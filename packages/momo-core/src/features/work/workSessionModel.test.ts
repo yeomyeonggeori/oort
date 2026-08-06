@@ -5,7 +5,7 @@ import {
   type WorkSessionACPFrame,
 } from "../../lib/realtimeEvents";
 import {
-  canReattachWorkSession,
+
   composeExcerpt,
   emptyStepsDetail,
   eventFromFrame,
@@ -624,15 +624,9 @@ describe("workHostTrust", () => {
         [host({ online: false })]
       ).key
     ).toBe("unavailable");
-    expect(canReattachWorkSession(session({ status: "idle" }), [host()])).toBe(
-      true
-    );
-    expect(
-      canReattachWorkSession(
-        session({ status: "orphaned" }),
-        [host()]
-      )
-    ).toBe(false);
+    // 이 판정은 **표현**만 바꾼다 — 원장의 상태는 그대로다. 어느 동사가
+    // 성립하는지는 여기서 묻지 않고 `sessionHandoff.sessionVerdict`가 서버
+    // 규칙 그대로 답한다(#1137, 옛 `canReattachWorkSession` 자리).
   });
 
   it("offers only eligible online hosts for an orphaned lineage resume", () => {

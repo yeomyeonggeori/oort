@@ -356,3 +356,52 @@ describe("diff 자리", () => {
     expect(items.every((item) => item.diff === undefined)).toBe(true);
   });
 });
+
+// ---- 이어하기 동사 (ADR-0154 D3, #1137) --------------------------------------
+
+describe("카드의 이어하기 동사", () => {
+  const hosts = [host("h-app", "app"), host("h-cloud", "cloud")];
+
+  it("살아 있고 붙을 것이 있으면 재개", () => {
+    const [card] = adeItemsFromSessions(
+      [session("s1", "running", "h-app", { remoteAttachAvailable: true })],
+      hosts
+    );
+    expect(card.handoff).toBe("resume");
+  });
+
+  it("고아 세션은 인수 — 대기 카드가 곧 행동 카드다", () => {
+    const [card] = adeItemsFromSessions(
+      [session("s1", "orphaned", "h-app")],
+      hosts
+    );
+    expect(card.state).toBe("blocked");
+    expect(card.handoff).toBe("takeover");
+  });
+
+  it("붙을 것이 없는 실행 중 세션에는 동사가 없다", () => {
+    const [card] = adeItemsFromSessions(
+      [session("s1", "running", "h-app", { remoteAttachAvailable: false })],
+      hosts
+    );
+    expect(card.handoff).toBeUndefined();
+  });
+
+  it("명부가 아직이면 동사를 지어내지 않는다", () => {
+    const [card] = adeItemsFromSessions(
+      [session("s1", "running", "h-app", { remoteAttachAvailable: true })],
+      undefined
+    );
+    expect(card.handoff).toBeUndefined();
+  });
+
+  // 턴은 호스트 위의 세션이 아니다. 재개할 히스토리도 인수할 원장 행도 없고,
+  // 모든 턴 카드에 동사를 하나씩 달면 그 낱말은 목록의 배경이 된다.
+  it("턴 카드에는 동사가 없다", () => {
+    const cards = adeItemsFromTurns(
+      [turn("agent-kim", "working", { runId: "R1" })],
+      nameFor
+    );
+    expect(cards.every((card) => card.handoff === undefined)).toBe(true);
+  });
+});

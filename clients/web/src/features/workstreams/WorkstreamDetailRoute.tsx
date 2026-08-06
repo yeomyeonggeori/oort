@@ -17,6 +17,11 @@ import {
 import { relativeLabel } from "@momo/core/features/inbox/model";
 import { useChannels, useDirectory } from "@/features/workspace/useWorkspace";
 import { HostPicker } from "@/features/work/HostPicker";
+import { TakeoverDisclosure } from "@/features/work/TakeoverDisclosure";
+import {
+  HANDOFF_COPY,
+  takeoverFailureCopy,
+} from "@momo/core/features/work/sessionHandoff";
 import { useWorkHosts } from "@/features/work/useWorkSessions";
 import {
   workHostName,
@@ -37,7 +42,6 @@ import {
   actorCount,
   channelDisplayName,
   continuationBlockedCopy,
-  continuationErrorCopy,
   continuationState,
   isWorkstreamMissing,
   runClockLabel,
@@ -166,7 +170,7 @@ function RunRow({
             </span>
             {/* 그 에이전트를 누가 책임지는가 (skill §9, PR 918 R1 M6). 원장의
                 요점이 "A -> 에이전트 -> C"인데 가운데 칸에 책임 주체가 없으면,
-                이어받기를 물어볼 사람이 화면에 없다. 문장은 멤버 디렉터리·
+                인수를 물어볼 사람이 화면에 없다. 문장은 멤버 디렉터리·
                 타임라인이 이미 쓰는 것과 같다. */}
             {actor.ownerName !== null && (
               <span
@@ -177,12 +181,15 @@ function RunRow({
               </span>
             )}
           </span>
+          {/* 계보 칩도 같은 낱말이다 (ADR-0154 D3). 이 행을 만든 act 가 바로 위
+              블록의 「인수」인데 그 결과물이 「이어받음」으로 적히면, 한 화면이 한
+              act 를 두 이름으로 부르는 이 티켓의 결함이 원장 안에서 다시 산다. */}
           {run.resumedFromSessionId !== undefined && (
             <span
               className={cn(CHIP_CLASS, "bg-surface-hover text-ink-muted")}
               data-testid="workstream-run-lineage"
             >
-              이어받음
+              인수함
             </span>
           )}
           <span
@@ -217,7 +224,7 @@ function RunRow({
 }
 
 /**
- * 이 표면에는 이어받기 블록이 하나뿐이므로 id는 상수다. 토글이 `aria-controls`로
+ * 이 표면에는 인수 블록이 하나뿐이므로 id는 상수다. 토글이 `aria-controls`로
  * 이 그룹을 가리키고, 그룹은 눈에 보이는 라벨을 `aria-labelledby`로 되짚는다.
  */
 const HOST_GROUP_ID = "workstream-continue-hosts";
@@ -253,7 +260,7 @@ function ContinuationBlock({
     status
   );
 
-  // 성공하면 방금 누른 버튼이 사라진다. 이어받기가 성공한 순간 그 실행은 더 이상
+  // 성공하면 방금 누른 버튼이 사라진다. 인수가 성공한 순간 그 실행은 더 이상
   // 고아가 아니고, 상태가 `ready`에서 `no-stopped-run`으로 넘어가면서 호스트 목록도
   // 토글 버튼도 언마운트되기 때문이다. 아무것도 하지 않으면 포커스는 <body>로
   // 떨어지고, 키보드 사용자는 안내만 듣고 문서 최상단에 남는다(1R M2). 오류
@@ -308,9 +315,15 @@ function ContinuationBlock({
         setOpen(false);
         setDone(true);
       } catch (cause) {
+        // 형제 표면과 **같은 번역기**다 (R1 H1). 이 자리에 있던
+        // `continuationErrorCopy` 는 상태 코드만 봤고, 서버가 409 하나로 말하는
+        // 세 가지 — 상태 변화 · `pool_exhausted` · `member_limit` — 에 전부
+        // 「이력을 새로고침하세요」라고 답했다. 슬롯이 찬 사람에게 그것은 아무리
+        // 반복해도 풀리지 않는 지시다.
         setError(
-          continuationErrorCopy(
-            cause instanceof ApiError ? cause.status : null
+          takeoverFailureCopy(
+            cause instanceof ApiError ? cause.status : undefined,
+            cause instanceof Error ? cause.message : undefined
           )
         );
       } finally {
@@ -334,9 +347,9 @@ function ContinuationBlock({
         data-testid="workstream-continue"
         data-state="pending"
       >
-        <h2 className="pb-1 text-meta text-ink-muted">이어받기</h2>
+        <h2 className="pb-1 text-meta text-ink-muted">{HANDOFF_COPY.takeover.verb}</h2>
         <p className="break-words text-meta text-ink-muted">
-          실행 이력을 확인한 뒤에 이어받을 수 있는지 알려 드립니다.
+          실행 이력을 확인한 뒤에 인수할 수 있는지 알려 드립니다.
         </p>
       </section>
     );
@@ -348,7 +361,7 @@ function ContinuationBlock({
       data-testid="workstream-continue"
       data-state={state.kind}
     >
-      <h2 className="pb-1 text-meta text-ink-muted">이어받기</h2>
+      <h2 className="pb-1 text-meta text-ink-muted">{HANDOFF_COPY.takeover.verb}</h2>
       {/* The outcome lines sit ABOVE the branch, not inside its ready arm. A
           successful takeover ends the very state that offered it — the source
           Run stops being orphaned the moment the server records the new one —
@@ -377,7 +390,7 @@ function ContinuationBlock({
           role="status"
           data-testid="workstream-continue-done"
         >
-          이어받았습니다. 아래 실행 이력에 내 실행이 추가됐습니다.
+          인수했습니다. 아래 실행 이력에 내 실행이 추가됐습니다.
         </p>
       )}
       {state.kind !== "ready" ? (
@@ -395,17 +408,16 @@ function ContinuationBlock({
           <p className="break-words text-meta text-ink">
             멈춘 실행{" "}
             <span className="text-ink-muted">{state.run.label}</span>
-            {particleFor(state.run.label, "object")} 새 호스트에서 이어받습니다.
+            {particleFor(state.run.label, "object")} 새 호스트로 인수합니다.
             새 실행으로 기록되고, 이 목표의 이력에 내 이름이 함께 남습니다.
           </p>
-          {/* The same two sentences the 작업 세션 패널 says before a lineage
-              resume, deliberately word for word: one surface promising less
-              than the other about the same act is how a reader learns which one
-              to distrust. */}
-          <p className="mt-1 break-words text-meta text-ink-muted">
-            Git 계보만 새 호스트로 이어집니다. 이전 호스트의 터미널 상태와
-            미커밋 변경은 옮겨지지 않습니다.
-          </p>
+          {/* 작업 세션 패널이 같은 act 앞에서 세우는 것과 **같은 컴포넌트**다.
+              "한 글자까지 같게 쓴다"는 규율은 지켜졌지만 두 벌이라는 사실은
+              그대로였고, 그래서 둘 다 틀린 채로 같이 늙었다: 실제로 이어지는
+              것은 「Git 계보」가 아니라 스레드다(서버가 원본의
+              `root_message_id`를 그대로 쓴다). 이제 문장이 아니라 목록이고,
+              고칠 자리는 한 곳이다(#1137). */}
+          <TakeoverDisclosure testId="workstream-continue-disclosure" />
           {/* 열기 전에는 이 토글이 블록의 결정이므로 채움이고, 열린 뒤에는
               결정이 호스트 버튼으로 옮겨가므로 ghost로 물러난다. v1은 둘이 같은
               outline·같은 size라, `호스트 선택 닫기`와 `성재 맥북`이 같은 무게로
@@ -424,7 +436,7 @@ function ContinuationBlock({
               }}
               data-testid="workstream-continue-toggle"
             >
-              {open ? "호스트 선택 닫기" : "새 호스트에서 이어받기"}
+              {open ? "호스트 선택 닫기" : HANDOFF_COPY.takeover.button}
             </Button>
           </div>
           {open && (
@@ -432,10 +444,10 @@ function ContinuationBlock({
               id={HOST_GROUP_ID}
               labelId={HOST_GROUP_LABEL_ID}
               copy={{
-                group: "이어받을 호스트",
-                confirm: "이어받기",
-                action: (name) => `${name}에서 이어받기`,
-                busy: (name) => `${name}에서 이어받는 중`,
+                group: "인수할 호스트",
+                confirm: HANDOFF_COPY.takeover.button,
+                action: (name) => `${name}에서 인수`,
+                busy: (name) => `${name}에서 인수하는 중`,
               }}
               targets={state.targets}
               busyHostId={pendingHostId}

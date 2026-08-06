@@ -7,6 +7,10 @@ import {
 } from "../../lib/api";
 import { makeDirectory } from "../workspace/directory";
 import {
+  TAKEOVER_NO_TARGET_COPY,
+  takeoverFailureCopy,
+} from "../work/sessionHandoff";
+import {
   WORKSTREAM_FILTER_TABS,
   WORKSTREAM_FILTERS,
   WORKSTREAM_STATUS_CLASS,
@@ -14,7 +18,6 @@ import {
   actorCount,
   continuableRun,
   continuationBlockedCopy,
-  continuationErrorCopy,
   continuationState,
   isWorkstreamMissing,
   parseStatusFilter,
@@ -184,7 +187,7 @@ describe("continuationState", () => {
   it("does not offer to continue a goal that is over", () => {
     // 1R M1: the state read the run ledger and never the GOAL, so a completed
     // workstream that still holds an orphaned Run (a host dies after the work
-    // is called done) rendered an enabled 이어받기 180px under its 완료 chip.
+    // is called done) rendered an enabled 인수 control 180px under its 완료 chip.
     for (const status of ["done", "cancelled"] as const) {
       const state = continuationState(
         [orphaned],
@@ -202,7 +205,7 @@ describe("continuationState", () => {
 
   it("does not promise a reconnection to a goal that is over", () => {
     // Offline is a transport fact and 완료 is a fact about the work. The
-    // offline sentence ends with "다시 연결되면 이 자리에서 이어받을 수
+    // offline sentence ends with "다시 연결되면 이 자리에서 인수할 수
     // 있습니다", which for a finished goal is a promise nothing can keep, so
     // the goal's own status has to be asked first.
     const state = continuationState([orphaned], [host()], alice, true, "done");
@@ -224,7 +227,19 @@ describe("continuationState", () => {
       // commits over is git's answer. No branch may promise otherwise.
       expect(copy).not.toContain("미커밋");
       expect(copy).not.toMatch(/[—–]/);
+      // R1 H1: 한 화면 한 어휘. 이 표면의 act 는 인수이고, 「이어받」계열이 한
+      // 갈래에라도 남으면 같은 화면이 같은 일을 두 이름으로 부른다.
+      expect(copy).not.toContain("이어받");
     }
+  });
+
+  it("대상이 없다는 사실은 형제 표면과 같은 문장이다", () => {
+    // 앞 판은 "온라인인 다른 호스트가 없습니다"였다 — 상태만 말하고 사람을 세워
+    // 두는 데다, 자격 규칙(`workSessionResumeTargets`)이 보지도 않는 `online` 을
+    // 자격인 것처럼 불렀다.
+    expect(continuationBlockedCopy({ kind: "no-host", run: orphaned })).toBe(
+      TAKEOVER_NO_TARGET_COPY
+    );
   });
 
   it("tells 완료 and 취소됨 apart in the sentence it says", () => {
@@ -236,26 +251,28 @@ describe("continuationState", () => {
     expect(done).toContain("완료");
     expect(cancelled).toContain("취소");
     expect(done).not.toBe(cancelled);
-    // 끝난 목표에 이어받기를 다시 권하지 않는다: 다음 행동은 새 작업이다.
-    expect(done).not.toContain("이어받을 수 있습니다");
-    expect(cancelled).not.toContain("이어받을 수 있습니다");
+    // 끝난 목표에 인수를 다시 권하지 않는다: 다음 행동은 새 작업이다.
+    expect(done).not.toContain("인수할 수 있습니다");
+    expect(cancelled).not.toContain("인수할 수 있습니다");
   });
 });
 
-describe("continuationErrorCopy", () => {
-  it("says membership only for the code that means membership", () => {
-    expect(continuationErrorCopy(403)).toContain("멤버");
-    expect(continuationErrorCopy(409)).not.toContain("멤버");
-    expect(continuationErrorCopy(404)).not.toContain("멤버");
-    expect(continuationErrorCopy(null)).not.toContain("멤버");
+// R1 H1: 이 표면의 인수 실패 문구는 이제 `takeoverFailureCopy` 하나다. 여기
+// 있던 `continuationErrorCopy` 는 상태 코드만 봤고, 서버가 409 하나로 말하는
+// 세 가지(상태 변화 · pool_exhausted · member_limit)에 전부 「이력을 새로고침
+// 하세요」라고 답했다. 그 세 갈래의 단정은 `work/sessionHandoff.test.ts` 가
+// 진다 — 문구가 한 곳에 있으므로 그 시험도 한 곳에 있다.
+describe("인수 실패 문구는 이 표면이 따로 갖지 않는다", () => {
+  it("두 번째 번역기가 다시 생기지 않았다", async () => {
+    const model = await import("./model");
+    expect("continuationErrorCopy" in model).toBe(false);
   });
 
-  it("never apologizes and never uses an em-dash", () => {
-    for (const status of [403, 409, 404, 500, null]) {
-      const copy = continuationErrorCopy(status);
-      expect(copy).not.toContain("죄송");
-      expect(copy).not.toMatch(/[—–]/);
-    }
+  it("409의 슬롯 고갈이 「새로고침」으로 번역되지 않는다", () => {
+    // 이 표면이 실제로 부르는 그 함수로, 앞 판이 틀렸던 그 입력을 물어본다.
+    const copy = takeoverFailureCopy(409, "pool_exhausted");
+    expect(copy).toContain("슬롯");
+    expect(copy).not.toContain("새로고침");
   });
 });
 

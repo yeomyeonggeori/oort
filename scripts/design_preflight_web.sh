@@ -26,10 +26,12 @@
 #   - src/design/tokens.contrast.test.ts  the verifier; the hex IS the assertion
 #   - any line carrying the marker `design-preflight-allow` (deliberate,
 #     reviewed exception, justify it in the PR body)
+#   - a GitHub issue reference inside raw_color (`#1137`); see ISSUE_REF_RE
 #
 # Usage:
 #   scripts/design_preflight_web.sh            check, exit 0 pass / 1 violation
 #   scripts/design_preflight_web.sh --list     print every hit, never gates
+#   scripts/design_preflight_web.sh --selftest prove the raw_color discriminator
 #
 # Compatible with /bin/bash 3.2 (macOS system bash): no associative arrays, no
 # mapfile. LC_ALL=C keeps grep byte-oriented so counts are deterministic.
@@ -55,6 +57,47 @@ fi
 TOKEN_FILE_RE='src/design/(tokens\.css|tokens\.contrast\.test\.ts):'
 # Deliberate reviewed exception marker.
 ALLOW_RE='design-preflight-allow'
+
+# ---- raw_color: what a color is, and what only looks like one ----------------
+#
+# `#1137` is an issue number, not a color. Every one of its four characters is a
+# hex digit, so the naive `#[0-9a-fA-F]{3,8}\b` claimed it — and this repo has
+# now been hit by that three times (#1060 was the third). Each time it was
+# settled by a convention ("don't write issue numbers in comments") and each time
+# the convention failed to reach the next author, because a convention that is
+# not compiled is not a convention. So the exception moves INTO the gate.
+#
+# The rule: strip issue-reference tokens from the line first, then ask whether a
+# color is still there. An issue reference is `#` + 3..5 DECIMAL digits + a
+# non-hex boundary. One letter anywhere (`#fff`, `#1a2740`) means it was never an
+# issue number, so it is not stripped and stays caught. Six and eight digit forms
+# (`#000000`, `#12345678`) never satisfy the 3..5 rule either, because the digit
+# that follows is itself hex, so they stay caught too.
+#
+# One hole is left open knowingly: a real color whose 3..5 digits are ALL decimal
+# (`#1234`). No such literal exists outside tokens.css in this client, and if one
+# appeared, `pure_bw` (#000/#fff) and `arbitrary_tw` (class="[#1234]") still hold
+# their own ground. Knowing about that hole is cheaper than the alternative this
+# gate actually produced, which was authors deleting the issue reference — the
+# one piece of provenance a reviewer needs — to get a green run.
+#
+# `--selftest` carries every one of those decisions as a case. BSD sed has no
+# `\b`, hence the explicit non-hex character class plus a separate end-of-line
+# pass (verified on /usr/bin/sed, macOS 15).
+COLOR_RE='#[0-9a-fA-F]{3,8}\b|rgba?\(|hsla?\('
+ISSUE_REF_RE='#[0-9]{3,5}'
+
+# stdin: candidate lines. stdout: the ones that still hold a color once every
+# issue reference is removed.
+drop_issue_refs() {
+  while IFS= read -r line; do
+    if printf '%s\n' "$line" \
+      | sed -E "s/${ISSUE_REF_RE}([^0-9a-fA-F])/\\1/g; s/${ISSUE_REF_RE}\$//" \
+      | grep -qE "$COLOR_RE"; then
+      printf '%s\n' "$line"
+    fi
+  done
+}
 
 KEYS="emdash raw_color inline_style arbitrary_tw ai_gradient toast naked_focus external_font hype pure_bw"
 
@@ -96,8 +139,9 @@ scan_category() {
       } | filter_common
       ;;
     raw_color)
-      grep -rnE '#[0-9a-fA-F]{3,8}\b|rgba?\(|hsla?\(' \
+      grep -rnE "$COLOR_RE" \
         "$SRC" --include='*.tsx' --include='*.ts' --include='*.css' 2>/dev/null \
+        | drop_issue_refs \
         | filter_common
       ;;
     inline_style)
@@ -146,13 +190,65 @@ count_category() {
   scan_category "$1" | grep -c . || true
 }
 
+# ---- raw_color self-test -----------------------------------------------------
+#
+# The red proof, kept executable instead of retold. Each case is one line of
+# would-be source and the verdict it must get: 1 = violation, 0 = clean. A
+# change to COLOR_RE or ISSUE_REF_RE that quietly stops catching `#fff` fails
+# here, in this file, without anyone remembering to re-run the injection by hand.
+run_selftest() {
+  echo "== raw_color discriminator self-test =="
+  local fails=0 want line got
+  while IFS='|' read -r want line; do
+    [ -z "${want:-}" ] && continue
+    case "$want" in \#*) continue ;; esac
+    got=0
+    if printf '%s\n' "$line" | grep -E "$COLOR_RE" | drop_issue_refs | grep -q .; then
+      got=1
+    fi
+    if [ "$got" = "$want" ]; then
+      echo "OK    want=$want  $line"
+    else
+      echo "FAIL  want=$want got=$got  $line"
+      fails=1
+    fi
+  done <<'CASES'
+# a real color is still a real color
+1|src/features/work/A.tsx:9:  <div className="text-[#fff]" />
+1|src/features/work/A.tsx:9:  const accent = "#1a2740";
+1|src/design/x.css:9:  background: #000000;
+1|src/design/x.css:9:  border: 1px solid rgba(12, 18, 28, 0.2);
+1|src/design/x.css:9:  color: hsl(210 40% 96%);
+1|src/features/work/A.tsx:9:  const c = "#12345678";
+# an issue reference is not a color
+0|src/features/work/A.tsx:9:// 부분 복원 고지 (ADR-0154 D3, #1137).
+0|src/features/work/A.tsx:9:              고칠 자리는 한 곳이다(#1137). */}
+0|src/features/work/A.tsx:9:// #1060 세 번째 적중 — 전파되지 않는 규약은 규약이 아니다.
+0|src/features/work/A.tsx:9:// 이슈 #12345 와 #97 을 나란히 적어도 색은 없다.
+# both on one line: the color survives the strip and is still reported
+1|src/features/work/A.tsx:9:// #1137 이 금지한 색이 바로 이것이다: #1a2740
+CASES
+  echo ""
+  if [ "$fails" -ne 0 ]; then
+    echo "RESULT: FAIL, the raw_color discriminator does not hold."
+    return 1
+  fi
+  echo "RESULT: PASS, raw_color tells issue references from colors."
+  return 0
+}
+
 MODE="check"
 case "${1:-}" in
   --list) MODE="list" ;;
+  --selftest)
+    run_selftest
+    exit $?
+    ;;
   --help|-h)
-    echo "usage: scripts/design_preflight_web.sh [--list]"
+    echo "usage: scripts/design_preflight_web.sh [--list|--selftest]"
     echo "  (no args)  hard-zero check of all 10 categories (exit 0 pass, 1 fail)"
     echo "  --list     print every current hit per category, no gating"
+    echo "  --selftest raw_color: prove issue refs pass and real hex fails"
     echo ""
     echo "rules: .claude/skills/momo-design-taste-web/SKILL.md §10"
     echo "tokens: .claude/skills/momo-design-taste-web/references/tokens.md"

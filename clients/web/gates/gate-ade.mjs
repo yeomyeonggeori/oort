@@ -33,6 +33,20 @@
 //                    위에서는 최소 한 칸(320px)이다. 반쯤 잘린 컨트롤이 걸리는
 //                    폭이 없다(리뷰 M3).
 //
+// ADE 3단계 D3 (#1137) — 재개/인수 어휘 분리:
+//  12. 동사 배정     카드가 세우는 동사가 **원장이 뜻하는 것**과 같다. 살아 있는
+//                    세션은 재개, 죽은 세션은 인수, 붙을 것이 없으면 아무것도.
+//                    한 카드에 두 동사가 함께 서지 않고, 턴 카드는 동사를 갖지
+//                    않는다. `data-handoff` 뿐 아니라 **보이는 글자**도 잰다 —
+//                    이 티켓이 고치는 것이 정확히 그 낱말이다.
+//  13. 사전조건      자격 있는 대상이 0이면 인수 확정 버튼이 서지 않고, 그 자리에
+//                    「무엇을 하면 되는지」가 온다(명령형으로 끝나는지까지 잰다).
+//                    고를 수 없는 것을 고를 수 있게 그려 놓고 서버가 거절하는
+//                    것은 「막았다」가 아니라 「거짓말한 뒤 막았다」이다.
+//  14. 부분 복원     인수 고지가 **두 목록 다** 세우고, 잃는 쪽이 미커밋 변경을
+//                    이름으로 말하며, 제목이 「일부」라고 말한다. 한쪽만 있는
+//                    고지는 「전부 복원된다」로 읽힌다.
+//
 // 이름 붙은 red proof (버릴 워크트리에서만 돌린다):
 //   ADE_GATE_PROVE_RED_COUNT=1 npm run gate:ade
 //     expected failure: "the summary count disagreed with the ledger"
@@ -48,6 +62,12 @@
 //     expected failure: "one Escape closed two layers"
 //   ADE_GATE_PROVE_RED_OUTSIDE=1 npm run gate:ade
 //     expected failure: "clicking the uncovered route did nothing"
+//   ADE_GATE_PROVE_RED_VERB=1 npm run gate:ade
+//     expected failure: "a verb was assigned to the wrong act"
+//   ADE_GATE_PROVE_RED_PRECOND=1 npm run gate:ade
+//     expected failure: "a takeover was offered without its preconditions"
+//   ADE_GATE_PROVE_RED_RESTORE=1 npm run gate:ade
+//     expected failure: "the partial restore hid what it loses"
 //
 // red seam 은 **목/드라이버의 행동만** 바꾼다. COUNT 는 원장에 실행 중 세션을 한
 // 줄 더 실어 화면과 기대표를 갈라놓고(단언이 DOM 의 숫자를 실제로 읽는지 증명),
@@ -61,6 +81,15 @@
 // window 캡처 단계에 작업 패널을 닫는 리스너를 앱보다 먼저 등록하므로, 층 스택이
 // 없던 시절처럼 두 층이 같은 Esc 에 각자 반응한다. OUTSIDE 는 스크림의
 // `pointer-events` 만 끈다(노드는 그대로 서 있고 클릭만 통과한다).
+//
+// D3 의 셋(#1137)도 같은 두 가지 수법만 쓴다. VERB 와 PRECOND 는 **목을 바꾸고
+// 기대표는 원본 픽스처에서 뽑는다** — COUNT 가 세운 그 형태다. VERB 는 고아
+// 세션을 살아 있는 것처럼 실어 화면의 동사를 뒤집고, 기대표는 여전히 「이 줄은
+// 인수」라고 말하므로 단언이 DOM 의 동사를 실제로 읽고 있다면 깨진다. PRECOND 는
+// 클라우드 호스트를 온라인으로 실어 자격 대상을 하나 만들어 내고, 기대표는
+// 원본 명부대로 「자격 대상 0 — 확정 버튼이 서면 안 된다」를 들고 있다.
+// RESTORE 는 CSS 로 「새로 시작하는 것」 목록만 숨긴다(BLOCKED·LAYOUT 과 같은
+// 수법 — React 가 들고 있는 노드는 그대로다).
 //
 // 스크린샷은 이 게이트가 만든다(게이트 재생성 규율): artifacts/ade/*.png,
 // light/dark 두 벌. 판정하지 않는다 — design-review 는 별도 레인이다.
@@ -93,6 +122,10 @@ const proveRedDurability = process.env.ADE_GATE_PROVE_RED_DURABILITY === "1";
 const proveRedSession = process.env.ADE_GATE_PROVE_RED_SESSION === "1";
 const proveRedEsc = process.env.ADE_GATE_PROVE_RED_ESC === "1";
 const proveRedOutside = process.env.ADE_GATE_PROVE_RED_OUTSIDE === "1";
+// ADE 3단계 D3 (#1137)
+const proveRedVerb = process.env.ADE_GATE_PROVE_RED_VERB === "1";
+const proveRedPrecond = process.env.ADE_GATE_PROVE_RED_PRECOND === "1";
+const proveRedRestore = process.env.ADE_GATE_PROVE_RED_RESTORE === "1";
 
 const PERSISTENT_BADGE = "기기를 꺼도 계속됩니다";
 const DEVICE_BADGE = "이 기기에서만";
@@ -290,7 +323,52 @@ const RED_EXTRA_SESSION = {
 };
 
 function ledger(extra = false) {
-  return extra ? [...BASE_SESSIONS, RED_EXTRA_SESSION] : BASE_SESSIONS;
+  const rows = extra ? [...BASE_SESSIONS, RED_EXTRA_SESSION] : BASE_SESSIONS;
+  if (!proveRedVerb) return rows;
+  // red seam(VERB): 고아 세션을 살아 있는 것으로 실어 화면의 동사를 재개로
+  // 뒤집는다. 기대표는 BASE_SESSIONS 에서 나오므로 「이 줄은 인수」로 남는다.
+  return rows.map((row) =>
+    row.status === "orphaned"
+      ? { ...row, status: "running", remoteAttachAvailable: true }
+      : row
+  );
+}
+
+/**
+ * 명부. red seam(PRECOND) 은 클라우드 호스트를 온라인으로 만들어 **자격 대상을
+ * 하나 만들어 낸다** — 기대표는 원본 `workHosts` 로 계산하므로 갈라진다.
+ */
+function hostRegistry() {
+  if (!proveRedPrecond) return workHosts;
+  return workHosts.map((host) =>
+    host.id === CLOUD_HOST ? { ...host, online: true } : host
+  );
+}
+
+/**
+ * 픽스처가 뜻하는 이어하기 동사 (코어 `sessionVerdict` 의 서버 규칙 그대로,
+ * 화면이 아니라 여기서 다시 센다).
+ */
+function expectedVerb(row, hosts) {
+  if (row.status === "orphaned") return "takeover";
+  if (row.status !== "running" && row.status !== "idle") return null;
+  const host = hosts.find((candidate) => candidate.id === row.hostId);
+  if (host === undefined) return null;
+  return host.revokedAtMs === undefined && row.remoteAttachAvailable
+    ? "resume"
+    : null;
+}
+
+/** 자격 있는 인수 대상 (코어 `workSessionResumeTargets` 규칙). */
+function eligibleTargets(row, hosts) {
+  if (row.status !== "orphaned") return [];
+  return hosts.filter(
+    (host) =>
+      host.revokedAtMs === undefined &&
+      host.online &&
+      host.id !== row.hostId &&
+      (host.scope === "workspace" || host.ownerMemberId === memberId)
+  );
 }
 
 /** 픽스처가 실제로 뜻하는 수. 화면이 아니라 여기서 센다. */
@@ -483,7 +561,9 @@ async function installRoutes(context, options = {}) {
     if (path.endsWith("/roster")) return json(route, { members: roster });
     if (path.endsWith("/channels")) return json(route, { channels });
     if (path.endsWith("/read-state")) return json(route, { read_states: [] });
-    if (path.endsWith("/work-hosts")) return json(route, { workHosts: workHosts });
+    if (path.endsWith("/work-hosts")) {
+      return json(route, { workHosts: hostRegistry() });
+    }
     if (path.endsWith("/work-sessions")) {
       return json(route, { workSessions: sessions });
     }
@@ -573,6 +653,10 @@ async function cardFacts(page) {
       diffEmpty:
         node.querySelector('[data-testid="ade-card-diff"]')?.hasAttribute("data-empty") ??
         false,
+      // ADE 3단계 D3: 이 카드가 세우는 이어하기 동사와 그 보이는 글자.
+      handoff: node.dataset.handoff ?? null,
+      handoffText:
+        node.querySelector('[data-testid="ade-card-handoff"]')?.textContent ?? "",
     }))
   );
 }
@@ -818,6 +902,79 @@ async function exerciseControl(browser) {
     );
   }
 
+  // ---- 12. 동사 배정 (ADE 3단계 D3, #1137) ------------------------------------
+  //
+  // 재개와 인수는 **다른 act** 이므로 같은 카드에 둘 다 설 수 없고, 어느 쪽이
+  // 서는지는 원장이 정한다. 기대표는 화면이 아니라 픽스처에서 뽑는다
+  // (`expectedVerb` — 서버 `SessionReattachState::verdict` 규칙 그대로).
+  //
+  // 이 검사가 이 티켓의 첫 red proof 를 진다. 앞 판의 결함은 **낱말이 뒤섞인
+  // 것**이었다: 죽은 세션의 인수 버튼이 「새 호스트에서 재개」였고, 살아 있는
+  // 세션으로 돌아가는 길이 「이어서 보기」였으며, 형제 표면은 같은 act 를
+  // 「이어받기」라고 불렀다. 한 act 에 두 이름, 두 act 에 한 종류의 이름.
+  const verbExpectations = BASE_SESSIONS.map((row) => ({
+    label: row.label,
+    verb: expectedVerb(row, workHosts),
+  }));
+  for (const card of cards) {
+    if (card.kind !== "session") {
+      // 턴에는 호스트도 원장 행도 없다. 동사를 하나 달면 모든 턴이 달게 된다.
+      if (card.handoff !== null) {
+        throw new Error(
+          `a verb was assigned to the wrong act: 턴 카드 "${card.title}" 가 이어하기 동사 "${card.handoff}" 를 세웠다 (턴은 재개할 히스토리도 인수할 원장 행도 없다)`
+        );
+      }
+      continue;
+    }
+    const expected = verbExpectations.find((row) => row.label === card.title);
+    if (expected === undefined) continue;
+    if (card.handoff !== expected.verb) {
+      throw new Error(
+        `a verb was assigned to the wrong act: 원장이 "${card.title}" 에 대해 뜻하는 동사는 ${
+          expected.verb ?? "없음"
+        } 인데 카드는 ${card.handoff ?? "없음"} 를 세웠다`
+      );
+    }
+    // 보이는 글자도 확인한다. `data-handoff` 만 맞고 라벨이 다른 판은 사람이
+    // 읽는 쪽이 틀린 것이고, 이 티켓이 고치는 것은 정확히 그 낱말이다.
+    const wanted =
+      expected.verb === "takeover"
+        ? "인수"
+        : expected.verb === "resume"
+          ? "이어서 보기"
+          : "";
+    if (card.handoffText.trim() !== wanted) {
+      throw new Error(
+        `a verb was assigned to the wrong act: "${card.title}" 의 동사는 ${
+          expected.verb ?? "없음"
+        } 인데 카드에 적힌 글자는 "${card.handoffText.trim()}" 다 (기대 "${wanted}")`
+      );
+    }
+  }
+  {
+    const spread = cards
+      .filter((c) => c.kind === "session")
+      .map((c) => `${c.title}=${c.handoff ?? "없음"}`)
+      .join(" · ");
+    console.log(`[verb] ${spread}`);
+  }
+  // 한 카드가 두 동사를 함께 세우는 판은 없다 — 「다른 버튼」이 D3 의 요구다.
+  const bothVerbs = await page.evaluate(
+    () =>
+      document
+        .querySelectorAll('[data-testid="ade-card"]')
+        .length > 0 &&
+      [...document.querySelectorAll('[data-testid="ade-card"]')].some(
+        (node) =>
+          node.querySelectorAll('[data-testid="ade-card-handoff"]').length > 1
+      )
+  );
+  if (bothVerbs) {
+    throw new Error(
+      "a verb was assigned to the wrong act: 한 카드가 이어하기 동사를 둘 세웠다 (재개와 인수는 함께 설 수 없다)"
+    );
+  }
+
   // ---- 6. 카드 확대: 서랍은 물러난다 ------------------------------------------
   //
   // **두 종류를 다 누른다.** 1차 게이트는 턴 카드만 눌렀고, 그 구멍으로 세션 카드가
@@ -842,6 +999,119 @@ async function exerciseControl(browser) {
     );
   }
   console.log(`[expand] 세션 카드 -> 작업 세션 패널 (${hash})`);
+
+  // ---- 13·14. 인수 사전조건과 부분 복원 정직 (D3, #1137) -----------------------
+  //
+  // 방금 누른 것은 목록에서 맨 위, 즉 **대기(고아) 세션**이다(정렬 규칙 D1).
+  // 그래서 여기 도착한 화면이 인수 동선의 출발점이고, 이 두 검사는 그 자리에서
+  // 돈다 — 서랍의 「대기」 카드가 목적지에서 실제로 이어지는지까지 봐야 그
+  // 카드가 동선이다.
+  const takeoverToggle = page.getByTestId("work-detail-takeover-toggle");
+  const hasToggle = await takeoverToggle
+    .waitFor({ timeout: 5_000 })
+    .then(() => true)
+    .catch(() => false);
+  if (!hasToggle) {
+    throw new Error(
+      "a takeover was offered without its preconditions: 고아 세션 상세에 인수 동선이 없다 (서랍의 대기 카드가 막다른 길로 끝난다)"
+    );
+  }
+  if ((await takeoverToggle.textContent())?.trim() !== "인수") {
+    throw new Error(
+      `a verb was assigned to the wrong act: 고아 세션의 동선 버튼이 "${(
+        await takeoverToggle.textContent()
+      )?.trim()}" 다 (인수여야 한다)`
+    );
+  }
+  await takeoverToggle.click();
+  await page.getByTestId("work-detail-takeover").waitFor({ timeout: 5_000 });
+
+  // 14. 부분 복원 정직 — 두 목록이 **다** 서고, 잃는 쪽이 미커밋 변경을 이름으로
+  // 말한다. 「Git 계보만 이어집니다」한 줄이던 앞 판은 읽는 사람에게 자기
+  // 작업이 어느 쪽인지 스스로 판정하게 시켰다.
+  if (proveRedRestore) {
+    await page.addStyleTag({
+      content: '[data-testid="takeover-fresh"]{display:none!important}',
+    });
+  }
+  const disclosure = await page.evaluate(() => {
+    const box = document.querySelector('[data-testid="work-detail-takeover-disclosure"]');
+    if (box === null) return null;
+    const visible = (node) =>
+      node !== null && node.getClientRects().length > 0;
+    const restored = box.querySelector('[data-testid="takeover-restored"]');
+    const fresh = box.querySelector('[data-testid="takeover-fresh"]');
+    return {
+      headline: box.querySelector("p")?.textContent ?? "",
+      restoredShown: visible(restored),
+      freshShown: visible(fresh),
+      freshText: fresh?.textContent ?? "",
+      restoredText: restored?.textContent ?? "",
+    };
+  });
+  if (disclosure === null) {
+    throw new Error(
+      "the partial restore hid what it loses: 인수 블록에 복원 고지가 아예 없다"
+    );
+  }
+  if (!disclosure.restoredShown || !disclosure.freshShown) {
+    throw new Error(
+      `the partial restore hid what it loses: 고지의 두 목록 중 ${
+        disclosure.freshShown ? "「그대로 이어지는 것」" : "「새로 시작하는 것」"
+      } 이 화면에 없다 — 한쪽만 있는 고지는 「전부 복원된다」로 읽힌다`
+    );
+  }
+  if (!disclosure.freshText.includes("커밋하지 않은 변경")) {
+    throw new Error(
+      `the partial restore hid what it loses: 잃는 목록이 미커밋 변경을 이름으로 말하지 않는다 ("${disclosure.freshText}")`
+    );
+  }
+  if (!disclosure.headline.includes("일부")) {
+    throw new Error(
+      `the partial restore hid what it loses: 고지 제목이 「일부」라고 말하지 않는다 ("${disclosure.headline}")`
+    );
+  }
+  console.log(
+    `[restore] 고지 두 목록 · 제목 "${disclosure.headline.trim()}"`
+  );
+
+  // 13. 사전조건 — 자격 대상이 0이면 확정 버튼이 **서지 않고**, 그 자리에
+  // 「무엇을 하면 되는지」가 온다. 기대는 원본 명부에서 계산한다.
+  const orphan = BASE_SESSIONS.find((row) => row.status === "orphaned");
+  const targets = eligibleTargets(orphan, workHosts);
+  const picker = await page.evaluate(() => ({
+    confirm:
+      document.querySelector('[data-testid="work-session-resume-confirm"]') !== null,
+    blocked:
+      document.querySelector('[data-testid="work-detail-takeover-blocked"]')
+        ?.textContent ?? null,
+  }));
+  if (targets.length === 0) {
+    if (picker.confirm) {
+      throw new Error(
+        "a takeover was offered without its preconditions: 자격 있는 대상 호스트가 하나도 없는데 인수 확정 버튼이 섰다 (서버는 이 요청을 거절하고, 화면은 거짓말한 뒤 막은 것이 된다)"
+      );
+    }
+    if (picker.blocked === null) {
+      throw new Error(
+        "a takeover was offered without its preconditions: 인수를 막았는데 이유가 없다"
+      );
+    }
+    // 「무엇을 하면 되는지」의 기계적 형태: 명령형으로 끝난다.
+    if (!/세요\.?\s*$/.test(picker.blocked.trim())) {
+      throw new Error(
+        `a takeover was offered without its preconditions: 차단 문장이 행동으로 끝나지 않는다 ("${picker.blocked.trim()}") — 상태만 말하는 문장은 사람을 세워 둔다`
+      );
+    }
+    console.log(`[precond] 대상 0 · 차단 문장 "${picker.blocked.trim()}"`);
+  } else if (!picker.confirm) {
+    throw new Error(
+      `a takeover was offered without its preconditions: 자격 대상이 ${targets.length}개인데 확정 버튼이 서지 않았다`
+    );
+  } else {
+    console.log(`[precond] 대상 ${targets.length}개 · 확정 버튼 있음`);
+  }
+
   await page.getByTestId("work-panel-close").click();
 
   await openDrawer(page);
@@ -1087,6 +1357,9 @@ async function main() {
   console.log("           살아 있는 표면으로 확대되고, Esc 한 번은 한 층만 닫으며,");
   console.log("           덮인 형제는 탭 순서에서 빠지고, 덮이지 않은 라우트는");
   console.log("           눌리면 서랍을 닫는다 — 남는 것은 띠가 아니라 한 칸이다.");
+  console.log("           D3: 재개와 인수가 다른 낱말·다른 버튼으로 갈리고,");
+  console.log("           자격 대상이 없는 인수는 확정 버튼 대신 「무엇을 하면");
+  console.log("           되는지」를 세우며, 복원 고지는 잃는 것을 이름으로 말한다.");
 }
 
 main().catch((error) => {

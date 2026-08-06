@@ -5,6 +5,7 @@ import {
   type AgentNameLookup,
 } from "../agents/turnCopy";
 import type { AgentWorkingSignal } from "../agents/workingSignal";
+import { sessionHandoffVerb, type HandoffVerb } from "./sessionHandoff";
 import { workSessionStatus } from "./workSessionModel";
 
 // =============================================================================
@@ -114,6 +115,16 @@ export interface AdeItem {
    * 바뀌지 않게), `adeDiffLabel`이 값이 왔을 때 무엇을 적을지 이미 정해 둔다.
    */
   diff?: { added: number; removed: number };
+  /**
+   * 이 카드에서 성립하는 이어하기 동사 (ADR-0154 D3, #1137). 세션 카드만 가지며
+   * (`kind: "session"`), 턴에는 없다 — 턴은 호스트 위의 세션이 아니라 채널에서
+   * 도는 에이전트의 한 턴이고, 재개할 히스토리도 인수할 원장 행도 없다.
+   *
+   * 판정은 여기서 하지 않는다. `sessionHandoff.sessionHandoffVerb`가 서버 규칙
+   * 그대로 답하고 이 빌더는 그 답을 싣기만 한다 — 관제 층이 자기 판정을 하나 더
+   * 가지면 카드가 말하는 동사와 그 카드를 눌러 도착한 표면의 동사가 갈린다.
+   */
+  handoff?: HandoffVerb;
 }
 
 /** 3분류의 계수. `total`은 살아 있는 것(working+blocked)이다 — 아래 주석 참조. */
@@ -303,6 +314,8 @@ export function adeItemsFromSessions(
     };
     if (session.endedAtMs !== undefined) item.endedAtMs = session.endedAtMs;
     item.sessionId = session.id;
+    const verb = sessionHandoffVerb(session, hosts);
+    if (verb !== null) item.handoff = verb;
     out.push(item);
   }
   return out;
