@@ -639,7 +639,29 @@ function AgentCard({
       // 카드가 `approval === null` 이라는 이유로 「이 결정은 인박스나 데스크톱
       // 앱에서」를 입었다 — 승인이 아닌 것에 승인 문장을 붙인 것이다.
       resumeOfferText: null,
-      decidable: approval !== null,
+      // ## 세 값이 하나였을 때 이 자리가 무엇을 잃었나 (U4-6 리뷰 B-1)
+      //
+      // 앞 판은 `decidable: approval !== null` 하나를 넘겼다. 그 불리언이 세 가지
+      // **서로 다른 사실**을 접고 있었다 — 「끝났는가」·「결정할 대상이 있는가」·
+      // 「이 표면에서 지금 대기인가」. 코어가 그것을 가른 뒤(`approvalNote.ts`)
+      // 이 호출부만 옛 이름으로 남았고, 그 결과가 **오프라인인데 승인·거부 버튼이
+      // 되살아나는** 화면이었다: 넘기지 않은 `settled`·`hasTarget` 이 `undefined`
+      // 라 `settled || !hasTarget` 이 참이 되고, 영수증 말고는 전부 `null` —
+      // 그리고 이 파일에서 `null` 은 「할 말이 없다」가 아니라 **「컨트롤이
+      // 선다」**이다. 끊긴 채로 누르면 나가지 않는 버튼이 서 있었다.
+      //
+      // 세 값의 출처가 각각 다르다는 것이 이 자리의 요점이다:
+      //
+      //   settled     원장이 답했으면 그 상태, 아니면 카드 스냅샷 — 위에서 칩이
+      //               읽는 그 값(`settledStatus`)과 **같은 값**이다. 다른 값을
+      //               쓰면 한 카드가 한 줄에서 두 가지를 말한다.
+      //   hasTarget   카드에 결정할 대상이 있는가. 재개 제안에는 없다.
+      //   pendingHere 대기 승인 **목록**이 지금도 대기라고 말하는가. 폰만 아는
+      //               사실이고(웹의 타임라인 카드는 이 목록을 구독하지 않는다),
+      //               다른 기기에서 결정된 건이 여기서 사라지는 근거다.
+      settled: settledStatus !== 'pending',
+      hasTarget: card.approvalId !== null,
+      pendingHere: approval !== null,
       offline: approvalOffline === true,
       approvalsProvided,
     });
