@@ -2,11 +2,14 @@ import {threadRollup, type Message, type ThreadRollup} from '@momo/core/lib/api'
 import {
   dayDividerLabel,
   dayDividerSegments,
+  recoveryDividerLabel,
   recoveryDividerSegments,
   unreadDividerSegments,
   DIVIDER_SPACE,
+  DIVIDER_TONE,
   ROW_SPACE,
   type DividerSegment,
+  type DividerTone,
   type RecoverySource,
 } from '@momo/core/features/timeline/divider';
 import {
@@ -30,6 +33,8 @@ import {
 } from '@momo/core/features/timeline/rowModel';
 import {isTruncated, omittedFileCount} from '@momo/core/features/timeline/artifacts';
 import type {ArtifactPresentation} from '@momo/core/features/timeline/artifacts';
+import {deletedFoldLabel} from '@momo/core/features/timeline/deletedFold';
+import {AVATAR_SIZE} from '@momo/core/features/workspace/avatar';
 import {canQuoteMessage} from '@momo/core/features/timeline/quote';
 import type {QuoteBlock as QuoteBlockModel} from '@momo/core/features/timeline/quote';
 import {
@@ -64,6 +69,7 @@ import {MessageBody, bodyAffordances, openLink} from './MessageBody';
 import {MessageActionSheet} from './MessageActionSheet';
 import {MessageEditorSheet} from './MessageEditorSheet';
 import {appNote} from './appVoice';
+import {Avatar} from './Avatar';
 import {
   deadlinePassed,
   gateFor,
@@ -75,7 +81,10 @@ import {
 const EMPTY_GATES: ReadonlyMap<string, ApprovalGate> = new Map();
 import type {DecisionOutcome} from '@momo/core/features/timeline/approvalDecision';
 import {ApprovalDecision} from '../inbox/ApprovalDecision';
-import {APPROVAL_OFFLINE_COPY} from '../inbox/useOnline';
+import {
+  approvalCardNote,
+  type ApprovalNoteTone,
+} from '@momo/core/features/timeline/approvalNote';
 import {QuoteBlock, quoteAccessibilityPhrase} from './Quote';
 import {useLongPress} from './useLongPress';
 
@@ -204,13 +213,23 @@ function relativeLabel(atMs: number, nowMs: number): string {
  */
 function DividerLabel({
   segments,
-  tone,
+  tone = 'quiet',
 }: {
   segments: readonly DividerSegment[];
-  tone?: 'warn';
+  /**
+   * 코어가 정한 **역할** (design-review U4-4 D-2). 옛 이름은 `'warn'` 이라 폰
+   * 토큰을 그대로 가리켰고, 그래서 「이 줄이 무슨 색인가」와 「이 줄이 무슨
+   * 일을 하는가」가 한 낱말에 겹쳐 있었다. 역할은 코어의 것이고 토큰은 이
+   * 파일의 것이다 — 그 대응이 `DIVIDER_TONE_COLOR` 한 자리에 있다.
+   */
+  tone?: DividerTone;
 }): React.JSX.Element {
   return (
-    <Text style={[styles.dividerLabel, tone === 'warn' && styles.dividerLabelWarn]}>
+    <Text
+      style={[
+        styles.dividerLabel,
+        tone === 'boundary' && styles.dividerLabelBoundary,
+      ]}>
       {segments.map((segment, index) =>
         segment.kind === 'figure' ? (
           <Text key={index} style={styles.dividerFigure}>
@@ -256,17 +275,43 @@ export function DayDivider({
       accessibilityLabel={dayDividerLabel(atMs, nowMs)}
       style={[styles.divider, styles.dividerDay]}
       testID="day-divider">
-      <DividerLabel segments={dayDividerSegments(atMs, nowMs)} />
+      <DividerLabel
+        segments={dayDividerSegments(atMs, nowMs)}
+        tone={DIVIDER_TONE.day}
+      />
       <View style={styles.dividerLine} />
     </View>
   );
 }
 
+/**
+ * 안 읽은 경계.
+ *
+ * ## 색이 「경고」가 아니라 **역할**이다 (design-review U4-4 D-2)
+ *
+ * 리뷰가 실측한 것: 웹은 이 경계를 `--accent`(호박)로, 폰은 `color.warn`
+ * (`#d9a441`)으로 그린다. 두 값이 지금 닮아 보이지만 **계약이 아니었다** — 폰의
+ * `accent` 는 파랑이라 이름으로는 대응조차 되지 않고, 어느 한쪽 팔레트를 손대는
+ * 날 경계가 조용히 갈라진다.
+ *
+ * 코어가 올린 것은 값이 아니라 역할이다(`DIVIDER_TONE.unread === 'boundary'`,
+ * *"여기서부터 아직 읽지 않았다 — 경계를 그리는 색"*). 이 파일이 답하는 것은
+ * 「그 역할을 이 팔레트에서 누가 지는가」 하나뿐이고, 답은 `warn` 그대로다 —
+ * **값은 바뀌지 않는다.** 바뀌는 것은 그 값이 우연이 아니게 됐다는 사실이고,
+ * `conversationVisual.test.tsx` 가 `mustDifferFrom`(quiet·agent·danger)을
+ * 그려진 트리에서 하나씩 잰다(U4-4R W-2: 가드는 실표를 봐야 한다).
+ *
+ * 그리고 이 톤만 rule 까지 칠한다 — `DIVIDER_TONE_SPEC.boundary.paintsRule`.
+ * 한 경계는 한 색이다.
+ */
 export function UnreadDivider({count}: {count: number}): React.JSX.Element {
   return (
     <View style={styles.divider} testID="unread-divider">
-      <DividerLabel segments={unreadDividerSegments(count)} tone="warn" />
-      <View style={[styles.dividerLine, styles.dividerLineWarn]} />
+      <DividerLabel
+        segments={unreadDividerSegments(count)}
+        tone={DIVIDER_TONE.unread}
+      />
+      <View style={[styles.dividerLine, styles.dividerLineBoundary]} />
     </View>
   );
 }
@@ -283,18 +328,44 @@ export function UnreadDivider({count}: {count: number}): React.JSX.Element {
  *
  * 이제 `source` 는 코어 `recoveryDividerSegments` 의 **필수 인자**다. 이 함수는
  * 조각 배열을 받아 칠하기만 하고, 붙일지 말지는 판정하지 않는다.
+ *
+ * ## 「seq N까지」가 사라졌다 (design-review U4-4 C-1 — 코어 승격분 소비)
+ *
+ * 이 화면은 그 숫자에 자릿폭 고정까지 걸어 **강조**하고 있었다(`u44-dividers.png`).
+ * SKILL §4 가 이름 대어 금지하는 자리이고, 무엇보다 읽는 사람에게 대조할 대상이
+ * 화면에 하나도 없었다 — 어느 행도 자기 seq 를 그리지 않는다. 문장은 코어가
+ * 바꿨고 이 파일은 그것을 그리기만 한다.
+ *
+ * **낭독 라벨이 새로 붙는다.** 「여기까지」는 이 줄이 서 있는 **자리**가 답을
+ * 마저 하기 때문에 성립하는 말인데, 소리로 듣는 사람에게 「여기」는 가리킬 곳이
+ * 없다. 코어 `recoveryDividerLabel` 이 그 자리를 말로 되돌려 준다 — `DayDivider`
+ * 가 「오늘」에 대해 이미 하고 있는 것과 같은 판단이고, 이 표지만 그 짝이 없었다.
  */
 export function RecoveryDivider({
   seq,
   source,
 }: {
+  /**
+   * 어디까지 복구됐는지의 서버 발급값.
+   *
+   * **문장에는 더 이상 들어가지 않는다**(위 C-1). prop 으로 남는 이유는 코어
+   * 시그니처가 아직 받기 때문이고, 그 인자를 걷어내는 것은 코어 쪽 정리다 —
+   * `recoveryDividerSegments` 의 `_seq` 주석이 같은 말을 한다.
+   */
   seq: number;
   /** Which rail healed the gap. Stated, because they are not equally strong. */
   source: RecoverySource;
 }): React.JSX.Element {
   return (
-    <View style={styles.divider} testID="recovery-divider">
-      <DividerLabel segments={recoveryDividerSegments(seq, source)} />
+    <View
+      accessibilityRole="text"
+      accessibilityLabel={recoveryDividerLabel(source)}
+      style={styles.divider}
+      testID="recovery-divider">
+      <DividerLabel
+        segments={recoveryDividerSegments(seq, source)}
+        tone={DIVIDER_TONE.recovery}
+      />
       <View style={styles.dividerLine} />
     </View>
   );
@@ -501,11 +572,42 @@ function toneForTurn(status: string): 'ok' | 'warn' | 'danger' | 'muted' {
   return 'muted';
 }
 
+/**
+ * 승인 카드가 컨트롤 대신 말하는 줄의 **격** (design-review U4-4 M-3).
+ *
+ * 리뷰가 실측한 것: 영수증·안내·오프라인 세 문장이 전부 `cardNote` 한 벌을
+ * 입고 있었고, *"카드에서 가장 값어치 있는 문장인 영수증이 가장 조용한 차림으로
+ * 나온다."* 격의 순서는 코어가 정한다(`APPROVAL_NOTE_TONE_ORDER`:
+ * receipt > blocked > guidance). 이 표는 그 순서를 **이 팔레트로** 옮긴 것뿐이다.
+ *
+ * ## 축이 잉크와 무게 둘뿐인 이유
+ *
+ * 크기는 안 쓴다 — 위계는 무게와 이차 색으로 내고 크기 팽창으로 내지 않는다
+ * (design-taste §Typography). 그리고 **새 색상을 들이지 않는다.** 「일시적
+ * 차단」에 앰버(`warn`)를 주는 안이 있었고 버렸다: 같은 배치가 D-2 에서 앰버를
+ * 「경계를 그리는 색」으로 못박았고, 여기에 또 주면 그 색이 세 번째 뜻을 갖는다
+ * — 인용 레일이 accent 에 대해 이미 거절한 그 거래다.
+ *
+ * 남는 것은 이미 있는 회색 3단 중 둘과 무게 하나이고, 그것으로 세 단이 나온다:
+ *
+ *   receipt   `text` + 600   방금 내가 한, 되돌릴 수 없는 행동의 기록
+ *   blocked   `text`         지금은 못 한다 (사고가 아니라 **때**의 문제)
+ *   guidance  `textMuted`    길 안내 — 읽으면 좋고 안 읽어도 잃는 것이 없다
+ *
+ * 한 컴포넌트에 무게는 둘(400·600)이다.
+ */
+const APPROVAL_NOTE_STYLE: Record<ApprovalNoteTone, {color: string; fontWeight: '400' | '600'}> = {
+  receipt: {color: color.text, fontWeight: '600'},
+  blocked: {color: color.text, fontWeight: '400'},
+  guidance: {color: color.textMuted, fontWeight: '400'},
+};
+
 function AgentCard({
   card,
   approvalGates,
   approvalReceipts,
   approvalOffline,
+  approvalsProvided,
   nowMs,
   onApprovalSettled,
 }: {
@@ -513,6 +615,8 @@ function AgentCard({
   approvalGates?: ReadonlyMap<string, ApprovalGate>;
   approvalReceipts?: ReadonlyMap<string, ApprovalReceipt>;
   approvalOffline?: boolean;
+  /** 서버가 승인 경로를 실었는가 (`usePendingApprovals` 의 `provided`). */
+  approvalsProvided?: boolean;
   nowMs: number;
   onApprovalSettled?: (approvalId: string, outcome: DecisionOutcome) => void;
 }): React.JSX.Element {
@@ -525,6 +629,20 @@ function AgentCard({
         ? undefined
         : approvalReceipts?.get(card.approvalId);
     const settledStatus = receipt?.status ?? card.status;
+    const note = approvalCardNote({
+      receiptNote: receipt?.note ?? null,
+      isResumeOffer: card.isResumeOffer,
+      // 폰에는 재개 제안에 할 말이 아직 없다. 웹의 문장은 **작업 세션 패널**로
+      // 가라는 안내인데(`AgentCard.tsx` — 「내 세션에서 온라인 호스트를
+      // 선택하세요」) 이 클라에는 그 화면이 없다. 없는 문을 가리키느니 아무
+      // 말도 하지 않는다. 그리고 이것이 옛 판을 고친다: 예전에는 재개 제안
+      // 카드가 `approval === null` 이라는 이유로 「이 결정은 인박스나 데스크톱
+      // 앱에서」를 입었다 — 승인이 아닌 것에 승인 문장을 붙인 것이다.
+      resumeOfferText: null,
+      decidable: approval !== null,
+      offline: approvalOffline === true,
+      approvalsProvided,
+    });
     return (
       <View style={styles.card} testID="agent-card">
         <View style={styles.cardHead}>
@@ -554,27 +672,28 @@ function AgentCard({
 
             승인을 기다리는 에이전트가 **지금 이 화면에 있는데** 폰은 다른 앱으로
             가라고만 했다. 감사 캡처(`m-07`)에는 같은 카드 셋이 연달아 그 한 문장만
-            반복한다.
+            반복한다. 컨트롤은 새로 만들지 않는다 — 잠금화면 알림과 인박스가 이미
+            쓰는 것을 그대로 부른다(세 번째 호출자).
 
-            컨트롤은 새로 만들지 않는다 — 잠금화면 알림과 인박스가 이미 쓰는 것을
-            그대로 부른다(세 번째 호출자). 결정 가능 여부는 `approval` 이 들고,
-            그것을 누가 어떻게 판정하는지는 `approvalGate.ts` 머리말에 있다.
+            ## 그리고 **판정이 여기서 코어로 나갔다** (U4-4 M-3 · #1102)
 
-            영수증이 컨트롤보다 **먼저** 온다: 결정한 순간 그 승인은 대기 목록에서
-            빠져 `approval` 이 `null` 이 되므로, 순서를 반대로 두면 방금 누른 사람이
-            영수증 대신 예전 안내 문장을 보게 된다.
+            이 자리는 삼항 사슬이었고, 그 사슬의 순서 자체가 폰이 실측으로 얻은
+            지식이었다 — 「영수증이 컨트롤보다 먼저」(결정한 순간 그 승인은 대기
+            목록에서 빠지므로, 뒤에 두면 방금 누른 사람이 영수증 대신 예전 안내를
+            읽는다). 그 지식이 이 파일 안의 `?:` 로만 있으면 웹은 그것을 다시
+            짓는다. 이제 순서는 `approvalCardNote` 가 들고, 여기서는 **그 답을
+            칠하기만** 한다.
+
+            `null` 은 「할 말이 없다」가 아니라 **「컨트롤이 선다」**이다. 그래서
+            아래 갈래가 셋이다: 문장 / 컨트롤 / (둘 다 아님 — 재개 제안).
             ===================================================================== */}
-        {receipt !== undefined ? (
-          <Text style={styles.cardNote} testID="card-approval-receipt">
-            {receipt.note}
+        {note !== null ? (
+          <Text
+            style={[styles.cardNote, APPROVAL_NOTE_STYLE[note.tone]]}
+            testID={`card-approval-${note.kind}`}>
+            {note.text}
           </Text>
-        ) : approval && approvalOffline ? (
-          // 결정할 수 있는 건인데 지금은 못 보낸다. 「다른 데서 하세요」와 다른
-          // 문장이어야 한다 — 이건 자리의 문제가 아니라 **때**의 문제다.
-          <Text style={styles.cardNote} testID="card-approval-offline">
-            {APPROVAL_OFFLINE_COPY}
-          </Text>
-        ) : approval ? (
+        ) : approval !== null ? (
           <ApprovalDecision
             approvalId={approval.approvalId}
             reversible={approval.reversible}
@@ -584,11 +703,7 @@ function AgentCard({
             }
             testIDPrefix={`card-approval-${approval.approvalId}`}
           />
-        ) : (
-          <Text style={styles.cardNote}>
-            이 결정은 인박스나 데스크톱 앱에서 처리할 수 있습니다.
-          </Text>
-        )}
+        ) : null}
       </View>
     );
   }
@@ -606,8 +721,14 @@ function AgentCard({
         <Text style={[styles.cardNote, styles.cardNoteDanger]}>{card.errorNote}</Text>
       ) : null}
       {card.kind === 'turn' && card.failure ? (
+        // 두 조각을 **공백**으로 잇는다 (u45 리뷰 M-2). 옛 판은 em-dash 였고,
+        // 이 제품의 사용자 문장에서 그 글자는 금지다. 다른 기호로 바꾸지 않은
+        // 이유: 코어가 주는 두 값은 이미 **각각 완결된 문장**이다
+        // (`agentCardModel.ts` — 「연결된 계정 인증이 만료되었습니다.」 +
+        // 「설정의 AI 연결에서 …」). 완결된 두 문장 사이에 필요한 것은 공백뿐이고,
+        // 콜론이나 괄호를 끼우면 없던 종속 관계를 지어내게 된다.
         <Text style={styles.cardNote}>
-          {`${card.failure.label} — ${card.failure.detail}`}
+          {`${card.failure.label} ${card.failure.detail}`}
         </Text>
       ) : null}
       {cost ? (
@@ -711,8 +832,14 @@ function ArtifactCard({
       ) : null}
 
       {artifact.kind === 'oversized' ? (
+        // em-dash 를 뺀 자리에 다른 기호를 넣지 않고 **바로 위 형제의 목소리**를
+        // 따랐다 (u45 리뷰 M-2): 잘린 diff 는 이미 「너무 길어 N줄만
+        // 표시했습니다. 전체는 M줄입니다.」라고 말한다. 같은 종류의 사실(다 못
+        // 보여 준다 + 전체 크기 + 어디서 보면 되는가)이므로 같은 모양으로 말한다.
         <Text style={styles.cardMeta}>
-          {`변경이 너무 큽니다 — ${formatCount(artifact.totalLineCount)}줄. 데스크톱 앱에서 열어 보세요.`}
+          {`변경이 너무 커서 여기서는 펼치지 못합니다. 전체 ${formatCount(
+            artifact.totalLineCount,
+          )}줄은 데스크톱 앱에서 열어 보세요.`}
         </Text>
       ) : null}
 
@@ -897,6 +1024,14 @@ export interface MessageRowProps {
    * 화면이 하고(`useOnline`), 문장은 두 화면이 같은 상수를 든다.
    */
   approvalOffline?: boolean;
+  /**
+   * 서버가 승인 경로를 실었는가 (`usePendingApprovals` 의 `provided`).
+   *
+   * 이 사실이 코어 판정에 들어가는 이유: 원장이 없는 서버에서는 온라인이 되어도
+   * 아무 일도 일어나지 않으므로 「다시 연결되면 여기서」가 거짓말이 된다
+   * (`approvalCardNote` 가 오프라인보다 이 갈래를 앞에 두는 이유).
+   */
+  approvalsProvided?: boolean;
   /** 결정을 원장에 보낸 뒤. 화면이 영수증을 만들고 목록을 무효화한다. */
   onApprovalSettled?: (approvalId: string, outcome: DecisionOutcome) => void;
 }
@@ -940,6 +1075,7 @@ function MessageRowInner({
   approvalGates,
   approvalReceipts,
   approvalOffline,
+  approvalsProvided,
   onApprovalSettled,
 }: MessageRowProps): React.JSX.Element {
   rowRenders += 1;
@@ -1192,12 +1328,13 @@ function MessageRowInner({
     UNKNOWN_MEMBER,
   ).name;
 
-  // 접힌 묘비의 문장. 접히지 않았으면 예전 그대로 한 낱말이다 — 「삭제된 메시지
-  // 1개」라고 세는 화면은 아무도 묻지 않은 것을 센다.
-  const tombstoneText =
-    deletedRepeat !== undefined && deletedRepeat > 1
-      ? `삭제된 메시지 ${deletedRepeat}개`
-      : '삭제된 메시지';
+  // 접힌 묘비의 문장. 접히지 않았으면 한 낱말이다 — 「삭제된 메시지 1개」라고
+  // 세는 화면은 아무도 묻지 않은 것을 센다.
+  //
+  // **문장을 여기서 짓지 않는다** (U4-6 코어 승격). 폰이 자기 파일에서 조사를
+  // 붙이고 웹이 자기 파일에서 다른 조사를 붙이는 순간 같은 접기가 두 얼굴을
+  // 갖는다 — U1 M-2 가 구분선에서 이미 겪은 실패 양식이다.
+  const tombstoneText = deletedFoldLabel(deletedRepeat);
 
   const tail = [
     !deleted && message.state === 'edited' ? '수정됨' : null,
@@ -1263,12 +1400,21 @@ function MessageRowInner({
         disabled={actions === undefined}
         style={({pressed}) => [
           styles.rowInner,
-          // 시각 칸의 예약은 **여기 한 곳**이다 (design-review M-1) — 아래
-          // `rowTimeReserve` 주석이 왜 자식이 아니라 그릇인지 든다.
+          // 두 칸의 예약은 **여기 한 곳**이다 (design-review M-1) — 아래
+          // `rowTimeReserve` 주석이 왜 자식이 아니라 그릇인지 든다. 아바타 칸은
+          // 그 규율의 거울이고, 같은 이유로 같은 자리에 있다.
           styles.rowTimeReserve,
+          styles.rowAvatarReserve,
           pressed && actions !== undefined && styles.rowPressed,
         ]}
         testID="message-press">
+        {/* 왼쪽 칸. **묶음의 머리에만** 그려지고, 칸 자체는 모든 행이 비워 둔다 —
+            그래야 한 묶음의 본문이 같은 x 에서 시작한다 (감사 H-11). */}
+        {startsGroup ? (
+          <View style={styles.rowAvatar}>
+            <Avatar directory={directory} memberId={message.authorMemberId} />
+          </View>
+        ) : null}
         {startsGroup ? (
           <Author directory={directory} memberId={message.authorMemberId} />
         ) : null}
@@ -1372,6 +1518,7 @@ function MessageRowInner({
                 approvalGates={approvalGates}
                 approvalReceipts={approvalReceipts}
                 approvalOffline={approvalOffline}
+                approvalsProvided={approvalsProvided}
                 nowMs={nowMs}
                 onApprovalSettled={onApprovalSettled}
               />
@@ -1697,6 +1844,7 @@ export const MESSAGE_ROW_COMPARED_PROPS: Record<keyof MessageRowProps, true> = {
   approvalGates: true,
   approvalReceipts: true,
   approvalOffline: true,
+  approvalsProvided: true,
   onApprovalSettled: true,
 };
 
@@ -1761,6 +1909,7 @@ export function sameMessageRowProps(
     a.approvalGates === b.approvalGates &&
     a.approvalReceipts === b.approvalReceipts &&
     a.approvalOffline === b.approvalOffline &&
+    a.approvalsProvided === b.approvalsProvided &&
     a.onApprovalSettled === b.onApprovalSettled
   );
 }
@@ -1887,7 +2036,10 @@ export function WorkingRow({
       accessibilityLabel={`${parts.name} 작업 중, 답을 기다리는 중입니다`}
       style={[styles.row, styles.rowStartsGroup]}
       testID={`working-row-${memberId}`}>
-      <View style={styles.rowInner}>
+      <View style={[styles.rowInner, styles.rowAvatarReserve]}>
+        <View style={styles.rowAvatar}>
+          <Avatar directory={directory} memberId={memberId} />
+        </View>
         <View style={styles.authorRow}>
           <Text
             style={[styles.authorName, styles.authorNameAgent]}
@@ -1961,7 +2113,16 @@ export function PendingRow({
     <View
       style={[styles.row, startsGroup && styles.rowStartsGroup]}
       testID="pending-row">
-      <View style={styles.rowInner}>
+      {/* 시각 칸은 안 쓰고(이 행에는 시각이 없다) **아바타 칸은 쓴다** — 이
+          행의 존재 이유가 「서버 사본이 대체할 때 글이 다시 흐르지 않게」이고,
+          왼쪽 들여쓰기가 다르면 그 흐름이 정확히 여기서 일어난다 (감사 M-12 가
+          좌우 여백에 대해 잡은 것과 같은 결함이다). */}
+      <View style={[styles.rowInner, styles.rowAvatarReserve]}>
+        {startsGroup ? (
+          <View style={styles.rowAvatar}>
+            <Avatar directory={directory} memberId={pending.authorMemberId} />
+          </View>
+        ) : null}
         {startsGroup ? (
           <Author directory={directory} memberId={pending.authorMemberId} />
         ) : null}
@@ -2045,6 +2206,42 @@ const styles = StyleSheet.create({
    */
   rowTimeReserve: {paddingRight: SAFE_GUTTER + TIME_COLUMN + space.sm},
   /**
+   * 아바타 칸의 예약 — 시각 칸의 **거울** (감사 H-11 / goal U4-6M).
+   *
+   * ## 왜 예약인가 (아바타는 머리 행에만 있는데)
+   *
+   * 아바타가 흐름 안에 있으면 그것을 가진 행만 오른쪽으로 밀리고, 한 사람이
+   * 연달아 쓴 다섯 줄의 왼쪽 끝이 두 x 에 선다. 칸을 **모든 행이** 비워 두면
+   * 묶음 전체의 본문이 한 줄에 서고, 그제야 아바타가 그 묶음 전부를 가리키는
+   * 표지가 된다 — 훑는 눈이 사는 것이 정확히 그것이다.
+   *
+   * 그래서 위 `rowTimeReserve` 와 같은 규율이다: 예약은 자식이 아니라 **그릇**이
+   * 지고(design-review M-1), 아바타 자신은 절대 배치라 세로 비용이 0 이다.
+   *
+   * ## 값
+   *
+   * `SAFE_GUTTER`(그릇 자신의 여백) + `AVATAR_SIZE` + `space.sm`. 아바타는 화면
+   * 왼쪽에서 `SAFE_GUTTER` 만큼 떨어져 서므로(`rowAvatar.left`), 아바타의 오른쪽
+   * 끝과 내용의 왼쪽 끝 사이에 정확히 `space.sm` 이 남는다.
+   *
+   * ## 값이 사는 비용
+   *
+   * 본문이 40pt 더 좁아진다. 세로가 아니라 **가로**를 내는 거래이고, 폰에서 가로는
+   * 비싼 쪽이다. 그래도 이쪽인 이유는 대안이 더 비싸기 때문이다: 작성자 줄 안에
+   * 넣으면 감사 M-3 이 이미 「5조각 과적재」로 센 줄에 여섯 번째가 붙고, 32pt 가
+   * 13pt 글자 옆 흐름에 들어가 머리 행이 한 줄만큼 자란다(묶음마다 반복된다).
+   */
+  rowAvatarReserve: {paddingLeft: SAFE_GUTTER + AVATAR_SIZE + space.sm},
+  /**
+   * 아바타가 앉는 자리. 규칙은 `rowTime` 과 하나도 다르지 않다 — **이 메시지의
+   * 맨 위 왼쪽**이고, 그 y 는 그릇의 위쪽 패딩과 **같은 곳**에서 온다.
+   */
+  rowAvatar: {
+    position: 'absolute',
+    left: SAFE_GUTTER,
+    top: ROW_SPACE.withinGroup / 2,
+  },
+  /**
    * 행의 시각 (H-3). 행의 첫 줄 오른쪽 끝.
    *
    * `position: 'absolute'` 인 이유는 세로 비용을 0 으로 두기 위해서다 — 흐름에
@@ -2125,7 +2322,7 @@ const styles = StyleSheet.create({
    * 옷을 입는다.
    *
    * 폰에서 「여기를 보라」를 맡고 있는 색은 앰버다: 미읽 구분선이 `warn` 으로
-   * 그려진다(`dividerLineWarn`) — 웹에서 그 경계가 accent 로 그려지는 것과 같은
+   * 그려진다(`dividerLineBoundary`) — 웹에서 그 경계가 accent 로 그려지는 것과 같은
    * 자리다. 그래서 대응은 **accent→accent 가 아니라 「미읽 경계를 그리는 색」→
    * 「미읽 경계를 그리는 색」** 이고, 그 색의 가장 부드러운 단이 `warnSurface` 다.
    *
@@ -2297,12 +2494,13 @@ const styles = StyleSheet.create({
     height: DIVIDER_SPACE.ruleThickness,
     backgroundColor: color.border,
   },
-  dividerLineWarn: {backgroundColor: color.warn},
+  /** `boundary` 역할이 이 팔레트에서 지는 값 (D-2). 이 톤만 rule 까지 칠한다. */
+  dividerLineBoundary: {backgroundColor: color.warn},
   // `textFaint` 는 배경 대비 3.909:1 로 본문 AA 미달이다(U4-2 M-6 실측).
   dividerLabel: {fontSize: font.meta, color: color.textMuted},
   /** 숫자만 자릿폭 고정 — 조사·단위가 함께 받으면 음절 사이가 벌어진다. */
   dividerFigure: {fontVariant: ['tabular-nums']},
-  dividerLabelWarn: {color: color.warn, fontWeight: '600'},
+  dividerLabelBoundary: {color: color.warn, fontWeight: '600'},
 
   chipRow: {flexDirection: 'row', flexWrap: 'wrap', gap: space.xs, paddingTop: space.xs},
   chip: {

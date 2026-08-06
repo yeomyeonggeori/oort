@@ -49,6 +49,7 @@ import {useOnline} from '../features/inbox/useOnline';
 import {usePendingApprovals} from '../features/conversation/usePendingApprovals';
 import {jumpMissedNotice} from '../features/conversation/jumpNotice';
 import {Composer} from '../features/conversation/Composer';
+import {channelDraftKey} from '../features/conversation/drafts';
 import {TypingBar} from '../features/conversation/TypingBar';
 import {
   markTyping,
@@ -560,11 +561,18 @@ export default function ConversationScreen({
   // 영수증은 **같은 순간에 서로 반대로** 움직인다 — 영수증을 행의 상태로 두면
   // 방금 누른 사람이 영수증 대신 예전 안내 문장을 보게 된다.
   // ===========================================================================
-  const {gates: approvalGates} = usePendingApprovals(channelId);
+  const {gates: approvalGates, provided: approvalsProvided} =
+    usePendingApprovals(channelId);
   // **레일 상태(`railStatus`)가 아니다.** 레일은 웹소켓이고 결정은 REST 로
   // 나간다 — 레일이 재연결 중이어도 그 POST 는 멀쩡히 성공한다. 승인에는
   // 기한이 있으므로, 할 수 있는 결정을 막는 쪽이 더 비싸다.
-  const approvalOnline = useOnline();
+  //
+  // 이름이 `approvalOnline` 이 아닌 이유(goal U4-6M): 소비자가 둘이 됐다.
+  // **전송도 REST POST** 이므로 컴포저가 물어야 하는 것도 정확히 같은 질문이고,
+  // 컴포저는 그동안 레일을 읽고 있었다. 한 화면이 같은 사실에 두 신호를 들면
+  // 그 둘은 반드시 갈라진다 — 이 파일이 「연결 중…」 하나로 두 상태를 덮던 옛
+  // 결함(M3)에서 이미 배운 것이다.
+  const networkOnline = useOnline();
   const invalidateApprovals = useInvalidateApprovals();
   const [approvalReceipts, setApprovalReceipts] = useState<
     ReadonlyMap<string, ApprovalReceipt>
@@ -779,7 +787,11 @@ export default function ConversationScreen({
             <Timeline
               approvalGates={approvalGates}
               approvalReceipts={approvalReceipts}
-              approvalOffline={!approvalOnline}
+              approvalOffline={!networkOnline}
+              // 원장 표면이 없는 서버에서는 「다시 연결되면 여기서」가 거짓말이
+              // 된다 — 코어가 그 갈래를 오프라인보다 앞에 두는 이유이고, 이
+              // 사실은 이 훅만 안다.
+              approvalsProvided={approvalsProvided}
               onApprovalSettled={onApprovalSettled}
               messages={timeline.state.messages}
               directory={directory}
@@ -853,7 +865,13 @@ export default function ConversationScreen({
               channelLabel={title}
               directory={directory}
               dmAgent={dmAgent}
-              disabled={railStatus === 'disconnected'}
+              // 승인 컨트롤과 **같은 신호**다. 전송도 REST POST 이므로 레일이
+              // 재연결 중이라는 사실은 「보낼 수 있는가」에 답하지 않는다 —
+              // 옛 배선(`railStatus === 'disconnected'`)이 답한다고 주장했을
+              // 뿐이다. 근거는 `useOnline.ts` 머리말, 판정은 `Composer` 의
+              // `offline` prop 주석에 있다.
+              offline={!networkOnline}
+              draftKey={channelDraftKey(channelId)}
               quote={quote}
               onCancelQuote={onCancelQuote}
               inputRef={composerInputRef}

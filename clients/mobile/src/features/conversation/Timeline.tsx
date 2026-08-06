@@ -35,11 +35,16 @@ import {resolveQuote} from '@momo/core/features/timeline/quote';
 import type {DecisionOutcome} from '@momo/core/features/timeline/approvalDecision';
 import type {ApprovalGate, ApprovalReceipt} from './approvalGate';
 import {buildThreadContext, parentOf, rollupFor} from './threadContext';
+// 접기는 이제 **코어 정본**이다 (U4-6, #1102). 이 파일이 부르던 폰 로컬 판은
+// 자기 머리말에 「정본 자리는 코어다」라고 적어 두고 폰에 있는 이유가 설계가
+// 아니라 동시 작업임을 밝혀 두었다(#1100 이탈 1). 그 배치가 끝나면서 규칙·문구·
+// **대리 착지 계약**이 그대로 올라갔고, 여기서는 임포트 경로만 바뀐다 — 규칙이
+// 한 글자도 다르지 않다는 것은 `conversationHygiene.test.tsx` 가 단정한다.
 import {
   foldDeletedRuns,
   foldedStandInIndex,
   type FoldedTimelineItem,
-} from './deletedFold';
+} from '@momo/core/features/timeline/deletedFold';
 
 // =============================================================================
 // The message list. **Forward — newest at the bottom.**
@@ -400,6 +405,7 @@ function TimelineInner({
   approvalGates,
   approvalReceipts,
   approvalOffline,
+  approvalsProvided,
   onApprovalSettled,
   myMemberId,
   loadingOlder,
@@ -455,6 +461,8 @@ function TimelineInner({
   approvalReceipts?: ReadonlyMap<string, ApprovalReceipt>;
   /** 연결이 끊겼는가 — 끊겼으면 컨트롤 대신 인박스와 같은 문장. */
   approvalOffline?: boolean;
+  /** 서버가 승인 경로를 실었는가. 행이 코어 판정에 그대로 넘긴다. */
+  approvalsProvided?: boolean;
   onApprovalSettled?: (approvalId: string, outcome: DecisionOutcome) => void;
   myMemberId: string;
   loadingOlder?: boolean;
@@ -620,8 +628,8 @@ function TimelineInner({
   // is the difference between replying and replying visibly.
   const threads = useMemo(() => buildThreadContext(messages), [messages]);
 
-  // 연달아 지워진 메시지는 한 줄로 접힌다 (감사 M-1). 왜 이 접기가 코어가 아니라
-  // 폰에 있는지, 그리고 무엇을 접지 않는지는 `deletedFold.ts` 머리말에 있다.
+  // 연달아 지워진 메시지는 한 줄로 접힌다 (감사 M-1). 무엇을 접지 **않는지**와
+  // 그 이유는 코어 `features/timeline/deletedFold.ts` 머리말에 있다.
   //
   // `threads`·`reactions` 뒤에 서는 이유가 그 규칙이다: 답글이 달렸거나 반응이
   // 붙은 묘비는 접지 않으므로, 접기는 그 둘을 **아는 상태에서만** 판정할 수 있다.
@@ -1008,6 +1016,7 @@ function TimelineInner({
           approvalGates={approvalGates}
           approvalReceipts={approvalReceipts}
           approvalOffline={approvalOffline}
+          approvalsProvided={approvalsProvided}
           onApprovalSettled={onApprovalSettled}
         />
       );
@@ -1059,6 +1068,7 @@ function TimelineInner({
       approvalGates,
       approvalReceipts,
       approvalOffline,
+      approvalsProvided,
       onApprovalSettled,
     ],
   );
@@ -1089,8 +1099,10 @@ function TimelineInner({
     //
     // 그래서 접기가 적어 둔 것을 한 번 더 본다. 착지 지점은 그 묘비를 **대신해 서
     // 있는 행**이고, 그 행은 「삭제된 메시지 N개」라고 자기가 무엇을 포함하는지
-    // 말한다. 왜 이쪽이고 「인용된 묘비는 접지 않는다」가 아닌지는 `deletedFold.ts`
-    // 머리말에 적혀 있다.
+    // 말한다. 왜 이쪽이고 「인용된 묘비는 접지 않는다」가 아닌지는 코어
+    // `features/timeline/deletedFold.ts` 머리말에 적혀 있다 — **승격이 되돌려서는
+    // 안 되는 자리**로 거기에 다시 못박혀 있고(#1105 인계), 이 줄이 그 계약의
+    // 폰 쪽 소비처다.
     if (index < 0) index = foldedStandInIndex(items, jumpTarget.messageId);
     if (index < 0) {
       // 로드된 범위의 가장 오래된 seq 보다 위면 그것은 **사실**이다.

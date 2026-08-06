@@ -222,12 +222,24 @@ describe('행이 말하는 것', () => {
     expect(screen.getByText('새 메시지 2개, 여기까지 읽음')).toBeTruthy();
   });
 
-  it('재연결 표시는 어디까지 복구됐는지 말한다', () => {
+  it('재연결 표시는 어디까지 복구됐는지 말한다 — seq 를 읽어 주지 않고', () => {
+    // 문장이 U4-6 에서 바뀌었다(design-review U4-4 C-1, 코어 승격분 소비). 옛
+    // 판은 「재연결됨, seq 2까지 복구」였고 폰은 그 숫자에 자릿폭 고정까지 걸어
+    // 강조했다. 「어디까지」의 답은 **이 줄이 서 있는 자리**가 이미 하고 있었고
+    // (표지는 자기가 확인한 것들 아래에 앵커된다), 그 숫자를 대조할 대상은 화면에
+    // 하나도 없었다 — 어느 행도 자기 seq 를 그리지 않는다.
     renderTimeline({
       messages: [message(1), message(2)],
       recoveryMarkers: [{id: 'r1', seq: 2, source: 'replay'}],
     });
-    expect(screen.getByText('재연결됨, seq 2까지 복구')).toBeTruthy();
+    expect(screen.getByText('재연결됨, 여기까지 복구')).toBeTruthy();
+    expect(screen.queryByText(/seq/)).toBeNull();
+    // 그리고 소리로 듣는 사람에게 「여기」는 가리킬 곳이 없다. 낭독은 그 자리를
+    // 말로 되돌려 받는다 (`recoveryDividerLabel`) — `dayDividerLabel` 이 「오늘」
+    // 에 대해 이미 하는 것과 같은 판단이고, 이 표지만 그 짝이 없었다.
+    expect(screen.getByTestId('recovery-divider').props.accessibilityLabel).toBe(
+      '연결이 다시 이어졌습니다. 이 줄 위까지 복구했습니다.',
+    );
   });
 
   it('삭제된 메시지는 자리를 지키고 본문을 지운다', () => {

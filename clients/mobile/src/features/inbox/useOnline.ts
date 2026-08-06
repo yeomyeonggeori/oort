@@ -51,6 +51,12 @@ export function useOnline(): boolean {
  *
  * 두 화면이 **같은 상수**를 든다. 복제하면 두 경로가 같은 상황에 다른 말을
  * 하기 시작하고, 그것이 이 파일이 존재하는 이유다.
+ *
+ * **이제 그 「두 화면」은 두 클라다** (U4-6, #1102). 문장은 여기서 landing 했고
+ * 코어 `approvalNote.ts` 가 그대로 들고 갔다. 여기 남는 것은 **이름 하나**이고,
+ * 값을 다시 적지 않는다 — 같은 값을 두 곳에 적는 순간 이 주석이 경고하는 그
+ * 복제가 된다. 이름을 지우지 않는 이유는 이 파일이 인박스 화면의 진입점이고,
+ * 「오프라인일 때 무슨 문장이 서는가」를 찾는 사람이 먼저 여는 자리가 여기이기
+ * 때문이다.
  */
-export const APPROVAL_OFFLINE_COPY =
-  '연결이 끊겨 지금은 결정할 수 없습니다. 다시 연결되면 여기서 승인하거나 거부할 수 있습니다.';
+export {APPROVAL_OFFLINE_COPY} from '@momo/core/features/timeline/approvalNote';

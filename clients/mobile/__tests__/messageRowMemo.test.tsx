@@ -152,6 +152,10 @@ const CHANGED: Record<keyof MessageRowProps, Partial<MessageRowProps>> = {
     ]),
   },
   approvalOffline: {approvalOffline: true},
+  // 원장 표면의 유무. 스칼라이고 **문장을 바꾼다** — 코어 `approvalCardNote` 가
+  // 이 값으로 「지금 못 보낸다」와 「다른 데서 하세요」를 가르므로, 비교자가 이
+  // 값을 안 보면 서버 표면이 바뀌어도 카드가 옛 문장을 그대로 든다.
+  approvalsProvided: {approvalsProvided: false},
   onApprovalSettled: {onApprovalSettled: () => {}},
 };
 

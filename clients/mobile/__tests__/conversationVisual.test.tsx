@@ -22,6 +22,8 @@ import {
   recoveryDividerSegments,
   DIVIDER_LABEL_SIDE,
   DIVIDER_SPACE,
+  DIVIDER_TONE,
+  DIVIDER_TONE_SPEC,
   ROW_SPACE,
 } from '@momo/core/features/timeline/divider';
 import {APP_NOTE_MARK} from '../src/features/conversation/appVoice';
@@ -1061,5 +1063,99 @@ describe('#1092 D-1 — 복구 구분선의 낱말이 코어의 것이다', () =
   it('낱말이 이 파일에 없다 — 있으면 다음 goal 에서 다시 갈라진다', () => {
     // 판정이 화면 파일에 남아 있으면 웹은 그것을 영영 모른다. 그 구멍이 D-1 이다.
     expect(codeOnly(SRC('MessageRow.tsx'))).not.toContain('다시 읽음');
+  });
+});
+
+// =============================================================================
+// U4-4 D-2 — 「경계를 그리는 색」이 우연이 아니라 계약이다
+//
+// 리뷰가 실측한 것: 안읽음 경계를 웹은 `--accent`(호박)로, 폰은 `color.warn`
+// (#d9a441)으로 그린다. 두 값이 지금 닮아 보이지만 **계약이 아니었다** — 폰의
+// `accent` 는 파랑(#3b6fd4)이라 이름으로는 대응조차 안 되고, 어느 한쪽 팔레트를
+// 손대는 날 경계가 조용히 갈라진다.
+//
+// 코어가 올린 것은 값이 아니라 **역할**이다(`DIVIDER_TONE`·`DIVIDER_TONE_SPEC`).
+// 여기서 재는 것은 이 팔레트가 그 역할을 실제로 만족하는가이고, 그 판정은
+// **그려진 트리에서** 한다 — U4-4R W-2 가 남긴 규율(가드는 실표를 봐야 한다).
+// 값 자체는 이 배치에서 바뀌지 않았다. 바뀐 것은 그것이 우연이 아니게 된 것이다.
+// =============================================================================
+
+describe('D-2 — 구분선의 색이 코어가 정한 역할을 만족한다', () => {
+  /** 라벨의 **바깥** `Text` — 안쪽 조각(`figure`)은 자릿폭만 들고 색은 없다. */
+  const labelStyle = (
+    view: ReturnType<typeof render>,
+    testID: string,
+    match: RegExp,
+  ) =>
+    flatten(within(view.getByTestId(testID)).getByText(match).props.style) as {
+      color?: string;
+    };
+
+  const ruleStyle = (
+    view: ReturnType<typeof render>,
+    testID: string,
+  ): {backgroundColor?: string} => {
+    // rule 은 낱말이 없는 `View` 다. 형제 중 배경색을 든 것 하나.
+    const children: unknown[] = view.getByTestId(testID).children;
+    for (const child of children) {
+      if (typeof child === 'string') continue;
+      const style = flatten(
+        (child as {props?: {style?: unknown}}).props?.style,
+      ) as {backgroundColor?: string};
+      if (style.backgroundColor !== undefined) return style;
+    }
+    return {};
+  };
+
+  it('세 구분선이 코어의 표대로 역할을 나눠 갖는다', () => {
+    expect(DIVIDER_TONE.day).toBe('quiet');
+    expect(DIVIDER_TONE.recovery).toBe('quiet');
+    expect(DIVIDER_TONE.unread).toBe('boundary');
+  });
+
+  it('boundary 만 rule 을 칠한다 — 한 경계는 한 색이다', () => {
+    expect(DIVIDER_TONE_SPEC.boundary.paintsRule).toBe(true);
+    expect(DIVIDER_TONE_SPEC.quiet.paintsRule).toBe(false);
+
+    const unread = render(<UnreadDivider count={3} />);
+    const boundaryLabel = labelStyle(unread, 'unread-divider', /새 메시지/).color;
+    const boundaryRule = ruleStyle(unread, 'unread-divider').backgroundColor;
+    // 라벨과 rule 이 **같은** 색이다. 둘이 다르면 한 경계가 두 색이 된다.
+    expect(boundaryRule).toBe(boundaryLabel);
+
+    const day = render(<DayDivider atMs={BASE_MS} nowMs={BASE_MS} />);
+    expect(ruleStyle(day, 'day-divider').backgroundColor).toBe(color.border);
+    expect(ruleStyle(day, 'day-divider').backgroundColor).not.toBe(boundaryRule);
+  });
+
+  it('boundary 가 quiet · agent · danger 와 다르다 (mustDifferFrom)', () => {
+    // 계약의 심장. 「경계가 무슨 색인가」는 팔레트마다 달라도 되지만 「무엇이
+    // 아니어야 하는가」는 두 클라에 공통이다.
+    expect([...DIVIDER_TONE_SPEC.boundary.mustDifferFrom].sort()).toEqual([
+      'agent',
+      'danger',
+      'quiet',
+    ]);
+
+    const unread = render(<UnreadDivider count={3} />);
+    const boundary = labelStyle(unread, 'unread-divider', /새 메시지/).color;
+    expect(boundary).toBeDefined();
+
+    // quiet — 실제로 그려진 조용한 표지의 색.
+    const day = render(<DayDivider atMs={BASE_MS} nowMs={BASE_MS} />);
+    const quiet = labelStyle(day, 'day-divider', /오늘|년/).color ?? color.textMuted;
+    expect(boundary).not.toBe(quiet);
+
+    // agent — 이 조건이 없으면 폰처럼 accent 가 파랑인 팔레트에서 경계가
+    // 에이전트 색을 빌려 쓰는 일이 조용히 일어난다.
+    expect(boundary).not.toBe(color.agent);
+    // danger — 안 읽은 것은 사고가 아니다.
+    expect(boundary).not.toBe(color.danger);
+  });
+
+  it('그리고 그 색이 실제로 읽힌다 — 배경 위 AA', () => {
+    const unread = render(<UnreadDivider count={3} />);
+    const boundary = String(labelStyle(unread, 'unread-divider', /새 메시지/).color);
+    expect(contrast(boundary, color.bg)).toBeGreaterThanOrEqual(4.5);
   });
 });
