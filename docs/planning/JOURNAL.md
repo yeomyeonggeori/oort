@@ -1817,3 +1817,8 @@
 - 성재 발제(스플릿뷰 멀티세션·기기 독립 연속성 = oort 지향점) → 로드맵 대조: **부품 완비·묶는 경험 부재** 판정 → **ADR-0154 Proposed**(D1 생존성 모델 working/blocked/idle+기기종속/지속, blocked=멘션급 · D2 관제 뷰=채널이 홈·집계 그리드·리뷰 루프 내장 · D3 재개/인수 어휘 분리+사전조건 선검사 · D4 단계=#1114가 1단계 · D5 외부 하네스 트랙).
 - 리서치(research/2026-08-06-prime-agent-ade-herdr.md): **prime agent**=Prime Intellect 2026-08-05 공개 CLI 하네스(MIT·로컬 데몬·JSONL RPC·steer·extension_ui) — 우리 provider와 같은 층, 스파이크 #1120. **herdr**=실존(24.8k★ Rust 에이전트 인식 tmux) — 워커 좀비화 해독제 후보, 스파이크 #1121(라이선스 재확인 전 실행만). ADE 업계 수렴 3원칙(worktree=경계·3상태 배지·resume/teleport 분리)·함정(리뷰 병목이 진짜)이 ADR에 반영됨.
 - 성재 대기: ADR-0154 세부 승인(D1~D5). 위생 3워커(레인 rust·게이트·Xcode 준비) 계속 진행 중.
+
+## 2026-08-06 (밤3) · Fable · 위생 C 랜딩(#1122) — Xcode Cloud 레포 준비 완료
+- **#1122 머지**: ci_post_clone(위치=워크스페이스 옆 — 루트는 Xcode Cloud가 조용히 무시 실측)·xcworkspace는 **contents.xcworkspacedata 1파일만**(절대경로·UUID 0 — 바이트 결정적, Podfile.lock과 정반대 성질 논증)·서명 잔재 4조합 제거·ci_post_xcodebuild가 11-런북 A·C절반을 CI로 이관("프로파일 서명이 있어야 보이던 것들 — 어느 게이트도 못 보던 층")·projectShape 가드 5(전부 "깨져도 빌드는 안 깨지고 체크만 조용히 사라지는" 종류)·docs/cicd/10 §8 정본 등재. 클린 클론 BUILD SUCCEEDED·red proof 매트릭스 11/11.
+- **A 몫 인계 1건(A PR 검수 시 확인)**: build-sim.sh:44의 `[ ! -d $WORKSPACE ]` 술어가 이 PR로 무효화(디렉터리는 항상 존재) — Pods/Manifest.lock 존재로 교체 필요. **Gemfile.lock 미커밋이 SPEC CHECKSUM 85줄 매런 재작성의 뿌리**(CocoaPods 1.15.2 vs 락 1.17.0) — #1101 규명 사안으로 §8-6 기록됨.
+- 성재 콘솔 절차는 docs/cicd/10 §8에 등재(Disable→재지정 — ②xcworkspace가 있어야 선택지가 화면에 뜸). 남은 위생: A(레인 rust)·B(게이트) 진행 중.
