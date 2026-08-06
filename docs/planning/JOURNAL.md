@@ -1822,3 +1822,9 @@
 - **#1122 머지**: ci_post_clone(위치=워크스페이스 옆 — 루트는 Xcode Cloud가 조용히 무시 실측)·xcworkspace는 **contents.xcworkspacedata 1파일만**(절대경로·UUID 0 — 바이트 결정적, Podfile.lock과 정반대 성질 논증)·서명 잔재 4조합 제거·ci_post_xcodebuild가 11-런북 A·C절반을 CI로 이관("프로파일 서명이 있어야 보이던 것들 — 어느 게이트도 못 보던 층")·projectShape 가드 5(전부 "깨져도 빌드는 안 깨지고 체크만 조용히 사라지는" 종류)·docs/cicd/10 §8 정본 등재. 클린 클론 BUILD SUCCEEDED·red proof 매트릭스 11/11.
 - **A 몫 인계 1건(A PR 검수 시 확인)**: build-sim.sh:44의 `[ ! -d $WORKSPACE ]` 술어가 이 PR로 무효화(디렉터리는 항상 존재) — Pods/Manifest.lock 존재로 교체 필요. **Gemfile.lock 미커밋이 SPEC CHECKSUM 85줄 매런 재작성의 뿌리**(CocoaPods 1.15.2 vs 락 1.17.0) — #1101 규명 사안으로 §8-6 기록됨.
 - 성재 콘솔 절차는 docs/cicd/10 §8에 등재(Disable→재지정 — ②xcworkspace가 있어야 선택지가 화면에 뜸). 남은 위생: A(레인 rust)·B(게이트) 진행 중.
+
+## 2026-08-06 (밤4) · Fable · 위생 A 랜딩(#1123) — 레인=배포 이미지·레이스 소멸·배포 파이프 선재 결함 적발
+- **#1123 머지**: 레인 스택=infra/rust 배포 compose+lane 오버레이(베이스 무접촉 — "배포와 같은 스택" 근거 보존). **매 실행 배포 이미지를 굽는 구조가 즉시 값을 함**: #1119가 Dockerfile pre-copy에 momo-drive 누락 → **배포 이미지 빌드가 깨져 있던 선재 결함 적발·수리**(다음 배포에서 터졌을 것). ADR-0004 가드를 자기신고→증거 3종으로 재설계. 목 재사용(변인 통제 — "초록/빨강 변화의 원인이 서버 교체라고 말할 수 있게").
+- **#1069 종결**: 원인=Rust 와이어 stream:false인데 MAESTRO 지시어가 SSE에서만 읽힘 → 비스트림 존중 수리로 「턴 열린 시간」이 이벤트 sleep 합(창발)→서버 sleep 하나(값) — **레이스 자체 소멸**. 20-stop 3연속 34/34/35s. **#1101 반증**: 3경로·4실행 락 바이트 동일 — desync 서사는 전부 #1035(Pods 부재)로 설명. 락 무변경.
+- 30-approval을 실행 가능 툴로 재조준+DB 행 재확인(화면-초록을 FAIL 강등 가능) — 폰 실시간 단정 red proof 포함(#1051 부분 해소).
+- **병합 교차 1건 실측·소수리 발사**: C의 예측대로 #1122(xcworkspace 커밋)×#1123(`[ ! -d ]` 술어) 충돌 — 클린 클론 자가 치유 불발. Manifest.lock 술어 교체 워커 가동.
