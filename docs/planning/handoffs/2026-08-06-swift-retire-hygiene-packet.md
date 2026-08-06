@@ -17,5 +17,9 @@
 - **#1099**: capture:design 모바일 openSheet 30초 타임아웃(95/118 중단) 수리 + #1057(설정 표면 미포함) 동반.
 - 검증: 게이트 전판 실행표(green/skip+사유) + red proof(Swift 패스 opt-in 복귀 동작·merge-tree 스크립트가 고의 드리프트 검출) + `cargo test --workspace` 무회귀. PR "Closes #1089"(부분 해소는 본문 명시).
 
+## 워커 C — Xcode Cloud RN 이관 레포 준비 (#1115)
+- 정본: `research/2026-08-06-xcode-cloud-transition.md` §레포 준비 6건 — ①`clients/mobile/ios/ci_scripts/ci_post_clone.sh`(node 22.11 확보→`npm ci`→`bundle install`→`pod install` — Podfile node 하드 의존 순서. 배치 위치 관례는 Apple 문서 1회 확인) ②xcworkspace 커밋(.gitignore:25 해제 — pod install 산출물이므로 재생성 가능성·diff 소음 평가 후 커밋 전략 기록) ③`.node-version` ④pbxproj `CODE_SIGN_IDENTITY[sdk=iphoneos*]` 잔재 제거 ⑤`ci_post_xcodebuild.sh` NSE 임베드 검증(11-런북 이식) ⑥docs/cicd/10 정본 등재(워크플로·앱 6792002019·재지정 절차).
+- 검증: 로컬에서 ci_post_clone.sh 시뮬레이션(클린 클론 → 스크립트 → xcodebuild 아카이브 dry — 서명 없이 build만) + 폰 스위트·lane 무회귀(pbxproj 접촉 때문) + red proof 1(스크립트에서 pod install 제거 시 빌드 실패 재현). PR "Closes #1115"·이탈 절·STOP.
+
 ## 공통
 단발 Opus·스크래치 파일명 고유·전 스위트+lint 총계·이탈 절·STOP·시크릿/프로덕션 금지. Xcode Cloud 비활성·RN 재활성은 **범위 밖**(별도 실측 진행 중 — 성재 수동 필요 범위 확정 후).
