@@ -533,11 +533,40 @@ const styles = StyleSheet.create({
     fontSize: font.meta,
     color: color.textFaint,
   },
+  /**
+   * 「지금은 못 보낸다」 한 줄. **앰버가 아니다** (U4-6 리뷰 M-2).
+   *
+   * 이 줄과 승인 카드의 오프라인 줄은 같은 종류의 말이다 — 코어가 이름까지
+   * 붙여 두었다(`ApprovalNoteTone` 의 `blocked`: *"지금은 못 한다. 사고가
+   * 아니라 **때**의 문제이므로 위험 색이 아니지만, 조용한 안내로 묻히면 사람이
+   * 버튼을 계속 누른다"*). 그런데 같은 배치에서 승인 쪽은 `color.text`/400 으로
+   * 서고 이 줄만 `color.warn` 이었다. 한 화면 안에서 같은 말이 두 옷을 입는다.
+   *
+   * ## 어느 쪽으로 맞췄나 — **앰버를 뺀다**
+   *
+   * 앰버가 이 팔레트에서 이미 두 가지 뜻을 갖는다: 상태 칩의 「승인 대기」와,
+   * D-2 가 못박은 **경계를 그리는 색**이다. 세 번째 뜻을 주면 색이 뜻을 잃는다
+   * — `MessageRow.tsx` 의 `APPROVAL_NOTE_STYLE` 주석이 「일시적 차단에 앰버를
+   * 주는 안」을 정확히 그 이유로 이미 기각했고, 그 기각을 여기서 뒤집을 근거가
+   * 없다. 반대 방향(승인 줄을 앰버로)은 그 결정을 되돌리는 일이고, 되돌릴
+   * 이유는 「컴포저가 먼저 그렇게 적혀 있었다」뿐이다.
+   *
+   * 잃는 것: 이 줄이 덜 튄다. 잃지 않는 것: **눈에 띄어야 하는 이유**는 색이
+   * 아니라 자리가 진다 — 이 문장은 사람이 지금 보고 있는 입력창 바로 아래,
+   * 꺼진 전송 버튼 옆에 선다. `textFaint` 를 쓰는 위 `hint` 와는 갈라져 있고
+   * (그쪽이 「읽어도 안 읽어도 되는」 축이다), 그 대비가 승인 카드에서 이미
+   * 검증된 3단(`text` 600 / `text` 400 / `textMuted`)의 가운데다.
+   *
+   * 웹은 `text-warn` 을 그대로 둔다. 톤 **이름**은 코어가 지고 색은 각 클라의
+   * 팔레트가 정한다는 것이 `approvalNote.ts` 의 계약이고, 웹은 자기 안에서 이미
+   * 정합이다(그 클라의 승인 blocked 도 `text-warn` 이다). 여기서 고치는 것은
+   * **폰 안에서 갈라진 두 줄**이지 두 클라의 색이 아니다.
+   */
   offline: {
     paddingHorizontal: SAFE_GUTTER,
     paddingTop: space.sm,
     fontSize: font.meta,
-    color: color.warn,
+    color: color.text,
   },
   pressed: {backgroundColor: color.surfacePressed},
 });

@@ -5,6 +5,9 @@ import {cleanup, render, within} from '@testing-library/react-native';
 import fs from 'node:fs';
 import path from 'node:path';
 import React from 'react';
+import {StyleSheet} from 'react-native';
+
+import {Composer} from '../src/features/conversation/Composer';
 
 import {
   approvalGates,
@@ -553,6 +556,33 @@ describe('M-3 — 승인 카드 세 문장의 격', () => {
             : {gates: new Map()};
       expect(noteFace(props, kind).color).not.toBe(color.warn);
     }
+  });
+
+  it('컴포저의 「지금은 못 보낸다」도 같은 잉크다 (U4-6 리뷰 M-2)', () => {
+    // 두 줄은 같은 종류의 말이다 — 코어가 이름까지 붙였다(`blocked`: 자리의
+    // 문제가 아니라 **때**의 문제). 그런데 같은 배치에서 승인 줄은 `text`/400
+    // 으로 서고 컴포저 줄만 `warn` 이었다. 한 화면 안에서 같은 말이 두 옷을
+    // 입으면, 사람은 그 차이를 뜻으로 읽는다.
+    const blocked = noteFace(
+      {gates: new Map([['ap-1', GATE]]), offline: true},
+      'offline',
+    );
+    const view = render(
+      <Composer
+        channelLabel="배포"
+        directory={DIRECTORY}
+        offline
+        onSend={() => {}}
+      />,
+    );
+    const composerLine = StyleSheet.flatten(
+      view.getByTestId('composer-offline').props.style,
+    ) as {color?: string};
+    view.unmount();
+
+    expect(composerLine.color).toBe(blocked.color);
+    // 그리고 그 잉크가 앰버가 아니다 — D-2 의 기각을 컴포저에서 되살리지 않는다.
+    expect(composerLine.color).not.toBe(color.warn);
   });
 
   it('격의 순서가 코어의 순서다', () => {
