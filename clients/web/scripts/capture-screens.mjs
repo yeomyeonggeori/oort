@@ -104,6 +104,42 @@ const ROUTING_FIXTURES = JSON.parse(
   readFileSync(resolve(WEB_ROOT, "src/features/routing/routingFixtures.json"), "utf8")
 );
 
+// 설정 > 사용량 · 구독 잔여량 (#1057). 게이트(gate-shell-layout)와 모델 테스트가
+// 계약으로 붙잡는 그 파일들을 그대로 읽는다.
+const USAGE_FIXTURE = JSON.parse(
+  readFileSync(resolve(WEB_ROOT, "src/features/settings/usageFixtures.json"), "utf8")
+).normal;
+const QUOTA_FIXTURE = JSON.parse(
+  readFileSync(resolve(WEB_ROOT, "src/features/settings/quotaFixtures.json"), "utf8")
+).healthy;
+
+// 설정 > 멤버와 초대. 한 장짜리 목록은 이 패널의 실제 길이가 아니다 — 만료·사용
+// 횟수·역할이 섞인 여러 줄이 이 화면의 기본 상태다.
+// 설정 > 앱은 **빈 카탈로그**로 찍는다.
+//
+// 출하 시드(server/Fixtures/plugin-manifests/github.json)를 한 줄 얹어 봤고, 그
+// 프레임 자체는 나온다. 그런데 그 뒤 섹션 전환이 무너졌다(실측 2026-08-06: 카탈로그
+// 행이 있으면 다음 섹션에서 `settings-route` 가 30초 안에 돌아오지 않는다 — 나란히
+// 클릭하는 판에서는 `사용량` nav 버튼 클릭이 같은 자리에서 죽었다). 원인은 `앱`
+// 패널의 `wide` 마켓플레이스 레이아웃 쪽으로 보이고, 카탈로그가 비면 재현되지 않는다.
+//
+// 그래서 여기서는 서버가 실제로 낼 수 있는 다른 상태 — 등록된 앱이 없는 워크스페이스 —
+// 를 찍는다. 캡처 레인의 목적(설정 표면이 리뷰 증거로 남는가)은 그것으로 달성되고,
+// 카탈로그가 있는 판은 이미 `gate:shell` 이 두 매니페스트로 측정한다. 카탈로그
+// 프레임을 이 하네스에 넣는 것은 위 전환 결함을 먼저 규명한 뒤의 일이다(후속).
+const SETTINGS_INVITES = Array.from({ length: 6 }, (_, i) => ({
+  id: `capture-invite-${i}`,
+  workspaceId: "00000000-0000-7000-8000-000000000001",
+  codePreview: `zz${String(i).padStart(4, "0")}`,
+  role: i % 2 ? "admin" : "member",
+  maxUses: 5,
+  usedCount: i % 5,
+  expiresAtMs: Date.now() + (i + 1) * 86_400_000,
+  createdBy: "019f94e3-7a10-79cd-9dee-208f47edd9a8",
+  createdAtMs: Date.now(),
+  updatedAtMs: Date.now(),
+}));
+
 const WORKSPACE_ID = "00000000-0000-7000-8000-000000000001";
 const GENERAL_ID = "00000000-0000-7000-8000-000000000201";
 const ME = "019f94e3-7a10-79cd-9dee-208f47edd9a8";
@@ -1208,6 +1244,41 @@ async function installMocks(context) {
     }
     return json(route, { messages: makeMessages(16) });
   });
+
+  // ── 설정 나머지 표면의 픽스처 (#1057) ──────────────────────────────────────
+  // 이 하네스는 설정 아홉 섹션 중 **둘**(AI 연결·코드 실행 호스트)만 찍고 있었다.
+  // 나머지 일곱은 라우트가 없어 프리뷰 서버로 새고, 404 HTML 을 받은 패널은
+  // 에러 경계를 그린다 — 즉 "안 찍힌" 것이 아니라 "찍으면 빨간 판"이었다. 그래서
+  // 설정 UI 를 바꾼 PR 은 커밋된 캡처 없이 리뷰됐다(#1056 실측).
+  //
+  // 아래 픽스처는 게이트가 이미 쓰는 것과 같은 출처를 쓴다: 사용량·구독 잔여량은
+  // src/features/settings/{usage,quota}Fixtures.json 이고, 그 파일은 각각의 모델
+  // 테스트가 계약으로 붙잡고 있다. 손으로 지어낸 페이로드는 서버가 낼 수 없는
+  // 화면을 그리므로 리뷰가 못 미더운 것을 승인하게 된다.
+  await context.route("**/v1/workspaces/*/usage/summary*", (route) =>
+    json(route, USAGE_FIXTURE)
+  );
+  await context.route("**/v1/provider/quota-snapshots", (route) =>
+    json(route, QUOTA_FIXTURE)
+  );
+  await context.route("**/v1/workspaces/*/invites*", (route) =>
+    json(route, { invites: SETTINGS_INVITES })
+  );
+  await context.route("**/v1/workspaces/*/plugins", (route) =>
+    json(route, { plugins: [], toolPolicy: { plugins: [] } })
+  );
+  // 워크스페이스 라우트 중 가장 덜 구체적이다. `*` 는 `/` 를 건너지 않으므로 위의
+  // 하위 경로들은 여전히 자기 라우트로 간다.
+  await context.route("**/v1/workspaces/*", (route) =>
+    json(route, {
+      workspace: {
+        id: WORKSPACE_ID,
+        slug: "momowebqa",
+        name: "momo webqa",
+        updatedAtMs: Date.now(),
+      },
+    })
+  );
 }
 
 async function waitForServer(url, timeoutMs = 30_000) {
@@ -2229,6 +2300,30 @@ async function waitForFocus(page, testId, where, note) {
  * 가로로 미는 이유: 타임라인은 세로로만 스크롤하므로 가로 드래그에는 브라우저가
  * 개입하지 않는다(`pointercancel`이 오지 않는다). 남은 방어는 훅의 거리 게이트
  * 하나뿐이고, 정확히 그것을 재려는 것이다.
+ *
+ * ## 끝은 touchEnd 가 아니라 touchCancel 이다 (#1099)
+ *
+ * 하네스가 95/118 프레임에서 30초 타임아웃으로 죽던 이유가 여기 있었다. 실측
+ * (2026-08-06, origin/track/engine baseline, `CAPTURE_PROFILE=mobile`):
+ *
+ *   [diag] before touchEnd opened=true
+ *   [diag] +0ms visible=false count=0
+ *   [diag] events [... "mousedown target=sheet-react-👍" "click target=sheet-react-👍"]
+ *
+ * 시트는 홀드 동안 정상적으로 열렸다. 그리고 **touchEnd 가 그 시트를 도로 닫았다.**
+ * Chrome 은 취소되지 않은 터치 시퀀스의 touchEnd 뒤에 호환용 마우스 이벤트
+ * (mousedown/mouseup/click)를 **놓았던 좌표에** 합성한다. 시트는 화면 아래에
+ * 붙는 판이라 길게 누른 그 좌표를 덮는다 — 그래서 손을 떼는 동작이 시트의 첫
+ * 빠른 반응 버튼(`sheet-react-👍`)을 누르고, 그 onClick 이 `close()` 를 부른다.
+ * 두 번째 openSheet() 가 30초를 기다린 것은 그 사이 시트가 닫혔기 때문이다.
+ * (첫 열기가 살아남은 것은 우연이다: 그때는 합성 클릭이 시트의 설명 문단이라는
+ * 죽은 자리에 떨어졌다.)
+ *
+ * 이것은 제품 결함이 아니라 **원시 터치 디스패치의 산물**이다. 실제 Chrome 은
+ * 700ms 홀드를 GestureLongPress 로 인식해 뒤따르는 탭을 소비하지만,
+ * `Input.dispatchTouchEvent` 로 낸 터치는 그 인식기를 거치지 않아 탭이 살아남는다.
+ * touchCancel 은 그 "제스처가 소비됐다"를 정확히 모델링하고, 앱 쪽에서는
+ * `pointercancel` → `useLongPress.onPointerCancel` 로 눌림 상태도 깨끗이 풀린다.
  */
 async function longPressGesture(page, target, { dx = 0, dy = 0, holdMs = 700 } = {}) {
   const box = await target.boundingBox();
@@ -2262,7 +2357,7 @@ async function longPressGesture(page, target, { dx = 0, dy = 0, holdMs = 700 } =
       .isVisible()
       .catch(() => false);
     await cdp.send("Input.dispatchTouchEvent", {
-      type: "touchEnd",
+      type: "touchCancel",
       touchPoints: [],
     });
     return opened;
@@ -2425,6 +2520,15 @@ async function captureMobile(browser, scheme) {
       })
       .filter(Boolean);
   })()`);
+  // 빈 목록은 통과가 아니다 (#1099). 이전 판은 `.filter(Boolean)` 뒤에 for 문만
+  // 있어서, 시트가 닫힌 뒤 이 자리에 오면 **행 0개를 무사통과**했다 — 44px 계약이
+  // 검사된 적 없는데 초록이 나오는 상태였고, 그 조용한 초록이 시트가 닫히고 있다는
+  // 사실을 118프레임 뒤까지 가려 줬다.
+  if (sheetTaps.length !== 3) {
+    throw new Error(
+      `[action sheet ${scheme}] 시트 행 ${sheetTaps.length}/3 — 시트가 닫혔거나 행이 사라졌다`
+    );
+  }
   for (const tap of sheetTaps) {
     if (tap.h < 44) {
       throw new Error(
@@ -3374,6 +3478,56 @@ async function captureScheme(browser, scheme) {
   const aiMockShot = `${OUT_DIR}/settings-ai-mock-mode-${scheme}.png`;
   await aiMock.screenshot({ path: aiMockShot });
   shots.push(aiMockShot);
+
+  // 3k. 설정의 나머지 섹션 (#1057). 위의 3g·3h 는 아홉 섹션 중 둘만 찍었고, 그래서
+  //     계정·알림 규칙·워크스페이스·앱·사용량·멤버와 초대를 바꾼 PR 은 커밋된
+  //     캡처 없이 리뷰됐다 — design-review 하드 룰의 증거 레인에 뚫린 구멍이었다.
+  //
+  //     섹션 사이는 **해시 재진입**으로 이동한다. 나란히 클릭으로 넘기는 판이
+  //     처음 시도였는데, `앱` 패널이 `wide` 레이아웃이라 그 다음 섹션의 nav 버튼
+  //     클릭이 30초 타임아웃으로 죽었다 — 한 섹션의 레이아웃이 다음 섹션의 진입을
+  //     좌우하는 순서 의존이다. `SettingsRoute` 는 `?section=` 을 마운트 시 한 번만
+  //     읽으므로 `/inbox` 로 튕겨 리마운트시킨다(gate-shell-layout 의 `go()` 와 같은
+  //     이유·같은 방식).
+  //
+  //     각 섹션은 자기 패널의 제목(h2)을 기다린 뒤 찍는다. 기다릴 표지가 없으면
+  //     "무엇이 그려졌는지 모르는 스크린샷"이 되고, 그건 에러 경계가 찍힌 판과
+  //     구별되지 않는다. 그래서 찍기 전에 에러 경계 부재를 한 번 더 단정한다.
+  const settingsSweep = await context.newPage();
+  await settingsSweep.goto(ORIGIN, { waitUntil: "networkidle" });
+  await signIn(settingsSweep);
+  for (const [section, heading, name] of [
+    ["account", "계정", "account"],
+    ["notifications", "알림 규칙", "notifications"],
+    ["workspace", "워크스페이스", "workspace"],
+    ["plugins", "앱", "plugins"],
+    ["usage", "사용량", "usage"],
+    ["members", "멤버와 초대", "members"],
+  ]) {
+    await settingsSweep.evaluate('location.hash = "/inbox"');
+    await settingsSweep.waitForTimeout(200);
+    await settingsSweep.evaluate(
+      `location.hash = "/settings?section=${section}"`
+    );
+    await settingsSweep.getByTestId("settings-route").waitFor({ state: "visible" });
+    await settingsSweep
+      .getByRole("heading", { name: heading, exact: true })
+      .first()
+      .waitFor({ state: "visible" });
+    await settingsSweep.waitForTimeout(250);
+    // 에러 경계가 그려진 판을 "설정 캡처"로 커밋하지 않는다. 이 하네스가 이 섹션들을
+    // 찍지 못하던 이유가 정확히 그것(라우트 부재 → 404 → 경계)이었으므로, 픽스처가
+    // 다시 새면 캡처가 조용히 빨간 판을 남기는 대신 여기서 죽어야 한다.
+    const boundary = await settingsSweep
+      .getByText("이 설정을 열지 못했습니다")
+      .count();
+    if (boundary > 0) {
+      throw new Error(`[설정 ${heading} ${scheme}] 에러 경계가 그려졌다 — 픽스처 누락`);
+    }
+    const sectionShot = `${OUT_DIR}/settings-${name}-${scheme}.png`;
+    await settingsSweep.screenshot({ path: sectionShot });
+    shots.push(sectionShot);
+  }
 
   // 4. dense timeline via the stress path (no realtime rail, 40 rows)
   const stress = await context.newPage();

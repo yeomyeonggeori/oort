@@ -192,6 +192,16 @@ async function installRoutes(context, searchMode = "ok") {
     const path = url.pathname;
 
     if (path === "/v1/auth/login") return json(route, session);
+    // 로그인 직후의 토큰 회전 (#1089). 이 분기가 없으면 아래 포괄 응답이 200 이지만
+    // **모양이 비어 있고**, 코어 `refreshResponseFromWire` 는 두 필드가 문자열이
+    // 아니면 throw 한다 → `markAuthExpired()` → 앱이 스스로 로그아웃한다. 실측
+    // (2026-08-06): 이 하네스는 `nav-inbox` 를 30초 기다리다 죽고 있었다.
+    if (path === "/v1/auth/refresh") {
+      return json(route, {
+        accessToken: session.accessToken,
+        refreshToken: session.refreshToken,
+      });
+    }
     if (path === "/v1/auth/realtime-token") {
       return json(route, { token: "capture-only", url: session.realtimeWebSocketUrl });
     }

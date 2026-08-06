@@ -155,6 +155,16 @@ async function installMocks(context, usage, quota = () => anchoredQuota(QUOTA.he
     json(route, { channels: [], members: [], read_states: [], messages: [] })
   );
   await context.route("**/v1/auth/login", (route) => json(route, SESSION));
+  // 로그인 직후의 토큰 회전 (#1089). 위 포괄 스텁은 200 이지만 **모양이 비어 있고**,
+  // 코어 `refreshResponseFromWire` 는 두 필드가 문자열이 아니면 throw 한다 →
+  // `markAuthExpired()` → 앱이 스스로 로그아웃한다. 게이트 셋이 같은 구멍으로
+  // 죽어 있었고(#1089), 이 하네스도 같은 모양이었다.
+  await context.route("**/v1/auth/refresh", (route) =>
+    json(route, {
+      accessToken: SESSION.accessToken,
+      refreshToken: SESSION.refreshToken,
+    })
+  );
   await context.route("**/v1/auth/realtime-token", (route) =>
     json(route, {
       token: "capture-only-not-a-credential",

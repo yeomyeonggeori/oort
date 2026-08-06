@@ -361,6 +361,29 @@ async function installMocks(context) {
     })
   );
   await context.route("**/v1/auth/login", (route) => json(route, SESSION));
+  // ## 로그인 직후의 토큰 회전 (#1089 — 이 게이트가 baseline 에서 죽던 이유)
+  //
+  // 위의 포괄 스텁은 200 을 주지만 **모양이 틀렸다**. 이 한 경로에서는 모양이
+  // load-bearing 이다:
+  //
+  //   DESK-1(`2ce728e2`)이 `hasPersistedSession` 을 `useSyncExternalStore` 로
+  //   바꾼 뒤, 로그인이 세션을 저장하는 순간 `resumable` 이 true 로 뒤집혀 갓 발급된
+  //   토큰을 한 번 회전시킨다. 그 POST 가 `{channels:[],...}` 를 받으면 코어의
+  //   `refreshResponseFromWire`(packages/momo-core/src/lib/api.ts:632)가 두 필드의
+  //   문자열 검사에서 throw 하고, 그 throw 는 `markAuthExpired()` 로 번역된다 —
+  //   앱은 로그인하고, 셸을 잠깐 그린 뒤, **스스로 로그아웃한다.** 증상은 화면이
+  //   아니라 여기였다: `signIn` 이 `channel-list` 를 30초 기다리다 죽는다.
+  //
+  // 실측(2026-08-06, origin/track/engine baseline): 로그인 200 직후
+  // `POST /v1/auth/refresh` → 포괄 스텁의 `{channels:[]...}` → 로그인 화면 복귀.
+  // 형제 게이트 12개는 전부 이 스텁을 갖고 있었고, 이 파일과 gate-my-sessions ·
+  // gate-huddle 셋만 빠져 있었다(#1089 규명 1/4).
+  await context.route("**/v1/auth/refresh", (route) =>
+    json(route, {
+      accessToken: SESSION.accessToken,
+      refreshToken: SESSION.refreshToken,
+    })
+  );
   await context.route("**/v1/auth/realtime-token", (route) =>
     json(route, {
       token: "gate-only-not-a-credential",

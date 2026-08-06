@@ -17,15 +17,36 @@
 # ---- 이 게이트는 두 개의 샘플 패스다 (SRV-B7 / #1042) ------------------------
 #   1차 — 스펙 ↔ Swift : 아래 본문. e2e 컴포즈(swift:6.2)에서 스펙 **전 연산**을
 #          샘플한다. known-unsampled(scripts/openapi_known_unsampled.txt)는 이
-#          패스만의 부채 장부다.
+#          패스만의 부채 장부다. **2026-08-06부터 기본 off**(아래 강등 절).
 #   2차 — 스펙 ↔ Rust  : scripts/verify_openapi_contract_rust.sh (스테이지 6).
 #          infra/rust 부분집합 스택(postgres·centrifugo·api)에서
 #          scripts/openapi_sampled_on_rust.txt 에 등재된 연산을 왕복시킨다.
+#          **기본 단독 패스.**
 #
 # 왜 둘인가: 스펙이 서술하는 대상은 이제 Rust 배포본이다(#1040). 정본이 Rust 로
 # 넘어간 경로에서 1차 패스의 초록은 "스펙대로 배포된다"가 아니라 "Swift 가 스펙을
 # 지킨다"만 증명한다. sampled-on-rust 매니페스트는 **늘어날 수만 있는** 목록이라,
 # 이식이 진행될수록 2차 패스가 1차를 잠식하고 끝내 대체한다.
+#
+# ---- 1차(Swift) 패스 강등 (ADR-0145 증보 2-② / #1089) -----------------------
+# **1차 패스는 기본 off 다. `OPENAPI_GATE_SWIFT_PASS=1` 로만 켠다.**
+#
+# 근거(ADR-0145 증보 2, 2026-08-06 성재 승인): Swift 서버는 삭제 전이라도 상시
+# 빌드·테스트 대상이 아니다. 스펙이 Rust 를 서술하는 이상 1차 패스는 **죽을 서버를
+# 스펙과 대조하며 매 실행 40분짜리 콜드 Swift 빌드를 태우는 일**이다. 커버리지의
+# 권위는 sampled-on-rust 매니페스트(#1042의 잠식 기제)가 승계한다.
+#
+# 강등이 정직하려면 대가를 이름 붙여야 한다. 1차 패스가 꺼지면 매니페스트 **밖**의
+# 연산은 "스펙에 있으나 어느 패스도 보지 않는" 상태가 된다 — 이전에는 1차가 보던
+# 자리다. 그래서 이 스크립트는 그 목록을 매 실행 **경고로 전부 출력한다**. 커버리지가
+# 조용히 사라지는 상태는 만들지 않는다: 잠식이 끝날 때까지의 과도기는 눈에 보여야 한다.
+#
+# 불변인 것: known-unsampled(scripts/openapi_known_unsampled.txt)의 의미는 그대로
+# **1차 패스만의 부채 장부**다. 1차가 꺼진 실행에서는 아예 참조되지 않는다(그 패스가
+# 돌지 않으므로 그 패스의 부채도 성립하지 않는다). 목록에 줄을 더하는 것은 여전히 금지.
+#
+# 두 패스를 동시에 끄는 조합(OPENAPI_GATE_SWIFT_PASS=0 + OPENAPI_GATE_RUST_PASS=0)은
+# **거부한다** — 아무도 샘플하지 않는 초록은 게이트가 아니다.
 #
 # Environment:
 #   BASE_URL                       Verify an already-running server instead of
@@ -72,6 +93,12 @@
 #                                  기본 1. 그 패스 자신의 환경변수는
 #                                  scripts/verify_openapi_contract_rust.sh 헤더
 #                                  참조(OPENAPI_RUST_GATE_*, MOMO_RUST_IMAGE).
+#   OPENAPI_GATE_SWIFT_PASS=1      1차(스펙 ↔ Swift) 패스를 되살린다. **기본 0**
+#                                  (ADR-0145 증보 2-② 강등). 0 일 때 이 스크립트는
+#                                  e2e 컴포즈를 아예 띄우지 않고, 감시받지 않는
+#                                  연산 목록을 경고로 찍은 뒤 2차 패스만 돌린다.
+#                                  위의 BASE_URL/OPENAPI_GATE_* 컴포즈 변수는
+#                                  전부 1차 패스 전용이라 =1 일 때만 의미가 있다.
 # =============================================================================
 set -euo pipefail
 
@@ -131,6 +158,14 @@ BOOT_TIMEOUT="${OPENAPI_GATE_BOOT_TIMEOUT:-2400}"
 EXTERNAL_BASE_URL="${BASE_URL:-}"
 MANAGED_STACK=0
 
+# 1차(Swift) 패스는 ADR-0145 증보 2-②로 기본 off — 켜려면 opt-in.
+SWIFT_PASS="${OPENAPI_GATE_SWIFT_PASS:-0}"
+RUST_PASS="${OPENAPI_GATE_RUST_PASS:-1}"
+if [ "$SWIFT_PASS" != "1" ] && [ "$RUST_PASS" != "1" ]; then
+  echo "[openapi] OPENAPI_GATE_SWIFT_PASS=0 + OPENAPI_GATE_RUST_PASS=0 — 두 패스를 모두 끄면 이 게이트는 아무것도 증명하지 않는다. 하나는 켜라." >&2
+  exit 1
+fi
+
 RUN_EPOCH="$(date -u +%s)"
 RUN_ID="${RUN_EPOCH}-$$"
 TMP_DIR="${TMPDIR:-/tmp}/momo-openapi-gate-$RUN_ID"
@@ -155,7 +190,7 @@ MANIFEST="$TMP_DIR/manifest.jsonl"
 SAMPLED_ON_RUST="$SCRIPT_DIR/openapi_sampled_on_rust.txt"
 RUST_OWNED="$TMP_DIR/rust-owned-ops.txt"
 : >"$RUST_OWNED"
-if [ "${OPENAPI_GATE_RUST_PASS:-1}" = "1" ] && [ -f "$SAMPLED_ON_RUST" ]; then
+if [ "$RUST_PASS" = "1" ] && [ -f "$SAMPLED_ON_RUST" ]; then
   sed -e 's/#.*//' "$SAMPLED_ON_RUST" \
     | awk 'NF { print tolower($1) " " $2 }' | sort -u >"$RUST_OWNED"
 fi
@@ -374,6 +409,74 @@ jq -e '.openapi and .paths' "$SPEC_JSON" >/dev/null || {
   exit 1
 }
 echo "[openapi] spec parsed: $SPEC_YAML"
+
+# ---- 1.5) 어느 패스도 보지 않는 연산 (ADR-0145 증보 2-② / #1089) -------------
+# 1차 패스가 꺼진 실행에서만 의미가 있다. 켜져 있으면 스테이지 5의 역방향 커버리지
+# 검사가 그 자리를 지키므로 이 경고는 중복이다.
+#
+# 여기서 세는 것은 **스펙 연산 - sampled-on-rust 매니페스트**다. 그 차집합이 곧
+# "스펙에 성문화돼 있는데 이번 실행에서 아무도 왕복시키지 않는" 연산이고, 강등이
+# 만든 과도기 부채의 정확한 크기다. 목록은 매니페스트가 자랄수록 줄어들고, 0 이
+# 되는 날 1차 패스는 되살릴 이유가 사라진다(#1042의 잠식 완료).
+report_unwatched_operations() {
+  local spec_ops="$TMP_DIR/spec-ops.txt"
+  local unwatched="$TMP_DIR/unwatched-ops.txt"
+  jq -r '
+    .paths | to_entries[] as $p
+    | $p.value | to_entries[]
+    | select(.key | test("^(get|put|post|delete|patch|head|options|trace)$"))
+    | .key + " " + $p.key
+  ' "$SPEC_JSON" | sort -u >"$spec_ops"
+  comm -23 "$spec_ops" "$RUST_OWNED" >"$unwatched"
+
+  local total watched missing
+  total="$(wc -l <"$spec_ops" | tr -d ' ')"
+  watched="$(wc -l <"$RUST_OWNED" | tr -d ' ')"
+  missing="$(wc -l <"$unwatched" | tr -d ' ')"
+
+  echo ""
+  echo "[openapi] ===== 1차(Swift) 패스 off — 감시받지 않는 연산 $missing/$total ====="
+  echo "[openapi] sampled-on-rust 가 덮는 연산: $watched — 나머지는 이번 실행에서 어느 패스도 왕복시키지 않는다."
+  if [ "$missing" -gt 0 ]; then
+    while IFS= read -r op; do
+      [ -n "$op" ] || continue
+      printf '[openapi] WARN unwatched  %s\n' "$op"
+    done <"$unwatched"
+    echo "[openapi] 이 목록은 부채이지 면제가 아니다. scripts/openapi_sampled_on_rust.txt 가 자라면 줄어들고,"
+    echo "[openapi] 당장 스펙 대조가 필요하면 OPENAPI_GATE_SWIFT_PASS=1 로 1차 패스를 되살려라(ADR-0145 증보 2-②)."
+  else
+    echo "[openapi] 감시 공백 0 — sampled-on-rust 가 스펙 전 연산을 덮었다. 1차 패스는 되살릴 이유가 없다(#1042 잠식 완료)."
+  fi
+  echo "[openapi] ================================================================"
+  echo ""
+}
+
+# ---- 2차 샘플 패스 실행부 (1차 on/off 양쪽에서 같은 코드로 돈다) -------------
+run_spec_rust_pass() {
+  local rc=0
+  if [ "$RUST_PASS" != "1" ]; then
+    echo "[openapi] OPENAPI_GATE_RUST_PASS=0 — skipping the spec-Rust sample pass"
+    return 0
+  fi
+  echo "[openapi] ===== 2차 샘플 패스: 스펙 - Rust (#1042) ====="
+  "$SCRIPT_DIR/verify_openapi_contract_rust.sh" || rc=$?
+  return "$rc"
+}
+
+if [ "$SWIFT_PASS" != "1" ]; then
+  echo "[openapi] 1차(스펙 - Swift) 패스는 기본 off 다 — ADR-0145 증보 2-②. 되살리려면 OPENAPI_GATE_SWIFT_PASS=1."
+  report_unwatched_operations
+  RUST_PASS_RC=0
+  run_spec_rust_pass || RUST_PASS_RC=$?
+  if [ "$RUST_PASS_RC" -ne 0 ]; then
+    echo "[openapi] FAIL OpenAPI contract drift gate — spec-Rust pass rc=$RUST_PASS_RC (evidence: $TMP_DIR)" >&2
+    exit 1
+  fi
+  echo "[openapi] PASS OpenAPI contract drift gate (spec-Rust pass only; swift pass demoted; evidence: $TMP_DIR)"
+  exit 0
+fi
+
+echo "[openapi] OPENAPI_GATE_SWIFT_PASS=1 — 1차(스펙 - Swift) 패스를 켠 채로 돈다"
 
 port_in_use() {
   (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null && { exec 3>&- 3<&-; return 0; }

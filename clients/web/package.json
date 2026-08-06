@@ -17,6 +17,7 @@
     "gate:seq": "node gates/gate-seq.mjs",
     "gate:resume": "node gates/gate-resume.mjs",
     "gate:shell": "node gates/gate-shell-layout.mjs",
+    "gate:scroll": "node gates/gate-scroll.mjs",
     "gate:wire": "node gates/gate-wire.mjs",
     "gate:csp": "node gates/gate-csp.mjs",
     "gate:boot": "node gates/gate-boot-budget.mjs",
