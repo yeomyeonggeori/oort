@@ -2345,6 +2345,81 @@ pub struct ApprovalListResponse {
     pub approvals: Vec<ApprovalDto>,
 }
 
+// ---------------------------------------------------------------------------
+// work controls (#1114 — Swift `WorkControlRoutes.swift`)
+// ---------------------------------------------------------------------------
+
+/// `POST …/work-controls` request (Swift `CreateWorkControlRequest`, :6-13).
+///
+/// `payload` stays a free `Value` here and is closed one layer down
+/// (`momo_t3::work_control::validated_payload`), because its legal shape depends
+/// on `kind` — a struct per kind would either duplicate that table or accept the
+/// union of all four.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CreateWorkControlRequest {
+    pub channel_id: Uuid,
+    pub run_id: Uuid,
+    pub target_host_id: Uuid,
+    #[serde(default)]
+    pub session_id: Option<Uuid>,
+    pub kind: String,
+    pub payload: Value,
+}
+
+/// `POST …/work-controls/{control}/ack` request (Swift `WorkControlAckRequest`,
+/// :15-19).
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WorkControlAckRequest {
+    pub ok: bool,
+    #[serde(default)]
+    pub session_id: Option<Uuid>,
+    #[serde(default)]
+    pub error_label: Option<String>,
+}
+
+/// Swift `WorkControlDTO` (:21-34).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkControlDto {
+    pub id: String,
+    pub workspace_id: String,
+    pub channel_id: String,
+    pub requester_member_id: String,
+    pub target_host_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
+    pub kind: String,
+    pub payload: Value,
+    pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub approval_message_id: Option<String>,
+    pub created_at_ms: i64,
+    pub updated_at_ms: i64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkControlResponse {
+    pub work_control: WorkControlDto,
+}
+
+/// Swift `WorkAutoApproveResponse` (:40-43).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkAutoApproveResponse {
+    pub tool: String,
+    pub enabled: bool,
+}
+
+/// Swift `WorkAutoApprovalsResponse` (:45-47).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkAutoApprovalsResponse {
+    pub tools: Vec<String>,
+}
+
 /// Swift `ApprovalDecisionRequestDTO`.
 ///
 /// `client_decision_id` is **required**, and that is the contract, not an
@@ -2360,6 +2435,16 @@ pub struct ApprovalDecisionRequest {
     pub reason: Option<String>,
     #[serde(rename = "client_decision_id", alias = "clientDecisionId")]
     pub client_decision_id: Uuid,
+    /// ADR-0125 D6-A (#1114) — the host the approver chose from the card's
+    /// picker.
+    ///
+    /// Optional, and absent is the normal case: only a spawn approval offers a
+    /// choice, and even then omitting it means "the one you pre-selected". It is
+    /// **not** part of the idempotency key — a replayed decision answers the
+    /// original receipt, so a retry that names a different host cannot silently
+    /// move a session that already started.
+    #[serde(default, rename = "host_id", alias = "hostId")]
+    pub host_id: Option<Uuid>,
 }
 
 /// Swift `ApprovalDecisionReceiptDTO` — the body every decision outcome returns,

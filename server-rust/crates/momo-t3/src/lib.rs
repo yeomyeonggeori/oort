@@ -59,6 +59,9 @@ pub mod reattach;
 pub mod reconcile;
 pub mod sweep;
 pub mod terminal_attach;
+/// ADR-0114 D4/D5 + ADR-0125 D6-A — the host-control ledger and the spawn
+/// approval card's host candidates.
+pub mod work_control;
 
 pub use billing::{
     acquire_slot_in_tx, pause_usage_in_tx, reserve_provisioning_slot_in_tx, resume_usage_in_tx,
@@ -108,4 +111,21 @@ pub use terminal_attach::{
     sweep_spent_observer_capabilities_in_tx, validate_attach_capability_in_tx, validated_binding,
     AttachMode, AttachTarget, IssuedCapability, RemotePtyBinding, ValidatedAttach,
     CAPABILITY_PREFIX, CAPABILITY_TTL_SECONDS, OBSERVER_CAPABILITY_RETENTION,
+};
+pub use work_control::{
+    active_host_owner_in_tx, agent_owner_human_in_tx, apply_spawn_approval_decision_in_tx,
+    bind_control_approval_message_in_tx, bind_control_session_in_tx, control_event_payload,
+    control_run_binding_in_tx, default_spawn_host, disable_auto_approve_in_tx,
+    enable_auto_approve_in_tx, fail_approved_control_in_tx, fetch_work_control_in_tx, host_tier,
+    insert_work_control_in_tx, list_auto_approvals_in_tx, lock_work_control_in_tx,
+    mark_control_dispatched_in_tx, retarget_control_host_in_tx,
+    session_control_lineage_status_in_tx, settle_control_ack_in_tx,
+    spawn_ack_session_matches_in_tx, spawn_execution_object, spawn_host_candidates_in_tx,
+    spawn_host_ineligible_reason_in_tx, spawn_is_auto_approved_in_tx, target_host_scope_allows,
+    target_work_host_in_tx, validated_error_label, validated_label, validated_payload,
+    validated_session_shape, validated_tool_key, work_control_id, work_host_is_active_in_tx,
+    ControlRunBinding, NewWorkControl, PayloadRejection, SpawnHostCandidate, TargetWorkHost,
+    WorkControlRow, ACTION_TYPE_WORK_SPAWN, APPROVAL_SOURCE_WORK_CONTROL, KIND_INPUT, KIND_KILL,
+    KIND_READ, KIND_SPAWN, STATUS_ACKED, STATUS_APPROVED, STATUS_DENIED, STATUS_DISPATCHED,
+    STATUS_FAILED, STATUS_PENDING_APPROVAL, T3_SPAWN_ENABLED,
 };

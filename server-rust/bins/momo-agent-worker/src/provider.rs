@@ -980,21 +980,26 @@ mod tests {
     #[test]
     fn momo_tools_render_nested_on_the_chat_wire() {
         let rendered = chat_tool_json(&momo_agent::tools::catalog_definitions());
-        assert_eq!(rendered.len(), 1);
+        // The whole catalog, not the first entry: a tool added without this
+        // rendering would reach the wire with momo's dots in its name and 400
+        // the request for every OTHER tool too (goal SRV-HOT1).
+        assert_eq!(rendered.len(), momo_agent::tools::CATALOG.len());
+        for (tool, momo_name) in rendered.iter().zip(momo_agent::tools::CATALOG) {
+            assert_eq!(tool["type"], serde_json::json!("function"));
+            assert_eq!(
+                tool["function"]["name"],
+                serde_json::json!(momo_agent::tools::wire_tool_name(momo_name)),
+                "nested under `function`, not flat — AND the WIRE name, not \
+                 momo's. This assertion said `work.session.end` when #1018 \
+                 shipped, which is precisely why the dot reached the backend and \
+                 400'd every turn (goal SRV-HOT1): {tool}"
+            );
+            assert!(
+                tool.get("name").is_none(),
+                "a flat `name` here is the Responses shape on the wrong wire: {tool}"
+            );
+        }
         let tool = &rendered[0];
-        assert_eq!(tool["type"], serde_json::json!("function"));
-        assert_eq!(
-            tool["function"]["name"],
-            serde_json::json!("work_session_end"),
-            "nested under `function`, not flat — AND the WIRE name, not momo's. \
-             This assertion said `work.session.end` when #1018 shipped, which is \
-             precisely why the dot reached the backend and 400'd every turn \
-             (goal SRV-HOT1): {tool}"
-        );
-        assert!(
-            tool.get("name").is_none(),
-            "a flat `name` here is the Responses shape on the wrong wire: {tool}"
-        );
         assert_eq!(
             tool["function"]["parameters"]["type"],
             serde_json::json!("object")

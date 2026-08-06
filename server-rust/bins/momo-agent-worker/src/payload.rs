@@ -96,6 +96,14 @@ pub struct AgentJobPayload {
     /// `crate::tool_exec`.
     #[serde(default)]
     pub approved_by: Option<Uuid>,
+    /// ADR-0125 D6-A (#1114) — the work host the approver chose on the card.
+    ///
+    /// Carried beside the call rather than inside `approved_tool_call.arguments`
+    /// because those arguments are the model's own utterance, stored byte for
+    /// byte. A host the human picked is a *different* fact, and overwriting the
+    /// model's words with it would change what the model is shown it said.
+    #[serde(default)]
+    pub approved_host_id: Option<Uuid>,
     /// The source run's step budget, carried across the pause so an approved
     /// tool call resumes inside the same G3 cap it paused under.
     #[serde(default)]
@@ -312,6 +320,7 @@ mod tests {
             &approval,
             decider,
             &json!({"status": "approved"}),
+            None,
         );
 
         let payload: AgentJobPayload =

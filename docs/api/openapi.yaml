@@ -8223,8 +8223,33 @@ components:
             server does not currently emit this field at all.
         actionType:
           type: string
-          description: e.g. `tool_call`, `deploy`, `spend`.
-        payload: {}
+          description: >
+            e.g. `tool_call`, `deploy`, `spend`. `work.spawn` marks a
+            work-control approval, whose decision settles the linked
+            `work_control` row instead of resuming an agent turn.
+        payload:
+          type: object
+          additionalProperties: true
+          description: >
+            Free-form approval payload. Two keys are contractual for the spawn
+            card (ADR-0125 D6-A, #1114) and absent everywhere else:
+
+
+            * `execution.host_candidates[]` — the hosts this approval offers,
+              each `{host_id, display_name, host_type, tier, scope, online,
+              selectable, unavailable_reason}`. `tier` is `local` | `remote` |
+              `cloud`; a `cloud` row is always `selectable: false` with
+              `unavailable_reason: "t3_disabled"` while ADR-0136 keeps momo Cloud
+              off. Unselectable rows are listed with their reason rather than
+              hidden.
+
+            * `execution.default_host_id` — the pre-selected host (online local
+              first, then remote), or null when nothing is eligible.
+
+
+            The picker's answer is sent back as `ApprovalDecisionRequest.hostId`.
+            No host-local path, environment, process state, or credential ever
+            appears here.
         status:
           type: string
           enum: [pending, approved, rejected, expired, cancelled]
@@ -8652,6 +8677,17 @@ components:
           type: string
           format: uuid
           description: Client-generated idempotency key for the decision.
+        hostId:
+          type: string
+          format: uuid
+          description: >
+            ADR-0125 D6-A. The work host the approver chose from the card's
+            picker, for an approval whose payload carries an `execution` object
+            (a `work.spawn` control or a `work.session.spawn` tool call). Omit to
+            accept `execution.default_host_id`; sending it on an approval that
+            offers no picker is a 400, and sending one outside
+            `execution.host_candidates[].selectable` is a 403. Not part of the
+            idempotency key: a replayed decision answers the original receipt.
 
     ApprovalDecisionReceipt:
       type: object

@@ -518,6 +518,24 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/work-sessions/{session}/resume",
             post(routes::work_sessions::resume),
         )
+        // work controls — the host-control ledger (#1114, ADR-0114 D4/D5)
+        .route(
+            "/v1/workspaces/{ws}/work-controls",
+            post(routes::work_controls::create),
+        )
+        .route(
+            "/v1/workspaces/{ws}/work-controls/{control}/ack",
+            post(routes::work_controls::acknowledge),
+        )
+        .route(
+            "/v1/workspaces/{ws}/work-auto-approvals",
+            get(routes::work_controls::list_auto_approvals),
+        )
+        .route(
+            "/v1/workspaces/{ws}/work-auto-approvals/{tool}",
+            put(routes::work_controls::enable_auto_approve)
+                .delete(routes::work_controls::disable_auto_approve),
+        )
         // reattach + replay (ADR-0139)
         .route(
             "/v1/workspaces/{ws}/work-sessions/{session}/reattach",
