@@ -208,6 +208,18 @@ async function installRoutes(context, state) {
   await context.route("**/v1/**", async (route) => {
     const path = new URL(route.request().url()).pathname;
     if (path === "/v1/auth/login") return json(route, session);
+    // 로그인 직후의 토큰 회전 (#1089). 이 분기가 없으면 맨 아래 포괄
+    // `return json(route, {})` 가 200 을 주지만 **모양이 비어 있고**, 코어의
+    // `refreshResponseFromWire`(packages/momo-core/src/lib/api.ts:632)는 두 필드가
+    // 문자열이 아니면 throw 한다 → `markAuthExpired()` → 앱이 스스로 로그아웃한다.
+    // 증상은 `openSignedIn` 이 `nav[aria-label='워크스페이스 탐색']` 을 30초
+    // 기다리다 죽는 것이었다(규명 3/4).
+    if (path === "/v1/auth/refresh") {
+      return json(route, {
+        accessToken: session.accessToken,
+        refreshToken: session.refreshToken,
+      });
+    }
     if (path === "/v1/auth/realtime-token") {
       return json(route, {
         token: "gate-realtime-token",
