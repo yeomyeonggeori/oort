@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useRef, useState } from "react";
+import { useInertRefWhile } from "@/app/inert";
 
 // =============================================================================
 // 셸 내비게이션 상태 (goal B6): 폰 폭인가, 사이드바 서랍이 열려 있는가, 그리고
@@ -24,6 +25,19 @@ import { createContext, useContext, useEffect, useRef, useState } from "react";
  * 태블릿은 744~768px다. 600px는 폰 세로만 서랍으로 만들고 나머지는 열로 남긴다.
  */
 export const MOBILE_SHELL_QUERY = "(width < 600px)";
+
+/**
+ * 라우트 상자의 DOM id.
+ *
+ * 라우트를 덮는 층이 닫힐 때 캐럿은 그 층을 연 컨트롤로 돌아간다. 그 컨트롤이
+ * 사라져 있는 판이 하나 있다(design-review ADE 2단계 N1): 관제 요약 줄은 살아
+ * 있는 작업이 0이 되면 DOM 에서 빠지므로, 서랍을 열어 둔 채 마지막 작업이 끝나면
+ * 돌아갈 자리가 없다. 그때 캐럿은 <body> 가 아니라 **방금 돌려받은 표면**으로
+ * 간다. 셸 밖에서 그 상자를 가리킬 이름이 필요해서 id 를 준다 — ChatShell 이
+ * 컴포저를 `composer-input` 으로 가리키는 것과 같은 이유이고, ref 를 층마다
+ * 실어 나르는 것보다 결선이 하나 적다.
+ */
+export const ROUTE_REGION_DOM_ID = "app-route";
 
 export interface ShellNavValue {
   /** 사이드바가 서랍으로 서는 폭인가. */
@@ -72,24 +86,14 @@ export function useIsMobileShell(): boolean {
 
 /**
  * 서랍이 열려 있는 동안 덮인 표면을 탭 순서와 접근성 트리에서 함께 빼낸다.
- *
- * `inert`는 플랫폼 자신의 답이고(포커스 가능성과 보조기술 노출을 한 번에
- * 없앤다), ChatShell이 900px 아래의 작업 세션 서랍에 이미 같은 방식으로 쓰고
- * 있다. React 18은 `inert` prop을 알지 못하므로 속성으로 직접 건다.
- *
- * 이것이 곧 초점 트랩이다: 덮인 쪽이 통째로 inert이면 Tab이 갈 수 있는 곳은
- * 서랍과 스크림 버튼뿐이라, 트랩을 손으로 구현하며 첫/마지막 요소를 추적할
- * 이유가 없다.
+ * 규칙과 그 근거는 `app/inert.ts` 에 한 벌로 있다 — 덮이는 쪽이 자기 노드를 이미
+ * 붙들고 있는 자리(작업 패널)도 같은 규칙을 받아야 해서 그쪽으로 옮겨 두었다.
+ * ChatShell 이 900px 아래의 작업 세션 서랍에 이미 같은 방식을 쓰고 있다.
  */
 export function useInertWhile<T extends HTMLElement = HTMLElement>(
   active: boolean
 ) {
   const ref = useRef<T | null>(null);
-  useEffect(() => {
-    const node = ref.current;
-    if (!node) return;
-    if (active) node.setAttribute("inert", "");
-    else node.removeAttribute("inert");
-  }, [active]);
+  useInertRefWhile(ref, active);
   return ref;
 }

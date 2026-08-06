@@ -29,12 +29,15 @@ import {
   UNKNOWN_AGENT_NAME,
 } from "@momo/core/features/agents/turnCopy";
 import { useSession } from "@/app/session";
+import { useInertRefWhile } from "@/app/inert";
 import { memberNameParts, useDirectory } from "@/features/workspace/useWorkspace";
 import { EmptyInvite, SkeletonRows } from "@/features/common/States";
+import { useAdeDrawerOpen } from "@/features/ade/adeDrawerStore";
 import {
   restoreDialogOpenerFocus,
   type DialogFocusTarget,
 } from "@/design/ui/dialog";
+import { useEscapeLayer } from "@/design/ui/escapeLayer";
 import { cn } from "@/design/lib/cn";
 import { useTickingNow } from "./agentWorkingSignal";
 import {
@@ -118,22 +121,23 @@ export function AgentWorkPanel() {
 
   // Escape는 aside 안에 캐럿이 있을 때만 듣는 것으로는 부족하다. 600px 아래에서
   // 이 패널은 라우트를 통째로 덮고, 포커스 없는 본문을 한 번 누르면
-  // activeElement가 <body>로 가서 키보드 탈출로가 사라진다. 캡처 단계에서 듣되
-  // 다이얼로그가 열려 있으면 비켜준다(AppShell 서랍과 같은 규칙: Esc는 언제나
-  // 가장 위 층의 것이다).
+  // activeElement가 <body>로 가서 키보드 탈출로가 사라진다. 그래서 window에서
+  // 듣되, **층 스택**을 통해 듣는다(`design/ui/escapeLayer`).
+  //
+  // 직접 리스너를 달던 판이 리뷰에 잡혔다(ADE 2단계 H1 ①): 관제 서랍도 같은
+  // 타깃 같은 캡처 단계에 자기 리스너를 달았고, `stopPropagation`은 같은 노드의
+  // 다른 리스너를 막지 못하므로 Esc 한 번에 서랍과 이 패널이 함께 닫혔다. 스택은
+  // 맨 위 층에게만 넘긴다 — 서랍이 위에 있으면 서랍만, 그 다음 Esc가 이 패널을.
   const panelOpen = target !== null;
-  useEffect(() => {
-    if (!panelOpen) return;
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key !== "Escape") return;
-      if (document.querySelector('[role="dialog"][data-state="open"]')) return;
-      event.stopPropagation();
-      event.preventDefault();
-      close();
-    }
-    window.addEventListener("keydown", onKeyDown, true);
-    return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [panelOpen, close]);
+  useEscapeLayer(panelOpen, close);
+
+  // 관제 서랍은 이 패널을 덮는다(1200px 아래에서는 통째로, 그 위에서는 스크림이).
+  // 덮인 표면은 탭 순서에서 함께 빠진다 — 라우트에만 걸려 있던 그 규칙을 형제인
+  // 이쪽도 받는다(리뷰 H1 ②: 600~899px에서 완전히 가려진 패널이 탭 순서에 남아
+  // 있었다). 셸이 감싸는 상자를 세우는 대신 규칙만 나눠 쓰는 이유는
+  // `useInertRefWhile` 주석에 있다.
+  const coveredByAdeDrawer = useAdeDrawerOpen();
+  useInertRefWhile(asideRef, coveredByAdeDrawer);
 
   if (target === null) return null;
 
@@ -147,12 +151,11 @@ export function AgentWorkPanel() {
       tabIndex={-1}
       aria-label={PANEL_TITLE}
       data-testid="agent-work-panel"
+      // Esc는 위 `useEscapeLayer` 한 곳에서만 받는다. 여기 있던 두 번째
+      // onKeyDown은 스택이 서기 전의 잔재이고, 이제는 도달하지도 않는다: 층
+      // 리스너가 캡처 단계에서 전파를 끊으므로 React의 루트 리스너까지 오지
+      // 않는다. 같은 키를 두 곳에서 받는 코드는 한쪽만 고쳐지는 날이 온다.
       className="work-panel-pane flex h-full shrink-0 flex-col border-l border-line bg-surface"
-      onKeyDown={(event) => {
-        if (event.key !== "Escape") return;
-        event.stopPropagation();
-        close();
-      }}
     >
       <PanelHeader
         name={name}

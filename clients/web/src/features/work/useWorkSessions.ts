@@ -50,15 +50,32 @@ const EVENT_MAX_PAGES = 5;
 const LIVE_EVENT_CAP = 400;
 const LIVE_EVENT_KEEP = 300;
 
-export function useWorkSessions(workspaceId: string) {
+/**
+ * The ledger is small and this used to be mounted only while someone was
+ * watching the panel. A slow poll is the floor under the realtime rail: a
+ * session started in a channel the cap left unwatched still lands, one minute
+ * late, instead of never.
+ */
+const LEDGER_POLL_MS = 60_000;
+
+/**
+ * @param refetchIntervalMs How stale this observer is willing to let the ledger
+ *   get. React Query keeps ONE query per key and uses the SHORTEST interval
+ *   among its observers, so a second surface asking for fresher data costs no
+ *   extra request.
+ *
+ *   It is a parameter rather than a second `useQuery` beside this one because
+ *   two hooks on one key would carry two `queryFn`s, and which one the query
+ *   actually runs would depend on mount order (ADE 관제 줄, 이슈 1135).
+ */
+export function useWorkSessions(
+  workspaceId: string,
+  refetchIntervalMs: number = LEDGER_POLL_MS
+) {
   return useQuery({
     queryKey: ["work-sessions", workspaceId],
     queryFn: () => fetchWorkSessions(workspaceId),
-    // The ledger is small and the panel is only mounted while someone is
-    // watching it. A slow poll is the floor under the realtime rail: a session
-    // started in a channel the cap left unwatched still lands, one minute late,
-    // instead of never.
-    refetchInterval: 60_000,
+    refetchInterval: refetchIntervalMs,
   });
 }
 
