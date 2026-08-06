@@ -130,6 +130,17 @@ product property, so this is real — but the fix is a server configuration and
 security decision and is out of scope here. See
 `src/realtime/centrifugeTransport.ts`.
 
+**The lane now measures this rather than assuming it (#1051).** Nothing in the
+five Maestro flows distinguishes a frame that arrived over the socket from a row
+a re-fetch drew, so a lane could be green with the realtime rail entirely shut —
+which is how the QA stack rejected every phone handshake for weeks without one
+red run. `scripts/lane-realtime-probe.mjs` closes that: it drives the app's own
+`centrifuge` client, presents the Origin React Native presents, and fails unless
+a live publication lands on the channel. Its red proof
+(`LANE_PHONE_REALTIME_RED_PROOF=1`) boots the same stack with that origin removed
+and passes only if the rail refuses — reproducing the exact
+`{"code":2,"message":"transport closed"}` above.
+
 ---
 
 ## Commands

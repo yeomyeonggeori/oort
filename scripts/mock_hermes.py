@@ -17,6 +17,7 @@ import argparse
 import json
 import os
 import re
+import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
@@ -54,19 +55,60 @@ UUID_PATTERN = r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-
 #   "MAESTRO TEXT"  -> this turn emits text deltas and NO tool_call, so it ends
 #                      in a durable channel message instead of an approval pause
 #                      (flows 10-mention-working and 20-stop).
-#   "MAESTRO SLOW"  -> this turn sleeps MAESTRO_SLOW_SECONDS between events
-#                      instead of EVENT_DELAY_SECONDS, so 「작업 중」 is on screen
-#                      long enough to be asserted, and 20-stop has a live turn to
-#                      interrupt. Without it, a default turn is ~0.2s end to end
-#                      and the indicator is gone before Maestro can look.
+#   "MAESTRO SLOW"  -> this turn is held open for MAESTRO_SLOW_SECONDS, so
+#                      「작업 중」 is on screen long enough to be asserted, and
+#                      20-stop has a live turn to interrupt. Without it, a default
+#                      turn is ~0.2s end to end and the indicator is gone before
+#                      Maestro can look.
+#
+# `MOCK_HERMES_MAESTRO_SLOW_SECONDS` measures different things on the two wires,
+# and the difference is the point rather than an inconsistency:
+#
+#   SSE            per-event delay. The turn stays open for the SUM of them —
+#                  a lead-in plus one per chunk — so the window was a product of
+#                  how many chunks this fixture happened to emit.
+#   non-streamed   the whole window, once. The turn is open for exactly this long.
+#
+# So a caller that wants a 25-second window sets 5 on the streamed wire and 25 on
+# the non-streamed one. `clients/mobile/scripts/lane-phone.sh` sets 25, which is
+# what the old five-sleep SSE turn actually produced at its documented 5.0 — the
+# lane's window is unchanged in duration and merely stopped being emergent.
 #
 # Both are inert when the marker is absent: a request that carries neither takes
 # byte-identical paths to before. Every existing verifier sends neither.
+#
+# ## Both wires honour them, and that is #1069's actual fix
+#
+# The markers used to be read on the SSE path ONLY (`_send_sse`). That was
+# invisible while the lane's server was Swift, whose AgentWorker streams — but
+# the Rust `momo-agent-worker` posts `"stream": false` on the chat wire
+# (`server-rust/bins/momo-agent-worker/src/provider.rs:456`; the streamed wire is
+# reserved for OpenAI-OAuth credentials). Against the Rust worker the old code
+# took `_non_stream_response`, which ignored both markers and ALWAYS emitted a
+# tool call: 10-mention-working and 20-stop would have received an approval pause
+# instead of a text reply and failed on every run. So `_send_json` learns the
+# same two directives, from the same `_maestro_directives`.
+#
+# The slow directive means something *better* on the non-streamed wire, and it is
+# why #1069 (20-stop flake) is closed by the migration rather than patched around
+# it. On SSE, "the turn is open" was the sum of the inter-event sleeps, so the
+# window's width depended on how many chunks happened to be emitted and on when
+# the client decided the first delta had landed — a timing race the flow lost
+# intermittently under load. Non-streamed, the turn is open for exactly as long as
+# this handler withholds its HTTP response: ONE sleep, server-side, of a duration
+# the runner sets. The window is no longer an emergent property of a stream; it is
+# a number.
 MAESTRO_TEXT_MARKER = "MAESTRO TEXT"
 MAESTRO_SLOW_MARKER = "MAESTRO SLOW"
 MAESTRO_SLOW_SECONDS = float(
     os.environ.get("MOCK_HERMES_MAESTRO_SLOW_SECONDS", "2.0")
 )
+
+# Work-session ids this process has already asked to end (see
+# `_maestro_directives`). `ThreadingHTTPServer` serves each request on its own
+# thread, so the set is guarded.
+SESSION_END_SERVED: set[str] = set()
+SESSION_END_LOCK = threading.Lock()
 
 
 class MockHermesHandler(BaseHTTPRequestHandler):
@@ -276,7 +318,49 @@ class MockHermesHandler(BaseHTTPRequestHandler):
         text_only = MAESTRO_TEXT_MARKER in latest
         slow = MAESTRO_SLOW_MARKER in latest
         delay = MAESTRO_SLOW_SECONDS if slow else EVENT_DELAY_SECONDS
+
+        # The RESUME turn of the `MOMO-352 session=<uuid>` approval loop answers
+        # in prose, not with the same tool call again.
+        #
+        # The marker lives in the channel history the server replays into every
+        # later turn, so a purely prompt-keyed fixture re-requests the tool after
+        # the human approved it: a second approval pause, then a third, until a
+        # loop guard kills the run. Measured on 2026-08-06 — one lane run left an
+        # `approved` approval AND a `pending` one behind, and a pending approval
+        # holds the agent's only concurrency slot (`agent.max_concurrent_runs`
+        # defaults to 1 and `live_run_count_in_tx` counts `awaiting_approval`),
+        # so the agent is silenced for everything that comes after.
+        #
+        # ONE emission per session id, then prose. Remembered state, which this
+        # fixture otherwise avoids — the first attempt keyed on the transcript
+        # instead, looking for a `role: "tool"` turn, and it never fired: the Rust
+        # worker maps EVERY channel message to `user` or `assistant`
+        # (bins/momo-agent-worker/src/context.rs:142-175), so a tool result
+        # reaches the provider as ordinary assistant prose with no role to key on.
+        # There is nothing in the request that distinguishes the first ask from
+        # the resume, so the fixture has to remember.
+        #
+        # Scoped tightly enough that the state cannot surprise anyone: keyed by
+        # session uuid (not global), only reachable through a marker that only the
+        # lane sends, and the lane gives every run a fresh container. The bare
+        # `MOMO-352` path four Swift verifiers depend on never touches this.
+        if not text_only:
+            marker = self._session_end_marker(request)
+            if marker:
+                session_id = marker.group(1).lower()
+                with SESSION_END_LOCK:
+                    if session_id in SESSION_END_SERVED:
+                        text_only = True
+                    else:
+                        SESSION_END_SERVED.add(session_id)
         return text_only, delay, slow
+
+    def _session_end_marker(self, request: dict[str, Any]) -> "re.Match[str] | None":
+        return re.search(
+            rf"MOMO-352 session=({UUID_PATTERN})",
+            self._combined_prompt(request),
+            re.IGNORECASE,
+        )
 
     def _tool_fixture(
         self, request: dict[str, Any]
@@ -309,6 +393,36 @@ class MockHermesHandler(BaseHTTPRequestHandler):
                     "channel": channel_match.group(1),
                 },
             )
+        # MAESTRO-1 / #1022: the approval flow's tool call, aimed at the tool the
+        # RUST server can actually execute.
+        #
+        # Bare `MOMO-352` (below) answers `momo.mock.echo`, which is on the SWIFT
+        # ToolResumeExecutor's allowlist and on nothing else. The Rust worker's
+        # executable catalog is one entry — `work.session.end`
+        # (`server-rust/crates/momo-agent/src/tools.rs:41`) — so against the Rust
+        # stack an approved `momo.mock.echo` comes back as
+        # "declared but this server cannot execute it". Every assertion up to the
+        # receipt would still pass, and 30-approval's last claim — that an
+        # APPROVED call runs — would be silently untrue. That is precisely the
+        # half-verified-but-green state 30-approval's own header warns about, so
+        # the lane asks for the tool that really runs and then checks the row.
+        #
+        # `work_session_end` is the WIRE spelling (dots become underscores when a
+        # tool is offered, `tools.rs:227`), which is what a real model would echo
+        # back; the worker maps it to `work.session.end` through a catalog lookup
+        # (`provider.rs:693`). Emitting the dotted name here would test a mapping
+        # nothing in production performs.
+        #
+        # Kept strictly more specific than the bare marker so the four Swift
+        # verifiers that send plain `MOMO-352`
+        # (scripts/verify_agent_worker.sh:1532 and friends) are byte-unchanged.
+        session_match = self._session_end_marker(request)
+        if session_match:
+            return (
+                "call_momo_352_session_end",
+                "work_session_end",
+                {"session_id": session_match.group(1)},
+            )
         if "MOMO-352" in combined:
             return "call_momo_352_echo", "momo.mock.echo", EQUIVALENCE_TOOL_ARGS
         return "call_momo_201_search", "github.search_issues", MOCK_TOOL_ARGS
@@ -336,8 +450,52 @@ class MockHermesHandler(BaseHTTPRequestHandler):
         }
 
     def _non_stream_response(self, request: dict[str, Any]) -> dict[str, Any]:
+        """The `"stream": false` answer — the Rust agent worker's chat wire.
+
+        MAESTRO directives are honoured HERE too, and they have to be: this is
+        the only path the Rust worker ever takes on a bearer credential, so a
+        marker that worked only on SSE worked only against the Swift server.
+        """
+        text_only, _, slow = self._maestro_directives(request)
+
+        # The whole 「작업 중」 window, in one place. There is no stream to spread
+        # the delay across, so holding the response IS holding the turn open —
+        # which is what makes the width exact instead of emergent (#1069).
+        if slow:
+            time.sleep(MAESTRO_SLOW_SECONDS)
+
         tool_id, tool_name, tool_args = self._tool_fixture(request)
-        content = None if tool_name.startswith("work_") else MOCK_TEXT
+        emit_tool_call = (
+            os.environ.get("MOCK_HERMES_TOOL_CALLS", "1") != "0" and not text_only
+        )
+
+        # `work_*` fixtures answer with a tool call and no prose; everything else
+        # carries the fixed reply text. When the tool call is suppressed the text
+        # is the entire turn, so it must be present even for a `work_*` prompt —
+        # otherwise the turn has no content at all and the worker settles a run
+        # with nothing to show the channel.
+        if emit_tool_call and tool_name.startswith("work_"):
+            content = None
+        else:
+            content = MOCK_TEXT
+
+        message: dict[str, Any] = {"role": "assistant", "content": content}
+        if emit_tool_call:
+            message["tool_calls"] = [
+                {
+                    "id": tool_id,
+                    "type": "function",
+                    "function": {
+                        "name": tool_name,
+                        "arguments": json.dumps(
+                            tool_args,
+                            ensure_ascii=False,
+                            separators=(",", ":"),
+                        ),
+                    },
+                }
+            ]
+
         return {
             "id": "chatcmpl-momo-004-mock",
             "object": "chat.completion",
@@ -346,25 +504,8 @@ class MockHermesHandler(BaseHTTPRequestHandler):
             "choices": [
                 {
                     "index": 0,
-                    "message": {
-                        "role": "assistant",
-                        "content": content,
-                        "tool_calls": [
-                            {
-                                "id": tool_id,
-                                "type": "function",
-                                "function": {
-                                    "name": tool_name,
-                                    "arguments": json.dumps(
-                                        tool_args,
-                                        ensure_ascii=False,
-                                        separators=(",", ":"),
-                                    ),
-                                },
-                            }
-                        ],
-                    },
-                    "finish_reason": "tool_calls",
+                    "message": message,
+                    "finish_reason": "tool_calls" if emit_tool_call else "stop",
                 }
             ],
             "usage": {
