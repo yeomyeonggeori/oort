@@ -53,6 +53,84 @@ describe('the iOS project survives (ADR-0137 D7 정오 7항)', () => {
   });
 });
 
+describe('the Xcode Cloud lane stays reachable (#1115, docs/cicd/10 §8)', () => {
+  // Every assertion here is a way this lane breaks WITHOUT breaking any build:
+  // Xcode Cloud simply stops running, or runs and skips the bootstrap, and the
+  // only symptom is a PR check that quietly went missing. None of it is
+  // observable from a local build, which is why it is file-shaped.
+  const IOS = join(APP_ROOT, 'ios');
+  const tracked = (path: string) =>
+    execSync(`git ls-files -s -- ${JSON.stringify(path)}`, {
+      cwd: REPO_ROOT,
+      encoding: 'utf8',
+    }).trim();
+
+  it('keeps both ci_scripts executable in the index', () => {
+    // Xcode Cloud EXECUTES these files; it does not `bash` them. A file
+    // committed 100644 is found, skipped, and the build proceeds straight to
+    // xcodebuild with no node_modules — failing deep inside the Podfile with a
+    // message about CocoaPods. Checking git's mode rather than the working
+    // tree's is the point: a chmod that never got committed looks fine locally.
+    for (const script of ['ci_post_clone.sh', 'ci_post_xcodebuild.sh']) {
+      const entry = tracked(`clients/mobile/ios/ci_scripts/${script}`);
+      expect(entry).not.toBe('');
+      expect(entry.split(' ')[0]).toBe('100755');
+    }
+  });
+
+  it('keeps ci_scripts beside the workspace, not at the repo root', () => {
+    // Xcode Cloud reads ci_scripts/ from the directory holding the project or
+    // workspace it was pointed at. In a monorepo that is this directory, and a
+    // copy anywhere else is silently ignored.
+    expect(existsSync(join(IOS, 'ci_scripts/ci_post_clone.sh'))).toBe(true);
+    expect(existsSync(join(REPO_ROOT, 'ci_scripts'))).toBe(false);
+  });
+
+  it('commits the workspace file, and only that file', () => {
+    // The workflow-creation screen offers what is IN THE CLONE. An ignored
+    // workspace cannot be selected at all. The rest of the bundle is IDE state
+    // and must stay ignored — see clients/mobile/.gitignore for both halves.
+    expect(
+      tracked('clients/mobile/ios/MomoMobile.xcworkspace/contents.xcworkspacedata'),
+    ).not.toBe('');
+    const ignored = (path: string) => {
+      try {
+        execSync(`git check-ignore -q -- ${JSON.stringify(path)}`, {
+          cwd: REPO_ROOT,
+          stdio: 'pipe',
+        });
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    expect(
+      ignored(
+        'clients/mobile/ios/MomoMobile.xcworkspace/xcshareddata/WorkspaceSettings.xcsettings',
+      ),
+    ).toBe(true);
+    expect(ignored('clients/mobile/ios/Pods/Pods.xcodeproj')).toBe(true);
+  });
+
+  it('pins no signing identity in the project file', () => {
+    // The RN template left `CODE_SIGN_IDENTITY[sdk=iphoneos*] = "iPhone
+    // Developer"` on the Release configuration too. Apple-managed signing
+    // expects the default; a project-level override is a development identity
+    // nailed into a distribution archive, and local gates never exercise it
+    // (they all pass CODE_SIGNING_ALLOWED=NO or CODE_SIGN_IDENTITY=-).
+    expect(readFileSync(PBXPROJ, 'utf8')).not.toContain('CODE_SIGN_IDENTITY');
+  });
+
+  it('pins node at the floor package.json declares', () => {
+    // Two files, one number: ci_post_clone.sh reads .node-version as the
+    // minimum, so a drift between them would let CI accept a Node this app
+    // says it does not run on.
+    const pin = readFileSync(join(APP_ROOT, '.node-version'), 'utf8').trim();
+    const pkg = JSON.parse(readFileSync(join(APP_ROOT, 'package.json'), 'utf8'));
+    expect(pkg.engines.node).toBe(`>= ${pin}`);
+  });
+});
+
 describe('Android is on hold, not half-started (성재 결정 6)', () => {
   it('has no android directory', () => {
     expect(existsSync(join(APP_ROOT, 'android'))).toBe(false);
