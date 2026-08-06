@@ -45,6 +45,10 @@ import { QuoteChip } from "@/features/timeline/QuoteBlock";
 import { TypingLine } from "@/features/chat/TypingLine";
 import { useTypingSend } from "@/features/chat/useTyping";
 import { useTypingThreshold, useTypists } from "@/features/chat/typingStore";
+import { clearDraft, readDraft, writeDraft } from "@/features/chat/draftStore";
+import { rememberSendLearned, useSendHintNeeded } from "@/features/chat/sendHint";
+import { useAutoGrow } from "@/features/timeline/useAutoGrow";
+import { useOffline } from "@/features/common/useOffline";
 
 // =============================================================================
 // Composer (R-1 §3). Send plus the @mention skeleton. ↵ sends, ⇧↵ is a line
@@ -67,10 +71,36 @@ import { useTypingThreshold, useTypists } from "@/features/chat/typingStore";
 // which it does immediately: the message is already on screen as a pending row,
 // and a composer that stays full while its message is visible below reads as if
 // nothing happened.
+//
+// ## U4-f — 미완성이던 세 자리 (진단 H-10 / M-7)
+//
+// 1. **초안이 채널 전환에 살아남는다.** 본문이 `useState`에만 있어서, 반쯤 쓴
+//    문단이 탭 한 번에 없어졌다. 저장 위치와 수명 정책은 `draftStore.ts`에.
+// 2. **오프라인에서는 보내지 않는다.** `connStatus`를 읽고는 있었지만 활동바
+//    표시에만 썼고, 전송 버튼의 유일한 비활성 조건은 빈 텍스트였다. 끊긴 채로
+//    누른 전송은 실패 행 하나를 만들고 끝난다. 다만 **입력창은 잠그지 않는다** —
+//    연결이 끊겼다고 글을 쓰지 못할 이유가 없고, 그동안 쓴 것은 초안이 지킨다.
+// 3. **자라는 방식을 고친다.** 앞 판은 `text.split("\n").length`로 **하드 개행만**
+//    셌다. 한국어 메시지는 줄바꿈 없이 한 문단으로 오고 창 폭에서 접히는 쪽이
+//    흔하므로, 길게 감긴 한 줄 문단에서는 상자가 자라지 않았다. `scrollHeight`를
+//    재는 `useAutoGrow`가 같은 레포에 있었고 스레드 컴포저와 수정 입력창은 이미
+//    그것을 쓰고 있었다 — 컴포저만 안 썼다.
 // =============================================================================
 
+const MIN_ROWS = 1;
 const MAX_ROWS = 6;
 const MENTION_LIMIT = 6;
+
+/**
+ * 연결이 끊겨 있을 때 전송 자리에서 하는 말.
+ *
+ * 승인 카드의 오프라인 문장과 같은 결이다(`@momo/core/features/timeline/
+ * approvalNote`): **자리의 문제가 아니라 때의 문제**라고 말하고, 지금 무엇이
+ * 지켜지는지까지 말한다. 초안 보존이 이 문장의 두 번째 절을 참으로 만든다 —
+ * 그것이 없으면 이 줄은 「기다리라」고만 하고 기다리는 동안 쓴 글을 잃게 한다.
+ */
+export const COMPOSER_OFFLINE_COPY =
+  "연결이 끊겨 지금은 보낼 수 없습니다. 쓰던 글은 그대로 남습니다.";
 
 interface MentionQuery {
   /** Index of the '@' that opened the query. */
@@ -301,7 +331,10 @@ export function Composer({
     options?: { routing?: RequestRouting; replyToId?: string }
   ) => Promise<void> | void;
 }) {
-  const [text, setText] = useState("");
+  // 초안은 이 채널의 것이다. 첫 렌더에서 바로 읽는 이유는 한 프레임의 빈 입력창이
+  // 「초안이 없다」로 읽히기 때문이다 — 그 프레임에 사람이 타이핑을 시작하면 복원이
+  // 그 글자를 덮어쓴다.
+  const [text, setText] = useState(() => readDraft(workspaceId, channelId));
   const [caret, setCaret] = useState(0);
   const [highlight, setHighlight] = useState(0);
   const [mentionOpen, setMentionOpen] = useState(false);
@@ -332,6 +365,14 @@ export function Composer({
   // 같은 중단점에서 접히므로 화면과 키가 어긋나지 않는다.
   const isMobile = useIsMobileShell();
   const railLive = connStatus === "connected";
+  // 레일 상태와 **다른 질문**이다. `railLive`는 웹소켓이 붙어 있는가이고, 전송은
+  // REST POST로 나간다 — 레일이 재연결 중이어도 그 POST는 멀쩡히 성공한다. 여기서
+  // 필요한 것은 「이 요청이 나갈 수 있는가」이고, 그 답을 가장 잘 아는 것은 브라우저
+  // 자신(`navigator.onLine`)과 레일이 재연결을 포기한 종단 절단 둘의 합이다
+  // (`useOffline`, 승인 경로가 같은 판단을 한다).
+  const offline = useOffline();
+  // 키 배치 설명이 아직 필요한가 (감사 M-7). 이 기기에서 ↵로 한 번 보내면 꺼진다.
+  const keysHintNeeded = useSendHintNeeded();
   const signals = useAgentWorkingSignals();
 
   // ── 「작성 중」 (ADR-0149) ────────────────────────────────────────────────
@@ -358,8 +399,14 @@ export function Composer({
     [query, directory.members]
   );
   const showMentions = candidates.length > 0;
+  /** 힌트 줄에 남은 조각이 하나라도 있는가. 없으면 그 줄은 서지 않는다. */
+  const hasHint = dmAgent !== null || keysHintNeeded;
 
-  const rows = Math.min(MAX_ROWS, Math.max(1, text.split("\n").length));
+  // 실제로 차지한 높이를 재서 자란다 (진단 H-10 / 감사 M-7). 앞 판의 `\n` 세기는
+  // **접힌 줄을 못 봤다** — 한국어 메시지는 줄바꿈 없이 한 문단으로 오고 창 폭에서
+  // 세 줄로 접히는 쪽이 흔하다. 같은 함수를 스레드 컴포저와 수정 입력창이 이미
+  // 쓰고 있었고, 여기만 자기 산수를 갖고 있었다.
+  useAutoGrow(inputRef, text, { minRows: MIN_ROWS, maxRows: MAX_ROWS });
 
   // 1회 오버라이드는 지금 이 글이 부르는 에이전트에 붙는다(ADR-0134 D1). 대상은
   // 확정된 멘션이 아니라 **텍스트에 남아 있는 멘션**에서 다시 계산한다: 사람이
@@ -382,6 +429,38 @@ export function Composer({
     if (hasTarget) setRowReserved(true);
     else if (text.trim() === "") setRowReserved(false);
   }, [hasTarget, text]);
+
+  // ── 초안 (U4-f · 진단 H-10) ────────────────────────────────────────────────
+  //
+  // 이 컴포넌트는 채널을 옮겨도 **언마운트되지 않는다**(ChatShell이 key를 걸지
+  // 않는다). 그래서 「떠나기」와 「들어오기」를 이 효과 하나가 진다: 정리 함수가
+  // 떠나는 채널에 지금 글을 남기고, 본문이 들어오는 채널의 글을 꺼낸다. 두 일을
+  // 한 효과에 두는 이유는 순서가 load-bearing이기 때문이다 — 갈라 두면 복원된
+  // 글이 떠나는 채널의 열쇠로 저장되는 순서가 만들어질 수 있다.
+  //
+  // 의존성에 `text`가 없는 것도 의도다. 넣으면 이 효과가 타이핑마다 돌면서 매
+  // 글자에 채널을 새로 여는 셈이 된다. 지금 글은 `textRef`가 나르고, 저장은
+  // 아래 `onChange`가 매 입력마다 이미 한다 — 여기 정리 함수는 **마지막 한 번**을
+  // 보장하는 자리다(마지막 입력과 전환 사이에 아무 일도 없어야 한다는 가정을
+  // 두지 않는다).
+  //
+  // `pagehide`가 함께 있는 이유: 창을 닫거나 탭을 치우는 손은 정리 함수를 부르지
+  // 않는다. `beforeunload`가 아닌 이유는 모바일 사파리가 bfcache로 들어갈 때
+  // 그것을 부르지 않기 때문이고, 그 차이만큼 글이 사라진다.
+  const textRef = useRef(text);
+  textRef.current = text;
+  useEffect(() => {
+    const restored = readDraft(workspaceId, channelId);
+    setText(restored);
+    setCaret(restored.length);
+    setMentionOpen(false);
+    const save = () => writeDraft(workspaceId, channelId, textRef.current);
+    window.addEventListener("pagehide", save);
+    return () => {
+      window.removeEventListener("pagehide", save);
+      save();
+    };
+  }, [workspaceId, channelId]);
 
   function applyMention(member: RosterMember) {
     if (!query) return;
@@ -411,6 +490,9 @@ export function Composer({
     setMentionOpen(false);
     routing.reset();
     onCancelQuote();
+    // 화면에서 사라진 글은 저장소에서도 사라진다. 여기서 지우지 않으면 이 채널을
+    // 다시 열 때 방금 보낸 문장이 입력창에 복원돼 두 번 보내진다.
+    clearDraft(workspaceId, channelId);
     void onSend(body, {
       ...(payload ? { routing: payload } : {}),
       ...(replyToId === undefined ? {} : { replyToId }),
@@ -420,7 +502,7 @@ export function Composer({
   function onSubmit(event: FormEvent) {
     event.preventDefault();
     const body = text.trim();
-    if (!body) return;
+    if (!body || offline) return;
     submit(body);
   }
 
@@ -454,8 +536,15 @@ export function Composer({
     switch (intent) {
       case "send": {
         event.preventDefault();
+        // ↵가 무엇인지 이 사람은 이제 안다 (감사 M-7). 버튼으로 보낸 것은 세지
+        // 않는다 — 그 사람은 키가 어디 있는지 아직 모르고, 힌트 줄은 정확히 그
+        // 사람을 위한 것이다. 오프라인이라 보내지 못한 누름도 세지 않는다: 배운
+        // 것은 「이 키가 전송이다」인데 그 누름은 그것을 보여 주지 못했다.
         const body = text.trim();
-        if (body) submit(body);
+        if (body && !offline) {
+          rememberSendLearned();
+          submit(body);
+        }
         return;
       }
       case "mention-accept":
@@ -569,12 +658,20 @@ export function Composer({
           id="composer-input"
           ref={inputRef}
           value={text}
-          rows={rows}
+          // `rows`는 최소 높이만 정한다. 실제 높이는 `useAutoGrow`가 내용에서 재고,
+          // 그래서 접힌 줄까지 함께 자란다.
+          rows={MIN_ROWS}
           onChange={(event) => {
-            setText(event.target.value);
+            const next = event.target.value;
+            setText(next);
             setCaret(event.target.selectionStart ?? 0);
             setMentionOpen(true);
             setHighlight(0);
+            // 초안은 **입력마다** 남는다. 디바운스를 걸지 않는 이유는 이 저장이
+            // 문자열 하나를 동기로 쓰는 일이고(같은 저장소에 세션 기록이 이미 이
+            // 방식으로 산다), 디바운스가 사는 창이 정확히 「마지막 몇 글자를
+            // 잃는 창」이기 때문이다.
+            writeDraft(workspaceId, channelId, next);
             // 「작성 중」은 **키에서만** 나간다 (ADR-0149). 타이머가 없으므로 입력이
             // 멈추면 송신도 멈추고, 흐림·탭 전환·언마운트에 끌 것이 없다. 소멸은
             // TTL이 하고 「정지」 신호는 계약에 없다.
@@ -603,7 +700,7 @@ export function Composer({
             justComposedRef.current = false;
           }}
           placeholder={`${channelLabel}에 메시지 보내기`}
-          aria-describedby="composer-hint"
+          aria-describedby={hasHint ? "composer-hint" : undefined}
           data-testid="composer-input"
           className="tap-target min-w-0 flex-1 resize-none rounded-md border border-line-strong bg-transparent px-3 py-2 text-body leading-relaxed placeholder:text-ink-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
         />
@@ -611,14 +708,37 @@ export function Composer({
           type="submit"
           size="icon"
           className="tap-target"
-          disabled={text.trim().length === 0}
+          // 오프라인에서는 보낼 수 없다 (진단 H-10). 누르면 실패 행 하나를 만들고
+          // 끝나므로, 막고 **왜**를 아래 한 줄이 말한다. 입력창은 잠그지 않는다:
+          // 연결이 끊겼다고 글을 못 쓸 이유가 없고, 그동안 쓴 것은 초안이 지킨다.
+          disabled={text.trim().length === 0 || offline}
           aria-label="메시지 보내기"
-          title={isMobile ? "메시지 보내기" : "메시지 보내기 (Enter)"}
+          title={
+            offline
+              ? COMPOSER_OFFLINE_COPY
+              : isMobile
+                ? "메시지 보내기"
+                : "메시지 보내기 (Enter)"
+          }
           data-testid="composer-send"
         >
           <SendHorizontal />
         </Button>
       </form>
+
+      {/* 왜 못 보내는지는 버튼 옆이 아니라 버튼 **아래** 한 줄이다: 비활성 버튼은
+          자기가 왜 비활성인지 말하지 못하고, `title`은 포인터가 있어야 열린다.
+          토스트가 아닌 이유는 이 앱의 규율이다 — 문제가 있는 자리에 문장이 산다.
+          `role="status"`인 것은 이것이 사고가 아니라 상태라서다. */}
+      {offline && (
+        <p
+          role="status"
+          className="px-6 pb-2 text-meta text-warn"
+          data-testid="composer-offline"
+        >
+          {COMPOSER_OFFLINE_COPY}
+        </p>
+      )}
 
       {/* Enter가 보내기가 된 이상, 줄바꿈이 어디로 갔는지 이 자리에서 말해야
           한다. 한 줄이고, 입력창 바로 아래이며, 조용하다: 이 힌트는 알림이
@@ -629,34 +749,45 @@ export function Composer({
           한 조각 더 붙는다. 새 줄이 아니라 같은 줄인 이유 — 둘 다 "이 입력창이
           어떻게 동작하는가"이고, 설명이 두 줄이 되는 순간 안내가 아니라 배너다.
           이쪽은 wide-only가 아니다: ⌘ 없는 기기에도 이 규칙은 그대로 있고,
-          폰에서 멘션을 타이핑하는 수고는 오히려 더 크다. */}
-      <p
-        id="composer-hint"
-        // px-6 = 폼의 p-3(12px) + 텍스트에어리어의 px-3(12px). 힌트의 첫 글자가
-        // 플레이스홀더의 첫 글자와 같은 세로선에 선다. px-4는 어느 쪽 모서리와도
-        // 맞지 않아 4px 어긋난 줄로 보였다.
-        //
-        // DM 문장이 없을 때는 줄 전체가 wide-only다(기존 동작 그대로). 안쪽
-        // span에만 걸면 좁은 폭에서 빈 <p>의 pb-2가 남아 8px 죽은 공간이 된다.
-        className={cn(
-          "px-6 pb-2 text-meta text-ink-muted",
-          !dmAgent && "wide-only"
-        )}
-        data-testid="composer-hint"
-      >
-        {dmAgent && (
-          <span data-testid="composer-dm-hint">
-            멘션 없이 바로 말하면{" "}
-            {agentLabelAsSubject(
-              memberNameParts(directory, dmAgent.id, dmAgent.displayName)
-            )}{" "}
-            답합니다
-          </span>
-        )}
-        <span className="wide-only" data-testid="composer-keys-hint">
-          {dmAgent ? " · " : ""}Enter로 보내기, Shift+Enter로 줄바꿈
-        </span>
-      </p>
+          폰에서 멘션을 타이핑하는 수고는 오히려 더 크다.
+
+          감사 M-7: 키 배치 설명은 **배운 사람에게는 사라진다**(`sendHint.ts`).
+          DM 문장은 그 규칙 밖이다 — 그것은 키가 아니라 **이 방의 성질**이라 방마다
+          다르고, 한 번 배워서 끝나지 않는다. 그래서 이 줄은 조각 둘이 각자 사라질
+          수 있고, 둘 다 없으면 <p> 자체가 서지 않는다: 빈 문단의 pb-2는 8px짜리
+          죽은 공간이고, `aria-describedby`가 가리키는 빈 요소는 보조기술에 아무
+          말도 하지 않는 이름이다. */}
+      {hasHint && (
+        <p
+          id="composer-hint"
+          // px-6 = 폼의 p-3(12px) + 텍스트에어리어의 px-3(12px). 힌트의 첫 글자가
+          // 플레이스홀더의 첫 글자와 같은 세로선에 선다. px-4는 어느 쪽 모서리와도
+          // 맞지 않아 4px 어긋난 줄로 보였다.
+          //
+          // DM 문장이 없을 때는 줄 전체가 wide-only다(기존 동작 그대로). 안쪽
+          // span에만 걸면 좁은 폭에서 빈 <p>의 pb-2가 남아 8px 죽은 공간이 된다.
+          className={cn(
+            "px-6 pb-2 text-meta text-ink-muted",
+            !dmAgent && "wide-only"
+          )}
+          data-testid="composer-hint"
+        >
+          {dmAgent && (
+            <span data-testid="composer-dm-hint">
+              멘션 없이 바로 말하면{" "}
+              {agentLabelAsSubject(
+                memberNameParts(directory, dmAgent.id, dmAgent.displayName)
+              )}{" "}
+              답합니다
+            </span>
+          )}
+          {keysHintNeeded && (
+            <span className="wide-only" data-testid="composer-keys-hint">
+              {dmAgent ? " · " : ""}Enter로 보내기, Shift+Enter로 줄바꿈
+            </span>
+          )}
+        </p>
+      )}
 
       {/* 사람이 위, 에이전트가 아래. 같은 구역에 나란히 두는 것이 「작성 중」과
           「작업 중」을 사람이 배우는 유일한 자리다 (TypingLine의 머리 주석). */}

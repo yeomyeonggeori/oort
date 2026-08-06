@@ -1,7 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowDown } from "lucide-react";
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
-import type { Channel, Message, RosterMember } from "@momo/core/lib/api";
+import {
+  threadRollup,
+  type Channel,
+  type Message,
+  type RosterMember,
+} from "@momo/core/lib/api";
 import type { Directory } from "@/features/workspace/useWorkspace";
 import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/States";
 import { Button } from "@/design/ui/button";
@@ -12,6 +17,10 @@ import {
   type RecoveryMarker,
   type TimelineItem,
 } from "@momo/core/features/timeline/model";
+import {
+  foldDeletedRuns,
+  type DeletedFoldFields,
+} from "@momo/core/features/timeline/deletedFold";
 import {
   DayDivider,
   MessageRow,
@@ -48,9 +57,16 @@ import {
 // already on screen, by how far it moved.
 const START_INDEX = 1_000_000;
 
+/**
+ * 이 목록이 그리는 항목. 코어 스트림에 삭제 접기의 두 필드가 얹힌 것이다
+ * (`deletedFold.ts`) — 접기는 그리는 순간에만 일어나고 메시지 배열도 seq도
+ * 커서도 그것을 모른다.
+ */
+type FoldedItem = TimelineItem & DeletedFoldFields;
+
 /** Oldest message currently in the stream, with its position. */
 function anchorOf(
-  items: TimelineItem[]
+  items: FoldedItem[]
 ): { seq: number; index: number } | null {
   for (let i = 0; i < items.length; i++) {
     const item = items[i];
@@ -59,7 +75,7 @@ function anchorOf(
   return null;
 }
 
-function indexOfSeq(items: TimelineItem[], seq: number): number {
+function indexOfSeq(items: FoldedItem[], seq: number): number {
   return items.findIndex(
     (item) => item.kind === "message" && item.message.seq === seq
   );
@@ -67,7 +83,7 @@ function indexOfSeq(items: TimelineItem[], seq: number): number {
 
 interface AnchorState {
   /** Identity of the stream this index was computed for. */
-  items: TimelineItem[];
+  items: FoldedItem[];
   firstItemIndex: number;
   /** Bumped when the stream is replaced, to remount instead of shifting. */
   epoch: number;
@@ -165,15 +181,48 @@ export function Timeline({
     [byId]
   );
 
+  // 접기 판정이 `actions` 객체 전체가 아니라 이 문자열 하나에만 매달리게 한다:
+  // 부모가 매 렌더 새 객체를 넘기므로(ChatShell의 인라인 리터럴) `actions`를
+  // 의존성에 넣으면 스트림이 매 렌더 새로 만들어지고, 그 동일성은 이 목록의
+  // 앵커 보정이 기대는 것이다.
+  const myMemberIdForFold = actions?.myMemberId;
+
+  // 연달아 지워진 메시지는 한 줄로 접힌다 (감사 M-1). 폰이 먼저 고쳤고, 코어 승격과
+  // 함께 실측한 결과 **웹도 같은 결함을 갖고 있었다**: 이 스트림은
+  // `buildTimelineItems` 하나로 끝났고 그 안에 삭제 접기가 없다 — 연속 묘비 네 개는
+  // 네 줄로 섰다(게이트 `gate-composer.mjs`의 `[deleted]` 절이 그 수를 인쇄한다).
+  //
+  // 접기가 아래 앵커 산수보다 **먼저** 도는 것이 load-bearing이다. `firstItemIndex`
+  // 보정은 「머리에 삽입된 항목 수」를 세는데 그 수는 화면에 실제로 서는 항목의
+  // 수여야 하고, 접기가 뒤에 오면 세는 배열과 그리는 배열이 달라진다.
+  //
+  // `factsFor`가 여기 있는 이유: 접지 않을 조건(답글·반응)은 **목록만 안다.**
+  // 롤업은 메시지가 들고 있고, 반응은 이 컴포넌트가 받은 표에서 온다.
   const items = useMemo(
     () =>
-      buildTimelineItems(messages, {
-        lastReadSeq,
-        unreadCount,
-        recoveryMarkers,
-        pending,
-      }),
-    [messages, lastReadSeq, unreadCount, recoveryMarkers, pending]
+      foldDeletedRuns(
+        buildTimelineItems(messages, {
+          lastReadSeq,
+          unreadCount,
+          recoveryMarkers,
+          pending,
+        }),
+        (item) => ({
+          hasRollup: threadRollup(item.message) !== null,
+          hasReactions:
+            chipsFor(reactions ?? {}, item.message.id, myMemberIdForFold)
+              .length > 0,
+        })
+      ),
+    [
+      messages,
+      lastReadSeq,
+      unreadCount,
+      recoveryMarkers,
+      pending,
+      reactions,
+      myMemberIdForFold,
+    ]
   );
 
   // Derived during render, not in an effect: virtuoso has to receive the new
@@ -327,8 +376,8 @@ export function Timeline({
         initialItemCount={Math.min(items.length, 24)}
         defaultItemHeight={48}
         increaseViewportBy={{ top: 600, bottom: 600 }}
-        computeItemKey={(_index, item: TimelineItem) => item.key}
-        itemContent={(_index, item: TimelineItem) => {
+        computeItemKey={(_index, item: FoldedItem) => item.key}
+        itemContent={(_index, item: FoldedItem) => {
           // 「오늘/어제」는 지금이 언제인지를 알아야 나온다 (H-4). 렌더 시각을 그대로
           // 쓰는 것은 `Sidebar`가 이미 하는 것과 같다. 1Hz 시계를 붙이지 않는 이유는
           // 그 시계가 가상 리스트 전체를 초당 한 번 다시 그리기 때문이다 — 하루에 한
@@ -368,6 +417,8 @@ export function Timeline({
                 }
               }
               pausedRepeat={item.pausedRepeat}
+              deletedRepeat={item.deletedRepeat}
+              deletedFoldedIds={item.deletedFoldedIds}
               onOpenThread={onOpenThread}
               onQuoteMessage={onQuoteMessage}
               onJumpToMessage={onJumpToMessage}

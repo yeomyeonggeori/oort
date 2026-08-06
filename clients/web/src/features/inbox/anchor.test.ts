@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   channelPath,
   messageAnchorPath,
+  foldedStandInSelector,
   messageIdSelector,
   messageSelector,
   searchHitPath,
@@ -256,5 +257,117 @@ describe("watchForMessage", () => {
     expect(cancel).toHaveBeenCalled();
     queued[0]();
     expect(queued).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 대리 착지 — 접힌 묘비를 겨눈 점프 (design-review U4-5 H-1 · 이슈 1105)
+//
+// 삭제 원본을 가리킨 인용은 점프 가능한데, 그 원본이 연속 묘비 묶음에 접히면 그
+// 행은 DOM에 없다. 그 자리에서 「위로 올려 더 불러오세요」는 **거짓 지시**다 —
+// 이미 로드돼 있고 접혀 있을 뿐이다.
+// ---------------------------------------------------------------------------
+
+describe("foldedStandInSelector", () => {
+  it("공백으로 이은 목록에서 낱개를 고른다", () => {
+    expect(foldedStandInSelector("019F94E3-0E04-79CD-9DEE-208F47EDD9A8")).toBe(
+      '[data-testid="timeline-message"]' +
+        '[data-deleted-folded-ids~="019f94e3-0e04-79cd-9dee-208f47edd9a8"]'
+    );
+  });
+
+  it("자기 행 선택자와 다른 속성을 본다", () => {
+    const id = "019f94e3-0e04-79cd-9dee-208f47edd9a8";
+    expect(foldedStandInSelector(id)).not.toBe(messageIdSelector(id));
+  });
+
+  it("따옴표를 이스케이프한다: 주소창에서 온 값이 선택자를 깨지 못한다", () => {
+    expect(foldedStandInSelector('abc"], script')).toBe(
+      '[data-testid="timeline-message"]' +
+        '[data-deleted-folded-ids~="abc\\"], script"]'
+    );
+  });
+});
+
+describe("watchForMessageId: 두 자리를 이 순서로 본다", () => {
+  function fakeSchedule() {
+    const queued: (() => void)[] = [];
+    return {
+      queued,
+      schedule: (fn: () => void) => {
+        queued.push(fn);
+        return queued.length;
+      },
+    };
+  }
+
+  function row(name: string) {
+    return {
+      name,
+      scrollIntoView: vi.fn(),
+      classList: { add: vi.fn(), remove: vi.fn() },
+    };
+  }
+
+  function docThatAnswers(hits: Record<string, ReturnType<typeof row>>) {
+    return {
+      querySelector: (selector: string) => hits[selector] ?? null,
+    } as unknown as Document;
+  }
+
+  const ID = "019f94e3-0e04-79cd-9dee-208f47edd9a8";
+
+  it("자기 행이 있으면 거기 선다", () => {
+    const own = row("own");
+    const standIn = row("stand-in");
+    watchForMessageId(ID, {
+      doc: docThatAnswers({
+        [messageIdSelector(ID)]: own,
+        [foldedStandInSelector(ID)]: standIn,
+      }),
+      now: () => 0,
+      schedule: () => 1,
+      cancel: () => {},
+    });
+    expect(own.scrollIntoView).toHaveBeenCalled();
+    expect(standIn.scrollIntoView).not.toHaveBeenCalled();
+  });
+
+  it("자기 행이 접혀 없으면 대신 서 있는 행에 착지한다", () => {
+    const standIn = row("stand-in");
+    const onExpire = vi.fn();
+    watchForMessageId(ID, {
+      doc: docThatAnswers({ [foldedStandInSelector(ID)]: standIn }),
+      now: () => 0,
+      schedule: () => 1,
+      cancel: () => {},
+      onExpire,
+    });
+    expect(standIn.scrollIntoView).toHaveBeenCalled();
+    expect(onExpire).not.toHaveBeenCalled();
+  });
+
+  /**
+   * **진짜 없는 것은 여전히 없다** (이슈 1105의 네 번째 red proof).
+   *
+   * 대리 착지가 「못 찾으면 아무거나」로 넓어지면, 아직 불러오지도 않은 옛 메시지를
+   * 가리킨 인용이 엉뚱한 묘비에 착지하고 화면은 그것을 원본이라고 말한다 — 고친
+   * 거짓 지시가 방향만 바꿔 돌아오는 것이다.
+   */
+  it("어느 쪽도 없으면 만료가 그대로 온다", () => {
+    const { queued, schedule } = fakeSchedule();
+    const onExpire = vi.fn();
+    let clock = 0;
+    watchForMessageId(ID, {
+      doc: docThatAnswers({}),
+      now: () => clock,
+      schedule,
+      cancel: () => {},
+      watchMs: 100,
+      onExpire,
+    });
+    clock = 1_000;
+    queued[0]();
+    expect(onExpire).toHaveBeenCalledTimes(1);
   });
 });
