@@ -37,21 +37,23 @@ use momo_auth::Principal;
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::{with_tenant_tx, DbError};
 use momo_messaging::{
-    channel_reaction_snapshot, clamp_history_limit, clamp_replies_limit, delete_message_in_tx,
-    edit_message_in_tx, is_channel_member, list_channel_page, list_thread_replies,
-    parse_replies_cursor, resolve_member_signing_key, send_message_with_mentions_in_tx,
-    set_reaction_in_tx, validate_quote_target_in_tx, validate_reaction_emoji,
-    validate_replies_root_in_tx, validate_thread_root_in_tx, AttachmentLinkRejected, HistoryCursor,
-    InteractionRefused, MessageAttachment, MessageSignature, MessageType, NewMessage, PagedMessage,
-    ProvenanceRejected, QuoteTargetInvalid, QuotedMessage, ReactionAction, ReactionSnapshot,
-    SendExtras, SendRejected, StoredMessage, ThreadRollup, ThreadRootInvalid,
+    channel_pins, channel_reaction_snapshot, clamp_history_limit, clamp_replies_limit,
+    delete_message_in_tx, edit_message_in_tx, is_channel_member, list_channel_page,
+    list_thread_replies, parse_replies_cursor, resolve_member_signing_key,
+    send_message_with_mentions_in_tx, set_pin_in_tx, set_reaction_in_tx,
+    validate_quote_target_in_tx, validate_reaction_emoji, validate_replies_root_in_tx,
+    validate_thread_root_in_tx, AttachmentLinkRejected, HistoryCursor, InteractionRefused,
+    MessageAttachment, MessageSignature, MessageType, NewMessage, PagedMessage, PinAction,
+    PinnedMessage, ProvenanceRejected, QuoteTargetInvalid, QuotedMessage, ReactionAction,
+    ReactionSnapshot, SendExtras, SendRejected, StoredMessage, ThreadRollup, ThreadRootInvalid,
 };
 use serde_json::{Map, Value};
 use uuid::Uuid;
 
 use crate::dto::{
-    EditMessageRequest, HistoryQuery, MessageDto, MessagePage, QuotedMessageDto, ReactionDeltaDto,
-    RepliesQuery, SendMessageRequest, ThreadRepliesPage, ThreadRollupDto,
+    EditMessageRequest, HistoryQuery, MessageDto, MessagePage, PinDeltaDto, PinListDto,
+    PinnedMessageDto, QuotedMessageDto, ReactionDeltaDto, RepliesQuery, SendMessageRequest,
+    ThreadRepliesPage, ThreadRollupDto,
 };
 use crate::error::{db_error, ApiError};
 use crate::routes::agent_mentions::{route_agent_mentions_in_tx, MentionSend};
@@ -685,8 +687,9 @@ fn interaction_refusal(refused: InteractionRefused) -> ApiError {
         | InteractionRefused::NotAuthorForDelete => StatusCode::FORBIDDEN,
         InteractionRefused::EditDeleted
         | InteractionRefused::ReactDeleted
+        | InteractionRefused::PinDeleted
         | InteractionRefused::EmptyBody => StatusCode::BAD_REQUEST,
-        InteractionRefused::ReactionLimit => StatusCode::CONFLICT,
+        InteractionRefused::ReactionLimit | InteractionRefused::PinLimit => StatusCode::CONFLICT,
     };
     ApiError::new(status, refused.to_string())
 }
@@ -969,6 +972,137 @@ pub async fn reaction_snapshot(
     })?;
 
     Ok(Json(snapshot))
+}
+
+// ---------------------------------------------------------------------------
+// 이슈 #1112 — pin. The reaction shape verbatim: two verbs on one path plus a
+// channel-scoped cold load, all three delegating every statement and every
+// guard to `momo_messaging::interaction`.
+// ---------------------------------------------------------------------------
+
+fn pinned_dto(pinned: &PinnedMessage) -> PinnedMessageDto {
+    PinnedMessageDto {
+        message_id: pinned.message_id,
+        channel_id: pinned.channel_id,
+        seq: pinned.seq,
+        author_member_id: pinned.author_member_id,
+        message_type: pinned.message_type.clone(),
+        state: pinned.state.clone(),
+        body: pinned.body.clone(),
+        created_at_ms: pinned.created_at.timestamp_millis(),
+        pinned_by: pinned.pinned_by,
+        pinned_at_ms: pinned.pinned_at.timestamp_millis(),
+    }
+}
+
+/// `PUT …/messages/{id}/pin`.
+pub async fn pin_message(
+    state: State<AppState>,
+    principal: Extension<Principal>,
+    path: Path<(String, String)>,
+) -> Result<Json<PinDeltaDto>, ApiError> {
+    mutate_pin(state, principal, path, PinAction::Pinned).await
+}
+
+/// `DELETE …/messages/{id}/pin`.
+pub async fn unpin_message(
+    state: State<AppState>,
+    principal: Extension<Principal>,
+    path: Path<(String, String)>,
+) -> Result<Json<PinDeltaDto>, ApiError> {
+    mutate_pin(state, principal, path, PinAction::Unpinned).await
+}
+
+/// The body both pin verbs share — one function for the same reason
+/// [`mutate_reaction`] is one: they differ in a single enum and the guard order
+/// is the thing most worth keeping identical.
+async fn mutate_pin(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path((workspace, message)): Path<(String, String)>,
+    action: PinAction,
+) -> Result<Json<PinDeltaDto>, ApiError> {
+    let (workspace_id, message_id) = message_scope_ids(&workspace, &message, &principal)?;
+    let via_token_id = audit_via_token_id(&principal);
+
+    let delta = tenant_tx_or_reject(&state.pool, workspace_id, move |conn| {
+        Box::pin(async move {
+            let delta =
+                match set_pin_in_tx(conn, workspace_id, message_id, principal.member_id, action)
+                    .await?
+                {
+                    Ok(delta) => delta,
+                    Err(refused) => {
+                        return Err(SendFailure::Rejected(interaction_refusal(refused)))
+                    }
+                };
+            // Same rule as the reaction toggle: a no-op answers 200 and records
+            // nothing, because nothing happened.
+            if delta.changed {
+                record_interaction_audit(
+                    conn,
+                    workspace_id,
+                    delta.channel_id,
+                    message_id,
+                    principal.member_id,
+                    via_token_id,
+                    &format!("message.{}", delta.action.as_wire_label()),
+                )
+                .await?;
+            }
+            Ok(delta)
+        })
+    })
+    .await
+    .map_err(|failure| match failure {
+        SendFailure::Rejected(rejection) => rejection,
+        SendFailure::Db(error) => db_error("messages.pin", error),
+    })?;
+
+    Ok(Json(PinDeltaDto {
+        action: delta.action.as_wire_label().to_string(),
+        message_id: delta.message_id,
+        channel_id: delta.channel_id,
+        changed: delta.changed,
+        pinned: delta.pinned.as_ref().map(pinned_dto),
+    }))
+}
+
+/// `GET /v1/workspaces/{ws}/channels/{ch}/pins` — the channel's pin list, for a
+/// cold load.
+///
+/// Channel-scoped like the reaction snapshot and for the same reason: the header
+/// list is loaded once per channel and then kept live by `message.pinned` /
+/// `message.unpinned`, so folding it into the history projection would make
+/// every page re-read it.
+pub async fn pin_list(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path((workspace, channel)): Path<(String, String)>,
+) -> Result<Json<PinListDto>, ApiError> {
+    let (workspace_id, channel_id) = scope_ids(&workspace, &channel, &principal)?;
+
+    let pins = tenant_tx_or_reject(&state.pool, workspace_id, move |conn| {
+        Box::pin(async move {
+            // Guard and read in one transaction, like every other channel read
+            // here.
+            if !is_channel_member(conn, channel_id, principal.member_id).await? {
+                return Err(SendFailure::Rejected(ApiError::forbidden(
+                    "not a member of this channel",
+                )));
+            }
+            Ok(channel_pins(conn, channel_id).await?)
+        })
+    })
+    .await
+    .map_err(|failure| match failure {
+        SendFailure::Rejected(rejection) => rejection,
+        SendFailure::Db(error) => db_error("messages.pins", error),
+    })?;
+
+    Ok(Json(PinListDto {
+        pins: pins.iter().map(pinned_dto).collect(),
+    }))
 }
 
 #[cfg(test)]
@@ -1436,5 +1570,98 @@ mod tests {
         .expect("a quote needs no root");
         assert_eq!(quote_only.root_id, None);
         assert_eq!(quote_only.reply_to_id, Some(quote));
+    }
+
+    // -----------------------------------------------------------------------
+    // 이슈 #1112 — pin
+    // -----------------------------------------------------------------------
+
+    /// **Red proof #1, route half.** A non-member's pin is a 403 and not a
+    /// silent success or a 500. The domain refuses with `NotAMember` (proven
+    /// against Postgres in `interaction_conformance_pg`); this pins the status
+    /// that refusal becomes — drop `NotAMember` out of the FORBIDDEN arm and a
+    /// stranger's pin starts answering 400.
+    ///
+    /// The two pin refusals ride along because they are what a reviewer would
+    /// most plausibly get wrong: the cap is a *conflict* (409, retry never
+    /// helps until someone unpins), the tombstone is a *bad request* (400).
+    #[test]
+    fn pin_refusals_keep_the_reaction_paths_status_shape() {
+        assert_eq!(
+            interaction_refusal(InteractionRefused::NotAMember).status,
+            StatusCode::FORBIDDEN,
+            "a non-member pinning must be refused, not tolerated"
+        );
+        assert_eq!(
+            interaction_refusal(InteractionRefused::PinLimit).status,
+            StatusCode::CONFLICT,
+            "the channel cap is a conflict — a retry cannot fix it"
+        );
+        assert_eq!(
+            interaction_refusal(InteractionRefused::PinDeleted).status,
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            interaction_refusal(InteractionRefused::NotFound).status,
+            StatusCode::NOT_FOUND,
+            "404 still outranks 403 for a message that does not exist"
+        );
+    }
+
+    /// The wire keys are the contract two clients decode. `type` in particular
+    /// is a serde rename that a refactor of the struct field would silently
+    /// drop, leaving the header list unable to tell a text message from a
+    /// system one.
+    #[test]
+    fn the_pin_delta_names_its_keys_in_camel_case_with_lowercase_ids() {
+        let message_id = Uuid::from_u128(0x1112);
+        let channel_id = Uuid::from_u128(0x1113);
+        let dto = PinDeltaDto {
+            action: "pinned".into(),
+            message_id,
+            channel_id,
+            changed: true,
+            pinned: Some(PinnedMessageDto {
+                message_id,
+                channel_id,
+                seq: 42,
+                author_member_id: Uuid::from_u128(0x1114),
+                message_type: "text".into(),
+                state: "sent".into(),
+                body: Some("고정할 메시지".into()),
+                created_at_ms: 1_700_000_000_000,
+                pinned_by: Uuid::from_u128(0x1115),
+                pinned_at_ms: 1_700_000_001_000,
+            }),
+        };
+        let wire = serde_json::to_value(&dto).expect("serializes");
+        assert_eq!(wire["messageId"], serde_json::json!(message_id));
+        assert_eq!(wire["changed"], serde_json::json!(true));
+        assert_eq!(wire["pinned"]["seq"], serde_json::json!(42));
+        assert_eq!(wire["pinned"]["type"], serde_json::json!("text"));
+        assert_eq!(
+            wire["pinned"]["pinnedAtMs"],
+            serde_json::json!(1_700_000_001_000i64)
+        );
+        assert_eq!(
+            wire["messageId"].as_str().expect("a string"),
+            message_id.to_string(),
+            "pin ids are lowercase — the reaction wire's uppercase is a Swift \
+             legacy this surface has no reason to inherit"
+        );
+
+        // An unpin names no projection at all.
+        let unpin = PinDeltaDto {
+            action: "unpinned".into(),
+            message_id,
+            channel_id,
+            changed: true,
+            pinned: None,
+        };
+        let wire = serde_json::to_value(&unpin).expect("serializes");
+        assert!(
+            wire.get("pinned").is_none(),
+            "an unpin must not carry a body back out: {wire}"
+        );
     }
 }

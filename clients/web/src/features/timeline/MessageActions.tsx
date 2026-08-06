@@ -2,6 +2,8 @@ import {
   MessageSquareReply,
   MoreHorizontal,
   Pencil,
+  Pin,
+  PinOff,
   Quote,
   Smile,
   Trash2,
@@ -55,6 +57,7 @@ import { QUICK_REACTIONS } from "@momo/core/features/timeline/reactions";
 
 import { hasAnyAction, type MessageActionAvailability } from "@momo/core/features/timeline/model";
 import { QUOTE_ACTION_LABEL } from "@momo/core/features/timeline/quote";
+import { pinActionLabel } from "@momo/core/features/timeline/pins";
 
 export interface MessageActionCallbacks {
   onReply: () => void;
@@ -67,6 +70,13 @@ export interface MessageActionCallbacks {
    */
   onQuote: () => void;
   onReact: (emoji: string) => void;
+  /**
+   * 이슈 #1112 - pin this message to the channel, or take the pin back down.
+   * One callback for both directions because the row already knows which way it
+   * is going (`pinned` below): a second callback would let the label and the
+   * request disagree.
+   */
+  onPin: () => void;
   onEdit: () => void;
   onDelete: () => void;
 }
@@ -89,11 +99,14 @@ export interface MessageActionCallbacks {
  */
 export function MessageActionColumn({
   available,
+  pinned,
   callbacks,
   onOpenPicker,
   hidden,
 }: {
   available: MessageActionAvailability;
+  /** 이슈 #1112 - whether this message is currently pinned, which flips the label. */
+  pinned: boolean;
   callbacks: MessageActionCallbacks;
   onOpenPicker: () => void;
   /** While the row is being edited the editor owns it (R2 M3). */
@@ -171,6 +184,7 @@ export function MessageActionColumn({
             {offersReactions &&
               (available.reply ||
                 available.quote ||
+                available.pin ||
                 available.edit ||
                 available.delete) && <DropdownMenuSeparator />}
             {available.reply && (
@@ -192,6 +206,22 @@ export function MessageActionColumn({
               >
                 <Quote className="size-4" aria-hidden="true" />
                 {QUOTE_ACTION_LABEL}
+              </DropdownMenuItem>
+            )}
+            {/* 이슈 #1112. 인용 아래, 고치기 위: 읽고 가져가는 행동들 다음이고
+                메시지 자체를 바꾸는 행동들 앞이다. 고정은 채널을 바꾸지 메시지를
+                바꾸지 않는다. */}
+            {available.pin && (
+              <DropdownMenuItem
+                data-testid="menu-pin"
+                onSelect={callbacks.onPin}
+              >
+                {pinned ? (
+                  <PinOff className="size-4" aria-hidden="true" />
+                ) : (
+                  <Pin className="size-4" aria-hidden="true" />
+                )}
+                {pinActionLabel(pinned)}
               </DropdownMenuItem>
             )}
             {available.edit && (
@@ -263,6 +293,7 @@ export function MessageActionSheet({
   onOpenChange,
   preview,
   available,
+  pinned,
   callbacks,
   onOpenPicker,
 }: {
@@ -271,6 +302,8 @@ export function MessageActionSheet({
   /** The first line of the message, so the sheet names what it will act on. */
   preview: string;
   available: MessageActionAvailability;
+  /** 이슈 #1112 - flips the pin row's label, exactly as it does in the menu. */
+  pinned: boolean;
   callbacks: MessageActionCallbacks;
   onOpenPicker: () => void;
 }) {
@@ -338,6 +371,22 @@ export function MessageActionSheet({
             }}
           >
             <Quote className="size-4" aria-hidden="true" />
+          </SheetAction>
+        )}
+        {available.pin && (
+          <SheetAction
+            label={pinActionLabel(pinned)}
+            testId="sheet-pin"
+            onSelect={() => {
+              close();
+              callbacks.onPin();
+            }}
+          >
+            {pinned ? (
+              <PinOff className="size-4" aria-hidden="true" />
+            ) : (
+              <Pin className="size-4" aria-hidden="true" />
+            )}
           </SheetAction>
         )}
         {available.edit && (

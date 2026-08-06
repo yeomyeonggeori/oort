@@ -30,6 +30,7 @@ import {
 } from "./MessageRow";
 import { PendingRow } from "./PendingRow";
 import { chipsFor, type ReactionMap } from "@momo/core/features/timeline/reactions";
+import { isPinned, type PinMap } from "@momo/core/features/timeline/pins";
 import {
   AT_BOTTOM_SLACK_PX,
   countNewerThan,
@@ -116,6 +117,7 @@ export function Timeline({
   pending,
   actions,
   reactions,
+  pins,
   onStartReached,
   onRetry,
   onOpenThread,
@@ -147,8 +149,14 @@ export function Timeline({
    * `chips` is filled per row from `reactions` below, so the caller hands over
    * the map once instead of deriving a list for every message in the channel.
    */
-  actions?: Omit<MessageRowActions, "chips">;
+  actions?: Omit<MessageRowActions, "chips" | "pinned">;
   reactions?: ReactionMap;
+  /**
+   * 이슈 #1112 — the channel's pins, handed over once. `pinned` is derived per
+   * row here for the same reason `chips` is: a row that held the whole map
+   * would re-render every time anything anywhere in the channel was pinned.
+   */
+  pins?: PinMap;
   onStartReached?: () => void;
   onRetry?: () => void;
   onOpenThread?: (message: Message) => void;
@@ -414,6 +422,7 @@ export function Timeline({
                     item.message.id,
                     actions.myMemberId
                   ),
+                  pinned: isPinned(pins ?? {}, item.message.id),
                 }
               }
               pausedRepeat={item.pausedRepeat}

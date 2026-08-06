@@ -12,7 +12,7 @@
 //! ```
 //!
 //! Harness contract:
-//!   * `DATABASE_URL` connects as a **superuser** (applies the 60 migrations via
+//!   * `DATABASE_URL` connects as a **superuser** (applies the 62 migrations via
 //!     psql + `infra/e2e/bootstrap_roles.sql`, and seeds fixtures bypassing RLS).
 //!   * the RLS-isolation and write-path assertions run as the runtime **`momo_app`**
 //!     role (`NOBYPASSRLS`), the only faithful way to exercise the DB policies.
@@ -124,7 +124,7 @@ fn apply_bootstrap_roles() {
     assert!(status.success(), "bootstrap_roles.sql failed to apply");
 }
 
-/// Apply the 60 migrations + bootstrap roles exactly once per test process.
+/// Apply the 62 migrations + bootstrap roles exactly once per test process.
 fn ensure_schema_and_roles() {
     static READY: Mutex<bool> = Mutex::new(false);
     let mut ready = READY.lock().unwrap();
@@ -132,7 +132,7 @@ fn ensure_schema_and_roles() {
         return;
     }
     run_migrations(&database_url(), &default_migrations_dir(), SeedMode::None)
-        .expect("apply all 60 migrations on a fresh pgvector/pg18 DB");
+        .expect("apply all 62 migrations on a fresh pgvector/pg18 DB");
     apply_bootstrap_roles();
     *ready = true;
 }

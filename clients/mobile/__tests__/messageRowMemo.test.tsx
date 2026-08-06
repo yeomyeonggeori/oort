@@ -111,6 +111,9 @@ const CHANGED: Record<keyof MessageRowProps, Partial<MessageRowProps>> = {
   startsGroup: {startsGroup: false},
   directory: {directory: OTHER_DIRECTORY},
   chips: {chips: [{emoji: '👍', count: 2, mine: false}]},
+  // 이슈 #1112. 고정 여부가 바뀌면 행 메뉴의 낱말이 바뀐다 — 스칼라라 동일성이
+  // 곧 값이고, 비교자가 이것을 안 보면 고정한 행이 계속 「고정하기」라고 말한다.
+  pinned: {pinned: true},
   pausedRepeat: {pausedRepeat: 3},
   // 접힌 묘비의 수(감사 M-1)와 착지 표시(#1076). 둘 다 스칼라라 값이 곧
   // 동일성이고, 둘 다 **화면에 보이는 것**을 바꾸므로 비교자가 반드시 봐야 한다.

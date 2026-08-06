@@ -2,6 +2,7 @@ import type {Centrifuge, Subscription} from 'centrifuge';
 import {isTerminalProgressFrame} from '@momo/core/features/agents/agentRail';
 import {
   asMessageDeletedFrame,
+  asPinFrame,
   asReactionFrame,
   asTypingFrame,
   centrifugoAgentChannelName,
@@ -11,6 +12,7 @@ import {
   type AgentProgressEvent,
   type MessageDeletedEvent,
   type MessageNewEvent,
+  type PinEvent,
   type ReactionEvent,
   type RealtimeHandle,
   type SubscribedRecoveryContext,
@@ -179,7 +181,15 @@ export function createChannelRail(getClient: () => Centrifuge): ChannelRail {
               return;
             }
             const reaction: ReactionEvent | null = asReactionFrame(ctx.data);
-            if (reaction) handlers.onReaction?.(reaction);
+            if (reaction) {
+              handlers.onReaction?.(reaction);
+              return;
+            }
+            // 이슈 #1112 — pin rides the same channel and reuses the target's
+            // `seq` too, so the pin list and the timeline can never disagree
+            // about which message a frame is about.
+            const pin: PinEvent | null = asPinFrame(ctx.data);
+            if (pin) handlers.onPin?.(pin);
           };
           sub.on('subscribed', onSubscribed);
           sub.on('publication', onPublication);

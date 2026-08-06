@@ -31,6 +31,7 @@ import {
   type QuoteDraft,
 } from "@momo/core/features/timeline/quote";
 import { Timeline } from "@/features/timeline/Timeline";
+import { PinListMenu } from "@/features/timeline/PinListMenu";
 import { CascadeProvider } from "@/features/timeline/cascadeRail";
 import { ThreadPanel } from "@/features/timeline/ThreadPanel";
 import { LongPressHint } from "@/features/timeline/LongPressHint";
@@ -640,6 +641,17 @@ export function ChatShell() {
               offline={offline}
             />
           )}
+          {/* 이슈 #1112 — 고정 목록. 작업 세션 토글 왼쪽에 두는 이유: 이것은
+              대화를 읽는 도구고 저것은 대화 밖의 일을 여는 문이다. 스트레스
+              픽스처에서는 뒤에 서버 행이 없으므로 내놓지 않는다 — 반응·액션과
+              같은 규칙. */}
+          {stressCount === 0 && channelId !== null && (
+            <PinListMenu
+              pins={timeline.pins}
+              directory={directory}
+              onJump={(messageId, seq) => onJumpToMessage(messageId, seq)}
+            />
+          )}
           {/* The tooltip and the accessible name are the same string: two
               names for one control is two controls to a reader who hears one
               and sees the other. */}
@@ -745,12 +757,14 @@ export function ChatShell() {
               // row behind them, so the actions are withheld there rather than
               // offered and then failing on every click.
               reactions={stressCount > 0 ? undefined : timeline.reactions}
+              pins={stressCount > 0 ? undefined : timeline.pins}
               actions={
                 stressCount > 0
                   ? undefined
                   : {
                       myMemberId: session.member.id,
                       onToggleReaction: timeline.toggleReaction,
+                      onTogglePin: timeline.togglePin,
                       onEditMessage: timeline.editMessage,
                       onDeleteMessage: timeline.deleteMessage,
                     }
@@ -827,9 +841,11 @@ export function ChatShell() {
           root={thread}
           directory={directory}
           reactions={timeline.reactions}
+          pins={timeline.pins}
           actions={{
             myMemberId: session.member.id,
             onToggleReaction: timeline.toggleReaction,
+            onTogglePin: timeline.togglePin,
             onEditMessage: timeline.editMessage,
             onDeleteMessage: timeline.deleteMessage,
           }}

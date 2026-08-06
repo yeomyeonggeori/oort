@@ -1751,6 +1751,81 @@ export function fetchReactionSnapshot(
   );
 }
 
+// ---- Message pin (이슈 #1112) ----------------------------------------------
+// PUT    /v1/workspaces/{ws}/messages/{id}/pin
+// DELETE /v1/workspaces/{ws}/messages/{id}/pin
+// GET    /v1/workspaces/{ws}/channels/{ch}/pins
+//
+// The reaction shape above, verbatim: message-scoped verbs plus a channel-scoped
+// cold load. The one difference is on the server and it shows here as the
+// *absence* of a member in the path — a pin is the channel's fact, so there is
+// no per-member axis to name and any channel member may undo one.
+
+/** One entry of a channel's pin list (server `PinnedMessageDto`). */
+export interface PinnedMessageWire {
+  messageId: string;
+  channelId: string;
+  /** The message's own seq — what a jump scrolls to. Pinning mints none. */
+  seq: number;
+  authorMemberId: string;
+  type: string;
+  state: string;
+  body: string | null;
+  createdAtMs: number;
+  pinnedBy: string;
+  pinnedAtMs: number;
+}
+
+/** A pin moving one way (server `PinDeltaDto`). */
+export interface PinDelta {
+  action: "pinned" | "unpinned";
+  messageId: string;
+  channelId: string;
+  /** false when it was already in that state. Still a success. */
+  changed: boolean;
+  /** The list entry, on an effective pin only. */
+  pinned?: PinnedMessageWire;
+}
+
+/**
+ * Pin or unpin a message. Idempotent server-side in both directions, like the
+ * reaction toggle: a second pin, and an unpin of something not pinned, both
+ * answer 200 having changed nothing.
+ *
+ * An effective pin answers with the whole list entry, so the caller inserts the
+ * row it just created rather than re-reading the list to learn what it did.
+ */
+export function setPin(
+  workspaceId: string,
+  messageId: string,
+  action: "pinned" | "unpinned"
+): Promise<PinDelta> {
+  return request<PinDelta>(
+    `/v1/workspaces/${encodeURIComponent(workspaceId)}/messages/${encodeURIComponent(
+      messageId
+    )}/pin`,
+    { method: action === "pinned" ? "PUT" : "DELETE" }
+  );
+}
+
+/**
+ * The cold-load pin list for a channel, newest pin first.
+ *
+ * Wrapped on the wire (`{ pins: [...] }`) unlike the reaction snapshot, which is
+ * bare only because a Swift `singleValueContainer` shipped that way. This
+ * unwraps so no caller has to know that.
+ */
+export function fetchChannelPins(
+  workspaceId: string,
+  channelId: string
+): Promise<PinnedMessageWire[]> {
+  return request<{ pins?: PinnedMessageWire[] }>(
+    `/v1/workspaces/${encodeURIComponent(workspaceId)}/channels/${encodeURIComponent(
+      channelId
+    )}/pins`
+  ).then((page) => page.pins ?? []);
+}
+
 // ---- Work sessions: the ADR-0114 session ledger (AX-3 / MOMO-618) ----------
 // GET   /v1/workspaces/{ws}/work-sessions[?active=1]   (WorkSessionRoutes.list)
 // PATCH /v1/workspaces/{ws}/work-sessions/{session}     (owner ends it)

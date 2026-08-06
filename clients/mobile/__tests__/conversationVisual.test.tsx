@@ -579,9 +579,49 @@ describe('#1079 M-7 — 사진 속 시트가 배송되는 시트와 같은 줄 �
     // 콜백이 없으면 그 줄이 사라지고, 큰 글자에서 넘침을 보려던 사진이 하필
     // 넘치지 않는 시트를 찍게 된다(AX5 캡처가 이것을 드러냈다).
     const code = codeOnly(HARNESS);
-    for (const prop of ['onQuote=', 'onCopy=', 'onReply=', 'onEdit=', 'onDelete=']) {
+    for (const prop of [
+      'onQuote=',
+      'onCopy=',
+      // 이슈 #1112 — 같은 함정, 같은 잠금. `availability.pin && onPin` 이라
+      // 콜백이 빠지면 사진 속 시트가 또 배송본보다 한 줄 짧아진다.
+      'onPin=',
+      'onReply=',
+      'onEdit=',
+      'onDelete=',
+    ]) {
       expect(code).toContain(prop);
     }
+  });
+});
+
+// =============================================================================
+// 이슈 #1112 — 고정이 하네스에 선다
+//
+// 낱말이 상태를 따라 뒤집히는 것은 **두 장**으로만 보인다(시트가 `Modal` 이라 한
+// 프레임에 둘을 세울 수 없다). 그래서 두 케이스가 모두 있어야 하고, 목록은
+// 채워진 판과 빈 판이 모두 있어야 한다 — 「아직 아무 말도 못 한 화면」과 「할 말이
+// 없다고 말하는 화면」은 사진에서만 갈린다.
+// =============================================================================
+
+describe('#1112 — 고정 표면이 하네스에 선다', () => {
+  const HARNESS = fs.readFileSync(
+    path.resolve(__dirname, '../measure/surfaces.tsx'),
+    'utf8',
+  );
+
+  it('고정 시트 두 판과 목록 두 판이 케이스로 있다', () => {
+    for (const name of ['sheet', 'pin-sheet', 'pin-list', 'pin-list-empty']) {
+      expect(HARNESS).toContain(`case '${name}'`);
+    }
+  });
+
+  it('하네스가 고정의 낱말을 베껴 적지 않는다 — 화면이 코어에서 든다', () => {
+    const code = codeOnly(HARNESS);
+    // 라벨을 리터럴로 박으면 코어가 바뀌어도 사진은 옛말을 계속 한다.
+    expect(code).not.toContain('고정 해제하기');
+    expect(code).not.toContain('고정하기');
+    // 대신 상태를 넘긴다: 시트가 `pinActionLabel` 로 낱말을 고른다.
+    expect(code).toContain('pinned={pinned}');
   });
 });
 

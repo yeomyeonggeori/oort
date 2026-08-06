@@ -8,6 +8,7 @@ import {
   type TimelineStreamItem,
 } from '@momo/core/features/timeline/model';
 import {chipsFor, type ReactionMap} from '@momo/core/features/timeline/reactions';
+import {isPinned, type PinMap} from '@momo/core/features/timeline/pins';
 import type {Directory} from '@momo/core/features/workspace/directory';
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
@@ -274,6 +275,8 @@ const KEEP_VISIBLE_POSITION = {minIndexForVisible: 0} as const;
  * 객체는 `chipsFor` 를 거쳐 새 배열이 된다. 상수 하나면 그 사슬이 끊긴다.
  */
 const NO_REACTIONS: ReactionMap = {};
+/** 같은 이유의 상수 (이슈 #1112). */
+const NO_PINS: PinMap = {};
 
 // =============================================================================
 // 셀 계측 seam (goal RN-P2a / #997)
@@ -402,6 +405,7 @@ function TimelineInner({
   pending,
   working,
   reactions,
+  pins,
   approvalGates,
   approvalReceipts,
   approvalOffline,
@@ -449,6 +453,11 @@ function TimelineInner({
    */
   working?: readonly {memberId: string}[];
   reactions?: ReactionMap;
+  /**
+   * 이슈 #1112 — 채널의 고정들. 행마다의 `pinned` 는 여기서 유도한다: 행이 지도를
+   * 통째로 들면 어디서 무엇이 고정되든 붙어 있는 행이 전부 다시 그려진다.
+   */
+  pins?: PinMap;
   /**
    * 결정 가능한 대기 승인, `approvalId` 로.
    *
@@ -996,6 +1005,7 @@ function TimelineInner({
           startsGroup={item.startsGroup}
           directory={directory}
           chips={chipsFor(reactions ?? NO_REACTIONS, item.message.id, myMemberId)}
+          pinned={isPinned(pins ?? NO_PINS, item.message.id)}
           pausedRepeat={item.pausedRepeat}
           deletedRepeat={item.deletedRepeat}
           landed={landedId !== null && uuidEq(item.message.id, landedId)}
@@ -1049,6 +1059,7 @@ function TimelineInner({
     [
       directory,
       reactions,
+      pins,
       myMemberId,
       nowMs,
       onResend,

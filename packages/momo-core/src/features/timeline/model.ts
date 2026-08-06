@@ -227,7 +227,21 @@ export function canReplyToMessage(message: Message): boolean {
   return isActionable(message) && !message.rootId;
 }
 
-/** What a row may offer, all five answers together. */
+/**
+ * 이슈 #1112 — anyone in the channel may pin a live message, and anyone may
+ * unpin one. There is no authorship gate here at all: a pin is the channel's
+ * fact rather than the pinner's, so tying "고정 해제" to whoever pressed 고정
+ * would strand every pin whose author left the workspace.
+ *
+ * A tombstone is not pinnable (the server refuses with 400) and, since the
+ * delete already swept the row, is never unpinnable either — so the single
+ * `isActionable` gate is the whole rule.
+ */
+export function canPinMessage(message: Message): boolean {
+  return isActionable(message);
+}
+
+/** What a row may offer, all six answers together. */
 export interface MessageActionAvailability {
   reply: boolean;
   /**
@@ -238,6 +252,8 @@ export interface MessageActionAvailability {
    */
   quote: boolean;
   react: boolean;
+  /** 이슈 #1112 — 판정은 {@link canPinMessage}. */
+  pin: boolean;
   edit: boolean;
   delete: boolean;
 }
@@ -252,6 +268,7 @@ export function hasAnyAction(available: MessageActionAvailability): boolean {
     available.reply ||
     available.quote ||
     available.react ||
+    available.pin ||
     available.edit ||
     available.delete
   );

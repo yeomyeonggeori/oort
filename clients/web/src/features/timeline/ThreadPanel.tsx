@@ -7,6 +7,7 @@ import { startsAuthorGroup } from "@momo/core/features/timeline/model";
 import { MessageRow, type MessageRowActions } from "./MessageRow";
 import { ThreadComposer } from "./ThreadComposer";
 import { chipsFor, type ReactionMap } from "@momo/core/features/timeline/reactions";
+import { isPinned, type PinMap } from "@momo/core/features/timeline/pins";
 
 // =============================================================================
 // Thread panel (R-1 §3 "스레드 진입 자리", P12: replies live outside the channel
@@ -21,6 +22,7 @@ export function ThreadPanel({
   directory,
   actions,
   reactions,
+  pins,
   onOpenWorkSession,
   onClose,
 }: {
@@ -33,8 +35,10 @@ export function ThreadPanel({
    * deleted and reacted to exactly where it is read. Omitted by the work
    * session panel, whose rows are an event log.
    */
-  actions?: Omit<MessageRowActions, "chips">;
+  actions?: Omit<MessageRowActions, "chips" | "pinned">;
   reactions?: ReactionMap;
+  /** 이슈 #1112 — a reply is pinned from where it is read, like every other action. */
+  pins?: PinMap;
   onOpenWorkSession?: (sessionId: string) => void;
   onClose: () => void;
 }) {
@@ -45,11 +49,12 @@ export function ThreadPanel({
 
   const replies = query.data?.messages ?? [];
 
-  /** Per-row actions, with this row's chips folded in. */
+  /** Per-row actions, with this row's chips and pin state folded in. */
   const rowActions = (message: Message): MessageRowActions | undefined =>
     actions && {
       ...actions,
       chips: chipsFor(reactions ?? {}, message.id, actions.myMemberId),
+      pinned: isPinned(pins ?? {}, message.id),
     };
 
   return (

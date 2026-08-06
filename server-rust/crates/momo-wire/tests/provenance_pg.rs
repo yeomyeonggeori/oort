@@ -114,7 +114,7 @@ fn apply_bootstrap_roles() {
     assert!(status.success(), "bootstrap_roles.sql failed to apply");
 }
 
-/// Apply the 60 migrations (incl. 060_action_signature) + roles once per process.
+/// Apply the 62 migrations (incl. 060_action_signature) + roles once per process.
 fn ensure_schema_and_roles() {
     static READY: Mutex<bool> = Mutex::new(false);
     let mut ready = READY.lock().unwrap();
@@ -122,7 +122,7 @@ fn ensure_schema_and_roles() {
         return;
     }
     run_migrations(&database_url(), &default_migrations_dir(), SeedMode::None)
-        .expect("apply all 60 migrations on a pgvector/pg18 DB");
+        .expect("apply all 62 migrations on a pgvector/pg18 DB");
     apply_bootstrap_roles();
     *ready = true;
 }

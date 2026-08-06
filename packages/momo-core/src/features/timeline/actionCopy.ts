@@ -67,6 +67,27 @@ export function reactionFailureMessage(error: unknown): string {
   }
 }
 
+/**
+ * 이슈 #1112. The 409 is the interesting one: unlike the reaction cap, which a
+ * person can clear on the message in front of them, the pin cap is a **channel**
+ * fact — the thing to unpin is somewhere else. So the sentence sends them to the
+ * list rather than telling them to undo something here.
+ */
+export function pinFailureMessage(error: unknown): string {
+  switch (statusOf(error)) {
+    case 400:
+      return "삭제된 메시지는 고정할 수 없습니다.";
+    case 403:
+      return "이 채널의 멤버만 메시지를 고정할 수 있습니다.";
+    case 404:
+      return "메시지를 찾지 못했습니다. 이미 지워졌을 수 있습니다.";
+    case 409:
+      return "이 채널에 고정된 메시지가 100개를 넘었습니다. 고정 목록에서 하나를 해제한 뒤 다시 눌러 보세요.";
+    default:
+      return "메시지를 고정하지 못했습니다. 잠시 뒤에 다시 시도하세요.";
+  }
+}
+
 export function replyFailureMessage(error: unknown): string {
   switch (statusOf(error)) {
     case 400:

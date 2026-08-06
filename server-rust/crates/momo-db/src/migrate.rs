@@ -1,7 +1,7 @@
-//! Migration runner — applies the existing 61 SQL files **in place, unmodified**
+//! Migration runner — applies the existing 62 SQL files **in place, unmodified**
 //! via `psql`, matching `scripts/migrate.sh` (L4 §8.7 canonical mechanism).
 //!
-//! ADR-0145 / D2 §3: the 61 migrations under `server/Migrations/NNN_*.sql` are
+//! ADR-0145 / D2 §3: the 62 migrations under `server/Migrations/NNN_*.sql` are
 //! Postgres DDL, language independent, and are the enforcement layer we inherit.
 //!
 //! **Why psql, not `sqlx::raw_sql`.** Several seed migrations (002/006/012) use
@@ -310,24 +310,32 @@ mod tests {
     use super::*;
 
     /// Structural conformance without a DB: the on-disk migration set is exactly
-    /// 001..=061, contiguous, correctly ordered, and starts at `001_init`.
+    /// 001..=062, contiguous, correctly ordered, and starts at `001_init`.
+    ///
+    /// The count is asserted rather than derived on purpose: it is what makes a
+    /// **second** file claiming a taken prefix, or a file dropped from the
+    /// directory, fail here rather than at deploy time. A new migration
+    /// therefore lands with this number bumped, deliberately — a test that
+    /// counted whatever it found would have nothing to say. (Two parallel
+    /// branches both claiming 061 is exactly what it caught this time.)
     ///
     /// 060 is ADR-0146's `action_signature` sidecar — the first migration this
     /// rewrite added rather than inherited (B2.5). 061 is ADR-0125 D6-A's
-    /// per-member last-used host (#1114), the second.
+    /// per-member last-used host (#1114), the second. 062 is 이슈 #1112's
+    /// `message_pin`.
     #[test]
-    fn discovers_contiguous_migrations_001_to_061() {
+    fn discovers_contiguous_migrations_001_to_062() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
         assert_eq!(
             migrations.len(),
-            61,
-            "expected 61 migrations under {}",
+            62,
+            "expected 62 migrations under {}",
             dir.display()
         );
         assert_eq!(migrations.first().unwrap().version, 1);
-        assert_eq!(migrations.last().unwrap().version, 61);
+        assert_eq!(migrations.last().unwrap().version, 62);
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
 
         for (i, migration) in migrations.iter().enumerate() {
