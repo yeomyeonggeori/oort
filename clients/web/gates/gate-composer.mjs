@@ -71,8 +71,31 @@ function avatarSizePx() {
   return Number(match[1]);
 }
 
+/**
+ * 오프라인 문장의 정본도 코어다 (U4-6 리뷰 H-1).
+ *
+ * 이 게이트는 문장 조각("쓰던 글은 그대로 남습니다")을 손으로 적고 있었고, 그
+ * 조각은 **웹만 쓰던 판**의 것이었다. 리뷰가 두 클라의 갈라짐을 실측해 값이
+ * 코어로 올라간 순간, 손으로 적힌 조각은 화면을 지키는 것이 아니라 화면이
+ * 고쳐지는 것을 막는 쪽이 된다. 아바타 지름과 같은 방법으로 읽는다.
+ */
+function composerOfflineCopy() {
+  const source = readFileSync(
+    resolve(webRoot, "../../packages/momo-core/src/features/chat/composerCopy.ts"),
+    "utf8"
+  );
+  const match = source.match(
+    /export const COMPOSER_OFFLINE_COPY\s*=\s*"([^"]+)"/
+  );
+  if (match === null) {
+    throw new Error("코어의 COMPOSER_OFFLINE_COPY를 읽지 못했다");
+  }
+  return match[1];
+}
+
 const TOUCH_TARGET = touchTargetPx();
 const AVATAR_SIZE = avatarSizePx();
+const COMPOSER_OFFLINE_COPY = composerOfflineCopy();
 
 const port = Number(process.env.COMPOSER_GATE_PORT || 5198);
 const origin = `http://127.0.0.1:${port}`;
@@ -705,10 +728,11 @@ async function exerciseComposer(browser) {
     );
   }
   const offlineCopy = ((await offlineLine.textContent()) ?? "").trim();
-  if (!offlineCopy.includes("쓰던 글은 그대로 남습니다")) {
+  if (offlineCopy !== COMPOSER_OFFLINE_COPY) {
     throw new Error(
-      `오프라인 문장이 초안 보존을 말하지 않는다 ("${offlineCopy}"): 기다리라고만 ` +
-        "하고 기다리는 동안 쓴 글을 잃게 하면 그 문장은 거짓이 된다"
+      `오프라인 문장이 코어의 문장이 아니다 ("${offlineCopy}"): 기다리라고만 하고 ` +
+        "기다리는 동안 쓴 글을 잃게 하면 그 문장은 거짓이 되고, 폰과 다른 말을 " +
+        `하면 같은 앱의 말이 아니다 — 정본은 "${COMPOSER_OFFLINE_COPY}"`
     );
   }
   await context.setOffline(false);

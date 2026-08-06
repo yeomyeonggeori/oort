@@ -1,4 +1,5 @@
 import type {RosterMember} from '@momo/core/lib/api';
+import {COMPOSER_OFFLINE_COPY} from '@momo/core/features/chat/composerCopy';
 import {attachParticle} from '@momo/core/lib/koreanParticle';
 import type {Directory} from '@momo/core/features/workspace/directory';
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
@@ -122,20 +123,20 @@ const INPUT_BORDER = 1;
 const MAX_HEIGHT = MAX_ROWS * line.body + INPUT_PAD_Y * 2 + INPUT_BORDER * 2;
 
 /**
- * 연결이 끊겨 지금은 보낼 수 없다는 한 문장.
+ * 연결이 끊겨 지금은 보낼 수 없다는 한 문장. **이름만 여기 있고 값은 코어에
+ * 있다** (U4-6 리뷰 H-1).
  *
- * 상수로 내보내는 이유는 `jumpNotice.ts` 와 같다 — **측정 하네스가 같은 값을
- * 읽어 사진을 찍는다.** 하네스가 문장을 베껴 적으면 배송되는 문장이 바뀌어도
- * 사진은 옛말을 계속 한다.
+ * 이 배치가 문장을 여기서 landing 시켰고, 같은 주에 웹이 자기 파일에 같은 이름
+ * 으로 **다른 문장**을 지었다("…쓰던 글은 그대로 남습니다"). 이름이 같은데 값이
+ * 다른 것은 갈라질 위험이 아니라 이미 갈라진 것이고, 그래서 값은
+ * `APPROVAL_OFFLINE_COPY` 가 이미 걸어 둔 길로 올라갔다 —
+ * `@momo/core/features/chat/composerCopy` 가 문장과 그 문장을 고른 이유를 든다.
  *
- * 두 조각으로 되어 있고 둘 다 필요하다. 앞은 **지금 무엇이 안 되는가**,
- * 뒤는 **그래서 내가 친 글은 어떻게 되는가**다. 뒤 문장은 이 배치가 초안 보존을
- * 함께 넣었기 때문에 참이 됐다 — 초안이 사라지는 앱에서 「그대로 있습니다」라고
- * 말하면 그것은 위로가 아니라 거짓말이다. `APPROVAL_OFFLINE_COPY` 와 같은
- * 모양으로 쓴다(지금 못 하는 것 → 다시 연결되면 여기서 할 수 있는 것).
+ * 이름을 남기는 이유는 `useOnline.ts` 와 같다: **측정 하네스와 테스트가 이 이름
+ * 으로 값을 읽어** 사진을 찍고 단정한다. 문장을 베껴 적으면 배송되는 문장이
+ * 바뀌어도 사진은 옛말을 계속 한다.
  */
-export const COMPOSER_OFFLINE_COPY =
-  '연결이 끊겨 지금은 보낼 수 없습니다. 쓰던 글은 그대로 있고, 다시 연결되면 여기서 보낼 수 있습니다.';
+export {COMPOSER_OFFLINE_COPY};
 
 export function Composer({
   channelLabel,
