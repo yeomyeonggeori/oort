@@ -3334,6 +3334,56 @@ async function captureScheme(browser, scheme) {
   await approvals.screenshot({ path: spawnPickerShot });
   shots.push(spawnPickerShot);
 
+  //     ④ **고를 것이 하나도 없을 때** (design-review M2가 미캡처로 남긴 자리).
+  //
+  //        이 갈래가 이 배치의 fail-closed 문이다: 서버가 409로 답할 것을 결정
+  //        전에 말하고, 승인은 실제로 불가용해지며(채움을 버리고 조용한 형태로
+  //        강등된다), 거부만 열린 채 남는다. 앞 판의 캡처 세트는 자격 있는 후보가
+  //        있는 픽스처 하나뿐이라 그 상태를 한 번도 찍지 못했고, 리뷰는 그것을
+  //        「증거 없음」으로 판정했다. 폰은 같은 장면을 이미 갖고 있다
+  //        (`measure/captures/ade1-spawn-picker.png`의 두 번째 카드).
+  //
+  //        라우트를 **갈아끼우지 않고** 쿼리 플래그로 가른다: 같은 목이 두 답을
+  //        내면 어느 프레임이 어느 픽스처였는지 사진만 보고는 말할 수 없다.
+  const blockedPage = await context.newPage();
+  await blockedPage.route("**/v1/workspaces/*/approvals*", (route) => {
+    const url = new URL(route.request().url());
+    if (url.searchParams.get("status") !== "pending") {
+      return json(route, { approvals: [] });
+    }
+    const [spawn, ...rest] = APPROVALS;
+    return json(route, {
+      approvals: [
+        {
+          ...spawn,
+          payload: {
+            ...spawn.payload,
+            execution: {
+              ...SPAWN_EXECUTION,
+              // 서버가 자격 있는 것을 하나도 못 찾으면 기본값이 없다.
+              default_host_id: null,
+              host_candidates: SPAWN_EXECUTION.host_candidates.filter(
+                (candidate) => !candidate.selectable
+              ),
+            },
+          },
+        },
+        ...rest,
+      ],
+    });
+  });
+  await blockedPage.goto(ORIGIN, { waitUntil: "networkidle" });
+  await signIn(blockedPage);
+  await blockedPage.evaluate('location.hash = "/inbox?filter=needs-action"');
+  await blockedPage
+    .getByTestId("inbox-approval-host-blocked")
+    .first()
+    .waitFor({ state: "visible" });
+  const spawnBlockedShot = `${OUT_DIR}/approvals-host-blocked-${scheme}.png`;
+  await blockedPage.screenshot({ path: spawnBlockedShot });
+  shots.push(spawnBlockedShot);
+  await blockedPage.close();
+
   // 3e. agent turn surfaces (MOMO-613): the sidebar pill and the composer
   //     activity list. `?agentwork=live` seeds fixed turns and reports the rail
   //     as connected, so the clock, the 승인 대기 state and the stacked composer

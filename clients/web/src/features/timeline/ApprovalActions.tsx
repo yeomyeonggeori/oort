@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { Button } from "@/design/ui/button";
 import { cn } from "@/design/lib/cn";
 import { useSession } from "@/app/session";
@@ -12,7 +12,7 @@ import {
   decisionHostId,
   findCandidate,
   preselectedHostId,
-  spawnDestinationClause,
+  spawnApproveLead,
   spawnHostGate,
 } from "@momo/core/features/timeline/spawnHostChoice";
 import { SpawnHostChoice } from "./SpawnHostChoice";
@@ -74,28 +74,26 @@ export const CONFIRM_GUARD_MS = 400;
  * 것뿐이다.
  */
 export function approveConfirmCopy(reversible: boolean | undefined): string {
-  const base = "승인하면 에이전트가 이어서 진행합니다.";
-  // `undefined`는 "모른다"이고, 되돌릴 수 없는 액션 계열에서 모름은 경고 쪽에
-  // 붙는다. 서버가 위험도를 싣지 않았다고 안전하다고 말할 수는 없다.
-  return reversible === true ? base : `${base} 되돌릴 수 없습니다.`;
+  return spawnApproveConfirmCopy(null, reversible);
 }
 
 /**
- * 스폰 승인의 확정 문장 — **목적지가 문장 안에 있다** (이슈 1114).
+ * 확정 문장. 스폰 승인이면 **목적지가 조건절 안에 들어간다** (이슈 1114).
  *
- * 확정 화면에서 라디오는 잠긴다. 잠긴 컨트롤을 다시 읽어 목적지를 확인하게 하는
- * 대신, 사람이 지금 누르려는 버튼 바로 위에서 어디로 가는지 말한다. 호스트 이름을
- * 모를 때(자격 후보가 없어 아무것도 찍히지 않은 경우) 목적지 절은 통째로 빠진다 —
- * 「어딘가에서 실행합니다」는 문장이 아니라 소음이다.
+ * 목적지를 별도 문장으로 앞세우지 않는 이유는 코어(`spawnApproveLead`)에 적혀
+ * 있다: "「팀 VPS」에서 실행합니다."는 이 승인이 지킬 수 없는 약속을 현재 직설로
+ * 단언하고, 바로 뒤 문장이 조심스럽게 단 조건과 서로를 반박한다
+ * (design-review H3). 호스트 이름을 모를 때(자격 후보가 없어 아무것도 찍히지 않은
+ * 경우) 그 자리는 통째로 빠진다 — 「어딘가에서」는 문장이 아니라 소음이다.
  */
 export function spawnApproveConfirmCopy(
   hostName: string | null,
   reversible: boolean | undefined
 ): string {
-  const base = approveConfirmCopy(reversible);
-  return hostName === null
-    ? base
-    : `${spawnDestinationClause(hostName)} ${base}`;
+  const base = spawnApproveLead(hostName);
+  // `undefined`는 "모른다"이고, 되돌릴 수 없는 액션 계열에서 모름은 경고 쪽에
+  // 붙는다. 서버가 위험도를 싣지 않았다고 안전하다고 말할 수는 없다.
+  return reversible === true ? base : `${base} 되돌릴 수 없습니다.`;
 }
 
 /**
@@ -176,6 +174,8 @@ export function ApprovalActions({
   // 이 state가 값을 갖는다. 그 구분이 결정 본문을 정한다: 손대지 않았으면 키를
   // 안 싣고(서버가 카드의 기본값을 적용한다), 손댔으면 명시적으로 싣는다.
   const [pickedHostId, setPickedHostId] = useState<string | null>(null);
+  /** 「고를 것이 없다」 문장의 id. 승인 버튼이 `aria-describedby`로 되짚는다. */
+  const blockedId = useId();
   const defaultHostId = preselectedHostId(execution);
   const chosenHostId = pickedHostId ?? defaultHostId;
   const hostGate = spawnHostGate(execution);
@@ -294,6 +294,14 @@ export function ApprovalActions({
         disarm();
       }}
     >
+      {/* 픽커가 붙으면 **묻는 말이 먼저 온다** (design-review M4).
+          픽커 없는 행에서 `lead`는 버튼과 한 줄에 앉는다(아래). 픽커가 붙으면 그
+          배치가 읽는 순서를 뒤집는다: 제목 → 실행할 호스트 → *허가가 필요합니다*
+          → 거부/승인. 두 번째 질문이 제기되고 답해진 뒤에야 첫 번째 질문이 나온다.
+          그래서 픽커가 있을 때만 `lead`를 자기 줄로 올린다. */}
+      {execution !== null && (
+        <p className="pb-2 text-meta text-ink-muted">{lead}</p>
+      )}
       {/* 픽커는 무장 여부와 무관하게 자리를 지킨다. 확정 화면에서 사라지면
           사람은 자기가 무엇을 고른 채 확정하는지 볼 수 없고, 확인은 판단의 근거
           옆에 있어야 한다는 이 표면의 원칙이 무너진다. 대신 잠긴다. */}
@@ -303,12 +311,19 @@ export function ApprovalActions({
           pickedHostId={chosenHostId}
           onPick={setPickedHostId}
           locked={armed !== null || busy}
+          blockedId={blockedId}
           testIdPrefix={testIdPrefix}
         />
       )}
       {armed === null ? (
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <span className="text-meta text-ink-muted">{lead}</span>
+          {execution === null ? (
+            <span className="text-meta text-ink-muted">{lead}</span>
+          ) : (
+            // 픽커가 있으면 `lead`는 이미 위에 있다. 자리는 남겨 둬야 버튼이
+            // 오른쪽에 붙는다(`justify-between`).
+            <span />
+          )}
           <span className="flex shrink-0 items-center gap-2">
             <Button
               variant="outline"
@@ -319,13 +334,31 @@ export function ApprovalActions({
             >
               거부
             </Button>
+            {/* ## 막힌 승인은 **모양을 바꾸지 투명해지지 않는다** (design-review H1)
+                
+                앞 판은 `disabled`였다. 두 가지가 따라왔다:
+                  - `disabled:opacity-50`이 채움 버튼에 걸리면 「승인」 글자가
+                    **2.23:1**이 된다. tokens.md §5b가 이 정확한 실패를 이름으로
+                    적어 둔 그 숫자다.
+                  - 네이티브 `disabled` 버튼은 **초점을 받지 못한다**. 키보드나
+                    보이스오버로 이 행을 지나는 사람은 막힌 컨트롤을 아예 만나지
+                    못하고, 그래서 왜 승인할 수 없는지도 듣지 못한다.
+                
+                그래서 실제로 할 수 없을 때는 **조용한 형태로 강등**하고(채움을
+                버리는 것이 곧 "지금은 이것이 기본 액션이 아니다"라는 말이다),
+                `aria-disabled`로 상태만 알린 뒤 초점은 남긴다. 이유는
+                `aria-describedby`가 픽커 아래 문장을 가리켜 초점이 닿는 순간 함께
+                읽힌다. 누름은 `arm()`이 거절한다 — 화면과 같은 판정으로. */}
             <Button
               size="sm"
               ref={approveRef}
-              // 진짜로 할 수 없다(tokens §5b): 자격 있는 호스트가 하나도 없으면
-              // 서버는 이 승인에 409로 답한다. 이유는 픽커 아래에 이미 서 있으므로
-              // 꺼진 버튼이 설명 없이 서 있는 경우가 아니다.
-              disabled={!hostGate.canApprove}
+              variant={hostGate.canApprove ? "default" : "outline"}
+              className={cn(!hostGate.canApprove && "text-ink-muted")}
+              aria-disabled={!hostGate.canApprove || undefined}
+              aria-describedby={
+                hostGate.canApprove ? undefined : blockedId
+              }
+              data-blocked={hostGate.canApprove ? undefined : ""}
               data-testid={`${testIdPrefix}-approve`}
               onClick={() => arm("approve")}
             >

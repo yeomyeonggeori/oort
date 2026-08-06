@@ -1000,9 +1000,18 @@ async function exerciseSpawnPicker(browser, delayMs) {
   const confirm = page.getByTestId("inbox-approval-confirm").first();
   await confirm.waitFor();
   const confirmText = (await confirm.textContent()) ?? "";
-  if (!confirmText.includes("「내 맥」에서 실행합니다")) {
+  // 목적지는 **조건절 안**에 있다 (design-review H3). "…에서 실행합니다"로 앞세우면
+  // 이 승인이 지킬 수 없는 약속을 현재 직설로 단언하게 되고, 바로 뒤 문장이 조심스럽게
+  // 단 조건과 서로를 반박한다. 그래서 둘을 함께 잰다: 목적지가 있는가, 그리고 그것이
+  // 실행을 단언하지 않는가.
+  if (!confirmText.includes("승인하면 에이전트가 내 맥에서 이어서 진행합니다")) {
     throw new Error(
       `destination in the sentence: 확정 문장이 목적지를 말하지 않았다 (${confirmText})`
+    );
+  }
+  if (/에서 실행합니다/.test(confirmText)) {
+    throw new Error(
+      `destination stays conditional: 확정 문장이 계약을 넘어 실행을 단언했다 (${confirmText})`
     );
   }
   // 확정 화면에서 라디오는 잠긴다. 문장이 목적지를 말한 뒤 그 아래에서 목적지가
@@ -1010,6 +1019,18 @@ async function exerciseSpawnPicker(browser, delayMs) {
   if (!(await radioState(page, remoteHostId)).disabled) {
     throw new Error(
       "picker locks on confirm: 확정 문장이 목적지를 말한 뒤에도 목적지를 바꿀 수 있다"
+    );
+  }
+  // **잠긴 것은 누르기 전에 보여야 한다** (design-review B1). `<fieldset disabled>`는
+  // `<input>`만 잠그고 `<label>`은 폼 컨트롤이 아니라, 커서와 hover가 그대로 살아
+  // 줄이 마우스 밑에서 밝아지며 "누르라"고 말한 뒤 클릭을 삼켰다. 클래스가 아니라
+  // **계산된 스타일**을 잰다: 클래스 이름은 CSS가 실제로 무엇을 그리는지 모른다.
+  const lockedCursor = await page
+    .getByTestId(`inbox-approval-host-option-${remoteHostId}`)
+    .evaluate((node) => getComputedStyle(node).cursor);
+  if (lockedCursor === "pointer") {
+    throw new Error(
+      "locked rows stop inviting a click: 잠긴 줄이 여전히 포인터 커서를 띄운다"
     );
   }
   await page.waitForTimeout(500);
@@ -1107,18 +1128,65 @@ async function exerciseSpawnBlocked(browser, delayMs) {
       "no eligible host blocks approve: 고를 것이 없는데 화면이 아무 말도 하지 않았다"
     );
   }
-  // 사고가 아니라 상태다. alert으로 끼어들면 이 줄이 오류처럼 읽힌다.
-  if ((await blocked.getAttribute("role")) !== "status") {
-    throw new Error("no eligible host blocks approve: 안내가 alert으로 그려졌다");
+  // 사고가 아니라 상태다. alert으로 끼어들면 이 줄이 오류처럼 읽힌다. 그렇다고
+  // `role="status"`도 아니다 (design-review M5): 라이브 리전은 **바뀐** 내용을
+  // 읽는데 이 문장은 첫 페인트부터 거기 있어 아무것도 발화되지 않는다. 대신 아래에서
+  // 승인 버튼이 `aria-describedby`로 이 문장을 되짚는지를 잰다.
+  const blockedRole = await blocked.getAttribute("role");
+  if (blockedRole !== null) {
+    throw new Error(
+      `no eligible host blocks approve: 안내에 role=${blockedRole} 이 붙어 있다`
+    );
   }
 
   const approve = page.getByTestId("inbox-approval-approve").first();
-  if (!(await approve.isDisabled())) {
+  // 네이티브 `disabled`가 **아니다** (design-review H1). 채움 버튼에 걸린
+  // `disabled:opacity-50`은 「승인」을 2.23:1로 떨어뜨리고, 무엇보다 disabled 버튼은
+  // 초점을 받지 못해 키보드/보이스오버 사용자가 막힌 컨트롤을 아예 만나지 못한다.
+  // 그래서 판정은 세 가지를 함께 잰다: 상태는 알리되(aria-disabled), 초점은
+  // 남기고(tabbable), 이유는 되짚는다(aria-describedby → 그 문장).
+  if ((await approve.getAttribute("aria-disabled")) !== "true") {
     throw new Error(
       "no eligible host blocks approve: 실행할 호스트가 없는데 승인 버튼이 살아 있다"
     );
   }
-  await approve.dispatchEvent("click");
+  // DOM 속성을 직접 읽는다. Playwright의 `isDisabled()`는 `aria-disabled`도 함께
+  // 세므로 이 구분(네이티브 disabled인가 / 상태만 알리는가)에는 쓸 수 없다 —
+  // 그리고 이 단언이 지키려는 것이 정확히 그 구분이다.
+  if (await approve.evaluate((node) => node.disabled)) {
+    throw new Error(
+      "blocked approve stays reachable: 막힌 승인이 네이티브 disabled라 초점이 닿지 않는다"
+    );
+  }
+  const describedBy = await approve.getAttribute("aria-describedby");
+  const blockedDomId = await blocked.getAttribute("id");
+  if (!describedBy || describedBy !== blockedDomId) {
+    throw new Error(
+      `blocked approve names its reason: aria-describedby=${describedBy} 가 사유 문장(${blockedDomId})을 가리키지 않는다`
+    );
+  }
+  await approve.focus();
+  const focused = await page.evaluate(() =>
+    document.activeElement?.getAttribute("data-testid")
+  );
+  if (focused !== "inbox-approval-approve") {
+    throw new Error(
+      `blocked approve stays reachable: 막힌 승인에 초점이 닿지 않는다 (${focused})`
+    );
+  }
+  // 진짜 마우스로 누른다. 로케이터의 `.click()`은 `aria-disabled`를 보고 액셔너빌리티
+  // 대기에 들어가 타임아웃으로 끝나는데, 타임아웃은 무엇이 틀렸는지 말하지 않는다.
+  const approveBox = await approve.boundingBox();
+  if (approveBox === null) {
+    throw new Error("no eligible host blocks approve: 승인 버튼이 화면에 없다");
+  }
+  await page.mouse.click(
+    approveBox.x + approveBox.width / 2,
+    approveBox.y + approveBox.height / 2
+  );
+  // 키보드도 같은 문을 지나야 한다: 초점이 이미 그 버튼에 있으므로 Enter가 곧
+  // 두 번째 입구다.
+  await page.keyboard.press("Enter");
   await page.waitForTimeout(delayMs + 200);
   if ((await page.getByTestId("inbox-approval-confirm").count()) !== 0) {
     throw new Error(

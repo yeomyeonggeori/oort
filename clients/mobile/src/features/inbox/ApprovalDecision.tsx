@@ -8,7 +8,7 @@ import {
   decisionHostId,
   findCandidate,
   preselectedHostId,
-  spawnDestinationClause,
+  spawnApproveLead,
   spawnHostGate,
 } from '@momo/core/features/timeline/spawnHostChoice';
 import React, {useCallback, useRef, useState} from 'react';
@@ -361,14 +361,11 @@ export function confirmCopy(
     return '기한이 지난 요청입니다. 지금 보내면 승인도 거부도 아닌 만료로 기록됩니다.';
   }
   if (armed === 'approve') {
-    const base = reversible
-      ? '승인하면 에이전트가 이어서 진행합니다.'
-      : '승인하면 에이전트가 이어서 진행합니다. 되돌릴 수 없습니다.';
-    // 확정 화면에서 라디오는 잠긴다. 잠긴 컨트롤을 다시 읽어 목적지를 확인하게
-    // 하는 대신, 사람이 지금 누르려는 버튼 바로 위에서 어디로 가는지 말한다.
-    return hostName === null
-      ? base
-      : `${spawnDestinationClause(hostName)} ${base}`;
+    // 목적지는 **조건절 안**에 있다. 별도 문장으로 앞세우면("…에서 실행합니다")
+    // 이 승인이 지킬 수 없는 약속을 현재 직설로 단언하게 되고, 바로 뒤에 오는
+    // 조건과 서로를 반박한다 — 근거는 코어 `spawnApproveLead`에 있다.
+    const base = spawnApproveLead(hostName);
+    return reversible ? base : `${base} 되돌릴 수 없습니다.`;
   }
   return '거부하면 대기 중인 실행이 취소됩니다.';
 }

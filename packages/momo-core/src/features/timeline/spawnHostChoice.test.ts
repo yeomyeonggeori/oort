@@ -7,7 +7,7 @@ import {
   offersHostChoice,
   preselectedHostId,
   selectableHosts,
-  spawnDestinationClause,
+  spawnApproveLead,
   spawnHostGate,
   tierLabel,
   unavailableReasonCopy,
@@ -211,7 +211,19 @@ describe("문구", () => {
     expect(tierLabel("local")).toBe("로컬");
   });
 
-  it("확정 문장이 목적지를 말한다", () => {
-    expect(spawnDestinationClause("내 맥")).toBe("「내 맥」에서 실행합니다.");
+  it("확정 문장의 목적지는 **조건절 안**에 있다 — 실행을 단언하지 않는다", () => {
+    // 이 제품의 승인은 실행을 보장하지 않는다(run이 hold를 떠났으면 재개 job이
+    // 아예 들어가지 않는다). 「…에서 실행합니다」는 그 보장을 하는 문장이었다.
+    expect(spawnApproveLead("팀 VPS")).toBe(
+      "승인하면 에이전트가 팀 VPS에서 이어서 진행합니다."
+    );
+    expect(spawnApproveLead("팀 VPS")).not.toMatch(/에서 실행합니다/);
+    // 꺾쇠는 이 제품의 사용자 문구에 없던 구두점이다. 화면에서 새 관습을
+    // 시작하지 않는다.
+    expect(spawnApproveLead("팀 VPS")).not.toMatch(/[「」]/);
+  });
+
+  it("목적지를 모르면 그 자리가 통째로 빠진다", () => {
+    expect(spawnApproveLead(null)).toBe("승인하면 에이전트가 이어서 진행합니다.");
   });
 });

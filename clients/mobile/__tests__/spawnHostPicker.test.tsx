@@ -10,6 +10,7 @@ import {
   waitFor,
 } from '@testing-library/react-native';
 import React from 'react';
+import {StyleSheet, Text} from 'react-native';
 
 import '../src/boot/polyfills';
 import '../src/boot/coreHost';
@@ -388,8 +389,11 @@ describe('확정 문장', () => {
     fireEvent.press(screen.getByTestId(`${PREFIX}-host-option-${REMOTE}`));
     fireEvent.press(screen.getByTestId(`${PREFIX}-approve`));
     await screen.findByTestId(`${PREFIX}-confirm`);
+    // 목적지는 **조건절 안**에 있다: 이 승인은 실행을 보장하지 않으므로
+    // 「…에서 실행합니다」로 단언하면 바로 뒤 조건과 서로를 반박한다
+    // (design-review H3).
     expect(
-      screen.getByText(/「팀 VPS」에서 실행합니다\./),
+      screen.getByText(/승인하면 에이전트가 팀 VPS에서 이어서 진행합니다\./),
     ).toBeTruthy();
     // 문장이 목적지를 말한 뒤 그 아래에서 목적지가 바뀌면, 읽은 문장과 나가는
     // 요청이 달라진다.
@@ -397,5 +401,29 @@ describe('확정 문장', () => {
       screen.getByTestId(`${PREFIX}-host-option-${LOCAL}`).props
         .accessibilityState.disabled,
     ).toBe(true);
+  });
+
+  it("잠긴 픽커는 살아 있는 픽커와 **달라 보인다** (design-review B1)", () => {
+    // 잠금은 탭을 막는 것으로 끝나지 않는다. 앞 판은 `locked`를 읽는 스타일 갈래가
+    // 하나도 없어서, 잠긴 픽커가 살아 있는 픽커와 픽셀까지 같았다 — 탭은 아무 일도
+    // 하지 않는데 화면은 그 사실을 말하지 않았다.
+    // 줄 안의 첫 `Text`가 이름이고 두 번째가 tier다. 이름 쪽만 본다.
+    const nameOf = (hostId: string) =>
+      screen
+        .getByTestId(`${PREFIX}-host-option-${hostId}`)
+        .findAllByType(Text as never)[0];
+
+    installFetch();
+    mount(
+      <ApprovalDecision
+        approvalId={APPROVAL}
+        execution={plan()}
+        onSettled={() => {}}
+      />,
+    );
+    const liveColor = StyleSheet.flatten(nameOf(REMOTE).props.style).color;
+    fireEvent.press(screen.getByTestId(`${PREFIX}-approve`));
+    const lockedColor = StyleSheet.flatten(nameOf(REMOTE).props.style).color;
+    expect(lockedColor).not.toBe(liveColor);
   });
 });
