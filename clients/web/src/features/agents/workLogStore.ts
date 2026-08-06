@@ -149,10 +149,15 @@ export function useWorkLog(target: WorkLogTarget | null): WorkLog | null {
 /** 패널이 지금 열고 있는 run. 열려 있지 않으면 null. */
 export interface WorkPanelTarget extends WorkLogTarget {
   /**
-   * run을 연 자리. 진입점이 둘(대화 활동 줄, 에이전트 허브의 현재 작업)이고,
-   * 닫을 때 캐럿을 어디로 돌려줄지는 연 쪽이 안다.
+   * run을 연 자리. 진입점이 셋(대화 활동 줄, 에이전트 허브의 현재 작업, ADE 관제
+   * 서랍의 카드)이고, 닫을 때 캐럿을 어디로 돌려줄지는 연 쪽이 안다.
+   *
+   * 이 값이 여는 키의 일부라는 것(`openWorkPanel`의 `same` 판정)이 `ade`를 세
+   * 번째 갈래로 세운 이유다: 같은 run을 컴포저에서 열었다가 서랍에서 다시 여는
+   * 것은 **새로 연 것**이고, 키가 같으면 패널은 캐럿을 이미 사라진 컴포저
+   * 버튼으로 돌려주려 한다.
    */
-  origin: "activity" | "hub";
+  origin: "activity" | "hub" | "ade";
   /**
    * 턴이 시작된 서버 시각, **연 쪽이 알고 있을 때만**.
    *

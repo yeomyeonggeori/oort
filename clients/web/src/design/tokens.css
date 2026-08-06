@@ -655,6 +655,39 @@
   }
 }
 
+/* ADE 관제 서랍 기하 (ADR-0154 D2, #1135).
+ *
+ * **이 유틸리티의 존재 이유는 한 줄이다: 서랍이 라우트를 밀지 않는다.** 요약 줄은
+ * 라우트 위에 있고 서랍은 그 줄을 눌러 내려오는데, 그것이 흐름 안의 블록이면
+ * 열 때마다 타임라인이 서랍 높이만큼 줄었다 늘었다 한다 — 「작성 중」 줄이 컴포저를
+ * 26px 밀었던 그 결함과 같은 종류이고, 이쪽은 변위가 그 몇 배다. 그래서 절대
+ * 위치로 라우트 상자를 **덮는다**. 게이트가 여는 전후의 좌표를 픽셀로 잰다.
+ *
+ * 앵커는 AppShell 이 이미 갖고 있는 라우트 상자의 `relative` 다 — 작업 패널이
+ * 폰 폭에서 쓰는 그 상자이고, 새 앵커를 만들면 문서가 스크롤할 수 있게 된다
+ * (MOMO-610).
+ *
+ * 폭이 `--spacing-pane`(320px)이 아니라 `--spacing-pane-lg`(640px)인 이유: 이
+ * 목록의 한 줄은 제목 + 상태 칩 + 생존성 배지 + 경과 + diff 자리이고, 320px 에서는
+ * 「기기를 꺼도 계속됩니다」한 조각이 이미 폭의 절반이다. 640px 은 이 레포가
+ * 「카드는 배너가 아니다」로 정해 둔 그 측정값이다.
+ *
+ * 600px 아래에서는 상한을 걷고 표면을 통째로 받는다. 320px 짜리 띠가 화면 왼쪽에
+ * 걸리면 그 아래로 반쯤 보이는 라우트가 남는데, 작업 세션 패널이 같은 폭에서
+ * 전면을 택한 근거가 그것이다(반쯤 가려진 컨트롤은 아예 가려진 것보다 나쁘다). */
+@utility ade-drawer {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 0;
+  inline-size: 100%;
+  max-inline-size: var(--spacing-pane-lg);
+  z-index: 20;
+
+  @media (width < 600px) {
+    max-inline-size: none;
+  }
+}
+
 /* Agent Hub keeps its roster and detail side by side while both have useful
  * reading width. In a narrow shell they become one column, so neither is asked
  * to survive in the remainder left after two fixed rails. The roster keeps one

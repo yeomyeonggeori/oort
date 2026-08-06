@@ -27,6 +27,7 @@
     "gate:workstream": "vite build --mode workstream-gate && node gates/gate-workstream.mjs",
     "gate:approvals": "npm run build && node gates/gate-approvals.mjs",
     "gate:work-panel": "npm run build && node gates/gate-work-panel.mjs",
+    "gate:ade": "npm run build && node gates/gate-ade.mjs",
     "gate:ailink": "npm run build && node gates/gate-ailink.mjs",
     "gate:quote": "npm run build && node gates/gate-quote.mjs",
     "gate:typing": "npm run build && node gates/gate-typing.mjs",

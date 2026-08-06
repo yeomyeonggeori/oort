@@ -29,6 +29,9 @@ import { AgentWorkPanel } from "@/features/agents/AgentWorkPanel";
 import { useWorkPanelTarget } from "@/features/agents/workLogStore";
 import { AgentTurnFixture } from "@/features/agents/AgentTurnFixture";
 import { agentTurnFixtureMode } from "@/features/agents/turnFixture";
+import { AdeSummaryLine } from "@/features/ade/AdeSummaryLine";
+import { AdeDrawer } from "@/features/ade/AdeDrawer";
+import { useAdeDrawerOpen } from "@/features/ade/adeDrawerStore";
 
 // =============================================================================
 // Signed-in shell: owns the single realtime rail for the session and renders
@@ -88,8 +91,14 @@ export function AppShell({
     query.addEventListener("change", sync);
     return () => query.removeEventListener("change", sync);
   }, []);
+  // ADE 관제 서랍(ADR-0154 D2)도 라우트를 덮으므로 같은 규칙을 받는다. 다만
+  // 문턱이 없다: 이 서랍은 어느 폭에서든 절대 위치로 덮는다(tokens.css
+  // `ade-drawer` — 열고 닫을 때 라우트를 밀지 않는 것이 그 유틸리티의 존재
+  // 이유다). 셸이 이 상태에서 읽는 것은 이 불리언 하나뿐이라(스토어에 사는
+  // 이유는 `adeDrawerStore` 주석) 시계가 셸을 다시 그리지 않는다.
+  const adeDrawerOpen = useAdeDrawerOpen();
   const routeRef = useInertWhile<HTMLDivElement>(
-    paneDrawerWidth && workPanelOpen
+    (paneDrawerWidth && workPanelOpen) || adeDrawerOpen
   );
 
   const openDrawer = useCallback((opener?: HTMLElement | null) => {
@@ -217,6 +226,14 @@ export function AppShell({
                * 인박스도 활동도 갱신이 멈추고, 조용한 하루와 구별되지 않는다.
                * 그래서 이 줄은 라우트 위, 셸 안에 한 벌만 있다. */}
               <ConnectionBanner />
+              {/* ADE 관제 요약 한 줄 (ADR-0154 D2, 이슈 1135). 연결 배너와 같은
+               * 자리에 있고 이유도 같다: 재료의 절반이 워크스페이스 전역이라
+               * 채널 헤더에 두면 지금 보고 있는 방 밖의 작업이 화면에서 사라진다.
+               * 살아 있는 작업이 없으면 이 컴포넌트는 아무것도 그리지 않는다 —
+               * 빈 자리도 남기지 않는다(근거는 코어 `adeSummarySegments` 주석).
+               * `?stress=N`은 합성 행만 그리는 순수 스크롤 측정이라 소켓도 REST도
+               * 없다: 여기서 원장을 부르면 그 측정이 네트워크까지 재게 된다. */}
+              {!stress && <AdeSummaryLine />}
               {/* 라우트 하나가 던져도 사이드바·⌘K·설정·로그아웃은 살아 있어야
                * 한다. 앱 루트 경계만 있으면 채팅에서 난 오류가 셸을 통째로
                * 지워 사용자가 다른 화면으로 갈 길까지 사라진다. 실패는 그것을
@@ -241,6 +258,10 @@ export function AppShell({
                  * 다른 쪽에서 열 수 없고, 두 벌을 두면 같은 run에 대해 두 로그가
                  * 생긴다. */}
                 {!stress && <AgentWorkPanel />}
+                {/* 관제 서랍은 라우트 상자를 덮는다(tokens.css `ade-drawer`).
+                 * 작업 패널과 형제인 것이 요점이다: 카드를 누르면 서랍이 닫히고
+                 * 그 자리에 패널이 서므로 둘이 겹쳐 있는 순간이 없다. */}
+                {!stress && adeDrawerOpen && <AdeDrawer />}
               </div>
             </main>
           </div>
