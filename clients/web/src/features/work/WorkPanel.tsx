@@ -282,6 +282,10 @@ function MySessionRow({
   // 두 동사 중 어느 것이 성립하는가 (ADR-0154 D3). 판정은 서버 규칙 그대로이고
   // (`sessionHandoff`), 이 행은 그 답을 소비만 한다. `orphaned` 를 직접 보던
   // 자리가 여기였고, 그러면 이 파일이 판정의 두 번째 사본이 된다.
+  //
+  // 이 값은 `data-verb` 로 행에도 실린다. 게이트가 「어느 버튼이 그려졌는가」가
+  // 아니라 **무엇이 성립하는가**를 묻게 하기 위해서다 — 낱말과 배치는 이 티켓에서
+  // 실제로 바뀌었고, 그때 「고아 행에 재개가 서지 않는다」는 단정은 바뀌면 안 됐다.
   const verb = sessionHandoffVerb(session, hosts);
   const advisory = handoffAdvisory(verb, hostOnline);
   // 고를 것이 실제로 있을 때만 폼이 그려진다. 없으면 그 자리에 문장이 오고,
@@ -299,6 +303,7 @@ function MySessionRow({
       data-testid="my-work-session-row"
       data-session-id={session.id}
       data-status={status.key}
+      data-verb={verb ?? "none"}
       data-host-online={
         hostOnline === null ? "unknown" : hostOnline ? "true" : "false"
       }
@@ -361,35 +366,32 @@ function MySessionRow({
         </p>
       )}
       <div className="mt-2 flex flex-wrap justify-end gap-2">
-        {/* 상세로 가는 길은 동사가 아니다 — 어느 동사가 서든 이 버튼은 늘 있고,
-            늘 outline 이다. 동사 버튼만 채움을 진다. */}
+        {/* ---- 상세 = 동사 1(재개)이 성립할 때는 그 동사 그 자체 -------------
+            이 자리에는 앞 판에서 **버튼이 두 개** 있었다. `세션 상세`와
+            `이어서 보기`가 나란히 서서 `onOpenDetail` 하나를 함께 눌렀다(R1 M3).
+            같은 곳으로 가는 두 이름은 사람에게 두 곳이 있다고 말하고, 그것은 이
+            티켓이 낱말에 대해 고치려던 결함과 **정확히 같은 형태**다 — 방향만
+            반대일 뿐(한 act 에 두 이름).
+
+            그래서 버튼은 하나다. 목적지가 하나이기 때문이다. 이름은 그 목적지에
+            도착해서 할 수 있는 일을 따른다: 재개가 성립하면 거기서 진행 내역과
+            관전 터미널로 돌아가는 것이므로 「이어서 보기」이고(코어
+            `HANDOFF_COPY`; 「보기」인 이유는 이 클라이언트가 observer 로만 붙기
+            때문이다), 그렇지 않으면 볼 것은 기록뿐이므로 「세션 상세」다. 채움은
+            동사가 설 때만 진다.
+
+            판정 자체는 `data-verb` 로 행에 실린다(아래 `<li>`) — 게이트가 어느
+            버튼이 그려졌는지가 아니라 **무엇이 성립하는지**를 물을 수 있게. */}
         <Button
           ref={detailRef}
           type="button"
-          variant="outline"
+          variant={verb === "resume" ? "default" : "outline"}
           size="sm"
           onClick={onOpenDetail}
           data-testid="my-work-session-detail"
         >
-          세션 상세
+          {verb === "resume" ? HANDOFF_COPY.resume.button : "세션 상세"}
         </Button>
-        {/* ---- 동사 1: 재개 --------------------------------------------------
-            세션은 아직 원래 호스트에 있다. 「보기」인 이유는 이 클라이언트가
-            observer 로만 붙기 때문이고(코어 `HANDOFF_COPY` 주석), 잃는 것이
-            없으므로 고지도 사전조건도 없다. 상세가 곧 그 표면이라 같은 곳으로
-            간다 — 다만 **다른 이름으로**: 이 행에서 그것은 「상세를 본다」가
-            아니라 「돌아간다」다. */}
-        {verb === "resume" && (
-          <Button
-            type="button"
-            variant="default"
-            size="sm"
-            onClick={onOpenDetail}
-            data-testid="my-work-session-resume"
-          >
-            {HANDOFF_COPY.resume.button}
-          </Button>
-        )}
         {/* ---- 동사 2: 인수 --------------------------------------------------
             열기 전에는 이 토글이 이 행의 결정이므로 채움이고, 열린 뒤에는 결정이
             확정 버튼으로 옮겨가므로 ghost로 물러난다. 라벨도 함께 바뀐다 —
@@ -411,9 +413,16 @@ function MySessionRow({
             {resumeOpen ? "호스트 선택 닫기" : HANDOFF_COPY.takeover.button}
           </Button>
         )}
-        {/* 동사가 없는 세션(끝났거나 붙을 것이 없다)에도 스레드는 남아 있다.
-            그 한 길이 이 버튼이고, 동사가 선 행에서는 상세가 같은 일을 하므로
-            중복으로 세우지 않는다. */}
+        {/* 동사가 없는 세션(끝났거나 붙을 것이 없다)에도 스레드는 남아 있고,
+            그 행에서는 이 버튼이 유일한 길이다.
+
+            동사가 선 행에서 이 버튼을 빼는 것은 세 번째 버튼을 피하려는
+            것이지 스레드가 필요 없어서가 아니다(R1 H2 부수). 앞 판의 주석은
+            「상세가 같은 일을 한다」고 적었지만 그것은 틀렸다 — 상세는 세션
+            원장이고 스레드는 채널 대화다. 그래서 그 길은 사라진 것이 아니라
+            상세 안으로 옮겨갔다(`WorkSessionDetail` 의 채널 스레드 줄). 도착지가
+            하나인 행에서 그 하나가 잃은 길을 다시 내주는 것이 세 개를 나란히
+            세우는 것보다 낫고, 상세는 이미 그 채널의 이름을 말하고 있다. */}
         {verb === null && (
           <Button
             type="button"
@@ -974,6 +983,8 @@ export function WorkPanel({
           wide={wide}
           onWideChange={setWide}
           onBack={closeDetail}
+          openingThread={uuidEq(openingThreadId ?? undefined, selected.id)}
+          onOpenThread={() => onOpenThread(selected)}
           onResumed={(resumedId) => {
             void sessionsQuery.refetch();
             onSelectedIdChange(resumedId);

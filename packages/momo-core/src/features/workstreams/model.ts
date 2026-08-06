@@ -8,6 +8,7 @@ import {
   type WorkstreamStatus,
 } from "../../lib/api";
 import { workSessionResumeTargets } from "../work/workSessionModel";
+import { TAKEOVER_NO_TARGET_COPY } from "../work/sessionHandoff";
 import {
   channelLabel,
   memberFor,
@@ -253,20 +254,20 @@ function closedStatus(
 }
 
 /**
- * Whether 이어받기 can be offered, and when it cannot, which fact stopped it.
+ * Whether 인수 can be offered, and when it cannot, which fact stopped it.
  *
  * Every branch is a different sentence to the reader, which is why this returns
- * a reason rather than a boolean: "아직 실행이 없습니다", "이어받을 수 있는
- * 실행이 없습니다" and "온라인인 호스트가 없습니다" are three different next
+ * a reason rather than a boolean: "아직 실행이 없습니다", "지금 인수할 실행이
+ * 없습니다" and "인수할 수 있는 다른 호스트가 없습니다" are three different next
  * actions, and a disabled button with one generic tooltip is none of them.
  *
  * The workstream's OWN status is the first question, ahead of transport and
  * ahead of the run ledger, and it is a separate question from the runs: a goal
  * that was completed or cancelled can still hold an orphaned Run (a host dies
- * after the work is called done), and reading only the runs offered "새 호스트에서
- * 이어받기" 180px under a 완료 chip (1R M1, measured). It has to outrank
+ * after the work is called done), and reading only the runs offered a 인수
+ * control 180px under a 완료 chip (1R M1, measured). It has to outrank
  * `offline` too, because the offline sentence promises "다시 연결되면 이 자리에서
- * 이어받을 수 있습니다", and for a finished goal that promise is simply false.
+ * 인수할 수 있습니다", and for a finished goal that promise is simply false.
  * The status is the one the page is already rendering, so the block cannot
  * disagree with the chip in its own header.
  */
@@ -311,33 +312,36 @@ export function continuationBlockedCopy(
         ? "이 목표는 완료됐습니다. 이어서 할 일이 있으면 앵커 대화에서 새 작업으로 시작하세요."
         : "이 목표는 취소됐습니다. 다시 해야 한다면 앵커 대화에서 새 작업으로 시작하세요.";
     case "offline":
-      return "연결이 끊겨 지금은 이어받을 수 없습니다. 다시 연결되면 이 자리에서 이어받을 수 있습니다.";
+      return "연결이 끊겨 지금은 인수할 수 없습니다. 다시 연결되면 이 자리에서 인수할 수 있습니다.";
     case "no-runs":
       return "아직 실행이 없습니다. 채널 스레드에서 작업을 시작하면 이 목표의 첫 실행으로 기록됩니다.";
     case "no-stopped-run":
-      return "지금 이어받을 실행이 없습니다. 호스트 연결이 끊긴 실행만 다른 호스트에서 이어받을 수 있습니다.";
+      // 「가져올 수 있습니다」로 적지 않는다. 이 표면의 어떤 문장도 워킹 트리를
+      // 약속하지 않는 것이 ADR-0143 D3 이고, 게이트가 그 낱말로 그 규칙을
+      // 지킨다(`gate-workstream` 왕복 단정).
+      return "지금 인수할 실행이 없습니다. 호스트 연결이 끊긴 실행만 다른 호스트에서 인수할 수 있습니다.";
     case "no-host":
-      return "온라인인 다른 호스트가 없습니다. 호스트를 연결한 뒤 다시 시도하세요.";
+      // 형제 표면과 **같은 문장**이다(sessionHandoff). 이 분기가 말하는 사실은
+      // 거기서 말하는 사실과 같은 것이고, 두 벌로 두면 같은 막힘이 두 가지
+      // 원인처럼 읽힌다 — 실제로 그랬다: 이쪽만 `online` 을 자격으로 불렀다.
+      return TAKEOVER_NO_TARGET_COPY;
   }
 }
 
 /**
- * The takeover failed. The status code decides the sentence because the server
- * uses the codes to mean different things, and folding them into one apology
- * would hide the only one the reader can act on.
+ * 인수 실패 문구는 **이 파일에 없다** (R1 H1).
+ *
+ * 여기 있던 `continuationErrorCopy` 는 상태 코드만 보고 세 문장을 갈랐다. 같은
+ * `POST …/resume` 를 부르는 작업 세션 패널은 그 사이 서버 메시지까지 읽도록
+ * 자랐고(`takeoverFailureCopy`), 두 번역기가 갈라진 지점이 정확히 **409**다:
+ * 서버는 그 코드로 「상태가 바뀌었다」와 「실행 슬롯이 다 찼다」(`pool_exhausted`)
+ * 와 「내 동시 실행 한도」(`member_limit`)를 함께 말한다. 이 파일의 409 문장은
+ * 그 셋 전부에 「이력을 새로고침한 뒤 다시 확인하세요」라고 답했고, 슬롯이 찬
+ * 사람은 새로고침을 반복하게 된다.
+ *
+ * 한 act 의 실패는 한 곳에서 번역한다 — 이 티켓이 낱말에 대해 세운 규칙과 같은
+ * 규칙이다. 호출자는 `features/work/sessionHandoff.takeoverFailureCopy` 를 쓴다.
  */
-export function continuationErrorCopy(status: number | null): string {
-  if (status === 403) {
-    return "이 채널의 멤버만 이어받을 수 있습니다. 채널에서 나갔거나 권한이 바뀌었는지 확인하세요.";
-  }
-  if (status === 409) {
-    return "이 실행은 더 이상 이어받을 수 있는 상태가 아닙니다. 이력을 새로고침한 뒤 다시 확인하세요.";
-  }
-  if (status === 404) {
-    return "이 실행을 찾지 못했습니다. 이력을 새로고침한 뒤 다시 확인하세요.";
-  }
-  return "이어받지 못했습니다. 호스트 상태를 확인한 뒤 다시 시도하세요.";
-}
 
 /**
  * Name a channel the way the 작업 세션 패널 names it: `#채널` for a channel, the

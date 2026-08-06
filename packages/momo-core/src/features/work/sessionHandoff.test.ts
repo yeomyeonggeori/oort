@@ -5,7 +5,7 @@ import {
   REPLAY_ONLY_COPY,
   TAKEOVER_DISCLOSURE_HEADLINE,
   TAKEOVER_FRESH,
-  TAKEOVER_ONE_WAY_COPY,
+  TAKEOVER_NO_TARGET_COPY,
   TAKEOVER_RESTORED,
   handoffAdvisory,
   handoffVerb,
@@ -15,6 +15,7 @@ import {
   showsOneWayNote,
   takeoverFailureCopy,
   takeoverGate,
+  takeoverOneWayCopy,
   takeoverTargets,
   workHostRevoked,
 } from "./sessionHandoff";
@@ -251,6 +252,9 @@ describe("takeoverGate — 사전조건 선검사", () => {
     const gate = takeoverGate(orphan, HOSTS, []);
     expect(gate.canTakeover).toBe(false);
     expect(gate.blockedCopy).toContain("호스트 앱");
+    // 형제 표면(작업 흐름 상세)이 같은 사실에 쓰는 문장과 **같은 상수**다.
+    // 두 벌이던 시절 이쪽만 `online` 을 자격으로 불렀다 (R1 H1).
+    expect(gate.blockedCopy).toBe(TAKEOVER_NO_TARGET_COPY);
   });
 
   // 모든 차단 문장은 행동 지시형이다 — 「무엇을 하면 되는지」(ADR-0154 D3).
@@ -358,6 +362,23 @@ describe("부분 복원 고지", () => {
       expect(TAKEOVER_FRESH).not.toContain(item);
     }
   });
+
+  // R1 B2: 이 목록의 항목은 사람이 읽는 문구다. em-dash 는 SKILL §7의 binary
+  // fail 인데, 이 패키지를 훑는 프리플라이트가 없어서(그 스크립트는 clients/web
+  // 만 본다) 세 건이 그대로 실렸다. 게이트가 못 보는 자리는 테스트가 본다.
+  it("사람이 읽는 문구에 em-dash 가 없다", () => {
+    for (const line of [
+      ...TAKEOVER_RESTORED,
+      ...TAKEOVER_FRESH,
+      TAKEOVER_DISCLOSURE_HEADLINE,
+      TAKEOVER_NO_TARGET_COPY,
+      REPLAY_ONLY_COPY,
+      HANDOFF_COPY.resume.lead,
+      HANDOFF_COPY.takeover.lead,
+    ]) {
+      expect(line).not.toMatch(/[—–]/);
+    }
+  });
 });
 
 // ---- 비대칭 (ADR-0154 D4 단방향) ---------------------------------------------
@@ -378,7 +399,22 @@ describe("단방향 비대칭 고지", () => {
     expect(showsOneWayNote(null, orphan, HOSTS, ME)).toBe(false);
   });
 
-  it("문구는 무엇이 그것을 바꾸는지까지 말한다", () => {
-    expect(TAKEOVER_ONE_WAY_COPY).toContain("멈춘 뒤");
+  // R1 M1: 앞 판은 상수 하나였고, 그 한 문장이 두 군데서 어긋났다.
+  it("주어가 카드의 상태를 따른다 — 대기 중인 세션을 「실행 중」이라 부르지 않는다", () => {
+    expect(takeoverOneWayCopy("idle")).toContain("대기 중인 세션");
+    expect(takeoverOneWayCopy("idle")).not.toContain("실행 중인 세션");
+    expect(takeoverOneWayCopy("running")).toContain("실행 중인 세션");
+  });
+
+  it("사람이 걸을 수 없는 길을 가리키지 않는다", () => {
+    // 사람이 세션을 멈추면 그것은 `ended` 이고, `ended` 는 인수 대상이 아니다.
+    // 인수를 여는 것은 **호스트의 신호 끊김**(스윕)뿐이다. 앞 판의 「그 기기에서
+    // 멈춘 뒤에야」를 그대로 따른 사람은 영영 인수하지 못한다.
+    for (const status of ["running", "idle"] as const) {
+      const copy = takeoverOneWayCopy(status);
+      expect(copy).not.toContain("멈춘 뒤");
+      expect(copy).toContain("연결이 끊긴 뒤");
+      expect(copy).not.toMatch(/[—–]/);
+    }
   });
 });

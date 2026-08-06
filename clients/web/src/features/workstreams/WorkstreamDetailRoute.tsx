@@ -18,7 +18,10 @@ import { relativeLabel } from "@momo/core/features/inbox/model";
 import { useChannels, useDirectory } from "@/features/workspace/useWorkspace";
 import { HostPicker } from "@/features/work/HostPicker";
 import { TakeoverDisclosure } from "@/features/work/TakeoverDisclosure";
-import { HANDOFF_COPY } from "@momo/core/features/work/sessionHandoff";
+import {
+  HANDOFF_COPY,
+  takeoverFailureCopy,
+} from "@momo/core/features/work/sessionHandoff";
 import { useWorkHosts } from "@/features/work/useWorkSessions";
 import {
   workHostName,
@@ -39,7 +42,6 @@ import {
   actorCount,
   channelDisplayName,
   continuationBlockedCopy,
-  continuationErrorCopy,
   continuationState,
   isWorkstreamMissing,
   runClockLabel,
@@ -168,7 +170,7 @@ function RunRow({
             </span>
             {/* 그 에이전트를 누가 책임지는가 (skill §9, PR 918 R1 M6). 원장의
                 요점이 "A -> 에이전트 -> C"인데 가운데 칸에 책임 주체가 없으면,
-                이어받기를 물어볼 사람이 화면에 없다. 문장은 멤버 디렉터리·
+                인수를 물어볼 사람이 화면에 없다. 문장은 멤버 디렉터리·
                 타임라인이 이미 쓰는 것과 같다. */}
             {actor.ownerName !== null && (
               <span
@@ -179,12 +181,15 @@ function RunRow({
               </span>
             )}
           </span>
+          {/* 계보 칩도 같은 낱말이다 (ADR-0154 D3). 이 행을 만든 act 가 바로 위
+              블록의 「인수」인데 그 결과물이 「이어받음」으로 적히면, 한 화면이 한
+              act 를 두 이름으로 부르는 이 티켓의 결함이 원장 안에서 다시 산다. */}
           {run.resumedFromSessionId !== undefined && (
             <span
               className={cn(CHIP_CLASS, "bg-surface-hover text-ink-muted")}
               data-testid="workstream-run-lineage"
             >
-              이어받음
+              인수함
             </span>
           )}
           <span
@@ -219,7 +224,7 @@ function RunRow({
 }
 
 /**
- * 이 표면에는 이어받기 블록이 하나뿐이므로 id는 상수다. 토글이 `aria-controls`로
+ * 이 표면에는 인수 블록이 하나뿐이므로 id는 상수다. 토글이 `aria-controls`로
  * 이 그룹을 가리키고, 그룹은 눈에 보이는 라벨을 `aria-labelledby`로 되짚는다.
  */
 const HOST_GROUP_ID = "workstream-continue-hosts";
@@ -255,7 +260,7 @@ function ContinuationBlock({
     status
   );
 
-  // 성공하면 방금 누른 버튼이 사라진다. 이어받기가 성공한 순간 그 실행은 더 이상
+  // 성공하면 방금 누른 버튼이 사라진다. 인수가 성공한 순간 그 실행은 더 이상
   // 고아가 아니고, 상태가 `ready`에서 `no-stopped-run`으로 넘어가면서 호스트 목록도
   // 토글 버튼도 언마운트되기 때문이다. 아무것도 하지 않으면 포커스는 <body>로
   // 떨어지고, 키보드 사용자는 안내만 듣고 문서 최상단에 남는다(1R M2). 오류
@@ -310,9 +315,15 @@ function ContinuationBlock({
         setOpen(false);
         setDone(true);
       } catch (cause) {
+        // 형제 표면과 **같은 번역기**다 (R1 H1). 이 자리에 있던
+        // `continuationErrorCopy` 는 상태 코드만 봤고, 서버가 409 하나로 말하는
+        // 세 가지 — 상태 변화 · `pool_exhausted` · `member_limit` — 에 전부
+        // 「이력을 새로고침하세요」라고 답했다. 슬롯이 찬 사람에게 그것은 아무리
+        // 반복해도 풀리지 않는 지시다.
         setError(
-          continuationErrorCopy(
-            cause instanceof ApiError ? cause.status : null
+          takeoverFailureCopy(
+            cause instanceof ApiError ? cause.status : undefined,
+            cause instanceof Error ? cause.message : undefined
           )
         );
       } finally {

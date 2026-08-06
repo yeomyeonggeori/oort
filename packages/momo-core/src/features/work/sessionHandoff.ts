@@ -205,9 +205,28 @@ export const HANDOFF_COPY: Readonly<Record<HandoffVerb, HandoffVerbCopy>> = {
  * 즉 **살아 있는 기기에서 세션을 빼앗을 수 없다.** 강제 플래그도, 생존성 무시
  * 경로도 없다. 이 사실을 화면이 말하지 않으면 사람은 다른 기기에서 도는 세션을
  * 보며 「인수 버튼이 어디 있지」를 찾다가, 그것이 없는 것을 결함으로 읽는다.
+ *
+ * ## 상수가 아니라 함수인 이유 (R1 M1)
+ *
+ * 앞 판은 한 문장이었고, 그 문장이 두 군데서 어긋났다.
+ *
+ * 1. **주어가 유휴 세션에서 틀렸다.** 이 고지가 서는 조건은 verdict `reattach`
+ *    인데 그 판정은 `running` 과 `idle` 을 함께 받는다. 대기 중인 세션 위에서
+ *    「실행 중인 세션은」은 화면이 같은 카드에 「완료 · 대기 중」이라고 적어 둔
+ *    것과 정면으로 다르다.
+ * 2. **없는 길을 약속했다.** 「그 기기에서 멈춘 뒤에야」는 사람이 걸을 수 있는
+ *    길처럼 읽히지만, 사람이 세션을 멈추면 그것은 `ended` 이고 `ended` 는 인수
+ *    대상이 아니다(서버는 `orphaned` 만 받는다). `orphaned` 를 만드는 것은
+ *    스윕뿐이고 그 조건은 **호스트가 신호를 끊는 것**이다. 즉 앞 판의 문장을
+ *    그대로 따른 사람은 인수를 영영 못 하게 된다.
+ *
+ * 그래서 지금 문장은 조건을 말하고 지시하지 않는다. 상태는 카드가 이미 렌더하고
+ * 있는 그 값을 받는다 — 고지가 칩과 다른 말을 할 수 없게.
  */
-export const TAKEOVER_ONE_WAY_COPY =
-  "실행 중인 세션은 인수할 수 없습니다. 그 기기에서 멈춘 뒤에야 다른 호스트로 가져올 수 있습니다.";
+export function takeoverOneWayCopy(status: WorkSession["status"]): string {
+  const subject = status === "idle" ? "대기 중인 세션" : "실행 중인 세션";
+  return `다른 기기에서 ${subject}입니다. 인수는 그 호스트의 연결이 끊긴 뒤에 열립니다.`;
+}
 
 /**
  * 지금 이 카드가 비대칭 고지를 세워야 하는가.
@@ -267,6 +286,18 @@ export interface TakeoverGate {
   /** 못 하는 이유 — **무엇을 하면 되는지**로 적는다. 가능하면 없다. */
   blockedCopy?: string;
 }
+
+/**
+ * 자격 있는 대상 호스트가 하나도 없다.
+ *
+ * 상수인 이유: 이 사실은 두 표면에서 **같은 사실**이다(작업 세션 패널의 인수
+ * 블록, 작업 흐름 상세의 인수 블록). 작업 흐름 쪽은 「온라인인 다른 호스트가
+ * 없습니다」라는 자기 문장을 들고 있었는데, 그 문장은 상태만 말하고 사람을 세워
+ * 두는 데다 `online` 을 자격 조건으로 부른다 — 이 파일 머리말이 못 믿는다고 적어
+ * 둔 바로 그 칼럼이고, 실제 자격 규칙(`takeoverTargets`)은 그것을 보지 않는다.
+ */
+export const TAKEOVER_NO_TARGET_COPY =
+  "인수할 수 있는 다른 호스트가 없습니다. 호스트 앱이 켜져 있는지 확인한 뒤 다시 시도하세요.";
 
 /**
  * 인수 사전조건 **선검사**. 요청을 보내기 전에 확실히 아는 것만 본다.
@@ -330,11 +361,7 @@ export function takeoverGate(
     // 이 상태의 원인은 거의 항상 「내 기계가 꺼져 있다」이고, 30초 안에 사람이
     // 고칠 수 있다. `spawnHostChoice.NO_ELIGIBLE_HOST_COPY` 가 같은 이유로 같은
     // 모양의 문장을 쓴다.
-    return {
-      canTakeover: false,
-      blockedCopy:
-        "인수할 수 있는 다른 호스트가 없습니다. 호스트 앱이 켜져 있는지 확인한 뒤 다시 시도하세요.",
-    };
+    return { canTakeover: false, blockedCopy: TAKEOVER_NO_TARGET_COPY };
   }
   return { canTakeover: true };
 }
@@ -405,7 +432,7 @@ export function takeoverFailureCopy(
  * 만든다. 목록은 그 판정을 대신 해 준다.
  */
 export const TAKEOVER_RESTORED: readonly string[] = [
-  "지금까지의 진행 내역 — 같은 스레드에 이어서 쌓입니다",
+  "지금까지의 진행 내역: 같은 스레드에 이어서 쌓입니다",
   "세션 이름과 도구, 관전 설정",
 ];
 
@@ -418,9 +445,9 @@ export const TAKEOVER_RESTORED: readonly string[] = [
  * 수 있는 사람도 그때부터 나다.
  */
 export const TAKEOVER_FRESH: readonly string[] = [
-  "실행 환경 — 새 호스트에서 처음부터 시작합니다",
+  "실행 환경: 새 호스트에서 처음부터 시작합니다",
   "이전 호스트의 터미널, 그리고 커밋하지 않은 변경",
-  "실행자 — 이 작업은 내 이름으로 이어집니다",
+  "실행자: 이 작업은 내 이름으로 이어집니다",
 ];
 
 /** 두 목록 위에 서는 제목. 「부분」이라는 사실이 제목에 있어야 한다. */

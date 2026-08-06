@@ -695,6 +695,24 @@ async function assertContinuity(context, state) {
   if ((await page.getByTestId("work-observer-terminal").count()) !== 0) {
     throw new Error("offline detail still offers terminal observation");
   }
+  // R1 H2: 배너는 **화면에 없는 버튼**을 지시하지 않는다. 1R 은 「목록으로 돌아가
+  // '세션 스레드'를 선택하면」이라고 적었는데, 이 배너가 서는 행은 대개 재개가
+  // 성립하는 행이고 그런 행에는 그 버튼이 없다 — 돌아가 봐야 그 이름이 없다.
+  const offlineBanner =
+    (await page.getByTestId("work-host-offline").textContent())?.trim() ?? "";
+  if (offlineBanner.includes("세션 스레드") || !offlineBanner.includes("아래")) {
+    throw new Error(
+      `오프라인 배너가 이 화면에 없는 동선을 지시한다 (${offlineBanner})`
+    );
+  }
+  // 그리고 목록 행이 잃은 채널 스레드 동선은 여기서 다시 난다(H2 부수). 상세는
+  // 세션 원장이고 스레드는 채널 대화라 서로를 대신하지 않는다 — 동사가 선 행에서
+  // 그 버튼을 뺀 대가를 이 줄이 치른다.
+  if ((await page.getByTestId("work-detail-thread").count()) !== 1) {
+    throw new Error(
+      "채널 스레드로 가는 길이 어디에도 없다: 목록 행에서 뺀 동선을 상세가 받지 않았다 (R1 H2 부수)"
+    );
+  }
   await page.getByTestId("work-detail-back").click();
   await page.waitForFunction(
     () =>
@@ -702,25 +720,38 @@ async function assertContinuity(context, state) {
       "my-work-session-detail"
   );
 
-  // ADE 3단계 D3 (#1137): 두 동사는 **다른 버튼**이다. 상세로 가는 길은 동사가
-  // 아니므로 이름이 상태에 따라 흔들리지 않고("세션 상세"로 고정), 재개와 인수는
-  // 각자 제 버튼을 갖는다. 앞 판은 상세 버튼이 재개를 겸했고, 인수 버튼은
-  // 「새 호스트에서 재개」라는 이름으로 스레드 버튼 자리를 빌려 썼다.
+  // ADE 3단계 D3 (#1137): 두 동사는 **다른 버튼**이고, 판정은 행이 실어 나른다
+  // (`data-verb`). 상세로 가는 길은 하나이며 그 하나의 이름이 도착해서 할 수 있는
+  // 일을 따른다 — 재개가 성립하면 「이어서 보기」, 아니면 「세션 상세」. 1R 은 이
+  // 자리에 두 버튼을 나란히 세워 같은 핸들러를 눌렀다(R1 M3): 같은 곳으로 가는 두
+  // 이름은 두 곳이 있다고 말한다.
   const online = page.locator(`li[data-testid="my-work-session-row"][data-session-id="${onlineSessionId}"]`);
   if (
     (await online.getByTestId("my-work-session-status").textContent())?.trim() !==
       "완료 · 대기 중" ||
+    (await online.getAttribute("data-verb")) !== "resume" ||
     (await online.getByTestId("my-work-session-detail").textContent())?.trim() !==
-      "세션 상세" ||
-    (await online.getByTestId("my-work-session-resume").textContent())?.trim() !==
       "이어서 보기"
   ) {
     throw new Error("idle row lost its neutral status or same-PTY action");
   }
+  // 목적지가 하나면 버튼도 하나다. 「세션 상세」와 「이어서 보기」가 같은 행에서
+  // 같은 핸들러를 함께 누르고 있으면 여기서 깨진다.
+  if (
+    (await online.getByTestId("my-work-session-detail").count()) !== 1 ||
+    (await online.getByRole("button", { name: "세션 상세", exact: true }).count()) !== 0
+  ) {
+    throw new Error(
+      "쌍둥이 버튼이 돌아왔다: 재개 행이 상세로 가는 길을 두 이름으로 세우고 있다 (R1 M3)"
+    );
+  }
   const orphaned = page.locator(`li[data-testid="my-work-session-row"][data-session-id="${orphanedSessionId}"]`);
   if (
+    (await orphaned.getAttribute("data-verb")) !== "takeover" ||
     (await orphaned.getByTestId("my-work-session-takeover").textContent())?.trim() !==
-    "인수"
+      "인수" ||
+    (await orphaned.getByTestId("my-work-session-detail").textContent())?.trim() !==
+      "세션 상세"
   ) {
     throw new Error("orphaned row lost its distinct lineage-resume action");
   }
@@ -734,7 +765,7 @@ async function assertContinuity(context, state) {
   }
   // 고아 행에 재개가, 살아 있는 행에 인수가 서지 않는다.
   if (
-    (await orphaned.getByTestId("my-work-session-resume").count()) !== 0 ||
+    (await orphaned.getByText("이어서 보기", { exact: true }).count()) !== 0 ||
     (await online.getByTestId("my-work-session-takeover").count()) !== 0
   ) {
     throw new Error("a verb stood on the wrong row: 재개와 인수가 뒤바뀌었다");
@@ -744,7 +775,11 @@ async function assertContinuity(context, state) {
   // 실측으로 못 믿는 값이고(momowebqa: 릴레이 중인 호스트가 online:false), 서버의
   // 같은 판정은 그것을 일부러 보지 않는다. 그래서 돌아갈 수 있는 세션에 돌아갈
   // 길이 없었다. 침묵은 게이트가 아니라 경고로 내려온다.
-  if ((await offline.getByTestId("my-work-session-resume").count()) !== 1) {
+  if (
+    (await offline.getAttribute("data-verb")) !== "resume" ||
+    (await offline.getByTestId("my-work-session-detail").textContent())?.trim() !==
+      "이어서 보기"
+  ) {
     throw new Error(
       "a silent heartbeat removed the way back: 응답 없는 호스트의 실행 중 세션이 재개를 잃었다 (서버 판정은 online 을 보지 않는다)"
     );
