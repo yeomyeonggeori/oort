@@ -7,6 +7,10 @@ import { QuoteBlock } from "./QuoteBlock";
 import type { PendingMessage } from "@momo/core/features/timeline/model";
 import { resolveQuote } from "@momo/core/features/timeline/quote";
 import type { Message } from "@momo/core/lib/api";
+import {
+  ROW_CONTINUATION_PAD_CLASS,
+  ROW_GROUP_START_PAD_CLASS,
+} from "./spacing";
 
 // =============================================================================
 // Optimistic echo row (M10, R-1 §3 "내 메시지는 seq 미확정이어도 로컬 echo").
@@ -58,7 +62,14 @@ export function PendingRow({
       data-status={pending.status}
       className={cn(
         "flex gap-2 px-4 hover:bg-surface-hover",
-        startsGroup ? "pt-3 pb-1" : "py-1"
+        // 확정된 행과 **같은 다리**를 쓴다 (U4-6 리뷰 M-1). 이 자리는 `pt-3 pb-1`
+        // /`py-1` 이라는 손으로 적은 값이었고, 그래서 묶음 안 간격이 8px(4+4)
+        // 이었다 — 코어가 말하는 12(`ROW_SPACE.withinGroup`)가 아니다. echo 행은
+        // 서버 echo 가 도착하면 `MessageRow` 로 **교체된다.** 두 행의 패딩이
+        // 다르면 그 순간 글이 4px 아래로 내려앉는다: 이 파일 머리말이 「같은
+        // 그리드를 빌려 쓰는 이유는 행이 제자리로 튀지 않게 하려는 것」이라고
+        // 적은 그 성질을, 정작 간격에서만 지키지 않고 있었다.
+        startsGroup ? ROW_GROUP_START_PAD_CLASS : ROW_CONTINUATION_PAD_CLASS
       )}
     >
       <div className="w-8 shrink-0">

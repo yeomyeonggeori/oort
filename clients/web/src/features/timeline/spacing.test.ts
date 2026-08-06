@@ -164,6 +164,48 @@ describe("구분선 간격이 코어 판정을 따른다 (M-2)", () => {
   });
 });
 
+// -----------------------------------------------------------------------------
+// U4-6 리뷰 M-1 — 다리를 놓아도 **건너지 않는 행**이 있으면 소용이 없다.
+//
+// 리뷰가 실측한 것: `PendingRow.tsx`가 `pt-3 pb-1`/`py-1`을 손으로 들고 있었다.
+// 위 단정들은 전부 초록이었다 — 이 파일은 상수를 검산할 뿐 **누가 그 상수를 쓰는
+// 지**는 묻지 않았기 때문이다. 그 사이 echo 행의 묶음 안 간격은 8px(4+4)이었고
+// 코어가 말하는 값은 12다.
+//
+// 그리고 그 4px은 눈에 보이는 자리에서 움직인다: echo 행은 서버 echo가 도착하면
+// `MessageRow`로 **교체된다.** 패딩이 다르면 방금 보낸 글이 도착 순간 4px 내려
+// 앉는다 — `PendingRow` 머리말이 「같은 그리드를 빌려 쓰는 이유는 행이 제자리로
+// 튀지 않게 하려는 것」이라고 적은 그 성질의 반대다.
+//
+// 소스를 읽는 단정인 이유는 U4-4R W-2와 같다: 물어야 하는 것이 「값이 맞는가」가
+// 아니라 「그 값이 화면에 닿는가」다. 이 레포에 웹 컴포넌트 렌더 테스트는 없고,
+// 있어도 jsdom은 Tailwind를 컴파일하지 않으므로 클래스 이름까지가 관측의 끝이다.
+// -----------------------------------------------------------------------------
+describe("행을 그리는 파일이 전부 이 다리를 건넌다 (M-1)", () => {
+  /** 타임라인에서 **메시지 한 줄**을 그리는 파일들. 구분선은 자기 축이 있다. */
+  const ROW_FILES = ["MessageRow.tsx", "PendingRow.tsx"] as const;
+
+  const sourceOf = (file: string) =>
+    readFileSync(fileURLToPath(new URL(`./${file}`, import.meta.url)), "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/^\s*\/\/.*$/gm, "");
+
+  it.each(ROW_FILES)("%s가 행 패딩을 이름으로 든다", (file) => {
+    const code = sourceOf(file);
+    expect(code).toContain("ROW_GROUP_START_PAD_CLASS");
+    expect(code).toContain("ROW_CONTINUATION_PAD_CLASS");
+  });
+
+  it.each(ROW_FILES)("%s에 손으로 적은 행 패딩이 없다", (file) => {
+    // `startsGroup ? "pt-3 pb-1" : "py-1"`이 정확히 이 모양이었다. 되돌아오면
+    // 여기서 빨강이다 — 산수가 맞는 값을 적어 넣어도 마찬가지다: 정본은 코어이고
+    // 두 번째 사본은 갈라질 자리이지 다른 무엇도 아니다.
+    const code = sourceOf(file);
+    const handWritten = code.match(/\bp[tby]-(?:row\b|\d)/g);
+    expect(handWritten, `${file}: ${handWritten?.join(" · ")}`).toBeNull();
+  });
+});
+
 describe("임의값을 클래스에 적어 넣지 못한다", () => {
   it("이 레포의 표 밖은 거부한다", () => {
     expect(() => spacingPx("pt-[13px]")).toThrow(/간격 표에 없는/);

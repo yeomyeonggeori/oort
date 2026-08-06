@@ -5,6 +5,9 @@ import {cleanup, render, within} from '@testing-library/react-native';
 import fs from 'node:fs';
 import path from 'node:path';
 import React from 'react';
+import {StyleSheet} from 'react-native';
+
+import {Composer} from '../src/features/conversation/Composer';
 
 import {
   approvalGates,
@@ -555,6 +558,33 @@ describe('M-3 — 승인 카드 세 문장의 격', () => {
     }
   });
 
+  it('컴포저의 「지금은 못 보낸다」도 같은 잉크다 (U4-6 리뷰 M-2)', () => {
+    // 두 줄은 같은 종류의 말이다 — 코어가 이름까지 붙였다(`blocked`: 자리의
+    // 문제가 아니라 **때**의 문제). 그런데 같은 배치에서 승인 줄은 `text`/400
+    // 으로 서고 컴포저 줄만 `warn` 이었다. 한 화면 안에서 같은 말이 두 옷을
+    // 입으면, 사람은 그 차이를 뜻으로 읽는다.
+    const blocked = noteFace(
+      {gates: new Map([['ap-1', GATE]]), offline: true},
+      'offline',
+    );
+    const view = render(
+      <Composer
+        channelLabel="배포"
+        directory={DIRECTORY}
+        offline
+        onSend={() => {}}
+      />,
+    );
+    const composerLine = StyleSheet.flatten(
+      view.getByTestId('composer-offline').props.style,
+    ) as {color?: string};
+    view.unmount();
+
+    expect(composerLine.color).toBe(blocked.color);
+    // 그리고 그 잉크가 앰버가 아니다 — D-2 의 기각을 컴포저에서 되살리지 않는다.
+    expect(composerLine.color).not.toBe(color.warn);
+  });
+
   it('격의 순서가 코어의 순서다', () => {
     expect(APPROVAL_NOTE_TONE_ORDER).toEqual(['receipt', 'blocked', 'guidance']);
     expect(approvalNoteRank('receipt')).toBeLessThan(approvalNoteRank('blocked'));
@@ -584,5 +614,68 @@ describe('M-3 — 승인 카드 세 문장의 격', () => {
     const agentCard = view.getByTestId('agent-card');
     expect(within(agentCard).queryByTestId('card-approval-offline')).toBeNull();
     expect(within(agentCard).getByTestId('card-approval-unsupported')).toBeTruthy();
+  });
+});
+
+// -----------------------------------------------------------------------------
+// B-1 (U4-6 병합 리뷰) — 코어가 `decidable` 하나를 셋으로 가른 뒤, **이 클라의
+// 호출부만 옛 이름으로 남아 있었다**.
+//
+// 병합 트리에서 실제로 일어난 일: 넘기지 않은 `settled`·`hasTarget` 이
+// `undefined` 라 `settled || !hasTarget` 이 참이 되고, 영수증 말고는 전부 `null`
+// 이 됐다. 그리고 이 화면에서 `null` 은 「할 말이 없다」가 아니라 **「컨트롤이
+// 선다」**이므로 — 연결이 끊긴 채로 승인·거부 버튼이 되살아났다. tsc 는 그것을
+// 한 줄로 말했지만(TS2353) 스위트는 8건이 붉었을 뿐 화면이 왜 그렇게 되는지는
+// 아래 두 단정이 말한다.
+// -----------------------------------------------------------------------------
+describe('B-1 — 판정 입력 셋이 각자 다른 사실을 나른다', () => {
+  it('끝난 결정에는 아무 줄도 세우지 않는다 — 컨트롤도, 「다른 데서 하세요」도', () => {
+    // `settled` 가 접혀 있던 동안 이 카드는 **거짓 안내**를 입었다: 처리할 것이
+    // 없는데 인박스로 가라고 한다. 끝난 카드가 할 말은 원장 줄이 이미 한다.
+    for (const status of ['approved', 'rejected', 'expired', 'cancelled']) {
+      const view = renderCard({
+        message: card({approval_status: status}),
+        gates: new Map(),
+      });
+      const agentCard = view.getByTestId('agent-card');
+      expect(within(agentCard).queryByText(DEAD_END)).toBeNull();
+      expect(
+        within(agentCard).queryByTestId('card-approval-elsewhere'),
+      ).toBeNull();
+      expect(
+        within(agentCard).queryByTestId('card-approval-ap-1-actions'),
+      ).toBeNull();
+      view.unmount();
+    }
+  });
+
+  it('원장이 방금 답한 것도 「끝났다」로 읽는다 — 칩과 같은 값을 본다', () => {
+    // 영수증 갈래가 먼저 서므로 화면은 영수증이지만, 그 아래 판정에 들어가는
+    // `settled` 는 칩이 읽는 값(`receipt.status ?? card.status`)과 같아야 한다.
+    // 다르면 한 카드가 한 줄에서 두 가지를 말한다.
+    const view = renderCard({
+      gates: new Map([['ap-1', GATE]]),
+      receipts: new Map([
+        ['ap-1', {note: '승인을 기록했습니다.', status: 'approved'}],
+      ]),
+    });
+    const agentCard = view.getByTestId('agent-card');
+    expect(within(agentCard).getByTestId('card-approval-receipt')).toBeTruthy();
+    expect(
+      within(agentCard).queryByTestId('card-approval-ap-1-actions'),
+    ).toBeNull();
+    expect(within(agentCard).getByText('승인됨')).toBeTruthy();
+  });
+
+  it('옛 이름을 다시 넣으면 여기서 빨강이다 — tsc 한 줄이 화면 전체였다', () => {
+    const src = fs.readFileSync(
+      path.resolve(__dirname, '../src/features/conversation/MessageRow.tsx'),
+      'utf8',
+    );
+    const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+    expect(code).not.toMatch(/\bdecidable\s*:/);
+    for (const key of ['settled:', 'hasTarget:', 'pendingHere:']) {
+      expect(code).toContain(key);
+    }
   });
 });

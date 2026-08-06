@@ -14,6 +14,7 @@ import { useSession } from "@/app/session";
 import { useIsMobileShell } from "@/app/shellNav";
 import type { Directory } from "@/features/workspace/useWorkspace";
 import { composerKeyIntent, isComposingEvent } from "@momo/core/features/chat/composerKeys";
+import { COMPOSER_OFFLINE_COPY } from "@momo/core/features/chat/composerCopy";
 import {
   agentTurnsInChannel,
   elapsedLabel,
@@ -92,15 +93,20 @@ const MAX_ROWS = 6;
 const MENTION_LIMIT = 6;
 
 /**
- * 연결이 끊겨 있을 때 전송 자리에서 하는 말.
+ * 연결이 끊겨 있을 때 전송 자리에서 하는 말. **이름만 여기 있고 값은 코어에
+ * 있다** (U4-6 리뷰 H-1).
  *
- * 승인 카드의 오프라인 문장과 같은 결이다(`@momo/core/features/timeline/
- * approvalNote`): **자리의 문제가 아니라 때의 문제**라고 말하고, 지금 무엇이
- * 지켜지는지까지 말한다. 초안 보존이 이 문장의 두 번째 절을 참으로 만든다 —
- * 그것이 없으면 이 줄은 「기다리라」고만 하고 기다리는 동안 쓴 글을 잃게 한다.
+ * 이 파일이 들고 있던 문장은 "…쓰던 글은 그대로 남습니다."였고, 같은 주에 폰이
+ * 자기 파일에 같은 이름으로 한 절이 더 있는 문장을 지었다. 리뷰가 그 갈라짐을
+ * 실측했고, 값은 `APPROVAL_OFFLINE_COPY` 가 이미 걸어 둔 길로 올라갔다 —
+ * 고른 문장과 고른 이유는 `@momo/core/features/chat/composerCopy` 가 적는다.
+ * 요약하면 **이 앱의 오프라인 문장에는 모양이 있고**(지금 못 하는 것 → 다시
+ * 연결되면 여기서 할 수 있는 것) 이 파일의 문장에는 그 뒷절이 없었다.
+ *
+ * 이름을 남기는 이유: 이 줄은 세 자리에서 쓰인다(버튼 `title` · 아래 한 줄 ·
+ * 게이트가 찾는 `data-testid`). 값을 세 번 적는 대신 이름 하나를 쓴다.
  */
-export const COMPOSER_OFFLINE_COPY =
-  "연결이 끊겨 지금은 보낼 수 없습니다. 쓰던 글은 그대로 남습니다.";
+export { COMPOSER_OFFLINE_COPY };
 
 interface MentionQuery {
   /** Index of the '@' that opened the query. */

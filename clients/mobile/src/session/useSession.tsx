@@ -18,6 +18,7 @@ import {
   subscribeSession,
 } from '../storage/secureSession';
 import {authGate, type AuthGate} from './authGate';
+import {clearAllDrafts} from '../features/conversation/drafts';
 
 // =============================================================================
 // The session, as React sees it.
@@ -216,6 +217,13 @@ export function SessionProvider({
     // destroyed, and some of it (channel names, member names) is the previous
     // person's. Clearing is not an optimisation.
     queryClient.clear();
+    // 초안도 함께 지운다 (U4-6 리뷰 H-2). 위 한 줄과 같은 이유인데 초안 쪽이 더
+    // 무겁다: react-query 의 캐시는 메모리라 프로세스와 함께 사라지지만, 초안은
+    // **MMKV 에 남아** 다음 사람의 첫 입력창에 복원된다. 로그아웃은 「이 기기에서
+    // 내 흔적을 지운다」이고, 쓰다 만 글은 보낸 메시지보다 사적이다 — 보낸 것은
+    // 지워도 원장에 남지만 안 보낸 글은 이 기기에만 있다. 웹이 같은 자리에서 같은
+    // 일을 한다(`clients/web/src/app/session.tsx`).
+    clearAllDrafts();
   }, [queryClient]);
 
   const value = useMemo<SignedInSession>(

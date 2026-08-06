@@ -1,4 +1,5 @@
 import type {RosterMember} from '@momo/core/lib/api';
+import {COMPOSER_OFFLINE_COPY} from '@momo/core/features/chat/composerCopy';
 import {attachParticle} from '@momo/core/lib/koreanParticle';
 import type {Directory} from '@momo/core/features/workspace/directory';
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
@@ -122,20 +123,20 @@ const INPUT_BORDER = 1;
 const MAX_HEIGHT = MAX_ROWS * line.body + INPUT_PAD_Y * 2 + INPUT_BORDER * 2;
 
 /**
- * 연결이 끊겨 지금은 보낼 수 없다는 한 문장.
+ * 연결이 끊겨 지금은 보낼 수 없다는 한 문장. **이름만 여기 있고 값은 코어에
+ * 있다** (U4-6 리뷰 H-1).
  *
- * 상수로 내보내는 이유는 `jumpNotice.ts` 와 같다 — **측정 하네스가 같은 값을
- * 읽어 사진을 찍는다.** 하네스가 문장을 베껴 적으면 배송되는 문장이 바뀌어도
- * 사진은 옛말을 계속 한다.
+ * 이 배치가 문장을 여기서 landing 시켰고, 같은 주에 웹이 자기 파일에 같은 이름
+ * 으로 **다른 문장**을 지었다("…쓰던 글은 그대로 남습니다"). 이름이 같은데 값이
+ * 다른 것은 갈라질 위험이 아니라 이미 갈라진 것이고, 그래서 값은
+ * `APPROVAL_OFFLINE_COPY` 가 이미 걸어 둔 길로 올라갔다 —
+ * `@momo/core/features/chat/composerCopy` 가 문장과 그 문장을 고른 이유를 든다.
  *
- * 두 조각으로 되어 있고 둘 다 필요하다. 앞은 **지금 무엇이 안 되는가**,
- * 뒤는 **그래서 내가 친 글은 어떻게 되는가**다. 뒤 문장은 이 배치가 초안 보존을
- * 함께 넣었기 때문에 참이 됐다 — 초안이 사라지는 앱에서 「그대로 있습니다」라고
- * 말하면 그것은 위로가 아니라 거짓말이다. `APPROVAL_OFFLINE_COPY` 와 같은
- * 모양으로 쓴다(지금 못 하는 것 → 다시 연결되면 여기서 할 수 있는 것).
+ * 이름을 남기는 이유는 `useOnline.ts` 와 같다: **측정 하네스와 테스트가 이 이름
+ * 으로 값을 읽어** 사진을 찍고 단정한다. 문장을 베껴 적으면 배송되는 문장이
+ * 바뀌어도 사진은 옛말을 계속 한다.
  */
-export const COMPOSER_OFFLINE_COPY =
-  '연결이 끊겨 지금은 보낼 수 없습니다. 쓰던 글은 그대로 있고, 다시 연결되면 여기서 보낼 수 있습니다.';
+export {COMPOSER_OFFLINE_COPY};
 
 export function Composer({
   channelLabel,
@@ -532,11 +533,40 @@ const styles = StyleSheet.create({
     fontSize: font.meta,
     color: color.textFaint,
   },
+  /**
+   * 「지금은 못 보낸다」 한 줄. **앰버가 아니다** (U4-6 리뷰 M-2).
+   *
+   * 이 줄과 승인 카드의 오프라인 줄은 같은 종류의 말이다 — 코어가 이름까지
+   * 붙여 두었다(`ApprovalNoteTone` 의 `blocked`: *"지금은 못 한다. 사고가
+   * 아니라 **때**의 문제이므로 위험 색이 아니지만, 조용한 안내로 묻히면 사람이
+   * 버튼을 계속 누른다"*). 그런데 같은 배치에서 승인 쪽은 `color.text`/400 으로
+   * 서고 이 줄만 `color.warn` 이었다. 한 화면 안에서 같은 말이 두 옷을 입는다.
+   *
+   * ## 어느 쪽으로 맞췄나 — **앰버를 뺀다**
+   *
+   * 앰버가 이 팔레트에서 이미 두 가지 뜻을 갖는다: 상태 칩의 「승인 대기」와,
+   * D-2 가 못박은 **경계를 그리는 색**이다. 세 번째 뜻을 주면 색이 뜻을 잃는다
+   * — `MessageRow.tsx` 의 `APPROVAL_NOTE_STYLE` 주석이 「일시적 차단에 앰버를
+   * 주는 안」을 정확히 그 이유로 이미 기각했고, 그 기각을 여기서 뒤집을 근거가
+   * 없다. 반대 방향(승인 줄을 앰버로)은 그 결정을 되돌리는 일이고, 되돌릴
+   * 이유는 「컴포저가 먼저 그렇게 적혀 있었다」뿐이다.
+   *
+   * 잃는 것: 이 줄이 덜 튄다. 잃지 않는 것: **눈에 띄어야 하는 이유**는 색이
+   * 아니라 자리가 진다 — 이 문장은 사람이 지금 보고 있는 입력창 바로 아래,
+   * 꺼진 전송 버튼 옆에 선다. `textFaint` 를 쓰는 위 `hint` 와는 갈라져 있고
+   * (그쪽이 「읽어도 안 읽어도 되는」 축이다), 그 대비가 승인 카드에서 이미
+   * 검증된 3단(`text` 600 / `text` 400 / `textMuted`)의 가운데다.
+   *
+   * 웹은 `text-warn` 을 그대로 둔다. 톤 **이름**은 코어가 지고 색은 각 클라의
+   * 팔레트가 정한다는 것이 `approvalNote.ts` 의 계약이고, 웹은 자기 안에서 이미
+   * 정합이다(그 클라의 승인 blocked 도 `text-warn` 이다). 여기서 고치는 것은
+   * **폰 안에서 갈라진 두 줄**이지 두 클라의 색이 아니다.
+   */
   offline: {
     paddingHorizontal: SAFE_GUTTER,
     paddingTop: space.sm,
     fontSize: font.meta,
-    color: color.warn,
+    color: color.text,
   },
   pressed: {backgroundColor: color.surfacePressed},
 });
