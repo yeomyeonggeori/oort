@@ -119,7 +119,7 @@ export function MemberRow({
       <li>
         <div {...shared} className={ROW_CLASS}>
           <span className={CONTENT_CLASS}>
-            <Avatar member={member} name={member.displayName} />
+            <Avatar member={member} />
             {identity}
             {/* Self is marked here; an inactive member already carries its
                 status beside the name, so the trailing slot stays empty rather
@@ -159,7 +159,7 @@ export function MemberRow({
             "disabled:cursor-default disabled:opacity-50"
           )}
         >
-          <Avatar member={member} name={member.displayName} />
+          <Avatar member={member} />
           {identity}
           {pending ? (
             <span className="shrink-0 text-meta text-ink-muted">여는 중</span>

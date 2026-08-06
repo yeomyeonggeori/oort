@@ -23,7 +23,16 @@ import { CARD_FOLD, foldText, type FoldBudget } from "./fold";
 // =============================================================================
 
 const FOLD_CONTROL_CLASS = cn(
-  "self-start rounded-sm text-meta text-ink-muted underline underline-offset-2",
+  // `touch-target`: hover가 없는 기기에서 이 링크의 **누를 수 있는 면적**이
+  // 24px가 된다 (design-review U4-5 M-1, WCAG 2.5.8 AA 바닥선). 리뷰 실측은
+  // ~18px이었고, 같은 배치가 폰에는 44pt를 도출식으로 강제하고 있었다 — hover 없는
+  // 기기를 섬기기 시작한 이상 그 축은 두 클라에서 같은 뜻이어야 한다.
+  //
+  // 44px(`tap-target`)를 주지 않는 이유는 이 컨트롤이 자기 줄을 갖는 버튼이 아니라
+  // 본문 밑에 붙는 밑줄 링크이기 때문이다 — 그 값을 주면 링크가 한 줄짜리 메시지
+  // 보다 커진다(tokens.css의 두 값이 갈리는 근거, `LongPressHint`의 같은 산수).
+  // 글자 크기도 밑줄 위치도 그대로다: 커지는 것은 면적뿐이다.
+  "touch-target self-start rounded-sm text-meta text-ink-muted underline underline-offset-2",
   "hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
 );
 

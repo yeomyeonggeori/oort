@@ -61,8 +61,8 @@ export function PendingRow({
         startsGroup ? "pt-3 pb-1" : "py-1"
       )}
     >
-      <div className="w-6 shrink-0">
-        {startsGroup && <Avatar member={author} name={name} />}
+      <div className="w-8 shrink-0">
+        {startsGroup && <Avatar member={author} />}
       </div>
       <div className="min-w-0 flex-1">
         {startsGroup && (

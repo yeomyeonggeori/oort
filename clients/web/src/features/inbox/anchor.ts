@@ -104,11 +104,39 @@ export function messageSelector(seq: number): string {
  * run in different from the branch the product runs in.
  */
 export function messageIdSelector(messageId: string): string {
-  const escaped = messageId
+  return `[data-testid="timeline-message"][data-message-id="${escapeAttr(
+    messageId
+  )}"]`;
+}
+
+function escapeAttr(messageId: string): string {
+  return messageId
     .toLowerCase()
     .replace(/["\\]/g, "\\$&")
     .replace(/[\n\r\f]/g, " ");
-  return `[data-testid="timeline-message"][data-message-id="${escaped}"]`;
+}
+
+/**
+ * 이 메시지를 **대신해 서 있는** 행 (design-review U4-5 H-1 · 코어
+ * `timeline/deletedFold.ts`).
+ *
+ * 연달아 지워진 묘비는 한 줄로 접히고, 접혀 들어간 행은 DOM에 없다. 그 상태에서
+ * 삭제 원본을 가리킨 인용을 누르면 위 선택자가 빈손으로 돌아오고 화면은 「위로
+ * 올려 이전 대화를 더 불러오세요」라고 말한다 — 원본은 **이미 로드돼 있고 접혀
+ * 있을 뿐인데**. 폰이 그 거짓 지시를 먼저 만났고(이슈 1105), 접기가 코어로 올라오면서
+ * 웹에도 같은 자리가 생겼으므로 착지도 같은 계약으로 온다.
+ *
+ * 「인용된 묘비는 접지 않는다」가 아니라 이쪽인 이유는 `deletedFold.ts` 머리말에
+ * 있다. 요지: 접힌 머리 행은 **원본이 지금 화면에서 서 있는 자리 그 자체**이고,
+ * 「삭제된 메시지 3개」는 원본을 포함해서 하는 말이다.
+ *
+ * `~=`는 공백으로 이은 목록에서 낱개를 고른다. 그래서 이 착지는 새 상태도 새
+ * 기계도 만들지 않는다 — 행이 이미 내보내는 속성 하나를 읽는 두 번째 선택자다.
+ */
+export function foldedStandInSelector(messageId: string): string {
+  return `[data-testid="timeline-message"][data-deleted-folded-ids~="${escapeAttr(
+    messageId
+  )}"]`;
 }
 
 export interface WatchOptions {
@@ -141,19 +169,35 @@ export interface WatchOptions {
  * 없다. 그래서 침묵은 **기본값으로 남기되** 만료를 알릴 통로를 연다. 무엇을 할지는
  * 표면이 정한다.
  */
-function watchForRow(selector: string, options: WatchOptions = {}): () => void {
+function watchForRow(
+  selectors: string | readonly string[],
+  options: WatchOptions = {}
+): () => void {
   const doc = options.doc ?? document;
   const now = options.now ?? (() => Date.now());
   const schedule = options.schedule ?? window.setTimeout.bind(window);
   const cancel = options.cancel ?? window.clearTimeout.bind(window);
   const deadline = now() + (options.watchMs ?? WATCH_MS);
+  // 선택자가 여럿이면 **순서가 곧 우선순위**다: 자기 행이 있으면 거기 서고, 없을
+  // 때만 대신 서 있는 행으로 간다. 한 선택자에 `,`로 합치지 않는 이유가 이것이다 —
+  // CSS의 선택자 목록은 문서 순서로 첫 요소를 돌려줄 뿐 어느 갈래가 맞았는지
+  // 모르고, 그러면 대리 착지가 직접 착지를 앞지르는 순간이 생긴다.
+  const list = typeof selectors === "string" ? [selectors] : selectors;
 
   let handle: number | null = null;
   let stopped = false;
 
+  const find = (): HTMLElement | null => {
+    for (const selector of list) {
+      const hit = doc.querySelector<HTMLElement>(selector);
+      if (hit !== null) return hit;
+    }
+    return null;
+  };
+
   const tick = () => {
     if (stopped) return;
-    const row = doc.querySelector<HTMLElement>(selector);
+    const row = find();
     if (row) {
       row.scrollIntoView({ block: "center" });
       row.classList.add(HIGHLIGHT_CLASS);
@@ -180,10 +224,19 @@ export function watchForMessage(seq: number, options: WatchOptions = {}): () => 
   return watchForRow(messageSelector(seq), options);
 }
 
-/** Jump to a message by its id (작업 흐름의 앵커 스레드). */
+/**
+ * Jump to a message by its id (작업 흐름의 앵커 스레드 · 인용 점프).
+ *
+ * 두 자리를 이 순서로 본다: **그 행 자체**, 그리고 없으면 **그것을 대신해 서 있는
+ * 행**(연속 묘비 접기, U4-5 H-1). 셋째는 없다 — 로드되지 않은 메시지는 여전히
+ * 없는 것이고, 그때 만료가 부르는 「더 위쪽에 있습니다」는 참인 말이다.
+ */
 export function watchForMessageId(
   messageId: string,
   options: WatchOptions = {}
 ): () => void {
-  return watchForRow(messageIdSelector(messageId), options);
+  return watchForRow(
+    [messageIdSelector(messageId), foldedStandInSelector(messageId)],
+    options
+  );
 }
