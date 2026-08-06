@@ -323,11 +323,14 @@ pub async fn validate(
     // 401 rather than a 400 — on a signed route, an id that cannot be parsed is
     // an id that cannot have been signed, and the caller learns nothing either
     // way (Swift `hostID(fromPath:)` → `invalidCapability`, :454-458).
-    let (Ok(workspace_id), Ok(host_id)) = (Uuid::parse_str(&workspace), Uuid::parse_str(&host))
+    let (Ok(workspace_id), Ok(_host_id)) = (Uuid::parse_str(&workspace), Uuid::parse_str(&host))
     else {
         return Err(signed_request_unauthorized());
     };
 
+    // The `{host}` pin is the authenticator's own now (`scoped_host_id_from_path`
+    // reads it from the raw path, which is what the signature covers). Parsing it
+    // here as well is kept as the cheap 401 for a malformed id, not as the pin.
     let signed = authenticate_signed_host_request(
         &state,
         &method,
@@ -335,7 +338,6 @@ pub async fn validate(
         &headers,
         &body,
         workspace_id,
-        host_id,
     )
     .await?;
 

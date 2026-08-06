@@ -2454,13 +2454,18 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          description: Human caller is not the source session owner.
+          description: >
+            Caller is not an active member of the source session's anchor
+            channel (ADR-0143 D3 — eligibility is channel membership, not the
+            source member_id), or the target is a member-scoped work host owned
+            by somebody else.
         "404":
           description: Source session does not exist in this workspace.
         "409":
           description: >
             Source is not orphaned, target host is revoked/unavailable/outside
-            policy, or the workspace/member pool has no available slot.
+            policy, target host is the source host, or the workspace/member pool
+            has no available slot.
 
   /v1/workspaces/{workspaceId}/work-sessions/{workSessionId}/terminal-attach:
     post:

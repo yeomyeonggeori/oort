@@ -2461,6 +2461,18 @@ pub struct WorkControlResponse {
     pub work_control: WorkControlDto,
 }
 
+/// Swift `PendingWorkControlsResponse` (`WorkHostRoutes.swift:43-45`).
+///
+/// The daemon's poll answer. It carries the whole `WorkControlDto`, not a
+/// narrowed shape, because the host has to act on `payload` — and a second,
+/// smaller control shape on the wire is how a daemon comes to parse two
+/// different objects for the same row.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PendingWorkControlsResponse {
+    pub work_controls: Vec<WorkControlDto>,
+}
+
 /// Swift `WorkAutoApproveResponse` (:40-43).
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]

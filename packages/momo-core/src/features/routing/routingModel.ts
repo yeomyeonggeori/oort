@@ -447,16 +447,130 @@ export function applyModelChange(
   nextModel: string | null,
   inheritedModel: string
 ): ModelChangeResult {
+  const model = effectiveModel({ model: nextModel, effort: null }, inheritedModel);
+  return clearUnsupportedEffort(draft, nextModel, effortsForModel(table, model).efforts);
+}
+
+/**
+ * 모델을 바꾼 결과를, 새 모델이 받는 강도 목록 하나로 판정한다.
+ *
+ * [`applyModelChange`]와 다중 타깃 경로가 **같은 규칙을 두 번 적지 않도록** 하는
+ * 자리다. 둘의 차이는 "새 모델이 받는 강도가 무엇인가"뿐이고(한 명이면 그 모델의
+ * 표 행, 여럿이면 부른 모두의 교집합), 비우는 규칙 자체는 하나다. 규칙이 두 벌이
+ * 되면 한쪽만 고쳐지는 순간이 오고, 그때 화면은 서버가 400으로 거절할 조합을
+ * 사람에게 남겨 둔다.
+ */
+export function clearUnsupportedEffort(
+  draft: RoutingDraft,
+  nextModel: string | null,
+  efforts: readonly string[]
+): ModelChangeResult {
   const next: RoutingDraft = { model: nextModel, effort: draft.effort };
   if (next.effort === null) return { draft: next, clearedEffort: null };
-  const model = effectiveModel(next, inheritedModel);
-  if (supportsEffort(table, model, next.effort)) {
-    return { draft: next, clearedEffort: null };
-  }
+  if (efforts.includes(next.effort)) return { draft: next, clearedEffort: null };
   return {
     draft: { model: nextModel, effort: null },
     clearedEffort: draft.effort,
   };
+}
+
+// ---- 한 발화가 여러 명을 부를 때 (#1113) ------------------------------------
+//
+// 한 메시지가 부른 에이전트 수만큼 run이 생기고(`agent_mentions.rs`의 per-agent
+// 루프), **`routing` 블록은 그 전부에 같은 값으로 적용된다**: 전송 표면이 받는
+// 것은 메시지 한 건당 블록 하나이며(ADR-0134 D1, openapi `RunRoutingInput`은
+// `additionalProperties: false`), 서버는 루프 안에서 그 하나를 각 에이전트에게
+// 다시 푼다(`resolve_mention_routing(agent, send.routing)`).
+//
+// 그래서 이 파일이 다중에 대해 할 수 있는 정직한 말은 두 가지다.
+//
+//   1. 지금 각자에게 걸려 있는 값은 **각자 다르다**. 그것을 보여 주는 일은
+//      상속 체인(`resolveInheritance`)을 부른 사람 수만큼 부르면 된다.
+//   2. 이번 한 번만 바꾸는 값은 **모두에게 같이 간다**. 그러므로 고를 수 있는
+//      값은 부른 모두가 받아 주는 값이어야 한다.
+//
+// 2번이 교집합인 이유는 취향이 아니라 실패 모드다. 모델 게이트는 에이전트마다
+// 허용집합이 다르고(`allowed_agent_models` = {그 에이전트의 model} ∪ 워크스페이스
+// 허용목록), 강도 게이트는 **그 에이전트에게 resolve된 모델**에 대해 판정한다.
+// 한 명에게만 유효한 값을 실어 보내면 서버는 그 한 명에서 400을 답하고, 그 400은
+// 전송 트랜잭션 전체를 되돌린다 — 두 명을 부른 메시지가 통째로 안 나간다.
+
+/** 이 발화가 부른 에이전트 하나에 대해 화면이 아는 전부. */
+export interface CalledAgentRouting {
+  id: string;
+  handle: string;
+  displayName: string;
+  /**
+   * 지금 이 에이전트에 걸려 있는 값. 아직 못 읽었거나 읽기에 실패했으면 `null`
+   * 이고, 그때 이 에이전트에 대해서는 아무것도 주장하지 않는다.
+   */
+  inheritance: RoutingInheritance | null;
+  /** 이 에이전트의 allow-list. 받지 못했으면 `null`(= 비었다가 아니라 모른다). */
+  allowedModels: readonly string[] | null;
+}
+
+/**
+ * 부른 모두에게 실을 수 있는 모델 이름들.
+ *
+ * 후보를 모으는 층위는 단일 타깃의 [`modelOptions`]와 같다(각자에게 걸려 있는
+ * 모델 → 로스터가 실제로 돌리는 모델 → 표의 나머지 → 받은 allow-list). 다른 것은
+ * 마지막 한 줄뿐이다: **받은 allow-list마다 걸러 낸다.** 한 명에게만 허용된 이름을
+ * 남겨 두면 그것을 고른 전송이 400으로 통째로 되돌아온다.
+ *
+ * 목록이 비는 것은 정상적인 답이다(워크스페이스 허용목록이 없으면 각 에이전트의
+ * 허용집합은 자기 모델 하나뿐이라, 서로 다른 모델을 쓰는 둘의 교집합은 비어
+ * 있다). 화면은 그때 상자를 잠그고 왜인지 말한다 — 없는 선택지를 그리지 않는다.
+ */
+export function sharedModelOptions(
+  called: readonly CalledAgentRouting[],
+  table: EffortTable | null,
+  known: readonly string[] = []
+): { models: string[]; allowedReceived: boolean } {
+  const candidates: string[] = [];
+  const push = (model: string | undefined | null) => {
+    if (!model || candidates.includes(model)) return;
+    candidates.push(model);
+  };
+  for (const agent of called) push(agent.inheritance?.model.value);
+  for (const model of known) push(model);
+  for (const entry of table?.entries ?? []) push(entry.model);
+  for (const agent of called) for (const model of agent.allowedModels ?? []) push(model);
+
+  const models = candidates.filter((model) =>
+    called.every(
+      (agent) => agent.allowedModels === null || agent.allowedModels.includes(model)
+    )
+  );
+  return {
+    models,
+    allowedReceived: called.every((agent) => agent.allowedModels !== null),
+  };
+}
+
+/**
+ * 부른 모두가 받아 주는 추론 강도들.
+ *
+ * `modelOverride`가 있으면 모두가 그 모델로 도므로 기준은 그 하나이고, 없으면
+ * 각자 자기 상속 모델로 도므로 기준은 그 모델들 전부다. 순서는 첫 기준 모델의
+ * 표 순서를 따른다(서버가 준 오름차순).
+ *
+ * 상속값을 아직 모르는 에이전트가 하나라도 있으면 빈 목록이다: 모르는 상대까지
+ * 받아 준다고 셈한 교집합은 교집합이 아니다.
+ */
+export function sharedEfforts(
+  table: EffortTable | null,
+  called: readonly CalledAgentRouting[],
+  modelOverride: string | null
+): string[] {
+  if (table === null || called.length === 0) return [];
+  const models =
+    modelOverride !== null
+      ? [modelOverride]
+      : called.map((agent) => agent.inheritance?.model.value ?? null);
+  if (models.some((model) => model === null)) return [];
+  const sets = (models as string[]).map((model) => effortsForModel(table, model).efforts);
+  const [first, ...rest] = sets;
+  return first.filter((effort) => rest.every((set) => set.includes(effort)));
 }
 
 /**
@@ -472,6 +586,20 @@ export function clearedEffortNotice(model: string, clearedEffort: string): strin
     label,
     "object"
   )} 지원하지 않아 상속으로 되돌렸습니다.`;
+}
+
+/**
+ * 여럿을 부른 글에서 모델을 상속으로 되돌렸을 때의 안내.
+ *
+ * 되돌린 이유가 모델 하나에 대한 사실이 아니다: 각자 자기 상속 모델로 돌아가면서
+ * 방금까지 유효했던 강도가 그중 누군가에게는 유효하지 않게 된 것이다. 그 문장에
+ * 모델 이름을 하나 골라 적으면, 화면은 서버가 하지 않은 판정을 말하게 된다.
+ */
+export function sharedClearedEffortNotice(clearedEffort: string): string {
+  return `추론 강도 ${attachParticle(
+    effortLabel(clearedEffort),
+    "object"
+  )} 부른 모두가 쓸 수 있는 것은 아니라 상속으로 되돌렸습니다.`;
 }
 
 // ---- 상속 옵션의 라벨 (D3 "상속 (실제값 병기)") ------------------------------

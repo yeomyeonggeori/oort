@@ -4,7 +4,7 @@
 //!
 //! ```text
 //! POST   /v1/workspaces/{ws}/work-controls                  (agent bearer, work:control)
-//! POST   /v1/workspaces/{ws}/work-controls/{control}/ack    (human host owner)
+//! POST   /v1/workspaces/{ws}/work-controls/{control}/ack    (host owner | signed host)
 //! GET    /v1/workspaces/{ws}/work-auto-approvals            (human)
 //! PUT    /v1/workspaces/{ws}/work-auto-approvals/{tool}     (human)
 //! DELETE /v1/workspaces/{ws}/work-auto-approvals/{tool}     (human)
@@ -29,16 +29,21 @@
 //! `pending_approval` control has no statement in this binary that can dispatch
 //! it.
 //!
+//! ## The daemon arm (#1114, closing #1132's first deviation)
+//!
+//! Swift accepts either the registering human owner *or* a `MomoHost`-signed
+//! daemon (`acknowledge` :251-291). #1132 served only the human arm, for a
+//! reason it stated rather than hid: the signed path was not on
+//! `work_host_auth`'s allow-list, the authenticator pinned the signer against a
+//! `{host}` segment this path does not have, and — decisively — the surface a
+//! daemon learns *what* to acknowledge from
+//! (`GET …/work-hosts/{host}/pending-controls`) was itself unported. All three
+//! are addressed together here, because any two of them without the third
+//! produce something worse than a gap: an authenticated caller with nothing to
+//! authenticate about, or a queue nobody may answer.
+//!
 //! ## Named parity gaps (each refused by absence, not approximated)
 //!
-//! * **The work-host-signed ack.** Swift accepts either the registering human
-//!   owner *or* a `MomoHost`-signed daemon (`acknowledge` :251-291). Only the
-//!   human arm is served here, because `work_host_auth::is_allowed_signed_path`
-//!   does not list this path and mounting it would need the signed-request
-//!   authenticator to accept a path whose `{control}` segment is not a host id.
-//!   The daemon surface it belongs to (`GET …/work-hosts/{host}/pending-controls`)
-//!   is itself unported, so serving a signed ack would authenticate a caller
-//!   that has no way to learn what to acknowledge.
 //! * **`POST …/work-sessions` with `controlId`.** Still refused by name
 //!   (`work_sessions::reject_unsupported_create`) for the same reason: it is a
 //!   work-host-signed arm. The in-process path that #1114 does close — the
@@ -73,7 +78,8 @@ use momo_t3::work_control::{
     active_host_owner_in_tx, bind_control_approval_message_in_tx, control_event_payload,
     control_run_binding_in_tx, default_spawn_host, disable_auto_approve_in_tx,
     enable_auto_approve_in_tx, fail_approved_control_in_tx, insert_work_control_in_tx,
-    list_auto_approvals_in_tx, lock_work_control_in_tx, mark_control_dispatched_in_tx,
+    last_used_spawn_host_in_tx, list_auto_approvals_in_tx, lock_work_control_in_tx,
+    mark_control_dispatched_in_tx, record_host_last_used_in_tx,
     session_control_lineage_status_in_tx, settle_control_ack_in_tx,
     spawn_ack_session_matches_in_tx, spawn_execution_object, spawn_host_candidates_in_tx,
     spawn_is_auto_approved_in_tx, target_host_scope_allows, target_work_host_in_tx,
@@ -342,7 +348,23 @@ async fn create_in_tx(conn: &mut PgConnection, input: CreateInput) -> Rejectable
     .map_err(T3Error::from)?;
 
     let settled = if dispatch_now {
-        dispatch_control_in_tx(conn, input.workspace_id, &control).await?
+        let settled = dispatch_control_in_tx(conn, input.workspace_id, &control).await?;
+        // ADR-0125 D6-A "마지막 사용" (migration 061). Only a **spawn that
+        // actually reached a host** counts: an `input`/`read`/`kill` addresses a
+        // session whose host was chosen once already, and a dispatch that failed
+        // on a revoked host is not a host anyone used. The pre-authorisation is
+        // the owner's own standing decision, which is why their preference moves
+        // here without a card ever being drawn.
+        if input.kind == KIND_SPAWN && settled.status == STATUS_DISPATCHED {
+            record_host_last_used_in_tx(
+                conn,
+                input.workspace_id,
+                binding.owner_human_id,
+                settled.target_host_id,
+            )
+            .await?;
+        }
+        settled
     } else {
         create_spawn_approval_in_tx(
             conn,
@@ -460,11 +482,16 @@ async fn create_spawn_approval_in_tx(
     // 실행 방식 컨펌 카드 rather than a yes/no.
     let candidates =
         spawn_host_candidates_in_tx(conn, input.workspace_id, input.owner_human_id).await?;
+    // ADR-0125 D6-A's "마지막 사용" (migration 061). Read for the same person the
+    // candidates were judged for — a default is a statement about whose habit it
+    // is, and the requesting agent has none.
+    let last_used =
+        last_used_spawn_host_in_tx(conn, input.workspace_id, input.owner_human_id).await?;
     let execution = spawn_execution_object(
         &tool,
         &label,
         Some(control.target_host_id),
-        default_spawn_host(&candidates).or(Some(control.target_host_id)),
+        default_spawn_host(&candidates, last_used).or(Some(control.target_host_id)),
         &candidates,
     );
 
@@ -624,9 +651,30 @@ pub(crate) async fn apply_spawn_approval_decision(
             ));
         }
     }
-    Ok(Some(
-        dispatch_control_in_tx(conn, workspace_id, &retargeted).await?,
-    ))
+    let dispatched = dispatch_control_in_tx(conn, workspace_id, &retargeted).await?;
+    // ADR-0125 D6-A "마지막 사용" (migration 061): the person just told this
+    // server where their work should run, and that answer outlives this card.
+    // Attributed to the **session owner**, which is who the candidate list was
+    // judged for — not to the approver, who may be a colleague with entirely
+    // different hosts, and not to the requesting agent, which has none.
+    if dispatched.status == STATUS_DISPATCHED {
+        if let Some(owner_member_id) = momo_t3::work_control::agent_owner_human_in_tx(
+            conn,
+            workspace_id,
+            dispatched.requester_member_id,
+        )
+        .await?
+        {
+            record_host_last_used_in_tx(
+                conn,
+                workspace_id,
+                owner_member_id,
+                dispatched.target_host_id,
+            )
+            .await?;
+        }
+    }
+    Ok(Some(dispatched))
 }
 
 async fn emit_control_event(
@@ -661,18 +709,59 @@ async fn emit_control_event(
 // ack
 // ---------------------------------------------------------------------------
 
+/// Who is allowed to say "this ran" (Swift `acknowledge` :250-291).
+///
+/// Two credentials, and they are checked against **different** facts: a human
+/// must be the host's registered owner, a signed daemon must *be* the host the
+/// control was addressed to. Collapsing them — say, by letting any signed host
+/// ack, or by trusting a human who merely shares the workspace — would let one
+/// party close the loop on another party's machine, and every later
+/// `input`/`read`/`kill` trusts that lineage
+/// (`session_control_lineage_status_in_tx`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AckCaller {
+    /// A human bearer, to be compared against `work_host.owner_member_id`.
+    HostOwner(Uuid),
+    /// A `MomoHost`-signed daemon, to be compared against
+    /// `work_control.target_host_id`.
+    SigningHost(Uuid),
+}
+
 /// `POST /v1/workspaces/{ws}/work-controls/{control}/ack` (Swift `acknowledge`,
-/// :248-357), the registered-host-owner arm.
+/// :248-357) — both arms.
+///
+/// #1132 served only the human arm and named the reason: the signed daemon had
+/// no way to *learn* what to acknowledge, so authenticating it would have been
+/// "an authenticated caller with nothing to authenticate about". `GET
+/// …/work-hosts/{host}/pending-controls` is that missing half and it lands in
+/// the same change, so the loop closes here.
+///
+/// **`work:control` is still not enough to ack.** The agent-bearer scope that
+/// lets an agent *request* a control deliberately does not reach this route
+/// (`momo_auth::required_agent_scope`): if the same credential could both ask
+/// for a spawn and report that it ran, an agent could manufacture a session the
+/// host has never seen, and everything downstream would believe it.
 pub async fn acknowledge(
     State(state): State<AppState>,
     Extension(principal): Extension<Principal>,
     Path((workspace, control)): Path<(String, String)>,
     Json(request): Json<WorkControlAckRequest>,
 ) -> Result<Json<WorkControlResponse>, ApiError> {
-    require_human(
-        &principal,
-        "work control ack requires the execution host owner",
-    )?;
+    let caller = match principal.kind {
+        PrincipalKind::Human => AckCaller::HostOwner(principal.member_id),
+        // The signed branch of `auth::require_principal` puts the HOST id in
+        // `token_id` (Swift: `tokenID: identity.hostID`). A work-host principal
+        // without one would be a middleware bug, not a client error.
+        PrincipalKind::WorkHost => match principal.token_id {
+            Some(host_id) => AckCaller::SigningHost(host_id),
+            None => return Err(crate::work_host_auth::signed_request_unauthorized()),
+        },
+        PrincipalKind::Agent => {
+            return Err(ApiError::forbidden(
+                "work control ack requires the execution host",
+            ))
+        }
+    };
     let workspace_id = workspace_scope(&workspace, &principal)?;
     let control_id = path_uuid(&control, "invalid work control id")?;
     let error_label = validated_error_label(request.error_label.as_deref()).map_err(rejection)?;
@@ -681,7 +770,6 @@ pub async fn acknowledge(
             "successful ack cannot include errorLabel",
         ));
     }
-    let member_id = principal.member_id;
     let ok = request.ok;
     let session_id = request.session_id;
 
@@ -692,7 +780,7 @@ pub async fn acknowledge(
                 acknowledge_in_tx(
                     conn,
                     workspace_id,
-                    member_id,
+                    caller,
                     control_id,
                     ok,
                     session_id,
@@ -713,7 +801,7 @@ pub async fn acknowledge(
 async fn acknowledge_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
-    member_id: Uuid,
+    caller: AckCaller,
     control_id: Uuid,
     ok: bool,
     session_id: Option<Uuid>,
@@ -728,15 +816,28 @@ async fn acknowledge_in_tx(
             "only dispatched controls can be acknowledged",
         )));
     }
+    // Swift resolves the host owner for BOTH arms (:275-282) and so does this:
+    // a control addressed to a host whose registration is gone cannot be
+    // acknowledged by anyone, which is ADR-0125 D8 again — revocation stops
+    // consumption, including the last message of a consumption that was already
+    // under way.
     let Some(owner_member_id) =
         active_host_owner_in_tx(conn, workspace_id, locked.target_host_id).await?
     else {
         return Ok(Err(ApiError::not_found("work host not found")));
     };
-    if owner_member_id != member_id {
-        return Ok(Err(ApiError::forbidden(
-            "only the registered host owner can acknowledge",
-        )));
+    match caller {
+        AckCaller::HostOwner(member_id) if owner_member_id != member_id => {
+            return Ok(Err(ApiError::forbidden(
+                "only the registered host owner can acknowledge",
+            )));
+        }
+        AckCaller::SigningHost(host_id) if host_id != locked.target_host_id => {
+            return Ok(Err(ApiError::forbidden(
+                "work host cannot acknowledge another host control",
+            )));
+        }
+        _ => {}
     }
 
     let ack_session_id = if locked.kind == KIND_SPAWN && ok {

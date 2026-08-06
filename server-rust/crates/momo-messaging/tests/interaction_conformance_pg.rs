@@ -865,7 +865,7 @@ async fn pin_1112_a_non_member_cannot_pin_and_another_tenant_cannot_see_the_mess
 ///
 /// Two assertions, and they are different claims. The first is that the domain
 /// answers `PinLimit` (a friendly 409) rather than letting the write through.
-/// The second is that migration 061's trigger is the *authority*: bypassing the
+/// The second is that migration 062's trigger is the *authority*: bypassing the
 /// domain entirely — a raw `INSERT` as the runtime role, which is what a future
 /// code path that forgot the guard would do — still fails, with the 23514 the
 /// migration names. Delete the trigger and only the second half goes red, which
@@ -942,7 +942,7 @@ async fn pin_1112_the_channel_cap_refuses_the_pin_over_the_line() {
         })
     })
     .await;
-    let error = raw.expect_err("migration 061's trigger refuses the 101st pin");
+    let error = raw.expect_err("migration 062's trigger refuses the 101st pin");
     let sentence = error.to_string();
     assert!(
         sentence.contains("maximum 100 pinned"),

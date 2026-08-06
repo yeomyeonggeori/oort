@@ -70,9 +70,9 @@ pub const MESSAGE_REACTION_LIMIT: i64 = 200;
 /// still clears the longest emoji anyone sends (a 4-person ZWJ family is 7).
 pub const REACTION_EMOJI_MAX_CHARS: usize = 32;
 
-/// The per-channel pin cap (이슈 #1112; migration `061_message_pin.sql`).
+/// The per-channel pin cap (이슈 #1112; migration `062_message_pin.sql`).
 ///
-/// **The trigger in 061 is the authority**; this constant only exists so the
+/// **The trigger in 062 is the authority**; this constant only exists so the
 /// domain can refuse with a 409 before Postgres refuses with a 23514. The two
 /// must agree — a change here without a migration would turn a friendly refusal
 /// back into a raw constraint error.
@@ -912,7 +912,7 @@ fn decode_pin(row: &sqlx::postgres::PgRow) -> Result<PinnedMessage, sqlx::Error>
 /// is not the race the cap has: two members pinning two *different* messages
 /// would both read `count = 99` and both insert. The advisory is keyed on the
 /// channel — the axis the cap is counted on — and is taken only on the insert
-/// branch, so an unpin never waits behind a pin. The trigger in migration 061
+/// branch, so an unpin never waits behind a pin. The trigger in migration 062
 /// remains the authority; this only ensures the friendly 409 is the one callers
 /// actually see.
 pub async fn set_pin_in_tx(

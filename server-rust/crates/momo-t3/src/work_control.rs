@@ -395,6 +395,64 @@ pub async fn fetch_work_control_in_tx(
         .map_err(Into::into)
 }
 
+/// Every `dispatched` control this host still has to act on, oldest first
+/// (Swift `WorkHostRoutes.pendingControls` :281-322).
+///
+/// This is the **only** way a daemon learns what to run: the dispatch broadcast
+/// is a courtesy for the room, not a delivery guarantee, and a host that was
+/// asleep when the outbox drained would otherwise never hear about the spawn a
+/// person approved. The ledger, not the relay, is what the host reconciles
+/// against — the same reason `work.control.acked` exists as a fact in the table
+/// before it exists as an envelope.
+///
+/// The `JOIN work_host … revoked_at IS NULL` is Swift's and it is not redundant
+/// with the authenticator: authentication proves the *caller* is unrevoked at
+/// the moment it asks, and this join proves the **target** of each control still
+/// is. They are the same host here, and keeping the join means a revoked host
+/// polling with a signature minted before the revoke reads an empty list rather
+/// than its old backlog (ADR-0125 D8 — revoke stops consumption immediately).
+///
+/// `LIMIT 100` is Swift's bound. A host with more than 100 pending controls has
+/// a bigger problem than pagination, and an unbounded read here would let one
+/// stuck daemon pull an arbitrary slice of the ledger into memory per poll.
+pub async fn pending_controls_for_host_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    host_id: Uuid,
+) -> Result<Vec<WorkControlRow>, T3Error> {
+    // Swift writes the host predicate as a JOIN; here it is an `EXISTS` for a
+    // mechanical reason — `work_control` and `work_host` share `id`,
+    // `workspace_id`, `created_at` and `updated_at`, so a join would make every
+    // name in `CONTROL_COLUMNS` ambiguous and force a second, alias-qualified
+    // copy of that list. One column list is worth more than one join keyword;
+    // the host row is reached by primary key either way, so the rows are the
+    // same rows.
+    let sql = format!(
+        "SELECT {CONTROL_COLUMNS} \
+           FROM work_control \
+          WHERE workspace_id = $1 \
+            AND target_host_id = $2 \
+            AND status = '{STATUS_DISPATCHED}' \
+            AND EXISTS ( \
+              SELECT 1 FROM work_host h \
+               WHERE h.id = work_control.target_host_id \
+                 AND h.workspace_id = work_control.workspace_id \
+                 AND h.revoked_at IS NULL \
+            ) \
+          ORDER BY created_at, id \
+          LIMIT 100"
+    );
+    let rows = sqlx::query(&sql)
+        .bind(workspace_id)
+        .bind(host_id)
+        .fetch_all(&mut *conn)
+        .await?;
+    rows.iter()
+        .map(decode_control)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(Into::into)
+}
+
 /// Lock one control for a state transition (Swift `lockControl` :1173-1190).
 pub async fn lock_work_control_in_tx(
     conn: &mut PgConnection,
@@ -787,6 +845,84 @@ pub fn target_host_scope_allows(host: &TargetWorkHost, session_owner_member_id: 
     }
 }
 
+// ---------------------------------------------------------------------------
+// resume target (#1139) — Swift `WorkSessionRoutes.requireResumeTarget`
+// ---------------------------------------------------------------------------
+
+/// Why an orphaned lineage may not be taken over onto this host.
+///
+/// Every variant is a **refusal of the target**, which is why they live together
+/// rather than as four booleans a caller could forget to read. The status each
+/// one answers with belongs to the route (see `routes::work_sessions::resume`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResumeTargetRejection {
+    /// No such host in this workspace, or its registration was revoked. Missing,
+    /// revoked and cross-workspace collapse into one non-disclosing answer, the
+    /// same way [`target_work_host_in_tx`] collapses them.
+    HostUnavailable,
+    /// A member-scoped host belonging to somebody else.
+    OtherMemberHost,
+    /// `work_tier_policy.mode = 'auto'` with `auto_target = 'cloud'`, and this
+    /// host is not a cloud host.
+    AutoPolicyRequiresCloud,
+    /// `mode = 'auto'` naming one specific host, and this is not that host.
+    OutsideAutoPolicy,
+    /// The target is the host the source session died on.
+    SameAsSourceHost,
+}
+
+/// Swift `requireResumeTarget` (:2518-2555) plus the `target != source`
+/// comparison Swift never made — the four checks that were missing from the Rust
+/// port entirely (#1139), which is why the client core's `takeoverTargets`
+/// filter was until now the only place the question was asked at all.
+///
+/// It is asked **inside the resume transaction**, after the source session is
+/// locked and before the first write, because every input can change underneath
+/// a card that was drawn minutes ago: a host is revoked, a policy is narrowed,
+/// an owner leaves. A client-side filter cannot fail closed here; this can.
+///
+/// ## Why `target != source` is here even though Swift has no such line
+///
+/// The core has excluded the dead source host from the offered targets since it
+/// was written (`workSessionResumeTargets`, `workSessionModel.ts:679`), so the
+/// only caller that can reach this case is one that bypassed the picker. Letting
+/// it through would settle the source's ledger as `orphaned` and immediately
+/// re-open a successor on the same host that just lost the session — a
+/// transition that reads as a handoff in the audit trail and is not one. The
+/// server refusing it is what makes the client's filter a convenience rather
+/// than the load-bearing check.
+pub async fn resume_target_rejection_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+    target_host_id: Uuid,
+    source_host_id: Uuid,
+    policy_mode: &str,
+    policy_auto_target: Option<&str>,
+) -> Result<Option<ResumeTargetRejection>, T3Error> {
+    let Some(host) = target_work_host_in_tx(conn, workspace_id, target_host_id).await? else {
+        return Ok(Some(ResumeTargetRejection::HostUnavailable));
+    };
+    if !target_host_scope_allows(&host, member_id) {
+        return Ok(Some(ResumeTargetRejection::OtherMemberHost));
+    }
+    if policy_mode == "auto" {
+        if let Some(auto_target) = policy_auto_target {
+            if auto_target == "cloud" {
+                if host_tier(&host.host_type) != "cloud" {
+                    return Ok(Some(ResumeTargetRejection::AutoPolicyRequiresCloud));
+                }
+            } else if Uuid::parse_str(auto_target) != Ok(target_host_id) {
+                return Ok(Some(ResumeTargetRejection::OutsideAutoPolicy));
+            }
+        }
+    }
+    if target_host_id == source_host_id {
+        return Ok(Some(ResumeTargetRejection::SameAsSourceHost));
+    }
+    Ok(None)
+}
+
 /// Is the host still registered and unrevoked? (Swift `enqueueDispatch`'s
 /// `FOR SHARE` liveness probe, :821-839.)
 pub async fn work_host_is_active_in_tx(
@@ -1125,15 +1261,33 @@ pub async fn spawn_host_candidates_in_tx(
     Ok(candidates)
 }
 
-/// ADR-0125 D6-A's default: **로컬 온라인 우선**, then remote, and never cloud
-/// while [`T3_SPAWN_ENABLED`] is false.
+/// ADR-0125 D6-A's default, both halves: **마지막 사용** when that host is still
+/// offerable, otherwise **로컬 온라인 우선**, then remote, and never cloud while
+/// [`T3_SPAWN_ENABLED`] is false.
 ///
-/// "마지막 사용" is the second half of the ADR's rule and it is deliberately not
-/// implemented here: this build has no per-member last-used host column, and
-/// inventing one from `work_session.started_at` would make the default depend on
-/// sessions the picker cannot show. The first half is the one that matters for a
-/// laptop-plus-VPS workspace, and the gap is named rather than approximated.
-pub fn default_spawn_host(candidates: &[SpawnHostCandidate]) -> Option<Uuid> {
+/// The order is the ADR's and it is the whole point of migration 061: a person
+/// who moved to the team VPS last week should not be handed their laptop again
+/// every morning because the laptop happens to sort first by tier. The tier rule
+/// stays underneath as the answer for someone who has never chosen — a new
+/// member's first card cannot read a preference nobody expressed.
+///
+/// `last_used` is filtered through the **same candidate list the card shows**,
+/// never trusted on its own: a host that was revoked, went offline, or changed
+/// hands since is not a default, it is a greyed row. That filter is why this is
+/// a pure function taking the already-judged candidates rather than a second
+/// query — the default and the picker cannot disagree about what is offerable.
+pub fn default_spawn_host(
+    candidates: &[SpawnHostCandidate],
+    last_used: Option<Uuid>,
+) -> Option<Uuid> {
+    if let Some(last_used) = last_used {
+        if candidates
+            .iter()
+            .any(|candidate| candidate.selectable && candidate.id == last_used)
+        {
+            return Some(last_used);
+        }
+    }
     candidates
         .iter()
         .filter(|candidate| candidate.selectable)
@@ -1143,6 +1297,61 @@ pub fn default_spawn_host(candidates: &[SpawnHostCandidate]) -> Option<Uuid> {
             _ => 2,
         })
         .map(|candidate| candidate.id)
+}
+
+/// The host this member last actually sent work to, or `None` for someone who
+/// has never chosen (migration 061).
+///
+/// Deliberately **not** derived from `work_session`: see the migration's header.
+/// The answer is one row by primary key, so the picker pays one index lookup for
+/// the half of D6-A that makes the card feel like it remembers.
+pub async fn last_used_spawn_host_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+) -> Result<Option<Uuid>, T3Error> {
+    let host_id: Option<Uuid> = sqlx::query_scalar(
+        "SELECT host_id FROM work_host_last_used \
+          WHERE workspace_id = $1 AND member_id = $2",
+    )
+    .bind(workspace_id)
+    .bind(member_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    Ok(host_id)
+}
+
+/// Record that this member's work went to this host (migration 061).
+///
+/// Called from the three places a human's host choice actually takes effect —
+/// the auto-approved dispatch, the approval decision's dispatch, and a resume's
+/// target — and from nowhere else. In particular it is **not** called when a
+/// control is merely *requested*: a spawn that sits in `pending_approval` and is
+/// then denied expressed the model's preference, not the person's, and letting
+/// it move the default would let an agent steer tomorrow's card by asking for a
+/// host it is never allowed to use.
+///
+/// The write is an upsert in the caller's transaction, so a dispatch that rolls
+/// back never leaves a preference behind. `used_at` moves on every call because
+/// "last" is the only question this table answers.
+pub async fn record_host_last_used_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+    host_id: Uuid,
+) -> Result<(), T3Error> {
+    sqlx::query(
+        "INSERT INTO work_host_last_used (workspace_id, member_id, host_id) \
+              VALUES ($1, $2, $3) \
+         ON CONFLICT (workspace_id, member_id) \
+         DO UPDATE SET host_id = EXCLUDED.host_id, used_at = clock_timestamp()",
+    )
+    .bind(workspace_id)
+    .bind(member_id)
+    .bind(host_id)
+    .execute(&mut *conn)
+    .await?;
+    Ok(())
 }
 
 /// The `execution` object a spawn approval carries — ADR-0125 D6-A's card in
@@ -1460,7 +1669,7 @@ mod tests {
             candidate(2, "내 맥", "app", true, true),
             candidate(3, "낡은 맥", "app", false, false),
         ];
-        assert_eq!(default_spawn_host(&hosts), Some(Uuid::from_u128(2)));
+        assert_eq!(default_spawn_host(&hosts, None), Some(Uuid::from_u128(2)));
 
         // Local offline → the remote host takes the default rather than a
         // disabled row.
@@ -1468,14 +1677,52 @@ mod tests {
             candidate(1, "팀 VPS", "workd", true, true),
             candidate(2, "내 맥", "app", false, false),
         ];
-        assert_eq!(default_spawn_host(&hosts), Some(Uuid::from_u128(1)));
+        assert_eq!(default_spawn_host(&hosts, None), Some(Uuid::from_u128(1)));
 
         // The T3 slot is visible and never chosen while the constant is false.
         let mut cloud = candidate(4, "momo Cloud", "cloud", true, false);
         cloud.unavailable_reason = Some(UNAVAILABLE_T3_DISABLED);
         const { assert!(!T3_SPAWN_ENABLED, "ADR-0136: T3 is off by default") };
-        assert_eq!(default_spawn_host(&[cloud]), None);
-        assert_eq!(default_spawn_host(&[]), None);
+        assert_eq!(default_spawn_host(&[cloud], None), None);
+        assert_eq!(default_spawn_host(&[], None), None);
+    }
+
+    /// D6-A's second clause (migration 061): the remembered host wins over the
+    /// tier order — but only while it is still a host the card would offer.
+    #[test]
+    fn the_last_used_host_outranks_the_tier_order_until_it_stops_being_offerable() {
+        let laptop = Uuid::from_u128(2);
+        let vps = Uuid::from_u128(1);
+        let hosts = vec![
+            candidate(1, "팀 VPS", "workd", true, true),
+            candidate(2, "내 맥", "app", true, true),
+        ];
+        // No preference yet → tier order (the local host).
+        assert_eq!(default_spawn_host(&hosts, None), Some(laptop));
+        // Preference recorded → it wins, even though it sorts second by tier.
+        assert_eq!(default_spawn_host(&hosts, Some(vps)), Some(vps));
+        // …and stating the obvious the other way: a preference for the host the
+        // tier rule would have picked anyway changes nothing.
+        assert_eq!(default_spawn_host(&hosts, Some(laptop)), Some(laptop));
+
+        // The remembered host went offline: the default falls back to the tier
+        // rule rather than pre-selecting a greyed row.
+        let hosts = vec![
+            candidate(1, "팀 VPS", "workd", true, true),
+            candidate(2, "내 맥", "app", false, false),
+        ];
+        assert_eq!(default_spawn_host(&hosts, Some(laptop)), Some(vps));
+        // A remembered host that is not in this workspace's list at all (revoked
+        // and filtered out, or someone else's) is likewise not a default.
+        assert_eq!(
+            default_spawn_host(&hosts, Some(Uuid::from_u128(99))),
+            Some(vps)
+        );
+        // And a preference cannot conjure a default when nothing is selectable.
+        assert_eq!(
+            default_spawn_host(&[candidate(2, "내 맥", "app", false, false)], Some(laptop)),
+            None
+        );
     }
 
     #[test]

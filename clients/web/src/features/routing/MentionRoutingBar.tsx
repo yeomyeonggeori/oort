@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import type { RosterMember } from "@momo/core/lib/api";
-import { attachParticle } from "@momo/core/lib/koreanParticle";
 import { cn } from "@/design/lib/cn";
 import { useDirectory } from "@/features/workspace/useWorkspace";
 import { useSession } from "@/app/session";
 import { useAgentProfile, useOpenAgentProfile } from "./useAgentProfile";
+import { useCalledAgentsRouting } from "./useMentionRouting";
 import { RoutingFields } from "./RoutingFields";
 import {
   SEND_UNSUPPORTED_REASON,
@@ -17,6 +17,7 @@ import {
 import type { MentionRoutingTarget } from "@momo/core/features/routing/mentionTargets";
 import {
   INHERIT_DRAFT,
+  appliedModelLabel,
   clearedEffortNotice,
   effectiveModel,
   effortLabel,
@@ -27,6 +28,10 @@ import {
   knownAgentModels,
   modelOptions,
   resolveInheritance,
+  sharedClearedEffortNotice,
+  sharedEfforts,
+  sharedModelOptions,
+  type CalledAgentRouting,
   type RoutingDraft,
 } from "@momo/core/features/routing/routingModel";
 
@@ -67,6 +72,25 @@ import {
 // 기억하지 않는다: 줄에 [다시 확인]이 서고, 접었다 다시 펼치기만 해도 물음이 새로
 // 날아간다. 회복 경로가 새로고침뿐인 화면은 "확인될 때까지 쓸 수 없습니다"라고
 // 적어 놓고 그 확인을 일으킬 방법을 주지 않는 화면이다.
+//
+// -----------------------------------------------------------------------------
+// 여럿을 부른 글 (#1113)
+//
+// 한 발화가 부른 에이전트 수만큼 run이 생기고(`agent_mentions.rs`의 per-agent
+// 루프), 각자에게 걸려 있는 모델·강도는 서로 다르다. 앞 판의 이 줄은 그 사실을
+// 한 문장으로 접어 두고("각 에이전트의 프로필 값이 그대로 적용됩니다") **그 값이
+// 무엇인지는 끝내 말하지 않았다.** 부른 사람 수만큼 상속 체인을 풀면 되는 일이고,
+// 그것이 여기서 늘어난 절반이다: 펼치면 부른 각자에게 이번 메시지가 무엇으로
+// 도착할지가 한 줄씩 적힌다.
+//
+// 나머지 절반은 오버라이드다. 전송 표면이 받는 `routing`은 **메시지 한 건당
+// 블록 하나**이고(openapi `RunRoutingInput`은 `additionalProperties: false`),
+// 서버는 그 하나를 루프 안에서 각 에이전트에게 다시 푼다. 그러므로 이 줄이
+// 여럿에게 걸 수 있는 값은 "각자 다른 값"이 아니라 **모두에게 같은 값**이고, 고를
+// 수 있는 값은 부른 모두가 받아 주는 것들의 교집합이다(`sharedModelOptions` /
+// `sharedEfforts`). 한 명에게만 유효한 값을 실으면 서버는 그 한 명에서 400을
+// 답하고, 그 400은 전송 트랜잭션 전체를 되돌린다 — 두 명을 부른 메시지가 통째로
+// 안 나간다. 화면은 그 조합을 애초에 상자에 올리지 않는다.
 // =============================================================================
 
 /** 이 줄이 접혀 있을 때의 고정 높이. 멘션이 붙었다 떨어질 때 컴포저가 튀지 않는다. */
@@ -122,6 +146,26 @@ function RowAction({
   );
 }
 
+/** 접기/펼치기 손잡이. 두 줄이 같은 동사와 같은 아이콘을 쓴다. */
+function ToggleAction({
+  expanded,
+  onToggle,
+}: {
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <RowAction expanded={expanded} onClick={onToggle} testId="composer-routing-toggle">
+      {expanded ? "접기" : "이번만 바꾸기"}
+      {expanded ? (
+        <ChevronUp aria-hidden="true" className="size-3" />
+      ) : (
+        <ChevronDown aria-hidden="true" className="size-3" />
+      )}
+    </RowAction>
+  );
+}
+
 export function MentionRoutingBar({
   channelId,
   target,
@@ -133,28 +177,6 @@ export function MentionRoutingBar({
   draft: RoutingDraft;
   onDraftChange: (next: RoutingDraft) => void;
 }) {
-  const [expanded, setExpanded] = useState(false);
-  const [cleared, setCleared] = useState<string | null>(null);
-  const { workspaceId } = useSession();
-  const directory = useDirectory(workspaceId).directory;
-  const capability = useRoutingCapability();
-  const sendTier = useSendRoutingCapability(channelId);
-  const openProfile = useOpenAgentProfile();
-  const agent: RosterMember | null = target.kind === "one" ? target.agent : null;
-  const profileHandle = useAgentProfile(agent?.id ?? null);
-  const allowedModels = useAllowedAgentModels(agent?.id ?? null);
-
-  // 프로필을 못 읽었으면 상속값을 **주장하지 않는다**(R1 H2). 404는 실패가 아니라
-  // "프로필이 없다"는 사실이고, 그때 상속의 상대는 에이전트 자신의 모델이다.
-  const profileFailed = agent !== null && Boolean(profileHandle.error);
-  const table = capability.table;
-  const inheritance = useMemo(() => {
-    if (!agent || profileHandle.isPending || profileFailed) return null;
-    return resolveInheritance(
-      table, agent.agentModel ?? "", profileHandle.profile, allowedModels
-    );
-  }, [table, agent, profileHandle.isPending, profileHandle.profile, profileFailed, allowedModels]);
-
   // 오버라이드가 걸려 있는데 대상이 사라지면(멘션을 지웠다) 그 값도 갈 곳이
   // 없다. 줄 자체가 사라지므로 초안도 함께 비운다.
   useEffect(() => {
@@ -162,62 +184,75 @@ export function MentionRoutingBar({
   }, [target.kind, draft, onDraftChange]);
 
   if (target.kind === "none") return null;
-
   if (target.kind === "many") {
-    const named = target.agents.slice(0, NAMED_LIMIT).map((a) => `@${a.handle}`);
-    const rest = target.agents.length - named.length;
-    // 조사는 목록이 무엇으로 끝나는지에 달려 있다(R2 M4). 두 명이면 문장은 라틴
-    // 핸들로 끝나 "를"이고, 셋 이상이면 "명"으로 끝나 "을"이다. 하드코딩한 "을"은
-    // 앞의 경우에 어긋나고, 같은 파일이 쓰는 clearedEffortNotice는 이미 이 규칙을
-    // 계산해서 쓴다.
-    const called = rest > 0 ? `${named.join(", ")} 외 ${rest}명` : named.join(", ");
     return (
-      <p
-        className="border-t border-line px-4 py-1 text-meta text-ink-muted"
-        data-testid="composer-routing-many"
-      >
-        {attachParticle(called, "object")} 불렀습니다. 요청이 각각 만들어져서
-        이번 한 번만 바꾸기는 붙일 수 없고, 각 에이전트의 프로필 값이 그대로
-        적용됩니다.
-      </p>
+      <ManyTargetRow
+        channelId={channelId}
+        target={target}
+        draft={draft}
+        onDraftChange={onDraftChange}
+      />
     );
   }
+  return (
+    <OneTargetRow
+      channelId={channelId}
+      agent={target.agent}
+      draft={draft}
+      onDraftChange={onDraftChange}
+    />
+  );
+}
+
+function OneTargetRow({
+  channelId,
+  agent,
+  draft,
+  onDraftChange,
+}: {
+  channelId: string;
+  agent: RosterMember;
+  draft: RoutingDraft;
+  onDraftChange: (next: RoutingDraft) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const [cleared, setCleared] = useState<string | null>(null);
+  const { workspaceId } = useSession();
+  const directory = useDirectory(workspaceId).directory;
+  const capability = useRoutingCapability();
+  const sendTier = useSendRoutingCapability(channelId);
+  const openProfile = useOpenAgentProfile();
+  const profileHandle = useAgentProfile(agent.id);
+  const allowedModels = useAllowedAgentModels(agent.id);
+
+  // 프로필을 못 읽었으면 상속값을 **주장하지 않는다**(R1 H2). 404는 실패가 아니라
+  // "프로필이 없다"는 사실이고, 그때 상속의 상대는 에이전트 자신의 모델이다.
+  const profileFailed = Boolean(profileHandle.error);
+  const table = capability.table;
+  const inheritance = useMemo(() => {
+    if (profileHandle.isPending || profileFailed) return null;
+    return resolveInheritance(
+      table, agent.agentModel ?? "", profileHandle.profile, allowedModels
+    );
+  }, [table, agent, profileHandle.isPending, profileHandle.profile, profileFailed, allowedModels]);
 
   const override = isOverride(draft);
   const effortReady = capability.support === "ready" && table !== null;
 
   // 잠긴 이유는 확정된 사실부터 순서대로 고른다. 확인 중은 결론이 아니므로
   // 마지막이고, 결론이 난 사유가 있으면 그것을 먼저 말한다.
-  const agentName = agent?.displayName ?? "이 에이전트";
+  const agentName = agent.displayName;
   const inheritSuffix = `지금 보내면 ${agentName}의 프로필 값이 그대로 적용됩니다.`;
   const reason: string | null = profileFailed
     ? "이 에이전트의 프로필을 불러오지 못해 무엇이 적용될지 확인하지 못했습니다."
-    : capability.support === "absent"
-      ? `${capability.reason ?? UNSUPPORTED_REASON} ${inheritSuffix}`
-      : capability.support === "unknown"
-        ? `${capability.reason ?? ""} 확인될 때까지 이번 한 번만 바꾸기는 쓸 수 없습니다.`.trim()
-        : sendTier.support === "absent"
-          ? `${sendTier.reason ?? SEND_UNSUPPORTED_REASON} ${inheritSuffix}`
-          : sendTier.support === "unknown"
-            ? `${sendTier.reason ?? ""} 확인될 때까지 이번 한 번만 바꾸기는 쓸 수 없습니다.`.trim()
-            : capability.support === "checking" ||
-                sendTier.support === "checking" ||
-                sendTier.support === "idle"
-              ? "이 서버가 메시지 한 건 오버라이드를 받는지 확인하는 중입니다."
-              : profileHandle.isPending
-                ? "이 에이전트에 지금 무엇이 걸려 있는지 확인하는 중입니다."
-                : null;
+    : serverReason(capability, sendTier, inheritSuffix) ??
+      (profileHandle.isPending
+        ? "이 에이전트에 지금 무엇이 걸려 있는지 확인하는 중입니다."
+        : null);
 
   // 이미 답이 있는 사유만 접힌 상태에서 보여 준다. 아직 물어보지도 않은 것을 두고
   // "확인 중"이라고 적어 두면 아무도 누르지 않은 줄이 계속 바쁜 척을 한다.
-  const standingReason =
-    profileFailed ||
-    capability.support === "absent" ||
-    capability.support === "unknown" ||
-    sendTier.support === "absent" ||
-    sendTier.support === "unknown"
-      ? reason
-      : null;
+  const standingReason = profileFailed || settledServerVerdict(capability, sendTier) ? reason : null;
 
   // 확인하지 못해서 잠긴 줄에는 확인을 일으킬 손잡이가 있어야 한다(R2 H1).
   // "확인될 때까지 쓸 수 없습니다"라고 적어 놓고 그 확인이 새로고침뿐이면, 그
@@ -233,7 +268,7 @@ export function MentionRoutingBar({
   const ready =
     effortReady && sendTier.support === "ready" && !profileFailed && inheritance !== null;
 
-  const inheritedModel = agent?.agentModel ?? "";
+  const inheritedModel = agent.agentModel ?? "";
   const summary = profileFailed
     ? "상속값을 확인하지 못했습니다"
     : inheritance
@@ -249,7 +284,7 @@ export function MentionRoutingBar({
       data-override={override ? "" : undefined}
     >
       <div className="flex h-8 items-center gap-2 px-4 text-meta">
-        <span className="shrink-0 text-agent">@{agent?.handle}</span>
+        <span className="shrink-0 text-agent">@{agent.handle}</span>
         {override ? (
           <Chip>이번 한 번만</Chip>
         ) : (
@@ -282,9 +317,9 @@ export function MentionRoutingBar({
             상속으로 되돌리기
           </RowAction>
         )}
-        <RowAction
+        <ToggleAction
           expanded={expanded}
-          onClick={() => {
+          onToggle={() => {
             const next = !expanded;
             setExpanded(next);
             // 펼치는 순간에만 전송 표면에 물어본다. 오버라이드를 한 번도 쓰지
@@ -292,15 +327,7 @@ export function MentionRoutingBar({
             // `prove`가 스스로 물러선다(capability.ts `beginSendProbe`).
             if (next && effortReady) sendTier.prove();
           }}
-          testId="composer-routing-toggle"
-        >
-          {expanded ? "접기" : "이번만 바꾸기"}
-          {expanded ? (
-            <ChevronUp aria-hidden="true" className="size-3" />
-          ) : (
-            <ChevronDown aria-hidden="true" className="size-3" />
-          )}
-        </RowAction>
+        />
       </div>
 
       {expanded && (
@@ -351,14 +378,12 @@ export function MentionRoutingBar({
                 : null
             }
           />
-          {agent && (
-            <RowAction
-              onClick={() => openProfile(agent.id)}
-              testId="composer-routing-open-profile"
-            >
-              {agent.displayName}의 기본값 편집
-            </RowAction>
-          )}
+          <RowAction
+            onClick={() => openProfile(agent.id)}
+            testId="composer-routing-open-profile"
+          >
+            {agent.displayName}의 기본값 편집
+          </RowAction>
         </div>
       )}
 
@@ -373,5 +398,293 @@ export function MentionRoutingBar({
         </p>
       )}
     </div>
+  );
+}
+
+/**
+ * 여럿을 부른 글의 줄 (#1113).
+ *
+ * 접혀 있을 때는 한 명일 때와 같은 문법이고(누구를 불렀는가 · 이번 메시지에
+ * 무엇이 적용되는가), 펼치면 두 가지가 나온다: 부른 각자에게 이번 메시지가
+ * 무엇으로 도착하는지, 그리고 모두에게 같이 걸 값 한 벌.
+ */
+function ManyTargetRow({
+  channelId,
+  target,
+  draft,
+  onDraftChange,
+}: {
+  channelId: string;
+  target: Extract<MentionRoutingTarget, { kind: "many" }>;
+  draft: RoutingDraft;
+  onDraftChange: (next: RoutingDraft) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const [cleared, setCleared] = useState<string | null>(null);
+  const { workspaceId } = useSession();
+  const directory = useDirectory(workspaceId).directory;
+  const capability = useRoutingCapability();
+  const sendTier = useSendRoutingCapability(channelId);
+  const table = capability.table;
+  const called = useCalledAgentsRouting(target, table);
+
+  const override = isOverride(draft);
+  const effortReady = capability.support === "ready" && table !== null;
+  const count = target.agents.length;
+
+  const named = target.agents.slice(0, NAMED_LIMIT).map((agent) => `@${agent.handle}`);
+  const rest = count - named.length;
+  // 조사는 목록이 무엇으로 끝나는지에 달려 있다(R2 M4). 두 명이면 문장은 라틴
+  // 핸들로 끝나 "를"이고, 셋 이상이면 "명"으로 끝나 "을"이다.
+  const calledLabel = rest > 0 ? `${named.join(", ")} 외 ${rest}명` : named.join(", ");
+
+  const { models, allowedReceived } = sharedModelOptions(
+    called.agents,
+    table,
+    knownAgentModels(directory.members)
+  );
+  const effortsFor = (modelOverride: string | null) =>
+    sharedEfforts(table, called.agents, modelOverride);
+
+  const unreadable = called.unreadable;
+  const unreadableReason =
+    unreadable.length > 0
+      ? `${unreadable.join(", ")}의 프로필을 불러오지 못해 무엇이 적용될지 확인하지 못했습니다.`
+      : null;
+  const inheritSuffix = `지금 보내면 부른 ${count}명의 프로필 값이 각자 그대로 적용됩니다.`;
+  const reason: string | null =
+    unreadableReason ??
+    serverReason(capability, sendTier, inheritSuffix) ??
+    (called.isPending ? "부른 에이전트들에 지금 무엇이 걸려 있는지 확인하는 중입니다." : null);
+
+  const standingReason =
+    unreadableReason !== null || settledServerVerdict(capability, sendTier) ? reason : null;
+
+  const unsettled = capability.support === "unknown" || sendTier.support === "unknown";
+  const recheckUnsettled = () => {
+    if (capability.support === "unknown") capability.recheck();
+    if (sendTier.support === "unknown") sendTier.prove();
+  };
+
+  const ready =
+    effortReady &&
+    sendTier.support === "ready" &&
+    unreadable.length === 0 &&
+    !called.isPending;
+
+  // 두 축은 따로 잠긴다. 공통 모델이 하나도 없는 워크스페이스에서도 강도는
+  // 걸 수 있고, 그 반대도 있다.
+  const noSharedModel = ready && models.length === 0;
+  const noSharedEffort = ready && effortsFor(draft.model).length === 0;
+  const modelReason = noSharedModel
+    ? `부른 ${count}명이 함께 쓸 수 있는 모델이 없습니다. 모델은 각자 프로필 값이 그대로 적용됩니다.`
+    : reason;
+  const effortReason = noSharedEffort
+    ? `부른 ${count}명이 함께 쓸 수 있는 추론 강도가 없습니다. 강도는 각자 프로필 값이 그대로 적용됩니다.`
+    : reason;
+
+  const summary = override
+    ? `모델 ${draft.model ?? "각자 프로필 값"} · 강도 ${
+        draft.effort ? effortLabel(draft.effort) : "각자 프로필 값"
+      }`
+    : unreadable.length > 0
+      ? "적용될 값을 확인하지 못했습니다"
+      : called.isPending
+        ? "적용될 값을 불러오는 중"
+        : "모델·강도 각자 프로필 값";
+
+  return (
+    <div
+      className={cn("border-t border-line", override && "bg-accent-soft")}
+      data-testid="composer-routing"
+      data-override={override ? "" : undefined}
+      data-called={count}
+    >
+      <div className="flex h-8 items-center gap-2 px-4 text-meta">
+        {/* 핸들 두 개가 붙은 라벨은 한 명일 때보다 길다. 폭을 묶어 두지 않으면
+            긴 핸들 두 개가 요약 줄을 밀어내고, 그다음에는 행 자체를 민다. */}
+        <span className="max-w-pane-sm shrink-0 truncate text-agent">{calledLabel}</span>
+        {override ? (
+          <Chip>이번 한 번만</Chip>
+        ) : (
+          <span className="shrink-0 text-ink-muted">이번 메시지</span>
+        )}
+        <span
+          className="min-w-0 flex-1 truncate text-ink-muted"
+          data-testid="composer-routing-summary"
+        >
+          {summary}
+        </span>
+        {unreadable.length > 0 && (
+          <RowAction onClick={called.refetch} testId="composer-routing-retry">
+            다시 시도
+          </RowAction>
+        )}
+        {unreadable.length === 0 && unsettled && (
+          <RowAction onClick={recheckUnsettled} testId="composer-routing-recheck">
+            다시 확인
+          </RowAction>
+        )}
+        {override && (
+          <RowAction
+            onClick={() => {
+              onDraftChange(INHERIT_DRAFT);
+              setCleared(null);
+            }}
+            testId="composer-routing-reset"
+          >
+            상속으로 되돌리기
+          </RowAction>
+        )}
+        <ToggleAction
+          expanded={expanded}
+          onToggle={() => {
+            const next = !expanded;
+            setExpanded(next);
+            if (next && effortReady) sendTier.prove();
+          }}
+        />
+      </div>
+
+      {expanded && (
+        <div
+          id="composer-routing-fields"
+          className="flex flex-col gap-2 border-t border-line bg-surface px-4 pb-2 pt-2"
+        >
+          <p className="text-meta text-ink-muted">
+            고른 값은 부른 {count}명 모두에게 같이 적용됩니다. 메시지 한 건에는
+            모델과 추론 강도를 하나씩만 실을 수 있고, 여기 올라오는 값은 부른
+            모두가 받아 주는 것들입니다.
+          </p>
+          <RoutingFields
+            idPrefix="composer-routing"
+            table={table}
+            models={models}
+            allowedModelsReceived={allowedReceived}
+            inheritedModel=""
+            modelInheritLabel="상속 (각자 프로필 값)"
+            effortInheritLabel="상속 (각자 프로필 값)"
+            effortsFor={effortsFor}
+            layout="row"
+            draft={draft}
+            onChange={(next, clearedEffort) => {
+              onDraftChange(next);
+              setCleared(
+                clearedEffort === null
+                  ? null
+                  : next.model === null
+                    ? sharedClearedEffortNotice(clearedEffort)
+                    : clearedEffortNotice(next.model, clearedEffort)
+              );
+            }}
+            modelDisabled={!ready || noSharedModel}
+            modelDisabledReason={modelReason}
+            effortDisabled={!ready || noSharedEffort}
+            effortDisabledReason={effortReason}
+            clearedNotice={cleared}
+          />
+          <CalledAgentList agents={called.agents} draft={draft} pending={called.isPending} />
+        </div>
+      )}
+
+      {!expanded && standingReason && (
+        <p
+          className="px-4 pb-1 text-meta text-ink-muted"
+          data-testid="composer-routing-notice"
+        >
+          {standingReason}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * 부른 각자에게 이번 메시지가 무엇으로 도착하는가.
+ *
+ * 오버라이드가 걸려 있으면 그 값이 이미 반영된 줄이다: 사람이 상자에서 고른 값과
+ * 이 목록이 다른 말을 하면, 둘 중 하나는 반드시 거짓이 된다.
+ */
+function CalledAgentList({
+  agents,
+  draft,
+  pending,
+}: {
+  agents: readonly CalledAgentRouting[];
+  draft: RoutingDraft;
+  pending: boolean;
+}) {
+  return (
+    <dl className="flex flex-col gap-1" data-testid="composer-routing-called">
+      {agents.map((agent) => (
+        <div key={agent.id} className="flex items-baseline gap-2 text-meta">
+          <dt className="max-w-pane-sm shrink-0 truncate text-agent">@{agent.handle}</dt>
+          <dd className="min-w-0 flex-1 truncate text-ink-muted">
+            {appliedLine(agent, draft, pending)}
+          </dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+function appliedLine(
+  agent: CalledAgentRouting,
+  draft: RoutingDraft,
+  pending: boolean
+): string {
+  if (agent.inheritance === null) {
+    return pending ? "불러오는 중" : "무엇이 적용될지 확인하지 못했습니다";
+  }
+  const model = appliedModelLabel(draft.model ?? agent.inheritance.model.value);
+  const effort = draft.effort ?? agent.inheritance.effort.value;
+  return `모델 ${model} · 강도 ${effort === null ? "지정 없음" : effortLabel(effort)}`;
+}
+
+// ---- 두 줄이 함께 쓰는 서버 판정 ---------------------------------------------
+
+type Capability = { support: string; reason: string | null };
+
+/**
+ * 서버가 이 오버라이드를 받는가에 대한, 사람에게 할 말. 없으면 `null`이고 그때
+ * 잠금 사유는 호출자가 자기 사정(프로필 읽기 등)으로 정한다.
+ *
+ * 순서가 곧 정직함이다: 확정된 사유가 먼저고, "확인 중"은 결론이 아니므로 맨
+ * 뒤다. 두 줄이 같은 순서를 쓰지 않으면 한 화면이 서버에 대해 두 가지를 말한다.
+ */
+function serverReason(
+  capability: Capability,
+  sendTier: Capability,
+  inheritSuffix: string
+): string | null {
+  if (capability.support === "absent") {
+    return `${capability.reason ?? UNSUPPORTED_REASON} ${inheritSuffix}`;
+  }
+  if (capability.support === "unknown") {
+    return `${capability.reason ?? ""} 확인될 때까지 이번 한 번만 바꾸기는 쓸 수 없습니다.`.trim();
+  }
+  if (sendTier.support === "absent") {
+    return `${sendTier.reason ?? SEND_UNSUPPORTED_REASON} ${inheritSuffix}`;
+  }
+  if (sendTier.support === "unknown") {
+    return `${sendTier.reason ?? ""} 확인될 때까지 이번 한 번만 바꾸기는 쓸 수 없습니다.`.trim();
+  }
+  if (
+    capability.support === "checking" ||
+    sendTier.support === "checking" ||
+    sendTier.support === "idle"
+  ) {
+    return "이 서버가 메시지 한 건 오버라이드를 받는지 확인하는 중입니다.";
+  }
+  return null;
+}
+
+/** 서버에 대해 **결론이 난** 사유가 있는가. 접힌 줄은 그것만 보여 준다. */
+function settledServerVerdict(capability: Capability, sendTier: Capability): boolean {
+  return (
+    capability.support === "absent" ||
+    capability.support === "unknown" ||
+    sendTier.support === "absent" ||
+    sendTier.support === "unknown"
   );
 }

@@ -151,7 +151,7 @@ export function pinList(map: PinMap): PinnedMessage[] {
 }
 
 /**
- * The cap the server enforces (migration `061_message_pin.sql`, and
+ * The cap the server enforces (migration `062_message_pin.sql`, and
  * `momo_messaging::CHANNEL_PIN_LIMIT`).
  *
  * Mirrored here only so the copy that explains a refusal can name the number.

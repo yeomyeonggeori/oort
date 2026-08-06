@@ -8,7 +8,7 @@
 //!   scoped). Invariant #6 (RLS FORCE) becomes structural: a domain query that
 //!   does not go through a tenant transaction never gets the GUC, so the DB
 //!   policies filter it to zero rows. Ports Swift `DB/Database.swift:85-105`.
-//! * **The migration runner reuses the existing 61 SQL files in place**
+//! * **The migration runner reuses the existing 62 SQL files in place**
 //!   (`server/Migrations/NNN_*.sql`), unmodified — the DB enforcement layer is
 //!   language independent (ADR-0145). See [`migrate`].
 //!
