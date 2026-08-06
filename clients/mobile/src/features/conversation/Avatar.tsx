@@ -86,11 +86,15 @@ export function Avatar({
   directory: Directory;
   memberId: string;
 }): React.JSX.Element {
+  // 서버 주소를 **의존성으로 든다.** `apiBase()` 를 메모 안에서만 부르면 기기가
+  // 서버를 고른 순간 이미 그려져 있던 아바타들이 옛 답(주소 없음 → 이니셜)에
+  // 붙잡힌다. 값을 밖에서 한 번 읽고 그것으로 키를 잡으면 그 경로가 없다.
+  const base = apiBase();
   const identity = useMemo(
-    () => avatarIdentity(memberFor(directory, memberId), apiBase()),
-    [directory, memberId],
+    () => avatarIdentity(memberFor(directory, memberId), base),
+    [directory, memberId, base],
   );
-  const source = avatarImageSource(identity, apiBase());
+  const source = avatarImageSource(identity, base);
   const carriesColor = avatarCarriesIdentityColor(identity.kind);
   const round = AVATAR_SHAPE[identity.kind] === 'round';
 
