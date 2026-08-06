@@ -158,6 +158,78 @@ describe("approval card (web-legacy basic-mode vocabulary)", () => {
   });
 });
 
+describe("스폰 승인의 호스트 후보 (ADR-0125 D6-A, #1114)", () => {
+  // 서버가 `execution`을 payload뿐 아니라 **props에도** 싣는 이유가 이 갈래다:
+  // 클라이언트가 브로드캐스트된 메시지 하나로 라디오를 그릴 수 있어야, 카드가
+  // 첫 라디오를 그리기 전에 승인 프로젝션을 한 번 더 읽지 않는다.
+  const execution = {
+    kind: "work_session_spawn",
+    tool: "codex",
+    label: "리팩터링",
+    default_host_id: "0199aa11-2222-7000-8000-0000000000c1",
+    host_candidates: [
+      {
+        host_id: "0199aa11-2222-7000-8000-0000000000c1",
+        display_name: "내 맥",
+        host_type: "app",
+        tier: "local",
+        scope: "member",
+        online: true,
+        selectable: true,
+        unavailable_reason: null,
+      },
+      {
+        host_id: "0199aa11-2222-7000-8000-0000000000c2",
+        display_name: "momo Cloud",
+        host_type: "cloud",
+        tier: "cloud",
+        scope: "workspace",
+        online: true,
+        selectable: false,
+        unavailable_reason: "t3_disabled",
+      },
+    ],
+  };
+
+  it("카드 스냅샷에서 후보를 읽는다 — 두 번째 fetch 없이", () => {
+    const card = agentCardModel(
+      msg({ type: "approval_request", props: approvalProps({ execution }) })
+    );
+    expect(card?.kind).toBe("approval");
+    if (card?.kind !== "approval") return;
+    expect(card.execution?.defaultHostId).toBe(
+      "0199aa11-2222-7000-8000-0000000000c1"
+    );
+    expect(card.execution?.candidates.map((c) => c.selectable)).toEqual([
+      true,
+      false,
+    ]);
+  });
+
+  it("픽커가 없는 승인은 `execution`이 null이다 — 압도적 다수", () => {
+    const card = agentCardModel(
+      msg({ type: "approval_request", props: approvalProps() })
+    );
+    if (card?.kind !== "approval") throw new Error("승인 카드가 아니다");
+    expect(card.execution).toBeNull();
+  });
+
+  it("그리는 것을 숨겼다고 말하지 않는다 — `execution`은 withheld가 아니다", () => {
+    // 이 단정이 지키는 것은 카드의 정직성이다: 라디오를 화면에 그려 놓고
+    // "숨김 N개"에 그것을 세면, 카드가 보여주고 있는 것을 숨기고 있다고 말한다.
+    const withExecution = payloadDetail({ title: "정리", execution });
+    const withoutExecution = payloadDetail({ title: "정리" });
+    expect(withExecution.withheld).toBe(withoutExecution.withheld);
+    // 그렇다고 후보가 원본 데이터 행으로 새어 나가지도 않는다.
+    expect(withExecution.rows).toEqual([]);
+  });
+
+  it("`target_host_id`는 여전히 불투명하다 — 이름 없는 id는 결정의 재료가 아니다", () => {
+    const detail = payloadDetail({ execution, target_host_id: "h-1" });
+    expect(detail.withheld).toBe(1);
+  });
+});
+
 describe("approval status resolution", () => {
   it("accepts only the five PG enum values", () => {
     for (const value of [
