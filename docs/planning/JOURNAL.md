@@ -1812,3 +1812,8 @@
 - **ADR-0153 Accepted**(CI 스택 — 재검토 실측: PRIVATE·ADMIN·NCP 2코어): 로컬 게이트 권위+셀프호스티드 러너(경량 한정)+Xcode Cloud+런북 CD — Jenkins 기각·Argo 부적합. 러너 설치=첫 수요 시(#1116).
 - **위생 배치 3워커 발사**: A(#1022 레인 rust+실시간 단정+flake 재설계+부트스트랩 자가 치유) · B(Swift 패스 강등+#1108 merge-tree 스크립트+#1089/#1099 게이트 수리) · C(#1115 Xcode Cloud RN 준비 6건). 완주 시 ADR-0145 증보 2 전 항목 이행.
 - 다음 결정 대기: 첨부 웹 컴포저(클라 표면 — ADR-0151 D2) 배치 시점 · 라이브 배포 묶음(웹 재배포+서버 이미지 — 첨부 포함) · W1(#1112 pin+#1113)·W2(#1114 스폰 폐곡선).
+
+## 2026-08-06 (밤2) · Fable · ADE 발제 → ADR-0154 기안 + prime/herdr 리서치
+- 성재 발제(스플릿뷰 멀티세션·기기 독립 연속성 = oort 지향점) → 로드맵 대조: **부품 완비·묶는 경험 부재** 판정 → **ADR-0154 Proposed**(D1 생존성 모델 working/blocked/idle+기기종속/지속, blocked=멘션급 · D2 관제 뷰=채널이 홈·집계 그리드·리뷰 루프 내장 · D3 재개/인수 어휘 분리+사전조건 선검사 · D4 단계=#1114가 1단계 · D5 외부 하네스 트랙).
+- 리서치(research/2026-08-06-prime-agent-ade-herdr.md): **prime agent**=Prime Intellect 2026-08-05 공개 CLI 하네스(MIT·로컬 데몬·JSONL RPC·steer·extension_ui) — 우리 provider와 같은 층, 스파이크 #1120. **herdr**=실존(24.8k★ Rust 에이전트 인식 tmux) — 워커 좀비화 해독제 후보, 스파이크 #1121(라이선스 재확인 전 실행만). ADE 업계 수렴 3원칙(worktree=경계·3상태 배지·resume/teleport 분리)·함정(리뷰 병목이 진짜)이 ADR에 반영됨.
+- 성재 대기: ADR-0154 세부 승인(D1~D5). 위생 3워커(레인 rust·게이트·Xcode 준비) 계속 진행 중.
