@@ -7,6 +7,7 @@ import { PanelRightClose, PanelRightOpen, X } from "lucide-react";
 import { cn } from "@/design/lib/cn";
 import { Button } from "@/design/ui/button";
 import {
+  ApiError,
   resumeWorkSession,
   uuidEq,
   type Channel,
@@ -36,7 +37,6 @@ import {
   emptyStepsDetail,
   eventsForSession,
   foldSessionEvents,
-  canReattachWorkSession,
   isSlowStep,
   lastLine,
   peekRows,
@@ -58,7 +58,13 @@ import {
   SESSION_STATUS_CLASS,
   silenceLabel,
 } from "@momo/core/features/work/workSessionFormat";
-import { HostPicker } from "./HostPicker";
+import {
+  HANDOFF_COPY,
+  handoffAdvisory,
+  sessionHandoffVerb,
+  takeoverFailureCopy,
+} from "@momo/core/features/work/sessionHandoff";
+import { TakeoverBlock } from "./TakeoverBlock";
 import { WorkSessionDetail } from "./WorkSessionDetail";
 
 // =============================================================================
@@ -273,24 +279,19 @@ function MySessionRow({
   const status = workSessionContinuityStatus(session, hosts);
   const hostName = workHostName(session, hosts) ?? "알 수 없는 호스트";
   const hostOnline = workHostOnline(session, hosts);
-  const canReattach = canReattachWorkSession(session, hosts);
-  const orphaned = session.status === "orphaned";
+  // 두 동사 중 어느 것이 성립하는가 (ADR-0154 D3). 판정은 서버 규칙 그대로이고
+  // (`sessionHandoff`), 이 행은 그 답을 소비만 한다. `orphaned` 를 직접 보던
+  // 자리가 여기였고, 그러면 이 파일이 판정의 두 번째 사본이 된다.
+  const verb = sessionHandoffVerb(session, hosts);
+  const advisory = handoffAdvisory(verb, hostOnline);
   // 고를 것이 실제로 있을 때만 폼이 그려진다. 없으면 그 자리에 문장이 오고,
-  // 토글은 가리킬 그룹이 없다(아래 aria-controls, 2R M4).
+  // 토글은 가리킬 그룹이 없다(아래 aria-controls, 2R M4). 사전조건 선검사와
+  // 그 문구는 `TakeoverBlock`이 진다.
   const hasTargets = resumeTargets.length > 0;
-  const errorRef = useRef<HTMLParagraphElement>(null);
 
-  // 실패한 재개의 포커스 복구 (2R H1). 확정 버튼은 진행 중에도 enabled라 대개
-  // 그대로 남아 있고, 그러면 사람이 그것을 쥔 채다 — 빼앗지 않는다. 자격 호스트가
-  // 마지막 하나였고 그 사이에 사라졌다면 폼째로 언마운트되고 포커스가 <body>로
-  // 떨어지는데, 그때만 오류 문장이 받는다. 판정은 이 파일이 스코프 변경에서 쓰는
-  // stranded와 같은 형태다.
-  useEffect(() => {
-    if (resumeError === null) return;
-    const active = document.activeElement;
-    if (active !== null && active !== document.body) return;
-    errorRef.current?.focus({ preventScroll: true });
-  }, [resumeError]);
+  // 실패한 인수의 포커스 복구(2R H1)는 `TakeoverBlock`으로 옮겼다 — 그 오류
+  // 문단을 소유한 것이 이제 그쪽이고, ref와 effect가 문단에서 떨어져 있으면
+  // 두 번째 호출자가 그 규칙 없이 같은 블록을 세운다.
 
   return (
     <li
@@ -348,7 +349,20 @@ function MySessionRow({
           {clockLabel(session.startedAtMs)}
         </span>
       </p>
+      {/* 하트비트 침묵은 재개를 **막지 않는다** — 서버가 판정에서 뺀 그
+          이유대로다. 다만 침묵하지도 않는다: 눌렀는데 터미널이 안 열리는 흔한
+          원인이 이것이고, 미리 아는 것과 누른 뒤 아는 것은 다르다. */}
+      {advisory !== null && (
+        <p
+          className="mt-1 break-keep break-words text-meta text-warn"
+          data-testid="my-work-session-advisory"
+        >
+          {advisory}
+        </p>
+      )}
       <div className="mt-2 flex flex-wrap justify-end gap-2">
+        {/* 상세로 가는 길은 동사가 아니다 — 어느 동사가 서든 이 버튼은 늘 있고,
+            늘 outline 이다. 동사 버튼만 채움을 진다. */}
         <Button
           ref={detailRef}
           type="button"
@@ -357,90 +371,80 @@ function MySessionRow({
           onClick={onOpenDetail}
           data-testid="my-work-session-detail"
         >
-          {canReattach ? "이어서 보기" : "세션 상세"}
+          세션 상세
         </Button>
-        {/* 열기 전에는 이 토글이 이 행의 결정이므로 채움이고, 열린 뒤에는 결정이
+        {/* ---- 동사 1: 재개 --------------------------------------------------
+            세션은 아직 원래 호스트에 있다. 「보기」인 이유는 이 클라이언트가
+            observer 로만 붙기 때문이고(코어 `HANDOFF_COPY` 주석), 잃는 것이
+            없으므로 고지도 사전조건도 없다. 상세가 곧 그 표면이라 같은 곳으로
+            간다 — 다만 **다른 이름으로**: 이 행에서 그것은 「상세를 본다」가
+            아니라 「돌아간다」다. */}
+        {verb === "resume" && (
+          <Button
+            type="button"
+            variant="default"
+            size="sm"
+            onClick={onOpenDetail}
+            data-testid="my-work-session-resume"
+          >
+            {HANDOFF_COPY.resume.button}
+          </Button>
+        )}
+        {/* ---- 동사 2: 인수 --------------------------------------------------
+            열기 전에는 이 토글이 이 행의 결정이므로 채움이고, 열린 뒤에는 결정이
             확정 버튼으로 옮겨가므로 ghost로 물러난다. 라벨도 함께 바뀐다 —
-            `aria-expanded={true}`인데 이름이 아직 "새 호스트에서 재개"면 보이는
-            이름과 안내되는 상태가 어긋난다(2R M9). 작업 흐름 상세의 같은 토글이
-            쓰는 규칙 그대로이고, 컨트롤을 공유하면서 그 컨트롤이 존재하는 이유인
-            규칙만 쪼갤 수는 없다. 고아가 아닌 행의 `세션 스레드`는 이 행의
-            결정이 아니므로 계속 outline이다. */}
-        <Button
-          type="button"
-          variant={orphaned ? (resumeOpen ? "ghost" : "default") : "outline"}
-          size="sm"
-          onClick={orphaned ? onToggleResume : onOpenThread}
-          disabled={openingThread || resumingHostId !== null}
-          aria-expanded={orphaned ? resumeOpen : undefined}
-          {...(orphaned && resumeOpen && hasTargets
-            ? { "aria-controls": resumeHostsDomId(session.id) }
-            : {})}
-          data-testid="my-work-session-thread"
-        >
-          {openingThread
-            ? "스레드 여는 중"
-            : orphaned
-              ? resumeOpen
-                ? "호스트 선택 닫기"
-                : "새 호스트에서 재개"
-              : "세션 스레드"}
-        </Button>
+            `aria-expanded={true}`인데 이름이 아직 "인수"면 보이는 이름과
+            안내되는 상태가 어긋난다(2R M9). */}
+        {verb === "takeover" && (
+          <Button
+            type="button"
+            variant={resumeOpen ? "ghost" : "default"}
+            size="sm"
+            onClick={onToggleResume}
+            disabled={resumingHostId !== null}
+            aria-expanded={resumeOpen}
+            {...(resumeOpen && hasTargets
+              ? { "aria-controls": resumeHostsDomId(session.id) }
+              : {})}
+            data-testid="my-work-session-takeover"
+          >
+            {resumeOpen ? "호스트 선택 닫기" : HANDOFF_COPY.takeover.button}
+          </Button>
+        )}
+        {/* 동사가 없는 세션(끝났거나 붙을 것이 없다)에도 스레드는 남아 있다.
+            그 한 길이 이 버튼이고, 동사가 선 행에서는 상세가 같은 일을 하므로
+            중복으로 세우지 않는다. */}
+        {verb === null && (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={onOpenThread}
+            disabled={openingThread}
+            data-testid="my-work-session-thread"
+          >
+            {openingThread ? "스레드 여는 중" : "세션 스레드"}
+          </Button>
+        )}
       </div>
-      {orphaned && resumeOpen && (
+      {verb === "takeover" && resumeOpen && (
         // 이 블록은 이 행에서 가장 긴 한국어 산문을 담는다. 어절에서 끊는 규칙은
         // 이 컨테이너가 갖고(word-break는 상속된다), 긴 토큰을 받아내는
         // break-words는 각 문단이 갖는다 — 한 엘리먼트에 함께 두면
         // tailwind-merge가 하나를 지운다(MOMO-676 M-5). 쌍둥이 표면의 같은
         // 문장들은 `<section class="break-keep">` 아래에 있는데 이쪽만 없어서,
         // 261px 실측에서 재개 오류의 `확인한`이 음절에서 쪼개졌다(2R M5).
-        <div
-          className="mt-2 break-keep rounded-md border border-line bg-surface-raised px-3 py-2"
-          data-testid="work-session-resume-targets"
-        >
-          <p className="break-words text-meta text-ink">
-            Git 계보만 새 호스트로 이어집니다.
-          </p>
-          <p className="mt-1 break-words text-meta text-ink-muted">
-            이전 호스트의 터미널 상태와 미커밋 변경은 옮겨지지 않습니다.
-          </p>
-          {resumeError !== null && (
-            <p
-              ref={errorRef}
-              tabIndex={-1}
-              className="mt-2 break-words text-meta text-danger focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
-              role="alert"
-            >
-              {resumeError}
-            </p>
-          )}
-          {!hasTargets ? (
-            <p className="mt-2 break-words text-meta text-ink-muted">
-              온라인인 다른 호스트가 없습니다. 호스트를 연결한 뒤 다시
-              시도하세요.
-            </p>
-          ) : (
-            // 작업 흐름 상세의 이어받기와 같은 컨트롤이다(HostPicker). 두 표면이
-            // 제안하는 act가 같고 그 아래 두 줄의 문장은 이미 한 글자까지 같게
-            // 쓰기로 한 것이라, 컨트롤만 두 벌로 두면 같은 약속이 두 가지 무게와
-            // 두 가지 폭으로 보인다.
-            <HostPicker
-              id={resumeHostsDomId(session.id)}
-              labelId={resumeHostsLabelDomId(session.id)}
-              copy={{
-                group: "재개할 호스트",
-                confirm: "재개",
-                action: (name) => `${name}에서 재개`,
-                busy: (name) => `${name}에서 재개하는 중`,
-              }}
-              targets={resumeTargets}
-              busyHostId={resumingHostId}
-              onPick={onResume}
-              selectTestId="work-session-resume-host-select"
-              confirmTestId="work-session-resume-confirm"
-            />
-          )}
-        </div>
+        <TakeoverBlock
+          session={session}
+          hosts={hosts}
+          targets={resumeTargets}
+          busyHostId={resumingHostId}
+          error={resumeError}
+          onPick={onResume}
+          domId={resumeHostsDomId(session.id)}
+          labelId={resumeHostsLabelDomId(session.id)}
+          testId="work-session-resume-targets"
+        />
       )}
     </li>
   );
@@ -487,7 +491,10 @@ function SessionPeek({
     [query.events, session, truncated]
   );
   const tail = peekRows(rows);
-  const canReattach = canReattachWorkSession(session, hosts);
+  // 미리보기의 이 버튼은 **동사가 아니다** — 어느 판정이든 같은 상세로 간다.
+  // 재개가 성립하는 세션에서만 「이어서」로 부르는 것은 그 말이 참인 자리에서만
+  // 쓰기 위해서다(코어 `HANDOFF_COPY.resume.button`).
+  const verb = sessionHandoffVerb(session, hosts);
   return (
     <div
       id={peekDomId(session.id)}
@@ -563,7 +570,7 @@ function SessionPeek({
           onClick={onOpen}
           data-testid="work-session-open"
         >
-          {canReattach ? "이어서 보기" : "전체 보기"}
+          {verb === "resume" ? HANDOFF_COPY.resume.button : "전체 보기"}
         </Button>
       </div>
     </div>
@@ -755,9 +762,16 @@ export function WorkPanel({
         await sessionsQuery.refetch();
         setResumeSessionId(null);
         onSelectedIdChange(resumed.id);
-      } catch {
+      } catch (error) {
+        // 앞 판은 모든 실패에 한 문장이었다("호스트 상태를 확인한 뒤…"), 그래서
+        // 슬롯이 찼을 때도 멀쩡한 호스트를 고치라고 시켰다. 서버의 거절 어휘는
+        // 닫혀 있으므로(pool_exhausted · member_limit · …) 코어가 그것을 행동으로
+        // 번역한다 (ADR-0154 D3 「실패를 무엇을 하면 되는지로」).
         setResumeError(
-          "새 호스트에서 재개하지 못했습니다. 호스트 상태를 확인한 뒤 다시 시도하세요."
+          takeoverFailureCopy(
+            error instanceof ApiError ? error.status : undefined,
+            error instanceof Error ? error.message : undefined
+          )
         );
       } finally {
         setResumingHostId(null);
@@ -960,6 +974,10 @@ export function WorkPanel({
           wide={wide}
           onWideChange={setWide}
           onBack={closeDetail}
+          onResumed={(resumedId) => {
+            void sessionsQuery.refetch();
+            onSelectedIdChange(resumedId);
+          }}
         />
       ) : (
         <div className="min-h-0 flex-1 overflow-y-auto">

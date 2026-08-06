@@ -12,6 +12,7 @@ import {
   type AdeItem,
   type AdeState,
 } from "@momo/core/features/work/adeControl";
+import { HANDOFF_COPY } from "@momo/core/features/work/sessionHandoff";
 import { elapsedLabel } from "@momo/core/features/agents/workingSignal";
 import { cn } from "@/design/lib/cn";
 import { useSession } from "@/app/session";
@@ -102,6 +103,16 @@ function AdeCard({
 }) {
   const durability = itemDurabilityBadge(item);
   const diff = adeDiffLabel(item.diff);
+  // 이 카드에서 성립하는 동사 (ADR-0154 D3). 카드는 동사를 **말하되 실행하지
+  // 않는다**: 누르면 그 동사가 사는 표면이 열린다.
+  //
+  // 인수를 이 320px 서랍 안에서 끝내지 않은 것은 판단이다. 인수는 호스트 선택 +
+  // 부분 복원 고지 + 사전조건 문장을 함께 세워야 하고(코어 `TAKEOVER_*`), 그
+  // 셋을 카드 안에 접어 넣으면 서랍은 관제가 아니라 폼 목록이 된다. 게다가 이
+  // 카드는 이미 <button> 하나라, 그 안에 두 번째 버튼을 두는 것은 마크업이
+  // 허락하지 않는다. 그래서 카드는 **무엇을 할 수 있는지**까지 말하고, 그 일이
+  // 실제로 일어나는 곳으로 데려간다.
+  const handoff = item.handoff === undefined ? null : HANDOFF_COPY[item.handoff];
   return (
     <li>
       <button
@@ -111,6 +122,7 @@ function AdeCard({
         data-kind={item.kind}
         data-state={item.state}
         data-durability={item.durability}
+        data-handoff={item.handoff ?? undefined}
         className={cn(
           "flex w-full min-w-0 flex-col gap-1 border-b border-line px-4 py-3 text-left",
           "transition-colors hover:bg-surface-hover",
@@ -182,14 +194,36 @@ function AdeCard({
             않는 이유는 코어 `adeDiffLabel` 에 있다: 「모른다」는 「안 바꿨다」가
             아니다. 빈 문자열이 아니라 zero-width space 인 것은 빈 span 이
             line-height 를 갖지 않아 자리를 예약하지 못하기 때문이다. */}
-        <span
-          data-numeric
-          data-testid="ade-card-diff"
-          data-empty={diff === null ? "" : undefined}
-          aria-hidden={diff === null ? "true" : undefined}
-          className="font-mono text-timestamp text-ink-muted"
-        >
-          {diff ?? "\u200b"}
+        <span className="flex min-w-0 items-baseline gap-2">
+          <span
+            data-numeric
+            data-testid="ade-card-diff"
+            data-empty={diff === null ? "" : undefined}
+            aria-hidden={diff === null ? "true" : undefined}
+            className="min-w-0 flex-1 font-mono text-timestamp text-ink-muted"
+          >
+            {diff ?? "\u200b"}
+          </span>
+          {/* \uc774 \uce74\ub4dc\ub97c \ub204\ub974\uba74 \ubb34\uc5c7\uc744 \ud560 \uc218 \uc788\ub294\uac00 (ADR-0154 D3). \ub450 \ub3d9\uc0ac\ub294 \uc11c\ub85c
+              \ub2e4\ub978 \ub0b1\ub9d0\uc774\uace0 \ub2e4\ub978 \uc789\ud06c\ub97c \uc9c4\ub2e4: \uc778\uc218\ub294 \uc0ac\ub78c\uc774 \uc6c0\uc9c1\uc5ec\uc57c \ub05d\ub098\ub294
+              \uc77c\uc774\ub77c accent \ub97c \uc785\uace0(\uc774 \ud654\uba74\uc5d0\uc11c \uc0ac\ub78c\uc744 \ubd80\ub974\ub294 \ucd95\uc774 \uadf8\uac83\uc774\ub2e4),
+              \uc7ac\uac1c\ub294 \uadf8\ub0e5 \ub3cc\uc544\uac00\ub294 \uac83\uc774\ub77c \ubb3c\ub7ec\uc120\ub2e4.
+
+              \ub3d9\uc0ac\uac00 \uc5c6\ub294 \uce74\ub4dc\uc5d0\ub294 **\uc544\ubb34 \ub9d0\ub3c4 \ud558\uc9c0 \uc54a\ub294\ub2e4**. \u300c\ud560 \uc218 \uc788\ub294 \uac83\uc774
+              \uc5c6\uc74c\u300d\uc744 \uce78\ub9c8\ub2e4 \uadf8\ub9ac\uba74 \uadf8 \ubb38\uad6c\uac00 \ubaa9\ub85d\uc758 \uae30\ubcf8\uac12\uc774 \ub418\uace0, \uadf8\ub54c \uadf8\uac83\uc740
+              \uc815\ubcf4\uac00 \uc544\ub2c8\ub77c \ubc30\uacbd\uc774\ub2e4 \u2014 `itemDurabilityBadge` \uac00 \ud134 \uce74\ub4dc\uc5d0 \ub300\ud574
+              \uc138\uc6b4 \uac83\uacfc \uac19\uc740 \uaddc\uce59. */}
+          {handoff !== null && (
+            <span
+              data-testid="ade-card-handoff"
+              className={cn(
+                "shrink-0 text-timestamp",
+                item.handoff === "takeover" ? "text-accent" : "text-ink-muted"
+              )}
+            >
+              {handoff.button}
+            </span>
+          )}
         </span>
       </button>
     </li>

@@ -4,7 +4,9 @@ import { ArrowLeft, Loader2 } from "lucide-react";
 import { cn } from "@/design/lib/cn";
 import { Button } from "@/design/ui/button";
 import {
+  ApiError,
   endWorkSession,
+  resumeWorkSession,
   sendThreadReply,
   uuidEq,
   type WorkHost,
@@ -38,6 +40,15 @@ import {
   SESSION_STATUS_CLASS,
   silenceLabel,
 } from "@momo/core/features/work/workSessionFormat";
+import {
+  HANDOFF_COPY,
+  sessionHandoffVerb,
+  showsOneWayNote,
+  takeoverFailureCopy,
+  takeoverTargets,
+  TAKEOVER_ONE_WAY_COPY,
+} from "@momo/core/features/work/sessionHandoff";
+import { TakeoverBlock } from "./TakeoverBlock";
 
 // =============================================================================
 // 세션 상세 (AX-3 / MOMO-618): what one work session did, in the order it did
@@ -472,6 +483,115 @@ function SessionActions({
   );
 }
 
+/**
+ * 이 상세에서 이어하기 — 두 동사 (ADR-0154 D3, #1137).
+ *
+ * 상세는 서랍의 세션 카드가 **첫 클릭으로 도착하는 곳**이다(`?work=`). 그래서
+ * 여기서 동선이 끊기면 서랍의 「대기」 카드는 목적지가 막다른 길인 카드가 된다:
+ * 앞 판에서 고아 세션을 그 경로로 열면 인수할 방법이 없어 목록으로 되돌아가야
+ * 했고, 목록은 서랍이 온 곳이 아니다.
+ *
+ * **재개 쪽에는 블록이 없다.** 이 화면이 곧 그 동사의 결과이기 때문이다 —
+ * 진행 내역이 아래에 있고 관전 터미널이 그 위에 있다. 이미 서 있는 곳으로
+ * 데려가는 버튼은 동선이 아니라 소음이다.
+ */
+function HandoffSection({
+  session,
+  hosts,
+  onResumed,
+}: {
+  session: WorkSession;
+  hosts: readonly WorkHost[] | undefined;
+  onResumed: (sessionId: string) => void;
+}) {
+  const { session: auth, workspaceId } = useSession();
+  const [open, setOpen] = useState(false);
+  const [busyHostId, setBusyHostId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const verb = sessionHandoffVerb(session, hosts);
+  const targets = takeoverTargets(session, hosts ?? [], auth.member.id);
+  const oneWay = showsOneWayNote(
+    verb === "resume" ? "reattach" : null,
+    session,
+    hosts,
+    auth.member.id
+  );
+  const domId = `work-detail-takeover-${session.id.toLowerCase()}`;
+
+  async function takeover(targetHostId: string) {
+    if (busyHostId !== null) return;
+    setBusyHostId(targetHostId);
+    setError(null);
+    try {
+      const resumed = await resumeWorkSession(
+        workspaceId,
+        session.id,
+        targetHostId
+      );
+      setOpen(false);
+      onResumed(resumed.id);
+    } catch (caught) {
+      setError(
+        takeoverFailureCopy(
+          caught instanceof ApiError ? caught.status : undefined,
+          caught instanceof Error ? caught.message : undefined
+        )
+      );
+    } finally {
+      setBusyHostId(null);
+    }
+  }
+
+  // 살아 있는 남의 기기 세션에 서는 비대칭 고지(ADR-0154 D4). 인수 버튼이 왜
+  // 없는지에 대한 답이고, 이것이 없으면 그 부재는 결함으로 읽힌다.
+  if (oneWay) {
+    return (
+      <p
+        className="border-b border-line px-4 py-2 break-keep break-words text-meta text-ink-muted"
+        data-testid="work-detail-one-way"
+      >
+        {TAKEOVER_ONE_WAY_COPY}
+      </p>
+    );
+  }
+
+  if (verb !== "takeover") return null;
+
+  return (
+    <section className="border-b border-line px-4 py-2" data-testid="work-detail-handoff">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-meta text-ink-muted">{HANDOFF_COPY.takeover.verb}</h2>
+        <Button
+          type="button"
+          variant={open ? "ghost" : "default"}
+          size="sm"
+          onClick={() => setOpen((was) => !was)}
+          disabled={busyHostId !== null}
+          aria-expanded={open}
+          {...(open ? { "aria-controls": domId } : {})}
+          data-testid="work-detail-takeover-toggle"
+        >
+          {open ? "호스트 선택 닫기" : HANDOFF_COPY.takeover.button}
+        </Button>
+      </div>
+      {open && (
+        <TakeoverBlock
+          session={session}
+          hosts={hosts}
+          targets={targets}
+          busyHostId={busyHostId}
+          error={error}
+          onPick={(hostId) => void takeover(hostId)}
+          domId={domId}
+          labelId={`${domId}-label`}
+          testId="work-detail-takeover"
+        />
+      )}
+    </section>
+  );
+}
+
 export function WorkSessionDetail({
   session,
   hosts,
@@ -483,6 +603,7 @@ export function WorkSessionDetail({
   wide,
   onWideChange,
   onBack,
+  onResumed,
 }: {
   session: WorkSession;
   hosts: WorkHost[] | undefined;
@@ -496,6 +617,13 @@ export function WorkSessionDetail({
   wide: boolean;
   onWideChange: (wide: boolean) => void;
   onBack: () => void;
+  /**
+   * 인수가 성공했다 — 후계 세션의 id. 서버가 **새 행**을 만들기 때문에 필요한
+   * 콜백이다(원본은 `ended`로 닫히고 새 id가 돌아온다). 이 화면이 스스로
+   * 갈아타지 않고 목록 소유자에게 넘기는 이유는 선택 상태가 거기 있기 때문이고,
+   * 여기서 바꾸면 목록과 상세가 서로 다른 세션을 가리킨다.
+   */
+  onResumed: (sessionId: string) => void;
 }) {
   const { workspaceId } = useSession();
   const mine = useMemo(
@@ -645,6 +773,17 @@ export function WorkSessionDetail({
             </Link>
           </p>
         )}
+
+        {/* 이어하기 (ADR-0154 D3). 목표 줄 **바로 아래**이고 세션 정보보다
+            위다: 이 자리에 온 사람이 고아 세션에서 물을 것은 「이걸 어떻게
+            이어가지」이고, 그 답이 접힌 <details> 아래에 있으면 없는 것과
+            같다. 재개가 성립하는 세션에는 아무것도 그리지 않는다 — 이 화면이
+            이미 그 동사의 결과다. */}
+        <HandoffSection
+          session={session}
+          hosts={hosts}
+          onResumed={onResumed}
+        />
 
         {/* The ledger facts, behind the platform's own disclosure control. They
             are reference material you check once, and as always-open chrome

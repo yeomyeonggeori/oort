@@ -654,16 +654,27 @@ export function workHostOnline(
   return host ? host.online : null;
 }
 
-/** Same-PTY reattach is offered only when both ledger and heartbeat agree. */
-export function canReattachWorkSession(
-  session: Pick<WorkSession, "hostId" | "status">,
-  hosts: readonly WorkHost[] | undefined
-): boolean {
-  return (
-    (session.status === "running" || session.status === "idle") &&
-    workHostOnline(session, hosts) === true
-  );
-}
+// `canReattachWorkSession` LIVED HERE and is gone on purpose (ADR-0154 D3 /
+// #1137). It answered "may this session be reattached?" with
+//
+//     (running | idle) && workHostOnline(...) === true
+//
+// and both halves were wrong against the server that decides the same thing
+// (`momo-t3::reattach::SessionReattachState::verdict`, measured 2026-08-07):
+//
+//   - it GATED on `online`, which the server deliberately excludes and which
+//     the note above `workHostOnline` already measured as untrustworthy — so a
+//     session you could return to was routinely offered no way back;
+//   - it never looked at `remoteAttachAvailable` or the host's revocation,
+//     which are the two inputs the server actually uses.
+//
+// The rule now lives in ONE place, `features/work/sessionHandoff.ts`
+// (`sessionVerdict` / `sessionHandoffVerb`), which replicates the server's
+// branch exactly and keeps the heartbeat where the server puts it: advisory.
+// Nothing is re-exported under the old name — a wrapper would let a caller keep
+// asking the question in the vocabulary that caused the drift, and this file's
+// whole argument (see `workSessionResumeTargets`) is that eligibility is asked
+// in one place.
 
 /**
  * Explicit targets for an orphaned lineage resume. This mirrors the accepted
