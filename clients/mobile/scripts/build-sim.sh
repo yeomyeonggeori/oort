@@ -43,9 +43,9 @@ PRODUCT="build/sim/Build/Products/Debug-iphonesimulator/MomoMobile.app"
 
 # ---- bootstrap, if this checkout has never had any (#1035, #1101) -----------
 #
-# `ios/MomoMobile.xcworkspace` is a `pod install` artifact and is gitignored, so
-# a brand-new worktree has none — and neither `.conductor/setup.sh` nor anything
-# else creates one. The old version of this script stopped here and told the
+# `ios/Pods/` is a `pod install` artifact and is gitignored, so a brand-new
+# worktree has none — and neither `.conductor/setup.sh` nor anything else
+# creates one. The old version of this script stopped here and told the
 # reader to run `pod install`, which is correct and still costs them a failed
 # build, a context switch, and (measured, U4-5M) a wrong diagnosis: the missing
 # sandbox surfaces from Xcode as "The sandbox is not in sync with the
@@ -70,8 +70,13 @@ if [ ! -d node_modules ]; then
   npm ci >&2
 fi
 
-if [ ! -d "$WORKSPACE" ]; then
-  echo "==> $WORKSPACE is missing; running pod install" >&2
+# The probe is the sandbox, NOT `$WORKSPACE`: #1122 committed
+# `MomoMobile.xcworkspace/contents.xcworkspacedata` (Xcode Cloud only offers a
+# workspace that exists in the clone), so that directory is now present even
+# where `pod install` has never run. `Pods/Manifest.lock` is the marker Xcode's
+# own `[CP] Check Pods Manifest.lock` phase reads — the sandbox described above.
+if [ ! -f ios/Pods/Manifest.lock ]; then
+  echo "==> ios/Pods sandbox is missing; running pod install" >&2
   if ! ( cd ios && pod install ) >&2; then
     echo "error: pod install failed. See the output above." >&2
     echo "       If CocoaPods itself is missing: brew install cocoapods" >&2
@@ -89,8 +94,8 @@ if [ ! -d "$WORKSPACE" ]; then
   fi
 fi
 
-if [ ! -d "$WORKSPACE" ]; then
-  echo "error: $WORKSPACE is still missing after pod install." >&2
+if [ ! -f ios/Pods/Manifest.lock ]; then
+  echo "error: ios/Pods/Manifest.lock is still missing after pod install." >&2
   exit 1
 fi
 
