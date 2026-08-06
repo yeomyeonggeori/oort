@@ -579,7 +579,7 @@ async fn work_sessions(su: &PgPool, workspace: Uuid) -> Vec<(Uuid, Uuid, Uuid, S
     .collect()
 }
 
-fn candidate<'a>(execution: &'a Value, host: Uuid) -> &'a Value {
+fn candidate(execution: &Value, host: Uuid) -> &Value {
     execution["host_candidates"]
         .as_array()
         .expect("host_candidates is an array")
@@ -914,10 +914,22 @@ async fn ade1_2_an_undecided_spawn_never_reaches_a_host() {
     // ---- the other direction: a `no` is recorded and still silent ----------
     let raised = approvals(&su, tenant.workspace).await;
     let approval = raised[0].0;
-    let response = decide(&http, &base, &token, tenant.workspace, approval, false, None).await;
+    let response = decide(
+        &http,
+        &base,
+        &token,
+        tenant.workspace,
+        approval,
+        false,
+        None,
+    )
+    .await;
     assert_eq!(response.status(), 200);
     let (status, _, _, _) = control_row(&su, control).await;
-    assert_eq!(status, "denied", "a refused spawn is denied, not left pending");
+    assert_eq!(
+        status, "denied",
+        "a refused spawn is denied, not left pending"
+    );
     assert!(
         broadcasts(&su, tenant.workspace, "work.control.dispatched")
             .await
@@ -1029,7 +1041,10 @@ async fn ade1_3_a_host_the_card_never_offered_is_refused() {
     let approval = approvals(&su, tenant.workspace).await[0].0;
 
     for (host, why) in [
-        (strangers_box, "a colleague's private host is not a candidate"),
+        (
+            strangers_box,
+            "a colleague's private host is not a candidate",
+        ),
         (sleeping, "an offline host is listed but not selectable"),
         (cloud, "the T3 slot is reserved, not offered"),
     ] {
@@ -1274,12 +1289,11 @@ async fn ade1_5_the_spawn_tool_closes_the_loop_from_model_to_session() {
     );
     worker.drain_once().await.expect("first drain");
 
-    let run_status: String =
-        sqlx::query_scalar("SELECT status::text FROM agent_run WHERE id = $1")
-            .bind(run)
-            .fetch_one(&su)
-            .await
-            .expect("read run");
+    let run_status: String = sqlx::query_scalar("SELECT status::text FROM agent_run WHERE id = $1")
+        .bind(run)
+        .fetch_one(&su)
+        .await
+        .expect("read run");
     assert_eq!(
         run_status, "awaiting_approval",
         "a spawn parks the run on a human"
@@ -1322,7 +1336,11 @@ async fn ade1_5_the_spawn_tool_closes_the_loop_from_model_to_session() {
     worker.drain_once().await.expect("resume drain");
 
     let sessions = work_sessions(&su, tenant.workspace).await;
-    assert_eq!(sessions.len(), 1, "one session, created by the tool: {sessions:?}");
+    assert_eq!(
+        sessions.len(),
+        1,
+        "one session, created by the tool: {sessions:?}"
+    );
     let (session_id, member_id, host_id, tool, status) = sessions[0].clone();
     assert_eq!(
         host_id, vps,
