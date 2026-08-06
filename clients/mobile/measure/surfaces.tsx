@@ -25,6 +25,8 @@ import {
   UnreadDivider,
 } from '../src/features/conversation/MessageRow';
 import {jumpMissedNotice} from '../src/features/conversation/jumpNotice';
+import {SpawnHostChoice} from '../src/features/inbox/SpawnHostChoice';
+import {parseExecutionPlan} from '@momo/core/lib/executionPlan';
 import {NoticeBlock} from '../src/design/atoms';
 import {ResultRow, SearchBody} from '../src/screens/SearchScreen';
 import type {MessageSearch} from '../src/features/search/useMessageSearch';
@@ -80,6 +82,10 @@ import {color} from '../src/design/tokens';
 //
 // ## ADE 1단계가 더한 것 (이슈 1114)
 //
+//   SPAWN-LOCKED      잠긴 픽커 ↔ 살아 있는 픽커 (리뷰 B1) — 무장하면 픽커가
+//                     잠기는데, 그것이 **보이는지**는 살아 있는 판 옆에서만
+//                     사진으로 확인된다. 시뮬레이터가 탭을 못 받아 카드를
+//                     통과시킬 수 없으므로 컨트롤을 직접 두 번 세운다.
 //   SPAWN-PICKER      승인 카드의 호스트 선택기 (ADR-0125 D6-A) — 자격 둘 ·
 //                     오프라인 하나 · T3 예약 하나를 한 장에, 그리고 그 옆에
 //                     **고를 것이 하나도 없는** 카드. 같은 규율의 네 번째 적용이다:
@@ -988,6 +994,79 @@ export function Surface({name}: {name: string}): React.JSX.Element {
         </Frame>
       );
     }
+    case 'spawn-locked': {
+      // **잠긴 판 ↔ 살아 있는 판**, 한 장에 (design-review B1).
+      //
+      // 무장하면 픽커가 잠긴다. 그것이 보이는지는 살아 있는 픽커 **옆에서만**
+      // 사진으로 확인된다 — 이 파일이 여백·접기·틴트에서 세 번 쓴 그 규율이다.
+      // 시뮬레이터는 탭을 받지 못해 카드를 통과시켜 무장 상태를 만들 수 없으므로,
+      // 카드가 쓰는 그 컴포넌트를 직접 두 번 세운다(shipping 소스 그대로).
+      const host = (
+        id: string,
+        display_name: string,
+        tier: string,
+        host_type: string,
+        selectable: boolean,
+        unavailable_reason: string | null,
+      ) => ({
+        host_id: id,
+        display_name,
+        host_type,
+        tier,
+        scope: tier === 'remote' || tier === 'cloud' ? 'workspace' : 'member',
+        online: unavailable_reason !== 'offline',
+        selectable,
+        unavailable_reason,
+      });
+      const rows = [
+        host('h-1', '성재 맥북', 'local', 'app', true, null),
+        host('h-2', '팀 VPS (서울)', 'remote', 'workd', true, null),
+        host('h-3', '작업실 아이맥', 'local', 'app', false, 'offline'),
+      ];
+      const parsed = parseExecutionPlan({
+        execution: {
+          kind: 'work_session_spawn',
+          tool: 'codex',
+          label: '릴레이 재시작 절차 정리',
+          requested_host_id: null,
+          default_host_id: 'h-2',
+          host_candidates: rows,
+        },
+      });
+      if (parsed === null) {
+        return (
+          <Frame label="스폰 픽커">
+            <Text style={styles.lockedLabel}>픽스처가 픽커로 읽히지 않는다</Text>
+          </Frame>
+        );
+      }
+      return (
+        <Frame label="스폰 픽커 — 고를 수 있을 때 / 무장 뒤 잠겼을 때 (리뷰 B1)">
+          <View style={styles.lockedFrame}>
+            <Text style={styles.lockedLabel}>고를 수 있다 (무장 전)</Text>
+            <SpawnHostChoice
+              plan={parsed}
+              pickedHostId="h-2"
+              onPick={() => {}}
+              locked={false}
+              testIDPrefix="measure-live"
+            />
+          </View>
+          <View style={styles.lockedFrame}>
+            <Text style={styles.lockedLabel}>
+              잠겼다 (무장 뒤) — 고른 것은 남고, 누를 수 있다는 신호는 빠진다
+            </Text>
+            <SpawnHostChoice
+              plan={parsed}
+              pickedHostId="h-2"
+              onPick={() => {}}
+              locked
+              testIDPrefix="measure-locked"
+            />
+          </View>
+        </Frame>
+      );
+    }
     case 'composer-offline': {
       // **글을 미리 넣어 둔다 — 배송되는 경로로.** 빈 컴포저 둘을 나란히 두면 두
       // 버튼이 똑같이 꺼져 있고(위는 「보낼 것이 없다」, 아래는 「지금 못 보낸다」),
@@ -1126,6 +1205,8 @@ const harnessClient = new QueryClient({
 });
 
 const styles = StyleSheet.create({
+  lockedFrame: {paddingHorizontal: 16, paddingTop: 8},
+  lockedLabel: {fontSize: 12, color: '#9aa0a8', paddingBottom: 4},
   root: {flex: 1, backgroundColor: color.bg, paddingTop: 56},
   label: {color: '#6b7280', fontSize: 11, fontWeight: '600', paddingHorizontal: 12},
   noticeStack: {padding: 16, gap: 12},
