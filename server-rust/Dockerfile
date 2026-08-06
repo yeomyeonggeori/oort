@@ -48,10 +48,22 @@ ENV CARGO_TERM_COLOR=never \
 # third-party crates recompile only when Cargo.toml/Cargo.lock changes and not
 # on every source edit. The stubs are deleted immediately afterwards — the real
 # sources land in the next COPY and only the workspace crates rebuild.
+#
+# **This list must mirror `crates/*` and `bins/*` exactly.** The workspace at
+# Cargo.toml:6 is `members = ["crates/*", "bins/*"]`, so a new crate that is not
+# added here does not produce a cache miss — it produces a hard build failure
+# (`failed to load manifest for dependency <crate>`) in the RUN below, and only
+# for whoever builds the IMAGE. Measured: commit 9b437626 (PR #1119, goal #1111)
+# added `crates/momo-drive` and left this list alone, which broke
+# `server-rust/Dockerfile` on track/engine for every deploy path while
+# `cargo build` on the host stayed green. The lane
+# (`clients/mobile/scripts/lane-phone.sh`) now builds this image on every run,
+# so the next omission surfaces in a gate instead of at deploy time.
 COPY server-rust/Cargo.toml server-rust/Cargo.lock ./
 COPY server-rust/crates/momo-agent/Cargo.toml crates/momo-agent/
 COPY server-rust/crates/momo-auth/Cargo.toml crates/momo-auth/
 COPY server-rust/crates/momo-db/Cargo.toml crates/momo-db/
+COPY server-rust/crates/momo-drive/Cargo.toml crates/momo-drive/
 COPY server-rust/crates/momo-ephemeral/Cargo.toml crates/momo-ephemeral/
 COPY server-rust/crates/momo-messaging/Cargo.toml crates/momo-messaging/
 COPY server-rust/crates/momo-outbox/Cargo.toml crates/momo-outbox/

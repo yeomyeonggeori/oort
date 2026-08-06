@@ -4,13 +4,22 @@ name: 30-approval
 ---
 # 30-approval — 툴콜 유도 → 결정 대기 탭 → 무장 → 확정 문장 → 승인 → 영수증.
 #
-# `MOMO-352` in the message body is the tool-call trigger, and the specific one
-# matters. scripts/mock_hermes.py `_tool_fixture` maps that marker to
-# `momo.mock.echo`, which is on ToolResumeExecutor's allowlist — so an APPROVED
-# call actually executes and the run finishes. The mock's default fixture
+# `MOMO-352 session=<uuid>` in the message body is the tool-call trigger, and the
+# specific one matters. scripts/mock_hermes.py `_tool_fixture` maps that marker to
+# `work_session_end`, the ONE entry in the Rust worker's executable catalog
+# (server-rust/crates/momo-agent/src/tools.rs:41) — so an APPROVED call actually
+# executes and the run finishes. The mock's default fixture
 # (`github.search_issues`) also pauses for approval and would satisfy every
-# assertion up to the receipt, then fail to resume with `unsupportedTool`,
-# leaving a half-verified flow that looks green until someone reads the run row.
+# assertion up to the receipt, then come back "declared but this server cannot
+# execute it", leaving a half-verified flow that looks green until someone reads
+# the run row.
+#
+# It used to be bare `MOMO-352` → `momo.mock.echo`, an entry on the SWIFT
+# `ToolResumeExecutor` allowlist. The lane's server is Rust now (#1022) and that
+# allowlist does not exist there. The uuid is the lane's own seeded work session,
+# handed in as `WORK_SESSION_ID`; the runner re-reads that row afterwards and
+# downgrades a screen-green run to FAIL unless the session really is `ended` —
+# the phone cannot see the difference, and the difference is this flow's subject.
 #
 # No `MAESTRO TEXT` here, obviously — the tool call IS the subject. No
 # `MAESTRO SLOW` either: an approval pause is a durable state, not a window, so
@@ -48,7 +57,7 @@ name: 30-approval
 - tapOn:
     id: "mention-option"
     index: 0
-- inputText: "MOMO-352 phone lane approval check"
+- inputText: "MOMO-352 session=${WORK_SESSION_ID} approval check"
 - tapOn:
     id: "composer-send"
 
@@ -56,7 +65,7 @@ name: 30-approval
 # message. Asserting it here is what ties the inbox card below to a turn this
 # flow actually caused.
 - extendedWaitUntil:
-    visible: ".*Approve momo.mock.echo.*"
+    visible: ".*Approve work.session.end.*"
     timeout: 120000
 
 # NO RELAUNCH. There used to be one here, and it was a workaround for #1020 —
@@ -135,9 +144,10 @@ name: 30-approval
     timeout: 60000
 - assertVisible: ".*승인을 기록했습니다.*"
 
-# An approved call that never executes is not an approval. `momo.mock.echo` is
-# on the resume allowlist precisely so this last step is real: the run has to
-# leave awaiting_approval and finish.
+# An approved call that never executes is not an approval. `work.session.end` is
+# the catalog's one executable entry precisely so this last step is real: the run
+# has to leave awaiting_approval and finish, and the runner then checks the work
+# session row actually changed.
 - tapOn:
     id: "tab-channels"
 - tapOn:

@@ -1,0 +1,115 @@
+# =============================================================================
+# infra/rust/docker-compose.lane-phone.yml — MAESTRO-1 폰 레인 오버레이 (#1022)
+#
+# `clients/mobile/scripts/lane-phone.sh` 전용. 이 파일 없이 `docker-compose.rust.yml`
+# 만으로는 폰 레인이 성립하지 않는다 — 이유는 정확히 하나다:
+#
+#   **Rust `agent-worker` 는 목 프로바이더를 내장하지 않는다.**
+#   `MockChatProvider` 는 라이브러리 seam 이고 `main.rs` 는 절대 그것을 만들지
+#   않는다(bins/momo-agent-worker/src/main.rs:7-10 — "env 오타 하나로 조작된 텍스트를
+#   답하는 바이너리는 부팅 에러보다 훨씬 나쁜 실패다"). 그래서 프로바이더 없는 검수의
+#   유일한 길은 `HERMES_BASE_URL` 을 **실제로 뜬 목 HTTP 서버**로 향하게 하는 것이고,
+#   그 서버가 `scripts/mock_hermes.py` 다. Swift e2e 스택이 하던 것과 같은 방식이며,
+#   그래서 목은 이 이관에서 **재사용**되지 재작성되지 않는다.
+#
+# 왜 오버레이인가(그리고 왜 `docker-compose.rust.yml` 을 고치지 않는가):
+# 베이스 파일은 **배포 compose 의 미러**다(prod 와 같은 서비스명·같은 env 계약).
+# 거기에 python 테스트 픽스처를 한 줄이라도 넣으면 배포 정본이 검수 장비를 품게 되고,
+# 그때부터 "배포와 같은 스택"이라는 이 레인의 유일한 존재 이유가 거짓이 된다.
+# #1058(openapi 2차 패스)이 베이스를 손대지 않고 고유 프로젝트명으로 재사용한 것과
+# 같은 규율이고, 이 레인은 목이 필요해서 오버레이 한 겹만 더 쓴다.
+#
+# 사용:
+#   docker compose --env-file <run.env> -p <project> \
+#     -f infra/rust/docker-compose.rust.yml \
+#     -f infra/rust/docker-compose.rust.build.yml \
+#     -f infra/rust/docker-compose.lane-phone.yml up -d api relay agent-worker
+#
+# 자원 회수: 베이스의 janitor 라벨을 그대로 상속한다. `DB_VOLUME_NAME` 은 러너가
+# **반드시** 덮어쓴다 — 베이스의 pgdata 는 프로젝트 스코프가 아닌 고정 이름이라
+# (`momo-rust-pgdata`), 덮어쓰지 않으면 레인이 실제 스모크 스택의 볼륨을 붙잡고
+# 마지막 `down -v` 로 지워버린다(#1058 실측).
+# =============================================================================
+
+x-momo-janitor-labels: &momo-janitor-labels
+  com.momo.janitor.managed: "true"
+  com.momo.janitor.match-label: com.docker.compose.project
+
+services:
+  # 목 프로바이더. `infra/docker-compose.e2e.yml:100-128` 과 같은 이미지·같은 커맨드·
+  # 같은 헬스체크다: 레인이 바꾸는 것은 **어느 서버가 이 목을 호출하는가**뿐이고,
+  # 목 자체는 Swift 레인이 쓰던 그것 그대로다. 그래야 5개 플로우가 초록/빨강을
+  # 바꾸면 그 원인이 서버 교체이지 픽스처 교체가 아니라고 말할 수 있다.
+  mock-hermes:
+    image: python:3.12-slim@sha256:57cd7c3a7a273101a6485ba99423ee568157882804b1124b4dd04266317710de
+    mem_limit: ${MOMO_MOCK_HERMES_MEM_LIMIT:-256m}
+    labels: *momo-janitor-labels
+    restart: "no"
+    working_dir: /workspace
+    # `-u` matters and is not cosmetic. mock_hermes.py logs every request through
+    # `print`, which is BLOCK buffered when stdout is a pipe — and in a container
+    # it always is. The lane's ADR-0004 guard reads those lines to prove the turn
+    # went to the mock and nowhere else; without `-u` the proof sits in a buffer
+    # that flushes minutes later, and the guard fails a stack that is correct.
+    # Measured here on 2026-08-06.
+    command: ["python3", "-u", "scripts/mock_hermes.py", "--host", "0.0.0.0", "--port", "8088"]
+    # 리스트 형식 + 맨몸 이름(PASS-THROUGH): 호스트가 export 하지 않은 이름을 compose 는
+    # 통째로 생략하고, 그때 mock_hermes.py 가 자기 기본값을 쓴다. `${VAR:-}` 였다면
+    # 빈 문자열이 주입돼 기본값이 사라진다(e2e 컴포즈 :69-73 과 같은 이유).
+    environment:
+      - MOCK_HERMES_MAESTRO_SLOW_SECONDS
+      - MOCK_HERMES_EVENT_DELAY_SECONDS
+      - MOCK_HERMES_TOOL_CALLS
+    ports:
+      # 호스트 바인드는 격리 검사용이다: 러너가 기동 전에 이 포트가 비어 있는지 보고,
+      # 비어 있지 않으면 남의 레인 위에 올라타는 대신 멈춘다.
+      - "127.0.0.1:${HERMES_HOST_PORT:-8088}:8088"
+    volumes:
+      - type: bind
+        source: ../..
+        target: /workspace
+        read_only: true
+    networks:
+      - private
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python3 -c 'import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:8088/health\", timeout=2).read()'",
+        ]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+      start_period: 2s
+
+  # 베이스(:276-295)는 `WORKER_DATABASE_URL`·`PROVIDER_LINK_MASTER_KEY`·`LOG_LEVEL`
+  # 만 준다. 즉 프로바이더는 `ProviderConfig::from_env` 의 기본값
+  # `http://localhost:8088/v1` 로 떨어지고, 그건 **컨테이너 안의** 8088 — 아무도 없다.
+  # 여기서 그 세 값을 채워 목으로 향하게 한다.
+  agent-worker:
+    environment:
+      # 컨테이너 네트워크 이름. 호스트 포트가 아니다 — 워커는 사설망 안에서 목을 부른다.
+      HERMES_BASE_URL: http://mock-hermes:8088/v1
+      HERMES_API_KEY: ${HERMES_API_KEY:-lane-mock-hermes-bearer}
+      # `local-mock`: `ProviderConfig::availability()` 가 "mock" 을 답하고
+      # `validation_errors` 의 URL 게이트가 열린다(crates/momo-settings/src/provider.rs:107,136).
+      # 이 값은 **자세를 신고할 뿐 목을 선택하지 않는다** — 목은 위 URL 이 선택한다.
+      # 그래서 러너는 이 문자열을 믿지 않고, 목이 실제로 그 턴을 받았다는 사실을
+      # 컨테이너 로그와 답문 본문으로 따로 증명한다.
+      AGENT_PROVIDER_MODE: local-mock
+      AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK: "1"
+      # 목은 즉답한다. 기본 300ms 폴링이면 왕복마다 그만큼이 붙고, 다섯 플로우면
+      # 사람이 기다리는 시간이 된다. NOTIFY 경로가 주력이고 이건 폴백 주기다.
+      WORKER_POLL_INTERVAL_MS: ${WORKER_POLL_INTERVAL_MS:-100}
+      # 목의 답문이 툴콜이면 승인 대기가 되고, 그 승인은 에이전트의 동시 실행 슬롯을
+      # 잡는다(`agent.max_concurrent_runs` 기본 1). 레인은 한 번에 한 플로우이므로
+      # 기본 1시간이면 충분하지만, 짧게 잡아 두면 앞 플로우가 남긴 승인이 뒤 플로우의
+      # 에이전트를 잠그는 사고가 레인 안에서 스스로 풀린다.
+      APPROVAL_TTL_SECONDS: ${APPROVAL_TTL_SECONDS:-600}
+    depends_on:
+      mock-hermes:
+        condition: service_healthy
+
+networks:
+  private:
+    labels: *momo-janitor-labels

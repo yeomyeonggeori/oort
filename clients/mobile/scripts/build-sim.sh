@@ -41,8 +41,56 @@ WORKSPACE="ios/MomoMobile.xcworkspace"
 DESTINATION="${1:-platform=iOS Simulator,name=iPhone 17 Pro}"
 PRODUCT="build/sim/Build/Products/Debug-iphonesimulator/MomoMobile.app"
 
+# ---- bootstrap, if this checkout has never had any (#1035, #1101) -----------
+#
+# `ios/MomoMobile.xcworkspace` is a `pod install` artifact and is gitignored, so
+# a brand-new worktree has none — and neither `.conductor/setup.sh` nor anything
+# else creates one. The old version of this script stopped here and told the
+# reader to run `pod install`, which is correct and still costs them a failed
+# build, a context switch, and (measured, U4-5M) a wrong diagnosis: the missing
+# sandbox surfaces from Xcode as "The sandbox is not in sync with the
+# Podfile.lock", which reads like a lockfile problem and sent #1101 looking for a
+# checksum bug that does not exist. Three checkouts at three different paths, on
+# two commits, were later measured producing byte-identical `Podfile.lock`s from
+# `npm ci` + `pod install`; the lock was never the problem, the absent sandbox
+# was.
+#
+# So this heals instead of complaining. It is safe to do automatically because
+# both steps are lockfile-pinned and idempotent — `npm ci` installs exactly
+# `package-lock.json`, `pod install` exactly `Podfile.lock` — and neither is run
+# when its output is already present, so a warm checkout takes the same path it
+# always did.
+#
+# Deliberately NOT moved into `.conductor/setup.sh`, which #1035 proposed: that
+# script runs on every worktree creation, including the many that never touch the
+# phone, and these two steps take minutes. The cost belongs to whoever asks for
+# an iOS build, which is here.
+if [ ! -d node_modules ]; then
+  echo "==> node_modules is missing; running npm ci (lockfile-pinned)" >&2
+  npm ci >&2
+fi
+
 if [ ! -d "$WORKSPACE" ]; then
-  echo "error: $WORKSPACE is missing. Run 'pod install' in ios/ first." >&2
+  echo "==> $WORKSPACE is missing; running pod install" >&2
+  if ! ( cd ios && pod install ) >&2; then
+    echo "error: pod install failed. See the output above." >&2
+    echo "       If CocoaPods itself is missing: brew install cocoapods" >&2
+    exit 1
+  fi
+  # `pod install` rewrites Podfile.lock when the resolved graph differs from the
+  # committed one. That is worth SAYING rather than silently carrying into a
+  # build, because the lock is a reviewed artifact: an unexpected change here is
+  # the signal #985/#1101 were opened to catch, and it must not first appear as
+  # an unexplained diff in somebody's PR.
+  if ! git diff --quiet -- ios/Podfile.lock 2>/dev/null; then
+    echo "warning: pod install modified ios/Podfile.lock in this checkout." >&2
+    echo "         The committed lock did not reproduce here. Do not commit the" >&2
+    echo "         change without explaining it (see #985, #1101)." >&2
+  fi
+fi
+
+if [ ! -d "$WORKSPACE" ]; then
+  echo "error: $WORKSPACE is still missing after pod install." >&2
   exit 1
 fi
 
