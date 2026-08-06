@@ -22,7 +22,30 @@ DerivedData
 
 # CocoaPods — the lockfile IS committed (below); the installed pods are not.
 ios/Pods/
-ios/*.xcworkspace
+
+# The workspace, on the other hand, IS committed — but only the one file inside
+# it that `pod install` derives from the Podfile.
+#
+# Why commit a generated artifact at all: Xcode Cloud picks the project or
+# workspace to build by listing what is in the CLONE at workflow-creation time.
+# An ignored workspace is not offerable, so the RN app could not be selected as
+# a build target at all — the single largest gap in the Xcode Cloud transition
+# (docs/planning/research/2026-08-06-xcode-cloud-transition.md §레포 준비 ②).
+#
+# Why THIS file is safe to commit: `contents.xcworkspacedata` is eleven lines of
+# XML holding two relative `group:` FileRefs (the app project, Pods.xcodeproj).
+# No absolute path, no UUID, no timestamp — byte-identical across machines,
+# worktrees and CocoaPods versions, unlike `Podfile.lock`, whose checksums are
+# not (see the hermes-engine note in ios/Podfile). It changes only when a target
+# is added to the Podfile, which is a review-worthy event rather than noise.
+#
+# Why the rest of the bundle stays ignored: `xcuserdata/` (line 14) and
+# `xcshareddata/` are IDE state — schemes of the moment, IDEWorkspaceChecks,
+# WorkspaceSettings. Neither exists in a freshly generated workspace; they appear
+# the first time someone opens it in Xcode, which is exactly when they must not
+# start being committed.
+ios/*.xcworkspace/*
+!ios/*.xcworkspace/contents.xcworkspacedata
 
 # node
 node_modules/
