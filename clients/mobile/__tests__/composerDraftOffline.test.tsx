@@ -1,9 +1,12 @@
 import {makeDirectory} from '@momo/core/features/workspace/directory';
+import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
 import {cleanup, fireEvent, render, screen} from '@testing-library/react-native';
 import fs from 'fs';
 import path from 'path';
 import React from 'react';
 import {StyleSheet} from 'react-native';
+
+import {SessionProvider, useSession} from '../src/session/useSession';
 
 import {
   Composer,
@@ -329,5 +332,80 @@ describe('성장 정책 — 상한이 도출된 숫자다', () => {
     expect(
       StyleSheet.flatten(screen.getByTestId('composer-input').props.style),
     ).toEqual(style);
+  });
+});
+
+// -----------------------------------------------------------------------------
+// H-2 (U4-6 병합 리뷰) — 로그아웃은 초안도 데리고 나간다.
+//
+// 리뷰가 실측한 것: 웹은 `app/session.tsx` 의 `signOut` 에서 `clearAllDrafts()`
+// 를 부르고 그 이유까지 적어 두었는데(「쓰다 만 글은 보낸 메시지보다 사적이다」)
+// 폰의 `signOut` 은 세션과 쿼리 캐시만 지웠다. 폰 쪽 저장소가 오히려 더 오래
+// 산다 — react-query 의 캐시는 메모리라 프로세스와 함께 사라지지만 MMKV 의
+// 초안은 앱이 지워질 때까지 남고, 다음 사람의 첫 입력창에 복원된다.
+// -----------------------------------------------------------------------------
+describe('로그아웃 — 이 기기에서 내 흔적을 지운다 (H-2)', () => {
+  /** 앱이 실제로 쓰는 `signOut` 을 그 provider 에서 그대로 꺼내 온다. */
+  function signOutFromApp(): () => void {
+    let captured: (() => void) | null = null;
+    function Probe(): React.JSX.Element | null {
+      captured = useSession().signOut;
+      return null;
+    }
+    const client = new QueryClient({
+      defaultOptions: {queries: {retry: false, gcTime: 0}},
+    });
+    render(
+      <QueryClientProvider client={client}>
+        <SessionProvider
+          member={
+            {
+              id: '11111111-1111-4111-8111-111111111111',
+              workspaceId: 'ws-1',
+              displayName: '곽성재',
+            } as never
+          }>
+          <Probe />
+        </SessionProvider>
+      </QueryClientProvider>,
+    );
+    if (captured === null) throw new Error('signOut 을 잡지 못했다');
+    return captured;
+  }
+
+  it('로그아웃하면 채널·스레드 초안이 남지 않는다', () => {
+    saveDraft(CH, '보내지 않은 문단');
+    saveDraft(threadDraftKey('root-1'), '스레드에 쓰다 만 답글');
+    expect(readDraft(CH)).toBe('보내지 않은 문단');
+
+    signOutFromApp()();
+
+    expect(readDraft(CH)).toBe('');
+    expect(readDraft(threadDraftKey('root-1'))).toBe('');
+    // 지도 자체가 없어야 한다 — 빈 지도가 남으면 그 안에 무엇이 있었는지는
+    // 아무도 모르지만 키는 남는다.
+    expect(store.map.has(NON_SECRET_KEYS.composerDrafts)).toBe(false);
+  });
+
+  it('배선이 없으면 여기서 빨강이다 — 초안만 살아남는 로그아웃', () => {
+    // 이 단정이 지키는 것은 `clearAllDrafts` 가 **동작한다**가 아니라 로그아웃이
+    // 그것을 **부른다**이다. 앞 판은 함수가 아예 없었고, 함수만 생기고 호출이
+    // 빠지면 화면은 앞 판과 똑같다.
+    const src = fs.readFileSync(
+      path.resolve(__dirname, '../src/session/useSession.tsx'),
+      'utf8',
+    );
+    const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+    expect(code).toContain('clearAllDrafts()');
+    expect(code).toMatch(/from '\.\.\/features\/conversation\/drafts'/);
+  });
+
+  it('로그아웃이 아닌 청소는 하지 않는다 — 수명 규칙은 그대로다', () => {
+    // 「부탁받은 청소」와 「부탁받은 적 없는 청소」의 경계가 이 파일의 규율이다.
+    // 초안을 읽고 쓰는 것만으로 다른 자리의 초안이 사라지면 안 된다.
+    saveDraft(CH, '남아야 하는 글');
+    saveDraft(threadDraftKey('root-2'), '이것도 남는다');
+    expect(readDraft(CH)).toBe('남아야 하는 글');
+    expect(readDraft(threadDraftKey('root-2'))).toBe('이것도 남는다');
   });
 });
