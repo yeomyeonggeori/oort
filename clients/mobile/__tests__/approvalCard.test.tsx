@@ -380,15 +380,26 @@ describe('오프라인 — 같은 컨트롤은 화면마다 같은 결을 갖는
     }
   });
 
-  it('레일 상태가 아니라 네트워크를 본다 — 결정은 REST 로 나간다', () => {
+  it('레일 상태가 아니라 네트워크를 본다 — 결정도 전송도 REST 로 나간다', () => {
     // 레일은 웹소켓이다. 재연결 중이어도 그 POST 는 멀쩡히 성공하고, 승인에는
     // 기한이 있으므로 할 수 있는 결정을 막는 쪽이 더 비싸다.
+    //
+    // **이 단정은 goal U4-6M 에서 넓어졌지, 좁아지지 않았다.** 원래는 승인
+    // 컨트롤 하나에 대한 것이었는데, 컴포저가 같은 범주 오류를 그대로 갖고
+    // 있었다 — 전송도 REST POST 인데 `disabled={railStatus === 'disconnected'}`
+    // 를 읽었다. 두 소비자가 같은 신호를 들게 됐으므로 이름도 소비자 하나를
+    // 가리키지 않는다(`approvalOnline` → `networkOnline`). 바뀐 것은 이름과
+    // 소비자 수뿐이고, 지키는 결정은 같다: **레일은 「보낼 수 있는가」에
+    // 답하지 않는다.**
     const screenSrc = fs.readFileSync(
       path.resolve(__dirname, '../src/screens/ConversationScreen.tsx'),
       'utf8',
     );
-    expect(screenSrc).toMatch(/approvalOnline = useOnline\(\)/);
+    expect(screenSrc).toMatch(/const networkOnline = useOnline\(\)/);
     expect(screenSrc).not.toMatch(/approvalOffline=\{railStatus/);
+    // 컴포저 몫 (U4-6M). 레일을 다시 들면 여기서 빨강이 된다.
+    expect(screenSrc).toMatch(/offline=\{!networkOnline\}/);
+    expect(screenSrc).not.toMatch(/disabled=\{railStatus/);
   });
 });
 

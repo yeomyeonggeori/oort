@@ -469,6 +469,41 @@ describe('M-13 — 색은 전부 토큰에서 나온다', () => {
     expect(offenders).toEqual([]);
   });
 
+  it('`src/` 어디에도 사용자 문장 속 em-dash 가 없다 (u45 리뷰 M-2)', () => {
+    // 리뷰가 둘을 셌다(`MessageRow.tsx:610`·`715`). 둘 다 이 배치 이전부터
+    // 있던 것이라 「스윕」이 요청됐고, 스윕은 두 줄을 고치는 것이 아니라 **다시
+    // 들어올 수 없게 하는 것**이다 — hex 를 잡은 위 단정과 같은 종류의 일이고,
+    // 그래서 같은 자리에 산다.
+    //
+    // 판정 규칙(design-taste SKILL §Copy): 사용자에게 보이는 문자열에 `—`/`–`
+    // 는 0 건. 이진값이다.
+    //
+    // 두 가지를 빼고 본다.
+    //
+    //   **주석.** 이 저장소의 주석은 한국어 산문이고 거기서 em-dash 는 옳은
+    //   글자다. 화면에 나가지 않는다.
+    //   **`console.*` 인자.** SKILL 이 스스로 「developer/diagnostic surfaces」를
+    //   따로 두고, 그 문장을 읽는 사람은 개발자다. 지금 `src/push/` 에 셋 있고
+    //   전부 `console.error` 다.
+    const withoutProse = (source: string): string =>
+      source
+        // 블록 주석 — JSX 의 `{/* … */}` 도 여기서 걸린다.
+        .replace(/\/\*[\s\S]*?\*\//g, '')
+        // 줄 주석. `https://` 의 `//` 는 건드리지 않는다.
+        .replace(/(?<!:)\/\/.*$/gm, '')
+        .replace(/console\.(error|warn|log|info|debug)\([\s\S]*?\);/g, '');
+    const offenders: string[] = [];
+    for (const file of sourceFiles(SRC_DIR)) {
+      const code = withoutProse(fs.readFileSync(file, 'utf8'));
+      for (const [index, text] of code.split('\n').entries()) {
+        if (/[—–]/.test(text)) {
+          offenders.push(`${path.relative(SRC_DIR, file)}:${index + 1}`);
+        }
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
   it('라이트 모드가 들어와도 깨지지 않을 이름들이다', () => {
     // M-13 이 말한 위험은 「값이 못생겼다」가 아니라 **「스킴이 하나 더 생기는
     // 순간 이 지점들이 전부 깨진다」** 였다. 그러니 단정은 이름이 존재하는지다.

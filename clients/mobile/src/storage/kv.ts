@@ -67,6 +67,16 @@ export const NON_SECRET_KEYS = {
    * with the app, which is the lifetime this identifier should have.
    */
   pushDeviceId: 'momo.mobile.push.device-id.v1',
+  /**
+   * 아직 보내지 않은 글 (goal U4-6M · 감사 H-10). 채널·스레드별 한 덩이의 JSON
+   * 지도이고, 접기·수명 규칙은 `features/conversation/drafts.ts` 가 진다.
+   *
+   * 여기 있어도 되는 이유는 하나다 — 이것은 **이미 화면에 떠 있던 글자**다.
+   * 사람이 자기 손으로 친 것을 자기 기기에 그대로 두는 것이고, 보내지기 전에는
+   * 서버가 본 적도 없다. 토큰과는 다른 종류의 값이다. 다만 「잃어도 되는 것」도
+   * 아니라서, 잃으면 사람이 쓴 글이 없어진다 — 그것이 이 키가 생긴 이유다.
+   */
+  composerDrafts: 'momo.mobile.composer.drafts.v1',
 } as const;
 
 export type NonSecretKey = (typeof NON_SECRET_KEYS)[keyof typeof NON_SECRET_KEYS];

@@ -7,6 +7,8 @@ import {color, font, SAFE_GUTTER, space} from '../../design/tokens';
 import {EdgeSwipeBack} from '../../nav/EdgeSwipeBack';
 import {Composer} from './Composer';
 import {ConversationLayout} from './ConversationLayout';
+import {threadDraftKey} from './drafts';
+import {useOnline} from '../inbox/useOnline';
 import {Timeline} from './Timeline';
 import type {MessageRowActions} from './MessageRow';
 import type {UseTimelineResult} from './useTimeline';
@@ -126,6 +128,10 @@ export function ThreadPanel({
   );
 
   const pending = timeline.repliesPending(root.id);
+  // 채널 컴포저와 **같은 신호**다 — 답글도 REST POST 로 나가고, 같은 앱의 두
+  // 입력창이 같은 상황에 다른 얼굴을 하면 그것은 어휘 분열이다
+  // (`features/inbox/useOnline.ts` 머리말이 승인 컨트롤에 대해 하는 말과 같다).
+  const online = useOnline();
   const {sendReply} = timeline;
   // A reply is my own send, and the same rule applies here as in the channel:
   // it comes to me regardless of where I had scrolled to.
@@ -227,6 +233,10 @@ export function ThreadPanel({
               <Composer
                 channelLabel="스레드"
                 directory={directory}
+                // 채널과 **다른 이름 공간**이다(`drafts.ts`). 스레드에 쓰다 만
+                // 답글이 채널 입력창에서 되살아나면 그 글은 잘못된 방으로 간다.
+                draftKey={threadDraftKey(root.id)}
+                offline={!online}
                 placeholder="답글 쓰기"
                 sendLabel="답글 보내기"
                 onSend={onSend}

@@ -606,8 +606,14 @@ function AgentCard({
         <Text style={[styles.cardNote, styles.cardNoteDanger]}>{card.errorNote}</Text>
       ) : null}
       {card.kind === 'turn' && card.failure ? (
+        // 두 조각을 **공백**으로 잇는다 (u45 리뷰 M-2). 옛 판은 em-dash 였고,
+        // 이 제품의 사용자 문장에서 그 글자는 금지다. 다른 기호로 바꾸지 않은
+        // 이유: 코어가 주는 두 값은 이미 **각각 완결된 문장**이다
+        // (`agentCardModel.ts` — 「연결된 계정 인증이 만료되었습니다.」 +
+        // 「설정의 AI 연결에서 …」). 완결된 두 문장 사이에 필요한 것은 공백뿐이고,
+        // 콜론이나 괄호를 끼우면 없던 종속 관계를 지어내게 된다.
         <Text style={styles.cardNote}>
-          {`${card.failure.label} — ${card.failure.detail}`}
+          {`${card.failure.label} ${card.failure.detail}`}
         </Text>
       ) : null}
       {cost ? (
@@ -711,8 +717,14 @@ function ArtifactCard({
       ) : null}
 
       {artifact.kind === 'oversized' ? (
+        // em-dash 를 뺀 자리에 다른 기호를 넣지 않고 **바로 위 형제의 목소리**를
+        // 따랐다 (u45 리뷰 M-2): 잘린 diff 는 이미 「너무 길어 N줄만
+        // 표시했습니다. 전체는 M줄입니다.」라고 말한다. 같은 종류의 사실(다 못
+        // 보여 준다 + 전체 크기 + 어디서 보면 되는가)이므로 같은 모양으로 말한다.
         <Text style={styles.cardMeta}>
-          {`변경이 너무 큽니다 — ${formatCount(artifact.totalLineCount)}줄. 데스크톱 앱에서 열어 보세요.`}
+          {`변경이 너무 커서 여기서는 펼치지 못합니다. 전체 ${formatCount(
+            artifact.totalLineCount,
+          )}줄은 데스크톱 앱에서 열어 보세요.`}
         </Text>
       ) : null}
 
