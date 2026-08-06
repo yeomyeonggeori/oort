@@ -115,6 +115,23 @@ const flatten = (style: unknown): Record<string, unknown> =>
  */
 const HIDDEN = {includeHiddenElements: true} as const;
 
+function channel(value: number): number {
+  const c = value / 255;
+  return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+}
+
+function luminance(hex: string): number {
+  const h = hex.replace('#', '');
+  const [r, g, b] = [0, 2, 4].map(i => parseInt(h.slice(i, i + 2), 16));
+  return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b);
+}
+
+/** WCAG 대비비. 토큰 값을 손으로 베끼지 않고 `tokens.ts` 에서 읽는다. */
+function contrast(a: string, b: string): number {
+  const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+  return (hi + 0.05) / (lo + 0.05);
+}
+
 // -----------------------------------------------------------------------------
 describe('아바타가 선다 — 그리고 코어가 말한 그대로 선다', () => {
   it('사람은 원, 에이전트는 둥근 사각 — 색 말고 하나 더로 가른다', () => {
@@ -163,6 +180,17 @@ describe('아바타가 선다 — 그리고 코어가 말한 그대로 선다', 
     const style = flatten(view.getByTestId('avatar-unknown', HIDDEN).props.style);
     expect(style.backgroundColor).toBeUndefined();
     expect(style.borderColor).toBe(color.border);
+  });
+
+  it('이니셜이 자기 채움 위에서 읽힌다 — 두 종류 모두 AA', () => {
+    // 아바타가 「읽히는 표지」라는 주장은 글자가 실제로 보일 때만 참이다.
+    // 실측(WCAG): `text` on `surface` = 15.70:1 · `agent` on `agentSurface`
+    // = 5.57:1. 값은 토큰에서 읽으므로 팔레트가 바뀌면 이 단정이 말을 한다.
+    expect(contrast(color.text, color.surface)).toBeGreaterThanOrEqual(4.5);
+    expect(contrast(color.agent, color.agentSurface)).toBeGreaterThanOrEqual(4.5);
+    // 그리고 두 채움이 배경 위에서 **보인다** — 안 보이면 아바타는 글자 한 자다.
+    expect(luminance(color.surface)).toBeGreaterThan(luminance(color.bg));
+    expect(luminance(color.agentSurface)).toBeGreaterThan(luminance(color.bg));
   });
 
   it('보조기술에는 나가지 않는다 — 행의 라벨이 이미 이름을 말한다', () => {

@@ -10,6 +10,8 @@ import {SafeAreaProvider} from 'react-native-safe-area-context';
 import {SessionProvider} from '../src/session/useSession';
 import {quoteDraftFor, type QuoteBlock as QuoteBlockModel} from '@momo/core/features/timeline/quote';
 import {typingSegments} from '@momo/core/features/chat/typing';
+import {Composer} from '../src/features/conversation/Composer';
+import {saveDraft} from '../src/features/conversation/drafts';
 import {MessageActionSheet} from '../src/features/conversation/MessageActionSheet';
 import {TypingBar} from '../src/features/conversation/TypingBar';
 import {MessageBody} from '../src/features/conversation/MessageBody';
@@ -66,6 +68,19 @@ import {color} from '../src/design/tokens';
 // 셋 다 **비교 대상을 같은 화면에 둔다.** 위생 결함은 혼자 찍으면 안 보이기
 // 때문이다: 「여백이 0 이다」는 여백을 가진 행 옆에서만 보이고, 「접혔다」는 접히지
 // 않은 묘비 옆에서만, 「물들었다」는 안 물든 이웃 옆에서만 보인다.
+//
+// ## U4-6M 이 더한 것 (#1103)
+//
+//   AVATAR            폰 아바타 신설 (감사 H-11) — 사람 · **연속 행** · 에이전트 ·
+//                     명부에 없는 작성자를 한 묶음처럼
+//   APPROVAL-NOTES    승인 카드 세 문장의 격 (리뷰 M-3) — 영수증 · 차단 · 안내.
+//                     **오프라인 상태는 U4-4 리뷰가 미캡처로 남긴 자리다**
+//                     (「증거가 상수 하나뿐이라 시각 판정은 확인 필요」).
+//   COMPOSER-OFFLINE  보낼 수 있을 때 ↔ 지금은 못 보낼 때 (감사 H-10)
+//
+// 같은 규율의 세 번째 적용이다. 「왼쪽 칸이 같다」는 연속 행이 함께 있어야,
+// 「영수증이 격상됐다」는 안내 문장이 함께 있어야, 「버튼이 꺼졌다」는 켜진 버튼이
+// 함께 있어야 사진에서 확인된다.
 //
 // 시트류는 `Modal` 이라 화면을 덮으므로 한 번에 하나씩 띄운다.
 //
@@ -786,6 +801,132 @@ export function Surface({name}: {name: string}): React.JSX.Element {
         </Frame>
       );
     }
+    // ---- U4-6M (#1103): 아바타 · 문장의 격 · 컴포저 -------------------------
+    //
+    // 셋 다 **비교 대상을 같은 화면에** 둔다. U4-5M 이 세운 규율 그대로다:
+    // 위생과 위계 결함은 혼자 찍으면 안 보인다 — 「모르는 작성자에게 글자가
+    // 없다」는 글자가 있는 아바타 옆에서만, 「영수증이 격상됐다」는 안내 문장
+    // 옆에서만, 「지금은 못 보낸다」는 보낼 수 있는 컴포저 옆에서만 보인다.
+    case 'avatar': {
+      // 넷을 한 묶음처럼 세운다: 사람(머리) → 같은 저자의 연속 행 → 에이전트 →
+      // 명부에 없는 작성자. 논점이 「왼쪽 칸이 모든 행에서 같은가」이므로 연속
+      // 행이 반드시 함께 있어야 하고, 「모를 때 글자를 안 그린다」는 uuid
+      // 작성자가 함께 있어야 보인다.
+      const ghost = '0199dddd-1111-4111-8111-999999999999';
+      const rows: Array<[string, string, boolean]> = [
+        [SELF, '금요일 배포는 오전 10시에 시작합니다.', true],
+        [SELF, '롤백 절차는 문서에 적어 뒀어요.', false],
+        [AGENT, '릴레이 로그를 확인했습니다. pool exhausted 가 두 번 있었습니다.', true],
+        [ghost, '이 작성자는 명부에 없습니다.', true],
+      ];
+      return (
+        <Frame label="아바타 — 사람 · 연속 행 · 에이전트 · 모르는 작성자 (감사 H-11)">
+          {rows.map(([author, body, head], i) => (
+            <MessageRow
+              key={i}
+              message={
+                {
+                  ...MESSAGE,
+                  id: `av-${i}`,
+                  seq: 60 + i,
+                  authorMemberId: author,
+                  body,
+                  thread: undefined,
+                } as unknown as Message
+              }
+              startsGroup={head}
+              directory={DIRECTORY}
+              chips={[]}
+              nowMs={NOW}
+            />
+          ))}
+        </Frame>
+      );
+    }
+    case 'approval-notes': {
+      // M-3 이 실측한 것: 세 문장이 전부 같은 옷이고, 카드에서 가장 값어치 있는
+      // 영수증이 가장 조용한 차림이었다. 한 장에 셋을 세워야 격이 갈렸는지가
+      // 사진에서 확인된다 — 하나만 찍으면 그것이 어떤 격인지 알 수 없다.
+      const approvalMessage = {
+        ...MESSAGE,
+        id: '00000000-0000-7000-8000-0000000000b2',
+        type: 'approval_request',
+        body: '툴 호출 승인',
+        authorMemberId: AGENT,
+        props: {
+          approval_id: 'ap-1',
+          title: 'github.search_issues 실행 허가',
+          approval_status: 'pending',
+        },
+      } as unknown as Message;
+      const gates = new Map([
+        ['ap-1', {approvalId: 'ap-1', reversible: false, expiresAtMs: null}],
+      ]);
+      return (
+        <Frame label="승인 카드 세 문장의 격 — 영수증 / 차단 / 안내 (리뷰 M-3)">
+          <MessageRow
+            message={approvalMessage}
+            startsGroup
+            directory={DIRECTORY}
+            chips={[]}
+            nowMs={NOW}
+            approvalGates={gates}
+            approvalReceipts={
+              new Map([['ap-1', {note: '승인을 기록했습니다.', status: 'approved'}]])
+            }
+          />
+          {/* 오프라인은 U4-4 리뷰가 **미캡처**로 남긴 자리다 — 「증거가 상수
+              하나뿐이라 시각 판정은 확인 필요로 남긴다」. 이 장이 그것을 닫는다. */}
+          <MessageRow
+            message={approvalMessage}
+            startsGroup
+            directory={DIRECTORY}
+            chips={[]}
+            nowMs={NOW}
+            approvalGates={gates}
+            approvalOffline
+          />
+          <MessageRow
+            message={approvalMessage}
+            startsGroup
+            directory={DIRECTORY}
+            chips={[]}
+            nowMs={NOW}
+          />
+        </Frame>
+      );
+    }
+    case 'composer-offline': {
+      // **글을 미리 넣어 둔다 — 배송되는 경로로.** 빈 컴포저 둘을 나란히 두면 두
+      // 버튼이 똑같이 꺼져 있고(위는 「보낼 것이 없다」, 아래는 「지금 못 보낸다」),
+      // 그 사진은 이 배치가 고친 것을 하나도 보여 주지 않는다. 초안을 심으면
+      // 위 버튼이 켜지고 아래만 꺼진 채로 남아 대조가 생긴다.
+      //
+      // 그리고 심는 방법이 곧 두 번째 증거다: `saveDraft` → `draftKey` 는 앱이
+      // 실제로 쓰는 그 경로이고, 아래 상자에 글이 남아 있는 것이 오프라인 문장
+      // 「쓰던 글은 그대로 있고」가 참이라는 그림이다.
+      const line = '릴레이 재시작 절차를 문서에 적어 뒀습니다.';
+      saveDraft('measure:composer-online', line);
+      saveDraft('measure:composer-offline', line);
+      return (
+        <Frame label="컴포저 — 보낼 수 있을 때 / 지금은 못 보낼 때 (감사 H-10)">
+          <Composer
+            channelLabel="배포"
+            directory={DIRECTORY}
+            draftKey="measure:composer-online"
+            onSend={() => {}}
+          />
+          <View style={styles.gap} />
+          <Composer
+            channelLabel="배포"
+            directory={DIRECTORY}
+            draftKey="measure:composer-offline"
+            offline
+            onSend={() => {}}
+          />
+        </Frame>
+      );
+    }
     case 'search-idle':
       return (
         <Frame label="검색 · 입력 전">
@@ -821,8 +962,9 @@ export function Surface({name}: {name: string}): React.JSX.Element {
         <Frame label={`알 수 없는 표면: ${name}`}>
           <Text style={styles.label}>
             sheet · delete · editor · editor-error · row · row-lead ·
-            approval-card · group · dividers · search-idle · search-searching ·
-            search-empty · search-error · search-results
+            approval-card · approval-notes · avatar · composer-offline ·
+            group · dividers · search-idle · search-searching · search-empty ·
+            search-error · search-results
           </Text>
         </Frame>
       );
@@ -898,4 +1040,6 @@ const styles = StyleSheet.create({
   pressPair: {paddingHorizontal: 16, paddingVertical: 8},
   // 화면이 누를 때 실제로 까는 값 — **같은 심볼**이다 (M-2).
   pressed: {backgroundColor: ROW_PRESSED_BACKGROUND},
+  /** 두 컴포저 사이. 붙여 두면 위아래 테두리가 한 줄로 읽힌다. */
+  gap: {height: 24},
 });
