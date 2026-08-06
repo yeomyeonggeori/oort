@@ -15,6 +15,7 @@ import {
   hasPersistedSession,
   subscribeSession,
 } from "@/lib/session";
+import { clearAllDrafts } from "@/features/chat/draftStore";
 import type { RealtimeHandle, RealtimeStatus } from "@/lib/realtime";
 
 /**
@@ -160,6 +161,10 @@ export function useRestoredSession(): SessionLifecycle {
     // and unconditional, so the user is out of the session before the network
     // call resolves, and a failed revoke cannot pin them inside the app.
     void logout();
+    // 초안도 함께 지운다 (U4-f). 로그아웃은 「이 기기에서 내 흔적을 지운다」이고,
+    // 쓰다 만 글은 보낸 메시지보다 사적이다 — 세션 기록과 같은 저장소에 사는 이상
+    // 같은 순간에 사라져야 한다(`draftStore.ts` 머리말의 비용 항목).
+    clearAllDrafts();
     setSession(null);
     setStatus("anonymous");
   }, []);
