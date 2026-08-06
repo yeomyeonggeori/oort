@@ -6,9 +6,12 @@ import {
   dividerText,
   DIVIDER_LABEL_SIDE,
   DIVIDER_SPACE,
+  recoveryDividerLabel,
   recoveryDividerSegments,
   ROW_SPACE,
   unreadDividerSegments,
+  DIVIDER_TONE,
+  DIVIDER_TONE_SPEC,
 } from "./divider";
 
 /**
@@ -168,10 +171,50 @@ describe("unread / recovery", () => {
     );
   });
 
-  it("keeps seq exact — it is the server's number", () => {
+  /**
+   * design-review C-1. 앞 판은 `재연결됨, seq 4821까지 복구`였고, 그 숫자를 지키던
+   * 근거(서버 발급값이라 정확하다)는 **표지가 서는 자리**를 정당화하는 근거였지
+   * 문장 속의 숫자를 정당화하는 근거가 아니었다 — 어느 행도 자기 seq를 그리지
+   * 않으므로 읽는 사람에게는 대조할 대상이 없다.
+   */
+  it("says where, not which number — seq는 화면 문구에서 사라진다", () => {
     expect(dividerText(recoveryDividerSegments(4821, "replay"))).toBe(
-      "재연결됨, seq 4821까지 복구"
+      "재연결됨, 여기까지 복구"
     );
+    for (const source of ["replay", "backfill"] as const) {
+      const text = dividerText(recoveryDividerSegments(4821, source));
+      expect(text).not.toContain("seq");
+      expect(text).not.toMatch(/\d/);
+    }
+  });
+
+  /**
+   * 옆 표지와 같은 문법이어야 한다. 안읽음이 「…, 여기까지 읽음」인데 복구가
+   * 「…, seq N까지 복구」이면, 같은 자리에 번갈아 서는 두 줄이 서로 다른 종류의
+   * 말을 하는 셈이다.
+   */
+  it("shares the 「여기까지 …」 grammar with the unread marker", () => {
+    expect(dividerText(unreadDividerSegments(3))).toContain("여기까지 읽음");
+    expect(dividerText(recoveryDividerSegments(4821, "replay"))).toContain(
+      "여기까지 복구"
+    );
+  });
+
+  /**
+   * 낭독은 위치를 볼 수 없다. 화면의 「여기까지」는 **이 줄이 서 있는 자리**가 답을
+   * 마저 해서 성립하는 말이라, 소리 쪽은 그 자리를 말로 되돌려 준다. 그러면서도
+   * 숫자를 다시 들이지는 않는다 — 눈으로 못 쓰는 숫자가 귀로 쓸 수 있게 되지는
+   * 않는다.
+   */
+  it("spells the position out for the ear, still without the number", () => {
+    for (const source of ["replay", "backfill"] as const) {
+      const label = recoveryDividerLabel(source);
+      expect(label).toContain("이 줄 위까지");
+      expect(label).not.toContain("seq");
+      expect(label).not.toMatch(/\d/);
+    }
+    expect(recoveryDividerLabel("backfill")).toContain("이미 본 메시지");
+    expect(recoveryDividerLabel("replay")).not.toContain("이미 본 메시지");
   });
 
   /**
@@ -181,7 +224,7 @@ describe("unread / recovery", () => {
    */
   it("names the rail that healed the gap — 되읽은 구간만 그렇게 말한다", () => {
     expect(dividerText(recoveryDividerSegments(4821, "backfill"))).toBe(
-      "재연결됨, seq 4821까지 복구 (다시 읽음)"
+      "재연결됨, 여기까지 복구 (다시 읽음)"
     );
     // 그리고 `replay`에는 붙지 않는다. 둘이 같은 문장이면 `source`가 인자인
     // 이유가 사라진다.
@@ -223,5 +266,40 @@ describe("두 클라가 같은 얼굴을 갖는다 (M-2)", () => {
     expect(ROW_SPACE.withinGroup).toBeGreaterThan(8);
     // 그리고 묶음 안이 묶음 사이를 따라잡으면 묶음이라는 개념이 사라진다.
     expect(ROW_SPACE.withinGroup).toBeLessThan(ROW_SPACE.betweenGroups);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 색 계약 (design-review U4-4 D-2)
+//
+// 값은 여기서 재지 않는다 — 그것은 각 클라의 계약 테스트가 자기 팔레트를 파싱해
+// 잰다(웹: `clients/web/src/features/timeline/dividerTone.test.ts`). 여기서 잠그는
+// 것은 그 테스트들이 **같은 표를 보고 있는가**이다.
+// ---------------------------------------------------------------------------
+
+describe("색 계약 (D-2)", () => {
+  it("경계를 그리는 색을 가진 구분선은 안읽음 하나뿐이다", () => {
+    expect(DIVIDER_TONE.unread).toBe("boundary");
+    expect(DIVIDER_TONE.day).toBe("quiet");
+    expect(DIVIDER_TONE.recovery).toBe("quiet");
+  });
+
+  it("경계는 라벨과 rule을 같은 색으로 칠한다 — 한 경계는 한 색이다", () => {
+    expect(DIVIDER_TONE_SPEC.boundary.paintsRule).toBe(true);
+    // 조용한 표지는 rule까지 물들이지 않는다. 물들이면 「그냥 선」이 아니게 된다.
+    expect(DIVIDER_TONE_SPEC.quiet.paintsRule).toBe(false);
+  });
+
+  /**
+   * 이 목록이 계약의 심장이다. 「경계가 무슨 색인가」는 팔레트마다 다르게 답해도
+   * 되지만 「무엇이 아니어야 하는가」는 두 클라에 공통이고, 이 셋 중 하나라도
+   * 빠지면 D-2가 실측한 상태(우연히 닮은 두 색)로 되돌아간다.
+   */
+  it("경계는 조용한 표지·에이전트 정체·위험 중 무엇과도 같지 않다", () => {
+    expect([...DIVIDER_TONE_SPEC.boundary.mustDifferFrom].sort()).toEqual([
+      "agent",
+      "danger",
+      "quiet",
+    ]);
   });
 });
