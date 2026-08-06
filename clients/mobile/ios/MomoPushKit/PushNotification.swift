@@ -39,7 +39,7 @@ public enum MomoPushContract {
     public static let pushFetchSessionAccount = "push-fetch-session"
     /// Legacy App Group key. Read only during the one-time Keychain migration.
     public static let sessionKey = "momo.ios.dev.session.push-fetch"
-    public static let placeholderTitle = "momo"
+    public static let placeholderTitle = "oort"
     public static let placeholderBody = "새 알림"
 }
 

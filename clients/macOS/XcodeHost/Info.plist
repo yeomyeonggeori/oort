@@ -10,8 +10,13 @@
 	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
+	<!-- 표시명은 타깃명과 분리한다(ADR-0152 D2-1). PRODUCT_NAME = TARGET_NAME =
+	     MomoMac 은 서명·스킴·CI가 함께 물고 있는 식별자라 그대로 두고, 사람이 읽는
+	     이름만 여기서 oort 로 고정한다. -->
 	<key>CFBundleName</key>
-	<string>$(PRODUCT_NAME)</string>
+	<string>oort</string>
+	<key>CFBundleDisplayName</key>
+	<string>oort</string>
 	<key>CFBundlePackageType</key>
 	<string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
 	<key>CFBundleShortVersionString</key>
@@ -55,7 +60,7 @@
 	     NSLocalNetworkUsageDescription은 로컬 네트워크 권한 프롬프트에 노출되는
 	     설명 문자열이고, NSBonjourServices는 브라우징을 허용할 서비스 타입이다. -->
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>momo looks for a workspace server on your local network so you can connect without typing its address.</string>
+	<string>oort looks for a workspace server on your local network so you can connect without typing its address.</string>
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_momo._tcp</string>

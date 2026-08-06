@@ -95,7 +95,7 @@ public struct MomoServerSessionForm: Equatable, Sendable {
     public func validatedEmail() throws -> String {
         let trimmed = email.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.contains("@"), trimmed.contains(".") else {
-            throw MomoServerSessionError.validation("Enter the email used by the MomoServer workspace.")
+            throw MomoServerSessionError.validation("Enter the email used by the oort workspace.")
         }
         return trimmed
     }
@@ -2060,7 +2060,7 @@ private struct MomoMarkView: View {
             .frame(width: MomoTheme.Onboarding.markSize, height: MomoTheme.Onboarding.markSize)
 
             VStack(alignment: .leading, spacing: MomoTheme.Onboarding.compactSpacing) {
-                Text("momo")
+                Text("oort")
                     .font(.title3.bold())
                     .foregroundStyle(
                         usesSignalForeground
@@ -2298,8 +2298,8 @@ private struct MomoSessionCopy {
 
     var choiceTitle: String {
         switch language {
-        case .korean: return "momo에서 시작하기"
-        case .english: return "Start with momo"
+        case .korean: return "oort에서 시작하기"
+        case .english: return "Start with oort"
         }
     }
 
@@ -2319,8 +2319,8 @@ private struct MomoSessionCopy {
 
     var discoveryTitle: String {
         switch language {
-        case .korean: return "같은 네트워크에서 momo 서버를 찾았습니다"
-        case .english: return "Found a momo server on your network"
+        case .korean: return "같은 네트워크에서 oort 서버를 찾았습니다"
+        case .english: return "Found an oort server on your network"
         }
     }
 
@@ -2340,8 +2340,8 @@ private struct MomoSessionCopy {
 
     var discoveryPrivacyNote: String {
         switch language {
-        case .korean: return "같은 와이파이의 momo 서버만 찾습니다. 주소는 자동으로 저장되지 않습니다."
-        case .english: return "Only momo servers on your Wi-Fi appear here. Nothing is saved automatically."
+        case .korean: return "같은 와이파이의 oort 서버만 찾습니다. 주소는 자동으로 저장되지 않습니다."
+        case .english: return "Only oort servers on your Wi-Fi appear here. Nothing is saved automatically."
         }
     }
 
@@ -2419,12 +2419,12 @@ private struct MomoSessionCopy {
         switch (language, path) {
         case (.korean, .join): return "초대 코드로 팀의 워크스페이스에 합류합니다."
         case (.english, .join): return "Use an invite code to join your team's workspace."
-        case (.korean, .signIn): return "이미 운영 중인 momo 서버로 돌아갑니다."
-        case (.english, .signIn): return "Return to a momo server that is already running."
+        case (.korean, .signIn): return "이미 운영 중인 oort 서버로 돌아갑니다."
+        case (.english, .signIn): return "Return to an oort server that is already running."
         case (.korean, .localDemo): return "서버 없이 사람과 에이전트의 협업 흐름을 둘러봅니다."
         case (.english, .localDemo): return "Preview the people and agent workflow without a server."
-        case (.korean, .operatorSetup): return "이미 설치한 momo 서버의 워크스페이스에 연결합니다."
-        case (.english, .operatorSetup): return "Connect to a workspace on a momo server you already installed."
+        case (.korean, .operatorSetup): return "이미 설치한 oort 서버의 워크스페이스에 연결합니다."
+        case (.english, .operatorSetup): return "Connect to a workspace on an oort server you already installed."
         }
     }
 
@@ -2495,8 +2495,8 @@ private struct MomoSessionCopy {
 
     var cardSubtitle: String {
         switch language {
-        case .korean: return "데모로 둘러보거나, 실행 중인 MomoServer에 연결하세요."
-        case .english: return "Open the demo or connect to a running MomoServer."
+        case .korean: return "데모로 둘러보거나, 실행 중인 oort 서버에 연결하세요."
+        case .english: return "Open the demo or connect to a running oort server."
         }
     }
 
@@ -2677,8 +2677,8 @@ private struct MomoSessionCopy {
 
     var loadingTitle: String {
         switch language {
-        case .korean: return "momo 여는 중"
-        case .english: return "Opening momo"
+        case .korean: return "oort 여는 중"
+        case .english: return "Opening oort"
         }
     }
 
@@ -3038,7 +3038,7 @@ enum MomoInviteMailComposer {
         if language == .korean {
             lines.append("안녕하세요,")
             lines.append("")
-            lines.append("momo 워크스페이스에 초대합니다. 아래 순서대로 참여하세요.")
+            lines.append("oort 워크스페이스에 초대합니다. 아래 순서대로 참여하세요.")
             lines.append("")
             lines.append("1. macOS 앱 설치")
             lines.append("운영자가 보낸 승인된 다운로드 링크와 SHA-256 체크섬을 확인한 뒤 설치하세요.")
@@ -3060,7 +3060,7 @@ enum MomoInviteMailComposer {
         } else {
             lines.append("Hello,")
             lines.append("")
-            lines.append("You are invited to a momo workspace. Follow these steps to join.")
+            lines.append("You are invited to an oort workspace. Follow these steps to join.")
             lines.append("")
             lines.append("1. Install the macOS app")
             lines.append("Verify the approved download link and SHA-256 checksum from your operator, then install.")
@@ -3082,8 +3082,8 @@ enum MomoInviteMailComposer {
         }
 
         let subject = language == .korean
-            ? "momo 워크스페이스 초대"
-            : "Join our momo workspace"
+            ? "oort 워크스페이스 초대"
+            : "Join our oort workspace"
         return MomoInviteMailContent(
             subject: subject,
             body: lines.joined(separator: lineBreak)

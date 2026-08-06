@@ -89,7 +89,7 @@ echo "[alpha-publish] sha256=$SHA256"
 
 echo "[alpha-publish] 3/5 release upload to $DIST_REPO"
 TAG="v${VERSION}"
-gh release create "$TAG" --repo "$DIST_REPO" --title "momo ${VERSION} (internal alpha)" \
+gh release create "$TAG" --repo "$DIST_REPO" --title "oort ${VERSION} (internal alpha)" \
   --notes "${NOTES}
 
 - build: ${BUILD_NUM} (source ${GIT_SHA}, private repo)

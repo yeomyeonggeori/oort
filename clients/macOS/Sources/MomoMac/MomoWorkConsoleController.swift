@@ -1062,8 +1062,8 @@ final class MomoWorkConsoleController: ObservableObject {
     private static var workHostDisplayName: String {
         let deviceName = Host.current().localizedName?
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let deviceName, !deviceName.isEmpty else { return "Momo for Mac" }
-        return String("Momo on \(deviceName)".prefix(80))
+        guard let deviceName, !deviceName.isEmpty else { return "oort for Mac" }
+        return String("oort on \(deviceName)".prefix(80))
     }
 
     private static var workHostCapabilities: [String: Bool] {

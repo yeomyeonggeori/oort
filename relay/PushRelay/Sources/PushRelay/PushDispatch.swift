@@ -101,7 +101,7 @@ enum DispatchValidationError: Error {
 struct APNSPayload: Encodable, Sendable {
     struct APS: Encodable, Sendable {
         struct Alert: Encodable, Sendable {
-            let title = "momo"
+            let title = "oort"
             let body = "새 알림"
         }
 

@@ -37,7 +37,7 @@ public struct SessionForm: Codable, Equatable, Sendable {
 
         let trimmedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmedEmail.contains("@"), trimmedEmail.contains(".") else {
-            throw SessionError.validation("Enter the email used by your momo workspace.")
+            throw SessionError.validation("Enter the email used by your oort workspace.")
         }
         guard !password.isEmpty else {
             throw SessionError.validation("Enter your password.")

@@ -41,7 +41,7 @@ base = "https://github.com/Dawn-kim-official/momo-alpha/releases/download"
 legacy = old.get("legacy")
 if legacy is None and not str(old.get("version", "")).startswith("0.1.0-next"):
     legacy = {
-        "app": "momo (SwiftUI, retired)",
+        "app": "oort (SwiftUI, retired)",
         "version": old.get("version"),
         "download_url": old.get("download_url"),
         "note": "구 앱 최종 빌드입니다. 신규 설치는 기본 다운로드를 사용하세요.",
@@ -49,19 +49,19 @@ if legacy is None and not str(old.get("version", "")).startswith("0.1.0-next"):
 manifest = {
     "schema_version": 1,
     "channel": "default",
-    "app": "momo (Tauri)",
+    "app": "oort (Tauri)",
     "version": version,
     "build": os.environ["BUILD_NUM"],
     "released_at": os.environ["RELEASED_AT"],
     "minimum_macos": "14.0",
-    "summary": "기본 다운로드가 새 momo 앱입니다. 이후 업데이트는 앱 안에서 자동으로 안내됩니다.",
+    "summary": "기본 다운로드가 새 oort 앱입니다. 이후 업데이트는 앱 안에서 자동으로 안내됩니다.",
     "download_url": f"{base}/{tag}/{zip_name}",
     "release_notes_url": f"https://github.com/Dawn-kim-official/momo-alpha/releases/tag/{tag}",
     "sha256": os.environ["SHA256"],
     "signed": True,
     "restart_instructions": [
         "Download and unzip the new build.",
-        "Move momo.app into /Applications and launch.",
+        "Move oort.app into /Applications and launch.",
         "In-app updates keep you current from here.",
     ],
 }

@@ -34,7 +34,7 @@ public final class MomoHuddleViewModel: ObservableObject {
             : .idle
     }
 
-    static let serverConnectionRequiredReason = "momo 서버에 연결하면 허들을 사용할 수 있어요."
+    static let serverConnectionRequiredReason = "oort 서버에 연결하면 허들을 사용할 수 있어요."
     static let workspaceRequiredReason = "워크스페이스를 선택하면 허들을 사용할 수 있어요."
     static let authenticationRequiredReason = "허들을 사용할 수 없어요. 다시 로그인한 뒤 시도해 주세요."
 

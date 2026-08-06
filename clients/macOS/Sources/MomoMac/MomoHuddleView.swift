@@ -243,8 +243,8 @@ extension MomoHuddleCopy {
         switch reason {
         case MomoHuddleViewModel.serverConnectionRequiredReason:
             return language == .korean
-                ? "momo 서버에 연결하면 허들을 사용할 수 있어요."
-                : "Connect to a momo server to use huddles."
+                ? "oort 서버에 연결하면 허들을 사용할 수 있어요."
+                : "Connect to an oort server to use huddles."
         case MomoHuddleViewModel.workspaceRequiredReason:
             return language == .korean
                 ? "워크스페이스를 선택하면 허들을 사용할 수 있어요."

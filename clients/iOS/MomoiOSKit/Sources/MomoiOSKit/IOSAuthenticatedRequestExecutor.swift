@@ -141,7 +141,7 @@ public actor IOSAuthenticatedRequestExecutor {
             throw error
         } catch {
             refreshTask = nil
-            throw SessionError.transport("The momo session could not be refreshed. Check your connection and try again.")
+            throw SessionError.transport("The oort session could not be refreshed. Check your connection and try again.")
         }
     }
 
@@ -171,7 +171,7 @@ public actor IOSAuthenticatedRequestExecutor {
         } catch is CancellationError {
             throw CancellationError()
         } catch {
-            throw SessionError.transport("Could not reach the momo server. Check your connection and try again.")
+            throw SessionError.transport("Could not reach the oort server. Check your connection and try again.")
         }
     }
 

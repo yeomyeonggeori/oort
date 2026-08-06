@@ -94,7 +94,7 @@ struct MomoProfileSettingsSurface: View {
         let memberName = (member?.displayName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         if !memberName.isEmpty { return memberName }
         let summaryName = (summary?.memberDisplayName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        return summaryName.isEmpty ? "momo" : summaryName
+        return summaryName.isEmpty ? "oort" : summaryName
     }
 
     private var profileInitials: String {
