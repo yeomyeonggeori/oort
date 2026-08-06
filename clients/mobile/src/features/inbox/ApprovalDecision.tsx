@@ -203,7 +203,7 @@ export function ApprovalDecision({
     return (
       <View style={styles.bar} testID={`${testIDPrefix}-actions`}>
         <Text style={styles.lead}>실행 전에 회원님의 허가가 필요합니다.</Text>
-        {execution !== null && execution.candidates.length > 0 ? (
+        {execution !== null ? (
           <SpawnHostChoice
             plan={execution}
             pickedHostId={chosenHostId}
@@ -271,7 +271,7 @@ export function ApprovalDecision({
           채 확정하는지 볼 수 없고, 확인이 판단의 근거 옆에 있어야 한다는 이 파일의
           원칙이 무너진다. 대신 잠긴다 — 확정 문장이 이미 목적지를 말했고, 그 아래에서
           목적지가 바뀌면 읽은 문장과 나가는 요청이 달라진다. */}
-      {execution !== null && execution.candidates.length > 0 ? (
+      {execution !== null ? (
         <SpawnHostChoice
           plan={execution}
           pickedHostId={chosenHostId}

@@ -38,11 +38,24 @@ import {
 // 막을 이유는 없다.
 // =============================================================================
 
-/** 이 승인이 호스트를 묻는가. */
+/**
+ * 이 승인이 호스트를 묻는가.
+ *
+ * **후보의 개수를 보지 않는다.** 서버의 같은 술어(`offers_host_choice`)가
+ * `execution.host_candidates` **키의 존재**만 보기 때문이고, 두 술어가 갈라지면
+ * 정확히 한 자리에서 사고가 난다: 워크스페이스에 등록된 호스트가 하나도 없어
+ * 목록이 빈 배열로 오는 경우. 개수로 판정하면 클라이언트는 "이 카드는 호스트를
+ * 묻지 않는다"고 읽어 승인 버튼을 그대로 세우고, 서버는 같은 payload를 보고
+ * "묻는다"고 읽어 409(`no eligible work host is available`)로 답한다. 사람은
+ * 멀쩡해 보이는 버튼을 누르고 이유 없는 실패를 받는다.
+ *
+ * 키가 있으면 묻는 것이고, 고를 것이 하나도 없다는 사실은 `spawnHostGate`가
+ * 결정 **전에** 말한다.
+ */
 export function offersHostChoice(
   plan: SpawnExecutionPlan | null | undefined
 ): plan is SpawnExecutionPlan {
-  return plan != null && plan.candidates.length > 0;
+  return plan != null;
 }
 
 /** 지금 실제로 고를 수 있는 후보들. */

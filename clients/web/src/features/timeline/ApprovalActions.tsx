@@ -297,7 +297,7 @@ export function ApprovalActions({
       {/* 픽커는 무장 여부와 무관하게 자리를 지킨다. 확정 화면에서 사라지면
           사람은 자기가 무엇을 고른 채 확정하는지 볼 수 없고, 확인은 판단의 근거
           옆에 있어야 한다는 이 표면의 원칙이 무너진다. 대신 잠긴다. */}
-      {execution !== null && execution.candidates.length > 0 && (
+      {execution !== null && (
         <SpawnHostChoice
           plan={execution}
           pickedHostId={chosenHostId}

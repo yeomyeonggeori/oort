@@ -79,8 +79,11 @@ export function SpawnHostChoice({
       <legend className="pb-1 text-meta text-ink-muted">
         {HOST_CHOICE_LABEL}
       </legend>
-      {/* 옵션마다 상자를 두르지 않는다. 행마다 카드는 web-card AI-tell이고
-          밀도를 잡아먹는다(SettingsFields와 같은 관용구). */}
+      {/* 후보가 0이면 상자 자체를 세우지 않는다. 빈 테두리는 「목록이 로딩 중」
+          으로 읽히는데, 실제로 일어난 일은 **등록된 호스트가 없다**이고 그것은
+          아래 문장이 말한다. 서버는 이 경우에도 `host_candidates` 키를 실으므로
+          카드는 여전히 호스트를 묻는 카드다(`offersHostChoice` 주석 참고). */}
+      {plan.candidates.length > 0 && (
       <div className="flex flex-col overflow-hidden rounded-md border border-line">
         {plan.candidates.map((candidate) => {
           const checked = candidate.hostId === pickedHostId;
@@ -145,6 +148,7 @@ export function SpawnHostChoice({
           );
         })}
       </div>
+      )}
       {gate.blockedCopy !== undefined && (
         // 사고가 아니라 상태다 — 빨간 alert이 아니라 조용한 안내로 끼어들지 않고
         // 선다. 무엇이 이것을 바꾸는지까지 말하는 것은 코어의 문장이 한다.

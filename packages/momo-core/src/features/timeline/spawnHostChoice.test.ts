@@ -139,6 +139,30 @@ describe("RED PROOF ① — 자격 없는 호스트는 전송되지 않는다", 
   });
 });
 
+describe("등록된 호스트가 하나도 없을 때 (빈 후보 목록)", () => {
+  // 서버는 이 경우에도 `host_candidates` 키를 싣는다 — 빈 배열로. 그래서 서버의
+  // `offers_host_choice`는 **참**이고, 결정은 409(`no eligible work host is
+  // available`)로 끝난다. 클라이언트가 개수로 판정하면 같은 payload를 보고 반대로
+  // 읽어(「이 카드는 호스트를 묻지 않는다」) 승인 버튼을 멀쩡히 세우고, 사람은
+  // 이유 없는 실패를 받는다.
+  const empty = plan({ candidates: [], defaultHostId: undefined });
+
+  it("여전히 호스트를 묻는 카드다 — 개수가 아니라 키가 판정한다", () => {
+    expect(offersHostChoice(empty)).toBe(true);
+  });
+
+  it("승인이 막히고, 그 이유를 결정 전에 말한다", () => {
+    const gate = spawnHostGate(empty);
+    expect(gate.canApprove).toBe(false);
+    expect(gate.blockedCopy).toBe(NO_ELIGIBLE_HOST_COPY);
+  });
+
+  it("찍히는 것도, 보낼 것도 없다", () => {
+    expect(preselectedHostId(empty)).toBeNull();
+    expect(decisionHostId(empty, LOCAL)).toBeUndefined();
+  });
+});
+
 describe("승인 게이트", () => {
   it("픽커가 없는 승인은 이 규칙이 판단할 것이 없다", () => {
     expect(spawnHostGate(null).canApprove).toBe(true);

@@ -62,6 +62,10 @@ export function SpawnHostChoice({
       {/* 보이는 라벨이다. 라디오 목록이 무엇을 묻는지 모른 채 기계 이름 서너 개만
           보는 화면은 선택기가 아니라 수수께끼다. */}
       <Text style={styles.legend}>{HOST_CHOICE_LABEL}</Text>
+      {/* 후보가 0이면 상자 자체를 세우지 않는다. 빈 테두리는 「로딩 중」으로
+          읽히는데, 실제로 일어난 일은 등록된 호스트가 없다는 것이고 그것은 아래
+          문장이 말한다. */}
+      {plan.candidates.length > 0 ? (
       <View
         accessibilityRole="radiogroup"
         accessibilityLabel={HOST_CHOICE_LABEL}
@@ -117,6 +121,7 @@ export function SpawnHostChoice({
           );
         })}
       </View>
+      ) : null}
       {gate.blockedCopy !== undefined ? (
         <Text style={styles.blocked} testID={`${testIDPrefix}-host-blocked`}>
           {gate.blockedCopy}
