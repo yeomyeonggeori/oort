@@ -93,8 +93,25 @@ export interface ApprovalCardNoteInput {
   isResumeOffer?: boolean;
   /** 재개 제안이 설명할 문장. 화면이 들고 있다. */
   resumeOfferText?: string | null;
-  /** 원장이 「지금도 대기」라고 말하는가. 거짓이면 이 카드에 세울 컨트롤이 없다. */
-  decidable: boolean;
+  /**
+   * 이 승인이 **이미 끝났는가**(스냅샷 또는 원장 기준).
+   *
+   * `pendingHere`와 갈라 두는 것이 load-bearing이다. 끝난 결정에 「인박스나
+   * 데스크톱에서 처리하세요」를 붙이면 그것은 거짓 안내다 — 처리할 것이 없다.
+   * 끝난 카드가 할 말은 원장 줄(누가·언제·원장 #xxxx)이 이미 하고 있다.
+   */
+  settled: boolean;
+  /** 이 카드에 결정할 대상이 있는가(`approvalId !== null`). */
+  hasTarget: boolean;
+  /**
+   * **이 표면에서** 지금 결정할 수 있는가 — 원장이 「지금도 대기」라고 말하는가.
+   *
+   * 폰은 대기 승인 목록으로 답하고(다른 데서 이미 결정된 건은 목록에서 빠진다),
+   * 웹의 타임라인 카드는 그 목록을 구독하지 않으므로 스냅샷이 대기이면 참이다.
+   * 두 클라의 답이 다른 것은 아는 것이 다르기 때문이지 규칙이 다르기 때문이
+   * 아니다 — 규칙은 이 함수 하나다.
+   */
+  pendingHere: boolean;
   /** 이 기기가 지금 결정을 보낼 수 있는가. */
   offline: boolean;
   /** 이 서버에 승인 원장 표면이 있는가. 없으면 버튼은 결코 성공하지 못한다. */
@@ -118,24 +135,29 @@ export const APPROVAL_ELSEWHERE_COPY =
   "이 결정은 인박스나 데스크톱 앱에서 처리할 수 있습니다.";
 
 /**
- * 카드가 컨트롤 대신 말할 줄. `null`이면 **컨트롤을 세운다**.
+ * 카드가 컨트롤 대신 말할 줄. `null`이면 **컨트롤을 세우거나, 할 말이 없다**.
  *
- * 순서가 곧 계약이다:
+ * 순서가 곧 계약이고, 각 단계는 「왜 여기 컨트롤이 없는가」에 답한다:
  *
  *   1. **영수증이 가장 먼저.** 결정한 순간 그 승인은 대기 목록에서 빠지므로
- *      `decidable`이 거짓이 된다. 영수증을 뒤에 두면 방금 누른 사람이 자기 영수증
+ *      `pendingHere`가 거짓이 된다. 영수증을 뒤에 두면 방금 누른 사람이 자기 영수증
  *      대신 「다른 데서 하세요」를 읽는다 (폰이 실측한 순서).
  *   2. **재개 제안은 승인이 아니다.** 승인할 대상이 없는 카드에 승인 문장을 붙이면
  *      그 문장이 무엇에 대한 말인지 아무도 모른다.
- *   3. **원장 없는 서버.** 버튼을 세우면 결코 성공할 수 없는 요청이 나가고 화면은
+ *   3. **끝난 결정은 할 말이 없다.** 원장 줄이 이미 누가·언제·어느 기록인지 말한다.
+ *      여기에 안내를 얹으면 처리할 것이 없는데 처리하러 가라고 하는 셈이다.
+ *   4. **결정할 대상이 없으면** 역시 할 말이 없다. 승인할 것이 없는 카드에 승인
+ *      안내를 붙이면 그 안내가 무엇을 가리키는지 아무도 모른다.
+ *   5. **원장 없는 서버.** 버튼을 세우면 결코 성공할 수 없는 요청이 나가고 화면은
  *      그 404를 원장의 답인 양 읽는다. 카드는 남기고 컨트롤만 지운다.
- *   4. **결정할 수 있는데 지금 못 보낸다** → 오프라인. 「다른 데서 하세요」와 다른
- *      문장이어야 한다 — 이건 자리의 문제가 아니라 **때**의 문제다.
- *   5. **결정할 수 있고 보낼 수 있다** → `null`, 컨트롤이 선다.
- *   6. 그 외 → 길 안내.
+ *   6. **이 표면에서는 결정할 수 없다** → 길 안내. **자리**의 문제다.
+ *   7. **결정할 수 있는데 지금 못 보낸다** → 오프라인. **때**의 문제다. 두 문장이
+ *      달라야 하는 이유가 이 둘의 차이다.
+ *   8. → `null`, 컨트롤이 선다.
  *
- * 3이 4보다 앞인 이유: 원장이 없는 서버에서는 온라인이 되어도 아무 일도 일어나지
- * 않는다. 「다시 연결되면 여기서」는 그 서버에서 거짓말이다.
+ * 5가 6·7보다 앞인 이유: 원장이 없는 서버에서는 다른 자리로 가도, 온라인이 되어도
+ * 아무 일도 일어나지 않는다. 그 서버에서 「인박스에서 처리하세요」와 「다시
+ * 연결되면 여기서」는 둘 다 거짓말이다.
  */
 export function approvalCardNote(
   input: ApprovalCardNoteInput
@@ -146,23 +168,22 @@ export function approvalCardNote(
   }
   if (input.isResumeOffer === true) {
     const text = input.resumeOfferText?.trim();
-    return text
-      ? { kind: "resume-offer", tone: "guidance", text }
-      : null;
+    return text ? { kind: "resume-offer", tone: "guidance", text } : null;
   }
-  if (!input.decidable) {
-    return {
-      kind: "elsewhere",
-      tone: "guidance",
-      text: APPROVAL_ELSEWHERE_COPY,
-    };
-  }
+  if (input.settled || !input.hasTarget) return null;
   if (input.approvalsProvided === false) {
     const text = input.unsupportedText?.trim();
     return {
       kind: "unsupported",
       tone: "guidance",
       text: text ? text : APPROVAL_ELSEWHERE_COPY,
+    };
+  }
+  if (!input.pendingHere) {
+    return {
+      kind: "elsewhere",
+      tone: "guidance",
+      text: APPROVAL_ELSEWHERE_COPY,
     };
   }
   if (input.offline) {

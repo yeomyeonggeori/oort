@@ -89,7 +89,7 @@ import type { TimelineStreamItem } from "./model";
  * 소비자들이 한꺼번에 타입 오류가 된다. 접기를 쓰는 표면만 이 타입을 쓰고, 쓰지
  * 않는 표면은 `TimelineStreamItem` 을 그대로 쓴다.
  */
-export type FoldedTimelineItem = TimelineStreamItem & {
+export interface DeletedFoldFields {
   /** 이 묘비가 대신하는 삭제 메시지 수 (2 이상일 때만 있다). */
   deletedRepeat?: number;
   /**
@@ -97,11 +97,13 @@ export type FoldedTimelineItem = TimelineStreamItem & {
    *
    * 개수(`deletedRepeat`)는 화면이 쓰고, 이 배열은 **항법**이 쓴다: 인용 점프가
    * 목적지를 못 찾았을 때 「그 메시지를 대신해 서 있는 행이 어느 것인가」를 답할
-   * 수 있는 유일한 재료다. 화면에는 나가지 않는다 — 행은 자기가 무엇을 흡수했는지
-   * 알 필요가 없다.
+   * 수 있는 유일한 재료다. 화면에는 개수만 나가고 이 배열은 나가지 않는다 —
+   * 행은 자기가 무엇을 흡수했는지 알 필요가 없다.
    */
   deletedFoldedIds?: readonly string[];
-};
+}
+
+export type FoldedTimelineItem = TimelineStreamItem & DeletedFoldFields;
 
 /** 접기가 판정 대상으로 삼는 항목 — 메시지 행. */
 export type MessageStreamItem = Extract<TimelineStreamItem, { kind: "message" }>;
@@ -117,15 +119,23 @@ export interface DeletedRowFacts {
 /**
  * 연속된 묘비를 접는다. 순수 함수이고 입력 배열은 그대로 둔다.
  *
+ * **항목 타입에 대해 제네릭인 것이 계약이다.** 두 클라가 서 있는 스트림이 다르다:
+ * 폰은 「작업 중」 자리표시까지 실은 `TimelineStreamItem` 을 접고, 웹은 그것이
+ * 없는 `TimelineItem` 을 접는다. 넓은 쪽 타입을 돌려주면 웹의 `itemContent` 가
+ * 네 종류를 걷어낸 뒤 남은 것을 메시지로 단정하지 못하게 되고, 그 파일은 접기
+ * 하나 때문에 있지도 않은 행 종류를 위한 죽은 갈래를 갖게 된다. 받은 타입을
+ * 그대로 돌려주면 그 일이 일어나지 않는다.
+ *
  * @param items 코어가 만든 스트림.
  * @param factsFor 행 하나가 접혀도 되는지 판정할 재료. 목록만이 답할 수 있으므로
  *   (롤업은 스레드 맥락에서, 반응은 반응 표에서 온다) 주입으로 받는다.
  */
-export function foldDeletedRuns(
-  items: readonly TimelineStreamItem[],
-  factsFor: (item: MessageStreamItem) => DeletedRowFacts
-): FoldedTimelineItem[] {
-  const out: FoldedTimelineItem[] = [];
+export function foldDeletedRuns<T extends TimelineStreamItem>(
+  items: readonly T[],
+  factsFor: (item: Extract<T, { kind: "message" }>) => DeletedRowFacts
+): (T & DeletedFoldFields)[] {
+  type Folded = T & DeletedFoldFields;
+  const out: Folded[] = [];
   /** 지금 열려 있는 묘비 묶음의 **출력 배열 안** 위치. 없으면 -1. */
   let runAt = -1;
 
@@ -137,7 +147,7 @@ export function foldDeletedRuns(
       runAt = -1;
       continue;
     }
-    const facts = factsFor(item);
+    const facts = factsFor(item as Extract<T, { kind: "message" }>);
     const foldable =
       runAt >= 0 && !item.startsGroup && !facts.hasRollup && !facts.hasReactions;
     if (!foldable) {
@@ -147,7 +157,7 @@ export function foldDeletedRuns(
       runAt = out.length - 1;
       continue;
     }
-    const head = out[runAt] as FoldedTimelineItem;
+    const head = out[runAt];
     out[runAt] = {
       ...head,
       deletedRepeat: (head.deletedRepeat ?? 1) + 1,
@@ -175,7 +185,7 @@ export function foldDeletedRuns(
  * 대소문자는 접는다 — 와이어가 섞어 보낸다(Swift `uuidString` 은 대문자).
  */
 export function foldedStandInIndex(
-  items: readonly FoldedTimelineItem[],
+  items: readonly DeletedFoldFields[],
   messageId: string
 ): number {
   return items.findIndex((item) =>

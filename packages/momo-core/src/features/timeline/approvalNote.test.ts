@@ -14,7 +14,14 @@ import {
 // =============================================================================
 
 function input(over: Partial<ApprovalCardNoteInput> = {}): ApprovalCardNoteInput {
-  return { decidable: true, offline: false, approvalsProvided: true, ...over };
+  return {
+    settled: false,
+    hasTarget: true,
+    pendingHere: true,
+    offline: false,
+    approvalsProvided: true,
+    ...over,
+  };
 }
 
 describe("격의 순서", () => {
@@ -46,18 +53,44 @@ describe("격의 순서", () => {
 
 describe("approvalCardNote", () => {
   /**
-   * 폰이 실측한 순서. 결정한 순간 그 승인은 대기 목록에서 빠져 `decidable` 이
+   * 폰이 실측한 순서. 결정한 순간 그 승인은 대기 목록에서 빠져 `pendingHere` 가
    * 거짓이 되므로, 영수증을 뒤에 두면 방금 누른 사람이 「다른 데서 하세요」를
    * 읽는다.
    */
   it("영수증이 무엇보다 먼저다 — 결정하면 대기 목록에서 빠지기 때문", () => {
     const note = approvalCardNote(
-      input({ decidable: false, receiptNote: "승인을 기록했습니다." })
+      input({
+        settled: true,
+        pendingHere: false,
+        receiptNote: "승인을 기록했습니다.",
+      })
     );
     expect(note).toEqual({
       kind: "receipt",
       tone: "receipt",
       text: "승인을 기록했습니다.",
+    });
+  });
+
+  /**
+   * 끝난 결정에 「인박스나 데스크톱에서 처리하세요」를 붙이면 처리할 것이 없는데
+   * 처리하러 가라고 하는 셈이다. 그 카드가 할 말은 원장 줄이 이미 하고 있다.
+   */
+  it("끝난 결정은 아무 줄도 세우지 않는다", () => {
+    expect(
+      approvalCardNote(input({ settled: true, pendingHere: false }))
+    ).toBeNull();
+  });
+
+  it("결정할 대상이 없으면 승인 안내를 붙이지 않는다", () => {
+    expect(approvalCardNote(input({ hasTarget: false }))).toBeNull();
+  });
+
+  it("이 표면에서 결정할 수 없으면 자리의 문제를 말한다", () => {
+    expect(approvalCardNote(input({ pendingHere: false }))).toEqual({
+      kind: "elsewhere",
+      tone: "guidance",
+      text: APPROVAL_ELSEWHERE_COPY,
     });
   });
 
@@ -80,20 +113,12 @@ describe("approvalCardNote", () => {
     });
   });
 
-  it("결정할 대상이 아니면 길 안내다", () => {
-    expect(approvalCardNote(input({ decidable: false }))).toEqual({
-      kind: "elsewhere",
-      tone: "guidance",
-      text: APPROVAL_ELSEWHERE_COPY,
-    });
-  });
-
   /**
-   * 원장이 없는 서버에서는 온라인이 되어도 아무 일도 일어나지 않는다. 그래서
-   * 「다시 연결되면 여기서」보다 이 판정이 앞이다 — 그 문장이 그 서버에서는
+   * 원장이 없는 서버에서는 다른 자리로 가도, 온라인이 되어도 아무 일도 일어나지
+   * 않는다. 그래서 그 둘보다 이 판정이 앞이다 — 나머지 두 문장이 그 서버에서는
    * 거짓말이 된다.
    */
-  it("원장 없는 서버는 오프라인보다 먼저 답한다", () => {
+  it("원장 없는 서버는 자리·때보다 먼저 답한다", () => {
     const note = approvalCardNote(
       input({
         approvalsProvided: false,
@@ -115,7 +140,7 @@ describe("approvalCardNote", () => {
     const note = approvalCardNote(
       input({
         isResumeOffer: true,
-        decidable: false,
+        hasTarget: false,
         resumeOfferText: "git 계보만 새 호스트로 이어집니다.",
       })
     );
@@ -135,7 +160,7 @@ describe("approvalCardNote", () => {
 
   it("할 말이 없는 재개 제안은 아무 줄도 세우지 않는다", () => {
     expect(
-      approvalCardNote(input({ isResumeOffer: true, decidable: false }))
+      approvalCardNote(input({ isResumeOffer: true, hasTarget: false }))
     ).toBeNull();
   });
 });
