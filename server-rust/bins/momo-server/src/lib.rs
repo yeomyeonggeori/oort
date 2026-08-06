@@ -496,6 +496,14 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/work-hosts/{host}",
             delete(routes::work_hosts::revoke),
         )
+        // #1114: the daemon's queue. Protected like its Swift twin
+        // (`addProtected` :97-100) — the credential is a `MomoHost` signature,
+        // which `auth::require_principal` now resolves to a `WorkHost`
+        // principal, so this route needs no mounting of its own.
+        .route(
+            "/v1/workspaces/{ws}/work-hosts/{host}/pending-controls",
+            get(routes::work_hosts::pending_controls),
+        )
         // cloud hosts (ADR-0142 BYOC)
         .route(
             "/v1/workspaces/{ws}/work-hosts/byoc/enrollments",

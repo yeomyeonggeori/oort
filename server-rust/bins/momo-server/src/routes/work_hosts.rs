@@ -28,17 +28,23 @@
 //! same 401 sentence, so the route tells an attacker nothing about which check
 //! failed.
 //!
-//! ## Not served by this batch (deliberate, named)
+//! ## The signed poll (#1114)
 //!
-//! `GET .../{host}/pending-controls` (:97-100), `GET .../{host}/live-sessions`
-//! (:101-104) and `POST .../{host}/reconcile` (:105-108) are **work-host-signed**
-//! routes: each begins `guard principal.kind == .workHost`, which requires the
-//! `MomoHost` request-signature authenticator (v2 payload + replay-id
-//! consumption) that `auth.rs` has not ported. They also serve the real workd
-//! (`work_control` dispatch, MOMO-656 reconciliation) — explicitly out of scope
-//! for B2.2, which stops at heartbeat signature verification. Mounting them
-//! behind the *bearer* middleware would have inverted their authorization, so
-//! they are absent rather than approximated.
+//! `GET .../{host}/pending-controls` (:97-100) is a **work-host-signed** route:
+//! Swift's handler begins `guard principal.kind == .workHost`. B2.2 left it out
+//! because `auth.rs` had no `MomoHost` branch; it has one now, so the route is
+//! mounted on the same protected router as its Swift twin and reads its
+//! principal the ordinary way. Its whole authorization is that the signature
+//! verified (`work_host_auth`) and that the path names **that** host in **that**
+//! workspace — a host may poll only its own queue.
+//!
+//! ## Still not served (deliberate, named)
+//!
+//! `GET .../{host}/live-sessions` (:101-104) and `POST .../{host}/reconcile`
+//! (:105-108) are signed the same way and remain unported: they serve MOMO-656
+//! restart reconciliation, which is a different goal with its own sweep
+//! semantics (`host_lost_at`). `work_host_auth::is_allowed_signed_path` still
+//! refuses both, so neither is an authenticated 404.
 
 use std::collections::BTreeMap;
 
@@ -58,11 +64,12 @@ use momo_wire::{
 };
 
 use crate::dto::{
-    RegisterWorkHostRequest, WorkHostDto, WorkHostHeartbeatRequest, WorkHostListResponse,
-    WorkHostResponse,
+    PendingWorkControlsResponse, RegisterWorkHostRequest, WorkHostDto, WorkHostHeartbeatRequest,
+    WorkHostListResponse, WorkHostResponse,
 };
 use crate::error::ApiError;
-use crate::routes::shared::{path_uuid, require_human, workspace_scope};
+use crate::routes::shared::{path_uuid, require_human, settle, tenant_tx, workspace_scope};
+use crate::routes::work_controls::control_dto;
 use crate::AppState;
 
 /// The 401 every heartbeat failure answers with — unknown host, revoked host,
@@ -241,6 +248,63 @@ pub async fn list(
             .into_iter()
             .map(work_host_dto)
             .collect::<Result<Vec<_>, _>>()?,
+    }))
+}
+
+/// `GET /v1/workspaces/{ws}/work-hosts/{host}/pending-controls` (Swift
+/// `pendingControls`, :280-322) — the daemon's queue.
+///
+/// This route is the half of the spawn closed loop that #1132 had to leave open:
+/// a control could reach `dispatched`, and the room was told, but the host had
+/// no way to *learn* it. Everything after — running the tool, acknowledging,
+/// binding the session — hangs off this read.
+///
+/// Authorization is three facts and nothing else, all of them already proven or
+/// checked before a row is read:
+///   * the caller signed as a work host (`PrincipalKind::WorkHost` — only
+///     [`crate::auth::require_principal`]'s signed branch installs one);
+///   * the `{ws}` in the path is the workspace that signature was verified in;
+///   * the `{host}` in the path is the signer.
+///
+/// The last two are redundant with the authenticator today (it pins both), and
+/// they are written anyway: they are the checks that stay correct if the pin
+/// ever moves, and a route that reads a queue must be able to state whose queue
+/// it is without deferring to a module.
+pub async fn pending_controls(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path((workspace, host)): Path<(String, String)>,
+) -> Result<Json<PendingWorkControlsResponse>, ApiError> {
+    if principal.kind != momo_auth::PrincipalKind::WorkHost {
+        return Err(ApiError::forbidden(
+            "pending controls require work host signature",
+        ));
+    }
+    let workspace_id = workspace_scope(&workspace, &principal)?;
+    let host_id = path_uuid(&host, "invalid work host id")?;
+    if Some(host_id) != principal.token_id {
+        // A host asking for another host's queue learns only that its signature
+        // was fine — the same sentence a bad signature gets.
+        return Err(crate::work_host_auth::signed_request_unauthorized());
+    }
+
+    let controls = settle(
+        "work_hosts.pending_controls",
+        tenant_tx(&state.pool, workspace_id, move |conn| {
+            Box::pin(async move {
+                Ok(Ok(momo_t3::pending_controls_for_host_in_tx(
+                    conn,
+                    workspace_id,
+                    host_id,
+                )
+                .await?))
+            })
+        })
+        .await,
+    )?;
+
+    Ok(Json(PendingWorkControlsResponse {
+        work_controls: controls.into_iter().map(control_dto).collect(),
     }))
 }
 

@@ -35,8 +35,14 @@
 //! ## B2.6: the second and third credentials
 //!
 //! [`require_principal`] now dispatches the way Swift's middleware does
-//! (`AuthMiddleware.swift:64-105`), in this order:
+//! (`AuthMiddleware.swift:43-105`), in this order:
 //!
+//! 0. **`MomoHost` authorization** → the work-host request signature (#1114).
+//!    First, because it is the one credential that is *not* a bearer: reading it
+//!    later would mean answering "missing bearer token" to a daemon that
+//!    presented exactly what it was told to. Only the allow-listed paths in
+//!    [`crate::work_host_auth::is_allowed_signed_path`] authenticate; everything
+//!    else answers the same 401 as a bad signature.
 //! 1. **no `Bearer` header** → the deprecated gateway shared secret
 //!    (`X-Momo-Agent-Gateway-Secret`), accepted only when
 //!    [`crate::config::AgentGatewaySettings::legacy_secret_enabled`] and only on
@@ -48,8 +54,10 @@
 //!    touched, and the row must carry that scope.
 //! 3. **anything else** → the App JWT path above.
 //!
-//! **Still not ported (deviation, see PR body):** the work-host Ed25519 bearer
-//! branch, which `work_host_auth` handles per-route instead.
+//! The work-host branch above is the credential B2.6 left out. It stays thin on
+//! purpose: this module decides *which* credential a request presented, and
+//! `work_host_auth` decides whether that credential is good — the same split the
+//! bearer path keeps with `momo_auth`.
 
 use axum::extract::{FromRequestParts, Request, State};
 use axum::http::request::Parts;
@@ -161,6 +169,21 @@ pub async fn require_principal(
     let method = request.method().as_str().to_string();
     let path = request.uri().path().to_string();
 
+    // #1114: the work-host branch runs FIRST, exactly where Swift's middleware
+    // puts it (`AuthMiddleware.swift:43-62`) — a `MomoHost` authorization is
+    // never a bearer, so falling through to `bearer_token` would answer
+    // "missing bearer token" to a request that presented a perfectly good
+    // credential of a different kind.
+    if request
+        .headers()
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .and_then(crate::work_host_auth::host_id_from_authorization)
+        .is_some()
+    {
+        return authenticate_signed_host(state, request, next).await;
+    }
+
     let presented = request
         .headers()
         .get(axum::http::header::AUTHORIZATION)
@@ -216,6 +239,77 @@ pub async fn require_principal(
     );
 
     request.extensions_mut().insert(principal);
+    Ok(next.run(request).await)
+}
+
+/// The `MomoHost` branch: verify the v2 request signature and install a
+/// [`PrincipalKind::WorkHost`] principal (#1114 — Swift `AuthMiddleware`
+/// :43-62).
+///
+/// Three properties this function must keep, each of which is a way the branch
+/// could otherwise become a hole:
+///
+/// 1. **The workspace comes from the path, and only the path.** A daemon holds
+///    no token that names a tenant, so there is nothing else to read it from —
+///    and [`crate::work_host_auth::authenticate_signed_host_request`] then opens
+///    its tenant transaction with that id, so a signature minted for workspace A
+///    cannot verify against a `work_host` row in workspace B. The route's own
+///    `workspace_scope` re-compares it against the principal afterwards.
+/// 2. **The body is buffered only on this branch.** Every other credential leaves
+///    the request stream untouched; here the raw bytes are the signed material,
+///    so they must be read before the handler and handed back to it unchanged.
+///    The ceiling is the authenticator's own
+///    [`crate::work_host_auth::MAX_SIGNED_BODY_BYTES`], so an unauthenticated
+///    caller cannot make the server buffer arbitrary volume.
+/// 3. **A failure here is a 401, never a fall-through.** A request that presented
+///    `MomoHost` and could not prove it does not get a second chance as a bearer.
+async fn authenticate_signed_host(
+    state: AppState,
+    request: Request,
+    next: Next,
+) -> Result<Response, ApiError> {
+    use crate::work_host_auth::{
+        authenticate_signed_host_request, signed_request_unauthorized, MAX_SIGNED_BODY_BYTES,
+    };
+
+    let (parts, body) = request.into_parts();
+    let Ok(bytes) = axum::body::to_bytes(body, MAX_SIGNED_BODY_BYTES).await else {
+        return Err(signed_request_unauthorized());
+    };
+
+    // `/v1/workspaces/{ws}/…` — segment 2. Every signable path has this shape
+    // (`is_allowed_signed_path` refuses anything else before the id is read).
+    let path = parts.uri.path().to_string();
+    let Some(Ok(workspace_id)) = path
+        .split('/')
+        .filter(|part| !part.is_empty())
+        .nth(2)
+        .map(uuid::Uuid::parse_str)
+    else {
+        return Err(signed_request_unauthorized());
+    };
+
+    let signed = authenticate_signed_host_request(
+        &state,
+        &parts.method,
+        &path,
+        &parts.headers,
+        &bytes,
+        workspace_id,
+    )
+    .await?;
+
+    let mut request = Request::from_parts(parts, axum::body::Body::from(bytes));
+    // `token_id` carries the HOST id, matching Swift (`tokenID: identity.hostID`)
+    // and the rule `routes::shared::audit_via_token_id` exists to enforce: it is
+    // not a `token` row, so it must never reach `audit_log.via_token_id`.
+    request.extensions_mut().insert(Principal {
+        member_id: signed.owner_member_id,
+        workspace_id: signed.workspace_id,
+        token_id: Some(signed.host_id),
+        scopes: vec![],
+        kind: PrincipalKind::WorkHost,
+    });
     Ok(next.run(request).await)
 }
 

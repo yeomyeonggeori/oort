@@ -1,28 +1,35 @@
 //! Signed work-host **request** authentication (MOMO-657 / migration 048),
 //! ported from Swift `Auth/WorkHostAuthenticator.swift`.
 //!
-//! ## Why this is a route-scoped function and not a middleware
+//! ## Two entry points, one authenticator
 //!
-//! Swift runs this as an authenticator over an allow-listed set of eight paths.
-//! Only one of those eight has a handler in this server (`…/work-hosts/{host}/
-//! terminal-attach/validate`), so mounting it as a middleware would advertise an
-//! authentication surface for seven routes that answer 404 — and the day one of
-//! them lands, its author would inherit an authenticator they never read. It is
-//! therefore a function the one route that needs it calls explicitly, with
-//! [`is_allowed_signed_path`] still holding Swift's allow-list shape so adding
-//! the next route is a one-line, visible decision.
+//! Swift runs this as an authenticator over an allow-listed set of eight paths,
+//! mounted ahead of the bearer middleware. This server reaches the same rule
+//! from two directions, because its routes are split across two routers:
 //!
-//! The **unported seven** (each already refused by absence, listed so the gap is
-//! named rather than discovered): `GET …/work-hosts/{host}/pending-controls`,
-//! `GET …/work-hosts/{host}/live-sessions`, `POST …/work-hosts/{host}/reconcile`,
-//! `GET …/work-tool-profiles`, `POST …/work-sessions`,
-//! `PATCH …/work-sessions/{session}`, `POST …/work-controls/{control}/ack`.
+//! * [`crate::auth::require_principal`] calls it for the **protected** routes a
+//!   daemon uses (`…/work-hosts/{host}/pending-controls`,
+//!   `…/work-controls/{control}/ack`), installing a
+//!   [`momo_auth::PrincipalKind::WorkHost`] principal exactly as Swift's
+//!   middleware does (`AuthMiddleware.swift:43-62`);
+//! * `routes::terminal_attach::validate` calls it directly, because that route
+//!   is mounted **outside** the bearer middleware (a PTY host asking whether a
+//!   capability is still good holds no bearer at all).
+//!
+//! [`is_allowed_signed_path`] is what both consult, so a path is signable in one
+//! place or neither. Adding the next route stays a one-line, visible decision.
+//!
+//! The **still-unported five** (each refused by absence, listed so the gap is
+//! named rather than discovered): `GET …/work-hosts/{host}/live-sessions`,
+//! `POST …/work-hosts/{host}/reconcile`, `GET …/work-tool-profiles`,
+//! `POST …/work-sessions`, `PATCH …/work-sessions/{session}`.
 //!
 //! ## The check, in Swift's order (`:29-125`)
 //!
 //! 1. the path/method is allow-listed — before anything is parsed;
 //! 2. `Authorization: MomoHost <hostId>` parses, and equals the `{host}` in the
-//!    path (`scopedHostID`, :56-60) — a host may only act as itself;
+//!    path **when the path names one** ([`scoped_host_id_from_path`], Swift
+//!    `scopedHostID` :283-289) — a host may only act as itself;
 //! 3. the three `X-Momo-Work-Host-*` headers parse;
 //! 4. the timestamp is inside the ±5 minute window — checked **before** the
 //!    database, so a flood of stale requests costs no query;
@@ -34,6 +41,17 @@
 //!
 //! Every failure is the same 401 with the same sentence, so the response tells
 //! an attacker nothing about which check failed.
+//!
+//! ## The one path whose `{…}` segment is not a host
+//!
+//! `POST …/work-controls/{control}/ack` addresses a *control*, so step 2 has
+//! nothing in the path to pin the signer against — and Swift's `scopedHostID`
+//! returns nil there for the same reason (it only reads segment 4 of a
+//! `work-hosts` path). The pin that route needs is a different one and it lives
+//! in the handler, where the ledger can be read: the signing host must be the
+//! control's own `target_host_id`. Answering "authenticated, therefore
+//! authorised" here would let any registered host in the workspace acknowledge
+//! any other host's control.
 //!
 //! ## Provenance (ADR-0146, B2.5)
 //!
@@ -134,16 +152,55 @@ pub(crate) fn host_id_from_authorization(raw: &str) -> Option<Uuid> {
 }
 
 /// Swift `isAllowed(method:path:)` (:186-275), reduced to the paths this server
-/// actually serves — see the module docs for the seven that are not ported.
+/// actually serves — see the module docs for the five that are not ported.
 pub(crate) fn is_allowed_signed_path(method: &Method, path: &str) -> bool {
     let segments: Vec<&str> = path.split('/').filter(|part| !part.is_empty()).collect();
-    method == Method::POST
+    if segments.len() < 4 || segments[0] != "v1" || segments[1] != "workspaces" {
+        return false;
+    }
+    // `POST …/work-hosts/{host}/terminal-attach/validate` (B2.4).
+    if method == Method::POST
         && segments.len() == 7
-        && segments[0] == "v1"
-        && segments[1] == "workspaces"
         && segments[3] == "work-hosts"
         && segments[5] == "terminal-attach"
         && segments[6] == "validate"
+    {
+        return true;
+    }
+    // `GET …/work-hosts/{host}/pending-controls` — how a daemon learns what a
+    // person approved (#1114).
+    if method == Method::GET
+        && segments.len() == 6
+        && segments[3] == "work-hosts"
+        && segments[5] == "pending-controls"
+    {
+        return true;
+    }
+    // `POST …/work-controls/{control}/ack` — and how it reports back (#1114).
+    if method == Method::POST
+        && segments.len() == 6
+        && segments[3] == "work-controls"
+        && segments[5] == "ack"
+    {
+        return true;
+    }
+    false
+}
+
+/// The host id a path pins the signer to, when it names one (Swift
+/// `scopedHostID(fromPath:)` :283-289).
+///
+/// `None` is **not** "any host may act": it means the path carries no host
+/// segment, so the pin has to come from somewhere else — see the module docs.
+/// Returning `None` for a malformed host id would silently drop the pin, so a
+/// `work-hosts` path whose segment 4 does not parse is instead treated as a
+/// mismatch by [`authenticate_signed_host_request`].
+pub(crate) fn scoped_host_id_from_path(path: &str) -> Option<Result<Uuid, ()>> {
+    let segments: Vec<&str> = path.split('/').filter(|part| !part.is_empty()).collect();
+    if segments.len() < 5 || segments[3] != "work-hosts" {
+        return None;
+    }
+    Some(Uuid::parse_str(segments[4]).map_err(|_| ()))
 }
 
 /// Authenticate a signed host request, returning the verified identity.
@@ -151,7 +208,8 @@ pub(crate) fn is_allowed_signed_path(method: &Method, path: &str) -> bool {
 /// `path` must be the **raw request path** (`Uri::path()`), because it is inside
 /// the signature: reconstructing it from route parameters would re-encode it and
 /// silently invalidate every signature from a host that spelled it differently.
-#[allow(clippy::too_many_arguments)]
+/// It is also where the scoped-host pin is read from, so the raw path is the one
+/// input this function trusts about the request's shape.
 pub(crate) async fn authenticate_signed_host_request(
     state: &AppState,
     method: &Method,
@@ -159,7 +217,6 @@ pub(crate) async fn authenticate_signed_host_request(
     headers: &HeaderMap,
     body: &[u8],
     workspace_id: Uuid,
-    path_host_id: Uuid,
 ) -> Result<SignedHostRequest, ApiError> {
     if !is_allowed_signed_path(method, path) {
         return Err(signed_request_unauthorized());
@@ -172,9 +229,13 @@ pub(crate) async fn authenticate_signed_host_request(
     let Some(host_id) = header("authorization").and_then(host_id_from_authorization) else {
         return Err(signed_request_unauthorized());
     };
-    // A host may only ever act as itself (`scopedHostID`, :56-60).
-    if host_id != path_host_id {
-        return Err(signed_request_unauthorized());
+    // A host may only ever act as itself, on the paths that name a host
+    // (`scopedHostID`, :56-60). A path that names none carries its pin in the
+    // handler instead — see the module docs.
+    if let Some(scoped) = scoped_host_id_from_path(path) {
+        if scoped != Ok(host_id) {
+            return Err(signed_request_unauthorized());
+        }
     }
     let (Some(sent_at_ms), Some(signature), Some(request_id)) = (
         header(SENT_AT_HEADER).and_then(|raw| raw.parse::<i64>().ok()),
@@ -267,26 +328,48 @@ mod tests {
     }
 
     #[test]
-    fn only_the_validate_path_is_signable_in_this_batch() {
+    fn exactly_three_paths_are_signable_and_the_method_is_part_of_the_rule() {
         let ws = Uuid::from_u128(1);
         let host = Uuid::from_u128(2);
+        let control = Uuid::from_u128(3);
         let validate = format!("/v1/workspaces/{ws}/work-hosts/{host}/terminal-attach/validate");
+        let pending = format!("/v1/workspaces/{ws}/work-hosts/{host}/pending-controls");
+        let ack = format!("/v1/workspaces/{ws}/work-controls/{control}/ack");
+
         assert!(is_allowed_signed_path(&Method::POST, &validate));
-        // Method is part of the signed payload, and of the allow-list.
+        assert!(is_allowed_signed_path(&Method::GET, &pending));
+        assert!(is_allowed_signed_path(&Method::POST, &ack));
+
+        // Method is part of the signed payload, and of the allow-list: the same
+        // path under the wrong verb is a different request.
         assert!(!is_allowed_signed_path(&Method::GET, &validate));
-        // The seven Swift allow-lists that have no handler here must NOT be
+        assert!(!is_allowed_signed_path(&Method::POST, &pending));
+        assert!(!is_allowed_signed_path(&Method::GET, &ack));
+
+        // The five Swift allow-lists that still have no handler here must NOT be
         // signable: an authenticated 404 would be a promise this server cannot
         // keep.
-        for unported in [
-            format!("/v1/workspaces/{ws}/work-hosts/{host}/pending-controls"),
-            format!("/v1/workspaces/{ws}/work-hosts/{host}/live-sessions"),
-            format!("/v1/workspaces/{ws}/work-hosts/{host}/reconcile"),
-            format!("/v1/workspaces/{ws}/work-tool-profiles"),
-            format!("/v1/workspaces/{ws}/work-sessions"),
-            format!("/v1/workspaces/{ws}/work-controls/{host}/ack"),
+        for (method, unported) in [
+            (
+                Method::GET,
+                format!("/v1/workspaces/{ws}/work-hosts/{host}/live-sessions"),
+            ),
+            (
+                Method::POST,
+                format!("/v1/workspaces/{ws}/work-hosts/{host}/reconcile"),
+            ),
+            (
+                Method::GET,
+                format!("/v1/workspaces/{ws}/work-tool-profiles"),
+            ),
+            (Method::POST, format!("/v1/workspaces/{ws}/work-sessions")),
+            (
+                Method::PATCH,
+                format!("/v1/workspaces/{ws}/work-sessions/{host}"),
+            ),
         ] {
             assert!(
-                !is_allowed_signed_path(&Method::POST, &unported),
+                !is_allowed_signed_path(&method, &unported),
                 "{unported} has no handler in this server"
             );
         }
@@ -299,12 +382,52 @@ mod tests {
             &Method::POST,
             &format!("/v1/workspaces/{ws}/work-hosts/{host}/terminal-attach/validate/extra")
         ));
+        assert!(!is_allowed_signed_path(
+            &Method::POST,
+            &format!("/v1/workspaces/{ws}/work-controls/{control}/ack/extra")
+        ));
         // A trailing slash produces an empty final segment, which the filter
         // drops — the same path, still allowed.
         assert!(is_allowed_signed_path(
             &Method::POST,
             &format!("{validate}/")
         ));
+    }
+
+    /// The generalisation #1114 needed: the pin exists where the path names a
+    /// host, and is deliberately absent — not silently satisfied — where it does
+    /// not.
+    #[test]
+    fn the_scoped_host_pin_follows_the_path_shape() {
+        let ws = Uuid::from_u128(1);
+        let host = Uuid::from_u128(2);
+        let control = Uuid::from_u128(3);
+        assert_eq!(
+            scoped_host_id_from_path(&format!(
+                "/v1/workspaces/{ws}/work-hosts/{host}/pending-controls"
+            )),
+            Some(Ok(host))
+        );
+        assert_eq!(
+            scoped_host_id_from_path(&format!(
+                "/v1/workspaces/{ws}/work-hosts/{host}/terminal-attach/validate"
+            )),
+            Some(Ok(host))
+        );
+        // A control id is not a host id, and pretending otherwise is exactly the
+        // confusion that kept this route unported.
+        assert_eq!(
+            scoped_host_id_from_path(&format!("/v1/workspaces/{ws}/work-controls/{control}/ack")),
+            None
+        );
+        // A malformed host segment must NOT read as "no pin".
+        assert_eq!(
+            scoped_host_id_from_path(&format!(
+                "/v1/workspaces/{ws}/work-hosts/nope/live-sessions"
+            )),
+            Some(Err(()))
+        );
+        assert_eq!(scoped_host_id_from_path("/healthz"), None);
     }
 
     #[test]
