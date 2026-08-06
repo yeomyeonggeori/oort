@@ -33,15 +33,23 @@
 //! whole execution is a local Postgres lifecycle transition. That is one of the
 //! three properties that chose this tool — see `momo_agent::tools`.
 
-use momo_agent::tools::{ToolCall, ToolResult, WORK_SESSION_END};
+use momo_agent::tools::{ToolCall, ToolResult, WORK_SESSION_END, WORK_SESSION_SPAWN};
 use momo_db::{DbError, PgConnection, PgPool};
 use momo_messaging::{cent_channel, send_message_in_tx, MessageType, NewMessage};
 use momo_outbox::{emit_outbox, OutboxKind};
+use momo_t3::work_control::{
+    bind_control_session_in_tx, control_event_payload, insert_work_control_in_tx,
+    mark_control_dispatched_in_tx, spawn_host_ineligible_reason_in_tx, validated_label,
+    validated_tool_key, NewWorkControl, KIND_SPAWN, STATUS_APPROVED,
+};
 use momo_t3::{
-    card_props, cloud_host_id_for_session_in_tx, end_work_session_in_tx,
-    is_active_channel_member_in_tx, lifecycle_payload, lock_work_session_detail_in_tx,
-    resolve_cloud_host_id, terminate_in_tx, update_session_card_props_in_tx, with_t3_lifecycle_tx,
-    work_session_scope_in_tx, T3Error, T3LockLadder, TerminationReason,
+    acquire_slot_in_tx, allocate_uuid_v7, card_props, cloud_host_id_for_host,
+    cloud_host_id_for_host_in_tx, cloud_host_id_for_session_in_tx,
+    create_work_session_with_id_in_tx, end_work_session_in_tx, is_active_channel_member_in_tx,
+    lifecycle_payload, lock_work_session_detail_in_tx, resolve_cloud_host_id, start_usage_in_tx,
+    terminate_in_tx, update_session_card_props_in_tx, with_t3_lifecycle_tx,
+    work_session_scope_in_tx, work_tool_is_enabled_in_tx, NewWorkSession, T3Error, T3LockLadder,
+    TerminationReason,
 };
 use uuid::Uuid;
 
@@ -56,6 +64,9 @@ pub struct ToolContext {
     pub agent_member_id: Uuid,
     /// The human whose authority the tool runs with.
     pub approved_by: Uuid,
+    /// ADR-0125 D6-A (#1114) — the host the approver chose, when the approval
+    /// asked. `None` means the call's own `host_id` argument stands.
+    pub approved_host_id: Option<Uuid>,
 }
 
 /// Run an approved tool call and record its `tool_result` in the channel, in one
@@ -92,6 +103,9 @@ pub async fn execute(
     let result = match momo_agent::tools::normalize(&call.name).as_str() {
         name if name == momo_agent::tools::normalize(WORK_SESSION_END) => {
             end_session(pool, context, call).await?
+        }
+        name if name == momo_agent::tools::normalize(WORK_SESSION_SPAWN) => {
+            spawn_session(pool, context, call).await?
         }
         // Unreachable while the catalog has one entry, and deliberately not a
         // `panic!`: a catalog entry added without an executor must degrade to a
@@ -315,6 +329,412 @@ async fn end_session_in_tx(
         call_id,
         format!("Ended work session `{}` ({}).", ended.label, ended.tool),
     ))
+}
+
+// ---------------------------------------------------------------------------
+// work.session.spawn (#1114)
+// ---------------------------------------------------------------------------
+
+/// The validated arguments of a `work.session.spawn` call.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SpawnArguments {
+    pub tool: String,
+    pub label: String,
+    /// The host the **model** proposed, which the approver may replace.
+    pub host_id: Option<Uuid>,
+}
+
+/// The argument validator (the second of the three pieces #1114 required).
+///
+/// It answers a `&'static str` rather than an error type because every rejection
+/// here becomes a `tool_result` the model reads: the sentence *is* the return
+/// value, and one that says "which host?" is what makes the next turn better
+/// than the last.
+///
+/// `host_id` is deliberately permissive about absence and strict about shape: a
+/// missing host is the normal case (the approver picks), while a present one
+/// that is not a uuid is a model mistake worth naming rather than dropping.
+pub fn spawn_arguments(arguments: &serde_json::Value) -> Result<SpawnArguments, &'static str> {
+    let Some(object) = arguments.as_object() else {
+        return Err("work.session.spawn requires an arguments object.");
+    };
+    let Some(tool) = object.get("tool").and_then(serde_json::Value::as_str) else {
+        return Err("work.session.spawn requires a `tool` argument, e.g. \"codex\".");
+    };
+    let tool = validated_tool_key(tool)
+        .map_err(|_| "`tool` must be a lowercase tool key such as `codex` or `claude`.")?;
+    let Some(label) = object.get("label").and_then(serde_json::Value::as_str) else {
+        return Err("work.session.spawn requires a `label` argument naming the session.");
+    };
+    let label = validated_label(label).map_err(|_| "`label` must contain 1 to 120 characters.")?;
+
+    let host_id = match object.get("host_id") {
+        None | Some(serde_json::Value::Null) => None,
+        Some(value) => {
+            let Some(host_id) = value
+                .as_str()
+                .map(str::trim)
+                .and_then(|raw| Uuid::parse_str(raw).ok())
+            else {
+                return Err(
+                    "`host_id` must be a work host UUID, or omitted so the approver picks.",
+                );
+            };
+            Some(host_id)
+        }
+    };
+    Ok(SpawnArguments {
+        tool,
+        label,
+        host_id,
+    })
+}
+
+/// `work.session.spawn` — start a tool in a new work session on a chosen host.
+///
+/// ## Why the session is created here and not by a daemon
+///
+/// The REST ledger's spawn is a message to a host: the daemon starts the tool,
+/// creates the session, and acks. That path stays exactly as Swift has it. This
+/// executor is the **in-process** half the tool loop needs, and it does what
+/// Swift's `resume` does (`WorkSessionRoutes.swift:1940-1959`): create the
+/// session first, then write the `work_control` spawn row **bound to it**, so a
+/// daemon watching `work.control.dispatched` is told which session to attach the
+/// tool it starts to. One ledger, two orders of arrival — not two ledgers.
+///
+/// ## The three authorities, kept apart
+///
+/// * the **agent** proposed it (`context.agent_member_id` authors the result);
+/// * a **human** authorised it, and chose where (`context.approved_host_id`);
+/// * the session belongs to the agent's **owner human**, which is the member
+///   every check below is made for. That is Swift's `sessionOwnerMemberID =
+///   binding.ownerHumanID`, and it is why an approver from another team cannot
+///   turn a colleague's agent into a session on their own laptop.
+async fn spawn_session(
+    pool: &PgPool,
+    context: &ToolContext,
+    call: &ToolCall,
+) -> Result<ToolResult, DbError> {
+    let arguments = match spawn_arguments(&call.arguments) {
+        Ok(arguments) => arguments,
+        Err(message) => return Ok(ToolResult::error(&call.call_id, message)),
+    };
+    // The human's pick wins over the model's proposal. Both absent is a refusal
+    // rather than a guess: picking a host on the agent's behalf would make the
+    // approval card decorative.
+    let Some(host_id) = context.approved_host_id.or(arguments.host_id) else {
+        return Ok(ToolResult::error(
+            &call.call_id,
+            "No work host was chosen for this spawn. Ask the person approving to \
+             pick a host, or name one with `host_id`.",
+        ));
+    };
+
+    let workspace_id = context.workspace_id;
+    let channel_id = context.channel_id;
+    let agent_member_id = context.agent_member_id;
+    let call_id = call.call_id.clone();
+
+    let owner_member_id = match momo_db::with_tenant_tx(pool, workspace_id, move |conn| {
+        Box::pin(async move {
+            momo_t3::work_control::agent_owner_human_in_tx(conn, workspace_id, agent_member_id)
+                .await
+                .map_err(|error| match error {
+                    T3Error::Db(inner) => inner,
+                    other => DbError::Sqlx(momo_db::sqlx::Error::Protocol(other.to_string())),
+                })
+        })
+    })
+    .await?
+    {
+        Some(owner) => owner,
+        None => {
+            return Ok(ToolResult::error(
+                &call.call_id,
+                "This agent has no active human owner, so it cannot own a work session.",
+            ))
+        }
+    };
+
+    // Resolved without a lock; the transaction re-reads it under the ladder and
+    // refuses if it moved — the same two-step `routes::work_sessions::create`
+    // performs.
+    let cloud_host_id = match cloud_host_id_for_host(pool, workspace_id, host_id).await {
+        Ok(id) => id,
+        Err(error) => return Ok(spawn_failure(&call.call_id, error)),
+    };
+
+    let spawn = arguments.clone();
+    let body = tool_body(move |conn: &mut PgConnection| {
+        let call_id = call_id.clone();
+        let spawn = spawn.clone();
+        Box::pin(async move {
+            spawn_session_in_tx(
+                conn,
+                SpawnInTx {
+                    workspace_id,
+                    owner_member_id,
+                    agent_member_id,
+                    channel_id,
+                    host_id,
+                    expected_cloud_host_id: cloud_host_id,
+                    arguments: spawn,
+                    call_id,
+                },
+            )
+            .await
+        }) as _
+    });
+
+    let outcome = match cloud_host_id {
+        // T3: the host advisory + the work_pool rung, exactly as the REST create
+        // takes them (`lockWorkPool: targetCloudHostID != nil`).
+        Some(cloud_host_id) => {
+            with_t3_lifecycle_tx(
+                pool,
+                workspace_id,
+                T3LockLadder::host(cloud_host_id).with_work_pool(),
+                body,
+            )
+            .await
+        }
+        None => {
+            momo_db::with_tenant_tx_prelude(
+                pool,
+                workspace_id,
+                |_conn| Box::pin(async move { Ok(()) }),
+                |_conn| Box::pin(async move { Ok(()) }),
+                body,
+            )
+            .await
+        }
+    };
+
+    match outcome {
+        Ok(result) => Ok(result),
+        Err(error) => Ok(spawn_failure(&call.call_id, error)),
+    }
+}
+
+struct SpawnInTx {
+    workspace_id: Uuid,
+    owner_member_id: Uuid,
+    agent_member_id: Uuid,
+    channel_id: Uuid,
+    host_id: Uuid,
+    expected_cloud_host_id: Option<Uuid>,
+    arguments: SpawnArguments,
+    call_id: String,
+}
+
+/// The eligibility re-check, the session, and the control row — one transaction.
+///
+/// Order is the REST route's: every refusal is answered before the first write,
+/// so a refused spawn leaves no card, no session and no ledger row behind.
+async fn spawn_session_in_tx(
+    conn: &mut PgConnection,
+    input: SpawnInTx,
+) -> Result<ToolResult, T3Error> {
+    let call_id = input.call_id.as_str();
+
+    if cloud_host_id_for_host_in_tx(conn, input.workspace_id, input.host_id).await?
+        != input.expected_cloud_host_id
+    {
+        return Ok(ToolResult::error(
+            call_id,
+            "Work host cloud lifecycle changed; ask again.",
+        ));
+    }
+    // **Red proof #2 lives here.** The picker's answer was computed when the
+    // card was drawn; this is the answer now, for the member who will own the
+    // session. A host that belongs to someone else, was revoked, went quiet, or
+    // is the reserved T3 slot is refused by name.
+    if let Some(reason) = spawn_host_ineligible_reason_in_tx(
+        conn,
+        input.workspace_id,
+        input.host_id,
+        input.owner_member_id,
+    )
+    .await?
+    {
+        return Ok(ToolResult::error(
+            call_id,
+            format!("That work host cannot run this session ({reason})."),
+        ));
+    }
+    if !work_tool_is_enabled_in_tx(conn, input.workspace_id, &input.arguments.tool).await? {
+        return Ok(ToolResult::error(
+            call_id,
+            format!(
+                "`{}` is not enabled in this workspace.",
+                input.arguments.tool
+            ),
+        ));
+    }
+    if !is_active_channel_member_in_tx(
+        conn,
+        input.workspace_id,
+        input.channel_id,
+        input.owner_member_id,
+    )
+    .await?
+    {
+        return Ok(ToolResult::error(
+            call_id,
+            "The session owner is not an active member of this channel.",
+        ));
+    }
+    // Slot admission (ADR-0125 D5). Its vocabulary is the REST route's.
+    if let Err(error) = acquire_slot_in_tx(
+        conn,
+        input.workspace_id,
+        input.owner_member_id,
+        input.host_id,
+    )
+    .await
+    {
+        return Ok(match error {
+            T3Error::SlotsExhausted { .. } => ToolResult::error(
+                call_id,
+                "This workspace has no free work session slots right now.",
+            ),
+            T3Error::MemberSlotLimit { .. } => ToolResult::error(
+                call_id,
+                "The session owner has reached their concurrent work session limit.",
+            ),
+            other => return Err(other),
+        });
+    }
+
+    // ---- writes ------------------------------------------------------------
+    let session_id = allocate_uuid_v7(conn).await?;
+    let props = card_props(
+        session_id,
+        &input.arguments.tool,
+        &input.arguments.label,
+        "running",
+        None,
+        None,
+        None,
+        None,
+    );
+    // The card goes through the message spine, so the seq bump, the row and its
+    // `message.new` broadcast keep one implementation (invariants #3/#4).
+    // `client_msg_id = session_id` makes the card idempotent per session, the
+    // same key `routes::work_sessions::create` uses.
+    let card = send_message_in_tx(
+        conn,
+        input.workspace_id,
+        NewMessage {
+            channel_id: input.channel_id,
+            author_member_id: input.owner_member_id,
+            message_type: MessageType::System,
+            body: None,
+            props,
+            root_id: None,
+            reply_to_id: None,
+            client_msg_id: Some(session_id),
+            run_id: None,
+            hlc_ts: None,
+            hlc_count: None,
+        },
+    )
+    .await
+    .map_err(T3Error::from)?;
+
+    let session = create_work_session_with_id_in_tx(
+        conn,
+        input.workspace_id,
+        session_id,
+        NewWorkSession {
+            channel_id: input.channel_id,
+            member_id: input.owner_member_id,
+            host_id: input.host_id,
+            root_message_id: card.message.id,
+            tool: input.arguments.tool.clone(),
+            label: input.arguments.label.clone(),
+        },
+    )
+    .await?;
+    start_usage_in_tx(conn, input.workspace_id, session.id, input.host_id).await?;
+
+    // The ledger row a host consumes. It is born `approved` — a human already
+    // said yes to *this* spawn, and the row records the delivery rather than
+    // re-asking the question.
+    let control = insert_work_control_in_tx(
+        conn,
+        input.workspace_id,
+        NewWorkControl {
+            channel_id: input.channel_id,
+            requester_member_id: input.agent_member_id,
+            target_host_id: input.host_id,
+            session_id: None,
+            kind: KIND_SPAWN.to_string(),
+            payload: serde_json::json!({
+                "tool": input.arguments.tool,
+                "label": input.arguments.label,
+            }),
+            status: STATUS_APPROVED.to_string(),
+        },
+    )
+    .await?;
+    let control = bind_control_session_in_tx(conn, input.workspace_id, control.id, session.id)
+        .await?
+        .unwrap_or(control);
+    let Some(dispatched) =
+        mark_control_dispatched_in_tx(conn, input.workspace_id, control.id).await?
+    else {
+        return Err(T3Error::IllegalTransition(
+            "spawn control could not be dispatched".to_string(),
+        ));
+    };
+
+    let detail = lock_work_session_detail_in_tx(conn, input.workspace_id, session.id)
+        .await?
+        .ok_or(T3Error::SessionNotFound)?;
+    for payload in [
+        lifecycle_payload(
+            &cent_channel(input.workspace_id, input.channel_id),
+            "work.session.started",
+            &detail.0,
+            card.message.seq,
+        ),
+        control_event_payload(
+            &cent_channel(input.workspace_id, input.channel_id),
+            "work.control.dispatched",
+            &dispatched,
+            None,
+            None,
+        ),
+    ] {
+        emit_outbox(
+            &mut *conn,
+            input.workspace_id,
+            OutboxKind::Broadcast,
+            "publish",
+            &payload,
+            Some(input.channel_id),
+        )
+        .await
+        .map_err(|error| T3Error::from(DbError::from(error)))?;
+    }
+
+    Ok(ToolResult::ok(
+        call_id,
+        format!(
+            "Started work session `{}` ({}) on host {}.",
+            input.arguments.label, input.arguments.tool, input.host_id
+        ),
+    ))
+}
+
+/// A domain failure a spawn should tell the model about, phrased without
+/// internals.
+fn spawn_failure(call_id: &str, error: T3Error) -> ToolResult {
+    ToolResult::error(
+        call_id,
+        format!("Could not start the work session: {error}"),
+    )
 }
 
 /// Pin a closure to the higher-ranked shape `with_t3_lifecycle_tx` and

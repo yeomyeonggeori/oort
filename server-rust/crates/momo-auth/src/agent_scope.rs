@@ -11,15 +11,16 @@
 //! minus X") is what keeps a new human route from being silently agent-reachable
 //! the day it is mounted.
 //!
-//! ## Only this batch's paths are listed
+//! ## Only mounted paths are listed
 //!
 //! Swift's table covers surfaces that do not exist on this server yet
-//! (`work-controls`, `search/messages`, `read-state`, `/v1/mcp/drive`,
-//! `plugins`, `realtime-token`, the quota-snapshot ingest). Listing a scope for
-//! a route that is not mounted would be a claim this server cannot keep, so the
-//! table below carries the B2.6 gateway surface plus the one already-mounted
-//! route Swift also allows an agent to reach (`POST …/channels/{ch}/messages`).
-//! Everything else stays absent — which is the fail-closed answer, not a gap.
+//! (`search/messages`, `read-state`, `/v1/mcp/drive`, `plugins`,
+//! `realtime-token`, the quota-snapshot ingest). Listing a scope for a route
+//! that is not mounted would be a claim this server cannot keep, so the table
+//! below carries the B2.6 gateway surface, the one already-mounted route Swift
+//! also allows an agent to reach (`POST …/channels/{ch}/messages`), and — since
+//! #1114 mounted it — the work-control ledger's create route. Everything else
+//! stays absent, which is the fail-closed answer, not a gap.
 
 /// `GET …/gateway/jobs/pending` and the two lease verbs (Swift :211-233).
 pub const SCOPE_AGENT_JOBS_READ: &str = "agent:jobs:read";
@@ -27,6 +28,13 @@ pub const SCOPE_AGENT_JOBS_READ: &str = "agent:jobs:read";
 pub const SCOPE_AGENT_RUNS_CALLBACK: &str = "agent:runs:callback";
 /// `POST …/channels/{ch}/messages` (Swift :165-173).
 pub const SCOPE_MESSAGES_WRITE: &str = "messages:write";
+/// `POST …/work-controls` (Swift `AuthMiddleware.swift:152-154`).
+///
+/// The ack route below it in Swift's table is **not** listed here, and the
+/// omission is the point: acking is the *host's* act, not the requesting
+/// agent's, and an agent that could acknowledge its own dispatch could close the
+/// loop on a spawn no host ever ran.
+pub const SCOPE_WORK_CONTROL: &str = "work:control";
 
 /// The scope an agent bearer must carry to reach `method path`, or `None` when
 /// no agent credential may reach it at all.
@@ -47,6 +55,16 @@ pub fn required_agent_scope(method: &str, path: &str) -> Option<&'static str> {
         && segments[5] == "messages"
     {
         return Some(SCOPE_MESSAGES_WRITE);
+    }
+
+    // POST /v1/workspaces/{ws}/work-controls
+    if method == "POST"
+        && segments.len() == 4
+        && segments[0] == "v1"
+        && segments[1] == "workspaces"
+        && segments[3] == "work-controls"
+    {
+        return Some(SCOPE_WORK_CONTROL);
     }
 
     // GET /v1/workspaces/{ws}/agents/{agent}/gateway/jobs/pending
@@ -149,6 +167,44 @@ mod tests {
                 &format!("/v1/workspaces/{WS}/channels/{RUN}/messages")
             ),
             Some(SCOPE_MESSAGES_WRITE)
+        );
+        assert_eq!(
+            required_agent_scope("POST", &format!("/v1/workspaces/{WS}/work-controls")),
+            Some(SCOPE_WORK_CONTROL)
+        );
+    }
+
+    /// The half of the work-control surface an agent must NOT reach.
+    ///
+    /// Requesting a control and acknowledging it are two different actors'
+    /// acts. If one credential could do both, an agent could report that a host
+    /// had spawned a session the host never saw — and `work_control` is the
+    /// ledger every later `input`/`kill` checks its lineage against.
+    #[test]
+    fn an_agent_may_request_a_control_but_never_acknowledge_one() {
+        assert_eq!(
+            required_agent_scope(
+                "POST",
+                &format!("/v1/workspaces/{WS}/work-controls/{RUN}/ack")
+            ),
+            None
+        );
+        for path in [
+            format!("/v1/workspaces/{WS}/work-auto-approvals"),
+            format!("/v1/workspaces/{WS}/work-auto-approvals/codex"),
+        ] {
+            for method in ["GET", "PUT", "DELETE", "POST"] {
+                assert_eq!(
+                    required_agent_scope(method, &path),
+                    None,
+                    "auto-approval is the human host owner's setting"
+                );
+            }
+        }
+        // Shape trap: the create route is exactly four segments.
+        assert_eq!(
+            required_agent_scope("GET", &format!("/v1/workspaces/{WS}/work-controls")),
+            None
         );
     }
 

@@ -91,7 +91,9 @@ use momo_agent::approval::{
     approval_payload, approval_request_body, approval_request_props, attach_request_message_in_tx,
     create_pending_approval_in_tx, default_expires_at, NewApproval,
 };
-use momo_agent::tools::{ApprovalReason, ToolCall, ACTION_TYPE_TOOL_CALL, TOOL_AUDIT_SCHEMA};
+use momo_agent::tools::{
+    ApprovalReason, ToolCall, ACTION_TYPE_TOOL_CALL, TOOL_AUDIT_SCHEMA, WORK_SESSION_SPAWN,
+};
 use momo_agent::{
     approval_reason, consume_run_step_in_tx, finish_run_in_tx, lock_gateway_run_in_tx,
     mark_run_started_in_tx, park_run_for_approval_in_tx, record_run_usage_in_tx,
@@ -128,10 +130,45 @@ use tool_exec::ToolContext;
 enum ToolDisposition {
     /// An approval exists and the run is parked on it.
     Parked { approval_id: Uuid },
-    /// G6 exempted the call; run it now.
-    RunNow,
+    /// G6 exempted the call, or ADR-0114 D5's `work_auto_approve` pre-authorised
+    /// it; run it now.
+    ///
+    /// `authorized_by` is the human whose standing permission opened the gate,
+    /// and `host_id` the host their default resolved to — both `None` for a G6
+    /// read-only exemption, where no human was involved at all and the agent's
+    /// own membership is the only authority that exists.
+    RunNow {
+        authorized_by: Option<Uuid>,
+        host_id: Option<Uuid>,
+    },
     /// G3's budget is spent. The loop stops here.
     StepExhausted,
+}
+
+/// What a `work.session.spawn` approval needs to know before it is raised.
+#[derive(Debug, Clone)]
+struct SpawnExecution {
+    /// The `execution` object the approval payload and card carry.
+    execution: serde_json::Value,
+    /// The human the agent acts for — the session's owner, and the member the
+    /// candidate list was judged for.
+    owner_member_id: Uuid,
+    default_host_id: Option<Uuid>,
+    /// ADR-0114 D5 opened the gate; no card is raised.
+    auto_approved: bool,
+}
+
+/// Carry a `T3Error` across into the worker's `DbError` channel.
+///
+/// Only the `Db` arm is a database failure; the rest are domain refusals that
+/// cannot arise on these reads (they are pure `SELECT`s). Mapping them to a
+/// protocol error keeps the transaction rolling back rather than committing a
+/// half-raised approval.
+fn t3_as_db(error: momo_t3::T3Error) -> DbError {
+    match error {
+        momo_t3::T3Error::Db(inner) => inner,
+        other => DbError::Sqlx(momo_db::sqlx::Error::Protocol(other.to_string())),
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -864,17 +901,23 @@ impl AgentWorker {
                     .await;
                 Settlement::Skipped
             }
-            Ok(ToolDisposition::RunNow) => {
+            Ok(ToolDisposition::RunNow {
+                authorized_by,
+                host_id,
+            }) => {
                 let context = ToolContext {
                     workspace_id: job.workspace_id,
                     run_id,
                     channel_id: payload.channel_id,
                     agent_member_id: payload.agent_member_id,
-                    // An exempt tool has no approver; it runs with the agent's
+                    // A G6-exempt tool has no approver; it runs with the agent's
                     // own membership, which is the only authority that exists
-                    // when no human was asked. G6 only exempts read-only grants,
-                    // so this arm cannot reach a write.
-                    approved_by: payload.agent_member_id,
+                    // when no human was asked, and G6 only exempts read-only
+                    // grants so that arm cannot reach a write. An
+                    // auto-approved spawn is different: a **person** granted it
+                    // in advance (`work_auto_approve`), and the row names them.
+                    approved_by: authorized_by.unwrap_or(payload.agent_member_id),
+                    approved_host_id: host_id,
                 };
                 match tool_exec::execute(&self.pool, &context, &tool_call).await {
                     Ok(result) => {
@@ -974,8 +1017,32 @@ impl AgentWorker {
                 }
 
                 if !reason.requires_approval() {
-                    return Ok(ToolDisposition::RunNow);
+                    return Ok(ToolDisposition::RunNow {
+                        authorized_by: None,
+                        host_id: None,
+                    });
                 }
+
+                // ADR-0125 D6-A + ADR-0114 D5 (#1114). A spawn is the one call
+                // whose approval carries a **question** as well as a request, so
+                // it is the one call that needs the picker's rows — and the one
+                // whose gate a person may have opened in advance.
+                let spawn =
+                    Self::spawn_execution(conn, workspace_id, agent_member_id, &call).await?;
+                if let Some(spawn) = spawn.as_ref() {
+                    if spawn.auto_approved {
+                        // The gate opened without a card. `authorized_by` names
+                        // the human whose standing permission did it, so the
+                        // session the executor creates belongs to them and the
+                        // audit trail can answer "who allowed this" without a
+                        // second table.
+                        return Ok(ToolDisposition::RunNow {
+                            authorized_by: Some(spawn.owner_member_id),
+                            host_id: spawn.default_host_id,
+                        });
+                    }
+                }
+                let execution = spawn.as_ref().map(|spawn| spawn.execution.clone());
 
                 // (3) the approval, its card, the hold, and the audit row.
                 let now = chrono::Utc::now();
@@ -987,6 +1054,7 @@ impl AgentWorker {
                     &raw_arguments,
                     grant.as_ref(),
                     reason.as_str(),
+                    execution.as_ref(),
                 );
                 let approval_id = create_pending_approval_in_tx(
                     conn,
@@ -1018,6 +1086,7 @@ impl AgentWorker {
                             &call,
                             &raw_arguments,
                             expires_at,
+                            execution.as_ref(),
                         ),
                         root_id: None,
                         // `None`, like the call card above. What this message
@@ -1059,6 +1128,85 @@ impl AgentWorker {
         .await
     }
 
+    /// The spawn-specific half of the approval decision (#1114).
+    ///
+    /// Answers three things in one read, because they are one question — *may
+    /// this spawn happen, where, and does anyone still have to be asked?*
+    ///
+    /// Returning `None` for every other tool is what keeps this out of the
+    /// general path: `work.session.end` and any future tool go on producing the
+    /// same approval they always did, with no `execution` key at all.
+    async fn spawn_execution(
+        conn: &mut PgConnection,
+        workspace_id: Uuid,
+        agent_member_id: Uuid,
+        call: &ToolCall,
+    ) -> Result<Option<SpawnExecution>, DbError> {
+        if momo_agent::tools::normalize(&call.name)
+            != momo_agent::tools::normalize(WORK_SESSION_SPAWN)
+        {
+            return Ok(None);
+        }
+        // Arguments that do not validate produce no candidates: the call will be
+        // refused by the executor's own validator with a sentence the model can
+        // act on, and drawing a host picker for a spawn that cannot run would
+        // ask a person to choose between hosts for nothing.
+        let Ok(arguments) = tool_exec::spawn_arguments(&call.arguments) else {
+            return Ok(None);
+        };
+        let Some(owner_member_id) =
+            momo_t3::work_control::agent_owner_human_in_tx(conn, workspace_id, agent_member_id)
+                .await
+                .map_err(t3_as_db)?
+        else {
+            return Ok(None);
+        };
+        let candidates =
+            momo_t3::work_control::spawn_host_candidates_in_tx(conn, workspace_id, owner_member_id)
+                .await
+                .map_err(t3_as_db)?;
+        let default_host_id = momo_t3::work_control::default_spawn_host(&candidates)
+            // The model's proposal is the default only when it is a host the
+            // picker would actually offer — otherwise the card would open
+            // pre-set to a row it also greys out.
+            .or_else(|| {
+                arguments.host_id.filter(|proposed| {
+                    candidates
+                        .iter()
+                        .any(|candidate| candidate.selectable && candidate.id == *proposed)
+                })
+            });
+        // ADR-0114 D5: the host owner may have pre-authorised this tool. The
+        // permission is theirs and it is per-tool, so it opens the gate for a
+        // spawn of `codex` and says nothing about `shell`.
+        let auto_approved = momo_t3::work_control::spawn_is_auto_approved_in_tx(
+            conn,
+            workspace_id,
+            owner_member_id,
+            &arguments.tool,
+        )
+        .await
+        .map_err(t3_as_db)?
+            // An auto-approval with nowhere to run is not an approval. Falling
+            // through to the card is the honest answer: it shows the person why
+            // (every candidate greyed, with its reason) instead of failing in
+            // the executor with nobody watching.
+            && default_host_id.is_some();
+
+        Ok(Some(SpawnExecution {
+            execution: momo_t3::work_control::spawn_execution_object(
+                &arguments.tool,
+                &arguments.label,
+                arguments.host_id,
+                default_host_id,
+                &candidates,
+            ),
+            owner_member_id,
+            default_host_id,
+            auto_approved,
+        }))
+    }
+
     /// Run the tool a human approved, and return its output for the model.
     async fn execute_approved_tool(
         &self,
@@ -1079,6 +1227,7 @@ impl AgentWorker {
             // malformed payload, so a payload with no approver runs as nobody:
             // `Uuid::nil()` matches no member and the executor refuses.
             approved_by: payload.approved_by.unwrap_or_else(Uuid::nil),
+            approved_host_id: payload.approved_host_id,
         };
         let call = ToolCall {
             call_id: approved.call_id.clone(),

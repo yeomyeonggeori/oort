@@ -800,21 +800,26 @@ mod tests {
             momo_tools: momo_agent::tools::catalog_definitions(),
         });
         let tools = body["tools"].as_array().expect("tools");
-        assert_eq!(tools.len(), 1);
-        let tool = &tools[0];
-        assert_eq!(tool["type"], json!("function"));
-        assert_eq!(
-            tool["name"],
-            json!("work_session_end"),
-            "flat, not nested — AND the WIRE name. The backend refuses anything \
-             outside `^[a-zA-Z0-9_-]+$` with a 400 that fails the WHOLE request, \
-             so momo's dots stop at this boundary (goal SRV-HOT1): {tool}"
-        );
-        assert!(
-            tool.get("function").is_none(),
-            "a nested `function` here is the chat shape on the wrong wire: {tool}"
-        );
-        assert_eq!(tool["parameters"]["required"], json!(["session_id"]));
+        // Every catalog entry, for the reason `provider.rs`'s mirror gives: one
+        // badly-rendered tool kills the whole request, not just its own turn.
+        assert_eq!(tools.len(), momo_agent::tools::CATALOG.len());
+        for (tool, momo_name) in tools.iter().zip(momo_agent::tools::CATALOG) {
+            assert_eq!(tool["type"], json!("function"));
+            assert_eq!(
+                tool["name"],
+                json!(momo_agent::tools::wire_tool_name(momo_name)),
+                "flat, not nested — AND the WIRE name. The backend refuses \
+                 anything outside `^[a-zA-Z0-9_-]+$` with a 400 that fails the \
+                 WHOLE request, so momo's dots stop at this boundary (goal \
+                 SRV-HOT1): {tool}"
+            );
+            assert!(
+                tool.get("function").is_none(),
+                "a nested `function` here is the chat shape on the wrong wire: {tool}"
+            );
+        }
+        assert_eq!(tools[0]["parameters"]["required"], json!(["session_id"]));
+        assert_eq!(tools[1]["parameters"]["required"], json!(["tool", "label"]));
     }
 
     /// The agent's own JSON keeps its place, and momo's is appended — an
@@ -832,7 +837,7 @@ mod tests {
             momo_tools: momo_agent::tools::catalog_definitions(),
         });
         let tools = body["tools"].as_array().expect("tools");
-        assert_eq!(tools.len(), 2);
+        assert_eq!(tools.len(), 1 + momo_agent::tools::CATALOG.len());
         assert_eq!(tools[0], declared, "passthrough, untouched and first");
         assert_eq!(tools[1]["name"], json!("work_session_end"));
 

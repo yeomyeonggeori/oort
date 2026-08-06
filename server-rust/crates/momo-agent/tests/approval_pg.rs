@@ -365,6 +365,7 @@ async fn park_on_approval(app: &PgPool, tenant: &Tenant, run_id: Uuid, ttl_secon
                 "{}",
                 None,
                 "grant_missing_or_ambiguous",
+                None,
             );
             let approval_id = create_pending_approval_in_tx(
                 conn,
@@ -395,6 +396,7 @@ async fn park_on_approval(app: &PgPool, tenant: &Tenant, run_id: Uuid, ttl_secon
                         &call,
                         "{}",
                         expires_at,
+                        None,
                     ),
                     root_id: None,
                     reply_to_id: None,
@@ -612,7 +614,7 @@ async fn t1_3_an_approved_run_is_requeued_and_its_resume_job_is_claimable() {
                 workspace_id,
                 OutboxKind::AgentJob,
                 RESUME_APPROVAL_JOB_METHOD,
-                &resume_job_payload(workspace_id, &approval, human_id, &event),
+                &resume_job_payload(workspace_id, &approval, human_id, &event, None),
                 Some(agent_id),
             )
             .await

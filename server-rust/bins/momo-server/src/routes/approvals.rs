@@ -65,9 +65,10 @@ use axum::{Extension, Json};
 use chrono::Utc;
 use momo_agent::approval::{
     decided_props_patch, decision_broadcast_payload, decision_event_payload, decision_receipt,
-    existing_decision_in_tx, is_active_channel_member_in_tx, is_active_human_member_in_tx,
-    list_approvals_in_tx, lock_approval_in_tx, mark_approval_decided_in_tx,
-    mark_approval_expired_in_tx, normalized_reason, record_decision_in_tx, resume_job_payload,
+    default_execution_host, existing_decision_in_tx, is_active_channel_member_in_tx,
+    is_active_human_member_in_tx, list_approvals_in_tx, lock_approval_in_tx,
+    mark_approval_decided_in_tx, mark_approval_expired_in_tx, normalized_reason,
+    offers_host_choice, record_decision_in_tx, resume_job_payload, selectable_host_ids,
     validated_limit, validated_status, ApprovalListRow, LockedApproval,
 };
 use momo_agent::tools::{ToolResult, TOOL_AUDIT_SCHEMA};
@@ -79,6 +80,7 @@ use momo_messaging::{
     cent_channel, patch_message_props_in_tx, send_message_in_tx, MessageType, NewMessage,
 };
 use momo_outbox::{emit_outbox, OutboxKind, RESUME_APPROVAL_JOB_METHOD};
+use momo_t3::work_control::{spawn_host_ineligible_reason_in_tx, work_control_id};
 use serde_json::{json, Value};
 use uuid::Uuid;
 
@@ -236,6 +238,7 @@ async fn decide(
     let client_decision_id = request.client_decision_id;
     let member_id = principal.member_id;
     let via_token_id = audit_via_token_id(&principal);
+    let selected_host_id = request.host_id;
 
     let outcome: DbRejectable<Decision> = agent_tenant_tx(&state.pool, workspace_id, move |conn| {
         Box::pin(async move {
@@ -250,6 +253,7 @@ async fn decide(
                     approve,
                     reason: reason.as_deref(),
                     client_decision_id,
+                    selected_host_id,
                 },
             )
             .await
@@ -272,6 +276,8 @@ struct DecisionInput<'a> {
     approve: bool,
     reason: Option<&'a str>,
     client_decision_id: Uuid,
+    /// ADR-0125 D6-A (#1114) — the host the approver picked on the card.
+    selected_host_id: Option<Uuid>,
 }
 
 async fn decide_in_tx(conn: &mut PgConnection, input: DecisionInput<'_>) -> DbRejectable<Decision> {
@@ -372,6 +378,29 @@ async fn decide_in_tx(conn: &mut PgConnection, input: DecisionInput<'_>) -> DbRe
         )));
     }
 
+    // The `work_control` this approval owns, if any (Swift :196). A malformed
+    // binding is answered here rather than followed, because following it would
+    // send a spawn down the generic resume path where nothing dispatches it.
+    let control_id = match work_control_id(&approval.payload) {
+        Ok(control_id) => control_id,
+        Err(message) => {
+            return Ok(Ok(refusal(
+                approval.id,
+                input.member_id,
+                "internal_error",
+                message,
+                StatusCode::INTERNAL_SERVER_ERROR,
+                now,
+            )))
+        }
+    };
+
+    // ---- ADR-0125 D6-A: the host choice, judged before the first write -----
+    let host_choice = match resolve_host_choice(conn, &approval, &input, now).await? {
+        Ok(choice) => choice,
+        Err(rejected) => return Ok(Ok(rejected)),
+    };
+
     // ---- expiry: settle it rather than merely refusing (Swift :198-221) ----
     if approval.expires_at.is_some_and(|expires| expires <= now) {
         return Ok(Ok(settle_expired(
@@ -381,6 +410,7 @@ async fn decide_in_tx(conn: &mut PgConnection, input: DecisionInput<'_>) -> DbRe
             input.via_token_id,
             input.approve,
             input.client_decision_id,
+            control_id,
         )
         .await?));
     }
@@ -445,8 +475,33 @@ async fn decide_in_tx(conn: &mut PgConnection, input: DecisionInput<'_>) -> DbRe
     )
     .await?;
 
-    if input.approve {
-        approve_run(conn, &approval, input.member_id, &event).await?;
+    // Swift `shouldApplyGenericAgentDecisionFlow(workControlID:)` (:302): a
+    // work-control approval settles its ledger row instead of resuming an agent
+    // turn, because the thing waiting on it is a **host**, not a model.
+    if let Some(control_id) = control_id {
+        if approval.action_type != momo_t3::work_control::ACTION_TYPE_WORK_SPAWN {
+            return Err(protocol_error("work control approval action is malformed"));
+        }
+        crate::routes::work_controls::apply_spawn_approval_decision(
+            conn,
+            input.workspace_id,
+            approval.id,
+            control_id,
+            input.approve,
+            host_choice.selected,
+        )
+        .await
+        .map_err(control_failure)?
+        .ok_or_else(|| protocol_error("linked work control is not pending approval"))?;
+    } else if input.approve {
+        approve_run(
+            conn,
+            &approval,
+            input.member_id,
+            &event,
+            host_choice.selected,
+        )
+        .await?;
     } else {
         reject_run(conn, &approval, input.member_id, input.reason, now).await?;
     }
@@ -482,6 +537,7 @@ async fn approve_run(
     approval: &LockedApproval,
     decided_by: Uuid,
     event: &Value,
+    approved_host_id: Option<Uuid>,
 ) -> Result<(), momo_db::DbError> {
     if !requeue_run_from_approval_in_tx(conn, approval.run_id).await? {
         // Nothing to resume. The approval still stands as approved (a human did
@@ -490,7 +546,13 @@ async fn approve_run(
         return Ok(());
     }
 
-    let payload = resume_job_payload(approval.workspace_id, approval, decided_by, event);
+    let payload = resume_job_payload(
+        approval.workspace_id,
+        approval,
+        decided_by,
+        event,
+        approved_host_id,
+    );
     emit_outbox(
         &mut *conn,
         approval.workspace_id,
@@ -596,6 +658,7 @@ async fn reject_run(
 /// It **settles** rather than merely refusing: the approval becomes `expired`,
 /// the run `timed_out`, and both the ledger row and the audit row are written.
 /// The audit actor is NULL — nobody decided this, the clock did.
+#[allow(clippy::too_many_arguments)]
 async fn settle_expired(
     conn: &mut PgConnection,
     approval: &LockedApproval,
@@ -603,8 +666,24 @@ async fn settle_expired(
     via_token_id: Option<Uuid>,
     approve: bool,
     client_decision_id: Uuid,
+    control_id: Option<Uuid>,
 ) -> Result<Decision, momo_db::DbError> {
     let now = Utc::now();
+    // Swift :201-210. A spawn whose card expired is **denied**, not left
+    // pending: the control row is what a host would consume, and an expired
+    // approval that left it dispatchable would be a deadline that bounds the
+    // inbox but not the machine.
+    if let Some(control_id) = control_id {
+        momo_t3::work_control::apply_spawn_approval_decision_in_tx(
+            conn,
+            approval.workspace_id,
+            approval.id,
+            control_id,
+            false,
+        )
+        .await
+        .map_err(control_failure)?;
+    }
     let reason = "Approval expired before a human decision.";
     let receipt = decision_receipt(approval.id, "expired", None, now, Some(reason));
     let event = decision_event_payload(approval, "expired", None, now, Some(reason));
@@ -690,6 +769,150 @@ pub(crate) async fn expire_run(
         .await?;
     }
     Ok(ended)
+}
+
+// ---------------------------------------------------------------------------
+// ADR-0125 D6-A — the host the approver chose (#1114)
+// ---------------------------------------------------------------------------
+
+/// The outcome of judging a decision's host selection.
+struct HostChoice {
+    /// The host the spawn will actually run on, or `None` when this approval
+    /// asks no host question at all.
+    selected: Option<Uuid>,
+}
+
+/// Judge the approver's host pick against the very list the card published.
+///
+/// Three checks, in this order and all **before the first write**:
+///
+/// 1. a `hostId` on an approval that offers no picker is a 400 — the client is
+///    answering a question this card did not ask, and silently ignoring it would
+///    let a person believe they had chosen something;
+/// 2. the pick must be one of the candidates this approval published as
+///    `selectable`. Reading the stored list rather than recomputing one is what
+///    guarantees the gate and the picker agree — a recomputed list could differ
+///    from the rows the human actually saw;
+/// 3. the pick must **still** be eligible now. The card may be hours old, and a
+///    host can be revoked, go offline, or change hands in between; step 2 alone
+///    would dispatch to a laptop that closed.
+///
+/// The session owner every check is made for is the **agent's owner human**, not
+/// the approver: a spawned session belongs to the person the agent acts for
+/// (Swift `createControl` binds `sessionOwnerMemberID = binding.ownerHumanID`),
+/// so the candidate list is stable from the moment the card is drawn and does
+/// not depend on which colleague happens to tap approve.
+async fn resolve_host_choice(
+    conn: &mut PgConnection,
+    approval: &LockedApproval,
+    input: &DecisionInput<'_>,
+    now: chrono::DateTime<Utc>,
+) -> Result<Result<HostChoice, Decision>, momo_db::DbError> {
+    let offers_choice = offers_host_choice(&approval.payload);
+    if !offers_choice {
+        if input.selected_host_id.is_some() {
+            return Ok(Err(refusal(
+                approval.id,
+                input.member_id,
+                "bad_request",
+                "this approval does not offer a host choice",
+                StatusCode::BAD_REQUEST,
+                now,
+            )));
+        }
+        return Ok(Ok(HostChoice { selected: None }));
+    }
+
+    let selected = input
+        .selected_host_id
+        .or_else(|| default_execution_host(&approval.payload));
+
+    // A rejection needs no host: nothing will run.
+    if !input.approve {
+        return Ok(Ok(HostChoice { selected: None }));
+    }
+
+    let Some(selected) = selected else {
+        return Ok(Err(refusal(
+            approval.id,
+            input.member_id,
+            "conflict",
+            "no eligible work host is available for this spawn",
+            StatusCode::CONFLICT,
+            now,
+        )));
+    };
+    if let Some(chosen) = input.selected_host_id {
+        if !selectable_host_ids(&approval.payload).contains(&chosen) {
+            return Ok(Err(refusal(
+                approval.id,
+                input.member_id,
+                "forbidden",
+                "selected host is not one of this approval's candidates",
+                StatusCode::FORBIDDEN,
+                now,
+            )));
+        }
+    }
+
+    let owner_member_id = match momo_t3::work_control::agent_owner_human_in_tx(
+        conn,
+        approval.workspace_id,
+        approval.requested_by,
+    )
+    .await
+    .map_err(control_failure)?
+    {
+        Some(owner) => owner,
+        None => {
+            return Ok(Err(refusal(
+                approval.id,
+                input.member_id,
+                "conflict",
+                "the requesting agent has no active human owner",
+                StatusCode::CONFLICT,
+                now,
+            )))
+        }
+    };
+    if let Some(reason) =
+        spawn_host_ineligible_reason_in_tx(conn, approval.workspace_id, selected, owner_member_id)
+            .await
+            .map_err(control_failure)?
+    {
+        return Ok(Err(refusal(
+            approval.id,
+            input.member_id,
+            "conflict",
+            &format!("selected work host is unavailable: {reason}"),
+            StatusCode::CONFLICT,
+            now,
+        )));
+    }
+
+    Ok(Ok(HostChoice {
+        selected: Some(selected),
+    }))
+}
+
+/// Carry a control-ledger failure across the `T3Error` → `DbError` seam.
+///
+/// The decision transaction speaks `DbError` because nothing else it touches is
+/// a T3 lifecycle object. A ledger failure has to **roll the decision back** —
+/// an approval marked `approved` whose control never dispatched is the worst of
+/// both answers — and `Err(DbError)` is the only channel that rolls back here
+/// (`Ok(Err(_))` commits, which is why every rejection above is returned before
+/// the first write). So the `Db` arm passes through and everything else becomes
+/// a protocol error carrying the ledger's own sentence.
+fn control_failure(error: momo_t3::T3Error) -> momo_db::DbError {
+    match error {
+        momo_t3::T3Error::Db(inner) => inner,
+        other => protocol_error(&other.to_string()),
+    }
+}
+
+fn protocol_error(message: &str) -> momo_db::DbError {
+    momo_db::DbError::Sqlx(momo_db::sqlx::Error::Protocol(message.to_string()))
 }
 
 /// An expected refusal: a receipt shaped like a decision, carrying the HTTP

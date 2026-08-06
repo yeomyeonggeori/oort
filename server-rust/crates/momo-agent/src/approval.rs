@@ -605,6 +605,18 @@ pub async fn workspaces_with_overdue_approvals(
 /// `arguments` is stored as the **string** the provider sent, byte for byte,
 /// because that is what the model must be shown again on resume; a re-serialised
 /// object would change key order and, for a model, change the input.
+///
+/// ## `execution` — what the decision is *about*, beyond yes/no (#1114)
+///
+/// Most approvals answer consent. ADR-0125 D6-A's spawn card answers **where**
+/// as well, so a spawn call carries an `execution` object holding the host
+/// candidates and the default. It is a separate key rather than something merged
+/// into `tool_call` for the reason the paragraph above gives: `tool_call` is the
+/// model's utterance, preserved byte for byte, and the candidates are the
+/// server's answer to a question the model did not ask.
+///
+/// `None` for every other tool, so the key is simply absent — a client that
+/// never saw one is unaffected.
 pub fn approval_payload(
     run_id: Uuid,
     action_type: &str,
@@ -612,6 +624,7 @@ pub fn approval_payload(
     raw_arguments: &str,
     tool_grant: Option<&Value>,
     approval_reason: &str,
+    execution: Option<&Value>,
 ) -> Value {
     let mut tool_call = Map::new();
     tool_call.insert("call_id".into(), json!(call.call_id));
@@ -622,13 +635,65 @@ pub fn approval_payload(
         tool_call.insert("tool_grant".into(), grant.clone());
     }
 
-    json!({
-        "run_id": run_id.to_string(),
-        "action_type": action_type,
-        "tool_call": Value::Object(tool_call),
-        "approval_reason": approval_reason,
-        "resume_model": RESUME_MODEL,
-    })
+    let mut payload = Map::new();
+    payload.insert("run_id".into(), json!(run_id.to_string()));
+    payload.insert("action_type".into(), json!(action_type));
+    payload.insert("tool_call".into(), Value::Object(tool_call));
+    payload.insert("approval_reason".into(), json!(approval_reason));
+    payload.insert("resume_model".into(), json!(RESUME_MODEL));
+    if let Some(execution) = execution {
+        payload.insert("execution".into(), execution.clone());
+    }
+    Value::Object(payload)
+}
+
+/// The `execution.host_candidates` of a spawn approval, or an empty slice's
+/// worth of nothing.
+///
+/// Read by the decision route to judge a human's host choice against the very
+/// list the card offered — the picker and the gate must agree, and the only way
+/// to guarantee that is for the gate to read the picker's own answer rather than
+/// recomputing one.
+pub fn selectable_host_ids(payload: &Value) -> Vec<Uuid> {
+    payload
+        .get("execution")
+        .and_then(|execution| execution.get("host_candidates"))
+        .and_then(Value::as_array)
+        .map(|candidates| {
+            candidates
+                .iter()
+                .filter(|candidate| {
+                    candidate
+                        .get("selectable")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false)
+                })
+                .filter_map(|candidate| {
+                    candidate
+                        .get("host_id")
+                        .and_then(Value::as_str)
+                        .and_then(|raw| Uuid::parse_str(raw).ok())
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Does this approval ask a human to choose a host, not just to consent?
+pub fn offers_host_choice(payload: &Value) -> bool {
+    payload
+        .get("execution")
+        .and_then(|execution| execution.get("host_candidates"))
+        .is_some()
+}
+
+/// The host the card pre-selected (`execution.default_host_id`).
+pub fn default_execution_host(payload: &Value) -> Option<Uuid> {
+    payload
+        .get("execution")
+        .and_then(|execution| execution.get("default_host_id"))
+        .and_then(Value::as_str)
+        .and_then(|raw| Uuid::parse_str(raw).ok())
 }
 
 /// `message.props` for the `approval_request` row — Swift
@@ -648,8 +713,9 @@ pub fn approval_request_props(
     call: &ToolCall,
     raw_arguments: &str,
     expires_at: DateTime<Utc>,
+    execution: Option<&Value>,
 ) -> Value {
-    json!({
+    let mut props = json!({
         "approval_id": approval_id.to_string(),
         "run_id": run_id.to_string(),
         "channel_id": channel_id.to_string(),
@@ -661,7 +727,15 @@ pub fn approval_request_props(
         "arguments": raw_arguments,
         "status": "pending",
         "expires_at_ms": expires_at.timestamp_millis(),
-    })
+    });
+    // The picker's rows go in `props` as well as in `payload`, because a client
+    // renders the card from the broadcast message alone — a props-less card
+    // would have to fetch the approval before it could draw a single radio
+    // button. Nothing host-local rides along; see `SpawnHostCandidate::to_json`.
+    if let (Some(execution), Some(object)) = (execution, props.as_object_mut()) {
+        object.insert("execution".into(), execution.clone());
+    }
+    props
 }
 
 /// The one-line body of an `approval_request` message (Swift :1618).
@@ -723,6 +797,7 @@ pub fn resume_job_payload(
     approval: &LockedApproval,
     decided_by: Uuid,
     decision_event: &Value,
+    approved_host_id: Option<Uuid>,
 ) -> Value {
     let payload = approval.payload.as_object();
     let tool_call = payload
@@ -764,6 +839,12 @@ pub fn resume_job_payload(
                 .unwrap_or_else(|| json!({})),
         },
         "approved_by": decided_by.to_string(),
+        // ADR-0125 D6-A (#1114). The host the approver chose, carried beside the
+        // call rather than written into it: `arguments` is the model's utterance
+        // stored byte for byte, and rewriting a field inside it would change
+        // what the model is shown it said. A `None` here means the approval
+        // asked no host question, and the executor falls back to the argument.
+        "approved_host_id": approved_host_id.map(|id| id.to_string()),
         "policy_evidence": tool_grant,
         "approval_decision": decision_event,
         "step_count": approval.step_count,
@@ -908,6 +989,7 @@ mod tests {
             &approval,
             Uuid::from_u128(9),
             &json!({"status": "approved"}),
+            None,
         );
         assert_eq!(payload["policy_evidence"], Value::Null);
         assert_eq!(payload["approved_tool_call"]["name"], "work.session.end");
@@ -942,6 +1024,7 @@ mod tests {
             &approval,
             Uuid::from_u128(9),
             &json!({}),
+            None,
         );
         assert_eq!(payload["step_count"], 7);
         assert_eq!(payload["max_steps"], 12);

@@ -22,7 +22,7 @@
 //! grown yet. It is answered with a `tool_result` naming the gap, never with a
 //! silent success and never by inventing an executor.
 //!
-//! ## Why exactly one tool executes in v0
+//! ## Why these two tools execute
 //!
 //! goal SRV-T1 exists to close the **approval** axis, not to grow the tool
 //! surface: ADR-0137 D5's third axis has no producer at all, so
@@ -54,6 +54,35 @@
 //!   spawn would have forced either porting that subsystem or diverging from
 //!   the contract this batch exists to honour.
 //!
+//! ## The second tool: `work.session.spawn` (#1114)
+//!
+//! The paragraph above ends with the reason spawn was *excluded*: "Swift routes
+//! `work.spawn` through `WorkControlRoutes.applySpawnApprovalDecision` instead
+//! … and `work_control` is not ported. Choosing spawn would have forced either
+//! porting that subsystem or diverging from the contract this batch exists to
+//! honour."
+//!
+//! #1114 ported that subsystem (`momo_t3::work_control`), so the exclusion has
+//! expired and [`WORK_SESSION_SPAWN`] is the second entry. It keeps all three
+//! properties that qualified the first:
+//!
+//! * **not a new capability** — the executor calls the same domain functions
+//!   `routes::work_sessions::create` calls, and records the same `work_control`
+//!   spawn row the REST ledger records. It is a third caller, not a third
+//!   implementation.
+//! * **no provider credential** (ADR-0004) — creating a session is a local
+//!   Postgres lifecycle transition plus an outbox row.
+//! * **a human genuinely decides** — and here the decision carries *content*
+//!   rather than just consent: ADR-0125 D6-A's host picker means the approval
+//!   answers **where** this runs, not only whether. The candidates ride in the
+//!   approval payload (`momo_t3::work_control::spawn_host_candidates_in_tx`).
+//!
+//! The one policy spawn adds and end does not is ADR-0114 D5's
+//! `work_auto_approve`: a host owner may pre-authorise a tool on their own
+//! hosts, and then the gate opens without a card. That is a *narrowing* of who
+//! must be asked, decided by the same person who would otherwise be asked — not
+//! a widening of what an agent may do.
+//!
 //! Everything else the roadmap names is listed in [`DECLARED_NOT_EXECUTABLE`]
 //! and refused by name. That list is the scope boundary, written down rather
 //! than implied.
@@ -68,10 +97,18 @@
 
 use serde_json::{json, Map, Value};
 
-/// `work.session.end` — the one tool this server executes in v0.
+/// `work.session.end` — end a running work session.
 ///
 /// Arguments: `{"session_id": "<uuid>"}`. See the module docs for why this one.
 pub const WORK_SESSION_END: &str = "work.session.end";
+
+/// `work.session.spawn` — start a tool on a work host (#1114).
+///
+/// Arguments: `{"tool": "codex", "label": "…", "host_id": "<uuid>"?}`. `host_id`
+/// is **optional** on purpose: ADR-0125 D6-A puts the host choice on the
+/// approval card, so the model may propose one and the human may replace it. A
+/// call that names none is normal, not malformed.
+pub const WORK_SESSION_SPAWN: &str = "work.session.spawn";
 
 /// `approval.action_type` for a tool call, matching Swift
 /// `ApprovalRuntime.pausePlan` (`ApprovalRuntime.swift:36-45`).
@@ -94,10 +131,12 @@ pub const TOOL_AUDIT_SCHEMA: &str = "momo.agent_tool_call.v0";
 
 /// What this server can actually execute today.
 ///
-/// One entry. Growing it is a deliberate act with its own ticket: each addition
-/// needs an executor, an argument validator, and a decision about whether its
-/// approval default may ever be anything but "required".
-pub const CATALOG: &[&str] = &[WORK_SESSION_END];
+/// Growing it is a deliberate act with its own ticket: each addition needs an
+/// executor, an argument validator, and a decision about whether its approval
+/// default may ever be anything but "required". #1114's spawn brought all three
+/// (`tool_exec::spawn_session`, `tool_exec::spawn_arguments`, and ADR-0114 D5's
+/// `work_auto_approve`).
+pub const CATALOG: &[&str] = &[WORK_SESSION_END, WORK_SESSION_SPAWN];
 
 /// Capabilities the product already has that a **future** batch may expose as
 /// tools, kept as a list rather than as code.
@@ -106,18 +145,13 @@ pub const CATALOG: &[&str] = &[WORK_SESSION_END];
 /// invented here. They are named so that "why is this not a tool yet" has a
 /// written answer, and so the next batch starts from a list instead of a guess.
 ///
-/// | tool | existing surface | why not in v0 |
+/// | tool | existing surface | why not yet |
 /// |---|---|---|
-/// | `work.session.spawn` | `POST …/work-sessions` | Swift gates it through `work_control`, which is not ported; using the generic path would diverge from the contract |
-/// | `work.session.resume` | `POST …/work-sessions/{s}/resume` | opens a new billing ledger — needs the spend-ceiling story spawn needs |
-/// | `agent.pause` | `PATCH …/agents/{a}` | reversible, so it does not exercise the gate this batch exists to prove |
+/// | `work.session.resume` | `POST …/work-sessions/{s}/resume` | ADR-0154 D3 splits 재개 from 인수 and the second needs a precondition check (clean tree, pushed branch, same repo) no server surface performs yet |
+/// | `agent.pause` | `PATCH …/agents/{a}` | reversible, so it does not exercise the gate this catalog exists to prove |
 /// | `message.post` | `POST …/channels/{c}/messages` | the agent already speaks through the run's own reply path |
-pub const DECLARED_NOT_EXECUTABLE: &[&str] = &[
-    "work.session.spawn",
-    "work.session.resume",
-    "agent.pause",
-    "message.post",
-];
+pub const DECLARED_NOT_EXECUTABLE: &[&str] =
+    &["work.session.resume", "agent.pause", "message.post"];
 
 /// One tool this server can execute, described the way a model needs to see it
 /// (goal SRV-B3f).
@@ -144,25 +178,59 @@ pub struct ToolDefinition {
 /// executor without gaining a description cannot ship: the model would be told a
 /// name with no idea when to use it.
 pub fn catalog_definitions() -> Vec<ToolDefinition> {
-    vec![ToolDefinition {
-        name: WORK_SESSION_END,
-        // Written for the model, not for a changelog: it has to convey the one
-        // property that makes this tool worth an approval — it cannot be undone.
-        description: "End a running work session. This terminates the session's \
+    vec![
+        ToolDefinition {
+            name: WORK_SESSION_END,
+            // Written for the model, not for a changelog: it has to convey the one
+            // property that makes this tool worth an approval — it cannot be undone.
+            description: "End a running work session. This terminates the session's \
              host and seals its billing ledger; it cannot be undone. Requires \
              human approval before it runs.",
-        parameters: json!({
-            "type": "object",
-            "properties": {
-                "session_id": {
-                    "type": "string",
-                    "description": "UUID of the work session to end."
-                }
-            },
-            "required": ["session_id"],
-            "additionalProperties": false
-        }),
-    }]
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "session_id": {
+                        "type": "string",
+                        "description": "UUID of the work session to end."
+                    }
+                },
+                "required": ["session_id"],
+                "additionalProperties": false
+            }),
+        },
+        ToolDefinition {
+            name: WORK_SESSION_SPAWN,
+            // The last sentence is the one that changes model behaviour: it tells
+            // the model that naming a host is a suggestion, so it stops inventing
+            // uuids when it has not been given one.
+            description: "Start a coding tool in a new work session on one of this \
+             workspace's registered hosts. Requires human approval, and the \
+             person approving chooses which host it runs on — propose `host_id` \
+             only if you were told which host to use.",
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "tool": {
+                        "type": "string",
+                        "description": "Tool key to start, e.g. `codex` or `claude`. \
+                                        Must be enabled in this workspace."
+                    },
+                    "label": {
+                        "type": "string",
+                        "description": "Short human-readable name for the session \
+                                        (1-120 characters)."
+                    },
+                    "host_id": {
+                        "type": "string",
+                        "description": "Optional UUID of the work host to run on. \
+                                        Omit to let the approver pick."
+                    }
+                },
+                "required": ["tool", "label"],
+                "additionalProperties": false
+            }),
+        },
+    ]
 }
 
 /// The definitions for the names an agent profile turned on — the **consumer**
@@ -612,7 +680,7 @@ mod tests {
 
         // Enabled but NOT executable → dropped, not advertised. Telling the
         // model about it would spend a turn to reach "this server cannot".
-        for unknown in ["web.search", "work.session.spawn", "message.post"] {
+        for unknown in ["web.search", "work.session.resume", "message.post"] {
             assert!(
                 enabled_tool_definitions(&[unknown.to_string()]).is_empty(),
                 "{unknown} is not in this build's catalog"
@@ -785,10 +853,11 @@ mod tests {
         assert!(is_executable("  WORK.SESSION.END  "));
     }
 
-    /// The catalog is the executable set, and it is deliberately one entry.
+    /// The catalog is the executable set, and every entry outside it is named.
     #[test]
     fn only_the_catalog_executes() {
         assert!(is_executable(WORK_SESSION_END));
+        assert!(is_executable(WORK_SESSION_SPAWN));
         for declared in DECLARED_NOT_EXECUTABLE {
             assert!(
                 !is_executable(declared),
