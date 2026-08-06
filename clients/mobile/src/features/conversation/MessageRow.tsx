@@ -720,6 +720,14 @@ function AgentCard({
             approvalId={approval.approvalId}
             reversible={approval.reversible}
             deadlinePassed={deadlinePassed(approval, nowMs)}
+            /* 호스트 후보는 **카드 스냅샷**에서 온다(이슈 1114). 위 주석의 규율과
+               어긋나 보이지만 아니다: 그 규율은 시계가 움직이면 바뀌는 사실
+               (만료·이미 결정됨)을 원장에서 읽으라는 것이고, 후보 목록은 승인이
+               만들어질 때 한 번 계산돼 payload와 props에 **같은 값으로** 저장된
+               얼어붙은 사실이다(`work_controls.rs`가 두 칸을 한 변수에서 쓴다).
+               서버가 그것을 props에도 실은 이유가 바로 이것이다 — 클라이언트가
+               브로드캐스트된 메시지 하나로 라디오를 그릴 수 있도록. */
+            execution={card.execution}
             onSettled={outcome =>
               onApprovalSettled?.(approval.approvalId, outcome)
             }

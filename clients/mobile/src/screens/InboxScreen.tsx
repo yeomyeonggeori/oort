@@ -315,6 +315,7 @@ export default function InboxScreen({
         <ApprovalDecision
           approvalId={item.approvalId}
           reversible={item.reversible}
+          execution={item.execution ?? null}
           deadlinePassed={item.deadlinePassed}
           onSettled={outcome => onDecided(item.approvalId as string, outcome)}
           testIDPrefix={`inbox-approval-${item.approvalId}`}

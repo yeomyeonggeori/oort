@@ -3,10 +3,19 @@ import {
   newDecisionId,
   type DecisionOutcome,
 } from '@momo/core/features/timeline/approvalDecision';
+import type {SpawnExecutionPlan} from '@momo/core/lib/executionPlan';
+import {
+  decisionHostId,
+  findCandidate,
+  preselectedHostId,
+  spawnApproveLead,
+  spawnHostGate,
+} from '@momo/core/features/timeline/spawnHostChoice';
 import React, {useCallback, useRef, useState} from 'react';
 import {AccessibilityInfo, Pressable, StyleSheet, Text, View} from 'react-native';
 import {color, font, radius, space, TOUCH_TARGET} from '../../design/tokens';
 import {useSession} from '../../session/useSession';
+import {SpawnHostChoice} from './SpawnHostChoice';
 
 // =============================================================================
 // 인앱 승인 결정 (goal M-AP1, ADR-0137 D5).
@@ -60,6 +69,7 @@ export function ApprovalDecision({
   approvalId,
   reversible = false,
   deadlinePassed = false,
+  execution = null,
   onSettled,
   testIDPrefix = 'inbox-approval',
 }: {
@@ -80,6 +90,13 @@ export function ApprovalDecision({
    * (`routes/approvals.rs:584`). 확정 문장이 그 사실을 말해야 한다.
    */
   deadlinePassed?: boolean;
+  /**
+   * 이 승인이 **어디서 실행할지**까지 묻는가 (ADR-0125 D6-A, 이슈 1114).
+   *
+   * 기본값이 `null`인 것이 이 prop의 전부다: 픽커가 없는 승인은 압도적 다수이고,
+   * 없는 것을 없다고 말하는 데 값이 필요하지 않다. 스폰 승인에서만 실린다.
+   */
+  execution?: SpawnExecutionPlan | null;
   onSettled: (outcome: DecisionOutcome) => void;
   /**
    * 한 목록에 여러 행이 동시에 떠 있으므로 test id는 행마다 달라야 한다. 접두사
@@ -100,8 +117,25 @@ export function ApprovalDecision({
   const keys = useRef<{approve?: string; reject?: string}>({});
   /** 확정 버튼이 이 자리에 뜬 시각. 위의 더블탭 구멍을 막는 데만 쓴다. */
   const armedAtMs = useRef(0);
+  // ---- 호스트 선택 (이슈 1114) ---------------------------------------------
+  //
+  // `null`은 "아무것도 안 골랐다"가 아니라 **"사람이 손대지 않았다"**이다. 찍혀
+  // 있는 것은 언제나 코어가 답하는 기본값이고, 그 구분이 결정 본문을 정한다:
+  // 손대지 않았으면 키를 안 싣고(서버가 카드의 기본값을 적용한다), 손댔으면
+  // 명시적으로 싣는다. 판정은 웹과 **같은 함수**가 한다.
+  const [pickedHostId, setPickedHostId] = useState<string | null>(null);
+  const chosenHostId = pickedHostId ?? preselectedHostId(execution);
+  const hostGate = spawnHostGate(execution);
+  const chosenHostName =
+    findCandidate(execution, chosenHostId)?.displayName ?? null;
 
-  const arm = useCallback((next: Exclude<Armed, null>) => {
+  const arm = useCallback(
+    (next: Exclude<Armed, null>) => {
+    // 실행할 호스트가 하나도 없으면 승인은 무장조차 하지 않는다. 서버가 409로
+    // 답할 것을 결정 전에 알고 있고(코어 `spawnHostGate`), 알면서 확정 화면을
+    // 세우는 것은 헛걸음을 시키는 것이다. **거부는 막지 않는다** — 서버도 거부에는
+    // 호스트를 묻지 않고, 실행할 수 없는 요청을 정리할 길까지 닫을 이유는 없다.
+    if (next === 'approve' && !hostGate.canApprove) return;
     setArmed(next);
     armedAtMs.current = Date.now();
     setErrorCopy(null);
@@ -113,7 +147,9 @@ export function ApprovalDecision({
         ? '승인을 확정할지 묻습니다.'
         : '거부를 확정할지 묻습니다.',
     );
-  }, []);
+    },
+    [hostGate.canApprove],
+  );
 
   const commit = useCallback(async () => {
     // 이 함수는 확인 단계 뒤에만 있다. `armed`가 null이면 확정 버튼이 그려지지도
@@ -142,6 +178,9 @@ export function ApprovalDecision({
         approvalId,
         approve,
         keys.current[slot] as string,
+        // 픽커가 없으면 `undefined`이고, 그때 키는 본문에 실리지 않는다. 서버는
+        // 픽커 없는 승인에 실린 `hostId`를 400으로 거절한다 — 그 거절이 옳다.
+        decisionHostId(execution, chosenHostId),
       );
       if (outcome.kind === 'error') {
         if (outcome.errorCode === 'idempotency_conflict') {
@@ -158,12 +197,21 @@ export function ApprovalDecision({
     } finally {
       setBusy(false);
     }
-  }, [approvalId, armed, busy, onSettled, workspaceId]);
+  }, [approvalId, armed, busy, chosenHostId, execution, onSettled, workspaceId]);
 
   if (armed === null) {
     return (
       <View style={styles.bar} testID={`${testIDPrefix}-actions`}>
         <Text style={styles.lead}>실행 전에 회원님의 허가가 필요합니다.</Text>
+        {execution !== null ? (
+          <SpawnHostChoice
+            plan={execution}
+            pickedHostId={chosenHostId}
+            onPick={setPickedHostId}
+            locked={false}
+            testIDPrefix={testIDPrefix}
+          />
+        ) : null}
         <View style={styles.buttons}>
           <Pressable
             accessibilityRole="button"
@@ -184,11 +232,17 @@ export function ApprovalDecision({
             accessibilityRole="button"
             accessibilityLabel="승인, 확인 필요"
             accessibilityHint="누르면 승인 확정 여부를 묻습니다."
+            // 진짜로 할 수 없다: 자격 있는 호스트가 하나도 없으면 서버는 이 승인에
+            // 409로 답한다. 이유는 픽커 아래에 이미 서 있으므로, 꺼진 버튼이 설명
+            // 없이 서 있는 경우가 아니다.
+            accessibilityState={{disabled: !hostGate.canApprove}}
+            disabled={!hostGate.canApprove}
             onPress={() => arm('approve')}
             style={({pressed}) => [
               styles.button,
               styles.buttonQuiet,
-              pressed && styles.pressed,
+              !hostGate.canApprove && styles.buttonInert,
+              pressed && hostGate.canApprove && styles.pressed,
             ]}
             testID={`${testIDPrefix}-approve`}>
             <Text style={styles.buttonQuietLabel}>승인</Text>
@@ -203,11 +257,29 @@ export function ApprovalDecision({
     );
   }
 
-  const consequence = confirmCopy(armed, reversible, deadlinePassed);
+  const consequence = confirmCopy(
+    armed,
+    reversible,
+    deadlinePassed,
+    armed === 'approve' ? chosenHostName : null,
+  );
 
   return (
     <View style={styles.bar} testID={`${testIDPrefix}-confirm`}>
       <Text style={styles.consequence}>{consequence}</Text>
+      {/* 픽커는 확정 화면에서도 자리를 지킨다. 사라지면 사람은 자기가 무엇을 고른
+          채 확정하는지 볼 수 없고, 확인이 판단의 근거 옆에 있어야 한다는 이 파일의
+          원칙이 무너진다. 대신 잠긴다 — 확정 문장이 이미 목적지를 말했고, 그 아래에서
+          목적지가 바뀌면 읽은 문장과 나가는 요청이 달라진다. */}
+      {execution !== null ? (
+        <SpawnHostChoice
+          plan={execution}
+          pickedHostId={chosenHostId}
+          onPick={setPickedHostId}
+          locked
+          testIDPrefix={testIDPrefix}
+        />
+      ) : null}
       <View style={styles.buttons}>
         <Pressable
           accessibilityRole="button"
@@ -275,16 +347,25 @@ export function confirmCopy(
   armed: Exclude<Armed, null>,
   reversible: boolean,
   deadlinePassed: boolean,
+  /**
+   * 스폰 승인에서 지금 찍혀 있는 호스트의 이름 (이슈 1114). 픽커가 없거나 고를 수
+   * 있는 것이 없으면 `null`이고, 그때 목적지 절은 통째로 빠진다 — 「어딘가에서
+   * 실행합니다」는 문장이 아니라 소음이다.
+   */
+  hostName: string | null = null,
 ): string {
   if (deadlinePassed) {
     // 기한이 지난 요청에 보내는 결정은 승인도 거부도 아니다 — 서버가 만료로
     // 확정한다. 승인 문장을 그대로 두면 일어나지 않을 일을 약속하게 된다.
+    // 목적지도 붙이지 않는다: 아무 데서도 실행되지 않는다.
     return '기한이 지난 요청입니다. 지금 보내면 승인도 거부도 아닌 만료로 기록됩니다.';
   }
   if (armed === 'approve') {
-    return reversible
-      ? '승인하면 에이전트가 이어서 진행합니다.'
-      : '승인하면 에이전트가 이어서 진행합니다. 되돌릴 수 없습니다.';
+    // 목적지는 **조건절 안**에 있다. 별도 문장으로 앞세우면("…에서 실행합니다")
+    // 이 승인이 지킬 수 없는 약속을 현재 직설로 단언하게 되고, 바로 뒤에 오는
+    // 조건과 서로를 반박한다 — 근거는 코어 `spawnApproveLead`에 있다.
+    const base = spawnApproveLead(hostName);
+    return reversible ? base : `${base} 되돌릴 수 없습니다.`;
   }
   return '거부하면 대기 중인 실행이 취소됩니다.';
 }

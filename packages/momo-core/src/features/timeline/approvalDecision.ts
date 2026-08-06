@@ -164,11 +164,38 @@ export function unsettledAnswerClause(status: number): string {
   return "서버가 이 결정을 받지 않았습니다. 다시 시도하세요.";
 }
 
+/**
+ * 결정을 보낸다. `hostId`는 **스폰 승인에서만**, 그것도 승인일 때만 실린다
+ * (ADR-0125 D6-A, #1114).
+ *
+ * 세 규칙이 서버의 세 갈래와 마주 본다(`routes/approvals.rs` `resolve_host_choice`):
+ *
+ *  1. 픽커가 없는 승인에 `hostId`를 실으면 **400**이다. 그래서 호출자는
+ *     `spawnHostChoice.decisionHostId()`가 답한 것만 넘기고, 그 함수는 픽커 없는
+ *     승인에 `undefined`를 답한다. 이 400은 옳은 거절이다 — 카드가 묻지 않은
+ *     질문에 답하는 클라이언트는 사람에게 고른 적 없는 선택을 보여준 것이다.
+ *  2. 자격 목록 밖의 호스트는 **403**이다. 서버는 카드가 실제로 낸 목록을 읽어
+ *     판정하므로, 화면이 못 고르게 막은 것과 서버가 거절하는 것이 같은 목록이다.
+ *  3. **거부에는 호스트를 싣지 않는다.** 서버도 거부면 호스트를 아예 묻지 않고
+ *     (`if !input.approve`), 실을 이유가 없는 값을 실으면 원장에는 사람이 하지도
+ *     않은 선택이 기록된다.
+ *
+ * 표기는 `hostId` — 이 본문에서 유일한 camelCase 키다. 우리가 고른 것이 아니라
+ * 정본 스펙이 그렇게 적혀 있고(`ApprovalDecisionRequest`), 서버는 두 표기를 다
+ * 받는다(`dto.rs`의 `rename = "host_id", alias = "hostId"`). 스펙에 적힌 이름을
+ * 보내는 쪽이 나중에 alias가 사라져도 살아남는다.
+ *
+ * **멱등 키에는 들어가지 않는다.** 같은 `client_decision_id`로 다른 호스트를
+ * 다시 보내도 서버는 원래 영수증을 재생한다(스펙이 그렇게 못박았다). 그래서 호스트를
+ * 바꿔 다시 결정하려면 새 키가 필요하고, 그것은 곧 이전 결정이 실패했을 때뿐이다 —
+ * 성공한 결정은 이미 목적지를 가졌다.
+ */
 export async function decideApproval(
   workspaceId: string,
   approvalId: string,
   approve: boolean,
-  clientDecisionId: string
+  clientDecisionId: string,
+  hostId?: string
 ): Promise<DecisionOutcome> {
   const headers = new Headers({ "Content-Type": "application/json" });
   const token = coreSession().getAccessToken();
@@ -190,6 +217,10 @@ export async function decideApproval(
           approval_id: approvalId,
           approve,
           client_decision_id: clientDecisionId,
+          // 키 자체를 조건부로 만든다(값을 `undefined`로 두는 것과 결과는 같지만
+          // 의도가 다르다): 「호스트를 안 골랐다」는 서버에서 「카드의 기본값을
+          // 그대로 받겠다」로 읽히고, 그 해석은 키가 없을 때만 성립한다.
+          ...(approve && hostId !== undefined ? { hostId } : {}),
         }),
       }
     );

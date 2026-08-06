@@ -24,6 +24,7 @@
 
 import { fetchWithDeadline, type HttpResponse } from "./http";
 import { apiBase, coreSession } from "../runtime/host";
+import { parseExecutionPlan, type SpawnExecutionPlan } from "./executionPlan";
 import { restoredLoginResponse } from "./sessionModel";
 import {
   arrayField,
@@ -2232,6 +2233,19 @@ export interface Approval {
    * (`dto.rs:2210-2212`). 판정은 `features/inbox/model.ts`가 fail-closed로 한다.
    */
   isReversible?: boolean;
+  /**
+   * 이 승인이 **어디서 실행할지**까지 묻는 경우의 재료 (ADR-0125 D6-A, #1114).
+   *
+   * `payload.execution`에만 있고 스폰 승인에만 실린다. 여기서 이름 한 조각이
+   * 아니라 객체를 통째로 꺼내는 것이 위 `toolName`의 규율과 어긋나 보이지만
+   * 아니다: 그 규율이 막는 것은 **호스트 로컬 사실**(경로·프롬프트·인자)이
+   * 화면으로 새는 것이고, 이 객체에는 그런 것이 한 조각도 없다. 서버가 이 칸에
+   * 무엇을 넣지 않기로 했는지 명시해 두었다(`SpawnHostCandidate::to_json`:
+   * 호스트 로컬 경로·환경·프로세스 상태·자격증명 없음). 남은 것은 등록된 기계의
+   * 표시 이름과 그것을 고를 수 있는지 여부뿐이고, 그 둘은 **사람이 결정하기 위해
+   * 반드시 봐야 하는 것**이다.
+   */
+  execution?: SpawnExecutionPlan;
   decidedBy?: string;
   decidedAtMs?: number;
   decisionReason?: string;
@@ -2286,6 +2300,8 @@ function toApproval(value: unknown): Approval {
   if (onBehalfOf !== undefined) approval.onBehalfOf = onBehalfOf;
   const toolName = toolNameFromPayload(record(value)?.["payload"]);
   if (toolName !== undefined) approval.toolName = toolName;
+  const execution = parseExecutionPlan(record(value)?.["payload"]);
+  if (execution !== null) approval.execution = execution;
   const isReversible = wireBool(value, "is_reversible", "isReversible");
   if (isReversible !== undefined) approval.isReversible = isReversible;
   const decidedBy = wireStr(value, "decided_by", "decidedBy");

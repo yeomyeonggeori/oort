@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { Button } from "@/design/ui/button";
 import { cn } from "@/design/lib/cn";
 import { useSession } from "@/app/session";
@@ -7,6 +7,15 @@ import {
   newDecisionId,
   type DecisionOutcome,
 } from "@momo/core/features/timeline/approvalDecision";
+import type { SpawnExecutionPlan } from "@momo/core/lib/executionPlan";
+import {
+  decisionHostId,
+  findCandidate,
+  preselectedHostId,
+  spawnApproveLead,
+  spawnHostGate,
+} from "@momo/core/features/timeline/spawnHostChoice";
+import { SpawnHostChoice } from "./SpawnHostChoice";
 
 // =============================================================================
 // 승인 결정 컨트롤 (R-1 §4, goal B5.3b D-5).
@@ -65,7 +74,23 @@ export const CONFIRM_GUARD_MS = 400;
  * 것뿐이다.
  */
 export function approveConfirmCopy(reversible: boolean | undefined): string {
-  const base = "승인하면 에이전트가 이어서 진행합니다.";
+  return spawnApproveConfirmCopy(null, reversible);
+}
+
+/**
+ * 확정 문장. 스폰 승인이면 **목적지가 조건절 안에 들어간다** (이슈 1114).
+ *
+ * 목적지를 별도 문장으로 앞세우지 않는 이유는 코어(`spawnApproveLead`)에 적혀
+ * 있다: "「팀 VPS」에서 실행합니다."는 이 승인이 지킬 수 없는 약속을 현재 직설로
+ * 단언하고, 바로 뒤 문장이 조심스럽게 단 조건과 서로를 반박한다
+ * (design-review H3). 호스트 이름을 모를 때(자격 후보가 없어 아무것도 찍히지 않은
+ * 경우) 그 자리는 통째로 빠진다 — 「어딘가에서」는 문장이 아니라 소음이다.
+ */
+export function spawnApproveConfirmCopy(
+  hostName: string | null,
+  reversible: boolean | undefined
+): string {
+  const base = spawnApproveLead(hostName);
   // `undefined`는 "모른다"이고, 되돌릴 수 없는 액션 계열에서 모름은 경고 쪽에
   // 붙는다. 서버가 위험도를 싣지 않았다고 안전하다고 말할 수는 없다.
   return reversible === true ? base : `${base} 되돌릴 수 없습니다.`;
@@ -96,6 +121,7 @@ export function ApprovalActions({
   className,
   testIdPrefix = "approval",
   reversible = true,
+  execution = null,
 }: {
   approvalId: string;
   armed: Armed;
@@ -118,6 +144,16 @@ export function ApprovalActions({
    * 한다: "absent `isReversible`를 reversible로 읽지 마라").
    */
   reversible?: boolean;
+  /**
+   * 이 승인이 **어디서 실행할지**까지 묻는가 (ADR-0125 D6-A, 이슈 1114).
+   *
+   * `null`이 압도적 다수다. 픽커가 붙는 순간 이 컨트롤이 지는 것이 하나 늘어나는데,
+   * 그것은 라디오 하나가 아니라 **결정의 목적지**다 — 그래서 여기 있다. 픽커를
+   * 카드 본문에 두고 결정만 이 파일이 지면, 두 조각은 서로 다른 컴포넌트의 state에
+   * 살면서 「무장했으니 잠근다」와 「고른 것을 싣는다」를 각자 기억해야 한다.
+   * 세 번째 표면(폰)이 같은 계약을 다시 지어야 하는 것도 그때부터다.
+   */
+  execution?: SpawnExecutionPlan | null;
 }) {
   // workspaceId comes from session context rather than a prop chain: both
   // callers sit several components below the shell.
@@ -130,6 +166,21 @@ export function ApprovalActions({
   const keysRef = useRef<{ approve?: string; reject?: string }>({});
   /** 무장한 시각. 확정이 그 뒤 `CONFIRM_GUARD_MS`를 기다렸는지 재는 기준. */
   const armedAtRef = useRef<number>(0);
+
+  // ---- 호스트 선택 (이슈 1114) --------------------------------------------------
+  //
+  // `null`은 "아직 아무것도 안 골랐다"가 아니라 **"사람이 손대지 않았다"**이다.
+  // 그래서 찍혀 있는 것은 언제나 코어가 답하는 기본값이고, 사람이 라디오를 눌러야
+  // 이 state가 값을 갖는다. 그 구분이 결정 본문을 정한다: 손대지 않았으면 키를
+  // 안 싣고(서버가 카드의 기본값을 적용한다), 손댔으면 명시적으로 싣는다.
+  const [pickedHostId, setPickedHostId] = useState<string | null>(null);
+  /** 「고를 것이 없다」 문장의 id. 승인 버튼이 `aria-describedby`로 되짚는다. */
+  const blockedId = useId();
+  const defaultHostId = preselectedHostId(execution);
+  const chosenHostId = pickedHostId ?? defaultHostId;
+  const hostGate = spawnHostGate(execution);
+  const chosenHostName =
+    findCandidate(execution, chosenHostId)?.displayName ?? null;
 
   async function commit(approve: boolean) {
     if (busy) return;
@@ -153,7 +204,10 @@ export function ApprovalActions({
         workspaceId,
         approvalId,
         approve,
-        keysRef.current[slot]
+        keysRef.current[slot],
+        // 픽커가 없으면 `undefined`이고, 그때 키는 본문에 실리지 않는다. 서버는
+        // 픽커 없는 승인에 실린 `hostId`를 400으로 거절한다 — 그 거절이 옳다.
+        decisionHostId(execution, chosenHostId)
       );
       if (outcome.kind === "error") {
         if (outcome.errorCode === "idempotency_conflict") {
@@ -203,6 +257,12 @@ export function ApprovalActions({
   }, [armed]);
 
   function arm(next: Exclude<Armed, null>) {
+    // 실행할 호스트가 하나도 없으면 승인은 무장조차 하지 않는다. 서버가 409로
+    // 답할 것을 결정 전에 알고 있고(코어 `spawnHostGate`), 그것을 알면서 확정
+    // 화면을 세우는 것은 사람에게 헛걸음을 시키는 것이다. **거부는 막지 않는다** —
+    // 서버도 거부에는 호스트를 묻지 않고, 실행할 수 없는 요청을 정리할 길까지
+    // 닫을 이유는 없다.
+    if (next === "approve" && !hostGate.canApprove) return;
     armedAtRef.current = Date.now();
     focusAfterArmChange.current = "commit";
     setTooFast(false);
@@ -234,9 +294,36 @@ export function ApprovalActions({
         disarm();
       }}
     >
+      {/* 픽커가 붙으면 **묻는 말이 먼저 온다** (design-review M4).
+          픽커 없는 행에서 `lead`는 버튼과 한 줄에 앉는다(아래). 픽커가 붙으면 그
+          배치가 읽는 순서를 뒤집는다: 제목 → 실행할 호스트 → *허가가 필요합니다*
+          → 거부/승인. 두 번째 질문이 제기되고 답해진 뒤에야 첫 번째 질문이 나온다.
+          그래서 픽커가 있을 때만 `lead`를 자기 줄로 올린다. */}
+      {execution !== null && (
+        <p className="pb-2 text-meta text-ink-muted">{lead}</p>
+      )}
+      {/* 픽커는 무장 여부와 무관하게 자리를 지킨다. 확정 화면에서 사라지면
+          사람은 자기가 무엇을 고른 채 확정하는지 볼 수 없고, 확인은 판단의 근거
+          옆에 있어야 한다는 이 표면의 원칙이 무너진다. 대신 잠긴다. */}
+      {execution !== null && (
+        <SpawnHostChoice
+          plan={execution}
+          pickedHostId={chosenHostId}
+          onPick={setPickedHostId}
+          locked={armed !== null || busy}
+          blockedId={blockedId}
+          testIdPrefix={testIdPrefix}
+        />
+      )}
       {armed === null ? (
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <span className="text-meta text-ink-muted">{lead}</span>
+          {execution === null ? (
+            <span className="text-meta text-ink-muted">{lead}</span>
+          ) : (
+            // 픽커가 있으면 `lead`는 이미 위에 있다. 자리는 남겨 둬야 버튼이
+            // 오른쪽에 붙는다(`justify-between`).
+            <span />
+          )}
           <span className="flex shrink-0 items-center gap-2">
             <Button
               variant="outline"
@@ -247,9 +334,31 @@ export function ApprovalActions({
             >
               거부
             </Button>
+            {/* ## 막힌 승인은 **모양을 바꾸지 투명해지지 않는다** (design-review H1)
+                
+                앞 판은 `disabled`였다. 두 가지가 따라왔다:
+                  - `disabled:opacity-50`이 채움 버튼에 걸리면 「승인」 글자가
+                    **2.23:1**이 된다. tokens.md §5b가 이 정확한 실패를 이름으로
+                    적어 둔 그 숫자다.
+                  - 네이티브 `disabled` 버튼은 **초점을 받지 못한다**. 키보드나
+                    보이스오버로 이 행을 지나는 사람은 막힌 컨트롤을 아예 만나지
+                    못하고, 그래서 왜 승인할 수 없는지도 듣지 못한다.
+                
+                그래서 실제로 할 수 없을 때는 **조용한 형태로 강등**하고(채움을
+                버리는 것이 곧 "지금은 이것이 기본 액션이 아니다"라는 말이다),
+                `aria-disabled`로 상태만 알린 뒤 초점은 남긴다. 이유는
+                `aria-describedby`가 픽커 아래 문장을 가리켜 초점이 닿는 순간 함께
+                읽힌다. 누름은 `arm()`이 거절한다 — 화면과 같은 판정으로. */}
             <Button
               size="sm"
               ref={approveRef}
+              variant={hostGate.canApprove ? "default" : "outline"}
+              className={cn(!hostGate.canApprove && "text-ink-muted")}
+              aria-disabled={!hostGate.canApprove || undefined}
+              aria-describedby={
+                hostGate.canApprove ? undefined : blockedId
+              }
+              data-blocked={hostGate.canApprove ? undefined : ""}
               data-testid={`${testIdPrefix}-approve`}
               onClick={() => arm("approve")}
             >
@@ -263,7 +372,11 @@ export function ApprovalActions({
           data-testid={`${testIdPrefix}-confirm`}
         >
           <span className="text-meta text-ink">
-            {armed === "approve" ? approveConfirmCopy(reversible) : REJECT_CONFIRM}
+            {armed === "approve"
+              ? execution === null
+                ? approveConfirmCopy(reversible)
+                : spawnApproveConfirmCopy(chosenHostName, reversible)
+              : REJECT_CONFIRM}
           </span>
           <span className="flex shrink-0 items-center gap-2">
             <Button

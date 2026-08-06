@@ -26,6 +26,7 @@ import {
   type ApprovalStatus,
   type PayloadDetail,
 } from "@momo/core/features/timeline/agentCardModel";
+import { spawnHostGate } from "@momo/core/features/timeline/spawnHostChoice";
 import { ApprovalChip, StreamCaret, TurnChip } from "./StatusChip";
 import { ApprovalActions, type Armed } from "./ApprovalActions";
 import { FoldedValue } from "./FoldToggle";
@@ -277,7 +278,12 @@ function ApprovalBody({
       // 오프라인에서는 y/n 단축키도 꺼진다. 켜 두면 키가 무장까지 하고 확정이
       // 나가지 않는, 화면이 설명하지 못하는 상태가 만들어진다.
       keyboard={note === null}
-      onApprove={() => setArmed("approve")}
+      // 이슈 1114: `y`도 버튼과 같은 문을 지난다. 자격 있는 호스트가 없으면 승인은
+      // 무장하지 않는다 — 단축키만 통과시키면 꺼진 버튼 옆에서 키보드로는 열리는,
+      // 화면이 설명하지 못하는 두 번째 문이 생긴다. `n`은 그대로다.
+      onApprove={() => {
+        if (spawnHostGate(card.execution).canApprove) setArmed("approve");
+      }}
       onReject={() => setArmed("reject")}
       detail={card.detail}
       footer={
@@ -289,6 +295,7 @@ function ApprovalBody({
             className="border-t border-line"
             armed={armed}
             setArmed={setArmed}
+            execution={card.execution}
             onSettled={(outcome) => {
               const next: {
                 status: ApprovalStatus;

@@ -1,4 +1,8 @@
 import type { Message } from "../../lib/api";
+import {
+  parseExecutionPlan,
+  type SpawnExecutionPlan,
+} from "../../lib/executionPlan";
 
 // =============================================================================
 // Agent card model (R-1 §4). Pure: no DOM, no fetch, no React, so the status
@@ -163,6 +167,14 @@ function readBoolean(props: Props, key: string): boolean | undefined {
  * Deliberately absent, and it must stay that way: `arguments`, `tool_grant`,
  * `payload`, `payload_sha256`, `call_id`, `output`, `target_host_id`,
  * `control_id`, `executor`.
+ *
+ * `execution` joined the list with #1114 and is the one entry that is an OBJECT
+ * rather than a scalar. It is here because the card genuinely reads it — the
+ * host picker is drawn from it — and because leaving it out would have counted
+ * a rendered field as `withheld`, which is the card telling the reader it is
+ * hiding something it is in fact showing. `target_host_id` stays absent right
+ * above it and the pair is not a contradiction: that prop is a raw id with no
+ * name attached, and an id is not something a person can decide with.
  */
 const PARSED_KEYS: ReadonlySet<string> = new Set([
   "kind",
@@ -197,6 +209,9 @@ const PARSED_KEYS: ReadonlySet<string> = new Set([
   "run_id",
   "channel_id",
   "agent_member_id",
+  // ADR-0125 D6-A의 호스트 후보(#1114). 카드가 실제로 그리는 것이라 withheld가
+  // 아니다 — 위 주석 참고.
+  "execution",
 ]);
 
 export interface PayloadRow {
@@ -369,6 +384,20 @@ export interface AgentApprovalCard {
   estimatedMicroUsd?: number;
   decidedByMemberId?: string;
   decidedAtMs?: number;
+  /**
+   * 이 승인이 「어디서 실행할지」까지 묻는가 (ADR-0125 D6-A, #1114).
+   *
+   * `null`이 압도적 다수다 — 스폰 승인에만 실린다. 카드 스냅샷에서 읽는 것이
+   * 맞는 이유: 서버가 후보를 **props에도** 싣는 것은 클라이언트가 브로드캐스트된
+   * 메시지 하나만으로 라디오를 그릴 수 있게 하기 위해서다(그러지 않으면 카드가
+   * 첫 라디오를 그리기 전에 승인 프로젝션을 한 번 더 읽어야 한다).
+   *
+   * 그래서 이 값은 **카드가 그려진 시점의 사실**이다. 그때 온라인이던 맥이 지금
+   * 꺼져 있을 수 있고, 그 경우 사람이 고른 호스트를 서버가 결정 시점에 다시
+   * 판정해 거절한다 — 그것이 서버가 두 겹으로 검증하는 이유이자, 화면이 그
+   * 거절을 「결정됨」이 아니라 오류로 그려야 하는 이유다.
+   */
+  execution: SpawnExecutionPlan | null;
   detail: PayloadDetail;
 }
 
@@ -502,6 +531,7 @@ function approvalCard(
       : readString(props, "title") ?? message.body ?? "승인 요청",
     status,
     isResumeOffer,
+    execution: parseExecutionPlan(props),
     detail: payloadDetail(props),
   };
   const summary = readString(props, "summary");
