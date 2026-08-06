@@ -16,9 +16,22 @@
 //                    않는다**. 이 문장은 사람이 랩탑을 덮는 근거다.
 //   5. 빈 상태       살아 있는 작업이 0이면 요약 줄이 DOM 에 없다. 빈 띠도 없다.
 //   6. 카드 확대     카드를 누르면 서랍이 물러나고 기존 표면이 선다. 둘이 겹쳐
-//                    있는 순간이 없다.
+//                    있는 순간이 없다. **두 종류 다** 누른다 — 턴 카드는 작업
+//                    패널로, 세션 카드는 `?work=` 로 작업 세션 패널로. 1차 게이트가
+//                    턴 카드만 눌러서 세션 절반이 죽은 채 통과했다(리뷰 B1: 세션
+//                    카드는 라우트 표에 없는 주소로 가서 `/` 로 튕겼다).
 //   7. live 아님     이 줄은 `aria-live` 영역이 아니다. 잦은 갱신을 낭독으로
 //                    끼어들게 하지 않는다(작업 패널 1Hz 시계와 같은 판정).
+//   8. Esc 는 한 층  서랍과 작업 패널이 함께 서 있을 때 Esc 한 번은 **위 한 층**만
+//                    닫는다(리뷰 H1 ①). 두 층이 같은 키에 같이 반응하면 사람이 한
+//                    번 누른 것으로 아직 보고 있던 것까지 사라진다.
+//   9. 덮인 형제     서랍에 덮인 작업 패널은 `inert` 다 — 라우트에만 걸려 있던
+//                    규칙을 형제 표면도 받는다(리뷰 H1 ②).
+//  10. 바깥 클릭     덮이지 않은 라우트 영역을 누르면 서랍이 닫힌다. 보이는데
+//                    아무 반응도 없는 표면을 남기지 않는다(리뷰 H2).
+//  11. 조각 띠 없음  899px 에서 서랍 오른쪽에 남는 라우트 띠는 0px 이고, 1200px
+//                    위에서는 최소 한 칸(320px)이다. 반쯤 잘린 컨트롤이 걸리는
+//                    폭이 없다(리뷰 M3).
 //
 // 이름 붙은 red proof (버릴 워크트리에서만 돌린다):
 //   ADE_GATE_PROVE_RED_COUNT=1 npm run gate:ade
@@ -29,12 +42,25 @@
 //     expected failure: "opening the drawer moved the route"
 //   ADE_GATE_PROVE_RED_DURABILITY=1 npm run gate:ade
 //     expected failure: "a device-bound session claimed it survives the lid"
+//   ADE_GATE_PROVE_RED_SESSION=1 npm run gate:ade
+//     expected failure: "the session card led nowhere"
+//   ADE_GATE_PROVE_RED_ESC=1 npm run gate:ade
+//     expected failure: "one Escape closed two layers"
+//   ADE_GATE_PROVE_RED_OUTSIDE=1 npm run gate:ade
+//     expected failure: "clicking the uncovered route did nothing"
 //
 // red seam 은 **목/드라이버의 행동만** 바꾼다. COUNT 는 원장에 실행 중 세션을 한
 // 줄 더 실어 화면과 기대표를 갈라놓고(단언이 DOM 의 숫자를 실제로 읽는지 증명),
 // DURABILITY 는 지속 호스트의 `type` 을 `app` 으로 바꿔 배지가 호스트에서 파생되는지
 // 증명하며, BLOCKED 와 LAYOUT 은 CSS 만 덮어쓴다(React 가 들고 있는 노드는 그대로).
 // 제품 소스 줄을 지우거나 단언을 빼라고 요구하지 않으므로 증명은 반복 가능하다.
+//
+// 새 셋도 같은 규율이다. SESSION 은 `history.pushState` 를 감싸 작업 세션 주소의
+// `#/c/` 를 `#/channels/` 로 되돌린다 — 리뷰가 잡은 그 죽은 주소 그대로이고, 라우트
+// 표에 없으므로 와일드카드가 `/` 로 보낸다. ESC 는 **예전 판의 리스너를 하나 되살린다**:
+// window 캡처 단계에 작업 패널을 닫는 리스너를 앱보다 먼저 등록하므로, 층 스택이
+// 없던 시절처럼 두 층이 같은 Esc 에 각자 반응한다. OUTSIDE 는 스크림의
+// `pointer-events` 만 끈다(노드는 그대로 서 있고 클릭만 통과한다).
 //
 // 스크린샷은 이 게이트가 만든다(게이트 재생성 규율): artifacts/ade/*.png,
 // light/dark 두 벌. 판정하지 않는다 — design-review 는 별도 레인이다.
@@ -64,6 +90,9 @@ const proveRedCount = process.env.ADE_GATE_PROVE_RED_COUNT === "1";
 const proveRedBlocked = process.env.ADE_GATE_PROVE_RED_BLOCKED === "1";
 const proveRedLayout = process.env.ADE_GATE_PROVE_RED_LAYOUT === "1";
 const proveRedDurability = process.env.ADE_GATE_PROVE_RED_DURABILITY === "1";
+const proveRedSession = process.env.ADE_GATE_PROVE_RED_SESSION === "1";
+const proveRedEsc = process.env.ADE_GATE_PROVE_RED_ESC === "1";
+const proveRedOutside = process.env.ADE_GATE_PROVE_RED_OUTSIDE === "1";
 
 const PERSISTENT_BADGE = "기기를 꺼도 계속됩니다";
 const DEVICE_BADGE = "이 기기에서만";
@@ -388,6 +417,48 @@ async function installRealtimeSocket(page) {
   });
 }
 
+/**
+ * red seam 둘 (드라이버 쪽에서만 산다, 앱 번들보다 **먼저** 돈다).
+ *
+ * SESSION: 1차 판이 지었던 죽은 주소를 되돌린다. 라우트 표에 있는 것은
+ *   `c/:channelId` 뿐이라 `#/channels/...` 는 와일드카드가 받아 `/` 로 보내고,
+ *   그 리다이렉트는 쿼리(`?work=`)까지 함께 버린다.
+ *
+ * ESC: 층 스택이 서기 전의 리스너를 하나 되살린다. window 캡처 단계이고 앱보다
+ *   먼저 등록되므로 — 그것이 정확히 예전 `AgentWorkPanel` 의 자리였다 —
+ *   `stopImmediatePropagation` 도 이것을 막지 못한다. 서랍이 자기 층을 닫는 사이
+ *   이 리스너가 작업 패널을 닫아, 한 번의 Esc 가 두 층을 가져간다.
+ */
+async function installRedSeams(page) {
+  if (proveRedSession) {
+    await page.addInitScript(() => {
+      const push = history.pushState.bind(history);
+      history.pushState = (state, title, url) => {
+        const dead =
+          typeof url === "string" && url.includes("work=")
+            ? url.replace("#/c/", "#/channels/")
+            : url;
+        return push(state, title, dead);
+      };
+    });
+  }
+  if (proveRedEsc) {
+    await page.addInitScript(() => {
+      window.addEventListener(
+        "keydown",
+        (event) => {
+          if (event.key !== "Escape") return;
+          const close = document.querySelector(
+            '[data-testid="agent-work-panel-close"]'
+          );
+          if (close instanceof HTMLElement) close.click();
+        },
+        true
+      );
+    });
+  }
+}
+
 async function installRoutes(context, options = {}) {
   const sessions = options.sessions ?? ledger(false);
   await context.route("**/v1/**", async (route) => {
@@ -515,6 +586,7 @@ async function exerciseControl(browser) {
   });
   const page = await context.newPage();
   await installRealtimeSocket(page);
+  await installRedSeams(page);
   await installRoutes(context, { sessions: ledger(proveRedCount) });
   await login(page);
 
@@ -747,7 +819,34 @@ async function exerciseControl(browser) {
   }
 
   // ---- 6. 카드 확대: 서랍은 물러난다 ------------------------------------------
-  const runCardIndex = cards.findIndex((c) => c.kind === "run");
+  //
+  // **두 종류를 다 누른다.** 1차 게이트는 턴 카드만 눌렀고, 그 구멍으로 세션 카드가
+  // 죽은 주소를 들고 통과했다(리뷰 B1). 카드가 두 종류라는 것은 이 표면의 설계이지
+  // 구현 세부가 아니므로, 확대 검사도 두 종류다.
+  const sessionCardIndex = cards.findIndex((c) => c.kind === "session");
+  if (sessionCardIndex < 0) throw new Error("세션 카드가 목록에 없다");
+  const sessionTitle = cards[sessionCardIndex].title;
+  await page.locator('[data-testid="ade-card"]').nth(sessionCardIndex).click();
+  await page.getByTestId("ade-drawer").waitFor({ state: "detached" });
+  const landed = await page
+    .getByTestId("work-panel")
+    .waitFor({ timeout: 5_000 })
+    .then(() => true)
+    .catch(() => false);
+  const hash = await page.evaluate(() => location.hash);
+  if (!landed || !hash.startsWith("#/c/")) {
+    throw new Error(
+      `the session card led nowhere: "${sessionTitle}" 를 눌렀는데 작업 세션 패널이 ${
+        landed ? "섰지만" : "서지 않았고"
+      } 주소는 ${hash} 다 (라우트 표에 있는 것은 c/:channelId 뿐이고, 와일드카드는 쿼리까지 버린 채 / 로 보낸다)`
+    );
+  }
+  console.log(`[expand] 세션 카드 -> 작업 세션 패널 (${hash})`);
+  await page.getByTestId("work-panel-close").click();
+
+  await openDrawer(page);
+  const reopened = await cardFacts(page);
+  const runCardIndex = reopened.findIndex((c) => c.kind === "run");
   if (runCardIndex < 0) throw new Error("턴 카드가 목록에 없다");
   await page.locator('[data-testid="ade-card"]').nth(runCardIndex).click();
   await page.getByTestId("ade-drawer").waitFor({ state: "detached" });
@@ -758,6 +857,114 @@ async function exerciseControl(browser) {
     );
   }
   console.log("[expand] 턴 카드 -> 작업 패널, 서랍은 물러났다");
+
+  // ---- 9·11. 덮인 형제와 남는 띠 ----------------------------------------------
+  //
+  // 여기부터는 **작업 패널이 열려 있는 채로** 서랍을 연다. 리뷰가 잡은 두 결함이
+  // 정확히 이 상태에서만 보인다: 가려진 패널이 탭 순서에 남았고(H1 ②), 서랍
+  // 오른쪽에 19px 짜리 라우트 조각이 걸렸다(M3, 899px 실측).
+  const panelInert = async () =>
+    page.evaluate(() => {
+      const panel = document.querySelector('[data-testid="agent-work-panel"]');
+      return panel === null ? null : panel.hasAttribute("inert");
+    });
+  const routeStrip = async () =>
+    page.evaluate(() => {
+      const drawer = document.querySelector('[data-testid="ade-drawer"]');
+      // 스크림이 곧 라우트 상자다(`inset: 0`). 상자를 따로 재지 않는 이유는 그
+      // 둘이 같아야 한다는 것이 H2 수리의 계약이기 때문이다.
+      const box = document.querySelector('[data-testid="ade-scrim"]');
+      if (drawer === null || box === null) return null;
+      const d = drawer.getBoundingClientRect();
+      const b = box.getBoundingClientRect();
+      return {
+        strip: Math.round(b.right - d.right),
+        box: Math.round(b.width),
+        drawer: Math.round(d.width),
+      };
+    });
+
+  await page.setViewportSize({ width: 899, height: 900 });
+  await openDrawer(page);
+  const narrow = await routeStrip();
+  console.log(
+    `[strip] 899px: 라우트 상자 ${narrow?.box}px · 서랍 ${narrow?.drawer}px · 남는 띠 ${narrow?.strip}px`
+  );
+  if (narrow === null || narrow.strip !== 0) {
+    throw new Error(
+      `the drawer left a sliver of route: 899px 에서 ${narrow?.strip}px 가 남았다 (반쯤 잘린 컨트롤이 걸리는 폭 — 전면 문턱은 1200px 이어야 한다)`
+    );
+  }
+  if ((await panelInert()) !== true) {
+    throw new Error(
+      "a covered sibling stayed in the tab order: 서랍이 통째로 덮은 작업 패널에 inert 가 없다 (라우트에만 걸려 있다)"
+    );
+  }
+
+  await page.setViewportSize({ width: 1280, height: 900 });
+  const wide = await routeStrip();
+  console.log(
+    `[strip] 1280px: 라우트 상자 ${wide?.box}px · 서랍 ${wide?.drawer}px · 남는 칸 ${wide?.strip}px`
+  );
+  if (wide === null || wide.strip < 320) {
+    throw new Error(
+      `the drawer left a sliver of route: 1280px 에서 ${wide?.strip}px 만 남았다 (남는 것은 띠가 아니라 최소 한 칸 320px 이어야 한다)`
+    );
+  }
+  if ((await panelInert()) !== true) {
+    throw new Error(
+      "a covered sibling stayed in the tab order: 넓은 창에서도 서랍이 열린 동안 작업 패널은 받지 않는다"
+    );
+  }
+
+  // ---- 10. 바깥 클릭 (리뷰 H2) -------------------------------------------------
+  //
+  // 덮이지 않은 라우트 영역은 `inert` 라 아무 버튼도 눌리지 않는다. 그 상태에서
+  // 클릭까지 아무 일도 하지 않으면 그 절반은 「살아 보이는 시체」다. 사이드바
+  // 서랍이 스크림을 버튼으로 세운 것과 같은 답을 이 서랍도 갖는다.
+  if (proveRedOutside) {
+    // red seam: 스크림은 그 자리에 그대로 서 있고 클릭만 통과시킨다 = 히트면이
+    // 없던 판. 노드도 색도 그대로라 「보이니까 반응한다」만 사라진다.
+    await page.addStyleTag({
+      content: '[data-testid="ade-scrim"]{pointer-events:none!important}',
+    });
+  }
+  await page.mouse.click(1000, 400);
+  await page
+    .getByTestId("ade-drawer")
+    .waitFor({ state: "detached", timeout: 3_000 })
+    .catch(() => {});
+  if ((await page.getByTestId("ade-drawer").count()) !== 0) {
+    throw new Error(
+      "clicking the uncovered route did nothing: 서랍이 라우트를 못 쓰게 해 놓고 바깥 클릭도 받지 않았다"
+    );
+  }
+  if ((await panelInert()) !== false) {
+    throw new Error(
+      "a covered sibling stayed in the tab order: 서랍이 닫혔는데 작업 패널의 inert 가 남았다"
+    );
+  }
+  console.log("[outside] 덮이지 않은 라우트 클릭 -> 서랍이 닫혔다");
+
+  // ---- 8. Esc 는 한 층만 (리뷰 H1 ①) ------------------------------------------
+  await openDrawer(page);
+  await page.keyboard.press("Escape");
+  await page
+    .getByTestId("ade-drawer")
+    .waitFor({ state: "detached", timeout: 3_000 })
+    .catch(() => {});
+  if ((await page.getByTestId("ade-drawer").count()) !== 0) {
+    throw new Error("Esc 를 눌렀는데 서랍이 닫히지 않았다 (가장 위 층이 이것이다)");
+  }
+  if ((await page.getByTestId("agent-work-panel").count()) !== 1) {
+    throw new Error(
+      "one Escape closed two layers: 서랍을 닫으려 누른 한 번이 그 아래 작업 패널까지 닫았다 (Esc 는 가장 위 층의 것이다)"
+    );
+  }
+  // 그리고 그 다음 Esc 는 아래 층을 닫는다 — 스택이 층을 삼키지 않는다는 증명.
+  await page.keyboard.press("Escape");
+  await page.getByTestId("agent-work-panel").waitFor({ state: "detached" });
+  console.log("[esc] 첫 Esc = 서랍만 · 둘째 Esc = 작업 패널");
 
   await context.close();
 }
@@ -876,7 +1083,10 @@ async function main() {
   console.log("GATE PASS: 집계가 원장과 일치하고(종료 제외·유휴는 줄을 켜지 않음),");
   console.log("           대기가 잉크와 순서 양쪽에서 강조되며, 서랍은 라우트를");
   console.log("           한 픽셀도 밀지 않고, 기기 종속 세션은 지속을 주장하지");
-  console.log("           않으며, 작업 0에서는 줄 자체가 없다.");
+  console.log("           않으며, 작업 0에서는 줄 자체가 없다. 카드는 두 종류 다");
+  console.log("           살아 있는 표면으로 확대되고, Esc 한 번은 한 층만 닫으며,");
+  console.log("           덮인 형제는 탭 순서에서 빠지고, 덮이지 않은 라우트는");
+  console.log("           눌리면 서랍을 닫는다 — 남는 것은 띠가 아니라 한 칸이다.");
 }
 
 main().catch((error) => {

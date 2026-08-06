@@ -15,15 +15,18 @@ import {
 import { elapsedLabel } from "@momo/core/features/agents/workingSignal";
 import { cn } from "@/design/lib/cn";
 import { useSession } from "@/app/session";
+import { ROUTE_REGION_DOM_ID } from "@/app/shellNav";
 import { CHIP_CLASS } from "@/features/common/chip";
 import { EmptyInvite, InlineBanner } from "@/features/common/States";
 import { openWorkPanel } from "@/features/agents/workLogStore";
+import { workSessionPath } from "@/features/inbox/anchor";
 import {
   channelLabel,
   useChannels,
   useDirectory,
 } from "@/features/workspace/useWorkspace";
 import { restoreDialogOpenerFocus } from "@/design/ui/dialog";
+import { useEscapeLayer } from "@/design/ui/escapeLayer";
 import { useAdeControl } from "./useAdeControl";
 import {
   ADE_DRAWER_DOM_ID,
@@ -51,11 +54,24 @@ import {
 // 결함(리뷰 H-2)과 같은 종류를 이 층에서 미리 닫는 것이고, 게이트가 여는 전후의
 // 좌표를 픽셀로 재서 그것이 실제로 성립하는지 본다.
 //
-// 덮인 라우트는 `inert` 로 탭 순서에서 함께 빠진다(AppShell). 그래서 이 서랍은
-// 모달처럼 행동하지만 스크림이 없다: 스크림은 「이 아래는 지금 못 쓴다」를 색으로
-// 말하는 장치인데, 이 서랍은 라우트의 왼쪽 절반만 덮으므로 오른쪽 절반을 어둡게
-// 칠하면 못 쓰는 이유를 설명하지 못한 채 화면 전체를 눌러 놓게 된다. 대신 Esc 와
-// 닫기 버튼이 있고, 캐럿은 연 컨트롤(요약 줄)로 돌아간다.
+// 덮인 라우트는 `inert` 로 탭 순서에서 함께 빠진다(AppShell). 형제 표면인 작업
+// 패널도 같은 규칙을 받는다(`AgentWorkPanel`) — 서랍이 열려 있는 동안 살아 있는
+// 것은 서랍과 스크림, 그리고 서랍 밖에 있는 셸(사이드바·요약 줄)뿐이다.
+//
+// ## 스크림 (design-review ADE 2단계 H2)
+//
+// 1차에는 스크림을 두지 않았다. 근거는 "라우트의 왼쪽만 덮으므로 오른쪽을 어둡게
+// 칠하면 못 쓰는 이유를 설명하지 못한다"였는데, 리뷰가 잰 결과는 그 반대였다:
+// 오른쪽 절반은 `inert` 라 아무 버튼도 눌리지 않으면서 **살아 있는 것과 똑같이
+// 보였다**(허들 버튼을 눌러도 아무 일도 일어나지 않는다). 「보이면 반응한다」를
+// 지키는 길은 둘뿐이고 — 반응하게 하거나, 반응하지 않는다고 말하거나 — 덮고 있는
+// 층이 있는 한 앞의 것은 택할 수 없다.
+//
+// 그래서 같은 셸이 이미 세워 둔 선례를 그대로 쓴다: 사이드바 서랍의 `sidebar-scrim`
+// 은 `--scrim` 으로 뒤를 눌러 놓고 **진짜 <button>** 으로 서서 바깥을 눌러 닫는
+// 길을 마우스 전용이 아니게 만든다. 그쪽 기하도 여기와 같다(280px 서랍 + 남은
+// 110px). 한 셸에 서랍이 둘인데 규칙이 둘이면, 사람은 어느 쪽에서 배운 것을
+// 다른 쪽에서 쓸 수 없다.
 // =============================================================================
 
 const STATE_CHIP_CLASS: Readonly<Record<AdeState, string>> = {
@@ -116,9 +132,15 @@ function AdeCard({
           </span>
           {/* 경과. 끝난 세션은 자기 종료 시각에서 멈춘다. 시작을 못 본 턴은
               숫자를 지어내지 않고 자리만 비운다 (workingSignal 의 같은 규칙). */}
+          {/* \uc790\ub9ac\ud45c\ub294 \ubcf4\uc870\uae30\uc220\uc774 \uc77d\uc744 \uac83\uc774 \uc544\ub2c8\ub2e4(design-review N2): \uc2dc\uc791\uc744 \ubabb \ubcf8
+              \ud134\uc758 \uc774 \uce78\uc740 zero-width space \ud55c \uae00\uc790\uc774\uace0, \uadf8\uac83\uc774 \uce74\ub4dc\uc758 \uc811\uadfc \uc774\ub984\uc5d0
+              \uc11e\uc774\uba74 \ub0ad\ub3c5\uc740 \uc81c\ubaa9\uacfc \ucc44\ub110 \uc0ac\uc774\uc5d0\uc11c \uc774\uc720 \uc5c6\uc774 \ud55c \ubc88 \uba4e\ub294\ub2e4. diff \uce78\uc774
+              \uac19\uc740 \uc790\ub9ac\uc5d0\uc11c \uc774\ubbf8 \ud558\uace0 \uc788\ub294 \ucc98\ub9ac\ub97c \uc5ec\uae30\uc11c\ub3c4 \ud55c\ub2e4. */}
           <span
             data-numeric
             data-testid="ade-card-elapsed"
+            data-empty={item.startedAtMs === undefined ? "" : undefined}
+            aria-hidden={item.startedAtMs === undefined ? "true" : undefined}
             className="shrink-0 font-mono text-timestamp text-ink-muted"
           >
             {item.startedAtMs === undefined
@@ -205,25 +227,25 @@ export function AdeDrawer() {
   const close = useCallback(() => {
     const opener = openerRef.current;
     closeAdeDrawer();
-    restoreDialogOpenerFocus(opener);
+    if (restoreDialogOpenerFocus(opener)) return;
+    // opener 가 사라진 판이 실제로 있다 (design-review N1): 서랍을 열어 둔 채
+    // 마지막 작업이 끝나면 요약 줄은 DOM 에서 빠지고(빈 자리를 예약하지 않는 것이
+    // 그 줄의 계약이다) 서랍만 남는다. 그 상태로 닫으면 캐럿이 <body> 로 떨어져
+    // 키보드 사용자는 셸 맨 위부터 다시 Tab 해야 한다.
+    //
+    // 폴백은 방금 돌려받은 표면 그 자체다. `inert` 를 손으로 먼저 걷는 이유는
+    // 사이드바 서랍의 `closeDrawer` 가 적어 둔 그대로다: React 는 이 커밋이
+    // 끝나야 속성을 걷으므로 그 전에 `focus()` 를 부르면 inert 가 거절한다.
+    const route = document.getElementById(ROUTE_REGION_DOM_ID);
+    route?.removeAttribute("inert");
+    route?.focus();
   }, []);
 
   // Esc 는 서랍 밖에서 눌러도 듣는다. 라우트를 덮고 있는 층이 이 서랍이므로 Esc 는
-  // 이 층의 것이고, 캡처 단계에서 가져가는 이유는 사이드바 서랍이 같은 자리에서
-  // 적어 둔 그대로다: 설정 라우트가 window 에서 Esc 를 듣고 뒤로 가는데, 그 쪽이
-  // 먼저 돌면 서랍을 닫으려던 한 번이 라우트 이동까지 해버린다. 다이얼로그가 열려
-  // 있으면 비켜준다 — 그때 가장 위 층은 그 다이얼로그다.
-  useEffect(() => {
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key !== "Escape") return;
-      if (document.querySelector('[role="dialog"][data-state="open"]')) return;
-      event.stopPropagation();
-      event.preventDefault();
-      close();
-    }
-    window.addEventListener("keydown", onKeyDown, true);
-    return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [close]);
+  // 이 층의 것이다 — 그리고 그 문장이 참이 되는 자리는 이제 이 파일이 아니라
+  // `escapeLayer` 스택이다(리뷰 H1 ①: 같은 타깃 같은 단계의 리스너 둘은 서로를
+  // 막지 못해서, 작업 패널과 이 서랍이 Esc 한 번에 함께 닫혔다).
+  useEscapeLayer(true, close);
 
   const openItem = useCallback(
     (item: AdeItem) => {
@@ -249,17 +271,21 @@ export function AdeDrawer() {
         // `?work=` 는 작업 세션 패널이 이미 읽는 열쇠다(ChatShell). 작업 세션은
         // 라우트가 아니라 채널 표면 안의 패널이라, 링크가 채널과 세션을 함께
         // 말한다 — 여기서 그 계약을 소비만 한다.
-        navigate(
-          `/channels/${encodeURIComponent(item.channelId)}?work=${encodeURIComponent(
-            item.sessionId
-          )}`
-        );
+        //
+        // **주소를 손으로 짓지 않는다** (design-review B1). 1차에는 여기서
+        // `/channels/{id}?work=` 를 지었는데 라우트 표에 있는 것은 `c/:channelId`
+        // 뿐이라 와일드카드가 받아 `/` 로 돌려보냈다: 세션 카드는 첫 클릭에서
+        // 채널도 세션도 잃고 홈에 도착했다. 그 주소를 만드는 자리는 이미
+        // 있었고(`inbox/anchor.ts` 의 `workSessionPath`, MOMO-679 에서 작업 흐름
+        // 상세가 쓰는 그것), 링크를 두 곳에서 지으면 한 곳만 낡는다.
+        navigate(workSessionPath(item.channelId, item.sessionId));
       }
     },
     [close, navigate]
   );
 
   return (
+    <>
     <aside
       ref={asideRef}
       id={ADE_DRAWER_DOM_ID}
@@ -312,5 +338,18 @@ export function AdeDrawer() {
         )}
       </div>
     </aside>
+    {/* 스크림은 서랍 **다음**에 있다: 서랍이 열린 동안 탭이 갈 수 있는 곳은 서랍과
+     * 이 버튼뿐이라(라우트와 작업 패널은 inert) DOM 순서가 곧 그 순환이고,
+     * 사이드바 서랍이 같은 자리에서 같은 순서를 고른 이유도 그것이다. 아이콘도
+     * 글자도 없는 표면이 진짜 <button> 인 이유 역시 같다 — 바깥을 눌러 닫는 것이
+     * 마우스로만 되는 행동이면 안 된다. */}
+    <button
+      type="button"
+      onClick={close}
+      aria-label="작업 목록 닫기"
+      data-testid="ade-scrim"
+      className="ade-scrim"
+    />
+    </>
   );
 }

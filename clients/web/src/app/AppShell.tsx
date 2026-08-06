@@ -9,11 +9,13 @@ import {
 } from "@/lib/realtime";
 import { SessionProvider } from "@/app/session";
 import {
+  ROUTE_REGION_DOM_ID,
   ShellNavProvider,
   useInertWhile,
   useIsMobileShell,
 } from "@/app/shellNav";
 import { restoreDialogOpenerFocus } from "@/design/ui/dialog";
+import { useEscapeLayer } from "@/design/ui/escapeLayer";
 import { queryClient } from "@/app/queryClient";
 import { resetRouteQueries } from "@/app/retryScope";
 import { RenderErrorBoundary } from "@/features/common/RenderErrorBoundary";
@@ -31,7 +33,10 @@ import { AgentTurnFixture } from "@/features/agents/AgentTurnFixture";
 import { agentTurnFixtureMode } from "@/features/agents/turnFixture";
 import { AdeSummaryLine } from "@/features/ade/AdeSummaryLine";
 import { AdeDrawer } from "@/features/ade/AdeDrawer";
-import { useAdeDrawerOpen } from "@/features/ade/adeDrawerStore";
+import {
+  closeAdeDrawer,
+  useAdeDrawerOpen,
+} from "@/features/ade/adeDrawerStore";
 
 // =============================================================================
 // Signed-in shell: owns the single realtime rail for the session and renders
@@ -120,34 +125,28 @@ export function AppShell({
 
   // 표면을 옮기면 서랍은 할 일을 마쳤다. 채널을 고르는 것이 이 서랍의 유일한
   // 목적이므로, 고른 뒤에도 덮여 있으면 방금 연 채널을 가린 채 남는다.
-  useEffect(() => setDrawerOpen(false), [routePath]);
+  //
+  // 관제 서랍도 **같은 판정**을 받는다 (design-review ADE 2단계 M2). 재료는
+  // 워크스페이스 전역이라 "라우트를 옮겨도 이 목록은 여전히 참"이라고 말할 수는
+  // 있지만, 참인 것과 그 자리에 있어야 하는 것은 다르다: 사이드바에서 채널을
+  // 고르면(서랍은 라우트만 덮으므로 사이드바는 살아 있다) 방금 고른 그 채널이
+  // 서랍 뒤에 가려진 채 열린다 — 위 서랍이 고치려던 그 결함 그대로다. 한 셸에
+  // 서랍이 둘인데 규칙이 둘이면 사람은 어느 쪽도 못 배운다.
+  useEffect(() => {
+    setDrawerOpen(false);
+    closeAdeDrawer();
+  }, [routePath]);
   // 창이 넓어져 사이드바가 다시 열로 서면 서랍이라는 상태 자체가 사라진다.
   useEffect(() => {
     if (!isMobile) setDrawerOpen(false);
   }, [isMobile]);
 
-  // Esc로 닫는다. **캡처 단계**에서 듣고 전파를 멈추는 것이 이 핸들러의 요점이다:
-  // 설정 라우트도 window에서 Esc를 듣고 뒤로 가는데(SettingsRoute), 그 리스너는
-  // 마운트 시점이 더 빨라 버블 단계에서 먼저 실행된다. 그대로 두면 서랍을 닫으려
-  // 누른 Esc 한 번이 설정에서 빠져나가는 것까지 함께 해버린다. 캡처 리스너는
-  // 대상에 닿기 전에 돌므로, 덮고 있는 층이 먼저 자기 것을 가져간다.
-  //
-  // 다이얼로그가 열려 있으면 비켜준다: 그때 가장 위에 있는 층은 서랍이 아니라
-  // 그 다이얼로그이고(⌘K 팔레트, 채널 만들기, 에이전트 프로필 모두 Radix라
-  // `[role=dialog][data-state=open]`으로 한 번에 알 수 있다), Esc는 언제나 가장
-  // 위 층의 것이다.
-  useEffect(() => {
-    if (!drawerOpen) return;
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key !== "Escape") return;
-      if (document.querySelector('[role="dialog"][data-state="open"]')) return;
-      event.stopPropagation();
-      event.preventDefault();
-      closeDrawer();
-    }
-    window.addEventListener("keydown", onKeyDown, true);
-    return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [drawerOpen, closeDrawer]);
+  // Esc로 닫는다. 캡처 단계·다이얼로그 예외·「Esc는 언제나 가장 위 층의 것」이라는
+  // 규칙은 전부 `design/ui/escapeLayer`에 한 벌로 있다. 이 셸이 그 리스너를 직접
+  // 달고 있던 동안, 같은 문장을 적어 둔 다른 두 층(작업 패널·관제 서랍)도 각자
+  // 달았고, 같은 타깃 같은 단계의 리스너는 서로를 막지 못해 한 번의 Esc가 두 층을
+  // 닫았다(design-review ADE 2단계 H1 ①). 스택이 그 문장을 자료구조로 만든다.
+  useEscapeLayer(drawerOpen, closeDrawer);
 
   useEffect(() => {
     if (stress) return;
@@ -242,7 +241,16 @@ export function AppShell({
                * 앵커다(tokens.css `work-panel-pane`). 채팅 표면은 자기 안에 같은
                * 앵커를 이미 갖고 있으므로 스레드·작업 세션 패널의 자리는 그대로다. */}
               <div className="relative flex min-h-0 min-w-0 flex-1">
-                <div ref={routeRef} className="flex min-h-0 min-w-0 flex-1">
+                {/* `tabIndex={-1}`은 탭 순서에 자리를 만들지 않는다. 층이 닫힐 때
+                 * 캐럿이 돌아갈 컨트롤이 사라져 있으면(관제 요약 줄은 작업이 0이
+                 * 되면 DOM에서 빠진다) 그 층이 여기로 캐럿을 놓는다 — <body>로
+                 * 떨어뜨리는 대신(shellNav `ROUTE_REGION_DOM_ID`). */}
+                <div
+                  ref={routeRef}
+                  id={ROUTE_REGION_DOM_ID}
+                  tabIndex={-1}
+                  className="flex min-h-0 min-w-0 flex-1"
+                >
                   <RenderErrorBoundary
                     resetKey={routePath}
                     title="이 화면을 열지 못했습니다"

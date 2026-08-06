@@ -20,6 +20,7 @@ import { isSurfaceProvided } from "@momo/core/features/capabilities/serverSurfac
 import { SurfaceUnavailableRoute } from "@/features/capabilities/SurfaceUnavailable";
 import { forgetQuota } from "@momo/core/features/settings/quotaModel";
 import { forgetUsage } from "@momo/core/features/settings/usageModel";
+import { resetAdeDrawer } from "@/features/ade/adeDrawerStore";
 
 // HashRouter, not BrowserRouter: the Tauri release build loads the bundle from
 // `tauri://localhost` with no server to rewrite deep paths, so the same routes
@@ -68,6 +69,7 @@ export function App() {
                 queryClient.clear();
                 forgetUsage();
                 forgetQuota();
+                resetAdeDrawer();
               }}
             >
               <AppShell
@@ -83,6 +85,11 @@ export function App() {
                   // here: the cost ledger and the provider quota gauges alike.
                   forgetUsage();
                   forgetQuota();
+                  // 관제 서랍의 열림 상태도 모듈 스코프라 세션보다 오래 산다
+                  // (design-review ADE 2단계 M1). 열어 둔 채 로그아웃하면 다음
+                  // 사람이 로그인하자마자 라우트가 inert인 채 덮여 있는 화면을
+                  // 받는다 — 자기가 열지 않은 서랍에.
+                  resetAdeDrawer();
                 }}
               />
             </RenderErrorBoundary>
