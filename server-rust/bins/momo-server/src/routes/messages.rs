@@ -41,10 +41,10 @@ use momo_messaging::{
     edit_message_in_tx, is_channel_member, list_channel_page, list_thread_replies,
     parse_replies_cursor, resolve_member_signing_key, send_message_with_mentions_in_tx,
     set_reaction_in_tx, validate_quote_target_in_tx, validate_reaction_emoji,
-    validate_replies_root_in_tx, validate_thread_root_in_tx, HistoryCursor, InteractionRefused,
-    MessageSignature, MessageType, NewMessage, PagedMessage, ProvenanceRejected,
-    QuoteTargetInvalid, QuotedMessage, ReactionAction, ReactionSnapshot, StoredMessage,
-    ThreadRollup, ThreadRootInvalid,
+    validate_replies_root_in_tx, validate_thread_root_in_tx, AttachmentLinkRejected, HistoryCursor,
+    InteractionRefused, MessageAttachment, MessageSignature, MessageType, NewMessage, PagedMessage,
+    ProvenanceRejected, QuoteTargetInvalid, QuotedMessage, ReactionAction, ReactionSnapshot,
+    SendExtras, SendRejected, StoredMessage, ThreadRollup, ThreadRootInvalid,
 };
 use serde_json::{Map, Value};
 use uuid::Uuid;
@@ -133,6 +133,7 @@ fn message_dto(
     include_state: bool,
     thread: Option<&ThreadRollup>,
     reply_to: Option<&QuotedMessage>,
+    attachments: &[MessageAttachment],
 ) -> MessageDto {
     MessageDto {
         id: message.id.to_string(),
@@ -156,6 +157,10 @@ fn message_dto(
         // draw "수정됨" after a reload.
         edited_at_ms: message.edited_at.map(|at| at.timestamp_millis()),
         deleted_at_ms: message.deleted_at.map(|at| at.timestamp_millis()),
+        // ADR-0151 — carried on every projection, send echo included, exactly
+        // like Swift. A client that only learned about attachments from the
+        // realtime frame would draw a file-less message after any reload.
+        attachments: attachments.to_vec(),
         thread: thread.map(thread_dto),
     }
 }
@@ -167,6 +172,7 @@ fn paged_dto(paged: &PagedMessage, include_state: bool) -> MessageDto {
         include_state,
         paged.thread.as_ref(),
         paged.reply_to.as_ref(),
+        &paged.attachments,
     )
 }
 
@@ -175,16 +181,14 @@ fn paged_dto(paged: &PagedMessage, include_state: bool) -> MessageDto {
 ///
 /// The list keeps shrinking, and each departure is a batch: `rootId` left in
 /// B4.1 (threads are served), `routing` left in B5.3a (the model/effort tier is
-/// served — see [`thread_root_rejection`] for what that did to the probe).
+/// served — see [`thread_root_rejection`] for what that did to the probe), and
+/// `attachmentIds` left in ADR-0151 (the three Drive routes are served, and the
+/// binding runs inside this send's own transaction).
+///
+/// `runId` is the last one standing.
 fn reject_unsupported(request: &SendMessageRequest) -> Result<(), ApiError> {
     let unsupported = if request.run_id.is_some() {
         Some("runId (agent-run binding)")
-    } else if request
-        .attachment_ids
-        .as_ref()
-        .is_some_and(|ids| !ids.is_empty())
-    {
-        Some("attachmentIds")
     } else {
         None
     };
@@ -193,6 +197,42 @@ fn reject_unsupported(request: &SendMessageRequest) -> Result<(), ApiError> {
             "{field} is not served by momo-server yet"
         ))),
         None => Ok(()),
+    }
+}
+
+/// A refused attachment binding → its status (Swift `linkAttachments`' throws,
+/// `MessageRoutes.swift:1326-1364`).
+///
+/// The two 403s stay apart on purpose: "another uploader" and "another channel"
+/// are different mistakes, and collapsing them would leave a client unable to
+/// tell a permissions problem from a stale composer.
+///
+/// **404 for an unknown id, not 403**, and that is a disclosure choice: an
+/// attachment in another tenant is invisible under RLS and lands in the same
+/// branch, so a more specific answer would confirm the existence of rows the
+/// caller may not see.
+fn attachment_link_rejection(rejected: AttachmentLinkRejected) -> ApiError {
+    let message = rejected.to_string();
+    match rejected {
+        AttachmentLinkRejected::Duplicate | AttachmentLinkRejected::TooMany => {
+            ApiError::bad_request(message)
+        }
+        AttachmentLinkRejected::NotFound => ApiError::not_found(message),
+        AttachmentLinkRejected::NotComplete | AttachmentLinkRejected::AlreadyLinked => {
+            ApiError::new(StatusCode::CONFLICT, message)
+        }
+        AttachmentLinkRejected::ForeignUploader | AttachmentLinkRejected::ForeignChannel => {
+            ApiError::forbidden(message)
+        }
+    }
+}
+
+/// A refused send → its response, whichever half refused it. One function so a
+/// new rejection variant cannot be added without a status being chosen for it.
+fn send_rejection(rejected: SendRejected) -> ApiError {
+    match rejected {
+        SendRejected::Provenance(provenance) => rejected_signature(provenance),
+        SendRejected::Attachment(attachment) => attachment_link_rejection(attachment),
     }
 }
 
@@ -378,6 +418,10 @@ pub async fn send(
     };
 
     let provenance_signature = request.signature.clone();
+    // ADR-0151: an absent key and an empty array are the same request — no
+    // binding, no lock, no query. Only a non-empty list changes what the send
+    // does.
+    let attachment_ids = request.attachment_ids.clone().unwrap_or_default();
 
     // Membership check + write in ONE tenant transaction (Swift parity): a
     // caller who leaves the channel mid-flight cannot slip a message in. A
@@ -434,12 +478,16 @@ pub async fn send(
                 conn,
                 workspace_id,
                 new_message,
-                signature.as_ref(),
+                SendExtras {
+                    signature: signature.as_ref(),
+                    attachment_ids: &attachment_ids,
+                    via_token_id,
+                },
             )
             .await?
             {
                 Ok(sent) => sent,
-                Err(rejected) => return Err(SendFailure::Rejected(rejected_signature(rejected))),
+                Err(rejected) => return Err(SendFailure::Rejected(send_rejection(rejected))),
             };
 
             // B5.2 — mention → agent run, in THIS transaction and only on a real
@@ -499,6 +547,10 @@ pub async fn send(
             // The echo carries `replyToId` and no rendered quote: the sender
             // picked the target and still has it on screen. See `MessageDto`.
             None,
+            // Attachments, unlike the quote, ARE echoed: the composer holds
+            // ids, and the names/sizes it needs to draw a file card come from
+            // the rows this transaction just bound.
+            &sent.attachments,
         )),
     ))
 }
@@ -728,6 +780,10 @@ pub async fn edit(
         // An edit re-projects the row, not the conversation around it: the
         // quote id rides along, the rendered quote comes from the next read.
         None,
+        // Neither does it re-project the attachments — Swift's edit response
+        // omits them too. Editing a body cannot change what is bound to the
+        // message, so the client keeps the file cards it already drew.
+        &[],
     )))
 }
 
@@ -786,6 +842,11 @@ pub async fn delete_message(
         true,
         None,
         None,
+        // A tombstone names no files. The rows survive with their `message_id`
+        // intact — the deletion is of the message, and reaping the archive is
+        // the janitor's decision, not this route's — but nothing that describes
+        // a deleted message should hand a client something to draw.
+        &[],
     )))
 }
 
@@ -1066,11 +1127,18 @@ mod tests {
             StatusCode::BAD_REQUEST
         );
 
+        // ADR-0151: attachments are served, so `attachmentIds` left this list
+        // too. Its refusals are now about the *rows* — the uploader, the
+        // channel, the lifecycle state — and every one of them is made inside
+        // the send transaction, not by a shape check here.
         let mut with_attachments = base();
         with_attachments.attachment_ids = Some(vec![Uuid::nil()]);
-        assert!(reject_unsupported(&with_attachments).is_err());
+        assert!(
+            reject_unsupported(&with_attachments).is_ok(),
+            "attachmentIds is served now; a bad id is refused by the binding"
+        );
 
-        // An empty array carries no intent → not an error.
+        // An empty array carries no intent, and neither does an absent key.
         let mut empty_attachments = base();
         empty_attachments.attachment_ids = Some(vec![]);
         assert!(reject_unsupported(&empty_attachments).is_ok());
@@ -1167,8 +1235,9 @@ mod tests {
             last_reply_seq: 9,
             last_reply_at_ms: 1_700_000_000_500,
         };
-        let json = serde_json::to_value(message_dto(&message, None, true, Some(&rollup), None))
-            .expect("serialize");
+        let json =
+            serde_json::to_value(message_dto(&message, None, true, Some(&rollup), None, &[]))
+                .expect("serialize");
         assert_eq!(json["thread"]["reply_count"], serde_json::json!(3));
         assert_eq!(json["thread"]["last_reply_seq"], serde_json::json!(9));
         assert_eq!(
@@ -1180,8 +1249,8 @@ mod tests {
 
         // A message with no replies carries no rollup at all — the badge's
         // absence is what "no thread here" looks like.
-        let bare =
-            serde_json::to_value(message_dto(&message, None, true, None, None)).expect("serialize");
+        let bare = serde_json::to_value(message_dto(&message, None, true, None, None, &[]))
+            .expect("serialize");
         assert!(bare.get("thread").is_none(), "{bare}");
     }
 
@@ -1233,7 +1302,7 @@ mod tests {
         let mut message = stored_message();
         message.reply_to_id = Some(Uuid::from_u128(0x11));
         let quote = quoted(Some("원문"), false, false);
-        let json = serde_json::to_value(message_dto(&message, None, true, None, Some(&quote)))
+        let json = serde_json::to_value(message_dto(&message, None, true, None, Some(&quote), &[]))
             .expect("serialize");
 
         assert_eq!(json["replyToId"], serde_json::json!(Uuid::from_u128(0x11)));
@@ -1255,8 +1324,9 @@ mod tests {
 
         // A message that quotes nothing carries neither key. Their absence is
         // what "no quote here" looks like, exactly like the thread rollup's.
-        let bare = serde_json::to_value(message_dto(&stored_message(), None, true, None, None))
-            .expect("serialize");
+        let bare =
+            serde_json::to_value(message_dto(&stored_message(), None, true, None, None, &[]))
+                .expect("serialize");
         assert!(bare.get("replyToId").is_none(), "{bare}");
         assert!(bare.get("replyTo").is_none(), "{bare}");
     }
@@ -1274,6 +1344,7 @@ mod tests {
             true,
             None,
             Some(&quoted(None, true, false)),
+            &[],
         ))
         .expect("serialize");
 
@@ -1304,6 +1375,7 @@ mod tests {
             true,
             None,
             Some(&quoted(Some("나도 인용함"), false, true)),
+            &[],
         ))
         .expect("serialize");
 

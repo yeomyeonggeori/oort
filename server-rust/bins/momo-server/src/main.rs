@@ -53,6 +53,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // MOMO-605: how wide the cross-origin surface is. A count, not the list —
         // the origins themselves go in the warn below only when one was refused.
         cors_allowed_origins = config.cors.allowed_origins.len(),
+        // ADR-0151: which archive backs attachments. The backend name and
+        // whether a shared drive was named — never the key path's contents and
+        // never a token.
+        drive_backend = %config.drive.backend,
+        drive_configured = config.drive.shared_drive_id.is_some(),
         "momo-server starting"
     );
     // MOMO-605: a refused entry is silent otherwise, and silence here reads as
@@ -88,6 +93,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
     }
 
+    // ADR-0151: build the archive before the pool, because `build_archive`
+    // reads the service-account key off disk and a misconfiguration should be in
+    // the log before anything else is opened. It never fails — an unreadable key
+    // degrades to the unavailable archive and the three attachment routes answer
+    // 503 (see `momo_drive::build_archive`).
+    let drive = momo_drive::build_archive(&config.drive.backend_config(config.port)).await;
+    if config.drive.backend == momo_drive::STUB_BACKEND {
+        tracing::warn!(
+            "MOMO_DRIVE_ARCHIVE_BACKEND=stub — attachments are held in memory and are \
+             LOST on restart. Refused outright in a deployed environment; this instance \
+             is not one."
+        );
+    }
+
     let pool = momo_db::connect(&config.db).await?;
     let state = AppState::new(
         pool,
@@ -120,7 +139,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // process the Centrifugo publish credential (CENT_API_URL + CENT_API_KEY).
     // No deployment did before this batch, so an un-updated env block keeps the
     // surface closed rather than half-open.
-    .with_ephemeral(config.ephemeral.clone());
+    .with_ephemeral(config.ephemeral.clone())
+    // ADR-0151: the attachment surface answers 503 unless the operator named a
+    // service-account key and a shared drive. The routes are mounted either way,
+    // so "no archive here" is distinguishable from "no such route".
+    .with_drive(drive);
     let app = build_app(state);
 
     let address: SocketAddr = format!("{}:{}", config.host, config.port).parse()?;

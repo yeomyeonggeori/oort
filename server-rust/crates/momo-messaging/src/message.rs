@@ -36,6 +36,13 @@
 //! publish a message whose mention decision the DB row already contradicts. The
 //! spine's own statement is unchanged; the step is a composition, which is why
 //! [`send_message_in_tx`] and every non-REST producer behave exactly as in B1.
+//!
+//! **ADR-0151** adds one more step in the same place and for the same reason:
+//! the attachment binding ([`crate::attachment::link_attachments_in_tx`]) runs
+//! between the insert and the broadcast, because Swift's payload carries
+//! `attachments` too (`MessageRoutes.swift:174-183, 205, 251`). Putting it there
+//! also makes the refusal atomic — a message whose attachment cannot be bound is
+//! not sent at all, rather than sent without the file its author attached.
 
 use chrono::{DateTime, Utc};
 use momo_db::{with_tenant_tx, DbError, PgPool};
@@ -49,6 +56,10 @@ use serde_json::{json, Map, Value};
 use sqlx::{PgConnection, Row};
 use uuid::Uuid;
 
+use crate::attachment::{
+    decode_paged_attachments, link_attachments_in_tx, message_attachments_in_tx,
+    AttachmentLinkRejected, MessageAttachment, PAGED_ATTACHMENT_COL, PAGED_ATTACHMENT_JOIN,
+};
 use crate::error::{MessagingError, ProvenanceRejected};
 
 /// `message_type` enum (`001_init.sql:15`).
@@ -222,6 +233,14 @@ pub struct SentMessage {
     /// `MessageRoutes.swift:326-333`). A reply never reports the thread it just
     /// joined here — the `thread.updated` broadcast does that.
     pub thread: Option<ThreadRollup>,
+    /// The completed attachments bound to this message (ADR-0151 D1).
+    ///
+    /// Filled only under [`AttachmentPolicy::Project`] — the REST send — and
+    /// only with `status = 'complete'` rows. Empty for every non-REST producer,
+    /// matching Swift: a work-session event card has no attachment to project,
+    /// and reading for one would put a query on the hot path of every system
+    /// message.
+    pub attachments: Vec<MessageAttachment>,
 }
 
 /// The `message.*` column list shared by insert-RETURNING and read queries, so a
@@ -288,6 +307,13 @@ pub fn cent_channel(workspace_id: Uuid, channel_id: Uuid) -> String {
 /// saying anything at all after it was deleted. The resolved quote is a *read*
 /// projection ([`PagedMessage::reply_to`]), rebuilt from the live row on every
 /// fetch.
+///
+/// **`attachments`, by contrast, IS embedded** (Swift `broadcastPayload`
+/// :2944-2953) — and the two are not in tension. An attachment row is immutable
+/// once complete: its name, mime and size cannot be edited and it can never be
+/// re-bound to another message, so the array is a statement of fact that stays
+/// true for as long as the outbox row does. A quote is a pointer at something
+/// that keeps changing; an attachment is not.
 #[allow(clippy::too_many_arguments)]
 pub fn build_broadcast_payload(
     workspace_id: Uuid,
@@ -302,6 +328,7 @@ pub fn build_broadcast_payload(
     root_id: Option<Uuid>,
     reply_to_id: Option<Uuid>,
     props: &Value,
+    attachments: &[MessageAttachment],
 ) -> Value {
     let channel = cent_channel(workspace_id, channel_id);
 
@@ -316,6 +343,11 @@ pub fn build_broadcast_payload(
     message_payload.insert("hlc_count".into(), json!(hlc_count));
     message_payload.insert("root_id".into(), json!(root_id));
     message_payload.insert("reply_to_id".into(), json!(reply_to_id));
+    // Swift only carries attachments when non-empty, and the key order below
+    // matches its dictionary literal: attachments before props.
+    if !attachments.is_empty() {
+        message_payload.insert("attachments".into(), json!(attachments));
+    }
     // Swift only carries props when non-empty.
     if let Some(obj) = props.as_object() {
         if !obj.is_empty() {
@@ -377,6 +409,53 @@ enum MentionPolicy {
     /// recipients' `mention_count` — and only then build the broadcast, so the
     /// realtime payload carries the mention decision the DB row now holds.
     Record,
+}
+
+/// Whether a send binds and projects attachments (ADR-0151 D1). Private for the
+/// same reason as its two siblings: a caller chooses by picking an entry point.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AttachmentPolicy {
+    /// The B1 spine's behaviour: no binding, no projection, no `attachments` key
+    /// on the payload. Every non-REST producer — work-session cards, gateway
+    /// completions, agent replies — takes this, exactly as in Swift, where
+    /// `linkAttachments`/`fetchAttachments` are called from `MessageRoutes.send`
+    /// and nowhere else.
+    Skip,
+    /// Swift `MessageRoutes.send`: bind `attachmentIds` on a first insert, then
+    /// project the message's completed attachments onto both the response and
+    /// the broadcast.
+    Project,
+}
+
+/// The REST send's optional extras — the two things `MessageRoutes.send` can
+/// carry that the spine has no opinion about.
+///
+/// A struct rather than two more positional parameters because both are
+/// *optional* and both are refusable, and a call site that has to write
+/// `None, &[], None` to mean "an ordinary send" is a call site that will
+/// eventually pass them in the wrong order.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct SendExtras<'a> {
+    /// ADR-0146 provenance. `None` takes the unchanged unsigned path.
+    pub signature: Option<&'a MessageSignature>,
+    /// ADR-0151 `attachmentIds`. Empty is the unchanged path — no lock is taken
+    /// and no query is issued.
+    pub attachment_ids: &'a [Uuid],
+    /// `audit_log.via_token_id` for the attachment-binding audit rows. `None`
+    /// for a host-signed action (see `momo_db::audit`).
+    pub via_token_id: Option<Uuid>,
+}
+
+/// Why a REST send was refused before it could commit.
+///
+/// Both halves must roll the transaction back, and they are one type so a caller
+/// cannot handle one and forget the other.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum SendRejected {
+    #[error("{0}")]
+    Provenance(#[from] ProvenanceRejected),
+    #[error("{0}")]
+    Attachment(#[from] AttachmentLinkRejected),
 }
 
 /// Steps 1+2 of the spine: row-locked seq bump and idempotent insert, in one
@@ -470,17 +549,27 @@ async fn finish_send_in_tx(
     deduped: bool,
     mentions: MentionPolicy,
     threads: ThreadPolicy,
+    attachments_policy: AttachmentPolicy,
 ) -> Result<SentMessage, DbError> {
     if deduped {
         // A retry still reports the root's rollup: the caller asked "what is
         // this message", and the answer includes the thread hanging under it,
         // whether or not this particular call created anything.
         let thread = own_thread_rollup(&mut *conn, &message, threads).await?;
+        // …and, for the same reason, the attachments already on it. Swift reads
+        // them unconditionally after the insert branch
+        // (`MessageRoutes.swift:205`), so a retried send echoes the same file
+        // cards the first one did instead of an empty message.
+        let attachments = match attachments_policy {
+            AttachmentPolicy::Skip => Vec::new(),
+            AttachmentPolicy::Project => message_attachments_in_tx(&mut *conn, message.id).await?,
+        };
         return Ok(SentMessage {
             message,
             deduped,
             outbox_id: None,
             thread,
+            attachments,
         });
     }
 
@@ -545,6 +634,15 @@ async fn finish_send_in_tx(
         _ => None,
     };
 
+    // Read AFTER the binding the caller performed and BEFORE the payload is
+    // built, which is the only ordering that makes the broadcast describe the
+    // row: an earlier read would publish a message with no files, and a later
+    // one would publish files the outbox row does not mention.
+    let attachments = match attachments_policy {
+        AttachmentPolicy::Skip => Vec::new(),
+        AttachmentPolicy::Project => message_attachments_in_tx(&mut *conn, message.id).await?,
+    };
+
     let payload = build_broadcast_payload(
         workspace_id,
         message.channel_id,
@@ -558,6 +656,7 @@ async fn finish_send_in_tx(
         message.root_id,
         message.reply_to_id,
         &message.props,
+        &attachments,
     );
     let outbox_id = emit_outbox(
         &mut *conn,
@@ -591,6 +690,7 @@ async fn finish_send_in_tx(
         deduped,
         outbox_id: Some(outbox_id),
         thread,
+        attachments,
     })
 }
 
@@ -623,6 +723,7 @@ pub async fn send_message_in_tx(
         deduped,
         MentionPolicy::Skip,
         ThreadPolicy::Skip,
+        AttachmentPolicy::Skip,
     )
     .await
 }
@@ -637,35 +738,48 @@ pub async fn send_message_in_tx(
 ///    a client can sign what it sent. Recording after the mention pass would
 ///    make every mentioning message fail verification, since no client can
 ///    predict the ids the server is about to add;
-/// 3. **mentions, then the thread rollup, then broadcast** — the payload carries
-///    `props.mention_member_ids` exactly like Swift's, so a realtime client
-///    highlights a mention without a second fetch; and when the send is a reply,
-///    the root's rollup is bumped first so the `thread.updated` publication
-///    committed beside the reply describes a row that already exists.
+/// 3. **attachment binding** (ADR-0151, when `attachmentIds` is non-empty and
+///    the insert was real) — before the mention pass because it is the step that
+///    can still refuse the whole send, and refusing early means the mention
+///    badges of a message that will not exist are never written;
+/// 4. **mentions, then the thread rollup, then the attachment read, then
+///    broadcast** — the payload carries `props.mention_member_ids` and
+///    `attachments` exactly like Swift's, so a realtime client highlights a
+///    mention and draws a file card without a second fetch; and when the send is
+///    a reply, the root's rollup is bumped first so the `thread.updated`
+///    publication committed beside the reply describes a row that already
+///    exists.
 ///
 /// The caller must have validated the `root_id` (see
 /// [`validate_thread_root_in_tx`]) before calling this: the rollup bump takes
 /// the root's row lock and would happily create one for a root in another
 /// channel.
 ///
-/// A rejected signature travels in the `Ok` half (see [`ProvenanceRejected`]);
-/// the caller must roll the transaction back so a refused assertion cannot leave
-/// the message behind as if it had been sent unsigned.
+/// A rejection travels in the `Ok` half (see [`SendRejected`]); the caller must
+/// roll the transaction back, so neither a refused assertion nor a refused
+/// attachment can leave the message behind as if it had been sent plain.
 pub async fn send_message_with_mentions_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     input: NewMessage,
-    signature: Option<&MessageSignature>,
-) -> Result<Result<SentMessage, ProvenanceRejected>, DbError> {
+    extras: SendExtras<'_>,
+) -> Result<Result<SentMessage, SendRejected>, DbError> {
+    let SendExtras {
+        signature,
+        attachment_ids,
+        via_token_id,
+    } = extras;
     if let Some(signature) = signature {
         if input.client_msg_id.is_none() {
-            return Ok(Err(ProvenanceRejected::MissingClientMsgId));
+            return Ok(Err(ProvenanceRejected::MissingClientMsgId.into()));
         }
         if signature.signer_member_id != input.author_member_id {
-            return Ok(Err(ProvenanceRejected::SignerIsNotAuthor));
+            return Ok(Err(ProvenanceRejected::SignerIsNotAuthor.into()));
         }
     }
 
+    let channel_id = input.channel_id;
+    let author_member_id = input.author_member_id;
     let (message, deduped) = insert_message_in_tx(conn, workspace_id, input).await?;
 
     if let Some(signature) = signature {
@@ -673,13 +787,33 @@ pub async fn send_message_with_mentions_in_tx(
         // subject, so re-read it from the message rather than the request.
         let client_msg_id = match client_msg_id_of(&mut *conn, &message).await? {
             Some(id) => id,
-            None => return Ok(Err(ProvenanceRejected::MissingClientMsgId)),
+            None => return Ok(Err(ProvenanceRejected::MissingClientMsgId.into())),
         };
         if let Err(rejected) =
             record_message_provenance(&mut *conn, workspace_id, &message, client_msg_id, signature)
                 .await?
         {
-            return Ok(Err(rejected));
+            return Ok(Err(rejected.into()));
+        }
+    }
+
+    // `!deduped` is Swift's `if didInsert` guard (`MessageRoutes.swift:174`) and
+    // it is what makes a retried send safe: binding again would find the
+    // attachment already linked — to this very message — and refuse a request
+    // that had in fact succeeded.
+    if !deduped && !attachment_ids.is_empty() {
+        if let Err(rejected) = link_attachments_in_tx(
+            &mut *conn,
+            workspace_id,
+            channel_id,
+            message.id,
+            author_member_id,
+            via_token_id,
+            attachment_ids,
+        )
+        .await?
+        {
+            return Ok(Err(rejected.into()));
         }
     }
 
@@ -690,6 +824,7 @@ pub async fn send_message_with_mentions_in_tx(
         deduped,
         MentionPolicy::Record,
         ThreadPolicy::Maintain,
+        AttachmentPolicy::Project,
     )
     .await?;
     Ok(Ok(sent))
@@ -992,6 +1127,9 @@ pub struct PagedMessage {
     /// [`StoredMessage::reply_to_id`] is set — a tombstoned target still
     /// resolves, as a tombstone.
     pub reply_to: Option<QuotedMessage>,
+    /// The completed attachments on this message (ADR-0151 D1), resolved in the
+    /// **same statement** as the page — see [`PAGED_ATTACHMENT_JOIN`].
+    pub attachments: Vec<MessageAttachment>,
 }
 
 /// The quoted message a client draws above a reply (ADR-0148 규칙 3/4).
@@ -1035,6 +1173,13 @@ const PAGED_COLS: &str = "m.id, m.workspace_id, m.channel_id, m.seq, m.hlc_ts, m
      q.type::text AS quote_message_type, q.state::text AS quote_state, q.body AS quote_body, \
      q.edited_at AS quote_edited_at, q.deleted_at AS quote_deleted_at, \
      (q.reply_to_id IS NOT NULL) AS quote_quotes_another";
+
+/// [`PAGED_COLS`] plus the attachment aggregate. A second constant rather than
+/// an extension of the first because `interaction.rs` builds its own column list
+/// on top of [`PAGED_COLS`] and does not carry the lateral join.
+fn paged_cols_with_attachments() -> String {
+    format!("{PAGED_COLS}, {PAGED_ATTACHMENT_COL}")
+}
 
 /// The join predicate. `m.root_id IS NULL` is not redundant with
 /// `t.root_id = m.id`: a reply's id could in principle key its own `thread` row,
@@ -1094,6 +1239,7 @@ fn decode_paged(row: &sqlx::postgres::PgRow) -> Result<PagedMessage, sqlx::Error
             row.try_get("last_reply_at_ms")?,
         ),
         reply_to: decode_quoted(row)?,
+        attachments: decode_paged_attachments(row)?,
     })
 }
 
@@ -1109,8 +1255,10 @@ fn channel_page_sql(cursor: HistoryCursor) -> String {
         HistoryCursor::Before(_) => ("AND m.seq < $3 ", "DESC"),
         HistoryCursor::After(_) => ("AND m.seq > $3 ", "ASC"),
     };
+    let cols = paged_cols_with_attachments();
     format!(
-        "SELECT {PAGED_COLS} FROM message m {PAGED_THREAD_JOIN} {PAGED_QUOTE_JOIN} \
+        "SELECT {cols} FROM message m {PAGED_THREAD_JOIN} {PAGED_QUOTE_JOIN} \
+         {PAGED_ATTACHMENT_JOIN} \
           WHERE m.channel_id = $1 {predicate}\
           ORDER BY m.seq {order} \
           LIMIT $2"
@@ -1120,8 +1268,10 @@ fn channel_page_sql(cursor: HistoryCursor) -> String {
 /// The thread-replies page's statement, as a value — same reason as
 /// [`channel_page_sql`].
 fn thread_replies_sql() -> String {
+    let cols = paged_cols_with_attachments();
     format!(
-        "SELECT {PAGED_COLS} FROM message m {PAGED_THREAD_JOIN} {PAGED_QUOTE_JOIN} \
+        "SELECT {cols} FROM message m {PAGED_THREAD_JOIN} {PAGED_QUOTE_JOIN} \
+         {PAGED_ATTACHMENT_JOIN} \
           WHERE m.channel_id = $1 AND m.root_id = $2 AND m.seq > $3 \
           ORDER BY m.seq ASC \
           LIMIT $4"
@@ -1903,6 +2053,7 @@ mod tests {
             None,
             None,
             &json!({}),
+            &[],
         );
 
         // Envelope shape (BroadcastPayload).
@@ -1958,6 +2109,7 @@ mod tests {
             None,
             Some(quoted),
             &json!({}),
+            &[],
         );
         let inner = &payload["data"]["payload"];
         assert_eq!(inner["reply_to_id"], json!(quoted));
@@ -1990,6 +2142,7 @@ mod tests {
             Some(root),
             Some(quoted),
             &json!({}),
+            &[],
         );
         let inner = &payload["data"]["payload"];
         assert_eq!(inner["root_id"], json!(root));
@@ -2074,11 +2227,24 @@ mod tests {
                 sql.contains("q.channel_id = m.channel_id"),
                 "규칙 2 must hold in the read path too: {sql}"
             );
+            // ADR-0151 widened this from "exactly one SELECT" to "exactly one
+            // top-level SELECT", because the attachment aggregate is a LATERAL
+            // subquery and therefore does contain a nested one. The property
+            // being defended is unchanged and is the one that matters — **one
+            // round trip** — so it is now asserted directly: a single scan of
+            // `message`, and every other SELECT inside a join the planner
+            // resolves in the same statement.
             assert_eq!(
-                sql.matches("SELECT").count(),
+                sql.matches("FROM message m").count(),
                 1,
-                "a page is ONE statement — a second SELECT here is a second round \
-                 trip in disguise: {sql}"
+                "a page is ONE statement — a second scan of `message` here is a \
+                 second round trip in disguise: {sql}"
+            );
+            assert_eq!(
+                sql.matches("SELECT").count() - sql.matches("LEFT JOIN LATERAL ( SELECT").count(),
+                1,
+                "every SELECT beyond the first must be inside a LATERAL join, not \
+                 a statement of its own: {sql}"
             );
             assert!(
                 !sql.contains(';'),
@@ -2187,9 +2353,74 @@ mod tests {
             None,
             None,
             &json!({"mention_member_ids": ["x"]}),
+            &[],
         );
         let inner = &payload["data"]["payload"];
         assert_eq!(inner["body"], Value::Null);
         assert_eq!(inner["props"]["mention_member_ids"], json!(["x"]));
+        assert!(
+            inner.get("attachments").is_none(),
+            "an empty array is omitted, not sent: {inner}"
+        );
+    }
+
+    /// ADR-0151 — the realtime frame carries the same four keys the REST
+    /// projection does. A client draws its file card straight off this frame, so
+    /// a rename here is a blank card in every connected client.
+    #[test]
+    fn broadcast_payload_carries_attachments_with_the_wire_keys() {
+        let attachment = MessageAttachment {
+            id: "11111111-1111-1111-1111-111111111111".into(),
+            name: "보고서.pdf".into(),
+            mime: "application/pdf".into(),
+            size_bytes: 2048,
+        };
+        let payload = build_broadcast_payload(
+            Uuid::from_u128(1),
+            Uuid::from_u128(2),
+            Uuid::from_u128(3),
+            4,
+            MessageType::Text,
+            Some("자료 붙였습니다"),
+            Uuid::from_u128(5),
+            9,
+            0,
+            None,
+            None,
+            &json!({}),
+            std::slice::from_ref(&attachment),
+        );
+        let attachments = &payload["data"]["payload"]["attachments"];
+        assert_eq!(attachments[0]["id"], json!(attachment.id));
+        assert_eq!(attachments[0]["name"], json!("보고서.pdf"));
+        assert_eq!(attachments[0]["mime"], json!("application/pdf"));
+        assert_eq!(attachments[0]["sizeBytes"], json!(2048));
+        assert!(
+            attachments[0].get("size_bytes").is_none(),
+            "the realtime key is camelCase like the REST one: {attachments}"
+        );
+        // The archive identifier and the lifecycle status are server-side facts.
+        assert!(attachments[0].get("driveFileId").is_none());
+        assert!(attachments[0].get("status").is_none());
+    }
+
+    /// The two page statements resolve attachments in the SAME query as the
+    /// page — the N+1 answer, asserted against the SQL rather than trusted.
+    #[test]
+    fn one_page_is_one_statement_however_many_attachments_it_holds() {
+        for sql in [
+            channel_page_sql(HistoryCursor::Newest),
+            channel_page_sql(HistoryCursor::Before(10)),
+            thread_replies_sql(),
+        ] {
+            assert!(sql.contains("attachments_json"), "{sql}");
+            assert!(sql.contains("a.status = 'complete'"), "{sql}");
+            assert_eq!(
+                sql.matches("LEFT JOIN LATERAL").count(),
+                1,
+                "the attachment aggregate is the page's own join, not a second \
+                 query: {sql}"
+            );
+        }
     }
 }

@@ -37,7 +37,7 @@ use momo_messaging::{
     active_workspace_role, canonical_participants, create_channel, dm_participant_key,
     list_direct_messages, list_read_state, open_direct_message_in_tx, search_messages,
     send_message, send_message_with_mentions_in_tx, update_read_cursor_in_tx, ChannelKind,
-    NewChannel, NewMessage, OpenedDirectMessage, SearchCursor,
+    NewChannel, NewMessage, OpenedDirectMessage, SearchCursor, SendExtras,
 };
 use serde_json::Value;
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
@@ -601,7 +601,8 @@ async fn d2_b12_3_mention_lands_in_the_recipient_count() {
 
     let sent = with_tenant_tx(&app, ws, move |conn| {
         Box::pin(async move {
-            let outcome = send_message_with_mentions_in_tx(conn, ws, input, None).await?;
+            let outcome =
+                send_message_with_mentions_in_tx(conn, ws, input, SendExtras::default()).await?;
             Ok::<_, DbError>(outcome.expect("an unsigned send is never a provenance rejection"))
         })
     })
@@ -670,7 +671,7 @@ async fn d2_b12_3_mention_lands_in_the_recipient_count() {
                 ws,
                 NewMessage::text(channel.id, alice, "no mention here")
                     .with_client_msg_id(Uuid::new_v4()),
-                None,
+                SendExtras::default(),
             )
             .await?;
             Ok::<_, DbError>(outcome.expect("unsigned"))

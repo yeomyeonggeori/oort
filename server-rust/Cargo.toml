@@ -56,6 +56,12 @@ reqwest = { version = "0.12", default-features = false, features = [
   "json",
   "rustls-tls",
 ] }
+# ADR-0151: the attachment content proxy *streams* Drive bytes through rather
+# than buffering them, so the 100 MB ceiling is a transfer bound and not a
+# per-download memory one. `bytes` is the currency reqwest and axum already
+# exchange, so pinning it here lets the stream cross momo-drive → momo-server
+# with no copy and no third buffer type in between.
+bytes = "1"
 
 # errors / logging
 thiserror = "1"

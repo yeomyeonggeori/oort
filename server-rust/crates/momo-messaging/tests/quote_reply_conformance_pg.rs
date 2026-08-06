@@ -43,7 +43,7 @@ use momo_messaging::{
     create_channel, delete_message_in_tx, edit_message_in_tx, list_channel_page,
     list_thread_replies, send_message_with_mentions_in_tx, validate_quote_target_in_tx,
     ChannelKind, HistoryCursor, NewChannel, NewMessage, PagedMessage, QuoteTargetInvalid,
-    SentMessage,
+    SendExtras, SentMessage,
 };
 use serde_json::Value;
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
@@ -207,7 +207,8 @@ async fn new_channel(app: &PgPool, ws: Uuid, name: &str, owner: Uuid) -> Uuid {
 async fn send(app: &PgPool, ws: Uuid, input: NewMessage) -> SentMessage {
     with_tenant_tx(app, ws, move |conn| {
         Box::pin(async move {
-            let outcome = send_message_with_mentions_in_tx(conn, ws, input, None).await?;
+            let outcome =
+                send_message_with_mentions_in_tx(conn, ws, input, SendExtras::default()).await?;
             Ok::<_, DbError>(outcome.expect("an unsigned send is never a provenance rejection"))
         })
     })

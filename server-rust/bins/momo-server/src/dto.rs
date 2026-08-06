@@ -12,6 +12,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
+/// ADR-0151 — re-exported rather than restated. The `attachments` array on a
+/// message is built in SQL (`momo_messaging::attachment::PAGED_ATTACHMENT_JOIN`)
+/// and its keys are that statement's; a second struct here would be a second
+/// place for `sizeBytes` to be spelled.
+pub use momo_messaging::MessageAttachment;
+
 // ---------------------------------------------------------------------------
 // health
 // ---------------------------------------------------------------------------
@@ -109,9 +115,10 @@ pub struct MemberDto {
 ///
 /// Closed-world like the Swift decoder (ADR-0134 D1): an unknown key is a 400,
 /// never a silently dropped field. The keys this server still does not serve
-/// (`runId`, `attachmentIds`, `routing`) are decoded so the handler can reject
-/// them **visibly** instead of accepting the request and dropping the intent on
-/// the floor. `rootId` left that list in B4.1 — it is served now.
+/// (`runId`) are decoded so the handler can reject them **visibly** instead of
+/// accepting the request and dropping the intent on the floor. `rootId` left
+/// that list in B4.1, `routing` in B5.3a and `attachmentIds` in ADR-0151 — each
+/// departure is a batch that started serving the field.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SendMessageRequest {
@@ -136,6 +143,9 @@ pub struct SendMessageRequest {
     pub props: Option<BTreeMap<String, String>>,
     #[serde(default)]
     pub run_id: Option<Uuid>,
+    /// ADR-0151 — the completed attachments this message binds, in the order the
+    /// composer holds them. Bound inside the send transaction, so a refusal
+    /// takes the message with it.
     #[serde(default)]
     pub attachment_ids: Option<Vec<Uuid>>,
     #[serde(default)]
@@ -256,9 +266,75 @@ pub struct MessageDto {
     /// absent and whose `state` is `"deleted"`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub deleted_at_ms: Option<i64>,
+    /// ADR-0151 — the completed attachments bound to this message, oldest first.
+    ///
+    /// **Omitted when empty**, not sent as `[]`: the openapi schema declares
+    /// `minItems: 1`, and Swift's `Codable` optional leaves the key out. A
+    /// client therefore tests for presence, exactly as it does for `thread`.
+    ///
+    /// Carries no `status` and no archive identifier. Only completed rows are
+    /// ever projected, and the bytes are reachable only through the
+    /// authenticated content proxy (ADR-0151 D3) — a Drive URL never appears on
+    /// this wire.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub attachments: Vec<MessageAttachment>,
     /// Present only on a root message that has replies (B4.1).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thread: Option<ThreadRollupDto>,
+}
+
+// ---------------------------------------------------------------------------
+// attachments (ADR-0151)
+// ---------------------------------------------------------------------------
+
+/// `POST …/attachments/uploads` request (openapi `CreateAttachmentUploadRequest`).
+///
+/// `size` is the client's declaration, and the whole completion step exists to
+/// check it: the server never sees the bytes on the way up, so a declared size
+/// that Drive later contradicts is what turns an attachment `failed`.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CreateAttachmentUploadRequest {
+    pub name: String,
+    pub mime: String,
+    pub size: i64,
+}
+
+/// `POST …/attachments/uploads` response (openapi `AttachmentUploadResponse`).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AttachmentUploadResponse {
+    pub id: String,
+    /// Always `"pending"` — the row was just created. Serialized rather than
+    /// implied because the spec's enum lists it and a client's state machine
+    /// reads it.
+    pub status: String,
+    /// The archive's own capability URL. **The one archive-side value that ever
+    /// crosses this wire**, and it crosses it because the client has to upload
+    /// somewhere: it grants exactly one write of one pre-declared file, and it
+    /// is not a read capability.
+    pub upload_url: String,
+}
+
+/// One attachment row (openapi `Attachment`), returned by the completion route.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AttachmentResponse {
+    pub id: String,
+    pub channel_id: String,
+    pub uploader_member_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message_id: Option<String>,
+    pub name: String,
+    pub mime: String,
+    /// Named `size` here and `sizeBytes` on [`MessageAttachment`]. The
+    /// difference is in the spec (`Attachment.size` vs
+    /// `MessageAttachment.sizeBytes`) and therefore in Swift's two DTOs, so it
+    /// is preserved: a client parsing the deployed wire would break on a
+    /// "tidy-up" that unified them.
+    pub size: i64,
+    pub status: String,
+    pub created_at_ms: i64,
 }
 
 /// `PATCH /v1/workspaces/{ws}/messages/{id}` request body (Swift
@@ -2530,6 +2606,7 @@ mod tests {
             state: None,
             edited_at_ms: None,
             deleted_at_ms: None,
+            attachments: Vec::new(),
             thread: None,
         };
         let json = serde_json::to_value(&dto).expect("serialize");
@@ -2573,6 +2650,7 @@ mod tests {
             state: Some("edited".into()),
             edited_at_ms: Some(1_700_000_000_123),
             deleted_at_ms: None,
+            attachments: Vec::new(),
             thread: None,
         })
         .expect("serialize");
