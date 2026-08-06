@@ -376,10 +376,32 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   chipText: {fontSize: font.meta, lineHeight: line.meta, fontWeight: '600'},
+  /**
+   * 경과는 **뜻을 나르는 글자**다 — 이 목록의 정렬 근거이고(같은 분류 안에서 오래된
+   * 것 먼저), 사람이 「이건 너무 오래 붙들려 있다」를 정하는 재료다. 장식이 아니므로
+   * 3등 잉크에 두지 않는다. U4-4 가 행의 시각에 대해 내린 그 판정이고
+   * (`MessageRow.dividerLabel` 이 같은 이유로 이미 `textMuted` 다), 웹의 쌍둥이 칸도
+   * `text-ink-muted` 로 선다(`AdeDrawer`).
+   *
+   * 대비도 그 판정을 지지한다 — `textFaint`(#6b7280)는 **카드 surface**(#171a20)
+   * 위에서 3.605:1 이라 본문 AA(4.5:1) 미달이고, 앱 배경 위의 3.909:1 보다 오히려
+   * 나쁘다(카드가 한 단 밝은 만큼). `textMuted` 는 같은 자리에서 6.612:1 이다.
+   */
   cardElapsed: {
     fontSize: font.meta,
     lineHeight: line.meta,
-    color: color.textFaint,
+    color: color.textMuted,
+    /**
+     * 1Hz 로 다시 그려지는 숫자다. 비례폭이면 `9s`->`10s`, `59s`->`1m 00s` 처럼
+     * 자릿수가 바뀔 때마다 칩과 제목이 매 초 1~2px 씩 흔들린다 — 정지한 목록에서
+     * 그 떨림은 무언가 바뀌었다는 신호로 읽힌다.
+     *
+     * `MessageRow.dividerFigure` 는 같은 이유로 있으면서 **숫자 조각만** 감쌌다
+     * (조사·단위가 자릿폭을 함께 받으면 한글 음절 사이가 벌어져서다). 여기서는
+     * 노드 하나에 그대로 건다: `elapsedLabel` 이 만드는 문자열은 `42s`/`12m 03s`/
+     * `1h 04m` 이라 한글이 한 글자도 없다.
+     */
+    fontVariant: ['tabular-nums'],
   },
   cardMeta: {fontSize: font.meta, lineHeight: line.meta, color: color.textMuted},
 });

@@ -19,6 +19,7 @@ import React from 'react';
 import '../src/boot/polyfills';
 import '../src/boot/coreHost';
 
+import {color} from '../src/design/tokens';
 import {resetAgentWorking} from '../src/features/agents/workingSignal';
 import AppShell from '../src/shell/AppShell';
 import {__resetSessionStore, sessionPort} from '../src/storage/secureSession';
@@ -638,6 +639,72 @@ describe('관제 목록 — 무엇이, 어디서, 살아남는지', () => {
         `ade-card-durability-run|${RUN_KIM.toLowerCase()}|${GENERAL.toLowerCase()}`,
       ),
     ).toBeNull();
+  });
+
+  it('등록기에 없는 호스트의 세션은 「실행 위치 확인 필요」를 경고 톤으로 세운다', async () => {
+    // 호스트 등록기는 워크스페이스가 **지금 아는** 기계의 목록이고 세션 원장은
+    // 있었던 일의 기록이라, 기계가 등록에서 빠진 뒤에도 그 기계의 세션 행은 남는다.
+    // 그 카드에 대해 화면이 할 수 있는 정직한 말은 「모른다」 하나뿐이고, 그것은
+    // 침묵이 아니라 **경고**여야 한다 — 사람이 랩탑을 덮을지 정하는 자리다.
+    installFetch({
+      workSessions: () =>
+        jsonResponse(200, {
+          workSessions: [
+            ...WORK_SESSIONS,
+            {
+              ...WORK_SESSIONS[1],
+              id: 'SESSION-HOST-GONE',
+              hostId: 'HOST-RETIRED',
+              label: '스테이징 마이그레이션',
+            },
+          ],
+        }),
+    });
+    await openConversation();
+    await openBothTurns();
+    await waitFor(() => expect(screen.getByTestId('ade-summary')).toBeTruthy());
+    fireEvent.press(screen.getByTestId('ade-summary'));
+    await waitFor(() => expect(screen.getByTestId('ade-card-list')).toBeTruthy());
+
+    await waitFor(() =>
+      expect(
+        screen.getByTestId('ade-card-durability-session|session-host-gone'),
+      ).toBeTruthy(),
+    );
+    const badge = screen.getByTestId(
+      'ade-card-durability-session|session-host-gone',
+    );
+    expect(badge).toHaveTextContent(new RegExp(durabilityBadge('unknown')));
+    // 「모른다」는 안심시키는 두 문장과 **다른 색**으로 선다. 셋이 같은 잉크면 이
+    // 줄은 세 등급 모두에 대해 같은 무게로 읽히고, 그러면 경고가 경고가 아니다.
+    expect(flatStyle(badge.props.style).color).toBe(color.warn);
+    expect(
+      flatStyle(
+        screen.getByTestId('ade-card-durability-session|session-orphaned').props
+          .style,
+      ).color,
+    ).not.toBe(color.warn);
+  });
+
+  it('경과는 3등 잉크에 두지 않고, 매 초 자리를 옮기지 않는다', async () => {
+    installFetch();
+    await openConversation();
+    await openBothTurns();
+    await waitFor(() => expect(screen.getByTestId('ade-summary')).toBeTruthy());
+    fireEvent.press(screen.getByTestId('ade-summary'));
+    await waitFor(() => expect(screen.getByTestId('ade-card-list')).toBeTruthy());
+
+    const elapsed = flatStyle(
+      screen.getByTestId('ade-card-elapsed-session|session-running').props.style,
+    );
+    // 이 숫자는 목록의 정렬 근거이자 사람이 「너무 오래 붙들려 있다」를 정하는
+    // 재료다 — 장식이 아니므로 3등 잉크에 두지 않는다. `textFaint` 는 카드
+    // surface(#171a20) 위에서 3.605:1 로 본문 AA 미달이기도 하다 (design-review H-1).
+    expect(elapsed.color).toBe(color.textMuted);
+    expect(elapsed.color).not.toBe(color.textFaint);
+    // 1Hz 로 다시 그려지는 숫자다. 비례폭이면 `9s`->`10s` 처럼 자릿수가 바뀔 때마다
+    // 옆의 칩과 제목이 매 초 흔들린다 (design-review M-2).
+    expect(elapsed.fontVariant).toEqual(['tabular-nums']);
   });
 
   it('카드를 누르면 그 카드의 방이 열리고, 목록은 물러난다', async () => {
