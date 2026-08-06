@@ -1165,7 +1165,14 @@ impl AgentWorker {
             momo_t3::work_control::spawn_host_candidates_in_tx(conn, workspace_id, owner_member_id)
                 .await
                 .map_err(t3_as_db)?;
-        let default_host_id = momo_t3::work_control::default_spawn_host(&candidates)
+        // ADR-0125 D6-A's "마지막 사용" (migration 061), read for the owner the
+        // candidates were judged for. The tool path and the REST path build the
+        // same card, so they read the same preference.
+        let last_used =
+            momo_t3::work_control::last_used_spawn_host_in_tx(conn, workspace_id, owner_member_id)
+                .await
+                .map_err(t3_as_db)?;
+        let default_host_id = momo_t3::work_control::default_spawn_host(&candidates, last_used)
             // The model's proposal is the default only when it is a host the
             // picker would actually offer — otherwise the card would open
             // pre-set to a row it also greys out.
