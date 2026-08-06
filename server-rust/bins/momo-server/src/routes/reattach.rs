@@ -111,6 +111,9 @@ fn event_dto(event: SessionEvent, channel_id: Uuid, root_message_id: Uuid) -> Me
         // rather than being reported as `null`.
         edited_at_ms: None,
         deleted_at_ms: None,
+        // ADR-0151 — a host's log line carries no file. Attachments are bound by
+        // the REST send, and a session event never travels that path.
+        attachments: Vec::new(),
         // A replayed row is a reply inside the session thread, and a reply
         // carries no rollup of its own — momo threads are one level deep.
         thread: None,

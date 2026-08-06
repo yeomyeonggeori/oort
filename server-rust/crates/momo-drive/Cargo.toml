@@ -1,0 +1,43 @@
+[package]
+name = "momo-drive"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+# ADR-0151 D1 — the workspace Drive archive, ported from Swift
+# `Drive/DriveArchiveClient.swift`. A crate rather than a module in
+# `momo-server` for exactly the reason `momo-ephemeral` is one: the sealed
+# capability is only a wall if the HTTP client it wraps cannot be reached
+# around. `reqwest` is a dependency of THIS crate, never of `momo-server`, so an
+# attachment handler cannot build a request of its own — the only thing it can
+# reach is the [`DriveArchive`] trait, whose five methods are the entire
+# outbound surface.
+#
+# **There is deliberately no `momo-db` and no `sqlx` here** (ADR-0151 D3): the
+# archive owns bytes, PostgreSQL owns authorization and lifecycle. A DB
+# dependency in this manifest would make that split unenforceable, so
+# `lib.rs::the_archive_has_no_database_dependency` asserts it against this file.
+#
+# **There is deliberately no `axum` here** either: the content proxy's response
+# type belongs to the route layer, so this crate hands back a byte stream and
+# never an HTTP response.
+[dependencies]
+async-trait.workspace = true
+bytes.workspace = true
+chrono.workspace = true
+futures.workspace = true
+# RS256 over the service-account private key — the `assertion` half of the
+# JWT-bearer grant. Already the workspace's JWT crate (momo-auth signs App JWTs
+# with it); no second signing implementation enters the tree.
+jsonwebtoken.workspace = true
+reqwest = { workspace = true, features = ["stream"] }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["sync"] }
+tracing.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

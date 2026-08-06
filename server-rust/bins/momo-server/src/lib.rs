@@ -142,6 +142,19 @@ pub struct AppState {
     /// 503, which is what every deployment that has not updated its env block
     /// gets.
     pub ephemeral: Arc<EphemeralState>,
+    /// ADR-0151 — the workspace Drive archive. Fail-closed like the rest: an
+    /// instance that named no service-account key holds
+    /// `momo_drive::UnavailableDriveArchive`, so the three attachment routes are
+    /// still mounted and answer **503 "Drive archive is not configured"**. They
+    /// are mounted rather than conditionally absent so a client can distinguish
+    /// "this server has no archive" from "this server is too old to have the
+    /// route".
+    ///
+    /// Typed as the trait object, not the concrete backend, and that is the
+    /// whole reason the conformance suite can drive the completion route's
+    /// mismatch branch: a test supplies its own archive without a test-only
+    /// branch existing anywhere in the handlers.
+    pub drive: Arc<dyn momo_drive::DriveArchive>,
     /// The key `ephemeral_grant`s are signed and verified with, derived once at
     /// startup from the app JWT secret (`momo_auth::ephemeral_grant_key`).
     ///
@@ -167,8 +180,17 @@ impl AppState {
             mentions: Arc::new(MentionSettings::default()),
             cors: Arc::new(CorsConfig::default()),
             ephemeral: Arc::new(EphemeralState::default()),
+            drive: Arc::new(momo_drive::UnavailableDriveArchive),
             ephemeral_grant_key: Arc::new(ephemeral_grant_key),
         }
+    }
+
+    /// Attach the operator's Drive archive (ADR-0151), same rationale as every
+    /// builder above: the default is an attachment surface that says "not
+    /// configured", not one that quietly stores bytes somewhere nobody chose.
+    pub fn with_drive(mut self, archive: Arc<dyn momo_drive::DriveArchive>) -> Self {
+        self.drive = archive;
+        self
     }
 
     /// Attach the operator's T3 configuration (B2.2). A builder rather than a
@@ -309,6 +331,23 @@ pub fn build_app(state: AppState) -> Router {
         .route(
             "/v1/workspaces/{ws}/channels/{ch}/reactions",
             get(routes::messages::reaction_snapshot),
+        )
+        // ADR-0151 — 첨부. Three routes, and the split between them is the
+        // decision: the upload session hands out a Drive capability so the bytes
+        // never cross this process, while the content proxy reads them here so
+        // that authorization stays with PostgreSQL. A client is never given a
+        // URL it can read a file from.
+        .route(
+            "/v1/workspaces/{ws}/channels/{ch}/attachments/uploads",
+            post(routes::attachments::create_upload),
+        )
+        .route(
+            "/v1/workspaces/{ws}/channels/{ch}/attachments/{attachment}/complete",
+            post(routes::attachments::complete),
+        )
+        .route(
+            "/v1/workspaces/{ws}/channels/{ch}/attachments/{attachment}/content",
+            get(routes::attachments::content),
         )
         // B4 — the client's first authenticated read after login. Without it the
         // sidebar has nothing and there is no way into a conversation.
@@ -583,6 +622,11 @@ pub fn build_app(state: AppState) -> Router {
 
     // MOMO-605: taken before `with_state` moves the state below.
     let cors = state.cors.clone();
+    // ADR-0151: likewise. The stub upload endpoint exists only when the archive
+    // is the stub one — Swift gates it on the same predicate
+    // (`App.swift:115-117`), and a deployed environment cannot reach this branch
+    // because a stub archive is a boot error there.
+    let accepts_stub_uploads = state.drive.accepts_stub_uploads();
 
     let app = Router::new()
         .route("/healthz", get(routes::health::health))
@@ -632,8 +676,20 @@ pub fn build_app(state: AppState) -> Router {
                 rate_limit::per_ip,
             )),
         )
-        .merge(protected)
-        .with_state(state);
+        .merge(protected);
+
+    // The stand-in for Google's resumable session URL. Public for the same
+    // reason that URL is: the client uploading has no bearer to present to it,
+    // and its authorization is the unguessable token in the path.
+    let app = if accepts_stub_uploads {
+        app.route(
+            "/__momo_stub/drive/uploads/{token}",
+            put(routes::attachments::stub_upload),
+        )
+    } else {
+        app
+    };
+    let app = app.with_state(state);
 
     // MOMO-605 / ADR-0133 P2 — the desktop webview's cross-origin gate.
     //

@@ -204,6 +204,23 @@ services:
       # webview is `tauri://localhost`, and without this it cannot reach the API
       # at all. Explicit allowlist; `*` is refused at boot.
       MOMO_CORS_ALLOWED_ORIGINS: ${MOMO_CORS_ALLOWED_ORIGINS:-}
+      # ADR-0151 — the workspace Drive archive. All three defaults are EMPTY, and
+      # empty means the attachment routes answer 503 "Drive archive is not
+      # configured": the surface is mounted but closed, which is what an
+      # un-updated deployment gets and is the only safe default for a stack that
+      # holds no service-account key.
+      #
+      # `MOMO_DRIVE_ARCHIVE_BACKEND=stub` is deliberately NOT usable here — this
+      # stack runs MOMO_ENV=staging, where a stub archive is a boot error. An
+      # in-memory archive accepts uploads, reports them complete and loses every
+      # byte on restart; that is the one Drive configuration worth refusing to
+      # start over.
+      MOMO_DRIVE_ARCHIVE_BACKEND: ${MOMO_DRIVE_ARCHIVE_BACKEND:-}
+      # A path INSIDE the api container. The key never enters the image or this
+      # file — mount it read-only and name it here (ADR-0004: provider
+      # credentials do not flow through momo's request path).
+      MOMO_DRIVE_SA_KEY_PATH: ${MOMO_DRIVE_SA_KEY_PATH:-}
+      MOMO_DRIVE_SHARED_DRIVE_ID: ${MOMO_DRIVE_SHARED_DRIVE_ID:-}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     ports:
       # Loopback only (no Caddy in this stack). The NCP smoke drives it over an

@@ -34,9 +34,18 @@
 //! the agent-run half of mention routing stays in `momo-agent`, which owns
 //! `agent_run` and — deliberately — no message SQL at all.
 //!
-//! Deliberately **still out of scope** (later batches): huddle, attachments and
-//! the pgvector memory plane.
+//! **ADR-0151** adds [`attachment`] — every `attachment` statement, and the
+//! binding step that runs inside the send transaction. It lives here rather than
+//! in a crate of its own because the binding is part of the *message's*
+//! transaction: a refused attachment has to roll the message back with it, and
+//! that is only expressible where the send path already is. The bytes, by
+//! contrast, are `momo-drive`'s and are deliberately not reachable from here —
+//! this crate owns the ledger, that one owns the archive.
+//!
+//! Deliberately **still out of scope** (later batches): huddle and the pgvector
+//! memory plane.
 
+pub mod attachment;
 pub mod channel;
 pub mod dm;
 pub mod error;
@@ -46,6 +55,13 @@ pub mod message;
 pub mod read_state;
 pub mod search;
 
+pub use attachment::{
+    create_pending_upload_in_tx, is_attachment_channel_member, link_attachments_in_tx,
+    load_attachment_in_tx, message_attachments_in_tx, settle_upload_in_tx,
+    validate_attachment_id_list, validate_attachment_mime, validate_attachment_name, Attachment,
+    AttachmentLinkRejected, AttachmentSpecInvalid, MessageAttachment, ATTACHMENT_TEXT_MAX_CHARS,
+    MAX_ATTACHMENTS_PER_MESSAGE, MAX_ATTACHMENT_BYTES,
+};
 pub use channel::{
     add_channel_member_in_tx, clamp_channel_list_limit, create_channel,
     create_channel_detailed_in_tx, create_channel_in_tx, list_workspace_channels,
@@ -83,9 +99,10 @@ pub use message::{
     send_message, send_message_in_tx, send_message_with_mentions_in_tx, send_signed_message_in_tx,
     thread_root_state_in_tx, validate_quote_target_in_tx, validate_replies_root_in_tx,
     validate_thread_root_in_tx, HistoryCursor, MessageSignature, MessageType, NewMessage,
-    PagedMessage, QuoteTargetInvalid, QuotedMessage, RepliesCursorInvalid, SentMessage,
-    StoredMessage, ThreadReplyPage, ThreadRollup, ThreadRootInvalid, ThreadRootState,
-    HISTORY_LIMIT_DEFAULT, HISTORY_LIMIT_MAX, REPLIES_LIMIT_DEFAULT, REPLIES_LIMIT_MAX,
+    PagedMessage, QuoteTargetInvalid, QuotedMessage, RepliesCursorInvalid, SendExtras,
+    SendRejected, SentMessage, StoredMessage, ThreadReplyPage, ThreadRollup, ThreadRootInvalid,
+    ThreadRootState, HISTORY_LIMIT_DEFAULT, HISTORY_LIMIT_MAX, REPLIES_LIMIT_DEFAULT,
+    REPLIES_LIMIT_MAX,
 };
 pub use read_state::{
     build_read_state_payload, contains_mention, effective_cursor, list_read_state,

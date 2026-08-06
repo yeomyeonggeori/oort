@@ -21,6 +21,11 @@ path = "src/main.rs"
 momo-db = { path = "../../crates/momo-db" }
 momo-auth = { path = "../../crates/momo-auth" }
 momo-messaging = { path = "../../crates/momo-messaging" }
+# ADR-0151: the workspace Drive archive. It owns the HTTP client so this manifest
+# does not, and its whole API is the five-method `DriveArchive` trait — so an
+# attachment handler cannot build a request of its own. Same shape as
+# momo-ephemeral, for the same reason (see the NOTE below).
+momo-drive = { path = "../../crates/momo-drive" }
 # B2.2 (T3 REST surface). `momo-t3` owns every T3 statement this batch mounts;
 # `momo-outbox` is the single egress chokepoint the work-session lifecycle
 # broadcasts go through — momo-t3 deliberately owns no outbox SQL, so the route

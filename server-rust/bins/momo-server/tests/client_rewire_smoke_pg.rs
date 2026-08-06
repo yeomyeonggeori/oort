@@ -1207,7 +1207,7 @@ async fn a_foreign_tenants_rows_are_zero_under_the_callers_guc() {
                     theirs.workspace,
                     momo_messaging::NewMessage::text(theirs.channel, theirs.member, "그쪽 루트")
                         .with_client_msg_id(Uuid::new_v4()),
-                    None,
+                    momo_messaging::SendExtras::default(),
                 )
                 .await?
                 .expect("unsigned send is never rejected");
@@ -1219,7 +1219,7 @@ async fn a_foreign_tenants_rows_are_zero_under_the_callers_guc() {
                     conn,
                     theirs.workspace,
                     reply,
-                    None,
+                    momo_messaging::SendExtras::default(),
                 )
                 .await?
                 .expect("unsigned send is never rejected");

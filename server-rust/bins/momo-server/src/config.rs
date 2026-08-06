@@ -79,6 +79,79 @@ pub struct Config {
     /// MOMO-605 CORS origin allowlist — **empty unless the operator names an
     /// origin**, and an empty one mounts no middleware at all.
     pub cors: CorsConfig,
+    /// ADR-0151 Drive archive — **unavailable unless the operator names a
+    /// service-account key and a shared drive**, in which case the three
+    /// attachment routes answer 503 rather than 404. Same fail-closed posture as
+    /// every other subsystem above.
+    pub drive: DriveSettings,
+}
+
+/// The workspace Drive archive's environment block (Swift
+/// `DriveArchiveClientFactory`, `DriveArchiveClient.swift:76-129`).
+///
+/// Names kept verbatim so one env block configures either implementation during
+/// the cutover — `MOMO_DRIVE_ARCHIVE_BACKEND` with `MOMO_DRIVE_BACKEND` as the
+/// legacy alias, plus `MOMO_DRIVE_SA_KEY_PATH` and `MOMO_DRIVE_SHARED_DRIVE_ID`.
+///
+/// **No credential is in this struct.** `sa_key_path` is a path the operator
+/// owns; the key material is read inside `momo-drive` and never comes back out
+/// (ADR-0004: provider credentials do not flow through momo).
+#[derive(Debug, Clone, Default)]
+pub struct DriveSettings {
+    pub backend: String,
+    pub sa_key_path: Option<String>,
+    pub shared_drive_id: Option<String>,
+}
+
+impl DriveSettings {
+    pub fn from_env() -> DriveSettings {
+        DriveSettings {
+            backend: env("MOMO_DRIVE_ARCHIVE_BACKEND")
+                .or_else(|| env("MOMO_DRIVE_BACKEND"))
+                .map(|value| value.trim().to_lowercase())
+                .unwrap_or_default(),
+            sa_key_path: env("MOMO_DRIVE_SA_KEY_PATH"),
+            shared_drive_id: env("MOMO_DRIVE_SHARED_DRIVE_ID"),
+        }
+    }
+
+    /// The boot refusal: a stub archive in a deployed environment (Swift
+    /// `DriveArchiveClientFactory.validateForBoot`, :77-87).
+    ///
+    /// Fatal rather than degrading, unlike every other Drive misconfiguration,
+    /// and the asymmetry is the point. An *absent* archive closes the attachment
+    /// surface visibly — clients get 503 and nobody believes a file was stored.
+    /// A **stub** archive accepts uploads, reports them complete, and loses every
+    /// byte on restart: it looks like it works. That is the one Drive
+    /// configuration worth refusing to start over.
+    pub fn boot_error(&self, environment: &str) -> Option<&'static str> {
+        if self.backend == momo_drive::STUB_BACKEND && requires_strict_secrets(environment) {
+            return Some(
+                "MOMO_DRIVE_ARCHIVE_BACKEND=stub is forbidden in a deployed environment \
+                 (staging/prod/production/internal-host)",
+            );
+        }
+        None
+    }
+
+    /// Translate to the archive factory's own config.
+    ///
+    /// `stub_base_url` is the address **this process** answers on, because the
+    /// stub's upload capability URLs point back at its own
+    /// `/__momo_stub/drive/uploads/{token}` route. Swift resolves it the same
+    /// way (`App.swift:32-33`): `MOMO_DRIVE_ARCHIVE_STUB_BASE_URL` if the
+    /// operator named one, otherwise loopback on the serving port — which is
+    /// right for a stub, since nothing outside the host should be uploading to
+    /// an in-memory archive.
+    pub fn backend_config(&self, port: u16) -> momo_drive::DriveBackendConfig {
+        momo_drive::DriveBackendConfig {
+            mode: self.backend.clone(),
+            sa_key_path: self.sa_key_path.clone(),
+            shared_drive_id: self.shared_drive_id.clone(),
+            stub_base_url: env("MOMO_DRIVE_ARCHIVE_STUB_BASE_URL")
+                .unwrap_or_else(|| format!("http://127.0.0.1:{port}")),
+        }
+    }
 }
 
 /// MOMO-300 request rate limiting (Swift `RateLimitConfig`, `Config.swift:283-302`).
@@ -940,6 +1013,13 @@ impl Config {
             return Err(ConfigError::InvalidSecurity(message));
         }
 
+        // ADR-0151: the one Drive misconfiguration that is fatal — see
+        // [`DriveSettings::boot_error`] for why a *missing* archive is not.
+        let drive = DriveSettings::from_env();
+        if let Some(message) = drive.boot_error(&environment) {
+            return Err(ConfigError::InvalidSecurity(message));
+        }
+
         Ok(Config {
             host: env_or("HOST", "0.0.0.0"),
             port: env_number("PORT", 8080u16)?,
@@ -963,6 +1043,7 @@ impl Config {
             // the boot warns; refusing to start over a browser knob would take
             // the whole instance down for a desktop-only concern.
             cors: CorsConfig::from_env(),
+            drive,
         })
     }
 }
