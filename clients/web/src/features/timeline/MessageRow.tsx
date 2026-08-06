@@ -18,11 +18,23 @@ import { rowPresentation } from "@momo/core/features/timeline/rowModel";
 import {
   dayDividerLabel,
   dayDividerSegments,
+  recoveryDividerLabel,
   recoveryDividerSegments,
   unreadDividerSegments,
   DIVIDER_LABEL_SIDE,
+  DIVIDER_TONE,
   type DividerSegment,
+  type DividerTone,
 } from "@momo/core/features/timeline/divider";
+// 코어의 **역할**을 이 팔레트의 토큰으로 옮긴 다리 (D-2). 값이 갈라지면
+// `dividerTone.test.ts`가 `tokens.css`를 읽어 붉게 만든다.
+import { DIVIDER_TONE_CLASS } from "./dividerTone";
+// 접기의 문구도 코어가 갖는다 — 폰이 자기 파일에서 조사를 붙이기 시작하면 같은
+// 접기가 두 얼굴을 갖는다(U1 M-2가 구분선에서 겪은 실패 양식).
+import { deletedFoldSegments } from "@momo/core/features/timeline/deletedFold";
+// 아바타의 계약도 코어가 갖는다 (진단 H-11): 어떤 주소를 이미지로 믿는가,
+// 무엇을 이니셜로 삼는가, 사람과 에이전트를 무엇으로 가르는가.
+import { avatarIdentity } from "@momo/core/features/workspace/avatar";
 // 코어의 간격 숫자를 클래스로 옮긴 다리. CSP가 인라인 스타일을 막아서 생긴 두 벌이고,
 // 갈라지지 않게 `spacing.test.ts`가 둘을 묶는다.
 import {
@@ -106,24 +118,67 @@ function rollupLabel(rollup: ThreadRollup): string {
   )}`;
 }
 
-/** Shared with the pending row so an optimistic echo sits on the same grid. */
-export function Avatar({
-  member,
-  name,
-}: {
-  member: RosterMember | null;
-  name: string;
-}) {
-  const isAgent = member?.kind === "agent";
+/**
+ * 발화자의 얼굴 (진단 H-11). Shared with the pending row so an optimistic echo
+ * sits on the same grid.
+ *
+ * 진단이 실측한 결함 셋이 여기서 닫힌다:
+ *
+ *  1. **24px 정사각 이니셜은 아바타로 읽히지 않았다.** 캡처에서 워크스페이스
+ *     스위처의 「곽」과 메시지 아바타의 「곽」이 같은 크기·같은 모양으로 충돌했다.
+ *     이제 `AVATAR_SIZE`(32)이고, 그 값과 근거는 코어에 있다.
+ *  2. **이니셜이 uuid 첫 글자가 될 수 있었다** — `name.slice(0, 1)` 에 명부에서
+ *     못 찾은 작성자의 uuid 앞 8자가 들어왔다. 이제 이니셜 판정은 코어가 하고,
+ *     글자로 시작하지 않으면 이니셜을 **그리지 않는다**: 모르는 것을 아는 척하지
+ *     않는 자리다.
+ *  3. **`avatarUrl` 경로가 아예 없었다** — 타입에만 있고 소비처도 `<img>` 도 0.
+ *     이제 실을 수 있는 주소면 그린다. 「실을 수 있는가」를 코어가 먼저 판정하는
+ *     이유는 배포 CSP(`img-src 'self' data:`)가 다른 오리진을 **조용히** 거절해
+ *     깨진 상자만 남기기 때문이다.
+ *
+ * 정체는 색과 **모양** 둘로 나른다(`AVATAR_SHAPE`): 사람은 원, 에이전트는 둥근
+ * 사각. 색만으로 가르면 색각 이상이 있는 사람에게 구분이 없다. 모르는 작성자는
+ * 사람 쪽 모양을 빌리되 정체 색을 쓰지 않는다 — 모양은 색보다 약한 주장이다.
+ *
+ * `aria-hidden`은 그대로다. 이름은 바로 옆 작성자 줄이 글자로 말하고, 아바타가
+ * 그것을 한 번 더 읽으면 보조기술은 모든 행에서 이름을 두 번 듣는다.
+ */
+export function Avatar({ member }: { member: RosterMember | null }) {
+  const identity = avatarIdentity(
+    member,
+    typeof location === "undefined" ? null : location.origin
+  );
   return (
     <span
       aria-hidden="true"
+      data-testid="row-avatar"
+      data-avatar-kind={identity.kind}
       className={cn(
-        "flex size-6 items-center justify-center rounded-sm text-meta font-semibold",
-        isAgent ? "bg-agent-soft text-agent" : "bg-surface-hover text-ink"
+        // size-8 = AVATAR_SIZE(32). 두 값이 갈라지면 `avatarSize.test.ts`가 붉다.
+        "flex size-8 items-center justify-center overflow-hidden text-meta font-semibold",
+        identity.kind === "agent" ? "rounded-sm" : "rounded-full",
+        identity.kind === "agent" && "bg-agent-soft text-agent",
+        identity.kind === "human" && "bg-surface-hover text-ink",
+        // 모르는 작성자: 정체 색 없이 배경만. 이름도 이니셜도 주장하지 않는다.
+        identity.kind === "unknown" && "bg-surface-hover text-ink-muted"
       )}
     >
-      {name.slice(0, 1)}
+      {identity.imageUrl !== null ? (
+        <img
+          src={identity.imageUrl}
+          alt=""
+          // 상자를 채우되 비율은 지킨다. 정사각이 아닌 사진이 늘어나면 그 얼굴은
+          // 그 사람이 아니다.
+          className="size-full object-cover"
+        />
+      ) : identity.fallback.kind === "initial" ? (
+        identity.fallback.text
+      ) : (
+        // 모른다. 글자를 그리지 않고 자리만 지킨다 — 이 자리에 들어갈 「?」는
+        // 물음이 아니라 잡음이고, 옆 줄이 이미 uuid 앞자리를 이름 자리에 쓰고
+        // 있으므로 같은 사실을 두 번 말하게 된다.
+        <span className="size-2 rounded-full bg-line-strong" />
+      )}
     </span>
   );
 }
@@ -150,6 +205,8 @@ export function MessageRow({
   directory,
   actions,
   pausedRepeat,
+  deletedRepeat,
+  deletedFoldedIds,
   onOpenThread,
   onQuoteMessage,
   onJumpToMessage,
@@ -168,6 +225,20 @@ export function MessageRow({
    * 응답 없이 지나갔는지는 이 줄이 말해야 한다.
    */
   pausedRepeat?: number;
+  /**
+   * 이 묘비가 자기를 포함해 대신하는 삭제 메시지 수 (감사 M-1, 코어
+   * `deletedFold.ts`). 접기 판정은 목록이 하고 이 행은 그 결과를 말하기만 한다.
+   */
+  deletedRepeat?: number;
+  /**
+   * 이 행 **안으로** 접혀 들어간 메시지들의 id.
+   *
+   * 화면에는 나가지 않는다. DOM에 나가는 이유는 **항법** 하나다: 삭제 원본을
+   * 가리킨 인용 점프가 그 원본의 행을 못 찾았을 때, 「그 메시지를 대신해 서 있는
+   * 행」을 이 속성으로 찾는다(`inbox/anchor.ts`의 대리 착지 — 폰이 U4-5 H-1에서
+   * 고친 거짓 지시가 웹에서 재현되지 않게 하는 자리다).
+   */
+  deletedFoldedIds?: readonly string[];
   onOpenThread?: (message: Message) => void;
   /**
    * ADR-0148 - pin this row to the composer as a quote. Absent on surfaces with
@@ -324,6 +395,14 @@ export function MessageRow({
       data-testid="timeline-message"
       data-seq={message.seq}
       data-message-id={message.id.toLowerCase()}
+      // 대리 착지의 열쇠 (U4-5 H-1). 공백으로 이은 목록이라 CSS `~=`가 낱개를
+      // 고를 수 있고, 그래서 항법이 상태를 새로 만들지 않고 이미 있는 감시자를
+      // 그대로 쓴다. 접힌 것이 없으면 속성 자체가 없다.
+      data-deleted-folded-ids={
+        deletedFoldedIds && deletedFoldedIds.length > 0
+          ? deletedFoldedIds.map((id) => id.toLowerCase()).join(" ")
+          : undefined
+      }
       data-author-kind={author?.kind ?? "unknown"}
       data-actionable={actionable ? "true" : undefined}
       onKeyDown={onRowKeyDown}
@@ -350,9 +429,9 @@ export function MessageRow({
           `relative`인 이유는 그 시각이 24px 상자보다 넓기 때문이다 — 절대 배치로
           거터 오른끝에 붙이면 남는 글자는 행의 `px-4` 여백 쪽으로 흘러나가고, 그래서
           레이아웃을 한 픽셀도 밀지 않는다(H-2에서 배운 것과 같은 규칙). */}
-      <div className="relative w-6 shrink-0">
+      <div className="relative w-8 shrink-0">
         {startsGroup ? (
-          <Avatar member={author} name={name} />
+          <Avatar member={author} />
         ) : (
           <time
             dateTime={new Date(message.createdAtMs).toISOString()}
@@ -451,7 +530,16 @@ export function MessageRow({
             // 메시지" from a message someone actually wrote was its colour, and
             // at a glance the tombstone read as content (R2 M5). It keeps its
             // place and gives up its weight.
-            <p className="break-words text-meta text-ink-muted">삭제된 메시지</p>
+            // 연달아 지워진 것들은 **한 줄**로 접힌다 (감사 M-1: 지워진 것들이
+            // 지워지지 않은 것들만큼 자리를 차지한다). 문구도 접기 규칙도 코어에
+            // 있으므로 폰과 같은 문장이 나온다.
+            <p
+              className="break-words text-meta text-ink-muted"
+              data-testid="tombstone"
+              data-deleted-repeat={deletedRepeat}
+            >
+              <DividerLabel segments={deletedFoldSegments(deletedRepeat)} />
+            </p>
           ) : editing && actions ? (
             <MessageEditor
               initialBody={message.body ?? ""}
@@ -681,9 +769,16 @@ function DividerLabel({ segments }: { segments: readonly DividerSegment[] }) {
  * 구분선의 뼈대. 라벨이 먼저, rule이 나중 — 그것이 `DIVIDER_LABEL_SIDE`가
  * `"leading"`이라는 말이다.
  *
- * 여백을 Tailwind 클래스가 아니라 `style`로 거는 이유는 그 값이 **두 클라의
- * 합의값**이기 때문이다. 클래스로 옮겨 적으면 코어의 숫자와 화면의 숫자가 두 벌이
- * 되고, 한쪽만 고치는 다음 goal에서 다시 갈라진다.
+ * **N-1 정정:** 이 자리의 앞 독스트링은 여백을 「`style`로 건다」고 적고 있었는데
+ * 구현은 `padClass`를 받는다. 1차의 잔해였고, `spacing.ts` 머리말이 정반대
+ * 결정(CSP가 인라인 스타일을 막아 길은 클래스뿐이다)을 이미 설명하고 있었다.
+ * 지금 참인 것만 남긴다: 간격의 정본은 코어이고 이 파일은 그 번역을 받는다.
+ *
+ * **색도 같은 구조가 됐다 (D-2).** `tone`은 이제 토큰 이름이 아니라 코어가 정한
+ * **역할**(`DividerTone`)이고, 그 역할이 이 팔레트의 어느 토큰인지는
+ * `dividerTone.ts` 한 자리가 답한다. 「accent인가」를 여기서 묻던 앞 판은 어느
+ * 토큰인지만 말하고 왜 그 토큰인지는 말하지 않았다 — 팔레트를 손대는 사람에게
+ * 안읽음 경계가 걸려 있다는 사실이 어디에도 없었다.
  */
 function DividerRow({
   testId,
@@ -694,21 +789,26 @@ function DividerRow({
 }: {
   testId: string;
   segments: readonly DividerSegment[];
-  tone: "muted" | "accent";
+  /** 코어의 역할. 토큰은 `dividerTone.ts`가, 계약은 그 테스트가 잠근다. */
+  tone: DividerTone;
   /** 코어의 간격을 옮긴 클래스. 둘이 갈라지면 `spacing.test.ts`가 붉다. */
   padClass: string;
   extra?: Record<string, string | number>;
 }) {
+  const paint = DIVIDER_TONE_CLASS[tone];
   return (
     <div
       className={cn(
         "flex items-center px-4 text-meta",
         padClass,
         DIVIDER_GAP_CLASS,
-        tone === "accent" ? "font-medium text-accent" : "text-ink-muted"
+        paint.label
       )}
       data-testid={testId}
       data-label-side={DIVIDER_LABEL_SIDE}
+      // 게이트가 이 줄의 색을 잴 때 「무엇이어야 하는가」를 함께 읽는다. 값이
+      // 아니라 역할이므로 이 속성은 팔레트가 바뀌어도 같은 말을 한다.
+      data-tone={tone}
       {...extra}
     >
       <span className="shrink-0 whitespace-pre">
@@ -716,11 +816,8 @@ function DividerRow({
       </span>
       <span
         aria-hidden="true"
-        className={cn(
-          "flex-1",
-          DIVIDER_RULE_CLASS,
-          tone === "accent" ? "bg-accent" : "bg-line"
-        )}
+        data-divider-rule=""
+        className={cn("flex-1", DIVIDER_RULE_CLASS, paint.rule)}
       />
     </div>
   );
@@ -739,7 +836,7 @@ export function DayDivider({ atMs, nowMs }: { atMs: number; nowMs: number }) {
     <DividerRow
       testId="day-divider"
       segments={dayDividerSegments(atMs, nowMs)}
-      tone="muted"
+      tone={DIVIDER_TONE.day}
       padClass={DAY_DIVIDER_PAD_CLASS}
       extra={{
         // 눈은 「오늘」을 읽고 보조기술은 절대 날짜를 읽는다. 화면을 되돌아볼 수 없는
@@ -751,22 +848,37 @@ export function DayDivider({ atMs, nowMs }: { atMs: number; nowMs: number }) {
   );
 }
 
-/** Unread boundary. Count is server truth (P7), never a local tally. */
+/**
+ * Unread boundary. Count is server truth (P7), never a local tally.
+ *
+ * 세 구분선 중 **경계를 그리는 색을 지는 것은 이 줄 하나**다 (D-2). 그 판정은
+ * 코어에 있고 여기서는 이름으로 받는다 — 이 파일이 「accent」라고 적고 있던 동안
+ * 그 선택은 팔레트를 손대는 사람에게 보이지 않았다.
+ */
 export function UnreadDivider({ count }: { count: number }) {
   return (
     <DividerRow
       testId="unread-divider"
       segments={unreadDividerSegments(count)}
-      tone="accent"
+      tone={DIVIDER_TONE.unread}
       padClass={MARKER_DIVIDER_PAD_CLASS}
     />
   );
 }
 
 /**
- * Reconnect marker. `seq` is exact because the server issues it, so the user is
- * told precisely how far the timeline was restored instead of being left to
- * wonder what a clock-skewed "since 5s ago" window missed (R-1 §3).
+ * Reconnect marker.
+ *
+ * **C-1: 문장에서 seq가 빠졌다.** 이 표지는 자기가 확인한 것들 **아래**에
+ * 앵커되므로 「어디까지」는 이 줄의 위치가 이미 답한다 — 화면의 어느 행도 자기
+ * seq를 그리지 않으므로 그 숫자는 대조할 대상이 없었다. 근거 전문은 코어
+ * `recoveryDividerSegments` 독스트링에.
+ *
+ * `data-seq`는 남는다. 그것은 문구가 아니라 **진단 값**이고, seq 게이트가 이
+ * 속성으로 복구 지점을 확인한다 (SKILL §4가 여는 예외가 정확히 그 자리다).
+ *
+ * 낭독은 위치를 볼 수 없으므로 `aria-label`이 「이 줄 위까지」로 그 자리를 말로
+ * 되돌려 준다 — 날짜 구분선이 절대 날짜를 함께 말하는 것과 같은 판단이다.
  */
 export function RecoveryDivider({
   seq,
@@ -779,9 +891,14 @@ export function RecoveryDivider({
     <DividerRow
       testId="recovery-divider"
       segments={recoveryDividerSegments(seq, source)}
-      tone="muted"
+      tone={DIVIDER_TONE.recovery}
       padClass={MARKER_DIVIDER_PAD_CLASS}
-      extra={{ "data-seq": seq, "data-source": source }}
+      extra={{
+        "data-seq": seq,
+        "data-source": source,
+        "aria-label": recoveryDividerLabel(source),
+        role: "separator",
+      }}
     />
   );
 }

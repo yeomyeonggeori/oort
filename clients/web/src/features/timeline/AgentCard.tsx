@@ -1,6 +1,20 @@
 import { useState } from "react";
-import { ShieldQuestion, Terminal, Zap } from "lucide-react";
+import { Check, ShieldQuestion, Terminal, Zap } from "lucide-react";
+import { cn } from "@/design/lib/cn";
+import { useOffline } from "@/features/common/useOffline";
 import { memberFor, type Directory } from "@/features/workspace/useWorkspace";
+import {
+  approvalCardNote,
+  type ApprovalCardNote,
+} from "@momo/core/features/timeline/approvalNote";
+// 영수증 문장은 **인박스와 같은 함수**가 짓는다 (design-review M-3). 이 카드가
+// 결정한 뒤 말할 문장은 인박스 목록이 같은 원장 응답에 대해 말하는 문장과 같아야
+// 하고, 그 판정은 이미 거기 landing 해 있다(원장에 적힌 **방향**까지 말한다:
+// 내가 승인을 눌렀는데 원장에 거부가 적혀 있을 수 있다). 앞 판의 이 카드는
+// `outcome.note` 만 읽었는데 그 필드는 409(이미 결정됨)에만 실리므로, **성공한
+// 결정에는 영수증이 아예 없었다** — 리뷰가 「가장 값어치 있는 문장」이라 부른 그
+// 줄이 웹에서는 그려지지도 않고 있었다.
+import { decisionNote } from "@/features/inbox/approvalsPanel";
 import {
   formatCount,
   formatMicroUsd,
@@ -148,6 +162,64 @@ function ledgerHandle(approvalId: string): string {
   return approvalId.replace(/-/g, "").slice(0, 4).toLowerCase();
 }
 
+/**
+ * 재개 제안이 설명할 것. 승인이 아니라 **다음에 무엇이 일어나는가**의 안내이므로
+ * 가장 조용한 격을 쓴다(`guidance`).
+ */
+const RESUME_OFFER_COPY =
+  "git 계보만 새 호스트로 이어집니다. 이전 호스트의 터미널 상태와 커밋하지 않은 변경은 옮겨지지 않습니다. 작업 세션 패널의 내 세션에서 온라인 호스트를 선택하세요.";
+
+/**
+ * 카드의 한 줄을 **격에 맞는 옷으로** 그린다 (design-review M-3).
+ *
+ * 리뷰: *"세 문장이 전부 같은 옷을 입는다. (…) 카드에서 가장 값어치 있는 문장인
+ * 영수증이 가장 조용한 차림으로 나온다."* 웹도 같았다 — 영수증·재개 안내·원장
+ * 없음 고지가 전부 `text-meta text-ink-muted` 한 벌이었다.
+ *
+ * 격은 코어가 정하고(`APPROVAL_NOTE_TONE_ORDER`) 이 함수가 옷을 입힌다:
+ *
+ *   * `receipt` — 본문 크기의 `text-ink`. 카드 안에서 크기로 올라오는 유일한
+ *     문장이고, 그 이유는 이것이 **방금 내가 한 되돌릴 수 없는 행동의 기록**이기
+ *     때문이다. 앞에 체크 아이콘이 서서 훑는 눈이 이 줄을 먼저 잡는다.
+ *   * `blocked` — `text-warn`. 위험이 아니라 **때**의 문제이므로 danger가 아니고,
+ *     조용한 안내에 묻히면 사람이 버튼을 계속 누르므로 muted도 아니다. 컴포저의
+ *     오프라인 줄과 같은 톤이라 한 화면에서 두 자리가 같은 사실을 같은 색으로 말한다.
+ *   * `guidance` — 앞과 같은 `text-ink-muted`. 이 톤은 바뀌지 않았다: 길 안내는
+ *     원래 이 격이 맞았고, 문제는 나머지 둘이 여기까지 내려와 있던 것이었다.
+ *
+ * `role`도 격을 따른다. 영수증만 `status` 다 — 방금 일어난 일을 보조기술에 알려야
+ * 하는 것은 그 줄 하나이고, 나머지 둘은 화면에 서 있는 조건이지 방금 일어난 일이
+ * 아니다.
+ */
+function ApprovalNoteLine({ note }: { note: ApprovalCardNote }) {
+  const receipt = note.tone === "receipt";
+  return (
+    <p
+      role={receipt ? "status" : undefined}
+      data-testid={`approval-note-${note.kind}`}
+      data-tone={note.tone}
+      className={cn(
+        "border-t border-line px-3 py-2",
+        receipt && "text-body text-ink",
+        note.tone === "blocked" && "text-meta text-warn",
+        note.tone === "guidance" && "text-meta text-ink-muted"
+      )}
+    >
+      {/* 인라인이고 `align-text-bottom`이다: flex로 세우면 두 줄로 접히는 문장에서
+          아이콘이 첫 줄이 아니라 상자 전체를 기준으로 서고, 세로 오프셋을 손으로
+          주는 것은 이 레포의 고정 스케일 밖 값이 된다(U4-4R W-1: 스케일 밖 클래스는
+          컴파일되지 않는다). */}
+      {receipt && (
+        <Check
+          className="mr-2 inline size-4 align-text-bottom"
+          aria-hidden="true"
+        />
+      )}
+      {note.text}
+    </p>
+  );
+}
+
 function ApprovalBody({
   card,
   directory,
@@ -163,12 +235,37 @@ function ApprovalBody({
   } | null>(null);
   const [armed, setArmed] = useState<Armed>(null);
   const approvalsProvided = isSurfaceProvided("approvals");
+  // 결정은 REST POST로 나간다. 「레일이 붙어 있는가」와 「이 요청이 나갈 수 있는가」는
+  // 다른 질문이고, 승인에는 기한이 있으므로 후자를 물어야 한다 — 웹소켓이 잠깐
+  // 끊겼다는 이유로 컨트롤을 감추면 할 수 있는 결정을 못 하고 만료될 수 있다.
+  // 폰의 `useOnline.ts` 가 같은 판단을 NetInfo로 한다.
+  const offline = useOffline();
 
   const status = resolveApprovalStatus(local?.status ?? null, card.status);
   const settled = status !== "pending";
   const decidedAtMs = local?.decidedAtMs ?? card.decidedAtMs;
   const decidedById = local?.decidedByMemberId ?? card.decidedByMemberId;
   const decidedBy = decidedById ? memberFor(directory, decidedById) : null;
+
+  // 카드가 컨트롤 대신 말할 줄. 판정도 순서도 코어가 진다 (design-review M-3).
+  // 이 파일이 삼항 사슬로 들고 있던 동안 폰이 자기 파일에 같은 사슬을 갖고 있었고,
+  // **웹에는 오프라인 갈래가 아예 없었다** — 끊긴 채로 버튼이 서 있고 누르면 실패
+  // 행 하나가 남았다.
+  const note = approvalCardNote({
+    receiptNote: local?.note ?? null,
+    isResumeOffer: card.isResumeOffer,
+    resumeOfferText: RESUME_OFFER_COPY,
+    settled,
+    hasTarget: card.approvalId !== null,
+    // 이 표면은 대기 승인 목록을 구독하지 않는다(폰의 타임라인 카드는 한다).
+    // 아는 것이 스냅샷뿐이므로, 스냅샷이 대기이면 여기서는 대기다.
+    pendingHere: !settled,
+    offline,
+    approvalsProvided,
+    unsupportedText: `${serverSurface("approvals").absentReason} ${
+      serverSurface("approvals").fallback
+    }`,
+  });
 
   return (
     <CardFrame
@@ -177,32 +274,16 @@ function ApprovalBody({
       chip={<ApprovalChip status={status} />}
       status={status}
       kind="approval"
-      note={
-        local?.note ? (
-          <p
-            role="status"
-            data-testid="approval-note"
-            className="px-3 pb-2 text-meta text-ink-muted"
-          >
-            {local.note}
-          </p>
-        ) : undefined
-      }
-      keyboard={!settled && !card.isResumeOffer}
+      // 오프라인에서는 y/n 단축키도 꺼진다. 켜 두면 키가 무장까지 하고 확정이
+      // 나가지 않는, 화면이 설명하지 못하는 상태가 만들어진다.
+      keyboard={note === null}
       onApprove={() => setArmed("approve")}
       onReject={() => setArmed("reject")}
       detail={card.detail}
       footer={
-        card.isResumeOffer ? (
-          <p
-            className="border-t border-line px-3 py-2 text-meta text-ink-muted"
-            data-testid="resume-offer-note"
-          >
-            git 계보만 새 호스트로 이어집니다. 이전 호스트의 터미널 상태와
-            커밋하지 않은 변경은 옮겨지지 않습니다. 작업 세션 패널의 내
-            세션에서 온라인 호스트를 선택하세요.
-          </p>
-        ) : !settled && card.approvalId !== null && approvalsProvided ? (
+        note !== null ? (
+          <ApprovalNoteLine note={note} />
+        ) : card.approvalId !== null ? (
           <ApprovalActions
             approvalId={card.approvalId}
             className="border-t border-line"
@@ -221,23 +302,10 @@ function ApprovalBody({
               if (outcome.decidedByMemberId !== undefined) {
                 next.decidedByMemberId = outcome.decidedByMemberId;
               }
-              if (outcome.note !== undefined) next.note = outcome.note;
+              next.note = decisionNote(outcome).text;
               setLocal(next);
             }}
           />
-        ) : !settled && card.approvalId !== null ? (
-          /* 승인 원장이 없는 서버 (goal B12). 버튼을 그대로 두면 누르는 순간
-             결코 성공할 수 없는 요청이 나가고, 화면은 그 404를 원장의 답인 양
-             읽는다. 카드 자체는 남긴다: 에이전트가 허가를 기다리며 멈춰 섰다는
-             것은 참이고, 그 사실을 지우면 사람은 왜 아무 일도 일어나지 않는지
-             알 길이 없다. 지우는 것은 결정 컨트롤뿐이다. */
-          <p
-            className="border-t border-line px-3 py-2 text-meta text-ink-muted"
-            data-testid="approval-unsupported"
-          >
-            {serverSurface("approvals").absentReason}{" "}
-            {serverSurface("approvals").fallback}
-          </p>
         ) : null
       }
     >

@@ -467,7 +467,7 @@ async function captureRemainingStates(browser, scheme, viewport, suffix) {
     await installRoutes(context);
     await login(page);
     await page.goto(`${origin}/#/c/${channelId}`);
-    await page.getByTestId("approval-unsupported").waitFor({ timeout: 15_000 });
+    await page.getByTestId("approval-note-unsupported").waitFor({ timeout: 15_000 });
     // 결정 버튼이 남아 있으면 이 배치의 요점이 무너진다.
     if ((await page.getByTestId("approval-approve").count()) !== 0) {
       throw new Error("승인 버튼이 아직 서 있다");
