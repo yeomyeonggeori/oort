@@ -42,6 +42,12 @@
 # ③ 등재와 동시에 verify_openapi_contract_rust.sh 에 실샘플이 있다. 목록과 샘플은
 #    **양방향**으로 강제된다(등재됐는데 미샘플 = 실패, 샘플인데 미등재 = 실패).
 #    "나중에 채우겠다"는 줄은 존재할 수 없다.
+# ④ 그 실샘플은 **그 라우트가 실제로 요구하는 자격증명**으로 돈다. #1132/#1143 이
+#    이 기준을 필요하게 만들었다: `POST …/work-controls` 는 agent bearer 전용이고
+#    `…/ack` 은 요청자와 다른 자격증명 — 등록 호스트 소유자 **또는 서명 데몬** —
+#    을 받는다. 사람 bearer 로 편하게 200 을 받아 등재하면 목록은 자라지만
+#    「Rust 에서 실측됐다」가 가리키는 문장이 달라진다. 그래서 ack 은 서명 arm 으로
+#    샘플한다(#1143 §① 이 연 그 경로).
 #
 # ── 등재 대상 밖: 스펙에 아예 없는 라우트 ────────────────────────────────────
 # 이 파일은 **스펙 연산의 검증 권위를 옮기는** 목록이다. 그러므로 docs/api/openapi.yaml
@@ -53,6 +59,16 @@
 # 현재 확인된 스펙 갭 — 성문화 후 등재 가능:
 #   * `/v1/provider/link` 계열(GET/PUT/DELETE/test) — #1050
 #   * ephemeral typing(「작성 중」) 계열 — #1053
+#   * 아래도 server-rust 가 라우팅하는데 스펙에 없어 등재 대상 밖이다 — 옮길 권위
+#     자체가 없으므로 커버리지도 부채도 아니고, 필요한 것은 성문화다:
+#       GET /v1/workspaces/{ws} · POST /v1/workspaces
+#       POST|DELETE /v1/workspaces/{ws}/channels/{ch}/members[/{member}]
+#       GET|POST /v1/workspaces/{ws}/invites · POST …/channels/{ch}/agent-runs
+#       POST|GET|DELETE /v1/workspaces/{ws}/devices[/{device}]
+#       GET …/work-sessions/{session}/reattach · GET …/usage/summary
+#       POST /v1/agent-runs/{run}/approval-decisions
+#       GET|PUT /v1/provider/work-host-engine · GET /v1/provider/quota-snapshots
+#       POST /v1/centrifugo/subscribe · agent gateway 5 경로
 #
 # ── 등재 보류: attachments 3경로 (#1111 / ADR-0151) ──────────────────────────
 # 스펙에 성문화돼 있고(:2991,3041,3080) server-rust 가 실제로 라우팅한다 —
@@ -75,14 +91,124 @@
 #   등재 조건: 부분집합에 **Drive 목 서비스**가 합류하거나, S3 호환 백엔드(ADR-0151
 #   에서 v1 로 유보)가 들어와 자격증명 없이 왕복이 성립할 때. 그때 relay/agent-worker
 #   와 같은 규칙으로 세 줄을 함께 추가한다.
+#
+# ── 등재 보류: T3(momo Cloud) 4경로 — 부분집합이 스위치를 배선하지 않는다 ────
+# `POST …/work-hosts/byoc/enrollments` · `POST …/work-hosts/cloud/register` ·
+# `GET …/work-hosts/cloud/{provisionId}` · `POST /v1/admin/workspaces/{ws}/credits/topups`
+# 는 전부 `MOMO_T3_ENABLED=1` 이 아니면 인증보다 **먼저** 503 이다
+# (routes::shared::ready_t3 — ADR-0136 「T3 기본 비활성」). 그리고
+# `infra/rust/docker-compose.rust.yml` 의 api 서비스는 그 키를 환경에 넣지 않는다
+# (환경 목록: MOMO_ENV·DATABASE_URL·JWT_HMAC·CENT_*·MOMO_DRIVE_*·CORS·LOG_LEVEL).
+# 즉 막는 것은 기준 ②이고, 여는 방법은 **배포 컴포즈에 게이트용 스위치를 넣는 것**
+# 뿐이라 택하지 않는다 — 그건 이 패스가 「배포본을 그대로 실측한다」를 포기하는 일이다.
+# (`register` 는 그 위에 enrollments 가 발급하는 1회용 bootstrap 토큰까지 필요하다.)
+# 등재 조건: 부분집합이 T3 를 켜고 도는 프로필이 생기거나, 그 4경로가 T3 없이도
+# 왕복하는 모양으로 바뀔 때. `POST …/work-hosts/cloud`(관리형 생성)는 애초에
+# server-rust 가 라우팅하지 않으므로 기준 ① 부터 미달이다.
+#
+# ── 등재 보류: /v1/provider/link/chain 3경로 — 같은 이유(미배선) ─────────────
+# GET|PUT|DELETE `/v1/provider/link/chain` 은 스펙에 있고 server-rust 가 라우팅한다.
+# 막는 것은 둘 다 부분집합 배선이다: `PROVIDER_LINK_MASTER_KEY` 가 없으면 계열 전체가
+# 503 이고, `PLATFORM_ADMIN_EMAILS` 가 비면 MOMO-583 게이트가 403 이다(이 서버의 로그인은
+# `platform:read` 를 발급하지 않으므로 허용목록이 유일한 경로다). 위 api 서비스 환경
+# 목록에 두 키가 다 없다. 게이트 편의로 배포 컴포즈에 조작기를 다는 대신, 보류로 둔다.
+#
+# ── 등재 보류: terminal-attach 2경로 — 앞절이 미이식 ─────────────────────────
+# `POST …/work-sessions/{s}/terminal-attach` 와 `POST …/work-hosts/{h}/terminal-attach/validate`
+# 는 세션에 **원격 PTY 바인딩**(`pty_id` + `attach_endpoint`)이 있어야 200 이고, 그 두 칸을
+# 쓰는 것은 work-host 서명 `POST …/work-sessions` / `PATCH …/work-sessions/{s}` 인데 둘 다
+# 미이식이다(work_host_auth 모듈 doc 의 「still-unported five」, routes::work_sessions::
+# reject_unsupported_create 가 이름 붙여 400 으로 거절). 원장을 SQL 로 조작해 두 칸을
+# 채우면 200 은 나오지만, 그건 이 서버가 만들 수 없는 상태를 게이트가 지어내는 것이라
+# 「Rust 에서 실측됐다」가 거짓이 된다. 등재 조건: 그 서명 arm 두 개가 이식될 때.
 
-# ── auth: 아래 승인 계열이 쓰는 자격증명의 출처 ──────────────────────────────
-# 승인 인박스와 결재는 사람 자격증명 없이는 왕복 자체가 성립하지 않는다. 이
-# 로그인은 편의가 아니라 승인 계열 샘플의 전제라서 함께 등재한다.
+# ── auth: 아래 표본 전부가 쓰는 자격증명의 출처 ─────────────────────────────
+# 승인 인박스도 결재도 사람 자격증명 없이는 왕복 자체가 성립하지 않는다. 이
+# 로그인은 편의가 아니라 나머지 전부의 전제라서 함께 등재한다.
+# refresh 는 단일 사용 회전이고 logout 은 자기가 쓴 쌍을 죽이므로, 스크립트는
+# refresh 를 정확히 한 번, logout 을 맨 마지막에 부른다.
 POST /v1/auth/login
+POST /v1/auth/refresh
+POST /v1/auth/logout
+POST /v1/auth/realtime-token
 
 # ── 승인 계열 (#1042 최초 등재분) ───────────────────────────────────────────
 # 사람이 만나는 두 지점: 인박스와, 결정하는 탭.
 # (routes/approvals.rs — Swift ApprovalDecisionRoutes.swift 의 포팅본)
 GET /v1/workspaces/{workspaceId}/approvals
 POST /v1/workspaces/{workspaceId}/approvals/{approvalId}/decision
+
+# ── 가입 · 로스터 · 채널 (#1132/#1143 잔여 등재) ────────────────────────────
+# `/v1/join` 은 이 서버의 유일한 미인증 쓰기다. 등재는 그 사실을 Rust 에서
+# 실측한다는 뜻이고, 초대 코드는 스펙에 없는 `…/invites` 대신 SQL 픽스처가 준다.
+POST /v1/join
+GET /v1/workspaces/{workspaceId}/roster
+GET /v1/workspaces/{workspaceId}/members
+GET /v1/workspaces/{workspaceId}/channels
+POST /v1/workspaces/{workspaceId}/channels
+PUT /v1/workspaces/{workspaceId}/channels/{channelId}/notification-pref
+
+# ── 메시지 스파인 ───────────────────────────────────────────────────────────
+# 보내기와 읽기, 그리고 「이미 보낸 메시지에 할 수 있는 일」 전부. 반응·고정은
+# seq 를 소비하지 않는 message-scoped 동사이고(momo_messaging::interaction),
+# 채널 스코프 목록은 그 둘의 콜드로드 짝이다.
+POST /v1/workspaces/{workspaceId}/channels/{channelId}/messages
+GET /v1/workspaces/{workspaceId}/channels/{channelId}/messages
+GET /v1/workspaces/{workspaceId}/channels/{channelId}/messages/{rootId}/replies
+PATCH /v1/workspaces/{workspaceId}/messages/{messageId}
+DELETE /v1/workspaces/{workspaceId}/messages/{messageId}
+PUT /v1/workspaces/{workspaceId}/messages/{messageId}/reactions/{emoji}
+DELETE /v1/workspaces/{workspaceId}/messages/{messageId}/reactions/{emoji}
+GET /v1/workspaces/{workspaceId}/channels/{channelId}/reactions
+PUT /v1/workspaces/{workspaceId}/messages/{messageId}/pin
+DELETE /v1/workspaces/{workspaceId}/messages/{messageId}/pin
+GET /v1/workspaces/{workspaceId}/channels/{channelId}/pins
+GET /v1/workspaces/{workspaceId}/search/messages
+GET /v1/workspaces/{workspaceId}/read-state
+PUT /v1/workspaces/{workspaceId}/channels/{channelId}/read-state
+GET /v1/workspaces/{workspaceId}/dms
+POST /v1/workspaces/{workspaceId}/dms
+
+# ── 설정: 자격증명이 필요 없는 읽기와 tier 정책 ─────────────────────────────
+# effort-table 은 컴파일된 상수라 어떤 배선도 요구하지 않는다. tier 정책은
+# 사람이 편집하는 그 행을 resume 이 그대로 읽는다(momo_settings::load_tier_policy).
+GET /v1/provider/effort-table
+GET /v1/workspaces/{workspaceId}/work-tier-policy
+PUT /v1/workspaces/{workspaceId}/work-tier-policy
+GET /v1/workspaces/{workspaceId}/work-tier-policy/me
+PUT /v1/workspaces/{workspaceId}/work-tier-policy/me
+
+# ── 에이전트 = 1급 멤버 ─────────────────────────────────────────────────────
+# 초대(=member 생성)·프로필·정지·모델 어휘, 그리고 ADR-0132 의 사람의 「멈춰라」.
+POST /v1/workspaces/{workspaceId}/agents
+GET /v1/workspaces/{workspaceId}/agents/{agentId}/profile
+PUT /v1/workspaces/{workspaceId}/agents/{agentId}/profile
+PUT /v1/workspaces/{workspaceId}/agents/{agentId}/pause
+GET /v1/workspaces/{workspaceId}/agents/{agentId}/allowed-models
+POST /v1/workspaces/{workspaceId}/agent-runs/{runId}/cancel
+
+# ── work host 레지스트리 + work session 원장 (ADR-0125 / ADR-0114) ──────────
+# heartbeat 는 bearer 가 아니라 Ed25519 서명 v1 으로 인증되는 PUBLIC 라우트다 —
+# 등재는 그 서명 경로가 Rust 에서 실제로 검증된다는 주장이다.
+POST /v1/workspaces/{workspaceId}/work-hosts
+GET /v1/workspaces/{workspaceId}/work-hosts
+DELETE /v1/workspaces/{workspaceId}/work-hosts/{workHostId}
+POST /v1/workspaces/{workspaceId}/work-hosts/{workHostId}/heartbeat
+POST /v1/workspaces/{workspaceId}/work-sessions
+GET /v1/workspaces/{workspaceId}/work-sessions
+PATCH /v1/workspaces/{workspaceId}/work-sessions/{workSessionId}
+POST /v1/workspaces/{workspaceId}/work-sessions/{workSessionId}/resume
+
+# ── work control 원장 + 서명 데몬 경로 (#1114 / #1132 이탈 6 / #1143) ───────
+# 이 다섯 줄이 #1132 가 "실제로 왕복시키지 않은 5개"라며 미등재로 남긴 그 연산들이다.
+# 이제 왕복한다: 사람이 도구를 미리 허가하고 → 에이전트가 **agent bearer**(scope
+# `work:control`)로 spawn 을 요청해 카드 없이 dispatched 가 되고 → **데몬이 자기
+# Ed25519 서명으로** 그 지시를 읽고(`pending-controls`) 자기 서명으로 「실행했다」를
+# 보고한다(`ack`). ack 의 자격증명이 요청자와 다른 것이 이 계열의 요점이라
+# (#1143 §①), 서명 arm 으로 샘플하지 않으면 등재해도 증명하는 바가 다르다.
+POST /v1/workspaces/{workspaceId}/work-controls
+POST /v1/workspaces/{workspaceId}/work-controls/{workControlId}/ack
+GET /v1/workspaces/{workspaceId}/work-hosts/{workHostId}/pending-controls
+GET /v1/workspaces/{workspaceId}/work-auto-approvals
+PUT /v1/workspaces/{workspaceId}/work-auto-approvals/{tool}
+DELETE /v1/workspaces/{workspaceId}/work-auto-approvals/{tool}
