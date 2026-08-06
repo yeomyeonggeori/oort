@@ -1,4 +1,5 @@
-//! DB-backed conformance for message interactions (B11 — edit / delete / react).
+//! DB-backed conformance for message interactions (B11 — edit / delete / react;
+//! 이슈 #1112 — pin).
 //!
 //! Red-test discipline: each assertion below goes red if the invariant it names
 //! is reverted, and the invariant is named in the test's own name. They are
@@ -32,8 +33,9 @@ use std::sync::Mutex;
 use momo_db::migrate::{default_migrations_dir, run_migrations, SeedMode};
 use momo_db::{with_tenant_tx, DbError, PgPool};
 use momo_messaging::{
-    channel_reaction_snapshot, delete_message_in_tx, edit_message_in_tx, send_message_in_tx,
-    InteractionRefused, NewMessage, ReactionAction, StoredMessage,
+    channel_pins, channel_reaction_snapshot, delete_message_in_tx, edit_message_in_tx,
+    send_message_in_tx, set_pin_in_tx, InteractionRefused, NewMessage, PinAction, ReactionAction,
+    StoredMessage, CHANNEL_PIN_LIMIT,
 };
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use uuid::Uuid;
@@ -760,4 +762,345 @@ async fn b11_history_projects_the_edit_and_delete_stamps() {
     );
     assert!(removed_row.body.is_none());
     assert!(removed_row.deleted_at.is_some());
+}
+
+// ---------------------------------------------------------------------------
+// #7 — pin: membership, cap, live-list parity (이슈 #1112)
+// ---------------------------------------------------------------------------
+
+async fn pin_row_count(su: &PgPool, channel_id: Uuid) -> i64 {
+    sqlx::query_scalar("SELECT count(*) FROM message_pin WHERE channel_id = $1")
+        .bind(channel_id)
+        .fetch_one(su)
+        .await
+        .expect("count pins")
+}
+
+/// **Red proof #1 — a non-member cannot pin.**
+///
+/// The membership gate is not the route's; it is [`set_pin_in_tx`]'s, exactly
+/// like the reaction path's. Remove `lock_and_authorize` from the pin body and
+/// this goes red on the refusal *and* on the row count — a stranger would
+/// otherwise be able to plant an entry in a channel header they cannot read.
+///
+/// The second half is the tenancy boundary: a foreign workspace does not get a
+/// 403, it gets `NotFound`, because RLS FORCE hides the message entirely. A 403
+/// here would confirm the message exists.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_app role"]
+async fn pin_1112_a_non_member_cannot_pin_and_another_tenant_cannot_see_the_message() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fx = seed_fixture(&su, "human").await;
+
+    let message = seed_sent_message(&app, fx.ws, fx.ch, fx.author, "고정 대상").await;
+
+    // A workspace member who is not in this channel.
+    let outsider = Uuid::new_v4();
+    seed_member(&su, fx.ws, outsider, "human").await;
+    let (ws, ch, message_id) = (fx.ws, fx.ch, message.id);
+
+    let refusal = with_tenant_tx(&app, ws, move |conn| {
+        Box::pin(async move {
+            Ok::<_, DbError>(
+                set_pin_in_tx(conn, ws, message_id, outsider, PinAction::Pinned)
+                    .await?
+                    .expect_err("a non-member may not pin"),
+            )
+        })
+    })
+    .await
+    .expect("query ran");
+    assert_eq!(refusal, InteractionRefused::NotAMember);
+    assert_eq!(
+        pin_row_count(&su, ch).await,
+        0,
+        "a refused pin must not have written a row"
+    );
+
+    // …and unpinning is gated identically: the refusal is not "pin only".
+    let refusal = with_tenant_tx(&app, ws, move |conn| {
+        Box::pin(async move {
+            Ok::<_, DbError>(
+                set_pin_in_tx(conn, ws, message_id, outsider, PinAction::Unpinned)
+                    .await?
+                    .expect_err("a non-member may not unpin either"),
+            )
+        })
+    })
+    .await
+    .expect("query ran");
+    assert_eq!(refusal, InteractionRefused::NotAMember);
+
+    let foreign_ws = Uuid::new_v4();
+    let foreign_member = Uuid::new_v4();
+    seed_workspace(&su, foreign_ws).await;
+    seed_member(&su, foreign_ws, foreign_member, "human").await;
+    let refusal = with_tenant_tx(&app, foreign_ws, move |conn| {
+        Box::pin(async move {
+            Ok::<_, DbError>(
+                set_pin_in_tx(
+                    conn,
+                    foreign_ws,
+                    message_id,
+                    foreign_member,
+                    PinAction::Pinned,
+                )
+                .await?
+                .expect_err("another tenant's message is not visible at all"),
+            )
+        })
+    })
+    .await
+    .expect("query ran");
+    assert_eq!(
+        refusal,
+        InteractionRefused::NotFound,
+        "RLS FORCE must hide the row — a 403 here would confirm it exists"
+    );
+}
+
+/// **Red proof #2 — the channel cap refuses the pin over the line.**
+///
+/// Two assertions, and they are different claims. The first is that the domain
+/// answers `PinLimit` (a friendly 409) rather than letting the write through.
+/// The second is that migration 061's trigger is the *authority*: bypassing the
+/// domain entirely — a raw `INSERT` as the runtime role, which is what a future
+/// code path that forgot the guard would do — still fails, with the 23514 the
+/// migration names. Delete the trigger and only the second half goes red, which
+/// is precisely the regression worth catching separately.
+///
+/// The cap is exercised at its real value rather than a test-only one, because
+/// a constant the test overrides is a constant the test is not checking.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_app role"]
+async fn pin_1112_the_channel_cap_refuses_the_pin_over_the_line() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fx = seed_fixture(&su, "human").await;
+    let (ws, ch, author) = (fx.ws, fx.ch, fx.author);
+
+    let mut ids = Vec::new();
+    for index in 0..=CHANNEL_PIN_LIMIT {
+        ids.push(
+            seed_sent_message(&app, ws, ch, author, &format!("고정 {index}"))
+                .await
+                .id,
+        );
+    }
+
+    let over_the_line = ids.pop().expect("one message past the cap");
+    let to_pin = ids.clone();
+    with_tenant_tx(&app, ws, move |conn| {
+        Box::pin(async move {
+            for id in &to_pin {
+                set_pin_in_tx(conn, ws, *id, author, PinAction::Pinned)
+                    .await?
+                    .expect("a channel member may pin up to the cap");
+            }
+            Ok::<_, DbError>(())
+        })
+    })
+    .await
+    .expect("fill the channel to the cap");
+    assert_eq!(pin_row_count(&su, ch).await, CHANNEL_PIN_LIMIT);
+
+    let refusal = with_tenant_tx(&app, ws, move |conn| {
+        Box::pin(async move {
+            Ok::<_, DbError>(
+                set_pin_in_tx(conn, ws, over_the_line, author, PinAction::Pinned)
+                    .await?
+                    .expect_err("the cap is reached"),
+            )
+        })
+    })
+    .await
+    .expect("query ran");
+    assert_eq!(refusal, InteractionRefused::PinLimit);
+    assert_eq!(
+        pin_row_count(&su, ch).await,
+        CHANNEL_PIN_LIMIT,
+        "a refused pin must not have written a row"
+    );
+
+    // The trigger is the authority: a write that skips the domain still fails.
+    let raw: Result<(), DbError> = with_tenant_tx(&app, ws, move |conn| {
+        Box::pin(async move {
+            sqlx::query(
+                "INSERT INTO message_pin (workspace_id, channel_id, message_id, pinned_by) \
+                 VALUES ($1, $2, $3, $4)",
+            )
+            .bind(ws)
+            .bind(ch)
+            .bind(over_the_line)
+            .bind(author)
+            .execute(&mut *conn)
+            .await?;
+            Ok(())
+        })
+    })
+    .await;
+    let error = raw.expect_err("migration 061's trigger refuses the 101st pin");
+    let sentence = error.to_string();
+    assert!(
+        sentence.contains("maximum 100 pinned"),
+        "the schema must be the one refusing, and by name: {sentence}"
+    );
+
+    // Freeing a slot makes room again — the cap is a live count, not a
+    // high-water mark.
+    let freed = ids[0];
+    with_tenant_tx(&app, ws, move |conn| {
+        Box::pin(async move {
+            set_pin_in_tx(conn, ws, freed, author, PinAction::Unpinned)
+                .await?
+                .expect("any channel member may unpin");
+            set_pin_in_tx(conn, ws, over_the_line, author, PinAction::Pinned)
+                .await?
+                .expect("the freed slot is usable");
+            Ok::<_, DbError>(())
+        })
+    })
+    .await
+    .expect("unpin then pin");
+    assert_eq!(pin_row_count(&su, ch).await, CHANNEL_PIN_LIMIT);
+}
+
+/// **Red proof #3, server half — the broadcast carries the whole list entry.**
+///
+/// A client must be able to apply `message.pinned` and end up with the state a
+/// re-read of `GET …/pins` would have given it. That only holds if the payload
+/// carries the *projection*, not the id: strip `pinned` down to ids and this
+/// goes red on the body/author/seq comparison, which is exactly the change that
+/// would silently force every client back into a refetch.
+///
+/// The idempotence and tombstone-sweep claims ride along because they are the
+/// other two ways the list and the broadcast can disagree: a duplicate PUT that
+/// re-published would insert a second header row on every client, and a delete
+/// that left the pin behind would strand an unopenable entry.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_app role"]
+async fn pin_1112_the_broadcast_carries_what_the_list_would_have_returned() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    // The pinner is an **agent** member: there is no human/agent branch in the
+    // pin path either (invariant #5).
+    let fx = seed_fixture(&su, "agent").await;
+    let (ws, ch, author, agent) = (fx.ws, fx.ch, fx.author, fx.other);
+
+    let message = seed_sent_message(&app, ws, ch, author, "고정할 메시지").await;
+    let message_id = message.id;
+
+    let (first, second) = with_tenant_tx(&app, ws, move |conn| {
+        Box::pin(async move {
+            let first = set_pin_in_tx(conn, ws, message_id, agent, PinAction::Pinned)
+                .await?
+                .expect("an agent member may pin");
+            let second = set_pin_in_tx(conn, ws, message_id, agent, PinAction::Pinned)
+                .await?
+                .expect("a duplicate PUT is a success");
+            Ok::<_, DbError>((first, second))
+        })
+    })
+    .await
+    .expect("two pin calls");
+
+    assert!(first.changed);
+    assert!(
+        !second.changed,
+        "a duplicate pin must report no change — and must not have raised \
+         message_pin_message_uniq as a 500"
+    );
+    assert_eq!(pin_row_count(&su, ch).await, 1);
+    assert_eq!(
+        broadcast_types(&su, ch).await,
+        vec!["message.new".to_string(), "message.pinned".to_string()],
+        "only the call that changed something publishes"
+    );
+
+    // The published payload and the list projection are the same facts.
+    let published: serde_json::Value = sqlx::query_scalar(
+        "SELECT payload->'data'->'payload' FROM outbox \
+          WHERE partition_key = $1 AND payload->'data'->>'type' = 'message.pinned' \
+          ORDER BY id DESC LIMIT 1",
+    )
+    .bind(ch)
+    .fetch_one(&su)
+    .await
+    .expect("read the pinned payload");
+
+    let listed = with_tenant_tx(&app, ws, move |conn| {
+        Box::pin(async move { channel_pins(conn, ch).await })
+    })
+    .await
+    .expect("pin list");
+    assert_eq!(listed.len(), 1);
+    let entry = &listed[0];
+
+    assert_eq!(published["message_id"], serde_json::json!(entry.message_id));
+    assert_eq!(published["channel_id"], serde_json::json!(entry.channel_id));
+    assert_eq!(published["seq"], serde_json::json!(entry.seq));
+    assert_eq!(
+        published["author_member_id"],
+        serde_json::json!(entry.author_member_id)
+    );
+    assert_eq!(published["body"], serde_json::json!(entry.body));
+    assert_eq!(published["pinned_by"], serde_json::json!(entry.pinned_by));
+    assert_eq!(
+        published["pinned_at_ms"],
+        serde_json::json!(entry.pinned_at.timestamp_millis()),
+        "a client applying the frame must land on the list's own timestamp, or \
+         its ordering diverges from everyone who cold-loaded"
+    );
+    assert_eq!(
+        entry.seq, message.seq,
+        "the entry names the message's own seq — pinning mints none"
+    );
+
+    // …and the broadcast reused that seq rather than minting one.
+    assert_eq!(
+        channel_last_seq(&su, ch).await,
+        message.seq,
+        "a pin must not advance the channel counter — every cursor in the \
+         workspace would read it as an unread message"
+    );
+
+    // Deleting the message sweeps the pin, and does so without a second frame:
+    // the client drops the entry on `message.deleted`.
+    let before = broadcast_types(&su, ch).await.len();
+    with_tenant_tx(&app, ws, move |conn| {
+        Box::pin(async move {
+            delete_message_in_tx(conn, ws, message_id, author)
+                .await?
+                .expect("the author may delete");
+            Ok::<_, DbError>(())
+        })
+    })
+    .await
+    .expect("delete");
+    assert_eq!(
+        pin_row_count(&su, ch).await,
+        0,
+        "a tombstone must not hold a slot against the channel cap"
+    );
+    let after = broadcast_types(&su, ch).await;
+    assert_eq!(
+        after.len(),
+        before + 1,
+        "the delete publishes exactly one frame: {after:?}"
+    );
+    assert_eq!(after.last().map(String::as_str), Some("message.deleted"));
+
+    let listed = with_tenant_tx(&app, ws, move |conn| {
+        Box::pin(async move { channel_pins(conn, ch).await })
+    })
+    .await
+    .expect("pin list after delete");
+    assert!(
+        listed.is_empty(),
+        "the list must not draw a deleted message"
+    );
 }

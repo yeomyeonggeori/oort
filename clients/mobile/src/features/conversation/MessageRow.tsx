@@ -40,15 +40,18 @@ import type {QuoteBlock as QuoteBlockModel} from '@momo/core/features/timeline/q
 import {
   canDeleteMessage,
   canEditMessage,
+  canPinMessage,
   canReactToMessage,
   canReplyToMessage,
   hasAnyAction,
   type MessageActionAvailability,
   type PendingMessage,
 } from '@momo/core/features/timeline/model';
+import {pinActionLabel} from '@momo/core/features/timeline/pins';
 import {
   deleteFailureMessage,
   editFailureMessage,
+  pinFailureMessage,
   reactionFailureMessage,
 } from '@momo/core/features/timeline/actionCopy';
 import type {ReactionChip} from '@momo/core/features/timeline/reactions';
@@ -946,6 +949,15 @@ export interface MessageRowActions {
   onEdit: (message: Message, body: string) => Promise<void>;
   onDelete: (message: Message) => Promise<void>;
   /**
+   * 이슈 #1112 — 고정하거나 고정을 푼다. 방향은 `pinned` 가 지므로 한 콜백이다.
+   * Optimistic only in the unpin direction (the hook explains why); rejects with
+   * the error the row turns into a line.
+   *
+   * Absent on a surface with no channel behind it (the measurement harness),
+   * exactly as `onQuote` is.
+   */
+  onTogglePin?: (message: Message) => Promise<void>;
+  /**
    * Open this message's thread. Absent when there is nowhere to open — inside a
    * thread already, or on a surface with no thread panel. A rollup with no
    * handler renders as a LABEL rather than a dead button (QA P3 1-1).
@@ -975,6 +987,13 @@ export interface MessageRowProps {
   startsGroup: boolean;
   directory: Directory;
   chips: ReactionChip[];
+  /**
+   * 이슈 #1112 — 이 메시지가 지금 고정돼 있는가. 목록이 든다.
+   *
+   * 행이 채널의 고정 지도를 통째로 들지 않는 이유는 `chips` 와 같다: 어딘가에서
+   * 아무거나 고정될 때마다 붙어 있는 행이 전부 다시 그려진다.
+   */
+  pinned?: boolean;
   /** This paused-agent notice stands in for N of them (core folded the rest). */
   pausedRepeat?: number;
   /**
@@ -1093,6 +1112,7 @@ function MessageRowInner({
   startsGroup,
   directory,
   chips,
+  pinned,
   pausedRepeat,
   deletedRepeat,
   landed,
@@ -1155,6 +1175,11 @@ function MessageRowInner({
       // 나눈 두 장치가 UI 에서 다시 합쳐진다.
       quote: actions?.onQuote !== undefined && canQuoteMessage(message),
       react: actions !== undefined && canReactToMessage(message),
+      // 고정에는 작성자 관문이 없다 — 채널의 사실이라 누구나 걸고 누구나 푼다
+      // (서버가 같은 규칙을 강제한다). 핸들러 유무를 함께 보는 모양은 `quote` 와
+      // 같다: 고정할 채널이 없는 표면에서는 내놓지 않는다.
+      pin:
+        actions?.onTogglePin !== undefined && canPinMessage(message),
       edit: actions !== undefined && canEditMessage(message, actions.myMemberId),
       delete:
         actions !== undefined && canDeleteMessage(message, actions.myMemberId),
@@ -1255,6 +1280,14 @@ function MessageRowInner({
     [actions, message],
   );
 
+  const togglePin = useCallback(() => {
+    if (!actions?.onTogglePin) return;
+    setRowError(null);
+    void actions.onTogglePin(message).catch((error: unknown) => {
+      setRowError(pinFailureMessage(error));
+    });
+  }, [actions, message]);
+
   const onChipPress = useCallback(
     (emoji: string) => {
       // The tap that follows a long press belongs to the gesture that opened the
@@ -1283,6 +1316,9 @@ function MessageRowInner({
         case 'momoQuoteJump':
           actions?.onJumpToQuoted?.(message);
           return;
+        case 'momoPin':
+          togglePin();
+          return;
         case 'momoLink':
           if (affordances.firstLink) openLink(affordances.firstLink);
           return;
@@ -1306,6 +1342,7 @@ function MessageRowInner({
       message,
       affordances,
       presentation.artifact,
+      togglePin,
     ],
   );
 
@@ -1315,6 +1352,11 @@ function MessageRowInner({
     const list: {name: string; label: string}[] = [];
     if (actionable) list.push({name: 'momoActions', label: '메시지 액션'});
     if (threadTarget) list.push({name: 'momoThread', label: '스레드 열기'});
+    // 이슈 #1112 — 시트를 열지 않고도 로터에서 바로 고정할 수 있다. 낱말은
+    // 시트의 항목과 같은 코어 상수에서 오므로 둘이 갈라질 수 없다.
+    if (available.pin) {
+      list.push({name: 'momoPin', label: pinActionLabel(pinned === true)});
+    }
     // 아래 넷이 H-1 이 더한 것이다. 묘비에는 하나도 붙지 않는다 — 지워진
     // 메시지에는 열 링크도 복사할 코드도 없다.
     if (!deleted) {
@@ -1350,6 +1392,8 @@ function MessageRowInner({
     actions,
     affordances,
     presentation.artifact,
+    available.pin,
+    pinned,
   ]);
 
   const authorLabel = memberNameParts(
@@ -1708,6 +1752,7 @@ function MessageRowInner({
           message={message}
           chips={chips}
           availability={available}
+          pinned={pinned}
           authorLabel={authorLabel}
           deletePending={deletePending}
           onClose={() => setSheetOpen(false)}
@@ -1738,6 +1783,14 @@ function MessageRowInner({
               ? () => {
                   setSheetOpen(false);
                   actions.onQuote?.(message);
+                }
+              : undefined
+          }
+          onPin={
+            available.pin
+              ? () => {
+                  setSheetOpen(false);
+                  togglePin();
                 }
               : undefined
           }
@@ -1862,6 +1915,7 @@ export const MESSAGE_ROW_COMPARED_PROPS: Record<keyof MessageRowProps, true> = {
   startsGroup: true,
   directory: true,
   chips: true,
+  pinned: true,
   pausedRepeat: true,
   deletedRepeat: true,
   landed: true,
@@ -1924,6 +1978,9 @@ export function sameMessageRowProps(
     // 바뀌고(세우기·거두기) 그때 붙어 있는 행이 전부 비교를 한 번씩 지나는데,
     // 다시 그려지는 것은 참이 된 행과 거짓이 된 행 둘뿐이다.
     a.deletedRepeat === b.deletedRepeat &&
+    // 이슈 #1112. 스칼라라 동일성으로 충분하고, 한 행의 고정 여부가 바뀔 때만
+    // 그 행이 다시 그려진다 — 채널의 다른 고정은 이 행을 건드리지 않는다.
+    a.pinned === b.pinned &&
     a.landed === b.landed &&
     a.nowMs === b.nowMs &&
     a.onResend === b.onResend &&

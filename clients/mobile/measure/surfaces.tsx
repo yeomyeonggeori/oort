@@ -13,6 +13,7 @@ import {typingSegments} from '@momo/core/features/chat/typing';
 import {Composer} from '../src/features/conversation/Composer';
 import {saveDraft} from '../src/features/conversation/drafts';
 import {MessageActionSheet} from '../src/features/conversation/MessageActionSheet';
+import {PinListPanel} from '../src/features/conversation/PinListPanel';
 import {TypingBar} from '../src/features/conversation/TypingBar';
 import {MessageBody} from '../src/features/conversation/MessageBody';
 import {MessageEditorSheet} from '../src/features/conversation/MessageEditorSheet';
@@ -183,6 +184,49 @@ const CODE_BODY = [
   '```',
 ].join('\n');
 
+/**
+ * 고정 목록의 씨앗 (이슈 #1112). 셋인 이유: 작성자가 갈리고(이름 줄), 본문 길이가
+ * 갈리고(한 줄·잘린 줄), 빈 본문이 하나 있어야 「내용 없는 메시지」가 사진에 선다.
+ */
+const PINS = {
+  '00000000-0000-7000-8000-0000000000a1': {
+    messageId: '00000000-0000-7000-8000-0000000000a1',
+    channelId: 'ch',
+    seq: 42,
+    authorMemberId: SELF,
+    type: 'text',
+    state: 'sent',
+    body: '금요일 배포는 오전 10시에 시작합니다. 롤백 절차는 문서에 적어 뒀어요.',
+    createdAtMs: NOW,
+    pinnedBy: SELF,
+    pinnedAtMs: NOW + 300_000,
+  },
+  '00000000-0000-7000-8000-0000000000a2': {
+    messageId: '00000000-0000-7000-8000-0000000000a2',
+    channelId: 'ch',
+    seq: 44,
+    authorMemberId: OTHER,
+    type: 'text',
+    state: 'sent',
+    body: '온콜 교대는 매주 화요일 10시.',
+    createdAtMs: NOW + 60_000,
+    pinnedBy: SELF,
+    pinnedAtMs: NOW + 200_000,
+  },
+  '00000000-0000-7000-8000-0000000000a3': {
+    messageId: '00000000-0000-7000-8000-0000000000a3',
+    channelId: 'ch',
+    seq: 46,
+    authorMemberId: OTHER,
+    type: 'artifact',
+    state: 'sent',
+    body: null,
+    createdAtMs: NOW + 120_000,
+    pinnedBy: OTHER,
+    pinnedAtMs: NOW + 100_000,
+  },
+};
+
 const CHIPS = [
   {emoji: '👍', count: 3, mine: true},
   {emoji: '🎉', count: 1, mine: false},
@@ -192,6 +236,7 @@ const AVAILABILITY = {
   reply: true,
   quote: true,
   react: true,
+  pin: true,
   edit: true,
   delete: true,
 };
@@ -506,6 +551,25 @@ function Row() {
 }
 
 export function Surface({name}: {name: string}): React.JSX.Element {
+  // 이슈 #1112 — 고정 여부만 다른 두 시트. 낱말이 상태를 따라 뒤집히는 것을 한
+  // 프레임 안에서 비교하려고 인자를 받는다.
+  const pinSheet = (pinned: boolean) => (
+    <MessageActionSheet
+      message={MESSAGE}
+      chips={CHIPS}
+      availability={AVAILABILITY}
+      pinned={pinned}
+      authorLabel="곽성재"
+      onClose={() => {}}
+      onToggleReaction={() => {}}
+      onReply={() => {}}
+      onQuote={() => {}}
+      onCopy={() => {}}
+      onPin={() => {}}
+      onEdit={() => {}}
+      onDelete={() => {}}
+    />
+  );
   const sheet = (confirm: boolean) => (
     <MessageActionSheet
       message={MESSAGE}
@@ -522,6 +586,9 @@ export function Surface({name}: {name: string}): React.JSX.Element {
       // 하필 넘치지 않는 시트를 찍고 있었다. AX5 캡처가 이 결함을 드러냈다.
       onQuote={() => {}}
       onCopy={() => {}}
+      // 이슈 #1112. 같은 함정을 되풀이하지 않으려고 함께 넘긴다 — `onPin` 이
+      // 없으면 시트가 그 줄을 안 그리고, 사진 속 시트가 또 배송본보다 짧아진다.
+      onPin={() => {}}
       onEdit={() => {}}
       onDelete={() => {}}
     />
@@ -684,10 +751,43 @@ export function Surface({name}: {name: string}): React.JSX.Element {
       );
     case 'sheet':
       return (
-        <Frame label="길게 누르기 시트 — 반응·답글·고치기·지우기·닫기">
+        <Frame label="길게 누르기 시트 — 반응·답글·인용·복사·고정·고치기·지우기·닫기">
           <Row />
           {sheet(false)}
         </Frame>
+      );
+    // ---- 이슈 #1112: 고정 -----------------------------------------------
+    //
+    // 시트는 `Modal` 이라 한 프레임에 둘을 세울 수 없다(전면을 덮는다). 그래서
+    // 낱말의 뒤집힘은 **두 장**으로 본다: 위의 `sheet` 가 「고정하기」를 그리고
+    // (그 시트는 `pinned` 없이 선다), 이 판이 「고정 해제하기」를 그린다. 두 장의
+    // 나머지 줄이 글자 하나까지 같아야 뒤집힌 것이 그 한 줄뿐임이 보인다.
+    case 'pin-sheet':
+      return (
+        <Frame label="고정 — 이미 고정된 행의 시트. 그 한 줄만 `sheet` 판과 다르다 (이슈 #1112)">
+          <Row />
+          {pinSheet(true)}
+        </Frame>
+      );
+    case 'pin-list':
+      return (
+        <PinListPanel
+          pins={PINS}
+          directory={DIRECTORY}
+          onJump={() => {}}
+          onClose={() => {}}
+        />
+      );
+    case 'pin-list-empty':
+      // 빈 목록은 채워진 것 **옆에서만** 읽힌다: 「이 화면이 아직 아무 말도 못 한
+      // 것」과 「할 말이 없다고 말하는 것」이 사진에서 갈리는 자리다.
+      return (
+        <PinListPanel
+          pins={{}}
+          directory={DIRECTORY}
+          onJump={() => {}}
+          onClose={() => {}}
+        />
       );
     case 'delete':
       return (

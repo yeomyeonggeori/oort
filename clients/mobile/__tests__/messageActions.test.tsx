@@ -367,3 +367,136 @@ describe('tombstone 은 자리를 지키고 무게를 내려놓는다', () => {
     expect(flat.fontSize).toBeLessThan(16);
   });
 });
+
+// =============================================================================
+// 고정 (이슈 #1112)
+//
+// 코어가 지도와 낱말을 순수 함수로 이미 증명한다(`pins.test.ts`). 여기서
+// 증명하는 것은 **그것이 배선돼 있는가** 하나다 — 시트가 항목을 세우는지,
+// 낱말이 상태를 따라 뒤집히는지, VoiceOver 가 시트를 열지 않고도 닿는지,
+// 거절이 그 행 안의 우리 문장이 되는지.
+// =============================================================================
+
+function pinnable(over: Partial<MessageRowActions> = {}): MessageRowActions {
+  return actions({onTogglePin: jest.fn().mockResolvedValue(undefined), ...over});
+}
+
+function renderPinRow({
+  pinned = false,
+  rowActions = pinnable(),
+  msg = message(),
+}: {
+  pinned?: boolean;
+  rowActions?: MessageRowActions;
+  msg?: Message;
+} = {}) {
+  render(
+    <MessageRow
+      message={msg}
+      startsGroup
+      directory={DIRECTORY}
+      chips={[]}
+      pinned={pinned}
+      nowMs={BASE_MS}
+      actions={rowActions}
+    />,
+  );
+  return rowActions;
+}
+
+describe('고정 — 낱말이 상태를 따라 뒤집힌다', () => {
+  it('고정되지 않은 행은 「고정하기」라고 말한다', () => {
+    renderPinRow({pinned: false});
+    longPress();
+    expect(screen.getByTestId('sheet-pin').props.accessibilityLabel).toBe(
+      '고정하기',
+    );
+  });
+
+  it('고정된 행은 「고정 해제하기」라고 말한다', () => {
+    renderPinRow({pinned: true});
+    longPress();
+    expect(screen.getByTestId('sheet-pin').props.accessibilityLabel).toBe(
+      '고정 해제하기',
+    );
+  });
+
+  /**
+   * 고정은 **채널의 사실**이다: 남이 쓴 메시지도 고정할 수 있고, 남이 고정한
+   * 것도 누구나 풀 수 있다. 작성자 관문이 붙으면 이 단언이 깨진다 — 그리고 그
+   * 관문은 서버에도 없다.
+   */
+  it('남의 메시지에도 항목이 선다 — 고치기·지우기와 다른 축이다', () => {
+    renderPinRow({msg: message({authorMemberId: OTHER})});
+    longPress();
+    expect(screen.queryByTestId('sheet-pin')).not.toBeNull();
+    expect(screen.queryByTestId('sheet-edit')).toBeNull();
+    expect(screen.queryByTestId('sheet-delete')).toBeNull();
+  });
+
+  /** 묘비에는 고정할 것이 없다 — 서버도 400 으로 거절한다. */
+  it('묘비에는 항목이 서지 않는다', () => {
+    renderPinRow({msg: message({state: 'deleted', body: undefined})});
+    const row = screen.getByTestId('message-row');
+    fireEvent(row, 'touchStart', touch(100, 200));
+    fireEvent(screen.getByTestId('message-press'), 'longPress');
+    expect(screen.queryByTestId('sheet-pin')).toBeNull();
+  });
+
+  /**
+   * 고정할 채널이 없는 표면(측정 하네스·검색 미리보기)은 핸들러를 안 넘긴다.
+   * 그때 항목이 서면 눌러도 아무 일이 없는 줄이 하나 생긴다.
+   */
+  it('핸들러가 없으면 항목도 없다', () => {
+    renderRow();
+    longPress();
+    expect(screen.queryByTestId('sheet-pin')).toBeNull();
+  });
+});
+
+describe('고정 — 로터와 되돌림', () => {
+  /**
+   * 행은 접근성 원소 **하나**다(6→1 규칙). 고정이 탭 스톱을 늘리는 대신 로터에
+   * 등재된다, 그리고 그 낱말은 시트의 항목과 같은 코어 상수에서 온다.
+   */
+  it('VoiceOver 는 시트를 열지 않고도 고정에 닿는다', () => {
+    const rowActions = renderPinRow({pinned: true});
+    const row = screen.getByTestId('message-row');
+    const names = (
+      row.props.accessibilityActions as {name: string; label: string}[]
+    ).map(action => action.name);
+    expect(names).toContain('momoPin');
+    const pinAction = (
+      row.props.accessibilityActions as {name: string; label: string}[]
+    ).find(action => action.name === 'momoPin');
+    expect(pinAction?.label).toBe('고정 해제하기');
+
+    fireEvent(row, 'accessibilityAction', {
+      nativeEvent: {actionName: 'momoPin'},
+    });
+    expect(rowActions.onTogglePin).toHaveBeenCalledTimes(1);
+  });
+
+  /**
+   * 상한 초과는 **그 행 안의 우리 문장**이다. 서버의 영어가 화면에 닿으면 안
+   * 되고(B8), 채널 상한이므로 「고정 목록에서 하나를 해제하라」가 다음 행동이다.
+   */
+  it('상한 거절은 서버의 영어가 아니라 우리 문장으로 그 행에 선다', async () => {
+    const rowActions = pinnable({
+      onTogglePin: jest
+        .fn()
+        .mockRejectedValue(new ApiError(409, 'channel pin limit reached')),
+    });
+    renderPinRow({rowActions});
+    longPress();
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('sheet-pin'));
+    });
+
+    // 코어의 문구를 그대로 쓰는지 본다. 화면에서 문장을 새로 지으면 웹과 두 벌이 된다.
+    expect(screen.getByTestId('message-action-error')).toBeTruthy();
+    expect(screen.getByText(/100개를 넘었습니다/)).toBeTruthy();
+    expect(screen.getByText(/고정 목록에서 하나를 해제한 뒤/)).toBeTruthy();
+    expect(screen.queryByText(/channel pin limit reached/)).toBeNull();
+  });
+});

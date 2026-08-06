@@ -1,5 +1,5 @@
-//! Message interactions — edit, delete, react (B11; Swift
-//! `MessageRoutes.swift:626-936`, "MOMO-478").
+//! Message interactions — edit, delete, react, **pin** (B11; Swift
+//! `MessageRoutes.swift:626-936`, "MOMO-478" — pin is 이슈 #1112, Rust-only).
 //!
 //! Everything here mutates a message that **already has a seq**, and that single
 //! fact is what shapes the module:
@@ -70,6 +70,19 @@ pub const MESSAGE_REACTION_LIMIT: i64 = 200;
 /// still clears the longest emoji anyone sends (a 4-person ZWJ family is 7).
 pub const REACTION_EMOJI_MAX_CHARS: usize = 32;
 
+/// The per-channel pin cap (이슈 #1112; migration `061_message_pin.sql`).
+///
+/// **The trigger in 061 is the authority**; this constant only exists so the
+/// domain can refuse with a 409 before Postgres refuses with a 23514. The two
+/// must agree — a change here without a migration would turn a friendly refusal
+/// back into a raw constraint error.
+///
+/// Why 100 rather than the reaction cap's 200: the bound is on a *read* surface.
+/// A channel's pins are projected into the channel header on every cold load,
+/// whereas 200 reactions sit on one message nobody has to scan. 100 is Slack's
+/// own per-channel limit and the length a header list can still be read at.
+pub const CHANNEL_PIN_LIMIT: i64 = 100;
+
 /// Why an emoji path segment was refused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum ReactionEmojiInvalid {
@@ -126,6 +139,12 @@ pub enum InteractionRefused {
     ReactionLimit,
     #[error("message body must not be empty")]
     EmptyBody,
+    /// Pinning a tombstone would put an empty row in the channel header that
+    /// nobody can open. Unpinning one is allowed — see [`set_pin_in_tx`].
+    #[error("deleted messages cannot be pinned")]
+    PinDeleted,
+    #[error("channel pin limit reached")]
+    PinLimit,
 }
 
 /// The row-locked message an interaction is about to act on (Swift
@@ -544,6 +563,16 @@ pub async fn delete_message_in_tx(
         .execute(&mut *conn)
         .await?;
 
+    // …and its pin, for the same reason (이슈 #1112). A tombstone left pinned
+    // would hold a slot against `CHANNEL_PIN_LIMIT` and draw an empty row in the
+    // channel header. **No `message.unpinned` is published**: the client already
+    // receives `message.deleted` for this id and drops the pin on it, so a second
+    // frame would describe the same event twice.
+    sqlx::query("DELETE FROM message_pin WHERE message_id = $1")
+        .bind(message_id)
+        .execute(&mut *conn)
+        .await?;
+
     let payload = build_message_deleted_payload(workspace_id, &projection);
     emit_outbox(
         &mut *conn,
@@ -719,6 +748,302 @@ pub async fn channel_reaction_snapshot(
             .push(member_id.to_string().to_uppercase());
     }
     Ok(snapshot)
+}
+
+// ---------------------------------------------------------------------------
+// PIN (이슈 #1112) — reaction's shape, one axis different
+// ---------------------------------------------------------------------------
+
+/// Which way a pin moved.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PinAction {
+    Pinned,
+    Unpinned,
+}
+
+impl PinAction {
+    /// The wire token, and also the `message.<action>` event suffix.
+    pub fn as_wire_label(self) -> &'static str {
+        match self {
+            PinAction::Pinned => "pinned",
+            PinAction::Unpinned => "unpinned",
+        }
+    }
+}
+
+/// One entry of a channel's pin list — the pin **and enough of the message to
+/// draw it**.
+///
+/// The message half is here rather than left to a second read because the
+/// surface this feeds is a header list of messages that are, by definition, not
+/// the ones on screen: a pin is most useful for a message scrolled far away, so
+/// a projection that carried only ids would force a lookup that misses.
+///
+/// The same struct is what [`build_pin_payload`] puts on the wire, which is the
+/// point — a client that applies `message.pinned` ends up with byte-identical
+/// state to one that re-read the list.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PinnedMessage {
+    pub message_id: Uuid,
+    pub channel_id: Uuid,
+    /// The pinned message's own seq. The pin does not mint one — see the module
+    /// docs, point 1.
+    pub seq: i64,
+    pub author_member_id: Uuid,
+    pub message_type: String,
+    pub state: String,
+    /// `None` only for a row an older code path tombstoned without sweeping its
+    /// pin; [`channel_pins`] filters those out.
+    pub body: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub pinned_by: Uuid,
+    pub pinned_at: DateTime<Utc>,
+}
+
+impl PinnedMessage {
+    /// The wire object, snake_case like every other broadcast payload.
+    ///
+    /// **Ids are lowercase here**, unlike the reaction wire. That uppercase is a
+    /// Swift `uuidString` legacy the reaction path reproduces for the shipped
+    /// macOS client ([`ReactionDelta::message_id_wire`]); pin is a new surface
+    /// with no client to keep compatible, so it uses the same lowercase form as
+    /// every other message id in the API.
+    fn to_wire(&self) -> Value {
+        json!({
+            "message_id": self.message_id,
+            "channel_id": self.channel_id,
+            "seq": self.seq,
+            "author_member_id": self.author_member_id,
+            "type": self.message_type,
+            "state": self.state,
+            "body": self.body,
+            "created_at_ms": self.created_at.timestamp_millis(),
+            "pinned_by": self.pinned_by,
+            "pinned_at_ms": self.pinned_at.timestamp_millis(),
+        })
+    }
+}
+
+/// The pin delta a mutation answers with.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PinDelta {
+    pub action: PinAction,
+    pub message_id: Uuid,
+    pub channel_id: Uuid,
+    /// The pinned message's seq, reused by the broadcast (never a new one).
+    pub seq: i64,
+    /// `false` when the row was already in the requested state — a duplicate PUT
+    /// or a DELETE of a pin that was not there. The call still **succeeds**
+    /// (idempotent), but it broadcasts and audits nothing.
+    pub changed: bool,
+    /// The list entry, on an effective pin only. `None` for an unpin (there is
+    /// nothing left to draw) and for a no-op.
+    pub pinned: Option<PinnedMessage>,
+}
+
+/// The `message.pinned` / `message.unpinned` payload.
+///
+/// `ts` is wall-clock now, not the message's: the message did not change, the
+/// pin happened now. `seq` is still the message's — see the module docs.
+///
+/// `message.pinned` carries the whole list entry so a header list can insert it
+/// without re-reading; `message.unpinned` carries the id alone, because removal
+/// needs no projection and re-broadcasting a body on the way out would be the
+/// mistake [`build_message_deleted_payload`] avoids.
+pub fn build_pin_payload(workspace_id: Uuid, delta: &PinDelta) -> Value {
+    let payload = match (&delta.pinned, delta.action) {
+        (Some(pinned), PinAction::Pinned) => pinned.to_wire(),
+        _ => json!({
+            "message_id": delta.message_id,
+            "channel_id": delta.channel_id,
+        }),
+    };
+    interaction_envelope(
+        workspace_id,
+        delta.channel_id,
+        &format!("message.{}", delta.action.as_wire_label()),
+        Utc::now().timestamp_millis(),
+        delta.seq,
+        payload,
+    )
+}
+
+/// The `message`/`message_pin` columns a pin list entry is decoded from.
+const PIN_COLS: &str = "p.message_id, p.channel_id, p.pinned_by, p.pinned_at, \
+     m.seq, m.author_member_id, m.type::text AS message_type, m.state::text AS state, \
+     m.body, m.created_at";
+
+fn decode_pin(row: &sqlx::postgres::PgRow) -> Result<PinnedMessage, sqlx::Error> {
+    Ok(PinnedMessage {
+        message_id: row.try_get("message_id")?,
+        channel_id: row.try_get("channel_id")?,
+        seq: row.try_get("seq")?,
+        author_member_id: row.try_get("author_member_id")?,
+        message_type: row.try_get("message_type")?,
+        state: row.try_get("state")?,
+        body: row.try_get("body")?,
+        created_at: row.try_get("created_at")?,
+        pinned_by: row.try_get("pinned_by")?,
+        pinned_at: row.try_get("pinned_at")?,
+    })
+}
+
+/// `PUT`/`DELETE …/messages/{id}/pin` — pin or unpin a message in its channel.
+///
+/// **A pin is the channel's fact, not the pinner's.** `message_pin` is unique on
+/// `message_id` alone (not on `(message, member)` the way `reaction` is), so two
+/// people pinning the same message produce one header row, and **any** channel
+/// member may unpin — including one who did not pin it. Requiring the pinner
+/// would strand every pin whose author left the workspace, and a pin is not
+/// property. `pinned_by` records where it came from; it grants nothing.
+///
+/// **Idempotent by construction**, exactly like [`set_reaction_in_tx`]: the
+/// insert is `ON CONFLICT (message_id) DO NOTHING` and the delete reports
+/// whether a row was there. A double-tapped "고정하기" is a 200, never a
+/// unique-violation 500.
+///
+/// Note the asymmetry on a tombstone, and it is the reaction path's: **pinning**
+/// a deleted message is refused, **unpinning** one is allowed. The delete sweep
+/// normally removes the row already, so the unpin branch only ever runs against
+/// a pin left by an older code path — and a member must be able to clear it.
+///
+/// **The channel advisory is what makes the cap real.** The message row lock
+/// [`lock_and_authorize`] takes serializes two pins *of the same message*, which
+/// is not the race the cap has: two members pinning two *different* messages
+/// would both read `count = 99` and both insert. The advisory is keyed on the
+/// channel — the axis the cap is counted on — and is taken only on the insert
+/// branch, so an unpin never waits behind a pin. The trigger in migration 061
+/// remains the authority; this only ensures the friendly 409 is the one callers
+/// actually see.
+pub async fn set_pin_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    message_id: Uuid,
+    member_id: Uuid,
+    action: PinAction,
+) -> Result<Result<PinDelta, InteractionRefused>, DbError> {
+    let locked = match lock_and_authorize(&mut *conn, message_id, member_id).await? {
+        Ok(locked) => locked,
+        Err(refused) => return Ok(Err(refused)),
+    };
+    if action == PinAction::Pinned && locked.is_deleted() {
+        return Ok(Err(InteractionRefused::PinDeleted));
+    }
+
+    let mut pinned_entry = None;
+    let changed = match action {
+        PinAction::Pinned => {
+            sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))")
+                .bind(format!("message_pin:{}", locked.channel_id))
+                .execute(&mut *conn)
+                .await?;
+
+            let existing: Option<i32> =
+                sqlx::query_scalar("SELECT 1 FROM message_pin WHERE message_id = $1 LIMIT 1")
+                    .bind(message_id)
+                    .fetch_optional(&mut *conn)
+                    .await?;
+            if existing.is_some() {
+                false
+            } else {
+                let count: i64 =
+                    sqlx::query_scalar("SELECT count(*) FROM message_pin WHERE channel_id = $1")
+                        .bind(locked.channel_id)
+                        .fetch_one(&mut *conn)
+                        .await?;
+                if count >= CHANNEL_PIN_LIMIT {
+                    return Ok(Err(InteractionRefused::PinLimit));
+                }
+                let sql = format!(
+                    "WITH inserted AS ( \
+                       INSERT INTO message_pin (workspace_id, channel_id, message_id, pinned_by) \
+                       VALUES ($1, $2, $3, $4) \
+                       ON CONFLICT (message_id) DO NOTHING \
+                       RETURNING message_id, channel_id, pinned_by, pinned_at \
+                     ) \
+                     SELECT {PIN_COLS} FROM inserted p JOIN message m ON m.id = p.message_id"
+                );
+                let row = sqlx::query(&sql)
+                    .bind(workspace_id)
+                    .bind(locked.channel_id)
+                    .bind(message_id)
+                    .bind(member_id)
+                    .fetch_optional(&mut *conn)
+                    .await?;
+                match row {
+                    Some(row) => {
+                        pinned_entry = Some(decode_pin(&row)?);
+                        true
+                    }
+                    None => false,
+                }
+            }
+        }
+        PinAction::Unpinned => {
+            let removed: Option<Uuid> =
+                sqlx::query_scalar("DELETE FROM message_pin WHERE message_id = $1 RETURNING id")
+                    .bind(message_id)
+                    .fetch_optional(&mut *conn)
+                    .await?;
+            removed.is_some()
+        }
+    };
+
+    let delta = PinDelta {
+        action,
+        message_id,
+        channel_id: locked.channel_id,
+        seq: locked.seq,
+        changed,
+        pinned: pinned_entry,
+    };
+    if changed {
+        let payload = build_pin_payload(workspace_id, &delta);
+        emit_outbox(
+            &mut *conn,
+            workspace_id,
+            OutboxKind::Broadcast,
+            "publish",
+            &payload,
+            Some(locked.channel_id),
+        )
+        .await?;
+    }
+    Ok(Ok(delta))
+}
+
+/// `GET …/channels/{ch}/pins` — a channel's pin list, newest pin first.
+///
+/// Membership is the caller's gate (the route runs it in the same transaction),
+/// matching every other channel-scoped read in this crate.
+///
+/// Tombstones are excluded for the same reason the reaction snapshot excludes
+/// them: the delete path sweeps the pin, so a surviving row is a leftover, and
+/// drawing it would put a header entry on text nobody can read.
+///
+/// `pinned_at DESC` — the order the channel index is built on, and the one a
+/// header list wants: the thing someone just pinned is the thing being talked
+/// about.
+pub async fn channel_pins(
+    conn: &mut PgConnection,
+    channel_id: Uuid,
+) -> Result<Vec<PinnedMessage>, DbError> {
+    let sql = format!(
+        "SELECT {PIN_COLS} \
+           FROM message_pin p \
+           JOIN message m ON m.id = p.message_id \
+          WHERE p.channel_id = $1 \
+            AND m.deleted_at IS NULL \
+            AND m.state <> 'deleted' \
+          ORDER BY p.pinned_at DESC, p.message_id"
+    );
+    let rows = sqlx::query(&sql)
+        .bind(channel_id)
+        .fetch_all(&mut *conn)
+        .await?;
+    rows.iter()
+        .map(|row| decode_pin(row).map_err(DbError::from))
+        .collect()
 }
 
 #[cfg(test)]

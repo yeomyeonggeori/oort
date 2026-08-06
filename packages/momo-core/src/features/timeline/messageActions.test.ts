@@ -4,6 +4,7 @@ import {
   applyTombstone,
   canDeleteMessage,
   canEditMessage,
+  canPinMessage,
   canReactToMessage,
   canReplyToMessage,
   emptyTimeline,
@@ -114,6 +115,7 @@ describe("action affordances", () => {
         reply: canReplyToMessage(gone),
         quote: canQuoteMessage(gone),
         react: canReactToMessage(gone),
+        pin: canPinMessage(gone),
         edit: canEditMessage(gone, ME),
         delete: canDeleteMessage(gone, ME),
       })
@@ -168,6 +170,7 @@ describe("action affordances", () => {
         reply: false,
         quote: false,
         react: true,
+        pin: false,
         edit: false,
         delete: false,
       })
@@ -177,6 +180,7 @@ describe("action affordances", () => {
         reply: false,
         quote: false,
         react: false,
+        pin: false,
         edit: false,
         delete: false,
       })

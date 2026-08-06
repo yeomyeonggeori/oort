@@ -4,6 +4,7 @@ import {
   deleteFailureMessage,
   editFailureMessage,
   genericActionFailureMessage,
+  pinFailureMessage,
   reactionFailureMessage,
   replyFailureMessage,
 } from "./actionCopy";
@@ -20,12 +21,16 @@ const WIRE_SENTENCES = [
   "deleted messages cannot receive reactions",
   "message reaction limit reached",
   "thread root must be a top-level message",
+  // 이슈 #1112
+  "deleted messages cannot be pinned",
+  "channel pin limit reached",
 ];
 
 const MAPPERS = [
   editFailureMessage,
   deleteFailureMessage,
   reactionFailureMessage,
+  pinFailureMessage,
   replyFailureMessage,
 ];
 
@@ -75,6 +80,13 @@ describe("message action failure copy", () => {
     expect(new Set(edit).size).toBe(edit.length);
 
     expect(reactionFailureMessage(new ApiError(409, "x"))).toContain("200");
+    // 이슈 #1112 — the pin cap is a *channel* fact, so its 409 must name the
+    // channel number and send the person to the list, not to this message.
+    const pinConflict = pinFailureMessage(new ApiError(409, "x"));
+    expect(pinConflict).toContain("100");
+    expect(pinConflict).toContain("고정 목록");
+    const pin = [400, 403, 404, 409].map((s) => pinFailureMessage(new ApiError(s, "x")));
+    expect(new Set(pin).size).toBe(pin.length);
     expect(editFailureMessage(new ApiError(403, "x"))).toContain("내가 보낸");
     expect(deleteFailureMessage(new ApiError(403, "x"))).toContain("내가 보낸");
   });

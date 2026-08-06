@@ -332,6 +332,20 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/channels/{ch}/reactions",
             get(routes::messages::reaction_snapshot),
         )
+        // 이슈 #1112 — pin. Message-scoped verbs like the reaction toggle above,
+        // for the same reason: a pin is a fact *about a message*, and its channel
+        // is a column on that row rather than an argument the caller asserts.
+        // The channel-scoped list is its cold-load counterpart, exactly as
+        // `/reactions` is to the reaction toggle — one read per channel, then
+        // `message.pinned`/`message.unpinned` keeps it live.
+        .route(
+            "/v1/workspaces/{ws}/messages/{id}/pin",
+            put(routes::messages::pin_message).delete(routes::messages::unpin_message),
+        )
+        .route(
+            "/v1/workspaces/{ws}/channels/{ch}/pins",
+            get(routes::messages::pin_list),
+        )
         // ADR-0151 — 첨부. Three routes, and the split between them is the
         // decision: the upload session hands out a Drive capability so the bytes
         // never cross this process, while the content proxy reads them here so

@@ -2,14 +2,20 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   deleteMessage as deleteMessageRequest,
   editMessage as editMessageRequest,
+  fetchChannelPins,
   fetchMessages,
   fetchReactionSnapshot,
   sendMessage,
+  setPin,
   setReaction,
   type Message,
   type SendMessageOptions,
 } from "@momo/core/lib/api";
-import { payloadToMessage, type RealtimeHandle } from "@/lib/realtime";
+import {
+  payloadToMessage,
+  pinnedPayloadToWire,
+  type RealtimeHandle,
+} from "@/lib/realtime";
 import {
   addPending,
   applyTombstone,
@@ -31,6 +37,14 @@ import {
   toggleDirection,
   type ReactionMap,
 } from "@momo/core/features/timeline/reactions";
+import {
+  applyPinned,
+  emptyPins,
+  isPinned,
+  normalizePinList,
+  removePin,
+  type PinMap,
+} from "@momo/core/features/timeline/pins";
 
 const HEAD_LIMIT = 50;
 const PAGE_LIMIT = 50;
@@ -72,6 +86,13 @@ export interface UseTimelineResult {
    * the caller surfaces the refusal as a sentence.
    */
   toggleReaction: (message: Message, emoji: string) => Promise<void>;
+  /** 이슈 #1112 — `message id -> the pin`, case-folded on ingest. */
+  pins: PinMap;
+  /**
+   * Pin or unpin one message. Optimistic only in the unpin direction — see the
+   * implementation for why a pin waits for the server.
+   */
+  togglePin: (message: Message) => Promise<void>;
   /** Rewrite my own message. The server's row replaces the local one. */
   editMessage: (message: Message, body: string) => Promise<void>;
   /** Soft-delete my own message. The tombstone replaces the local row. */
@@ -114,6 +135,14 @@ export function useTimeline(
   // without depending on the state it is about to change (that dependency would
   // rebuild every row's click handler on every reaction in the channel).
   const reactionsRef = useRef<ReactionMap>(reactions);
+  // 이슈 #1112. Same shape and the same reason as `reactions` above: a pin is an
+  // annotation on a message, not a field of it.
+  const [pins, setPins] = useState<PinMap>(emptyPins);
+  const pinsRef = useRef<PinMap>(pins);
+  const applyPins = useCallback((next: PinMap) => {
+    pinsRef.current = next;
+    setPins(next);
+  }, []);
   const applyReaction = useCallback(
     (change: Parameters<typeof applyReactionDelta>[1]) => {
       reactionsRef.current = applyReactionDelta(reactionsRef.current, change);
@@ -285,6 +314,7 @@ export function useTimeline(
     setResume({ lastRecovered: null, lastBackfillCount: 0, resubscribeCount: 0 });
     reactionsRef.current = emptyReactions();
     setReactions(reactionsRef.current);
+    applyPins(emptyPins());
 
     // 1) REST head (descending page; merge is order-agnostic).
     fetchMessages(workspaceId, channelId, { limit: HEAD_LIMIT })
@@ -314,6 +344,21 @@ export function useTimeline(
       })
       .catch(() => {
         /* chips stay empty; the channel is still fully usable */
+      });
+
+    // 1c) The channel's pins, on the same terms as the snapshot above: in
+    // parallel, and not fatal. A header list that failed to load is an absent
+    // accessory; a channel that refuses to open because of one is a broken app.
+    fetchChannelPins(workspaceId, channelId)
+      .then((wire) => {
+        if (cancelled) return;
+        // Merge with the live map on the same side as the reaction snapshot:
+        // a `message.pinned` that arrived while this was in flight wins, since
+        // it is strictly newer than the read it raced.
+        applyPins({ ...normalizePinList(wire), ...pinsRef.current });
+      })
+      .catch(() => {
+        /* the header list stays empty; the channel is still fully usable */
       });
 
     // 2) Realtime rail with resume healing.
@@ -361,6 +406,10 @@ export function useTimeline(
           messageId
         );
         setReactions(reactionsRef.current);
+        // …and its pin, which the server swept with the message. No
+        // `message.unpinned` is published for a delete, so this is the only
+        // place the header list learns about it.
+        applyPins(removePin(pinsRef.current, messageId));
       },
       onReaction: (event) => {
         if (cancelled) return;
@@ -372,6 +421,19 @@ export function useTimeline(
           emoji: event.payload.emoji,
           action: event.payload.action,
         });
+      },
+      // 이슈 #1112 — the header list stays live off these two frames alone. The
+      // `message.pinned` payload IS the list entry, so nothing here re-reads
+      // the list to find out what was pinned.
+      onPin: (event) => {
+        if (cancelled) return;
+        if (event.type === "message.pinned") {
+          applyPins(
+            applyPinned(pinsRef.current, pinnedPayloadToWire(event.payload))
+          );
+        } else {
+          applyPins(removePin(pinsRef.current, event.payload.message_id));
+        }
       },
     });
 
@@ -386,6 +448,7 @@ export function useTimeline(
     backfillAfter,
     applyBatch,
     applyReaction,
+    applyPins,
     addMarker,
     updatePending,
     reloadNonce,
@@ -478,8 +541,42 @@ export function useTimeline(
         message.id
       );
       setReactions(reactionsRef.current);
+      applyPins(removePin(pinsRef.current, message.id));
     },
-    [workspaceId, applyBatch]
+    [workspaceId, applyBatch, applyPins]
+  );
+
+  /**
+   * Pin or unpin one message (이슈 #1112).
+   *
+   * **Asymmetrically optimistic, and the asymmetry is the design.** An unpin is
+   * applied immediately: the entry to remove is already in hand, so a revert is
+   * exact. A pin is not, because the row a header list draws is the server's
+   * projection — `pinnedAtMs` in particular is what the list sorts on, and a
+   * locally invented one would put the entry in the wrong place until a reload,
+   * which is a worse lie than a half-second wait. So the pin direction takes
+   * the delta the server answers with, exactly as `editMessage` takes the row.
+   *
+   * Both directions are idempotent underneath, so the realtime echo of one's own
+   * click lands harmlessly on top of whichever happened first.
+   */
+  const togglePin = useCallback(
+    async (message: Message) => {
+      if (isPinned(pinsRef.current, message.id)) {
+        const previous = pinsRef.current;
+        applyPins(removePin(previous, message.id));
+        try {
+          await setPin(workspaceId, message.id, "unpinned");
+        } catch (error) {
+          applyPins(previous);
+          throw error;
+        }
+        return;
+      }
+      const delta = await setPin(workspaceId, message.id, "pinned");
+      if (delta.pinned) applyPins(applyPinned(pinsRef.current, delta.pinned));
+    },
+    [workspaceId, applyPins]
   );
 
   return {
@@ -496,6 +593,8 @@ export function useTimeline(
     reachedStart,
     reactions,
     toggleReaction,
+    pins,
+    togglePin,
     editMessage,
     deleteMessage,
   };

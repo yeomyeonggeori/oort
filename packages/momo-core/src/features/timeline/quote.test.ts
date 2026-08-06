@@ -284,6 +284,7 @@ describe("the two devices stay separate in the action set", () => {
       reply: false,
       quote: false,
       react: false,
+      pin: false,
       edit: false,
       delete: false,
     };

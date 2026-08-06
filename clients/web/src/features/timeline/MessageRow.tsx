@@ -48,10 +48,12 @@ import {
 import {
   canDeleteMessage,
   canEditMessage,
+  canPinMessage,
   canReactToMessage,
   canReplyToMessage,
   hasAnyAction,
 } from "@momo/core/features/timeline/model";
+import { PIN_EMPTY_BODY_TEXT } from "@momo/core/features/timeline/pins";
 import {
   canQuoteMessage,
   resolveQuote,
@@ -71,6 +73,7 @@ import type { ReactionChip } from "@momo/core/features/timeline/reactions";
 import {
   deleteFailureMessage,
   editFailureMessage,
+  pinFailureMessage,
   reactionFailureMessage,
 } from "@momo/core/features/timeline/actionCopy";
 import { useLongPress } from "./useLongPress";
@@ -195,6 +198,15 @@ export interface MessageRowActions {
   chips: ReactionChip[];
   /** Toggle one emoji. Optimistic upstream; a failure is reported back here. */
   onToggleReaction: (message: Message, emoji: string) => Promise<void> | void;
+  /**
+   * 이슈 #1112 — whether THIS message is pinned, already derived (see
+   * `isPinned`). Passed in rather than looked up here for the same reason
+   * `chips` is: the row must not hold the channel's whole pin map, or every pin
+   * anywhere re-renders every row.
+   */
+  pinned: boolean;
+  /** Pin or unpin. The direction is `pinned`'s; a failure is reported here. */
+  onTogglePin: (message: Message) => Promise<void> | void;
   onEditMessage: (message: Message, body: string) => Promise<void>;
   onDeleteMessage: (message: Message) => Promise<void>;
 }
@@ -342,6 +354,9 @@ export function MessageRow({
     // 걸 곳이 없는 표면에서는 내놓지 않는다.
     quote: Boolean(actions && onQuoteMessage) && canQuoteMessage(message),
     react: Boolean(actions) && canReactToMessage(message),
+    // 이슈 #1112. 작성자 관문이 없다 — 고정은 채널의 사실이고, 푸는 것도 누구나
+    // 할 수 있다(서버가 같은 규칙을 강제한다).
+    pin: Boolean(actions) && canPinMessage(message),
     edit: Boolean(actions) && canEditMessage(message, actions?.myMemberId),
     delete: Boolean(actions) && canDeleteMessage(message, actions?.myMemberId),
   };
@@ -355,6 +370,13 @@ export function MessageRow({
       setRowError(null);
       void Promise.resolve(actions.onToggleReaction(message, emoji)).catch(
         (error: unknown) => setRowError(reactionFailureMessage(error))
+      );
+    },
+    onPin: () => {
+      if (!actions) return;
+      setRowError(null);
+      void Promise.resolve(actions.onTogglePin(message)).catch(
+        (error: unknown) => setRowError(pinFailureMessage(error))
       );
     },
     onEdit: () => {
@@ -692,6 +714,7 @@ export function MessageRow({
       {actions && (
         <MessageActionColumn
           available={available}
+          pinned={Boolean(actions?.pinned)}
           callbacks={callbacks}
           onOpenPicker={() => setPickerOpen(true)}
           hidden={editing}
@@ -702,8 +725,9 @@ export function MessageRow({
           <MessageActionSheet
             open={sheetOpen}
             onOpenChange={setSheetOpen}
-            preview={message.body?.trim() || "내용 없는 메시지"}
+            preview={message.body?.trim() || PIN_EMPTY_BODY_TEXT}
             available={available}
+            pinned={Boolean(actions?.pinned)}
             callbacks={callbacks}
             onOpenPicker={() => setPickerOpen(true)}
           />

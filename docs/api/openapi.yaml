@@ -3342,6 +3342,125 @@ paths:
               schema: {$ref: "#/components/schemas/ErrorResponse"}
         "429": {$ref: "#/components/responses/RateLimited"}
 
+  /v1/workspaces/{workspaceId}/messages/{messageId}/pin:
+    put:
+      tags: [messages]
+      operationId: pinMessage
+      summary: Pin a message to its channel idempotently.
+      description: >
+        A pin is the **channel's** fact, not the pinner's: `message_pin` is unique
+        on the message alone, so two members pinning the same message produce one
+        header entry, and any channel member may unpin it — including one who did
+        not pin it. Requiring the pinner would strand every pin whose author left.
+        Pinning consumes no `message.seq` and does not modify the message; the
+        `message.pinned` broadcast reuses the target's own seq. The response
+        carries the full list entry so the caller can insert it without re-reading.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: messageId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: Pinned delta; an already-pinned message is also success (changed=false).
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PinDelta"}
+        "400":
+          description: Malformed message id, or the message is deleted.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403":
+          description: Not a channel member, or workspace scope mismatch.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "404":
+          description: Message not found.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "409":
+          description: The channel already has the maximum 100 pinned messages.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+    delete:
+      tags: [messages]
+      operationId: unpinMessage
+      summary: Unpin a message from its channel idempotently.
+      description: >
+        Any channel member may unpin, not only the pinner. Unpinning a message
+        that is not pinned is also a success (changed=false) and publishes
+        nothing. Deleting a message sweeps its pin without a separate
+        `message.unpinned` frame — the client drops it on `message.deleted`.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: messageId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: Unpinned delta; an already-absent pin is also success.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PinDelta"}
+        "400":
+          description: Malformed message id.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403":
+          description: Not a channel member, or workspace scope mismatch.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "404":
+          description: Message not found.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+
+  /v1/workspaces/{workspaceId}/channels/{channelId}/pins:
+    get:
+      tags: [messages]
+      operationId: getChannelPins
+      summary: List a channel's pinned messages, most recently pinned first.
+      description: >
+        The cold-load counterpart of the pin verbs, the way the reaction snapshot
+        is to the reaction toggle: read once per channel, then kept live by
+        `message.pinned` / `message.unpinned`. Deleted messages are excluded.
+        Empty channels return an empty array.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/ChannelId"
+      responses:
+        "200":
+          description: The channel's pins, ordered by pinnedAtMs descending.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PinList"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403":
+          description: Not a channel member, or workspace scope mismatch.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+
   /v1/workspaces/{workspaceId}/channels/{channelId}/reactions:
     get:
       tags: [messages]
@@ -7809,6 +7928,63 @@ components:
           items:
             type: string
             format: uuid
+
+    PinnedMessage:
+      type: object
+      description: >
+        One entry of a channel's pin list — the pin plus enough of the message to
+        draw a header row without a second read. A pin's whole point is a message
+        that is not on screen, so an ids-only projection would force a lookup that
+        misses. `seq` is the message's own; pinning never mints one.
+      required:
+        [messageId, channelId, seq, authorMemberId, type, state, createdAtMs, pinnedBy, pinnedAtMs]
+      properties:
+        messageId: {type: string, format: uuid}
+        channelId: {type: string, format: uuid}
+        seq: {type: integer, format: int64}
+        authorMemberId: {type: string, format: uuid}
+        type: {type: string}
+        state: {type: string}
+        body:
+          type: string
+          nullable: true
+        createdAtMs: {type: integer, format: int64}
+        pinnedBy:
+          type: string
+          format: uuid
+          description: >
+            Where the pin came from. A pin is the channel's fact, not the
+            pinner's — any channel member may unpin, including one who did not
+            pin it. This field grants nothing.
+        pinnedAtMs: {type: integer, format: int64}
+
+    PinDelta:
+      type: object
+      required: [action, messageId, channelId, changed]
+      properties:
+        action:
+          type: string
+          enum: [pinned, unpinned]
+        messageId: {type: string, format: uuid}
+        channelId: {type: string, format: uuid}
+        changed:
+          type: boolean
+          description: >
+            false when the message was already in the requested state. The call
+            still succeeded — pin and unpin are idempotent — but nothing was
+            recorded and nothing was published.
+        pinned:
+          allOf:
+            - $ref: "#/components/schemas/PinnedMessage"
+          description: Present on an effective pin only; absent on unpin and on a no-op.
+
+    PinList:
+      type: object
+      required: [pins]
+      properties:
+        pins:
+          type: array
+          items: {$ref: "#/components/schemas/PinnedMessage"}
 
     CreateAttachmentUploadRequest:
       type: object

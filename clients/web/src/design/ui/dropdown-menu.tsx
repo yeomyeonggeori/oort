@@ -55,13 +55,23 @@ DropdownMenuContent.displayName = MenuPrimitive.Content.displayName;
  *
  * Radix moves focus with the arrow keys, so the highlight is a focus ring and a
  * background, not a separate "selected" concept.
+ *
+ * **`layout="stack"`** (이슈 #1112) is for a menu whose items name a *thing*
+ * rather than an action — the channel's pin list, where one row is an author
+ * line over a message excerpt. It is a named variant rather than a `className`
+ * at the call site because the two heights genuinely conflict (`h-control` vs
+ * `h-auto`) and `tailwind-merge` does not know `h-control` is a height: the
+ * override silently loses and the second line ships clipped to a few pixels of
+ * glyph. That is exactly what happened once here. A variant cannot lose that
+ * fight, and the 32px measure becomes the floor rather than the height.
  */
 export const DropdownMenuItem = React.forwardRef<
   React.ElementRef<typeof MenuPrimitive.Item>,
   React.ComponentPropsWithoutRef<typeof MenuPrimitive.Item> & {
     tone?: "danger";
+    layout?: "row" | "stack";
   }
->(({ className, tone, ...props }, ref) => (
+>(({ className, tone, layout = "row", ...props }, ref) => (
   <MenuPrimitive.Item
     ref={ref}
     className={cn(
@@ -69,7 +79,12 @@ export const DropdownMenuItem = React.forwardRef<
       // background is the menu's own language and the browser's default ring is
       // suppressed below. The house focus ring is restored on the same class
       // list (§6): it is what tells a Tab user which row Enter will fire.
-      "flex h-control cursor-default select-none items-center gap-2 rounded-sm px-2 text-body outline-none focus:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+      "flex cursor-default select-none gap-2 rounded-sm px-2 text-body outline-none focus:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+      layout === "stack"
+        ? // `gap-2` between two lines of ONE item would read as a paragraph
+          // break, so a stacked item sets its own vertical rhythm.
+          "min-h-control flex-col items-start gap-px py-1"
+        : "h-control items-center",
       tone === "danger" ? "text-danger" : "text-ink",
       className
     )}

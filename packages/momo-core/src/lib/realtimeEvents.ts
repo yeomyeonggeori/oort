@@ -1,4 +1,4 @@
-import type { Message } from "./api";
+import type { Message, PinnedMessageWire } from "./api";
 
 
 // =============================================================================
@@ -109,6 +109,94 @@ export function asMessageDeletedFrame(
   return frame;
 }
 
+/**
+ * 이슈 #1112 — a message being pinned or unpinned in its channel.
+ *
+ * `seq` is the **target message's**, reused rather than minted, for the same
+ * reason the reaction frame reuses it: a pin is not a message and must not mark
+ * the channel unread for everyone.
+ *
+ * The asymmetry between the two payloads is deliberate and load-bearing.
+ * `message.pinned` carries the **whole list entry**, so a header list applies
+ * the frame and lands on exactly the state a re-read of `GET …/pins` would have
+ * given it — that is what makes the list live without a refetch.
+ * `message.unpinned` carries the id alone, because removal needs no projection
+ * and re-broadcasting a body on the way out is the mistake the tombstone frame
+ * exists to avoid.
+ *
+ * There is no `message.unpinned` when a *deleted* message loses its pin: the
+ * server sweeps the row and the client drops the entry on `message.deleted`,
+ * because one event should not arrive as two frames.
+ *
+ * Ids here are **lowercase** — unlike the reaction frame's. Pin is a new surface
+ * with no shipped Swift client to keep compatible, so it uses the API's normal
+ * casing; consumers fold anyway, which is what makes that difference invisible.
+ */
+export interface MessagePinnedEvent {
+  type: "message.pinned";
+  v: number;
+  ts: number;
+  seq: number;
+  payload: PinnedWirePayload;
+}
+
+/** The `message.pinned` payload — snake_case like every broadcast payload. */
+export interface PinnedWirePayload {
+  message_id: string;
+  channel_id: string;
+  seq: number;
+  author_member_id: string;
+  type: string;
+  state: string;
+  body: string | null;
+  created_at_ms: number;
+  pinned_by: string;
+  pinned_at_ms: number;
+}
+
+export interface MessageUnpinnedEvent {
+  type: "message.unpinned";
+  v: number;
+  ts: number;
+  seq: number;
+  payload: { message_id: string; channel_id: string };
+}
+
+export type PinEvent = MessagePinnedEvent | MessageUnpinnedEvent;
+
+/**
+ * Narrow a publication to a pin frame, or `null`.
+ *
+ * The `message.pinned` branch validates **every field the list draws**, not just
+ * the id: a frame missing `pinned_at_ms` would sort as `undefined` and sit at
+ * the top of the header list forever. A half-decoded pin is worse than a dropped
+ * one, because a dropped one is repaired by the next cold load.
+ */
+export function asPinFrame(data: unknown): PinEvent | null {
+  const frame = data as PinEvent | undefined;
+  if (!frame) return null;
+  if (frame.type === "message.unpinned") {
+    const payload = frame.payload;
+    if (!payload || typeof payload.message_id !== "string") return null;
+    return frame;
+  }
+  if (frame.type !== "message.pinned") return null;
+  const payload = frame.payload;
+  if (
+    !payload ||
+    typeof payload.message_id !== "string" ||
+    typeof payload.channel_id !== "string" ||
+    typeof payload.seq !== "number" ||
+    typeof payload.author_member_id !== "string" ||
+    typeof payload.pinned_by !== "string" ||
+    typeof payload.pinned_at_ms !== "number" ||
+    typeof payload.created_at_ms !== "number"
+  ) {
+    return null;
+  }
+  return frame;
+}
+
 /** Narrow a publication to a reaction frame, or `null`. */
 export function asReactionFrame(data: unknown): ReactionEvent | null {
   const frame = data as ReactionEvent | undefined;
@@ -159,6 +247,31 @@ export function payloadToMessage(p: MessageNewEvent["payload"]): Message {
   if (typeof p.edited_at_ms === "number") message.editedAtMs = p.edited_at_ms;
   if (typeof p.deleted_at_ms === "number") message.deletedAtMs = p.deleted_at_ms;
   return message;
+}
+
+/**
+ * 이슈 #1112 — the `message.pinned` payload as the REST list entry.
+ *
+ * The twin of {@link payloadToMessage}, and it exists for the identical reason:
+ * the wire speaks snake_case and the rest of the app speaks camelCase, and a
+ * second converter written at each call site is how the two projections drift
+ * until a live pin and a cold-loaded one draw differently.
+ */
+export function pinnedPayloadToWire(
+  p: PinnedWirePayload
+): PinnedMessageWire {
+  return {
+    messageId: p.message_id,
+    channelId: p.channel_id,
+    seq: p.seq,
+    authorMemberId: p.author_member_id,
+    type: p.type,
+    state: p.state,
+    body: p.body ?? null,
+    createdAtMs: p.created_at_ms,
+    pinnedBy: p.pinned_by,
+    pinnedAtMs: p.pinned_at_ms,
+  };
 }
 
 export function centrifugoChannelName(
@@ -690,6 +803,8 @@ export interface RealtimeHandle {
        */
       onMessageDeleted?: (event: MessageDeletedEvent) => void;
       onReaction?: (event: ReactionEvent) => void;
+      /** 이슈 #1112 — optional for the same reason as the two above. */
+      onPin?: (event: PinEvent) => void;
     }
   ) => () => void;
   /**

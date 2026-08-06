@@ -365,6 +365,62 @@ pub struct ReactionDeltaDto {
     pub emoji: String,
 }
 
+/// `PUT`/`DELETE …/messages/{id}/pin` response (이슈 #1112).
+///
+/// **Lowercase ids**, unlike [`ReactionDeltaDto`] right above: that uppercase is
+/// a Swift `uuidString` legacy kept for the shipped macOS client, and pin has no
+/// such client to keep compatible. New surfaces use the API's normal casing.
+///
+/// `pinned` is the list entry on an effective pin and absent otherwise, so the
+/// caller can insert the row it just created without a second read — the same
+/// contract the `message.pinned` broadcast holds for everyone else.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PinDeltaDto {
+    pub action: String,
+    pub message_id: Uuid,
+    pub channel_id: Uuid,
+    /// `false` when the message was already in the requested state. The call
+    /// still succeeded — it is idempotent — but nothing was published.
+    pub changed: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pinned: Option<PinnedMessageDto>,
+}
+
+/// One entry of a channel's pin list (이슈 #1112).
+///
+/// Carries enough of the message to draw the header row — author, body, seq —
+/// because a pin's whole point is a message that is *not* on screen, so a
+/// projection of ids alone would force a lookup that misses. `seq` is what the
+/// client jumps to; it is the message's own, never a new one.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PinnedMessageDto {
+    pub message_id: Uuid,
+    pub channel_id: Uuid,
+    pub seq: i64,
+    pub author_member_id: Uuid,
+    #[serde(rename = "type")]
+    pub message_type: String,
+    pub state: String,
+    pub body: Option<String>,
+    pub created_at_ms: i64,
+    pub pinned_by: Uuid,
+    pub pinned_at_ms: i64,
+}
+
+/// `GET …/channels/{ch}/pins` response (이슈 #1112).
+///
+/// Wrapped in an object rather than returned as a bare array — unlike the
+/// reaction snapshot, which is bare only because Swift's `singleValueContainer`
+/// shipped that way. A wrapper is what lets a count or a cursor be added later
+/// without breaking every decoder that already exists.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PinListDto {
+    pub pins: Vec<PinnedMessageDto>,
+}
+
 /// `GET …/channels/{ch}/messages/{root}/replies` response (Swift
 /// `ThreadRepliesPage`, `DTOs.swift:261-264`).
 #[derive(Debug, Serialize)]

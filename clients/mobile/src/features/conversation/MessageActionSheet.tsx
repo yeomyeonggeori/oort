@@ -1,6 +1,7 @@
 import type {Message} from '@momo/core/lib/api';
 import type {MessageActionAvailability} from '@momo/core/features/timeline/model';
 import {QUOTE_ACTION_LABEL} from '@momo/core/features/timeline/quote';
+import {pinActionLabel} from '@momo/core/features/timeline/pins';
 import {
   QUICK_REACTIONS,
   type ReactionChip,
@@ -62,6 +63,7 @@ export function MessageActionSheet({
   message,
   chips,
   availability,
+  pinned,
   authorLabel,
   deletePending,
   startInDeleteConfirm = false,
@@ -70,12 +72,15 @@ export function MessageActionSheet({
   onReply,
   onQuote,
   onCopy,
+  onPin,
   onEdit,
   onDelete,
 }: {
   message: Message;
   chips: ReactionChip[];
   availability: MessageActionAvailability;
+  /** 이슈 #1112 — 지금 고정돼 있는가. 항목의 낱말이 이 값으로 뒤집힌다. */
+  pinned?: boolean;
   /** 이미 해석된 작성자 이름. 행이 쓰던 것과 같은 답을 쓴다. */
   authorLabel: string;
   deletePending?: boolean;
@@ -107,6 +112,15 @@ export function MessageActionSheet({
    * 그것을 다시 붙여 넣을 곳은 대개 마크다운을 아는 자리가 아니라 터미널이다.
    */
   onCopy?: () => void;
+  /**
+   * 고정하기 / 고정 해제하기 (이슈 #1112). 낱말은 코어의 `pinActionLabel` 이고,
+   * 방향은 한 콜백이 진다 — 행이 이미 어느 쪽인지 알기 때문에 콜백을 둘로
+   * 나누면 낱말과 요청이 갈라질 수 있다.
+   *
+   * 고정은 **채널의 사실**이라 작성자 관문이 없다: 남이 고정한 것도 누구나 풀 수
+   * 있고, 서버가 같은 규칙을 강제한다.
+   */
+  onPin?: () => void;
   onEdit: () => void;
   onDelete: () => void;
 }): React.JSX.Element {
@@ -274,6 +288,16 @@ export function MessageActionSheet({
                   label="메시지 복사하기"
                   onPress={onCopy}
                   testID="sheet-copy"
+                />
+              ) : null}
+              {/* 고정은 복사 다음, 고치기 앞이다 — 여기까지가 「메시지를 그대로 두고
+                  하는 일」이고 아래부터가 「메시지를 바꾸는 일」이다. 고정은 채널을
+                  바꾸지 메시지를 바꾸지 않는다. */}
+              {availability.pin && onPin ? (
+                <SheetRow
+                  label={pinActionLabel(pinned === true)}
+                  onPress={onPin}
+                  testID="sheet-pin"
                 />
               ) : null}
               {availability.edit ? (

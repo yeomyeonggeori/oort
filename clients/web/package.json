@@ -30,6 +30,7 @@
     "gate:ade": "npm run build && node gates/gate-ade.mjs",
     "gate:ailink": "npm run build && node gates/gate-ailink.mjs",
     "gate:quote": "npm run build && node gates/gate-quote.mjs",
+    "gate:pin": "npm run build && node gates/gate-pin.mjs",
     "gate:typing": "npm run build && node gates/gate-typing.mjs",
     "gate:borders": "npm run build && node gates/gate-time-borders.mjs",
     "gate:fold": "npm run build && node gates/gate-fold-nav.mjs",

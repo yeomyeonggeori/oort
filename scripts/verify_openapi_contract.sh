@@ -1313,6 +1313,26 @@ sample reaction-remove delete "/v1/workspaces/{workspaceId}/messages/{messageId}
   "/v1/workspaces/$WS/messages/$SENT_ID/reactions/%F0%9F%91%8D" 200 "" "$ACCESS"
 guard_jq '.action == "removed" and .emoji == "👍"' "reaction removal delta"
 
+# pin (이슈 #1112): pin → list → unpin, before the tombstone below sweeps it.
+# The list guard is the one that matters — it is what proves the header surface
+# receives the message projection and not just an id it would have to look up.
+sample pin-add put "/v1/workspaces/{workspaceId}/messages/{messageId}/pin" \
+  "/v1/workspaces/$WS/messages/$SENT_ID/pin" 200 "" "$ACCESS"
+guard_jq --argjson seq "$SENT_SEQ" \
+  '.action == "pinned" and .changed == true and (.pinned.seq == $seq)' \
+  "pin delta carries the list entry at the message's own seq"
+
+sample pin-list get "/v1/workspaces/{workspaceId}/channels/{channelId}/pins" \
+  "/v1/workspaces/$WS/channels/$GENERAL_ID/pins" 200 "" "$ACCESS"
+guard_jq --arg id "$(printf '%s' "$SENT_ID" | tr '[:upper:]' '[:lower:]')" \
+  'any(.pins[]; (.messageId | ascii_downcase) == $id and (.pinnedAtMs > 0))' \
+  "pin list contains the pinned message"
+
+sample pin-remove delete "/v1/workspaces/{workspaceId}/messages/{messageId}/pin" \
+  "/v1/workspaces/$WS/messages/$SENT_ID/pin" 200 "" "$ACCESS"
+guard_jq '.action == "unpinned" and .changed == true and (has("pinned") | not)' \
+  "unpin delta names no projection"
+
 sample message-delete delete "/v1/workspaces/{workspaceId}/messages/{messageId}" \
   "/v1/workspaces/$WS/messages/$SENT_ID" 200 "" "$ACCESS"
 guard_jq --argjson seq "$SENT_SEQ" \

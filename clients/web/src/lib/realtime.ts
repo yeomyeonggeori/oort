@@ -4,6 +4,7 @@ import {
   asCascadeFallbackFrame,
   asHuddleLifecycleFrame,
   asMessageDeletedFrame,
+  asPinFrame,
   asReactionFrame,
   asTypingFrame,
   asWorkSessionACPFrame,
@@ -19,6 +20,7 @@ import {
   type HuddleLifecycleFrame,
   type MessageDeletedEvent,
   type MessageNewEvent,
+  type PinEvent,
   type ReactionEvent,
   type RealtimeHandle,
   type RealtimeStatus,
@@ -195,6 +197,7 @@ export function createRealtime(
       onMessage: (event: MessageNewEvent) => void;
       onMessageDeleted?: (event: MessageDeletedEvent) => void;
       onReaction?: (event: ReactionEvent) => void;
+      onPin?: (event: PinEvent) => void;
     }
   ): () => void {
     return attach(
@@ -222,7 +225,15 @@ export function createRealtime(
             return;
           }
           const reaction = asReactionFrame(ctx.data);
-          if (reaction) handlers.onReaction?.(reaction);
+          if (reaction) {
+            handlers.onReaction?.(reaction);
+            return;
+          }
+          // 이슈 #1112 — pin rides the same channel for the same reason, and
+          // reuses the target's `seq` too, so the header list and the timeline
+          // never disagree about which message a frame is about.
+          const pin = asPinFrame(ctx.data);
+          if (pin) handlers.onPin?.(pin);
         };
         sub.on("subscribed", onSubscribed);
         sub.on("publication", onPublication);

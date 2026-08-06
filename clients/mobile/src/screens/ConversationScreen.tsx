@@ -21,6 +21,7 @@ import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
   AccessibilityInfo,
   AppState,
+  Pressable,
   StyleSheet,
   Text,
   View,
@@ -28,7 +29,14 @@ import {
   type TextInput,
 } from 'react-native';
 import {NoticeBlock, Screen, ScreenHeader} from '../design/atoms';
-import {color, font, SAFE_GUTTER, space} from '../design/tokens';
+import {
+  color,
+  font,
+  radius,
+  SAFE_GUTTER,
+  space,
+  TOUCH_TARGET,
+} from '../design/tokens';
 import {AdeControlPanel} from '../features/ade/AdeControlPanel';
 import {AdeSummaryLine} from '../features/ade/AdeSummaryLine';
 import {StopTurnControl} from '../features/agents/StopTurnControl';
@@ -68,6 +76,8 @@ import {
 } from '../features/conversation/LongPressHint';
 import type {MessageRowActions} from '../features/conversation/MessageRow';
 import {ThreadPanel} from '../features/conversation/ThreadPanel';
+import {PinListPanel} from '../features/conversation/PinListPanel';
+import {pinListLabel} from '@momo/core/features/timeline/pins';
 import {Timeline} from '../features/conversation/Timeline';
 import {useTimeline} from '../features/conversation/useTimeline';
 import {useMarkRead} from '../features/inbox/useInbox';
@@ -500,6 +510,17 @@ export default function ConversationScreen({
   const closeAde = useCallback(() => setAdeOpen(false), []);
   const openAde = useCallback(() => setAdeOpen(true), []);
 
+  // 고정 목록 (이슈 #1112). 작업 목록과 같은 자리, 같은 이유로 채널이 바뀌면
+  // 닫힌다 — 이 화면은 `channelId` 만 갈아 끼우므로, 남겨 두면 A 채널의 고정
+  // 목록이 B 채널 위에 떠 있게 된다.
+  const [pinsOpen, setPinsOpen] = useState(false);
+  useEffect(() => setPinsOpen(false), [channelId]);
+  const closePins = useCallback(() => setPinsOpen(false), []);
+  const openPins = useCallback(() => setPinsOpen(true), []);
+  // 헤더의 낱말이 개수를 말한다. 0이면 「고정한 메시지」이고 숫자를 말하지
+  // 않는다 — 「고정 0개」는 아무것도 알리지 않으면서 헤더의 폭만 가져간다.
+  const pinCount = Object.keys(timeline.pins).length;
+
   // ---- 걸어 둔 인용 (ADR-0148) ----------------------------------------------
   //
   // `thread` 와 같은 자리에 산다: 둘 다 「이 표면이 지금 무엇을 가리키고 있나」이고,
@@ -565,6 +586,26 @@ export default function ConversationScreen({
   // 점프가 **성공하면** 고지는 스스로 물러난다. 남겨 두면 사람이 이미 도착한
   // 자리 위에 「못 찾았습니다」가 계속 붙어 있게 된다 — 다음 점프나 채널 이동까지.
   const clearJumpNotice = useCallback(() => setJumpMissed(null), []);
+
+  /**
+   * 고정 목록에서 원본으로 (이슈 #1112).
+   *
+   * `onJumpToQuoted` 와 **같은 기계**를 탄다. 고정 목록은 자기 항법을 만들지
+   * 않는다 — 못 찾았을 때의 문장도 이미 저 아래(`anchor-missed`)에 있고, 두
+   * 번째를 그리면 같은 사실을 두 군데서 말하게 된다.
+   *
+   * `seq` 는 **항상** 있다: 서버의 고정 목록 항목이 메시지의 seq 를 나른다(인용
+   * 라이브 프레임과 달리). 그래서 못 찾았을 때 「더 위에 있다」를 추측이 아니라
+   * 사실로 말할 수 있다.
+   */
+  const onJumpToPinned = useCallback((messageId: string, seq: number) => {
+    setJumpMissed(null);
+    setJumpTarget(current => ({
+      messageId,
+      seq,
+      token: (current?.token ?? 0) + 1,
+    }));
+  }, []);
 
   // ===========================================================================
   // 타임라인 승인 (감사 H-1 / goal U4-g)
@@ -651,8 +692,15 @@ export default function ConversationScreen({
   //
   // 턴이 열려 있으면 이 화면은 초당 한 번 다시 그려지므로, 그 번역은 초당 한 번
   // 일어나고 있었다.
-  const {toggleReaction, editBody, removeMessage, loadOlder, resend, reload} =
-    timeline;
+  const {
+    toggleReaction,
+    togglePin,
+    editBody,
+    removeMessage,
+    loadOlder,
+    resend,
+    reload,
+  } = timeline;
   const openThread = useCallback((message: Message) => setThread(message), []);
   const onStartReached = useCallback(() => void loadOlder(), [loadOlder]);
   const onResend = useCallback(
@@ -698,6 +746,7 @@ export default function ConversationScreen({
     () => ({
       myMemberId: member.id,
       onToggleReaction: toggleReaction,
+      onTogglePin: togglePin,
       onEdit: editBody,
       onDelete: removeMessage,
       onOpenThread: openThread,
@@ -708,6 +757,7 @@ export default function ConversationScreen({
     [
       member.id,
       toggleReaction,
+      togglePin,
       editBody,
       removeMessage,
       openThread,
@@ -757,6 +807,22 @@ export default function ConversationScreen({
         subtitle={railSubtitle(railStatus)}
         onBack={onBack}
         titleTestID="conversation-title"
+        // 이슈 #1112 — 고정 목록으로 가는 문. 헤더의 오른쪽 슬롯은 이 화면에서
+        // 비어 있었고, 사이드바가 「메시지 찾기」에 쓰는 그 자리다. 고정이 하나도
+        // 없어도 남는다: 처음 고정하는 사람이 목록이 어디 있는지 배울 자리가
+        // 필요하고, 그때 열리는 화면이 빈 상태로 그것을 말한다.
+        right={
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={pinListLabel(pinCount)}
+            onPress={openPins}
+            style={({pressed}) => [styles.headerAction, pressed && styles.pressed]}
+            testID="open-pin-list">
+            <Text style={styles.headerActionLabel}>
+              {pinListLabel(pinCount)}
+            </Text>
+          </Pressable>
+        }
       />
       {/* 워크스페이스 전역 집계 한 줄. 살아 있는 작업이 없으면 **아무것도 그리지
           않는다** — 빈 띠도 남기지 않는 것이 이 줄의 계약이고, 그래서 이 자리는
@@ -825,6 +891,7 @@ export default function ConversationScreen({
               pending={timeline.pending}
               working={working}
               reactions={timeline.reactions}
+              pins={timeline.pins}
               myMemberId={member.id}
               loadingOlder={timeline.loadingOlder}
               reachedStart={timeline.reachedStart}
@@ -923,6 +990,17 @@ export default function ConversationScreen({
           없는 카드 목록은 훑을 수만 있는 목록이고, 그것은 이 층이 존재하는 이유가
           아니다 — 셸이 아닌 곳에서 이 화면을 쓰는 호출자(측정 하네스)에게 목록만
           떠 있는 상태를 만들어 주지 않는다. */}
+      {/* 고정 목록. 스레드보다 뒤, 작업 목록보다 앞 — 층은 JSX 순서다.
+          누르면 이 화면은 물러나고 `jumpTarget` 이 그 줄로 데려간다. */}
+      {pinsOpen ? (
+        <PinListPanel
+          pins={timeline.pins}
+          directory={directory}
+          onJump={onJumpToPinned}
+          onClose={closePins}
+        />
+      ) : null}
+
       {adeOpen && onOpenConversation ? (
         <AdeControlPanel onClose={closeAde} onOpenChannel={onOpenConversation} />
       ) : null}
@@ -932,6 +1010,21 @@ export default function ConversationScreen({
 
 const styles = StyleSheet.create({
   notice: {padding: space.md},
+  // 사이드바의 「메시지 찾기」와 같은 모양이다 (이슈 #1112): 헤더의 오른쪽
+  // 액션은 이 앱에서 이미 이렇게 생겼고, 두 번째 모양을 만들 이유가 없다.
+  headerAction: {
+    minHeight: TOUCH_TARGET,
+    justifyContent: 'center',
+    paddingHorizontal: space.sm,
+    marginRight: -space.sm,
+    borderRadius: radius.sm,
+  },
+  headerActionLabel: {
+    fontSize: font.label,
+    color: color.accentText,
+    fontWeight: '600',
+  },
+  pressed: {backgroundColor: color.surfacePressed},
   /**
    * 중단의 결과 한 줄. 활동 줄과 입력창 사이, 방금 누른 버튼 바로 아래다 —
    * 토스트가 아니라 제자리 문장인 이유는 그것이 판단의 근거 옆이기 때문이다.
