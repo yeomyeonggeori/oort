@@ -961,6 +961,64 @@ const ALLOWED_AGENT_MODELS = ["hermes-agent", "hermes-agent-mini"];
 const CREATED_AGENT_ID = "019f9b10-0000-7000-8000-0000000004a1";
 
 /** 결정 대기 (D-5). snake_case on the wire, the way the ledger projects it. */
+/**
+ * 스폰 승인의 `execution` — ADR-0125 D6-A의 호스트 선택기(이슈 1114).
+ *
+ * 후보 넷을 다 싣는다. 자격 있는 둘만 실으면 이 캡처는 라디오가 있다는 것만
+ * 보여주고, 이 배치의 논점 — **자격 없는 줄이 사유와 함께 선다** — 은 사진에
+ * 나오지 않는다. 서버가 실제로 내는 모양 그대로 snake_case다
+ * (`crates/momo-t3/src/work_control.rs` `spawn_execution_object`).
+ */
+const SPAWN_EXECUTION = {
+  kind: "work_session_spawn",
+  tool: "codex",
+  label: "릴레이 재시작 절차 정리",
+  requested_host_id: null,
+  default_host_id: "019f9b10-0000-7000-8000-00000000c001",
+  host_candidates: [
+    {
+      host_id: "019f9b10-0000-7000-8000-00000000c001",
+      display_name: "성재 맥북",
+      host_type: "app",
+      tier: "local",
+      scope: "member",
+      online: true,
+      selectable: true,
+      unavailable_reason: null,
+    },
+    {
+      host_id: "019f9b10-0000-7000-8000-00000000c002",
+      display_name: "팀 VPS (서울)",
+      host_type: "workd",
+      tier: "remote",
+      scope: "workspace",
+      online: true,
+      selectable: true,
+      unavailable_reason: null,
+    },
+    {
+      host_id: "019f9b10-0000-7000-8000-00000000c003",
+      display_name: "작업실 아이맥",
+      host_type: "app",
+      tier: "local",
+      scope: "member",
+      online: false,
+      selectable: false,
+      unavailable_reason: "offline",
+    },
+    {
+      host_id: "019f9b10-0000-7000-8000-00000000c004",
+      display_name: "momo Cloud",
+      host_type: "cloud",
+      tier: "cloud",
+      scope: "workspace",
+      online: true,
+      selectable: false,
+      unavailable_reason: "t3_disabled",
+    },
+  ],
+};
+
 const APPROVALS = [
   {
     id: "019f9b10-0000-7000-8000-0000000005a1",
@@ -973,6 +1031,11 @@ const APPROVALS = [
     status: "pending",
     is_reversible: false,
     expires_at_ms: Date.now() + 26 * 60_000,
+    payload: {
+      source: "work_control",
+      tool_call: { call_id: "call-spawn", name: "work.spawn" },
+      execution: SPAWN_EXECUTION,
+    },
   },
   {
     id: "019f9b10-0000-7000-8000-0000000005a2",
@@ -3250,6 +3313,26 @@ async function captureScheme(browser, scheme) {
   const approvalsConfirmShot = `${OUT_DIR}/approvals-confirm-${scheme}.png`;
   await approvals.screenshot({ path: approvalsConfirmShot });
   shots.push(approvalsConfirmShot);
+
+  //     ③ 호스트 선택기 (이슈 1114). 위 두 프레임이 이미 그것을 담고 있지만, 이
+  //        한 장은 **확정 문장이 목적지를 말하는 순간**을 다른 호스트에서 잡는다:
+  //        사람이 팀 VPS로 바꾼 뒤 무장하면 잠긴 라디오 옆에서 문장이
+  //        「팀 VPS」를 말해야 한다. 두 조각(고른 것 / 말한 것)이 어긋나면 사진
+  //        한 장에서 바로 보인다.
+  await approvals.keyboard.press("Escape");
+  await approvals
+    .getByTestId(
+      "inbox-approval-host-radio-019f9b10-0000-7000-8000-00000000c002"
+    )
+    .check();
+  await approvals.getByTestId("inbox-approval-approve").first().click();
+  await approvals
+    .getByTestId("inbox-approval-confirm")
+    .first()
+    .waitFor({ state: "visible" });
+  const spawnPickerShot = `${OUT_DIR}/approvals-host-picker-${scheme}.png`;
+  await approvals.screenshot({ path: spawnPickerShot });
+  shots.push(spawnPickerShot);
 
   // 3e. agent turn surfaces (MOMO-613): the sidebar pill and the composer
   //     activity list. `?agentwork=live` seeds fixed turns and reports the rail

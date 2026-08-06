@@ -14,6 +14,15 @@
 //               미제공으로 접혀야 한다.
 //   error       목록이 500. 이건 진짜 장애라 오류 배너 + [다시 시도]가 서야 한다.
 //   empty       목록이 200 + 빈 배열. 조용한 인박스는 설계가 작동한 모습이다.
+//   spawn       ADR-0125 D6-A 호스트 선택기 (이슈 1114). 스폰 승인 한 건이 후보 넷을
+//               싣고 온다: 자격 둘 + 오프라인 하나 + T3 예약 하나. 자격 없는 둘은
+//               **숨지 않고** 사유와 함께 서고, 라디오는 눌리지 않으며, 그 id는
+//               결정 본문에 실리지 않는다.
+//   spawn-forbidden  결정 POST가 403. 카드가 그려진 뒤 호스트가 꺼진 경우이고
+//               (서버 `resolve_host_choice`의 세 번째 검사), 결정은 **기록되지
+//               않았다**. 영수증이 아니라 오류로 그려져야 하고 픽커는 남아야 한다.
+//   spawn-blocked    자격 있는 후보가 0. 서버가 409로 답할 것을 결정 **전에**
+//               말한다: 승인 버튼이 실제로 불가용하고 그 옆에 이유가 선다.
 //
 // 결정 영수증은 **두 와이어를 함께 돌린다**(2R N2): 승인 갈래는 snake_case(Swift
 // 서버), 거부 갈래는 camelCase(Rust 서버). 한 표기만 검사하면 다른 표기 앞에서
@@ -36,6 +45,25 @@
 //   APPROVALS_GATE_PROVE_RED_ABSENT=1 npm run gate:approvals
 //     expected failure: "absent folds to 미제공"
 //     (404 대신 500으로 답한다. 단언이 404와 5xx를 구분함을 증명한다.)
+//
+// 이슈 1114가 더한 red proof 넷. 전부 픽스처만 바꾼다:
+//   APPROVALS_GATE_PROVE_RED_UNSELECTABLE=1
+//     expected failure: "unselectable host stays unpickable"
+//     (오프라인 후보를 `selectable: true`로 답한다 = 서버가 자격을 잘못 말한 경우.
+//      단언이 `selectable`을 실제로 읽어 라디오를 잠그고 있음을 증명한다.)
+//   APPROVALS_GATE_PROVE_RED_DEFAULT=1
+//     expected failure: "default host preselected"
+//     (`default_host_id`를 두 번째 자격 호스트로 옮긴다. 단언은 첫 번째를 이름으로
+//      기대하므로, 화면이 **payload의 기본값을 따라간다**는 사실이 붉게 드러난다 —
+//      위치나 순서로 고르고 있었다면 이 이음매는 아무것도 바꾸지 못한다.)
+//   APPROVALS_GATE_PROVE_RED_FORBIDDEN=1
+//     expected failure: "forbidden host is refused"
+//     (403 대신 200 + 승인 영수증으로 답한다. 단언이 거절을 「결정됨」과 구분함을
+//      증명한다 — 기록되지 않은 결정을 기록됐다고 말하는 것이 이 갈래의 위험이다.)
+//   APPROVALS_GATE_PROVE_RED_BLOCKED=1
+//     expected failure: "no eligible host blocks approve"
+//     (자격 0 시나리오에서 오프라인 후보 하나를 `selectable: true`로 답한다.
+//      단언이 후보 목록을 읽어 승인 버튼을 끄고 있음을 증명한다.)
 //
 // `commit control viewport`에는 이음매가 없고, 그 이유를 적어 둔다(2R M4 실측).
 // 창을 240px로 줄여도 이 단언은 붉어지지 않는다 — 무장 시 초점이 확정 버튼으로
@@ -72,11 +100,23 @@ const runId = "00000000-0000-7000-8000-000000000301";
 const pendingId = "BBBBBBBB-BBBB-7BBB-8BBB-BBBBBBBBBB01";
 const secondPendingId = "BBBBBBBB-BBBB-7BBB-8BBB-BBBBBBBBBB02";
 const settledId = "BBBBBBBB-BBBB-7BBB-8BBB-BBBBBBBBBB03";
+const spawnId = "BBBBBBBB-BBBB-7BBB-8BBB-BBBBBBBBBB04";
+
+// 호스트 후보 넷 — ADR-0125 D6-A가 이름 붙인 3택 + 자격을 잃은 로컬 하나.
+const localHostId = "CCCCCCCC-CCCC-7CCC-8CCC-CCCCCCCCCC01";
+const remoteHostId = "CCCCCCCC-CCCC-7CCC-8CCC-CCCCCCCCCC02";
+const deadHostId = "CCCCCCCC-CCCC-7CCC-8CCC-CCCCCCCCCC03";
+const cloudHostId = "CCCCCCCC-CCCC-7CCC-8CCC-CCCCCCCCCC04";
 
 const proveRedSettled = process.env.APPROVALS_GATE_PROVE_RED_SETTLED === "1";
 const proveRedSuperseded =
   process.env.APPROVALS_GATE_PROVE_RED_SUPERSEDED === "1";
 const proveRedAbsent = process.env.APPROVALS_GATE_PROVE_RED_ABSENT === "1";
+const proveRedUnselectable =
+  process.env.APPROVALS_GATE_PROVE_RED_UNSELECTABLE === "1";
+const proveRedDefault = process.env.APPROVALS_GATE_PROVE_RED_DEFAULT === "1";
+const proveRedForbidden = process.env.APPROVALS_GATE_PROVE_RED_FORBIDDEN === "1";
+const proveRedBlocked = process.env.APPROVALS_GATE_PROVE_RED_BLOCKED === "1";
 
 // 시계는 픽스처가 소유한다. 만료 라벨("12분 후 만료")이 실행 시각에 따라 흔들리면
 // 이 게이트는 자기가 재지 않은 것 때문에 붉어진다.
@@ -170,6 +210,103 @@ const settledApproval = wireApproval({
   decided_at_ms: nowMs - 90_000,
   expires_at_ms: undefined,
 });
+
+/**
+ * 스폰 승인의 `execution` — **서버가 실제로 내는 그 모양** (`spawn_execution_object`
+ * 실측). snake_case이고, `unavailable_reason`까지 그대로다.
+ *
+ * 픽스처가 서버보다 친절하면 화면의 거짓말이 게이트에 잠긴다. 특히 자격 없는 둘을
+ * 빼고 싶은 유혹이 있는데, 그것을 빼는 순간 이 게이트는 「사유와 함께 세운다」는
+ * 이 배치의 논점을 아예 못 본다.
+ */
+function spawnExecution({ blocked = false } = {}) {
+  const dead = {
+    host_id: deadHostId,
+    display_name: "낡은 맥",
+    host_type: "app",
+    tier: "local",
+    scope: "member",
+    online: false,
+    // red seam: 서버가 자격을 잘못 말했다고 치면, 화면이 `selectable`을 실제로
+    // 읽고 있는지가 드러난다.
+    selectable: blocked ? proveRedBlocked : proveRedUnselectable,
+    unavailable_reason: "offline",
+  };
+  const cloud = {
+    host_id: cloudHostId,
+    display_name: "momo Cloud",
+    host_type: "cloud",
+    tier: "cloud",
+    scope: "workspace",
+    online: true,
+    selectable: false,
+    unavailable_reason: "t3_disabled",
+  };
+  const local = {
+    host_id: localHostId,
+    display_name: "내 맥",
+    host_type: "app",
+    tier: "local",
+    scope: "member",
+    online: true,
+    selectable: true,
+    unavailable_reason: null,
+  };
+  const remote = {
+    host_id: remoteHostId,
+    display_name: "팀 VPS",
+    host_type: "workd",
+    tier: "remote",
+    scope: "workspace",
+    online: true,
+    selectable: true,
+    unavailable_reason: null,
+  };
+  return {
+    kind: "work_session_spawn",
+    tool: "codex",
+    label: "리팩터링",
+    requested_host_id: null,
+    // red seam: 기본값을 두 번째 자격 호스트로 옮긴다. 아래 단언은 첫 번째를
+    // **이름으로** 기대하므로, 화면이 payload의 기본값을 따라간다는 사실이 여기서
+    // 붉게 드러난다.
+    default_host_id: blocked
+      ? null
+      : proveRedDefault
+        ? remoteHostId
+        : localHostId,
+    host_candidates: blocked ? [dead, cloud] : [local, remote, dead, cloud],
+  };
+}
+
+/** 픽커가 붙는 대기 승인 한 건. */
+function spawnApproval({ blocked = false } = {}) {
+  return wireApproval({
+    id: spawnId,
+    action_type: "tool_call",
+    payload: {
+      run_id: runId,
+      action_type: "tool_call",
+      tool_call: {
+        call_id: "call-spawn",
+        name: "work.session.spawn",
+        arguments: '{"tool":"codex","label":"리팩터링"}',
+      },
+      approval_reason: "spawn requires a human",
+      resume_model: "gpt-5.6",
+      execution: spawnExecution({ blocked }),
+    },
+    expires_at_ms: nowMs + 30 * 60_000,
+  });
+}
+
+/** 카드가 낸 목록 밖의 호스트에 서버가 답하는 모양 (`resolve_host_choice`). */
+const forbiddenReceipt = {
+  approvalId: spawnId,
+  status: "forbidden",
+  decidedAtMs: nowMs,
+  decisionReason: "selected host is not one of this approval's candidates",
+};
 
 const decisionReceipt = {
   approval_id: pendingId,
@@ -316,6 +453,13 @@ async function installRoutes(context, scenario, delayMs) {
       const body = request.postDataJSON();
       state.decisions.push(body);
       await wait(delayMs);
+      if (scenario === "spawn-forbidden") {
+        // 카드가 그려진 뒤 호스트가 꺼진 경우다. 서버는 결정을 **기록하지 않고**
+        // 403 + 영수증 스키마로 답한다. red seam은 200 + 승인 영수증으로 답한다.
+        return proveRedForbidden
+          ? json(route, { ...decisionReceipt, approval_id: spawnId }, 200)
+          : json(route, forbiddenReceipt, 403);
+      }
       if (scenario === "superseded") {
         if (proveRedSuperseded) {
           return json(route, { error: { message: "internal error" } }, 500);
@@ -357,6 +501,14 @@ async function installRoutes(context, scenario, delayMs) {
       }
       if (scenario === "empty") return json(route, { approvals: [] });
       if (status !== "pending") return json(route, { approvals: [] });
+      if (scenario === "spawn" || scenario === "spawn-forbidden") {
+        // 스폰 한 건만 답한다. 픽커가 붙은 행과 안 붙은 행이 섞이면 test id가
+        // 어느 행의 라디오를 가리키는지 말할 수 없다.
+        return json(route, { approvals: [spawnApproval()] });
+      }
+      if (scenario === "spawn-blocked") {
+        return json(route, { approvals: [spawnApproval({ blocked: true })] });
+      }
       return json(route, {
         approvals: [...pendingApprovals, settledApproval],
       });
@@ -735,6 +887,256 @@ async function exerciseReject(browser, delayMs) {
   await context.close();
 }
 
+// ---- 이슈 1114: 승인 카드 호스트 선택기 (ADR-0125 D6-A) ---------------------
+
+/** 라디오 하나의 실제 상태. `disabled`는 DOM에서 읽는다 — 클래스가 아니라. */
+async function radioState(page, hostId) {
+  const radio = page.getByTestId(`inbox-approval-host-radio-${hostId}`);
+  if ((await radio.count()) === 0) {
+    throw new Error(`host radio: ${hostId} 줄이 아예 그려지지 않았다`);
+  }
+  return {
+    checked: await radio.isChecked(),
+    disabled: await radio.isDisabled(),
+    label:
+      (
+        await page
+          .getByTestId(`inbox-approval-host-option-${hostId}`)
+          .textContent()
+      )?.trim() ?? "",
+  };
+}
+
+/**
+ * 픽커가 서는 갈래: 목록 · 기본값 · 잠긴 줄 · 결정 본문.
+ *
+ * 이 시나리오가 지키는 것은 하나로 요약된다: **화면이 고를 수 있다고 말한 것만
+ * 서버로 나간다.** 서버는 같은 것을 두 겹으로 다시 막지만(카드가 낸 목록과의
+ * 대조 403 + 결정 시점 재판정), 화면이 고를 수 있는 것처럼 보여 놓고 서버가
+ * 거절하는 것은 「막았다」가 아니라 「거짓말한 뒤 막았다」이다.
+ */
+async function exerciseSpawnPicker(browser, delayMs) {
+  const { context, page, state } = await newPage(browser, "spawn", delayMs);
+  await page.getByTestId("inbox-list").waitFor();
+  await page.getByTestId("inbox-approval-host-group").waitFor();
+
+  // ① RED PROOF: 자격 없는 줄은 눌리지 않는다.
+  //
+  // 순서에 이유가 있다. 아래 ②의 라벨 단언도 같은 `selectable`을 읽으므로, 그것을
+  // 먼저 두면 `PROVE_RED_UNSELECTABLE` 이음매가 라벨 쪽을 먼저 붉히고 이 배치의
+  // 논점(**눌리지 않는다**)은 한 번도 측정되지 않은 채로 남는다.
+  const dead = await radioState(page, deadHostId);
+  const cloud = await radioState(page, cloudHostId);
+  if (!dead.disabled || !cloud.disabled) {
+    throw new Error(
+      `unselectable host stays unpickable: 자격 없는 라디오가 열려 있다 (dead=${dead.disabled} cloud=${cloud.disabled})`
+    );
+  }
+  // **진짜 마우스**로 그 줄의 한가운데를 누른다. 두 가지 손쉬운 방법을 다 버린
+  // 이유가 있다:
+  //   - 라디오에 `dispatchEvent("click")`: Chromium은 dispatch된 click을 disabled
+  //     입력에도 흘려보내 checked를 뒤집는다. 사람이 만들 수 없는 입력이고, 화면의
+  //     계약도 아니다.
+  //   - 로케이터의 `.click()`: Playwright의 액셔너빌리티가 "element is not enabled"
+  //     에서 30초를 기다리다 **타임아웃**을 낸다. 타임아웃은 무엇이 틀렸는지 말하지
+  //     않는다.
+  // `page.mouse.click`은 브라우저의 히트 테스트를 그대로 지나므로, 사람이 그 줄을
+  // 눌렀을 때 무슨 일이 일어나는지를 실제로 잰다.
+  const checkedBefore = (await radioState(page, localHostId)).checked
+    ? localHostId
+    : remoteHostId;
+  const deadBox = await page
+    .getByTestId(`inbox-approval-host-option-${deadHostId}`)
+    .boundingBox();
+  if (deadBox === null) {
+    throw new Error("unselectable host stays unpickable: 오프라인 줄이 화면에 없다");
+  }
+  await page.mouse.click(
+    deadBox.x + deadBox.width / 2,
+    deadBox.y + deadBox.height / 2
+  );
+  if ((await radioState(page, deadHostId)).checked) {
+    throw new Error(
+      "unselectable host stays unpickable: 오프라인 호스트가 선택 상태로 옮겨 갔다"
+    );
+  }
+  // 누르기 **전에** 무엇이 찍혀 있었는지를 들고 비교한다. 「내 맥이 여전히
+  // 찍혀 있다」로 적으면 기본값을 옮기는 다른 이음매(`PROVE_RED_DEFAULT`)가 이
+  // 단언을 먼저 붉혀, 그 이음매가 겨냥한 곳이 측정되지 않는다.
+  if ((await radioState(page, checkedBefore)).checked !== true) {
+    throw new Error(
+      "unselectable host stays unpickable: 자격 없는 줄을 누르자 선택이 풀렸다"
+    );
+  }
+
+  // ② 자격 없는 후보가 **숨지 않는다**. 서버가 사유와 함께 싣기로 한 결정을
+  //    화면이 무효로 만들면, "왜 내 랩탑을 못 고르지"의 답이 사라진다.
+  if (!dead.label.includes("낡은 맥 (오프라인)")) {
+    throw new Error(
+      `unavailable host is listed: 오프라인 호스트가 사유와 함께 서지 않았다 (${dead.label})`
+    );
+  }
+  // T3 자리 — ADR-0136이 momo Cloud를 꺼 둔 동안의 표기.
+  if (!cloud.label.includes("momo Cloud (준비 중)")) {
+    throw new Error(
+      `t3 slot: 예약된 클라우드 슬롯이 「준비 중」으로 서지 않았다 (${cloud.label})`
+    );
+  }
+
+  // ③ RED PROOF: 찍혀 있는 것은 **payload의 기본값**이다. 이름으로 기대한다 —
+  //    위치나 순서로 고르고 있었다면 이 단언은 seam 없이도 통과해 버린다.
+  const local = await radioState(page, localHostId);
+  const remote = await radioState(page, remoteHostId);
+  if (!local.checked || remote.checked) {
+    throw new Error(
+      `default host preselected: 카드의 기본값(내 맥)이 아니라 다른 것이 찍혀 있다 (local=${local.checked} remote=${remote.checked})`
+    );
+  }
+
+  // ④ RED PROOF: 손대지 않고 결정하면 `hostId` 키가 **아예 없다**. 서버가 같은
+  //    payload의 `default_host_id`를 적용하므로 결과는 같고, 키를 빼는 쪽이
+  //    정직하다: 사람이 선택이라는 행위를 하지 않았다는 사실이 원장에 남는다.
+  await page.getByTestId("inbox-approval-approve").first().click();
+  const confirm = page.getByTestId("inbox-approval-confirm").first();
+  await confirm.waitFor();
+  const confirmText = (await confirm.textContent()) ?? "";
+  if (!confirmText.includes("「내 맥」에서 실행합니다")) {
+    throw new Error(
+      `destination in the sentence: 확정 문장이 목적지를 말하지 않았다 (${confirmText})`
+    );
+  }
+  // 확정 화면에서 라디오는 잠긴다. 문장이 목적지를 말한 뒤 그 아래에서 목적지가
+  // 바뀌면, 사람이 읽은 문장과 나가는 요청이 달라진다.
+  if (!(await radioState(page, remoteHostId)).disabled) {
+    throw new Error(
+      "picker locks on confirm: 확정 문장이 목적지를 말한 뒤에도 목적지를 바꿀 수 있다"
+    );
+  }
+  await page.waitForTimeout(500);
+  await page.getByTestId("inbox-approval-commit").first().click();
+  await page.getByTestId("inbox-decision-note").waitFor();
+  if (state.decisions.length !== 1) {
+    throw new Error(
+      `spawn decision: expected exactly 1 POST, got ${state.decisions.length}`
+    );
+  }
+  const untouched = state.decisions[0];
+  if (Object.prototype.hasOwnProperty.call(untouched, "hostId")) {
+    throw new Error(
+      `default applies without a hostId: 픽커를 손대지 않았는데 본문이 hostId를 실었다 ${JSON.stringify(untouched)}`
+    );
+  }
+  await context.close();
+
+  // ⑤ 바꾸면 명시적으로 실린다. 새 판에서 한다 — 결정한 행은 사라진다.
+  const second = await newPage(browser, "spawn", delayMs);
+  await second.page.getByTestId("inbox-approval-host-group").waitFor();
+  await second.page
+    .getByTestId(`inbox-approval-host-radio-${remoteHostId}`)
+    .check();
+  await second.page.getByTestId("inbox-approval-approve").first().click();
+  await second.page.getByTestId("inbox-approval-confirm").first().waitFor();
+  await second.page.waitForTimeout(500);
+  await second.page.getByTestId("inbox-approval-commit").first().click();
+  await second.page.getByTestId("inbox-decision-note").waitFor();
+  const chosen = second.state.decisions[0];
+  if (String(chosen?.hostId ?? "").toLowerCase() !== remoteHostId.toLowerCase()) {
+    throw new Error(
+      `chosen host travels: 사람이 고른 호스트가 본문에 실리지 않았다 ${JSON.stringify(chosen)}`
+    );
+  }
+  await second.context.close();
+}
+
+/**
+ * 403 — 카드가 그려진 뒤 호스트가 꺼졌다 (서버 `resolve_host_choice`의 세 번째 검사).
+ *
+ * 이 갈래의 위험은 하나뿐이고 그것이 이 단언의 전부다: **기록되지 않은 결정을
+ * 기록됐다고 말하는 것.** 403은 원장을 움직이지 않았으므로 영수증이 아니라 오류이고,
+ * 픽커는 남아 있어야 사람이 다른 호스트로 다시 시도할 수 있다.
+ */
+async function exerciseSpawnForbidden(browser, delayMs) {
+  const { context, page } = await newPage(browser, "spawn-forbidden", delayMs);
+  await page.getByTestId("inbox-approval-host-group").waitFor();
+  await page.getByTestId("inbox-approval-approve").first().click();
+  await page.getByTestId("inbox-approval-confirm").first().waitFor();
+  await page.waitForTimeout(500);
+  await page.getByTestId("inbox-approval-commit").first().click();
+
+  await waitForEither(
+    page,
+    "inbox-approval-error",
+    "inbox-decision-note",
+    "forbidden host is refused"
+  );
+  const error = page.getByTestId("inbox-approval-error");
+  const role = await error.getAttribute("role");
+  const tone = await error.getAttribute("data-tone");
+  if (role !== "alert" || tone !== "error") {
+    throw new Error(
+      `forbidden host is refused: 거절이 사고로 그려지지 않았다 (role=${role} tone=${tone})`
+    );
+  }
+  // 픽커가 남아야 다른 호스트로 다시 시도할 수 있다. 거절과 함께 사라지면 사람은
+  // 무엇을 바꿔야 하는지 모른 채 같은 버튼을 다시 누른다.
+  if ((await page.getByTestId("inbox-approval-host-group").count()) === 0) {
+    throw new Error(
+      "forbidden host is refused: 거절 뒤 픽커가 사라져 다른 호스트를 고를 수 없다"
+    );
+  }
+  await context.close();
+}
+
+/**
+ * 자격 있는 후보가 0. 서버가 409로 답할 것을 결정 **전에** 말한다.
+ *
+ * 거부는 막지 않는다 — 서버도 거부에는 호스트를 묻지 않고, 실행할 수 없는 요청을
+ * 정리할 길까지 닫을 이유는 없다.
+ */
+async function exerciseSpawnBlocked(browser, delayMs) {
+  const { context, page, state } = await newPage(
+    browser,
+    "spawn-blocked",
+    delayMs
+  );
+  await page.getByTestId("inbox-approval-host-group").waitFor();
+
+  const blocked = page.getByTestId("inbox-approval-host-blocked");
+  if ((await blocked.count()) === 0) {
+    throw new Error(
+      "no eligible host blocks approve: 고를 것이 없는데 화면이 아무 말도 하지 않았다"
+    );
+  }
+  // 사고가 아니라 상태다. alert으로 끼어들면 이 줄이 오류처럼 읽힌다.
+  if ((await blocked.getAttribute("role")) !== "status") {
+    throw new Error("no eligible host blocks approve: 안내가 alert으로 그려졌다");
+  }
+
+  const approve = page.getByTestId("inbox-approval-approve").first();
+  if (!(await approve.isDisabled())) {
+    throw new Error(
+      "no eligible host blocks approve: 실행할 호스트가 없는데 승인 버튼이 살아 있다"
+    );
+  }
+  await approve.dispatchEvent("click");
+  await page.waitForTimeout(delayMs + 200);
+  if ((await page.getByTestId("inbox-approval-confirm").count()) !== 0) {
+    throw new Error(
+      "no eligible host blocks approve: 승인이 무장까지 갔다 (헛걸음)"
+    );
+  }
+  if (state.decisions.length !== 0) {
+    throw new Error(
+      `no eligible host blocks approve: 결정이 ${state.decisions.length}건 나갔다`
+    );
+  }
+
+  // 거부는 열려 있다.
+  await page.getByTestId("inbox-approval-reject").first().click();
+  await page.getByTestId("inbox-approval-confirm").first().waitFor();
+  await context.close();
+}
+
 /** 이미 다른 곳에서 결정된 요청. 정상적인 상태 전이이지 사고가 아니다. */
 async function exerciseSuperseded(browser, delayMs) {
   const { context, page } = await newPage(browser, "superseded", delayMs);
@@ -838,6 +1240,13 @@ async function main() {
       }
       await exerciseLoading(browser);
       await exerciseReject(browser, 60);
+      // 이슈 1114 — 호스트 선택기. 두 지연에서 돌린다: 픽커의 기본값은 목록 응답이
+      // 그려진 **뒤에** 정해지므로, 같은 tick에 답하는 목은 그 순서를 못 잰다.
+      for (const delayMs of [20, 180]) {
+        await exerciseSpawnPicker(browser, delayMs);
+      }
+      await exerciseSpawnForbidden(browser, 60);
+      await exerciseSpawnBlocked(browser, 60);
       await exerciseSuperseded(browser, 120);
       await exerciseAbsent(browser, 60);
       await exerciseError(browser, 60);
@@ -857,6 +1266,16 @@ async function main() {
   console.log(
     "           미제공/장애/빈/로딩 네 갈래가 세 가지 응답 지연에서 갈라진 채로 남았다."
   );
+  console.log(
+    "           호스트 선택기: 자격 없는 둘이 사유와 함께 서고 눌리지 않는다 ·"
+  );
+  console.log(
+    "           기본값은 payload가 정한다 · 손대지 않으면 hostId 키가 없다 ·"
+  );
+  console.log(
+    "           고른 호스트는 본문에 실린다 · 403은 영수증이 아니라 오류다 ·"
+  );
+  console.log("           자격 0이면 승인이 실제로 불가용하고 거부만 열린다.");
 }
 
 main().catch((error) => {

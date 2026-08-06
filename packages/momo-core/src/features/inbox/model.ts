@@ -1,5 +1,6 @@
 import type { Approval, AgentRun, Message } from "../../lib/api";
 import { uuidEq } from "../../lib/api";
+import type { SpawnExecutionPlan } from "../../lib/executionPlan";
 import type { FilterTabsSpec } from "../common/filterTabs";
 
 // =============================================================================
@@ -194,6 +195,14 @@ export interface FeedItem {
    * 붙을 자리가 아예 없다.
    */
   approvalId?: string;
+  /**
+   * 이 행의 결정이 **어디서 실행할지**까지 묻는가 (ADR-0125 D6-A, #1114).
+   *
+   * `approvalId`와 같은 조건에서만 실린다(대기 중인 승인 행). 결정할 수 없는 행에
+   * 픽커의 재료를 실어 두면 화면은 고를 수 없는 것을 그릴 수 있게 되고, 그 순간
+   * 「보이는데 눌리지 않는 라디오」가 생긴다.
+   */
+  execution?: SpawnExecutionPlan;
 }
 
 // ---- time --------------------------------------------------------------
@@ -320,6 +329,9 @@ export function approvalItem(
     key: `approval:${approval.id}`,
     kind: "approval",
     ...(pending ? { approvalId: approval.id } : {}),
+    ...(pending && approval.execution !== undefined
+      ? { execution: approval.execution }
+      : {}),
     tone: pending ? "warn" : "muted",
     actor: actorToken(actor),
     actorIsAgent: actor.isAgent,
@@ -457,6 +469,11 @@ const TOOL_CALL_ACTION = "tool_call";
 /** 이 서버가 실행할 수 있는 툴의 사람 이름 (`tools.rs`의 CATALOG와 1:1). */
 const TOOL_LABELS: Record<string, string> = {
   "work.session.end": "작업 세션 종료",
+  // #1114이 CATALOG의 두 번째 항목으로 올린 것. 「시작」이지 「스폰」이 아니다 —
+  // spawn은 이 원장의 어휘이지 사람의 말이 아니다.
+  "work.session.spawn": "작업 세션 시작",
+  // REST 컨트롤 원장이 쓰는 action_type. 같은 행위의 다른 입구라서 같은 말을 한다.
+  "work.spawn": "작업 세션 시작",
 };
 
 /**

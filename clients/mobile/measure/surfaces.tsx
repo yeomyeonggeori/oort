@@ -78,6 +78,14 @@ import {color} from '../src/design/tokens';
 //                     (「증거가 상수 하나뿐이라 시각 판정은 확인 필요」).
 //   COMPOSER-OFFLINE  보낼 수 있을 때 ↔ 지금은 못 보낼 때 (감사 H-10)
 //
+// ## ADE 1단계가 더한 것 (이슈 1114)
+//
+//   SPAWN-PICKER      승인 카드의 호스트 선택기 (ADR-0125 D6-A) — 자격 둘 ·
+//                     오프라인 하나 · T3 예약 하나를 한 장에, 그리고 그 옆에
+//                     **고를 것이 하나도 없는** 카드. 같은 규율의 네 번째 적용이다:
+//                     「자격 없는 줄이 사유와 함께 선다」는 자격 있는 줄 옆에서만,
+//                     「승인이 꺼졌다」는 켜진 승인 옆에서만 사진에서 확인된다.
+//
 // 같은 규율의 세 번째 적용이다. 「왼쪽 칸이 같다」는 연속 행이 함께 있어야,
 // 「영수증이 격상됐다」는 안내 문장이 함께 있어야, 「버튼이 꺼졌다」는 켜진 버튼이
 // 함께 있어야 사진에서 확인된다.
@@ -892,6 +900,90 @@ export function Surface({name}: {name: string}): React.JSX.Element {
             directory={DIRECTORY}
             chips={[]}
             nowMs={NOW}
+          />
+        </Frame>
+      );
+    }
+    // ---- 이슈 1114 (ADE 1단계): 승인 카드 호스트 선택기 --------------------
+    case 'spawn-picker': {
+      // 스폰 승인은 「해도 되나」와 **「어디서 하나」** 를 함께 묻는다. 이 장이
+      // 보여야 하는 것은 라디오가 있다는 사실이 아니라 **자격 없는 줄이 사유와
+      // 함께 서 있다**는 것이고, 그것은 자격 있는 줄 옆에서만 보인다 — 네 줄을
+      // 한 장에 세우는 이유다(이 파일이 여백·접기·틴트에서 세 번 쓴 규율 그대로).
+      //
+      // 오른쪽 카드는 **고를 것이 하나도 없을 때**다. 승인 버튼이 실제로 꺼지고
+      // 그 위에 이유가 서는 것이 이 배치의 fail-closed 문이며, 꺼진 버튼은 켜진
+      // 버튼 옆에서만 꺼진 것으로 읽힌다.
+      const host = (
+        id: string,
+        display_name: string,
+        tier: string,
+        host_type: string,
+        selectable: boolean,
+        unavailable_reason: string | null,
+      ) => ({
+        host_id: id,
+        display_name,
+        host_type,
+        tier,
+        scope: tier === 'remote' || tier === 'cloud' ? 'workspace' : 'member',
+        online: unavailable_reason !== 'offline',
+        selectable,
+        unavailable_reason,
+      });
+      const candidates = [
+        host('h-1', '성재 맥북', 'local', 'app', true, null),
+        host('h-2', '팀 VPS (서울)', 'remote', 'workd', true, null),
+        host('h-3', '작업실 아이맥', 'local', 'app', false, 'offline'),
+        host('h-4', 'momo Cloud', 'cloud', 'cloud', false, 't3_disabled'),
+      ];
+      const execution = (rows: typeof candidates, defaultHostId: string | null) => ({
+        kind: 'work_session_spawn',
+        tool: 'codex',
+        label: '릴레이 재시작 절차 정리',
+        requested_host_id: null,
+        default_host_id: defaultHostId,
+        host_candidates: rows,
+      });
+      const spawnMessage = (id: string, exec: unknown) =>
+        ({
+          ...MESSAGE,
+          id,
+          type: 'approval_request',
+          body: '작업 세션 시작 승인',
+          authorMemberId: AGENT,
+          props: {
+            approval_id: id,
+            title: 'codex 작업 세션 시작 허가',
+            approval_status: 'pending',
+            execution: exec,
+          },
+        }) as unknown as Message;
+      const gate = (id: string) =>
+        new Map([[id, {approvalId: id, reversible: false, expiresAtMs: null}]]);
+      return (
+        <Frame label="스폰 승인 호스트 선택기 — 후보 넷 / 고를 것이 없을 때 (이슈 1114)">
+          <MessageRow
+            message={spawnMessage('ap-spawn', execution(candidates, 'h-1'))}
+            startsGroup
+            directory={DIRECTORY}
+            chips={[]}
+            nowMs={NOW}
+            approvalGates={gate('ap-spawn')}
+          />
+          <MessageRow
+            message={spawnMessage(
+              'ap-spawn-blocked',
+              execution(
+                candidates.filter(row => !row.selectable),
+                null,
+              ),
+            )}
+            startsGroup
+            directory={DIRECTORY}
+            chips={[]}
+            nowMs={NOW}
+            approvalGates={gate('ap-spawn-blocked')}
           />
         </Frame>
       );

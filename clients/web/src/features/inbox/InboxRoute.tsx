@@ -23,6 +23,7 @@ import {
   type Armed,
 } from "@/features/timeline/ApprovalActions";
 import type { DecisionOutcome } from "@momo/core/features/timeline/approvalDecision";
+import type { SpawnExecutionPlan } from "@momo/core/lib/executionPlan";
 import {
   isSurfaceProvided,
   serverSurface,
@@ -109,10 +110,20 @@ function InboxApprovalActions({
   approvalId,
   onSettled,
   reversible,
+  execution,
 }: {
   approvalId: string;
   onSettled: (outcome: DecisionOutcome) => void;
   reversible?: boolean;
+  /**
+   * 스폰 승인의 호스트 후보 (ADR-0125 D6-A, 이슈 1114).
+   *
+   * 목록 행에도 픽커가 서는 이유는 위 주석이 결정 컨트롤에 대해 이미 말한 것과
+   * 같다: 결정에 필요한 사실이 이 행에 다 있으므로 결정도 여기서 한다. 「어디서
+   * 실행하나」는 스폰 승인에서 결정에 필요한 사실이고, 그것만 채널로 들어가
+   * 고르게 하면 이 행은 다시 반쪽이 된다.
+   */
+  execution?: SpawnExecutionPlan;
 }) {
   const [armed, setArmed] = useState<Armed>(null);
   return (
@@ -125,6 +136,7 @@ function InboxApprovalActions({
       className="px-4 pb-2"
       testIdPrefix="inbox-approval"
       reversible={reversible}
+      execution={execution ?? null}
     />
   );
 }
@@ -333,6 +345,7 @@ export function InboxRoute() {
           approvalId={control.approvalId}
           onSettled={onDecided}
           reversible={item.reversible}
+          execution={item.execution}
         />
       );
     },
