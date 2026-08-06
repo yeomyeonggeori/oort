@@ -561,7 +561,8 @@ export default function ConversationScreen({
   // 영수증은 **같은 순간에 서로 반대로** 움직인다 — 영수증을 행의 상태로 두면
   // 방금 누른 사람이 영수증 대신 예전 안내 문장을 보게 된다.
   // ===========================================================================
-  const {gates: approvalGates} = usePendingApprovals(channelId);
+  const {gates: approvalGates, provided: approvalsProvided} =
+    usePendingApprovals(channelId);
   // **레일 상태(`railStatus`)가 아니다.** 레일은 웹소켓이고 결정은 REST 로
   // 나간다 — 레일이 재연결 중이어도 그 POST 는 멀쩡히 성공한다. 승인에는
   // 기한이 있으므로, 할 수 있는 결정을 막는 쪽이 더 비싸다.
@@ -787,6 +788,10 @@ export default function ConversationScreen({
               approvalGates={approvalGates}
               approvalReceipts={approvalReceipts}
               approvalOffline={!networkOnline}
+              // 원장 표면이 없는 서버에서는 「다시 연결되면 여기서」가 거짓말이
+              // 된다 — 코어가 그 갈래를 오프라인보다 앞에 두는 이유이고, 이
+              // 사실은 이 훅만 안다.
+              approvalsProvided={approvalsProvided}
               onApprovalSettled={onApprovalSettled}
               messages={timeline.state.messages}
               directory={directory}

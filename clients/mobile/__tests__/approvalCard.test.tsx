@@ -15,6 +15,11 @@ import {
 } from '../src/features/conversation/approvalGate';
 import {pendingApprovalsKey} from '../src/features/conversation/usePendingApprovals';
 import {APPROVAL_OFFLINE_COPY} from '../src/features/inbox/useOnline';
+import {
+  approvalNoteRank,
+  APPROVAL_NOTE_TONE_ORDER,
+} from '@momo/core/features/timeline/approvalNote';
+import {color} from '../src/design/tokens';
 import {MessageRow} from '../src/features/conversation/MessageRow';
 import {SessionProvider} from '../src/session/useSession';
 
@@ -99,6 +104,7 @@ function renderCard(props: {
   gates?: ReadonlyMap<string, ApprovalGate>;
   receipts?: ReadonlyMap<string, ApprovalReceipt>;
   offline?: boolean;
+  approvalsProvided?: boolean;
 }) {
   const client = new QueryClient({
     defaultOptions: {queries: {retry: false, gcTime: 0}},
@@ -115,6 +121,7 @@ function renderCard(props: {
           approvalGates={props.gates}
           approvalReceipts={props.receipts}
           approvalOffline={props.offline}
+          approvalsProvided={props.approvalsProvided}
           onApprovalSettled={() => {}}
         />
       </SessionProvider>
@@ -123,6 +130,12 @@ function renderCard(props: {
 }
 
 const DEAD_END = '이 결정은 인박스나 데스크톱 앱에서 처리할 수 있습니다.';
+
+/** 잉크의 밝기. 「격상이 실제로 격상인가」를 값으로 묻는 데만 쓴다. */
+function brightness(hex: string): number {
+  const h = hex.replace('#', '');
+  return [0, 2, 4].reduce((sum, i) => sum + parseInt(h.slice(i, i + 2), 16), 0);
+}
 
 afterEach(cleanup);
 
@@ -365,19 +378,33 @@ describe('오프라인 — 같은 컨트롤은 화면마다 같은 결을 갖는
     expect(within(view.getByTestId('agent-card')).getByText(DEAD_END)).toBeTruthy();
   });
 
-  it('문장이 한 벌이다 — 두 화면이 같은 상수를 든다', () => {
+  it('문장이 한 벌이다 — 이제 두 화면이 아니라 **두 클라**가 (U4-6)', () => {
     const SRC2 = (p: string) =>
       fs.readFileSync(path.resolve(__dirname, `../src/${p}`), 'utf8');
     const codeOnly2 = (t: string) =>
       t.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+    // 문장을 손으로 적은 자리가 **하나도** 없다. 값이 사는 자리는 코어 하나다.
     for (const file of [
       'screens/InboxScreen.tsx',
       'features/conversation/MessageRow.tsx',
+      'features/inbox/useOnline.ts',
     ]) {
-      const code = codeOnly2(SRC2(file));
-      expect(code).toContain('APPROVAL_OFFLINE_COPY');
-      expect(code).not.toContain('연결이 끊겨 지금은 결정할 수 없습니다');
+      expect(codeOnly2(SRC2(file))).not.toContain(
+        '연결이 끊겨 지금은 결정할 수 없습니다',
+      );
     }
+    // 인박스는 이름으로 부르고(그 화면의 진입점이 `useOnline.ts` 다), 그 이름은
+    // 코어에서 다시 내보내는 것이다.
+    expect(codeOnly2(SRC2('screens/InboxScreen.tsx'))).toContain(
+      'APPROVAL_OFFLINE_COPY',
+    );
+    expect(codeOnly2(SRC2('features/inbox/useOnline.ts'))).toContain(
+      "from '@momo/core/features/timeline/approvalNote'",
+    );
+    // 카드는 상수조차 안 든다 — **어떤 문장이 서는가**를 코어가 판정한다.
+    expect(codeOnly2(SRC2('features/conversation/MessageRow.tsx'))).toContain(
+      'approvalCardNote',
+    );
   });
 
   it('레일 상태가 아니라 네트워크를 본다 — 결정도 전송도 REST 로 나간다', () => {
@@ -434,5 +461,128 @@ describe('두 번째 구현이 아니라 세 번째 호출자다', () => {
     const inbox = codeOnly(SRC('features/inbox/useInbox.ts'));
     expect(inbox).toContain("['approvals', workspaceId, 'pending']");
     expect(pendingApprovalsKey(WS)).toEqual(['approvals', WS, 'pending']);
+  });
+});
+
+// -----------------------------------------------------------------------------
+// U4-4 M-3 — 세 문장이 같은 옷을 입지 않는다 (코어 승격분 소비)
+//
+// 리뷰가 실측한 것: 영수증(`승인을 기록했습니다.`)·안내(`이 결정은 인박스나…`)·
+// 오프라인 문장이 전부 `styles.cardNote` 한 벌이었다. *"카드에서 가장 값어치
+// 있는 문장인 영수증이 가장 조용한 차림으로 나온다."*
+//
+// 격의 **순서**는 코어가 정하고(`APPROVAL_NOTE_TONE_ORDER`), 그 순서를 이
+// 팔레트가 실제로 지키는지는 **그려진 트리에서** 잰다. 소스 매칭이 아니라 실표를
+// 보는 이유는 U4-4R W-2 그대로다.
+// -----------------------------------------------------------------------------
+
+describe('M-3 — 승인 카드 세 문장의 격', () => {
+  const flatten = (style: unknown): Record<string, unknown> =>
+    Array.isArray(style)
+      ? Object.assign({}, ...style.filter(Boolean).map(flatten))
+      : ((style ?? {}) as Record<string, unknown>);
+
+  /** 카드가 실제로 그린 줄의 잉크와 무게. */
+  function noteFace(props: Parameters<typeof renderCard>[0], kind: string) {
+    const view = renderCard(props);
+    const node = within(view.getByTestId('agent-card')).getByTestId(
+      `card-approval-${kind}`,
+    );
+    const style = flatten(node.props.style) as {
+      color?: string;
+      fontWeight?: string;
+    };
+    const face = {color: style.color, weight: style.fontWeight ?? '400'};
+    view.unmount();
+    return face;
+  }
+
+  const RECEIPT = new Map([
+    ['ap-1', {note: '승인을 기록했습니다.', status: 'approved' as const}],
+  ]);
+
+  it('세 갈래가 코어가 말한 kind 로 선다', () => {
+    // 종류(왜 이 줄이 섰는가)와 톤(얼마나 앞으로 나오는가)이 나뉘어 있으므로,
+    // 테스트도 종류로 지목한다.
+    for (const [props, kind] of [
+      [{gates: new Map([['ap-1', GATE]]), receipts: RECEIPT}, 'receipt'],
+      [{gates: new Map([['ap-1', GATE]]), offline: true}, 'offline'],
+      [{gates: new Map()}, 'elsewhere'],
+    ] as const) {
+      const view = renderCard(props);
+      expect(view.queryByTestId(`card-approval-${kind}`)).toBeTruthy();
+      view.unmount();
+    }
+  });
+
+  it('영수증 > 차단 > 안내 — 격이 실제로 갈린다', () => {
+    const receipt = noteFace(
+      {gates: new Map([['ap-1', GATE]]), receipts: RECEIPT},
+      'receipt',
+    );
+    const blocked = noteFace(
+      {gates: new Map([['ap-1', GATE]]), offline: true},
+      'offline',
+    );
+    const guidance = noteFace({gates: new Map()}, 'elsewhere');
+
+    // 세 벌이 서로 다르다 — 옛 판은 셋이 같은 `cardNote` 하나였다.
+    const faces = [receipt, blocked, guidance].map(f => `${f.color}/${f.weight}`);
+    expect(new Set(faces).size).toBe(3);
+
+    // 그리고 방향이 옳다: 영수증만 굵고, 안내만 흐리다.
+    expect(receipt.weight).toBe('600');
+    expect(blocked.weight).toBe('400');
+    expect(guidance.weight).toBe('400');
+    expect(receipt.color).toBe(color.text);
+    expect(blocked.color).toBe(color.text);
+    expect(guidance.color).toBe(color.textMuted);
+    // 격상이 실제로 격상이다 — 영수증의 잉크가 안내의 잉크보다 **밝다**.
+    // (`text` #f2f3f5 ↔ `textMuted` #9aa0a8 — 값은 `tokens.ts` 에서 읽는다.)
+    expect(brightness(color.text)).toBeGreaterThan(brightness(color.textMuted));
+  });
+
+  it('색상은 새로 들이지 않았다 — 앰버는 이미 경계의 뜻이다 (D-2)', () => {
+    // 「일시적 차단」에 `warn` 을 주면 같은 배치가 앰버에 세 번째 뜻을 준다.
+    for (const kind of ['receipt', 'offline', 'elsewhere'] as const) {
+      const props =
+        kind === 'receipt'
+          ? {gates: new Map([['ap-1', GATE]]), receipts: RECEIPT}
+          : kind === 'offline'
+            ? {gates: new Map([['ap-1', GATE]]), offline: true}
+            : {gates: new Map()};
+      expect(noteFace(props, kind).color).not.toBe(color.warn);
+    }
+  });
+
+  it('격의 순서가 코어의 순서다', () => {
+    expect(APPROVAL_NOTE_TONE_ORDER).toEqual(['receipt', 'blocked', 'guidance']);
+    expect(approvalNoteRank('receipt')).toBeLessThan(approvalNoteRank('blocked'));
+    expect(approvalNoteRank('blocked')).toBeLessThan(
+      approvalNoteRank('guidance'),
+    );
+  });
+
+  it('재개 제안은 승인 문장을 입지 않는다 — 승인이 아니다', () => {
+    // 옛 판은 `approval === null` 이라는 이유로 「이 결정은 인박스나 데스크톱
+    // 앱에서」를 붙였다. 재개 제안에는 결정할 대상이 아예 없다.
+    const view = renderCard({
+      message: card({approval_id: null, kind: 'resume_offer'}),
+      gates: new Map(),
+    });
+    const agentCard = view.getByTestId('agent-card');
+    expect(within(agentCard).queryByText(DEAD_END)).toBeNull();
+    expect(within(agentCard).queryByTestId('card-approval-elsewhere')).toBeNull();
+  });
+
+  it('원장 없는 서버는 오프라인 문장을 말하지 않는다 — 「다시 연결되면」이 거짓말이다', () => {
+    const view = renderCard({
+      gates: new Map([['ap-1', GATE]]),
+      offline: true,
+      approvalsProvided: false,
+    });
+    const agentCard = view.getByTestId('agent-card');
+    expect(within(agentCard).queryByTestId('card-approval-offline')).toBeNull();
+    expect(within(agentCard).getByTestId('card-approval-unsupported')).toBeTruthy();
   });
 });

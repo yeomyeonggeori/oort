@@ -28,9 +28,11 @@ import {
   PendingRow,
 } from '../src/features/conversation/MessageRow';
 import {
+  deletedFoldLabel,
+  DELETED_TOMBSTONE_COPY,
   foldDeletedRuns,
   foldedStandInIndex,
-} from '../src/features/conversation/deletedFold';
+} from '@momo/core/features/timeline/deletedFold';
 import {Timeline} from '../src/features/conversation/Timeline';
 
 // =============================================================================
@@ -295,6 +297,13 @@ describe('M-12 — 낙관적 메아리도 같은 여백을 진다', () => {
 // ---------------------------------------------------------------------------
 
 describe('M-1 — 연달아 지워진 메시지가 한 줄로 접힌다', () => {
+  // ## 이 블록은 이제 **코어를 부른다** (U4-6, #1102 승격 · #1100 이탈 1 종결)
+  //
+  // 규칙이 폰 로컬에 있던 동안 이 파일이 그 규칙의 유일한 가드였다. 규칙이
+  // 코어로 올라갔으므로 코어 테스트가 규칙을 지키고, 여기 남는 질문은 하나다:
+  // **이 클라가 그 정본을 실제로 소비하는가.** 그래서 임포트가 코어를 가리키고,
+  // 아래 마지막 두 단정이 「폰 로컬 판이 남아 있지 않다」와 「대리 착지 계약이
+  // 폰 화면에서도 그대로다」를 잰다.
   const NO_EXTRAS = () => ({hasRollup: false, hasReactions: false});
 
   function deletedItem(
@@ -445,6 +454,61 @@ describe('M-1 — 연달아 지워진 메시지가 한 줄로 접힌다', () => 
       />,
     );
     expect(screen.getByTestId('tombstone').props.children).not.toContain('개');
+  });
+
+  // -------------------------------------------------------------------------
+  // U4-6 — 승격분 소비
+  // -------------------------------------------------------------------------
+
+  it('폰 로컬 판이 남아 있지 않다 — 정본은 하나다', () => {
+    // 로컬 파일이 남으면 두 규칙이 공존하고, 갈라지는 쪽은 아무도 보고 있지
+    // 않은 쪽이다. 소비처가 코어를 부르는지도 함께 본다 — 파일만 지우고 다른
+    // 로컬 사본을 만드는 것으로는 이 단정을 통과하지 못한다.
+    expect(
+      fs.existsSync(path.resolve(SRC_DIR, 'features/conversation/deletedFold.ts')),
+    ).toBe(false);
+    const timeline = fs.readFileSync(
+      path.resolve(SRC_DIR, 'features/conversation/Timeline.tsx'),
+      'utf8',
+    );
+    expect(timeline).toContain(
+      "from '@momo/core/features/timeline/deletedFold'",
+    );
+  });
+
+  it('화면이 짓는 문장이 코어의 문장과 **같다**', () => {
+    // 「문자열 동일성」을 눈이 아니라 함수로 잰다. 폰이 자기 파일에서 조사를
+    // 붙이면 여기서 빨강이 된다.
+    for (const count of [undefined, 1, 2, 3, 12] as const) {
+      const view = render(
+        <MessageRow
+          message={message({state: 'deleted', body: ''})}
+          startsGroup
+          directory={DIRECTORY}
+          chips={[]}
+          deletedRepeat={count}
+          nowMs={BASE_MS}
+        />,
+      );
+      expect(view.getByTestId('tombstone').props.children).toContain(
+        deletedFoldLabel(count),
+      );
+      view.unmount();
+    }
+    expect(deletedFoldLabel(undefined)).toBe(DELETED_TOMBSTONE_COPY);
+  });
+
+  it('대리 착지 계약이 그대로다 — 진짜 없는 것은 여전히 없다 (#1105 인계)', () => {
+    // 승격이 되돌려서는 안 되는 자리. 둘 다 참이어야 하고, 하나만 참이면 이
+    // 함수는 거짓말을 한다: ①접혀 들어간 것은 대신 서는 행을 답한다,
+    // ②애초에 로드되지 않은 것은 **여전히 -1** 이다(그래야 화면의 「더 위쪽에
+    // 있습니다」가 참인 자리에서만 뜬다).
+    const folded = foldDeletedRuns(
+      [deletedItem(2, true), deletedItem(3, false)],
+      NO_EXTRAS,
+    );
+    expect(foldedStandInIndex(folded, 'm-3')).toBe(0);
+    expect(foldedStandInIndex(folded, 'm-1000')).toBe(-1);
   });
 });
 
