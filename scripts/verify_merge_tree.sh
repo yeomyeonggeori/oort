@@ -51,7 +51,7 @@ while [ $# -gt 0 ]; do
     --install) DO_INSTALL=1; shift ;;
     --typecheck-only) TYPECHECK_ONLY=1; shift ;;
     --keep) KEEP=1; shift ;;
-    -h|--help) sed -n '2,36p' "$0"; exit 0 ;;
+    -h|--help) sed -n '3,35p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "[merge-tree] unknown argument: $1" >&2; exit 2 ;;
   esac
 done
@@ -138,30 +138,39 @@ git worktree add --detach "$WORKTREE" "$MERGE_COMMIT" >/dev/null
 # 기본은 소스 체크아웃의 node_modules 를 심볼릭 링크로 빌려 쓴다: 3종 npm ci 는
 # 수 분이고, 이 게이트는 머지 루틴에서 매번 도는 자리이기 때문이다. 다만 **락파일이
 # 병합으로 바뀌었으면 빌려 쓰기가 거짓말이 된다** — 그 경우 자동으로 설치 모드다.
-LANES=("packages/momo-core" "clients/web" "clients/mobile")
+# 설치 단위 세 곳. 코어는 npm workspace 라서 락파일도 node_modules 도 **레포 루트**에
+# 있다(packages/momo-core 에는 둘 다 없다) — 여기서 그걸 틀리면 매번 설치 모드가 되고,
+# 빌려 쓰기 경로는 죽은 코드가 된다.
+INSTALL_DIRS=("." "clients/web" "clients/mobile")
+
+lane_stale() {
+  local dir="$1"
+  ! diff -q "$REPO_ROOT/$dir/package-lock.json" \
+    "$WORKTREE/$dir/package-lock.json" >/dev/null 2>&1
+}
+
 if [ "$DO_INSTALL" = "0" ]; then
-  for lane in "${LANES[@]}"; do
+  for dir in "${INSTALL_DIRS[@]}"; do
     # 비교 대상은 **지금 이 체크아웃**의 락파일이다. 빌려 쓸 node_modules 가 그
     # 락파일로 설치된 것이므로, 병합 결과의 락파일이 다르면 빌려 쓰기는 거짓말이 된다.
-    if ! diff -q "$REPO_ROOT/$lane/package-lock.json" \
-      "$WORKTREE/$lane/package-lock.json" >/dev/null 2>&1; then
-      echo "[merge-tree] $lane 의 락파일이 이 체크아웃과 다르다 — 설치 모드로 전환"
+    if lane_stale "$dir"; then
+      echo "[merge-tree] $dir 의 락파일이 이 체크아웃과 다르다 — 설치 모드로 전환"
       DO_INSTALL=1
       break
     fi
   done
 fi
 
-for lane in "${LANES[@]}"; do
+for dir in "${INSTALL_DIRS[@]}"; do
   if [ "$DO_INSTALL" = "1" ]; then
-    echo "[merge-tree] npm ci — $lane"
-    (cd "$WORKTREE/$lane" && npm ci --silent >/dev/null)
+    echo "[merge-tree] npm ci — ${dir#./}"
+    (cd "$WORKTREE/$dir" && npm ci --silent >/dev/null)
   else
-    [ -d "$REPO_ROOT/$lane/node_modules" ] || {
-      echo "[merge-tree] $lane/node_modules 가 없다 — 먼저 설치하거나 --install 로 돌려라" >&2
+    [ -d "$REPO_ROOT/$dir/node_modules" ] || {
+      echo "[merge-tree] $dir/node_modules 가 없다 — 먼저 설치하거나 --install 로 돌려라" >&2
       exit 1
     }
-    ln -s "$REPO_ROOT/$lane/node_modules" "$WORKTREE/$lane/node_modules"
+    ln -s "$REPO_ROOT/$dir/node_modules" "$WORKTREE/$dir/node_modules"
   fi
 done
 

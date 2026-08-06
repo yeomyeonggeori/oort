@@ -288,9 +288,19 @@ export MOMO_EMAIL=... MOMO_PASSWORD=...
 node gates/inject.mjs 120           # seed the spike-745-gate channel (never #general)
 node gates/gate-seq.mjs             # GATE 1
 node gates/gate-resume.mjs 25       # GATE 2
-npm run preview -- --host 127.0.0.1 # then, in another shell:
-node gates/gate-scroll.mjs          # GATE 3 (+ web cold start), headless Chromium
 ```
+
+GATE 3(1k 스크롤 프로파일 + 콜드 스타트)은 **더 이상 자격증명도 외부 preview도
+요구하지 않는다**(#1089). `?stress=N` 은 행을 클라이언트에서 만들고 네트워크를
+타지 않으므로 필요한 것은 로그인 왕복 하나뿐이었고, 그건 형제 게이트들이 쓰는
+라우트 스텁으로 대체된다:
+
+```sh
+npm run build && npm run gate:scroll     # 자체 preview(5185) + 스텁 세션
+```
+
+라이브 서버를 상대로 재려면 `SCROLL_GATE_BASE` 와 `MOMO_EMAIL`/`MOMO_PASSWORD` 를
+**함께** 준다 — 그 조합에서만 스텁이 비활성이다.
 
 The shell layout gate needs neither creds nor a backend (it mocks `/v1` the way
 `scripts/capture-screens.mjs` does) and brings up its own preview server:

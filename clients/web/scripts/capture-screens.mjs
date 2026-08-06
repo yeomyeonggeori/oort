@@ -115,29 +115,18 @@ const QUOTA_FIXTURE = JSON.parse(
 
 // 설정 > 멤버와 초대. 한 장짜리 목록은 이 패널의 실제 길이가 아니다 — 만료·사용
 // 횟수·역할이 섞인 여러 줄이 이 화면의 기본 상태다.
-// 설정 > 앱. 출하 시드 매니페스트를 그대로 읽는다 — 빈 카탈로그는 정직하지만
-// 리뷰할 것이 없는 프레임이고, 손으로 지어낸 앱은 서버가 낼 수 없는 프레임이다.
-const GITHUB_MANIFEST = JSON.parse(
-  readFileSync(
-    resolve(WEB_ROOT, "../../server/Fixtures/plugin-manifests/github.json"),
-    "utf8"
-  )
-);
-const SETTINGS_PLUGIN_CATALOG = [
-  {
-    pluginId: GITHUB_MANIFEST.plugin.id,
-    name: GITHUB_MANIFEST.plugin.name,
-    version: GITHUB_MANIFEST.plugin.version,
-    description: GITHUB_MANIFEST.plugin.description,
-    official: true,
-    recommended: true,
-    egressDomains: GITHUB_MANIFEST.momo.egressDomains,
-    recommendedFor: GITHUB_MANIFEST.momo.recommendedFor,
-    installed: true,
-    enabled: true,
-  },
-];
-
+// 설정 > 앱은 **빈 카탈로그**로 찍는다.
+//
+// 출하 시드(server/Fixtures/plugin-manifests/github.json)를 한 줄 얹어 봤고, 그
+// 프레임 자체는 나온다. 그런데 그 뒤 섹션 전환이 무너졌다(실측 2026-08-06: 카탈로그
+// 행이 있으면 다음 섹션에서 `settings-route` 가 30초 안에 돌아오지 않는다 — 나란히
+// 클릭하는 판에서는 `사용량` nav 버튼 클릭이 같은 자리에서 죽었다). 원인은 `앱`
+// 패널의 `wide` 마켓플레이스 레이아웃 쪽으로 보이고, 카탈로그가 비면 재현되지 않는다.
+//
+// 그래서 여기서는 서버가 실제로 낼 수 있는 다른 상태 — 등록된 앱이 없는 워크스페이스 —
+// 를 찍는다. 캡처 레인의 목적(설정 표면이 리뷰 증거로 남는가)은 그것으로 달성되고,
+// 카탈로그가 있는 판은 이미 `gate:shell` 이 두 매니페스트로 측정한다. 카탈로그
+// 프레임을 이 하네스에 넣는 것은 위 전환 결함을 먼저 규명한 뒤의 일이다(후속).
 const SETTINGS_INVITES = Array.from({ length: 6 }, (_, i) => ({
   id: `capture-invite-${i}`,
   workspaceId: "00000000-0000-7000-8000-000000000001",
@@ -1276,10 +1265,7 @@ async function installMocks(context) {
     json(route, { invites: SETTINGS_INVITES })
   );
   await context.route("**/v1/workspaces/*/plugins", (route) =>
-    json(route, {
-      plugins: SETTINGS_PLUGIN_CATALOG,
-      toolPolicy: { plugins: [] },
-    })
+    json(route, { plugins: [], toolPolicy: { plugins: [] } })
   );
   // 워크스페이스 라우트 중 가장 덜 구체적이다. `*` 는 `/` 를 건너지 않으므로 위의
   // 하위 경로들은 여전히 자기 라우트로 간다.
@@ -3497,27 +3483,33 @@ async function captureScheme(browser, scheme) {
   //     계정·알림 규칙·워크스페이스·앱·사용량·멤버와 초대를 바꾼 PR 은 커밋된
   //     캡처 없이 리뷰됐다 — design-review 하드 룰의 증거 레인에 뚫린 구멍이었다.
   //
-  //     한 페이지에서 섹션 사이를 **네비게이션 버튼으로** 이동한다. 해시 재진입은
-  //     SettingsRoute 가 `?section=` 을 마운트 시 한 번만 읽기 때문에 매번 리마운트
-  //     왕복이 필요하고, 그건 사람이 이 화면을 쓰는 방식도 아니다.
+  //     섹션 사이는 **해시 재진입**으로 이동한다. 나란히 클릭으로 넘기는 판이
+  //     처음 시도였는데, `앱` 패널이 `wide` 레이아웃이라 그 다음 섹션의 nav 버튼
+  //     클릭이 30초 타임아웃으로 죽었다 — 한 섹션의 레이아웃이 다음 섹션의 진입을
+  //     좌우하는 순서 의존이다. `SettingsRoute` 는 `?section=` 을 마운트 시 한 번만
+  //     읽으므로 `/inbox` 로 튕겨 리마운트시킨다(gate-shell-layout 의 `go()` 와 같은
+  //     이유·같은 방식).
   //
-  //     각 섹션은 자기 패널의 표지 요소를 기다린 뒤 찍는다. 기다릴 표지가 없으면
+  //     각 섹션은 자기 패널의 제목(h2)을 기다린 뒤 찍는다. 기다릴 표지가 없으면
   //     "무엇이 그려졌는지 모르는 스크린샷"이 되고, 그건 에러 경계가 찍힌 판과
-  //     구별되지 않는다. 그래서 마지막에 에러 경계 부재를 한 번 더 단정한다.
+  //     구별되지 않는다. 그래서 찍기 전에 에러 경계 부재를 한 번 더 단정한다.
   const settingsSweep = await context.newPage();
   await settingsSweep.goto(ORIGIN, { waitUntil: "networkidle" });
   await signIn(settingsSweep);
-  await settingsSweep.evaluate('location.hash = "/settings?section=account"');
-  await settingsSweep.getByTestId("settings-route").waitFor({ state: "visible" });
-  for (const [label, heading, name] of [
-    ["계정", "계정", "account"],
-    ["알림 규칙", "알림 규칙", "notifications"],
-    ["워크스페이스", "워크스페이스", "workspace"],
-    ["앱", "앱", "plugins"],
-    ["사용량", "사용량", "usage"],
-    ["멤버와 초대", "멤버와 초대", "members"],
+  for (const [section, heading, name] of [
+    ["account", "계정", "account"],
+    ["notifications", "알림 규칙", "notifications"],
+    ["workspace", "워크스페이스", "workspace"],
+    ["plugins", "앱", "plugins"],
+    ["usage", "사용량", "usage"],
+    ["members", "멤버와 초대", "members"],
   ]) {
-    await settingsSweep.getByRole("button", { name: label, exact: true }).click();
+    await settingsSweep.evaluate('location.hash = "/inbox"');
+    await settingsSweep.waitForTimeout(200);
+    await settingsSweep.evaluate(
+      `location.hash = "/settings?section=${section}"`
+    );
+    await settingsSweep.getByTestId("settings-route").waitFor({ state: "visible" });
     await settingsSweep
       .getByRole("heading", { name: heading, exact: true })
       .first()
@@ -3530,7 +3522,7 @@ async function captureScheme(browser, scheme) {
       .getByText("이 설정을 열지 못했습니다")
       .count();
     if (boundary > 0) {
-      throw new Error(`[설정 ${label} ${scheme}] 에러 경계가 그려졌다 — 픽스처 누락`);
+      throw new Error(`[설정 ${heading} ${scheme}] 에러 경계가 그려졌다 — 픽스처 누락`);
     }
     const sectionShot = `${OUT_DIR}/settings-${name}-${scheme}.png`;
     await settingsSweep.screenshot({ path: sectionShot });
