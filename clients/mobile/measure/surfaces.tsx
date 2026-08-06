@@ -3,7 +3,7 @@ import {makeStressRoster} from '@momo/core/features/timeline/stress';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
 import type {SearchPhase} from '@momo/core/features/search/searchModel';
 import React from 'react';
-import {StyleSheet, Text, View} from 'react-native';
+import {LogBox, StyleSheet, Text, View} from 'react-native';
 import type {Member} from '@momo/core/lib/api';
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
 import {SafeAreaProvider} from 'react-native-safe-area-context';
@@ -26,7 +26,17 @@ import {
 } from '../src/features/conversation/MessageRow';
 import {jumpMissedNotice} from '../src/features/conversation/jumpNotice';
 import {SpawnHostChoice} from '../src/features/inbox/SpawnHostChoice';
+import {AdeControlPanel} from '../src/features/ade/AdeControlPanel';
+import {AdeSummaryLine} from '../src/features/ade/AdeSummaryLine';
+import {AgentActivityBar} from '../src/features/agents/turnSurfaces';
+import {markAgentWorking, resetAgentWorking} from '../src/features/agents/workingSignal';
+import {RealtimeContext} from '../src/realtime/RealtimeProvider';
+import {ConversationLayout} from '../src/features/conversation/ConversationLayout';
+import {Timeline} from '../src/features/conversation/Timeline';
+import {Screen, ScreenHeader} from '../src/design/atoms';
 import {parseExecutionPlan} from '@momo/core/lib/executionPlan';
+import {measureMode} from './root';
+import type {AgentWorkingSignal} from '@momo/core/features/agents/workingSignal';
 import {NoticeBlock} from '../src/design/atoms';
 import {ResultRow, SearchBody} from '../src/screens/SearchScreen';
 import type {MessageSearch} from '../src/features/search/useMessageSearch';
@@ -120,6 +130,24 @@ import {color} from '../src/design/tokens';
 // 이미 적어 두었고, 캡처도 같은 확인을 지나야 한다.
 // =============================================================================
 
+// =============================================================================
+// LogBox 는 이 모듈에서만 꺼진다 (이슈 1137).
+//
+// `index.js` 는 표면 모드일 때만 이 파일을 `require` 하므로, 이 줄은 사진을 찍는
+// 실행에서만 돈다 — 개발자가 앱을 띄우는 보통의 실행에는 닿지 않는다.
+//
+// 끄는 이유는 **사진 위의 배너가 질문을 만들기 때문**이고(`measure/states.tsx` 가
+// VirtualizedList 경고에 대해 같은 말을 한다), 지금 뜨는 그 경고는 이 배치의 것이
+// 아니다. 실측으로 문장을 확인했다(`metro --client-logs`):
+//
+//   WARN  The global process.env.EXPO_OS is not defined. This should be inlined
+//         by babel-preset-expo during transformation.
+//
+// babel 변환 설정에 대한 말이고 이 저장소의 화면 코드와 무관하다. 같은 트리를
+// jest 로 렌더하면 `console.warn`·`console.error` 가 0건이다.
+// =============================================================================
+LogBox.ignoreAllLogs(true);
+
 const ROSTER = makeStressRoster();
 const DIRECTORY = makeDirectory(ROSTER);
 const SELF = (ROSTER.find(m => m.kind === 'human') ?? ROSTER[0]).id;
@@ -203,6 +231,217 @@ function search(phase: SearchPhase, hits: MessageSearchHit[] = []): MessageSearc
     retry: () => {},
   };
 }
+
+
+// =============================================================================
+// ADE 관제 픽스처 (이슈 1137).
+//
+// **목업이 아니다.** 앱이 실제로 읽는 두 자리에 앱이 실제로 쓰는 모양으로 넣는다:
+// 세션 원장·호스트 등록기·명부·채널은 `react-query` 캐시의 **그 키**에(`agentKeys`
+// ·`workspaceKeys` 와 글자 단위로 같다), 열린 턴은 `AgentWorkingRail` 이 쓰는 그
+// 스토어 함수(`markAgentWorking`)로. 그래서 사진에 찍히는 것은 배송되는 컴포넌트가
+// 배송되는 경로로 읽은 값이다 — `composer-offline` 이 `saveDraft` 로 초안을 심는
+// 것과 같은 방법이다.
+//
+// 픽스처가 고른 다섯 장은 세 상태와 세 생존성 등급을 한 장에 세우기 위한 것이다:
+//
+//   대기   `orphaned` 세션 · 랩탑 위 호스트   -> 「이 기기에서만」
+//   실행   `running`  세션 · 클라우드 호스트  -> 「기기를 꺼도 계속됩니다」
+//   유휴   `idle`     세션                    -> 목록에는 있고 계수에는 없다
+//   대기   승인을 기다리는 턴                 -> 호스트가 없으므로 배지도 없다
+//   실행   흐르고 있는 턴                     -> 같음
+// =============================================================================
+
+/** 하네스 세션의 워크스페이스. 아래 캐시 키가 전부 이 값을 쓴다. */
+const ADE_WS = 'measure-ws';
+
+/**
+ * 두 번째 에이전트. 스트레스 명부에는 에이전트가 하나뿐인데, 이 장이 보여야 하는
+ * 것 중 하나가 **두 방에서 동시에 도는 두 턴**이다 — 요약 줄이 워크스페이스 전역
+ * 이라는 사실은 서로 다른 방의 항목이 한 줄로 세어질 때만 사진에 나타난다.
+ */
+const ADE_AGENT_2 = '00000000-0000-7000-8000-00000000ade2';
+
+const ADE_ROSTER = [
+  ...ROSTER,
+  {
+    ...(ROSTER.find(m => m.kind === 'agent') ?? ROSTER[0]),
+    id: ADE_AGENT_2,
+    displayName: 'codex',
+    handle: 'codex',
+  },
+];
+
+/** 두 번째 에이전트까지 아는 명부. 화면들이 이름을 여기서 얻는다. */
+const ADE_DIRECTORY = makeDirectory(ADE_ROSTER);
+
+const ADE_CHANNELS = [
+  {id: 'ch-deploy', workspaceId: ADE_WS, kind: 'public', name: '배포', muted: false},
+  {id: 'ch-build', workspaceId: ADE_WS, kind: 'public', name: '빌드', muted: false},
+] as const;
+
+const ADE_HOSTS = [
+  {
+    id: 'host-mac',
+    workspaceId: ADE_WS,
+    scope: 'member',
+    ownerMemberId: SELF,
+    type: 'app',
+    displayName: '성재 맥북',
+    capabilities: {},
+    createdAtMs: 0,
+    online: true,
+  },
+  {
+    id: 'host-cloud',
+    workspaceId: ADE_WS,
+    scope: 'workspace',
+    ownerMemberId: SELF,
+    type: 'cloud',
+    displayName: 'momo Cloud',
+    capabilities: {},
+    createdAtMs: 0,
+    online: true,
+  },
+] as const;
+
+function adeSession(over: Record<string, unknown>) {
+  return {
+    workspaceId: ADE_WS,
+    channelId: 'ch-deploy',
+    memberId: AGENT,
+    hostId: 'host-cloud',
+    rootMessageId: 'm-root',
+    tool: 'codex',
+    label: '작업',
+    status: 'running',
+    observation: 'open',
+    observerGrantCount: 0,
+    remoteAttachAvailable: false,
+    startedAtMs: NOW - 900_000,
+    ...over,
+  };
+}
+
+const ADE_SESSIONS = [
+  adeSession({
+    id: 's-orphaned',
+    channelId: 'ch-build',
+    hostId: 'host-mac',
+    tool: 'claude',
+    label: '야간 회귀 스위트',
+    status: 'orphaned',
+    startedAtMs: NOW - 5_400_000,
+  }),
+  adeSession({
+    id: 's-running',
+    label: '릴레이 재시작 절차 정리',
+    startedAtMs: NOW - 1_920_000,
+  }),
+  adeSession({
+    id: 's-idle',
+    hostId: 'host-mac',
+    label: '로그 훑기',
+    status: 'idle',
+    startedAtMs: NOW - 7_200_000,
+  }),
+];
+
+/** 열린 턴 둘. 승인 대기가 하나, 흐르는 것이 하나. */
+const ADE_TURNS: AgentWorkingSignal[] = [
+  {
+    memberId: AGENT,
+    channelId: 'ch-deploy',
+    state: 'awaiting_approval',
+    source: 'status',
+    runId: 'run-approval',
+    startedAtMs: NOW - 240_000,
+    headlines: [],
+    lastActivityAtMs: NOW,
+  },
+  {
+    memberId: ADE_AGENT_2,
+    channelId: 'ch-build',
+    state: 'working',
+    source: 'run',
+    runId: 'run-live',
+    startedAtMs: NOW - 95_000,
+    headlines: ['테스트 스위트를 돌리는 중'],
+    lastActivityAtMs: NOW,
+  },
+];
+
+/**
+ * 대화가 비어 보이지 않을 만큼의 줄. 이 장의 주인공은 위아래 두 스택이지만, 빈
+ * 타임라인은 리뷰어에게 「목록이 안 그려졌다」로 읽힌다.
+ */
+const ADE_TIMELINE: Message[] = [
+  {
+    ...MESSAGE,
+    id: '00000000-0000-7000-8000-0000000000b1',
+    seq: 40,
+    authorMemberId: OTHER,
+    body: '릴레이 재시작 절차 문서 링크 좀 올려 주세요.',
+    createdAtMs: NOW - 1_200_000,
+    thread: undefined,
+  },
+  {
+    ...MESSAGE,
+    id: '00000000-0000-7000-8000-0000000000b2',
+    seq: 41,
+    authorMemberId: AGENT,
+    body: '문서를 열었습니다. 재시작 전 확인 항목이 셋입니다.',
+    createdAtMs: NOW - 900_000,
+    thread: undefined,
+  },
+  MESSAGE,
+];
+
+/** 하네스에는 소켓이 없다. 「연결됨」은 이 값 하나로 만들어진다. */
+const CONNECTED_RAIL = {
+  rail: null,
+  status: 'connected' as const,
+  subscriptionsWanted: true,
+};
+
+/**
+ * 두 표면이 읽는 자리를 채운다.
+ *
+ * **렌더 중에 부르지 않는다.** `markAgentWorking` 은 구독자를 동기적으로 깨우고,
+ * 그 구독자 중 하나가 지금 그려지고 있는 `AdeSummaryLine` 이다 — React 는 그것을
+ * "Cannot update a component while rendering a different component" 으로 잡고
+ * LogBox 가 사진 위에 배너를 얹는다(실측: 첫 캡처에 그렇게 찍혔다). 모듈 몸통은
+ * 어떤 렌더보다 먼저 도므로 그 자리가 옳다.
+ *
+ * 시계는 `Date.now()` 로 흐르므로 경과 숫자는 픽스처의 `startedAtMs` 가 아니라
+ * **찍는 순간**을 기준으로 커진다. `NOW` 를 그대로 쓰면 2023년에서 지금까지의
+ * 시간이 인쇄되므로, 시작 시각을 현재에서 거꾸로 잡는다.
+ */
+function seedAdeControl(): void {
+  const nowMs = Date.now();
+  const shift = nowMs - NOW;
+  resetAgentWorking();
+  harnessClient.setQueryData(['roster', ADE_WS], ADE_ROSTER);
+  harnessClient.setQueryData(['channels', ADE_WS], ADE_CHANNELS);
+  harnessClient.setQueryData(['work-hosts', ADE_WS], ADE_HOSTS);
+  harnessClient.setQueryData(
+    ['work-sessions', ADE_WS],
+    ADE_SESSIONS.map(session => ({
+      ...session,
+      startedAtMs: session.startedAtMs + shift,
+    })),
+  );
+  for (const turn of ADE_TURNS) {
+    markAgentWorking({
+      ...turn,
+      ...(turn.startedAtMs === undefined
+        ? {}
+        : {startedAtMs: turn.startedAtMs + shift}),
+      lastActivityAtMs: nowMs,
+    });
+  }
+}
+
 
 function Frame({label, children}: {label: string; children: React.ReactNode}) {
   return (
@@ -1098,6 +1337,120 @@ export function Surface({name}: {name: string}): React.JSX.Element {
         </Frame>
       );
     }
+    // ---- 이슈 1137 (ADE 3단계, 폰): 요약 한 줄 · 관제 목록 ------------------
+    case 'ade-summary': {
+      // **두 스택을 한 장에.** 이 배치가 고른 자리가 옳은지는 위(헤더 아래)와
+      // 아래(컴포저 액세서리 스택)가 같은 사진에 있어야만 확인된다 — 이 파일이
+      // 여백·접기·틴트·잠긴 픽커에서 네 번 쓴 그 규율이다. 위의 한 줄은
+      // 워크스페이스 전역 집계이고 아래 줄들은 이 채널의 것이며, 둘이 같은 낱말로
+      // 다른 모집단을 세는지가 여기서 눈으로 갈린다.
+      //
+      // 컴포지션은 `ConversationLayout` 그대로다. 그 파일이 자기가 이름을 가진
+      // 이유를 적어 두었다 — "Naming the composition means `measure/` renders the
+      // tree that ships."
+      // 액세서리 스택에는 **이 채널의 턴만** 간다. 그것이 그 스택의 계약이고
+      // (`agentTurnsInChannel` 로 좁힌다), 위의 한 줄이 좁히지 않는다는 사실이
+      // 바로 이 대조에서 읽힌다: 아래는 한 줄, 위는 두 방의 넷.
+      const channelTurns = ADE_TURNS.filter(
+        turn => turn.channelId === 'ch-deploy',
+      );
+      return (
+        <Screen>
+          <Text style={styles.label}>
+            ADE 요약 줄 — 헤더 아래 (워크스페이스 전역) ↕ 컴포저 액세서리 스택 (이 채널)
+          </Text>
+          <ScreenHeader title="배포" onBack={() => {}} titleTestID="measure-title" />
+          <AdeSummaryLine onPress={() => {}} />
+          <ConversationLayout
+            list={
+              <Timeline
+                messages={ADE_TIMELINE}
+                directory={ADE_DIRECTORY}
+                status="ready"
+                channelKind="public"
+                myMemberId={SELF}
+                nowMs={NOW + 900_000}
+              />
+            }
+            composer={
+              <>
+                <AgentActivityBar
+                  turns={channelTurns}
+                  directory={ADE_DIRECTORY}
+                  nowMs={Date.now()}
+                  live
+                />
+                <TypingBar segments={typingSegments(['박다연'])} />
+                <Composer
+                  channelLabel="배포"
+                  directory={ADE_DIRECTORY}
+                  draftKey="measure:ade-summary"
+                  onSend={() => {}}
+                />
+              </>
+            }
+          />
+        </Screen>
+      );
+    }
+    case 'ade-summary-empty': {
+      // **줄이 없는 판.** 「살아 있는 작업이 없으면 줄 자체가 없다」는 코어의 판정
+      // 이고(`adeSummarySegments`), 그것이 참인지는 줄이 **있는** 사진 옆에서만
+      // 확인된다 — 빈 띠를 남겼는지, 남겼다면 컴포저가 그만큼 밀렸는지가 두 장을
+      // 겹쳐 보면 바로 나온다. 이 파일이 여백·접기·틴트·잠긴 픽커에서 네 번 쓴
+      // 그 규율의 다섯 번째 적용이다.
+      //
+      // 이 표면만 씨앗을 안 받는다(파일 맨 아래 `seedAdeControl` 호출 참조).
+      return (
+        <Screen>
+          <Text style={styles.label}>
+            ADE 요약 줄 — 살아 있는 작업이 없을 때 (줄도, 빈 띠도 없다)
+          </Text>
+          <ScreenHeader title="배포" onBack={() => {}} titleTestID="measure-title" />
+          <AdeSummaryLine onPress={() => {}} />
+          <ConversationLayout
+            list={
+              <Timeline
+                messages={ADE_TIMELINE}
+                directory={ADE_DIRECTORY}
+                status="ready"
+                channelKind="public"
+                myMemberId={SELF}
+                nowMs={NOW + 900_000}
+              />
+            }
+            composer={
+              <Composer
+                channelLabel="배포"
+                directory={ADE_DIRECTORY}
+                draftKey="measure:ade-summary-empty"
+                onSend={() => {}}
+              />
+            }
+          />
+        </Screen>
+      );
+    }
+    case 'ade-panel': {
+      // 관제 목록. 카드 다섯 장이 **세 상태와 세 생존성 등급**을 한 장에 세운다:
+      // 대기(호스트 연결 끊김 · 이 기기에서만) · 실행 중(기기를 꺼도 계속됩니다)
+      // · 유휴 · 그리고 호스트가 없는 턴 둘(배지 자체가 없다).
+      //
+      // 「해당 없음」과 「모른다」가 다른 사실이라는 코어의 판정은 턴 카드에
+      // 배지가 **없다**는 것으로만 사진에 나타난다 — 세션 카드 옆에서만 보인다.
+      //
+      // **사진은 첫 폴링 창 안에서 찍는다.** 이 화면의 세션 질의는 20초 간격을
+      // 요구하고(`ADE_SESSION_POLL_MS`), 하네스에는 답할 서버가 없어서 그 첫 tick
+      // 이 질의를 오류로 만든다 — 그러면 씨앗으로 채운 카드들 위에 「불러오지
+      // 못했습니다」 배너가 함께 서고, 그 사진은 두 가지를 동시에 주장하게 된다
+      // (실측: 25초에 찍은 첫 판이 정확히 그렇게 나왔다). 실패 배너 자체는 별도
+      // 단정이 지킨다(`__tests__/adeControlSurface.test.tsx`).
+      return (
+        <RealtimeContext.Provider value={CONNECTED_RAIL}>
+          <AdeControlPanel onClose={() => {}} onOpenChannel={() => {}} />
+        </RealtimeContext.Provider>
+      );
+    }
     case 'search-idle':
       return (
         <Frame label="검색 · 입력 전">
@@ -1134,8 +1487,9 @@ export function Surface({name}: {name: string}): React.JSX.Element {
           <Text style={styles.label}>
             sheet · delete · editor · editor-error · row · row-lead ·
             approval-card · approval-notes · avatar · composer-offline ·
-            group · dividers · search-idle · search-searching · search-empty ·
-            search-error · search-results
+            group · dividers · ade-summary · ade-summary-empty · ade-panel ·
+            search-idle ·
+            search-searching · search-empty · search-error · search-results
           </Text>
         </Frame>
       );
@@ -1201,7 +1555,17 @@ export default function SurfacesHarness({name}: {name: string}): React.JSX.Eleme
 
 /** 네트워크로 나가지 않는다. 하네스는 사진을 찍지 데이터를 받지 않는다. */
 const harnessClient = new QueryClient({
-  defaultOptions: {queries: {retry: false, enabled: false, gcTime: 0}},
+  defaultOptions: {
+    queries: {
+      retry: false,
+      enabled: false,
+      gcTime: 0,
+      // 씨앗을 뿌린 질의가 마운트하자마자 네트워크로 나가지 않게 (이슈 1137).
+      // `enabled: false` 는 훅이 명시적으로 `true` 를 넘기면 뒤집히므로, 신선도
+      // 쪽에서도 한 번 더 막는다 — 하네스는 사진을 찍지 데이터를 받지 않는다.
+      staleTime: Infinity,
+    },
+  },
 });
 
 const styles = StyleSheet.create({
@@ -1216,3 +1580,23 @@ const styles = StyleSheet.create({
   /** 두 컴포저 사이. 붙여 두면 위아래 테두리가 한 줄로 읽힌다. */
   gap: {height: 24},
 });
+
+// 위 독스트링의 이유로 렌더 밖에서 한 번. **파일 맨 아래**인 것은 `harnessClient`
+// 가 `const` 라 그 선언보다 먼저 부르면 TDZ 로 터지기 때문이고(실측: 첫 시도가
+// "Cannot read property 'setQueryData' of undefined" 로 찍혔다), 다른 표면들은 이
+// 스토어도 이 키들도 읽지 않으므로 값이 앉아 있어도 자기 사진에 나타나지 않는다.
+//
+// `ade-summary-empty` 만 빼는 이유는 그 장이 보여야 하는 것이 **아무것도 없을 때**
+// 이기 때문이다. 스토어도 캐시도 모듈 상태라 표면마다 다른 값을 줄 방법은 「어느
+// 표면으로 띄웠는가」를 렌더보다 먼저 읽는 것 하나뿐이고, 그 답은 루트가 이미
+// 파싱하는 그 실행 인자에 있다.
+const LAUNCHED = measureMode();
+if (
+  !(
+    LAUNCHED !== null &&
+    LAUNCHED.kind === 'surface' &&
+    LAUNCHED.name === 'ade-summary-empty'
+  )
+) {
+  seedAdeControl();
+}

@@ -119,11 +119,29 @@ export function useAllowedAgentModels(workspaceId: string, agentMemberId: string
  * tell an agent that has never worked apart from one that finished an hour ago.
  * The server already scopes rows to the caller's channels and caps them at 200.
  */
-export function useWorkSessions(workspaceId: string, enabled = true) {
+export function useWorkSessions(
+  workspaceId: string,
+  enabled = true,
+  /**
+   * 이 관측자가 요구하는 신선도 상한, ms (이슈 1137).
+   *
+   * 목록 화면(에이전트 탭·에이전트 상세)은 열릴 때 읽으면 충분하므로 아무것도
+   * 주지 않는다. ADE 요약 줄은 대화가 열려 있는 내내 「지금 몇 개가 돌고 있나」에
+   * 답해야 하므로 간격을 준다 — 근거는 `features/ade/useAdeControl.ts` 의
+   * `ADE_SESSION_POLL_MS`.
+   *
+   * react-query 는 한 키의 여러 관측자 중 **가장 짧은** 간격을 쓴다. 그래서 이
+   * 인자를 주는 관측자가 하나라도 있으면 요청은 여전히 한 벌이고 신선도만 오른다.
+   */
+  refetchIntervalMs?: number,
+) {
   return useQuery({
     queryKey: agentKeys.workSessions(workspaceId),
     queryFn: () => fetchWorkSessions(workspaceId),
     enabled,
+    ...(refetchIntervalMs === undefined
+      ? {}
+      : {refetchInterval: refetchIntervalMs}),
   });
 }
 

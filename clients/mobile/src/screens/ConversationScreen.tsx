@@ -29,11 +29,14 @@ import {
 } from 'react-native';
 import {NoticeBlock, Screen, ScreenHeader} from '../design/atoms';
 import {color, font, SAFE_GUTTER, space} from '../design/tokens';
+import {AdeControlPanel} from '../features/ade/AdeControlPanel';
+import {AdeSummaryLine} from '../features/ade/AdeSummaryLine';
 import {StopTurnControl} from '../features/agents/StopTurnControl';
 import {AgentActivityBar} from '../features/agents/turnSurfaces';
 import {
   agentTurnsInChannel,
   hasChannelTurn,
+  TURN_STALENESS_GRID_MS,
   useAgentWorkingSignals,
   useTickingNow,
 } from '../features/agents/workingSignal';
@@ -128,16 +131,6 @@ function railSubtitle(status: RealtimeStatus): string | undefined {
 }
 
 /**
- * 만료(90초 TTL) 판정에 쓰는 시계의 격자, ms (goal RN-P2a).
- *
- * 화면의 경과 숫자는 1초마다 바뀌어야 하지만 **어떤 턴이 살아 있는가**는 그렇지
- * 않다. 그 판정에 1Hz 시계를 그대로 먹이면 파생되는 배열이 매초 새 동일성을 얻고,
- * 그 아래의 모든 `useMemo` 가 무효가 된다. 5초는 90초 TTL 대비 5.5% 의 지연이고,
- * 스토어의 zombie sweep 이 15초마다 도는 것보다 여전히 촘촘하다.
- */
-const TURN_STALENESS_GRID_MS = 5_000;
-
-/**
  * 읽음 커서를 몰아 보내는 지연, ms (goal RN-P2a).
  *
  * 사람이 알아채지 못할 만큼 짧고(채널을 열고 배지가 사라지기까지), 한 턴 동안
@@ -150,6 +143,7 @@ export default function ConversationScreen({
   title,
   anchor,
   onBack,
+  onOpenConversation,
 }: {
   channelId: string;
   title: string;
@@ -165,6 +159,15 @@ export default function ConversationScreen({
    */
   anchor?: {messageId: string; seq: number};
   onBack: () => void;
+  /**
+   * 다른 방을 연다 (이슈 1137).
+   *
+   * 이 화면이 이 프롭을 갖게 된 이유는 하나다: ADE 관제 목록의 카드가 **자기
+   * 채널로 확대**되고, 그 목록은 워크스페이스 전역이라 도착지가 지금 열려 있는
+   * 방이 아닐 수 있다. 셸의 `openConversation` 은 열려 있던 대화를 대체하므로
+   * 뒤로가기는 여전히 한 겹이다(`navReducer`).
+   */
+  onOpenConversation?: (channelId: string, title: string) => void;
 }): React.JSX.Element {
   const {member, workspaceId} = useSession();
   const {rail, status: railStatus} = useRealtime();
@@ -483,6 +486,20 @@ export default function ConversationScreen({
   const [thread, setThread] = useState<Message | null>(null);
   const hint = useLongPressHint();
 
+  // ---- ADE 관제 (이슈 1137, ADR-0154 D2) ------------------------------------
+  //
+  // 요약 줄은 헤더 아래에, 목록은 이 화면을 덮는 층에. 자리와 형식의 근거는 각
+  // 컴포넌트의 머리말에 있다.
+  //
+  // 채널이 바뀌면 닫는다. 이 화면은 `channelId` 프롭만 갈아 끼우고 언마운트되지
+  // 않으므로(셸이 위치로 렌더한다), 카드를 눌러 다른 방으로 간 다음 목록이 그대로
+  // 떠 있으면 사람은 자기가 이동했다는 사실을 못 본다. 이 화면의 다른 per-channel
+  // 초기화들(`quote`·`jumpTarget`·`stopOutcome`)과 같은 자리, 같은 이유다.
+  const [adeOpen, setAdeOpen] = useState(false);
+  useEffect(() => setAdeOpen(false), [channelId]);
+  const closeAde = useCallback(() => setAdeOpen(false), []);
+  const openAde = useCallback(() => setAdeOpen(true), []);
+
   // ---- 걸어 둔 인용 (ADR-0148) ----------------------------------------------
   //
   // `thread` 와 같은 자리에 산다: 둘 다 「이 표면이 지금 무엇을 가리키고 있나」이고,
@@ -741,6 +758,10 @@ export default function ConversationScreen({
         onBack={onBack}
         titleTestID="conversation-title"
       />
+      {/* 워크스페이스 전역 집계 한 줄. 살아 있는 작업이 없으면 **아무것도 그리지
+          않는다** — 빈 띠도 남기지 않는 것이 이 줄의 계약이고, 그래서 이 자리는
+          컴포저 액세서리 스택이 아니다(`AdeSummaryLine` 머리말의 세 근거). */}
+      <AdeSummaryLine onPress={openAde} />
       <ConversationLayout
         list={
           <>
@@ -892,6 +913,18 @@ export default function ConversationScreen({
           onClose={closeThread}
           onReplySent={bumpSelfSend}
         />
+      ) : null}
+
+      {/* 스레드보다 **뒤에** 선다. 둘이 동시에 열릴 수 있는 경로는 없지만(스레드가
+          열려 있으면 요약 줄은 그 밑에 있다) DOM 순서가 곧 층이므로, 나중에 어느
+          쪽이 위인지 묻게 되는 날 답은 「방금 연 것」이어야 한다.
+
+          `onOpenConversation` 이 없으면 목록을 아예 세우지 않는다. 확대할 곳이
+          없는 카드 목록은 훑을 수만 있는 목록이고, 그것은 이 층이 존재하는 이유가
+          아니다 — 셸이 아닌 곳에서 이 화면을 쓰는 호출자(측정 하네스)에게 목록만
+          떠 있는 상태를 만들어 주지 않는다. */}
+      {adeOpen && onOpenConversation ? (
+        <AdeControlPanel onClose={closeAde} onOpenChannel={onOpenConversation} />
       ) : null}
     </Screen>
   );

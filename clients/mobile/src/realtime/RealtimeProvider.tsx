@@ -69,7 +69,18 @@ export interface RealtimeContextValue {
   subscriptionsWanted: boolean;
 }
 
-const RealtimeContext = createContext<RealtimeContextValue>({
+/**
+ * 내보내는 이유는 **캡처 하네스** 하나다 (이슈 1137).
+ *
+ * 소켓 상태를 읽는 표면은 끊긴 판과 연결된 판이 서로 다르게 생겼고, 그 차이는
+ * 나란히 놓인 사진에서만 확인된다(`measure/surfaces.tsx` 가 여백·접기·틴트·잠긴
+ * 픽커에서 이미 네 번 쓴 규율). 시뮬레이터에는 붙일 소켓이 없어 하네스는
+ * 「연결됨」을 만들 방법이 없었다 — `RealtimeProvider` 를 세워도 주소가 없으면
+ * `connecting` 에 머문다.
+ *
+ * 앱 코드는 이것을 쓰지 않는다. 앱에서 읽는 길은 `useRealtime()` 하나다.
+ */
+export const RealtimeContext = createContext<RealtimeContextValue>({
   rail: null,
   status: 'connecting',
   subscriptionsWanted: false,
