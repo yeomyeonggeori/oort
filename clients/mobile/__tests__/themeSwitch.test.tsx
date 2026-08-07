@@ -168,6 +168,26 @@ describe('스킴 왕복 — 세 값이 화면 끝까지 간다', () => {
     expect(selected.backgroundColor).toBe(lightPalette.accentSurface);
   });
 
+  it('「시스템」 칸이 지금 무엇으로 풀리는지 보조기술에게 말한다', () => {
+    // 웹 설정의 설명 줄과 같은 문장이다. 폰은 발치에 줄을 하나 더 쓰지 않으므로,
+    // 그 정보를 힌트로 옮긴다 — 옮긴 것이지 버린 것이 아니다.
+    act(() => setSystemColorScheme('light'));
+    render(
+      <ThemeProvider>
+        <ThemeControl />
+      </ThemeProvider>,
+    );
+    expect(screen.getByTestId('theme-system').props.accessibilityHint).toContain(
+      '라이트',
+    );
+    fireEvent.press(screen.getByTestId('theme-dark'));
+    expect(screen.getByTestId('theme-system').props.accessibilityHint).toContain(
+      '다크',
+    );
+    // 라벨이 곧 답인 두 칸은 힌트가 없다.
+    expect(screen.getByTestId('theme-light').props.accessibilityHint).toBeUndefined();
+  });
+
   it('고른 칸만 selected 다 — 셋 중 하나', () => {
     render(
       <ThemeProvider>

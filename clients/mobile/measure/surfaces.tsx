@@ -35,6 +35,7 @@ import {RealtimeContext} from '../src/realtime/RealtimeProvider';
 import {ConversationLayout} from '../src/features/conversation/ConversationLayout';
 import {Timeline} from '../src/features/conversation/Timeline';
 import {Screen, ScreenHeader} from '../src/design/atoms';
+import {ThemeControl} from '../src/design/ThemeControl';
 import {parseExecutionPlan} from '@momo/core/lib/executionPlan';
 import {measureMode} from './root';
 import type {AgentWorkingSignal} from '@momo/core/features/agents/workingSignal';
@@ -103,6 +104,21 @@ import {FixedScheme, useStyles, type ColorScheme} from '../src/design/theme';
 //                     **고를 것이 하나도 없는** 카드. 같은 규율의 네 번째 적용이다:
 //                     「자격 없는 줄이 사유와 함께 선다」는 자격 있는 줄 옆에서만,
 //                     「승인이 꺼졌다」는 켜진 승인 옆에서만 사진에서 확인된다.
+//
+// ## U2 가 더한 것 — 표면이 아니라 **축** 하나
+//
+//   THEME             스킴 세 칸과, 그 선택을 받는 진짜 타임라인 행. 컨트롤만
+//                     찍으면 이 배치가 한 일의 절반만 남는다 — 논점은 「고른
+//                     스킴이 화면 끝까지 가는가」이고, 위는 종이인데 아래 행만
+//                     밤하늘인 사진이 곧 그 실패다.
+//
+// 그리고 이 배치부터 **모든 표면이 두 번 찍힐 수 있다.** 이름 앞에 `light-` 를
+// 붙이면 같은 장이 라이트로 나온다(`measure/root.ts` 가 그 접두사를 스킴으로
+// 읽는다). 인자를 하나 더 늘리지 않은 이유는 표면 목록이 계속 자라기 때문이고,
+// 스킴을 **못 박는** 이유는 시뮬레이터의 시스템 설정을 따라가면 같은 명령이 기기
+// 상태에 따라 다른 색을 찍기 때문이다 — 그 사진은 증거가 아니라 일화가 된다.
+//
+//     xcrun simctl launch booted app.momo.ios --args -momoMeasure LIGHT-THEME
 //
 // 같은 규율의 세 번째 적용이다. 「왼쪽 칸이 같다」는 연속 행이 함께 있어야,
 // 「영수증이 격상됐다」는 안내 문장이 함께 있어야, 「버튼이 꺼졌다」는 켜진 버튼이
@@ -970,6 +986,21 @@ export function Surface({name}: {name: string}): React.JSX.Element {
     case 'row':
       return (
         <Frame label="행 — 반응 칩과 스레드 앵커는 항상 보이는 진입점">
+          <Row />
+        </Frame>
+      );
+    // ---- U2: 스킴을 고르는 세 칸, 그리고 그 옆의 진짜 행 ----------------------
+    //
+    // 컨트롤만 찍으면 이 배치가 한 일의 **절반**만 사진에 남는다. 논점은 「세 칸이
+    // 예쁜가」가 아니라 「고른 스킴이 화면 끝까지 가는가」이고, 그 주장은 컨트롤과
+    // 타임라인 행이 **같은 장에** 있을 때만 사진에서 확인된다 — 라이트 판에서 위는
+    // 종이인데 아래 행만 밤하늘이면 그것이 곧 이 배치의 실패다.
+    //
+    // `light-theme` 로 띄우면 같은 장이 라이트로 나온다(`measure/root.ts`).
+    case 'theme':
+      return (
+        <Frame label="테마 — 세 칸과, 그 선택을 받는 행 (U2)">
+          <ThemeControl />
           <Row />
         </Frame>
       );

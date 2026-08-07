@@ -23,8 +23,14 @@ import {font, radius, SAFE_GUTTER, space, TOUCH_TARGET, type Palette} from './to
 //
 // 토글(라이트↔다크)로 만들면 「시스템을 따른다」를 표현할 방법이 사라진다. 그것이
 // 기본값이자 대부분의 사람이 원하는 상태이므로, 토글은 첫 탭에서 그 상태를 **잃게**
-// 만든다 — 되돌릴 방법도 없다(앱 삭제 말고는). 웹 설정도 같은 이유로 세 값이고,
-// 두 클라가 같은 것을 다르게 부르지 않도록 낱말도 같다(시스템 · 라이트 · 다크).
+// 만든다 — 되돌릴 방법도 없다(앱 삭제 말고는).
+//
+// 웹 설정(`clients/web/src/features/settings/AppearanceSection.tsx`)도 같은 이유로
+// 세 값이고, 값 이름(system/light/dark)과 기본값이 두 클라에서 같다. 화면에 보이는
+// 낱말 하나만 다르다: 웹은 자기 줄과 설명 줄을 가진 목록이라 「시스템 설정 따르기」로
+// 풀어 쓰고, 여기는 세 칸이 한 줄을 나눠 갖는 세그먼트라 「시스템」이다. 그 칸이
+// **지금** 무엇을 뜻하는지는 힌트가 답한다 — 웹이 설명 줄에 적는 그 문장이고, 폰은
+// 발치에 줄을 하나 더 쓰는 대신 보조기술에게 말한다.
 //
 // ## 라디오지 탭이 아니다
 //
@@ -35,7 +41,7 @@ import {font, radius, SAFE_GUTTER, space, TOUCH_TARGET, type Palette} from './to
 
 export function ThemeControl(): React.JSX.Element {
   const styles = useStyles(buildStyles);
-  const {choice, setChoice} = useTheme();
+  const {choice, scheme, setChoice} = useTheme();
   return (
     <View style={styles.wrap} testID="theme-control">
       <Text style={styles.label}>테마</Text>
@@ -49,6 +55,14 @@ export function ThemeControl(): React.JSX.Element {
             value={value}
             selected={value === choice}
             onSelect={setChoice}
+            // 「시스템」이 지금 무엇으로 풀리는지. 다른 두 칸은 라벨이 곧 답이라
+            // 힌트가 없다 — 아는 것을 두 번 말하면 보조기술 사용자가 매번 그것을
+            // 듣는다.
+            hint={
+              value === 'system'
+                ? `지금 이 기기의 시스템은 ${scheme === 'dark' ? '다크' : '라이트'}입니다.`
+                : undefined
+            }
           />
         ))}
       </View>
@@ -60,10 +74,12 @@ function Segment({
   value,
   selected,
   onSelect,
+  hint,
 }: {
   value: ThemeChoice;
   selected: boolean;
   onSelect: (choice: ThemeChoice) => void;
+  hint?: string;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   return (
@@ -71,6 +87,7 @@ function Segment({
       accessibilityRole="radio"
       accessibilityState={{selected}}
       accessibilityLabel={themeChoiceLabel(value)}
+      accessibilityHint={hint}
       onPress={() => onSelect(value)}
       style={({pressed}) => [
         styles.segment,
