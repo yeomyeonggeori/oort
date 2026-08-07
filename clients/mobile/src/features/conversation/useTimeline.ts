@@ -47,6 +47,8 @@ import {
   type ReactionChange,
   type ReactionMap,
 } from '@momo/core/features/timeline/reactions';
+import {endedStreamRunIds} from '@momo/core/features/timeline/streamStop';
+import {seedEndedRuns} from '../agents/endedRuns';
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import type {ChannelRail} from '../../realtime/channelRail';
 
@@ -225,6 +227,12 @@ export function useTimeline(
         newestSeqRef.current = message.seq;
       }
     }
+    // #1166 — 종결 기록의 씨앗을 **머지 자리에서** 심는다. 페이지를 긷는 곳은
+    // 넷(첫 화면·위로 더 읽기·재연결 백필·스레드 답글)이고, 그 넷이 전부 이 문을
+    // 지난다. 호출부마다 심게 두면 언젠가 한 곳이 빠지고, 그 한 곳으로 들어온
+    // 반쪽 답만 조용히 완결 행세를 한다. 실시간으로 온 행은 `runEnded` 를 달고
+    // 오지 않으므로 여기서 아무것도 내놓지 않는다.
+    seedEndedRuns(endedStreamRunIds(batch));
     setState(s => reconcileMessages(s, batch));
   }, []);
 

@@ -340,6 +340,50 @@ pub async fn load_agent_run_in_tx(
         .map_err(DbError::from)
 }
 
+/// Which of these runs have **ended** — the durable half of ADR-0155's
+/// defensive render (#1166).
+///
+/// One statement for a whole page, because the caller's question is about a
+/// page: a per-message `load_agent_run_in_tx` would put an N+1 inside the read
+/// transaction of the busiest route in the product.
+///
+/// **Only terminal ids come back, and an unknown id simply is not in the set.**
+/// A run this workspace cannot see (RLS), a run id a client invented in its own
+/// props, and a run still queued are the same answer here — *not ended* — which
+/// is the only answer that keeps "absence ≠ ended" true on the wire the way
+/// `endedRuns.ts` keeps it true in a session. [`RunStatus::is_terminal`] decides,
+/// so this route and the cancel path can never disagree about what "ended"
+/// means.
+pub async fn terminal_run_ids_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    run_ids: &[Uuid],
+) -> Result<std::collections::HashSet<Uuid>, DbError> {
+    if run_ids.is_empty() {
+        return Ok(std::collections::HashSet::new());
+    }
+    let rows = sqlx::query(
+        "SELECT id, status::text AS status FROM agent_run \
+          WHERE workspace_id = $1 AND id = ANY($2)",
+    )
+    .bind(workspace_id)
+    .bind(run_ids)
+    .fetch_all(&mut *conn)
+    .await?;
+    let mut ended = std::collections::HashSet::new();
+    for row in &rows {
+        let id: Uuid = row.try_get("id").map_err(DbError::from)?;
+        let status: String = row.try_get("status").map_err(DbError::from)?;
+        // An unparseable label is a status this build does not know; treating it
+        // as non-terminal keeps a future enum value from being announced as an
+        // ending by a server that has never heard of it.
+        if RunStatus::from_db_label(&status).is_some_and(RunStatus::is_terminal) {
+            ended.insert(id);
+        }
+    }
+    Ok(ended)
+}
+
 /// Load a run by its trigger's idempotency key.
 pub async fn find_agent_run_by_trigger_in_tx(
     conn: &mut PgConnection,

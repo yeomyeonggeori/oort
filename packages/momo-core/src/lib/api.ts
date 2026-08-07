@@ -241,6 +241,20 @@ export interface Message {
     last_reply_seq: number;
     last_reply_at: number;
   };
+  /**
+   * #1166 — 이 반쪽 답을 쓴 run 이 **끝났다**고 서버가 말한 것.
+   *
+   * 페이지 읽기(히스토리·답글)에만, 그리고 `true` 일 때만 실린다. 없다는 것은
+   * 세 가지 침묵을 한꺼번에 뜻하므로(스트리밍한 적 없음 · 이미 닫혀서
+   * 자기서술적임 · run 이 아직 안 끝남) **없음을 종결로 읽으면 안 된다** —
+   * `endedRuns.ts` 가 서 있는 바로 그 규칙이다.
+   *
+   * 이 값은 화면에 직접 쓰이지 않는다. `features/timeline/streamStop.ts`
+   * (`endedStreamRunIds`)가 여기서 run id 를 거두어 호스트의 종결 기록에
+   * 심고, 꼬리 판정은 예전처럼 그 기록 하나에 대고 묻는다. 그래야 같은 run 이
+   * 쓴 다른 행 — 실시간으로 뒤늦게 도착한 행까지 — 이 같은 답을 받는다.
+   */
+  runEnded?: boolean;
 }
 
 function isMessage(value: unknown): value is Message {

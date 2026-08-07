@@ -633,6 +633,46 @@ impl StreamOutcome {
     }
 }
 
+/// The run behind a message whose stream is **still open**, `None` otherwise
+/// (#1166).
+///
+/// Mirrors the client's `streamRunId` + `marker.streaming` narrowing
+/// (`packages/momo-core/src/features/timeline/streamStop.ts`) on purpose: a page
+/// read answers "did this run end?" for exactly the rows whose answer can change
+/// what a reader sees, and a server that keyed the question differently from the
+/// client that asks it would ship an answer nobody could use.
+///
+/// ## Why props and not the `run_id` column
+///
+/// The column is set by the in-process producer (`MessageStream::open`) and is
+/// **never serialized on the wire** — `stream.rs` says so where it merges the id
+/// into props for this very reason. An out-of-process adapter (prime, hermes)
+/// streams over REST, where `POST …/messages` refuses a `runId` field outright,
+/// so for those turns props is not merely the readable copy but the only one.
+/// Keying on the column would answer for in-process turns and stay silent for
+/// exactly the adapters #1152 was built for.
+///
+/// ## Why `streaming: true` only
+///
+/// A closed stream is already self-describing — it carries `outcome` or it
+/// simply finished — so its run's state changes nothing on screen. Narrowing
+/// here keeps the extra read proportional to the half-written rows on the page
+/// (usually none) and keeps a client-writable `run_id` prop from turning a page
+/// read into a run-status oracle for rows that have no business asking.
+pub fn open_stream_run_id(props: &Value) -> Option<Uuid> {
+    let stream = props.get(STREAM_PROPS_KEY)?;
+    // `rev` is what proves a stream marker rather than a lookalike object, the
+    // same test `streamMarker` makes client-side.
+    stream.get("rev").and_then(Value::as_i64)?;
+    if stream.get("streaming") != Some(&Value::Bool(true)) {
+        return None;
+    }
+    props
+        .get("run_id")
+        .and_then(Value::as_str)
+        .and_then(|raw| Uuid::parse_str(raw).ok())
+}
+
 /// The revision already stored on a message, `0` when it has never streamed.
 fn stored_stream_rev(props: &Value) -> i64 {
     props
@@ -1620,6 +1660,56 @@ mod tests {
         assert_eq!(
             stored_stream_rev(&json!({ STREAM_PROPS_KEY: { "rev": 17, "streaming": false } })),
             17
+        );
+    }
+
+    /// #1166 — the page read's question, asked of props exactly as the client
+    /// asks it.
+    ///
+    /// The three refusals are the three ways this could quietly over-answer:
+    /// a row that never streamed, a row whose stream is already closed (its
+    /// `outcome` is the answer, and asking the run again could contradict it),
+    /// and a `run_id` that is not a run id at all.
+    #[test]
+    fn only_a_still_open_stream_names_a_run_to_ask_about() {
+        let run = Uuid::from_u128(0x5150);
+        let open = json!({
+            STREAM_PROPS_KEY: { "rev": 9, "streaming": true },
+            "run_id": run.to_string(),
+        });
+        assert_eq!(open_stream_run_id(&open), Some(run));
+
+        assert_eq!(
+            open_stream_run_id(&json!({ "run_id": run.to_string() })),
+            None,
+            "a turn record carries a run id and never streamed"
+        );
+        assert_eq!(
+            open_stream_run_id(&json!({
+                STREAM_PROPS_KEY: { "rev": 9, "streaming": false, "outcome": "cancelled" },
+                "run_id": run.to_string(),
+            })),
+            None,
+            "a closed stream already says how it ended"
+        );
+        assert_eq!(
+            open_stream_run_id(&json!({
+                STREAM_PROPS_KEY: { "streaming": true },
+                "run_id": run.to_string(),
+            })),
+            None,
+            "no rev is no marker — the same test `streamMarker` makes"
+        );
+        assert_eq!(
+            open_stream_run_id(&json!({
+                STREAM_PROPS_KEY: { "rev": 9, "streaming": true },
+                "run_id": "not-a-uuid",
+            })),
+            None
+        );
+        assert_eq!(
+            open_stream_run_id(&json!({ STREAM_PROPS_KEY: { "rev": 9, "streaming": true } })),
+            None
         );
     }
 

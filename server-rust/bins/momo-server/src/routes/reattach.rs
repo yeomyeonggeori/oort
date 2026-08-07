@@ -117,6 +117,9 @@ fn event_dto(event: SessionEvent, channel_id: Uuid, root_message_id: Uuid) -> Me
         // A replayed row is a reply inside the session thread, and a reply
         // carries no rollup of its own — momo threads are one level deep.
         thread: None,
+        // #1166 — a session event never streamed and names no run, so there is
+        // no half-written answer here for a run's ending to explain.
+        run_ended: false,
     }
 }
 

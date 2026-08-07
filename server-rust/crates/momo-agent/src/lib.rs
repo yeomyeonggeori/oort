@@ -195,8 +195,9 @@ pub use run::{
     is_active_human_channel_member_in_tx, linked_work_session_ids_in_tx, live_run_count_in_tx,
     load_agent_run_in_tx, load_eligible_agent_in_tx, lock_gateway_run_in_tx,
     lock_run_for_cancel_in_tx, mark_run_started_in_tx, park_run_for_approval_in_tx,
-    requeue_run_from_approval_in_tx, AgentRunRow, CancellableRun, CompletionStatusError,
-    CreatedRun, EligibleAgent, GatewayRunSnapshot, NewAgentRun, RunStatus, RunTrigger,
+    requeue_run_from_approval_in_tx, terminal_run_ids_in_tx, AgentRunRow, CancellableRun,
+    CompletionStatusError, CreatedRun, EligibleAgent, GatewayRunSnapshot, NewAgentRun, RunStatus,
+    RunTrigger,
 };
 pub use status::{
     agent_partial_payload, agent_partial_tool_call_payload, agent_status_channel,

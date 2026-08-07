@@ -49,17 +49,14 @@ function emit() {
 }
 
 /**
- * 터미널 프레임을 본다. 터미널이 아니거나 이미 아는 run 이면 아무 일도 없다
- * (같은 집합을 그대로 두므로 구독자도 깨우지 않는다).
+ * 종결을 기록한다 — 새로 아는 것이 하나도 없으면 집합을 그대로 두므로 구독자도
+ * 깨우지 않는다. 두 입구(실시간 프레임 · 페이지 읽기)가 이 한 문을 쓴다.
  */
-export function observeAgentProgress(event: AgentProgressEvent): void {
-  if (!isTerminalProgressFrame(event)) return;
-  const runId = event.payload.run_id;
-  if (typeof runId !== "string" || runId === "") return;
-  const key = runId.toLowerCase();
-  if (ended.has(key)) return;
+function remember(keys: readonly string[]): void {
+  const fresh = keys.filter((key) => key !== "" && !ended.has(key));
+  if (fresh.length === 0) return;
   const next = new Set(ended);
-  next.add(key);
+  for (const key of fresh) next.add(key);
   while (next.size > MAX_REMEMBERED) {
     const oldest = next.values().next();
     if (oldest.done) break;
@@ -67,6 +64,38 @@ export function observeAgentProgress(event: AgentProgressEvent): void {
   }
   ended = next;
   emit();
+}
+
+/**
+ * 터미널 프레임을 본다. 터미널이 아니거나 이미 아는 run 이면 아무 일도 없다.
+ */
+export function observeAgentProgress(event: AgentProgressEvent): void {
+  if (!isTerminalProgressFrame(event)) return;
+  const runId = event.payload.run_id;
+  if (typeof runId !== "string" || runId === "") return;
+  remember([runId.toLowerCase()]);
+}
+
+/**
+ * 페이지 읽기가 들고 온 종결 (#1166 — `Message.runEnded`).
+ *
+ * ## 왜 이것이 「본 것만 적는다」를 깨지 않는가
+ *
+ * 위 헤더의 규칙은 「없음을 종결로 읽지 말라」이지 「프레임만 믿으라」가 아니다.
+ * 서버는 durable 한 job status 를 읽고 답하므로 — ADR-0155 가 진실이라고 부른
+ * 그것 — 여기 들어오는 id 는 프레임 못지않게 본 것이다. 오히려 프레임보다
+ * 오래간다: 새로고침한 탭이 알 수 있는 유일한 경로다.
+ *
+ * 서버는 `false` 를 보내지 않고 침묵하므로(openapi `Message.runEnded`) 이
+ * 함수에 도착하는 것은 항상 종결뿐이다. 「모른다」는 여기까지 오지 않는다.
+ *
+ * 열쇠는 코어(`endedStreamRunIds` → `streamRunId`)가 이미 소문자로 접어서
+ * 넘긴다. 여기서 다시 접지 않는 것은 접는 자리가 둘이 되면 언젠가 한쪽만
+ * 바뀌기 때문이다.
+ */
+export function seedEndedRuns(runIds: readonly string[]): void {
+  if (runIds.length === 0) return;
+  remember(runIds);
 }
 
 /** 세션이 바뀌면 아무것도 물려받지 않는다 — 다른 워크스페이스의 run id 다. */

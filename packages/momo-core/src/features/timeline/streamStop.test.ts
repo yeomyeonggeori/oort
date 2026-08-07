@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import type { Message } from "../../lib/api";
 import { TURN_STATUS_LABEL } from "./agentCardModel";
 import {
+  endedStreamRunIds,
+  isStreamRunEnded,
   STREAM_CANCELLED_MARK,
   STREAM_CUT_OFF_MARK,
   STREAM_PROPS_KEY,
@@ -127,5 +129,71 @@ describe("streamStopMark", () => {
    */
   it("취소를 부르는 낱말은 턴 칩과 같다", () => {
     expect(STREAM_CANCELLED_MARK).toBe(TURN_STATUS_LABEL.cancelled);
+  });
+});
+
+describe("endedStreamRunIds", () => {
+  function streamedByRun(
+    runId: unknown,
+    marker: Record<string, unknown>,
+    runEnded?: boolean,
+  ): Message {
+    return {
+      ...message({ [STREAM_PROPS_KEY]: marker, run_id: runId }),
+      ...(runEnded === undefined ? {} : { runEnded }),
+    };
+  }
+
+  it("서버가 끝났다고 말한 run 만 거둔다", () => {
+    const ids = endedStreamRunIds([
+      streamedByRun("RUN-A", { rev: 9, streaming: true }, true),
+      streamedByRun("run-b", { rev: 4, streaming: true }),
+      message(),
+    ]);
+    expect(ids).toEqual(["run-a"]);
+  });
+
+  /**
+   * **RED proof — 「없음」은 종결이 아니다.**
+   *
+   * 서버는 종결일 때만 `runEnded` 를 싣고 `false` 는 아예 보내지 않는다. 이
+   * 단정을 뒤집어(= 키 없음을 종결로 읽어) 구현하면, 지금 도착 중인 답 전부에
+   * 「응답이 끊김」이 붙는다 — 우리가 막으려는 거짓말의 거울상이다.
+   */
+  it("runEnded 가 없거나 false 면 아무것도 내놓지 않는다", () => {
+    expect(
+      endedStreamRunIds([
+        streamedByRun("run-live", { rev: 2, streaming: true }),
+        streamedByRun("run-false", { rev: 2, streaming: true }, false),
+      ]),
+    ).toEqual([]);
+  });
+
+  /**
+   * 열쇠 규칙은 한 자리에만 있다. 여기서 거둔 글자가 `isStreamRunEnded` 가
+   * 나중에 묻는 글자와 어긋나면 판정은 **조용히** 항상 거짓이 된다 —
+   * `streamRunId` 가 소문자로 접는 것을 여기서도 그대로 쓰는 이유다.
+   */
+  it("거둔 열쇠로 그 자리에서 판정이 성립한다", () => {
+    const orphan = streamedByRun("RuN-MiXeD", { rev: 9, streaming: true }, true);
+    const seeded = new Set(endedStreamRunIds([orphan]));
+    expect(isStreamRunEnded(orphan, seeded)).toBe(true);
+    expect(streamStopMark(orphan, isStreamRunEnded(orphan, seeded))).toBe(
+      STREAM_CUT_OFF_MARK,
+    );
+  });
+
+  /**
+   * 스트리밍한 적 없는 행은 `run_id` 를 들고 있어도(에이전트가 쓴 모든 행이
+   * 그렇다) 이 집합에 들어오지 않는다. `streamRunId` 의 좁힘이 여기서 값을
+   * 한다 — 턴 기록 한 줄이 종결을 심으면 같은 run 이 쓴 **도착 중인** 답까지
+   * 끊긴 것으로 그려진다.
+   */
+  it("도장 없는 행은 run_id 가 있어도 세지 않는다", () => {
+    const turnRecord: Message = {
+      ...message({ run_id: "run-x" }),
+      runEnded: true,
+    };
+    expect(endedStreamRunIds([turnRecord])).toEqual([]);
   });
 });
