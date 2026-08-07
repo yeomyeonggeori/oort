@@ -2,10 +2,12 @@ import type {Member} from '@momo/core/lib/api';
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
 import {cleanup, fireEvent, render, screen, waitFor} from '@testing-library/react-native';
 import React from 'react';
+import {StyleSheet} from 'react-native';
 
 import '../src/boot/polyfills';
 import '../src/boot/coreHost';
 
+import {darkPalette, lightPalette} from '../src/design/tokens';
 import AppShell from '../src/shell/AppShell';
 import {
   __resetSessionStore,
@@ -588,5 +590,34 @@ describe('signing out', () => {
     // The local wipe is synchronous and unconditional — it does not wait for the
     // server to acknowledge the revocation.
     expect(getPersistedSession()).toBeNull();
+  });
+
+  it('그 버튼의 테두리가 바로 아래 이웃과 같은 값이다 (#1155 관찰)', async () => {
+    // 발치의 두 줄은 한 판(`footerStack`)이고 같은 바탕(`bg`) 위에 선다. 위 줄의
+    // 「로그아웃」과 아래 줄의 스킴 세 칸은 **같은 종류의 컨트롤**이다 — 채움도 글자
+    // 강조도 없고, 테두리 하나가 「여기가 버튼이다」를 말하는 전부다.
+    //
+    // 아래 줄은 리뷰 M-1 에서 `border`(바탕 위 3:1 **아래**)를 떠나 `textFaint`
+    // (`--line-strong` 자리, 3:1 위)로 옮겼고, 위 줄만 그대로 남아 한 판 안에서
+    // 선명한 테두리 위에 흐린 테두리가 얹혔다. 이 단정이 재는 것은 값이 아니라
+    // **둘이 같다** 이고 — 어느 쪽이 다시 움직여도 함께 움직이라는 뜻이다. 3:1
+    // 바닥선 자체는 `paletteContrast.test.ts` 가 두 스킴에서 이미 진다.
+    installFetch();
+    renderShell();
+    await waitFor(() => expect(screen.getByTestId('sidebar-list')).toBeTruthy());
+
+    const borderOf = (testID: string) =>
+      (StyleSheet.flatten(screen.getByTestId(testID).props.style) ?? {})
+        .borderColor;
+
+    // 「시스템」이 기본 선택이므로 「라이트」 칸은 **안 고른** 칸이다 — 고른 칸을
+    // 읽으면 accent 가 나와 이 대조가 무의미해진다.
+    expect(borderOf('sign-out')).toBe(borderOf('theme-light'));
+    expect([darkPalette.textFaint, lightPalette.textFaint]).toContain(
+      borderOf('sign-out'),
+    );
+    expect([darkPalette.border, lightPalette.border]).not.toContain(
+      borderOf('sign-out'),
+    );
   });
 });
