@@ -321,6 +321,31 @@ describe('한 벌짜리 색이 다시 새어 들어오지 못한다', () => {
   });
 });
 
+describe('구독은 앱 전체에 하나다', () => {
+  it('색을 읽는 컴포넌트가 20 개여도 Appearance 구독은 프로바이더의 것 하나뿐', () => {
+    // 색을 읽는 자리마다 `useColorScheme()` 을 불렀다면 여기서 21 이 나온다. RN 의
+    // `EventEmitter` 는 제거가 O(n) 이라 그 숫자가 가상화 목록의 스크롤 프레임
+    // 안에 앉는다 — 성능처럼 생겼지만 프레임을 떨어뜨리면 정확성 문제다.
+    const listeners = (global as unknown as {
+      __momoColorScheme: {listeners: Set<unknown>};
+    }).__momoColorScheme.listeners;
+    const before = listeners.size;
+    function Probe(): React.JSX.Element {
+      const styles = useStyles(build);
+      return <Text style={styles.ink}>재료</Text>;
+    }
+    const build = (color: Palette) => ({ink: {color: color.text}});
+    render(
+      <ThemeProvider>
+        {Array.from({length: 20}, (_, i) => (
+          <Probe key={i} />
+        ))}
+      </ThemeProvider>,
+    );
+    expect(listeners.size - before).toBe(1);
+  });
+});
+
 describe('useStyles 는 (팩토리 × 스킴) 당 한 벌만 만든다', () => {
   it('행이 200 개여도 스타일시트는 한 벌이다', () => {
     // 캐시가 컴포넌트에 붙어 있었다면(`useMemo`) 행마다 한 벌씩 생긴다. 캐시가

@@ -1,5 +1,5 @@
 import React, {createContext, useCallback, useContext, useMemo, useState} from 'react';
-import {useColorScheme} from 'react-native';
+import {Appearance, useColorScheme} from 'react-native';
 import {darkPalette, lightPalette, type Palette} from './tokens';
 import {NON_SECRET_KEYS, nonSecretStore} from '../storage/kv';
 
@@ -27,6 +27,18 @@ import {NON_SECRET_KEYS, nonSecretStore} from '../storage/kv';
 // 훅은 **컨텍스트 구독**이라 memo 를 통과한다. 색을 읽는 컴포넌트가 색의 변화를
 // 구독한다 — 숨길 것이 없는 대신, 색을 읽는 자리마다 한 줄이 든다. 그 한 줄이
 // 이 배치가 30 개 파일을 만진 이유다.
+//
+// ## 구독은 앱 전체에 **하나**다
+//
+// 두 번째 함정은 성능이 아니라 성능처럼 생긴 정확성이다. 색을 읽는 자리마다
+// `useColorScheme()` 을 부르면 그 자리마다 `Appearance` 구독이 하나씩 생긴다.
+// 타임라인 행 200 개에 행마다 컴포넌트 서넛이면 600 개이고, 가상화 목록은 스크롤
+// 하는 동안 그것을 계속 붙였다 뗐다 한다 — RN 의 `EventEmitter` 는 제거가 O(n) 이라
+// 그 비용이 스크롤 프레임 안에 앉는다.
+//
+// 그래서 시스템을 **구독하는 것은 프로바이더 하나뿐**이고, 나머지는 컨텍스트만
+// 읽는다. 컨텍스트 읽기는 구독이 아니라 트리 조회이고, 값이 바뀌면 리액트가 알아서
+// 소비자를 다시 그린다(그리고 그것이 memo 를 통과하는 이유이기도 하다).
 //
 // ## `useStyles` 가 매 렌더 `StyleSheet.create` 를 부르지 않는다
 //
@@ -96,21 +108,35 @@ interface ThemeValue {
   setChoice: (choice: ThemeChoice) => void;
 }
 
-const ThemeContext = createContext<ThemeValue | null>(null);
+/** 시스템이 지금 말하는 것. 모름(`null`)이면 이 앱이 처음부터 입고 있던 다크다. */
+function systemScheme(): ColorScheme {
+  return Appearance.getColorScheme() === 'light' ? 'light' : 'dark';
+}
 
 /**
- * 스킴 하나를 답한다.
+ * 프로바이더 **밖**에서 그려질 때의 값.
  *
- * 프로바이더가 없으면 **시스템을 따른다.** 그 폴백이 다크 고정이 아닌 이유는
- * 하나다: 프로바이더 밖에서 그려지는 것은 테스트와 측정 하네스뿐이고, 둘 다
- * 「이 기기가 지금 무슨 스킴인가」를 물어 답을 받는 쪽이 옳다. 시스템이 모름
- * (`null`)이면 이 앱이 처음부터 입고 있던 다크다.
+ * 그런 자리는 앱에 없다(`App.tsx` 가 가장 바깥에 세운다) — 단위 테스트와 측정
+ * 하네스뿐이고, 둘 다 「이 기기가 지금 무슨 스킴인가」를 물어 답을 받는 쪽이 옳다.
+ * 그래서 다크 고정이 아니라 시스템이다.
+ *
+ * `scheme` 이 게터인 이유는 **구독하지 않고도 지금 값을 답하기 위해서**다. 이
+ * 자리에는 다시 그려 줄 프로바이더가 없으므로 구독해 봐야 알릴 곳이 없고, 그
+ * 대신 읽을 때마다 최신을 답한다.
  */
+const DETACHED: ThemeValue = {
+  choice: 'system',
+  get scheme(): ColorScheme {
+    return systemScheme();
+  },
+  setChoice: () => {},
+};
+
+const ThemeContext = createContext<ThemeValue>(DETACHED);
+
+/** 스킴 하나. 구독이 아니라 **컨텍스트 조회**다 (파일 머리 주석). */
 function useScheme(): ColorScheme {
-  const ctx = useContext(ThemeContext);
-  const system = useColorScheme();
-  if (ctx !== null) return ctx.scheme;
-  return system === 'light' ? 'light' : 'dark';
+  return useContext(ThemeContext).scheme;
 }
 
 /** 지금 스킴의 팔레트. 스타일시트 밖에서 색 하나가 필요할 때(예: 아이콘 tint). */
@@ -120,17 +146,11 @@ export function usePalette(): Palette {
 
 /**
  * 「테마」 컨트롤이 읽고 쓰는 것. 프로바이더 없이 부르면 고를 수 없다는 사실을
- * 그대로 답한다(선택은 `system` 고정, `setChoice` 는 아무 일도 하지 않음) —
- * 던지지 않는 이유는 이 훅을 쓰는 화면이 프로바이더 없이 렌더되는 테스트에서도
- * 자기 나머지 부분을 검사할 수 있어야 하기 때문이다.
+ * 그대로 답한다(`DETACHED`) — 던지지 않는 이유는 이 훅을 쓰는 화면이 프로바이더
+ * 없이 렌더되는 테스트에서도 자기 나머지 부분을 검사할 수 있어야 하기 때문이다.
  */
 export function useTheme(): ThemeValue {
-  const ctx = useContext(ThemeContext);
-  const system = useColorScheme();
-  const fallbackScheme: ColorScheme = system === 'light' ? 'light' : 'dark';
-  return (
-    ctx ?? {choice: 'system', scheme: fallbackScheme, setChoice: () => {}}
-  );
+  return useContext(ThemeContext);
 }
 
 /**
@@ -173,6 +193,7 @@ export function ThemeProvider({
   // 초기값을 lazy initializer 로 읽는다: MMKV 읽기는 싸지만 매 렌더 할 일은
   // 아니고, 무엇보다 **첫 렌더에 이미 답이 있어야** 한다.
   const [choice, setChoiceState] = useState<ThemeChoice>(readStoredChoice);
+  // 앱 전체에서 시스템을 구독하는 **유일한** 자리다 (파일 머리 주석).
   const system = useColorScheme();
 
   const setChoice = useCallback((next: ThemeChoice) => {

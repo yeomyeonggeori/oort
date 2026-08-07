@@ -315,23 +315,51 @@ jest.mock('@react-native-community/netinfo', () => {
 // 하고(`__setSystemColorScheme('light')`), 말한 것이 화면까지 닿게 실제 구독자를
 // 깨운다 — 값만 바꾸고 알리지 않는 목은 「시스템이 바뀌면 화면이 따라간다」를
 // 검사할 수 없다.
+//
+// **둘을 함께 목킹한다.** `design/theme.tsx` 는 두 경로로 시스템을 읽는다:
+// 프로바이더는 `useColorScheme()` 으로 **구독**하고, 프로바이더 밖의 폴백은
+// `Appearance.getColorScheme()` 으로 **묻기만** 한다(구독은 앱 전체에 하나여야
+// 하므로). 하나만 목킹하면 그 둘이 테스트에서 서로 다른 답을 하게 된다.
+const momoColorScheme = {
+  current: 'dark',
+  listeners: new Set(),
+};
+global.__momoColorScheme = momoColorScheme;
+
+jest.mock('react-native/Libraries/Utilities/Appearance', () => {
+  const store = global.__momoColorScheme;
+  return {
+    __esModule: true,
+    getColorScheme: () => store.current,
+    setColorScheme: next => {
+      store.current = next ?? 'dark';
+    },
+    addChangeListener: listener => {
+      store.listeners.add(listener);
+      return {remove: () => store.listeners.delete(listener)};
+    },
+  };
+});
+
 jest.mock('react-native/Libraries/Utilities/useColorScheme', () => {
   const React = require('react');
-  let scheme = 'dark';
-  const listeners = new Set();
+  const store = global.__momoColorScheme;
   const subscribe = onChange => {
-    listeners.add(onChange);
-    return () => listeners.delete(onChange);
+    store.listeners.add(onChange);
+    return () => store.listeners.delete(onChange);
   };
-  const read = () => scheme;
+  const read = () => store.current;
   const useColorScheme = () => React.useSyncExternalStore(subscribe, read, read);
+  const announce = () => {
+    for (const onChange of [...store.listeners]) onChange();
+  };
   useColorScheme.__setSystemColorScheme = next => {
-    scheme = next;
-    for (const onChange of [...listeners]) onChange();
+    store.current = next;
+    announce();
   };
   useColorScheme.__reset = () => {
-    scheme = 'dark';
-    for (const onChange of [...listeners]) onChange();
+    store.current = 'dark';
+    announce();
   };
   return {__esModule: true, default: useColorScheme};
 });
