@@ -20,6 +20,16 @@
 //   5. 거절은 그 자리   상한 초과(409)는 그 행 안의 문장이다. 토스트가 아니고,
 //                      서버의 영어 문장도 아니며, 숫자와 다음 행동을 말한다.
 //
+// 후속 #1146 이 더한 봉인 셋:
+//
+//   6. 목록은 거짓말하지  `/pins` 가 실패하면 「없습니다」가 아니라 「불러오지
+//      않는다             못했습니다」다. 그리고 「다시 시도」는 **목록만** 다시
+//                        읽는다(채널 전체를 재구축하지 않는다).
+//   7. 도장 = 정렬 근거   목록의 시각은 **고정된 때**이지 쓰인 때가 아니다.
+//                        해가 다르면 연도가 붙는다.
+//   8. 행에 흔적이 남는다 고정된 메시지의 꼬리에 「고정됨」이 서고, 고정되지 않은
+//                        행에는 서지 않는다.
+//
 // 이름 붙은 red proof (버릴 워크트리에서만 돌린다):
 //   PIN_GATE_PROVE_RED_REFETCH=1 npm run gate:pin
 //     expected failure: "the header list reached the network again"
@@ -29,6 +39,15 @@
 //     expected failure: "the pin action did not flip with the state"
 //   PIN_GATE_PROVE_RED_CAP=1 npm run gate:pin
 //     expected failure: "the channel cap refusal was never stated in the row"
+//   PIN_GATE_PROVE_RED_HONEST=1 npm run gate:pin
+//     expected failure: "a failed read must not be reported as an empty channel"
+//   PIN_GATE_PROVE_RED_STAMP=1 npm run gate:pin
+//     expected failure: "the list stamp is not the value the list sorts on"
+//   PIN_GATE_PROVE_RED_MARK=1 npm run gate:pin
+//     expected failure: "a pinned row carries no mark"
+//
+// HONEST는 실패해야 할 `/pins` 를 성공시키고(그러면 화면이 「없습니다」로 돌아가
+// 단언이 깨진다), STAMP·MARK 는 DOM 에서 글자와 원소를 걷어낸다.
 //
 // red seam은 **목/드라이버의 행동만** 바꾼다. REFETCH는 페이지에서 `/pins`를 직접
 // 한 번 더 부르고(카운터 단언이 네트워크를 실제로 보고 있음을 증명), LIVE는
@@ -90,6 +109,9 @@ const proveRedRefetch = process.env.PIN_GATE_PROVE_RED_REFETCH === "1";
 const proveRedLive = process.env.PIN_GATE_PROVE_RED_LIVE === "1";
 const proveRedLabel = process.env.PIN_GATE_PROVE_RED_LABEL === "1";
 const proveRedCap = process.env.PIN_GATE_PROVE_RED_CAP === "1";
+const proveRedHonest = process.env.PIN_GATE_PROVE_RED_HONEST === "1";
+const proveRedStamp = process.env.PIN_GATE_PROVE_RED_STAMP === "1";
+const proveRedMark = process.env.PIN_GATE_PROVE_RED_MARK === "1";
 
 // 행 id는 소문자다 — 행이 `data-message-id`를 소문자로 내놓는다.
 const COLD_PINNED_MSG = "0199bbbb-0000-7000-8000-0000000000c1";
@@ -164,6 +186,13 @@ function row(over) {
   };
 }
 
+/**
+ * 콜드 고정 대상은 **닷새 전에 쓰였다** (#1146 N1). 쓰인 때와 고정된 때가 같은
+ * 날이면 도장이 어느 쪽을 그리는지 아무 단언도 구별하지 못한다 — 그리고 오래된
+ * 글을 지금 고정하는 것이 고정의 전형적인 쓰임이다.
+ */
+const COLD_CREATED_MS = AT - 5 * 86_400_000;
+
 function historyPage() {
   return [
     row({
@@ -171,6 +200,7 @@ function historyPage() {
       seq: 41,
       authorMemberId: memberId,
       body: COLD_BODY,
+      createdAtMs: COLD_CREATED_MS,
     }),
     row({ id: LIVE_PINNED_MSG, seq: 42, authorMemberId: peerId, body: LIVE_BODY }),
     row({ id: PLAIN_MSG, seq: 43, authorMemberId: memberId, body: PLAIN_BODY }),
@@ -178,8 +208,13 @@ function historyPage() {
   ];
 }
 
-/** 서버 `PinnedMessageDto` 그대로 (camelCase, 소문자 id). */
-function pinEntry(messageId, seq, authorMemberId, body, pinnedAtMs) {
+/**
+ * 서버 `PinnedMessageDto` 그대로 (camelCase, 소문자 id).
+ *
+ * `createdAtMs` 를 따로 받을 수 있는 것은 #1146 N1 때문이다: **쓰인 때와 고정된
+ * 때가 같은 날이면 도장이 어느 쪽을 그리는지 사진으로도 코드로도 구별되지 않는다.**
+ */
+function pinEntry(messageId, seq, authorMemberId, body, pinnedAtMs, createdAtMs) {
   return {
     messageId,
     channelId,
@@ -188,7 +223,7 @@ function pinEntry(messageId, seq, authorMemberId, body, pinnedAtMs) {
     type: "text",
     state: "sent",
     body,
-    createdAtMs: AT + seq * 1_000,
+    createdAtMs: createdAtMs ?? AT + seq * 1_000,
     pinnedBy: memberId,
     pinnedAtMs,
   };
@@ -356,7 +391,10 @@ function makeTraffic() {
   return { pinReads: [], pinWrites: [], allUrls: [] };
 }
 
-async function installRoutes(context, traffic) {
+async function installRoutes(context, traffic, options = {}) {
+  // #1146 M2 — 첫 목록 읽기를 한 번 떨어뜨린다. 재시도가 두 번째 읽기를 내는지,
+  // 그리고 그 사이에 화면이 무슨 말을 하는지가 아래 `exerciseHonesty` 의 전부다.
+  let pinReadsToDegrade = options.failFirstPinRead ? 1 : 0;
   await context.route("**/v1/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -419,11 +457,28 @@ async function installRoutes(context, traffic) {
 
     if (path.endsWith("/pins")) {
       traffic.pinReads.push(`${method} ${path}`);
-      return json(route, {
-        pins: [
-          pinEntry(COLD_PINNED_MSG, 41, memberId, COLD_BODY, AT + 700_000),
-        ],
-      });
+      if (pinReadsToDegrade > 0) {
+        pinReadsToDegrade -= 1;
+        // red seam: **1차의 행동 그대로** — 실패를 조용한 빈 목록으로 바꾼다.
+        // 그러면 화면은 「고정한 메시지가 없습니다」로 돌아가고, 그것을 잡는
+        // 단언이 실제로 화면을 읽고 있다면 반드시 깨진다.
+        if (proveRedHonest) return json(route, { pins: [] });
+        return json(
+          route,
+          { error: { code: "unavailable", message: "pins are away" } },
+          503
+        );
+      }
+      return json(route, { pins: options.pins ?? [
+        pinEntry(
+          COLD_PINNED_MSG,
+          41,
+          memberId,
+          COLD_BODY,
+          AT + 700_000,
+          COLD_CREATED_MS
+        ),
+      ] });
     }
 
     if (path.endsWith("/roster")) return json(route, { members: roster });
@@ -469,6 +524,12 @@ async function login(page) {
   await page
     .locator(`[data-testid="timeline-message"][data-message-id="${COLD_PINNED_MSG}"]`)
     .waitFor();
+}
+
+/** 「8월 5일」. 오늘·어제가 아닌 날에 대해서만 정확하고, 아래는 그런 날만 쓴다. */
+function plainDay(atMs) {
+  const at = new Date(atMs);
+  return `${at.getMonth() + 1}월 ${at.getDate()}일`;
 }
 
 function rowLocator(page, messageId) {
@@ -537,6 +598,37 @@ async function exercise(browser) {
   }
   if (!coldText.includes("곽성재")) {
     throw new Error(`the list entry must name its author, read "${coldText}"`);
+  }
+
+  // ---- 1b. 도장은 정렬 근거다 (#1146 N1) --------------------------------------
+  // 1차는 **쓰인 때**를 그리면서 **고정된 때**로 줄을 세웠다. 그 둘이 다른 날에
+  // 떨어지는 픽스처에서만 이 단언이 의미를 갖는다.
+  const pinnedDay = plainDay(AT + 700_000);
+  const writtenDay = plainDay(COLD_CREATED_MS);
+  if (pinnedDay === writtenDay) {
+    throw new Error(
+      "fixture is vacuous: the pinned day and the written day must differ"
+    );
+  }
+  if (proveRedStamp) {
+    // red seam: DOM에서 도장의 글자를 쓰인 때로 갈아치운다. 아래 단언이 DOM을
+    // 읽고 있다면 반드시 깨진다. 제품 소스는 그대로다.
+    await page.evaluate((text) => {
+      const node = document.querySelector('[data-testid="pin-list-stamp"]');
+      if (node) node.textContent = text;
+    }, writtenDay);
+  }
+  const stamp =
+    (await page.getByTestId("pin-list-stamp").textContent())?.trim() ?? "";
+  if (stamp !== pinnedDay) {
+    throw new Error(
+      `the list stamp is not the value the list sorts on: expected the pinned day "${pinnedDay}", read "${stamp}"`
+    );
+  }
+  if (stamp === writtenDay) {
+    throw new Error(
+      "the stamp drew the message's own time — the list would look unsorted"
+    );
   }
   await closePinList(page);
 
@@ -693,6 +785,33 @@ async function exercise(browser) {
     );
   }
 
+  // ---- 6b. 행에 흔적이 남는다 (#1146 M3) --------------------------------------
+  //
+  // 고정 목록에서 원본으로 점프한 뒤 착지 틴트가 가시면, 방금 고른 그 줄은 옆줄과
+  // 완전히 같아진다. 흔적이 없으면 「이것이 그 고정된 메시지인가」에 답하는 것이
+  // 사람의 기억뿐이다. 액션 메뉴를 열어 낱말을 확인하는 것은 답이 아니다.
+  await closeAnyMenu(page);
+  if (proveRedMark) {
+    // red seam: DOM에서 표지를 걷어낸다. 단언이 화면을 보고 있다면 깨진다.
+    await page.evaluate(() => {
+      for (const node of document.querySelectorAll('[data-testid="pin-mark"]')) {
+        node.remove();
+      }
+    });
+  }
+  const pinnedRowMark = rowLocator(page, PLAIN_MSG).getByTestId("pin-mark");
+  try {
+    await pinnedRowMark.waitFor({ timeout: 5_000 });
+  } catch {
+    throw new Error(
+      "a pinned row carries no mark — the only way to learn a message is pinned would be to open its menu"
+    );
+  }
+  // 그리고 고정되지 않은 행에는 서지 않는다. 모든 행에 서는 표지는 표지가 아니다.
+  if (await rowLocator(page, CAPPED_MSG).getByTestId("pin-mark").isVisible()) {
+    throw new Error("an unpinned row wears the pinned mark");
+  }
+
   // ---- 7. 헤더 버튼은 하나의 이름을 갖는다 ------------------------------------
   const trigger = page.getByTestId("open-pin-list");
   const [ariaLabel, title] = await Promise.all([
@@ -702,6 +821,118 @@ async function exercise(browser) {
   if (!ariaLabel || ariaLabel !== title) {
     throw new Error(
       `two names for one control is two controls to a reader: aria-label "${ariaLabel}" vs title "${title}"`
+    );
+  }
+
+  await context.close();
+}
+
+/**
+ * 목록이 **모르는 것을 아는 척하지 않는가** (#1146 M2·N1 연도).
+ *
+ * 1차의 결함은 조용했다: `/pins` 가 실패해도 지도는 비어 있었고, 화면은
+ * 「고정한 메시지가 없습니다」를 인쇄했다 — 채널에 고정이 열 개 있어도. 오프라인에서
+ * 그것을 읽은 사람은 고정이 지워졌다고 결론 내린다. 채널을 못 쓰게 만들자는 것이
+ * 아니라(그 판정은 그대로다), 없다고 **말하지 말자**는 것이다.
+ *
+ * 별도의 컨텍스트에서 도는 이유는 위의 `exercise` 가 「채널당 정확히 한 번 읽는다」를
+ * 재고 있기 때문이다. 실패와 재시도를 그 안에 끼우면 그 카운터가 흔들린다.
+ */
+async function exerciseHonesty(browser) {
+  const traffic = makeTraffic();
+  const context = await browser.newContext({
+    viewport: { width: 1280, height: 900 },
+    reducedMotion: "reduce",
+  });
+  const page = await context.newPage();
+  await installRealtimeSocket(page);
+  // 재시도가 돌려줄 목록. 둘째 항목은 **해를 넘겨** 고정된 것이다 — 연도가 붙는지는
+  // 붙지 않는 줄 옆에서만 확인된다.
+  const lastYear = new Date(AT);
+  lastYear.setFullYear(lastYear.getFullYear() - 1);
+  const olderPinMs = lastYear.getTime();
+  await installRoutes(context, traffic, {
+    failFirstPinRead: true,
+    pins: [
+      pinEntry(
+        COLD_PINNED_MSG,
+        41,
+        memberId,
+        COLD_BODY,
+        AT + 700_000,
+        COLD_CREATED_MS
+      ),
+      pinEntry(LIVE_PINNED_MSG, 42, peerId, LIVE_BODY, olderPinMs, olderPinMs),
+    ],
+  });
+  await login(page);
+
+  await openPinList(page);
+  const failedText =
+    (await page.getByTestId("pin-list").textContent()) ?? "";
+  if (failedText.includes("고정한 메시지가 없습니다")) {
+    throw new Error(
+      "a failed read must not be reported as an empty channel — that sentence tells someone offline their pins are gone"
+    );
+  }
+  if (!failedText.includes("불러오지 못했습니다")) {
+    throw new Error(`a failed read must say so, read "${failedText}"`);
+  }
+  if ((await listedIds(page)).length !== 0) {
+    throw new Error("the failed read produced entries out of nowhere");
+  }
+  // 그리고 버튼도 수를 말하지 않는다. 목록 안에서 고친 거짓말이 헤더로 옮겨 가면
+  // 고쳐진 것이 아니다.
+  const failedTrigger =
+    (await page.getByTestId("open-pin-list").getAttribute("aria-label")) ?? "";
+  if (/\d/.test(failedTrigger)) {
+    throw new Error(
+      `the header must not count what it could not read, read "${failedTrigger}"`
+    );
+  }
+
+  // 「다시 시도」는 **목록만** 다시 읽는다. 채널 전체를 재구축하면 읽던 자리를
+  // 잃는데, 사람이 답하고 있는 것은 부속물 하나에 대한 문장 하나다.
+  const readsBefore = traffic.pinReads.length;
+  const historyBefore = traffic.allUrls.filter((url) =>
+    url.includes("/messages")
+  ).length;
+  await page.getByTestId("pin-list-retry").click();
+  await page.getByTestId("pin-list-item").first().waitFor({ timeout: 5_000 });
+  if (traffic.pinReads.length !== readsBefore + 1) {
+    throw new Error(
+      `the retry must read the list exactly once more (${readsBefore} -> ${traffic.pinReads.length})`
+    );
+  }
+  const historyAfter = traffic.allUrls.filter((url) =>
+    url.includes("/messages")
+  ).length;
+  if (historyAfter !== historyBefore) {
+    throw new Error(
+      "the retry rebuilt the channel — it must re-read the list alone, or the reader loses their place"
+    );
+  }
+  const healedText = (await page.getByTestId("pin-list").textContent()) ?? "";
+  if (healedText.includes("불러오지 못했습니다")) {
+    throw new Error("the failure sentence outlived the failure");
+  }
+
+  // 해가 다르면 연도가 붙는다 (#1146 N1의 나머지 절반). 채널의 고정은 해를 넘겨
+  // 남고, 「12월 31일」은 그것이 작년인지 말하지 않는다.
+  const stamps = await page
+    .getByTestId("pin-list-stamp")
+    .evaluateAll((nodes) => nodes.map((node) => node.textContent?.trim() ?? ""));
+  if (stamps.length !== 2) {
+    throw new Error(`expected two entries, read ${stamps.join(" | ")}`);
+  }
+  if (stamps[0].includes("년")) {
+    throw new Error(
+      `a pin from this year must not wear a year, read "${stamps[0]}"`
+    );
+  }
+  if (!stamps[1].startsWith(`${lastYear.getFullYear()}년`)) {
+    throw new Error(
+      `a pin from another year must name it, read "${stamps[1]}"`
     );
   }
 
@@ -739,8 +970,31 @@ async function captureShots(browser) {
     await openRowMenu(page, COLD_PINNED_MSG);
     await page.screenshot({ path: resolve(outDir, `pin-menu-${scheme}.png`) });
     await context.close();
+
+    // #1146 M2 — 「없다」와 「모른다」는 **나란히 놓아야** 갈린다. 그래서 못 불러온
+    // 목록도 같은 두 배색으로 찍는다: 리뷰가 두 장을 함께 보지 않으면 1차의
+    // 거짓말이 고쳐졌는지 사진으로 확인할 길이 없다.
+    const failedTraffic = makeTraffic();
+    const failedContext = await browser.newContext({
+      viewport: { width: 1280, height: 900 },
+      reducedMotion: "reduce",
+      colorScheme: scheme,
+    });
+    const failedPage = await failedContext.newPage();
+    await installRealtimeSocket(failedPage);
+    await installRoutes(failedContext, failedTraffic, {
+      failFirstPinRead: true,
+    });
+    await login(failedPage);
+    await openPinList(failedPage);
+    await failedPage
+      .getByTestId("pin-list")
+      .screenshot({ path: resolve(outDir, `pin-list-failed-${scheme}.png`) });
+    await failedContext.close();
   }
-  console.log("[shots] artifacts/pin/pin-{list,menu}-{light,dark}.png");
+  console.log(
+    "[shots] artifacts/pin/pin-{list,list-detail,list-failed,menu}-{light,dark}.png"
+  );
 }
 
 async function main() {
@@ -757,6 +1011,7 @@ async function main() {
     const browser = await chromium.launch();
     try {
       await exercise(browser);
+      await exerciseHonesty(browser);
       if (process.env.PIN_GATE_SHOTS === "1") await captureShots(browser);
     } finally {
       await browser.close();
@@ -768,6 +1023,9 @@ async function main() {
   console.log("           unpin·tombstone 양쪽에서 빠졌고, 행 메뉴의 낱말은");
   console.log("           상태를 따라 뒤집혔고, 클릭은 기존 앵커로 원본에");
   console.log("           착지했고, 상한 거절은 그 행 안의 우리 문장이었다.");
+  console.log("           #1146: 도장은 정렬 근거(고정된 때·연도)를 그렸고,");
+  console.log("           고정된 행에만 흔적이 섰고, 못 불러온 목록은 「없다」고");
+  console.log("           말하지 않았으며 재시도는 목록만 다시 읽었다.");
 }
 
 await main();

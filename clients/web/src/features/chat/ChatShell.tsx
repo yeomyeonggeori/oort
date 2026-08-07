@@ -648,8 +648,10 @@ export function ChatShell() {
           {stressCount === 0 && channelId !== null && (
             <PinListMenu
               pins={timeline.pins}
+              status={timeline.pinsStatus}
               directory={directory}
               onJump={(messageId, seq) => onJumpToMessage(messageId, seq)}
+              onRetry={timeline.reloadPins}
             />
           )}
           {/* The tooltip and the accessible name are the same string: two

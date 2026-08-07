@@ -43,6 +43,7 @@ import {
   isPinned,
   normalizePinList,
   removePin,
+  type PinListStatus,
   type PinMap,
 } from "@momo/core/features/timeline/pins";
 
@@ -88,6 +89,13 @@ export interface UseTimelineResult {
   toggleReaction: (message: Message, emoji: string) => Promise<void>;
   /** 이슈 #1112 — `message id -> the pin`, case-folded on ingest. */
   pins: PinMap;
+  /**
+   * 이슈 #1146 M2 — where the cold read of `pins` stands. An empty map means
+   * two different things and only this says which.
+   */
+  pinsStatus: PinListStatus;
+  /** Read the channel's pins again. The retry behind the failure sentence. */
+  reloadPins: () => void;
   /**
    * Pin or unpin one message. Optimistic only in the unpin direction — see the
    * implementation for why a pin waits for the server.
@@ -143,6 +151,38 @@ export function useTimeline(
     pinsRef.current = next;
     setPins(next);
   }, []);
+  // 이슈 #1146 M2. The map alone cannot tell "nobody pinned anything" from
+  // "we never found out", and the header list was printing the first sentence
+  // for both.
+  const [pinsStatus, setPinsStatus] = useState<PinListStatus>("loading");
+  // Which read owns the answer. A channel switch and a retry both bump it, so a
+  // slow reply from the channel you just left cannot write over the one you are
+  // in — the same hazard the `cancelled` flag guards in the effect, held in a
+  // ref because the retry is called from outside that effect's closure.
+  const pinReadRef = useRef(0);
+  const loadPins = useCallback(
+    (channel: string) => {
+      const read = ++pinReadRef.current;
+      setPinsStatus("loading");
+      fetchChannelPins(workspaceId, channel)
+        .then((wire) => {
+          if (pinReadRef.current !== read) return;
+          // Merge with the live map on the same side as the reaction snapshot:
+          // a `message.pinned` that arrived while this was in flight wins, since
+          // it is strictly newer than the read it raced.
+          applyPins({ ...normalizePinList(wire), ...pinsRef.current });
+          setPinsStatus("ready");
+        })
+        .catch(() => {
+          if (pinReadRef.current !== read) return;
+          // The channel stays fully usable — that judgement has not changed.
+          // What changes is that the list now says so instead of claiming the
+          // channel has no pins.
+          setPinsStatus("failed");
+        });
+    },
+    [workspaceId, applyPins]
+  );
   const applyReaction = useCallback(
     (change: Parameters<typeof applyReactionDelta>[1]) => {
       reactionsRef.current = applyReactionDelta(reactionsRef.current, change);
@@ -349,17 +389,8 @@ export function useTimeline(
     // 1c) The channel's pins, on the same terms as the snapshot above: in
     // parallel, and not fatal. A header list that failed to load is an absent
     // accessory; a channel that refuses to open because of one is a broken app.
-    fetchChannelPins(workspaceId, channelId)
-      .then((wire) => {
-        if (cancelled) return;
-        // Merge with the live map on the same side as the reaction snapshot:
-        // a `message.pinned` that arrived while this was in flight wins, since
-        // it is strictly newer than the read it raced.
-        applyPins({ ...normalizePinList(wire), ...pinsRef.current });
-      })
-      .catch(() => {
-        /* the header list stays empty; the channel is still fully usable */
-      });
+    // 이슈 #1146 M2 — "absent" is now something the list can say out loud.
+    loadPins(channelId);
 
     // 2) Realtime rail with resume healing.
     const unsub = realtime.subscribeChannel(workspaceId, channelId, {
@@ -449,10 +480,24 @@ export function useTimeline(
     applyBatch,
     applyReaction,
     applyPins,
+    loadPins,
     addMarker,
     updatePending,
     reloadNonce,
   ]);
+
+  /**
+   * Read the list again (이슈 #1146 M2).
+   *
+   * Deliberately *not* `reload()`. That one re-runs the whole channel — history,
+   * rail, subscription — and the person pressing this button is answering one
+   * sentence about one accessory. Rebuilding the conversation under them to
+   * refill a header list is the kind of over-reaction that loses their scroll
+   * position.
+   */
+  const reloadPins = useCallback(() => {
+    if (channelId) loadPins(channelId);
+  }, [channelId, loadPins]);
 
   const loadOlder = useCallback(async () => {
     if (!channelId || loadingOlder || reachedStart) return;
@@ -594,6 +639,8 @@ export function useTimeline(
     reactions,
     toggleReaction,
     pins,
+    pinsStatus,
+    reloadPins,
     togglePin,
     editMessage,
     deleteMessage,

@@ -187,6 +187,11 @@ const CODE_BODY = [
 /**
  * 고정 목록의 씨앗 (이슈 #1112). 셋인 이유: 작성자가 갈리고(이름 줄), 본문 길이가
  * 갈리고(한 줄·잘린 줄), 빈 본문이 하나 있어야 「내용 없는 메시지」가 사진에 선다.
+ *
+ * **고정 시각도 셋이 다르다** (#1146 N1): 오늘 · 어제 · 해를 넘긴 것. 도장이
+ * 정렬 근거(`pinnedAtMs`)를 그리는지, 그리고 **해가 다를 때만 연도가 붙는지**는
+ * 셋이 한 장에 있어야 사진에서 확인된다 — 「2022년 …」 한 줄만 찍으면 그것이
+ * 규칙인지 사고인지 알 수 없다.
  */
 const PINS = {
   '00000000-0000-7000-8000-0000000000a1': {
@@ -211,7 +216,7 @@ const PINS = {
     body: '온콜 교대는 매주 화요일 10시.',
     createdAtMs: NOW + 60_000,
     pinnedBy: SELF,
-    pinnedAtMs: NOW + 200_000,
+    pinnedAtMs: NOW - 86_400_000,
   },
   '00000000-0000-7000-8000-0000000000a3': {
     messageId: '00000000-0000-7000-8000-0000000000a3',
@@ -223,7 +228,7 @@ const PINS = {
     body: null,
     createdAtMs: NOW + 120_000,
     pinnedBy: OTHER,
-    pinnedAtMs: NOW + 100_000,
+    pinnedAtMs: NOW - 400 * 86_400_000,
   },
 };
 
@@ -531,13 +536,16 @@ function Frame({label, children}: {label: string; children: React.ReactNode}) {
   );
 }
 
-function Row() {
+function Row({pinned = false}: {pinned?: boolean} = {}) {
   return (
     <MessageRow
       message={MESSAGE}
       startsGroup
       directory={DIRECTORY}
       chips={CHIPS}
+      // 이슈 #1146 M3. 기본값이 `false` 인 것은 이 하네스의 다른 표면 전부가
+      // 고정과 무관하기 때문이다 — 그 사진들은 이 인자로 한 픽셀도 바뀌지 않는다.
+      pinned={pinned}
       nowMs={NOW + 900_000}
       actions={{
         myMemberId: SELF,
@@ -545,6 +553,7 @@ function Row() {
         onEdit: async () => {},
         onDelete: async () => {},
         onOpenThread: () => {},
+        onTogglePin: async () => {},
       }}
     />
   );
@@ -769,13 +778,30 @@ export function Surface({name}: {name: string}): React.JSX.Element {
           {pinSheet(true)}
         </Frame>
       );
+    // 행에 남는 흔적 (#1146 M3). **두 행을 한 장에** 두는 것이 이 하네스의 규율이다:
+    // 「표지가 섰다」는 표지가 없는 행 옆에서만 보이고, 「위계를 침범하지 않았다」는
+    // 「수정됨」과 같은 줄에 나란히 설 때만 보인다. 강조색이 아니라 흐린 글자라는
+    // 판정이 사진에서 확인되는 자리이기도 하다.
+    case 'pin-mark':
+      return (
+        <Frame label="고정 흔적 — 고정된 행 ↔ 아닌 행. 꼬리 한 줄, 흐린 글자 (#1146 M3)">
+          <Row pinned />
+          <Row />
+        </Frame>
+      );
     case 'pin-list':
       return (
         <PinListPanel
           pins={PINS}
+          status="ready"
           directory={DIRECTORY}
+          // 고정된 시각으로 도장이 찍히므로 「지금」이 필요하다. 상수인 이유는
+          // 사진이 재현돼야 하기 때문이다 — `Date.now()` 로 두면 어제 찍은 것과
+          // 오늘 찍은 것이 다른 글자를 담고, 그 차이가 회귀인지 달력인지 알 수 없다.
+          nowMs={NOW}
           onJump={() => {}}
           onClose={() => {}}
+          onRetry={() => {}}
         />
       );
     case 'pin-list-empty':
@@ -784,9 +810,29 @@ export function Surface({name}: {name: string}): React.JSX.Element {
       return (
         <PinListPanel
           pins={{}}
+          status="ready"
           directory={DIRECTORY}
+          nowMs={NOW}
           onJump={() => {}}
           onClose={() => {}}
+          onRetry={() => {}}
+        />
+      );
+    // 셋째 판 (#1146 M2). 「없다」와 「모른다」는 **나란히 놓아야** 갈린다: 위의
+    // 빈 판과 이 판이 한 리뷰에서 함께 읽히지 않으면, 1차가 오프라인에서 하던
+    // 거짓말이 고쳐졌는지 사진으로 확인할 길이 없다. 가진 항목을 함께 세우는
+    // 것도 그래서다 — 실패한 목록이 반쪽이라는 사실과 그 반쪽은 둘 다 참이고,
+    // 화면은 둘 다 말해야 한다.
+    case 'pin-list-failed':
+      return (
+        <PinListPanel
+          pins={PINS}
+          status="failed"
+          directory={DIRECTORY}
+          nowMs={NOW}
+          onJump={() => {}}
+          onClose={() => {}}
+          onRetry={() => {}}
         />
       );
     case 'delete':

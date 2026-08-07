@@ -237,6 +237,20 @@ export function dayDividerSegments(
 }
 
 /**
+ * 해까지 적은 날짜 한 줄. **상대 표기가 섞이지 않는다.**
+ *
+ * 낭독되는 라벨의 재료이고(아래 `dayDividerLabel`), 눈으로 읽는 상대 표기가 귀에
+ * 남기지 못하는 것을 채운다. 여기 따로 서 있는 이유는 이것을 필요로 하는 자리가
+ * 구분선 말고 또 있기 때문이다 — 고정 목록의 항목 라벨(`pins.ts`의
+ * `pinStampLabel`)이 같은 문장을 짓는다. 두 파일이 각자 `getFullYear()`를 열면
+ * 「2026년 8월 5일」과 「2026. 8. 5.」가 한 앱에서 함께 산다.
+ */
+export function absoluteDayLabel(atMs: number): string {
+  const at = new Date(atMs);
+  return `${at.getFullYear()}년 ${at.getMonth() + 1}월 ${at.getDate()}일`;
+}
+
+/**
  * 보조기술이 읽을 날짜. **언제나 절대 날짜를 함께 말한다.**
  *
  * 「오늘」은 눈으로 훑을 때는 가장 값싼 낱말이지만, 낭독으로 들으면 어느 날인지
@@ -245,8 +259,7 @@ export function dayDividerSegments(
  * `typingLabel`이 같은 판단을 한다.
  */
 export function dayDividerLabel(atMs: number, nowMs: number): string {
-  const at = new Date(atMs);
-  const absolute = `${at.getFullYear()}년 ${at.getMonth() + 1}월 ${at.getDate()}일`;
+  const absolute = absoluteDayLabel(atMs);
   const days = calendarDaysBetween(atMs, nowMs);
   if (days === 0) return `${absolute}, 오늘`;
   if (days === 1) return `${absolute}, 어제`;

@@ -47,7 +47,10 @@ import {
   type MessageActionAvailability,
   type PendingMessage,
 } from '@momo/core/features/timeline/model';
-import {pinActionLabel} from '@momo/core/features/timeline/pins';
+import {
+  PIN_ROW_MARK,
+  pinActionLabel,
+} from '@momo/core/features/timeline/pins';
 import {
   deleteFailureMessage,
   editFailureMessage,
@@ -1410,8 +1413,20 @@ function MessageRowInner({
   // 갖는다 — U1 M-2 가 구분선에서 이미 겪은 실패 양식이다.
   const tombstoneText = deletedFoldLabel(deletedRepeat);
 
+  // 이슈 #1146 M3 — 이 행이 고정돼 있다는 흔적. 왜 그리는지·왜 이 줄인지·왜
+  // accent 가 아닌지는 코어의 `PIN_ROW_MARK` 독스트링에 있다.
+  //
+  // 지워진 행에는 그리지 않는다: 서버가 삭제와 함께 pin 행을 쓸어내므로 묘비가
+  // 「고정됨」을 다는 창은 프레임이 도착하기까지의 몇 밀리초뿐이고, 그 몇 밀리초에
+  // 하는 말은 이미 참이 아니다.
+  const showsPinMark = pinned === true && !deleted;
+
   const tail = [
     !deleted && message.state === 'edited' ? '수정됨' : null,
+    // 「수정됨」 다음, 「답글 N개」 앞 — 본문에 대한 서술 다음이고 바깥 스레드로
+    // 나가는 문 앞이다. 안쪽에서 바깥쪽으로. 이 배열은 낭독 라벨의 재료이기도
+    // 하므로(`rowAccessibilityLabel`), 여기 끼우는 것만으로 귀에도 닿는다.
+    showsPinMark ? PIN_ROW_MARK : null,
     rollup
       ? `답글 ${rollup.replyCount}개 · 마지막 ${relativeLabel(
           rollup.lastReplyAtMs,
@@ -1620,8 +1635,13 @@ function MessageRowInner({
         {tail.length > 0 ? (
           <View style={styles.tailRow}>
             {!deleted && message.state === 'edited' ? (
-              <Text style={styles.edited} testID="edited-mark">
+              <Text style={styles.tailMark} testID="edited-mark">
                 수정됨
+              </Text>
+            ) : null}
+            {showsPinMark ? (
+              <Text style={styles.tailMark} testID="pin-mark">
+                {PIN_ROW_MARK}
               </Text>
             ) : null}
             {rollup ? (
@@ -2473,7 +2493,9 @@ const styles = StyleSheet.create({
   // 묘비와 **같은 낱말이므로 같은 모양이어야 한다**: 한 화면에 두 모양으로 나오면
   // 사람은 둘이 다른 것을 뜻한다고 읽는다.
   tombstone: {fontSize: font.label, color: color.textMuted, lineHeight: line.label},
-  edited: {fontSize: font.meta, color: color.textFaint},
+  // 꼬리 한 줄에 앉는 **읽기만 하는 표지**들 — 「수정됨」과 「고정됨」.
+  // 둘은 같은 격이므로 같은 상자를 쓴다: 흐린 meta 글자, 강조 없음.
+  tailMark: {fontSize: font.meta, color: color.textFaint},
   tailRow: {
     flexDirection: 'row',
     alignItems: 'center',

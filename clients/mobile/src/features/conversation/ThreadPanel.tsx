@@ -105,13 +105,25 @@ export function ThreadPanel({
 
   const messages = useMemo(() => [liveRoot, ...replies], [liveRoot, replies]);
 
-  const {toggleReaction, editBody, removeMessage} = timeline;
+  const {toggleReaction, editBody, removeMessage, togglePin} = timeline;
   const actions = useMemo<MessageRowActions>(
     () => ({
       myMemberId,
       onToggleReaction: toggleReaction,
       onEdit: editBody,
       onDelete: removeMessage,
+      // 이슈 #1146 M1 — **a reply is pinned from where it is read**, which is
+      // the sentence the web thread panel has carried since #1112. The phone
+      // did not, and that split had no reason: it was the one action the web
+      // offered here that this file forgot to pass on.
+      //
+      // 그리고 이것은 바로 아래 `onQuote` 의 부재와 **다른 종류의 판단**이다.
+      // 인용은 결과가 이 패널 뒤의 채널 컴포저에 떨어져서 화면 밖으로 나가지만,
+      // 고정의 결과는 **여기 있다**: 그 행의 액션 낱말이 「고정 해제하기」로
+      // 뒤집히고, 꼬리에 「고정됨」이 서고, 거절 문장도 그 행 안에 선다(#1146 M3).
+      // 헤더의 목록은 채널로 돌아가면 늘어 있지만, 그것은 이 행동의 영수증이
+      // 아니라 그 결과가 모이는 곳이다.
+      onTogglePin: togglePin,
       // No `onOpenThread`: see the header. Every row here is already in one.
       //
       // No `onQuote` either, and that absence is a decision rather than an
@@ -124,7 +136,7 @@ export function ThreadPanel({
       // decision about where a quoted thread reply lands (본류 or the thread)
       // and belongs to whoever makes that one.
     }),
-    [myMemberId, toggleReaction, editBody, removeMessage],
+    [myMemberId, toggleReaction, editBody, removeMessage, togglePin],
   );
 
   const pending = timeline.repliesPending(root.id);
@@ -203,6 +215,10 @@ export function ThreadPanel({
               status="ready"
               pending={pending}
               reactions={timeline.reactions}
+              // 이슈 #1146 M1 — 채널과 **같은 지도**다. 행마다의 `pinned` 는
+              // `Timeline` 이 여기서 유도하므로, 이것 없이 `onTogglePin` 만 주면
+              // 이미 고정된 답글이 「고정하기」라고 말한다.
+              pins={timeline.pins}
               myMemberId={myMemberId}
               // A thread has no older page to fetch: `loadReplies` walks every
               // cursor before it resolves.

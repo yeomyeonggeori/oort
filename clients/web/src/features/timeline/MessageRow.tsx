@@ -53,7 +53,10 @@ import {
   canReplyToMessage,
   hasAnyAction,
 } from "@momo/core/features/timeline/model";
-import { PIN_EMPTY_BODY_TEXT } from "@momo/core/features/timeline/pins";
+import {
+  PIN_EMPTY_BODY_TEXT,
+  PIN_ROW_MARK,
+} from "@momo/core/features/timeline/pins";
 import {
   canQuoteMessage,
   resolveQuote,
@@ -318,6 +321,13 @@ export function MessageRow({
   const failed = message.state === "failed";
   const rollup = showRollup ? threadRollup(message) : null;
   const showsEditedMark = message.state === "edited" && !editing;
+  // 이슈 #1146 M3 — 이 행이 고정돼 있다는 흔적. 왜 그리는지·왜 이 줄인지·왜
+  // accent가 아닌지는 코어의 `PIN_ROW_MARK` 독스트링에 있다.
+  //
+  // 지워진 행에는 그리지 않는다: 서버가 삭제와 함께 pin 행을 쓸어내므로 묘비가
+  // 「고정됨」을 다는 창은 프레임이 도착하기까지의 몇 밀리초뿐이고, 그 몇 밀리초에
+  // 하는 말은 이미 참이 아니다.
+  const showsPinMark = Boolean(actions?.pinned) && !deleted;
   // 하나로 접힌 반복 (goal P3 1-2). 한 번뿐이면 셀 것이 없으므로 아무 말도 하지
   // 않는다 — "1개"는 개수가 아니라 잡음이다.
   const repeatLabel =
@@ -619,12 +629,17 @@ export function MessageRow({
             `chat-light.png`: 본문 → 👍 2 → 수정됨). 「수정됨」은 **본문에 대한 서술**
             이므로 본문 바로 밑에 있어야 어느 메시지 것인지 되짚지 않는다. 칩은
             그 메시지에 대한 **남들의 반응**이라 한 겹 바깥이 맞다. */}
-        {(showsEditedMark || rollup || repeatLabel) && (
+        {(showsEditedMark || showsPinMark || rollup || repeatLabel) && (
           <div
             className="mt-1 flex flex-wrap items-center gap-2 text-meta text-ink-muted"
             data-testid="message-meta"
           >
             {showsEditedMark && <span>수정됨</span>}
+            {/* 「수정됨」 다음, 「답글 N개」 앞 — 본문에 대한 서술 다음이고 바깥
+                스레드로 나가는 문 앞이다. 안쪽에서 바깥쪽으로. */}
+            {showsPinMark && (
+              <span data-testid="pin-mark">{PIN_ROW_MARK}</span>
+            )}
             {/* 접힌 반복의 개수 (goal P3 1-2). 알림 문장은 서버가 쓴 그대로 본문에
                 남고, 이 조각은 그 문장이 몇 번 반복될 뻔했는지만 덧붙인다 —
                 사라진 것은 같은 문장이지 사실이 아니다. */}
