@@ -1,6 +1,6 @@
 # ADR-0155 — 취소된 스트리밍 메시지: 정지 버튼 뒤에 남는 것
 
-- Status: **Proposed** (기안 2026-08-07 Fable · 승인=성재)
+- Status: **Accepted** (기안 2026-08-07 Fable · 성재 승인 2026-08-07)
 - 관련: ADR-0154(ADE 관제 표면) · #1152(메시지 edit 계약 — stream rev) · #1130(prime 전제 ①)
 
 ## Context
