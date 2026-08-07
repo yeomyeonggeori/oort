@@ -80,6 +80,7 @@ pub mod partial;
 pub mod payload;
 pub mod provider;
 pub mod responses;
+pub mod stream;
 pub mod tool_exec;
 
 use std::future::Future;

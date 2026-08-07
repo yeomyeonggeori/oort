@@ -3186,6 +3186,13 @@ paths:
       tags: [messages]
       operationId: editMessage
       summary: Edit an authored, undeleted message without changing its seq.
+      description: >
+        Two writes share this route. Without a `stream` block it is a human
+        revision: `state` becomes `edited` and `editedAtMs` is stamped. With one
+        (#1130 전제①) it is a slice of a growing answer — same 200, same
+        `message.edited` broadcast, but no edit stamp, and a `rev` that is not
+        newer than the stored one is a no-op. Authorship, membership, the
+        tombstone rule and "no interaction consumes a seq" guard both.
       security:
         - bearerAuth: []
       parameters:
@@ -7904,6 +7911,39 @@ components:
         body:
           type: string
           minLength: 1
+        stream:
+          $ref: "#/components/schemas/StreamEdit"
+
+    StreamEdit:
+      type: object
+      description: >
+        #1130 전제① — marks this PATCH as a slice of a growing answer rather than
+        a human revising what they already said. Present only for streaming
+        producers. With it, `body` is the whole text so far (never a delta), the
+        response leaves `editedAtMs` null and `state` at `sent`, the message
+        keeps its original `seq`, and the realtime frame is the usual
+        `message.edited` carrying the whole body — so a client renders a slice
+        without re-reading anything.
+      required: [rev, final]
+      additionalProperties: false
+      properties:
+        rev:
+          type: integer
+          format: int64
+          minimum: 1
+          description: >
+            The writer's own monotonic revision, starting at 1. Not a `seq`: it
+            orders one message's slices and lives in that message's server-owned
+            `props["momo.stream"]`. A `rev` that is not strictly greater than the
+            stored one is accepted as a 200 no-op — nothing is written, published
+            or audited — which is the honest answer to both a replayed slice and
+            one overtaken by its own successor. A value below 1 is a 400.
+        final:
+          type: boolean
+          description: >
+            True on the last slice. Clears `props["momo.stream"].streaming` and
+            is the point at which the single `message.streamed` audit row is
+            written — one per assembled message, not one per slice.
 
     ReactionDelta:
       type: object

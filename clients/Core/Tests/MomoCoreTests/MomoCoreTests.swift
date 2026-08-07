@@ -886,6 +886,169 @@ final class MomoCoreTests: XCTestCase {
         XCTAssertTrue(backfillCalls.isEmpty)
     }
 
+    // MARK: - #1130 전제① — the growing body
+
+    private static func streamed(
+        _ base: Message,
+        body: String,
+        rev: Int64,
+        streaming: Bool = true
+    ) -> Message {
+        var message = base
+        message.body = body
+        message.props = .object([
+            Message.streamPropsKey: .object([
+                "rev": .int(rev),
+                "streaming": .bool(streaming),
+            ])
+        ])
+        return message
+    }
+
+    /// A growing agent answer is one message and one seq, delivered as slices on
+    /// the **non-sequenced** `message.edited` rail — and each slice carries the
+    /// whole body, so nothing is re-read to render it.
+    ///
+    /// The measured shape (#1120 prime 스파이크 §2): 17 writes for one answer.
+    /// Were every slice a `message.new`, this assertion would read 17 seqs.
+    func testStreamingSlicesGrowOneMessageWithoutConsumingASeq() async throws {
+        let channel = ChannelID(uuidString: "00000000-0000-7000-8000-000000000010")!
+        let author = MemberID(uuidString: "00000000-0000-7000-8000-000000000101")!
+        let opening = Self.message(channel: channel, author: author, seq: 12, body: "1번째")
+        let controller = RealtimeReplayController(channel: channel, lastAppliedSeq: 11)
+        let backfill = BackfillScript(pages: [:])
+
+        var events = try await controller.process(Self.envelope(opening)) { after, limit in
+            await backfill.backfill(after: after, limit: limit)
+        }
+        XCTAssertEqual(events.messageSeqs, [12])
+
+        var accumulated = "1번째"
+        for rev in Int64(1)...16 {
+            accumulated += " \(rev + 1)번째"
+            let slice = Self.streamed(
+                opening,
+                body: accumulated,
+                rev: rev,
+                streaming: rev != 16
+            )
+            events += try await controller.process(
+                Self.envelope(slice, type: RealtimeEnvelope.EventType.messageEdited.rawValue)
+            ) { after, limit in
+                await backfill.backfill(after: after, limit: limit)
+            }
+        }
+
+        let snapshot = await controller.snapshot()
+        XCTAssertEqual(snapshot.lastAppliedSeq, 12, "16 slices must not advance the cursor")
+        XCTAssertEqual(events.count, 17, "one open + 16 slices, none suppressed")
+        guard case .messageEdited(let last) = events.last else {
+            return XCTFail("the last event is the final slice")
+        }
+        XCTAssertEqual(last.body, accumulated, "the frame carries the whole body — nothing is re-read")
+        XCTAssertEqual(last.streamRev, 16)
+        XCTAssertFalse(last.isStreamingBody, "the final slice says the text stopped arriving")
+        XCTAssertNil(last.editedAtMs, "an answer arriving is not a revision of itself")
+        let backfillCalls = await backfill.calls()
+        XCTAssertTrue(backfillCalls.isEmpty, "a slice never triggers a backfill")
+    }
+
+    /// **RED.** `message.edited` skips the replay cursor by design, so nothing
+    /// but this rule orders two slices of the same message. Drop
+    /// `admitStreamSlice` and a slice that lost the race to its own successor
+    /// rewinds the body on screen mid-sentence.
+    func testAStaleOrReplayedStreamSliceIsDroppedAndTheBodyNeverRewinds() async throws {
+        let channel = ChannelID(uuidString: "00000000-0000-7000-8000-000000000010")!
+        let author = MemberID(uuidString: "00000000-0000-7000-8000-000000000101")!
+        let opening = Self.message(channel: channel, author: author, seq: 5, body: "하나")
+        let controller = RealtimeReplayController(channel: channel, lastAppliedSeq: 4)
+        let backfill = BackfillScript(pages: [:])
+        func feed(_ message: Message, type: String) async throws -> [RealtimeEvent] {
+            try await controller.process(Self.envelope(message, type: type)) { after, limit in
+                await backfill.backfill(after: after, limit: limit)
+            }
+        }
+
+        _ = try await feed(opening, type: "message.new")
+        let edited = RealtimeEnvelope.EventType.messageEdited.rawValue
+        _ = try await feed(Self.streamed(opening, body: "하나 둘", rev: 1), type: edited)
+        _ = try await feed(Self.streamed(opening, body: "하나 둘 셋", rev: 2), type: edited)
+
+        // A replay of rev 2, then rev 1 arriving late with a body that is a
+        // prefix of the truth. Both must vanish.
+        let replay = try await feed(Self.streamed(opening, body: "하나 둘 셋", rev: 2), type: edited)
+        XCTAssertTrue(replay.isEmpty, "a replayed slice is dropped")
+        let overtaken = try await feed(Self.streamed(opening, body: "하나 둘", rev: 1), type: edited)
+        XCTAssertTrue(overtaken.isEmpty, "a slice that lost the race to its successor is dropped")
+
+        let forward = try await feed(Self.streamed(opening, body: "하나 둘 셋 넷", rev: 3), type: edited)
+        XCTAssertEqual(forward.count, 1, "…but the stream itself never stalls")
+    }
+
+    /// **RED, and the reason `isStreamSlice` reads two fields instead of one.**
+    ///
+    /// A streamed message keeps its `momo.stream` props forever, so a person
+    /// later correcting it arrives carrying the *same* revision. A staleness
+    /// rule that only compared revisions would swallow their correction — the
+    /// user would watch their own edit disappear. `editedAtMs` is what tells the
+    /// two apart, and the server's asymmetry (stamped on every edit, on no
+    /// slice) is what makes that reliable.
+    func testAHumanEditAfterAStreamIsNeverDroppedAsStale() async throws {
+        let channel = ChannelID(uuidString: "00000000-0000-7000-8000-000000000010")!
+        let author = MemberID(uuidString: "00000000-0000-7000-8000-000000000101")!
+        let opening = Self.message(channel: channel, author: author, seq: 5, body: "초안")
+        let controller = RealtimeReplayController(channel: channel, lastAppliedSeq: 4)
+        let backfill = BackfillScript(pages: [:])
+        let edited = RealtimeEnvelope.EventType.messageEdited.rawValue
+        func feed(_ message: Message) async throws -> [RealtimeEvent] {
+            try await controller.process(Self.envelope(message, type: edited)) { after, limit in
+                await backfill.backfill(after: after, limit: limit)
+            }
+        }
+
+        _ = try await controller.process(Self.envelope(opening)) { after, limit in
+            await backfill.backfill(after: after, limit: limit)
+        }
+        _ = try await feed(Self.streamed(opening, body: "초안 완성", rev: 3, streaming: false))
+
+        var correction = Self.streamed(opening, body: "사람이 고친 문장", rev: 3, streaming: false)
+        correction.state = .edited
+        correction.editedAtMs = 1_700_000_000_000
+        XCTAssertFalse(correction.isStreamSlice, "a stamped edit clock is never a slice")
+
+        let delivered = try await feed(correction)
+        XCTAssertEqual(delivered.count, 1, "a person's correction is never dropped as stale")
+        guard case .messageEdited(let message) = delivered[0] else {
+            return XCTFail("expected message.edited")
+        }
+        XCTAssertEqual(message.body, "사람이 고친 문장")
+        XCTAssertEqual(message.state, .edited)
+    }
+
+    /// A message that never streamed reads as no revision at all, and a message
+    /// mid-stream says so. Both are what a renderer branches on.
+    func testStreamMarkersAreAbsentUntilAMessageStreams() {
+        let channel = ChannelID(uuidString: "00000000-0000-7000-8000-000000000010")!
+        let author = MemberID(uuidString: "00000000-0000-7000-8000-000000000101")!
+        let plain = Self.message(channel: channel, author: author, seq: 1, body: "사람이 쓴 글")
+        XCTAssertNil(plain.streamRev)
+        XCTAssertFalse(plain.isStreamingBody)
+        XCTAssertFalse(plain.isStreamSlice)
+
+        let mid = Self.streamed(plain, body: "답이 자라는 중", rev: 4)
+        XCTAssertEqual(mid.streamRev, 4)
+        XCTAssertTrue(mid.isStreamingBody)
+        XCTAssertTrue(mid.isStreamSlice)
+
+        let settled = Self.streamed(plain, body: "답", rev: 5, streaming: false)
+        XCTAssertEqual(settled.streamRev, 5)
+        XCTAssertFalse(settled.isStreamingBody, "the text stopped arriving")
+        XCTAssertTrue(
+            settled.isStreamSlice,
+            "…but the final slice is still a slice, so its own replay is still droppable"
+        )
+    }
+
     func testBackfillProjectionCanReapplyDuplicateInteractionEventsIdempotently() {
         let channel = ChannelID(uuidString: "00000000-0000-7000-8000-000000000010")!
         let author = MemberID(uuidString: "00000000-0000-7000-8000-000000000101")!

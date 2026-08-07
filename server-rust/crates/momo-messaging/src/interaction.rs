@@ -145,6 +145,14 @@ pub enum InteractionRefused {
     PinDeleted,
     #[error("channel pin limit reached")]
     PinLimit,
+    /// #1130 전제① — a streaming revision must be a positive integer.
+    ///
+    /// `0` is refused rather than accepted-as-first because a message with no
+    /// stream marker reads as revision `0`; letting a writer send `0` would make
+    /// "I am the first slice" and "I am a replay of nothing" the same request,
+    /// and the staleness guard would have no floor to stand on.
+    #[error("stream revision must be a positive integer")]
+    StreamRevInvalid,
 }
 
 /// The row-locked message an interaction is about to act on (Swift
@@ -489,6 +497,222 @@ pub async fn edit_message_in_tx(
     )
     .await?;
     Ok(Ok(projection))
+}
+
+// ---------------------------------------------------------------------------
+// #1130 전제① — the growing body
+// ---------------------------------------------------------------------------
+
+/// The server-owned props key a streaming assembly writes into.
+///
+/// Namespaced under `momo.` because a message's `props` is otherwise the
+/// producer's own dictionary, and this is the one object in it the server
+/// authors. The route strips it from client-supplied props for the same reason
+/// it strips `mention_member_ids`: a props key the server trusts is a props key
+/// a client must not be able to write.
+pub const STREAM_PROPS_KEY: &str = "momo.stream";
+
+/// What one streaming write claims about itself.
+///
+/// Both fields belong to the **writer**, not the server. The server owns order
+/// (`seq`) and identity (`author_member_id`); a streaming producer owns the only
+/// fact the server cannot derive — which of its own slices this is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StreamEdit {
+    /// The writer's monotonic revision, `1` for the first slice.
+    ///
+    /// This is **not** a `seq`. It never leaves the message's own props, it is
+    /// per-message rather than per-channel, and nothing reads it for ordering
+    /// except the staleness guard below. `seq` stays the channel's authority and
+    /// this path never consumes one (invariant #4) — that is the entire reason
+    /// the feature is an edit rather than seventeen messages.
+    pub rev: i64,
+    /// `true` on the writer's last slice for this message.
+    pub is_final: bool,
+}
+
+/// What [`stream_message_body_in_tx`] did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StreamOutcome {
+    /// The body moved. One `message.edited` broadcast rode the transaction.
+    Applied(InteractionMessage),
+    /// The revision was not newer than the one already stored: the row was left
+    /// exactly as it was, **no broadcast and no audit row were written**, and the
+    /// caller gets the current projection back with a 200.
+    ///
+    /// This single arm is both halves of the contract at once. A retried slice
+    /// (the prime spike's `RestSink` has no retry key at all today) and a slice
+    /// that lost a race to its own successor are the same event to the server,
+    /// and the honest answer to both is "this is already true".
+    Stale(InteractionMessage),
+}
+
+impl StreamOutcome {
+    pub fn message(&self) -> &InteractionMessage {
+        match self {
+            StreamOutcome::Applied(message) | StreamOutcome::Stale(message) => message,
+        }
+    }
+
+    pub fn applied(&self) -> bool {
+        matches!(self, StreamOutcome::Applied(_))
+    }
+}
+
+/// The revision already stored on a message, `0` when it has never streamed.
+fn stored_stream_rev(props: &Value) -> i64 {
+    props
+        .get(STREAM_PROPS_KEY)
+        .and_then(|stream| stream.get("rev"))
+        .and_then(Value::as_i64)
+        .unwrap_or(0)
+}
+
+/// Read the props of a locked message without re-projecting the whole row.
+async fn message_props_in_tx(conn: &mut PgConnection, message_id: Uuid) -> Result<Value, DbError> {
+    let props: Option<Value> = sqlx::query_scalar("SELECT props FROM message WHERE id = $1")
+        .bind(message_id)
+        .fetch_optional(&mut *conn)
+        .await?;
+    Ok(props.unwrap_or_else(|| json!({})))
+}
+
+/// Re-project a message without changing it — the answer a stale slice gets.
+async fn reread_interaction_in_tx(
+    conn: &mut PgConnection,
+    message_id: Uuid,
+) -> Result<Option<InteractionMessage>, DbError> {
+    let sql = format!("SELECT {INTERACTION_COLS} FROM message WHERE id = $1");
+    let row = sqlx::query(&sql)
+        .bind(message_id)
+        .fetch_optional(&mut *conn)
+        .await?;
+    match row {
+        Some(row) => Ok(Some(decode_interaction(&row)?)),
+        None => Ok(None),
+    }
+}
+
+/// `PATCH …/messages/{id}` with a `stream` block — **grow** a message's body.
+///
+/// ## Why this is an edit and not seventeen messages
+///
+/// 실측 (#1120 prime 스파이크, `docs/planning/research/2026-08-06-prime-agent-spike.md`
+/// §2): a 3,661-character answer coalesced 30.8× still needed **17 REST writes**.
+/// Through `send` that is 17 messages, 17 `seq` values and 17 rows in everyone's
+/// timeline for one sentence. Through this path it is one message that grows:
+/// the row keeps its `id`, its `seq` and its place, and every client already
+/// applies `message.edited` in place with the whole body on board.
+///
+/// ## What it does *not* do, and why each absence is the design
+///
+/// * **No `seq`.** Same as every other interaction (module docs, point 1). A
+///   growing answer must not look like 17 unread messages to a read cursor.
+/// * **No `state = 'edited'`, no `edited_at`.** This is the one place this
+///   function deliberately parts from [`edit_message_in_tx`]. "수정됨" is a claim
+///   that a human revised what they had already said; an answer arriving is not a
+///   revision of itself. Stamping it would put the badge on every streamed
+///   message from its first slice and never take it off — and it would also
+///   destroy the consumer's only way to tell a stream frame from a real edit
+///   (see `RealtimeSubscriptionDriver`, which drops a stale stream frame and must
+///   never drop a human's edit).
+/// * **No append.** `body` is **absolute** — the whole text so far, every time.
+///   The writer owns the accumulator. An append contract would double-write on
+///   any retry, and the measured adapter retries without a stable key.
+/// * **No new frame type.** The broadcast is the existing `message.edited`,
+///   which already carries the full body at the message's own seq
+///   ([`build_message_edited_payload`]), so no client re-reads anything to render
+///   a slice. ADR-0148's "a quote is a reference, not a snapshot" is about the
+///   quoted block inside the payload and is untouched here.
+///
+/// ## Ordering and idempotency, in one rule
+///
+/// `rev` must be **strictly greater** than the stored one or the write is a
+/// no-op ([`StreamOutcome::Stale`]). The row lock makes that check a decision
+/// rather than a race. That one rule covers a replay, a duplicate and a slice
+/// that arrived after its own successor, and it needs no new column: the
+/// revision lives in the server-owned [`STREAM_PROPS_KEY`] object, which the
+/// same `UPDATE` merges shallowly so nothing else in `props` is disturbed.
+///
+/// Every other guard is [`edit_message_in_tx`]'s, unchanged: author-only,
+/// channel membership, no tombstones, and RLS confines the lock to the tenant.
+pub async fn stream_message_body_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    message_id: Uuid,
+    actor_member_id: Uuid,
+    body: &str,
+    edit: StreamEdit,
+) -> Result<Result<StreamOutcome, InteractionRefused>, DbError> {
+    if edit.rev < 1 {
+        return Ok(Err(InteractionRefused::StreamRevInvalid));
+    }
+    if body.trim().is_empty() {
+        return Ok(Err(InteractionRefused::EmptyBody));
+    }
+    let locked = match lock_and_authorize(&mut *conn, message_id, actor_member_id).await? {
+        Ok(locked) => locked,
+        Err(refused) => return Ok(Err(refused)),
+    };
+    // Authorship before state, exactly as the edit path orders it: a non-author
+    // must not learn from the refusal whether the message is a tombstone.
+    if locked.author_member_id != actor_member_id {
+        return Ok(Err(InteractionRefused::NotAuthorForEdit));
+    }
+    if locked.is_deleted() {
+        return Ok(Err(InteractionRefused::EditDeleted));
+    }
+
+    // Read under the lock taken above, so the compare-and-set below cannot
+    // interleave with a concurrent slice of the same message.
+    let stored_rev = stored_stream_rev(&message_props_in_tx(&mut *conn, message_id).await?);
+    if edit.rev <= stored_rev {
+        let Some(current) = reread_interaction_in_tx(&mut *conn, message_id).await? else {
+            return Ok(Err(InteractionRefused::NotFound));
+        };
+        return Ok(Ok(StreamOutcome::Stale(current)));
+    }
+
+    // `||` is a shallow merge — the producer's own props keys survive a slice
+    // (`patch_message_props_in_tx` documents the same choice for approval cards).
+    let patch = json!({
+        STREAM_PROPS_KEY: {
+            "rev": edit.rev,
+            // The one bit a renderer needs: is more text coming? It is `false`
+            // on the final slice rather than the key being removed, so a client
+            // that only ever sees the last frame still learns this message was
+            // assembled rather than typed.
+            "streaming": !edit.is_final,
+        }
+    });
+    let sql = format!(
+        "UPDATE message \
+            SET body = $2, props = COALESCE(props, '{{}}'::jsonb) || $3 \
+          WHERE id = $1 \
+        RETURNING {INTERACTION_COLS}"
+    );
+    let row = sqlx::query(&sql)
+        .bind(message_id)
+        .bind(body)
+        .bind(&patch)
+        .fetch_optional(&mut *conn)
+        .await?;
+    let Some(row) = row else {
+        return Ok(Err(InteractionRefused::NotFound));
+    };
+    let projection = decode_interaction(&row)?;
+
+    let payload = build_message_edited_payload(workspace_id, &projection);
+    emit_outbox(
+        &mut *conn,
+        workspace_id,
+        OutboxKind::Broadcast,
+        "publish",
+        &payload,
+        Some(projection.message.channel_id),
+    )
+    .await?;
+    Ok(Ok(StreamOutcome::Applied(projection)))
 }
 
 /// Outcome of [`delete_message_in_tx`].
@@ -1169,6 +1393,67 @@ mod tests {
             payload["data"]["ts"],
             json!(1_700_000_777_000_i64),
             "ts is the edit's own instant, not the original hlc"
+        );
+    }
+
+    /// #1130 전제① — a message that has never streamed reads as revision `0`,
+    /// and so does one whose marker is garbage. `0` is the floor the strictly-
+    /// greater rule stands on; if a malformed marker read as anything else, a
+    /// producer could be locked out of its own message by junk in `props`.
+    #[test]
+    fn a_message_that_never_streamed_is_revision_zero() {
+        assert_eq!(stored_stream_rev(&json!({})), 0);
+        assert_eq!(stored_stream_rev(&json!({ "tool_name": "grep" })), 0);
+        assert_eq!(stored_stream_rev(&json!({ STREAM_PROPS_KEY: {} })), 0);
+        assert_eq!(
+            stored_stream_rev(&json!({ STREAM_PROPS_KEY: "not an object" })),
+            0
+        );
+        assert_eq!(
+            stored_stream_rev(&json!({ STREAM_PROPS_KEY: { "rev": "3" } })),
+            0,
+            "a string revision is not a revision"
+        );
+        assert_eq!(
+            stored_stream_rev(&json!({ STREAM_PROPS_KEY: { "rev": 17, "streaming": false } })),
+            17
+        );
+    }
+
+    /// #1130 전제① — the growing body reuses the **existing** `message.edited`
+    /// frame, whole body and all, at the message's own seq. That is the whole
+    /// reason no client has to re-read anything to render a slice: were the
+    /// frame body-less, seventeen slices would be seventeen history round trips
+    /// per turn per connected client.
+    #[test]
+    fn a_stream_slice_broadcasts_the_whole_body_at_the_targets_own_seq() {
+        let mut streamed = projection(41);
+        streamed.message.body = Some("답이 자라는 중".into());
+        streamed.message.state = "sent".into();
+        streamed.message.edited_at = None;
+        streamed.message.props = json!({ STREAM_PROPS_KEY: { "rev": 3, "streaming": true } });
+
+        let payload = build_message_edited_payload(Uuid::from_u128(2), &streamed);
+        let inner = &payload["data"]["payload"];
+        assert_eq!(payload["data"]["type"], json!("message.edited"));
+        assert_eq!(payload["data"]["seq"], json!(41), "no new seq is consumed");
+        assert_eq!(inner["body"], json!("답이 자라는 중"));
+        assert_eq!(
+            inner["state"],
+            json!("sent"),
+            "a growing answer has not been edited by anyone"
+        );
+        assert_eq!(inner["edited_at_ms"], Value::Null);
+        assert_eq!(inner["props"][STREAM_PROPS_KEY]["rev"], json!(3));
+        assert_eq!(
+            inner["props"][STREAM_PROPS_KEY]["streaming"],
+            json!(true),
+            "the one bit a renderer needs: is more text coming"
+        );
+        assert_eq!(
+            payload["data"]["ts"],
+            json!(1_700_000_000_000_i64),
+            "with no edited_at the frame falls back to the message's own hlc"
         );
     }
 
