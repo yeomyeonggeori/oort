@@ -20,7 +20,10 @@ import {
 } from "@/features/workspace/useWorkspace";
 import { uuidEq, type MessageSearchHit } from "@momo/core/lib/api";
 import { NetworkError } from "@momo/core/lib/http";
-import { serverSaysAbsent } from "@momo/core/features/capabilities/serverSurfaces";
+import {
+  serverSaysAbsent,
+  serverSurface,
+} from "@momo/core/features/capabilities/serverSurfaces";
 import { SurfaceUnavailableSection } from "@/features/capabilities/SurfaceUnavailable";
 import {
   leadsWithEllipsis,
@@ -44,6 +47,15 @@ import { useMessageSearch } from "./useMessageSearch";
 // 세 상태가 갈 곳이 없어진다. 대신 팔레트에는 **이 표면으로 오는 자리**를 둔다
 // (QuickSwitcher의 "메시지 검색"): 편승은 하되 흉내는 내지 않는다.
 // =============================================================================
+
+/**
+ * 이 목적지의 이름 — 사이드바 줄과 팔레트 항목이 읽는 그 한 줄 (이슈 #1146 N4).
+ *
+ * 표면 판정표가 이미 「사용자가 이 표면을 부르는 이름」을 들고 있으므로 여기서
+ * 다시 짓지 않는다. 셋이 각자 적으면 한 목적지가 이름을 셋 갖고, 실제로 1차의
+ * 사이드바가 「검색」이라고 적어 그 값을 치렀다.
+ */
+const SEARCH_SURFACE_NAME = serverSurface("messageSearch").label;
 
 /** 한 줄. 채널 · 작성자 · 시각 · 본문 스니펫, 그리고 눌러서 원문으로. */
 function HitRow({
@@ -158,7 +170,11 @@ export function SearchRoute() {
     <div className="flex min-w-0 flex-1 flex-col" data-testid="search-route">
       <header className="flex items-center gap-2 border-b border-line px-4 py-2">
         <SidebarDrawerToggle />
-        <h1 className="text-body font-semibold">메시지 검색</h1>
+        {/* 도착한 표면이 자기 이름을 말한다 — 그리고 그 말은 사이드바 줄·팔레트
+            항목과 **같은 한 줄**에서 온다 (이슈 #1146 N4). */}
+        <h1 className="text-body font-semibold" data-testid="search-title">
+          {SEARCH_SURFACE_NAME}
+        </h1>
       </header>
 
       {/* `role="search"`을 form이 갖는다. 제출은 막는다: 결과는 타자를 멈추면
@@ -178,7 +194,8 @@ export function SearchRoute() {
             type="search"
             value={search.raw}
             onChange={(event) => search.setRaw(event.target.value)}
-            aria-label="메시지 검색"
+            // 이 밭의 이름도 이 표면의 이름이다 (이슈 #1146 N4).
+            aria-label={SEARCH_SURFACE_NAME}
             placeholder="메시지 내용으로 검색"
             className="ps-8"
             data-testid="search-input"

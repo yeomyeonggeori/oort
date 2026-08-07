@@ -1,6 +1,7 @@
 import {ApiError, openDirectMessage, uuidEq} from '@momo/core/lib/api';
 import {NetworkError} from '@momo/core/lib/http';
 import {attachParticle} from '@momo/core/lib/koreanParticle';
+import {serverSurface} from '@momo/core/features/capabilities/serverSurfaces';
 import {channelLabel} from '@momo/core/features/workspace/directory';
 import {useMutation} from '@tanstack/react-query';
 import React, {useCallback, useMemo, useState} from 'react';
@@ -54,7 +55,88 @@ import {useSession} from '../session/useSession';
 // pure synchronous call. Routing it through a query or a debounce timer and back
 // is what severed the iOS IME in the spike, and a Korean channel search is
 // exactly where that would be discovered by a user rather than by us.
+//
+// ## 그 목적지의 이름은 하나다 (이슈 #1146 N4)
+//
+// 이 화면이 여는 곳은 「메시지 검색」이고, 그것은 도착한 화면이 자기 제목으로
+// 쓰는 말이자 코어의 표면 판정표가 「사용자가 이 표면을 부르는 이름」으로 들고
+// 있는 말이다. 1차의 이 화면은 그 문을 **눈에는 「메시지 찾기」로, 귀에는
+// 「메시지 검색」으로** 내놓았다 — 한 컨트롤이 이름을 둘 가진 것이고, 화면을
+// 되짚어 볼 수 없는 사람에게는 자기가 들은 것이 화면에 없다. 웹의 사이드바가
+// 같은 자리에서 「검색」이라고 적어 셋째 이름을 만들고 있었고, 그래서 이름은
+// 세 표면 모두 코어의 그 한 줄에서 받아 온다.
 // =============================================================================
+
+/** 이 화면이 여는 목적지의 이름. 눈과 귀가 같은 말을 듣는다 (이슈 #1146 N4). */
+const SEARCH_SURFACE_NAME = serverSurface('messageSearch').label;
+
+/**
+ * 이름으로 못 찾았을 때 같은 문으로 넘겨주는 줄.
+ *
+ * 조사는 골라 붙인다 — 레포에 이미 있는 규칙을 쓰고 여기서 두 번째 규칙을
+ * 세우지 않는다 (B12 R2 High-2). 한 문자열인 것은 눈과 귀가 갈리지 않게 하기
+ * 위해서다.
+ */
+function fallthroughLabel(query: string): string {
+  const quoted = `'${query.trim()}'`;
+  return `${attachParticle(quoted, 'subject')} 오간 ${SEARCH_SURFACE_NAME}`;
+}
+
+/**
+ * 이 화면의 머리에 서는 문 — 언제나 열려 있는 쪽.
+ *
+ * 자기 컴포넌트인 것은 **사진을 찍기 위해서**다(`measure/surfaces.tsx`). 이
+ * 화면 전체는 세션·질의 클라이언트·명부를 세워야 뜨는데, 리뷰가 봐야 하는 것은
+ * 그 셋이 아니라 이 컨트롤이 무슨 낱말을 어느 폭으로 내놓는가다. 목업을 그리지
+ * 않는 것이 하네스의 규칙이므로, 찍히는 것은 배송되는 바로 이 컴포넌트다.
+ */
+export function SearchEntryAction({
+  onPress,
+}: {
+  onPress: () => void;
+}): React.JSX.Element {
+  const styles = useStyles(buildStyles);
+  return (
+    <Pressable
+      accessibilityRole="button"
+      // 라벨과 글자가 같은 문자열이다: 하나를 듣고 하나를 보는 사람에게
+      // 이름이 둘이면 컨트롤도 둘이다 (고정 목록 버튼과 같은 규칙).
+      accessibilityLabel={SEARCH_SURFACE_NAME}
+      onPress={onPress}
+      style={({pressed}) => [styles.headerAction, pressed && styles.pressed]}
+      testID="open-message-search">
+      <Text style={styles.headerActionLabel}>{SEARCH_SURFACE_NAME}</Text>
+    </Pressable>
+  );
+}
+
+/**
+ * 이름으로 못 찾은 사람에게 열리는 두 번째 문.
+ *
+ * 1차는 눈에 「…가 오간 메시지 찾기」, 귀에 「…로 메시지 검색」을 주었다 — 이름이
+ * 갈렸을 뿐 아니라 조사도 손으로 적혀 있어서, 「두 번째 규칙을 세우지 않는다」가
+ * 보이는 글자에만 지켜지고 낭독 라벨에서는 깨져 있었다. 이제 한 문자열이다.
+ */
+export function SearchFallthrough({
+  query,
+  onPress,
+}: {
+  query: string;
+  onPress: () => void;
+}): React.JSX.Element {
+  const styles = useStyles(buildStyles);
+  const label = fallthroughLabel(query);
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      onPress={onPress}
+      style={({pressed}) => [styles.fallthrough, pressed && styles.pressed]}
+      testID="search-messages-instead">
+      <Text style={styles.fallthroughLabel}>{label}</Text>
+    </Pressable>
+  );
+}
 
 export default function SidebarScreen({
   openChannelId,
@@ -176,16 +258,7 @@ export default function SidebarScreen({
     <Screen>
       <ScreenHeader
         title="대화"
-        right={
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="메시지 검색"
-            onPress={() => onOpenSearch()}
-            style={({pressed}) => [styles.headerAction, pressed && styles.pressed]}
-            testID="open-message-search">
-            <Text style={styles.headerActionLabel}>메시지 찾기</Text>
-          </Pressable>
-        }
+        right={<SearchEntryAction onPress={() => onOpenSearch()} />}
       />
 
       <View style={styles.searchWrap}>
@@ -253,18 +326,11 @@ export default function SidebarScreen({
               detail="이름의 일부만 입력해도 찾을 수 있습니다. 이름이 아니라 오간 말을 찾는 중이라면:"
               testID="channels-no-match"
             />
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={`'${query.trim()}'로 메시지 검색`}
+            {/* 같은 문이므로 같은 이름을 쓴다 (이슈 #1146 N4). */}
+            <SearchFallthrough
+              query={query}
               onPress={() => onOpenSearch(query)}
-              style={({pressed}) => [styles.fallthrough, pressed && styles.pressed]}
-              testID="search-messages-instead">
-              <Text style={styles.fallthroughLabel}>
-                {/* 조사는 골라 붙인다. 레포에 이미 있는 규칙을 쓰고 여기서
-                    두 번째 규칙을 세우지 않는다 (B12 R2 High-2). */}
-                {`${attachParticle(`'${query.trim()}'`, 'subject')} 오간 메시지 찾기`}
-              </Text>
-            </Pressable>
+            />
           </View>
         ) : (
           <EmptyState

@@ -1,8 +1,11 @@
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
 import {act, cleanup, render, screen, waitFor} from '@testing-library/react-native';
+import {readFileSync} from 'fs';
+import {join} from 'path';
 import React from 'react';
 import {Text} from 'react-native';
 
+import {serverSurface} from '@momo/core/features/capabilities/serverSurfaces';
 import {useMessageSearch} from '../src/features/search/useMessageSearch';
 
 // The one network call this surface makes. Mocked at the module boundary so the
@@ -211,5 +214,58 @@ describe('넘겨받은 질의', () => {
       expect(searchMessages).toHaveBeenCalledWith(WS, '배포', expect.anything()),
     );
     expect(probe.query).toBe('배포');
+  });
+});
+
+// =============================================================================
+// 한 목적지, 한 이름 (이슈 #1146 N4).
+//
+// 1차의 폰은 이 문을 **눈에는 「메시지 찾기」로, 귀에는 판정표의 이름으로** 내놓
+// 았다 — 한 컨트롤이 이름을 둘 가진 것이고, 화면을 되짚어 볼 수 없는 사람에게는
+// 자기가 들은 것이 화면에 없다. 웹의 사이드바는 같은 자리에서 셋째 이름을 적고
+// 있었다.
+//
+// 검사가 파일 모양인 것은 `projectShape.test.ts` 가 같은 종류의 결함에 대해
+// 내린 판단과 같다: 이 실패는 **조용하고**, 행동 테스트가 볼 수 있을 때쯤이면
+// 이미 두 이름이 두 벌의 문서와 두 벌의 습관을 갖는다. 이 화면들을 실제로 띄우
+// 려면 세션·질의 클라이언트·목록 세 개를 세워야 하는데, 그렇게 세운 화면이
+// 증명하는 것도 결국 「낱말을 손으로 적지 않았다」 하나다.
+//
+// 주석은 걷어내고 본다 — 산문은 이 낱말들을 계속 써야 하고, 산문까지 막는 가드는
+// 가드가 무뎌지는 대신 글이 무뎌진다(DOM 가드가 같은 이유로 같은 일을 한다).
+// =============================================================================
+
+describe('메시지 검색이라는 목적지는 이름이 하나다 (이슈 #1146 N4)', () => {
+  const SCREENS = ['SidebarScreen.tsx', 'SearchScreen.tsx'];
+
+  /** 주석을 걷어낸 소스 — 화면이 실제로 사람에게 내놓는 글자만 남는다. */
+  function code(file: string): string {
+    return readFileSync(join(__dirname, '../src/screens', file), 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/^\s*\/\/.*$/gm, '');
+  }
+
+  it('이름을 짓지 않고 표면 판정표에서 받아 온다', () => {
+    for (const file of SCREENS) {
+      expect(code(file)).toContain("serverSurface('messageSearch')");
+    }
+  });
+
+  it('문을 여는 쪽도 도착한 쪽도 낱말을 손으로 적지 않는다', () => {
+    // 판정표의 낱말을 문자열 리터럴로 다시 적은 화면이 하나라도 있으면, 표를
+    // 고치는 날 그 화면만 옛 이름으로 남는다. 이름이 갈라지는 유일한 경로다.
+    const name = serverSurface('messageSearch').label;
+    for (const file of SCREENS) {
+      expect(code(file)).not.toContain(`'${name}'`);
+      expect(code(file)).not.toContain(`"${name}"`);
+    }
+  });
+
+  it('1차의 둘째 이름은 어디에도 남지 않는다', () => {
+    // 「메시지 찾기」는 사이드바 헤더 액션의 **보이는 글자**였고, 같은 컨트롤의
+    // 낭독 라벨은 판정표의 이름이었다. 눈과 귀가 갈린 자리다.
+    for (const file of SCREENS) {
+      expect(code(file)).not.toContain('메시지 찾기');
+    }
   });
 });

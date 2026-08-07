@@ -42,7 +42,10 @@ import {
 } from "@/features/workspace/useWorkspace";
 import { canCreateChannelNow } from "@momo/core/features/channels/model";
 import { useOpenCreateChannel } from "@/features/channels/useCreateChannel";
-import { isSurfaceProvided } from "@momo/core/features/capabilities/serverSurfaces";
+import {
+  isSurfaceProvided,
+  serverSurface,
+} from "@momo/core/features/capabilities/serverSurfaces";
 import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/States";
 import { UpdateBadge } from "@/features/updates/UpdateBadge";
 import { SidebarRow, SidebarSection } from "./SidebarRow";
@@ -350,9 +353,28 @@ export function Sidebar({
               <SidebarRow to="/directory" icon={<Users className="size-4" />} label="멤버" testId="nav-directory" />
               <SidebarRow to="/agents" icon={<Bot className="size-4" />} label="에이전트" testId="nav-agents" />
               {/* 메시지 검색 (goal B12 H5). 전역 목적지인 이유는 인박스와 같다:
-                  가는 곳이지 구독하는 것이 아니다. */}
+                  가는 곳이지 구독하는 것이 아니다.
+
+                  **이름을 짓지 않고 받아 온다** (이슈 #1146 N4). 1차의 이 줄은
+                  「검색」이라고 적었는데, 도착하는 라우트의 제목도 팔레트의 항목도
+                  폰의 화면도 전부 「메시지 검색」이었다 — 한 목적지에 이름이 둘이면
+                  사람은 그것을 두 기능으로 센다. 바로 위 줄의 「검색과 이동」과
+                  나란히 서면 더 나빠서, 「검색」은 그 팔레트의 짧은 이름처럼 읽혔다.
+                  게다가 팔레트의 빈 상태는 이 줄을 **이름으로 가리킨다**(「메시지
+                  본문은 아래 메시지 검색에서 찾을 수 있습니다」) — 가리키는 이름이
+                  화면에 없으면 그 안내는 없는 곳을 가리킨 것이다.
+
+                  판정은 팔레트가 「멤버 ↔ 디렉터리」에서 이미 내렸다: 사람이
+                  **도착하는 표면이 쓰는 말**이 그 목적지의 이름이다. 그 말은 코어의
+                  표면 판정표에 이미 한 줄로 있으므로(`serverSurface`), 여기서 다시
+                  적지 않고 그것을 든다. */}
               {isSurfaceProvided("messageSearch") && (
-                <SidebarRow to="/search" icon={<Search className="size-4" />} label="검색" testId="nav-search" />
+                <SidebarRow
+                  to="/search"
+                  icon={<Search className="size-4" />}
+                  label={serverSurface("messageSearch").label}
+                  testId="nav-search"
+                />
               )}
               {/* 작업 흐름 sits with the global destinations for the reason
                   에이전트 does (MOMO-652): it is a place you GO, not a thing you

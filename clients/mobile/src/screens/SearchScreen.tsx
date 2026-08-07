@@ -7,6 +7,7 @@ import {
   snippetSegments,
   trailsWithEllipsis,
 } from '@momo/core/features/search/searchModel';
+import {serverSurface} from '@momo/core/features/capabilities/serverSurfaces';
 import {
   channelLabel,
   memberNameParts,
@@ -70,7 +71,18 @@ import {useSession} from '../session/useSession';
 // 방금 읽은 문장을 눌러 놓고 표식도 문장도 없이 전혀 다른 메시지가 있는 채널
 // 바닥에 도착했다. seq 를 함께 들고 가는 것이 "더 위쪽에 있어 아직 안 불러왔다"를
 // 추측이 아니라 사실로 만든다.
+//
+// ## 이 화면의 이름 (이슈 #1146 N4)
+//
+// 제목을 손으로 적지 않고 코어의 표면 판정표에서 든다. 이 화면은 사람이 **도착
+// 하는 곳**이고, 이 레포의 규칙에서 목적지의 이름은 도착한 표면이 쓰는 말이다 —
+// 그래서 여기가 이름의 원본이 될 자격이 있는 유일한 자리인데, 원본이 화면 안에
+// 갇혀 있으면 문을 여는 쪽(사이드바 헤더 액션·웹 사이드바 줄·⌘K 항목)은 그것을
+// 베껴 적을 수밖에 없고, 실제로 베낀 것들이 갈라져 있었다.
 // =============================================================================
+
+/** 이 목적지의 이름. 문을 여는 컨트롤들이 읽는 그 한 줄 (이슈 #1146 N4). */
+const SEARCH_SURFACE_NAME = serverSurface('messageSearch').label;
 
 export default function SearchScreen({
   initialQuery = '',
@@ -123,8 +135,10 @@ export default function SearchScreen({
 
   return (
     <Screen>
+      {/* 도착한 화면이 자기 이름을 말한다 — 그리고 그 말은 이 문을 여는
+          컨트롤들과 **같은 한 줄**에서 온다 (이슈 #1146 N4). */}
       <ScreenHeader
-        title="메시지 검색"
+        title={SEARCH_SURFACE_NAME}
         onBack={onBack}
         backLabel="검색 닫기"
         titleTestID="search-title"
@@ -225,7 +239,9 @@ export function SearchBody({
           onChangeText={search.setQuery}
           placeholder="메시지 내용으로 검색"
           placeholderTextColor={palette.textFaint}
-          accessibilityLabel="메시지 검색"
+          // 이 밭의 이름도 이 표면의 이름이다 — 한 낱말을 두 군데 적으면 한쪽만
+          // 낡는다 (이슈 #1146 N4).
+          accessibilityLabel={SEARCH_SURFACE_NAME}
           autoCorrect={false}
           returnKeyType="search"
           testID="search-input"
