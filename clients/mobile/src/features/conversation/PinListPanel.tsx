@@ -2,8 +2,14 @@ import {
   PIN_EMPTY_BODY_TEXT,
   PIN_LIST_EMPTY_DETAIL,
   PIN_LIST_EMPTY_HEADLINE,
+  PIN_LIST_FAILED_DETAIL,
+  PIN_LIST_FAILED_HEADLINE,
+  pinExcerpt,
   pinList,
-  pinListLabel,
+  pinListHeaderLabel,
+  pinStampLabel,
+  pinStampSegments,
+  type PinListStatus,
   type PinMap,
   type PinnedMessage,
 } from '@momo/core/features/timeline/pins';
@@ -11,7 +17,7 @@ import {memberNameParts} from '@momo/core/features/workspace/directory';
 import type {Directory} from '@momo/core/features/workspace/directory';
 import React, {useCallback, useMemo} from 'react';
 import {FlatList, Pressable, StyleSheet, Text, View} from 'react-native';
-import {EmptyState, Screen, ScreenHeader} from '../../design/atoms';
+import {EmptyState, ErrorState, Screen, ScreenHeader} from '../../design/atoms';
 import {
   color,
   font,
@@ -25,7 +31,7 @@ import {EdgeSwipeBack} from '../../nav/EdgeSwipeBack';
 import {appNote} from './appVoice';
 
 // =============================================================================
-// 채널의 고정 목록 (이슈 #1112) — 폰 몫.
+// 채널의 고정 목록 (이슈 #1112 · 후속 #1146) — 폰 몫.
 //
 // ## 왜 바텀 시트가 아니라 덮는 화면인가 (이 앱이 이미 적어 둔 관례)
 //
@@ -43,7 +49,15 @@ import {appNote} from './appVoice';
 // 웹은 같은 목록을 헤더 버튼의 드롭다운으로 낸다. 두 앱이 다른 껍데기를 쓰는 것은
 // 분열이 아니라 각자의 관례다 — 마우스가 여는 메뉴는 320px 안에서 열리고 닫히지만,
 // 엄지가 여는 목록은 화면이어야 100개를 훑을 수 있다. 안에 든 낱말과 순서는 코어의
-// 같은 함수(`pinList`·`pinListLabel`)에서 오므로 두 화면이 다른 말을 하지 않는다.
+// 같은 함수(`pinList`·`pinListHeaderLabel`)에서 오므로 두 화면이 다른 말을 하지
+// 않는다.
+//
+// ## #1146 M2 — 못 불러온 목록은 「없다」고 말하지 않는다
+//
+// 1차는 `/pins` 가 실패해도 조용히 빈 지도로 남았고, 그래서 오프라인에서 이 화면을
+// 연 사람은 「고정한 메시지가 없습니다」를 읽었다. 채널에 고정이 열 개 있어도.
+// 읽은 사람은 고정이 지워졌다고 결론 내린다. 이제 상태를 받아 셋을 갈라 그리고,
+// 실패한 목록에 프레임으로 들어온 항목이 있으면 **둘 다** 그린다.
 //
 // ## 누르면 원본으로 간다 — 그리고 새 항법을 만들지 않는다
 //
@@ -58,39 +72,38 @@ const EXCERPT_MAX_CHARS = 80;
 /**
  * 이 줄이 **누구의 말인가**.
  *
- * 본문이 있으면 저자의 말이고, 없으면 앱의 서술이다 — 그리고 앱의 서술은 `※` 를
- * 달고 흐린 색으로 선다(`appVoice.ts`). 카드 안에서 그 둘이 같은 결로 서면 사람은
- * 앱의 해명을 남의 말로 읽는다. 텍스트 첨부만 있는 메시지가 정확히 이 경우다.
+ * 자르는 규칙은 코어의 것이다(`pinExcerpt` — 서로게이트를 반토막 내지 않는 절단).
+ * 여기 남는 것은 **격**뿐이다: 본문이 있으면 저자의 말이고, 없으면 앱의 서술이며,
+ * 앱의 서술은 `※` 를 달고 흐린 색으로 선다(`appVoice.ts`). 카드 안에서 그 둘이
+ * 같은 결로 서면 사람은 앱의 해명을 남의 말로 읽는다.
  */
-function excerpt(body: string | null): {text: string; ours: boolean} {
-  const text = body?.trim();
-  if (!text) return {text: appNote(PIN_EMPTY_BODY_TEXT), ours: true};
-  const flattened = text.replace(/\s+/g, ' ');
-  return {
-    text:
-      flattened.length > EXCERPT_MAX_CHARS
-        ? `${flattened.slice(0, EXCERPT_MAX_CHARS)}…`
-        : flattened,
-    ours: false,
-  };
-}
-
-function dayLabel(atMs: number): string {
-  const at = new Date(atMs);
-  return `${at.getMonth() + 1}월 ${at.getDate()}일`;
+function excerptLine(body: string | null): {text: string; ours: boolean} {
+  const excerpt = pinExcerpt(body, EXCERPT_MAX_CHARS);
+  return excerpt.empty
+    ? {text: appNote(excerpt.text), ours: true}
+    : {text: excerpt.text, ours: false};
 }
 
 export function PinListPanel({
   pins,
+  status,
   directory,
+  nowMs,
   onJump,
   onClose,
+  onRetry,
 }: {
   pins: PinMap;
+  /** 이슈 #1146 M2 — 빈 지도가 무엇을 뜻하는지 아는 유일한 값. */
+  status: PinListStatus;
   directory: Directory;
+  /** 도장이 「오늘」인지 아는 데 필요한 값. 대화 화면의 시계를 그대로 받는다. */
+  nowMs: number;
   /** 원본으로 간다. 대화 화면의 기존 점프 기계를 그대로 탄다. */
   onJump: (messageId: string, seq: number) => void;
   onClose: () => void;
+  /** 목록만 다시 읽는다(채널 전체가 아니라). 실패 문장 뒤의 행동. */
+  onRetry: () => void;
 }): React.JSX.Element {
   const entries = useMemo(() => pinList(pins), [pins]);
 
@@ -113,7 +126,7 @@ export function PinListPanel({
       testID="pin-list-pane">
       <Screen>
         <ScreenHeader
-          title={pinListLabel(entries.length)}
+          title={pinListHeaderLabel(entries.length, status)}
           onBack={onClose}
           // 「뒤로」가 아니다. 덮고 있는 표면은 자기가 무엇을 닫는지 말한다.
           backLabel="고정 목록 닫기"
@@ -124,14 +137,39 @@ export function PinListPanel({
           keyExtractor={entry => entry.messageId}
           testID="pin-list"
           contentContainerStyle={styles.listBody}
+          // 실패는 목록 **위에** 선다 (이슈 #1146 M2). 빈 자리를 차지하는 것이
+          // 아니라 머리에 서는 이유는, 프레임으로 들어온 항목이 있을 수 있기
+          // 때문이다 — 「가진 것은 이게 전부가 아니다」와 「가진 것은 이것들이다」는
+          // 둘 다 참이고, 둘 다 말해야 한다.
+          //
+          // `ErrorState` 를 쓰는 것은 스레드 패널이 답글을 못 불러왔을 때 하는
+          // 것과 같다: 무슨 일이 있었는지와 다음에 할 일이 한 블록에 있고,
+          // 「다시 시도」는 그 원자가 스스로 그린다.
+          ListHeaderComponent={
+            status === 'failed' ? (
+              <ErrorState
+                headline={PIN_LIST_FAILED_HEADLINE}
+                detail={PIN_LIST_FAILED_DETAIL}
+                onRetry={onRetry}
+                testID="pin-list-failed"
+              />
+            ) : null
+          }
           ListEmptyComponent={
-            <EmptyState
-              // 두 조각을 코어에서 든다. 제목을 손으로 적으면 설명과 갈라지고,
-              // 한 문자열을 둘 다에 넘기면 같은 문장이 두 번 인쇄된다(실측).
-              headline={PIN_LIST_EMPTY_HEADLINE}
-              detail={PIN_LIST_EMPTY_DETAIL}
-              testID="pin-list-empty"
-            />
+            // 셋 중 하나만 말한다. **실패했을 때 「없습니다」를 함께 말하지 않는
+            // 것**이 이 갈래의 요점이고(둘은 서로 반대되는 주장이다), 아직
+            // 불러오는 중일 때도 마찬가지다 — 한 번의 REST 왕복은 문장을 세울
+            // 만큼 길지 않고, 그 사이에 「없습니다」를 그리면 다음 순간 스스로를
+            // 뒤집는다.
+            status === 'ready' ? (
+              <EmptyState
+                // 두 조각을 코어에서 든다. 제목을 손으로 적으면 설명과 갈라지고,
+                // 한 문자열을 둘 다에 넘기면 같은 문장이 두 번 인쇄된다(실측).
+                headline={PIN_LIST_EMPTY_HEADLINE}
+                detail={PIN_LIST_EMPTY_DETAIL}
+                testID="pin-list-empty"
+              />
+            ) : null
           }
           renderItem={({item}) => {
             const name = memberNameParts(
@@ -139,7 +177,7 @@ export function PinListPanel({
               item.authorMemberId,
               '알 수 없는 멤버',
             ).name;
-            const excerptLine = excerpt(item.body);
+            const excerpt = excerptLine(item.body);
             return (
               <Pressable
                 accessibilityRole="button"
@@ -148,9 +186,12 @@ export function PinListPanel({
                 //
                 // 라벨에는 `※` 가 없다 — 그 표시는 눈으로 훑을 때 「본문이 아님」을
                 // 주는 것이지 소리 내어 읽을 것이 아니다(`appVoice.ts` 의 규율).
-                accessibilityLabel={`${name}, ${
-                  excerptLine.ours ? PIN_EMPTY_BODY_TEXT : excerptLine.text
-                }, 원본으로 이동`}
+                //
+                // 도장은 **절대 날짜로** 읽힌다: 눈은 「오늘」로 충분하지만 귀에
+                // 「오늘」만 남기는 것은 정보를 빼는 것이다(`pinStampLabel`).
+                accessibilityLabel={`${name}, ${pinStampLabel(
+                  item.pinnedAtMs,
+                )}, ${excerpt.ours ? PIN_EMPTY_BODY_TEXT : excerpt.text}, 원본으로 이동`}
                 onPress={() => openEntry(item)}
                 style={({pressed}) => [styles.card, pressed && styles.pressed]}
                 testID="pin-list-item">
@@ -158,12 +199,27 @@ export function PinListPanel({
                   <Text style={styles.author} numberOfLines={1}>
                     {name}
                   </Text>
-                  <Text style={styles.day}>{dayLabel(item.createdAtMs)}</Text>
+                  {/* **고정된 때**이지 쓰인 때가 아니다 (#1146 N1): 이 열이 목록의
+                      정렬 근거이고, 다른 값을 그리면 정렬이 깨진 것처럼 보인다.
+                      자릿폭 표지는 숫자에만 — 한글 음절이 함께 잡히면
+                      「8월  5일」로 벌어진다(`divider.ts` 실측). */}
+                  <Text style={styles.day} testID="pin-list-stamp">
+                    {pinStampSegments(item.pinnedAtMs, nowMs).map(
+                      (segment, index) =>
+                        segment.kind === 'figure' ? (
+                          <Text key={index} style={styles.figure}>
+                            {segment.text}
+                          </Text>
+                        ) : (
+                          segment.text
+                        ),
+                    )}
+                  </Text>
                 </View>
                 <Text
-                  style={[styles.body, excerptLine.ours && styles.ourWords]}
+                  style={[styles.body, excerpt.ours && styles.ourWords]}
                   numberOfLines={2}>
-                  {excerptLine.text}
+                  {excerpt.text}
                 </Text>
               </Pressable>
             );
@@ -217,6 +273,7 @@ const styles = StyleSheet.create({
     fontSize: font.meta,
     lineHeight: line.meta,
   },
+  figure: {fontVariant: ['tabular-nums']},
   body: {
     color: color.text,
     fontSize: font.body,

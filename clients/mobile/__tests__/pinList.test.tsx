@@ -4,6 +4,7 @@ import type {PinnedMessageWire} from '@momo/core/lib/api';
 import {
   applyPinned,
   emptyPins,
+  type PinListStatus,
   type PinMap,
 } from '@momo/core/features/timeline/pins';
 import {cleanup, fireEvent, render, screen} from '@testing-library/react-native';
@@ -25,6 +26,8 @@ const SELF = '11111111-1111-4111-8111-111111111111';
 const OTHER = 'bbbbbbbb-1111-4111-8111-bbbbbbbbbbbb';
 const CHANNEL = 'cccccccc-1111-4111-8111-cccccccccccc';
 const BASE_MS = 1_700_000_000_000;
+/** 「지금」. 고정 도장이 오늘인지 어제인지는 이 값에서만 나온다. */
+const NOW_MS = BASE_MS + 2_000;
 
 function member(over: Partial<RosterMember> & {id: string}): RosterMember {
   return {
@@ -67,18 +70,46 @@ function pinsOf(...entries: PinnedMessageWire[]): PinMap {
   return entries.reduce(applyPinned, emptyPins());
 }
 
-function renderPanel(pins: PinMap) {
+function renderPanel(pins: PinMap, status: PinListStatus = 'ready') {
   const onJump = jest.fn();
   const onClose = jest.fn();
+  const onRetry = jest.fn();
   render(
     <PinListPanel
       pins={pins}
+      status={status}
       directory={DIRECTORY}
+      nowMs={NOW_MS}
       onJump={onJump}
       onClose={onClose}
+      onRetry={onRetry}
     />,
   );
-  return {onJump, onClose};
+  return {onJump, onClose, onRetry};
+}
+
+/**
+ * 조각으로 그려진 라벨을 한 문자열로. 도장은 숫자와 산문이 갈라져 있고(자릿폭
+ * 표지는 숫자에만 붙는다), 그 갈라짐 자체는 여기서 재는 것이 아니다 — 재는 것은
+ * **무슨 날짜를 말하는가**다.
+ */
+function flatText(node: {props: {children?: unknown}}): string {
+  const parts: string[] = [];
+  const walk = (child: unknown): void => {
+    if (typeof child === 'string') {
+      parts.push(child);
+      return;
+    }
+    if (Array.isArray(child)) {
+      child.forEach(walk);
+      return;
+    }
+    if (child !== null && typeof child === 'object' && 'props' in child) {
+      walk((child as {props: {children?: unknown}}).props.children);
+    }
+  };
+  walk(node.props.children);
+  return parts.join('');
 }
 
 afterEach(cleanup);
@@ -190,6 +221,21 @@ describe('빈 목록도 말을 한다', () => {
     expect(screen.queryAllByText(/고정한 메시지가 없습니다/)).toHaveLength(1);
   });
 
+  /**
+   * 그리고 못 불러왔을 때는 수를 말하지 않는다 (#1146 M2). 실패 문장 위의 제목이
+   * 「고정 2개」라고 말하면, 고친 거짓말이 한 줄 위로 옮겨 간 것뿐이다.
+   */
+  it('못 불러왔을 때는 개수를 말하지 않는다', () => {
+    renderPanel(
+      pinsOf(wire(), wire({messageId: 'aaaa0002-1111-4111-8111-aaaaaaaaaaaa'})),
+      'failed',
+    );
+    expect(screen.getByTestId('pin-list-title').props.children).toBe(
+      '고정한 메시지',
+    );
+    expect(screen.getAllByTestId('pin-list-item')).toHaveLength(2);
+  });
+
   /** 헤더는 개수를 말한다. */
   it('헤더가 개수를 말한다', () => {
     renderPanel(
@@ -213,5 +259,102 @@ describe('빈 목록도 말을 한다', () => {
     expect(back.props.accessibilityLabel).toBe('고정 목록 닫기');
     fireEvent.press(back);
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('시각은 정렬 근거다 (#1146 N1)', () => {
+  /**
+   * 1차는 **쓰인 때**를 그리면서 **고정된 때**로 줄을 세웠다. 그래서 어제 쓴 글을
+   * 방금 고정하면 맨 위에 어제 날짜가 서고, 목록은 정렬이 깨진 것처럼 보인다.
+   * 화면과 정렬 근거가 같은 값이어야 사람이 자기가 보는 순서를 믿는다.
+   */
+  it('도장은 쓰인 때가 아니라 고정된 때를 그린다', () => {
+    // 오래전에 쓰였고, 방금 고정됐다 — 두 값이 다른 날에 떨어지게 벌려 둔다.
+    renderPanel(
+      pinsOf(
+        wire({
+          createdAtMs: BASE_MS - 30 * 86_400_000,
+          pinnedAtMs: NOW_MS - 1_000,
+        }),
+      ),
+    );
+    const stamp = screen.getByTestId('pin-list-stamp');
+    // 「오늘」은 고정된 때의 낱말이다. 쓰인 때를 그렸다면 한 달 전 날짜가 선다.
+    expect(flatText(stamp)).toBe('오늘');
+  });
+
+  /** 해를 넘긴 고정은 **연도를 말한다** — 1차에는 그 자리가 없었다. */
+  it('해가 다르면 연도가 붙는다', () => {
+    const at = new Date(NOW_MS);
+    const lastYear = new Date(
+      at.getFullYear() - 1,
+      11,
+      31,
+      12,
+      0,
+      0,
+    ).getTime();
+    renderPanel(pinsOf(wire({pinnedAtMs: lastYear})));
+    expect(flatText(screen.getByTestId('pin-list-stamp'))).toBe(
+      `${at.getFullYear() - 1}년 12월 31일`,
+    );
+  });
+
+  /**
+   * 눈은 「오늘」로 충분하지만 귀에 「오늘」만 남기는 것은 정보를 빼는 것이다 —
+   * 화면을 되돌아볼 수 없는 사람에게 그 낱말은 어느 날인지 알려주지 않는다.
+   * 날짜 구분선이 같은 판단을 하고, 같은 재료를 쓴다.
+   */
+  it('낭독은 절대 날짜로, 그리고 그것이 고정 시각임을 말한다', () => {
+    renderPanel(pinsOf(wire({pinnedAtMs: NOW_MS - 1_000})));
+    const at = new Date(NOW_MS - 1_000);
+    const label = screen.getByTestId('pin-list-item').props
+      .accessibilityLabel as string;
+    expect(label).toContain(
+      `${at.getFullYear()}년 ${at.getMonth() + 1}월 ${at.getDate()}일에 고정`,
+    );
+  });
+});
+
+describe('못 불러온 목록은 「없다」고 말하지 않는다 (#1146 M2)', () => {
+  /**
+   * **1차의 거짓말이 여기 있었다.** `/pins` 가 실패해도 지도는 조용히 비어 있었고,
+   * 화면은 「고정한 메시지가 없습니다」를 인쇄했다 — 채널에 고정이 열 개 있어도.
+   * 오프라인에서 그것을 읽은 사람은 고정이 지워졌다고 결론 내린다.
+   */
+  it('실패하면 못 불러왔다고 말하고, 「없습니다」는 말하지 않는다', () => {
+    renderPanel(emptyPins(), 'failed');
+    expect(screen.getByTestId('pin-list-failed')).toBeTruthy();
+    expect(screen.getByText('고정 목록을 불러오지 못했습니다.')).toBeTruthy();
+    expect(screen.queryByTestId('pin-list-empty')).toBeNull();
+    expect(screen.queryByText(/고정한 메시지가 없습니다/)).toBeNull();
+  });
+
+  /** 다음 행동이 그 자리에 있다. 이 앱의 오류 블록은 언제나 재시도를 함께 낸다. */
+  it('다시 시도가 목록만 다시 읽는다', () => {
+    const {onRetry} = renderPanel(emptyPins(), 'failed');
+    fireEvent.press(screen.getByTestId('pin-list-failed-retry'));
+    expect(onRetry).toHaveBeenCalledTimes(1);
+  });
+
+  /**
+   * 프레임으로 들어온 고정이 있으면 **둘 다** 그린다. 「가진 것은 이게 전부가
+   * 아니다」와 「가진 것은 이것들이다」는 둘 다 참이고, 하나를 지우면 다시
+   * 거짓말이 된다.
+   */
+  it('실패해도 이미 가진 항목은 지우지 않는다', () => {
+    renderPanel(pinsOf(wire()), 'failed');
+    expect(screen.getByTestId('pin-list-failed')).toBeTruthy();
+    expect(screen.getAllByTestId('pin-list-item')).toHaveLength(1);
+  });
+
+  /**
+   * 아직 불러오는 중인 것도 「없다」가 아니다. 한 번의 REST 왕복은 문장을 세울
+   * 만큼 길지 않지만, 그 사이에 빈 문장을 그리면 다음 순간 스스로를 뒤집는다.
+   */
+  it('불러오는 중에는 아무 말도 하지 않는다', () => {
+    renderPanel(emptyPins(), 'loading');
+    expect(screen.queryByTestId('pin-list-empty')).toBeNull();
+    expect(screen.queryByTestId('pin-list-failed')).toBeNull();
   });
 });

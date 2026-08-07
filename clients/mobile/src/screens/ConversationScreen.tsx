@@ -77,7 +77,7 @@ import {
 import type {MessageRowActions} from '../features/conversation/MessageRow';
 import {ThreadPanel} from '../features/conversation/ThreadPanel';
 import {PinListPanel} from '../features/conversation/PinListPanel';
-import {pinListLabel} from '@momo/core/features/timeline/pins';
+import {pinListHeaderLabel} from '@momo/core/features/timeline/pins';
 import {Timeline} from '../features/conversation/Timeline';
 import {useTimeline} from '../features/conversation/useTimeline';
 import {useMarkRead} from '../features/inbox/useInbox';
@@ -520,6 +520,9 @@ export default function ConversationScreen({
   // 헤더의 낱말이 개수를 말한다. 0이면 「고정한 메시지」이고 숫자를 말하지
   // 않는다 — 「고정 0개」는 아무것도 알리지 않으면서 헤더의 폭만 가져간다.
   const pinCount = Object.keys(timeline.pins).length;
+  // 그리고 **셀 자격이 있을 때만** 센다 (#1146 M2): 목록을 못 불러온 채로
+  // 「고정 3개」라고 적으면, 목록 안에서 고친 거짓말이 헤더로 옮겨 갈 뿐이다.
+  const pinLabel = pinListHeaderLabel(pinCount, timeline.pinsStatus);
 
   // ---- 걸어 둔 인용 (ADR-0148) ----------------------------------------------
   //
@@ -814,12 +817,12 @@ export default function ConversationScreen({
         right={
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel={pinListLabel(pinCount)}
+            accessibilityLabel={pinLabel}
             onPress={openPins}
             style={({pressed}) => [styles.headerAction, pressed && styles.pressed]}
             testID="open-pin-list">
             <Text style={styles.headerActionLabel}>
-              {pinListLabel(pinCount)}
+              {pinLabel}
             </Text>
           </Pressable>
         }
@@ -995,9 +998,12 @@ export default function ConversationScreen({
       {pinsOpen ? (
         <PinListPanel
           pins={timeline.pins}
+          status={timeline.pinsStatus}
           directory={directory}
+          nowMs={nowMs}
           onJump={onJumpToPinned}
           onClose={closePins}
+          onRetry={timeline.reloadPins}
         />
       ) : null}
 

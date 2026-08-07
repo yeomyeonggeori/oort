@@ -22,6 +22,7 @@ import {
   isPinned,
   normalizePinList,
   removePin,
+  type PinListStatus,
   type PinMap,
 } from '@momo/core/features/timeline/pins';
 import {
@@ -166,6 +167,13 @@ export interface UseTimelineResult {
   /** 이슈 #1112 — `message id -> the pin`, case-folded on ingest. */
   pins: PinMap;
   /**
+   * 이슈 #1146 M2 — where the cold read of `pins` stands. An empty map means
+   * two different things and only this says which.
+   */
+  pinsStatus: PinListStatus;
+  /** Read the channel's pins again. The retry behind the failure sentence. */
+  reloadPins: () => void;
+  /**
    * Pin or unpin one message. **Throws** on failure, after having put the list
    * back where it was — the caller turns the error into the sentence.
    */
@@ -196,6 +204,11 @@ export function useTimeline(
   // message rather than being a field of it.
   const [pins, setPins] = useState<PinMap>(emptyPins);
   const pinsRef = useRef<PinMap>(pins);
+  // 이슈 #1146 M2. The map alone cannot tell 「nobody pinned anything」 from
+  // 「we never found out」, and the list was printing the first sentence for both.
+  const [pinsStatus, setPinsStatus] = useState<PinListStatus>('loading');
+  /** Which read owns the answer. See `loadPins`. */
+  const pinReadRef = useRef(0);
 
   // Authoritative newest-seq cursor, updated at MERGE time rather than at render
   // time, so a resubscribe firing between renders still reads truth. A send that
@@ -332,6 +345,39 @@ export function useTimeline(
     pinsRef.current = next;
     setPins(next);
   }, []);
+
+  /**
+   * Read the channel's pins (이슈 #1146 M2).
+   *
+   * The read is here rather than inline in the channel effect because the
+   * failure now has a retry behind it, and that retry is pressed from outside
+   * that effect's closure. `pinReadRef` is what the effect's `cancelled` flag
+   * was doing for it: a slow reply from the channel you just left, or from the
+   * read a retry superseded, must not write over the one you are in.
+   */
+  const loadPins = useCallback(
+    (channel: string) => {
+      const read = ++pinReadRef.current;
+      setPinsStatus('loading');
+      fetchChannelPins(workspaceId, channel)
+        .then(wire => {
+          if (pinReadRef.current !== read) return;
+          // Merge on the same side as the reaction snapshot: a `message.pinned`
+          // that arrived while this was in flight is strictly newer than the
+          // read it raced, so it wins.
+          applyPins({...normalizePinList(wire), ...pinsRef.current});
+          setPinsStatus('ready');
+        })
+        .catch(() => {
+          if (pinReadRef.current !== read) return;
+          // The channel stays fully usable — that judgement has not changed.
+          // What changes is that the list now says so instead of claiming the
+          // channel has no pins.
+          setPinsStatus('failed');
+        });
+    },
+    [workspaceId, applyPins],
+  );
 
   /**
    * Pin or unpin one message (이슈 #1112).
@@ -566,17 +612,8 @@ export function useTimeline(
     // 1c) The channel's pins, on the same terms: in parallel, and not fatal. A
     // pin list that failed to load is an absent accessory; a channel that
     // refuses to open because of one is a broken app.
-    fetchChannelPins(workspaceId, channelId)
-      .then(wire => {
-        if (cancelled) return;
-        // Merge on the same side as the snapshot above: a `message.pinned` that
-        // arrived while this was in flight is strictly newer than the read it
-        // raced, so it wins.
-        applyPins({...normalizePinList(wire), ...pinsRef.current});
-      })
-      .catch(() => {
-        /* the pin list stays empty; the channel is still fully usable */
-      });
+    // 이슈 #1146 M2 — 「absent」 is now something the list can say out loud.
+    loadPins(channelId);
 
     // 2) The realtime rail, with resume healing.
     const unsub = rail.subscribeChannel(workspaceId, channelId, {
@@ -668,10 +705,24 @@ export function useTimeline(
     backfillAfter,
     applyBatch,
     applyPins,
+    loadPins,
     addMarker,
     updatePending,
     reloadNonce,
   ]);
+
+  /**
+   * Read the list again (이슈 #1146 M2).
+   *
+   * Deliberately **not** `reload()`. That one re-runs the whole channel —
+   * history, rail, subscription — and the person pressing this button is
+   * answering one sentence about one accessory. Rebuilding the conversation
+   * under them to refill a list would throw away their scroll position, which
+   * on a phone is the thing hardest to get back.
+   */
+  const reloadPins = useCallback(() => {
+    if (channelId) loadPins(channelId);
+  }, [channelId, loadPins]);
 
   const loadOlder = useCallback(async () => {
     if (!channelId || loadingOlder || reachedStart) return;
@@ -716,6 +767,8 @@ export function useTimeline(
     reachedStart,
     reactions,
     pins,
+    pinsStatus,
+    reloadPins,
     togglePin,
   };
 }
