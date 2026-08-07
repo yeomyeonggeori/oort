@@ -4,10 +4,12 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/design/ui/dropdown-menu";
 import { InlineBanner, SkeletonRows } from "@/features/common/States";
 import { memberFor, type Directory } from "@/features/workspace/useWorkspace";
+import { appNote } from "@momo/core/features/timeline/appVoice";
 import {
   PIN_LIST_EMPTY_DETAIL,
   PIN_LIST_EMPTY_HEADLINE,
@@ -48,6 +50,18 @@ import {
 // 결론 내린다. 이제 상태를 받아 세 가지를 갈라 그린다 — 그리고 실패한 목록에
 // 프레임으로 들어온 항목이 있으면 **둘 다** 그린다(가진 것을 숨기지 않고, 모르는
 // 것을 아는 척하지 않는다).
+//
+// ## #1149 M1 — 스켈레톤은 **보여줄 것이 없을 때만** 선다
+//
+// 「가진 것을 숨기지 않는다」를 실패에는 지켰고 **재시도에는 지키지 못했다.**
+// `reloadPins()` 가 상태를 `loading` 으로 되돌리므로, 「다시 시도」를 누른 사람의
+// 화면에서는 방금까지 읽던 항목들이 회색 막대 뒤로 사라졌다 — 그 항목들은 여전히
+// 지도에 있고 여전히 참이다. 폰은 같은 순간에 목록을 그대로 두므로(`FlatList` 의
+// `data` 는 상태와 무관하다) 한 제품의 두 화면이 같은 클릭에 다르게 답하고 있었다.
+//
+// 스켈레톤이 하는 말은 「곧 무언가 올 자리다」이고, 그 말이 필요한 것은 그 자리가
+// **비어 있을 때**뿐이다. 이미 채워진 목록 위에서는 아무것도 알리지 않으면서 읽던
+// 것을 가져간다.
 // =============================================================================
 
 /** 한 줄이 감당할 만큼만. 나머지는 원본에 있고, 한 번 누르면 거기로 간다. */
@@ -124,12 +138,26 @@ export function PinListMenu({
             항목들로만 로빙 포커스를 돌리고 Tab 은 메뉴를 닫으므로, 배너 안의
             `<button>` 은 마우스로만 닿는 컨트롤이 된다. 그래서 항목으로 세우고
             `preventDefault` 로 **닫히지 않게** 한다 — 다시 읽은 결과를 보려면 이
-            표면이 열려 있어야 한다. */}
+            표면이 열려 있어야 한다.
+
+            ## 줄은 어디에 속하는가 (이슈 #1149 M3)
+
+            1차는 배너의 `separator` 를 「항목이 있을 때」로 켰다. 그러면 그 줄은
+            문장과 **자기 버튼 사이**에 떨어진다 — `InlineBanner` 의 아래 테두리는
+            액자가 아니라 「이 배너와 그 아래 내용을 가르는 칸막이」라고 그 원자가
+            스스로 적어 두었는데(MOMO-628 R1 M2), 「다시 시도」는 아래 내용이 아니라
+            **이 배너의 행동**이다. 키보드 때문에 상자 밖으로 나갔을 뿐이라는 것이
+            바로 위 문단의 내용이고, 그 사정이 화면에서 두 조각으로 보이면 안 된다.
+
+            그래서 배너는 칸막이를 갖지 않고(`separator={false}` — 가를 것이 자기
+            버튼뿐이다), 칸막이는 **실패 블록 전체와 목록 사이**에 한 번 선다. 메뉴가
+            자기 어휘로 가진 `DropdownMenuSeparator` 를 쓰는 것은 이 자리가 메뉴 안의
+            구분이기 때문이다 — 항목 사이를 가르는 줄은 이 메뉴가 이미 아는 모양이다. */}
         {status === "failed" && (
           <>
             <InlineBanner
               message={`${PIN_LIST_FAILED_HEADLINE} ${PIN_LIST_FAILED_DETAIL}`}
-              separator={entries.length > 0}
+              separator={false}
               testId="pin-list-failed"
             />
             <DropdownMenuItem
@@ -141,9 +169,15 @@ export function PinListMenu({
             >
               다시 시도
             </DropdownMenuItem>
+            {entries.length > 0 && (
+              <DropdownMenuSeparator data-testid="pin-list-divider" />
+            )}
           </>
         )}
-        {status === "loading" ? (
+        {/* 스켈레톤은 **보여줄 것이 없을 때만** (이슈 #1149 M1 — 머리말). 재시도
+            중에도 상태는 `loading` 이고, 그때 이미 가진 항목을 회색 막대로 덮으면
+            「가진 것을 숨기지 않는다」가 재시도 한 번에 무너진다. */}
+        {status === "loading" && entries.length === 0 ? (
           // 로딩은 **문장을 갖지 않는다.** 한 번의 REST 왕복이고, 「불러오는 중…」은
           // 대개 읽히기 전에 사라진다. 요점은 이 순간에 빈 문장(「없습니다」)을
           // 그리지 않는 것이다 — 그것이 1차가 로딩과 빈 상태를 구별하지 못해 하던
@@ -198,8 +232,40 @@ export function PinListMenu({
                     )}
                   </span>
                 </span>
-                <span className="w-full truncate text-body text-ink">
-                  {excerpt.text}
+                {/* 이 줄이 **누구의 말인가** (이슈 #1149 M4).
+
+                    코어는 `PinExcerpt.empty` 로 「이 글자는 저자의 것이 아니다」를
+                    이미 쥐여 주는데 1차의 웹은 그 깃발을 읽지 않았다. 그래서 본문
+                    없는 메시지의 카드가 「내용 없는 메시지」를 **저자가 그렇게 쓴 것과
+                    똑같은 결**로 세웠다 — 앱의 해명이 남의 말로 읽히는 자리다. 폰은
+                    같은 카드에서 `※` 를 달고 흐린 색으로 세운다.
+
+                    표시도 색도 폰의 것을 그대로 든다(`appNote` 는 이제 코어에 있다).
+                    주(註) 기호 하나로 축이 서므로 크기는 건드리지 않는다: 이 줄이
+                    `text-meta` 로 내려가면 위의 이름 줄과 같은 급이 되어 카드의
+                    위계가 사라진다. */}
+                <span
+                  className={cn(
+                    "w-full truncate text-body",
+                    excerpt.empty ? "text-ink-muted" : "text-ink"
+                  )}
+                  data-testid="pin-list-excerpt"
+                  data-app-voice={excerpt.empty ? "" : undefined}
+                >
+                  {excerpt.empty ? (
+                    <>
+                      {/* 표시는 **눈으로 훑을 때** 「본문이 아님」을 주는 것이지 소리
+                          내어 읽을 것이 아니다 — 폰이 낭독 라벨에서 `※` 를 빼는 것과
+                          같은 규율(`appVoice` 머리말). 폰은 라벨이 따로라 거기서 빼고,
+                          웹의 메뉴 항목은 라벨이 곧 글자라 빼는 자리가 이 노드다.
+                          사이 공백까지 `appNote` 가 짓는다: 간격을 손으로 적으면 두
+                          표면에서 같은 낱말이 다른 모양으로 선다. */}
+                      <span aria-hidden="true">{appNote("")}</span>
+                      {excerpt.text}
+                    </>
+                  ) : (
+                    excerpt.text
+                  )}
                 </span>
               </DropdownMenuItem>
             );

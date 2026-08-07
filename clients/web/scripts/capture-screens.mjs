@@ -115,18 +115,36 @@ const QUOTA_FIXTURE = JSON.parse(
 
 // 설정 > 멤버와 초대. 한 장짜리 목록은 이 패널의 실제 길이가 아니다 — 만료·사용
 // 횟수·역할이 섞인 여러 줄이 이 화면의 기본 상태다.
-// 설정 > 앱은 **빈 카탈로그**로 찍는다.
+// 설정 > 앱은 **카탈로그 한 줄과 함께** 찍는다 (이슈 #1125에서 열림).
 //
-// 출하 시드(server/Fixtures/plugin-manifests/github.json)를 한 줄 얹어 봤고, 그
-// 프레임 자체는 나온다. 그런데 그 뒤 섹션 전환이 무너졌다(실측 2026-08-06: 카탈로그
-// 행이 있으면 다음 섹션에서 `settings-route` 가 30초 안에 돌아오지 않는다 — 나란히
-// 클릭하는 판에서는 `사용량` nav 버튼 클릭이 같은 자리에서 죽었다). 원인은 `앱`
-// 패널의 `wide` 마켓플레이스 레이아웃 쪽으로 보이고, 카탈로그가 비면 재현되지 않는다.
-//
-// 그래서 여기서는 서버가 실제로 낼 수 있는 다른 상태 — 등록된 앱이 없는 워크스페이스 —
-// 를 찍는다. 캡처 레인의 목적(설정 표면이 리뷰 증거로 남는가)은 그것으로 달성되고,
-// 카탈로그가 있는 판은 이미 `gate:shell` 이 두 매니페스트로 측정한다. 카탈로그
-// 프레임을 이 하네스에 넣는 것은 위 전환 결함을 먼저 규명한 뒤의 일이다(후속).
+// 여기 있던 「빈 카탈로그로 찍는다」는 회피였다. 2026-08-06 실측은 「카탈로그 행이
+// 있으면 다음 섹션에서 `settings-route` 가 30초 안에 돌아오지 않는다」였고, 원인을
+// `앱` 패널의 `wide` 마켓플레이스 레이아웃으로 **추정**해 두었다. 그 추정은 틀렸다 —
+// `wide` 는 `max-width` 한 줄이다. 실제 원인은 짝 없는 `/v1` 요청이 프리뷰 프록시를
+// 타고 진짜 서버로 나간 것이고, 규명과 수리는 `installUnmockedFallback` 머리말에 있다.
+/**
+ * 설정 > 앱 카탈로그의 한 줄. 출하 시드 매니페스트 그대로다
+ * (`gate-shell-layout.mjs` 와 같은 파일, 같은 이유).
+ */
+const PLUGIN_MANIFEST = JSON.parse(
+  readFileSync(
+    resolve(WEB_ROOT, "../../server/Fixtures/plugin-manifests/github.json"),
+    "utf8"
+  )
+);
+const PLUGIN_CATALOG_ITEM = {
+  pluginId: PLUGIN_MANIFEST.plugin.id,
+  name: PLUGIN_MANIFEST.plugin.name,
+  version: PLUGIN_MANIFEST.plugin.version,
+  description: PLUGIN_MANIFEST.plugin.description,
+  official: true,
+  recommended: true,
+  egressDomains: PLUGIN_MANIFEST.momo.egressDomains,
+  recommendedFor: PLUGIN_MANIFEST.momo.recommendedFor,
+  installed: false,
+  enabled: false,
+};
+
 const SETTINGS_INVITES = Array.from({ length: 6 }, (_, i) => ({
   id: `capture-invite-${i}`,
   workspaceId: "00000000-0000-7000-8000-000000000001",
@@ -1058,7 +1076,55 @@ function json(route, body) {
   });
 }
 
+/**
+ * 이 하네스가 **답하지 않은** `/v1` 경로들 (이슈 #1125).
+ *
+ * 아래 `unmockedFallback` 이 채운다. 런이 끝날 때 한 번 인쇄되므로, 새 표면이
+ * 붙어 요청이 하나 늘면 다음 사람이 이 목록에서 본다.
+ */
+const unmockedPaths = new Set();
+
+/**
+ * 짝이 없는 `/v1` 요청에 **이 하네스가 직접** 답한다 (이슈 #1125).
+ *
+ * ## 왜 필요한가 — 프리뷰 서버는 `/v1` 을 **진짜 서버로 넘긴다**
+ *
+ * `vite.config.ts` 의 `preview.proxy` 는 `/v1` 을 `http://127.0.0.1:28000` 으로
+ * 보낸다. 그래서 목이 없는 경로는 응답이 **없는 것이 아니라 그 자리에 떠 있는
+ * 아무 서버의 것**이 된다. 실측(2026-08-07): 로컬 스택이 떠 있는 기계에서
+ * `GET …/plugins/{id}` 가 **401** 로 돌아왔고, 코어의 `authed()` 는 계약대로
+ * 회전을 한 번 시도한 뒤(그것도 401) `markAuthExpired()` 를 불러 **앱이 스스로
+ * 로그아웃**했다. 캡처는 그때부터 로그인 화면을 찍는다.
+ *
+ * 그 답이 기계마다 다르다는 것이 이 결함의 성질이다. 28000 에 아무것도 없는
+ * 기계에서는 프록시가 연결 거부로 끝나 화면이 그냥 **매달리고**, 그래서 앞선
+ * 진단은 이것을 「`앱` 패널의 `wide` 마켓플레이스 레이아웃 문제」로 적었다
+ * (설정 스윕 주석, 2026-08-06). `wide` 는 `max-width` 한 줄이고 아무 잘못이
+ * 없었다 — 레이아웃이 아니라 **짝 없는 요청**이 원인이었다.
+ *
+ * ## 왜 404 이고 왜 죽이지 않는가
+ *
+ * 이 하네스가 흉내 내는 것은 「우리가 실제로 이야기하는 서버」이고, 그 서버가
+ * 모르는 경로에 하는 답이 본문 없는 404 다(`capture-honesty.mjs` 의 `absent` 와
+ * 같은 모양·같은 이유). 클라이언트는 그 404 를 **미제공으로 접을 줄 안다**
+ * (`serverSaysAbsent`). 죽이지 않는 이유는 이것이 판정 게이트가 아니라 증거
+ * 레인이기 때문이고, 대신 **조용하지 않게** 한다: 목록이 런 끝에 인쇄된다.
+ *
+ * 등록 순서가 계약이다. Playwright 는 **나중에 등록된 라우트를 먼저** 보므로
+ * 이 포괄 라우트는 반드시 `installMocks` 의 **맨 앞**에 선다. 뒤에 서면 그것이
+ * 모든 목을 이긴다.
+ */
+async function installUnmockedFallback(context) {
+  await context.route("**/v1/**", (route) => {
+    unmockedPaths.add(
+      `${route.request().method()} ${new URL(route.request().url()).pathname}`
+    );
+    return route.fulfill({ status: 404, contentType: "text/plain", body: "" });
+  });
+}
+
 async function installMocks(context) {
+  await installUnmockedFallback(context);
   await context.route("**/v1/auth/login", (route) => json(route, SESSION));
   // ## 로그인 직후의 토큰 회전까지 막아야 로그인이 유지된다 (goal RN-U2, 선행 결함)
   //
@@ -1340,8 +1406,31 @@ async function installMocks(context) {
   await context.route("**/v1/workspaces/*/invites*", (route) =>
     json(route, { invites: SETTINGS_INVITES })
   );
+  // 설정 > 앱은 **카탈로그 한 줄과 함께** 찍는다 (이슈 #1125).
+  //
+  // 1차는 빈 카탈로그였다. 줄을 하나 얹으면 다음 섹션 진입이 무너졌기 때문인데,
+  // 그 원인은 위 `installUnmockedFallback` 머리말이 규명한 그것이다 — 카탈로그
+  // 행이 여는 `GET …/plugins/{id}` 에 짝이 없어 프리뷰 프록시를 타고 나갔고,
+  // 진짜 서버의 401 이 앱을 로그아웃시켰다. 레이아웃과는 무관했다.
+  //
+  // 목은 `gate-shell-layout` 이 쓰는 것과 같은 출처(출하 시드 매니페스트)를
+  // 그대로 든다. 손으로 지어낸 페이로드는 서버가 낼 수 없는 화면을 그리므로
+  // 리뷰가 못 미더운 것을 승인하게 된다.
   await context.route("**/v1/workspaces/*/plugins", (route) =>
-    json(route, { plugins: [], toolPolicy: { plugins: [] } })
+    json(route, { plugins: [PLUGIN_CATALOG_ITEM], toolPolicy: { plugins: [] } })
+  );
+  await context.route(`**/v1/workspaces/*/plugins/${PLUGIN_MANIFEST.plugin.id}`, (route) =>
+    json(route, { plugin: { ...PLUGIN_CATALOG_ITEM, manifest: PLUGIN_MANIFEST } })
+  );
+  await context.route(
+    `**/v1/workspaces/*/plugins/${PLUGIN_MANIFEST.plugin.id}/grants`,
+    (route) => json(route, { grants: [] })
+  );
+  // #1112 이 더한 부속 읽기. 이 하네스가 찍는 채널 프레임마다 나가고, 짝이 없으면
+  // 위 포괄 라우트가 404 로 접어 고정 목록이 「불러오지 못했습니다」로 선다 —
+  // 캡처가 보여줄 상태가 아니다.
+  await context.route("**/v1/workspaces/*/channels/*/pins", (route) =>
+    json(route, { pins: [] })
   );
   // 워크스페이스 라우트 중 가장 덜 구체적이다. `*` 는 `/` 를 건너지 않으므로 위의
   // 하위 경로들은 여전히 자기 라우트로 간다.
@@ -3757,6 +3846,19 @@ async function captureScheme(browser, scheme) {
   return shots;
 }
 
+/**
+ * 짝 없는 `/v1` 경로를 런 끝에 한 번 인쇄한다 (이슈 #1125).
+ *
+ * 죽이지 않는 이유는 `installUnmockedFallback` 머리말에 있다. 조용하지 않게 두는
+ * 것이 요점이다 — 이 목록이 비어 있지 않은 채로 커밋된 캡처가 다음 사람에게는
+ * 「왜 이 화면이 이렇게 나왔는지 모르겠는 판」이 된다.
+ */
+function reportUnmocked() {
+  if (unmockedPaths.size === 0) return;
+  console.log(`\n[미대응 /v1 경로 ${unmockedPaths.size}건 — 본문 없는 404로 답했다]`);
+  for (const path of [...unmockedPaths].sort()) console.log(`  ${path}`);
+}
+
 async function main() {
   if (!existsSync(resolve(WEB_ROOT, "dist/index.html"))) {
     throw new Error("dist/ is missing. Run `npm run capture:design`.");
@@ -3793,6 +3895,7 @@ async function main() {
         }
       }
       for (const path of all) console.log(path);
+      reportUnmocked();
     } finally {
       await browser.close();
     }
