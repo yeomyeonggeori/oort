@@ -114,6 +114,41 @@ export function streamRunId(message: Message): string | null {
 }
 
 /**
+ * 페이지가 「끝났다」고 말한 run 들의 id (#1166).
+ *
+ * ## 왜 이 함수가 필요한가
+ *
+ * 위의 방어 렌더링은 [[isStreamRunEnded]] 를 거쳐 호스트의 종결 기록에 묻는데,
+ * 그 기록은 **터미널 프레임을 그 세션에서 본 run** 만 안다(`endedRuns.ts`).
+ * 닫는 PATCH 가 실패한 채로 사람이 새로고침하면 볼 프레임이 이미 지나갔고,
+ * 반쪽 답이 완결된 답의 옷을 입는다 — ADR-0155 가 C안을 기각한 그 거짓말이다.
+ * 그 판을 닫으려고 서버가 페이지 읽기 응답에 `runEnded` 를 실어 보낸다.
+ *
+ * ## 왜 메시지의 플래그를 그대로 쓰지 않고 run id 를 거두는가
+ *
+ * 같은 run 이 쓴 행은 하나가 아닐 수 있고, 그중 일부는 이 페이지 뒤에
+ * 실시간으로 도착한다. 판정을 행에 붙여 두면 그 행들이 서로 다른 답을 받는다.
+ * 그래서 페이지가 가져온 것은 **사실 하나**(이 run 은 끝났다)로 접어 종결
+ * 기록에 심고, 꼬리 판정은 예전처럼 그 기록 하나에 대고 묻는다.
+ *
+ * 열쇠 규칙도 같은 이유로 여기 있다: [[streamRunId]] 가 소문자로 접으므로
+ * 스토어에 심는 글자와 나중에 묻는 글자가 어긋날 수 없다. 두 클라가 각자
+ * `message.props.run_id` 를 읽었다면 한쪽만 접는 날이 온다.
+ *
+ * `runEnded` 가 없거나 `false` 인 행은 아무것도 내놓지 않는다 — 모르는 것과
+ * 끝난 것은 다르다.
+ */
+export function endedStreamRunIds(messages: readonly Message[]): string[] {
+  const ids: string[] = [];
+  for (const message of messages) {
+    if (message.runEnded !== true) continue;
+    const runId = streamRunId(message);
+    if (runId !== null) ids.push(runId);
+  }
+  return ids;
+}
+
+/**
  * 「이 메시지의 run 이 끝난 것을 보았는가」 — 호스트의 종결 기록에 대고 묻는다.
  *
  * 두 표면이 각자 두 줄로 적으면 한쪽만 소문자로 접거나 한쪽만 스트리밍 메시지로

@@ -33,13 +33,14 @@ use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::{Extension, Json};
+use momo_agent::terminal_run_ids_in_tx;
 use momo_auth::Principal;
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::{with_tenant_tx, DbError};
 use momo_messaging::{
     channel_pins, channel_reaction_snapshot, clamp_history_limit, clamp_replies_limit,
     delete_message_in_tx, edit_message_in_tx, is_channel_member, list_channel_page,
-    list_thread_replies, parse_replies_cursor, resolve_member_signing_key,
+    list_thread_replies, open_stream_run_id, parse_replies_cursor, resolve_member_signing_key,
     send_message_with_mentions_in_tx, set_pin_in_tx, set_reaction_in_tx, stream_message_body_in_tx,
     validate_quote_target_in_tx, validate_reaction_emoji, validate_replies_root_in_tx,
     validate_thread_root_in_tx, AttachmentLinkRejected, HistoryCursor, InteractionMessage,
@@ -49,6 +50,7 @@ use momo_messaging::{
     StreamEdit, ThreadRollup, ThreadRootInvalid, STREAM_PROPS_KEY,
 };
 use serde_json::{Map, Value};
+use std::collections::HashSet;
 use uuid::Uuid;
 
 use crate::dto::{
@@ -139,6 +141,7 @@ fn quoted_dto(quoted: &QuotedMessage) -> QuotedMessageDto {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn message_dto(
     message: &StoredMessage,
     client_msg_id: Option<Uuid>,
@@ -146,6 +149,7 @@ fn message_dto(
     thread: Option<&ThreadRollup>,
     reply_to: Option<&QuotedMessage>,
     attachments: &[MessageAttachment],
+    run_ended: bool,
 ) -> MessageDto {
     MessageDto {
         id: message.id.to_string(),
@@ -174,10 +178,32 @@ fn message_dto(
         // realtime frame would draw a file-less message after any reload.
         attachments: attachments.to_vec(),
         thread: thread.map(thread_dto),
+        run_ended,
     }
 }
 
-fn paged_dto(paged: &PagedMessage, include_state: bool) -> MessageDto {
+/// The run ids a page has to ask about — the still-open streams on it (#1166).
+///
+/// Empty for essentially every page, which is the point: the extra read below
+/// costs nothing until a closing PATCH has actually gone missing.
+fn open_stream_runs(page: &[PagedMessage]) -> Vec<Uuid> {
+    let mut ids: Vec<Uuid> = page
+        .iter()
+        .filter_map(|paged| open_stream_run_id(&paged.message.props))
+        .collect();
+    ids.sort_unstable();
+    ids.dedup();
+    ids
+}
+
+/// One page row → its DTO, with #1166's verdict already taken.
+///
+/// `ended_runs` is the set the page's own transaction resolved. A row whose
+/// stream is closed, or which never streamed, cannot be in it — [`open_stream_run_id`]
+/// is the only thing that put ids there.
+fn paged_dto(paged: &PagedMessage, include_state: bool, ended_runs: &HashSet<Uuid>) -> MessageDto {
+    let run_ended =
+        open_stream_run_id(&paged.message.props).is_some_and(|run_id| ended_runs.contains(&run_id));
     message_dto(
         &paged.message,
         None,
@@ -185,6 +211,7 @@ fn paged_dto(paged: &PagedMessage, include_state: bool) -> MessageDto {
         paged.thread.as_ref(),
         paged.reply_to.as_ref(),
         &paged.attachments,
+        run_ended,
     )
 }
 
@@ -563,6 +590,11 @@ pub async fn send(
             // ids, and the names/sizes it needs to draw a file card come from
             // the rows this transaction just bound.
             &sent.attachments,
+            // #1166 — a write path answers about the write. The run behind a
+            // message that was just opened is by construction not over, and
+            // asking would put a read inside the send transaction for an answer
+            // that is always `false` (the same trade `replyTo` above declines).
+            false,
         )),
     ))
 }
@@ -589,7 +621,7 @@ pub async fn replies(
 
     // Guard and read share one transaction, so a caller removed from the
     // channel mid-flight cannot still receive the page their check passed for.
-    let page = tenant_tx_or_reject(&state.pool, workspace_id, move |conn| {
+    let (page, ended_runs) = tenant_tx_or_reject(&state.pool, workspace_id, move |conn| {
         Box::pin(async move {
             if !is_channel_member(conn, channel_id, principal.member_id).await? {
                 return Err(SendFailure::Rejected(ApiError::forbidden(
@@ -602,7 +634,15 @@ pub async fn replies(
                     other => ApiError::bad_request(other.to_string()),
                 }));
             }
-            Ok(list_thread_replies(conn, channel_id, root_id, cursor, limit).await?)
+            let page = list_thread_replies(conn, channel_id, root_id, cursor, limit).await?;
+            // #1166 — same transaction as the page it annotates. A thread is
+            // read after a reload exactly as a channel is, and a reader who
+            // gets the defensive tail on the main timeline but not inside a
+            // thread would be told two different things about one message.
+            let ended =
+                terminal_run_ids_in_tx(conn, workspace_id, &open_stream_runs(&page.messages))
+                    .await?;
+            Ok((page, ended))
         })
     })
     .await
@@ -615,7 +655,7 @@ pub async fn replies(
         messages: page
             .messages
             .iter()
-            .map(|paged| paged_dto(paged, true))
+            .map(|paged| paged_dto(paged, true, &ended_runs))
             .collect(),
         next_cursor: page.next_cursor,
     }))
@@ -638,20 +678,29 @@ pub async fn history(
                 return Ok(None);
             }
             let messages = list_channel_page(conn, channel_id, cursor, limit).await?;
-            Ok::<_, DbError>(Some(messages))
+            // #1166 — the reload closure. `endedRuns` in a client only knows
+            // the runs whose terminal frame it *watched arrive*, which is the
+            // right rule for a live session and no rule at all for a tab that
+            // was opened afterwards. So the page that rebuilds that tab carries
+            // the answer with it, resolved in the same transaction that read
+            // the rows, against the durable job status ADR-0155 calls the truth.
+            let ended =
+                terminal_run_ids_in_tx(conn, workspace_id, &open_stream_runs(&messages)).await?;
+            Ok::<_, DbError>(Some((messages, ended)))
         })
     })
     .await
     .map_err(|error| db_error("messages.history", error))?;
 
-    let messages = page.ok_or_else(|| ApiError::forbidden("not a member of this channel"))?;
+    let (messages, ended_runs) =
+        page.ok_or_else(|| ApiError::forbidden("not a member of this channel"))?;
     // nextBefore = the smallest seq on this page (Swift `dtos.map(\.seq).min()`).
     let next_before = messages.iter().map(|paged| paged.message.seq).min();
 
     Ok(Json(MessagePage {
         messages: messages
             .iter()
-            .map(|paged| paged_dto(paged, true))
+            .map(|paged| paged_dto(paged, true, &ended_runs))
             .collect(),
         next_before,
     }))
@@ -827,6 +876,9 @@ pub async fn edit(
         // omits them too. Editing a body cannot change what is bound to the
         // message, so the client keeps the file cards it already drew.
         &[],
+        // #1166 — an edit answers about the edit; the run verdict rides page
+        // reads only.
+        false,
     )))
 }
 
@@ -932,6 +984,9 @@ fn stream_message_dto(projection: &InteractionMessage) -> MessageDto {
         None,
         None,
         &[],
+        // #1166 — the producer of this slice *is* the run; it does not need to
+        // be told whether it has ended.
+        false,
     )
 }
 
@@ -1028,6 +1083,9 @@ pub async fn delete_message(
         // the janitor's decision, not this route's — but nothing that describes
         // a deleted message should hand a client something to draw.
         &[],
+        // #1166 — a tombstone draws no tail at all (`MessageRow` short-circuits
+        // on `deleted`), so the verdict has nowhere to land.
+        false,
     )))
 }
 
@@ -1628,9 +1686,16 @@ mod tests {
             last_reply_seq: 9,
             last_reply_at_ms: 1_700_000_000_500,
         };
-        let json =
-            serde_json::to_value(message_dto(&message, None, true, Some(&rollup), None, &[]))
-                .expect("serialize");
+        let json = serde_json::to_value(message_dto(
+            &message,
+            None,
+            true,
+            Some(&rollup),
+            None,
+            &[],
+            false,
+        ))
+        .expect("serialize");
         assert_eq!(json["thread"]["reply_count"], serde_json::json!(3));
         assert_eq!(json["thread"]["last_reply_seq"], serde_json::json!(9));
         assert_eq!(
@@ -1642,7 +1707,7 @@ mod tests {
 
         // A message with no replies carries no rollup at all — the badge's
         // absence is what "no thread here" looks like.
-        let bare = serde_json::to_value(message_dto(&message, None, true, None, None, &[]))
+        let bare = serde_json::to_value(message_dto(&message, None, true, None, None, &[], false))
             .expect("serialize");
         assert!(bare.get("thread").is_none(), "{bare}");
     }
@@ -1667,6 +1732,86 @@ mod tests {
             edited_at: None,
             deleted_at: None,
         }
+    }
+
+    fn paged(props: Value) -> PagedMessage {
+        let mut message = stored_message();
+        message.props = props;
+        PagedMessage {
+            message,
+            thread: None,
+            reply_to: None,
+            attachments: Vec::new(),
+        }
+    }
+
+    /// #1166 — the page asks about the rows whose answer can change what a
+    /// reader sees, and about nothing else.
+    #[test]
+    fn a_page_asks_only_about_its_still_open_streams() {
+        let run = Uuid::from_u128(0xa11);
+        let open = serde_json::json!({
+            STREAM_PROPS_KEY: { "rev": 9, "streaming": true },
+            "run_id": run.to_string(),
+        });
+        let page = vec![
+            paged(open.clone()),
+            // The same run wrote more than one row; one question is asked.
+            paged(open.clone()),
+            paged(serde_json::json!({
+                STREAM_PROPS_KEY: { "rev": 12, "streaming": false, "outcome": "cancelled" },
+                "run_id": Uuid::from_u128(0xb22).to_string(),
+            })),
+            paged(serde_json::json!({ "source": "human" })),
+        ];
+        assert_eq!(open_stream_runs(&page), vec![run]);
+        assert!(
+            open_stream_runs(&[paged(serde_json::json!({}))]).is_empty(),
+            "an ordinary page costs no second read at all"
+        );
+    }
+
+    /// #1166 — the verdict is the intersection of "still open" and "the run
+    /// ended", and `false` never crosses the wire.
+    #[test]
+    fn only_an_ended_run_marks_its_half_written_answer() {
+        let ended_run = Uuid::from_u128(0xa11);
+        let live_run = Uuid::from_u128(0xb22);
+        let ended: HashSet<Uuid> = [ended_run].into_iter().collect();
+        let open = |run: Uuid| {
+            serde_json::json!({
+                STREAM_PROPS_KEY: { "rev": 9, "streaming": true },
+                "run_id": run.to_string(),
+            })
+        };
+
+        let marked =
+            serde_json::to_value(paged_dto(&paged(open(ended_run)), true, &ended)).expect("json");
+        assert_eq!(marked["runEnded"], serde_json::json!(true));
+
+        // RED proof — a run this server did not find terminal cannot be
+        // announced as one. If this key ever appears here, every answer still
+        // arriving in the channel gets "응답이 끊김" stapled to it.
+        let live =
+            serde_json::to_value(paged_dto(&paged(open(live_run)), true, &ended)).expect("json");
+        assert!(live.get("runEnded").is_none(), "{live}");
+
+        // A closed stream is self-describing; its run's state is not this
+        // route's business even when the run *is* over.
+        let closed = serde_json::to_value(paged_dto(
+            &paged(serde_json::json!({
+                STREAM_PROPS_KEY: { "rev": 12, "streaming": false, "outcome": "cancelled" },
+                "run_id": ended_run.to_string(),
+            })),
+            true,
+            &ended,
+        ))
+        .expect("json");
+        assert!(closed.get("runEnded").is_none(), "{closed}");
+
+        let human = serde_json::to_value(paged_dto(&paged(serde_json::json!({})), true, &ended))
+            .expect("json");
+        assert!(human.get("runEnded").is_none(), "{human}");
     }
 
     fn quoted(body: Option<&str>, deleted: bool, quotes_another: bool) -> QuotedMessage {
@@ -1695,8 +1840,16 @@ mod tests {
         let mut message = stored_message();
         message.reply_to_id = Some(Uuid::from_u128(0x11));
         let quote = quoted(Some("원문"), false, false);
-        let json = serde_json::to_value(message_dto(&message, None, true, None, Some(&quote), &[]))
-            .expect("serialize");
+        let json = serde_json::to_value(message_dto(
+            &message,
+            None,
+            true,
+            None,
+            Some(&quote),
+            &[],
+            false,
+        ))
+        .expect("serialize");
 
         assert_eq!(json["replyToId"], serde_json::json!(Uuid::from_u128(0x11)));
         assert_eq!(
@@ -1717,9 +1870,16 @@ mod tests {
 
         // A message that quotes nothing carries neither key. Their absence is
         // what "no quote here" looks like, exactly like the thread rollup's.
-        let bare =
-            serde_json::to_value(message_dto(&stored_message(), None, true, None, None, &[]))
-                .expect("serialize");
+        let bare = serde_json::to_value(message_dto(
+            &stored_message(),
+            None,
+            true,
+            None,
+            None,
+            &[],
+            false,
+        ))
+        .expect("serialize");
         assert!(bare.get("replyToId").is_none(), "{bare}");
         assert!(bare.get("replyTo").is_none(), "{bare}");
     }
@@ -1738,6 +1898,7 @@ mod tests {
             None,
             Some(&quoted(None, true, false)),
             &[],
+            false,
         ))
         .expect("serialize");
 
@@ -1769,6 +1930,7 @@ mod tests {
             None,
             Some(&quoted(Some("나도 인용함"), false, true)),
             &[],
+            false,
         ))
         .expect("serialize");
 

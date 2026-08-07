@@ -281,6 +281,23 @@ pub struct MessageDto {
     /// Present only on a root message that has replies (B4.1).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thread: Option<ThreadRollupDto>,
+    /// #1166 — the run that wrote this half-written answer has **ended**.
+    ///
+    /// Only ever `true`, and only ever on a page read (history, thread replies).
+    /// The key is omitted otherwise, because the three silences a client must
+    /// not confuse are one silence here: this message never streamed, or its
+    /// stream is already closed and self-describing, or this server does not
+    /// know what became of the run. `endedRuns.ts` is built on "absence ≠
+    /// ended", and a `false` on the wire would be the first thing to tempt a
+    /// reader into reading absence as an answer.
+    ///
+    /// **Not written into `momo.stream`.** That block is the writer's, and the
+    /// writer here is the agent, not this server (#1152 규율). What rides the
+    /// page instead is a projection beside the message — the same shape
+    /// `thread`, `replyTo` and `attachments` already take, for the same reason:
+    /// a reader needs it, the row does not own it.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub run_ended: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -2798,6 +2815,7 @@ mod tests {
             deleted_at_ms: None,
             attachments: Vec::new(),
             thread: None,
+            run_ended: false,
         };
         let json = serde_json::to_value(&dto).expect("serialize");
         assert_eq!(json["seq"], 3);
@@ -2815,6 +2833,10 @@ mod tests {
         // time" to a client that only checks for the key's presence.
         assert!(json.get("editedAtMs").is_none());
         assert!(json.get("deletedAtMs").is_none());
+        // #1166 — `false` never crosses the wire. `endedRuns.ts` is built on
+        // "absence is not an ending", and a `runEnded: false` would be the
+        // first thing to tempt a reader into treating a silence as an answer.
+        assert!(json.get("runEnded").is_none(), "{json}");
     }
 
     /// The two B11 keys, once they exist, are camelCase millisecond integers —
@@ -2842,6 +2864,7 @@ mod tests {
             deleted_at_ms: None,
             attachments: Vec::new(),
             thread: None,
+            run_ended: false,
         })
         .expect("serialize");
         assert_eq!(json["state"], "edited");

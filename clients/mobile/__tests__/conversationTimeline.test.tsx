@@ -1,11 +1,18 @@
 import type {Member, Message} from '@momo/core/lib/api';
 import {isStrictlyOrdered} from '@momo/core/features/timeline/model';
+import {
+  isStreamRunEnded,
+  STREAM_CUT_OFF_MARK,
+  STREAM_PROPS_KEY,
+  streamStopMark,
+} from '@momo/core/features/timeline/streamStop';
 import {centrifugoChannelName} from '@momo/core/lib/realtimeEvents';
 import {act, cleanup, renderHook, waitFor} from '@testing-library/react-native';
 
 import '../src/boot/polyfills';
 import '../src/boot/coreHost';
 
+import {endedRunIds, resetEndedRuns} from '../src/features/agents/endedRuns';
 import {createChannelRail, type ChannelRail} from '../src/realtime/channelRail';
 import {useTimeline} from '../src/features/conversation/useTimeline';
 import {
@@ -182,6 +189,7 @@ beforeEach(() => {
     member: SELF,
   });
   (jest.requireMock('centrifuge') as {__reset: () => void}).__reset();
+  resetEndedRuns();
 });
 
 afterEach(cleanup);
@@ -472,5 +480,55 @@ describe('보내기 — 낙관적 반영과 화해', () => {
     expect(
       result.current.state.messages.filter(m => m.body === '먼저 도착'),
     ).toHaveLength(1);
+  });
+});
+
+describe('#1166 — 페이지 읽기가 run 의 종결을 들고 온다', () => {
+  const RUN = '019F9AB9-6DA4-7BE7-9BC9-4A3872D921FF';
+
+  /** 닫는 PATCH 가 못 닿은 반쪽 답 — 열린 채로 남은 스트림. */
+  function halfAnswer(runEnded?: boolean): Message {
+    return message(4, {
+      body: '그 파일을 열어 보면 첫 줄에',
+      props: {[STREAM_PROPS_KEY]: {rev: 9, streaming: true}, run_id: RUN},
+      ...(runEnded === undefined ? {} : {runEnded}),
+    });
+  }
+
+  /**
+   * **리로드 폐곡선, 훅을 통째로 지나서.**
+   *
+   * 이 세션은 그 run 의 터미널 프레임을 본 적이 없다 — 새로 뜬 앱이 하는 일은
+   * REST 한 판을 긷는 것뿐이다. `applyBatch` 의 씨딩을 지우면 아래 꼬리가
+   * `null` 로 돌아가고, 반쪽 답이 완결된 답의 옷을 입는다(ADR-0155 C안).
+   */
+  it('첫 페이지가 종결을 심어 꼬리가 선다', async () => {
+    installFetch({
+      messages: () => jsonResponse(200, {messages: [halfAnswer(true)]}),
+    });
+    const {rail} = makeRail();
+    const {result} = renderTimeline(rail);
+
+    await waitFor(() => expect(result.current.status).toBe('ready'));
+    const row = result.current.state.messages[0];
+    expect(endedRunIds().has(RUN.toLowerCase())).toBe(true);
+    expect(streamStopMark(row, isStreamRunEnded(row, endedRunIds()))).toBe(
+      STREAM_CUT_OFF_MARK,
+    );
+  });
+
+  it('서버가 말하지 않으면 그 답은 도착 중인 채로 남는다', async () => {
+    installFetch({
+      messages: () => jsonResponse(200, {messages: [halfAnswer()]}),
+    });
+    const {rail} = makeRail();
+    const {result} = renderTimeline(rail);
+
+    await waitFor(() => expect(result.current.status).toBe('ready'));
+    const row = result.current.state.messages[0];
+    expect(endedRunIds().size).toBe(0);
+    expect(
+      streamStopMark(row, isStreamRunEnded(row, endedRunIds())),
+    ).toBeNull();
   });
 });

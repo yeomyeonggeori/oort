@@ -8196,6 +8196,29 @@ components:
             are never included; download bytes through the authenticated content proxy.
         thread:
           $ref: "#/components/schemas/ThreadRollup"
+        runEnded:
+          type: boolean
+          enum: [true]
+          description: >
+            ADR-0155 방어 렌더링의 durable한 절반 (#1166). Present, and only ever
+            `true`, on a page read (history, thread replies) whose row is still
+            marked `momo.stream.streaming: true` while the `run_id` in its props
+            names an agent run that has reached a terminal status. A reader that
+            sees it draws the same "응답이 끊김" tail a closed stream's `outcome`
+            would have drawn, so a closing PATCH that never landed survives a
+            reload instead of dressing a half answer as a finished one.
+
+            **Omitted otherwise — never `false`.** Absence covers three
+            different silences (this message never streamed, its stream is
+            already closed and self-describing, or the run is not over), and a
+            client must not read any of them as an ending. Optional and
+            additive: a client that ignores the key behaves exactly as it did
+            before the key existed.
+
+            Never present on the send echo, on an edit/stream response, or on a
+            realtime `message.new`/`message.edited` frame — those describe a
+            write, and a connected client learns a run's ending from its
+            terminal `agent.status` frame.
 
     QuotedMessage:
       type: object
