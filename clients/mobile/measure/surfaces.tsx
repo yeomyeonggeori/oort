@@ -536,10 +536,17 @@ function Frame({label, children}: {label: string; children: React.ReactNode}) {
   );
 }
 
-function Row({pinned = false}: {pinned?: boolean} = {}) {
+function Row({
+  pinned = false,
+  edited = false,
+}: {pinned?: boolean; edited?: boolean} = {}) {
   return (
     <MessageRow
-      message={MESSAGE}
+      // 이슈 #1149 M2 — 「수정됨」을 켤 수 있어야 한다. 아래 `pin-mark` 프레임의
+      // 주석은 처음부터 「같은 줄에 나란히 설 때만 보인다」고 말했는데, 정작 씨앗
+      // 메시지가 `sent` 라 그 프레임에 「수정됨」이 한 번도 서지 않았다. 주장만
+      // 있고 사진이 없던 자리다.
+      message={edited ? {...MESSAGE, state: 'edited'} : MESSAGE}
       startsGroup
       directory={DIRECTORY}
       chips={CHIPS}
@@ -778,14 +785,19 @@ export function Surface({name}: {name: string}): React.JSX.Element {
           {pinSheet(true)}
         </Frame>
       );
-    // 행에 남는 흔적 (#1146 M3). **두 행을 한 장에** 두는 것이 이 하네스의 규율이다:
-    // 「표지가 섰다」는 표지가 없는 행 옆에서만 보이고, 「위계를 침범하지 않았다」는
-    // 「수정됨」과 같은 줄에 나란히 설 때만 보인다. 강조색이 아니라 흐린 글자라는
-    // 판정이 사진에서 확인되는 자리이기도 하다.
+    // 행에 남는 흔적 (#1146 M3 · #1149 M2). **두 행을 한 장에** 두는 것이 이
+    // 하네스의 규율이다: 「표지가 섰다」는 표지가 없는 행 옆에서만 보인다.
+    //
+    // 그리고 위 행은 **수정된 행이다** (#1149 M2). #1146 은 「위계를 침범하지
+    // 않았다 = 「수정됨」과 같은 줄에 나란히 선다」를 이 프레임의 요점으로 적어
+    // 놓고, 씨앗 메시지를 `sent` 로 두어 그 둘이 함께 선 사진을 **한 장도 남기지
+    // 않았다.** 「같은 격·같은 흐린 글자」도 「순서는 수정됨 다음」도 나란히 놓인
+    // 프레임에서만 확인되는 주장이고, 확인되지 않는 주장은 다음 배치가 조용히
+    // 뒤집을 수 있다.
     case 'pin-mark':
       return (
-        <Frame label="고정 흔적 — 고정된 행 ↔ 아닌 행. 꼬리 한 줄, 흐린 글자 (#1146 M3)">
-          <Row pinned />
+        <Frame label="고정 흔적 — 수정+고정된 행 ↔ 아무 표지 없는 행. 꼬리 한 줄, 같은 흐린 글자 (#1146 M3 · #1149 M2)">
+          <Row pinned edited />
           <Row />
         </Frame>
       );

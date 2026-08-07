@@ -364,12 +364,39 @@ async function captureScheme(browser, scheme, viewport, suffix) {
   await page.getByTestId("activity-unavailable").waitFor();
   await shoot(page, `unavailable-activity-${suffix}`);
 
-  // 3) 인박스: 죽은 탭 둘이 사라지고 멘션만 남는다. 열자마자 빈 결정 대기에
-  //    착지하던 것이 이 배치의 수정이다.
-  await page.goto(`${origin}/#/inbox`);
+  // 3) 인박스: 열자마자 빈 결정 대기에 착지하던 것이 이 배치의 수정이다.
+  //
+  // **이 단언은 2026-08-07 에 뒤집혔다 (이슈 #1125).** 처음 쓸 때(2026-08-02)는
+  // `serverSurfaces` 의 `approvals.provided` 가 false 였고, 그래서 「결정 대기」
+  // 탭은 도달 경로가 0인 죽은 탭이었다 — 없는 것이 맞았다. 그런데 2026-08-04 에
+  // goal SRV-T1(#979)이 승인 3라우트를 **서버에 올렸고**, 그 표의 줄이 true 로
+  // 뒤집혔다. 탭은 그때부터 살아 있는 탭이다.
+  //
+  // 하네스는 그 사실을 몰랐고, 그래서 이 줄에서 「죽은 결정 대기 탭이 아직 서
+  // 있다」로 멈춰 **캡처 레인 전체가 석 달째 한 장도 못 찍고 있었다**(실측: 이
+  // throw 가 첫 스킴의 세 번째 표면에서 터진다). 지키려던 것은 「탭이 없다」가
+  // 아니라 **「없는 것을 있다고 말하지 않는다」**였으므로, 못은 그쪽으로 다시
+  // 박는다:
+  //
+  //   - 탭은 **선다**. 원장이 이 코드베이스의 서버에 있으므로 정적 판정이 참이다.
+  //   - 그런데 이 하네스의 서버는 아직 배포되지 않은 세대라 `/approvals` 에
+  //     404 로 답한다. 그때 목록은 「지금 결정할 일이 없습니다」가 아니라
+  //     **미제공**으로 접혀야 한다. 그 문장이 서면 사람은 결정할 일이 정말로
+  //     없다고 읽는데, 우리는 그것을 모른다 — B12 가 고친 거짓말과 같은 모양이다.
+  await page.goto(`${origin}/#/inbox?filter=needs-action`);
   await page.getByTestId("inbox-route").waitFor();
-  const tabs = await page.getByTestId("inbox-tab-needs-action").count();
-  if (tabs !== 0) throw new Error("죽은 결정 대기 탭이 아직 서 있다");
+  const needsActionTab = await page.getByTestId("inbox-tab-needs-action").count();
+  if (needsActionTab !== 1) {
+    throw new Error(
+      "결정 대기 탭이 없다 — 승인 원장은 2026-08-04 부터 이 서버 코드베이스에 있다(serverSurfaces.approvals)"
+    );
+  }
+  await page.getByTestId("inbox-unavailable").waitFor({ timeout: 15_000 });
+  if ((await page.getByTestId("inbox-empty").count()) !== 0) {
+    throw new Error(
+      "못 읽은 원장을 「지금 결정할 일이 없습니다」로 그렸다 — 모르는 것을 아는 척하는 그 문장이다"
+    );
+  }
   await shoot(page, `honest-inbox-${suffix}`);
 
   // 4) 설정 > 앱: 서버가 404로 답하면 구획 전체가 접힌다(이중 방어 (b)).
@@ -469,7 +496,16 @@ async function captureRemainingStates(browser, scheme, viewport, suffix) {
     await context.close();
   }
 
-  // 승인 카드: 카드는 남고 결정 컨트롤만 걷힌다
+  // 승인 카드: 원장이 실린 뒤로는 **결정이 그 카드에서 일어난다**
+  //
+  // 위 인박스 탭과 **같은 날 같은 줄에서 뒤집힌 단언이다** (이슈 #1125). 1차는
+  // 「카드는 남고 결정 컨트롤만 걷힌다」를 기다렸는데, 그 접힘의 조건은
+  // `approvalCardNote` 의 `approvalsProvided === false` 이고 그 값은 2026-08-04
+  // 부터 true 다. 즉 이 하네스는 **없어진 상태를 기다리다** 멈춰 있었다.
+  //
+  // 지금 참인 것은 그 반대다: 승인 카드는 결정 컨트롤을 세우고, 미제공 고지는
+  // 서지 않는다. B12 의 요점(「없는 것을 있다고 말하지 않는다」)은 그대로 지킨다 —
+  // 방향만 반대로: **있는 것을 없다고 말하지 않는가**를 잰다.
   {
     const context = await browser.newContext({ viewport, colorScheme: scheme, reducedMotion: "reduce" });
     const page = await context.newPage();
@@ -477,12 +513,13 @@ async function captureRemainingStates(browser, scheme, viewport, suffix) {
     await installRoutes(context);
     await login(page);
     await page.goto(`${origin}/#/c/${channelId}`);
-    await page.getByTestId("approval-note-unsupported").waitFor({ timeout: 15_000 });
-    // 결정 버튼이 남아 있으면 이 배치의 요점이 무너진다.
-    if ((await page.getByTestId("approval-approve").count()) !== 0) {
-      throw new Error("승인 버튼이 아직 서 있다");
+    await page.getByTestId("approval-approve").waitFor({ timeout: 15_000 });
+    if ((await page.getByTestId("approval-note-unsupported").count()) !== 0) {
+      throw new Error(
+        "실린 원장을 미제공이라고 말했다 — serverSurfaces.approvals 는 2026-08-04 부터 true 다"
+      );
     }
-    await shoot(page, `approval-unsupported-${suffix}`);
+    await shoot(page, `approval-decidable-${suffix}`);
     await context.close();
   }
 

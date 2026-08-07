@@ -99,10 +99,11 @@ function pinnedReply(): PinMap {
 }
 
 /** `ThreadPanel` 이 실제로 읽는 만큼의 `useTimeline`. */
-function renderThread(pins: PinMap) {
+function renderThread(pins: PinMap, replyOver: Partial<Message> = {}) {
   const togglePin = jest.fn(async (_message: Message) => {});
+  const reply = {...REPLY, ...replyOver};
   const timeline = {
-    state: {messages: [ROOT, REPLY], oldestSeq: ROOT.seq, newestSeq: REPLY.seq},
+    state: {messages: [ROOT, reply], oldestSeq: ROOT.seq, newestSeq: reply.seq},
     status: 'ready',
     resume: {lastRecovered: null, lastBackfillCount: 0, resubscribeCount: 0},
     recoveryMarkers: [],
@@ -192,6 +193,52 @@ describe('스레드의 답글도 고정할 수 있다', () => {
     const marks = screen.getAllByTestId('pin-mark');
     expect(marks).toHaveLength(1);
     expect(marks[0].props.children).toBe(PIN_ROW_MARK);
+  });
+});
+
+describe('「수정됨」과 「고정됨」은 한 줄에 나란히 선다 (이슈 #1149 M2)', () => {
+  /**
+   * #1146 M3 은 「기존 위계를 침범하지 않는다」를 이렇게 변호했다 — 「고정됨」은
+   * 「수정됨」이 앉아 있는 **그 꼬리 한 줄**에 같은 격·같은 흐린 글자로 앉고,
+   * 순서는 「수정됨」(본문에 대한 서술) 다음이다.
+   *
+   * 그런데 그 주장의 증거는 **0건**이었다: 픽스처의 메시지가 전부 `sent` 라 두
+   * 표지가 함께 선 판이 테스트에도 사진에도 없었다. 변호되기만 하고 못 박히지
+   * 않은 판정은 다음 배치가 조용히 뒤집는다 — 새 띠 하나, 새 색 하나면 된다.
+   */
+  const editedPinnedReply = {state: 'edited' as const};
+
+  it('두 표지가 함께 서고, 격이 같다', async () => {
+    renderThread(pinnedReply(), editedPinnedReply);
+    await act(async () => {});
+    const edited = screen.getByTestId('edited-mark');
+    const pin = screen.getByTestId('pin-mark');
+    expect(edited.props.children).toBe('수정됨');
+    expect(pin.props.children).toBe(PIN_ROW_MARK);
+    // 「같은 격, 같은 흐린 글자」를 눈이 아니라 값으로 못 박는다: 둘이 같은
+    // 등록 스타일을 쓰지 않게 되는 순간(새 색·새 크기) 이 단언이 깨진다.
+    expect(pin.props.style).toBe(edited.props.style);
+  });
+
+  it('순서는 「수정됨」 다음이고, 귀에도 그 순서로 닿는다', async () => {
+    renderThread(pinnedReply(), editedPinnedReply);
+    await act(async () => {});
+    // 꼬리 배열은 낭독 라벨의 재료이기도 하다(`MessageRow` 의 `tail`). 그래서
+    // 한 문자열에서 두 순서를 함께 잰다 — 화면 순서가 뒤집히면 라벨도 뒤집힌다.
+    const label = screen
+      .getAllByTestId('message-row')
+      .at(-1)!.props.accessibilityLabel as string;
+    expect(label).toContain('수정됨');
+    expect(label).toContain(PIN_ROW_MARK);
+    expect(label.indexOf('수정됨')).toBeLessThan(label.indexOf(PIN_ROW_MARK));
+  });
+
+  /** 그리고 수정되지 않은 고정 행에는 「수정됨」이 서지 않는다. */
+  it('고정만 된 행은 「고정됨」 하나만 단다', async () => {
+    renderThread(pinnedReply());
+    await act(async () => {});
+    expect(screen.queryByTestId('edited-mark')).toBeNull();
+    expect(screen.getAllByTestId('pin-mark')).toHaveLength(1);
   });
 });
 

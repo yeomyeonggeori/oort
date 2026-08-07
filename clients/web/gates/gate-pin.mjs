@@ -30,6 +30,17 @@
 //   8. 행에 흔적이 남는다 고정된 메시지의 꼬리에 「고정됨」이 서고, 고정되지 않은
 //                        행에는 서지 않는다.
 //
+// 잔여 #1149 가 더한 봉인 셋:
+//
+//   9. 가진 것은 재시도    「다시 시도」는 상태를 `loading` 으로 되돌린다. 그 순간
+//      중에도 남는다      이미 가진 항목이 스켈레톤 뒤로 숨으면 안 된다 — 스켈레톤은
+//                        **보여줄 것이 없을 때만** 서는 말이다(폰은 처음부터 그랬다).
+//  10. 실패와 항목은       못 불러온 목록에 프레임으로 들어온 항목이 있으면 둘 다
+//      **함께** 선다      그린다. 그리고 칸막이는 문장과 자기 버튼 사이가 아니라
+//                        실패 블록과 목록 사이에 한 번 선다.
+//  11. 빈 본문은 앱의 말   본문 없는 메시지의 발췌는 저자의 말이 아니라 앱의 서술이고,
+//                        그래서 주(註) 기호를 달고 흐린 글자로 선다(폰과 같은 표시).
+//
 // 이름 붙은 red proof (버릴 워크트리에서만 돌린다):
 //   PIN_GATE_PROVE_RED_REFETCH=1 npm run gate:pin
 //     expected failure: "the header list reached the network again"
@@ -45,6 +56,12 @@
 //     expected failure: "the list stamp is not the value the list sorts on"
 //   PIN_GATE_PROVE_RED_MARK=1 npm run gate:pin
 //     expected failure: "a pinned row carries no mark"
+//   PIN_GATE_PROVE_RED_TAIL=1 npm run gate:pin
+//     expected failure: "the pinned mark jumped ahead of 「수정됨」"
+//   PIN_GATE_PROVE_RED_KEEP=1 npm run gate:pin
+//     expected failure: "the retry hid what the list already had"
+//   PIN_GATE_PROVE_RED_VOICE=1 npm run gate:pin
+//     expected failure: "an empty body is drawn as if the author wrote it"
 //
 // HONEST는 실패해야 할 `/pins` 를 성공시키고(그러면 화면이 「없습니다」로 돌아가
 // 단언이 깨진다), STAMP·MARK 는 DOM 에서 글자와 원소를 걷어낸다.
@@ -91,7 +108,30 @@ function canonicalPinCopy(root) {
   if (!conflict) {
     throw new Error("pinFailureMessage의 409 문장을 코어에서 찾지 못했다");
   }
-  return { unpin: labels[1], pin: labels[2], capSentence: conflict[1] };
+  // #1149 M2·M4 — 행의 표지, 빈 본문의 서술, 그리고 그 서술 앞에 서는 주(註)
+  // 기호. 셋 다 코어에서 읽는 이유는 위와 같다: 게이트가 문자열을 다시 적으면
+  // 정본이 바뀐 날 게이트만 혼자 초록으로 남는다.
+  const rowMark = /export const PIN_ROW_MARK = "([^"]+)";/.exec(pins);
+  const emptyBody = /export const PIN_EMPTY_BODY_TEXT = "([^"]+)";/.exec(pins);
+  if (!rowMark || !emptyBody) {
+    throw new Error("PIN_ROW_MARK / PIN_EMPTY_BODY_TEXT 를 코어에서 찾지 못했다");
+  }
+  const voice = readFileSync(
+    resolve(root, "../../packages/momo-core/src/features/timeline/appVoice.ts"),
+    "utf8"
+  );
+  const noteMark = /export const APP_NOTE_MARK = "([^"]+)";/.exec(voice);
+  if (!noteMark) {
+    throw new Error("APP_NOTE_MARK 를 코어에서 찾지 못했다");
+  }
+  return {
+    unpin: labels[1],
+    pin: labels[2],
+    capSentence: conflict[1],
+    rowMark: rowMark[1],
+    emptyBody: emptyBody[1],
+    noteMark: noteMark[1],
+  };
 }
 
 const port = Number(process.env.PIN_GATE_PORT || 5197);
@@ -102,8 +142,14 @@ const memberId = "00000000-0000-7000-8000-000000000101";
 const peerId = "00000000-0000-7000-8000-000000000102";
 const channelId = "00000000-0000-7000-8000-000000000201";
 
-const { unpin: UNPIN_LABEL, pin: PIN_LABEL, capSentence: CAP_SENTENCE } =
-  canonicalPinCopy(webRoot);
+const {
+  unpin: UNPIN_LABEL,
+  pin: PIN_LABEL,
+  capSentence: CAP_SENTENCE,
+  rowMark: PIN_ROW_MARK_TEXT,
+  emptyBody: EMPTY_BODY_TEXT,
+  noteMark: APP_NOTE_MARK,
+} = canonicalPinCopy(webRoot);
 
 const proveRedRefetch = process.env.PIN_GATE_PROVE_RED_REFETCH === "1";
 const proveRedLive = process.env.PIN_GATE_PROVE_RED_LIVE === "1";
@@ -112,12 +158,20 @@ const proveRedCap = process.env.PIN_GATE_PROVE_RED_CAP === "1";
 const proveRedHonest = process.env.PIN_GATE_PROVE_RED_HONEST === "1";
 const proveRedStamp = process.env.PIN_GATE_PROVE_RED_STAMP === "1";
 const proveRedMark = process.env.PIN_GATE_PROVE_RED_MARK === "1";
+const proveRedTail = process.env.PIN_GATE_PROVE_RED_TAIL === "1";
+const proveRedKeep = process.env.PIN_GATE_PROVE_RED_KEEP === "1";
+const proveRedVoice = process.env.PIN_GATE_PROVE_RED_VOICE === "1";
 
 // 행 id는 소문자다 — 행이 `data-message-id`를 소문자로 내놓는다.
 const COLD_PINNED_MSG = "0199bbbb-0000-7000-8000-0000000000c1";
 const LIVE_PINNED_MSG = "0199bbbb-0000-7000-8000-0000000000c2";
 const PLAIN_MSG = "0199bbbb-0000-7000-8000-0000000000c3";
 const CAPPED_MSG = "0199bbbb-0000-7000-8000-0000000000c4";
+/**
+ * 본문이 없는 메시지 (#1149 M4). 고정 목록은 그 자리에 앱의 서술을 그리고, 그
+ * 서술이 저자의 말과 같은 결로 서면 사람은 앱의 해명을 남의 말로 읽는다.
+ */
+const VOICELESS_MSG = "0199bbbb-0000-7000-8000-0000000000c5";
 
 const COLD_BODY = "배포 순서는 이 문서가 정본입니다. 롤백까지 여기 있습니다.";
 const LIVE_BODY = "온콜 교대는 매주 화요일 10시입니다.";
@@ -203,7 +257,16 @@ function historyPage() {
       createdAtMs: COLD_CREATED_MS,
     }),
     row({ id: LIVE_PINNED_MSG, seq: 42, authorMemberId: peerId, body: LIVE_BODY }),
-    row({ id: PLAIN_MSG, seq: 43, authorMemberId: memberId, body: PLAIN_BODY }),
+    // **수정된 행이다** (#1149 M2). 이 행이 5단계에서 고정되므로, 6b 는 「수정됨」과
+    // 「고정됨」이 한 꼬리에 그 순서로 함께 선 것을 한 번에 잰다. 1차 픽스처는
+    // 전부 `sent` 라 그 공존이 코드에도 사진에도 없었다 — 주장만 있고 증거가 0.
+    row({
+      id: PLAIN_MSG,
+      seq: 43,
+      authorMemberId: memberId,
+      body: PLAIN_BODY,
+      state: "edited",
+    }),
     row({ id: CAPPED_MSG, seq: 44, authorMemberId: memberId, body: CAPPED_BODY }),
   ];
 }
@@ -395,6 +458,10 @@ async function installRoutes(context, traffic, options = {}) {
   // #1146 M2 — 첫 목록 읽기를 한 번 떨어뜨린다. 재시도가 두 번째 읽기를 내는지,
   // 그리고 그 사이에 화면이 무슨 말을 하는지가 아래 `exerciseHonesty` 의 전부다.
   let pinReadsToDegrade = options.failFirstPinRead ? 1 : 0;
+  // #1149 M1 — 재시도가 도는 **동안**의 화면을 재려면 그 창이 존재해야 한다.
+  // 즉답하는 목은 `loading` 을 한 프레임도 남기지 않으므로, 늦게 답하는 목만이
+  // 「스켈레톤이 가진 것을 덮었는가」를 물을 수 있다.
+  const laterReadDelayMs = options.laterPinReadDelayMs ?? 0;
   await context.route("**/v1/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -469,6 +536,7 @@ async function installRoutes(context, traffic, options = {}) {
           503
         );
       }
+      if (laterReadDelayMs > 0) await wait(laterReadDelayMs);
       return json(route, { pins: options.pins ?? [
         pinEntry(
           COLD_PINNED_MSG,
@@ -812,6 +880,44 @@ async function exercise(browser) {
     throw new Error("an unpinned row wears the pinned mark");
   }
 
+  // ---- 6c. 두 표지는 **한 줄에 그 순서로** 선다 (#1149 M2) --------------------
+  //
+  // #1146 은 「기존 위계를 침범하지 않는다」를 이렇게 변호했다: 「고정됨」은
+  // 「수정됨」이 앉아 있는 그 꼬리 한 줄에 같은 격으로 앉고, 순서는 「수정됨」
+  // (본문에 대한 서술) 다음이다. 그런데 픽스처의 행이 전부 `sent` 라 **그 둘이
+  // 함께 선 판이 한 번도 없었다** — 변호만 있고 증거가 0건이면, 다음 배치가 새 띠
+  // 하나로 조용히 뒤집어도 게이트는 초록으로 남는다.
+  const pinnedRow = rowLocator(page, PLAIN_MSG);
+  const tails = pinnedRow.getByTestId("message-meta");
+  if ((await tails.count()) !== 1) {
+    throw new Error(
+      `the row's read-only marks must share ONE tail line, found ${await tails.count()}`
+    );
+  }
+  if (proveRedTail) {
+    // red seam: DOM 에서 두 표지의 순서를 뒤집는다. 아래 단언이 순서를 실제로
+    // 보고 있다면 반드시 깨진다. 제품 소스는 그대로다.
+    await page.evaluate((id) => {
+      const row = document.querySelector(
+        `[data-testid="timeline-message"][data-message-id="${id}"]`
+      );
+      const meta = row?.querySelector('[data-testid="message-meta"]');
+      const mark = meta?.querySelector('[data-testid="pin-mark"]');
+      if (meta && mark) meta.insertBefore(mark, meta.firstChild);
+    }, PLAIN_MSG);
+  }
+  const tailText = (await tails.textContent()) ?? "";
+  if (!tailText.includes("수정됨")) {
+    throw new Error(
+      `fixture is vacuous: the pinned row must also be an edited row, read "${tailText}"`
+    );
+  }
+  if (tailText.indexOf("수정됨") > tailText.indexOf(PIN_ROW_MARK_TEXT)) {
+    throw new Error(
+      `the pinned mark jumped ahead of 「수정됨」 — the tail reads inside-out, "${tailText}"`
+    );
+  }
+
   // ---- 7. 헤더 버튼은 하나의 이름을 갖는다 ------------------------------------
   const trigger = page.getByTestId("open-pin-list");
   const [ariaLabel, title] = await Promise.all([
@@ -939,6 +1045,166 @@ async function exerciseHonesty(browser) {
   await context.close();
 }
 
+/**
+ * 못 불러온 목록도 **가진 것은 지키고**, 그 항목이 앱의 말이면 앱의 말로 선다
+ * (#1149 M1·M3·M4).
+ *
+ * 세 항목이 한 화면에서 만나는 것은 우연이 아니다. `/pins` 가 실패한 채로 프레임이
+ * 하나 도착한 순간이 그 셋의 유일한 공통 무대다:
+ *
+ *   M3  실패 문장과 그 항목이 **함께** 서는가. #1146 이 그렇게 하겠다고 적었지만
+ *       (「가진 것을 숨기지 않는다」) 게이트도 캡처도 항목이 0인 판만 봤다.
+ *   M1  그 상태에서 「다시 시도」를 누르면 상태가 `loading` 으로 되돌아간다. 1차의
+ *       웹은 그 순간 스켈레톤을 세워 **가진 항목을 덮었다** — 폰은 덮지 않는다.
+ *   M4  그 항목의 본문이 비어 있으면 발췌 자리에 서는 것은 앱의 서술이다. 저자의
+ *       말과 같은 결로 서면 사람은 앱의 해명을 남의 말로 읽는다.
+ *
+ * 별도 컨텍스트인 이유는 `exercise` 와 같다: 저기는 「채널당 정확히 한 번 읽는다」를
+ * 세고 있고, 실패·재시도를 끼우면 그 카운터가 흔들린다.
+ */
+async function exerciseKeepsWhatItHas(browser) {
+  const traffic = makeTraffic();
+  const context = await browser.newContext({
+    viewport: { width: 1280, height: 900 },
+    reducedMotion: "reduce",
+  });
+  const page = await context.newPage();
+  await installRealtimeSocket(page);
+  await installRoutes(context, traffic, {
+    failFirstPinRead: true,
+    // 재시도가 도는 창을 사람이 볼 수 있을 만큼 벌린다. 즉답하는 목은 `loading` 을
+    // 한 프레임도 남기지 않아 M1 을 물을 수 없다.
+    laterPinReadDelayMs: 1_500,
+    pins: [
+      pinEntry(COLD_PINNED_MSG, 41, memberId, COLD_BODY, AT + 700_000, COLD_CREATED_MS),
+      pinEntry(VOICELESS_MSG, 45, peerId, null, AT + 770_000),
+    ],
+  });
+  await login(page);
+
+  // 실패한 읽기 **위로** 프레임이 하나 도착한다. 서버가 목록을 못 준 것과 이
+  // 메시지가 고정된 것은 둘 다 참이다.
+  await page.evaluate(
+    (frame) => window.__pinGatePublish(frame),
+    pinnedFrame(pinEntry(VOICELESS_MSG, 45, peerId, null, AT + 770_000))
+  );
+  await wait(300);
+  await openPinList(page);
+
+  // ---- M3. 실패 문장과 항목이 함께 선다 --------------------------------------
+  await page.getByTestId("pin-list-failed").waitFor({ timeout: 5_000 });
+  const kept = await listedIds(page);
+  if (!kept.includes(VOICELESS_MSG)) {
+    throw new Error(
+      `a failed read must not swallow the frames that did arrive, read ${kept.join(", ")}`
+    );
+  }
+
+  // 그리고 칸막이는 **실패 블록과 목록 사이**에 선다 (#1149 M3 판단). 배너가
+  // 자기 아래 테두리를 그리면 그 줄은 문장과 **자기 버튼** 사이에 떨어지는데,
+  // 「다시 시도」는 아래 내용이 아니라 이 배너의 행동이다(키보드 때문에 상자
+  // 밖으로 나갔을 뿐이다).
+  const bannerBorder = await page
+    .getByTestId("pin-list-failed")
+    .evaluate((node) => getComputedStyle(node).borderBottomWidth);
+  if (bannerBorder !== "0px") {
+    throw new Error(
+      `the separator fell between the sentence and its own button (banner border-bottom ${bannerBorder})`
+    );
+  }
+  if ((await page.getByTestId("pin-list-divider").count()) !== 1) {
+    throw new Error(
+      "the failure block and the list it sits on must be divided exactly once"
+    );
+  }
+
+  // ---- M4. 빈 본문은 앱의 말로 선다 ------------------------------------------
+  const voiceRow = page.locator(
+    `[data-testid="pin-list-item"][data-message-id="${VOICELESS_MSG}"] [data-testid="pin-list-excerpt"]`
+  );
+  if (proveRedVoice) {
+    // red seam: DOM 에서 주(註) 기호를 걷어낸다. 단언이 화면을 보고 있다면 깨진다.
+    await page.evaluate((id) => {
+      const node = document.querySelector(
+        `[data-testid="pin-list-item"][data-message-id="${id}"] [data-testid="pin-list-excerpt"]`
+      );
+      if (node) node.textContent = node.textContent?.replace(/^\S+\s*/, "") ?? "";
+    }, VOICELESS_MSG);
+  }
+  const voiceText = (await voiceRow.textContent())?.trim() ?? "";
+  if (!voiceText.includes(EMPTY_BODY_TEXT)) {
+    throw new Error(
+      `an empty body must say what it is, read "${voiceText}"`
+    );
+  }
+  if (!voiceText.startsWith(APP_NOTE_MARK)) {
+    throw new Error(
+      `an empty body is drawn as if the author wrote it — the app's own sentence must wear "${APP_NOTE_MARK}", read "${voiceText}"`
+    );
+  }
+  // 그리고 저자가 실제로 쓴 줄에는 그 표시가 없다. 모든 줄에 서는 표시는 표시가
+  // 아니다. (이 판에서 저자의 줄은 재시도 뒤에 온다 — 아래에서 함께 잰다.)
+
+  // ---- M1. 재시도 중에도 가진 것은 남는다 -------------------------------------
+  const readsBefore = traffic.pinReads.length;
+  await page.getByTestId("pin-list-retry").click();
+  if (proveRedKeep) {
+    // red seam: 재시도가 도는 동안 DOM 에서 항목을 걷어낸다. 아래 단언이 화면을
+    // 보고 있다면 반드시 깨진다. 제품 소스는 그대로다.
+    await page.evaluate(() => {
+      for (const node of document.querySelectorAll('[data-testid="pin-list-item"]')) {
+        node.remove();
+      }
+    });
+  }
+  // 창 안에서 잰다: 읽기가 아직 안 돌아왔고(카운터가 늘었지만 목록은 그대로),
+  // 화면은 `loading` 이다.
+  await page.waitForFunction(
+    () =>
+      document.querySelector('[data-testid="pin-list"]')?.getAttribute(
+        "data-pin-status"
+      ) === "loading",
+    undefined,
+    { timeout: 5_000 }
+  );
+  const duringRetry = await listedIds(page);
+  if (!duringRetry.includes(VOICELESS_MSG)) {
+    throw new Error(
+      `the retry hid what the list already had — a skeleton stands only when there is nothing to show (read ${duringRetry.join(", ")})`
+    );
+  }
+  if ((await page.getByTestId("pin-list").getByTestId("skeleton-row").count()) !== 0) {
+    throw new Error(
+      "a skeleton was drawn over a list that already had rows: it predicts a place that is not empty"
+    );
+  }
+
+  // 그리고 읽기가 돌아오면 실패 문장은 사라지고 두 항목이 함께 선다.
+  await page.getByTestId("pin-list-item").nth(1).waitFor({ timeout: 10_000 });
+  if (traffic.pinReads.length !== readsBefore + 1) {
+    throw new Error(
+      `the retry must read the list exactly once more (${readsBefore} -> ${traffic.pinReads.length})`
+    );
+  }
+  const healed = await listedIds(page);
+  if (!healed.includes(COLD_PINNED_MSG) || !healed.includes(VOICELESS_MSG)) {
+    throw new Error(`the healed list lost an entry, read ${healed.join(", ")}`);
+  }
+  const authored = page.locator(
+    `[data-testid="pin-list-item"][data-message-id="${COLD_PINNED_MSG}"] [data-testid="pin-list-excerpt"]`
+  );
+  if (((await authored.textContent()) ?? "").startsWith(APP_NOTE_MARK)) {
+    throw new Error(
+      "a line the author actually wrote wears the app's own mark — then the mark says nothing"
+    );
+  }
+  if ((await page.getByTestId("pin-list-divider").count()) !== 0) {
+    throw new Error("the divider outlived the failure it was dividing");
+  }
+
+  await context.close();
+}
+
 /** 리뷰용 스크린샷. 판정하지 않는다 — 사람이 보는 자리다. */
 async function captureShots(browser) {
   const outDir = resolve(webRoot, "artifacts/pin");
@@ -974,6 +1240,13 @@ async function captureShots(browser) {
     // #1146 M2 — 「없다」와 「모른다」는 **나란히 놓아야** 갈린다. 그래서 못 불러온
     // 목록도 같은 두 배색으로 찍는다: 리뷰가 두 장을 함께 보지 않으면 1차의
     // 거짓말이 고쳐졌는지 사진으로 확인할 길이 없다.
+    //
+    // **그리고 항목과 함께 찍는다** (#1149 M3). 1차의 이 판은 항목이 0인 실패였고,
+    // 그래서 #1146 이 길게 변호한 「가진 것을 숨기지 않는다」는 사진에 한 번도 서지
+    // 않았다 — 실제로 갈리는 판은 실패 문장과 항목이 **함께** 선 그림이다. 프레임으로
+    // 들어오는 그 항목은 **본문이 없는 메시지**로 고른다: 같은 한 장이 앱의 서술이
+    // 저자의 말과 다른 결로 서는지(#1149 M4)와 칸막이가 어디 떨어지는지(#1149 M3)를
+    // 함께 보여 준다.
     const failedTraffic = makeTraffic();
     const failedContext = await browser.newContext({
       viewport: { width: 1280, height: 900 },
@@ -990,10 +1263,23 @@ async function captureShots(browser) {
     await failedPage
       .getByTestId("pin-list")
       .screenshot({ path: resolve(outDir, `pin-list-failed-${scheme}.png`) });
+    await closePinList(failedPage);
+    await failedPage.evaluate(
+      (frame) => window.__pinGatePublish(frame),
+      pinnedFrame(pinEntry(VOICELESS_MSG, 45, peerId, null, AT + 770_000))
+    );
+    await wait(300);
+    await openPinList(failedPage);
+    await failedPage.getByTestId("pin-list-item").first().waitFor();
+    await failedPage
+      .getByTestId("pin-list")
+      .screenshot({
+        path: resolve(outDir, `pin-list-failed-kept-${scheme}.png`),
+      });
     await failedContext.close();
   }
   console.log(
-    "[shots] artifacts/pin/pin-{list,list-detail,list-failed,menu}-{light,dark}.png"
+    "[shots] artifacts/pin/pin-{list,list-detail,list-failed,list-failed-kept,menu}-{light,dark}.png"
   );
 }
 
@@ -1012,6 +1298,7 @@ async function main() {
     try {
       await exercise(browser);
       await exerciseHonesty(browser);
+      await exerciseKeepsWhatItHas(browser);
       if (process.env.PIN_GATE_SHOTS === "1") await captureShots(browser);
     } finally {
       await browser.close();
@@ -1026,6 +1313,10 @@ async function main() {
   console.log("           #1146: 도장은 정렬 근거(고정된 때·연도)를 그렸고,");
   console.log("           고정된 행에만 흔적이 섰고, 못 불러온 목록은 「없다」고");
   console.log("           말하지 않았으며 재시도는 목록만 다시 읽었다.");
+  console.log("           #1149: 「수정됨」과 「고정됨」이 한 꼬리에 그 순서로 섰고,");
+  console.log("           실패 문장은 가진 항목과 함께 섰고(칸막이는 그 둘 사이가");
+  console.log("           아니라 목록 앞에), 재시도가 도는 동안에도 가진 것은");
+  console.log("           남았으며, 빈 본문은 앱의 말로 섰다.");
 }
 
 await main();

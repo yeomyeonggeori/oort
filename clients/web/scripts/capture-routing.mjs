@@ -215,6 +215,48 @@ function rosterFor(support) {
 }
 
 /**
+ * 이 하네스가 **답하지 않은** `/v1` 경로들 (이슈 #1125). 런 끝에 한 번 인쇄된다.
+ */
+const unmockedPaths = new Set();
+
+/**
+ * 짝이 없는 `/v1` 요청에 **이 하네스가 직접** 답한다 (이슈 #1125).
+ *
+ * 바로 아래 `/v1/auth/refresh` 목의 주석이 이 결함을 이미 이름까지 대고 있었다 —
+ * *"Anything this table does not name escapes to `vite preview`, which proxies
+ * /v1 to a real backend; a 401 there makes `restoreSession()` clear the session
+ * and drop the run back on the login card, 200-lines away from any assertion
+ * that could explain it."* 그때는 그 한 경로만 막았고, 그 뒤로 표면이 늘면서
+ * 짝 없는 경로가 다시 다섯이 됐다(실측 2026-08-07: `work-sessions`·`work-hosts`·
+ * `reactions`·`huddles/active`·`pins`). 로컬 스택이 떠 있는 기계에서 그 다섯이
+ * 401 로 돌아왔고, 디렉터리는 첫 프레임을 찍은 직후 로그인 카드로 바뀌어 있었다 —
+ * 그래서 「`directory-row` 는 떴는데 그 다음 클릭이 30초 타임아웃」이라는, 원인과
+ * 아무 관계 없어 보이는 증상으로 나타났다.
+ *
+ * 그래서 이번에는 **경로 하나가 아니라 새는 구멍 자체**를 막는다. 답은 본문 없는
+ * 404 다: 이 하네스가 흉내 내는 서버가 모르는 경로에 하는 답이 그것이고,
+ * 클라이언트는 그 404 를 미제공으로 접을 줄 안다(`serverSaysAbsent`).
+ *
+ * 등록 순서가 계약이다 — Playwright 는 나중에 등록된 라우트를 먼저 보므로 이것은
+ * `installMocks` 의 맨 앞에 선다.
+ */
+async function installUnmockedFallback(context) {
+  await context.route("**/v1/**", (route) => {
+    unmockedPaths.add(
+      `${route.request().method()} ${new URL(route.request().url()).pathname}`
+    );
+    return route.fulfill({ status: 404, contentType: "text/plain", body: "" });
+  });
+}
+
+/** 짝 없는 경로를 런 끝에 한 번 인쇄한다. 조용히 새는 것만 막으면 된다. */
+function reportUnmocked() {
+  if (unmockedPaths.size === 0) return;
+  console.log(`\n[미대응 /v1 경로 ${unmockedPaths.size}건 — 본문 없는 404로 답했다]`);
+  for (const path of [...unmockedPaths].sort()) console.log(`  ${path}`);
+}
+
+/**
  * `support`는 이 캡처가 흉내 내는 서버 형상이다.
  *   "ready"     effort-table 200 + effortPref를 아는 프로필 + 전송 프로브 400
  *   "sendless"  effort-table 200이지만 전송 표면은 routing을 모른다(404)
@@ -227,6 +269,9 @@ function rosterFor(support) {
  */
 async function installMocks(context, support, probes = { count: 0, puts: [] }) {
   const hasEffortAxis = support !== "absent";
+  // 짝 없는 `/v1` 은 **여기서** 끝난다 (이슈 #1125). 반드시 맨 앞이다: Playwright 는
+  // 나중에 등록된 라우트를 먼저 보므로, 이 줄이 뒤로 가면 아래 목을 전부 이긴다.
+  await installUnmockedFallback(context);
   await context.route("**/v1/auth/login", (route) => json(route, SESSION));
   // `/v1/auth/refresh` MUST be stubbed even though nothing in these frames asks
   // for a rotation on purpose. Anything this table does not name escapes to
@@ -256,6 +301,20 @@ async function installMocks(context, support, probes = { count: 0, puts: [] }) {
     hasEffortAxis
       ? json(route, FIXTURES.effortTable)
       : json(route, { error: { message: "not found" } }, 404)
+  );
+  // 프로필 **쓰기 축**의 프로브 (이슈 #1125). `useAgentEditingCapability` 가 이
+  // 경로 하나로 「이 서버가 프로필 편집을 받는가」를 판정하고, 오류를 받으면 모델
+  // 상자를 잠근다. 짝이 없던 동안에는 이 물음이 프리뷰 프록시를 타고 나갔고,
+  // 그래서 이 하네스의 프레임은 **떠 있는 서버가 대신 답한 판정** 위에 서 있었다.
+  //
+  // 본문에 `allowedAgentModels` 를 싣지 않는 것은 판단이다: 이 하네스가 흉내 내는
+  // 서버들에는 워크스페이스 허용목록 경로가 없고(아래 2d 주석의 전제), 그럼에도
+  // 경로가 200 이면 그 옆의 쓰기는 있다 — 코어가 그 독법을 명시해 두었다
+  // (*"A 200 whose body this client cannot use is still a 200"*). 그 결과가
+  // 피커에 붙는 「이 서버는 … 목록을 알려주지 않습니다」 한 줄이고, 그것이 이
+  // 캡처가 보여주려는 상태다.
+  await context.route("**/v1/workspaces/*/agents/*/allowed-models", (route) =>
+    json(route, {})
   );
   await context.route("**/v1/workspaces/*/agents/*/profile", (route) => {
     const request = route.request();
@@ -298,6 +357,23 @@ async function installMocks(context, support, probes = { count: 0, puts: [] }) {
     }
     return json(route, { profile });
   });
+  // 채널 하나를 여는 데 딸려 나가는 부속 읽기들 (이슈 #1125). 짝이 없으면 위
+  // 포괄 라우트가 404 로 접는데, 반응은 접힐 표면이 아니고 고정 목록은 그때
+  // 「불러오지 못했습니다」로 선다 — 라우팅 프레임이 보여줄 상태가 아니다.
+  // (`pins` 는 #1112 이, `work-*` 는 작업 세션이 더한 요청이고, 이 하네스는 그
+  // 셋보다 먼저 쓰였다.)
+  await context.route("**/v1/workspaces/*/channels/*/reactions", (route) =>
+    json(route, {})
+  );
+  await context.route("**/v1/workspaces/*/channels/*/pins", (route) =>
+    json(route, { pins: [] })
+  );
+  await context.route("**/v1/workspaces/*/work-sessions", (route) =>
+    json(route, { workSessions: [] })
+  );
+  await context.route("**/v1/workspaces/*/work-hosts", (route) =>
+    json(route, { workHosts: [] })
+  );
   await context.route("**/v1/workspaces/*/channels", (route) =>
     json(route, { channels: CHANNELS })
   );
@@ -359,7 +435,20 @@ async function waitForServer(url, timeoutMs = 30_000) {
   }
 }
 
+/**
+ * 매번 **로그인 화면에서** 시작한다 (이슈 #1125).
+ *
+ * 이 컨텍스트의 페이지들은 localStorage 를 공유하므로, 두 번째 페이지부터는 이미
+ * 로그인된 셸로 복귀해 로그인 카드가 아예 없다. 지금까지 그 카드가 매번 나온 것은
+ * **짝 없는 `/v1` 요청이 진짜 서버의 401 을 받아 앱이 스스로 로그아웃했기**
+ * 때문이다 — 즉 이 하네스는 자기가 고치려던 결함 덕분에 돌고 있었다. 그 구멍을
+ * 막으면(`installUnmockedFallback`) 세션이 정상적으로 살아남고, 그 우연이 사라진다.
+ *
+ * `capture-screens.mjs` 의 `signIn` 이 같은 자리에서 같은 이유로 같은 일을 한다.
+ */
 async function signIn(page) {
+  await page.evaluate("try { localStorage.clear(); } catch (e) {}");
+  await page.reload({ waitUntil: "networkidle" });
   await page.getByTestId("login-email").fill("seongjae@dawn.example");
   await page.getByTestId("login-password").fill("capture-only-not-a-credential");
   await page.getByTestId("login-submit").click();
@@ -627,6 +716,7 @@ async function main() {
         }
       }
       for (const path of all) console.log(path);
+      reportUnmocked();
     } finally {
       await browser.close();
     }
