@@ -93,6 +93,40 @@ public struct Message: Identifiable, Codable, Sendable, Hashable {
     /// Tombstone check (L4 §5.1 DELETE = tombstone).
     public var isDeleted: Bool { state == .deleted || deletedAtMs != nil }
 
+    /// The server-owned props key a streaming assembly writes into (#1130 전제①).
+    public static let streamPropsKey = "momo.stream"
+
+    /// The producer's revision for this message; `nil` if it never streamed.
+    ///
+    /// **Not a `seq`.** It orders one message's own slices and nothing else; the
+    /// channel's order is still `seq`, which a growing body never consumes. Its
+    /// only consumer is the staleness drop in `RealtimeSubscriptionDriver`.
+    public var streamRev: Int64? {
+        props[Message.streamPropsKey]?["rev"]?.intValue
+    }
+
+    /// True while more text is still arriving for this message.
+    ///
+    /// A renderer uses it for the "still arriving" affordance. It is `false` —
+    /// not absent — once the final slice lands, so a client that only ever saw
+    /// the last frame still knows this message was assembled rather than typed.
+    public var isStreamingBody: Bool {
+        props[Message.streamPropsKey]?["streaming"]?.boolValue ?? false
+    }
+
+    /// True when this payload is a **slice of a growing answer** rather than a
+    /// human's revision (#1130 전제①).
+    ///
+    /// Both halves are required and the second is the load-bearing one. A
+    /// streamed message keeps its `momo.stream` props forever, so a *person*
+    /// later correcting that message arrives carrying the same `rev` — and a
+    /// staleness rule that only looked at the revision would swallow their
+    /// correction. The server never stamps `editedAtMs` on a slice and always
+    /// stamps it on an edit, so that absence is what tells the two apart.
+    public var isStreamSlice: Bool {
+        streamRev != nil && editedAtMs == nil
+    }
+
     private enum CodingKeys: String, CodingKey {
         case id
         case channelId = "channel_id"

@@ -40,12 +40,13 @@ use momo_messaging::{
     channel_pins, channel_reaction_snapshot, clamp_history_limit, clamp_replies_limit,
     delete_message_in_tx, edit_message_in_tx, is_channel_member, list_channel_page,
     list_thread_replies, parse_replies_cursor, resolve_member_signing_key,
-    send_message_with_mentions_in_tx, set_pin_in_tx, set_reaction_in_tx,
+    send_message_with_mentions_in_tx, set_pin_in_tx, set_reaction_in_tx, stream_message_body_in_tx,
     validate_quote_target_in_tx, validate_reaction_emoji, validate_replies_root_in_tx,
-    validate_thread_root_in_tx, AttachmentLinkRejected, HistoryCursor, InteractionRefused,
-    MessageAttachment, MessageSignature, MessageType, NewMessage, PagedMessage, PinAction,
-    PinnedMessage, ProvenanceRejected, QuoteTargetInvalid, QuotedMessage, ReactionAction,
-    ReactionSnapshot, SendExtras, SendRejected, StoredMessage, ThreadRollup, ThreadRootInvalid,
+    validate_thread_root_in_tx, AttachmentLinkRejected, HistoryCursor, InteractionMessage,
+    InteractionRefused, MessageAttachment, MessageSignature, MessageType, NewMessage, PagedMessage,
+    PinAction, PinnedMessage, ProvenanceRejected, QuoteTargetInvalid, QuotedMessage,
+    ReactionAction, ReactionSnapshot, SendExtras, SendRejected, StoredMessage, StreamEdit,
+    ThreadRollup, ThreadRootInvalid, STREAM_PROPS_KEY,
 };
 use serde_json::{Map, Value};
 use uuid::Uuid;
@@ -53,7 +54,7 @@ use uuid::Uuid;
 use crate::dto::{
     EditMessageRequest, HistoryQuery, MessageDto, MessagePage, PinDeltaDto, PinListDto,
     PinnedMessageDto, QuotedMessageDto, ReactionDeltaDto, RepliesQuery, SendMessageRequest,
-    ThreadRepliesPage, ThreadRollupDto,
+    StreamEditRequest, ThreadRepliesPage, ThreadRollupDto,
 };
 use crate::error::{db_error, ApiError};
 use crate::routes::agent_mentions::{route_agent_mentions_in_tx, MentionSend};
@@ -63,6 +64,15 @@ use crate::AppState;
 /// Server-owned props key: a save-time parsing result that a client may never
 /// supply (Swift `encodeProps` strips it before persisting).
 const SERVER_OWNED_PROPS_KEY: &str = "mention_member_ids";
+
+/// Every props key the server authors and therefore trusts.
+///
+/// [`STREAM_PROPS_KEY`] joins the list with #1130 전제①: the streaming
+/// staleness guard reads `momo.stream.rev` back and compares against it, so a
+/// client that could write that key could park a huge revision on someone's
+/// message and freeze every later slice of it as "stale". A trusted key that a
+/// client can write is not a trusted key.
+const SERVER_OWNED_PROPS_KEYS: [&str; 2] = [SERVER_OWNED_PROPS_KEY, STREAM_PROPS_KEY];
 
 /// Resolve `{ws}`/`{ch}` and enforce that the path workspace matches the token's
 /// (Swift `MessageRoutes.scopeIDs`, :2824-2839).
@@ -81,12 +91,12 @@ fn scope_ids(
     Ok((workspace_id, channel_id))
 }
 
-/// Client props → the stored `props` object, minus the server-owned key.
+/// Client props → the stored `props` object, minus every server-owned key.
 fn props_value(props: Option<&std::collections::BTreeMap<String, String>>) -> Value {
     let mut object = Map::new();
     if let Some(props) = props {
         for (key, value) in props {
-            if key == SERVER_OWNED_PROPS_KEY {
+            if SERVER_OWNED_PROPS_KEYS.contains(&key.as_str()) {
                 continue;
             }
             object.insert(key.clone(), Value::String(value.clone()));
@@ -688,7 +698,12 @@ fn interaction_refusal(refused: InteractionRefused) -> ApiError {
         InteractionRefused::EditDeleted
         | InteractionRefused::ReactDeleted
         | InteractionRefused::PinDeleted
-        | InteractionRefused::EmptyBody => StatusCode::BAD_REQUEST,
+        | InteractionRefused::EmptyBody
+        // #1130 전제① — a malformed revision is the caller's mistake, not a
+        // conflict: nothing on the server disagreed with it, it was never a
+        // usable number. 409 would tell a retry loop to back off and try the
+        // same broken value again.
+        | InteractionRefused::StreamRevInvalid => StatusCode::BAD_REQUEST,
         InteractionRefused::ReactionLimit | InteractionRefused::PinLimit => StatusCode::CONFLICT,
     };
     ApiError::new(status, refused.to_string())
@@ -730,6 +745,15 @@ async fn record_interaction_audit(
 /// 200 with the updated message (Swift returns the `MessageDTO` through
 /// `response(from:context:)`, whose default status is `.ok` — unlike `send`,
 /// which is a 201 because it creates).
+///
+/// **Two writes share this door** (#1130 전제①). Without a `stream` block it is
+/// the human revision it has always been. With one it is a slice of a growing
+/// answer, and [`stream_edit`] takes it — same route, same 200, same
+/// `message.edited` broadcast, so no client learns a new frame to render a
+/// streaming agent. The fork is here rather than on a second route because
+/// everything that guards an edit — authorship, membership, the tombstone rule,
+/// RLS, "no interaction consumes a seq" — must guard both, and a second route is
+/// a second place for one of those to be forgotten.
 pub async fn edit(
     State(state): State<AppState>,
     Extension(principal): Extension<Principal>,
@@ -738,6 +762,19 @@ pub async fn edit(
 ) -> Result<Json<MessageDto>, ApiError> {
     let (workspace_id, message_id) = message_scope_ids(&workspace, &message, &principal)?;
     let via_token_id = audit_via_token_id(&principal);
+
+    if let Some(stream) = request.stream {
+        return stream_edit(
+            &state,
+            &principal,
+            workspace_id,
+            message_id,
+            via_token_id,
+            request.body,
+            stream,
+        )
+        .await;
+    }
 
     let edited = tenant_tx_or_reject(&state.pool, workspace_id, move |conn| {
         Box::pin(async move {
@@ -788,6 +825,127 @@ pub async fn edit(
         // message, so the client keeps the file cards it already drew.
         &[],
     )))
+}
+
+/// The `PATCH …/messages/{id}` arm that carries a `stream` block (#1130 전제①).
+///
+/// One turn of a streaming provider is one message that **grows**. 실측 (#1120
+/// prime 스파이크 §2): a 3,661-character answer coalesced 30.8× still needs 17
+/// writes; through `send` that is 17 messages in the channel for one sentence.
+///
+/// Two things differ from the arm above, and both are deliberate:
+///
+/// 1. **A not-newer `rev` is a 200, not a 409.** The domain answers
+///    [`StreamOutcome::Stale`] and the caller gets the message as it stands. A
+///    replayed slice and a slice overtaken by its own successor are the same
+///    event, and "this is already true" is the honest answer to both — a 409
+///    would make a correct retry look like a failure to every adapter.
+/// 2. **One audit row per assembled message, not one per slice.** The row is
+///    written on the *final* applied slice and names the revision count it
+///    settled at. Seventeen `message.edited` audit rows would be seventeen
+///    claims that a member revised their words, which is false, and the volume
+///    would drown the real edits an auditor is reading for.
+async fn stream_edit(
+    state: &AppState,
+    principal: &Principal,
+    workspace_id: Uuid,
+    message_id: Uuid,
+    via_token_id: Option<Uuid>,
+    body: String,
+    stream: StreamEditRequest,
+) -> Result<Json<MessageDto>, ApiError> {
+    let actor_member_id = principal.member_id;
+    let edit = StreamEdit {
+        rev: stream.rev,
+        is_final: stream.is_final,
+    };
+
+    let outcome = tenant_tx_or_reject(&state.pool, workspace_id, move |conn| {
+        Box::pin(async move {
+            let outcome = match stream_message_body_in_tx(
+                conn,
+                workspace_id,
+                message_id,
+                actor_member_id,
+                &body,
+                edit,
+            )
+            .await?
+            {
+                Ok(outcome) => outcome,
+                // Through the ERROR channel for the same reason the plain edit
+                // does it: `with_tenant_tx` commits on `Ok`, and a refusal
+                // returned as a value would still commit the locks it took.
+                Err(refused) => return Err(SendFailure::Rejected(interaction_refusal(refused))),
+            };
+            if edit.is_final && outcome.applied() {
+                record_stream_audit(
+                    conn,
+                    workspace_id,
+                    outcome.message().message.channel_id,
+                    message_id,
+                    actor_member_id,
+                    via_token_id,
+                    edit.rev,
+                )
+                .await?;
+            }
+            Ok(outcome)
+        })
+    })
+    .await
+    .map_err(|failure| match failure {
+        SendFailure::Rejected(rejection) => rejection,
+        SendFailure::Db(error) => db_error("messages.stream_edit", error),
+    })?;
+
+    Ok(Json(stream_message_dto(outcome.message())))
+}
+
+/// The 200 body a streaming slice answers with — identical in shape to the plain
+/// edit's, so an adapter parses one `Message` either way.
+fn stream_message_dto(projection: &InteractionMessage) -> MessageDto {
+    message_dto(
+        &projection.message,
+        projection.client_msg_id,
+        true,
+        None,
+        None,
+        &[],
+    )
+}
+
+/// The single audit row an assembled message leaves (#1130 전제①).
+///
+/// `message.streamed` rather than `message.edited`: an auditor reading for "who
+/// changed what they said" must not have to filter seventeen machine slices out
+/// of the answer, and the two facts genuinely are different. `revisions` records
+/// how many slices it took, which is the only number a reader of this row would
+/// otherwise have to reconstruct from the outbox.
+async fn record_stream_audit(
+    conn: &mut momo_db::PgConnection,
+    workspace_id: Uuid,
+    channel_id: Uuid,
+    message_id: Uuid,
+    actor_member_id: Uuid,
+    via_token_id: Option<Uuid>,
+    final_rev: i64,
+) -> Result<(), DbError> {
+    let entry = AuditEntry::new(workspace_id, "message.streamed")
+        .by(actor_member_id)
+        .about_optional(None)
+        .target("message", message_id)
+        .via_token(via_token_id)
+        .with_schema(
+            "momo.message_stream.v1",
+            serde_json::json!({
+                "channel_id": channel_id,
+                "event_type": "message.streamed",
+                "final_rev": final_rev,
+            }),
+        );
+    write_audit(conn, &entry).await?;
+    Ok(())
 }
 
 /// `DELETE /v1/workspaces/{ws}/messages/{id}` — soft delete one's own message.
@@ -1109,6 +1267,7 @@ pub async fn pin_list(
 mod tests {
     use super::*;
     use momo_auth::PrincipalKind;
+    use momo_messaging::StreamOutcome;
     use std::collections::BTreeMap;
 
     fn principal(workspace_id: Uuid) -> Principal {
@@ -1216,11 +1375,91 @@ mod tests {
         let mut props = BTreeMap::new();
         props.insert("k".to_string(), "v".to_string());
         props.insert(SERVER_OWNED_PROPS_KEY.to_string(), "spoofed".to_string());
+        // #1130 전제① — the streaming revision is read back by the staleness
+        // guard, so a client that could write it could park a huge number on
+        // someone else's message and freeze every later slice as "stale".
+        props.insert(STREAM_PROPS_KEY.to_string(), r#"{"rev":9999}"#.to_string());
         let value = props_value(Some(&props));
         assert_eq!(value["k"], Value::String("v".into()));
         assert!(
             value.get(SERVER_OWNED_PROPS_KEY).is_none(),
             "mention_member_ids is server-owned and must be stripped"
+        );
+        assert!(
+            value.get(STREAM_PROPS_KEY).is_none(),
+            "momo.stream is server-owned and must be stripped"
+        );
+    }
+
+    /// #1130 전제① — a `stream` block is optional and its absence is the plain
+    /// edit. A request shaped like yesterday's must still parse, or every
+    /// deployed client breaks the day this ships.
+    #[test]
+    fn the_stream_block_is_optional_and_its_absence_is_a_plain_edit() {
+        let plain: EditMessageRequest =
+            serde_json::from_str(r#"{"body":"고쳤다"}"#).expect("a body-only edit still parses");
+        assert!(plain.stream.is_none());
+
+        let sliced: EditMessageRequest =
+            serde_json::from_str(r#"{"body":"답이 자","stream":{"rev":3,"final":false}}"#)
+                .expect("a slice parses");
+        let stream = sliced.stream.expect("stream block");
+        assert_eq!(stream.rev, 3);
+        assert!(!stream.is_final, "`final` is the wire name, not `isFinal`");
+    }
+
+    /// A malformed revision is the caller's mistake, not a conflict. 409 would
+    /// tell a retry loop to back off and re-send the same unusable number.
+    #[test]
+    fn a_bad_stream_revision_is_a_400_with_its_own_sentence() {
+        let error = interaction_refusal(InteractionRefused::StreamRevInvalid);
+        assert_eq!(error.status, StatusCode::BAD_REQUEST);
+        assert_eq!(error.message, "stream revision must be a positive integer");
+    }
+
+    /// The slice's 200 is the same `Message` an edit answers with — an adapter
+    /// parses one shape either way — and it must **not** claim `editedAt`.
+    /// "수정됨" is a claim that a human revised what they said; an answer
+    /// arriving is not a revision of itself.
+    #[test]
+    fn a_stream_slice_answers_with_a_message_that_was_never_edited() {
+        let mut message = stored_message();
+        message.props = serde_json::json!({ STREAM_PROPS_KEY: { "rev": 4, "streaming": true } });
+        let projection = InteractionMessage {
+            message,
+            run_id: None,
+            client_msg_id: None,
+        };
+        let dto = stream_message_dto(&projection);
+        assert!(
+            dto.edited_at_ms.is_none(),
+            "a growing body has not been edited"
+        );
+        assert_eq!(dto.state.as_deref(), Some("sent"));
+        let props = dto.props.expect("the stream marker rides the response");
+        assert_eq!(props[STREAM_PROPS_KEY]["rev"], serde_json::json!(4));
+        assert_eq!(
+            props[STREAM_PROPS_KEY]["streaming"],
+            serde_json::json!(true)
+        );
+    }
+
+    /// `StreamOutcome::Stale` answers 200 with the row as it stands — the same
+    /// projection an applied slice would have produced, so a retrying adapter
+    /// cannot tell "I already did this" from "I just did this" and does not have
+    /// to.
+    #[test]
+    fn a_stale_slice_still_answers_with_the_current_message() {
+        let projection = InteractionMessage {
+            message: stored_message(),
+            run_id: None,
+            client_msg_id: None,
+        };
+        let stale = StreamOutcome::Stale(projection.clone());
+        assert!(!stale.applied(), "a stale slice wrote nothing");
+        assert_eq!(
+            stream_message_dto(stale.message()).id,
+            stream_message_dto(&projection).id
         );
     }
 

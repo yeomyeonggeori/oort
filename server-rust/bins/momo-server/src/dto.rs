@@ -340,12 +340,36 @@ pub struct AttachmentResponse {
 /// `PATCH /v1/workspaces/{ws}/messages/{id}` request body (Swift
 /// `EditMessageRequest`, `DTOs.swift:180-182`).
 ///
-/// One field, deliberately: the author is the credential's, never the body's.
-/// An `authorMemberId` here would be a field the server must ignore, and a field
-/// the server ignores is one a client can believe in.
+/// The author is the credential's, never the body's. An `authorMemberId` here
+/// would be a field the server must ignore, and a field the server ignores is
+/// one a client can believe in.
 #[derive(Debug, Deserialize)]
 pub struct EditMessageRequest {
     pub body: String,
+    /// #1130 전제① — present when this write is a **slice of a growing answer**
+    /// rather than a human revising what they already said.
+    ///
+    /// Optional and additive: a request shaped like yesterday's still means
+    /// exactly what it meant. Its presence is what selects
+    /// `momo_messaging::stream_message_body_in_tx`, whose two visible departures
+    /// from a plain edit are that it stamps no `editedAtMs` and that a
+    /// not-newer `rev` is a no-op.
+    pub stream: Option<StreamEditRequest>,
+}
+
+/// The `stream` block on [`EditMessageRequest`] (#1130 전제①).
+///
+/// `rev` is the **writer's** counter, not a `seq`: per-message, starting at 1,
+/// and never leaving that message's own props. The server keeps its own
+/// authorities — order is `seq`, identity is the credential — and asks the
+/// producer for the one fact it cannot derive: which of its own slices this is.
+#[derive(Debug, Deserialize)]
+pub struct StreamEditRequest {
+    pub rev: i64,
+    /// `final` is a Rust keyword and a perfectly ordinary JSON key. The wire
+    /// name is the spec's; the rename is where that costs nothing.
+    #[serde(rename = "final")]
+    pub is_final: bool,
 }
 
 /// `PUT`/`DELETE …/messages/{id}/reactions/{emoji}` response (Swift
