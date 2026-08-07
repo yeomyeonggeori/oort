@@ -5,14 +5,8 @@ import {
 } from '@momo/core/features/work/adeControl';
 import React from 'react';
 import {Pressable, StyleSheet, Text} from 'react-native';
-import {
-  color,
-  font,
-  line,
-  SAFE_GUTTER,
-  space,
-  TOUCH_TARGET,
-} from '../../design/tokens';
+import {font, line, SAFE_GUTTER, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
+import {useStyles} from '../../design/theme';
 import {useAdeControl} from './useAdeControl';
 
 // =============================================================================
@@ -70,18 +64,22 @@ import {useAdeControl} from './useAdeControl';
  * 같은 판정을 이미 적었다) — 같은 색이 두 앱에서 다른 것을 뜻하면 베끼는 쪽이
  * 틀린다.
  */
-const SEGMENT_STYLE: Readonly<Record<AdeSummarySegmentKind, {color: string}>> = {
+const buildSegmentStyle = (
+  color: Palette,
+): Readonly<Record<AdeSummarySegmentKind, {color: string}>> => ({
   plain: {color: color.textMuted},
   count: {color: color.text},
   blocked: {color: color.warn},
   blockedCount: {color: color.warn},
-};
+});
 
 export function AdeSummaryLine({
   onPress,
 }: {
   onPress: () => void;
 }): React.JSX.Element | null {
+  const styles = useStyles(buildStyles);
+  const segmentStyle = useStyles(buildSegmentStyle);
   // 시계 없는 렌더의 자기 시각(위 머리말). 이 값은 만료 격자로 양자화되어 들어간다.
   const {counts} = useAdeControl(Date.now(), false);
   const segments = adeSummarySegments(counts);
@@ -108,7 +106,7 @@ export function AdeSummaryLine({
         ellipsizeMode="tail"
         testID="ade-summary-text">
         {segments.map((segment, index) => (
-          <Text key={index} style={SEGMENT_STYLE[segment.kind]}>
+          <Text key={index} style={segmentStyle[segment.kind]}>
             {segment.text}
           </Text>
         ))}
@@ -122,7 +120,7 @@ export function AdeSummaryLine({
   );
 }
 
-const styles = StyleSheet.create({
+const buildStyles = (color: Palette) => StyleSheet.create({
   row: {
     // 헤더 아래에 붙는 한 줄. `TOUCH_TARGET` 을 깔고 앉는다 — 이 앱의 모든 누를
     // 것이 지는 바닥이고, 12pt 글자 한 줄은 그것 없이는 17pt 다.

@@ -304,3 +304,34 @@ jest.mock('@react-native-community/netinfo', () => {
     },
   };
 });
+
+// ---- 시스템 색 스킴 (U2) ------------------------------------------------------
+// React Native 의 jest 프리셋은 `useColorScheme` 을 **`'light'` 로** 목킹한다. 이
+// 스위트는 그 사실보다 먼저 쓰였고, 폰이 다크 한 벌이던 시절의 낱값을 60 개 파일이
+// 단정한다(`expect(style.color).toBe(color.text)`). 스킴이 둘이 된 지금 그 단정들은
+// **다크 스킴에 대한 단정**이고, 그 사실은 여기 한 곳에 적힌다.
+//
+// 그래서 기본을 `'dark'` 로 뒤집는다. 라이트를 보고 싶은 테스트는 그렇다고 말해야
+// 하고(`__setSystemColorScheme('light')`), 말한 것이 화면까지 닿게 실제 구독자를
+// 깨운다 — 값만 바꾸고 알리지 않는 목은 「시스템이 바뀌면 화면이 따라간다」를
+// 검사할 수 없다.
+jest.mock('react-native/Libraries/Utilities/useColorScheme', () => {
+  const React = require('react');
+  let scheme = 'dark';
+  const listeners = new Set();
+  const subscribe = onChange => {
+    listeners.add(onChange);
+    return () => listeners.delete(onChange);
+  };
+  const read = () => scheme;
+  const useColorScheme = () => React.useSyncExternalStore(subscribe, read, read);
+  useColorScheme.__setSystemColorScheme = next => {
+    scheme = next;
+    for (const onChange of [...listeners]) onChange();
+  };
+  useColorScheme.__reset = () => {
+    scheme = 'dark';
+    for (const onChange of [...listeners]) onChange();
+  };
+  return {__esModule: true, default: useColorScheme};
+});

@@ -57,6 +57,8 @@ AppRegistry.registerComponent(appName, () => {
   // reached by a script on a simulator.
   const Surfaces = require('./measure/surfaces').default;
   return function SurfaceRoot() {
-    return React.createElement(Surfaces, {name: mode.name});
+    // 스킴도 인자에서 온다 (U2). 하네스가 스스로 고르면 라이트 판 사진은
+    // 시뮬레이터의 시스템 설정에 매이고, 그 설정은 캡처 스크립트 밖에 있다.
+    return React.createElement(Surfaces, {name: mode.name, scheme: mode.scheme});
   };
 });

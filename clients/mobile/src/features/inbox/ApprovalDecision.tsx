@@ -13,7 +13,8 @@ import {
 } from '@momo/core/features/timeline/spawnHostChoice';
 import React, {useCallback, useRef, useState} from 'react';
 import {AccessibilityInfo, Pressable, StyleSheet, Text, View} from 'react-native';
-import {color, font, radius, space, TOUCH_TARGET} from '../../design/tokens';
+import {font, radius, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
+import {useStyles} from '../../design/theme';
 import {useSession} from '../../session/useSession';
 import {SpawnHostChoice} from './SpawnHostChoice';
 
@@ -105,6 +106,7 @@ export function ApprovalDecision({
    */
   testIDPrefix?: string;
 }): React.JSX.Element {
+  const styles = useStyles(buildStyles);
   const {workspaceId} = useSession();
   const [armed, setArmed] = useState<Armed>(null);
   const [busy, setBusy] = useState(false);
@@ -370,7 +372,7 @@ export function confirmCopy(
   return '거부하면 대기 중인 실행이 취소됩니다.';
 }
 
-const styles = StyleSheet.create({
+const buildStyles = (color: Palette) => StyleSheet.create({
   bar: {gap: space.sm, paddingBottom: space.md},
   lead: {fontSize: font.meta, color: color.textMuted},
   consequence: {fontSize: font.meta, color: color.text, lineHeight: 18},

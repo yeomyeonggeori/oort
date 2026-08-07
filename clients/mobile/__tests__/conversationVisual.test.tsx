@@ -14,7 +14,7 @@ import {
   MessageRow,
   PendingRow,
   RecoveryDivider,
-  ROW_PRESSED_BACKGROUND,
+  rowPressedBackground,
   UnreadDivider,
 } from '../src/features/conversation/MessageRow';
 import {
@@ -542,7 +542,7 @@ describe('#1079 — 사진이 배송되는 화면과 갈라지지 않게', () =>
     const code = codeOnly(HARNESS);
     expect(code).toContain('jumpMissedNotice(');
     expect(code).not.toContain('인용한 원본은 이 대화의');
-    expect(code).toContain('ROW_PRESSED_BACKGROUND');
+    expect(code).toContain('rowPressedBackground(color)');
     // 색을 리터럴로 박으면 화면이 바뀌어도 사진은 옛말을 계속 한다.
     expect(code).not.toMatch(/backgroundColor: '#/);
   });
@@ -561,10 +561,11 @@ describe('#1079 — 사진이 배송되는 화면과 갈라지지 않게', () =>
     // 여기서 값으로 붙잡는다. (값 공간을 가르는 것은 U2 소관 — 범위 밖.)
     const body = render(<MessageBody body={'```sh\necho hi\n```'} />);
     const wrap = flatten(body.getByTestId('message-code-block').props.style);
-    expect(wrap.backgroundColor).toBe(ROW_PRESSED_BACKGROUND);
-    expect(contrast(String(wrap.backgroundColor), ROW_PRESSED_BACKGROUND)).toBe(
-      1,
-    );
+    // 팔레트를 **인자로** 넘긴다 (U2). 이 스위트가 그리는 것은 다크 스킴이고
+    // (`jest.setup.js`), 눌린 채움도 같은 스킴에서 물어야 같은 질문이 된다.
+    const pressed = rowPressedBackground(color);
+    expect(wrap.backgroundColor).toBe(pressed);
+    expect(contrast(String(wrap.backgroundColor), pressed)).toBe(1);
   });
 });
 

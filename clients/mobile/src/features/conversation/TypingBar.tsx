@@ -1,7 +1,8 @@
 import type {TypingSegment} from '@momo/core/features/chat/typing';
 import React from 'react';
 import {StyleSheet, Text} from 'react-native';
-import {color, font, SAFE_GUTTER, space} from '../../design/tokens';
+import {font, SAFE_GUTTER, space, type Palette} from '../../design/tokens';
+import {useStyles} from '../../design/theme';
 
 // =============================================================================
 // 「작성 중」 — 사람이 지금 무언가 치고 있다 (ADR-0149).
@@ -92,6 +93,7 @@ export function TypingBar({
   label?: string | null;
   testID?: string;
 }): React.JSX.Element | null {
+  const styles = useStyles(buildStyles);
   const empty = segments.length === 0;
   return (
     <Text
@@ -131,7 +133,7 @@ export function TypingBar({
   );
 }
 
-const styles = StyleSheet.create({
+const buildStyles = (color: Palette) => StyleSheet.create({
   /**
    * meta 크기, 가장 흐린 글자. 이 줄은 **대화에 대한 서술**이지 대화가 아니다 —
    * 묘비·롤업·활동 줄이 이미 쓰고 있는 무게이고, 여기서 한 급이라도 올리면

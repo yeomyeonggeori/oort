@@ -7,7 +7,8 @@ import {
 } from '@momo/core/features/timeline/spawnHostChoice';
 import React from 'react';
 import {Pressable, StyleSheet, Text, View} from 'react-native';
-import {color, font, line, radius, space, TOUCH_TARGET} from '../../design/tokens';
+import {font, line, radius, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
+import {useStyles} from '../../design/theme';
 
 // =============================================================================
 // 승인 카드의 호스트 선택기 — 폰 (ADR-0125 D6-A, 이슈 1114).
@@ -64,6 +65,7 @@ export function SpawnHostChoice({
   locked: boolean;
   testIDPrefix: string;
 }): React.JSX.Element {
+  const styles = useStyles(buildStyles);
   const gate = spawnHostGate(plan);
   return (
     <View style={styles.group} testID={`${testIDPrefix}-host-group`}>
@@ -142,7 +144,7 @@ export function SpawnHostChoice({
   );
 }
 
-const styles = StyleSheet.create({
+const buildStyles = (color: Palette) => StyleSheet.create({
   group: {gap: space.sm, paddingBottom: space.sm},
   legend: {fontSize: font.meta, color: color.textMuted},
   list: {

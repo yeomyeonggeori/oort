@@ -32,7 +32,8 @@ import {
   ScreenHeader,
 } from '../design/atoms';
 import {useRefreshControl} from '../design/refresh';
-import {color, font, radius, SAFE_GUTTER, space, TOUCH_TARGET} from '../design/tokens';
+import {font, radius, SAFE_GUTTER, space, TOUCH_TARGET, type Palette} from '../design/tokens';
+import {useStyles} from '../design/theme';
 import {
   ApprovalDecision,
   decisionReceiptCopy,
@@ -152,6 +153,7 @@ export default function InboxScreen({
   active?: boolean;
   onOpenConversation: (channelId: string, title: string) => void;
 }): React.JSX.Element {
+  const styles = useStyles(buildStyles);
   const {member} = useSession();
 
   const availableFilters = useMemo(
@@ -322,7 +324,7 @@ export default function InboxScreen({
         />
       );
     },
-    [approvalsProvided, filter, onDecided, online, receipts],
+    [approvalsProvided, filter, onDecided, online, receipts, styles],
   );
 
   return (
@@ -476,6 +478,7 @@ function FeedRow({
    */
   decision?: React.ReactNode;
 }): React.JSX.Element {
+  const styles = useStyles(buildStyles);
   return (
     <View style={styles.rowShell} testID={`feed-row-${item.key}`}>
       <View style={styles.row}>
@@ -507,7 +510,7 @@ function FeedRow({
               {item.channelLabel}
             </Text>
             {item.outcome ? (
-              <Text style={[styles.outcome, outcomeStyle(item.outcomeTone)]}>
+              <Text style={[styles.outcome, outcomeStyle(styles, item.outcomeTone)]}>
                 → {item.outcome}
               </Text>
             ) : null}
@@ -537,14 +540,24 @@ function FeedRow({
   );
 }
 
-function outcomeStyle(tone: FeedItem['outcomeTone']) {
+/**
+ * 결말 한 낱말의 잉크. 스타일시트를 **인자로** 받는다 (U2).
+ *
+ * 이 함수는 컴포넌트가 아니라서 훅을 부를 수 없고, 모듈 상수 `styles` 를 닫아
+ * 잡던 옛 모양은 스킴이 둘이 된 순간 「언제나 다크의 그 색」을 뜻하게 된다.
+ * 고르는 일은 부르는 쪽(`FeedRow`)이 이미 하고 있으므로, 고른 것을 넘긴다.
+ */
+function outcomeStyle(
+  styles: ReturnType<typeof buildStyles>,
+  tone: FeedItem['outcomeTone'],
+) {
   if (tone === 'ok') return styles.outcomeOk;
   if (tone === 'danger') return styles.outcomeDanger;
   if (tone === 'warn') return styles.outcomeWarn;
   return styles.outcomeMuted;
 }
 
-const styles = StyleSheet.create({
+const buildStyles = (color: Palette) => StyleSheet.create({
   tabs: {
     flexDirection: 'row',
     gap: space.sm,

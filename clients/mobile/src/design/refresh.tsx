@@ -1,6 +1,6 @@
 import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {RefreshControl, type RefreshControlProps} from 'react-native';
-import {color} from './tokens';
+import {usePalette} from './theme';
 
 // =============================================================================
 // 당겨서 새로고침 (goal RN-B4b / #1026)
@@ -54,6 +54,7 @@ export function useRefreshControl(
   const [refreshing, setRefreshing] = useState(false);
   /** 진행 중인 당김. 손가락이 두 번 당겨도 요청은 하나다. */
   const busyRef = useRef(false);
+  const palette = usePalette();
   const mountedRef = useRef(true);
   const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
@@ -89,7 +90,7 @@ export function useRefreshControl(
       refreshing={refreshing}
       onRefresh={handleRefresh}
       // 시스템 표준 스피너에 토큰 색 하나. iOS 는 `tintColor` 만 읽는다.
-      tintColor={color.textFaint}
+      tintColor={palette.textFaint}
       testID={testID}
     />
   );

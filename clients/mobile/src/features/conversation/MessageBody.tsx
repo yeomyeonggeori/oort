@@ -14,7 +14,8 @@ import {
   Text,
   View,
 } from 'react-native';
-import {color, font, radius, space} from '../../design/tokens';
+import {font, radius, space, type Palette} from '../../design/tokens';
+import {useStyles} from '../../design/theme';
 import {COPY_RECEIPT_MS, copyText} from './copy';
 
 // =============================================================================
@@ -186,6 +187,7 @@ function InlineNodes({nodes}: {nodes: Inline[]}): React.JSX.Element {
 }
 
 function InlineNode({node}: {node: Inline}): React.JSX.Element {
+  const styles = useStyles(buildStyles);
   if (node.kind === 'text') return <>{node.text}</>;
   if (node.kind === 'strong') {
     return (
@@ -224,6 +226,7 @@ function InlineNode({node}: {node: Inline}): React.JSX.Element {
 
 /** `em` 안쪽. 텍스트 잎만 스크립트별로 끊고, 나머지는 그대로 내려간다. */
 function EmphasisNodes({nodes}: {nodes: Inline[]}): React.JSX.Element {
+  const styles = useStyles(buildStyles);
   return (
     <>
       {nodes.map((node, index) => {
@@ -255,6 +258,7 @@ function EmphasisNodes({nodes}: {nodes: Inline[]}): React.JSX.Element {
  * 때마다 본문 전체가 다시 그려지고, 그것은 이 배치가 계속 피해 온 전파다.
  */
 function CodeCopyButton({text}: {text: string}): React.JSX.Element {
+  const styles = useStyles(buildStyles);
   const [done, setDone] = useState(false);
   // 되돌리는 타이머. **끄는 자리가 필요하다** — 사람이 복사하고 바로 스크롤하면
   // 이 행은 가상화에서 빠지는데, 1.5초 뒤 타이머는 살아 있다. 그 자체로 큰 해는
@@ -320,6 +324,7 @@ function BlockNode({
   muted: boolean;
   selectable: boolean;
 }): React.JSX.Element {
+  const styles = useStyles(buildStyles);
   if (block.kind === 'code') {
     return (
       <View style={styles.codeWrap} testID="message-code-block">
@@ -449,6 +454,7 @@ export function MessageBody({
    */
   selectable?: boolean;
 }): React.JSX.Element {
+  const styles = useStyles(buildStyles);
   const blocks = useMemo(
     () => (isPlainText(body) ? null : parseMarkdown(body)),
     [body],
@@ -478,7 +484,7 @@ export function MessageBody({
   );
 }
 
-const styles = StyleSheet.create({
+const buildStyles = (color: Palette) => StyleSheet.create({
   markdown: {gap: space.sm},
   paragraph: {fontSize: font.body, color: color.text, lineHeight: 22},
   muted: {color: color.textMuted},

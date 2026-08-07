@@ -29,14 +29,8 @@ import {
   type TextInput,
 } from 'react-native';
 import {NoticeBlock, Screen, ScreenHeader} from '../design/atoms';
-import {
-  color,
-  font,
-  radius,
-  SAFE_GUTTER,
-  space,
-  TOUCH_TARGET,
-} from '../design/tokens';
+import {font, radius, SAFE_GUTTER, space, TOUCH_TARGET, type Palette} from '../design/tokens';
+import {useStyles} from '../design/theme';
 import {AdeControlPanel} from '../features/ade/AdeControlPanel';
 import {AdeSummaryLine} from '../features/ade/AdeSummaryLine';
 import {StopTurnControl} from '../features/agents/StopTurnControl';
@@ -179,6 +173,7 @@ export default function ConversationScreen({
    */
   onOpenConversation?: (channelId: string, title: string) => void;
 }): React.JSX.Element {
+  const styles = useStyles(buildStyles);
   const {member, workspaceId} = useSession();
   const {rail, status: railStatus} = useRealtime();
   const nowMs = useNow();
@@ -1014,7 +1009,7 @@ export default function ConversationScreen({
   );
 }
 
-const styles = StyleSheet.create({
+const buildStyles = (color: Palette) => StyleSheet.create({
   notice: {padding: space.md},
   // 사이드바의 「메시지 찾기」와 같은 모양이다 (이슈 #1112): 헤더의 오른쪽
   // 액션은 이 앱에서 이미 이렇게 생겼고, 두 번째 모양을 만들 이유가 없다.

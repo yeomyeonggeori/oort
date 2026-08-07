@@ -11,7 +11,8 @@ import {
 } from '@momo/core/features/workspace/directory';
 import React from 'react';
 import {Pressable, StyleSheet, Text, View} from 'react-native';
-import {color, font, radius, SAFE_GUTTER, space, TOUCH_TARGET} from '../../design/tokens';
+import {font, radius, SAFE_GUTTER, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
+import {useStyles} from '../../design/theme';
 import {appNote} from './appVoice';
 
 // =============================================================================
@@ -100,6 +101,7 @@ export function QuoteBlock({
   /** 원본 줄로 이동. 원본이 로드된 범위 안에 있을 때만 주어진다. */
   onJump?: () => void;
 }): React.JSX.Element {
+  const styles = useStyles(buildStyles);
   const jumpable = onJump !== undefined && block.kind !== 'unresolved';
   const inner = (
     <View style={styles.blockInner}>
@@ -227,6 +229,7 @@ export function QuoteDraftBar({
   directory: Directory;
   onCancel: () => void;
 }): React.JSX.Element {
+  const styles = useStyles(buildStyles);
   const preview =
     block.kind === 'deleted'
       ? QUOTE_DELETED_TEXT
@@ -259,7 +262,7 @@ export function QuoteDraftBar({
   );
 }
 
-const styles = StyleSheet.create({
+const buildStyles = (color: Palette) => StyleSheet.create({
   // ===========================================================================
   // 배경이 없다 (design-review H-2). 그리고 그것이 이 수리의 핵심이다.
   //

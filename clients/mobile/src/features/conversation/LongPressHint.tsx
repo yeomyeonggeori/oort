@@ -1,6 +1,7 @@
 import React, {useCallback, useState} from 'react';
 import {Pressable, StyleSheet, Text, View} from 'react-native';
-import {color, font, SAFE_GUTTER, space, TOUCH_TARGET} from '../../design/tokens';
+import {font, SAFE_GUTTER, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
+import {useStyles} from '../../design/theme';
 import {NON_SECRET_KEYS, nonSecretStore} from '../../storage/kv';
 
 // =============================================================================
@@ -53,6 +54,7 @@ export function LongPressHint({
   visible: boolean;
   onDismiss: () => void;
 }): React.JSX.Element | null {
+  const styles = useStyles(buildStyles);
   if (!visible) return null;
   return (
     <View style={styles.root} testID="long-press-hint">
@@ -93,7 +95,7 @@ export function useLongPressHint(): {
   return {visible, dismiss, markUsed};
 }
 
-const styles = StyleSheet.create({
+const buildStyles = (color: Palette) => StyleSheet.create({
   root: {
     flexDirection: 'row',
     alignItems: 'center',

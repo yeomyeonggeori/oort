@@ -10,7 +10,8 @@ import {
   TapRow,
 } from '../design/atoms';
 import {useRefreshControl} from '../design/refresh';
-import {color, font, radius, space} from '../design/tokens';
+import {font, radius, space, type Palette} from '../design/tokens';
+import {useStyles} from '../design/theme';
 import {RUNNING_SESSION_PILL} from '@momo/core/features/agents/agentOps';
 import {
   agentTurnBadgeCopy,
@@ -91,6 +92,7 @@ export default function AgentsScreen({
     handle: string;
   }) => void;
 }): React.JSX.Element {
+  const styles = useStyles(buildStyles);
   const {workspaceId} = useSession();
   const directoryQuery = useDirectory(workspaceId);
   const channelsQuery = useChannels(workspaceId);
@@ -245,6 +247,7 @@ function Row({
   railLive: boolean;
   onPress: () => void;
 }): React.JSX.Element {
+  const styles = useStyles(buildStyles);
   // The turn sentence is folded into the ROW's label, not left on the badge.
   // `TapRow` is a `Pressable` with its own `accessibilityLabel`, so its subtree
   // is one accessibility element and nothing inside it is announced separately —
@@ -303,7 +306,7 @@ function Row({
   );
 }
 
-const styles = StyleSheet.create({
+const buildStyles = (color: Palette) => StyleSheet.create({
   listContent: {paddingBottom: space.lg},
   dot: {
     width: 10,

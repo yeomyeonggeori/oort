@@ -25,7 +25,9 @@ import {
   TapRow,
 } from '../design/atoms';
 import {useRefreshControl} from '../design/refresh';
-import {color, font, radius, SAFE_GUTTER, space, TOUCH_TARGET} from '../design/tokens';
+import {font, radius, SAFE_GUTTER, space, TOUCH_TARGET, type Palette} from '../design/tokens';
+import {usePalette, useStyles} from '../design/theme';
+import {ThemeControl} from '../design/ThemeControl';
 import {buildSidebarSections, rowCount, type SidebarRow} from '../features/sidebar/rows';
 import {useChannels, useDirectory, useReadStates} from '../features/workspace/queries';
 import {useSession} from '../session/useSession';
@@ -73,6 +75,8 @@ export default function SidebarScreen({
    */
   onOpenSearch: (initialQuery?: string) => void;
 }): React.JSX.Element {
+  const styles = useStyles(buildStyles);
+  const palette = usePalette();
   const {member, workspaceId, signOut} = useSession();
   const channelsQuery = useChannels(workspaceId);
   const directoryQuery = useDirectory(workspaceId);
@@ -190,7 +194,7 @@ export default function SidebarScreen({
           value={query}
           onChangeText={setQuery}
           placeholder="채널·사람 검색"
-          placeholderTextColor={color.textFaint}
+          placeholderTextColor={palette.textFaint}
           autoCapitalize="none"
           autoCorrect={false}
           returnKeyType="search"
@@ -316,6 +320,7 @@ function Row({
   busy: boolean;
   onPress: () => void;
 }): React.JSX.Element {
+  const styles = useStyles(buildStyles);
   return (
     <TapRow
       accessibilityLabel={row.accessibilityLabel}
@@ -378,6 +383,14 @@ function Row({
  * is deliberately one row and not the first plank of one. The confirmation is
  * inline rather than a native alert because signing out is the only irreversible
  * thing in this batch, and because an inline step is assertable in a test.
+ *
+ * ## 그리고 「테마」 (U2)
+ *
+ * 설정 화면이 없다는 사실은 그대로다. 그래서 스킴을 고르는 세 칸도 새 화면이
+ * 아니라 **이 발치**로 온다 — 계정 줄이 이미 여기 서 있으므로 이 자리는 이 앱에서
+ * 「나에 관한 것」이 사는 곳이고, 그것이 두 번째 널판이 되는 것과 설정 화면을
+ * 세우는 것은 다른 크기의 일이다. 두 줄이 되는 대신 한 줄이 붐비지 않는다:
+ * 계정+로그아웃이 첫 줄, 테마 세 칸이 둘째 줄이다.
  */
 function AccountFooter({
   name,
@@ -388,50 +401,62 @@ function AccountFooter({
   handle: string;
   onSignOut: () => void;
 }): React.JSX.Element {
+  const styles = useStyles(buildStyles);
   const [confirming, setConfirming] = useState(false);
   return (
-    <View style={styles.footer}>
-      <View style={styles.rowText}>
-        <Text style={styles.footerName} numberOfLines={1}>
-          {name}
-        </Text>
-        <Text style={styles.rowMeta} numberOfLines={1}>
-          @{handle}
-        </Text>
-      </View>
-      {confirming ? (
-        <View style={styles.confirmRow}>
-          <Pressable
-            accessibilityRole="button"
-            onPress={() => setConfirming(false)}
-            style={({pressed}) => [styles.footerButton, pressed && styles.pressed]}
-            testID="sign-out-cancel">
-            <Text style={styles.footerButtonLabel}>취소</Text>
-          </Pressable>
-          <Pressable
-            accessibilityRole="button"
-            onPress={onSignOut}
-            style={({pressed}) => [
-              styles.footerButton,
-              styles.footerButtonDanger,
-              pressed && styles.pressed,
-            ]}
-            testID="sign-out-confirm">
-            <Text style={styles.footerButtonDangerLabel}>로그아웃</Text>
-          </Pressable>
+    <View style={styles.footerStack}>
+      <View style={styles.footer}>
+        <View style={styles.rowText}>
+          <Text style={styles.footerName} numberOfLines={1}>
+              {name}
+            </Text>
+            <Text style={styles.rowMeta} numberOfLines={1}>
+              @{handle}
+            </Text>
+          </View>
+          {confirming ? (
+            <View style={styles.confirmRow}>
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => setConfirming(false)}
+                style={({pressed}) => [
+                  styles.footerButton,
+                  pressed && styles.pressed,
+                ]}
+                testID="sign-out-cancel">
+                <Text style={styles.footerButtonLabel}>취소</Text>
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                onPress={onSignOut}
+                style={({pressed}) => [
+                  styles.footerButton,
+                  styles.footerButtonDanger,
+                  pressed && styles.pressed,
+                ]}
+                testID="sign-out-confirm">
+                <Text style={styles.footerButtonDangerLabel}>로그아웃</Text>
+              </Pressable>
+            </View>
+          ) : (
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => setConfirming(true)}
+              style={({pressed}) => [
+                styles.footerButton,
+                pressed && styles.pressed,
+              ]}
+              testID="sign-out">
+              <Text style={styles.footerButtonLabel}>로그아웃</Text>
+            </Pressable>
+          )}
         </View>
-      ) : (
-        <Pressable
-          accessibilityRole="button"
-          onPress={() => setConfirming(true)}
-          style={({pressed}) => [styles.footerButton, pressed && styles.pressed]}
-          testID="sign-out">
-          <Text style={styles.footerButtonLabel}>로그아웃</Text>
-        </Pressable>
-      )}
-    </View>
-  );
-}
+        {/* 두 번째 널판 — 스킴 세 칸 (U2). 계정 줄 **아래**인 것은 이것이 계정에
+            관한 것이 아니라 이 기기의 보기 설정이기 때문이다. */}
+        <ThemeControl />
+      </View>
+    );
+  }
 
 /**
  * Why a DM could not be opened.
@@ -464,7 +489,7 @@ export function queryFailureDetail(error: unknown): string | undefined {
   return error instanceof NetworkError ? error.message : undefined;
 }
 
-const styles = StyleSheet.create({
+const buildStyles = (color: Palette) => StyleSheet.create({
   searchWrap: {paddingHorizontal: SAFE_GUTTER, paddingVertical: space.sm},
   search: {
     minHeight: TOUCH_TARGET,
@@ -499,15 +524,20 @@ const styles = StyleSheet.create({
   rowTitleUnread: {fontWeight: '700'},
   rowHandle: {fontSize: font.meta, color: color.textFaint, flexShrink: 1},
   rowMeta: {fontSize: font.meta, color: color.textFaint},
+  // 발치의 두 줄을 한 판으로 묶는다 (U2). 테두리와 배경이 **묶음**에 있는 이유는
+  // 그것이 목록과 발치를 가르는 선이기 때문이다 — 계정 줄에 그대로 두면 테마 줄이
+  // 그 선 아래에 따로 떠서 발치가 두 조각으로 읽힌다.
+  footerStack: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: color.border,
+    backgroundColor: color.bg,
+  },
   footer: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: space.md,
     paddingHorizontal: SAFE_GUTTER,
     paddingVertical: space.sm,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: color.border,
-    backgroundColor: color.bg,
   },
   footerName: {fontSize: font.label, color: color.text, fontWeight: '600'},
   confirmRow: {flexDirection: 'row', gap: space.sm},

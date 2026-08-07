@@ -17,7 +17,8 @@ import {
   View,
 } from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
-import {color, font, radius, SAFE_GUTTER, space, TOUCH_TARGET} from '../../design/tokens';
+import {font, radius, SAFE_GUTTER, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
+import {useStyles} from '../../design/theme';
 
 // =============================================================================
 // 메시지 액션 시트 — 폰에서 hover 를 대신하는 것.
@@ -124,6 +125,7 @@ export function MessageActionSheet({
   onEdit: () => void;
   onDelete: () => void;
 }): React.JSX.Element {
+  const styles = useStyles(buildStyles);
   const insets = useSafeAreaInsets();
   // ===========================================================================
   // 시트는 스크롤한다 (design-review M-7 — 실측으로 확정)
@@ -333,6 +335,7 @@ function SheetRow({
   tone?: 'default' | 'danger' | 'muted';
   testID?: string;
 }): React.JSX.Element {
+  const styles = useStyles(buildStyles);
   return (
     <Pressable
       accessibilityRole="button"
@@ -352,7 +355,7 @@ function SheetRow({
   );
 }
 
-const styles = StyleSheet.create({
+const buildStyles = (color: Palette) => StyleSheet.create({
   root: {flex: 1, justifyContent: 'flex-end'},
   backdrop: {
     position: 'absolute',

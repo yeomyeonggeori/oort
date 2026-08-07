@@ -11,7 +11,8 @@ import {
   type ViewStyle,
 } from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
-import {color, font, radius, SAFE_GUTTER, space, TOUCH_TARGET} from './tokens';
+import {font, radius, SAFE_GUTTER, space, TOUCH_TARGET, type Palette} from './tokens';
+import {usePalette, useStyles} from './theme';
 
 // =============================================================================
 // The shell's shared pieces.
@@ -51,6 +52,7 @@ export function Screen({
   children: React.ReactNode;
   style?: StyleProp<ViewStyle>;
 }): React.JSX.Element {
+  const styles = useStyles(buildStyles);
   const insets = useSafeAreaInsets();
   // Top only. The bottom inset belongs to whatever sits at the bottom (the tab
   // bar, a scroll view's content inset), and applying it here as well would
@@ -85,6 +87,7 @@ export function ScreenHeader({
    */
   titleTestID?: string;
 }): React.JSX.Element {
+  const styles = useStyles(buildStyles);
   return (
     <View style={styles.header}>
       {onBack ? (
@@ -135,6 +138,7 @@ export function TapRow({
   selected?: boolean;
   testID?: string;
 }): React.JSX.Element {
+  const styles = useStyles(buildStyles);
   return (
     <Pressable
       accessibilityRole="button"
@@ -167,6 +171,8 @@ export function PrimaryButton({
   busy?: boolean;
   testID?: string;
 }): React.JSX.Element {
+  const styles = useStyles(buildStyles);
+  const palette = usePalette();
   const inert = disabled === true || busy === true;
   return (
     <Pressable
@@ -182,7 +188,7 @@ export function PrimaryButton({
       testID={testID}>
       {busy ? (
         <View style={styles.buttonBusy}>
-          <ActivityIndicator color={color.onAccent} />
+          <ActivityIndicator color={palette.onAccent} />
           {busyLabel ? <Text style={styles.buttonLabel}>{busyLabel}</Text> : null}
         </View>
       ) : (
@@ -202,6 +208,7 @@ export function CountBadge({
   tone?: 'unread' | 'mention';
   label: string;
 }): React.JSX.Element | null {
+  const styles = useStyles(buildStyles);
   if (count <= 0) return null;
   return (
     <View style={[styles.badge, tone === 'mention' && styles.badgeMention]}>
@@ -221,9 +228,11 @@ export function LoadingState({
   label: string;
   testID?: string;
 }): React.JSX.Element {
+  const styles = useStyles(buildStyles);
+  const palette = usePalette();
   return (
     <View style={styles.stateBlock} testID={testID}>
-      <ActivityIndicator color={color.accentText} />
+      <ActivityIndicator color={palette.accentText} />
       <Text style={styles.stateDetail}>{label}</Text>
     </View>
   );
@@ -248,6 +257,7 @@ export function EmptyState({
   refreshControl?: React.ReactElement<RefreshControlProps>;
   testID?: string;
 }): React.JSX.Element {
+  const styles = useStyles(buildStyles);
   const body = (
     <>
       <Text style={styles.stateHeadline}>{headline}</Text>
@@ -286,6 +296,7 @@ export function ErrorState({
   onRetry?: () => void;
   testID?: string;
 }): React.JSX.Element {
+  const styles = useStyles(buildStyles);
   return (
     <View style={styles.stateBlock} testID={testID}>
       <Text style={[styles.stateHeadline, styles.stateHeadlineDanger]}>
@@ -326,6 +337,7 @@ export function NoticeBlock({
   onDismiss?: () => void;
   testID?: string;
 }): React.JSX.Element {
+  const styles = useStyles(buildStyles);
   return (
     <View style={styles.notice} testID={testID}>
       <View style={styles.noticeHead}>
@@ -358,6 +370,7 @@ export function FailureBanner({
   onRetry?: () => void;
   testID?: string;
 }): React.JSX.Element {
+  const styles = useStyles(buildStyles);
   return (
     <View style={styles.failure} testID={testID}>
       <Text style={styles.failureText}>{message}</Text>
@@ -375,6 +388,7 @@ export function FailureBanner({
 }
 
 export function SectionLabel({label}: {label: string}): React.JSX.Element {
+  const styles = useStyles(buildStyles);
   return (
     <View style={styles.sectionLabel}>
       <Text style={styles.sectionLabelText}>{label}</Text>
@@ -382,7 +396,7 @@ export function SectionLabel({label}: {label: string}): React.JSX.Element {
   );
 }
 
-const styles = StyleSheet.create({
+const buildStyles = (color: Palette) => StyleSheet.create({
   screen: {flex: 1, backgroundColor: color.bg},
   header: {
     flexDirection: 'row',

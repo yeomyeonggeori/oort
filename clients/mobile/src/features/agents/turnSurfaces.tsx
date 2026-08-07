@@ -15,7 +15,8 @@ import {memberNameParts} from '@momo/core/features/workspace/directory';
 import type {Directory} from '@momo/core/features/workspace/directory';
 import React, {useMemo} from 'react';
 import {StyleSheet, Text, View} from 'react-native';
-import {color, font, radius, SAFE_GUTTER, space} from '../../design/tokens';
+import {font, radius, SAFE_GUTTER, space, type Palette} from '../../design/tokens';
+import {useStyles} from '../../design/theme';
 
 // =============================================================================
 // The two 「작업 중」 surfaces on the phone (goal RN-T2).
@@ -56,6 +57,7 @@ export function AgentTurnBadge({
   live: boolean;
   testID?: string;
 }): React.JSX.Element {
+  const styles = useStyles(buildStyles);
   const accessibilityLabel = live
     ? label
     : `${label} ${TURN_STALE_SENTENCE}`;
@@ -122,6 +124,7 @@ export function AgentActivityBar({
   }) => React.ReactNode;
   testID?: string;
 }): React.JSX.Element | null {
+  const styles = useStyles(buildStyles);
   const {lines, overflowCount} = useMemo(
     () =>
       activityLines(turns, memberId =>
@@ -227,6 +230,7 @@ export function AgentTurnStaleNotice({
 }: {
   testID?: string;
 }): React.JSX.Element {
+  const styles = useStyles(buildStyles);
   return (
     <View style={styles.staleNotice} testID={testID}>
       <Text style={styles.staleText}>{TURN_STALE_SENTENCE}</Text>
@@ -260,6 +264,7 @@ function ActivityRow({
   /** 이 행이 확정 패널을 감쌀 수 있는 모양인지 테스트가 확인할 수 있게 (2R H1). */
   testID?: string;
 }): React.JSX.Element {
+  const styles = useStyles(buildStyles);
   const showClock =
     live && line.state === 'working' && line.startedAtMs !== undefined;
   return (
@@ -290,7 +295,7 @@ function ActivityRow({
   );
 }
 
-const styles = StyleSheet.create({
+const buildStyles = (color: Palette) => StyleSheet.create({
   badge: {
     paddingHorizontal: space.sm,
     paddingVertical: 2,

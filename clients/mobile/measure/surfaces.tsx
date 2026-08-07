@@ -22,7 +22,7 @@ import {
   MessageRow,
   PendingRow,
   RecoveryDivider,
-  ROW_PRESSED_BACKGROUND,
+  rowPressedBackground,
   UnreadDivider,
 } from '../src/features/conversation/MessageRow';
 import {jumpMissedNotice} from '../src/features/conversation/jumpNotice';
@@ -41,7 +41,8 @@ import type {AgentWorkingSignal} from '@momo/core/features/agents/workingSignal'
 import {NoticeBlock} from '../src/design/atoms';
 import {ResultRow, SearchBody} from '../src/screens/SearchScreen';
 import type {MessageSearch} from '../src/features/search/useMessageSearch';
-import {color} from '../src/design/tokens';
+import type {Palette} from '../src/design/tokens';
+import {FixedScheme, useStyles, type ColorScheme} from '../src/design/theme';
 
 // =============================================================================
 // goal RN-C5 의 표면들을 사진 찍을 수 있게 세워 두는 하네스. **앱 코드가 아니다.**
@@ -528,6 +529,7 @@ function seedAdeControl(): void {
 
 
 function Frame({label, children}: {label: string; children: React.ReactNode}) {
+  const styles = useStyles(buildStyles);
   return (
     <View style={styles.root}>
       <Text style={styles.label}>{label}</Text>
@@ -560,6 +562,7 @@ function Row({pinned = false}: {pinned?: boolean} = {}) {
 }
 
 export function Surface({name}: {name: string}): React.JSX.Element {
+  const styles = useStyles(buildStyles);
   // 이슈 #1112 — 고정 여부만 다른 두 시트. 낱말이 상태를 따라 뒤집히는 것을 한
   // 프레임 안에서 비교하려고 인자를 받는다.
   const pinSheet = (pinned: boolean) => (
@@ -694,7 +697,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
       return (
         <Frame label="행 눌림 — 코드 상자의 고도가 사라진다 (M-2, 1.000:1)">
           {/* 시뮬레이터는 손가락을 대고 있을 수 없다. 그래서 눌린 채움을
-              **같은 심볼**(`ROW_PRESSED_BACKGROUND`)로 깔고 진짜 행을 그 위에
+              **같은 심볼**(`rowPressedBackground`)로 깔고 진짜 행을 그 위에
               세운다 — 색을 베껴 적었다면 이 사진은 증거가 아니다.
 
               아래 두 행은 코드 상자를 든 같은 본문이고, 위는 평상시·아래는
@@ -1721,15 +1724,26 @@ const HARNESS_MEMBER = {
   displayName: '곽성재',
 } as Member;
 
-export default function SurfacesHarness({name}: {name: string}): React.JSX.Element {
+export default function SurfacesHarness({
+  name,
+  scheme,
+}: {
+  name: string;
+  scheme: ColorScheme;
+}): React.JSX.Element {
+  // 스킴을 **못 박아** 그린다 (U2). `ThemeProvider` 를 쓰면 이 기기에 저장된
+  // 사람의 선택이 사진에 새어 들어오고, 시스템 추종에 맡기면 시뮬레이터 설정이
+  // 새어 들어온다. 사진은 인자가 말한 것만 찍는다.
   return (
-    <SafeAreaProvider>
-      <QueryClientProvider client={harnessClient}>
-        <SessionProvider member={HARNESS_MEMBER}>
-          <Surface name={name} />
-        </SessionProvider>
-      </QueryClientProvider>
-    </SafeAreaProvider>
+    <FixedScheme scheme={scheme}>
+      <SafeAreaProvider>
+        <QueryClientProvider client={harnessClient}>
+          <SessionProvider member={HARNESS_MEMBER}>
+            <Surface name={name} />
+          </SessionProvider>
+        </QueryClientProvider>
+      </SafeAreaProvider>
+    </FixedScheme>
   );
 }
 
@@ -1748,18 +1762,25 @@ const harnessClient = new QueryClient({
   },
 });
 
-const styles = StyleSheet.create({
-  lockedFrame: {paddingHorizontal: 16, paddingTop: 8},
-  lockedLabel: {fontSize: 12, color: '#9aa0a8', paddingBottom: 4},
-  root: {flex: 1, backgroundColor: color.bg, paddingTop: 56},
-  label: {color: '#6b7280', fontSize: 11, fontWeight: '600', paddingHorizontal: 12},
-  noticeStack: {padding: 16, gap: 12},
-  pressPair: {paddingHorizontal: 16, paddingVertical: 8},
-  // 화면이 누를 때 실제로 까는 값 — **같은 심볼**이다 (M-2).
-  pressed: {backgroundColor: ROW_PRESSED_BACKGROUND},
-  /** 두 컴포저 사이. 붙여 두면 위아래 테두리가 한 줄로 읽힌다. */
-  gap: {height: 24},
-});
+const buildStyles = (color: Palette) => StyleSheet.create({
+    lockedFrame: {paddingHorizontal: 16, paddingTop: 8},
+    // 하네스 자신의 라벨. 제품이 아니라 **사진의 캡션**이라 토큰을 든다: 라이트
+    // 판에서 어두운 회색 글자가 종이 위에 그대로 서야 캡션이 읽힌다.
+    lockedLabel: {fontSize: 12, color: color.textMuted, paddingBottom: 4},
+    root: {flex: 1, backgroundColor: color.bg, paddingTop: 56},
+    label: {
+      color: color.textFaint,
+      fontSize: 11,
+      fontWeight: '600',
+      paddingHorizontal: 12,
+    },
+    noticeStack: {padding: 16, gap: 12},
+    pressPair: {paddingHorizontal: 16, paddingVertical: 8},
+    // 화면이 누를 때 실제로 까는 값 — **같은 심볼**이다 (M-2).
+    pressed: {backgroundColor: rowPressedBackground(color)},
+    /** 두 컴포저 사이. 붙여 두면 위아래 테두리가 한 줄로 읽힌다. */
+    gap: {height: 24},
+  });
 
 // 위 독스트링의 이유로 렌더 밖에서 한 번. **파일 맨 아래**인 것은 `harnessClient`
 // 가 `const` 라 그 선언보다 먼저 부르면 TDZ 로 터지기 때문이고(실측: 첫 시도가

@@ -20,7 +20,8 @@ import {
   View,
 } from 'react-native';
 import {FailureBanner, NoticeBlock, PrimaryButton, Screen} from '../design/atoms';
-import {color, font, radius, SAFE_GUTTER, space, TOUCH_TARGET} from '../design/tokens';
+import {font, radius, SAFE_GUTTER, space, TOUCH_TARGET, type Palette} from '../design/tokens';
+import {usePalette, useStyles} from '../design/theme';
 import {useJoinPrefill} from '../deeplink/joinLink';
 import {isOnlineFromNetInfo} from '../query/queryClient';
 import {SESSION_EXPIRED_NOTICE} from '../session/authGate';
@@ -81,6 +82,8 @@ export default function ConnectScreen({
 }: {
   sessionExpired?: boolean;
 }): React.JSX.Element {
+  const styles = useStyles(buildStyles);
+  const palette = usePalette();
   const prefill = useJoinPrefill();
 
   const [mode, setMode] = useState<ConnectMode>('signIn');
@@ -232,7 +235,7 @@ export default function ConnectScreen({
                 setServerUrl(next);
               }}
               placeholder={SERVER_URL_PLACEHOLDER}
-              placeholderTextColor={color.textFaint}
+              placeholderTextColor={palette.textFaint}
               autoCapitalize="none"
               autoCorrect={false}
               keyboardType="url"
@@ -370,6 +373,7 @@ function Field({
   hint?: string;
   children: React.ReactNode;
 }): React.JSX.Element {
+  const styles = useStyles(buildStyles);
   return (
     <View style={styles.field}>
       <Text style={styles.label}>{label}</Text>
@@ -379,7 +383,7 @@ function Field({
   );
 }
 
-const styles = StyleSheet.create({
+const buildStyles = (color: Palette) => StyleSheet.create({
   flex: {flex: 1},
   content: {
     paddingHorizontal: SAFE_GUTTER,

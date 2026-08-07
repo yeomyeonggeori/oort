@@ -13,15 +13,8 @@ import {
   type NativeSyntheticEvent,
   type TextInputSelectionChangeEventData,
 } from 'react-native';
-import {
-  color,
-  font,
-  line,
-  radius,
-  SAFE_GUTTER,
-  space,
-  TOUCH_TARGET,
-} from '../../design/tokens';
+import {font, line, radius, SAFE_GUTTER, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
+import {usePalette, useStyles} from '../../design/theme';
 import {clearDraft, readDraft, saveDraft} from './drafts';
 import {
   applyMention,
@@ -222,6 +215,8 @@ export function Composer({
    */
   inputRef?: React.MutableRefObject<TextInput | null>;
 }): React.JSX.Element {
+  const styles = useStyles(buildStyles);
+  const palette = usePalette();
   // 첫 렌더가 이미 초안을 들고 있다 (`drafts.ts`). 효과로 채우면 빈 상자가 한
   // 프레임 그려졌다가 글이 나타나고, 그것은 「글이 잠깐 사라졌다 돌아오는」
   // 화면이다 — MMKV 가 동기로 읽히는 것이 여기서 값을 한다.
@@ -428,7 +423,7 @@ export function Composer({
           onChangeText={onChangeText}
           onSelectionChange={onSelectionChange}
           placeholder={placeholder ?? `${channelLabel}에 메시지 보내기`}
-          placeholderTextColor={color.textFaint}
+          placeholderTextColor={palette.textFaint}
           accessibilityLabel={placeholder ?? `${channelLabel}에 보낼 메시지`}
           multiline
           // Enter inserts a newline (see the header). `blurOnSubmit` false keeps
@@ -463,7 +458,7 @@ export function Composer({
   );
 }
 
-const styles = StyleSheet.create({
+const buildStyles = (color: Palette) => StyleSheet.create({
   root: {
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: color.border,

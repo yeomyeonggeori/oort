@@ -37,14 +37,8 @@ import {
   ScreenHeader,
   SectionLabel,
 } from '../design/atoms';
-import {
-  color,
-  font,
-  radius,
-  SAFE_GUTTER,
-  space,
-  TOUCH_TARGET,
-} from '../design/tokens';
+import {font, radius, SAFE_GUTTER, space, TOUCH_TARGET, type Palette} from '../design/tokens';
+import {useStyles} from '../design/theme';
 import {
   useAgentProfile,
   useAllowedAgentModels,
@@ -103,6 +97,7 @@ export default function AgentDetailScreen({
   onBack: () => void;
   onOpenConversation: (channelId: string, title: string) => void;
 }): React.JSX.Element {
+  const styles = useStyles(buildStyles);
   const {workspaceId, member} = useSession();
   const directoryQuery = useDirectory(workspaceId);
   const channelsQuery = useChannels(workspaceId);
@@ -381,6 +376,7 @@ function PauseControl({
   busy: boolean;
   onToggle: (next: boolean) => void;
 }): React.JSX.Element {
+  const styles = useStyles(buildStyles);
   return (
     <View style={styles.card}>
       <Text style={styles.stateHeadline} testID="agent-state">
@@ -432,6 +428,7 @@ function SessionRow({
   session: WorkSession;
   hosts: Parameters<typeof sessionSurvival>[1];
 }): React.JSX.Element {
+  const styles = useStyles(buildStyles);
   const status = workSessionStatus(session);
   const survival = sessionSurvival(session, hosts);
   return (
@@ -474,6 +471,7 @@ function Field({
   value: string;
   testID?: string;
 }): React.JSX.Element {
+  const styles = useStyles(buildStyles);
   return (
     <View style={styles.field}>
       <Text style={styles.fieldLabel}>{label}</Text>
@@ -484,7 +482,7 @@ function Field({
   );
 }
 
-const styles = StyleSheet.create({
+const buildStyles = (color: Palette) => StyleSheet.create({
   body: {paddingBottom: space.xl},
   bannerWrap: {paddingHorizontal: SAFE_GUTTER, paddingBottom: space.sm},
   card: {
