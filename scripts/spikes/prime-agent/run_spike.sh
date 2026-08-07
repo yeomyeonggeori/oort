@@ -10,6 +10,10 @@
 #   scripts/spikes/prime-agent/run_spike.sh approve        # extension_ui → approval card
 #   scripts/spikes/prime-agent/run_spike.sh reject         # red proof: denial blocks
 #   scripts/spikes/prime-agent/run_spike.sh kernel         # cold/warm cell latency
+#   scripts/spikes/prime-agent/run_spike.sh refine         # #1130 ②: refine audit window
+#   scripts/spikes/prime-agent/run_spike.sh tenancy-leak   # #1130 ③ red proof: no isolation
+#   scripts/spikes/prime-agent/run_spike.sh tenancy-home   # #1130 ③: per-workspace HOME
+#   scripts/spikes/prime-agent/run_spike.sh tenancy        # #1130 ③: HOME + TMPDIR
 #   scripts/spikes/prime-agent/run_spike.sh all
 #
 # Real relay to a LOCAL stack (never production). Set these and the scenarios
@@ -76,9 +80,34 @@ case "${1:-all}" in
   kernel)
     run tool2 text --timeout 240 --prompt "run two cells"
     ;;
+  refine)
+    # #1130 ② — call the one RPC command docs/rpc.md never mentions and record
+    # what the protocol says while the harness changes underneath. The mock
+    # answers the refinement pass with a real proposal (mock_provider.py) so
+    # this measures the audit surface, not a parse failure.
+    run text refine --timeout 120 --refine-global --prompt "hello from oort"
+    ;;
+  tenancy-leak|tenancy-home|tenancy)
+    # #1130 ③ — two workspaces inside ONE container, as a shared worker host
+    # would run them. `tenancy-leak` is the red proof: with isolation off, ws-b
+    # must be able to read ws-a's global harness memory.
+    case "$1" in
+      tenancy-leak) iso=off;  expect=expect-leak ;;
+      tenancy-home) iso=home; expect=expect-isolated ;;
+      tenancy)      iso=full; expect=expect-isolated ;;
+    esac
+    docker run --rm --network "${SPIKE_NETWORK:-none}" \
+      -v "$HERE:/spike:ro" \
+      -v "$OUT:/work/out" \
+      --add-host=host.docker.internal:host-gateway \
+      "$IMAGE" bash /spike/tenancy_probe.sh "$iso" "$expect"
+    ;;
   all)
-    for s in nocreds text long steer approve reject kernel; do
+    for s in nocreds text long steer approve reject kernel refine; do
       rm -f "$OUT/relay.jsonl"
+      "$0" "$s" || echo "!! $s failed" >&2
+    done
+    for s in tenancy-leak tenancy-home tenancy; do
       "$0" "$s" || echo "!! $s failed" >&2
     done
     ;;
