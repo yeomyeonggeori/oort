@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { ArrowDown, Loader2 } from "lucide-react";
 import { cn } from "@/design/lib/cn";
+import { subscribeTheme } from "@/design/theme";
 import { Button } from "@/design/ui/button";
 import { useSession } from "@/app/session";
 import {
@@ -677,6 +678,12 @@ export function ObserverTerminal({
       terminal.options.theme = readTheme(mount, probe);
     };
     media.addEventListener("change", applyTheme);
+    // 설정 > 테마의 전환도 같은 재읽기를 일으켜야 한다 (U2). 그 전환은 미디어 질의가
+    // 아니라 루트의 `data-theme` 스탬프로 일어나므로 위 리스너는 깨어나지 않고, 열려
+    // 있던 관전 터미널만 이전 스킴의 색으로 남는다(라이트 종이 위의 검은 판). 이
+    // 구독이 불릴 때 스탬프는 이미 붙어 있으므로, 여기서 읽는 계산값은 새 스킴의
+    // 것이다(src/design/theme.ts setTheme).
+    const unsubscribeTheme = subscribeTheme(applyTheme);
     const mount = mountRef.current;
     const observer = new ResizeObserver(() => refitRef.current?.());
     // The wheel is the way a reader leaves the tail, and it does not go through
@@ -689,6 +696,7 @@ export function ObserverTerminal({
     }
     return () => {
       media.removeEventListener("change", applyTheme);
+      unsubscribeTheme();
       observer.disconnect();
       mount?.removeEventListener("scroll", syncTail, true);
     };

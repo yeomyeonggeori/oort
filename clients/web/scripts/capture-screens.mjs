@@ -3644,6 +3644,11 @@ async function captureScheme(browser, scheme) {
   await signIn(settingsSweep);
   for (const [section, heading, name] of [
     ["account", "계정", "account"],
+    // 설정 > 테마 (U2). 이 스윕은 두 스킴에서 도므로, 선택 화면 **자신이** 라이트와
+    // 다크 각각에서 성립하는지가 리뷰 증거로 남는다. 고르는 값은 localStorage이고
+    // signIn()이 매번 그것을 비우므로, 찍히는 것은 언제나 기본값(시스템)의 화면이다.
+    // 고른 뒤의 화면은 gates/gate-theme.mjs가 실행마다 다시 찍는다.
+    ["appearance", "테마", "appearance"],
     ["notifications", "알림 규칙", "notifications"],
     ["workspace", "워크스페이스", "workspace"],
     ["plugins", "앱", "plugins"],

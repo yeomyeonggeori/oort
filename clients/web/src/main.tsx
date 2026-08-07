@@ -12,12 +12,19 @@ import { startPwa } from "@/features/pwa/store";
 import { initSessionStore } from "@/lib/session";
 import { releaseAfter, SESSION_HYDRATE_BUDGET_MS } from "@/app/boot";
 import { trackViewportHeight } from "@/app/viewportHeight";
+import { initTheme } from "@/design/theme";
 import "@/design/tokens.css";
 
 // 셸 높이의 근거 (goal B9). 첫 렌더보다 먼저 켠다: 로그인 화면도 셸 밖의 표면이라
 // 같은 높이를 쓰고, 컴포저가 있는 첫 프레임이 이미 맞아 있어야 한다. 해제 함수는
 // 쓰지 않는다 — 이 구독은 문서와 수명이 같다.
 trackViewportHeight();
+
+// 저장된 테마 (U2). 여기는 **두 번째** 적용이다: 첫 페인트 전에 스탬프를 붙이는
+// 것은 index.html의 theme-boot.js이고, 번들은 defer이므로 그 자리를 대신할 수
+// 없다. 이 줄이 지키는 것은 그 스크립트가 오지 못한 경우(오프라인 콜드 스타트)와
+// 모듈이 가진 선택이 문서와 어긋나지 않는다는 사실이다.
+initTheme();
 
 // StrictMode is intentionally OFF: its dev-only double-invocation would
 // double-subscribe the Centrifugo rail and make the realtime/resume demo
