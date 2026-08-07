@@ -191,4 +191,4 @@ echo "ok: MomoAPNSEnvironment=$aps_env"
 # carry the keychain access group. An ad-hoc simulator signature embeds an empty
 # entitlements dictionary — verified: `codesign -d --entitlements` on this .appex
 # returns `<dict></dict>`. Only a profile-signed device build can show it, which
-# is why docs/cicd/20-ios-push-device-check.md exists.
+# is why docs/cicd/11-ios-push-device-check.md exists.

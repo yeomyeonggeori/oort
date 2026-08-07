@@ -64,7 +64,7 @@ export function slopTo(size: number): number {
 // 값은 문자열이고, 그 문자열을 스킴에 따라 고르는 일을 하는 CSS 엔진이 없다. 그
 // 고르는 일을 하는 것이 `design/theme.tsx` 이고, 이 파일은 고를 것 두 벌을 댄다.
 //
-// ## 라이트는 발명이 아니라 **번역**이다
+// ## 두 스킴 다 발명이 아니라 **번역**이다
 //
 // 여명(Dawn) 팔레트의 정본은 웹 `clients/web/src/design/tokens.css` 이고, 거기에는
 // 이미 두 스킴이 다 적혀 있다. 그래서 라이트 값은 여기서 새로 고른 것이 아니라 그
@@ -79,20 +79,30 @@ export function slopTo(size: number): number {
 //   scrim ← --scrim(rgb(36 33 28 / .24))
 //
 // 웹에 짝이 없는 역할(`surfacePressed` 의 방향, `accentPressed`, `accentText`,
-// `accentSurfaceStrong`, `*Border`, `dangerText`, `onWarn`)은 **다크가 그 역할에
-// 대해 지키던 관계를 라이트에서 다시 세운 값**이다. 관계가 원본이고 값은 그 관계의
+// `accentSurfaceStrong`, `*Border`, `dangerText`, `onWarn`)은 **한 스킴이 그 역할에
+// 대해 지키던 관계를 다른 스킴에서 다시 세운 값**이다. 관계가 원본이고 값은 그 관계의
 // 답이라서, 셋 다 `__tests__/paletteContrast.test.ts` 가 두 스킴에서 같은 자로 잰다.
+//
+// 다크의 accent 가족도 뒤늦게 같은 길로 왔다 (#1155). 그때까지 다크만 선존재 파랑
+// (#3b6fd4)이었고, 그래서 스킴을 바꾸면 「내 것」의 색이 계열째 갈아탔다. 지금은 웹에
+// 짝이 있는 셋(`accent`·`accentSurface`·`onAccent`)이 웹 다크 항과 바이트로 같고,
+// 짝이 없는 셋은 위 규율대로 관계에서 풀린다 — 값의 근거는 `darkPalette` 에 있다.
 //
 // ## 방향이 뒤집히는 역할이 셋 있다
 //
 //   surfacePressed  다크에서는 한 단 **밝고**, 라이트에서는 한 단 **어둡다**.
 //                   뜻은 둘 다 「눌린 표면」이고, 그것은 배경에서 멀어지는 것이다.
-//   accentText      다크에서는 accent 보다 **밝은** 단(#6fa8dc), 라이트에서는
+//   accentText      다크에서는 accent 보다 **밝은** 단(#fcba6e), 라이트에서는
 //                   **어두운** 단(#8f4207). 뜻은 「배경 위에서 읽히는 accent」다.
+//                   두 스킴 모두 accent 의 색상각 위에 있고, 배경에서 멀어지는 쪽으로
+//                   같은 크기의 걸음을 간다 — 방향만 스킴이 정한다.
 //   dangerText      상자 안의 문장. 다크에서 danger 보다 밝고, 라이트에서 어둡다.
 //
-//   onWarn 은 값이 뒤집힌다: 다크의 앰버 채움(#d9a441)은 밝아서 검은 글자를 받고,
-//   라이트의 앰버 채움(#8a5c00)은 어두워서 종이색 글자를 받는다.
+//   `on*` 둘은 방향이 아니라 **값**이 뒤집힌다. 채움의 밝기가 스킴마다 반대이기
+//   때문이다: 다크의 앰버 채움(warn #d9a441 · accent #f0a850)은 밝아서 어두운 글자를
+//   받고(#1b1405 · #17161a), 라이트의 채움(#8a5c00 · #a54c08)은 어두워서 종이색
+//   글자(#fffefb)를 받는다. `onAccent` 가 이 목록에 든 것은 #1155 부터다 — 그전엔
+//   다크의 accent 가 파랑이라 채움이 양쪽 다 어두웠다.
 // =============================================================================
 
 /**
@@ -204,17 +214,33 @@ export const darkPalette: Palette = {
   text: '#f2f3f5',
   textMuted: '#9aa0a8',
   textFaint: '#6b7280',
-  accent: '#3b6fd4',
-  accentPressed: '#325ab3',
-  accentText: '#6fa8dc',
-  accentSurface: '#1a2740',
-  accentSurfaceStrong: '#2a3550',
-  // 순백이었다 (U2). 여명 팔레트의 규율은 웹이 처음부터 적어 둔 것이고
-  // (`tokens.css`: "no pure #000000 / #ffffff anywhere"), 폰에서 이 한 값만 그것을
-  // 어기고 있었다. 라이트 팔레트를 옮기면서 `paletteContrast.test.ts` 가 두 스킴을
-  // 같은 자로 재기 시작하자 그 자리에서 빨개졌다 — 종이의 흰색으로 내린다.
-  // accent 채움 위에서 4.76:1 -> 4.72:1, AA 는 그대로 넘는다.
-  onAccent: '#fffefb',
+  // accent 가족 — 파랑이었다 (#1155). 라이트가 웹의 라이트 항을 값 단위로 옮긴
+  // 뒤에도(U2) 다크만 선존재 파랑(#3b6fd4)을 들고 있었고, 그래서 같은 앱이 스킴을
+  // 바꾸면 「내 것」의 색이 계열째 갈아탔다. 웹은 한 줄로 두 스킴을 적으므로
+  // (`light-dark(#a54c08, #f0a850)`) 그 곳에서는 일어날 수 없는 일이다.
+  //
+  // 웹에 짝이 있는 셋은 **바이트로 같다** — 라이트가 이미 그렇게 정렬됐다:
+  //   accent ← --accent(#f0a850) · accentSurface ← --accent-soft(#33261a)
+  //   onAccent ← --on-accent(#17161a)
+  // 짝이 없는 셋은 파일 머리 주석의 규율대로 **관계를 다시 푼 값**이고, 그 관계는
+  // OKLCH 로 적으면 한 줄이다 — accent 의 색상각을 그대로 두고 L 만 한 걸음.
+  //   accentPressed  L −0.0887 (라이트가 같은 역할에 쓴 걸음), 채도 유지
+  //   accentText     L +0.0502 (같은 걸음, 다크는 배경에서 **멀어지는** 쪽이 밝은
+  //                  쪽이다), 채도 ×0.9 — 라이트의 accent→accentText 비와 같다
+  //   accentSurfaceStrong  accentSurface 에서 L +0.0577 (다크가 이 역할에 대해
+  //                  쓰던 자기 걸음), 채도 ×1.3
+  // 값이 아니라 이 관계가 원본이고, `paletteContrast.test.ts` 가 두 스킴에서 잰다.
+  accent: '#f0a850',
+  accentPressed: '#d28c30',
+  accentText: '#fcba6e',
+  accentSurface: '#33261a',
+  accentSurfaceStrong: '#453323',
+  // 종이의 흰색이었다 (U2). 그때 두 스킴의 accent 채움은 **둘 다 어두웠고**
+  // (다크 파랑 #3b6fd4 · 라이트 #a54c08) 그래서 그 위의 글자도 둘 다 종이색이었다.
+  // 호박으로 정렬하면서 다크의 채움만 밝아졌으므로(#f0a850, bg 위 9.38:1) 그 위의
+  // 글자는 반대쪽으로 뒤집힌다 — 웹의 `--on-accent` 가 다크에서 `#17161a` 인 것과
+  // 같은 이유이고, 값도 그것이다. 채움 위 8.94:1 · 눌린 채움 위 6.47:1.
+  onAccent: '#17161a',
   agent: '#b58bd6',
   agentSurface: '#2a2136',
   warn: '#d9a441',

@@ -958,7 +958,7 @@ cat <<'NOTE'
     · 잠금화면 푸시로 도착하는 승인 요청, 그리고 거기서 바로 결정하기
     · 알림 권한 프롬프트 이후의 실제 배달 (이 레인은 항상 "허용 안 함"을 누른다)
     · 공유 키체인 access group — 기기 서명에서만 검증됨
-      (clients/mobile/scripts/build-sim.sh 헤더 · docs/cicd/20-ios-push-device-check.md)
+      (clients/mobile/scripts/build-sim.sh 헤더 · docs/cicd/11-ios-push-device-check.md)
 
   서버는 이제 라이브와 같다 (#1022):
     · 이 레인의 api·relay·agent-worker는 server-rust/Dockerfile이 굽는 배포 이미지

@@ -654,10 +654,16 @@ describe('#1076 — 인용 점프가 도착했다고 말한다', () => {
     expect(inner.backgroundColor).toBeUndefined();
   });
 
-  it('파랑이 아니다 — 폰에서 accent 는 「내가 한 것」이다', () => {
+  it('「내가 한 것」의 옷이 아니다 — 폰에서 accent 는 그 뜻이다', () => {
     // u44 직전 리뷰가 인용 레일에 대해 내린 판정과 같은 규칙이다: accent 는 이미
     // 보내기 버튼과 내 반응 칩의 뜻이므로 세 번째 뜻을 갖지 않는다. 착지에
     // `accentSurface` 를 쓰면 방금 점프해 온 행이 **내가 반응한 행**의 옷을 입는다.
+    //
+    // 이 단정의 이름이 「파랑이 아니다」였다 (#1155 이전). 그때는 폰 accent 가
+    // 파랑이라 착지 틴트가 그쪽으로 새면 **눈으로도** 보였고, 그래서 이름이 색을
+    // 불렀다. 이제 accent 는 웹과 같은 호박이라 두 값은 이웃이고(OKLab 거리 0.047),
+    // 새더라도 눈에는 잘 안 띈다 — 지키는 것이 색이 아니라 **뜻**이라는 사실이
+    // 그만큼 더 중요해졌으므로 이름을 뜻으로 되돌린다. 단정은 그대로다.
     expect(color.warnSurface).not.toBe(color.accentSurface);
     expect(color.warnSurface).not.toBe(color.accent);
   });

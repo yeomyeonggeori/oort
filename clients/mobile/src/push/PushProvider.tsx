@@ -27,7 +27,7 @@ import {registerWithRetry} from './registration';
 // these lines are visible through `simctl launch --console-pty` (which is how
 // gate:session already runs the app); on a device, through Console.app.
 //
-// The `[push]` prefix is load-bearing: docs/cicd/20-ios-push-device-check.md
+// The `[push]` prefix is load-bearing: docs/cicd/11-ios-push-device-check.md
 // tells whoever runs the device check to grep for it.
 // =============================================================================
 

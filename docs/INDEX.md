@@ -103,6 +103,10 @@
 | [`docs/cicd/07-crash-analytics-spec.md`](cicd/07-crash-analytics-spec.md) | Sentry Cocoa(self-host) + MetricKit 계측 스펙 |
 | [`docs/cicd/08-e2e-accessibility-performance.md`](cicd/08-e2e-accessibility-performance.md) | XCUITest + performAccessibilityAudit + XCTMetric 테스트 plan |
 | [`docs/cicd/09-qa-codex-tickets.md`](cicd/09-qa-codex-tickets.md) | QA Codex 티켓(Q0~Q7 의존순) |
+| [`docs/cicd/10-ios-signing-identity-runbook.md`](cicd/10-ios-signing-identity-runbook.md) | iOS 서명 아이덴티티 런북(사람이 1회) + **자산 확보 실측표** |
+| [`docs/cicd/11-ios-push-device-check.md`](cicd/11-ios-push-device-check.md) | iOS 푸시 실기기 확인 절차(시뮬레이터로 증명 못 하는 것) |
+| [`docs/cicd/12-push-relay-deploy-runbook.md`](cicd/12-push-relay-deploy-runbook.md) | PushRelay 배포·검증 런북(ADR-0120 P-3) |
+| [`docs/cicd/13-selfhosted-runner-macos.md`](cicd/13-selfhosted-runner-macos.md) | 셀프호스티드 macOS 러너 운영 절차(ADR-0153 D2, 데스크톱 릴리스) |
 
 > **PASS 블록 정본 기록처 = `03-store-readiness-gate.md` 상단**(05 §10 양식). `STATUS.md §5b` 게이트 상태도 OPEN→PASS로 함께 갱신.
 

@@ -547,8 +547,21 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     paddingHorizontal: space.md,
     borderRadius: radius.sm,
     borderWidth: 1,
-    borderColor: color.border,
+    // `border` 가 아니다 (#1155 동반 관찰). 바로 아래 이웃인 `ThemeControl` 의 안 고른
+    // 칸이 리뷰 M-1 에서 같은 이유로 이 토큰을 떠났고, 이 버튼만 남아 한 판
+    // (`footerStack`) 안에서 선명한 테두리 위에 흐린 테두리가 얹혔다.
+    //
+    // 근거는 이웃 맞추기가 아니라 이웃과 **같은 사실**이다: 채움도 글자 강조도 없는
+    // 버튼이라 테두리 하나가 「여기가 버튼이다」를 말하는 전부인데, `border` 는 바탕
+    // (`bg`) 위에서 다크 1.406:1 · 라이트 1.315:1 로 컨트롤 테두리의 3:1 아래이고
+    // 토큰 자신이 「선이지 컨트롤이 아니다」라고 적는다. `textFaint` 는 웹
+    // `--line-strong` 과 같은 자리로 두 스킴 모두 3:1 을 넘는다(3.909:1 · 3.587:1).
+    //
+    // 확인은 `shell.test.tsx` 가 그려진 트리에서 두 테두리를 나란히 읽어 한다.
+    borderColor: color.textFaint,
   },
+  // 확인 상태의 파괴 버튼은 이 규칙 밖이다 — 테두리 말고 **글자**(`danger`, 굵게)가
+  // 이미 「여기가 버튼이다」를 말하므로 테두리가 유일한 신호가 아니다.
   footerButtonDanger: {borderColor: color.dangerBorder},
   footerButtonLabel: {fontSize: font.label, color: color.textMuted},
   footerButtonDangerLabel: {fontSize: font.label, color: color.danger, fontWeight: '600'},
