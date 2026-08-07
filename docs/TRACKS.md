@@ -1,4 +1,4 @@
-# momo 트랙 파이프라인 (정본, 2026-07-18 성재 지시)
+# oort 트랙 파이프라인 (정본, 2026-07-18 성재 지시)
 
 > **모든 세션(Claude/Fable, GPT/momo-main, Codex worker)은 작업 시작 전에 이 문서로 자기 트랙을 선언한다.**
 > 관련: `docs/MULTI_SESSION_OPS.md` §4.1(루트 무접촉·clean 유지), `docs/planning/ENGINE_HANDOFF.md`(엔진→UXUI 큐).

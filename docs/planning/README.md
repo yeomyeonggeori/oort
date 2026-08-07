@@ -1,7 +1,7 @@
-# momo 기획 운영 계약 (Planning Layer Contract)
+# oort 기획 운영 계약 (Planning Layer Contract)
 
 > 생성: 2026-07-10 · 정본 등급: **기획 레이어 운영 정본** (구현 계약은 `AGENTS.md`, 결정 거버넌스는 ADR-0100)
-> **이 문서 하나만 읽으면 어떤 기획 세션(Fable, GPT 5.6, 사람)이든 momo에서 기획을 시작할 수 있다.**
+> **이 문서 하나만 읽으면 어떤 기획 세션(Fable, GPT 5.6, 사람)이든 oort에서 기획을 시작할 수 있다.**
 
 ## 0. 역할 4분할
 

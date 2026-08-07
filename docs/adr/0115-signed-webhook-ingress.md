@@ -6,7 +6,7 @@
 
 ## Context
 
-1. 외부 시스템(CI/모니터링/서드파티)이 momo 채널로 이벤트를 밀어 넣는 공식 경로가 없다. 수신 경로는 반드시 단일 쓰기 경로(REST→PG 트랜잭션→outbox→relay)를 지나야 하며, provider가 Centrifugo에 직접 publish하는 일은 없어야 한다.
+1. 외부 시스템(CI/모니터링/서드파티)이 oort 채널로 이벤트를 밀어 넣는 공식 경로가 없다. 수신 경로는 반드시 단일 쓰기 경로(REST→PG 트랜잭션→outbox→relay)를 지나야 하며, provider가 Centrifugo에 직접 publish하는 일은 없어야 한다.
 2. 기존 예약(2026-07-14 proposal)이 골격을 이미 권고: per-install HMAC-SHA256, canonical signature base, replay window, `(workspace_id, installation_id, delivery_id)` 멱등 receipt, 같은 tenant 트랜잭션 원자 기록.
 3. ADR-0113 D4가 채택한 Slack-호환의 실체(16-04 검증): **Slack incoming webhook은 URL 자체가 시크릿**(별도 서명 없음)이고, Mattermost가 12년째 이 와이어 포맷을 수용해 "URL만 바꾸면 기존 도구가 동작"을 실증했다. 화이트리스트는 MM 검증 부분집합 차용이 안전.
 4. MOMO-410으로 plugin registry가 랜딩 — webhook은 `external_webhook` **첫 reference plugin**으로 SE-04B에서 구현된다(기존 예약 그대로).
@@ -18,7 +18,7 @@
 - B — asymmetric publisher key(ed25519 등): 발신자 다수·공개 검증 시나리오용 — v0 과설계. **후속 예약**(publisher enrollment는 커뮤니티 플러그인 시점).
 
 ### D2. Slack-호환 모드 (ADR-0113 D4 이행)
-- **A (권고) — 같은 ingress의 별도 모드**: `POST /hooks/{token}` — Slack 동형 **URL-시크릿 모델**(서명 없음 — 원본 Slack과 등가 보안, 고엔트로피 토큰+HTTPS). 페이로드 변환기: `text` + legacy `attachments`(MM 지원 필드 화이트리스트) + `<url|text>`/멘션/`<!channel>` 번역 → momo 메시지. **`blocks`는 v0 거부(400 + 명시 오류)** — 표시 부분집합은 후속 ADR. 미지원 목록(mrkdwn/parse/link_names 등)은 MM과 동일하게 문서화.
+- **A (권고) — 같은 ingress의 별도 모드**: `POST /hooks/{token}` — Slack 동형 **URL-시크릿 모델**(서명 없음 — 원본 Slack과 등가 보안, 고엔트로피 토큰+HTTPS). 페이로드 변환기: `text` + legacy `attachments`(MM 지원 필드 화이트리스트) + `<url|text>`/멘션/`<!channel>` 번역 → oort 메시지. **`blocks`는 v0 거부(400 + 명시 오류)** — 표시 부분집합은 후속 ADR. 미지원 목록(mrkdwn/parse/link_names 등)은 MM과 동일하게 문서화.
 - B — Slack 페이로드도 HMAC 서명 요구: 기존 도구가 서명을 못 붙이므로 "URL만 바꾸면 동작"이라는 채택 이유가 죽는다. **기각.**
 - 두 모드의 공통 강제: rate limit, max body, replay/멱등(delivery ID 없는 Slack 모드는 `(install, body hash, 시간창)` 근사 멱등), **channel binding**(발급 시 채널 고정 — Slack 모던 webhook과 동일), 오류 응답의 정보 비노출.
 
@@ -31,7 +31,7 @@
 
 ## Consequences
 
-- (+) GitHub/Jenkins/Grafana/Alertmanager류 기존 Slack 연동이 URL 교체만으로 momo에 알림 — "쓰던 것 계속 사용"의 첫 실물. native HMAC 모드는 업계(token 대조) 대비 상향 보안.
+- (+) GitHub/Jenkins/Grafana/Alertmanager류 기존 Slack 연동이 URL 교체만으로 oort에 알림 — "쓰던 것 계속 사용"의 첫 실물. native HMAC 모드는 업계(token 대조) 대비 상향 보안.
 - (+) 단일 쓰기 경로·멱등·감사 불변식 안에서 외부 이벤트가 원장에 합류.
 - (−) 변환기 유지비(단 Slack legacy 포맷은 사실상 동결 — MM 12년 유지가 근거). blocks 미지원 구간의 사용자 혼동은 명시 오류+문서로 완화.
 - 보류: blocks 표시 부분집합(후속 ADR — "MM보다 나은 호환" 기회), outgoing/slash 호환(2순위), asymmetric key, 발급 UI(UX 트랙).

@@ -8,7 +8,7 @@
 
 ## 1. 한 줄 결정
 
-momo의 기본 셸은 **workspace/server → channel/DM → timeline** 위계를 먼저 읽히게 하고, Work·terminal·agent 실행은 같은 타임라인의 governed execution surface로 확장한다. 메신저 기본기와 슈퍼앱 엔진을 한 화면에 섞되, 구현 책임과 신뢰 경계는 분리한다.
+oort의 기본 셸은 **workspace/server → channel/DM → timeline** 위계를 먼저 읽히게 하고, Work·terminal·agent 실행은 같은 타임라인의 governed execution surface로 확장한다. 메신저 기본기와 슈퍼앱 엔진을 한 화면에 섞되, 구현 책임과 신뢰 경계는 분리한다.
 
 ## 2. 이번 QA에서 확인된 문제
 
@@ -35,9 +35,9 @@ momo의 기본 셸은 **workspace/server → channel/DM → timeline** 위계를
 
 ## 3. 레퍼런스에서 채택할 문법
 
-- **Discord:** server/workspace를 channel보다 상위 탐색 단위로 둔다. momo v0는 현재 workspace header를 sidebar 최상단에 고정하고, multi-workspace는 후속 rail/switcher ADR에서 확정한다.
-- **Mattermost:** search는 workspace/team 범위와 `from:`/`in:`/date modifier를 지원하고 결과에서 원문으로 jump한다. momo v0는 message/member/mention 결과와 channel context jump를 최소 계약으로 삼는다.
-- **Codex/Orca/Conductor:** terminal 한 장이 아니라 task별 workspace/branch/process/transcript/diff/review가 핵심이다. momo는 raw shell을 메신저에 붙이는 대신 `agent_run`과 approval/audit ledger를 중심으로 Work Console을 만든다.
+- **Discord:** server/workspace를 channel보다 상위 탐색 단위로 둔다. oort v0는 현재 workspace header를 sidebar 최상단에 고정하고, multi-workspace는 후속 rail/switcher ADR에서 확정한다.
+- **Mattermost:** search는 workspace/team 범위와 `from:`/`in:`/date modifier를 지원하고 결과에서 원문으로 jump한다. oort v0는 message/member/mention 결과와 channel context jump를 최소 계약으로 삼는다.
+- **Codex/Orca/Conductor:** terminal 한 장이 아니라 task별 workspace/branch/process/transcript/diff/review가 핵심이다. oort는 raw shell을 메신저에 붙이는 대신 `agent_run`과 approval/audit ledger를 중심으로 Work Console을 만든다.
 - **macOS:** channel creation은 native sheet, member/context detail은 inspector, workspace commands는 Menu/commands를 우선한다.
 
 ## 4. 실행 분할
@@ -86,7 +86,7 @@ momo의 기본 셸은 **workspace/server → channel/DM → timeline** 위계를
 
 - `Control+backtick`의 transcript/activity drawer는 MOMO-375로 구현 가능하다.
 - 실제 command input, Codex/Claude/OpenCode session, PTY/process lifecycle, cwd/repo/worktree, approval relay는 ADR-0114 뒤 새 buildable child로 구현한다.
-- 실행은 user-owned host에 남고 momo server는 command process/provider credential을 보관하지 않는다.
+- 실행은 user-owned host에 남고 oort server는 command process/provider credential을 보관하지 않는다.
 
 ## 5. Engine delegation 준비
 

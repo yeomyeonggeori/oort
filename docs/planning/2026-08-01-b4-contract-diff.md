@@ -38,7 +38,7 @@ Swift 시절 계약을 그대로 구현하는 것으로 전부 닫혔다. UI 쪽
 | 클라 | 경로 | API 소비 표면 |
 |---|---|---|
 | 웹 SPA (정본, ADR-0133) | `clients/web/src/**` | **68쌍 전량.** `lib/api.ts`(2,402줄) · `features/settings/api.ts` · `features/timeline/approvalDecision.ts` · `lib/realtime.ts` |
-| Tauri 셸 | `clients/desktop/src-tauri/src/**` | **0쌍.** IPC 커맨드만(`deep_link_*` · `discovery_*` · `open_external_url` · `notification_*` · `keychain_*` · `app_version` · `updater_*`). 업데이터 엔드포인트는 GitHub Pages(`tauri.conf.json:33-36`)로 momo API가 아니다 |
+| Tauri 셸 | `clients/desktop/src-tauri/src/**` | **0쌍.** IPC 커맨드만(`deep_link_*` · `discovery_*` · `open_external_url` · `notification_*` · `keychain_*` · `app_version` · `updater_*`). 업데이터 엔드포인트는 GitHub Pages(`tauri.conf.json:33-36`)로 oort API가 아니다 |
 | `clients/Core` (MomoCore) | `Sources/MomoCore/**` | **0쌍.** URL 리터럴 0개. `ChatBackend`/`WorkspaceBackend` 프로토콜 + 모델 타입만 — 계약 **타입**의 정본이고 전송은 각 앱이 구현 |
 | `clients/web-legacy` (ADR-0119) | — | 범위 밖(legacy). 웹 정본이 계승한 quirk의 출처로만 참조 |
 
@@ -362,7 +362,7 @@ Swift의 `probeHop`은 네 갈래로 답한다. 앞의 셋은 **네트워크가 
 - `skipped` → 패널이 "꺼둠"으로 렌더한다(`chainModel.ts:612`). 켜 둔 hop을 운영자가 껐다고 말하는 셈이다.
 - `probe_not_run` → 패널에 이미 있는 어휘이고 "확인이 끝나지 않았습니다"로 렌더된다(`chainModel.ts:probeReasonCopy`). 최상단 문장은 `providerTestMessage`의 기본 갈래를 타 "연결을 확인하지 못했습니다"가 된다. **일어난 일 그대로다.**
 
-닫는 방법은 둘 중 하나이고 둘 다 이 배치 밖이다: ① 아웃바운드 프로브 클라이언트를 허용하는 ADR, 또는 ② ADR-0135 D2-A가 quota에 대해 이미 택한 길 — 자격증명을 쥔 쪽이 프로브하고 momo는 숫자만 받는 것. 후자가 ADR-0004와 결이 같다.
+닫는 방법은 둘 중 하나이고 둘 다 이 배치 밖이다: ① 아웃바운드 프로브 클라이언트를 허용하는 ADR, 또는 ② ADR-0135 D2-A가 quota에 대해 이미 택한 길 — 자격증명을 쥔 쪽이 프로브하고 oort는 숫자만 받는 것. 후자가 ADR-0004와 결이 같다.
 
 ### 10.4 §9.2 델타 — effort-table을 서빙하면 `capability.ts`의 ② 판정이 뒤집힌다
 

@@ -1,4 +1,4 @@
-# 핸드오프 패킷 — UXUI buzz 잔여 배치 (2026-07-23, momo-main → momo UXUI 세션)
+# 핸드오프 패킷 — UXUI buzz 잔여 배치 (2026-07-23, momo-main → oort UXUI 세션)
 
 > 계보: buzz 경쟁 분석 UXUI Top5(`2026-07-22-buzz-competitive-analysis.md` §112~119) → ENGINE_HANDOFF A-21/22/23 + 기존 #602. 내부 테스트 집중 전환(`2026-07-23-internal-test-focus-plan.md` §4-2)의 UXUI 전면 배치.
 > 스킬 의무: 모든 UI 변경은 `momo-design-taste` 스킬 규율(§0 Design Read 라인 출력 포함) + 완료 전 design-review 에이전트(신선 컨텍스트).

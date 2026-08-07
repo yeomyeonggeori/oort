@@ -1,4 +1,4 @@
-# momo — 크래시 / 분석 계측 스펙 (Sentry · MetricKit · Crashlytics, 2026)
+# oort — 크래시 / 분석 계측 스펙 (Sentry · MetricKit · Crashlytics, 2026)
 
 > 작성: 2026-06-24 · 실행 주체: **Codex (goal 자율)** · 게이트: 05 §G-A.
 > 목적: 게이트의 크래시-free율(05 §2)을 **객관 수치로 측정**할 수 있게 클라이언트(iOS/macOS) 계측을 정의.
@@ -7,15 +7,15 @@
 
 ---
 
-## 1. 도구 선택 (momo 기조와의 정합)
+## 1. 도구 선택 (oort 기조와의 정합)
 
-| 도구 | 크래시-free 지표 | 멀티플랫폼 | 의존/계정 | permissive 정합 | momo 판단 |
+| 도구 | 크래시-free 지표 | 멀티플랫폼 | 의존/계정 | permissive 정합 | oort 판단 |
 |---|---|---|---|---|---|
 | **Sentry Cocoa SDK** | Release Health: **Crash Free Sessions / Users**(릴리스별) (검증됨) | iOS/macOS/서버/웹 | self-host 가능(Sentry는 BSL/오픈), SaaS도 | ◎(self-host로 데이터 자가소유) | **1순위** |
 | **MetricKit** | crash/hang/CPU **진단** + 일일 메트릭(세션 분모는 자체 계산) (검증됨) | iOS15+/macOS12+ | **서드파티 0**(Apple 프레임워크) | ◎ | **보조(항상 켬)** |
 | **Firebase Crashlytics** | crash-free users 중심 (검증됨) | iOS/Android | Google SDK/계정 종속 | △(Google 종속) | **선택지로만 문서화** |
 
-> momo는 "자체구축·permissive·플랫폼 관리자 전체 추적" 제품. **데이터 자가소유(self-host Sentry) + Apple 네이티브(MetricKit)** 조합이 기조에 맞다. Crashlytics는 팀이 Firebase를 이미 쓸 때만. (추정)
+> oort는 "자체구축·permissive·플랫폼 관리자 전체 추적" 제품. **데이터 자가소유(self-host Sentry) + Apple 네이티브(MetricKit)** 조합이 기조에 맞다. Crashlytics는 팀이 Firebase를 이미 쓸 때만. (추정)
 
 ---
 
@@ -45,7 +45,7 @@
 - 전달 시점: **iOS 15+/macOS 12+ 진단 즉시 전달**, 메트릭은 24h당 최대 1회. (검증됨)
 - 한계: `MXCallStackTree`는 JSON-only 인코딩 → 심볼리케이션/파싱 손이 감. (검증됨, 알려진 불편)
 
-### 3.2 momo 사용
+### 3.2 oort 사용
 - payload를 서버(`POST /v1/diagnostics` 또는 별도 수집 엔드포인트)로 업로드 → **플랫폼 관리자 추적**(제품 목표의 "전체 추적")과 연결. (추정 — 자체 수집은 Sentry self-host로 갈음 가능)
 - macOS 직접배포(TestFlight 미사용) 빌드의 **유일한 OS-레벨 진단원** → 반드시 활성.
 - Sentry `enableMetricKit`을 켜면 MetricKit 진단이 Sentry로도 들어가므로 **이중 수집(자체 + Sentry)** 가능. (검증됨)
@@ -54,7 +54,7 @@
 
 ## 4. Crashlytics (선택지 — 디폴트 아님)
 - Firebase 프로젝트 + GoogleService-Info.plist + Firebase SDK 필요(Google 종속). crash-free users 지표 제공. (검증됨)
-- momo permissive/자가소유 기조와 충돌 → **팀이 명시적으로 선택할 때만**. 선택 시 05 §2.1의 "crash-free users" 정의로 게이트 판정. (추정)
+- oort permissive/자가소유 기조와 충돌 → **팀이 명시적으로 선택할 때만**. 선택 시 05 §2.1의 "crash-free users" 정의로 게이트 판정. (추정)
 
 ---
 

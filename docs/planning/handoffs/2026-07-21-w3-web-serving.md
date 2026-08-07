@@ -4,7 +4,7 @@
 > 트랙: 엔진/인프라 · base = main · PR base = track/engine · 도메인 = infra(+scripts/docs). **서버 Swift 코드 수정 금지.** verifier 포트 밴드 **28070~28074**.
 
 ## 목표
-셀프호스터가 momo를 설치하면 브라우저로 `https://momo.example.com`에 접속해 바로 쓰는 상태. Caddy가 SPA를 서빙하고 같은 오리진에서 `/v1/*`를 api로 프록시 — CORS 불요(0119 D1-A).
+셀프호스터가 oort를 설치하면 브라우저로 `https://momo.example.com`에 접속해 바로 쓰는 상태. Caddy가 SPA를 서빙하고 같은 오리진에서 `/v1/*`를 api로 프록시 — CORS 불요(0119 D1-A).
 
 ## 구현 범위
 1. **prod Caddyfile — `{$APP_DOMAIN}` site 추가**(기존 `{$API_DOMAIN}`/`{$REALTIME_DOMAIN}` 유지):

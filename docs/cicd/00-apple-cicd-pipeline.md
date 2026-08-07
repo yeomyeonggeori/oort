@@ -1,4 +1,4 @@
-# momo — Apple 앱 CI/CD 정식 파이프라인 스펙 (2026)
+# oort — Apple 앱 CI/CD 정식 파이프라인 스펙 (2026)
 
 > 작성: 2026-06-24 · 대상 실행 주체: **Codex (goal 자율 실행)** · 산출 위치: 이 리포(`/Users/kwakseongjae/projects/momo`)
 > 범위: **macOS 데스크탑 앱 공증(notarize) 직접배포** + **iOS 앱 TestFlight/App Store 업로드**.
@@ -309,7 +309,7 @@ deliver(
 
 ### 6.3 권고
 
-- **momo 초기(빌드 빈도 낮음, macOS+iOS 둘 다, notarize 직접배포 필요):**
+- **oort 초기(빌드 빈도 낮음, macOS+iOS 둘 다, notarize 직접배포 필요):**
   → **주: GitHub Actions(`macos-15`) + fastlane**(notarize/match/pilot/deliver 일원화, 멀티플랫폼·서버까지 동일 CI).
   → **보조: Xcode Cloud 무료 25h**를 "App Store/TestFlight 전용 백업 경로"로(서명 단순). (추정)
 - **빌드가 월 25h 이내로 수렴하고 iOS 위주면** Xcode Cloud 단독도 비용 0으로 합리적. notarize 직접배포는 여전히 GH Actions 필요.

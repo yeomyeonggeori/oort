@@ -1,4 +1,4 @@
-# momo — L0/L1 등록 준비 런북: 등록주체, D-U-N-S, Apple Developer Program
+# oort — L0/L1 등록 준비 런북: 등록주체, D-U-N-S, Apple Developer Program
 
 > **법률 자문 아님.** 이 문서는 Apple 배포를 시작하기 전의 운영 런북/체크리스트다. 법인 설립, 세무, 계약, 개인정보/EULA 문구는 외부 변호사 또는 세무 전문가의 1회 검토가 필요하다.
 > 확인일: 2026-06-26. Apple/D&B 정책과 금액은 바뀔 수 있으므로 실제 등록 직전에 1차 출처를 다시 확인한다.
@@ -19,7 +19,7 @@ Codex는 절차, 체크리스트, 템플릿, 링크, secret inventory 항목을 
 
 ## 1. 현재 권장 흐름
 
-현재 momo는 GitHub Actions가 disabled/manual-only이고, M7 QA 게이트 PASS 전에는 external TestFlight/App Store/공증 배포를 하지 않는다. 따라서 L0/L1의 목적은 "즉시 출시"가 아니라 M4/M5/M6에서 막히지 않도록 행정 선결을 준비하는 것이다.
+현재 oort는 GitHub Actions가 disabled/manual-only이고, M7 QA 게이트 PASS 전에는 external TestFlight/App Store/공증 배포를 하지 않는다. 따라서 L0/L1의 목적은 "즉시 출시"가 아니라 M4/M5/M6에서 막히지 않도록 행정 선결을 준비하는 것이다.
 
 권장 기본값(추정):
 
@@ -41,7 +41,7 @@ Codex는 절차, 체크리스트, 템플릿, 링크, secret inventory 항목을 
 | 등록자 권한 | 본인 | 소유자/창업자/임원/시니어 리드 또는 법적 구속 권한을 위임받은 직원 |
 | 이메일/웹사이트 | Apple Account 중심 | 조직 도메인 업무 이메일과 공개 동작 웹사이트 필요 |
 | 팀 운영 | 제한적 시작에 적합 | 멤버 초대와 App Store Connect 역할 운영에 적합 |
-| momo 판단 | 빠른 내부 검증에 적합(추정) | 정식 상용/B2B/조직 명의 배포에 적합(추정) |
+| oort 판단 | 빠른 내부 검증에 적합(추정) | 정식 상용/B2B/조직 명의 배포에 적합(추정) |
 
 공식 근거:
 - Apple Program Enrollment: https://developer.apple.com/help/account/membership/program-enrollment/

@@ -12,7 +12,7 @@
 **성재 결정 체인**: A안(fork) 선택 → 선행 스파이크가 fork 불성립 판정 → **B안(참조 재작성) 승인 + provenance 서명 차용 포함 + "설계부터 시작"**.
 
 **확정 상태**:
-- **ADR-0145 Accepted** — Swift/Hummingbird → Rust/Axum **재작성**, buzz는 fork 아니라 **코드 레퍼런스**, momo 불변식 6개 보존.
+- **ADR-0145 Accepted** — Swift/Hummingbird → Rust/Axum **재작성**, buzz는 fork 아니라 **코드 레퍼런스**, oort 불변식 6개 보존.
 - **ADR-0146 Proposed** — 에이전트 행동 provenance 서명(buzz 강점 조각 차용, Ed25519 additive, 단일쓰기경로·RLS 무손상). D3에서 확정.
 - **실행 정본 = `docs/planning/2026-07-30-server-rewrite-plan.md`** — 설계-우선. Phase 0 산출물 D1~D6 확정 → 구현 배치 B1~B5.
 
@@ -47,7 +47,7 @@
 
 **성재 결정 대기 지점**: ADR-0146 세부(서명 페이로드 바이트·사람 device 키 배선 시점 B1내/fast-follow·"서명됨" UX 표식) 확정 후 Accept 승격 — B1 전까지. (Phase 0 전체 승인은 완료: "B0 착수해줘".)
 
-**스파이크 판정(기록됨, ADR-0145)**: buzz ↔ momo는 스택 표면만 1:1, 정합성·격리 코어는 정반대. 불변식 3개(단일쓰기경로·gapless seq·RLS FORCE)가 buzz Nostr 코어(클라-서명-publish·created_at·RLS 전무)와 정면 충돌. 둘 다 "relay=SoT"는 같음(차이는 저자·순서·격리강제). 곡선 정정: buzz=secp256k1 Schnorr, momo=Ed25519. buzz clone: scratchpad/buzz.
+**스파이크 판정(기록됨, ADR-0145)**: buzz ↔ oort는 스택 표면만 1:1, 정합성·격리 코어는 정반대. 불변식 3개(단일쓰기경로·gapless seq·RLS FORCE)가 buzz Nostr 코어(클라-서명-publish·created_at·RLS 전무)와 정면 충돌. 둘 다 "relay=SoT"는 같음(차이는 저자·순서·격리강제). 곡선 정정: buzz=secp256k1 Schnorr, oort=Ed25519. buzz clone: scratchpad/buzz.
 
 정본(판단 근거): `docs/planning/2026-07-30-server-stack-reassessment.md`(§0~§7).
 

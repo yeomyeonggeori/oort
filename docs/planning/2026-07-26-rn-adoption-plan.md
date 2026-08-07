@@ -1,4 +1,4 @@
-# RN 채택 실전 조사 — momo 모바일 (iOS+Android)
+# RN 채택 실전 조사 — oort 모바일 (iOS+Android)
 
 - 작성: 2026-07-26, Fable (리서치 세션)
 - **전제: 성재가 2026-07-26 React Native로 결정.** 스택 비교 근거는 `2026-07-26-mobile-stack-research.md`(본 문서의 선행 문서)에 남아 있다. 본 문서는 **"어떻게 만들 것인가"** 만 다룬다.
@@ -13,7 +13,7 @@
 1. **재사용 경계가 실측으로 확정됐다**: 로직 **11,444 LOC + 테스트 7,728 LOC가 넘어가고**, UI는 다시 쓴다. 다만 **v0 UI는 13,346이 아니라 ≈4,600 LOC 상당**(ADR-0123 v0 스코프 기준). 넘어가는 쪽이 어려운 쪽(계약·순서·승인·쿼터)이고 다시 쓰는 쪽이 기계적인 쪽이다(§3).
 2. **게이트 2개가 열렸다**: ①**centrifuge-js는 React Native를 공식 지원**한다(npm description 명시) → 실시간 층 유지 확정 ②**Expo config plugin으로 iOS NSE 주입 가능**(OneSignal 플러그인이 실증) — 단 범용 플러그인은 ★3 수준(§4.1, §2.1).
 3. **기존 Swift 자산 중 391 LOC가 살아남는다** — NSE(62) + `MomoiOSPushKit`(329, `Foundation`·`Security`만 import). **RN 전환의 가장 어려운 지점을 이미 작성해둔 코드로 시작**한다. fastlane/match/CI도 그대로(§3.9).
-4. **Expo 권고 = "완전 Expo" 아님**: Mattermost처럼 **bare RN + Expo 모듈 낱개, EAS 미도입**. momo는 이미 fastlane+match+`release-ios.yml`을 갖고 있어 EAS로 갈아탈 이유가 없다(§2.2).
+4. **Expo 권고 = "완전 Expo" 아님**: Mattermost처럼 **bare RN + Expo 모듈 낱개, EAS 미도입**. oort는 이미 fastlane+match+`release-ios.yml`을 갖고 있어 EAS로 갈아탈 이유가 없다(§2.2).
 5. **brownfield 아니라 재작성**: Android가 0이라 brownfield는 iOS에만 걸려 **비대칭 하이브리드**(=Airbnb의 "세 번째 플랫폼")를 만든다. 그리고 brownfield 성공 사례가 **전부 전담 인력을 둔 대기업**이다(§6).
 6. **"FlashList 쓰면 된다"는 틀렸다** — Mattermost의 채팅 타임라인은 `FlatList`이고, `inverted`+`maintainVisibleContentPosition`를 위해 **RN 자체의 Fabric ObjC++를 패치**했다. 타임라인 리스크를 별도 계상할 것(§1.6).
 7. **LiveKit RN은 v0 게이트가 아니다**(ADR-0123이 음성을 v0 제외). v1에서는 CallKit이 3개월 된 포크에 의존하므로, **기존 `IOSHuddleLiveKitSession.swift`를 얇은 네이티브 모듈로 노출하는 편이 안전**(§5).
@@ -23,17 +23,17 @@
 
 ## 0. 선행 문서의 열린 질문 하나가 닫혔다 — 실행 위치 `[SOURCE]`
 
-선행 문서 §6.4-5에서 "momo 에이전트 작업이 모든 기기를 꺼도 계속되는가"를 **엔진 트랙 질의 사항**으로 남겼다. ADR 정본을 읽어 확인한 결과 **이미 답이 있다**:
+선행 문서 §6.4-5에서 "oort 에이전트 작업이 모든 기기를 꺼도 계속되는가"를 **엔진 트랙 질의 사항**으로 남겼다. ADR 정본을 읽어 확인한 결과 **이미 답이 있다**:
 
 | 호스트 타입(ADR-0125 D1) | 실행 위치 | 폰·맥 다 꺼도 계속되나 |
 |---|---|---|
 | `type=app` (내 맥) | ADR-0114 v0 — **세션 수명 = 맥 앱 수명** | ❌ (Codex Remote·Claude Remote Control과 같은 등급) |
 | `type=workd` (팀 VPS 데몬) | launchd/systemd 상주, outbound-only 다이얼 | ✅ |
-| `type=cloud` (momo Cloud) | E2B 샌드박스 (ADR-0125 D3, 파일럿 완료) | ✅ |
+| `type=cloud` (oort Cloud) | E2B 샌드박스 (ADR-0125 D3, 파일럿 완료) | ✅ |
 
-그리고 ADR-0125 D6은 **승인 카드에 호스트 선택기**(내 맥 온라인 / 팀 VPS / momo Cloud)를 이미 설계해 뒀다.
+그리고 ADR-0125 D6은 **승인 카드에 호스트 선택기**(내 맥 온라인 / 팀 VPS / oort Cloud)를 이미 설계해 뒀다.
 
-> **모바일 UX 요구사항이 여기서 도출된다: 작업 세션 행은 "어느 호스트에서 도는지"를 반드시 표시해야 한다.** 그게 "폰 닫아도 계속됩니다"를 말할 수 있는지를 결정하기 때문이다. 선행 문서 §5.2 패턴 1(레퍼런스 제품들이 정확히 이 지점에서 갈림)이 momo 안에서 그대로 재현된다 — 다만 momo는 **한 앱 안에 두 등급이 공존**하므로, 구분 표시가 레퍼런스보다 더 중요하다.
+> **모바일 UX 요구사항이 여기서 도출된다: 작업 세션 행은 "어느 호스트에서 도는지"를 반드시 표시해야 한다.** 그게 "폰 닫아도 계속됩니다"를 말할 수 있는지를 결정하기 때문이다. 선행 문서 §5.2 패턴 1(레퍼런스 제품들이 정확히 이 지점에서 갈림)이 oort 안에서 그대로 재현된다 — 다만 oort는 **한 앱 안에 두 등급이 공존**하므로, 구분 표시가 레퍼런스보다 더 중요하다.
 
 ---
 
@@ -195,7 +195,7 @@ SwiftUI iOS 킷(14,119 LOC)이 통째로 버려지는 게 아니다. **앱 익�
 
 > **즉 ADR-0120 D2-A(id-only → NSE fetch)의 iOS 구현 391 LOC는 살아남는다.** RN 전환의 가장 어려운 부분(선행문서 §2.1에서 Tauri가 못 넘은 바로 그 지점)을 **이미 작성해둔 Swift로 시작**할 수 있다. Mattermost도 같은 구조다 — RN 앱 + Swift NSE + 네이티브 모듈(§1.4).
 
-**배포 파이프라인도 그대로 넘어간다** `[SOURCE]`: momo는 이미 `fastlane/{Appfile,Fastfile,Matchfile}` + `.github/workflows/release-ios.yml` + `docs/cicd/*`(런북·시크릿 인벤토리·스토어 게이트·TestFlight 계획·크래시 스펙 10종)을 갖고 있다. **fastlane은 Xcode 프로젝트를 빌드할 뿐 앱이 SwiftUI인지 RN인지 모른다** — `match`(private signing repo `momo-signing`)·TestFlight 레인·공증 레인 전부 유효하다. **이건 Mattermost가 쓰는 것과 동일한 조합**(fastlane + Matchfile + GH Actions, EAS 아님). 추가 작업은 ①Xcode 프로젝트 경로 변경 ②**Android 레인 신설** 두 가지다.
+**배포 파이프라인도 그대로 넘어간다** `[SOURCE]`: oort는 이미 `fastlane/{Appfile,Fastfile,Matchfile}` + `.github/workflows/release-ios.yml` + `docs/cicd/*`(런북·시크릿 인벤토리·스토어 게이트·TestFlight 계획·크래시 스펙 10종)을 갖고 있다. **fastlane은 Xcode 프로젝트를 빌드할 뿐 앱이 SwiftUI인지 RN인지 모른다** — `match`(private signing repo `momo-signing`)·TestFlight 레인·공증 레인 전부 유효하다. **이건 Mattermost가 쓰는 것과 동일한 조합**(fastlane + Matchfile + GH Actions, EAS 아님). 추가 작업은 ①Xcode 프로젝트 경로 변경 ②**Android 레인 신설** 두 가지다.
 
 ### 3.10 이식하면 안 되는 것
 
@@ -211,14 +211,14 @@ SwiftUI iOS 킷(14,119 LOC)이 통째로 버려지는 게 아니다. **앱 익�
 
 ### 1.1 한눈에
 
-| 항목 | Mattermost | momo 시사점 |
+| 항목 | Mattermost | oort 시사점 |
 |---|---|---|
 | RN / React | **0.83.9 / 19.2.6**, New Arch **ON** | 우리도 동급으로 시작 |
 | 빌드 | **bare RN + expo-router + Expo 모듈 낱개**. `eas.json` 없음, `.expo/` 없음 | **EAS 없이도 Expo 모듈만 골라 쓴다**(§2) |
-| 릴리스 | fastlane(Matchfile) + GitHub Actions. Detox·Maestro E2E | momo도 fastlane 자산 있음(`docs/cicd/`) |
-| 상태관리 | **Redux 없음**(`createStore` 0건). WatermelonDB + `withObservables` + RxJS | momo는 react-query 유지가 더 단순(§1.5) |
-| 로컬 DB | WatermelonDB 0.28.1, **서버당 SQLite 1개**, 서버 스키마 v20·마이그레이션 19단계·모델 36개 | momo v0는 오프라인 캐시 없음 → **이 층 전체를 안 만든다** |
-| WS 전송 | **네이티브**(`@mattermost/react-native-network-client` = Alamofire/OkHttp3). `new WebSocket(` **0건** | momo는 centrifuge-js(JS) — 차이 주의(§1.3) |
+| 릴리스 | fastlane(Matchfile) + GitHub Actions. Detox·Maestro E2E | oort도 fastlane 자산 있음(`docs/cicd/`) |
+| 상태관리 | **Redux 없음**(`createStore` 0건). WatermelonDB + `withObservables` + RxJS | oort는 react-query 유지가 더 단순(§1.5) |
+| 로컬 DB | WatermelonDB 0.28.1, **서버당 SQLite 1개**, 서버 스키마 v20·마이그레이션 19단계·모델 36개 | oort v0는 오프라인 캐시 없음 → **이 층 전체를 안 만든다** |
+| WS 전송 | **네이티브**(`@mattermost/react-native-network-client` = Alamofire/OkHttp3). `new WebSocket(` **0건** | oort는 centrifuge-js(JS) — 차이 주의(§1.3) |
 | 네이티브 코드 | **Swift 12,059 + Kotlin 11,548 + ObjC 1,100 + Java 1,322 ≈ 26,000 LOC** | 규모의 상한선이지 우리 목표치가 아님(§1.6) |
 | 웹과 코드 공유 | **없음**(별도 레포, 서브모듈 없음, 타입도 각자 작성) | §3.6 결론과 일치 |
 
@@ -230,9 +230,9 @@ SwiftUI iOS 킷(14,119 LOC)이 통째로 버려지는 게 아니다. **앱 익�
 169 database/     160 utils/        145 actions/     132 routes/(expo-router)
  91 hooks/         49 client/        39 queries/      30 managers/   22 store/
 ```
-상단은 수평 레이어(`actions`/`client`/`components`/`database`/`queries`/`screens`), 그 안은 기능 폴더, 그리고 **`products/`는 자체 `database/models`·`actions`·`screens`를 갖는 수직 플러그인 모듈**이다. — momo의 `features/*` 구조와 궁합이 좋다.
+상단은 수평 레이어(`actions`/`client`/`components`/`database`/`queries`/`screens`), 그 안은 기능 폴더, 그리고 **`products/`는 자체 `database/models`·`actions`·`screens`를 갖는 수직 플러그인 모듈**이다. — oort의 `features/*` 구조와 궁합이 좋다.
 
-### 1.3 실시간 — momo와 가장 크게 갈리는 지점 ⚠️
+### 1.3 실시간 — oort와 가장 크게 갈리는 지점 ⚠️
 
 **Mattermost는 JS WebSocket을 쓰지 않는다.** 전송이 네이티브 모듈이다.
 
@@ -242,7 +242,7 @@ MAX_WEBSOCKET_FAILS = 7;  MIN_RETRY = 3_000;  MAX_RETRY = 300_000;  PING_INTERVA
 retryTime = Math.min(MIN_RETRY * connectFailCount, MAX_RETRY);   // fails > 7 이후 선형 백오프
 ```
 
-**seq 갭 처리 — momo와 철학이 다르다**:
+**seq 갭 처리 — oort와 철학이 다르다**:
 ```ts
 if (msg.seq !== this.serverSequence) {   // 갭 감지
     this.connectionId = ''; this.close(false);   // 끊고 재연결
@@ -252,7 +252,7 @@ this.serverSequence = msg.seq + 1;
 ```
 갭이 나면 **증분 리플레이가 아니라 REST 전량 재동기화**(`doReconnect()` → entry 플로우 재실행 → `operator.batchRecords(models,'doReconnect')` → 현재 화면 채널만 `fetchPostDataIfNeeded()`).
 
-> **momo는 이 지점에서 오히려 유리하다.** Centrifugo가 `recovered`/`hasRecoveredPublications`로 **증분 복구를 서버에서 제공**하고, momo는 이미 `createReplayGate`로 그 배치를 구분한다(실측: 25초 단절 후 8프레임 리플레이, `momowebqa` 2026-07-25). **Mattermost보다 정교한 것을 이미 갖고 있으니 버리지 말 것** — 이게 centrifuge-js를 RN에서 살려야 하는 이유다(§3.7).
+> **oort는 이 지점에서 오히려 유리하다.** Centrifugo가 `recovered`/`hasRecoveredPublications`로 **증분 복구를 서버에서 제공**하고, oort는 이미 `createReplayGate`로 그 배치를 구분한다(실측: 25초 단절 후 8프레임 리플레이, `momowebqa` 2026-07-25). **Mattermost보다 정교한 것을 이미 갖고 있으니 버리지 말 것** — 이게 centrifuge-js를 RN에서 살려야 하는 이유다(§3.7).
 
 **백그라운드 정책**(`app/managers/websocket_manager.ts`) — 그대로 베낄 만하다:
 - 백그라운드 진입 시 **즉시 끊지 않고 15초 유예**(`WAIT_TO_CLOSE`), 네이티브 통화 중이면 아예 안 끊음
@@ -260,7 +260,7 @@ this.serverSequence = msg.seq + 1;
 - 네트워크 타입 전환(VPN↔WiFi)은 강제 `closeAll()`
 - 서버가 여러 개면 재연결을 **5초씩 스태거**
 
-### 1.4 푸시 / NSE — momo ADR-0120과 거의 동형
+### 1.4 푸시 / NSE — oort ADR-0120과 거의 동형
 
 iOS `NotificationService.swift` 흐름:
 1. `postNotificationReceipt()` — 푸시 프록시에 ack
@@ -274,13 +274,13 @@ Android는 대칭 — `CustomPushNotification.kt`(Wix `react-native-notification
 
 JS측 푸시 등록 라이브러리 = **`react-native-notifications` (Wix) 5.2.2** (notifee 아님), 그것도 패치해서 씀(`patches/react-native-notifications+5.2.2.patch`).
 
-> **momo가 절약하는 부분**: Mattermost의 네이티브 코드가 큰 이유는 **NSE가 로컬 DB에 직접 써야 하기 때문**(REST 클라이언트 + DB writer를 플랫폼마다 네이티브로 중복 구현). **momo v0는 오프라인 DB가 없어 NSE가 fetch→표시만 하면 된다** — 그래서 momo의 기존 391 LOC(§3.9)로 충분하다. **오프라인 캐시를 도입하는 순간 이 비용이 따라온다는 것을 알고 결정할 것.**
+> **oort가 절약하는 부분**: Mattermost의 네이티브 코드가 큰 이유는 **NSE가 로컬 DB에 직접 써야 하기 때문**(REST 클라이언트 + DB writer를 플랫폼마다 네이티브로 중복 구현). **oort v0는 오프라인 DB가 없어 NSE가 fetch→표시만 하면 된다** — 그래서 oort의 기존 391 LOC(§3.9)로 충분하다. **오프라인 캐시를 도입하는 순간 이 비용이 따라온다는 것을 알고 결정할 것.**
 
-### 1.5 상태관리 — momo는 따라가지 말 것
+### 1.5 상태관리 — oort는 따라가지 말 것
 
 Mattermost는 `withObservables`(253개 파일)로 WatermelonDB 옵저버블을 컴포넌트에 주입한다. 도메인 데이터는 전부 DB, `app/store/*`(22개)는 RxJS `BehaviorSubject` 싱글턴으로 **비영속 UI 상태만** 보관.
 
-> **momo 권고: react-query 유지.** 이 아키텍처는 **오프라인 우선 + 멀티서버 SQLite**를 전제로 성립한다. momo v0는 둘 다 없다. `useInbox`·`useTimeline`·`useWorkSessions`(C군 1,820 LOC)를 그대로 가져가는 편이 싸고, 나중에 오프라인이 필요해지면 그때 WatermelonDB를 검토한다.
+> **oort 권고: react-query 유지.** 이 아키텍처는 **오프라인 우선 + 멀티서버 SQLite**를 전제로 성립한다. oort v0는 둘 다 없다. `useInbox`·`useTimeline`·`useWorkSessions`(C군 1,820 LOC)를 그대로 가져가는 편이 싸고, 나중에 오프라인이 필요해지면 그때 WatermelonDB를 검토한다.
 
 ### 1.6 타임라인 렌더링 — **"FlashList 쓰면 된다"는 틀렸다** ⚠️
 
@@ -295,13 +295,13 @@ Mattermost는 `withObservables`(253개 파일)로 WatermelonDB 옵저버블을 �
 그리고 결정적으로 — `patches/react-native+0.83.9.patch`가 **RN 자체의 Fabric 컴포넌트**를 패치한다:
 > `React/Fabric/Mounting/ComponentViews/ScrollView/RCTScrollViewComponentView.mm` — inverted 스크롤뷰의 `contentInset` 처리를 `maintainVisibleContentPosition` 오토스크롤 중에 고치는 패치
 
-> **momo 시사점: 채팅 타임라인의 어려움은 "가상화 성능"이 아니라 `inverted` + 스크롤 위치 보존이다.** 프로덕션 RN 메신저가 RN의 Fabric C++/ObjC++ 레이어까지 패치해야 했다. §3.8의 timeline 2,132 LOC 재작성 견적에 **이 리스크를 별도로 계상**해야 한다. Bluesky가 FlashList/LegendList를 둘 다 안 쓰는 것과 같은 결의 신호다.
+> **oort 시사점: 채팅 타임라인의 어려움은 "가상화 성능"이 아니라 `inverted` + 스크롤 위치 보존이다.** 프로덕션 RN 메신저가 RN의 Fabric C++/ObjC++ 레이어까지 패치해야 했다. §3.8의 timeline 2,132 LOC 재작성 견적에 **이 리스크를 별도로 계상**해야 한다. Bluesky가 FlashList/LegendList를 둘 다 안 쓰는 것과 같은 결의 신호다.
 
 ### 1.7 네이티브 모듈 목록 (무엇 때문에 네이티브가 필요했나)
 
-| 모듈 | 목적 | momo 필요? |
+| 모듈 | 목적 | oort 필요? |
 |---|---|---|
-| **Gekidou**(iOS Swift 패키지, ~43파일 5,607 LOC) | 푸시 fetch/검증/저장, NSE·share ext용 REST, 공유 DB 읽기쓰기, 이미지 캐시 | △ **일부만** — momo는 fetch/검증만(391 LOC 기존) |
+| **Gekidou**(iOS Swift 패키지, ~43파일 5,607 LOC) | 푸시 fetch/검증/저장, NSE·share ext용 REST, 공유 DB 읽기쓰기, 이미지 캐시 | △ **일부만** — oort는 fetch/검증만(391 LOC 기존) |
 | `@mattermost/react-native-network-client` | 네이티브 HTTP/WS(Alamofire/OkHttp3) | ❌ v0는 JS fetch + centrifuge-js |
 | `@mattermost/calls-native` | **PushKit + CallKit**(VoIP) | ✅ 허들에 필요(§5) |
 | `@mattermost/rnutils` | 화면방향 잠금, 폴더블 분할, 파일 실경로, 저장 | △ 첨부 시 |
@@ -325,20 +325,20 @@ Mattermost는 `withObservables`(253개 파일)로 WatermelonDB 옵저버블을 �
 | `pawicao/expo-nse-plugin` | 3 | 2026-04-26 | **범용 NSE 주입 플러그인** |
 | `LunatiqueCoder/expo-notifee-plugin` | 18 | 2024-10-29 | 정체 |
 
-> **판정: 기술적으로 막히지 않는다.** 다만 **범용 NSE 플러그인은 ★3짜리 개인 프로젝트**이고, 건강한 것(OneSignal)은 벤더 종속이다. momo는 **자체 Swift NSE 391 LOC**(§3.9)를 주입해야 하므로 커스텀 config plugin을 직접 쓰거나 유지해야 한다.
+> **판정: 기술적으로 막히지 않는다.** 다만 **범용 NSE 플러그인은 ★3짜리 개인 프로젝트**이고, 건강한 것(OneSignal)은 벤더 종속이다. oort는 **자체 Swift NSE 391 LOC**(§3.9)를 주입해야 하므로 커스텀 config plugin을 직접 쓰거나 유지해야 한다.
 
 ### 2.2 그래서 권고는 "완전 Expo"가 아니다
 
-**momo와 가장 가까운 프로덕션 메신저가 이미 답을 실행 중이다** — Mattermost는 `[SOURCE]`:
+**oort와 가장 가까운 프로덕션 메신저가 이미 답을 실행 중이다** — Mattermost는 `[SOURCE]`:
 - `eas.json` **없음**, `.expo/` **없음** → **EAS 미사용**
 - 그러나 `expo-router`로 파일 기반 라우팅, `expo-image`·`expo-file-system`·`expo-application`·`expo-splash-screen`을 **낱개로** 사용
 - 빌드는 **fastlane + GitHub Actions**
 
 즉 **"bare RN 프로젝트 + Expo 모듈을 라이브러리로 골라 쓰기"** 가 실전 표준이고, EAS나 managed workflow는 필수가 아니다.
 
-**momo에 이게 맞는 이유**
+**oort에 이게 맞는 이유**
 1. **NSE·딥링크·(v1)LiveKit** 모두 네이티브 프로젝트를 직접 만져야 한다. config plugin으로 우회할수록 디버깅 경로가 길어진다.
-2. **momo는 이미 fastlane + match + `release-ios.yml`을 갖고 있다**(§3.9) — EAS로 갈아탈 이유가 없고, 갈아타면 서명 인프라(`momo-signing` private repo)를 재구성해야 한다.
+2. **oort는 이미 fastlane + match + `release-ios.yml`을 갖고 있다**(§3.9) — EAS로 갈아탈 이유가 없고, 갈아타면 서명 인프라(`momo-signing` private repo)를 재구성해야 한다.
 3. 셀프호스팅 오픈소스 제품이라 **빌드가 특정 SaaS에 묶이지 않는 편이 낫다**(EAS는 유료 티어·큐 대기 존재).
 4. Expo 모듈 자체의 이점(`expo-image` 등)은 bare에서도 그대로 얻는다.
 
@@ -348,7 +348,7 @@ Mattermost는 `withObservables`(253개 파일)로 WatermelonDB 옵저버블을 �
 
 위 결론은 iOS·Android를 묶어 말했지만, §1의 자산 실측을 다시 겹쳐 보면 **두 플랫폼이 bare를 택하는 이유가 서로 다르다**:
 
-- **iOS**: §3.9가 이미 확인했듯 그린필드가 아니다 — NSE(62 LOC)·`PushNotification.swift`(329 LOC)·App Group·fastlane/match가 **이미 손으로 짜여 동작한다.** Expo config plugin의 가치는 "손으로 유지하던 네이티브 프로젝트를 선언적 스크립트로 대체"하는 것인데, momo iOS는 대체할 필요가 없는 걸 이미 갖고 있다 — plugin을 새로 짜는 건 순 이득이 아니라 **번역 비용**이다.
+- **iOS**: §3.9가 이미 확인했듯 그린필드가 아니다 — NSE(62 LOC)·`PushNotification.swift`(329 LOC)·App Group·fastlane/match가 **이미 손으로 짜여 동작한다.** Expo config plugin의 가치는 "손으로 유지하던 네이티브 프로젝트를 선언적 스크립트로 대체"하는 것인데, oort iOS는 대체할 필요가 없는 걸 이미 갖고 있다 — plugin을 새로 짜는 건 순 이득이 아니라 **번역 비용**이다.
 - **Android**: 선행 문서 §1이 확인했듯 완전한 그린필드다("파일 한 줄도 없다") — 지킬 기존 네이티브 자산이 0이므로, `npx expo prebuild --platform android`로 네이티브 프로젝트 뼈대를 부트스트랩해도 **잃을 게 없다.** `--platform` 플래그로 플랫폼 단위 prebuild가 가능하다는 건 실사용 확인됨 `[SOURCE]` — 실제 프로젝트(`deeeed/audiolab`)의 엔지니어링 노트가 `yarn expo prebuild --platform android`(및 `--clean` 유무 구분)를 실전 커맨드로 문서화한다.
 
 > **즉 "bare RN + Expo 모듈 낱개"라는 결론 자체는 그대로이되, Android 쪽만 `expo prebuild --platform android`로 초기 골격을 만들고 그 위에 손으로 얹어가는 것이 iOS를 100% 손으로 시작하는 것보다 부트스트랩 비용이 싸다.** 굳이 android/ 디렉터리를 처음부터 수작업으로 만들 이유가 없다 — 다만 이후 유지보수는 여전히 bare RN 프로젝트를 손으로 관리하는 것과 동일하다(재생성 가능한 CNG 관리형 워크플로로 계속 가져가진 않는다는 뜻).
@@ -376,7 +376,7 @@ Mattermost는 `withObservables`(253개 파일)로 WatermelonDB 옵저버블을 �
 
 ### 4.1 ✅ Centrifugo 클라이언트는 RN을 **공식 지원**한다 — 게이트 해소 `[OFFICIAL/SOURCE]`
 
-momo 실시간 층 전체(`lib/realtime.ts` 653 LOC + 리플레이 게이트)가 여기 걸려 있었다. **직접 확인 결과 통과다.**
+oort 실시간 층 전체(`lib/realtime.ts` 653 LOC + 리플레이 게이트)가 여기 걸려 있었다. **직접 확인 결과 통과다.**
 
 npm `centrifuge` 패키지 description 원문:
 > "JavaScript client SDK for bidirectional communication with Centrifugo and Centrifuge-based server from browser, NodeJS **and React Native**"
@@ -384,17 +384,17 @@ npm `centrifuge` 패키지 description 원문:
 | 항목 | 값 |
 |---|---|
 | 최신 | **5.7.0** (2026-06-15, 활발) |
-| momo 현재 | `^5.3.5` → 마이너 상향만 |
+| oort 현재 | `^5.3.5` → 마이너 상향만 |
 | 의존성 | `events`, `protobufjs` |
-| **protobuf** | **옵트인** — `centrifuge/build/protobuf`를 따로 import해야 활성. **momo는 JSON이므로 protobufjs 미로드** |
+| **protobuf** | **옵트인** — `centrifuge/build/protobuf`를 따로 import해야 활성. **oort는 JSON이므로 protobufjs 미로드** |
 
 **RN에서 주의할 점 2가지** `[OFFICIAL, README]`:
 1. **Android cleartext** — README가 명시: *"If you have issues with the connection on Android when using React Native – … you may be using non-secure endpoint schemes and need to explicitly allow it."*
-   → **momo에 직접 해당한다.** `lib/realtime.ts:220`에 이미 `ws://<machine>.local:28001/...`(mDNS LAN 서버) 경로가 있고, 셀프호스팅·LAN 발견이 제품 특성이다. Android는 `usesCleartextTraffic`/network security config를 열어야 하며, **이건 앱스토어/플레이 심사와 보안 정책이 얽히는 결정**이므로 티켓으로 분리할 것.
+   → **oort에 직접 해당한다.** `lib/realtime.ts:220`에 이미 `ws://<machine>.local:28001/...`(mDNS LAN 서버) 경로가 있고, 셀프호스팅·LAN 발견이 제품 특성이다. Android는 `usesCleartextTraffic`/network security config를 열어야 하며, **이건 앱스토어/플레이 심사와 보안 정책이 얽히는 결정**이므로 티켓으로 분리할 것.
 2. **WebSocket 주입** — 브라우저 밖에서는 WebSocket 구현을 넘겨줄 수 있다(커스텀 헤더가 필요할 때). RN에는 전역 `WebSocket`이 있으므로 기본은 그대로 동작할 것으로 보이나 **실측 필요**.
 
-> **결론: momo의 실시간 층은 centrifuge-js를 유지한다.** §3.7에서 짚은 대로 `createReplayGate`가 centrifuge-js 내부 flush 동작에 의존하므로, 네이티브 SDK로 갈아끼우면 재설계가 필요했다. 그럴 이유가 없어졌다.
-> **참고 대비**: Mattermost는 반대로 WS를 네이티브 모듈로 내렸다(§1.3). momo는 서버가 Centrifugo라 **증분 복구를 공짜로 얻으므로** JS 유지가 유리하다.
+> **결론: oort의 실시간 층은 centrifuge-js를 유지한다.** §3.7에서 짚은 대로 `createReplayGate`가 centrifuge-js 내부 flush 동작에 의존하므로, 네이티브 SDK로 갈아끼우면 재설계가 필요했다. 그럴 이유가 없어졌다.
+> **참고 대비**: Mattermost는 반대로 WS를 네이티브 모듈로 내렸다(§1.3). oort는 서버가 Centrifugo라 **증분 복구를 공짜로 얻으므로** JS 유지가 유리하다.
 
 ### 4.2 라이브러리 건강도 실측 (npm 레지스트리 직접 조회, 2026-07-26) `[SOURCE]`
 
@@ -409,9 +409,9 @@ npm `centrifuge` 패키지 description 원문:
 | `@notifee/react-native` | 9.1.8 | **2024-12-20** | 415k | ❌ **폐기됨** — `invertase/notifee` 레포 **archived**(아래 갱신). 신규 채택 제외 |
 | `react-native-notifications` (Wix) | 5.2.2 | 2025-11-16 | 34k | △ **Mattermost 채택분**(단 패치해서 씀). 다운로드는 적음 |
 
-> **푸시 라이브러리 선택은 열어둔다.** Mattermost 선례(Wix)와 생태계 대세(RN Firebase)가 갈리고, notifee는 정체 신호가 있다. **momo는 iOS NSE를 이미 Swift로 갖고 있어(§3.9) JS 라이브러리의 역할이 "토큰 등록 + 알림 액션 수신"으로 좁다** — 그래서 선택 리스크가 낮고, v0 스파이크에서 실측으로 정하면 된다.
+> **푸시 라이브러리 선택은 열어둔다.** Mattermost 선례(Wix)와 생태계 대세(RN Firebase)가 갈리고, notifee는 정체 신호가 있다. **oort는 iOS NSE를 이미 Swift로 갖고 있어(§3.9) JS 라이브러리의 역할이 "토큰 등록 + 알림 액션 수신"으로 좁다** — 그래서 선택 리스크가 낮고, v0 스파이크에서 실측으로 정하면 된다.
 
-> **갱신(같은 세션 후속 조사) — notifee는 "정체"가 아니라 공식 폐기됐다** `[SOURCE]`. `invertase/notifee`는 GitHub에서 **archived** 상태(코드 변경 없음, `pushed_at` 2026-04-07 이후 정지)이고 README 상단 배너 원문: *"Notifee is no longer actively maintained... We recommend that users migrate to expo-notifications for a supported experience within the React Native ecosystem. Alternatively, see the community-maintained fork react-native-notify-kit."* 라이선스는 여전히 Apache-2.0(완전 오픈소스로 남겨졌다 — "유료화"는 아니다). 대체 후보 `react-native-notify-kit`(2026-03 생성, ⭐175, 활발히 릴리스 중, 최신 10.5.0)는 아직 검증되지 않은 신생 포크다. **momo의 JS 푸시 라이브러리 후보는 사실상 두 갈래로 좁혀진다: `expo-notifications`(§2 채택 시, 공식·최다운로드 4,171k/주) 또는 `@react-native-firebase/messaging`(벤더 무관·858k/주) — Notifee 계열(원본·포크 모두)은 신규 채택 후보에서 제외 권고.**
+> **갱신(같은 세션 후속 조사) — notifee는 "정체"가 아니라 공식 폐기됐다** `[SOURCE]`. `invertase/notifee`는 GitHub에서 **archived** 상태(코드 변경 없음, `pushed_at` 2026-04-07 이후 정지)이고 README 상단 배너 원문: *"Notifee is no longer actively maintained... We recommend that users migrate to expo-notifications for a supported experience within the React Native ecosystem. Alternatively, see the community-maintained fork react-native-notify-kit."* 라이선스는 여전히 Apache-2.0(완전 오픈소스로 남겨졌다 — "유료화"는 아니다). 대체 후보 `react-native-notify-kit`(2026-03 생성, ⭐175, 활발히 릴리스 중, 최신 10.5.0)는 아직 검증되지 않은 신생 포크다. **oort의 JS 푸시 라이브러리 후보는 사실상 두 갈래로 좁혀진다: `expo-notifications`(§2 채택 시, 공식·최다운로드 4,171k/주) 또는 `@react-native-firebase/messaging`(벤더 무관·858k/주) — Notifee 계열(원본·포크 모두)은 신규 채택 후보에서 제외 권고.**
 
 ### 4.3 터미널 관전 — RN에 xterm.js 등가물은 **없다** (예상대로)
 
@@ -426,14 +426,14 @@ npm `centrifuge` 패키지 description 원문:
 | 패키지 | 최신 | 발행일 | 주간 DL | 백엔드 | 판정 |
 |---|---|---|---:|---|---|
 | `react-native-keychain` | 10.0.0 | 2025-03-23 | 529k | iOS Keychain / Android Keystore | ✅ §3.3 `session.ts` 키체인 가지 대체 1순위(bare 유지 시) |
-| `expo-secure-store` | 57.0.1 | 2026-07-15 | 4,171k | 동일(iOS `kSecClassGenericPassword` / Android Keystore+SharedPreferences) | ✅ à la carte로 채택 시 동급 대안. **iOS 값당 ~2048바이트 제한 이력 있음** `[OFFICIAL, docs.expo.dev/versions/latest/sdk/securestore]` — momo의 refresh token/짧은 키엔 무해하나 큰 payload는 금지 |
+| `expo-secure-store` | 57.0.1 | 2026-07-15 | 4,171k | 동일(iOS `kSecClassGenericPassword` / Android Keystore+SharedPreferences) | ✅ à la carte로 채택 시 동급 대안. **iOS 값당 ~2048바이트 제한 이력 있음** `[OFFICIAL, docs.expo.dev/versions/latest/sdk/securestore]` — oort의 refresh token/짧은 키엔 무해하나 큰 payload는 금지 |
 | `react-native-mmkv` | 4.3.2 | 2026-06-22 | 1,459k | 자체 AES-128/256, **키는 개발자가 직접 공급·관리** | ⚠️ **"암호화 스토리지"가 아니라 "빠른 로컬 KV + 옵션 암호화"**. `encryptionKey` 자체를 어딘가에 안전히 저장해야 하는데 그게 다시 시크릿 관리 문제로 되돌아간다 — **세션 토큰 등 진짜 시크릿의 1차 저장소로 쓰지 말 것.** §3.3의 `serverBase.ts`(서버 주소 기억) 같은 **비시크릿 로컬 캐시**엔 적합(§4.2에도 이미 그 용도로 등재) |
 
-> **momo 권고**: `session.ts`의 키체인 분기(§3.3, 이미 존재)는 `react-native-keychain`으로 치환. `react-native-mmkv`는 시크릿이 아닌 로컬 상태(서버 주소·UI 프리퍼런스)에 한정.
+> **oort 권고**: `session.ts`의 키체인 분기(§3.3, 이미 존재)는 `react-native-keychain`으로 치환. `react-native-mmkv`는 시크릿이 아닌 로컬 상태(서버 주소·UI 프리퍼런스)에 한정.
 
 ### 4.6 백그라운드 실행 — 상주 소켓은 없다, 있는 척하지 말 것 `[SOURCE]`
 
-momo v0가 오프라인 DB 없이 "포그라운드=centrifuge-js 소켓, 백그라운드=푸시"로 설계된 이유(§1.5)가 iOS 플랫폼 제약과 정확히 일치한다는 걸 재확인한다.
+oort v0가 오프라인 DB 없이 "포그라운드=centrifuge-js 소켓, 백그라운드=푸시"로 설계된 이유(§1.5)가 iOS 플랫폼 제약과 정확히 일치한다는 걸 재확인한다.
 
 | 라이브러리 | 최신 | 실제로 주는 것 |
 |---|---|---|
@@ -441,17 +441,17 @@ momo v0가 오프라인 DB 없이 "포그라운드=centrifuge-js 소켓, 백그�
 | `react-native-background-actions` | 4.1.0(2026-04-07, ⭐942) | Android 포그라운드 서비스 래퍼 — iOS엔 대응하는 지속 실행 개념이 없음 |
 | Headless JS(RN 코어) | — | **Android 전용.** 5초 타임아웃, foreground UI 접근 불가, 푸시 수신·짧은 동기화용 |
 
-**결론(문서로 못 돌릴 사실)**: iOS는 일반 앱(VoIP/파일전송 등 특수 백그라운드 모드 미보유)에 **상주 WebSocket을 허용하지 않는다.** 위 세 라이브러리 전부 "짧고 기회주의적인 깨우기"만 제공하고, 그마저 OS가 배터리/사용 패턴에 따라 조절한다 — **momo가 "폰이 백그라운드일 때 메시지가 왔다"를 알리는 유일하게 신뢰 가능한 경로는 푸시(§4.2 NSE 체인)이지 소켓 상주가 아니다.** §0(호스트 실행 위치 표시가 UX 요구사항인 이유)을 다시 뒷받침한다 — **"닫아도 계속됩니다"는 서버/작업호스트의 지속성 문제이지, 클라이언트 소켓을 안 죽이는 기술의 문제가 아니다.**
+**결론(문서로 못 돌릴 사실)**: iOS는 일반 앱(VoIP/파일전송 등 특수 백그라운드 모드 미보유)에 **상주 WebSocket을 허용하지 않는다.** 위 세 라이브러리 전부 "짧고 기회주의적인 깨우기"만 제공하고, 그마저 OS가 배터리/사용 패턴에 따라 조절한다 — **oort가 "폰이 백그라운드일 때 메시지가 왔다"를 알리는 유일하게 신뢰 가능한 경로는 푸시(§4.2 NSE 체인)이지 소켓 상주가 아니다.** §0(호스트 실행 위치 표시가 UX 요구사항인 이유)을 다시 뒷받침한다 — **"닫아도 계속됩니다"는 서버/작업호스트의 지속성 문제이지, 클라이언트 소켓을 안 죽이는 기술의 문제가 아니다.**
 
-### 4.7 리스트 가상화 — FlashList v2는 New Arch 전용, momo는 이미 New Arch다 `[SOURCE]`
+### 4.7 리스트 가상화 — FlashList v2는 New Arch 전용, oort는 이미 New Arch다 `[SOURCE]`
 
-§4.2 표의 `@shopify/flash-list` 행("△ 부차 리스트용")을 보강한다. **v2(현재 최신, 2.3.2)는 New Architecture 없이는 아예 동작하지 않는다** — 공식 마이그레이션 문서 원문: *"New architecture is required - v2 only works on top of React Native's new architecture."* momo는 처음부터 New Arch를 전제하므로(선행 문서 §4.2: "New Arch는 0.82+ 강제") 이 제약은 momo에 해당 사항 없음 — 오히려 v2는 `estimatedItemSize` 등 수동 튜닝 props를 없애고 `maintainVisibleContentPosition`을 **기본 활성화**해 채팅 인버티드 리스트에 유리한 방향으로 갔다.
+§4.2 표의 `@shopify/flash-list` 행("△ 부차 리스트용")을 보강한다. **v2(현재 최신, 2.3.2)는 New Architecture 없이는 아예 동작하지 않는다** — 공식 마이그레이션 문서 원문: *"New architecture is required - v2 only works on top of React Native's new architecture."* oort는 처음부터 New Arch를 전제하므로(선행 문서 §4.2: "New Arch는 0.82+ 강제") 이 제약은 oort에 해당 사항 없음 — 오히려 v2는 `estimatedItemSize` 등 수동 튜닝 props를 없애고 `maintainVisibleContentPosition`을 **기본 활성화**해 채팅 인버티드 리스트에 유리한 방향으로 갔다.
 
-그런데 §1.6이 이미 정직하게 지적했듯 **Mattermost의 메인 채팅 타임라인은 FlashList가 아니라 `Animated.FlatList`(inverted+`maintainVisibleContentPosition`)이고, 심지어 RN Fabric 자체를 패치해서 쓴다.** FlashList v2는 그 시점 이후 나온 옵션이라 Mattermost 판단에 반영되지 않았을 뿐, momo가 새로 짜는 입장에서는 재검토 대상이다.
+그런데 §1.6이 이미 정직하게 지적했듯 **Mattermost의 메인 채팅 타임라인은 FlashList가 아니라 `Animated.FlatList`(inverted+`maintainVisibleContentPosition`)이고, 심지어 RN Fabric 자체를 패치해서 쓴다.** FlashList v2는 그 시점 이후 나온 옵션이라 Mattermost 판단에 반영되지 않았을 뿐, oort가 새로 짜는 입장에서는 재검토 대상이다.
 
 세 번째 후보 `@legendapp/list`(v3.3.3, 2026-07-16, 주간 365k, ⭐3282)는 **채팅 UI를 1급 시나리오로 설계**했다 — README 원문: *"Bidirectional infinite lists: Supports infinite scrolling in both directions... Chat UIs without inverted: Chat UIs can align their content to the bottom... maintainScrollAtEnd... alignItemsAtEnd: Useful for chat UIs."* Expo 라이브스트림·React Native Radio 팟캐스트에 소개된 신생(2024-11 생성) 라이브러리로 FlashList(1,745k 주간)보다 훨씬 작지만 성장 중이다.
 
-> **momo 권고**: §7.1 스파이크 5(타임라인)에서 **FlashList v2와 LegendList를 둘 다 실측**할 것. FlashList는 다운로드/생태계 규모에서 안전패, LegendList는 "우리가 필요한 게 정확히 이것"이라는 설계 적합성에서 앞선다 — Mattermost가 검증한 건 어느 쪽도 아닌 순정 `FlatList`+Fabric 패치라는 점을 잊지 말 것(그 경로도 세 번째 후보로 열어 둔다).
+> **oort 권고**: §7.1 스파이크 5(타임라인)에서 **FlashList v2와 LegendList를 둘 다 실측**할 것. FlashList는 다운로드/생태계 규모에서 안전패, LegendList는 "우리가 필요한 게 정확히 이것"이라는 설계 적합성에서 앞선다 — Mattermost가 검증한 건 어느 쪽도 아닌 순정 `FlatList`+Fabric 패치라는 점을 잊지 말 것(그 경로도 세 번째 후보로 열어 둔다).
 
 ---
 
@@ -461,9 +461,9 @@ momo v0가 오프라인 DB 없이 "포그라운드=centrifuge-js 소켓, 백그�
 
 ### 5.1 상태 `[SOURCE]`
 
-| | RN SDK | Swift SDK (momo 현재) | Android SDK |
+| | RN SDK | Swift SDK (oort 현재) | Android SDK |
 |---|---|---|---|
-| 버전 | 2.12.0 (2026-07-23) | **2.15.2** (momo 핀) | 2.27.0 |
+| 버전 | 2.12.0 (2026-07-23) | **2.15.2** (oort 핀) | 2.27.0 |
 | 스타 / 열린이슈 | 281 / 20 | 432 / 19 | 351 / 78 |
 | 최근 푸시 | 2026-07-26 | 2026-07-17 | 2026-07-25 |
 
@@ -478,7 +478,7 @@ momo v0가 오프라인 DB 없이 "포그라운드=centrifuge-js 소켓, 백그�
 
 > 즉 "지금 된다"는 확실하지만 **"계속 되리라"는 보장이 없는 유일한 항목**이다. 추적 대상으로 명시할 것.
 
-### 5.3 momo가 아플 지점
+### 5.3 oort가 아플 지점
 
 | 항목 | 상태 |
 |---|---|
@@ -492,7 +492,7 @@ momo v0가 오프라인 DB 없이 "포그라운드=centrifuge-js 소켓, 백그�
 
 **RN 스택 결정을 되돌릴 이유는 아니다.** 그러나 허들만큼은 "RN이 네이티브 작업을 없애준다"가 성립하지 않는다 — CallKit·백그라운드 오디오·화면공유는 **어차피 Swift/Kotlin을 써야 하고**, RN은 그걸 감쌀 뿐이다.
 
-> **권고: 허들은 momo가 이미 가진 네이티브 자산을 살리는 쪽으로 설계한다.** `IOSHuddleLiveKitSession.swift`(+ macOS 대응물)가 이미 동작하므로, v1에서 **얇은 네이티브 모듈로 그 Swift 세션을 RN에 노출**하는 편이 순수 RN 재구현보다 안전하다. Shopify의 결론과 같은 결이다 — *"Think native **and** React Native."*
+> **권고: 허들은 oort가 이미 가진 네이티브 자산을 살리는 쪽으로 설계한다.** `IOSHuddleLiveKitSession.swift`(+ macOS 대응물)가 이미 동작하므로, v1에서 **얇은 네이티브 모듈로 그 Swift 세션을 RN에 노출**하는 편이 순수 RN 재구현보다 안전하다. Shopify의 결론과 같은 결이다 — *"Think native **and** React Native."*
 
 ---
 
@@ -516,10 +516,10 @@ momo v0가 오프라인 DB 없이 "포그라운드=centrifuge-js 소켓, 백그�
 
 **Airbnb 경고의 성격이 중요하다.** 2018년 구 아키텍처 시절 이야기라 기술적 불만(초기화 지연·비동기 렌더)은 Fabric이 상당수 해소했다. 그러나 **"플랫폼이 셋이 된다"는 조직/인력 논거는 아키텍처로 해결되지 않는다.** 그리고 이 비용은 팀이 작다고 줄지 않는다 — 오히려 **나눠 맡을 사람이 없어 비율상 더 나쁘다.**
 
-### 6.3 momo의 사실관계가 재작성을 가리킨다
+### 6.3 oort의 사실관계가 재작성을 가리킨다
 
 1. **Android가 0이다.** brownfield로 감쌀 기존 Android 앱이 아예 없다 → **Android는 어느 쪽을 골라도 그린필드 RN.** brownfield는 iOS 한쪽에만 적용되는데, 그러면 "iOS는 하이브리드, Android는 순수 RN"이라는 **비대칭 구조**가 생긴다. 이게 정확히 Airbnb가 말한 "세 번째 플랫폼"이다.
-2. **iOS 앱이 14,119 LOC로 유계다.** brownfield의 장점("건드리기 무서운 큰 네이티브 앱을 안 건드리고 점진 이행")은 Office/Shopify Mobile 급에서 값어치가 나온다. momo는 그 기준에 못 미친다 — 재작성이 **추정 가능한 유한 작업**이다.
+2. **iOS 앱이 14,119 LOC로 유계다.** brownfield의 장점("건드리기 무서운 큰 네이티브 앱을 안 건드리고 점진 이행")은 Office/Shopify Mobile 급에서 값어치가 나온다. oort는 그 기준에 못 미친다 — 재작성이 **추정 가능한 유한 작업**이다.
 3. **인력이 오너 1인 + 에이전트다.** Shopify·Microsoft가 brownfield를 지탱한 방식(전담 로테이션·전용 툴킷)을 재현할 수 없다. 에이전트는 코드 **양**은 감당해도 "이 크래시가 Fabric interop 문제냐 앱 로직이냐" 같은 판단을 대신하지 못한다.
 4. **본 리서치에서 소규모 팀이 brownfield로 성공한 문서화 사례를 찾지 못했다.** 전부 전담 모바일 인프라 인력을 가진 회사다.
 

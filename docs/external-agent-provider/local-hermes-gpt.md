@@ -26,9 +26,9 @@ scripts/local_gate.sh --profile external-agent-provider
 intended for a developer-run Hermes process that owns the GPT/OpenAI provider
 credential.
 
-momo still never owns GPT/OpenAI credentials. OpenAI API keys, Codex/OpenAI OAuth
+oort still never owns GPT/OpenAI credentials. OpenAI API keys, Codex/OpenAI OAuth
 access tokens, refresh tokens, provider account secrets, and provider refresh
-state belong in the Hermes process or its provider-owned secret store. momo only
+state belong in the Hermes process or its provider-owned secret store. oort only
 sees the Hermes-facing OpenAI-compatible `/v1/chat/completions` boundary plus the
 opaque `HERMES_API_KEY` used to authenticate to Hermes.
 
@@ -53,8 +53,8 @@ opaque `HERMES_API_KEY` used to authenticate to Hermes.
 - placeholder `HERMES_API_KEY` values for credentialed external-provider smoke
 - `CODEX_OAUTH_TOKEN`, `CODEX_ACCESS_TOKEN`, `CODEX_API_KEY`,
   `OPENAI_OAUTH_TOKEN`, `OPENAI_ACCESS_TOKEN`, `OPENAI_API_KEY`, or equivalent
-  provider credential env vars in the momo verifier process
-- any momo app/API/DB/evidence path that stores or prints GPT/OpenAI provider
+  provider credential env vars in the oort verifier process
+- any oort app/API/DB/evidence path that stores or prints GPT/OpenAI provider
   credentials
 
 ## Smoke Behavior
@@ -82,7 +82,7 @@ Hermes owns:
 - provider account unlink/revoke
 - provider-specific audit needed to rotate those credentials
 
-momo owns:
+oort owns:
 
 - workspace/member/channel identity
 - message order and `message.seq`
@@ -91,8 +91,8 @@ momo owns:
 - outbox and Centrifugo publish path
 - redacted provider availability/status projection
 
-The provider must not publish directly to Centrifugo or mutate momo DB state.
-All user-visible writes still enter through momo REST, Postgres, and outbox.
+The provider must not publish directly to Centrifugo or mutate oort DB state.
+All user-visible writes still enter through oort REST, Postgres, and outbox.
 
 ## Local Example
 
@@ -105,7 +105,7 @@ must stay in that provider runtime:
 hermes --host 127.0.0.1 --port 22683
 ```
 
-Run momo smoke without exporting any provider credential:
+Run oort smoke without exporting any provider credential:
 
 ```sh
 unset OPENAI_API_KEY OPENAI_OAUTH_TOKEN OPENAI_ACCESS_TOKEN OPENAI_REFRESH_TOKEN

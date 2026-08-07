@@ -18,14 +18,14 @@
 
 ### D1. 스택 = **bare React Native + Expo 모듈 낱개, EAS 미도입**
 - RN 0.83+/React 19, **New Architecture ON**. 레퍼런스 정합: Mattermost 0.83.9(New Arch, bare + expo-router + Expo 모듈 낱개, `eas.json` 없음, fastlane+GHA), Rocket.Chat 0.81.5.
-- **EAS를 쓰지 않는 이유**: momo는 이미 fastlane+match+`release-ios.yml`과 `momo-signing` private repo를 갖고 있다. EAS로 가면 서명 인프라를 재구성해야 하고, 셀프호스팅 오픈소스 제품의 빌드를 특정 SaaS에 묶는다. Expo 모듈의 이점은 bare에서도 그대로 얻는다.
+- **EAS를 쓰지 않는 이유**: oort는 이미 fastlane+match+`release-ios.yml`과 `momo-signing` private repo를 갖고 있다. EAS로 가면 서명 인프라를 재구성해야 하고, 셀프호스팅 오픈소스 제품의 빌드를 특정 SaaS에 묶는다. Expo 모듈의 이점은 bare에서도 그대로 얻는다.
 - **플랫폼별로 이유가 다르다(정밀화)**: **iOS는 bare 유지** — NSE 62줄 + `PushNotification.swift` 329줄 + App Group + fastlane/match가 **이미 손으로 짜여 동작한다**. config plugin의 가치는 "손으로 유지하던 네이티브 프로젝트를 선언적으로 대체"인데, 대체할 필요 없는 것을 이미 가졌으므로 plugin 작성은 순 이득이 아니라 **번역 비용**이다. **Android는 `expo prebuild --platform android`로 골격만 부트스트랩** — 지킬 기존 자산이 0이라 잃을 게 없고, 이후 유지보수는 bare와 동일하게 간다(CNG 관리형으로 계속 끌고 가지 않는다).
 - 2026년에는 `expo` 의존 유무가 bare/managed 이분법의 기준이 아니다(실사용 페어링: Bluesky Expo 54/RN 0.81.5 · Mattermost Expo ^55/RN 0.83.9 · Rocket.Chat Expo ^54/RN 0.81.5 · MetaMask Expo ^55/RN 0.83.6).
 - 대안 기각: Tauri 모바일(§Context 5), Capacitor(silent push 미지원), Flutter(우리 TS/React 자산과 공유 0 — buzz가 그 길을 갔고 코드 공유가 0이다), KMP(UI 2벌은 우리 인력으로 불가).
 
 ### D2. 이행 방식 = **전량 재작성** (brownfield 기각)
 - brownfield 자체는 방치된 길이 아니다(RN 공식 문서가 New Arch 기본, Callstack `react-native-brownfield` v5.0.0이 2026-07-23 릴리스). **그러나 성공 사례가 전부 대기업이고, 소규모 팀 사례를 찾지 못했다.**
-- momo 사실관계가 재작성을 가리킨다: ①**Android가 0** → brownfield는 iOS에만 걸려 "iOS 하이브리드 / Android 순수 RN"이라는 비대칭을 만든다(= Airbnb가 철수 사유로 든 "플랫폼이 셋이 된다") ②iOS 14,119줄로 **유계** — brownfield의 값어치는 Office/Shopify Mobile 급에서 나온다 ③**오너 1인 + 에이전트** — 에이전트는 코드 양은 감당해도 "이 크래시가 Fabric interop이냐 앱 로직이냐"를 판단하지 못한다.
+- oort 사실관계가 재작성을 가리킨다: ①**Android가 0** → brownfield는 iOS에만 걸려 "iOS 하이브리드 / Android 순수 RN"이라는 비대칭을 만든다(= Airbnb가 철수 사유로 든 "플랫폼이 셋이 된다") ②iOS 14,119줄로 **유계** — brownfield의 값어치는 Office/Shopify Mobile 급에서 나온다 ③**오너 1인 + 에이전트** — 에이전트는 코드 양은 감당해도 "이 크래시가 Fabric interop이냐 앱 로직이냐"를 판단하지 못한다.
 - Airbnb 경고의 기술 부분(초기화 지연·비동기 렌더)은 Fabric이 상당수 해소했으나, **"플랫폼이 셋이 된다"는 조직 논거는 아키텍처로 해결되지 않고 팀이 작을수록 비율상 더 나쁘다.**
 
 ### D3. **`packages/momo-core` 모노레포 — 순수 로직만, npm workspaces**
@@ -42,12 +42,12 @@
 
 ### D4. 실시간층 = **centrifuge-js 유지** (Mattermost와 의도적으로 갈라짐)
 - centrifuge npm이 React Native를 공식 지원 대상으로 명시(오케스트레이터 확인, 5.7.0). 우리는 `^5.3.5` → 마이너 상향.
-- Mattermost는 WS를 네이티브 모듈로 내렸고 **갭 감지 시 REST 전량 재동기화**를 한다. **momo는 여기서 더 정교하다** — Centrifugo가 `recovered`/`hasRecoveredPublications`로 증분 복구를 주고 우리 `createReplayGate`가 그 배치를 구분한다(실측: 25초 단절 후 8프레임 리플레이). **버릴 이유가 없는 자산이다.**
+- Mattermost는 WS를 네이티브 모듈로 내렸고 **갭 감지 시 REST 전량 재동기화**를 한다. **oort는 여기서 더 정교하다** — Centrifugo가 `recovered`/`hasRecoveredPublications`로 증분 복구를 주고 우리 `createReplayGate`가 그 배치를 구분한다(실측: 25초 단절 후 8프레임 리플레이). **버릴 이유가 없는 자산이다.**
 - 백그라운드 정책은 Mattermost를 베낀다: 백그라운드 진입 시 즉시 끊지 않고 **15초 유예**, 포그라운드 복귀 시 재개, 네트워크 타입 전환은 강제 재연결.
 - **Android cleartext는 티켓 분리**: 우리는 `ws://<machine>.local:28001`(mDNS LAN) 경로가 있고 셀프호스팅이 제품 특성이라 network security config를 열어야 하는데, 보안·심사와 얽힌다.
 
 ### D5. v0 범위 = **관전·승인·대화** (데스크톱 축소판이 아니다)
-- 성재 통찰("gpt·claude 앱의 원격 지원이 만족도가 높다")을 설계 축으로 채택. momo는 마침 관전 패널·승인 원장·작업중 표시를 갖췄다.
+- 성재 통찰("gpt·claude 앱의 원격 지원이 만족도가 높다")을 설계 축으로 채택. oort는 마침 관전 패널·승인 원장·작업중 표시를 갖췄다.
 - v0 UI 실측 ≈**4,575줄 상당**(auth 453 + sidebar 641 + timeline 2,132 + chat 835 + inbox 514). 그나마 "포팅"이 아니라 **같은 모델(A군) 위에 RN 뷰를 새로 얹는 것**이다.
 - v0 제외: 설정 3,387(운영자 표면은 데스크톱) · 채널/디렉터리 관리 · 업데이트(스토어 담당) · **터미널 raw PTY**.
 - **터미널 관전은 강등한다**: RN에 xterm.js 등가물이 없고, WebView 우회를 해도 **폰에서 80컬럼을 읽는 문제가 남는다**. `WorkPanel`의 타입드 행 아코디언으로 대체하고 raw PTY는 "데스크톱에서 열기"로 넘긴다.

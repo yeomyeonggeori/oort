@@ -6,9 +6,9 @@
 ## 결론 요약 (5줄)
 
 1. **고민①(cowork)은 이미 ADR-0126으로 절반 실행 중**(D1 관전 attach 랜딩) — 잔여는 D2(diff 카드)·D3(앵커 코멘트)·D4(워크스페이스 소유 세션)의 v1 승격과 웹 관전. 새 설계 불요, 실행 순서 결정만 필요.
-2. **고민②(외부 에이전트 호스팅)는 8할 준비돼 있다** — codex-workbench가 "Hermes SDK 없이 gateway 계약만으로 임의 에이전트 연결"을 실증. 막힘은 3곳뿐(work tool의 gateway 미노출·도구 화이트리스트 하드코딩·셀프온보딩 부재). **ACP(Zed Agent Client Protocol) 클라이언트 1개를 구현하면 레지스트리의 40+ 코딩 에이전트가 즉시 momo 멤버 후보**가 된다. → ADR-0130 후보.
-3. **고민③(새 규격)의 공백은 실재한다** — "멀티파티 영속 대화 공간의 에이전트 멤버십 레이어"는 2026-07 현재 어떤 공개 규격도 다루지 않는다(Slack은 독점 API로, OpenClaw는 프로토콜 없는 제품으로 채우는 중). 전략은 **이중**: ACP 클라이언트로 즉시 호환 + momo 구현에서 추출한 얇은 "Agent Membership Protocol" 스펙 제안(구현 먼저, 스펙은 결과물 — MCP 승리 공식). 창은 12~18개월로 추정.
-4. **고민④(컨텍스트/메모리)가 최대 갭이자 최대 기회** — Context Packet/Memory Plane/Capability Cache의 규범 스펙·fixture는 2026-06에 이미 정본화됐으나(research/11) **런타임이 통째로 비어 있다**(packet 5필드 partial·mock grants·메모리 테이블 0·pgvector 부재). 외부 지형 리서치 결론: PG-native 자체구현이 momo 불변식과 유일하게 양립(그래프DB는 라이선스 전멸 지대, Hindsight가 PG 단일 실증). → ADR-0129 후보.
+2. **고민②(외부 에이전트 호스팅)는 8할 준비돼 있다** — codex-workbench가 "Hermes SDK 없이 gateway 계약만으로 임의 에이전트 연결"을 실증. 막힘은 3곳뿐(work tool의 gateway 미노출·도구 화이트리스트 하드코딩·셀프온보딩 부재). **ACP(Zed Agent Client Protocol) 클라이언트 1개를 구현하면 레지스트리의 40+ 코딩 에이전트가 즉시 oort 멤버 후보**가 된다. → ADR-0130 후보.
+3. **고민③(새 규격)의 공백은 실재한다** — "멀티파티 영속 대화 공간의 에이전트 멤버십 레이어"는 2026-07 현재 어떤 공개 규격도 다루지 않는다(Slack은 독점 API로, OpenClaw는 프로토콜 없는 제품으로 채우는 중). 전략은 **이중**: ACP 클라이언트로 즉시 호환 + oort 구현에서 추출한 얇은 "Agent Membership Protocol" 스펙 제안(구현 먼저, 스펙은 결과물 — MCP 승리 공식). 창은 12~18개월로 추정.
+4. **고민④(컨텍스트/메모리)가 최대 갭이자 최대 기회** — Context Packet/Memory Plane/Capability Cache의 규범 스펙·fixture는 2026-06에 이미 정본화됐으나(research/11) **런타임이 통째로 비어 있다**(packet 5필드 partial·mock grants·메모리 테이블 0·pgvector 부재). 외부 지형 리서치 결론: PG-native 자체구현이 oort 불변식과 유일하게 양립(그래프DB는 라이선스 전멸 지대, Hindsight가 PG 단일 실증). → ADR-0129 후보.
 5. **Blaxel은 명시 기각이 아니라 미파일럿**(E2B가 파일럿으로 승리). 프로비저너가 provider-불가지 설계라 **2nd 기질 후보 + 가격 협상 레버리지**로 정확히 들어맞는다. CTO 유휴 질문의 답: **E2B·Blaxel 모두 메모리+FS 보존 상태로 0-컴퓨트 반납 후 재개 가능**. 차이는 보관비 — E2B는 미명문화(계약 명문화 필요), Blaxel은 $0.20/GB-월 명시. 세션당 월 원가 $1~3으로 크레딧 BM 마진은 충분.
 
 ---
@@ -32,23 +32,23 @@
 - **B. 도구 화이트리스트 하드코딩** — `["claude","codex","opencode","shell"]`이 서버(`WorkControlRoutes.swift:507`)·mac 앱·workd 3곳에 고정. ADR-0114 D7의 "임의 셸/도구-불가지 프로파일" 설계와 코드가 불일치. kimi/grok/pi를 붙이려면 3곳 수정 — **work_tool 프로파일 원장(서버 테이블+capability 검증)으로 승격 필요**.
 - **C. 셀프 온보딩 부재** — A2A Agent Card/`agents/announce`(MOMO-313)가 blocked. 수동 등록만 가능.
 
-**핵심 제안 — ACP 클라이언트(19-02 §4 옵션 A)**: 2026-07 현재 코딩 에이전트 생태계는 **ACP(Zed)로 수렴 중**(Gemini CLI·opencode·Kimi CLI·Goose·Qwen·Cline 네이티브 + Claude Code·Codex 공식 어댑터 + Registry 배포). momo가 에이전트별 어댑터 N개를 만드는 대신 **ACP 클라이언트 1개("momo-acp-host")를 work host 계층에 구현**하면:
-- ACP `session/update`(진행·plan) → 세션 스레드 카드, `session/request_permission` → momo 승인 카드, `terminal/*` → 기존 PTY 세션 매니저, ACP 세션 → work_session 원장 — **어휘가 거의 1:1 매핑**된다(19-02 §1.4).
-- 비-에디터 ACP 클라이언트 선례 존재(marimo 노트북·Toad 터미널). momo는 "메신저형 ACP 클라이언트"의 첫 선례가 된다 — §3 규격 제안의 실탄.
+**핵심 제안 — ACP 클라이언트(19-02 §4 옵션 A)**: 2026-07 현재 코딩 에이전트 생태계는 **ACP(Zed)로 수렴 중**(Gemini CLI·opencode·Kimi CLI·Goose·Qwen·Cline 네이티브 + Claude Code·Codex 공식 어댑터 + Registry 배포). oort가 에이전트별 어댑터 N개를 만드는 대신 **ACP 클라이언트 1개("momo-acp-host")를 work host 계층에 구현**하면:
+- ACP `session/update`(진행·plan) → 세션 스레드 카드, `session/request_permission` → oort 승인 카드, `terminal/*` → 기존 PTY 세션 매니저, ACP 세션 → work_session 원장 — **어휘가 거의 1:1 매핑**된다(19-02 §1.4).
+- 비-에디터 ACP 클라이언트 선례 존재(marimo 노트북·Toad 터미널). oort는 "메신저형 ACP 클라이언트"의 첫 선례가 된다 — §3 규격 제안의 실탄.
 - Grok Build만 ACP 미확인 — 헤드리스 `-p`로 별도 어댑터 또는 보류.
 
-**ADR-0130 결정 구조(안)**: D1 ACP 클라이언트 채택 범위(momo-acp-host를 workd/앱 세션 매니저에 통합) / D2 work tool gateway 노출(막힘 A) / D3 work_tool 프로파일 원장(막힘 B) / D4 Agent Card 셀프 온보딩(막힘 C — MOMO-313 승계, A2A v1.0 Agent Card 정합) / D5 대화 멤버용 표준 어댑터 템플릿 공개(codex-workbench 일반화 — 오픈소스 공개 시 "momo에 아무 에이전트나 붙이는 법" 문서).
+**ADR-0130 결정 구조(안)**: D1 ACP 클라이언트 채택 범위(momo-acp-host를 workd/앱 세션 매니저에 통합) / D2 work tool gateway 노출(막힘 A) / D3 work_tool 프로파일 원장(막힘 B) / D4 Agent Card 셀프 온보딩(막힘 C — MOMO-313 승계, A2A v1.0 Agent Card 정합) / D5 대화 멤버용 표준 어댑터 템플릿 공개(codex-workbench 일반화 — 오픈소스 공개 시 "oort에 아무 에이전트나 붙이는 법" 문서).
 
 ## §3. 고민③ 새 규격 제안 — 공백은 실재, 순서가 생명
 
-**리서치 결론(19-02)**: 런타임 레이어는 포화(툴=MCP·호스팅=ACP·원격 호출=A2A·프론트 스트리밍=AG-UI). 그러나 **"방 멤버십·컨텍스트 권한 스코프·멀티파티 승인·스레드 진행 게시·방의 영속 산출물"은 전부 공백**. 이 공백을 채우는 것은 Slack(독점 API)과 OpenClaw(프로토콜 없는 제품, 보안 참사)뿐 — OpenClaw 사고는 "승인·감사·격리 기본값 있는 규격" 수요의 방증이자 momo 차별화 논거.
+**리서치 결론(19-02)**: 런타임 레이어는 포화(툴=MCP·호스팅=ACP·원격 호출=A2A·프론트 스트리밍=AG-UI). 그러나 **"방 멤버십·컨텍스트 권한 스코프·멀티파티 승인·스레드 진행 게시·방의 영속 산출물"은 전부 공백**. 이 공백을 채우는 것은 Slack(독점 API)과 OpenClaw(프로토콜 없는 제품, 보안 참사)뿐 — OpenClaw 사고는 "승인·감사·격리 기본값 있는 규격" 수요의 방증이자 oort 차별화 논거.
 
 **채택 역학의 교훈(19-02 §3)**: 성공 공식 = 실제 제품에서 추출한 최소 스펙 + 1·2위 에이전트 어댑터를 제안자가 직접 출하 + 상세 문서 + 락인 의심 제거(permissive·재단 기증 경로) + 두 번째 대형 채택자. **"규격 먼저"는 전패**(IBM ACP·ANP·NLWeb) — 규격은 제품 성공의 결과다.
 
 **전략(이중, 순차)**:
 1. **지금**: ADR-0130(ACP 클라이언트)으로 기존 표준에 올라탄다 — 즉시 40+ 에이전트 호환 + "메신저형 ACP 클라이언트" 선례 확보.
-2. **momo 제품 질량 확보 후(오픈소스 공개+실사용 워크스페이스)**: momo의 기존 프리미티브(member.kind='agent'·Context Packet·승인 원장·세션=스레드·observer capability)에서 **"Agent Membership Protocol"(가칭) 얇은 스펙 초안 추출** — 방/멤버/컨텍스트 스코프/승인/진행/산출물의 최소 어휘 + "로컬 에이전트=ACP 세션, 원격 에이전트=A2A 태스크로 바인딩" 매핑 장. Claude Code·Codex·opencode 어댑터 3종 동시 출하, Apache-2.0, AAIF 기증 경로 명시.
-3. **시간 창**: MCP Apps+Tasks가 2027년경 이 방향으로 자랄 수 있고 Slack이 독점 API로 선점 중 — 12~18개월 추정. 단 이 창은 "규격 발표"의 창이지 momo 실행의 데드라인이 아님.
+2. **oort 제품 질량 확보 후(오픈소스 공개+실사용 워크스페이스)**: oort의 기존 프리미티브(member.kind='agent'·Context Packet·승인 원장·세션=스레드·observer capability)에서 **"Agent Membership Protocol"(가칭) 얇은 스펙 초안 추출** — 방/멤버/컨텍스트 스코프/승인/진행/산출물의 최소 어휘 + "로컬 에이전트=ACP 세션, 원격 에이전트=A2A 태스크로 바인딩" 매핑 장. Claude Code·Codex·opencode 어댑터 3종 동시 출하, Apache-2.0, AAIF 기증 경로 명시.
+3. **시간 창**: MCP Apps+Tasks가 2027년경 이 방향으로 자랄 수 있고 Slack이 독점 API로 선점 중 — 12~18개월 추정. 단 이 창은 "규격 발표"의 창이지 oort 실행의 데드라인이 아님.
 
 **내부 정합**: 이 방향은 research/13-redesign의 기존 결정("MCP+A2A+AG-UI 삼각 채택, 에이전트 프리미티브를 표준 위에")과 충돌하지 않고 그 공개-표면화다. 단 13-redesign의 "ACP 무시" 판정은 **IBM ACP(소멸) 기준이었음** — Zed ACP는 별개 프로토콜로 재평가가 필요하다(이번 리서치가 그 재평가).
 
@@ -56,14 +56,14 @@
 
 **현재 좌표(실사 19-00)**: 스펙(research/11 04~06 — Context Packet 16필드·Memory Plane 6타입·Capability Cache 4-kind, 전부 RLS FORCE 전제)과 fixture는 완비. 런타임은 ①same-channel 히스토리 창 조립 ②ILIKE 검색 ③plugin grant 정적 projection뿐. **Memory Plane 테이블 0개, pgvector/FTS 부재, packet은 5필드 partial + mock tool_grants, 서빙 감사 인스펙터 없음.**
 
-**외부 지형 결론(19-03)**: ①업계 수렴 패턴 — 2-phase 추출(ADD/UPDATE/DELETE/NOOP)·삭제 대신 시간축 무효화(invalid_at)·프로필 상시 주입+사실 질의 시 조립·workspace→user→agent→session 4단 스코프(momo RLS와 자연 동형) ②그래프 전용 DB는 라이선스 전멸(Neo4j GPLv3/FalkorDB SSPL/Kuzu 사망) — **PG-native가 유일한 permissive 경로이고 Hindsight(MIT, 18.6k)가 PG 단일 실증** ③사이드카(mem0 서버 등)는 제2의 SoT를 만들어 momo 하드 룰과 정면 충돌 → **권고: PG 내장 자체구현 + 검증된 오픈 패턴 이식**.
+**외부 지형 결론(19-03)**: ①업계 수렴 패턴 — 2-phase 추출(ADD/UPDATE/DELETE/NOOP)·삭제 대신 시간축 무효화(invalid_at)·프로필 상시 주입+사실 질의 시 조립·workspace→user→agent→session 4단 스코프(oort RLS와 자연 동형) ②그래프 전용 DB는 라이선스 전멸(Neo4j GPLv3/FalkorDB SSPL/Kuzu 사망) — **PG-native가 유일한 permissive 경로이고 Hindsight(MIT, 18.6k)가 PG 단일 실증** ③사이드카(mem0 서버 등)는 제2의 SoT를 만들어 oort 하드 룰과 정면 충돌 → **권고: PG 내장 자체구현 + 검증된 오픈 패턴 이식**.
 
 **ADR-0129 결정 구조(안) — "Memory Plane & Context Fabric 런타임"**:
 - **D1 저장**: research/11 05 §15의 `memory_item`/`memory_source_ref`/`memory_visibility_grant`/`memory_lifecycle_event` 스키마 승계, workspace_id+RLS FORCE, 스코프 4단(workspace/member/agent/conversation).
 - **D2 추출 파이프라인**: outbox 소비 비동기 워커(단일 쓰기경로 유지) — mem0 2-phase + Graphiti invalid_at 무효화(조직 메모리는 삭제 대신 무효화=감사가능성). 추출 LLM 호출은 BYOA 경계 준수(워크스페이스 지정 에이전트/로컬 모델로 — provider 자격증명 비유입).
 - **D3 검색 스택**: **pgvector 도입**(v0.8.5, PostgreSQL License — permissive 통과) + tsvector FTS + RRF 하이브리드. 스택 추가라 Accepted ADR 필수. 부수 효과: 메시지 검색도 ILIKE→FTS 승격 경로 열림.
 - **D4 서빙**: Context Packet v0 실장과 결합 — partial projection을 불변 packet(packet_id/expires_at/**memory_refs**/budget/redactions)으로 승격, 프로필 블록 상시 주입+사실/에피소드 질의 시 조립+토큰 예산.
-- **D5 가시성(momo 차별화)**: 워크스페이스 메모리를 **채널처럼 브라우징하는 1급 표면** — "에이전트가 아는 것" 뷰 + **각 항목의 출처 메시지 역링크**(메신저만 가능한 지점, OpenMemory/ChatGPT/Claude 어디에도 없음) + 편집/무효화 이력 + 관리자 정책 스위치(ChatGPT Enterprise 선례: 기본 off·끄면 삭제) + run별 "무엇이 서빙됐나" 인스펙터(MOMO-171 승계).
+- **D5 가시성(oort 차별화)**: 워크스페이스 메모리를 **채널처럼 브라우징하는 1급 표면** — "에이전트가 아는 것" 뷰 + **각 항목의 출처 메시지 역링크**(메신저만 가능한 지점, OpenMemory/ChatGPT/Claude 어디에도 없음) + 편집/무효화 이력 + 관리자 정책 스위치(ChatGPT Enterprise 선례: 기본 off·끄면 삭제) + run별 "무엇이 서빙됐나" 인스펙터(MOMO-171 승계).
 - **D6 에이전트 쓰기 경로**: Anthropic memory tool 책임 분리 이식 — 에이전트는 자기 스코프 메모리를 tool로 읽고 제안하되, **저장·권한·무효화는 서버 집행**(위험 쓰기=승인 정지점 준수).
 - **선결 관계**: D4(packet 실장)가 D1~D3의 소비자이므로 packet 승격을 같은 ADR에 포함하거나 선행 배치로. 기존 gap-audit(research/14)의 "승인된 보안 ADR → Capability/Context/Memory foundation" 크리티컬 패스와 일치.
 
@@ -73,9 +73,9 @@
 
 **현재 좌표**: ADR-0125 D3에서 Blaxel은 후보군 표기(17-00 §1: "무제한 0-컴퓨트 스탠바이·25ms 재개")였고 파일럿은 E2B만 실시 → E2B 확정. **명시 기각 아님.** 프로비저너는 기질-불가지 인터페이스로 설계됨(D3-A) — 2nd provider 슬롯이 구조적으로 존재.
 
-**CTO 질문 직답(19-04 §1)**: "유휴 반납 후 데이터 유지+재개" — **E2B·Blaxel·Morph는 메모리+FS 풀 스냅샷으로 가능**(Daytona/Vercel은 FS만, Modal/Cloudflare는 부적합). 보관비: E2B는 **공식 문서에 과금 조항이 없어 사실상 무료이나 미명문화**(재판매 규모에서는 Enterprise 계약에 보관 단가·보존 보장 명문화 필요), Blaxel은 **$0.20/GB-월 명시**(Tier0=7일·Tier1=30일 TTL). 시산: 대표 시나리오(활성 30분/일×22일, 스냅샷 5GB)에서 세션당 월 원가 **E2B ≈$1.82(+Pro 고정비 상각) vs Blaxel ≈$2.82** — 크레딧 판가 대비 무시 가능 수준. **가격 산정의 실질 변수는 활성 컴퓨트가 아니라 (a)스냅샷 보관×휴면 롱테일 (b)고정비 상각 (c)보존 기한 정책** → momo 요금제에 "휴면 N일 후 아카이브" 정책을 넣으면 보관 원가 캡핑.
+**CTO 질문 직답(19-04 §1)**: "유휴 반납 후 데이터 유지+재개" — **E2B·Blaxel·Morph는 메모리+FS 풀 스냅샷으로 가능**(Daytona/Vercel은 FS만, Modal/Cloudflare는 부적합). 보관비: E2B는 **공식 문서에 과금 조항이 없어 사실상 무료이나 미명문화**(재판매 규모에서는 Enterprise 계약에 보관 단가·보존 보장 명문화 필요), Blaxel은 **$0.20/GB-월 명시**(Tier0=7일·Tier1=30일 TTL). 시산: 대표 시나리오(활성 30분/일×22일, 스냅샷 5GB)에서 세션당 월 원가 **E2B ≈$1.82(+Pro 고정비 상각) vs Blaxel ≈$2.82** — 크레딧 판가 대비 무시 가능 수준. **가격 산정의 실질 변수는 활성 컴퓨트가 아니라 (a)스냅샷 보관×휴면 롱테일 (b)고정비 상각 (c)보존 기한 정책** → oort 요금제에 "휴면 N일 후 아카이브" 정책을 넣으면 보관 원가 캡핑.
 
-**"사용자에게 원격 샌드박스 온디맨드 대여+크레딧" BM**: 이미 ADR-0125 D5(work_pool 슬롯)+D7(워크스페이스 과금: 동시 슬롯 N+월 활성시간 H+초과 종량)이 그 설계다. 리서치가 더한 것: **Devin ACU 선례(이종 원가를 단일 크레딧으로 합성+활성 15분 앵커) / upper bound는 "동시 세션+최대 시간"으로, 크레딧은 활성 사용량에만 연동 / Manus가 E2B 재판매 크레딧 BM의 스케일 실증**. momo Cloud 프로비저너 ADR(0125 예약분)에서 크레딧 단위를 이 문법으로 설계 권고.
+**"사용자에게 원격 샌드박스 온디맨드 대여+크레딧" BM**: 이미 ADR-0125 D5(work_pool 슬롯)+D7(워크스페이스 과금: 동시 슬롯 N+월 활성시간 H+초과 종량)이 그 설계다. 리서치가 더한 것: **Devin ACU 선례(이종 원가를 단일 크레딧으로 합성+활성 15분 앵커) / upper bound는 "동시 세션+최대 시간"으로, 크레딧은 활성 사용량에만 연동 / Manus가 E2B 재판매 크레딧 BM의 스케일 실증**. oort Cloud 프로비저너 ADR(0125 예약분)에서 크레딧 단위를 이 문법으로 설계 권고.
 
 **Blaxel 협업 전략(권고)**:
 1. E2B 유지(파일럿 실증 자산). Blaxel은 **프로비저너 2nd 기질 후보로 등재** — 멀티 provider는 가격 협상 레버리지이자 리전 커버리지 보완.
@@ -92,7 +92,7 @@
 | R2 | `tool_grants`가 하드코딩 mock(`mock-github`) — packet이 사실이 아닌 grant를 주장 | `MessageRoutes.swift:2062-2073` | dogfood 한정 무해하나 ADR-0113 실주입 전 제거 필수. 0129 D4에 포함 |
 | R3 | work tool 화이트리스트 하드코딩(서버·앱·workd 3곳) vs ADR-0114 D7 "도구-불가지 프로파일" 설계 | `WorkControlRoutes.swift:507` 외 | 설계-코드 드리프트 — ADR-0130 D3(프로파일 원장)로 해소 |
 | R4 | workd ProcessManager가 Pipe 기반(비-PTY) — MOMO-488 스펙의 "PTY 세션 매니저(앱과 프로토콜 공유)"와 불일치 | `ProcessManager.swift:32-66` | TUI 도구가 T2에서 제약됨(D10 원격 attach의 전제 훼손 가능). 0130 D1(ACP/PTY 통합) 시 정합 회복 권고 |
-| R5 | inbound MCP protocolVersion "2025-06-18" — 현행 2025-11-25·2026-07-28 stateless 대개정 반영 전 | `InboundMCPToolRegistry.swift:11` | 스텁이라 무해. **호재**: stateless 개정은 momo의 HTTP 골격과 오히려 정합 — 완성 시점을 개정판 기준으로 |
+| R5 | inbound MCP protocolVersion "2025-06-18" — 현행 2025-11-25·2026-07-28 stateless 대개정 반영 전 | `InboundMCPToolRegistry.swift:11` | 스텁이라 무해. **호재**: stateless 개정은 oort의 HTTP 골격과 오히려 정합 — 완성 시점을 개정판 기준으로 |
 | R6 | token kind `delegation` 스키마만 존재(ADR-0101 Phase 2 미착수) | `001_init.sql:334` | 워크스페이스 소유 세션(0126 D4)·operator 위임과 합류 시점에 착수 |
 
 ## §7. 우선순위 제안 (성재 결정 대기)

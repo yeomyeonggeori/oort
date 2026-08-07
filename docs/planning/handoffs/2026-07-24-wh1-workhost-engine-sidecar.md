@@ -4,7 +4,7 @@
 > base=**track/engine** · worktree=`../momo-worktrees/705-opencode-goose-3-adr-0114-1-wh-1` · 다음 마이그레이션=**040**(필요 시) · verifier 포트=**28270대**.
 
 ## 목표 (한 줄)
-성재가 배포판을 받으면 코드 실행 엔진이 이미 담겨 있어(opencode 우선 + goose 병행), momo가 그것을 프로그램으로 몰 수 있고, 독점 Codex는 로컬 연결한다. 자격증명은 여전히 momo 서버/DB/원장 비유입.
+성재가 배포판을 받으면 코드 실행 엔진이 이미 담겨 있어(opencode 우선 + goose 병행), oort가 그것을 프로그램으로 몰 수 있고, 독점 Codex는 로컬 연결한다. 자격증명은 여전히 oort 서버/DB/원장 비유입.
 
 ## 이미 있는 것 (재사용 — 새로 만들지 말 것)
 - `workers/WorkHostDaemon`(executable `momo-workd`) + 라이브러리 `MomoACPHost`.
@@ -41,13 +41,13 @@
 - 사이드카(또는 opencode/goose 바이너리) 부팅 → **opencode**: `/doc` 200 + `POST /session` 실세션 생성 + (mock provider로) 최소 턴 왕복 + `/permissions` 승인 왕복.
 - **goose(ACP)**: `mock_acp_agent.py`로 ACP 핸드셰이크 + prompt + 승인 왕복(기존 `verify_acp_host.sh` 재사용/확장 가능).
 - **codex-jsonrpc**: mock codex app-server(신규, `mock_acp_agent.py` 형식의 mock JSON-RPC 응답기)로 initialize→thread/start→turn/start→승인 훅 왕복. 실 Codex는 OAuth 필요라 verifier는 mock.
-- **ADR-0004 단정**: 어떤 provider 키/OAuth 토큰도 momo 서버 로그/DB/원장에 없음. 사이드카는 소비자.
+- **ADR-0004 단정**: 어떤 provider 키/OAuth 토큰도 oort 서버 로그/DB/원장에 없음. 사이드카는 소비자.
 - PASS/FAIL 라인 명확히(provider_link verifier 형식 참고).
 
-## 하드 룰 (momo)
+## 하드 룰 (oort)
 - **PR base=track/engine. PR 생성 후 STOP. merge/close/gate 절대 금지**(오케스트레이터가 수행).
 - `schema_v0.sql` 수정·이동 금지. 시크릿 커밋 금지. 마이그레이션은 040부터, 번호 충돌 금지.
-- ADR-0004 불변: provider 자격증명·Codex OAuth는 서버/DB/원장/패킷 비유입 — 사이드카는 사용자 호스트 자격 소비자, momo 서버와 신뢰경계 분리.
+- ADR-0004 불변: provider 자격증명·Codex OAuth는 서버/DB/원장/패킷 비유입 — 사이드카는 사용자 호스트 자격 소비자, oort 서버와 신뢰경계 분리.
 - Linux 컨테이너 함정 준수: 암묵 전이 import 금지(명시 의존), swift-crypto Sendable=`@preconcurrency import Crypto`, compose `--wait`는 exit-0 one-shot에 실패(install-shaped 시퀀스).
 - 커밋 컨벤션 준수, 논리 단위로 커밋. 빌드+단위테스트는 커밋 전 통과(docker gate는 오케스트레이터).
 

@@ -1,6 +1,6 @@
 # WH-0 스파이크 — work host 동봉 엔진 임베드 가능성 + Codex 연결 경로 실증 (2026-07-24, Fable)
 
-> 게이트: ADR-0114 증보1 D1/D4. "opencode를 momo가 프로그램으로 몰 수 있나(=동봉 정당한가)" + "Codex 로컬 연결을 ACP 외 JSON-RPC로 할 수 있나"를 **문서가 아니라 hands-on으로** 판정.
+> 게이트: ADR-0114 증보1 D1/D4. "opencode를 oort가 프로그램으로 몰 수 있나(=동봉 정당한가)" + "Codex 로컬 연결을 ACP 외 JSON-RPC로 할 수 있나"를 **문서가 아니라 hands-on으로** 판정.
 > **결론: 둘 다 CONFIRMED(그린). opencode v0 동봉 확정, work host 연결은 ACP∪JSON-RPC(+ Codex mcp-server)로 확장.** 스코프 축소 없음.
 
 ---
@@ -27,7 +27,7 @@
   - `GET /experimental/tool`(도구 목록) · `/experimental/control-plane/move-session`
   - 공식 JS/TS SDK `@opencode-ai/sdk`(OpenAPI 자동생성 타입)
 - **실왕복 증거**: `POST /session {"title":"momo WH-0 스파이크 스모크"}` → `{"id":"ses_06f52ace…","title":"…"}` 200. 키 없이 세션 생성 성공.
-- **momo 의미**: work host 사이드카가 `opencode serve`를 띄우고 momo 서버/워커가 HTTP+SSE로 세션 생성→프롬프트→이벤트 스트림→승인을 몬다. 승인 엔드포인트가 있어 ADR-0114 D5 승인 경계를 그대로 매핑 가능.
+- **oort 의미**: work host 사이드카가 `opencode serve`를 띄우고 oort 서버/워커가 HTTP+SSE로 세션 생성→프롬프트→이벤트 스트림→승인을 몬다. 승인 엔드포인트가 있어 ADR-0114 D5 승인 경계를 그대로 매핑 가능.
 
 ## 3. Codex — 로컬 연결 프로토콜 실증
 
@@ -39,12 +39,12 @@
   - 대화: `ThreadStartParams`/`ThreadResume…`/`TurnStartParams`/`TurnSteerParams`
   - 실행+승인: `CommandExecParams`/`CommandExecutionRequestApprovalParams`/`ApplyPatchApprovalParams`/`PermissionsRequestApprovalParams`/`ExecCommandApprovalResponse`
   - 버전: v1(`ClientRequest` 165 정의) + **v2(516 정의)** 병존 — 안정적·버전관리되는 계약.
-- **대안 경로**: `codex mcp-server`(Codex를 MCP 서버로, stdio) — momo가 이미 MCP를 쓰면 최소 어댑터로 연결 가능. `codex remote-control`(websocket).
-- **자격증명 경계(ADR-0004 재확인)**: 스키마에 `ChatgptAuthTokensRefresh…`가 있으나 이는 **사용자 호스트의 Codex가 자기 `~/.codex`/keychain으로 처리**하는 것 — momo 서버/DB/원장 비유입 불변. 사이드카/로컬 Codex는 자격증명 소비자일 뿐.
+- **대안 경로**: `codex mcp-server`(Codex를 MCP 서버로, stdio) — oort가 이미 MCP를 쓰면 최소 어댑터로 연결 가능. `codex remote-control`(websocket).
+- **자격증명 경계(ADR-0004 재확인)**: 스키마에 `ChatgptAuthTokensRefresh…`가 있으나 이는 **사용자 호스트의 Codex가 자기 `~/.codex`/keychain으로 처리**하는 것 — oort 서버/DB/원장 비유입 불변. 사이드카/로컬 Codex는 자격증명 소비자일 뿐.
 
 ## 4. 결정 (D1/D4 확정)
 
-1. **opencode v0 동봉 유지**(게이트 통과). 사이드카가 `opencode serve` 헤드리스 구동, momo가 HTTP+SSE로 몲.
+1. **opencode v0 동봉 유지**(게이트 통과). 사이드카가 `opencode serve` 헤드리스 구동, oort가 HTTP+SSE로 몲.
 2. **goose 병행 동봉**(Apache-2.0, ACP) — 기존 근거 유지.
 3. **work host 연결 프로토콜 = 다중 지원**: 사이드카 동봉 엔진(opencode HTTP / goose ACP) + **Codex 로컬 연결(app-server JSON-RPC/stdio 우선, mcp-server 대안)**. 단일 ACP 가정을 폐기하고 어댑터 레이어로 추상화.
 4. **승인 경계 통일**: opencode `/permissions` · Codex `*ApprovalParams` 둘 다 승인 요청/응답 훅을 노출 → work console 승인 UI(D5)를 엔진 무관 단일 계약으로 매핑.

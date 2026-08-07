@@ -6,9 +6,9 @@
 
 ## Context
 
-1. **구조적 필연**: APNs 발송 열쇠(.p8/인증서)는 App Store 배포자만 가진다. 셀프호스팅 momo 서버 각각이 Apple과 계약할 수 없으므로, **모든 셀프호스트 서버는 Dawn이 운영하는 push relay를 경유해야만 iOS 푸시를 보낼 수 있다.** Mattermost(HPNS)·Rocket.Chat(gateway)·Zulip(bouncer)·Matrix(Sygnal) 전원이 같은 구조에 수렴했다(`research/15-platform-expansion/02` §2-1).
+1. **구조적 필연**: APNs 발송 열쇠(.p8/인증서)는 App Store 배포자만 가진다. 셀프호스팅 oort 서버 각각이 Apple과 계약할 수 없으므로, **모든 셀프호스트 서버는 Dawn이 운영하는 push relay를 경유해야만 iOS 푸시를 보낼 수 있다.** Mattermost(HPNS)·Rocket.Chat(gateway)·Zulip(bouncer)·Matrix(Sygnal) 전원이 같은 구조에 수렴했다(`research/15-platform-expansion/02` §2-1).
 2. **스키마는 day-1부터 준비되어 있다**: `device`(ios/macos)/`push_token`(apns_token/env/topic/invalidated_at)/`push_dispatch_log`(apns_status/collapse_id) 테이블(`server/Migrations/001_init.sql:506-543`)과 APNs 운영 상수(ES256, 429/410→invalidate) 문서(`docs/DEPLOY.md:447-451`). 없는 것은 등록 REST·notifier worker·relay 서비스 전부다.
-3. **판정이 본체다**: Slack의 20년 교훈은 "전송은 쉽고 판정(무엇을·누구에게·어느 기기로)이 어렵다 — activity와 delivery를 분리하고 판정을 한 곳에"(15-01 §1.5). momo는 unread/멘션의 SoT(`read_state`, ADR-0109)가 이미 서버에 있어 판정의 데이터 기반이 완비 상태다.
+3. **판정이 본체다**: Slack의 20년 교훈은 "전송은 쉽고 판정(무엇을·누구에게·어느 기기로)이 어렵다 — activity와 delivery를 분리하고 판정을 한 곳에"(15-01 §1.5). oort는 unread/멘션의 SoT(`read_state`, ADR-0109)가 이미 서버에 있어 판정의 데이터 기반이 완비 상태다.
 4. **과금 반면교사**: Mattermost의 id-only 유료 게이팅과 Rocket.Chat의 월 1만 건 제한은 커뮤니티 반발·우회 생태계를 낳았다. Zulip(관대한 무료+등록제+rate limit)이 유일하게 마찰 없는 모델.
 
 ## Options
@@ -31,7 +31,7 @@
 - 신규: `POST /v1/devices`(플랫폼·토큰 upsert), `DELETE`(로그아웃 시 invalidate). 410/400 응답 시 `invalidated_at` 기록(스키마 기존재). MOMO-041(APNs .p8 ES256+push_token 등록)의 계약을 승계·구체화한다.
 
 ### D5. 무료 정책
-- **A (권고) — 전면 무료 + 서버 단위 rate limit + 남용 차단**: Zulip 모델. 대량 상업 사용의 과금은 momo Cloud/지원과 함께 ADR-0121 BM 절에서 다룬다 — relay 단독 과금은 하지 않는다.
+- **A (권고) — 전면 무료 + 서버 단위 rate limit + 남용 차단**: Zulip 모델. 대량 상업 사용의 과금은 oort Cloud/지원과 함께 ADR-0121 BM 절에서 다룬다 — relay 단독 과금은 하지 않는다.
 - B — 건수 제한/유료 게이팅: 업계 반발 실증. **기각.**
 
 ## Decision (Proposed 권고안)
@@ -52,7 +52,7 @@ D1-A + D2-A + D3-A + D4 + D5-A. macOS 알림(APNs macOS topic)도 같은 파이�
 - (+) 셀프호스팅 배포 모델의 마지막 구조적 공백(모바일 알림)이 닫힌다. 내용 비유입으로 신뢰 경계 유지.
 - (+) 판정을 notifier 한 곳에 고정 — Slack이 사후에 비싸게 정리한 산재를 원천 방지(P9).
 - (+) BYO-relay 경로가 공짜 부산물로 생긴다(오픈소스 relay).
-- (−) Dawn이 상시 운영 인프라(relay)와 Apple Developer 계정·키 커스터디를 짊어진다 — momo의 첫 "제품 부속 SaaS".
+- (−) Dawn이 상시 운영 인프라(relay)와 Apple Developer 계정·키 커스터디를 짊어진다 — oort의 첫 "제품 부속 SaaS".
 - (−) id-only는 알림 표시에 fetch 왕복 지연을 더한다 — 셀프호스터 서버가 느리면 알림도 느리다(문서에 명시).
 - 보류: E2E 봉투(v2), FCM/Android, 채널별 알림 설정·DND(후속 — P8 알림 예산과 함께), 웹 브라우저 알림(ADR-0119 v1 합류).
 

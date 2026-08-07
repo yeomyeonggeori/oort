@@ -1,4 +1,4 @@
-# momo — CI/CD 비밀값 인벤토리
+# oort — CI/CD 비밀값 인벤토리
 
 > 전부 GitHub repo Secrets(`Dawn-kim-official/momo`). 로컬은 `.env`(gitignore됨) 또는 export.
 > ⚠️ 어떤 비밀값도 로그/PR/커밋에 노출 금지. .p8는 base64로만.

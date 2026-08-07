@@ -24,7 +24,7 @@
 3. work tier policy는 기본 `ask`로 둔다. `auto_target=cloud`는 이 대본에서
    사용하지 않는다. T3 전환은 매번 사용자가 승인 카드에서 직접 선택한다.
 4. 운영자가 테스트 workspace에 최소 T3 크레딧과 슬롯 1개를 부여한다.
-5. 오케스트레이터가 `E2B_API_KEY`, E2B template, 공개 HTTPS momo server URL,
+5. 오케스트레이터가 `E2B_API_KEY`, E2B template, 공개 HTTPS oort server URL,
    cloud `workd` 부트스트랩 명령을 서버 프로세스에만 주입한다. 값을 출력하거나
    클라이언트·workspace 설정·DB·감사 detail에 복제하지 않는다.
 6. 아래 표를 복사해 실측 시각과 ID를 기록한다. 시간은 UTC, 지연은 monotonic
@@ -67,7 +67,7 @@
 
 ## 4. T3 — 명시적 생성, pause 제외, 재개, 종료
 
-1. `resume_offer`에서 **momo Cloud를 직접 선택**한다. 질문 없는 자동 전환이
+1. `resume_offer`에서 **oort Cloud를 직접 선택**한다. 질문 없는 자동 전환이
    일어나지 않았음을 기록한다.
 2. 요청부터 E2B create 완료까지 **spawn 지연**, cloud `workd`의 Ed25519
    자기등록과 첫 heartbeat까지 **host 준비 지연**, session running까지의
@@ -102,7 +102,7 @@ pause 시간은 어떤 active 구간에도 포함되면 안 된다.
 각 검사는 별도 T3 요청으로 수행하고 기존 running session은 종료하지 않는다.
 
 1. 크레딧을 0으로 만든 뒤 T3 생성이 409로 거부되고, 문구가
-   “momo Cloud 크레딧이 없어 시작할 수 없습니다.”처럼 다음 행동을 설명하는지 확인한다.
+   “oort Cloud 크레딧이 없어 시작할 수 없습니다.”처럼 다음 행동을 설명하는지 확인한다.
 2. 슬롯을 모두 점유한 뒤 새 T3 생성이 409로 거부되고 현재/최대 슬롯을
    사용자가 읽을 수 있는 문장으로 설명하는지 확인한다.
 3. 서버 프로세스에서 `E2B_API_KEY`를 제거한 격리 인스턴스로 T3 생성이 503인지

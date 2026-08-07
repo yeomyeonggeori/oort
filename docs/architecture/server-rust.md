@@ -8,13 +8,13 @@
 2. **`message.seq`는 PG 트리거·시퀀스가 아니라 앱코드다.** `channel_seq` row-lock `UPDATE ... RETURNING`(`MessageRoutes.swift:127`)로 채널당 쓰기를 직렬화, DB는 `message_seq_uniq UNIQUE(channel_id, seq)`(`001_init.sql:184`)로 백스톱. → Rust도 같은 row-lock 패턴 복제, UNIQUE가 최종 안전망. (D2가 이 red 테스트 명시.)
 3. **공유 계약이 소스 복제로 흩어져 있다.** 명시적 공유는 SwiftPM `CloudProviderKit`(821 LOC) 하나뿐. `CentrifugoClient`(3벌)·`T3Lifecycle*`(2벌)·서명 포맷 문자열(workd `Signing.swift` ↔ 서버 `WorkHostAuthenticator.swift`)이 물리 복제. → Rust에서 공유 crate로 통합(§2 `momo-wire`).
 
-추가: **git 서버 도메인은 momo에 없다**(GitHub은 플러그인 매니페스트로만). → buzz의 git-over-http 패턴 인용은 지금 불필요(D4 카탈로그에서 제외, 향후 네이티브 git 도입 시 재검토).
+추가: **git 서버 도메인은 oort에 없다**(GitHub은 플러그인 매니페스트로만). → buzz의 git-over-http 패턴 인용은 지금 불필요(D4 카탈로그에서 제외, 향후 네이티브 git 도입 시 재검토).
 
 ## 1. 스택 결정
 
 | 항목 | 선택 | 근거 |
 |---|---|---|
-| 웹 프레임워크 | **Axum** | buzz 검증, tower 미들웨어 생태계, momo relay/워커와 tokio 통일 |
+| 웹 프레임워크 | **Axum** | buzz 검증, tower 미들웨어 생태계, oort relay/워커와 tokio 통일 |
 | DB 접근 | **sqlx** | 컴파일타임 쿼리 검증 = 정합성 축 직접 기여, buzz도 sqlx, ORM 마법 최소 |
 | 마이그레이션 | **기존 59개 SQL 그대로 실행** | 언어독립. `server/Migrations/NNN_*.sql`는 sqlx migrator 관례(`<version>_<desc>.sql`)와 호환 → 내용 수정·이동 없이 실행(하드룰). `schema_v0.sql`도 불변 |
 | 런타임 | tokio | Axum/sqlx 표준 |

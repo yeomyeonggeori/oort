@@ -76,7 +76,7 @@
 ## 2026-07-28 (Fable) · buzz 에이전트 탭 실사(HEAD 07-27) → 허브 탭 갭 판정 + 향후 티켓 2장
 - **성재 질문**: buzz Agents 탭 같은 "에이전트 베이스 탭"(프로필·권한·프롬프트·memory·이력·현재작업·cron)이 우리 설계에 있나 + buzz 갱신. **판정: 없다 — 조각 분산**(프로필 다이얼로그·디렉터리·앱 권한·인박스), 정본 `2026-07-28-buzz-agents-tab-delta.md`.
 - **buzz 델타 실사**(07-22 분석 이후 **179커밋**, HEAD `18eef633`): Agents 탭 = 목록+프로필 4탭(info/runtime/channels/**memories**)+정의 단일정본(`8c0e8cb`)+Respond to/MCP/실행위치+세션 전사+스냅샷/팀+**BYOH generic ACP**(`95fdf97`). **방향 신호 = 분산 표면의 Unified 수렴**(페르소나 카탈로그·디렉터리 섹션 삭제). buzz도 cron은 없다(Workflows가 그 자리). **안 따라가는 것 명시: 프로바이더 API 키 입력(ADR-0004 위반).**
-- **momo 최대 갭 발견**: **MemoryRoutes 10종이 서버에 완비돼 있는데 웹 소비자 0건** · agent-runs가 채널 단위뿐(전역 없음) · `triggers.schedule` 예약만·실행기 없음.
+- **oort 최대 갭 발견**: **MemoryRoutes 10종이 서버에 완비돼 있는데 웹 소비자 0건** · agent-runs가 채널 단위뿐(전역 없음) · `triggers.schedule` 예약만·실행기 없음.
 - **향후 티켓**(성재 지시대로 현 배치 뒤 진행): **#860** 웹 에이전트 허브 탭 v1(MOMO-568 작업중 전류 연결 포함, cron 자리는 정직 고지) · **#861** 에이전트별 전역 run REST. **ADR-0140 기안 예정**(schedule 실행기 — 새 실행 유발 경로라 결정 선행). buzz 추적 상시화: 배치 종결 시마다 델타 실사(방법 §4-4 고정).
 
 ## 2026-07-28 (Fable) · ADR-0139 Accepted + 파생 4장 · #850/#855 sol medium 가동
@@ -118,7 +118,7 @@
 
 ## 2026-07-27 (Fable) · 일반 사용자 대응 조사 3건 → 이슈 5장 + ADR 선행 분리
 - **성재 발제 3건**(브라우저 왕복 가입 / 보안은 어떻게 답하나 / 코덱스식 커넥터 UI)을 코드에서 전수 조사. 계획 정본 `2026-07-27-general-user-readiness-plan.md`.
-- **판정: 셋이 같은 결정을 가리킨다** — 셀프호스팅 도구에서 일반 유저 제품으로 무게중심 이동. ADR-0121 D6-A(기본 공개 서버 비내장)·D5-A(momo Cloud 범위 밖)가 막고 있어 **새 ADR이 필요한 경계 변경**이다. 그래서 **결정 불요분만 즉시 착수**로 갈랐다.
+- **판정: 셋이 같은 결정을 가리킨다** — 셀프호스팅 도구에서 일반 유저 제품으로 무게중심 이동. ADR-0121 D6-A(기본 공개 서버 비내장)·D5-A(oort Cloud 범위 밖)가 막고 있어 **새 ADR이 필요한 경계 변경**이다. 그래서 **결정 불요분만 즉시 착수**로 갈랐다.
 - **브라우저 왕복**: 후반부는 **이미 배선됨** — `momo://` OS 등록·전달·**콜드스타트 버퍼**(앱이 꺼져 있어도 유실 없음)·URL 비밀값 즉시 제거. 앱→브라우저도 `opener.rs`가 **https만 허용**해 인증에 오히려 적합. 빠진 건 유니버설 링크·인증 플로우·콜백 토큰 규약, 그리고 **초대 없는 계정 생성 경로 자체**(`JoinRoutes`가 유일 생성 경로, 초대 필수). ADR-0121 D2-A가 도메인 검증 우회 설계를 이미 예약(구현 S-4만 미발행).
 - **보안**: 구현은 강하다(RLS FORCE + **부팅 거부** 부트가드 · capability URL 직송으로 바이트 서버 미경유 · 채널 멤버십 게이트 · Drive SA `drive.readonly`+driveId 강제·재검증·DB 미저장 · 푸시 id-only). **그런데 말할 자료가 없다** — 한국어 문안 0건, 랜딩 없음, 위협모델 없음. **`legal/privacy-policy.md`는 빈칸 템플릿이라 지금 링크 보내면 역효과**. 정직하게 함께 적어야 할 것도 확인: 바이러스 검사 없음·MIME sniffing 없음·브라우저 localStorage refresh token·Tauri CSP 미설정·구 알파 미서명·3자 인증 없음.
 - **커넥터**: 서버 라우트 6종 실동 + 상세 API가 **manifest 통째**를 줘 동의 모달 재료가 이미 다 온다(publisher.verified·license·provenance·tools[].scopes/risk·**egressDomains**). **웹에 화면이 0건** — 구 SwiftUI 734줄 마켓플레이스가 은퇴 때 미포팅, Tauri 계획에도 없었다(**기능 유실**). 동의 모달은 mac에도 없었다(1클릭 즉시 grant). 스크린샷의 3자 OAuth는 ADR-0113이 토큰 취득을 에이전트 호스트로 밀어놔 **재개정 선행**.
@@ -237,10 +237,10 @@
 ## 2026-07-26 (Fable 리서치) · 모바일 스택 레퍼런스 — ADR-0133 P4a 입력
 - **산출**: `docs/planning/2026-07-26-mobile-stack-research.md`. 성재 발제(모바일 전략) → A 제품별 스택 / B 프레임워크 / C 모바일 에이전트 UX / 권고. 소스 직독 우선(tauri·plugins-workspace·buzz·element-x·zulip·mattermost·rocket.chat·signal 클론).
 - **판정: Tauri 2 모바일 = 불합격.** 1st-party 푸시 부재(업스트림 #11651 20개월 open, notification 플러그인은 `UNPushNotificationTrigger`를 명시 배제) · **ADR-0120이 요구하는 NSE가 Tauri iOS CI 서명에서 entitlement 유실**(#15663 open) · awesome-tauri 모바일 앱 사실상 0 · **buzz가 같은 Tauri 2.11에서 모바일만 Flutter 37,815 LOC·코드공유 0**.
-- **권고 1순위 = React Native**(iOS+Android 단일, **한글 IME 스파이크 조건부**), 대안 = Flutter. 근거: momo 공백은 iOS가 아니라 **Android(0)** · TS/React가 ADR-0133 "오너가 UI를 직접" 원칙을 모바일까지 잇는 유일 선택지 · **momo의 id-only+NSE 푸시가 Mattermost(RN 0.83.9)에서 프로덕션 검증** — ADR-0120이 선례로 인용한 그 제품. Capacitor는 **iOS silent push 미지원(공식)** 으로, KMP/CMP는 유명사례가 전부 "로직만 공유·UI 네이티브 2벌"이라 기각.
+- **권고 1순위 = React Native**(iOS+Android 단일, **한글 IME 스파이크 조건부**), 대안 = Flutter. 근거: oort 공백은 iOS가 아니라 **Android(0)** · TS/React가 ADR-0133 "오너가 UI를 직접" 원칙을 모바일까지 잇는 유일 선택지 · **oort의 id-only+NSE 푸시가 Mattermost(RN 0.83.9)에서 프로덕션 검증** — ADR-0120이 선례로 인용한 그 제품. Capacitor는 **iOS silent push 미지원(공식)** 으로, KMP/CMP는 유명사례가 전부 "로직만 공유·UI 네이티브 2벌"이라 기각.
 - **🔴 최대 리스크(직접 검증)**: iOS Fabric **CJK/한글 IME 조합 결함** 18개월째 open(원본 #48497 재현코드 첨부, 수정 PR #56082 리뷰어 미배정 `blocked`), New Arch는 0.82+ 강제라 회피로 없음. **단 "한글 입력 불가"는 과장** — 확증 증상은 조합 밑줄 소실이고 더 센 주장엔 RN팀이 `Needs: Repro`, **Mattermost(New Arch)엔 열린 CJK 이슈 0**. → 실기기 스파이크가 P4a 1번 게이트. **한글 검증은 Flutter를 골라도 동일 필요**(Flutter도 2019~2025 한글 이슈 계보).
 - **정정 4건**: ①`clients/web`은 "이미 반응형"이 아님(반응형 프리픽스 3개, 900px는 데스크톱 축소용) ②ADR-0123(SwiftUI iOS 14,119 LOC)과 ADR-0133이 iOS에 **상충하는 Accepted** — 결정의 실체는 그 자산 처분 ③buzz 모바일은 "Flutter(부분)"이 아니라 220파일·37,815 LOC 본격 구현 ④Slack "과거 하이브리드"설은 1차 출처 미확인(2013년부터 네이티브, 공유 C++ Libslack만 시도 후 폐기).
-- **대기**: 성재 결정 4건(스택·기존 iOS 킷 처분·Android 시점·ADR 증보 기안). **엔진 선결질문**: momo 에이전트 작업이 모든 기기 꺼도 지속되는가(레퍼런스가 여기서 갈림 → 모바일 약속 문구 결정).
+- **대기**: 성재 결정 4건(스택·기존 iOS 킷 처분·Android 시점·ADR 증보 기안). **엔진 선결질문**: oort 에이전트 작업이 모든 기기 꺼도 지속되는가(레퍼런스가 여기서 갈림 → 모바일 약속 문구 결정).
 
 ## 2026-07-26 (Fable Wave C2 완결) · ADR-0134·0135 소비면 4장 랜딩
 - **랜딩**: 816 엔진(profile effort_pref writer+멘션 routing, track/engine #820) · 817 프로필 다이얼로그+컴포저 피커(#821) · 818 체인 UI+캐스캐이드 표기(#822) · 819 잔여량 게이지(#823) track/uxui. 824 tests대(각 랜딩 시 원점 재검증).
@@ -285,7 +285,7 @@
 - **main 동기화**(성재 승인, #799 #800) 후 원점 검증 그린(웹 467 tests·swift build 0), momowebqa 재배포.
 - **616 라이브 통합 실측 PASS**: /usage/summary 전항목 손계산 일치(30d 총계 148,200µUSD·추정 분리·모델/에이전트 내림차순·7d 범위 절단·주 bucket 경계·401/400 게이트). 시드 3행은 QA 워크스페이스에 잔류(합성 데이터 고지) — 사용량 섹션 실렌더 확인용.
 - **0.1.0-next.8 발행 + 기본 다운로드 갱신**(switch_default_download.sh) — Wave A 5장이 사용자 빌드에 도달.
-- **Wave C ADR 3건 Proposed 발의**: 0134(요청 단위 model·effort 라우팅+auto — 선택 모델 항상 노출), 0135(프로바이더 캐스캐이드 체인+잔여량 프로브 — ADR-0004 경계 보존형), 0136(momo Cloud E2B 프로비저너+크레딧·활성시간 원장+리허설 게이트). 성재 검토·Accept 대기.
+- **Wave C ADR 3건 Proposed 발의**: 0134(요청 단위 model·effort 라우팅+auto — 선택 모델 항상 노출), 0135(프로바이더 캐스캐이드 체인+잔여량 프로브 — ADR-0004 경계 보존형), 0136(oort Cloud E2B 프로비저너+크레딧·활성시간 원장+리허설 게이트). 성재 검토·Accept 대기.
 
 
 ## 2026-07-26 (Fable Wave A 랜딩) · 에이전트 경험 프로그램 1차 — 5장 전량 트랙 랜딩
@@ -377,7 +377,7 @@
 ## 2026-07-25 (Fable ADR-0133 Accepted + P0 스파이크 게이트 PASS + R-1/R-2) · Tauri/React 전환 개시
 - 성재 ADR-0133 승인 → 즉시 P0 스파이크(#745)+R-1/R-2 병렬. **스파이크 게이트 전관문 PASS**(커밋 667a40a3 정본): seq 121건 셔플 후 단조·gap 0 / 재연결 resume 25/25 누락 0 / 1k 스크롤 p95 10.3ms·>33ms 프레임 0 / 콜드 web 181ms·desktop 537ms / 메모리 196MB(<400MB). clients/web-spike+clients/desktop(Tauri 2) 신설, momo-spike.app 실빌드. main #747.
 - **P1/P2 이월 발견 3건**: ①서버가 mDNS WS 호스트 반환 시 Chrome 리졸버 행(근본 수정=브라우저 리졸브 가능한 호스트 반환) ②REST CORS 부재→웹은 동일오리진 프록시, Tauri release는 Rust HTTP 필요 ③virtuoso initialItemCount. 스파이크 에이전트 최종 구조화 보고는 실패(StructuredOutput cap)했으나 작업·커밋·실측 완결 — ground truth 검증 원칙 재확인.
-- **R-1 웹 UX 스펙 5장**(`research/2026-07-25-r1-ux-component-spec-web.md`): 실코드 어휘(TimelineMessage.seq·reconcileMessages·ApprovalStatus) 인용, buzz zero-noise→인박스 3필터 번역, 재연결 UX=momo 최대 우위 표면화, 에이전트=같은 그리드+--agent-accent+managed-by. **R-2 momo-design-taste-web 스킬 설치**(초안): 여명 토큰·CSP style-src 'self' 제약·grep 10종 pre-flight. **정정**: clients/web v0(ADR-0119) 실존 — ADR 컨텍스트 수정.
+- **R-1 웹 UX 스펙 5장**(`research/2026-07-25-r1-ux-component-spec-web.md`): 실코드 어휘(TimelineMessage.seq·reconcileMessages·ApprovalStatus) 인용, buzz zero-noise→인박스 3필터 번역, 재연결 UX=oort 최대 우위 표면화, 에이전트=같은 그리드+--agent-accent+managed-by. **R-2 momo-design-taste-web 스킬 설치**(초안): 여명 토큰·CSP style-src 'self' 제약·grep 10종 pre-flight. **정정**: clients/web v0(ADR-0119) 실존 — ADR 컨텍스트 수정.
 - 다음 성재 결정: ①P1(momo-web MVP) 착수 — 착수 시 SwiftUI 신규 표면 동결 발효 ②web-spike 승격 명명(기존 v0와의 관계) ③팔레트(v0 인디고→여명 호박) 승인.
 
 
@@ -393,7 +393,7 @@
 - **엔진 3건**: 584 invite-create 딥링크 출력(verify 10/10, 코드 원문 파일-only 유지) · 586 internal_alpha mDNS 광고(dns-sd 수명주기, 누수 0 실측) · 588 에이전트 첫 인사(단일 쓰기경로 한 tx·UUIDv5 멱등·결정론 템플릿·join 불가침, **runtime verifier 11/11** — 실행 요건: 클린 볼륨+MOMO_AGENT_SEED_MODE=demo).
 - **UXUI 2건**: 585 momo:// 스킴+join 프리필+기본값 정리(파서 16+라우팅 5 tests) · 587 chooser LAN 발견 카드. **design-review 1R FAIL(Blocker2·High1)→수정→2R PASS**: 배너 크롬 밴드 회피(controlBandHeight+8)·발견 카드 1행 압축(기본 창 푸터 잘림 해소)·Esc·톤 합니다체·connecting 딥링크 큐잉(didSet 전달). 스냅샷 기준이미지 오케스트레이터 기록.
 - **검수에서 잡은 것**: 588 verifier 2건(demo 시드 모드 미지정 401, outbox id uuidString 대문자 케이스 — 582·577과 동일 클래스 3번째, **"UUID 비교는 항상 케이스 무관" 성문화 대상**) · STATUS.md 트랙 충돌 union 해소.
-- **W-O5**: TESTER_GUIDE 운영자 초대 카드 복붙 템플릿(딥링크 1개+폴백). momowebqa 재배포 — **mDNS 광고 라이브**(momo._momo._tcp :28000). 0.0.4 발행(온보딩 와우 빌드). 백로그: Esc 공존(Medium), ko InfoPlist.strings, W-O6 서명/공증(성재 결정).
+- **W-O5**: TESTER_GUIDE 운영자 초대 카드 복붙 템플릿(딥링크 1개+폴백). momowebqa 재배포 — **mDNS 광고 라이브**(oort._momo._tcp :28000). 0.0.4 발행(온보딩 와우 빌드). 백로그: Esc 공존(Medium), ko InfoPlist.strings, W-O6 서명/공증(성재 결정).
 
 ## 2026-07-24 (Fable MOMO-583 권한 재조임 + 알파 사이트 여명 리디자인) · 576 후속 집행, 사이트 라이브
 - 성재 발제: ①576 후속 진행 ②배포 사이트 리디자인(buzz/slack/discord 참조, 히어로 재밌게, 여명거리 느낌, 마스코트는 우선 없이).
@@ -429,9 +429,9 @@
 - **발급**: WH-1 사이드카+어댑터 3종(#705, 엔진)·WH-2 GUI 페어링+엔진선택(#706, UXUI)·WH-3 문서(#707). 핸드오프 패킷 후 착수. 다음: WH-1 착수 여부 성재 확인(사이드카 동봉 대형 빌드).
 
 ## 2026-07-24 (Fable 코드 에이전트 엔진 조사 — opencode/goose/t3code) · ADR-0114 증보1 양자 동봉 재기안 + t3code 분석
-- 성재 발제("opencode·goose·t3code 다뤄봐, 셋 다 좋아 보임"). 웹 실측으로 라이선스·정체 확정: **goose(Apache-2.0)·opencode(MIT)=독립 에이전트=동봉 후보**, **t3code(MIT)=에이전트 감싸는 GUI 오케스트레이터=엔진 아님(momo work console 경쟁자)**. Codex/Claude Code=독점=로컬 연결만.
+- 성재 발제("opencode·goose·t3code 다뤄봐, 셋 다 좋아 보임"). 웹 실측으로 라이선스·정체 확정: **goose(Apache-2.0)·opencode(MIT)=독립 에이전트=동봉 후보**, **t3code(MIT)=에이전트 감싸는 GUI 오케스트레이터=엔진 아님(oort work console 경쟁자)**. Codex/Claude Code=독점=로컬 연결만.
 - **ADR-0114 증보1 재기안(여전히 Proposed)**: goose 단독 → **opencode 우선+goose 병행** 양자 동봉안. 엔진 선택 매트릭스 추가, **WH-0 스파이크 신설**(opencode 임베드/헤드리스 API 표면 + Codex app-server JSON-RPC(stdio) 연결경로 검증 — t3code가 실증한 경로. D1/D4 확정 게이트, 실패 시 goose 단독 후퇴).
-- **t3code 경쟁 분석 신규**(`2026-07-24-t3code-competitive-analysis.md`, buzz 분석 형식): t3code=work console에서 메신저·에이전트멤버·SoT 뺀 1인 로컬 슬라이스. momo 해자=팀+에이전트=멤버·PG SoT·네이티브 Swift·엔진 비종속. 가져올 것 Top4=Codex JSON-RPC 경로·태스크스레드 GUI·worktree 1급 UX·Full/Supervised 이중런타임. 포지셔닝 경보: "코드 에이전트 GUI" 공간 붐빔 → momo는 "메신저, work console은 표면" 위계 고정.
+- **t3code 경쟁 분석 신규**(`2026-07-24-t3code-competitive-analysis.md`, buzz 분석 형식): t3code=work console에서 메신저·에이전트멤버·SoT 뺀 1인 로컬 슬라이스. oort 해자=팀+에이전트=멤버·PG SoT·네이티브 Swift·엔진 비종속. 가져올 것 Top4=Codex JSON-RPC 경로·태스크스레드 GUI·worktree 1급 UX·Full/Supervised 이중런타임. 포지셔닝 경보: "코드 에이전트 GUI" 공간 붐빔 → oort는 "메신저, work console은 표면" 위계 고정.
 - 대기: 성재 ADR-0114 증보1 승인(양자 동봉안) → WH-0 스파이크 착수. 백로그에 t3code 파생 액션 3건.
 
 ## 2026-07-24 (Fable provider GUI 실서버 완결 — 577 랜딩·라이브 검증·0.0.2 발행)
@@ -442,7 +442,7 @@
 - 다음: 성재 GUI 실사용(다운로드→로그인→AI 연결) 피드백 · ADR-0114 증보1(work host 동봉+GUI 페어링) 승인 대기 · 백로그 MOMO-575·ADR-0117 W-4·567.
 
 ## 2026-07-24 (Fable provider GUI 연동 3조각 완주) · "GUI로 붙이면 실제 대화" 성립
-- 성재 발제("실제 codex/hermes를 CLI가 아니라 GUI로 연동, 배포판에 담아"). buzz 실측: 코드 에이전트는 동봉 아닌 ACP 접속(momo ADR-0114 동형), mesh-llm(오픈모델)만 동봉. Codex 자체 동봉은 독점 CLI+OAuth+ADR-0004로 불가(buzz도 안 함).
+- 성재 발제("실제 codex/hermes를 CLI가 아니라 GUI로 연동, 배포판에 담아"). buzz 실측: 코드 에이전트는 동봉 아닌 ACP 접속(oort ADR-0114 동형), mesh-llm(오픈모델)만 동봉. Codex 자체 동봉은 독점 CLI+OAuth+ADR-0004로 불가(buzz도 안 함).
 - **ADR-0004 증보1 Accepted → 3장 main 랜딩**(Opus 4.8): 572 provider config REST(암호화 저장·마스킹·mode override·health, 193 tests) + 573 worker job-time 소비(GUI 변경이 실제 대화 반영, 캐시 TTL 2s·golden interop vector) + 574 관리자 "AI 연결" GUI(design-review 2R Blocker 해소: 이탈 잠금 dead-end→미저장 확인 다이얼로그, in-flight dead-click→잠금을 unsaved bearer로 한정). 572의 prod boot 갭(api PROVIDER_LINK_MASTER_KEY 누락)·e2e compose 마스터키 배선도 수리.
 - **ADR-0114 증보1 기안(Proposed)**: work host 배포판 동봉+GUI 페어링(goose 동봉·Codex 로컬)=WH-1~3 — 성재 승인 대기.
 - 부수: MOMO-575(WorkConsole 프리셋 스냅샷 크로스환경 드리프트 안정화) 발급. 다음: momowebqa 재배포(039)→성재 GUI 실왕복→0.0.2 발행.
@@ -467,7 +467,7 @@
 - 대기: 서버 공유 방식(Tailscale vs 단독 도그푸드) 성재 결정 → 결정 시 연동 온보딩 §2 실행.
 
 ## 2026-07-23 (Fable 공개 게이트 완성) · 565 랜딩 → 리허설 Phase 1 PASS → 564 랜딩 — "공개 버튼만 남음"
-- **565 랜딩**: 단일 momo 이미지(6 커맨드+웹 에셋+LICENSE/NOTICE 빌드 시 단정), verifier 6/6 실기동 PASS(28240s). 공개 표면 6→1.
+- **565 랜딩**: 단일 oort 이미지(6 커맨드+웹 에셋+LICENSE/NOTICE 빌드 시 단정), verifier 6/6 실기동 PASS(28240s). 공개 표면 6→1.
 - **리허설 Phase 1 PASS(5/5)** — 보고서 2026-07-23-rehearsal-phase1-report.md. 검출 결함 4건 당일 해소(--wait 원샷 quirk→install 동형 시퀀스, 한도 600s, 528 픽스처 갭→mock 툴콜 토글, 증적 변수 잔재).
 - **564 랜딩**: 공개 README(신뢰 경계 "What never leaves your server" 절)+SECURITY.md(비공개 신고·응답 타깃·하드닝). 링크 전수 실존 확인.
 - 부수: 디스크 회수 254GB+14GB(reclaim_worktrees.sh 정본화=MOMO-566 종결), 패키징 레인 §8 판정 집행 완료.
@@ -500,20 +500,20 @@
 - 진행 중: 651(558 Stop/Pause UI, base track/uxui)·654(561 set-owner) worker 병렬. 다음: 654 랜딩→560→563, 651 랜딩(design-review), 이후 **리허설 Phase 1**(새 롤 태세 검증=공개 게이트). 성재 확인 대기: 내부 알파 재배포 여부(554 랜딩 조건), 557 run↔work_session 경계 해석, ADR-0121 증보 승인(→562).
 
 ## 2026-07-23 새벽 (Fable buzz→Wave H 기획) · PLN-20260722-02 plan-ready — 정본 2026-07-22-buzz-actions-plan.md + ADR-0132 Proposed
-- 성재 지시("제안 액션 고도화+인프라 도입 검토+셀프호스팅 비교+우선순위·배포 판단+프롬프트")로 2차 사실 감사 2건 완료: ①momo RLS/게이트 태세 실코드 감사 — **Critical: prod 템플릿 API 롤=수퍼유저 momo(RLS 무효)**, 휴먼 정지권 REST 부재+cancelRun TODO, depth 전파 미구현, 게이트 3갭(skew/중복번호/SPM) ②셀프호스팅 축별 비교 — momo 우위(백업/롤백/BM), buzz 우위(단일이미지/owner 1줄/day-2 CLI/관측/공개 릴리스).
+- 성재 지시("제안 액션 고도화+인프라 도입 검토+셀프호스팅 비교+우선순위·배포 판단+프롬프트")로 2차 사실 감사 2건 완료: ①oort RLS/게이트 태세 실코드 감사 — **Critical: prod 템플릿 API 롤=수퍼유저 momo(RLS 무효)**, 휴먼 정지권 REST 부재+cancelRun TODO, depth 전파 미구현, 게이트 3갭(skew/중복번호/SPM) ②셀프호스팅 축별 비교 — oort 우위(백업/롤백/BM), buzz 우위(단일이미지/owner 1줄/day-2 CLI/관측/공개 릴리스).
 - 산출: Wave H 3단(H1 554~556 태세·게이트 / H2 ADR-0132 정지권·루프·발화계약 / H3 560~563 셀프호스팅 제품화)+Wave U″ 제안, worker 프롬프트 3종+오케스트레이터 인수 프롬프트 포함. ADR-0132 Proposed 기안.
 - 독립 critic 검수 완료(신선 컨텍스트, 실코드 스팟체크) — 핵심 사실 전부 재확증, 정정 5건 반영(553 랜딩 반영·554 수리면 축소·555/556 순차화·D1 human 한정·562 ADR 증보 선행). §5에 기록.
 - 다음: 성재 승인 3건 대기 — (a) H1 발급(기존 위임 큐 '게이트 부채 배치'와 합류 권장, 554는 리허설 Phase1 선행) (b) ADR-0132 option (c) H3 실행+공개 이미지 결정. 티켓/이슈 발급 없음(번호 554~563 예약만).
 
 ## 2026-07-22 (Fable buzz 경쟁 분석) · block/buzz 4축 해부 — 정본 2026-07-22-buzz-competitive-analysis.md
 - 성재 발제: 어제(7/21) 공식 런칭한 block/buzz(Nostr relay 기반 agent-native 워크스페이스, HN 316pt) 0-tier 해부. 레포 전체 clone+병렬 4축(아키텍처/git 고고학/커뮤니티/UX) 분석 완료.
-- 판정: momo와 동일 신념(에이전트=1급 멤버·PG=SoT·키 비유입)의 거울상. 프로토콜은 momo 우위(seq/outbox/RLS를 buzz는 구조적으로 못 가짐), 가져갈 것은 로직 계층(오너 위임 캐스케이드·페이지 계약·wake-only 푸시·승인 체인)+상흔(에이전트 멘션 루프·킬스위치 미도달·RLS 공리 5·branch-skew 가드).
-- 커뮤니티 최대 쟁점=멀티 에이전트 권한 누출 질문에 buzz가 답 못함 — momo RLS FORCE+member 모델이 구조적 답(포지셔닝 전면 배치 제안).
+- 판정: oort와 동일 신념(에이전트=1급 멤버·PG=SoT·키 비유입)의 거울상. 프로토콜은 oort 우위(seq/outbox/RLS를 buzz는 구조적으로 못 가짐), 가져갈 것은 로직 계층(오너 위임 캐스케이드·페이지 계약·wake-only 푸시·승인 체인)+상흔(에이전트 멘션 루프·킬스위치 미도달·RLS 공리 5·branch-skew 가드).
+- 커뮤니티 최대 쟁점=멀티 에이전트 권한 누출 질문에 buzz가 답 못함 — oort RLS FORCE+member 모델이 구조적 답(포지셔닝 전면 배치 제안).
 - 제안 액션 7건(§8, 전부 성재 결정 대기): RLS 공리 게이트·라이선스 게이트·branch-skew·에이전트 상호작용 안전 계약·UXUI Top5·포지셔닝·4~6주 후 재방문. 티켓/정본 반영 없음.
 
 ## 2026-07-22 (Fable ⑮ 랜딩·공개 게이트 확정) · Memory Plane 사용자 표면 완결 + 법무 5항 확정
 - **#646 MOMO-553 grant UI 랜딩(main c8bca25)** — design-review PASS(Blocker 0·High 0). 529의 X-11 잠금 완전 해제: Memory Plane이 추출→검색→packet→모델 주입→브라우저/인스펙터→**grant 부여/회수 UI**까지 전 표면 완결. 3 브랜치 동기, worker 0 — 계획 파이프라인 소진.
-- **공개 게이트 5항 성재 확정**(외부 법무 없이 내부 확정): dawnkim·DCO(CONTRIBUTING.md 구현)·momo 유지(상표 미등록 리스크 고지)·Centrifugo v6 Apache-2.0 실측·NOTICE 유지 절차. 실배포 리허설 2단계 일정 확정(Phase1 로컬=게이트 부채 후, Phase2=성재 VPS 요청 시점 명시).
+- **공개 게이트 5항 성재 확정**(외부 법무 없이 내부 확정): dawnkim·DCO(CONTRIBUTING.md 구현)·oort 유지(상표 미등록 리스크 고지)·Centrifugo v6 Apache-2.0 실측·NOTICE 유지 절차. 실배포 리허설 2단계 일정 확정(Phase1 로컬=게이트 부채 후, Phase2=성재 VPS 요청 시점 명시).
 - 다음: 게이트 부채 배치 → 리허설 Phase 1 → ADR-0117 기안. 후속 소형: 553 Medium(피커 암묵 대상·⌘⇧G), 546 승인 이력 다건.
 
 ## 2026-07-22 (Fable UXUI 소비 3장 랜딩 + 통합 사고 수습) · ⑫⑬⑭ main, 마커 사고 2건 해소·절차화
@@ -547,7 +547,7 @@
 ## 2026-07-22 (Fable 회귀 정비 + 온보딩 리서치 + 동생 반려) · runtime-agent rc=0, 제품 결함 1건 수정
 - **527 전 게이트 회귀 완주**(runtime-db 핵심 PASS + runtime-agent rc=0). 8층 부검: ①pgvector 이미지 glibc 계보(→trixie digest, 상주 스택은 원 env로 재생성) ②스냅샷 드리프트 2건 재기록(카피 변경 — 511-U 부채 해소) ③멘션 패리티 단정 UUID 케이스 ④packet 스키마 문자열 ⑤~⑦fail-closed 픽스처 전환(owner 멤버십+실 install/grant+capability 등재 — §4 10 성문화) ⑧**제품 결함: 승인 재개가 grant 없는 도구에서 침묵 실패**(resume payload {} → 워커 디코드 사망; e984d9c 수정 — 서버 null 발신+워커 evidence optional, 인간 결정=권위).
 - 부수 발견→후속 후보: **MOMO-539** 추출 워커 실패 백오프 부재(비-JSON 응답에 초당 수회 핫루프, 포이즌 배치 격리 없음). momo240_* 잔재 28100 선점 재확인(리클레임 사각).
-- **리서치 20-01**(성재 발제 2차): eve 공식 셀프호스트+커스텀 채널 1급 API 확인, 업계 수렴=양문형(URL 담아오기/자연어 만들기)+에이전트 명부(=momo 불변식). **Wave B/C 기안**(534 어댑터·536 URL 온보딩·537 agent_profile+ADR-0131·535 outbound·538 동봉 eve) 성재 결정 대기.
+- **리서치 20-01**(성재 발제 2차): eve 공식 셀프호스트+커스텀 채널 1급 API 확인, 업계 수렴=양문형(URL 담아오기/자연어 만들기)+에이전트 명부(=oort 불변식). **Wave B/C 기안**(534 어댑터·536 URL 온보딩·537 agent_profile+ADR-0131·535 outbound·538 동봉 eve) 성재 결정 대기.
 - **동생 #610 반려**(design-review Blocker 1: MomoWorkspaceCopy 우회 ~30 문자열 + High 4) — PR 코멘트로 반려 패킷 게시. iOS 공식 빌드 게이트는 내가 PASS 확인.
 
 ## 2026-07-22 (Fable 패브릭 3라운드) · Wave M/A 완주 — 528·531 랜딩, 엔진 배치 종결
@@ -558,7 +558,7 @@
 ## 2026-07-22 (Fable 패브릭 2라운드) · 527·533 랜딩 + main 머지 + M-3/A-3 스폰 + 플랫폼 에이전트 리서치
 - **랜딩→main(e7c6592)**: #611 MOMO-527 pgvector+FTS+RRF(verify_memory_search 전 항목 PASS) / #612 MOMO-533 work_tool_profile(verifier PASS). track/engine 완전 랜딩(main과 동기). **528(#598)·531(#601) worker 스폰** — 528에 델타2 서빙 필터+memory_search_hybrid grant 확장 지시.
 - 검수 발견 3건(패킷 §4 성문화): 포트 28040대는 attachment와 충돌(신규=28100대부터, 27850~28093 사용 중) / 시드에 message 행 없음(verifier는 API 생성 — memory_plane 패턴) / Swift Int=bigint 바인딩이 SQL 함수 integer 파라미터 해석 실패(500) → `::integer` 캐스트. 마이그레이션 병렬 충돌: 028 중복 → 533을 029 리넘버.
-- **리서치 20-00**(성재 발제): eve/Cloudflare 플랫폼 에이전트 = hermes와 본질 동일(차이=거주지·컨텍스트 소유자). momo=경쟁 아닌 "에이전트가 출근하는 사무실". 권고: MOMO-534(eve/CF momo 채널 어댑터)·535(outbound 이벤트 구독)·0130 D4 상향. 성재 결정 대기.
+- **리서치 20-00**(성재 발제): eve/Cloudflare 플랫폼 에이전트 = hermes와 본질 동일(차이=거주지·컨텍스트 소유자). oort=경쟁 아닌 "에이전트가 출근하는 사무실". 권고: MOMO-534(eve/CF oort 채널 어댑터)·535(outbound 이벤트 구독)·0130 D4 상향. 성재 결정 대기.
 - 남은 것: 전 게이트 회귀(pgvector 이미지 영향 — internal-alpha 실행 예정), 528/531 검수·랜딩 후 동생 ⑩⑪ 개방, 공개 게이트 법무 패키지.
 
 ## 2026-07-22 (Fable 패브릭 1라운드) · 526·530·W-6 랜딩 + 비전 정합 델타 + 공개 게이트 준비
@@ -569,7 +569,7 @@
 
 ## 2026-07-22 (Fable 기획 3차) · Momo Archive 재구성 + 메신저 심화 리서치 v0.2 (노션 정본)
 - 성재 발제(집필·스터디): 노션 허브 **"Momo Archive"**(3a4c5b1cae0481739c9bc660205fc346) 개설 — 5.6 sol의 Messenger Systems Bible v0.1(00~09장)·결정 패키지·심화 리서치를 한 지붕으로 이동·체계화.
-- **심화 리서치 5편 집필·게시**(1차 자료 직접 검증): 프레이밍(Geoffrey Litt "Understanding is the new bottleneck" — 제목 정정, 발표자 블로그 문서판 전문 확보) / Slack(QCon 2016+slack.engineering 12건, v0.1 교정 3건) / Discord(blog 11건+이미지 6종 육안 검증) / Mattermost(GitHub master 소스 검증 — Save↔Publish 무보장 구멍=momo outbox 정당성의 직접 증거) / Teams(MS Learn — compliance 쌍방향 기판). 각 편에 momo 대조 시사점 7~8개 포함(outbox·seq·RLS·MPNS 동형 확인).
+- **심화 리서치 5편 집필·게시**(1차 자료 직접 검증): 프레이밍(Geoffrey Litt "Understanding is the new bottleneck" — 제목 정정, 발표자 블로그 문서판 전문 확보) / Slack(QCon 2016+slack.engineering 12건, v0.1 교정 3건) / Discord(blog 11건+이미지 6종 육안 검증) / Mattermost(GitHub master 소스 검증 — Save↔Publish 무보장 구멍=oort outbox 정당성의 직접 증거) / Teams(MS Learn — compliance 쌍방향 기판). 각 편에 oort 대조 시사점 7~8개 포함(outbox·seq·RLS·MPNS 동형 확인).
 - 개념도 3종 codex(gpt-image) 생성(세 평면·Slack 3시대·Mattermost ledger-first) — 로컬 PNG, 노션 첨부는 성재 드래그 필요(MCP가 로컬 바이너리 업로드 미지원).
 - 이 작업은 노션이 정본(레포 비반영). 바이블 v0.2 개정 시 심화 리서치가 근거 문서.
 
@@ -608,12 +608,12 @@
 
 ## 2026-07-21 (Fable 오픈소스 배치 완결) · 519 랜딩 — 배치 4/4, track/engine=main+5 승인 대기
 - #562 MOMO-519 티어 폴백 랜딩(track/engine 9cae37e): docker verifier 최종 PASS(ask/t1_only/auto/orphan/resume/push/RLS). 검수 중 verifier 결함 4종을 오케스트레이터가 수정(포트 중복 28023 → hermes 28024 분리 / INSERT...SELECT uuid·message_type·jsonb 캐스트 / Swift UUID 대문자 vs 시드 소문자 lower() 3곳 / RLS 단정 psql -q 부재로 명령 태그 오염). keep-stack 부검으로 구현 무죄 확정(카드·RLS 전부 정상 — 단정만 결함). X-8 done(#560 remoteAttachAvailable).
-- perm-research 서브에이전트 좀비화(named spawn mailbox 전례 재발 — 메모리 교훈 위반, 재확인) → 손절, InfoQ 직접 fetch + 공지식으로 research/18-permissions-workspaces/00 작성(Slack V1→Grid→Unified Grid·Vitess 채널 샤딩·권한 헬퍼 중앙화 / Discord 계층·kick/ban / Mattermost·Matrix / 공통 패턴 8 / momo 시사점: 재샤딩 불요·0117=스키마 작업).
+- perm-research 서브에이전트 좀비화(named spawn mailbox 전례 재발 — 메모리 교훈 위반, 재확인) → 손절, InfoQ 직접 fetch + 공지식으로 research/18-permissions-workspaces/00 작성(Slack V1→Grid→Unified Grid·Vitess 채널 샤딩·권한 헬퍼 중앙화 / Discord 계층·kick/ban / Mattermost·Matrix / 공통 패턴 8 / oort 시사점: 재샤딩 불요·0117=스키마 작업).
 - **성재 대기**: ①track/engine→main 머지 승인(main+5: 560 관전·561 웹·562 폴백) ②ADR-0127(S3 스토리지) ③ADR-0128(멤버십 수명주기 — MOMO-523~525 발급 대기). 유지: momowebqa+vite(:5173) 성재 육안용.
 
 ## 2026-07-21 (Fable 오픈소스 배치) · 웹 탄생 + 관전 attach 랜딩 + 티어폴백 검수 중 + 권한 ADR-0128 기안
 - 성재 승인: 이중트랙 main 머지(8f9408f) + 우선순위 실행. ADR: 0126(관전)·0125 D11(티어폴백) **Accepted**, 0127(S3 스토리지)·0128(멤버십 수명주기 — 역할변경/suspend/kick/**ban**/self-leave/audit/에이전트 대칭) **Proposed 성재 대기**. 진단 2건: 2026-07-21-opensource-cowork-diagnosis.md(웹=0119 기이행 대기·셀프호스트 갭 4·cowork 갭 4) / 2026-07-21-permissions-workspace-diagnosis.md(P1~P7 — 초대는 강함, 수명주기 API 전무, 0117 멀티워크스페이스 미기안).
-- **랜딩(track/engine)**: #560 MOMO-516 관전 attach(observer capability+X-8 remoteAttachAvailable — verifier+511 회귀 PASS) / #561 **W-2 clients/web**(Vite+React, vitest 20·실서버 육안·실전송 PASS — momo 세 번째 클라이언트. 컴포저 범위초과=deviation accepted, W-4 축소로 상쇄). track/engine=main+3(560·561 머지커밋 포함).
+- **랜딩(track/engine)**: #560 MOMO-516 관전 attach(observer capability+X-8 remoteAttachAvailable — verifier+511 회귀 PASS) / #561 **W-2 clients/web**(Vite+React, vitest 20·실서버 육안·실전송 PASS — oort 세 번째 클라이언트. 컴포저 범위초과=deviation accepted, W-4 축소로 상쇄). track/engine=main+3(560·561 머지커밋 포함).
 - **진행 중**: #562 MOMO-519 티어폴백 검수 — notifier/workd 테스트 PASS, verify_tier_fallback은 worker의 포트 중복 버그(HERMES=PUSH=28023) 발견·오케스트레이터 직접 수정(HERMES→28024) 후 3차 실행 중. 이 수정은 559 브랜치에 커밋 필요. Slack/Discord 권한 리서치(deep-research) 마감 요청함 — 도착 시 research/18-permissions-workspaces/00에 저장.
 - 유지 중 스택: momowebqa(:28000)+vite dev(:5173 — 성재 육안용 크레덴셜은 QA_FOLLOWUP Q9 계정). worker 사고 1건(zsh 1-기반 배열로 워크트리 매핑 어긋남 — main 무사, 재발 방지: spawn 루프에 명시 매핑 사용).
 
@@ -659,7 +659,7 @@
 ## 2026-07-20 (Fable 엔진 트랙) · X-6(493)+work_pool(489) 랜딩 — 0125 파생 3/4 완료
 - 493(#529): auto-approve GET(human 전용·자기것만·tool만) — A-11 소비 짝. 489(#531): work_pool 슬롯 원장(FOR UPDATE 직렬화·구조화 409·집계 회복·admin audit). 둘 다 verifier+게이트 실패 0.
 - 검수 실측 결함 1건(489): 기본행 included_active_hours=NULL이 audit jsonb_build_object 바인딩에서 타입 미상 PSQLError→빈 본문 500 — 스택 유지 재현으로 확정, ::int 캐스트 수정. **jsonb 내 nullable 바인딩은 명시 캐스트** 교훈.
-- track/engine = main+2(493·489). 0125 파생 잔여: 490(UXUI 호스트 선택기 — A-11 뒤 동생 큐)·momo Cloud 프로비저너(T3 파일럿 후). 다음: 동생 A-11 검수 대기, 491(openssl 이식) 소형 정리 후보.
+- track/engine = main+2(493·489). 0125 파생 잔여: 490(UXUI 호스트 선택기 — A-11 뒤 동생 큐)·oort Cloud 프로비저너(T3 파일럿 후). 다음: 동생 A-11 검수 대기, 491(openssl 이식) 소형 정리 후보.
 
 ## 2026-07-20 (Fable 통합) · A-10 Work Console 검수 완료 + QA 팔로업 트래커 개설
 - track/uxui@940369e(5169ef5, +2,311) A-10 검수: 코드 결함 0. SwiftTerm 1.14.0(MIT, exact pin·macOS 전용)·환경 allowlist(PATH/SHELL/TMPDIR만·TOKEN/cwd/PWD 배제 테스트)·host 필터·control dedup·세션종료 dedup·raw 로컬 파일 전용·샌드박스 fail-closed. macos-ui 게이트+420 tests PASS(동생 보고).
@@ -793,12 +793,12 @@
 ## 2026-07-17 (Fable 엔진 트랙+성재) · Drive 실 SA smoke PASS — 경로 C 전 구간 종결
 - 성재가 런북 §2~§5 수행(GCP momo-dawn, SA momo-archive, 공유 드라이브 0AHKTseTvG-mpUk9PVA). 관문 2개 실측 기록: ①Google secure-by-default 조직 정책이 SA 키 발급 차단 → 프로젝트 한정 재정의(legacy+managed 둘 다) ②조직 정책 관리자 역할 선행 필요.
 - 오케스트레이터 smoke(§7.1): drives.get/files.list/changes.startPageToken 3종 200. scope 실증 — drive.file 403 → drive.readonly 확정(GoogleDriveSABackend 기구현과 일치, 코드 무변경). 키 바이트 무출력·레포 밖 보관.
-- 남은 성재 결정 2건 유지: S-4 단축링크(momo.app), P-3 푸시(.p8 대기 — 개인 유료 계정 확인됨).
+- 남은 성재 결정 2건 유지: S-4 단축링크(oort.app), P-3 푸시(.p8 대기 — 개인 유료 계정 확인됨).
 
 ## 2026-07-17 (Fable 엔진 트랙) · MOMO-459 openapi 플러그인 표면 + SA smoke 대기
 - `c109043`: 플러그인/webhook/Drive MCP 25 paths·30 operations 명세, 라이브 대조 41/41 PASS. 리뷰에서 expires_at_ms 오배치 교정(선재 approvals drift 동시 마감). 미기재 표면 목록은 PR #469 본문에 보존(후속 문서 티켓 후보).
 - Drive 실 SA smoke: 성재에게 GCP 단계 안내 전달 완료(런북 §2~§5) — Workspace 유무 확인 대기, 산출물 계약 = SA 키 파일(~/.momo-secrets/) + 공유 드라이브 ID.
-- ADR-0121 잔여는 성재 결정 대기: S-4 단축링크(momo.app 도메인/호스팅), S-5는 ADR-0120 P-3(Apple Developer — 성재 개인 유료 계정 사용 가능 확인) 선행.
+- ADR-0121 잔여는 성재 결정 대기: S-4 단축링크(oort.app 도메인/호스팅), S-5는 ADR-0120 P-3(Apple Developer — 성재 개인 유료 계정 사용 가능 확인) 선행.
 
 ## 2026-07-17 (Fable 엔진 트랙) · MOMO-458 오피셜 라인업 마감
 - `f9085dd`: Notion/Linear 왕복 검증(3-플러그인 정확 집합 + 개별 revoke 차집합) + 카탈로그 `recommended`(ADR-0113 D6 세트 {github, drive, external_webhook}) — 마켓플레이스 UI(#462)가 소비할 서버 계약 성립.
@@ -855,7 +855,7 @@
 
 ## 2026-07-17 (Fable, 오케스트레이터) · SE-04A 종결 + 발열 사고 진단·방지 계약
 - MOMO-410(PR #435 `1809551`) 종결 — 플러그인 물리 기반 랜딩. 리뷰 H1/M1/M2 반영, plugin verifier+runtime-db PASS. 크로스트랙 오커밋 사고(add -A → main macOS 빌드 파손)를 e1a9b78 revert로 수습, UX 작업분 보존.
-- **발열 과부하 진단(성재 발제, Opus 세션 병행)**: 원인 절반=정상 동시부하(tf-hwp+momo 2트랙+VM 콜드빌드), 절반=구조 결함 — ①runtime-db 게이트의 `make up`이 스택을 내리지 않아 게이트 런마다 postgres+centrifugo 잔재 생성(주 생성자=이 세션의 오케스트레이션) ②게이트 중첩. 조치: 유휴 스택 5벌 down(활성 433·momo_main 보존), builder 2.5GB+볼륨 5.6GB 회수.
+- **발열 과부하 진단(성재 발제, Opus 세션 병행)**: 원인 절반=정상 동시부하(tf-hwp+oort 2트랙+VM 콜드빌드), 절반=구조 결함 — ①runtime-db 게이트의 `make up`이 스택을 내리지 않아 게이트 런마다 postgres+centrifugo 잔재 생성(주 생성자=이 세션의 오케스트레이션) ②게이트 중첩. 조치: 유휴 스택 5벌 down(활성 433·momo_main 보존), builder 2.5GB+볼륨 5.6GB 회수.
 - **재발 방지 계약(오케스트레이터 의무)**: ①게이트 런 종료 즉시 해당 compose project down ②docker-heavy 게이트 직렬화(동시 1개) ③배치 종결마다 janitor+prune, 주 1회 reclaim --aggressive ④무거운 병행 작업 시 worker 동시 수 1-2 제한. tooling 후보: local_gate.sh `--down` 플래그(티켓 발급은 머신 안정 후).
 - 다음: ADR-0115(signed webhook+Slack-호환 모드) draft → SE-04B. 무거운 게이트는 머신 부하 확인 후 실행.
 
@@ -1148,7 +1148,7 @@
 - prod compose/env/preflight를 shared SHA tag·per-image digest rollback·migrate-first로 정렬했다. Docker/AWS/verifier/local gate는 미실행(`runtime-unverified`).
 
 ## 2026-07-13 (momo-main/Fable) · ADR-0111 기안 (Agent Work Surface, 성재 발제) + UI W1/Phase A 스폰
-- 성재 발제: 메신저 내 업무·터미널·코드 작업(특화 에이전트 + codex 오픈소스 활용) → ADR-0111 Proposed 기안. Option A(BYOA 실행: momo 서버는 코드 실행 안 함, codex CLI=에이전트 호스트 엔진, sandbox→승인 티어 매핑, capability 배지 명시 선택) 권장.
+- 성재 발제: 메신저 내 업무·터미널·코드 작업(특화 에이전트 + codex 오픈소스 활용) → ADR-0111 Proposed 기안. Option A(BYOA 실행: oort 서버는 코드 실행 안 함, codex CLI=에이전트 호스트 엔진, sandbox→승인 티어 매핑, capability 배지 명시 선택) 권장.
 - ROADMAP §1.4 overlay 추가, MOMO-362..365 예약(Accepted 전 발급 금지). ADR-0109(unread)도 같은 날 Proposed.
 - UI W1(357 `#347`/359 `#348`)+Phase A(360 `#349`/361 `#350`) worker 4기 스폰, 358 `#351`은 357 랜딩 대기.
 - 성재 판정(같은 날): **ADR-0111 Accepted (Option A=BYOA)** + **ADR-0109 Accepted**. Work 배치·Wave 2 모두 현행 배치 랜딩 후 발급으로 확정.
@@ -1185,7 +1185,7 @@
 - 다음: worker PR handoff 후 momo-main이 clean/root runtime-agent+macos-ui와 snapshot 영향 없음 확인 후 merge한다 (`runtime-unverified`).
 
 ## 2026-07-13 (Codex worker) · MOMO-356 gateway 운영 공지 timeline 차단
-- 어댑터 direct message write를 momo `run_id`가 있는 실제 agent final로 제한하고, Hermes reset/home/`/resume`·`/sethome`/model-provider 공지는 성공 처리+본문 비포함 로컬 로그로만 남겼다. native gateway final은 `/gateway/complete` 유지.
+- 어댑터 direct message write를 oort `run_id`가 있는 실제 agent final로 제한하고, Hermes reset/home/`/resume`·`/sethome`/model-provider 공지는 성공 처리+본문 비포함 로컬 로그로만 남겼다. native gateway final은 `/gateway/complete` 유지.
 - Hermes 정식 `MOMO_HOME_CHANNEL`을 plugin/enablement/`hermes-gateway-init` 신규·기존 env에 연결해 설정 요구를 기동 전에 해결했다. `schema_v0.sql`·UI·스냅샷 변경 없음.
 - adapter contract 54 tests+smoke+pycompile, 실제 SDK result 및 신규·legacy home env init, 수정 shell `bash -n`/실행권한, diff check PASS. verifier DB assertion/runtime-agent gate는 worker 금지로 미실행.
 - 다음: 오케스트레이터가 clean/root `runtime-agent`를 수행하고 gate 체크박스/merge를 맡는다.
@@ -1380,7 +1380,7 @@
 - 다음: 성재의 0102 결정 → 파생 티켓. #307 PR 오면 momo-main 리뷰 사이클 가동.
 
 ## 2026-07-30 (오후) · Fable · 기획
-- 한 일: 서버 스택 **B안 확정**(성재 승인) — Swift/Hummingbird→Rust/Axum **재작성**, buzz는 fork 아니라 코드 레퍼런스, momo 불변식 6개 보존. **ADR-0145 Accepted**로 개정(A안 fork→스파이크 불성립→B안). **ADR-0146 Proposed** 발제(에이전트 행동 provenance 서명, buzz 강점 조각을 Ed25519 additive로 차용, 단일쓰기경로·RLS 무손상). **실행 정본 `docs/planning/2026-07-30-server-rewrite-plan.md`** 신설 — 설계-우선(Phase 0 D1~D6 → 구현 배치 B1~B5). 저위험 핵심 = 불변식이 DB에 살아 마이그레이션 재사용, 재작성은 앱 계층 번역.
+- 한 일: 서버 스택 **B안 확정**(성재 승인) — Swift/Hummingbird→Rust/Axum **재작성**, buzz는 fork 아니라 코드 레퍼런스, oort 불변식 6개 보존. **ADR-0145 Accepted**로 개정(A안 fork→스파이크 불성립→B안). **ADR-0146 Proposed** 발제(에이전트 행동 provenance 서명, buzz 강점 조각을 Ed25519 additive로 차용, 단일쓰기경로·RLS 무손상). **실행 정본 `docs/planning/2026-07-30-server-rewrite-plan.md`** 신설 — 설계-우선(Phase 0 D1~D6 → 구현 배치 B1~B5). 저위험 핵심 = 불변식이 DB에 살아 마이그레이션 재사용, 재작성은 앱 계층 번역.
 - 이어서: **Phase 0 설계 6/6 완료**. D1 crate 레이아웃 확정(공유5 db·outbox·wire·auth·provider + 도메인3 굵게 messaging·t3·integrations + 바이너리5 — 성재 승인: 공유는 별도 crate, 도메인 굵게 출발). D2 불변식 7개×[강제·DB백스톱·red]. D3 ADR-0146 범위 확정(성재 "상태 전이까지 넓게" → 3표면 서명·사이드카 action_signature·record_provenance chokepoint·불변식 무손상). D4 buzz 인용 카탈로그·D5 커토버 빅뱅 확정·D6 배치분할(B0 골격+B1~B5, provenance 분산).
 - 열린 것: **성재 Phase 0 전체 승인 대기** → 승인 시 B0(워크스페이스 골격)부터 워커 착수. ADR-0146 세부(페이로드 바이트·device 키 시점·UX 표식) 확정 후 Accept 승격. 승인 전 재작성 코드 금지. NCP smoke(§독립)·열린 티켓 #925·#926·#893 병존.
 
@@ -1542,7 +1542,7 @@
 - 열린 것: **Centrifugo `allowed_origins` 정책**(RN이 Origin을 보냄 — **릴리즈 빌드 Origin 실측 선행**, dev 측정으로 보안을 깎지 않는다) · `CODE_SIGNING_ALLOWED=NO` 시뮬 빌드는 키체인 불가라 **세션 복원 회귀를 영영 못 잡음**(게이트 신뢰성) · 메시지 액션/스레드/검색(다음 배치) · NSE 타깃 추가(순서 5) · 실기기·실서버 왕복.
 
 ## 2026-08-03 · Fable · 오케스트레이션 — 푸시 종단 구축 + RN 결함 정리 + 후속 청소 (검수 준비 완료)
-- **푸시 파이프라인 종단 구축(오케스트레이터 직접 배포)**. 구간별: ①`momo_notifier` DB 롤 신규 생성(prod `bootstrap_runtime_roles.sql`이 3개만 만드는 갭 — BYPASSRLS·`momo_join_private` 차단 확인, 비번은 서버에서 생성해 서버에만) ②PushRelay amd64 빌드→배포→기동(`senderMode=live`·`registeredServers=1`) ③서버 Ed25519 키쌍 생성·등록(개인키 서버 밖 미유출) ④**APNs 자격증명 실증** — 가짜 토큰 dispatch에 Apple이 `400 BadDeviceToken`+`apns_id` 반환 = **키(`4SSR3XS7WZ`)·Key ID·Team(`YWQQFQM38J`)·topic·시계·아웃바운드 443 전부 유효**. momo Swift 시절 키가 그대로 산다 ⑤Rust 이미지 재빌드·배포(#963의 `notifier` 역할이 구이미지에 없었다) ⑥drain 가동. 8서비스 running, 라이브 `/` 200·WSS 101.
+- **푸시 파이프라인 종단 구축(오케스트레이터 직접 배포)**. 구간별: ①`momo_notifier` DB 롤 신규 생성(prod `bootstrap_runtime_roles.sql`이 3개만 만드는 갭 — BYPASSRLS·`momo_join_private` 차단 확인, 비번은 서버에서 생성해 서버에만) ②PushRelay amd64 빌드→배포→기동(`senderMode=live`·`registeredServers=1`) ③서버 Ed25519 키쌍 생성·등록(개인키 서버 밖 미유출) ④**APNs 자격증명 실증** — 가짜 토큰 dispatch에 Apple이 `400 BadDeviceToken`+`apns_id` 반환 = **키(`4SSR3XS7WZ`)·Key ID·Team(`YWQQFQM38J`)·topic·시계·아웃바운드 443 전부 유효**. oort Swift 시절 키가 그대로 산다 ⑤Rust 이미지 재빌드·배포(#963의 `notifier` 역할이 구이미지에 없었다) ⑥drain 가동. 8서비스 running, 라이브 `/` 200·WSS 101.
   - **fail-closed가 두 번 내 실수를 잡았다**: 서명키 권한 부족에 notifier가 **부팅 거부**(조용한 무동작이었으면 "왜 안 오지"를 한참 헤맸다). `.p8` 전송은 **보안 분류기가 차단** → 우회하지 않고 성재에게 한 줄 위임(개인 서명키 반출은 사람 승인이 맞다).
   - 스키마 실측: dispatch v2는 15키 평면 구조(id-only), 허용 `reason` 4종·`category` 4종.
 - **PUSH-1(#973)** — relay Dockerfile+compose 오버레이(기존 compose **0줄 변경**). **relay fail-open 발견·차단**: `MOMO_APNS_SENDER=stub`이 Apple 미접속인데 `200`+조작 apns-id를 돌려줘 notifier가 배달 완료로 정산 → 기기는 영원히 안 울리는데 로그·메트릭·헬스체크가 전부 초록. 이제 `MOMO_APNS_ALLOW_STUB=1` 없이는 부팅 거부. 증거는 **기존 테스트가 opt-in 없이 stub 성공을 단언**하고 있던 것. 또 `verify_push_relay.sh`가 jq 인용 오류로 **HEAD에서 한 번도 통과한 적 없었다**(내가 구판 실행으로 확인 — 이번 세션 세 번째 죽은 게이트).
