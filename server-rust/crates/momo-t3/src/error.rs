@@ -63,7 +63,7 @@ pub enum T3Error {
 
     /// Pre-flight balance check (not part of `t3_terminate`): the workspace has
     /// no credit to start a paid session with.
-    #[error("workspace has no momo Cloud credit")]
+    #[error("workspace has no oort Cloud credit")]
     InsufficientCredit,
 
     /// `work_host_usage_one_unsettled_per_host_idx` (051:33): this cloud host
@@ -72,11 +72,11 @@ pub enum T3Error {
     HostAlreadyBilling,
 
     /// All workspace slots are occupied (`work_pool.max_active`).
-    #[error("momo Cloud slots exhausted ({occupied}/{max_active})")]
+    #[error("oort Cloud slots exhausted ({occupied}/{max_active})")]
     SlotsExhausted { occupied: i32, max_active: i32 },
 
     /// The requesting member is at their own concurrent-instance limit.
-    #[error("member momo Cloud limit reached ({occupied}/{limit})")]
+    #[error("member oort Cloud limit reached ({occupied}/{limit})")]
     MemberSlotLimit { occupied: i32, limit: i32 },
 
     /// The cloud host is not in a state that can carry a running session.

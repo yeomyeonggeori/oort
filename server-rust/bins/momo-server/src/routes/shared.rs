@@ -65,13 +65,14 @@ pub(crate) fn audit_via_token_id(principal: &Principal) -> Option<Uuid> {
     }
 }
 
-/// `momo Cloud(T3)는 기본 비활성입니다` — Swift `CloudProvisionerRoutes.disabledError`
-/// (:1183-1188), 503 verbatim so an operator sees the same sentence they would
-/// from the Swift server.
+/// `oort Cloud(T3)는 기본 비활성입니다` — Swift `CloudProvisionerRoutes.disabledError`
+/// (:1183-1188), same 503 and same sentence an operator would see from the Swift
+/// server, with the product name carried to `oort` (ADR-0152 D2-1). The brand
+/// word is the only difference; the shape and the issue reference are verbatim.
 pub(crate) fn t3_disabled() -> ApiError {
     ApiError::new(
         StatusCode::SERVICE_UNAVAILABLE,
-        "momo Cloud(T3)는 기본 비활성입니다. 재설계 진행 중(#888)입니다.",
+        "oort Cloud(T3)는 기본 비활성입니다. 재설계 진행 중(#888)입니다.",
     )
 }
 
@@ -95,7 +96,7 @@ pub(crate) fn ready_t3(settings: &T3Settings) -> Result<String, ApiError> {
     settings.ready_public_base_url().ok_or_else(|| {
         ApiError::new(
             StatusCode::SERVICE_UNAVAILABLE,
-            "momo Cloud 프로비저너 설정이 완전하지 않습니다. 인스턴스 운영자에게 문의하세요.",
+            "oort Cloud 프로비저너 설정이 완전하지 않습니다. 인스턴스 운영자에게 문의하세요.",
         )
     })
 }
@@ -112,7 +113,7 @@ pub(crate) fn t3_error(context: &str, error: T3Error) -> ApiError {
     match error {
         T3Error::Db(inner) => db_error_status(context, inner),
         T3Error::SessionNotFound => ApiError::not_found("work session not found"),
-        T3Error::CloudHostNotFound => ApiError::not_found("momo Cloud host not found"),
+        T3Error::CloudHostNotFound => ApiError::not_found("oort Cloud host not found"),
         // ADR-0140 enforcement points: all conflicts, all retryable-or-not by a
         // client that can read the message.
         error @ (T3Error::IllegalTransition(_)
@@ -128,7 +129,7 @@ pub(crate) fn t3_error(context: &str, error: T3Error) -> ApiError {
         | T3Error::IntervalStateConflict) => conflict(error.to_string()),
         T3Error::UnknownProvider(_) | T3Error::Provider(_) => ApiError::new(
             StatusCode::SERVICE_UNAVAILABLE,
-            "momo Cloud 호스트를 준비하지 못했습니다. 잠시 후 다시 시도하세요.",
+            "oort Cloud 호스트를 준비하지 못했습니다. 잠시 후 다시 시도하세요.",
         ),
         // A ladder misuse, a missing work_pool row, or a reason this server
         // chose itself are all server bugs, not client input.
