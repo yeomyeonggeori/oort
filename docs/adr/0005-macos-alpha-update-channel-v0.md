@@ -12,7 +12,7 @@ The repo is not yet at full M4 distribution exit. `MomoMac.xcodeproj` exists as 
 
 ## Decision
 
-momo will use Sparkle 2 as the preferred macOS direct-distribution update engine for the alpha channel, with a local/file manifest fallback until signed/notarized artifacts and appcast infrastructure exist.
+oort will use Sparkle 2 as the preferred macOS direct-distribution update engine for the alpha channel, with a local/file manifest fallback until signed/notarized artifacts and appcast infrastructure exist.
 
 The v0 implementation has two layers:
 

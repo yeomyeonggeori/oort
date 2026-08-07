@@ -1,6 +1,6 @@
-# momo 보안 판단 자료
+# oort 보안 판단 자료
 
-이 문서는 조직이 momo를 도입할지 판단할 때 읽는, 구현과 결정 기록에 연결된 한국어 자료다. 취약점 신고 절차와 지원 범위는 영문 [Security Policy](../../SECURITY.md)를 따른다. 여기서 말하는 경계는 현재 저장소의 코드와 ADR에 근거하며, 인증·심사·무결함을 보증하지 않는다.
+이 문서는 조직이 oort를 도입할지 판단할 때 읽는, 구현과 결정 기록에 연결된 한국어 자료다. 취약점 신고 절차와 지원 범위는 영문 [Security Policy](../../SECURITY.md)를 따른다. 여기서 말하는 경계는 현재 저장소의 코드와 ADR에 근거하며, 인증·심사·무결함을 보증하지 않는다.
 
 ## 신뢰 경계
 
@@ -25,9 +25,9 @@ flowchart LR
     class D dawn;
 ```
 
-실선은 momo 설치가 처리하는 경로이고, 점선은 선택적인 Dawn push 경로다. 기본 API·DB·realtime·agent 실행·파일·백업 요청은 Dawn을 통과하지 않는다. relay가 받는 것은 device routing, badge, channel/message 식별자 또는 hash뿐이며 본문·prompt·첨부는 포함하지 않는다. relay를 등록하지 않으면 push만 사용할 수 없고 momo 자체는 계속 사용할 수 있다. [근거: README 55–76행](../../README.md#L55-L76), [ADR-0120 D2](../adr/0120-push-notification-boundary.md#L21-L24)
+실선은 oort 설치가 처리하는 경로이고, 점선은 선택적인 Dawn push 경로다. 기본 API·DB·realtime·agent 실행·파일·백업 요청은 Dawn을 통과하지 않는다. relay가 받는 것은 device routing, badge, channel/message 식별자 또는 hash뿐이며 본문·prompt·첨부는 포함하지 않는다. relay를 등록하지 않으면 push만 사용할 수 없고 oort 자체는 계속 사용할 수 있다. [근거: README 55–76행](../../README.md#L55-L76), [ADR-0120 D2](../adr/0120-push-notification-boundary.md#L21-L24)
 
-외부 agent/provider는 별도 신뢰 경계다. momo는 제한된 작업 컨텍스트를 해당 backend로 직접 보낼 수 있으나 Dawn을 경유하지 않는다. provider의 Codex/OpenAI OAuth와 원본 API key는 provider가 소유하며 momo는 이를 저장·proxy·log·persist하지 않는다. [근거: README 70–76행](../../README.md#L70-L76), [ADR-0004 8–20행](../adr/0004-codex-oauth-hermes-provider-boundary.md#L8-L20)
+외부 agent/provider는 별도 신뢰 경계다. oort는 제한된 작업 컨텍스트를 해당 backend로 직접 보낼 수 있으나 Dawn을 경유하지 않는다. provider의 Codex/OpenAI OAuth와 원본 API key는 provider가 소유하며 oort는 이를 저장·proxy·log·persist하지 않는다. [근거: README 70–76행](../../README.md#L70-L76), [ADR-0004 8–20행](../adr/0004-codex-oauth-hermes-provider-boundary.md#L8-L20)
 
 ## 적용된 통제
 
@@ -41,11 +41,11 @@ API는 현재 DB role이 정확히 `momo_app`이고, superuser도 `BYPASSRLS`도
 
 ### 자격증명과 provider
 
-Codex/OpenAI OAuth authorization/access/refresh token과 provider API key는 momo의 app·API·worker·DB·diagnostics·local gate evidence 경계 밖이다. 외부 provider verifier는 이 환경변수가 momo 검증 프로세스에 전달되면 실패한다. [근거: ADR-0004 8–15행, 37–44행](../adr/0004-codex-oauth-hermes-provider-boundary.md#L8-L15), [verifier 183–197행](../../scripts/verify_external_agent_provider.sh#L183-L197)
+Codex/OpenAI OAuth authorization/access/refresh token과 provider API key는 oort의 app·API·worker·DB·diagnostics·local gate evidence 경계 밖이다. 외부 provider verifier는 이 환경변수가 oort 검증 프로세스에 전달되면 실패한다. [근거: ADR-0004 8–15행, 37–44행](../adr/0004-codex-oauth-hermes-provider-boundary.md#L8-L15), [verifier 183–197행](../../scripts/verify_external_agent_provider.sh#L183-L197)
 
 ### 첨부
 
-업로드 요청은 archive backend가 만든 upload URL을 클라이언트에 반환하므로 업로드 바이트는 capability URL로 직접 전송된다. momo는 세션 생성 전후에 채널 멤버십을 확인하고 pending attachment·감사 기록을 만든다. [근거: `AttachmentRoutes` 60–90행, 119–125행](../../server/Sources/MomoServer/Routes/AttachmentRoutes.swift#L60-L90) 완료 시에는 저장소가 보고한 크기·MIME·file ID를 요청 때 저장한 값과 대조한다. [근거: `AttachmentRoutes` 152–209행](../../server/Sources/MomoServer/Routes/AttachmentRoutes.swift#L152-L209)
+업로드 요청은 archive backend가 만든 upload URL을 클라이언트에 반환하므로 업로드 바이트는 capability URL로 직접 전송된다. oort는 세션 생성 전후에 채널 멤버십을 확인하고 pending attachment·감사 기록을 만든다. [근거: `AttachmentRoutes` 60–90행, 119–125행](../../server/Sources/MomoServer/Routes/AttachmentRoutes.swift#L60-L90) 완료 시에는 저장소가 보고한 크기·MIME·file ID를 요청 때 저장한 값과 대조한다. [근거: `AttachmentRoutes` 152–209행](../../server/Sources/MomoServer/Routes/AttachmentRoutes.swift#L152-L209)
 
 첨부 content 조회는 같은 workspace의 archived 되지 않은 채널에 속한 active member만 통과한다. [근거: `AttachmentRoutes` 371–397행](../../server/Sources/MomoServer/Routes/AttachmentRoutes.swift#L371-L397) S3 backend의 presigned URL 기본 만료는 900초(15분)다. [근거: `S3ArchiveClient` 83–109행](../../server/Sources/MomoServer/Drive/S3ArchiveClient.swift#L83-L109)
 
@@ -59,7 +59,7 @@ Drive plugin migration은 credential과 shared-drive identifier를 DB에 저장�
 
 ### 배포·소스 공개
 
-momo는 Apache-2.0이고 기여에는 DCO를 사용하며 별도 CLA를 요구하지 않는다. [근거: README 159–164행](../../README.md#L159-L164), [CONTRIBUTING 3–13행](../../CONTRIBUTING.md#L3-L13) Tauri **next** 채널은 minisign 업데이트 서명과 Developer ID 서명·공증·staple 절차를 문서화한다. [근거: `NEXT_CHANNEL` 31–60행](../NEXT_CHANNEL.md#L31-L60)
+oort는 Apache-2.0이고 기여에는 DCO를 사용하며 별도 CLA를 요구하지 않는다. [근거: README 159–164행](../../README.md#L159-L164), [CONTRIBUTING 3–13행](../../CONTRIBUTING.md#L3-L13) Tauri **next** 채널은 minisign 업데이트 서명과 Developer ID 서명·공증·staple 절차를 문서화한다. [근거: `NEXT_CHANNEL` 31–60행](../NEXT_CHANNEL.md#L31-L60)
 
 ## 현재 한계와 도입 시 확인할 점
 

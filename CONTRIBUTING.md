@@ -1,6 +1,6 @@
-# Contributing to momo
+# Contributing to oort
 
-momo는 Apache-2.0으로 배포됩니다. 기여를 환영합니다.
+oort는 Apache-2.0으로 배포됩니다. 기여를 환영합니다.
 
 ## DCO (Developer Certificate of Origin)
 

@@ -2,7 +2,7 @@
 
 - Status: **active** (2026-07-13, momo-main/Fable · ADR-0111 Accepted, Option A=BYOA — 성재 발제·판정)
 - 정본: `docs/adr/0111-agent-work-surface.md` (D1~D5·Non-goals가 경계), ADR-0102(gateway 경로 보장 매트릭스), ADR-0004(provider 자격증명 비유입), MOMO-349(승인 왕복)·350(status/partial)·341(lease).
-- 목표: 채널에서 특화 에이전트에게 실제 업무(터미널·코드 작업)를 시키고, 시작→진행 transcript→승인→결과(diff/PR/exit)가 전부 타임라인 원장에 남는 v0. **momo 서버는 코드를 실행하지 않는다.**
+- 목표: 채널에서 특화 에이전트에게 실제 업무(터미널·코드 작업)를 시키고, 시작→진행 transcript→승인→결과(diff/PR/exit)가 전부 타임라인 원장에 남는 v0. **oort 서버는 코드를 실행하지 않는다.**
 
 ## 공통 계약 (네 티켓 모두)
 

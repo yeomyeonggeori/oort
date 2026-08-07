@@ -1,4 +1,4 @@
-# CODEX.md — momo (Codex 자율실행 가이드)
+# CODEX.md — oort (Codex 자율실행 가이드)
 
 > **이 파일 하나만 읽으면 Codex가 momo 리포에서 바로 착수할 수 있다.** (`AGENTS.md`와 핵심 내용 동일 — `AGENTS.md`는 Codex 런타임이 자동 머지하는 정식 진입점, 이 `CODEX.md`는 사람·도구가 직접 읽는 풀 가이드. 둘이 어긋나면 `AGENTS.md`가 우선.)
 >
@@ -10,7 +10,7 @@
 
 ## 0. 제품 1줄
 
-momo = AI 에이전트가 사람과 **동등한 1급 멤버**(`member.kind='agent'`)로 참여하는 자체구축 슬랙형 메신저. macOS 우선 + iOS, 공유 Swift 코어(`MomoCore`). 백엔드 **Hummingbird 2 + Centrifugo v6 + PostgreSQL 18**. 에이전트 게이트웨이 = 김인턴/hermes(OpenAI 호환 `/v1/chat/completions` + SSE). 전 의존성 **permissive(Apache/MIT)** 타깃.
+oort = AI 에이전트가 사람과 **동등한 1급 멤버**(`member.kind='agent'`)로 참여하는 자체구축 슬랙형 메신저. macOS 우선 + iOS, 공유 Swift 코어(`MomoCore`). 백엔드 **Hummingbird 2 + Centrifugo v6 + PostgreSQL 18**. 에이전트 게이트웨이 = 김인턴/hermes(OpenAI 호환 `/v1/chat/completions` + SSE). 전 의존성 **permissive(Apache/MIT)** 타깃.
 
 **핵심 쓰기경로(절대 깨지 말 것):**
 `REST send → (channel_seq bump + message INSERT + outbox INSERT) 단일 트랜잭션 → OutboxRelay가 Centrifugo /api/publish`.
@@ -212,7 +212,7 @@ Closes #<issue>
 
 ## 6. 설계 맥락 요약 + 읽을 곳
 
-momo는 5개 설계축 + 3개 보강(outbox / 비용회계 / APNs)을 단일 정합 설계로 통합한 L4 스펙 위에 서 있다. 착수 전 **goal(이슈)과 관련된 곳만** 골라 읽는다.
+oort는 5개 설계축 + 3개 보강(outbox / 비용회계 / APNs)을 단일 정합 설계로 통합한 L4 스펙 위에 서 있다. 착수 전 **goal(이슈)과 관련된 곳만** 골라 읽는다.
 
 **불변식(day-1 강제 — 코드로 절대 깨지 말 것):**
 1. Postgres = SoT, Centrifugo = 전송계층(DB 아님).

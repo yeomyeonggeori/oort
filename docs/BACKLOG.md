@@ -1,4 +1,4 @@
-# momo — BACKLOG (마일스톤 → 에픽 → 티켓)
+# oort — BACKLOG (마일스톤 → 에픽 → 티켓)
 
 > **목적:** spine 전체 티켓을 **GitHub 이슈로 그대로 옮길 수 있는 단일 백로그 정본**. 각 티켓은 Codex가 읽고 바로 착수 가능하도록 `id / 제목 / 마일스톤 / 에픽 / 플랫폼 / deps / 수용기준(체크박스) / 라벨 / 추정` 을 모두 포함한다.
 >
@@ -292,7 +292,7 @@ M0(baseline)
   - [ ] [spec] mention, slash command, message context action fixture 3종 작성. 각 fixture는 source ref, memory ref, tool grant, budget, redaction/withheld context 중 하나 이상 포함
   - [ ] [spec] agent runtime에 주입 가능한 필드와 금지 필드 정의
   - [ ] [spec] Hermes/Kim Intern/OpenAI-compatible SSE 호출의 context envelope 정의
-  - [ ] [spec] openclaw식 approval availability/presentation/transport/interactions/observe 분리를 momo Context Broker/clients/server/Postgres 경계로 매핑
+  - [ ] [spec] openclaw식 approval availability/presentation/transport/interactions/observe 분리를 oort Context Broker/clients/server/Postgres 경계로 매핑
 - **라벨:** `type:spec`, `area:core`, `priority:p1`, `size:m`, `agent:codex-ok`
 - **참조:** `research/11-agent-runtime/04-context-packet-v0.md`, `research/11-agent-runtime/fixtures/context-packet-v0/`
 
@@ -512,7 +512,7 @@ M0(baseline)
 - **마일스톤:** M2 · **에픽:** EP-AGENT-RUNTIME/EP-AGENT-PROTOCOL · **플랫폼:** shared · **추정:** M
 - **deps:** MOMO-151, MOMO-004
 - **수용기준:**
-  - [ ] [spec] A2A Task/Message/Artifact/status를 momo `agent_run/message/artifact_ref/agent.status`에 매핑
+  - [ ] [spec] A2A Task/Message/Artifact/status를 oort `agent_run/message/artifact_ref/agent.status`에 매핑
   - [ ] [spec] queued/running/input-required/awaiting-approval/succeeded/failed/cancelled 상태 의미 확정
   - [ ] [spec] `input-required`(추가 입력)와 `awaiting-approval`(승인 게이트)을 분리
   - [ ] [swift/sql] Swift model/DB migration/AgentWorker runtime 영향 범위 기록
@@ -535,7 +535,7 @@ M0(baseline)
 - **마일스톤:** M2 · **에픽:** EP-AGENT-RUNTIME · **플랫폼:** backend · **추정:** M
 - **deps:** MOMO-150, MOMO-004
 - **수용기준:**
-  - [ ] [runtime] Hermes platform adapter path와 momo AgentWorker SSE path를 각각 검증하거나 제품 기본 경로를 하나로 확정
+  - [ ] [runtime] Hermes platform adapter path와 oort AgentWorker SSE path를 각각 검증하거나 제품 기본 경로를 하나로 확정
   - [ ] [python] `adapters/hermes/momo_adapter.py`가 현재 Hermes adapter API와 정합하는지 live/static check 기록
   - [ ] [docs] compatibility path와 canonical execution path를 RUN/STATUS에 구분 기록
 - **라벨:** `type:spec`, `type:docs`, `area:adapter`, `area:worker`, `priority:p1`, `size:m`, `agent:codex-ok`
@@ -1111,7 +1111,7 @@ M0(baseline)
 - **deps:** — (문서만)
 - **수용기준:**
   - [ ] [infra] MOMO-122 스펙 정정: `drive.metadata.readonly`=restricted-class 명기 + Internal consent 전제
-  - [ ] [infra] "no full Drive mirrors" 규칙에 momo 관리 공유 드라이브 한정 revocable 파생 인덱스 허용 명시
+  - [ ] [infra] "no full Drive mirrors" 규칙에 oort 관리 공유 드라이브 한정 revocable 파생 인덱스 허용 명시
   - [ ] [infra] MOMO-123 `service_account_boundary`에 `boundary_kind: shared_drive_member` 추가
   - [ ] [infra] `docs/`에 배포 조직용 GCP 프로젝트/Internal consent/SA 생성 런북(`[manual]` 단계 표기)
 - **라벨:** `type:spec`, `area:docs`, `priority:p1`
@@ -1143,7 +1143,7 @@ M0(baseline)
 - **마일스톤:** M3 · **에픽:** EP-AGENT-PROTOCOL · **플랫폼:** backend · **추정:** M
 - **deps:** MOMO-308
 - **수용기준:**
-  - [ ] [runtime] `/.well-known/agent.json` Agent Card 서빙(momo 자체 + 등록 에이전트) + `agents/announce` 등록 → member(kind=agent) 생성 → 채널 멤버십 플로우
+  - [ ] [runtime] `/.well-known/agent.json` Agent Card 서빙(oort 자체 + 등록 에이전트) + `agents/announce` 등록 → member(kind=agent) 생성 → 채널 멤버십 플로우
   - [ ] [runtime] 외부 에이전트 초대 e2e smoke(mock A2A 에이전트), 기존 승인/비용/audit 경계 그대로 적용
   - [ ] [infra] `agent.partial`/`agent.status` envelope 필드를 AG-UI 어휘와 정렬(스펙 문서 + 호환 매핑표)
 - **라벨:** `type:feat`, `area:server`, `priority:p2`

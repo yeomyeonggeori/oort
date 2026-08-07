@@ -1,4 +1,4 @@
-# momo — 베타 배포 & 사용성 검수 플랜 (TestFlight + macOS 공증빌드, 2026)
+# oort — 베타 배포 & 사용성 검수 플랜 (TestFlight + macOS 공증빌드, 2026)
 
 > 작성: 2026-06-24 · 실행 주체: **Codex (goal 자율)** · 게이트: 05 §G-E/§G-F.
 > 목적: 게이트(M3) 통과를 위해 **실사용 빌드를 테스터 손에** 올려 "사용 가능"을 빡세게 판명. 스토어 제출(M5) / 공개 다운로드(M4)는 게이트 PASS 후.
@@ -21,7 +21,7 @@
 > 출처: Apple App Store Connect Help — invite-external-testers / testflight-overview / Apple TestFlight 페이지. (검증됨)
 > ⚠️ fastlane `pilot`의 `groups:` 자동 배정은 **External Testing 그룹에서 신뢰성 있게 동작**. "Manual for Xcode Builds" Internal 그룹은 자동 배정 불가(00 문서 §5.1). (검증됨)
 
-### 1.2 momo 베타 단계 (권고)
+### 1.2 oort 베타 단계 (권고)
 1. **내부(team-dawnkim)**: 개발/운영 멤버를 ASC 유저로 등록 → 빌드 업로드 즉시 노출. 핵심 8플로우(05 §3.1) 1차 스모크. 심사 없음 → 빠른 반복.
 2. **외부(momo-internal-beta)**: 자체구축 멤버(10명=1팀, 3+팀) 초대. **첫 빌드만 Beta App Review** → 통과 후 동일버전 반복 빌드는 빠르게. 멀티팀 격리·초대코드 자가가입을 실디바이스에서 검증.
 3. (선택) **공개링크**: 표본 확대 필요 시. 익명 테스터의 crash/세션이 G-A 분모 보강에 유용. (추정)
@@ -44,7 +44,7 @@ pilot(
 ## 2. macOS — 공증 빌드 베타 (직접배포 경로)
 
 ### 2.1 왜 TestFlight가 아니라 공증 .dmg인가
-- momo macOS의 **정식 배포 경로 = Developer ID 공증 직접 다운로드**(M4). 따라서 게이트의 macOS 사용성 검수도 **실제 배포 산출물(공증 .dmg)** 로 해야 의미가 있다. (설계)
+- oort macOS의 **정식 배포 경로 = Developer ID 공증 직접 다운로드**(M4). 따라서 게이트의 macOS 사용성 검수도 **실제 배포 산출물(공증 .dmg)** 로 해야 의미가 있다. (설계)
 - TestFlight macOS 베타도 가능(테스터가 macOS에서 TestFlight 앱 사용) 하나, 직접배포 산출물과 서명/설치 경로가 달라 **공증 .dmg 베타가 1순위**. (추정 — TestFlight macOS 자체는 검증됨)
 
 ### 2.2 절차 (게이트 단계, 비공개 베타)

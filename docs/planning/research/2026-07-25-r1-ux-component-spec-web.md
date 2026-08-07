@@ -1,6 +1,6 @@
 # R-1 컴포넌트 UX 스펙, momo-web (React) 5장 (2026-07-25, Fable)
 
-> 파생: ADR-0133(SwiftUI → TS/React + Tauri) Accepted. 목표: "buzz와 거의 동일한 UXUI 체감"을 momo-web으로 구현하되, momo 구조 우위(seq 결정론·승인 원장·RLS FORCE)를 화면에 표면화한다.
+> 파생: ADR-0133(SwiftUI → TS/React + Tauri) Accepted. 목표: "buzz와 거의 동일한 UXUI 체감"을 momo-web으로 구현하되, oort 구조 우위(seq 결정론·승인 원장·RLS FORCE)를 화면에 표면화한다.
 > 스택 정본(ADR-0133 §Decision.3): Tailwind + shadcn/ui(Radix) + react-virtuoso(타임라인 가상화) + cmdk(Cmd+K) + Tauri 2 셸. Next.js 배제(SPA/Vite).
 > 실측 제약: 현행 `clients/web` v0는 CSP `style-src 'self'`(인라인 스타일·style 속성 금지, 모든 스타일은 컴파일된 시트로). 토큰/모델 어휘는 실제 코드에서 인용(`TimelineMessage.seq`, `reconcileMessages`, `ApprovalStatus`, `approval_request` props).
 > 팔레트: R-2 스킬의 여명(Dawn) 토큰을 정본으로 참조. 현행 v0의 인디고 액센트(`#4f46e5`)는 잠정값이며 R-2에서 호박색으로 교체 대상(AI-tell 회피, §각 장 차별점).
@@ -10,7 +10,7 @@
 
 **상태 4종 의무(모든 surface)**: 빈(empty) / 로딩(loading) / 오류(error) / 오프라인(offline). 빈 상태는 "포스터"가 아니라 행동 1개를 담은 초대(카피 1줄 + 액션 1개). 오프라인은 WS 끊김을 별도 배너로(아래 재연결 계약).
 
-**재연결/seq 계약(실측 근거)**: `TimelineMessage.seq`가 전역 단조. 재구독은 시각 스큐가 아니라 **마지막 확인 seq**로(`reconcileMessages`가 seq 기준 정렬·머지, `mergeMessages`는 append 별칭). buzz의 `since-5s` 시계 스큐 세금을 원천 제거, 이것이 화면에 나타나는 momo 우위의 뿌리다.
+**재연결/seq 계약(실측 근거)**: `TimelineMessage.seq`가 전역 단조. 재구독은 시각 스큐가 아니라 **마지막 확인 seq**로(`reconcileMessages`가 seq 기준 정렬·머지, `mergeMessages`는 append 별칭). buzz의 `since-5s` 시계 스큐 세금을 원천 제거, 이것이 화면에 나타나는 oort 우위의 뿌리다.
 
 **키보드 우선(P11)**: Cmd+K 퀵스위처(cmdk), 채널/스레드/멤버 전역 이동. 방향키 순회. 행 단위 액션은 항상-보이는 버튼줄이 아니라 컨텍스트 메뉴(Radix ContextMenu)로.
 
@@ -23,7 +23,7 @@
 ## 1장. 사이드바 (워크스페이스 / 채널 / DM / pill · 설정 진입)
 
 ### 목적과 IA
-buzz IA 소화(§7): Slack 기본기(채널/DM/스레드/⌘K) 위에 **글로벌 표면을 채널보다 위**에 얹는다. momo v0은 과잉을 피해 글로벌 표면을 2개로 축소: **인박스(2장)**, **활동(에이전트 활동 피드)**. Pulse/Projects/Workflows는 예약(비스코프).
+buzz IA 소화(§7): Slack 기본기(채널/DM/스레드/⌘K) 위에 **글로벌 표면을 채널보다 위**에 얹는다. oort v0은 과잉을 피해 글로벌 표면을 2개로 축소: **인박스(2장)**, **활동(에이전트 활동 피드)**. Pulse/Projects/Workflows는 예약(비스코프).
 
 ### 레이아웃 스케치 (density 6~7)
 ```
@@ -71,9 +71,9 @@ buzz IA 소화(§7): Slack 기본기(채널/DM/스레드/⌘K) 위에 **글로�
 - `⌥↑/⌥↓` unread 채널 순회(P11, Slack 문법). `⌘1..9` 워크스페이스 rail 전환.
 - `⌘.` 설정. 사이드바 포커스 시 `↑/↓` 행 이동, `Enter` 열기.
 
-### buzz 대비 차별점 (momo 우위 표면화)
-- buzz는 read state가 클라 로컬+replaceable 이벤트 동기화라 멀티디바이스 unread가 구조적으로 약함. momo 사이드바 unread는 **서버 단일 진실(P7/ADR-0109)**, 기기를 바꿔도 카운트가 일치. 이 일관성 자체가 조용한 우위(광고할 필요 없이 "그냥 맞다").
-- 에이전트 working 배지는 buzz도 하지만, momo는 관측 이벤트(관측 surface ADR-0126)에서 파생, typing 위조가 아니라 실제 턴 liveness.
+### buzz 대비 차별점 (oort 우위 표면화)
+- buzz는 read state가 클라 로컬+replaceable 이벤트 동기화라 멀티디바이스 unread가 구조적으로 약함. oort 사이드바 unread는 **서버 단일 진실(P7/ADR-0109)**, 기기를 바꿔도 카운트가 일치. 이 일관성 자체가 조용한 우위(광고할 필요 없이 "그냥 맞다").
+- 에이전트 working 배지는 buzz도 하지만, oort는 관측 이벤트(관측 surface ADR-0126)에서 파생, typing 위조가 아니라 실제 턴 liveness.
 
 ### shadcn/Radix 컴포넌트 매핑
 | 요소 | 컴포넌트 |
@@ -91,7 +91,7 @@ buzz IA 소화(§7): Slack 기본기(채널/DM/스레드/⌘K) 위에 **글로�
 ## 2장. 통합 인박스 · 알림 (buzz zero-noise 소화)
 
 ### 철학 (buzz + P8/P9)
-buzz: **"Zero is the default. You opt in to noise, not out."** 알림 기본 0 + 통합 Inbox가 보상. momo는 P8("보내지 않을 이유가 기본값") + 에이전트가 알림을 만들 수 있어 **Slack보다 더 엄격**해야 함. 인박스는 그 급진적 축소의 안전망: 조용해도 놓치지 않는다.
+buzz: **"Zero is the default. You opt in to noise, not out."** 알림 기본 0 + 통합 Inbox가 보상. oort는 P8("보내지 않을 이유가 기본값") + 에이전트가 알림을 만들 수 있어 **Slack보다 더 엄격**해야 함. 인박스는 그 급진적 축소의 안전망: 조용해도 놓치지 않는다.
 
 ### 레이아웃 스케치
 ```
@@ -130,7 +130,7 @@ buzz: **"Zero is the default. You opt in to noise, not out."** 알림 기본 0 +
 - 승인 행 포커스 시 `Y` 승인 / `N` 거절(확인 다이얼로그 경유, 파괴적 액션은 즉발 금지, R-2).
 
 ### buzz 대비 차별점
-- **승인이 암호학 체인 위의 원장**(buzz §5-6 소화 + momo 우위): 인박스 승인은 토큰 해시 저장·단일 사용 UPDATE·서명 이벤트로 남는 **"누가 언제 yes 했는가"**. buzz는 승인 UI는 있으나 executor suspend 미영속으로 반쪽 배포한 전례, momo는 거버넌스로 반쪽 금지(ADR-0132 안전 계약).
+- **승인이 암호학 체인 위의 원장**(buzz §5-6 소화 + oort 우위): 인박스 승인은 토큰 해시 저장·단일 사용 UPDATE·서명 이벤트로 남는 **"누가 언제 yes 했는가"**. buzz는 승인 UI는 있으나 executor suspend 미영속으로 반쪽 배포한 전례, oort는 거버넌스로 반쪽 금지(ADR-0132 안전 계약).
 - **멀티 에이전트 권한 질문에 대한 표면 답**(커뮤니티 최대 미해결, §4-③): 에이전트 outcome 행에 owner("managed by 성재") 표기 → 책임 소재가 알림 단계에서 이미 보인다.
 
 ### shadcn/Radix 매핑
@@ -147,7 +147,7 @@ buzz: **"Zero is the default. You opt in to noise, not out."** 알림 기본 0 +
 ## 3장. 타임라인 (메시지 그리드 · 스레드 · 가상화 계약 · seq/재연결 상태)
 
 ### 목적
-채널/DM의 메시지 흐름. momo 타임라인의 제1 리스크는 buzz §6-(b)가 경고한 "역방향 무한 스크롤 + 실시간 append + 스레드 오버레이 = 수십 커밋 늪". 계약을 스펙에 못박아 진입한다.
+채널/DM의 메시지 흐름. oort 타임라인의 제1 리스크는 buzz §6-(b)가 경고한 "역방향 무한 스크롤 + 실시간 append + 스레드 오버레이 = 수십 커밋 늪". 계약을 스펙에 못박아 진입한다.
 
 ### 레이아웃 스케치
 ```
@@ -181,7 +181,7 @@ buzz: **"Zero is the default. You opt in to noise, not out."** 알림 기본 0 +
 
 ### 가상화 계약 (react-virtuoso, 실측 모델 기반)
 - **정렬·머지는 seq 단조**: `reconcileMessages(existing, incoming)`가 `Map<seq>` 병합 후 seq 오름차순. 라이브 append는 `mergeMessages` 별칭. 화면 로직은 인덱스가 아니라 seq를 키로.
-- **불변 페이지 + 라이브 오버레이 분리(buzz NIP-CW 소화, §5-1)**: 과거 페이지는 불변 이력, 라이브 이벤트는 별도 구독 렌더타임 머지. **재연결 시 마지막 확인 seq로 재요청**(page 0 재요청 아님, momo는 seq가 있어 buzz보다 단순·강함).
+- **불변 페이지 + 라이브 오버레이 분리(buzz NIP-CW 소화, §5-1)**: 과거 페이지는 불변 이력, 라이브 이벤트는 별도 구독 렌더타임 머지. **재연결 시 마지막 확인 seq로 재요청**(page 0 재요청 아님, oort는 seq가 있어 buzz보다 단순·강함).
 - **author grouping**: `startsAuthorGroup`, 작성자 변경 OR 5분(`AUTHOR_GROUP_WINDOW_MS = 300_000`) 초과 OR 날짜 경계면 헤더 표시. 연속이면 헤더 생략(밀도 확보, Slack 관례).
 - **reactions/edit/delete/thread-summary는 2-hop closure로 페이지에 동봉**(1왕복, buzz §5-1). 카운트·리스트·타임라인을 **전부 같은 seq 스트림에서 파생**(buzz §6-b "하나의 사실이 세 갈래로 오는" 버그의 근원 회피, "카운터는 서버가 따로 재계산해 쏜다"는 최적화 금지).
 - **역방향 무한 스크롤**: virtuoso `startReached` → 이전 seq 범위 fetch. `firstItemIndex` 조정으로 스크롤 점프 없이 prepend.
@@ -190,7 +190,7 @@ buzz: **"Zero is the default. You opt in to noise, not out."** 알림 기본 0 +
 - **빈 채널**: "이 채널을 함께 시작하세요" + [사람 추가] · [에이전트 추가] **동급 버튼**(buzz §7-4, 온보딩 감사 §2). 빈 채널 인트로에서 첫 멘션까지 4클릭 예산(MOMO-570).
 - **로딩(초기)**: 메시지 skeleton(행 높이 유지 회색 바). "쓰기 직후 읽기가 인덱싱 앞지름" 윈도우(buzz §6-b)는 낙관 삽입으로, 내 메시지는 seq 미확정이어도 로컬 echo(전송중 표시), 서버 seq 도착 시 reconcile.
 - **오류**: 페이지 fetch 실패 → 해당 지점 인라인 "이 구간을 불러오지 못했습니다 [다시]"(전체 화면 오류 아님).
-- **오프라인**: 헤더 아래 얇은 배너 "연결 끊김 · 재연결 중". 재연결 성공 시 **"재연결됨 · seq N까지 복구" 마커**(buzz의 부트 리커버리 원장 §6-a 소화, 복구 이벤트를 새 것처럼 응답하지 않도록 사용자에게도 명시). 이 마커는 momo만 가능(seq 덕).
+- **오프라인**: 헤더 아래 얇은 배너 "연결 끊김 · 재연결 중". 재연결 성공 시 **"재연결됨 · seq N까지 복구" 마커**(buzz의 부트 리커버리 원장 §6-a 소화, 복구 이벤트를 새 것처럼 응답하지 않도록 사용자에게도 명시). 이 마커는 oort만 가능(seq 덕).
 - **컴포저 전송 실패**: 메시지 옆 인라인 "전송 실패 [재시도]"(rate-limit-aware, buzz §6-c). 큐 캡 초과 시 가시적 드롭 표시.
 
 ### 키보드 경로
@@ -199,10 +199,10 @@ buzz: **"Zero is the default. You opt in to noise, not out."** 알림 기본 0 +
 - 메시지 포커스: `R` 답글(스레드), `E` 편집(내 것), `⌫`+확인 삭제, `+` 리액션 피커.
 - `Shift+Esc` 미읽음 divider로 점프. `⌥⌘↑/↓` 스레드 간 이동.
 
-### buzz 대비 차별점 (momo 우위 표면화)
-- **재연결 결정론**: buzz는 서명이 `created_at`을 덮어 서버 seq 발급 불가 → 복합 커서·커밋타임 fence·CLI `sleep 1` 보정이 겹겹. momo는 `message.seq` 하나로 "seq N까지 복구" 마커를 **정확히** 그린다. 사용자는 "뭘 놓쳤나"를 다시 묻지 않는다.
-- **전달 보장 가시화**: buzz outbox 없음(fire-and-forget). momo REST→PG→outbox→relay는 전송중/전달됨/실패를 정직하게 표시할 근거가 있다.
-- **스레드**: P12, 채널 밖 답글 + All Threads 뷰. buzz 무한중첩은 "에이전트 간 장시간 협업엔 승리, 사람에겐 고통"(§4). momo는 사람 가독성 우선(메인 뷰 가독성이 제1제약, P12) + 에이전트 작업 스레드는 종결 시 아카이브(§7-5 축소 이식).
+### buzz 대비 차별점 (oort 우위 표면화)
+- **재연결 결정론**: buzz는 서명이 `created_at`을 덮어 서버 seq 발급 불가 → 복합 커서·커밋타임 fence·CLI `sleep 1` 보정이 겹겹. oort는 `message.seq` 하나로 "seq N까지 복구" 마커를 **정확히** 그린다. 사용자는 "뭘 놓쳤나"를 다시 묻지 않는다.
+- **전달 보장 가시화**: buzz outbox 없음(fire-and-forget). oort REST→PG→outbox→relay는 전송중/전달됨/실패를 정직하게 표시할 근거가 있다.
+- **스레드**: P12, 채널 밖 답글 + All Threads 뷰. buzz 무한중첩은 "에이전트 간 장시간 협업엔 승리, 사람에겐 고통"(§4). oort는 사람 가독성 우선(메인 뷰 가독성이 제1제약, P12) + 에이전트 작업 스레드는 종결 시 아카이브(§7-5 축소 이식).
 
 ### shadcn/Radix 매핑
 | 요소 | 컴포넌트 |
@@ -272,8 +272,8 @@ buzz: **"Zero is the default. You opt in to noise, not out."** 알림 기본 0 +
 ### 키보드 경로
 - 카드 포커스: `Y` 승인 / `N` 거절(확인 경유), `Space` disclosure 토글, `Enter` 검토(상세 뷰/스레드), `⌘.` 에이전트 정지(킬스위치, buzz §6-a: 킬스위치는 실제 클라 표면 E2E로 도달 가능해야; 정확매칭 함정 금지).
 
-### buzz 대비 차별점 (momo 우위 표면화)
-- **승인 원장 = 감사 연결**: "성재 · 14:04 (원장 #a1b2)"가 해시체인 감사(buzz §5-7 소화)로 뒷받침. buzz는 executor suspend 미영속으로 승인 후 런 Failed 처리한 전례, momo는 거버넌스+ADR-0132로 반쪽 방지.
+### buzz 대비 차별점 (oort 우위 표면화)
+- **승인 원장 = 감사 연결**: "성재 · 14:04 (원장 #a1b2)"가 해시체인 감사(buzz §5-7 소화)로 뒷받침. buzz는 executor suspend 미영속으로 승인 후 런 Failed 처리한 전례, oort는 거버넌스+ADR-0132로 반쪽 방지.
 - **verb/object/outcome 강제**: 원 payload 덤프(buzz도 피하려 한 것)를 disclosure 뒤로, 전면은 "무엇을→무엇에→결과" 문장. mac 스킬 §4 "raw JSON 금지"의 웹 이식.
 - **RLS FORCE가 뒷받침하는 데이터**: 카드가 보여주는 모든 필드는 RLS 통과분, "이 에이전트가 이 채널에서 볼 수 있는 것"이 DB 레벨에서 이미 집행(§4-③ 정보누출 질문에 대한 구조적 답).
 
@@ -333,7 +333,7 @@ buzz: **"Zero is the default. You opt in to noise, not out."** 알림 기본 0 +
 │                              [취소]  [만들기]    │
 └────────────────────────────────────────────────┘
 ```
-- buzz의 200+ 파일 관리 패널(EnvVars/Provider/MCP)은 "운영자=개발자" 제품이라 허용되는 복잡도, momo는 간편 생성 노선(§7 반면교사). 가져오는 것은 패널이 아니라 **페르소나 카탈로그**(구성=복제 가능 자산, export/import) 상위 추상(후속).
+- buzz의 200+ 파일 관리 패널(EnvVars/Provider/MCP)은 "운영자=개발자" 제품이라 허용되는 복잡도, oort는 간편 생성 노선(§7 반면교사). 가져오는 것은 패널이 아니라 **페르소나 카탈로그**(구성=복제 가능 자산, export/import) 상위 추상(후속).
 
 ### 상태
 - **빈**: provider 0개 → "에이전트가 쓸 AI를 연결하세요" + [연결하기]. work host 0개 → "코드를 실행할 호스트를 페어링하세요".
@@ -346,8 +346,8 @@ buzz: **"Zero is the default. You opt in to noise, not out."** 알림 기본 0 +
 - 폼: `Tab` 순회, `⌘S` 저장, `⌘↵` 다이얼로그 기본 액션(만들기).
 
 ### buzz 대비 차별점
-- **초대 딥링크 + mDNS 발견**(온보딩 감사 W-O1/W-O2): buzz는 디바이스 추가에 전용 사이드카 relay+SAS 페어링 필요(§3). momo는 서버 관리 identity라 초대 링크 1클릭이 가능, 팀 메신저 맥락에서 운영상 압도적 단순.
-- **키 비유입 고지의 카피화**: buzz도 같은 신념이나, momo는 설정 화면에서 이를 명시 카피로 노출 → 신뢰가 기능(P2 "모든 디테일이 마케팅").
+- **초대 딥링크 + mDNS 발견**(온보딩 감사 W-O1/W-O2): buzz는 디바이스 추가에 전용 사이드카 relay+SAS 페어링 필요(§3). oort는 서버 관리 identity라 초대 링크 1클릭이 가능, 팀 메신저 맥락에서 운영상 압도적 단순.
+- **키 비유입 고지의 카피화**: buzz도 같은 신념이나, oort는 설정 화면에서 이를 명시 카피로 노출 → 신뢰가 기능(P2 "모든 디테일이 마케팅").
 
 ### shadcn/Radix 매핑
 | 요소 | 컴포넌트 |

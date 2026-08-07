@@ -1,4 +1,4 @@
-# momo — QA / 릴리스 게이트 (스토어 제출 선행, 데스크탑+모바일, 2026)
+# oort — QA / 릴리스 게이트 (스토어 제출 선행, 데스크탑+모바일, 2026)
 
 > 작성: 2026-06-24 · 실행 주체: **Codex (goal 자율)** · 산출 위치: 이 리포.
 > 이 문서는 `docs/cicd/03-store-readiness-gate.md`의 **객관 통과기준(measurable DoD)** 을 정의한다.
@@ -91,9 +91,9 @@ M0 런타임 검증 ── M1 v0 데모(D/B/C) ── M2 멀티팀/테넌시
 - **신규(미해결) crash 그룹 중 P0/P1 = 0** (P0=핵심 플로우 차단/데이터 손상, P1=빈발·플로우 일부 차단).
 - 측정 윈도우: **마지막 게이트 후보 빌드로 ≥ 7일 또는 ≥ N세션**(N은 §2.4 표본 충분성).
 
-### 2.3 수집 경로 (momo 권고)
+### 2.3 수집 경로 (oort 권고)
 - **iOS/macOS 클라이언트(SwiftUI)**: **Sentry Cocoa SDK** 1순위(릴리스 헬스 + crash-free 세션 내장, MetricKit 인입 옵션, permissive). 보조로 **MetricKit 직수집**(서드파티 0 의존, 오프라인 자체 집계). 상세 = `docs/cicd/07-crash-analytics-spec.md`.
-- **Crashlytics(Firebase)**는 Google SDK/계정 종속 → momo의 "자체구축·permissive" 기조와 충돌. **선택지로만 문서화**, 디폴트는 Sentry+MetricKit. (추정)
+- **Crashlytics(Firebase)**는 Google SDK/계정 종속 → oort의 "자체구축·permissive" 기조와 충돌. **선택지로만 문서화**, 디폴트는 Sentry+MetricKit. (추정)
 - **TestFlight crashes**: 베타 기간 보조 신호(특히 공개링크 익명 테스터의 crash 카운트). (검증됨)
 
 ### 2.4 표본 충분성 (작은 내부 베타의 함정 — 추정)
@@ -104,7 +104,7 @@ M0 런타임 검증 ── M1 v0 데모(D/B/C) ── M2 멀티팀/테넌시
 
 ## 3. G-B 핵심플로우 e2e (기능 무결함)
 
-### 3.1 핵심 시나리오 8 (momo 제품 플로우)
+### 3.1 핵심 시나리오 8 (oort 제품 플로우)
 1. **로그인/온보딩**: 초대코드 입력 → 자가가입 → 워크스페이스 진입.
 2. **채널**: 채널 목록 로드 → 채널 입장 → 히스토리 렌더.
 3. **메시지 송수신**: 텍스트 전송 → `channel_seq` 갭리스 도착(본인+타기기) → 실시간 수신(Centrifugo).

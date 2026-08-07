@@ -41,7 +41,7 @@ clients/mobile/       # P4 판정 후 (tauri-mobile이면 desktop과 셸 공유)
 
 ## 3. UXUI 레퍼런스 소화 (R-1 리서치 티켓)
 
-목표: **"buzz와 거의 동일한 UXUI 체감"** — 단 momo 우위(seq 결정론·RLS·승인 원장)를 표면에 세운다.
+목표: **"buzz와 거의 동일한 UXUI 체감"** — 단 oort 우위(seq 결정론·RLS·승인 원장)를 표면에 세운다.
 
 | 소스 | 가져올 것 | 근거 |
 |---|---|---|
@@ -49,7 +49,7 @@ clients/mobile/       # P4 판정 후 (tauri-mobile이면 desktop과 셸 공유)
 | **codex 앱** | 패널 미니멀리즘·사이드바 태스크 목록·승인 시트 절제 | 이미 대화 조각 히어로에 반영된 톤 |
 | **t3code** | 태스크=스레드·Working NNs 라이브 상태·Settled 섹션·update pill(이식 완료 개념) | 기존 분석 문서 |
 
-산출물: `docs/planning/research/` 에 **컴포넌트 레벨 UX 스펙**(사이드바/인박스/타임라인/에이전트 카드/설정 셸 5장, 각각 buzz 스크린샷 대조 + momo 불변식 주석) — P1 구현의 디자인 정본. momo-design-taste-web 스킬(웹판 하드룰: 토큰·em-dash 0·상태 4종·키보드·AA)로 성문화.
+산출물: `docs/planning/research/` 에 **컴포넌트 레벨 UX 스펙**(사이드바/인박스/타임라인/에이전트 카드/설정 셸 5장, 각각 buzz 스크린샷 대조 + oort 불변식 주석) — P1 구현의 디자인 정본. momo-design-taste-web 스킬(웹판 하드룰: 토큰·em-dash 0·상태 4종·키보드·AA)로 성문화.
 
 ## 4. 리스크와 상쇄
 

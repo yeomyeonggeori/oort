@@ -4,7 +4,7 @@
 > 트랙: 엔진/인프라(0119 명시 — Fable momo-main 겸임 위임 범위) · base = main · PR base = track/engine · 도메인 = **clients/web(신설)** — 기존 파일군과 충돌 0.
 
 ## 목표
-momo의 세 번째 클라이언트: 브라우저에서 서버 URL 입력 → 로그인 → 채널 목록 → 타임라인 읽기(read-only v0). "서버 URL이 곧 웹 주소"(0119)의 첫 실행.
+oort의 세 번째 클라이언트: 브라우저에서 서버 URL 입력 → 로그인 → 채널 목록 → 타임라인 읽기(read-only v0). "서버 URL이 곧 웹 주소"(0119)의 첫 실행.
 
 ## 스택 (0119 D2-A 고정 — 변경 금지)
 TypeScript + Vite + React + centrifuge-js. 전부 MIT/Apache. 상태관리는 v0 최소(React Query 권장, Redux 금지). CSS는 라이트/다크 대응 CSS 변수 — 디자인 토큰은 macOS Theme의 시맨틱 이름을 따른다(`--color-accent`, `--color-bg-primary` 등. AI-slop 그라데이션 금지, momo-design-taste §0/§3 준수).

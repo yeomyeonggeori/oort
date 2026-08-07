@@ -1,11 +1,11 @@
-# buzz 에이전트 탭 실사 + 07-21 이후 델타 — momo 에이전트 허브 갭 판정
+# buzz 에이전트 탭 실사 + 07-21 이후 델타 — oort 에이전트 허브 갭 판정
 
 - 작성: 2026-07-28 (Fable). 발단: 성재 — "buzz의 에이전트 탭을 바탕으로, 워크스페이스 에이전트·프로필·접근권한·시스템 프롬프트·memory·최근 작업 이력·현재 수행중·cron job을 확인/설정하는 agent 베이스 탭이 우리 설계에 있는지. buzz 최신 아니면 갱신."
-- 방법: `github.com/block/buzz` 얕은 clone(HEAD `18eef633`, push 2026-07-27) — **기존 분석(07-22, 커밋~07-21) 이후 179 커밋 델타** + 에이전트 탭 실코드 인벤토리. momo 쪽은 전부 코드 검증.
+- 방법: `github.com/block/buzz` 얕은 clone(HEAD `18eef633`, push 2026-07-27) — **기존 분석(07-22, 커밋~07-21) 이후 179 커밋 델타** + 에이전트 탭 실코드 인벤토리. oort 쪽은 전부 코드 검증.
 
 ## 1. 판정 한 줄
 
-**momo에 "에이전트 베이스 탭"은 없다 — 조각은 흩어져 있고(프로필 다이얼로그·디렉터리·작업 패널), 서버는 대부분 준비돼 있는데(특히 메모리 REST 13 endpoints 완비·웹 소비자 0건) 한 곳에 모은 표면과 cron 실행기가 빠져 있다.**
+**oort에 "에이전트 베이스 탭"은 없다 — 조각은 흩어져 있고(프로필 다이얼로그·디렉터리·작업 패널), 서버는 대부분 준비돼 있는데(특히 메모리 REST 13 endpoints 완비·웹 소비자 0건) 한 곳에 모은 표면과 cron 실행기가 빠져 있다.**
 
 ## 2. buzz 에이전트 탭 실코드 인벤토리 (2026-07-27 HEAD 기준)
 
@@ -22,14 +22,14 @@
 | **스냅샷 내보내기/가져오기/공유**(에이전트·팀 단위) | `Agent/TeamSnapshotExport/ImportDialog`·`PersonaShareDialog` |
 | **팀**(에이전트 묶음) 관리 | `TeamsSection`·`TeamDialog`·`team_repair.rs` |
 | **BYOH** — 서드파티 하니스(generic ACP) 갤러리 | 07-25 `95fdf97` "bring your own harness — generic ACP runtime seam + settings gallery" |
-| 프로바이더 API 키 입력 | `PersonaProviderApiKeyField` — **momo와 반대 결정**(ADR-0004 비유입). 따라가지 않는다 |
+| 프로바이더 API 키 입력 | `PersonaProviderApiKeyField` — **oort와 반대 결정**(ADR-0004 비유입). 따라가지 않는다 |
 | cron | **없음** — buzz도 cron이 아니라 Workflows 글로벌 표면이 그 자리다 |
 
 **07-21→07-27 델타 179커밋 중 방향 신호**: 페르소나 카탈로그 UI 삭제(`8e67cf3`)·Agents 페이지에서 디렉터리 섹션 삭제(`5d1233e`) — **분산 표면을 Unified 한 곳으로 수렴 중**. 기본 병렬도 24→10(`5d8ede4`). 관리형 런타임 모듈 재편(`74b63e1`).
 
-## 3. momo 현황 (전부 코드 검증)
+## 3. oort 현황 (전부 코드 검증)
 
-| 성재가 물은 것 | momo 서버 | momo 웹 |
+| 성재가 물은 것 | oort 서버 | oort 웹 |
 |---|---|---|
 | 에이전트 목록+프로필 | `agent_profile`(036: instructions 8KiB·model_pref·pause·triggers) + profile/pause/allowed-models REST | **탭 없음.** `routing/AgentProfileDialog.tsx`(다이얼로그) + 디렉터리(#782)에 분산 |
 | 시스템 프롬프트 | `agent.system_prompt`(001) + `agent_profile.instructions` — **이원 구조** | instructions만 다이얼로그에서 |
@@ -48,6 +48,6 @@
 
 ## 5. 따라가지 않는 것 (명시)
 
-- **프로바이더 API 키 유입**(buzz `PersonaProviderApiKeyField`) — ADR-0004 위반. momo는 BYOA.
+- **프로바이더 API 키 유입**(buzz `PersonaProviderApiKeyField`) — ADR-0004 위반. oort는 BYOA.
 - **스냅샷 공유·팀**은 v1 범위 밖(관찰 대상으로만 기록 — 수렴 방향이 확인되면 별도 발제).
 - buzz의 Nostr 계층 전반(07-22 분석 결론 유지 — 가져올 것 없음).

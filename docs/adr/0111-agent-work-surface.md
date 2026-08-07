@@ -6,26 +6,26 @@
 
 ## Context
 
-1. momo의 차별화 문장은 이미 "채널 타임라인 = 실행 원장(execution ledger)"이다(ROADMAP §1.2, MOMO-184). 그러나 현재 사용자가 체감하는 것은 채팅+승인 카드까지다. **"에이전트에게 실제 업무를 시키고, 그 실행 과정 전체가 채널에 남는"** 표면이 없다.
+1. oort의 차별화 문장은 이미 "채널 타임라인 = 실행 원장(execution ledger)"이다(ROADMAP §1.2, MOMO-184). 그러나 현재 사용자가 체감하는 것은 채팅+승인 카드까지다. **"에이전트에게 실제 업무를 시키고, 그 실행 과정 전체가 채널에 남는"** 표면이 없다.
 2. 필요한 백엔드 뼈대는 이번 두 배치로 이미 랜딩됐다:
    - 실행 개체: `agent_run` (trigger message, parent/depth 루프가드, idempotency, input/output jsonb)
    - 위험 작업 게이트: 승인 왕복 (`approval_request` → awaiting → resume, MOMO-349)
    - 과정 가시화: status/partial 브로드캐스트 (MOMO-350)
    - 중복 실행 방지: lease claim/takeover (MOMO-341)
    - 실행 위치: ADR-0102 Option C — gateway(BYOA, 에이전트가 자기 호스트에서 실행) / worker(managed)
-3. **Codex 오픈소스 자산**: `openai/codex` CLI는 Apache-2.0(permissive — 스택 규칙 부합)이고, 우리는 이미 codex-fleet 파이프라인으로 실전 검증했다: headless `codex exec`, `resume <session-id>` 왕복, sandbox 정책(read-only / workspace-write / network 토글), `--output-last-message` 구조화 출력. **momo가 터미널/실행기를 새로 만들 필요가 없다** — 에이전트 호스트에서 codex CLI가 엔진이 되고, momo는 원장·승인·스트림만 담당하면 된다.
-4. 반례 경계: momo 서버가 임의 코드를 실행하게 만들면 RCE 표면 + provider 자격증명 유입(ADR-0004 위반) 위험. 실행은 서버 밖이어야 한다.
+3. **Codex 오픈소스 자산**: `openai/codex` CLI는 Apache-2.0(permissive — 스택 규칙 부합)이고, 우리는 이미 codex-fleet 파이프라인으로 실전 검증했다: headless `codex exec`, `resume <session-id>` 왕복, sandbox 정책(read-only / workspace-write / network 토글), `--output-last-message` 구조화 출력. **oort가 터미널/실행기를 새로 만들 필요가 없다** — 에이전트 호스트에서 codex CLI가 엔진이 되고, oort는 원장·승인·스트림만 담당하면 된다.
+4. 반례 경계: oort 서버가 임의 코드를 실행하게 만들면 RCE 표면 + provider 자격증명 유입(ADR-0004 위반) 위험. 실행은 서버 밖이어야 한다.
 
 ## Options
 
-### Option A — BYOA 실행 (권장): 에이전트 호스트에서 실행, momo는 원장·승인·스트림만
+### Option A — BYOA 실행 (권장): 에이전트 호스트에서 실행, oort는 원장·승인·스트림만
 - Work run은 `agent_run`의 확장이다(새 실행 개체 금지). gateway 경로의 에이전트(Hermes처럼 자기 머신/컨테이너에서 도는 BYOA)가 실행 주체.
-- 터미널/코드 실행 = 에이전트 호스트에서 codex CLI(또는 동급 로컬 러너)가 수행, 명령·diff·결과가 momo 타임라인에 스트림/커밋됨. momo 서버는 어떤 코드도 실행하지 않는다.
+- 터미널/코드 실행 = 에이전트 호스트에서 codex CLI(또는 동급 로컬 러너)가 수행, 명령·diff·결과가 oort 타임라인에 스트림/커밋됨. oort 서버는 어떤 코드도 실행하지 않는다.
 - 장점: ADR-0004/보안 경계 그대로, 기존 349/350/341 재사용, 구현 최소. 단점: Work 가능 에이전트는 BYOA 게이트웨이 필요(초대만 하면 되는 managed 에이전트는 v1+).
 
-### Option B — momo 서버측 관리 러너(sandboxed executor 서비스 신설)
-- momo compose에 실행 컨테이너를 추가하고 서버가 직접 잡을 실행.
-- 장점: 에이전트 호스트 불필요. 단점: RCE 표면·리소스 격리·비용 폭주 관리가 전부 momo 몫, ADR-0004 경계 재설계 필요, v0 규모에 과함. **기각 권장** (v1+에서 Option A 위에 "momo가 호스팅하는 BYOA 노드"로 재검토 가능).
+### Option B — oort 서버측 관리 러너(sandboxed executor 서비스 신설)
+- oort compose에 실행 컨테이너를 추가하고 서버가 직접 잡을 실행.
+- 장점: 에이전트 호스트 불필요. 단점: RCE 표면·리소스 격리·비용 폭주 관리가 전부 oort 몫, ADR-0004 경계 재설계 필요, v0 규모에 과함. **기각 권장** (v1+에서 Option A 위에 "oort가 호스팅하는 BYOA 노드"로 재검토 가능).
 
 ### Option C — 외부 SaaS 연동(Codex cloud 등)으로 위임
 - 장점: 구현 최소. 단점: self-hosted trust boundary 포지셔닝(§1.2)과 정면 충돌, 자격증명 경계 복잡. **기각 권장.**
@@ -35,23 +35,23 @@
 ### D1. Work는 `agent_run`의 1급 사용례다 — 새 실행 개체를 만들지 않는다
 v0는 `agent_run.input`에 work 계약(`{type:"work", title, repo?, branch?, brief}`)을 싣는 convention + 서버 검증으로 시작한다. `schema_v0.sql` 불변, 필요 시 신규 numbered migration만. 타임라인이 원장: 시작 카드 → 진행(partial) → 승인 카드 → 결과 카드가 전부 채널 메시지/이벤트로 남는다.
 
-### D2. 실행은 항상 에이전트 호스트에서 — momo 서버는 코드를 실행하지 않는다
-터미널·코드 작업의 프로세스는 BYOA gateway 에이전트의 호스트에서 돈다. momo에는 명령 텍스트·출력 transcript·diff·exit code 같은 **기록**만 들어온다(REST 단일 쓰기 경로). provider/OAuth/레포 자격증명은 에이전트 호스트에 남는다(ADR-0004 유지).
+### D2. 실행은 항상 에이전트 호스트에서 — oort 서버는 코드를 실행하지 않는다
+터미널·코드 작업의 프로세스는 BYOA gateway 에이전트의 호스트에서 돈다. oort에는 명령 텍스트·출력 transcript·diff·exit code 같은 **기록**만 들어온다(REST 단일 쓰기 경로). provider/OAuth/레포 자격증명은 에이전트 호스트에 남는다(ADR-0004 유지).
 
 ### D3. 위험 등급은 codex sandbox 정책을 승인 티어에 매핑한다
 - read-only 실행(조회·검색·빌드 dry-run): 자동 진행, 결과만 기록.
 - workspace-write(파일 수정·테스트 실행·커밋): **승인 왕복 필수**(349 재사용) — 승인 카드에 명령/대상 요약.
 - network 동반 쓰기·자격증명 사용(push, 배포): 승인 + 감사 로그 필수.
-- danger-full-access 상당: momo 표면에서 요청 자체 불가(fail-closed).
+- danger-full-access 상당: oort 표면에서 요청 자체 불가(fail-closed).
 
 ### D4. 특화 에이전트 라우팅 v0 = 명시 선택 + capability 배지
 `agent.config`의 `capabilities` convention(예: `["code","terminal","docs"]`, 스키마 무변경)을 서버가 표면화하고, 클라이언트는 Work 시작 시 **채널에 초대된 에이전트 중** 해당 capability 보유자를 배지와 함께 제시한다(초대 게이팅 원칙 그대로). 자동 라우팅/오케스트레이션은 명시적 v1+ (decision ledger·autonomy_level 트랙과 합류 지점).
 
 ### D5. 코드 특화 에이전트의 v0 레퍼런스 구현 = codex CLI 기반 gateway adapter
-hermes adapter 패턴을 승계한 `adapters/codex-workbench/`: momo run을 받아 에이전트 호스트에서 `codex exec`(sandbox 정책은 D3 티어)로 수행, 세션 resume으로 후속 지시 왕복, transcript는 partial 스트림, 최종 diff/PR 링크/exit 요약은 결과 카드로 커밋. Apache-2.0 재사용은 어댑터 의존성으로만(momo 백본 비유입).
+hermes adapter 패턴을 승계한 `adapters/codex-workbench/`: oort run을 받아 에이전트 호스트에서 `codex exec`(sandbox 정책은 D3 티어)로 수행, 세션 resume으로 후속 지시 왕복, transcript는 partial 스트림, 최종 diff/PR 링크/exit 요약은 결과 카드로 커밋. Apache-2.0 재사용은 어댑터 의존성으로만(oort 백본 비유입).
 
 ### Non-goals (v0)
-사람이 직접 치는 인터랙티브 raw PTY, momo 서버측 실행 컨테이너, 자동 에이전트 선택, 멀티 에이전트 협업 오케스트레이션, 대형 산출물 스토리지(파일은 Drive 트랙 기확정), iOS 표면.
+사람이 직접 치는 인터랙티브 raw PTY, oort 서버측 실행 컨테이너, 자동 에이전트 선택, 멀티 에이전트 협업 오케스트레이션, 대형 산출물 스토리지(파일은 Drive 트랙 기확정), iOS 표면.
 
 ## Consequences
 

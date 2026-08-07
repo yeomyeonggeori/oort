@@ -6,12 +6,12 @@
 
 ## Context
 
-momo에는 에이전트 실행 경로가 **2개** 있고, 어느 쪽이 정본인지 결정된 적이 없다 (2026-07-09 감사 SD-2).
+oort에는 에이전트 실행 경로가 **2개** 있고, 어느 쪽이 정본인지 결정된 적이 없다 (2026-07-09 감사 SD-2).
 
 | | **AgentWorker SSE** (worker 모드) | **Hermes Gateway** (gateway 모드) |
 |---|---|---|
-| 구동 방식 | momo가 소유한 워커가 `agent_job` claim → provider의 OpenAI 호환 SSE 호출 | 사용자 소유 Hermes 프로세스가 realtime `agent.job` 수신 → REST 콜백 |
-| provider 자격증명 | momo env의 `HERMES_API_KEY` (opaque bearer) | Hermes/provider 내부 (momo 완전 비관여, ADR-0004) |
+| 구동 방식 | oort가 소유한 워커가 `agent_job` claim → provider의 OpenAI 호환 SSE 호출 | 사용자 소유 Hermes 프로세스가 realtime `agent.job` 수신 → REST 콜백 |
+| provider 자격증명 | oort env의 `HERMES_API_KEY` (opaque bearer) | Hermes/provider 내부 (oort 완전 비관여, ADR-0004) |
 | Context Packet | ✅ 서버가 job payload에 투영 | ✅ 동일 payload를 gateway job에도 투영 (이미 구현됨) |
 | 승인(HITL) pause/resume | ✅ 설계·구현됨 (`resume_approval` outbox) | ❌ 없음 — 콜백은 running/complete뿐 |
 | 스트리밍(부분 응답) | ✅ SSE 델타 수신 (채널 노출은 별개 과제) | ❌ 최종 메시지 1건 |
@@ -23,12 +23,12 @@ momo에는 에이전트 실행 경로가 **2개** 있고, 어느 쪽이 정본�
 
 ## 업계는 어떻게 하나
 
-Slack의 대응물은 "앱을 어디서 실행하느냐"다: 초기에는 외부 호스팅(webhook/Socket Mode = momo의 gateway와 동형)뿐이었고, 이후 Slack-호스팅 실행(Workflow Steps/자동화 플랫폼)을 추가해 **이중 경로를 공식화**했다. 교훈: 실행 위치가 달라도 **플랫폼 보장(권한·감사·과금)은 플랫폼 쪽 기계장치로 통일**해야 한다 — Slack은 보장을 앱 쪽에 맡기지 않고 API 계층(스코프, 감사 로그, rate limit)에서 강제한다. momo도 승인·비용·감사를 경로별 구현이 아니라 **서버 기계장치**로 통일하는 것이 같은 원리다.
+Slack의 대응물은 "앱을 어디서 실행하느냐"다: 초기에는 외부 호스팅(webhook/Socket Mode = oort의 gateway와 동형)뿐이었고, 이후 Slack-호스팅 실행(Workflow Steps/자동화 플랫폼)을 추가해 **이중 경로를 공식화**했다. 교훈: 실행 위치가 달라도 **플랫폼 보장(권한·감사·과금)은 플랫폼 쪽 기계장치로 통일**해야 한다 — Slack은 보장을 앱 쪽에 맡기지 않고 API 계층(스코프, 감사 로그, rate limit)에서 강제한다. oort도 승인·비용·감사를 경로별 구현이 아니라 **서버 기계장치**로 통일하는 것이 같은 원리다.
 
 ## Options
 
 ### Option A — Gateway 정본 승격, Worker 폐기
-사용 실적이 있는 쪽으로 단일화. **기각 권고**: AgentWorker는 "momo가 관리하는(managed) 에이전트" — 사용자가 별도 프로세스를 못 띄우는 환경(향후 호스팅판, 서버측 자동화 에이전트)의 유일한 경로다. 폐기하면 제품 옵션이 좁아진다.
+사용 실적이 있는 쪽으로 단일화. **기각 권고**: AgentWorker는 "oort가 관리하는(managed) 에이전트" — 사용자가 별도 프로세스를 못 띄우는 환경(향후 호스팅판, 서버측 자동화 에이전트)의 유일한 경로다. 폐기하면 제품 옵션이 좁아진다.
 
 ### Option B — Worker 복권, Gateway는 interop 한정
 계약 문서 원안. **기각 권고**: 실사용자(성재)의 실제 운용 형태가 "내 Hermes를 데려온다(bring-your-own-agent)"이고, 이것이 agent-native 초대 경험의 핵심이다. 현실을 뒤집는 결정은 P13(도그푸딩 검증) 위반.
@@ -36,7 +36,7 @@ Slack의 대응물은 "앱을 어디서 실행하느냐"다: 초기에는 외부
 ### Option C — 역할 분리 이중 경로 + 단일 보장 매트릭스 (권고)
 두 경로를 **에이전트 유형별 공식 경로**로 정본화한다:
 - **gateway = BYOA(bring-your-own-agent)** 경로: 사용자 소유 런타임 (현 Hermes dogfood).
-- **worker = managed** 경로: momo가 실행을 소유하는 에이전트 (향후 서버측 에이전트/호스팅판).
+- **worker = managed** 경로: oort가 실행을 소유하는 에이전트 (향후 서버측 에이전트/호스팅판).
 
 그리고 **보장 매트릭스를 서버 기계장치로 통일**한다 — 경로와 무관하게 `agent_run` 상태머신·승인·비용·감사는 서버가 소유하고, 두 경로는 전달 방식만 다르다:
 1. (즉시) gateway 경로에 **승인 이벤트** 추가: 어댑터 콜백으로 `approval_request` 생성 → run `awaiting_approval` → 사람 결정 시 기존 `resume_approval` outbox가 gateway에도 `agent.job`(resume)을 publish. 스키마 변경 불필요.
@@ -64,7 +64,7 @@ gateway 콜백 `POST .../gateway/events`와 `POST .../gateway/complete`도 같�
 
 ### ADR-0101 연동과 legacy secret 폐기 일정
 
-두 공식 경로의 momo 신원은 `token.kind='agent_bearer'`로 수렴한다. worker는 서버가 run의 agent identity를 결속하고, gateway는 같은 agent의 bearer로 realtime-token·pending recovery·callback·message write를 수행한다. provider OAuth/API key는 어느 경로에서도 이 토큰으로 대체하거나 momo에 유입하지 않는다(ADR-0004).
+두 공식 경로의 oort 신원은 `token.kind='agent_bearer'`로 수렴한다. worker는 서버가 run의 agent identity를 결속하고, gateway는 같은 agent의 bearer로 realtime-token·pending recovery·callback·message write를 수행한다. provider OAuth/API key는 어느 경로에서도 이 토큰으로 대체하거나 oort에 유입하지 않는다(ADR-0004).
 
 `X-Momo-Agent-Gateway-Secret` / `AGENT_GATEWAY_SECRET`는 공식 인증 경로가 아니다. 폐기 일정은 날짜가 아니라 검증 게이트에 결속한다.
 

@@ -8,7 +8,7 @@
 
 ## 1. 결정 요약
 
-ADR-0113은 플러그인 = "manifest + MCP 서버 참조 + momo 확장 필드"로 정의하고, momo 서버의 역할을 **카탈로그·설치 정책·grant 기록·감사**로 한정했다(토큰은 에이전트 호스트 소유 — 커스터디 A). 이 goal은 그 물리적 기반: registry 스키마 + manifest validator + install/grant/revoke REST + Capability Cache projection + 오피셜 시드 3종(GitHub/Notion/Linear — 16-03 실검증분). Drive 경로 C 포장·Slack-호환 webhook·카탈로그 UI는 후속 SE.
+ADR-0113은 플러그인 = "manifest + MCP 서버 참조 + oort 확장 필드"로 정의하고, oort 서버의 역할을 **카탈로그·설치 정책·grant 기록·감사**로 한정했다(토큰은 에이전트 호스트 소유 — 커스터디 A). 이 goal은 그 물리적 기반: registry 스키마 + manifest validator + install/grant/revoke REST + Capability Cache projection + 오피셜 시드 3종(GitHub/Notion/Linear — 16-03 실검증분). Drive 경로 C 포장·Slack-호환 webhook·카탈로그 UI는 후속 SE.
 
 ## 2. Goal 체인
 

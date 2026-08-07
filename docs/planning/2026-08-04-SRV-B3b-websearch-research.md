@@ -2,15 +2,15 @@
 
 > 상태: **조사 완료 · 구현 0** (패킷 지시: "추측 구현이 최악이다"). 기준 `track/engine@d5cc8559`.
 > 발단: 성재 검수 — *"웹검색이 안 된다 — 툴이 필요하면 쥐어줘"*.
-> 이 문서가 답하는 것: ① 이 provider 경로가 내장 웹검색 툴을 **받는가** ② 받는다면 momo 쪽에 **무엇이 없어서** 안 되는가 ③ 웹검색을 **승인 대상으로 볼 것인가**(권고, 결정은 위로).
+> 이 문서가 답하는 것: ① 이 provider 경로가 내장 웹검색 툴을 **받는가** ② 받는다면 oort 쪽에 **무엇이 없어서** 안 되는가 ③ 웹검색을 **승인 대상으로 볼 것인가**(권고, 결정은 위로).
 
 ---
 
 ## 0. 결론 세 줄
 
 1. **provider는 받는다.** 이 경로(`https://chatgpt.com/backend-api/codex` + Responses)의 **모든 모델이 `supports_search_tool: true`를 스스로 선언**하고, 툴 형상은 `{"type": "web_search"}`다. 독립 출처 3종이 일치한다(§2).
-2. **momo 어댑터도 이미 통과시킨다.** `tools`는 `agent.tool_schema` 배열이 **그대로** 실려 나가고(재해석 없음), 미지의 SSE 이벤트는 무시되며, `web_search_call`은 momo의 tool_call이 되지 않는다(§3). 어댑터는 **한 줄도 고칠 필요가 없을 가능성이 높다**.
-3. **막고 있는 건 provider가 아니라 momo다.** `agent.tool_schema`에 **쓰기 경로가 레포 전체에 0건**이고(생성 시 `'[]'` 고정), `agent_profile.enabled_tools`에는 **읽는 코드가 없다**. 즉 오늘 어떤 에이전트도 어떤 툴도 가질 수 없다 — 웹검색만의 문제가 아니다(§4).
+2. **oort 어댑터도 이미 통과시킨다.** `tools`는 `agent.tool_schema` 배열이 **그대로** 실려 나가고(재해석 없음), 미지의 SSE 이벤트는 무시되며, `web_search_call`은 oort의 tool_call이 되지 않는다(§3). 어댑터는 **한 줄도 고칠 필요가 없을 가능성이 높다**.
+3. **막고 있는 건 provider가 아니라 oort다.** `agent.tool_schema`에 **쓰기 경로가 레포 전체에 0건**이고(생성 시 `'[]'` 고정), `agent_profile.enabled_tools`에는 **읽는 코드가 없다**. 즉 오늘 어떤 에이전트도 어떤 툴도 가질 수 없다 — 웹검색만의 문제가 아니다(§4).
 
 > goal #1000에서 찾은 것과 **같은 계열의 구멍**이다: 컬럼은 있고 검증도 있는데, 그 값을 채울 표면이 없다.
 
@@ -76,21 +76,21 @@ config.toml ………………………  [tools] web_search
 
 ---
 
-## 3. momo 어댑터는 이미 통과시킨다 (코드 실측)
+## 3. oort 어댑터는 이미 통과시킨다 (코드 실측)
 
 | 사실 | 위치 | 함의 |
 |---|---|---|
 | `tools`는 `agent.tool_schema` 배열 **그대로** body에 실린다. 함수툴로 재해석하지 않는다 | `bins/momo-agent-worker/src/responses.rs:231-235` (+ `provider.rs:127-133` "Passed through rather than re-shaped") | `[{"type":"web_search"}]`는 **오늘 그대로 나간다**. 어댑터 수정 불요 |
 | 알 수 없는 SSE 이벤트는 조용히 무시된다 | `responses.rs` `flush()` — match 마지막 arm "Every other event is progress, reasoning or bookkeeping" | `response.output_item.added` / `response.web_search_call.*`가 와도 스트림이 깨지지 않는다 |
-| `collect_tool_calls()`는 `type == "function_call"`**만** 고른다 | `responses.rs:316-340` | **`web_search_call`은 momo의 tool_call이 되지 않는다.** 실행이 provider 안에서 끝나므로 momo가 실행할 것도, 승인 받을 것도 생기지 않는다 (→ §5의 구조적 근거) |
+| `collect_tool_calls()`는 `type == "function_call"`**만** 고른다 | `responses.rs:316-340` | **`web_search_call`은 oort의 tool_call이 되지 않는다.** 실행이 provider 안에서 끝나므로 oort가 실행할 것도, 승인 받을 것도 생기지 않는다 (→ §5의 구조적 근거) |
 | `collect_output_text()`는 `message`의 `output_text`만 모은다 | `responses.rs:362-372` | `url_citation` **annotation은 버려진다**. 본문에 URL이 박혀 오면 남고, annotation으로만 온 출처는 사라진다 |
 | 답변 본문은 delta 누적이 이긴다 | `responses.rs:288-294` | 검색이 provider 안에서 일어나도 사용자에게는 평소와 같은 스트리밍 답으로 보인다 |
 
-**즉 provider 쪽 형상에 대해 momo가 고칠 것은 (인용 표시를 원하지 않는 한) 없다.**
+**즉 provider 쪽 형상에 대해 oort가 고칠 것은 (인용 표시를 원하지 않는 한) 없다.**
 
 ---
 
-## 4. 진짜 블로커 — momo 쪽 두 구멍
+## 4. 진짜 블로커 — oort 쪽 두 구멍
 
 ### 4.1 `agent.tool_schema`에 쓰기 경로가 없다
 
@@ -116,7 +116,7 @@ config.toml ………………………  [tools] web_search
 
 ### 근거 셋
 
-1. **구조적으로 승인 생산자가 될 수 없다.** momo의 승인 경로는 `function_call` → `ToolCall` → `requires_approval`에서만 시작한다(§3). provider 내장 웹검색은 `web_search_call`로 오고 momo의 tool_call 파이프라인에 **아예 들어오지 않는다**. 승인을 물리려면 새 코드를 일부러 써야 한다 — "물릴까 말까"가 아니라 "굳이 만들까"의 문제다.
+1. **구조적으로 승인 생산자가 될 수 없다.** oort의 승인 경로는 `function_call` → `ToolCall` → `requires_approval`에서만 시작한다(§3). provider 내장 웹검색은 `web_search_call`로 오고 oort의 tool_call 파이프라인에 **아예 들어오지 않는다**. 승인을 물리려면 새 코드를 일부러 써야 한다 — "물릴까 말까"가 아니라 "굳이 만들까"의 문제다.
 2. **G6가 지키려는 성질이 없다.** `requires_approval`의 fail-closed 방향은 **비가역성** 때문이다(`tools.rs` 모듈 주석: `work.session.end` = `t3_terminate`가 정산을 봉인, undo 없음). 웹검색은 읽기 전용이고 되돌릴 대상이 없다.
 3. **대화가 실제로 멈춘다.** v0 승인은 사람이 인박스에서 눌러야 진행된다. 한 턴에 여러 번 검색하는 모델에 승인을 물리면 답 하나에 승인 N번이 된다. 게다가 provider가 턴 **안에서** 검색을 끝내므로 중간에 끼어들 지점도 없다.
 
@@ -129,7 +129,7 @@ config.toml ………………………  [tools] web_search
 | **데이터 경계** | `external_web_access` **기본 true** = 사용자 메시지에서 뽑은 검색어가 외부 검색엔진으로 나간다. **사내 메신저의 대화 내용이 외부로 나가는 경로**다 |
 | 감사 | 지금은 `web_search_call`이 무시되므로 **아무 흔적도 남지 않는다**. 최소한 "이 턴에서 검색이 N번 일어났다"는 run detail/audit 기록을 권고 |
 
-> **새 ADR 대상 1건 제기**: ADR-0004는 *credential이 momo 안으로 들어오지 않는 방향*만 다룬다. **대화 내용이 momo 밖 검색엔진으로 나가는 방향**은 어떤 ADR도 다루지 않는다. 웹검색을 켜는 결정은 그 ADR과 함께여야 한다.
+> **새 ADR 대상 1건 제기**: ADR-0004는 *credential이 oort 안으로 들어오지 않는 방향*만 다룬다. **대화 내용이 oort 밖 검색엔진으로 나가는 방향**은 어떤 ADR도 다루지 않는다. 웹검색을 켜는 결정은 그 ADR과 함께여야 한다.
 
 ---
 
@@ -147,10 +147,10 @@ config.toml ………………………  [tools] web_search
 
 ## 7. 미측정 — 그리고 그것을 가르는 5분짜리 실험
 
-1. **momo에서 인증된 왕복을 해 본 적이 없다.** `~/.codex/auth.json` 열람이 환경 정책으로 차단됐고 **우회하지 않았다**. 그래서 "이 백엔드가 momo의 요청에 대해서도 `web_search`를 받는가"는 코드·문서·카탈로그 추론이지 실측이 아니다.
+1. **oort에서 인증된 왕복을 해 본 적이 없다.** `~/.codex/auth.json` 열람이 환경 정책으로 차단됐고 **우회하지 않았다**. 그래서 "이 백엔드가 oort의 요청에 대해서도 `web_search`를 받는가"는 코드·문서·카탈로그 추론이지 실측이 아니다.
    **검증 계획(로컬 스택 또는 라이브 1회, 쓰기 실험은 로컬에서):**
    `agent.tool_schema`를 SQL로 `[{"type":"web_search"}]`로 세팅 → `@oort 오늘 XX 뉴스 찾아줘` → ① 200/400 ② 400이면 provider 문구 그대로 ③ 답에 최신 정보가 실렸는지 ④ SSE에 `web_search_call`이 오는지(어댑터에 임시 로그 1줄). **이 결과가 T-a 착수 여부를 가른다.**
-2. **클라이언트 신원 게이팅 가능성.** Codex CLI는 이 백엔드에 자기 신원 헤더(`originator: codex_cli_rs`, `x-codex-installation-id` 등)를 붙이고 **momo는 일부러 붙이지 않는다**(`responses.rs` 모듈 주석: "momo is not the Codex CLI"). 백엔드가 웹검색 툴을 클라이언트 신원으로 게이팅할 여지는 남아 있으며, 위 왕복으로만 갈린다.
+2. **클라이언트 신원 게이팅 가능성.** Codex CLI는 이 백엔드에 자기 신원 헤더(`originator: codex_cli_rs`, `x-codex-installation-id` 등)를 붙이고 **oort는 일부러 붙이지 않는다**(`responses.rs` 모듈 주석: "momo is not the Codex CLI"). 백엔드가 웹검색 툴을 클라이언트 신원으로 게이팅할 여지는 남아 있으며, 위 왕복으로만 갈린다.
 3. **B에만 있는 필드**(`web_search_mode`·`allowed_callers`·`indexed_web_access`)는 검증되지 않았다 → 최소 집합 권고(§2.4).
 
 ---
@@ -159,7 +159,7 @@ config.toml ………………………  [tools] web_search
 
 패킷 §Goal2-3 대비용. **권고하지 않는다** — 위 근거로 거절 가능성이 낮고, 비용이 비대칭적으로 크다.
 
-서버사이드 검색 프록시 툴(`web.search`를 momo가 직접 실행, Brave/Bing/Tavily 등): 새 외부 자격증명 도입(ADR-0004 재검토 필요) · 새 실행자와 인자 검증(`tools::CATALOG` 확장) · 종량 요금 · 결과 요약/토큰 예산 파이프라인 · 인용 처리 · rate limit·타임아웃·실패 시맨틱. **내장 툴이 되는 한 이 경로는 명백히 비싸다.**
+서버사이드 검색 프록시 툴(`web.search`를 oort가 직접 실행, Brave/Bing/Tavily 등): 새 외부 자격증명 도입(ADR-0004 재검토 필요) · 새 실행자와 인자 검증(`tools::CATALOG` 확장) · 종량 요금 · 결과 요약/토큰 예산 파이프라인 · 인용 처리 · rate limit·타임아웃·실패 시맨틱. **내장 툴이 되는 한 이 경로는 명백히 비싸다.**
 
 ---
 
@@ -168,6 +168,6 @@ config.toml ………………………  [tools] web_search
 1. **구현 0.** 패킷 §Goal2-4("조사 보고 PR로 끝나도 된다") 그대로. 추측 구현 없음.
 2. **승인 정책은 권고만 적었다** — 결정은 성재/오케스트레이터 몫(패킷 §Goal2-2 지시).
 3. **새 ADR 대상 1건 제기**: 대화 내용의 외부 검색엔진 송출(데이터 경계). ADR-0004는 credential 방향만 다룬다(§5).
-4. **자격증명 열람 차단, 우회하지 않음** → 인증 왕복 미실측(§7-1). 그래서 §0의 결론 1은 "실측 3종 교차 + 경로 401 확인"이지 "momo가 던져 봤다"가 아니다.
+4. **자격증명 열람 차단, 우회하지 않음** → 인증 왕복 미실측(§7-1). 그래서 §0의 결론 1은 "실측 3종 교차 + 경로 401 확인"이지 "oort가 던져 봤다"가 아니다.
 5. **범위 밖 결함 2건 발견, 손대지 않음** — ⓐ `agent.tool_schema`에 쓰기 경로 없음 ⓑ `agent_profile.enabled_tools`에 소비자 없음(§4). 둘 다 웹검색과 **독립한 선행 결함**이고, 특히 ⓑ는 "저장·검증되는데 아무 효과가 없는 필드"라 웹검색 없이도 고칠 값어치가 있다. 별도 goal 권고.
 6. **패킷의 "enabled_tools 어휘 확장" 제안은 그대로는 성립하지 않는다** — 어휘만 넓히면 오늘과 동일하게 아무 일도 일어나지 않는다(§4.2). T-b는 어휘와 소비자를 한 티켓으로 묶을 것을 권고한다.

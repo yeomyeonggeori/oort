@@ -7,7 +7,7 @@
 ## Context
 
 1. **제품 모델(성재)**: ①터미널이 있고 사람이 claude/codex/opencode를 직접 쳐서 쓸 수 있다 ②그러나 기본 흐름은 **사람이 채팅에서 요청 → 에이전트가 필요에 따라 CLI 세션을 스폰·조종·작업 → 결과 제공** ③세션 내용은 채팅으로 흘러들어오고(진행·산출물), 채팅 입력이 세션으로 흘러들어간다(양방향).
-2. **하드 경계 불변**: momo 서버는 process·provider credential을 보관/proxy하지 않는다. CLI 도구와 자격증명(~/.codex, Claude keychain)은 사용자 실행 호스트에 있다 → **세션은 항상 사용자 호스트에서 돌고, 서버는 원장과 전송만 담당한다.** 에이전트의 "조종"도 서버가 프로세스를 만지는 게 아니라, 호스트가 소비하는 원장 이벤트로 전달된다.
+2. **하드 경계 불변**: oort 서버는 process·provider credential을 보관/proxy하지 않는다. CLI 도구와 자격증명(~/.codex, Claude keychain)은 사용자 실행 호스트에 있다 → **세션은 항상 사용자 호스트에서 돌고, 서버는 원장과 전송만 담당한다.** 에이전트의 "조종"도 서버가 프로세스를 만지는 게 아니라, 호스트가 소비하는 원장 이벤트로 전달된다.
 3. **기존 자산과의 정합이 이 설계의 핵심 논거**: 채팅→에이전트 트리거(mention→agent_run), 위험 행위 승인(approval pause/resume), 진행 스트리밍(agent.partial), 단일 쓰기경로(REST→PG→outbox→relay), 실행 호스트(BYOA) — **전부 랜딩돼 있다.** 본 ADR은 새 시스템이 아니라 이 다섯 자산을 "PTY 세션"이라는 새 객체에 재사용하는 계약이다.
 
 ## Options
@@ -30,17 +30,17 @@
 
 ### D5. 승인 경계 — 에이전트가 내 머신에 프로세스를 만드는 행위
 - **A (권고) — spawn은 승인 대상, 프로파일별 auto-approve 화이트리스트**: 에이전트의 `work.spawn`은 기존 승인 원장(pause/resume)을 통과한다. 사용자가 프로파일 단위로 auto-approve를 켤 수 있고(예: "codex 프로파일은 자동 허용") 그 설정 변경 자체도 감사 원장에 남는다. `work.input`은 활성 세션 내에서는 free(세션 승인에 포괄), `work.kill`은 free. 사람 직접 조작은 승인 불요.
-- B — 전부 자동 허용: "에이전트가 내 맥에서 임의 프로세스"는 momo의 승인 원장 차별화가 가장 빛나는 지점을 버리는 것. **기각.**
+- B — 전부 자동 허용: "에이전트가 내 맥에서 임의 프로세스"는 oort의 승인 원장 차별화가 가장 빛나는 지점을 버리는 것. **기각.**
 
 ### D6. 표면
 - **A (권고) — 터미널 뷰 + 스레드 브리지 병행**: macOS는 SwiftTerm(MIT) 임베드 — Work 서랍(Control+backtick, MOMO-375 승계)에 세션 목록+활성 터미널. 같은 세션이 채널 스레드로도 보인다(D2). 사람은 어느 쪽에서든 개입: 터미널에 직접 타이핑하거나, 스레드에 답글(→ work.input). iOS/웹 v0 = 스레드만.
 - 디자인: momo-design-taste — agentPayloadMono 토큰, 시스템 우선, 상태 칩은 기존 run 수명주기 칩 재사용.
 
 ### D7. 도구 모델
-- **A (권고) — 도구-불가지 프로파일**(이름·명령 템플릿·cwd·env 화이트리스트, 기본 3종 claude/codex/opencode + 임의 셸). interactive 세션 안에서 뭘 돌리든 momo는 불가지. 도구 내부 통합(transcript 파싱·세션 이어받기)은 후속 플러그인.
+- **A (권고) — 도구-불가지 프로파일**(이름·명령 템플릿·cwd·env 화이트리스트, 기본 3종 claude/codex/opencode + 임의 셸). interactive 세션 안에서 뭘 돌리든 oort는 불가지. 도구 내부 통합(transcript 파싱·세션 이어받기)은 후속 플러그인.
 
 ### D8. 호스트 추상화 훅 (v1 예약 — ADR-0125 연계)
-- **A (권고) — `work_session`·`work.control.*`은 host_id를 필수로 가진다**: v0의 유일 호스트는 맥 앱이지만, 이 필드 하나로 v1의 self-host workd(SSH 부트스트랩·outbound-only 다이얼)와 momo Cloud 샌드박스(유료)가 같은 계약 위에 선다 — 3계층·라우팅·경제 모델은 research/17-work-host-fabric/00 + ADR-0125(기안 예정)로 위임. 본 ADR에서는 이 필드 계약만 결정해 v0 구현이 T2/T3를 막지 않게 한다.
+- **A (권고) — `work_session`·`work.control.*`은 host_id를 필수로 가진다**: v0의 유일 호스트는 맥 앱이지만, 이 필드 하나로 v1의 self-host workd(SSH 부트스트랩·outbound-only 다이얼)와 oort Cloud 샌드박스(유료)가 같은 계약 위에 선다 — 3계층·라우팅·경제 모델은 research/17-work-host-fabric/00 + ADR-0125(기안 예정)로 위임. 본 ADR에서는 이 필드 계약만 결정해 v0 구현이 T2/T3를 막지 않게 한다.
 
 ## Decision (Proposed v2 권고안)
 
@@ -73,8 +73,8 @@ D1-A(호스트 세션 매니저) · D2-A(세션=스레드) · D3-A(큐레이션 
 
 ## 증보 1 — work host의 배포판 동봉 + GUI 페어링 (2026-07-23 기안 · 2026-07-24 엔진 매트릭스 확장, 성재 발제)
 
-- Status: **Accepted** (2026-07-24, 성재 "승인할게" — goose∪opencode 양자 동봉안 승인. 파생 WH-0(게이트 스파이크)=MOMO-578부터 순차. 2026-07-23 momo-main 기안 → 2026-07-24 goose 단독에서 goose∪opencode 양자 동봉안으로 확장 재기안 — 성재 "opencode·goose 둘 다" 지시. "코드 실행을 CLI 수동 등록이 아니라 배포판에 담아 GUI로 매끄럽게" 요구. buzz 실측: 코드 에이전트는 동봉 아닌 ACP 접속 — momo도 동형이나 페어링 UX가 수동)
-- 발단: 성재는 코드 실행 에이전트(Codex/goose)를 "담아서 띄우는" 경험을 원한다. buzz 검증 결과 Codex 자체는 독점 CLI+OAuth라 buzz도 동봉하지 않고 ACP로 접속한다(momo ADR-0114와 동형). 갭은 **①work host가 배포판에 안 담겨 사용자가 별도 실행 ②페어링이 host ID 수동 복사(TUI)**다. 자격증명 경계(본문 §하드 경계 불변, ADR-0004)는 유지한다.
+- Status: **Accepted** (2026-07-24, 성재 "승인할게" — goose∪opencode 양자 동봉안 승인. 파생 WH-0(게이트 스파이크)=MOMO-578부터 순차. 2026-07-23 momo-main 기안 → 2026-07-24 goose 단독에서 goose∪opencode 양자 동봉안으로 확장 재기안 — 성재 "opencode·goose 둘 다" 지시. "코드 실행을 CLI 수동 등록이 아니라 배포판에 담아 GUI로 매끄럽게" 요구. buzz 실측: 코드 에이전트는 동봉 아닌 ACP 접속 — oort도 동형이나 페어링 UX가 수동)
+- 발단: 성재는 코드 실행 에이전트(Codex/goose)를 "담아서 띄우는" 경험을 원한다. buzz 검증 결과 Codex 자체는 독점 CLI+OAuth라 buzz도 동봉하지 않고 ACP로 접속한다(oort ADR-0114와 동형). 갭은 **①work host가 배포판에 안 담겨 사용자가 별도 실행 ②페어링이 host ID 수동 복사(TUI)**다. 자격증명 경계(본문 §하드 경계 불변, ADR-0004)는 유지한다.
 
 ### D1. work host를 single image 배포판에 사이드카로 동봉
 - 565 단일 이미지 옆에 **work host 사이드카 서비스**(compose `--profile workhost` opt-in)를 배포판에 포함해, 설치 시 ACP 브리지가 이미 떠 있게 한다. 서버는 여전히 프로세스·자격증명 무접촉(본문 불변) — 사이드카는 사용자가 지정한 호스트/자격증명으로만 CLI를 실행하는 소비자다.
@@ -86,14 +86,14 @@ D1-A(호스트 세션 매니저) · D2-A(세션=스레드) · D3-A(큐레이션 
 | **opencode** (opencode.ai / Anomaly·SST) | MIT | 독립 에이전트, build/plan 모드, 75+ 모델 | ✅ Anthropic/OpenAI/Ollama | **서버-클라(로컬 서버)** — 임베드 API는 스파이크 확인 | ✅ 바이너리 | 서버-클라 구조라 프로그램으로 몰기 유리(가설) |
 | Codex / Claude Code | 독점 | 독립 에이전트 | — | ACP 또는 Codex app-server JSON-RPC(stdio, t3code 실증) | ❌ 불가 | 사용자 호스트의 것 로컬 연결(`~/.codex`·keychain 그대로) |
 
-- **v0 동봉 엔진 = opencode 우선 + goose 병행**(사용자가 설정에서 선택). 근거: opencode(MIT, 더 느슨)가 (a) 서버-클라 구조로 momo가 GUI로 몰기 수월할 여지, (b) 데스크톱 배포 경험 보유. goose는 MCP 확장·Apache-2.0으로 병행 가치. **단, opencode의 실제 임베드/헤드리스 API 표면은 미확정 — WH-0 스파이크로 검증 후 최종 확정**(검증 실패 시 goose 단독으로 후퇴).
+- **v0 동봉 엔진 = opencode 우선 + goose 병행**(사용자가 설정에서 선택). 근거: opencode(MIT, 더 느슨)가 (a) 서버-클라 구조로 oort가 GUI로 몰기 수월할 여지, (b) 데스크톱 배포 경험 보유. goose는 MCP 확장·Apache-2.0으로 병행 가치. **단, opencode의 실제 임베드/헤드리스 API 표면은 미확정 — WH-0 스파이크로 검증 후 최종 확정**(검증 실패 시 goose 단독으로 후퇴).
 - **Codex/Claude Code는 독점이라 동봉 불가 — 사용자 호스트의 것을 연결**. 연결 프로토콜은 ACP 외에 **Codex app-server JSON-RPC(stdio) 경로도 후보**(t3code가 실증) — WH-0에서 함께 판정.
 
 ### D2. GUI 페어링 (host ID 수동 복사 제거)
 - 관리자 설정 "코드 실행 호스트" 화면: 사이드카/로컬 호스트를 **자동 발견·페어링**(단기 페어링 코드 or 서명 challenge)하고 상태(연결됨/오프라인/도구 목록)를 표시. 현재 `MOMO_WORK_HOST_ID` 수동 조율(A-11)을 대체. ADR-0004 증보 1의 provider GUI와 **한 설정 화면에서 구분 표기**(LLM provider vs 코드 실행 호스트).
 
 ### D3. 자격증명 경계 불변 (재확인)
-- 사이드카가 동봉돼도 **Codex OAuth·provider 키는 서버/DB/원장 비유입**(ADR-0004). 사이드카는 사용자 호스트 자격증명 소비자일 뿐, momo 서버 컨테이너와 신뢰 경계 분리. goose를 쓰더라도 goose가 호출하는 LLM 자격은 goose 설정(사용자) 소유.
+- 사이드카가 동봉돼도 **Codex OAuth·provider 키는 서버/DB/원장 비유입**(ADR-0004). 사이드카는 사용자 호스트 자격증명 소비자일 뿐, oort 서버 컨테이너와 신뢰 경계 분리. goose를 쓰더라도 goose가 호출하는 LLM 자격은 goose 설정(사용자) 소유.
 
 ### D4. 스코프 경계
 - v0: **opencode(우선)+goose 사이드카 동봉** + GUI 페어링 + 상태 + 엔진 선택. Codex/Claude Code는 로컬 연결(GUI 페어링 공유). 원격 workd 다중 호스트·풀은 후속(ADR-0125 계보).

@@ -485,7 +485,7 @@ depend on or mutate persistent dogfood roster data.
 
 Codex OAuth tokens are intentionally not part of this profile. If Hermes/Kim
 Intern uses Codex OAuth, configure authorization code exchange, access/refresh
-token storage, refresh, unlink, and rotation inside the provider host. The momo
+token storage, refresh, unlink, and rotation inside the provider host. The oort
 smoke process accepts only `HERMES_API_KEY` for the provider SSE boundary and
 fails fast if known Codex/OpenAI OAuth token or API key env var names are
 present. The MOMO-257 local setup runbook is

@@ -8,7 +8,7 @@
 
 ## 1. 결정 요약
 
-momo의 에이전트 인증은 현재 전 에이전트·전 워크스페이스 **공용 시크릿 1개**(`X-Momo-Agent-Gateway-Secret`)이고, 어댑터는 REST 쓰기를 위해 **사람 오퍼레이터 계정으로 로그인**한다. ADR-0101은 스키마에 이미 존재하는 `token(kind='agent_bearer')`를 실제 인증 경로로 승격해 **per-agent 자격증명(스코프·회전·폐기)** 으로 교체하기로 결정했다(Option A Phase 1). 이 배치는 Phase 1 전체다 — Phase 2(delegation)는 이 배치에 포함되지 않는다. 정본: `docs/adr/0101-agent-identity-credentials.md`.
+oort의 에이전트 인증은 현재 전 에이전트·전 워크스페이스 **공용 시크릿 1개**(`X-Momo-Agent-Gateway-Secret`)이고, 어댑터는 REST 쓰기를 위해 **사람 오퍼레이터 계정으로 로그인**한다. ADR-0101은 스키마에 이미 존재하는 `token(kind='agent_bearer')`를 실제 인증 경로로 승격해 **per-agent 자격증명(스코프·회전·폐기)** 으로 교체하기로 결정했다(Option A Phase 1). 이 배치는 Phase 1 전체다 — Phase 2(delegation)는 이 배치에 포함되지 않는다. 정본: `docs/adr/0101-agent-identity-credentials.md`.
 
 ## 2. Goal 체인과 의존
 
@@ -39,7 +39,7 @@ momo의 에이전트 인증은 현재 전 에이전트·전 워크스페이스 *
 
 ## 4. 지켜야 할 계약
 
-- **ADR-0004**: provider 자격증명(Codex/OpenAI OAuth)은 여전히 momo에 절대 들어오지 않는다. 이 배치는 momo↔agent 인증만 다룬다.
+- **ADR-0004**: provider 자격증명(Codex/OpenAI OAuth)은 여전히 oort에 절대 들어오지 않는다. 이 배치는 oort↔agent 인증만 다룬다.
 - **MOMO-262 계약**: 페어링 매니페스트/export에 시크릿(새 bearer 포함) 비포함 — 테스트로 고정돼 있음, 깨지 말 것.
 - **쓰기 경로 불변식**: REST→PG→outbox→relay. 인증 교체가 메시지 경로 자체를 바꾸지 않는다.
 - **MOMO-333 계약**: 에이전트 realtime token의 subject는 agent member — bearer 이관 후에도 subscribe proxy의 agent-stream 허용 로직이 계속 동작해야 한다.

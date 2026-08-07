@@ -2,7 +2,7 @@
 
 > 최종 대조: 2026-07-15 · 출처: discord.com/blog 공식 포스트 · 수치는 발표 당시 기준(보이스 2018, 미디어 2017 등 주의)
 
-Discord는 Slack과 같은 문제들을 다른 재료로 풀었고, 특히 **적은 인원·적은 비용으로 극단적 규모를 버틴 방법론**이 뚜렷하다. momo처럼 작은 팀이 배울 것이 많은 쪽은 오히려 Discord다.
+Discord는 Slack과 같은 문제들을 다른 재료로 풀었고, 특히 **적은 인원·적은 비용으로 극단적 규모를 버틴 방법론**이 뚜렷하다. oort처럼 작은 팀이 배울 것이 많은 쪽은 오히려 Discord다.
 
 ---
 
@@ -12,7 +12,7 @@ Discord의 실시간 계층은 Elixir(BEAM) 위의 두 프로세스 타입이다
 
 5백만 동시 유저에서 병목은 팬아웃이었다: 대형 길드 publish 한 번이 최대 2.1초. 해법은 Manifold(송신 작업 자체를 원격 노드로 분산), FastGlobal(핫 룩업을 상수로 컴파일) 등 — 전부 "런타임의 강점을 극한까지 쓰는" 계열이다.
 
-**momo 대응**: momo의 fanout은 Centrifugo가 담당한다(검증된 기성품 — Discord가 Elixir로 직접 지은 것을 momo는 사지 않고 빌렸다). 팀 규모 fanout에서 병목은 오지 않는다. 배울 것은 형태가 아니라 태도 — **병목을 측정으로 특정하고 그 지점만 고친다**(아래 §6).
+**oort 대응**: oort의 fanout은 Centrifugo가 담당한다(검증된 기성품 — Discord가 Elixir로 직접 지은 것을 oort는 사지 않고 빌렸다). 팀 규모 fanout에서 병목은 오지 않는다. 배울 것은 형태가 아니라 태도 — **병목을 측정으로 특정하고 그 지점만 고친다**(아래 §6).
 
 - https://discord.com/blog/how-discord-scaled-elixir-to-5-000-000-concurrent-users
 
@@ -22,7 +22,7 @@ MongoDB(1억 메시지에서 인덱스가 RAM 초과) → Cassandra(2017) → Sc
 
 Cassandra 시절의 고통은 채팅 특유의 "최근 데이터 삭제" 패턴이 만든 tombstone 지옥(삭제 표식이 쌓여 읽기가 10초 GC 정지를 유발)이었고, ScyllaDB(C++, GC 없음) 이전으로 177노드→72노드로 **줄이면서** 성능을 올렸다. 동시에 DB 앞에 Rust data services를 세워 같은 데이터를 향한 동시 요청을 1개의 쿼리로 합쳤다(request coalescing) — 유명 공지 하나에 수만 명이 몰리는 hot partition을 DB 앞에서 흡수하는 장치다.
 
-**momo 대응**: momo의 `(channel_id, seq)`는 이 정답의 최소 구현으로 이미 동형이다. 훗날 캐시가 필요해지면 Discord의 답이 올바른 첫 형태다: **DB 앞의 얇은 stateless 계층이 coalescing으로 hot channel을 흡수** — DB를 바꾸는 게 아니라.
+**oort 대응**: oort의 `(channel_id, seq)`는 이 정답의 최소 구현으로 이미 동형이다. 훗날 캐시가 필요해지면 Discord의 답이 올바른 첫 형태다: **DB 앞의 얇은 stateless 계층이 coalescing으로 hot channel을 흡수** — DB를 바꾸는 게 아니라.
 
 - https://discord.com/blog/how-discord-stores-billions-of-messages · https://discord.com/blog/how-discord-stores-trillions-of-messages
 
@@ -34,7 +34,7 @@ Discord 스스로 명시한 명제다: N명이 각자 이벤트를 만들고 N�
 2. **Relays** — guild process와 세션 사이 중계 프로세스로 팬아웃을 수평 분할.
 3. 압축 교체(zlib→zstd streaming)로 클라이언트 대역폭 40% 절감.
 
-**momo 교훈**: "보고 있지 않은 사람에게 보내지 않는다"는 원칙은 규모와 무관하게 옳다. ADR-0104 설계 시 momo도 **화면에 보이는 멤버/채널의 presence만 구독**하는 문법으로 시작하면 Slack(03장 §4)과 Discord의 결론을 모두 선반영하는 셈이다. ux-bible P14와 동일 결론.
+**oort 교훈**: "보고 있지 않은 사람에게 보내지 않는다"는 원칙은 규모와 무관하게 옳다. ADR-0104 설계 시 oort도 **화면에 보이는 멤버/채널의 presence만 구독**하는 문법으로 시작하면 Slack(03장 §4)과 Discord의 결론을 모두 선반영하는 셈이다. ux-bible P14와 동일 결론.
 
 - https://discord.com/blog/maxjourney-pushing-discords-limits-with-a-million-plus-online-users-in-a-single-server · https://discord.com/blog/how-discord-reduced-websocket-traffic-by-40-percent
 
@@ -42,7 +42,7 @@ Discord 스스로 명시한 명제다: N명이 각자 이벤트를 만들고 N�
 
 Discord에서 배지·unread 계산의 SoT인 Read States 서비스는 "접속할 때마다, 메시지가 올 때마다, 읽을 때마다" 불리는 최고 빈도 경로다. Go 구현의 GC가 2분마다 지연 스파이크를 만들자 Rust로 재작성한 것이 유명한 "Go to Rust" 사례다. 알림 쪽은 모든 후보(DM/멘션/팔로우 등)를 Notifications Platform으로 모으고 중앙 서비스가 "버릴지/보낼지/어느 채널로"를 판정한다 — Slack과 같은 결론(판정은 한 곳에).
 
-**momo 대응**: momo의 read_state(ADR-0109)가 정확히 이 SoT 역할이며 이미 서버 소유다. 푸시 판정(M6)이 여기 얹힌다는 의존관계까지 Discord 구조가 확인해 준다.
+**oort 대응**: oort의 read_state(ADR-0109)가 정확히 이 SoT 역할이며 이미 서버 소유다. 푸시 판정(M6)이 여기 얹힌다는 의존관계까지 Discord 구조가 확인해 준다.
 
 - https://discord.com/blog/why-discord-is-switching-from-go-to-rust · https://discord.com/blog/building-delightful-notifications-using-ml
 
@@ -50,15 +50,15 @@ Discord에서 배지·unread 계산의 SoT인 Read States 서비스는 "접속�
 
 썸네일은 자체 Media Proxy(Go + OpenCV 계열 네이티브 묶음)가 일 1.5억 건 리사이즈. 첨부 원본은 GCS 기반 CDN에서 서빙됐는데 — **원래 링크가 영구·무인증이라 멀웨어 유통 경로로 악용됐고**, 2023년 말 모든 첨부 URL에 서명·만료(24시간)를 강제하는 대공사를 치렀다.
 
-**momo 교훈**: 파일 서빙은 처음부터 **인증 게이트 + 만료형 서명 URL**로. momo의 M7 설계(Drive 트랙이든 자체 스토리지든)에서 협상 불가 항목이다.
+**oort 교훈**: 파일 서빙은 처음부터 **인증 게이트 + 만료형 서명 URL**로. oort의 M7 설계(Drive 트랙이든 자체 스토리지든)에서 협상 불가 항목이다.
 
 - https://discord.com/blog/how-discord-resizes-150-million-images-every-day-with-go-and-c
 
-## 6. 비용 효율의 방법론 — momo가 가장 배울 부분
+## 6. 비용 효율의 방법론 — oort가 가장 배울 부분
 
 Discord가 반복해서 보여주는 패턴 5개:
 
-1. **런타임 레버리지** — BEAM 프로세스 모델로 서버 1대당 50만 세션. 직접 짜지 않은 것의 힘. (momo 번역: Centrifugo·PG·Caddy 같은 검증된 기성품이 momo의 BEAM이다.)
+1. **런타임 레버리지** — BEAM 프로세스 모델로 서버 1대당 50만 세션. 직접 짜지 않은 것의 힘. (oort 번역: Centrifugo·PG·Caddy 같은 검증된 기성품이 oort의 BEAM이다.)
 2. **hot path만 골라 재작성** — Read States(Go→Rust), 저장(→ScyllaDB), 이미지(Lilliput). 측정으로 특정된 급소만. 전면 재작성은 한 번도 없다(ux-bible P15와 동일 결론).
 3. **대역폭 절감을 기능으로 취급** — passive sessions 90%, zstd 40%는 곧 egress 비용 절감.
 4. **자체 제작은 비용 근거가 있을 때만** — SFU 자체 제작의 명분은 "최대 성능 = 최저 비용".
@@ -68,11 +68,11 @@ Discord가 반복해서 보여주는 패턴 5개:
 
 Discord 클라이언트는 `session_id`+마지막 수신 시퀀스 `s`를 보관하고, 재연결 시 RESUME을 보내면 서버가 놓친 이벤트를 순서대로 재생한다. 재생 불가면 전체 재식별(re-Identify).
 
-**momo 대응**: Centrifugo가 같은 기능을 내장한다(offset/epoch 기반 recovery, `recovered: true/false`). momo는 여기에 "recovered:false면 REST로 PG에서 gap fill"이라는 Slack식 폴백을 결합해 두 회사의 답을 모두 갖췄다(02장 §1).
+**oort 대응**: Centrifugo가 같은 기능을 내장한다(offset/epoch 기반 recovery, `recovered: true/false`). oort는 여기에 "recovered:false면 REST로 PG에서 gap fill"이라는 Slack식 폴백을 결합해 두 회사의 답을 모두 갖췄다(02장 §1).
 
 ## 8. 이 장의 요약
 
-| Discord가 만난 문제 | 그들의 해법 | momo 번역 |
+| Discord가 만난 문제 | 그들의 해법 | oort 번역 |
 |---|---|---|
 | 대형 길드 fanout | Manifold/relays/passive sessions | Centrifugo에 위임 (팀 규모 무병목) |
 | 메시지 저장 스케일 | (channel, 시간ID) 모델 불변 + DB 교체 | (channel_id, seq) 이미 동형 |

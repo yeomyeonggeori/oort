@@ -1,4 +1,4 @@
-# momo — QA 게이트 (스토어 제출 전 빌드파일 사용성 검수, 2026)
+# oort — QA 게이트 (스토어 제출 전 빌드파일 사용성 검수, 2026)
 
 > **이 문서 = M7 검수 게이트의 단일 진입점(top-level).** "빌드 파일이 실제로 **사용 가능**"함을 빡세게 판명한 뒤에만 스토어/공증 배포(M8)로 간다.
 > **불변식(절대 규칙):** 🔒 아래 게이트(G-0 ~ G-H)가 **전부 PASS + 증거 첨부**되기 전에는 `release-ios.yml`/`release-macos.yml`(App Store `deliver` / Developer ID 공개 다운로드)를 **트리거하지 않는다.** external TestFlight·공개 다운로드 개시도 PASS 이후.
@@ -11,7 +11,7 @@
 
 ## 0. 이 게이트가 무엇이고, 다른 문서와 어떻게 연결되나
 
-momo의 QA 게이트 문서는 **"무엇을 통과(checklist)" → "어떻게 증명(measurable)" → "구체 절차(per-domain)"** 의 3층 구조다. 이 문서(`docs/QA_GATE.md`)는 **최상위 요약 + GO 판정**이고, 세부는 `docs/cicd/*`에 위임한다. Codex는 게이트 작업 시 이 파일을 먼저 읽고, 도메인별 세부는 아래 링크를 따라간다.
+oort의 QA 게이트 문서는 **"무엇을 통과(checklist)" → "어떻게 증명(measurable)" → "구체 절차(per-domain)"** 의 3층 구조다. 이 문서(`docs/QA_GATE.md`)는 **최상위 요약 + GO 판정**이고, 세부는 `docs/cicd/*`에 위임한다. Codex는 게이트 작업 시 이 파일을 먼저 읽고, 도메인별 세부는 아래 링크를 따라간다.
 
 | 층 | 파일 | 역할 |
 |---|---|---|
@@ -93,7 +93,7 @@ M0 런타임 e2e ─ M1 staging ─ M2 멀티팀 ─ M3 데스크탑 UX ─ M4 �
 | 심사 | **없음 — 즉시** | **버전당 첫 빌드 Beta App Review 필요** |
 | 빌드 만료 | **90일** | **90일** |
 
-**momo 베타 순서(권고):**
+**oort 베타 순서(권고):**
 1. **내부(team-dawnkim):** 개발/운영 멤버를 ASC 유저로 등록 → 빌드 처리 후 즉시 노출. 핵심 8플로우 1차 스모크(심사 없음 → 빠른 반복).
 2. **외부(momo-internal-beta):** 자체구축 멤버(10명=1팀, 3+팀)를 초대. **첫 빌드만 Beta App Review** → 통과 후 동일 버전 반복 빌드는 빠르게. **멀티팀 격리·고유 초대코드 자가가입을 실기기에서 검증**(체크리스트 §4 A·H 항목과 직결).
 3. (선택) **공개링크:** 표본 확대 필요 시. 익명 테스터 crash/세션이 G-A 분모 보강에 유용 (추정).
@@ -101,7 +101,7 @@ M0 런타임 e2e ─ M1 staging ─ M2 멀티팀 ─ M3 데스크탑 UX ─ M4 �
 > fastlane `pilot`의 `groups:` 자동 배정은 **External Testing 그룹에서만 신뢰성 있게 동작**(Internal "Manual for Xcode Builds"는 자동 배정 불가). (검증됨)
 
 ### 3.2 macOS — 공증 .dmg 비공개 베타 (직접배포 경로)
-- momo macOS의 **정식 배포 경로 = Developer ID 공증 직접 다운로드**(M4). 따라서 게이트의 macOS 사용성 검수도 **실제 배포 산출물(공증 .dmg)** 로 한다 (설계).
+- oort macOS의 **정식 배포 경로 = Developer ID 공증 직접 다운로드**(M4). 따라서 게이트의 macOS 사용성 검수도 **실제 배포 산출물(공증 .dmg)** 로 한다 (설계).
 - 절차: `gym(export_method: developer-id)` → inside-out 서명 + hardened runtime → `xcrun notarytool submit Momo.zip --wait` Accepted → `stapler staple`(.app/.dmg) → **비공개 링크/사내 채널**로 전달 → 테스터는 **빌드 안 한 다른 맥**에서 `spctl --assess --type execute --verbose Momo.app` accepted + 핵심 8플로우 1왕복. (검증됨)
 - macOS는 TestFlight 미사용 시 인앱 피드백이 없으므로 **Sentry/MetricKit(07 문서)** 가 크래시-free율의 주 수집원, 수동 피드백은 내부 GitHub Issue(`type:bug`+`gate:qa`).
 
@@ -113,7 +113,7 @@ M0 런타임 e2e ─ M1 staging ─ M2 멀티팀 ─ M3 데스크탑 UX ─ M4 �
 
 ## 4. 사용성 체크리스트 (G-B 핵심 8플로우 — 가입/초대/메시지/김인턴/승인/비용 e2e)
 
-> momo 제품 플로우 = 검수의 척추. **iOS는 XCUITest 자동화 우선(최소 A·B·C·H), macOS는 자동화 어려운 실시간/스트리밍은 수동 스모크 + 스크린샷 증거.** 각 항목은 **실기기 + Release 구성**으로 1왕복. 자동화 plan은 `08-e2e-accessibility-performance.md`.
+> oort 제품 플로우 = 검수의 척추. **iOS는 XCUITest 자동화 우선(최소 A·B·C·H), macOS는 자동화 어려운 실시간/스트리밍은 수동 스모크 + 스크린샷 증거.** 각 항목은 **실기기 + Release 구성**으로 1왕복. 자동화 plan은 `08-e2e-accessibility-performance.md`.
 
 각 플로우는 `[ ] iOS 자동(XCUITest) / [ ] iOS 수동 / [ ] macOS 수동` 3축으로 증거를 남긴다.
 
@@ -171,11 +171,11 @@ M0 런타임 e2e ─ M1 staging ─ M2 멀티팀 ─ M3 데스크탑 UX ─ M4 �
 
 > 세부 SDK 설정/데이터맵은 `docs/cicd/07-crash-analytics-spec.md`. App Privacy 라벨(법무)과 반드시 일관.
 
-| 도구 | 역할 | momo 채택 | 근거 |
+| 도구 | 역할 | oort 채택 | 근거 |
 |---|---|---|---|
 | **Sentry Cocoa (self-host)** | **1순위.** Release Health = Crash Free Sessions/Users(릴리스별), 이슈 그룹핑, MetricKit 인입 옵션, permissive | ✅ 디폴트 | 자체구축·permissive 기조 정합 (검증됨) |
 | **MetricKit (Apple, 0의존)** | **보조.** `MXCrashDiagnostic`/`MXHangDiagnostic`(iOS15/macOS12부터 즉시 전달), 8대 성능 메트릭(24h 1회) | ✅ 병행 | 서드파티 0 의존, 오프라인 자체 집계 (검증됨) |
-| Firebase Crashlytics | crash-free users 중심 | ⛔ 선택지로만 문서화 | Google SDK/계정 종속 → momo 기조와 충돌 (추정) |
+| Firebase Crashlytics | crash-free users 중심 | ⛔ 선택지로만 문서화 | Google SDK/계정 종속 → oort 기조와 충돌 (추정) |
 | TestFlight crashes | 베타 보조 신호(익명 테스터 crash/세션) | ✅ 보조 | ASC 빌드별 메트릭 (검증됨) |
 
 - **macOS는 TestFlight 미사용 경로가 정식**이므로 크래시-free율을 **Sentry/MetricKit(실기기 페이로드)** 에 의존. macOS 공증 .dmg 직접배포는 "설치 수/세션" 자동 집계가 없음 → 계측이 유일 수집원.

@@ -3,20 +3,20 @@
 > Status: Accepted for MOMO-257.
 > Scope: local MacBook + Docker Desktop dogfood setup for a user-operated
 > Hermes-compatible runtime. This document does not implement Codex OAuth inside
-> momo, does not store provider credentials in momo, and does not replace the
+> oort, does not store provider credentials in oort, and does not replace the
 > deterministic repo-local mock Hermes gates.
 
 ## Goal
 
 Run a real local Hermes-compatible provider that may authenticate to Codex,
-OpenAI, or another GPT provider, then let momo prove one safe `@hermes`
+OpenAI, or another GPT provider, then let oort prove one safe `@hermes`
 roundtrip through:
 
 ```text
 macOS app -> MomoServer -> agent_job -> AgentWorker -> local Hermes-compatible SSE provider -> channel timeline
 ```
 
-The user performs OAuth login/token entry in the provider. Codex and momo only
+The user performs OAuth login/token entry in the provider. Codex and oort only
 prepare the boundary, scripts, and evidence.
 
 ## Ownership Boundary
@@ -24,12 +24,12 @@ prepare the boundary, scripts, and evidence.
 | Item | Owner | Where it may live |
 |---|---|---|
 | Codex/OpenAI OAuth login, authorization code, access token, refresh token | User-operated Hermes-compatible provider | Provider UI, provider secret store, keychain, or provider runtime memory |
-| GPT/OpenAI provider API key | User-operated Hermes-compatible provider | Provider-only env/secret store, never momo |
-| Hermes-facing bearer used by momo | Operator/runtime config | Out-of-repo momo provider env file or host secret |
-| Workspace, channel, member, context packet, cost, approval, audit | momo | Postgres + outbox + redacted status/evidence |
+| GPT/OpenAI provider API key | User-operated Hermes-compatible provider | Provider-only env/secret store, never oort |
+| Hermes-facing bearer used by oort | Operator/runtime config | Out-of-repo oort provider env file or host secret |
+| Workspace, channel, member, context packet, cost, approval, audit | oort | Postgres + outbox + redacted status/evidence |
 
-momo must not read, log, store, or copy Codex/OpenAI OAuth tokens or GPT/OpenAI
-provider API keys. If those variables are present in the momo smoke process,
+oort must not read, log, store, or copy Codex/OpenAI OAuth tokens or GPT/OpenAI
+provider API keys. If those variables are present in the oort smoke process,
 the verifier fails before contacting the provider.
 
 ## Safe Local Topology
@@ -59,7 +59,7 @@ or `http://localhost` is allowed only with `MOMO_ENV=local` and
 
    The exact command depends on the provider. Complete any Codex OAuth, OpenAI
    API key, or GPT provider login inside that provider process. Do not export
-   Codex/OpenAI credentials into the momo shell.
+   Codex/OpenAI credentials into the oort shell.
 
 2. Confirm the provider exposes an OpenAI-compatible SSE endpoint.
 
@@ -112,7 +112,7 @@ or `http://localhost` is allowed only with `MOMO_ENV=local` and
 
 5. Use the app.
 
-   Start momo, open `#agent-lab`, and send:
+   Start oort, open `#agent-lab`, and send:
 
    ```text
    @hermes summarize this channel in one paragraph.
@@ -140,7 +140,7 @@ or `http://localhost` is allowed only with `MOMO_ENV=local` and
 | Symptom | Likely cause | Fix |
 |---|---|---|
 | `NEEDS_USER_CREDENTIAL` | No out-of-repo env file | Create `$HOME/.momo/local-hermes-provider.env` from the example |
-| `credential-boundary` fail | OpenAI/Codex token exported in momo shell | Unset it and configure it inside the provider runtime only |
+| `credential-boundary` fail | OpenAI/Codex token exported in oort shell | Unset it and configure it inside the provider runtime only |
 | `HERMES_BASE_URL must not point at localhost` | Missing local opt-in | Set `MOMO_ENV=local` and `AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1` |
 | `provider/network` fail | Provider is not running or wrong port/path | Check provider `/v1/chat/completions` endpoint and port |
 | `provider/protocol` fail | Provider did not stream SSE data | Enable streaming or choose an OpenAI-compatible endpoint |

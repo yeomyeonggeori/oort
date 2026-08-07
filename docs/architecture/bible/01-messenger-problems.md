@@ -2,9 +2,9 @@
 
 > 최종 대조: 2026-07-15 @ 9c1fc7a · 정본 아님(바이블 README 참조)
 
-메신저는 "텍스트를 주고받는 앱"처럼 보이지만, 실제로는 **분산 시스템의 고전 문제들을 사용자가 눈치 못 채게 푸는 제품**이다. 이 장은 어떤 메신저든 — Slack이든, Discord든, 우리 momo든 — 반드시 마주치는 문제 11개를 정의한다. 뒤의 모든 장은 이 번호(M1~M11)를 인용한다.
+메신저는 "텍스트를 주고받는 앱"처럼 보이지만, 실제로는 **분산 시스템의 고전 문제들을 사용자가 눈치 못 채게 푸는 제품**이다. 이 장은 어떤 메신저든 — Slack이든, Discord든, 우리 oort든 — 반드시 마주치는 문제 11개를 정의한다. 뒤의 모든 장은 이 번호(M1~M11)를 인용한다.
 
-중요한 구분 하나를 먼저 하자. 이 문제들 중 일부는 **사용자 2명만 있어도 발생**하고(순서, 전달 보장, 재연결, 읽음, 푸시), 일부는 **규모가 커져야 발생**한다(fanout 폭발, 샤딩, 멀티 리전). momo가 지금 무엇을 만들고 무엇을 미뤄야 하는지는 이 구분에서 나온다.
+중요한 구분 하나를 먼저 하자. 이 문제들 중 일부는 **사용자 2명만 있어도 발생**하고(순서, 전달 보장, 재연결, 읽음, 푸시), 일부는 **규모가 커져야 발생**한다(fanout 폭발, 샤딩, 멀티 리전). oort가 지금 무엇을 만들고 무엇을 미뤄야 하는지는 이 구분에서 나온다.
 
 ---
 
@@ -20,7 +20,7 @@
 3. **채널별 단조 증가 시퀀스** — 채널마다 1, 2, 3… 번호표를 뽑는다. 순서 판정이 "번호 비교"로 환원되고, 빠진 메시지 감지(3번 다음에 5번이 오면 4번이 없다는 것)까지 공짜로 얻는다. Slack의 `ts`, 대부분의 채팅 프로토콜의 seq가 이 계열이다.
 4. 분산 ID(Snowflake 등) — 채널별 카운터 대신 전역 유일 + 대략적 시간 순서 ID. Discord가 이 계열. 순서는 근사적이 되지만 채널 카운터 경합이 사라진다.
 
-**momo.** 3번을 골랐다. `channel_seq` 테이블의 행을 잠그고 번호를 증가시키는 gapless 카운터가 순서의 유일한 진실이다(`schema_v0.sql`의 `channel_seq`, `001_init.sql:142`). Postgres의 내장 sequence를 일부러 쓰지 않는데, sequence는 트랜잭션이 롤백돼도 번호를 소모해서 구멍(gap)이 생기기 때문이다. 구멍이 생기면 "빠진 메시지 감지"가 불가능해진다. 이 선택의 대가는 채널당 초당 쓰기 상한(행 잠금 경합)인데, 이는 M10에서 다룬다.
+**oort.** 3번을 골랐다. `channel_seq` 테이블의 행을 잠그고 번호를 증가시키는 gapless 카운터가 순서의 유일한 진실이다(`schema_v0.sql`의 `channel_seq`, `001_init.sql:142`). Postgres의 내장 sequence를 일부러 쓰지 않는데, sequence는 트랜잭션이 롤백돼도 번호를 소모해서 구멍(gap)이 생기기 때문이다. 구멍이 생기면 "빠진 메시지 감지"가 불가능해진다. 이 선택의 대가는 채널당 초당 쓰기 상한(행 잠금 경합)인데, 이는 M10에서 다룬다.
 
 ---
 
@@ -32,7 +32,7 @@
 
 **해법 스펙트럼.** 업계 표준은 사실상 하나다: **at-least-once(무조건 될 때까지 재시도) + 멱등키(idempotency key)로 중복 제거**. 클라이언트가 메시지마다 고유 ID를 만들어 보내고, 서버는 같은 ID가 두 번 오면 "이미 처리했음"을 돌려준다. exactly-once를 네트워크 수준에서 보장하는 마법은 없다 — 저장소에서 중복을 제거해 exactly-once**처럼 보이게** 만드는 것이다.
 
-**momo.** 모든 쓰기가 REST 하나의 경로로 들어오고, `agent_run`은 `clientRunId`, 승인 결정은 `approval_decision` 원장(`004_approval_decision.sql`)으로 멱등을 보장한다. 서버 내부 전파도 같은 원리다: 메시지 커밋과 브로드캐스트 예약을 **한 트랜잭션**에 묶는 transactional outbox(M3)가 "DB에는 있는데 전파는 안 된" 상태를 구조적으로 없앤다.
+**oort.** 모든 쓰기가 REST 하나의 경로로 들어오고, `agent_run`은 `clientRunId`, 승인 결정은 `approval_decision` 원장(`004_approval_decision.sql`)으로 멱등을 보장한다. 서버 내부 전파도 같은 원리다: 메시지 커밋과 브로드캐스트 예약을 **한 트랜잭션**에 묶는 transactional outbox(M3)가 "DB에는 있는데 전파는 안 된" 상태를 구조적으로 없앤다.
 
 ---
 
@@ -46,7 +46,7 @@
 - 전파: DB 커밋과 같은 트랜잭션에 "전파할 것" 행을 남기고(outbox), 별도 프로세스가 그 행을 읽어 websocket 서버로 밀어 넣는다. DB가 진실, 전파는 파생.
 - 복구: ① websocket 서버가 최근 N개를 기억해서 재전송(빠르지만 한계 있음) ② 클라이언트가 "내가 마지막으로 본 seq 이후 전부"를 DB에 다시 묻는 backfill(느리지만 완전함). 성숙한 시스템은 둘 다 쓴다 — 짧은 끊김은 ①, 긴 끊김은 ②.
 
-**momo.** 교과서 그대로 구현되어 있다. REST → PG 커밋(메시지+seq+outbox 한 트랜잭션) → OutboxRelay가 `FOR UPDATE SKIP LOCKED`로 outbox를 집어 Centrifugo에 publish(`relay/OutboxRelay/Sources/OutboxRelay/RelayService.swift:11-16`) → websocket으로 각 클라이언트에 도착. 복구는 Centrifugo history(짧은 끊김, `infra/centrifugo.json:4-8`)와 REST `?after=<seq>` backfill(긴 끊김·진짜 권위, `docs/DEPLOY.md:279`) 이중이다. **Centrifugo는 순서도 권한도 히스토리의 원본도 아니다** — 전송 전용이라는 제1불변식이 여기서 나온다.
+**oort.** 교과서 그대로 구현되어 있다. REST → PG 커밋(메시지+seq+outbox 한 트랜잭션) → OutboxRelay가 `FOR UPDATE SKIP LOCKED`로 outbox를 집어 Centrifugo에 publish(`relay/OutboxRelay/Sources/OutboxRelay/RelayService.swift:11-16`) → websocket으로 각 클라이언트에 도착. 복구는 Centrifugo history(짧은 끊김, `infra/centrifugo.json:4-8`)와 REST `?after=<seq>` backfill(긴 끊김·진짜 권위, `docs/DEPLOY.md:279`) 이중이다. **Centrifugo는 순서도 권한도 히스토리의 원본도 아니다** — 전송 전용이라는 제1불변식이 여기서 나온다.
 
 ---
 
@@ -58,7 +58,7 @@
 
 **해법.** 사실상 수렴된 설계가 있다: 사용자×채널마다 "마지막으로 읽은 위치(cursor)" 하나를 서버 DB에 저장하고, unread 수 = head seq − cursor로 계산한다. cursor는 단조 증가만 허용(뒤로 가는 갱신은 무시)해야 기기 간 경합에서 안전하다.
 
-**momo.** ADR-0109로 이미 정본화·구현됐다. Postgres `read_state`가 유일한 권위, bulk GET + actor-bound PUT, cursor 전진 알림도 같은 트랜잭션의 outbox를 타고 본인에게만 흐른다(`user:read-state#<member-id>`). M1의 seq가 있기에 "위치"가 정수 하나로 표현된다는 점에 주목 — 문제들은 서로 얽혀 있고, 순서를 잘 풀면 읽음이 쉬워진다.
+**oort.** ADR-0109로 이미 정본화·구현됐다. Postgres `read_state`가 유일한 권위, bulk GET + actor-bound PUT, cursor 전진 알림도 같은 트랜잭션의 outbox를 타고 본인에게만 흐른다(`user:read-state#<member-id>`). M1의 seq가 있기에 "위치"가 정수 하나로 표현된다는 점에 주목 — 문제들은 서로 얽혀 있고, 순서를 잘 풀면 읽음이 쉬워진다.
 
 ---
 
@@ -70,7 +70,7 @@
 
 **해법 스펙트럼.** ① websocket 연결 자체를 온라인 신호로 쓴다(연결=온라인, 끊김=오프라인) ② 주기적 heartbeat + 타임아웃 ③ 상태 변화를 채널 구독자에게만, 그리고 묶어서(batch/debounce) 전파 ④ 대규모에선 "보이는 사람 것만 구독"(lazy presence)으로 전환.
 
-**momo.** 아직 서버가 소유한 presence가 없다. Centrifugo namespace에 presence 기능이 켜져 있고(`infra/centrifugo.json:4,9,12` — 연결 기반 ①의 재료), 클라이언트에 `PresenceDelta`/`TypingDelta` 모델과 `setTyping` 프로토콜은 있으나 no-op이다(`clients/macOS/Sources/MomoMac/MomoServerRESTChatBackend.swift:562`). 사람 presence만이 아니라 **에이전트의 존재감**(실행 중/대기/생각 중)이라는 momo 고유 축이 있어서, 이 전체가 ADR-0104(결정 큐 대기)의 범위다.
+**oort.** 아직 서버가 소유한 presence가 없다. Centrifugo namespace에 presence 기능이 켜져 있고(`infra/centrifugo.json:4,9,12` — 연결 기반 ①의 재료), 클라이언트에 `PresenceDelta`/`TypingDelta` 모델과 `setTyping` 프로토콜은 있으나 no-op이다(`clients/macOS/Sources/MomoMac/MomoServerRESTChatBackend.swift:562`). 사람 presence만이 아니라 **에이전트의 존재감**(실행 중/대기/생각 중)이라는 oort 고유 축이 있어서, 이 전체가 ADR-0104(결정 큐 대기)의 범위다.
 
 ---
 
@@ -82,7 +82,7 @@
 
 **해법의 뼈대.** ① 서버가 "이 이벤트가 이 사람에게 푸시할 가치가 있나"를 판정(멘션? DM? 채널 음소거?) — 판정 로직은 서버 한 곳에만 존재해야 한다(ux-bible P9) ② 기기 토큰 관리(등록·무효화) ③ APNs/FCM으로 발송 ④ 셀프호스팅이라면 벤더 운영 push relay 경유.
 
-**momo.** 스키마는 처음부터 준비되어 있었다 — `device`, `push_token`, `push_dispatch_log` 테이블과 APNs 운영 상수(ES256 키, 429/410 처리)까지 문서화됐다(`001_init.sql:506-543`, `docs/DEPLOY.md:447-451`). 그러나 토큰 등록 라우트도, 발송 worker도, 판정 로직도 아직 없다. 로드맵 M5(iOS)의 MOMO-040~043이 이 자리다. unread/멘션 판정(M4)이 먼저 서버에 있어야 푸시 판정(P9)이 설 수 있다는 의존관계에 주목.
+**oort.** 스키마는 처음부터 준비되어 있었다 — `device`, `push_token`, `push_dispatch_log` 테이블과 APNs 운영 상수(ES256 키, 429/410 처리)까지 문서화됐다(`001_init.sql:506-543`, `docs/DEPLOY.md:447-451`). 그러나 토큰 등록 라우트도, 발송 worker도, 판정 로직도 아직 없다. 로드맵 M5(iOS)의 MOMO-040~043이 이 자리다. unread/멘션 판정(M4)이 먼저 서버에 있어야 푸시 판정(P9)이 설 수 있다는 의존관계에 주목.
 
 ---
 
@@ -94,7 +94,7 @@
 
 **해법 스펙트럼.** 저장: 로컬 디스크(작은 규모) → S3 호환 스토리지(MinIO 셀프호스팅/클라우드) → 외부 문서 시스템(Drive/SharePoint) 위임. 서빙: 서버 경유(권한 검사 확실, 대역폭 부담) vs presigned URL(스토리지 직접, 만료 시간으로 권한 근사) vs CDN. 업로드: 클라→서버→스토리지 vs 클라→스토리지 직송(resumable).
 
-**momo.** `file` 테이블(storage_key, mime, checksum)과 `message_type='artifact'`가 스키마에 있고(`001_init.sql:227-246`), 업로드 라우트와 클라이언트 경로는 전부 미구현. 방향 결정은 이미 한 번 났다가 동결됐다 — "자체 오브젝트 스토리지를 만들지 않고 workspace당 Google Drive 공유 드라이브 + 서비스 계정" 설계(`research/13-redesign/03-google-workspace-files-rag.md`)가 보안·retention ADR(0113/0116) 승인 대기로 얼려져 있다. **일반 첨부(스크린샷 붙여넣기)와 문서 협업(Drive)은 다른 문제일 수 있다**는 점이 열린 질문이다(research/15에서 다룬다).
+**oort.** `file` 테이블(storage_key, mime, checksum)과 `message_type='artifact'`가 스키마에 있고(`001_init.sql:227-246`), 업로드 라우트와 클라이언트 경로는 전부 미구현. 방향 결정은 이미 한 번 났다가 동결됐다 — "자체 오브젝트 스토리지를 만들지 않고 workspace당 Google Drive 공유 드라이브 + 서비스 계정" 설계(`research/13-redesign/03-google-workspace-files-rag.md`)가 보안·retention ADR(0113/0116) 승인 대기로 얼려져 있다. **일반 첨부(스크린샷 붙여넣기)와 문서 협업(Drive)은 다른 문제일 수 있다**는 점이 열린 질문이다(research/15에서 다룬다).
 
 ---
 
@@ -104,7 +104,7 @@
 
 **해법 스펙트럼.** DB 내장 전문검색(PG tsvector/pg_trgm — CJK 약함) → PGroonga·pg_bigm 같은 CJK 특화 확장 → 별도 검색엔진(Elasticsearch/Meilisearch — 운영 비용과 "두 번째 진실" 동기화 문제).
 
-**momo.** 미착수, ADR-0105로 예약. 2026-07-09 감사에서 "pg_trgm은 CJK 재현율 낮음"으로 이미 판정됐다(`docs/architecture/overview.md:205`). 셀프호스팅 배포판 관점에선 "컨테이너 하나 추가"가 설치 난이도를 얼마나 올리는지도 변수다.
+**oort.** 미착수, ADR-0105로 예약. 2026-07-09 감사에서 "pg_trgm은 CJK 재현율 낮음"으로 이미 판정됐다(`docs/architecture/overview.md:205`). 셀프호스팅 배포판 관점에선 "컨테이너 하나 추가"가 설치 난이도를 얼마나 올리는지도 변수다.
 
 ---
 
@@ -114,7 +114,7 @@
 
 **해법 스펙트럼.** ① 앱 레이어에서만 필터(사고 대기) ② 테넌트별 DB 분리(격리 최강, 운영 비용 최대) ③ **한 DB + Row-Level Security** — DB 엔진이 모든 쿼리에 테넌트 필터를 강제 주입. 앱이 실수해도 DB가 막는다.
 
-**momo.** ③을 처음부터 채택했다. 모든 테넌트 테이블에 RLS FORCE + `app.workspace_id` GUC, 앱 role은 NOBYPASSRLS, 배경 소비자(relay/worker)만 BYPASSRLS(`001_init.sql:388-391,548-565`). 최근 MOMO-383에서 테넌트 루트인 `workspace` 테이블 자체에도 RLS를 확장했다(`009_workspace_tenant_rls.sql`). 서버·DB는 day-1부터 멀티 워크스페이스인데 **클라이언트 UI만 단일 워크스페이스**로 잠겨 있다(ADR-0117 대기) — "서버는 준비, 표면은 결정 대기"의 전형적 사례.
+**oort.** ③을 처음부터 채택했다. 모든 테넌트 테이블에 RLS FORCE + `app.workspace_id` GUC, 앱 role은 NOBYPASSRLS, 배경 소비자(relay/worker)만 BYPASSRLS(`001_init.sql:388-391,548-565`). 최근 MOMO-383에서 테넌트 루트인 `workspace` 테이블 자체에도 RLS를 확장했다(`009_workspace_tenant_rls.sql`). 서버·DB는 day-1부터 멀티 워크스페이스인데 **클라이언트 UI만 단일 워크스페이스**로 잠겨 있다(ADR-0117 대기) — "서버는 준비, 표면은 결정 대기"의 전형적 사례.
 
 ---
 
@@ -124,21 +124,21 @@
 
 **핵심 감각.** 수십 명~수백 명 규모에서 ④는 오지 않는다. 대부분의 셀프호스팅 메신저는 단일 노드로 수천 명을 감당한다(05장). 진짜 위험은 스케일이 아니라 **백업 없는 디스크 사망**이다.
 
-**momo.** 명시적 단일 노드 전략(EC2 t4g.large 1대, `docs/AWS_INTERNAL_ALPHA.md:11`)이되, 확장이 코드 재작성이 아닌 설정 변경이 되도록 준비되어 있다: API는 stateless(다중화 가능), relay/worker는 `SKIP LOCKED`라 여러 개 떠도 안전, Centrifugo는 prod에서 Redis 엔진이라 노드 추가 가능(`infra/prod/centrifugo.prod.json:2-7`), 확장 레버 목록은 `docs/DEPLOY.md:504-515`. 백업은 pgBackRest + 리허설 스크립트. **멀티 리전은 현재 계획에 없음이 올바른 상태다** — 03장에서 보겠지만 Slack조차 데이터는 사실상 단일 리전이고 edge만 분산한다.
+**oort.** 명시적 단일 노드 전략(EC2 t4g.large 1대, `docs/AWS_INTERNAL_ALPHA.md:11`)이되, 확장이 코드 재작성이 아닌 설정 변경이 되도록 준비되어 있다: API는 stateless(다중화 가능), relay/worker는 `SKIP LOCKED`라 여러 개 떠도 안전, Centrifugo는 prod에서 Redis 엔진이라 노드 추가 가능(`infra/prod/centrifugo.prod.json:2-7`), 확장 레버 목록은 `docs/DEPLOY.md:504-515`. 백업은 pgBackRest + 리허설 스크립트. **멀티 리전은 현재 계획에 없음이 올바른 상태다** — 03장에서 보겠지만 Slack조차 데이터는 사실상 단일 리전이고 edge만 분산한다.
 
 ---
 
-## M11. 실행 원장 — momo가 스스로 추가한 열한 번째 문제
+## M11. 실행 원장 — oort가 스스로 추가한 열한 번째 문제
 
-**문제.** M1~M10은 모든 메신저의 공통 문제다. momo는 여기에 하나를 더 얹었다: **에이전트가 1급 멤버라면, 에이전트의 실행·승인·비용·감사가 대화와 같은 원장에 남아야 한다.** "봇이 API로 메시지를 쏘는" Slack 모델과의 근본 차이가 이것이다.
+**문제.** M1~M10은 모든 메신저의 공통 문제다. oort는 여기에 하나를 더 얹었다: **에이전트가 1급 멤버라면, 에이전트의 실행·승인·비용·감사가 대화와 같은 원장에 남아야 한다.** "봇이 API로 메시지를 쏘는" Slack 모델과의 근본 차이가 이것이다.
 
-**momo의 해법(이미 정본).** 실행 개체 `agent_run`(멱등, 루프가드), 위험 작업 승인 왕복(`approval`), 비용 원장(`usage_ledger`), 감사(`audit_log`)가 전부 메시지와 같은 트랜잭션 규율 아래 있다. 실행 자체는 momo 서버가 아니라 에이전트 호스트에서 일어난다(ADR-0111 D2 — 서버 RCE 표면과 자격증명 유입을 원천 차단). 이 축은 이 바이블에서 별도 장으로 다루지 않는다 — 정본(ADR-0102/0111, `docs/architecture/overview.md`의 보장 매트릭스)이 이미 교재 수준으로 상세하다.
+**oort의 해법(이미 정본).** 실행 개체 `agent_run`(멱등, 루프가드), 위험 작업 승인 왕복(`approval`), 비용 원장(`usage_ledger`), 감사(`audit_log`)가 전부 메시지와 같은 트랜잭션 규율 아래 있다. 실행 자체는 oort 서버가 아니라 에이전트 호스트에서 일어난다(ADR-0111 D2 — 서버 RCE 표면과 자격증명 유입을 원천 차단). 이 축은 이 바이블에서 별도 장으로 다루지 않는다 — 정본(ADR-0102/0111, `docs/architecture/overview.md`의 보장 매트릭스)이 이미 교재 수준으로 상세하다.
 
 ---
 
 ## 정리 — 규모 축으로 다시 보기
 
-| 문제 | 2명부터 필요 | 규모가 만든다 | momo 현재 |
+| 문제 | 2명부터 필요 | 규모가 만든다 | oort 현재 |
 |---|---|---|---|
 | M1 순서 | ✅ | 핫채널 경합은 규모 | ✅ channel_seq |
 | M2 전달 보장 | ✅ | | ✅ outbox+멱등 |
@@ -150,6 +150,6 @@
 | M8 검색 | 수천 메시지부터 | 엔진 분리는 규모 | ❌ ADR-0105 대기 |
 | M9 격리 | 멀티팀부터 | | ✅ RLS day-1 |
 | M10 스케일·HA | 백업은 day-1 | 나머지는 규모 | ✅ 단일노드+레버 문서화 |
-| M11 실행 원장 | momo 고유 | | ✅ 정본 완비 |
+| M11 실행 원장 | oort 고유 | | ✅ 정본 완비 |
 
-이 표가 이 바이블 전체의 지도다. momo의 골격(M1·M2·M3·M4·M9·M11)은 이미 업계 정석 또는 그 이상이고, 남은 것은 전부 "제품 표면과 플랫폼 확장"(M5·M6·M7·M8)과 "배포판"(M10의 셀프호스팅 축)이다.
+이 표가 이 바이블 전체의 지도다. oort의 골격(M1·M2·M3·M4·M9·M11)은 이미 업계 정석 또는 그 이상이고, 남은 것은 전부 "제품 표면과 플랫폼 확장"(M5·M6·M7·M8)과 "배포판"(M10의 셀프호스팅 축)이다.

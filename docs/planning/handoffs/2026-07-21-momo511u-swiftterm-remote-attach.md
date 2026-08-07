@@ -9,7 +9,7 @@
 ## 서버 계약 (이미 main에 있음 — 수정 금지, 소비만)
 - `POST /v1/workspaces/{ws}/work-sessions/{sid}/terminal-attach` (openapi.yaml:1134) → `{attach_endpoint, capability_token, pty_id}` 정확히 3필드, **60초 grant**. 세션 소유자 human bearer 전용.
 - 오류: 400 잘못된 id / 403 비인간·비소유자 / 404 없음 / 409 세션 종료·PTY 미결속·host revoked / 429.
-- **클라이언트는 attach_endpoint에 직접 연결**(WSS/HTTPS) — momo 서버/relay는 PTY 바이트를 절대 중계하지 않는다(ADR-0125 D10, ADR-0004).
+- **클라이언트는 attach_endpoint에 직접 연결**(WSS/HTTPS) — oort 서버/relay는 PTY 바이트를 절대 중계하지 않는다(ADR-0125 D10, ADR-0004).
 
 ## 구현 범위
 1. **원격 attach 백엔드**: 기존 `MomoLocalTerminalSession`(로컬 PTY)과 동일한 인터페이스의 `MomoRemoteTerminalSession` — capability 발급 REST 호출 → attach_endpoint에 WebSocket 연결(`capability_token`은 헤더/첫 프레임, URL 쿼리 금지) → stdout 스트림을 SwiftTerm feed로, 키입력을 send_stdin 프레임으로, 뷰 리사이즈를 resize 프레임으로. 프로토콜 프레임은 E2B pty 의미론(create/connect/send_stdin/resize/kill)의 클라측 대응 — 서버가 정한 계약 외 필드 추가 금지.
