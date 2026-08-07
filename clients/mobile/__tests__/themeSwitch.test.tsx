@@ -177,15 +177,53 @@ describe('스킴 왕복 — 세 값이 화면 끝까지 간다', () => {
         <ThemeControl />
       </ThemeProvider>,
     );
-    expect(screen.getByTestId('theme-system').props.accessibilityHint).toContain(
-      '라이트',
-    );
+    const hint = () => screen.getByTestId('theme-system').props.accessibilityHint;
+    expect(hint()).toContain('라이트');
+
+    // **이 단정이 리뷰 H-1 이 잡은 것이다.** 첫 판은 힌트를 풀린 스킴(`scheme`)으로
+    // 만들었고, 이 자리에 「다크를 고르면 힌트도 다크가 된다」를 단정으로 **봉인**
+    // 하고 있었다. 그것은 참이 아니다 — 시스템은 여전히 라이트이고, 이 문장이
+    // 있는 유일한 이유가 「고르지 않으면 무엇이 되는가」이므로 고른 값을 되돌려
+    // 주는 힌트는 답이 아니라 메아리다.
     fireEvent.press(screen.getByTestId('theme-dark'));
-    expect(screen.getByTestId('theme-system').props.accessibilityHint).toContain(
-      '다크',
-    );
+    expect(hint()).toContain('라이트');
+    expect(hint()).not.toContain('다크');
+
+    // 그리고 **시스템이 실제로 바뀌면** 고정된 동안에도 힌트는 따라간다. 고정은
+    // 화면의 색을 못 박는 것이지 기기의 사실을 못 박는 것이 아니고, 되돌릴지
+    // 판단하는 사람에게 필요한 것이 그 사실이다.
+    act(() => setSystemColorScheme('dark'));
+    expect(hint()).toContain('다크');
+
     // 라벨이 곧 답인 두 칸은 힌트가 없다.
     expect(screen.getByTestId('theme-light').props.accessibilityHint).toBeUndefined();
+  });
+
+  it('안 고른 칸의 테두리는 **컨트롤의** 테두리다 — 두 스킴에서 3:1 위 (리뷰 M-1)', () => {
+    // `border` 는 배경 위 3:1 아래이고(`paletteContrast.test.ts` 가 그것을 잰다),
+    // 토큰 자신이 「선이지 컨트롤이 아니다」라고 적는다. 안 고른 칸은 채움도 글자
+    // 강조도 없으므로 테두리 하나가 「여기가 버튼이다」를 말하는 전부이고, 그래서
+    // 그 값은 hairline 이 아니라 컨트롤 테두리여야 한다.
+    //
+    // 두 스킴에서 함께 잰다: 라이트에서만 확인하면 다크의 회귀를 놓치고, 이 결함이
+    // 처음 눈에 띈 것도 라이트 판 사진에서였다.
+    // 아무것도 고르지 않았으므로(기본 = 시스템) 「라이트」 칸은 어느 스킴에서든
+    // 안 고른 칸이다 — 고른 칸을 읽으면 accent 가 나와 이 단정이 무의미해진다.
+    act(() => setSystemColorScheme('light'));
+    render(
+      <ThemeProvider>
+        <ThemeControl />
+      </ThemeProvider>,
+    );
+    const border = () =>
+      flatten(screen.getByTestId('theme-light').props.style).borderColor;
+
+    expect(border()).toBe(lightPalette.textFaint);
+    expect(border()).not.toBe(lightPalette.border);
+
+    act(() => setSystemColorScheme('dark'));
+    expect(border()).toBe(darkPalette.textFaint);
+    expect(border()).not.toBe(darkPalette.border);
   });
 
   it('고른 칸만 selected 다 — 셋 중 하나', () => {

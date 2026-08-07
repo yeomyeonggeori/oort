@@ -105,6 +105,21 @@ function writeStoredChoice(choice: ThemeChoice): void {
 interface ThemeValue {
   choice: ThemeChoice;
   scheme: ColorScheme;
+  /**
+   * 시스템이 **지금** 말하는 것. `scheme` 과 다른 값이다.
+   *
+   * `scheme` 은 이미 풀린 답이라 사람이 다크를 고르면 시스템이 무엇이든 `dark` 다.
+   * 그래서 「시스템은 지금 무엇인가」를 `scheme` 으로 답하면 고정된 동안 **거짓
+   * 진술**이 된다 — 라이트인 기기에서 다크를 고른 사람이 「시스템은 다크입니다」를
+   * 듣는다(U2 리뷰 H-1: 「시스템」 칸의 VoiceOver 힌트가 정확히 그것이었다).
+   *
+   * 두 값이 갈라지는 자리는 하나뿐이지만(그 힌트), 갈라진다는 사실 자체는 컨텍스트가
+   * 져야 한다. 소비자가 `Appearance.getColorScheme()` 을 직접 물으면 그 답은 구독
+   * 없이 읽은 값이라 시스템이 바뀌어도 갱신되지 않고, 구독을 달면 「구독은 앱 전체에
+   * 하나」(파일 머리 주석)가 깨진다. 이미 구독하고 있는 프로바이더가 답하는 것이
+   * 두 규율을 다 지키는 유일한 길이다.
+   */
+  systemScheme: ColorScheme;
   setChoice: (choice: ThemeChoice) => void;
 }
 
@@ -127,6 +142,11 @@ function systemScheme(): ColorScheme {
 const DETACHED: ThemeValue = {
   choice: 'system',
   get scheme(): ColorScheme {
+    return systemScheme();
+  },
+  // 고른 것이 없는 자리라 둘이 같은 값이다 — `choice` 가 `system` 이면 풀린 답이
+  // 곧 시스템의 답이다.
+  get systemScheme(): ColorScheme {
     return systemScheme();
   },
   setChoice: () => {},
@@ -202,9 +222,12 @@ export function ThemeProvider({
   }, []);
 
   const value = useMemo<ThemeValue>(() => {
-    const scheme: ColorScheme =
-      choice === 'system' ? (system === 'light' ? 'light' : 'dark') : choice;
-    return {choice, scheme, setChoice};
+    // 시스템의 답을 **먼저** 이름 붙인다. 이 값은 고른 것과 무관하게 참이고,
+    // `scheme` 은 그것을 고른 것으로 덮은 결과다 — 두 문장이 한 줄에 접혀 있었을 때
+    // 「시스템은 지금 무엇인가」에 답할 것이 `scheme` 밖에 없었다.
+    const fromSystem: ColorScheme = system === 'light' ? 'light' : 'dark';
+    const scheme: ColorScheme = choice === 'system' ? fromSystem : choice;
+    return {choice, scheme, systemScheme: fromSystem, setChoice};
   }, [choice, system, setChoice]);
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
@@ -224,8 +247,12 @@ export function FixedScheme({
   scheme: ColorScheme;
   children: React.ReactNode;
 }): React.JSX.Element {
+  // 시스템도 인자를 따른다. 하네스가 스킴을 못 박는 이유가 「같은 명령이 기기 상태에
+  // 따라 다른 것을 내면 그 사진은 증거가 아니라 일화가 된다」이고, 시스템 스킴을 진짜
+  // 기기에서 읽으면 그 일화가 **보조기술 문자열**로 되돌아온다 — 같은 캡처 명령이
+  // 시뮬레이터 설정에 따라 다른 힌트를 담게 된다.
   const value = useMemo<ThemeValue>(
-    () => ({choice: scheme, scheme, setChoice: () => {}}),
+    () => ({choice: scheme, scheme, systemScheme: scheme, setChoice: () => {}}),
     [scheme],
   );
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
