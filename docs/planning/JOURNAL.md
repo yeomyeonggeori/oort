@@ -1902,3 +1902,7 @@
 - **#1163 머지(W-B=#1155·#1157 종결)**: 다크 accent 가족 6역할 여명화 — 웹 짝 3역할 바이트 일치+파생 3 OKLCH 관계 재해석(색상각 고정·라이트의 걸음 재사용). 파리티 가드=웹 tokens.css **실파일 파싱 대조**(베낀 기대값 0). onAccent 뒤집힘=값 아닌 관계(명도 부등호)로 재정의. 로그아웃 테두리 원 소견 발굴(성재 이슈 코멘트)→border→textFaint. **design-review PASS(B0·H0·M1·N4)** — 전문 `research/2026-08-07-dark1155-design-review.md`. M1(sign-out confirm 위계)+N1(warn/accent 10.9° 이웃화)=#1164 적립.
 - 워커 위생: named spawn 2기가 최종 보고 대신 유휴 신호로 종료(mailbox 전례 재확인 — **이후 단발 워커는 무명 spawn 복귀**). 완주 확인 후 TaskStop+워크트리 회수. 구 워크트리 6기+브랜치 10개 청소(6.6G→3.2G — 잔존 판정 대기 2: 684-3 Swift 미랜딩·WEB-WP1 squash 대조 필요).
 - 활성: #1160 워커 1기(무명). 도착 시 design-review(웹·폰 꼬리) 발주→검수→머지. 이후 후보: #1161(run_turn flip)·#1164(다크 잔여+재배선)·#1139·#1141·#1146·#1149.
+
+## 2026-08-08 (전야) · Fable · #1165 랜딩(ADR-0155 전면 구현) — 3워커 배치 발사
+- **#1165 머지 → #1160 종결**: StreamCloseOutcome(닫힌 2값·final 동반 강제·정상 완결=키 부재)·닫는 PATCH best effort·코어 streamStopMark+문구 상수·웹/폰 꼬리(잉크=「수정됨」 동일 실측·accent 0)·endedRuns(부재≠종결). 이탈 3 전부 수용(props run_id 1줄="방어 렌더링 도달 가능성의 조건"·endedRuns 스토어·gate:pin 확장). **design-review PASS(B0·H1·M2·N2)** → H-1(픽스처 UUID 얽힘 — "무엇을 재는지 아무도 모르는 초록") 원 워커 재개 수리(cde4b872 — 자기모순 가드 신설+failed 판 픽스처·캡처 추가). M-2=#1166 발급(방어 렌더링 세션-로컬 — 페이지 읽기에 run 터미널 동봉, 엔진 후속). 전문 `research/2026-08-07-outcome1160-design-review.md`.
+- 다음 배치 발사(3워커 무명): W-D=#1161(run_turn flip — 공존/은퇴·Suppressed 분기·dedup 합류 3결정 실측) · W-E=#1139(resume 서버 검증 이식 — fail-closed) · W-F=#1146+#1149(pin 다듬기 — 리뷰 발주 예정). 패킷 `2026-08-07-flip-resume-pin-packet.md`. 서버 D·E는 순차 머지+교차 실측.
