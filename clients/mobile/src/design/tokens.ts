@@ -139,7 +139,7 @@ export interface Palette {
    * accent 의 가장 부드러운 단. 내 반응 칩의 채움이 이 값이다 (감사 M-13).
    *
    * `surface`(중성 고도)와 뜻이 다르다: 이것은 **내가 참여했다**는 표시라 색을
-   * 가진다. 칩이 서는 자리인 `surface` 위에서 다크 1.17:1 · 라이트 1.21:1.
+   * 가진다. 칩이 서는 자리인 `surface` 위에서 다크 1.19:1 · 라이트 1.21:1.
    */
   accentSurface: string;
   /**
@@ -147,7 +147,7 @@ export interface Palette {
    *
    * 두 단을 두는 이유: `accentSurface` 는 이미 서 있는 칩을 물들이는 값이라
    * 조용해야 하고, 검색 일치는 사람이 눈으로 스캔해 찾아내야 하는 값이라
-   * 조용하면 실패한다(`surface` 위 다크 1.43:1 대 1.17:1 · 라이트 1.41:1 대
+   * 조용하면 실패한다(`surface` 위 다크 1.45:1 대 1.19:1 · 라이트 1.41:1 대
    * 1.21:1). 웹의 `--line`/`--line-strong` 과 같은 종류의 쌍이다.
    */
   accentSurfaceStrong: string;
