@@ -8,7 +8,8 @@ import {
 import {memberFor, type Directory} from '@momo/core/features/workspace/directory';
 import React, {useMemo} from 'react';
 import {Image, StyleSheet, Text, View} from 'react-native';
-import {color, font, radius, space} from '../../design/tokens';
+import {font, radius, space, type Palette} from '../../design/tokens';
+import {useStyles} from '../../design/theme';
 import {apiBase} from '../../storage/serverBase';
 
 // =============================================================================
@@ -86,6 +87,7 @@ export function Avatar({
   directory: Directory;
   memberId: string;
 }): React.JSX.Element {
+  const styles = useStyles(buildStyles);
   // 서버 주소를 **의존성으로 든다.** `apiBase()` 를 메모 안에서만 부르면 기기가
   // 서버를 고른 순간 이미 그려져 있던 아바타들이 옛 답(주소 없음 → 이니셜)에
   // 붙잡힌다. 값을 밖에서 한 번 읽고 그것으로 키를 잡으면 그 경로가 없다.
@@ -132,7 +134,7 @@ export function Avatar({
   );
 }
 
-const styles = StyleSheet.create({
+const buildStyles = (color: Palette) => StyleSheet.create({
   box: {
     width: AVATAR_SIZE,
     height: AVATAR_SIZE,

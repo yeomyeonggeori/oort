@@ -18,15 +18,8 @@ import type {Directory} from '@momo/core/features/workspace/directory';
 import React, {useCallback, useMemo} from 'react';
 import {FlatList, Pressable, StyleSheet, Text, View} from 'react-native';
 import {EmptyState, ErrorState, Screen, ScreenHeader} from '../../design/atoms';
-import {
-  color,
-  font,
-  line,
-  radius,
-  SAFE_GUTTER,
-  space,
-  TOUCH_TARGET,
-} from '../../design/tokens';
+import {font, line, radius, SAFE_GUTTER, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
+import {useStyles} from '../../design/theme';
 import {EdgeSwipeBack} from '../../nav/EdgeSwipeBack';
 import {appNote} from './appVoice';
 
@@ -105,6 +98,7 @@ export function PinListPanel({
   /** 목록만 다시 읽는다(채널 전체가 아니라). 실패 문장 뒤의 행동. */
   onRetry: () => void;
 }): React.JSX.Element {
+  const styles = useStyles(buildStyles);
   const entries = useMemo(() => pinList(pins), [pins]);
 
   const openEntry = useCallback(
@@ -230,7 +224,7 @@ export function PinListPanel({
   );
 }
 
-const styles = StyleSheet.create({
+const buildStyles = (color: Palette) => StyleSheet.create({
   overlay: {
     position: 'absolute',
     top: 0,

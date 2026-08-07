@@ -10,7 +10,8 @@ import {
 } from '@momo/core/features/agents/runCancel';
 import React, {useCallback, useRef, useState} from 'react';
 import {AccessibilityInfo, Pressable, StyleSheet, Text, View} from 'react-native';
-import {color, font, radius, space, TOUCH_TARGET} from '../../design/tokens';
+import {font, radius, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
+import {useStyles} from '../../design/theme';
 import {CONFIRM_GUARD_MS} from '../inbox/ApprovalDecision';
 import {useSession} from '../../session/useSession';
 
@@ -68,6 +69,7 @@ export function StopTurnControl({
   onOutcome: (outcome: CancelOutcome) => void;
   testIDPrefix?: string;
 }): React.JSX.Element {
+  const styles = useStyles(buildStyles);
   const {workspaceId} = useSession();
   const [armed, setArmed] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -180,7 +182,7 @@ export function StopTurnControl({
   );
 }
 
-const styles = StyleSheet.create({
+const buildStyles = (color: Palette) => StyleSheet.create({
   quiet: {
     minHeight: TOUCH_TARGET,
     justifyContent: 'center',

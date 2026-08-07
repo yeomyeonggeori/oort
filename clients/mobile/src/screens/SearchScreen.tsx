@@ -27,7 +27,8 @@ import {
   Screen,
   ScreenHeader,
 } from '../design/atoms';
-import {color, font, radius, SAFE_GUTTER, space, TOUCH_TARGET} from '../design/tokens';
+import {font, radius, SAFE_GUTTER, space, TOUCH_TARGET, type Palette} from '../design/tokens';
+import {usePalette, useStyles} from '../design/theme';
 import {
   useMessageSearch,
   type MessageSearch,
@@ -150,6 +151,8 @@ export function SearchBody({
   search: MessageSearch;
   renderItem: ({item}: {item: MessageSearchHit}) => React.JSX.Element;
 }): React.JSX.Element {
+  const styles = useStyles(buildStyles);
+  const palette = usePalette();
   const body = useMemo(() => {
     switch (search.phase) {
       case 'idle':
@@ -210,7 +213,7 @@ export function SearchBody({
           />
         );
     }
-  }, [search, renderItem]);
+  }, [search, renderItem, styles]);
 
   return (
     <>
@@ -221,7 +224,7 @@ export function SearchBody({
           value={search.query}
           onChangeText={search.setQuery}
           placeholder="메시지 내용으로 검색"
-          placeholderTextColor={color.textFaint}
+          placeholderTextColor={palette.textFaint}
           accessibilityLabel="메시지 검색"
           autoCorrect={false}
           returnKeyType="search"
@@ -247,6 +250,7 @@ export function ResultRow({
   authorName: string;
   onPress: () => void;
 }): React.JSX.Element {
+  const styles = useStyles(buildStyles);
   const segments = snippetSegments(hit.snippet, hit.matchOffset, query);
   // 잘린 쪽에만 말줄임을 붙인다. 잘리지 않은 쪽에 붙이면 없는 말이 있다고 하는
   // 것이고, 그것도 이 표면이 없애려는 거짓말과 같은 종류다.
@@ -281,7 +285,7 @@ export function ResultRow({
   );
 }
 
-const styles = StyleSheet.create({
+const buildStyles = (color: Palette) => StyleSheet.create({
   field: {paddingHorizontal: SAFE_GUTTER, paddingVertical: space.sm},
   input: {
     minHeight: TOUCH_TARGET,

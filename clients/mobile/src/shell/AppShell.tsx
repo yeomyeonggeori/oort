@@ -3,7 +3,8 @@ import React, {useCallback, useReducer, useRef} from 'react';
 import {Pressable, StyleSheet, Text, View} from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {CountBadge} from '../design/atoms';
-import {color, font, SAFE_GUTTER, space, TOUCH_TARGET} from '../design/tokens';
+import {font, SAFE_GUTTER, space, TOUCH_TARGET, type Palette} from '../design/tokens';
+import {useStyles} from '../design/theme';
 import {AgentWorkingRail} from '../features/agents/AgentWorkingRail';
 import {useMentionCount} from '../features/inbox/useInbox';
 import {EdgeSwipeBack} from '../nav/EdgeSwipeBack';
@@ -78,6 +79,7 @@ export default function AppShell({member}: {member: Member}): React.JSX.Element 
 }
 
 function Shell(): React.JSX.Element {
+  const styles = useStyles(buildStyles);
   const [nav, dispatch] = useReducer(navReducer, INITIAL_NAV);
 
   const onOpenConversation = useCallback(
@@ -207,6 +209,7 @@ function TabBar({
   current: Tab;
   onSelect: (tab: Tab) => void;
 }): React.JSX.Element {
+  const styles = useStyles(buildStyles);
   const insets = useSafeAreaInsets();
   const mentionCount = useMentionCount();
   return (
@@ -240,7 +243,7 @@ function TabBar({
   );
 }
 
-const styles = StyleSheet.create({
+const buildStyles = (color: Palette) => StyleSheet.create({
   root: {flex: 1, backgroundColor: color.bg},
   tabBody: {flex: 1},
   // `display: none` rather than unmounting: see the header note on scroll

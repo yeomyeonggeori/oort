@@ -3,7 +3,8 @@ import React, {useEffect, useMemo, useState} from 'react';
 import {ActivityIndicator, StatusBar, StyleSheet, Text, View} from 'react-native';
 import {SafeAreaProvider} from 'react-native-safe-area-context';
 import {PrimaryButton} from './src/design/atoms';
-import {color, font, SAFE_GUTTER, space} from './src/design/tokens';
+import {font, SAFE_GUTTER, space, type Palette} from './src/design/tokens';
+import {ThemeProvider, usePalette, useStyles, useTheme} from './src/design/theme';
 import {createQueryClient, installReactQueryBridges} from './src/query/queryClient';
 import ConnectScreen from './src/screens/ConnectScreen';
 import {RESTORE_UNREACHABLE_NOTICE} from './src/session/authGate';
@@ -40,6 +41,19 @@ import {initSessionStore} from './src/storage/secureSession';
 // =============================================================================
 
 export default function App(): React.JSX.Element {
+  // `ThemeProvider` 가 제일 바깥이다 (U2). 이 트리에서 색을 쓰는 첫 번째 것이
+  // 부팅 화면이고, 그것도 사람이 고른 스킴으로 나와야 한다 — 프로바이더가
+  // `Gate` 아래 있으면 앱을 열 때마다 다크 한 프레임이 먼저 지나간다.
+  return (
+    <ThemeProvider>
+      <AppChrome />
+    </ThemeProvider>
+  );
+}
+
+function AppChrome(): React.JSX.Element {
+  const palette = usePalette();
+  const {scheme} = useTheme();
   const queryClient = useMemo(() => createQueryClient(), []);
   const [booted, setBooted] = useState(false);
 
@@ -59,7 +73,12 @@ export default function App(): React.JSX.Element {
 
   return (
     <SafeAreaProvider>
-      <StatusBar barStyle="light-content" backgroundColor={color.bg} />
+      {/* 상태바 글자는 배경의 반대다 (U2). 값을 「light-content」로 박아 두면
+          라이트 스킴에서 종이 위에 흰 글자가 서고, 시계와 배터리가 사라진다. */}
+      <StatusBar
+        barStyle={scheme === 'light' ? 'dark-content' : 'light-content'}
+        backgroundColor={palette.bg}
+      />
       <QueryClientProvider client={queryClient}>
         {booted ? <Gate /> : <Booting testID="booting" />}
       </QueryClientProvider>
@@ -99,9 +118,11 @@ function Booting({
   onRetry?: () => void;
   testID?: string;
 }): React.JSX.Element {
+  const styles = useStyles(buildStyles);
+  const palette = usePalette();
   return (
     <View style={styles.booting} testID={testID}>
-      {onRetry ? null : <ActivityIndicator color={color.accentText} />}
+      {onRetry ? null : <ActivityIndicator color={palette.accentText} />}
       {label ? <Text style={styles.bootingLabel}>{label}</Text> : null}
       {onRetry ? (
         <View style={styles.bootingAction}>
@@ -112,7 +133,7 @@ function Booting({
   );
 }
 
-const styles = StyleSheet.create({
+const buildStyles = (color: Palette) => StyleSheet.create({
   booting: {
     flex: 1,
     alignItems: 'center',

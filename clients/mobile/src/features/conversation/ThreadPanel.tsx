@@ -3,7 +3,8 @@ import type {Directory} from '@momo/core/features/workspace/directory';
 import React, {useCallback, useEffect, useMemo, useState} from 'react';
 import {StyleSheet, Text, View} from 'react-native';
 import {ErrorState, Screen, ScreenHeader} from '../../design/atoms';
-import {color, font, SAFE_GUTTER, space} from '../../design/tokens';
+import {font, SAFE_GUTTER, space, type Palette} from '../../design/tokens';
+import {useStyles} from '../../design/theme';
 import {EdgeSwipeBack} from '../../nav/EdgeSwipeBack';
 import {Composer} from './Composer';
 import {ConversationLayout} from './ConversationLayout';
@@ -65,6 +66,7 @@ export function ThreadPanel({
    */
   onReplySent?: () => void;
 }): React.JSX.Element {
+  const styles = useStyles(buildStyles);
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [reloadNonce, setReloadNonce] = useState(0);
 
@@ -265,7 +267,7 @@ export function ThreadPanel({
   );
 }
 
-const styles = StyleSheet.create({
+const buildStyles = (color: Palette) => StyleSheet.create({
   overlay: {
     position: 'absolute',
     top: 0,

@@ -1,7 +1,8 @@
 import React from 'react';
 import {StyleSheet, View} from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
-import {color} from '../../design/tokens';
+import {type Palette} from '../../design/tokens';
+import {useStyles} from '../../design/theme';
 import {KeyboardPane} from '../../lib/keyboardPane';
 
 // =============================================================================
@@ -107,6 +108,7 @@ export function ConversationLayout({
   list: React.ReactNode;
   composer: React.ReactNode;
 }): React.JSX.Element {
+  const styles = useStyles(buildStyles);
   const insets = useSafeAreaInsets();
 
   return (
@@ -128,7 +130,7 @@ export function ConversationLayout({
   );
 }
 
-const styles = StyleSheet.create({
+const buildStyles = (color: Palette) => StyleSheet.create({
   clip: {flex: 1, overflow: 'hidden', backgroundColor: color.bg},
   root: {flex: 1, backgroundColor: color.bg},
   list: {flex: 1},

@@ -22,7 +22,8 @@ import {
   type NativeSyntheticEvent,
 } from 'react-native';
 import {EmptyState, ErrorState, LoadingState} from '../../design/atoms';
-import {color, font, SAFE_GUTTER, space} from '../../design/tokens';
+import {font, SAFE_GUTTER, space, type Palette} from '../../design/tokens';
+import {usePalette, useStyles} from '../../design/theme';
 import {
   DayDivider,
   MessageRow,
@@ -572,6 +573,8 @@ function TimelineInner({
   /** Same seam: lets the harness put the reader mid-history before measuring. */
   listRef?: React.MutableRefObject<FlatList<TimelineStreamItem> | null>;
 }): React.JSX.Element {
+  const styles = useStyles(buildStyles);
+  const palette = usePalette();
   const ownListRef = useRef<FlatList<TimelineStreamItem> | null>(null);
   const listRef = externalListRef ?? ownListRef;
   /** Is the reader at the bottom? Decides whether new content is followed. */
@@ -1199,13 +1202,16 @@ function TimelineInner({
     () => (
       <View style={styles.header}>
         {loadingOlder ? (
-          <ActivityIndicator color={color.accentText} />
+          <ActivityIndicator color={palette.accentText} />
         ) : reachedStart && items.length > 0 ? (
           <Text style={styles.headerLabel}>대화의 시작입니다.</Text>
         ) : null}
       </View>
     ),
-    [loadingOlder, reachedStart, items.length],
+    // 스킴이 바뀌면 `styles` 는 **다른 객체**가 되고, 그때 이 메모도 다시 계산되어야
+    // 한다 (U2). `useStyles` 의 캐시가 (팩토리 × 스킴) 당 하나이므로 같은 스킴이
+    // 이어지는 동안 이 참조는 변하지 않고, 메모는 스킴이 실제로 바뀔 때만 깨진다.
+    [loadingOlder, reachedStart, items.length, palette, styles],
   );
 
   // 정리(cleanup) 형식의 ref — `renderItem` 안의 앵커 래퍼와 같은 이유다: 떼어내는
@@ -1229,7 +1235,7 @@ function TimelineInner({
       // was never the app's.
       <View ref={tailNodeRef} collapsable={false} style={styles.footer} />
     ),
-    [tailNodeRef],
+    [tailNodeRef, styles],
   );
 
   if (status === 'error') {
@@ -1342,7 +1348,7 @@ function TimelineInner({
 export const Timeline = React.memo(TimelineInner);
 Timeline.displayName = 'Timeline';
 
-const styles = StyleSheet.create({
+const buildStyles = (color: Palette) => StyleSheet.create({
   header: {
     minHeight: space.md,
     paddingVertical: space.sm,

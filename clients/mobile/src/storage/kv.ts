@@ -77,6 +77,16 @@ export const NON_SECRET_KEYS = {
    * 아니라서, 잃으면 사람이 쓴 글이 없어진다 — 그것이 이 키가 생긴 이유다.
    */
   composerDrafts: 'momo.mobile.composer.drafts.v1',
+  /**
+   * 라이트/다크/시스템 중 사람이 고른 것 (U2). 값은 `ThemeChoice` 세 낱말 중
+   * 하나이고, 없으면 `system` 이다 — 저장이 없다는 것과 「시스템을 따르라」는
+   * 것은 같은 뜻이라 폴백에 정보가 없다(`design/theme.tsx`).
+   *
+   * 여기여야 하는 이유는 **첫 페인트**다. 이 값이 비동기로 오면 앱은 매 실행
+   * 다크로 한 프레임 그렸다가 라이트로 뒤집힌다. 잃어도 되는 값이지만(다시
+   * 고르면 된다) 늦게 오면 안 되는 값이라, 서버도 키체인도 아닌 여기에 산다.
+   */
+  themeChoice: 'momo.mobile.theme.v1',
 } as const;
 
 export type NonSecretKey = (typeof NON_SECRET_KEYS)[keyof typeof NON_SECRET_KEYS];

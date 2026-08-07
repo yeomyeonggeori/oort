@@ -1,7 +1,8 @@
 import React, {useCallback, useRef, useState} from 'react';
 import {Modal, Pressable, StyleSheet, Text, TextInput, View} from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
-import {color, font, radius, SAFE_GUTTER, space, TOUCH_TARGET} from '../../design/tokens';
+import {font, radius, SAFE_GUTTER, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
+import {usePalette, useStyles} from '../../design/theme';
 import {useKeyboard} from '../../lib/useKeyboard';
 
 // =============================================================================
@@ -56,6 +57,8 @@ export function MessageEditorSheet({
   onCancel: () => void;
   onSave: (body: string) => void;
 }): React.JSX.Element {
+  const styles = useStyles(buildStyles);
+  const palette = usePalette();
   // 동기. 헤더 참조.
   const [text, setText] = useState(initialBody);
   const insets = useSafeAreaInsets();
@@ -108,7 +111,7 @@ export function MessageEditorSheet({
             textAlignVertical="top"
             accessibilityLabel="고칠 메시지 내용"
             placeholder="메시지 내용"
-            placeholderTextColor={color.textFaint}
+            placeholderTextColor={palette.textFaint}
             testID="editor-input"
           />
 
@@ -151,7 +154,7 @@ export function MessageEditorSheet({
   );
 }
 
-const styles = StyleSheet.create({
+const buildStyles = (color: Palette) => StyleSheet.create({
   root: {flex: 1, justifyContent: 'flex-end'},
   backdrop: {
     position: 'absolute',

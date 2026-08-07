@@ -52,84 +52,238 @@ export function slopTo(size: number): number {
   return Math.max(0, Math.ceil((TOUCH_TARGET - size) / 2));
 }
 
-export const color = {
+// =============================================================================
+// 팔레트 — 두 스킴, 하나의 역할표 (U2).
+//
+// 이 파일이 처음 쓰였을 때 색은 **한 벌**이었고(다크 고정), 그래서 역할의 설명과
+// 값이 같은 자리에 있었다. 스킴이 둘이 되면 그 둘은 갈라져야 한다: 「`surface` 는
+// 카드·행·탭바가 서는 한 단 위」는 두 스킴에서 같은 문장이고, `#171a20` 은 그중 한
+// 스킴의 답일 뿐이다. 그래서 **뜻은 `Palette` 인터페이스에**, 값은 두 상수에 있다.
+//
+// 두 벌을 두는 대신 웹처럼 `light-dark()` 한 줄로 쓸 수 없느냐 — 없다. RN 의 스타일
+// 값은 문자열이고, 그 문자열을 스킴에 따라 고르는 일을 하는 CSS 엔진이 없다. 그
+// 고르는 일을 하는 것이 `design/theme.tsx` 이고, 이 파일은 고를 것 두 벌을 댄다.
+//
+// ## 라이트는 발명이 아니라 **번역**이다
+//
+// 여명(Dawn) 팔레트의 정본은 웹 `clients/web/src/design/tokens.css` 이고, 거기에는
+// 이미 두 스킴이 다 적혀 있다. 그래서 라이트 값은 여기서 새로 고른 것이 아니라 그
+// 파일의 라이트 항을 **역할로 대응시켜** 옮긴 것이다:
+//
+//   bg ← --surface(#f7f6f3)         surface ← --surface-raised(#fffefb)
+//   surfacePressed ← --surface-hover  border ← --line        text ← --ink
+//   textMuted ← --ink-muted           textFaint ← --line-strong
+//   accent ← --accent(#a54c08)        accentSurface ← --accent-soft
+//   onAccent ← --on-accent            agent ← --agent        agentSurface ← --agent-soft
+//   warn ← --warn                     danger ← --danger      ok ← --ok
+//   scrim ← --scrim(rgb(36 33 28 / .24))
+//
+// 웹에 짝이 없는 역할(`surfacePressed` 의 방향, `accentPressed`, `accentText`,
+// `accentSurfaceStrong`, `*Border`, `dangerText`, `onWarn`)은 **다크가 그 역할에
+// 대해 지키던 관계를 라이트에서 다시 세운 값**이다. 관계가 원본이고 값은 그 관계의
+// 답이라서, 셋 다 `__tests__/paletteContrast.test.ts` 가 두 스킴에서 같은 자로 잰다.
+//
+// ## 방향이 뒤집히는 역할이 셋 있다
+//
+//   surfacePressed  다크에서는 한 단 **밝고**, 라이트에서는 한 단 **어둡다**.
+//                   뜻은 둘 다 「눌린 표면」이고, 그것은 배경에서 멀어지는 것이다.
+//   accentText      다크에서는 accent 보다 **밝은** 단(#6fa8dc), 라이트에서는
+//                   **어두운** 단(#8f4207). 뜻은 「배경 위에서 읽히는 accent」다.
+//   dangerText      상자 안의 문장. 다크에서 danger 보다 밝고, 라이트에서 어둡다.
+//
+//   onWarn 은 값이 뒤집힌다: 다크의 앰버 채움(#d9a441)은 밝아서 검은 글자를 받고,
+//   라이트의 앰버 채움(#8a5c00)은 어두워서 종이색 글자를 받는다.
+// =============================================================================
+
+/**
+ * 이 앱이 아는 색 역할의 전부. 두 팔레트가 **같은 키를 전부** 갖는다는 사실을
+ * 타입이 진다 — 한쪽에만 있는 색은 컴파일되지 않는다.
+ */
+export interface Palette {
   /** App background. */
-  bg: '#0f1115',
-  /** Raised surface: cards, rows, the tab bar. */
-  surface: '#171a20',
-  /** A pressed surface, one step up rather than a new hue. */
-  surfacePressed: '#1e222a',
-  /** Hairlines and field borders. */
-  border: '#2a2f38',
+  bg: string;
+  /** Raised surface: cards, rows, the tab bar. 언제나 `bg` 보다 한 단 위다. */
+  surface: string;
+  /** A pressed surface, one step away from `surface` rather than a new hue. */
+  surfacePressed: string;
+  /** Hairlines and field borders. 배경 위에서 3:1 **아래** — 선이지 컨트롤이 아니다. */
+  border: string;
   /** Primary body text. */
-  text: '#f2f3f5',
+  text: string;
   /** Secondary text: labels, timestamps, the second line of a row. */
-  textMuted: '#9aa0a8',
-  /** Third-rank text: hints under a settled state. */
-  textFaint: '#6b7280',
+  textMuted: string;
+  /**
+   * Third-rank text: hints under a settled state, 그리고 인용의 규정선.
+   *
+   * 본문 AA(4.5)를 노리지 않는다 — 노리면 `textMuted` 와 같은 값이 된다. 대신
+   * 웹이 컨트롤 테두리에 요구하는 **3:1** 을 지킨다(`--line-strong` 과 같은 자리).
+   */
+  textFaint: string;
   /** The one accent. Selection, links, the primary button. */
-  accent: '#3b6fd4',
-  accentPressed: '#325ab3',
-  accentText: '#6fa8dc',
+  accent: string;
+  /** 눌린 accent 채움. */
+  accentPressed: string;
+  /** 배경 위에 **글자·글리프로** 서는 accent. 채움이 아니라 잉크다. */
+  accentText: string;
   /**
    * accent 의 가장 부드러운 단. 내 반응 칩의 채움이 이 값이다 (감사 M-13).
    *
    * `surface`(중성 고도)와 뜻이 다르다: 이것은 **내가 참여했다**는 표시라 색을
-   * 가진다. 칩이 서는 자리인 `surface` 위에서 1.17:1 (배경 위 1.27:1).
+   * 가진다. 칩이 서는 자리인 `surface` 위에서 다크 1.17:1 · 라이트 1.21:1.
    */
-  accentSurface: '#1a2740',
+  accentSurface: string;
   /**
-   * 같은 파랑의 한 단 위. 검색 일치처럼 **찾아져야** 하는 강조에만 쓴다.
+   * 같은 계열의 한 단 위. 검색 일치처럼 **찾아져야** 하는 강조에만 쓴다.
    *
    * 두 단을 두는 이유: `accentSurface` 는 이미 서 있는 칩을 물들이는 값이라
    * 조용해야 하고, 검색 일치는 사람이 눈으로 스캔해 찾아내야 하는 값이라
-   * 조용하면 실패한다(`surface` 위 1.42:1 대 1.18:1). 웹의 `--line`/
-   * `--line-strong` 과 같은 종류의 쌍이다.
+   * 조용하면 실패한다(`surface` 위 다크 1.43:1 대 1.17:1 · 라이트 1.41:1 대
+   * 1.21:1). 웹의 `--line`/`--line-strong` 과 같은 종류의 쌍이다.
    */
-  accentSurfaceStrong: '#2a3550',
+  accentSurfaceStrong: string;
   /** accent 채움 위에 얹는 글자. */
-  onAccent: '#ffffff',
+  onAccent: string;
   /** Agent identity. Agents are members, and the product names them apart. */
-  agent: '#b58bd6',
+  agent: string;
   /** 에이전트 태그의 채움 — `agent` 의 가장 부드러운 단. */
-  agentSurface: '#2a2136',
+  agentSurface: string;
   /** Something needs a person: unread counts, pending approvals. */
-  warn: '#d9a441',
+  warn: string;
   /**
    * 앰버의 가장 부드러운 단. 상태 칩(대기)의 채움이자 **인용 점프 착지 틴트**다
    * (#1076 — 색 선택 근거는 `MessageRow.tsx` 의 `rowLanded` 주석).
    */
-  warnSurface: '#241d0f',
-  warnBorder: '#4a3a1c',
-  /** 앰버 채움 위에 얹는 글자 — 멘션 배지의 숫자. */
-  onWarn: '#1b1405',
+  warnSurface: string;
+  /** `warnSurface` 채움의 테두리. */
+  warnBorder: string;
+  /** 앰버 **채움** 위에 얹는 글자 — 멘션 배지의 숫자. */
+  onWarn: string;
   /** A refusal or a failure. Never used for "not provided yet". */
-  danger: '#e0777d',
-  dangerSurface: '#2a1c1f',
-  dangerBorder: '#5a2f35',
+  danger: string;
+  dangerSurface: string;
+  dangerBorder: string;
   /**
-   * danger 상자 **안**의 글자 — `danger` 보다 한 단 밝다.
+   * danger 상자 **안**의 글자 — `danger` 에서 배경 반대쪽으로 한 단 간 값.
    *
    * 상자 밖의 표식(「전송 실패」 한 낱말)과 상자 안의 문장(실패 사유 한 줄)은
-   * 읽히는 시간이 다르다. 후자는 `dangerSurface` 위에서 **9.29:1** 이고 전자의
-   * 값(`danger`, 5.53:1)보다 위다 — 둘 다 AA 를 지나되 한 단 갈라 둔다.
+   * 읽히는 시간이 다르다. 후자는 `dangerSurface` 위에서 다크 9.29:1 · 라이트
+   * 7.59:1 이고 전자의 값보다 위다 — 둘 다 AA 를 지나되 한 단 갈라 둔다.
    */
-  dangerText: '#f0b4b8',
+  dangerText: string;
   /** A settled success. */
-  ok: '#93d3a8',
-  okSurface: '#16241c',
-  okBorder: '#2c4a38',
+  ok: string;
+  okSurface: string;
+  okBorder: string;
   /**
    * 스크림 — 시트 뒤를 덮는 층.
    *
-   * 색이 아니라 **방향**이다: 뒤를 어둡게 해서 앞의 시트가 앞으로 나오게 한다.
-   * `bg` 를 알파와 함께 쓰지 않는 이유는 라이트 모드에서 그 값이 밝아지면
-   * 스크림이 배경을 오히려 밝혀 시트가 뒤로 물러나기 때문이다.
+   * 색이 아니라 **방향**이다: 어느 스킴에서든 뒤를 어둡게 해서 앞의 시트가 앞으로
+   * 나오게 한다. 그래서 라이트에서도 밝아지지 않는다 — 잉크를 알파와 함께 쓰고
+   * (`text` 계열), `bg` 를 빌려 쓰지 않는다. `bg` 에 알파를 걸면 라이트에서
+   * 스크림이 배경을 **밝혀** 시트가 뒤로 물러난다. 웹의 `--scrim` 이 같은 이유로
+   * 자기 토큰을 갖는다.
+   *
+   * 알파가 스킴마다 다른 것도 웹과 같다: 밝은 종이를 24%(`3d`) 로 눌러 얻는 분리를
+   * 이미 어두운 밤하늘에서 얻으려면 훨씬 짙어야 한다(67%, `aa`).
+   *
+   * 지켜야 하는 것은 비율이 아니라 **부호**이고, `paletteContrast.test.ts` 가 두
+   * 스킴에서 그것을 합성해 잰다: 스크림은 모든 표면을 어둡게 하고, 스크림 걸린
+   * 어떤 표면보다 시트(`surface`)가 밝다.
    */
-  scrim: '#000000aa',
+  scrim: string;
   /** 그림자. 스킴과 무관하게 아래 방향이라 팔레트를 따라가지 않는다. */
+  shadow: string;
+}
+
+/** 이 앱이 처음부터 입고 있던 스킴. 값의 근거는 `Palette` 의 역할 주석에 있다. */
+export const darkPalette: Palette = {
+  bg: '#0f1115',
+  surface: '#171a20',
+  surfacePressed: '#1e222a',
+  border: '#2a2f38',
+  text: '#f2f3f5',
+  textMuted: '#9aa0a8',
+  textFaint: '#6b7280',
+  accent: '#3b6fd4',
+  accentPressed: '#325ab3',
+  accentText: '#6fa8dc',
+  accentSurface: '#1a2740',
+  accentSurfaceStrong: '#2a3550',
+  // 순백이었다 (U2). 여명 팔레트의 규율은 웹이 처음부터 적어 둔 것이고
+  // (`tokens.css`: "no pure #000000 / #ffffff anywhere"), 폰에서 이 한 값만 그것을
+  // 어기고 있었다. 라이트 팔레트를 옮기면서 `paletteContrast.test.ts` 가 두 스킴을
+  // 같은 자로 재기 시작하자 그 자리에서 빨개졌다 — 종이의 흰색으로 내린다.
+  // accent 채움 위에서 4.76:1 -> 4.72:1, AA 는 그대로 넘는다.
+  onAccent: '#fffefb',
+  agent: '#b58bd6',
+  agentSurface: '#2a2136',
+  warn: '#d9a441',
+  warnSurface: '#241d0f',
+  warnBorder: '#4a3a1c',
+  onWarn: '#1b1405',
+  danger: '#e0777d',
+  dangerSurface: '#2a1c1f',
+  dangerBorder: '#5a2f35',
+  dangerText: '#f0b4b8',
+  ok: '#93d3a8',
+  okSurface: '#16241c',
+  okBorder: '#2c4a38',
+  scrim: '#000000aa',
   shadow: '#000000',
-} as const;
+};
+
+/**
+ * 여명(Dawn)의 낮. 웹 `tokens.css` 의 라이트 항을 역할로 옮긴 것이고, 웹에 짝이
+ * 없는 역할은 다크가 지키던 관계를 라이트에서 다시 푼 답이다 (파일 머리 주석).
+ *
+ * 순백(#ffffff)도 순흑(#000000)도 쓰지 않는다 — 종이의 흰색은 `#fffefb` 다.
+ * 웹 팔레트가 처음부터 갖고 있던 규율이고, 폰이 그것을 어기면 두 클라가 같은
+ * 스킴에서 다른 흰색을 낸다.
+ */
+export const lightPalette: Palette = {
+  bg: '#f7f6f3',
+  surface: '#fffefb',
+  surfacePressed: '#e7e3db',
+  border: '#dcd8d0',
+  text: '#24211c',
+  textMuted: '#6a655f',
+  textFaint: '#84817d',
+  accent: '#a54c08',
+  accentPressed: '#7f3a06',
+  accentText: '#8f4207',
+  accentSurface: '#f4e7d6',
+  accentSurfaceStrong: '#eed5b0',
+  onAccent: '#fffefb',
+  agent: '#4a6785',
+  agentSurface: '#e6ebf2',
+  warn: '#8a5c00',
+  warnSurface: '#f7ecd2',
+  warnBorder: '#d9bd7e',
+  onWarn: '#fffefb',
+  danger: '#b3261e',
+  dangerSurface: '#fae9e7',
+  dangerBorder: '#e2b0ab',
+  dangerText: '#8f1d16',
+  ok: '#187533',
+  okSurface: '#e3f1e6',
+  okBorder: '#a9d2b3',
+  scrim: '#24211c3d',
+  shadow: '#000000',
+};
+
+/**
+ * 다크 스킴의 **낱값**.
+ *
+ * 앱 코드는 이것을 읽지 않는다 — 화면에 그리는 색은 `useStyles(buildStyles)` 가
+ * 그때의 스킴에서 고른다(`design/theme.tsx`). 이 별칭이 남아 있는 자리는 렌더
+ * 밖에서 값 자체를 물어야 하는 곳뿐이다: 대비를 재는 테스트, 그리고 두 스킴을
+ * 나란히 세우는 하네스.
+ *
+ * `src/` 안에서 이것을 다시 import 하면 그 화면만 스킴을 안 따라가게 된다.
+ * 그래서 규칙은 취향이 아니라 기계다 — `__tests__/themeSwitch.test.tsx` 가
+ * `src/` 전수를 훑어 이 이름의 import 를 0 으로 단정한다.
+ */
+export const color: Palette = darkPalette;
 
 export const space = {
   xs: 4,

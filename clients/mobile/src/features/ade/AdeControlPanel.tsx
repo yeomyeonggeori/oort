@@ -19,15 +19,8 @@ import {
   Screen,
   ScreenHeader,
 } from '../../design/atoms';
-import {
-  color,
-  font,
-  line,
-  radius,
-  SAFE_GUTTER,
-  space,
-  TOUCH_TARGET,
-} from '../../design/tokens';
+import {font, line, radius, SAFE_GUTTER, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
+import {useStyles} from '../../design/theme';
 import {EdgeSwipeBack} from '../../nav/EdgeSwipeBack';
 import {useRealtime} from '../../realtime/RealtimeProvider';
 import {useSession} from '../../session/useSession';
@@ -99,25 +92,29 @@ import {useAdeControl} from './useAdeControl';
  *   `idle`     무채색. 「끝났고 호스트가 터미널을 열어 두고 있다」는 구경이지
  *              행동이 아니다.
  */
-const STATE_CHIP: Readonly<
-  Record<AdeState, {backgroundColor: string; borderColor: string}>
-> = {
+const buildStateChip = (
+  color: Palette,
+): Readonly<Record<AdeState, {backgroundColor: string; borderColor: string}>> => ({
   working: {backgroundColor: color.okSurface, borderColor: color.okBorder},
   blocked: {backgroundColor: color.warnSurface, borderColor: color.warnBorder},
   idle: {backgroundColor: color.surfacePressed, borderColor: color.border},
-};
+});
 
-const STATE_CHIP_TEXT: Readonly<Record<AdeState, {color: string}>> = {
+const buildStateChipText = (
+  color: Palette,
+): Readonly<Record<AdeState, {color: string}>> => ({
   working: {color: color.ok},
   blocked: {color: color.warn},
   idle: {color: color.textMuted},
-};
+});
 
-const DURABILITY_TEXT = {
+const buildDurabilityText = (
+  color: Palette,
+): Readonly<Record<'ok' | 'muted' | 'warn', {color: string}>> => ({
   ok: {color: color.ok},
   muted: {color: color.textMuted},
   warn: {color: color.warn},
-} as const;
+});
 
 /** 명부가 아직이거나 내가 못 보는 방. 방 이름을 지어내지 않는다(웹과 같은 낱말). */
 const UNRESOLVED_CHANNEL = '다른 채널';
@@ -135,6 +132,10 @@ function AdeCard({
   hostsPending: boolean;
   onPress: () => void;
 }): React.JSX.Element {
+  const styles = useStyles(buildStyles);
+  const stateChip = useStyles(buildStateChip);
+  const stateChipText = useStyles(buildStateChipText);
+  const durabilityText = useStyles(buildDurabilityText);
   // 생존성은 **등록기가 답한 뒤에만** 말한다. 「모른다」와 「아직 안 물어봤다」는
   // 다른 사실이고, 뒤의 것을 「실행 위치 확인 필요」로 그리면 이 화면은 열릴 때마다
   // 모든 카드에 경고를 하나씩 달고 뜬 다음 조용히 지운다 — 그렇게 되는 순간 그것은
@@ -177,9 +178,9 @@ function AdeCard({
           testID={`ade-card-title-${item.key}`}>
           {item.title}
         </Text>
-        <View style={[styles.chip, STATE_CHIP[item.state]]}>
+        <View style={[styles.chip, stateChip[item.state]]}>
           <Text
-            style={[styles.chipText, STATE_CHIP_TEXT[item.state]]}
+            style={[styles.chipText, stateChipText[item.state]]}
             testID={`ade-card-state-${item.key}`}>
             {ADE_STATE_LABEL[item.state]}
           </Text>
@@ -208,7 +209,7 @@ function AdeCard({
           사람이 랩탑을 덮을지 정하는 근거가 사라진다. */}
       {durability === null ? null : (
         <Text
-          style={[styles.cardMeta, DURABILITY_TEXT[durabilityTone(item.durability)]]}
+          style={[styles.cardMeta, durabilityText[durabilityTone(item.durability)]]}
           testID={`ade-card-durability-${item.key}`}>
           {durability}
         </Text>
@@ -230,6 +231,7 @@ export function AdeControlPanel({
   /** 카드가 확대되는 곳. 이 화면은 물러나고 그 방이 열린다. */
   onOpenChannel: (channelId: string, title: string) => void;
 }): React.JSX.Element {
+  const styles = useStyles(buildStyles);
   const {workspaceId, member} = useSession();
   const {status: railStatus} = useRealtime();
   // 여기서는 경과를 인쇄하므로 1Hz 가 실제로 무언가를 잰다. 요약 줄이 그것을
@@ -333,7 +335,7 @@ export function AdeControlPanel({
   );
 }
 
-const styles = StyleSheet.create({
+const buildStyles = (color: Palette) => StyleSheet.create({
   overlay: {
     position: 'absolute',
     top: 0,

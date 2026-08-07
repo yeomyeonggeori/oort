@@ -22,7 +22,7 @@ import {
   MessageRow,
   PendingRow,
   RecoveryDivider,
-  ROW_PRESSED_BACKGROUND,
+  rowPressedBackground,
   UnreadDivider,
 } from '../src/features/conversation/MessageRow';
 import {jumpMissedNotice} from '../src/features/conversation/jumpNotice';
@@ -35,13 +35,15 @@ import {RealtimeContext} from '../src/realtime/RealtimeProvider';
 import {ConversationLayout} from '../src/features/conversation/ConversationLayout';
 import {Timeline} from '../src/features/conversation/Timeline';
 import {Screen, ScreenHeader} from '../src/design/atoms';
+import {ThemeControl} from '../src/design/ThemeControl';
 import {parseExecutionPlan} from '@momo/core/lib/executionPlan';
 import {measureMode} from './root';
 import type {AgentWorkingSignal} from '@momo/core/features/agents/workingSignal';
 import {NoticeBlock} from '../src/design/atoms';
 import {ResultRow, SearchBody} from '../src/screens/SearchScreen';
 import type {MessageSearch} from '../src/features/search/useMessageSearch';
-import {color} from '../src/design/tokens';
+import type {Palette} from '../src/design/tokens';
+import {FixedScheme, useStyles, type ColorScheme} from '../src/design/theme';
 
 // =============================================================================
 // goal RN-C5 의 표면들을 사진 찍을 수 있게 세워 두는 하네스. **앱 코드가 아니다.**
@@ -103,9 +105,49 @@ import {color} from '../src/design/tokens';
 //                     「자격 없는 줄이 사유와 함께 선다」는 자격 있는 줄 옆에서만,
 //                     「승인이 꺼졌다」는 켜진 승인 옆에서만 사진에서 확인된다.
 //
+// ## U2 가 더한 것 — 표면이 아니라 **축** 하나
+//
+//   THEME             스킴 세 칸과, 그 선택을 받는 진짜 타임라인 행. 컨트롤만
+//                     찍으면 이 배치가 한 일의 절반만 남는다 — 논점은 「고른
+//                     스킴이 화면 끝까지 가는가」이고, 위는 종이인데 아래 행만
+//                     밤하늘인 사진이 곧 그 실패다.
+//
+// 그리고 이 배치부터 **모든 표면이 두 번 찍힐 수 있다.** 이름 앞에 `light-` 를
+// 붙이면 같은 장이 라이트로 나온다(`measure/root.ts` 가 그 접두사를 스킴으로
+// 읽는다). 인자를 하나 더 늘리지 않은 이유는 표면 목록이 계속 자라기 때문이고,
+// 스킴을 **못 박는** 이유는 시뮬레이터의 시스템 설정을 따라가면 같은 명령이 기기
+// 상태에 따라 다른 색을 찍기 때문이다 — 그 사진은 증거가 아니라 일화가 된다.
+//
+//     xcrun simctl launch booted app.momo.ios --args -momoMeasure LIGHT-THEME
+//
 // 같은 규율의 세 번째 적용이다. 「왼쪽 칸이 같다」는 연속 행이 함께 있어야,
 // 「영수증이 격상됐다」는 안내 문장이 함께 있어야, 「버튼이 꺼졌다」는 켜진 버튼이
 // 함께 있어야 사진에서 확인된다.
+//
+// ## 라이트 판이 **무엇을** 찍어야 하는가 (U2 리뷰 M-2)
+//
+// 첫 판의 라이트 캡처 다섯 장은 전부 같은 것을 졌다 — 「고른 스킴이 화면 끝까지
+// 가는가」(테마·행·시트·승인 안내·ADE 관제). 그것은 이 배치의 **큰** 주장이고, 그
+// 주장이 참이어도 남는 질문이 있다: 라이트에서만 **얇아지는** 것이 있는가. 다섯 장
+// 중 그 질문을 지는 장이 하나도 없었다.
+//
+// 그래서 두 장을 더한다. 둘 다 이미 있는 표면이라 코드가 아니라 명령이 늘어난다:
+//
+//   LIGHT-QUOTE-READY   인용 규정선 — 폭 2pt 짜리 중성 회색 선 하나
+//   LIGHT-MARKDOWN      코드 상자 — **눌리지 않은 평시**의 고도
+//
+// 각각의 결정이 얇은 것 **하나에** 걸려 있어서 고른 것이다. 다크에서는 밤하늘 위의
+// 밝은 것이라 둘 다 저절로 눈에 띄고, 라이트에서는 종이 위의 밝은 것이라 같은
+// 관계가 성립한다는 보장이 없다. 찍힌 픽셀에서 잰 값 (pt = px/3):
+//
+//   규정선    #84817d(textFaint) on #f7f6f3(bg) = 3.587:1 — 컨트롤 테두리 바닥 위
+//   코드 상자 채움 #fffefb(surface) = 1.072:1 · 테두리 #dcd8d0(border) = 1.315:1
+//
+// 코드 상자의 두 숫자가 이 장의 값어치다: 라이트에서 그 상자를 상자로 만드는 것은
+// 고도 띠가 **아니라 테두리**다(1.072 대 1.315). 그리고 행이 눌리면 띠는 1.000:1 이
+// 된다 — `rowPressedBackground` 가 `surface` 라 채움이 같아지기 때문이고, 그것이
+// `row-pressed` 표면이 다크에서 이미 보여 준 것이다(U4-3 M-2). 즉 평시의 상자도
+// 이미 테두리 하나로 서 있고, 눌린 동안에는 그것이 전부다.
 //
 // 시트류는 `Modal` 이라 화면을 덮으므로 한 번에 하나씩 띄운다.
 //
@@ -528,6 +570,7 @@ function seedAdeControl(): void {
 
 
 function Frame({label, children}: {label: string; children: React.ReactNode}) {
+  const styles = useStyles(buildStyles);
   return (
     <View style={styles.root}>
       <Text style={styles.label}>{label}</Text>
@@ -567,6 +610,7 @@ function Row({
 }
 
 export function Surface({name}: {name: string}): React.JSX.Element {
+  const styles = useStyles(buildStyles);
   // 이슈 #1112 — 고정 여부만 다른 두 시트. 낱말이 상태를 따라 뒤집히는 것을 한
   // 프레임 안에서 비교하려고 인자를 받는다.
   const pinSheet = (pinned: boolean) => (
@@ -701,7 +745,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
       return (
         <Frame label="행 눌림 — 코드 상자의 고도가 사라진다 (M-2, 1.000:1)">
           {/* 시뮬레이터는 손가락을 대고 있을 수 없다. 그래서 눌린 채움을
-              **같은 심볼**(`ROW_PRESSED_BACKGROUND`)로 깔고 진짜 행을 그 위에
+              **같은 심볼**(`rowPressedBackground`)로 깔고 진짜 행을 그 위에
               세운다 — 색을 베껴 적었다면 이 사진은 증거가 아니다.
 
               아래 두 행은 코드 상자를 든 같은 본문이고, 위는 평상시·아래는
@@ -979,6 +1023,21 @@ export function Surface({name}: {name: string}): React.JSX.Element {
     case 'row':
       return (
         <Frame label="행 — 반응 칩과 스레드 앵커는 항상 보이는 진입점">
+          <Row />
+        </Frame>
+      );
+    // ---- U2: 스킴을 고르는 세 칸, 그리고 그 옆의 진짜 행 ----------------------
+    //
+    // 컨트롤만 찍으면 이 배치가 한 일의 **절반**만 사진에 남는다. 논점은 「세 칸이
+    // 예쁜가」가 아니라 「고른 스킴이 화면 끝까지 가는가」이고, 그 주장은 컨트롤과
+    // 타임라인 행이 **같은 장에** 있을 때만 사진에서 확인된다 — 라이트 판에서 위는
+    // 종이인데 아래 행만 밤하늘이면 그것이 곧 이 배치의 실패다.
+    //
+    // `light-theme` 로 띄우면 같은 장이 라이트로 나온다(`measure/root.ts`).
+    case 'theme':
+      return (
+        <Frame label="테마 — 세 칸과, 그 선택을 받는 행 (U2)">
+          <ThemeControl />
           <Row />
         </Frame>
       );
@@ -1733,15 +1792,26 @@ const HARNESS_MEMBER = {
   displayName: '곽성재',
 } as Member;
 
-export default function SurfacesHarness({name}: {name: string}): React.JSX.Element {
+export default function SurfacesHarness({
+  name,
+  scheme,
+}: {
+  name: string;
+  scheme: ColorScheme;
+}): React.JSX.Element {
+  // 스킴을 **못 박아** 그린다 (U2). `ThemeProvider` 를 쓰면 이 기기에 저장된
+  // 사람의 선택이 사진에 새어 들어오고, 시스템 추종에 맡기면 시뮬레이터 설정이
+  // 새어 들어온다. 사진은 인자가 말한 것만 찍는다.
   return (
-    <SafeAreaProvider>
-      <QueryClientProvider client={harnessClient}>
-        <SessionProvider member={HARNESS_MEMBER}>
-          <Surface name={name} />
-        </SessionProvider>
-      </QueryClientProvider>
-    </SafeAreaProvider>
+    <FixedScheme scheme={scheme}>
+      <SafeAreaProvider>
+        <QueryClientProvider client={harnessClient}>
+          <SessionProvider member={HARNESS_MEMBER}>
+            <Surface name={name} />
+          </SessionProvider>
+        </QueryClientProvider>
+      </SafeAreaProvider>
+    </FixedScheme>
   );
 }
 
@@ -1760,18 +1830,25 @@ const harnessClient = new QueryClient({
   },
 });
 
-const styles = StyleSheet.create({
-  lockedFrame: {paddingHorizontal: 16, paddingTop: 8},
-  lockedLabel: {fontSize: 12, color: '#9aa0a8', paddingBottom: 4},
-  root: {flex: 1, backgroundColor: color.bg, paddingTop: 56},
-  label: {color: '#6b7280', fontSize: 11, fontWeight: '600', paddingHorizontal: 12},
-  noticeStack: {padding: 16, gap: 12},
-  pressPair: {paddingHorizontal: 16, paddingVertical: 8},
-  // 화면이 누를 때 실제로 까는 값 — **같은 심볼**이다 (M-2).
-  pressed: {backgroundColor: ROW_PRESSED_BACKGROUND},
-  /** 두 컴포저 사이. 붙여 두면 위아래 테두리가 한 줄로 읽힌다. */
-  gap: {height: 24},
-});
+const buildStyles = (color: Palette) => StyleSheet.create({
+    lockedFrame: {paddingHorizontal: 16, paddingTop: 8},
+    // 하네스 자신의 라벨. 제품이 아니라 **사진의 캡션**이라 토큰을 든다: 라이트
+    // 판에서 어두운 회색 글자가 종이 위에 그대로 서야 캡션이 읽힌다.
+    lockedLabel: {fontSize: 12, color: color.textMuted, paddingBottom: 4},
+    root: {flex: 1, backgroundColor: color.bg, paddingTop: 56},
+    label: {
+      color: color.textFaint,
+      fontSize: 11,
+      fontWeight: '600',
+      paddingHorizontal: 12,
+    },
+    noticeStack: {padding: 16, gap: 12},
+    pressPair: {paddingHorizontal: 16, paddingVertical: 8},
+    // 화면이 누를 때 실제로 까는 값 — **같은 심볼**이다 (M-2).
+    pressed: {backgroundColor: rowPressedBackground(color)},
+    /** 두 컴포저 사이. 붙여 두면 위아래 테두리가 한 줄로 읽힌다. */
+    gap: {height: 24},
+  });
 
 // 위 독스트링의 이유로 렌더 밖에서 한 번. **파일 맨 아래**인 것은 `harnessClient`
 // 가 `const` 라 그 선언보다 먼저 부르면 TDZ 로 터지기 때문이고(실측: 첫 시도가

@@ -24,7 +24,8 @@ import {
   settles,
   type EdgeSwipeState,
 } from './edgeSwipe';
-import {color} from '../design/tokens';
+import {type Palette} from '../design/tokens';
+import {useStyles} from '../design/theme';
 
 // =============================================================================
 // 셸 위로 push 된 화면을 좌측 엣지에서 밀어 닫는다.
@@ -114,6 +115,7 @@ export function EdgeSwipeBack({
   progressRef?: EdgeSwipeProgressRef;
   testID?: string;
 }): React.JSX.Element {
+  const styles = useStyles(buildStyles);
   const {width} = useWindowDimensions();
   const translateX = useRef(new Animated.Value(0)).current;
 
@@ -305,7 +307,7 @@ export function EdgeSwipeBack({
   );
 }
 
-const styles = StyleSheet.create({
+const buildStyles = (color: Palette) => StyleSheet.create({
   pane: {
     // 밀려나는 동안 이것이 **위에 얹힌 카드**로 읽히게 하는 그림자. 제자리(x=0)에서는
     // 화면 왼쪽 바깥에 떨어지므로 보이지 않고, 따라서 평소에는 아무것도 바꾸지 않는다.

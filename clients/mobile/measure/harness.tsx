@@ -20,6 +20,7 @@ import {
   type TimelineGeometry,
 } from '../src/features/conversation/Timeline';
 import {color, font, SAFE_GUTTER, space} from '../src/design/tokens';
+import {FixedScheme} from '../src/design/theme';
 import {keyboardNative} from '../src/lib/keyboardPane';
 import {useKeyboard} from '../src/lib/useKeyboard';
 
@@ -529,10 +530,17 @@ const EMPTY: Results = {
 };
 
 export default function MeasureHarness(): React.JSX.Element {
+  // 스킴을 다크로 못 박는다 (U2). 이 하네스가 그리는 것은 **배송되는 컴포넌트**
+  // 이고, 그것들은 이제 스킴을 따라간다 — 시뮬레이터가 라이트면 이 사진/측정도
+  // 라이트가 된다. 이 하네스가 답하는 질문(기하·복원·상태)에 스킴은 변수가
+  // 아니므로, 답이 기기 설정에 매이지 않게 여기서 고정한다. 스킴이 변수인
+  // 캡처는 `measure/surfaces.tsx` 가 인자로 받는다.
   return (
-    <SafeAreaProvider>
-      <Harness />
-    </SafeAreaProvider>
+    <FixedScheme scheme="dark">
+      <SafeAreaProvider>
+        <Harness />
+      </SafeAreaProvider>
+    </FixedScheme>
   );
 }
 

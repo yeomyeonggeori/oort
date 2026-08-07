@@ -4,6 +4,7 @@ import type {PendingMessage} from '@momo/core/features/timeline/model';
 import React from 'react';
 import {StyleSheet, Text, View} from 'react-native';
 import {SafeAreaProvider} from 'react-native-safe-area-context';
+import {FixedScheme} from '../src/design/theme';
 import {Timeline} from '../src/features/conversation/Timeline';
 
 // =============================================================================
@@ -64,72 +65,79 @@ function Panel({
 }
 
 export default function StatesHarness(): React.JSX.Element {
+  // 스킴을 다크로 못 박는다 (U2). 이 하네스가 그리는 것은 **배송되는 컴포넌트**
+  // 이고, 그것들은 이제 스킴을 따라간다 — 시뮬레이터가 라이트면 이 사진/측정도
+  // 라이트가 된다. 이 하네스가 답하는 질문(기하·복원·상태)에 스킴은 변수가
+  // 아니므로, 답이 기기 설정에 매이지 않게 여기서 고정한다. 스킴이 변수인
+  // 캡처는 `measure/surfaces.tsx` 가 인자로 받는다.
   return (
-    <SafeAreaProvider>
-      {/* A plain View, not a ScrollView: nesting the Timeline's FlatList inside
-          one raises "VirtualizedLists should never be nested…" — harmless here
-          but it lands a red warning across the capture, and a screenshot with a
-          warning on it invites the question of whether the app has one. */}
-      <View style={[styles.root, styles.body]}>
-        <Text style={styles.title}>RN-C4 상태 캡처</Text>
+    <FixedScheme scheme="dark">
+      <SafeAreaProvider>
+        {/* A plain View, not a ScrollView: nesting the Timeline's FlatList inside
+            one raises "VirtualizedLists should never be nested…" — harmless here
+            but it lands a red warning across the capture, and a screenshot with a
+            warning on it invites the question of whether the app has one. */}
+        <View style={[styles.root, styles.body]}>
+          <Text style={styles.title}>RN-C4 상태 캡처</Text>
 
-        <Panel label="빈 채널 — 다음에 할 일을 말한다">
-          <Timeline
-            messages={[]}
-            directory={DIRECTORY}
-            status="ready"
-            channelKind="public"
-            myMemberId={SELF_ID}
-            nowMs={NOW}
-          />
-        </Panel>
+          <Panel label="빈 채널 — 다음에 할 일을 말한다">
+            <Timeline
+              messages={[]}
+              directory={DIRECTORY}
+              status="ready"
+              channelKind="public"
+              myMemberId={SELF_ID}
+              nowMs={NOW}
+            />
+          </Panel>
 
-        <Panel label="빈 DM — 참여자를 더할 수 없으므로 다른 말을 한다">
-          <Timeline
-            messages={[]}
-            directory={DIRECTORY}
-            status="ready"
-            channelKind="dm"
-            peer={PEER}
-            myMemberId={SELF_ID}
-            nowMs={NOW}
-          />
-        </Panel>
+          <Panel label="빈 DM — 참여자를 더할 수 없으므로 다른 말을 한다">
+            <Timeline
+              messages={[]}
+              directory={DIRECTORY}
+              status="ready"
+              channelKind="dm"
+              peer={PEER}
+              myMemberId={SELF_ID}
+              nowMs={NOW}
+            />
+          </Panel>
 
-        <Panel label="오류 — 다시 시도가 있다">
-          <Timeline
-            messages={[]}
-            directory={DIRECTORY}
-            status="error"
-            myMemberId={SELF_ID}
-            nowMs={NOW}
-            onRetry={() => {}}
-          />
-        </Panel>
+          <Panel label="오류 — 다시 시도가 있다">
+            <Timeline
+              messages={[]}
+              directory={DIRECTORY}
+              status="error"
+              myMemberId={SELF_ID}
+              nowMs={NOW}
+              onRetry={() => {}}
+            />
+          </Panel>
 
-        <Panel label="불러오는 중">
-          <Timeline
-            messages={[]}
-            directory={DIRECTORY}
-            status="loading"
-            myMemberId={SELF_ID}
-            nowMs={NOW}
-          />
-        </Panel>
+          <Panel label="불러오는 중">
+            <Timeline
+              messages={[]}
+              directory={DIRECTORY}
+              status="loading"
+              myMemberId={SELF_ID}
+              nowMs={NOW}
+            />
+          </Panel>
 
-        <Panel label="보내는 중 / 전송 실패 — 그 자리에서 다시 보내기">
-          <Timeline
-            messages={[]}
-            directory={DIRECTORY}
-            status="ready"
-            pending={PENDING}
-            myMemberId={SELF_ID}
-            nowMs={NOW}
-            onResendPending={() => {}}
-          />
-        </Panel>
-      </View>
-    </SafeAreaProvider>
+          <Panel label="보내는 중 / 전송 실패 — 그 자리에서 다시 보내기">
+            <Timeline
+              messages={[]}
+              directory={DIRECTORY}
+              status="ready"
+              pending={PENDING}
+              myMemberId={SELF_ID}
+              nowMs={NOW}
+              onResendPending={() => {}}
+            />
+          </Panel>
+        </View>
+      </SafeAreaProvider>
+    </FixedScheme>
   );
 }
 

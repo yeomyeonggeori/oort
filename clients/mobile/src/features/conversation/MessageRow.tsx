@@ -60,16 +60,8 @@ import {
 import type {ReactionChip} from '@momo/core/features/timeline/reactions';
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {Keyboard, Pressable, StyleSheet, Text, View} from 'react-native';
-import {
-  color,
-  font,
-  line,
-  radius,
-  SAFE_GUTTER,
-  slopTo,
-  space,
-  TOUCH_TARGET,
-} from '../../design/tokens';
+import {font, line, radius, SAFE_GUTTER, slopTo, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
+import {useStyles} from '../../design/theme';
 import {COPY_RECEIPT_MS, copyText} from './copy';
 import {MessageBody, bodyAffordances, openLink} from './MessageBody';
 import {MessageActionSheet} from './MessageActionSheet';
@@ -230,6 +222,7 @@ function DividerLabel({
    */
   tone?: DividerTone;
 }): React.JSX.Element {
+  const styles = useStyles(buildStyles);
   return (
     <Text
       style={[
@@ -275,6 +268,7 @@ export function DayDivider({
   atMs: number;
   nowMs: number;
 }): React.JSX.Element {
+  const styles = useStyles(buildStyles);
   return (
     <View
       accessibilityRole="text"
@@ -311,6 +305,7 @@ export function DayDivider({
  * 한 경계는 한 색이다.
  */
 export function UnreadDivider({count}: {count: number}): React.JSX.Element {
+  const styles = useStyles(buildStyles);
   return (
     <View style={styles.divider} testID="unread-divider">
       <DividerLabel
@@ -362,6 +357,7 @@ export function RecoveryDivider({
   /** Which rail healed the gap. Stated, because they are not equally strong. */
   source: RecoverySource;
 }): React.JSX.Element {
+  const styles = useStyles(buildStyles);
   return (
     <View
       accessibilityRole="text"
@@ -393,6 +389,7 @@ function Author({
   directory: Directory;
   memberId: string;
 }): React.JSX.Element {
+  const styles = useStyles(buildStyles);
   const member = memberFor(directory, memberId);
   const parts = memberNameParts(directory, memberId, UNKNOWN_MEMBER);
   const isAgent = member?.kind === 'agent';
@@ -451,6 +448,7 @@ function Chips({
   chips: ReactionChip[];
   onToggle?: (emoji: string) => void;
 }): React.JSX.Element | null {
+  const styles = useStyles(buildStyles);
   if (chips.length === 0) return null;
   return (
     <View style={styles.chipRow} testID="reaction-chips">
@@ -529,6 +527,7 @@ function ReplyMarker({
   directory: Directory;
   onOpen?: () => void;
 }): React.JSX.Element {
+  const styles = useStyles(buildStyles);
   const label =
     parent === null
       ? // 모르면 모른다고 말한다: the root is not loaded, so the row says that it
@@ -562,6 +561,7 @@ function ReplyMarker({
 // ---- agent + artifact cards -------------------------------------------------
 
 function StatusChip({label, tone}: {label: string; tone: 'ok' | 'warn' | 'danger' | 'muted'}) {
+  const styles = useStyles(buildStyles);
   return (
     <View style={[styles.statusChip, styles[`statusChip_${tone}`]]}>
       <Text style={[styles.statusChipText, styles[`statusChipText_${tone}`]]}>
@@ -602,11 +602,13 @@ function toneForTurn(status: string): 'ok' | 'warn' | 'danger' | 'muted' {
  *
  * 한 컴포넌트에 무게는 둘(400·600)이다.
  */
-const APPROVAL_NOTE_STYLE: Record<ApprovalNoteTone, {color: string; fontWeight: '400' | '600'}> = {
+const buildApprovalNoteStyle = (
+  color: Palette,
+): Record<ApprovalNoteTone, {color: string; fontWeight: '400' | '600'}> => ({
   receipt: {color: color.text, fontWeight: '600'},
   blocked: {color: color.text, fontWeight: '400'},
   guidance: {color: color.textMuted, fontWeight: '400'},
-};
+});
 
 function AgentCard({
   card,
@@ -626,6 +628,8 @@ function AgentCard({
   nowMs: number;
   onApprovalSettled?: (approvalId: string, outcome: DecisionOutcome) => void;
 }): React.JSX.Element {
+  const styles = useStyles(buildStyles);
+  const approvalNoteStyle = useStyles(buildApprovalNoteStyle);
   if (card.kind === 'approval') {
     // 카드가 이미 파싱돼 있으므로 여기서 맞춰 본다 — 목록 쪽에서 하려면 이
     // 파싱을 한 번 더 해야 하고, 그것은 코어 규칙의 두 번째 구현이 된다.
@@ -717,7 +721,7 @@ function AgentCard({
             ===================================================================== */}
         {note !== null ? (
           <Text
-            style={[styles.cardNote, APPROVAL_NOTE_STYLE[note.tone]]}
+            style={[styles.cardNote, approvalNoteStyle[note.tone]]}
             testID={`card-approval-${note.kind}`}>
             {note.text}
           </Text>
@@ -813,6 +817,7 @@ function ArtifactCard({
   artifact: ArtifactPresentation;
   state: ArtifactState | null;
 }): React.JSX.Element {
+  const styles = useStyles(buildStyles);
   const note = state ? artifactNote(state) : null;
   const provisional = isProvisional(state);
   return (
@@ -1131,6 +1136,7 @@ function MessageRowInner({
   approvalsProvided,
   onApprovalSettled,
 }: MessageRowProps): React.JSX.Element {
+  const styles = useStyles(buildStyles);
   rowRenders += 1;
   const presentation = useMemo(() => rowPresentation(message), [message]);
   const deleted = message.state === 'deleted';
@@ -2046,7 +2052,9 @@ MessageRow.displayName = 'MessageRow';
  * 토큰 체계 결정이라 U2 소관이고, 여기서는 그 사실을 **사진과 단정으로 붙잡아
  * 둔다**.
  */
-export const ROW_PRESSED_BACKGROUND = color.surface;
+export function rowPressedBackground(color: Palette): string {
+  return color.surface;
+}
 
 export function rowAccessibilityLabel({
   message,
@@ -2131,6 +2139,7 @@ export function WorkingRow({
   memberId: string;
   directory: Directory;
 }): React.JSX.Element {
+  const styles = useStyles(buildStyles);
   const parts = memberNameParts(directory, memberId, UNKNOWN_MEMBER);
   const member = memberFor(directory, memberId);
   const owner = member?.ownerHumanId
@@ -2215,6 +2224,7 @@ export function PendingRow({
   quote?: QuoteBlockModel | null;
   onResend?: (clientMsgId: string) => void;
 }): React.JSX.Element {
+  const styles = useStyles(buildStyles);
   const failed = pending.status === 'failed';
   return (
     <View
@@ -2264,7 +2274,7 @@ export function PendingRow({
   );
 }
 
-const styles = StyleSheet.create({
+const buildStyles = (color: Palette) => StyleSheet.create({
   // The padding lives on the inner pressable so the press highlight covers the
   // whole row rather than a box floating inside it.
   row: {},
@@ -2406,7 +2416,7 @@ const styles = StyleSheet.create({
   rowTimeGroupHead: {lineHeight: line.head},
   // Feedback that the row is interactive at all. On a phone this is one of the
   // few honest signals that a gesture exists, and it costs no vertical space.
-  rowPressed: {backgroundColor: ROW_PRESSED_BACKGROUND},
+  rowPressed: {backgroundColor: rowPressedBackground(color)},
   /**
    * 「방금 여기로 왔다」 — 인용·검색 점프의 착지 표시 (#1076).
    *
