@@ -45,6 +45,7 @@
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use momo_agent::{create_agent_run_in_tx, NewAgentRun, RunTrigger};
 use momo_agent_worker::provider::{ChatProvider, MockChatProvider, ProviderError};
@@ -985,6 +986,7 @@ async fn a_cancel_closes_the_message_a_streaming_turn_left_open() {
         tenant.agent_id,
         run_id,
         None,
+        serde_json::json!({}),
     );
     streaming
         .push("생각해 보면", false)
@@ -1057,4 +1059,396 @@ async fn a_cancel_closes_the_message_a_streaming_turn_left_open() {
         run_status, "cancelled",
         "the cancel is not revived by the turn arriving late"
     );
+}
+
+// ---------------------------------------------------------------------------
+// #1161 — the in-process flip: a turn's answer arrives while it is being written
+// ---------------------------------------------------------------------------
+
+/// Every broadcast this channel enqueued, as `(type, count, total payload
+/// bytes)`.
+///
+/// Bytes as well as counts because the two halves of a window are not the same
+/// size and the decision about whether both should stay turns on exactly that
+/// (see `partial`'s module header).
+async fn broadcast_stats(su: &PgPool, channel_id: Uuid) -> Vec<(String, i64, i64)> {
+    sqlx::query(
+        "SELECT payload->'data'->>'type' AS type, count(*) AS n, \
+                sum(length(payload::text))::bigint AS bytes \
+           FROM outbox \
+          WHERE partition_key = $1 AND kind::text = 'broadcast' \
+          GROUP BY 1 ORDER BY 1",
+    )
+    .bind(channel_id)
+    .fetch_all(su)
+    .await
+    .expect("read broadcast stats")
+    .into_iter()
+    .map(|row| {
+        (
+            row.get::<Option<String>, _>("type").unwrap_or_default(),
+            row.get::<i64, _>("n"),
+            row.get::<i64, _>("bytes"),
+        )
+    })
+    .collect()
+}
+
+fn count_of(stats: &[(String, i64, i64)], kind: &str) -> i64 {
+    stats
+        .iter()
+        .find(|(name, _, _)| name == kind)
+        .map(|(_, n, _)| *n)
+        .unwrap_or(0)
+}
+
+fn bytes_of(stats: &[(String, i64, i64)], kind: &str) -> i64 {
+    stats
+        .iter()
+        .find(|(name, _, _)| name == kind)
+        .map(|(_, _, bytes)| *bytes)
+        .unwrap_or(0)
+}
+
+async fn stream_props(su: &PgPool, message_id: Uuid) -> Value {
+    let props: Value = sqlx::query_scalar("SELECT props FROM message WHERE id = $1")
+        .bind(message_id)
+        .fetch_one(su)
+        .await
+        .expect("read props");
+    props
+        .get(momo_messaging::STREAM_PROPS_KEY)
+        .cloned()
+        .unwrap_or(Value::Null)
+}
+
+/// **The flip, end to end.** One turn, one message, and that message *grows*.
+///
+/// The assertion that names the batch is `messages.len() == 1` next to
+/// `message.edited > 1`: the answer reached the channel in several writes and is
+/// still a single row with a single `seq`. Give the pump a `client_msg_id` other
+/// than the run id — the obvious way to write this flip — and the count goes to
+/// two: the growing answer, and the commit's own copy underneath it.
+///
+/// The rest pins what must NOT have changed while the message learned to grow:
+/// the props a client reads, the quoted trigger, the ledger, the terminal run.
+/// Those all used to ride the commit's `send`, which on a streamed turn is now
+/// always a dedupe and writes nothing at all — so every one of them had to move
+/// to the opening slice, and every one of them is a silent loss if it did not.
+#[tokio::test]
+#[ignore = "requires DATABASE_URL to a throwaway pgvector/pg18 database"]
+async fn a_streaming_turn_grows_one_message_and_the_commit_finishes_it() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    settle_residual_worker_jobs(&su).await;
+    let tenant = seed_tenant(&su).await;
+
+    let (run_id, trigger_message_id, job_id) =
+        enqueue_mention_turn(&su, &tenant, tenant.agent_id, "@hermes 길게 대답해줘").await;
+
+    // Four slices, a window and a bit apart, so the pump coalesces into four
+    // separate durable writes rather than one. The window is the shipped
+    // constant — a test that shortened it would prove the pump against a
+    // configuration production never runs.
+    let provider = Arc::new(MockChatProvider::echo().streaming(4, Duration::from_millis(900)));
+    let worker = build_worker(provider.clone(), base_config()).await;
+    let stats = worker.drain_once().await.expect("drain");
+    assert_eq!(stats.answered, 1, "the turn produced an answer");
+
+    let messages = agent_messages(&su, &tenant, tenant.agent_id).await;
+    assert_eq!(
+        messages.len(),
+        1,
+        "one turn is one message however many writes it took — a second row here \
+         is the commit posting its own copy beside the one the reader watched arrive"
+    );
+    let (message_id, seq, body, props) = messages.into_iter().next().unwrap();
+    assert!(seq > 0, "the answer is recoverable by cursor");
+    assert_eq!(
+        body, "mock: [성재] @hermes 길게 대답해줘",
+        "the body that stands is the answer the provider finally returned"
+    );
+
+    // The self-description that used to ride the commit's `send`.
+    assert_eq!(props["run_id"], json!(run_id));
+    assert_eq!(
+        props["source"],
+        json!("agent_worker.final_text.v0"),
+        "a client cannot tell a streamed answer from any other one, and must not \
+         have to — the props are the same props"
+    );
+    assert_eq!(props["trigger_message_id"], json!(trigger_message_id));
+    let quoted: Option<Uuid> = sqlx::query_scalar("SELECT reply_to_id FROM message WHERE id = $1")
+        .bind(message_id)
+        .fetch_one(&su)
+        .await
+        .expect("read reply_to_id");
+    assert_eq!(
+        quoted,
+        Some(trigger_message_id),
+        "ADR-0148 규칙 6 survives the flip — and it had to be read from the RUN row \
+         at turn start, because the opening slice happens long before the commit \
+         locks anything"
+    );
+
+    // The stream block: closed, un-marked, and grown by more than one write.
+    let stream = stream_props(&su, message_id).await;
+    assert_eq!(
+        stream["streaming"],
+        json!(false),
+        "the commit transaction closed it — a `succeeded` run with a message still \
+         streaming is the one state ADR-0155 asks clients to render defensively, \
+         and the ordinary path must never produce it"
+    );
+    assert!(
+        stream.get("outcome").is_none(),
+        "a turn that finished carries no outcome; `final: true` alone says so: {stream}"
+    );
+    let rev = stream["rev"].as_i64().expect("a revision");
+    assert!(
+        rev >= 3,
+        "four coalescing windows plus the close should have spent several \
+         revisions, not one: {rev}"
+    );
+
+    // No 수정됨 badge. An answer arriving is not a revision of itself.
+    let (state, edited_at): (String, Option<chrono::DateTime<chrono::Utc>>) =
+        sqlx::query_as("SELECT state::text, edited_at FROM message WHERE id = $1")
+            .bind(message_id)
+            .fetch_one(&su)
+            .await
+            .expect("read state");
+    assert_eq!(
+        state, "sent",
+        "the state a message is born in — streaming must never move it to `edited`"
+    );
+    assert!(
+        edited_at.is_none(),
+        "streaming must not stamp the edit badge every message an agent writes"
+    );
+
+    // The run and the ledger, unchanged by the flip.
+    assert_eq!(run_status(&su, run_id).await, "succeeded");
+    let ledger: i64 = sqlx::query_scalar("SELECT count(*) FROM usage_ledger WHERE run_id = $1")
+        .bind(run_id)
+        .fetch_one(&su)
+        .await
+        .expect("count ledger");
+    assert_eq!(ledger, 1, "exactly one immutable ledger row per run");
+
+    // The arithmetic, printed so the PR can quote it rather than assert a
+    // number that will move the next time a provider is faster.
+    let stats = broadcast_stats(&su, tenant.channel_id).await;
+    println!("--- #1161 window arithmetic for one streamed turn ---");
+    for (kind, n, bytes) in &stats {
+        println!("  {kind:<16} count={n:<4} bytes={bytes}");
+    }
+    assert_eq!(
+        count_of(&stats, "message.new"),
+        2,
+        "the human's utterance and the agent's answer — the growing answer opens \
+         exactly one message"
+    );
+    assert!(
+        count_of(&stats, "message.edited") > 1,
+        "the answer grew: {stats:?}"
+    );
+    assert!(
+        count_of(&stats, "agent.partial") > 0,
+        "the rail hint rides the same window and did not retire: {stats:?}"
+    );
+    // Decision ① in one measured line. Both halves ride ONE window, so their
+    // counts track each other; what differs is size, because the durable slice
+    // restates the whole answer while the hint carries only its window's delta.
+    // Retiring the hint would save the cheaper of the two and blind every rail
+    // surface. Printed rather than asserted against a threshold: the ratio grows
+    // with the answer, and pinning today's number would go red on a longer
+    // fixture for no reason at all.
+    println!(
+        "  durable/hint bytes = {} / {} (counts {} / {})",
+        bytes_of(&stats, "message.edited"),
+        bytes_of(&stats, "agent.partial"),
+        count_of(&stats, "message.edited"),
+        count_of(&stats, "agent.partial"),
+    );
+
+    // Re-draining changes nothing: no second answer, no second charge.
+    let again = worker.drain_once().await.expect("second drain");
+    assert_eq!(again.claimed, 0, "a settled job is not re-claimable");
+    assert_eq!(agent_messages(&su, &tenant, tenant.agent_id).await.len(), 1);
+    let (status, _, _) = job_row(&su, job_id).await;
+    assert_eq!(status, "done");
+}
+
+/// **RED proof — 취소 시 이중 메시지 부재.** The human presses stop *while* the
+/// answer is arriving, which is the case that only exists after the flip.
+///
+/// Two ways to get this wrong, and both are silent:
+///
+/// * revive the suppressed commit into a `send` — the channel then holds the
+///   answer the human cancelled, written over the text they stopped;
+/// * give the growing message any key but the run id — the commit no longer
+///   dedupes, and the cancelled turn leaves **two** messages, one frozen and one
+///   complete, saying different things about the same run.
+///
+/// `messages.len() == 1` plus `outcome: "cancelled"` is what closes both.
+#[tokio::test]
+#[ignore = "requires DATABASE_URL to a throwaway pgvector/pg18 database"]
+async fn a_cancel_during_a_streaming_turn_leaves_exactly_one_frozen_message() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    settle_residual_worker_jobs(&su).await;
+    let tenant = seed_tenant(&su).await;
+
+    let (run_id, _trigger_message_id, _job_id) =
+        enqueue_mention_turn(&su, &tenant, tenant.agent_id, "@hermes 아주 긴 답을 줘").await;
+
+    let provider = Arc::new(MockChatProvider::echo().streaming(6, Duration::from_millis(400)));
+    let worker = Arc::new(build_worker(provider.clone(), base_config()).await);
+    let driving = tokio::spawn({
+        let worker = Arc::clone(&worker);
+        async move { worker.drain_once().await }
+    });
+
+    // Two windows in: the message is open in the channel and text is on screen.
+    tokio::time::sleep(Duration::from_millis(1_600)).await;
+    let open: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM message WHERE run_id = $1 AND props -> $2 ->> 'streaming' = 'true'",
+    )
+    .bind(run_id)
+    .bind(momo_messaging::STREAM_PROPS_KEY)
+    .fetch_one(&su)
+    .await
+    .expect("count open streams");
+    assert_eq!(
+        open, 1,
+        "the premise of this test: by now the reader has half an answer in front \
+         of them. Without the flip there is nothing here to cancel"
+    );
+
+    // The human presses stop.
+    let workspace_id = tenant.workspace_id;
+    let worker_pool = momo_worker_pool().await;
+    let cancelled = with_tenant_tx(&worker_pool, workspace_id, move |conn| {
+        Box::pin(async move {
+            momo_agent::cancel_run_in_tx(
+                conn,
+                workspace_id,
+                run_id,
+                &json!({"code": "cancelled", "reason": "사람이 정지를 눌렀다"}),
+            )
+            .await
+        })
+    })
+    .await
+    .expect("the cancel statement ran");
+    assert!(cancelled, "the run was cancellable mid-answer");
+
+    let stats = driving.await.expect("join").expect("drain");
+    assert_eq!(
+        stats.answered, 0,
+        "the answer the human cancelled is never posted"
+    );
+    assert_eq!(stats.skipped, 1, "the job settles done without an answer");
+
+    let messages = agent_messages(&su, &tenant, tenant.agent_id).await;
+    assert_eq!(
+        messages.len(),
+        1,
+        "THE assertion: a cancelled streaming turn adds no second message — the \
+         one it was growing is all there is"
+    );
+    let (message_id, _seq, body, _props) = messages.into_iter().next().unwrap();
+    assert!(
+        !body.is_empty(),
+        "the text the human was reading when they pressed stop is still there"
+    );
+    let stream = stream_props(&su, message_id).await;
+    assert_eq!(
+        stream["outcome"],
+        json!("cancelled"),
+        "freeze AND mark (ADR-0155) — an unmarked half sentence wears a finished \
+         answer's clothes: {stream}"
+    );
+    assert_eq!(stream["streaming"], json!(false));
+    assert_eq!(
+        run_status(&su, run_id).await,
+        "cancelled",
+        "the cancel is not revived by the turn arriving late"
+    );
+    let ledger: i64 = sqlx::query_scalar("SELECT count(*) FROM usage_ledger WHERE run_id = $1")
+        .bind(run_id)
+        .fetch_one(&su)
+        .await
+        .expect("count ledger");
+    assert_eq!(ledger, 0, "a suppressed commit bills nothing");
+}
+
+/// **The third ending.** The provider dies with half an answer already in the
+/// channel.
+///
+/// The interesting half is what does *not* happen: the Korean degraded notice
+/// this path writes on a non-streamed turn never appears. It has nowhere to go —
+/// the `client_msg_id` join makes it the same message — and writing it would
+/// overwrite the very text that tells the reader something arrived before it
+/// stopped. ADR-0155's answer is freeze and mark, and `outcome: "failed"` is the
+/// mark. Restore the overwrite and this goes red on the body.
+#[tokio::test]
+#[ignore = "requires DATABASE_URL to a throwaway pgvector/pg18 database"]
+async fn a_provider_death_mid_answer_freezes_what_the_reader_already_read() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    settle_residual_worker_jobs(&su).await;
+    let tenant = seed_tenant(&su).await;
+
+    let (run_id, _trigger_message_id, job_id) =
+        enqueue_mention_turn(&su, &tenant, tenant.agent_id, "@hermes 답하다 죽어봐").await;
+
+    // A 4xx: an answer about this request, not an outage, so the turn is
+    // terminal on the first attempt rather than requeued.
+    let provider = Arc::new(
+        MockChatProvider::failing(ProviderError::HttpStatus(
+            400,
+            "model refused the request".to_string(),
+        ))
+        .streaming_text("생각해 보면 그건", 2, Duration::from_millis(900)),
+    );
+    let worker = build_worker(provider.clone(), base_config()).await;
+    let stats = worker.drain_once().await.expect("drain");
+    assert_eq!(stats.failed, 1, "a 4xx stops rather than retrying");
+
+    let messages = agent_messages(&su, &tenant, tenant.agent_id).await;
+    assert_eq!(
+        messages.len(),
+        1,
+        "the half answer and the failure are one message, not a notice posted \
+         under an orphan"
+    );
+    let (message_id, _seq, body, props) = messages.into_iter().next().unwrap();
+    assert_eq!(
+        body, "생각해 보면 그건",
+        "frozen exactly where the provider stopped — the degraded notice must not \
+         overwrite the evidence that anything arrived at all"
+    );
+    assert_eq!(
+        props["source"],
+        json!("agent_worker.final_text.v0"),
+        "it is still the answer, half of one; the failure is recorded on the run \
+         and in the stream outcome, not by relabelling the message"
+    );
+    let stream = stream_props(&su, message_id).await;
+    assert_eq!(
+        stream["outcome"],
+        json!("failed"),
+        "「응답이 끊김」, not 「중단됨」 — nobody pressed stop: {stream}"
+    );
+    assert_eq!(stream["streaming"], json!(false));
+
+    assert_eq!(run_status(&su, run_id).await, "failed");
+    assert_eq!(
+        run_error(&su, run_id).await["code"],
+        json!("provider_failed")
+    );
+    let (status, _, _) = job_row(&su, job_id).await;
+    assert_eq!(status, "failed");
 }

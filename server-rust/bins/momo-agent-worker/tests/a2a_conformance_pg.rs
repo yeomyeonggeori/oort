@@ -834,3 +834,89 @@ async fn b72_4_a_delegated_run_records_the_parent_and_the_depth_it_inherited() {
         "row, input, payload and audit must report one depth"
     );
 }
+
+// ---------------------------------------------------------------------------
+// b72_5 (#1161) — the flip must not silently retire delegation
+// ---------------------------------------------------------------------------
+
+/// **RED proof.** α's answer arrives by streaming, and it still hands off to β.
+///
+/// This is the trap #1161 sets. A2A used to be guarded by `!sent.deduped`, which
+/// was a perfect proxy for "this write delivered the answer" while every answer
+/// arrived in exactly one write. After the flip the commit's `send` **always**
+/// dedupes on a streamed turn — the pump opened that message — so the old
+/// spelling would have made `delegated == 0` for every streaming agent in the
+/// product, with no error, no audit row and no refusal anywhere: the chain would
+/// simply stop existing.
+///
+/// The guard that replaced it is "the write that first made the answer final",
+/// and the second drain below is the other half of it: re-running a settled turn
+/// must still delegate nothing.
+#[tokio::test]
+#[ignore = "requires DATABASE_URL to a throwaway pgvector/pg18 database"]
+async fn b72_5_a_streamed_answer_still_delegates() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    settle_residual_worker_jobs(&su).await;
+    let tenant = seed_tenant(&su).await;
+
+    let (root_run_id, _) =
+        enqueue_human_mention(&su, &tenant, tenant.alpha_id, "@hermes 배포 준비 시작").await;
+
+    let provider = Arc::new(
+        MockChatProvider::scripted([
+            ("배포 준비 시작", "@atlas 릴리스 노트 확인 부탁해"),
+            ("릴리스 노트 확인 부탁해", "릴리스 노트 확인 완료했습니다."),
+        ])
+        // Both turns stream: two slices, a window apart, so each answer is a
+        // message that grows and a commit that only closes it.
+        .streaming(2, std::time::Duration::from_millis(900)),
+    );
+    let worker = build_worker(provider.clone(), base_config()).await;
+    let (stats, _rounds) = drain_bounded(&worker, 6).await;
+
+    assert_eq!(stats.answered, 2, "α answered and β answered: {stats:?}");
+    assert_eq!(
+        stats.delegated, 1,
+        "THE assertion: a streamed answer delegates exactly as a one-write answer \
+         does. `0` here is the `!sent.deduped` guard surviving the flip: {stats:?}"
+    );
+    assert_eq!(stats.a2a_blocked, 0, "nothing was capped: {stats:?}");
+
+    let runs = runs(&su, &tenant).await;
+    assert_eq!(runs.len(), 2, "a root and one child: {runs:?}");
+    let child = runs
+        .iter()
+        .find(|run| run.id != root_run_id)
+        .expect("the delegated run");
+    assert_eq!(child.agent_member_id, tenant.beta_id, "β got the work");
+    assert_eq!(child.parent_run_id, Some(root_run_id));
+    assert_eq!(child.depth, 1);
+
+    // Both answers grew rather than being posted whole, which is what makes the
+    // assertion above about the flip and not about A2A in general.
+    let streamed: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM message WHERE workspace_id = $1 \
+           AND props -> $2 ->> 'streaming' = 'false'",
+    )
+    .bind(tenant.workspace_id)
+    .bind(momo_messaging::STREAM_PROPS_KEY)
+    .fetch_one(&su)
+    .await
+    .expect("count closed streams");
+    assert_eq!(
+        streamed, 2,
+        "both agents streamed their answer and both were closed by their commit"
+    );
+
+    // And the other half of the guard: a settled run delegates nothing more.
+    let root = runs
+        .iter()
+        .find(|run| run.id == root_run_id)
+        .expect("the root run");
+    assert_eq!(
+        root.step_count, 1,
+        "exactly one hop was spent — a guard that let a re-claim delegate again \
+         would spend a second step here"
+    );
+}

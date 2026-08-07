@@ -296,6 +296,7 @@ async fn an_agent_grows_one_message_across_seventeen_deltas() {
         tenant.agent_id,
         run_id,
         None,
+        serde_json::json!({}),
     );
 
     let mut expected = String::new();
@@ -376,6 +377,7 @@ async fn a_reclaimed_turn_resumes_the_revision_it_left_behind() {
         tenant.agent_id,
         run_id,
         None,
+        serde_json::json!({}),
     );
     for delta in ["앞부분 ", "중간 ", "조금 더 "] {
         first.push(delta, false).await.expect("first worker writes");
@@ -396,6 +398,7 @@ async fn a_reclaimed_turn_resumes_the_revision_it_left_behind() {
         tenant.agent_id,
         run_id,
         None,
+        serde_json::json!({}),
     );
     resumed
         .push("앞부분 중간 조금 더 그리고 끝.", false)
@@ -475,6 +478,7 @@ async fn an_agent_cannot_stream_into_a_humans_message() {
         tenant.agent_id,
         agent_run,
         None,
+        serde_json::json!({}),
     );
     agent
         .push("에이전트가 자기 걸 쓴다", false)
@@ -569,6 +573,7 @@ async fn a_cancelled_run_freezes_its_message_and_marks_how_it_ended() {
         tenant.agent_id,
         run_id,
         None,
+        serde_json::json!({}),
     );
     stream
         .push("답을 절반쯤 쓰다가", false)
@@ -702,6 +707,7 @@ async fn an_outcome_on_a_non_final_slice_is_refused() {
         tenant.agent_id,
         run_id,
         None,
+        serde_json::json!({}),
     );
     stream
         .push("아직", false)
@@ -760,5 +766,114 @@ async fn an_outcome_on_a_non_final_slice_is_refused() {
         props_after.get("momo.stream"),
         props_before.get("momo.stream"),
         "nor does it move the revision, which would refuse the writer's own next slice as stale"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// #6 — RED: a revision that goes backwards changes nothing
+// ---------------------------------------------------------------------------
+
+/// **RED proof — rev 역행 거절.** A slice at a revision already spent is a
+/// no-op, and the row it names is left exactly as it was.
+///
+/// This is the rule the #1161 flip leans its whole weight on. The in-process
+/// turn now has two writers on one message — the pump, window by window, and
+/// the commit transaction's closing slice — and after the flip a *third* is
+/// possible whenever a job is re-claimed while an older worker is still holding
+/// a socket. If a late slice could land under a revision that has already gone
+/// by, a finished answer would reopen as `streaming: true` with stale text in
+/// it, under a run the client has already been told is over. There would be no
+/// error and no log line; the reader would simply watch a completed answer
+/// un-finish itself.
+///
+/// Relax the comparison in `stream_message_body_in_tx` from `<=` to `<` and the
+/// first half goes red; drop the compare-and-set entirely and both halves do.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_app role"]
+async fn a_slice_at_a_revision_already_spent_changes_nothing() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let tenant = seed_tenant(&su).await;
+    let run_id = seed_run(&app, &tenant).await;
+
+    let mut stream = MessageStream::new(
+        app.clone(),
+        tenant.workspace_id,
+        tenant.channel_id,
+        tenant.agent_id,
+        run_id,
+        None,
+        serde_json::json!({}),
+    );
+    stream.push("첫 조각", false).await.expect("open");
+    stream.push(" 둘째 조각", false).await.expect("grow");
+    stream.push(" 셋째 조각", false).await.expect("grow");
+    let message_id = stream.message_id().expect("opened");
+    let (body_before, state_before, edited_before, props_before) = row(&su, message_id).await;
+    let rev_before = props_before["momo.stream"]["rev"]
+        .as_i64()
+        .expect("a revision");
+    assert!(rev_before >= 2, "the stream got somewhere: {rev_before}");
+
+    let workspace_id = tenant.workspace_id;
+    let agent_id = tenant.agent_id;
+    // Two ways backwards: the revision that just landed, and one below it.
+    for (rev, label) in [
+        (rev_before, "the revision that just landed"),
+        (rev_before - 1, "a revision from two slices ago"),
+    ] {
+        let outcome = momo_db::with_tenant_tx(&app, workspace_id, move |conn| {
+            Box::pin(async move {
+                momo_messaging::stream_message_body_in_tx(
+                    conn,
+                    workspace_id,
+                    message_id,
+                    agent_id,
+                    "되감긴 텍스트",
+                    momo_messaging::StreamEdit {
+                        rev,
+                        is_final: true,
+                        outcome: Some(momo_messaging::StreamCloseOutcome::Cancelled),
+                    },
+                )
+                .await
+            })
+        })
+        .await
+        .expect("the statement ran")
+        .expect("a stale slice is refused by being ignored, not by erroring");
+        assert!(
+            !outcome.applied(),
+            "{label}: rev {rev} must be stale against {rev_before}"
+        );
+
+        let (body_after, state_after, edited_after, props_after) = row(&su, message_id).await;
+        assert_eq!(
+            body_after, body_before,
+            "{label}: the answer must not roll back to text an older writer held"
+        );
+        assert_eq!(
+            props_after["momo.stream"], props_before["momo.stream"],
+            "{label}: nor may a stale slice move the revision, close the stream, \
+             or stamp an outcome the run never had"
+        );
+        assert_eq!(state_after, state_before);
+        assert_eq!(edited_after, edited_before);
+    }
+
+    // And the writer that is actually ahead still lands, so the refusal above is
+    // a compare-and-set and not a frozen message.
+    stream.push(" 넷째 조각", false).await.expect("still grows");
+    let (body_final, _, _, props_final) = row(&su, message_id).await;
+    assert_eq!(
+        body_final.as_deref(),
+        Some("첫 조각 둘째 조각 셋째 조각 넷째 조각")
+    );
+    assert!(props_final["momo.stream"]["rev"].as_i64().unwrap() > rev_before);
+    assert_eq!(
+        message_count(&su, tenant.channel_id).await,
+        1,
+        "none of this opened a second message"
     );
 }

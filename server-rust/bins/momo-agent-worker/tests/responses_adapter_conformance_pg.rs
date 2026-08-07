@@ -1417,16 +1417,31 @@ async fn b54c_2_the_terminal_events_usage_lands_on_every_ledger_axis() {
 }
 
 /// A stream that stops before `response.completed` — the provider hung up
-/// mid-answer — must be retried, not published.
+/// mid-answer — is retried, and what the reader is left looking at meanwhile is
+/// **marked**.
 ///
-/// ## Why half an answer is worse than no answer
+/// ## Why half an answer used to be worse than no answer, and what changed
 ///
-/// The deltas already received spell a real sentence that simply stops. Writing
-/// it is indistinguishable, in the channel, from the agent choosing to say that
-/// much: there is no seq gap, no marker, nothing an operator or a reader could
-/// use to tell. So the turn is settled the same way every other availability
-/// failure is — requeued with a backoff, no message, no ledger row — and the
-/// retry re-asks the question.
+/// B5.4c settled this the other way: publish nothing. Its argument was precise
+/// and, at the time, correct — the deltas already received spell a real sentence
+/// that simply stops, and writing it was *indistinguishable* in the channel from
+/// the agent choosing to say that much. "No seq gap, no marker, nothing an
+/// operator or a reader could use to tell."
+///
+/// ADR-0155 built the marker. A message assembled by a stream carries
+/// `momo.stream`, and a stopped one carries `outcome` — so the state B5.4c
+/// refused to create no longer exists: the half sentence says out loud that it
+/// is one. With #1161 the in-process turn streams, which means the choice is no
+/// longer between "half an answer" and "no answer" but between a marked half
+/// answer and **retracting text the reader has already read** — and ADR-0155
+/// rejected retraction by name (B안, tombstone), because the person watching an
+/// answer stop is owed the evidence of what stopped.
+///
+/// So the settlement is unchanged where it was ever load-bearing — requeued with
+/// a backoff, no ledger row, the run `failed` between attempts, the operator told
+/// in the provider's own words — and the retry still delivers the whole answer as
+/// a single message, because `body` is absolute and the second attempt re-states
+/// it over the first.
 ///
 /// The shipped Codex CLI names the same condition in its own SSE module:
 /// "stream closed before response.completed".
@@ -1476,10 +1491,35 @@ async fn b54c_3_a_stream_that_dies_mid_answer_is_retried_not_half_published() {
         !reason.contains("답이 중간에"),
         "the half answer is not smuggled into the log either: {reason}"
     );
-    assert!(
-        agent_messages(&su, &tenant).await.is_empty(),
-        "NOTHING is published: half a sentence would read as the agent's final word"
+    // ADR-0155, superseding B5.4c's "publish nothing" (see this test's header).
+    let interrupted = agent_messages(&su, &tenant).await;
+    assert_eq!(
+        interrupted.len(),
+        1,
+        "the half sentence the reader was already watching is still there — and it \
+         is ONE message, not a half answer plus a notice"
     );
+    assert_eq!(
+        interrupted[0].0, "답이 중간에",
+        "frozen exactly where the socket died"
+    );
+    let stream: Value = sqlx::query_scalar(
+        "SELECT props -> $2 FROM message WHERE workspace_id = $1 AND type = 'text' \
+           AND run_id IS NOT NULL ORDER BY seq DESC LIMIT 1",
+    )
+    .bind(tenant.workspace_id)
+    .bind(momo_messaging::STREAM_PROPS_KEY)
+    .fetch_one(&su)
+    .await
+    .expect("read the stream block");
+    assert_eq!(
+        stream["outcome"],
+        json!("failed"),
+        "THE assertion B5.4c could not make: the half sentence says it is one. \
+         Without the mark it wears a finished answer's clothes, which is the \
+         state that batch refused to create: {stream}"
+    );
+    assert_eq!(stream["streaming"], json!(false));
     assert_eq!(
         ledger_rows(&su, run_id).await,
         0,
