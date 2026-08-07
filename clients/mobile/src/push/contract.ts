@@ -11,7 +11,7 @@
 //
 // There is no shared type system across that boundary and no error if they
 // disagree — the extension just fails open and ships the relay's placeholder
-// ("momo / 새 알림") forever (NotificationService.swift:26-30). That is the
+// ("oort / 새 알림") forever (NotificationService.swift:26-30). That is the
 // quietest failure in this feature, so `__tests__/pushContract.test.ts` parses
 // the Swift source and asserts every value below still matches it.
 // =============================================================================

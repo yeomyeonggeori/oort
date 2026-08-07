@@ -22,7 +22,7 @@ import {registerWithRetry} from './registration';
 //
 // The 2026-08-02 audit's §4.3 item 4 asks for exactly this and gives the reason:
 // the extension fails OPEN. When anything in this chain is wrong the person
-// still gets a notification — just the relay's placeholder, "momo / 새 알림" —
+// still gets a notification — just the relay's placeholder, "oort / 새 알림" —
 // so "working" and "silently broken" are visually identical. On the simulator
 // these lines are visible through `simctl launch --console-pty` (which is how
 // gate:session already runs the app); on a device, through Console.app.

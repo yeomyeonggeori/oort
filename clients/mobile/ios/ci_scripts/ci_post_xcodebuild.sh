@@ -20,7 +20,7 @@
 # entitlements dictionary").
 #
 # The failure this defends against is the runbook's worst one: nothing crashes,
-# the build ships, and notifications simply arrive as "momo / 새 알림" forever.
+# the build ships, and notifications simply arrive as "oort / 새 알림" forever.
 #
 # ## When it runs
 #
