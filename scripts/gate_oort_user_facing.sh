@@ -11,7 +11,10 @@
 #   - 패키지·타깃·crate 이름(@momo/core, MomoMac, momo-desktop …) · 리포/URL · 파일 경로
 #   - 저장 키·이벤트명·accessibilityIdentifier·로그 태그·Bonjour 서비스 타입(_momo._tcp)
 #   - 주석 · 테스트 · 픽스처 · 예시 도메인(momo.local, momo.test)
-#   - server/ 와 server-rust/ (이 배치의 파일 범위 밖 — 별도 배치에서 잰다)
+#   - Swift `server/` (아직 옛 이름 — 별도 배치. 잔존은 #1118 에 명시돼 있다)
+#
+# `server-rust/` 는 #1118 에서 합류했다(3절). 클라가 "oort Cloud"를 말하는데 서버가
+# 돌려주는 오류 문장이 "momo Cloud"면 사람 눈에는 두 제품이다 — 그 갈라짐을 여기서 잰다.
 # 위 형태들은 IDENTIFIER_PATTERNS 로 문자열 리터럴 단위에서 걸러지고, 패턴으로 못 가르는
 # 몇 건은 ALLOW 에 이유와 함께 하나씩 적혀 있다. 규칙을 넓혀야 하면 근거는 ADR 이어야
 # 한다 — 여기서 조용히 넓히면 게이트가 아무것도 재지 않게 된다.
@@ -205,14 +208,71 @@ def check_structured():
                 failures.append("%s 사용자 문구에 옛 이름: %s" % (path, stripped[:90]))
 
 
+# ── 3. server-rust 가 사람에게 돌려주는 문장 (#1118) ───────────────────────
+# API 오류 본문·승인 카드 카피·에이전트가 매 턴 읽는 preamble 이 범위다. 테스트
+# 모듈은 재지 않는다: Rust 관례상 `#[cfg(test)]` 는 파일 맨 뒤이므로 거기서 자르고,
+# `tests/` 통합 테스트 디렉터리는 통째로 건너뛴다.
+RUST_ROOT = "server-rust"
+RUST_IDENTIFIER_RE = re.compile(
+    r"://|momo_[a-z]|momo-[a-z]|MOMO_[A-Z]|MOMO-[A-Z0-9]|app\.momo|com\.momo"
+    r"|X-Momo-|@momo/|Momo[A-Z]|momo[A-Z]|momo\.[A-Za-z0-9_.{]|/momo|momo/|momohost"
+)
+CFG_TEST_RE = re.compile(r"^#\[cfg\(test\)\]", re.M)
+
+# 패턴으로 못 가르는 잔존. 전부 "형태가 맨 momo 인 계약값/로그"다.
+RUST_ALLOW = {
+    ("server-rust/bins/momo-notifier/src/lib.rs", "momo notifier starting"):
+        "운영 로그 라인 — 사람이 제품 안에서 읽는 카피가 아니다",
+    ("server-rust/bins/momo-notifier/src/lib.rs", "momo notifier stopped"):
+        "운영 로그 라인",
+    ("server-rust/bins/momo-server/src/config.rs", "momo"):
+        "예약 핸들 목록 + POSTGRES_DB 기본값 — 와이어/인프라 계약값(D1)",
+    ("server-rust/crates/momo-settings/src/provider.rs", "momo"):
+        "예약 핸들 목록 — 같은 계약값의 도메인 쪽 복사본",
+}
+
+
+def scan_server_rust():
+    global checked
+    root = os.path.join(ROOT, RUST_ROOT)
+    if not os.path.isdir(root):
+        return
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in ("target", "tests")]
+        for name in sorted(filenames):
+            if not name.endswith(".rs"):
+                continue
+            path = os.path.join(dirpath, name)
+            checked += 1
+            raw = open(path, encoding="utf-8").read()
+            cut = CFG_TEST_RE.search(raw)
+            if cut:
+                raw = raw[: cut.start()]
+            body = strip_comments(raw)
+            for m in re.finditer(r'"((?:[^"\\\n]|\\.)*)"', body):
+                literal = m.group(1)
+                if not BRAND_RE.search(literal):
+                    continue
+                if RUST_IDENTIFIER_RE.search(literal):
+                    continue
+                if (rel(path), literal) in RUST_ALLOW:
+                    continue
+                line = body.count("\n", 0, m.start()) + 1
+                failures.append(
+                    "%s:%d 서버가 돌려주는 문장에 옛 이름이 남았다: %r"
+                    % (rel(path), line, literal[:90])
+                )
+
+
 scan_sources()
 check_structured()
+scan_server_rust()
 
 if failures:
-    print("GATE FAIL: oort 1단계 — 사용자 노출 잔여 %d 건" % len(failures))
+    print("GATE FAIL: oort 사용자 노출 잔여 %d 건" % len(failures))
     for f in failures:
         print("  - " + f)
     sys.exit(1)
 
-print("GATE PASS: oort 1단계 — 사용자 노출 표면 %d 곳 확인, momo 잔여 0" % checked)
+print("GATE PASS: oort 사용자 노출 표면 %d 곳 확인, momo 잔여 0" % checked)
 PY
