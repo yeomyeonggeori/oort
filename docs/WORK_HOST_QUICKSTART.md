@@ -1,6 +1,6 @@
 # 코드 실행 호스트 5분 연결 (WORK_HOST_QUICKSTART.md)
 
-> **목적:** 배포판 운영자가 momo에 **코드 실행 호스트**(work host)를 붙이는 절차. 동봉 엔진
+> **목적:** 배포판 운영자가 oort에 **코드 실행 호스트**(work host)를 붙이는 절차. 동봉 엔진
 > opencode(기본)와 goose는 사이드카로 기동하고, Codex는 사용자 호스트의 것을 로컬로
 > 연결한다.
 > **근거:** [ADR-0114 증보1](adr/0114-interactive-work-console.md)(work host 동봉 + 엔진 선택),
@@ -25,7 +25,7 @@
 
 코드 실행 호스트는 세 엔진을 지원한다.
 
-- **opencode** (MIT): 기본 엔진. 사이드카에 동봉된다. HTTP+SSE로 momo가 몬다.
+- **opencode** (MIT): 기본 엔진. 사이드카에 동봉된다. HTTP+SSE로 oort가 몬다.
 - **goose** (Apache-2.0): 동봉 엔진. ACP로 세션마다 스폰한다.
 - **codex-local**: Codex는 독점이라 **동봉하지 않는다.** 사용자 호스트의 `codex`를 로컬로
   연결한다(§4).
@@ -133,7 +133,7 @@ DB에 행이 없으면 별도 쓰기 없이 opencode로 동작한다.
 
 Codex는 독점 CLI라 배포판에 담지 않는다. `codex-local` 엔진은 **`codex`가 설치된 사용자
 호스트에서 실행하는 `momo-workd`**가 그 호스트의 `codex`를 그대로 쓴다. Codex의
-ChatGPT/OAuth 자격증명은 사용자 호스트의 `~/.codex`와 keychain에 남고 momo로 들어오지
+ChatGPT/OAuth 자격증명은 사용자 호스트의 `~/.codex`와 keychain에 남고 oort로 들어오지
 않는다(ADR-0004).
 
 절차 요약(상세는 [`docs/RUN.md`](RUN.md) §5.4):
@@ -167,11 +167,11 @@ macOS 앱은 자기 Mac을 work 호스트로 등록하는 경로("이 Mac의 호
 
 ## 5. 자격증명 경계 (ADR-0004)
 
-- 동봉 엔진(opencode/goose)이 호출하는 LLM 자격증명은 **엔진 설정(사용자) 소유**다. momo
+- 동봉 엔진(opencode/goose)이 호출하는 LLM 자격증명은 **엔진 설정(사용자) 소유**다. oort
   서버/DB/원장에 들어오지 않는다.
-- 로컬 Codex의 ChatGPT/OAuth 토큰은 사용자 호스트의 `~/.codex`와 keychain에만 있다. momo는
+- 로컬 Codex의 ChatGPT/OAuth 토큰은 사용자 호스트의 `~/.codex`와 keychain에만 있다. oort는
   이를 읽거나 중계하지 않는다.
-- 사이드카는 자격증명 **소비자**일 뿐, 저장소가 아니다. momo 서버 컨테이너와 신뢰 경계가
+- 사이드카는 자격증명 **소비자**일 뿐, 저장소가 아니다. oort 서버 컨테이너와 신뢰 경계가
   분리돼 있다.
 - `momo-workd`는 raw stdout/stderr, 명령 경로, 환경값, provider 자격증명을 서버로 보내지
   않는다. 로컬 출력은 기본 `~/.momo/workd-output/` 아래 mode `0600` 파일로만 보관한다.

@@ -1,4 +1,4 @@
-# CLAUDE.md — momo (기획/오케스트레이션 세션 진입점)
+# CLAUDE.md — oort (기획/오케스트레이션 세션 진입점)
 
 > Claude(Fable) 세션의 기본 역할은 **기획 레이어**다. GPT 5.6 planner와 병렬로 일할 수 있지만 한 planning ID에는 owner가 하나뿐이며, 공용 정본 통합은 `momo-main`이 순차 수행한다. 직접 구현하지 않는다 — 구현은 Codex worker가 goal(=GitHub Issue)로 수행한다(계약: `AGENTS.md`).
 

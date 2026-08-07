@@ -30,7 +30,7 @@ ADR-0112 places the workspace above channels and direct messages, but the app pr
 
 ## Industry comparison
 
-Slack and Discord present the workspace/server as shared administrative identity, while rename authority is restricted to administrative roles. momo follows that familiar boundary while preserving its stronger tenant transaction, RLS, audit, and optimistic-concurrency requirements.
+Slack and Discord present the workspace/server as shared administrative identity, while rename authority is restricted to administrative roles. oort follows that familiar boundary while preserving its stronger tenant transaction, RLS, audit, and optimistic-concurrency requirements.
 
 ## Consequences
 

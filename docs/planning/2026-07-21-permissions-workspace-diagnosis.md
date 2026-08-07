@@ -4,7 +4,7 @@
 > 리서치: research/18-permissions-workspaces/00-industry-permission-models.md (Slack/Discord/Mattermost/Matrix — 별도 산출)
 > 결론: **초대는 강함, 수명주기 관리(역할 변경·정지·추방·차단)는 ENUM만 있고 API가 없다. 멀티 워크스페이스는 데이터 모델만 준비(ADR-0117 미기안). → ADR-0128 기안.**
 
-## 1. momo 현재 상태 (2026-07-21 main 8f9408f 대조)
+## 1. oort 현재 상태 (2026-07-21 main 8f9408f 대조)
 
 ### 있는 것 ✅
 | 영역 | 현황 |
@@ -31,7 +31,7 @@
 ### 구조 평가
 - **P1·P2·P4는 순수 API 공백** — 스키마(ENUM·membership)가 이미 받치고 있어 마이그레이션 없이 REST+검증+audit만으로 해소 가능. 오픈소스 공개 전 필수(관리 기능 없는 메신저는 운영 불가).
 - **P3는 작은 마이그레이션**(workspace_membership 또는 member.workspace_role 컬럼) — Slack 문법(워크스페이스 역할 ⊥ 채널 역할) 정렬.
-- **P5는 인증 경계 재설계**(human이 workspace 스코프 → 계정(email) 전역 + workspace 연결) — 가장 큰 조각, ADR-0117로 별도 기안(웹/모바일 멀티 워크스페이스 rail과 함께). Slack이 workspace 샤딩을 버린 교훈(리서치 §5)이 여기 직결: momo는 단일 PG+RLS라 **채널/유저 단위 재샤딩 부담이 없고**, 계정-워크스페이스 분리만 하면 된다.
+- **P5는 인증 경계 재설계**(human이 workspace 스코프 → 계정(email) 전역 + workspace 연결) — 가장 큰 조각, ADR-0117로 별도 기안(웹/모바일 멀티 워크스페이스 rail과 함께). Slack이 workspace 샤딩을 버린 교훈(리서치 §5)이 여기 직결: oort는 단일 PG+RLS라 **채널/유저 단위 재샤딩 부담이 없고**, 계정-워크스페이스 분리만 하면 된다.
 
 ## 2. 설계 추가 — ADR-0128 (멤버십·권한 수명주기 v1)
 

@@ -1,6 +1,6 @@
 # 레퍼런스 제품 UX 실측 서베이 (2026-07-25)
 
-> 목적: momo(에이전트=1급 멤버인 팀 메신저, Tauri+React) 다음 기능 설계를 위한 레퍼런스 조사.
+> 목적: oort(에이전트=1급 멤버인 팀 메신저, Tauri+React) 다음 기능 설계를 위한 레퍼런스 조사.
 > 원칙: 마케팅 문구가 아니라 **실제 UI 동작**만. 확인 불가는 `미확인`으로 정직 표기.
 >
 > **1차 소스 등급 고지**
@@ -14,7 +14,7 @@
 
 ### 1-A. buzz `[코드]` — 가장 직접적인 레퍼런스
 
-buzz는 momo와 문제 정의가 거의 동일(에이전트=채널 멤버인 메신저, Tauri 데스크탑)해서 소스를 직접 읽었다.
+buzz는 oort와 문제 정의가 거의 동일(에이전트=채널 멤버인 메신저, Tauri 데스크탑)해서 소스를 직접 읽었다.
 
 **온보딩은 2개 레이어로 분리돼 있다.**
 
@@ -40,7 +40,7 @@ buzz는 momo와 문제 정의가 거의 동일(에이전트=채널 멤버인 메
 - 타이밍 상수에 **뼈아픈 교훈이 주석으로 남아있다**: `TEAMMATE_INTRO_BACKSTOP_MS = 120_000`. 원래 15초였는데 "2026-07-18 관측: 인트로가 실제로 60초쯤 도착했는데 15초에 '늦어지고 있다'는 클로저가 이미 최종 확정으로 찍혀버렸다"며 120초로 올렸다. 주석 원문: *"`unresolved` means 'no intro seen yet', which is ignorance, not a fact; announcing it early states a falsehood, and the closer marker is terminal so nothing ever corrects it."* / `CLOSER_BEAT_MS = 3_000`, 준비 폴링 250ms, 대기 상한 60초.
 - 멱등성: 오프너/클로저/프로바이더 안내마다 마커(`buzz-welcome-kickoff.opener.v1` 등)를 찍어 재방문 시 중복 게시를 막는다.
 
-> **momo 번역**: 커뮤니티 온보딩은 "프로필 → 팀 소개" 2스텝으로 자르고, 첫 채널에서 김인턴이 다른 에이전트를 @멘션해 자기소개시키는 스크립트를 자동 재생하되 — 지연 판정 백스톱은 buzz의 실측값(120초)을 그대로 채택하고 실패 문구는 "안 됨"이 아니라 "어디서 확인하면 되는지"로 쓴다.
+> **oort 번역**: 커뮤니티 온보딩은 "프로필 → 팀 소개" 2스텝으로 자르고, 첫 채널에서 김인턴이 다른 에이전트를 @멘션해 자기소개시키는 스크립트를 자동 재생하되 — 지연 판정 백스톱은 buzz의 실측값(120초)을 그대로 채택하고 실패 문구는 "안 됨"이 아니라 "어디서 확인하면 되는지"로 쓴다.
 
 ### 1-B. Raycast `[2차/구조확인]`
 
@@ -54,7 +54,7 @@ pageflows.com의 실제 화면 녹화 기반 시퀀스(화면명·타임스탬�
 - 온보딩은 **"Show Onboarding" 커맨드로 언제든 재진입 가능**(스킵해도 영구 손실 아님).
 - `미확인`: 온보딩 화면들의 정확한 버튼 카피. **컨페티/축하 모먼트는 코어 온보딩에 없음** — 커뮤니티 제작 Store 확장("1-Click Confetti")으로만 존재.
 
-> **momo 번역**: 계정/워크스페이스 가입을 앞에 세우지 말고 "먼저 한 번 써보게 한 뒤 뒤에서 붙이기" + 온보딩 재진입 커맨드를 상시 제공한다.
+> **oort 번역**: 계정/워크스페이스 가입을 앞에 세우지 말고 "먼저 한 번 써보게 한 뒤 뒤에서 붙이기" + 온보딩 재진입 커맨드를 상시 제공한다.
 
 ### 1-C. Cursor `[공식은 부분만]`
 
@@ -62,7 +62,7 @@ pageflows.com의 실제 화면 녹화 기반 시퀀스(화면명·타임스탬�
 - `[2차]` 첫 실행 시 welcome screen에서 가입/로그인(이메일·Google·GitHub), 계정 생성과 동시에 **14일 Pro 트라이얼 자동 부여(카드 불필요)**. VS Code 임포트 프롬프트는 계정 생성 **이후**, "One-Click Import"로 대다수 즉시 완료, 스킵 시 나중에 Settings에서 재실행 가능.
 - `미확인`: 최초 실행 화면의 정확한 순서는 공식 1차 문서에 없음(2차 소스 합성). **"Tab 튜토리얼 파일이 첫 실행에 자동으로 열린다"는 서술은 어떤 소스에서도 확인 못함** — cursor.com/tab의 인터랙티브 데모는 마케팅 페이지이지 앱 내 온보딩인지 불명.
 
-> **momo 번역**: "기존 환경 1클릭 임포트"는 이주 비용을 없애는 강력한 첫 스텝 — momo라면 Slack 워크스페이스/채널 구조 임포트가 이 자리.
+> **oort 번역**: "기존 환경 1클릭 임포트"는 이주 비용을 없애는 강력한 첫 스텝 — oort라면 Slack 워크스페이스/채널 구조 임포트가 이 자리.
 
 ### 1-D. t3.chat / T3 Code `[공식 부분]`
 
@@ -79,7 +79,7 @@ pageflows.com의 실제 화면 녹화 기반 시퀀스(화면명·타임스탬�
 - 승인 모드 프리셋(현행 공식 config): `Auto` / `Safe read-only browsing` / `Read-only non-interactive (CI)` / `Dangerous full access`("not recommended" 명시).
 - `미확인`: 구버전(Suggest/Auto Edit/Full Auto) vs 현행 프리셋 vs 커뮤니티 서술(Read-Only/Auto/Full Access)이 혼재 — 2026-07 화면에 실제 뜨는 리터럴 라벨은 스크린샷 미확보.
 
-> **momo 번역**: 권한 모드를 빈 화면에서 고르게 하지 말고, 워크스페이스 성격을 감지해 안전한 기본값을 제안한 뒤 바꾸게 한다.
+> **oort 번역**: 권한 모드를 빈 화면에서 고르게 하지 말고, 워크스페이스 성격을 감지해 안전한 기본값을 제안한 뒤 바꾸게 한다.
 
 ### 1-F. Orca — **제품 식별 모호, 재확인 필요**
 
@@ -87,7 +87,7 @@ pageflows.com의 실제 화면 녹화 기반 시퀀스(화면명·타임스탬�
 - 첫 실행에 대해 검증된 유일한 구체 서술(andrew.ooo 리뷰): *"First launch walks you through agent detection — it scans `$PATH` for installed CLIs and pre-populates the agent list."* 이후 계정 스위처로 각 CLI 계정 추가 → 첫 worktree 생성.
 - `미확인`: 화면 단위 온보딩 시퀀스, 로그인 필요 여부, 단계 수. **애초에 성재가 의도한 "Orca"가 이 제품이 맞는지 확인 필요.**
 
-> **momo 번역**: `$PATH` 스캔으로 설치된 하네스를 자동 발견해 목록을 미리 채워주는 패턴은 buzz의 하네스 감지와 동일 계열 — momo도 "설정하라"가 아니라 "찾아놨다"로 시작한다.
+> **oort 번역**: `$PATH` 스캔으로 설치된 하네스를 자동 발견해 목록을 미리 채워주는 패턴은 buzz의 하네스 감지와 동일 계열 — oort도 "설정하라"가 아니라 "찾아놨다"로 시작한다.
 
 ---
 
@@ -129,13 +129,13 @@ pageflows.com의 실제 화면 녹화 기반 시퀀스(화면명·타임스탬�
 ### OpenRouter `[공식]`
 - `openrouter/auto`(NotDiamond 기반) 선택 시 추가 수수료 없이 선택된 모델 표준 요금. `cost_quality_tradeoff` 0~10 슬라이더(기본 7), `allowed_models`로 `anthropic/*` 등 제한.
 
-### buzz `[코드]` — momo에 가장 직접 적용 가능한 모델
+### buzz `[코드]` — oort에 가장 직접 적용 가능한 모델
 - effort는 **per-provider × per-model 테이블**로 유효값이 다르다(`effortTable.fixture.json`): `claude-opus-4-5` → `[low, medium, high]`, default `null` / `claude-opus-4-7`·`sonnet-5`·`fable-5` → `[low, medium, high, xhigh, max]`, default `high` / `claude-opus-4-6` → xhigh 제외. OpenAI 라우트는 `normalize_effort_for_openai_route`로 max를 xhigh로 클램프.
 - UI 라벨은 **"Thinking / Effort"**, 도움말: *"Controls how much reasoning effort the LLM applies per turn. Leave blank to inherit from the global or persona default."*
 - **핵심: 3단 상속 체인 + 명시적 Inherit 옵션.** 전역 기본 → 페르소나 기본 → 에이전트별 오버라이드. 피커의 폴백 옵션 문구가 **"Inherit (agent default)"**이고, 상속된 실제 값(`inheritedEffort`)을 함께 보여준다. 모델을 바꿔 현재 effort가 유효값에서 벗어나면 `useEffortAutoClear`가 **자동으로 비운다**(t3.chat의 "리셋되어 당황" 문제를 구조적으로 해결).
 - buzz엔 **요청 단위 모델 오버라이드가 없다** — 모델/effort는 에이전트 설정에 귀속.
 
-> **momo 번역**: "요청 단위 오버라이드 vs 기본값"은 **상속 체인 + 'Inherit (…)' 명시 옵션**으로 표현하고(빈 값=상속, 상속된 실제 값을 같이 노출), 모델 변경 시 무효해진 effort는 조용히 리셋하지 말고 자동 클리어 + 안내한다. Auto 라우팅을 쓴다면 **Cursor가 아니라 Copilot 쪽**을 따라 "이번 턴에 실제로 답한 모델"을 메시지에 반드시 라벨링한다 — 에이전트가 멤버인 제품에서 "누가 답했는지 모름"은 치명적.
+> **oort 번역**: "요청 단위 오버라이드 vs 기본값"은 **상속 체인 + 'Inherit (…)' 명시 옵션**으로 표현하고(빈 값=상속, 상속된 실제 값을 같이 노출), 모델 변경 시 무효해진 effort는 조용히 리셋하지 말고 자동 클리어 + 안내한다. Auto 라우팅을 쓴다면 **Cursor가 아니라 Copilot 쪽**을 따라 "이번 턴에 실제로 답한 모델"을 메시지에 반드시 라벨링한다 — 에이전트가 멤버인 제품에서 "누가 답했는지 모름"은 치명적.
 
 ---
 
@@ -184,7 +184,7 @@ pageflows.com의 실제 화면 녹화 기반 시퀀스(화면명·타임스탬�
 - **Codex 앱**: ChatGPT 데스크톱에 Chat·Work와 나란한 "Codex" 탭. 인라인 diff 편집, 사이드 패널 PR 리뷰, **expand-and-collapse navigation**. CLI는 `codex cloud list` / `codex apply <TASK_ID>`.
 - **Jules**: 실행 전 단계별 plan 제시(리뷰·수정·거부 가능), 번호 매겨진 박스로 plan 항목·완료 상태 표시, activity feed에 의존성 설치·파일 수정·테스트 실행 라이브 로그.
 
-> **momo 번역**: 관전 패널은 **채널 우측 보조 패널 + 스코프 라벨 상시 노출**(buzz)로 가고, 툴 호출은 과거형/진행형 어휘로 접힌 한 줄 요약, 상태는 Running/Pending/Done/Error 4종. 관전에서 가장 중요한 두 기능은 **① 자리를 잃지 않고 훔쳐보기**(Claude Agent View의 인라인 프리뷰) **② 프로세스는 살린 채 현재 턴만 중단**(buzz의 "Stop current turn"). 10초 넘으면 색을 바꿔 생존 신호를 주는 Claude Code 패턴도 그대로 채택할 만하다.
+> **oort 번역**: 관전 패널은 **채널 우측 보조 패널 + 스코프 라벨 상시 노출**(buzz)로 가고, 툴 호출은 과거형/진행형 어휘로 접힌 한 줄 요약, 상태는 Running/Pending/Done/Error 4종. 관전에서 가장 중요한 두 기능은 **① 자리를 잃지 않고 훔쳐보기**(Claude Agent View의 인라인 프리뷰) **② 프로세스는 살린 채 현재 턴만 중단**(buzz의 "Stop current turn"). 10초 넘으면 색을 바꿔 생존 신호를 주는 Claude Code 패턴도 그대로 채택할 만하다.
 
 ---
 
@@ -214,7 +214,7 @@ pageflows.com의 실제 화면 녹화 기반 시퀀스(화면명·타임스탬�
 ### 4-B. Slack `[공식]`
 - `user_typing` 이벤트: 필드는 `type`/`channel`/`user` 뿐, **스코프 불필요**, **RTM API 전용**(Events API 아님).
 - 송신 스로틀: `@slack/rtm-api` 문서 기준 "최근 3초 내 안 보냈으면" 키 입력마다 재전송(수신측 표시 타임아웃과는 별개).
-- **AI 앱 전용 `assistant.threads.setStatus`가 momo에 가장 직접적**:
+- **AI 앱 전용 `assistant.threads.setStatus`가 oort에 가장 직접적**:
   - 필수 `status`(예: "is working on your request..."), `thread_ts`, `channel_id`.
   - 옵션 `loading_messages` — **최대 10개** 문자열 배열을 Slack이 **순환 표시**. Bolt 공식 예시가 재밌다: *"Teaching the hamsters to type faster…"*, *"Untangling the internet cables…"*, *"Consulting the office goldfish…"*
   - 렌더링: **컴포저 바로 아래**에 타이핑 인디케이터처럼, 형식은 `<앱 이름> <status>` (예: "YourAssistantJeeves is thinking...").
@@ -227,7 +227,7 @@ pageflows.com의 실제 화면 녹화 기반 시퀀스(화면명·타임스탬�
 
 ### 4-C. Linear `[공식]`
 - 상태 카테고리 6종: Triage(옵션) / Backlog / Unstarted / Started / Completed / Canceled(+시스템 예약 Duplicate). 기본 워크플로우 `Backlog > Todo > In Progress > Done > Canceled`.
-- **Agent Sessions**(momo에 직접 대응): 에이전트가 멘션·위임되면 세션 자동 생성, 상태 **6종** — `pending` / `active` / `error` / `awaitingInput` / `complete` / `stale`(응답 없음/방치).
+- **Agent Sessions**(oort에 직접 대응): 에이전트가 멘션·위임되면 세션 자동 생성, 상태 **6종** — `pending` / `active` / `error` / `awaitingInput` / `complete` / `stale`(응답 없음/방치).
 - 에이전트가 발행하는 **activity 5종**: `Thought`(추론 노출) / `Action`(툴 호출) / `Response`(최종 결과) / `Elicitation`(명확화 요청) / `Error`(선택적 링크 포함).
 - **Ephemeral activity**: "다음 activity가 도착하면 교체되는" 일시적 진행 표시가 공식 개념으로 존재.
 - 2026-06-11 체인지로그: 코딩 에이전트 작업 중 **브라우저 탭에 애니메이션 탭 인디케이터** 추가, Agent Session 카드 상태 행(라벨+미리보기) 정렬 개선.
@@ -236,7 +236,7 @@ pageflows.com의 실제 화면 녹화 기반 시퀀스(화면명·타임스탬�
 ### 4-D. Discord `[공식]`
 - `POST /channels/{id}/typing` — **10초 후 만료** 명시. 공식 문서가 *"봇은 일반적으로 이 라우트를 쓰면 안 된다"*고 권고하되, **명령 처리에 수 초 걸릴 것으로 예상될 때는 허용된 유스케이스**로 명시.
 
-> **momo 번역**: 사이드바/대화목록에는 스피너 대신 **틱하는 경과시간 pill + `(N)`**을 쓰고 툴팁은 "김인턴 외 2명 작업 중". 컴포저에는 현재 활동 헤드라인을 ~2.2초 회전. 신호원은 buzz처럼 **단일 모듈로 통합**(1차=서버 턴 이벤트, 폴백=타이핑)하고, Slack의 **2분 강제 클리어**와 Linear의 **`stale` 상태**를 반드시 넣는다 — 죽은 에이전트가 영원히 "작업 중"으로 남는 게 이 UI의 최대 실패 모드다. `prefers-reduced-motion` 정적 폴백은 buzz처럼 필수.
+> **oort 번역**: 사이드바/대화목록에는 스피너 대신 **틱하는 경과시간 pill + `(N)`**을 쓰고 툴팁은 "김인턴 외 2명 작업 중". 컴포저에는 현재 활동 헤드라인을 ~2.2초 회전. 신호원은 buzz처럼 **단일 모듈로 통합**(1차=서버 턴 이벤트, 폴백=타이핑)하고, Slack의 **2분 강제 클리어**와 Linear의 **`stale` 상태**를 반드시 넣는다 — 죽은 에이전트가 영원히 "작업 중"으로 남는 게 이 UI의 최대 실패 모드다. `prefers-reduced-motion` 정적 폴백은 buzz처럼 필수.
 
 ---
 
@@ -288,9 +288,9 @@ pageflows.com의 실제 화면 녹화 기반 시퀀스(화면명·타임스탬�
 - `미확인`: **help.openai.com 전 페이지가 WebFetch 403**으로 2026년 현재 정확한 한도 도달 문구 확보 실패. GPT-4 시절 커뮤니티 인용문만 확인. 소비자용 상시 사용량 대시보드 존재 여부도 미확인.
 
 ### buzz `[코드]` — **사용량/쿼터 UI가 아예 없음**
-`features/settings/` 전체를 grep한 결과 usage/quota/credit/rate-limit 관련 화면이 존재하지 않는다. 유일한 인접 화면은 Hosted communities(계정 연결/커뮤니티 생성)뿐. → **이 영역은 buzz가 아직 안 푼 문제이고, momo가 앞설 수 있는 지점.**
+`features/settings/` 전체를 grep한 결과 usage/quota/credit/rate-limit 관련 화면이 존재하지 않는다. 유일한 인접 화면은 Hosted communities(계정 연결/커뮤니티 생성)뿐. → **이 영역은 buzz가 아직 안 푼 문제이고, oort가 앞설 수 있는 지점.**
 
-> **momo 번역**: OAuth 구독 잔여량은 **"짧은 창 + 주간" 2게이지 + 절대 시각 리셋 텍스트**(Claude/Codex 공통 표준)로, 크레딧은 **잔액 + auto top-up(임계값/금액 2필드)**로 — 두 프레임을 섞지 말고 시각적으로 분리한다. 문구는 Claude 원문 구조(`You've hit your weekly limit · resets Mon 12:00am`)를 차용. **지표 조회 실패 시 `Showing last-known usage` 폴백은 반드시 넣는다**(에이전트가 계속 도는 제품에서 사용량 화면이 빈 채로 뜨면 최악). 예측형 소진 표시는 아무도 안 하고 있으니 차별화 여지.
+> **oort 번역**: OAuth 구독 잔여량은 **"짧은 창 + 주간" 2게이지 + 절대 시각 리셋 텍스트**(Claude/Codex 공통 표준)로, 크레딧은 **잔액 + auto top-up(임계값/금액 2필드)**로 — 두 프레임을 섞지 말고 시각적으로 분리한다. 문구는 Claude 원문 구조(`You've hit your weekly limit · resets Mon 12:00am`)를 차용. **지표 조회 실패 시 `Showing last-known usage` 폴백은 반드시 넣는다**(에이전트가 계속 도는 제품에서 사용량 화면이 빈 채로 뜨면 최악). 예측형 소진 표시는 아무도 안 하고 있으니 차별화 여지.
 
 ---
 
@@ -331,11 +331,11 @@ pageflows.com의 실제 화면 녹화 기반 시퀀스(화면명·타임스탬�
 - **Railway**: **소프트 한도(이메일 알림만)와 하드 한도(전 워크로드 오프라인)를 별도 필드로 분리**. 75%/90%/100% 순차 알림. 하드 한도 최소 $10.
 - **Fly.io**: 공식 문서가 *"We don't support billing alerts (yet), so budget accordingly."*라고 명시 — alert/spend-cap/auto-recharge 부재.
 
-> **momo 번역**: 크레딧은 **Daytona식 Threshold+Target 2필드 auto top-up**, 알림은 **Vercel식 50/75/100% 단계 + 소프트/하드 한도 분리(Railway)**. 동시 에이전트 캡은 잔액이 아니라 **레이트 미터(현재 N / 최대 M)**로 그리고, 캡 도달 시 즉시 실패보다 **Modal식 큐 깊이 노출**이 메신저 맥락에 맞다("김인턴이 대기열 2번째" 가 "실패했습니다"보다 낫다).
+> **oort 번역**: 크레딧은 **Daytona식 Threshold+Target 2필드 auto top-up**, 알림은 **Vercel식 50/75/100% 단계 + 소프트/하드 한도 분리(Railway)**. 동시 에이전트 캡은 잔액이 아니라 **레이트 미터(현재 N / 최대 M)**로 그리고, 캡 도달 시 즉시 실패보다 **Modal식 큐 깊이 노출**이 메신저 맥락에 맞다("김인턴이 대기열 2번째" 가 "실패했습니다"보다 낫다).
 
 ---
 
-## 종합: momo가 바로 가져갈 5가지
+## 종합: oort가 바로 가져갈 5가지
 
 1. **첫 화면 와우 = 에이전트가 에이전트를 호출하는 장면.** buzz의 Welcome Kickoff가 정답에 가깝다. 단 지연 판정 백스톱은 buzz가 15초→120초로 고쳐야 했던 실측 교훈을 그대로 승계.
 2. **사이드바 작업중 표시 = 틱하는 경과시간 pill.** 스피너보다 정보량이 크고, 멈춘 에이전트를 즉시 드러낸다. `(N)` + "리드 외 N명" 툴팁까지 세트.
@@ -372,6 +372,6 @@ buzz 소스: `github.com/block/buzz` @ `ab3af82` (2026-07-24) — `desktop/src/f
 
 **주목 포인트(소스 확인)**: ①순수 소켓 API + 동봉 Claude 스킬 — 에이전트가 herdr 페인을 spawn하고 출력을 읽고 서로를 wait할 수 있다(로컬판 에이전트 오케스트레이션) ②에이전트 세션 resume 매핑(`codex resume <id>` 등)을 도구별로 정본화 ③최근 커밋이 **사이드바 worktree 계층** — 우리 goal_claim 워크트리-티켓 모델과 같은 정신 모델 ④감지 매니페스트 기반 에이전트 인식(src/detect/).
 
-**momo와의 관계**: 니치가 직교한다 — herdr는 **1인·로컬·터미널** 관제, momo 관전 표면은 **팀·원장·권한 계약**(observer capability, RLS) 위의 관제. herdr의 상태 문법(blocked/working/done at a glance)이 우리 작업중 표시·작업 패널과 수렴한 것은 방향 검증으로 읽으면 된다. momo가 못 하는 것(로컬 터미널 멀티플렉스)을 herdr가 하고, herdr가 안 하는 것(팀 공유·승인 원장·비용)을 momo가 한다.
+**oort와의 관계**: 니치가 직교한다 — herdr는 **1인·로컬·터미널** 관제, oort 관전 표면은 **팀·원장·권한 계약**(observer capability, RLS) 위의 관제. herdr의 상태 문법(blocked/working/done at a glance)이 우리 작업중 표시·작업 패널과 수렴한 것은 방향 검증으로 읽으면 된다. oort가 못 하는 것(로컬 터미널 멀티플렉스)을 herdr가 하고, herdr가 안 하는 것(팀 공유·승인 원장·비용)을 oort가 한다.
 
 **우리 내부 사용 여부**: 미사용. 내부 오케스트레이션은 Claude Code Workflow(API 기반 서브에이전트 — PTY가 아니라 herdr에 안 잡힘)+goal_claim 워크트리+codex-fleet. **채택 판단**: 파이프라인 도입 실익 없음. 성재가 로컬에서 CLI 에이전트를 직접 여럿 돌릴 때 개인 관제용으로는 유용할 수 있음(brew install herdr). 참고할 세부: 소켓 API의 "에이전트가 서로를 wait" 문법, resume 매핑 정본화.

@@ -60,8 +60,8 @@
   `SSHPASS="$(cat scratchpad/.ncp-root-pw)" sshpass -e ssh root@101.79.11.189`
   (비밀번호는 `scratchpad/.ncp-root-pw`에 0600으로 저장돼 있고, sshpass는 brew로 설치됨)
 - **실측 사양**: Ubuntu 22.04.3 LTS · 2 vCPU · RAM 7GB · **디스크 9.8G(가용 4.4G)** · docker 미설치.
-- **막힌 지점 — 디스크**: momo 스택은 compose가 소스에서 Swift를 빌드하므로 가용 4.4G로는 부족할 가능성이 크다(툴체인+빌드 산출물). **다음 재개 시 첫 결정**:
-  ① 블록 스토리지 추가(예: 50GB, `createBlockStorageInstance` — 소액 추가 과금) ② 더 큰 디스크로 서버 재생성 ③ VM에는 **workd만** 두고 momo 서버는 다른 곳에서 운영(단 데몬이 서버에 닿아야 하므로 서버가 공개 주소여야 함 — 이 VM에 서버를 올리는 게 원래 취지)
+- **막힌 지점 — 디스크**: oort 스택은 compose가 소스에서 Swift를 빌드하므로 가용 4.4G로는 부족할 가능성이 크다(툴체인+빌드 산출물). **다음 재개 시 첫 결정**:
+  ① 블록 스토리지 추가(예: 50GB, `createBlockStorageInstance` — 소액 추가 과금) ② 더 큰 디스크로 서버 재생성 ③ VM에는 **workd만** 두고 oort 서버는 다른 곳에서 운영(단 데몬이 서버에 닿아야 하므로 서버가 공개 주소여야 함 — 이 VM에 서버를 올리는 게 원래 취지)
   → **권고는 ①**(가장 작고 되돌리기 쉬움).
 - 그 뒤: SSH 확인 → compose 스택 + momo-workd 설치 → **BYOC 등록→세션→과금 원장→종료** smoke → `MOMO_T3_ENABLED` 판단 자료.
 - **도구**: NCP 공식 MCP(`scratchpad/NCP-Claude-Project/ncp-mcp`) + venv(`scratchpad/ncp-venv`, mcp 1.x 고정). 자격증명 `~/.ncp/credentials.env`.

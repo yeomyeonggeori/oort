@@ -13,8 +13,8 @@
 
 ## 수용기준
 - [ ] "코드 실행 호스트 5분 연결" 문서(위치: `docs/` 또는 배포판 문서 관례에 맞게, README에서 링크). 한국어 우선(제품 톤 일치).
-- [ ] 내용: (1) 사이드카 opt-in 기동(`--profile workhost`) (2) 앱 설정 "코드 실행 호스트"에서 엔진 선택(opencode 기본/goose 동봉/codex-local) (3) Codex 로컬 연결 방법(사용자 호스트의 `codex` 사용, 자격증명은 `~/.codex`/keychain — momo 비유입) (4) provider("AI 연결")와 work host의 관계 구분.
-- [ ] 자격증명 경계(ADR-0004) 명시: 동봉 엔진/로컬 Codex가 쓰는 LLM 키는 사용자 소유, momo 서버/DB/원장 비유입.
+- [ ] 내용: (1) 사이드카 opt-in 기동(`--profile workhost`) (2) 앱 설정 "코드 실행 호스트"에서 엔진 선택(opencode 기본/goose 동봉/codex-local) (3) Codex 로컬 연결 방법(사용자 호스트의 `codex` 사용, 자격증명은 `~/.codex`/keychain — oort 비유입) (4) provider("AI 연결")와 work host의 관계 구분.
+- [ ] 자격증명 경계(ADR-0004) 명시: 동봉 엔진/로컬 Codex가 쓰는 LLM 키는 사용자 소유, oort 서버/DB/원장 비유입.
 - [ ] em-dash(—/–) 0, 과장어("원활한/손쉽게/seamless") 0. 동사-우선. 정확한 명령/경로만.
 
 ## 하드 룰

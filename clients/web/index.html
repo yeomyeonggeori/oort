@@ -36,6 +36,19 @@
     <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f7f6f3" />
     <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#17161a" />
     <!--
+      저장된 테마를 첫 페인트보다 먼저 문서에 못 박는다 (U2). 근거 전문은
+      public/theme-boot.js 머리말에 있고, 이 자리가 요구하는 것은 셋뿐이다.
+
+      1. defer가 아니다. 앱 진입점은 type="module"이라 언제나 defer이고, 그것이
+         실행될 때는 이미 한 프레임이 그려졌을 수 있다. 저장된 선택이 다크인데
+         이 기기가 라이트면 그 프레임이 흰 종이로 번쩍인다.
+      2. 인라인이 아니다. 배포 CSP와 Tauri CSP 모두 script-src 'self'이고
+         'unsafe-inline'이 없으므로, 인라인 <script>는 실행되지 않는다.
+      3. 위의 theme-color 두 줄보다 뒤에 있다. 그 스크립트가 고정할 때 두 줄의
+         값을 읽어 쓰므로, 파서가 그것들을 이미 지났어야 한다.
+    -->
+    <script src="/theme-boot.js"></script>
+    <!--
       홈 화면 설치 (goal B10). 매니페스트 자체는 public/manifest.json이고, 그
       선택들(standalone, 다크 타일과 같은 배경색, 192/512/maskable 아이콘)의
       근거는 src/features/pwa/store.ts 머리말에 적혀 있다.

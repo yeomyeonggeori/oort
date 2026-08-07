@@ -85,7 +85,7 @@
 
 ### 3.3 유휴 메모리 < 400MB — **PASS**
 
-momo 프로세스 4종(메인 + WebKit GPU/Networking/WebContent) 합계.
+oort 프로세스 4종(메인 + WebKit GPU/Networking/WebContent) 합계.
 
 | 상태 | RSS 합 | phys_footprint 합 |
 | --- | --- | --- |
@@ -185,7 +185,7 @@ RSS는 공유 페이지를 중복 계산하므로 `footprint`가 실제에 가�
 | 초대 코드 | **신규 1개** (`…ptC0-Rs`, 0/1 사용, 2026-08-01 만료) — **소진하지 않음**. 기존 `7G26eE`도 그대로 |
 | 멤버 | **신규 생성 없음** |
 | 워크스페이스 | **신규 생성 없음** |
-| 로컬 머신 | macOS 알림 권한을 `momo`(app.momo.desktop)에 **허용**으로 설정. keychain `app.momo.desktop / refresh-token` 항목 존재(현재 로그인 상태). 격리 경로의 `momo.app` 사본 1개 |
+| 로컬 머신 | macOS 알림 권한을 `momo`(app.oort.desktop)에 **허용**으로 설정. keychain `app.momo.desktop / refresh-token` 항목 존재(현재 로그인 상태). 격리 경로의 `momo.app` 사본 1개 |
 
 되돌리려면: `spike-745-gate` 메시지 정리, DM 채널 폐기, 초대 코드 폐기, `security delete-generic-password -s app.momo.desktop -a refresh-token`.
 

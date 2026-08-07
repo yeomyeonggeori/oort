@@ -1,11 +1,11 @@
-# momo UX 바이블 — Slack 레퍼런스 기반 원칙 v0
+# oort UX 바이블 — Slack 레퍼런스 기반 원칙 v0
 
 > 생성: 2026-07-10 · 근거: Slack UX/엔지니어링 코퍼스 36선 (34건 본문 검증) · 관리: ADR-0100 삼분법의 "계획/기준" 문서
 > 사용법: **UI/UX 티켓의 수용기준은 이 문서의 원칙 번호(P1~P15)를 인용한다.** 원칙 수정은 ADR로.
 
 ## 원칙 15개조
 
-| # | 원칙 | momo 번역 | 근거 |
+| # | 원칙 | oort 번역 | 근거 |
 |---|---|---|---|
 | P1 | 소프트웨어가 아니라 "더 나은 팀"을 판다 | "에이전트가 1급 동료인 조직"이라는 변화를 판다. 기능 목록 금지 | A1, A2 |
 | P2 | 고객이 아직 원할 줄 모르는 제품은 결함 관용이 0 — 모든 디테일이 마케팅 | 속도·카피·모션이 곧 설득. "동작함"과 "쓰고 싶음"의 격차를 craft로 메움 | A1, A3, A5 |
@@ -14,7 +14,7 @@
 | P5 | 온보딩은 제품이 제품 안에서 스스로를 가르치는 것 | 첫 실행 = 에이전트와의 첫 대화(Slackbot 패턴). 활성화 매직넘버 1개를 정해 소유 | B1, B2, A2, A10 |
 | P6 | 부팅은 즉시처럼: 최소 페이로드 + lazy backfill + 예측 프리페치 | 활성 채널만 먼저, 나머지는 뒤에서. 부트 페이로드가 성능 예산의 1순위 | C4, C10, C11, C3, C9 |
 | P7 | **Unread 상태가 곧 제품이다** | 읽음/안읽음은 서버 단일 진실 + 경량 카운트 API 일괄 점등. read_state 스키마는 준비됨, UI가 없음 → ADR-0109 | C11, B6, B12, C5 |
-| P8 | 알림은 예산이다 — 보내지 않을 이유가 기본값 | 에이전트가 알림을 만들 수 있는 momo는 Slack보다 더 엄격해야 함 | B6, B8, B9, B10 |
+| P8 | 알림은 예산이다 — 보내지 않을 이유가 기본값 | 에이전트가 알림을 만들 수 있는 oort는 Slack보다 더 엄격해야 함 | B6, B8, B9, B10 |
 | P9 | 알림 판정 로직은 서버에 단 하나, 단순한 멘탈모델로 | 목표: 6-노드 수준의 합성 가능한 결정 트리. 플랫폼별 재구현 금지 | B6, B7, B8 |
 | P10 | 알림에는 관측 가능성을 내장 | trigger→sent→opened 트레이스. "알림이 안 와요"를 디버깅 가능하게 | C12, B8 |
 | P11 | 키보드 우선 내비게이션이 파워유저 리텐션의 뼈대 | Cmd+K 퀵 스위처 + unread 순회를 1급 문법으로 | B12, C10 |
@@ -66,7 +66,7 @@
 | C2 | [Scaling Slack — QCon SF 2017](https://www.infoq.com/presentations/slack-scalability/) (영상, [슬라이드](https://qconsf.com/sf2017/system/files/presentation-slides/slack_qcon-bing_wei.pdf)) | Bing Wei | 프레즌스 = 이벤트 볼륨 60% |
 | C3 | [Scaling Slack — QCon 2018](https://www.infoq.com/presentations/slack-scalability-2018/) (영상) | Demmer | DAU 4M→8M 3대 전환 |
 | C4 | [Flannel: Edge Cache](https://slack.engineering/flannel-an-application-level-edge-cache-to-make-slack-scale/) | Wei, 2017 | lazy backfill의 원전; 부트 페이로드 44배 감소 |
-| C5 | [Real-time Messaging](https://slack.engineering/real-time-messaging/) | Thangudu, 2023 | GS/CS/PS 분리; momo Centrifugo 계층의 참조 사양 |
+| C5 | [Real-time Messaging](https://slack.engineering/real-time-messaging/) | Thangudu, 2023 | GS/CS/PS 분리; oort Centrifugo 계층의 참조 사양 |
 | C6 | [Websockets to Envoy](https://slack.engineering/migrating-millions-of-concurrent-websockets-to-envoy/) | van der Stelt & Kumari, 2021 | 무중단 인그레스 교체 절차 |
 | C7 | [Scaling Slack's Job Queue](https://slack.engineering/scaling-slacks-job-queue/) | Yadav 외, 2017 | Redis 교체 대신 Kafka 전치 |
 | C8 | [Vitess Datastores](https://slack.engineering/scaling-datastores-at-slack-with-vitess/) | Ganguli 외, 2020 | 샤딩 키가 제품 로드맵을 결정 |
@@ -77,8 +77,8 @@
 | C13 | [Slack at the Edge — SREcon19](https://www.usenix.org/conference/srecon19asia/presentation/pemberton) ⚠️초록검증 | Pemberton, 2019 | 리전 정전에도 세션 생존 |
 | C14 | [Disasterpiece Theater](https://slack.engineering/disasterpiece-theater-slacks-process-for-approachable-chaos-engineering/) | Crowley, 2019 | 접근 가능한 카오스 엔지니어링 |
 
-## 확인된 리서치 갭 (= momo의 실험 기회)
+## 확인된 리서치 갭 (= oort의 실험 기회)
 
 - **프레즌스·타이핑 전용** 1차 문서 부재 (C5·C2가 최선) — 에이전트 프레즌스는 우리가 직접 정의해야 하는 공백.
-- **드래프트/컴포저 동작**의 양질 분석 부재 — momo 클라의 채널별 드래프트 설계는 자체 실험 영역.
+- **드래프트/컴포저 동작**의 양질 분석 부재 — oort 클라의 채널별 드래프트 설계는 자체 실험 영역.
 - QCon 영상 3건(C1·C2·C3)과 A10은 NotebookLM 노트북에 넣어 발표 전문 기반 Q&A로 보조 학습 권장.

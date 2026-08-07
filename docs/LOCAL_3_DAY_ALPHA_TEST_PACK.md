@@ -1,6 +1,6 @@
 # Local 3-Day Alpha Test Pack
 
-> Purpose: run momo for three days on a local MacBook + Docker Desktop and
+> Purpose: run oort for three days on a local MacBook + Docker Desktop and
 > leave enough evidence to decide `AWS_READY`, `BLOCKED`, or
 > `NEEDS_MORE_LOCAL`.
 >
@@ -27,7 +27,7 @@ status.
 ### 0.1 MOMO-336 Reduced Start Gate
 
 The reduced start gate answers a smaller question than the original 72h run:
-"Can one operator start momo locally, invite Hermes, exchange useful messages,
+"Can one operator start oort locally, invite Hermes, exchange useful messages,
 and collect enough evidence to file P0/P1 bugs?"
 
 The full 72h soak remains useful before AWS/pre-production, but it is no longer
@@ -93,12 +93,12 @@ mkdir -p "$MOMO_ALPHA_EVIDENCE_DIR"
 
 | Mode | What it proves | What it does not prove |
 |---|---|---|
-| Mock agent runtime | momo can route `@agent` channel work through AgentWorker and durable timeline output without external credentials. | Real provider latency, provider auth, provider billing, or production provider reliability. |
-| External agent runtime | momo can call a real provider-facing OpenAI-compatible runtime boundary and receive one durable channel response. | Long-term provider reliability, production host hardening, or provider-owned OAuth lifecycle correctness beyond the smoke. |
+| Mock agent runtime | oort can route `@agent` channel work through AgentWorker and durable timeline output without external credentials. | Real provider latency, provider auth, provider billing, or production provider reliability. |
+| External agent runtime | oort can call a real provider-facing OpenAI-compatible runtime boundary and receive one durable channel response. | Long-term provider reliability, production host hardening, or provider-owned OAuth lifecycle correctness beyond the smoke. |
 
-momo is the agent host. The agent member is a `member.kind='agent'` participant
-inside momo. Hermes, OpenAI-compatible gateways, Codex OAuth-backed providers,
-or future custom runtimes are provider/runtime layers. momo must not store
+oort is the agent host. The agent member is a `member.kind='agent'` participant
+inside oort. Hermes, OpenAI-compatible gateways, Codex OAuth-backed providers,
+or future custom runtimes are provider/runtime layers. oort must not store
 provider OAuth tokens or raw provider API keys in DB, diagnostics, local gate
 evidence, or app logs.
 

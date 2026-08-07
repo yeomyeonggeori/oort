@@ -12,6 +12,7 @@ import { isDesktop } from "@/lib/tauri";
 import { UpdateSection } from "@/features/updates/UpdateSection";
 import { AccountSection } from "./AccountSection";
 import { AiLinkSection } from "./AiLinkSection";
+import { AppearanceSection } from "./AppearanceSection";
 import { InviteSection } from "./InviteSection";
 import { PluginSection } from "@/features/plugins/PluginSection";
 import { SectionShell } from "./SettingsFields";
@@ -32,6 +33,7 @@ import { WorkspaceSection } from "./WorkspaceSection";
 
 type SectionId =
   | "account"
+  | "appearance"
   | "notifications"
   | "updates"
   | "ai"
@@ -63,6 +65,9 @@ interface SectionMeta {
 
 const SECTIONS: SectionMeta[] = [
   { id: "account", label: "계정", group: "나" },
+  // 테마는 이 기기에만 저장되는 선택이라 워크스페이스가 아니라 나에 속한다
+  // (src/design/theme.ts). 계정 바로 아래인 것은 순서가 곧 빈도이기 때문이다.
+  { id: "appearance", label: "테마", group: "나" },
   { id: "notifications", label: "알림 규칙", group: "나" },
   { id: "updates", label: "업데이트", group: "나", desktopOnly: true },
   { id: "ai", label: "AI 연결", group: "워크스페이스" },
@@ -199,6 +204,7 @@ export function SettingsRoute() {
             onRetry={() => resetSettingsQueries(queryClient)}
           >
           {section === "account" && <AccountSection />}
+          {section === "appearance" && <AppearanceSection />}
           {section === "notifications" && <NotificationRulesSection />}
           {section === "updates" && <UpdateSection />}
           {section === "ai" && <AiLinkSection offline={offline} />}

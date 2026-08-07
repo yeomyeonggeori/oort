@@ -1,6 +1,6 @@
 # Internal Alpha Runbook
 
-> Purpose: one teammate should be able to start momo locally, attach the macOS dev app, exercise invite/join, Kim Intern, diagnostics, and file a useful bug report without reading the whole repo.
+> Purpose: one teammate should be able to start oort locally, attach the macOS dev app, exercise invite/join, Kim Intern, diagnostics, and file a useful bug report without reading the whole repo.
 > Scope: internal alpha on a developer Mac. This is not the M7 release gate and not a public/staging production launch.
 > Cloud host: for a one-week AWS team alpha, use `docs/AWS_INTERNAL_ALPHA.md` first. The local runbook below still applies to app behavior and smoke scenarios.
 > Local solo alpha: use [`docs/LOCAL_SOLO_ALPHA_ROADMAP.md`](LOCAL_SOLO_ALPHA_ROADMAP.md) for the narrower path to one-person Docker + macOS app + local Hermes-compatible provider dogfood before AWS.
@@ -10,7 +10,7 @@
 
 - Work from a dedicated worktree. Do not run alpha smoke tests from a dirty root checkout.
 - Never commit `.env`, diagnostics archives, app logs, or screenshots with secrets.
-- Raw invite codes are bearer secrets. momo stores only hashes, so an invite code must be copied when it is created.
+- Raw invite codes are bearer secrets. oort stores only hashes, so an invite code must be copied when it is created.
 - The durable write path is still REST -> Postgres transaction -> outbox -> relay publish. The macOS app must not publish directly to Centrifugo.
 - Internal alpha can use repo-local mock Hermes. External agent runtime/provider side effects remain `runtime-unverified` unless a real gateway is explicitly attached with an out-of-repo provider env file.
 - "Kim Intern invited" and "Kim Intern connected" are separate checks: invited means the agent is an active `member.kind='agent'` with channel membership; connected means the provider status chip or `/v1/agent-runtime/status` reports mock/available instead of degraded.
@@ -73,7 +73,7 @@ set -a; . ./.env.worktree; set +a
 swift run --package-path workers/AgentWorker AgentWorker
 ```
 
-If a port is already occupied, stop the older momo process or rerun `.conductor/setup.sh` in a clean worktree. Do not change `infra/centrifugo.json` during alpha testing just to work around a local port conflict.
+If a port is already occupied, stop the older oort process or rerun `.conductor/setup.sh` in a clean worktree. Do not change `infra/centrifugo.json` during alpha testing just to work around a local port conflict.
 
 Quick API health check:
 
@@ -344,7 +344,7 @@ Paste the `## Local Gate` block from the script into the PR or issue comment.
 
 ## 7. One-Person Local Alpha Gate
 
-This gate decides whether momo is ready to leave a single developer Mac and move
+This gate decides whether oort is ready to leave a single developer Mac and move
 to an AWS internal alpha host. It is intentionally local and evidence-based: do
 not provision AWS because the app "feels close". AWS promotion requires every
 required row below to be `PASS`, with evidence paths recorded in the handoff

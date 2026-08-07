@@ -1,6 +1,6 @@
 # Local Solo Alpha Roadmap
 
-> Purpose: bring momo to a level where one operator can run a local Docker stack,
+> Purpose: bring oort to a level where one operator can run a local Docker stack,
 > open the macOS dev app, invite/use a local Hermes-compatible agent, and collect
 > enough evidence for a 3-day dogfood decision before AWS.
 
@@ -17,15 +17,15 @@ Local solo alpha is ready when all of the following are true on a chosen commit:
 - The macOS app can be started with `scripts/momo start`, logs in with a fresh
   post-MOMO-300 session, and sends/reads messages against the local server.
 - A Hermes-compatible runtime can be started locally by the user with
-  provider-owned GPT/Codex OAuth credentials. momo must not read, copy, or store
-  the OAuth token; momo only receives a loopback endpoint and Hermes-facing
+  provider-owned GPT/Codex OAuth credentials. oort must not read, copy, or store
+  the OAuth token; oort only receives a loopback endpoint and Hermes-facing
   bearer or smoke env outside the repo.
 - Sending `@hermes` in a channel creates an `agent_job`, AgentWorker calls the
   local OpenAI-compatible SSE provider, usage is minimally recorded, and the
   agent response is persisted back to the same channel timeline.
-- For the Hermes-native path, Hermes gateway can load the momo platform plugin,
-  receive momo `agent.job` events, run its provider-owned OAuth runtime, and
-  report final result/usage back to momo REST without direct DB/Centrifugo
+- For the Hermes-native path, Hermes gateway can load the oort platform plugin,
+  receive oort `agent.job` events, run its provider-owned OAuth runtime, and
+  report final result/usage back to oort REST without direct DB/Centrifugo
   writes.
 - A reduced start gate can record enough evidence to begin a 1-3 day local solo
   run without waiting for an unattended 72h soak.
@@ -46,9 +46,9 @@ The redesign baseline is stronger than the older dogfood plan:
 - MOMO-237/MOMO-240/MOMO-241/MOMO-245 already provide most of the local alpha,
   runner, 3-day pack, and soak-monitor infrastructure.
 - MOMO-325/MOMO-326/MOMO-333 proved the Hermes-native gateway path: Hermes can
-  load momo as a platform, subscribe to the `agent:` realtime work stream,
+  load oort as a platform, subscribe to the `agent:` realtime work stream,
   receive `agent.job`, call its provider-owned runtime, and report a durable
-  same-channel response through momo REST without direct DB/Centrifugo writes.
+  same-channel response through oort REST without direct DB/Centrifugo writes.
 - MOMO-334 changed the macOS dogfood UX so Hermes is no longer shown as an
   already-invited mock agent on first launch. The member `+` flow now branches
   into human/agent invite, and Hermes appears in the roster only after an

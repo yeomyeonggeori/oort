@@ -57,7 +57,12 @@ function momoServiceWorker(): Plugin {
       const entry = Object.values(bundle).find(
         (file) => file.type === "chunk" && file.isEntry
       );
-      const shell = ["/index.html"];
+      // `/theme-boot.js`는 번들 그래프에 없다: public/의 정적 파일이라 진입 청크가
+      // import하지 않는다. 그래도 셸에 속한다. 그 파일이 오지 못하면 저장된 테마가
+      // 첫 페인트에 적용되지 않고, 홈 화면 앱의 콜드 스타트는 정확히 네트워크가
+      // 없을 수 있는 그 순간이다. 이름에 내용 해시가 없지만 캐시가 빌드마다 통째로
+      // 갈리므로(CACHE = oort-shell-${BUILD_ID}) 낡을 창은 생기지 않는다.
+      const shell = ["/index.html", "/theme-boot.js"];
       if (entry && entry.type === "chunk") {
         shell.push(`/${entry.fileName}`);
         for (const imported of entry.imports) shell.push(`/${imported}`);

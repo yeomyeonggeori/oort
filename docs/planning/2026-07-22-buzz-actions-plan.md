@@ -1,23 +1,23 @@
 # PLN-20260722-02: buzz 교훈 집행 배치 — 태세 정정·게이트 하드닝·정지권·셀프호스팅 제품화 (2026-07-22, Fable)
 
 > 발단: 성재 — "buzz는 우리가 미래에 겪을 피드백/시장반응을 미리 겪은 케이스. 제안 액션을 풍부하게 고도화하고, 로직/인프라 레이어 고민을 심화하고, 셀프호스팅 해법을 비교하고, 우선순위와 배포 레벨 판단 + 실행 프롬프트까지."
-> 입력: `2026-07-22-buzz-competitive-analysis.md`(1차 분석) + 이번 세션 2차 사실 감사 2건 — ①momo RLS/게이트 태세 실코드 감사 ②buzz vs momo 셀프호스팅 축별 비교. 모든 갭 판정은 파일:라인 근거를 가진 실측이다.
+> 입력: `2026-07-22-buzz-competitive-analysis.md`(1차 분석) + 이번 세션 2차 사실 감사 2건 — ①oort RLS/게이트 태세 실코드 감사 ②buzz vs oort 셀프호스팅 축별 비교. 모든 갭 판정은 파일:라인 근거를 가진 실측이다.
 > **한 줄 결론: buzz 교훈은 "새 기능"이 아니라 "이미 가진 강점의 집행 완결"로 번역된다 — RLS는 스키마가 아니라 prod 롤 태세가 구멍이고(Critical), 킬스위치는 buzz가 밟은 지뢰 그대로 우리도 REST/클라 표면이 비어 있으며, 셀프호스팅은 백업/롤백 규율은 이기고 day-2 운영 표면·owner 온보딩·관측에서 지고 있다.**
 
 ## 1. 2차 감사 사실 요약 (근거는 감사 원보고서, 핵심만)
 
-**momo 태세 감사 — buzz A-RLS 공리 대비:**
+**oort 태세 감사 — buzz A-RLS 공리 대비:**
 - A-RLS-1(전 테이블 정책) PASS(59개 중 의도적 제외 1) · A-RLS-3(SET LOCAL, 풀 잔류 없음) PASS · A-RLS-4(SECURITY DEFINER 1건, 통제됨) PASS · 에러 sanitize 양호.
 - **A-RLS-2 PARTIAL — Critical**: prod 정본 템플릿(`infra/prod/secrets.env.example:46` + `docker-compose.prod.yml:138`)의 API 접속 롤이 `momo` = **postgres 수퍼유저**. 수퍼유저는 FORCE RLS도 무시하므로 prod 템플릿 배포에서는 RLS가 전면 무효다. (검수 정정: 롤 부트스트랩 기계장치 자체는 이미 상당 부분 존재 — migrate 이미지의 `internal-smoke-migrate.sh`가 3롤 존재+NOBYPASSRLS 태세를 fail-closed 어서션하고, `prod_env_preflight.sh` internal-host 모드는 momo_app URL 검증까지 한다. **실갭은 4개로 좁혀진다**: ①시크릿 템플릿의 API URL이 `momo` ②install.sh 롤 프로비저닝 부재 ③api/migrate DATABASE_URL 변수 미분리 ④API 기동 시 current_user non-superuser 어서션 부재 + DEPLOY.md §5.2 표에 momo_app/momo_worker 부재.)
 - A-RLS-5 PARTIAL: 존재 누설 unique 3건(push token 409 문구가 "다른 워크스페이스에 등록됨"을 명시 반환 `DeviceRoutes.swift:199` / attachment drive_file_uniq 글로벌 / workspace slug — 미노출 예약 지뢰), 코어 FK 단일 컬럼(신규 마이그레이션은 복합 FK 채택 중).
 - 루프 방어 PASS(depth·round CHECK + G1~G3·G5 이중, A2A 핑퐁도 G2가 각자 3회 차단) — 단 **depth 전파 미구현**(enqueue 항상 0 → depth≤4 CHECK가 실제로 안 물림), G4 SimHash 스텁.
-- **휴먼 정지권 FAIL**: 진행 중 run을 사람이 멈추는 REST 부재(openapi 전 경로 확인), macOS `cancelRun` TODO 스텁(`LiveChatBackend.swift:1174`). work-control kill은 agent bearer 전용. buzz "킬스위치가 어떤 제품 표면에서도 도달 불가능" 교훈의 momo판.
+- **휴먼 정지권 FAIL**: 진행 중 run을 사람이 멈추는 REST 부재(openapi 전 경로 확인), macOS `cancelRun` TODO 스텁(`LiveChatBackend.swift:1174`). work-control kill은 agent bearer 전용. buzz "킬스위치가 어떤 제품 표면에서도 도달 불가능" 교훈의 oort판.
 - 게이트: branch-skew 가드 0건 · 마이그레이션 중복 번호 미검출(둘 다 조용히 적용됨) · SPM 라이선스 수동 1회(THIRD_PARTY 스스로 "scripts 없이" 명시 — AGPL 사후 재라이선스 무방비) · web 라이선스 게이트는 모범 PASS · flaky 재시도 마스킹 없음 PASS.
 
 **셀프호스팅 비교 (축별 판정):**
-- momo 우위: 설치 UX(preflight·digest 검증·evidence), 업그레이드/롤백(백업 PASS 없이 거부·자동 롤백·`.previous`), **백업/복구 압도적**(pgBackRest PITR+restore rehearsal 게이트), BM 명료성(Zulip 모델), 용량 명시, 푸시 content 비유입(대화가 Dawn을 안 지남 — buzz보다 명료한 차별점).
-- buzz 우위: 배포 단위(이미지 1개 vs momo 6+4서비스), **owner 부트스트랩("키 생성+env 1줄" vs momo psql heredoc DBA 작업)**, day-2 운영 단일 진입(run.sh: status/logs/upgrade/backup-hint/member), 관측 기본 내장(/metrics 상시 vs momo 문서상 계획·배선 0건), 릴리스 채널(공개 GHCR·semver·자동 CHANGELOG vs momo GHCR read token 전제), 운영자 웹 콘솔, k8s 스펙트럼.
-- 채택 비권장: embedded auto-migrate(momo one-shot+evidence가 우월), Helm(v1 밖), TLA+/Tamarin 풀스택(conformance 아이디어만 취함).
+- oort 우위: 설치 UX(preflight·digest 검증·evidence), 업그레이드/롤백(백업 PASS 없이 거부·자동 롤백·`.previous`), **백업/복구 압도적**(pgBackRest PITR+restore rehearsal 게이트), BM 명료성(Zulip 모델), 용량 명시, 푸시 content 비유입(대화가 Dawn을 안 지남 — buzz보다 명료한 차별점).
+- buzz 우위: 배포 단위(이미지 1개 vs oort 6+4서비스), **owner 부트스트랩("키 생성+env 1줄" vs oort psql heredoc DBA 작업)**, day-2 운영 단일 진입(run.sh: status/logs/upgrade/backup-hint/member), 관측 기본 내장(/metrics 상시 vs oort 문서상 계획·배선 0건), 릴리스 채널(공개 GHCR·semver·자동 CHANGELOG vs oort GHCR read token 전제), 운영자 웹 콘솔, k8s 스펙트럼.
+- 채택 비권장: embedded auto-migrate(oort one-shot+evidence가 우월), Helm(v1 밖), TLA+/Tamarin 풀스택(conformance 아이디어만 취함).
 
 ## 2. 배치 구조 — Wave H(hardening) 3단 + UXUI 제안
 
@@ -50,7 +50,7 @@ ADR-0132(`docs/adr/0132-agent-interaction-safety-contract.md`) 5결정: D1 휴�
 | **MOMO-562** | 관측 실물화 v0 — DEPLOY §8.2 계획 메트릭 5종(outbox lag·예산 트립율·APNs·턴 지연·publish 지연)을 실제 `/metrics`로, prod compose opt-in prometheus 오버레이, bounded-cardinality 라벨 규율(buzz push-gateway 규율 이식) | **ADR-0121 관측 증보 Accepted 선행**(신규 노출 표면) |
 | **MOMO-563** | 공급망 실물 위생 — install.sh preflight `gh attestation verify`(provenance), compose 서비스 mem_limit+라벨(janitor 매칭 정합 — Docker 발열 전례 대응), 태그-only 이미지 digest 핀 확대 | deploy-lib 확장 |
 
-**성재 결정 대기(티켓 아님)**: ①~~공개 GHCR+semver 릴리스 레인~~ → **확정(2026-07-23, 성재)**: 첫 공개 태그 게이트=**554 랜딩+리허설 Phase 1 PASS**, **레포(모노레포 전체)+이미지 동시 공개**(README/SECURITY.md 완료 전제). 조건 4: (a) 이미지에 LICENSE/NOTICE 동봉 (b) 공개 전 이미지 1회 시크릿/설정 스캔(gitleaks는 레포 이력만 커버 — 이미지 env/설정은 미스캔) (c) 태그 정책 semver v0.x+`latest`=stable+digest 핀 규율 유지 (d) publish 트리거는 workflow_dispatch 수동 유지(CI 과금 정책). 법무 실질(§5 확정 5항)은 기확정 — 추가 법무 검토는 공개 차단 사유 아님 ②"Self-host in 5 minutes" 공개 문서+신뢰 경계 다이어그램("무엇이 Dawn을 지나지 않는가" — momo-main 문서 작업) ③drive_file_uniq workspace 스코프화(의도 확인 필요 — DB 계약) ④workspace slug 정책 ⑤join policy(약관 동의+영수증 — 법무 연계) ⑥admin 콘솔(ADR-0119 v1+0128 파생 예약만) ⑦momo Cloud 성장 경로 서사(로드맵 예약).
+**성재 결정 대기(티켓 아님)**: ①~~공개 GHCR+semver 릴리스 레인~~ → **확정(2026-07-23, 성재)**: 첫 공개 태그 게이트=**554 랜딩+리허설 Phase 1 PASS**, **레포(모노레포 전체)+이미지 동시 공개**(README/SECURITY.md 완료 전제). 조건 4: (a) 이미지에 LICENSE/NOTICE 동봉 (b) 공개 전 이미지 1회 시크릿/설정 스캔(gitleaks는 레포 이력만 커버 — 이미지 env/설정은 미스캔) (c) 태그 정책 semver v0.x+`latest`=stable+digest 핀 규율 유지 (d) publish 트리거는 workflow_dispatch 수동 유지(CI 과금 정책). 법무 실질(§5 확정 5항)은 기확정 — 추가 법무 검토는 공개 차단 사유 아님 ②"Self-host in 5 minutes" 공개 문서+신뢰 경계 다이어그램("무엇이 Dawn을 지나지 않는가" — momo-main 문서 작업) ③drive_file_uniq workspace 스코프화(의도 확인 필요 — DB 계약) ④workspace slug 정책 ⑤join policy(약관 동의+영수증 — 법무 연계) ⑥admin 콘솔(ADR-0119 v1+0128 파생 예약만) ⑦oort Cloud 성장 경로 서사(로드맵 예약).
 
 ### Wave U″ — UXUI 제안 (UXUI 트랙 큐 — ENGINE_HANDOFF 등재 제안)
 

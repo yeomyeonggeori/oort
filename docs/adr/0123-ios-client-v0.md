@@ -6,7 +6,7 @@
 
 ## Context
 
-1. **모바일의 제1가치는 수신이다**: 이동 중 알림 수신→열람→짧은 답장→**승인 결정**. 특히 "이동 중 에이전트 승인"은 Slack 모바일에 없는 momo 고유 가치다(승인 카드는 이미 macOS에서 실물).
+1. **모바일의 제1가치는 수신이다**: 이동 중 알림 수신→열람→짧은 답장→**승인 결정**. 특히 "이동 중 에이전트 승인"은 Slack 모바일에 없는 oort 고유 가치다(승인 카드는 이미 macOS에서 실물).
 2. **재사용 자산 실측**: `clients/Core`(MomoCore, 20파일)는 AppKit 의존 0 — REST/Centrifugo/모델 전부 iOS에서 그대로 쓴다. `clients/macOS`의 뷰·뷰모델은 Mac 관용구(NavigationSplitView·창 크롬·키보드)에 결합되어 직접 공유 대상이 아니다.
 3. **레거시 EP-IOS 정리**: MOMO-040(xcodeproj 골격)은 승계. MOMO-041(APNs 서버측)은 ADR-0120 P-1~P-3으로 **이미 완성**. MOMO-042(계정 삭제)·043(privacy manifest)·EP-UGC는 **App Store 제출 요건** — dogfood v0와 무관하므로 M8/EP-STORE 시점으로 이월.
 4. **배포 전제 확인됨**: 성재 개인 유료 Apple Developer 계정(Team `YWQQFQM38J`), APNs 키 실검증 완료(2026-07-17). TestFlight internal은 개인 팀으로 충분. Apple silicon 시뮬레이터는 APNs sandbox 푸시 수신을 지원해 실기기 전 검증 폭이 넓다.
