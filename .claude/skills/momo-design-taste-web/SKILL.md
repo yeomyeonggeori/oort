@@ -139,6 +139,26 @@ Ten grep categories, **hard zero** (unlike the mac ratchet: `clients/web` was co
 
 `src/design/tokens.css` and `tokens.contrast.test.ts` are excluded (defining and measuring raw values is their job). A deliberate, reviewed exception is marked on the offending line with the comment marker `design-preflight-allow` and justified in the PR body.
 
+### 10.1 The core stage (issue #1141)
+
+The ten categories above scan `clients/web/src` only — but a large share of what this client puts on screen is not there. It lives in `packages/momo-core`, and both TS clients render it verbatim. That gap is what carried em-dashes to the edge of a release in #1138 B2.
+
+So the same command runs a second stage over the core. The core is pure TS with no markup, which means there is no syntactic marker separating "text that gets rendered" from "prose written for a reader" (comments, docstrings, test names) — line-based grep does not survive there. The separation rule is therefore an AST one, held with its evidence in `scripts/design_preflight_core.mjs`:
+
+- only **string-literal nodes** in shipped code are checked; the parser never hands a comment to the scan, so "how do I recognise a comment" stops being a question
+- `*.test.ts` is excluded whole: a test quotes the surface, it does not produce it (measured — 70 of 72 core em-dash hits were `describe`/`it` names)
+- categories are `emdash`, `raw_color`, `hype`. The other seven are markup/CSS checks and the core cannot hold markup (`packages/momo-core/scripts/purity.mjs` rejects `.tsx`/`.css` outright)
+- the same `design-preflight-allow` marker applies, and may sit either on the literal's own line or in the leading comment of the field it belongs to
+
+Core is **hard zero** as well, with no ratchet file: applying the separation rule dropped #1141's measured backlog from em-dash 73 / raw_color 47 to em-dash 2 / raw_color 0, and both survivors are strings their own docstrings describe as never rendered.
+
+```sh
+scripts/design_preflight_web.sh --selftest   # both discriminators, as cases
+npm run gate:copy                            # the core stage alone
+```
+
+`scripts/verify_merge_tree.sh` runs the core stage as a lane, so this one is gated rather than remembered.
+
 Two more mechanical checks that are not grep:
 
 ```sh

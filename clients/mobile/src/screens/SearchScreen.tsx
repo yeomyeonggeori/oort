@@ -140,7 +140,12 @@ export default function SearchScreen({
       <ScreenHeader
         title={SEARCH_SURFACE_NAME}
         onBack={onBack}
-        backLabel="검색 닫기"
+        // 닫는 문도 이 목적지의 이름을 쓴다 (이슈 #1170 N3). 「검색 닫기」는 화면에
+        // 픽셀을 하나도 쓰지 않는 자리 — 뒤로 글리프의 낭독 라벨 — 이지만, 그
+        // 라벨만 듣고 판단하는 사람에게는 그것이 방금 도착한 표면의 이름이어야
+        // 한다. 짧은 「검색」은 ⌘K 팔레트(「검색과 이동」)의 이름처럼 읽히고, 그
+        // 오독을 없애려고 #1146 N4 가 이름을 하나로 모은 것이다.
+        backLabel={`${SEARCH_SURFACE_NAME} 닫기`}
         titleTestID="search-title"
       />
       <SearchBody search={search} renderItem={renderItem} />

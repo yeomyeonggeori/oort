@@ -233,16 +233,36 @@ describe('넘겨받은 질의', () => {
 //
 // 주석은 걷어내고 본다 — 산문은 이 낱말들을 계속 써야 하고, 산문까지 막는 가드는
 // 가드가 무뎌지는 대신 글이 무뎌진다(DOM 가드가 같은 이유로 같은 일을 한다).
+//
+// ## 인용형 두 개로는 모자랐다 (이슈 #1170 N1)
+//
+// 1차의 이 가드는 `'…'` 와 `"…"` 만 봤다. 그런데 이 파일들이 낱말을 내놓는 문법은
+// 그 둘이 아니다: RN 화면은 대개 `<Text>글자</Text>` 로 맨글자를 쓰고, 조사가
+// 붙는 자리는 백틱 템플릿이다(`fallthroughLabel`). 즉 **가드가 안 보는 문법이
+// 이 화면들이 실제로 쓰는 문법**이었고, 이름을 손으로 다시 적으려는 사람이 가장
+// 자연스럽게 고를 모양이 정확히 거기였다.
+//
+// 그래서 인용형을 늘리는 대신 질문을 바꾼다: 「어떤 인용부호로 적었나」가 아니라
+// **「이 파일이 그 낱말을 글자로 갖고 있나」**. 주석을 걷어낸 뒤 남은 글자에 이름이
+// 있으면, 그것이 어떤 문법이든 손으로 적은 것이다 — 배선으로 받아 온 이름은
+// 런타임에만 존재하고 소스에는 없다.
 // =============================================================================
 
 describe('메시지 검색이라는 목적지는 이름이 하나다 (이슈 #1146 N4)', () => {
   const SCREENS = ['SidebarScreen.tsx', 'SearchScreen.tsx'];
 
-  /** 주석을 걷어낸 소스 — 화면이 실제로 사람에게 내놓는 글자만 남는다. */
+  /** 산문을 걷어낸다 — 남는 것은 화면이 실제로 사람에게 내놓는 글자다. */
+  function stripProse(source: string): string {
+    return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  }
+
   function code(file: string): string {
-    return readFileSync(join(__dirname, '../src/screens', file), 'utf8')
-      .replace(/\/\*[\s\S]*?\*\//g, '')
-      .replace(/^\s*\/\/.*$/gm, '');
+    return stripProse(readFileSync(join(__dirname, '../src/screens', file), 'utf8'));
+  }
+
+  /** 이 소스가 그 낱말을 **손으로** 갖고 있는가. 문법을 묻지 않는다. */
+  function handWrites(source: string, name: string): boolean {
+    return stripProse(source).includes(name);
   }
 
   it('이름을 짓지 않고 표면 판정표에서 받아 온다', () => {
@@ -252,13 +272,34 @@ describe('메시지 검색이라는 목적지는 이름이 하나다 (이슈 #11
   });
 
   it('문을 여는 쪽도 도착한 쪽도 낱말을 손으로 적지 않는다', () => {
-    // 판정표의 낱말을 문자열 리터럴로 다시 적은 화면이 하나라도 있으면, 표를
-    // 고치는 날 그 화면만 옛 이름으로 남는다. 이름이 갈라지는 유일한 경로다.
+    // 판정표의 낱말을 다시 적은 화면이 하나라도 있으면, 표를 고치는 날 그 화면만
+    // 옛 이름으로 남는다. 이름이 갈라지는 유일한 경로다.
     const name = serverSurface('messageSearch').label;
-    for (const file of SCREENS) {
-      expect(code(file)).not.toContain(`'${name}'`);
-      expect(code(file)).not.toContain(`"${name}"`);
-    }
+    const offenders = SCREENS.filter(file => handWrites(code(file), name));
+    expect(offenders).toEqual([]);
+  });
+
+  it('가드가 보는 문법이 이 화면들이 쓰는 문법이다 (이슈 #1170 N1)', () => {
+    // 위 단정이 무엇을 잡는지 산문으로 주장하지 않고 **씨앗으로** 보인다. 인용형
+    // 둘만 보던 1차라면 아래 넷 중 마지막 넷이 통과했다 — 그것이 N1 이 가리킨 구멍
+    // 이고, 이 케이스 표가 그 구멍을 다시 열지 못하게 한다.
+    const name = serverSurface('messageSearch').label;
+    const shapes: ReadonlyArray<readonly [string, string]> = [
+      ['홑따옴표', `accessibilityLabel='${name}'`],
+      ['쌍따옴표', `accessibilityLabel="${name}"`],
+      ['백틱', 'const l = `' + name + '`;'],
+      ['백틱 + 치환', 'const l = `' + name + ' ${q}`;'],
+      ['JSX 맨글자', `<Text>${name}</Text>`],
+      ['JSX 맨글자, 줄바꿈', `<Text>\n  ${name}\n</Text>`],
+    ];
+    const missed = shapes
+      .filter(([, snippet]) => !handWrites(snippet, name))
+      .map(([shape]) => shape);
+    expect(missed).toEqual([]);
+
+    // 그리고 산문은 여전히 통과한다 — 가드를 넓히면서 글을 좁히지 않았다.
+    expect(handWrites(`// 이 문은 ${name}을 연다`, name)).toBe(false);
+    expect(handWrites(`/**\n * ${name} 으로 가는 문.\n */`, name)).toBe(false);
   });
 
   it('1차의 둘째 이름은 어디에도 남지 않는다', () => {

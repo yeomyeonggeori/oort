@@ -806,9 +806,13 @@ export default function ConversationScreen({
         onBack={onBack}
         titleTestID="conversation-title"
         // 이슈 #1112 — 고정 목록으로 가는 문. 헤더의 오른쪽 슬롯은 이 화면에서
-        // 비어 있었고, 사이드바가 「메시지 찾기」에 쓰는 그 자리다. 고정이 하나도
-        // 없어도 남는다: 처음 고정하는 사람이 목록이 어디 있는지 배울 자리가
-        // 필요하고, 그때 열리는 화면이 빈 상태로 그것을 말한다.
+        // 비어 있었고, 사이드바의 검색 진입 액션(`SearchEntryAction`)이 쓰는 그
+        // 자리다. 고정이 하나도 없어도 남는다: 처음 고정하는 사람이 목록이 어디
+        // 있는지 배울 자리가 필요하고, 그때 열리는 화면이 빈 상태로 그것을 말한다.
+        //
+        // 그 액션을 **이름이 아니라 컴포넌트로** 가리킨다 (이슈 #1170 N2): 이 줄은
+        // 한 번 이미 낡았다. 「메시지 찾기」라고 적혀 있었고 그 이름은 #1146 N4 에서
+        // 사라졌는데, 산문은 아무것도 컴파일하지 않으므로 조용히 남아 있었다.
         right={
           <Pressable
             accessibilityRole="button"
@@ -1011,8 +1015,9 @@ export default function ConversationScreen({
 
 const buildStyles = (color: Palette) => StyleSheet.create({
   notice: {padding: space.md},
-  // 사이드바의 「메시지 찾기」와 같은 모양이다 (이슈 #1112): 헤더의 오른쪽
-  // 액션은 이 앱에서 이미 이렇게 생겼고, 두 번째 모양을 만들 이유가 없다.
+  // 사이드바의 검색 진입 액션(`SearchEntryAction`)과 같은 모양이다 (이슈 #1112):
+  // 헤더의 오른쪽 액션은 이 앱에서 이미 이렇게 생겼고, 두 번째 모양을 만들 이유가
+  // 없다. 그 컨트롤을 보이는 낱말로 부르지 않는 이유는 위 `right=` 주석과 같다.
   headerAction: {
     minHeight: TOUCH_TARGET,
     justifyContent: 'center',

@@ -132,6 +132,10 @@ const SURFACES: Record<SurfaceId, ServerSurface> = {
     provided: true,
     absentReason: "이 서버는 아직 승인 결정을 기록하지 않습니다.",
     fallback: "에이전트가 멈춰 서면 채널에서 직접 이야기해 진행 여부를 정하세요.",
+    // design-preflight-allow — `measured` 는 실측 근거이고 **사용자에게 보이지
+    // 않는다**(위 `ServerSurface.measured` 독스트링). 어느 클라도 이 칸을 렌더하지
+    // 않으므로 사용자 문장 규칙(em-dash 금지)이 걸리는 자리가 아니다. 이 예외를
+    // 지우고 싶으면 문장을 고칠 것이 아니라 이 칸이 렌더되기 시작했는지를 본다.
     measured:
       "2026-08-04 실측: server-rust/bins/momo-server/src/lib.rs:555-564에 셋 다 등록됨 — " +
       "GET …/approvals(routes::approvals::list), " +
