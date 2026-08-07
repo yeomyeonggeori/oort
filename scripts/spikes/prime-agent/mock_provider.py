@@ -17,6 +17,16 @@ Scenarios (env MOCK_SCENARIO):
   text        one assistant turn, streamed text only
   tool        turn 1 calls the `ipython` tool (sleeps, so there is a window to
               steer into), turn 2+ streams text
+  cell        turn 1 calls `ipython` with code supplied verbatim by the host in
+              $MOCK_CELL_CODE, turn 2+ streams text. Used by the tenancy probe
+              (#1130 ③): the only way to reach `rlm.harness` — the harness store
+              the *kernel* can write — is through a real kernel cell.
+
+`/refine` (#1130 ②) does not stream: it goes through `completeSimple` and needs a
+parseable JSON proposal back, so the non-streaming path answers a refinement
+request with a real `RefinementProposal` (see `_refinement_proposal`). Without
+that the command errors out on parsing and we would only ever be measuring the
+error path, not the audit surface.
 """
 
 from __future__ import annotations
@@ -34,8 +44,39 @@ REQUEST_LOG = os.environ.get("MOCK_REQUEST_LOG", "/work/out/mock-requests.jsonl"
 MODEL_ID = os.environ.get("MOCK_MODEL_ID", "spike-mock-1")
 # Seconds the scripted ipython cell sleeps — the steering window.
 TOOL_SLEEP = os.environ.get("MOCK_TOOL_SLEEP", "6")
+# Verbatim cell body for MOCK_SCENARIO=cell.
+CELL_CODE = os.environ.get("MOCK_CELL_CODE", "print('spike: empty cell')")
+# Harness id the scripted /refine proposal creates, so the caller can assert on it.
+REFINE_ENTRY_ID = os.environ.get("MOCK_REFINE_ENTRY_ID", "oort-refine-probe")
 
 _turn = {"n": 0}
+
+
+def _refinement_proposal() -> str:
+    """A minimal, valid `RefinementProposal` for the `/refine` LLM pass.
+
+    Shape from `dist/core/refinement/refinement.d.ts`. One `create` edit is
+    enough: the audit question is not *what* a refinement decides, it is whether
+    the host can see that one happened at all.
+    """
+    return json.dumps(
+        {
+            "summary": "spike: record a tenancy marker",
+            "rationale": "Scripted by the oort spike so /refine has a parseable proposal.",
+            "expectedOutcome": "One memory entry exists in the harness state.",
+            "edits": [
+                {
+                    "action": "create",
+                    "kind": "memory",
+                    "id": REFINE_ENTRY_ID,
+                    "title": "oort refine probe",
+                    "content": "Written by prime-agent /refine during spike #1130 ②.",
+                    "path": "general",
+                    "reason": "audit probe",
+                }
+            ],
+        }
+    )
 
 
 def _sse(payload: dict) -> bytes:
@@ -80,8 +121,15 @@ class Handler(BaseHTTPRequestHandler):
         turn = _turn["n"]
         self._record(turn, req)
 
+        # `planRefinement` builds a user prompt containing <current_harness_state>;
+        # that marker is how a refinement pass is told apart from the other
+        # helpers without guessing. Measured: it arrives **streamed**, not on the
+        # non-streaming path, even though it goes through `completeSimple` —
+        # hence the check happens before the stream/non-stream branch.
+        is_refine = "<current_harness_state>" in json.dumps(req.get("messages", []))
+
         if not req.get("stream"):
-            # Non-streaming path (used by compaction/title helpers).
+            content = _refinement_proposal() if is_refine else "mock-nonstream"
             body = json.dumps(
                 {
                     "id": "chatcmpl-" + uuid.uuid4().hex[:12],
@@ -91,7 +139,7 @@ class Handler(BaseHTTPRequestHandler):
                     "choices": [
                         {
                             "index": 0,
-                            "message": {"role": "assistant", "content": "mock-nonstream"},
+                            "message": {"role": "assistant", "content": content},
                             "finish_reason": "stop",
                         }
                     ],
@@ -108,10 +156,14 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Transfer-Encoding", "chunked")
         self.end_headers()
 
-        if (SCENARIO == "tool" and turn == 1) or (SCENARIO == "tool2" and turn <= 2):
+        if is_refine:
+            self._stream_raw(_refinement_proposal())
+        elif (SCENARIO == "tool" and turn == 1) or (SCENARIO == "tool2" and turn <= 2):
             # tool2 fires a second cell so cold-kernel vs warm-kernel latency
             # can be read off one transcript.
             self._stream_tool_call()
+        elif SCENARIO == "cell" and turn == 1:
+            self._stream_tool_call(CELL_CODE)
         else:
             self._stream_text(turn, req)
 
@@ -150,11 +202,20 @@ class Handler(BaseHTTPRequestHandler):
         self._write(b"data: [DONE]\n\n")
         self._write(b"0\r\n\r\n", raw=True)
 
-    def _stream_tool_call(self) -> None:
-        code = (
-            f"import time\nprint('spike: cell start')\n"
-            f"time.sleep({TOOL_SLEEP})\nprint('spike: cell done')\n"
-        )
+    def _stream_raw(self, text: str) -> None:
+        """Stream one exact payload — no chunking games, no framing prefix."""
+        self._write(_sse(_chunk({"role": "assistant", "content": ""})))
+        self._write(_sse(_chunk({"content": text})))
+        self._write(_sse(_chunk({}, finish="stop")))
+        self._write(b"data: [DONE]\n\n")
+        self._write(b"0\r\n\r\n", raw=True)
+
+    def _stream_tool_call(self, code: str | None = None) -> None:
+        if code is None:
+            code = (
+                f"import time\nprint('spike: cell start')\n"
+                f"time.sleep({TOOL_SLEEP})\nprint('spike: cell done')\n"
+            )
         args = json.dumps({"code": code})
         call_id = "call_" + uuid.uuid4().hex[:10]
         self._write(_sse(_chunk({"role": "assistant", "content": ""})))

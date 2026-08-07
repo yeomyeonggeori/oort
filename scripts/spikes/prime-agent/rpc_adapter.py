@@ -35,6 +35,7 @@ import time
 import urllib.error
 import urllib.request
 import uuid
+import hashlib
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
@@ -242,6 +243,13 @@ class Adapter:
         self.agent_ended = threading.Event()
         self.tool_started = threading.Event()
         self.observed: dict[str, int] = {}
+        # Every inbound record, in arrival order, with only its type and (for
+        # `response`) which command it answers. This is the instrument for the
+        # #1130 ② audit question: "does a harness self-modification produce any
+        # protocol output at all?" A per-type counter cannot answer that,
+        # because the answer is about a *window* in the stream.
+        self.stream_log: list[dict[str, Any]] = []
+        self.cell_output: list[str] = []
 
     def note(self, obj: dict[str, Any]) -> None:
         self.events.append({"ts": time.time(), **obj})
@@ -265,6 +273,9 @@ class Adapter:
     def handle(self, ev: dict[str, Any]) -> None:
         etype = ev.get("type", "?")
         self.observed[etype] = self.observed.get(etype, 0) + 1
+        self.stream_log.append(
+            {"ts": time.time(), "type": etype, **({"command": ev["command"]} if "command" in ev else {})}
+        )
 
         if etype == "response":
             self.note({"kind": "response", "command": ev.get("command"), "success": ev.get("success"), "error": ev.get("error")})
@@ -306,6 +317,7 @@ class Adapter:
         if etype == "tool_execution_end":
             result = ev.get("result") or {}
             text = " ".join(c.get("text", "") for c in result.get("content", []) if isinstance(c, dict))
+            self.cell_output.append(text)
             self.sink.send(
                 "tool_result",
                 text[:2000],
@@ -385,7 +397,7 @@ class Adapter:
         self.rpc.send(resp)
         self.note({"kind": "ui_response", "sent": resp})
 
-    def dump(self) -> None:
+    def dump(self, extra: dict[str, Any] | None = None) -> None:
         os.makedirs(os.path.dirname(self.transcript_path), exist_ok=True)
         with open(self.transcript_path, "w", encoding="utf-8") as fh:
             json.dump(
@@ -395,12 +407,50 @@ class Adapter:
                     "flushes": self.buffer.flushes,
                     "uiRequests": self.ui_requests,
                     "notes": self.events,
+                    "streamLog": self.stream_log,
+                    "cellOutput": self.cell_output,
                     "stderr": self.rpc.stderr_lines[-40:],
+                    **(extra or {}),
                 },
                 fh,
                 ensure_ascii=False,
                 indent=2,
             )
+
+
+# --------------------------------------------------------------------------
+# Harness state observation (#1130 ②)
+# --------------------------------------------------------------------------
+
+
+def harness_snapshot() -> dict[str, Any]:
+    """What a host can learn about harness self-modification — by looking at disk.
+
+    There is no RPC event for it (`AgentEvent` has ten members and none of them
+    is about the harness), so an adapter that wants an audit trail has to hash
+    the file and diff. This function is that fallback, written down so the cost
+    of the missing event is concrete rather than rhetorical.
+    """
+    agent_dir = os.environ.get("PRIME_AGENT_CODING_AGENT_DIR") or os.path.join(
+        os.path.expanduser("~"), ".prime", "agent"
+    )
+    path = os.path.join(agent_dir, "harness", "harness_state.json")
+    snap: dict[str, Any] = {"path": path, "exists": os.path.exists(path)}
+    if not snap["exists"]:
+        return snap
+    with open(path, "rb") as fh:
+        raw = fh.read()
+    snap["sha256"] = hashlib.sha256(raw).hexdigest()
+    snap["bytes"] = len(raw)
+    try:
+        state = json.loads(raw)
+        snap["entryIds"] = sorted(
+            eid for kind in (state.get("entries") or {}).values() for eid in (kind or {})
+        )
+        snap["refinementIds"] = [r.get("id") for r in state.get("refinements") or []]
+    except json.JSONDecodeError:
+        snap["parse"] = "failed"
+    return snap
 
 
 # --------------------------------------------------------------------------
@@ -418,8 +468,9 @@ def build_sink(args) -> Any:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--scenario", default="text", choices=["text", "steer", "extension-ui", "nocreds"])
+    ap.add_argument("--scenario", default="text", choices=["text", "steer", "extension-ui", "nocreds", "refine"])
     ap.add_argument("--out", default="/work/out")
+    ap.add_argument("--tag", help="transcript/artifact suffix; defaults to --scenario")
     ap.add_argument("--relay", default="file", choices=["file", "rest"])
     ap.add_argument("--api-base")
     ap.add_argument("--workspace")
@@ -432,9 +483,15 @@ def main() -> int:
     ap.add_argument("--prompt", default="hello from oort")
     ap.add_argument("--steer-after", type=float, default=3.0)
     ap.add_argument("--steer-message", default="STEER: drop that and answer 42 instead")
+    ap.add_argument(
+        "--refine-global",
+        action="store_true",
+        help="refine scenario: ask for scope=global, i.e. the cross-workspace harness dir",
+    )
     args = ap.parse_args()
 
     os.makedirs(args.out, exist_ok=True)
+    tag = args.tag or args.scenario
 
     argv = ["prime-agent", "--mode", "rpc", "--no-session", "--offline"]
     if args.scenario != "nocreds":
@@ -445,8 +502,9 @@ def main() -> int:
     workdir = os.environ.get("SPIKE_CWD") or ("/work" if os.path.isdir("/work") else os.getcwd())
     rpc = JsonlRpc(argv, env=dict(os.environ), cwd=workdir)
     sink = build_sink(args)
-    adapter = Adapter(rpc, sink, args.ui_policy, f"{args.out}/transcript-{args.scenario}.json")
+    adapter = Adapter(rpc, sink, args.ui_policy, f"{args.out}/transcript-{tag}.json")
     deadline = time.time() + args.timeout
+    extra: dict[str, Any] = {}
 
     rpc.send({"id": "state-1", "type": "get_state"})
     time.sleep(0.5)
@@ -467,11 +525,79 @@ def main() -> int:
     if args.scenario == "steer":
         adapter.pump(min(deadline, time.time() + 40))
 
+    if args.scenario == "refine":
+        extra = run_refine_probe(rpc, adapter, args, deadline)
+
     adapter.buffer.flush("final")
     rpc.close()
-    adapter.dump()
-    print(json.dumps({"eventCounts": adapter.observed, "flushes": len(adapter.buffer.flushes), "uiRequests": len(adapter.ui_requests)}))
+    adapter.dump(extra)
+    summary = {
+        "eventCounts": adapter.observed,
+        "flushes": len(adapter.buffer.flushes),
+        "uiRequests": len(adapter.ui_requests),
+    }
+    if extra:
+        summary["refineAudit"] = extra.get("refineAudit")
+    print(json.dumps(summary, ensure_ascii=False))
     return 0
+
+
+def run_refine_probe(rpc: JsonlRpc, adapter: Adapter, args, deadline: float) -> dict[str, Any]:
+    """#1130 ② — invoke `refine` and measure what the *protocol* said about it.
+
+    The measurement is the window: how many records arrive between sending the
+    command and its own `response`, and how many of those are `AgentEvent`s. If
+    the only trace of a harness mutation is the reply to the command that caused
+    it, then anything that refines without a host command (auto-refine at
+    `turnInterval`, at compaction, or a kernel-side `rlm.harness` write) is
+    invisible to the host — which is the audit gap #1130 ② names.
+    """
+    before = harness_snapshot()
+    mark = len(adapter.stream_log)
+    sent_at = time.time()
+    adapter.note({"kind": "refine_send", "global": bool(args.refine_global)})
+    cmd: dict[str, Any] = {"id": "refine-1", "type": "refine"}
+    if args.refine_global:
+        cmd["global"] = True
+    rpc.send(cmd)
+
+    response: dict[str, Any] | None = None
+    window_deadline = min(deadline, time.time() + 90)
+    while time.time() < window_deadline and response is None:
+        try:
+            ev = rpc.inbox.get(timeout=0.2)
+        except queue.Empty:
+            continue
+        adapter.handle(ev)
+        if ev.get("type") == "response" and ev.get("command") == "refine":
+            response = {
+                "success": ev.get("success"),
+                "error": ev.get("error"),
+                "data": ev.get("data"),
+            }
+        if ev.get("type") == "__eof__":
+            break
+
+    after = harness_snapshot()
+    window = adapter.stream_log[mark:]
+    agent_events = [
+        r
+        for r in window
+        if r["type"] not in ("response", "__eof__", "__unparsed__", "extension_ui_request")
+    ]
+    return {
+        "refineAudit": {
+            "sentAt": sent_at,
+            "responded": response is not None,
+            "response": response,
+            "recordsInWindow": [r["type"] for r in window],
+            "agentEventsInWindow": [r["type"] for r in agent_events],
+            "agentEventCount": len(agent_events),
+            "harnessBefore": before,
+            "harnessAfter": after,
+            "harnessChanged": before.get("sha256") != after.get("sha256"),
+        }
+    }
 
 
 def _steer_later(rpc: JsonlRpc, adapter: Adapter, args) -> None:

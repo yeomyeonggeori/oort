@@ -42,7 +42,12 @@ RUN curl -fsSL -o prime-agent.tgz \
 # says provider credentials never enter our images or our servers.
 ENV PRIME_AGENT_SPIKE=1
 
-COPY mock_provider.py rpc_adapter.py container_entry.sh /spike/
+# The image's own agent dir doubles as a read-only template: the kernel venv and
+# the vendored rg/fd are package installs, not tenant state, so a per-workspace
+# HOME (#1130 ③) borrows them from here instead of rebuilding them offline.
+ENV SPIKE_SHARED_AGENT_DIR=/root/.prime/agent
+
+COPY mock_provider.py rpc_adapter.py container_entry.sh harness_probe.py tenancy_probe.sh /spike/
 
 # Pre-warm the kernel venv. The npm postinstall bootstrap creates the venv but
 # does NOT install the eight bundled Python skills — those are `uv pip install`d
