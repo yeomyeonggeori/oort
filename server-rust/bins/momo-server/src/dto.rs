@@ -370,6 +370,19 @@ pub struct StreamEditRequest {
     /// name is the spec's; the rename is where that costs nothing.
     #[serde(rename = "final")]
     pub is_final: bool,
+    /// ADR-0155 — how the stream ended, when it did not simply finish.
+    ///
+    /// `"cancelled"` (a human pressed stop) or `"failed"` (the provider died),
+    /// and only ever on a slice that is also `final`. Absent is the normal
+    /// ending, which is why the field is additive in the strictest sense: a
+    /// producer written before this ADR sends exactly what it sent before and
+    /// means exactly what it meant.
+    ///
+    /// A `String` rather than a typed enum here so an unknown value reaches the
+    /// route as data and leaves as a 400 with a sentence, instead of being
+    /// rejected by serde as a malformed body — the two are the same status but
+    /// only one of them tells the adapter author which field was wrong.
+    pub outcome: Option<String>,
 }
 
 /// `PUT`/`DELETE …/messages/{id}/reactions/{emoji}` response (Swift

@@ -494,6 +494,7 @@ async fn an_agent_cannot_stream_into_a_humans_message() {
                 momo_messaging::StreamEdit {
                     rev: 1,
                     is_final: false,
+                    outcome: None,
                 },
             )
             .await
@@ -523,5 +524,241 @@ async fn an_agent_cannot_stream_into_a_humans_message() {
         message_count(&su, tenant.channel_id).await,
         2,
         "the agent's own message exists; the human's is untouched"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// #4 — ADR-0155: a cancel closes the polygon it opened
+// ---------------------------------------------------------------------------
+
+/// **The ADR-0155 closed loop.** A human presses stop while an answer is
+/// arriving; the half-answer stays exactly as they read it, and the message says
+/// so about itself.
+///
+/// Six assertions, each of which is a different way the decision could be
+/// betrayed:
+///
+/// 1. `outcome` is on the row. Drop the closing PATCH from the cancel path and
+///    this is the assertion that goes red — the message would sit `streaming:
+///    true` under a terminal run forever, which is precisely the shape the ADR
+///    calls "defensive rendering" and does not want to rely on.
+/// 2. `streaming` is `false`. A marked message that still claims text is coming
+///    would make a client draw the stop tail and the live caret at once.
+/// 3. **The body did not change.** This is the whole decision: freeze, do not
+///    tombstone. The person pressed stop because of these words.
+/// 4. `state`/`edited_at` untouched — the arrival of a stop is no more a
+///    revision than the arrival of an answer (#1152's rule, extended).
+/// 5. One message and one `seq`. The close is an edit; it must not cost the
+///    channel a row or an unread.
+/// 6. Closing twice changes nothing. The cancel path is best effort and gets
+///    re-run by a re-claimed job; a second close must not overwrite the first
+///    marking or bump the revision under a client that already applied it.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_app role"]
+async fn a_cancelled_run_freezes_its_message_and_marks_how_it_ended() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let tenant = seed_tenant(&su).await;
+    let run_id = seed_run(&app, &tenant).await;
+
+    let mut stream = MessageStream::new(
+        app.clone(),
+        tenant.workspace_id,
+        tenant.channel_id,
+        tenant.agent_id,
+        run_id,
+        None,
+    );
+    stream
+        .push("답을 절반쯤 쓰다가", false)
+        .await
+        .expect("the first slice lands");
+    stream
+        .push(" 여기서", false)
+        .await
+        .expect("the second slice lands");
+    let message_id = stream.message_id().expect("the stream opened a message");
+    let frozen = stream.body().to_string();
+    let seq_before = channel_last_seq(&su, tenant.channel_id).await;
+
+    // The human presses stop. This is the real statement the cancel route runs,
+    // not a hand-written UPDATE — a fixture that reaches `cancelled` by a path
+    // production cannot take would prove the close against a fiction.
+    let workspace_id = tenant.workspace_id;
+    let cancelled = momo_db::with_tenant_tx(&app, workspace_id, move |conn| {
+        Box::pin(async move {
+            momo_agent::cancel_run_in_tx(
+                conn,
+                workspace_id,
+                run_id,
+                &serde_json::json!({"code": "cancelled", "reason": "사람이 정지를 눌렀다"}),
+            )
+            .await
+        })
+    })
+    .await
+    .expect("the cancel statement ran");
+    assert!(cancelled, "the run was cancellable");
+
+    // …and the worker does what `commit_turn`'s suppressed arm does.
+    let closed = momo_agent_worker::stream::close_run_stream(
+        &app,
+        tenant.workspace_id,
+        run_id,
+        momo_messaging::StreamCloseOutcome::Cancelled,
+    )
+    .await
+    .expect("the closing PATCH runs")
+    .expect("there was an open stream to close");
+    assert_eq!(closed, message_id, "it closed the message the run opened");
+
+    let (body, state, edited_at_ms, props) = row(&su, message_id).await;
+    let stream_props = props
+        .get("momo.stream")
+        .expect("the stream marker survives the close");
+    assert_eq!(
+        stream_props.get("outcome").and_then(Value::as_str),
+        Some("cancelled"),
+        "1 — the message carries its own verdict, so a history reader needs no run table"
+    );
+    assert_eq!(
+        stream_props.get("streaming").and_then(Value::as_bool),
+        Some(false),
+        "2 — nothing more is coming"
+    );
+    assert_eq!(
+        body.as_deref(),
+        Some(frozen.as_str()),
+        "3 — the partial answer is exactly what the human read when they pressed stop"
+    );
+    assert_eq!(state, "sent", "4 — a stop is not a revision");
+    assert_eq!(edited_at_ms, None, "4 — and it stamps no 「수정됨」");
+    assert_eq!(
+        message_count(&su, tenant.channel_id).await,
+        1,
+        "5 — the close is an edit, not a second message"
+    );
+    assert_eq!(
+        channel_last_seq(&su, tenant.channel_id).await,
+        seq_before,
+        "5 — and it consumes no seq, so a cancel marks nobody unread"
+    );
+
+    let rev_after_close = stream_props.get("rev").and_then(Value::as_i64);
+    let again = momo_agent_worker::stream::close_run_stream(
+        &app,
+        tenant.workspace_id,
+        run_id,
+        momo_messaging::StreamCloseOutcome::Failed,
+    )
+    .await
+    .expect("a second close runs");
+    assert_eq!(
+        again, None,
+        "6 — a closed stream is not open, so the retry finds nothing to close"
+    );
+    let (_, _, _, props_again) = row(&su, message_id).await;
+    let stream_again = props_again.get("momo.stream").expect("still marked");
+    assert_eq!(
+        stream_again.get("outcome").and_then(Value::as_str),
+        Some("cancelled"),
+        "6 — and 「중단됨」 is never overwritten by a later 「응답이 끊김」"
+    );
+    assert_eq!(
+        stream_again.get("rev").and_then(Value::as_i64),
+        rev_after_close,
+        "6 — nor does the revision move under a client that already applied it"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// #5 — ADR-0155 RED proof: an ending cannot be claimed mid-stream
+// ---------------------------------------------------------------------------
+
+/// **RED proof.** `outcome` says how the answer ended. On a slice that is not
+/// `final` it would say the answer ended while the same write says more is
+/// coming, and a renderer reading those props has no way to pick a winner.
+///
+/// Delete the pairing guard in `stream_message_body_in_tx` and this goes green
+/// with a 200 — and the row that comes back says `{"streaming": true, "outcome":
+/// "cancelled"}`, which is a message simultaneously live and abandoned. The
+/// second half of the assertion is the part that matters: the row must be
+/// **untouched**, because a refusal that had already written the body would
+/// leave the message carrying text from a request the server rejected.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_app role"]
+async fn an_outcome_on_a_non_final_slice_is_refused() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let tenant = seed_tenant(&su).await;
+    let run_id = seed_run(&app, &tenant).await;
+
+    let mut stream = MessageStream::new(
+        app.clone(),
+        tenant.workspace_id,
+        tenant.channel_id,
+        tenant.agent_id,
+        run_id,
+        None,
+    );
+    stream
+        .push("아직", false)
+        .await
+        .expect("the opening slice lands");
+    // A second push, because the opening `send` carries the first slice's text
+    // itself and writes no stream marker — the revision only exists once a
+    // `PATCH`-shaped slice has run.
+    stream
+        .push(" 쓰는 중", false)
+        .await
+        .expect("the second slice lands");
+    let message_id = stream.message_id().expect("the stream opened a message");
+    let (body_before, _, _, props_before) = row(&su, message_id).await;
+    let rev_before = props_before
+        .get("momo.stream")
+        .and_then(|stream| stream.get("rev"))
+        .and_then(Value::as_i64)
+        .expect("the slice recorded a revision");
+
+    let workspace_id = tenant.workspace_id;
+    let agent_id = tenant.agent_id;
+    let refused = momo_db::with_tenant_tx(&app, workspace_id, move |conn| {
+        Box::pin(async move {
+            momo_messaging::stream_message_body_in_tx(
+                conn,
+                workspace_id,
+                message_id,
+                agent_id,
+                "끝났다고 주장하면서 계속 쓴다",
+                momo_messaging::StreamEdit {
+                    rev: rev_before + 1,
+                    is_final: false,
+                    outcome: Some(momo_messaging::StreamCloseOutcome::Cancelled),
+                },
+            )
+            .await
+        })
+    })
+    .await
+    .expect("the statement ran")
+    .expect_err("an ending may not ride a slice that promises more");
+    assert_eq!(refused, InteractionRefused::StreamOutcomeNotFinal);
+    assert_eq!(
+        StreamError::Refused(refused).to_string(),
+        "stream outcome may only accompany the final slice",
+        "the refusal carries its own sentence out to the caller"
+    );
+
+    let (body_after, _, _, props_after) = row(&su, message_id).await;
+    assert_eq!(
+        body_after, body_before,
+        "a refused slice writes no body — the rejected text must not reach the channel"
+    );
+    assert_eq!(
+        props_after.get("momo.stream"),
+        props_before.get("momo.stream"),
+        "nor does it move the revision, which would refuse the writer's own next slice as stale"
     );
 }

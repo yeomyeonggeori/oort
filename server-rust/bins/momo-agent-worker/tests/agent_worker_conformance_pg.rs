@@ -943,3 +943,118 @@ fn the_suite_runs_on_the_shipped_lease_default() {
         "batch > 1 is what makes b51_3 meaningful"
     );
 }
+
+// ---------------------------------------------------------------------------
+// ADR-0155 — a cancel that lands on a turn which was already streaming
+// ---------------------------------------------------------------------------
+
+/// **The wiring, end to end.** The worker's suppressed-cancel arm must close the
+/// message the turn left open — not just be *able* to.
+///
+/// The other cancel test in this repo (`stream_message_conformance_pg`) calls
+/// the closing helper directly, which proves the statement and nothing about
+/// whether anybody calls it. Here the only thing driven is `drain_once`: a run
+/// with a half-written message, cancelled before the worker commits.
+///
+/// Delete the `close_stopped_stream` call from `commit_turn` and this is the
+/// assertion that goes red — and the shape it goes red in is the shape a user
+/// would have seen: a message sitting `streaming: true` under a `cancelled` run,
+/// forever, with a caret blinking for text that is never coming. No error, no
+/// log line, no failed request; that silence is why this test exists at the
+/// worker's own entry point rather than one layer down.
+#[tokio::test]
+#[ignore = "requires DATABASE_URL to a throwaway pgvector/pg18 database"]
+async fn a_cancel_closes_the_message_a_streaming_turn_left_open() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    settle_residual_worker_jobs(&su).await;
+    let tenant = seed_tenant(&su).await;
+
+    let (run_id, _trigger_message_id, _job_id) =
+        enqueue_mention_turn(&su, &tenant, tenant.agent_id, "@hermes 긴 답 좀").await;
+
+    // The turn starts streaming: the answer is already half in the channel when
+    // the human reaches for the button. This is the producer sequence, not a
+    // hand-written row — a fixture that reached `streaming: true` some other way
+    // would prove the close against a shape production cannot make.
+    let worker_pool = momo_worker_pool().await;
+    let mut streaming = momo_agent_worker::stream::MessageStream::new(
+        worker_pool.clone(),
+        tenant.workspace_id,
+        tenant.channel_id,
+        tenant.agent_id,
+        run_id,
+        None,
+    );
+    streaming
+        .push("생각해 보면", false)
+        .await
+        .expect("the first slice lands");
+    streaming
+        .push(" 그건", false)
+        .await
+        .expect("the second slice lands");
+    let message_id = streaming.message_id().expect("the stream opened a message");
+
+    // The human presses stop.
+    let workspace_id = tenant.workspace_id;
+    let cancelled = with_tenant_tx(&worker_pool, workspace_id, move |conn| {
+        Box::pin(async move {
+            momo_agent::cancel_run_in_tx(
+                conn,
+                workspace_id,
+                run_id,
+                &json!({"code": "cancelled", "reason": "사람이 정지를 눌렀다"}),
+            )
+            .await
+        })
+    })
+    .await
+    .expect("the cancel statement ran");
+    assert!(cancelled, "the run was cancellable");
+
+    // …and only now does the worker get to the job.
+    let provider = Arc::new(MockChatProvider::echo());
+    let worker = build_worker(provider.clone(), base_config()).await;
+    let stats = worker.drain_once().await.expect("drain");
+    assert_eq!(stats.claimed, 1, "the job was claimed");
+    assert_eq!(
+        stats.answered, 0,
+        "the answer the human cancelled is never posted"
+    );
+    assert_eq!(stats.skipped, 1, "the job settles done without an answer");
+
+    let messages = agent_messages(&su, &tenant, tenant.agent_id).await;
+    assert_eq!(
+        messages.len(),
+        1,
+        "the cancelled turn adds no second message — the one it was growing is all there is"
+    );
+    let (found_id, _seq, body, props) = messages.into_iter().next().unwrap();
+    assert_eq!(found_id, message_id);
+    assert_eq!(
+        body, "생각해 보면 그건",
+        "the half answer is frozen exactly where the human read it"
+    );
+    let stream_props = &props["momo.stream"];
+    assert_eq!(
+        stream_props["outcome"],
+        json!("cancelled"),
+        "THE assertion: the worker actually issued the closing PATCH — props were {props}"
+    );
+    assert_eq!(
+        stream_props["streaming"],
+        json!(false),
+        "and nothing more is coming, so no client draws a caret on it"
+    );
+
+    let run_status: String = sqlx::query_scalar("SELECT status::text FROM agent_run WHERE id = $1")
+        .bind(run_id)
+        .fetch_one(&su)
+        .await
+        .expect("read run status");
+    assert_eq!(
+        run_status, "cancelled",
+        "the cancel is not revived by the turn arriving late"
+    );
+}
