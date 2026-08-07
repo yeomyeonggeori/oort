@@ -12,12 +12,12 @@
 
 ## §2. 티켓 계약·수용기준
 
-### MOMO-534 (엔진) — eve/Cloudflare용 momo 채널 어댑터 레퍼런스 2종
-- **Goal**: 외부 플랫폼-상주 에이전트가 momo gateway BYOA 계약을 소비해 momo 멤버로 대화하는 레퍼런스 어댑터. ADR-0130 D5의 집행. 오픈소스 공개물의 "5분 데모" 자산.
+### MOMO-534 (엔진) — eve/Cloudflare용 oort 채널 어댑터 레퍼런스 2종
+- **Goal**: 외부 플랫폼-상주 에이전트가 oort gateway BYOA 계약을 소비해 oort 멤버로 대화하는 레퍼런스 어댑터. ADR-0130 D5의 집행. 오픈소스 공개물의 "5분 데모" 자산.
 - **계약**:
-  - `examples/eve-momo-channel/`: eve `defineChannel` 커스텀 채널(TS) — momo 인바운드(gateway pending 폴링 또는 웹훅 수신)→eve `send()`→응답을 momo REST(gateway message/callback)로. continuationToken=momo 채널/스레드 키. 인증은 per-agent bearer(기존 gateway credential — ADR-0004: 자격증명은 env 주입, 코드/로그 비유입).
+  - `examples/eve-momo-channel/`: eve `defineChannel` 커스텀 채널(TS) — oort 인바운드(gateway pending 폴링 또는 웹훅 수신)→eve `send()`→응답을 oort REST(gateway message/callback)로. continuationToken=oort 채널/스레드 키. 인증은 per-agent bearer(기존 gateway credential — ADR-0004: 자격증명은 env 주입, 코드/로그 비유입).
   - `examples/cloudflare-agent-momo/`: CF Agents SDK 클래스 동형 예제(fetch/WS 기반).
-  - 코어 서버 수정 0. 계약 소비만. README에 아키텍처 다이어그램+환경변수 표+한계(승인 카드 왕복은 momo 앱에서) 명기.
+  - 코어 서버 수정 0. 계약 소비만. README에 아키텍처 다이어그램+환경변수 표+한계(승인 카드 왕복은 oort 앱에서) 명기.
   - 검증 하네스: `scripts/verify_momo_channel_adapter.sh` — e2e 스택 기동 후 node로 eve 채널 어댑터 핵심 로직(폴링→메시지 게시→완료 콜백)을 mock eve 런타임으로 구동해 gateway 계약 왕복 단정. eve 실런타임 설치는 runtime-unverified 허용(MOMO-230 문법).
 - **함정**: eve는 beta(주간 릴리스) — 어댑터는 eve API 표면 최소 사용, 버전 고정 명시. npm 의존은 예제 디렉터리 안에 격리(루트 오염 금지).
 - **수용기준**: [ ] 어댑터 2종+README [ ] verifier PASS(gateway 왕복) [ ] 코어 diff 0 [ ] 시크릿/자격증명 코드 비유입
@@ -33,7 +33,7 @@
 - **수용기준**: [ ] from-card→confirm 왕복 [ ] SSRF 가드 테스트 [ ] `verify_agent_card_onboarding.sh` PASS(mock 카드 서버 python) [ ] RLS·audit
 
 ### MOMO-535 (엔진) — outbound 이벤트 구독 (웹훅형 양방향화)
-- **Goal**: 워크스페이스 이벤트(멘션·승인요청·work 상태 전이)를 외부 URL로 서명 발송하는 구독 원장 — n8n/Zapier/Dify가 momo를 트리거로.
+- **Goal**: 워크스페이스 이벤트(멘션·승인요청·work 상태 전이)를 외부 URL로 서명 발송하는 구독 원장 — n8n/Zapier/Dify가 oort를 트리거로.
 - **계약**: `event_subscription(workspace_id, url, secret_ref, event_kinds[], enabled, created_by, audit)` + 관리자 CRUD. 발송은 **outbox 문법 재사용**(신규 outbox kind=`webhook_delivery`, relay가 HMAC-SHA256 서명 헤더로 POST, 재시도/백오프, 5xx 누적 시 자동 disable+audit). 시크릿은 해시/암호화 저장(평문 조회 API 없음). SSRF 가드 536과 공용 유틸.
 - **수용기준**: [ ] CRUD+RLS [ ] 이벤트→서명 POST 왕복(mock 수신기 python) [ ] 재시도·자동 disable [ ] `verify_event_subscription.sh` PASS
 
@@ -43,8 +43,8 @@
 - **수용기준**: ADR-0131 Accepted 후 확정. [ ] profile 주입 packet 반영 [ ] verifier PASS
 
 ### MOMO-538 (엔진·인프라, 534 후) — 셀프호스트 compose에 eve 옵션 동봉
-- **Goal**: `docker compose --profile eve`로 eve 런타임 1컨테이너(버전 고정)+momo 채널 프리셋 기동 — "momo 설치=커스텀 에이전트 빌드 환경 포함".
-- **계약**: compose 3종 중 dev/prod에 옵션 프로파일(기본 오프), eve 이미지/버전 고정, Postgres world는 momo PG의 별도 DB, 534 어댑터 프리셋 마운트. drift guard 갱신(§4-4). 문서: RUN.md 절 추가.
+- **Goal**: `docker compose --profile eve`로 eve 런타임 1컨테이너(버전 고정)+oort 채널 프리셋 기동 — "oort 설치=커스텀 에이전트 빌드 환경 포함".
+- **계약**: compose 3종 중 dev/prod에 옵션 프로파일(기본 오프), eve 이미지/버전 고정, Postgres world는 oort PG의 별도 DB, 534 어댑터 프리셋 마운트. drift guard 갱신(§4-4). 문서: RUN.md 절 추가.
 - **수용기준**: [ ] --profile eve 기동/미기동 무영향 [ ] verifier(compose config+기동 스모크) [ ] RUN.md
 
 ### MOMO-539 (엔진, 소형) — 추출 워커 실패 백오프+포이즌 배치 격리

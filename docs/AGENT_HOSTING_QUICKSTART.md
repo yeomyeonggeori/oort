@@ -201,7 +201,7 @@ from-card로 온보딩한 외부 에이전트의 멘션 왕복은 그 에이전�
 
 - momo-workd는 raw stdout/stderr, 명령 경로, 환경값, provider 자격증명을 서버로 보내지 않는다.
   로컬 출력은 기본 `~/.momo/workd-output/` 아래 mode 0600 파일로만 보관한다.
-- codex-local의 ChatGPT/OAuth 토큰은 사용자 호스트의 `~/.codex`와 keychain에만 있고 momo로
+- codex-local의 ChatGPT/OAuth 토큰은 사용자 호스트의 `~/.codex`와 keychain에만 있고 oort로
   들어오지 않는다.
 - `work_host_engine`은 엔진 라벨만 저장한다. 키/토큰/경로는 저장하지 않는다.
 - 등록 토큰은 1회용이다. 등록 성공 후 로컬 토큰 파일은 데몬이 삭제한다.

@@ -25,7 +25,7 @@
 - [ ] `[manual]` 유료 Apple Developer Program의 Team `YWQQFQM38J`에 접근할 수 있다.
 - [ ] `[manual]` Xcode 26에서 Apple 계정 로그인이 되어 있고 Team `YWQQFQM38J`가 보인다.
 - [ ] `[manual]` App Store Connect에서 앱 생성과 TestFlight 테스터 관리 권한이 있다.
-- [ ] `[manual]` 실기기에서 접근 가능한 momo 서버 URL을 정했다. §7의 LAN 또는 AWS internal alpha 중 하나를 사용한다.
+- [ ] `[manual]` 실기기에서 접근 가능한 oort 서버 URL을 정했다. §7의 LAN 또는 AWS internal alpha 중 하나를 사용한다.
 - [ ] `[manual]` 업로드할 commit, `MARKETING_VERSION`, 중복되지 않는 `CURRENT_PROJECT_VERSION`을 기록했다.
 - [ ] `[manual]` M7 PASS 전에는 external TestFlight, App Store 제출, `release-ios.yml` 실행을 하지 않는다.
 
@@ -113,7 +113,7 @@ internal tester는 App Store Connect 사용자다. 외부 이메일 초대가 �
 ### 옵션 A: 같은 LAN의 Mac
 
 1. `[manual]` Mac과 iPhone을 같은 신뢰 가능한 LAN에 연결한다. 공용 Wi-Fi는 사용하지 않는다.
-2. `[manual]` momo 서버가 loopback만이 아니라 Mac의 LAN interface에서 수신하는지 확인하고 macOS 방화벽에서 해당 개발 서버 연결을 허용한다.
+2. `[manual]` oort 서버가 loopback만이 아니라 Mac의 LAN interface에서 수신하는지 확인하고 macOS 방화벽에서 해당 개발 서버 연결을 허용한다.
 3. `[manual]` iPhone Safari에서 `http://<Mac-LAN-IP>:28180/health`처럼 실제 health URL을 열어 도달성을 먼저 확인한다.
 4. `[manual]` 앱 로그인 화면에 `http://<Mac-LAN-IP>:28180`을 입력하고 로컬 네트워크 권한을 허용한다.
 
@@ -136,7 +136,7 @@ AWS URL은 ATS 예외에 의존하지 않아 장기 dogfood에 권장된다. 어
    - [ ] `[manual]` 짧은 답장 1건을 보내 다른 클라이언트에서 같은 메시지와 순서를 확인한다.
    - 스크린샷: 서버 host 일부, workspace 이름, channel timeline을 캡처하되 계정 비밀번호는 가린다.
 2. **알림 권한과 device 등록**
-   - [ ] `[manual]` 알림 권한 prompt에서 허용하고 iOS Settings → Notifications → momo에서 알림이 켜졌는지 확인한다.
+   - [ ] `[manual]` 알림 권한 prompt에서 허용하고 iOS Settings → Notifications → oort에서 알림이 켜졌는지 확인한다.
    - [ ] `[manual]` 운영 DB의 `device`와 `push_token`에서 로그인 member의 active 등록 행 1개를 확인한다. token 원문 대신 device ID, env, token suffix, `invalidated_at IS NULL`만 evidence에 남긴다.
    - 스크린샷: iOS 알림 설정과 redacted DB 조회 결과를 캡처한다.
 3. **relay 실발송 수신**

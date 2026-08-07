@@ -1,4 +1,4 @@
-# momo — RELEASE PLAYBOOK (데스크탑 공증 + iOS App Store + CI/CD)
+# oort — RELEASE PLAYBOOK (데스크탑 공증 + iOS App Store + CI/CD)
 
 > 작성: 2026-06-24 · 대상 실행 주체: **Codex (goal 자율 실행)** · REPO: `/Users/kwakseongjae/projects/momo` · GitHub: `Dawn-kim-official/momo` (branch `main`).
 > 범위: **(A) macOS 데스크탑 Developer ID 공증 직접배포(notarytool/stapler/DMG/Sparkle)** + **(B) iOS App Store 전 과정(가입→인증서→TestFlight→Review→배포)** + **(C) CI/CD(fastlane match/gym/pilot/deliver + ASC API Key + GitHub Actions)**.
@@ -232,10 +232,10 @@ xcrun stapler validate build/MomoMac.dmg
 - [ ] **외부 ≤10,000**: 그룹 첫 빌드 **Beta App Review** + beta 앱 설명/리뷰 정보 필수. **external TestFlight는 게이트 PASS 후에만**(불변식 §0).
 - [ ] `pilot groups`는 **External Testing 그룹에서만 신뢰성 있게 동작**(Manual-for-Xcode Internal 그룹 배정 불가). 처리 hang(#20645) 시 `skip_waiting_for_build_processing:true` + 폴링.
 
-### 6.5 App Review Guidelines 핵심 (momo 리젝 리스크 순)
+### 6.5 App Review Guidelines 핵심 (oort 리젝 리스크 순)
 - [ ] **1.2 UGC**(최우선): 모더레이션 4종 + EULA 무관용 (STAGE B §3.3에서 구현). 가이드라인 원문은 'timely responses'(적시 대응) — '24h'는 운영 권장치(원문 명문 아님, gotcha §9).
 - [ ] **5.1.1(v) 계정 삭제** + **5.1.2 개인정보**: 제3자(LLM hermes) 전송 명시적 사전 동의·고지.
-- [ ] **3.1.1 IAP**: momo가 순수 B2B(조직 워크스페이스 직접판매)면 **3.1.3(c) enterprise 예외** 여지. consumer/단일사용자/가족 판매 섞이면 IAP 필수. 1차 출시는 '무료+조직직판'으로 단순화해 IAP 리스크 제거(추정). 자체 라이선스키/QR/암호화폐 잠금해제 금지.
+- [ ] **3.1.1 IAP**: oort가 순수 B2B(조직 워크스페이스 직접판매)면 **3.1.3(c) enterprise 예외** 여지. consumer/단일사용자/가족 판매 섞이면 IAP 필수. 1차 출시는 '무료+조직직판'으로 단순화해 IAP 리스크 제거(추정). 자체 라이선스키/QR/암호화폐 잠금해제 금지.
 - [ ] **2.1 App Completeness**: placeholder 제거 + 실기기 안정성 + **심사용 데모 워크스페이스 + 유효 초대코드 + 백엔드 가동 SLA**(꺼지면 빈화면 리젝).
 
 ### 6.6 App Privacy / 메타 / 스크린샷 / 연령등급 (`MOMO-070`)

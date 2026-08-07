@@ -8,7 +8,7 @@
 
 1. 진단(정본 §1): 초대(role 지정·revoke·단축링크)와 채널 추가/제거·RLS 격리·파일 접근=채널 멤버십 파생은 강하다. 그러나 **역할 변경·정지·추방·차단·self-leave REST가 전무** — `member_status`(suspended/deleted) ENUM은 스키마에만 존재한다. 관리 기능 없는 메신저는 셀프호스트 운영이 불가능하므로 오픈소스 공개 전 필수.
 2. 워크스페이스 admin이 **채널 membership에서 유도**된다(owner/admin 채널이 하나라도 있으면 워크스페이스 admin격) — Slack(워크스페이스 역할 ⊥ 채널 역할)·Discord(서버 역할 계층)·Mattermost(system/team/channel admin 3층) 전부 분리하는 지점.
-3. 에이전트=member 대칭이 momo 고유 강점 — 수명주기도 대칭이어야 한다(정지된 에이전트가 계속 실행되면 안 됨).
+3. 에이전트=member 대칭이 oort 고유 강점 — 수명주기도 대칭이어야 한다(정지된 에이전트가 계속 실행되면 안 됨).
 
 ## Decisions
 

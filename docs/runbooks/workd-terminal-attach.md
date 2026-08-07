@@ -2,7 +2,7 @@
 
 세션 터미널을 웹·mac에서 **직접** 붙어 보는 경로의 운영 문서다. 서버는 이 스트림을
 중계하지 않는다(ADR-0125 D10): 바이트는 브라우저 ↔ 호스트 사이에서만 흐르고,
-momo 서버는 capability 발급과 검증만 한다.
+oort 서버는 capability 발급과 검증만 한다.
 
 ## 무엇이 켜지는가
 
@@ -24,7 +24,7 @@ momo 서버는 capability 발급과 검증만 한다.
 앞단 프록시가 그렇게 만들어 주기 때문이다. 기본 바인드가 루프백인 이유가 이것이다:
 프록시를 안 붙인 상태는 "LAN에 평문으로 열림"이 아니라 "닿지 않음"으로 실패해야 한다.
 
-self-host 현실을 반영한 권장 배치는 momo 서버 TLS를 이미 끊고 있는 프록시에
+self-host 현실을 반영한 권장 배치는 oort 서버 TLS를 이미 끊고 있는 프록시에
 경로 하나를 더 얹는 것이다.
 
 ```nginx
@@ -72,7 +72,7 @@ MOMO_WORKD_REGISTRATION_TOKEN=... \
 
 ## 연결이 성립하는 순서
 
-1. 사람이 momo 서버에 `POST .../terminal-attach` → `attach_endpoint`,
+1. 사람이 oort 서버에 `POST .../terminal-attach` → `attach_endpoint`,
    `capability_token`(TTL 60초), `pty_id`를 받는다.
 2. 클라이언트가 그 엔드포인트로 WebSocket 업그레이드. 토큰은 mac이면
    `Authorization: Bearer`, 브라우저면 서브프로토콜 목록

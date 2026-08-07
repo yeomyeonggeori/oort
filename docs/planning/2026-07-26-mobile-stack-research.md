@@ -1,8 +1,8 @@
-# 모바일 스택 레퍼런스 리서치 — momo iOS/Android 결정용
+# 모바일 스택 레퍼런스 리서치 — oort iOS/Android 결정용
 
 - 작성: 2026-07-26, Fable (리서치 세션)
 - **⚠️ 후속 결정: 성재가 2026-07-26 React Native로 결정했다.** 본 문서는 그 결정의 **근거 기록**으로 보존한다. 실행 계획은 → **`2026-07-26-rn-adoption-plan.md`**.
-- 발단: 성재 — momo 모바일 전략 결정. ADR-0133 §4 "iOS 결정은 스파이크 게이트(P4a)"의 입력 자료.
+- 발단: 성재 — oort 모바일 전략 결정. ADR-0133 §4 "iOS 결정은 스파이크 게이트(P4a)"의 입력 자료.
 - 목적: **ADR-0133 P4a(Tauri-mobile 이식 판정)를 실증 근거로 대체/보강**. 본 문서는 결정이 아니라 근거다. 결정은 ADR 증보로.
 - 출처 등급: `[SOURCE]` 소스 직독 · `[OFFICIAL]` 벤더 공식 문서/블로그 · `[SECONDARY]` 2차 · `[미확인]`
 
@@ -10,19 +10,19 @@
 
 ## 0. 요약 (결론 먼저)
 
-1. **Tauri 2 모바일은 momo의 모바일 1순위가 될 수 없다.** 렌더링 불가라서가 아니라, **메신저를 메신저로 만드는 기능(푸시 웨이크·NSE 콘텐츠 페치·백그라운드·스토어 파이프라인)이 정확히 Tauri 모바일의 최약점**이기 때문이다. 그리고 momo의 **Accepted ADR-0120이 iOS Notification Service Extension(앱 익스텐션)을 전제**하는데, 그게 Tauri iOS에서 현재 깨져 있다(§2.1).
-2. **가장 결정적인 단일 근거: buzz.** momo가 Tauri 데스크톱을 베껴온 바로 그 프로젝트가, **momo와 같은 Tauri 2.11에서**, 모바일만은 Tauri를 쓰지 않고 **37,815 LOC 별도 Flutter 앱**을 썼다. 코드 공유는 **0**이다(§2.2).
-3. **momo의 실제 공백은 iOS가 아니라 Android다.** iOS는 SwiftUI 킷 14,119 LOC가 이미 동작한다(푸시·NSE·딥링크·허들·작업세션 관전 포함). Android는 **파일 한 줄도 없다**(§1).
+1. **Tauri 2 모바일은 oort의 모바일 1순위가 될 수 없다.** 렌더링 불가라서가 아니라, **메신저를 메신저로 만드는 기능(푸시 웨이크·NSE 콘텐츠 페치·백그라운드·스토어 파이프라인)이 정확히 Tauri 모바일의 최약점**이기 때문이다. 그리고 oort의 **Accepted ADR-0120이 iOS Notification Service Extension(앱 익스텐션)을 전제**하는데, 그게 Tauri iOS에서 현재 깨져 있다(§2.1).
+2. **가장 결정적인 단일 근거: buzz.** oort가 Tauri 데스크톱을 베껴온 바로 그 프로젝트가, **oort와 같은 Tauri 2.11에서**, 모바일만은 Tauri를 쓰지 않고 **37,815 LOC 별도 Flutter 앱**을 썼다. 코드 공유는 **0**이다(§2.2).
+3. **oort의 실제 공백은 iOS가 아니라 Android다.** iOS는 SwiftUI 킷 14,119 LOC가 이미 동작한다(푸시·NSE·딥링크·허들·작업세션 관전 포함). Android는 **파일 한 줄도 없다**(§1).
 4. **"이미 반응형인 웹 클라"는 사실이 아니다.** `clients/web`의 Tailwind 반응형 프리픽스는 **전체 tsx 통틀어 3개**, 브레이크포인트는 `(width < 900px)` 2곳뿐이며 이건 폰 레이아웃이 아니라 **데스크톱 창 축소 대응**이다(§1.2).
 5. 업계 패턴은 갈렸고, **"어느 쪽이 옳다"가 아니라 "무엇을 지불할 것이냐"의 문제**다. Discord=RN 고수(대신 핫패스는 네이티브로 내려꽂고 전문 컨설팅 투입), Slack=완전 네이티브(공유 C++ 코어 시도 후 폐기), Telegram=완전 네이티브 커스텀 드로잉(§3).
-6. **모바일 = "관전+승인+대화"라는 결론은 momo가 이미 ADR-0123으로 승인해 둔 것**이고, 이번 레퍼런스 실측이 그것을 반증하지 않고 지지한다. 다만 두 군데를 보정해야 한다 — ①폰에서 **후속 지시**까지 열 것(레퍼런스 전원이 허용) ②푸시를 **완료/승인필요 2채널**로 분리할 것(§5.2).
-7. **1순위 권고 = React Native**(iOS+Android 단일), 대안 = Flutter. 근거는 ①momo의 공백이 Android라 어차피 새로 짬 ②TS/React가 집 언어라 ADR-0133의 "오너가 UI를 직접 다듬는다" 원칙을 모바일까지 유지하는 유일한 선택지 ③momo의 푸시 구조(id-only+NSE)가 **Mattermost RN에서 프로덕션 검증됨** — 그것도 ADR-0120이 선례로 인용한 바로 그 제품에서(§6.2).
+6. **모바일 = "관전+승인+대화"라는 결론은 oort가 이미 ADR-0123으로 승인해 둔 것**이고, 이번 레퍼런스 실측이 그것을 반증하지 않고 지지한다. 다만 두 군데를 보정해야 한다 — ①폰에서 **후속 지시**까지 열 것(레퍼런스 전원이 허용) ②푸시를 **완료/승인필요 2채널**로 분리할 것(§5.2).
+7. **1순위 권고 = React Native**(iOS+Android 단일), 대안 = Flutter. 근거는 ①oort의 공백이 Android라 어차피 새로 짬 ②TS/React가 집 언어라 ADR-0133의 "오너가 UI를 직접 다듬는다" 원칙을 모바일까지 유지하는 유일한 선택지 ③oort의 푸시 구조(id-only+NSE)가 **Mattermost RN에서 프로덕션 검증됨** — 그것도 ADR-0120이 선례로 인용한 바로 그 제품에서(§6.2).
 8. **다만 이 권고는 조건부다.** iOS Fabric에 **한글/CJK IME 조합 결함이 18개월째 미해결**로 열려 있고(원본 #48497 재현코드 첨부, 수정 PR #56082는 리뷰어 미배정 `blocked`), New Arch는 0.82+에서 강제라 회피로가 없다. **다만 "한글 입력 불가"는 과장이다** — 확증된 증상은 조합 밑줄 소실이고, 더 센 주장에는 RN팀이 `Needs: Repro`를 붙였으며, **Mattermost(RN 0.83.9·New Arch)엔 열린 CJK 이슈가 없다.** → **실기기 한글 IME 스파이크가 P4a 1번 게이트**(§4.2, §6.4). **한글 검증은 Flutter·CMP를 골라도 동일하게 필요하다.**
-9. **Capacitor·KMP/CMP는 검토 후 기각.** Capacitor는 공식 문서가 **iOS silent push 미지원**을 명시해 메신저의 핵심을 못 한다. KMP/CMP는 유명 사례가 전부 "로직만 공유·UI는 네이티브 2벌"이라 momo가 React 자산을 하나도 못 쓴다(§4.1).
+9. **Capacitor·KMP/CMP는 검토 후 기각.** Capacitor는 공식 문서가 **iOS silent push 미지원**을 명시해 메신저의 핵심을 못 한다. KMP/CMP는 유명 사례가 전부 "로직만 공유·UI는 네이티브 2벌"이라 oort가 React 자산을 하나도 못 쓴다(§4.1).
 
 ---
 
-## 1. momo의 현재 자산 (실측, 2026-07-26 main)
+## 1. oort의 현재 자산 (실측, 2026-07-26 main)
 
 | 자산 | 규모 | 상태 |
 |---|---|---|
@@ -58,9 +58,9 @@ min-w-[NNNpx] 하드코딩          0개
 
 ## 2. Tauri 2 모바일 판정 (핵심)
 
-### 판정: **momo 모바일 1순위로 부적합 — 불합격**
+### 판정: **oort 모바일 1순위로 부적합 — 불합격**
 
-Tauri 2 모바일은 "동작한다". 그러나 momo가 필요로 하는 것은 렌더링이 아니라 **메신저 런타임**이고, 그 지점에서 무너진다.
+Tauri 2 모바일은 "동작한다". 그러나 oort가 필요로 하는 것은 렌더링이 아니라 **메신저 런타임**이고, 그 지점에서 무너진다.
 
 ### 2.1 근거
 
@@ -89,9 +89,9 @@ if notification.request.trigger?.isKind(of: UNPushNotificationTrigger.self) != t
 
 메신저의 존재 이유인 푸시를, **개인이 유지하는 RC 품질 플러그인**에 얹는 것이다.
 
-**(b) momo의 Accepted ADR-0120이 요구하는 NSE가 Tauri iOS에서 깨져 있다** `[SOURCE]`
+**(b) oort의 Accepted ADR-0120이 요구하는 NSE가 Tauri iOS에서 깨져 있다** `[SOURCE]`
 
-ADR-0120 D2-A(승인됨)는 **id-only 페이로드 + 클라이언트가 깨어나 자기 서버에서 fetch해 알림을 완성(iOS Notification Service Extension)** 이다. 즉 NSE는 momo 푸시 아키텍처의 **필수 부품**이다.
+ADR-0120 D2-A(승인됨)는 **id-only 페이로드 + 클라이언트가 깨어나 자기 서버에서 fetch해 알림을 완성(iOS Notification Service Extension)** 이다. 즉 NSE는 oort 푸시 아키텍처의 **필수 부품**이다.
 
 그런데 `tauri-apps/tauri#15663`(2026-07-06 개설, **open, 코멘트 0**):
 
@@ -101,7 +101,7 @@ ADR-0120 D2-A(승인됨)는 **id-only 페이로드 + 클라이언트가 깨어�
 
 **(c) 모바일에서 빠지는 공식 플러그인들** `[SOURCE]` (각 README 플랫폼 표 직독)
 
-| 플러그인 | iOS | Android | momo 영향 |
+| 플러그인 | iOS | Android | oort 영향 |
 |---|---|---|---|
 | `updater` | ✗ | ✗ | 예상된 것(스토어가 담당) |
 | `sql` | **✗** | ✓ | iOS 오프라인 캐시 경로 별도 필요 |
@@ -120,7 +120,7 @@ ADR-0120 D2-A(승인됨)는 **id-only 페이로드 + 클라이언트가 깨어�
 **(f) 신선도 리스크** `[SOURCE]`
 
 - `tauri#15719`(2026-07-14, open): 공식 문서가 안내하는 빈 `UISceneConfigurations`가 **iOS 27 SDK에서 런치 크래시**(EXC_BREAKPOINT).
-- momo ROADMAP은 이미 "2026-04-28부터 iOS 26 SDK + Xcode 26 이상으로 빌드해야 App Store Connect 업로드 가능"을 게이트로 걸어놨다. **최신 SDK 강제 + Tauri의 최신 SDK 대응 지연**은 정면 충돌하는 조합이다.
+- oort ROADMAP은 이미 "2026-04-28부터 iOS 26 SDK + Xcode 26 이상으로 빌드해야 App Store Connect 업로드 가능"을 게이트로 걸어놨다. **최신 SDK 강제 + Tauri의 최신 SDK 대응 지연**은 정면 충돌하는 조합이다.
 - iOS/Android 관련 open 이슈 **159건**.
 
 ### 2.2 buzz 반례 — 가장 결정적 근거 `[SOURCE]`
@@ -145,9 +145,9 @@ buzz/crates/buzz-push-gateway/          전용 APNs 게이트웨이 (Rust)
 ```
 즉 **암호(NIP-44/NIP-OA/ECDH/HKDF)·릴레이 클라이언트·채널·스레드·멘션·읽음상태를 두 번 구현**했다.
 
-그리고 푸시는 별도 서비스다 — `crates/buzz-push-gateway`, `docs/push-gateway-deployment.md`: APNs 전용 라스트홉(`push.buzz.xyz`), Apple App Attest 검증, 토큰 AEAD 암호화 후 PostgreSQL 보관, 위임 capability, 엔드포인트 쿼터. **momo의 ADR-0120이 그리는 구조와 거의 동일하다.**
+그리고 푸시는 별도 서비스다 — `crates/buzz-push-gateway`, `docs/push-gateway-deployment.md`: APNs 전용 라스트홉(`push.buzz.xyz`), Apple App Attest 검증, 토큰 AEAD 암호화 후 PostgreSQL 보관, 위임 capability, 엔드포인트 쿼터. **oort의 ADR-0120이 그리는 구조와 거의 동일하다.**
 
-> **함의:** Block이 자금을 대는 팀이, momo와 동일한 Tauri 2.11 데스크톱을 가진 채로, 이 질문을 이미 풀었고 — **38k LOC짜리 두 번째 구현을 지불하는 쪽**을 택했다. momo가 "Tauri니까 모바일도 공짜"를 기대한다면, 가장 가까운 선례가 정확히 그 반대를 증언한다.
+> **함의:** Block이 자금을 대는 팀이, oort와 동일한 Tauri 2.11 데스크톱을 가진 채로, 이 질문을 이미 풀었고 — **38k LOC짜리 두 번째 구현을 지불하는 쪽**을 택했다. oort가 "Tauri니까 모바일도 공짜"를 기대한다면, 가장 가까운 선례가 정확히 그 반대를 증언한다.
 
 ---
 
@@ -175,7 +175,7 @@ buzz/crates/buzz-push-gateway/          전용 APNs 게이트웨이 (Rust)
 
 **즉 Zulip이 버린 것은 "2026년의 React Native"가 아니라 "2022년 버전에 고착되어 자체 포크까지 떠야 했던 자기네 RN 코드베이스"다.** 같은 시점에 Mattermost는 RN **0.83.9**, Rocket.Chat은 **0.81.5**로 New Architecture를 켜고 건강하게 굴러간다. Zulip 사례를 "RN은 안 된다"의 근거로 쓰면 오독이다. 올바른 교훈은 **"RN을 채택하면 업그레이드를 게을리한 순간 탈출 비용이 재작성 비용이 된다"** 이다.
 
-### 3.2 반복되는 두 갈래 (momo가 고를 축)
+### 3.2 반복되는 두 갈래 (oort가 고를 축)
 
 1. **공유 코어(Rust) + 100% 네이티브 UI** — Element X, Signal. UI 공유는 **0**, 공유하는 건 프로토콜/동기화/암호. 대가: 플랫폼마다 UI를 다시 만든다.
 2. **공유 UI 프레임워크** — Discord/Mattermost/Rocket.Chat(RN), Zulip/buzz(Flutter). UI를 공유하고, OS 통합(익스텐션·푸시·keychain)만 네이티브로 내려간다.
@@ -184,9 +184,9 @@ buzz/crates/buzz-push-gateway/          전용 APNs 게이트웨이 (Rust)
 
 > "most mobile engineers at Slack were not familiar enough with C++... to help fix issues in the library" / "hiring engineers with C++ experience, particularly on mobile, is difficult"
 
-momo는 1인 오너 + 에이전트 체제이므로 이 리스크가 Slack보다 **크다**. Element X가 성공한 건 matrix-rust-sdk를 **전담하는 별도 팀**이 있어서다.
+oort는 1인 오너 + 에이전트 체제이므로 이 리스크가 Slack보다 **크다**. Element X가 성공한 건 matrix-rust-sdk를 **전담하는 별도 팀**이 있어서다.
 
-### 3.3 결정적 확증 — momo의 ADR-0120 푸시 구조는 RN에서 이미 돌아간다 `[SOURCE]`
+### 3.3 결정적 확증 — oort의 ADR-0120 푸시 구조는 RN에서 이미 돌아간다 `[SOURCE]`
 
 ADR-0120 D2-A(승인됨)는 **id-only 페이로드 → 클라이언트가 NSE로 깨어나 자기 서버에서 fetch해 알림 완성**이다. 이게 Tauri에서 막히는 지점(§2.1b)인데, **Mattermost(RN 0.83.9)는 정확히 그 구조를 프로덕션에서 굴린다.**
 
@@ -208,11 +208,11 @@ PushNotification.default.fetchAndStoreDataForPushNotification(notification, with
 
 ---
 
-## 4. 프레임워크별 2026 성숙도와 momo 적합성
+## 4. 프레임워크별 2026 성숙도와 oort 적합성
 
 ### 4.1 판정 요약
 
-| 프레임워크 | 2026 성숙도 | momo 적합성 | 결정적 리스크 |
+| 프레임워크 | 2026 성숙도 | oort 적합성 | 결정적 리스크 |
 |---|---|---|---|
 | **Tauri 2 모바일** | 렌더링은 되나 **메신저 런타임이 미비** | **부적합 (불합격)** | 1st-party 푸시 부재 · NSE 서명 버그 · 출시 사례 전무 · buzz 반례 |
 | **React Native** | **성숙.** stable 0.86(2026-06-11). New Arch는 0.82+에서 **강제**(옵트아웃 불가) | **최적합 — 단 한글 IME 스파이크 조건부** | 🔴 iOS Fabric IME 조합 결함 미해결(§4.2) · 업그레이드 게을리하면 탈출=재작성(Zulip) |
@@ -220,11 +220,11 @@ PushNotification.default.fetchAndStoreDataForPushNotification(notification, with
 | **Capacitor** | 유지되나 **정체 후 회복 중**(v8.4.2, 2026-02 백로그 방치 자인 후 대량 트리아지) | 코드 재사용 최대, **메신저 적합성 최저** | **공식 문서가 iOS silent push 미지원 명시** — 메신저 핵심을 못 함 |
 | **KMP + Compose MP** | KMP/CMP 모두 Stable(CMP iOS는 1.8.0/2025-05) | **부적합** | 전환비용 최대(전부 새로 배움) + 유명 사례 대부분 **로직만 공유·UI는 네이티브 2벌** |
 | **네이티브(Swift+Kotlin)** | 최상 | iOS만 부분 적합 | Android 0에서 시작 + **오너 참여 불가** |
-| **공유 Rust 코어 + 네이티브 UI** | Element X·Signal이 증명 | **momo 규모엔 과대** | Slack Libslack 폐기 사유(전담 인력 필요)가 momo에 그대로 적용 |
+| **공유 Rust 코어 + 네이티브 UI** | Element X·Signal이 증명 | **oort 규모엔 과대** | Slack Libslack 폐기 사유(전담 인력 필요)가 oort에 그대로 적용 |
 
-**Capacitor 기각 사유(핵심)** `[OFFICIAL]`: 공식 문서가 *"This plugin does not support iOS Silent Push (Remote Notifications)"* 라고 못 박는다. Android도 킬 상태에서 data-only 푸시가 JS 콜백을 깨우지 못해 네이티브 `FirebaseMessagingService`가 필요하다. Background Runner는 iOS 30초/호출·Android 최소 15분 간격이라 WebSocket 상주 불가. **momo의 ADR-0120(id-only 푸시로 깨워 fetch)이 Capacitor에서는 결국 네이티브로 내려가야 하는데, 그럴 거면 Capacitor를 쓸 이유가 사라진다.**
+**Capacitor 기각 사유(핵심)** `[OFFICIAL]`: 공식 문서가 *"This plugin does not support iOS Silent Push (Remote Notifications)"* 라고 못 박는다. Android도 킬 상태에서 data-only 푸시가 JS 콜백을 깨우지 못해 네이티브 `FirebaseMessagingService`가 필요하다. Background Runner는 iOS 30초/호출·Android 최소 15분 간격이라 WebSocket 상주 불가. **oort의 ADR-0120(id-only 푸시로 깨워 fetch)이 Capacitor에서는 결국 네이티브로 내려가야 하는데, 그럴 거면 Capacitor를 쓸 이유가 사라진다.**
 
-**KMP/CMP 기각 사유(핵심)** `[OFFICIAL]`: 흔히 인용되는 사례(Google Workspace·Netflix·McDonald's·Forbes)는 **전부 "로직만 KMP 공유 + UI는 네이티브"** 다 — CMP로 UI를 공유하는 게 아니다. 그 패턴을 따르면 momo는 **모바일 UI를 SwiftUI·Compose로 두 번** 짜야 하고 React 자산은 하나도 안 쓰인다. CMP로 UI까지 공유하는 쪽은 훨씬 작은 코호트이고, **iOS 네이티브 텍스트 입력이 2026-05(1.11.0)에야 실험적 옵트인으로 도착**했다.
+**KMP/CMP 기각 사유(핵심)** `[OFFICIAL]`: 흔히 인용되는 사례(Google Workspace·Netflix·McDonald's·Forbes)는 **전부 "로직만 KMP 공유 + UI는 네이티브"** 다 — CMP로 UI를 공유하는 게 아니다. 그 패턴을 따르면 oort는 **모바일 UI를 SwiftUI·Compose로 두 번** 짜야 하고 React 자산은 하나도 안 쓰인다. CMP로 UI까지 공유하는 쪽은 훨씬 작은 코호트이고, **iOS 네이티브 텍스트 입력이 2026-05(1.11.0)에야 실험적 옵트인으로 도착**했다.
 
 ### 4.2 React Native (실측)
 
@@ -240,9 +240,9 @@ PushNotification.default.fetchAndStoreDataForPushNotification(notification, with
 | Rocket.Chat | **0.81.5** | 19.1.0 | `newArchEnabled=true` |
 | Zulip(폐기) | **0.68.7 자체 포크** | 17.0.2 | — |
 
-**momo에 유리한 점**
+**oort에 유리한 점**
 - 언어가 TS/React — `clients/web`과 **같은 집 언어**. ADR-0133의 제1 발단("오너가 UI를 직접 다듬을 수 있어야 한다")을 모바일에서도 유지하는 **유일한 선택지**.
-- iOS+Android를 한 코드베이스로. momo는 Android가 0이므로 **어차피 새로 짜야 하고**, 그렇다면 두 개보다 하나가 낫다.
+- iOS+Android를 한 코드베이스로. oort는 Android가 0이므로 **어차피 새로 짜야 하고**, 그렇다면 두 개보다 하나가 낫다.
 - 푸시·NSE·Share Extension·백그라운드·스토어 파이프라인이 **전부 해결된 영역** — Mattermost가 실물로 증명(§3.3).
 - 공유 가능한 것은 **컴포넌트가 아니라 로직**: API 클라이언트, `seq`/reconcile 모델, `inbox/model.ts`의 FeedItem 파생, `workSessionModel.ts`의 프로젝션 규칙, 승인 만료 라벨. 이것들은 이미 순수 TS 함수로 분리되어 있다(테스트 파일이 옆에 있는 게 증거: `model.test.ts`·`workSessionModel.test.ts`·`anchor.test.ts`). **UI는 공유하지 않는다** — Mattermost·Rocket.Chat도 웹과 UI를 공유하지 않는다.
 
@@ -250,7 +250,7 @@ PushNotification.default.fetchAndStoreDataForPushNotification(notification, with
 
 **🔴 최대 리스크 — iOS Fabric의 CJK/한글 IME 조합 결함 (직접 검증함)**
 
-momo는 한국어 메신저이고 컴포저가 코어 루프이므로, 이건 성능 이슈보다 상위 리스크다. **다만 과장과 축소를 모두 피해서 적어야 한다.**
+oort는 한국어 메신저이고 컴포저가 코어 루프이므로, 이건 성능 이슈보다 상위 리스크다. **다만 과장과 축소를 모두 피해서 적어야 한다.**
 
 확인된 사실 `[SOURCE]` GitHub API 직접 조회:
 
@@ -276,7 +276,7 @@ momo는 한국어 메신저이고 컴포저가 코어 루프이므로, 이건 �
 **그 외 리스크**
 - **업그레이드 규율이 곧 생존이다.** Zulip은 RN 0.68.7에 고착 → 자체 포크 → 탈출 = 전면 재작성이었다. RN 버전 상향을 **게이트 항목으로 명문화**해야 한다.
 - Discord조차 New Architecture 전환 성능 회귀를 **외부 컨설팅(Margelo)** 으로 해결했다 `[SECONDARY]`. RN은 "공짜"가 아니라 "관리하면 싼" 스택이다.
-- 채팅 타임라인 성능: momo의 parity 게이트(1k/60fps)를 **모바일용으로 다시 세워야** 한다. 참고로 **Bluesky(RN 0.81.5)는 FlashList도 LegendList도 안 쓴다** `[SOURCE]` — "FlashList 쓰면 된다"는 정설이 아니다.
+- 채팅 타임라인 성능: oort의 parity 게이트(1k/60fps)를 **모바일용으로 다시 세워야** 한다. 참고로 **Bluesky(RN 0.81.5)는 FlashList도 LegendList도 안 쓴다** `[SOURCE]` — "FlashList 쓰면 된다"는 정설이 아니다.
 - `[미확인]` **Expo NSE**: `expo-notifications` 공식 문서에 NSE/mutable-content 언급이 **없다** `[OFFICIAL, 부재 확인]`. ADR-0120 경로는 (a) bare RN에 NSE 타깃 직접 추가(= **Mattermost 방식, 검증됨**) 또는 (b) Expo config plugin인데 **(b)는 미검증**. 최악의 경우 (a)로 가면 되므로 권고를 뒤집지는 않으나, **Expo 채택 여부는 이 검증에 달렸다.**
 
 **교차 참고 — 다른 프레임워크도 한글이 깨끗하지 않다** `[SOURCE]`: Flutter는 2019~2025년에 걸친 한글 이슈 계보(#42273 삼성키보드·#71782 조합 중 `clear()`·#134507 iOS `onChanged`·#98590 커서 병합·#115739 천지인·#172270 2025-07 "모든 Flutter 버전")가 있고 현재 상태 미확인. Compose Multiplatform은 2026년에도 한글 조합 수정이 계속 릴리스되고 있다(1.10.0 한글 백스페이스·음절블록 조합 수정). **웹뷰 계열(Capacitor)만 OS가 조합을 소유해 구조적으로 안전하나 이 역시 실측 미확인.** → **한글 IME는 어느 스택을 고르든 실기기 스파이크가 필요한 항목이다. RN만의 문제로 오독하면 안 된다.**
@@ -285,7 +285,7 @@ momo는 한국어 메신저이고 컴포저가 코어 루프이므로, 이건 �
 
 buzz(37.8k LOC)와 Zulip이 프로덕션으로 증명한 스택이고, 텍스트 밀도 높은 메신저에서 실패했다는 근거는 이번 리서치에서 나오지 않았다. Zulip은 오히려 "수천 개 메시지를 끊김 없이" 넘긴다고 주장한다 `[OFFICIAL]`.
 
-**momo의 문제는 기술이 아니라 언어다.** ADR-0133이 SwiftUI를 버린 첫 번째 이유가 "Swift 백그라운드 부재로 오너가 UI를 직접 다듬을 수 없음"이었다. **Dart를 채택하면 정확히 같은 문제가 모바일에서 재발한다.** momo는 오너 1인 + 에이전트 체제라 "에이전트가 짜면 되지 않나"가 반론이 될 수 있으나, ADR-0133이 그 반론을 이미 기각하고 TS/React를 골랐다.
+**oort의 문제는 기술이 아니라 언어다.** ADR-0133이 SwiftUI를 버린 첫 번째 이유가 "Swift 백그라운드 부재로 오너가 UI를 직접 다듬을 수 없음"이었다. **Dart를 채택하면 정확히 같은 문제가 모바일에서 재발한다.** oort는 오너 1인 + 에이전트 체제라 "에이전트가 짜면 되지 않나"가 반론이 될 수 있으나, ADR-0133이 그 반론을 이미 기각하고 TS/React를 골랐다.
 
 **2026 건강도 — "죽어간다"는 담론은 과장이나 무시할 신호도 아니다**
 - 2024-04 Flutter/Dart/Python 약 200명 감원 `[SECONDARY, Google 미확인]`. 이게 **커뮤니티 포크 "Flock"(2024-10)** 을 낳았고, 포크 사유가 "헤드카운트 동결·리뷰 처리량 병목"으로 명시되어 있다 `[SOURCE, getflocked.dev]`.
@@ -301,22 +301,22 @@ buzz(37.8k LOC)와 Zulip이 프로덕션으로 증명한 스택이고, 텍스트
 
 ### 4.4 공유 Rust 코어 + 네이티브 UI (Element X / Signal 패턴)
 
-기술적으로는 가장 우아하고, momo에 매력적인 이유도 분명하다 — momo는 이미 Rust(Tauri 셸)를 쓰고 서버 계약이 UI 무관이다.
+기술적으로는 가장 우아하고, oort에 매력적인 이유도 분명하다 — oort는 이미 Rust(Tauri 셸)를 쓰고 서버 계약이 UI 무관이다.
 
 **그러나 권고하지 않는다.**
-- Element X는 matrix-rust-sdk **전담 팀**이 있고, iOS 1,361 swift파일 + Android 4,150 kt파일을 **따로** 유지한다. UI 공유는 0이다. momo 규모에서 이건 비용이 줄어드는 게 아니라 **세 배로 늘어나는** 선택이다(Rust 코어 + Swift UI + Kotlin UI).
+- Element X는 matrix-rust-sdk **전담 팀**이 있고, iOS 1,361 swift파일 + Android 4,150 kt파일을 **따로** 유지한다. UI 공유는 0이다. oort 규모에서 이건 비용이 줄어드는 게 아니라 **세 배로 늘어나는** 선택이다(Rust 코어 + Swift UI + Kotlin UI).
 - Slack이 같은 구조(Libslack)를 접은 사유가 성능이 아니라 **"모바일 엔지니어가 그 언어를 몰라서 고칠 수 없었다"** 였다 `[OFFICIAL]`. 1인 오너 체제에 그대로 적용되는 리스크다.
-- Signal은 공유 범위를 **암호/프로토콜로만** 좁게 잡았다. momo가 이 패턴을 쓴다면 그 정도 범위여야 하는데, momo의 어려운 부분은 암호가 아니라 UI/실시간이다. 즉 **공유해서 이득 볼 부분이 작다.**
+- Signal은 공유 범위를 **암호/프로토콜로만** 좁게 잡았다. oort가 이 패턴을 쓴다면 그 정도 범위여야 하는데, oort의 어려운 부분은 암호가 아니라 UI/실시간이다. 즉 **공유해서 이득 볼 부분이 작다.**
 
 ---
 
-## 5. 모바일 에이전트 경험 — momo는 이미 답을 갖고 있다
+## 5. 모바일 에이전트 경험 — oort는 이미 답을 갖고 있다
 
-성재 지시("gpt·claude 앱이 원격 지원 잘해서 만족도 높다")의 번역 문제. **결론: momo는 이 질문에 이미 Accepted ADR로 답해놨고, 이번 리서치는 그 답을 반증하지 못했다 — 오히려 지지한다.**
+성재 지시("gpt·claude 앱이 원격 지원 잘해서 만족도 높다")의 번역 문제. **결론: oort는 이 질문에 이미 Accepted ADR로 답해놨고, 이번 리서치는 그 답을 반증하지 못했다 — 오히려 지지한다.**
 
-### 5.1 momo가 이미 결정한 것 `[SOURCE]` ADR-0123 (2026-07-17 Accepted, 성재 승인)
+### 5.1 oort가 이미 결정한 것 `[SOURCE]` ADR-0123 (2026-07-17 Accepted, 성재 승인)
 
-> **"모바일의 제1가치는 수신이다**: 이동 중 알림 수신→열람→짧은 답장→**승인 결정**. 특히 '이동 중 에이전트 승인'은 Slack 모바일에 없는 momo 고유 가치다."
+> **"모바일의 제1가치는 수신이다**: 이동 중 알림 수신→열람→짧은 답장→**승인 결정**. 특히 '이동 중 에이전트 승인'은 Slack 모바일에 없는 oort 고유 가치다."
 >
 > "iOS는 **수신·결정 우선의 컴패니언**이지 macOS 패리티가 아니다(**패리티 압박은 로드맵 왜곡의 주범** — Slack 모바일 교훈)."
 
@@ -332,13 +332,13 @@ buzz(37.8k LOC)와 Zulip이 프로덕션으로 증명한 스택이고, 텍스트
 |---|---|
 | ChatGPT Tasks·Deep Research·Agent mode, Claude Code on the web(클라우드 VM), **Claude Cowork**("scheduled tasks now run with no device online"), GitHub Copilot 클라우드 에이전트, Jules | **Codex Remote**("that computer sleeps … remote access stops"), **Claude Remote Control**(로컬 프로세스), **Claude Dispatch** |
 
-> **momo 함의(중요):** momo의 작업 호스트(ADR-0125 fabric·momo-workd·T3)가 어느 쪽인지가 **모바일이 사용자에게 약속할 수 있는 문구를 결정한다.** "폰 닫아도 계속됩니다"를 말하려면 실행이 서버측이어야 한다. 이건 UI 결정이 아니라 **엔진 결정**이며, 모바일 스펙 착수 전에 못 박아야 한다.
+> **oort 함의(중요):** oort의 작업 호스트(ADR-0125 fabric·momo-workd·T3)가 어느 쪽인지가 **모바일이 사용자에게 약속할 수 있는 문구를 결정한다.** "폰 닫아도 계속됩니다"를 말하려면 실행이 서버측이어야 한다. 이건 UI 결정이 아니라 **엔진 결정**이며, 모바일 스펙 착수 전에 못 박아야 한다.
 
 **(2) 푸시는 두 채널로 분리된다** `[OFFICIAL]` — Claude Remote Control `/config`에 토글이 **정확히 두 개**:
 - **"Push when Claude decides"** (완료/자발적 보고)
 - **"Push when actions required"** (권한 요청/질문)
 
-> momo 함의: ADR-0120 notifier(P9 "판정은 한 곳")에 **완료 푸시 / 승인요청 푸시**를 별도 등급으로 두는 근거. ux-bible P8(알림 예산)과도 맞다.
+> oort 함의: ADR-0120 notifier(P9 "판정은 한 곳")에 **완료 푸시 / 승인요청 푸시**를 별도 등급으로 두는 근거. ux-bible P8(알림 예산)과도 맞다.
 
 **(3) 승인 granularity는 표면이 chat에 가까울수록 굵어진다** `[OFFICIAL]` — 이번 리서치의 가장 강한 교차 발견:
 
@@ -348,30 +348,30 @@ buzz(37.8k LOC)와 Zulip이 프로덕션으로 증명한 스택이고, 텍스트
 채팅     Claude/Cursor in Slack         : 스레드 액션 버튼(View Session/Create PR/Apply) ← 결과 단위
 ```
 
-> **momo 함의: momo는 chat-native이므로 "결과 단위 + 스레드 액션 버튼"이 자연스러운 자리다.** momo의 승인 카드가 이미 그 형태다. 명령 단위 승인을 폰에 끌어오려는 시도는 이 gradient를 거스른다.
+> **oort 함의: oort는 chat-native이므로 "결과 단위 + 스레드 액션 버튼"이 자연스러운 자리다.** oort의 승인 카드가 이미 그 형태다. 명령 단위 승인을 폰에 끌어오려는 시도는 이 gradient를 거스른다.
 
 **(4) 폰은 read-only가 아니다 — "대화형 조종은 O, 구조적 저작은 X"** `[OFFICIAL]`
 
 Cursor·Claude Remote Control·GitHub Mobile·Codex Remote 전부 **폰에서 후속 지시를 보낼 수 있다.** 다만 Cursor 문서가 경계를 명시한다: *"On mobile you see changed files in the diff view, **not a full workspace**."*
 
-> momo 함의: ADR-0123의 "수신·결정 우선"은 맞지만 **"짧은 답장"을 넘어 "에이전트에게 후속 지시"까지는 열어야** 레퍼런스 수준이 된다. 반대로 워크스페이스/설정 저작은 데스크톱에 남긴다.
+> oort 함의: ADR-0123의 "수신·결정 우선"은 맞지만 **"짧은 답장"을 넘어 "에이전트에게 후속 지시"까지는 열어야** 레퍼런스 수준이 된다. 반대로 워크스페이스/설정 저작은 데스크톱에 남긴다.
 
 **(5) 세션 리스트는 상태 칩 어휘로 압축된다** `[OFFICIAL/SECONDARY]`
-- **GitHub Mobile**: `In progress` / `Action required` / `Idle` / `Disconnected` + **에이전트 종류(Copilot·Claude·Codex)로 필터** → **멀티벤더 에이전트 인박스**. momo 구상에 구조적으로 가장 가까운 기존 제품.
+- **GitHub Mobile**: `In progress` / `Action required` / `Idle` / `Disconnected` + **에이전트 종류(Copilot·Claude·Codex)로 필터** → **멀티벤더 에이전트 인박스**. oort 구상에 구조적으로 가장 가까운 기존 제품.
 - **Claude**: "computer icon with a **green status dot** when online"
 - **Cursor Slack**: 이모지 리액션 ⏳ 실행중 / ✅ 완료 / ❌ 실패
 - **Cursor iOS**: **Live Activities(잠금화면) + Dynamic Island로 최대 8개 에이전트 동시 관전** — 네이티브만 가능한 표면
 - **buzz 모바일** `[SOURCE]`: `activity/feed_item.dart` + `pulse/agent_activity_card.dart` — 접히는 그룹 카드 + 상태 점. **터미널이 아니다**
 
-**(6) 조종 권한이 클수록 신원 확인이 붙는다** `[OFFICIAL]` — Claude Trusted Devices(beta): 폰이 로컬 파일시스템 접근 세션을 보거나 조종하려면 **생체 인증 step-up(18시간마다 갱신)**. momo가 "이동 중 승인"을 파는 이상 승인 표면의 인증 등급을 별도로 결정해야 한다는 신호.
+**(6) 조종 권한이 클수록 신원 확인이 붙는다** `[OFFICIAL]` — Claude Trusted Devices(beta): 폰이 로컬 파일시스템 접근 세션을 보거나 조종하려면 **생체 인증 step-up(18시간마다 갱신)**. oort가 "이동 중 승인"을 파는 이상 승인 표면의 인증 등급을 별도로 결정해야 한다는 신호.
 
-> **Live Activities는 Tauri 판정에 추가 근거다.** 잠금화면 위젯·Dynamic Island는 웹뷰가 접근할 수 없는 네이티브 표면이고, momo의 "이동 중 에이전트 관전"과 정확히 겹치는 자리다.
+> **Live Activities는 Tauri 판정에 추가 근거다.** 잠금화면 위젯·Dynamic Island는 웹뷰가 접근할 수 없는 네이티브 표면이고, oort의 "이동 중 에이전트 관전"과 정확히 겹치는 자리다.
 
-### 5.3 momo 번역 — 이미 있는 부품으로 조립된다 `[SOURCE]`
+### 5.3 oort 번역 — 이미 있는 부품으로 조립된다 `[SOURCE]`
 
-momo 웹에 **모바일에 그대로 맞는 부품이 이미 구현되어 있다**:
+oort 웹에 **모바일에 그대로 맞는 부품이 이미 구현되어 있다**:
 
-| momo 기존 자산 | 모바일에서의 역할 |
+| oort 기존 자산 | 모바일에서의 역할 |
 |---|---|
 | `features/inbox/model.ts` `FeedItem{kind: approval\|mention\|run, actor, predicate, detail, outcome, pending, reason}` | **모바일 홈 = 이 피드.** 이미 알림 카드 모델 그 자체다 |
 | `deadlineLabel()` — `3분 후 만료` / `기한 지남` | 승인 카드의 긴급도. 푸시 문구로 직결 |
@@ -397,7 +397,7 @@ momo 웹에 **모바일에 그대로 맞는 부품이 이미 구현되어 있다
 
 **푸시 2채널**(패턴 2): `완료` / `승인 필요` 를 별도 등급으로. 알림 액션에서 앱을 안 열고 승인 종결 — iOS 킷에 `IOSPushActionExecutor`로 이미 구현되어 있다.
 
-**후속 후보**: Live Activities(잠금화면에 실행중 에이전트 경과) — Cursor iOS가 하는 것. momo의 "이동 중 관전"과 정확히 겹치며 **네이티브 표면이라 웹뷰로는 불가**.
+**후속 후보**: Live Activities(잠금화면에 실행중 에이전트 경과) — Cursor iOS가 하는 것. oort의 "이동 중 관전"과 정확히 겹치며 **네이티브 표면이라 웹뷰로는 불가**.
 
 **가져가면 안 되는 것**: `ObserverTerminal`(80컬럼 PTY). 폰에서 raw 터미널은 못 읽는다. buzz도 모바일은 카드로 갔다.
 
@@ -414,7 +414,7 @@ momo 웹에 **모바일에 그대로 맞는 부품이 이미 구현되어 있다
 ADR-0133 §4의 P4a 게이트에 대한 답. 스파이크를 3~5일 태우기 전에 **문서 근거만으로 이미 불합격 판정이 가능**하다:
 
 1. 1st-party 푸시 없음, 업스트림 이슈 20개월 미해결, 대안은 개인 유지 RC 플러그인 `[SOURCE]`
-2. **momo의 Accepted ADR-0120이 요구하는 NSE가 Tauri iOS CI 서명 경로에서 entitlement를 잃는다**(#15663, open) `[SOURCE]`
+2. **oort의 Accepted ADR-0120이 요구하는 NSE가 Tauri iOS CI 서명 경로에서 entitlement를 잃는다**(#15663, open) `[SOURCE]`
 3. 출시된 Tauri 모바일 앱이 생태계에 사실상 없음(awesome-tauri ~96% 데스크톱 전용) `[OFFICIAL]`
 4. 벤더 자신이 "모바일 DX에 만족하지 못한다", "모바일에선 공식 플러그인이 다 되지 않는다"고 고지 `[OFFICIAL]`
 5. **buzz가 같은 Tauri 2.11에서 모바일만 Flutter로 갔다 — 코드 공유 0, 37,815 LOC 지불** `[SOURCE]`
@@ -423,13 +423,13 @@ ADR-0133 §4의 P4a 게이트에 대한 답. 스파이크를 3~5일 태우기 �
 
 ### 6.2 1순위 권고: **React Native (iOS+Android 단일) + 기존 웹 로직 패키지 공유** — **한글 IME 스파이크 조건부**
 
-> **확신 수준: 조건부.** RN은 다른 모든 축(언어 정합·Android 동시 확보·푸시/NSE 검증·메신저 선례)에서 1위지만, **iOS Fabric 한글 IME 결함(§4.2)이 실기기에서 momo 컴포저를 망가뜨리는 수준으로 확인되면 이 권고는 대안 A(Flutter)로 넘어간다.** 문서로는 판정 불가 — 스파이크가 결정한다. 단, **한글 IME 실기기 검증은 Flutter·CMP를 골라도 똑같이 필요하다**(§4.2 말미) — RN만의 페널티가 아니다.
+> **확신 수준: 조건부.** RN은 다른 모든 축(언어 정합·Android 동시 확보·푸시/NSE 검증·메신저 선례)에서 1위지만, **iOS Fabric 한글 IME 결함(§4.2)이 실기기에서 oort 컴포저를 망가뜨리는 수준으로 확인되면 이 권고는 대안 A(Flutter)로 넘어간다.** 문서로는 판정 불가 — 스파이크가 결정한다. 단, **한글 IME 실기기 검증은 Flutter·CMP를 골라도 똑같이 필요하다**(§4.2 말미) — RN만의 페널티가 아니다.
 
 **근거**
-- momo의 실제 공백은 **Android(0)** 이다. 어차피 새로 짜야 하므로, iOS만 살리는 선택보다 **둘을 하나로 짓는** 선택이 총량이 적다.
+- oort의 실제 공백은 **Android(0)** 이다. 어차피 새로 짜야 하므로, iOS만 살리는 선택보다 **둘을 하나로 짓는** 선택이 총량이 적다.
 - ADR-0133의 제1 발단(오너가 UI를 직접 다듬을 수 있어야 함)을 **모바일까지 일관되게 유지하는 유일한 스택**. Flutter=Dart, 네이티브=Swift/Kotlin은 그 원칙을 모바일에서 깬다.
-- momo의 푸시 아키텍처(ADR-0120 id-only + NSE)가 **RN에서 프로덕션 검증됨** — 그것도 ADR-0120이 선례로 인용한 바로 그 Mattermost가(§3.3).
-- 자기호스팅 팀 메신저 중 momo와 구조가 가장 가까운 **두 제품(Mattermost·Rocket.Chat)이 모두 현행 RN + New Architecture**로 건강하게 운영 중 `[SOURCE]`.
+- oort의 푸시 아키텍처(ADR-0120 id-only + NSE)가 **RN에서 프로덕션 검증됨** — 그것도 ADR-0120이 선례로 인용한 바로 그 Mattermost가(§3.3).
+- 자기호스팅 팀 메신저 중 oort와 구조가 가장 가까운 **두 제품(Mattermost·Rocket.Chat)이 모두 현행 RN + New Architecture**로 건강하게 운영 중 `[SOURCE]`.
 - 공유는 **UI가 아니라 로직**. `inbox/model.ts`·`workSessionModel.ts`·`anchor.ts`·API 클라이언트는 이미 순수 TS로 분리·테스트되어 있어 패키지 추출이 현실적이다.
 
 **결정적 리스크와 방어**
@@ -444,7 +444,7 @@ ADR-0133 §4의 P4a 게이트에 대한 답. 스파이크를 3~5일 태우기 �
 
 - **대안 A — Flutter (buzz 경로).** 메신저 실물 선례가 둘(buzz·Zulip) 있고 buzz는 화면 단위 레퍼런스로 쓸 수 있다. **포기하는 것: 오너의 UI 직접 참여**(Dart). RN의 한글 IME 게이트가 실패하면 이쪽 — **단 Flutter도 같은 한글 게이트를 통과해야 하며**(§4.3), 통과 못 하면 남는 건 네이티브뿐이다.
 - **대안 B — iOS SwiftUI 유지 + Android만 별도.** 14k LOC를 살리는 유일한 길이지만 **UI 스택이 3개(React/SwiftUI/Android)** 가 되고 ADR-0133이 해결한 문제를 되살린다. **권고하지 않음.**
-- **비권고 — Tauri 모바일**(§6.1). **비권고 — 공유 Rust 코어 + 네이티브 UI**(§4.4, momo 규모 초과).
+- **비권고 — Tauri 모바일**(§6.1). **비권고 — 공유 Rust 코어 + 네이티브 UI**(§4.4, oort 규모 초과).
 
 ### 6.4 전환 규율 제안
 
@@ -461,7 +461,7 @@ ADR-0133 §4의 P4a 게이트에 대한 답. 스파이크를 3~5일 태우기 �
 | 4 | 실시간 | Centrifugo 재연결 `seq` resume | — |
 | 5 | 승인 루프 | 푸시 알림 액션에서 승인/거부 종결 | — |
 | 6 | Android | ①~⑤ 동일 루프 | — |
-5. **엔진 선결 질문(모바일 UI와 독립, 먼저 답해야 함)**: **momo의 에이전트 작업은 모든 기기를 꺼도 계속되는가?** §5.2 패턴 1에서 보듯 레퍼런스 제품들이 여기서 정확히 갈리고, 이 답이 모바일이 사용자에게 할 수 있는 약속("폰 닫아도 계속됩니다")을 결정한다. ADR-0125 work host fabric / momo-workd / T3 기질의 실행 위치 문제이므로 **엔진 트랙에 질의**해야 한다.
+5. **엔진 선결 질문(모바일 UI와 독립, 먼저 답해야 함)**: **oort의 에이전트 작업은 모든 기기를 꺼도 계속되는가?** §5.2 패턴 1에서 보듯 레퍼런스 제품들이 여기서 정확히 갈리고, 이 답이 모바일이 사용자에게 할 수 있는 약속("폰 닫아도 계속됩니다")을 결정한다. ADR-0125 work host fabric / momo-workd / T3 기질의 실행 위치 문제이므로 **엔진 트랙에 질의**해야 한다.
 
 ### 6.5 성재 결정 대기 항목
 
@@ -477,7 +477,7 @@ ADR-0133 §4의 P4a 게이트에 대한 답. 스파이크를 3~5일 태우기 �
 **결정을 바꿀 수 있는 것 (P4a에서 반드시 해소)**
 - **Expo config plugin의 iOS NSE 지원 여부.** `expo-notifications` 공식 문서에 NSE/mutable-content 언급이 **없음**을 확인했다 `[OFFICIAL, 부재 확인]`. bare RN 경로는 Mattermost로 검증되었으므로 이 항목이 실패해도 1순위 권고는 유지되나, **Expo 채택 여부는 갈린다.**
 - RN 채팅 타임라인의 모바일 실측 성능(1k 메시지 60fps) — 문헌이 아니라 **실측**으로만 판정 가능.
-- momo 에이전트 작업의 실행 위치(서버측 지속 여부) — 엔진 트랙 질의(§6.4-5).
+- oort 에이전트 작업의 실행 위치(서버측 지속 여부) — 엔진 트랙 질의(§6.4-5).
 
 **결정을 바꾸지 않는 것 (참고용 공백)**
 - Flutter의 현재 mobile-stable에서 한글 조합이 깨끗한지 — **대안 A로 넘어가면 즉시 필수 검증**이 된다.

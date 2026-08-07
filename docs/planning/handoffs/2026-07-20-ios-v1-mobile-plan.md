@@ -4,9 +4,9 @@
 > 정본: ADR-0123(iOS v0) 승계·확장. 구현=codex worker(iOS plugin), **컴파일·시뮬레이터·스냅샷은 전부 오케스트레이터**(worker 샌드박스 CoreSimulator/xcodebuild 불가 — v0 실측 교훈).
 > 번호 예약: **MOMO-496~506** (+ 엔진 보완 E-1). 각 티켓 = goal 이슈 1개 = 핸드오프 패킷 겸용으로 발급.
 
-## 0. 레퍼런스 해석 → momo 설계 원칙
+## 0. 레퍼런스 해석 → oort 설계 원칙
 
-| 레퍼런스 | 가져올 것 | momo 번역 |
+| 레퍼런스 | 가져올 것 | oort 번역 |
 |---|---|---|
 | Discord 모바일 | 아바타·이름·연속 메시지 그룹핑, 채팅 밀도, 명확한 다크 위계, 컴포저(+·이모지·마이크) | 타임라인 v2 그룹핑·mention 하이라이트·컴포저 확장 |
 | Mattermost 모바일 | **하단 탭바**(홈/검색/멘션/저장/프로필), Threads 진입점, unread 굵기·프레즌스 도트, replies N + Follow, 파일 카드, 날짜 구분선 | 탭 셸(홈/검색/활동/Work/프로필), 채널 목록 문법, 스레드 1급 |
@@ -18,9 +18,9 @@
 
 ### Phase A — 기반 (선행)
 
-**MOMO-496 · IOS-6: momo 앱 아이콘·브랜드 자산** `[ios]` 소형
-- macOS 앱의 momo 아이콘 원본을 iOS AppIcon.appiconset 전 사이즈로 생성(1024 포함, iOS 다크/틴트 변형), TestFlight/홈 화면 반영. 런치 스크린 배경·AccentColor 정렬.
-- 수용: 실기기 홈 화면·설정·알림 배너에서 momo 아이콘 표시. (원본 부재 시 codex-image로 후보 3안 생성 → 성재 선택)
+**MOMO-496 · IOS-6: oort 앱 아이콘·브랜드 자산** `[ios]` 소형
+- macOS 앱의 oort 아이콘 원본을 iOS AppIcon.appiconset 전 사이즈로 생성(1024 포함, iOS 다크/틴트 변형), TestFlight/홈 화면 반영. 런치 스크린 배경·AccentColor 정렬.
+- 수용: 실기기 홈 화면·설정·알림 배너에서 oort 아이콘 표시. (원본 부재 시 codex-image로 후보 3안 생성 → 성재 선택)
 
 **MOMO-497 · IOS-7: 네비게이션 셸 — 하단 탭바 + 채널 홈** `[ios]` 대형
 - 탭 5개: **홈**(채널·DM 목록) / **검색** / **활동**(멘션·반응 피드) / **Work** / **프로필**(설정). Mattermost 문법.

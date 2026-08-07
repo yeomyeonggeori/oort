@@ -10,7 +10,7 @@
 
 Use **EC2 recommended single-node** for the first one-week internal alpha:
 `t4g.large` in `us-east-1`, one Elastic IP, encrypted `gp3` data volume, Caddy
-on 80/443, all momo services in image-based Docker Compose, pgBackRest to S3,
+on 80/443, all oort services in image-based Docker Compose, pgBackRest to S3,
 and daily EBS snapshots.
 
 Do not provision this host until the local one-person alpha handoff in
@@ -215,7 +215,7 @@ publish, and Kim Intern mode, then switch traffic.
 
 The alpha host must not need a source checkout.
 
-1. Build the multi-command momo image on a builder machine or CI.
+1. Build the multi-command oort image on a builder machine or CI.
 2. Push one immutable tag or digest to GHCR/ECR, for example
    `ghcr.io/dawn-kim-official/momo:sha-<gitsha>`.
    The manual-only `publish-images` workflow publishes the `api`, `relay`,

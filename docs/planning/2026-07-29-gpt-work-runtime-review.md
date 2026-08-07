@@ -8,7 +8,7 @@
 
 ## 0. 한 줄 결론
 
-GPT 문서의 **격리·관찰·연속성 원칙 절반은 momo에 이미 있고**(용어만 다르다), **핵심 신규 기여는 둘**이다 — (a) Workstream(목표)과 실행 단위의 분리, (b) actor-independent 인계. **가장 큰 충돌도 둘**이다 — (a) `work_session.member_id` 소유권 결합(현행 연속성이 사람에 묶여 있음), (b) "local-first" 표현이 momo 하드 불변식(Postgres=SoT·단일 쓰기경로)과 정면 충돌. E2B 폐기는 **스키마 1곳 + 클라이언트 1곳**의 교체 문제이지 설계 붕괴가 아니다 — ADR-0140이 provider 경계를 이미 일반형으로 잘라놨다.
+GPT 문서의 **격리·관찰·연속성 원칙 절반은 oort에 이미 있고**(용어만 다르다), **핵심 신규 기여는 둘**이다 — (a) Workstream(목표)과 실행 단위의 분리, (b) actor-independent 인계. **가장 큰 충돌도 둘**이다 — (a) `work_session.member_id` 소유권 결합(현행 연속성이 사람에 묶여 있음), (b) "local-first" 표현이 oort 하드 불변식(Postgres=SoT·단일 쓰기경로)과 정면 충돌. E2B 폐기는 **스키마 1곳 + 클라이언트 1곳**의 교체 문제이지 설계 붕괴가 아니다 — ADR-0140이 provider 경계를 이미 일반형으로 잘라놨다.
 
 ## 1. 문서 §26 요구 표
 
@@ -17,7 +17,7 @@ GPT 문서의 **격리·관찰·연속성 원칙 절반은 momo에 이미 있고
 | **Workstream 도입** | ③ 없음. 가장 가까운 것은 스레드 앵커(`work_session.root_message_id`, ADR-0114 "세션=스레드")지만 이는 실행 1건의 앵커지 목표가 아님 | `019_work_session.sql:16` | 목표·수용기준·담당 이력을 담는 타입 부재. 현재 "목표"는 GitHub Issue(개발 메타)에만 존재 — 제품에는 없음 | 신규 ADR로 도입. 스레드를 대체하지 말고 **스레드에 워크스트림을 앵커**(대화 문법 유지) | **P1** |
 | **Workstream/Task 분리** | ③ 해당 타입 자체가 없어 충돌도 없음 | 동상 | `work_session`은 문서의 Run에 해당. Task 계층은 부재 | 첫 슬라이스에서는 Task≈`work_session` 1:1로 시작, 분리는 병렬 Subtask 필요 시점에 | P2 |
 | **Actor-independent Handoff** | ② **충돌** — 연속성이 사람에 묶여 있음 | `work_session.member_id NOT NULL`(019:13) · 재부착은 소유자만(ADR-0139 D1) · resume도 요청자 본인 세션 생성(`WorkSessionRoutes.swift:1410` `principal.memberID`) | 문서 §1.7의 "A 요청→B 시작→Agent 이어받기→C 인계"가 현 모델로 불가능 | **Workstream이 목표를 소유하고 Run(=work_session)은 실행자만 기록**하는 구조로 ADR. member_id는 Run의 실행자로 의미 축소 | **P1** |
-| **Source Lane / Worktree** | ② 부분 — 순차 계보는 있음, 병렬 분기는 없음 | `resumed_from_session_id`(025, ADR-0125 D11) — git 계보 재개 | 병렬 Subtask·Fork·Integration 부재. 단 momo 개발 파이프라인 자체는 워크트리 병렬을 이미 실증(트랙/worker 워크트리) | Lane=branch+base+lease의 얇은 모델로 ADR-0141 확장 시 함께 | P2 |
+| **Source Lane / Worktree** | ② 부분 — 순차 계보는 있음, 병렬 분기는 없음 | `resumed_from_session_id`(025, ADR-0125 D11) — git 계보 재개 | 병렬 Subtask·Fork·Integration 부재. 단 oort 개발 파이프라인 자체는 워크트리 병렬을 이미 실증(트랙/worker 워크트리) | Lane=branch+base+lease의 얇은 모델로 ADR-0141 확장 시 함께 | P2 |
 | **Writer Lease** | ② 부분 — 암묵적으로 존재 | 소유자만 입력(ADR-0139) · 호스트당 미정산 1건(049 unique) · observer input 거부(#857) | "명시적 이전(transfer)"이 없음 — 인계가 곧 세션 종료+신규 생성 | Takeover 절차와 함께 도입. **단독 도입은 불필요**(현행 암묵 규칙이 P0 안전은 이미 보장) | P2 |
 | **Live Run Observation** | ① **대부분 있음** | `observation` 컬럼+observer grant(`WorkSessionRoutes.swift` 33개소) · 호스트 로컬 링버퍼 replay(ADR-0139 D2, #857) · observer 입력 거부 · `verify_observer_attach` | **Secret Redaction 부재**(②) · T1 로컬 관찰의 opt-in 정책 명문화 부재 | Redaction은 관찰 스트림 확장 전 필수. 나머지는 유지 | P1(Redaction만) |
 | **Takeover / Fork 구분** | ③ 없음 | 현행 인계는 orphaned→계보 재개뿐(장애 경로) | 관찰자가 인계받는 명시 절차 부재. #893(unreachable)과 같은 상태 모델 지점 | ADR-0141 재론 시 Takeover를 D1(사용자 행동이 orphaned를 만든다)과 통합 — **같은 결정의 두 얼굴** | P2 |
@@ -30,10 +30,10 @@ GPT 문서의 **격리·관찰·연속성 원칙 절반은 momo에 이미 있고
 
 ## 2. 문서 §26 최종 9항
 
-1. **가장 잘 맞는 부분**: 실행 패브릭. 문서의 "T1·T2·T3 동일 Runner Protocol"은 momo에서 이미 사실 — 전 티어가 `work_host` 하나의 표면(서명 v2·capabilities·PTY 호스트 로컬)이고, T3 cloud workd는 T2 데몬과 같은 바이너리다. 관찰 모델(read-only observer·입력 거부·ring replay)도 문서 §10과 거의 일치. **Cold 항상 가능/Hot은 최적화 원칙(§14.1)은 ADR-0139 D3에 이미 같은 문장으로 있다.**
-2. **가장 큰 구조적 충돌**: ① `work_session.member_id` 소유권 — 연속성이 목적이 아니라 사람에 묶여 있다(문서 §22.1이 경고한 바로 그 형태). ② **"local-first"** — momo 하드 불변식은 Postgres=SoT·Centrifugo 전송전용·단일 쓰기경로다. 문서의 local-first sync 확장(§25.7)은 이 불변식과 정면 충돌하며, Accepted ADR 없이 수용 불가. **권고: 문서 표현을 "offline-tolerant client + server-authoritative ledger"로 재해석**하고 SoT는 유지.
-3. **기존 타입의 과책임**: `work_session`은 Run이다. 과책임은 없다 — 오히려 **상위 계층(목표)이 통째로 비어 있는 것**이 문제. GPT 문서의 Task 이중의미 비판은 momo에는 적용되지 않고, "Workstream 부재" 비판만 적용된다.
-4. **Workstream 도입 필요?**: **필요.** 단 momo 문법으로 — 대화 정본(스레드)을 대체하지 않고 스레드에 앵커. 이미 `root_message_id`가 그 앵커 자리다.
+1. **가장 잘 맞는 부분**: 실행 패브릭. 문서의 "T1·T2·T3 동일 Runner Protocol"은 oort에서 이미 사실 — 전 티어가 `work_host` 하나의 표면(서명 v2·capabilities·PTY 호스트 로컬)이고, T3 cloud workd는 T2 데몬과 같은 바이너리다. 관찰 모델(read-only observer·입력 거부·ring replay)도 문서 §10과 거의 일치. **Cold 항상 가능/Hot은 최적화 원칙(§14.1)은 ADR-0139 D3에 이미 같은 문장으로 있다.**
+2. **가장 큰 구조적 충돌**: ① `work_session.member_id` 소유권 — 연속성이 목적이 아니라 사람에 묶여 있다(문서 §22.1이 경고한 바로 그 형태). ② **"local-first"** — oort 하드 불변식은 Postgres=SoT·Centrifugo 전송전용·단일 쓰기경로다. 문서의 local-first sync 확장(§25.7)은 이 불변식과 정면 충돌하며, Accepted ADR 없이 수용 불가. **권고: 문서 표현을 "offline-tolerant client + server-authoritative ledger"로 재해석**하고 SoT는 유지.
+3. **기존 타입의 과책임**: `work_session`은 Run이다. 과책임은 없다 — 오히려 **상위 계층(목표)이 통째로 비어 있는 것**이 문제. GPT 문서의 Task 이중의미 비판은 oort에는 적용되지 않고, "Workstream 부재" 비판만 적용된다.
+4. **Workstream 도입 필요?**: **필요.** 단 oort 문법으로 — 대화 정본(스레드)을 대체하지 않고 스레드에 앵커. 이미 `root_message_id`가 그 앵커 자리다.
 5. **Live Observation 구현 가능?**: 이미 구현돼 있다(§1 표). 남은 것은 Redaction과 T1 opt-in 정책 명문화.
 6. **Writer Lease·Source Lane의 자리**: Lease는 Takeover 절차의 부속(ADR-0141 재론에 흡수). Lane은 Workstream ADR의 부속. **독립 ADR로 세우지 말 것** — 개념 수가 곧 비용이다.
 7. **첫 Vertical Slice**: 문서 §23(16단계)은 과대. 축소안: **①Workstream 테이블+스레드 앵커 ②세션→Workstream 연결 ③"이어받기"(타인이 같은 Workstream에서 새 Run 시작 — Handoff Package는 ADR-0141 WIP push 재사용) ④관찰은 기존 그대로.** Queue·병렬 Lane·Fork는 다음 슬라이스.
@@ -57,7 +57,7 @@ GPT 문서의 **격리·관찰·연속성 원칙 절반은 momo에 이미 있고
 - 크레딧 원장·GENERATED pause=0·슬롯 게이트 — provider 무관
 - cloud workd 부트스트랩(1회 토큰 digest→Ed25519 자체 등록) — provider 무관. **BYOC의 핵심 재료가 이미 있다**: "사용자가 아무 VM에나 workd를 깔고 부트스트랩 토큰으로 등록"이 곧 BYOC다. T2 데몬 등록과 같은 문법.
 
-**성재 원칙과의 정합**: "셀프호스팅은 의존성 0 + 세팅 쉬움, 워크스페이스는 momo 통해 구매 또는 직접 연동" → 정확히 **T3-BYOC를 1급으로, momo Cloud를 그 위의 관리형 provider 구현 하나로** 두는 구조. 문서 §17.2 표와 동일. 현재 코드는 반대로 momo Cloud(E2B)만 있고 BYOC가 없다 — 이 역전이 ADR-0142의 핵심.
+**성재 원칙과의 정합**: "셀프호스팅은 의존성 0 + 세팅 쉬움, 워크스페이스는 momo 통해 구매 또는 직접 연동" → 정확히 **T3-BYOC를 1급으로, oort Cloud를 그 위의 관리형 provider 구현 하나로** 두는 구조. 문서 §17.2 표와 동일. 현재 코드는 반대로 oort Cloud(E2B)만 있고 BYOC가 없다 — 이 역전이 ADR-0142의 핵심.
 
 **진행 중 작업 판정**: #891(T-3 정본화)은 provider-일반형이라 **계속 가치 있음 — 완주시킨다**. **#892(T-4 수렴)는 reconciler의 provider 호출부를 재작성하는 티켓이므로 ADR-0142 결정 전 착수 보류** — E2B 어댑터를 다시 쓰는 낭비를 피한다.
 
@@ -70,9 +70,9 @@ GPT 문서의 **격리·관찰·연속성 원칙 절반은 momo에 이미 있고
 인터뷰가 결정 공백 5개를 찾았고, Fable 판단으로 채운 것과 성재 몫으로 남긴 것을 구분한다.
 
 **Fable 판단으로 확정 (ADR 기안에 반영할 것):**
-1. **BYOC = 순수 compute 모델** (federated SoT 아님) — momo 서버가 control plane, BYOC는 workd 등록으로 붙는 compute. T2 데몬과 같은 문법의 연장이라 하드 불변식(PG=SoT)과 정합. federated는 기각.
+1. **BYOC = 순수 compute 모델** (federated SoT 아님) — oort 서버가 control plane, BYOC는 workd 등록으로 붙는 compute. T2 데몬과 같은 문법의 연장이라 하드 불변식(PG=SoT)과 정합. federated는 기각.
 2. **인계 = 소유권 이전이 아니라 "같은 Workstream 아래 새 Run"** — `work_session.member_id`는 불변 실행 기록으로 의미 축소(이전 안 함). 기존 계보 재개와 같은 문법이라 마이그레이션 최소. Writer Lease가 필요한 유일한 지점은 라이브 PTY takeover뿐(ADR-0141 재론에 귀속).
-3. **Workstream 권한 = 채널 멤버십 파생** (새 권한 체계 발명 금지). 명시 할당은 P2. WIP push의 git 원격 접근은 momo 권한 밖 — 비대칭을 ADR에 명문화.
+3. **Workstream 권한 = 채널 멤버십 파생** (새 권한 체계 발명 금지). 명시 할당은 P2. WIP push의 git 원격 접근은 oort 권한 밖 — 비대칭을 ADR에 명문화.
 4. **cross-provider 연속성 = ADR-0142의 부정형 의무 2개로 보장** — ①어댑터는 죽음을 정직하게 보고(provider_missing) ②연속성 필수 상태를 provider 내부에 두지 않음(스냅샷=최적화, 원본 금지). 수용 기준: mock provider 2종 간 재개 시 계보+WIP 복원. BYOC 해지 시 provider 내부 잔여 스냅샷 삭제만 사용자 책임(고지 의무).
 5. **ADR-0143 P1 수용 기준**: 스레드 첫 Run 시 Workstream 암시 생성 · 같은 채널 멤버 B의 이어받기(새 Run이 같은 Workstream에 연결, 실행 이력에 A·B 병기) · 비멤버 403(RLS 강제 — 정보성 경고 불가) · WIP 메타 노출은 원장까지(git fetch 권한은 범위 밖).
 
@@ -98,13 +98,13 @@ GPT 문서의 **격리·관찰·연속성 원칙 절반은 momo에 이미 있고
 
 → ADR-0142(`docs/adr/0142-t3-provider-interface-byoc.md`)·ADR-0143(`docs/adr/0143-workstream-actor-independent-continuity.md`) 기안 완료(Proposed). 승인 대기.
 
-## 8. 인프라 축 감사 — "관리형 momo(k8s 호스팅)" 방향 반영도 (2026-07-29 성재 질문)
+## 8. 인프라 축 감사 — "관리형 oort(k8s 호스팅)" 방향 반영도 (2026-07-29 성재 질문)
 
-성재 방향: Slack처럼 momo가 k8s를 띄워 호스팅하고, 사용자는 워크스페이스 생성·에이전트 연동·Claude Code/Codex 개발·컴퓨트 사용을 쉽게 한다. VM·스토리지 축 반영도 실측:
+성재 방향: Slack처럼 oort가 k8s를 띄워 호스팅하고, 사용자는 워크스페이스 생성·에이전트 연동·Claude Code/Codex 개발·컴퓨트 사용을 쉽게 한다. VM·스토리지 축 반영도 실측:
 
 ### 반영돼 있는 것 (설계가 이미 이 방향을 받는다)
 
-1. **VM 축의 자리**: ADR-0142 D1/D2가 momo Cloud를 "인터페이스 뒤의 관리형 provider 구현 하나"로 분리해 뒀다 — k8s fleet은 그 구현으로 들어가면 되고 인터페이스는 무변경. 과금·슬롯·수명주기(ADR-0136/0140)는 전부 provider-무관으로 이미 잘려 있다.
+1. **VM 축의 자리**: ADR-0142 D1/D2가 oort Cloud를 "인터페이스 뒤의 관리형 provider 구현 하나"로 분리해 뒀다 — k8s fleet은 그 구현으로 들어가면 되고 인터페이스는 무변경. 과금·슬롯·수명주기(ADR-0136/0140)는 전부 provider-무관으로 이미 잘려 있다.
 2. **스토리지 축(첨부)**: 걱정보다 좋다 — **ADR-0127(Accepted, 07-21)이 이미 S3 호환 어댑터를 결정·구현**했다(`S3ArchiveClient.swift` 실재, `MOMO_ARCHIVE_BACKEND=drive|s3`). Drive는 Dawn 자사 운영용 백엔드일 뿐 결합이 아니다. 관리형 SaaS는 env 1줄로 S3 계열 선택. presigned 직송이라 서버가 바이트를 중계하지 않는 경계도 유지.
 3. **작업 상태 스토리지**: ADR-0142 D3(연속성 무상태 — 원본은 git+원장, 샌드박스 스토리지=소모품)가 곧 관리형 스토리지 전략이다. 샌드박스 디스크를 영속 자산으로 관리할 필요가 없다.
 4. **컨트롤 플레인 멀티테넌시**: RLS FORCE·워크스페이스 경계·크레딧 원장 — SaaS 전제와 정합.
@@ -113,11 +113,11 @@ GPT 문서의 **격리·관찰·연속성 원칙 절반은 momo에 이미 있고
 
 1. **[P0] 격리 경계**: E2B 폐기로 **E2B가 공짜로 주던 microVM 격리가 우리 몫**이 됐다. k8s 컨테이너/네임스페이스는 임의 에이전트 코드의 보안 경계가 아니다(GPT §16.2도 동일 지적 — 당시 ④로 미뤘으나 k8s 방향 확정으로 되살아남). run당 microVM(Firecracker/Kata)·gVisor·전용 노드풀 중 결정 필요.
 2. **[P1] 샌드박스 이미지·캐시 전략**: base 이미지(Claude Code/Codex/도구 사전 설치), content-addressed 패키지 캐시(읽기 전용 공유), cold start 대 warm pool 비용 균형(리서치 완료분 — Modal min_containers 패턴). 관리형의 체감 속도와 원가가 여기서 결정된다.
-3. **[P1] 관리형 샌드박스 안의 LLM 자격증명**: T1/T2는 사용자 기기라 자기 로그인이 있지만, momo Cloud 샌드박스에서 Claude Code가 무슨 자격으로 도는가는 **미결정**. ADR-0004(비유입)와의 긴장 — 권고 방향: 첫 사용 시 샌드박스 안 대화형 로그인(자격증명이 샌드박스에만 살고 momo는 저장 안 함), 단기 브로커 주입은 후속.
+3. **[P1] 관리형 샌드박스 안의 LLM 자격증명**: T1/T2는 사용자 기기라 자기 로그인이 있지만, oort Cloud 샌드박스에서 Claude Code가 무슨 자격으로 도는가는 **미결정**. ADR-0004(비유입)와의 긴장 — 권고 방향: 첫 사용 시 샌드박스 안 대화형 로그인(자격증명이 샌드박스에만 살고 oort는 저장 안 함), 단기 브로커 주입은 후속.
 4. **[P2] 컨트롤 플레인 k8s 배포 자산**: 현재 compose뿐(infra/ + prod compose). helm/manifest 부재 — 설계 충돌은 아니고 운영 작업. "관리형도 셀프호스트와 같은 스택" 원칙 유지가 조건.
 5. **[P3] 명명 부채**: `attachment.drive_file_id` 컬럼명(017)이 백엔드 중립이 아님 — 동작 문제 없음, 기록만.
 6. **범위 밖 기록**: SaaS 좌석 과금·조직 결제는 T3 크레딧과 별개 축 — 필요 시점에 별건.
 
 ### 판정
 
-**인터페이스·스토리지·과금은 반영 완료, VM 실체(격리·이미지·자격증명)가 빈 곳**이다. 이는 ADR-0142가 의도적으로 "후속 별건"으로 미룬 자리인데, 성재의 k8s 방향 확정으로 이제 기안 대상이 됐다 → **ADR-0144(momo Cloud substrate: k8s + microVM 격리 + 이미지/캐시 + 자격증명) 기안 필요.**
+**인터페이스·스토리지·과금은 반영 완료, VM 실체(격리·이미지·자격증명)가 빈 곳**이다. 이는 ADR-0142가 의도적으로 "후속 별건"으로 미룬 자리인데, 성재의 k8s 방향 확정으로 이제 기안 대상이 됐다 → **ADR-0144(oort Cloud substrate: k8s + microVM 격리 + 이미지/캐시 + 자격증명) 기안 필요.**

@@ -1,4 +1,4 @@
-# momo — GitHub 운영 구조 (Codex가 goal로 자율작업)
+# oort — GitHub 운영 구조 (Codex가 goal로 자율작업)
 
 > 목적: **계획은 사람/워크플로우가, 실제 작업은 Codex가 GitHub Issue를 goal로 받아 자율 실행**하는 운영 골격.
 > repo: `Dawn-kim-official/momo` · branch: `main` · 모든 사실은 2026 기준 1차 출처로 확인했고 추정은 "(추정)"으로 표기.
@@ -7,7 +7,7 @@
 
 ## 0. 한눈 구조
 
-| GitHub 프리미티브 | momo에서의 역할 | 산출 파일 |
+| GitHub 프리미티브 | oort에서의 역할 | 산출 파일 |
 |---|---|---|
 | **Milestones** | **릴리스/게이트** (M0~M8 순서가 로드맵) | `scripts/github_bootstrap.sh` |
 | **Issues** | **Codex의 goal 단위.** 이슈 본문이 작업 프롬프트 | `scripts/github_bootstrap.sh`, `.github/ISSUE_TEMPLATE/` |
@@ -162,7 +162,7 @@ Codex cloud는 네트워크 격리 sandbox에서 돌고, **GitHub 브랜치 보�
    gh issue list --repo Dawn-kim-official/momo --milestone "M1 Backend 런타임 + 배포(staging)" --json url -q '.[].url' \
      | xargs -I{} gh project item-add <PROJECT_NUMBER> --owner Dawn-kim-official --url {}
    ```
-- Project 한도: 50,000 items([GA changelog](https://github.com/orgs/community/discussions/154148)). momo 규모에 충분.
+- Project 한도: 50,000 items([GA changelog](https://github.com/orgs/community/discussions/154148)). oort 규모에 충분.
 - 자동화: Project workflow로 "이슈 closed → Done", "PR merged → 이슈 status 갱신"을 설정(수동 1회).
 
 ---

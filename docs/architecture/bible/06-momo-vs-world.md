@@ -1,19 +1,19 @@
-# 06 · momo 대조표와 결정 큐 — 이미 갖춘 것, 미룬 것, 결정할 것
+# 06 · oort 대조표와 결정 큐 — 이미 갖춘 것, 미룬 것, 결정할 것
 
-> 최종 대조: 2026-07-15 @ 9c1fc7a · 이 장은 01~05장을 momo의 실제 결정 큐에 접속시킨다. 실행 제안의 정본은 `research/15-platform-expansion/`.
+> 최종 대조: 2026-07-15 @ 9c1fc7a · 이 장은 01~05장을 oort의 실제 결정 큐에 접속시킨다. 실행 제안의 정본은 `research/15-platform-expansion/`.
 
 ---
 
 ## 1. 이미 갖춘 것 — 업계 정답과 동형인 골격
 
-| 문제 | 업계 정답 (03~05장) | momo 현재 | 판정 |
+| 문제 | 업계 정답 (03~05장) | oort 현재 | 판정 |
 |---|---|---|---|
 | M1 순서 | 채널당 단일 직렬화 + 단조 키 (Slack CS, Discord snowflake) | channel_seq 행 잠금 | **동형** — 규모만 다름 |
 | M2 전달 보장 | 내구 버퍼 + 멱등 (Slack Kafka) | transactional outbox | **동형** (소형판) |
 | M3 복구 | RESUME 재생 + gap fill (Discord/Slack) | Centrifugo recovery + REST backfill | **양쪽 다 보유** |
 | M4 읽음 | 서버 소유 SoT hot path (Discord Read States) | read_state (ADR-0109) | **동형** |
 | M9 격리 | (대형사는 샤딩으로) | RLS FORCE day-1 | 체급 대비 **상향** |
-| M11 실행 원장 | 선례 없음 (Slack 봇은 외부 API) | agent_run/approval/usage/audit | **momo 고유 우위** |
+| M11 실행 원장 | 선례 없음 (Slack 봇은 외부 API) | agent_run/approval/usage/audit | **oort 고유 우위** |
 | 배포 뼈대 | compose + TLS 자동화 + 백업 (Mattermost/Zulip) | prod compose + Caddy + SOPS + pgBackRest | **동체급 표준 충족** |
 
 부트 페이로드(Slack Flannel의 교훈)와 첨부 만료 URL(Discord의 교훈)은 "아직 문제가 안 생겼을 때 예방할 항목"으로 각각 API 설계 원칙과 M7 설계 협상불가 항목에 등재한다.
@@ -39,7 +39,7 @@
 | 한국어 검색 | PGroonga 계열 vs 외부 엔진 — 설치 난이도가 배포판 변수 | **ADR-0105** (기존 큐) |
 | CI·배포 신뢰 경계 | install/upgrade 스크립트, 이미지 서명 | **ADR-0107** (기존 큐) + ADR-0002 후속 |
 | 서버 스택 지속 판정 | 단일 노드 표준 확인됨 (05§4) | **ADR-0108** (기존 큐) |
-| **push relay를 momo가 운영하는가** | 구조적 필연 (05§1) — id-only 페이로드, Zulip 과금 모델 | **신규 ADR 필요** (0119+ 제안) |
+| **push relay를 oort가 운영하는가** | 구조적 필연 (05§1) — id-only 페이로드, Zulip 과금 모델 | **신규 ADR 필요** (0119+ 제안) |
 | **웹 클라이언트 트랙 신설** | 서버 동일 도메인 서빙 (05§3) — 로드맵에 웹 트랙 자체가 없음 | **신규 ADR + 로드맵 개정** |
 | **셀프호스팅 배포판·초대 온보딩 모델** | 스토어 단일 앱 + URL + universal link (05§2), 단일노드 상한 명시 (05§4) | **신규 ADR** (ADR-0002/0107과 연동) |
 | 첨부(가벼운 파일)와 Drive(문서)의 분리 여부 | 첨부는 만료형 서명 URL 필수 (04§5) | ADR-0113/0116 논의에 합류 |

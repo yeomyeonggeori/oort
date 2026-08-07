@@ -1,4 +1,4 @@
-# momo 아키텍처 정본 (Overview)
+# oort 아키텍처 정본 (Overview)
 
 > 생성: 2026-07-10 · 갱신: 2026-07-22 (MOMO-548 external memory provider consent, ADR-0131 agent profile) · 근거: 2026-07-09 6방향 코드베이스 감사 · 관리 규칙: 이 문서와 어긋나는 코드 변경은 같은 PR에서 이 문서를 갱신한다 (ADR-0100)
 > 상세 진단(판정표·근거 전문)은 아티팩트 "momo 아키텍처 진단 & 빌드업 가이드 v0" 참조. 결정 이력은 `docs/adr/`.
@@ -10,7 +10,7 @@
 3. **순서의 진실은 `message.seq`** — 채널별 gapless 카운터(`channel_seq` 행 잠금). Postgres sequence 금지(롤백 갭).
 4. **에이전트는 평범한 `member`다** — 같은 REST, 같은 멱등성, 같은 RLS.
 5. **테넌트 격리는 RLS FORCE** (`app.workspace_id` GUC) + 역할 분리(momo_app NOBYPASSRLS / relay·worker BYPASSRLS).
-6. **provider 자격증명(Codex OAuth 등)은 momo에 절대 들어오지 않는다** (ADR-0004).
+6. **provider 자격증명(Codex OAuth 등)은 oort에 절대 들어오지 않는다** (ADR-0004).
 
 ## 시스템 지도
 
@@ -43,12 +43,12 @@ flowchart LR
 
 - 로컬 알파: PG·Centrifugo만 Docker, 나머지는 호스트 프로세스 (`scripts/momo` → `scripts/local_alpha_runner.sh`).
 - 푸시 후보(ADR-0120): `message` INSERT와 같은 트랜잭션에서 migration 011의 AFTER INSERT 트리거가 outbox `push_candidate` 행을 기록하고, NotifierWorker(BYPASSRLS `momo_notifier`)가 SKIP LOCKED로 소비해 기존 판정(DM/멘션/승인, 채널 음소거·자기 메시지 억제) 후 id-only v2 페이로드를 PushRelay로 dispatch한다. v2는 `thread_id=root_id ?? channel_id`, `momo.message|mention|approval|work` category, 승인에만 `approval_id`, ADR-0109 unread 합계 badge를 싣고 PushRelay가 APNs `thread-id`/`category`로 변환한다. **outbox 생산자 트리거는 이 1건이 유일하며, 신규 트리거 생산자는 Accepted ADR 없이 추가하지 않는다.** relay(`broadcast`)·AgentWorker(`agent_job`)·notifier(`push_candidate`)는 kind로 상호 배제된다.
-- 에이전트 실행 경로는 역할이 분리된 **두 공식 경로**다(ADR-0102): `worker` = momo 소유 managed runtime, `gateway` = 사용자 소유 BYOA runtime. `AGENT_GATEWAY_MODE`는 전달 방식을 선택할 뿐 보장 소유권을 바꾸지 않는다.
+- 에이전트 실행 경로는 역할이 분리된 **두 공식 경로**다(ADR-0102): `worker` = oort 소유 managed runtime, `gateway` = 사용자 소유 BYOA runtime. `AGENT_GATEWAY_MODE`는 전달 방식을 선택할 뿐 보장 소유권을 바꾸지 않는다.
 - Memory Plane의 `workspace_memory_policy.enabled`와 외부 provider 전송 동의는 별도 축이다. `workspace.memory_external_provider_consent`는 기존 워크스페이스도 기본 false이며, 서버가 admin PUT과 member read projection에서 provider trust(`local-mock|self-hosted|external`) 및 최종 허용 여부를 판정한다. AgentWorker 추출·임베딩은 같은 공유 trust 분류와 서버 소유 원장 값을 소비하며, external 미동의면 원문 provider 호출 전에 건너뛰고 `memory.extraction.consent_required`를 워크스페이스당 한 번 기록한다. local-mock과 literal loopback/RFC1918/ULA self-host는 동의와 무관하게 기존 동작을 유지한다.
 - 에이전트 정의는 `member(kind=agent)` + `agent_profile` + run별 불변 Context Packet이다(ADR-0131). profile은 자격증명 없이 instructions·model preference·enabled tool allowlist·mention 고정/예약 schedule만 보유한다. mention packet은 서버 정책 프리앰블을 profile보다 먼저 두고, profile tool은 실제 Capability grant와 교집합만 허용하며, model preference는 workspace allowlist 밖이면 run당 감사 후 기존 model로 되돌린다. profile 없는 agent는 기존 528 payload 계약을 유지한다.
-- 플러그인 경계(ADR-0113): momo 서버는 검증된 3층 manifest, workspace install 정책, `(workspace, member, plugin, scope)` grant와 Capability Cache projection, audit만 보유한다. provider OAuth/raw credential은 사용자 소유 BYOA 호스트에만 있고 서버 테이블·로그·응답에 들어오지 않는다. install revoke와 grant revoke는 projection을 같은 transaction에서 제거하고, Hermes adapter는 Context Packet마다 위임 사용자와 agent가 함께 속한 채널을 서버에 재검증한 뒤 유효 projection의 MCP 접속 기술자만 tool policy로 조립한다. 조회·manifest가 하나라도 잘못되면 해당 범위를 기본 거부하며 장기 캐시하지 않는다.
+- 플러그인 경계(ADR-0113): oort 서버는 검증된 3층 manifest, workspace install 정책, `(workspace, member, plugin, scope)` grant와 Capability Cache projection, audit만 보유한다. provider OAuth/raw credential은 사용자 소유 BYOA 호스트에만 있고 서버 테이블·로그·응답에 들어오지 않는다. install revoke와 grant revoke는 projection을 같은 transaction에서 제거하고, Hermes adapter는 Context Packet마다 위임 사용자와 agent가 함께 속한 채널을 서버에 재검증한 뒤 유효 projection의 MCP 접속 기술자만 tool policy로 조립한다. 조회·manifest가 하나라도 잘못되면 해당 범위를 기본 거부하며 장기 캐시하지 않는다.
 
-  이 호스트 커스터디 모델은 에이전트 호스트가 사용자가 직접 소유·통제하는 머신이라는 전제다. OAuth/PAT 등 MCP 자격증명은 그 호스트의 MCP 클라이언트에만 보관해야 하며 momo 서버나 Context Packet으로 전달하지 않는다. 다중 사용자 workspace에서도 한 에이전트 호스트를 사용자 사이에 공유하지 않고, 각 사용자의 호스트 세션과 토큰 저장소를 분리한다.
+  이 호스트 커스터디 모델은 에이전트 호스트가 사용자가 직접 소유·통제하는 머신이라는 전제다. OAuth/PAT 등 MCP 자격증명은 그 호스트의 MCP 클라이언트에만 보관해야 하며 oort 서버나 Context Packet으로 전달하지 않는다. 다중 사용자 workspace에서도 한 에이전트 호스트를 사용자 사이에 공유하지 않고, 각 사용자의 호스트 세션과 토큰 저장소를 분리한다.
 
   Drive 경로 C는 이 일반 remote 커스터디 모델의 좁은 서버 소유 예외다(ADR-0113 D3/D5). `com.momo.plugins.drive`의 상대 MCP endpoint는 catalog 응답에서 현재 서버의 public origin으로 절대화되고, `POST /v1/mcp/drive`는 agent bearer와 위임 사용자·채널 binding, 매 호출의 활성 `drive:read` grant를 재검증한다. 도구는 공유 드라이브 검색·메타데이터·bounded text export 3개뿐이며 전부 read-only다. 배포 운영자가 SA 키 파일과 공유 드라이브 ID를 환경으로 주입하고 키 바이트는 DB·응답·audit·로그에 들어가지 않는다. SA 생성·공유 드라이브 멤버십·수동 실호출 evidence는 [`docs/GWS_INTERNAL_CONSENT_RUNBOOK.md`](../GWS_INTERNAL_CONSENT_RUNBOOK.md)가 정본이다.
 
@@ -163,7 +163,7 @@ member는 `POST /v1/workspaces/:ws/channels/:ch/agent-runs`에 target agent,
 `clientRunId`, `{type:"work",title,brief,repo?,branch?}` input을 보내며, 서버는 shape를
 트랜잭션 전에 검증한다. 한 tenant transaction이 run, gateway `agent_job`, private
 `agentwork:` wake-up outbox, audit을 함께 기록한다. 실행은 항상 target agent의 BYOA
-호스트에서 이루어지고 provider·repo 자격증명은 momo에 들어오지 않는다.
+호스트에서 이루어지고 provider·repo 자격증명은 oort에 들어오지 않는다.
 
 같은 channel route의 GET은 Work run 목록, `GET /v1/workspaces/:ws/agent-runs/:run`은
 해당 채널에서 볼 수 있는 agent run의 상세 projection을 제공한다. 사람의 두 읽기 경로는
@@ -261,13 +261,13 @@ template, environment, key/path/PID와 stdout/stderr는 host-local이며 raw 출
 host-local 저장이며, permission은 human decision 전 fail-closed한다. Centrifugo control
 subscription은 후속 범위다.
 
-### momo Cloud T3 provisioner + active-time ledger
+### oort Cloud T3 provisioner + active-time ledger
 
 ADR-0136의 T3는 opt-in 경로이고, ADR-0142가 그 실행 주체를 **이원화**했다. 호스트를
 얻는 길은 두 가지이며 **수명주기·과금·관찰은 획득 경로와 무관하게 동일하다.**
 
-- **BYOC(기본형)**: 워크스페이스 운영자가 자기 VM에 `momo-workd`를 설치하고 momo가 발급한
-  1회 토큰으로 등록한다. momo는 그 호스트를 만들지도 부수지도 않는다 — 등록·배정·관찰·과금만
+- **BYOC(기본형)**: 워크스페이스 운영자가 자기 VM에 `momo-workd`를 설치하고 oort가 발급한
+  1회 토큰으로 등록한다. oort는 그 호스트를 만들지도 부수지도 않는다 — 등록·배정·관찰·과금만
   한다. 등록 단위는 워크스페이스 공용이며, personal은 스키마가 아니라 REST에서 닫는다.
 - **관리형 provider**: 어댑터가 같은 등록 흐름을 자동으로 수행한다. 어댑터의 유일한 추가
   권한은 "인스턴스를 만들고 부수는 것"이다.
@@ -289,7 +289,7 @@ provider 운영자 키는 인스턴스 운영자 process env에만 있고 tenant
 token digest만 남고 private key는 인스턴스 밖으로 나오지 않는다.
 
 연속성에 필요한 상태는 provider 안에 두지 않는다. 스냅샷·pause 이미지는 최적화이고 원본은
-git(계보·WIP)과 momo 원장이다. 따라서 **교차 provider 재개는 별도 절차가 아니라 기존 재개
+git(계보·WIP)과 oort 원장이다. 따라서 **교차 provider 재개는 별도 절차가 아니라 기존 재개
 경로 그 자체**이며, 어댑터가 죽음을 정직하게 보고하는 것이 그 전제다(ADR-0142 D3).
 
 T3 session 생성은 host당 미정산 1건 partial unique 아래 `work_host_usage` 한 행과 첫

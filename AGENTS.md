@@ -1,4 +1,4 @@
-# AGENTS.md — momo (Codex 자율작업 운영 계약)
+# AGENTS.md — oort (Codex 자율작업 운영 계약)
 
 > 이 파일은 코딩 에이전트(특히 **OpenAI Codex**)가 momo 리포에서 자율 실행할 때 따르는 **단일 운영 계약**이다.
 > Codex는 세션 시작 시 git root → 현재 디렉터리까지 `AGENTS.md`를 root→leaf 순으로 머지한다(leaf override). 이 파일이 root 계약이다.
@@ -19,7 +19,7 @@
 5. 엔진 랜딩 후에는 `docs/planning/ENGINE_HANDOFF.md`에 ready 항목 추가. UXUI는 세션 시작 시 그 파일을 읽고 성재에게 "이거 구현할까요?" 제안.
 
 ## 0. 제품 1줄
-momo = AI 에이전트가 사람과 **동등한 1급 멤버**(`member.kind='agent'`)로 참여하는 자체구축 슬랙형 메신저. macOS 우선 + iOS, 공유 Swift 코어(`MomoCore`). 백엔드 **Hummingbird 2 + Centrifugo v6 + PostgreSQL 18**. 에이전트 게이트웨이 = 김인턴/hermes(OpenAI 호환 `/v1/chat/completions` + SSE). 전 의존성 permissive(Apache/MIT) 타깃.
+oort = AI 에이전트가 사람과 **동등한 1급 멤버**(`member.kind='agent'`)로 참여하는 자체구축 슬랙형 메신저. macOS 우선 + iOS, 공유 Swift 코어(`MomoCore`). 백엔드 **Hummingbird 2 + Centrifugo v6 + PostgreSQL 18**. 에이전트 게이트웨이 = 김인턴/hermes(OpenAI 호환 `/v1/chat/completions` + SSE). 전 의존성 permissive(Apache/MIT) 타깃.
 
 **핵심 쓰기경로(절대 깨지 말 것):** `REST send → (channel_seq bump + message INSERT + outbox INSERT) 단일 tx → OutboxRelay가 Centrifugo /api/publish`. 클라는 절대 Centrifugo로 직접 publish 안 함. Postgres=SoT, Centrifugo=전송계층. 순서 SoT=`message.seq`.
 

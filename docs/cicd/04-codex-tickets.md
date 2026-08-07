@@ -1,4 +1,4 @@
-# momo — CI/CD Codex 실행 티켓 (의존순 · DoD · 명령)
+# oort — CI/CD Codex 실행 티켓 (의존순 · DoD · 명령)
 
 > 실행 주체: **Codex(goal 자율)**. 컨벤션은 BUILD_TICKETS.md 수용기준 등급 차용.
 > 등급: `[infra]`=파일 존재+정합 · `[swift]`=`swift build` green · `[xcode]`=`xcodebuild` 산출 · `[ci]`=워크플로우 syntax/lint · `[manual]`=사람 1회(Apple 계정·secrets).
