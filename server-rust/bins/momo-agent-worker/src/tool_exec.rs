@@ -763,6 +763,11 @@ fn tool_failure(call_id: &str, error: T3Error) -> ToolResult {
 /// returns the existing row instead of posting a second result. The tool's own
 /// side effect is idempotent for the same reason the route's is — an
 /// already-ended session answers success without ending it twice.
+///
+/// It is [`result_message_id`], **not** [`call_message_id`] — see #1133. The two
+/// rows share a channel and an author (the agent said both things), so sharing a
+/// key too made the guard treat the result as a retry of the card and fold it
+/// away: the room saw the ask and never the answer.
 async fn write_result(
     pool: &PgPool,
     context: &ToolContext,
@@ -770,7 +775,7 @@ async fn write_result(
 ) -> Result<ToolResult, DbError> {
     let props = result.message_props();
     let body = result.message_body();
-    let client_msg_id = call_message_id(context.run_id, &result.call_id);
+    let client_msg_id = result_message_id(context.run_id, &result.call_id);
     let context = context.clone();
     let stored = result.clone();
 
@@ -802,13 +807,48 @@ async fn write_result(
     Ok(stored)
 }
 
-/// A stable v5-style id for one `(run, call_id)` pair.
+/// A stable v5-style id for one `(run, call_id)` pair — the **`tool_call` card**.
 ///
 /// `client_msg_id` is a `uuid` column, and a provider's `call_id` is an
 /// arbitrary string, so the string is hashed into a uuid rather than parsed as
 /// one. Deterministic on purpose — that is the whole idempotency guarantee.
 pub fn call_message_id(run_id: Uuid, call_id: &str) -> Uuid {
     Uuid::new_v5(&run_id, call_id.as_bytes())
+}
+
+/// The namespace the `tool_result` key space hangs off (#1133).
+///
+/// The card's key space is `Uuid::new_v5(&run_id, …)`, so a *separate* namespace
+/// is what makes the result's key space disjoint — and disjoint **by
+/// construction**, not by luck. The near miss worth naming: prefixing the name
+/// instead (`"tool_result:" + call_id`) leaves both spaces rooted at the same
+/// namespace, so a provider that happened to emit the `call_id`
+/// `tool_result:x` would land back on top of another call's card. A name is
+/// attacker- and vendor-controlled; a namespace is not.
+///
+/// The bytes are ASCII, which makes the constant readable in a hexdump and
+/// pins the argument: byte 6 is `o` (`0x6f`), so its version nibble is 6, and
+/// `agent_run.id` is `uuidv7()` at every insert site (`momo_agent::run`,
+/// `schema_v0.sql:268`). No run id can ever equal this namespace, so the two
+/// key spaces cannot meet at their roots either.
+const TOOL_RESULT_NAMESPACE: Uuid = Uuid::from_bytes(*b"momo.tool_result");
+
+/// A stable v5-style id for one `(run, call_id)` pair — the **`tool_result` row**.
+///
+/// Deterministic for the same reason [`call_message_id`] is: a resume replayed
+/// after a lease takeover re-derives this key, the spine's
+/// `(channel, author, client_msg_id)` guard finds the row it wrote the first
+/// time, and the channel keeps exactly one result line per call. What changed in
+/// #1133 is only *which* key space it is deterministic in.
+///
+/// `run_id` occupies a fixed 16-byte prefix of the hashed name, so the mapping
+/// from `(run_id, call_id)` is injective — no `call_id` can borrow bytes from a
+/// neighbouring run's id and alias onto it.
+pub fn result_message_id(run_id: Uuid, call_id: &str) -> Uuid {
+    let mut name = Vec::with_capacity(16 + call_id.len());
+    name.extend_from_slice(run_id.as_bytes());
+    name.extend_from_slice(call_id.as_bytes());
+    Uuid::new_v5(&TOOL_RESULT_NAMESPACE, &name)
 }
 
 #[cfg(test)]
@@ -820,18 +860,71 @@ mod tests {
     #[test]
     fn the_result_key_is_deterministic_per_run_and_call() {
         let run = Uuid::from_u128(1);
-        assert_eq!(
-            call_message_id(run, "call_a"),
-            call_message_id(run, "call_a")
-        );
+        for key in [call_message_id, result_message_id] {
+            assert_eq!(key(run, "call_a"), key(run, "call_a"));
+            assert_ne!(key(run, "call_a"), key(run, "call_b"));
+            assert_ne!(key(run, "call_a"), key(Uuid::from_u128(2), "call_a"));
+        }
+    }
+
+    /// #1133. The card and the result are two messages by one author in one
+    /// channel, so the spine's `(channel, author, client_msg_id)` guard folds
+    /// them the moment their keys agree — and the room loses the answer while
+    /// keeping the question. Reverting `write_result` to `call_message_id`
+    /// fails here first.
+    #[test]
+    fn a_call_and_its_result_never_share_a_key() {
+        let run = Uuid::from_u128(1);
         assert_ne!(
             call_message_id(run, "call_a"),
-            call_message_id(run, "call_b")
+            result_message_id(run, "call_a")
         );
+    }
+
+    /// The namespace is what makes that separation structural rather than
+    /// probable: no `call_id` a provider can emit — including one that spells
+    /// the prefix a name-based scheme would have used — walks one key space
+    /// into the other.
+    #[test]
+    fn no_call_id_can_forge_a_result_key() {
+        let run = Uuid::from_u128(1);
+        for forged in [
+            "tool_result:call_a",
+            "tool_result",
+            "result:call_a",
+            // The 16 raw bytes of the namespace itself, and of a run id.
+            "momo.tool_result",
+            "\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{1}",
+        ] {
+            assert_ne!(
+                call_message_id(run, forged),
+                result_message_id(run, "call_a"),
+                "`{forged}` reached the result key space through the card's"
+            );
+        }
+    }
+
+    /// The 16-byte `run_id` prefix is what keeps the concatenated name
+    /// injective: two different pairs cannot hash the same bytes by sliding the
+    /// boundary between them.
+    #[test]
+    fn the_result_key_cannot_slide_its_run_boundary() {
+        // `run_a` + "bcall" vs `run_b` + "call" — same tail letters, different
+        // pairs, and the fixed-width prefix keeps them apart.
+        let run_a = Uuid::from_bytes([0xaa; 16]);
+        let run_b = Uuid::from_bytes([0xbb; 16]);
         assert_ne!(
-            call_message_id(run, "call_a"),
-            call_message_id(Uuid::from_u128(2), "call_a")
+            result_message_id(run_a, "bcall"),
+            result_message_id(run_b, "call")
         );
+    }
+
+    /// The namespace is a v6-shaped constant and every `agent_run.id` is
+    /// `uuidv7()`, so the two key spaces cannot share a root either.
+    #[test]
+    fn the_namespace_is_not_a_shape_any_run_id_takes() {
+        assert_eq!(TOOL_RESULT_NAMESPACE.get_version_num(), 6);
+        assert_ne!(TOOL_RESULT_NAMESPACE.get_version_num(), 7);
     }
 
     /// A `tool_result` for a failure is still a result, and its props keep the

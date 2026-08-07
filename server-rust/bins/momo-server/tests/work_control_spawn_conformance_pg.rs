@@ -30,6 +30,7 @@
 //! | `ade1_3_a_host_the_card_never_offered_is_refused` (**red proof 2**) | drop the `selectable_host_ids` check in the decision, or the in-transaction `spawn_host_ineligible_reason_in_tx` re-check |
 //! | `ade1_4_a_pre_authorised_tool_dispatches_without_a_card` | drop `work_auto_approve` from the create path, or stop joining `work_tool_profile` so a disabled tool stays auto-approved |
 //! | `ade1_5_the_spawn_tool_closes_the_loop_from_model_to_session` | remove `work.session.spawn` from `CATALOG`, run it without approval, or have the executor ignore `approved_host_id` |
+//! | `ade1_6_a_tool_result_stands_beside_its_call_and_survives_a_replay` (#1133, **red proof 1+2**) | revert `write_result` to `call_message_id` (the result folds into the card), or give it a non-deterministic key (a replay posts a second result) |
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -37,13 +38,16 @@ use std::process::Command;
 use std::sync::{Arc, Mutex};
 
 use momo_agent_worker::provider::{MockChatProvider, ProviderToolCall};
+use momo_agent_worker::tool_exec::{self, ToolContext};
 use momo_agent_worker::{AgentWorker, WorkerConfig};
 use momo_db::migrate::{default_migrations_dir, run_migrations, SeedMode};
 use momo_db::sqlx;
 use momo_db::sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use momo_db::sqlx::Row;
 use momo_db::PgPool;
-use momo_messaging::{create_channel, ChannelKind, NewChannel};
+use momo_messaging::{
+    create_channel, send_message_in_tx, ChannelKind, MessageType, NewChannel, NewMessage,
+};
 use momo_server::{build_app, AppState};
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -1399,13 +1403,61 @@ async fn ade1_5_the_spawn_tool_closes_the_loop_from_model_to_session() {
     .expect("count tool_call cards");
     assert_eq!(asked, 1, "the agent's request is visible in the room");
 
+    // …and so is its answer (#1133). Both rows stand on the spine with their
+    // own `seq`, which is the whole user-visible payoff of the spawn loop: the
+    // room reads 「세션 시작됨」 rather than a request that trails off.
+    //
+    // Until #1133 the result carried `call_message_id(run, call_id)` — the
+    // card's key — and the spine's `(channel, author, client_msg_id)` guard
+    // folded it into the card, leaving this query with one row instead of two.
+    let spine: Vec<(String, Uuid, i64, String)> = sqlx::query(
+        "SELECT type::text, client_msg_id, seq, COALESCE(body, '') AS body \
+           FROM message \
+          WHERE workspace_id = $1 AND run_id = $2 \
+            AND type IN ('tool_call', 'tool_result') \
+          ORDER BY seq",
+    )
+    .bind(tenant.workspace)
+    .bind(run)
+    .fetch_all(&su)
+    .await
+    .expect("read the run's tool rows")
+    .into_iter()
+    .map(|row| {
+        (
+            row.get("type"),
+            row.get("client_msg_id"),
+            row.get::<i64, _>("seq"),
+            row.get("body"),
+        )
+    })
+    .collect();
+    assert_eq!(
+        spine.iter().map(|row| row.0.as_str()).collect::<Vec<_>>(),
+        vec!["tool_call", "tool_result"],
+        "the ask AND its answer, in that order: {spine:?}"
+    );
+    assert!(spine[0].2 < spine[1].2, "two seqs, not one: {spine:?}");
+    // The keys are the shipped functions, not hand-derived: reverting
+    // `write_result` to `call_message_id` makes the second row vanish above and
+    // these two equal here.
+    assert_eq!(
+        spine[0].1,
+        momo_agent_worker::tool_exec::call_message_id(run, "call_spawn_1"),
+        "the card keeps its key"
+    );
+    assert_eq!(
+        spine[1].1,
+        momo_agent_worker::tool_exec::result_message_id(run, "call_spawn_1"),
+        "and the result has one of its own"
+    );
+    assert!(
+        spine[1].3.contains("리팩터링") && spine[1].3.contains(&vps.to_string()),
+        "the result names the session and the host it landed on: {}",
+        spine[1].3
+    );
+
     // …and the turn's answer carries the outcome in the model's own language.
-    // (It is the turn message rather than a `tool_result` row because the
-    // resume's result shares its `client_msg_id` with the `tool_call` card —
-    // `tool_exec::call_message_id(run, call_id)` — so the message spine's
-    // `(channel, author, client_msg_id)` guard folds the two. That predates
-    // #1114 and is the same for `work.session.end`; it is noted here rather
-    // than asserted around silently.)
     let answer: String = sqlx::query_scalar(
         "SELECT COALESCE(body, '') FROM message \
           WHERE workspace_id = $1 AND run_id = $2 AND type = 'text' \
@@ -1420,4 +1472,137 @@ async fn ade1_5_the_spawn_tool_closes_the_loop_from_model_to_session() {
         answer.contains("리팩터링") && answer.contains(&vps.to_string()),
         "the answer names the session and the host it landed on: {answer}"
     );
+}
+
+// ---------------------------------------------------------------------------
+// 6 — the tool_result's own key (#1133)
+// ---------------------------------------------------------------------------
+
+/// **A result stands beside its call, and a replay adds nothing.**
+///
+/// The bug, precisely: a `tool_call` card and its `tool_result` are two
+/// messages by ONE author in ONE channel, and both derived `client_msg_id` from
+/// `call_message_id(run, call_id)`. The spine's
+/// `(channel, author, client_msg_id)` guard cannot tell "the result of that
+/// call" from "that call, posted twice", so it did the only thing it can: it
+/// folded the second write into the first and returned the card. The room kept
+/// the question and lost the answer — since before #1114, for every tool.
+///
+/// This stages the collision rather than describing it: the card is written
+/// through the same spine with the same shipped `call_message_id`, and only
+/// then does the executor run. Two things must hold at once, and they pull in
+/// opposite directions:
+///
+/// - **red proof 1 — a replay writes no second result.** The executor is run
+///   twice, which is exactly what a job re-claimed after a lease takeover does.
+///   Giving the result a random key, or none, makes the second run post a
+///   duplicate here.
+/// - **red proof 2 — the old key is a collision.** Reverting `write_result` to
+///   `call_message_id` folds the result into the card, and the room is left
+///   with a `tool_call` and nothing else.
+///
+/// The staged call names a session that does not exist, so the executor's
+/// answer is a refusal it can give twice without touching a lifecycle row: the
+/// only thing under test is the key.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn ade1_6_a_tool_result_stands_beside_its_call_and_survives_a_replay() {
+    const CALL_ID: &str = "call_replayed_1";
+
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = role_pool("momo_app", &momo_app_password()).await;
+    let worker_pool = role_pool("momo_worker", &momo_worker_password()).await;
+    let tenant = seed_tenant(&su, &app_pool).await;
+    let agent = seed_channel_agent(&su, &tenant, "hermes").await;
+    let run = seed_run(&su, &tenant, agent, "running").await;
+    let workspace = tenant.workspace;
+    let channel = tenant.channel;
+
+    let call = momo_agent::tools::ToolCall {
+        call_id: CALL_ID.to_string(),
+        name: momo_agent::tools::WORK_SESSION_END.to_string(),
+        arguments: json!({"session_id": Uuid::new_v4().to_string()}),
+    };
+
+    // The card `record_tool_call` posts before anything executes — same spine,
+    // same shipped key function, so the key space really is occupied.
+    let card = call.clone();
+    momo_db::with_tenant_tx(&worker_pool, workspace, move |conn| {
+        Box::pin(async move {
+            send_message_in_tx(
+                conn,
+                workspace,
+                NewMessage {
+                    channel_id: channel,
+                    author_member_id: agent,
+                    message_type: MessageType::ToolCall,
+                    body: Some(card.message_body()),
+                    props: card.message_props(),
+                    root_id: None,
+                    reply_to_id: None,
+                    client_msg_id: Some(tool_exec::call_message_id(run, CALL_ID)),
+                    run_id: Some(run),
+                    hlc_ts: None,
+                    hlc_count: None,
+                },
+            )
+            .await?;
+            Ok(())
+        })
+    })
+    .await
+    .expect("post the tool_call card");
+
+    let context = ToolContext {
+        workspace_id: workspace,
+        run_id: run,
+        channel_id: channel,
+        agent_member_id: agent,
+        approved_by: tenant.human,
+        approved_host_id: None,
+    };
+
+    let first = tool_exec::execute(&worker_pool, &context, &call)
+        .await
+        .expect("execute");
+    assert!(
+        first.is_error && first.output.contains("not found"),
+        "the staged call is refused without touching anything: {first:?}"
+    );
+    assert_eq!(
+        tool_rows(&su, workspace, run).await,
+        vec!["tool_call".to_string(), "tool_result".to_string()],
+        "**red proof 2**: the answer is on the spine next to the ask"
+    );
+
+    // The replay a re-claimed job performs.
+    let replayed = tool_exec::execute(&worker_pool, &context, &call)
+        .await
+        .expect("replay");
+    assert_eq!(
+        replayed.output, first.output,
+        "a replay answers the model the same thing"
+    );
+    assert_eq!(
+        tool_rows(&su, workspace, run).await,
+        vec!["tool_call".to_string(), "tool_result".to_string()],
+        "**red proof 1**: still one result — the key is idempotent, just no \
+         longer the card's"
+    );
+}
+
+/// The run's tool rows in spine order, as type labels.
+async fn tool_rows(su: &PgPool, workspace: Uuid, run: Uuid) -> Vec<String> {
+    sqlx::query_scalar(
+        "SELECT type::text FROM message \
+          WHERE workspace_id = $1 AND run_id = $2 \
+            AND type IN ('tool_call', 'tool_result') \
+          ORDER BY seq",
+    )
+    .bind(workspace)
+    .bind(run)
+    .fetch_all(su)
+    .await
+    .expect("read the run's tool rows")
 }
