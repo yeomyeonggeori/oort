@@ -1,11 +1,11 @@
 # Local LLM and Context Broker
 
 > Updated: 2026-06-25
-> Status: roadmap research, not implementation. Facts are source-linked; product choices are momo decisions.
+> Status: roadmap research, not implementation. Facts are source-linked; product choices are oort decisions.
 
 ## 1. Conclusion
 
-momo should not treat the on-device model as a replacement for server agents. The stronger product shape is:
+oort should not treat the on-device model as a replacement for server agents. The stronger product shape is:
 
 ```
 user message -> momo Context Broker -> local model for light context work
@@ -22,7 +22,7 @@ The local model is best used for intent classification, summarization, context c
 - Apple research describes the device model as a compact on-device model using a roughly 3B parameter, 2-bit design and reports around 30 tokens/sec on iPhone 15 Pro in its test context: [Introducing Apple Foundation Models](https://machinelearning.apple.com/research/introducing-apple-foundation-models).
 - The user phrase "Gemma4 level" is not an Apple-published claim. The supported comparison is Apple's own Gemma-1.1/Llama-3-era benchmark discussion and Google's separate on-device Gemma 3n line: [Introducing Gemma 3n](https://developers.googleblog.com/en/introducing-gemma-3n/).
 
-Product implication: momo should phrase this as "fast private on-device context handling" rather than "server-grade reasoning on device."
+Product implication: oort should phrase this as "fast private on-device context handling" rather than "server-grade reasoning on device."
 
 ## 3. Context Broker v0
 
@@ -126,6 +126,6 @@ Initial tickets:
 This makes the messenger more than a shell:
 
 - Slack/Mattermost-style chat remains the UI entry point.
-- momo owns context, memory, policy, cost, approval, and audit.
+- oort owns context, memory, policy, cost, approval, and audit.
 - Agents/plugins become governed work surfaces rather than sidecar bots.
 - Local LLM makes privacy-sensitive, low-latency context handling feel native on Mac and iPhone.

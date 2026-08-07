@@ -1,4 +1,4 @@
-# T3 momo Cloud 파일럿 실험 설계 + 예산 (2026-07-19, Fable)
+# T3 oort Cloud 파일럿 실험 설계 + 예산 (2026-07-19, Fable)
 
 > 성재 지시: "cloud쪽 실 테스트 진행 예정 — 예산과 실험 방법 설계". ADR-0125 D3(기질 선정)의 실측 입력을 만드는 1개월 파일럿.
 > 검증 대상 가설: ①스냅샷/재개 경제(유휴=0컴퓨트) ②spawn 지연 상품성 ③L-base 워크스페이스 공유 실효 ④구독 OAuth의 샌드박스 내 실동작 ⑤인당 실원가 $8~30 추정의 실증.
@@ -33,7 +33,7 @@
 - momo repo+Swift 의존성 웜 스냅샷 1개 → "사용자 2명" 세션을 CoW 분기 — 분기 시간·스토리지 델타·빌드 캐시 재사용률 측정.
 - **판정선**: 분기 < 5s, 델타 < 3GB, 두 번째 사용자 첫 빌드가 캐시로 단축(≥50%).
 
-### E5. momo 통합 시제 (2주차, 484 랜딩 후)
+### E5. oort 통합 시제 (2주차, 484 랜딩 후)
 - 오케스트레이터가 수동 workd 역할: `work.control.dispatched` 소비 → 샌드박스에서 `claude -p` 1태스크 실행 → 결과를 세션 스레드에 회신 — **484 계약의 실기질 E2E**(486 mock E2E의 클라우드판).
 - 성재 시나리오 재현: 채팅에서 요청 → 승인 카드 → 샌드박스 spawn → 작업 → 스레드에서 결과 확인(맥+아이폰).
 
@@ -60,12 +60,12 @@
 | 오류 | 0/10 | 0/10 | — |
 
 - **판정: 두 기질 모두 E1 통과(판정선 대비 수십 배 여유)** — "스냅샷+재개" 지연 전제 실증. E2B는 명시적 pause/resume(keep_memory)이 sub-second, Blaxel은 create 자체가 sub-second라 웜 풀 없이도 콜드 spawn이 상품성 있음.
-- 주의: 이 "콜드"는 기본 이미지 기준 — momo L-base(repo+Swift 의존성) 템플릿의 콜드/분기는 E4에서 별도 실측.
+- 주의: 이 "콜드"는 기본 이미지 기준 — oort L-base(repo+Swift 의존성) 템플릿의 콜드/분기는 E4에서 별도 실측.
 - 스크립트·원시 데이터: `pilot/e1_*.py`, `pilot/results_e1_*.json`. Blaxel SDK 메모: 기본 이미지 생략이 정답(명시 `blaxel/base:latest`는 배포 실패), env는 BL_API_KEY/BL_WORKSPACE로 매핑.
 
 ## 4b. E4 실측 결과 (2026-07-20 — 완료 ✅, E2B)
 
-momo L-base 템플릿(swift:6.2 + server/Core 소스 + 웜 .build, 4vCPU/4GB — v2 원격 빌드 60초):
+oort L-base 템플릿(swift:6.2 + server/Core 소스 + 웜 .build, 4vCPU/4GB — v2 원격 빌드 60초):
 
 | 측정 | 결과 | 판정선 |
 |---|---|---|
@@ -82,7 +82,7 @@ momo L-base 템플릿(swift:6.2 + server/Core 소스 + 웜 .build, 4vCPU/4GB —
 E2B 샌드박스에서 GitHub in/out 왕복 실증(dawn-cut 전용 스크래치 브랜치, 기본 브랜치 무접촉):
 - sandbox_create 0.32s → git clone(depth 1) → 브랜치 생성 → 파일 생성·커밋(e6caaa0) → **토큰 URL push 성공** → GitHub API로 브랜치·파일(MOMO_E5_CLOUD.md 49B) 실재 확인 → 데모 브랜치 정리.
 - 판정: **"에이전트가 클라우드에서 GitHub 받아 작업하고 push"의 인프라 경로 PASS**. 토큰은 샌드박스 env로만 전달·로그 비출력. (스크립트 commit 단정은 오탐 — GitHub 실재로 반증.)
-- 잔여: ①에이전트 control 배선(work_control→cloud host — 후속) ②샌드박스 내 구독 CLI(claude/codex) 로그인 E3 ③momo 원장 연동. 이 3개가 붙으면 "채팅 요청→클라우드 세션→PR" 완전판.
+- 잔여: ①에이전트 control 배선(work_control→cloud host — 후속) ②샌드박스 내 구독 CLI(claude/codex) 로그인 E3 ③oort 원장 연동. 이 3개가 붙으면 "채팅 요청→클라우드 세션→PR" 완전판.
 - 스크립트: pilot/e5_e2b_github_cycle.py.
 
 ## 4d. E3 실측 — 구독 OAuth 클라우드 로그인 (2026-07-20, 부분 PASS)
@@ -90,12 +90,12 @@ E2B 샌드박스에서 GitHub in/out 왕복 실증(dawn-cut 전용 스크래치 
 성재와 라이브로 진행하며 **하드한 사용자 대면 단계 전부 실증**:
 - ✅ E2B 샌드박스에 Claude Code CLI(npm) 설치
 - ✅ `claude setup-token`이 구독 OAuth URL 발급 → `script`(강제 pty) + FIFO stdin으로 캡처
-- ✅ 성재 폰/브라우저 인증 → 코드를 momo(Fable) 통해 FIFO로 샌드박스에 주입 → setup-token이 코드 수락
+- ✅ 성재 폰/브라우저 인증 → 코드를 oort(Fable) 통해 FIFO로 샌드박스에 주입 → setup-token이 코드 수락
 - ⚠️ **미해결**: 발급 토큰을 `claude -p`가 쓰는 형태로 신뢰성 있게 영속·추출하지 못함. setup-token은 헤드리스용 `CLAUDE_CODE_OAUTH_TOKEN`을 TUI로 출력하는데 리드로우로 스크랩 소실. `claude -p`는 "Not logged in".
-- **결론**: 스크랩 방식의 한계. **이 흐름은 productize 대상**(§ 아래 in-messenger UX) — 터미널을 제대로 소유하는 momo 세션 매니저가 토큰을 결정론적으로 캡처해야 함. 대안 경로도 조사 필요: `claude login`(세션 크레덴셜, `claude -p`용) vs `setup-token`(CI 토큰) 중 클라우드 자동화엔 어느 쪽이 맞는지 productize 시 확정.
+- **결론**: 스크랩 방식의 한계. **이 흐름은 productize 대상**(§ 아래 in-messenger UX) — 터미널을 제대로 소유하는 oort 세션 매니저가 토큰을 결정론적으로 캡처해야 함. 대안 경로도 조사 필요: `claude login`(세션 크레덴셜, `claude -p`용) vs `setup-token`(CI 토큰) 중 클라우드 자동화엔 어느 쪽이 맞는지 productize 시 확정.
 - 파일럿 총평: E1·E4·E5 PASS, E2 설계완료(실행 대기), E3 부분 PASS(메커니즘 증명·영속 productize 필요). **T3 기술 타당성 충분히 입증** → ADR-0125 D3 기질=E2B 유력.
 
 ## 5. 산출물·판정
 
-- 본 문서에 실측표 추가 → **ADR-0125 D3 기질 확정**(1개 선정) + 요금제 숫자 보정(17-00 §4) + momo Cloud 프로비저너 티켓(S 배치 합류) 발급 입력.
+- 본 문서에 실측표 추가 → **ADR-0125 D3 기질 확정**(1개 선정) + 요금제 숫자 보정(17-00 §4) + oort Cloud 프로비저너 티켓(S 배치 합류) 발급 입력.
 - 실패 조건: 전 기질이 E1/E2 판정선 미달 → D3-B(자체 Firecracker) 조기 검토로 회귀.

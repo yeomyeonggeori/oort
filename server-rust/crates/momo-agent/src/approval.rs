@@ -723,7 +723,7 @@ pub fn approval_request_props(
         "call_id": call.call_id,
         "tool_name": call.name,
         "title": format!("Approve {}", call.name),
-        "summary": "Review the proposed tool call before momo executes it.",
+        "summary": "Review the proposed tool call before oort executes it.",
         "arguments": raw_arguments,
         "status": "pending",
         "expires_at_ms": expires_at.timestamp_millis(),

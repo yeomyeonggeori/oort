@@ -889,7 +889,7 @@ pub fn requires_strict_secrets(environment: &str) -> bool {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct T3Settings {
     /// `MOMO_T3_ENABLED == "1"`. Swift's default is OFF and so is this one:
-    /// "momo Cloud(T3)는 기본 비활성입니다" (`CloudProvisionerRoutes.disabledError`).
+    /// "oort Cloud(T3)는 기본 비활성입니다" (`CloudProvisionerRoutes.disabledError`).
     pub enabled: bool,
     /// `MOMO_T3_PROVIDER`, a registry id. Default `byoc` — the one adapter that
     /// needs no operator credential at all.

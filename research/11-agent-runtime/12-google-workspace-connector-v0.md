@@ -5,23 +5,23 @@
 
 ## 1. Purpose
 
-Google Workspace Connector v0 defines how momo imports citeable, permission-checked references from Drive, Gmail, and Calendar into the agent runtime planes without copying a user's workspace into momo.
+Google Workspace Connector v0 defines how oort imports citeable, permission-checked references from Drive, Gmail, and Calendar into the agent runtime planes without copying a user's workspace into oort.
 
 It answers five questions:
 
 1. Which Google account and scopes authorize a read?
-2. What token and provider state may momo store?
+2. What token and provider state may oort store?
 3. Which Drive, Gmail, and Calendar read paths feed source refs?
 4. How do those refs project into Context Packet, Memory Plane, and Capability Cache?
 5. Which operations remain external writes that must pause for approval?
 
-The connector is owned by momo. Google Workspace MCP servers and future domain-wide delegation can inform later implementations, but the v0 product default is per-user OAuth plus official Google APIs.
+The connector is owned by oort. Google Workspace MCP servers and future domain-wide delegation can inform later implementations, but the v0 product default is per-user OAuth plus official Google APIs.
 
 ## 2. Non-Negotiable Rules
 
 - Per-user OAuth is the only v0 authorization model. Domain-wide delegation and the shared-drive-member service-account path (`boundary_kind: shared_drive_member`) are out of scope for this spec and belong to MOMO-123; this spec only records the carve-out below so the two documents stay consistent.
 - The connector stores provider ids, cursors, bounded excerpts, permission snapshots, and audit state. It must not store raw mailbox dumps, full Drive mirrors, broad calendar history, OAuth access tokens in Context Packets, or refresh tokens in Memory Plane/Capability Cache.
-- Bounded carve-out to "no full Drive mirrors" (MOMO-323): for the **momo-managed workspace shared drive only** (workspace archive mode — MOMO-123 `service_account_boundary` with `boundary_kind = shared_drive_member`), momo may keep a **revocable derived index**: embeddings plus chunked text, with a permission snapshot version on every row. Those files are momo-managed artifacts, the index is rebuildable from Drive, and delete/permission-loss tombstones must remove the derived rows. User personal Drive files (`drive.file` selected) stay excerpt-only as before — momo never builds a derived full-text/embedding index from a user's personal Drive.
+- Bounded carve-out to "no full Drive mirrors" (MOMO-323): for the **momo-managed workspace shared drive only** (workspace archive mode — MOMO-123 `service_account_boundary` with `boundary_kind = shared_drive_member`), oort may keep a **revocable derived index**: embeddings plus chunked text, with a permission snapshot version on every row. Those files are momo-managed artifacts, the index is rebuildable from Drive, and delete/permission-loss tombstones must remove the derived rows. User personal Drive files (`drive.file` selected) stay excerpt-only as before — oort never builds a derived full-text/embedding index from a user's personal Drive.
 - Google source refs are citeable pointers, not credentials. Every ref has `workspace_id`, `subject_member_id`, provider resource id, scope snapshot, retrieval time, and delete/revoke path.
 - Context Packet can include `sources.kind = google_drive|gmail|calendar` only after workspace membership, channel visibility, source grant, and redaction checks pass.
 - Memory Plane can store Google-backed durable references only as `memory_type = external_source_ref` or `artifact_ref`; it must not promote Gmail or Drive body text into unsourced long-term memory.
@@ -57,13 +57,13 @@ Required top-level fields:
 |---|---|
 | `schema` | Literal `momo.google_workspace.source_ref.v0`. |
 | `source_id` | Stable ref id used by Context Packet `sources[].source_id`, Memory Plane `source_refs[].source_id`, and audit events. |
-| `workspace_id` | momo tenant root. Required for RLS and audit. |
-| `subject_member_id` | momo human member whose Google OAuth grant authorized the read. |
+| `workspace_id` | oort tenant root. Required for RLS and audit. |
+| `subject_member_id` | oort human member whose Google OAuth grant authorized the read. |
 | `provider` | Literal `google_workspace`. |
 | `source_kind` | `google_drive`, `gmail`, or `calendar`. |
 | `provider_account` | Google account boundary: stable `google_subject`, primary email hash or redacted email, hosted domain when known. |
 | `provider_resource` | Provider ids and display metadata safe for source badges. |
-| `permission_snapshot` | OAuth scopes, user grant version, resource scope, app verification class, and momo visibility decision. |
+| `permission_snapshot` | OAuth scopes, user grant version, resource scope, app verification class, and oort visibility decision. |
 | `sync_state` | Cursor/change token/search query/time window used to retrieve or refresh the ref. |
 | `excerpt` | Bounded, redacted excerpt or metadata summary fit for citation. |
 | `lifecycle` | Delete, revoke, invalidation, tombstone, and retention behavior. |
@@ -73,7 +73,7 @@ Required top-level fields:
 
 ### 4.1 Per-User Grant
 
-v0 uses one grant per momo workspace member and Google account:
+v0 uses one grant per oort workspace member and Google account:
 
 ```json
 {
@@ -106,7 +106,7 @@ Official scope pages classify broad data scopes as sensitive or restricted. v0 t
 
 **Verification-class correction (2026-07, MOMO-323):** `drive.metadata.readonly` is a **restricted-class** scope — the same app-verification class as `drive` and `drive.readonly`. It is not a lighter "metadata tier"; earlier revisions of the table below implied otherwise. Among the Drive scopes in this spec only `drive.file` is non-sensitive.
 
-**Deployment assumption (Internal consent):** self-hosted momo assumes each deploying organization owns its own GCP project and configures the OAuth consent screen as **User type = Internal** (users restricted to the same Google Workspace organization). Internal apps are exempt from Google app verification and the CASA security assessment, so restricted-class scopes carry no external verification burden in this deployment shape. The binding limit on scope selection is therefore momo's own policy — non-retention, least privilege, approval-gated writes — not Google verification economics. External/multi-tenant consent screens are out of scope for v0. Setup runbook: `docs/GWS_INTERNAL_CONSENT_RUNBOOK.md`; grounds: `research/13-redesign/03` §2.
+**Deployment assumption (Internal consent):** self-hosted oort assumes each deploying organization owns its own GCP project and configures the OAuth consent screen as **User type = Internal** (users restricted to the same Google Workspace organization). Internal apps are exempt from Google app verification and the CASA security assessment, so restricted-class scopes carry no external verification burden in this deployment shape. The binding limit on scope selection is therefore oort's own policy — non-retention, least privilege, approval-gated writes — not Google verification economics. External/multi-tenant consent screens are out of scope for v0. Setup runbook: `docs/GWS_INTERNAL_CONSENT_RUNBOOK.md`; grounds: `research/13-redesign/03` §2.
 
 | Surface | Preferred scopes | Notes |
 |---|---|---|
@@ -127,8 +127,8 @@ References checked for this spec: Google Drive scope guidance, Drive changes, Gm
 
 Drive v0 has two modes:
 
-1. Selected-file mode: user picks files or shares files with momo. Resource scope is the selected provider file ids.
-2. Metadata/index mode: momo tracks metadata changes for files visible to the grant, subject to policy and user consent.
+1. Selected-file mode: user picks files or shares files with oort. Resource scope is the selected provider file ids.
+2. Metadata/index mode: oort tracks metadata changes for files visible to the grant, subject to policy and user consent.
 
 Read path:
 
@@ -159,8 +159,8 @@ Read path:
 
 1. User enables Gmail source and grants metadata or readonly scope.
 2. Context Broker creates a bounded search plan from a user request, source picker, or channel action. The plan records query text, label filters, time window, max threads/messages, and redaction policy.
-3. For metadata-only grants, momo can store thread ids, message ids, labels, internal date, sender/recipient hashes, and subject snippets. It cannot store body excerpts.
-4. For readonly grants, momo may fetch selected thread/message bodies and keep only bounded excerpts needed for citation. Attachments are references only unless separately selected and scanned.
+3. For metadata-only grants, oort can store thread ids, message ids, labels, internal date, sender/recipient hashes, and subject snippets. It cannot store body excerpts.
+4. For readonly grants, oort may fetch selected thread/message bodies and keep only bounded excerpts needed for citation. Attachments are references only unless separately selected and scanned.
 5. Gmail API search differences from the Gmail UI are recorded in `sync_state.query_semantics`. Thread-wide search behavior must not be assumed unless proven by returned messages.
 6. Delete/revoke/lost-scope events hide refs and invalidate dependent memory. If Gmail returns 404/403 for a previously stored ref, Context Packet withholds it.
 
@@ -214,7 +214,7 @@ Required Context Packet source fields for Google refs:
 | `permission_snapshot` | Short summary of grant, resource scope, and actor visibility |
 | `retrieved_at` | `sync_state.retrieved_at` |
 | `excerpt` | Bounded excerpt or availability summary |
-| `checksum` | Provider revision/hash or momo excerpt hash when available |
+| `checksum` | Provider revision/hash or oort excerpt hash when available |
 
 Additional `source_refs` metadata may be stored in future DB records, but Context Packet must remain bounded and credential-free.
 
@@ -245,7 +245,7 @@ Required Memory Plane fields:
 Revalidation rules:
 
 - Retrieval checks current workspace membership, source visibility, active Google grant, scope compatibility, and provider resource availability.
-- Personal Gmail refs do not become workspace memory unless a human explicitly shares the message/thread into a momo channel or stores a reviewed summary with safe visibility.
+- Personal Gmail refs do not become workspace memory unless a human explicitly shares the message/thread into a oort channel or stores a reviewed summary with safe visibility.
 - Drive docs shared in a channel can become `artifact_ref` or `external_source_ref` with `channel` visibility only if the actor and agent can still read the channel and the Drive grant/resource scope remains valid.
 - Calendar availability memory should expire quickly and prefer `task_state` or `external_source_ref` with short TTL. It must not become permanent availability profiling.
 
@@ -287,7 +287,7 @@ Capability entries must include:
 User-visible controls:
 
 - Disconnect Google account for a workspace member.
-- Revoke individual source refs from momo memory/context.
+- Revoke individual source refs from oort memory/context.
 - Delete or unlink Memory Plane items created from Google refs.
 - Refresh a source ref or mark it stale.
 - View which Context Packets and agent runs cited a source ref.
@@ -302,9 +302,9 @@ Connector lifecycle effects:
 | Drive file removed/permission lost | Tombstone source ref; Memory Plane keeps citation-only tombstone or hides per policy. |
 | Gmail message/thread deleted or inaccessible | Hide ref; do not keep body excerpt unless retention policy explicitly allows citation-only tombstone. |
 | Calendar event cancelled/deleted | Mark stale or cancelled; availability refs expire on TTL. |
-| momo member leaves workspace/channel | Future Context Packets cannot include personal or channel refs for that actor; memory retrieval rechecks visibility. |
+| oort member leaves workspace/channel | Future Context Packets cannot include personal or channel refs for that actor; memory retrieval rechecks visibility. |
 
-Token deletion must happen before user-facing disconnect returns success. If provider revocation API is unavailable, momo still deletes local token material and marks the grant revoked.
+Token deletion must happen before user-facing disconnect returns success. If provider revocation API is unavailable, oort still deletes local token material and marks the grant revoked.
 
 ## 10. Runtime Boundaries
 

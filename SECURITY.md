@@ -7,7 +7,7 @@ the authoritative source for supported versions and vulnerability reporting.
 
 ## Supported versions
 
-momo is pre-1.0. Security fixes are provided for the latest published `v0.x`
+oort is pre-1.0. Security fixes are provided for the latest published `v0.x`
 tag only.
 
 | Version | Supported |
@@ -28,7 +28,7 @@ form to create a private Security Advisory.
 
 Include:
 
-- the affected momo tag, image digest, and deployment mode;
+- the affected oort tag, image digest, and deployment mode;
 - the affected component and configuration, with sensitive values redacted;
 - minimal reproduction steps or a proof of concept;
 - expected and observed impact;
@@ -56,7 +56,7 @@ until a coordinated disclosure or explicit permission to publish.
 
 ## Security posture
 
-momo's production hardening includes:
+oort's production hardening includes:
 
 - **Forced tenant isolation.** Tenant tables use PostgreSQL RLS with
   `ENABLE ROW LEVEL SECURITY` and `FORCE ROW LEVEL SECURITY`; API transactions
@@ -88,10 +88,10 @@ never in source, image layers, command-line arguments, logs, diagnostics, issue
 reports, or gate evidence. Rotate credentials by trust domain rather than
 reusing values across JWT, database, relay, webhook, or provider boundaries.
 
-Under [ADR-0004](docs/adr/0004-codex-oauth-hermes-provider-boundary.md), momo
+Under [ADR-0004](docs/adr/0004-codex-oauth-hermes-provider-boundary.md), oort
 does not own, store, proxy, log, or persist Codex/OpenAI OAuth authorization
 codes, access or refresh tokens, or provider API keys. Those remain in the
-operator-selected Hermes/provider runtime. momo may hold only the opaque
+operator-selected Hermes/provider runtime. oort may hold only the opaque
 Hermes-facing bearer required to call that runtime, injected through the
 operator's secret environment and redacted from evidence.
 

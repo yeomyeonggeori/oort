@@ -1,6 +1,6 @@
 # `@momo/core`
 
-The part of momo (oort) that is the same on every screen it will ever run on.
+The part of oort that is the same on every screen it will ever run on.
 
 Extracted by goal **RN-C1** under **ADR-0137 D3**. It exists for one reason: iOS
 is being rewritten in React Native, and the decision logic this product has spent

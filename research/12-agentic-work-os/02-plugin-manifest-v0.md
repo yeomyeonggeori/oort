@@ -6,7 +6,7 @@
 
 ## 1. Purpose
 
-Plugin Manifest v0 fixes the minimum contract for momo plugins before any repo split or plugin runtime implementation. It answers:
+Plugin Manifest v0 fixes the minimum contract for oort plugins before any repo split or plugin runtime implementation. It answers:
 
 1. What can this plugin expose to a channel, agent run, source picker, or approval card?
 2. Which capability schemas can become Capability Cache `plugin_tool_schema` entries?
@@ -14,7 +14,7 @@ Plugin Manifest v0 fixes the minimum contract for momo plugins before any repo s
 4. Which source refs and memory refs can survive into Context Packet and Memory Plane?
 5. What approval, audit, source, signature, and compatibility evidence must a catalog carry?
 
-momo v0 is not a WASM marketplace and not a Paca-style catalog of backend apps. It is a governed connector ecosystem: every useful action is mediated by workspace policy, Context Packet, Capability Cache, Memory Plane, approval pause/resume, usage ledger, and audit log.
+oort v0 is not a WASM marketplace and not a Paca-style catalog of backend apps. It is a governed connector ecosystem: every useful action is mediated by workspace policy, Context Packet, Capability Cache, Memory Plane, approval pause/resume, usage ledger, and audit log.
 
 The product center remains the channel timeline execution ledger. A plugin is admitted only when its reads, proposals, approvals, tool results, usage/cost evidence, source refs, and audit events can be projected back into that ledger.
 
@@ -28,8 +28,8 @@ The product center remains the channel timeline execution ledger. A plugin is ad
 - Memory Plane retrieval uses `permissions.retrieval_policy_version`; plugin install or provider revocation can force memory revalidation but does not silently delete memory.
 - `signature.required_for_catalog = true` for any artifact in `momo-plugins`. Dev fixtures may be unsigned only when they are explicitly not catalog installable.
 - `schema_v0.sql` is unchanged by this spec. Runtime tables, registry migrations, and executors are out of scope.
-- Catalog metadata never grants execution. It only lets momo discover signed manifests, compare compatibility, and decide whether a workspace may install or project capabilities.
-- A plugin that cannot produce approval metadata and audit evidence for write-like side effects is not a momo plugin v0 catalog candidate.
+- Catalog metadata never grants execution. It only lets oort discover signed manifests, compare compatibility, and decide whether a workspace may install or project capabilities.
+- A plugin that cannot produce approval metadata and audit evidence for write-like side effects is not a oort plugin v0 catalog candidate.
 
 ## 3. Manifest Shape
 
@@ -72,7 +72,7 @@ Required fields:
 | `name` | Human-readable display name. |
 | `version` | SemVer plugin version. This feeds Capability Cache `capability_version`. |
 | `publisher` | Publisher id/name/homepage/support; no secret contacts or private keys. |
-| `runtime` | How momo reaches the plugin: connector, webhook, MCP proxy, future WASM, or internal host. |
+| `runtime` | How oort reaches the plugin: connector, webhook, MCP proxy, future WASM, or internal host. |
 | `runtime_boundary` | Trust boundary summary: process/host owner, sandbox, egress, secret boundary, and executor owner. |
 | `surfaces` | User and system surfaces exposed by the plugin. |
 | `ui_surfaces` | Client-visible surfaces: slash command, message context action, approval card, source picker, settings, and timeline card affordances. |
@@ -112,8 +112,8 @@ Catalog admission requires publisher ownership verification and signing key regi
 | Kind | Meaning | v0 status |
 |---|---|---|
 | `hosted_connector` | momo-owned connector process or worker path calls provider APIs. | Preferred v0 default. |
-| `external_webhook` | momo calls a remote HTTPS endpoint controlled by publisher/customer. | Allowed with strict egress/signature policy. |
-| `mcp_tool_proxy` | momo proxies a bounded MCP tool list into Capability Cache. | Allowed after inbound/outbound MCP policy exists. |
+| `external_webhook` | oort calls a remote HTTPS endpoint controlled by publisher/customer. | Allowed with strict egress/signature policy. |
+| `mcp_tool_proxy` | oort proxies a bounded MCP tool list into Capability Cache. | Allowed after inbound/outbound MCP policy exists. |
 | `internal` | Capability is implemented in the core monorepo but described as plugin-like metadata. | Allowed for first-party bootstrap only. |
 | `wasm` | Sandboxed in-process artifact. | Reserved M5+; not a v0 implementation default. |
 
@@ -264,7 +264,7 @@ Required:
 - `process_boundary`: `in_core_process`, `sidecar_worker`, `remote_https`, `mcp_server`, or `future_wasm`.
 - `secret_boundary`: where provider credentials and signing material live. Must never be the catalog.
 - `network_boundary`: egress allowlist and inbound webhook policy when applicable.
-- `state_boundary`: whether durable state remains in momo Postgres, provider APIs, plugin-owned storage, or none.
+- `state_boundary`: whether durable state remains in oort Postgres, provider APIs, plugin-owned storage, or none.
 - `failure_boundary`: retry/idempotency owner and how failures return to the channel timeline.
 
 ### 4.13 `tools`
@@ -299,7 +299,7 @@ Broad provider scopes are not enough. If a tool input can name arbitrary provide
 
 ### 4.15 `audit_surface`
 
-`audit_surface` binds plugin activity to momo's channel timeline execution ledger.
+`audit_surface` binds plugin activity to oort's channel timeline execution ledger.
 
 Required:
 
@@ -322,7 +322,7 @@ Required:
 - `provenance.build_digest`
 - `provenance.publisher_verification`
 
-Bundled and first-party plugins must remain permissive-license compatible with momo's Apache/MIT target. Third-party and private enterprise plugins may use their own licenses only when the catalog marks them non-bundled and workspace admins accept the separate terms.
+Bundled and first-party plugins must remain permissive-license compatible with oort's Apache/MIT target. Third-party and private enterprise plugins may use their own licenses only when the catalog marks them non-bundled and workspace admins accept the separate terms.
 
 ## 5. Plane Connections
 
@@ -480,11 +480,11 @@ Do not create SDK repos before duplication exists. Split `momo-plugin-sdk-ts`, `
 
 `momo-plugin-sdk-ts` is the likely first SDK because manifest/schema/catalog tooling is web/CLI-friendly. Swift SDK is only justified if native client extensions become real. MCP SDK is justified when external MCP servers need a stable bridge without cloning core.
 
-## 7. Paca Comparison and momo Difference
+## 7. Paca Comparison and oort Difference
 
-Paca is useful as a repo-topology reference: core, catalog, plugins, SDKs, and MCP-adjacent packages can be separated. momo must not copy Paca's plugin catalog semantics directly.
+Paca is useful as a repo-topology reference: core, catalog, plugins, SDKs, and MCP-adjacent packages can be separated. oort must not copy Paca's plugin catalog semantics directly.
 
-| Paca-like concern | momo v0 decision |
+| Paca-like concern | oort v0 decision |
 |---|---|
 | Plugin as backend extension | Plugin as governed work surface visible in the channel timeline. |
 | Catalog as installable app list | Catalog as signed capability evidence feeding Capability Cache and approval/audit gates. |

@@ -5,8 +5,8 @@
 ## 핵심 결론 3줄
 
 1. 서버측 계약(신원·런타임·컨텍스트·실행·승인)은 이미 **경로 불가지한 서버-소유 보장 매트릭스**로 설계됐고, gateway REST 계약은 Hermes SDK 없이 구현 가능 — **codex-workbench가 실증**.
-2. 그러나 오늘 붙는 방법은 Hermes SDK 상속 또는 momo 자작 어댑터 2종뿐 — "표준 어댑터 SDK"/"에이전트 셀프-온보딩(Agent Card/discovery)" 경로 **없음**(MOMO-313 blocked).
-3. 진짜 막히는 곳은 (a) **어댑터 작성**(에이전트가 momo gateway 와이어 계약을 말하게) (b) **work tool의 gateway 경로 미노출**(MOMO-486은 worker 전용) 두 지점.
+2. 그러나 오늘 붙는 방법은 Hermes SDK 상속 또는 oort 자작 어댑터 2종뿐 — "표준 어댑터 SDK"/"에이전트 셀프-온보딩(Agent Card/discovery)" 경로 **없음**(MOMO-313 blocked).
+3. 진짜 막히는 곳은 (a) **어댑터 작성**(에이전트가 oort gateway 와이어 계약을 말하게) (b) **work tool의 gateway 경로 미노출**(MOMO-486은 worker 전용) 두 지점.
 
 ## (a) 연동 표면 전체 지도 — 5계층
 
@@ -49,7 +49,7 @@
 | | `adapters/hermes/momo_adapter.py`(2438줄) | `adapters/codex-workbench/codex_workbench.py`(1279줄) |
 |---|---|---|
 | Hermes SDK | **의존**(`BasePlatformAdapter` 상속 `:124-135`, hermes_runtime 주입 `:426`) | **무의존** — 순수 stdlib, gateway REST 직접 `:347-451` |
-| momo 프로토콜 부분 | agentwork: 구독 `:738-757`, pending claim `:1077-1138`, redaction `:65-91` | 동일 계약 독립 구현 `:351-404` |
+| oort 프로토콜 부분 | agentwork: 구독 `:738-757`, pending claim `:1077-1138`, redaction `:65-91` | 동일 계약 독립 구현 `:351-404` |
 | 실행 엔진 | Hermes 소유 provider(OpenAI-compat SSE) | 호스트 codex CLI(`CodexRunner` `:462-609`) |
 
 → **서드파티 온보딩의 출발점은 momo_adapter.py가 아니라 codex_workbench.py 복제.**
@@ -57,7 +57,7 @@
 ## inbound MCP skeleton 실체
 
 - `InboundMCPRoutes.swift:14-18` HTTP 골격(JSON-RPC 아님), preflight 실수행·실행은 `momo.mcp.runtime_stub` 에러 `:71-91`. 툴 4종+resource/prompt 정의 `InboundMCPToolRegistry.swift:18-259`, protocolVersion "2025-06-18" `:11`, runtime-unverified `:288`. `mcp.*` 스코프 발급 경로 없음(`research/13-redesign/01:35`).
-- 1급 멤버 온보딩에는 필수 아님(그건 gateway 경로) — momo를 "컨텍스트 소스 MCP"로 소비하는 시나리오에서만 필수.
+- 1급 멤버 온보딩에는 필수 아님(그건 gateway 경로) — oort를 "컨텍스트 소스 MCP"로 소비하는 시나리오에서만 필수.
 
 ## 프로토콜 표준화 논의 — 이미 있었고, blocked
 
@@ -69,7 +69,7 @@
 
 **바로 되는 것**: ①생성 REST ②bearer 발급 ③채널 초대 ④gateway 어댑터(codex-workbench 템플릿 — 인증·리스·redaction·idempotency 복붙 가능) ⑤승인·비용·감사(서버 자동).
 
-**작성 필요(어댑터 레벨, 코어 무수정)**: ⑥출력→momo 이벤트 번역(`_render_codex_event` `:1064-1089`·`_structured_completion` `:953-979`·`_gateway_usage` `:1092-1107` 상당) ⑦권한 모델→승인 티어 매핑.
+**작성 필요(어댑터 레벨, 코어 무수정)**: ⑥출력→oort 이벤트 번역(`_render_codex_event` `:1064-1089`·`_structured_completion` `:953-979`·`_gateway_usage` `:1092-1107` 상당) ⑦권한 모델→승인 티어 매핑.
 
 **코어 수정 필요(막힘)**:
 - **[막힘 A] work tool의 gateway 경로 미노출** — work tool-call 배선은 worker 전용(`WorkerService.swift:358-410`, WorkToolDispatcher). gateway BYOA 노출은 명시적 후속(`QA_FOLLOWUP.md:39`). → gateway로 붙인 서드파티는 "대화"는 되지만 "CLI 스폰"은 안 됨.

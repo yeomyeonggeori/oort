@@ -90,7 +90,7 @@ pub async fn enroll(
     Path(workspace): Path<String>,
     Json(request): Json<EnrollByocHostRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
-    require_human(&principal, "momo Cloud management requires a human member")?;
+    require_human(&principal, "oort Cloud management requires a human member")?;
     let workspace_id = workspace_scope(&workspace, &principal)?;
     let public_base_url = ready_t3(&state.t3)?;
 
@@ -256,7 +256,7 @@ pub async fn register_cloud_host(
                     if claim.provision_id != expected {
                         return Ok(Err(ApiError::new(
                             StatusCode::CONFLICT,
-                            "momo Cloud registration lifecycle changed; retry",
+                            "oort Cloud registration lifecycle changed; retry",
                         )));
                     }
                     let host_id = insert_work_host(
@@ -300,7 +300,7 @@ pub async fn get_cloud_host(
     Extension(principal): Extension<Principal>,
     Path((workspace, provision)): Path<(String, String)>,
 ) -> Result<Json<CloudHostResponse>, ApiError> {
-    require_human(&principal, "momo Cloud management requires a human member")?;
+    require_human(&principal, "oort Cloud management requires a human member")?;
     if !state.t3.enabled {
         return Err(t3_disabled());
     }
@@ -318,7 +318,7 @@ pub async fn get_cloud_host(
         })
         .await,
     )?
-    .ok_or_else(|| ApiError::not_found("momo Cloud host not found"))?;
+    .ok_or_else(|| ApiError::not_found("oort Cloud host not found"))?;
 
     Ok(Json(CloudHostResponse {
         cloud_host: CloudHostDto {

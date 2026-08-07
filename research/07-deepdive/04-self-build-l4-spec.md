@@ -1,4 +1,4 @@
-# momo — L4 빌드 스펙 (통합본)
+# oort — L4 빌드 스펙 (통합본)
 
 > 에이전트 1급 멀티테넌트 메신저. 6개 설계축 + 3개 보강(outbox / 비용회계 / APNs)을 단일 정합 설계로 통합. 코딩 에이전트가 바로 구현 착수 가능한 수준. 모든 DDL은 정본 `/Users/kwakseongjae/projects/momo/schema_v0.sql`(PostgreSQL 18, `uuidv7()` PK, member 추상화, `channel_seq` 행카운터)에 정합되도록 조정함. **축 간 불일치는 §0.5에서 리드 아키텍트 권한으로 확정 조정.**
 >
@@ -513,7 +513,7 @@ public enum AgentEvent: Sendable {
 
 ### 6.2 역할 분리 이중 실행 경로 (ADR-0102 Option C)
 
-에이전트 유형에 따라 두 경로가 모두 공식이다. `worker`는 momo가 runtime을 소유하는 **managed** 경로, `gateway`는 사용자가 Hermes/provider runtime을 소유하는 **BYOA** 경로다. `AGENT_GATEWAY_MODE=worker|gateway`는 전달 방식만 고르며, `agent_run`·Context Packet·approval·usage/audit·message/outbox의 권위는 항상 MomoServer/Postgres에 있다.
+에이전트 유형에 따라 두 경로가 모두 공식이다. `worker`는 oort가 runtime을 소유하는 **managed** 경로, `gateway`는 사용자가 Hermes/provider runtime을 소유하는 **BYOA** 경로다. `AGENT_GATEWAY_MODE=worker|gateway`는 전달 방식만 고르며, `agent_run`·Context Packet·approval·usage/audit·message/outbox의 권위는 항상 MomoServer/Postgres에 있다.
 
 ```mermaid
 flowchart LR

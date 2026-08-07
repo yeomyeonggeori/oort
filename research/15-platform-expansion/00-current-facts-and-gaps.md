@@ -17,7 +17,7 @@
 
 | 도메인 | 있는 것 | 없는 것 | 기존 예약 |
 |---|---|---|---|
-| 푸시 | `device`/`push_token`/`push_dispatch_log` 테이블(`001_init.sql:506-543`), APNs 운영 상수 문서(`docs/DEPLOY.md:447-451`) | 토큰 등록 라우트, 발송 worker, 판정 로직, **momo 운영 push relay(신규 결정 필요)** | M5 · MOMO-040~043 |
+| 푸시 | `device`/`push_token`/`push_dispatch_log` 테이블(`001_init.sql:506-543`), APNs 운영 상수 문서(`docs/DEPLOY.md:447-451`) | 토큰 등록 라우트, 발송 worker, 판정 로직, **oort 운영 push relay(신규 결정 필요)** | M5 · MOMO-040~043 |
 | presence/typing | Centrifugo namespace presence 켜짐(`infra/centrifugo.json:4,9,12`), 클라 `PresenceDelta`/`TypingDelta` 모델, `ChatBackend.setTyping` 프로토콜 | 서버 소유 경로 전무 — `setTyping`은 no-op(`MomoServerRESTChatBackend.swift:562`), heartbeat 없음 | ADR-0104 (결정 큐) |
 | 파일 | `file` 테이블 + `message_type='artifact'`(`001_init.sql:227-246`), Drive 설계(`research/13-redesign/03`)·GWS 런북 | 업로드/서빙 라우트, 클라 경로 전부 | **동결** — ADR-0113/0116 게이트 |
 | 웹훅 | 채널 설정 placeholder 탭(`MomoAccountSettingsViews.swift:1060-1065`) | 발급·서명·수신 전부 | ADR-0115 + SE-04A/B |

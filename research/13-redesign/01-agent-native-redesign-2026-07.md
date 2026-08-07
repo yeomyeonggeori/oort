@@ -1,4 +1,4 @@
-# momo 재설계 — "이럴 거면 Slack 쓰지" 방지 설계서 (2026-07)
+# oort 재설계 — "이럴 거면 Slack 쓰지" 방지 설계서 (2026-07)
 
 > 생성: 2026-07-06 · 입력 = 전체 코드베이스 심층 분석(클라/서버/문서 3트랙) + 외부 레퍼런스 리서치 2트랙(astryx·openagents·Codex app·Slack Kit·Discord·Compass·Apple on-device AI·pgvector).
 > 성격: **정본 스펙이 아니라 재설계 방향 문서.** 채택 시 각 트랙을 `docs/BACKLOG.md` 티켓(MOMO-3XX 제안 번호)으로 변환한다.
@@ -8,7 +8,7 @@
 
 ## 0. 한 줄 결론
 
-momo의 **에이전트 네이티브 코어(스키마·outbox·seq·비용회계·승인)는 이미 경쟁력이 있다.**
+oort의 **에이전트 네이티브 코어(스키마·outbox·seq·비용회계·승인)는 이미 경쟁력이 있다.**
 지금 위험한 것은 반대쪽이다: **메신저로서의 기본기(스레드·검색·파일·마크다운·알림)와 디자인 시스템이 통째로 비어 있고, 에이전트가 실제로는 "기억 없는 단발 호출"이라는 것.**
 "이럴 거면 Slack 쓰지"는 에이전트 기능이 부족해서가 아니라 **메신저 기본기가 부족해서** 나오는 말이다. 재설계의 절반은 기본기 회복, 절반은 이미 설계된 에이전트 프리미티브를 표준 프로토콜(MCP/A2A/AG-UI) 위에 올리는 것이다.
 
@@ -54,11 +54,11 @@ momo의 **에이전트 네이티브 코어(스키마·outbox·seq·비용회계�
 
 ## 2. 레퍼런스 → 채택 결정
 
-| 레퍼런스 | 실체 (2026-07 검증) | momo가 가져올 것 |
+| 레퍼런스 | 실체 (2026-07 검증) | oort가 가져올 것 |
 |---|---|---|
-| **facebook/astryx** | Meta의 오픈소스 디자인 시스템(React+StyleX, "agent ready", MCP 서버/CLI 동봉). 메신저 아님 | 코드가 아니라 **철학**: 디자인 시스템·문서·API를 사람과 LLM이 같은 인터페이스로 소비("one API for humans and AI"). momo 자신이 `llms.txt` + 자기 MCP 서버를 가진 agent-ready 제품이 될 것. 예측 가능한 네이밍 규약 |
+| **facebook/astryx** | Meta의 오픈소스 디자인 시스템(React+StyleX, "agent ready", MCP 서버/CLI 동봉). 메신저 아님 | 코드가 아니라 **철학**: 디자인 시스템·문서·API를 사람과 LLM이 같은 인터페이스로 소비("one API for humans and AI"). oort 자신이 `llms.txt` + 자기 MCP 서버를 가진 agent-ready 제품이 될 것. 예측 가능한 네이밍 규약 |
 | **openagents-org/openagents** | "Slack, but for agents" — 워크스페이스+런처+Network SDK(Python, MCP/A2A 지원). 가장 가까운 유사체 | ① **세션 모델 그대로 이식**: 에이전트 컨텍스트 키 = `(workspace, agent, channel)`, 채널=컨텍스트 경계, 채널 내 직렬 실행, 재시작 생존·자가치유 ② 이벤트 네이티브 에이전트 SDK(`on_channel_post`/`on_mention` 핸들러 + fluent reply) ③ 단일 포트 `/a2a` + `/mcp` 레이아웃, `/.well-known/agent.json` Agent Card ④ 거버넌스: process-tree kill Stop, inactivity watchdog, max-turns |
-| **OpenAI Codex app** | Electron(비공개). 오픈소스는 CLI/TUI(Rust)만. 네이티브 장인정신의 모범은 아님 | **인터랙션 문법**: 스레드=에이전트 세션(+워크트리 격리), 승인 = 상태 라이프사이클(Reviewing/Approved/Denied/Aborted/Timed-out)을 가진 1급 타입 메시지, **sandbox 수준 × 승인 정책 2축 분리**, diff는 별도 화면이 아닌 메시지-레벨 아티팩트. momo 스키마와 놀랍도록 호환 — 렌더 문법만 가져오면 됨 |
+| **OpenAI Codex app** | Electron(비공개). 오픈소스는 CLI/TUI(Rust)만. 네이티브 장인정신의 모범은 아님 | **인터랙션 문법**: 스레드=에이전트 세션(+워크트리 격리), 승인 = 상태 라이프사이클(Reviewing/Approved/Denied/Aborted/Timed-out)을 가진 1급 타입 메시지, **sandbox 수준 × 승인 정책 2축 분리**, diff는 별도 화면이 아닌 메시지-레벨 아티팩트. oort 스키마와 놀랍도록 호환 — 렌더 문법만 가져오면 됨 |
 | **Slack Kit** | 점진적 디자인 시스템 구축기 | **"ugly mode"**: 토큰 미사용 색을 디버그 테마에서 형광색으로 노출 → SwiftUI에서 저비용 재현, day-1 도입. 사용자 테마 입력 9→4개 축소 + 시맨틱 램프 파생 |
 | **Discord 2025 리디자인** | 밀도 3단이 1급 설정 | **Density(compact/default/spacious)를 토큰 차원으로** — 뷰별 해킹 금지 |
 | **Mattermost Compass** | Foundations→Components→Patterns 계층. 서버 테마 JSON을 유저에게 노출 | 패턴 택소노미(Channel Sidebar/Header/Right Sidebar) + **self-hosted 어드민이 테마 JSON으로 클라를 테마링**하는 관행 |
@@ -113,7 +113,7 @@ Density    : compact / default / spacious — spacing·lineHeight 토큰을 스�
 
 1. **세션 모델 (openagents 이식):** 에이전트 컨텍스트 키 = `(workspace_id, agent_member_id, channel_id)`. 채널=컨텍스트 경계, 채널 내 직렬(이미 partition_key로 보장), 스레드 시작 = 새 서브세션. `agent_run`에 `session_key` 파생 컬럼.
 2. **컨텍스트 조립 v1 (최우선 버그 수준):** WorkerService의 단일 메시지 전송을 폐기. Context Packet v0 스펙대로 조립 — recent N messages(스레드 우선) + 토큰 예산 내 슬라이딩 윈도 + Memory Plane 조회. **Context Broker를 서버 서비스로 티켓화**(스펙은 이미 research/10·11에 완성).
-3. **Inbound MCP 실구현:** JSON-RPC 전송으로 교체, 4개 도구(search/fetch_thread/post/create_tool_call) 실동작, `mcp.*` scope 발급 플로우(admin install). → 외부 에이전트(Claude Code, Codex CLI 등)가 momo를 도구로 쓰는 입구.
+3. **Inbound MCP 실구현:** JSON-RPC 전송으로 교체, 4개 도구(search/fetch_thread/post/create_tool_call) 실동작, `mcp.*` scope 발급 플로우(admin install). → 외부 에이전트(Claude Code, Codex CLI 등)가 oort를 도구로 쓰는 입구.
 4. **A2A Agent Card:** `/.well-known/agent.json` + `agents/announce` 등록 플로우(openagents 단일 포트 레이아웃). 에이전트 초대 = Card fetch → member(kind=agent) 생성 → 채널 멤버십. "에이전트 초대가 자유로운" 목표의 프로토콜적 실현.
 5. **AG-UI 정렬:** 기존 `agent.partial`/`agent.status`/`approval` envelope의 필드명·이벤트 종류를 AG-UI 어휘(RunStarted/ToolCallStart/ToolCallEnd/StateDelta/RunFinished)에 맞춰 정규화. 자체 발명 최소화 + 외부 프런트엔드 호환.
 6. **BYOK:** `provider_config` 테이블(workspace 단위, 필요시 agent 단위 override) — base_url, 모델, **암호화된 key**(age/KMS 봉투 암호화, 평문 컬럼 금지), 회전 감사로그. UI = Settings > AI Providers. ADR-0004 경계 유지(Codex OAuth 토큰은 여전히 provider 소유).
@@ -181,7 +181,7 @@ pgvector ≥0.8.4 halfvec HNSW             FoundationModels (~3B, 4k ctx)
 
 ---
 
-## 5. "왜 Slack이 아니라 momo인가"에 대한 답 (재설계 후)
+## 5. "왜 Slack이 아니라 oort인가"에 대한 답 (재설계 후)
 
 1. **에이전트가 봇이 아니라 멤버다** — presence·lifecycle·비용·감사를 가진 member(kind=agent). Slack 봇은 웹훅이다.
 2. **타임라인이 실행 원장이다** — tool call·승인·diff·비용이 채팅 버블이 아니라 상태 라이프사이클을 가진 1급 메시지 (Codex의 문법을 팀 채널로).

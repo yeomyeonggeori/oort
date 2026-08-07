@@ -82,7 +82,7 @@ ADR-0137:20은 승계 자산을 "NSE 62줄 + `PushNotification.swift` 329줄 + *
 - `MomoiOSPushKit` 안에서는 5행의 **상수 선언뿐**이고 참조하는 코드가 없다.
 - NSE의 entitlement 파일에는 App Group이 **선언돼 있다**(`clients/iOS/NotificationService/MomoiOSNotificationService.entitlements:5-8`). 즉 선언은 있는데 그 프로세스의 코드가 쓰지 않는다.
 
-**따라서 앱↔NSE 사이의 load-bearing 공유 채널은 App Group이 아니라 Keychain access group(`$(AppIdentifierPrefix)app.momo.ios.shared`)이다.** 이식 시 반드시 살려야 하는 것은 후자다. 이것은 실무적으로 중요한 차이다 — App Group만 맞추고 Keychain access group을 놓치면 NSE는 크래시 없이 **조용히 fail-open**해서 placeholder("momo / 새 알림")만 계속 띄운다(`NotificationService.swift:26-30`의 `else` 분기). 증상이 "푸시는 오는데 내용이 안 채워짐"으로 나타나므로 원인 추적이 어렵다.
+**따라서 앱↔NSE 사이의 load-bearing 공유 채널은 App Group이 아니라 Keychain access group(`$(AppIdentifierPrefix)app.momo.ios.shared`)이다.** 이식 시 반드시 살려야 하는 것은 후자다. 이것은 실무적으로 중요한 차이다 — App Group만 맞추고 Keychain access group을 놓치면 NSE는 크래시 없이 **조용히 fail-open**해서 placeholder("oort / 새 알림")만 계속 띄운다(`NotificationService.swift:26-30`의 `else` 분기). 증상이 "푸시는 오는데 내용이 안 채워짐"으로 나타나므로 원인 추적이 어렵다.
 
 **미검증(측정 필요):** `IOSNotificationPreferences.swift:43`과 `SessionStore.swift:18`은 `UserDefaults(suiteName:)`를 **강제 언랩(`!`)** 한다. App Group entitlement가 없는 빌드에서 이 이니셜라이저가 `nil`을 반환하는지 여부는 Apple 문서가 명시하지 않는다(문서화된 `nil` 반환 조건은 suiteName이 번들 ID이거나 `globalDomain`인 경우뿐). `nil`이라면 **앱이 즉시 크래시**한다. RN 이식에서 App Group을 뺄지 말지는 이 동작을 실측한 뒤 정해야 한다 — 추측으로 빼면 부팅 크래시를 만들 수 있다.
 

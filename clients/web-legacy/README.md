@@ -1,4 +1,4 @@
-# momo web client (v0, `clients/web-legacy`)
+# oort web client (v0, `clients/web-legacy`)
 
 > **경로 이력 (MOMO-596 / ADR-0133):** 이 클라이언트는 `clients/web`에 있었고
 > 2026-07-25에 `clients/web-legacy`로 이동했다. 정본 UI 경로 `clients/web`은
@@ -46,7 +46,7 @@ W-6(#605)는 read-only Work 세션 목록과 root thread 관전, observer 터미
 
 ### 공개 배포 전 승격 게이트 (필수, ADR-0119 D3-B)
 
-**이 저장 모델은 내부 알파 전용이다.** momo 웹을 내부 알파 밖(공개 알파 포함)
+**이 저장 모델은 내부 알파 전용이다.** oort 웹을 내부 알파 밖(공개 알파 포함)
 어떤 대상에게든 배포하기 전에, 아래를 완료해야 한다:
 
 1. refresh token 보관을 `localStorage`에서 **httpOnly Secure SameSite=Strict

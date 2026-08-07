@@ -1,4 +1,4 @@
-# momo Plugin Platform Product Proposal
+# oort Plugin Platform Product Proposal
 
 > Planning ID: `PLN-20260716-01`
 > Updated: 2026-07-16
@@ -9,7 +9,7 @@
 
 > 필요한 도구를 워크스페이스에 설치하고, 각 사용자가 자기 계정을 연결하면, 사람과 에이전트가 같은 채널에서 출처·권한·승인 기록을 남기며 함께 일한다.
 
-momo의 차별점은 plugin 개수가 아니라 plugin으로 수행한 일이 channel execution ledger에 남는다는 점이다.
+oort의 차별점은 plugin 개수가 아니라 plugin으로 수행한 일이 channel execution ledger에 남는다는 점이다.
 
 ## 2. Product model
 
@@ -48,7 +48,7 @@ momo의 차별점은 plugin 개수가 아니라 plugin으로 수행한 일이 ch
 - Connection badge: N명 연결, 연결 필요, 정책 차단
 - Runtime badge: Healthy, Setup required, Degraded, Revoked
 
-Codex의 icon strip과 featured catalog는 참고하되, momo는 각 plugin card에 **누가 어떤 데이터와 action을 허용하는지**를 먼저 보여준다.
+Codex의 icon strip과 featured catalog는 참고하되, oort는 각 plugin card에 **누가 어떤 데이터와 action을 허용하는지**를 먼저 보여준다.
 
 ### 3.2 Install flow
 
@@ -128,7 +128,7 @@ Cache invalidation trigger:
 2. Member chooses `Google 계정 연결`.
 3. v0 requests selected-file access using `drive.file` and Google Picker.
 4. Member selects one or more file IDs. 업로드가 필요하면 별도의 target folder를 선택한다. 선택 폴더의 재귀 검색은 `drive.file`의 암묵적 권한으로 간주하지 않는다.
-5. momo creates connection metadata and source allow-list; token custody follows accepted ADR-0113.
+5. oort creates connection metadata and source allow-list; token custody follows accepted ADR-0113.
 6. Channel owner enables `Drive search/read/cite` and optionally `upload/create`.
 
 ### 5.2 Ask and produce
@@ -141,7 +141,7 @@ Expected execution:
 
 1. agent receives only granted Drive tools and selected resource scope.
 2. Drive documents become bounded source refs with citations.
-3. artifact is generated in momo Work runtime.
+3. artifact is generated in oort Work runtime.
 4. upload tool call pauses for approval with target folder, filename and mime type.
 5. approval resumes same agent run.
 6. Drive upload result returns a source URL and file id.
@@ -161,8 +161,8 @@ Expected execution:
 - Plugin manifest, Context Packet, Memory Plane, Capability Cache, audit log에는 raw token이 없다.
 - OAuth connection id and encrypted secret record are separate.
 - Hosted connector token storage requires Accepted ADR-0113 and key rotation/delete/export runbook.
-- Remote MCP uses its own OAuth audience and cannot receive momo access token by passthrough.
-- BYOA/Hermes may own provider credentials, but momo still owns channel grant, approval, result and audit.
+- Remote MCP uses its own OAuth audience and cannot receive oort access token by passthrough.
+- BYOA/Hermes may own provider credentials, but oort still owns channel grant, approval, result and audit.
 - disconnect/revoke/delete must invalidate capability cache before UI reports completion.
 
 ### 6.1 Remote runtime egress boundary

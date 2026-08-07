@@ -1,9 +1,9 @@
-# momo codex-workbench gateway adapter
+# oort codex-workbench gateway adapter
 
 `codex-workbench` is the Work v0 reference BYOA runner from ADR-0111 D5. It
-claims momo `agent_job` rows through the scoped gateway REST surface and runs a
-host-installed Codex CLI non-interactively. momo remains the execution ledger;
-the momo server never starts Codex or receives Codex/provider credentials.
+claims oort `agent_job` rows through the scoped gateway REST surface and runs a
+host-installed Codex CLI non-interactively. oort remains the execution ledger;
+the oort server never starts Codex or receives Codex/provider credentials.
 
 ## Runtime contract
 
@@ -12,7 +12,7 @@ the momo server never starts Codex or receives Codex/provider credentials.
 3. Map the configured sandbox policy:
    - `read-only`: run `codex exec --json -s read-only` immediately.
    - `workspace-write`: prepare a read-only plan, preserve the `thread.started`
-     session ID in host-local mode-0600 state, request momo approval with
+     session ID in host-local mode-0600 state, request oort approval with
      `tier=workspace_write`, then run `codex exec resume <session-id>` with
      `-s workspace-write` only after an approved resume job.
    - `network-write`, provider credential transfer, `danger-full-access`,
@@ -33,13 +33,13 @@ retry the callback without rerunning a finished Codex turn.
 ## Credential boundary
 
 - `MOMO_AGENT_TOKEN` is the only credential read by the adapter. It is used only
-  as the momo REST bearer, is removed from the Codex subprocess environment,
+  as the oort REST bearer, is removed from the Codex subprocess environment,
   and is redacted from errors/transcript.
 - Codex login/OAuth and repository credentials remain in the operator's Codex
   installation. The adapter does not read `CODEX_HOME`, auth files, keychains,
   provider environment variables, or Git credential stores.
 - The Codex subprocess inherits the host runtime as a normal local CLI process;
-  no credential value is serialized into momo callbacks, local state, argv, or
+  no credential value is serialized into oort callbacks, local state, argv, or
   result cards.
 
 ## Configure and run
@@ -48,10 +48,10 @@ Required environment:
 
 | Variable | Meaning |
 |---|---|
-| `MOMO_API_URL` | momo REST base URL. Non-loopback plaintext requires the explicit private-network opt-in below. |
+| `MOMO_API_URL` | oort REST base URL. Non-loopback plaintext requires the explicit private-network opt-in below. |
 | `MOMO_WORKSPACE_ID` | Workspace UUID. |
 | `MOMO_AGENT_MEMBER_ID` | Active Work-capable agent member UUID. |
-| `MOMO_AGENT_TOKEN` | Scoped per-agent momo bearer; never a Codex/provider token. |
+| `MOMO_AGENT_TOKEN` | Scoped per-agent oort bearer; never a Codex/provider token. |
 | `MOMO_CODEX_WORKSPACE` | Existing local workspace used as Codex `--cd`. The Work payload's `repo` is a label and cannot redirect the filesystem root. |
 
 Optional environment:
@@ -62,7 +62,7 @@ Optional environment:
 | `MOMO_CODEX_BIN` | `codex` | Host Codex executable path/name; invoked with an argv array, never a shell. |
 | `MOMO_CODEX_STATE_DIR` | `~/.local/state/momo-codex-workbench` | Mode-0700 directory containing mode-0600 resume/result state. Keep it outside the repository. |
 | `MOMO_CODEX_POLL_INTERVAL_SECONDS` | `2` | Idle pending-claim interval. |
-| `MOMO_CODEX_HTTP_TIMEOUT_SECONDS` | `15` | momo REST timeout. |
+| `MOMO_CODEX_HTTP_TIMEOUT_SECONDS` | `15` | oort REST timeout. |
 | `MOMO_AGENT_ALLOW_INSECURE_HTTP` | unset | Set to `1` only for a trusted non-loopback private-network HTTP endpoint. |
 
 ```sh
@@ -77,7 +77,7 @@ starting it.
 ## Login-free contract checks
 
 These tests execute only the repo-local mock Codex binary. They do not connect to
-DB, Docker, verifier services, momo, or a real Codex/provider account.
+DB, Docker, verifier services, oort, or a real Codex/provider account.
 
 ```sh
 python3 -m unittest discover \
@@ -90,6 +90,6 @@ python3 -m py_compile \
 bash -n adapters/codex-workbench/run.sh
 ```
 
-The real Codex roundtrip, real momo approval resume, and merged
+The real Codex roundtrip, real oort approval resume, and merged
 `runtime-agent` gate remain `runtime-unverified` for the worker and are performed
 only by the momo-main orchestrator.
