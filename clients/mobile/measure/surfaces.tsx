@@ -609,6 +609,37 @@ function Row({
   );
 }
 
+/**
+ * ADR-0155 — 자라다 만 답 한 줄.
+ *
+ * 본문은 **문장 중간에서 끊긴다**. 완성된 문장으로 찍으면 이 배치가 무엇을 고쳤는지
+ * 사진에서 사라진다: 논점은 「반쪽 답이 완결된 답의 옷을 입지 않는가」이고, 그
+ * 대비는 본문이 실제로 끊겨 있을 때만 눈에 온다.
+ */
+function StoppedRow({
+  marker,
+  runEnded = false,
+}: {
+  marker: Record<string, unknown>;
+  runEnded?: boolean;
+}) {
+  return (
+    <MessageRow
+      message={{
+        ...MESSAGE,
+        id: `stop-${String(marker.rev)}-${String(marker.outcome ?? 'none')}`,
+        body: '배포 로그를 보면 첫 번째 원인은',
+        props: {'momo.stream': marker},
+      }}
+      startsGroup
+      directory={DIRECTORY}
+      chips={[]}
+      nowMs={NOW + 900_000}
+      runEnded={runEnded}
+    />
+  );
+}
+
 export function Surface({name}: {name: string}): React.JSX.Element {
   const styles = useStyles(buildStyles);
   // 이슈 #1112 — 고정 여부만 다른 두 시트. 낱말이 상태를 따라 뒤집히는 것을 한
@@ -1024,6 +1055,27 @@ export function Surface({name}: {name: string}): React.JSX.Element {
       return (
         <Frame label="행 — 반응 칩과 스레드 앵커는 항상 보이는 진입점">
           <Row />
+        </Frame>
+      );
+    // ---- ADR-0155 (#1160): 멈춘 답의 꼬리 ------------------------------------
+    //
+    // 세 판을 **한 장에** 세운다. 논점이 「이 낱말이 예쁜가」가 아니라 「끊긴 답이
+    // 완결된 답과 구별되는가, 그러면서도 강조가 되지는 않는가」이기 때문이다 —
+    // 그 주장은 세 행이 나란히 설 때만 사진에서 확인된다. 위에서부터: 잘 끝난 답
+    // (아무 말 없음) · 사람이 멈춘 답(「중단됨」) · 닫는 PATCH 가 못 닿아 열린 채
+    // 남은 답(「응답이 끊김」).
+    //
+    // 세 번째가 특히 사진에 있어야 하는 판이다. 그것은 서버가 아무 도장도 못 찍은
+    // 경우이고, 화면이 스스로 알아본 것이라 코드만 읽어서는 무엇이 그려지는지
+    // 아무도 확인할 수 없다.
+    case 'stream-stop':
+      return (
+        <Frame label="멈춘 답 — 완결 · 중단됨 · 응답이 끊김 (ADR-0155)">
+          <StoppedRow marker={{rev: 17, streaming: false}} />
+          <StoppedRow
+            marker={{rev: 6, streaming: false, outcome: 'cancelled'}}
+          />
+          <StoppedRow marker={{rev: 9, streaming: true}} runEnded />
         </Frame>
       );
     // ---- U2: 스킴을 고르는 세 칸, 그리고 그 옆의 진짜 행 ----------------------
