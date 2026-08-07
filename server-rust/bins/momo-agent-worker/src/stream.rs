@@ -172,7 +172,16 @@ impl MessageStream {
                         author_member_id,
                         message_type: MessageType::Text,
                         body: Some(body),
-                        props: serde_json::json!({}),
+                        // ADR-0155 — the growing message names its own run.
+                        //
+                        // Every other agent message already does (`success_props`,
+                        // `failure_props`); this path was the one that did not,
+                        // and the gap only became visible when a client needed to
+                        // ask "is the run behind this half-written message over?"
+                        // — the defensive half of the render rule. `run_id` the
+                        // COLUMN is set below and is not serialized on the wire,
+                        // so props is the only place a reader can find it.
+                        props: serde_json::json!({ "run_id": run_id }),
                         root_id: None,
                         // ADR-0148 규칙 6 — the answer quotes the utterance that
                         // raised it, exactly as `commit_turn` does. Streaming

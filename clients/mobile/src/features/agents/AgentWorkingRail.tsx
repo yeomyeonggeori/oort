@@ -12,6 +12,7 @@ import {
 import {resolveAgentWorkingSignals} from '@momo/core/features/agents/workingSignal';
 import type {AgentProgressEvent} from '@momo/core/lib/realtimeEvents';
 import {useCallback, useEffect, useMemo, useRef} from 'react';
+import {observeAgentProgress, resetEndedRuns} from './endedRuns';
 import {useInvalidateInboxLedgers} from '../inbox/useInbox';
 import {useRealtime} from '../../realtime/RealtimeProvider';
 import {useSession} from '../../session/useSession';
@@ -159,6 +160,9 @@ export function AgentWorkingRail(): null {
           invalidateInboxLedgers();
         }
       }
+      // ADR-0155 — `applyAgentEvent` 가 끝난 run 을 트랙에서 지우기 전에 적는다.
+      // 그 기록이 없으면 「run 은 끝났는데 stream 은 열림」을 영영 알 수 없다.
+      observeAgentProgress(event);
       const next = applyAgentEvent(tracksRef.current, event, pair, nowMs);
       // 트랙이 그대로여도 위의 무효화는 이미 일어났고, 그래야 한다. 끝난 런은
       // `applyAgentEvent` 가 트랙에서 **지우고** 같은 맵을 돌려줄 수 있는데,
@@ -218,6 +222,7 @@ export function AgentWorkingRail(): null {
       ownedRef.current = new Set();
       runStatusRef.current = new Map();
       resetAgentWorking();
+      resetEndedRuns();
     };
   }, [workspaceId]);
 

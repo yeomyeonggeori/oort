@@ -21,6 +21,8 @@ import {
   foldDeletedRuns,
   type DeletedFoldFields,
 } from "@momo/core/features/timeline/deletedFold";
+import { isStreamRunEnded } from "@momo/core/features/timeline/streamStop";
+import { useEndedRuns } from "@/features/agents/endedRuns";
 import {
   DayDivider,
   MessageRow,
@@ -233,6 +235,11 @@ export function Timeline({
     ]
   );
 
+  // ADR-0155 — 끝난 것을 **본** run 들. 여기서 한 번 구독하고 행에는 boolean 하나만
+  // 내려 보낸다. 행마다 구독하면 아무 run 이나 끝날 때 화면의 모든 줄이 다시 그려지고,
+  // 이 목록은 가상화되어 있어서 그 비용이 바로 스크롤로 나온다.
+  const endedRuns = useEndedRuns();
+
   // Derived during render, not in an effect: virtuoso has to receive the new
   // `data` and the lowered `firstItemIndex` together or the correction lands a
   // frame late, which is exactly the jump it is meant to prevent. Keyed on the
@@ -434,6 +441,7 @@ export function Timeline({
               quoteLookup={quoteLookup}
               onOpenWorkSession={onOpenWorkSession}
               onResend={onResend}
+              runEnded={isStreamRunEnded(item.message, endedRuns)}
             />
           );
         }}

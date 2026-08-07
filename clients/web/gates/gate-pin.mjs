@@ -168,6 +168,12 @@ const LIVE_PINNED_MSG = "0199bbbb-0000-7000-8000-0000000000c2";
 const PLAIN_MSG = "0199bbbb-0000-7000-8000-0000000000c3";
 const CAPPED_MSG = "0199bbbb-0000-7000-8000-0000000000c4";
 /**
+ * ADR-0155 — 사람이 정지를 눌러 얼어붙은 답. 꼬리 낱말이 하나 더 생겼으므로,
+ * 「한 줄에 안쪽부터」 계약을 재는 이 게이트가 그 낱말도 함께 잰다. 별도 게이트를
+ * 세우지 않는 이유는 계약이 하나이기 때문이다 — 두 곳에서 재면 한 곳만 고쳐진다.
+ */
+const STOPPED_MSG = "0199bbbb-0000-7000-8000-0000000000c5";
+/**
  * 본문이 없는 메시지 (#1149 M4). 고정 목록은 그 자리에 앱의 서술을 그리고, 그
  * 서술이 저자의 말과 같은 결로 서면 사람은 앱의 해명을 남의 말로 읽는다.
  */
@@ -176,6 +182,7 @@ const VOICELESS_MSG = "0199bbbb-0000-7000-8000-0000000000c5";
 const COLD_BODY = "배포 순서는 이 문서가 정본입니다. 롤백까지 여기 있습니다.";
 const LIVE_BODY = "온콜 교대는 매주 화요일 10시입니다.";
 const PLAIN_BODY = "확인했습니다.";
+const STOPPED_BODY = "배포 로그를 보면 첫 번째 원인은";
 const CAPPED_BODY = "이 채널은 고정이 꽉 찼습니다.";
 
 const session = {
@@ -268,6 +275,18 @@ function historyPage() {
       state: "edited",
     }),
     row({ id: CAPPED_MSG, seq: 44, authorMemberId: memberId, body: CAPPED_BODY }),
+    // ADR-0155 — 에이전트가 쓰다 만 답. `outcome` 은 서버가 닫는 PATCH 로 찍은
+    // 도장이고, 본문은 사람이 정지를 누르던 순간 읽고 있던 그 글자 그대로다.
+    row({
+      id: STOPPED_MSG,
+      seq: 45,
+      authorMemberId: peerId,
+      body: STOPPED_BODY,
+      props: {
+        run_id: "0199bbbb-0000-7000-8000-0000000000r1",
+        "momo.stream": { rev: 6, streaming: false, outcome: "cancelled" },
+      },
+    }),
   ];
 }
 
@@ -918,6 +937,76 @@ async function exercise(browser) {
     );
   }
 
+  // ---- 6d. 멈춘 답은 같은 꼬리에, 같은 격으로 (ADR-0155) ---------------------
+  //
+  // 이 게이트가 이미 「꼬리 한 줄·안쪽부터」를 재고 있으므로 새 낱말도 여기서
+  // 잰다. 색을 **계산된 값으로** 읽는 것이 요점이다: ADR-0155 는 이것이 상태이지
+  // 강조가 아니라고 정했고, accent 나 danger 로 바뀌는 순간 그 결정이 뒤집힌다 —
+  // 그런데 클래스 이름만 보는 단언은 팔레트가 바뀌어도 초록으로 남는다.
+  const stoppedRow = rowLocator(page, STOPPED_MSG);
+  const stopMark = stoppedRow.getByTestId("stream-stop-mark");
+  const stopText = (await stopMark.textContent()) ?? "";
+  if (stopText.trim() !== "중단됨") {
+    throw new Error(
+      `a cancelled stream must name itself in the app's own word, read "${stopText}"`
+    );
+  }
+  // 얼린다 = 지우지 않는다. 사람이 읽고서 누른 그 반쪽이 그대로 있어야 한다.
+  if (!((await stoppedRow.textContent()) ?? "").includes(STOPPED_BODY)) {
+    throw new Error(
+      "the frozen half-answer vanished — freezing, not tombstoning, is the whole decision"
+    );
+  }
+  const stopTails = stoppedRow.getByTestId("message-meta");
+  if ((await stopTails.count()) !== 1) {
+    throw new Error(
+      `the stop mark must join the ONE tail line, found ${await stopTails.count()}`
+    );
+  }
+  const tones = await page.evaluate(
+    ([stoppedId, editedId]) => {
+      const pick = (id, testId) => {
+        const row = document.querySelector(
+          `[data-testid="timeline-message"][data-message-id="${id}"]`
+        );
+        const node = row?.querySelector(`[data-testid="${testId}"]`);
+        return node ? getComputedStyle(node).color : null;
+      };
+      const probe = document.createElement("span");
+      document.body.appendChild(probe);
+      const swatch = (token) => {
+        probe.style.color = `var(${token})`;
+        return getComputedStyle(probe).color;
+      };
+      const out = {
+        stop: pick(stoppedId, "stream-stop-mark"),
+        edited: pick(editedId, "message-meta"),
+        accent: swatch("--accent"),
+        danger: swatch("--danger"),
+        muted: swatch("--ink-muted"),
+      };
+      probe.remove();
+      return out;
+    },
+    [STOPPED_MSG, PLAIN_MSG]
+  );
+  if (tones.stop !== tones.muted) {
+    throw new Error(
+      `the stop mark must be the tail's muted ink, read ${tones.stop} against ${tones.muted}`
+    );
+  }
+  if (tones.stop === tones.accent || tones.stop === tones.danger) {
+    throw new Error(
+      `a stopped answer is a STATE, not an alarm: ${tones.stop} is accent/danger`
+    );
+  }
+  if (tones.stop !== tones.edited) {
+    throw new Error(
+      `the stop mark diverged from 「수정됨」's ink (${tones.stop} vs ${tones.edited}) — one tail, one weight`
+    );
+  }
+  console.log(`[stop] "${stopText.trim()}" · ${tones.stop} (=수정됨)`);
+
   // ---- 7. 헤더 버튼은 하나의 이름을 갖는다 ------------------------------------
   const trigger = page.getByTestId("open-pin-list");
   const [ariaLabel, title] = await Promise.all([
@@ -1233,6 +1322,13 @@ async function captureShots(browser) {
       .getByTestId("pin-list")
       .screenshot({ path: resolve(outDir, `pin-list-detail-${scheme}.png`) });
     await closePinList(page);
+    // ADR-0155 — 멈춘 답의 꼬리. 행 하나만 찍는다: 리뷰가 봐야 하는 것은 「반쪽
+    // 본문이 남아 있고, 그 아래 한 낱말이 흐리게 서 있다」이고, 화면 전체 사진은
+    // 그 두 사실을 옆 줄들 사이에 묻는다. 두 배색으로 찍는 이유는 「흐린 잉크」가
+    // 배색마다 다른 값이기 때문이다 — 한 장으로는 그 값이 지켜졌는지 못 본다.
+    await rowLocator(page, STOPPED_MSG).screenshot({
+      path: resolve(outDir, `stream-stop-row-${scheme}.png`),
+    });
     await openRowMenu(page, COLD_PINNED_MSG);
     await page.screenshot({ path: resolve(outDir, `pin-menu-${scheme}.png`) });
     await context.close();
@@ -1281,6 +1377,7 @@ async function captureShots(browser) {
   console.log(
     "[shots] artifacts/pin/pin-{list,list-detail,list-failed,list-failed-kept,menu}-{light,dark}.png"
   );
+  console.log("[shots] artifacts/pin/stream-stop-row-{light,dark}.png");
 }
 
 async function main() {
@@ -1317,6 +1414,9 @@ async function main() {
   console.log("           실패 문장은 가진 항목과 함께 섰고(칸막이는 그 둘 사이가");
   console.log("           아니라 목록 앞에), 재시도가 도는 동안에도 가진 것은");
   console.log("           남았으며, 빈 본문은 앱의 말로 섰다.");
+  console.log("           ADR-0155: 멈춘 답은 같은 꼬리 한 줄에 「중단됨」으로 섰고,");
+  console.log("           그 글자는 「수정됨」과 **같은 흐린 잉크**였으며(accent 도");
+  console.log("           danger 도 아니고), 얼어붙은 반쪽 본문은 그대로 남았다.");
 }
 
 await main();

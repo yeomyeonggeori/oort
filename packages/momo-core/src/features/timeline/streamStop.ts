@@ -95,6 +95,39 @@ export function streamMarker(message: Message): StreamMarker | null {
   };
 }
 
+/**
+ * 이 메시지를 쓴 run 의 id, 없으면 `null`.
+ *
+ * `cascadeModel.turnRecordRunId` 와 **일부러 다른 함수**다. 저쪽은 「정착한 턴
+ * 기록」으로 좁혀 놓았는데(한 run 이 승인 요청·도구 결과·턴 기록을 다 쓰기 때문에
+ * 같은 알림이 세 번 나오는 것을 막으려고), 여기서 묻는 것은 그 반대다 — 자라다
+ * 만 메시지에는 그 도장이 없고, 있는 것은 `momo.stream` 뿐이다.
+ *
+ * 그래서 스트리밍한 적 있는 메시지에만 답한다. 그 좁힘이 저쪽과 같은 역할을 한다:
+ * `run_id` 는 에이전트가 쓴 모든 행에 실리므로, 좁히지 않으면 이 판정이 스트리밍과
+ * 무관한 행까지 건드린다.
+ */
+export function streamRunId(message: Message): string | null {
+  if (!streamMarker(message)) return null;
+  const runId = message.props?.["run_id"];
+  return typeof runId === "string" && runId !== "" ? runId.toLowerCase() : null;
+}
+
+/**
+ * 「이 메시지의 run 이 끝난 것을 보았는가」 — 호스트의 종결 기록에 대고 묻는다.
+ *
+ * 두 표면이 각자 두 줄로 적으면 한쪽만 소문자로 접거나 한쪽만 스트리밍 메시지로
+ * 좁히는 날이 온다. 열쇠 규칙(`streamRunId` 가 소문자로 접는다)이 스토어와
+ * 어긋나는 순간 이 판정은 **조용히** 항상 거짓이 되므로, 짓는 자리를 하나로 둔다.
+ */
+export function isStreamRunEnded(
+  message: Message,
+  endedRunIds: ReadonlySet<string>,
+): boolean {
+  const runId = streamRunId(message);
+  return runId !== null && endedRunIds.has(runId);
+}
+
 /** 사람이 정지를 눌러 얼어붙은 답. 메시지 자신이 그렇다고 적혀 있을 때만. */
 export const STREAM_CANCELLED_MARK = "중단됨";
 

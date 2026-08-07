@@ -160,6 +160,10 @@ const CHANGED: Record<keyof MessageRowProps, Partial<MessageRowProps>> = {
   // 값을 안 보면 서버 표면이 바뀌어도 카드가 옛 문장을 그대로 든다.
   approvalsProvided: {approvalsProvided: false},
   onApprovalSettled: {onApprovalSettled: () => {}},
+  // ADR-0155. 스칼라라 동일성이 곧 값이다. 비교자가 이것을 안 보면, 취소를 눌러
+  // run 이 끝난 뒤에도 붙어 있는 행은 옛 `false` 를 든 채 그대로 서 있고
+  // 「응답이 끊김」은 다음 무언가가 그 행을 흔들 때까지 나타나지 않는다.
+  runEnded: {runEnded: true},
 };
 
 describe('memo 비교자는 모든 prop 을 본다', () => {

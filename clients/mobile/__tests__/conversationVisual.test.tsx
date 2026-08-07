@@ -1206,3 +1206,103 @@ describe('D-2 — 구분선의 색이 코어가 정한 역할을 만족한다', 
     expect(contrast(boundary, color.bg)).toBeGreaterThanOrEqual(4.5);
   });
 });
+
+// =============================================================================
+// ADR-0155 — 멈춘 답의 꼬리
+// =============================================================================
+
+describe('ADR-0155 — 멈춘 답은 꼬리 한 낱말로 말한다', () => {
+  function streamed(marker: Record<string, unknown>): Message {
+    return message({body: '답을 절반쯤 쓰다가', props: {'momo.stream': marker}});
+  }
+
+  function row(over: Message, runEnded?: boolean) {
+    return render(
+      <MessageRow
+        message={over}
+        startsGroup
+        directory={DIRECTORY}
+        chips={[]}
+        nowMs={BASE_MS}
+        runEnded={runEnded}
+      />,
+    );
+  }
+
+  it('잘 끝난 답에는 아무 말도 붙지 않는다', () => {
+    row(streamed({rev: 17, streaming: false}));
+    expect(screen.queryByTestId('stream-stop-mark')).toBeNull();
+  });
+
+  it('도착 중인 답에도 붙지 않는다 — 침묵이 기본값이다', () => {
+    row(streamed({rev: 4, streaming: true}), false);
+    expect(screen.queryByTestId('stream-stop-mark')).toBeNull();
+  });
+
+  it('취소된 답은 「중단됨」이라고 말하고, 본문은 그대로다', () => {
+    row(streamed({rev: 5, streaming: false, outcome: 'cancelled'}));
+    expect(screen.getByTestId('stream-stop-mark').props.children).toBe('중단됨');
+    // 얼린다는 것은 지우지 않는다는 뜻이다 — 사람이 읽고서 누른 그 글자가 남는다.
+    expect(screen.getByText('답을 절반쯤 쓰다가')).toBeTruthy();
+  });
+
+  it('run 은 끝났는데 stream 이 열려 있으면 「응답이 끊김」', () => {
+    // 닫는 PATCH 가 못 닿은 메시지. 방어 렌더링이 없으면 이 행은 영원히
+    // 도착 중인 답으로 서 있는다.
+    row(streamed({rev: 9, streaming: true}), true);
+    expect(screen.getByTestId('stream-stop-mark').props.children).toBe(
+      '응답이 끊김',
+    );
+  });
+
+  /**
+   * **강조가 아니라 서술이다.** 끊긴 답을 accent 나 danger 로 그리면 화면에서
+   * 가장 눈에 띄는 것이 「실패했다는 사실」이 되는데, 사람이 보러 온 것은 그 위의
+   * 반쪽 답이다. 「수정됨」·「고정됨」과 **같은 글자**여야 하고, 그 동일성은
+   * 여기서 값으로 잠긴다.
+   */
+  it('꼬리의 다른 낱말과 같은 흐린 글자다 — accent 도 danger 도 아니다', () => {
+    const stopped = row(
+      message({
+        body: '답을 절반쯤 쓰다가',
+        state: 'edited',
+        props: {'momo.stream': {rev: 5, streaming: false, outcome: 'cancelled'}},
+      }),
+    );
+    const mark = flatten(
+      within(stopped.getByTestId('message-row'))
+        .getByTestId('stream-stop-mark')
+        .props.style,
+    );
+    const edited = flatten(
+      within(stopped.getByTestId('message-row')).getByTestId('edited-mark').props
+        .style,
+    );
+    expect(mark.color).toBe(edited.color);
+    expect(mark.color).toBe(color.textFaint);
+    expect(mark.color).not.toBe(color.accent);
+    expect(mark.color).not.toBe(color.danger);
+  });
+
+  /**
+   * 꼬리 배열이 낭독 라벨의 재료이므로, 화면에 넣는 것만으로 귀에도 닿아야 한다.
+   * 눈에만 그리고 배열에 안 넣으면 보조기술 사용자에게 이 메시지는 완결된 답이다.
+   */
+  it('귀에도 닿는다 — 낭독 라벨이 같은 낱말을 읽는다', () => {
+    row(streamed({rev: 5, streaming: false, outcome: 'cancelled'}));
+    expect(
+      String(screen.getByTestId('message-row').props.accessibilityLabel),
+    ).toContain('중단됨');
+  });
+
+  it('묘비에는 그리지 않는다 — 없는 본문을 서술할 수는 없다', () => {
+    row(
+      message({
+        state: 'deleted',
+        body: undefined,
+        props: {'momo.stream': {rev: 5, streaming: false, outcome: 'cancelled'}},
+      }),
+    );
+    expect(screen.queryByTestId('stream-stop-mark')).toBeNull();
+  });
+});

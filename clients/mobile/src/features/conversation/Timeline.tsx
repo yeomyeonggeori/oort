@@ -34,6 +34,8 @@ import {
   type MessageRowActions,
 } from './MessageRow';
 import {resolveQuote} from '@momo/core/features/timeline/quote';
+import {isStreamRunEnded} from '@momo/core/features/timeline/streamStop';
+import {useEndedRuns} from '../agents/endedRuns';
 import type {DecisionOutcome} from '@momo/core/features/timeline/approvalDecision';
 import type {ApprovalGate, ApprovalReceipt} from './approvalGate';
 import {buildThreadContext, parentOf, rollupFor} from './threadContext';
@@ -977,6 +979,11 @@ function TimelineInner({
     return (messageId: string) => index.get(messageId.toLowerCase());
   }, [messages]);
 
+  // ADR-0155 — 끝난 것을 **본** run 들. 여기서 한 번 구독하고 행에는 boolean 하나만
+  // 내려 보낸다. 행마다 구독하면 아무 run 이나 끝날 때 붙어 있는 모든 줄이 다시
+  // 그려진다.
+  const endedRuns = useEndedRuns();
+
   const renderItem = useCallback(
     ({item}: {item: FoldedTimelineItem}) => {
       renderItemCalls += 1;
@@ -1031,6 +1038,7 @@ function TimelineInner({
           approvalOffline={approvalOffline}
           approvalsProvided={approvalsProvided}
           onApprovalSettled={onApprovalSettled}
+          runEnded={isStreamRunEnded(item.message, endedRuns)}
         />
       );
       if (anchorSeq !== undefined && item.message.seq === anchorSeq) {
@@ -1084,6 +1092,7 @@ function TimelineInner({
       approvalOffline,
       approvalsProvided,
       onApprovalSettled,
+      endedRuns,
     ],
   );
 
