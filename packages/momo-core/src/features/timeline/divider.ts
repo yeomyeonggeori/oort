@@ -135,6 +135,10 @@ export const DIVIDER_TONE_SPEC = {
     mustDifferFrom: [],
   },
   boundary: {
+    // design-preflight-allow — `meaning` 은 이 톤이 답하는 질문을 **계약 테스트에게**
+    // 설명하는 줄이다(위 `DividerToneSpec.meaning` 독스트링). 화면에 나가는 것은
+    // 구분선의 라벨이지 이 문장이 아니고, 이 칸을 읽는 것은 두 클라의 팔레트 대조
+    // 테스트뿐이다(dividerTone.test.ts · conversationVisual.test.tsx).
     meaning: "여기서부터 아직 읽지 않았다 — 경계를 그리는 색",
     paintsRule: true,
     mustDifferFrom: ["quiet", "agent", "danger"],

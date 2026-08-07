@@ -28,10 +28,25 @@
 #     reviewed exception, justify it in the PR body)
 #   - a GitHub issue reference inside raw_color (`#1137`); see ISSUE_REF_RE
 #
+# ---- 코어 단계 (이슈 #1141) --------------------------------------------------
+#
+# 위 열 분류는 `clients/web/src` 만 훑는다. 그런데 이 클라가 화면에 내놓는 문장의
+# 상당수는 거기 없다 — `packages/momo-core` 에 있고, 웹과 폰이 **그것을 그대로**
+# 렌더한다. 그래서 코어에 em-dash 를 적으면 두 클라가 함께 출하하는데 어느 게이트도
+# 붉지 않았다. #1138 B2(출하 직전에 사람이 발견한 em-dash 3건)의 원인이 이 구멍이다.
+#
+# 코어는 순수 TS 라 「렌더되는 글자」와 「산문(주석·독스트링·테스트 이름)」을 가르는
+# 문법적 표지가 없어서 줄 기반 grep 이 성립하지 않는다. 그 분리 규칙은 AST 로
+# `scripts/design_preflight_core.mjs` 가 들고 있고(규칙과 세 후보의 비교 근거는 그
+# 머리말, 케이스는 그 `--selftest`), 여기서는 마지막 단계로 부른다. 이 파일 이름이
+# 여전히 web 인 이유: 이 게이트가 답하는 질문은 「이 클라가 화면에 무엇을 내놓는가」
+# 이고, 그 답에 코어의 문장이 포함될 뿐이다.
+#
 # Usage:
 #   scripts/design_preflight_web.sh            check, exit 0 pass / 1 violation
 #   scripts/design_preflight_web.sh --list     print every hit, never gates
-#   scripts/design_preflight_web.sh --selftest prove the raw_color discriminator
+#   scripts/design_preflight_web.sh --selftest prove both discriminators
+#                                              (web raw_color + core separation)
 #
 # Compatible with /bin/bash 3.2 (macOS system bash): no associative arrays, no
 # mapfile. LC_ALL=C keeps grep byte-oriented so counts are deterministic.
@@ -237,21 +252,57 @@ CASES
   return 0
 }
 
+# ---- 코어 단계 (이슈 #1141) --------------------------------------------------
+#
+# node 가 없으면 **건너뛰지 않고 실패한다**. "안 돌린 것"과 "초록"이 구별되지 않는
+# 상태를 만들지 않는 것이 이 레포의 게이트 규칙이다(verify_merge_tree.sh 머리말).
+CORE_SCAN="$SCRIPT_DIR/design_preflight_core.mjs"
+
+run_core_stage() {
+  # $1: "" | --list | --selftest
+  if [ ! -f "$CORE_SCAN" ]; then
+    echo "design pre-flight (core): $CORE_SCAN 없음" >&2
+    return 2
+  fi
+  if ! command -v node >/dev/null 2>&1; then
+    echo "design pre-flight (core): node 가 없다 — 코어 단계를 돌릴 수 없다." >&2
+    echo "  (이 단계는 건너뛰지 않는다: 안 돈 것을 초록으로 세지 않기 위해서다)" >&2
+    return 2
+  fi
+  if [ -n "${1:-}" ]; then
+    node "$CORE_SCAN" "$1"
+  else
+    node "$CORE_SCAN"
+  fi
+}
+
 MODE="check"
 case "${1:-}" in
   --list) MODE="list" ;;
   --selftest)
     run_selftest
-    exit $?
+    web_rc=$?
+    echo ""
+    run_core_stage --selftest
+    core_rc=$?
+    echo ""
+    if [ "$web_rc" -ne 0 ] || [ "$core_rc" -ne 0 ]; then
+      echo "SELFTEST: FAIL (web raw_color=$web_rc, core separation=$core_rc)"
+      exit 1
+    fi
+    echo "SELFTEST: PASS (web raw_color + core separation rule)"
+    exit 0
     ;;
   --help|-h)
     echo "usage: scripts/design_preflight_web.sh [--list|--selftest]"
-    echo "  (no args)  hard-zero check of all 10 categories (exit 0 pass, 1 fail)"
+    echo "  (no args)  hard-zero check: web 10 categories + core string literals"
     echo "  --list     print every current hit per category, no gating"
-    echo "  --selftest raw_color: prove issue refs pass and real hex fails"
+    echo "  --selftest raw_color: prove issue refs pass and real hex fails, and"
+    echo "             core: prove render strings fail while prose/tests pass"
     echo ""
     echo "rules: .claude/skills/momo-design-taste-web/SKILL.md §10"
     echo "tokens: .claude/skills/momo-design-taste-web/references/tokens.md"
+    echo "core:  scripts/design_preflight_core.mjs (이슈 #1141 — 분리 규칙과 근거)"
     exit 0
     ;;
   "") ;;
@@ -268,6 +319,8 @@ if [ "$MODE" = "list" ]; then
     echo "-- $key ($n): $(label_for "$key")"
     scan_category "$key" | sed 's/^/   /'
   done
+  echo ""
+  run_core_stage --list
   exit 0
 fi
 
@@ -291,6 +344,22 @@ done
 
 echo ""
 if [ "$overall" -ne 0 ]; then
+  echo "FAIL  web: 위 분류에 위반이 있다."
+else
+  echo "OK    web: 10/10 categories clean."
+fi
+
+# 코어 단계는 웹이 붉어도 **돈다**. 한 번의 실행이 두 층을 다 말해야 고치는 사람이
+# 두 번 왕복하지 않는다.
+echo ""
+run_core_stage
+core_rc=$?
+if [ "$core_rc" -ne 0 ]; then
+  overall=1
+fi
+
+echo ""
+if [ "$overall" -ne 0 ]; then
   echo "RESULT: FAIL, design pre-flight violation."
   echo "  Fix it with a Dawn token utility or a shadcn/Radix primitive. If the hit"
   echo "  is a deliberate, reviewed exception, mark that line with the comment"
@@ -298,7 +367,7 @@ if [ "$overall" -ne 0 ]; then
   exit 1
 fi
 
-echo "RESULT: PASS, 10/10 categories clean."
+echo "RESULT: PASS, web 10/10 + core 3/3 categories clean."
 echo "  Still manual (SKILL §10 checklist): light AND dark reviewed, four states"
 echo "  present, keyboard path exists, long Korean strings do not overflow."
 exit 0
