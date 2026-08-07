@@ -41,6 +41,10 @@ import {measureMode} from './root';
 import type {AgentWorkingSignal} from '@momo/core/features/agents/workingSignal';
 import {NoticeBlock} from '../src/design/atoms';
 import {ResultRow, SearchBody} from '../src/screens/SearchScreen';
+import {
+  SearchEntryAction,
+  SearchFallthrough,
+} from '../src/screens/SidebarScreen';
 import type {MessageSearch} from '../src/features/search/useMessageSearch';
 import type {Palette} from '../src/design/tokens';
 import {FixedScheme, useStyles, type ColorScheme} from '../src/design/theme';
@@ -1754,6 +1758,22 @@ export function Surface({name}: {name: string}): React.JSX.Element {
         </RealtimeContext.Provider>
       );
     }
+    // 이슈 #1146 N4 — 「메시지 검색」으로 가는 두 문을 한 장에.
+    //
+    // 이름은 이제 셋(도착한 화면의 제목과 이 두 문)이 코어의 표면 판정표 한 줄
+    // 에서 함께 받는다. 그러니 사진이 증명할 것은 낱말이 무엇인가가 아니라 **그
+    // 낱말이 이 폭에 들어가는가**다: 헤더 액션은 제목 옆 오른쪽 끝에 앉고, 넘김
+    // 줄은 스스로 폭을 갖는 알약이라 둘 다 글자 수가 늘면 가장 먼저 깨진다.
+    case 'search-entry':
+      return (
+        <Frame label="메시지 검색으로 가는 두 문 · 눈과 귀가 같은 이름">
+          <ScreenHeader
+            title="대화"
+            right={<SearchEntryAction onPress={() => {}} />}
+          />
+          <SearchFallthrough query="배포" onPress={() => {}} />
+        </Frame>
+      );
     case 'search-idle':
       return (
         <Frame label="검색 · 입력 전">
@@ -1791,7 +1811,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
             sheet · delete · editor · editor-error · row · row-lead ·
             approval-card · approval-notes · avatar · composer-offline ·
             group · dividers · ade-summary · ade-summary-empty · ade-panel ·
-            search-idle ·
+            search-entry · search-idle ·
             search-searching · search-empty · search-error · search-results
           </Text>
         </Frame>

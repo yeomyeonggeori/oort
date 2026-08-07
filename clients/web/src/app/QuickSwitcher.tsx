@@ -34,7 +34,10 @@ import {
   useOpenAgentProfile,
 } from "@/features/routing/useAgentProfile";
 import { InlineBanner } from "@/features/common/States";
-import { isSurfaceProvided } from "@momo/core/features/capabilities/serverSurfaces";
+import {
+  isSurfaceProvided,
+  serverSurface,
+} from "@momo/core/features/capabilities/serverSurfaces";
 
 // =============================================================================
 // ⌘K quick switcher (R-1 §공통계약, ADR-0133 stack: cmdk). Channels, DMs, people
@@ -67,6 +70,16 @@ const groupHeadingClass =
   "[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1 " +
   "[&_[cmdk-group-heading]]:text-meta [&_[cmdk-group-heading]]:font-medium " +
   "[&_[cmdk-group-heading]]:text-ink-muted";
+
+/**
+ * 메시지 검색이라는 목적지의 이름 (이슈 #1146 N4).
+ *
+ * 이 팔레트가 「멤버 ↔ 디렉터리」에서 세운 규칙 그대로다 — 한 목적지는 이름이
+ * 하나이고, 그 이름은 **도착하는 표면이 쓰는 말**이다. 다른 점은 이번엔 그 말을
+ * 여기 적지 않고 코어의 표면 판정표에서 든다는 것뿐이다: 이 항목·사이드바 줄·
+ * 라우트의 제목이 각자 적으면 셋이 갈라지고, 실제로 사이드바가 갈라져 있었다.
+ */
+const SEARCH_SURFACE_NAME = serverSurface("messageSearch").label;
 
 export function QuickSwitcher({
   open,
@@ -236,8 +249,12 @@ export function QuickSwitcher({
             두 검색이 만나는 자연스러운 접합점이라, 막다른 길 대신 넘길 곳을
             말한다 (goal B12 R1). */}
         <Command.Empty className="px-2 py-3 text-body text-ink-muted">
+          {/* 이 문장은 **다른 줄을 이름으로 가리킨다.** 그 이름을 여기 손으로
+              적으면 가리키는 쪽과 가리켜지는 쪽이 갈라지고, 안내는 화면에 없는
+              곳을 가리키게 된다 (이슈 #1146 N4 — 1차의 사이드바가 「검색」이라
+              적고 있는 동안 이 문장은 「메시지 검색」을 가리키고 있었다). */}
           {searchProvided
-            ? "이름이 일치하는 채널이나 사람이 없습니다. 메시지 본문은 아래 메시지 검색에서 찾을 수 있습니다."
+            ? `이름이 일치하는 채널이나 사람이 없습니다. 메시지 본문은 아래 ${SEARCH_SURFACE_NAME}에서 찾을 수 있습니다.`
             : "일치하는 채널이나 사람이 없습니다. 다른 이름으로 검색하세요."}
         </Command.Empty>
 
@@ -249,7 +266,7 @@ export function QuickSwitcher({
           {searchProvided && (
             <Command.Item
               className={itemClass}
-              value="메시지 검색 찾기 search messages"
+              value={`${SEARCH_SURFACE_NAME} 검색 찾기 search messages`}
               data-testid="switcher-message-search"
               // 이 줄만 `forceMount`다. 나머지 항목은 이름이 안 맞으면 사라지는
               // 것이 맞지만, 이것은 **이름으로 못 찾았을 때 쓰라고 있는** 항목이라
@@ -265,8 +282,8 @@ export function QuickSwitcher({
             >
               <Search className="size-4 opacity-70" />
               {typed.trim() === ""
-                ? "메시지 검색"
-                : `'${typed.trim()}' 메시지 검색`}
+                ? SEARCH_SURFACE_NAME
+                : `'${typed.trim()}' ${SEARCH_SURFACE_NAME}`}
             </Command.Item>
           )}
           <Command.Item className={itemClass} onSelect={() => go("/inbox")}>
