@@ -1,5 +1,21 @@
 # momo 기획 현재 상태 (Planning Current State)
 
+> **2026-08-07 스냅샷 16 (Fable · momo-main — ADE D1~D5 전 단계 랜딩·4기능 완결·전 층 배포·8/7 누계 13 PR).** 컴팩트 복원 진입점.
+>
+> **8/7 랜딩(13 PR, 전부 track/engine)**: ADE 1~3단계 완결(#1138 웹 재개/인수·#1140 폰 관제·#1142 다중멘션·#1143 서버 체인=#1114 종결·스폰 폐곡선) · #1145 pin v0+#1148 스레드 고정(H0 파리티) · #1147 sampled-on-rust 3→53 · oort 2단계 #1150+배치 3 #1159(동결층 diff 0 기계 증명·eve 게이트 선재 결함 수리) · U2 테마(#1151 웹 토글·#1153 폰 라이트 — 16역할 바이트 일치) · #1152 메시지 edit 계약(stream rev·"답의 도착은 수정이 아니다") · #1156 Tauri CI(=#1116 종결, 서명 자산 전부 실측 실재·첫 러너 등록만 성재 수동) · #1158 tool_result 접힘 수리(=#1133 종결 — 멱등 가드 type 미포함이 기전, `result_message_id` 키 공간 분리·마이그레이션 0).
+>
+> **라이브**: 웹 `index-lsbIEZDj`(app.oor7.com) · 서버 `momo-rust:2fe2be47`(NCP·migrate 62·롤백 da6a646b 보존) · 폰 U2 아카이브 빌드 완료(**기기 unavailable — 연결 시 설치**, 성재 "기기 연동 검수는 추후"). 데스크탑 릴리스 레인 개통(release-desktop.yml — 러너 미등록 상태).
+>
+> **성재 대기(재촉 금지)**: ①ASC 콘솔 "MomoiOS|Default" Disable(docs/cicd/10 §8) ②셀프호스티드 러너 첫 등록(docs/cicd/13 — 릴리스 시) ③폰 기기 연결(U2+ADE 설치 검수) ④codex CLI 롤백 여부(herdr 스파이크 부작용 0.146.1 — 유지 or `npm install -g @openai/codex@0.144.1`) ⑤`! rm -rf .../scratchpad/xcC-cleanclone`(3.5GB) ⑥ADR-0150(웹검색 egress) 승인.
+>
+> **진행 중(이 스냅샷 시점)**: W-A=#1130 잔여(②refine 감사 — 업스트림 이슈는 초안만·③HOME 격리, 스파이크 한정) · W-B=#1155(폰 다크 accent 여명화 — 웹 다크 `#f0a850` 정렬)+#1157(INDEX cicd 목차)+cicd/20→11 깨진 링크 3곳. ADR-0155(취소 시 스트리밍 메시지 처리) 기안=Fable 직접.
+>
+> **적립 큐**: #1118 잔여(Swift server/ ~50곳 — **prod 이미지가 아직 이쪽 빌드**·openapi·ROADMAP 13건·하이픈 109) · #1146(pin Medium)·#1149(고정 Medium 4) · #1139(resume 서버 검증 이식)·#1141(코어 기계 검사) · #1144(per-agent 라우팅 ADR — 수요 실증 후) · 세션 카드 메시지 앵커(코어 AdeItem — 이슈 미발급) · 스파인 가드 type 추가(동일 결함 재발 시 ADR).
+>
+> **워커·머지 규율(현행 — 스냅샷 15에서 이어짐)**: 단발 Opus 서브에이전트·병합 트리 3종(verify_merge_tree.sh)·연속 큐=성재 신호 유효("실행중인 작업 끝나면 다음 작업 이어가줘" 2026-08-07)·UI 변경=design-review 필수(B0)·폰 캡처 축척 pt=px/3 · 이슈 주석에 #NNNN 리터럴 금지는 해제됨(#1060 preflight 자체 수리·selftest 11케이스).
+>
+> 이하 스냅샷 15:
+
 > **2026-08-06 스냅샷 15 (Fable · momo-main — Swift 퇴역 완료·ADE 방향 기안·8/6 누계 12 PR).** 컴팩트 복원 진입점.
 >
 > **8/6 랜딩(12 PR)**: U4-6 완결(#1107/#1106/#1109 — 컴포저·아바타·문장옷·색계약·seq어휘) · oort 1단계(#1117 — 사용자 노출 69곳+게이트 신설, ADR-0152 Accepted) · 첨부 v0 서버(#1119 — Drive 3경로+바인딩, ADR-0151 Accepted, **ADR-0145 판정표 잔여=agentRunHistory 1건**) · 위생 배치(#1122 Xcode 준비·#1123 레인 rust+배포 이미지 선재결함 적발·#1124 게이트 — **ADR-0145 증보 2 전 항목 이행**) · 교차 소수리(#1126). 신규 ADR: **0153 Accepted**(CI=로컬 게이트+셀프호스티드 러너+Xcode Cloud — Jenkins 기각·Argo 부적합) · **0154 Proposed**(ADE 관제 표면 — D1 생존성 모델·D2 멀티세션 뷰·D3 재개/인수 어휘·D4 단계·D5 prime/herdr 트랙).

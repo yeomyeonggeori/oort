@@ -1889,3 +1889,9 @@
 - **전 층 배포**: 웹 index-lsbIEZDj · 서버 momo-rust:2fe2be47(migrate 62·4서비스 일치·healthz 200·롤백 fc122584→아니 b74e6e53 제거·직전 보존 확인 필요 없음 — da6a646b 잔존) · 폰 U2 아카이브 빌드 성공(**기기 unavailable — 연결 시 설치**).
 - 적립: #1155(다크 accent 파리티+로그아웃 버튼 테두리) · #1130 잔여(②감사·③격리·ADR-0155 후보=취소 시 스트리밍 메시지) · #1118(oort 잔여 범위) · #1144(per-agent 라우팅 ADR 후보).
 - 다음: 성재 검수(웹 라이브·폰은 연결 후 설치) → 피드백 배치.
+
+## 2026-08-07 (밤) · Fable · 야간 배치 3/3 완결 — Tauri CI 개통·tool_result 접힘 수리·oort 배치 3
+- **#1156 머지 → #1116 종결**: `release-desktop.yml`(build-only/dry-run/release 3모드·runs-on self-hosted macOS)+`docs/cicd/13` 러너 가이드. 서명 자산 전부 로컬 실측 실재(Developer ID·notarytool momo-notary·minisign — 자리표시자 0), 발행=기존 `publish_next_build.sh` 호출로 일원화. 성재 수동 1건: 첫 러너 등록(키체인 프롬프트 — 릴리스 시점에).
+- **#1158 머지 → #1133 종결**: 스파인 멱등 가드 `(channel,author,client_msg_id)`가 type 미포함 → 카드·결과가 `call_message_id` 공유로 결과 쓰기가 dedup 흡수(전 도구 공통·선존재). 수리=`result_message_id` 전용 네임스페이스(v6 상수 vs run id=uuidv7 — **키 공간 구조적 분리**, `tool_result:x` 위조 call_id도 차단). 스키마/마이그레이션 0("구 키 점유 행은 언제나 카드"의 논증)·TS/Swift 0줄·red proof 2종(ade1_6). 후속감(기록만): 가드 type 추가는 동일 결함 재발 시 ADR.
+- **#1159 머지 → #1118 코멘트(오픈 유지)**: server-rust 사용자 문장 5→**13곳**(shared.rs·cloud_hosts.rs 동질 8곳)·런북 stale 7곳·문서 잔여 65파일/670건(**동결층 diff 0 — 오케스트레이터 독립 재실측 일치**)·eve 게이트 선재 결함 수리(compose가 프로파일 필터 전에 전 서비스 보간 → workhost `:?` env 자리표시자 2줄)·oort 게이트 server-rust 3절 확장(표면 469→630). ROADMAP.md는 skew 적발로 의도적 제외. 잔여=Swift server/ ~50곳(prod 이미지가 아직 이쪽 빌드 — Dockerfile:25 주의)·openapi·하이픈 109 등 이슈에 표로.
+- 다음 배치 발사: W-A(#1130 잔여 ②refine 감사·③HOME 격리) · W-B(#1155 폰 다크 여명화+#1157 INDEX cicd+깨진 링크 3곳). ADR-0155(취소 시 스트리밍 메시지) 기안은 Fable 직접.
