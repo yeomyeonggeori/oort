@@ -241,7 +241,7 @@ above all the shared keychain ACCESS GROUP the NSE will read
 - **Anything that creates `android/`.** Android is on hold (성재 결정 6). It is
   not cancelled; it resumes after iOS v0 reaches TestFlight, because the
   expensive half is FCM and that chain is still Swift-only.
-- **EAS.** momo already owns fastlane + match + `momo-signing` (D1).
+- **EAS.** oort already owns fastlane + match + `momo-signing` (D1).
 
 ## The phone lane — `npm run lane:phone` (MAESTRO-1)
 

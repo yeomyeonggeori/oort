@@ -1,6 +1,6 @@
-# 외부 리서치 ② — 셀프호스팅 에이전트 메모리 OSS 지형과 momo 내장 설계 패턴 (2026-07-21, Fable · PLN-20260721-01)
+# 외부 리서치 ② — 셀프호스팅 에이전트 메모리 OSS 지형과 oort 내장 설계 패턴 (2026-07-21, Fable · PLN-20260721-01)
 
-> 조사 기준: 모든 라이선스는 GitHub API(`repos/{repo}/license`)로 LICENSE 원문 직접 확인(2026-07-21). momo 제약(PG18=단일 SoT, Swift Hummingbird, RLS FORCE, permissive만 허용·AGPL 백본 금지)을 판정 축으로 사용.
+> 조사 기준: 모든 라이선스는 GitHub API(`repos/{repo}/license`)로 LICENSE 원문 직접 확인(2026-07-21). oort 제약(PG18=단일 SoT, Swift Hummingbird, RLS FORCE, permissive만 허용·AGPL 백본 금지)을 판정 축으로 사용.
 
 ## §1. 프로젝트별 실태
 
@@ -26,11 +26,11 @@
 ### 1.2 핵심 상술
 
 - **mem0**: 사실상의 레퍼런스. 논문(arXiv:2504.19413) **2-phase 파이프라인** — ①추출(대화→후보 사실) ②갱신(기존 메모리 대조 → LLM tool call로 **ADD/UPDATE/DELETE/NOOP**). OpenMemory에서 가져갈 것은 스택이 아니라 **UI/ACL 패턴**(§4).
-- **Letta**: 메모리 서버가 아니라 에이전트 런타임 전체. momo처럼 자체 런타임이 있는 시스템에는 **아키텍처 참고용**(core memory block=항상 상주하는 self-editing 블록 / archival=벡터층 분리).
-- **Zep/Graphiti**: CE 2025-04 공식 폐기. Graphiti는 엔진일 뿐 그래프DB 조달이 필요한데 **백엔드 선택지가 전부 momo 라이선스와 충돌**(Neo4j GPLv3/FalkorDB SSPL/Kuzu 사망). 가치는 코드가 아니라 **bi-temporal 무효화 설계**(사실을 지우지 않고 `invalid_at`).
+- **Letta**: 메모리 서버가 아니라 에이전트 런타임 전체. oort처럼 자체 런타임이 있는 시스템에는 **아키텍처 참고용**(core memory block=항상 상주하는 self-editing 블록 / archival=벡터층 분리).
+- **Zep/Graphiti**: CE 2025-04 공식 폐기. Graphiti는 엔진일 뿐 그래프DB 조달이 필요한데 **백엔드 선택지가 전부 oort 라이선스와 충돌**(Neo4j GPLv3/FalkorDB SSPL/Kuzu 사망). 가치는 코드가 아니라 **bi-temporal 무효화 설계**(사실을 지우지 않고 `invalid_at`).
 - **cognee**: PG+pgvector 공식 지원 유일 그래프형 후보. 단 기본 그래프 계층 Kuzu(아카이브) 리스크, GraphRAG 성격이라 대화 메모리와는 결이 다름.
-- **Hindsight**: **MIT+PG 단일 백엔드**에 4중 검색·리랭커·REST·UI 동봉. **"그래프 전용 DB 없이 PG 위에서 그래프 포함 메모리 시스템 성립"의 가장 강력한 실증** — momo 라이선스 필터 통과 후보 중 완성도 최고.
-- **1st-party 벤치마크**: Anthropic memory tool(`memory_20250818`) — 클라이언트 측 파일 디렉토리에 6개 명령, **저장은 호출자(서버) 관할** = momo의 "서버가 메모리를 관리하고 서빙"과 동일한 책임 분리. claude.ai는 프로젝트 스코프 자동 메모리+직접 열람/편집. OpenAI는 saved memories+reference chat history 이원 → 2026-06 "Dreaming V3" 백그라운드 합성(회상 41.5%→82.8% 주장), **Enterprise 기본 off(관리자 opt-in)·워크스페이스 끄면 삭제·학습 제외**.
+- **Hindsight**: **MIT+PG 단일 백엔드**에 4중 검색·리랭커·REST·UI 동봉. **"그래프 전용 DB 없이 PG 위에서 그래프 포함 메모리 시스템 성립"의 가장 강력한 실증** — oort 라이선스 필터 통과 후보 중 완성도 최고.
+- **1st-party 벤치마크**: Anthropic memory tool(`memory_20250818`) — 클라이언트 측 파일 디렉토리에 6개 명령, **저장은 호출자(서버) 관할** = oort의 "서버가 메모리를 관리하고 서빙"과 동일한 책임 분리. claude.ai는 프로젝트 스코프 자동 메모리+직접 열람/편집. OpenAI는 saved memories+reference chat history 이원 → 2026-06 "Dreaming V3" 백그라운드 합성(회상 41.5%→82.8% 주장), **Enterprise 기본 off(관리자 opt-in)·워크스페이스 끄면 삭제·학습 제외**.
 
 ## §2. 공통 설계 패턴
 
@@ -40,30 +40,30 @@
 
 **(c) 검색/서빙** — 하이브리드가 표준(semantic+BM25+graph+temporal→리랭커). 서빙 이원: ①질의 시점 조립(검색→리랭킹→토큰 예산 절사) ②상시 상주 블록(Letta core/memobase 프로필, <100ms). 성숙 시스템은 겸비.
 
-**(d) 스코프 모델** — **org/workspace → user → agent → session(run) 4단 + 명시적 공유 단위**로 수렴(mem0/LangMem/Zep/MemOS/OpenMemory·Claude·ChatGPT 공통). **momo RLS FORCE 멀티테넌시와 자연 동형.**
+**(d) 스코프 모델** — **org/workspace → user → agent → session(run) 4단 + 명시적 공유 단위**로 수렴(mem0/LangMem/Zep/MemOS/OpenMemory·Claude·ChatGPT 공통). **oort RLS FORCE 멀티테넌시와 자연 동형.**
 
-## §3. Postgres-native 구현 타당성 — **타당. momo 규모·제약에서는 PG 단일이 오히려 정합적**
+## §3. Postgres-native 구현 타당성 — **타당. oort 규모·제약에서는 PG 단일이 오히려 정합적**
 
 1. **pgvector v0.8.5**(PostgreSQL License — permissive). 0.8.x iterative index scan이 overfiltering 해소 → `WHERE workspace_id=... AND scope=...`+벡터 검색(=RLS/테넌트 필터 패턴) 실용화. 워크스페이스 메모리는 수만~수십만 행 — HNSW 한계(수백만)까지 여유. 초과 시 pgvectorscale(PostgreSQL License) 승급.
 2. **하이브리드 검색**: `tsvector`+pgvector+**RRF SQL 함수** 합성이 정착된 표준 레시피(Supabase 공식). 한국어는 pg_trgm 보조(메시지 검색과 동일 과제).
 3. **그래프를 PG로**: ①엣지 테이블+재귀 CTE(메모리 그래프는 1~2-hop — **Hindsight가 전체를 PG 단일로 실증**) ②Apache AGE(Apache-2.0, PG 11~18) 승급 경로 ③그래프 생략(mem0에서도 선택 계층). 그래프 전용 DB는 라이선스 전멸 지대 — **PG 표현이 유일한 permissive 경로**.
-4. **momo 불변식 정합**: memory 테이블에 workspace_id+RLS FORCE → 기존 멀티테넌시 편입. 추출 파이프라인=outbox 소비 비동기 워커. 메모리 갱신 이벤트도 동일 경로로 realtime 반영. **탈락 확장**: VectorChord(AGPL/ELv2), ParadeDB pg_search(AGPL).
+4. **oort 불변식 정합**: memory 테이블에 workspace_id+RLS FORCE → 기존 멀티테넌시 편입. 추출 파이프라인=outbox 소비 비동기 워커. 메모리 갱신 이벤트도 동일 경로로 realtime 반영. **탈락 확장**: VectorChord(AGPL/ELv2), ParadeDB pg_search(AGPL).
 
-## §4. momo 적용 권고
+## §4. oort 적용 권고
 
 **라이선스 통과**: mem0·Hindsight·cognee·LangMem·Graphiti(설계만)·memobase·MemOS(Neo4j 의존 주의)·memU·supermemory(검증 필요). **탈락**: Honcho(AGPL)·Zep CE(폐기)·VectorChord/pg_search(AGPL)·FalkorDB(SSPL)·Neo4j CE(GPLv3).
 
 - **A. 내장(자체구현 PG-native)**: 불변식 완전 보존·메모리가 메시지와 같은 거버넌스(권한·감사·백업)·라이선스 무결·외부 런타임 0. 단 추출 품질 직접 구축(mem0 논문+공개 프롬프트로 설계 리스크 낮음, 튜닝 비용 문제로 수렴).
-- **B. 사이드카(mem0 서버/Hindsight 컨테이너)**: 착수 최소·검증된 품질·UI 동봉. 그러나 **제2의 SoT 발생** — "PG=단일 SoT" 정면 충돌, 멀티테넌시가 RLS→앱레벨 필터로 격하, Python 런타임 운영 부담, momo 클라에 UI 재구축 시 이점 소멸.
-- **C. 하이브리드(권고 1안)**: **스키마·저장·서빙·거버넌스는 momo PG 내장(A) + 파이프라인 설계는 검증된 오픈 패턴 이식 + Hindsight를 개발 중 대조군 사이드카로만 병행.**
+- **B. 사이드카(mem0 서버/Hindsight 컨테이너)**: 착수 최소·검증된 품질·UI 동봉. 그러나 **제2의 SoT 발생** — "PG=단일 SoT" 정면 충돌, 멀티테넌시가 RLS→앱레벨 필터로 격하, Python 런타임 운영 부담, oort 클라에 UI 재구축 시 이점 소멸.
+- **C. 하이브리드(권고 1안)**: **스키마·저장·서빙·거버넌스는 oort PG 내장(A) + 파이프라인 설계는 검증된 오픈 패턴 이식 + Hindsight를 개발 중 대조군 사이드카로만 병행.**
   - 이식 패턴: ①mem0 2-phase ②Graphiti `invalid_at` 무효화 ③memobase식 "프로필 상시 주입+사실/에피소드 질의 시 조립+토큰 예산" ④FTS+pgvector+RRF 하이브리드 ⑤스코프 `workspace→member→agent→conversation` 4단(RLS 강제).
-  - 근거: momo에서 메모리는 **사용자가 보고 편집하는 제품 표면** = 메시지와 동급의 도메인 데이터 — 별도 SoT는 하드 룰과 양립 불가. 라이선스상 그래프DB 전멸이라 PG-native가 유일 경로.
+  - 근거: oort에서 메모리는 **사용자가 보고 편집하는 제품 표면** = 메시지와 동급의 도메인 데이터 — 별도 SoT는 하드 룰과 양립 불가. 라이선스상 그래프DB 전멸이라 PG-native가 유일 경로.
 
 **가시성/거버넌스 UX 이식**:
 - OpenMemory: 상태 3단(active/paused/archived)·에이전트별 접근 토글·메모리별 접근 로그·`access_controls`(앱-메모리 allow/deny) — RLS 정책 직결 가능.
 - ChatGPT: 항목 열람/수정/삭제+"Memory updated" 인라인 알림+**워크스페이스 관리자 통제(기본 off·끄면 삭제·학습 제외)**.
-- Claude: 프로젝트(채널/워크스페이스)별 격리+요약 직접 편집. memory tool의 "저장은 호출자 관할" = momo 서버가 에이전트에게 메모리 툴을 노출하되 저장·권한은 서버 집행과 동형.
-- **momo 고유 차별화**: 워크스페이스 메모리를 **채널처럼 브라우징하는 1급 객체**("에이전트가 아는 것" 뷰 + **각 항목의 출처 메시지 역링크** + 수정/무효화 이력) — 세 선례 중 어디에도 없는, 메신저만 가능한 지점.
+- Claude: 프로젝트(채널/워크스페이스)별 격리+요약 직접 편집. memory tool의 "저장은 호출자 관할" = oort 서버가 에이전트에게 메모리 툴을 노출하되 저장·권한은 서버 집행과 동형.
+- **oort 고유 차별화**: 워크스페이스 메모리를 **채널처럼 브라우징하는 1급 객체**("에이전트가 아는 것" 뷰 + **각 항목의 출처 메시지 역링크** + 수정/무효화 이력) — 세 선례 중 어디에도 없는, 메신저만 가능한 지점.
 
 ## §출처 (모두 2026-07-21 확인)
 

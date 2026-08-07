@@ -13,9 +13,9 @@
 
 ## 1. 신규 ADR 후보 3건 (번호는 승인 후 0119+에서 발급)
 
-### ADR-α · 푸시 알림 경계와 momo push relay — **권고 1순위**
+### ADR-α · 푸시 알림 경계와 oort push relay — **권고 1순위**
 
-- **왜 지금**: iOS(M5)의 전제조건이면서 리드타임이 가장 길다(Dawn 운영 인프라 + Apple Developer 계정 + relay 서비스). APNs 구조상 **셀프호스팅 momo 서버는 Dawn이 운영하는 relay를 경유해야만 푸시를 보낼 수 있다**(02 §2-1 — 4사 공통 구조적 필연). 스키마(`device`/`push_token`/`push_dispatch_log`)는 이미 있다.
+- **왜 지금**: iOS(M5)의 전제조건이면서 리드타임이 가장 길다(Dawn 운영 인프라 + Apple Developer 계정 + relay 서비스). APNs 구조상 **셀프호스팅 oort 서버는 Dawn이 운영하는 relay를 경유해야만 푸시를 보낼 수 있다**(02 §2-1 — 4사 공통 구조적 필연). 스키마(`device`/`push_token`/`push_dispatch_log`)는 이미 있다.
 - **결정 범위**: ① Dawn 운영 push relay(서버 등록제, rate limit, 남용 차단) ② 페이로드 등급 — **id-only 기본**(대화 내용이 Dawn 인프라를 지나지 않음; ADR-0004의 "자격증명 비유입"과 같은 결의 content 비유입, Zulip E2E 봉투는 v2 후보) ③ 서버측 notifier — outbox 소비 단일 worker, unread(ADR-0109)·멘션·DND 판정을 한 곳에(ux-bible P9, Slack activity/delivery 분리 교훈) ④ device/push_token 등록 REST ⑤ 무료 정책 — **관대한 무료 + rate limit**(Zulip 모델; Mattermost/Rocket.Chat 유료 게이팅은 반면교사).
 - **옵션**: A) relay 운영 + id-only(권고) / B) A + 자체 빌드 앱용 BYO-push 병행(later 후보) / C) 푸시 없는 iOS 출시(기각 — 메신저 성립 불가).
 - **승계**: MOMO-040~043(EP-IOS)의 APNs 항목이 이 ADR의 파생 배치로 흡수·확장된다. 서버측(③④)은 iOS 앱 이전에 선행 착수 가능.
@@ -30,8 +30,8 @@
 ### ADR-γ · 셀프호스팅 배포판과 온보딩 모델
 
 - **왜**: "오픈소스지만 우리가 호스팅한 서버 기반으로 무료로 서버 파고 멤버 초대"가 제품 방향인데, 현재 배포는 운영자(성재) 수동 런북 단계다. ADR-0002가 install/upgrade 경계를 이미 예약했고, 이 ADR은 그 위의 **제품화 결정**이다.
-- **결정 범위**: ① install/upgrade 스크립트(ADR-0002 승계 — pinned image + 마이그레이션 + 롤백) ② **universal link 초대**(초대 링크 하나로 웹 합류/앱 설치 관통 — Rocket.Chat 완성형) ③ 서버 개설 시 relay 등록 온보딩(ADR-α 연동) ④ 단일노드 상한 숫자 명시(Mattermost 관행; momo는 "동시 수백 명" 보수 명시로 시작) ⑤ BM 경계 — **셀프호스팅 전 기능 무료**, 수익은 Dawn 호스팅(momo Cloud)·relay 대량 사용·지원(Zulip 모델; permissive 원칙과 유일하게 완전 정합) ⑥ 앱에 기본 공개 서버 비내장(Element Play 정지 교훈).
-- **옵션(포장 수준)**: A) compose + install.sh(권고 v1) / B) 클라우드 마켓플레이스 원클릭 이미지(v1.5) / C) momo Cloud managed(별도 트랙).
+- **결정 범위**: ① install/upgrade 스크립트(ADR-0002 승계 — pinned image + 마이그레이션 + 롤백) ② **universal link 초대**(초대 링크 하나로 웹 합류/앱 설치 관통 — Rocket.Chat 완성형) ③ 서버 개설 시 relay 등록 온보딩(ADR-α 연동) ④ 단일노드 상한 숫자 명시(Mattermost 관행; oort는 "동시 수백 명" 보수 명시로 시작) ⑤ BM 경계 — **셀프호스팅 전 기능 무료**, 수익은 Dawn 호스팅(oort Cloud)·relay 대량 사용·지원(Zulip 모델; permissive 원칙과 유일하게 완전 정합) ⑥ 앱에 기본 공개 서버 비내장(Element Play 정지 교훈).
+- **옵션(포장 수준)**: A) compose + install.sh(권고 v1) / B) 클라우드 마켓플레이스 원클릭 이미지(v1.5) / C) oort Cloud managed(별도 트랙).
 
 ## 2. 기존 큐에 얹는 입력 (신규 ADR 불요)
 
@@ -77,7 +77,7 @@ ADR-0112는 "기본 모드 vs 개발자 모드" 양 끝을 정의했다. 성재�
 | 후보 | 내용 | 선행 |
 |---|---|---|
 | T-α1 | notifier worker 골격 + device/push_token 등록 REST + 판정 v0(멘션/DM) | ADR-α Accepted |
-| T-α2 | momo push relay 서비스 v0(등록·전달·rate limit) + APNs .p8 운영 | ADR-α Accepted |
+| T-α2 | oort push relay 서비스 v0(등록·전달·rate limit) + APNs .p8 운영 | ADR-α Accepted |
 | T-γ1 | `infra/prod/install.sh`/`upgrade.sh` + 단일노드 상한 문서 | ADR-γ Accepted (ADR-0002 계약) |
 | T-γ2 | universal link 초대(웹 합류 관통) | ADR-γ + (권장) ADR-β v0 |
 | T-β1 | 웹 클라 v0 스캐폴드 + compose 정적 서빙 + 로그인/타임라인 읽기 | ADR-β Accepted |

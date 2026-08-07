@@ -1,6 +1,6 @@
-# Cloudflare Agent → momo reference
+# Cloudflare Agent → oort reference
 
-This example is the Cloudflare Agents SDK equivalent of the eve momo channel. A Durable Object-backed `Agent` uses `fetch` to claim momo gateway work, executes platform-owned agent logic, and completes the leased momo run.
+This example is the Cloudflare Agents SDK equivalent of the eve oort channel. A Durable Object-backed `Agent` uses `fetch` to claim oort gateway work, executes platform-owned agent logic, and completes the leased oort run.
 
 ## Architecture
 
@@ -16,7 +16,7 @@ momo message / @agent
   -> momo clients receive message.new
 ```
 
-The Agent instance can be named with the momo workspace/channel key when routing it, which gives the Durable Object the same stable conversation identity as the eve `continuationToken` example.
+The Agent instance can be named with the oort workspace/channel key when routing it, which gives the Durable Object the same stable conversation identity as the eve `continuationToken` example.
 
 ## Install and adapt
 
@@ -36,20 +36,20 @@ The package pins **Cloudflare `agents` 0.3.10** and overrides its unused Node/MC
 
 | Variable | Required | Purpose |
 |---|---:|---|
-| `MOMO_BASE_URL` | yes | Public HTTPS momo API origin |
+| `MOMO_BASE_URL` | yes | Public HTTPS oort API origin |
 | `MOMO_WORKSPACE_ID` | yes | Workspace UUID for the agent membership |
-| `MOMO_AGENT_MEMBER_ID` | yes | momo agent member UUID |
+| `MOMO_AGENT_MEMBER_ID` | yes | oort agent member UUID |
 | `MOMO_AGENT_TOKEN` | yes | Scoped per-agent bearer for pending/event/complete calls |
 | `MOMO_CHANNEL_ROUTE_TOKEN` | yes | Separate bearer protecting the Cloudflare Agent `/poll` trigger |
 
 Set non-secret IDs as Worker vars and inject both tokens with `wrangler secret put` (or the equivalent deployment secret store). Never put either bearer in `wrangler.jsonc`, Durable Object state, source, request bodies, or logs. Failures expose only HTTP status codes, following ADR-0004.
 
-The fetch client consumes the same gateway endpoints as `adapters/hermes/momo_adapter.py`. At this baseline, `docs/api/openapi.yaml` explicitly leaves agent credential/run routes undocumented; the example therefore follows the live server/Hermes contract and does not alter OpenAPI, momo core routes, or Centrifugo.
+The fetch client consumes the same gateway endpoints as `adapters/hermes/momo_adapter.py`. At this baseline, `docs/api/openapi.yaml` explicitly leaves agent credential/run routes undocumented; the example therefore follows the live server/Hermes contract and does not alter OpenAPI, oort core routes, or Centrifugo.
 
 ## Limits
 
 - `/poll` is an explicit reference trigger. Production deployments should schedule it or push a signal, apply bounded backoff, and renew leases for long work.
-- WebSocket input is intentionally omitted. Add it only with equivalent connection authentication; the momo write path must remain REST.
-- One Agent instance should own one logical momo conversation or agent partition. Do not share a claimed lease across instances.
-- Approval cards and human decisions remain in the momo app. The adapter does not approve work from Cloudflare.
-- Provider credentials stay in the Cloudflare runtime and must never be copied into momo callbacks or state.
+- WebSocket input is intentionally omitted. Add it only with equivalent connection authentication; the oort write path must remain REST.
+- One Agent instance should own one logical oort conversation or agent partition. Do not share a claimed lease across instances.
+- Approval cards and human decisions remain in the oort app. The adapter does not approve work from Cloudflare.
+- Provider credentials stay in the Cloudflare runtime and must never be copied into oort callbacks or state.

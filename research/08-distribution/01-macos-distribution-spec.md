@@ -1,4 +1,4 @@
-# momo — macOS/iOS 정식 배포 스펙 (2026 기준)
+# oort — macOS/iOS 정식 배포 스펙 (2026 기준)
 
 > 작성: 2026-06-24 · 1차 출처 검증(Apple Developer Docs / Sparkle / notarytool man page)
 > 대상 산출물: `MomoMac`(SwiftPM 라이브러리) → 공증된(notarized) 다운로드 가능한 `.app` + iOS 앱스토어 업로드

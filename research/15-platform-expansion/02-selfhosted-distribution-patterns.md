@@ -1,4 +1,4 @@
-# 15-02 · 셀프호스팅 메신저 4종 비교 — momo 배포 모델 선행 사례
+# 15-02 · 셀프호스팅 메신저 4종 비교 — oort 배포 모델 선행 사례
 
 > Planning ID: `PLN-20260715-02` · 수집: 2026-07-15 deep-research (공식 문서/블로그 우선)
 > 용도: "사용자가 자기 서버를 무료로 파고, 멤버를 초대하고, iOS/웹에서 자기 서버 URL로 접속" 모델의 업계 근거. 바이블 05장의 원자료. 월 비용은 사양 기반 추정치(Hetzner/DO 2026 요금).
@@ -72,16 +72,16 @@
 
 - Mattermost: 오픈코어, LDAP/SAML/HA 유료, 경계는 `einterfaces`. https://docs.mattermost.com/product-overview/faq-license.html
 - Rocket.Chat: CE=MIT + `ee/` 상업. Zulip: **전부 Apache 2.0 — 4사 중 가장 깨끗한 FOSS**, 수익=클라우드+push 플랜+지원. https://zulip.com/plans/
-- Matrix: Synapse AGPLv3(Element 상업 이중) — **momo 하드 룰(AGPL 백본 금지)상 코드 차용 금지, 참조만.** https://element.io/blog/element-to-adopt-agplv3/
+- Matrix: Synapse AGPLv3(Element 상업 이중) — **oort 하드 룰(AGPL 백본 금지)상 코드 차용 금지, 참조만.** https://element.io/blog/element-to-adopt-agplv3/
 
-## 3. momo가 차용할 패턴 vs 피할 패턴
+## 3. oort가 차용할 패턴 vs 피할 패턴
 
 ### 차용
-1. **push relay는 momo가 직접 운영(구조적 필연)** — Zulip 모델: 서버 등록제 + rate limit + id-only(또는 E2E 봉투) + 클라 fetch. ADR-0004의 "자격증명 비유입"과 같은 결의 "content 비유입".
+1. **push relay는 oort가 직접 운영(구조적 필연)** — Zulip 모델: 서버 등록제 + rate limit + id-only(또는 E2E 봉투) + 클라 fetch. ADR-0004의 "자격증명 비유입"과 같은 결의 "content 비유입".
 2. **온보딩 = 스토어 단일 앱 + 서버 URL 루트 + universal link 초대**(Rocket.Chat 완성형) + 멀티서버 데이터 모델 선반영(ADR-0117 합류). QR 로그인은 초기 과설계.
 3. **웹은 서버 동일 도메인 직접 서빙** + 첨부만 오리진 격리(서브도메인/CSP).
-4. **초대 보안 3종**: 만료 기본값 + regenerate/revoke + 워크스페이스·역할 바인딩 검증(momo invite hash는 이미 워크스페이스 바인딩 — `003_onboarding.sql`).
-5. **presence는 비용 예측 가능한 설계**(Zulip 폴링+증분 참조, momo는 Centrifugo presence 활용 + 느슨한 offline threshold).
+4. **초대 보안 3종**: 만료 기본값 + regenerate/revoke + 워크스페이스·역할 바인딩 검증(oort invite hash는 이미 워크스페이스 바인딩 — `003_onboarding.sql`).
+5. **presence는 비용 예측 가능한 설계**(Zulip 폴링+증분 참조, oort는 Centrifugo presence 활용 + 느슨한 offline threshold).
 6. **BM = Zulip 모델**: 코어 전부 permissive·완전 기능 무료 셀프호스팅, 수익은 relay/호스팅/지원.
 7. **단일 노드 상한을 숫자로 명시**(Mattermost 방식) — HA 후순위 정당화.
 8. 파일: 백엔드 스위치 인터페이스 + Zulip 워커식 썸네일 파이프라인(Drive 결정은 동결 계약 승계).
@@ -89,13 +89,13 @@
 ### 회피
 1. **푸시 유료 게이팅**(Mattermost HPNS/id-only 유료, Rocket.Chat 월 1만 건) — 반발·우회 생태계 전례.
 2. **AGPL 코드 차용**(Synapse/Sygnal/Dendrite).
-3. **운영 복잡성 강제**(Rocket.Chat의 단일 노드 MongoDB replica set) — momo PG 단일 의존 유지.
+3. **운영 복잡성 강제**(Rocket.Chat의 단일 노드 MongoDB replica set) — oort PG 단일 의존 유지.
 4. **클라-서버 분리 배포 강제**(Element Web) — 배포물 2배.
-5. **기본 공개 서버 내장**(Element Play 정지 교훈) — momo 앱은 "자기 서버 입력"이 1급, 데모는 읽기 전용.
+5. **기본 공개 서버 내장**(Element Play 정지 교훈) — oort 앱은 "자기 서버 입력"이 1급, 데모는 읽기 전용.
 
 ## 4. 남은 불확실성
 
 - 월 비용은 추정치 — 과금 벤치마크 시점에 특정 클라우드 요금표로 재계산.
-- Mattermost HPNS의 플랜 포함 범위는 개편이 잦음 — momo 과금 설계 시 재확인.
+- Mattermost HPNS의 플랜 포함 범위는 개편이 잦음 — oort 과금 설계 시 재확인.
 - Rocket.Chat 파일 백엔드 목록은 통용 사실이나 이번 조사에서 원문 페이지 미확인.
 - App Store의 셀프호스트 메신저 거절 공식 기록 없음 — "확인되지 않음"으로 유지.

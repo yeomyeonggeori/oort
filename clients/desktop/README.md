@@ -1,4 +1,4 @@
-# momo desktop — Tauri 2 shell (ADR-0133)
+# oort desktop — Tauri 2 shell (ADR-0133)
 
 Tauri 2 shell that wraps the **exact `clients/web` bundle** — no forked UI.
 Proves web/desktop run one codebase (plan §1). Originated as the MOMO-595 P0

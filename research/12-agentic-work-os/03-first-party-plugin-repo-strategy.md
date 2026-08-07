@@ -6,7 +6,7 @@
 
 ## 1. Purpose
 
-This document fixes the first-party plugin sequencing for momo before any repo split is created.
+This document fixes the first-party plugin sequencing for oort before any repo split is created.
 
 It defines:
 
@@ -25,7 +25,7 @@ The first-party plugin order is:
 |---|---|---|---|---|
 | P0 | GitHub / GitHub Issues | `momo-plugin-github` | Public once provider grants and approval writes are stable; private during bootstrap if the core repo is private. | Best proof of agent work OS value: messages become issues, issue state returns to the timeline, writes are approval-gated, and source refs are easy to cite. |
 | P1 | Google Workspace | `momo-plugin-google-workspace` | Private first. Public only after OAuth consent, restricted scopes, DWD option, and enterprise admin docs are review-ready. | Highest source-provider value for "ask my work" but highest trust burden. Start read-mostly and approval-gate writes. |
-| P2 | Jira-like Work Items | `momo-plugin-work-items` | Public/private depending on provider mix. Prefer neutral `work-items` until Jira-specific runtime is required. | Proves that momo can bridge existing ticket systems without becoming a board-first clone. |
+| P2 | Jira-like Work Items | `momo-plugin-work-items` | Public/private depending on provider mix. Prefer neutral `work-items` until Jira-specific runtime is required. | Proves that oort can bridge existing ticket systems without becoming a board-first clone. |
 | P3 | Docs Connector | `momo-plugin-docs` | Private first if it includes enterprise sources; public can start with open local/Markdown/Obsidian adapters. | Proves long-lived knowledge/source citation and Memory Plane revalidation across docs systems. |
 
 GitHub comes first because it covers both source citation and approval-gated external writes with narrow repository allowlists. Google Workspace follows because it is the most important source provider but needs the strictest credential and admin boundary. Jira-like work items and Docs follow once the shared command/action/source/audit patterns are proven.
@@ -132,7 +132,7 @@ Initial capabilities:
 | `work_items.create` | `propose` | `write` | Requires approval; source message/thread refs attached. |
 | `work_items.transition` | `propose` | `write` | Requires approval; transition graph and current state rechecked. |
 
-Repo split trigger: split neutral `momo-plugin-work-items` before provider-specific `momo-plugin-jira` unless Jira API details become the dominant runtime. This keeps momo's model provider-neutral and prevents a board-first product drift.
+Repo split trigger: split neutral `momo-plugin-work-items` before provider-specific `momo-plugin-jira` unless Jira API details become the dominant runtime. This keeps oort's model provider-neutral and prevents a board-first product drift.
 
 ### 5.4 Docs Connector
 
@@ -182,7 +182,7 @@ Expired, invalidated, signature-held, grant-revoked, or policy-incompatible entr
 
 ### 6.3 Context Packet `tool_grants`
 
-For each run, momo projects only the bounded tools needed for the request:
+For each run, oort projects only the bounded tools needed for the request:
 
 - Read tools project as `grant = "read"` only when provider and resource scopes are valid.
 - External writes project as `grant = "propose"` with `approval_policy = "require_approval"` or `always`.
@@ -215,7 +215,7 @@ Approval is part of the plugin contract, not UI sugar:
 5. Executor rechecks schema hash, resource scope, provider grant, approval outcome, and idempotency before side effect.
 6. Tool result and audit events return to the timeline.
 
-Required audit events are namespaced by plugin but must map to momo's common lifecycle:
+Required audit events are namespaced by plugin but must map to oort's common lifecycle:
 
 - `plugin.installed`
 - `capability.discovered`

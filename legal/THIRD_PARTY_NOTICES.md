@@ -75,7 +75,7 @@
 | PostgreSQL 18 | PostgreSQL License(permissive) | DB |
 | pgvector 0.8.5 | PostgreSQL License(검증됨, upstream LICENSE) | PostgreSQL 벡터 타입·HNSW 검색 확장 |
 | Node.js 24.4.1 | MIT(검증됨, upstream LICENSE) | 선택적 eve profile 런타임 베이스 |
-| eve 0.27.0 | Apache-2.0(검증됨, npm package metadata/NOTICE) | 선택적 커스텀 에이전트 런타임 + momo 채널 |
+| eve 0.27.0 | Apache-2.0(검증됨, npm package metadata/NOTICE) | 선택적 커스텀 에이전트 런타임 + oort 채널 |
 | @workflow/world-postgres 5.0.0-beta.27 | Apache-2.0(검증됨, npm package metadata/LICENSE) | eve durable workflow state용 별도 PostgreSQL world |
 | LiveKit Egress 1.9.1 | Apache-2.0(검증됨, upstream LICENSE) | 선택적 `transcription` profile 참가자 Track 녹음 |
 | faster-whisper 1.2.1 | MIT(검증됨, upstream LICENSE) | 개발/운영자용 사후 전사 실측 하니스 |
@@ -90,7 +90,7 @@ SSPL/BUSL 항목은 없다.
 > 동봉된다(기본 스택 미포함, `--profile workhost`). 각 엔진 바이너리는 별도
 > 이미지 레이어로 분리하고 upstream LICENSE를 `/usr/share/licenses/<engine>/`에
 > 함께 동봉한다. **Codex는 미동봉** — `codex-local` 엔진은 사용자 호스트의 자체
-> Codex 설치에 연결하며 ChatGPT/OAuth 자격증명 경계는 momo 밖에 남는다(ADR-0004).
+> Codex 설치에 연결하며 ChatGPT/OAuth 자격증명 경계는 oort 밖에 남는다(ADR-0004).
 
 | 엔진 | 라이선스 | 배포 | 사용처 |
 |---|---|---|---|

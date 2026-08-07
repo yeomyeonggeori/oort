@@ -9,7 +9,7 @@
 
 모든 클라이언트는 웹소켓 하나를 유지하며, 실시간 계층은 Java 4종 서버다: **Channel Server(CS)** — 상태 보유, 채널 ID를 consistent hashing으로 매핑, 피크 시 호스트당 약 1,600만 채널 서빙. **Gateway Server(GS)** — 웹소켓 종단 + 유저별 구독 상태, 유일하게 여러 지리 리전(edge)에 배포. **Admin Server** — 무상태 라우팅. **Presence Server** — 유저 해싱 온라인 상태. 해시 링은 CHARM이 관리, Consul 디스커버리, 죽은 CS는 20초 내 교체. 전송 경로는 `클라 → Webapp API(HTTP POST) → Admin → CS → 전 세계 GS → 클라`, 전 세계 전달 목표 500ms. 타이핑 등 비영속 이벤트도 같은 경로를 타되 DB를 안 거친다.
 
-- momo 시사점: momo의 단일 쓰기경로(REST→PG→outbox→relay)와 동형. CS의 "채널당 단일 직렬화" 역할은 momo에선 PG `message.seq` 채번.
+- oort 시사점: oort의 단일 쓰기경로(REST→PG→outbox→relay)와 동형. CS의 "채널당 단일 직렬화" 역할은 oort에선 PG `message.seq` 채번.
 - [A] https://slack.engineering/real-time-messaging/ · [B] https://www.infoq.com/news/2023/04/real-time-messaging-slack/ · [A] https://slack.engineering/migrating-millions-of-concurrent-websockets-to-envoy/
 
 ### 1.2 Flannel — edge cache의 존재 이유
@@ -23,7 +23,7 @@ Flannel 이전 클라이언트는 `rtm.start` 한 방에 워크스페이스 전�
 
 초기: MySQL workspace 단위 샤드(active-active 2대 + metadata cluster). 붕괴 원인 둘: ① 대형 고객 하나가 단일 최고사양 호스트 한계 도달(hot shard, 재분배 불가) ② Enterprise Grid/Slack Connect(공유 채널)가 "한 채널=한 워크스페이스" 전제를 파괴. 2017~2020 Vitess 이전, 메시지=채널 ID·유저 데이터=유저 ID로 재샤딩. 2020년 말 99% 트래픽이 Vitess, 피크 2.3M QPS(읽기 2M/쓰기 300K), 중앙값 2ms/p99 11ms.
 
-- 교훈: 테넌트 샤딩은 최대 테넌트가 하드웨어 한계에 닿는 순간, 그리고 크로스 테넌트 기능이 생기는 순간 끝난다. momo는 channel_id를 1급 키로 유지하면 미래 재샤딩 경로가 열려 있다.
+- 교훈: 테넌트 샤딩은 최대 테넌트가 하드웨어 한계에 닿는 순간, 그리고 크로스 테넌트 기능이 생기는 순간 끝난다. oort는 channel_id를 1급 키로 유지하면 미래 재샤딩 경로가 열려 있다.
 - [A] https://slack.engineering/scaling-datastores-at-slack-with-vitess/ · [A] https://slack.engineering/the-query-strikes-again/
 
 ### 1.4 Presence — 브로드캐스트에서 구독 모델로 (공개 후퇴)
@@ -36,7 +36,7 @@ Flannel 이전 클라이언트는 `rtm.start` 한 방에 워크스페이스 전�
 
 경로: webapp(판정) → job queue → push service → APNs/FCM. 판정 = 유저 활성 상태 × 기기 설정 × 채널 설정 × DND. `@here` 하나가 수십만 유저×복수 기기 팬아웃(트레이스 하나에 수십억 span → 알림 플로우 100% 샘플링 트레이싱). 2026 리빌드: 산재한 판정 로직을 **activity(무엇이 알림을 만드나)/delivery(어떻게 전달하나) 분리** + 단일 preference 모델로 정리.
 
-- 교훈: 푸시는 규모 무관 첫날부터 필요하고, 판정 로직은 처음부터 한 곳에(momo: outbox 소비 단일 notifier + ux-bible P9).
+- 교훈: 푸시는 규모 무관 첫날부터 필요하고, 판정 로직은 처음부터 한 곳에(oort: outbox 소비 단일 notifier + ux-bible P9).
 - [A] https://slack.engineering/tracing-notifications/ · [A] https://slack.engineering/how-slack-rebuilt-notifications/ · [B] https://www.infoq.com/news/2026/04/slack-new-notification-system/
 
 ### 1.6 파일 (공식 단독 포스트 부재 — 조합 근거)
@@ -49,7 +49,7 @@ Flannel 이전 클라이언트는 `rtm.start` 한 방에 워크스페이스 전�
 
 모든 메시지 포스트·푸시·unfurl·리마인더·빌링이 통과, 피크 일 14억 잡/초당 3.3만. Redis 단독의 결함: dequeue O(n) + 폭주 시 dequeue가 여유 메모리를 요구해 큐 잠김 데드락(2016 실장애). 해법: Redis 교체가 아니라 **Kafka를 내구 버퍼로 앞단 추가**(Kafkagate + JQRelay, Consul lock 토픽당 1개, rate limit). 폭주가 장애 대신 "적체 + 속도 조절"이 됨.
 
-- 교훈(momo): outbox가 같은 역할의 소형판 — outbox 깊이를 1급 지표로, consumer 속도 조절 수단 확보.
+- 교훈(oort): outbox가 같은 역할의 소형판 — outbox 깊이를 1급 지표로, consumer 속도 조절 수단 확보.
 - [A] https://slack.engineering/scaling-slacks-job-queue/
 
 ### 1.8 멀티 리전 — 데이터는 한 곳, edge는 전달만
@@ -104,10 +104,10 @@ Notifications Platform으로 전 후보 수집 → ML 기반 Smart Notification 
 ## 3부. 공통 질문
 
 ### 3.1 순서 보장
-양사 공통: **채널 단위 단조 정렬 키 + 채널당 단일 직렬화 지점.** Slack `ts`(채널 내 유일 ID·정렬 키) + CS 단일 매핑. Discord Snowflake message_id + guild process 배포 순서 + 세션별 seq `s`. momo `(channel_id, seq)`는 이 패턴의 최소 구현 — 단일 PG인 동안 순서 문제는 부재.
+양사 공통: **채널 단위 단조 정렬 키 + 채널당 단일 직렬화 지점.** Slack `ts`(채널 내 유일 ID·정렬 키) + CS 단일 매핑. Discord Snowflake message_id + guild process 배포 순서 + 세션별 seq `s`. oort `(channel_id, seq)`는 이 패턴의 최소 구현 — 단일 PG인 동안 순서 문제는 부재.
 
 ### 3.2 재연결 복구
-Discord = 프로토콜 RESUME(session_id+s 보관, 놓친 이벤트 순서 재생, 불가 시 re-Identify). Slack = 얇은 재부트(Flannel 흡수) + `conversations.history` 커서 gap fill. momo = Centrifugo recovery(offset/epoch, `recovered` 플래그) + `recovered:false` 시 REST PG backfill — 두 방식 모두 보유.
+Discord = 프로토콜 RESUME(session_id+s 보관, 놓친 이벤트 순서 재생, 불가 시 re-Identify). Slack = 얇은 재부트(Flannel 흡수) + `conversations.history` 커서 gap fill. oort = Centrifugo recovery(offset/epoch, `recovered` 플래그) + `recovered:false` 시 REST PG backfill — 두 방식 모두 보유.
 
 - [A] https://docs.discord.com/developers/events/gateway · https://centrifugal.dev/docs/server/history_and_recovery
 

@@ -1,4 +1,4 @@
-# momo web — canonical UI (ADR-0133 §1)
+# oort web — canonical UI (ADR-0133 §1)
 
 TS + React 18 + Vite. The same bundle runs in the browser and inside the Tauri
 shell (`clients/desktop`). Origin: the MOMO-595 P0 spike, promoted to this path
@@ -241,7 +241,7 @@ how to show a banner, and this decides when one is worth showing.
   approval request whose ledger status is still `pending` — the agent card's
   `awaiting-approval` state, the one row in the product actively waiting on a
   human.
-- **The window having focus suppresses everything.** momo in front means the
+- **The window having focus suppresses everything.** oort in front means the
   message is already on screen or one keystroke away, so a banner would be pure
   noise. Also suppressed: one's own writing, a muted channel (server truth,
   `Channel.muted`), an edit of a message that already had its chance, a repeat of
@@ -490,7 +490,7 @@ has no shell, so a short window must still reach the sign-in button.
 
 `src/features/work/ObserverTerminal.tsx` + `observerStream.ts`. The capability
 call is REST (`POST .../work-sessions/{id}/terminal-attach {"mode":"observer"}`),
-the bytes are a **direct** WebSocket to the host: momo servers carry no terminal
+the bytes are a **direct** WebSocket to the host: oort servers carry no terminal
 stream, by design. xterm.js is bundled locally and code split
 (`terminalRuntime.ts`, 334 kB js + 5 kB css, loaded on the first 관전 시작).
 

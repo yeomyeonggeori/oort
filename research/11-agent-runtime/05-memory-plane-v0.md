@@ -5,7 +5,7 @@
 
 ## 1. Purpose
 
-Memory Plane v0 defines how momo stores and retrieves long-term memory for agents without turning chat history into uncontrolled surveillance exhaust.
+Memory Plane v0 defines how oort stores and retrieves long-term memory for agents without turning chat history into uncontrolled surveillance exhaust.
 
 It answers four questions:
 
@@ -14,7 +14,7 @@ It answers four questions:
 3. Who is allowed to retrieve it for a future Context Packet?
 4. How can it expire, be hidden, or be deleted?
 
-Memory Plane is owned by momo, not by Hermes, Kim Intern, openclaw, a plugin, or a client. Agent runtime memory may exist, but it is not trusted context until momo imports it as a typed, sourced, permission-checked memory item.
+Memory Plane is owned by oort, not by Hermes, Kim Intern, openclaw, a plugin, or a client. Agent runtime memory may exist, but it is not trusted context until oort imports it as a typed, sourced, permission-checked memory item.
 
 ## 2. Non-Negotiable Rules
 
@@ -227,7 +227,7 @@ Memory has two gates: write-time and retrieval-time.
 
 ### Write-Time Gate
 
-To create or update a memory item, momo checks:
+To create or update a memory item, oort checks:
 
 1. The creator is a workspace member.
 2. The creator can read all source refs.
@@ -239,7 +239,7 @@ To create or update a memory item, momo checks:
 
 ### Retrieval-Time Gate
 
-To include memory in a Context Packet, momo checks:
+To include memory in a Context Packet, oort checks:
 
 1. `SET LOCAL app.workspace_id` matches the request workspace.
 2. Actor is a current workspace member.
@@ -302,21 +302,21 @@ Rules:
 
 ### Hermes and Kim Intern
 
-Hermes and Kim Intern may maintain their own session memory, but momo does not treat that as workspace truth.
+Hermes and Kim Intern may maintain their own session memory, but oort does not treat that as workspace truth.
 
 Allowed import path:
 
 1. Runtime emits an explicit candidate memory proposal.
-2. momo records the source `agent_run`, source messages, tool results, and policy versions.
-3. momo applies write-time gate.
+2. oort records the source `agent_run`, source messages, tool results, and policy versions.
+3. oort applies write-time gate.
 4. Candidate is stored as `quality.review_status = "candidate"` or accepted by policy.
 5. Future retrieval still runs retrieval-time gate.
 
 ### openclaw lesson
 
-openclaw-style channel/plugin runtime is useful for interaction boundaries, but momo keeps memory ownership in Postgres:
+openclaw-style channel/plugin runtime is useful for interaction boundaries, but oort keeps memory ownership in Postgres:
 
-| Concern | momo owner |
+| Concern | oort owner |
 |---|---|
 | Memory availability | retrieval-time permission check |
 | Presentation | memory inspector and source badges |

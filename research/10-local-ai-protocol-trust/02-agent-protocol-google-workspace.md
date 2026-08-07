@@ -5,15 +5,15 @@
 
 ## 1. Protocol Lessons
 
-momo should borrow interaction patterns from existing chat platforms, but not their responsibility model.
+oort should borrow interaction patterns from existing chat platforms, but not their responsibility model.
 
-| Platform | Useful lesson | momo decision |
+| Platform | Useful lesson | oort decision |
 |---|---|---|
 | Slack | Agent context management, app governance, streaming UX | Store `context_packet`, `tool_call`, `approval`, `cost`, and `audit` as first-class Postgres records, not app-side ephemera. Sources: [Slack context management](https://docs.slack.dev/ai/agent-context-management/), [Slack governance](https://docs.slack.dev/ai/agent-governance/) |
 | Discord | Gateway sequence/resume, slash/message/user commands, interaction verification | Keep Centrifugo as transport but maintain momo-owned `message.seq`, idempotency, and signed interaction/approval protocol. Sources: [Discord Gateway](https://docs.discord.com/developers/events/gateway), [Discord Interactions](https://docs.discord.com/developers/interactions/overview) |
 | Telegram | Bots, mini apps, rich messages, broad distribution | Do not claim Telegram-style E2EE for all chats. Use self-hosting, audit, optional E2EE, and local AI privacy as the trust message. Sources: [Telegram FAQ](https://telegram.org/faq), [Telegram Bot API](https://core.telegram.org/bots/api) |
 | Mattermost | Deep plugin surface and self-hosted enterprise posture | Do not copy Mattermost code. Use API/UX ideas only. Source builds and enterprise plugins have license constraints. Sources: [Mattermost LICENSE](https://raw.githubusercontent.com/mattermost/mattermost/master/LICENSE.txt), [Mattermost source available plugins](https://developers.mattermost.com/integrate/plugins/source-available-license/) |
-| OpenAgents | Agents embedded in daily apps and web UI surfaces | Treat as research input; momo's moat is protocolized execution in the channel timeline. Source: [OpenAgents paper](https://arxiv.org/abs/2310.10634) |
+| OpenAgents | Agents embedded in daily apps and web UI surfaces | Treat as research input; oort's moat is protocolized execution in the channel timeline. Source: [OpenAgents paper](https://arxiv.org/abs/2310.10634) |
 
 ## 2. Agent Protocol v0
 
@@ -48,7 +48,7 @@ Rules:
 
 ## 4. Google Workspace Connector v0
 
-Google Workspace matters because most users already run work through Gmail, Drive, Calendar, Docs, and Meet. momo should make that existing work available to agents without forcing immediate migration.
+Google Workspace matters because most users already run work through Gmail, Drive, Calendar, Docs, and Meet. oort should make that existing work available to agents without forcing immediate migration.
 
 Source facts:
 
@@ -105,5 +105,5 @@ This keeps answers citeable and lets agents explain why a source was used.
 ## 7. Anti-goals
 
 - Do not build a generic chat bot layer where each integration invents its own cards.
-- Do not sync private external content into momo without source, scope, and delete controls.
+- Do not sync private external content into oort without source, scope, and delete controls.
 - Do not make "agent did it" an audit answer. The actor, subject, approver, plugin, model, cost, and source must be visible.

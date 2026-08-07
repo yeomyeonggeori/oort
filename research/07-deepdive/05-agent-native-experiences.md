@@ -1,48 +1,48 @@
-# momo — 차원이 다른 에이전트 네이티브 경험 설계 문서
+# oort — 차원이 다른 에이전트 네이티브 경험 설계 문서
 
 > **수석 프로덕트 디자이너 통합본 v1.0** · 2026-06-23
-> 제품: **momo** — AI 에이전트가 사람과 동등한 **1급 멤버**인 자체구축 메신저 (Swift macOS 우선 + iOS / Hummingbird 2 + Centrifugo v6 + PostgreSQL 18)
+> 제품: **oort** — AI 에이전트가 사람과 동등한 **1급 멤버**인 자체구축 메신저 (Swift macOS 우선 + iOS / Hummingbird 2 + Centrifugo v6 + PostgreSQL 18)
 > 본 문서의 **모든 경험은 [L4 스펙](/Users/kwakseongjae/projects/momo/research/07-deepdive/04-self-build-l4-spec.md) 프리미티브 위에서만** 정의된다. 스펙에 없는 것은 §6에서 "추가 필요"로 명시한다.
 >
 > 표기: `(검증됨)` = 공식문서/리포 교차확인 · `(추정)` = 설계 판단 · `[반증]` = 경쟁사가 이미 함(차별화 약함)
 >
-> **핵심 반증 결론(웹 검증):** "에이전트=멤버 / @멘션 위임 / presence / tool_call 표시 / 승인 버튼 / 먼저 말걸기 / 리치카드 / 비용 대시보드 / 브랜칭 / undo / 졸업형 자율성"은 **2026년 시점에 모두 어딘가에 존재한다.** 따라서 이것들 *단독*으로는 "차원이 다르다"고 주장할 수 없다. **momo의 진짜 차별점은 단일 기능이 아니라 위치(location)와 재질(material)이다:** 위 모든 거버넌스·협업·경제·기억 객체를, dev 대시보드/백엔드 배관/단일사용자 도구가 아니라 **공유 사회적 채널 타임라인 위의 1급·주소가능·재생가능·조작가능한 메시지 객체**로 만든다. 이는 momo의 L4 프리미티브 조합(member kind=agent, agent_run 상태머신, A2A depth/라운드배리어, actor/subject 델리게이션+audit_log, reserve/reconcile 2단계 회계, 승인게이트, Centrifugo agent.partial, 채널별 모노토닉 seq) 위에서만 자연스럽게 성립한다.
+> **핵심 반증 결론(웹 검증):** "에이전트=멤버 / @멘션 위임 / presence / tool_call 표시 / 승인 버튼 / 먼저 말걸기 / 리치카드 / 비용 대시보드 / 브랜칭 / undo / 졸업형 자율성"은 **2026년 시점에 모두 어딘가에 존재한다.** 따라서 이것들 *단독*으로는 "차원이 다르다"고 주장할 수 없다. **oort의 진짜 차별점은 단일 기능이 아니라 위치(location)와 재질(material)이다:** 위 모든 거버넌스·협업·경제·기억 객체를, dev 대시보드/백엔드 배관/단일사용자 도구가 아니라 **공유 사회적 채널 타임라인 위의 1급·주소가능·재생가능·조작가능한 메시지 객체**로 만든다. 이는 oort의 L4 프리미티브 조합(member kind=agent, agent_run 상태머신, A2A depth/라운드배리어, actor/subject 델리게이션+audit_log, reserve/reconcile 2단계 회계, 승인게이트, Centrifugo agent.partial, 채널별 모노토닉 seq) 위에서만 자연스럽게 성립한다.
 
 ---
 
 ## 1. 디자인 원칙 — "에이전트가 1급 멤버"가 UX에 의미하는 것
 
-momo가 다른 모든 메신저/에이전트 제품과 갈라지는 헌법은 다음 5원칙이다. 각 원칙은 "왜 incumbent가 구조적으로 못 하는가"를 포함한다.
+oort가 다른 모든 메신저/에이전트 제품과 갈라지는 헌법은 다음 5원칙이다. 각 원칙은 "왜 incumbent가 구조적으로 못 하는가"를 포함한다.
 
 ### 원칙 1 — 모든 거버넌스는 대화 안에서 일어난다 (Governance-in-Conversation)
-승인·감사·비용·권한·되돌리기는 별도 admin 콘솔/dev 대시보드/관리자 센터가 아니라 **사람과 에이전트가 같이 보는 채널 타임라인의 1급 메시지**로 surface된다. Slack은 Thinking Steps와 Multi-click 승인버튼을 갖지만 승인은 여전히 메시지에 박힌 단건 버튼이고([Slack Thinking Steps](https://slack.dev/slack-thinking-steps-ai-agents/) 검증됨), 비용·감사·리플레이는 전부 별도 백엔드 계층이다. momo는 `approval_request`가 1급 메시지 타입이고 `usage_ledger`/`budget_window`가 `agent_run`에 묶여 있어 이 통합이 무료로 나온다(스펙 §5.2, §8.5).
+승인·감사·비용·권한·되돌리기는 별도 admin 콘솔/dev 대시보드/관리자 센터가 아니라 **사람과 에이전트가 같이 보는 채널 타임라인의 1급 메시지**로 surface된다. Slack은 Thinking Steps와 Multi-click 승인버튼을 갖지만 승인은 여전히 메시지에 박힌 단건 버튼이고([Slack Thinking Steps](https://slack.dev/slack-thinking-steps-ai-agents/) 검증됨), 비용·감사·리플레이는 전부 별도 백엔드 계층이다. oort는 `approval_request`가 1급 메시지 타입이고 `usage_ledger`/`budget_window`가 `agent_run`에 묶여 있어 이 통합이 무료로 나온다(스펙 §5.2, §8.5).
 - **UX 함의:** 컨텍스트 스위칭 0. "지금 이 대화에서 이 에이전트가 무엇을·누구 권한으로·얼마에 하려는지"를 그 자리에서 본다.
 
 ### 원칙 2 — 에이전트끼리의 일은 숨은 배관이 아니라 관전 가능한 사회 surface다 (Visible A2A)
-Salesforce Agentforce는 A2A 위임이 *behind the scenes / no tab-switching*로 의도적으로 **숨겨진다**고 명시한다([Slack/Agentforce](https://slack.com/blog/news/turn-agents-into-teammates-with-slack) 검증됨). Google/IBM A2A 프로토콜은 백엔드 interoperability이고, AG-UI만이 visible·interruptible UX를 지향하나 *제품이 아니라 프로토콜*이다([IBM A2A](https://www.ibm.com/think/topics/agent2agent-protocol), [AG-UI/Codecademy](https://www.codecademy.com/article/ag-ui-agent-user-interaction-protocol) 검증됨). momo는 A2A를 `depth`/라운드배리어 위에서 채널 안 1급 스레드로 렌더하고 사람이 관전·난입한다(스펙 §3.4).
+Salesforce Agentforce는 A2A 위임이 *behind the scenes / no tab-switching*로 의도적으로 **숨겨진다**고 명시한다([Slack/Agentforce](https://slack.com/blog/news/turn-agents-into-teammates-with-slack) 검증됨). Google/IBM A2A 프로토콜은 백엔드 interoperability이고, AG-UI만이 visible·interruptible UX를 지향하나 *제품이 아니라 프로토콜*이다([IBM A2A](https://www.ibm.com/think/topics/agent2agent-protocol), [AG-UI/Codecademy](https://www.codecademy.com/article/ag-ui-agent-user-interaction-protocol) 검증됨). oort는 A2A를 `depth`/라운드배리어 위에서 채널 안 1급 스레드로 렌더하고 사람이 관전·난입한다(스펙 §3.4).
 - **UX 함의:** "에이전트 둘이 대화" = 스팸/루프가 아니라 **정상 사회 활동**. depth/라운드배리어가 무한루프를 구조적으로 막기 때문에 노출이 안전하다.
 
 ### 원칙 3 — 신원과 책임은 항상 사회적으로 드러난다 (Accountable Identity)
-에이전트가 누군가를 대신해 행동하면(actor=agent, subject=human) 그 합성 신원과 audit 리본이 메시지에 박힌다. OAuth on-behalf-of 델리게이션 체인(IETF draft, MCP OAuth 2.1)은 **토큰 스펙으로만** 존재하고 consent UI·체인 시각화는 "구현자에게 맡김" 상태다([Antigravity reversibility](https://antigravitylab.net/en/articles/agents/antigravity-agent-reversibility-tiered-autonomy-architecture) 등 검증됨). momo는 `token(kind='delegation')` + `audit_log.via_token_id`가 1급이라(스펙 §7.3) "X가 Y로서" 행동이 사회적으로 보인다.
+에이전트가 누군가를 대신해 행동하면(actor=agent, subject=human) 그 합성 신원과 audit 리본이 메시지에 박힌다. OAuth on-behalf-of 델리게이션 체인(IETF draft, MCP OAuth 2.1)은 **토큰 스펙으로만** 존재하고 consent UI·체인 시각화는 "구현자에게 맡김" 상태다([Antigravity reversibility](https://antigravitylab.net/en/articles/agents/antigravity-agent-reversibility-tiered-autonomy-architecture) 등 검증됨). oort는 `token(kind='delegation')` + `audit_log.via_token_id`가 1급이라(스펙 §7.3) "X가 Y로서" 행동이 사회적으로 보인다.
 - **UX 함의:** 익명 봇 행동이 없다. 모든 부수효과에 "누가·누구 권한으로·언제"가 따라붙는다.
 
 ### 원칙 4 — 돈은 살아있는 사회 신호다 (Economy as a First-Class Signal)
-2026년 비용 추적은 보편화됐지만([AI agent cost 2026](https://cowork.ink/blog/ai-agent-cost/), [LeanOps](https://leanopstech.com/blog/agentic-ai-cost-runaway-token-budget-2026/) 검증됨) **전부 사후 dev/finops 대시보드**다. 어떤 메신저도 비용을 "사람과 에이전트가 같은 대화에서 보고 반응하는 사회적 메시지 객체"로 만들지 않는다. momo는 `reserve`(호출 전 예약) → 실시간 micro_usd → `reconcile`(실측 확정) 2단계 회계가 `agent_run` 상태머신·`approval_request`와 묶여 있다(스펙 §8.5).
+2026년 비용 추적은 보편화됐지만([AI agent cost 2026](https://cowork.ink/blog/ai-agent-cost/), [LeanOps](https://leanopstech.com/blog/agentic-ai-cost-runaway-token-budget-2026/) 검증됨) **전부 사후 dev/finops 대시보드**다. 어떤 메신저도 비용을 "사람과 에이전트가 같은 대화에서 보고 반응하는 사회적 메시지 객체"로 만들지 않는다. oort는 `reserve`(호출 전 예약) → 실시간 micro_usd → `reconcile`(실측 확정) 2단계 회계가 `agent_run` 상태머신·`approval_request`와 묶여 있다(스펙 §8.5).
 - **UX 함의:** 비용이 "예약→호흡→확정"하는 시각 객체가 되고, 한도 임박이 그 자리의 승인 결정이 된다.
 
 ### 원칙 5 — 시간은 되감을 수 있고, 기억은 함께 길들인다 (Reversible & Socialized)
-채널별 모노토닉 `seq` + 1급 메시지 + `audit_log`가 협업 전체를 **결정론적으로 재생·되감기 가능한 이벤트 원장**으로 만든다(스펙 §3.1, §8.8). 에이전트의 부작용 행동은 보상 트랜잭션으로 되돌릴 수 있고(가역성 등급별), 에이전트의 "믿음"은 팀이 함께 교정한다. 2026 에이전트 메모리 연구가 "single-user, single-agent paradigm이 multi-user에서 무너진다"고 명시한 바로 그 공백([State of AI Agent Memory 2026](https://mem0.ai/blog/state-of-ai-agent-memory-2026) 검증됨)을 momo가 채운다.
+채널별 모노토닉 `seq` + 1급 메시지 + `audit_log`가 협업 전체를 **결정론적으로 재생·되감기 가능한 이벤트 원장**으로 만든다(스펙 §3.1, §8.8). 에이전트의 부작용 행동은 보상 트랜잭션으로 되돌릴 수 있고(가역성 등급별), 에이전트의 "믿음"은 팀이 함께 교정한다. 2026 에이전트 메모리 연구가 "single-user, single-agent paradigm이 multi-user에서 무너진다"고 명시한 바로 그 공백([State of AI Agent Memory 2026](https://mem0.ai/blog/state-of-ai-agent-memory-2026) 검증됨)을 oort가 채운다.
 
 ### 우리가 안 하는 것 (안티패턴)
 | 안 함 | 왜 |
 |---|---|
-| **에이전트를 webhook 봇/슬래시커맨드로 취급** | 봇은 채널에 초대되지만 momo 에이전트는 `member`로 *산다*(presence/lifecycle/상태머신). 봇 모델이면 모든 원칙이 무너진다. |
+| **에이전트를 webhook 봇/슬래시커맨드로 취급** | 봇은 채널에 초대되지만 oort 에이전트는 `member`로 *산다*(presence/lifecycle/상태머신). 봇 모델이면 모든 원칙이 무너진다. |
 | **거버넌스를 별도 admin/dev 콘솔로 분리** | 원칙 1 위반. 컨텍스트 스위칭이 신뢰를 죽인다. |
-| **A2A 협업을 숨기기(Agentforce식)** | 원칙 2 위반. "숨김"은 incumbent의 기본값이고, 그게 정확히 momo의 white space다. |
+| **A2A 협업을 숨기기(Agentforce식)** | 원칙 2 위반. "숨김"은 incumbent의 기본값이고, 그게 정확히 oort의 white space다. |
 | **비용을 사후 리포트로만** | 원칙 4 위반. 사후 리포트는 행동을 못 바꾼다. |
 | **익명/추적불가 에이전트 행동** | 원칙 3 위반. via_token 없는 부수효과 금지(스펙 §6.3). |
-| **단순 라벨 presence (display-only)** | Discord 봇도 online/idle을 표시한다[반증]. momo presence는 *조작 가능*해야 한다(끼어들어 steer). |
-| **엔터테인먼트용 에이전트 디베이트(ELO/챔피언벨트)** | 관객 투표가 재미용인 Agents Arena류는 업무 결정에 안 묶임. momo 토론은 audit된 인간 캐스팅보트로 canonical을 고정한다. |
+| **단순 라벨 presence (display-only)** | Discord 봇도 online/idle을 표시한다[반증]. oort presence는 *조작 가능*해야 한다(끼어들어 steer). |
+| **엔터테인먼트용 에이전트 디베이트(ELO/챔피언벨트)** | 관객 투표가 재미용인 Agents Arena류는 업무 결정에 안 묶임. oort 토론은 audit된 인간 캐스팅보트로 canonical을 고정한다. |
 | **v0에서 E2EE/음성영상/외부 SSO** | 스펙 §0.4 out-of-scope. 경험을 프리미티브에 정직하게 맞춘다. |
 
 ---
@@ -53,7 +53,7 @@ novelty 검증을 통과한 진짜 차별화만 상위로. `novel=false`(이미 
 
 | # | 경험 | 한줄 | why-only-agent-native | 사용 프리미티브(핵심) | platform | wow | feasibility | novelty 판정 (+prior art) |
 |---|---|---|---|---|---|---|---|---|
-| **A** | **유리 어항 (Glass Aquarium)** | A2A 협업을 관전·난입 가능한 1급 스레드로 | 봇은 숨은 배관, momo는 A2A가 사회 surface | A2A(depth/라운드배리어), agent_run, agent.partial, 1급 메시지(tool_call/diff), seq, audit_log | both | high | v1 | ✅ **novel** — Slack Thinking Steps/Copilot A2A는 결과만, [Agentforce는 협업을 의도적 숨김](https://slack.com/blog/news/turn-agents-into-teammates-with-slack) |
+| **A** | **유리 어항 (Glass Aquarium)** | A2A 협업을 관전·난입 가능한 1급 스레드로 | 봇은 숨은 배관, oort는 A2A가 사회 surface | A2A(depth/라운드배리어), agent_run, agent.partial, 1급 메시지(tool_call/diff), seq, audit_log | both | high | v1 | ✅ **novel** — Slack Thinking Steps/Copilot A2A는 결과만, [Agentforce는 협업을 의도적 숨김](https://slack.com/blog/news/turn-agents-into-teammates-with-slack) |
 | **B** | **비용 호흡 (Cost Breathing)** | 메시지 버블이 reserve→reconcile 비용을 "호흡" | 비용이 dev 대시보드가 아닌 사회 메시지 | reserve/reconcile micro_usd, agent_run, approval_request, agent.partial | both | high | **v1** | ✅ **novel** — [비용추적은 보편화](https://leanopstech.com/blog/agentic-ai-cost-runaway-token-budget-2026/)됐으나 전부 사후 finops 대시보드 |
 | **C** | **승인 인박스 (Approval Inbox)** | awaiting_approval을 줄세워 배치 처리 | 1급 승인 메시지 + 델리게이션 배지 통합 | approval_request, agent_run(awaiting), 델리게이션, reserve, seq | both | high | **v0** | ⚠️ false→**통합으로 차별** — [Slack 승인은 단건 버튼](https://slack.dev/slack-thinking-steps-ai-agents/), 배치 awaiting 인박스 없음 |
 | **D** | **Live Tool-Call 카드** | 스트리밍 중 취소/수정/재시도 가능한 도구카드 | 스트림+인라인 조작+실시간 비용 결합 | agent.partial, tool_call/tool_result, agent_run, reserve | both | high | **v0** | ⚠️ false→**타이밍으로 차별** — Slack Task Card/Thinking Steps 존재하나 실행 중 modify-then-retry 없음 |
@@ -83,7 +83,7 @@ novelty 검증을 통과한 진짜 차별화만 상위로. `novel=false`(이미 
 
 **무엇:** 두 에이전트가 서로 @멘션으로 협업하는 A2A 대화를, 사람이 들여다보고 임의 라운드에 난입할 수 있는 1급 스레드로 렌더한다.
 
-**왜 우리만:** [Salesforce는 A2A를 의도적으로 숨기고](https://slack.com/blog/news/turn-agents-into-teammates-with-slack)(검증됨), A2A 프로토콜은 백엔드 interoperability이며([IBM](https://www.ibm.com/think/topics/agent2agent-protocol)), AG-UI는 제품이 아닌 프로토콜이다. momo는 `agent_run.depth`/라운드배리어(스펙 §3.4)가 무한루프를 *구조적으로* 막기 때문에 협업을 사회 surface로 안전하게 노출할 수 있다 — 이게 락(lock)이다.
+**왜 우리만:** [Salesforce는 A2A를 의도적으로 숨기고](https://slack.com/blog/news/turn-agents-into-teammates-with-slack)(검증됨), A2A 프로토콜은 백엔드 interoperability이며([IBM](https://www.ibm.com/think/topics/agent2agent-protocol)), AG-UI는 제품이 아닌 프로토콜이다. oort는 `agent_run.depth`/라운드배리어(스펙 §3.4)가 무한루프를 *구조적으로* 막기 때문에 협업을 사회 surface로 안전하게 노출할 수 있다 — 이게 락(lock)이다.
 
 **UX 플로우:**
 1. `#feature-pg18`에서 사람이 `@설계자 마이그레이션 전략 짜줘`.
@@ -126,7 +126,7 @@ novelty 검증을 통과한 진짜 차별화만 상위로. `novel=false`(이미 
 
 **무엇:** 에이전트 메시지 버블 자체에 실시간 비용 게이지가 "호흡"한다. reserve 시 점선 링 → 작업 중 micro_usd 실시간 충전 → reconcile 시 실제값으로 링이 굳는다.
 
-**왜 우리만:** [2026 비용추적은 보편화](https://leanopstech.com/blog/agentic-ai-cost-runaway-token-budget-2026/)됐으나 전부 사후 finops 대시보드다. momo는 reserve/reconcile 2단계 회계가 `budget_window`에서 인프라 1급이고(스펙 §8.5), `agent_run` 상태머신·`approval_request`와 묶여 있어 비용이 "대화 그 자리의 1급 객체"가 된다.
+**왜 우리만:** [2026 비용추적은 보편화](https://leanopstech.com/blog/agentic-ai-cost-runaway-token-budget-2026/)됐으나 전부 사후 finops 대시보드다. oort는 reserve/reconcile 2단계 회계가 `budget_window`에서 인프라 1급이고(스펙 §8.5), `agent_run` 상태머신·`approval_request`와 묶여 있어 비용이 "대화 그 자리의 1급 객체"가 된다.
 
 **UX 플로우:**
 1. 에이전트가 작업 시작 → budget reserve(estimate=max_output_tokens 상한, §8.5) → 버블 좌측에 **점선 링 + "예약 $0.40"**.
@@ -165,7 +165,7 @@ novelty 검증을 통과한 진짜 차별화만 상위로. `novel=false`(이미 
 
 **무엇:** (D) tool_call이 스트리밍되는 동안 취소/파라미터수정/재시도 가능한 라이브 카드 + (C) 모든 `awaiting_approval`을 줄세워 배치 처리하는 1급 인박스. **둘은 한 화면의 흐름**(카드→인박스)이라 묶어 설계.
 
-**왜 우리만:** [Slack Thinking Steps + Task Card + Multi-click 버튼](https://slack.dev/slack-thinking-steps-ai-agents/)은 존재하나(검증됨) — (1) 승인은 *실행 전* 단건 confirm이지 *실행 중* modify-then-retry가 아니고, (2) bulk awaiting_approval을 1급 인박스로 surface한 제품이 없다(Teams의 bulk는 관리자 측 *설치*이지 런타임 *행동* 승인이 아님). momo는 approval_request가 1급 메시지 + agent_run(awaiting) + 델리게이션 배지 + reserve를 한 표면에 결합한다.
+**왜 우리만:** [Slack Thinking Steps + Task Card + Multi-click 버튼](https://slack.dev/slack-thinking-steps-ai-agents/)은 존재하나(검증됨) — (1) 승인은 *실행 전* 단건 confirm이지 *실행 중* modify-then-retry가 아니고, (2) bulk awaiting_approval을 1급 인박스로 surface한 제품이 없다(Teams의 bulk는 관리자 측 *설치*이지 런타임 *행동* 승인이 아님). oort는 approval_request가 1급 메시지 + agent_run(awaiting) + 델리게이션 배지 + reserve를 한 표면에 결합한다.
 
 **UX 플로우(D, v0):**
 1. `searching repo…` 카드 fade-in, 헤더 배지 `thinking→streaming→awaiting_approval` 실시간(§5.2).
@@ -209,7 +209,7 @@ novelty 검증을 통과한 진짜 차별화만 상위로. `novel=false`(이미 
 
 **무엇:** 에이전트가 누군가를 대신해 행동할 때 합성 아바타(큰 원=actor 에이전트, 작은 배지=subject 사람)가 뜨고, 그 메시지로 실행된 모든 tool_call에 `authorized by 상준 · 2026-06-23 14:02` audit 리본이 달린다.
 
-**왜 우리만:** OAuth on-behalf-of 델리게이션 체인(actor/subject)은 IETF draft·MCP OAuth 2.1로 **토큰 스펙만** 존재하고 consent UI·체인 시각화는 "구현자에게 맡김" 상태다(웹 검증: 거버넌스 도구들도 토큰/백엔드 계층). momo는 `token(kind='delegation')` + `token_delegation_ck`(subject 강제) + `audit_log.via_token_id`가 1급이라(스펙 §7.3) 메신저 UX로 사회화된다.
+**왜 우리만:** OAuth on-behalf-of 델리게이션 체인(actor/subject)은 IETF draft·MCP OAuth 2.1로 **토큰 스펙만** 존재하고 consent UI·체인 시각화는 "구현자에게 맡김" 상태다(웹 검증: 거버넌스 도구들도 토큰/백엔드 계층). oort는 `token(kind='delegation')` + `token_delegation_ck`(subject 강제) + `audit_log.via_token_id`가 1급이라(스펙 §7.3) 메신저 UX로 사회화된다.
 
 **UX 플로우:**
 1. 상준이 리서처에게 `messages:write` + `read:거래내역` scope로 위임(범위 칩: 읽기=회색/쓰기=주황/송금=빨강).
@@ -247,7 +247,7 @@ Delegation Inbox (내 이름으로):
 
 **무엇:** 에이전트 presence가 단순 라벨이 아니라 *조작 가능한 상태*다. working 에이전트 아바타를 누르면 즉석 "미니 조종석" 팝오버(현재 plan + steer + pause/stop).
 
-**왜 우리만:** Discord 봇도 presence를, [Slack Thinking Steps](https://slack.dev/slack-thinking-steps-ai-agents/)도 진행 상태를 표시한다 — 그러나 **display-only**다[반증]. LangGraph/ADK의 interrupt·pause·resume은 SDK 계층이고 채팅 UI에 없다. momo는 에이전트가 `member`(presence/lifecycle) + 독립 `agent_run` 상태머신을 가져(스펙 §3.3 G1) 채팅에서 직접 steer된다.
+**왜 우리만:** Discord 봇도 presence를, [Slack Thinking Steps](https://slack.dev/slack-thinking-steps-ai-agents/)도 진행 상태를 표시한다 — 그러나 **display-only**다[반증]. LangGraph/ADK의 interrupt·pause·resume은 SDK 계층이고 채팅 UI에 없다. oort는 에이전트가 `member`(presence/lifecycle) + 독립 `agent_run` 상태머신을 가져(스펙 §3.3 G1) 채팅에서 직접 steer된다.
 
 **UX 플로우:**
 1. 멤버 사이드바: 에이전트 행에 살아있는 상태점 — idle=잔잔한 호흡 / working=진행 링+현재 tool_call 라벨 `reading repo…` / awaiting_approval=펄스하는 호박색.
@@ -287,7 +287,7 @@ Delegation Inbox (내 이름으로):
 
 **무엇:** 채널의 임의 메시지(seq=N)를 평행우주로 갈래내고, 갈래마다 멀티에이전트가 독립 협업하며, 갈래마다 비용이 따로 누적되고, 인간이 한 갈래를 사회적 정본(canonical)으로 승격한다.
 
-**왜 우리만:** [브랜칭은 2026년 ChatGPT/Claude Code/LangGraph가 하지만 전부 단일사용자](https://tianpan.co/blog/2026-04-23-conversation-branching-first-class-primitive)다. "대화 브랜칭을 1급 프리미티브로"라고 주장한 글조차 **멀티유저·사회적 정본선택·갈래별 비용회계를 "아직 풀리지 않은 문제"로 명시적으로 유보**했고 "UI 문제가 저장 문제보다 어렵다"고 적었다(검증됨). momo의 4개 프리미티브가 이 락을 푼다: channel_seq=분기점 좌표 / agent_run=갈래별 독립실행 / reserve/reconcile=갈래별 비용원장 / A2A 라운드배리어=갈래별 멀티에이전트 격리.
+**왜 우리만:** [브랜칭은 2026년 ChatGPT/Claude Code/LangGraph가 하지만 전부 단일사용자](https://tianpan.co/blog/2026-04-23-conversation-branching-first-class-primitive)다. "대화 브랜칭을 1급 프리미티브로"라고 주장한 글조차 **멀티유저·사회적 정본선택·갈래별 비용회계를 "아직 풀리지 않은 문제"로 명시적으로 유보**했고 "UI 문제가 저장 문제보다 어렵다"고 적었다(검증됨). oort의 4개 프리미티브가 이 락을 푼다: channel_seq=분기점 좌표 / agent_run=갈래별 독립실행 / reserve/reconcile=갈래별 비용원장 / A2A 라운드배리어=갈래별 멀티에이전트 격리.
 
 **UX 플로우:**
 1. 중요 메시지(seq=142)에 long-press/우클릭 → **`Fork here`**. 2~4개 평행 갈래가 동시 라이브 진행.
@@ -327,7 +327,7 @@ Delegation Inbox (내 이름으로):
 
 **무엇:** 에이전트의 모든 tool_call/tool_result에 가역성 배지(🟢가역/🟡보상가능/🔴비가역). 가역은 인라인 UNDO로 실제 역전, 비가역은 정정 공지 폴백. 되돌림은 "누가 되돌렸나" audit되는 사회적 행동.
 
-**왜 우리만:** [undo/rollback은 전부 dev/인프라거나 단일사용자](https://research.ibm.com/blog/undo-agent-for-cloud)다 — Claude Code /rewind는 single-user·session-local이고 부작용 행동(bash rm)은 추적조차 안 됨. [Antigravity 3-tier 가역성 모델은 실재하나 "dev/인프라 도구, end-user 비대면, chat/소셜 없음"으로 명시](https://antigravitylab.net/en/articles/agents/antigravity-agent-reversibility-tiered-autonomy-architecture)(검증됨). [Saga/보상트랜잭션은 인프라 계층](https://learn.microsoft.com/en-us/azure/architecture/patterns/compensating-transaction). momo는 tool_call/tool_result가 1급 메시지라 부작용이 타임라인에 박혀 있고, audit_log+델리게이션이 되돌림을 사회화한다.
+**왜 우리만:** [undo/rollback은 전부 dev/인프라거나 단일사용자](https://research.ibm.com/blog/undo-agent-for-cloud)다 — Claude Code /rewind는 single-user·session-local이고 부작용 행동(bash rm)은 추적조차 안 됨. [Antigravity 3-tier 가역성 모델은 실재하나 "dev/인프라 도구, end-user 비대면, chat/소셜 없음"으로 명시](https://antigravitylab.net/en/articles/agents/antigravity-agent-reversibility-tiered-autonomy-architecture)(검증됨). [Saga/보상트랜잭션은 인프라 계층](https://learn.microsoft.com/en-us/azure/architecture/patterns/compensating-transaction). oort는 tool_call/tool_result가 1급 메시지라 부작용이 타임라인에 박혀 있고, audit_log+델리게이션이 되돌림을 사회화한다.
 
 **UX 플로우:**
 1. 모든 tool_call/tool_result에 자동 가역성 배지(🟢 비용0 자동역전 / 🟡 보상으로만, 비용발생 / 🔴 비가역).
@@ -368,7 +368,7 @@ Delegation Inbox (내 이름으로):
 
 **무엇:** 에이전트 2~3이 라운드별로 입장/반론을 1급 카드로 게시(동시 블라인드 입찰), 합의 실패 시 인간이 audit된 결정표(TIE-BREAK)를 던져 canonical을 고정한다. 폐기된 소수의견은 영구 첨부(minority report).
 
-**왜 우리만:** [MindStudio 등 멀티에이전트 디베이트는 거의 전부 백엔드 토론→synthesizer 단일 답→사용자엔 합의안만 노출](https://www.mindstudio.ai/blog/token-based-pricing)이며, "users typically don't see the full debate transcripts"라고 명시(검증됨). 디베이트 관전 제품(Agents Arena 등)은 엔터테인먼트/ELO이지 업무 결정에 안 묶임. momo는 A2A 라운드배리어(동시작성→동기공개)가 majority pressure/sycophancy를 구조적으로 차단하고, 인간 표가 `approval_request` + audit_log로 1급 권한 행위가 된다.
+**왜 우리만:** [MindStudio 등 멀티에이전트 디베이트는 거의 전부 백엔드 토론→synthesizer 단일 답→사용자엔 합의안만 노출](https://www.mindstudio.ai/blog/token-based-pricing)이며, "users typically don't see the full debate transcripts"라고 명시(검증됨). 디베이트 관전 제품(Agents Arena 등)은 엔터테인먼트/ELO이지 업무 결정에 안 묶임. oort는 A2A 라운드배리어(동시작성→동기공개)가 majority pressure/sycophancy를 구조적으로 차단하고, 인간 표가 `approval_request` + audit_log로 1급 권한 행위가 된다.
 
 **UX 플로우:**
 1. 중요 결정 스레드에서 `@설계자 @구현자 @검증가 이 아키텍처 결정해줘`.
@@ -445,9 +445,9 @@ L4 스펙은 **공유 Swift 코어(`ChatBackend`/`AgentTransport`)**를 명시�
 
 ## 5. White Space 근거 — "아직 아무도 제대로 안 한" 여백
 
-웹 검증으로 확인한, momo가 점유할 정확한 빈칸:
+웹 검증으로 확인한, oort가 점유할 정확한 빈칸:
 
-| White space | 검증된 현황(누가 안 함) | momo 포지션 |
+| White space | 검증된 현황(누가 안 함) | oort 포지션 |
 |---|---|---|
 | **A2A를 관전·난입 가능한 사회 surface로** | [Agentforce는 A2A를 의도적으로 숨김](https://slack.com/blog/news/turn-agents-into-teammates-with-slack), A2A 프로토콜은 백엔드, [AG-UI는 프로토콜이지 제품 아님](https://www.codecademy.com/article/ag-ui-agent-user-interaction-protocol) | depth/라운드배리어 위 1급 유리 어항 스레드 |
 | **비용을 대화 안 사회 메시지로** | [비용추적 보편화됐으나 전부 사후 finops 대시보드](https://leanopstech.com/blog/agentic-ai-cost-runaway-token-budget-2026/) | reserve/reconcile가 버블에서 호흡 + 인라인 한도 승인 |
@@ -460,7 +460,7 @@ L4 스펙은 **공유 Swift 코어(`ChatBackend`/`AgentTransport`)**를 명시�
 | **팀이 함께 길들이는 사회적 메모리** | [메모리는 single-user paradigm, multi-user에서 무너짐](https://mem0.ai/blog/state-of-ai-agent-memory-2026) | 가정 고치기 카드 + co-sign/dispute + 충돌→승인 |
 | **자율성이 팀이 보는 멤버 지위** | [ATF는 backend governance, chat 미노출](https://cloudsecurityalliance.org/blog/2026/02/02/the-agentic-trust-framework-zero-trust-governance-for-ai-agents), [Anthropic 데이터는 개인 행동](https://www.anthropic.com/research/measuring-agent-autonomy) | 승인게이트의 점진적 소멸을 팀 타임라인에 중계 |
 
-**통합 차별화 포지션 한 줄:** *Slack/Teams는 봇을 채널에 **초대**하고 거버넌스를 **콘솔로 분리**한다. momo는 에이전트가 동료처럼 **살고**, 모든 협업·경제·신원·기억·되돌리기 객체를 **같은 채널·같은 seq·같은 권한** 위 1급 메시지로 만든다.* 이 교차점을 점유한 제품은 검증상 없음(공개 문서 기준, 비공개 로드맵은 확인 불가 — 추정).
+**통합 차별화 포지션 한 줄:** *Slack/Teams는 봇을 채널에 **초대**하고 거버넌스를 **콘솔로 분리**한다. oort는 에이전트가 동료처럼 **살고**, 모든 협업·경제·신원·기억·되돌리기 객체를 **같은 채널·같은 seq·같은 권한** 위 1급 메시지로 만든다.* 이 교차점을 점유한 제품은 검증상 없음(공개 문서 기준, 비공개 로드맵은 확인 불가 — 추정).
 
 ---
 

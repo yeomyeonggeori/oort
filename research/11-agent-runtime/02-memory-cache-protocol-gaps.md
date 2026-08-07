@@ -7,7 +7,7 @@
 
 For an agent-native messenger, memory and cache are not performance details. They decide what the agent is allowed to know, what it can reuse, what it can cite, and whether a team can trust an automated action later.
 
-Existing momo primitives are strong:
+Existing oort primitives are strong:
 
 - `member.kind='agent'`
 - `message.seq` as channel order source of truth
@@ -65,11 +65,11 @@ Cache entries must include `workspace_id`, `visibility`, `source`, `expires_at`,
 
 ### MCP
 
-MCP is the best fit for inbound tool/context access: external Claude/Codex/Cursor-like clients ask momo for resources, prompts, and tools. MCP uses JSON-RPC 2.0, stateful connections, and capability negotiation; it defines resources, prompts, tools, sampling, roots, and elicitation. Source: [MCP specification](https://modelcontextprotocol.io/specification/2025-11-25).
+MCP is the best fit for inbound tool/context access: external Claude/Codex/Cursor-like clients ask oort for resources, prompts, and tools. MCP uses JSON-RPC 2.0, stateful connections, and capability negotiation; it defines resources, prompts, tools, sampling, roots, and elicitation. Source: [MCP specification](https://modelcontextprotocol.io/specification/2025-11-25).
 
-momo implication:
+oort implication:
 
-- MCP server = "external agent reads/acts through momo with user consent."
+- MCP server = "external agent reads/acts through oort with user consent."
 - MCP must not bypass RLS or plugin approval policy.
 - MCP tools should produce the same `tool_call`, `approval_request`, `tool_result`, and `audit_log` records as native flows.
 
@@ -77,7 +77,7 @@ momo implication:
 
 A2A is a better semantic reference for agent-to-agent tasks. It defines Agent Cards, task lifecycle, messages, artifacts, streaming events, idempotency, push notifications, and protocol bindings. Source: [A2A protocol specification](https://a2a-protocol.org/latest/specification/).
 
-| A2A concept | momo concept |
+| A2A concept | oort concept |
 |---|---|
 | Agent Card | `member.kind='agent'` + capability cache |
 | Task | `agent_run` |
@@ -94,7 +94,7 @@ A2A is a better semantic reference for agent-to-agent tasks. It defines Agent Ca
 
 OpenAI-compatible SSE remains the v0 execution transport because Hermes and Kim Intern can converge on it quickly.
 
-momo should normalize all transports into:
+oort should normalize all transports into:
 
 ```json
 {
@@ -137,7 +137,7 @@ This turns approval from a pretty card into a protocol checkpoint.
 | A2A lifecycle alignment | Enables future agent-to-agent delegation without rewrites | `MOMO-160` |
 | Approval pause/resume | Makes dangerous actions actually governed | `MOMO-161` |
 | Hermes contract verification | Confirms real adapter/runtime behavior beyond docs | `MOMO-162` |
-| Inbound MCP v0 | Lets external agents use momo as governed context/tool server | `MOMO-163` |
+| Inbound MCP v0 | Lets external agents use oort as governed context/tool server | `MOMO-163` |
 
 ## 7. Sources
 
