@@ -986,6 +986,10 @@ impl AgentWorker {
             Box::pin(async move {
                 // (1) the call itself, on the spine. `client_msg_id` from the
                 // provider's `call_id` makes a re-claimed turn re-post nothing.
+                // Its *result* takes `tool_exec::result_message_id`, a separate
+                // key space on purpose (#1133): the guard this key buys is
+                // `(channel, author, client_msg_id)`, and the card and the
+                // result already agree on the first two.
                 send_message_in_tx(
                     conn,
                     workspace_id,
