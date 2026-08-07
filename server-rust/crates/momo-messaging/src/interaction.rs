@@ -521,6 +521,25 @@ pub async fn edit_message_in_tx(
 /// a client must not be able to write.
 pub const STREAM_PROPS_KEY: &str = "momo.stream";
 
+/// The `momo.stream` block a producer's **opening write** carries (#1161).
+///
+/// ## Why the marker cannot wait for the first slice
+///
+/// A stream's first write is a `send`, not a `PATCH` — the opening text rides
+/// the insert. If the marker only appeared on the second write, a turn that died
+/// between the two would leave a half sentence in the channel wearing a finished
+/// answer's clothes, and [`open_stream_message_for_run_in_tx`] could not even
+/// find it in order to mark it. That window is small, and it is exactly the
+/// window a provider hanging up mid-answer lands in — the failure mode ADR-0155
+/// exists to make legible.
+///
+/// `rev: 0` is the floor the strictly-greater rule already stands on, so the
+/// first slice is revision 1 whether or not it found this block: no producer's
+/// arithmetic changes, and a message that never streamed still reads as 0.
+pub fn opening_stream_props() -> Value {
+    json!({ "rev": 0, "streaming": true })
+}
+
 /// How a stream stopped, when it did not simply finish (ADR-0155).
 ///
 /// Absent on a normal completion — an answer that arrived in full says so by

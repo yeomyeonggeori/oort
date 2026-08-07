@@ -786,6 +786,11 @@ struct RawCompletionDetails {
 /// error, so the substitution seam is the constructor, not the environment.
 pub struct MockChatProvider {
     outcome: MockOutcome,
+    /// What the mock puts on the sink before it answers, when a test wants a
+    /// turn that actually streams (#1161). `None` — the default — keeps every
+    /// existing test on the non-streaming path, which is still the honest shape
+    /// for the wires that do not stream.
+    stream_plan: Option<StreamPlan>,
     calls: Mutex<Vec<ObservedCall>>,
     /// One entry per turn: what tool calls that turn returns (goal SRV-T1).
     ///
@@ -795,6 +800,21 @@ pub struct MockChatProvider {
     /// second turn, and that second turn is the half of the loop that proves
     /// `resume_approval` is no longer swallowed.
     tool_call_script: Mutex<std::collections::VecDeque<Vec<ProviderToolCall>>>,
+}
+
+/// How a streaming mock turn arrives (#1161).
+///
+/// The gap is real time rather than a virtual clock because what a conformance
+/// test needs to exercise is the pump's **shipped** window — a test that moved
+/// the window would prove the pump against a configuration production never
+/// runs.
+struct StreamPlan {
+    /// Text to emit as deltas. `None` means "whatever this turn's answer is",
+    /// which is what a success test wants; a failure test has to say it out
+    /// loud, because a failing turn has no answer to borrow.
+    text: Option<String>,
+    slices: usize,
+    gap: Duration,
 }
 
 enum MockOutcome {
@@ -836,6 +856,7 @@ impl MockChatProvider {
     pub fn echo() -> MockChatProvider {
         MockChatProvider {
             outcome: MockOutcome::Echo,
+            stream_plan: None,
             calls: Mutex::new(Vec::new()),
             tool_call_script: Mutex::new(std::collections::VecDeque::new()),
         }
@@ -859,6 +880,7 @@ impl MockChatProvider {
                     .map(|(needle, answer)| (needle.into(), answer.into()))
                     .collect(),
             ),
+            stream_plan: None,
             calls: Mutex::new(Vec::new()),
             tool_call_script: Mutex::new(std::collections::VecDeque::new()),
         }
@@ -868,6 +890,7 @@ impl MockChatProvider {
     pub fn failing(error: ProviderError) -> MockChatProvider {
         MockChatProvider {
             outcome: MockOutcome::Fail(error),
+            stream_plan: None,
             calls: Mutex::new(Vec::new()),
             tool_call_script: Mutex::new(std::collections::VecDeque::new()),
         }
@@ -891,6 +914,65 @@ impl MockChatProvider {
         MockChatProvider {
             tool_call_script: Mutex::new(script.into_iter().collect()),
             ..self
+        }
+    }
+
+    /// Deliver this turn's answer as `slices` deltas, `gap` apart, before
+    /// returning it whole (#1161).
+    ///
+    /// This is what makes a conformance test a *streaming* turn rather than a
+    /// turn that merely could have been one: the deltas go through the same sink
+    /// a real SSE loop writes to, so the pump's window, the growing message and
+    /// the closing slice are all exercised by the shipped code path.
+    ///
+    /// `gap` should exceed [`crate::partial::PARTIAL_WINDOW`] when the test
+    /// wants more than one window's worth of slices — the pump coalesces, so
+    /// four fast deltas are one slice, not four.
+    pub fn streaming(self, slices: usize, gap: Duration) -> MockChatProvider {
+        MockChatProvider {
+            stream_plan: Some(StreamPlan {
+                text: None,
+                slices,
+                gap,
+            }),
+            ..self
+        }
+    }
+
+    /// Stream `text` and *then* do whatever this mock does — which, on a
+    /// [`MockChatProvider::failing`], is die.
+    ///
+    /// The half-written answer has to be named explicitly because a failing turn
+    /// has no answer to borrow, and "what the reader had already read when the
+    /// provider went away" is the exact thing ADR-0155 is about.
+    pub fn streaming_text(
+        self,
+        text: impl Into<String>,
+        slices: usize,
+        gap: Duration,
+    ) -> MockChatProvider {
+        MockChatProvider {
+            stream_plan: Some(StreamPlan {
+                text: Some(text.into()),
+                slices,
+                gap,
+            }),
+            ..self
+        }
+    }
+
+    /// The answer this mock would give for a request, without recording a call.
+    fn answer_text(&self, request: &ChatRequest) -> String {
+        match &self.outcome {
+            MockOutcome::Echo | MockOutcome::Fail(_) => MockChatProvider::echo_text(request),
+            MockOutcome::Scripted(rules) => {
+                let prompt = MockChatProvider::last_user_content(request);
+                rules
+                    .iter()
+                    .find(|(needle, _)| prompt.contains(needle.as_str()))
+                    .map(|(_, answer)| answer.clone())
+                    .unwrap_or_else(|| MockChatProvider::echo_text(request))
+            }
         }
     }
 
@@ -936,18 +1018,10 @@ impl ChatProvider for MockChatProvider {
                     .map(|definition| definition.name.to_string())
                     .collect(),
             });
-        let text = match &self.outcome {
-            MockOutcome::Fail(error) => return Err(error.clone()),
-            MockOutcome::Echo => MockChatProvider::echo_text(request),
-            MockOutcome::Scripted(rules) => {
-                let prompt = MockChatProvider::last_user_content(request);
-                rules
-                    .iter()
-                    .find(|(needle, _)| prompt.contains(needle.as_str()))
-                    .map(|(_, answer)| answer.clone())
-                    .unwrap_or_else(|| MockChatProvider::echo_text(request))
-            }
-        };
+        if let MockOutcome::Fail(error) = &self.outcome {
+            return Err(error.clone());
+        }
+        let text = self.answer_text(request);
         // One turn, one entry. An exhausted script means "no tool calls", which
         // is what makes the resume turn answer in text.
         let tool_calls = self
@@ -967,6 +1041,56 @@ impl ChatProvider for MockChatProvider {
             }),
         })
     }
+
+    /// Put the planned slices on the sink, then answer (or fail) exactly as
+    /// [`complete`](MockChatProvider::complete) would.
+    ///
+    /// The deltas go out **before** the outcome is decided, which is the shape a
+    /// dying provider actually has: a reader who watched half an answer arrive
+    /// and then saw it stop is not looking at a turn that failed before it
+    /// spoke.
+    async fn complete_streaming(
+        &self,
+        endpoint: &ProviderEndpoint,
+        request: &ChatRequest,
+        sink: &dyn DeltaSink,
+    ) -> Result<ChatCompletion, ProviderError> {
+        if let Some(plan) = &self.stream_plan {
+            let text = plan
+                .text
+                .clone()
+                .unwrap_or_else(|| self.answer_text(request));
+            for slice in split_into_slices(&text, plan.slices) {
+                sink.text_delta(slice);
+                tokio::time::sleep(plan.gap).await;
+            }
+        }
+        self.complete(endpoint, request).await
+    }
+}
+
+/// Cut `text` into at most `slices` pieces on character boundaries.
+///
+/// Character boundaries rather than byte offsets because momo's channels are
+/// mostly Korean: a naive byte split would hand the sink invalid UTF-8 roughly
+/// two times in three, and the bug it produced would be in the test harness
+/// rather than in the thing under test.
+fn split_into_slices(text: &str, slices: usize) -> Vec<&str> {
+    let chars: Vec<usize> = text.char_indices().map(|(at, _)| at).collect();
+    if slices <= 1 || chars.len() <= 1 {
+        return vec![text];
+    }
+    let per = chars.len().div_ceil(slices);
+    let mut out = Vec::new();
+    let mut start = 0usize;
+    while start < chars.len() {
+        let end = (start + per).min(chars.len());
+        let from = chars[start];
+        let to = chars.get(end).copied().unwrap_or(text.len());
+        out.push(&text[from..to]);
+        start = end;
+    }
+    out
 }
 
 #[cfg(test)]

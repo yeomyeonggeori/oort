@@ -1,15 +1,35 @@
-//! The progress pump — provider slices → coalesced `agent.partial` frames
-//! (goal SRV-B3e).
+//! The turn pump — provider slices → **the growing message** (#1161) and the
+//! coalesced `agent.partial` frames beside it (goal SRV-B3e).
 //!
 //! ## The shape, and why it is two halves
 //!
 //! [`ChannelDeltaSink`] runs *inside* the provider's SSE loop and does exactly
 //! one thing: hand the slice to a channel. [`run_partial_pump`] owns everything
-//! else — the window, the transaction, the failure policy. The split is not
+//! else — the window, the transactions, the failure policy. The split is not
 //! tidiness; it is what keeps the socket read independent of the database. A
 //! sink that wrote rows itself would make a slow `INSERT` into a stalled stream,
 //! and a failed one into a question about whether to abandon an answer that is
 //! arriving perfectly well.
+//!
+//! ## What one window now does, and why both writes stayed
+//!
+//! Since #1161 a window does two things: it grows the durable answer
+//! ([`crate::stream::MessageStream`], ADR-0155 결정 5) and it publishes the
+//! ephemeral rail hint. They are **not** substitutes, and the arithmetic is why:
+//!
+//! * the durable slice carries the **whole answer so far** (`body` is absolute),
+//!   so its payload bytes over a turn are the sum of the prefixes — quadratic in
+//!   the answer's length;
+//! * the hint carries only **this window's delta**, capped at
+//!   [`MAX_PARTIAL_BYTES`] — linear, and bounded.
+//!
+//! Retiring the hint would therefore save the cheaper of the two while blinding
+//! every rail surface that reads it (macOS `AgentPartialView`, web/mobile
+//! `AgentWorkingRail`, `workLog`) — including rails watching a channel the
+//! reader is not currently looking at. Retiring the durable half is not on the
+//! table: it is the answer. So both ride **one** window, at
+//! [`PARTIAL_WINDOW`], and the frame count per turn is exactly what it was
+//! before the flip.
 //!
 //! ## Why coalescing, and why a window rather than a count
 //!
@@ -27,18 +47,22 @@
 //! ## Ordering
 //!
 //! Every frame is emitted with `partition_key = channel_id`, the same key the
-//! turn's messages use, so the whole turn — opening, thinking, each partial, the
-//! final message, the terminal frame — is one FIFO. Partials commit on their own
-//! short transactions *while* the turn runs, so their outbox ids are below the
-//! commit's by construction.
+//! turn's messages use, so the whole turn — opening, thinking, each slice of the
+//! answer, each partial, the closing slice, the terminal frame — is one FIFO.
+//! The durable slice commits **before** the hint that accompanies it, for the
+//! same reason the opening `streaming` phase rides its own partial's
+//! transaction: the rail must never headline text the channel does not have yet.
 //!
-//! ## Failure policy: a lost partial is nothing
+//! ## Failure policy: the two halves fail differently
 //!
-//! A flush that fails is logged and dropped, never retried and never propagated.
-//! The partial is a progress hint whose truth expires in milliseconds; the
-//! durable record of this turn is the message and the terminal frame, and both
-//! ride the commit transaction. Failing the turn because a hint did not land
-//! would trade an answer for a progress bar.
+//! A hint flush that fails is logged and dropped, never retried and never
+//! propagated — its truth expires in milliseconds. A durable slice that fails is
+//! logged and **not** dropped: `body` is absolute and the accumulator belongs to
+//! [`crate::stream::MessageStream`], so the next window re-states this text along
+//! with whatever arrived since, and the closing slice in `commit_turn` re-states
+//! it one last time. Neither failure fails the turn: trading an answer for a
+//! progress bar was never the deal, and a slice is a preview of a body the
+//! commit transaction writes anyway.
 
 use std::time::Duration;
 
@@ -47,6 +71,7 @@ use momo_db::{with_tenant_tx, PgPool};
 use tokio::sync::mpsc;
 
 use crate::provider::DeltaSink;
+use crate::stream::MessageStream;
 
 /// How long slices accumulate before one frame goes out.
 ///
@@ -98,18 +123,43 @@ pub fn delta_channel() -> (ChannelDeltaSink, mpsc::UnboundedReceiver<String>) {
     (ChannelDeltaSink { tx }, rx)
 }
 
-/// Drain slices, publish one coalesced frame per window, and flush what is left
-/// when the stream ends.
+/// What one turn's pump did, once the provider stopped talking.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PumpReport {
+    /// `agent.partial` frames published — what the rail tests assert on.
+    pub frames: u32,
+    /// Durable slices accepted — what a streaming turn's message grew by.
+    pub slices: u32,
+}
+
+/// Drain slices; per window, grow the durable answer and publish one coalesced
+/// rail frame; flush what is left when the stream ends.
 ///
-/// Returns the number of frames published, which is what the tests assert on.
+/// The stream is **not** closed here. A pump that marked the answer `final`
+/// would be claiming the turn ended well before anyone knows: the same slices
+/// precede a commit, a tool call, a provider death and a cancel, and only the
+/// settle path can tell those apart. `commit_turn` writes the closing slice
+/// inside the transaction that ends the run; the stop paths write theirs through
+/// [`crate::stream::close_run_stream`] with an ADR-0155 `outcome`.
+///
+/// The stream is taken by value because the pump is `tokio::spawn`ed alongside
+/// the provider read and must own everything it touches for the length of the
+/// turn; nothing downstream needs the handle back, since `commit_turn` finds the
+/// same message through the `client_msg_id` join rather than through a pointer.
 pub async fn run_partial_pump(
     pool: PgPool,
     address: AgentRunAddress,
     mut deltas: mpsc::UnboundedReceiver<String>,
     window: Duration,
-) -> u32 {
-    let mut buffer = String::new();
-    let mut published = 0u32;
+    mut stream: MessageStream,
+) -> PumpReport {
+    // Two buffers, because the two halves of a window carry different things.
+    // `hint` is this window's delta under the byte cap; `pending` is every byte
+    // since the last durable slice, uncapped — the answer must not lose a
+    // sentence to a limit that exists to keep a headline short.
+    let mut hint = String::new();
+    let mut pending = String::new();
+    let mut report = PumpReport::default();
     let mut ticker = tokio::time::interval(window);
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     // `interval` fires immediately on its first tick; consuming it here is what
@@ -120,22 +170,53 @@ pub async fn run_partial_pump(
     loop {
         tokio::select! {
             received = deltas.recv() => match received {
-                Some(delta) => append(&mut buffer, &delta),
+                Some(delta) => {
+                    pending.push_str(&delta);
+                    append(&mut hint, &delta);
+                }
                 // The sink was dropped: the provider is done, one way or
                 // another. Fall out and flush the tail.
                 None => break,
             },
             _ = ticker.tick() => {
-                flush(&pool, address, &mut buffer, &mut published).await;
+                grow(&mut stream, &mut pending, &mut report).await;
+                flush(&pool, address, &mut hint, &mut report.frames).await;
             }
         }
     }
 
     // The tail. Without this the last window of an answer — often its whole
-    // final sentence — would never be reported, and the rail's headline would
-    // stop mid-thought until the durable message arrived.
-    flush(&pool, address, &mut buffer, &mut published).await;
-    published
+    // final sentence — would never be reported, and on every path that does not
+    // reach a commit (a tool call, a provider death, a cancel) it would never
+    // reach the channel at all: those paths freeze whatever the message already
+    // holds.
+    grow(&mut stream, &mut pending, &mut report).await;
+    flush(&pool, address, &mut hint, &mut report.frames).await;
+    report
+}
+
+/// One durable slice: hand the window's text to the accumulator and publish the
+/// answer so far.
+///
+/// A failure keeps the text — [`MessageStream::push`] appends before it writes,
+/// and `body` is absolute — so the next window re-states it. That is why this
+/// logs at `warn` and returns nothing to decide on: there is no lost byte to
+/// recover, only a frame a reader did not see.
+async fn grow(stream: &mut MessageStream, pending: &mut String, report: &mut PumpReport) {
+    if pending.is_empty() {
+        return;
+    }
+    let delta = std::mem::take(pending);
+    match stream.push(&delta, false).await {
+        // A window of nothing but whitespace opens no message and writes no row
+        // — the same rule that keeps an empty bubble out of the channel — so it
+        // is not a slice either.
+        Ok(()) => report.slices += u32::from(stream.message_id().is_some()),
+        Err(error) => tracing::warn!(
+            error = %error,
+            "streamed slice did not land; the next window re-states it"
+        ),
+    }
 }
 
 /// Append with the byte cap applied — the cap trims the *tail*, so a frame

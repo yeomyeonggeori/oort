@@ -10,14 +10,20 @@
 //! identical two calls over REST — `POST …/messages` then
 //! `PATCH …/messages/{id}` with a `stream` block — and inherits the same rules.
 //!
-//! It is **not** yet what `AgentWorker::run_turn` does with its own turns; that
-//! flip is a separate ticket (ADR-0155 결정 5). What the flip was *waiting on*
-//! is now decided: a run cancelled between enqueue and commit still posts
-//! nothing when nothing was streamed, but a run that had already started
-//! streaming has a message in the channel, and [`close_run_stream`] is what
-//! happens to it. ADR-0155 chose **freeze and mark** over tombstone — the person
-//! who pressed stop pressed it because of the text they had already read, and
-//! deleting that text deletes their reason along with it.
+//! Since #1161 it is also what `AgentWorker::run_turn` does with its own turns.
+//! The flip was waiting on ADR-0155 결정 5, which is now decided and shipped: a
+//! run cancelled between enqueue and commit still posts nothing when nothing was
+//! streamed, but a run that had already started streaming has a message in the
+//! channel, and [`close_run_stream`] is what happens to it. ADR-0155 chose
+//! **freeze and mark** over tombstone — the person who pressed stop pressed it
+//! because of the text they had already read, and deleting that text deletes
+//! their reason along with it.
+//!
+//! The in-process producer is [`crate::partial::run_partial_pump`], which owns
+//! the window; the **closing** slice is not written here at all but inside the
+//! commit transaction (`commit_turn`), so a run can no more be `succeeded` with
+//! an answer still marked `streaming: true` than it can be `succeeded` without
+//! the answer.
 //!
 //! ## The three rules a producer must not get wrong
 //!
@@ -31,13 +37,23 @@
 //!    every one of its own slices refused as stale for the rest of the turn.
 //! 3. **The opening write is idempotent on `client_msg_id`.** It is the run id,
 //!    the same key `commit_turn` uses, so a crashed-and-re-claimed turn resumes
-//!    the message it already opened instead of opening a second one.
+//!    the message it already opened instead of opening a second one — and so
+//!    the commit at the end of the turn *joins* the message this stream has been
+//!    growing rather than posting a second answer beside it. That join is what
+//!    makes "one turn, one message" survive the flip (#1161).
+//! 4. **The opening write carries the turn's whole `props`.** A reader who
+//!    arrives mid-answer must see the same self-description as one who arrives
+//!    after it finished — `source`, the trigger linkage, the attribution — since
+//!    the commit's `send` will dedupe and can no longer supply them. `run_id` is
+//!    merged in here rather than trusted to the caller: ADR-0155's defensive
+//!    render ("run ended, stream still open") has no other way to find the run
+//!    behind a half-written message.
 
 use momo_db::{with_tenant_tx, DbError, PgPool};
 use momo_messaging::{
-    open_stream_message_for_run_in_tx, send_message_in_tx, stream_message_body_in_tx,
-    InteractionRefused, MessageType, NewMessage, StreamCloseOutcome, StreamEdit, StreamOutcome,
-    STREAM_PROPS_KEY,
+    open_stream_message_for_run_in_tx, opening_stream_props, send_message_in_tx,
+    stream_message_body_in_tx, InteractionRefused, MessageType, NewMessage, StreamCloseOutcome,
+    StreamEdit, StreamOutcome, STREAM_PROPS_KEY,
 };
 use serde_json::Value;
 use uuid::Uuid;
@@ -65,6 +81,31 @@ fn stored_rev(props: &Value) -> i64 {
         .unwrap_or(0)
 }
 
+/// The turn's props with the two things a half-written message cannot be without
+/// merged in, whatever the caller passed.
+///
+/// * **`run_id`** (rule 4): the only way a client can ask "is the run behind this
+///   still going?" — the defensive half of ADR-0155's render rule. The `run_id`
+///   **column** is set on the same insert but is not serialized on the wire, so
+///   props is the only place a reader can find it.
+/// * **[`STREAM_PROPS_KEY`]**: the message says it is being assembled from its
+///   very first byte. A turn that dies between the opening `send` and its first
+///   slice is a real and frequent shape (a provider hanging up mid-answer), and
+///   without this the half sentence it leaves is unmarked, unfindable by
+///   [`close_run_stream`], and indistinguishable from an answer the agent chose
+///   to end there.
+fn opening_props(props: Value, run_id: Uuid) -> Value {
+    let mut object = match props {
+        Value::Object(object) => object,
+        // A non-object props is not a shape this crate produces; refusing to
+        // lose the run id is worth more than preserving it.
+        _ => serde_json::Map::new(),
+    };
+    object.insert("run_id".into(), serde_json::json!(run_id));
+    object.insert(STREAM_PROPS_KEY.into(), opening_stream_props());
+    Value::Object(object)
+}
+
 /// One turn's growing message.
 ///
 /// Hold it for the length of a provider stream: [`open`](Self::open) once with
@@ -79,6 +120,8 @@ pub struct MessageStream {
     /// Doubles as the opening write's `client_msg_id` — see rule 3.
     run_id: Uuid,
     reply_to_id: Option<Uuid>,
+    /// What the message says about itself, from its first slice — see rule 4.
+    props: Value,
     message_id: Option<Uuid>,
     rev: i64,
     body: String,
@@ -92,6 +135,7 @@ impl MessageStream {
         author_member_id: Uuid,
         run_id: Uuid,
         reply_to_id: Option<Uuid>,
+        props: Value,
     ) -> Self {
         MessageStream {
             pool,
@@ -100,6 +144,7 @@ impl MessageStream {
             author_member_id,
             run_id,
             reply_to_id,
+            props: opening_props(props, run_id),
             message_id: None,
             rev: 0,
             body: String::new(),
@@ -161,6 +206,7 @@ impl MessageStream {
         let run_id = self.run_id;
         let reply_to_id = self.reply_to_id;
         let body = self.body.clone();
+        let props = self.props.clone();
 
         let sent = with_tenant_tx(&self.pool, workspace_id, move |conn| {
             Box::pin(async move {
@@ -172,16 +218,12 @@ impl MessageStream {
                         author_member_id,
                         message_type: MessageType::Text,
                         body: Some(body),
-                        // ADR-0155 — the growing message names its own run.
-                        //
-                        // Every other agent message already does (`success_props`,
-                        // `failure_props`); this path was the one that did not,
-                        // and the gap only became visible when a client needed to
-                        // ask "is the run behind this half-written message over?"
-                        // — the defensive half of the render rule. `run_id` the
-                        // COLUMN is set below and is not serialized on the wire,
-                        // so props is the only place a reader can find it.
-                        props: serde_json::json!({ "run_id": run_id }),
+                        // Rule 4 — the turn's whole self-description, `run_id`
+                        // included, from the first slice. Since #1161 this is
+                        // the *only* write that can supply it: the commit at the
+                        // end of the turn presents the same `client_msg_id` and
+                        // so dedupes, and a deduped send updates nothing.
+                        props,
                         root_id: None,
                         // ADR-0148 규칙 6 — the answer quotes the utterance that
                         // raised it, exactly as `commit_turn` does. Streaming
@@ -278,8 +320,8 @@ impl MessageStream {
 /// ## Best effort, deliberately
 ///
 /// Returns `Ok(None)` when there is nothing open — no streamed message, or one
-/// already closed — and that is the common case today, since `run_turn` still
-/// posts its answer in one write. Callers log an `Err` and move on: ADR-0155
+/// already closed. Since #1161 that means either the turn was stopped before it
+/// said anything, or it was stopped twice. Callers log an `Err` and move on: ADR-0155
 /// chose defensive rendering over a server sweeper precisely so that a failed
 /// close is a cosmetic loss rather than a stuck message. The run's terminal
 /// status is already durable, so a client seeing "run ended, stream still open"
@@ -336,6 +378,35 @@ mod tests {
         assert_eq!(stored_rev(&json!({})), 0);
         assert_eq!(stored_rev(&json!({ "kind": "resume_offer" })), 0);
         assert_eq!(stored_rev(&json!({ STREAM_PROPS_KEY: { "rev": 9 } })), 9);
+    }
+
+    /// #1161 — the opening write says two things a half sentence cannot be
+    /// without, and says them without disturbing what the caller sent.
+    ///
+    /// The revision assertion is the load-bearing one: the marker is written at
+    /// the floor, so the first real slice is still revision 1 and no producer's
+    /// arithmetic moves. Write `rev: 1` here instead and every stream's first
+    /// slice is refused as stale — silently, forever.
+    #[test]
+    fn the_opening_write_marks_the_message_as_being_assembled() {
+        let run_id = Uuid::from_u128(7);
+        let props = opening_props(json!({ "source": "agent_worker.final_text.v0" }), run_id);
+        assert_eq!(props["source"], json!("agent_worker.final_text.v0"));
+        assert_eq!(props["run_id"], json!(run_id));
+        assert_eq!(props[STREAM_PROPS_KEY]["streaming"], json!(true));
+        assert_eq!(
+            stored_rev(&props) + 1,
+            1,
+            "the first slice is revision 1, exactly as it was before the marker existed"
+        );
+
+        // The run id is not the caller's to omit or to override.
+        let hijacked = opening_props(json!({ "run_id": Uuid::from_u128(99) }), run_id);
+        assert_eq!(hijacked["run_id"], json!(run_id));
+        assert_eq!(
+            opening_props(json!("not an object"), run_id)["run_id"],
+            json!(run_id)
+        );
     }
 
     /// **The re-claim rule.** A worker that crashed mid-answer and had its job

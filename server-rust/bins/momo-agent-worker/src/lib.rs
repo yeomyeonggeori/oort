@@ -103,7 +103,10 @@ use momo_agent::{
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::sqlx::postgres::PgListener;
 use momo_db::{with_tenant_tx, DbError, PgConnection, PgPool};
-use momo_messaging::{send_message_in_tx, MessageType, NewMessage, StreamCloseOutcome};
+use momo_messaging::{
+    send_message_in_tx, stream_message_body_in_tx, MessageType, NewMessage, StreamCloseOutcome,
+    StreamEdit, STREAM_PROPS_KEY,
+};
 use momo_outbox::{
     backoff_seconds, claim_agent_job_batch, mark_done, mark_failed, requeue, ClaimedAgentJob,
     NOTIFY_CHANNEL,
@@ -524,6 +527,17 @@ impl AgentWorker {
         let started = with_tenant_tx(&self.pool, job.workspace_id, move |conn| {
             Box::pin(async move {
                 let started = mark_run_started_in_tx(conn, run_id).await?;
+                // #1161 — read here because the *first slice* of a streamed
+                // answer needs it, and that slice happens before `commit_turn`
+                // ever locks the run. Same source as the commit's
+                // (`agent_run.trigger_message_id`, not the job payload) for the
+                // same ADR-0148 reason: `resume_job_payload` carries no trigger,
+                // so a payload read would silently stop quoting after every
+                // approval — and a streamed message's `reply_to_id` is written
+                // once, on the opening send, with no second chance.
+                let trigger_message_id = lock_gateway_run_in_tx(conn, job_workspace_id, run_id)
+                    .await?
+                    .and_then(|snapshot| snapshot.trigger_message_id);
                 // The rail learns the turn was picked up (goal SRV-B3d). Only
                 // when the transition actually happened: a job re-claimed after
                 // its lease expired finds the run already `running`, and
@@ -543,12 +557,15 @@ impl AgentWorker {
                     )
                     .await?;
                 }
-                Ok(started)
+                Ok((started, trigger_message_id))
             })
         })
         .await;
-        match started {
-            Ok(started) => tracing::debug!(run_id = %run_id, started, "run start transition"),
+        let quoted_message_id = match started {
+            Ok((started, trigger_message_id)) => {
+                tracing::debug!(run_id = %run_id, started, "run start transition");
+                trigger_message_id.or(payload.trigger_message_id)
+            }
             Err(error) => {
                 // A DB error here is transient by nature: do not run the turn.
                 return self
@@ -559,7 +576,7 @@ impl AgentWorker {
                     )
                     .await;
             }
-        }
+        };
 
         // goal B8 L7: the model is told what day it is, every turn, from this
         // process's clock plus the workspace offset. Computed here rather than
@@ -648,16 +665,34 @@ impl AgentWorker {
             refreshed_this_turn = true;
         }
 
-        // goal SRV-B3e: the turn streams into a pump that publishes one
-        // coalesced `agent.partial` per window. The sink is handed to the
-        // provider; everything about batching, transactions and failure belongs
-        // to the pump (see `partial`'s module header).
+        // goal SRV-B3e + #1161: the turn streams into a pump that, once per
+        // window, grows the durable answer and publishes one coalesced
+        // `agent.partial` beside it. The sink is handed to the provider;
+        // everything about batching, transactions and failure belongs to the
+        // pump (see `partial`'s module header).
+        //
+        // The message the pump grows is the message `commit_turn` finishes:
+        // both present `client_msg_id = run_id`, so the commit's `send` returns
+        // this row instead of opening a second answer. That is the whole join —
+        // there is no handle passed back, and nothing to keep in sync.
         let (sink, deltas) = partial::delta_channel();
+        let answer = stream::MessageStream::new(
+            self.pool.clone(),
+            job.workspace_id,
+            payload.channel_id,
+            payload.agent_member_id,
+            run_id,
+            quoted_message_id,
+            // The turn's self-description rides the first slice, because the
+            // commit's deduped `send` cannot supply it later (stream rule 4).
+            success_props(&payload, run_id),
+        );
         let pump = tokio::spawn(partial::run_partial_pump(
             self.pool.clone(),
             started_address,
             deltas,
             partial::PARTIAL_WINDOW,
+            answer,
         ));
         let mut attempt = self
             .provider
@@ -679,9 +714,12 @@ impl AgentWorker {
             );
             match self.refresh_and_reseal(&mut transport).await {
                 // Replayed WITHOUT the sink. The first attempt's slices are
-                // already on the rail, and streaming the same answer twice
-                // would make a reader watch it be typed out, erased and typed
-                // again. The retry's text still becomes the durable message.
+                // already on the rail — and, since #1161, in the channel — and
+                // streaming the same answer twice would make a reader watch it
+                // be typed out, erased and typed again. The retry's text is
+                // still what lands: `body` is absolute, so the closing slice in
+                // `commit_turn` re-states the replayed answer over whatever the
+                // first attempt had grown.
                 Ok(()) => attempt = self.provider.complete(&transport.endpoint, &request).await,
                 Err(error) => {
                     return self
@@ -694,9 +732,14 @@ impl AgentWorker {
         // The sink is dropped BEFORE the pump is awaited: closing the channel
         // is what tells the pump the stream is over and to flush its tail.
         drop(sink);
-        let streamed_frames = pump.await.unwrap_or(0);
-        if streamed_frames > 0 {
-            tracing::debug!(run_id = %run_id, streamed_frames, "published agent.partial frames");
+        let pumped = pump.await.unwrap_or_default();
+        if pumped.frames > 0 || pumped.slices > 0 {
+            tracing::debug!(
+                run_id = %run_id,
+                streamed_frames = pumped.frames,
+                streamed_slices = pumped.slices,
+                "turn streamed"
+            );
         }
 
         let completion = match attempt {
@@ -1350,13 +1393,17 @@ impl AgentWorker {
                     // it, and never post the answer they cancelled (Swift
                     // `finalizeStreamingMessage` :2229-2236).
                     //
-                    // "Post nothing" is still right for a turn that never
-                    // streamed — there is nothing in the channel to contradict.
-                    // When the turn *did* stream, the message already exists and
-                    // suppressing the commit leaves it hanging open; the caller
-                    // closes it (ADR-0155), outside this transaction, because a
-                    // marking that fails must not turn a settled cancel into a
-                    // retried job.
+                    // Suppression is still the right verb after #1161, and this
+                    // is the arm ADR-0155 결정 2 was written for: **suppress the
+                    // send, close the message**. A turn that never streamed has
+                    // nothing in the channel to contradict, so nothing happens
+                    // at all. A turn that did stream already has its half-answer
+                    // in the channel — writing the send here would not add a
+                    // second message (the `client_msg_id` join sees to that) but
+                    // it would silently overwrite the text the human stopped, so
+                    // the only thing left to do is close it. The caller does
+                    // that outside this transaction, because a marking that
+                    // fails must not turn a settled cancel into a retried job.
                     return Ok(TurnCommit::Suppressed(SUPPRESSED_RUN_CANCELLED));
                 }
 
@@ -1366,6 +1413,12 @@ impl AgentWorker {
                 // the message already in the channel instead of posting a second
                 // answer. Swift needs a bespoke "does a text message for this run
                 // exist" pre-read (:2241-2261) because it has no such key.
+                //
+                // #1161 gave that key a second job. The pump opened this turn's
+                // message with the *same* key, so on a streaming turn this send
+                // is always a dedupe and what comes back is the answer the
+                // reader has been watching arrive. One key, one message, whether
+                // the answer landed in one write or in forty.
                 let sent = send_message_in_tx(
                     conn,
                     workspace_id,
@@ -1409,6 +1462,72 @@ impl AgentWorker {
                     },
                 )
                 .await?;
+
+                // ADR-0155 / #1161 — the closing slice, in the transaction that
+                // ends the run.
+                //
+                // A message still marked `streaming: true` under a terminal run
+                // is the one state ADR-0155 asks clients to render defensively;
+                // writing the close **here** means the ordinary path never
+                // produces it. `body` is absolute, so this slice is also what
+                // makes the durable answer authoritative: whatever the windows
+                // had grown, the text that stands is the text the provider
+                // finally returned (which is not the same string when an OAuth
+                // rejection made the turn replay without the sink).
+                //
+                // A **failed** turn re-states the body it already has instead —
+                // freeze and mark, not overwrite. The person reading a half
+                // answer when the provider died keeps what they read, and
+                // `outcome: "failed"` is what stops that half sentence from
+                // wearing a finished one's clothes. The degraded Korean notice
+                // this path would otherwise have posted has nowhere to go on a
+                // streamed turn (the `client_msg_id` join makes it the same
+                // message), and replacing the answer with it would delete the
+                // evidence to say "something went wrong" — which the frozen
+                // message plus the terminal run already say.
+                let open_rev = open_stream_rev(&sent.message.props);
+                let closed_stream = match open_rev {
+                    Some(rev) => {
+                        let frozen = sent.message.body.clone().unwrap_or_default();
+                        let (slice_body, close_outcome) = match outcome {
+                            TurnOutcome::Succeeded => (mention_body.as_str(), None),
+                            TurnOutcome::Failed(_) => {
+                                (frozen.as_str(), Some(StreamCloseOutcome::Failed))
+                            }
+                        };
+                        let refusal = stream_message_body_in_tx(
+                            conn,
+                            workspace_id,
+                            sent.message.id,
+                            agent_member_id,
+                            slice_body,
+                            StreamEdit {
+                                rev: rev + 1,
+                                is_final: true,
+                                outcome: close_outcome,
+                            },
+                        )
+                        .await?;
+                        match refusal {
+                            Ok(_) => true,
+                            // The domain refused the close — in practice only a
+                            // message a human deleted mid-turn. The run still
+                            // ends; the answer that would have been finalized no
+                            // longer exists, so nothing downstream may treat this
+                            // as a delivery.
+                            Err(refused) => {
+                                tracing::warn!(
+                                    run_id = %run_id,
+                                    message_id = %sent.message.id,
+                                    refused = %refused,
+                                    "closing slice refused; the streamed answer stays open"
+                                );
+                                false
+                            }
+                        }
+                    }
+                    None => false,
+                };
 
                 let output = json!({
                     "schema": "momo.agent_run.output.v0",
@@ -1492,11 +1611,22 @@ impl AgentWorker {
                 // argument: the ledger row above is part of this chain's spend,
                 // so a ceiling evaluated before it would always be one turn
                 // stale and could be overshot by the very hop it is meant to
-                // stop. `deduped` is the other guard — a re-claimed job returns
-                // the message already in the channel, and re-running the routing
-                // on it would spend a second step and write a second audit row
-                // for a delegation that already happened.
-                let (delegated, blocked) = if delegates && !sent.deduped {
+                // stop.
+                //
+                // The second guard is **first delivery**, and #1161 is why it
+                // needs saying that way. It used to be spelled `!sent.deduped`,
+                // which was the same thing while every answer arrived in one
+                // write: a re-claimed job got the message back deduped, and
+                // re-running the routing on it would spend a second step and
+                // write a second audit row for a delegation that already
+                // happened. On a streamed turn the send is *always* a dedupe —
+                // the pump opened the message — so that spelling would have
+                // silently retired A2A for every streaming agent. What actually
+                // distinguishes the two is which write made the answer final:
+                // the close above happens exactly once per run, because the
+                // second one finds `streaming: false` and does nothing.
+                let first_delivery = !sent.deduped || closed_stream;
+                let (delegated, blocked) = if delegates && first_delivery {
                     let routed = route_a2a_mentions_in_tx(
                         conn,
                         A2aSend {
@@ -1526,14 +1656,13 @@ impl AgentWorker {
 
         // ADR-0155 — after the transaction, never inside it.
         //
-        // A human's cancel is already settled by the time we get here; the only
-        // thing left is what the channel shows. If this turn streamed, its
-        // message is sitting open mid-sentence, and this is the one closing
-        // PATCH that marks it. Doing it in the commit transaction would make a
+        // A suppressed commit wrote nothing, so a turn that streamed has its
+        // message sitting open mid-sentence and this is the one closing PATCH
+        // that marks it. Doing it in the commit transaction would make a
         // cosmetic write able to fail the whole commit and get the job retried —
         // and the retry would find the same cancelled run and try again forever.
-        if commit.was_cancelled() {
-            self.close_stopped_stream(workspace_id, run_id, StreamCloseOutcome::Cancelled)
+        if let Some(outcome) = commit.closing_outcome() {
+            self.close_stopped_stream(workspace_id, run_id, outcome)
                 .await;
         }
         Ok(commit)
@@ -2187,11 +2316,25 @@ enum TurnCommit {
 }
 
 impl TurnCommit {
-    /// True when the commit was suppressed because a human cancelled the run
-    /// (ADR-0155) — the one suppression that may have left a half-written
-    /// message in the channel.
-    fn was_cancelled(&self) -> bool {
-        matches!(self, TurnCommit::Suppressed(reason) if *reason == SUPPRESSED_RUN_CANCELLED)
+    /// How to close a message this commit left open, if it left one (ADR-0155).
+    ///
+    /// A committed turn closes its own message inside the transaction, so only a
+    /// suppression can reach here — and every suppression is a turn whose answer
+    /// is never arriving. Which word to mark it with is the whole content of
+    /// this function: a human who pressed stop must not be told the provider
+    /// died, and an agent that lost its channel membership mid-answer did not
+    /// stop on anyone's instruction.
+    ///
+    /// Before #1161 only the cancel arm could find anything open, because
+    /// nothing else had streamed. Now every suppression can.
+    fn closing_outcome(&self) -> Option<StreamCloseOutcome> {
+        match self {
+            TurnCommit::Committed { .. } => None,
+            TurnCommit::Suppressed(reason) if *reason == SUPPRESSED_RUN_CANCELLED => {
+                Some(StreamCloseOutcome::Cancelled)
+            }
+            TurnCommit::Suppressed(_) => Some(StreamCloseOutcome::Failed),
+        }
     }
 }
 
@@ -2259,6 +2402,23 @@ fn transport_or_env(
 }
 
 /// `props` on a successful reply — Swift `finalMessageProps` (:2336-2354).
+/// The revision of a message that is **still streaming**, `None` when it is not
+/// one — never streamed, or already closed (#1161).
+///
+/// Read off the projection the send handed back rather than with a second query:
+/// on a deduped send that projection *is* the stored row, which is exactly the
+/// case this answers a question about. "Already closed" folding into `None` is
+/// what makes the closing slice idempotent: a job re-claimed after a successful
+/// commit finds nothing to close, spends no revision, and — the part that
+/// matters — does not delegate a second time.
+fn open_stream_rev(props: &Value) -> Option<i64> {
+    let stream = props.get(STREAM_PROPS_KEY)?;
+    if stream.get("streaming").and_then(Value::as_bool) != Some(true) {
+        return None;
+    }
+    stream.get("rev").and_then(Value::as_i64)
+}
+
 fn success_props(payload: &AgentJobPayload, run_id: Uuid) -> Value {
     let mut props = json!({
         "run_id": run_id,
@@ -2593,21 +2753,60 @@ mod tests {
     }
 
     /// ADR-0155 — the settle path tells a human's cancel apart from every other
-    /// suppression, because only that one may have left a message hanging open
-    /// mid-sentence.
+    /// suppression, because the two get **different words** on the message they
+    /// leave hanging open mid-sentence.
     ///
     /// Rename the constant on one side only and this goes red. Without it the
-    /// mismatch is silent: cancels would settle exactly as they do today and the
-    /// half-written answer would simply never get its 「중단됨」, which is a bug
-    /// with no error, no log line and no failing request anywhere.
+    /// mismatch is silent: a cancel would settle exactly as it does today and
+    /// the half-written answer would be marked 「응답이 끊김」 instead of
+    /// 「중단됨」 — telling the person who pressed stop that the provider died.
+    /// A bug with no error, no log line and no failing request anywhere.
     #[test]
-    fn only_a_human_cancel_asks_for_a_streamed_message_to_be_closed() {
-        assert!(TurnCommit::Suppressed(SUPPRESSED_RUN_CANCELLED).was_cancelled());
-        assert!(!TurnCommit::Suppressed("run missing or agent ineligible").was_cancelled());
-        assert!(!TurnCommit::Committed {
-            delegated: 0,
-            blocked: 0
-        }
-        .was_cancelled());
+    fn a_cancel_and_a_lost_run_close_a_streamed_message_with_different_words() {
+        assert_eq!(
+            TurnCommit::Suppressed(SUPPRESSED_RUN_CANCELLED).closing_outcome(),
+            Some(StreamCloseOutcome::Cancelled)
+        );
+        assert_eq!(
+            TurnCommit::Suppressed("run missing or agent ineligible").closing_outcome(),
+            Some(StreamCloseOutcome::Failed),
+            "an agent that lost its channel mid-answer stopped on nobody's instruction"
+        );
+        assert_eq!(
+            TurnCommit::Committed {
+                delegated: 0,
+                blocked: 0
+            }
+            .closing_outcome(),
+            None,
+            "a committed turn closed its own message inside the transaction"
+        );
+    }
+
+    /// #1161 — the predicate the closing slice and the A2A guard both stand on.
+    ///
+    /// The middle case is the one that matters: a message whose stream has
+    /// already been closed reads as *not open*, which is what makes a re-claimed
+    /// job neither spend a revision nor delegate a second time.
+    #[test]
+    fn only_a_message_still_streaming_has_a_revision_to_close() {
+        assert_eq!(open_stream_rev(&json!({})), None, "never streamed");
+        assert_eq!(
+            open_stream_rev(&json!({ STREAM_PROPS_KEY: { "rev": 7, "streaming": true } })),
+            Some(7)
+        );
+        assert_eq!(
+            open_stream_rev(&json!({ STREAM_PROPS_KEY: { "rev": 7, "streaming": false } })),
+            None,
+            "already closed — the second close must be a no-op, not a rev bump"
+        );
+        assert_eq!(
+            open_stream_rev(
+                &json!({ STREAM_PROPS_KEY: { "rev": 7, "streaming": true, "outcome": "cancelled" } })
+            ),
+            Some(7),
+            "an outcome and `streaming: true` cannot both be true, but if a producer \
+             ever writes it the close is still the honest move"
+        );
     }
 }
