@@ -21,6 +21,7 @@ import {
   sweepAgentWorking,
   ZOMBIE_CLEAR_MS,
 } from "./agentWorkingSignal";
+import { observeAgentProgress, resetEndedRuns } from "./endedRuns";
 import { recordAgentProgress, resetWorkLogs } from "./workLogStore";
 
 // =============================================================================
@@ -92,6 +93,10 @@ export function AgentWorkingRail() {
       // 때문이다. 스토어는 **보고 있는 run만** 받아 적으므로(workLogStore),
       // 아무도 패널을 안 열었으면 이 호출은 즉시 돌아온다.
       recordAgentProgress(event);
+      // ADR-0155 — 같은 이유로 여기서 분기한다. `applyAgentEvent` 는 끝난 run 을
+      // 트랙에서 **지우므로**, 종결을 본 사실은 지워지기 전에 따로 적어야 한다.
+      // 그 기록이 없으면 「run 은 끝났는데 stream 이 열림」을 영영 알 수 없다.
+      observeAgentProgress(event);
       const next = applyAgentEvent(tracksRef.current, event, pair, nowMs);
       if (next === tracksRef.current) return;
       tracksRef.current = next;
@@ -134,6 +139,7 @@ export function AgentWorkingRail() {
       ownedRef.current = new Set();
       resetAgentWorking();
       resetWorkLogs();
+      resetEndedRuns();
     };
   }, [workspaceId]);
 

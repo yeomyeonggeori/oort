@@ -103,7 +103,7 @@ use momo_agent::{
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::sqlx::postgres::PgListener;
 use momo_db::{with_tenant_tx, DbError, PgConnection, PgPool};
-use momo_messaging::{send_message_in_tx, MessageType, NewMessage};
+use momo_messaging::{send_message_in_tx, MessageType, NewMessage, StreamCloseOutcome};
 use momo_outbox::{
     backoff_seconds, claim_agent_job_batch, mark_done, mark_failed, requeue, ClaimedAgentJob,
     NOTIFY_CHANNEL,
@@ -1334,7 +1334,7 @@ impl AgentWorker {
         let gateway_enabled = self.config.gateway_enabled;
         let context_max_messages = self.config.context_max_messages;
 
-        with_tenant_tx(&self.pool, workspace_id, move |conn| {
+        let commit = with_tenant_tx(&self.pool, workspace_id, move |conn| {
             Box::pin(async move {
                 // `FOR UPDATE` on the run is what makes the ledger's
                 // `NOT EXISTS` a decision rather than a TOCTOU window, and its
@@ -1349,7 +1349,15 @@ impl AgentWorker {
                     // A human cancelled between enqueue and commit. Never revive
                     // it, and never post the answer they cancelled (Swift
                     // `finalizeStreamingMessage` :2229-2236).
-                    return Ok(TurnCommit::Suppressed("run cancelled"));
+                    //
+                    // "Post nothing" is still right for a turn that never
+                    // streamed — there is nothing in the channel to contradict.
+                    // When the turn *did* stream, the message already exists and
+                    // suppressing the commit leaves it hanging open; the caller
+                    // closes it (ADR-0155), outside this transaction, because a
+                    // marking that fails must not turn a settled cancel into a
+                    // retried job.
+                    return Ok(TurnCommit::Suppressed(SUPPRESSED_RUN_CANCELLED));
                 }
 
                 // `client_msg_id = run_id` makes the reply exactly-once through
@@ -1514,7 +1522,54 @@ impl AgentWorker {
                 Ok(TurnCommit::Committed { delegated, blocked })
             })
         })
-        .await
+        .await?;
+
+        // ADR-0155 — after the transaction, never inside it.
+        //
+        // A human's cancel is already settled by the time we get here; the only
+        // thing left is what the channel shows. If this turn streamed, its
+        // message is sitting open mid-sentence, and this is the one closing
+        // PATCH that marks it. Doing it in the commit transaction would make a
+        // cosmetic write able to fail the whole commit and get the job retried —
+        // and the retry would find the same cancelled run and try again forever.
+        if commit.was_cancelled() {
+            self.close_stopped_stream(workspace_id, run_id, StreamCloseOutcome::Cancelled)
+                .await;
+        }
+        Ok(commit)
+    }
+
+    /// One best-effort closing PATCH on the message a stopped turn left open
+    /// (ADR-0155).
+    ///
+    /// Every failure mode ends in a log line and nothing else, which is the
+    /// decision and not an omission: the ADR chose defensive client rendering
+    /// over a server sweeper, so a message left `final: false` under a terminal
+    /// run still draws the same tail. Escalating here would trade a correct
+    /// cancel for a stuck job.
+    async fn close_stopped_stream(
+        &self,
+        workspace_id: Uuid,
+        run_id: Uuid,
+        outcome: StreamCloseOutcome,
+    ) {
+        match stream::close_run_stream(&self.pool, workspace_id, run_id, outcome).await {
+            // The common case today: the turn posted its answer in one write, so
+            // there was never an open stream to close. Silent on purpose.
+            Ok(None) => {}
+            Ok(Some(message_id)) => tracing::info!(
+                run_id = %run_id,
+                message_id = %message_id,
+                outcome = outcome.wire(),
+                "streamed message closed by a stopped run"
+            ),
+            Err(error) => tracing::warn!(
+                run_id = %run_id,
+                outcome = outcome.wire(),
+                error = %error,
+                "stream close failed; the message stays open and clients render defensively"
+            ),
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -1694,6 +1749,14 @@ impl AgentWorker {
     /// Move the run to `failed` without writing a message — the between-attempts
     /// state. Best effort: the durable progress marker is the job's own status,
     /// and a run-status write that fails must not strand the job `processing`.
+    ///
+    /// ADR-0155 — "without writing a message" is still true of the *run record*,
+    /// but a turn that was already streaming has a half-grown message in the
+    /// channel, and this is where it learns it is over. The comment below about
+    /// there being "no message in the channel to imply it" was written for a
+    /// world where a dying turn left nothing behind; on the streaming path it
+    /// leaves a sentence that stops mid-word, which is worse than nothing until
+    /// it is marked.
     async fn mark_run_failed(&self, workspace_id: Uuid, run_id: Uuid, reason: &str) {
         let reason = reason.to_string();
         let result = with_tenant_tx(&self.pool, workspace_id, move |conn| {
@@ -1702,17 +1765,17 @@ impl AgentWorker {
                 // `finish_run_in_tx` carries no status guard of its own.
                 let Some(snapshot) = lock_gateway_run_in_tx(conn, workspace_id, run_id).await?
                 else {
-                    return Ok(());
+                    return Ok(false);
                 };
                 if snapshot.status == RunStatus::Cancelled {
-                    return Ok(());
+                    return Ok(false);
                 }
                 let error = json!({"code": PROVIDER_FAILED, "reason": reason});
                 finish_run_in_tx(conn, run_id, false, &json!({}), Some(&error)).await?;
                 // A turn that died before it could answer still ended, and the
                 // badge has to learn that from somewhere (goal SRV-B3c). This is
-                // the path where it matters most: there is no message in the
-                // channel to imply it either.
+                // the path where it matters most: on the non-streaming path
+                // there is no message in the channel to imply it either.
                 emit_terminal_agent_status(
                     conn,
                     workspace_id,
@@ -1722,12 +1785,28 @@ impl AgentWorker {
                     RunStatus::Failed,
                 )
                 .await?;
-                Ok(())
+                Ok(true)
             })
         })
         .await;
-        if let Err(error) = result {
-            tracing::warn!(run_id = %run_id, error = %error, "run failure transition failed");
+        match result {
+            // Only after the run is durably `failed`. Marking a message
+            // 「응답이 끊김」 while the run row still says `running` would put a
+            // verdict in the channel that the run record contradicts — and this
+            // path is also reached between retry attempts, where the next
+            // attempt may yet answer.
+            Ok(true) => {
+                self.close_stopped_stream(workspace_id, run_id, StreamCloseOutcome::Failed)
+                    .await;
+            }
+            // The run was cancelled, or vanished. A cancel closes its own stream
+            // through `commit_turn`, with its own outcome — overwriting it with
+            // `failed` here would tell the reader the provider died when in fact
+            // they pressed stop.
+            Ok(false) => {}
+            Err(error) => {
+                tracing::warn!(run_id = %run_id, error = %error, "run failure transition failed");
+            }
         }
     }
 
@@ -2093,10 +2172,27 @@ enum Settlement {
     Skipped,
 }
 
+/// The suppression reason a human's cancel leaves behind.
+///
+/// Named rather than inlined because ADR-0155 gave it a second reader: the
+/// settle path has to tell "a human pressed stop" apart from the other
+/// suppressions in order to know whether a streamed message needs closing, and
+/// a literal compared in two files is a rename waiting to go silently wrong.
+const SUPPRESSED_RUN_CANCELLED: &str = "run cancelled";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TurnCommit {
     Committed { delegated: usize, blocked: usize },
     Suppressed(&'static str),
+}
+
+impl TurnCommit {
+    /// True when the commit was suppressed because a human cancelled the run
+    /// (ADR-0155) — the one suppression that may have left a half-written
+    /// message in the channel.
+    fn was_cancelled(&self) -> bool {
+        matches!(self, TurnCommit::Suppressed(reason) if *reason == SUPPRESSED_RUN_CANCELLED)
+    }
 }
 
 /// `agent_run.error.code` for a provider that answered badly.
@@ -2494,5 +2590,24 @@ mod tests {
             "the skew window counts as expired"
         );
         assert_eq!(transport(&credential, None).link_updated_at_ms, None);
+    }
+
+    /// ADR-0155 — the settle path tells a human's cancel apart from every other
+    /// suppression, because only that one may have left a message hanging open
+    /// mid-sentence.
+    ///
+    /// Rename the constant on one side only and this goes red. Without it the
+    /// mismatch is silent: cancels would settle exactly as they do today and the
+    /// half-written answer would simply never get its 「중단됨」, which is a bug
+    /// with no error, no log line and no failing request anywhere.
+    #[test]
+    fn only_a_human_cancel_asks_for_a_streamed_message_to_be_closed() {
+        assert!(TurnCommit::Suppressed(SUPPRESSED_RUN_CANCELLED).was_cancelled());
+        assert!(!TurnCommit::Suppressed("run missing or agent ineligible").was_cancelled());
+        assert!(!TurnCommit::Committed {
+            delegated: 0,
+            blocked: 0
+        }
+        .was_cancelled());
     }
 }

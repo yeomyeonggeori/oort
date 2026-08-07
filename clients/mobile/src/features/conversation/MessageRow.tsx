@@ -51,6 +51,7 @@ import {
   PIN_ROW_MARK,
   pinActionLabel,
 } from '@momo/core/features/timeline/pins';
+import {streamStopMark} from '@momo/core/features/timeline/streamStop';
 import {
   deleteFailureMessage,
   editFailureMessage,
@@ -1095,6 +1096,15 @@ export interface MessageRowProps {
   approvalsProvided?: boolean;
   /** 결정을 원장에 보낸 뒤. 화면이 영수증을 만들고 목록을 무효화한다. */
   onApprovalSettled?: (approvalId: string, outcome: DecisionOutcome) => void;
+  /**
+   * ADR-0155 — 이 메시지를 쓴 run 이 **끝난 것을 보았는가**.
+   *
+   * 목록이 넣는다(`Timeline`). 행이 직접 스토어를 구독하면 아무 run 이나 끝날 때
+   * 화면의 모든 줄이 다시 그려지고, 이 목록은 가상화되어 있어서 그 비용이 바로
+   * 스크롤로 나온다. 기본값 `undefined` 는 「모른다」이고, 모를 때 아무 말도 하지
+   * 않는 것이 이 판정의 보수적인 쪽이다.
+   */
+  runEnded?: boolean;
 }
 
 /**
@@ -1139,6 +1149,7 @@ function MessageRowInner({
   approvalOffline,
   approvalsProvided,
   onApprovalSettled,
+  runEnded,
 }: MessageRowProps): React.JSX.Element {
   const styles = useStyles(buildStyles);
   rowRenders += 1;
@@ -1430,8 +1441,16 @@ function MessageRowInner({
   // 「고정됨」을 다는 창은 프레임이 도착하기까지의 몇 밀리초뿐이고, 그 몇 밀리초에
   // 하는 말은 이미 참이 아니다.
   const showsPinMark = pinned === true && !deleted;
+  // ADR-0155 — 멈춘 답. 왜 이 낱말인지·왜 accent 가 아닌지는 코어의
+  // `streamStop.ts` 헤더에 있다. 묘비에는 그리지 않는다: 저자가 지운 메시지에
+  // 대고 「중단됨」이라고 말하는 것은 이미 없는 본문을 서술하는 것이다.
+  const stopMark = deleted ? null : streamStopMark(message, runEnded === true);
 
   const tail = [
+    // 「수정됨」보다 **앞**이다. 안쪽에서 바깥쪽 규칙에서 이보다 안쪽인 서술은
+    // 없다 — 이 낱말은 본문이 여기서 끝났다고 말하고, 나머지는 그 본문에
+    // **대해** 말한다. 이 배열이 낭독 라벨의 재료이므로 순서는 귀에도 그대로 간다.
+    stopMark,
     !deleted && message.state === 'edited' ? '수정됨' : null,
     // 「수정됨」 다음, 「답글 N개」 앞 — 본문에 대한 서술 다음이고 바깥 스레드로
     // 나가는 문 앞이다. 안쪽에서 바깥쪽으로. 이 배열은 낭독 라벨의 재료이기도
@@ -1644,6 +1663,11 @@ function MessageRowInner({
             read, so they sit together. */}
         {tail.length > 0 ? (
           <View style={styles.tailRow}>
+            {stopMark ? (
+              <Text style={styles.tailMark} testID="stream-stop-mark">
+                {stopMark}
+              </Text>
+            ) : null}
             {!deleted && message.state === 'edited' ? (
               <Text style={styles.tailMark} testID="edited-mark">
                 수정됨
@@ -1960,6 +1984,7 @@ export const MESSAGE_ROW_COMPARED_PROPS: Record<keyof MessageRowProps, true> = {
   approvalOffline: true,
   approvalsProvided: true,
   onApprovalSettled: true,
+  runEnded: true,
 };
 
 /**
@@ -2027,7 +2052,11 @@ export function sameMessageRowProps(
     a.approvalReceipts === b.approvalReceipts &&
     a.approvalOffline === b.approvalOffline &&
     a.approvalsProvided === b.approvalsProvided &&
-    a.onApprovalSettled === b.onApprovalSettled
+    a.onApprovalSettled === b.onApprovalSettled &&
+    // ADR-0155. 스칼라라 동일성으로 충분하고, 한 행의 run 이 끝날 때만 그 행이
+    // 다시 그려진다. 이것이 빠지면 취소 직후 붙어 있는 행은 옛 값을 든 채 서 있고
+    // 「응답이 끊김」은 다음에 무언가가 그 행을 흔들 때까지 나타나지 않는다.
+    a.runEnded === b.runEnded
   );
 }
 

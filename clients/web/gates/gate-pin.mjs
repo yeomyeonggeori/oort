@@ -172,10 +172,32 @@ const CAPPED_MSG = "0199bbbb-0000-7000-8000-0000000000c4";
  * 서술이 저자의 말과 같은 결로 서면 사람은 앱의 해명을 남의 말로 읽는다.
  */
 const VOICELESS_MSG = "0199bbbb-0000-7000-8000-0000000000c5";
+/**
+ * ADR-0155 — 사람이 정지를 눌러 얼어붙은 답. 꼬리 낱말이 하나 더 생겼으므로,
+ * 「한 줄에 안쪽부터」 계약을 재는 이 게이트가 그 낱말도 함께 잰다. 별도 게이트를
+ * 세우지 않는 이유는 계약이 하나이기 때문이다 — 두 곳에서 재면 한 곳만 고쳐진다.
+ *
+ * **c5 가 아니라 c6 이다** (design-review H-1). 1차는 `VOICELESS_MSG` 와 같은
+ * UUID·같은 seq 를 썼다. 두 페르소나가 정반대인데(하나는 본문이 **없는** 고정
+ * 대상, 하나는 본문이 **얼어붙은** 타임라인 행) 한 id 를 나눠 가지면, 그 id 를
+ * 고정하는 프레임이 어느 쪽을 고정하는지 픽스처가 스스로 대답하지 못한다. 두
+ * 단언이 서로 다른 표면을 읽어 **우연히** 초록이었을 뿐이고, id 로 조회하는 다음
+ * 단언부터는 무엇을 재는지 아무도 모른다. 같은 사고가 다시 오지 않도록 아래
+ * `assertDistinctFixtureIds` 가 이 목록 전체를 기계적으로 잰다.
+ */
+const STOPPED_MSG = "0199bbbb-0000-7000-8000-0000000000c6";
+/**
+ * ADR-0155 — 프로바이더가 답 도중에 죽은 판. 「중단됨」과 **다른 낱말**을 그리므로
+ * 픽스처도 다른 행이어야 한다: 한 행을 두 outcome 으로 돌려쓰면 두 낱말이 한
+ * 장에 함께 선 사진이 영영 안 나오고, 그 비교가 이 배치의 논점이다.
+ */
+const FAILED_MSG = "0199bbbb-0000-7000-8000-0000000000c7";
 
 const COLD_BODY = "배포 순서는 이 문서가 정본입니다. 롤백까지 여기 있습니다.";
 const LIVE_BODY = "온콜 교대는 매주 화요일 10시입니다.";
 const PLAIN_BODY = "확인했습니다.";
+const STOPPED_BODY = "배포 로그를 보면 첫 번째 원인은";
+const FAILED_BODY = "그 다음 단계는 릴레이를 재시작하고";
 const CAPPED_BODY = "이 채널은 고정이 꽉 찼습니다.";
 
 const session = {
@@ -247,6 +269,53 @@ function row(over) {
  */
 const COLD_CREATED_MS = AT - 5 * 86_400_000;
 
+/**
+ * 픽스처의 id·seq 가 서로 다른가 (design-review H-1 의 재발 방지).
+ *
+ * H-1 은 상수 **두 줄이 같은 문자열**이었던 사고다. 사람은 그것을 못 본다 — 한
+ * 줄은 c5 를 선언하고 다른 줄은 스무 줄 아래에서 c5 를 선언하며, 둘 다 자기
+ * 페르소나를 길게 변호하는 독스트링을 달고 있다. 그리고 게이트는 **초록으로
+ * 남았다**: 두 단언이 서로 다른 표면(고정 목록 vs 타임라인)을 읽었기 때문이다.
+ * 즉 이 종류의 오염은 실패로 나타나지 않고 「무엇을 재는지 아무도 모르는 상태」로
+ * 나타난다.
+ *
+ * 그래서 픽스처를 사람이 아니라 기계가 읽는다. 이 함수는 어떤 단언보다 **먼저**
+ * 돌고, 다음번 상수 하나가 남의 id 를 빌리는 순간 게이트가 그 자리에서 멈춘다.
+ */
+function assertDistinctFixtureIds() {
+  const rows = historyPage();
+  const byId = new Map();
+  const bySeq = new Map();
+  for (const entry of rows) {
+    if (byId.has(entry.id)) {
+      throw new Error(
+        `fixture id collision: "${entry.id}" is both ${byId.get(entry.id)} and ${entry.body} — ` +
+          "two personas on one id means no assertion knows which one it read"
+      );
+    }
+    if (bySeq.has(entry.seq)) {
+      throw new Error(
+        `fixture seq collision at ${entry.seq}: ${bySeq.get(entry.seq)} and ${entry.body}`
+      );
+    }
+    byId.set(entry.id, entry.body ?? "(voiceless)");
+    bySeq.set(entry.seq, entry.body ?? "(voiceless)");
+  }
+  // 고정 목록 쪽 페르소나는 히스토리에 없는 id 를 쓸 수도 있으므로 따로 잰다.
+  // H-1 이 정확히 이 교차점에서 일어났다: 타임라인 상수가 고정 목록 상수의 id 를
+  // 빌렸다.
+  if (byId.has(VOICELESS_MSG)) {
+    throw new Error(
+      `VOICELESS_MSG ("${VOICELESS_MSG}") leaked into the timeline fixture — ` +
+        "the pin-list persona is defined by having NO body, and a history row gives it one"
+    );
+  }
+  console.log(
+    `[fixture] ${byId.size} timeline rows, ${byId.size} distinct ids / ${bySeq.size} distinct seqs · ` +
+      `VOICELESS(${VOICELESS_MSG.slice(-2)}) ∦ STOPPED(${STOPPED_MSG.slice(-2)}) ∦ FAILED(${FAILED_MSG.slice(-2)})`
+  );
+}
+
 function historyPage() {
   return [
     row({
@@ -268,6 +337,34 @@ function historyPage() {
       state: "edited",
     }),
     row({ id: CAPPED_MSG, seq: 44, authorMemberId: memberId, body: CAPPED_BODY }),
+    // ADR-0155 — 에이전트가 쓰다 만 답. `outcome` 은 서버가 닫는 PATCH 로 찍은
+    // 도장이고, 본문은 사람이 정지를 누르던 순간 읽고 있던 그 글자 그대로다.
+    //
+    // seq 는 46 이다 — 45 는 `VOICELESS_MSG` 의 것이고, 그 겹침이 H-1 이었다.
+    row({
+      id: STOPPED_MSG,
+      seq: 46,
+      authorMemberId: peerId,
+      body: STOPPED_BODY,
+      props: {
+        // 16진뿐이다 (design-review N-2). 1차의 `…r1` 은 UUID 를 주장하면서
+        // UUID 가 아니었다 — 클라는 문자열로만 읽어 무해했지만, 모양을 주장하는
+        // 픽스처는 그 모양을 지켜야 다음 사람이 값을 믿는다.
+        run_id: "0199bbbb-0000-7000-8000-0000000000f1",
+        "momo.stream": { rev: 6, streaming: false, outcome: "cancelled" },
+      },
+    }),
+    // ADR-0155 — 프로바이더 사망. 같은 꼬리 자리, **다른 낱말**.
+    row({
+      id: FAILED_MSG,
+      seq: 47,
+      authorMemberId: peerId,
+      body: FAILED_BODY,
+      props: {
+        run_id: "0199bbbb-0000-7000-8000-0000000000f2",
+        "momo.stream": { rev: 4, streaming: false, outcome: "failed" },
+      },
+    }),
   ];
 }
 
@@ -918,6 +1015,96 @@ async function exercise(browser) {
     );
   }
 
+  // ---- 6d. 멈춘 답은 같은 꼬리에, 같은 격으로 (ADR-0155) ---------------------
+  //
+  // 이 게이트가 이미 「꼬리 한 줄·안쪽부터」를 재고 있으므로 새 낱말도 여기서
+  // 잰다. 색을 **계산된 값으로** 읽는 것이 요점이다: ADR-0155 는 이것이 상태이지
+  // 강조가 아니라고 정했고, accent 나 danger 로 바뀌는 순간 그 결정이 뒤집힌다 —
+  // 그런데 클래스 이름만 보는 단언은 팔레트가 바뀌어도 초록으로 남는다.
+  const stoppedRow = rowLocator(page, STOPPED_MSG);
+  const stopMark = stoppedRow.getByTestId("stream-stop-mark");
+  const stopText = (await stopMark.textContent()) ?? "";
+  if (stopText.trim() !== "중단됨") {
+    throw new Error(
+      `a cancelled stream must name itself in the app's own word, read "${stopText}"`
+    );
+  }
+  // 얼린다 = 지우지 않는다. 사람이 읽고서 누른 그 반쪽이 그대로 있어야 한다.
+  if (!((await stoppedRow.textContent()) ?? "").includes(STOPPED_BODY)) {
+    throw new Error(
+      "the frozen half-answer vanished — freezing, not tombstoning, is the whole decision"
+    );
+  }
+  const stopTails = stoppedRow.getByTestId("message-meta");
+  if ((await stopTails.count()) !== 1) {
+    throw new Error(
+      `the stop mark must join the ONE tail line, found ${await stopTails.count()}`
+    );
+  }
+  const tones = await page.evaluate(
+    ([stoppedId, editedId]) => {
+      const pick = (id, testId) => {
+        const row = document.querySelector(
+          `[data-testid="timeline-message"][data-message-id="${id}"]`
+        );
+        const node = row?.querySelector(`[data-testid="${testId}"]`);
+        return node ? getComputedStyle(node).color : null;
+      };
+      const probe = document.createElement("span");
+      document.body.appendChild(probe);
+      const swatch = (token) => {
+        probe.style.color = `var(${token})`;
+        return getComputedStyle(probe).color;
+      };
+      const out = {
+        stop: pick(stoppedId, "stream-stop-mark"),
+        edited: pick(editedId, "message-meta"),
+        accent: swatch("--accent"),
+        danger: swatch("--danger"),
+        muted: swatch("--ink-muted"),
+      };
+      probe.remove();
+      return out;
+    },
+    [STOPPED_MSG, PLAIN_MSG]
+  );
+  if (tones.stop !== tones.muted) {
+    throw new Error(
+      `the stop mark must be the tail's muted ink, read ${tones.stop} against ${tones.muted}`
+    );
+  }
+  if (tones.stop === tones.accent || tones.stop === tones.danger) {
+    throw new Error(
+      `a stopped answer is a STATE, not an alarm: ${tones.stop} is accent/danger`
+    );
+  }
+  if (tones.stop !== tones.edited) {
+    throw new Error(
+      `the stop mark diverged from 「수정됨」's ink (${tones.stop} vs ${tones.edited}) — one tail, one weight`
+    );
+  }
+  // 사망 판은 **다른 낱말**을 쓴다. 한 행을 두 outcome 으로 돌려쓰지 않는 이유가
+  // 이것이다 — 두 낱말이 갈리는지는 둘이 함께 서 있을 때만 재진다.
+  const failedRow = rowLocator(page, FAILED_MSG);
+  const failedText = (await failedRow.getByTestId("stream-stop-mark").textContent()) ?? "";
+  if (failedText.trim() !== "응답이 끊김") {
+    throw new Error(
+      `a dead provider is not a human pressing stop: read "${failedText}"`
+    );
+  }
+  if (failedText.trim() === stopText.trim()) {
+    throw new Error(
+      "cancelled and failed collapsed into one word — the two endings stopped being distinguishable"
+    );
+  }
+  // 그리고 얼어붙은 두 본문이 **둘 다** 살아 있다.
+  if (!((await failedRow.textContent()) ?? "").includes(FAILED_BODY)) {
+    throw new Error("the dead provider's half-answer vanished");
+  }
+  console.log(
+    `[stop] "${stopText.trim()}" · "${failedText.trim()}" · ${tones.stop} (=수정됨)`
+  );
+
   // ---- 7. 헤더 버튼은 하나의 이름을 갖는다 ------------------------------------
   const trigger = page.getByTestId("open-pin-list");
   const [ariaLabel, title] = await Promise.all([
@@ -1233,6 +1420,19 @@ async function captureShots(browser) {
       .getByTestId("pin-list")
       .screenshot({ path: resolve(outDir, `pin-list-detail-${scheme}.png`) });
     await closePinList(page);
+    // ADR-0155 — 멈춘 답의 꼬리. 행 하나만 찍는다: 리뷰가 봐야 하는 것은 「반쪽
+    // 본문이 남아 있고, 그 아래 한 낱말이 흐리게 서 있다」이고, 화면 전체 사진은
+    // 그 두 사실을 옆 줄들 사이에 묻는다. 두 배색으로 찍는 이유는 「흐린 잉크」가
+    // 배색마다 다른 값이기 때문이다 — 한 장으로는 그 값이 지켜졌는지 못 본다.
+    await rowLocator(page, STOPPED_MSG).screenshot({
+      path: resolve(outDir, `stream-stop-row-${scheme}.png`),
+    });
+    // 방어 낱말의 웹 판 (design-review M-3). 폰은 세 판이 한 장에 서지만 웹은
+    // 「중단됨」 한 장뿐이었다 — 두 낱말이 실제로 다른 글자인지는 웹 사진에서
+    // 확인할 수 없었다.
+    await rowLocator(page, FAILED_MSG).screenshot({
+      path: resolve(outDir, `stream-stop-failed-row-${scheme}.png`),
+    });
     await openRowMenu(page, COLD_PINNED_MSG);
     await page.screenshot({ path: resolve(outDir, `pin-menu-${scheme}.png`) });
     await context.close();
@@ -1281,12 +1481,17 @@ async function captureShots(browser) {
   console.log(
     "[shots] artifacts/pin/pin-{list,list-detail,list-failed,list-failed-kept,menu}-{light,dark}.png"
   );
+  console.log(
+    "[shots] artifacts/pin/stream-stop-{row,failed-row}-{light,dark}.png"
+  );
 }
 
 async function main() {
   if (!existsSync(resolve(webRoot, "dist/index.html"))) {
     throw new Error("dist/ is missing. Run npm run build first.");
   }
+  // 브라우저를 띄우기 전에. 픽스처가 자기모순이면 그 뒤의 초록은 무의미하다.
+  assertDistinctFixtureIds();
   const server = spawn(
     resolve(webRoot, "node_modules/.bin/vite"),
     ["preview", "--port", String(port), "--strictPort", "--host", "127.0.0.1"],
@@ -1317,6 +1522,9 @@ async function main() {
   console.log("           실패 문장은 가진 항목과 함께 섰고(칸막이는 그 둘 사이가");
   console.log("           아니라 목록 앞에), 재시도가 도는 동안에도 가진 것은");
   console.log("           남았으며, 빈 본문은 앱의 말로 섰다.");
+  console.log("           ADR-0155: 멈춘 답은 같은 꼬리 한 줄에 「중단됨」으로 섰고,");
+  console.log("           그 글자는 「수정됨」과 **같은 흐린 잉크**였으며(accent 도");
+  console.log("           danger 도 아니고), 얼어붙은 반쪽 본문은 그대로 남았다.");
 }
 
 await main();

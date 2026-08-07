@@ -3192,7 +3192,9 @@ paths:
         (#1130 전제①) it is a slice of a growing answer — same 200, same
         `message.edited` broadcast, but no edit stamp, and a `rev` that is not
         newer than the stored one is a no-op. Authorship, membership, the
-        tombstone rule and "no interaction consumes a seq" guard both.
+        tombstone rule and "no interaction consumes a seq" guard both. The
+        slice that closes a stream may also name an `outcome` (ADR-0155) when
+        the answer was stopped rather than completed.
       security:
         - bearerAuth: []
       parameters:
@@ -3213,7 +3215,9 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/Message"}
         "400":
-          description: Empty body, malformed id, or an already-deleted message.
+          description: >
+            Empty body, malformed id, an already-deleted message, a stream `rev`
+            below 1, or an `outcome` that is unknown or not on a final slice.
           content:
             application/json:
               schema: {$ref: "#/components/schemas/ErrorResponse"}
@@ -7944,6 +7948,20 @@ components:
             True on the last slice. Clears `props["momo.stream"].streaming` and
             is the point at which the single `message.streamed` audit row is
             written — one per assembled message, not one per slice.
+        outcome:
+          type: string
+          enum: [cancelled, failed]
+          description: >
+            ADR-0155 — how the stream ended, when it did not simply finish.
+            Optional and additive: a normal completion omits it (and the key is
+            then absent from `props["momo.stream"]`, not null), so a producer
+            written before this field sends what it always sent and means what it
+            always meant. `cancelled` is a human pressing stop; `failed` is the
+            provider dying mid-answer. In both cases the partial body is left
+            exactly as it stood and clients draw a restrained tail from this
+            value. Only valid together with `final: true` — an outcome on a
+            non-final slice is a 400, because "this is how it ended" and "more is
+            coming" cannot both be true. Any other value is a 400.
 
     ReactionDelta:
       type: object

@@ -45,8 +45,8 @@ use momo_messaging::{
     validate_thread_root_in_tx, AttachmentLinkRejected, HistoryCursor, InteractionMessage,
     InteractionRefused, MessageAttachment, MessageSignature, MessageType, NewMessage, PagedMessage,
     PinAction, PinnedMessage, ProvenanceRejected, QuoteTargetInvalid, QuotedMessage,
-    ReactionAction, ReactionSnapshot, SendExtras, SendRejected, StoredMessage, StreamEdit,
-    ThreadRollup, ThreadRootInvalid, STREAM_PROPS_KEY,
+    ReactionAction, ReactionSnapshot, SendExtras, SendRejected, StoredMessage, StreamCloseOutcome,
+    StreamEdit, ThreadRollup, ThreadRootInvalid, STREAM_PROPS_KEY,
 };
 use serde_json::{Map, Value};
 use uuid::Uuid;
@@ -703,7 +703,10 @@ fn interaction_refusal(refused: InteractionRefused) -> ApiError {
         // conflict: nothing on the server disagreed with it, it was never a
         // usable number. 409 would tell a retry loop to back off and try the
         // same broken value again.
-        | InteractionRefused::StreamRevInvalid => StatusCode::BAD_REQUEST,
+        | InteractionRefused::StreamRevInvalid
+        // ADR-0155 — same reasoning: an outcome on a non-final slice is a
+        // self-contradictory request, not a race with another writer.
+        | InteractionRefused::StreamOutcomeNotFinal => StatusCode::BAD_REQUEST,
         InteractionRefused::ReactionLimit | InteractionRefused::PinLimit => StatusCode::CONFLICT,
     };
     ApiError::new(status, refused.to_string())
@@ -845,6 +848,12 @@ pub async fn edit(
 ///    settled at. Seventeen `message.edited` audit rows would be seventeen
 ///    claims that a member revised their words, which is false, and the volume
 ///    would drown the real edits an auditor is reading for.
+///
+/// A slice may also carry `outcome` (ADR-0155) — the closing slice of an answer
+/// that was **stopped** rather than completed. It rides the same final write, so
+/// it leaves the same single audit row: a cancelled answer was still assembled,
+/// and hiding it from the audit trail would make "the agent said nothing here"
+/// and "the agent was cut off here" the same absence.
 async fn stream_edit(
     state: &AppState,
     principal: &Principal,
@@ -855,9 +864,20 @@ async fn stream_edit(
     stream: StreamEditRequest,
 ) -> Result<Json<MessageDto>, ApiError> {
     let actor_member_id = principal.member_id;
+    // ADR-0155 — an unrecognised outcome is refused here rather than dropped.
+    // Dropping it would let a producer believe it had marked a message as
+    // stopped while the channel shows a half-answer that looks complete, and the
+    // producer would have no way to find out.
+    let outcome = match stream.outcome.as_deref() {
+        None => None,
+        Some(value) => Some(StreamCloseOutcome::from_wire(value).ok_or_else(|| {
+            ApiError::bad_request("stream outcome must be \"cancelled\" or \"failed\"")
+        })?),
+    };
     let edit = StreamEdit {
         rev: stream.rev,
         is_final: stream.is_final,
+        outcome,
     };
 
     let outcome = tenant_tx_or_reject(&state.pool, workspace_id, move |conn| {

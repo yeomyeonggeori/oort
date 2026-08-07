@@ -14,6 +14,7 @@ import { MessageBody } from "./MessageBody";
 import { CascadeNotice } from "./CascadeNotice";
 import { turnRecordRunId } from "@momo/core/features/timeline/cascadeModel";
 import { rowPresentation } from "@momo/core/features/timeline/rowModel";
+import { streamStopMark } from "@momo/core/features/timeline/streamStop";
 // 구분선의 판정은 코어가 갖는다 — 폰이 같은 값을 소비한다 (U1 M-2).
 import {
   dayDividerLabel,
@@ -222,6 +223,7 @@ export function MessageRow({
   pausedRepeat,
   deletedRepeat,
   deletedFoldedIds,
+  runEnded = false,
   onOpenThread,
   onQuoteMessage,
   onJumpToMessage,
@@ -254,6 +256,15 @@ export function MessageRow({
    * 고친 거짓 지시가 웹에서 재현되지 않게 하는 자리다).
    */
   deletedFoldedIds?: readonly string[];
+  /**
+   * ADR-0155 — 이 메시지를 쓴 run 이 **끝난 것을 보았는가**.
+   *
+   * 목록이 넣는다(`Timeline`). 행이 직접 스토어를 구독하면 아무 run 이나 끝날 때
+   * 화면의 모든 줄이 다시 그려진다. 기본값 `false` 는 「모른다」이고, 모를 때
+   * 아무 말도 하지 않는 것이 이 판정의 보수적인 쪽이다 — 스레드 패널이나 작업
+   * 패널처럼 레일을 읽지 않는 표면은 이 값을 넣지 않는다.
+   */
+  runEnded?: boolean;
   onOpenThread?: (message: Message) => void;
   /**
    * ADR-0148 - pin this row to the composer as a quote. Absent on surfaces with
@@ -328,6 +339,10 @@ export function MessageRow({
   // 「고정됨」을 다는 창은 프레임이 도착하기까지의 몇 밀리초뿐이고, 그 몇 밀리초에
   // 하는 말은 이미 참이 아니다.
   const showsPinMark = Boolean(actions?.pinned) && !deleted;
+  // ADR-0155 — 멈춘 답. 왜 이 낱말인지·왜 accent 가 아닌지는 코어의
+  // `streamStop.ts` 헤더에 있다. 묘비에는 그리지 않는다: 저자가 지운 메시지에
+  // 대고 「중단됨」이라고 말하는 것은 이미 없는 본문을 서술하는 것이다.
+  const stopMark = deleted ? null : streamStopMark(message, runEnded);
   // 하나로 접힌 반복 (goal P3 1-2). 한 번뿐이면 셀 것이 없으므로 아무 말도 하지
   // 않는다 — "1개"는 개수가 아니라 잡음이다.
   const repeatLabel =
@@ -629,11 +644,15 @@ export function MessageRow({
             `chat-light.png`: 본문 → 👍 2 → 수정됨). 「수정됨」은 **본문에 대한 서술**
             이므로 본문 바로 밑에 있어야 어느 메시지 것인지 되짚지 않는다. 칩은
             그 메시지에 대한 **남들의 반응**이라 한 겹 바깥이 맞다. */}
-        {(showsEditedMark || showsPinMark || rollup || repeatLabel) && (
+        {(stopMark || showsEditedMark || showsPinMark || rollup || repeatLabel) && (
           <div
             className="mt-1 flex flex-wrap items-center gap-2 text-meta text-ink-muted"
             data-testid="message-meta"
           >
+            {/* 「수정됨」보다 **앞**이다. 순서 규칙은 안쪽에서 바깥쪽이고, 이보다
+                안쪽인 서술은 없다 — 이 낱말은 본문이 여기서 끝났다고 말한다.
+                꼬리의 다른 조각들은 그 본문에 **대해** 말한다. */}
+            {stopMark && <span data-testid="stream-stop-mark">{stopMark}</span>}
             {showsEditedMark && <span>수정됨</span>}
             {/* 「수정됨」 다음, 「답글 N개」 앞 — 본문에 대한 서술 다음이고 바깥
                 스레드로 나가는 문 앞이다. 안쪽에서 바깥쪽으로. */}

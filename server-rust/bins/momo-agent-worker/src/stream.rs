@@ -10,14 +10,14 @@
 //! identical two calls over REST — `POST …/messages` then
 //! `PATCH …/messages/{id}` with a `stream` block — and inherits the same rules.
 //!
-//! It is **not** yet what `AgentWorker::run_turn` does with its own turns. That
-//! flip is deliberately a separate decision, and the reason is in
-//! `commit_turn`: a run cancelled between enqueue and commit posts nothing
-//! (`TurnCommit::Suppressed("run cancelled")`). Once the answer starts landing
-//! as it arrives, "post nothing" is no longer available — the message already
-//! exists — and what a cancel should then do to it (tombstone it, freeze it
-//! mid-sentence, mark it abandoned) is a product decision about what a human
-//! sees after they press stop, not an implementation detail. See the PR body.
+//! It is **not** yet what `AgentWorker::run_turn` does with its own turns; that
+//! flip is a separate ticket (ADR-0155 결정 5). What the flip was *waiting on*
+//! is now decided: a run cancelled between enqueue and commit still posts
+//! nothing when nothing was streamed, but a run that had already started
+//! streaming has a message in the channel, and [`close_run_stream`] is what
+//! happens to it. ADR-0155 chose **freeze and mark** over tombstone — the person
+//! who pressed stop pressed it because of the text they had already read, and
+//! deleting that text deletes their reason along with it.
 //!
 //! ## The three rules a producer must not get wrong
 //!
@@ -35,8 +35,9 @@
 
 use momo_db::{with_tenant_tx, DbError, PgPool};
 use momo_messaging::{
-    send_message_in_tx, stream_message_body_in_tx, InteractionRefused, MessageType, NewMessage,
-    StreamEdit, StreamOutcome, STREAM_PROPS_KEY,
+    open_stream_message_for_run_in_tx, send_message_in_tx, stream_message_body_in_tx,
+    InteractionRefused, MessageType, NewMessage, StreamCloseOutcome, StreamEdit, StreamOutcome,
+    STREAM_PROPS_KEY,
 };
 use serde_json::Value;
 use uuid::Uuid;
@@ -171,7 +172,16 @@ impl MessageStream {
                         author_member_id,
                         message_type: MessageType::Text,
                         body: Some(body),
-                        props: serde_json::json!({}),
+                        // ADR-0155 — the growing message names its own run.
+                        //
+                        // Every other agent message already does (`success_props`,
+                        // `failure_props`); this path was the one that did not,
+                        // and the gap only became visible when a client needed to
+                        // ask "is the run behind this half-written message over?"
+                        // — the defensive half of the render rule. `run_id` the
+                        // COLUMN is set below and is not serialized on the wire,
+                        // so props is the only place a reader can find it.
+                        props: serde_json::json!({ "run_id": run_id }),
                         root_id: None,
                         // ADR-0148 규칙 6 — the answer quotes the utterance that
                         // raised it, exactly as `commit_turn` does. Streaming
@@ -215,6 +225,9 @@ impl MessageStream {
         let edit = StreamEdit {
             rev: self.rev + 1,
             is_final,
+            // A slice that arrives is never a stopping — the only writer of an
+            // outcome is `close_run_stream`, on a turn that has already ended.
+            outcome: None,
         };
 
         let outcome = with_tenant_tx(&self.pool, workspace_id, move |conn| {
@@ -242,6 +255,73 @@ impl MessageStream {
         });
         Ok(())
     }
+}
+
+/// Close the message a stopped run left open, marking **how** it stopped
+/// (ADR-0155).
+///
+/// One `PATCH`-shaped write: the same body at the next revision, `final: true`,
+/// and an `outcome`. The body is re-stated unchanged — that is the whole point.
+/// Freezing the partial answer keeps the evidence the human acted on; the
+/// `outcome` is what stops that frozen half-sentence from passing for a
+/// finished one.
+///
+/// ## Why it takes a `run_id` and not a [`MessageStream`]
+///
+/// The process that must close a stream is often not the process that opened
+/// it. prime and hermes stream over REST from outside this binary; a worker
+/// that died mid-answer has its job re-claimed by a different worker; and the
+/// cancel arrives on the run, which is the only name all of them share. Looking
+/// the message up by run id also makes the close work for a producer this crate
+/// has never heard of.
+///
+/// ## Best effort, deliberately
+///
+/// Returns `Ok(None)` when there is nothing open — no streamed message, or one
+/// already closed — and that is the common case today, since `run_turn` still
+/// posts its answer in one write. Callers log an `Err` and move on: ADR-0155
+/// chose defensive rendering over a server sweeper precisely so that a failed
+/// close is a cosmetic loss rather than a stuck message. The run's terminal
+/// status is already durable, so a client seeing "run ended, stream still open"
+/// draws the same tail from the other half of the rule.
+pub async fn close_run_stream(
+    pool: &PgPool,
+    workspace_id: Uuid,
+    run_id: Uuid,
+    outcome: StreamCloseOutcome,
+) -> Result<Option<Uuid>, StreamError> {
+    let open = with_tenant_tx(pool, workspace_id, move |conn| {
+        Box::pin(async move { open_stream_message_for_run_in_tx(conn, run_id).await })
+    })
+    .await?;
+    let Some(open) = open else {
+        return Ok(None);
+    };
+
+    let message_id = open.message_id;
+    let author_member_id = open.author_member_id;
+    let body = open.body;
+    let edit = StreamEdit {
+        rev: open.rev + 1,
+        is_final: true,
+        outcome: Some(outcome),
+    };
+    with_tenant_tx(pool, workspace_id, move |conn| {
+        Box::pin(async move {
+            stream_message_body_in_tx(
+                conn,
+                workspace_id,
+                message_id,
+                author_member_id,
+                &body,
+                edit,
+            )
+            .await
+        })
+    })
+    .await?
+    .map_err(StreamError::Refused)?;
+    Ok(Some(message_id))
 }
 
 #[cfg(test)]

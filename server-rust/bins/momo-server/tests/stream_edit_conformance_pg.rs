@@ -337,6 +337,45 @@ async fn slice(
     (status, body)
 }
 
+/// The closing `PATCH` of ADR-0155 — a slice that also says **how** the stream
+/// ended.
+///
+/// Separate from [`slice`] rather than a ninth parameter on it, because the two
+/// are different events: `slice` is the answer arriving, this is the answer
+/// stopping. Keeping them apart is also what lets this helper send the invalid
+/// combinations a producer must be refused for (`final: false` with an outcome,
+/// an outcome nobody defined) without teaching the ordinary path a shape it
+/// never sends.
+#[allow(clippy::too_many_arguments)]
+async fn close_slice(
+    http: &reqwest::Client,
+    base: &str,
+    token: &str,
+    fx: &Fixture,
+    message_id: &str,
+    body: &str,
+    rev: i64,
+    is_final: bool,
+    outcome: &str,
+) -> (reqwest::StatusCode, Value) {
+    let response = http
+        .patch(format!(
+            "{base}/v1/workspaces/{}/messages/{message_id}",
+            fx.workspace
+        ))
+        .bearer_auth(token)
+        .json(&json!({
+            "body": body,
+            "stream": {"rev": rev, "final": is_final, "outcome": outcome},
+        }))
+        .send()
+        .await
+        .expect("send a closing slice");
+    let status = response.status();
+    let body = response.json().await.unwrap_or(Value::Null);
+    (status, body)
+}
+
 // ---------------------------------------------------------------------------
 // reads
 // ---------------------------------------------------------------------------
@@ -811,5 +850,234 @@ async fn a_zero_revision_and_a_tombstone_are_both_refused_by_name() {
     assert_eq!(
         status, 400,
         "a tombstone must not grow a body back: {error}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// #6 — ADR-0155: the wire shape of a stream that was stopped
+// ---------------------------------------------------------------------------
+
+/// The optional field, proved from the outside: a closing slice may name an
+/// `outcome`, and the response and the row both carry it.
+///
+/// The first half of the test is the **backward-compatibility assertion** the
+/// ADR promised. A producer that has never heard of `outcome` sends exactly what
+/// it always sent, and what comes back is exactly what always came back — no
+/// `outcome` key, not a null one. That distinction is the contract: clients read
+/// "did this answer finish?" as a key-presence test, and a server that stamped
+/// `"outcome": null` on every completed answer would make every reader write a
+/// null check nobody agreed to.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn a_closing_slice_may_name_how_the_stream_ended() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let fx = seed(&su, &app_pool).await;
+    let base = start_server(app_pool).await;
+    let http = reqwest::Client::new();
+    let token = login(&http, &base, fx.workspace, &fx.author).await;
+
+    // A turn that simply finished — the pre-ADR shape, unchanged.
+    let finished = open(&http, &base, &token, &fx, Uuid::new_v4(), "끝까지 쓴 답").await;
+    let finished_id = finished["id"].as_str().expect("message id").to_string();
+    let (status, body) = slice(
+        &http,
+        &base,
+        &token,
+        &fx,
+        &finished_id,
+        "끝까지 쓴 답입니다.",
+        1,
+        true,
+    )
+    .await;
+    assert_eq!(status, 200, "a plain final slice still works: {body}");
+    let (_, _, _, props) = stored(&su, Uuid::parse_str(&finished_id).unwrap()).await;
+    let finished_stream = props.get("momo.stream").expect("the marker");
+    assert_eq!(
+        finished_stream.get("outcome"),
+        None,
+        "a completed answer says nothing about how it ended, because it just ended"
+    );
+
+    // A turn that was stopped.
+    let stopped = open(&http, &base, &token, &fx, Uuid::new_v4(), "절반쯤 쓰다가").await;
+    let stopped_id = stopped["id"].as_str().expect("message id").to_string();
+    let seq_before = channel_last_seq(&su, fx.channel).await;
+    let (status, response) = close_slice(
+        &http,
+        &base,
+        &token,
+        &fx,
+        &stopped_id,
+        "절반쯤 쓰다가",
+        1,
+        true,
+        "cancelled",
+    )
+    .await;
+    assert_eq!(
+        status, 200,
+        "the closing slice is an ordinary 200: {response}"
+    );
+    assert_eq!(
+        response["props"]["momo.stream"]["outcome"].as_str(),
+        Some("cancelled"),
+        "the response carries the verdict, so a producer can confirm the marking landed: {response}"
+    );
+    assert_eq!(
+        response["state"].as_str(),
+        Some("sent"),
+        "a stop is not a revision: {response}"
+    );
+    assert!(
+        response["editedAtMs"].is_null(),
+        "and it stamps no 「수정됨」: {response}"
+    );
+
+    let (body, state, edited_at_ms, props) =
+        stored(&su, Uuid::parse_str(&stopped_id).unwrap()).await;
+    let stream_props = props.get("momo.stream").expect("the marker");
+    assert_eq!(
+        stream_props.get("outcome").and_then(Value::as_str),
+        Some("cancelled")
+    );
+    assert_eq!(
+        stream_props.get("streaming").and_then(Value::as_bool),
+        Some(false),
+        "a marked ending is not still arriving"
+    );
+    assert_eq!(
+        body.as_deref(),
+        Some("절반쯤 쓰다가"),
+        "the frozen body is what the human read when they pressed stop"
+    );
+    assert_eq!(state, "sent");
+    assert_eq!(edited_at_ms, None);
+    assert_eq!(
+        channel_last_seq(&su, fx.channel).await,
+        seq_before,
+        "closing a stream consumes no seq — a cancel marks nobody unread"
+    );
+
+    let last = broadcasts(&su, fx.channel)
+        .await
+        .pop()
+        .expect("a broadcast");
+    assert_eq!(
+        last["type"].as_str(),
+        Some("message.edited"),
+        "no new frame type: a client renders the stop from the frame it already applies: {last}"
+    );
+    assert_eq!(
+        last["payload"]["props"]["momo.stream"]["outcome"].as_str(),
+        Some("cancelled"),
+        "and the verdict rides the broadcast, so nobody re-reads history to draw the tail: {last}"
+    );
+
+    // ADR-0155 결정 4 — the frozen message is an ordinary message. Quoting it
+    // works, which is the concrete half of "a stopped answer is not a tombstone":
+    // option B was rejected precisely because deleting would break references
+    // like this one.
+    let quoted = http
+        .post(format!(
+            "{base}/v1/workspaces/{}/channels/{}/messages",
+            fx.workspace, fx.channel
+        ))
+        .bearer_auth(&token)
+        .json(&json!({
+            "clientMsgId": Uuid::new_v4().to_string(),
+            "body": "여기까지만 봐도 됩니다",
+            "replyToId": stopped_id,
+        }))
+        .send()
+        .await
+        .expect("quote the frozen message");
+    assert_eq!(
+        quoted.status(),
+        201,
+        "a cancel-frozen message can still be quoted"
+    );
+}
+
+/// **RED proof.** The two shapes a producer must not get away with.
+///
+/// 1. `outcome` on a slice that is not `final`. Remove the pairing guard in
+///    `stream_message_body_in_tx` and this goes green with a 200, leaving a row
+///    that says `{"streaming": true, "outcome": "cancelled"}` — a message that
+///    is simultaneously live and abandoned, which no renderer can resolve.
+/// 2. An `outcome` value nobody defined. Drop the parse in the route and this
+///    goes green: the unknown token lands in the message's props, every client
+///    fails to match it, and the answer renders as though it had finished
+///    normally — the exact silent lie ADR-0155 option C was rejected for.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn an_outcome_is_refused_off_the_final_slice_and_outside_its_two_values() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let fx = seed(&su, &app_pool).await;
+    let base = start_server(app_pool).await;
+    let http = reqwest::Client::new();
+    let token = login(&http, &base, fx.workspace, &fx.author).await;
+
+    let opened = open(&http, &base, &token, &fx, Uuid::new_v4(), "아직 쓰는 중").await;
+    let message_id = opened["id"].as_str().expect("message id").to_string();
+    let (_, _, _, before) = stored(&su, Uuid::parse_str(&message_id).unwrap()).await;
+
+    let (status, error) = close_slice(
+        &http,
+        &base,
+        &token,
+        &fx,
+        &message_id,
+        "더 쓴다",
+        1,
+        false,
+        "cancelled",
+    )
+    .await;
+    assert_eq!(
+        status, 400,
+        "an ending may not ride a non-final slice: {error}"
+    );
+    assert_eq!(
+        error["error"]["message"]
+            .as_str()
+            .or(error["message"].as_str()),
+        Some("stream outcome may only accompany the final slice"),
+        "the refusal keeps its own sentence: {error}"
+    );
+
+    let (status, error) = close_slice(
+        &http,
+        &base,
+        &token,
+        &fx,
+        &message_id,
+        "더 쓴다",
+        1,
+        true,
+        "abandoned",
+    )
+    .await;
+    assert_eq!(
+        status, 400,
+        "an undefined outcome is refused, not stored: {error}"
+    );
+    assert_eq!(
+        error["error"]["message"]
+            .as_str()
+            .or(error["message"].as_str()),
+        Some("stream outcome must be \"cancelled\" or \"failed\""),
+        "and it names the two values, so an adapter author is not left guessing: {error}"
+    );
+
+    let (_, _, _, after) = stored(&su, Uuid::parse_str(&message_id).unwrap()).await;
+    assert_eq!(
+        after.get("momo.stream"),
+        before.get("momo.stream"),
+        "neither refusal moved the revision, which would refuse the writer's own next slice as stale"
     );
 }

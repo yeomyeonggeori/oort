@@ -153,6 +153,15 @@ pub enum InteractionRefused {
     /// and the staleness guard would have no floor to stand on.
     #[error("stream revision must be a positive integer")]
     StreamRevInvalid,
+    /// ADR-0155 — an `outcome` may only ride the slice that closes the stream.
+    ///
+    /// The field's whole meaning is "this is how the answer ended". On a slice
+    /// that is not final it would claim an ending while the writer is still
+    /// promising more text, and a client reading the props could not tell which
+    /// half to believe. Refusing is cheaper than teaching every renderer to
+    /// arbitrate between a marked ending and a `streaming: true` beside it.
+    #[error("stream outcome may only accompany the final slice")]
+    StreamOutcomeNotFinal,
 }
 
 /// The row-locked message an interaction is about to act on (Swift
@@ -512,11 +521,49 @@ pub async fn edit_message_in_tx(
 /// a client must not be able to write.
 pub const STREAM_PROPS_KEY: &str = "momo.stream";
 
+/// How a stream stopped, when it did not simply finish (ADR-0155).
+///
+/// Absent on a normal completion — an answer that arrived in full says so by
+/// being final and nothing else. These two values exist because the *other* two
+/// endings leave a body that stops mid-sentence, and a half-answer wearing the
+/// same clothes as a whole one is the lie option C was rejected for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StreamCloseOutcome {
+    /// A human pressed stop. The partial body stays exactly as they read it.
+    Cancelled,
+    /// The provider died mid-answer.
+    Failed,
+}
+
+impl StreamCloseOutcome {
+    /// The wire spelling, which is also what lands in the message's props.
+    pub fn wire(self) -> &'static str {
+        match self {
+            StreamCloseOutcome::Cancelled => "cancelled",
+            StreamCloseOutcome::Failed => "failed",
+        }
+    }
+
+    /// Parse the wire spelling; `None` for anything else.
+    ///
+    /// A closed set rather than a free string: `outcome` is read by clients to
+    /// choose a sentence, and an unknown value would render as either silence or
+    /// a raw token in a channel. The route turns this `None` into a 400.
+    pub fn from_wire(value: &str) -> Option<Self> {
+        match value {
+            "cancelled" => Some(StreamCloseOutcome::Cancelled),
+            "failed" => Some(StreamCloseOutcome::Failed),
+            _ => None,
+        }
+    }
+}
+
 /// What one streaming write claims about itself.
 ///
-/// Both fields belong to the **writer**, not the server. The server owns order
+/// Every field belongs to the **writer**, not the server. The server owns order
 /// (`seq`) and identity (`author_member_id`); a streaming producer owns the only
-/// fact the server cannot derive — which of its own slices this is.
+/// facts the server cannot derive — which of its own slices this is, and how the
+/// stream ended.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StreamEdit {
     /// The writer's monotonic revision, `1` for the first slice.
@@ -529,6 +576,14 @@ pub struct StreamEdit {
     pub rev: i64,
     /// `true` on the writer's last slice for this message.
     pub is_final: bool,
+    /// ADR-0155 — set on the closing slice when the answer was **stopped**
+    /// rather than completed. `None` is the normal ending.
+    ///
+    /// Only ever valid together with `is_final`; the pairing is enforced in
+    /// [`stream_message_body_in_tx`] rather than in the type, because the same
+    /// mistake has to be refused when it arrives over the wire from an
+    /// out-of-process adapter, where no Rust type is in the loop.
+    pub outcome: Option<StreamCloseOutcome>,
 }
 
 /// What [`stream_message_body_in_tx`] did.
@@ -634,6 +689,21 @@ async fn reread_interaction_in_tx(
 /// revision lives in the server-owned [`STREAM_PROPS_KEY`] object, which the
 /// same `UPDATE` merges shallowly so nothing else in `props` is disturbed.
 ///
+/// ## How a stream ends (ADR-0155)
+///
+/// A finished answer closes with `final: true` and nothing else. An answer that
+/// was **stopped** — a human pressed the button, or the provider died — closes
+/// with the same slice plus [`StreamEdit::outcome`], and the body is left
+/// exactly where it stopped. Freezing rather than deleting is the decision: the
+/// person who pressed stop pressed it *because of* the text they had already
+/// read, and a message that erases itself takes their reason with it. The
+/// marking is what keeps that honest — a sentence that ends mid-word must not
+/// wear the same clothes as one that finished.
+///
+/// `state` and `edited_at` stay untouched here too, for the same reason the
+/// growing slices leave them alone: the arrival of a stop is no more a revision
+/// than the arrival of an answer.
+///
 /// Every other guard is [`edit_message_in_tx`]'s, unchanged: author-only,
 /// channel membership, no tombstones, and RLS confines the lock to the tenant.
 pub async fn stream_message_body_in_tx(
@@ -646,6 +716,10 @@ pub async fn stream_message_body_in_tx(
 ) -> Result<Result<StreamOutcome, InteractionRefused>, DbError> {
     if edit.rev < 1 {
         return Ok(Err(InteractionRefused::StreamRevInvalid));
+    }
+    // ADR-0155 — "how it ended" and "more is coming" cannot both be true.
+    if edit.outcome.is_some() && !edit.is_final {
+        return Ok(Err(InteractionRefused::StreamOutcomeNotFinal));
     }
     if body.trim().is_empty() {
         return Ok(Err(InteractionRefused::EmptyBody));
@@ -673,18 +747,27 @@ pub async fn stream_message_body_in_tx(
         return Ok(Ok(StreamOutcome::Stale(current)));
     }
 
+    let mut stream_props = json!({
+        "rev": edit.rev,
+        // The one bit a renderer needs: is more text coming? It is `false`
+        // on the final slice rather than the key being removed, so a client
+        // that only ever sees the last frame still learns this message was
+        // assembled rather than typed.
+        "streaming": !edit.is_final,
+    });
+    // ADR-0155 — written only when there is one. A normal completion leaves the
+    // key **absent** rather than null, so "did this answer finish?" is a key
+    // presence test in every reader instead of a null check nobody writes.
+    if let Some(outcome) = edit.outcome {
+        stream_props["outcome"] = Value::String(outcome.wire().to_string());
+    }
     // `||` is a shallow merge — the producer's own props keys survive a slice
     // (`patch_message_props_in_tx` documents the same choice for approval cards).
-    let patch = json!({
-        STREAM_PROPS_KEY: {
-            "rev": edit.rev,
-            // The one bit a renderer needs: is more text coming? It is `false`
-            // on the final slice rather than the key being removed, so a client
-            // that only ever sees the last frame still learns this message was
-            // assembled rather than typed.
-            "streaming": !edit.is_final,
-        }
-    });
+    //
+    // Note the merge is shallow at the *top* level: this whole `momo.stream`
+    // object replaces the stored one, which is why every slice re-states `rev`
+    // and `streaming` rather than patching them individually.
+    let patch = json!({ STREAM_PROPS_KEY: stream_props });
     let sql = format!(
         "UPDATE message \
             SET body = $2, props = COALESCE(props, '{{}}'::jsonb) || $3 \
@@ -713,6 +796,79 @@ pub async fn stream_message_body_in_tx(
     )
     .await?;
     Ok(Ok(StreamOutcome::Applied(projection)))
+}
+
+/// A message a run left mid-stream (ADR-0155) — everything needed to close it.
+///
+/// `body` rides along because the closing slice re-states it: `body` on this
+/// path is absolute, and the whole point of the close is that the text does
+/// **not** change. Reading it here rather than trusting a caller's buffer is
+/// what makes the close work for an out-of-process producer, whose accumulator
+/// lives in another process and may already be gone.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OpenStreamMessage {
+    pub message_id: Uuid,
+    pub channel_id: Uuid,
+    /// The message's own author — the only member the streaming path will accept
+    /// as the actor, agent or not.
+    pub author_member_id: Uuid,
+    pub body: String,
+    /// The revision already stored; the closing slice is this plus one.
+    pub rev: i64,
+}
+
+/// Find the still-open streamed message of a run, if it has one (ADR-0155).
+///
+/// Keyed on `run_id` rather than on a handle held in memory, because the
+/// producer that opened the message may not be the process that has to close
+/// it: prime and hermes stream over REST, and a worker that crashed mid-answer
+/// is re-claimed by a different worker entirely. The run id is the one name all
+/// three share.
+///
+/// "Still open" is `streaming: true` — which is also what makes calling this
+/// twice harmless. Once the closing slice lands the flag is `false`, so a
+/// retried cancel finds nothing and writes nothing, and the first marking is
+/// never overwritten by a second one.
+///
+/// Returns at most one row: a turn is one message by construction (the opening
+/// write is idempotent on the run id), and `ORDER BY seq` makes "at most one"
+/// deterministic rather than merely expected.
+pub async fn open_stream_message_for_run_in_tx(
+    conn: &mut PgConnection,
+    run_id: Uuid,
+) -> Result<Option<OpenStreamMessage>, DbError> {
+    /// `(id, channel_id, author_member_id, body, rev)` as Postgres hands it back.
+    type OpenStreamRow = (Uuid, Uuid, Uuid, Option<String>, Option<i64>);
+
+    let row: Option<OpenStreamRow> = sqlx::query_as(
+        "SELECT id, channel_id, author_member_id, body, \
+                (props -> $2 ->> 'rev')::bigint \
+           FROM message \
+          WHERE run_id = $1 \
+            AND deleted_at IS NULL \
+            AND (props -> $2 ->> 'streaming') = 'true' \
+          ORDER BY seq \
+          LIMIT 1",
+    )
+    .bind(run_id)
+    .bind(STREAM_PROPS_KEY)
+    .fetch_optional(&mut *conn)
+    .await?;
+    let Some((message_id, channel_id, author_member_id, body, rev)) = row else {
+        return Ok(None);
+    };
+    // A streamed message always has a non-empty body (the domain refuses an
+    // empty one) and always has a `rev` (it is written by the same statement
+    // that sets `streaming`). Both `unwrap_or` arms are therefore unreachable
+    // shapes rather than tolerated ones — but a `NOT NULL` this function cannot
+    // enforce is not worth a panic in a best-effort close path.
+    Ok(Some(OpenStreamMessage {
+        message_id,
+        channel_id,
+        author_member_id,
+        body: body.unwrap_or_default(),
+        rev: rev.unwrap_or(0),
+    }))
 }
 
 /// Outcome of [`delete_message_in_tx`].
@@ -1273,6 +1429,34 @@ pub async fn channel_pins(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// ADR-0155 — the outcome vocabulary is closed, and its two spellings are
+    /// the ones the ADR and the OpenAPI enum name.
+    ///
+    /// The round trip is the load-bearing half: `wire()` writes the value into a
+    /// message's props and `from_wire` reads it off an incoming PATCH, so a
+    /// divergence between them would let a producer set a value the server can
+    /// never parse back — and every client would then render a stopped answer as
+    /// a finished one.
+    #[test]
+    fn the_stream_outcome_vocabulary_is_two_words_and_closed() {
+        assert_eq!(StreamCloseOutcome::Cancelled.wire(), "cancelled");
+        assert_eq!(StreamCloseOutcome::Failed.wire(), "failed");
+        for outcome in [StreamCloseOutcome::Cancelled, StreamCloseOutcome::Failed] {
+            assert_eq!(StreamCloseOutcome::from_wire(outcome.wire()), Some(outcome));
+        }
+        // Everything else is refused rather than stored. An unknown token in a
+        // message's props renders as silence in every client, which is exactly
+        // the "a half-answer wearing a whole answer's clothes" failure this
+        // field exists to prevent.
+        for unknown in ["", "Cancelled", "abandoned", "stopped", "timed_out", "null"] {
+            assert_eq!(
+                StreamCloseOutcome::from_wire(unknown),
+                None,
+                "{unknown:?} is not part of the vocabulary"
+            );
+        }
+    }
 
     fn stored(seq: i64) -> StoredMessage {
         StoredMessage {
