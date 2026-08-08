@@ -1954,3 +1954,9 @@
 ## 2026-08-08 (밤2) · Fable · #1181 랜딩(#1176 종결)·SSH 진단 확정·NCP 전원 도구 재작성
 - **#1181 머지**: web-legacy 빨강 원인=스펙 이동 후 미추종(타입만이 아니라 web-legacy dist가 Rust API 앞에서 승인 패널 TypeError — **라이브 무영향**, app.oor7.com=clients/web 서빙). 은퇴 기각(momo.Dockerfile 유일 웹·MOMO-678 선례)·수리=이중 표기 리더. 같은 프로파일 base 빨강 2건 동반 수리(B2 title 리브랜딩 준비 판정·B3 admin 픽스처), B4=#1182 발급. --profile web 13/14 green.
 - **SSH 스톨 진단 확정**: TCP·배너·키교환 정상 → **비밀번호(PAM) 단계 서버 무응답**(logind/dbus 류 전형) — 성재 터미널도 동일이라 서버측 확정. 처방=NCP API 재부팅. `ncp-power.py` 재작성(원본 tmp 유실 — 서명 v2·자격 ~/.ncp 생존)·status 검증 성공(running). 성재에 reboot 명령 전달(리스크 고지: 재부팅 후 up -d까지 1~3분 다운 가능). 회복 시 순서: 스택 확인→잔여물 청소→웹 C3szaFwl→서버 3380e4fc.
+
+## 2026-08-08 (밤3) · Fable · 서버 회복+전 층 배포 완결·#1183/#1184 랜딩
+- **SSH 사건 종결**: 원인=logind 런타임 걸림(재부팅=정답·디스크 86% 무관) + 혼선 2겹(비번 파일 tmp 청소 소실 — pem+getRootPassword API로 재복호화 복구·root 일시 잠금 — 1분 자동 해제). 교훈: 비번 파일은 세션 스크래치 의존 금지 → **API 재복호화 절차가 정본**(ncp-power.py+getRootPassword, ~/.ncp 자격+pem이 진짜 원본).
+- **전 층 배포**: 웹 `index-C3szaFWl`·서버 `momo-rust:08e0c9d9`(4서비스 일치·migrate 62 skip·healthz 200·approvals 401) — 오늘 랜딩 전체(ADR-0155 폐곡선·runEnded·CubeSandbox 어댑터+프로비저너·여는 POST 표식·oort 배치 4) 라이브. 롤백=892b342f 단일 보존, 구 태그 2개 회수(디스크 87→84%).
+- **#1183 머지(#1173 종결)**: 여는 POST 표식 — 선언≠저장값(400)·SignedStreamOpen 거절·클라 0줄. 서버측 닫기 전제(runId 서비스)는 #1130 합류. **#1184 머지(#1182 종결)**: 스모크 18일 잠복 드리프트(#577 개명) — 정착 배리어 보존 수리+B5 경합+B6 히어독 백틱(#1181 자기 결함)+testid⊆렌더 밀리초 가드. #1185 적립(게이트 ruby 환경).
+- 활성: #1186(다크 20역할 파리티 — N1 해소 18.08° 실측·에이전트 색 159° 통일) design-review 중. ADR-0157(샌드박스 네트워크 경계) Proposed — 성재 승인 대기.
