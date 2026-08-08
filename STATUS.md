@@ -1,5 +1,16 @@
 # oort 진행 현황
 
+## 게이트 위생 — 14단계가 게이트 경유에서만 빨갛던 이유는 **드리프트한 사본** (#1185, 2026-08-08)
+
+- **증상은 환경 차이였지만 원인은 코드였다.** `local_gate.sh`는 모든 단계를 `bash -lc`(로그인 셸)로 돌린다. 이 기계의 로그인 PATH는 `/usr/bin`을 `/opt/homebrew/bin`보다 앞에 두므로 `ruby`가 **2.6.10**으로 잡히고, psych 3은 `YAML.load_file(..., aliases: true)`의 `aliases:` 키워드를 모른다(`unknown keyword: aliases (ArgumentError)`). 같은 명령을 직접 실주행하면 ruby 4.0.6이 잡혀 초록이었다 — #1181·#1184의 14단계 초록이 전부 직접 실주행이었던 이유.
+- **정작 죽은 자리는 2차 패스였다.** 1차 패스(`verify_openapi_contract.sh`)에는 `aliases:` 없이 재시도하는 psych 3 갈래가 **이미 있었다**. #1042가 만든 2차 패스(`verify_openapi_contract_rust.sh`)는 그 변환을 "1차 패스와 같은 변환"이라 주석 달고 **복사**했는데 재시도만 빠져 있었고, 그래서 곧장 python 갈래로 떨어졌다. 그 python은 `PYTHON_BIN`(≥3.10 기준으로 고른 python3.13)이고 PyYAML이 없다. Swift 패스가 기본 off인 지금 2차 패스는 **유일한 기본 패스**이므로 14단계 전체가 죽었다.
+- **수리: 사본을 지웠다.** `scripts/openapi_spec_to_json.sh` 신설 — 소스 전용 라이브러리 한 벌을 두 패스가 같이 부른다. 인터프리터의 **자격을 실측**해서 갈래를 고르고(psych 4+면 `aliases: true`, psych 3-면 무키워드 — `RUBY_VERSION` 숫자 비교는 psych 백포트에 거짓말한다), **어느 갈래로 뛰었는지 언제나 한 줄 출력한다**(`spec->json reader: ruby 2.6.10 (psych 3-, …)`). 조용한 강등 금지(#1089·#1181 전례).
+- **실패도 정직해졌다.** 종전 ruby 갈래는 `2>/dev/null`로 이유를 삼키고 "need ruby or python yaml"이라는 일반문으로 죽었다. 이제 갈래별로 실격 사유를 이름 댄다: `ruby : ruby 2.6.10 has no aliases: keyword…` / `python: python3.13 has no PyYAML (import yaml failed)`.
+- **로그인 셸 PATH 고정은 기각했다.** 게이트가 PATH를 다시 쓰는 것은 레포 밖 기계 전역을 건드리는 수리이고, 고쳐도 "이 기계에서 어떤 ruby가 먼저 잡히는가"에 초록이 계속 매달린다. `OPENSSL_BIN`(LibreSSL은 Ed25519를 못 한다)·`PYTHON_BIN`(MOMO-458, Xcode 3.9 회피) 선택이 이미 **자격 실측** 규율이고, 이번 수리는 그 규율을 ruby로 넓힌 것이다. 기각 사유는 새 파일 헤더에 남겼다.
+- **두 ruby 갈래는 오늘의 스펙에서 동등하다.** ruby 4.0.6 `aliases: true`와 ruby 2.6.10 무키워드의 JSON이 **263332 바이트 동일**. `docs/api/openapi.yaml`에는 현재 앵커/별칭이 0개라 `aliases: true`는 미래 대비이고, psych 4에서 키워드를 뺀 채 별칭이 등장하면 Psych가 예외를 던지므로 **조용히 틀린 JSON이 나오는 경로는 없다**.
+- **red proof를 영구화했다.** `scripts/tests/test_local_gate_hardening.sh`에 `aliases:`만 거부하는 가짜 ruby를 PATH 앞에 세우는 픽스처를 추가했다 — 변환 성공 + **갈래 고지 문자열**을 함께 단정하므로 조용한 강등이 초록으로 통과하지 못한다. 두 번째 픽스처는 리더가 하나도 없을 때 갈래별 이유를 대고 죽는지를 단정한다. 실측: psych 3 갈래를 제거하면 이 테스트가 빨개지고 로그인 셸 변환이 다시 `no qualified YAML reader`로 죽는다.
+- **`local_gate.sh` shell syntax 목록에 3개를 넣었다** — 신설 라이브러리와, 그동안 빠져 있던 `verify_openapi_contract_rust.sh`까지.
+
 ## 게이트 위생 — Swift 패스 강등·병합 트리 게이트·선재 FAIL 규명 (#1089/#1099/#1108/#1057, 2026-08-06)
 
 - **1차(스펙 ↔ Swift) 패스를 기본 off 로 강등했다(ADR-0145 증보 2-②).** `OPENAPI_GATE_SWIFT_PASS=1` 로만 켜진다. 강등 자체보다 중요한 것은 **대가를 이름 붙인 것**이다: 1차가 꺼지면 `openapi_sampled_on_rust.txt` 밖의 연산은 "스펙에 있으나 어느 패스도 보지 않는" 상태가 되므로, 게이트가 그 목록을 매 실행 경고로 **전부** 출력한다(실측 **125/128**, 매니페스트가 덮는 것은 3). 커버리지가 조용히 사라지는 상태를 만들지 않는다 — 목록은 매니페스트가 자랄수록 줄고, 0이 되는 날 1차 패스는 되살릴 이유가 사라진다(#1042 잠식 완료).

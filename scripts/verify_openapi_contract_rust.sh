@@ -62,6 +62,10 @@ SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 REPO_ROOT="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)"
 cd "$REPO_ROOT"
 
+# 스펙 YAML -> JSON 변환은 1차 패스와 공유하는 한 벌이다(#1185).
+# shellcheck source=scripts/openapi_spec_to_json.sh
+. "$SCRIPT_DIR/openapi_spec_to_json.sh"
+
 need() {
   command -v "$1" >/dev/null 2>&1 || {
     echo "[openapi-rust] missing required command: $1" >&2
@@ -272,21 +276,12 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-# ---- 1) 스펙 YAML -> JSON (1차 패스와 같은 변환) -----------------------------
-if command -v ruby >/dev/null 2>&1 && ruby -ryaml -rjson -e \
-  'puts JSON.generate(YAML.load_file(ARGV[0], aliases: true))' \
-  "$SPEC_YAML" >"$SPEC_JSON" 2>/dev/null; then
-  :
-else
-  "$PYTHON_BIN" -c '
-import json, sys, yaml
-with open(sys.argv[1], encoding="utf-8") as handle:
-    json.dump(yaml.safe_load(handle), sys.stdout)
-' "$SPEC_YAML" >"$SPEC_JSON" || {
-    echo "[openapi-rust] cannot convert spec to JSON (need ruby or python yaml)" >&2
-    exit 1
-  }
-fi
+# ---- 1) 스펙 YAML -> JSON (1차 패스와 **같은 함수**) -------------------------
+# "같은 변환"이라고 적어 두고 사본을 뒀던 자리다(#1185). 사본에는 psych 3 재시도가
+# 없어서, 로그인 셸이 /usr/bin/ruby 2.6 을 먼저 잡는 기계에서는 이 줄이 곧장 python
+# 갈래로 떨어졌고 그 python 에 PyYAML 이 없어 여기서 죽었다 — 직접 실주행은 초록인
+# 채로. 이제 두 패스가 한 함수를 부른다.
+momo_openapi_spec_to_json "$SPEC_YAML" "$SPEC_JSON" openapi-rust "$PYTHON_BIN" || exit 1
 
 # ---- 2) 매니페스트 적재 ------------------------------------------------------
 EXPECTED_OPS="$TMP_DIR/expected-ops.txt"
