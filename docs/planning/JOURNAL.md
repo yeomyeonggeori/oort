@@ -1990,3 +1990,8 @@
 
 ## 2026-08-09 (새벽5) · Fable · track/engine→main 동기화 완료(a749d765)
 - 525커밋 동기화(위임 사항 — 랜딩 단위). 충돌 3건 전부 문서: 0144=engine(oort화)+대체 헤더 재적용·0145=engine(oort화)+증보 2 이식·JOURNAL=main 초집합(역사 원문 우선 — engine측 구항목 oort화 미채택 기록). **병합 결과 7레인 green 확인 후 푸시** — main=engine 코드 동일. uxui 트랙은 별도(변경 없음 확인 시 생략).
+
+## 2026-08-09 (아침) · Fable · U1 PASS·표준 KVM 반전·D4-② 본판 가동
+- **U1 판정 PASS**(25분): PVM 커널 NCP VM 부팅 성공(3회·ioctl 실증). **더 큰 발견: NCP 표준 VM에 /dev/kvm(nested) 실동작** — L2 게스트 KVM 가속 부팅 실증 → ADR-0156 증보 2(**표준 KVM 1차·PVM 폴백**). 상류 결함 3 실측(BLS 무효 스크립트·kvm_intel 선점·console de-dup — 전문 `research/2026-08-09-cubesandbox-u1-verdict.md`). U1 VM(144279772) **terminate 완료**(성재 스크립트 대행).
+- **D4-② 환경 구성**: cube-d42 생성(**인스턴스 144280017**·s8-g3 31GB)+`101.79.20.102` 공인 IP(**인스턴스 144280033**)+**200GB CB1 볼륨(144280036)** — 회수 대상 3개 전부 번호 명기(**종료 책임=오케스트레이터**: terminate+IP 반납+볼륨 삭제). KVM(g3) 스토리지 API 특이(분리 생성 CB1+zone→attach) 실측 기록. D4-② 워커 가동(표준 모드 설치→실 microVM 폐곡선→매핑 실물→idle 시계→ADR-0157 네트워크 실측).
+- 병행: #1193 앵커·자동 refine 실측 워커 진행 중.
