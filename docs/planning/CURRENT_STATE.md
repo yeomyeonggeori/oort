@@ -1,5 +1,21 @@
 # momo 기획 현재 상태 (Planning Current State)
 
+> **2026-08-09 스냅샷 18 (Fable · momo-main — prime 3번째 provider 승격 완결·CubeSandbox 3/4·8/8 하루 13 PR).** 컴팩트 복원 진입점.
+>
+> **8/8~8/9 랜딩(13 PR·이슈 12 종결)**: 재개 배치(#1171 코어 기계검사 하드제로·#1172 runEnded 동봉) · oort 배치 4+웹 emdash AST(#1174·#1175=#1141 완결) · **CubeSandbox 체인**(ADR-0156 Accepted → #1179 어댑터·#1180 프로비저너 — 잔여 D4-② 실기동만) · web-legacy 계열(#1181·#1184 — 18일 잠복 드리프트) · #1183 여는 표식 · #1186 다크 20역할 파리티(에이전트 색 통일·리뷰 PASS) · #1187 게이트 ruby=사본 드리프트 · **prime 승격**(ADR-0158 Accepted D1~D7 → #1188 서버 축(runId 서비스·D7 PATCH 스코프—Swift 시절 공백 적발)·#1189 어댑터 상주(실연동: 베어러 하나 525 update→메시지 1) → **#1130 종결**).
+>
+> **신규 ADR**: 0156 Accepted(CubeSandbox=T3 기질·발주 사양 32GB 증보) · 0157 **Proposed**(샌드박스 네트워크 경계 — 성재 검토 대기) · 0158 Accepted(prime 승격·D7) · 0129 증보 1(kind 분리·사후 필터링 금지). 리서치 정본: `2026-08-08-oss-sandbox-memory-evaluation.md`(Tencent Memory 4중 위반 배제·vibesdk 배제)·`2026-08-08-cubesandbox-requirements-adapter-mapping.md`(발주 체크리스트·probe lossy).
+>
+> **라이브**: 웹 `index-C3szaFWl` · 서버 `momo-rust:08e0c9d9`(롤백 892b342f 단일) — 단 **#1188·#1189는 미배포**(다음 배포 묶음). 폰 아카이브 재빌드 대기(#1186 다크 포함 — 기기 검수 시).
+>
+> **SSH 사건 종결 기록**: 원인=logind 런타임 걸림(NCP API 재부팅=정답·ncp-power.py 재작성—서명 v2·~/.ncp 자격+pem이 원본)+비번 파일 tmp 소실(getRootPassword API 재복호화 절차가 정본)+root 일시 잠금(1분 자동 해제).
+>
+> **성재 게이트**: ①전용 호스트 발주(D4-② — x86_64·32GB·XFS 200GB·콘솔 필수·CIDR 회피, 폐기 VM으로 U1 30분 판정 먼저) ②ADR-0157 검토. **적립 큐**: #1190(uuid5 골든 벡터)·#1164 ②③(재배선·confirm 위계 — 성재 결정)·#1168(preamble 실물)·#1118 소형 산문·세션 카드 앵커(이슈 미발급)·PYTHON_BIN 관측·운영 전 체크리스트(자동 refine 실측·멀티 uid·업스트림 문서 초안 제출 여부=성재)·잔존 워크트리 판정 2(684-3·WEB-WP1).
+>
+> **워커·머지 규율 추가분(8/8 성문화)**: 발주 전 랜딩분 대조(`git log -S`/PR 검색 — #1139 헛발주 전례)·track base PR은 머지 시점 이슈 수동 종결·단발 워커=무명 spawn·병합 트리 flake 1회=동일 트리 재실행 판정(#1063 계열)·대기 중에도 큐 병렬(성재 지적)·배포 전 디스크 확인.
+>
+> 이하 스냅샷 17:
+
 > **2026-08-08 스냅샷 17 (Fable · momo-main — 성재 지시 정지. ADR-0155 폐곡선 라이브·재개=W-G/W-H 재발사).** 컴팩트 복원 진입점.
 >
 > **정지 상태**: 성재 "작업 중단하고, 해당 작업부터 재개할 수 있게 준비만"(2026-08-08 새벽) — W-G(#1166)·W-H(#1170+#1141) 워커 2기를 착수 직후(패킷 읽기 단계) 정지, 워크트리·브랜치 회수 완료(유실 0). **재개 절차: `docs/planning/handoffs/2026-08-08-terminal-backfill-guards-packet.md`(ready 상태 그대로)에서 무명 Opus 단발 2기 재발사** — 발주 전 랜딩분 대조는 이미 완료된 패킷이니 즉시 발사 가능. 재개는 성재 신호 후.
