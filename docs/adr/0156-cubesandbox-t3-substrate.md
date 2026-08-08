@@ -19,6 +19,7 @@ E2B 은퇴(ADR-0142) 후 T3 관리형 provider 자리가 비어 있었고, ADR-0
 1. **D1 — 기질**: T3 관리형 샌드박스 기질 = **CubeSandbox**. ADR-0144 D1의 "k8s+kata 직접 조립"을 대체한다(격리 계열은 동일 — 바뀌는 것은 조립 주체). BYOC는 degenerate 어댑터로 **공존 유지**(ADR-0142 불변).
 2. **D2 — 합류 형태**: ADR-0142 D2 계약의 구현체 `cubesandbox` provider 어댑터. E2B 고유 수치가 그랬듯 pause/resume 의미론·연속 상한은 전부 **capability 선언**으로 — 정책 코드는 CubeSandbox 상수를 모른다. 의존 형태는 **API 소비**(HTTP — 코드 벤더링 없음), 설치물은 전용 호스트의 CubeSandbox 데몬.
 3. **D3 — 인프라**: **전용 호스트 신설**(성재 확보) — PG=SoT 박스와 물리 분리. 1차 후보는 PVM 모드(일반 VM — 커널 교체 요건 실측 후 확정), KVM 가용 베어메탈이면 표준 모드. 사양 하한: RAM 8GB·디스크 50GB.
+   - **증보 1 (2026-08-08, D4-① 실측 — `research/2026-08-08-cubesandbox-requirements-adapter-mapping.md`)**: 하한 8GB는 설치기 거부선일 뿐 — 1st-party 벤치가 시스템 기저 ~7GB를 실측. **발주 사양: x86_64 · 8~16 vCPU · RAM 32GB · 시스템 50GB + 데이터 디스크 200GB 별도(XFS — `/data/cubelet` 필수) · Ubuntu 22.04 · 콘솔(VNC) 접근 필수(커널 교체 실패 대비) · VPC 대역 192.168.0.0/18 회피**. PVM=커널 교체+GRUB 기본 변경+재부팅(x86_64 전용, 투기실행 완화 일부 강제 해제 — PG 물리분리 근거 강화). 스케일아웃은 베어메탈(중첩가상화 미지원). aarch64는 베어메탈 경로만.
 4. **D4 — 단계**: ①**요건 실측+어댑터 매핑**(호스트 사양 확정 재료 — 인프라 발주 전) ②전용 호스트에서 **실기동 스파이크**(리서치 미확인 목록: 성능 주장·PVM 부팅·디스크 실점유) ③어댑터 구현(+mock conformance 동형) ④프로비저너 연동 — T3 활성화는 ADR-0140의 게이트(T-2~T-4+실 smoke) 그대로.
 5. **D5 — 유보**: CubeSandbox 부속 컴포넌트(CubeProxy·CubeEgress·CubeDB 등)는 전부 쓰지 않는다 — 우리가 소비하는 표면은 수명주기 API뿐. egress 정책은 ADR-0150 계열에서 별도 결정.
 
