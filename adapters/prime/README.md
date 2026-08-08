@@ -45,8 +45,9 @@ prime-agent stdout JSONL ─► PrimeAdapter ─► StreamRelay ─► OortClien
 
 The adapter never publishes to Centrifugo and never touches Postgres. `seq` is
 whatever the server returns; the adapter has no opinion about ordering. Measured
-on a local stack: 30 adapter writes produced 36 `outbox` rows, all `done` — a
-bypass would have produced none.
+on a local stack: every adapter write produced its `outbox` row and the relay
+drained all of them (`broadcast` 112/112 `done`). A bypass would have produced
+none, which is why the outbox count is the evidence and the message count is not.
 
 ## Streaming: one answer, one message
 
@@ -69,8 +70,11 @@ PATCH  {"body": "답이 자라고 있습니다", "stream": {"rev": 2, "final": t
   opens and closes, because `cancelled`/`failed` is only expressible on a
   closing slice.
 
-Measured against a local Rust stack (`momo-rust:08e0c9d9`): 525 `message_update`
-events became 1 opening POST + 29 slices, one message, `seq` 1, `edited = false`.
+Measured against a local Rust stack: 525 `message_update` events became 1 opening
+POST + 23 slices, one message, `edited = false`, authored by the agent member and
+bound to its run on both the `run_id` column and `props.run_id`. The whole run
+used the **agent bearer**, which is what makes it the adapter's real credential
+rather than a demonstration.
 
 ## Endings
 
@@ -82,10 +86,14 @@ events became 1 opening POST + 29 slices, one message, `seq` 1, `edited = false`
 | the harness died mid-answer | final slice `outcome: "failed"` |
 | **this adapter** died mid-answer | nothing the adapter can write — this is what `runId` is for |
 
-That last row is the argument for ADR-0158 D5. With a run bound to the opening
-write, `open_stream_message_for_run_in_tx` can find the half-written message and
-mark it; without one, a dead adapter leaves a half sentence wearing a finished
-answer's clothes forever.
+That last row is the argument for ADR-0158 D5, and it was reproduced by accident
+during development: a crash between the opening POST and the first slice left a
+row reading `{"rev": 0, "streaming": true}` with nothing that could ever close
+it. With a run bound to the opening write, `open_stream_message_for_run_in_tx`
+finds exactly that row and marks it. The adapter therefore sends `runId` whenever
+one is configured, and surfaces a refusal rather than dropping the binding — a
+dropped binding is a stream nothing can close, wearing a finished answer's
+clothes.
 
 ## Self-modification (ADR-0158 D1~D4)
 
