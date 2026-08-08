@@ -1360,7 +1360,7 @@ async fn d2_t3_9_lease_renewal_is_the_complement_of_host_loss() {
     .await
     .expect("age the heartbeat");
 
-    let renewable = momo_t3::lease::renewable_lease_candidates(&su, 90, 500)
+    let renewable = momo_t3::lease::renewable_lease_candidates(&su, 90, 500, None)
         .await
         .expect("lease candidates");
     let stale = stale_session_candidates(&su, 90, 500)
@@ -1426,7 +1426,7 @@ async fn d2_t3_9_lease_renewal_is_the_complement_of_host_loss() {
     .await
     .expect("freeze the paused host's heartbeat");
 
-    let renewable = momo_t3::lease::renewable_lease_candidates(&su, 90, 500)
+    let renewable = momo_t3::lease::renewable_lease_candidates(&su, 90, 500, None)
         .await
         .expect("lease candidates");
     let stale = stale_session_candidates(&su, 90, 500)
@@ -1445,6 +1445,46 @@ async fn d2_t3_9_lease_renewal_is_the_complement_of_host_loss() {
             .iter()
             .any(|c| c.cloud_host_id == Some(alive.cloud_host_id)),
         "a parked host's quiet heartbeat is the pause working, not a loss"
+    );
+
+    // The keyset walk really walks: a batch size of 1 must still reach every
+    // renewable host, because a renewal writes nothing and so cannot advance the
+    // ordering the way the reconciler's claim does. If this ever caps, hosts
+    // past the batch are deleted by the substrate one lease later while healthy.
+    let mut walked: Vec<Uuid> = Vec::new();
+    let mut cursor: Option<Uuid> = None;
+    // Bounded on purpose. A cursor that does not advance — the exact shape of
+    // the bug this asserts against — makes an unbounded walk spin forever, and a
+    // regression that hangs CI is strictly worse than one that fails it.
+    for _ in 0..(renewable.len() + 8) {
+        let page = momo_t3::lease::renewable_lease_candidates(&su, 90, 1, cursor)
+            .await
+            .expect("lease page");
+        let Some(last) = page.last() else { break };
+        assert_ne!(
+            Some(last.cloud_host_id),
+            cursor,
+            "named regression: the cursor did not advance, so the walk is standing still. \
+             Renewal writes nothing, so nothing else can move it along"
+        );
+        cursor = Some(last.cloud_host_id);
+        walked.extend(page.iter().map(|c| c.cloud_host_id));
+    }
+    let mut expected: Vec<Uuid> = renewable.iter().map(|c| c.cloud_host_id).collect();
+    expected.sort();
+    let mut walked_sorted = walked.clone();
+    walked_sorted.sort();
+    walked_sorted.dedup();
+    assert_eq!(
+        walked_sorted.len(),
+        walked.len(),
+        "named regression: the keyset walk returned a host twice — the cursor and the ORDER BY \
+         have drifted apart"
+    );
+    assert_eq!(
+        walked_sorted, expected,
+        "named regression: paging with batch size 1 must reach exactly the same hosts one big \
+         page does. A cap here silently stops renewing the tail of the fleet"
     );
 
     let _ = (alive_session, dead_session);

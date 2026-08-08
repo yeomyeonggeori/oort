@@ -80,7 +80,7 @@ pub struct LeaseRenewalCandidate {
     pub state: String,
 }
 
-/// Instances that should still be kept alive, across every tenant.
+/// One page of instances that should still be kept alive, across every tenant.
 ///
 /// Unscoped for the same reason as [`crate::reconcile::due_lifecycle_candidates`]
 /// and [`crate::sweep::stale_session_candidates`]: the renewal loop runs as the
@@ -101,10 +101,28 @@ pub struct LeaseRenewalCandidate {
 /// destroys it. There is no ordering between the two in which the instance
 /// survives, which is the property a crashed VM's permanent `running` reply
 /// takes away from every other mechanism.
+///
+/// ## Why this pages, and why that is not a performance concern
+///
+/// `after` is a keyset cursor over `id`; the caller walks it to exhaustion every
+/// tick ([`crate::lease::renewal_pages`] describes the contract). A plain
+/// `LIMIT` would be a **starvation bug with a body count**, and the reason is
+/// specific to this loop:
+///
+/// the reconciler's claim writes `lifecycle_operation_next_attempt_at` and the
+/// sweep's transition moves the session out of the candidate set, so in both
+/// cases acting on a row *removes it from the next query*. A renewal writes
+/// nothing at all — deliberately, it is not a lifecycle transition — so the
+/// ordering is identical on every tick. With a bare `LIMIT n`, hosts `n+1..`
+/// would never be renewed once, and would be deleted by the substrate one lease
+/// later while perfectly healthy. The batch size is an operator's throughput
+/// knob everywhere else in this worker; here it would have been a silent cap on
+/// how many sessions momo can keep alive.
 pub async fn renewable_lease_candidates(
     pool: &PgPool,
     grace_seconds: i64,
     limit: i64,
+    after: Option<Uuid>,
 ) -> Result<Vec<LeaseRenewalCandidate>, T3Error> {
     let rows = sqlx::query(
         "SELECT ch.id, ch.workspace_id, ch.provider, ch.provider_sandbox_id, ch.state \
@@ -122,12 +140,14 @@ pub async fn renewable_lease_candidates(
                       >= clock_timestamp() - make_interval(secs => $2::double precision) \
               ) \
             ) \
-          ORDER BY ch.updated_at, ch.id \
+            AND ($4::uuid IS NULL OR ch.id > $4::uuid) \
+          ORDER BY ch.id \
           LIMIT $3",
     )
     .bind(RENEWABLE_STATES.as_slice())
     .bind(grace_seconds as f64)
     .bind(limit)
+    .bind(after)
     .fetch_all(pool)
     .await?;
     rows.iter()
@@ -173,6 +193,33 @@ mod tests {
         assert!(
             !RENEWABLE_STATES.contains(&"provisioning"),
             "a host being provisioned has no instance handle to renew"
+        );
+    }
+
+    /// The query must be a keyset walk, not a bare `LIMIT` (#1197 H1).
+    ///
+    /// Named regression, asserted against the SQL because the failure it
+    /// prevents is invisible in a green test run and lethal in production: a
+    /// renewal writes nothing, so acting on a row does not remove it from the
+    /// next query the way the reconciler's claim and the sweep's transition do.
+    /// A bare `LIMIT n` would therefore return the same first `n` hosts forever
+    /// and let hosts `n+1..` be deleted by the substrate one lease later while
+    /// perfectly healthy.
+    #[test]
+    fn the_candidate_walk_cannot_starve_hosts_past_the_batch_size() {
+        let source = include_str!("lease.rs")
+            .split_once("#[cfg(test)]")
+            .expect("this file has a test module")
+            .0;
+        assert!(
+            source.contains("ch.id > $4::uuid"),
+            "named regression: the candidate read must page by keyset. Without the cursor the \
+             ordering is identical on every tick — a renewal writes nothing — so every host past \
+             the batch size is never renewed and dies at one lease while healthy"
+        );
+        assert!(
+            source.contains("ORDER BY ch.id"),
+            "the cursor and the ordering must be the same column, or a page can skip rows"
         );
     }
 }

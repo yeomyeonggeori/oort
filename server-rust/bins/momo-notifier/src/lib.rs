@@ -502,18 +502,41 @@ impl Notifier {
     /// transition, and every failure is simply counted: the lease is four
     /// renewal periods long, so any single tick is one of four chances.
     pub async fn renew_leases_once(&self) -> Result<LeaseStats, NotifierError> {
-        let candidates = renewable_lease_candidates(
-            &self.pool,
-            self.config.host_offline_grace_seconds,
-            self.config.claim_batch_size,
-        )
-        .await?;
-        let mut stats = LeaseStats {
-            candidates: candidates.len(),
-            ..LeaseStats::default()
-        };
+        let batch = self.config.claim_batch_size.max(1);
+        let mut stats = LeaseStats::default();
+        let mut cursor: Option<uuid::Uuid> = None;
 
-        for candidate in candidates {
+        // **Every candidate, every tick — the batch size paginates, it does not
+        // cap.** A renewal writes nothing, so unlike the reconciler's claim or
+        // the sweep's transition it cannot advance a queue: acting on a host
+        // leaves it exactly where it was in the ordering. Stopping at one batch
+        // would mean hosts past it were never renewed at all and were deleted by
+        // the substrate one lease later, healthy and mid-session.
+        loop {
+            let page = renewable_lease_candidates(
+                &self.pool,
+                self.config.host_offline_grace_seconds,
+                batch,
+                cursor,
+            )
+            .await?;
+            if page.is_empty() {
+                break;
+            }
+            let short_page = (page.len() as i64) < batch;
+            cursor = page.last().map(|candidate| candidate.cloud_host_id);
+            stats.candidates += page.len();
+            self.renew_page(page, &mut stats).await;
+            if short_page {
+                break;
+            }
+        }
+        Ok(stats)
+    }
+
+    /// One page of [`Self::renew_leases_once`].
+    async fn renew_page(&self, page: Vec<momo_t3::LeaseRenewalCandidate>, stats: &mut LeaseStats) {
+        for candidate in page {
             let adapter = match self.resolver.adapter_for(&candidate.instance.provider_id) {
                 Ok(adapter) => adapter,
                 Err(error) => {
@@ -559,7 +582,6 @@ impl Notifier {
                 }
             }
         }
-        Ok(stats)
     }
 
     // -----------------------------------------------------------------------
