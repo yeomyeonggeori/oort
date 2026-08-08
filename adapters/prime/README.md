@@ -45,9 +45,10 @@ prime-agent stdout JSONL ─► PrimeAdapter ─► StreamRelay ─► OortClien
 
 The adapter never publishes to Centrifugo and never touches Postgres. `seq` is
 whatever the server returns; the adapter has no opinion about ordering. Measured
-on a local stack: every adapter write produced its `outbox` row and the relay
-drained all of them (`broadcast` 112/112 `done`). A bypass would have produced
-none, which is why the outbox count is the evidence and the message count is not.
+on a fresh local stack: 25 adapter writes produced 25 `broadcast` outbox rows and
+the relay drained every one (`done` 25/25), for 2 channel messages. A bypass
+would have produced no outbox rows at all, which is why the outbox count is the
+evidence and the message count is not.
 
 ## Streaming: one answer, one message
 
