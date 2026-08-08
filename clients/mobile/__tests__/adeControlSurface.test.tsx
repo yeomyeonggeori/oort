@@ -20,6 +20,7 @@ import '../src/boot/polyfills';
 import '../src/boot/coreHost';
 
 import {color} from '../src/design/tokens';
+import {jumpMissedNotice} from '../src/features/conversation/jumpNotice';
 import {resetAgentWorking} from '../src/features/agents/workingSignal';
 import AppShell from '../src/shell/AppShell';
 import {__resetSessionStore, sessionPort} from '../src/storage/secureSession';
@@ -805,5 +806,139 @@ describe('요청 예산', () => {
 
     fireEvent.press(screen.getByTestId('ade-summary'));
     await waitFor(() => expect(log.callsTo('/work-hosts')).toBe(1));
+  });
+});
+
+// =============================================================================
+// 발원 대화 앵커 (#1193)
+//
+// 이 화면의 머리말에는 「재료가 없어서 방까지만 데려간다」가 적혀 있었다. 재료는
+// 처음부터 원장에 있었고(`work_session.root_message_id`), 착지 기계도 이미
+// `seq: null` 을 받는다. 아래 셋이 그 연결을 각각 다른 각도에서 잰다.
+// =============================================================================
+
+describe('「대화로」 — 그 작업을 낳은 줄까지', () => {
+  /** 지금 화면에 걸려 있는 점프. 목록이 아니라 **타임라인이 받은 것**을 읽는다. */
+  function jumpTargetOf(): {messageId: string; seq: number | null} | null {
+    const nodes = screen.UNSAFE_root.findAll(
+      (node: {props?: Record<string, unknown>}) =>
+        node.props?.jumpTarget !== undefined,
+    );
+    const found = nodes[0]?.props?.jumpTarget;
+    return (found as {messageId: string; seq: number | null}) ?? null;
+  }
+
+  it('RED PROOF — 카드가 원장의 발원 메시지로 점프를 건다', async () => {
+    installFetch();
+    await openConversation();
+    await openBothTurns();
+    await waitFor(() => expect(screen.getByTestId('ade-summary')).toBeTruthy());
+    fireEvent.press(screen.getByTestId('ade-summary'));
+    await waitFor(() => expect(screen.getByTestId('ade-card-list')).toBeTruthy());
+
+    // 기대값을 손으로 적지 않는다. 원장 픽스처가 정본이고, 화면이 그 행의
+    // `rootMessageId` 를 그대로 나르는지를 본다 — 앵커 칸이 사라지거나 다른
+    // 필드를 싣기 시작하면 이 단정이 먼저 깨진다.
+    const ledgerRow = WORK_SESSIONS.find(row => row.id === 'SESSION-RUNNING');
+    expect(ledgerRow?.channelId).toBe(GENERAL);
+
+    fireEvent.press(screen.getByTestId('ade-card-anchor-session|session-running'));
+    // 목록은 물러난다. 착지한 줄 위에 카드 목록이 떠 있으면 사람은 자기가
+    // 도착했다는 사실을 못 본다.
+    await waitFor(() => expect(screen.queryByTestId('ade-card-list')).toBeNull());
+
+    await waitFor(() => expect(jumpTargetOf()).not.toBeNull());
+    expect(jumpTargetOf()?.messageId).toBe(ledgerRow?.rootMessageId);
+    // 세션 원장은 순서값을 나르지 않는다. 없는 seq 를 지어내지 않는다.
+    expect(jumpTargetOf()?.seq).toBeNull();
+  });
+
+  it('못 찾으면 **그 작업을 시작한 메시지**를 못 찾았다고 말한다', async () => {
+    // 이 하네스의 타임라인은 비어 있다. 그래서 점프는 반드시 빈손으로 돌아오고,
+    // 그때 화면이 무슨 낱말을 쓰는지가 이 단정의 대상이다: 「대화로」를 누른
+    // 사람은 인용을 누른 적이 없다.
+    installFetch();
+    await openConversation();
+    await openBothTurns();
+    await waitFor(() => expect(screen.getByTestId('ade-summary')).toBeTruthy());
+    fireEvent.press(screen.getByTestId('ade-summary'));
+    await waitFor(() => expect(screen.getByTestId('ade-card-list')).toBeTruthy());
+    fireEvent.press(screen.getByTestId('ade-card-anchor-session|session-running'));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('jump-missed')).toBeTruthy(),
+    );
+    const notice = jumpMissedNotice('unknown', 'session');
+    expect(screen.getByTestId('jump-missed')).toHaveTextContent(
+      new RegExp(notice.headline),
+    );
+    expect(screen.getByTestId('jump-missed')).not.toHaveTextContent(
+      /인용한 원본/,
+    );
+  });
+
+  // 죽은 버튼 금지. 턴에는 원장 행이 없으므로 발원 메시지도 없다.
+  it('턴 카드에는 그 동사가 아예 서지 않는다', async () => {
+    installFetch();
+    await openConversation();
+    await openBothTurns();
+    await waitFor(() => expect(screen.getByTestId('ade-summary')).toBeTruthy());
+    fireEvent.press(screen.getByTestId('ade-summary'));
+    await waitFor(() => expect(screen.getByTestId('ade-card-list')).toBeTruthy());
+
+    const withPrefix = (prefix: string): string[] =>
+      screen.UNSAFE_root
+        .findAll((node: {props?: {testID?: unknown}}) =>
+          String(node.props?.testID ?? '').startsWith(prefix),
+        )
+        .map((node: {props?: {testID?: unknown}}) => String(node.props?.testID));
+
+    // 컨트롤은 세션 카드 셋(running · orphaned · idle)에만 선다.
+    expect(new Set(withPrefix('ade-card-anchor-session|')).size).toBe(3);
+    // 턴 둘에는 컨트롤이 없다. 있는 것은 **자리**뿐이다 (리뷰 H1) — 목록의
+    // 오른쪽 끝이 카드 종류에 따라 흔들리지 않게.
+    expect(withPrefix('ade-card-anchor-run|')).toHaveLength(0);
+    const ghosts = withPrefix('ade-card-anchor-ghost-');
+    expect(new Set(ghosts).size).toBe(2);
+    expect(ghosts.every((id: string) => id.includes('ghost-run|'))).toBe(true);
+  });
+
+  // 유령은 **자리**이지 컨트롤이 아니다 (리뷰 H1). 누를 수도 없고 낭독에도 없다.
+  it('예약된 칸은 버튼이 아니다 — 자리만 잡는다', async () => {
+    installFetch();
+    await openConversation();
+    await openBothTurns();
+    await waitFor(() => expect(screen.getByTestId('ade-summary')).toBeTruthy());
+    fireEvent.press(screen.getByTestId('ade-summary'));
+    await waitFor(() => expect(screen.getByTestId('ade-card-list')).toBeTruthy());
+
+    const ghost = screen.UNSAFE_root.findAll((node: {props?: {testID?: unknown}}) =>
+      String(node.props?.testID ?? '').startsWith('ade-card-anchor-ghost-'),
+    )[0] as unknown as {props: Record<string, unknown>};
+    expect(ghost.props.accessibilityRole).toBeUndefined();
+    expect(ghost.props.onPress).toBeUndefined();
+    expect(ghost.props.accessibilityElementsHidden).toBe(true);
+    // 폭은 컨트롤과 같은 규칙에서 온다: 같은 스타일, 같은 글자.
+    expect(flatStyle(ghost.props.style).opacity).toBe(0);
+  });
+
+  it('다른 방의 카드는 그 방을 열고 나서 착지한다', async () => {
+    installFetch();
+    await openConversation(GENERAL);
+    await openBothTurns();
+    await waitFor(() => expect(screen.getByTestId('ade-summary')).toBeTruthy());
+    fireEvent.press(screen.getByTestId('ade-summary'));
+    await waitFor(() => expect(screen.getByTestId('ade-card-list')).toBeTruthy());
+
+    // 이 카드는 build 채널의 것이다 — 지금 열려 있는 방이 아니다.
+    fireEvent.press(screen.getByTestId('ade-card-anchor-session|session-orphaned'));
+    await waitFor(() =>
+      expect(screen.getByTestId('conversation-title')).toHaveTextContent(/build/),
+    );
+    await waitFor(() =>
+      expect(jumpTargetOf()?.messageId).toBe(
+        WORK_SESSIONS.find(row => row.id === 'SESSION-ORPHANED')?.rootMessageId,
+      ),
+    );
   });
 });

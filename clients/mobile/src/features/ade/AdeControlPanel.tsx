@@ -73,10 +73,22 @@ import {useAdeControl} from './useAdeControl';
 //         (`WorkSession.rootMessageId` 가 그 채널의 카드다). 그 카드가 있는 방까지가
 //         폰이 정직하게 데려다줄 수 있는 곳이다.
 //
-// 그 방의 **어느 줄**인지까지 데려가지 못하는 것은 남는 구멍이고, 이 배치가 메우지
-// 않은 이유는 재료가 없어서다: 대화 화면의 앵커는 `{messageId, seq}` 쌍을 요구하는데
-// (없는 줄을 「더 위에 있다」고 말할 수 있어야 해서) 코어의 `AdeItem` 은 둘 중
-// 어느 것도 나르지 않는다. 없는 seq 를 지어내는 대신 방까지 데려다주고 멈춘다.
+// ## 그 방의 **어느 줄**까지 (#1193 — 위 문단이 남긴 구멍)
+//
+// 이 자리에는 「재료가 없어서 방까지만 데려간다」가 적혀 있었다. 그 진단의 절반이
+// 틀렸다: 진입 앵커가 `{messageId, seq}` 쌍을 요구한다고 읽었지만, 실제로 착지를
+// 하는 기계(`Timeline` 의 `jumpTarget`)는 처음부터 `seq: number | null` 을 받는다.
+// seq 는 **못 찾았을 때 「더 위에 있다」로 정밀해지기 위한** 것이지 착지의 조건이
+// 아니고, 라이브 프레임으로 온 인용이 이미 `null` 로 그 길을 다닌다.
+//
+// 그리고 재료 자체는 서버가 처음부터 실어 보내고 있었다 —
+// `work_session.root_message_id` 는 019 마이그레이션의 `NOT NULL` 칼럼이고 REST
+// 투영의 필수 필드다. 그래서 이 배치는 와이어를 늘리지 않고 코어의
+// `AdeItem.anchorMessageId` 를 소비만 한다: 카드는 방으로 가는 길(본체)과 **그
+// 작업을 낳은 줄**로 가는 길(「대화로」)을 둘 다 갖는다.
+//
+// 앵커가 없는 카드(턴)에는 그 동사를 **그리지 않는다**. 목록의 절반에 눌러도
+// 아무 데도 안 가는 버튼을 하나씩 세우는 것이 이 구멍을 메우는 방법은 아니다.
 // =============================================================================
 
 /**
@@ -119,18 +131,30 @@ const buildDurabilityText = (
 /** 명부가 아직이거나 내가 못 보는 방. 방 이름을 지어내지 않는다(웹과 같은 낱말). */
 const UNRESOLVED_CHANNEL = '다른 채널';
 
+/**
+ * 「대화로」의 글자 (#1193 · 리뷰 H1).
+ *
+ * 상수인 이유는 이 낱말이 **폭을 정하기 때문**이다: 동사가 있는 카드와 유령 칸이
+ * 글자 하나까지 같은 폭이어야 목록의 오른쪽 끝이 하나로 선다. 두 자리에 나눠
+ * 적으면 다음에 라벨을 고치는 사람이 유령만 옛 폭으로 남긴다. 웹의 같은 칸도
+ * 같은 이유로 상수를 든다(`AdeDrawer.ANCHOR_LABEL`).
+ */
+const ANCHOR_LABEL = '대화로';
+
 function AdeCard({
   item,
   channelName,
   nowMs,
   hostsPending,
   onPress,
+  onPressAnchor,
 }: {
   item: AdeItem;
   channelName: string;
   nowMs: number;
   hostsPending: boolean;
   onPress: () => void;
+  onPressAnchor: () => void;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const stateChip = useStyles(buildStateChip);
@@ -153,6 +177,11 @@ function AdeCard({
   const diff = adeDiffLabel(item.diff);
 
   return (
+    // 행이 둘로 갈린다 (#1193). 「대화로」는 카드 **옆**에 선다 — 안이 아니다:
+    // `Pressable` 은 기본이 `accessible` 이라 안쪽에 넣은 버튼은 카드 라벨로
+    // 병합돼 낭독에서 사라지고, 그러면 그 동사는 손가락에만 있는 것이 된다.
+    // 그래서 테두리와 배경은 이 <View> 로 올라오고 두 컨트롤이 형제로 선다.
+    <View style={styles.card}>
     <Pressable
       accessibilityRole="button"
       // 한 문장으로 합친다. `Pressable` 은 기본이 `accessible` 이라 안쪽 조각들은
@@ -168,7 +197,7 @@ function AdeCard({
         .filter(part => part !== null)
         .join(', ')}
       onPress={onPress}
-      style={({pressed}) => [styles.card, pressed && styles.pressed]}
+      style={({pressed}) => [styles.cardBody, pressed && styles.pressed]}
       testID={`ade-card-${item.key}`}>
       <View style={styles.cardHead}>
         <Text
@@ -220,16 +249,66 @@ function AdeCard({
         </Text>
       )}
     </Pressable>
+    {/* 「대화로」 — 이 작업을 낳은 줄로 (#1193).
+     *
+     * ## 칸은 **모든 카드에 있다** (리뷰 H1)
+     *
+     * 1차 판은 앵커가 있을 때만 칸을 세웠고, 그래서 이 화면에서 가장 먼저 훑는
+     * 열(상태 칩 + 경과)이 카드 종류에 따라 두 오른쪽 끝을 갖게 됐다 — 실측 54pt
+     * 차이로 목록이 지그재그였다. 동사가 없는 카드는 이제 같은 폭의 **유령**을
+     * 세운다. 폭을 라벨이 정하므로 새 상수도, 나중에 어긋날 두 번째 숫자도 없다.
+     *
+     * 유령은 `Pressable` 이 아니라 `View` 이고 낭독에서도 빠진다. 자리는
+     * 예약하되 컨트롤은 만들지 않는다 — 죽은 버튼 금지는 자리가 아니라
+     * **컨트롤**에 대한 규율이다.
+     *
+     * ## 컨트롤처럼 읽히게 (리뷰 H2)
+     *
+     * 1차 판의 `font.meta` + `textMuted` 는 바로 옆 `cardElapsed` 와 크기도 잉크도
+     * 같았다. 색으로 갚지 않는다 — 여섯 장 목록에서 accent 낱말 넷은 accent 가
+     * 아니게 된다. 크기(`font.label`)와 굵기와 경계로 말한다.
+     *
+     * 접근 이름이 보이는 글자를 품고(WCAG 2.5.3), 그 안에서 목적지를 정확히
+     * 말한다: 폰에서는 카드 본체도 **같은 방**을 열어서 낱말만으로는 둘이
+     * 구별되지 않는다(리뷰 M1). */}
+    {item.anchorMessageId === undefined ? (
+      <View
+        style={[styles.cardAnchor, styles.cardAnchorGhost]}
+        accessibilityElementsHidden
+        importantForAccessibility="no-hide-descendants"
+        testID={`ade-card-anchor-ghost-${item.key}`}>
+        <Text style={styles.cardAnchorLabel}>{ANCHOR_LABEL}</Text>
+      </View>
+    ) : (
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`${item.title}, 이 작업을 시작한 메시지가 있는 ${ANCHOR_LABEL} 이동`}
+        onPress={onPressAnchor}
+        style={({pressed}) => [styles.cardAnchor, pressed && styles.pressed]}
+        testID={`ade-card-anchor-${item.key}`}>
+        <Text style={styles.cardAnchorLabel}>{ANCHOR_LABEL}</Text>
+      </Pressable>
+    )}
+    </View>
   );
 }
 
 export function AdeControlPanel({
   onClose,
   onOpenChannel,
+  onOpenAnchor,
 }: {
   onClose: () => void;
   /** 카드가 확대되는 곳. 이 화면은 물러나고 그 방이 열린다. */
   onOpenChannel: (channelId: string, title: string) => void;
+  /**
+   * 「대화로」의 도착지 — 그 작업을 낳은 **줄** (#1193).
+   *
+   * 방(`onOpenChannel`)과 나누어 받는 이유는 도착지가 다르기 때문이다: 하나는
+   * 채널의 바닥(가장 최근)이고 하나는 세션 카드가 서 있는 그 자리다. 한 콜백에
+   * 옵셔널 인자로 접으면 호출자가 둘을 구별하지 않고 넘겨도 타입이 통과한다.
+   */
+  onOpenAnchor: (channelId: string, title: string, messageId: string) => void;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const {workspaceId, member} = useSession();
@@ -262,6 +341,21 @@ export function AdeControlPanel({
       onOpenChannel(item.channelId, nameOfChannel(item.channelId));
     },
     [onClose, onOpenChannel, nameOfChannel],
+  );
+
+  // 「대화로」 (#1193). 확대와 같은 규율로 이 화면이 먼저 물러난다 — 착지한 줄
+  // 위에 목록이 그대로 떠 있으면 사람은 자기가 도착했다는 사실을 못 본다.
+  const openAnchor = useCallback(
+    (item: AdeItem) => {
+      if (item.anchorMessageId === undefined) return;
+      onClose();
+      onOpenAnchor(
+        item.channelId,
+        nameOfChannel(item.channelId),
+        item.anchorMessageId,
+      );
+    },
+    [onClose, onOpenAnchor, nameOfChannel],
   );
 
   return (
@@ -327,6 +421,7 @@ export function AdeControlPanel({
               nowMs={nowMs}
               hostsPending={hostsPending}
               onPress={() => openItem(item)}
+              onPressAnchor={() => openAnchor(item)}
             />
           )}
         />
@@ -346,17 +441,70 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   },
   listBody: {paddingVertical: space.sm},
   bannerWrap: {paddingHorizontal: SAFE_GUTTER, paddingBottom: space.sm},
+  /**
+   * 카드는 이제 **한 행에 두 컨트롤**이다 (#1193). 테두리·배경·바깥 여백은 행의
+   * 것이고, 안쪽 여백과 세로 리듬은 본체의 것이다.
+   *
+   * `overflow: 'hidden'` 이 load-bearing 이다: 눌린 배경은 자식이 칠하는데,
+   * 모서리를 깎는 것은 이 행이라 자르지 않으면 눌린 색이 둥근 귀 밖으로 새어
+   * 사각형으로 보인다.
+   */
   card: {
     minHeight: TOUCH_TARGET,
-    justifyContent: 'center',
+    flexDirection: 'row',
+    alignItems: 'stretch',
     marginHorizontal: SAFE_GUTTER,
     marginBottom: space.sm,
-    padding: space.md,
     borderRadius: radius.md,
     borderWidth: 1,
     borderColor: color.border,
     backgroundColor: color.surface,
+    overflow: 'hidden',
+  },
+  cardBody: {
+    flex: 1,
+    justifyContent: 'center',
+    padding: space.md,
     gap: space.xs,
+  },
+  /**
+   * 「대화로」의 손가락 자리. 좌우 여백까지 합쳐 최소 폭을 `TOUCH_TARGET` 으로
+   * 두는 이유는 세 글자가 44pt 를 채우지 못하기 때문이다 — 카드 본체가 같은
+   * 상수로 자기 높이를 지키는 것과 같은 규칙이고, 그 둘이 다르면 목록에서
+   * **작은 쪽만** 빗맞는다.
+   */
+  cardAnchor: {
+    minWidth: TOUCH_TARGET,
+    paddingHorizontal: space.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderLeftWidth: 1,
+    borderLeftColor: color.border,
+  },
+  /**
+   * 동사가 없는 카드의 **자리만** (리뷰 H1).
+   *
+   * `opacity: 0` **하나뿐**인 것이 중요하다. 1차 수리는 여기서 `borderLeftWidth`
+   * 까지 0으로 지웠는데, 그 1pt 가 곧 폭이라 유령 칸이 진짜 칸보다 1pt 좁아졌다 —
+   * 캡처에서 잰 결과 턴 카드의 경과 글자가 세션 카드보다 3px(=1pt) 오른쪽에서
+   * 끝났다. 지그재그를 55pt 에서 1pt 로 줄인 것은 고친 것이 아니다.
+   *
+   * 투명도가 0이면 테두리도 함께 사라지므로 「아무것도 없는 칸에 선만 선다」는
+   * 걱정도 성립하지 않는다: 자리는 남고, 보이는 것은 없다.
+   */
+  cardAnchorGhost: {opacity: 0},
+  /**
+   * 컨트롤의 글자 (리뷰 H2). `font.meta`/`textMuted` 였던 1차 판은 바로 옆
+   * `cardElapsed` 와 크기도 잉크도 같아 컨트롤로 읽히지 않았다. accent 로 갚지
+   * 않는 이유는 이 낱말이 목록에서 카드 수만큼 반복되기 때문이고, 그래서 크기와
+   * 굵기로 말한다 — `font.label` 은 이 앱에서 텍스트 액션이 서는 단이다
+   * (`atoms.retryLabel` · `ConversationScreen.headerActionLabel`).
+   */
+  cardAnchorLabel: {
+    fontSize: font.label,
+    lineHeight: line.label,
+    color: color.textMuted,
+    fontWeight: '600',
   },
   pressed: {backgroundColor: color.surfacePressed},
   cardHead: {

@@ -756,22 +756,33 @@ export function Surface({name}: {name: string}): React.JSX.Element {
       );
     case 'jump-missed':
       return (
-        <Frame label="인용 점프 실패 — 실패가 아니라 사실 진술이다 (H-5)">
+        <Frame label="점프 실패 — 실패가 아니라 사실 진술이다 (H-5 · #1193)">
           {/* 두 이유를 **함께** 세운다. 이 고지의 설계 논점이 「어디 있는지
               모르면 모른다고 말한다」인데, 한 장만 찍으면 그 대비가 안 보인다.
-              문장은 화면이 쓰는 것과 **같은 상수**에서 온다. */}
+              문장은 화면이 쓰는 것과 **같은 상수**에서 온다.
+
+              세 번째 줄이 #1193 리뷰 M3 이다: 같은 기계를 ADE 카드의 「대화로」도
+              타는데, 그 사람은 인용을 누른 적이 없다. 주어가 갈렸다는 사실은
+              **두 문장을 나란히 놓아야** 보이고, 사진이 없으면 그 갈래는 코드에만
+              있는 주장으로 남는다. */}
           <View style={styles.noticeStack}>
             <NoticeBlock
               headline={jumpMissedNotice('older').headline}
               detail={jumpMissedNotice('older').detail}
               onDismiss={() => {}}
-              testID="quote-jump-missed"
+              testID="jump-missed"
             />
             <NoticeBlock
               headline={jumpMissedNotice('unknown').headline}
               detail={jumpMissedNotice('unknown').detail}
               onDismiss={() => {}}
-              testID="quote-jump-missed-unknown"
+              testID="jump-missed-unknown"
+            />
+            <NoticeBlock
+              headline={jumpMissedNotice('unknown', 'session').headline}
+              detail={jumpMissedNotice('unknown', 'session').detail}
+              onDismiss={() => {}}
+              testID="jump-missed-session"
             />
           </View>
         </Frame>
@@ -1754,7 +1765,11 @@ export function Surface({name}: {name: string}): React.JSX.Element {
       // 단정이 지킨다(`__tests__/adeControlSurface.test.tsx`).
       return (
         <RealtimeContext.Provider value={CONNECTED_RAIL}>
-          <AdeControlPanel onClose={() => {}} onOpenChannel={() => {}} />
+          <AdeControlPanel
+            onClose={() => {}}
+            onOpenChannel={() => {}}
+            onOpenAnchor={() => {}}
+          />
         </RealtimeContext.Provider>
       );
     }

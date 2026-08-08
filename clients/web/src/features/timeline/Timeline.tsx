@@ -1,4 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MutableRefObject,
+} from "react";
 import { ArrowDown } from "lucide-react";
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import {
@@ -84,6 +90,49 @@ function indexOfSeq(items: FoldedItem[], seq: number): number {
   );
 }
 
+/**
+ * 이 목록에게 **한 줄을 존재하게 하라**고 시키는 손잡이 (리뷰 B1, #1193).
+ *
+ * ## 왜 DOM 워처만으로는 안 되는가 (실측)
+ *
+ * `inbox/anchor.watchForRow` 는 `document.querySelector` 를 폴링한다. 그 계약은
+ * 「행은 곧 마운트된다」에 기대는데, 가상 목록에서 그 말은 **창 안에 있을 때만**
+ * 참이다. 리뷰가 잰 표: 20·30줄 방에서는 찾았고 45줄부터는 창이 36줄로 잘려
+ * 목표가 DOM 에 아예 없었다. 그러면 화면은 「위로 올려 이전 대화를 더
+ * 불러오세요」라고 말하는데 그 메시지는 **이미 로드돼 있다**. 작업 세션의 발원
+ * 메시지는 정의상 그 스레드에서 가장 오래된 줄이라, 이것은 가장자리가 아니라
+ * 이 컨트롤의 상시 경로였다.
+ *
+ * 폰에는 이 결함이 없다 — 그쪽 `Timeline` 은 **데이터 배열**에서 찾아
+ * (`items.findIndex`) 리스트에 스크롤을 명령한다. 그래서 이 손잡이는 새 기계가
+ * 아니라 이미 있던 계약의 웹 쪽 짝이다.
+ *
+ * ## 답이 두 갈래인 것이 이 손잡이의 값이다
+ *
+ * `false` 는 「이 목록이 그것을 들고 있지 않다」이고, **그때만** 「더
+ * 불러오세요」가 참이다. `true` 는 「들고 있고, 지금 그리로 옮겨 놓았다」다.
+ * 워처는 그 뒤에 마운트된 행을 찾아 표식을 건다 — 두 층이 각자 아는 것만 한다.
+ */
+export interface TimelineJump {
+  bringIntoView(target: { messageId?: string; seq?: number }): boolean;
+}
+
+/**
+ * 목록에서 이 메시지의 자리. 자기 행이 먼저이고, 없으면 **그것을 대신해 서 있는
+ * 행**(연속 묘비 접기)이다 — `watchForMessageId` 가 선택자 둘을 그 순서로 보는
+ * 것과 같은 규칙이고, 근거도 그쪽 주석에 있다.
+ */
+function indexOfMessageId(items: FoldedItem[], messageId: string): number {
+  const wanted = messageId.toLowerCase();
+  const own = items.findIndex(
+    (item) => item.kind === "message" && item.message.id.toLowerCase() === wanted
+  );
+  if (own >= 0) return own;
+  return items.findIndex((item) =>
+    (item.deletedFoldedIds ?? []).some((id) => id.toLowerCase() === wanted)
+  );
+}
+
 interface AnchorState {
   /** Identity of the stream this index was computed for. */
   items: FoldedItem[];
@@ -125,6 +174,7 @@ export function Timeline({
   onOpenThread,
   onQuoteMessage,
   onJumpToMessage,
+  jumpHandleRef,
   onOpenWorkSession,
   onResend,
   onResendPending,
@@ -166,6 +216,11 @@ export function Timeline({
   onQuoteMessage?: (message: Message) => void;
   /** Jump to a quoted original (the channel surface's existing anchor watcher). */
   onJumpToMessage?: (messageId: string, seq: number | null) => void;
+  /**
+   * 채널 표면이 「이 줄을 존재하게 하라」고 부를 손잡이 (리뷰 B1). 목록만 아는
+   * 것을 목록에게 묻는다 — 무엇이 로드돼 있고 그중 무엇이 지금 창 밖인지.
+   */
+  jumpHandleRef?: MutableRefObject<TimelineJump | null>;
   onOpenWorkSession?: (sessionId: string) => void;
   onResend?: (message: Message) => Promise<void> | void;
   onResendPending?: (clientMsgId: string) => Promise<void> | void;
@@ -275,6 +330,41 @@ export function Timeline({
     }
   }
   const { firstItemIndex, epoch } = anchorRef.current;
+
+  // ---- 「이 줄을 존재하게 하라」 (리뷰 B1) -----------------------------------
+  //
+  // 손잡이는 **렌더 시점의** 목록을 봐야 하므로 거울을 하나 둔다. 클로저로 잡으면
+  // 채널을 옮긴 직후 옛 배열을 뒤지게 되고, 그 답은 「없다」라서 화면은 로드된
+  // 줄을 두고 「더 불러오세요」라고 말한다 — 이 수리가 없애려는 그 문장이다.
+  const itemsRef = useRef<FoldedItem[]>(items);
+  itemsRef.current = items;
+  useEffect(() => {
+    if (jumpHandleRef === undefined) return undefined;
+    jumpHandleRef.current = {
+      bringIntoView: (target) => {
+        const list = itemsRef.current;
+        const index =
+          target.messageId !== undefined
+            ? indexOfMessageId(list, target.messageId)
+            : target.seq !== undefined
+              ? indexOfSeq(list, target.seq)
+              : -1;
+        if (index < 0) return false;
+        // `firstItemIndex` 를 더하지 않는다 (실측 — react-virtuoso `jn()`):
+        // `scrollToIndex` 의 index 는 `totalCount` 로 클램프되는 **배열 첨자**이고,
+        // `firstItemIndex` 는 `itemContent` 가 받는 번호에만 얹힌다.
+        //
+        // `behavior` 를 부드럽게 두지 않는 이유: 바로 뒤에 워처가 마운트된 행에
+        // `scrollIntoView` 를 한 번 더 건다. 애니메이션이 도는 중에 그 호출이
+        // 끼면 목록이 두 목적지 사이에서 튄다.
+        ref.current?.scrollToIndex({ index, align: "center" });
+        return true;
+      },
+    };
+    return () => {
+      jumpHandleRef.current = null;
+    };
+  }, [jumpHandleRef]);
 
   // ---- 항법 상태 (U4-j) -----------------------------------------------------
   //

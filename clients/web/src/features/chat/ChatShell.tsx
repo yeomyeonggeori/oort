@@ -30,7 +30,7 @@ import {
   quoteDraftStillValid,
   type QuoteDraft,
 } from "@momo/core/features/timeline/quote";
-import { Timeline } from "@/features/timeline/Timeline";
+import { Timeline, type TimelineJump } from "@/features/timeline/Timeline";
 import { PinListMenu } from "@/features/timeline/PinListMenu";
 import { CascadeProvider } from "@/features/timeline/cascadeRail";
 import { ThreadPanel } from "@/features/timeline/ThreadPanel";
@@ -376,9 +376,61 @@ export function ChatShell() {
     );
   }, [anchorWork, openWorkSession, setSearchParams]);
 
+  /**
+   * 주소가 가리킨 자리를 **읽고 나면 지운다** (리뷰 B2, #1193).
+   *
+   * `?work=` 는 이미 그렇게 한다(바로 위). `?msg=`/`?seq=` 만 남아 있었고, 그
+   * 결과 같은 「대화로」를 두 번 누르면 두 번째 주소가 첫 번째와 **글자 단위로
+   * 같아** 아래 효과가 다시 돌지 않았다 — 서랍은 닫히고 아무 일도 일어나지
+   * 않는다. 리뷰 실측: `1st press -> seq 4102` / `2nd press -> seq null`.
+   *
+   * 지우는 것은 「패널을 닫은 뒤에도 주소는 열려 있다고 말한다」와 같은 이유이기도
+   * 하다: 착지한 뒤 아래로 읽어 내려가면 주소는 여전히 「여기를 보고 있다」고
+   * 말한다.
+   *
+   * 그래서 파라미터를 **상태로 옮겨 받는다.** 효과 안에서 지우면 그 삭제가 같은
+   * 효과를 다시 돌려 방금 건 워처를 자기 정리 함수로 취소한다. 토큰은 「같은 곳을
+   * 두 번 가리켰다」를 두 번의 요청으로 만드는 자리이고, 폰의 `jumpTarget` 이
+   * 같은 이유로 같은 값을 든다.
+   */
+  const [urlAnchor, setUrlAnchor] = useState<{
+    msg: string | null;
+    seq: string | null;
+    token: number;
+  } | null>(null);
+  useEffect(() => {
+    if (anchorMsg === null && anchorSeq === null) return;
+    setUrlAnchor((previous) => ({
+      msg: anchorMsg,
+      seq: anchorSeq,
+      token: (previous?.token ?? 0) + 1,
+    }));
+    setSearchParams(
+      (current) => {
+        const next = new URLSearchParams(current);
+        next.delete("msg");
+        next.delete("seq");
+        return next;
+      },
+      { replace: true }
+    );
+  }, [anchorMsg, anchorSeq, setSearchParams]);
+  // 방을 옮기면 앞선 주소가 가리키던 자리는 이 화면의 사실이 아니다.
+  useEffect(() => setUrlAnchor(null), [channelId]);
+
   // 워처는 행이 실제로 마운트된 뒤에만 찾을 것이 있다. 가상 목록이라 첫 페이지가
   // 도착하기 전에는 DOM에 행이 하나도 없고, 워처의 3초 창은 그 사이에 지나간다.
   const anchorReady = messages.length > 0;
+
+  /**
+   * 목록에게 「이 줄을 존재하게 하라」고 시키는 손잡이 (리뷰 B1).
+   *
+   * 워처 혼자서는 **가상 창 밖의 행**을 영원히 기다린다. 그 행은 로드돼 있는데도
+   * DOM 에 없기 때문이고, 그 침묵은 화면에서 「위로 올려 더 불러오세요」라는
+   * 거짓 지시가 된다. 목록만 아는 것(무엇이 로드돼 있나)을 목록에게 묻고, 답이
+   * 「없다」일 때만 그 문장을 말한다.
+   */
+  const timelineJump = useRef<TimelineJump | null>(null);
 
   // 앵커를 끝내 못 찾았다 (goal B12 R1 High-3).
   //
@@ -394,7 +446,7 @@ export function ChatShell() {
   // 주소가 가리키는 자리가 바뀌면 앞선 실패는 이 화면의 사실이 아니다.
   useEffect(() => {
     setAnchorMissed(null);
-  }, [anchorMsg, anchorSeq, channelId]);
+  }, [urlAnchor?.token, channelId]);
 
   /**
    * 인용 블록을 눌렀다 → 원본으로 점프 (ADR-0148 · goal B3 W1).
@@ -416,18 +468,22 @@ export function ChatShell() {
       // 만료되는 쪽이 이미 도착한 점프에 대해 「못 찾았다」를 띄운다.
       quoteJumpRef.current?.();
       setAnchorMissed(null);
+      const missKind = (): "older" | "unknown" => {
+        if (seq === null) return "unknown";
+        const oldestLoaded = messages.reduce(
+          (min, message) => Math.min(min, message.seq),
+          Number.POSITIVE_INFINITY
+        );
+        return seq < oldestLoaded ? "older" : "unknown";
+      };
+      // 목록에게 먼저 묻는다 (리뷰 B1). 「없다」면 기다릴 것이 없으므로 3초를
+      // 흘려보내지 않고 그 자리에서 사실을 말한다.
+      if (timelineJump.current?.bringIntoView({ messageId }) === false) {
+        setAnchorMissed(missKind());
+        return;
+      }
       quoteJumpRef.current = watchForMessageId(messageId, {
-        onExpire: () => {
-          if (seq === null) {
-            setAnchorMissed("unknown");
-            return;
-          }
-          const oldestLoaded = messages.reduce(
-            (min, message) => Math.min(min, message.seq),
-            Number.POSITIVE_INFINITY
-          );
-          setAnchorMissed(seq < oldestLoaded ? "older" : "unknown");
-        },
+        onExpire: () => setAnchorMissed(missKind()),
       });
     },
     [messages]
@@ -435,7 +491,8 @@ export function ChatShell() {
   useEffect(() => () => quoteJumpRef.current?.(), []);
 
   useEffect(() => {
-    if (!anchorReady) return undefined;
+    if (!anchorReady || urlAnchor === null) return undefined;
+    const { msg, seq: rawSeq } = urlAnchor;
 
     /**
      * 목표가 지금 로드된 창보다 **위쪽**인가. seq는 채널의 순서값이므로, 목표가
@@ -443,7 +500,7 @@ export function ChatShell() {
      * (`?seq=` 없이 온 링크) 모른다고 답하고, 화면도 모르는 채로 말한다.
      */
     const missKind = (): "older" | "unknown" => {
-      const target = anchorSeq === null ? Number.NaN : Number(anchorSeq);
+      const target = rawSeq === null ? Number.NaN : Number(rawSeq);
       if (!Number.isFinite(target)) return "unknown";
       const oldestLoaded = messages.reduce(
         (min, message) => Math.min(min, message.seq),
@@ -453,17 +510,31 @@ export function ChatShell() {
     };
     const onExpire = () => setAnchorMissed(missKind());
 
-    if (anchorMsg !== null) return watchForMessageId(anchorMsg, { onExpire });
-    if (anchorSeq !== null) {
-      const seq = Number(anchorSeq);
-      if (Number.isFinite(seq)) return watchForMessage(seq, { onExpire });
+    // 목록에게 먼저 묻는다 (리뷰 B1). 가상 창 밖의 행은 로드돼 있어도 DOM 에
+    // 없으므로, 워처만 돌리면 「이미 들고 있는 줄」에 대고 「더 불러오세요」라고
+    // 말하게 된다. 여기서 답이 갈린다: 옮겨 놓았거나, 정말로 없거나.
+    if (msg !== null) {
+      if (timelineJump.current?.bringIntoView({ messageId: msg }) === false) {
+        setAnchorMissed(missKind());
+        return undefined;
+      }
+      return watchForMessageId(msg, { onExpire });
+    }
+    if (rawSeq !== null) {
+      const seq = Number(rawSeq);
+      if (!Number.isFinite(seq)) return undefined;
+      if (timelineJump.current?.bringIntoView({ seq }) === false) {
+        setAnchorMissed(missKind());
+        return undefined;
+      }
+      return watchForMessage(seq, { onExpire });
     }
     return undefined;
     // `messages`는 의도적으로 빼 둔다: 새 메시지가 도착할 때마다 워처를 다시
     // 돌리면 3초 창이 영원히 갱신된다. 만료 시점의 창은 `missKind`가 클로저로
     // 잡은 그 목록이면 충분하다.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [anchorReady, anchorMsg, anchorSeq, channelId]);
+  }, [anchorReady, urlAnchor, channelId]);
 
   // Under 900px the 작업 세션 pane stops being a column beside the channel and
   // becomes a drawer over it (tokens.css `work-pane`: position absolute, inset
@@ -779,6 +850,7 @@ export function ChatShell() {
               }}
               onQuoteMessage={stressCount > 0 ? undefined : onQuoteMessage}
               onJumpToMessage={onJumpToMessage}
+              jumpHandleRef={timelineJump}
               onOpenWorkSession={openWorkSession}
               onResend={stressCount > 0 ? undefined : onResend}
               onResendPending={stressCount > 0 ? undefined : timeline.resend}

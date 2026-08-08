@@ -52,7 +52,10 @@ import {useInvalidateApprovals} from '../features/inbox/useInbox';
 import type {ApprovalReceipt} from '../features/conversation/approvalGate';
 import {useOnline} from '../features/inbox/useOnline';
 import {usePendingApprovals} from '../features/conversation/usePendingApprovals';
-import {jumpMissedNotice} from '../features/conversation/jumpNotice';
+import {
+  jumpMissedNotice,
+  type JumpSubject,
+} from '../features/conversation/jumpNotice';
 import {Composer} from '../features/conversation/Composer';
 import {channelDraftKey} from '../features/conversation/drafts';
 import {TypingBar} from '../features/conversation/TypingBar';
@@ -141,6 +144,16 @@ function railSubtitle(status: RealtimeStatus): string | undefined {
  * 쏟아지는 프레임을 한 번의 PUT + 한 번의 무효화로 접을 만큼은 길다.
  */
 const READ_CURSOR_COALESCE_MS = 600;
+
+/**
+ * 걸어 둔 발원 앵커의 수명, ms (#1193 리뷰 M2).
+ *
+ * 「대화로」를 누르고 목적지 방이 뜨기까지 넉넉한 시간이되, 사람이 그 행동을
+ * 잊을 만큼 길지는 않다. 이 시한이 지나면 앵커는 조용히 사라지고, 나중에 그
+ * 방에 들어가도 아무 일도 일어나지 않는다 — 몇 분 전에 누른 것의 결과가 지금
+ * 튀어나오는 것은 사람에게 원인 없는 사건이다.
+ */
+const PENDING_ANCHOR_TTL_MS = 30_000;
 
 export default function ConversationScreen({
   channelId,
@@ -567,10 +580,20 @@ export default function ConversationScreen({
     setJumpTarget(null);
     setJumpMissed(null);
   }, [channelId]);
+  /**
+   * 지금 걸린 점프가 **무엇을 찾고 있는가** (#1193).
+   *
+   * 고지의 주어를 고른다. 상태가 아니라 ref 인 이유는 이 값이 화면을 그리지
+   * 않기 때문이다 — 읽는 것은 `onJumpMissed` 한 곳뿐이고, 상태로 두면 그
+   * 콜백의 동일성이 바뀌어 `Timeline` 의 `renderItem` 을 타고 목록 전체가 다시
+   * 그려진다(이 화면이 `quoteRef` 에서 이미 고른 모양이다).
+   */
+  const jumpSubjectRef = useRef<JumpSubject>('quote');
 
   const onJumpToQuoted = useCallback((message: Message) => {
     const targetId = message.replyToId;
     if (targetId === undefined) return;
+    jumpSubjectRef.current = 'quote';
     setJumpMissed(null);
     setJumpTarget(current => ({
       messageId: targetId,
@@ -597,6 +620,7 @@ export default function ConversationScreen({
    * 사실로 말할 수 있다.
    */
   const onJumpToPinned = useCallback((messageId: string, seq: number) => {
+    jumpSubjectRef.current = 'quote';
     setJumpMissed(null);
     setJumpTarget(current => ({
       messageId,
@@ -604,6 +628,66 @@ export default function ConversationScreen({
       token: (current?.token ?? 0) + 1,
     }));
   }, []);
+
+  // ---- ADE 카드의 「대화로」 (#1193) -----------------------------------------
+  //
+  // 세 번째 호출자이고, **같은 기계**를 탄다(위 둘과 같은 규율). 다른 점은 하나
+  // 뿐이다: 목적지가 다른 방일 수 있다. 서랍 목록은 워크스페이스 전역이라
+  // 「대화로」의 절반은 지금 열려 있지 않은 방으로 간다.
+  //
+  // 그래서 앵커를 **한 박자 들고 있는다**. 방을 여는 것은 셸의 일이고(이 화면은
+  // `channelId` 프롭만 갈아 끼운다), 새 방의 타임라인이 도착하기 전에 점프를
+  // 걸면 목록이 비어 있어 그 즉시 「찾지 못했습니다」가 뜬다 — 사실은 아직
+  // 오는 중인데.
+  //
+  // 채널이 바뀔 때 도는 초기화(`setJumpTarget(null)`)보다 **뒤에** 선언돼 있는
+  // 것이 load-bearing 이다: 같은 커밋에서 둘 다 돌면 순서는 선언 순서이고,
+  // 반대로 두면 초기화가 방금 건 점프를 지운다.
+  // **어느 방의 앵커인지 함께 든다** (리뷰 M2). 1차 판은 id 하나만 들고 「타임라인이
+  // 준비되면 쏜다」였다. 목적지 방이 끝내 준비되지 않고(오프라인·조회 실패) 사람이
+  // 다른 방을 열면 그 방에서 발사돼 「이 작업을 시작한 메시지를 이 화면에서 찾지
+  // 못했습니다」를 띄운다 — 그 방이 한 번도 들고 있던 적 없는 메시지에 대해서.
+  // 이 배치가 없애려고 나온 바로 그 종류의 거짓 문장이다.
+  //
+  // 그리고 **늙는다.** 방이 영영 안 열리면 앵커는 조용히 사라져야 한다: 몇 분 뒤
+  // 우연히 그 방에 들어갔을 때 튀어나오는 점프는 사람이 방금 한 행동의 결과가 아니다.
+  const [pendingAnchor, setPendingAnchor] = useState<{
+    channelId: string;
+    messageId: string;
+  } | null>(null);
+  useEffect(() => {
+    if (pendingAnchor === null) return undefined;
+    const timer = setTimeout(() => setPendingAnchor(null), PENDING_ANCHOR_TTL_MS);
+    return () => clearTimeout(timer);
+  }, [pendingAnchor]);
+  useEffect(() => {
+    if (pendingAnchor === null) return;
+    // 아직 그 방이 아니다. 다른 방에서는 **절대** 쏘지 않는다.
+    if (!uuidEq(pendingAnchor.channelId, channelId)) return;
+    if (timeline.status !== 'ready') return;
+    setPendingAnchor(null);
+    jumpSubjectRef.current = 'session';
+    setJumpMissed(null);
+    setJumpTarget(current => ({
+      messageId: pendingAnchor.messageId,
+      // 세션 원장은 순서값을 나르지 않는다. 없는 seq 를 지어내지 않고, 그 대가로
+      // 못 찾았을 때의 문장은 「더 위에 있다」로 정밀해지지 못한다.
+      seq: null,
+      token: (current?.token ?? 0) + 1,
+    }));
+  }, [pendingAnchor, channelId, timeline.status]);
+
+  const onOpenAdeAnchor = useCallback(
+    (targetChannelId: string, targetTitle: string, messageId: string) => {
+      setPendingAnchor({channelId: targetChannelId, messageId});
+      // 이미 그 방이면 방을 다시 열지 않는다. 셸에 같은 대화를 한 번 더 밀어도
+      // 화면은 그대로지만, 그 왕복은 「눌렀는데 아무 일도 안 일어난 것 같은」
+      // 한 프레임을 만든다.
+      if (uuidEq(targetChannelId, channelId)) return;
+      onOpenConversation?.(targetChannelId, targetTitle);
+    },
+    [channelId, onOpenConversation],
+  );
 
   // ===========================================================================
   // 타임라인 승인 (감사 H-1 / goal U4-g)
@@ -653,7 +737,7 @@ export default function ConversationScreen({
   // 찍기 때문**이다(H-5 는 「코드 확인 / 시각 SKIPPED」로 남아 있었다). 하네스가
   // 베껴 적으면 배송되는 문장이 바뀌어도 사진은 옛말을 계속 한다.
   const onJumpMissed = useCallback((reason: 'older' | 'unknown') => {
-    setJumpMissed(jumpMissedNotice(reason));
+    setJumpMissed(jumpMissedNotice(reason, jumpSubjectRef.current));
   }, []);
 
   // Bumped the moment a send is issued — before the round trip, because the
@@ -869,7 +953,7 @@ export default function ConversationScreen({
                   headline={jumpMissed.headline}
                   detail={jumpMissed.detail}
                   onDismiss={clearJumpNotice}
-                  testID="quote-jump-missed"
+                  testID="jump-missed"
                 />
               </View>
             ) : null}
@@ -1007,7 +1091,11 @@ export default function ConversationScreen({
       ) : null}
 
       {adeOpen && onOpenConversation ? (
-        <AdeControlPanel onClose={closeAde} onOpenChannel={onOpenConversation} />
+        <AdeControlPanel
+          onClose={closeAde}
+          onOpenChannel={onOpenConversation}
+          onOpenAnchor={onOpenAdeAnchor}
+        />
       ) : null}
     </Screen>
   );

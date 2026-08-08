@@ -116,6 +116,39 @@ export interface AdeItem {
    */
   diff?: { added: number; removed: number };
   /**
+   * 이 작업을 **낳은 메시지** (#1193). 세션 카드만 가지며(`kind: "session"`),
+   * 카드에서 「대화로」가 성립하는 유일한 근거다.
+   *
+   * ## 서버가 이미 알고 있다 (실측 — 와이어를 늘리지 않은 이유)
+   *
+   * `work_session.root_message_id` 는 019 마이그레이션부터 `NOT NULL UNIQUE
+   * REFERENCES message(id)` 였고, REST 투영도 그것을 필수 필드로 싣는다
+   * (`openapi.yaml` 의 `WorkSession.required` 에 `rootMessageId` 가 있다).
+   * 그러므로 이 칸은 **새 사실이 아니라 이미 오던 사실의 소비처**다. 그 원장
+   * 주석이 적어 둔 문장이 이 칸의 뜻 그대로다: "the channel root message is the
+   * session card and its existing thread is the collaboration surface."
+   *
+   * ## seq 는 없다 — 그리고 없는 채로 착지할 수 있다
+   *
+   * 원장은 순서값을 나르지 않는다. 그래서 이 칸은 **id 하나**이고, 착지도 id 로
+   * 하는 문법을 쓴다: 웹의 `?msg=`(`inbox/anchor.messageAnchorPath`)는 정확히
+   * 이 경우를 위해 이미 있다 — 그쪽 주석이 "The goal layer knows its anchor
+   * thread by `rootMessageId` and never sees a seq" 라고 적어 둔 그 자리다.
+   * 폰도 `jumpTarget` 이 `seq: number | null` 을 이미 받는다.
+   *
+   * 없는 seq 를 지어내지 않는 대가는 「못 찾았다」의 문장이 「더 위에 있다」로
+   * 정밀해지지 못한다는 것뿐이고, 그것은 두 클라이언트가 이미 정한 거래다.
+   *
+   * ## 없으면 동사를 그리지 않는다
+   *
+   * 옵셔널인 이유는 턴 카드(`kind: "run"`)가 이 사실을 갖지 않기 때문이고, 그
+   * 카드에서 「대화로」를 그리면 눌러도 아무 데도 가지 않는 버튼이 하나 생긴다.
+   * 원장 행이 빈 문자열을 답하는 판(있어서는 안 되지만 와이어는 문자열이다)도
+   * 같은 자리로 접는다 — `itemDurabilityBadge` 가 「해당 없음」과 「모른다」를
+   * 가른 것과 같은 규율이다.
+   */
+  anchorMessageId?: string;
+  /**
    * 이 카드에서 성립하는 이어하기 동사 (ADR-0154 D3, #1137). 세션 카드만 가지며
    * (`kind: "session"`), 턴에는 없다 — 턴은 호스트 위의 세션이 아니라 채널에서
    * 도는 에이전트의 한 턴이고, 재개할 히스토리도 인수할 원장 행도 없다.
@@ -314,6 +347,19 @@ export function adeItemsFromSessions(
     };
     if (session.endedAtMs !== undefined) item.endedAtMs = session.endedAtMs;
     item.sessionId = session.id;
+    // 발원 메시지 (#1193). 원장에서 그대로 옮겨 온다 — 이 층은 여전히 아무것도
+    // 새로 관측하지 않는다.
+    //
+    // **타입을 믿지 않는다** (실측). `WorkSession.rootMessageId` 는 `string` 이고
+    // 와이어에서도 필수지만, 그 타입은 서버가 지키는 약속이지 이 함수가 받는
+    // 보장이 아니다. 게이트의 red seam 이 그 칸을 빼고 답했더니 `.trim()` 이
+    // TypeError 를 던졌고, 그 예외는 요약 줄에서 시작해 **셸 전체를 흰 화면으로**
+    // 만들었다 — 앵커 하나가 없을 때 잃는 것이 「대화로」 버튼이 아니라 앱이면
+    // 안 된다. 없으면 없는 것이고, 그 카드는 동사를 그리지 않는다.
+    const anchor: unknown = session.rootMessageId;
+    if (typeof anchor === "string" && anchor.trim() !== "") {
+      item.anchorMessageId = anchor;
+    }
     const verb = sessionHandoffVerb(session, hosts);
     if (verb !== null) item.handoff = verb;
     out.push(item);
