@@ -19,6 +19,31 @@ channel. This module makes them one announcement type with an honest `trigger`:
 the second path says `observed-drift`, which claims only what we actually know —
 we saw the file change — instead of claiming the agent decided something.
 
+## Two *files*, not one (#1194)
+
+The file half is not one path either, and watching only the global one was a
+second silent hole (실측 `research/2026-08-09-prime-auto-refine-measurement.md`
+§4.3). Where a refinement lands depends on who asked for it:
+
+| origin | `RefinementResult.scope` | file |
+|---|---|---|
+| `refine` command with `global: true` | `global` | `<agentDir>/harness/harness_state.json` |
+| automatic refine (`turn_interval` / `compact`), `refine.run` | `local` | `<agentDir>/session-artifacts/<sessionId>/harness/harness_state.json` |
+
+The automatic path is the on-by-default one and it writes **local**, so an
+observer holding the global path alone was watching the file the automatic path
+never touches. The measured deferred-compaction shape (§2.4) is exactly where
+that costs everything: 2/2 runs changed the local file and emitted **zero**
+`refine_complete` records, so with stdout silent the audit trail was not thin, it
+was empty.
+
+The local path is per-session, so this is a directory scan rather than one
+watched name: [`HarnessObserver`] globs `<local_root>/*/harness/harness_state.json`
+on every check, and a file it has never seen carries an implicit "did not exist"
+baseline — which is what turns a session directory appearing mid-run into a drift
+instead of a silence. Files already present when the observer was built are
+baselined rather than announced: they are a previous session's history, not news.
+
 ## Idempotency (D4)
 
 ADR-0158 D4 says the key is `RefinementResult.id`, and the *property* it wants is
@@ -73,6 +98,7 @@ promised.
 
 from __future__ import annotations
 
+import glob
 import hashlib
 import json
 import os
@@ -109,6 +135,22 @@ REFINE_ID_MAX_CHARS = 200
 REFINE_SUMMARY_MAX_CHARS = 500
 REFINE_EDITS_MAX = 50
 
+#: prime's own names for the two halves of the path, spelled once
+#: (`refinement.js` `HARNESS_STATE_DIR_NAME` / `getHarnessStatePath`, and
+#: `session-manager.js` `getSessionArtifactPath`).
+HARNESS_STATE_DIR_NAME = "harness"
+HARNESS_STATE_FILE_NAME = "harness_state.json"
+SESSION_ARTIFACTS_DIR_NAME = "session-artifacts"
+
+#: How many session-local state files one scan will watch, newest first.
+#:
+#: A long-lived workspace HOME accumulates one session-artifact directory per
+#: session and never prunes them, so an uncapped scan grows without bound while
+#: the interesting file is always among the newest. The cap bounds the work, not
+#: the correctness of what it finds: a file this adapter already holds a baseline
+#: for stays watched regardless of where it falls in the ordering.
+HARNESS_LOCAL_SCAN_MAX = 64
+
 
 def harness_refine_client_msg_id(refinement_id: str) -> str:
     """The derived key an announcement must be sent under (D4).
@@ -129,26 +171,86 @@ def harness_refine_client_msg_id(refinement_id: str) -> str:
 
 
 class HarnessObserver:
-    """The disk-side half of refine auditing: hash the state file, diff the ids.
+    """The disk-side half of refine auditing: hash the state files, diff the ids.
 
     This exists because of the kernel path. If upstream ever emits an event on
     every `HarnessState.save()` regardless of who called it, this class is the
     code that gets deleted — and the `observed-drift` trigger with it.
+
+    **Two scopes, one observer** (#1194). `path` is prime's global file and
+    `local_root` is the session-artifacts directory the automatic path writes
+    under; every check globs the latter, because the file's name contains a
+    session id that does not exist yet when this object is built.
+
+    `scan_local=False` is the red-proof lever, not a tuning knob: it reproduces
+    the measured pre-#1194 world in which an automatic refinement changed a file
+    nobody watched. Production never passes it.
     """
 
-    def __init__(self, path: str | None = None):
+    def __init__(
+        self,
+        path: str | None = None,
+        *,
+        local_root: str | None = None,
+        scan_local: bool = True,
+    ):
         self.path = path or default_harness_state_path()
-        self.baseline = self.snapshot()
+        self.scan_local = scan_local
+        self.local_root = local_root or session_artifacts_root_for(self.path)
+        self.baselines: dict[str, dict[str, Any]] = {
+            source: self.snapshot(source) for source in self.sources()
+        }
 
-    def snapshot(self) -> dict[str, Any]:
-        snap: dict[str, Any] = {"path": self.path, "exists": os.path.exists(self.path)}
+    # -- what is watched ---------------------------------------------------
+
+    def local_sources(self) -> list[str]:
+        """Every session-local state file that exists right now, newest first."""
+        if not self.scan_local:
+            return []
+        pattern = os.path.join(
+            self.local_root, "*", HARNESS_STATE_DIR_NAME, HARNESS_STATE_FILE_NAME
+        )
+        found = glob.glob(pattern)
+        if len(found) > HARNESS_LOCAL_SCAN_MAX:
+            found = sorted(found, key=_mtime_or_zero, reverse=True)[:HARNESS_LOCAL_SCAN_MAX]
+        return sorted(found)
+
+    def sources(self) -> list[str]:
+        """The global file, the local scan, and anything already baselined.
+
+        The third term is what keeps a deleted session directory from silently
+        dropping out of the audit: a file this observer has a baseline for stays
+        watched even after it disappears, so its disappearance is a drift.
+        """
+        watched = [self.path]
+        for source in self.local_sources():
+            if source not in watched:
+                watched.append(source)
+        for source in sorted(getattr(self, "baselines", {})):
+            if source not in watched:
+                watched.append(source)
+        return watched
+
+    def scope_of(self, path: str) -> str:
+        """`global` for prime's shared file, `local` for a session's own."""
+        return "global" if os.path.abspath(path) == os.path.abspath(self.path) else "local"
+
+    # -- reading -----------------------------------------------------------
+
+    def snapshot(self, path: str | None = None) -> dict[str, Any]:
+        path = path or self.path
+        snap: dict[str, Any] = {
+            "path": path,
+            "scope": self.scope_of(path),
+            "exists": os.path.exists(path),
+        }
         if not snap["exists"]:
             snap["sha256"] = None
             snap["entryIds"] = []
             snap["refinementIds"] = []
             return snap
         try:
-            with open(self.path, "rb") as handle:
+            with open(path, "rb") as handle:
                 raw = handle.read()
         except OSError as exc:  # the file can vanish between the check and the read
             snap.update({"exists": False, "sha256": None, "entryIds": [], "refinementIds": [], "error": str(exc)})
@@ -178,50 +280,125 @@ class HarnessObserver:
             snap["refinementIds"] = [str(item.get("id")) for item in refinements if isinstance(item, dict)]
         return snap
 
-    def drift(self) -> dict[str, Any] | None:
-        """The change since the last accepted baseline, or `None`.
+    @property
+    def baseline(self) -> dict[str, Any]:
+        """The global file's baseline — what `summary()` has always reported."""
+        return self.baselines.get(self.path) or self.snapshot(self.path)
+
+    def drifts(self, *, include_local: bool = True) -> list[dict[str, Any]]:
+        """Every watched file that changed since its last accepted baseline.
 
         Reading advances nothing: [`accept`] is separate so a failed announcement
         is retried on the next turn instead of being lost because the observer
         already moved on.
-        """
-        current = self.snapshot()
-        if current.get("sha256") == self.baseline.get("sha256"):
-            return None
-        before_entries = set(self.baseline.get("entryIds") or [])
-        before_refinements = set(self.baseline.get("refinementIds") or [])
-        return {
-            "before": self.baseline,
-            "after": current,
-            "newEntryIds": sorted(set(current.get("entryIds") or []) - before_entries),
-            "newRefinementIds": [
-                item for item in (current.get("refinementIds") or []) if item not in before_refinements
-            ],
-        }
 
-    def accept(self) -> dict[str, Any]:
-        """Move the baseline to what is on disk now, and return it.
+        A source with no baseline at all is one that appeared after this observer
+        was built — a session directory created mid-run — and its implicit
+        baseline is "did not exist", so its first content is news.
+
+        `include_local=False` restricts the answer to the global file. See
+        `PrimeAdapter.check_harness_drift` for why the two scopes are not asked
+        about at the same moments.
+        """
+        changed: list[dict[str, Any]] = []
+        for path in self.sources():
+            if not include_local and self.scope_of(path) == "local":
+                continue
+            baseline = self.baselines.get(path) or _absent_snapshot(path, self.scope_of(path))
+            current = self.snapshot(path)
+            if current.get("sha256") == baseline.get("sha256"):
+                continue
+            before_entries = set(baseline.get("entryIds") or [])
+            before_refinements = set(baseline.get("refinementIds") or [])
+            changed.append(
+                {
+                    "before": baseline,
+                    "after": current,
+                    "newEntryIds": sorted(set(current.get("entryIds") or []) - before_entries),
+                    "newRefinementIds": [
+                        item
+                        for item in (current.get("refinementIds") or [])
+                        if item not in before_refinements
+                    ],
+                }
+            )
+        return changed
+
+    def drift(self) -> dict[str, Any] | None:
+        """The first pending drift, or `None`. See [`drifts`] for all of them."""
+        pending = self.drifts()
+        return pending[0] if pending else None
+
+    def accept(self, path: str | None = None) -> dict[str, Any]:
+        """Move a baseline to what is on disk now, and return the global one.
 
         Called after a `refine_complete` announcement too — otherwise the file
         change that refinement just made would be re-announced a second time as
-        an `observed-drift`, which is the same fact wearing a worse name.
+        an `observed-drift`, which is the same fact wearing a worse name. With
+        the local scan in place that is no longer a nicety: an automatic
+        refinement *always* writes a file this observer is watching, so without
+        the accept every automatic refinement would produce two channel lines.
+
+        `path` narrows the move to one file, which is what an announcement
+        should do — accepting everything would swallow an unrelated kernel write
+        that happened to land in the same window.
         """
-        self.baseline = self.snapshot()
+        if path is None:
+            for source in self.sources():
+                self.baselines[source] = self.snapshot(source)
+        else:
+            self.baselines[path] = self.snapshot(path)
         return self.baseline
 
 
-def default_harness_state_path() -> str:
-    """Where prime keeps global harness state, resolved the way prime resolves it.
+def _absent_snapshot(path: str, scope: str) -> dict[str, Any]:
+    return {"path": path, "scope": scope, "exists": False, "sha256": None, "entryIds": [], "refinementIds": []}
+
+
+def _mtime_or_zero(path: str) -> float:
+    try:
+        return os.path.getmtime(path)
+    except OSError:
+        return 0.0
+
+
+def prime_agent_dir() -> str:
+    """prime's agent dir, resolved the way prime resolves it.
 
     `$PRIME_AGENT_CODING_AGENT_DIR` else `$HOME/.prime/agent` (`dist/config.js`
     `getAgentDir`, and `rlm/harness.py:_agent_dir` on the kernel side). Both
     halves matter: the kernel writes through the Python spelling, and if this
     adapter watched a different path it would observe nothing at all.
     """
-    agent_dir = os.environ.get("PRIME_AGENT_CODING_AGENT_DIR") or os.path.join(
+    return os.environ.get("PRIME_AGENT_CODING_AGENT_DIR") or os.path.join(
         os.path.expanduser("~"), ".prime", "agent"
     )
-    return os.path.join(agent_dir, "harness", "harness_state.json")
+
+
+def default_harness_state_path() -> str:
+    """Where prime keeps *global* harness state."""
+    return os.path.join(prime_agent_dir(), HARNESS_STATE_DIR_NAME, HARNESS_STATE_FILE_NAME)
+
+
+def session_artifacts_root_for(state_path: str) -> str:
+    """The session-artifacts root that belongs with a given global state file.
+
+    Derived from the watched path rather than read from the environment a second
+    time, so an operator who points `OORT_PRIME_HARNESS_STATE_PATH` somewhere
+    else gets a local root beside it instead of a scan of the real `$HOME` — and
+    so a test with a temporary path scans a temporary directory.
+
+    prime spells the pair `<agentDir>/harness/harness_state.json` and
+    `<agentDir>/session-artifacts/<sessionId>/harness/harness_state.json`
+    (`refinement.js` `getGlobalHarnessStateDir`, `session-manager.js`
+    `getSessionArtifactPath`), so the agent dir is two levels up **when the
+    parent directory is prime's `harness/`** and one level up otherwise.
+    """
+    parent = os.path.dirname(state_path)
+    agent_dir = (
+        os.path.dirname(parent) if os.path.basename(parent) == HARNESS_STATE_DIR_NAME else parent
+    )
+    return os.path.join(agent_dir, SESSION_ARTIFACTS_DIR_NAME)
 
 
 def drift_refinement_id(digest: str | None) -> str:
@@ -235,6 +412,36 @@ def drift_refinement_id(digest: str | None) -> str:
     harness assigned.
     """
     return ("drift_" + (digest or "unknown"))[:REFINE_ID_MAX_CHARS]
+
+
+def observed_drift_id(drift: dict[str, Any]) -> str:
+    """The id a drift announces under — the harness's own when the file has one.
+
+    Not two ids for one fact. A state file carries a `refinements[]` list, and a
+    refinement that wrote it leaves its `RefinementResult.id` there. When the
+    drift names a new one, that id **is** D4's key, so the file watcher and the
+    `refine_complete` event derive the *same* `clientMsgId` for the same
+    refinement and the second one to notice adds nothing — which is the property
+    `momo_messaging::harness_refine_client_msg_id` is documented to provide
+    ("the RPC path and the file watcher both noticing the same event").
+
+    It stopped being theoretical when the local scan landed (#1194): every
+    automatic refinement now writes a file this adapter watches, so a drift check
+    that lands between the write and the event sees exactly that. Keyed on the
+    content hash it was a second line for one refinement; keyed on the harness's
+    id it is the same line, and whichever observation arrives first is the one
+    that names the trigger.
+
+    Falls back to the content hash when the file names no new refinement — the
+    kernel's `add_memory` + `save()` writes entries without appending a
+    refinement event, and that path is what `drift_` exists for.
+    """
+    new_refinements = [str(item) for item in (drift.get("newRefinementIds") or []) if str(item).strip()]
+    if new_refinements:
+        # The last one: a file can gain several between two checkpoints, and the
+        # newest is the one whose event has not arrived yet.
+        return new_refinements[-1][:REFINE_ID_MAX_CHARS]
+    return drift_refinement_id((drift.get("after") or {}).get("sha256"))
 
 
 def refine_body(handle: str, entry_count: int, trigger: str) -> str:
@@ -305,8 +512,12 @@ class RefineAnnouncer:
         )
         if self.observer is not None:
             # The refinement just wrote the file; adopt that as the new baseline
-            # so it is not announced twice under two triggers.
-            self.observer.accept()
+            # so it is not announced twice under two triggers. `harnessStatePath`
+            # is the harness's own word for which file it wrote (실측 §3.2), and
+            # narrowing to it is what keeps an unrelated kernel write in the same
+            # window from being swallowed by this accept.
+            written = result.get("harnessStatePath")
+            self.observer.accept(written if isinstance(written, str) and written else None)
         return announcement
 
     def announce_observed_drift(self, drift: dict[str, Any]) -> dict[str, Any] | None:
@@ -321,14 +532,14 @@ class RefineAnnouncer:
             for entry_id in (drift.get("newEntryIds") or [])
         ][:REFINE_EDITS_MAX]
         announcement = self._announce(
-            refinement_id=drift_refinement_id(after.get("sha256")),
+            refinement_id=observed_drift_id(drift),
             trigger=TRIGGER_OBSERVED_DRIFT,
             edits=edits,
             summary=None,
             rollback_id=None,
         )
         if self.observer is not None:
-            self.observer.accept()
+            self.observer.accept(after.get("path"))
         return announcement
 
     def _announce(
@@ -381,10 +592,21 @@ def _wire_edits(applied: Any) -> list[dict[str, str]]:
     that happens next to the transport is one somebody eventually moves. The
     server refuses the extra keys too (`deny_unknown_fields`), so this is the
     inner of two locks on the same door.
+
+    **`applied` is a filter, not decoration** (#1194). The field's name is
+    misleading: `appliedEdits` is the list of edits the harness *attempted*, and
+    an edit that failed — re-creating an entry that already exists, measured in
+    §4.4 — stays in it with `applied: false`. Announcing it as "항목 1건" tells
+    the channel a change happened that did not. Upstream's own extension emit
+    counts `appliedEdits.filter(e => e.applied).length`
+    (`agent-session.js:6283`), so this is the same filter on our side of the
+    wire rather than a rule invented here.
     """
     out: list[dict[str, str]] = []
     for edit in applied or []:
         if not isinstance(edit, dict):
+            continue
+        if not edit.get("applied"):
             continue
         entry_id = str(edit.get("id") or "").strip()
         if not entry_id:

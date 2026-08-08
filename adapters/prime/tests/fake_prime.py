@@ -20,6 +20,14 @@ Scenarios (`--scenario`):
                   `refine_complete` + `response` (the undocumented pair)
     silent-drift  as `text`, but the harness state file is rewritten mid-turn
                   with **no** event at all — the kernel path
+    auto-refine   as `text`, and a `refine_complete` arrives that **nobody
+                  asked for**, writing the session-local file. The measured
+                  automatic shape (실측 §3.2): same event, `scope: "local"`,
+                  and no field anywhere saying what set it off
+    compact-refine  a compaction, then the automatic refinement it schedules
+    local-drift   the automatic path's own silence: the session-local file is
+                  written and the RPC says nothing at all, which is what the
+                  deferred-compaction drain measured 2/2 (실측 §2.4)
     abort         streams, then answers `abort` with
                   `message_update{error, reason: "aborted"}`
     die           streams half an answer and exits, leaving the adapter an EOF
@@ -101,10 +109,42 @@ def refinement_result(refinement_id: str, entry_id: str) -> dict:
     }
 
 
+def local_refinement_result(refinement_id: str, entry_id: str, state_path: str) -> dict:
+    """What the *automatic* path produces — same record, different scope.
+
+    Field for field the shape measured in §3.2, including the two that matter
+    here and are easy to lose: `scope: "local"` and a `harnessStatePath` under
+    `session-artifacts/`. The second edit is the measured §4.4 case — an entry
+    the harness tried to create again and could not, carried in `appliedEdits`
+    with `applied: false`.
+    """
+    return {
+        "id": refinement_id,
+        "scope": "local",
+        "summary": "track where this task got to",
+        "appliedEdits": [
+            {"action": "create", "kind": "memory", "id": entry_id, "applied": True, "after": "…"},
+            {
+                "action": "create",
+                "kind": "memory",
+                "id": entry_id + "-again",
+                "applied": False,
+                "after": "…",
+            },
+        ],
+        "harnessStatePath": state_path,
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--scenario", default=os.environ.get("FAKE_PRIME_SCENARIO", "text"))
     parser.add_argument("--harness-state", default=os.environ.get("FAKE_PRIME_HARNESS_STATE", ""))
+    # The session-local file, spelled by the caller rather than derived here: a
+    # double that re-derived the layout would agree with a wrong derivation.
+    parser.add_argument(
+        "--local-harness-state", default=os.environ.get("FAKE_PRIME_LOCAL_HARNESS_STATE", "")
+    )
     parser.add_argument("--mode")
     parser.add_argument("--model")
     parser.add_argument("--no-session", action="store_true")
@@ -153,6 +193,36 @@ def main() -> int:
             stream_text(TEXT)
             if args.harness_state:
                 write_harness_state(args.harness_state, entry_id, refinement_id)
+        elif scenario == "local-drift":
+            # No event of any kind. The file moves and the protocol says nothing,
+            # which is the shape the deferred-compaction drain produced 2/2: by
+            # the time the queue ran, the RPC was already down.
+            stream_text(TEXT)
+            if args.local_harness_state:
+                write_harness_state(args.local_harness_state, entry_id, refinement_id)
+        elif scenario == "auto-refine":
+            stream_text(TEXT)
+            emit({"type": "turn_end"})
+            auto_refine()
+            emit({"type": "agent_end"})
+            done.set()
+            return
+        elif scenario == "compact-refine":
+            stream_text(TEXT)
+            emit({"type": "compaction_start", "reason": "manual"})
+            emit(
+                {
+                    "type": "compaction_end",
+                    "reason": "manual",
+                    "result": {"summary": "compacted"},
+                    "aborted": False,
+                    "willRetry": False,
+                }
+            )
+            auto_refine()
+            emit({"type": "agent_end"})
+            done.set()
+            return
         elif scenario == "abort":
             stream_half()
             return  # wait for the `abort` command
@@ -161,6 +231,25 @@ def main() -> int:
         emit({"type": "turn_end"})
         emit({"type": "agent_end"})
         done.set()
+
+    def auto_refine() -> None:
+        """A refinement nobody asked for: file first, then the event.
+
+        The order is upstream's (`_applyRefine` writes `harnessStatePath` before
+        `_emit`), and it is the order the adapter's double-announcement guard
+        depends on — the file is already changed when the announcement accepts
+        its baseline.
+        """
+        if args.local_harness_state:
+            write_harness_state(args.local_harness_state, entry_id, refinement_id)
+        emit(
+            {
+                "type": "refine_complete",
+                "result": local_refinement_result(
+                    refinement_id, entry_id, args.local_harness_state
+                ),
+            }
+        )
 
     def stream_half() -> None:
         emit({"type": "message_update", "assistantMessageEvent": {"type": "text_start", "contentIndex": 0}})

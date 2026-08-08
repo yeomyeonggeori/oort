@@ -98,16 +98,20 @@ clothes.
 
 ## Self-modification (ADR-0158 D1~D4)
 
-Two paths reach `harness_state.json` and they have different visibility:
+Three paths reach harness state and they have different visibility:
 
 1. `refine_complete` on stdout — real, undocumented, and absent from the shipped
    RPC types. The adapter knows the name by hand, and re-measuring that it still
    exists is part of the version pin.
-2. `rlm.harness` inside the kernel — the same file, **zero** protocol output
-   (6 runs x 37 events, `refine_complete` = 0). Only the file knows.
+2. `rlm.harness` inside the kernel — the **global** file, **zero** protocol
+   output (6 runs x 37 events, `refine_complete` = 0). Only the file knows.
+3. automatic refinement (`turnInterval` 25 by default, or a compaction) — the
+   same `refine_complete`, but it writes a **session-local** file, and when a
+   compaction defers it the drain happens after the RPC is already down: file
+   changed, stdout zero, 2/2 runs (실측 §2.4).
 
-Both become one quiet `system` line. The second says `trigger: "observed-drift"`,
-which claims only what we saw.
+All three become one quiet `system` line. The file-only ones say
+`trigger: "observed-drift"`, which claims only what we saw.
 
 ```json
 {
@@ -142,6 +146,46 @@ which claims only what we saw.
   useful thing a reader can be given; the entries themselves stay on the host.
 * **`rollbackId` travels** (D3): recorded on the row for an operator asking "can
   this be undone", with no channel affordance promised.
+* **only edits that applied are items.** `appliedEdits` is what the harness
+  *attempted*; a create that hit an existing entry stays in the list with
+  `applied: false`, and counting it told the channel about a change that did not
+  happen (실측 §4.4). Upstream's own extension emit filters the same way.
+
+### `trigger` is observed, not assumed (#1194)
+
+`refine_complete` carries **no field naming its trigger**, so the honest value
+has to come from something the adapter saw. Two observations decide it:
+
+| what the adapter saw | `trigger` |
+|---|---|
+| a `refine` command it sent is still unanswered | `command` |
+| a successful `compaction_end` has an unclaimed refinement | `compact` |
+| neither | `turn_interval` |
+| no event at all, only a file that moved | `observed-drift` |
+
+Before this, every refinement was announced as `command` — so an automatic one
+told the room a person had asked for it, in all three measured automatic shapes.
+Two residues are documented rather than hidden: a compaction whose review gate
+declined leaves its attribution to be spent by a later `turn_interval`
+refinement, and a refinement the agent starts from a kernel cell (`refine.run`)
+is indistinguishable from `turn_interval` on stdout — naming it would need a
+fifth value in a wire enum that is landed in two languages, which is an ADR-0158
+amendment rather than an adapter change.
+
+### Two files, and why the local one is checked late
+
+Automatic refinement writes `session-artifacts/<sessionId>/harness/harness_state.json`,
+not the global file, so the observer scans that directory as well as watching the
+global path. The two scopes are asked about at different moments and that is
+deliberate: the global file's writer (`rlm.harness`) never speaks, so every
+checkpoint asks; the session-local file's only writer is the refine machinery,
+which does speak, so asking mid-turn would only race the file against its own
+imminent `refine_complete` and let the winner decide the trigger. The local scan
+runs when nothing further can explain the file — after the RPC is down, which is
+also exactly when the compaction-deferred drain writes it.
+
+That ordering is why `adapter.py` closes the transport **before** its last drift
+check rather than after.
 
 ### Idempotency, and the one place the ADR's letter had to bend
 
@@ -157,9 +201,13 @@ rewritten idempotency key is one the caller cannot retry with. That derivation i
 one function implemented twice, once per side, and `harness_refine_client_msg_id`
 here must stay byte-identical to `momo_messaging`'s.
 
-An observed drift has no harness-assigned id, so this adapter mints one that is
-still a pure function of what it saw: `drift_<sha256 of the state file>`. The
-same state names the same announcement.
+An observed drift usually has no harness-assigned id, so this adapter mints one
+that is still a pure function of what it saw: `drift_<sha256 of the state file>`.
+The same state names the same announcement. When the state file **does** name a
+new refinement — the automatic path appends its `RefinementResult.id` there — the
+drift keys on that id instead, so the file watcher and the `refine_complete`
+event derive the same `clientMsgId` and one refinement is one line however it was
+noticed.
 
 ## Isolation: the container is the boundary
 
@@ -254,10 +302,24 @@ nothing in this package reads one.
 python3 adapters/prime/tests/smoke_prime_adapter.py          # closed loop, no docker
 python3 adapters/prime/tests/test_prime_adapter_contract.py  # contract + red proofs
 adapters/prime/run.sh tenancy-leak && adapters/prime/run.sh tenancy
+adapters/prime/run.sh auto-refine && adapters/prime/run.sh auto-refine-rejected
 ```
 
 The first two need only python3 and run in `scripts/local_gate.sh --profile docs`.
 The red proofs are labelled in the test names: each one deletes a specific guard
 and reproduces a specific, previously-measured failure — a duplicated
-announcement, a frozen answer, a truncated body. A guard whose removal changes
-nothing was never load bearing.
+announcement, a frozen answer, a truncated body, an automatic refinement wearing
+a person's name. A guard whose removal changes nothing was never load bearing.
+
+`auto-refine` is the only one that exercises the **automatic** path against the
+real harness: it lowers `turnInterval` to 1 in the container's own
+`settings.json`, turns sessions on for that run (`OORT_PRIME_NO_SESSION=0` — the
+shipped default is untouched, and with it on there is no automatic path at all),
+and asserts that the resulting announcement says `turn_interval` while no `refine`
+command was ever sent. `auto-refine-rejected` is its reverse control: the same
+run with the review gate declining, which must produce zero refinements. Both run
+`--network none` with the loopback provider and no credential.
+
+Add `OORT_PRIME_MOUNT_SOURCE=1` to run the working tree's adapter inside the
+pinned image without rebuilding it — the harness under test stays the image's
+v0.7.0, only `/opt/oort/prime` is replaced, read-only.
