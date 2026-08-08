@@ -61,6 +61,7 @@ use crate::attachment::{
     AttachmentLinkRejected, MessageAttachment, PAGED_ATTACHMENT_COL, PAGED_ATTACHMENT_JOIN,
 };
 use crate::error::{MessagingError, ProvenanceRejected};
+use crate::interaction::{opening_stream_props, STREAM_PROPS_KEY};
 
 /// `message_type` enum (`001_init.sql:15`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -444,6 +445,21 @@ pub struct SendExtras<'a> {
     /// `audit_log.via_token_id` for the attachment-binding audit rows. `None`
     /// for a host-signed action (see `momo_db::audit`).
     pub via_token_id: Option<Uuid>,
+    /// #1173 — this send is the **opening write of a growing answer**, and the
+    /// insert carries [`crate::opening_stream_props`] on its props.
+    ///
+    /// `false` is the unchanged path: an ordinary message says nothing about
+    /// streams. `true` is what an out-of-process producer (prime, hermes) needs
+    /// in order to be the same shape as the in-process one — the marker rides
+    /// the insert, because a turn that dies between the opening write and its
+    /// first slice otherwise leaves a half sentence wearing a finished answer's
+    /// clothes, unfindable by [`crate::open_stream_message_for_run_in_tx`].
+    ///
+    /// It is a flag rather than a caller-supplied props key on purpose: the
+    /// marker is server-owned (the staleness guard reads its `rev` back), so the
+    /// wire says *that* a stream is being opened and this crate says *what* that
+    /// means.
+    pub opens_stream: bool,
 }
 
 /// Why a REST send was refused before it could commit.
@@ -733,7 +749,10 @@ pub async fn send_message_in_tx(
 /// `MessageRoutes.send` is one path, and because the three steps have an order
 /// that must not be re-arranged by a caller:
 ///
-/// 1. **insert** — assigns `seq` and `message.id`;
+/// 1. **insert** — assigns `seq` and `message.id`, and carries the stream's
+///    opening marker when [`SendExtras::opens_stream`] is set (#1173). On this
+///    statement and no later one: a marker that waited for a second write would
+///    be missing for exactly the turns that die before it;
 /// 2. **provenance** (when signed) — verified over the props **as inserted**, so
 ///    a client can sign what it sent. Recording after the mention pass would
 ///    make every mentioning message fail verification, since no client can
@@ -768,6 +787,7 @@ pub async fn send_message_with_mentions_in_tx(
         signature,
         attachment_ids,
         via_token_id,
+        opens_stream,
     } = extras;
     if let Some(signature) = signature {
         if input.client_msg_id.is_none() {
@@ -776,7 +796,23 @@ pub async fn send_message_with_mentions_in_tx(
         if signature.signer_member_id != input.author_member_id {
             return Ok(Err(ProvenanceRejected::SignerIsNotAuthor.into()));
         }
+        // #1173 — the marker below lands on the very props this signature is
+        // about to be verified over, so the pair is refused by name rather than
+        // left to fail as a bad signature. See `ProvenanceRejected`.
+        if opens_stream {
+            return Ok(Err(ProvenanceRejected::SignedStreamOpen.into()));
+        }
     }
+
+    // #1173 — before the insert, because the whole point of the marker is that
+    // it rides the same statement as the opening text. Written here rather than
+    // by the caller because the key is server-owned: the route strips
+    // `momo.stream` from client props exactly so this is its only writer.
+    let input = if opens_stream {
+        opening_stream_input(input)
+    } else {
+        input
+    };
 
     let channel_id = input.channel_id;
     let author_member_id = input.author_member_id;
@@ -828,6 +864,27 @@ pub async fn send_message_with_mentions_in_tx(
     )
     .await?;
     Ok(Ok(sent))
+}
+
+/// The send's props with the stream's opening marker stamped in (#1173).
+///
+/// The same object [`crate::opening_stream_props`] gives the in-process producer
+/// (`momo-agent-worker`'s `stream.rs`), under the same key, so a message opened
+/// over REST and one opened in-process are indistinguishable to every reader —
+/// including [`crate::open_stream_message_for_run_in_tx`], which is what can
+/// still close a half-written answer whose producer died.
+///
+/// A non-object `props` is not a shape this crate's callers produce (the route
+/// builds an object or nothing), and if one ever arrives, losing it costs less
+/// than losing the marker — the same trade `stream.rs::opening_props` makes.
+fn opening_stream_input(mut input: NewMessage) -> NewMessage {
+    let mut object = match input.props {
+        Value::Object(object) => object,
+        _ => Map::new(),
+    };
+    object.insert(STREAM_PROPS_KEY.to_string(), opening_stream_props());
+    input.props = Value::Object(object);
+    input
 }
 
 /// The stored row's `client_msg_id` — the value the provenance digest binds.
@@ -2422,5 +2479,54 @@ mod tests {
                  query: {sql}"
             );
         }
+    }
+
+    /// #1173 — the opening marker is the **same object** the in-process producer
+    /// writes, merged into whatever props the send already carried.
+    ///
+    /// Both halves matter. If it were a different object, a message opened over
+    /// REST would be invisible to `open_stream_message_for_run_in_tx` and to
+    /// every client that reads `momo.stream`; if it replaced the props instead of
+    /// joining them, an adapter would lose the `run_id` that is the only way a
+    /// reader can ask whether the run behind a half-written answer is still
+    /// going (#1166).
+    #[test]
+    fn the_opening_marker_joins_the_props_a_send_already_carried() {
+        let run = Uuid::from_u128(0x51ea3);
+        let mut input = NewMessage::text(Uuid::from_u128(1), Uuid::from_u128(2), "답이 자");
+        input.props = json!({ "run_id": run.to_string(), "source": "prime" });
+
+        let opened = opening_stream_input(input);
+        assert_eq!(
+            opened.props[STREAM_PROPS_KEY],
+            crate::interaction::opening_stream_props(),
+            "REST and in-process must open the same shape"
+        );
+        assert_eq!(opened.props["source"], json!("prime"));
+        assert_eq!(
+            crate::interaction::open_stream_run_id(&opened.props),
+            Some(run),
+            "an adapter that names its run stays findable behind a half answer"
+        );
+    }
+
+    /// The marker is the server's word, not the caller's: a props key that
+    /// arrives spelled `momo.stream` is overwritten, never merged into.
+    ///
+    /// The route already strips the key from client props, which is where the
+    /// rule is enforced for the wire. This asserts the second half — that no
+    /// other caller of this crate can smuggle a revision in through `props` and
+    /// have it survive into the row the staleness guard reads back.
+    #[test]
+    fn a_supplied_stream_key_does_not_survive_the_opening_marker() {
+        let mut input = NewMessage::text(Uuid::from_u128(1), Uuid::from_u128(2), "답");
+        input.props = json!({ STREAM_PROPS_KEY: { "rev": 9999, "streaming": false } });
+
+        let opened = opening_stream_input(input);
+        assert_eq!(
+            opened.props[STREAM_PROPS_KEY]["rev"],
+            json!(crate::interaction::OPENING_STREAM_REV)
+        );
+        assert_eq!(opened.props[STREAM_PROPS_KEY]["streaming"], json!(true));
     }
 }

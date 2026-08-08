@@ -47,7 +47,7 @@ use momo_messaging::{
     InteractionRefused, MessageAttachment, MessageSignature, MessageType, NewMessage, PagedMessage,
     PinAction, PinnedMessage, ProvenanceRejected, QuoteTargetInvalid, QuotedMessage,
     ReactionAction, ReactionSnapshot, SendExtras, SendRejected, StoredMessage, StreamCloseOutcome,
-    StreamEdit, ThreadRollup, ThreadRootInvalid, STREAM_PROPS_KEY,
+    StreamEdit, ThreadRollup, ThreadRootInvalid, OPENING_STREAM_REV, STREAM_PROPS_KEY,
 };
 use serde_json::{Map, Value};
 use std::collections::HashSet;
@@ -407,7 +407,51 @@ fn rejected_signature(rejected: ProvenanceRejected) -> ApiError {
     ApiError::bad_request(rejected.to_string())
 }
 
+/// Whether this send opens a growing answer, after checking what it claims
+/// (#1173).
+///
+/// The block carries no value the server stores — the marker it produces is
+/// always [`momo_messaging::opening_stream_props`] — so both checks exist to keep
+/// the producer's arithmetic and the row's the same. Dropping them would not
+/// change a single byte in Postgres, and that is exactly the danger: a producer
+/// that declared `rev: 9` would number its first slice 10 against a row that
+/// says 0, and one that declared `streaming: false` would believe it had posted
+/// a finished answer while the channel shows one that nothing will ever close.
+/// A refusal is the only answer that tells it so.
+fn opens_stream(request: &SendMessageRequest) -> Result<bool, ApiError> {
+    let Some(stream) = request.stream.as_ref() else {
+        return Ok(false);
+    };
+    if stream.rev != OPENING_STREAM_REV {
+        return Err(ApiError::bad_request(format!(
+            "a stream's opening marker must be rev {OPENING_STREAM_REV} — the first slice is \
+             rev {}",
+            OPENING_STREAM_REV + 1
+        )));
+    }
+    if !stream.streaming {
+        return Err(ApiError::bad_request(
+            "a stream's opening marker must be streaming: true — a stream is closed by its \
+             final PATCH slice, not by the send that opens it",
+        ));
+    }
+    Ok(true)
+}
+
 /// `POST /v1/workspaces/{ws}/channels/{ch}/messages` — the single write path.
+///
+/// **An optional `stream` block makes this the opening write of a growing
+/// answer** (#1173). It changes nothing about the send except one server-owned
+/// props key, written on the same insert as the text — which is the whole point:
+/// the in-process producer has carried that marker since #1161, and until now an
+/// out-of-process one (prime, hermes) had no way to. A turn that died between
+/// its opening write and its first slice left, over REST only, a half sentence
+/// that claimed to be a finished answer and that
+/// `open_stream_message_for_run_in_tx` could not even find in order to mark.
+///
+/// The two paths now open the same shape, so `PATCH …/messages/{id}` with a
+/// `stream` block continues an adapter's message exactly as it continues the
+/// worker's, and no reader has to know which one wrote it.
 pub async fn send(
     State(state): State<AppState>,
     Extension(principal): Extension<Principal>,
@@ -416,6 +460,10 @@ pub async fn send(
 ) -> Result<impl IntoResponse, ApiError> {
     let (workspace_id, channel_id) = scope_ids(&workspace, &channel, &principal)?;
     reject_unsupported(&request)?;
+    // #1173 — shape only, and before any connection is taken, for the same
+    // reason `routing` is validated here: a malformed declaration is the
+    // caller's mistake and costs nothing to answer.
+    let opens_stream = opens_stream(&request)?;
 
     let message_type = match request.message_type.as_deref() {
         None => MessageType::Text,
@@ -521,6 +569,7 @@ pub async fn send(
                     signature: signature.as_ref(),
                     attachment_ids: &attachment_ids,
                     via_token_id,
+                    opens_stream,
                 },
             )
             .await?
@@ -1486,6 +1535,103 @@ mod tests {
         assert!(!stream.is_final, "`final` is the wire name, not `isFinal`");
     }
 
+    /// #1173 — the same promise on the send: a POST shaped like yesterday's
+    /// carries no `stream` block, parses, and opens nothing.
+    ///
+    /// The decoder is closed-world (`deny_unknown_fields`), so before this
+    /// ticket a producer that tried to say it got a 400 naming an unknown key.
+    /// That is exactly why the field has to be added rather than tolerated: a
+    /// server that ignored it would leave the adapter believing it had marked
+    /// the message.
+    #[test]
+    fn an_absent_stream_block_is_the_send_that_was_always_there() {
+        let plain: SendMessageRequest = serde_json::from_str(
+            r#"{"clientMsgId":"00000000-0000-0000-0000-000000000001","body":"안녕"}"#,
+        )
+        .expect("a send shaped like yesterday's still parses");
+        assert!(plain.stream.is_none());
+        assert!(!opens_stream(&plain).expect("nothing to check"));
+    }
+
+    /// The opening declaration the server accepts, and the two it refuses.
+    ///
+    /// **RED proof.** Delete either guard in [`opens_stream`] and this goes
+    /// green — with a 201 whose row says exactly what it said before, because
+    /// the marker is the server's to write. That is the trap: the producer's
+    /// arithmetic and the row's would part company silently. A producer that
+    /// declared `rev: 9` numbers its first slice `10` against a row holding
+    /// `0`, and one that declared `streaming: false` believes it posted a
+    /// finished answer while the channel shows one that nothing will ever
+    /// close.
+    #[test]
+    fn an_opening_marker_must_declare_rev_zero_and_streaming_true() {
+        let opening: SendMessageRequest = serde_json::from_str(
+            r#"{"clientMsgId":"00000000-0000-0000-0000-000000000001",
+                "body":"답이 자","stream":{"rev":0,"streaming":true}}"#,
+        )
+        .expect("an opening send parses");
+        assert!(opens_stream(&opening).expect("rev 0 + streaming is the marker"));
+
+        let numbered: SendMessageRequest = serde_json::from_str(
+            r#"{"clientMsgId":"00000000-0000-0000-0000-000000000001",
+                "body":"답이 자","stream":{"rev":9,"streaming":true}}"#,
+        )
+        .expect("parses; the refusal is the route's, not serde's");
+        let error = opens_stream(&numbered).expect_err("only rev 0 opens");
+        assert_eq!(error.status, StatusCode::BAD_REQUEST);
+        assert!(
+            error.message.contains("rev 0") && error.message.contains("rev 1"),
+            "the sentence must name both floors: {}",
+            error.message
+        );
+
+        let closed: SendMessageRequest = serde_json::from_str(
+            r#"{"clientMsgId":"00000000-0000-0000-0000-000000000001",
+                "body":"답이 자","stream":{"rev":0,"streaming":false}}"#,
+        )
+        .expect("parses");
+        let error = opens_stream(&closed).expect_err("a send cannot open a closed stream");
+        assert_eq!(error.status, StatusCode::BAD_REQUEST);
+        assert!(
+            error.message.contains("streaming: true"),
+            "the sentence must name the field: {}",
+            error.message
+        );
+    }
+
+    /// A closing verb on the opening block is refused by the decoder itself.
+    ///
+    /// `final`/`outcome` belong to the PATCH. Accepting them here silently would
+    /// let a producer believe it had opened and closed a stream in one write,
+    /// and what it would actually leave behind is a message stuck at
+    /// `streaming: true` with nothing left to close it.
+    #[test]
+    fn the_opening_block_refuses_the_closing_verbs() {
+        let error = serde_json::from_str::<SendMessageRequest>(
+            r#"{"clientMsgId":"00000000-0000-0000-0000-000000000001",
+                "body":"답","stream":{"rev":0,"streaming":true,"final":true}}"#,
+        )
+        .expect_err("`final` is not a key of the opening block");
+        assert!(
+            error.to_string().contains("final"),
+            "the decoder must name the key: {error}"
+        );
+    }
+
+    /// A signed send that also opens a stream is refused **by name**, in the
+    /// domain crate, before anything is written.
+    ///
+    /// The digest is taken over the props as inserted, and the marker lands on
+    /// that same insert — so the pair could only ever come back as "your
+    /// signature does not verify", blaming the caller for a key it was never
+    /// shown.
+    #[test]
+    fn a_signed_send_cannot_also_open_a_stream() {
+        let error = rejected_signature(ProvenanceRejected::SignedStreamOpen);
+        assert_eq!(error.status, StatusCode::BAD_REQUEST);
+        assert_eq!(error.message, "a signed send cannot also open a stream");
+    }
+
     /// A malformed revision is the caller's mistake, not a conflict. 409 would
     /// tell a retry loop to back off and re-send the same unusable number.
     #[test]
@@ -1560,6 +1706,7 @@ mod tests {
             attachment_ids: None,
             routing: None,
             signature: None,
+            stream: None,
         };
         assert!(reject_unsupported(&base()).is_ok());
 

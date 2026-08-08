@@ -159,6 +159,17 @@ pub struct SendMessageRequest {
     /// request supplies verifies its own signature and proves nothing.
     #[serde(default)]
     pub signature: Option<String>,
+    /// #1173 — present when this send **opens a growing answer** rather than
+    /// posting a finished one.
+    ///
+    /// Optional and additive, exactly like [`EditMessageRequest::stream`]: a
+    /// request shaped like yesterday's still means what it meant. It says
+    /// *that* a stream is being opened; what the marker contains is the
+    /// server's to write (`momo_messaging::opening_stream_props`), because a
+    /// props key the staleness guard reads back is one a client must not be
+    /// able to author.
+    #[serde(default)]
+    pub stream: Option<StreamOpenRequest>,
 }
 
 /// The reply rollup embedded in a message (Swift `ThreadRollupDTO`,
@@ -400,6 +411,41 @@ pub struct StreamEditRequest {
     /// rejected by serde as a malformed body — the two are the same status but
     /// only one of them tells the adapter author which field was wrong.
     pub outcome: Option<String>,
+}
+
+/// The `stream` block on [`SendMessageRequest`] (#1173) — the opening write of a
+/// growing answer.
+///
+/// ## Why a producer has to say it at all
+///
+/// A stream's first write is a `POST`, not a `PATCH`: the opening text rides the
+/// insert. In-process (`momo-agent-worker`'s `stream.rs`) the marker goes on with
+/// it, so a turn that dies before its first slice still leaves a message that
+/// *says* it was being assembled. Over REST there was no way to say it, so the
+/// same death left an unmarked half sentence wearing a finished answer's
+/// clothes.
+///
+/// ## Why both fields are declarations the server checks rather than values it
+/// stores
+///
+/// The stored marker is always `momo_messaging::opening_stream_props()`. These
+/// two fields are the producer stating the arithmetic it is about to do, and the
+/// route refuses any other statement — the alternative is a producer numbering
+/// its slices from a floor the row never held, or believing it posted a finished
+/// answer while the channel shows one that nothing will ever close.
+///
+/// `deny_unknown_fields` because a `final`/`outcome` here would be a producer
+/// trying to open and close a stream in one write, and a silently dropped key is
+/// how that becomes a message stuck at `streaming: true` forever.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StreamOpenRequest {
+    /// Must be `momo_messaging::OPENING_STREAM_REV` (`0`) — the floor the
+    /// strictly-greater rule stands on, which makes the first slice `rev: 1` on
+    /// this path exactly as on the in-process one.
+    pub rev: i64,
+    /// Must be `true`. A send opens; only the final `PATCH` slice closes.
+    pub streaming: bool,
 }
 
 /// `PUT`/`DELETE …/messages/{id}/reactions/{emoji}` response (Swift
