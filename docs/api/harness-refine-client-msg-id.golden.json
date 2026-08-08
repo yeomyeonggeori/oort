@@ -1,0 +1,100 @@
+{
+  "_comment": "#1190 — uuid5 파생 골든 벡터. ADR-0158 D4의 refine 멱등 키 `uuidv5(momo.harnessRefi, refinementId)`는 서버(Rust, momo_messaging::refine)와 prime 어댑터(Python, adapters/prime/refine.py)에 한 벌씩 구현돼 있다. 성질이 같다는 말로는 부족하다 — 한쪽이 움직이면 서버가 400으로 잡지만 그때는 이미 프로덕션 거절이다. 이 파일이 그 두 구현이 공유하는 단 하나의 기대값이며, **사본은 없다**: server-rust/crates/momo-messaging/src/refine.rs 와 adapters/prime/tests/test_prime_adapter_contract.py 가 각자 이 경로를 읽어 대조한다. 기대값은 어느 구현의 출력도 아니고 RFC 4122 §4.3(SHA-1(namespace_bytes || utf8(name)), version 5, RFC 4122 variant)에서 직접 조립했다. 값을 고치는 일은 파생 방식을 바꾸는 일이고, 그것은 ADR 없이는 하지 않는다.",
+  "issue": 1190,
+  "adr": "ADR-0158 D4",
+  "namespace": {
+    "_comment": "16 ASCII bytes. Byte 6 is 'a' (0x61) so the version nibble reads 6 while every agent_run.id is uuidv7 — the refinement key space cannot meet the tool-card one at its root. Pinned by value because a 'tidy-up' of this constant in either language silently splits the key space in two.",
+    "asciiBytes": "momo.harnessRefi",
+    "uuid": "6d6f6d6f-2e68-6172-6e65-737352656669"
+  },
+  "vectorFields": {
+    "refinementId": "the name hashed under the namespace",
+    "charLength": "Unicode scalar count — what both sides cap at 200 (HARNESS_REFINE_ID_MAX_CHARS)",
+    "utf8ByteLength": "length of the bytes actually fed to SHA-1",
+    "utf8Hex": "those bytes, so a third language can be added without guessing the encoding",
+    "clientMsgId": "the derived message.client_msg_id, lowercase hyphenated"
+  },
+  "vectors": [
+    {
+      "name": "measured-rpc-id",
+      "why": "실측 RefinementResult.id — the refine_complete RPC record's own key.",
+      "refinementId": "refine_20260807041452415",
+      "charLength": 24,
+      "utf8ByteLength": 24,
+      "utf8Hex": "726566696e655f3230323630383037303431343532343135",
+      "clientMsgId": "ca3738fa-149b-564a-ae16-f6318ecee914"
+    },
+    {
+      "name": "measured-rpc-id-neighbour",
+      "why": "The measured id with its last digit stepped. Adjacent ids must not collide.",
+      "refinementId": "refine_20260807041452416",
+      "charLength": 24,
+      "utf8ByteLength": 24,
+      "utf8Hex": "726566696e655f3230323630383037303431343532343136",
+      "clientMsgId": "a3e05e95-6fe4-52c9-9b3b-2096810eba6b"
+    },
+    {
+      "name": "measured-observed-drift-id",
+      "why": "drift_<sha256 of harness_state.json> — the kernel-path id the adapter mints (70 chars).",
+      "refinementId": "drift_e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "charLength": 70,
+      "utf8ByteLength": 70,
+      "utf8Hex": "64726966745f65336230633434323938666331633134396166626634633839393666623932343237616534316534363439623933346361343935393931623738353262383535",
+      "clientMsgId": "3c8a5384-d54f-58a2-9ed1-23442aaffdd2"
+    },
+    {
+      "name": "edge-empty-string",
+      "why": "Refused by validation on both sides; the derivation is still total and must agree.",
+      "refinementId": "",
+      "charLength": 0,
+      "utf8ByteLength": 0,
+      "utf8Hex": "",
+      "clientMsgId": "bbee3395-9a7f-5b8c-86f7-f78d7aabe84a"
+    },
+    {
+      "name": "edge-hangul",
+      "why": "Multi-byte UTF-8: the name is hashed as bytes, so both sides must encode identically.",
+      "refinementId": "refine_김인턴_자기수정_20260807",
+      "charLength": 24,
+      "utf8ByteLength": 38,
+      "utf8Hex": "726566696e655feab980ec9db8ed84b45fec9e90eab8b0ec8898eca0955f3230323630383037",
+      "clientMsgId": "c4d7b8c6-eb9e-5b35-ad3f-9fbe5ab71b92"
+    },
+    {
+      "name": "edge-astral-plane",
+      "why": "U+1D11E, outside the BMP — a surrogate-pair trap for any consumer that is not UTF-8.",
+      "refinementId": "refine_𝄞_20260807041452415",
+      "charLength": 26,
+      "utf8ByteLength": 29,
+      "utf8Hex": "726566696e655ff09d849e5f3230323630383037303431343532343135",
+      "clientMsgId": "0818bef2-7345-5547-b44f-e98fb7ced109"
+    },
+    {
+      "name": "edge-longest-ascii",
+      "why": "200 characters — HARNESS_REFINE_ID_MAX_CHARS, the longest id validation lets through.",
+      "refinementId": "refine_0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789abc",
+      "charLength": 200,
+      "utf8ByteLength": 200,
+      "utf8Hex": "726566696e655f30313233343536373839303132333435363738393031323334353637383930313233343536373839303132333435363738393031323334353637383930313233343536373839303132333435363738393031323334353637383930313233343536373839303132333435363738393031323334353637383930313233343536373839303132333435363738393031323334353637383930313233343536373839303132333435363738393031323334353637383930313233343536373839616263",
+      "clientMsgId": "fbcffd8e-9f16-5f3f-8810-a5e67da58139"
+    },
+    {
+      "name": "edge-surrounding-whitespace",
+      "why": "The server trims only to test for emptiness (is_valid_id) and then hashes the string as it arrived, while the adapter strips before it derives. Pinned so that neither side starts normalising: a padded id and its trimmed form are different keys, not the same one.",
+      "refinementId": " refine_20260807041452415 ",
+      "charLength": 26,
+      "utf8ByteLength": 26,
+      "utf8Hex": "20726566696e655f323032363038303730343134353234313520",
+      "clientMsgId": "1bd88156-6dd9-553d-a6b9-caf07fa41ae8"
+    },
+    {
+      "name": "edge-longest-hangul",
+      "why": "200 characters / 586 bytes — the cap is counted in characters, not bytes, on both sides.",
+      "refinementId": "refine_자기수정자기수정자기수정자기수정자기수정자기수정자기수정자기수정자기수정자기수정자기수정자기수정자기수정자기수정자기수정자기수정자기수정자기수정자기수정자기수정자기수정자기수정자기수정자기수정자기수정자기수정자기수정자기수정자기수정자기수정자기수정자기수정자기수정자기수정자기수정자기수정자기수정자기수정자기수정자기수정자기수정자기수정자기수정자기수정자기수정자기수정자기수정자기수정갱",
+      "charLength": 200,
+      "utf8ByteLength": 586,
+      "utf8Hex": "726566696e655fec9e90eab8b0ec8898eca095ec9e90eab8b0ec8898eca095ec9e90eab8b0ec8898eca095ec9e90eab8b0ec8898eca095ec9e90eab8b0ec8898eca095ec9e90eab8b0ec8898eca095ec9e90eab8b0ec8898eca095ec9e90eab8b0ec8898eca095ec9e90eab8b0ec8898eca095ec9e90eab8b0ec8898eca095ec9e90eab8b0ec8898eca095ec9e90eab8b0ec8898eca095ec9e90eab8b0ec8898eca095ec9e90eab8b0ec8898eca095ec9e90eab8b0ec8898eca095ec9e90eab8b0ec8898eca095ec9e90eab8b0ec8898eca095ec9e90eab8b0ec8898eca095ec9e90eab8b0ec8898eca095ec9e90eab8b0ec8898eca095ec9e90eab8b0ec8898eca095ec9e90eab8b0ec8898eca095ec9e90eab8b0ec8898eca095ec9e90eab8b0ec8898eca095ec9e90eab8b0ec8898eca095ec9e90eab8b0ec8898eca095ec9e90eab8b0ec8898eca095ec9e90eab8b0ec8898eca095ec9e90eab8b0ec8898eca095ec9e90eab8b0ec8898eca095ec9e90eab8b0ec8898eca095ec9e90eab8b0ec8898eca095ec9e90eab8b0ec8898eca095ec9e90eab8b0ec8898eca095ec9e90eab8b0ec8898eca095ec9e90eab8b0ec8898eca095ec9e90eab8b0ec8898eca095ec9e90eab8b0ec8898eca095ec9e90eab8b0ec8898eca095ec9e90eab8b0ec8898eca095ec9e90eab8b0ec8898eca095ec9e90eab8b0ec8898eca095ec9e90eab8b0ec8898eca095ec9e90eab8b0ec8898eca095ec9e90eab8b0ec8898eca095ec9e90eab8b0ec8898eca095ec9e90eab8b0ec8898eca095ec9e90eab8b0ec8898eca095eab0b1",
+      "clientMsgId": "f79c9021-0538-598c-bf86-64037e0cf2b6"
+    }
+  ]
+}

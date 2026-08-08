@@ -28,12 +28,15 @@ import uuid
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PACKAGE_ROOT = os.path.dirname(os.path.dirname(HERE))
+REPO_ROOT = os.path.dirname(PACKAGE_ROOT)
 sys.path.insert(0, PACKAGE_ROOT)
 sys.path.insert(0, HERE)
 
 from fake_oort import REFINE_PROPS_KEY, STREAM_PROPS_KEY, FakeOort  # noqa: E402
 from prime.oort_client import OortClient, OortError, stable_key, string_props  # noqa: E402
 from prime.refine import (  # noqa: E402
+    HARNESS_REFINE_NAMESPACE,
+    REFINE_ID_MAX_CHARS,
     TRIGGER_OBSERVED_DRIFT,
     HarnessObserver,
     RefineAnnouncer,
@@ -45,6 +48,11 @@ from prime.stream_relay import StreamRelay  # noqa: E402
 
 WS = "00000000-0000-7000-8000-000000000001"
 CH = "00000000-0000-7000-8000-000000000201"
+
+#: #1190 — the *shared* golden file, not a copy of one. The Rust server pins this
+#: same path with `include_str!` (`momo-messaging/src/refine.rs`), so there is one
+#: set of expected uuids in this repository and both derivations answer to it.
+GOLDEN_VECTORS = os.path.join(REPO_ROOT, "docs", "api", "harness-refine-client-msg-id.golden.json")
 
 
 def client_for(oort: FakeOort, **kwargs) -> OortClient:
@@ -285,6 +293,92 @@ class Idempotency(unittest.TestCase):
                 announcer = RefineAnnouncer(client)  # a fresh process each time
                 announcer.announce_refine_complete({"id": "refine_42", "appliedEdits": [{"id": "e1"}]})
             self.assertEqual(len(oort.model.messages), 1)
+
+
+class GoldenVectorCrossCheck(unittest.TestCase):
+    """contract (#1190) — the other language's copy of this function still agrees.
+
+    `harness_refine_client_msg_id` is implemented twice on purpose, once here and
+    once in `momo_messaging::refine`, because the wire has a side in each
+    language. What the code review of #1189 asked for is a way to *watch* that
+    pair: the server does refuse a mismatched key with a 400 naming the expected
+    uuid, but that refusal happens in production, against a real announcement,
+    after the drift shipped.
+
+    So the expectation lives outside both implementations. This file and
+    `server-rust/crates/momo-messaging/src/refine.rs` read **the same path** —
+    no copy, no regenerated fixture, no "keep these two in sync" comment — and
+    the values in it were assembled from RFC 4122 §4.3 rather than captured from
+    either side's output. A drift on either side is a red test in that side's own
+    suite, before a PR.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        with open(GOLDEN_VECTORS, encoding="utf-8") as handle:
+            cls.golden = json.load(handle)
+
+    def test_the_namespace_matches_the_shared_file(self):
+        self.assertEqual(self.golden["namespace"]["uuid"], str(HARNESS_REFINE_NAMESPACE))
+        self.assertEqual(
+            self.golden["namespace"]["asciiBytes"],
+            HARNESS_REFINE_NAMESPACE.bytes.decode("ascii"),
+        )
+
+    def test_every_golden_vector_derives_its_recorded_uuid(self):
+        vectors = self.golden["vectors"]
+        self.assertGreaterEqual(len(vectors), 9, "the edge set must not be quietly shrunk")
+        for vector in vectors:
+            with self.subTest(vector=vector["name"]):
+                refinement_id = vector["refinementId"]
+                encoded = refinement_id.encode("utf-8")
+                # Bytes first: when a unicode vector fails this says whether the
+                # JSON decode or the derivation is the half that moved.
+                self.assertEqual(encoded.hex(), vector["utf8Hex"])
+                self.assertEqual(len(encoded), vector["utf8ByteLength"])
+                self.assertEqual(len(refinement_id), vector["charLength"])
+                self.assertEqual(
+                    harness_refine_client_msg_id(refinement_id),
+                    vector["clientMsgId"],
+                    "derived key drifted from the shared golden vector",
+                )
+
+    def test_the_server_stand_in_answers_to_the_same_file(self):
+        """The hole a per-suite fixture would leave open.
+
+        `fake_oort` derives the expected key itself — it has to, because that is
+        what makes it a stand-in for a server that refuses a mismatched one. But
+        that means the adapter and its stand-in could drift *together* and this
+        suite would stay green while the real Rust server started answering 400.
+
+        So the fake is pinned to the same file, through a real POST: the message
+        the fake accepted must carry the uuid the golden vector names.
+        """
+        vector = next(
+            v for v in self.golden["vectors"] if v["name"] == "measured-rpc-id"
+        )
+        with FakeOort() as oort:
+            announcer = RefineAnnouncer(client_for(oort))
+            announcer.announce_refine_complete(
+                {"id": vector["refinementId"], "appliedEdits": []}
+            )
+            message = next(iter(oort.model.messages.values()))
+            self.assertEqual(message["clientMsgId"], vector["clientMsgId"])
+
+    def test_the_edges_the_set_exists_for_are_still_in_it(self):
+        ids = [vector["refinementId"] for vector in self.golden["vectors"]]
+        self.assertTrue(any(rid == "" for rid in ids), "empty id")
+        self.assertTrue(
+            any(len(rid.encode("utf-8")) > len(rid) for rid in ids), "multi-byte id"
+        )
+        self.assertTrue(
+            any(len(rid) == REFINE_ID_MAX_CHARS for rid in ids),
+            "an id at the cap both sides enforce",
+        )
+        self.assertTrue(
+            any(rid.strip() != rid for rid in ids),
+            "a padded id — neither side may start trimming before it derives",
+        )
 
 
 class RedProofs(unittest.TestCase):
