@@ -55,6 +55,8 @@ pub mod convergence;
 pub mod error;
 pub mod lifecycle;
 pub mod provider;
+/// ADR-0136 D1 / ADR-0156 D4-④ — the managed half of cloud-host acquisition.
+pub mod provision;
 pub mod reattach;
 pub mod reconcile;
 pub mod sweep;
@@ -91,9 +93,25 @@ pub use lifecycle::{
     work_tool_is_enabled_in_tx, CloudHostState, NewWorkSession, T3LockLadder, TerminationReason,
     WorkSession, WorkSessionDetail,
 };
+/// The B0 provider vocabulary, re-exported because this crate's public API
+/// speaks it (`CloudProvisioner::capabilities`, `provision_instance`). A caller
+/// that already depends on `momo-t3` should not have to take a second dependency
+/// to name the types it is handed — and letting `momo-server` depend on
+/// `momo-provider` directly would put the adapter trait, whose implementors own
+/// HTTP clients, back inside the route layer's reach (invariant #2).
+pub use momo_provider::{
+    CloudInstancePresence, CloudInstanceRef, CloudProviderCapabilities, CloudProviderError,
+    CloudProviderOperation,
+};
 pub use provider::{
-    ByocProviderAdapter, CubeSandboxProviderAdapter, CubeSandboxTuning, MockCall,
-    MockInstanceState, MockProviderAdapter, T3ProviderEndpoint,
+    managed_adapters_from_env, managed_adapters_from_process_env, provisioner_from_env,
+    provisioner_from_process_env, ByocProviderAdapter, CubeSandboxProviderAdapter,
+    CubeSandboxTuning, MockCall, MockInstanceState, MockProviderAdapter, T3ProviderEndpoint,
+};
+pub use provision::{
+    enroll_managed_cloud_host_in_tx, find_managed_provision_by_idempotency_key_in_tx,
+    load_managed_provision_in_tx, record_provider_instance_in_tx, BootstrapDerivationSecret,
+    CloudProvisioner, ManagedProvision, NewManagedProvision, ProvisionRequest,
 };
 pub use reattach::{
     clamp_replay_limit, list_session_events_in_tx, load_session_reattach_state_in_tx,

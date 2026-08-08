@@ -5,7 +5,23 @@
 //! configured with (the comment the e2e compose spells out at
 //! `docker-compose.e2e.yml:483-484`). That resolution is a seam, not a table:
 //! this module maps an id to an adapter and knows nothing else about providers.
+//!
+//! ## What ADR-0156 D4-④ changed here
+//!
+//! Until D4-④ this resolver served exactly one id (`byoc`) and refused every
+//! managed one, because no managed adapter existed that could be pointed at
+//! anything real. Now one can be: [`momo_t3::managed_adapters_from_process_env`]
+//! builds every managed substrate **the operator configured**, once, at
+//! construction.
+//!
+//! The refusal did not go away — its *reason* moved from the source tree to the
+//! environment. A managed id is `Unwired` when this process holds no endpoint
+//! for it, which is exactly the deployment where resolving it would aim the
+//! reconciler at a host nobody stood up. So the boundary test below still passes
+//! for an unconfigured process and now also states the other half: a configured
+//! one resolves.
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use momo_provider::CloudProviderAdapter;
@@ -33,27 +49,70 @@ pub trait ProviderAdapterResolver: Send + Sync {
 
 /// The production resolver.
 ///
-/// Today it serves exactly one adapter — the degenerate BYOC form, whose probe
-/// is honestly [`Unknown`](momo_provider::CloudInstancePresence::Unknown) and
-/// whose destroy is momo releasing its own binding. Every other registered id is
-/// **refused**, on purpose:
+/// It serves two kinds of adapter and refuses everything else:
 ///
-/// * `cubesandbox` **exists** as of ADR-0156 D4-③ and is registered, but wiring
-///   it in here is D4-④ (provisioner integration) and is gated on D4-② proving
-///   the substrate boots on a real host. Resolving it today would point the
-///   reconciler at an endpoint nobody has stood up, so the refusal below is the
-///   boundary, stated by name rather than left as a silence;
-/// * substituting an in-process [`momo_t3::MockProviderAdapter`] here would be
+/// * the degenerate **BYOC** form, always — it needs no configuration, its probe
+///   is honestly [`Unknown`](momo_provider::CloudInstancePresence::Unknown) and
+///   its destroy is momo releasing its own binding;
+/// * every **managed** substrate this process was given an endpoint and a
+///   credential for (ADR-0142 D4). The adapters are built once, at construction,
+///   because each owns an HTTP client and a per-intent rebuild would discard the
+///   connection pool on the hot path.
+///
+/// Everything else is **refused**, on purpose:
+///
+/// * a registered managed id with no configuration is `Unwired`. Resolving it
+///   would point the reconciler at an endpoint nobody has stood up;
+/// * substituting an in-process [`momo_t3::MockProviderAdapter`] for one would be
 ///   worse than useless: a fresh mock knows no instances, so every probe would
 ///   answer `Absent` and the reconciler would settle live paid sessions on the
 ///   word of a substrate that never saw them. That is precisely the silent
 ///   failure ADR-0142 D3.1 bans, so the refusal is the safe answer, not a gap in
-///   the wiring.
+///   the wiring. [`momo_t3::managed_adapters_from_env`] enforces that by never
+///   producing one.
 ///
 /// A refusal is logged by name and leaves the durable intent for the next pass,
 /// which is what the deadline and the backoff are for.
-#[derive(Debug, Default, Clone, Copy)]
-pub struct RegistryAdapterResolver;
+#[derive(Default, Clone)]
+pub struct RegistryAdapterResolver {
+    managed: BTreeMap<String, Arc<dyn CloudProviderAdapter>>,
+}
+
+/// Hand-written: the adapters themselves are not `Debug` (each holds an operator
+/// credential, redacted by its own impl), and what a log line wants here is the
+/// *shape* of the wiring anyway — which substrates this process can reach.
+impl std::fmt::Debug for RegistryAdapterResolver {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("RegistryAdapterResolver")
+            .field("wired", &self.wired_provider_ids())
+            .finish()
+    }
+}
+
+impl RegistryAdapterResolver {
+    /// Build from the process environment — the production constructor.
+    pub fn from_process_env() -> RegistryAdapterResolver {
+        RegistryAdapterResolver {
+            managed: momo_t3::managed_adapters_from_process_env(),
+        }
+    }
+
+    /// Build from an explicit environment map (tests, and any caller that must
+    /// not read the ambient process env).
+    pub fn from_env(env: &BTreeMap<String, String>) -> RegistryAdapterResolver {
+        RegistryAdapterResolver {
+            managed: momo_t3::managed_adapters_from_env(env),
+        }
+    }
+
+    /// The registry ids this process can actually speak to. Logged at boot so a
+    /// deployment can tell "no managed substrate configured" from "configured
+    /// and idle".
+    pub fn wired_provider_ids(&self) -> Vec<&str> {
+        self.managed.keys().map(String::as_str).collect()
+    }
+}
 
 impl ProviderAdapterResolver for RegistryAdapterResolver {
     fn adapter_for(
@@ -62,6 +121,9 @@ impl ProviderAdapterResolver for RegistryAdapterResolver {
     ) -> Result<Arc<dyn CloudProviderAdapter>, AdapterError> {
         if provider_id == BYOC_PROVIDER_ID {
             return Ok(Arc::new(ByocProviderAdapter::new()));
+        }
+        if let Some(adapter) = self.managed.get(provider_id) {
+            return Ok(Arc::clone(adapter));
         }
         if is_registered(provider_id) {
             return Err(AdapterError::Unwired(provider_id.to_string()));
@@ -95,12 +157,27 @@ mod tests {
     use super::*;
     use momo_provider::CloudProviderOperation;
     use momo_t3::provider::registry::{
-        CUBESANDBOX_PROVIDER_ID, MOCK_A_PROVIDER_ID, MOCK_B_PROVIDER_ID,
+        environment_namespace, CUBESANDBOX_PROVIDER_ID, MOCK_A_PROVIDER_ID, MOCK_B_PROVIDER_ID,
     };
+
+    fn configured_env() -> BTreeMap<String, String> {
+        let namespace = environment_namespace(CUBESANDBOX_PROVIDER_ID);
+        BTreeMap::from([
+            (
+                format!("{namespace}_API_BASE_URL"),
+                "http://cube.invalid:3000".to_string(),
+            ),
+            (
+                format!("{namespace}_API_KEY"),
+                "operator-issued-key".to_string(),
+            ),
+        ])
+    }
 
     #[test]
     fn byoc_resolves_to_the_degenerate_adapter() {
-        let adapter = RegistryAdapterResolver
+        let resolver = RegistryAdapterResolver::default();
+        let adapter = resolver
             .adapter_for(BYOC_PROVIDER_ID)
             .expect("byoc is served");
         assert!(!adapter
@@ -109,31 +186,84 @@ mod tests {
         assert_eq!(adapter.capabilities().provider_id, BYOC_PROVIDER_ID);
     }
 
-    /// `cubesandbox` is in this list on purpose (ADR-0156 D4-③/D4-④). The
-    /// adapter is built and proved against a fake upstream, but until D4-② has
-    /// stood a real host up, resolving it here would aim the reconciler at
-    /// nothing. The refusal is the D4-④ boundary made visible.
+    /// ADR-0156 D4-④ — the wiring #1179 named as a boundary.
+    ///
+    /// The reconciler resolves the managed substrate the API provisioned
+    /// against, so pause/resume/destroy/probe reach the same host the create
+    /// went to. Without this, every managed intent would sit `Unwired` forever
+    /// and a paid instance could be paused in the ledger and running on the box.
+    #[test]
+    fn a_configured_managed_provider_resolves_to_its_own_adapter() {
+        let resolver = RegistryAdapterResolver::from_env(&configured_env());
+        let adapter = resolver
+            .adapter_for(CUBESANDBOX_PROVIDER_ID)
+            .expect("a configured managed substrate is served");
+        assert_eq!(
+            adapter.capabilities().provider_id,
+            CUBESANDBOX_PROVIDER_ID,
+            "the adapter must answer for the row's provider, not for whatever this process \
+             prefers"
+        );
+        for operation in [
+            CloudProviderOperation::Pause,
+            CloudProviderOperation::Resume,
+            CloudProviderOperation::Destroy,
+            CloudProviderOperation::Probe,
+        ] {
+            assert!(adapter.capabilities().supports(operation));
+        }
+        assert_eq!(
+            resolver.wired_provider_ids(),
+            vec![CUBESANDBOX_PROVIDER_ID],
+            "only the substrate the operator configured is wired"
+        );
+    }
+
+    /// The refusal that survives D4-④, with its reason moved to the environment.
+    ///
+    /// `mock-a`/`mock-b` are in-process substrates and can never be served here.
+    /// A managed id is served only where an operator supplied an endpoint — so on
+    /// a deployment that configured none, resolving it would aim the reconciler
+    /// at a host nobody stood up, and the refusal is still the correct answer.
     #[test]
     fn a_managed_provider_with_no_adapter_is_refused_not_guessed() {
+        let unconfigured = RegistryAdapterResolver::default();
+        assert!(unconfigured.wired_provider_ids().is_empty());
         for provider_id in [
             MOCK_A_PROVIDER_ID,
             MOCK_B_PROVIDER_ID,
             CUBESANDBOX_PROVIDER_ID,
         ] {
             assert_eq!(
-                RegistryAdapterResolver.adapter_for(provider_id).err(),
+                unconfigured.adapter_for(provider_id).err(),
                 Some(AdapterError::Unwired(provider_id.to_string())),
                 "named regression: a substrate the notifier cannot ask must never be \
                  answered by an empty in-process mock (its probe would read `absent`)"
+            );
+        }
+
+        // …and configuring the managed one does not make the in-process pair
+        // resolvable either.
+        let configured = RegistryAdapterResolver::from_env(&configured_env());
+        for provider_id in [MOCK_A_PROVIDER_ID, MOCK_B_PROVIDER_ID] {
+            assert_eq!(
+                configured.adapter_for(provider_id).err(),
+                Some(AdapterError::Unwired(provider_id.to_string()))
             );
         }
     }
 
     #[test]
     fn an_unregistered_provider_fails_closed() {
-        assert_eq!(
-            RegistryAdapterResolver.adapter_for("e2b").err(),
-            Some(AdapterError::Unknown("e2b".to_string()))
-        );
+        for resolver in [
+            RegistryAdapterResolver::default(),
+            RegistryAdapterResolver::from_env(&configured_env()),
+        ] {
+            assert_eq!(
+                resolver.adapter_for("e2b").err(),
+                Some(AdapterError::Unknown("e2b".to_string())),
+                "named regression: wiring a managed substrate must not resurrect the retired id"
+            );
+        }
     }
 }

@@ -101,8 +101,9 @@ pub use provider::{
 };
 pub use quota::{list_quota_snapshots, QuotaSnapshot};
 pub use tier::{
-    load_tier_policy, tier_target_allowed, upsert_tier_policy, validated_auto_target,
-    validated_tier_mode, TierPolicy, TierScope, TierSpecInvalid, TierTargetRejected,
+    cloud_acquisition_rejection, load_tier_policy, tier_target_allowed, upsert_tier_policy,
+    validated_auto_target, validated_tier_mode, CloudAcquisitionRejected, TierPolicy, TierScope,
+    TierSpecInvalid, TierTargetRejected,
 };
 pub use workspace::{
     create_workspace_in_tx, normalized_workspace_name, normalized_workspace_slug, CreatedWorkspace,

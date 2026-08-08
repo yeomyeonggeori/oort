@@ -49,6 +49,21 @@ pub struct BootstrapToken {
 }
 
 impl BootstrapToken {
+    /// Wrap a raw token somebody else chose, computing the digest here.
+    ///
+    /// `pub(crate)` because *choosing* the token is a policy with exactly two
+    /// legal answers, and both live in this crate: BYOC mints a random one
+    /// ([`mint_bootstrap_token`]) because there is nothing to converge on, and
+    /// managed provisioning derives one from the provision id
+    /// ([`crate::provision::CloudProvisioner::bootstrap_token`]) because
+    /// ADR-0136 requires a retry after a lost response to hand the instance the
+    /// same credential the ledger row already stores the digest of. Exposing
+    /// this publicly would let a route layer invent a third.
+    pub(crate) fn from_raw(raw: String) -> BootstrapToken {
+        let digest = momo_wire::sha256_hex(raw.as_bytes());
+        BootstrapToken { raw, digest }
+    }
+
     pub fn raw(&self) -> &str {
         &self.raw
     }
@@ -78,13 +93,11 @@ impl std::fmt::Debug for BootstrapToken {
 /// token is an opaque bearer string the workd echoes back — but the properties
 /// that are (unguessable, single-use, digest-only at rest) are preserved.
 pub fn mint_bootstrap_token() -> BootstrapToken {
-    let raw = format!(
+    BootstrapToken::from_raw(format!(
         "{}{}",
         Uuid::new_v4().as_simple(),
         Uuid::new_v4().as_simple()
-    );
-    let digest = momo_wire::sha256_hex(raw.as_bytes());
-    BootstrapToken { raw, digest }
+    ))
 }
 
 /// Digest of a token presented by a workd (`tokenDigest` :1216-1218).

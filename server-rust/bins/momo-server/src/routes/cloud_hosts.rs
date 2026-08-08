@@ -1,60 +1,83 @@
-//! T3 cloud-host acquisition — Swift `CloudProvisionerRoutes.swift` parity, the
-//! BYOC subset (ADR-0142 D1).
+//! T3 cloud-host acquisition — Swift `CloudProvisionerRoutes.swift` parity
+//! (ADR-0142 D1 BYOC + ADR-0136 D1-A managed).
 //!
 //! ```text
 //! POST /v1/workspaces/{ws}/work-hosts/byoc/enrollments  (bearer, workspace admin)
+//! POST /v1/workspaces/{ws}/work-hosts/cloud             (bearer, active member + tier policy)
 //! POST /v1/workspaces/{ws}/work-hosts/cloud/register    (PUBLIC, MomoBootstrap token)
 //! GET  /v1/workspaces/{ws}/work-hosts/cloud/{provision} (bearer, human)
 //! ```
 //!
-//! ## Why BYOC and not a managed provider
+//! ## The two acquisitions, and the one line between them
 //!
-//! The packet named `mock-a`. Measured, `mock-a` is a **managed** adapter: the
-//! managed path (`POST .../work-hosts/cloud`, Swift `create` :80-283) calls the
-//! provider's HTTP API to boot an instance, which needs (a) a live substrate at
-//! `MOMO_T3_PROVIDER_MOCK_A_API_BASE_URL` and (b) an outbound HTTP client inside
-//! momo-server — and this crate deliberately has none (invariant #2: only
-//! momo-relay makes outbound HTTP). BYOC is the path that closes the T3 curve
-//! without either: momo registers, schedules, observes and bills a host it never
-//! boots, so `enroll` makes no provider call at all (:284-286) and the whole
-//! lifecycle from `provisioning` to settlement is exercised by the same
-//! statements a managed host would use. `mock-a`'s managed create belongs with
-//! the batch that gives momo-server a provider client.
+//! Both end at the same `work_cloud_host` row and the same `register` route.
+//! They differ in exactly one step: who boots the machine.
 //!
-//! ## The bootstrap token
+//! * **BYOC** ([`enroll`], ADR-0142 D1) — the owner does. momo never gained the
+//!   right to boot or kill their machine, so the enrollment *is* the instance:
+//!   `provider_sandbox_id` is derived at insert time and no provider is called.
+//! * **Managed** ([`provision`], ADR-0136 D1-A / ADR-0156 D4-④) — momo does,
+//!   through the [`momo_t3::CloudProvisioner`] the operator configured. The row
+//!   is committed *before* the provider call and the instance handle is recorded
+//!   *after* it, because an instance with no row is money nobody can name while a
+//!   row with no instance is a retry.
 //!
-//! `enroll` mints a one-shot token, stores **only its SHA-256 digest**
-//! (045:87-88) and returns the token exactly once. `register` is public because
-//! the workd holding that token has no bearer credential yet; the token is its
-//! authorization, spent under `FOR UPDATE` with unconsumed/unexpired/`provisioning`
-//! all in the WHERE clause, so a replay finds nothing. A replayed
-//! `idempotencyRef` on `enroll` is a 409 rather than a re-issue: momo cannot
-//! re-reveal a token it never kept.
+//! B2.2 could only serve the first: the managed create needs an outbound HTTP
+//! client, and this crate deliberately has no `reqwest` (invariant #2). It still
+//! does not — the client lives inside `momo-t3`'s adapter and the whole surface
+//! reachable from here is the provisioner's two methods, exactly the shape
+//! ADR-0149 gave `momo-ephemeral`.
 //!
-//! ## Not served by this batch
+//! ## The bootstrap token, and why the two paths mint it differently
 //!
-//! `POST .../work-hosts/cloud` (managed create), `.../cloud/pause`,
-//! `.../cloud/resume`, `DELETE .../cloud` (destroy) — every one of them drives a
-//! provider adapter over HTTP. They land with the provider-client batch; ADR-0140
-//! D4 reconciliation lands with it too.
+//! `enroll` mints a **random** token, stores only its SHA-256 digest
+//! (045:87-88) and returns it exactly once — a replayed `idempotencyRef` is a
+//! 409, because momo cannot re-reveal a token it never kept.
+//!
+//! `provision` **derives** its token from the provision id (ADR-0136 D2), and a
+//! replayed `idempotencyRef` is therefore *success*, not a conflict: the retry
+//! re-derives the same credential the row already stores the digest of, hands it
+//! to the same instance the adapter's metadata reconstruction converges on, and
+//! nothing is created twice. The token is never returned to anybody — it travels
+//! in the instance's environment.
+//!
+//! `register` is public for both because the workd holding a token has no bearer
+//! credential yet; the token is its authorization, spent under `FOR UPDATE` with
+//! unconsumed/unexpired/`provisioning` all in the WHERE clause.
+//!
+//! ## Not served here
+//!
+//! `.../cloud/pause`, `.../cloud/resume`, `DELETE .../cloud` — the durable-intent
+//! verbs. They are ADR-0140 D4's, and the process that performs them is
+//! `momo-notifier`'s reconciler, which resolves the same adapter through
+//! `momo_t3::managed_adapters_from_process_env`.
+
+use std::sync::Arc;
 
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::IntoResponse;
 use axum::{Extension, Json};
 use momo_auth::{active_workspace_role, insert_work_host, load_work_host, NewWorkHost, Principal};
+use momo_settings::{
+    cloud_acquisition_rejection, load_tier_policy, CloudAcquisitionRejected, TierScope,
+};
 use momo_t3::{
     bind_cloud_host_in_tx, bootstrap_token_digest, claim_bootstrap_in_tx,
     cloud_host_id_for_bootstrap_digest, enroll_byoc_cloud_host_in_tx,
-    find_enrollment_by_idempotency_key_in_tx, load_cloud_host_in_tx, lock_enrollment_key_in_tx,
-    mint_bootstrap_token, reserve_provisioning_slot_in_tx, with_t3_lifecycle_tx, NewByocEnrollment,
-    T3LockLadder,
+    enroll_managed_cloud_host_in_tx, find_enrollment_by_idempotency_key_in_tx,
+    find_managed_provision_by_idempotency_key_in_tx, load_cloud_host_in_tx,
+    load_managed_provision_in_tx, lock_enrollment_key_in_tx, mint_bootstrap_token,
+    record_provider_instance_in_tx, reserve_provisioning_slot_in_tx, with_t3_lifecycle_tx,
+    CloudProviderError, CloudProvisioner, ManagedProvision, NewByocEnrollment, NewManagedProvision,
+    ProvisionRequest, T3LockLadder,
 };
 use uuid::Uuid;
 
 use crate::dto::{
-    ByocEnrollmentDto, ByocEnrollmentResponse, CloudHostDto, CloudHostResponse,
-    EnrollByocHostRequest, RegisterWorkHostRequest,
+    ByocEnrollmentDto, ByocEnrollmentResponse, CloudHostDto, CloudHostResponse, CloudProvisionDto,
+    CloudProvisionResponse, EnrollByocHostRequest, ProvisionCloudHostRequest,
+    RegisterWorkHostRequest,
 };
 use crate::error::ApiError;
 use crate::routes::shared::{
@@ -197,6 +220,314 @@ pub async fn enroll(
             },
         }),
     ))
+}
+
+// ---------------------------------------------------------------------------
+// managed acquisition (ADR-0136 D1-A, ADR-0156 D4-④)
+// ---------------------------------------------------------------------------
+
+/// Only a workspace-shared managed host is served, exactly as for BYOC.
+fn validated_shared_scope(scope: Option<&str>) -> Result<(), ApiError> {
+    match scope {
+        None | Some("workspace") => Ok(()),
+        Some(_) => Err(ApiError::bad_request(
+            "oort Cloud 호스트는 워크스페이스 공용만 지원합니다. 개인 호스트는 아직 열려 있지 않습니다.",
+        )),
+    }
+}
+
+/// The 503 an instance answers when momo Cloud is configured *in intent* but not
+/// *in capability* — the operator named a managed provider and supplied no
+/// endpoint, or named the degenerate one.
+///
+/// A 503 rather than a 500: nothing is wrong with the request, and nothing is
+/// wrong with the code. The instance simply cannot acquire a paid host right
+/// now, and saying so is what stops a durable billable row being written against
+/// a substrate nobody can reach (ADR-0142 D4).
+fn provisioner_unavailable() -> ApiError {
+    ApiError::new(
+        StatusCode::SERVICE_UNAVAILABLE,
+        "이 인스턴스에는 oort Cloud 호스트를 생성할 수 있는 provider가 설정돼 있지 않습니다. \
+         인스턴스 운영자에게 문의하세요.",
+    )
+}
+
+/// The provisioner for this request, or a refusal — resolved **before** any
+/// durable write.
+///
+/// Three conditions, and each one is a way a half-configured instance could
+/// otherwise create something billable it can never finish:
+///
+/// 1. the operator configured a provisioner at all;
+/// 2. it is the provider new rows will be stamped with
+///    (`work_cloud_host.provider` must name the adapter that will later be asked
+///    to pause/destroy this host — a mismatch here is a host the reconciler
+///    resolves to the wrong substrate);
+/// 3. it declares `Create`. Read through
+///    [`momo_provider::CloudProviderCapabilities`], never by comparing a provider
+///    id, so this stays the ADR-0142 D2 shape: policy asks what a substrate can
+///    do, never who it is.
+fn require_provisioner(state: &AppState) -> Result<Arc<CloudProvisioner>, ApiError> {
+    let provisioner = state
+        .t3_provisioner
+        .clone()
+        .ok_or_else(provisioner_unavailable)?;
+    if provisioner.provider_id() != state.t3.default_provider_id {
+        tracing::error!(
+            configured_provider = %state.t3.default_provider_id,
+            provisioner_provider = %provisioner.provider_id(),
+            "the configured T3 provider and the built provisioner disagree; refusing to \
+             provision rather than stamping rows with a provider nobody will reconcile"
+        );
+        return Err(provisioner_unavailable());
+    }
+    if !provisioner.can_create() {
+        // The degenerate adapter reaching here means the operator asked for a
+        // managed acquisition against a BYOC-shaped provider. `enroll` is the
+        // route for that, and saying so beats booting nothing.
+        return Err(provisioner_unavailable());
+    }
+    Ok(provisioner)
+}
+
+/// ADR-0136's flow begins at a *cloud session request*, so the policy that
+/// decides whether this member's work may go to the cloud at all is the gate.
+fn tier_rejection(rejection: CloudAcquisitionRejected) -> ApiError {
+    match rejection {
+        CloudAcquisitionRejected::TierPolicyExcludesCloud => ApiError::new(
+            StatusCode::CONFLICT,
+            "현재 작업 티어 정책이 oort Cloud 호스트를 허용하지 않습니다. 정책을 먼저 바꾸세요.",
+        ),
+        CloudAcquisitionRejected::PolicyPinsAnotherHost => ApiError::new(
+            StatusCode::CONFLICT,
+            "작업 티어 정책이 특정 호스트를 지정하고 있습니다. 새 클라우드 호스트를 만들 수 없습니다.",
+        ),
+    }
+}
+
+/// A provider call that did not produce an instance, as the client sees it.
+///
+/// Always a 503 and always the same sentence: the substrate refused, timed out,
+/// or answered something momo could not read, and none of those is the caller's
+/// to fix or to distinguish. What *is* load bearing is the log line beside it —
+/// the failure is named for the operator, and the durable row stays
+/// `provisioning` so the very next retry with the same `idempotencyRef`
+/// re-derives the same bootstrap token and converges on the same instance.
+fn provider_call_failed(context: &str, error: CloudProviderError) -> ApiError {
+    tracing::warn!(
+        context,
+        error = %error,
+        "oort Cloud instance creation did not complete; the provisioning row stays claimable"
+    );
+    ApiError::new(
+        StatusCode::SERVICE_UNAVAILABLE,
+        "oort Cloud 호스트를 준비하지 못했습니다. 잠시 후 같은 idempotencyRef로 다시 시도하세요.",
+    )
+}
+
+/// `POST /v1/workspaces/{ws}/work-hosts/cloud` → 201 (Swift `create`, :80-283;
+/// ADR-0136 D1-A, ADR-0156 D4-④).
+///
+/// ## The shape of the transaction, and why it is two of them
+///
+/// ```text
+///   tx1 (tenant)  membership → tier policy → key advisory → replay
+///                 → admission → durable row            [COMMIT]
+///   ── no transaction ──  adapter.create (HTTP)
+///   tx2 (ladder)  record the instance handle           [COMMIT]
+/// ```
+///
+/// ADR-0136 D2 requires the durable intent to be committed before the external
+/// call, and ADR-0140 D4 requires provider calls to happen outside a
+/// transaction — a DB transaction held open across an HTTP round trip is a lock
+/// held for as long as somebody else's outage. The gap between the two is
+/// exactly the "row exists, instance may or may not" state, and it is
+/// recoverable *because* the token is derived rather than minted: the retry is
+/// the replay branch, and it walks the same second half.
+///
+/// ## What closes the double-create window
+///
+/// Two halves, and neither is sufficient alone (the managed adapter's own module
+/// header states the same pairing from the substrate's side):
+///
+/// * **exclusion** — `lock_enrollment_key_in_tx` serializes concurrent requests
+///   carrying the same `idempotencyRef`, and `work_cloud_host_create_idempotency_idx`
+///   (049:38) makes a second row for one ref impossible. Distinct refs get
+///   distinct provision ids, hence distinct instance stamps, and cannot collide.
+/// * **recovery** — the adapter's metadata reconstruction adopts an instance a
+///   lost response left behind, and [`momo_t3::record_provider_instance_in_tx`]
+///   keeps the handle the row already published if two ever raced past both.
+pub async fn provision(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path(workspace): Path<String>,
+    Json(request): Json<ProvisionCloudHostRequest>,
+) -> Result<impl IntoResponse, ApiError> {
+    require_human(&principal, "oort Cloud management requires a human member")?;
+    let workspace_id = workspace_scope(&workspace, &principal)?;
+    // The gate first, and before every write: T3 on, the configured provider in
+    // the registry, an https callback URL. A disabled instance never reaches the
+    // provisioner below, so no request leaves this process and no row is made.
+    let public_base_url = ready_t3(&state.t3)?;
+    let provisioner = require_provisioner(&state)?;
+
+    validated_shared_scope(request.scope.as_deref())?;
+    let display_name = validated_display_name(&request.display_name)?;
+    let idempotency_key = Uuid::parse_str(request.idempotency_ref.trim())
+        .map_err(|_| ApiError::bad_request("idempotencyRef must be a UUID"))?;
+
+    let member_id = principal.member_id;
+    let unit_rate = state.t3.unit_rate_micro_usd_second;
+    let provider = provisioner.provider_id().to_string();
+
+    // ---- tx1: the durable intent ------------------------------------------
+    let provisioner_for_tx = Arc::clone(&provisioner);
+    let enrolled_display_name = display_name.clone();
+    let enrolled = settle(
+        "cloud_hosts.provision",
+        tenant_tx(&state.pool, workspace_id, move |conn| {
+            Box::pin(async move {
+                if active_workspace_role(conn, workspace_id, member_id)
+                    .await?
+                    .is_none()
+                {
+                    return Ok(Err(ApiError::forbidden("not an active workspace member")));
+                }
+                // ADR-0136 D1-A: the trigger is a cloud session request, so the
+                // policy in force for this member is what says whether a paid
+                // host may be acquired for them at all.
+                let policy = load_tier_policy(conn, workspace_id, TierScope::Member(member_id))
+                    .await
+                    .map_err(momo_t3::T3Error::from)?;
+                if let Some(rejection) =
+                    cloud_acquisition_rejection(&policy.mode, policy.auto_target.as_deref())
+                {
+                    return Ok(Err(tier_rejection(rejection)));
+                }
+
+                // The same serialization the BYOC enrollment uses: a row lock
+                // cannot order a key which does not exist yet.
+                lock_enrollment_key_in_tx(conn, workspace_id, idempotency_key).await?;
+
+                // Replay first, admission second: a repeated idempotencyRef must
+                // not consume a second slot.
+                if let Some(existing) = find_managed_provision_by_idempotency_key_in_tx(
+                    conn,
+                    workspace_id,
+                    idempotency_key,
+                )
+                .await?
+                {
+                    return Ok(Ok(existing));
+                }
+
+                reserve_provisioning_slot_in_tx(conn, workspace_id, member_id).await?;
+
+                let provision_id = momo_t3::allocate_uuid_v7(conn).await?;
+                // Derived, not minted (ADR-0136 D2). The digest is all that is
+                // stored, and the retry above re-derives the raw token from the
+                // provision id alone.
+                let token = provisioner_for_tx.bootstrap_token(provision_id);
+                let enrollment = enroll_managed_cloud_host_in_tx(
+                    conn,
+                    workspace_id,
+                    &NewManagedProvision {
+                        provision_id,
+                        requester_member_id: member_id,
+                        provider: provider.clone(),
+                        bootstrap_token_digest: token.digest().to_string(),
+                        unit_rate_micro_usd_second: unit_rate,
+                        idempotency_key,
+                        requested_display_name: enrolled_display_name.clone(),
+                    },
+                )
+                .await?;
+                Ok(Ok(enrollment))
+            })
+        })
+        .await,
+    )?;
+
+    let provision_id = enrolled.provision_id;
+    let register_url =
+        format!("{public_base_url}/v1/workspaces/{workspace_id}/work-hosts/cloud/register");
+
+    // A replay whose instance is already recorded asks the substrate nothing:
+    // the work is done and re-calling would only widen the window this branch
+    // exists to close.
+    if enrolled.instance_known {
+        return Ok((
+            StatusCode::CREATED,
+            Json(CloudProvisionResponse {
+                provision: provision_dto(enrolled, register_url),
+            }),
+        ));
+    }
+
+    // ---- the provider call, outside every transaction ----------------------
+    //
+    // The one-shot credential the workd will spend is assembled inside the
+    // provisioner (it derives the same string a retry would), so no bootstrap
+    // token value ever exists in this crate.
+    let instance = provisioner
+        .provision_instance(&ProvisionRequest {
+            provision_id,
+            workspace_id,
+            display_name: &display_name,
+            server_url: &public_base_url,
+        })
+        .await
+        .map_err(|error| provider_call_failed("cloud_hosts.provision", error))?;
+
+    // ---- tx2: publish the handle under the ADR-0140 D2 ladder --------------
+    let instance_id = instance.instance_id.clone();
+    let recorded = settle(
+        "cloud_hosts.provision.record",
+        with_t3_lifecycle_tx(
+            &state.pool,
+            workspace_id,
+            T3LockLadder::host(provision_id),
+            move |conn| {
+                Box::pin(async move {
+                    record_provider_instance_in_tx(conn, workspace_id, provision_id, &instance_id)
+                        .await?;
+                    Ok(Ok(load_managed_provision_in_tx(
+                        conn,
+                        workspace_id,
+                        provision_id,
+                    )
+                    .await?))
+                })
+            },
+        )
+        .await,
+    )?
+    .ok_or_else(|| ApiError::internal("cloud_hosts.provision", "cloud provision reload failed"))?;
+
+    Ok((
+        StatusCode::CREATED,
+        Json(CloudProvisionResponse {
+            provision: provision_dto(
+                ManagedProvision {
+                    replayed: enrolled.replayed,
+                    ..recorded
+                },
+                register_url,
+            ),
+        }),
+    ))
+}
+
+fn provision_dto(provision: ManagedProvision, register_url: String) -> CloudProvisionDto {
+    CloudProvisionDto {
+        provision_id: provision.provision_id.to_string(),
+        provider: provision.provider,
+        state: provision.state,
+        instance_known: provision.instance_known,
+        bootstrap_expires_at_ms: provision.bootstrap_expires_at_ms,
+        register_url,
+        replayed: provision.replayed,
+    }
 }
 
 /// `POST /v1/workspaces/{ws}/work-hosts/cloud/register` → 201 — PUBLIC

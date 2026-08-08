@@ -107,6 +107,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
     }
 
+    // ADR-0156 D4-④: the managed provisioner, built once from the process
+    // environment. Absent whenever T3 is off, the default provider is the
+    // degenerate one, or the operator supplied no endpoint for it — and in all
+    // three cases the acquisition route answers 503 rather than writing a
+    // billable row against a substrate nobody can reach (ADR-0142 D4).
+    //
+    // Deliberately gated on `t3.enabled` as well as on configuration: a disabled
+    // instance must not even hold the object that can create paid instances.
+    let t3_provisioner = config
+        .t3
+        .enabled
+        .then(|| momo_t3::provisioner_from_process_env(&config.t3.default_provider_id))
+        .flatten()
+        .map(std::sync::Arc::new);
+    tracing::info!(
+        t3_provisioner_ready = t3_provisioner.is_some(),
+        "oort Cloud managed provisioner resolved"
+    );
+
     let pool = momo_db::connect(&config.db).await?;
     let state = AppState::new(
         pool,
@@ -144,6 +163,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // service-account key and a shared drive. The routes are mounted either way,
     // so "no archive here" is distinguishable from "no such route".
     .with_drive(drive);
+    // ADR-0156 D4-④: attached only when one was actually built, so "no managed
+    // substrate here" stays distinguishable from "one that cannot be reached".
+    let state = match t3_provisioner {
+        Some(provisioner) => state.with_t3_provisioner(provisioner),
+        None => state,
+    };
     let app = build_app(state);
 
     let address: SocketAddr = format!("{}:{}", config.host, config.port).parse()?;

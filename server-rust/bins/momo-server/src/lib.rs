@@ -109,6 +109,18 @@ pub struct AppState {
     /// otherwise, so a deployment that never configured T3 answers 503 on every
     /// T3 route instead of half-provisioning something billable.
     pub t3: Arc<T3Settings>,
+    /// The managed provisioner for [`T3Settings::default_provider_id`]
+    /// (ADR-0156 D4-④). `None` on every instance that named no managed
+    /// substrate — including every BYOC-only one — and `None` is what makes the
+    /// managed acquisition route answer 503.
+    ///
+    /// It is the **only** object in this process that can create a billable
+    /// instance, and its API is the [`momo_t3::CloudProvisioner`] surface: a
+    /// deterministic bootstrap credential and a create. Same shape and same
+    /// reason as [`EphemeralState::publisher`] — this crate still carries no
+    /// `reqwest`, so no handler can build a provider request of its own
+    /// (invariant #2).
+    pub t3_provisioner: Option<Arc<momo_t3::CloudProvisioner>>,
     /// AgentGateway settings (B2.6). **`worker` mode** unless
     /// [`AppState::with_agent_gateway`] says otherwise, so the callback surface
     /// answers 403 on a deployment that never chose it.
@@ -173,6 +185,7 @@ impl AppState {
             jwt_secret: Arc::new(jwt_secret),
             realtime_ws_url: Arc::new(realtime_ws_url),
             t3: Arc::new(T3Settings::default()),
+            t3_provisioner: None,
             agent_gateway: Arc::new(AgentGatewaySettings::default()),
             realtime: Arc::new(RealtimeSettings::default()),
             settings: Arc::new(SettingsConfig::default()),
@@ -198,6 +211,20 @@ impl AppState {
     /// the fail-closed default.
     pub fn with_t3(mut self, settings: T3Settings) -> Self {
         self.t3 = Arc::new(settings);
+        self
+    }
+
+    /// Attach the managed provisioner for the configured default provider
+    /// (ADR-0156 D4-④).
+    ///
+    /// Separate from [`AppState::with_t3`] rather than folded into it, and the
+    /// split is the fail-closed property: `T3Settings` is operator *intent* read
+    /// from the environment, while this is the *capability* that intent asks for.
+    /// An instance that named a managed provider but supplied no endpoint gets
+    /// intent without capability, which is a 503 on the acquisition route — never
+    /// a durable row against a substrate nobody can reach.
+    pub fn with_t3_provisioner(mut self, provisioner: Arc<momo_t3::CloudProvisioner>) -> Self {
+        self.t3_provisioner = Some(provisioner);
         self
     }
 
@@ -518,10 +545,17 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/work-hosts/{host}/pending-controls",
             get(routes::work_hosts::pending_controls),
         )
-        // cloud hosts (ADR-0142 BYOC)
+        // cloud hosts (ADR-0142 BYOC + ADR-0136 D1-A managed acquisition).
+        // Both end at the same row and the same public `register`; only the
+        // managed one calls a provider, and it can only do so on an instance the
+        // operator handed a provisioner (ADR-0156 D4-④).
         .route(
             "/v1/workspaces/{ws}/work-hosts/byoc/enrollments",
             post(routes::cloud_hosts::enroll),
+        )
+        .route(
+            "/v1/workspaces/{ws}/work-hosts/cloud",
+            post(routes::cloud_hosts::provision),
         )
         .route(
             "/v1/workspaces/{ws}/work-hosts/cloud/{provision}",
