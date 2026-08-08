@@ -57,7 +57,7 @@ export function slopTo(size: number): number {
 //
 // 이 파일이 처음 쓰였을 때 색은 **한 벌**이었고(다크 고정), 그래서 역할의 설명과
 // 값이 같은 자리에 있었다. 스킴이 둘이 되면 그 둘은 갈라져야 한다: 「`surface` 는
-// 카드·행·탭바가 서는 한 단 위」는 두 스킴에서 같은 문장이고, `#171a20` 은 그중 한
+// 카드·행·탭바가 서는 한 단 위」는 두 스킴에서 같은 문장이고, `#201f24` 는 그중 한
 // 스킴의 답일 뿐이다. 그래서 **뜻은 `Palette` 인터페이스에**, 값은 두 상수에 있다.
 //
 // 두 벌을 두는 대신 웹처럼 `light-dark()` 한 줄로 쓸 수 없느냐 — 없다. RN 의 스타일
@@ -67,31 +67,35 @@ export function slopTo(size: number): number {
 // ## 두 스킴 다 발명이 아니라 **번역**이다
 //
 // 여명(Dawn) 팔레트의 정본은 웹 `clients/web/src/design/tokens.css` 이고, 거기에는
-// 이미 두 스킴이 다 적혀 있다. 그래서 라이트 값은 여기서 새로 고른 것이 아니라 그
-// 파일의 라이트 항을 **역할로 대응시켜** 옮긴 것이다:
+// 이미 두 스킴이 다 적혀 있다. 그래서 아래 값들은 여기서 새로 고른 것이 아니라 그
+// 파일의 두 항을 **역할로 대응시켜** 옮긴 것이다. 열여섯 역할이 짝을 갖는다:
 //
-//   bg ← --surface(#f7f6f3)         surface ← --surface-raised(#fffefb)
+//   bg ← --surface                  surface ← --surface-raised
 //   surfacePressed ← --surface-hover  border ← --line        text ← --ink
 //   textMuted ← --ink-muted           textFaint ← --line-strong
-//   accent ← --accent(#a54c08)        accentSurface ← --accent-soft
+//   accent ← --accent                 accentSurface ← --accent-soft
 //   onAccent ← --on-accent            agent ← --agent        agentSurface ← --agent-soft
 //   warn ← --warn                     danger ← --danger      ok ← --ok
-//   scrim ← --scrim(rgb(36 33 28 / .24))
+//   scrim ← --scrim
 //
-// 웹에 짝이 없는 역할(`surfacePressed` 의 방향, `accentPressed`, `accentText`,
-// `accentSurfaceStrong`, `*Border`, `dangerText`, `onWarn`)은 **한 스킴이 그 역할에
-// 대해 지키던 관계를 다른 스킴에서 다시 세운 값**이다. 관계가 원본이고 값은 그 관계의
-// 답이라서, 셋 다 `__tests__/paletteContrast.test.ts` 가 두 스킴에서 같은 자로 잰다.
+// **두 항 다 바이트로 같다.** 라이트가 먼저 왔고(U2), 다크의 accent 가족이 뒤따랐고
+// (#1155), 나머지 다크 역할이 #1164 에서 같은 길로 왔다. 그 전까지 다크는 이 앱이
+// RN-C2 에서 입고 나온 v0 회색·보라·민트를 들고 있었고, 그래서 스킴을 바꾸면 색이
+// **계열째** 갈아탔다 — 에이전트가 라이트에서는 새벽 남색(#4a6785)이고 다크에서는
+// 네온 보라(#b58bd6)였다. 웹에서는 그 일이 일어날 수 없다: 두 스킴을 `light-dark()`
+// 한 줄에 적으므로 두 항이 갈라질 자리가 없다. 이 파일은 그 한 줄이 없는 대신
+// `__tests__/paletteContrast.test.ts` 가 저 파일을 **읽어서** 두 항을 맞춘다.
 //
-// 다크의 accent 가족도 뒤늦게 같은 길로 왔다 (#1155). 그때까지 다크만 선존재 파랑
-// (#3b6fd4)이었고, 그래서 스킴을 바꾸면 「내 것」의 색이 계열째 갈아탔다. 지금은 웹에
-// 짝이 있는 셋(`accent`·`accentSurface`·`onAccent`)이 웹 다크 항과 바이트로 같고,
-// 짝이 없는 셋은 위 규율대로 관계에서 풀린다 — 값의 근거는 `darkPalette` 에 있다.
+// 웹에 짝이 없는 역할(`accentPressed`, `accentText`, `accentSurfaceStrong`,
+// `*Surface`/`*Border` 의 상태 3가족, `dangerText`, `onWarn`, `shadow`)은 **그 스킴이
+// 그 역할에 대해 지키던 관계를 값으로 푼 답**이다. 관계가 원본이고 값은 그 관계의
+// 답이라서, 전부 `paletteContrast.test.ts` 가 두 스킴에서 같은 자로 잰다.
 //
 // ## 방향이 뒤집히는 역할이 셋 있다
 //
 //   surfacePressed  다크에서는 한 단 **밝고**, 라이트에서는 한 단 **어둡다**.
 //                   뜻은 둘 다 「눌린 표면」이고, 그것은 배경에서 멀어지는 것이다.
+//                   두 값 다 웹 `--surface-hover` 이므로 방향도 웹이 정한 것이다.
 //   accentText      다크에서는 accent 보다 **밝은** 단(#fcba6e), 라이트에서는
 //                   **어두운** 단(#8f4207). 뜻은 「배경 위에서 읽히는 accent」다.
 //                   두 스킴 모두 accent 의 색상각 위에 있고, 배경에서 멀어지는 쪽으로
@@ -99,8 +103,8 @@ export function slopTo(size: number): number {
 //   dangerText      상자 안의 문장. 다크에서 danger 보다 밝고, 라이트에서 어둡다.
 //
 //   `on*` 둘은 방향이 아니라 **값**이 뒤집힌다. 채움의 밝기가 스킴마다 반대이기
-//   때문이다: 다크의 앰버 채움(warn #d9a441 · accent #f0a850)은 밝아서 어두운 글자를
-//   받고(#1b1405 · #17161a), 라이트의 채움(#8a5c00 · #a54c08)은 어두워서 종이색
+//   때문이다: 다크의 앰버 채움(warn #d4a72c · accent #f0a850)은 밝아서 어두운 글자를
+//   받고(#191405 · #17161a), 라이트의 채움(#8a5c00 · #a54c08)은 어두워서 종이색
 //   글자(#fffefb)를 받는다. `onAccent` 가 이 목록에 든 것은 #1155 부터다 — 그전엔
 //   다크의 accent 가 파랑이라 채움이 양쪽 다 어두웠다.
 // =============================================================================
@@ -139,7 +143,7 @@ export interface Palette {
    * accent 의 가장 부드러운 단. 내 반응 칩의 채움이 이 값이다 (감사 M-13).
    *
    * `surface`(중성 고도)와 뜻이 다르다: 이것은 **내가 참여했다**는 표시라 색을
-   * 가진다. 칩이 서는 자리인 `surface` 위에서 다크 1.19:1 · 라이트 1.21:1.
+   * 가진다. 칩이 서는 자리인 `surface` 위에서 다크 1.12:1 · 라이트 1.21:1.
    */
   accentSurface: string;
   /**
@@ -147,7 +151,7 @@ export interface Palette {
    *
    * 두 단을 두는 이유: `accentSurface` 는 이미 서 있는 칩을 물들이는 값이라
    * 조용해야 하고, 검색 일치는 사람이 눈으로 스캔해 찾아내야 하는 값이라
-   * 조용하면 실패한다(`surface` 위 다크 1.45:1 대 1.19:1 · 라이트 1.41:1 대
+   * 조용하면 실패한다(`surface` 위 다크 1.36:1 대 1.12:1 · 라이트 1.41:1 대
    * 1.21:1). 웹의 `--line`/`--line-strong` 과 같은 종류의 쌍이다.
    */
   accentSurfaceStrong: string;
@@ -157,7 +161,15 @@ export interface Palette {
   agent: string;
   /** 에이전트 태그의 채움 — `agent` 의 가장 부드러운 단. */
   agentSurface: string;
-  /** Something needs a person: unread counts, pending approvals. */
+  /**
+   * Something needs a person: unread counts, pending approvals.
+   *
+   * `accent` 와 같은 앰버 대역에 산다. 두 뜻(「여기를 보라」/「내가 한 것」)이 색으로
+   * 얼마나 갈라지는지는 **웹이 정한다** — 두 값 다 웹 항이므로. 실측 색상각 차:
+   * 다크 18.08° · 라이트 25.92°. 다크가 좁은 것은 웹 팔레트 자신의 성질이고
+   * (`--warn` #d4a72c 대 `--accent` #f0a850), #1164 이전 폰 다크가 10.87° 로 그보다
+   * 더 좁았던 것은 폰만의 결함이었다 (#1155 리뷰 N1).
+   */
   warn: string;
   /**
    * 앰버의 가장 부드러운 단. 상태 칩(대기)의 채움이자 **인용 점프 착지 틴트**다
@@ -176,8 +188,8 @@ export interface Palette {
    * danger 상자 **안**의 글자 — `danger` 에서 배경 반대쪽으로 한 단 간 값.
    *
    * 상자 밖의 표식(「전송 실패」 한 낱말)과 상자 안의 문장(실패 사유 한 줄)은
-   * 읽히는 시간이 다르다. 후자는 `dangerSurface` 위에서 다크 9.29:1 · 라이트
-   * 7.59:1 이고 전자의 값보다 위다 — 둘 다 AA 를 지나되 한 단 갈라 둔다.
+   * 읽히는 시간이 다르다. 후자는 `dangerSurface` 위에서 다크 9.88:1 · 라이트
+   * 7.59:1 이고 전자의 값(5.93 · 5.56)보다 위다 — 둘 다 AA 를 지나되 한 단 갈라 둔다.
    */
   dangerText: string;
   /** A settled success. */
@@ -194,7 +206,8 @@ export interface Palette {
    * 자기 토큰을 갖는다.
    *
    * 알파가 스킴마다 다른 것도 웹과 같다: 밝은 종이를 24%(`3d`) 로 눌러 얻는 분리를
-   * 이미 어두운 밤하늘에서 얻으려면 훨씬 짙어야 한다(67%, `aa`).
+   * 이미 어두운 밤하늘에서 얻으려면 훨씬 짙어야 한다(62%, `9e`). 두 값 다 웹
+   * `--scrim` 을 `#rrggbbaa` 로 옮긴 것이다 — RN 은 `rgb(… / …)` 를 모른다.
    *
    * 지켜야 하는 것은 비율이 아니라 **부호**이고, `paletteContrast.test.ts` 가 두
    * 스킴에서 그것을 합성해 잰다: 스크림은 모든 표면을 어둡게 하고, 스크림 걸린
@@ -205,15 +218,67 @@ export interface Palette {
   shadow: string;
 }
 
-/** 이 앱이 처음부터 입고 있던 스킴. 값의 근거는 `Palette` 의 역할 주석에 있다. */
+/**
+ * 여명(Dawn)의 밤. 웹 `tokens.css` 의 **다크 항**을 역할로 옮긴 것이다.
+ *
+ * ## 이 팔레트가 세 번에 걸쳐 온 길
+ *
+ * 이 앱이 RN-C2 에서 입고 나온 v0 은 다크 한 벌이었고, 값은 그 화면들이 그때 쓰던
+ * 회색·보라·민트였다. U2 가 라이트를 웹의 라이트 항으로 열여섯 역할 정렬했을 때
+ * (#1153) 다크는 손대지 않았고, #1155 가 accent 가족 여섯만 옮겼다. 남은 나머지가
+ * 여기서 온다 (#1164).
+ *
+ * 남겨 두면 무슨 일이 일어나는지는 이미 실측됐다. 스킴을 바꾸면 **색이 계열째
+ * 갈아탄다**: 에이전트가 라이트에서는 새벽 남색(`--agent` #4a6785 · OKLCH 색상각
+ * 249.90°)이고 다크에서는 네온 보라(#b58bd6 · 309.32°)였다 — **같은 역할의 두 스킴이
+ * 59.42° 벌어져 있었다.** 그것은 한 아이덴티티의 두 스킴이 아니라 두 아이덴티티다
+ * (정렬 뒤 1.06° — #7fa0c4 250.96°). 웹 정본이 그 색을 두고 적어 둔 규율이
+ * *"never neon AI purple"* 이다.
+ *
+ * 이 각을 잴 때 **무엇과 무엇을 재는지**를 위처럼 값과 함께 적는다. 초판이 여기에
+ * 159° 를 적었고 그것은 다른 쌍의 값이었다 — 라이트의 `agent` 와 라이트의 `accent`
+ * 사이(159.32°). 스킴 **간** 같은 역할을 재야 할 자리에 스킴 **안** 두 역할의 각이
+ * 앉은 것이고, 두 항을 hex 로 함께 적어 두면 다음 사람이 그 자리에서 다시 계산해
+ * 볼 수 있다 (#1186 리뷰 M1).
+ *
+ * 그리고 그것이 **위계까지** 흔들었다. 웹이 위험 순서의 자로 세운 것은 대비가 아니라
+ * 채도이고(`--danger` 주석), 옛 다크는 danger C 0.1305 · warn C 0.1295 로 그 순서가
+ * 1.008 배 차이의 우연이었다. 웹 다크 항은 같은 자리에서 0.1661 · 0.1407 (1.18배)다.
+ *
+ * ## 짝 있는 열여섯은 바이트로 같다
+ *
+ * 파일 머리 주석의 대응표 그대로다. 기대값을 이 파일에 적어 두지 않고
+ * `paletteContrast.test.ts` 가 웹 `tokens.css` 를 **읽어서** 맞춘다.
+ *
+ * ## 짝 없는 열은 관계에서 푼다 (발명 금지)
+ *
+ * accent 파생 셋은 #1155 가 푼 그대로이고 값도 그대로다 — 부모(`accent`)가 안
+ * 움직였기 때문이다:
+ *   accentPressed  accent 의 색상각 위, L −0.0887 (라이트가 같은 역할에 쓴 걸음)
+ *   accentText     같은 색상각, L +0.0502 · 채도 ×0.9 (라이트의 같은 비)
+ *   accentSurfaceStrong  accentSurface 에서 L +0.0577 · 채도 ×1.3
+ *
+ * 상태 3가족(warn·danger·ok)의 채움·테두리·잉크 여덟은 부모가 움직였으므로 따라간다.
+ * **바뀐 것은 색상각뿐이다**: 각 값은 자기 앵커에 대해 쓰던 걸음(L 차)과 채도를 그대로
+ * 들고, 자기 tone 이 정렬되며 돈 각도만큼(`warn` +7.21° · `danger` +10.42° ·
+ * `ok` −10.10°) 같이 돈다. tone 대비 오프셋은 정렬 전후로 같다.
+ *
+ *   앵커가 `bg` 인 것 — 채움과 테두리는 **배경을 물들이는** 값이라 배경에서 잰다.
+ *   그래서 `bg` 가 웹 값으로 L +0.0258 밝아진 만큼 여섯도 함께 밝아졌고, 배경 위
+ *   세기(대비비)는 정렬 전과 같다. 이 규율을 안 지키면 착지 틴트(#1076)가 고도 한 단
+ *   보다 어두워진다 — 물듦이 카드보다 조용해지는 것이라 뜻이 뒤집힌다.
+ *
+ *   앵커가 자기 tone 인 것 — `onWarn`(채움 위의 글자)과 `dangerText`(상자 안의 문장)
+ *   는 배경이 아니라 그 tone 에 매여 있다. tone 의 L 이 움직인 만큼 따라간다.
+ */
 export const darkPalette: Palette = {
-  bg: '#0f1115',
-  surface: '#171a20',
-  surfacePressed: '#1e222a',
-  border: '#2a2f38',
-  text: '#f2f3f5',
-  textMuted: '#9aa0a8',
-  textFaint: '#6b7280',
+  bg: '#17161a',
+  surface: '#201f24',
+  surfacePressed: '#26252c',
+  border: '#34323b',
+  text: '#ececf1',
+  textMuted: '#9b98a3',
+  textFaint: '#6f6e73',
   // accent 가족 — 파랑이었다 (#1155). 라이트가 웹의 라이트 항을 값 단위로 옮긴
   // 뒤에도(U2) 다크만 선존재 파랑(#3b6fd4)을 들고 있었고, 그래서 같은 앱이 스킴을
   // 바꾸면 「내 것」의 색이 계열째 갈아탔다. 웹은 한 줄로 두 스킴을 적으므로
@@ -222,14 +287,7 @@ export const darkPalette: Palette = {
   // 웹에 짝이 있는 셋은 **바이트로 같다** — 라이트가 이미 그렇게 정렬됐다:
   //   accent ← --accent(#f0a850) · accentSurface ← --accent-soft(#33261a)
   //   onAccent ← --on-accent(#17161a)
-  // 짝이 없는 셋은 파일 머리 주석의 규율대로 **관계를 다시 푼 값**이고, 그 관계는
-  // OKLCH 로 적으면 한 줄이다 — accent 의 색상각을 그대로 두고 L 만 한 걸음.
-  //   accentPressed  L −0.0887 (라이트가 같은 역할에 쓴 걸음), 채도 유지
-  //   accentText     L +0.0502 (같은 걸음, 다크는 배경에서 **멀어지는** 쪽이 밝은
-  //                  쪽이다), 채도 ×0.9 — 라이트의 accent→accentText 비와 같다
-  //   accentSurfaceStrong  accentSurface 에서 L +0.0577 (다크가 이 역할에 대해
-  //                  쓰던 자기 걸음), 채도 ×1.3
-  // 값이 아니라 이 관계가 원본이고, `paletteContrast.test.ts` 가 두 스킴에서 잰다.
+  // 짝이 없는 셋은 위 주석의 걸음이고, `paletteContrast.test.ts` 가 두 스킴에서 잰다.
   accent: '#f0a850',
   accentPressed: '#d28c30',
   accentText: '#fcba6e',
@@ -237,24 +295,27 @@ export const darkPalette: Palette = {
   accentSurfaceStrong: '#453323',
   // 종이의 흰색이었다 (U2). 그때 두 스킴의 accent 채움은 **둘 다 어두웠고**
   // (다크 파랑 #3b6fd4 · 라이트 #a54c08) 그래서 그 위의 글자도 둘 다 종이색이었다.
-  // 호박으로 정렬하면서 다크의 채움만 밝아졌으므로(#f0a850, bg 위 9.38:1) 그 위의
+  // 호박으로 정렬하면서 다크의 채움만 밝아졌으므로(#f0a850, bg 위 8.94:1) 그 위의
   // 글자는 반대쪽으로 뒤집힌다 — 웹의 `--on-accent` 가 다크에서 `#17161a` 인 것과
-  // 같은 이유이고, 값도 그것이다. 채움 위 8.94:1 · 눌린 채움 위 6.47:1.
+  // 같은 이유이고, 값도 그것이다. 채움 위 8.94:1 · 눌린 채움 위 6.46:1.
   onAccent: '#17161a',
-  agent: '#b58bd6',
-  agentSurface: '#2a2136',
-  warn: '#d9a441',
-  warnSurface: '#241d0f',
-  warnBorder: '#4a3a1c',
-  onWarn: '#1b1405',
-  danger: '#e0777d',
-  dangerSurface: '#2a1c1f',
-  dangerBorder: '#5a2f35',
-  dangerText: '#f0b4b8',
-  ok: '#93d3a8',
-  okSurface: '#16241c',
-  okBorder: '#2c4a38',
-  scrim: '#000000aa',
+  // 네온 보라(#b58bd6 · 309.32°)였다 (#1164). 라이트의 `--agent`(#4a6785 · 249.90°)
+  // 와 색상각이 **59.42°** 벌어져 있었으므로 스킴 전환이 에이전트를 **다른 인물**로
+  // 만들었다. 이 값(#7fa0c4)은 250.96° 라 라이트와 1.06° 다.
+  agent: '#7fa0c4',
+  agentSurface: '#1e2836',
+  warn: '#d4a72c',
+  warnSurface: '#292415',
+  warnBorder: '#4e4222',
+  onWarn: '#191405',
+  danger: '#ff796b',
+  dangerSurface: '#312223',
+  dangerBorder: '#623635',
+  dangerText: '#fec2bd',
+  ok: '#57ab5a',
+  okSurface: '#1e2a20',
+  okBorder: '#38503a',
+  scrim: '#09080b9e',
   shadow: '#000000',
 };
 

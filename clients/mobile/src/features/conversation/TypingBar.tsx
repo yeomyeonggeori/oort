@@ -143,8 +143,8 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     paddingHorizontal: SAFE_GUTTER,
     paddingBottom: space.xs,
     fontSize: font.meta,
-    // `textFaint` 는 배경 대비 **3.909:1** 로 본문 AA(4.5)에 못 미친다
-    // (design-review M-6, 실측 확정). `textMuted` 는 7.170:1 이다.
+    // `textFaint` 는 배경 대비 **3.562:1** 로 본문 AA(4.5)에 못 미친다
+    // (design-review M-6, 실측 확정). `textMuted` 는 6.358:1 이다.
     // 토큰 전면 재조정은 U2(라이트 모드)의 소관이고, 여기서는 **용례만** 옮긴다.
     color: color.textMuted,
     // 자리 예약의 실체 (H-3): 줄이 비어도 이 높이가 남으므로 아래의 컴포저가

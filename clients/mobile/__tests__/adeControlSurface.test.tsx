@@ -699,7 +699,7 @@ describe('관제 목록 — 무엇이, 어디서, 살아남는지', () => {
     );
     // 이 숫자는 목록의 정렬 근거이자 사람이 「너무 오래 붙들려 있다」를 정하는
     // 재료다 — 장식이 아니므로 3등 잉크에 두지 않는다. `textFaint` 는 카드
-    // surface(#171a20) 위에서 3.605:1 로 본문 AA 미달이기도 하다 (design-review H-1).
+    // surface(#201f24) 위에서 3.238:1 로 본문 AA 미달이기도 하다 (design-review H-1).
     expect(elapsed.color).toBe(color.textMuted);
     expect(elapsed.color).not.toBe(color.textFaint);
     // 1Hz 로 다시 그려지는 숫자다. 비례폭이면 `9s`->`10s` 처럼 자릿수가 바뀔 때마다

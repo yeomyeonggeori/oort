@@ -1774,18 +1774,33 @@ function Row({
   );
 }
 
+// 하네스 자신의 크롬. 스킴을 따라가지 않는 고정 다크라 `color`(= `darkPalette`)를
+// 직접 든다 — 이 별칭이 남아 있는 두 자리 중 하나다(`tokens.ts` 의 `color` 주석).
+//
+// 값을 손으로 적어 두고 있었고(`#0f1115`·`#f2f3f5`·…), 그것이 #1164 에서 팔레트가
+// 웹으로 옮겨갈 때 그대로 남을 뻔했다: 진짜 컴포넌트를 담는 **액자만** 옛 회색인
+// 캡처가 나온다. 액자와 내용이 같은 파일에서 색을 받으면 그 어긋남이 생길 자리가 없다.
 const styles = StyleSheet.create({
-  root: {flex: 1, backgroundColor: '#0f1115'},
-  report: {maxHeight: 400, borderBottomWidth: 1, borderBottomColor: '#2a2f38'},
+  root: {flex: 1, backgroundColor: color.bg},
+  report: {
+    maxHeight: 400,
+    borderBottomWidth: 1,
+    borderBottomColor: color.border,
+  },
   reportBody: {padding: 12, paddingTop: 48, gap: 2},
-  title: {color: '#f2f3f5', fontSize: 18, fontWeight: '700', marginBottom: 4},
+  title: {color: color.text, fontSize: 18, fontWeight: '700', marginBottom: 4},
   row: {flexDirection: 'row', alignItems: 'center', gap: 8},
-  rowLabel: {flex: 1, color: '#9aa0a8', fontSize: 12},
-  rowValue: {color: '#f2f3f5', fontSize: 14, fontWeight: '700', minWidth: 76},
-  verdict: {fontSize: 12, fontWeight: '700', color: '#6b7280', minWidth: 44},
-  pass: {color: '#93d3a8'},
-  fail: {color: '#e0777d'},
-  meta: {color: '#6b7280', fontSize: 10},
+  rowLabel: {flex: 1, color: color.textMuted, fontSize: 12},
+  rowValue: {color: color.text, fontSize: 14, fontWeight: '700', minWidth: 76},
+  verdict: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: color.textFaint,
+    minWidth: 44,
+  },
+  pass: {color: color.ok},
+  fail: {color: color.danger},
+  meta: {color: color.textFaint, fontSize: 10},
   // `ThreadPanel` 의 `styles.invite` 와 같은 값. 이 줄의 높이가 buzz 반례의
   // 숫자에 그대로 들어가므로, 비슷한 것이 아니라 같은 것이어야 한다.
   threadInvite: {

@@ -132,7 +132,7 @@ describe('M-4 — 이름에 눈에 보이는 축을 준다', () => {
 
 describe('M-6 — 이 줄이 AA 를 지난다', () => {
   it('textFaint 를 쓰지 않는다', () => {
-    // 실측: textFaint on bg = 3.909:1 (본문 AA 4.5 미달) · textMuted = 7.170:1.
+    // 실측: textFaint on bg = 3.562:1 (본문 AA 4.5 미달) · textMuted = 6.358:1.
     // 토큰 전면 재조정은 U2 소관이고 여기서는 **용례만** 옮긴다.
     render(<TypingBar segments={typingSegments(['김민수'])} />);
     const style = flatten(screen.getByTestId('composer-typing').props.style);

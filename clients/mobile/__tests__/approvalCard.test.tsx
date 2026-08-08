@@ -541,7 +541,7 @@ describe('M-3 — 승인 카드 세 문장의 격', () => {
     expect(blocked.color).toBe(color.text);
     expect(guidance.color).toBe(color.textMuted);
     // 격상이 실제로 격상이다 — 영수증의 잉크가 안내의 잉크보다 **밝다**.
-    // (`text` #f2f3f5 ↔ `textMuted` #9aa0a8 — 값은 `tokens.ts` 에서 읽는다.)
+    // (`text` #ececf1 ↔ `textMuted` #9b98a3 — 값은 `tokens.ts` 에서 읽는다.)
     expect(brightness(color.text)).toBeGreaterThan(brightness(color.textMuted));
   });
 

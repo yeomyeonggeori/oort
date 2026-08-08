@@ -5,6 +5,7 @@ import React from 'react';
 import {StyleSheet, Text, View} from 'react-native';
 import {SafeAreaProvider} from 'react-native-safe-area-context';
 import {FixedScheme} from '../src/design/theme';
+import {color} from '../src/design/tokens';
 import {Timeline} from '../src/features/conversation/Timeline';
 
 // =============================================================================
@@ -141,16 +142,18 @@ export default function StatesHarness(): React.JSX.Element {
   );
 }
 
+// 액자는 고정 다크다 (`harness.tsx` 의 같은 자리와 같은 이유). 값을 손으로 적으면
+// 팔레트가 움직인 날 액자만 옛 회색으로 남는다 — 그래서 `color` 에서 받는다.
 const styles = StyleSheet.create({
-  root: {flex: 1, backgroundColor: '#0f1115'},
+  root: {flex: 1, backgroundColor: color.bg},
   body: {padding: 12, paddingTop: 56, gap: 6},
-  title: {color: '#f2f3f5', fontSize: 18, fontWeight: '700'},
+  title: {color: color.text, fontSize: 18, fontWeight: '700'},
   panel: {gap: 4},
-  label: {color: '#6b7280', fontSize: 11, fontWeight: '600'},
+  label: {color: color.textFaint, fontSize: 11, fontWeight: '600'},
   stage: {
     height: 116,
     borderWidth: 1,
-    borderColor: '#2a2f38',
+    borderColor: color.border,
     borderRadius: 8,
     overflow: 'hidden',
   },
