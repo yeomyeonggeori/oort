@@ -13,7 +13,7 @@
 
 - 업계 3층 표준 수렴(MCP+SKILL.md+plugin.json/marketplace.json), Codex의 CLAUDE_* 호환 유지 — [1차] 검증 완료.
 - MCP authorization 스펙(OAuth 2.1/PRM/DCR/resource/passthrough 금지)과 "토큰 보유 주체=MCP 클라이언트" — 스펙 전문 확인.
-- 커스터디 권고 (B)+(C): 에이전트 호스트=클라이언트, 벤더 remote 우선, momo 서버는 카탈로그·정책·감사 전용 — momo 불변식과의 정합 논증은 01 §1.
+- 커스터디 권고 (B)+(C): 에이전트 호스트=클라이언트, 벤더 remote 우선, oort 서버는 카탈로그·정책·감사 전용 — oort 불변식과의 정합 논증은 01 §1.
 - 원클릭 설치의 실체 4단계, ChatGPT 워크스페이스 정책 모델(기본 비활성·role 스코프), 동적 발견의 도구 폭발 해법(지연 로드+검색).
 
 ## 1순위 작업: [미확인] 실검증 (ADR-0113 draft 인용 전 필수)
@@ -29,11 +29,11 @@
 
 - 01 §1 커스터디 권고 + §4 Drive 모드 A 우선 + 에이전트 호스트 토큰 보유의 신뢰 경계(다중 사용자 워크스페이스에서 토큰 소유자 명시)를 Options로 구조화.
 - (A) 서버측 보관 모델을 기각이 아닌 명시 Option으로 두고 ADR-0004 경계 변경 비용을 적시(성재가 트레이드오프를 보고 결정).
-- SE-04A 계약 확장(3층 manifest·momo 확장 필드·server.json 참조·추천 세트 정책 필드)을 파생 배치로.
+- SE-04A 계약 확장(3층 manifest·oort 확장 필드·server.json 참조·추천 세트 정책 필드)을 파생 배치로.
 
 ## 경계 (변경 금지)
 
-- 구현 금지 — ADR-0113/0115 Accepted 전. GPL/AGPL 백본 금지. momo 서버 코드 실행·토큰 보관 금지(결정 전).
+- 구현 금지 — ADR-0113/0115 Accepted 전. GPL/AGPL 백본 금지. oort 서버 코드 실행·토큰 보관 금지(결정 전).
 - UX/UI(`clients/macOS`)는 momo-main 트랙 소유 — **Codex의 플러그인 UI handoff 문서가 도착하면 01 §5 UX 계약과 대조**하고, 화면은 UX 트랙·registry/정책/감사 API는 엔진 트랙으로 분담. UI handoff 위치는 성재에게 확인.
 - 기존 ID 재사용 금지(MOMO-300~323 소진, 신규 티켓은 400번대 현황 확인 후), ADR 번호는 0123+ 또는 기존 0113/0115 안에서.
 

@@ -3,8 +3,8 @@ import {
   type MembershipRole,
   type PluginManifestTool,
   type PluginPolicyTool,
-} from "@/lib/api";
-import { NetworkError } from "@/lib/http";
+} from "@momo/core/lib/api";
+import { NetworkError } from "@momo/core/lib/http";
 
 export type PluginAction =
   | { kind: "install"; pluginId: string; pluginName: string }

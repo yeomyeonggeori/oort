@@ -1,0 +1,35 @@
+# Local build override for docker-compose.rust.yml (ADR-0145 B안, batch B1.7).
+#
+#   export MOMO_RUST_IMAGE=momo-rust:dev
+#   docker compose --env-file infra/rust/rust-smoke.secrets.env \
+#     -f infra/rust/docker-compose.rust.yml \
+#     -f infra/rust/docker-compose.rust.build.yml up -d --build
+#
+# The base file stays image-only, exactly like infra/prod/docker-compose.prod.yml:
+# a deployed stack pulls a pinned ref and never builds from a checkout. This
+# overlay is the local/pre-publish path — it produces the same `MOMO_RUST_IMAGE`
+# tag the base file references, so `up` after `build` needs no registry at all.
+#
+# The build context is the repo root (`../..` from this file), not `server-rust/`:
+# the image copies server/Migrations and three infra SQL files, which live
+# outside the crate workspace. See the header of server-rust/Dockerfile.
+
+x-rust-build: &rust-build
+  context: ../..
+  dockerfile: server-rust/Dockerfile
+
+# All four services declare the same build so `docker compose build` (no service
+# argument) works and every one of them resolves to the identical local tag;
+# after the first, each is a full layer-cache hit.
+services:
+  runtime-roles:
+    build: *rust-build
+
+  migrate:
+    build: *rust-build
+
+  api:
+    build: *rust-build
+
+  relay:
+    build: *rust-build

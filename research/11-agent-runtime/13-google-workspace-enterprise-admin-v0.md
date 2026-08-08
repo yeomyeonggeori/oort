@@ -5,7 +5,7 @@
 
 ## 1. Purpose
 
-Google Workspace Enterprise Admin v0 defines the enterprise-only install path for momo's Google Workspace connector.
+Google Workspace Enterprise Admin v0 defines the enterprise-only install path for oort's Google Workspace connector.
 
 It extends MOMO-122 without changing its default:
 
@@ -22,16 +22,16 @@ This spec answers seven questions:
 4. How do enterprise grants project into Context Packet, Memory Plane, and Capability Cache?
 5. Which audit records must be exportable?
 6. How does admin revoke/delete work?
-7. What remains manual and outside momo runtime v0?
+7. What remains manual and outside oort runtime v0?
 
 ## 2. Non-Negotiable Rules
 
-- Per-user OAuth from MOMO-122 is the product default. Enterprise admin install must be explicitly enabled per momo workspace.
+- Per-user OAuth from MOMO-122 is the product default. Enterprise admin install must be explicitly enabled per oort workspace.
 - Domain-wide delegation (DWD) is disabled by default even after enterprise admin install. It requires a separate admin approval record, scope inventory, service account client id, and user-delegation policy.
-- A `shared_drive_member` service-account boundary (§6) is **not DWD**. The service account acts only as itself, holds Content Manager membership in exactly one momo-managed workspace shared drive, never impersonates a user, and never mints delegated tokens. Enabling it must not enable DWD and requires no Admin console API Controls client authorization.
+- A `shared_drive_member` service-account boundary (§6) is **not DWD**. The service account acts only as itself, holds Content Manager membership in exactly one oort-managed workspace shared drive, never impersonates a user, and never mints delegated tokens. Enabling it must not enable DWD and requires no Admin console API Controls client authorization.
 - A delegated request must name a human Google subject or user principal. Agents must not use a domain-wide grant as an ownerless mailbox, Drive, or Calendar identity.
 - The service account private key, workload identity credential, refresh token, or access token is never stored in Context Packet, Memory Plane, Capability Cache, fixtures, audit exports, logs, or user-visible props.
-- DWD read access is still source-scoped at momo policy time. A broad Workspace grant does not authorize broad Context Packet inclusion.
+- DWD read access is still source-scoped at oort policy time. A broad Workspace grant does not authorize broad Context Packet inclusion.
 - Gmail send, Calendar mutation, Drive share/permission mutation, Admin SDK changes, and identity/admin actions are approval-gated or denied. DWD does not convert risky writes into direct tool grants.
 - Revocation must fail closed: stop delegated token minting first, hide future source refs, invalidate Capability Cache entries, queue Memory Plane revalidation, and export audit evidence.
 - Enterprise audit export is an admin-readable artifact. It may include ids, hashes, scope names, policy versions, timestamps, and redaction reasons, but not provider tokens or raw external content bodies.
@@ -41,9 +41,9 @@ This spec answers seven questions:
 | Mode | Default | Actor | Credential | Intended use |
 |---|---|---|---|---|
 | `per_user_oauth` | yes | each human member | user's OAuth grant | MOMO-122 read-mostly Drive/Gmail/Calendar sources |
-| `enterprise_admin_install` | no | Google Workspace super/admin + momo workspace owner/admin | admin consent and workspace policy | central policy, scope inventory, audit export, optional app allowlisting |
-| `domain_wide_delegation` | no | Google Workspace super admin plus momo enterprise admin policy | service account client id with approved scopes | delegated read for enterprise tenants where per-user OAuth is operationally unsuitable |
-| `shared_drive_member` | no | momo workspace owner/admin plus a Workspace member/admin who creates the shared drive | service account **as itself** — Content Manager member of exactly one momo-managed shared drive (`boundary_kind = shared_drive_member`, §6) | workspace archive storage and indexing credential (MOMO-320/321); not DWD, no impersonation |
+| `enterprise_admin_install` | no | Google Workspace super/admin + oort workspace owner/admin | admin consent and workspace policy | central policy, scope inventory, audit export, optional app allowlisting |
+| `domain_wide_delegation` | no | Google Workspace super admin plus oort enterprise admin policy | service account client id with approved scopes | delegated read for enterprise tenants where per-user OAuth is operationally unsuitable |
+| `shared_drive_member` | no | oort workspace owner/admin plus a Workspace member/admin who creates the shared drive | service account **as itself** — Content Manager member of exactly one oort-managed shared drive (`boundary_kind = shared_drive_member`, §6) | workspace archive storage and indexing credential (MOMO-320/321); not DWD, no impersonation |
 
 Enterprise admin install can exist without DWD. For example, a customer may use admin approval only to pre-approve the OAuth app and export audits while keeping per-user OAuth as the only data access path.
 
@@ -55,20 +55,20 @@ Required records:
 
 | Field | Meaning |
 |---|---|
-| `enterprise_install_id` | Stable momo id for the enterprise install. |
-| `workspace_id` | momo workspace/tenant. |
+| `enterprise_install_id` | Stable oort id for the enterprise install. |
+| `workspace_id` | oort workspace/tenant. |
 | `google_customer_id` | Google Workspace customer id, if known. |
 | `hosted_domains` | Allowed domains, normalized and verified. |
 | `install_mode` | `enterprise_admin_install`. |
 | `dwd_status` | `disabled`, `pending_admin`, `active`, `revoked`, or `deleted`. |
-| `approved_by_member_id` | momo admin who recorded the install. |
+| `approved_by_member_id` | oort admin who recorded the install. |
 | `google_admin_email_hash` | Hash or redacted email of approving Google admin. |
 | `scope_inventory_version` | Version of the approved scope inventory. |
 | `service_account_boundary_id` | Boundary record when DWD is enabled. |
 | `policy_version` | Enterprise connector policy used for projection. |
 | `audit_export_enabled` | Whether admin export is enabled for this workspace. |
 
-Manual tasks that momo must not pretend to complete:
+Manual tasks that oort must not pretend to complete:
 
 1. Google Cloud project ownership and OAuth app verification.
 2. Google Workspace Admin console approval.
@@ -101,8 +101,8 @@ v0 recommended inventory:
 
 | Surface | Scope | DWD allowed | Default | Notes |
 |---|---|---:|---|---|
-| Drive selected/resource-scoped | `https://www.googleapis.com/auth/drive.file` | false | per-user only | Keep MOMO-122 selected-file default. A `shared_drive_member` boundary may also use this scope **as the service account itself** (not DWD) for the momo-managed shared drive. |
-| Drive metadata | `https://www.googleapis.com/auth/drive.metadata.readonly` | true | off | Useful for enterprise source badge refresh; still resource filtered by momo. |
+| Drive selected/resource-scoped | `https://www.googleapis.com/auth/drive.file` | false | per-user only | Keep MOMO-122 selected-file default. A `shared_drive_member` boundary may also use this scope **as the service account itself** (not DWD) for the oort-managed shared drive. |
+| Drive metadata | `https://www.googleapis.com/auth/drive.metadata.readonly` | true | off | Useful for enterprise source badge refresh; still resource filtered by oort. |
 | Drive readonly | `https://www.googleapis.com/auth/drive.readonly` | true | off | Restricted. Requires explicit admin justification and bounded excerpts. |
 | Gmail metadata | `https://www.googleapis.com/auth/gmail.metadata` | true | off | Prefer headers/labels/search metadata. |
 | Gmail readonly | `https://www.googleapis.com/auth/gmail.readonly` | true | off | Restricted. Requires user delegation and query/window bounds. |
@@ -113,12 +113,12 @@ v0 recommended inventory:
 
 ## 6. Service Account Boundary
 
-momo records a service account boundary whenever a service-account credential exists for a workspace. `boundary_kind` selects the mode:
+oort records a service account boundary whenever a service-account credential exists for a workspace. `boundary_kind` selects the mode:
 
 | `boundary_kind` | What the service account is | Impersonation |
 |---|---|---|
 | `dwd_delegation` (default) | DWD client authorized in the Admin console; mints delegated tokens for named users | yes, per §7 |
-| `shared_drive_member` (added 2026-07-06, MOMO-323) | **Not DWD.** The service account acts only as itself; its entire authority is Content Manager membership in exactly one momo-managed workspace shared drive | none — no delegated subjects, no Admin console API Controls authorization |
+| `shared_drive_member` (added 2026-07-06, MOMO-323) | **Not DWD.** The service account acts only as itself; its entire authority is Content Manager membership in exactly one oort-managed workspace shared drive | none — no delegated subjects, no Admin console API Controls authorization |
 
 Boundary records without `boundary_kind` are read as `dwd_delegation` (backward compatible — all pre-2026-07 records are DWD).
 
@@ -163,18 +163,18 @@ Shared-drive-member boundary (`boundary_kind = shared_drive_member`):
 Boundary rules (both kinds):
 
 - Prefer keyless workload identity or secret-manager backed credentials. If a static key exists, it must have a rotation deadline and a delete path.
-- The boundary is workspace-scoped. A service account authorized for one customer must not be reused across unrelated momo workspaces unless a future multi-tenant enterprise contract explicitly allows it.
+- The boundary is workspace-scoped. A service account authorized for one customer must not be reused across unrelated oort workspaces unless a future multi-tenant enterprise contract explicitly allows it.
 - Token minting is runtime-only. Store `credential_storage_ref`, not credentials.
 - A disabled, revoked, stale, or unreviewed boundary denies projection and execution.
 
 `dwd_delegation`-only rules:
 
 - Token minting requires `(workspace_id, service_account_boundary_id, delegated_subject, scope_set, resource_scope, purpose)`.
-- DWD scopes must match the approved Google Admin console client authorization and momo scope inventory.
+- DWD scopes must match the approved Google Admin console client authorization and oort scope inventory.
 
 `shared_drive_member`-only rules:
 
-- `shared_drive_id` names exactly one momo-managed shared drive; `shared_drive_role` is `content_manager` in v0. `allowed_subject_domains` is empty and the §7 delegated-subject model does not apply — the boundary must never mint delegated tokens.
+- `shared_drive_id` names exactly one oort-managed shared drive; `shared_drive_role` is `content_manager` in v0. `allowed_subject_domains` is empty and the §7 delegated-subject model does not apply — the boundary must never mint delegated tokens.
 - Scope set follows the §5 inventory: `drive.file` as the service account itself is preferred. If runtime evidence shows SA-side `drive.file` is insufficient for changes.list/download on the shared drive, SA-only `drive.readonly` may be recorded with justification in the scope inventory (`research/13-redesign/03` §6, 실증 1 — runtime-unverified until MOMO-320).
 - Revoking the boundary = remove the service account from the shared drive membership `[manual]`, disable/delete credential material, set status `revoked`, and delete the derived index rows built from that drive (the MOMO-122 §2 carve-out is revocable by construction).
 
@@ -185,10 +185,10 @@ Delegation is not anonymous domain access. A delegated read uses:
 | Field | Meaning |
 |---|---|
 | `delegated_subject` | Google user principal being impersonated. |
-| `delegated_member_id` | momo human member mapped to that Google user when available. |
+| `delegated_member_id` | oort human member mapped to that Google user when available. |
 | `delegation_basis` | `admin_policy`, `user_opt_in`, `legal_hold`, or `support_case`. v0 product path should use `admin_policy` plus optional `user_opt_in`. |
 | `resource_scope` | Mailbox query, calendar window, Drive corpus/file/shared drive scope. |
-| `request_actor_member_id` | Human initiating the momo request. |
+| `request_actor_member_id` | Human initiating the oort request. |
 | `agent_member_id` | Agent member receiving Context Packet/tool grant. |
 | `purpose` | Short user-visible reason included in audit. |
 | `expires_at` | Delegation decision TTL. |
@@ -254,7 +254,7 @@ Exports must be filterable by time range, delegated subject hash, actor member i
 
 Admin revoke flow:
 
-1. Set enterprise install or DWD status to `revoked` in momo policy state.
+1. Set enterprise install or DWD status to `revoked` in oort policy state.
 2. Stop delegated token minting immediately.
 3. Delete or disable credential material referenced by `credential_storage_ref` when the customer requests local revoke/delete.
 4. Invalidate Capability Cache entries that depend on the install, scope inventory, or boundary.
@@ -266,8 +266,8 @@ Admin revoke flow:
 User delete/unlink flow:
 
 - If the source came from per-user OAuth, use MOMO-122 user disconnect behavior.
-- If the source came from DWD, delete or hide source refs for that delegated subject/resource scope inside momo and record audit evidence.
-- A delegated subject leaving the Google domain, being suspended, or losing momo workspace membership hides future refs and triggers revalidation.
+- If the source came from DWD, delete or hide source refs for that delegated subject/resource scope inside oort and record audit evidence.
+- A delegated subject leaving the Google domain, being suspended, or losing oort workspace membership hides future refs and triggers revalidation.
 - Deleting a source ref does not delete the original Google resource.
 
 ## 11. Fixtures

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Channel, RosterMember } from "@/lib/api";
+import type { Channel, RosterMember } from "@momo/core/lib/api";
 import type { AgentPartialEvent, AgentStatusEvent } from "@/lib/realtime";
 import { centrifugoAgentChannelName, createReplayGate } from "@/lib/realtime";
 import {
@@ -14,7 +14,7 @@ import {
   subscriptionKey,
   turnStateOf,
   type RunTracks,
-} from "./agentRail";
+} from "@momo/core/features/agents/agentRail";
 import {
   IDLE_CUTOFF_MS,
   resolveAgentWorkingSignals,

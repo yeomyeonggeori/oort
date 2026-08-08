@@ -96,7 +96,7 @@ public final class MomoiOSAppModel {
             store.clearSession()
             failureKind = Self.failureKind(for: error)
             errorMessage = failureKind == .offline
-                ? "Could not reach the momo server. Check the URL and try again."
+                ? "Could not reach the oort server. Check the URL and try again."
                 : "Your saved session could not be restored. Sign in again."
             phase = .signedOut
         }
@@ -135,8 +135,8 @@ public struct MomoiOSRootView: View {
                 }
             case .connecting:
                 NavigationStack {
-                    ProgressView("Connecting to momo")
-                        .navigationTitle("momo")
+                    ProgressView("Connecting to oort")
+                        .navigationTitle("oort")
                 }
             case .signedIn(let session, let bootstrap):
                 IOSWorkspaceView(
@@ -243,7 +243,7 @@ private struct LoginView: View {
                 Text("Development credentials are stored on this device in UserDefaults.")
             }
         }
-        .navigationTitle("Sign in to momo")
+        .navigationTitle("Sign in to oort")
     }
 }
 

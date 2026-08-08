@@ -99,7 +99,7 @@ Profiles:
 
 | Profile | Use when | What it runs |
 |---|---|---|
-| `docs` | docs/spec/script-only changes, including internal alpha runbook/feedback/AWS topology updates | whitespace diff, workflow YAML parse, actionlint if installed, e2e compose config, AWS internal alpha topology preflight fixture, JSON syntax, shell syntax, Python syntax, Hermes adapter smoke |
+| `docs` | docs/spec/script-only changes, including internal alpha runbook/feedback/AWS topology updates | whitespace diff, workflow YAML parse, actionlint if installed, e2e compose config, AWS internal alpha topology preflight fixture, JSON syntax, shell syntax, Python syntax, Hermes adapter smoke, prime adapter contract tests + closed-loop smoke (`adapters/prime/tests/`, no docker/network/credential) |
 | `swift` | Swift package/model/view changes | `docs` profile + design pre-flight ratchet (`scripts/verify_design_preflight.sh`) + `make build` + `make test` |
 | `diagnostics` | diagnostics/observability bundle changes | `docs` profile + `scripts/collect_diagnostics.sh --smoke` redaction check |
 | `staging-smoke` | staging/prod/internal-hosting config or runbook changes that do not have real VPS secrets | `docs` profile + `scripts/verify_staging_smoke.sh` + `scripts/verify_internal_hosting_smoke.sh` for prod compose config, internal single-node smoke overlay, Caddyfile structure, Centrifugo Redis config, API health route wiring, relay/worker enablement, secret-template guard, public/staging preflight evidence markdown/json, and SOPS/pgBackRest checklist |
@@ -153,6 +153,21 @@ handlers behind that surface, or a client generated from the spec must run:
 scripts/verify_openapi_contract.sh
 ```
 
+**2026-08-06 강등 — 1차(Swift) 패스는 기본 off (ADR-0145 증보 2-② / #1089).**
+Swift 서버는 삭제 전이라도 상시 빌드·테스트 대상이 아니다. 스펙이 서술하는 대상은
+Rust 배포본이므로(#1040), 1차 패스는 죽을 서버를 스펙과 대조하며 매 실행 40분짜리
+콜드 Swift 빌드를 태우는 일이었다. **기본 실행은 2차(스펙 ↔ Rust) 패스 하나다.**
+
+- `OPENAPI_GATE_SWIFT_PASS=1` — 1차 패스를 되살린다(아래가 그 패스의 동작이다).
+- 1차가 꺼지면 `scripts/openapi_sampled_on_rust.txt` **밖**의 연산은 어느 패스도
+  보지 않는다. 그래서 게이트가 그 목록을 매 실행 **경고로 전부 출력한다**
+  (2026-08-06 실측 125/128). 과도기 부채이지 면제가 아니다.
+- 두 패스를 동시에 끄는 조합(`SWIFT_PASS=0` + `RUST_PASS=0`)은 거부한다 —
+  아무도 샘플하지 않는 초록은 게이트가 아니다.
+- `known-unsampled`의 의미는 불변이다: 1차 패스만의 부채 장부이고, 1차가 꺼진
+  실행에서는 참조되지 않는다. 줄 추가는 여전히 금지.
+
+아래는 `OPENAPI_GATE_SWIFT_PASS=1` 일 때의 1차 패스 동작이다.
 The gate boots an isolated e2e compose stack (`infra/docker-compose.e2e.yml`)
 under its own compose project (default `momo389gate`) on non-default host
 ports (`18980`-`18983`), installs disposable fixtures (a dedicated gate
@@ -184,6 +199,28 @@ scripts/verify_openapi_contract.sh
 The `docs` profile statically checks the spec parse and both gate scripts.
 The runtime drift gate is wired into the `web` profile (MOMO-391) and also
 runs standalone with the command above.
+
+### 병합 트리 크로스-클라 게이트 (#1108)
+
+```bash
+scripts/verify_merge_tree.sh                     # HEAD 를 origin/track/engine 에
+scripts/verify_merge_tree.sh --base main --head feat/xxx
+scripts/verify_merge_tree.sh --typecheck-only    # 빠른 사전 확인
+```
+
+**코어(`packages/momo-core`)를 만진 PR을 트랙에 머지하기 전에 필수다.** 재는 것은
+브랜치가 아니라 **병합 결과**다: `git merge-tree --write-tree` 로 병합 트리를 만들고
+임시 워크트리에 실체화한 뒤 거기서 웹·폰·코어 3종 typecheck + 스위트를 돌린다.
+브랜치 HEAD 는 한 번도 체크아웃되지 않는다 — 그것이 이미 초록인 판이기 때문이다.
+
+같은 실패 양식이 두 번 왔기 때문에 세운다: ①U4-4 W-1(게이트 증거를 버려질 판에서
+수집) ②U4-6 B1(웹 PR이 코어 API를 재편, 폰 PR이 옛 API 소비 — 각 브랜치는 초록,
+병합 트리에서만 폰 `tsc TS2353`. 런타임에서는 오프라인 승인 버튼이 되살아났다).
+
+기본은 이 체크아웃의 `node_modules` 를 심볼릭 링크로 빌려 쓴다(실측 20초). 병합
+결과의 락파일이 다르면 자동으로 `npm ci` 모드로 전환하고, `--install` 로 강제할 수
+있다. 워킹 트리의 커밋되지 않은 변경은 병합 트리에 들어가지 않으므로 게이트가 그
+사실을 경고로 말한다.
 
 ### Push device registration gate (MOMO-403, ADR-0120 P-1)
 
@@ -397,7 +434,7 @@ idempotent credential rotation, and active-session revocation. Worker handoff
 leaves this Docker verifier `runtime-unverified` for the orchestrator.
 
 For the external provider profile, keep stack ports in `.env.worktree` and pass
-only momo-facing provider endpoint/key values through the shell or, preferably,
+only oort-facing provider endpoint/key values through the shell or, preferably,
 a separate untracked file. Codex/OpenAI OAuth login and provider API keys stay
 inside the provider runtime:
 
@@ -431,7 +468,7 @@ scripts/local_gate.sh --profile external-agent-provider
 ```
 
 The wrapper/verifier never prints the API key. If no out-of-repo provider env
-file or inline momo-facing endpoint/key is configured, the profile exits
+file or inline oort-facing endpoint/key is configured, the profile exits
 successfully with explicit `NEEDS_USER_CREDENTIAL` /
 `runtime-unverified(external provider credentials)` evidence so default mock
 runtime gates remain deterministic. If `AGENT_PROVIDER_MODE=external-hermes` is
@@ -448,7 +485,7 @@ depend on or mutate persistent dogfood roster data.
 
 Codex OAuth tokens are intentionally not part of this profile. If Hermes/Kim
 Intern uses Codex OAuth, configure authorization code exchange, access/refresh
-token storage, refresh, unlink, and rotation inside the provider host. The momo
+token storage, refresh, unlink, and rotation inside the provider host. The oort
 smoke process accepts only `HERMES_API_KEY` for the provider SSE boundary and
 fails fast if known Codex/OpenAI OAuth token or API key env var names are
 present. The MOMO-257 local setup runbook is

@@ -44,7 +44,7 @@ enum CloudUsageLedger {
             logger: logger
         ).collect()
         guard let poolRow = poolRows.first else {
-            throw HTTPError(.internalServerError, message: "momo Cloud 슬롯 설정을 읽을 수 없습니다.")
+            throw HTTPError(.internalServerError, message: "oort Cloud 슬롯 설정을 읽을 수 없습니다.")
         }
         let (maxActive, memberLimit) = try poolRow.decode((Int, Int).self)
 
@@ -60,14 +60,14 @@ enum CloudUsageLedger {
         guard let creditRow = creditRows.first else {
             throw HTTPError(
                 .conflict,
-                message: "momo Cloud 크레딧 원장이 없어 시작할 수 없습니다. 운영자에게 크레딧 할당을 요청하세요."
+                message: "oort Cloud 크레딧 원장이 없어 시작할 수 없습니다. 운영자에게 크레딧 할당을 요청하세요."
             )
         }
         let balance = try creditRow.decode(Int64.self)
         guard balance > 0 else {
             throw HTTPError(
                 .conflict,
-                message: "momo Cloud 크레딧이 없어 시작할 수 없습니다. 크레딧을 충전한 뒤 다시 시도하세요."
+                message: "oort Cloud 크레딧이 없어 시작할 수 없습니다. 크레딧을 충전한 뒤 다시 시도하세요."
             )
         }
 
@@ -100,19 +100,19 @@ enum CloudUsageLedger {
             logger: logger
         ).collect()
         guard let usageRow = usageRows.first else {
-            throw HTTPError(.internalServerError, message: "momo Cloud 슬롯 사용량을 읽을 수 없습니다.")
+            throw HTTPError(.internalServerError, message: "oort Cloud 슬롯 사용량을 읽을 수 없습니다.")
         }
         let (occupied, memberOccupied) = try usageRow.decode((Int, Int).self)
         guard occupied < maxActive else {
             throw HTTPError(
                 .conflict,
-                message: "momo Cloud 슬롯이 모두 사용 중입니다. 현재 \(occupied)/\(maxActive)개입니다."
+                message: "oort Cloud 슬롯이 모두 사용 중입니다. 현재 \(occupied)/\(maxActive)개입니다."
             )
         }
         guard memberOccupied < memberLimit else {
             throw HTTPError(
                 .conflict,
-                message: "내 momo Cloud 동시 실행 한도 \(memberLimit)개를 모두 사용 중입니다."
+                message: "내 oort Cloud 동시 실행 한도 \(memberLimit)개를 모두 사용 중입니다."
             )
         }
     }
@@ -139,7 +139,7 @@ enum CloudUsageLedger {
         guard state == "ready" || state == "running" else {
             throw HTTPError(
                 .conflict,
-                message: "momo Cloud 호스트가 실행 준비 상태가 아닙니다. 현재 상태: \(state)"
+                message: "oort Cloud 호스트가 실행 준비 상태가 아닙니다. 현재 상태: \(state)"
             )
         }
         let existingRows = try await conn.query(
@@ -156,7 +156,7 @@ enum CloudUsageLedger {
         guard existingRows.first == nil else {
             throw HTTPError(
                 .conflict,
-                message: "이 momo Cloud 호스트에는 이미 정산 전 세션이 있습니다."
+                message: "이 oort Cloud 호스트에는 이미 정산 전 세션이 있습니다."
             )
         }
 
@@ -171,7 +171,7 @@ enum CloudUsageLedger {
             logger: logger
         ).collect()
         guard let usageID = try usageRows.first?.decode(UUID.self) else {
-            throw HTTPError(.internalServerError, message: "momo Cloud 활성시간 원장을 시작하지 못했습니다.")
+            throw HTTPError(.internalServerError, message: "oort Cloud 활성시간 원장을 시작하지 못했습니다.")
         }
         _ = try await conn.query(
             """
@@ -334,7 +334,7 @@ enum CloudUsageLedger {
             ).collect()
         }
         guard let row = rows.first else {
-            throw HTTPError(.conflict, message: "실행 중인 momo Cloud 세션이 없습니다.")
+            throw HTTPError(.conflict, message: "실행 중인 oort Cloud 세션이 없습니다.")
         }
         let decoded = try row.decode((UUID, UUID).self)
         return OpenUsage(id: decoded.0, sessionID: decoded.1)
@@ -377,7 +377,7 @@ enum CloudUsageLedger {
         guard rows.first != nil else {
             throw HTTPError(
                 .conflict,
-                message: "momo Cloud 세션 상태가 이미 변경되었습니다. 새로고침 후 다시 시도하세요."
+                message: "oort Cloud 세션 상태가 이미 변경되었습니다. 새로고침 후 다시 시도하세요."
             )
         }
     }

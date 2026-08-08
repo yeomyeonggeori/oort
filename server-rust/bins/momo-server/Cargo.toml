@@ -1,0 +1,108 @@
+[package]
+name = "momo-server"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+# The router is a library so integration tests can boot the real app on an
+# ephemeral port; `src/main.rs` is a thin env→config→serve shell.
+[lib]
+name = "momo_server"
+path = "src/lib.rs"
+
+[[bin]]
+name = "momo-server"
+path = "src/main.rs"
+
+[dependencies]
+# shared infrastructure + domain (B0/B1). The route layer consumes these public
+# APIs only — it owns no SQL of its own (D1 §3).
+momo-db = { path = "../../crates/momo-db" }
+momo-auth = { path = "../../crates/momo-auth" }
+momo-messaging = { path = "../../crates/momo-messaging" }
+# ADR-0151: the workspace Drive archive. It owns the HTTP client so this manifest
+# does not, and its whole API is the five-method `DriveArchive` trait — so an
+# attachment handler cannot build a request of its own. Same shape as
+# momo-ephemeral, for the same reason (see the NOTE below).
+momo-drive = { path = "../../crates/momo-drive" }
+# B2.2 (T3 REST surface). `momo-t3` owns every T3 statement this batch mounts;
+# `momo-outbox` is the single egress chokepoint the work-session lifecycle
+# broadcasts go through — momo-t3 deliberately owns no outbox SQL, so the route
+# emits them in the same transaction (momo-t3 lib.rs, "It owns no outbox SQL").
+momo-t3 = { path = "../../crates/momo-t3" }
+momo-outbox = { path = "../../crates/momo-outbox" }
+# B2.6 (AgentGateway + LLM billing). `momo-agent` owns every `agent_run` and
+# `usage_ledger` statement this batch mounts; the gateway job lease is
+# `momo-outbox`'s (it is columns on an outbox row) and the final timeline message
+# goes through `momo-messaging`'s send path — so this route layer still owns no
+# SQL of its own beyond the two membership predicates it shares with Swift.
+momo-agent = { path = "../../crates/momo-agent" }
+# B4.2 (설정 표면). `momo-settings` owns every provider_link / provider_link_chain
+# / work_host_engine / work_tier_policy / quota_snapshot / invite_code statement
+# this batch mounts, plus the AES-GCM sealing of the provider bearer — so the
+# route layer still owns no SQL of its own and the plaintext bearer exists only
+# between the PUT body that carried it and the seal call.
+momo-settings = { path = "../../crates/momo-settings" }
+# P2 (푸시 등록 표면). `momo-push` owns every `device` / `push_token` statement the
+# devices route mounts. It carries no HTTP client of its own, so mounting the
+# registration surface here does not give momo-server an outbound HTTP
+# dependency (invariant #2) — the relay transport lives in momo-notifier.
+momo-push = { path = "../../crates/momo-push" }
+# B2.4: the signed work-host REQUEST authenticator hashes the raw body with the
+# shared `momo-wire` helper, so the server's digest and the daemon's signer are
+# one implementation — the exact drift Swift had between two copies of the
+# format string. Promoted from a dev-dependency (it was the T3 smoke's).
+momo-wire = { path = "../../crates/momo-wire" }
+# ADR-0149 (goal SRV-T2): the 휘발 신호 publisher, and the reason it is a crate
+# rather than a module in this binary — see the NOTE below. It owns the HTTP
+# client so this manifest does not, and its whole API takes a sealed
+# `EphemeralSignal`, so no handler can publish anything else anywhere else.
+momo-ephemeral = { path = "../../crates/momo-ephemeral" }
+
+axum.workspace = true
+tokio = { workspace = true, features = ["net", "signal", "time"] }
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+# NOTE (invariant #2, amended by ADR-0149): there is still deliberately no
+# `reqwest` here. Until goal SRV-T2 that meant "momo-server never talks to
+# Centrifugo"; it now means something narrower but equally mechanical — the only
+# outbound HTTP this process can perform is `momo-ephemeral`'s, whose entire API
+# is `publish(&EphemeralSignal)`. Adding `reqwest` to this manifest would undo
+# the guard, because a handler could then build any request to any host. The
+# durable rail is untouched: `outbox → relay → Centrifugo` remains the only path
+# a persisted message travels.
+
+[dev-dependencies]
+# goal SRV-B3e: the conformance suite implements `ChatProvider` to drive the
+# streaming seam, and that trait is `#[async_trait]`.
+async-trait = { workspace = true }
+# `reqwest` is the HTTP *client* the smoke tests drive the server with, and
+# (SRV-T2) what the ephemeral tests build a mock Centrifugo receiver against —
+# not a server-side dependency in either case.
+reqwest.workspace = true
+tokio = { workspace = true, features = ["net", "time"] }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+# B2.2 T3 smoke only: the test plays the part of a cloud workd, so it needs the
+# shared signing format and a throwaway keypair. Neither is linked into the
+# server binary.
+momo-wire = { path = "../../crates/momo-wire" }
+ed25519-dalek.workspace = true
+base64.workspace = true
+# B4 client-rewire smoke only: the test plays the part of CENTRIFUGO, so it
+# verifies the connection token with the broker's HMAC key exactly as the broker
+# would. Already in the tree via momo-auth; never linked for a server-side use.
+jsonwebtoken.workspace = true
+# B5.2 conformance only: `tests/mention_routing_conformance_pg.rs` runs ONE real
+# worker iteration in-process after the send, so the 티키타카 is proved end to end
+# instead of stopping at "a row was enqueued". Dev-only — the server binary
+# neither links nor starts a worker, and the two processes still meet through
+# nothing but the `outbox` row.
+momo-agent-worker = { path = "../momo-agent-worker" }

@@ -10,7 +10,7 @@ import {
   putProviderChain,
   type ProviderChain,
   type ProviderChainProbe,
-} from "./api";
+} from "@momo/core/features/settings/api";
 import {
   addDraftRow,
   bearerHint,
@@ -36,8 +36,8 @@ import {
   removeDraftRow,
   type ChainDraftRow,
   type DraftRowError,
-} from "./chainModel";
-import { choiceLabel, errorMessage, isOperatorDenied, PROVIDER_MODES } from "./model";
+} from "@momo/core/features/settings/chainModel";
+import { choiceLabel, errorMessage, isOperatorDenied, PROVIDER_MODES } from "@momo/core/features/settings/model";
 import {
   ConfirmButton,
   Field,
@@ -103,8 +103,11 @@ function HeadRow({ chain }: { chain: ProviderChain }) {
         <span className="min-w-0 break-all text-body font-medium text-ink">
           {head.endpointLabel}
         </span>
+        {/* "키" is the wrong noun for position 0 since ADR-0147: the head may
+            hold an OAuth grant, and this row sits 200px under a card that just
+            said so. One panel gets one vocabulary. */}
         <StatusChip tone={head.bearerConfigured ? "ok" : "warn"}>
-          {head.bearerConfigured ? "키 있음" : "키 없음"}
+          {head.bearerConfigured ? "자격증명 있음" : "자격증명 없음"}
         </StatusChip>
         {!head.enabled && <StatusChip tone="muted">꺼둠</StatusChip>}
         <StatusChip tone="muted">{choiceLabel(PROVIDER_MODES, head.mode)}</StatusChip>

@@ -1,0 +1,39 @@
+[package]
+name = "momo-relay"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+# The drain loop is a library so conformance tests can run exactly one
+# iteration against a mock Centrifugo; `src/main.rs` is the env→serve shell.
+[lib]
+name = "momo_relay"
+path = "src/lib.rs"
+
+[[bin]]
+name = "momo-relay"
+path = "src/main.rs"
+
+[dependencies]
+# All outbox SQL comes from momo-outbox (invariant #3): this crate contains no
+# `outbox` statement of its own — claim + settle are its public API.
+momo-db = { path = "../../crates/momo-db" }
+momo-outbox = { path = "../../crates/momo-outbox" }
+momo-wire = { path = "../../crates/momo-wire" }
+
+reqwest.workspace = true
+tokio = { workspace = true, features = ["net", "signal", "time", "sync"] }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[dev-dependencies]
+# Conformance harness (tests/relay_conformance_pg.rs, #[ignore]): a mock
+# Centrifugo receiver (axum) plus the real write path to produce outbox rows.
+momo-messaging = { path = "../../crates/momo-messaging" }
+axum.workspace = true
+chrono.workspace = true
+uuid.workspace = true

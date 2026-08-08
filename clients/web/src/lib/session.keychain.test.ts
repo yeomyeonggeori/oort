@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { LoginResponse } from "./api";
+import type { LoginResponse } from "@momo/core/lib/api";
 
 // The refresh token's storage location is a RUNTIME decision (ADR-0133 P2,
 // MOMO-603), so what is worth pinning is the decision itself and its failure

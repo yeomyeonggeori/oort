@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "momo",
+  "productName": "oort",
   "version": "0.1.0-next.1",
   "identifier": "app.momo.desktop",
   "build": {
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "momo",
+        "title": "oort",
         "width": 1100,
         "height": 760,
         "minWidth": 720,
@@ -27,7 +27,7 @@
   "plugins": {
     "deep-link": {
       "desktop": {
-        "schemes": ["momo"]
+        "schemes": ["oort", "momo"]
       }
     },
     "updater": {

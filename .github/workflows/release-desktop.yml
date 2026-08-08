@@ -1,0 +1,218 @@
+# oort — 데스크톱(Tauri 2 셸, clients/desktop) 빌드·서명·공증·발행.
+#
+# 러너: 셀프호스티드 macOS(성재 맥) — ADR-0153 D2. 클라우드 macOS 러너(10배 배율)를
+#   쓰지 않으므로 과금 0이다. 러너는 상시 데몬이 아니라 **릴리스 때만** 사람이
+#   `./run.sh` 로 올린다. 등록·기동 절차는 docs/cicd/13-selfhosted-runner-macos.md.
+#   러너가 꺼져 있으면 이 잡은 실행되지 않고 큐에서 기다린다(그게 의도된 동작).
+#
+# workflow_dispatch 전용인 이유는 두 가지다.
+#   1) release-macos.yml / ci-build.yml 과 같은 관례(ADR-0107: 머지 게이트는 로컬 증거).
+#   2) 셀프호스티드 러너는 워크플로가 러너 머신에서 임의 코드를 실행한다는 뜻이다.
+#      푸시/PR 트리거를 달면 브랜치에 코드를 넣을 수 있는 누구나 성재 맥의 키체인
+#      옆에서 코드를 돌릴 수 있게 된다. 수동 dispatch가 그 경계다.
+#
+# 세 모드
+#   build-only  서명 없이 빌드만 — 러너/툴체인이 살아 있는지, 소스가 빌드되는지.
+#               자격증명 하나도 안 쓴다. 산출물은 워크플로 아티팩트(설치용 아님).
+#   dry-run     publish_next_build.sh --dry-run — 빌드 + Developer ID 서명 + 검증까지.
+#               공증 직전에 멈춘다(네트워크·대기 없음).
+#   release     전체 — 공증·스테이플·릴리스 업로드·update-next.json 커밋.
+#               채널 계약은 docs/NEXT_CHANNEL.md 가 정본이고 이 워크플로는 그
+#               스크립트를 대행 실행할 뿐이다(발행 논리를 두 벌 두지 않는다).
+#
+# 자격증명은 이 레포에 없다. 서명 키·공증 프로파일·minisign 개인키는 전부 러너
+# 머신의 키체인/홈에 있고, 워크플로는 그 이름만 참조한다(docs/cicd/02 · 13 §4).
+name: release-desktop
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "build-only(서명 없음) / dry-run(서명까지) / release(공증+발행)"
+        type: choice
+        default: build-only
+        options:
+          - build-only
+          - dry-run
+          - release
+      version:
+        description: "next 채널 버전 0.1.0-next.N — dry-run·release 에서 필수"
+        type: string
+        required: false
+      notes:
+        description: "업데이트 패널에 그대로 보이는 한 문장 (release)"
+        type: string
+        required: false
+
+concurrency:
+  group: release-desktop
+  cancel-in-progress: false
+
+permissions:
+  contents: read              # 발행 대상은 이 레포가 아니라 배포 저장소다
+
+jobs:
+  desktop:
+    name: tauri ${{ inputs.mode }}
+    runs-on: [self-hosted, macOS]
+    # 신규 팀의 공증은 1시간을 넘긴 적이 있다(2026-07-24 실측). 스크립트의
+    # notarytool --timeout 120m 보다 넉넉하게 잡는다.
+    timeout-minutes: 180
+    env:
+      INPUT_MODE: ${{ inputs.mode }}
+      INPUT_VERSION: ${{ inputs.version }}
+      INPUT_NOTES: ${{ inputs.notes }}
+      # 러너 머신의 자격 "이름". 값이 아니라 이름이므로 vars 로 덮어써도 안전하다.
+      MOMO_SIGN_IDENTITY: "${{ vars.MOMO_SIGN_IDENTITY || 'Developer ID Application: Kwak Seongjae (YWQQFQM38J)' }}"
+      MOMO_NOTARY_PROFILE: ${{ vars.MOMO_NOTARY_PROFILE || 'momo-notary' }}
+      MOMO_UPDATER_KEY: ${{ vars.MOMO_UPDATER_KEY || '' }}
+      MOMO_DIST_REPO: ${{ vars.MOMO_DIST_REPO || 'Dawn-kim-official/momo-alpha' }}
+
+    steps:
+      # clean: false — 러너 작업 디렉터리를 보존한다. 기본값(git clean -ffdx)은
+      # src-tauri/target(1.1GB, 295 crate)과 node_modules 를 매번 지워서 릴리스마다
+      # 콜드 빌드를 강요한다. 대신 추적 파일이 더러운 채로 빌드되는 일이 없도록
+      # 바로 다음 단계에서 확인한다.
+      - uses: actions/checkout@v4
+        with:
+          clean: false
+
+      - name: 워크스페이스 청결 확인
+        run: |
+          set -euo pipefail
+          dirty="$(git status --porcelain --untracked-files=no)"
+          if [ -n "$dirty" ]; then
+            echo "::error::추적 파일이 수정된 상태입니다(이전 실행 잔재). 러너의 _work 디렉터리를 지우고 다시 실행하세요."
+            printf '%s\n' "$dirty"
+            exit 1
+          fi
+
+      - name: 러너 전제 확인
+        run: |
+          set -euo pipefail
+          # cargo 는 rustup 기본 위치가 로그인 셸 PATH 에만 있는 경우가 있다.
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.cargo/bin:$PATH"
+          fail=0
+          for bin in node npm cargo git gh python3; do
+            command -v "$bin" >/dev/null || {
+              echo "::error::$bin 을 찾을 수 없습니다 — 러너를 로그인 셸에서 ./run.sh 로 띄웠는지 확인하세요 (docs/cicd/13-selfhosted-runner-macos.md §5)"
+              fail=1
+            }
+          done
+          cargo tauri --version >/dev/null 2>&1 || {
+            echo "::error::tauri-cli 없음 — cargo install tauri-cli --version '^2'"
+            fail=1
+          }
+          [ "$fail" = 0 ]
+          { node --version; npm --version; cargo --version; cargo tauri --version; } 2>&1
+
+      - name: 입력·서명 자격 확인 (dry-run·release)
+        if: inputs.mode != 'build-only'
+        run: |
+          set -euo pipefail
+          # 스크립트도 같은 검사를 하지만, 여기서 걸러야 빌드 전에 멈춘다.
+          case "$INPUT_VERSION" in
+            *-next.[0-9]*) : ;;
+            *) echo "::error::version 은 0.1.0-next.N 형태여야 합니다 (받은 값: '$INPUT_VERSION'). docs/NEXT_CHANNEL.md §1"; exit 1 ;;
+          esac
+          security find-identity -v -p codesigning | grep -qF "$MOMO_SIGN_IDENTITY" || {
+            echo "::error::러너 키체인에 '$MOMO_SIGN_IDENTITY' 가 없습니다 (docs/cicd/13 §4)"; exit 1; }
+          key="${MOMO_UPDATER_KEY:-$HOME/.momo-secrets/momo-updater.key}"
+          [ -f "$key" ] || { echo "::error::minisign 개인키 없음: $key (docs/NEXT_CHANNEL.md §2)"; exit 1; }
+          echo "signing identity + minisign key 확인됨"
+
+      - name: 공증 프로파일 확인 (release)
+        if: inputs.mode == 'release'
+        run: |
+          set -euo pipefail
+          # 20분짜리 빌드가 끝난 뒤 공증에서 죽는 대신 지금 죽는다. 러너가 처음
+          # 키체인 항목에 닿는 순간이기도 하므로, 접근 허용 대화상자가 뜬다면
+          # 여기서 뜬다(docs/cicd/13 §6).
+          xcrun notarytool history --keychain-profile "$MOMO_NOTARY_PROFILE" >/dev/null || {
+            echo "::error::notarytool 키체인 프로파일 '$MOMO_NOTARY_PROFILE' 을 쓸 수 없습니다 (docs/cicd/13 §4)"; exit 1; }
+          echo "notary profile 확인됨"
+
+      - name: 웹 의존성 설치 (npm ci)
+        working-directory: clients/web
+        run: npm ci
+
+      # ── build-only: 자격증명 없이 빌드가 성립하는지 ──────────────────────────
+      - name: tauri build (서명 없음)
+        if: inputs.mode == 'build-only'
+        working-directory: clients/desktop
+        run: |
+          set -euo pipefail
+          # 서명 환경변수를 명시적으로 지운다. 번들러는 APPLE_SIGNING_IDENTITY 가
+          # 있으면 서명하려 들고, 없으면 ad-hoc 서명된 .app 을 만든다(실측).
+          env -u APPLE_SIGNING_IDENTITY -u APPLE_CERTIFICATE -u TAURI_SIGNING_PRIVATE_KEY \
+            cargo tauri build --bundles app --ci
+
+      - name: 산출물 압축 (build-only)
+        if: inputs.mode == 'build-only'
+        run: |
+          set -euo pipefail
+          app="clients/desktop/src-tauri/target/release/bundle/macos/oort.app"
+          [ -d "$app" ] || { echo "::error::.app 이 없습니다: $app"; exit 1; }
+          # 워크스페이스가 아니라 RUNNER_TEMP 에 만든다. clean:false 로 작업
+          # 디렉터리를 보존하므로, 산출물을 워크스페이스에 두면 계속 쌓인다.
+          # ditto: .app 의 심볼릭 링크·실행 비트를 보존한다. 그냥 zip 하면 깨진다.
+          ditto -c -k --sequesterRsrc --keepParent "$app" \
+            "${RUNNER_TEMP}/oort-desktop-unsigned-${GITHUB_SHA:0:7}.zip"
+          codesign -dv --verbose=2 "$app" 2>&1 | grep -E '^(Identifier|Format|Signature)' || true
+          shasum -a 256 "${RUNNER_TEMP}"/oort-desktop-unsigned-*.zip
+
+      - name: 아티팩트 업로드 (build-only)
+        if: inputs.mode == 'build-only'
+        uses: actions/upload-artifact@v4
+        with:
+          name: oort-desktop-unsigned-${{ github.sha }}
+          path: ${{ runner.temp }}/oort-desktop-unsigned-*.zip
+          retention-days: 7
+          if-no-files-found: error
+
+      # ── dry-run / release: 발행 스크립트가 정본 ──────────────────────────────
+      - name: 발행 (scripts/publish_next_build.sh)
+        if: inputs.mode != 'build-only'
+        env:
+          # 배포 저장소는 이 레포가 아니므로 GITHUB_TOKEN 으로는 닿지 않는다.
+          # 비워 두면 러너 사용자의 gh/git 자격(로그인 세션)이 그대로 쓰인다 —
+          # 러너가 성재 맥이라는 전제에서 그게 기본 경로다(docs/cicd/13 §4).
+          MOMO_DIST_TOKEN: ${{ secrets.MOMO_DIST_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -n "${MOMO_DIST_TOKEN:-}" ]; then
+            export GH_TOKEN="$MOMO_DIST_TOKEN"
+            # 스크립트가 Pages 저장소를 clone/push 한다. 전역 git config 를 건드리지
+            # 않고 이 스텝에만 자격을 붙인다.
+            export GIT_CONFIG_COUNT=1
+            export GIT_CONFIG_KEY_0="url.https://x-access-token:${MOMO_DIST_TOKEN}@github.com/.insteadOf"
+            export GIT_CONFIG_VALUE_0="https://github.com/"
+          fi
+          args=(--version "$INPUT_VERSION")
+          if [ -n "${INPUT_NOTES:-}" ]; then args+=(--notes "$INPUT_NOTES"); fi
+          if [ "$INPUT_MODE" = "dry-run" ]; then args+=(--dry-run); fi
+          scripts/publish_next_build.sh "${args[@]}"
+
+      - name: 요약
+        if: always()
+        run: |
+          set -euo pipefail
+          {
+            echo "### release-desktop (\`$INPUT_MODE\`)"
+            echo
+            echo "- ref: \`${GITHUB_REF_NAME}\` @ \`${GITHUB_SHA:0:7}\`"
+            case "$INPUT_MODE" in
+              build-only)
+                echo "- 서명 없는 빌드 확인용. 아티팩트는 설치용이 아니다(Gatekeeper 거부)."
+                ;;
+              dry-run)
+                echo "- 버전 \`${INPUT_VERSION}\` — 빌드 + Developer ID 서명까지. 공증·발행 없음."
+                ;;
+              release)
+                echo "- 버전 \`${INPUT_VERSION}\` — 발행 완료 시 매니페스트: <https://dawn-kim-official.github.io/momo-alpha/update-next.json>"
+                echo "- Pages 캐시 \`max-age=600\` — 테스터에게 최대 10분 지연 안내 (docs/NEXT_CHANNEL.md §4)"
+                ;;
+            esac
+          } >> "$GITHUB_STEP_SUMMARY"

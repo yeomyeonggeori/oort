@@ -1,13 +1,13 @@
-# ADR-0131: agent_profile 원장과 momo 네이티브 간편 생성
+# ADR-0131: agent_profile 원장과 oort 네이티브 간편 생성
 
 - 상태: **Accepted** (성재 승인 2026-07-22 — "537은 승인할게. 최적의 형태로 구현 진행")
 - 날짜: 2026-07-22
-- 발단: 성재 — "우리쪽 간편 생성 레벨에서 사용자가 원하는 에이전트를 제공할 수 있는가"(research/20-01 §2 T-B). 업계 수렴(OpenAI Workspace Agents·Notion Custom Agents)은 "이름·지시문·도구·트리거를 가진 공유 에이전트"이며, momo는 실행 런타임(AgentWorker+Context Packet)과 생성 API(X-7)를 이미 보유 — 빠진 것은 에이전트별 인격 정의 원장뿐.
+- 발단: 성재 — "우리쪽 간편 생성 레벨에서 사용자가 원하는 에이전트를 제공할 수 있는가"(research/20-01 §2 T-B). 업계 수렴(OpenAI Workspace Agents·Notion Custom Agents)은 "이름·지시문·도구·트리거를 가진 공유 에이전트"이며, oort는 실행 런타임(AgentWorker+Context Packet)과 생성 API(X-7)를 이미 보유 — 빠진 것은 에이전트별 인격 정의 원장뿐.
 
 ## 결정
 
 ### D1. agent_profile 원장 (정의=PG 행, 실행=기존 경로)
-`agent_profile(agent_member_id PK/FK, workspace_id, instructions text, model_pref text NULL, enabled_tools jsonb, triggers jsonb, version int, updated_by, updated_at)` — RLS FORCE. 신규 상주 프로세스 0: AgentWorker가 run 조립 시 profile을 읽어 반영한다. eve의 "에이전트=디렉터리"에 대한 momo의 대답은 **"에이전트=member 행+profile 행+Context Packet"**.
+`agent_profile(agent_member_id PK/FK, workspace_id, instructions text, model_pref text NULL, enabled_tools jsonb, triggers jsonb, version int, updated_by, updated_at)` — RLS FORCE. 신규 상주 프로세스 0: AgentWorker가 run 조립 시 profile을 읽어 반영한다. eve의 "에이전트=디렉터리"에 대한 oort의 대답은 **"에이전트=member 행+profile 행+Context Packet"**.
 
 ### D2. Context Packet 주입 (528 경로 가산, 기존 필드 불변)
 - instructions → packet `system_prompt` 앞단에 병합(서버 관제 프리앰블·하드 룰이 항상 우선 — 프리앰블을 profile이 덮을 수 없음).

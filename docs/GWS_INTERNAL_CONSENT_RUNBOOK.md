@@ -1,7 +1,7 @@
 # GWS Internal Consent 셋업 런북 — GCP 프로젝트 · OAuth Internal · SA · 공유 드라이브
 
 > **티켓:** MOMO-323 · **마일스톤:** M2 · 근거: `research/13-redesign/03` §2·§5, 정본 스펙 `research/11-agent-runtime/12-google-workspace-connector-v0.md`(MOMO-122) + `13-google-workspace-enterprise-admin-v0.md`(MOMO-123).
-> **대상:** momo를 self-host하는 배포 조직의 운영자 1인. Google Workspace 조직 + 관리자(또는 공유 드라이브 생성 권한자) 접근이 필요하다.
+> **대상:** oort를 self-host하는 배포 조직의 운영자 1인. Google Workspace 조직 + 관리자(또는 공유 드라이브 생성 권한자) 접근이 필요하다.
 > **핵심 전제:** GCP 프로젝트를 **배포 조직이 직접 소유**하고 OAuth consent screen을 **Internal**(같은 Workspace 조직 사용자 한정)로 설정하면 Google 앱 검증·CASA 평가가 **면제**된다. 이 런북의 모든 절차는 이 전제 위에서만 유효하다 — External consent로 바꾸는 순간 restricted scope에 검증/CASA 부담이 생기며, 그 경로는 이 런북 범위 밖이다.
 > 사람이 직접 해야 하는 단계는 `[manual]`로 표기한다(AGENTS.md §3 검증 등급). momo/Codex는 이 단계들을 대신 완료한 것처럼 기록하면 안 된다.
 
@@ -34,22 +34,22 @@
 
 ## 3. OAuth consent — Internal
 
-3. `[manual]` APIs & Services → OAuth consent screen에서 **User type = Internal** 선택 후 앱 이름(`momo`), 지원 이메일, 개발자 연락처를 입력하고 저장. Internal이므로 scope 등록은 동작에 필수는 아니지만, momo가 실제 요청하는 scope(모드 A: `drive.file` 등)를 기재해 두면 조직 감사에 유리하다.
+3. `[manual]` APIs & Services → OAuth consent screen에서 **User type = Internal** 선택 후 앱 이름(`momo`), 지원 이메일, 개발자 연락처를 입력하고 저장. Internal이므로 scope 등록은 동작에 필수는 아니지만, oort가 실제 요청하는 scope(모드 A: `drive.file` 등)를 기재해 두면 조직 감사에 유리하다.
    - 확인: consent screen 요약에 "User type: Internal"이 보여야 한다. 이 상태에서는 Google 검증 제출 버튼/CASA 요구가 없다.
-4. `[manual]` (모드 A를 쓸 때만) APIs & Services → Credentials → Create credentials → **OAuth client ID** (Web application). Redirect URI는 momo 서버의 OAuth 콜백(배포 도메인 기준, 예: `https://momo.example.com/v1/connectors/google/callback` — 구현 티켓에서 확정). client id/secret은 시크릿 저장소로만 보관.
+4. `[manual]` (모드 A를 쓸 때만) APIs & Services → Credentials → Create credentials → **OAuth client ID** (Web application). Redirect URI는 oort 서버의 OAuth 콜백(배포 도메인 기준, 예: `https://momo.example.com/v1/connectors/google/callback` — 구현 티켓에서 확정). client id/secret은 시크릿 저장소로만 보관.
 
 ## 4. 서비스 계정 (모드 B — workspace archive)
 
 5. `[manual]` IAM & Admin → Service Accounts → Create service account — 예: `momo-archive@momo-{org}.iam.gserviceaccount.com`. GCP 프로젝트 수준 IAM role은 **부여하지 않아도 된다**(Drive 접근은 IAM이 아니라 공유 드라이브 멤버십으로 나온다).
    - **하지 말 것:** Admin console API Controls의 domain-wide delegation에 이 SA client id를 등록하지 마라. 모드 B는 **DWD가 아니다** — SA는 자기 자신으로서만 동작한다(MOMO-123 §6 `shared_drive_member`).
-6. `[manual]` SA 키 발급: Service account → Keys → Add key → JSON. 다운로드 즉시 시크릿 저장소(SOPS/age 또는 secret manager)에 넣고 **로컬 다운로드 파일은 삭제**한다. momo에는 `credential_storage_ref`(경로 참조)만 기록되며 키 바이트는 어떤 DB/픽스처/로그에도 저장되지 않는다(MOMO-123 boundary). 배포 환경이 지원하면 keyless(workload identity federation)가 우선이고, static key를 쓰면 회전 주기(예: 90일)와 삭제 경로를 함께 기록한다.
+6. `[manual]` SA 키 발급: Service account → Keys → Add key → JSON. 다운로드 즉시 시크릿 저장소(SOPS/age 또는 secret manager)에 넣고 **로컬 다운로드 파일은 삭제**한다. oort에는 `credential_storage_ref`(경로 참조)만 기록되며 키 바이트는 어떤 DB/픽스처/로그에도 저장되지 않는다(MOMO-123 boundary). 배포 환경이 지원하면 keyless(workload identity federation)가 우선이고, static key를 쓰면 회전 주기(예: 90일)와 삭제 경로를 함께 기록한다.
 
 ## 5. 공유 드라이브 + SA 멤버십
 
-7. `[manual]` Google Drive에서 공유 드라이브 생성 — 이름 규약: `momo — {workspace}` (레이아웃 정본: `research/13-redesign/03` §3, `channels/{channel_slug}/YYYY/MM/`는 momo가 생성).
+7. `[manual]` Google Drive에서 공유 드라이브 생성 — 이름 규약: `momo — {workspace}` (레이아웃 정본: `research/13-redesign/03` §3, `channels/{channel_slug}/YYYY/MM/`는 oort가 생성).
 8. `[manual]` 공유 드라이브 → Manage members → SA 이메일(`momo-archive@…gserviceaccount.com`)을 멤버로 추가하고 역할을 **Content Manager(콘텐츠 관리자)** 로 지정. Manager(관리자) 권한은 주지 않는다 — 멤버십/드라이브 설정 변경 권한은 사람에게만.
 
-## 6. momo 쪽 기록 (배포 설정)
+## 6. oort 쪽 기록 (배포 설정)
 
 9. `[manual]` 아래 값을 배포 시크릿/설정으로 기록한다(소비 구현은 MOMO-320 — 그 전까지는 준비 상태로 보관):
 
@@ -69,7 +69,7 @@ GCP project `momo-dawn`(dawn.kim 조직 하위) · SA `momo-archive@momo-dawn.ia
 
 ## 7. 검증 체크리스트
 
-### 7.1 momo-hosted read-only Drive MCP (MOMO-457)
+### 7.1 oort-hosted read-only Drive MCP (MOMO-457)
 
 서버에는 repo 밖 시크릿 경로의 `MOMO_DRIVE_SA_KEY_PATH`, 대상 1개인 `MOMO_DRIVE_SHARED_DRIVE_ID`, `MOMO_DRIVE_BACKEND=google`을 주입한다. 키 JSON 원문은 `.env*`, DB, fixture, audit evidence에 복사하지 않는다. `scripts/verify_drive_mcp.sh`는 `MOMO_DRIVE_BACKEND=stub`으로 계약만 검증하며 Google에 접속하지 않는다. 실제 SA smoke는 아래 `[manual]` 절차로만 evidence를 남기고, 응답 본문이나 access token/키 바이트는 evidence에 첨부하지 않는다.
 
@@ -78,8 +78,8 @@ GCP project `momo-dawn`(dawn.kim 조직 하위) · SA `momo-archive@momo-dawn.ia
       `GET https://www.googleapis.com/drive/v3/drives/{shared_drive_id}` → 200이면 멤버십/크레덴셜 OK.
     - `GET https://www.googleapis.com/drive/v3/files?corpora=drive&driveId={shared_drive_id}&includeItemsFromAllDrives=true&supportsAllDrives=true` → 200 + 항목 나열.
     - `GET https://www.googleapis.com/drive/v3/changes/startPageToken?driveId={shared_drive_id}&supportsAllDrives=true` → 200이면 MOMO-321 폴러 전제 확인.
-    - `drive.file` scope로 위 호출이 403이면: SA만 `drive.readonly`로 재시도하고, 채택 시 scope inventory에 justification을 남긴다(Internal consent라 검증 부담은 없음 — momo 자체 최소권한 정책 문제).
-11. 롤백/철회 경로 확인(실행은 하지 않음): 공유 드라이브 멤버에서 SA 제거 `[manual]` → 키 비활성/삭제 `[manual]` → momo boundary `status=revoked` → 그 드라이브에서 파생된 인덱스 행 삭제(MOMO-122 §2 carve-out은 revocable이 계약이다).
+    - `drive.file` scope로 위 호출이 403이면: SA만 `drive.readonly`로 재시도하고, 채택 시 scope inventory에 justification을 남긴다(Internal consent라 검증 부담은 없음 — oort 자체 최소권한 정책 문제).
+11. 롤백/철회 경로 확인(실행은 하지 않음): 공유 드라이브 멤버에서 SA 제거 `[manual]` → 키 비활성/삭제 `[manual]` → oort boundary `status=revoked` → 그 드라이브에서 파생된 인덱스 행 삭제(MOMO-122 §2 carve-out은 revocable이 계약이다).
 
 ## 8. 운영 주의
 

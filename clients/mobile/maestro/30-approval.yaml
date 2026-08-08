@@ -1,0 +1,158 @@
+appId: app.momo.ios
+name: 30-approval
+# No `env:` block — see the note at the top of 00-login.yaml.
+---
+# 30-approval — 툴콜 유도 → 결정 대기 탭 → 무장 → 확정 문장 → 승인 → 영수증.
+#
+# `MOMO-352 session=<uuid>` in the message body is the tool-call trigger, and the
+# specific one matters. scripts/mock_hermes.py `_tool_fixture` maps that marker to
+# `work_session_end`, the ONE entry in the Rust worker's executable catalog
+# (server-rust/crates/momo-agent/src/tools.rs:41) — so an APPROVED call actually
+# executes and the run finishes. The mock's default fixture
+# (`github.search_issues`) also pauses for approval and would satisfy every
+# assertion up to the receipt, then come back "declared but this server cannot
+# execute it", leaving a half-verified flow that looks green until someone reads
+# the run row.
+#
+# It used to be bare `MOMO-352` → `momo.mock.echo`, an entry on the SWIFT
+# `ToolResumeExecutor` allowlist. The lane's server is Rust now (#1022) and that
+# allowlist does not exist there. The uuid is the lane's own seeded work session,
+# handed in as `WORK_SESSION_ID`; the runner re-reads that row afterwards and
+# downgrades a screen-green run to FAIL unless the session really is `ended` —
+# the phone cannot see the difference, and the difference is this flow's subject.
+#
+# No `MAESTRO TEXT` here, obviously — the tool call IS the subject. No
+# `MAESTRO SLOW` either: an approval pause is a durable state, not a window, so
+# nothing has to be held open for the assertions to land.
+#
+# WHAT THIS FLOW CANNOT SEE: the simulator has no APNs, so the lock-screen
+# approval path is not exercised here. The runner prints that as an explicit
+# 실기기 파이널 체크 item rather than letting a green table imply it was covered.
+- launchApp:
+    appId: app.momo.ios
+- runFlow: subflows/ensure-signed-in.yaml
+
+- tapOn:
+    id: "sidebar-row-channel:${GENERAL_CHANNEL_ID}"
+- extendedWaitUntil:
+    visible:
+      id: "composer-input"
+    timeout: 60000
+- runFlow:
+    when:
+      visible:
+        id: "long-press-hint"
+    commands:
+      - tapOn:
+          id: "long-press-hint-dismiss"
+- runFlow: subflows/dismiss-dev-logbox.yaml
+
+- tapOn:
+    id: "composer-input"
+- inputText: "@kim"
+- extendedWaitUntil:
+    visible:
+      id: "mention-list"
+    timeout: 20000
+- tapOn:
+    id: "mention-option"
+    index: 0
+- inputText: "MOMO-352 session=${WORK_SESSION_ID} approval check"
+- tapOn:
+    id: "composer-send"
+
+# The pause is visible in the channel first — the agent posts an approval_request
+# message. Asserting it here is what ties the inbox card below to a turn this
+# flow actually caused.
+- extendedWaitUntil:
+    visible: ".*Approve work.session.end.*"
+    timeout: 120000
+
+# NO RELAUNCH. There used to be one here, and it was a workaround for #1020 —
+# the inbox did not pick up an approval that arrived while the app was open, so
+# this flow restarted the app to force a fresh mount. Measured then: the approval
+# sat `pending` in the database and rendered live in the CHANNEL while the inbox
+# showed "지금 결정할 일이 없습니다. 조용한 게 정상입니다." for the full 60s wait.
+#
+# goal RN-B4d landed the invalidation (`AgentWorkingRail` folds
+# `agent.status`'s `run_status` change into the inbox ledgers, and opening the
+# tab re-reads them), so the workaround is gone and this is a plain tab tap
+# again. That is the point of removing it rather than leaving it as insurance: a
+# detour that outlives the defect it routed around stops anyone from noticing
+# when the defect comes back.
+#
+# WHAT THIS STILL CANNOT SEE: the lock-screen push path. The simulator has no
+# APNs, and the relaunch used to stand in for it by accident. It never proved it
+# — the runner already prints that as an explicit 실기기 파이널 체크 item.
+
+# Back out of the conversation. Decisions live on the inbox tab, not in the
+# timeline (ApprovalDecision is only mounted by InboxScreen).
+- tapOn:
+    id: "header-back"
+- extendedWaitUntil:
+    visible:
+      id: "tab-inbox"
+    timeout: 30000
+- tapOn:
+    id: "tab-inbox"
+- extendedWaitUntil:
+    visible:
+      id: "inbox-list"
+    timeout: 60000
+
+# 결정 대기 — the needs-action filter. The strip only renders when more than one
+# filter is available, so this is guarded rather than assumed.
+- runFlow:
+    when:
+      visible:
+        id: "inbox-tab-needs-action"
+    commands:
+      - tapOn:
+          id: "inbox-tab-needs-action"
+
+# Regex on the id: the testID carries the approval's runtime UUID
+# (`inbox-approval-{approvalId}-…`), which cannot be known when the flow is
+# written and is not worth threading through the runner just to name a button.
+- extendedWaitUntil:
+    visible:
+      id: "inbox-approval-.*-approve"
+    timeout: 60000
+- tapOn:
+    id: "inbox-approval-.*-approve"
+
+# Same two-tap contract as the stop control, and the same reason for asserting
+# the sentence rather than the button: `reversible` defaults false, so the copy
+# a person is asked to accept has to include that it cannot be undone.
+- assertVisible:
+    id: "inbox-approval-.*-confirm"
+- assertVisible: ".*승인하면 에이전트가 이어서 진행합니다. 되돌릴 수 없습니다.*"
+- waitForAnimationToEnd:
+    timeout: 3000
+- tapOn:
+    id: "inbox-approval-.*-commit"
+- assertNotVisible:
+    id: "inbox-approval-.*-too-fast"
+
+# The receipt is `inbox-decision-note`, NOT `decision-receipt-{key}`. The two are
+# easy to swap and mean opposite things: `decision-receipt-*` is what the screen
+# shows when a decision was made SOMEWHERE ELSE and this client is catching up,
+# so asserting it here would pass on a run where this phone's own approve did
+# nothing and another client happened to decide it.
+- extendedWaitUntil:
+    visible:
+      id: "inbox-decision-note"
+    timeout: 60000
+- assertVisible: ".*승인을 기록했습니다.*"
+
+# An approved call that never executes is not an approval. `work.session.end` is
+# the catalog's one executable entry precisely so this last step is real: the run
+# has to leave awaiting_approval and finish, and the runner then checks the work
+# session row actually changed.
+- tapOn:
+    id: "tab-channels"
+- tapOn:
+    id: "sidebar-row-channel:${GENERAL_CHANNEL_ID}"
+- extendedWaitUntil:
+    notVisible:
+      id: "composer-working"
+    timeout: 120000

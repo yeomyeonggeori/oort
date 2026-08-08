@@ -3,9 +3,9 @@ import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/design/ui/button";
 import { cn } from "@/design/lib/cn";
 import { EmptyInvite, InlineBanner } from "@/features/common/States";
-import { ApiError } from "@/lib/api";
-import { fetchProviderQuotaSnapshots } from "./api";
-import { errorMessage } from "./model";
+import { ApiError } from "@momo/core/lib/api";
+import { fetchProviderQuotaSnapshots } from "@momo/core/features/settings/api";
+import { errorMessage } from "@momo/core/features/settings/model";
 import { StatusChip, type ChipTone } from "./SettingsFields";
 import {
   QUOTA_TICK_MS,
@@ -23,7 +23,7 @@ import {
   type QuotaSnapshot,
   type QuotaTone,
   type QuotaWindow,
-} from "./quotaModel";
+} from "@momo/core/features/settings/quotaModel";
 
 // =============================================================================
 // 설정 > 사용량 > 구독 잔여량 (ADR-0135 D2, MOMO-628).

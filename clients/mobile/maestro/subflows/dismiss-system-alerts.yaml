@@ -1,0 +1,29 @@
+appId: app.momo.ios
+name: dismiss-system-alerts
+---
+# Two system alerts sit over this app, and while either is up the accessibility
+# hierarchy UNDER it is not matchable — so every selector in the flow fails
+# while the app renders perfectly behind the sheet, and the failure screenshot
+# shows a healthy screen with a dialog on it.
+#
+#   "Apple 계정 확인"        the simulator's own App Store nag. Appears on a
+#                          schedule nobody controls, including mid-flow.
+#   "…알림을 보내고자 합니다"   the real iOS push permission prompt, raised by the app
+#                          the first time it reaches a signed-in state. DENIED
+#                          on purpose: the simulator has no APNs, so granting it
+#                          buys nothing, and 30-approval's lock-screen half is a
+#                          real-device check either way (see the runner's output).
+#
+# Both are dismissed defensively rather than once at setup — `runFlow: when:`
+# is a no-op on the runs where the alert never showed, so calling this between
+# steps costs nothing and removes a whole class of flake.
+- runFlow:
+    when:
+      visible: "지금 안 함"
+    commands:
+      - tapOn: "지금 안 함"
+- runFlow:
+    when:
+      visible: "허용 안 함"
+    commands:
+      - tapOn: "허용 안 함"

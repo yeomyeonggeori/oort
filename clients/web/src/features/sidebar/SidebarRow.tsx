@@ -5,8 +5,11 @@ import { cn } from "@/design/lib/cn";
 // Flat rows with a hover background, not one rounded "web card" per list item
 // (design-taste-web §8). Everything interactive is a real link/button with a
 // visible focus ring.
+// `tap-target`은 폰에서만 이 행을 44px로 세운다 (goal B6). 데스크탑의 30px 행은
+// 포인터에 맞춘 밀도이고, 손가락으로는 옆 채널이 함께 눌린다. 넓은 창에서는 이
+// 유틸리티가 아무 규칙도 갖지 않으므로 목록 밀도는 그대로다.
 const rowClass =
-  "flex w-full items-center gap-2 rounded-sm px-2 py-1 text-left text-body " +
+  "tap-target flex w-full items-center gap-2 rounded-sm px-2 py-1 text-left text-body " +
   "transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent";
 
 const inactiveClass =

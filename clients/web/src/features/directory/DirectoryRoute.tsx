@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
-import type { RosterMember } from "@/lib/api";
+import type { RosterMember } from "@momo/core/lib/api";
 import { useSession } from "@/app/session";
+import { SidebarDrawerToggle } from "@/app/SidebarDrawerToggle";
 import { Input } from "@/design/ui/input";
 import { Button } from "@/design/ui/button";
 import { EmptyInvite, InlineBanner } from "@/features/common/States";
 import { memberFor, useDirectory } from "@/features/workspace/useWorkspace";
 import { CONTENT_CLASS, MemberRow, ROW_CLASS } from "./MemberRow";
-import { countLabel, groupDirectory, hasOtherMembers } from "./model";
+import { countLabel, groupDirectory, hasOtherMembers } from "@momo/core/features/directory/model";
 import { useOpenDm } from "./useOpenDm";
 import { useOpenAgentProfile } from "@/features/routing/useAgentProfile";
 
@@ -181,7 +182,10 @@ export function DirectoryRoute() {
           it belongs to on a 1600px window. Same measure, one column. */}
       <header className="border-b border-line px-4 py-2">
         <div className="flex w-full max-w-pane-lg items-center justify-between gap-3">
-          <h1 className="text-body font-semibold">멤버</h1>
+          <div className="flex min-w-0 items-center gap-2">
+            <SidebarDrawerToggle />
+            <h1 className="text-body font-semibold">멤버</h1>
+          </div>
           {/* Nothing at all while the roster is unknown: a header that counts to
               zero over a skeleton or over "명부를 불러오지 못했습니다" is the one
               screen saying two contradictory things (model.countLabel). */}

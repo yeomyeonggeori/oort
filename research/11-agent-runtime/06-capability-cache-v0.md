@@ -5,17 +5,17 @@
 
 ## 1. Purpose
 
-Capability Cache v0 defines how momo discovers, stores, invalidates, and projects agent/plugin/MCP capabilities into a Context Packet.
+Capability Cache v0 defines how oort discovers, stores, invalidates, and projects agent/plugin/MCP capabilities into a Context Packet.
 
 It answers five questions:
 
 1. Which agent, plugin, or MCP tool exists?
 2. Which workspace policy and provider grant made it visible?
 3. Which JSON schema should validate its input and output?
-4. How long may momo reuse that discovery result?
+4. How long may oort reuse that discovery result?
 5. How does a cached capability become a bounded `tool_grant` for one run?
 
-Capability Cache is owned by momo. Hermes, Kim Intern, openclaw-style plugins, MCP servers, or provider SDKs may announce capabilities, but they do not decide workspace authorization. A cached capability is evidence for policy evaluation, not permission by itself.
+Capability Cache is owned by oort. Hermes, Kim Intern, openclaw-style plugins, MCP servers, or provider SDKs may announce capabilities, but they do not decide workspace authorization. A cached capability is evidence for policy evaluation, not permission by itself.
 
 ## 2. Non-Negotiable Rules
 
@@ -289,19 +289,19 @@ Required event kinds:
 
 ### Hermes and Kim Intern
 
-Hermes and Kim Intern may expose tools or runtime capabilities, but momo decides if those capabilities are available in a workspace.
+Hermes and Kim Intern may expose tools or runtime capabilities, but oort decides if those capabilities are available in a workspace.
 
 Allowed import path:
 
 1. Runtime or admin config announces an agent capability.
-2. momo records the source manifest, version, schema hash, and policy versions.
-3. momo applies workspace/plugin/provider policy.
+2. oort records the source manifest, version, schema hash, and policy versions.
+3. oort applies workspace/plugin/provider policy.
 4. The capability is cached as valid, withheld, or candidate.
 5. Future Context Packet projection still runs policy/version/approval checks.
 
 ### MCP
 
-MCP `tools/list` is an input to Capability Cache, not a direct grant. MCP tool definitions may be cached, but momo must support explicit invalidation through list-changed notifications, manual refresh, TTL expiry, and policy changes.
+MCP `tools/list` is an input to Capability Cache, not a direct grant. MCP tool definitions may be cached, but oort must support explicit invalidation through list-changed notifications, manual refresh, TTL expiry, and policy changes.
 
 ### Plugin ecosystem
 

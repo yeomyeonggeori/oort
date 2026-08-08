@@ -1,0 +1,50 @@
+[package]
+name = "momo-t3"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# shared infrastructure — consumed through its public API, never re-implemented.
+momo-db = { path = "../momo-db" }             # the sole RLS GUC seam
+momo-provider = { path = "../momo-provider" } # the sole provider-specific seam
+momo-wire = { path = "../momo-wire" }         # B2.2: the bootstrap-token digest
+                                              # format is a server<->workd
+                                              # contract, so it is minted with
+                                              # the shared sha256 helper, not a
+                                              # second local implementation.
+
+async-trait.workspace = true
+futures.workspace = true
+sqlx.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+thiserror.workspace = true
+# B2.4 (terminal attach + reattach replay):
+#   base64     — the capability bearer is `base64URL(randomBytes(32))`, the exact
+#                spelling `WebhookCrypto.randomReference()` produces; a second
+#                encoder would be a second grammar.
+#   serde_json — a replayed thread row carries `message.props` (jsonb) through
+#                unchanged; the domain must not re-shape a client contract.
+base64.workspace = true
+serde_json.workspace = true
+# ADR-0156 D4-③ — the `cubesandbox` adapter is this crate's first (and only)
+# outbound HTTP client. It is confined here rather than in `momo-server` for the
+# same reason `momo-ephemeral`'s is: `momo-server`'s manifest still carries no
+# `reqwest`, so no route can hand-roll a request of its own. The only provider
+# surface reachable from anywhere else is `CloudProviderAdapter`'s five methods.
+reqwest.workspace = true
+# The `Retry-After` hint on a refused destroy is *recorded*, never obeyed — the
+# reconciler owns the schedule — so this crate needs a log seam.
+tracing.workspace = true
+
+[dev-dependencies]
+# DB-backed conformance harness (tests/conformance_pg.rs, all #[ignore]) — the
+# orchestrator's docker gate. Not part of the DB-free `cargo test --workspace`.
+# `net` (+ axum) is for tests/cubesandbox_conformance.rs, which stands up a fake
+# CubeAPI on a loopback socket so the adapter is proved against real HTTP without
+# a real host — ADR-0156 D4-② owns the real one.
+tokio = { workspace = true, features = ["net"] }
+futures = { workspace = true }
+axum = { workspace = true }

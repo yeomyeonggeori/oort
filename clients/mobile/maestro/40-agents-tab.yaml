@@ -1,0 +1,155 @@
+appId: app.momo.ios
+name: 40-agents-tab
+# No `env:` block — see the note at the top of 00-login.yaml.
+---
+# 40-agents-tab — 에이전트 탭 상태 · 재우기 토글 · 자고 있음 시스템 라인.
+#
+# The flow ends by waking the agent again, and that is not politeness: 재우기 is
+# the one action here that OUTLIVES the run. A lane that left the agent asleep
+# would make 10/20/30 fail on the next pass with "the agent never answered",
+# which is a fixture bug wearing the costume of a product bug. The stack is torn
+# down per run, but this flow is also meant to be runnable alone against a live
+# one.
+#
+# The lane's fixture member is a workspace ADMIN for this flow's sake: pause is
+# restricted to a workspace owner/admin or the agent's operator, and a plain
+# member gets `agent-state-forbidden` — a screen the flow would otherwise have
+# to treat as a pass.
+- launchApp:
+    appId: app.momo.ios
+- runFlow: subflows/ensure-signed-in.yaml
+
+# Detour through #general before touching the tab bar, and it is not wasted
+# motion: the LogBox banner (subflows/dismiss-dev-logbox.yaml) sits on the same
+# band of screen as the tab bar, so a tab tap made while it is up is swallowed
+# and the flow carries on against the wrong screen — `tapOn: tab-agents`
+# reported COMPLETED here while the app never left 대화.
+#
+# It has to be dismissed from a CONVERSATION rather than from this screen,
+# because the dismissal is a coordinate and on the sidebar that coordinate lands
+# inside the 에이전트 tab. In a conversation it lands on a disabled send button.
+# The channel is opened again later anyway, for the system line.
+- tapOn:
+    id: "sidebar-row-channel:${GENERAL_CHANNEL_ID}"
+- extendedWaitUntil:
+    visible:
+      id: "composer-input"
+    timeout: 60000
+- runFlow:
+    when:
+      visible:
+        id: "long-press-hint"
+    commands:
+      - tapOn:
+          id: "long-press-hint-dismiss"
+- runFlow: subflows/dismiss-dev-logbox.yaml
+- tapOn:
+    id: "header-back"
+
+# The agents tab is mounted LAZILY on first visit (AppShell), so `agents-list`
+# does not exist in the hierarchy until this tap has happened — waiting for it
+# before tapping would time out on a healthy app.
+- extendedWaitUntil:
+    visible:
+      id: "tab-agents"
+    timeout: 30000
+- tapOn:
+    id: "tab-agents"
+- extendedWaitUntil:
+    visible:
+      id: "agents-list"
+    timeout: 60000
+- assertVisible:
+    id: "agents-title"
+- assertVisible:
+    id: "agent-row-${AGENT_MEMBER_ID}"
+
+- tapOn:
+    id: "agent-row-${AGENT_MEMBER_ID}"
+- extendedWaitUntil:
+    visible:
+      id: "agent-state"
+    timeout: 60000
+
+# Awake first — otherwise "재우기 worked" cannot be told apart from "it was
+# already asleep", and the toggle's label would have been 깨우기 all along.
+- assertVisible: ".*깨어 있습니다.*"
+- assertVisible:
+    id: "agent-pause-toggle"
+- assertVisible: ".*재우기.*"
+
+# The effect notice is asserted BEFORE the tap: this control has no confirm
+# step, so the sentence on screen is the only thing standing between a person
+# and an agent that stops answering. It also has to be honest about what
+# sleeping does NOT do — a run already in flight keeps going.
+- assertVisible:
+    id: "agent-pause-effect"
+- assertVisible: ".*재우면 새 실행이 시작되지 않습니다.*"
+
+- tapOn:
+    id: "agent-pause-toggle"
+- extendedWaitUntil:
+    visible:
+      id: "agent-pause-receipt"
+    timeout: 60000
+- assertVisible: ".*재웠습니다.*"
+- assertVisible: ".*자고 있습니다.*"
+
+# 자고 있음 시스템 라인 — the half of 재우기 that happens in the CHANNEL.
+#
+# This is the assertion that makes the flow worth running: a paused agent that
+# silently ignores a mention is indistinguishable from a broken one, so the
+# server posts a system line naming it (MessageRoutes insertPausedMentionSystemLine),
+# and the phone has to render that line.
+- tapOn:
+    id: "header-back"
+- tapOn:
+    id: "tab-channels"
+- tapOn:
+    id: "sidebar-row-channel:${GENERAL_CHANNEL_ID}"
+- extendedWaitUntil:
+    visible:
+      id: "composer-input"
+    timeout: 60000
+- runFlow: subflows/dismiss-dev-logbox.yaml
+
+- tapOn:
+    id: "composer-input"
+- inputText: "@kim"
+- extendedWaitUntil:
+    visible:
+      id: "mention-list"
+    timeout: 20000
+- tapOn:
+    id: "mention-option"
+    index: 0
+- inputText: "MAESTRO TEXT phone lane paused check"
+- tapOn:
+    id: "composer-send"
+
+- extendedWaitUntil:
+    visible: ".*현재 일시정지되어 있습니다.*"
+    timeout: 60000
+
+# Wake it back up — see the header.
+- tapOn:
+    id: "header-back"
+- tapOn:
+    id: "tab-agents"
+- extendedWaitUntil:
+    visible:
+      id: "agent-row-${AGENT_MEMBER_ID}"
+    timeout: 60000
+- tapOn:
+    id: "agent-row-${AGENT_MEMBER_ID}"
+- extendedWaitUntil:
+    visible:
+      id: "agent-pause-toggle"
+    timeout: 60000
+- assertVisible: ".*깨우기.*"
+- tapOn:
+    id: "agent-pause-toggle"
+- extendedWaitUntil:
+    visible: ".*깨어 있습니다.*"
+    timeout: 60000
+- assertVisible: ".*깨웠습니다.*"

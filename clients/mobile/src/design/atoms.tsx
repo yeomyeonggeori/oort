@@ -1,0 +1,512 @@
+import React from 'react';
+import {
+  ActivityIndicator,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+  type RefreshControlProps,
+  type StyleProp,
+  type ViewStyle,
+} from 'react-native';
+import {useSafeAreaInsets} from 'react-native-safe-area-context';
+import {font, radius, SAFE_GUTTER, space, TOUCH_TARGET, type Palette} from './tokens';
+import {usePalette, useStyles} from './theme';
+
+// =============================================================================
+// The shell's shared pieces.
+//
+// The list below is short on purpose — it is the set of things that appear on
+// more than one of this batch's four screens, and nothing else. What it exists
+// to prevent is three screens each growing their own "nothing here yet" block,
+// which is how an app ends up telling a person three different stories about the
+// same situation.
+//
+// ## The four states are a type, not a convention
+//
+// `AsyncState` is not decoration. Every list surface in this batch renders
+// through it, so "loading" and "empty" and "failed" cannot be quietly skipped by
+// a screen that only ever got tested with data in it. The distinction it insists
+// on hardest is the last one:
+//
+//   `ErrorState`   something went wrong. There is a retry, because retrying is
+//                  the thing that might work.
+//   `NoticeBlock`  this server does not carry that feature yet
+//                  (`@momo/core/features/capabilities/serverSurfaces`). There is
+//                  NO retry, because there is nothing to retry — and it is not
+//                  coloured as a failure, because it is not one.
+//
+// Collapsing those two is the specific lie goal B12 was opened to remove on web
+// ("없는 기능을 장애라고 말하는 것은 있는 기능을 없다고 말하는 것과 같은 크기의
+// 거짓말"). The RN shell inherits the fix rather than re-earning it.
+// =============================================================================
+
+/** Every tappable thing in this app is at least this tall. */
+const hitStyle = {minHeight: TOUCH_TARGET, justifyContent: 'center'} as const;
+
+export function Screen({
+  children,
+  style,
+}: {
+  children: React.ReactNode;
+  style?: StyleProp<ViewStyle>;
+}): React.JSX.Element {
+  const styles = useStyles(buildStyles);
+  const insets = useSafeAreaInsets();
+  // Top only. The bottom inset belongs to whatever sits at the bottom (the tab
+  // bar, a scroll view's content inset), and applying it here as well would
+  // stack two gaps on a phone with a home indicator.
+  return (
+    <View style={[styles.screen, {paddingTop: insets.top}, style]}>{children}</View>
+  );
+}
+
+export function ScreenHeader({
+  title,
+  subtitle,
+  onBack,
+  backLabel = '뒤로',
+  right,
+  titleTestID = 'header-title',
+}: {
+  title: string;
+  subtitle?: string;
+  onBack?: () => void;
+  /**
+   * What the back control is called. Defaults to 뒤로, but a surface that covers
+   * another one says what it is closing — "스레드 닫기" tells a screen-reader user
+   * which of the two stacked things is about to go away, and 뒤로 does not.
+   */
+  backLabel?: string;
+  right?: React.ReactNode;
+  /**
+   * Overridable because more than one header is mounted at a time: the tab
+   * screens stay alive under an open conversation, so a single shared id would
+   * match three nodes and a test could not name the one it meant.
+   */
+  titleTestID?: string;
+}): React.JSX.Element {
+  const styles = useStyles(buildStyles);
+  return (
+    <View style={styles.header}>
+      {onBack ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={backLabel}
+          onPress={onBack}
+          hitSlop={8}
+          style={({pressed}) => [styles.backButton, pressed && styles.pressed]}
+          testID="header-back">
+          <Text style={styles.backGlyph}>‹</Text>
+        </Pressable>
+      ) : null}
+      <View style={styles.headerText}>
+        <Text
+          style={styles.headerTitle}
+          numberOfLines={1}
+          ellipsizeMode="tail"
+          testID={titleTestID}>
+          {title}
+        </Text>
+        {subtitle ? (
+          <Text style={styles.headerSubtitle} numberOfLines={1} ellipsizeMode="tail">
+            {subtitle}
+          </Text>
+        ) : null}
+      </View>
+      {right ?? null}
+    </View>
+  );
+}
+
+/**
+ * A row that can be tapped. `minHeight` rather than a fixed height because the
+ * second line of a sidebar row wraps on a narrow phone, and a fixed height would
+ * clip it; the floor is what matters for the thumb.
+ */
+export function TapRow({
+  children,
+  onPress,
+  accessibilityLabel,
+  selected,
+  testID,
+}: {
+  children: React.ReactNode;
+  onPress: () => void;
+  accessibilityLabel: string;
+  selected?: boolean;
+  testID?: string;
+}): React.JSX.Element {
+  const styles = useStyles(buildStyles);
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
+      accessibilityState={selected === undefined ? undefined : {selected}}
+      onPress={onPress}
+      style={({pressed}) => [
+        styles.row,
+        selected && styles.rowSelected,
+        pressed && styles.pressed,
+      ]}
+      testID={testID}>
+      {children}
+    </Pressable>
+  );
+}
+
+export function PrimaryButton({
+  label,
+  busyLabel,
+  onPress,
+  disabled,
+  busy,
+  testID,
+}: {
+  label: string;
+  busyLabel?: string;
+  onPress: () => void;
+  disabled?: boolean;
+  busy?: boolean;
+  testID?: string;
+}): React.JSX.Element {
+  const styles = useStyles(buildStyles);
+  const palette = usePalette();
+  const inert = disabled === true || busy === true;
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityState={{disabled: inert, busy}}
+      disabled={inert}
+      onPress={onPress}
+      style={({pressed}) => [
+        styles.button,
+        inert && styles.buttonDisabled,
+        pressed && !inert && styles.buttonPressed,
+      ]}
+      testID={testID}>
+      {busy ? (
+        <View style={styles.buttonBusy}>
+          <ActivityIndicator color={palette.onAccent} />
+          {busyLabel ? <Text style={styles.buttonLabel}>{busyLabel}</Text> : null}
+        </View>
+      ) : (
+        <Text style={styles.buttonLabel}>{label}</Text>
+      )}
+    </Pressable>
+  );
+}
+
+/** A count the SERVER supplied. Never rendered from a locally derived number. */
+export function CountBadge({
+  count,
+  tone = 'unread',
+  label,
+}: {
+  count: number;
+  tone?: 'unread' | 'mention';
+  label: string;
+}): React.JSX.Element | null {
+  const styles = useStyles(buildStyles);
+  if (count <= 0) return null;
+  return (
+    <View style={[styles.badge, tone === 'mention' && styles.badgeMention]}>
+      <Text
+        style={[styles.badgeText, tone === 'mention' && styles.badgeMentionText]}
+        accessibilityLabel={label}>
+        {count > 99 ? '99+' : String(count)}
+      </Text>
+    </View>
+  );
+}
+
+export function LoadingState({
+  label,
+  testID,
+}: {
+  label: string;
+  testID?: string;
+}): React.JSX.Element {
+  const styles = useStyles(buildStyles);
+  const palette = usePalette();
+  return (
+    <View style={styles.stateBlock} testID={testID}>
+      <ActivityIndicator color={palette.accentText} />
+      <Text style={styles.stateDetail}>{label}</Text>
+    </View>
+  );
+}
+
+export function EmptyState({
+  headline,
+  detail,
+  refreshControl,
+  testID,
+}: {
+  headline: string;
+  detail?: string;
+  /**
+   * 당겨서 새로고침 (goal RN-B4b / #1026).
+   *
+   * 빈 목록은 당김이 **가장 필요한** 자리다. 「지금 결정할 일이 없습니다」를 읽은
+   * 사람이 그 말을 의심하는 방법은 당기는 것 하나뿐이고, 당길 목록이 없다는 것은
+   * 구현의 사정이지 사람의 사정이 아니다. 그래서 이 블록은 컨트롤을 받으면
+   * 스크롤할 수 있는 몸을 얻는다 — 하는 말은 그대로다.
+   */
+  refreshControl?: React.ReactElement<RefreshControlProps>;
+  testID?: string;
+}): React.JSX.Element {
+  const styles = useStyles(buildStyles);
+  const body = (
+    <>
+      <Text style={styles.stateHeadline}>{headline}</Text>
+      {detail ? <Text style={styles.stateDetail}>{detail}</Text> : null}
+    </>
+  );
+  if (refreshControl === undefined) {
+    return (
+      <View style={styles.stateBlock} testID={testID}>
+        {body}
+      </View>
+    );
+  }
+  return (
+    <ScrollView
+      // 내용이 화면보다 짧아도 당길 수 있어야 한다. 스크롤할 것이 없는 iOS
+      // 스크롤뷰는 제스처를 시작조차 하지 않으므로, 이 한 줄이 없으면 컨트롤은
+      // 붙어 있는데 아무 일도 일어나지 않는다 — 고치려는 결함과 같은 모양이다.
+      alwaysBounceVertical
+      contentContainerStyle={styles.stateBlock}
+      refreshControl={refreshControl}
+      testID={testID}>
+      {body}
+    </ScrollView>
+  );
+}
+
+export function ErrorState({
+  headline,
+  detail,
+  onRetry,
+  testID,
+}: {
+  headline: string;
+  detail?: string;
+  onRetry?: () => void;
+  testID?: string;
+}): React.JSX.Element {
+  const styles = useStyles(buildStyles);
+  return (
+    <View style={styles.stateBlock} testID={testID}>
+      <Text style={[styles.stateHeadline, styles.stateHeadlineDanger]}>
+        {headline}
+      </Text>
+      {detail ? <Text style={styles.stateDetail}>{detail}</Text> : null}
+      {onRetry ? (
+        <Pressable
+          accessibilityRole="button"
+          onPress={onRetry}
+          style={({pressed}) => [styles.retry, pressed && styles.pressed]}
+          testID={testID ? `${testID}-retry` : undefined}>
+          <Text style={styles.retryLabel}>다시 시도</Text>
+        </Pressable>
+      ) : null}
+    </View>
+  );
+}
+
+/**
+ * A statement of fact that is not a failure: "이 서버는 아직 그걸 하지 않습니다".
+ *
+ * Deliberately has no retry and no danger colour. See the header note.
+ */
+export function NoticeBlock({
+  headline,
+  detail,
+  onDismiss,
+  testID,
+}: {
+  headline: string;
+  detail?: string;
+  /**
+   * Only for a notice that is a RECEIPT — something the person just did, which
+   * they have read once and do not need under the list forever. A statement of
+   * what this server cannot do is not dismissible: it stays true after a tap.
+   */
+  onDismiss?: () => void;
+  testID?: string;
+}): React.JSX.Element {
+  const styles = useStyles(buildStyles);
+  return (
+    <View style={styles.notice} testID={testID}>
+      <View style={styles.noticeHead}>
+        <View style={styles.noticeText}>
+          <Text style={styles.noticeHeadline}>{headline}</Text>
+          {detail ? <Text style={styles.noticeDetail}>{detail}</Text> : null}
+        </View>
+        {onDismiss ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="닫기"
+            onPress={onDismiss}
+            style={({pressed}) => [styles.noticeDismiss, pressed && styles.pressed]}
+            testID={testID ? `${testID}-dismiss` : undefined}>
+            <Text style={styles.retryLabel}>닫기</Text>
+          </Pressable>
+        ) : null}
+      </View>
+    </View>
+  );
+}
+
+/** An inline failure attached to a form, rather than a whole-surface state. */
+export function FailureBanner({
+  message,
+  onRetry,
+  testID,
+}: {
+  message: string;
+  onRetry?: () => void;
+  testID?: string;
+}): React.JSX.Element {
+  const styles = useStyles(buildStyles);
+  return (
+    <View style={styles.failure} testID={testID}>
+      <Text style={styles.failureText}>{message}</Text>
+      {onRetry ? (
+        <Pressable
+          accessibilityRole="button"
+          onPress={onRetry}
+          style={({pressed}) => [styles.retry, pressed && styles.pressed]}
+          testID={testID ? `${testID}-retry` : undefined}>
+          <Text style={styles.retryLabel}>다시 시도</Text>
+        </Pressable>
+      ) : null}
+    </View>
+  );
+}
+
+export function SectionLabel({label}: {label: string}): React.JSX.Element {
+  const styles = useStyles(buildStyles);
+  return (
+    <View style={styles.sectionLabel}>
+      <Text style={styles.sectionLabelText}>{label}</Text>
+    </View>
+  );
+}
+
+const buildStyles = (color: Palette) => StyleSheet.create({
+  screen: {flex: 1, backgroundColor: color.bg},
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm,
+    paddingHorizontal: SAFE_GUTTER,
+    paddingVertical: space.md,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: color.border,
+    minHeight: TOUCH_TARGET + space.md,
+  },
+  headerText: {flex: 1, gap: 2},
+  headerTitle: {fontSize: font.heading, fontWeight: '600', color: color.text},
+  headerSubtitle: {fontSize: font.meta, color: color.textMuted},
+  backButton: {
+    ...hitStyle,
+    width: TOUCH_TARGET,
+    marginLeft: -space.md,
+    alignItems: 'center',
+  },
+  backGlyph: {fontSize: 30, lineHeight: 34, color: color.accentText},
+  row: {
+    ...hitStyle,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.md,
+    paddingHorizontal: SAFE_GUTTER,
+    paddingVertical: space.md,
+  },
+  rowSelected: {backgroundColor: color.surface},
+  pressed: {backgroundColor: color.surfacePressed},
+  button: {
+    ...hitStyle,
+    borderRadius: radius.md,
+    paddingVertical: space.md,
+    alignItems: 'center',
+    backgroundColor: color.accent,
+  },
+  buttonDisabled: {backgroundColor: color.border},
+  buttonPressed: {backgroundColor: color.accentPressed},
+  buttonBusy: {flexDirection: 'row', alignItems: 'center', gap: space.sm},
+  buttonLabel: {color: color.onAccent, fontSize: font.body, fontWeight: '600'},
+  badge: {
+    minWidth: 22,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: radius.pill,
+    backgroundColor: color.border,
+    alignItems: 'center',
+  },
+  badgeMention: {backgroundColor: color.warn},
+  badgeText: {fontSize: font.meta, fontWeight: '600', color: color.text},
+  badgeMentionText: {color: color.onWarn},
+  stateBlock: {
+    paddingHorizontal: SAFE_GUTTER,
+    paddingVertical: space.xl,
+    gap: space.sm,
+    alignItems: 'flex-start',
+  },
+  stateHeadline: {fontSize: font.body, color: color.text, fontWeight: '600'},
+  stateHeadlineDanger: {color: color.danger},
+  stateDetail: {fontSize: font.label, color: color.textMuted, lineHeight: 20},
+  retry: {
+    ...hitStyle,
+    paddingHorizontal: space.md,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: color.border,
+    alignSelf: 'flex-start',
+  },
+  retryLabel: {color: color.accentText, fontSize: font.label, fontWeight: '600'},
+  notice: {
+    marginHorizontal: SAFE_GUTTER,
+    marginVertical: space.md,
+    padding: space.md,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: color.border,
+    backgroundColor: color.surface,
+    gap: space.xs,
+  },
+  noticeHead: {flexDirection: 'row', alignItems: 'flex-start', gap: space.sm},
+  noticeText: {flex: 1, gap: space.xs},
+  noticeDismiss: {
+    ...hitStyle,
+    minWidth: TOUCH_TARGET,
+    alignItems: 'center',
+    marginVertical: -space.md,
+    borderRadius: radius.sm,
+  },
+  noticeHeadline: {fontSize: font.label, color: color.text, fontWeight: '600'},
+  noticeDetail: {fontSize: font.meta, color: color.textMuted, lineHeight: 18},
+  failure: {
+    borderRadius: radius.md,
+    padding: space.md,
+    backgroundColor: color.dangerSurface,
+    borderWidth: 1,
+    borderColor: color.dangerBorder,
+    gap: space.sm,
+  },
+  failureText: {color: color.dangerText, fontSize: font.label, lineHeight: 20},
+  sectionLabel: {
+    paddingHorizontal: SAFE_GUTTER,
+    paddingTop: space.lg,
+    paddingBottom: space.xs,
+  },
+  sectionLabelText: {
+    fontSize: font.meta,
+    color: color.textFaint,
+    fontWeight: '600',
+    letterSpacing: 0.4,
+  },
+});

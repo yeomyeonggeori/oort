@@ -7,8 +7,8 @@ import PostgresNIO
 /// Hermes gateway native platform callback surface (MOMO-325).
 ///
 /// This is intentionally **not** an agent provider credential surface. Hermes or
-/// another provider runtime owns Codex/OpenAI OAuth and model keys. momo only
-/// accepts run status/result callbacks for jobs that momo itself created, then
+/// another provider runtime owns Codex/OpenAI OAuth and model keys. oort only
+/// accepts run status/result callbacks for jobs that oort itself created, then
 /// commits user-visible output through the same Postgres/outbox path as every
 /// other message.
 struct AgentGatewayRoutes: Sendable {

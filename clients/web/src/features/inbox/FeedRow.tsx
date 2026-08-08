@@ -1,9 +1,9 @@
-import { useCallback, useRef } from "react";
+import { useCallback, useRef, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { AtSign, Bot, ShieldAlert } from "lucide-react";
 import { cn } from "@/design/lib/cn";
 import { channelPath, watchForMessage } from "./anchor";
-import type { FeedItem, FeedTone, OutcomeTone } from "./model";
+import type { FeedItem, FeedTone, OutcomeTone } from "@momo/core/features/inbox/model";
 
 // =============================================================================
 // One feed row, shared by the inbox and the activity route (R-1 §2). Flat rows
@@ -38,7 +38,22 @@ function KindIcon({ kind, tone }: { kind: FeedItem["kind"]; tone: FeedTone }) {
   return <Bot className={className} />;
 }
 
-export function FeedRow({ item }: { item: FeedItem }) {
+/**
+ * `actions` is rendered as a SIBLING of the link, never inside it.
+ *
+ * The whole row is an anchor, and a button inside an anchor is not a button: the
+ * browser gives the click to the link, so 승인 would navigate to the channel
+ * instead of deciding anything, and the keyboard path collapses to one stop.
+ * Keeping the two apart inside one `li` is what lets the row stay openable and
+ * decidable at the same time (goal B5.3b D-5).
+ */
+export function FeedRow({
+  item,
+  actions,
+}: {
+  item: FeedItem;
+  actions?: ReactNode;
+}) {
   const seqAttrs = item.seq === undefined ? {} : { "data-seq": String(item.seq) };
   const hasFooter =
     item.outcome !== null ||
@@ -46,7 +61,7 @@ export function FeedRow({ item }: { item: FeedItem }) {
     item.managedBy !== undefined;
 
   return (
-    <li>
+    <li className={actions ? "border-b border-line" : undefined}>
       <Link
         to={channelPath(item.channelId, item.seq)}
         onClick={() => {
@@ -58,7 +73,10 @@ export function FeedRow({ item }: { item: FeedItem }) {
         data-kind={item.kind}
         data-channel-id={item.channelId}
         {...seqAttrs}
-        className="flex gap-3 border-b border-line px-4 py-2 transition-colors hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+        className={cn(
+          "flex gap-3 px-4 py-2 transition-colors hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
+          !actions && "border-b border-line"
+        )}
       >
         <span className="shrink-0 pt-1" aria-hidden="true">
           <KindIcon kind={item.kind} tone={item.tone} />
@@ -105,13 +123,14 @@ export function FeedRow({ item }: { item: FeedItem }) {
               {item.note && <span className="text-warn">{item.note}</span>}
               {item.managedBy && (
                 <span className="text-ink-muted">
-                  managed by {item.managedBy}
+                  {item.managedBy} 님이 관리
                 </span>
               )}
             </span>
           )}
         </span>
       </Link>
+      {actions}
     </li>
   );
 }
@@ -124,14 +143,27 @@ export function FeedRow({ item }: { item: FeedItem }) {
 export function FeedList({
   items,
   onMarkRead,
+  renderActions,
   testId,
+  listRef: externalRef,
 }: {
   items: FeedItem[];
   /** Only offered for rows that carry a seq to read up to. */
   onMarkRead?: (item: FeedItem) => void;
+  /** Per-row controls, rendered beside the link. Return null for plain rows. */
+  renderActions?: (item: FeedItem) => ReactNode;
   testId: string;
+  /**
+   * 목록 자체로 캐럿을 돌려보내야 하는 호출자를 위해 (goal W-AP1 2R N-D).
+   *
+   * ↑/↓ 핸들러는 아래 `ul`에 걸려 있다. 결정한 행이 사라진 뒤 초점을 바깥 상자로
+   * 보내면 "다음 행으로 이어진다"는 약속이 성립하지 않는다 — 키가 이 핸들러에
+   * 닿지 않기 때문이다. 착지점은 핸들러를 가진 엘리먼트여야 한다.
+   */
+  listRef?: React.RefObject<HTMLUListElement>;
 }) {
-  const listRef = useRef<HTMLUListElement>(null);
+  const ownRef = useRef<HTMLUListElement>(null);
+  const listRef = externalRef ?? ownRef;
 
   const onKeyDown = useCallback(
     (event: React.KeyboardEvent) => {
@@ -162,10 +194,13 @@ export function FeedList({
       ref={listRef}
       onKeyDown={onKeyDown}
       data-testid={testId}
-      className="flex flex-col"
+      // 캐럿이 여기 착지할 수 있어야 ↑/↓가 바로 이어진다. -1이라 Tab 순서에는
+      // 끼어들지 않는다: 이 목록의 정상적인 Tab 경로는 행 링크들이다.
+      tabIndex={-1}
+      className="flex flex-col focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
     >
       {items.map((item) => (
-        <FeedRow key={item.key} item={item} />
+        <FeedRow key={item.key} item={item} actions={renderActions?.(item)} />
       ))}
     </ul>
   );

@@ -1,11 +1,11 @@
 import Foundation
 
-// MARK: - momo:// deep link parsing (W-O1, MOMO-585)
+// MARK: - oort:// deep link parsing (W-O1, MOMO-585; scheme renamed in goal B13)
 
-/// A parsed `momo://join` deep link.
+/// A parsed `oort://join` deep link.
 ///
 /// Shared contract with the invite tooling (MOMO-584):
-/// `momo://join?server=<percent-encoded base URL>&code=<invite code>`.
+/// `oort://join?server=<percent-encoded base URL>&code=<invite code>`.
 /// Two query parameters, order-independent, unknown parameters ignored. The
 /// `server` value is percent-decoded here; it is re-validated by the existing
 /// `MomoServerSessionForm.validatedBaseURL()` rules before any connection is made.
@@ -22,15 +22,27 @@ public struct MomoDeepLink: Equatable, Sendable {
     }
 }
 
-/// Pure parsing for momo custom-scheme deep links. No AppKit or session state is
+/// Pure parsing for the invite custom-scheme deep links. No AppKit or session state is
 /// touched, so the whole surface is unit-testable without a window.
 public enum MomoDeepLinkParser {
-    public static let scheme = "momo"
+    /// The scheme links are MINTED with (goal B13, momo -> oort rebrand).
+    /// `MomoDeepLinkBuilder` reads this, so renaming it moves the mint.
+    public static let scheme = "oort"
+
+    /// Every scheme a link is ACCEPTED under.
+    ///
+    /// The old name is absorbed rather than dropped, and that is a decision
+    /// about links that already exist: an invite is handed over out of band and
+    /// stays valid for days, so a link that was correct when it was sent must
+    /// not stop opening because the product was renamed in between. Both are
+    /// registered in `XcodeHost/Info.plist` so both actually reach this parser.
+    public static let acceptedSchemes: Set<String> = [scheme, "momo"]
+
     public static let joinAction = "join"
 
-    /// Parses `momo://join?server=…&code=…`.
+    /// Parses `oort://join?server=…&code=…`.
     ///
-    /// Returns `nil` when the URL is not a momo join link, or when it carries
+    /// Returns `nil` when the URL is not a join link, or when it carries
     /// nothing usable to prefill. When at least one recognized parameter has a
     /// non-empty value the available fields are returned so the chooser can
     /// prefill what it can (a link with only a server, or only a code, still
@@ -40,7 +52,7 @@ public enum MomoDeepLinkParser {
         guard
             let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
             let scheme = components.scheme?.lowercased(),
-            scheme == Self.scheme,
+            Self.acceptedSchemes.contains(scheme),
             resolvedAction(components) == Self.joinAction
         else {
             return nil
@@ -67,8 +79,8 @@ public enum MomoDeepLinkParser {
         return MomoDeepLink(serverURLString: trimmedServer, inviteCode: trimmedCode)
     }
 
-    /// The action is the authority (`momo://join`) or, when the link omits the
-    /// authority (`momo:join`), the first path segment. Case-insensitive.
+    /// The action is the authority (`oort://join`) or, when the link omits the
+    /// authority (`oort:join`), the first path segment. Case-insensitive.
     private static func resolvedAction(_ components: URLComponents) -> String? {
         if let host = components.host, !host.isEmpty {
             return host.lowercased()
@@ -80,9 +92,9 @@ public enum MomoDeepLinkParser {
     }
 }
 
-// MARK: - momo:// deep link assembly (MOMO-591)
+// MARK: - oort:// deep link assembly (MOMO-591)
 
-/// Builds `momo://join` deep links, the inverse of `MomoDeepLinkParser`.
+/// Builds `oort://join` deep links, the inverse of `MomoDeepLinkParser`.
 ///
 /// The output must match `docs/onboarding-deeplink.md` byte for byte so the
 /// ops CLI (MOMO-584) and the in-app invite tooling produce identical links.
@@ -99,7 +111,7 @@ public enum MomoDeepLinkBuilder {
         value.addingPercentEncoding(withAllowedCharacters: unreservedCharacters)
     }
 
-    /// Assembles `momo://join?server=<percent-encoded base URL>&code=<code>`.
+    /// Assembles `oort://join?server=<percent-encoded base URL>&code=<code>`.
     ///
     /// The raw invite code is embedded on purpose: the deep link is a hand-off
     /// artifact the operator gives a new member, so carrying the code inside the

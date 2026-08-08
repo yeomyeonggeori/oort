@@ -1,4 +1,4 @@
-# momo — Apple 앱 CI/CD 정식 파이프라인 스펙 (2026)
+# oort — Apple 앱 CI/CD 정식 파이프라인 스펙 (2026)
 
 > 작성: 2026-06-24 · 대상 실행 주체: **Codex (goal 자율 실행)** · 산출 위치: 이 리포(`/Users/kwakseongjae/projects/momo`)
 > 범위: **macOS 데스크탑 앱 공증(notarize) 직접배포** + **iOS 앱 TestFlight/App Store 업로드**.
@@ -110,9 +110,9 @@ api_key = app_store_connect_api_key(
 ```bash
 # signing repo 초기화 + 인증서/프로파일 생성·업로드 (대화형 OK, 1회)
 bundle exec fastlane match init           # Matchfile 생성
-bundle exec fastlane match appstore       # iOS App Store
-bundle exec fastlane match developer_id   # macOS 직접배포(공증)용
-# (macOS App Store도 낼 거면) bundle exec fastlane match appstore --platform macos
+bundle exec fastlane match appstore       # iOS App Store (Matchfile 기본값 = 앱 + 알림 확장)
+# macOS는 번들 ID·타입이 다르므로 명시 필수(안 하면 iOS 기본값이 잘못 쓰인다)
+bundle exec fastlane match developer_id --platform macos --app_identifier com.dawnkim.momo
 ```
 
 ### 2.3 CI에서 (읽기전용)
@@ -122,7 +122,9 @@ match(
   type: "appstore",
   readonly: true,                 # CI 필수 (검증됨)
   api_key: api_key,               # API Key로 프로파일 갱신 인가
-  app_identifier: ["com.dawnkim.momo"],
+  # 앱과 확장은 각각 프로파일이 필요하다. 정본은 Xcode 프로젝트의
+  # PRODUCT_BUNDLE_IDENTIFIER — docs/cicd/10-ios-signing-identity-runbook.md §0.
+  app_identifier: ["app.momo.ios", "app.momo.ios.NotificationService"],
   git_url: ENV["MATCH_GIT_URL"],
   git_basic_authorization: Base64.strict_encode64("x-access-token:#{ENV['MATCH_GIT_TOKEN']}")
 )
@@ -307,7 +309,7 @@ deliver(
 
 ### 6.3 권고
 
-- **momo 초기(빌드 빈도 낮음, macOS+iOS 둘 다, notarize 직접배포 필요):**
+- **oort 초기(빌드 빈도 낮음, macOS+iOS 둘 다, notarize 직접배포 필요):**
   → **주: GitHub Actions(`macos-15`) + fastlane**(notarize/match/pilot/deliver 일원화, 멀티플랫폼·서버까지 동일 CI).
   → **보조: Xcode Cloud 무료 25h**를 "App Store/TestFlight 전용 백업 경로"로(서명 단순). (추정)
 - **빌드가 월 25h 이내로 수렴하고 iOS 위주면** Xcode Cloud 단독도 비용 0으로 합리적. notarize 직접배포는 여전히 GH Actions 필요.

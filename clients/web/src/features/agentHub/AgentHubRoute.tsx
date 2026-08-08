@@ -13,6 +13,7 @@ import {
 import { Link } from "react-router-dom";
 import { Bot, Loader2, Search } from "lucide-react";
 import { useSession } from "@/app/session";
+import { SidebarDrawerToggle } from "@/app/SidebarDrawerToggle";
 import { cn } from "@/design/lib/cn";
 import { Button } from "@/design/ui/button";
 import {
@@ -29,12 +30,15 @@ import {
   useTickingNow,
 } from "@/features/agents/agentWorkingSignal";
 import { AgentTurnBadge } from "@/features/agents/AgentTurnBadge";
+import { openWorkPanel } from "@/features/agents/workLogStore";
+import type { AgentWorkingSignal } from "@momo/core/features/agents/workingSignal";
 import {
   memberFor,
   useDirectory,
   type Directory,
 } from "@/features/workspace/useWorkspace";
 import {
+  useAgentEditingCapability,
   useAllowedAgentModels,
   useRoutingCapability,
 } from "@/features/routing/capability";
@@ -50,7 +54,7 @@ import {
   knownAgentModels,
   modelOptions,
   type RoutingDraft,
-} from "@/features/routing/routingModel";
+} from "@momo/core/features/routing/routingModel";
 import {
   isAgentProfileMissing,
   useAgentProfile,
@@ -70,10 +74,13 @@ import {
   type AgentRunSummary,
   type MemoryItem,
   type RosterMember,
-} from "@/lib/api";
+} from "@momo/core/lib/api";
 import {
   agentMembers,
   canInvalidateMemory,
+  effectiveEffortLabel,
+  effectiveModelLabel,
+  lifecycleLabel,
   memoryKindLabel,
   memoryScopeLabel,
   mergeRunPages,
@@ -81,13 +88,36 @@ import {
   runStatusLabel,
   signalsForAgent,
   type AgentHubSection,
-} from "./model";
+} from "@momo/core/features/agents/hubModel";
+import { AgentChannelsSection } from "./AgentChannelsSection";
+import {
+  EMPTY_AGENT_DRAFT,
+  canCreateAgentNow,
+  type AgentDraft,
+} from "./createModel";
+import { CreateAgentDialog } from "./CreateAgentDialog";
+import {
+  isSurfaceProvided,
+  type SurfaceId,
+} from "@momo/core/features/capabilities/serverSurfaces";
 
-const SECTIONS: { id: AgentHubSection; label: string }[] = [
+/**
+ * 허브의 탭 셋과 각 탭이 서 있는 서버 표면 (goal B12).
+ *
+ * 프로필은 표면을 적지 않는다: 그 탭의 읽기/쓰기는 이 서버에 있고, 편집 가능
+ * 여부는 이미 자기 프로브가 판정한다(features/routing/capability.ts ④).
+ * 메모리와 이력은 이 서버에 경로가 없어서 열면 언제나 오류였다.
+ */
+const SECTIONS: { id: AgentHubSection; label: string; surface?: SurfaceId }[] = [
   { id: "profile", label: "프로필" },
-  { id: "memory", label: "메모리" },
-  { id: "history", label: "이력" },
+  { id: "memory", label: "메모리", surface: "agentMemory" },
+  { id: "history", label: "이력", surface: "agentRunHistory" },
 ];
+
+/** 이 서버에서 실제로 답이 오는 탭만. */
+const VISIBLE_SECTIONS = SECTIONS.filter(
+  (item) => item.surface === undefined || isSurfaceProvided(item.surface)
+);
 
 const DATE_TIME = new Intl.DateTimeFormat("ko-KR", {
   dateStyle: "medium",
@@ -163,16 +193,7 @@ function AgentListRow({
   onSelect: () => void;
 }) {
   const current = signals[0];
-  const lifecycle =
-    agent.status !== "active"
-      ? "사용 중지"
-      : profilePending
-        ? "상태 확인 중"
-        : profileFailed
-          ? "상태 확인 실패"
-        : profile?.paused
-          ? "일시정지"
-          : "활성";
+  const lifecycle = lifecycleLabel(agent, profile, profilePending, profileFailed);
   return (
     <li className="border-b border-line">
       <button
@@ -227,7 +248,7 @@ function AgentListRow({
 }
 
 export function AgentHubRoute() {
-  const { workspaceId, connStatus } = useSession();
+  const { workspaceId, connStatus, session } = useSession();
   const offline = useOffline();
   const railLive = connStatus === "connected";
   const directoryQuery = useDirectory(workspaceId);
@@ -261,7 +282,19 @@ export function AgentHubRoute() {
   );
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [section, setSection] = useState<AgentHubSection>("profile");
+  const [creating, setCreating] = useState(false);
+  const [agentDraft, setAgentDraft] = useState<AgentDraft>(EMPTY_AGENT_DRAFT);
   const allSignals = useAgentWorkingSignals();
+  // 만들 수 없는 사람에게 [만들기]를 내주지 않는다: `routes::agents::create`는
+  // human + owner/admin을 요구하므로 그 밖의 모든 시도는 403으로 끝난다. 명부가
+  // 아직 오지 않은 동안에는 아무 말도 하지 않는다 — 한 프레임 보여 줬다 거두는
+  // 제안이 한 박자 늦게 도착하는 제안보다 나쁘다(MOMO-614 R2 M5).
+  const rosterSettled = !directoryQuery.isPending;
+  const mayCreate = canCreateAgentNow(
+    rosterSettled,
+    session.member.kind,
+    memberFor(directoryQuery.directory, session.member.id)?.role
+  );
   // This clock expires remembered signals even while the rail is down. Color
   // certainty is handled separately by AgentTurnBadge's `live` input.
   const nowMs = useTickingNow(allSignals.size > 0);
@@ -287,18 +320,34 @@ export function AgentHubRoute() {
       data-testid="agent-hub-route"
     >
       <header className="border-b border-line px-4 py-2">
-        <div className="flex w-full max-w-pane-lg items-center justify-between gap-3">
+        <div className="flex w-full max-w-pane-lg flex-wrap items-center justify-between gap-3">
           <div>
-            <h1 className="text-body font-semibold text-ink">에이전트</h1>
+            <div className="flex min-w-0 items-center gap-2">
+              <SidebarDrawerToggle />
+              <h1 className="text-body font-semibold text-ink">에이전트</h1>
+            </div>
             <p className="text-meta text-ink-muted">
-              워크스페이스 에이전트의 상태와 기억, 작업 이력을 한 곳에서 봅니다.
+              워크스페이스 에이전트를 만들고, 상태와 기억, 작업 이력을 한 곳에서
+              봅니다.
             </p>
           </div>
-          {!directoryQuery.isPending && !directoryQuery.isError && (
-            <span className="text-meta text-ink-muted" data-numeric>
-              {agents.length}명
-            </span>
-          )}
+          <div className="flex shrink-0 items-center gap-3">
+            {!directoryQuery.isPending && !directoryQuery.isError && (
+              <span className="text-meta text-ink-muted" data-numeric>
+                {agents.length}명
+              </span>
+            )}
+            {mayCreate && (
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => setCreating(true)}
+                data-testid="agent-hub-create"
+              >
+                에이전트 만들기
+              </Button>
+            )}
+          </div>
         </div>
       </header>
 
@@ -328,15 +377,25 @@ export function AgentHubRoute() {
           ) : agents.length === 0 ? (
             <EmptyInvite
               headline="이 워크스페이스에는 에이전트가 없습니다."
-              detail="에이전트를 추가하면 상태와 기억, 작업 이력이 여기에 모입니다."
+              detail={
+                mayCreate
+                  ? "에이전트를 만들고 채널에 넣으면 그 채널에서 멘션할 수 있습니다."
+                  : "에이전트는 워크스페이스 오너나 관리자가 만들 수 있습니다."
+              }
               actions={
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => void directoryQuery.refetch()}
-                >
-                  명부 다시 불러오기
-                </Button>
+                mayCreate ? (
+                  <Button size="sm" onClick={() => setCreating(true)}>
+                    에이전트 만들기
+                  </Button>
+                ) : (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void directoryQuery.refetch()}
+                  >
+                    명부 다시 불러오기
+                  </Button>
+                )
               }
               testId="agent-hub-empty"
             />
@@ -380,7 +439,7 @@ export function AgentHubRoute() {
                     aria-label={`${selected.displayName} 상세`}
                   >
                     <ul className="flex gap-1 whitespace-nowrap">
-                      {SECTIONS.map((item) => (
+                      {VISIBLE_SECTIONS.map((item) => (
                         <li key={item.id} className="shrink-0">
                           <button
                             type="button"
@@ -434,6 +493,19 @@ export function AgentHubRoute() {
           )}
         </div>
       </div>
+
+      <CreateAgentDialog
+        open={creating}
+        onOpenChange={setCreating}
+        draft={agentDraft}
+        setDraft={setAgentDraft}
+        // 만든 뒤 그 에이전트를 연다. 방금 만든 것이 화면에 없으면 만든 것이
+        // 아니고, 다음 행동(채널에 넣기)이 바로 그 판에 있다.
+        onCreated={(created) => {
+          setSelectedId(normalizedId(created.id));
+          setSection("profile");
+        }}
+      />
     </div>
   );
 }
@@ -500,6 +572,16 @@ function AgentProfileSection({
       : effectiveModel(currentDraft, inheritedModel);
   const effortReady =
     routingCapability.support === "ready" && routingCapability.table !== null;
+  // 이 서버가 프로필 쓰기와 일시정지를 실제로 받는가(capability.ts ④). 확정된
+  // ready가 아니면 쓰기 컨트롤은 잠긴다: 읽을 수 있다는 사실이 저장할 수 있다는
+  // 뜻은 아니고, 여기가 그 둘이 갈라지는 유일한 화면이다.
+  const editing = useAgentEditingCapability(agent.id);
+  const editable = editing.support === "ready";
+  const editDisabledReason = offline
+    ? "연결이 끊긴 동안에는 바꿀 수 없습니다."
+    : editing.support === "checking"
+      ? "이 서버가 프로필 편집을 받는지 확인 중입니다."
+      : (editing.reason ?? null);
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -508,6 +590,7 @@ function AgentProfileSection({
       currentInstructions === null ||
       handle.saving ||
       offline ||
+      !editable ||
       !dirty
     ) {
       return;
@@ -563,8 +646,37 @@ function AgentProfileSection({
         <InlineBanner
           tone="neutral"
           separator={false}
-          message="아직 저장된 프로필이 없습니다. 변경을 저장하면 프로필이 만들어집니다."
+          message={
+            editable
+              ? "아직 저장된 프로필이 없습니다. 변경을 저장하면 프로필이 만들어집니다."
+              : "아직 저장된 프로필이 없습니다."
+          }
           testId="agent-hub-profile-empty"
+        />
+      )}
+      {/* 편집 표면이 없거나 확인되지 않은 서버에서는 그 사실을 먼저 말한다.
+          이 배너가 없던 동안 화면은 "저장하면 만들어집니다"라고 약속하고 404를
+          돌려줬다 — 프로필 읽기가 200을 답한다는 사실만으로 쓰기까지 있다고
+          가정한 결과다(capability.ts ④).
+
+          `checking`에는 아무 배너도 띄우지 않는다: 아직 결론이 아닌 상태를
+          띄우면 프로필을 열 때마다 배너가 한 번 깜빡인다. 그동안 컨트롤은
+          잠겨 있고, 그 이유는 상자 옆 사유가 말한다. 오프라인도 여기 오지
+          않는다 — 라우트 상단 배너가 이미 그 사실을 말하고 있고, 같은 사실을
+          두 번 말하면 둘 중 하나는 반드시 낡는다. */}
+      {(editing.support === "absent" || editing.support === "unknown") && (
+        <InlineBanner
+          tone={editing.support === "absent" ? "neutral" : "error"}
+          separator={false}
+          message={
+            editing.support === "absent"
+              ? `${editing.reason ?? ""} 프로필 편집과 일시정지는 서버를 올린 뒤에 할 수 있습니다. 채널 배치는 지금도 됩니다.`.trim()
+              : (editing.reason ?? "이 서버가 프로필 편집을 받는지 확인하지 못했습니다.")
+          }
+          {...(editing.support === "unknown"
+            ? { actionLabel: "다시 확인", onAction: editing.recheck }
+            : {})}
+          testId="agent-hub-edit-unsupported"
         />
       )}
       {pauseMutation.isError && (
@@ -582,7 +694,36 @@ function AgentProfileSection({
             일시정지하면 새 멘션과 작업이 이 에이전트로 전달되지 않습니다.
           </p>
         </div>
-        <dl className="flex flex-col gap-2 text-body">
+        {/* 프로필 카드: 멘션하기 전에 확인하는 다섯 가지를 한 판에 둔다. 값이
+            없는 칸은 비워 두지 않고 왜 없는지 말한다(model.ts의 세 함수). */}
+        <dl className="flex flex-col gap-2 text-body" data-testid="agent-hub-profile-card">
+          <div className="grid grid-cols-3 gap-2">
+            <dt className="min-w-0 text-ink-muted">상태</dt>
+            <dd
+              className="col-span-2 min-w-0 text-ink"
+              data-testid="agent-hub-lifecycle"
+            >
+              {lifecycleLabel(agent, handle.profile, false, false)}
+            </dd>
+          </div>
+          <div className="grid grid-cols-3 gap-2">
+            <dt className="min-w-0 text-ink-muted">모델</dt>
+            <dd
+              className="col-span-2 min-w-0 break-words text-ink"
+              data-testid="agent-hub-model-summary"
+            >
+              {effectiveModelLabel(handle.profile, agent)}
+            </dd>
+          </div>
+          <div className="grid grid-cols-3 gap-2">
+            <dt className="min-w-0 text-ink-muted">추론 강도</dt>
+            <dd
+              className="col-span-2 min-w-0 text-ink"
+              data-testid="agent-hub-effort-summary"
+            >
+              {effectiveEffortLabel(handle.profile, effortReady)}
+            </dd>
+          </div>
           <div className="grid grid-cols-3 gap-2">
             <dt className="min-w-0 text-ink-muted">관리 주체</dt>
             <dd
@@ -599,16 +740,9 @@ function AgentProfileSection({
               data-testid="agent-hub-work-summary"
             >
               {currentWork ? (
-                <AgentTurnBadge
-                  state={currentWork.state}
-                  text={
-                    currentWork.state === "working" ? "작업 중" : "승인 대기"
-                  }
-                  label={
-                    currentWork.state === "working"
-                      ? `${agent.displayName} 에이전트가 작업 중입니다.`
-                      : `${agent.displayName} 에이전트가 승인을 기다립니다.`
-                  }
+                <CurrentWorkValue
+                  agentName={agent.displayName}
+                  work={currentWork}
                   live={live}
                 />
               ) : (
@@ -622,7 +756,7 @@ function AgentProfileSection({
           variant={profilePaused ? "default" : "outline"}
           size="sm"
           className="self-start"
-          disabled={offline}
+          disabled={offline || !editable}
           aria-busy={pausePending || undefined}
           onClick={() => {
             if (!pausePending) pauseMutation.mutate(!profilePaused);
@@ -639,6 +773,8 @@ function AgentProfileSection({
               : "에이전트 일시정지"}
         </Button>
       </section>
+
+      <AgentChannelsSection agent={agent} offline={offline} />
 
       <form onSubmit={submit} className="flex flex-col gap-6">
         <section className="flex flex-col gap-3">
@@ -660,7 +796,7 @@ function AgentProfileSection({
               handle.clearFailure();
             }}
             rows={7}
-            disabled={offline}
+            disabled={offline || !editable}
             className={cn(
               "w-full resize-y rounded-sm border border-line-strong bg-transparent px-3 py-2 text-body text-ink placeholder:text-ink-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
               // Offline dims the SURFACE, not the text. The house rule for a
@@ -709,14 +845,15 @@ function AgentProfileSection({
               setLocalError(null);
               handle.clearFailure();
             }}
-            modelDisabled={offline}
-            modelDisabledReason={
-              offline ? "연결이 끊긴 동안에는 바꿀 수 없습니다." : null
-            }
-            effortDisabled={!effortReady || offline}
+            modelDisabled={offline || !editable}
+            modelDisabledReason={editDisabledReason}
+            effortDisabled={!effortReady || offline || !editable}
             effortDisabledReason={
-              offline
-                ? "연결이 끊긴 동안에는 바꿀 수 없습니다."
+              // 두 축 모두 없는 서버에서 강도 상자가 말해야 하는 것은 강도
+              // 이야기가 아니라 "여기서는 아무것도 저장되지 않는다"이다. 쓰기
+              // 표면 판정이 먼저 서는 이유가 그것이다.
+              !editable
+                ? editDisabledReason
                 : routingCapability.reason ??
                   "이 서버가 추론 강도 변경을 지원하는지 확인 중입니다."
             }
@@ -738,7 +875,7 @@ function AgentProfileSection({
           type="submit"
           size="sm"
           className="self-start"
-          disabled={offline || !dirty || instructionBytes > 8_192}
+          disabled={offline || !editable || !dirty || instructionBytes > 8_192}
           aria-busy={handle.saving || undefined}
           data-testid="agent-hub-profile-save"
         >
@@ -758,6 +895,67 @@ function AgentProfileSection({
         </p>
       </section>
     </div>
+  );
+}
+
+/**
+ * 「현재 작업」 값 한 칸, 그리고 작업 패널 진입점 ② (goal WEB-WP1).
+ *
+ * run을 특정하지 못한 신호는 배지 그대로 둔다: 열 run이 없는데 버튼을 내주면
+ * 눌러도 아무 일이 없고, 그런 컨트롤은 고장 난 버튼으로 읽힌다.
+ */
+function CurrentWorkValue({
+  agentName,
+  work,
+  live,
+}: {
+  agentName: string;
+  work: AgentWorkingSignal;
+  live: boolean;
+}) {
+  const badge = (
+    <AgentTurnBadge
+      state={work.state}
+      text={work.state === "working" ? "작업 중" : "승인 대기"}
+      label={
+        work.state === "working"
+          ? `${agentName} 에이전트가 작업 중입니다.`
+          : `${agentName} 에이전트가 승인을 기다립니다.`
+      }
+      live={live}
+    />
+  );
+  const runId = work.runId;
+  if (runId === undefined) return badge;
+  return (
+    <button
+      type="button"
+      onClick={(event) =>
+        openWorkPanel(
+          {
+            runId,
+            memberId: work.memberId,
+            channelId: work.channelId,
+            origin: "hub",
+            // 패널이 자기 힘으로는 얻을 수 없는 값(여는 프레임은 run id가 알려지기
+            // 전에 지나간다). 레일이 봤다면 여기서 넘겨준다.
+            ...(work.startedAtMs !== undefined
+              ? { startedAtMs: work.startedAtMs }
+              : {}),
+          },
+          // 닫을 때 캐럿이 돌아올 자리(WebKit은 클릭으로 포커스를 주지 않는다).
+          event.currentTarget
+        )
+      }
+      // 배지의 접근성 문장이 통째로 이름이 되면 오프라인일 때 두 문장으로 늘어난다.
+      // 이 컨트롤의 이름은 이 컨트롤이 하는 일이다.
+      aria-label={`${agentName} 에이전트의 진행 과정 열기`}
+      data-testid="agent-hub-work-open"
+      className="flex items-center gap-1 rounded-sm text-left hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+    >
+      {badge}
+      <span className="text-timestamp text-ink-muted">진행 과정 보기</span>
+    </button>
   );
 }
 
@@ -806,6 +1004,11 @@ function PermissionsSection({
           </dd>
         </div>
       </dl>
+      {/* 앱 표면은 진입점을 감추지 않고 **서버의 답으로** 접는다 (goal B12,
+          이중 방어 (b)). 이 링크가 데려가는 패널은 앱 목록을 못 받으면 그
+          자리에서 이유를 말하므로, 여기서 미리 판정할 필요가 없다. 정적 판정은
+          사이드바의 작업 흐름처럼 **일급 목적지**에만 쓴다: 설정의 한 줄과
+          달리 그것은 셸의 상시 네비게이션이고, 죽은 채로 서 있는 값이 다르다. */}
       <Button variant="outline" size="sm" className="self-start" asChild>
         <Link to="/settings?section=plugins">설정의 앱에서 권한 보기</Link>
       </Button>

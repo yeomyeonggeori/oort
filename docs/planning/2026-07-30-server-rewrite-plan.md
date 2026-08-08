@@ -16,7 +16,7 @@ buzz 관계: **패턴 인용만**(Axum 파이프라인·sqlx·백프레셔·git-
 여섯 산출물을 확정하고 성재 승인 → 그 다음 구현 배치. 각 산출물은 문서 하나로 떨어진다.
 
 ### D1. 타깃 아키텍처 설계 — `docs/architecture/server-rust.md` (신설)
-- crate 레이아웃. buzz의 "relay가 오케스트레이터, 서브시스템은 서로 격리" 교훈 채택 범위 결정. momo 도메인 경계(auth·messaging·outbox/relay·t3-runtime·workstream·billing·git)로 매핑.
+- crate 레이아웃. buzz의 "relay가 오케스트레이터, 서브시스템은 서로 격리" 교훈 채택 범위 결정. oort 도메인 경계(auth·messaging·outbox/relay·t3-runtime·workstream·billing·git)로 매핑.
 - Axum handler 파이프라인이 **단일 쓰기경로**(`REST→PG→outbox→relay`)를 어떻게 강제하나 — 쓰기 진입점 단일화, outbox 삽입이 같은 트랜잭션.
 - sqlx vs sea-orm 결정(sqlx 유력 — 컴파일타임 쿼리 검증이 정합성 축에 부합, buzz도 sqlx).
 - 마이그레이션 재사용 방식: `schema_v0.sql`+59 마이그레이션을 그대로. Rust 측은 sqlx-migrate로 동일 파일 실행(수정·이동 금지 — 하드룰).

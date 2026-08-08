@@ -6,14 +6,14 @@
 
 ## 1. Research question
 
-momo에서 Codex처럼 공식/커스텀 플러그인을 발견하고 설치하되, Slack app directory보다 에이전트 실행에 적합한 권한·승인·감사 모델을 제공하려면 무엇을 채택해야 하는가?
+oort에서 Codex처럼 공식/커스텀 플러그인을 발견하고 설치하되, Slack app directory보다 에이전트 실행에 적합한 권한·승인·감사 모델을 제공하려면 무엇을 채택해야 하는가?
 
 이번 조사는 현재 정본인 Plugin Manifest v0, Capability Cache v0, Context Packet v0, approval ledger를 유지하면서 다음 제품 요구를 구체화한다.
 
 - 워크스페이스 관리자가 공식/커스텀 플러그인을 설치·회수한다.
 - 사용자는 자신의 Google Drive·Calendar·Gmail·GitHub·Notion 계정을 별도로 연결한다.
 - 채널에서 플러그인을 명시적으로 호출하거나, 에이전트가 허용된 플러그인을 동적으로 발견한다.
-- 외부 write는 항상 momo의 approval/audit timeline을 거친다.
+- 외부 write는 항상 oort의 approval/audit timeline을 거친다.
 
 ## 2. Codex에서 배울 것
 
@@ -50,25 +50,25 @@ Hermes는 `plugin.yaml`과 Python registration으로 tool, hook, slash command, 
 - 공식/bundled와 custom/private의 trust class를 분리한다.
 - 발견(discovered), 설치(installed), 활성화(enabled)를 분리한다.
 - runtime adapter는 종류별로 명시한다: hosted connector, remote MCP, local MCP, agent-host plugin.
-- inbound signed webhook은 외부 이벤트를 momo에 넣는 trigger transport이며, 외부 write를 수행하는 outbound executor와 같은 runtime kind로 취급하지 않는다.
+- inbound signed webhook은 외부 이벤트를 oort에 넣는 trigger transport이며, 외부 write를 수행하는 outbound executor와 같은 runtime kind로 취급하지 않는다.
 
 ### 채택하지 않음
 
 - 워크스페이스 서버가 검증되지 않은 Python 코드를 바로 import하는 모델.
 - 이름 충돌 시 last-writer-wins로 공식 plugin을 덮어쓰는 모델.
 
-momo의 custom plugin은 v0에서 arbitrary executable이 아니라 signed manifest + 외부 runtime endpoint를 기본으로 한다.
+oort의 custom plugin은 v0에서 arbitrary executable이 아니라 signed manifest + 외부 runtime endpoint를 기본으로 한다.
 
 ## 4. MCP가 담당하는 범위
 
 MCP는 external tool/resource transport의 한 구현이다. HTTP transport의 표준 authorization은 OAuth 2.1 계열, PKCE, protected resource discovery, resource indicator와 audience binding을 요구하며 token passthrough를 금지한다. [MCP Authorization](https://modelcontextprotocol.io/specification/2025-11-25/basic/authorization)
 
-MCP tool annotation은 trusted server에서 온 경우가 아니면 신뢰할 수 없다. 따라서 momo의 risk/approval classification은 catalog 검증과 policy owner 결정에서 만들어져야 한다. [MCP Tools](https://modelcontextprotocol.io/specification/2025-11-25/server/tools)
+MCP tool annotation은 trusted server에서 온 경우가 아니면 신뢰할 수 없다. 따라서 oort의 risk/approval classification은 catalog 검증과 policy owner 결정에서 만들어져야 한다. [MCP Tools](https://modelcontextprotocol.io/specification/2025-11-25/server/tools)
 
 결론:
 
 - MCP server는 plugin의 `runtime adapter`가 될 수 있다.
-- plugin identity, publisher trust, 설치, channel grant, approval policy, audit는 momo가 소유한다.
+- plugin identity, publisher trust, 설치, channel grant, approval policy, audit는 oort가 소유한다.
 - remote MCP OAuth token과 upstream provider token은 서로 다른 audience로 묶고 pass-through하지 않는다.
 
 ## 5. 후보 connector 조사
@@ -96,7 +96,7 @@ Gmail `gmail.readonly`, `gmail.compose`, `gmail.modify` 등은 restricted scope�
 
 GitHub의 공식 MCP server는 toolset·개별 tool allow-list, read-only, lockdown을 제공한다. [GitHub MCP Server](https://github.com/github/github-mcp-server), [Server configuration](https://github.com/github/github-mcp-server/blob/main/docs/server-configuration.md)
 
-이는 momo의 `tool_grants` 최소화 모델과 잘 맞는다. v0는 repo allow-list + issues/PR/repo read를 먼저 제공하고, issue/comment/PR write는 approval 뒤로 둔다.
+이는 oort의 `tool_grants` 최소화 모델과 잘 맞는다. v0는 repo allow-list + issues/PR/repo read를 먼저 제공하고, issue/comment/PR write는 approval 뒤로 둔다.
 
 ### 5.3 Notion
 
@@ -131,7 +131,7 @@ Hosted MCP는 최초 interactive OAuth와 refresh/session lifecycle을 요구하
 
 ## 7. 핵심 결론
 
-1. momo plugin은 MCP server와 동의어가 아니다.
+1. oort plugin은 MCP server와 동의어가 아니다.
 2. 설치는 data access가 아니다. workspace install, member OAuth, channel enable, capability grant를 분리한다.
 3. agent에는 전체 catalog가 아니라 현재 actor/channel에서 허용되고 healthy한 `tool_grants`만 전달한다.
 4. OAuth token과 provider secret은 Context Packet, Memory Plane, Capability Cache, timeline, audit payload에 절대 넣지 않는다.

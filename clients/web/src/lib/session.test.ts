@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { LoginResponse } from "./api";
+import type { LoginResponse } from "@momo/core/lib/api";
 import {
   parsePersistedMetadata,
   parsePersistedSession,

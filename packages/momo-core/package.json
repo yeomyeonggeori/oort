@@ -1,0 +1,24 @@
+{
+  "name": "@momo/core",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Platform-free domain logic shared by every momo (oort) client (ADR-0137 D3). No UI, no platform API, no runtime dependencies — enforced by scripts/purity.mjs.",
+  "type": "module",
+  "exports": {
+    "./*": "./src/*.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint .",
+    "gate:purity": "node scripts/purity.mjs",
+    "gate:copy": "node ../../scripts/design_preflight_core.mjs"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.5",
+    "eslint": "^9.39.5",
+    "typescript": "^5.6.3",
+    "typescript-eslint": "^8.65.0",
+    "vitest": "^2.1.0"
+  }
+}

@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { TimelineMessage } from "../timeline/model";
 import {
+  approvalActionType,
   approvalCardModel,
+  approvalRequestedBy,
   parseApprovalStatus,
   resolveApprovalStatus,
 } from "./approvalModel";
@@ -65,5 +67,49 @@ describe("approval card state machine", () => {
 
   it("rejects unknown status values", () => {
     expect(parseApprovalStatus("running")).toBeNull();
+  });
+});
+
+// #1176: the two servers in the tree answer this endpoint in two notations.
+// These rows are the real wire shapes, trimmed to the fields the panel reads.
+describe("approval projection notation (#1176)", () => {
+  const rustRow = {
+    id: "approval-1",
+    actionType: "tool_call",
+    requestedBy: "member-agent-1",
+  };
+  const swiftRow = {
+    id: "approval-1",
+    action_type: "tool_call",
+    requested_by: "member-agent-1",
+  };
+
+  it("reads the deployed Rust api's camelCase row", () => {
+    expect(approvalActionType(rustRow)).toBe("tool_call");
+    expect(approvalRequestedBy(rustRow)).toBe("member-agent-1");
+  });
+
+  it("still reads the Swift e2e server's snake_case row", () => {
+    expect(approvalActionType(swiftRow)).toBe("tool_call");
+    expect(approvalRequestedBy(swiftRow)).toBe("member-agent-1");
+  });
+
+  it("prefers the deployed notation when a row carries both", () => {
+    expect(
+      approvalRequestedBy({
+        requestedBy: "member-camel",
+        requested_by: "member-snake",
+      })
+    ).toBe("member-camel");
+  });
+
+  it("reports absence instead of a name the caller would index by", () => {
+    // The panel must be able to tell "no requester" from a member id, because
+    // displayNameFor() lowercases whatever it is handed.
+    expect(approvalRequestedBy({ id: "approval-1" })).toBeUndefined();
+    expect(approvalRequestedBy({ requestedBy: "" })).toBeUndefined();
+    expect(approvalRequestedBy({ requestedBy: 7 })).toBeUndefined();
+    expect(approvalActionType(null)).toBeUndefined();
+    expect(approvalActionType("approval-1")).toBeUndefined();
   });
 });

@@ -151,6 +151,17 @@ public actor RealtimeReplayController {
     private var lastAppliedSeq: Int64
     private var pendingBySeq: [Int64: RealtimeEnvelope] = [:]
     private var seenMessageIDs: Set<MessageID> = []
+    /// Highest streaming revision already applied, per message (#1130 전제①).
+    ///
+    /// `message.edited` is deliberately **non-sequenced**: it projects a message
+    /// that already has a seq rather than occupying one, so it skips the replay
+    /// cursor entirely (see `process`). That was harmless while an edit was a
+    /// rare human act. A growing agent answer is sixteen of them in twelve
+    /// seconds, and on an unordered rail one arriving after its own successor
+    /// would rewind the body on screen mid-sentence. This map is the only order
+    /// those frames have — and it costs one entry per streamed message rather
+    /// than a re-read per frame, which is the alternative.
+    private var streamRevByMessage: [MessageID: Int64] = [:]
 
     public init(
         channel: ChannelID,
@@ -219,13 +230,37 @@ public actor RealtimeReplayController {
     private func nonSequencedEvents(from envelope: RealtimeEnvelope) throws -> [RealtimeEvent] {
         guard let event = try decodeKnownEvent(envelope) else { return [] }
         switch event {
-        case .messageEdited, .messageDeleted, .reaction,
+        case .messageEdited(let message):
+            guard admitStreamSlice(message) else { return [] }
+            return [event]
+        case .messageDeleted, .reaction,
              .agentPartial, .agentStatus, .typing, .presence, .huddle, .threadUpdated,
              .workSession, .workControl:
             return [event]
         case .message, .approval:
             return []
         }
+    }
+
+    /// Should this `message.edited` reach the projection? (#1130 전제①)
+    ///
+    /// `true` for everything except a **stream slice that is not newer** than
+    /// one already applied for the same message — a replay, or a slice that lost
+    /// the race to its own successor. Applying it would rewind a body that has
+    /// already moved on.
+    ///
+    /// A human's edit is never dropped here, however many slices preceded it:
+    /// `isStreamSlice` requires `editedAtMs == nil`, and the server stamps that
+    /// clock on every edit and on no slice. Reverting that server-side asymmetry
+    /// would silently start swallowing people's corrections, which is why the
+    /// conformance names it.
+    private func admitStreamSlice(_ message: Message) -> Bool {
+        guard message.isStreamSlice, let rev = message.streamRev else { return true }
+        if let applied = streamRevByMessage[message.id], rev <= applied {
+            return false
+        }
+        streamRevByMessage[message.id] = rev
+        return true
     }
 
     private func fillGap(targetSeq: Int64, backfill: RealtimeBackfill) async throws -> [RealtimeEvent] {
@@ -304,6 +339,7 @@ public actor RealtimeReplayController {
             return [event]
         case .messageEdited(let message):
             seenMessageIDs.insert(message.id)
+            guard admitStreamSlice(message) else { return [] }
             return [event]
         case .messageDeleted, .reaction, .approval, .threadUpdated, .workSession, .workControl:
             return [event]

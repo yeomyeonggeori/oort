@@ -1,0 +1,65 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  escapeLayerDepth,
+  pushEscapeLayer,
+  removeEscapeLayer,
+  resetEscapeLayers,
+  runTopEscapeLayer,
+} from "./escapeLayer";
+
+// 이 스택이 지키는 것은 한 줄이다: **한 번의 Esc 는 한 층만 닫는다.**
+//
+// 리뷰가 잡은 판(ADE 2단계 H1 ①)은 작업 패널 위에 관제 서랍이 열려 있는 상태였다.
+// 둘 다 window 캡처 단계에 자기 리스너를 달고 `stopPropagation` 을 불렀는데, 그
+// 호출은 같은 노드의 다른 리스너를 막지 못하므로 Esc 한 번에 둘이 함께 닫혔다.
+// 아래 테스트는 그 상황을 층 순서로 재현한다 — 브라우저 없이 잴 수 있는 것이
+// 정확히 이 순서이기 때문이다.
+
+describe("escape layer stack", () => {
+  beforeEach(() => {
+    resetEscapeLayers();
+  });
+
+  it("Esc 한 번은 맨 위 층 하나만 닫는다", () => {
+    const panel = vi.fn();
+    const drawer = vi.fn();
+    pushEscapeLayer({ handle: panel });
+    pushEscapeLayer({ handle: drawer });
+
+    expect(runTopEscapeLayer(false)).toBe(true);
+    expect(drawer).toHaveBeenCalledOnce();
+    expect(panel).not.toHaveBeenCalled();
+  });
+
+  it("위 층이 닫히면 다음 Esc 가 아래 층을 닫는다", () => {
+    const panel = vi.fn();
+    const drawer = { handle: vi.fn() };
+    pushEscapeLayer({ handle: panel });
+    pushEscapeLayer(drawer);
+
+    runTopEscapeLayer(false);
+    removeEscapeLayer(drawer);
+    expect(runTopEscapeLayer(false)).toBe(true);
+    expect(panel).toHaveBeenCalledOnce();
+  });
+
+  it("층이 없으면 Esc 를 가로채지 않는다 (설정 라우트의 뒤로 가기가 살아 있다)", () => {
+    expect(runTopEscapeLayer(false)).toBe(false);
+  });
+
+  it("다이얼로그가 열려 있으면 어느 층도 받지 않는다", () => {
+    const drawer = vi.fn();
+    pushEscapeLayer({ handle: drawer });
+    expect(runTopEscapeLayer(true)).toBe(false);
+    expect(drawer).not.toHaveBeenCalled();
+  });
+
+  it("닫힌 층은 스택에서 빠진다 (남으면 그것이 가장 위가 된다)", () => {
+    const layer = { handle: vi.fn() };
+    pushEscapeLayer(layer);
+    expect(escapeLayerDepth()).toBe(1);
+    removeEscapeLayer(layer);
+    expect(escapeLayerDepth()).toBe(0);
+    expect(runTopEscapeLayer(false)).toBe(false);
+  });
+});

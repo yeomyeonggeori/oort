@@ -3,17 +3,18 @@ import { Link, useSearchParams } from "react-router-dom";
 import { cn } from "@/design/lib/cn";
 import { Button } from "@/design/ui/button";
 import { useSession } from "@/app/session";
+import { SidebarDrawerToggle } from "@/app/SidebarDrawerToggle";
 import { CHIP_CLASS } from "@/features/common/chip";
 import { FilterTabs } from "@/features/common/FilterTabs";
 import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/States";
 import { useOffline } from "@/features/common/useOffline";
-import { relativeLabel } from "@/features/inbox/model";
+import { relativeLabel } from "@momo/core/features/inbox/model";
 import {
   useChannels,
   useDirectory,
   type Directory,
 } from "@/features/workspace/useWorkspace";
-import { type Workstream } from "@/lib/api";
+import { type Workstream } from "@momo/core/lib/api";
 import {
   WORKSTREAM_FILTER_TABS,
   WORKSTREAM_STATUS_CLASS,
@@ -23,7 +24,7 @@ import {
   workstreamActor,
   workstreamFilterOf,
   workstreamStatusOf,
-} from "./model";
+} from "@momo/core/features/workstreams/model";
 import { useWorkstreams } from "./useWorkstreams";
 
 // =============================================================================
@@ -134,7 +135,7 @@ function WorkstreamRow({
             </span>
             {/* 시작한 사람. 목표 문장만으로 가르기 어려운 두 행을 실제로 가르는
                 두 번째 사실이고, 목록이 곧 작업 큐라 "누가 벌여둔 일인가"는
-                이어받으러 온 사람이 다음으로 묻는 것이다. 이미 상세가 같은
+                인수하러 온 사람이 다음으로 묻는 것이다. 이미 상세가 같은
                 사실을 같은 이름 규칙으로 말한다(workstreamActor). */}
             <span className="shrink-0">· 시작</span>
             <span className="min-w-0 truncate" data-testid="workstream-starter">
@@ -208,10 +209,13 @@ export function WorkstreamListRoute() {
               같은 `break` 그룹이라 한 엘리먼트에 쓰면 하나가 조용히 사라진다
               (common/States.tsx가 세운 형태). */}
           <div className="min-w-0 break-keep">
-            <h1 className="text-body font-semibold text-ink">작업 흐름</h1>
+            <div className="flex min-w-0 items-center gap-2">
+              <SidebarDrawerToggle />
+              <h1 className="text-body font-semibold text-ink">작업 흐름</h1>
+            </div>
             <p className="break-words text-meta text-ink-muted">
               목표 하나와 그 목표를 실행한 사람들. 멈춘 목표는 같은 채널 멤버가
-              이어받습니다.
+              인수합니다.
             </p>
           </div>
           {settled && (

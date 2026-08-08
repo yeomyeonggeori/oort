@@ -1,0 +1,24 @@
+[package]
+name = "momo-db"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+sqlx.workspace = true
+uuid.workspace = true
+# B2.4: `audit_log.detail` is `jsonb`, so `AuditEntry` names `serde_json::Value`
+# directly rather than through `sqlx::types` — legible at the call site, and the
+# same crate sqlx's `json` feature already pulls in (a name, not a new tree).
+serde_json.workspace = true
+tokio.workspace = true
+futures.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+# DB-backed conformance harness (tests/conformance_pg.rs, #[ignore]) — the seed
+# of the D5 conformance suite. Orchestrator-added B0 docker gate.
+tokio = { workspace = true }
+uuid = { workspace = true }

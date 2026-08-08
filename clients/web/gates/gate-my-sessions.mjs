@@ -347,6 +347,17 @@ async function installRoutes(context, state) {
   await context.route("**/v1/**", async (route) => {
     const path = new URL(route.request().url()).pathname;
     if (path === "/v1/auth/login") return json(route, auth);
+    // 로그인 직후의 토큰 회전 (#1089). 이 분기가 없으면 맨 아래 포괄
+    // `return json(route, {})` 가 200 을 주지만 **모양이 비어 있고**, 코어의
+    // `refreshResponseFromWire`(packages/momo-core/src/lib/api.ts:632)는 두 필드가
+    // 문자열이 아니면 throw 한다 → `markAuthExpired()` → 앱이 스스로 로그아웃한다.
+    // 증상은 `loginPage` 가 `open-work-panel` 을 30초 기다리다 죽는 것이었다(규명 2/4).
+    if (path === "/v1/auth/refresh") {
+      return json(route, {
+        accessToken: auth.accessToken,
+        refreshToken: auth.refreshToken,
+      });
+    }
     if (path === "/v1/auth/realtime-token") {
       return json(route, {
         token: "gate-realtime-token",
@@ -684,6 +695,24 @@ async function assertContinuity(context, state) {
   if ((await page.getByTestId("work-observer-terminal").count()) !== 0) {
     throw new Error("offline detail still offers terminal observation");
   }
+  // R1 H2: 배너는 **화면에 없는 버튼**을 지시하지 않는다. 1R 은 「목록으로 돌아가
+  // '세션 스레드'를 선택하면」이라고 적었는데, 이 배너가 서는 행은 대개 재개가
+  // 성립하는 행이고 그런 행에는 그 버튼이 없다 — 돌아가 봐야 그 이름이 없다.
+  const offlineBanner =
+    (await page.getByTestId("work-host-offline").textContent())?.trim() ?? "";
+  if (offlineBanner.includes("세션 스레드") || !offlineBanner.includes("아래")) {
+    throw new Error(
+      `오프라인 배너가 이 화면에 없는 동선을 지시한다 (${offlineBanner})`
+    );
+  }
+  // 그리고 목록 행이 잃은 채널 스레드 동선은 여기서 다시 난다(H2 부수). 상세는
+  // 세션 원장이고 스레드는 채널 대화라 서로를 대신하지 않는다 — 동사가 선 행에서
+  // 그 버튼을 뺀 대가를 이 줄이 치른다.
+  if ((await page.getByTestId("work-detail-thread").count()) !== 1) {
+    throw new Error(
+      "채널 스레드로 가는 길이 어디에도 없다: 목록 행에서 뺀 동선을 상세가 받지 않았다 (R1 H2 부수)"
+    );
+  }
   await page.getByTestId("work-detail-back").click();
   await page.waitForFunction(
     () =>
@@ -691,27 +720,74 @@ async function assertContinuity(context, state) {
       "my-work-session-detail"
   );
 
+  // ADE 3단계 D3 (#1137): 두 동사는 **다른 버튼**이고, 판정은 행이 실어 나른다
+  // (`data-verb`). 상세로 가는 길은 하나이며 그 하나의 이름이 도착해서 할 수 있는
+  // 일을 따른다 — 재개가 성립하면 「이어서 보기」, 아니면 「세션 상세」. 1R 은 이
+  // 자리에 두 버튼을 나란히 세워 같은 핸들러를 눌렀다(R1 M3): 같은 곳으로 가는 두
+  // 이름은 두 곳이 있다고 말한다.
   const online = page.locator(`li[data-testid="my-work-session-row"][data-session-id="${onlineSessionId}"]`);
   if (
     (await online.getByTestId("my-work-session-status").textContent())?.trim() !==
       "완료 · 대기 중" ||
+    (await online.getAttribute("data-verb")) !== "resume" ||
     (await online.getByTestId("my-work-session-detail").textContent())?.trim() !==
       "이어서 보기"
   ) {
     throw new Error("idle row lost its neutral status or same-PTY action");
   }
+  // 목적지가 하나면 버튼도 하나다. 「세션 상세」와 「이어서 보기」가 같은 행에서
+  // 같은 핸들러를 함께 누르고 있으면 여기서 깨진다.
+  if (
+    (await online.getByTestId("my-work-session-detail").count()) !== 1 ||
+    (await online.getByRole("button", { name: "세션 상세", exact: true }).count()) !== 0
+  ) {
+    throw new Error(
+      "쌍둥이 버튼이 돌아왔다: 재개 행이 상세로 가는 길을 두 이름으로 세우고 있다 (R1 M3)"
+    );
+  }
   const orphaned = page.locator(`li[data-testid="my-work-session-row"][data-session-id="${orphanedSessionId}"]`);
   if (
-    (await orphaned.getByTestId("my-work-session-thread").textContent())?.trim() !==
-    "새 호스트에서 재개"
+    (await orphaned.getAttribute("data-verb")) !== "takeover" ||
+    (await orphaned.getByTestId("my-work-session-takeover").textContent())?.trim() !==
+      "인수" ||
+    (await orphaned.getByTestId("my-work-session-detail").textContent())?.trim() !==
+      "세션 상세"
   ) {
     throw new Error("orphaned row lost its distinct lineage-resume action");
   }
+  // 두 낱말이 같은 화면에 함께 서고 **서로 다르다**. 한 act 에 두 이름이거나 두
+  // act 에 한 이름이면 사람은 무엇이 무엇인지 배울 수 없다(D3).
   if (
     (await page.getByText("이어서 보기", { exact: true }).count()) === 0 ||
-    (await page.getByText("새 호스트에서 재개", { exact: true }).count()) === 0
+    (await page.getByText("인수", { exact: true }).count()) === 0
   ) {
     throw new Error("reattach and lineage-resume labels did not coexist");
+  }
+  // 고아 행에 재개가, 살아 있는 행에 인수가 서지 않는다.
+  if (
+    (await orphaned.getByText("이어서 보기", { exact: true }).count()) !== 0 ||
+    (await online.getByTestId("my-work-session-takeover").count()) !== 0
+  ) {
+    throw new Error("a verb stood on the wrong row: 재개와 인수가 뒤바뀌었다");
+  }
+  // 하트비트가 끊긴 실행 중 세션도 **재개를 잃지 않는다**. 앞 판의
+  // `canReattachWorkSession` 은 `online === true` 를 게이트로 썼는데, 그 칼럼은
+  // 실측으로 못 믿는 값이고(momowebqa: 릴레이 중인 호스트가 online:false), 서버의
+  // 같은 판정은 그것을 일부러 보지 않는다. 그래서 돌아갈 수 있는 세션에 돌아갈
+  // 길이 없었다. 침묵은 게이트가 아니라 경고로 내려온다.
+  if (
+    (await offline.getAttribute("data-verb")) !== "resume" ||
+    (await offline.getByTestId("my-work-session-detail").textContent())?.trim() !==
+      "이어서 보기"
+  ) {
+    throw new Error(
+      "a silent heartbeat removed the way back: 응답 없는 호스트의 실행 중 세션이 재개를 잃었다 (서버 판정은 online 을 보지 않는다)"
+    );
+  }
+  if ((await offline.getByTestId("my-work-session-advisory").count()) !== 1) {
+    throw new Error(
+      "the silence was neither gated nor stated: 하트비트가 끊겼는데 경고 한 줄이 없다"
+    );
   }
   await online.getByTestId("my-work-session-detail").click();
   await page.getByTestId("work-detail").waitFor();
@@ -727,7 +803,7 @@ async function assertContinuity(context, state) {
   // 버튼으로 옮겨가므로 ghost로 물러나면서 이름도 바뀐다. 컨트롤은 공유하면서
   // 그 컨트롤이 존재하는 이유인 규칙만 한쪽에 두고 오면, `aria-expanded=true`인데
   // 이름은 여전히 여는 이름이 된다.
-  const resumeToggle = orphaned.getByTestId("my-work-session-thread");
+  const resumeToggle = orphaned.getByTestId("my-work-session-takeover");
   const transparentFill = (value) =>
     value === "rgba(0, 0, 0, 0)" || value === "transparent";
   const closedFill = await resumeToggle.evaluate(
@@ -741,8 +817,13 @@ async function assertContinuity(context, state) {
   await resumeToggle.click();
   const targets = orphaned.getByTestId("work-session-resume-targets");
   await targets.waitFor();
+  // 부분 복원 고지는 이제 산문 두 줄이 아니라 **두 목록**이다(#1137). 앞 판의
+  // "Git 계보만 새 호스트로 이어집니다"는 틀렸다 — 실제로 이어지는 것은
+  // 스레드이고(서버가 원본의 root_message_id 를 그대로 쓴다), git 계보는 이
+  // 원장이 아예 모르는 것이다.
+  await targets.getByTestId("takeover-restored").waitFor();
   await targets
-    .getByText("미커밋 변경은 옮겨지지 않습니다.", { exact: false })
+    .getByText("커밋하지 않은 변경", { exact: false })
     .waitFor();
   await page.mouse.move(0, 0);
   await page.waitForFunction(

@@ -9,7 +9,7 @@ import {
   listInvites,
   resolveServerBaseUrl,
   type CreatedInvite,
-} from "./api";
+} from "@momo/core/features/settings/api";
 import {
   buildInviteMailto,
   buildJoinLink,
@@ -22,7 +22,7 @@ import {
   inviteStatus,
   isOperatorDenied,
   type InviteCardInput,
-} from "./model";
+} from "@momo/core/features/settings/model";
 import {
   ChoiceRadios,
   CopyButton,
@@ -144,7 +144,7 @@ export function InviteSection({
   const serverBaseUrl = resolveServerBaseUrl();
   const card: InviteCardInput | null = issued
     ? {
-        workspaceName: workspace.data?.name ?? "momo",
+        workspaceName: workspace.data?.name ?? "oort",
         serverBaseUrl,
         code: issued.code,
         expiresAtMs: issued.invite.expiresAtMs,

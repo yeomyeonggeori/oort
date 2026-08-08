@@ -1,7 +1,7 @@
 openapi: 3.0.3
 
 # =============================================================================
-# momo REST API — web v0 + plugin surface (MOMO-389/MOMO-459)
+# oort REST API — web v0 + plugin surface (MOMO-389/MOMO-459)
 #
 # This file is the canonical client contract for the web v0 surface. Clients
 # (clients/web-legacy via openapi-typescript, and MomoCore as a conformance target)
@@ -34,10 +34,10 @@ openapi: 3.0.3
 # =============================================================================
 
 info:
-  title: momo REST API (web v0 + plugin surface)
+  title: oort REST API (web v0 + plugin surface)
   version: 0.1.0
   description: >
-    Canonical REST contract for the momo web v0 client surface:
+    Canonical REST contract for the oort web v0 client surface:
     login/refresh/logout, public invite join, realtime token issuance,
     workspace roster, channels (list/create), messages (send/history with
     seq-cursor pagination and `?after=` backfill), read-state (bulk read +
@@ -664,9 +664,20 @@ paths:
       summary: Read one agent's effective workspace model allow-list.
       description: >
         Any active workspace member may read this credential-free projection.
-        The response is exactly the agent's own model plus
+        The response is the agent's own model plus
         workspace.settings.allowed_agent_models; it deliberately does not
         expose the workspace settings object or agent profile fields.
+
+        When workspace.settings carries no allowed_agent_models key at all AND
+        the agent's own model is one of the measured provider-catalog ids also
+        served by GET /v1/provider/effort-table under provider `openai-codex`,
+        the answer additionally contains that catalog (SRV-B3). An unconfigured
+        workspace is the absence of a configuration surface — nothing on this
+        API writes workspace.settings — rather than a narrowing anyone chose,
+        and the agent's own model is the evidence of which upstream this
+        instance reaches. A workspace that HAS configured the key, including an
+        explicit empty list, gets exactly agent.model plus what it configured;
+        a gateway-handle model (hermes-*) is never widened.
       security: [{bearerAuth: []}]
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
@@ -847,12 +858,15 @@ paths:
       operationId: cancelAgentRun
       summary: Cancel one agent run as a human channel member.
       description: >
-        ADR-0132 D1. Any active human member of the run's channel may cancel.
+        ADR-0132 D1. Any active human member of the run's channel may cancel —
+        channel membership, not workspace ownership, is the authorization.
         Agent and work-host bearers are rejected. The server atomically marks
         the run cancelled, retires pending agent jobs, cancels pending
         approvals, writes an audit event and a channel system line, and returns
         linked work-session IDs. Linked work sessions are not terminated;
         callers must use the existing work.control kill path separately.
+        Cancelling an already-cancelled run answers 200 with the same body and
+        writes nothing: no second system line and no second audit row.
       security: [{bearerAuth: []}]
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
@@ -866,6 +880,7 @@ paths:
           content:
             application/json:
               schema: {$ref: "#/components/schemas/AgentRunCancelResponse"}
+        "400": {description: Malformed workspace or run identifier, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {description: Active human channel membership required, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
         "404": {description: Agent run not found, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
@@ -1348,7 +1363,7 @@ paths:
     post:
       tags: [work-hosts]
       operationId: provisionCloudWorkHost
-      summary: Explicitly provision one paid momo Cloud host on the configured provider.
+      summary: Explicitly provision one paid oort Cloud host on the configured provider.
       description: >
         Human bearer only. Requires confirmPaidCloud=true, positive workspace
         credit, an available work-pool slot, and a managed provider adapter
@@ -1413,7 +1428,7 @@ paths:
       description: >
         ADR-0142 D1. The base acquisition path: a workspace admin installs
         `momo-workd` on their own VM and spends this token at the cloud
-        register endpoint. momo never creates or destroys a BYOC host — its
+        register endpoint. oort never creates or destroys a BYOC host — its
         lifetime belongs to its owner — but scheduling, observation and billing
         are identical to a managed host. Workspace-shared hosts only; a
         `scope` other than `workspace` is refused by name. The token is
@@ -2327,7 +2342,7 @@ paths:
         plus resumed_at and the preserved exit_code. Idle also commits one
         system thread message ("작업 완료 — idle 대기") so NotifierWorker can
         notify only the owner through the existing id-only push envelope. When
-        the bound host is a momo Cloud host whose adapter declares pause
+        the bound host is an oort Cloud host whose adapter declares pause
         support, running-to-idle also pauses its provider instance and opens a
         zero-active-seconds paused interval; idle-to-running resumes it before
         reopening active usage. An adapter that declares no pause is skipped
@@ -2391,7 +2406,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "410":
-          description: The bound momo Cloud sandbox no longer exists; orphaned fallback is scheduled.
+          description: The bound oort Cloud sandbox no longer exists; orphaned fallback is scheduled.
           content:
             application/json:
               schema:
@@ -2399,7 +2414,7 @@ paths:
         "429":
           $ref: "#/components/responses/RateLimited"
         "503":
-          description: The momo Cloud provisioner is unavailable; non-cloud hosts do not use it.
+          description: The oort Cloud provisioner is unavailable; non-cloud hosts do not use it.
           content:
             application/json:
               schema:
@@ -2439,13 +2454,18 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          description: Human caller is not the source session owner.
+          description: >
+            Caller is not an active member of the source session's anchor
+            channel (ADR-0143 D3 — eligibility is channel membership, not the
+            source member_id), or the target is a member-scoped work host owned
+            by somebody else.
         "404":
           description: Source session does not exist in this workspace.
         "409":
           description: >
             Source is not orphaned, target host is revoked/unavailable/outside
-            policy, or the workspace/member pool has no available slot.
+            policy, target host is the source host, or the workspace/member pool
+            has no available slot.
 
   /v1/workspaces/{workspaceId}/work-sessions/{workSessionId}/terminal-attach:
     post:
@@ -3166,6 +3186,15 @@ paths:
       tags: [messages]
       operationId: editMessage
       summary: Edit an authored, undeleted message without changing its seq.
+      description: >
+        Two writes share this route. Without a `stream` block it is a human
+        revision: `state` becomes `edited` and `editedAtMs` is stamped. With one
+        (#1130 전제①) it is a slice of a growing answer — same 200, same
+        `message.edited` broadcast, but no edit stamp, and a `rev` that is not
+        newer than the stored one is a no-op. Authorship, membership, the
+        tombstone rule and "no interaction consumes a seq" guard both. The
+        slice that closes a stream may also name an `outcome` (ADR-0155) when
+        the answer was stopped rather than completed.
       security:
         - bearerAuth: []
       parameters:
@@ -3186,7 +3215,9 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/Message"}
         "400":
-          description: Empty body, malformed id, or an already-deleted message.
+          description: >
+            Empty body, malformed id, an already-deleted message, a stream `rev`
+            below 1, or an `outcome` that is unknown or not on a final slice.
           content:
             application/json:
               schema: {$ref: "#/components/schemas/ErrorResponse"}
@@ -3327,6 +3358,125 @@ paths:
               schema: {$ref: "#/components/schemas/ErrorResponse"}
         "429": {$ref: "#/components/responses/RateLimited"}
 
+  /v1/workspaces/{workspaceId}/messages/{messageId}/pin:
+    put:
+      tags: [messages]
+      operationId: pinMessage
+      summary: Pin a message to its channel idempotently.
+      description: >
+        A pin is the **channel's** fact, not the pinner's: `message_pin` is unique
+        on the message alone, so two members pinning the same message produce one
+        header entry, and any channel member may unpin it — including one who did
+        not pin it. Requiring the pinner would strand every pin whose author left.
+        Pinning consumes no `message.seq` and does not modify the message; the
+        `message.pinned` broadcast reuses the target's own seq. The response
+        carries the full list entry so the caller can insert it without re-reading.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: messageId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: Pinned delta; an already-pinned message is also success (changed=false).
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PinDelta"}
+        "400":
+          description: Malformed message id, or the message is deleted.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403":
+          description: Not a channel member, or workspace scope mismatch.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "404":
+          description: Message not found.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "409":
+          description: The channel already has the maximum 100 pinned messages.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+    delete:
+      tags: [messages]
+      operationId: unpinMessage
+      summary: Unpin a message from its channel idempotently.
+      description: >
+        Any channel member may unpin, not only the pinner. Unpinning a message
+        that is not pinned is also a success (changed=false) and publishes
+        nothing. Deleting a message sweeps its pin without a separate
+        `message.unpinned` frame — the client drops it on `message.deleted`.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: messageId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: Unpinned delta; an already-absent pin is also success.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PinDelta"}
+        "400":
+          description: Malformed message id.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403":
+          description: Not a channel member, or workspace scope mismatch.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "404":
+          description: Message not found.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+
+  /v1/workspaces/{workspaceId}/channels/{channelId}/pins:
+    get:
+      tags: [messages]
+      operationId: getChannelPins
+      summary: List a channel's pinned messages, most recently pinned first.
+      description: >
+        The cold-load counterpart of the pin verbs, the way the reaction snapshot
+        is to the reaction toggle: read once per channel, then kept live by
+        `message.pinned` / `message.unpinned`. Deleted messages are excluded.
+        Empty channels return an empty array.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/ChannelId"
+      responses:
+        "200":
+          description: The channel's pins, ordered by pinnedAtMs descending.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PinList"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403":
+          description: Not a channel member, or workspace scope mismatch.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+
   /v1/workspaces/{workspaceId}/channels/{channelId}/reactions:
     get:
       tags: [messages]
@@ -3366,6 +3516,11 @@ paths:
         Supplying `rootId` creates a one-level thread reply. The root must be an
         undeleted top-level message in the same channel; cross-channel roots are
         reported as not found.
+        Supplying `replyToId` quotes a message (ADR-0148): the send stays in the
+        channel's main flow and points at the target rather than folding the
+        conversation into a thread. The two are independent and may be sent
+        together. A quote target must be undeleted and in the same channel, but
+        — unlike a thread root — it may itself be a reply.
       security:
         - bearerAuth: []
       parameters:
@@ -3385,7 +3540,13 @@ paths:
               schema:
                 $ref: "#/components/schemas/Message"
         "400":
-          description: Invalid workspace/channel id, deleted root, or nested reply root.
+          description: >
+            Invalid workspace/channel id, deleted root, nested reply root, a
+            deleted quote target, an opening `stream` block that declares
+            anything other than `rev: 0` / `streaming: true`, or a signed send
+            that also opens a stream (the provenance digest binds the props as
+            inserted, and the opening marker is written by the server after the
+            signature was made).
           content:
             application/json:
               schema:
@@ -3399,7 +3560,10 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "404":
-          description: Channel/root not found or not provisioned.
+          description: >
+            Channel/root not found or not provisioned, or a quote target that is
+            not in this channel (a target in another channel or workspace is
+            answered identically to one that does not exist).
           content:
             application/json:
               schema:
@@ -4202,7 +4366,7 @@ paths:
     post:
       tags: [webhooks]
       operationId: receiveNativeWebhook
-      summary: Receive a native momo HMAC-signed webhook.
+      summary: Receive a native oort HMAC-signed webhook.
       description: >
         Public ingress authenticated by X-Momo-Signature-Version,
         X-Momo-Key-Id, X-Momo-Timestamp, X-Momo-Delivery-Id, and
@@ -4861,6 +5025,15 @@ paths:
         tenant row and no provider credential (ADR-0134 D2), and a model absent
         from it resolves to the conservative low/medium/high fallback rather
         than silently accepting a level the provider would reject.
+
+        Two provider groups are served. `hermes` holds oort's own
+        provider-agnostic gateway handles (ADR-0130). `openai-codex` holds model
+        ids the upstream publishes in its own catalog, measured 2026-08-04 from
+        GET https://chatgpt.com/backend-api/codex/models — the base URL an
+        ADR-0147 OAuth link stores. The upstream lists a sixth level, `ultra`,
+        on some of those models; oort deliberately does not serve it, so
+        `levels` stays low/medium/high/xhigh/max and an `ultra` request is a
+        400.
       security: [{bearerAuth: []}]
       responses:
         "200":
@@ -5656,8 +5829,8 @@ components:
       type: object
       description: >
         Roster entry. Human-only fields (email/timeZone) and agent-only
-        fields (agentModel/ownerHumanId/maxConcurrentRuns/maxRunSteps) are
-        present only for the matching kind; agent secrets and execution
+        fields (agentModel/ownerHumanId/maxConcurrentRuns/maxRunSteps/paused)
+        are present only for the matching kind; agent secrets and execution
         config are never exposed.
       required:
         - id
@@ -5721,6 +5894,16 @@ components:
           type: integer
         maxRunSteps:
           type: integer
+        paused:
+          type: boolean
+          description: >
+            Present for agents only, and always present for them including when
+            false, so a list can tell "awake" apart from "not reported".
+            `agent_profile.paused`; an agent with no profile row reports false.
+            This is not a new disclosure: mentioning a paused agent already posts
+            a public system line in the channel saying so, and the rest of the
+            profile (instructions, enabled tools, triggers) stays behind the
+            owner-gated profile read.
         createdAtMs:
           type: integer
           format: int64
@@ -6468,7 +6651,7 @@ components:
         bootstrapToken:
           type: string
           description: >
-            Shown exactly once. Only its SHA-256 digest is stored, so momo
+            Shown exactly once. Only its SHA-256 digest is stored, so oort
             cannot show it again.
         bootstrapExpiresAtMs:
           type: integer
@@ -7681,6 +7864,15 @@ components:
           type: string
           format: uuid
           description: Undeleted top-level message in this channel used as the thread root.
+        replyToId:
+          type: string
+          format: uuid
+          description: >
+            ADR-0148 quote target — the message this send points at. Independent
+            of `rootId`: a message may carry both, which quotes one particular
+            reply from inside its own thread. The target must be an undeleted
+            message in the same channel (it may itself be a reply); a target in
+            another channel or another workspace is reported as not found.
         type:
           type: string
           enum: [text, tool_call, tool_result, diff, artifact, approval_request, system]
@@ -7693,12 +7885,43 @@ components:
             type: string
           description: >
             Simplified structured payload for v0 — a flat string-to-string
-            map on send. The server-owned `mention_member_ids` key is
-            stripped and recomputed server-side.
+            map on send. Server-owned keys are stripped and rewritten
+            server-side: `mention_member_ids` (recomputed from the body),
+            `momo.stream` (the streaming staleness marker) and
+            `momo.harnessRefine` (ADR-0158 — send the `harnessRefine` block
+            instead). Because the map is flat, a structured block cannot be sent
+            through it at all.
         runId:
           type: string
           format: uuid
-          description: Agent-run binding; agent principals only.
+          description: >
+            ADR-0158 D5 — the agent run this write belongs to. Served since
+            ADR-0158; earlier builds decoded the field and answered
+            `400 runId (agent-run binding) is not served by momo-server yet`, so
+            a producer can detect support by sending it.
+
+            Validated **fail-closed inside the send transaction**, and all three
+            checks must pass: the run exists, it is in this workspace, and the
+            caller is that run's agent (`agent_run.agent_member_id` equals the
+            credential's member — which is what makes this an agent-bearer field
+            in practice, a human credential being refused by the same rule rather
+            than by a separate one). A run this workspace cannot see — including
+            one in another tenant, which RLS makes invisible — answers **404**; a
+            run it can see but does not own answers **403**.
+
+            On success the id is written to `message.run_id` *and* mirrored into
+            `props.run_id`, overwriting any `run_id` the request put in `props`.
+            The column is what a server-side close looks a half-written answer up
+            by (ADR-0155), and the props copy is what a history page reads to
+            decide `runEnded` (#1166); an out-of-process producer needs both in
+            order to behave exactly like the in-process one. Sending `runId`
+            together with `stream` is the intended adapter shape — it is what
+            makes a cancel able to close the stream that adapter opened.
+        harnessRefine:
+          $ref: "#/components/schemas/HarnessRefine"
+          description: >
+            ADR-0158 D1–D4 — announces that the agent rewrote its own harness.
+            Optional and additive; omitting it is the ordinary send.
         attachmentIds:
           type: array
           maxItems: 20
@@ -7712,6 +7935,11 @@ components:
         routing:
           $ref: "#/components/schemas/RunRoutingInput"
           description: Per-request agent model/effort override for mention runs.
+        stream:
+          $ref: "#/components/schemas/StreamOpen"
+          description: >
+            #1173 — marks this send as the opening write of a growing answer.
+            Optional and additive; omitting it is the ordinary send.
 
     RunRoutingInput:
       type: object
@@ -7720,6 +7948,100 @@ components:
         model: {type: string, minLength: 1, maxLength: 200}
         effort: {type: string, enum: [low, medium, high, xhigh, max]}
 
+    HarnessRefine:
+      type: object
+      description: >
+        ADR-0158 D1–D4 — the block that turns "the agent rewrote its own
+        instructions" into one line the room can scroll back to.
+
+        A prime harness refines itself on a timer without any host command
+        (`autoRefine.enabled` defaults true, `turnInterval` 25, `cooldownMs`
+        20 min — measured), and D1 decided that in a product where an agent is a
+        first-class member the team is owed that fact rather than one host's log.
+
+        The send that carries this block must be `type: system` (D2 — no new
+        message type is introduced) and must carry a human-readable `body`; the
+        reasons live in props, the sentence lives in the channel. The stored
+        object is `props["momo.harnessRefine"]`, written by the server: `scope`
+        is re-stated rather than copied, and the key is stripped from any
+        client-supplied `props`.
+
+        **`clientMsgId` is derived, not chosen** (D4). It must equal
+        `uuidv5(namespace = 6d6f6d6f-2e68-6172-6e65-737352656669, name =
+        refinementId)` — the 16 ASCII bytes `momo.harnessRefi`. `message.client_msg_id`
+        is a uuid column and `RefinementResult.id` is an arbitrary string, so the
+        string is hashed into the column's type, exactly as `tool_result` keys
+        are. Any other value is a 400 that names the expected uuid. The point is
+        that the two paths which can observe one refinement — the `refine_complete`
+        RPC event and the file watcher that covers the kernel's silent writes —
+        derive the same key and collapse into a single announcement.
+
+        Unlike most request objects here this one is strictly closed
+        (`additionalProperties: false`, on the edits too). That is a disclosure
+        rule, not tidiness: harness memories can quote the conversation that
+        produced them, so an edit may name *what* changed and never carry the
+        text. A producer that adds `before`/`after` is refused rather than
+        silently trimmed.
+      required: [refinementId, trigger, scope]
+      additionalProperties: false
+      properties:
+        refinementId:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: >
+            `RefinementResult.id` as the harness assigned it (e.g.
+            `refine_20260807041452415`). The seed of the derived `clientMsgId`.
+        trigger:
+          type: string
+          enum: [command, turn_interval, compact, observed-drift]
+          description: >
+            What set the refinement off. `command` is an explicit `refine` RPC;
+            `turn_interval` and `compact` are the harness's own timers;
+            `observed-drift` is the honest name for the kernel path, where
+            `rlm.harness` writes `harness_state.json` and the protocol emits
+            nothing at all (measured: 6 runs × 37 events, `refine_complete` = 0).
+            An adapter using `observed-drift` is stating "we saw the file change",
+            never "the agent decided X". The mixed casing is the contract's, not
+            a typo. An unrecognised value is a 400 — the server does not repeat a
+            story it cannot read.
+        scope:
+          type: string
+          enum: [workspace]
+          description: >
+            Always `workspace`, and any other value is a 400. The harness calls a
+            global refinement `"global"`, but an adapter runs one `HOME` per
+            workspace, so repeating that word would claim something about other
+            workspaces that is not true.
+        edits:
+          type: array
+          maxItems: 50
+          description: The harness entries this refinement touched — names only.
+          items:
+            type: object
+            required: [action, kind, id]
+            additionalProperties: false
+            properties:
+              action: {type: string, minLength: 1, maxLength: 200}
+              kind: {type: string, minLength: 1, maxLength: 200}
+              id: {type: string, minLength: 1, maxLength: 200}
+        summary:
+          type: string
+          maxLength: 500
+          description: >
+            Supporting detail for the human sentence. Bounded for the same
+            disclosure reason the edits are: an unbounded summary is the harness
+            text reaching the channel under a friendlier name.
+        rollbackId:
+          type: string
+          maxLength: 200
+          description: >
+            D3 — recorded on the row and in the audit trail, with **no channel
+            affordance promised**. What a rewind should look like to a room is an
+            open question; storing the id keeps the cheap half (an operator can
+            answer "can this be undone, and by what id") without shipping a
+            half-answer that would be harder to withdraw than to add.
+
     EditMessageRequest:
       type: object
       required: [body]
@@ -7727,6 +8049,90 @@ components:
         body:
           type: string
           minLength: 1
+        stream:
+          $ref: "#/components/schemas/StreamEdit"
+
+    StreamEdit:
+      type: object
+      description: >
+        #1130 전제① — marks this PATCH as a slice of a growing answer rather than
+        a human revising what they already said. Present only for streaming
+        producers. With it, `body` is the whole text so far (never a delta), the
+        response leaves `editedAtMs` null and `state` at `sent`, the message
+        keeps its original `seq`, and the realtime frame is the usual
+        `message.edited` carrying the whole body — so a client renders a slice
+        without re-reading anything.
+      required: [rev, final]
+      additionalProperties: false
+      properties:
+        rev:
+          type: integer
+          format: int64
+          minimum: 1
+          description: >
+            The writer's own monotonic revision, starting at 1. Not a `seq`: it
+            orders one message's slices and lives in that message's server-owned
+            `props["momo.stream"]`. A `rev` that is not strictly greater than the
+            stored one is accepted as a 200 no-op — nothing is written, published
+            or audited — which is the honest answer to both a replayed slice and
+            one overtaken by its own successor. A value below 1 is a 400.
+        final:
+          type: boolean
+          description: >
+            True on the last slice. Clears `props["momo.stream"].streaming` and
+            is the point at which the single `message.streamed` audit row is
+            written — one per assembled message, not one per slice.
+        outcome:
+          type: string
+          enum: [cancelled, failed]
+          description: >
+            ADR-0155 — how the stream ended, when it did not simply finish.
+            Optional and additive: a normal completion omits it (and the key is
+            then absent from `props["momo.stream"]`, not null), so a producer
+            written before this field sends what it always sent and means what it
+            always meant. `cancelled` is a human pressing stop; `failed` is the
+            provider dying mid-answer. In both cases the partial body is left
+            exactly as it stood and clients draw a restrained tail from this
+            value. Only valid together with `final: true` — an outcome on a
+            non-final slice is a 400, because "this is how it ended" and "more is
+            coming" cannot both be true. Any other value is a 400.
+
+    StreamOpen:
+      type: object
+      description: >
+        #1173 — the `stream` block on a send, marking it as the **opening write**
+        of a growing answer. A stream's first write is a POST, not a PATCH (the
+        opening text rides the insert), so without this block a producer that
+        died before its first slice left a half sentence with nothing on it —
+        indistinguishable from an answer the agent chose to end there, and
+        invisible to the close path that could have marked it. With it, the
+        message carries `props["momo.stream"] = {rev: 0, streaming: true}` from
+        its first byte, exactly like one opened in-process, and the first PATCH
+        slice is `rev: 1` as always. Neither field is stored as sent: the marker
+        is server-owned, and these are the producer's declaration of the
+        arithmetic it is about to do — which is why a wrong one is refused
+        instead of silently corrected.
+      required: [rev, streaming]
+      additionalProperties: false
+      properties:
+        rev:
+          type: integer
+          format: int64
+          enum: [0]
+          description: >
+            Must be `0` — the floor the strictly-greater rule already stands on,
+            so a message that never streamed and one that just opened read the
+            same. Any other value is a 400: the server would write `0` anyway,
+            and a producer numbering its slices from a different floor would be
+            keeping a revision ledger the row never held.
+        streaming:
+          type: boolean
+          enum: [true]
+          description: >
+            Must be `true`. A send opens a stream; only the final PATCH slice
+            closes one. `false` is a 400 rather than a no-op, because a producer
+            that believed it had posted a finished answer would never send the
+            slice that closes the message the channel is actually showing.
 
     ReactionDelta:
       type: object
@@ -7756,6 +8162,63 @@ components:
           items:
             type: string
             format: uuid
+
+    PinnedMessage:
+      type: object
+      description: >
+        One entry of a channel's pin list — the pin plus enough of the message to
+        draw a header row without a second read. A pin's whole point is a message
+        that is not on screen, so an ids-only projection would force a lookup that
+        misses. `seq` is the message's own; pinning never mints one.
+      required:
+        [messageId, channelId, seq, authorMemberId, type, state, createdAtMs, pinnedBy, pinnedAtMs]
+      properties:
+        messageId: {type: string, format: uuid}
+        channelId: {type: string, format: uuid}
+        seq: {type: integer, format: int64}
+        authorMemberId: {type: string, format: uuid}
+        type: {type: string}
+        state: {type: string}
+        body:
+          type: string
+          nullable: true
+        createdAtMs: {type: integer, format: int64}
+        pinnedBy:
+          type: string
+          format: uuid
+          description: >
+            Where the pin came from. A pin is the channel's fact, not the
+            pinner's — any channel member may unpin, including one who did not
+            pin it. This field grants nothing.
+        pinnedAtMs: {type: integer, format: int64}
+
+    PinDelta:
+      type: object
+      required: [action, messageId, channelId, changed]
+      properties:
+        action:
+          type: string
+          enum: [pinned, unpinned]
+        messageId: {type: string, format: uuid}
+        channelId: {type: string, format: uuid}
+        changed:
+          type: boolean
+          description: >
+            false when the message was already in the requested state. The call
+            still succeeded — pin and unpin are idempotent — but nothing was
+            recorded and nothing was published.
+        pinned:
+          allOf:
+            - $ref: "#/components/schemas/PinnedMessage"
+          description: Present on an effective pin only; absent on unpin and on a no-op.
+
+    PinList:
+      type: object
+      required: [pins]
+      properties:
+        pins:
+          type: array
+          items: {$ref: "#/components/schemas/PinnedMessage"}
 
     CreateAttachmentUploadRequest:
       type: object
@@ -7832,6 +8295,22 @@ components:
           type: string
           format: uuid
           description: Thread root for a reply; omitted for top-level messages.
+        replyToId:
+          type: string
+          format: uuid
+          description: >
+            ADR-0148 — the message this one quotes; omitted when it quotes
+            nothing. Present on every projection (send echo, history, replies)
+            and independent of `rootId`.
+        replyTo:
+          allOf:
+            - $ref: "#/components/schemas/QuotedMessage"
+          description: >
+            The quoted message, resolved at read time. Present on history and
+            thread-replies rows whose `replyToId` resolves; omitted from the
+            send response, which echoes the write rather than the conversation
+            around it. Never a stored snapshot — an edit of the original shows
+            through here and a deletion arrives as a tombstone.
         seq:
           type: integer
           format: int64
@@ -7888,6 +8367,72 @@ components:
             are never included; download bytes through the authenticated content proxy.
         thread:
           $ref: "#/components/schemas/ThreadRollup"
+        runEnded:
+          type: boolean
+          enum: [true]
+          description: >
+            ADR-0155 방어 렌더링의 durable한 절반 (#1166). Present, and only ever
+            `true`, on a page read (history, thread replies) whose row is still
+            marked `momo.stream.streaming: true` while the `run_id` in its props
+            names an agent run that has reached a terminal status. A reader that
+            sees it draws the same "응답이 끊김" tail a closed stream's `outcome`
+            would have drawn, so a closing PATCH that never landed survives a
+            reload instead of dressing a half answer as a finished one.
+
+            **Omitted otherwise — never `false`.** Absence covers three
+            different silences (this message never streamed, its stream is
+            already closed and self-describing, or the run is not over), and a
+            client must not read any of them as an ending. Optional and
+            additive: a client that ignores the key behaves exactly as it did
+            before the key existed.
+
+            Never present on the send echo, on an edit/stream response, or on a
+            realtime `message.new`/`message.edited` frame — those describe a
+            write, and a connected client learns a run's ending from its
+            terminal `agent.status` frame.
+
+    QuotedMessage:
+      type: object
+      required: [id, seq, authorMemberId, type, state]
+      description: >
+        The quoted message a client draws above a reply (ADR-0148). A reference
+        resolved on every read, never a copy: editing the original changes what
+        this says, and deleting it leaves a tombstone with no `body` at all. The
+        author is named by id only, like every other row in the response — the
+        client resolves it against the roster it already holds.
+      properties:
+        id:
+          type: string
+          format: uuid
+        seq:
+          type: integer
+          format: int64
+        authorMemberId:
+          type: string
+          format: uuid
+        type:
+          type: string
+          enum: [text, tool_call, tool_result, diff, artifact, approval_request, system]
+        body:
+          type: string
+          description: Omitted on a tombstone, whose text no longer exists.
+        state:
+          type: string
+          enum: [sent, edited, deleted, failed]
+        editedAtMs:
+          type: integer
+          format: int64
+        deletedAtMs:
+          type: integer
+          format: int64
+          description: Present when the quoted message has been deleted.
+        quotesAnother:
+          type: boolean
+          description: >
+            The quoted message itself quotes something. A marker only — the
+            inner target's id is deliberately absent, because quoting is drawn
+            one layer deep and a second id is all anyone needs to build a
+            staircase. Omitted when false.
 
     MessageAttachment:
       type: object
@@ -8055,64 +8600,122 @@ components:
 
     # ---- Approvals (snake_case wire contract) ---------------------------------------
     ApprovalProjection:
+      description: >
+        One row of the approval inbox, as `GET .../approvals` returns it.
+
+
+        NOTATION (SRV-B5c): the keys below are camelCase because that is what
+        the Rust server — the deployed one — emits (`#[serde(rename_all =
+        "camelCase")]` on `ApprovalDto`). The Swift server, which is still in
+        the tree, maps the same fields to snake_case through explicit
+        `CodingKeys` (`DTOs.swift:650`), so while both exist ONE of them does
+        not match this schema. The spec follows the deployed server.
+
+
+        Consequence a reader should know: `scripts/verify_openapi_contract.sh`
+        boots the **Swift** e2e stack, so its samples are the snake_case ones.
+        Its strict closed-object check therefore validates the shape this
+        schema no longer describes. Repointing that gate at `server-rust` is
+        tracked as harness hygiene, not fixed here.
       type: object
       required:
         - id
-        - workspace_id
-        - run_id
-        - channel_id
-        - requested_by
-        - action_type
+        - workspaceId
+        - runId
+        - channelId
+        - requestedBy
+        - actionType
         - payload
         - status
+        - createdAtMs
       properties:
         id:
           type: string
           format: uuid
-        workspace_id:
+        workspaceId:
           type: string
           format: uuid
-        run_id:
+        runId:
           type: string
           format: uuid
-        channel_id:
+        channelId:
           type: string
           format: uuid
-        request_message_id:
+        requestMessageId:
           type: string
           format: uuid
           description: The approval_request message, when one exists.
-        requested_by:
+        requestedBy:
           type: string
           format: uuid
           description: The requesting agent member.
-        on_behalf_of:
+        onBehalfOf:
           type: string
-          description: Delegation subject, projected from `payload.on_behalf_of`.
-        action_type:
+          description: >
+            Delegation subject, projected from `payload.on_behalf_of`. The Rust
+            server does not currently emit this field at all.
+        actionType:
           type: string
-          description: e.g. `tool_call`, `deploy`, `spend`.
-        payload: {}
+          description: >
+            e.g. `tool_call`, `deploy`, `spend`. `work.spawn` marks a
+            work-control approval, whose decision settles the linked
+            `work_control` row instead of resuming an agent turn.
+        payload:
+          type: object
+          additionalProperties: true
+          description: >
+            Free-form approval payload. Two keys are contractual for the spawn
+            card (ADR-0125 D6-A, #1114) and absent everywhere else:
+
+
+            * `execution.host_candidates[]` — the hosts this approval offers,
+              each `{host_id, display_name, host_type, tier, scope, online,
+              selectable, unavailable_reason}`. `tier` is `local` | `remote` |
+              `cloud`; a `cloud` row is always `selectable: false` with
+              `unavailable_reason: "t3_disabled"` while ADR-0136 keeps momo Cloud
+              off. Unselectable rows are listed with their reason rather than
+              hidden.
+
+            * `execution.default_host_id` — the pre-selected host (online local
+              first, then remote), or null when nothing is eligible.
+
+
+            The picker's answer is sent back as `ApprovalDecisionRequest.hostId`.
+            No host-local path, environment, process state, or credential ever
+            appears here.
         status:
           type: string
           enum: [pending, approved, rejected, expired, cancelled]
-        estimated_micro_usd:
+        estimatedMicroUsd:
           type: integer
           format: int64
-          description: Projected from payload when present as a number or numeric string.
-        is_reversible:
+          description: >
+            Projected from payload when present as a number or numeric string.
+            Not emitted by the Rust server: its one executable tool has no price
+            table to quote.
+        isReversible:
           type: boolean
-        decided_by:
+          description: >
+            Not emitted by the Rust server. An ABSENT value means "unknown" and
+            must never be read as "reversible".
+        decidedBy:
           type: string
           format: uuid
-        decided_at_ms:
+        decidedAtMs:
           type: integer
           format: int64
-        decision_reason:
+        decisionReason:
           type: string
-        expires_at_ms:
+        expiresAtMs:
           type: integer
           format: int64
+        createdAtMs:
+          type: integer
+          format: int64
+          description: >
+            Always present on the Rust server. Neither the Swift DTO nor this
+            schema carried it before SRV-B5c, which under the gate's
+            closed-object rule made every Rust approval row undeclared drift.
 
     # ---- Plugin registry and delegated tool policy --------------------------
     InstallPluginRequest:
@@ -8507,6 +9110,17 @@ components:
           type: string
           format: uuid
           description: Client-generated idempotency key for the decision.
+        hostId:
+          type: string
+          format: uuid
+          description: >
+            ADR-0125 D6-A. The work host the approver chose from the card's
+            picker, for an approval whose payload carries an `execution` object
+            (a `work.spawn` control or a `work.session.spawn` tool call). Omit to
+            accept `execution.default_host_id`; sending it on an approval that
+            offers no picker is a 400, and sending one outside
+            `execution.host_candidates[].selectable` is a 403. Not part of the
+            idempotency key: a replayed decision answers the original receipt.
 
     ApprovalDecisionReceipt:
       type: object
@@ -8515,19 +9129,29 @@ components:
         approved/rejected; expected failures reuse this shape with a
         diagnostic status (e.g. idempotency_conflict, forbidden, not_found,
         bad_request, expired, or the approval's current status on a 409).
-      required: [approval_id, status]
+
+
+        NOTATION (SRV-B5c): camelCase, matching the deployed Rust server. See
+        `ApprovalProjection` for the Swift dual-notation caveat — and note this
+        receipt is additionally stored verbatim in `approval_decision.receipt`
+        and replayed on retry, so a notation change here rewrites what an
+        idempotent retry returns.
+      required: [approvalId, status, decidedAtMs]
       properties:
-        approval_id:
+        approvalId:
           type: string
           format: uuid
         status:
           type: string
-        decided_by:
+        decidedBy:
           type: string
           format: uuid
           description: Absent for system-side outcomes such as expiry.
-        decided_at_ms:
+        decidedAtMs:
           type: integer
           format: int64
-        decision_reason:
+          description: >
+            Always present on the Rust server (the field is not optional on
+            `ApprovalDecisionReceipt`), including on the refusal shapes.
+        decisionReason:
           type: string

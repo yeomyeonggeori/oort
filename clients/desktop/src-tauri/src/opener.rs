@@ -126,6 +126,7 @@ mod tests {
         for url in [
             "http://github.com/x/y",
             "file:///etc/passwd",
+            "oort://join?code=1",
             "momo://join?code=1",
             "javascript:alert(1)",
             "https://example.com/a b",

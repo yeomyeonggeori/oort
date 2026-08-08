@@ -1,0 +1,97 @@
+# oort prime adapter manifest — the env contract, in one place.
+#
+# The hermes adapter's `plugin.yaml` is a Hermes *plugin* manifest because the
+# gateway loads it. Nothing loads this one: prime-agent has no plugin registry to
+# announce ourselves to, so this file is the declaration a human and an
+# orchestrator read — what the adapter needs, what is optional, and what each
+# value must never be. `adapter.py` is the only code that reads any of it.
+name: prime
+label: prime
+kind: agent-harness-adapter
+version: 0.1.0
+description: >
+  Relays a containerised `prime-agent --mode rpc` session into an oort channel
+  over REST only. Streaming answers are one growing message (#1152/#1173),
+  endings carry an outcome (ADR-0155), and harness self-modification becomes a
+  quiet `system` line (ADR-0158 D1~D4).
+entrypoint: adapter.py
+image: oort-prime-adapter:0.7.0
+harness:
+  package: prime-agent
+  version: 0.7.0
+  sha256: 88b6578518c72cd51a825bc80f28e0fef9a64c67de4a7d6fd7afd7ca1b34da0b
+  source: https://github.com/PrimeIntellect-ai/prime-agent/releases
+
+# `OORT_PRIME_<NAME>` is read first, `MOMO_PRIME_<NAME>` second (ADR-0152 D2-3:
+# new surfaces are spelled oort, old spellings keep working).
+requires_env:
+  - name: OORT_PRIME_API_URL
+    label: oort REST API base
+    description: e.g. http://127.0.0.1:8080. Plaintext to a non-loopback host is refused by default.
+  - name: OORT_PRIME_WORKSPACE_ID
+    label: Workspace ID
+    description: >
+      Workspace UUID. Also names the per-workspace HOME and TMPDIR inside the
+      container, which is what keeps one workspace's harness memory out of
+      another's (#1130 ③).
+  - name: OORT_PRIME_CHANNEL_ID
+    label: Channel ID
+    description: Channel UUID this session relays into.
+  - name: OORT_PRIME_AGENT_TOKEN
+    label: oort bearer
+    description: >
+      An oort credential, never a provider key (ADR-0004). It must reach
+      POST .../channels/{ch}/messages and PATCH .../messages/{id}; see the
+      README's "Which credential" for why an agent bearer alone is not enough
+      today.
+
+optional_env:
+  - name: OORT_PRIME_RUN_ID
+    label: Agent run ID
+    description: >
+      ADR-0158 D5. Sent as the `runId` request field and mirrored into
+      props.run_id. It is what lets the server close a stream this process
+      abandoned. A server that has not landed D5 answers 400 by name.
+  - name: OORT_PRIME_SEND_RUN_ID_FIELD
+    label: Send the runId field
+    description: Set 0 to carry the run in props only, on a server without D5.
+  - name: OORT_PRIME_AGENT_HANDLE
+    label: Agent handle
+    description: Used in the refinement announcement's sentence. Default `prime`.
+  - name: OORT_PRIME_ISOLATION
+    label: Workspace isolation
+    description: >
+      `full` (default, HOME+TMPDIR). `home` and `off` exist only for the tenancy
+      red proof and refuse to run without OORT_PRIME_ALLOW_UNSAFE_ISOLATION=1.
+  - name: OORT_PRIME_ALLOW_UNSAFE_ISOLATION
+    label: Allow reduced isolation
+    description: Red-proof lever. Never set in a deployment.
+  - name: OORT_PRIME_ALLOW_INSECURE_HTTP
+    label: Allow private-network plaintext
+    description: Set 1 only when http is required on a trusted non-loopback network. Fail-closed by default.
+  - name: OORT_PRIME_MOCK_PROVIDER
+    label: Loopback mock provider
+    description: >
+      Test/build only. Writes a credential-free models.json pointing at the
+      bundled loopback mock. A deployment establishes its real prime login
+      inside the container instead.
+  - name: OORT_PRIME_UI_POLICY
+    label: Approval auto-answer
+    description: >
+      approve | deny | cancel | none (default). `none` leaves a dialog
+      unanswered on purpose; see the README's "Approval decisions".
+  - name: OORT_PRIME_FLUSH_CHARS
+    label: Delta flush size
+    description: Characters buffered before a slice is written. Default 220.
+  - name: OORT_PRIME_FLUSH_INTERVAL
+    label: Delta flush interval
+    description: Seconds before a partial buffer is flushed anyway. Default 0.8.
+  - name: OORT_PRIME_HARNESS_STATE_PATH
+    label: Harness state file
+    description: >
+      Override for the file the drift observer watches. Defaults to prime's own
+      resolution ($PRIME_AGENT_CODING_AGENT_DIR else $HOME/.prime/agent) plus
+      /harness/harness_state.json.
+  - name: OORT_PRIME_MODEL
+    label: Model
+    description: Passed to `prime-agent --model`.

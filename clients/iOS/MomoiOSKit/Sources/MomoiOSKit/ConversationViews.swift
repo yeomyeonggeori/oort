@@ -145,7 +145,7 @@ struct IOSChannelHomeView: View {
                 ContentUnavailableView {
                     Label("No conversations yet", systemImage: "bubble.left.and.bubble.right")
                 } description: {
-                    Text("Create a channel or start a direct message in momo on Mac.")
+                    Text("Create a channel or start a direct message in oort on Mac.")
                 } actions: {
                     Button("Refresh conversations") { Task { await model.refresh() } }
                 }
@@ -868,7 +868,7 @@ private struct IOSHuddleSheet: View {
                 ContentUnavailableView(
                     "Huddle unavailable",
                     systemImage: "waveform.slash",
-                    description: Text("This momo server is not configured for huddles.")
+                    description: Text("This oort server is not configured for huddles.")
                 )
             }
         }

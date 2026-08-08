@@ -1,4 +1,4 @@
-# momo — 로컬 기동 가이드 (RUN.md)
+# oort — 로컬 기동 가이드 (RUN.md)
 
 > **이 환경의 현실 (반드시 먼저 읽기).**
 > 로컬 검증 기준으로 **Swift 6.2.3, Docker Desktop, PostgreSQL 18 client(psql)는 있다. hermes 게이트웨이는 없다.**
@@ -12,7 +12,7 @@
 > 떠 있어야 한다. 이 둘은 `infra/docker-compose.yml`로 한 번에 띄운다.
 > docker/psql이 없는 머신에서는 빌드/정적 점검 단계까지만 수행 가능하다.
 
-이 문서는 momo v0를 **로컬에서 처음부터 끝까지 기동**하는 순서를 정리한다.
+이 문서는 oort v0를 **로컬에서 처음부터 끝까지 기동**하는 순서를 정리한다.
 정본 스펙은 [`research/07-deepdive/04-self-build-l4-spec.md`](../research/07-deepdive/04-self-build-l4-spec.md),
 정본 스키마는 [`schema_v0.sql`](../schema_v0.sql), 데모 타깃은
 [`research/07-deepdive/05-agent-native-experiences.md`](../research/07-deepdive/05-agent-native-experiences.md) 참고.
@@ -172,25 +172,25 @@ cp infra/.env.example .env
 | `LIVEKIT_PORT` / `LIVEKIT_RTC_TCP_PORT` | compose `huddle` profile | LiveKit signaling/HTTP(기본 7880)와 TCP RTC fallback(기본 7881)의 호스트 포트. |
 | `LIVEKIT_RTC_UDP_START` / `LIVEKIT_RTC_UDP_END` | compose `huddle` profile | 컨테이너의 제한된 UDP media range 50000~50100에 대응하는 같은 크기의 호스트 포트 범위. 기본 50000~50100. |
 | `EVE_PORT` | compose `eve` profile | eve HTTP/health 포트. 기본 28140이며 verifier는 실행 전 28140~28142 선점을 검사한다. |
-| `EVE_WORLD_DB` / `EVE_WORLD_USER` / `EVE_WORLD_PASSWORD` | compose `eve` profile | momo PG 클러스터 안의 별도 `eve_world` DB와 전용 NOBYPASSRLS role. 비밀번호는 URL-safe random text를 env/secret manager로 주입한다. |
-| `EVE_MOMO_BASE_URL` | compose `eve` profile | eve 컨테이너가 접근하는 momo API origin. 컨테이너 안에는 `MOMO_BASE_URL`로 주입된다. dev 기본은 `host.docker.internal:8080`, prod 기본은 `api:8080`. |
+| `EVE_WORLD_DB` / `EVE_WORLD_USER` / `EVE_WORLD_PASSWORD` | compose `eve` profile | oort PG 클러스터 안의 별도 `eve_world` DB와 전용 NOBYPASSRLS role. 비밀번호는 URL-safe random text를 env/secret manager로 주입한다. |
+| `EVE_MOMO_BASE_URL` | compose `eve` profile | eve 컨테이너가 접근하는 oort API origin. 컨테이너 안에는 `MOMO_BASE_URL`로 주입된다. dev 기본은 `host.docker.internal:8080`, prod 기본은 `api:8080`. |
 | `MOMO_WORKSPACE_ID` / `MOMO_AGENT_MEMBER_ID` | compose `eve` profile | MOMO-534 채널 프리셋이 poll할 workspace와 `member(kind=agent)` 식별자. |
-| `MOMO_AGENT_TOKEN` / `MOMO_CHANNEL_ROUTE_TOKEN` | compose `eve` profile | 각각 momo gateway 전용 agent bearer와 eve `/poll` 보호 bearer. 코드·로그·world DB에 넣지 않고 env로만 주입한다. |
-| `EVE_AI_GATEWAY_API_KEY` | compose `eve` profile | 선택한 eve model provider credential. 컨테이너에는 `AI_GATEWAY_API_KEY`로만 주입하며 momo는 소유하거나 전달하지 않는다. |
+| `MOMO_AGENT_TOKEN` / `MOMO_CHANNEL_ROUTE_TOKEN` | compose `eve` profile | 각각 oort gateway 전용 agent bearer와 eve `/poll` 보호 bearer. 코드·로그·world DB에 넣지 않고 env로만 주입한다. |
+| `EVE_AI_GATEWAY_API_KEY` | compose `eve` profile | 선택한 eve model provider credential. 컨테이너에는 `AI_GATEWAY_API_KEY`로만 주입하며 oort는 소유하거나 전달하지 않는다. |
 | `AGENT_PROVIDER_MODE` | 서버, worker | `local-mock` / `internal-host-mock` / `external-hermes`. staging/prod/internal-host는 `external-hermes`만 허용. |
 | `AGENT_MODEL` | 서버, worker | 김인턴 provider model label(기본 `hermes-agent`). |
 | `AGENT_HANDLE` / `AGENT_DISPLAY_NAME` | 서버, macOS 표시 | status surface 표시용 agent identity(기본 `kim-intern` / `김인턴`). |
 | `HERMES_BASE_URL` | 서버, worker | hermes OpenAI 호환 게이트웨이 베이스(`/v1`). 서버는 health/status projection에 redacted label만 노출. |
 | `HERMES_API_KEY` | 서버, worker | hermes Bearer 토큰. health/status/log/diagnostics에는 원문 노출 금지. |
 | `AGENT_GATEWAY_MODE` | 서버, worker | `worker`(기본) 또는 `gateway`. `gateway`면 `@hermes` mention이 AgentWorker provider call 대신 Hermes native platform adapter로 전달된다. |
-| `MOMO_AGENT_TOKEN` | Hermes adapter, AgentWorker work controls | Pairing/credential API에서 1회 발급하는 agent-scoped momo bearer. adapter는 `~/.momo/hermes-gateway.env`, worker는 process-local secret env에만 저장하며 provider OAuth token과 별개다. DB/job payload/log에 원문을 넣지 않는다. |
+| `MOMO_AGENT_TOKEN` | Hermes adapter, AgentWorker work controls | Pairing/credential API에서 1회 발급하는 agent-scoped oort bearer. adapter는 `~/.momo/hermes-gateway.env`, worker는 process-local secret env에만 저장하며 provider OAuth token과 별개다. DB/job payload/log에 원문을 넣지 않는다. |
 | `AGENT_GATEWAY_SECRET` | 서버 | ADR-0101 이관 회귀검증에만 쓰는 deprecated callback 공유 시크릿. 기본 거부되며 아래 flag가 1인 경우에만 수용한다. |
 | `MOMO_ALLOW_LEGACY_GATEWAY_SECRET` | 서버, local alpha runner | `1`일 때만 `AGENT_GATEWAY_SECRET` 병행 수용. 기본 `0`; MOMO-338 adapter는 이 경로를 사용하지 않는다. |
 | `EXTERNAL_AGENT_PROVIDER_ENV_FILE` | `scripts/verify_external_agent_provider.sh` | 선택. 외부 runtime provider credentials만 담은 untracked env 파일. `.env.worktree`의 local stack ports를 유지하면서 provider secret만 override할 때 사용. |
 
-Codex OAuth access/refresh token은 momo 환경변수가 아니다. External runtime
+Codex OAuth access/refresh token은 oort 환경변수가 아니다. External runtime
 provider가 Codex OAuth를 사용하더라도 token exchange, storage, refresh,
-unlink는 provider 내부에서만 처리하고, momo app/API/DB/diagnostics/local gate는
+unlink는 provider 내부에서만 처리하고, oort app/API/DB/diagnostics/local gate는
 그 토큰을 받지 않는다. 정본 boundary는
 [`docs/adr/0004-codex-oauth-hermes-provider-boundary.md`](adr/0004-codex-oauth-hermes-provider-boundary.md)다.
 
@@ -214,7 +214,7 @@ unlink는 provider 내부에서만 처리하고, momo app/API/DB/diagnostics/loc
 | `MOMO_S3_FORCE_PATH_STYLE` | 서버 | `0` | `1`이면 `<endpoint>/<bucket>/<key>` path-style. compose MinIO에서는 필수이며 AWS/R2/B2는 제공자 endpoint 정책에 맞춘다. |
 | `MOMO_DRIVE_SA_KEY_PATH` | 서버 | (미설정) | repo 밖 SA JSON 파일 경로. 키 바이트는 로그·응답·DB에 저장하지 않는다. |
 | `MOMO_DRIVE_SHARED_DRIVE_ID` | 서버 | (미설정) | 경로 C가 접근할 공유 드라이브 1개의 ID. 미설정이면 `tools/call`이 fail-closed 오류를 반환한다. |
-| `PUBLIC_BASE_URL` | 서버 | (요청 origin) | momo-hosted MCP 상대 endpoint를 descriptor의 절대 URL로 조립할 public HTTPS origin. localhost HTTP만 개발 fallback 허용. |
+| `PUBLIC_BASE_URL` | 서버 | (요청 origin) | oort-hosted MCP 상대 endpoint를 descriptor의 절대 URL로 조립할 public HTTPS origin. localhost HTTP만 개발 fallback 허용. |
 | `CENT_CONNECTION_TOKEN_TTL_SECONDS` | 서버 | `300` | `/v1/auth/realtime-token` Centrifugo connection JWT TTL. dev 값은 60~1800초로 clamp된다. |
 | `RELAY_DATABASE_URL` | relay/worker | (= `DATABASE_URL`) | relay/worker 전용 **BYPASSRLS `momo_relay`** 접속(§2.2/§10.1). 설정 시 우선. |
 | `RELAY_POSTGRES_USER` / `RELAY_POSTGRES_PASSWORD` | relay/worker | (= `POSTGRES_*`) | 위와 동일 목적의 분리 자격증명. |
@@ -231,7 +231,7 @@ unlink는 provider 내부에서만 처리하고, momo app/API/DB/diagnostics/loc
 | `MEMORY_EMBEDDING_MODEL` | worker/api | `text-embedding-3-small` | external-hermes `/embeddings` 모델. local-mock은 이 값과 무관한 결정적 384차원 벡터를 사용한다. |
 | `MEMORY_EMBEDDING_POLL_INTERVAL_MS` | worker | `5000` | 임베딩 대기 항목 재탐색 주기(최소 100ms). |
 | `MEMORY_EMBEDDING_BATCH_SIZE` | worker | `50` | 한 poll에서 임베딩할 최대 항목 수(1..200). |
-| `MOMO_API_URL` | worker | `http://localhost:8080` | `work_*` tool이 기존 `/v1/workspaces/:ws/work-controls`를 호출할 momo API origin. |
+| `MOMO_API_URL` | worker | `http://localhost:8080` | `work_*` tool이 기존 `/v1/workspaces/:ws/work-controls`를 호출할 oort API origin. |
 | `MOMO_WORK_HOST_ID` | worker/gateway adapter | (미설정) | ADR-0125 host registry target UUID. worker의 `work_*` 및 gateway의 `work.*`는 이 호스트를 provider 인자 밖에서 주입한다. UUID가 없거나 잘못되면 worker는 호출을 거부하고 gateway adapter는 work tool 4종을 provider에 노출하지 않는다. |
 | `MAX_CONSECUTIVE_AUTO` | worker | `3` | 루프가드 G2(연속 자동응답). |
 | `MAX_STEPS` | worker | `12` | 루프가드 G3(턴당 tool-call 상한, 스키마 50의 v0 오버라이드). |
@@ -255,7 +255,7 @@ unlink는 provider 내부에서만 처리하고, momo app/API/DB/diagnostics/loc
 > `tauri dev`는 devUrl(`http://localhost:5173`)을 그대로 쓴다.
 > **와일드카드 금지** — `*`, `https://*.example.com`, 리터럴 `null`, 경로/트레일링 슬래시가
 > 붙은 값은 부팅 시 거부되고 warning 로그로 알린다(오타는 허용범위를 좁힐 뿐 넓히지 않는다).
-> **credentials off** — momo는 쿠키를 발급하지 않고 Authorization 베어러만 쓰므로
+> **credentials off** — oort는 쿠키를 발급하지 않고 Authorization 베어러만 쓰므로
 > `Access-Control-Allow-Credentials`를 절대 보내지 않는다(클라는 fetch 기본값
 > `credentials: 'omit'` + 토큰 헤더). 따라서 `Allow-Origin: *` + credentials 조합은 표현 불가다.
 > 허용되지 않은 Origin은 403이 아니라 **헤더 없이 통과**시킨다 — 브라우저는 차단하고,
@@ -282,7 +282,7 @@ unlink는 provider 내부에서만 처리하고, momo app/API/DB/diagnostics/loc
 `staging`/`prod`/`internal-host`에서 `local-mock`/`internal-host-mock`, localhost/mock URL,
 placeholder key가 보이면 MomoServer/AgentWorker boot와 `scripts/prod_env_preflight.sh`가 fail-fast한다.
 `external-hermes`의 non-loopback `http://...` URL도 항상 fail-fast한다. loopback HTTP는 local-only
-opt-in이며, Hermes local process가 GPT/OpenAI credential을 소유하고 momo에는 Hermes-facing bearer만
+opt-in이며, Hermes local process가 GPT/OpenAI credential을 소유하고 oort에는 Hermes-facing bearer만
 전달하는 개발 루프에서만 쓴다. provider-neutral smoke 계약은
 [`docs/external-agent-provider/README.md`](external-agent-provider/README.md), local loopback 특화 계약은
 [`docs/external-agent-provider/local-hermes-gpt.md`](external-agent-provider/local-hermes-gpt.md)다.
@@ -336,16 +336,16 @@ AGENT_MODEL=gpt-via-local-hermes \
 scripts/local_gate.sh --profile external-agent-provider
 ```
 
-Credentialed smoke에 필요한 momo-side env는 위 네 가지
+Credentialed smoke에 필요한 oort-side env는 위 네 가지
 `AGENT_PROVIDER_MODE`, `HERMES_BASE_URL`, `HERMES_API_KEY`, `AGENT_MODEL`뿐이다. local loopback은
 여기에 `MOMO_ENV=local`, `AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1`이 추가로 필요하다.
 credentialed PASS에서는 `/v1/agent-runtime/status`가 `available`이고 `degradedReason`이 비어 있어야
 한다. 실패 evidence는 redacted category/reason만 남긴다.
 provider가 Codex OAuth를 내부적으로 쓰는 경우에도 `CODEX_OAUTH_TOKEN`,
 `CODEX_OAUTH_REFRESH_TOKEN`, `CODEX_ACCESS_TOKEN`, `CODEX_REFRESH_TOKEN`,
-`OPENAI_OAUTH_TOKEN`, `OPENAI_OAUTH_REFRESH_TOKEN`, `OPENAI_API_KEY`류 값은 momo verifier에 넘기지
+`OPENAI_OAUTH_TOKEN`, `OPENAI_OAUTH_REFRESH_TOKEN`, `OPENAI_API_KEY`류 값은 oort verifier에 넘기지
 말고 provider host secret으로만 설정한다. verifier는 알려진 Codex/OpenAI OAuth
-token/API key env var가 momo smoke process에 있으면 credential-boundary 오류로 fail-fast한다.
+token/API key env var가 oort smoke process에 있으면 credential-boundary 오류로 fail-fast한다.
 
 `scripts/verify_external_agent_provider.sh`는 먼저 external env contract를 검사한다.
 `AGENT_PROVIDER_MODE`가 없거나 `external-hermes`가 아니면 mock 기본 환경으로 보고
@@ -358,15 +358,15 @@ MomoServer/AgentWorker/OutboxRelay boot, `/v1/agent-runtime/status` redaction, v
 
 #### 2.1.2 Hermes gateway native platform mode
 
-MOMO-325은 AgentWorker SSE 경로와 별개로 Hermes gateway가 momo를 Slack/Telegram 같은
+MOMO-325은 AgentWorker SSE 경로와 별개로 Hermes gateway가 oort를 Slack/Telegram 같은
 messaging platform으로 인식하는 native adapter path를 추가한다. 이 경로도 모든 사용자 가시
-write는 **momo REST -> Postgres -> outbox**로만 들어오며, adapter는 DB/Centrifugo에 직접 쓰지
+write는 **oort REST -> Postgres -> outbox**로만 들어오며, adapter는 DB/Centrifugo에 직접 쓰지
 않는다.
 
 Dogfood 온보딩 순서는 고정이다. 에이전트는 migration/local-alpha 시드로 생기지 않는다.
 
 1. `scripts/momo hermes-gateway-init`으로 secret 없는 pre-pairing env 템플릿을 만든다.
-2. momo 앱의 **Members + → 에이전트 초대**에서 Hermes pairing을 완료하고 채널에 초대한다.
+2. oort 앱의 **Members + → 에이전트 초대**에서 Hermes pairing을 완료하고 채널에 초대한다.
 3. pairing surface에서 scoped credential을 1회 발급한다.
 4. 발급 원문과 paired member/channel ID를 `~/.momo/hermes-gateway.env`에 기록한다.
 5. `scripts/momo hermes-gateway-install-plugin` 후 `scripts/momo hermes-gateway-status`로 확인한다.
@@ -406,7 +406,7 @@ transaction에서 `agent_profile`을 함께 만든다. 별도 생성/갱신은 a
 workspace owner/admin이 `GET/PUT /v1/workspaces/{workspace}/agents/{agent}/profile`로 수행한다.
 instructions는 UTF-8 8KB, triggers는 `mention=true` 고정+미집행 schedule 예약이며 자격증명 형태
 필드는 재귀적으로 거부된다. 1번은 **채널을 자동 추가하지 않는다**. 2번은 기존 human/agent 공용 membership 경로를
-그대로 재사용한다. 3번의 원문 bearer는 provider OAuth/API key가 아니라 momo-facing agent
+그대로 재사용한다. 3번의 원문 bearer는 provider OAuth/API key가 아니라 oort-facing agent
 credential이며 서버에는 sha256만 저장된다. `baseUrl`/`config`에는 Codex/OpenAI OAuth token,
 provider API key, userinfo/query/fragment credential을 넣을 수 없다. non-loopback은 HTTPS만,
 loopback HTTP는 `MOMO_ENV=local AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1`과 명시적 포트가 있을 때만
@@ -453,7 +453,7 @@ adapter/Hermes side env는 `$HOME/.momo/hermes-gateway.env`에 생성된다. pro
 token은 이 파일에 들어가지 않고 Hermes/provider runtime 내부에만 둔다. mock harness는
 `scripts/verify_hermes_gateway_adapter.sh`와 `scripts/local_gate.sh --profile runtime-agent`가
 검증한다. MOMO-326은 real Hermes evidence layer를 추가했다. `--real`은 Hermes CLI,
-plugin install, provider-login marker, momo server 상태를 분리해서 evidence로 남기며,
+plugin install, provider-login marker, oort server 상태를 분리해서 evidence로 남기며,
 사용자가 Hermes 내부에서 provider OAuth/login을 끝낸 뒤에는 다음처럼 실제 1왕복까지 시도한다.
 
 2026-07-12 이전 dogfood DB에서 deterministic 김인턴/Hermes가 이미 시드됐다면 자동 삭제하지
@@ -480,7 +480,7 @@ MOMO_HERMES_PROVIDER_READY=1 scripts/momo hermes-gateway-smoke --real --trigger
 macOS dogfood 앱에서는 초대 전 Hermes member 자체가 존재하지 않으며 roster에도 보이지 않는다.
 멤버 섹션의 `+` 버튼에서 **에이전트 초대**를 선택하고 `@hermes` alias, 표시 이름, endpoint
 label, model label, permission scope, avatar를 확인한다. 앱은 pairing manifest와 invite code를
-생성하고 copy/export affordance를 제공한다. manifest에는 momo-facing connection metadata와
+생성하고 copy/export affordance를 제공한다. manifest에는 oort-facing connection metadata와
 `$HOME/.momo/hermes-gateway.env:MOMO_AGENT_TOKEN` 설정 위치만 들어가며, 토큰 원문이나
 Codex/OpenAI OAuth token, refresh token, provider API key 값은 절대 포함하지 않는다.
 non-loopback `http://...` endpoint는 사용자가 명시적으로 opt-in하지 않으면 초대 완료가 막힌다.
@@ -493,8 +493,8 @@ local/demo fallback과 backend hook 중심이며, production typing fanout은 �
 `에이전트 승인함`은 일반 알림함이 아니라 에이전트가 외부 작업을 수행하기 전에 사람이 확인해야
 하는 approval queue다. Command Center는 실사용 중 필요한 경우에만 여는 진단 surface이며, 일반
 대화는 `#general`, 에이전트 연결/실험은 `#agent-lab`에서 시작한다.
-이 UX는 provider OAuth/token을 momo에 넘기는 절차가 아니다. provider login은 Hermes runtime
-안에서 사용자가 직접 수행하고, momo 앱은 초대/표시/mention entrypoint만 관리한다.
+이 UX는 provider OAuth/token을 oort에 넘기는 절차가 아니다. provider login은 Hermes runtime
+안에서 사용자가 직접 수행하고, oort 앱은 초대/표시/mention entrypoint만 관리한다.
 
 현재 Hermes runtime이 없으면 real CLI/plugin/provider call은
 `runtime-unverified(real hermes gateway missing)`로 남긴다. 정본 문서는
@@ -632,9 +632,9 @@ MOMO-527 이전 구성에서 업그레이드할 때는 새 이미지를 pull한 
 
 ### 3.1 커스텀 에이전트 빌드 환경(eve) 옵트인
 
-momo 설치에는 커스텀 에이전트를 빌드·실행할 수 있는 eve 환경이 동봉된다. 기본 설치는
+oort 설치에는 커스텀 에이전트를 빌드·실행할 수 있는 eve 환경이 동봉된다. 기본 설치는
 기존처럼 PostgreSQL+Centrifugo만 기동하며, `eve` profile을 명시했을 때만 Node 24.4.1
-(digest pin)+eve 0.27.0+MOMO-534 momo 채널 프리셋이 추가된다.
+(digest pin)+eve 0.27.0+MOMO-534 oort 채널 프리셋이 추가된다.
 
 ```sh
 cp infra/.env.example .env
@@ -648,8 +648,8 @@ docker compose --env-file .env -f infra/docker-compose.yml --profile eve stop ev
 ```
 
 `eve-db-roles` one-shot은 같은 PostgreSQL 18 클러스터에 `eve_world` DB와 전용
-`eve_world` NOBYPASSRLS role을 만든다. 이 role에는 momo DB의 테이블·시퀀스·함수 권한을
-부여하지 않으며 eve 컨테이너에는 `WORKFLOW_POSTGRES_URL`만 전달한다. momo의
+`eve_world` NOBYPASSRLS role을 만든다. 이 role에는 oort DB의 테이블·시퀀스·함수 권한을
+부여하지 않으며 eve 컨테이너에는 `WORKFLOW_POSTGRES_URL`만 전달한다. oort의
 `DATABASE_URL`/`RELAY_DATABASE_URL`/DB owner credential은 eve에 전달하지 않는다.
 
 dev/prod compose는 534 프리셋을 read-only로 마운트하고 writable named volume에 staging한
@@ -665,7 +665,7 @@ scripts/verify_eve_profile.sh
 ```
 
 실 provider credential을 사용한 eve 세션 왕복은 `runtime-unverified`다. verifier는 실제 eve
-HTTP runtime과 Postgres world까지만 기동하고, 모델 호출이나 momo gateway job을 만들지 않는다.
+HTTP runtime과 Postgres world까지만 기동하고, 모델 호출이나 oort gateway job을 만들지 않는다.
 
 ### 3.2 음성 허들용 LiveKit 옵트인
 
@@ -1009,7 +1009,7 @@ swift run --package-path workers/AgentWorker AgentWorker
 - hermes `POST /v1/chat/completions`(`stream=true`) SSE 중계 → `agent.partial`/`agent.status` publish.
   비스트리밍 폴백 포함(§6.3). 루프가드 G1~G3 + A2A depth(§3.3/§3.4).
 - **hermes 게이트웨이가 떠 있어야** 에이전트 턴이 실제로 동작(D 데모). `HERMES_BASE_URL`/`HERMES_API_KEY`.
-- `work_*`를 쓰는 worker process에는 해당 agent의 `MOMO_AGENT_TOKEN`, momo API의
+- `work_*`를 쓰는 worker process에는 해당 agent의 `MOMO_AGENT_TOKEN`, oort API의
   `MOMO_API_URL`, host-owned 실행기의 opaque `MOMO_WORK_HOST_ID`가 필요하다. token은
   credential 발급 응답에서 한 번만 얻으며 저장소·DB·로그에 남기지 않는다.
 - gateway/BYOA adapter도 같은 `MOMO_WORK_HOST_ID`를 사용한다. 설정되면 provider에는
@@ -1233,7 +1233,7 @@ scripts/verify_workd_attach.sh
 ```
 
 자가서명 TLS 프록시 뒤의 평문 리스너에 브라우저 문법(`Sec-WebSocket-Protocol:
-momo.terminal.v1, <token>`)으로 붙어 **직전 출력 → `replay_end` 1개 → `send_stdin` →
+oort.terminal.v1, <token>`)으로 붙어 **직전 출력 → `replay_end` 1개 → `send_stdin` →
 라이브 출력**을 단정하고, 열린 observer 스트림이 소유자의 관전 차단에 1008로 끊기는지를
 단정한다(MOMO-674). red proof는 `WORKD_ATTACH_PROVE_RED=replay-marker`.
 
@@ -1371,7 +1371,7 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh -
 - `scripts/momo`: 내부 dogfood용 friendly launcher다. `start`는 `http://127.0.0.1:28180/health`가
   이미 살아 있으면 앱만 열고, 없으면 `scripts/local_alpha_runner.sh execute --hermes mock`으로
   local alpha stack을 올린 뒤 `MomoMacDevApp`을 연다. `stop`은 앱을 종료하고, runner가 남긴
-  stop script 또는 `28180`을 publish하는 momo Docker compose project를 찾아 local stack을 내린다.
+  stop script 또는 `28180`을 publish하는 oort Docker compose project를 찾아 local stack을 내린다.
 - session bar의 `Updates` popover는 internal alpha Dev Update Channel v0다.
   `MOMO_UPDATE_MANIFEST_PATH` 또는 `file://` `MOMO_UPDATE_MANIFEST_URL`로 local manifest를 읽고
   current/available version, latest/update/failure 상태, `Open Download` + relaunch 안내를 표시한다.
@@ -1420,7 +1420,7 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh -
 ## 7. hermes 어댑터(에이전트 1급 멤버화) — 선택
 
 `adapters/hermes/`는 hermes 게이트웨이 플러그인(`MomoAdapter`)으로, 에이전트를 webhook 봇이
-아닌 momo `member`(kind=`agent`)로 만든다(§6.3). **게이트웨이 안에서만** 동작한다.
+아닌 oort `member`(kind=`agent`)로 만든다(§6.3). **게이트웨이 안에서만** 동작한다.
 
 ```sh
 # 정적 점검(이 환경에서 가능한 전부)
@@ -1435,9 +1435,9 @@ env(`MOMO_API_URL`, `MOMO_CENTRIFUGO_WS_URL`, `MOMO_WORKSPACE_ID`,
 `adapters/hermes/README.md` 및 `plugin.yaml`의 `spec.env` 참고.
 `scripts/momo hermes-gateway-init`은 홈 채널 UUID/이름도 기동 전에 기록한다.
 세션 reset, 홈 설정, `/resume`·`/sethome` 힌트, model/provider 진단은
-어댑터 로컬 로그로만 처리하며 momo timeline의 durable message로 쓰지 않는다.
+어댑터 로컬 로그로만 처리하며 oort timeline의 durable message로 쓰지 않는다.
 
-> **`runtime-unverified (hermes 게이트웨이 필요)`** — 게이트웨이/실행 momo 스택 없이는
+> **`runtime-unverified (hermes 게이트웨이 필요)`** — 게이트웨이/실행 oort 스택 없이는
 > end-to-end 미검증. `py_compile` 정적 점검만 수행됨.
 
 ---
@@ -1517,7 +1517,7 @@ scripts/local_gate.sh --profile host-runtime
 refresh하더라도 refresh 자체는 유지하되 새 pair에서 두 privileged scope만 제거하고
 남은 privileged sibling token을 일괄 폐기한다. 별도 토큰 문법이나 raw token 저장은 없다.
 
-### 8.1.2 momo Cloud T3 provider 어댑터 (MOMO-647 · MOMO-670/ADR-0142)
+### 8.1.2 oort Cloud T3 provider 어댑터 (MOMO-647 · MOMO-670/ADR-0142)
 
 T3는 기본 비활성이며 재설계 진행 중(#888)이다. `MOMO_T3_ENABLED=1`을 명시한
 경우에만 opt-in된다. 비활성에서는 provisioning·조회·register·pause/resume·destroy와
@@ -1540,7 +1540,7 @@ ADR-0142로 provider는 **어댑터 레지스트리 식별자**가 됐다. `MOMO
   provider를 바꿔도 기존 호스트는 계속 조작 가능하다.
 
 `_IMAGE_REF`는 `momo-workd`를 포함하고 entrypoint에서 실행하는 운영자 소유 이미지여야
-한다. 서버는 create 시 공개 HTTPS momo URL, workspace ID, `scope=workspace`,
+한다. 서버는 create 시 공개 HTTPS oort URL, workspace ID, `scope=workspace`,
 `type=cloud`, 15분짜리 1회 등록 token만 인스턴스 env로 전달한다. workd는 자체 Ed25519
 키를 만든 뒤 cloud register REST에서 token을 소비한다. DB에는 token SHA-256 digest만
 남는다. 이 흐름은 BYOC와 관리형이 **동일하다** — 다른 것은 인스턴스를 누가 만드느냐뿐이다.
@@ -1635,7 +1635,7 @@ T3_CONTINUITY_PROVE_RED=dishonest-probe scripts/verify_t3_provider_continuity.sh
 
 BYOC 호스트는 4~5단계 대신
 `POST .../work-hosts/byoc/enrollments`로 1회 토큰을 받고 운영자가 직접 workd를 설치한다.
-BYOC 해지 시 VM·디스크·스냅샷 삭제는 **소유자 책임**이다 — momo는 지울 수 없다.
+BYOC 해지 시 VM·디스크·스냅샷 삭제는 **소유자 책임**이다 — oort는 지울 수 없다.
 
 실호출 smoke는 외부 과금과 운영자 키가 필요하므로 worker가 임의 실행하지 않는다.
 

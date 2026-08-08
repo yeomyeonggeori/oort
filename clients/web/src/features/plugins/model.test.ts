@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { ApiError } from "@/lib/api";
+import { ApiError } from "@momo/core/lib/api";
 import driveManifest from "../../../../../server/Fixtures/plugin-manifests/drive.json";
 import githubManifest from "../../../../../server/Fixtures/plugin-manifests/github.json";
 import linearManifest from "../../../../../server/Fixtures/plugin-manifests/linear.json";

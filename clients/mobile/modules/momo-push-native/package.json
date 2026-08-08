@@ -1,0 +1,6 @@
+{
+  "name": "momo-push-native",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Local Expo module (goal RN-N1). Exposes exactly two build-resolved Info.plist values to JS, because nothing else can read them: the APNs environment and the shared keychain access group. No JS entry point on purpose — callers use requireNativeModule('MomoPushNative') from src/push/native.ts."
+}

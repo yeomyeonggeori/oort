@@ -7,11 +7,14 @@ import {
   uuidEq,
   type Message,
   type WorkSession,
-} from "@/lib/api";
+} from "@momo/core/lib/api";
 import { useSession } from "@/app/session";
+import { SidebarDrawerToggle } from "@/app/SidebarDrawerToggle";
+import { useIsMobileShell } from "@/app/shellNav";
 import {
   channelLabel,
   channelLabelParts,
+  dmAutoReplyAgent,
   dmPeer,
   makeDirectory,
   memberFor,
@@ -22,18 +25,27 @@ import {
   useReadStates,
 } from "@/features/workspace/useWorkspace";
 import { watchForMessage, watchForMessageId } from "@/features/inbox/anchor";
+import {
+  quoteDraftFor,
+  quoteDraftStillValid,
+  type QuoteDraft,
+} from "@momo/core/features/timeline/quote";
 import { Timeline } from "@/features/timeline/Timeline";
+import { PinListMenu } from "@/features/timeline/PinListMenu";
 import { CascadeProvider } from "@/features/timeline/cascadeRail";
 import { ThreadPanel } from "@/features/timeline/ThreadPanel";
+import { LongPressHint } from "@/features/timeline/LongPressHint";
 import { WorkPanel } from "@/features/work/WorkPanel";
-import type { WorkScope } from "@/features/work/workSessionModel";
+import { useWorkPanelTarget } from "@/features/agents/workLogStore";
+import type { WorkScope } from "@momo/core/features/work/workSessionModel";
 import { useTimeline } from "@/features/timeline/useTimeline";
+import { useTypingReceive } from "@/features/chat/useTyping";
 import {
   makeStressRoster,
   makeSyntheticMessages,
-} from "@/features/timeline/stress";
+} from "@momo/core/features/timeline/stress";
 import { Composer } from "@/features/chat/Composer";
-import { canCreateChannelNow } from "@/features/channels/model";
+import { canCreateChannelNow } from "@momo/core/features/channels/model";
 import { useOpenCreateChannel } from "@/features/channels/useCreateChannel";
 import {
   HuddleHeaderBanner,
@@ -121,6 +133,12 @@ export function ChatShell() {
     ? channelLabel(channel, directory, session.member.id)
     : "채널";
   const peer = channel ? dmPeer(channel, directory, session.member.id) : null;
+  // goal B13 (QA H7): 이 채널이 멘션 없이도 답하는 방인가. `peer`와 따로 묻는다
+  // — `peer`는 "상대가 누구냐"이고 이쪽은 "서버가 자동으로 부르느냐"라서, 그룹
+  // DM이나 사람끼리의 DM에서 둘의 답이 갈린다.
+  const dmAgent = channel
+    ? dmAutoReplyAgent(channel, directory, session.member.id)
+    : null;
 
   const timeline = useTimeline(
     realtime,
@@ -129,6 +147,14 @@ export function ChatShell() {
     session.member.id
   );
   const messages = stressCount > 0 ? stressMessages : timeline.state.messages;
+
+  // 「작성 중」 수신 (ADR-0149). **보이는 채널만** 구독한다 - 그것이 이 레일의 유일한
+  // 폭 제어다. 스트레스 픽스처에는 서버가 없으므로 걸지 않는다.
+  useTypingReceive(
+    stressCount > 0 ? null : realtime,
+    workspaceId,
+    stressCount > 0 ? null : channelId
+  );
 
   // Unread boundary is the cursor as it stood when the channel was OPENED:
   // advancing the cursor below must not erase the divider under the reader.
@@ -155,6 +181,14 @@ export function ChatShell() {
 
   // Advance the server read cursor once history is on screen (P7: the server
   // owns unread, so the client reports a position instead of counting).
+  //
+  // goal B8 H10: the failure branch used to keep `markedRef` pointing at the
+  // seq whose PUT had just failed, so this effect refused to try that seq
+  // again. One dropped request and the channel you are reading kept its unread
+  // badge until a LATER message happened to arrive. Clearing the mark on
+  // failure is what makes the retry the comment already promised real: the next
+  // run of this effect (a new message, a remount, a channel round trip) sends
+  // it again.
   const newestSeq = timeline.state.newestSeq;
   useEffect(() => {
     if (stressCount > 0 || newestSeq === null || channelId === null) return;
@@ -164,12 +198,21 @@ export function ChatShell() {
     updateReadState(workspaceId, channelId, newestSeq)
       .then(() => invalidateReadStates())
       .catch(() => {
-        /* the cursor is advisory; the next open retries it */
+        if (markedRef.current === key) markedRef.current = null;
       });
   }, [workspaceId, channelId, newestSeq, stressCount, invalidateReadStates]);
 
   const [thread, setThread] = useState<Message | null>(null);
   useEffect(() => setThread(null), [channelId]);
+
+  // ── 걸어 둔 인용 (ADR-0148) ────────────────────────────────────────────────
+  //
+  // `thread`와 같은 자리에 산다. 둘 다 「이 표면이 지금 무엇을 가리키고 있나」이고,
+  // 둘 다 채널을 옮기면 뜻을 잃는다. 컴포저 안에 두지 않는 이유는 컴포저가
+  // 마운트/언마운트되기 때문이다 — 스레드를 열었다 닫는 사이에 걸어 둔 인용이
+  // 사라지면, 사람은 자기가 무엇을 눌렀는지 의심하게 된다.
+  const [quote, setQuote] = useState<QuoteDraft | null>(null);
+  useEffect(() => setQuote(null), [channelId]);
 
   // 작업 세션 패널 (AX-3 / MOMO-618). One secondary pane at a time: a thread and
   // a work session are both "the thing you stepped aside to read", and stacking
@@ -283,6 +326,24 @@ export function ChatShell() {
     setWorkOpen(false);
   }, [channelId, pendingWorkThread]);
 
+  // 걸어 둔 원본이 지워졌다. 인용은 서버가 받아 주지만(같은 채널이면 tombstone도
+  // 유효한 대상이다) 그렇게 보낸 글은 태어날 때부터 「삭제된 메시지」를 가리킨다.
+  // 조용히 떼는 것이 맞다: 걸어 둔 사람은 그 삭제를 이미 화면에서 봤다.
+  useEffect(() => {
+    if (quote === null) return;
+    const lookup = (messageId: string) =>
+      messages.find((message) => uuidEq(message.id, messageId));
+    if (!quoteDraftStillValid(quote, lookup)) setQuote(null);
+  }, [quote, messages]);
+
+  const onQuoteMessage = useCallback((message: Message) => {
+    setQuote(quoteDraftFor(message));
+    // 인용을 건 사람의 다음 동작은 100% 글쓰기다. 캐럿을 옮겨 주지 않으면 칩이
+    // 떴는데 손은 아직 타임라인에 있다.
+    const input = document.getElementById("composer-input");
+    if (input instanceof HTMLTextAreaElement) input.focus();
+  }, []);
+
   // ── URL이 데리고 온 자리 (MOMO-679) ────────────────────────────────────────
   //
   // 세 파라미터가 같은 성질이다: 다른 표면이 이 채널 안의 한 지점을 가리키며
@@ -318,14 +379,90 @@ export function ChatShell() {
   // 워처는 행이 실제로 마운트된 뒤에만 찾을 것이 있다. 가상 목록이라 첫 페이지가
   // 도착하기 전에는 DOM에 행이 하나도 없고, 워처의 3초 창은 그 사이에 지나간다.
   const anchorReady = messages.length > 0;
+
+  // 앵커를 끝내 못 찾았다 (goal B12 R1 High-3).
+  //
+  // 예전에는 이 실패가 아무 자국도 남기지 않았다. 인박스에서는 대개 맞는
+  // 절충이었지만 검색에서는 가정이 뒤집힌다: 검색은 정의상 로드된 머리에 없는
+  // 것을 찾아 주는 표면이라, 사용자는 방금 화면에서 읽은 문장을 누르고 전혀
+  // 다른 메시지가 있는 채널 바닥에 도착한다. 표식도, 문장도, 재시도도 없이.
+  //
+  // 백필까지 가지 않고 **신호**로 갚는다. 다만 신호는 참이어야 하므로, 무슨 일이
+  // 일어났는지 아는 만큼만 말한다.
+  const [anchorMissed, setAnchorMissed] = useState<"older" | "unknown" | null>(null);
+
+  // 주소가 가리키는 자리가 바뀌면 앞선 실패는 이 화면의 사실이 아니다.
+  useEffect(() => {
+    setAnchorMissed(null);
+  }, [anchorMsg, anchorSeq, channelId]);
+
+  /**
+   * 인용 블록을 눌렀다 → 원본으로 점프 (ADR-0148 · goal B3 W1).
+   *
+   * **기존 앵커 기계 그대로**다. 새 메커니즘을 만들지 않는 이유는 이 자리가 이미
+   * 인박스·활동·검색·작업흐름이 쓰는 그 자리이기 때문이고, 못 찾았을 때 할 말도
+   * 이미 위에 있다(`anchorMissed`). 라우트를 건드리지 않는 이유는 인용 대상이 같은
+   * 채널 안에 있어야 하기 때문이다(규칙 2) — `?msg=`로 우회하면 주소가 「여기를
+   * 보고 있다」고 계속 말하는데 사람은 이미 다른 곳을 읽고 있게 된다.
+   *
+   * `seq`를 함께 받는 이유: 못 찾았을 때 「더 위쪽에 있어 아직 안 불러왔다」를
+   * 추측이 아니라 사실로 말할 수 있다. 서버가 인용에 원본의 seq를 실어 준다
+   * (`replyTo.seq`), 라이브 프레임으로 온 인용은 실어 주지 않으므로 null이 온다.
+   */
+  const quoteJumpRef = useRef<(() => void) | null>(null);
+  const onJumpToMessage = useCallback(
+    (messageId: string, seq: number | null) => {
+      // 앞선 점프가 아직 행을 기다리고 있으면 접는다. 두 워처가 동시에 돌면 나중에
+      // 만료되는 쪽이 이미 도착한 점프에 대해 「못 찾았다」를 띄운다.
+      quoteJumpRef.current?.();
+      setAnchorMissed(null);
+      quoteJumpRef.current = watchForMessageId(messageId, {
+        onExpire: () => {
+          if (seq === null) {
+            setAnchorMissed("unknown");
+            return;
+          }
+          const oldestLoaded = messages.reduce(
+            (min, message) => Math.min(min, message.seq),
+            Number.POSITIVE_INFINITY
+          );
+          setAnchorMissed(seq < oldestLoaded ? "older" : "unknown");
+        },
+      });
+    },
+    [messages]
+  );
+  useEffect(() => () => quoteJumpRef.current?.(), []);
+
   useEffect(() => {
     if (!anchorReady) return undefined;
-    if (anchorMsg !== null) return watchForMessageId(anchorMsg);
+
+    /**
+     * 목표가 지금 로드된 창보다 **위쪽**인가. seq는 채널의 순서값이므로, 목표가
+     * 가장 오래된 로드분보다 작으면 그것은 추측이 아니라 사실이다. seq를 모르면
+     * (`?seq=` 없이 온 링크) 모른다고 답하고, 화면도 모르는 채로 말한다.
+     */
+    const missKind = (): "older" | "unknown" => {
+      const target = anchorSeq === null ? Number.NaN : Number(anchorSeq);
+      if (!Number.isFinite(target)) return "unknown";
+      const oldestLoaded = messages.reduce(
+        (min, message) => Math.min(min, message.seq),
+        Number.POSITIVE_INFINITY
+      );
+      return target < oldestLoaded ? "older" : "unknown";
+    };
+    const onExpire = () => setAnchorMissed(missKind());
+
+    if (anchorMsg !== null) return watchForMessageId(anchorMsg, { onExpire });
     if (anchorSeq !== null) {
       const seq = Number(anchorSeq);
-      if (Number.isFinite(seq)) return watchForMessage(seq);
+      if (Number.isFinite(seq)) return watchForMessage(seq, { onExpire });
     }
     return undefined;
+    // `messages`는 의도적으로 빼 둔다: 새 메시지가 도착할 때마다 워처를 다시
+    // 돌리면 3초 창이 영원히 갱신된다. 만료 시점의 창은 `missKind`가 클로저로
+    // 잡은 그 목록이면 충분하다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [anchorReady, anchorMsg, anchorSeq, channelId]);
 
   // Under 900px the 작업 세션 pane stops being a column beside the channel and
@@ -348,7 +485,25 @@ export function ChatShell() {
     query.addEventListener("change", sync);
     return () => query.removeEventListener("change", sync);
   }, []);
-  const covered = workOpen && !thread && stressCount === 0 && drawerWidth;
+  // 폰에서는 스레드 패널도 같은 성질이 된다 (goal B6): 320px 열이 390px 화면에서
+  // 채널에 70px만 남기므로, 그 폭에서는 스레드가 채널 표면 전체를 받는다
+  // (tokens.css `thread-pane`). 덮은 표면은 위와 같은 이유로 탭 순서에서 빠진다.
+  const isMobile = useIsMobileShell();
+  // 「작업 패널」(goal WEB-WP1)은 이 표면 **바깥**, 셸의 라우트 상자 옆에 산다.
+  // 그래서 이 파일이 이미 지키던 "부차 표면은 한 번에 하나" 규칙의 사각지대에
+  // 있었다: 사이드바 240 + 스레드 320 + 작업 패널 320 = 880이라, 900px 창에서
+  // 채팅에 20px가 남는다. 산술이 아니라 실렌더로 쟀고 컴포저가 26px였다
+  // (gate-work-panel의 co-open-900 시나리오).
+  //
+  // 그래서 규칙을 그대로 한 칸 넓힌다. 스레드가 작업 세션 패널을 가리고 있다가
+  // 닫히면 되돌아오는 것과 **같은 방식으로**(닫는 것이 아니라 가리는 것이다),
+  // 작업 패널이 열려 있는 동안은 이 표면의 부차 패널이 물러난다. 상태는 그대로
+  // 남아 있으므로 작업 패널을 닫으면 읽던 스레드가 그 자리에 돌아온다.
+  const workPanelOpen = useWorkPanelTarget() !== null;
+  const covered =
+    !workPanelOpen &&
+    ((workOpen && !thread && stressCount === 0 && drawerWidth) ||
+      (thread !== null && channelId !== null && isMobile));
   useEffect(() => {
     const node = coveredRef.current;
     if (!node) return;
@@ -428,6 +583,9 @@ export function ChatShell() {
     <>
       <header className="flex min-h-control-lg items-center justify-between gap-3 border-b border-line px-4 py-2">
         <div className="flex min-w-0 flex-1 items-center gap-2">
+          {/* 폰에서 채널 목록으로 돌아가는 길 (goal B6). 사이드바가 열이 아니라
+              서랍이므로, 목록은 이 컨트롤로만 다시 열린다. */}
+          <SidebarDrawerToggle />
           <span aria-hidden="true" className="shrink-0 text-ink-muted">
             {channel?.kind === "dm" ? (
               <MessageSquare className="size-4" />
@@ -456,7 +614,10 @@ export function ChatShell() {
             </span>
           )}
           {memberSummary && (
-            <span className="min-w-0 truncate text-meta text-ink-muted">
+            /* 폰에서는 접는다 (goal B6): 390px 헤더에서 이 요약이 제목보다 먼저
+               폭을 가져가 채널 이름이 두 글자로 줄었다. 같은 사실은 멤버 목록에
+               온전히 있다. */
+            <span className="wide-only min-w-0 truncate text-meta text-ink-muted">
               {memberSummary}
             </span>
           )}
@@ -478,6 +639,19 @@ export function ChatShell() {
             <HuddleHeaderControl
               huddle={huddle}
               offline={offline}
+            />
+          )}
+          {/* 이슈 #1112 — 고정 목록. 작업 세션 토글 왼쪽에 두는 이유: 이것은
+              대화를 읽는 도구고 저것은 대화 밖의 일을 여는 문이다. 스트레스
+              픽스처에서는 뒤에 서버 행이 없으므로 내놓지 않는다 — 반응·액션과
+              같은 규칙. */}
+          {stressCount === 0 && channelId !== null && (
+            <PinListMenu
+              pins={timeline.pins}
+              status={timeline.pinsStatus}
+              directory={directory}
+              onJump={(messageId, seq) => onJumpToMessage(messageId, seq)}
+              onRetry={timeline.reloadPins}
             />
           )}
           {/* The tooltip and the accessible name are the same string: two
@@ -548,11 +722,26 @@ export function ChatShell() {
           renderChannelHeader(null)
         )}
 
-        {offline && (
+        {/* 연결 배너는 셸로 올라갔다 (goal B8 B2, AppShell.ConnectionBanner):
+            같은 사실을 채널에서만 말하면 인박스·활동·설정에서는 갱신이 멈춘 줄
+            모른 채 조용한 화면을 읽게 된다. `offline`은 여전히 여기 남는다 —
+            허들 컨트롤처럼 지금 쓸 수 있는지를 물어야 하는 것들이 읽는다. */}
+
+        {/* 가리켜진 메시지를 끝내 못 찾았다 (goal B12 R1 High-3).
+            tone="neutral": 고장이 아니라 아직 안 불러온 것이라 --danger도
+            role="alert"도 맞지 않는다. 닫기가 있는 이유는 이 줄이 사람의 다음
+            행동을 막지 않아야 하기 때문이다. */}
+        {anchorMissed !== null && (
           <InlineBanner
             tone="neutral"
-            message="연결 끊김, 재연결 중입니다. 지금 보이는 내용은 마지막으로 확인된 상태입니다."
-            testId="offline-banner"
+            message={
+              anchorMissed === "older"
+                ? "찾던 메시지는 이 대화의 더 위쪽에 있어 아직 불러오지 않았습니다. 위로 올려 이어서 불러오세요."
+                : "찾던 메시지를 이 화면에서 찾지 못했습니다. 위로 올려 이전 대화를 더 불러오세요."
+            }
+            actionLabel="닫기"
+            onAction={() => setAnchorMissed(null)}
+            testId="chat-anchor-missed"
           />
         )}
 
@@ -566,12 +755,30 @@ export function ChatShell() {
               unreadCount={openedWith?.unreadCount ?? 0}
               recoveryMarkers={timeline.recoveryMarkers}
               pending={stressCount > 0 ? undefined : timeline.pending}
+              // B11 — the stress fixture renders synthetic rows with no server
+              // row behind them, so the actions are withheld there rather than
+              // offered and then failing on every click.
+              reactions={stressCount > 0 ? undefined : timeline.reactions}
+              pins={stressCount > 0 ? undefined : timeline.pins}
+              actions={
+                stressCount > 0
+                  ? undefined
+                  : {
+                      myMemberId: session.member.id,
+                      onToggleReaction: timeline.toggleReaction,
+                      onTogglePin: timeline.togglePin,
+                      onEditMessage: timeline.editMessage,
+                      onDeleteMessage: timeline.deleteMessage,
+                    }
+              }
               onStartReached={stressCount > 0 ? undefined : timeline.loadOlder}
               onRetry={timeline.reload}
               onOpenThread={(message) => {
                 setWorkOpen(false);
                 setThread(message);
               }}
+              onQuoteMessage={stressCount > 0 ? undefined : onQuoteMessage}
+              onJumpToMessage={onJumpToMessage}
               onOpenWorkSession={openWorkSession}
               onResend={stressCount > 0 ? undefined : onResend}
               onResendPending={stressCount > 0 ? undefined : timeline.resend}
@@ -612,28 +819,44 @@ export function ChatShell() {
           )}
         </div>
 
+        {/* 폰에는 액션이 있다는 것을 말해 주는 것이 화면에 하나도 없었다
+            (R2 H4). 손가락 기기에서만, 한 번만, 컴포저 바로 위에서. */}
+        {stressCount === 0 && channelId !== null && <LongPressHint />}
         {stressCount === 0 && channelId !== null && (
           <Composer
+            workspaceId={workspaceId}
             channelId={channelId}
             directory={directory}
             channelLabel={label}
+            dmAgent={dmAgent}
+            quote={quote}
+            onCancelQuote={() => setQuote(null)}
             onSend={timeline.send}
           />
         )}
       </div>
 
-      {thread && channelId !== null && (
+      {thread && channelId !== null && !workPanelOpen && (
         <ThreadPanel
           workspaceId={workspaceId}
           channelId={channelId}
           root={thread}
           directory={directory}
+          reactions={timeline.reactions}
+          pins={timeline.pins}
+          actions={{
+            myMemberId: session.member.id,
+            onToggleReaction: timeline.toggleReaction,
+            onTogglePin: timeline.togglePin,
+            onEditMessage: timeline.editMessage,
+            onDeleteMessage: timeline.deleteMessage,
+          }}
           onOpenWorkSession={openWorkSession}
           onClose={() => setThread(null)}
         />
       )}
 
-      {workOpen && !thread && stressCount === 0 && (
+      {workOpen && !thread && stressCount === 0 && !workPanelOpen && (
         <WorkPanel
           channelId={channelId}
           scope={workScope}

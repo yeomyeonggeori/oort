@@ -1,11 +1,11 @@
-# momo — App Privacy 데이터 매핑 (영양성분표 입력 소스)
+# oort — App Privacy 데이터 매핑 (영양성분표 입력 소스)
 
 > App Store Connect "App Privacy" 입력값의 1:1 소스. **신규 앱·업데이트 제출 시 필수.**
 > 출처: https://developer.apple.com/app-store/app-privacy-details/
 > 제3자 SDK 수집까지 포함해야. **법률 자문 아님 — 실제 수집 코드와 대조 검증 필수(TODO).**
 
 ## 데이터 유형 × 수집 여부 × 목적 (초안 — schema_v0.sql 기반, 검증 필요)
-| Apple 데이터 카테고리 | momo 수집? | 데이터 | 목적 | 사용자 연결 | 추적 |
+| Apple 데이터 카테고리 | oort 수집? | 데이터 | 목적 | 사용자 연결 | 추적 |
 |---|---|---|---|---|---|
 | Contact Info (이메일) | 예(추정) | 계정 이메일 | 앱 기능(로그인/식별) | 예 | 아니오 |
 | User Content (메시지) | 예 | 메시지 본문, 첨부 | 앱 기능(메신저) | 예 | 아니오 |

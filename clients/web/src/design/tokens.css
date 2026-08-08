@@ -105,6 +105,44 @@
 
   /* --- shell geometry ---------------------------------------------------- */
   --w-sidebar: 240px;
+
+  /* 드로어로 설 때의 사이드바 (B6). 폰에서는 사이드바가 행을 나눠 갖지 않고 채널
+   * 표면을 **덮으므로**, 열을 좁게 유지할 이유가 사라진다. 280px는 390px 폰
+   * (iPhone 14/15의 CSS 폭)에서 뒤 표면을 110px 남기는 값이다: 덮은 것이 화면
+   * 전체가 아니라 서랍이라는 사실이 보여야, 바깥을 눌러 닫을 자리도 함께 보인다. */
+  --w-sidebar-drawer: 280px;
+
+  /* 실제로 보이는 뷰포트 높이 (goal B9). 값은 src/app/viewportHeight.ts가 매
+   * `visualViewport` 변화마다 다시 쓴다. 여기 있는 것은 **그 값이 아직 없을 때의
+   * 답**이다: 스크립트가 돌기 전 첫 페인트, 그리고 visualViewport가 없는 옛
+   * 브라우저. 그 경우의 최선이 `100dvh`이고, 그래서 폴백이 아니라 기본값이다.
+   *
+   * 왜 dvh로 부족한가: iOS 사파리의 하단 툴바는 레이아웃 뷰포트를 줄이지 않는다.
+   * 844px 화면에서 `100dvh`도 `height: 100%`도 844px을 답하는데 실제로 보이는 것은
+   * 744px이고, 나머지 100px은 주소 줄이 덮는다. 셸의 마지막 줄인 컴포저가 정확히
+   * 그 100px 안에 들어가 가려졌다(성재 iPhone 실캡처 2026-08-02 22:54). 가상
+   * 키보드가 올라오면 같은 일이 300px 규모로 한 번 더 일어난다 —
+   * `interactive-widget=resizes-content`(index.html)는 크로미움만 읽는다. */
+  --app-viewport-height: 100dvh;
+
+  /* 손가락 최소 타깃 (B6). WCAG 2.5.5 Target Size (Enhanced) / Apple HIG 44pt.
+   * 데스크탑의 28px 아이콘 버튼은 포인터에 맞춘 크기이고, 같은 버튼이 폰에서는
+   * 두 번에 한 번 빗나간다. 리듬 스케일에도 컨트롤 높이 축에도 없는 값이라
+   * (28/32/40 중 어느 것도 아니다) 이름을 갖는다. */
+  --tap-target: 44px;
+
+  /* 본문에 섞여 사는 컨트롤의 최소 타깃 (design-review U4-5 M-1).
+   * WCAG 2.5.8 Target Size (Minimum), AA 바닥선.
+   *
+   * `--tap-target`(44px)과 **다른 자리**를 위한 값이다. 44는 자기 줄을 갖는
+   * 컨트롤의 크기이고(전송 버튼, 사이드바 행), 메시지 본문 밑에 밑줄 링크로 사는
+   * 「38줄 더 보기」에 그것을 주면 그 링크가 한 줄짜리 메시지보다 커진다 —
+   * `LongPressHint`가 「행마다 44px 버튼」을 기각한 것과 같은 산수다.
+   *
+   * 리뷰가 실측한 상태: 터치 웹에서 그 토글이 ~18px였다. 같은 배치가 폰에는
+   * 44pt를 도출식으로 강제하면서 웹만 AA 바닥선 아래였고, hover 없는 기기를
+   * 섬기기 시작한 이상 그 축은 두 클라에서 같은 뜻이어야 한다. */
+  --touch-target: 24px;
 }
 
 :root[data-theme="light"] {
@@ -138,6 +176,24 @@
   /* Selection marker bar (R-1 §1: 현재 워크스페이스 = 좌측 액센트 바 2px). Two
    * pixels is a state marker; the 1px hairline reads as a border artifact. */
   --spacing-marker: 2px;
+
+  /* 타임라인 행이 자기 몫으로 무는 세로 여백 (U4-4R W-1). 이 값은 「행 사이의
+   * 거리」가 아니라 그 거리의 **절반**이다 — 웹에서 두 행 사이에 남는 거리는 위 행의
+   * padding-bottom + 아래 행의 padding-top이므로, 코어가 정한 거리를 화면에 만들려면
+   * 그 절반을 적어야 한다 (`features/timeline/spacing.ts`).
+   *
+   * **왜 리듬 스케일 밖의 값이 이름을 얻는가.** 코어의 `ROW_SPACE`는 묶음 안 12 ·
+   * 묶음 사이 18이고, 위 스케일의 단계는 1px 헤어라인을 빼면 전부 4의 배수다.
+   * 두 단계의 합으로 18을 만들 수 있는 조합은 없다(18 ≡ 2 mod 4). 그래서 이 값을
+   * 이름 없이 쓰려면 `py-1.5` 같은 격자 밖 클래스를 적게 되는데, 그것은 **아예
+   * 컴파일되지 않는다**(바로 위 주석이 그 예로 이름을 대어 적어 둔 클래스다).
+   * U4-4가 실제로 그렇게 적었고, 묶음 안 간격이 화면에서 0px이 됐다.
+   *
+   * 그래서 --spacing-pane / --spacing-action과 같은 규율을 따른다: 격자 밖 측정값은
+   * **숫자가 아니라 이름**으로 들어온다. `py-row`는 있고 `py-1.5`는 여전히 없다.
+   * 값을 바꾸려면 코어의 `ROW_SPACE`를 바꿔야 하고, 그러면 `spacing.test.ts`가
+   * 둘이 어긋난 것을 잡는다. */
+  --spacing-row: 6px;
 
   /* Control heights are a separate dimension from spacing. */
   --spacing-control-sm: 28px;
@@ -274,6 +330,247 @@
   min-block-size: 0;
   position: relative;
   overflow: clip;
+
+  /* 폰 (B6). 240px 열은 390px 화면의 62%를 남기고, 그 남은 150px 안에 채널
+   * 제목·타임라인·컴포저가 전부 들어가야 했다(성재 iPhone 실캡처). 그래서 이
+   * 폭에서는 사이드바가 행을 나눠 갖지 않는다: 격자는 한 열이 되고 사이드바는
+   * 그 위를 덮는 서랍이 된다(sidebar-drawer). 셸이 창이라는 계약은 그대로다 —
+   * `overflow: clip`이 닫힌 서랍을 잘라내므로 가로 스크롤은 생기지 않는다. */
+  @media (width < 600px) {
+    grid-template-columns: minmax(0, 1fr);
+
+    /* 위쪽 안전 영역 (goal B9). `viewport-fit=cover`로 노치 아래까지 그리기로 한
+     * 이상, 아래를 물러나는 규칙(safe-area-bottom)만 있고 위가 없는 것은 반쪽이다.
+     * 홈 화면에 추가된 상태(standalone)에서는 상단 인셋이 47~59px이고, 그만큼
+     * 헤더 첫 줄이 상태바 밑으로 들어간다. 사파리 탭에서는 브라우저 크롬이 이미
+     * 그 자리를 차지해 인셋이 0이므로 이 규칙은 아무 일도 하지 않는다.
+     *
+     * 셸 하나에 한 번만 둔다: 헤더는 표면마다 다르지만 셸은 하나이고, 표면마다
+     * 인셋을 더하면 어느 표면 하나는 반드시 빠뜨린다. `box-sizing: border-box`라
+     * 패딩은 100% 높이 **안**에서 자리를 얻으므로 셸은 여전히 창만 하다. */
+    padding-block-start: env(safe-area-inset-top, 0px);
+  }
+}
+
+/* 사이드바 서랍 (B6). 데스크탑에서는 아무것도 하지 않는다 — 사이드바는 격자의
+ * 첫 열에 그대로 서고, 이 유틸리티는 폰에서만 규칙을 갖는다.
+ *
+ * 위치의 앵커는 `.app-shell`의 `position: relative`다. 그래서 서랍은 셸 밖으로
+ * 나가지 못하고, 닫힌 상태의 `translateX(-100%)`도 문서 폭을 넓히지 못한다
+ * (clip이 자른다). `position: fixed`였다면 초기 컨테이닝 블록에 붙어 셸의
+ * 클리핑을 벗어났을 것이고, MOMO-628이 sr-only에서 이미 치른 값이다.
+ *
+ * 움직임은 피드백이다(SKILL §4): 서랍이 **어디에서** 왔는지가 160ms 동안 보이고,
+ * 그보다 길어지면 대기가 된다. reduced-motion에서는 전환 없이 자리에 나타난다 —
+ * 위치 정보는 그림자와 스크림이 이미 말하고 있으므로 잃는 것이 없다. */
+@utility sidebar-drawer {
+  @media (width < 600px) {
+    position: absolute;
+    inset-block: 0;
+    inset-inline-start: 0;
+    inline-size: var(--w-sidebar-drawer);
+    z-index: 30;
+    /* 논리 속성이 아닌 이유: transform은 물리 축만 안다. 이 앱은 ko/LTR이고,
+     * RTL이 생기면 여기가 뒤집을 자리다. */
+    transform: translateX(-100%);
+    transition: transform 160ms ease-out;
+
+    &[data-open] {
+      transform: translateX(0);
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      transition: none;
+    }
+  }
+}
+
+/* 서랍을 덮은 스크림 (B6). 다이얼로그와 같은 --scrim을 쓰는 이유도 같다: 뒤를
+ * 어둡게 해서 앞의 표면이 앞으로 나오게 하는 층이고, 어느 스킴에서든 그래야
+ * 한다(tokens.contrast.test.ts가 두 스킴에서 잰다). 셸 안에 있으므로
+ * `position: absolute`이고, 서랍(z-index 30)보다 아래, 본문보다 위에 선다. */
+@utility sidebar-scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  background: var(--scrim);
+  /* 진짜 <button>인 탭 정거장 — 보이는 포커스 없는 정거장은 키보드 사용자를
+   * 잃게 만든다(design-review B6 M2). 안쪽 링으로 서랍 경계를 침범하지 않는다. */
+  &:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -4px;
+  }
+}
+
+/* 폰에서만 서는 컨트롤 (B6). 햄버거와 서랍 닫기 버튼이 그것인데, 둘 다 넓은 창
+ * 에서는 **할 일이 없는** 컨트롤이다(사이드바가 이미 열에 서 있다). 살아 있는
+ * 것처럼 보이지만 아무 일도 하지 않는 버튼을 두지 않는 것은 pane-wide-toggle이
+ * 900px 아래에서 사라지는 것과 같은 규칙이다. */
+@utility mobile-only {
+  @media (width >= 600px) {
+    display: none;
+  }
+}
+
+/* 그 반대 (B6): 폭이 있을 때만 하는 말. 헤더 한 줄은 폰에서 390px이고 그 줄에는
+ * 제목이 먼저 들어가야 한다 — 부차적인 한 조각(참여자 요약, 단축키 힌트)이 그
+ * 자리를 가져가면 채널 이름이 "ge..."로 줄어든다(실측). 잘린 제목보다 없는
+ * 부제가 낫다. 지워지는 것은 다른 곳에 이미 있거나(참여자는 멤버 목록에),
+ * 이 기기에 없는 것(폰에는 ⌘ 키가 없다)뿐이다. */
+@utility wide-only {
+  @media (width < 600px) {
+    display: none;
+  }
+}
+
+/* 폭이 아니라 **입력 장치**로 가르는 자리 (B11 R2).
+ *
+ * 메시지 행의 액션 진입점(⋯)은 hover로 나타난다. hover가 없는 기기에서 그것은
+ * 어떤 제스처로도 나타나지 않는 컨트롤이고, 그 자리를 위해 비워 둔 열은 본문이
+ * 쓸 수 있었던 폭이다. 그래서 터치에서는 열째로 사라지고, 폰은 자기 진입점(길게
+ * 누르기 → 시트)을 쓴다.
+ *
+ * `wide-only`를 쓰지 않는 이유가 정확히 여기 있다. R1은 바를 폭으로 숨기고 길게
+ * 누르기는 포인터 종류로 무장해서, 마우스로 창을 600px 아래로 줄이면 바는 CSS가
+ * 숨기고 길게 누르기는 마우스라서 무장하지 않는 구멍이 생겼다 — 액션에 닿는 길이
+ * 하나도 남지 않았다(R2 M2). 두 쪽을 같은 축(`hover`)에 매어 두면 그 둘은
+ * 어긋날 수 없다. 좁은 창의 마우스는 여전히 hover하므로 열을 갖는다. */
+@utility pointer-only {
+  @media (hover: none) {
+    display: none;
+  }
+}
+
+/* 그 반대. 손가락에게만 하는 말 (B11 R2): 길게 누르기를 알려 주는 한 줄은
+ * hover가 있는 기기에서는 할 말이 없다. 거기엔 행마다 ⋯가 보이기 때문이다. */
+@utility touch-only {
+  @media (hover: hover) {
+    display: none;
+  }
+}
+
+/* 기울임 강조를 라틴 문자에만 허용한다 (goal B8 H6).
+ *
+ * 시스템 한글 페이스에는 이탤릭 자형이 없어서, `font-style: italic`을 주면
+ * 브라우저가 글자를 기울여 **합성**한다. 그 합성 기울기가 "시"의 세로 획을
+ * 떼어 놓아 뒤따르는 공백과 붙으면 슬래시로 읽힌다(design-review 실측:
+ * "실패하면 즉시/ 이전 태그로"). 쓰지 않은 글자가 화면에 생기는 것이므로
+ * 취향 문제가 아니다. 애초에 한국어 조판은 기울임으로 강조하지 않는다.
+ *
+ * `font-synthesis-style: none`은 **진짜 이탤릭이 있는 페이스만** 기울인다.
+ * 라틴 본문은 그대로 기울고, 한글은 곧게 선 채 `<em>` 시맨틱만 남는다.
+ * 이 속성을 모르는 엔진에서는 지금까지의 동작 그대로다.
+ *
+ * 대가는 분명히 해 둔다: 한글 `*강조*`는 별표를 잃고 시각적으로는 아무 차이도
+ * 남기지 않는다. `<em>` 시맨틱은 남으므로 보조기술은 여전히 강조를 읽고,
+ * 쓰지 않은 글자를 그리는 것보다는 아무것도 그리지 않는 쪽이 낫다고 본 것이다. */
+@utility em-latin-only {
+  font-style: italic;
+  font-synthesis-style: none;
+}
+
+/* 44px 손가락 타깃 (B6). 폰에서만 커진다: 포인터에는 28px 아이콘 버튼이 맞고,
+ * 데스크탑 밀도를 손가락 크기로 올리면 사이드바 한 화면에 들어가던 채널 수가
+ * 절반이 된다. 커지는 것은 타깃이지 아이콘이 아니다 — 그려지는 글리프는 그대로
+ * 16px이고 그 주위의 누를 수 있는 면적만 44px가 된다. */
+@utility tap-target {
+  @media (width < 600px) {
+    min-block-size: var(--tap-target);
+    min-inline-size: var(--tap-target);
+  }
+}
+
+/* 24px 최소 타깃, hover가 없는 기기에서만 (design-review U4-5 M-1).
+ *
+ * 문턱이 `tap-target`과 다르다. 그쪽은 폭(`width < 600px`)으로 가르고 이쪽은
+ * **입력 장치**(`hover: none`)로 가른다. 이유는 이 축이 이미 그렇게 갈려
+ * 있기 때문이다 — `pointer-only`/`touch-only`, 그리고 거터 시각의 정지 노출이
+ * 전부 `hover`를 본다(리뷰 W-4). 손가락으로 쓰는 큰 화면(터치 노트북, 태블릿)이
+ * 폭 기준에서는 빠지는데, 거기서 이 링크를 누르는 것은 여전히 손가락이다.
+ *
+ * 커지는 것은 **누를 수 있는 면적뿐**이다: 글자 크기도 밑줄 위치도 그대로다.
+ * `inline-flex + align-items: center`가 그것을 한다 — 글리프는 상자 가운데
+ * 그대로 서고 위아래로 여백만 생긴다. */
+@utility touch-target {
+  @media (hover: none) {
+    display: inline-flex;
+    align-items: center;
+    min-block-size: var(--touch-target);
+    min-inline-size: var(--touch-target);
+  }
+}
+
+/* 길게 누르기의 자리를 비운다 (B11). 터치 화면에는 hover가 없으므로 메시지
+ * 액션은 길게 누르기로 연다. 그런데 iOS Safari는 텍스트 위 길게 누르기에 자기
+ * 선택 콜아웃을 띄우고, 그게 우리 시트 위로 올라온다 — 한 제스처를 두고 두
+ * 메뉴가 다툰다.
+ *
+ * `user-select`는 건드리지 않는다. 그걸 끄면 메시지 본문을 아예 고를 수 없게
+ * 되는데 사람들은 메시지를 복사한다. 콜아웃만 끄고 선택은 남긴다.
+ *
+ * 폰 폭에서만 적용한다: 데스크탑의 우클릭 메뉴(복사·검사)는 진짜로 쓸모가 있고
+ * 거기엔 길게 누르기가 없다. */
+@utility no-touch-callout {
+  @media (width < 600px) {
+    -webkit-touch-callout: none;
+  }
+}
+
+/* 셸의 마지막 줄 (B6). iOS의 홈 인디케이터는 화면 하단 34px를 차지하고, 그 위에
+ * 그린 컨트롤(컴포저의 전송 버튼, 사이드바 발치의 설정)은 눌리지 않는다.
+ * `viewport-fit=cover`(index.html)로 그 영역까지 그리기로 한 이상 안전 영역만큼
+ * 물러나는 것은 선택이 아니다. 값이 0인 기기(홈 버튼 아이폰·안드로이드 대부분)
+ * 에서는 아무 일도 일어나지 않는다. */
+@utility safe-area-bottom {
+  @media (width < 600px) {
+    padding-block-end: env(safe-area-inset-bottom, 0px);
+  }
+}
+
+/* 스레드 패널 기하 (B6). work-pane과 같은 규칙이고 문턱만 다르다. 320px 패널은
+ * 900px 창에서는 채널에 580px를 남기지만 390px 폰에서는 70px를 남긴다 — 그 70px
+ * 에는 타임라인도 컴포저도 들어가지 않는다. 그래서 폰에서는 두 표면이 행을
+ * 나눠 갖지 않고, 스레드가 채널 표면 전체를 받는다. 넓은 창의 동작은 건드리지
+ * 않는다: 이 티켓이 고치는 것은 폰이다.
+ *
+ * 앵커는 work-pane과 같은 채팅 표면의 `relative` 상자다. 덮인 표면은 ChatShell이
+ * `inert`로 탭 순서에서 함께 빼낸다. */
+@utility thread-pane {
+  inline-size: var(--spacing-pane);
+
+  @media (width < 600px) {
+    position: absolute;
+    inset: 0;
+    inline-size: auto;
+    z-index: 20;
+  }
+}
+
+/* 설정의 두 열 (B6). agent-hub-layout과 같은 성질의 표면이라 같은 답을 쓴다:
+ * 192px 섹션 목록이 390px 폰에서 본문에 198px만 남기므로, 그 폭에서는 목록이
+ * 본문 위로 올라가 가로로 눕는다. 넓은 창은 그대로 두 열이다. */
+@utility settings-layout {
+  display: flex;
+  min-block-size: 0;
+  flex: 1;
+
+  @media (width < 600px) {
+    flex-direction: column;
+  }
+}
+
+@utility settings-nav {
+  inline-size: var(--spacing-pane-sm);
+  flex-shrink: 0;
+  overflow-y: auto;
+  border-inline-end: 1px solid var(--line);
+
+  @media (width < 600px) {
+    inline-size: auto;
+    max-block-size: var(--spacing-pane-sm);
+    border-inline-end: 0;
+    border-block-end: 1px solid var(--line);
+  }
 }
 
 /* 작업 세션 패널 기하 (MOMO-618 R1). The pane is 320px, and beside a 240px
@@ -335,6 +632,101 @@
 @utility pane-wide-toggle {
   @media (width < 900px) {
     display: none;
+  }
+}
+
+/* 작업 패널 기하 (goal WEB-WP1). 문턱은 thread-pane의 600px이 아니라 work-pane과
+ * 같은 900px이고, 이유는 이 패널이 붙는 상자가 다르기 때문이다.
+ *
+ * thread-pane은 **채팅 표면 안쪽**에 붙어서 600px이 맞는 숫자다. 이 패널은
+ * 240px 사이드바 옆의 라우트 상자에 붙는데 미디어 쿼리는 뷰포트를 재므로, 601px
+ * 창에서 라우트에 남는 폭은 601 - 240 - 320 = 41px다. work-pane이 같은 실측으로
+ * 이미 900px을 골랐고(760px 창에서 컴포저 placeholder가 두 줄로 접히며 잘렸다),
+ * 부차 표면이 주 표면을 쓸 수 없는 폭으로 밀어내면 안 된다는 규칙은 여기서도
+ * 같다. 덮인 표면은 AppShell이 `inert`로 탭 순서에서 함께 빼낸다. */
+@utility work-panel-pane {
+  inline-size: var(--spacing-pane);
+
+  @media (width < 900px) {
+    position: absolute;
+    inset: 0;
+    inline-size: auto;
+    z-index: 20;
+  }
+}
+
+/* ADE 관제 서랍 기하 (ADR-0154 D2, #1135).
+ *
+ * **이 유틸리티의 존재 이유는 한 줄이다: 서랍이 라우트를 밀지 않는다.** 요약 줄은
+ * 라우트 위에 있고 서랍은 그 줄을 눌러 내려오는데, 그것이 흐름 안의 블록이면
+ * 열 때마다 타임라인이 서랍 높이만큼 줄었다 늘었다 한다 — 「작성 중」 줄이 컴포저를
+ * 26px 밀었던 그 결함과 같은 종류이고, 이쪽은 변위가 그 몇 배다. 그래서 절대
+ * 위치로 라우트 상자를 **덮는다**. 게이트가 여는 전후의 좌표를 픽셀로 잰다.
+ *
+ * 앵커는 AppShell 이 이미 갖고 있는 라우트 상자의 `relative` 다 — 작업 패널이
+ * 폰 폭에서 쓰는 그 상자이고, 새 앵커를 만들면 문서가 스크롤할 수 있게 된다
+ * (MOMO-610).
+ *
+ * 폭이 `--spacing-pane`(320px)이 아니라 `--spacing-pane-lg`(640px)인 이유: 이
+ * 목록의 한 줄은 제목 + 상태 칩 + 생존성 배지 + 경과 + diff 자리이고, 320px 에서는
+ * 「기기를 꺼도 계속됩니다」한 조각이 이미 폭의 절반이다. 640px 은 이 레포가
+ * 「카드는 배너가 아니다」로 정해 둔 그 측정값이다.
+ *
+ * ## 전면 문턱이 600px 이 아니라 1200px 인 이유 (design-review M3)
+ *
+ * 1차 문턱은 600px 이었고, 그 위 어디에서나 서랍은 640px 로 서고 라우트는 남는
+ * 만큼 보였다. 실측이 그것을 깼다: 899px 창에서 라우트 상자는 899-240=659px 이라
+ * 서랍 오른쪽에 **19px** 이 남고, 그 띠에 컴포저 전송 버튼의 반원이 세로로 잘려
+ * 걸린다. 「반쯤 가려진 컨트롤은 아예 가려진 것보다 나쁘다」는 바로 이 판을 두고
+ * 한 말인데, 정작 그 규칙은 폰 폭에만 걸려 있었다.
+ *
+ * 새 문턱은 셋을 더한 값이다: 사이드바 240 + 서랍 640(`--spacing-pane-lg`) +
+ * 라우트에 남길 최소 한 칸 320(`--spacing-pane`, 이 레포가 「패널 하나」로 정해
+ * 둔 그 측정값). 그래서
+ *
+ *   < 1200px   서랍이 라우트 상자를 통째로 받는다 (조각 띠가 존재할 수 없다)
+ *   >= 1200px  서랍 640 + 라우트 최소 320 — 남는 것이 띠가 아니라 칸이다
+ *
+ * 1200px 정확히에서 서랍의 오른쪽 끝(640)과 작업 패널의 왼쪽 끝(659-320)이 만나
+ * **둘이 겹치는 구간이 없다**. 작업 패널이 같은 종류의 실측으로 900px 을 고른
+ * 계보 그대로다(`work-panel-pane`). */
+@utility ade-drawer {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 0;
+  inline-size: 100%;
+  max-inline-size: var(--spacing-pane-lg);
+  /* 덮는 표면들과 같은 층(20)이 아니라 그 **한 칸 위**다. 스크림이 20 에 서서
+   * 작업 패널(`work-panel-pane`)과 작업 세션 패널(`work-pane`, 넓게 보기)을
+   * 눌러야 하는데, 그 둘도 20 이라 같은 값이면 순서가 DOM 에 달린다. 서랍만
+   * 21 로 올려 두면 그 셋 중 누가 먼저 그려지든 서랍은 언제나 맨 위다.
+   * 사이드바 서랍(30)은 그대로 이 모두의 위에 선다. */
+  z-index: 21;
+
+  @media (width < 1200px) {
+    max-inline-size: none;
+  }
+}
+
+/* 관제 서랍이 물러나게 한 표면 (design-review ADE 2단계 H2).
+ *
+ * 사이드바 서랍의 `sidebar-scrim` 과 같은 장치이고 같은 값을 쓴다: `--scrim` 으로
+ * 뒤를 눌러 놓고, 진짜 <button> 이라 바깥을 눌러 닫는 것이 마우스 전용 행동이 되지
+ * 않는다. 서랍(21)보다 아래, 덮인 표면들과 같은 20 에 서되 DOM 에서 그것들 **뒤**에
+ * 있어 위에 그려진다.
+ *
+ * 라우트 상자에 `inset: 0` 하므로 작업 패널까지 함께 덮는다. 그것이 의도다 —
+ * 서랍이 열려 있는 동안 그 상자 안의 어떤 표면도 받지 않는다는 사실을 한 장으로
+ * 말하고, `inert` 가 같은 경계를 탭 순서에서 긋는다. */
+@utility ade-scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  background: var(--scrim);
+
+  &:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -4px;
   }
 }
 
@@ -601,10 +993,80 @@
     border-color: var(--line);
   }
 
+  /* 긴 무공백 토큰 (goal B9) ---------------------------------------------
+   *
+   * 서버가 쓴 글에는 띄어쓰기가 없는 덩어리가 섞인다: 게이트웨이가 뱉은 URL 한 줄,
+   * sha256 다이제스트, 절대 경로, 사람이 붙여 쓴 핸들. 이 덩어리는 줄바꿈 기회가
+   * 하나도 없으므로 flex/grid 자식의 **자동 최소 크기**(`min-width: auto`, 즉
+   * min-content)를 자기 폭만큼 밀어올리고, 그 자식은 390px 화면에서 1171px이 된다
+   * (실측: 타임라인 스크롤러 +781px). 결과는 좌우로 끌리는 채널 표면 —
+   * 아바타와 왼쪽 여백이 화면 밖으로 밀려 나간 성재 실캡처의 그 화면이다.
+   *
+   * `overflow-wrap: break-word`로는 이것을 막을 수 없다. break-word는 **줄을 그릴
+   * 때** 넘칠 낱말을 쪼개지만 min-content 계산에는 참여하지 않아서, 상자가 이미
+   * 낱말 크기로 커진 뒤에는 쪼갤 일이 없다. min-content 자체를 낮추는 값은
+   * `anywhere` 하나뿐이다(CSS Text §5.5).
+   *
+   * `:where()`라 특정도가 0이다: `truncate`(white-space: nowrap)를 쓰는 자리는
+   * 지금처럼 한 줄로 자르고 말줄임을 남긴다 — nowrap이면 줄바꿈 기회 자체가 없어
+   * 이 규칙이 들어설 자리가 없기 때문이고, 그래서 이름·제목의 생김새는 변하지
+   * 않는다. 목록도 닫혀 있다: 글이 흐르는 상자만 넣고, 컨트롤(button, input)은
+   * 넣지 않는다.
+   *
+   * 이 규칙이 없어도 메시지 **본문**은 이미 멀쩡했다(실측: Chromium/WebKit 양쪽
+   * 모두 390px에서 URL을 접었다). 본문에는 `min-w-0 flex-1` 조상이 있었기
+   * 때문이고, 그 조상이 없는 자리 — 행 머리의 이름·소유자·시각, 카드의 값 —
+   * 이 밀렸다. 조상 사슬을 한 줄씩 고치는 대신 규칙을 아래에 깔아 둔다: 다음에
+   * 생길 상자도 같은 성질을 물려받아야 한다. */
+  :where(
+      p,
+      span,
+      li,
+      dd,
+      dt,
+      a,
+      time,
+      code,
+      strong,
+      em,
+      small,
+      label,
+      summary,
+      figcaption,
+      blockquote,
+      td,
+      th,
+      h1,
+      h2,
+      h3,
+      h4,
+      h5,
+      h6
+    ) {
+    overflow-wrap: anywhere;
+  }
+
+  /* 같은 규칙의 그림 판. 폭이 정해지지 않은 이미지는 자기 원본 크기로 서서 상자를
+   * 밀어낸다. 아직 타임라인에 이미지는 없지만, 규칙이 먼저 있어야 첫 이미지가
+   * 조용히 들어온다. */
+  :where(img, video, canvas) {
+    max-inline-size: 100%;
+  }
+
   html,
   body,
   #root {
     height: 100%;
+  }
+
+  /* 브라우저가 가져가는 스크롤 (goal B9). 문서 끝에서 한 번 더 당기면 안드로이드
+   * 크롬은 페이지를 다시 읽고(pull-to-refresh), iOS는 화면 전체를 끌어당긴다.
+   * 이 앱에서 아래로 당기는 몸짓은 언제나 "더 보여달라"이지 "처음부터 다시
+   * 열어달라"가 아니다. 상자 안쪽은 `overscroll-contain`이 같은 일을 하고(타임라인과
+   * 채널 목록이 그것을 단다), 여기는 그
+   * 상자들 **바깥**, 즉 문서 자신을 막는다. */
+  html {
+    overscroll-behavior-y: contain;
   }
 
   body {
@@ -615,10 +1077,124 @@
     font-size: var(--text-body);
     line-height: var(--text-body--line-height);
     -webkit-font-smoothing: antialiased;
+    /* 모바일 사파리는 가로로 돌리면 본문 글자를 제멋대로 키운다. 이 앱의 텍스트
+     * 역할은 닫힌 집합이므로(§3), 그 자동 보정은 스케일을 깨는 쪽으로만 작동한다. */
+    text-size-adjust: 100%;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  /* 폰 (B6) --------------------------------------------------------------- */
+  @media (width < 600px) {
+    /* `height: 100%`는 iOS 사파리에서 **주소창이 접힌** 큰 뷰포트를 가리킨다.
+     * 그래서 셸의 마지막 줄(컴포저)이 주소창 뒤로 들어가 잘렸다. B6은 이것을
+     * `100dvh`로 바꿨는데, 그것으로도 부족하다는 것이 성재 실캡처에서 드러났다:
+     * 사파리의 하단 툴바가 서 있는 동안에도 `100dvh`는 844px을 답하고 실제로
+     * 보이는 것은 744px이라, 컴포저는 여전히 88px만큼 툴바 뒤에 있었다(실측).
+     *
+     * 그래서 높이의 근거를 브라우저가 **말해 주는 값**으로 바꾼다:
+     * `--app-viewport-height`는 visualViewport가 답한 지금 보이는 높이이고
+     * (src/app/viewportHeight.ts), 그 값이 아직 없을 때만 `100dvh`가 답한다.
+     * 키보드가 올라올 때도 같은 경로로 따라온다.
+     *
+     * 데스크탑에서는 세 값이 모두 같으므로 이 규칙은 폰 안에 둔다 — 넓은 창의 셸
+     * 높이 계약(MOMO-610, gate:shell)은 건드리지 않는다. */
+    html,
+    body,
+    #root {
+      height: var(--app-viewport-height);
+    }
+
+    /* 회색 사각형 (goal B9). iOS는 누른 링크·버튼 위에 자기 하이라이트를 한 겹
+     * 얹는데, 이 앱의 컨트롤은 이미 자기 눌림 상태를 갖고 있고(사파리는 탭에
+     * `:hover`를 적용한다) 그 위에 덧칠된 회색 사각형은 우리 반지름과 어긋난 모서리
+     * 로 나타나 웹페이지를 누른 느낌을 준다. 지우는 것은 겹친 층이지 피드백이
+     * 아니다. */
+    a,
+    button,
+    summary,
+    [role="button"] {
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    /* iOS 사파리는 16px보다 작은 폼 컨트롤에 포커스가 가면 **페이지를 확대한다**.
+     * 컴포저는 14px(--text-body)이므로 메시지를 쓸 때마다 화면이 튀고, 확대된
+     * 채로 남아 가로 스크롤이 생겼다. 확대를 막는 유일한 방법은 컨트롤 글자를
+     * 16px로 두는 것이다(user-scalable=no는 접근성을 끄는 것이라 쓰지 않는다).
+     * 16px는 임의값이 아니라 이미 있는 역할 --text-title이다. */
+    input,
+    textarea,
+    select {
+      font-size: var(--text-title);
+      line-height: var(--text-title--line-height);
+    }
   }
 
   /* Numbers never jitter: counters, seq, cost. */
   :where([data-numeric]) {
     font-variant-numeric: tabular-nums;
+  }
+}
+
+/* 폰에서 1급 액션의 오터치 방어 (B6 design-review H1). 데스크탑 밀도는 그대로
+ * 두고, 오터치 비용이 가장 큰 컨트롤(승인·거부·확정류와 route 헤더 액션·필터
+ * 탭)만 좁은 폭에서 44px 최소 높이를 받는다. 대상 선택은 testid 관례를 탄다. */
+@media (width < 600px) {
+  [data-testid$="-approve"],
+  [data-testid$="-reject"],
+  [data-testid$="-commit"],
+  [data-testid$="-cancel"],
+  [role="tablist"] [role="tab"],
+  [data-mobile-tap="primary"] {
+    min-height: var(--tap-target);
+  }
+}
+
+/* 홈 화면에서 열렸을 때 (goal B10) ------------------------------------------
+ * 주소창이 사라지면 셸의 첫 줄은 상태바(시계·배터리)와 맞닿는다. 브라우저 탭에
+ * 서는 그 자리를 브라우저 크롬이 차지하고 있었으므로, 이 규칙은 홈 화면에서 연
+ * 경우에만 필요하다.
+ *
+ * env()가 판단을 대신한다. iOS는 상태바 스타일이 default일 때 웹뷰를 상태바
+ * 아래로 내려 주므로 inset이 0이고, 그때 이 규칙은 아무 일도 하지 않는다.
+ * translucent로 바뀌거나 안드로이드가 상태바 아래까지 그리게 되면 같은 줄이
+ * 그만큼 물러난다. 숫자를 적어 두는 대신 기기에게 묻는다.
+ *
+ * 물러나는 것이 셸(.app-shell)이 아닌 이유: 서랍(sidebar-drawer)과 스레드 패널은
+ * `.app-shell`의 패딩 상자를 기준으로 `inset: 0` 하므로, 셸에 패딩을 주면 서랍만
+ * 그 패딩을 뚫고 올라가 상태바 밑으로 들어간다.
+ *
+ * body가 아닌 이유는 실측이다: 위 폰 규칙이 `html, body, #root` 셋 모두에
+ * 100dvh를 주므로, body만 패딩을 받으면 body의 콘텐츠 상자는 785px로 줄어드는데
+ * #root는 여전히 자기 100dvh(844px)를 주장한다. 그 59px 차이가 그대로 문서
+ * 스크롤이 되어 사이드바를 화면 밖으로 밀어낸다(MOMO-610이 고친 바로 그 증상).
+ * #root가 물러나면 border-box인 100dvh 안에서 패딩이 나뉘므로 문서는 창보다
+ * 커지지 않고, 그 위의 띠는 body의 --surface가 채운다. */
+@media (display-mode: standalone) {
+  #root {
+    padding-block-start: env(safe-area-inset-top, 0px);
+  }
+}
+
+/* 거터의 시계는 hover가 없는 기기에서 **정지 상태로 선다** (U4-5 · 리뷰 W-4) ---
+ *
+ * 연속 행의 시각은 hover(와 포커스)로 드러난다. 그 문법 자체는 옳다 — 5분을
+ * 덮는 묶음마다 시각을 상시로 켜면 타임라인의 밀도가 시계에 먹힌다. 문제는
+ * **hover가 없는 기기**다: 거기서는 그 시각을 드러낼 제스처가 하나도 없으므로,
+ * 「이 말 언제 한 거지」에 답이 없던 진단 H-3의 상태가 그대로 남는다.
+ * (폰 뷰포트에서는 액션 열도 `pointer-only`로 사라지므로 포커스로 드러날
+ * 자식조차 없다.)
+ *
+ * 그래서 규칙을 입력 장치로 가른다 — `pointer-only`/`touch-only`가 이미 쓰는
+ * 그 축이다. 포인터가 있으면 hover가 가르치고, 없으면 시각이 처음부터 서 있다.
+ * 정지 상태의 발견 가능성(리뷰 W-4)은 이 갈래로만 손대고, 포인터 쪽 밀도는
+ * 건드리지 않는다: 그쪽은 묶음 머리 행이 이름 옆에 상시로 시각을 보여 주므로
+ * 「행에 시각이 있다」는 개념이 이미 화면에서 가르쳐진다.
+ *
+ * 레이어 밖에 있으므로 `.opacity-0`(utilities 레이어)을 이긴다. Tailwind의
+ * `opacity-0`과 순서를 다투는 대신 계층으로 이기는 쪽이, 클래스 순서가 바뀌어도
+ * 무너지지 않는다. */
+@media (hover: none) {
+  [data-row-clock] {
+    opacity: 1;
   }
 }

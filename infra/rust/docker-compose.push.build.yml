@@ -1,0 +1,30 @@
+# Local build override for docker-compose.push.yml (goal PUSH-1).
+#
+#   export MOMO_PUSH_RELAY_IMAGE=momo-push-relay:dev
+#   docker compose --env-file infra/rust/rust-smoke.secrets.env \
+#     --env-file infra/rust/push-relay.secrets.env \
+#     -f infra/rust/docker-compose.rust.yml \
+#     -f infra/rust/docker-compose.push.yml \
+#     -f infra/rust/docker-compose.rust.build.yml \
+#     -f infra/rust/docker-compose.push.build.yml \
+#     build push-relay
+#
+# Same split as docker-compose.rust.build.yml: the push overlay stays image-only
+# so a deployed stack always pulls a pinned ref and never builds from a checkout,
+# and this file is the local/pre-publish path. It produces the exact
+# `MOMO_PUSH_RELAY_IMAGE` tag the push overlay references, so `up` after `build`
+# needs no registry.
+#
+# The build context is the repo root (`../..` from this file), not
+# `relay/PushRelay/`: the package depends on `services/MomoMetrics` by path. See
+# the header of relay/PushRelay/Dockerfile.
+#
+# `notifier` gets its build from docker-compose.rust.build.yml's shared anchor
+# only if that file is also passed — it is the same momo-rust image as api and
+# relay, so there is nothing to declare here.
+
+services:
+  push-relay:
+    build:
+      context: ../..
+      dockerfile: relay/PushRelay/Dockerfile

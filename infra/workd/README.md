@@ -1,9 +1,9 @@
 # momo-workd v0 service assets
 
 `momo-workd` is an outbound-only user service. It opens no listener and polls the
-momo REST API for controls addressed to its registered Ed25519 identity. Tool
+oort REST API for controls addressed to its registered Ed25519 identity. Tool
 stdout/stderr is written under `~/.local/share/momo/workd-output/` with mode
-`0600`; it is not sent to the momo server.
+`0600`; it is not sent to the oort server.
 
 After registration, workd reads the enabled workspace `work_tool_profile`
 projection with its signed host identity. The server provides only a portable
@@ -23,7 +23,7 @@ globally with `MOMO_WORKD_CHILD_ENV_MODE=legacy`, or per profile by setting
 
 The checked-in launchd and systemd files are templates consumed by
 `bootstrap.sh`. The bootstrap expects a binary compiled for the target OS and
-architecture, an HTTPS momo server, workspace UUID, and a one-time human access
+architecture, an HTTPS oort server, workspace UUID, and a one-time human access
 token supplied by private file or environment. The token becomes a remote
 mode-`0600` file and is deleted only after registration succeeds and the host ID
 has been saved locally.

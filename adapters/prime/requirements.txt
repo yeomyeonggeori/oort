@@ -1,0 +1,19 @@
+# oort prime adapter — runtime dependencies.
+#
+# There are none, and that is a decision rather than an accident.
+#
+# The adapter's whole job is two HTTP verbs against oort and one JSONL pipe to a
+# subprocess. `urllib.request`, `json`, `subprocess` and `threading` do all of
+# it, so the container's Python needs nothing installed, the gate needs no
+# virtualenv, and the tests can run anywhere python3 exists. `aiohttp` would buy
+# concurrency this process has no use for: one session, one channel, writes that
+# must be ordered anyway.
+#
+# The pinned dependency that DOES matter is not a Python package — it is
+# prime-agent v0.7.0 itself, SHA-256 verified in `container/Dockerfile`. Its RPC
+# surface is a day-1 API that already drifts from its own docs
+# (`refine_complete` is emitted, documented nowhere, absent from the shipped
+# types), so bumping that pin means re-running `tests/` against the new tarball,
+# not editing a version string.
+#
+# If a dependency ever becomes necessary, pin it here and say why in one line.

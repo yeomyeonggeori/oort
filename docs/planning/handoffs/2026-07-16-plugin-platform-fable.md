@@ -39,7 +39,7 @@ ADR-0113 credential/capability/action boundary
 - Workspace install, member OAuth connection, channel enablement and capability grant are distinct states.
 - Official, verified, custom/private and local-developer trust classes share the same ledger contract.
 - Agent sees only currently granted and healthy tools through Context Packet `tool_grants`.
-- All user-visible writes use momo REST -> Postgres -> outbox; direct provider result publication is forbidden.
+- All user-visible writes use oort REST -> Postgres -> outbox; direct provider result publication is forbidden.
 - External write uses `tool_call -> approval_request -> same-run resume -> tool_result -> audit`.
 - Google catalog listing is one `Google Workspace` plugin with separately grantable Drive/Calendar/Gmail bundles.
 - Arbitrary in-process code installation is out of v0.
@@ -55,8 +55,8 @@ ADR-0113 credential/capability/action boundary
 - No OAuth/provider credential in manifest, Context Packet, Memory Plane, Capability Cache, timeline or audit payload.
 - No upstream token passthrough to remote MCP; bind tokens to their intended audience/resource.
 - Revoke must invalidate grants/cache before UI reports success.
-- Tool annotations from untrusted MCP servers cannot define momo risk/approval policy.
-- Provider permissions remain authoritative; momo grants can only narrow them.
+- Tool annotations from untrusted MCP servers cannot define oort risk/approval policy.
+- Provider permissions remain authoritative; oort grants can only narrow them.
 - Source permission is checked at retrieval and action execution, not only at install.
 - Custom plugin manifest must be signed before installable state; unknown publisher defaults fail-closed.
 - Gmail restricted scope is not part of the first reference build.
@@ -69,7 +69,7 @@ ADR-0113 credential/capability/action boundary
 
 Decide credential custody by runtime class:
 
-1. momo-hosted encrypted connector vault
+1. oort-hosted encrypted connector vault
 2. provider-hosted/remote MCP delegated OAuth
 3. user-owned agent host/BYOA credential custody
 4. hybrid policy by plugin runtime
@@ -130,7 +130,7 @@ Do not design UI files. Return state/event/API requirements to `momo-main`.
 
 ## 7. Questions requiring 성재 decision
 
-1. Official hosted connectors의 refresh token을 Dawn-operated momo server가 보관하는 것을 허용할 것인가?
+1. Official hosted connectors의 refresh token을 Dawn-operated oort server가 보관하는 것을 허용할 것인가?
 2. Self-hosted 배포에서 token vault key owner는 server admin인가, per-user Keychain인가, 외부 secret manager인가?
 3. Google Workspace v0가 selected-file only로 시작해도 되는가, 아니면 broad Drive search가 필수인가?
 4. Gmail restricted-scope 검증 비용을 v0에서 감수할 것인가?

@@ -5,7 +5,7 @@
 
 ## 1. Purpose
 
-`agent_run` is momo's durable task row. It is the stateful unit of work that connects:
+`agent_run` is oort's durable task row. It is the stateful unit of work that connects:
 
 - a human-visible channel/thread timeline,
 - the immutable Context Packet for a run,
@@ -14,7 +14,7 @@
 - Hermes/Kim Intern/OpenAI-compatible execution,
 - approval, usage, audit, and artifact records.
 
-This document aligns `agent_run` with the A2A-style Task lifecycle while preserving momo's invariant that Postgres is the source of truth and Centrifugo is only the delivery layer.
+This document aligns `agent_run` with the A2A-style Task lifecycle while preserving oort's invariant that Postgres is the source of truth and Centrifugo is only the delivery layer.
 
 Reference: A2A protocol specification, especially Task, TaskStatus/TaskState, Message, Artifact, TaskStatusUpdateEvent, and TaskArtifactUpdateEvent: <https://a2a-protocol.org/latest/specification/>.
 
@@ -78,12 +78,12 @@ Rules:
 
 ## 4. A2A Mapping
 
-| A2A concept | momo source of truth | Notes |
+| A2A concept | oort source of truth | Notes |
 |---|---|---|
 | Agent Card | `member.kind='agent'` + Capability Cache `agent_capability` | Agent discovery is a cache/policy projection, not permission by itself. |
 | Agent skill/capability | Capability Cache `agent_capability`, `plugin_tool_schema`, `mcp_tool_list` | Projected into Context Packet `tool_grants` after policy checks. |
 | Task | `agent_run` | One durable row per invocation/turn. `agent_run.id` is the task id. |
-| Task context id | workspace + channel + thread root + Context Packet id | A2A `contextId` groups tasks/messages. momo uses tenant/channel/thread scope and immutable packet references. |
+| Task context id | workspace + channel + thread root + Context Packet id | A2A `contextId` groups tasks/messages. oort uses tenant/channel/thread scope and immutable packet references. |
 | Task status | `agent_run.status` | Public states are the seven states in section 2. |
 | Task status update | `agent.status` event | Event delivery is Centrifugo; durable state remains Postgres. |
 | Message | `message` | Same table for human and agent messages. `message.run_id` links outputs to the task. |
@@ -92,7 +92,7 @@ Rules:
 | Artifact | `message.type='artifact'` + Memory Plane `artifact_ref` | Timeline card is the visible artifact; Memory Plane stores durable references and retrieval policy. |
 | Artifact update | `message.new`/`message.edited` for artifact cards + optional `agent.partial` | Final artifact writes follow REST/DB/outbox. Progress chunks may be ephemeral. |
 | Input required | `agent_run.status='input_required'` + agent question message | Follow-up input resumes the same run context or creates a child run with `parent_run_id`. |
-| Approval required | `agent_run.status='awaiting_approval'` + `approval(status='pending')` + `approval_request` message | This is momo-specific policy control, not a generic A2A input request. |
+| Approval required | `agent_run.status='awaiting_approval'` + `approval(status='pending')` + `approval_request` message | This is oort-specific policy control, not a generic A2A input request. |
 | Cancel task | future cancel endpoint updates `agent_run.status='cancelled'` | Worker must stop/reconcile budget and write audit. |
 | Push notification | outbox/realtime/APNs future path | Push delivery must mirror the same task/message/artifact updates. |
 
@@ -128,7 +128,7 @@ Rules:
 | `workers/AgentWorker RunStatus` | Local enum mixes UI phases (`thinking`, `streaming`, `done`, `error`) with `awaiting_approval`. | Split durable lifecycle from UI phase in future runtime event payloads. | Follow-up runtime refactor; current behavior remains compile/runtime-compatible. |
 | `WorkerService.updateRunStatus` | Maps `thinking/streaming` -> `running`, `done` -> `succeeded`, `error` -> `failed`, `awaitingApproval` -> `awaiting_approval`. | Add `inputRequired` only after DB migration exists; do not map it to `paused` for new writes. | Follow-up MOMO-161/runtime work. |
 | `approval` table | Durable approval gate exists. | Only `awaiting_approval` may depend on `approval(status='pending')`. | MOMO-161 implements pause/resume. |
-| Hermes/OpenAI SSE | Emits text/tool/usage/error events, not A2A task states. | AgentWorker normalizes transport events into momo lifecycle + phase. | No Hermes protocol change in this ticket. |
+| Hermes/OpenAI SSE | Emits text/tool/usage/error events, not A2A task states. | AgentWorker normalizes transport events into oort lifecycle + phase. | No Hermes protocol change in this ticket. |
 | Server REST | No public task get/cancel/resume API yet. | Future APIs should expose the seven-state lifecycle and preserve `message.seq` ordering. | Follow-up MOMO-160 implementation slice or MOMO-161/163. |
 
 ## 7. Future Migration Sketch

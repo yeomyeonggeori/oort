@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CADisableMinimumFrameDurationOnPhone</key>
+	<true/>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleDisplayName</key>
+	<string>oort</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<!-- CFBundleDisplayName 이 이미 oort 이지만, 그것이 없거나 잘릴 때 OS가 읽는
+	     짧은 이름은 CFBundleName 이다. PRODUCT_NAME(=MomoMobile, 실행파일·타깃명)은
+	     건드리지 않고 표시용 이름만 분리한다(ADR-0152 D2-1). -->
+	<key>CFBundleName</key>
+	<string>oort</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>$(MARKETING_VERSION)</string>
+	<key>CFBundleSignature</key>
+	<string>????</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>app.momo.ios.join</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>oort</string>
+				<string>momo</string>
+			</array>
+		</dict>
+	</array>
+	<key>CFBundleVersion</key>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>LSRequiresIPhoneOS</key>
+	<true/>
+	<!-- Carried over from clients/iOS/XcodeHost/Info.plist:50 (audit 2026-08-02 §7.2 #9).
+	     $(APS_ENVIRONMENT) is set per configuration in project.pbxproj
+	     (Debug=development, Release=production) and is the ONLY thing that tells the
+	     device-registration call whether this build's APNs token is a sandbox or a
+	     production token. Drop this key and the code falls back to `__DEV__`, which
+	     means a Release build registers a production token as sandbox and every push
+	     silently goes nowhere. -->
+	<key>MomoAPNSEnvironment</key>
+	<string>$(APS_ENVIRONMENT)</string>
+	<!-- Read by MomoPushShared/PushNotification.swift:30-32 in BOTH processes to
+	     build kSecAttrAccessGroup. Must match keychain-access-groups in both
+	     entitlement files. -->
+	<key>MomoKeychainAccessGroup</key>
+	<string>$(AppIdentifierPrefix)app.momo.ios.shared</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<false/>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>같은 네트워크에 있는 oort 서버에 연결합니다.</string>
+	<key>RCTNewArchEnabled</key>
+	<true/>
+	<!-- ADR-0120 D2-A sends `content-available: 1` alongside `mutable-content: 1`
+	     (relay/PushRelay/Sources/PushRelay/PushDispatch.swift:112-113). Without this
+	     background mode the content-available half is dropped and the app is never
+	     woken to refresh behind the notification. -->
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>remote-notification</string>
+	</array>
+	<key>UILaunchStoryboardName</key>
+	<string>LaunchScreen</string>
+	<key>UIRequiredDeviceCapabilities</key>
+	<array>
+		<string>arm64</string>
+	</array>
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+	</array>
+	<key>UISupportedInterfaceOrientations~ipad</key>
+	<array>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationPortraitUpsideDown</string>
+	</array>
+	<key>UIViewControllerBasedStatusBarAppearance</key>
+	<false/>
+</dict>
+</plist>

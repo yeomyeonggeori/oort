@@ -8,7 +8,7 @@
 
 Paca shows a useful ecosystem shape: core monorepo, plugin catalog, first-party plugins, plugin SDKs, MCP package, and separate deploy artifacts. OpenHands shows another shape: agent frontend/control center separated from agent server/backends. Linear/GitHub/Rovo show that existing work systems are becoming agent-accessible through MCP, coding agents, and governed automation.
 
-momo currently has a different center of gravity. It is not a board-first project manager and not a coding-agent-only canvas. momo's center is the channel timeline as a governed execution ledger for humans, AI agents, and plugins.
+oort currently has a different center of gravity. It is not a board-first project manager and not a coding-agent-only canvas. oort's center is the channel timeline as a governed execution ledger for humans, AI agents, and plugins.
 
 The repo topology must therefore protect two things:
 
@@ -59,7 +59,7 @@ A new repo is not justified when:
 
 ## Plugin ecosystem layering
 
-momo plugin v0 should be manifest-first.
+oort plugin v0 should be manifest-first.
 
 Minimum plugin manifest fields:
 
@@ -72,9 +72,9 @@ Minimum plugin manifest fields:
 - `source_policy`: what source refs can enter Context Packet and Memory Plane.
 - `audit_surface` and `audit_policy`: timeline/admin/source/cost events emitted on proposal, approval, tool result, failure, revoke, and memory revalidation.
 - `license` and `provenance`: SPDX license, notice requirements, source repo, release ref, build digest, publisher verification.
-- `compatibility` and `signature`: momo protocol versions, client card versions, artifact digest, signature ref.
+- `compatibility` and `signature`: oort protocol versions, client card versions, artifact digest, signature ref.
 
-Paca uses WASM for backend plugin isolation. momo should not adopt a WASM runtime immediately. The first practical step is governed external connectors plus capability metadata because momo already has approval/cost/audit primitives. WASM or other sandboxed in-process plugins become M5+ only after manifest, catalog, signed artifacts, and permission model are stable.
+Paca uses WASM for backend plugin isolation. oort should not adopt a WASM runtime immediately. The first practical step is governed external connectors plus capability metadata because oort already has approval/cost/audit primitives. WASM or other sandboxed in-process plugins become M5+ only after manifest, catalog, signed artifacts, and permission model are stable.
 
 Catalog classes are fixed by the Plugin Manifest v0 spec: core bundled plugin, first-party repo plugin, third-party/custom plugin, and private enterprise plugin. All classes share the same path: manifest/catalog evidence -> Capability Cache `plugin_tool_schema` -> Context Packet `tool_grants` -> approval metadata gate -> channel timeline/audit result. The catalog is therefore an execution-ledger trust index, not a generic backend app directory.
 

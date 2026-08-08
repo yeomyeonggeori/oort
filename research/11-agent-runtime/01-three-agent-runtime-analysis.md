@@ -6,9 +6,9 @@
 
 ## 1. Conclusion
 
-momo should become the host of agent work, not another channel adapter attached to an agent runtime.
+oort should become the host of agent work, not another channel adapter attached to an agent runtime.
 
-Hermes and openclaw are strongest when they connect an agent to existing messaging surfaces. momo's strongest position is the reverse: the messenger owns the context packet, permission boundary, approval pause point, audit trail, and cost ledger, then calls an agent runtime through a narrow transport.
+Hermes and openclaw are strongest when they connect an agent to existing messaging surfaces. oort's strongest position is the reverse: the messenger owns the context packet, permission boundary, approval pause point, audit trail, and cost ledger, then calls an agent runtime through a narrow transport.
 
 ```mermaid
 flowchart LR
@@ -23,30 +23,30 @@ flowchart LR
   T --> R["Centrifugo transport"]
 ```
 
-This preserves momo's core invariant: all visible work is committed to Postgres first and then transported.
+This preserves oort's core invariant: all visible work is committed to Postgres first and then transported.
 
 ## 2. Hermes Agent
 
 Hermes is a useful reference because it already treats messaging platforms as first-class front doors. Its gateway can connect to Telegram, Discord, Slack, Mattermost, Matrix, LINE, Teams, browser, and others, and routes each platform adapter through a per-chat session store. It also runs cron jobs and delivery flows from the same gateway process. Source: [Hermes Messaging Gateway](https://hermes-agent.nousresearch.com/docs/user-guide/messaging/).
 
-Hermes also has memory/runtime features momo should learn from, not blindly delegate: agent-curated memory, FTS5 session search, skill improvement, subagents, terminal backends, and trajectory compression. Source: [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent).
+Hermes also has memory/runtime features oort should learn from, not blindly delegate: agent-curated memory, FTS5 session search, skill improvement, subagents, terminal backends, and trajectory compression. Source: [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent).
 
-### momo Integration Decision
+### oort Integration Decision
 
 Use two distinct paths:
 
 | Path | Direction | Purpose | Product role |
 |---|---|---|---|
-| Hermes platform adapter | Hermes -> momo | Lets a Hermes gateway live inside momo as a platform | Useful compatibility path |
-| momo AgentWorker transport | momo -> Hermes | momo invokes Hermes/Kim Intern under momo context, approval, cost, audit | Product default path |
+| Hermes platform adapter | Hermes -> oort | Lets a Hermes gateway live inside oort as a platform | Useful compatibility path |
+| oort AgentWorker transport | oort -> Hermes | oort invokes Hermes/Kim Intern under oort context, approval, cost, audit | Product default path |
 
-The second path should be canonical. If Hermes memory suggests context, momo may import it as sourced hints, but momo should not expose raw workspace history to Hermes memory without explicit context-packet construction.
+The second path should be canonical. If Hermes memory suggests context, oort may import it as sourced hints, but oort should not expose raw workspace history to Hermes memory without explicit context-packet construction.
 
 ### Protocol Notes
 
 - Transport baseline: OpenAI-compatible `/v1/chat/completions` with SSE.
 - Required event normalization: `text_delta`, `tool_call`, `tool_progress`, `usage`, `done`, `error`.
-- Required momo-owned metadata: `workspace_id`, `channel_id`, `run_id`, `trigger_message_id`, `context_packet_id`, `idempotency_key`.
+- Required oort-owned metadata: `workspace_id`, `channel_id`, `run_id`, `trigger_message_id`, `context_packet_id`, `idempotency_key`.
 - Dangerous tool calls must pause `agent_run`; they are not just rendered as cards.
 
 ## 3. internkim / Kim Intern
@@ -61,12 +61,12 @@ Kim Intern should be made compatible with the same minimum contract as Hermes:
 - `stream=true` SSE.
 - Function/tool calls with stable `call_id`, `name`, and JSON arguments.
 - Usage reporting with prompt, completion, cached, and reasoning tokens when available.
-- Idempotency key support, or momo-side idempotency around a stateless endpoint.
+- Idempotency key support, or oort-side idempotency around a stateless endpoint.
 - No direct workspace DB access. All workspace context arrives through `Context Packet v0`.
 
 ### Memory Boundary
 
-Kim Intern may have its own memory, but momo should treat it as untrusted external memory unless imported through the Memory Plane.
+Kim Intern may have its own memory, but oort should treat it as untrusted external memory unless imported through the Memory Plane.
 
 Allowed:
 
@@ -84,9 +84,9 @@ Not allowed by default:
 
 openclaw is valuable as an adapter and approval-runtime design reference. Its channel plugin docs split native approval delivery into capability/route gates plus smaller pieces such as availability, presentation, transport, interactions, and observation. Source: [OpenClaw channel plugins](https://docs.openclaw.ai/plugins/sdk-channel-plugins).
 
-momo should copy the architecture idea, not the code:
+oort should copy the architecture idea, not the code:
 
-| openclaw lesson | momo adaptation |
+| openclaw lesson | oort adaptation |
 |---|---|
 | Channel-specific transport is isolated from core approval policy | Centrifugo/macOS/iOS renderers should not own approval policy |
 | Presentation and interactions are separate | Approval card rendering differs per client, decision semantics stay server-owned |
@@ -94,11 +94,11 @@ momo should copy the architecture idea, not the code:
 
 ## 5. Competitive Reading
 
-Hermes and openclaw both show that the next interface is not "one chatbot in one app." It is a mesh of channels, tools, memory, approvals, and long-running jobs. momo can win only if it makes those pieces inspectable in a team timeline.
+Hermes and openclaw both show that the next interface is not "one chatbot in one app." It is a mesh of channels, tools, memory, approvals, and long-running jobs. oort can win only if it makes those pieces inspectable in a team timeline.
 
 The resulting product sentence:
 
-> momo is the work ledger for human and AI teammates: every context decision, tool call, approval, cost, memory citation, and result is visible, permissioned, and replayable in the channel.
+> oort is the work ledger for human and AI teammates: every context decision, tool call, approval, cost, memory citation, and result is visible, permissioned, and replayable in the channel.
 
 ## 6. Sources
 

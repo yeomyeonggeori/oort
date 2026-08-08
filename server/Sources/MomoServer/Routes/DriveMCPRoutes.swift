@@ -3,7 +3,7 @@ import Hummingbird
 import Logging
 import PostgresNIO
 
-/// ADR-0113 D3 path C: momo-hosted, read-only Google Drive MCP.
+/// ADR-0113 D3 path C: oort-hosted, read-only Google Drive MCP.
 ///
 /// The route is stateless JSON-RPC. Agent bearer authentication happens in
 /// `AuthMiddleware`; every request then proves the delegated human and agent

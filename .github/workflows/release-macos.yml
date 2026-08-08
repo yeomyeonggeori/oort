@@ -61,17 +61,17 @@ jobs:
           set -euo pipefail
           brew install create-dmg || true
           create-dmg \
-            --volname "momo" \
+            --volname "oort" \
             --window-size 540 380 \
             --app-drop-link 400 180 \
-            "build/momo-${{ github.ref_name }}.dmg" "build/MomoMac.app" || \
-          hdiutil create -volname "momo" -srcfolder build/MomoMac.app -ov -format UDZO \
-            "build/momo-${{ github.ref_name }}.dmg"
+            "build/oort-${{ github.ref_name }}.dmg" "build/MomoMac.app" || \
+          hdiutil create -volname "oort" -srcfolder build/MomoMac.app -ov -format UDZO \
+            "build/oort-${{ github.ref_name }}.dmg"
           # dmg 자체도 서명+공증 권장(엄격 배포 시):
-          # codesign --sign "Developer ID Application: ..." "build/momo-*.dmg"
+          # codesign --sign "Developer ID Application: ..." "build/oort-*.dmg"
 
       - name: GitHub Release 업로드
         uses: softprops/action-gh-release@v2
         with:
-          files: build/momo-*.dmg
+          files: build/oort-*.dmg
           fail_on_unmatched_files: true

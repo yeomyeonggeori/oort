@@ -9,14 +9,14 @@
 1. **현행 배포는 운영자 수동 런북 단계다**: prod compose 8서비스 + SOPS 시크릿 + pgBackRest + GHCR 수동 발행 + preflight까지 뼈대는 동체급 표준을 충족하지만(`research/15-platform-expansion/00`), `install.sh`/`upgrade.sh`는 ADR-0002가 예약만 해둔 미구현 레이어다(`docs/adr/0002-docker-compose-layering.md:28,99-123`). "비개발자 친화 포장"은 없다.
 2. **초대는 서버 안에서 끝난다**: invite hash 발급/redeem/revoke + 공개 `/v1/join`(`server/Sources/MomoServer/Routes/JoinRoutes.swift:20-57`)은 견고하나, 앱 미설치자·미가입자를 관통하는 링크(universal link) 표면이 없다. ADR-0119의 웹 합류가 이 관통의 1차 랜딩이 된다 — 성재의 "웹 먼저"와 맞물리는 지점.
 3. **업계 검증 완료**(15-02): 온보딩 완성형은 Rocket.Chat(`go.rocket.chat/invite` — 링크 하나로 설치→서버 등록→가입 관통), BM 완성형은 Zulip(전부 permissive·전 기능 무료 셀프호스팅·수익은 호스팅/relay/지원), 반면교사는 Rocket.Chat 운영 복잡성(단일 노드도 replica set 강제)과 Element(기본 공개 서버 내장이 스토어 정지 유발). 단일 노드 상한 숫자 명시는 Mattermost 관행("2,000 동시까지 단일 서버").
-4. **초대 보안 교훈**: Zulip CVE-2022-21706(재사용 초대 링크의 타 조직 가입) — momo invite hash는 워크스페이스 바인딩이 이미 있으나(`server/Migrations/003_onboarding.sql`), universal link 도입 시 만료·역할 바인딩·regenerate 계약을 명문화해야 한다.
+4. **초대 보안 교훈**: Zulip CVE-2022-21706(재사용 초대 링크의 타 조직 가입) — oort invite hash는 워크스페이스 바인딩이 이미 있으나(`server/Migrations/003_onboarding.sql`), universal link 도입 시 만료·역할 바인딩·regenerate 계약을 명문화해야 한다.
 
 ## Options
 
 ### D1. 배포 포장 수준
 - **A (권고, v1) — compose + `install.sh`/`upgrade.sh`**: ADR-0002 계약 그대로 — pinned image digest, 마이그레이션 순서, 롤백, preflight 통합. 대상 사용자는 "터미널을 열 수 있는 운영자 1명"(팀마다 1명이면 된다). 설치 문서는 "5분 설치" 기준으로 재작성하고 **단일 노드 상한을 숫자로 명시**(v1 문서 기준 "동시 수백 명" 보수 표기 — Mattermost 관행).
 - B (v1.5) — 클라우드 마켓플레이스 원클릭 이미지(DO/Lightsail 등): A의 스크립트가 안정된 뒤 그 위에 포장. **순서상 후속** — A 없이 B를 먼저 만들면 upgrade 경로가 사유화된다.
-- C — momo Cloud(Dawn 호스팅 managed): BM상 필요하지만 배포판 ADR의 범위 밖 별도 트랙. **범위 제외**(BM 절에서만 언급).
+- C — oort Cloud(Dawn 호스팅 managed): BM상 필요하지만 배포판 ADR의 범위 밖 별도 트랙. **범위 제외**(BM 절에서만 언급).
 
 ### D2. 초대 관통 (universal link)
 - **A (권고) — `momo.app/i/<code>`형 Dawn 운영 단축 링크 + 웹 우선 랜딩**: 링크 하나가 ① 웹(ADR-0119)에서 즉시 합류(무설치 — 1차 경로) ② 앱 보유 시 딥링크(`momo://join?...`)로 앱 합류 ③ iOS 출시 후 스토어 유도까지 관통. Dawn이 단축 도메인만 운영하고 **초대 코드 검증·가입은 전부 대상 셀프호스트 서버에서** 일어난다(코드가 Dawn에 저장되지 않음 — 링크는 `서버 URL + hash`의 포장일 뿐).
@@ -30,8 +30,8 @@
 - install.sh가 마지막 단계에서 서버를 Dawn relay에 등록(서버 ID+공개키 발급)하고 실패해도 설치는 성공(푸시만 비활성 — 나머지 기능은 relay 없이 완전 동작). 오프그리드 설치를 1급으로 지원한다는 선언.
 
 ### D5. BM 경계
-- **A (권고) — Zulip 모델**: 셀프호스팅은 전 기능 무료·기능 게이팅 없음(permissive 하드 룰과 유일 정합). 수익원은 ① momo Cloud(managed 호스팅) ② relay 대량 사용·SLA ③ 지원/컨설팅. **기능을 파는 게 아니라 운영을 판다.**
-- B — 오픈코어(EE 폴더): Mattermost/Rocket.Chat 모델 — momo의 신뢰 포지셔닝·permissive 원칙과 충돌. **기각.**
+- **A (권고) — Zulip 모델**: 셀프호스팅은 전 기능 무료·기능 게이팅 없음(permissive 하드 룰과 유일 정합). 수익원은 ① oort Cloud(managed 호스팅) ② relay 대량 사용·SLA ③ 지원/컨설팅. **기능을 파는 게 아니라 운영을 판다.**
+- B — 오픈코어(EE 폴더): Mattermost/Rocket.Chat 모델 — oort의 신뢰 포지셔닝·permissive 원칙과 충돌. **기각.**
 
 ### D6. 앱의 기본 서버 정책
 - **A (권고) — 기본 공개 서버 비내장**: 모든 클라이언트(웹 랜딩 제외)는 "서버 URL 입력/초대 링크"가 루트. 데모가 필요하면 읽기 전용 데모 서버를 명시 분리(Element Play 정지 교훈 — UGC 모더레이션 책임 회피).
@@ -57,7 +57,7 @@ D1-A(→B 후속) + D2-A(B는 상시 폴백) + D3 + D4 + D5-A + D6-A.
 - (+) 오프그리드(relay 미등록) 설치가 1급 — 폐쇄망 수요 수용.
 - (−) Dawn 운영 표면 확대: 단축 링크 도메인 + relay(0120) — 소규모지만 상시 운영 의무.
 - (−) upgrade 경로의 하위 호환 부담이 공식화된다(마이그레이션 순서 보장은 이미 규율 — `scripts/migrate.sh`).
-- 보류: 마켓플레이스 이미지(D1-B), momo Cloud(별도 트랙), Android 관통(FCM 이후).
+- 보류: 마켓플레이스 이미지(D1-B), oort Cloud(별도 트랙), Android 관통(FCM 이후).
 
 ---
 

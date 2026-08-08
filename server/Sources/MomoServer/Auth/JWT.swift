@@ -35,7 +35,7 @@ struct AppJWTPayload: JWTPayload {
 
 /// Extra JSON attached to Centrifugo's connection token `info` claim.
 ///
-/// Centrifugo uses `sub` as the client user id. momo also carries the workspace
+/// Centrifugo uses `sub` as the client user id. oort also carries the workspace
 /// boundary in `ws` and in `info` so server/client logs can correlate the
 /// connection without allowing channel access by token alone.
 struct RealtimeTokenInfo: Codable, Equatable, Sendable {
@@ -66,7 +66,7 @@ struct RealtimeTokenMeta: Codable, Equatable, Sendable {
 
 /// Centrifugo connection JWT payload.
 ///
-/// Required Centrifugo claims: `sub` and `exp`. momo-specific workspace claim:
+/// Required Centrifugo claims: `sub` and `exp`. oort-specific workspace claim:
 /// `ws`. The `info` string is JSON so Centrifugo can pass it through as client
 /// info without giving it authorization power.
 struct CentrifugoConnectionJWTPayload: JWTPayload {

@@ -1,4 +1,43 @@
-# momo 진행 현황
+# oort 진행 현황
+
+## ADR-0158 서버 축 — `runId` 서비스 개시 · refine 공지 · 어댑터 스트림 (#1130 W-N, 2026-08-08)
+
+- **`POST …/messages`의 `runId` 거절이 풀렸다(D5).** 검증 3종은 전송 트랜잭션 **안**에서 fail-closed다(`momo_agent::authorize_run_binding_in_tx`): run 실재 · 같은 워크스페이스 · 요청 주체가 그 run의 에이전트(`agent_run.agent_member_id == principal.member_id`). 안 보이는 run은 **404**(RLS가 타 테넌트 행을 감추므로 더 구체적인 답은 존재 확인이 된다), 보이지만 남의 것이면 **403**. 통과하면 `message.run_id` 컬럼과 `props.run_id` 사본을 **함께** 쓴다 — 전자는 서버측 닫기가 미완성 답을 찾는 키, 후자는 히스토리 페이지가 `runEnded`를 정하는 키라, 하나만 쓰면 두 독자 중 하나가 못 본다.
+- **취소가 어댑터가 연 스트림을 닫는다(ADR-0155 완전체).** 종전엔 REST로 연 메시지에 `run_id`가 없어 `open_stream_message_for_run_in_tx`가 아무것도 못 찾았고, 닫는 PATCH는 정확히 prime/hermes 경로에서만 조용히 무동작이었다. 신규 conformance가 in-process 스위트의 **여섯 단정을 같은 순서로** 재현한다(동결된 본문 · `outcome: cancelled` · `streaming: false` · `state='sent'`·`editedAt` NULL · 메시지 1행·seq 불변 · 두 번째 닫기는 no-op).
+- **자기수정 공지가 채널 사건이 됐다(D1~D4).** `type: "system"` + 서버 소유 `props["momo.harnessRefine"]`(refinementId·trigger·scope·edits·summary·rollbackId). 멱등 키는 **파생**이다 — `client_msg_id`가 uuid 컬럼(동결층)이라 `RefinementResult.id` 문자열을 `uuidv5(momo.harnessRefi, id)`로 해싱한다(`tool_result` 키와 같은 전례). 다른 값을 보내면 400이 **기대값을 이름 대고** 거절한다. RPC 유래와 파일 관찰 유래가 같은 키로 모여 한 줄이 된다.
+- **유출 금지가 기계적이다.** `harnessRefine`과 그 `edits[]`가 `deny_unknown_fields`라, 하네스 본문(`before`/`after`)을 실은 공지는 **422로 거절**된다 — 조용히 잘려 발신자가 배달됐다고 믿는 경로가 없다. `scope`는 `workspace` 외 전부 400(어댑터는 워크스페이스별 HOME이라 하네스의 `global`을 그대로 옮기면 거짓말이다). `momo.harnessRefine`은 서버 소유 키 목록에 올라 클라이언트 props로는 절대 안 들어간다.
+- **어댑터가 자기 자격증명으로 슬라이스를 쓴다(증보 1 D7 — 성재 승인).** W-N이 적발한 공백: `required_agent_scope` 표가 메시지 라우트를 `POST` **하나만** 매핑해 agent bearer의 `PATCH …/messages/{id}`가 403이었다. Swift 원본에도 없었고 #1152/#1173 conformance는 **사람 로그인**으로 증명해서 아무도 이 질문을 안 했다 — 스파이크가 턴당 17 메시지였던 실제 이유가 이것이다(POST만 열려 있었다). D7이 PATCH 행을 추가했다. **새 스코프는 안 만들었다** — 여는 write와 잇는 write는 같은 행위이고(#1152: 한 턴 = 자라는 한 메시지), 스코프를 가르면 어댑터가 한 문장 쓰는 데 두 개가 필요하고 이미 발급된 `messages:write` 토큰을 전부 재발급해야 한다.
+- **범위를 좁히는 것은 스코프가 아니라 저자 검사다 — 그리고 그건 이미 있었다.** `stream_message_body_in_tx`·`edit_message_in_tx` 둘 다 비저자를 `NotAuthorForEdit`로 **다른 무엇을 보기 전에** 거절하고, 비교 대상 actor는 요청 본문이 주장할 수 없는 자격증명의 멤버다. 그래서 검사는 **추가하지 않고 실측으로 확인만** 했다 — 같은 `messages:write`를 든 두 번째 에이전트의 PATCH가 403이고 본문이 그대로다. 에이전트가 지키는 규칙이 사람이 지키는 규칙과 **같은 하나**이지 병렬 사본이 아니다. `DELETE`는 같은 경로에서 계속 닫혀 있다(메서드로 매칭 — 잇는 것과 무르는 것은 다른 행위이고 스트리밍에 후자는 필요 없다).
+- **red proof 5종 전부 실주행 반전 확인.** ① 소유권 체크 제거 → 남의 run에 대한 POST가 403 대신 **201**. ② 검증 블록 제거 → 타 워크스페이스 run이 404 대신 **201**로 테넌트 타임라인에 들어간다(`message.run_id` FK는 워크스페이스 쌍이 없는 전역 FK이고, uuid를 컬럼에 넣는 것은 그 행을 읽는 게 아니라 RLS가 안 잡는다 — 스위트가 검증 없는 경로를 **실제로 실행해** 커밋을 단정한다). ③ 파생 키 검증 제거 → 한 refinement의 재시도가 **두 줄**이 된다. ④ D7 스코프 행 제거 → 슬라이스가 **403 회귀**. ⑤ 저자 검사 제거 → 남의 답 안에 다른 에이전트의 문장이 **200으로 들어간다**.
+- **검증.** `cargo fmt --check` green · `cargo clippy --workspace --all-targets -D warnings` 0 · `cargo test --workspace` 실패 0 · `run_binding_refine_conformance_pg` 3/3(실 PG18+`momo_app` NOBYPASSRLS) · 인접 실DB 스위트 무회귀(`stream_edit` 9 · `stream_message` 6 · `mention_routing` 13 · `agent_run_cancel` 4 · `run_terminal_backfill` 6 · `http_smoke` 3 · `client_rewire` 4 · `gateway_mode` 2) · `verify_openapi_contract_rust.sh` **PASS 55/55** · `verify_merge_tree.sh` **7레인 green**.
+
+## 게이트 위생 — 14단계가 게이트 경유에서만 빨갛던 이유는 **드리프트한 사본** (#1185, 2026-08-08)
+
+- **증상은 환경 차이였지만 원인은 코드였다.** `local_gate.sh`는 모든 단계를 `bash -lc`(로그인 셸)로 돌린다. 이 기계의 로그인 PATH는 `/usr/bin`을 `/opt/homebrew/bin`보다 앞에 두므로 `ruby`가 **2.6.10**으로 잡히고, psych 3은 `YAML.load_file(..., aliases: true)`의 `aliases:` 키워드를 모른다(`unknown keyword: aliases (ArgumentError)`). 같은 명령을 직접 실주행하면 ruby 4.0.6이 잡혀 초록이었다 — #1181·#1184의 14단계 초록이 전부 직접 실주행이었던 이유.
+- **정작 죽은 자리는 2차 패스였다.** 1차 패스(`verify_openapi_contract.sh`)에는 `aliases:` 없이 재시도하는 psych 3 갈래가 **이미 있었다**. #1042가 만든 2차 패스(`verify_openapi_contract_rust.sh`)는 그 변환을 "1차 패스와 같은 변환"이라 주석 달고 **복사**했는데 재시도만 빠져 있었고, 그래서 곧장 python 갈래로 떨어졌다. 그 python은 `PYTHON_BIN`(≥3.10 기준으로 고른 python3.13)이고 PyYAML이 없다. Swift 패스가 기본 off인 지금 2차 패스는 **유일한 기본 패스**이므로 14단계 전체가 죽었다.
+- **수리: 사본을 지웠다.** `scripts/openapi_spec_to_json.sh` 신설 — 소스 전용 라이브러리 한 벌을 두 패스가 같이 부른다. 인터프리터의 **자격을 실측**해서 갈래를 고르고(psych 4+면 `aliases: true`, psych 3-면 무키워드 — `RUBY_VERSION` 숫자 비교는 psych 백포트에 거짓말한다), **어느 갈래로 뛰었는지 언제나 한 줄 출력한다**(`spec->json reader: ruby 2.6.10 (psych 3-, …)`). 조용한 강등 금지(#1089·#1181 전례).
+- **실패도 정직해졌다.** 종전 ruby 갈래는 `2>/dev/null`로 이유를 삼키고 "need ruby or python yaml"이라는 일반문으로 죽었다. 이제 갈래별로 실격 사유를 이름 댄다: `ruby : ruby 2.6.10 has no aliases: keyword…` / `python: python3.13 has no PyYAML (import yaml failed)`.
+- **로그인 셸 PATH 고정은 기각했다.** 게이트가 PATH를 다시 쓰는 것은 레포 밖 기계 전역을 건드리는 수리이고, 고쳐도 "이 기계에서 어떤 ruby가 먼저 잡히는가"에 초록이 계속 매달린다. `OPENSSL_BIN`(LibreSSL은 Ed25519를 못 한다)·`PYTHON_BIN`(MOMO-458, Xcode 3.9 회피) 선택이 이미 **자격 실측** 규율이고, 이번 수리는 그 규율을 ruby로 넓힌 것이다. 기각 사유는 새 파일 헤더에 남겼다.
+- **두 ruby 갈래는 오늘의 스펙에서 동등하다.** ruby 4.0.6 `aliases: true`와 ruby 2.6.10 무키워드의 JSON이 **263332 바이트 동일**. `docs/api/openapi.yaml`에는 현재 앵커/별칭이 0개라 `aliases: true`는 미래 대비이고, psych 4에서 키워드를 뺀 채 별칭이 등장하면 Psych가 예외를 던지므로 **조용히 틀린 JSON이 나오는 경로는 없다**.
+- **red proof를 영구화했다.** `scripts/tests/test_local_gate_hardening.sh`에 `aliases:`만 거부하는 가짜 ruby를 PATH 앞에 세우는 픽스처를 추가했다 — 변환 성공 + **갈래 고지 문자열**을 함께 단정하므로 조용한 강등이 초록으로 통과하지 못한다. 두 번째 픽스처는 리더가 하나도 없을 때 갈래별 이유를 대고 죽는지를 단정한다. 실측: psych 3 갈래를 제거하면 이 테스트가 빨개지고 로그인 셸 변환이 다시 `no qualified YAML reader`로 죽는다.
+- **`local_gate.sh` shell syntax 목록에 3개를 넣었다** — 신설 라이브러리와, 그동안 빠져 있던 `verify_openapi_contract_rust.sh`까지.
+
+## 게이트 위생 — Swift 패스 강등·병합 트리 게이트·선재 FAIL 규명 (#1089/#1099/#1108/#1057, 2026-08-06)
+
+- **1차(스펙 ↔ Swift) 패스를 기본 off 로 강등했다(ADR-0145 증보 2-②).** `OPENAPI_GATE_SWIFT_PASS=1` 로만 켜진다. 강등 자체보다 중요한 것은 **대가를 이름 붙인 것**이다: 1차가 꺼지면 `openapi_sampled_on_rust.txt` 밖의 연산은 "스펙에 있으나 어느 패스도 보지 않는" 상태가 되므로, 게이트가 그 목록을 매 실행 경고로 **전부** 출력한다(실측 **125/128**, 매니페스트가 덮는 것은 3). 커버리지가 조용히 사라지는 상태를 만들지 않는다 — 목록은 매니페스트가 자랄수록 줄고, 0이 되는 날 1차 패스는 되살릴 이유가 사라진다(#1042 잠식 완료).
+- **불변으로 둔 것.** `known-unsampled`의 의미는 그대로 **1차 패스만의 부채 장부**이고, 1차가 꺼진 실행에서는 아예 참조되지 않는다(그 패스가 안 도니 그 패스의 부채도 성립하지 않는다). 두 패스를 동시에 끄는 조합은 **거부**한다 — 아무도 샘플하지 않는 초록은 게이트가 아니다.
+- **`scripts/verify_merge_tree.sh` 신설(#1108).** 재는 것이 브랜치가 아니라 **병합 결과**다: `git merge-tree --write-tree` → 임시 커밋 → 임시 워크트리 → 거기서 웹·폰·코어 3종 typecheck + 스위트. 브랜치 HEAD는 한 번도 체크아웃되지 않는다(그것이 이미 초록인 판이므로). 기본은 이 체크아웃의 `node_modules`를 심볼릭 링크로 빌려 써 **20초**에 끝나고, 병합 결과의 락파일이 다르면 자동으로 `npm ci` 모드로 전환한다(코어는 npm workspace라 락파일·node_modules가 레포 루트에 있다 — 그걸 틀리면 빌려 쓰기 경로가 죽은 코드가 된다).
+- **선재 FAIL 4건은 원인이 하나였다(#1089).** `gate:shell`(=`gate:shell-layout`, 같은 스크립트다)·`gate:my-sessions`·`gate:huddle` 셋 다 로그인 직후 **토큰 회전 스텁 부재**로 죽고 있었다. 실측 로그: 로그인 200 → `POST /v1/auth/refresh` → 포괄 스텁의 `{channels:[]...}` → 코어 `refreshResponseFromWire` throw → `markAuthExpired()` → 앱이 스스로 로그아웃 → `channel-list`/`open-work-panel`/`nav[워크스페이스 탐색]` 30초 타임아웃. 형제 게이트 12개는 전부 이 스텁을 갖고 있었고 이 셋만 빠져 있었다. 세 줄로 셋 다 초록.
+- **`gate:scroll`은 자격증명 요구 자체가 근거 없었다(#1089).** `?stress=N`은 행을 클라이언트에서 만들고 네트워크를 타지 않는다 — 라이브 서버가 필요했던 것은 로그인 왕복 하나였고 그건 스텁으로 대체된다. 자체 preview + 스텁 세션으로 재배선하고 `npm run gate:scroll`을 등록했다(실측 1000행·최대 DOM 36행·120.3fps·33ms 초과 프레임 0). 가상화가 무너진 판에서 "빠르다"고 통과하던 구멍도 함께 막았다(행 수 단정 추가). 라이브 측정은 `SCROLL_GATE_BASE`+자격증명을 **함께** 줄 때만.
+- **`capture:design`이 118프레임 중 95에서 죽던 이유(#1099): 길게 누르기의 손 떼는 동작이 자기가 연 시트를 닫고 있었다.** 실측 이벤트 로그가 `touchEnd` 직후 `mousedown/click target=sheet-react-👍`를 보여 준다 — Chrome은 취소되지 않은 터치의 touchEnd 뒤에 호환용 마우스 이벤트를 **놓았던 좌표에** 합성하고, 화면 아래에 붙는 시트가 그 좌표를 덮는다. 실제 Chrome은 700ms 홀드를 GestureLongPress로 인식해 그 탭을 소비하지만 `Input.dispatchTouchEvent`로 낸 터치는 그 인식기를 거치지 않는다 — 즉 **원시 터치 디스패치의 산물**이다. `touchCancel`로 바꿔 모델링을 맞췄고(앱 쪽에서도 `pointercancel`로 눌림 상태가 깨끗이 풀린다), 첫 열기가 우연히 살아남던 자리의 **조용한 초록**(시트가 닫혀 행 0개인데 44px 단정이 무사통과)도 함께 막았다.
+- **설정 표면 6개가 캡처 레인에 들어왔다(#1057).** 계정·알림 규칙·워크스페이스·앱·사용량·멤버와 초대. 라우트가 없어 프리뷰 서버로 새면 404 → 에러 경계였으므로 "안 찍힌" 것이 아니라 "찍으면 빨간 판"이었다 — 픽스처(사용량·구독 잔여량은 모델 테스트가 계약으로 붙잡는 그 JSON)를 붙이고, **에러 경계가 그려진 판은 캡처가 아니라 실패**가 되게 단정을 넣었다. 전체 실행 **130 프레임 완주**(baseline은 95에서 중단).
+- **같은 자폭 로그아웃이 캡처 하네스 셋에 더 있었다.** `capture:usage`·`capture:standalone`·`capture:honesty`도 `/v1/auth/refresh` 스텁이 없었다. 셋 다 고쳤고 red proof도 세웠다(스텁을 빼면 `capture:usage`가 `channel-list`에서 다시 죽는다). 앞의 둘은 초록으로 완주. **`capture:honesty`는 로그인을 통과한 뒤 진짜 단정에서 멈춘다** — 아래 관측 2.
+- **검증.** 웹 750 tests(40 files)·typecheck 0·eslint error 0(warning 11, base 동일) · `cargo test --workspace` **740 passed / 0 failed / 145 ignored**(러스트 무변경) · `bash -n` green, shellcheck 신규 경고 0(잔존 SC1007 2건은 base와 같은 `CDPATH=` 관용구) · openapi 게이트 강등 경로 **PASS**(경고 125/128 → 2차 패스 3/3 샘플 일치) · `verify_merge_tree.sh` 자기 브랜치 대상 **6/6 green**(20초).
+- **웹 게이트 전판 실행표 (2026-08-06, 이 브랜치).** 자체 완결 게이트 **17/17 green**: `gate:shell` · `gate:scroll`(신규 등록) · `gate:wire` · `gate:csp` · `gate:boot` · `gate:huddle` · `gate:my-sessions` · `gate:agent-hub` · `gate:workstream` · `gate:approvals` · `gate:work-panel` · `gate:ailink` · `gate:quote` · `gate:typing` · `gate:borders` · `gate:fold` · `gate:composer`. **skip 3**: `gate:inject`·`gate:seq`·`gate:resume` — 라이브 momowebqa와 `MOMO_EMAIL`/`MOMO_PASSWORD`가 필요해 워커 세션에서 실행 불가(자격증명 취급 금지). `gate:scroll`은 그 셋과 같은 이유로 묶여 있었는데, 요구가 근거 없음이 드러나 이번에 스텁으로 풀렸다 — 남은 셋은 실서버 왕복 자체가 대상이라 같은 방식으로 풀리지 않는다. 캡처 하네스: `capture:design` 130프레임 완주 · `capture:usage` green · `capture:standalone` 6샷 green · `capture:honesty` **RED(관측 2 — 제품 단정)**.
+- **red proof 4종.** ①#1108: 코어 API를 재편한 브랜치와 그 API를 새로 소비하는 폰 브랜치를 각각 초록으로 만든 뒤 병합 → **폰만 RED, `TS2353`**(U4-6 B1과 같은 오류 코드·같은 자리). ②openapi: `OPENAPI_GATE_SWIFT_PASS=1`이면 다시 1차 패스 경로로 들어간다(스테이지 2 도달을 BASE_URL 모드의 이름 있는 실패로 확인). ③`SWIFT_PASS=0 + RUST_PASS=0`은 거부되고 exit 1. ④`capture:usage` 회전 스텁 제거 시 `channel-list` 타임아웃 재현.
+- **관측 1 (반경 밖 · 차단 요인).** `server-rust/Dockerfile`이 **origin/track/engine에서 빌드되지 않는다.** 의존성 레이어의 하드코딩된 매니페스트 COPY 목록에 `crates/momo-drive/Cargo.toml`(#1111 신설)이 빠져 `cargo build`가 `failed to load manifest for workspace member .../bins/momo-server`로 죽는다. 강등 뒤 2차(Rust) 패스가 **유일한 기본 패스**이므로 이건 openapi 게이트 전체를 막는다. `server-rust/`는 이 워커의 반경 밖이라 손대지 않았고, 검증은 같은 base commit으로 오늘 만들어진 `momo-rust:laneA-724b772d` 이미지를 `MOMO_RUST_IMAGE`로 재사용해 수행했다(레인 워커가 이미 같은 벽을 넘은 것으로 보인다). **머지 전에 이 한 줄이 닫혀야 한다.**
+- **관측 2 (별건 티켓 필요).** `capture:honesty`가 회전 스텁 수리 뒤 로그인을 통과하고 나서 `죽은 결정 대기 탭이 아직 서 있다`로 멈춘다 — 승인 표면이 없다고 답하는 서버에서 인박스의 `결정 대기` 탭이 접히지 않는다는 **제품 단정**이다(W-AP1이 `approvals.provided`를 뒤집은 뒤 이 분기가 갱신되지 않은 것으로 보인다). 의미 없는 빨강(로그인 타임아웃)이 의미 있는 빨강으로 바뀐 것이므로 되돌리지 않았다.
+- **관측 3 (후속).** `capture:design`의 설정 > 앱은 **빈 카탈로그**로 찍는다. 출하 시드 매니페스트를 한 줄 얹으면 그 프레임 자체는 나오는데 **그 다음 섹션 전환이 무너진다**(다음 섹션에서 `settings-route`가 30초 안에 안 돌아오고, 클릭으로 넘기는 판에서는 `사용량` nav 버튼 클릭이 같은 자리에서 죽는다). `앱` 패널의 `wide` 마켓플레이스 레이아웃 쪽으로 보이며 카탈로그가 비면 재현되지 않는다. 카탈로그가 있는 판은 `gate:shell`이 두 매니페스트로 이미 측정하므로, 이 하네스에 넣는 것은 위 전환 결함을 규명한 뒤의 일이다.
 
 ## MOMO-680 자사 플러그인 매니페스트 도구 설명 한국어화 (#921, 2026-07-30)
 
@@ -184,7 +223,7 @@
 - Migration 054가 `work_cloud_host.provider`의 단일 벤더 CHECK와 default를 걷어내고 어댑터 레지스트리 식별자로 바꾼다. reconciler·REST는 프로세스 기본값이 아니라 **행에 적힌 provider**로 어댑터를 해석하므로, 운영자가 기본 provider를 바꿔도 기존 호스트가 계속 조작 가능하다. 레지스트리에 없는 이름은 설정 로드에서 fail closed.
 - BYOC를 REST로 공식화했다(`POST /v1/workspaces/:ws/work-hosts/byoc/enrollments`, 워크스페이스 공용만 — personal은 스키마가 아니라 REST에서 이름 있게 거절). 기존 1회 부트스트랩 토큰·자체 Ed25519 등록 흐름을 그대로 재사용하며, 토큰은 digest만 저장하므로 같은 ref 재요청은 409다. 셀프호스트 2단 가이드는 `docs/BYOC_CLOUD_HOST.md`.
 - 검증 fixture를 mock provider 2종으로 일반화했다(`scripts/mock_provider.py`: mock-a=pause 지원/메모리 보존, mock-b=pause 거부/cold boot). mock은 정직성이 계약이다 — pause된 인스턴스는 실행이 필요한 호출을 409로 거절하고, 죽은 인스턴스는 probe에 `absent`를 답한다. 정책 코드·검증기·인프라·문서의 벤더 문자열 잔존은 0이며 `verify_t3_provisioner.sh`가 `provider-neutral-policy-code` 이름으로 이를 상시 감시한다(needle을 런타임 조립해 자기 텍스트에 매칭되지 않는다).
-- 연속성 무상태 검증기 `scripts/verify_t3_provider_continuity.sh`를 추가했다: mock-a 사망 → 어댑터의 정직한 보고 → reconciler의 이름 있는 `provider_missing` 수렴 → **기존 resume REST 그대로** mock-b의 새 Run 재개 → `resumed_from_session_id` 계보·단일 정산 단정. red proof는 `T3_CONTINUITY_PROVE_RED=dishonest-probe` — probe가 죽음을 숨기면 momo가 자기모순 provider 위에서 정산하기를 거부하므로 수렴이 없고, 검증기는 유한 deadline에서 `provider-missing-convergence` 이름으로 빨개진다(행·타임아웃 아님).
+- 연속성 무상태 검증기 `scripts/verify_t3_provider_continuity.sh`를 추가했다: mock-a 사망 → 어댑터의 정직한 보고 → reconciler의 이름 있는 `provider_missing` 수렴 → **기존 resume REST 그대로** mock-b의 새 Run 재개 → `resumed_from_session_id` 계보·단일 정산 단정. red proof는 `T3_CONTINUITY_PROVE_RED=dishonest-probe` — probe가 죽음을 숨기면 oort가 자기모순 provider 위에서 정산하기를 거부하므로 수렴이 없고, 검증기는 유한 deadline에서 `provider-missing-convergence` 이름으로 빨개진다(행·타임아웃 아님).
 - 서버 354·NotifierWorker 7·CloudProviderKit 9·WorkHostDaemon 32(3 skip) 테스트, `check_migration_numbers.sh`, 두 T3 검증기의 정적 절반, compose/OpenAPI YAML 파싱이 green이다. Docker 행동 검증(연속성 정상/red proof, 기존 T3 provisioner·동시성 gate, T1/T2 무회귀)은 오케스트레이터 실행 대기(`runtime-unverified`)다.
 
 ## MOMO-667 T3 수명주기 정본화 (#891, 2026-07-29)
@@ -372,7 +411,7 @@
 
 ## MOMO-623 provider 잔여량 스냅샷 ingest+조회 (ADR-0135 D2, #810, 2026-07-26)
 
-- 배경: ADR-0135 D2-A — 프로브 실행 주체를 **자격증명 보유 측(hermes adapter)**로 옮기면 OAuth 잔여량 대시보드와 ADR-0004(자격증명 비유입)가 충돌하지 않는다. momo는 provider API를 **직접 조회하지 않고 숫자만 받는다.**
+- 배경: ADR-0135 D2-A — 프로브 실행 주체를 **자격증명 보유 측(hermes adapter)**로 옮기면 OAuth 잔여량 대시보드와 ADR-0004(자격증명 비유입)가 충돌하지 않는다. oort는 provider API를 **직접 조회하지 않고 숫자만 받는다.**
 - 마이그레이션 **043** `server/Migrations/043_quota_snapshot.sql` — `quota_snapshot(provider_ref, quota_window, remaining_ratio, resets_at, probed_at, ingested_at)`, `PRIMARY KEY (provider_ref, quota_window)`로 게이지당 1행(ADR-0135 "최신 스냅샷만"). CHECK: window ∈ short|weekly · ratio 0..1 · provider_ref 슬러그(`^[a-z0-9][a-z0-9._-]{0,63}$`). **`window`는 PostgreSQL 예약어라 컬럼명은 `quota_window`, 와이어 필드는 ADR대로 `window` 유지**(REST 계층에서 매핑). `schema_v0.sql` 무변경.
 - RLS FORCE 2정책(provider_link 039 패턴 변형, workspace_id 없는 instance-global 테이블): 쓰기 = `app.provider_quota_admin` GUC 게이트(REST가 scope 검증 **후에만** 세팅), 읽기 = `app.workspace_id`가 바인딩된 테넌트 세션만 SELECT. GUC 없는 세션은 default-deny.
 - 신규 표면 `server/Sources/MomoServer/Routes/ProviderQuotaSnapshotRoutes.swift`:
@@ -398,7 +437,7 @@
 - 배경(ADR-0133 P2 스파이크 발견): 웹은 같은 오리진 서빙(ADR-0119 D1-A)이라 CORS가 필요 없지만, 패키징된 Tauri 릴리스는 webview 오리진이 `tauri://localhost`(Windows/Android는 `http://tauri.localhost`)라 `/v1/*` 호출이 진짜 교차 오리진이 되어 브라우저 규칙에 막힌다. 어떤 도메인으로도 파생할 수 없는 값이라 operator 명시 env로 연다.
 - 신규 계약: `MOMO_CORS_ALLOWED_ORIGINS`(쉼표 구분, **완전일치** allowlist). 파싱은 `server/Sources/MomoServer/Config.swift`의 `CORSConfig`, 게이트는 `server/Sources/MomoServer/Middleware/CORSMiddleware.swift`의 `OriginAllowlistCORSMiddleware`(Hummingbird 내장 `CORSMiddleware`의 헤더 기계장치를 위임 사용 — 내장 `.oneOf`가 가변인자 전용이라 런타임 배열로 만들 수 없기 때문).
 - **기본 빈=완전 무변경**: `config.cors.isEnabled`가 false면 `App.swift`가 미들웨어를 아예 mount하지 않는다 → `Access-Control-*`/`Vary` 헤더 0개, OPTIONS 단락 없음. 기존 게이트 전부 무회귀.
-- 와일드카드 금지: `*`·`https://*.example.com`·리터럴 `null`·경로/트레일링 슬래시·userinfo·불량 포트는 파싱 단계에서 거부하고 부팅 시 warning 1회를 남긴다(오타는 허용범위를 좁힐 뿐 넓히지 않는다 — 실측: `MOMO_CORS_ALLOWED_ORIGINS=*` 기동 시 표면 완전 폐쇄 + warning). credentials 정합: momo는 쿠키 미발급(서버 `Set-Cookie` 0건)·Authorization 베어러 전용이라 `Access-Control-Allow-Credentials`를 절대 보내지 않는다 → `Allow-Origin: *` + credentials 조합이 표현 불가다.
+- 와일드카드 금지: `*`·`https://*.example.com`·리터럴 `null`·경로/트레일링 슬래시·userinfo·불량 포트는 파싱 단계에서 거부하고 부팅 시 warning 1회를 남긴다(오타는 허용범위를 좁힐 뿐 넓히지 않는다 — 실측: `MOMO_CORS_ALLOWED_ORIGINS=*` 기동 시 표면 완전 폐쇄 + warning). credentials 정합: oort는 쿠키 미발급(서버 `Set-Cookie` 0건)·Authorization 베어러 전용이라 `Access-Control-Allow-Credentials`를 절대 보내지 않는다 → `Allow-Origin: *` + credentials 조합이 표현 불가다.
 - 미허용 Origin은 403이 아니라 **헤더 없이 통과**시킨다(브라우저가 차단; Origin을 보내지 않는 네이티브 클라·curl·work host·subscribe proxy는 무영향). 미들웨어는 rate limiter 바깥이라 429/4xx 응답도 CORS 헤더를 유지한다(브라우저가 불투명 오류 대신 실제 상태를 읽는다).
 - Centrifugo: `infra/centrifugo.json` `client.allowed_origins`에 `tauri://localhost`·`http://tauri.localhost` 추가 — e2e와 내부알파(`momowebqa`, `scripts/internal_alpha_stack.sh`)가 같은 파일을 쓴다. prod는 MOMO-398 `APP_DOMAIN` 단일 파생 계약 **무변경**.
 - 배선/문서: e2e·prod compose api 서비스가 `MOMO_CORS_ALLOWED_ORIGINS: ${MOMO_CORS_ALLOWED_ORIGINS:-}` passthrough, 두 env 템플릿(`infra/.env.example`·`infra/prod/.env.example`) 동시 갱신(주석 상태 유지 = 기본 무변경), `scripts/prod_env_preflight.sh` strict가 와일드카드/`null` 값을 compose 기동 전에 fail-fast, `docs/RUN.md` §2.2 + `docs/DEPLOY.md` 갱신. 마이그레이션 없음, `schema_v0.sql` 무변경.
@@ -539,7 +578,7 @@
 - migration 027의 `memory_visibility_grant` 원장에 admin/member-scope subject/agent human owner 관리 GET·POST·DELETE를 가산했다. active human/agent grantee 검증, 회수 마킹·멱등 재회수, 부여/회수 audit, FORCE RLS와 OpenAPI를 동기화했다.
 - `verify_memory_grant.sh`는 28160~28163 격리 포트에서 부여→030 검색/Context Packet 가시→회수→검색 비가시·재발급 `memory_refs` 제외, 권한·감사·RLS를 단정한다. Docker 실런은 오케스트레이터 수행 전까지 `runtime-unverified`다.
 
-## MOMO-537 agent_profile 원장 + momo 네이티브 간편 생성 (#618, 2026-07-22)
+## MOMO-537 agent_profile 원장 + oort 네이티브 간편 생성 (#618, 2026-07-22)
 
 - ADR-0131 Accepted를 정본화하고 migration 036(035는 진행 PR #625와 충돌 회피)에 `agent_profile` 복합 agent FK·FORCE RLS 원장을 추가했다. 관리자/agent human owner GET·PUT, 8KB instructions·credential-shaped field 거부, version 증가·audit와 기존 agent 생성 요청의 optional profile 동시 커밋을 OpenAPI에 반영했다.
 - 528 mention 경로는 profile이 있을 때만 서버 정책 프리앰블→기존 시스템 지시→profile instructions를 packet/payload에 가산하고, 실제 grant∩enabled_tools만 투영한다. model_pref는 `workspace.settings.allowed_agent_models`와 기존 agent.model 안에서만 적용하며 불허 preference는 run당 audit 1회 후 무시한다. 기존 profile 없는 agent payload는 유지된다.
@@ -553,7 +592,7 @@
 ## MOMO-538 셀프호스트 eve 옵션 프로파일 (#619, 2026-07-22)
 
 - dev/prod compose에 기본 비활성 `eve` profile을 추가했다. Node 24.4.1 digest, eve 0.27.0, Postgres world 5.0.0-beta.27을 고정하고 MOMO-534 채널 프리셋과 모든 자격증명은 read-only mount/env 경계로만 주입한다.
-- `eve-db-roles`는 momo PostgreSQL 클러스터 안에 별도 `eve_world` DB와 NOBYPASSRLS role을 만들되 momo schema object 권한은 부여하지 않는다. `verify_eve_profile.sh`가 dev/prod profile off/on drift, 기본 서비스 불변, 28140~28142 포트 선점, eve health·프리셋 load 로그·world durable table·momo table 접근 거부를 단정한다.
+- `eve-db-roles`는 oort PostgreSQL 클러스터 안에 별도 `eve_world` DB와 NOBYPASSRLS role을 만들되 oort schema object 권한은 부여하지 않는다. `verify_eve_profile.sh`가 dev/prod profile off/on drift, 기본 서비스 불변, 28140~28142 포트 선점, eve health·프리셋 load 로그·world durable table·oort table 접근 거부를 단정한다.
 - 실제 provider credential을 사용하는 eve 세션 왕복만 `runtime-unverified(external eve model credentials)`다.
 
 ## MOMO-535 outbound 이벤트 구독 (#617, 2026-07-22)
@@ -593,10 +632,10 @@
 - macOS가 `agent_run.input.memory_delivery` 영수증을 fail-closed sidecar로 소비해 `injected=true`이고 `included_count>0`이며 저장 packet ID를 확인한 에이전트 응답·Work 실행 카드에만 "메모리 n건 반영" 메타 버튼을 표시하고, 기존 서빙 내역 인스펙터로 연결한다. 0건·미주입·malformed 영수증과 packet ID 없는 실행은 거짓 액션 없이 무표시다.
 - macOS build와 집중 로직·REST 계약 테스트, 표시/무표시 라이트·다크 스냅샷 4장이 PASS했다. 시작점 `track/uxui`에 커밋돼 있던 충돌 마커 6개도 양쪽 protocol conformance를 보존해 정리했다.
 
-## MOMO-534 eve/Cloudflare momo 채널 어댑터 2종 (#615, 2026-07-22)
+## MOMO-534 eve/Cloudflare oort 채널 어댑터 2종 (#615, 2026-07-22)
 
 - `examples/eve-momo-channel`은 eve 0.27.0 `defineChannel`/`routeAuth`/`send`/workspace·channel continuation token으로, `examples/cloudflare-agent-momo`는 permissive·audit 경계를 지키는 Agents SDK 0.3.10 인증 fetch로 기존 per-agent bearer gateway pending→event→complete 계약만 소비한다. 코어 서버·OpenAPI·스키마·루트 npm은 변경하지 않았다.
-- 두 예제 TypeScript build와 Node 3 tests, `verify_momo_channel_adapter.sh` bash 문법이 PASS했다. 28120~28123 e2e stack의 mock eve pending→momo 메시지→완료 callback 실왕복은 오케스트레이터 실행 전까지, eve 실런타임은 beta 외부 런타임 설치 전까지 `runtime-unverified`다.
+- 두 예제 TypeScript build와 Node 3 tests, `verify_momo_channel_adapter.sh` bash 문법이 PASS했다. 28120~28123 e2e stack의 mock eve pending→oort 메시지→완료 callback 실왕복은 오케스트레이터 실행 전까지, eve 실런타임은 beta 외부 런타임 설치 전까지 `runtime-unverified`다.
 
 ## UXUI MOMO-532 macOS 도구 프로파일·ACP 세션 카드 (#604, 2026-07-22)
 
@@ -846,7 +885,7 @@
 - macOS 중앙 패널 하단에 Control+backtick으로 여는 Work 서랍을 추가했다. SwiftTerm(MIT) 기반 로컬 PTY에서 Claude Code·Codex CLI·OpenCode·로그인 셸을 실행하고, 세션 목록/상태/종료, 서버가 만든 채널 카드, 세션 스레드 열기, 사용자가 검토한 출력 발췌 공유를 연결했다.
 - MOMO-483/484 REST와 `work.session.*`·`work.control.dispatched`를 소비해 로컬 spawn/input/read/kill 및 ack를 처리한다. 기존 `approval_request` 카드를 그대로 사용하고 tool별 auto-approve PUT/DELETE UI를 제공한다. 서버에 현재 설정을 읽는 계약은 없어 앱 시작 시 거짓 기본값 대신 `unknown`을 표시하며 X-6 역핸드오프로 기록했다.
 - ADR-0114 D3 경계를 따라 PTY raw·실제 cwd·프로세스 환경/자격증명은 서버 요청, 로그, UI 상태, 영속 상태에 넣지 않는다. `work.read`는 자동 전송하지 않고 사람이 발췌를 검토·편집·승인한 뒤에만 일반 thread reply로 보낸다. REST 계약 테스트는 `/Users`, `PATH`, `TOKEN`, terminal output이 요청에 없음을 단정한다.
-- macOS 420 tests, unsigned Xcode build, 디자인 pre-flight와 `macos-ui` local gate를 검증한다. 실제 서버에서 Codex↔momo 승인/제어/스레드 한 사이클은 C-2 수동 QA 전까지 `runtime-unverified`다. Xcode 배포 타깃의 App Sandbox는 별도 보안 승인 없이 변경하지 않았으며, 해당 빌드에서는 로컬 CLI 시작을 fail-closed하고 SwiftPM 개발 빌드에서만 PTY를 허용한다.
+- macOS 420 tests, unsigned Xcode build, 디자인 pre-flight와 `macos-ui` local gate를 검증한다. 실제 서버에서 Codex↔oort 승인/제어/스레드 한 사이클은 C-2 수동 QA 전까지 `runtime-unverified`다. Xcode 배포 타깃의 App Sandbox는 별도 보안 승인 없이 변경하지 않았으며, 해당 빌드에서는 로컬 CLI 시작을 fail-closed하고 SwiftPM 개발 빌드에서만 PTY를 허용한다.
 ## MOMO-488 momo-workd v0 사용자 호스트 데몬 (2026-07-20)
 
 - ADR-0125 D2에 따라 macOS/Linux Swift 실행 패키지 `workers/WorkHostDaemon`(`momo-workd`)을 추가했다. 데몬은 로컬 0600 Ed25519 신원으로 workd host를 1회 등록하고 heartbeat 및 허용된 REST action을 서명하며, 자기 앞 dispatched control만 outbound poll한다.
@@ -932,7 +971,7 @@
 - 실기기(iPhone, Debug 케이블 빌드)에서 전 체인 실증: 디바이스 등록(env 자동판별 sandbox, MOMO-467) → PushRelay(Ed25519 서명 dispatch) → 실 APNs(.p8, apns_id 발급 200) → 실기기 알림 표시 → **NSE가 REST로 실제 메시지 본문 fetch·교체 성공**. ADR-0120 P-1~P-4 + ADR-0123 IOS-1~5의 최종 evidence.
 - 발견 1건: 알림 탭 deep link가 채널 목록에서 멈춤 → MOMO-469(`#487`) 발급.
 
-# momo — Phase 0 빌드 STATUS
+# oort — Phase 0 빌드 STATUS
 
 > 생성: 2026-06-24 · 빌드 워크플로우 `momo-phase0-build`(T01~T10) + 로컬 `swift build` 재검증
 > 검증 환경: Swift 6.2.3 (arm64-apple-macosx), Docker Desktop 29.4.3, PostgreSQL client 18.4(`/opt/homebrew/opt/libpq/bin/psql`). 실제 hermes는 없지만 MOMO-004에서 OpenAI-compatible SSE mock으로 AgentWorker e2e를 검증함.
@@ -1246,7 +1285,7 @@
 ## MOMO-363 Work v0 Codex Workbench Gateway Adapter (2026-07-13)
 
 - `adapters/codex-workbench/`가 scoped agent bearer로 Work job을 claim하고 host Codex `exec`/`resume`을 감싼다. read-only는 즉시 실행하며 workspace-write는 read-only 계획 세션 ID를 mode-0600 host state에 보존한 뒤 MOMO-362 승인 전에는 workspace-write로 실행하지 않고, network/danger 경로는 제공하지 않는다.
-- Codex JSONL은 bounded gateway status/partial로만 전달하고 최종 completion은 diff·변경 파일 수·exit·PR 링크 자리의 `momo.agent_work.result.v0` 카드다. 운영 공지 durable send 및 Codex/provider 자격증명 momo 유입 경로는 없다.
+- Codex JSONL은 bounded gateway status/partial로만 전달하고 최종 completion은 diff·변경 파일 수·exit·PR 링크 자리의 `momo.agent_work.result.v0` 카드다. 운영 공지 durable send 및 Codex/provider 자격증명 oort 유입 경로는 없다.
 - 검증: repo-local mock Codex 기반 DB 비접속 Python 계약 테스트, py_compile, launcher `bash -n`, `git diff --check` 대상. 실 Codex·DB/Docker/verifier/`local_gate.sh`·clean/root `runtime-agent`는 오케스트레이터 대기(`runtime-unverified`).
 
 ## MOMO-366 Wave 2 Read-State Server Contract (2026-07-13)
@@ -1312,7 +1351,7 @@
 
 ## MOMO-356 Gateway Operational Notice Suppression (2026-07-13)
 
-- Hermes platform `send()`는 명시적 momo `run_id`가 있는 실제 에이전트 최종 응답만 REST durable message로 허용한다. session reset, home-channel, `/resume`·`/sethome`, model/provider 등 run-unbound 운영 공지는 성공 처리 후 본문을 남기지 않는 로컬 이벤트 로그로만 기록한다. native gateway 최종 응답은 기존 `/gateway/complete` server-owned commit을 유지한다.
+- Hermes platform `send()`는 명시적 oort `run_id`가 있는 실제 에이전트 최종 응답만 REST durable message로 허용한다. session reset, home-channel, `/resume`·`/sethome`, model/provider 등 run-unbound 운영 공지는 성공 처리 후 본문을 남기지 않는 로컬 이벤트 로그로만 기록한다. native gateway 최종 응답은 기존 `/gateway/complete` server-owned commit을 유지한다.
 - `scripts/momo hermes-gateway-init`이 Hermes 정식 `MOMO_HOME_CHANNEL`/이름을 새 env에 기록하고 기존 env의 `MOMO_DEFAULT_CHANNEL_ID`에서 보강해, 홈 채널 요구를 gateway 기동 전에 해결한다. verifier에는 fresh marker/OID DB·per-run channel·대문자 transport·source digest·exit 96 경계를 유지한 채 운영 공지 전후 agent message count 불변 assertion을 추가했다. `schema_v0.sql`과 UI/스냅샷은 변경하지 않았다.
 - 검증: adapter contract 54 tests, smoke, py_compile, 실제 Hermes SDK `SendResult` 호환, 신규·기존 임시 env의 home-channel init, 수정 shell `bash -n`/실행권한, `git diff --check` PASS. 지시된 worker 경계에 따라 Docker/DB/verifier/`local_gate.sh`는 실행하지 않았고 clean/root `runtime-agent`는 오케스트레이터 merge 전 수행 대기(`runtime-unverified`).
 
@@ -1467,14 +1506,14 @@
 
 ## 0-4b-2. MOMO-234 Hermes Codex OAuth Provider Boundary v0 (2026-07-01)
 
-- `docs/adr/0004-codex-oauth-hermes-provider-boundary.md`를 추가해 Codex OAuth access/refresh token은 external runtime provider 소유이고 momo app/API/DB/Context Packet/Memory/diagnostics/local gate가 직접 보관하지 않는다는 credential boundary를 정본화했다.
-- `scripts/verify_external_agent_provider.sh`는 credentialed smoke에 필요한 momo-side env를 `AGENT_PROVIDER_MODE=external-hermes`, `HERMES_BASE_URL`, `HERMES_API_KEY`, `AGENT_MODEL`로 명확히 출력하고, 알려진 Codex/OpenAI OAuth token env var가 momo smoke process에 있으면 fail-fast한다. secret 없는 기본 경로는 계속 safe skip/pass로 `runtime-unverified(external provider credentials)` evidence를 남긴다.
+- `docs/adr/0004-codex-oauth-hermes-provider-boundary.md`를 추가해 Codex OAuth access/refresh token은 external runtime provider 소유이고 oort app/API/DB/Context Packet/Memory/diagnostics/local gate가 직접 보관하지 않는다는 credential boundary를 정본화했다.
+- `scripts/verify_external_agent_provider.sh`는 credentialed smoke에 필요한 oort-side env를 `AGENT_PROVIDER_MODE=external-hermes`, `HERMES_BASE_URL`, `HERMES_API_KEY`, `AGENT_MODEL`로 명확히 출력하고, 알려진 Codex/OpenAI OAuth token env var가 oort smoke process에 있으면 fail-fast한다. secret 없는 기본 경로는 계속 safe skip/pass로 `runtime-unverified(external provider credentials)` evidence를 남긴다.
 - 실제 Codex OAuth-backed provider credentialed PASS는 provider host secret이 있는 환경에서만 닫을 수 있으므로 계속 `runtime-unverified(external provider credentials)`다. 검증: `scripts/local_gate.sh --profile external-agent-provider` PASS(no-credential explicit skip), `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` 대상.
 
 ## 0-4b-3. MOMO-238 Local Hermes GPT Provider Loopback Contract (2026-07-01)
 
 - `docs/external-agent-provider/local-hermes-gpt.md`를 추가해 local Hermes + GPT provider 개발 루프는 `MOMO_ENV=local AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1 AGENT_PROVIDER_MODE=external-hermes` opt-in일 때만 `http://127.0.0.1:<port>/v1` 또는 `http://localhost:<port>/v1`를 허용하도록 정리했다.
-- MomoServer/AgentWorker/verifier가 non-loopback `http://...`, staging/prod/internal-host loopback, `mock-hermes`, placeholder Hermes bearer, Codex/OpenAI OAuth token/API key env를 fail-fast 처리한다. GPT/OpenAI credential은 Hermes local process/provider host 소유이며 momo app/API/DB/evidence에는 들어오지 않는다.
+- MomoServer/AgentWorker/verifier가 non-loopback `http://...`, staging/prod/internal-host loopback, `mock-hermes`, placeholder Hermes bearer, Codex/OpenAI OAuth token/API key env를 fail-fast 처리한다. GPT/OpenAI credential은 Hermes local process/provider host 소유이며 oort app/API/DB/evidence에는 들어오지 않는다.
 - credential 없는 기본 환경은 `scripts/local_gate.sh --profile external-agent-provider`에서 explicit `runtime-unverified(external provider credentials)` skip PASS를 유지한다. 검증: `scripts/local_gate.sh --profile docs`, `scripts/local_gate.sh --profile external-agent-provider`, `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` 대상.
 
 ## 0-4b-4. MOMO-242 External Agent Runtime Smoke (2026-07-01)
@@ -1492,35 +1531,35 @@
 
 ## 0-4b-6. MOMO-257 Local Hermes/Codex OAuth Provider Setup (2026-07-02)
 
-- `docs/external-agent-provider/local-hermes-codex-oauth-setup.md`와 placeholder-only `local-hermes-provider.env.example`를 추가해 사용자가 local Hermes-compatible provider에서 Codex/OpenAI OAuth 또는 provider token 설정을 직접 수행하고, momo는 loopback `HERMES_BASE_URL` + Hermes-facing bearer만 받아 검증하는 경계를 고정했다.
-- `scripts/verify_local_hermes_credentialed_smoke.sh`를 추가해 기본 실행은 `NEEDS_USER_CREDENTIAL` evidence로 안전하게 종료하고, out-of-repo env 파일 또는 inline momo-facing endpoint/key가 있으면 기존 external-provider verifier로 위임해 `@hermes` credentialed roundtrip을 검증한다. 알려진 Codex/OpenAI OAuth/API key env가 momo smoke process에 있으면 fail-fast한다.
+- `docs/external-agent-provider/local-hermes-codex-oauth-setup.md`와 placeholder-only `local-hermes-provider.env.example`를 추가해 사용자가 local Hermes-compatible provider에서 Codex/OpenAI OAuth 또는 provider token 설정을 직접 수행하고, oort는 loopback `HERMES_BASE_URL` + Hermes-facing bearer만 받아 검증하는 경계를 고정했다.
+- `scripts/verify_local_hermes_credentialed_smoke.sh`를 추가해 기본 실행은 `NEEDS_USER_CREDENTIAL` evidence로 안전하게 종료하고, out-of-repo env 파일 또는 inline oort-facing endpoint/key가 있으면 기존 external-provider verifier로 위임해 `@hermes` credentialed roundtrip을 검증한다. 알려진 Codex/OpenAI OAuth/API key env가 oort smoke process에 있으면 fail-fast한다.
 - macOS Alpha Command Center에 `Provider Setup` 상태, `Connect real local Hermes` 체크리스트, provider credential boundary capability를 추가했다. 실제 provider login/token 입력은 사람이 provider에서 수행해야 하며, 이 환경의 real credentialed provider PASS는 사용자가 런타임을 띄운 뒤 별도 evidence로 닫는다.
 - 검증: `scripts/local_gate.sh --profile external-agent-provider` PASS(`NEEDS_USER_CREDENTIAL` no-secret path), `scripts/local_gate.sh --profile runtime-agent` PASS(mock/local Hermes bridge), `scripts/local_gate.sh --profile macos-ui` PASS, `LOCAL_GATE_LAUNCH_UI=1 scripts/verify_macos_real_backend_ui.sh` PASS(window_count=1). 실제 Codex/OAuth credentialed provider PASS는 사용자가 provider 로그인/env를 준비한 뒤 `scripts/verify_local_hermes_credentialed_smoke.sh`로 닫는다.
 
 ## 0-4b-6a. LSA-005 Local Hermes operator helper (2026-07-07)
 
-- MOMO-257의 credentialed Hermes boundary/runbook/verifier는 존재하지만, 실제 1인 dogfood 사용자는 out-of-repo env 생성, placeholder 확인, 금지된 OpenAI/Codex provider credential env 확인, smoke 실행 순서를 기억해야 했다. 이 후속은 사용자가 provider login 이후 momo에서 무엇을 해야 하는지 CLI가 바로 안내하게 만든다.
+- MOMO-257의 credentialed Hermes boundary/runbook/verifier는 존재하지만, 실제 1인 dogfood 사용자는 out-of-repo env 생성, placeholder 확인, 금지된 OpenAI/Codex provider credential env 확인, smoke 실행 순서를 기억해야 했다. 이 후속은 사용자가 provider login 이후 oort에서 무엇을 해야 하는지 CLI가 바로 안내하게 만든다.
 - `scripts/momo`에 `hermes`/`hermes-status`, `hermes-init`, `hermes-smoke` 명령을 추가했다. `hermes-init`은 `~/.momo/local-hermes-provider.env`를 safe template에서 만들고 `chmod 600`을 적용한다. `hermes`는 env file path, file mode, provider mode/model, query/fragment가 제거된 endpoint label, Hermes-facing bearer configured 여부, 현재 shell의 금지된 OpenAI/Codex credential env 존재 여부, local MomoServer `/v1/agent-runtime/status` 요약을 보여준다. secret 값은 출력하지 않는다.
 - 검증: `bash -n scripts/momo` PASS. `/private/tmp` 임시 env로 `scripts/momo hermes-init` → `scripts/momo hermes`가 placeholder를 secret 없이 표시하고, `OPENAI_API_KEY`가 현재 shell에 있을 때 boundary FAIL을 표시하는 것을 확인했다. 실제 credentialed provider PASS는 사용자가 provider login/env를 준비한 뒤 `scripts/momo hermes-smoke`로 닫는다.
 
 ## 0-4b-6b. MOMO-325 Hermes Gateway Native Platform Integration v1 (2026-07-07)
 
-- AgentWorker SSE 경로를 유지하면서, `AGENT_GATEWAY_MODE=gateway`일 때 Hermes gateway가 momo를 Slack/Telegram-style messaging platform으로 보고 `agent.job` realtime event를 받아 처리하는 native path를 추가했다. `AgentWorker`는 `outbox.method='gateway'` job을 claim하지 않으며, final response/usage/audit는 gateway callback을 받은 MomoServer가 REST→Postgres→outbox 경로로만 기록한다.
+- AgentWorker SSE 경로를 유지하면서, `AGENT_GATEWAY_MODE=gateway`일 때 Hermes gateway가 oort를 Slack/Telegram-style messaging platform으로 보고 `agent.job` realtime event를 받아 처리하는 native path를 추가했다. `AgentWorker`는 `outbox.method='gateway'` job을 claim하지 않으며, final response/usage/audit는 gateway callback을 받은 MomoServer가 REST→Postgres→outbox 경로로만 기록한다.
 - 새 public callback route는 `POST /v1/workspaces/:workspace/agent-runs/:run/gateway/events`와 `/gateway/complete`이며, `X-Momo-Agent-Gateway-Secret` 없이는 401 fail-closed다. Gateway completion은 durable channel message, `usage_ledger`, `audit_log(agent.gateway.*)`, channel broadcast outbox, gateway job `done`을 같은 DB transaction에서 정리한다.
 - `adapters/hermes/PLUGIN.yaml`, `adapter.py`, `momo_adapter.py`를 최신 Hermes plugin path에 맞춰 정렬하고 `register(ctx)`/legacy `register_platform`을 모두 제공한다. `scripts/momo hermes-gateway-init/status/smoke`와 `scripts/verify_hermes_gateway_adapter.sh`는 local pairing env, status check, mock gateway harness를 제공한다.
 - 검증: `swift build --package-path server` PASS, `swift build --package-path workers/AgentWorker` PASS, `python3 adapters/hermes/tests/test_momo_adapter_contract.py` PASS, `scripts/verify_hermes_gateway_adapter.sh` PASS(mock gateway; `@hermes`→`agent_run`→`agent_job(method=gateway)`→`agent.job` outbox→secret 401 guard→gateway callbacks→durable message/usage/audit/job done). 실제 Hermes gateway CLI/plugin load와 provider side effect는 `runtime-unverified(real hermes gateway missing)`로 남는다.
 
 ## 0-4b-6c. MOMO-326 Real Hermes Gateway Credentialed Smoke Prep (2026-07-07)
 
-- 실제 Hermes gateway 런타임을 대상으로 한 설치/플러그인/credentialed smoke 레이어를 추가했다. `scripts/momo hermes-gateway-install-plugin`은 `adapters/hermes/`를 로컬 Hermes plugin directory(`$HERMES_HOME/plugins/momo`)에 symlink/copy하고, `scripts/momo hermes-gateway-smoke --real [--trigger]`는 Hermes CLI, plugin load files, 사용자 provider OAuth/login marker, momo gateway-mode `/health`, `@hermes` same-channel response를 단계별 evidence로 분리한다.
+- 실제 Hermes gateway 런타임을 대상으로 한 설치/플러그인/credentialed smoke 레이어를 추가했다. `scripts/momo hermes-gateway-install-plugin`은 `adapters/hermes/`를 로컬 Hermes plugin directory(`$HERMES_HOME/plugins/momo`)에 symlink/copy하고, `scripts/momo hermes-gateway-smoke --real [--trigger]`는 Hermes CLI, plugin load files, 사용자 provider OAuth/login marker, oort gateway-mode `/health`, `@hermes` same-channel response를 단계별 evidence로 분리한다.
 - `adapters/hermes/plugin.yaml`을 Hermes 공식 platform manifest 형태(`kind: platform`, `requires_env`, `optional_env`)로 정렬했고, `momo_adapter.py`는 최신 `gateway.platforms.base.BasePlatformAdapter(config, platform)` 경로와 legacy registry를 모두 지원한다. MOMO-338에서 operator login을 제거하고 per-agent bearer로 private `agentwork:ws<workspace>.<agentMember>`를 구독하도록 대체했다.
 - 검증: `python3 -m py_compile adapters/hermes/momo_adapter.py adapters/hermes/adapter.py` PASS, `python3 adapters/hermes/tests/test_momo_adapter_contract.py` PASS, `bash -n scripts/momo scripts/verify_hermes_gateway_real_smoke.sh` PASS, `scripts/momo hermes-gateway-smoke --real` PASS with evidence state `NEEDS_USER_INSTALL`, `scripts/local_gate.sh --profile docs` PASS, `scripts/local_gate.sh --profile runtime-agent` PASS (`/var/folders/zj/v6yd5tj104l14xhlpn1bx1r80000gn/T//momo-local-gate/local-gate-runtime-agent-20260707T115936Z-pid70974-ns1783425576779580000-wt9a510db2fbf3-ra293c905ef49.md`). 이 머신에는 아직 Hermes CLI가 없어 실제 provider OAuth 및 `@hermes` real gateway roundtrip은 `runtime-unverified(real hermes gateway missing; user install/login required)`로 남는다.
 
 ## 0-4b-6d. MOMO-327 Hermes v0.18 plugin load compatibility (2026-07-07)
 
 - 실제 Hermes Agent v0.18 CLI-only 설치 후 user-installed directory plugin은 `~/.hermes/plugins/momo` 파일 링크만으로는 로드되지 않고 `~/.hermes/config.yaml`의 `plugins.enabled`에 `momo`가 있어야 함을 확인했다. `scripts/momo hermes-gateway-install-plugin`이 symlink/copy 후 config enable까지 수행하고, `scripts/momo hermes-gateway-status`가 plugin enabled 여부를 표시하도록 보강했다.
-- Hermes v0.18 `BasePlatformAdapter`가 `get_chat_info(chat_id)`를 필수 추상 메서드로 요구해 momo adapter construction이 실패하던 문제를 수정했다. `MomoAdapter.get_chat_info`는 로그인 후 momo REST channel list에서 이름/타입을 조회하고, gateway boot/degraded smoke에서는 env/default fallback으로 fail-open 대신 platform construction을 유지한다.
-- 검증: `python3 -m py_compile adapters/hermes/__init__.py adapters/hermes/momo_adapter.py adapters/hermes/adapter.py adapters/hermes/tests/test_momo_adapter_contract.py` PASS, `python3 adapters/hermes/tests/test_momo_adapter_contract.py` PASS(11 tests), `bash -n scripts/momo` PASS, `scripts/momo hermes-gateway-install-plugin && scripts/momo hermes-gateway-status` PASS(`plugin enabled: yes`, momo server reachable), `scripts/momo hermes-gateway-smoke --real` PASS with evidence state `NEEDS_PROVIDER_LOGIN`(`/var/folders/zj/v6yd5tj104l14xhlpn1bx1r80000gn/T//momo-hermes-gateway-real/20260707T150741Z/summary.md`). 실제 provider OAuth 및 `@hermes` real gateway roundtrip은 사용자가 Hermes/provider login을 완료한 뒤 닫는다.
+- Hermes v0.18 `BasePlatformAdapter`가 `get_chat_info(chat_id)`를 필수 추상 메서드로 요구해 oort adapter construction이 실패하던 문제를 수정했다. `MomoAdapter.get_chat_info`는 로그인 후 oort REST channel list에서 이름/타입을 조회하고, gateway boot/degraded smoke에서는 env/default fallback으로 fail-open 대신 platform construction을 유지한다.
+- 검증: `python3 -m py_compile adapters/hermes/__init__.py adapters/hermes/momo_adapter.py adapters/hermes/adapter.py adapters/hermes/tests/test_momo_adapter_contract.py` PASS, `python3 adapters/hermes/tests/test_momo_adapter_contract.py` PASS(11 tests), `bash -n scripts/momo` PASS, `scripts/momo hermes-gateway-install-plugin && scripts/momo hermes-gateway-status` PASS(`plugin enabled: yes`, oort server reachable), `scripts/momo hermes-gateway-smoke --real` PASS with evidence state `NEEDS_PROVIDER_LOGIN`(`/var/folders/zj/v6yd5tj104l14xhlpn1bx1r80000gn/T//momo-hermes-gateway-real/20260707T150741Z/summary.md`). 실제 provider OAuth 및 `@hermes` real gateway roundtrip은 사용자가 Hermes/provider login을 완료한 뒤 닫는다.
 
 ## 0-4b-6f. MOMO-334 Dogfood Hermes Invite Roster UX v0 (2026-07-08)
 
@@ -1538,7 +1577,7 @@
 ## 0-4b-6f. MOMO-329 Local alpha gateway mode env passthrough hotfix (2026-07-08)
 
 - `AGENT_GATEWAY_MODE=gateway AGENT_GATEWAY_SECRET=... scripts/momo up`로 실행해도 `/v1/agent-runtime/status`가 계속 `local-mock`으로 뜨던 원인을 확인했다. `scripts/momo`까지는 env를 받았지만, `scripts/local_alpha_runner.sh`가 host-run `MomoServer`를 시작할 때 explicit `env ... swift run` allowlist에 `AGENT_GATEWAY_MODE`/`AGENT_GATEWAY_SECRET`을 넣지 않아 서버 프로세스가 gateway mode를 보지 못했다.
-- `local_alpha_runner`가 gateway mode/secret을 로드·export·redacted summary 기록·MomoServer env 주입까지 전달하도록 수정했다. provider OAuth/Codex/OpenAI token은 여전히 momo env에 전달하지 않고, 이 secret은 momo↔Hermes gateway callback 인증용이다.
+- `local_alpha_runner`가 gateway mode/secret을 로드·export·redacted summary 기록·MomoServer env 주입까지 전달하도록 수정했다. provider OAuth/Codex/OpenAI token은 여전히 oort env에 전달하지 않고, 이 secret은 oort↔Hermes gateway callback 인증용이다.
 - 검증: `bash -n scripts/local_alpha_runner.sh` 대상. 실제 operator는 `scripts/momo stop-stack` 후 `AGENT_GATEWAY_MODE=gateway AGENT_GATEWAY_SECRET="$MOMO_AGENT_GATEWAY_SECRET" scripts/momo up`를 다시 실행하면 `agentRuntime.mode=gateway`를 확인할 수 있어야 한다.
 
 ## 0-4b-6g. MOMO-330 Agent runtime status gateway delivery hotfix (2026-07-08)
@@ -1549,7 +1588,7 @@
 
 ## 0-4b-6h. MOMO-331 Hermes adapter Centrifugo ping/pong hotfix (2026-07-08)
 
-- 실제 `hermes gateway run`에서 momo platform adapter가 연결되고 `Gateway running with 1 platform(s)`까지 갔지만, 잠시 후 realtime listen loop가 Centrifugo close code `3012 no pong`으로 종료됐다. 원인은 adapter가 Centrifugo JSON protocol heartbeat frame을 push가 아니라는 이유로 무시해 server-side heartbeat에 응답하지 못한 것이다.
+- 실제 `hermes gateway run`에서 oort platform adapter가 연결되고 `Gateway running with 1 platform(s)`까지 갔지만, 잠시 후 realtime listen loop가 Centrifugo close code `3012 no pong`으로 종료됐다. 원인은 adapter가 Centrifugo JSON protocol heartbeat frame을 push가 아니라는 이유로 무시해 server-side heartbeat에 응답하지 못한 것이다.
 - `MomoAdapter._listen_loop()`가 빈 heartbeat frame에는 빈 pong command를, 명시적 `ping` frame에는 `{"pong": {}}`를 보내도록 수정했다. connect/subscribe ack와 publish push 처리는 그대로 유지한다.
 - 검증: `python3 -m py_compile adapters/hermes/momo_adapter.py && python3 adapters/hermes/tests/test_momo_adapter_contract.py` PASS(12 tests), `LOCAL_GATE_ALLOW_DIRTY=1 scripts/local_gate.sh --profile docs` PASS(`/var/folders/zj/v6yd5tj104l14xhlpn1bx1r80000gn/T//momo-local-gate/local-gate-docs-20260708T004604Z-pid62511-ns1783471564069844000-wt9a510db2fbf3-r90750a762add.md`). 실제 gateway roundtrip도 `MOMO_HERMES_PROVIDER_READY=1 scripts/momo hermes-gateway-smoke --real --trigger` PASS(`same-channel Hermes gateway response observed`, evidence `/var/folders/zj/v6yd5tj104l14xhlpn1bx1r80000gn/T//momo-hermes-gateway-real/20260708T005622Z/summary.md`).
 
@@ -1557,7 +1596,7 @@
 
 - 당시 실제 앱에서 `@hermes hi`를 보냈을 때 `message`와 `agent_job(method=gateway)` 생성, OutboxRelay publish까지는 성공했지만 stale local-alpha Centrifugo config 때문에 구독이 거부됐다. MOMO-333에서 최초 복구했고, MOMO-338은 private job을 `agentwork:ws<workspace>.<agentMember>`로 분리해 실제 agent-bearer WebSocket 수신까지 검증한다.
 - `scripts/local_alpha_runner.sh`의 generated Centrifugo config를 `infra/centrifugo.json`과 맞춰 `agent` namespace도 `subscribe_proxy_enabled=true`와 workspace-qualified `channel_regex`를 갖도록 수정했다. `docs/RUN.md`와 Hermes gateway native platform runbook에는 local alpha에서도 `agent:` stream proxy가 필수라는 진단 기준을 추가했다.
-- 검증: generated config 확인(`/var/folders/zj/v6yd5tj104l14xhlpn1bx1r80000gn/T/momo-local-alpha/20260708T033819Z/centrifugo.local-alpha.json`: `agent.subscribe_proxy_enabled=true`, regex `^ws...\\....$`), 서버 `GET /v1/agent-runtime/status` = `mode=gateway`, `docker logs momo240_72373-centrifugo-1`에서 `namespace=agent subscribe proxy enabled` 및 `agent:ws... permission denied` 없음. 사용자-owned Hermes gateway(`openai-codex gpt-5.5`, provider token은 momo에 저장/로그하지 않음) 연결 상태에서 `MOMO_HERMES_PROVIDER_READY=1 scripts/momo hermes-gateway-smoke --real --trigger` PASS(`/var/folders/zj/v6yd5tj104l14xhlpn1bx1r80000gn/T//momo-hermes-gateway-real/20260708T034009Z/summary.md`). DB evidence: `outbox(kind=agent_job, method=gateway)=done`, `agent_run.status=succeeded`, `audit_log`에 `agent.gateway.status/completed`, `usage_ledger` 1건, Hermes final response가 같은 channel `message.seq=4`로 기록됨. 정적 gate: `LOCAL_GATE_ALLOW_DIRTY=1 scripts/local_gate.sh --profile docs` PASS(`/var/folders/zj/v6yd5tj104l14xhlpn1bx1r80000gn/T//momo-local-gate/local-gate-docs-20260708T034450Z-pid17038-ns1783482290079413000-wt9a510db2fbf3-r5e9aa29fc209.md`).
+- 검증: generated config 확인(`/var/folders/zj/v6yd5tj104l14xhlpn1bx1r80000gn/T/momo-local-alpha/20260708T033819Z/centrifugo.local-alpha.json`: `agent.subscribe_proxy_enabled=true`, regex `^ws...\\....$`), 서버 `GET /v1/agent-runtime/status` = `mode=gateway`, `docker logs momo240_72373-centrifugo-1`에서 `namespace=agent subscribe proxy enabled` 및 `agent:ws... permission denied` 없음. 사용자-owned Hermes gateway(`openai-codex gpt-5.5`, provider token은 oort에 저장/로그하지 않음) 연결 상태에서 `MOMO_HERMES_PROVIDER_READY=1 scripts/momo hermes-gateway-smoke --real --trigger` PASS(`/var/folders/zj/v6yd5tj104l14xhlpn1bx1r80000gn/T//momo-hermes-gateway-real/20260708T034009Z/summary.md`). DB evidence: `outbox(kind=agent_job, method=gateway)=done`, `agent_run.status=succeeded`, `audit_log`에 `agent.gateway.status/completed`, `usage_ledger` 1건, Hermes final response가 같은 channel `message.seq=4`로 기록됨. 정적 gate: `LOCAL_GATE_ALLOW_DIRTY=1 scripts/local_gate.sh --profile docs` PASS(`/var/folders/zj/v6yd5tj104l14xhlpn1bx1r80000gn/T//momo-local-gate/local-gate-docs-20260708T034450Z-pid17038-ns1783482290079413000-wt9a510db2fbf3-r5e9aa29fc209.md`).
 
 ## 0-4b-6j. MOMO-335 Mention Autocomplete + Hermes Working Indicator (2026-07-08)
 
@@ -1577,7 +1616,7 @@
 ## 0-4b-6l. MOMO-262 Agent Pairing Wizard v0 (2026-07-08)
 
 - macOS 멤버 `+` → 에이전트 초대 흐름을 pairing wizard로 확장했다. 사용자는 `@hermes` alias, 표시 이름, local endpoint, model label, permission scope, avatar를 확인하고 Hermes를 현재 채널 roster에 추가한다.
-- 앱은 pairing manifest와 invite code를 생성하고 copy/export affordance를 제공한다. manifest에는 momo-facing API/workspace/channel metadata, helper command, `$HOME/.momo/hermes-gateway.env:MOMO_AGENT_GATEWAY_SECRET` secret source만 들어가며 Codex/OpenAI OAuth token, refresh token, provider API key 값은 포함하지 않는다.
+- 앱은 pairing manifest와 invite code를 생성하고 copy/export affordance를 제공한다. manifest에는 oort-facing API/workspace/channel metadata, helper command, `$HOME/.momo/hermes-gateway.env:MOMO_AGENT_GATEWAY_SECRET` secret source만 들어가며 Codex/OpenAI OAuth token, refresh token, provider API key 값은 포함하지 않는다.
 - endpoint policy는 loopback HTTP를 기본 허용하고, non-loopback `http://...`는 명시 opt-in 없이는 fail-closed guidance를 보여주며 초대/manifest copy/export를 막는다. userinfo/query/fragment가 붙은 credential-bearing endpoint는 reject하고 manifest에 토큰/API key shaped 값이 들어가지 않도록 테스트로 고정했다. 실제 provider OAuth/login은 계속 Hermes/provider runtime 내부에서 사용자가 수행한다.
 - `@hermes` mention, working indicator, profile draft, Hermes gateway real path는 MOMO-333/MOMO-335/MOMO-260 계약을 유지한다. 실제 credentialed provider smoke는 user-owned Hermes/provider login 이후 `scripts/momo hermes-gateway-smoke --real --trigger`로 별도 evidence를 남긴다.
 - 검증: `swift build --package-path clients/macOS --product MomoMacDevApp` PASS, `swift test --package-path clients/macOS` PASS(72 tests), `LOCAL_GATE_ALLOW_DIRTY=1 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile runtime-agent` PASS(evidence: `local-gate-runtime-agent-20260708T080156Z-pid72693-ns1783497716611283000-wt6092ab556fc7-rf9116ebf5514.md`), `LOCAL_GATE_ALLOW_DIRTY=1 LOCAL_GATE_LAUNCH_UI=1 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile macos-ui` PASS(evidence: `local-gate-macos-ui-20260708T080507Z-pid91159-ns1783497907345665000-wt6092ab556fc7-r31e0192f5346.md`). 코드리뷰에서 endpoint secret leakage, blocked endpoint manifest export, unstable invite code, editable-but-unsupported custom alias를 지적했고 endpoint sanitization/draft persistence, copy/export gating, stable invite code, `@hermes` fixed alias로 반영했다.
@@ -1936,7 +1975,7 @@
 
 ## 0g. MOMO-150 Agent Runtime Research + Roadmap (2026-06-25)
 
-- Hermes agent / internkim(Kim Intern) / openclaw를 기준으로 momo가 agent runtime의 단순 채널 어댑터가 아니라 context, memory, cache, approval, audit, cost를 소유하는 agent host가 되어야 한다는 결정을 문서화했다.
+- Hermes agent / internkim(Kim Intern) / openclaw를 기준으로 oort가 agent runtime의 단순 채널 어댑터가 아니라 context, memory, cache, approval, audit, cost를 소유하는 agent host가 되어야 한다는 결정을 문서화했다.
 - 새 연구 정본: `research/11-agent-runtime/01-three-agent-runtime-analysis.md`, `02-memory-cache-protocol-gaps.md`, `03-roadmap-and-methodology.md`.
 - 새 후속 로드맵: MOMO-151 Context Packet v0 deep spec, MOMO-152 Memory Plane v0, MOMO-153 Capability Cache v0, MOMO-160~163 backend protocol, MOMO-170~172 macOS/LLM UX.
 - 런타임 코드 변경 없음. 이번 PR은 docs/spec 변경이며, M1 runtime-unverified 잔여 범위(WebSocket live subscribe/presence/recovery, APNs)는 그대로 유지된다.
@@ -2012,7 +2051,7 @@
 
 ## 0r. MOMO-163 Inbound MCP Server v0 Spec + Fixtures (2026-06-26)
 
-- Inbound MCP Server v0 정본을 `research/11-agent-runtime/09-inbound-mcp-server-v0.md`에 추가하고, 외부 Claude/Codex/Cursor류 host가 momo를 쓰는 최소 surface를 `momo.search_messages`, `momo.fetch_thread`, `momo.post_message`, `momo.create_tool_call`로 고정했다.
+- Inbound MCP Server v0 정본을 `research/11-agent-runtime/09-inbound-mcp-server-v0.md`에 추가하고, 외부 Claude/Codex/Cursor류 host가 oort를 쓰는 최소 surface를 `momo.search_messages`, `momo.fetch_thread`, `momo.post_message`, `momo.create_tool_call`로 고정했다.
 - JSON fixture 2종을 `research/11-agent-runtime/fixtures/inbound-mcp-server-v0/`에 추가했다: tools/resources/prompts discovery snapshot, approval-safe tool-call proposal.
 - 런타임 코드/스키마 변경 없음. MCP server runtime, RLS/idempotency integration test, approval executor 연결은 후속 구현 범위다.
 
@@ -2134,7 +2173,7 @@
 
 - `adapters/hermes/tests/smoke_momo_adapter.py`를 추가해 Hermes SDK/네트워크 없이 `platform_adapter_event_mapping.json` Centrifugo fixture → adapter event unwrap → REST invoke/final-message capture를 검증한다.
 - `scripts/local_gate.sh --profile docs`가 adapter `py_compile`, contract unittest, repo-local smoke를 모두 실행하도록 연결했다. adapter docs/contract/ROADMAP/BUILD_TICKETS도 live Hermes boundary를 갱신했다.
-- 실제 Hermes gateway plugin load 및 live momo+Centrifugo+Postgres platform-adapter e2e는 여전히 `runtime-unverified` 후속 범위다.
+- 실제 Hermes gateway plugin load 및 live oort+Centrifugo+Postgres platform-adapter e2e는 여전히 `runtime-unverified` 후속 범위다.
 
 
 ## 0ah. MOMO-122 Google Workspace Connector v0 Spec + Fixtures (2026-06-27)
@@ -2175,7 +2214,7 @@
 
 ## 0am. MOMO-180 Agentic Work OS Market + Repo Topology ADR (2026-06-29)
 
-- Paca/OpenHands/Linear/Rovo/GitHub Copilot/Slack/MCP/A2A 흐름을 기준으로 momo의 포지션을 "agent execution ledger가 있는 messenger / enterprise agent host / protocol surface"로 문서화했다. 정본: `research/12-agentic-work-os/01-agentic-work-os-market-analysis.md`.
+- Paca/OpenHands/Linear/Rovo/GitHub Copilot/Slack/MCP/A2A 흐름을 기준으로 oort의 포지션을 "agent execution ledger가 있는 messenger / enterprise agent host / protocol surface"로 문서화했다. 정본: `research/12-agentic-work-os/01-agentic-work-os-market-analysis.md`.
 - repo split 판단을 ADR로 고정했다. M3/M4까지 `momo` core monorepo를 유지하고, 안정화 후 `momo-plugins`, first-party plugin repos, plugin SDK repos, `momo-mcp`, `momo-landing`, private `momo-signing` 경계부터 분리한다. 정본: `docs/adr/0001-agentic-work-os-repo-topology.md`.
 - Docker/deploy layering은 dev/e2e/prod/install/upgrade/backup으로 나누되, 실제 repo split, plugin runtime, prod installer 구현은 MOMO-181~184 후속으로 남겼다. 코드/스키마/런타임 변경 없음.
 
@@ -2223,7 +2262,7 @@
 
 ## 0aq. MOMO-184 Agent Host Product Messaging (2026-06-29)
 
-- `research/12-agentic-work-os/03-agent-host-positioning.md`를 추가해 momo 제품 문장을 **channel timeline execution ledger** 중심으로 고정했다. Slack/Discord/Mattermost/Paca/OpenHands 대비 1페이지 비교와 website/README/sales deck reusable copy block을 포함한다.
+- `research/12-agentic-work-os/03-agent-host-positioning.md`를 추가해 oort 제품 문장을 **channel timeline execution ledger** 중심으로 고정했다. Slack/Discord/Mattermost/Paca/OpenHands 대비 1페이지 비교와 website/README/sales deck reusable copy block을 포함한다.
 - `README.md`, `ROADMAP.md`, `BUILD_TICKETS.md`, `docs/INDEX.md`에 정본 링크와 상태를 반영했다. agent host, protocol surface, self-hosted trust boundary, local LLM future 방향을 제품 copy에 연결했다.
 - 코드/스키마/runtime 변경은 없으며 runtime 영향 없음. 검증: `scripts/local_gate.sh --profile docs` PASS.
 
@@ -2281,8 +2320,8 @@
 
 ## 0az. MOMO-323 GWS 스펙 정정 3건 + Internal consent 셋업 런북 (2026-07-06)
 
-- MOMO-122 스펙(`research/11-agent-runtime/12-google-workspace-connector-v0.md`) 정정: §4.2 scope 표에서 `drive.metadata.readonly`가 **restricted-class**임을 명기(기존 표는 가벼운 metadata tier처럼 읽혔음 — `drive.file`만 non-sensitive), self-hosted 배포는 배포 조직 소유 GCP 프로젝트 + OAuth consent **Internal**(같은 Workspace 조직) 전제에서 Google 검증/CASA가 면제됨을 배포 전제로 반영. §2 "no full Drive mirrors" 규칙에 **momo 관리 공유 드라이브 한정 revocable 파생 인덱스**(임베딩+청크, 행마다 permission snapshot version, tombstone 시 삭제) carve-out을 추가 — 사용자 개인 Drive(`drive.file` 선택 파일)는 기존대로 excerpt-only.
-- MOMO-123 스펙(`13-google-workspace-enterprise-admin-v0.md`)에 `service_account_boundary.boundary_kind` 도입: 기존 DWD 경로는 `dwd_delegation`(필드 부재 시 기본으로 읽음 — backward compatible), 제3모드 `shared_drive_member` 추가(**DWD 아님** — SA가 자기 자신으로서 momo 관리 공유 드라이브 1개의 Content Manager 멤버로만 동작, 사칭/delegated token 금지, Admin console API Controls 등록 불필요). §3 install mode 표·§5 scope inventory(`drive.file` SA-as-itself)·§6 boundary JSON/규칙·revoke 경로를 함께 갱신하고, fixtures 3종(`admin_install_scope_inventory`/`dwd_delegated_context_projection`/`audit_export_revoke_flow`)에 `boundary_kind` 필드 + `shared_drive_member` boundary 예시를 additive로 확장(jq green).
+- MOMO-122 스펙(`research/11-agent-runtime/12-google-workspace-connector-v0.md`) 정정: §4.2 scope 표에서 `drive.metadata.readonly`가 **restricted-class**임을 명기(기존 표는 가벼운 metadata tier처럼 읽혔음 — `drive.file`만 non-sensitive), self-hosted 배포는 배포 조직 소유 GCP 프로젝트 + OAuth consent **Internal**(같은 Workspace 조직) 전제에서 Google 검증/CASA가 면제됨을 배포 전제로 반영. §2 "no full Drive mirrors" 규칙에 **oort 관리 공유 드라이브 한정 revocable 파생 인덱스**(임베딩+청크, 행마다 permission snapshot version, tombstone 시 삭제) carve-out을 추가 — 사용자 개인 Drive(`drive.file` 선택 파일)는 기존대로 excerpt-only.
+- MOMO-123 스펙(`13-google-workspace-enterprise-admin-v0.md`)에 `service_account_boundary.boundary_kind` 도입: 기존 DWD 경로는 `dwd_delegation`(필드 부재 시 기본으로 읽음 — backward compatible), 제3모드 `shared_drive_member` 추가(**DWD 아님** — SA가 자기 자신으로서 oort 관리 공유 드라이브 1개의 Content Manager 멤버로만 동작, 사칭/delegated token 금지, Admin console API Controls 등록 불필요). §3 install mode 표·§5 scope inventory(`drive.file` SA-as-itself)·§6 boundary JSON/규칙·revoke 경로를 함께 갱신하고, fixtures 3종(`admin_install_scope_inventory`/`dwd_delegated_context_projection`/`audit_export_revoke_flow`)에 `boundary_kind` 필드 + `shared_drive_member` boundary 예시를 additive로 확장(jq green).
 - 신규 `docs/GWS_INTERNAL_CONSENT_RUNBOOK.md`: 배포 조직용 GCP 프로젝트 생성 → OAuth consent Internal → SA 생성/키 발급(시크릿 저장소 only, 키 바이트 비커밋) → 공유 드라이브 생성 + SA Content Manager 멤버 추가 → boundary 기록값 → 검증 스모크/철회 경로까지, 사람 단계는 전부 `[manual]` 표기. `docs/INDEX.md` §2에 등록.
 - 검증: `LOCAL_GATE_ALLOW_DIRTY=1 scripts/local_gate.sh --profile docs` PASS(fixtures JSON jq 포함). 문서/fixture만 변경 — 코드/스키마 변경 없음. 정직 표기: 런북의 `[manual]` 단계(GCP/consent/SA/드라이브)는 미실행이며, SA `drive.file` scope의 changes.list/다운로드 충분성은 **runtime-unverified**(MOMO-320 착수 시 실증 — tracker 실증 항목 유지). 실행 트래커에서 MOMO-323 → `review`.
 
@@ -2507,5 +2546,5 @@ scripts/local_alpha_runner.sh execute --hermes mock
 > 라이선스: 전 의존성 permissive(Apache/MIT) 타깃. 외부 배포/상용 전 법무 검토 1회 필수(L4 §10).
 ## MOMO-406 install/upgrade + 5분 설치 (2026-07-16)
 
-- prod compose를 변경하지 않고 소비하는 `install.sh`/`upgrade.sh`를 추가했다. 네 momo 이미지의 per-service sha256 digest, 기존 strict preflight, one-shot migrate, 순차 재기동, mode-0600 이전 이미지 상태와 app-only rollback(DB migration 전방 전용)을 강제하며 시크릿 값은 출력하지 않는다.
+- prod compose를 변경하지 않고 소비하는 `install.sh`/`upgrade.sh`를 추가했다. 네 oort 이미지의 per-service sha256 digest, 기존 strict preflight, one-shot migrate, 순차 재기동, mode-0600 이전 이미지 상태와 app-only rollback(DB migration 전방 전용)을 강제하며 시크릿 값은 출력하지 않는다.
 - 정적 인자/rollback 매트릭스와 shellcheck/bash syntax는 worker에서 PASS. Docker가 필요한 `staging-smoke` compose render와 실제 VPS DNS/TLS·registry pull·SOPS·pgBackRest·Hermes는 오케스트레이터/실호스트 검증 대기(`runtime-unverified(public host)`).

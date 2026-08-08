@@ -854,7 +854,7 @@ public final class ChatViewModel: ObservableObject {
         let loadGeneration = workspaceIdentityLoadGeneration
         guard let workspaceBackend else {
             workspace = cachedWorkspaceIdentity(workspaceID)
-                ?? Workspace(id: workspaceID, slug: workspaceID.description, name: "momo")
+                ?? Workspace(id: workspaceID, slug: workspaceID.description, name: "oort")
             workspaceIdentityUsesCache = true
             return
         }

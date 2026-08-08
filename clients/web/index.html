@@ -2,8 +2,76 @@
 <html lang="ko">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <title>momo</title>
+    <!--
+      viewport-fit=cover는 노치와 홈 인디케이터 영역까지 그리게 한다. 그 대가로
+      셸의 마지막 줄(컴포저, 사이드바 발치)이 안전 영역만큼 스스로 물러나야
+      하고, 그 규칙은 src/design/tokens.css의 safe-area-bottom이 갖고 있다.
+
+      interactive-widget=resizes-content는 가상 키보드가 올라올 때 레이아웃
+      뷰포트 자체를 줄인다. 기본값(resizes-visual)에서는 셸 높이가 그대로라
+      컴포저가 키보드 뒤에 남고, 쓰는 사람은 자기가 친 글자를 못 본다. 이 값을
+      모르는 브라우저는 무시하므로 잃는 것이 없다.
+
+      user-scalable=no와 maximum-scale은 쓰지 않는다: 확대를 막는 것은 접근성을
+      끄는 것이다. iOS가 입력창에서 자동 확대하는 문제는 폼 컨트롤 글자를 16px로
+      두는 것으로 푼다(tokens.css @layer base).
+    -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content"
+    />
+    <title>oort</title>
+    <!--
+      탭 아이콘은 SVG 한 장이다. 브라우저가 어떤 배율로 그리든 같은 path를 다시
+      그리므로 16/32/48 사본을 두지 않는다. apple-touch-icon만 래스터인데, iOS 홈
+      화면이 SVG를 읽지 않기 때문이고 같은 SVG에서 180px로 떠낸 것이다.
+    -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <!--
+      브라우저 크롬(주소창·상태바)이 앱 표면과 같은 종이를 쓰게 한다. 값은
+      src/design/tokens.css의 --surface 두 스킴을 옮긴 것이고, 팔레트가 바뀌면
+      여기도 같이 바뀐다.
+    -->
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f7f6f3" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#17161a" />
+    <!--
+      저장된 테마를 첫 페인트보다 먼저 문서에 못 박는다 (U2). 근거 전문은
+      public/theme-boot.js 머리말에 있고, 이 자리가 요구하는 것은 셋뿐이다.
+
+      1. defer가 아니다. 앱 진입점은 type="module"이라 언제나 defer이고, 그것이
+         실행될 때는 이미 한 프레임이 그려졌을 수 있다. 저장된 선택이 다크인데
+         이 기기가 라이트면 그 프레임이 흰 종이로 번쩍인다.
+      2. 인라인이 아니다. 배포 CSP와 Tauri CSP 모두 script-src 'self'이고
+         'unsafe-inline'이 없으므로, 인라인 <script>는 실행되지 않는다.
+      3. 위의 theme-color 두 줄보다 뒤에 있다. 그 스크립트가 고정할 때 두 줄의
+         값을 읽어 쓰므로, 파서가 그것들을 이미 지났어야 한다.
+    -->
+    <script src="/theme-boot.js"></script>
+    <!--
+      홈 화면 설치 (goal B10). 매니페스트 자체는 public/manifest.json이고, 그
+      선택들(standalone, 다크 타일과 같은 배경색, 192/512/maskable 아이콘)의
+      근거는 src/features/pwa/store.ts 머리말에 적혀 있다.
+
+      확장자가 .webmanifest가 아니라 .json인 이유: 매니페스트는 JSON MIME으로
+      와야 브라우저가 읽는데, 배포 Caddy 이미지에는 .webmanifest 매핑이 없어
+      text/plain으로 나갈 수 있다. .json은 어디서나 application/json이다.
+
+      apple- 접두사 두 줄은 iOS 몫이다. iOS 16.4부터는 매니페스트의 display도
+      읽지만, 그 아래 버전에서 홈 화면 아이콘을 전체 화면으로 여는 스위치는
+      apple-mobile-web-app-capable 하나뿐이다. mobile-web-app-capable은 같은
+      뜻의 표준 이름이고 크롬이 이쪽을 본다.
+
+      상태바 스타일은 black-translucent가 아니라 default다. translucent는 글자를
+      흰색으로 고정하는데, 이 앱은 라이트 스킴에서 밝은 종이(#f7f6f3)를 깔기
+      때문에 흰 글자 시계가 배경에 지워진다. default는 위의 theme-color 두 줄을
+      따라가므로 스킴이 바뀌어도 시계가 읽힌다.
+    -->
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="oort" />
   </head>
   <body>
     <div id="root"></div>

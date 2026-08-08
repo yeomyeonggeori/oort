@@ -1,5 +1,6 @@
 import { cn } from "@/design/lib/cn";
 import type { AgentTurnState } from "./agentWorkingSignal";
+import { TURN_STALE_SENTENCE } from "./turnCopy";
 
 /**
  * A compact turn state whose color is evidence-sensitive.
@@ -21,9 +22,7 @@ export function AgentTurnBadge({
   live: boolean;
   testId?: string;
 }) {
-  const accessibleLabel = live
-    ? label
-    : `${label} 연결이 끊겨 갱신이 멈췄습니다. 마지막으로 확인된 상태입니다.`;
+  const accessibleLabel = live ? label : `${label} ${TURN_STALE_SENTENCE}`;
   return (
     <span
       className={cn(

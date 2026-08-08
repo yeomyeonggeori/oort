@@ -1,0 +1,28 @@
+[package]
+name = "momo-ephemeral"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+# ADR-0149 (goal SRV-T2) — the SECOND Centrifugo writer in the workspace, and a
+# crate rather than a module in `momo-server` for one reason: the sealed
+# publish API is only a wall if the HTTP client it wraps cannot be reached
+# around. `reqwest` is a dependency of THIS crate, never of `momo-server`, so a
+# route cannot hand-roll a publish of its own — the only thing it can reach is
+# `EphemeralPublisher::publish(&EphemeralSignal)`.
+#
+# **There is deliberately no `momo-db` and no `sqlx` here** (ADR-0149 guard 3).
+# The ephemeral path writes nothing and reads nothing from Postgres; a DB
+# dependency in this manifest would make that claim unenforceable, so
+# `lib.rs::the_publisher_has_no_database_dependency` asserts it against this
+# file.
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+reqwest.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

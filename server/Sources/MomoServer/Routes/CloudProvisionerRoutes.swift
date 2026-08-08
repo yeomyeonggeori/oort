@@ -84,7 +84,7 @@ struct CloudProvisionerRoutes: Sendable {
         guard input.confirmPaidCloud else {
             throw HTTPError(
                 .badRequest,
-                message: "momo Cloud는 유료 실행입니다. 명시적으로 동의한 뒤 다시 요청하세요."
+                message: "oort Cloud는 유료 실행입니다. 명시적으로 동의한 뒤 다시 요청하세요."
             )
         }
         let displayName = try WorkHostRoutes.validatedDisplayName(input.displayName)
@@ -102,7 +102,7 @@ struct CloudProvisionerRoutes: Sendable {
         guard let bootstrapSecret = readyConfig.bootstrapSecret(for: providerID) else {
             throw HTTPError(
                 .serviceUnavailable,
-                message: "momo Cloud 프로비저너 설정이 완전하지 않습니다. 인스턴스 운영자에게 문의하세요."
+                message: "oort Cloud 프로비저너 설정이 완전하지 않습니다. 인스턴스 운영자에게 문의하세요."
             )
         }
         let expiresAt = Date().addingTimeInterval(Self.bootstrapTTLSeconds)
@@ -161,7 +161,7 @@ struct CloudProvisionerRoutes: Sendable {
             )
             let idRows = try await conn.query("SELECT uuidv7()", logger: db.logger).collect()
             guard let provisionID = try idRows.first?.decode(UUID.self) else {
-                throw HTTPError(.internalServerError, message: "momo Cloud 요청 ID를 만들지 못했습니다.")
+                throw HTTPError(.internalServerError, message: "oort Cloud 요청 ID를 만들지 못했습니다.")
             }
             let token = Self.bootstrapToken(
                 provisionID: provisionID,
@@ -258,7 +258,7 @@ struct CloudProvisionerRoutes: Sendable {
                     logger: db.logger
                 ).collect()
                 guard let row = rows.first else {
-                    throw HTTPError(.conflict, message: "momo Cloud 요청 상태가 변경되었습니다.")
+                    throw HTTPError(.conflict, message: "oort Cloud 요청 상태가 변경되었습니다.")
                 }
                 return try Self.decodeCloudHost(row)
             }
@@ -280,9 +280,9 @@ struct CloudProvisionerRoutes: Sendable {
 
     /// ADR-0142 D1 — BYOC enrollment.
     ///
-    /// Same lifecycle, different acquisition: momo issues the one-shot token
+    /// Same lifecycle, different acquisition: oort issues the one-shot token
     /// and the operator installs `momo-workd` wherever they like. There is no
-    /// provider call here at all, which is the whole point — momo never gained
+    /// provider call here at all, which is the whole point — oort never gained
     /// the right to boot or kill that machine.
     @Sendable
     func enroll(_ request: Request, context: AppRequestContext) async throws -> Response {
@@ -399,7 +399,7 @@ struct CloudProvisionerRoutes: Sendable {
             return (provisionID, expiresAt, false)
         }
 
-        // A replayed idempotencyRef cannot re-reveal a token momo never kept.
+        // A replayed idempotencyRef cannot re-reveal a token oort never kept.
         guard !enrollment.replayed else {
             throw HTTPError(
                 .conflict,
@@ -467,7 +467,7 @@ struct CloudProvisionerRoutes: Sendable {
             guard provisionID == expectedProvisionID else {
                 throw HTTPError(
                     .conflict,
-                    message: "momo Cloud registration lifecycle changed; retry"
+                    message: "oort Cloud registration lifecycle changed; retry"
                 )
             }
             let hostRows = try await conn.query(
@@ -544,7 +544,7 @@ struct CloudProvisionerRoutes: Sendable {
                 logger: db.logger
             ).collect()
             guard let row = rows.first else {
-                throw HTTPError(.notFound, message: "momo Cloud 요청을 찾을 수 없습니다.")
+                throw HTTPError(.notFound, message: "oort Cloud 요청을 찾을 수 없습니다.")
             }
             return try Self.decodeCloudHost(row)
         }
@@ -619,7 +619,7 @@ struct CloudProvisionerRoutes: Sendable {
                 )
                 throw HTTPError(
                     .gone,
-                    message: "momo Cloud 샌드박스가 사라져 orphan 정리를 예약했습니다."
+                    message: "oort Cloud 샌드박스가 사라져 orphan 정리를 예약했습니다."
                 )
             }
             throw Self.httpError(error)
@@ -729,7 +729,7 @@ struct CloudProvisionerRoutes: Sendable {
                 guard usageRows.first == nil else {
                     throw HTTPError(
                         .conflict,
-                        message: "실행 중인 세션을 먼저 종료한 뒤 momo Cloud 호스트를 삭제하세요."
+                        message: "실행 중인 세션을 먼저 종료한 뒤 oort Cloud 호스트를 삭제하세요."
                     )
                 }
             }
@@ -754,7 +754,7 @@ struct CloudProvisionerRoutes: Sendable {
                 logger: db.logger
             ).collect()
             guard let row = updatedRows.first else {
-                throw HTTPError(.conflict, message: "momo Cloud 호스트 상태가 변경되었습니다.")
+                throw HTTPError(.conflict, message: "oort Cloud 호스트 상태가 변경되었습니다.")
             }
             if action == .destroy {
                 _ = try await conn.query(
@@ -821,7 +821,7 @@ struct CloudProvisionerRoutes: Sendable {
             workspaceID: workspaceID,
             hostID: hostID
         ) else {
-            throw HTTPError(.notFound, message: "momo Cloud 호스트를 찾을 수 없습니다.")
+            throw HTTPError(.notFound, message: "oort Cloud 호스트를 찾을 수 없습니다.")
         }
         return try await withTenantLifecycleTransactionUnwrapped(
             workspaceID: workspaceID,
@@ -852,7 +852,7 @@ struct CloudProvisionerRoutes: Sendable {
                 logger: db.logger
             ).collect()
             guard let row = rows.first else {
-                throw HTTPError(.notFound, message: "momo Cloud 호스트를 찾을 수 없습니다.")
+                throw HTTPError(.notFound, message: "oort Cloud 호스트를 찾을 수 없습니다.")
             }
             let (lockedCloudHostID, requesterID, sandboxID, state, rowProviderID,
                  hasOpenUsage) =
@@ -860,11 +860,11 @@ struct CloudProvisionerRoutes: Sendable {
             guard lockedCloudHostID == cloudHostID else {
                 throw HTTPError(
                     .conflict,
-                    message: "momo Cloud host lifecycle changed; retry"
+                    message: "oort Cloud host lifecycle changed; retry"
                 )
             }
             guard requesterID == principal.memberID || role.isAdmin else {
-                throw HTTPError(.forbidden, message: "momo Cloud 호스트 소유자 또는 관리자만 변경할 수 있습니다.")
+                throw HTTPError(.forbidden, message: "oort Cloud 호스트 소유자 또는 관리자만 변경할 수 있습니다.")
             }
             // Refuse rather than route a host to the wrong substrate: an
             // adapter that does not know this instance would answer "missing"
@@ -900,19 +900,19 @@ struct CloudProvisionerRoutes: Sendable {
             guard state == expectedState else {
                 throw HTTPError(
                     .conflict,
-                    message: "momo Cloud 호스트를 이 상태에서 변경할 수 없습니다. 현재 상태: \(state)"
+                    message: "oort Cloud 호스트를 이 상태에서 변경할 수 없습니다. 현재 상태: \(state)"
                 )
             }
             guard action != .destroy || !hasOpenUsage else {
                 throw HTTPError(
                     .conflict,
-                    message: "실행 중인 세션을 먼저 종료한 뒤 momo Cloud 호스트를 삭제하세요."
+                    message: "실행 중인 세션을 먼저 종료한 뒤 oort Cloud 호스트를 삭제하세요."
                 )
             }
             guard let sandboxID else {
                 throw HTTPError(
                     .serviceUnavailable,
-                    message: "momo Cloud 인스턴스 연결 정보가 준비되지 않았습니다."
+                    message: "oort Cloud 인스턴스 연결 정보가 준비되지 않았습니다."
                 )
             }
             let operationID = UUID()
@@ -942,7 +942,7 @@ struct CloudProvisionerRoutes: Sendable {
                 logger: db.logger
             ).collect()
             guard let intentRow = updatedRows.first else {
-                throw HTTPError(.conflict, message: "momo Cloud 호스트 상태가 변경되었습니다.")
+                throw HTTPError(.conflict, message: "oort Cloud 호스트 상태가 변경되었습니다.")
             }
             let version = try intentRow.decode((UUID, Int64).self).1
             return LifecycleIntent(
@@ -1147,7 +1147,7 @@ struct CloudProvisionerRoutes: Sendable {
         catch CloudProvisionerConfigError.missingEndpoint {
             throw HTTPError(
                 .serviceUnavailable,
-                message: "momo Cloud를 사용할 수 없습니다. 인스턴스 운영자에게 provider 설정을 요청하세요."
+                message: "oort Cloud를 사용할 수 없습니다. 인스턴스 운영자에게 provider 설정을 요청하세요."
             )
         }
         catch CloudProvisionerConfigError.unknownProvider {
@@ -1158,7 +1158,7 @@ struct CloudProvisionerRoutes: Sendable {
         } catch {
             throw HTTPError(
                 .serviceUnavailable,
-                message: "momo Cloud 프로비저너 설정이 완전하지 않습니다. 인스턴스 운영자에게 문의하세요."
+                message: "oort Cloud 프로비저너 설정이 완전하지 않습니다. 인스턴스 운영자에게 문의하세요."
             )
         }
     }
@@ -1183,7 +1183,7 @@ struct CloudProvisionerRoutes: Sendable {
     static func disabledError() -> HTTPError {
         HTTPError(
             .serviceUnavailable,
-            message: "momo Cloud(T3)는 기본 비활성입니다. 재설계 진행 중(#888)입니다."
+            message: "oort Cloud(T3)는 기본 비활성입니다. 재설계 진행 중(#888)입니다."
         )
     }
 
@@ -1202,7 +1202,7 @@ struct CloudProvisionerRoutes: Sendable {
         }
         return HTTPError(
             .serviceUnavailable,
-            message: "momo Cloud 호스트를 준비하지 못했습니다. 잠시 후 다시 시도하세요."
+            message: "oort Cloud 호스트를 준비하지 못했습니다. 잠시 후 다시 시도하세요."
         )
     }
 
@@ -1259,7 +1259,7 @@ struct CloudProvisionerRoutes: Sendable {
                 logger: db.logger
             ).collect()
             guard let row = rows.first else {
-                throw HTTPError(.notFound, message: "momo Cloud 요청을 찾을 수 없습니다.")
+                throw HTTPError(.notFound, message: "oort Cloud 요청을 찾을 수 없습니다.")
             }
             return try Self.decodeCloudHost(row)
         }
@@ -1285,7 +1285,7 @@ struct CloudProvisionerRoutes: Sendable {
     private static func requireHuman(_ context: AppRequestContext) throws -> AuthPrincipal {
         let principal = try context.requirePrincipal()
         guard principal.kind == .human else {
-            throw HTTPError(.forbidden, message: "momo Cloud management requires a human member")
+            throw HTTPError(.forbidden, message: "oort Cloud management requires a human member")
         }
         return principal
     }

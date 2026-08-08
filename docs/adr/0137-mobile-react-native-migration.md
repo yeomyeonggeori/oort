@@ -1,5 +1,7 @@
 # ADR-0137: 모바일 클라이언트 — React Native 채택 (iOS 재작성 + Android 신설)
 
+> **범위 갱신 2026-08-02(성재 결정 6)**: **Android 보류 · App Store 전용 배포.** 취소가 아니라 순서 변경이다 — 상세는 §성재 결정(6).
+
 - Status: **Accepted** (2026-07-27, 성재 승인 — "ADR-0137 Accept 진행해줘". 스택 방향은 2026-07-26 결정 "RN쪽으로 가자", 세부 결정 5건은 아래 §성재 결정에 기록)
 - 관련: **ADR-0123(iOS 클라이언트 v0 — 본 ADR이 대체)**, ADR-0133(UI 스택 Tauri/React — iOS 경로를 P4a 스파이크로 미뤄둔 공백을 본 ADR이 해소), ADR-0120(푸시 id-only→NSE fetch — **승계**), ADR-0125(work host 등급), 리서치 정본 `docs/planning/2026-07-26-rn-adoption-plan.md`·`2026-07-26-mobile-stack-research.md`
 
@@ -16,14 +18,14 @@
 
 ### D1. 스택 = **bare React Native + Expo 모듈 낱개, EAS 미도입**
 - RN 0.83+/React 19, **New Architecture ON**. 레퍼런스 정합: Mattermost 0.83.9(New Arch, bare + expo-router + Expo 모듈 낱개, `eas.json` 없음, fastlane+GHA), Rocket.Chat 0.81.5.
-- **EAS를 쓰지 않는 이유**: momo는 이미 fastlane+match+`release-ios.yml`과 `momo-signing` private repo를 갖고 있다. EAS로 가면 서명 인프라를 재구성해야 하고, 셀프호스팅 오픈소스 제품의 빌드를 특정 SaaS에 묶는다. Expo 모듈의 이점은 bare에서도 그대로 얻는다.
+- **EAS를 쓰지 않는 이유**: oort는 이미 fastlane+match+`release-ios.yml`과 `momo-signing` private repo를 갖고 있다. EAS로 가면 서명 인프라를 재구성해야 하고, 셀프호스팅 오픈소스 제품의 빌드를 특정 SaaS에 묶는다. Expo 모듈의 이점은 bare에서도 그대로 얻는다.
 - **플랫폼별로 이유가 다르다(정밀화)**: **iOS는 bare 유지** — NSE 62줄 + `PushNotification.swift` 329줄 + App Group + fastlane/match가 **이미 손으로 짜여 동작한다**. config plugin의 가치는 "손으로 유지하던 네이티브 프로젝트를 선언적으로 대체"인데, 대체할 필요 없는 것을 이미 가졌으므로 plugin 작성은 순 이득이 아니라 **번역 비용**이다. **Android는 `expo prebuild --platform android`로 골격만 부트스트랩** — 지킬 기존 자산이 0이라 잃을 게 없고, 이후 유지보수는 bare와 동일하게 간다(CNG 관리형으로 계속 끌고 가지 않는다).
 - 2026년에는 `expo` 의존 유무가 bare/managed 이분법의 기준이 아니다(실사용 페어링: Bluesky Expo 54/RN 0.81.5 · Mattermost Expo ^55/RN 0.83.9 · Rocket.Chat Expo ^54/RN 0.81.5 · MetaMask Expo ^55/RN 0.83.6).
 - 대안 기각: Tauri 모바일(§Context 5), Capacitor(silent push 미지원), Flutter(우리 TS/React 자산과 공유 0 — buzz가 그 길을 갔고 코드 공유가 0이다), KMP(UI 2벌은 우리 인력으로 불가).
 
 ### D2. 이행 방식 = **전량 재작성** (brownfield 기각)
 - brownfield 자체는 방치된 길이 아니다(RN 공식 문서가 New Arch 기본, Callstack `react-native-brownfield` v5.0.0이 2026-07-23 릴리스). **그러나 성공 사례가 전부 대기업이고, 소규모 팀 사례를 찾지 못했다.**
-- momo 사실관계가 재작성을 가리킨다: ①**Android가 0** → brownfield는 iOS에만 걸려 "iOS 하이브리드 / Android 순수 RN"이라는 비대칭을 만든다(= Airbnb가 철수 사유로 든 "플랫폼이 셋이 된다") ②iOS 14,119줄로 **유계** — brownfield의 값어치는 Office/Shopify Mobile 급에서 나온다 ③**오너 1인 + 에이전트** — 에이전트는 코드 양은 감당해도 "이 크래시가 Fabric interop이냐 앱 로직이냐"를 판단하지 못한다.
+- oort 사실관계가 재작성을 가리킨다: ①**Android가 0** → brownfield는 iOS에만 걸려 "iOS 하이브리드 / Android 순수 RN"이라는 비대칭을 만든다(= Airbnb가 철수 사유로 든 "플랫폼이 셋이 된다") ②iOS 14,119줄로 **유계** — brownfield의 값어치는 Office/Shopify Mobile 급에서 나온다 ③**오너 1인 + 에이전트** — 에이전트는 코드 양은 감당해도 "이 크래시가 Fabric interop이냐 앱 로직이냐"를 판단하지 못한다.
 - Airbnb 경고의 기술 부분(초기화 지연·비동기 렌더)은 Fabric이 상당수 해소했으나, **"플랫폼이 셋이 된다"는 조직 논거는 아키텍처로 해결되지 않고 팀이 작을수록 비율상 더 나쁘다.**
 
 ### D3. **`packages/momo-core` 모노레포 — 순수 로직만, npm workspaces**
@@ -40,12 +42,12 @@
 
 ### D4. 실시간층 = **centrifuge-js 유지** (Mattermost와 의도적으로 갈라짐)
 - centrifuge npm이 React Native를 공식 지원 대상으로 명시(오케스트레이터 확인, 5.7.0). 우리는 `^5.3.5` → 마이너 상향.
-- Mattermost는 WS를 네이티브 모듈로 내렸고 **갭 감지 시 REST 전량 재동기화**를 한다. **momo는 여기서 더 정교하다** — Centrifugo가 `recovered`/`hasRecoveredPublications`로 증분 복구를 주고 우리 `createReplayGate`가 그 배치를 구분한다(실측: 25초 단절 후 8프레임 리플레이). **버릴 이유가 없는 자산이다.**
+- Mattermost는 WS를 네이티브 모듈로 내렸고 **갭 감지 시 REST 전량 재동기화**를 한다. **oort는 여기서 더 정교하다** — Centrifugo가 `recovered`/`hasRecoveredPublications`로 증분 복구를 주고 우리 `createReplayGate`가 그 배치를 구분한다(실측: 25초 단절 후 8프레임 리플레이). **버릴 이유가 없는 자산이다.**
 - 백그라운드 정책은 Mattermost를 베낀다: 백그라운드 진입 시 즉시 끊지 않고 **15초 유예**, 포그라운드 복귀 시 재개, 네트워크 타입 전환은 강제 재연결.
 - **Android cleartext는 티켓 분리**: 우리는 `ws://<machine>.local:28001`(mDNS LAN) 경로가 있고 셀프호스팅이 제품 특성이라 network security config를 열어야 하는데, 보안·심사와 얽힌다.
 
 ### D5. v0 범위 = **관전·승인·대화** (데스크톱 축소판이 아니다)
-- 성재 통찰("gpt·claude 앱의 원격 지원이 만족도가 높다")을 설계 축으로 채택. momo는 마침 관전 패널·승인 원장·작업중 표시를 갖췄다.
+- 성재 통찰("gpt·claude 앱의 원격 지원이 만족도가 높다")을 설계 축으로 채택. oort는 마침 관전 패널·승인 원장·작업중 표시를 갖췄다.
 - v0 UI 실측 ≈**4,575줄 상당**(auth 453 + sidebar 641 + timeline 2,132 + chat 835 + inbox 514). 그나마 "포팅"이 아니라 **같은 모델(A군) 위에 RN 뷰를 새로 얹는 것**이다.
 - v0 제외: 설정 3,387(운영자 표면은 데스크톱) · 채널/디렉터리 관리 · 업데이트(스토어 담당) · **터미널 raw PTY**.
 - **터미널 관전은 강등한다**: RN에 xterm.js 등가물이 없고, WebView 우회를 해도 **폰에서 80컬럼을 읽는 문제가 남는다**. `WorkPanel`의 타입드 행 아코디언으로 대체하고 raw PTY는 "데스크톱에서 열기"로 넘긴다.
@@ -67,6 +69,14 @@ Accepted 후 첫 티켓은 구현이 아니라 스파이크다. 하나라도 실
 - **푸시 JS 라이브러리 후보는 2개**: `expo-notifications` 또는 `@react-native-firebase/messaging`. **Notifee 계열은 제외** — `invertase/notifee`가 GitHub **archived 상태**(오케스트레이터 확인)이고 README가 `expo-notifications` 이관을 권고한다. 우리는 iOS NSE를 Swift로 이미 가져 JS 역할이 "토큰 등록 + 알림 액션 수신"으로 좁으므로 스파이크 4에서 실측 결정한다.
 - **저장소 분리 규율**: 세션 토큰·자격증명은 `react-native-keychain`(iOS 키체인/Android Keystore). **MMKV는 시크릿 저장소가 아니다** — 옵션 암호화의 `encryptionKey`를 다시 어딘가 안전히 둬야 하는 순환 문제가 생긴다. MMKV는 `serverBase.ts` 같은 **비시크릿 로컬 캐시 한정**.
 - 상태관리는 Mattermost를 따라가지 않는다 — WatermelonDB+RxJS는 오프라인 우선·멀티서버 SQLite 전제에서 성립한다. **react-query 유지가 싸다.**
+- **[정오 2026-08-02 — #837 게이트 4 감사(`docs/planning/2026-08-02-rn-push-inheritance-audit.md`), 오케스트레이터 실측 재확인. 결정은 불변, 서술의 사실 정정과 범위 축소다.]**
+  1. **"배포 레인은 살린다"는 현재 파일 기준 미성립.** `fastlane/{Matchfile,Appfile,Fastfile}`이 프로비저닝하는 app identifier는 **`com.dawnkim.momo` 하나**이고 Matchfile·Appfile에 `# ⚠️ 실제 Bundle ID로 교체` 주석이 그대로 남아 있다 — Xcode의 `app.momo.ios`와도, NSE의 `app.momo.ios.NotificationService`와도 불일치하며 **확장 프로파일이 아예 없다**. `CODE_SIGN_STYLE = Automatic`이라 **로컬에선 안 드러나고 CI에서만 터진다**(Tauri #15663과 같은 계열). **RN 전환과 무관하게 지금 필요한 수선**이고, 레인이 "유효"하다는 서술은 실측으로 뒷받침되지 않았다.
+  2. **승계 자산의 App Group은 NSE 경로에서 load-bearing이 아니다.** NSE 읽기 경로는 **Keychain access group**(`kSecAttrAccessGroup`, `$(AppIdentifierPrefix)app.momo.ios.shared`)을 쓴다(`MomoiOSPushKit/PushNotification.swift:73`). App Group(`group.app.momo.ios`)은 앱 타깃 쪽 `SessionStore`·`IOSNotificationPreferences`가 쓴다. 혼동하면 **NSE가 크래시 없이 조용히 fail-open**해 placeholder 알림만 계속 띄운다 — 가장 탐지하기 어려운 실패 형태다.
+  3. **391줄은 게이트가 요구한 한 바퀴 중 앞 3/4만 덮는다.** 네 번째 걸음(**알림 액션에서 승인**)은 앱 타깃에 있고 상당 부분이 그대로 생존하지 않는다. "그대로 생존한다"의 범위는 **id-only fetch → 표시**까지다.
+  4. 이식성의 진짜 근거는 import 개수가 아니라 **`MomoiOSPushKit`이 의존성 0으로 선언된 SPM 리프 타깃**이라는 구조다(옆 타깃 `MomoiOSKit`은 MomoCore·Centrifuge·LiveKit에 의존).
+  5. **푸시 JS 라이브러리 = `expo-notifications`로 판정.** `@react-native-firebase/messaging`은 설정으로 우회 불가한 두 축에서 실격 — 커스텀 액션 식별자를 JS로 전달하지 않아 **승인 흐름이 닫히지 않고**, iOS 발송에 APNs 키의 Firebase 업로드를 요구하는데 우리 PushRelay는 **ES256 JWT를 직접 서명해 APNs로 쏜다**. 남은 검증 1건: `NotificationCenterManager.addDelegate(_:)`가 `public`이지만 산문 문서가 없어 부착 스파이크의 최우선 항목이다.
+  6. **서버 공백**: id-only 발송 체인이 전부 Swift(NotifierWorker → PushRelay → APNs)다. **Rust 서버엔 APNs 코드 0줄, devices 라우트 없음.** 의도된 미완이지만, 이 승계 결론의 유효기간은 Swift 서버 수명과 같다.
+  7. **`expo prebuild`는 반드시 `--platform android`로.** 플래그 없는 실행 한 번이면 `ios/`가 재생성돼 **NSE가 사라진다** — Tauri가 죽은 것과 문자 그대로 같은 사고다. CI 가드가 필요하다.
 
 ### D8. 기존 iOS SwiftUI 킷 = **동결 후 교체**, ADR-0123 대체
 - **ADR-0123을 본 ADR이 대체**한다(iOS 수신부 결정을 RN으로 이관). 0133이 남긴 "iOS 경로 미결" 공백도 여기서 닫는다.
@@ -105,11 +115,32 @@ Accepted 후 첫 티켓은 구현이 아니라 스파이크다. 하나라도 실
 하나라도 실패하면 성재에게 재보고하고 계획을 고친다. 특히 **한글 IME는 1번 게이트**이며, 실패 시
 스택 선택 자체를 재검토한다(Flutter도 한글 이슈 계보가 있어 어느 스택이든 실기기 검증은 필요하다).
 
-## 이행 순서 (Accepted 시점 기준)
+## 성재 결정 (6) — 2026-08-02 · **Android 보류, App Store 전용 배포**
 
-1. **스파이크 1장** — D6의 6항목, 5~7일, 실기기. 한글 IME 최우선.
+> "안드쪽은 일단 미뤄두자. 앱스토어에만 배포하려해"
+
+**취소가 아니라 순서 변경이다.** v0의 출하 대상은 **iOS/App Store 하나**로 좁힌다. 구체적 영향:
+
+| 조항 | 변경 |
+|---|---|
+| D6 게이트 6(Android 동일 루프) | **보류.** #837 수용기준은 **게이트 1~5**로 축소. Android SDK 설치 불요 |
+| D1 "Android는 `expo prebuild --platform android`로 골격 부트스트랩" | **보류.** 지금은 `expo prebuild`를 **아예 실행하지 않는다** → D7 정오 7항의 "NSE 소멸" 위험이 당분간 발생하지 않는다(Android 착수 시 CI 가드부터) |
+| D6-3 / 성재 결정 5번 Android cleartext | **보류.** 단 **문제 자체는 사라지지 않고 iOS ATS로 옮겨간다** — 다만 iOS는 **이미 해결돼 있다**: `NSAllowsLocalNetworking=true`가 `XcodeHost/Info.plist:41`과 스파이크 `MobileSpike/Info.plist:33`에 있고, 이것이 `.local`·로컬망 평문에 대한 Apple 공인 예외라 심사에서 다투지 않는다. `NSAllowsArbitraryLoads`는 **false 유지**(그쪽이 심사에서 정당화를 요구하는 스위치다) |
+| 이행 순서 6번(Android 레인 + cleartext) | **보류** |
+| D3 `packages/momo-core` | **불변.** 이 결정의 근거는 웹↔iOS 로직 공유(A군 7,516줄 + B군 2,108줄)이지 플랫폼 수가 아니다 |
+| D2 전량 재작성 | **유지, 단 근거 하나가 약해짐을 기록한다.** D2 ①("Android가 0 → brownfield는 iOS에만 걸려 비대칭")은 Android가 뒤로 밀리면 **당장은 힘을 잃는다**. ②(14,119줄로 유계) ③(오너 1인+에이전트는 Fabric interop 크래시를 판별 못 함)는 그대로 성립하고, SwiftUI 존치는 웹과의 공유가 **0**이라 D3의 이득 전체를 포기한다. 결론은 안 바뀌지만 **iOS 단독일 때 RN의 우위 폭은 얇아진다** — 게이트 1(한글 IME)·5(스크롤 보존)가 FAIL이면 이 얇아진 폭 때문에 "SwiftUI 존치"가 다시 실질 후보가 된다 |
+
+## 이행 순서 (2026-08-02 갱신 — Android 보류 반영)
+
+1. **스파이크** — D6의 **게이트 1~5**, 실기기. 한글 IME 최우선. (게이트 2·3은 2026-08-02 PASS, 1·4·5 기기대기)
 2. `packages/momo-core` 추출 — **웹이 먼저 소비해 회귀 0을 증명한 뒤** 모바일이 붙는다(D3).
 3. RN 스캐폴드 + URL 폴리필 + react-query 배선.
 4. v0 UI 배치(auth/sidebar/timeline/chat/inbox ≈4,600 LOC).
-5. NSE 이식 + TestFlight.
-6. Android 레인 + cleartext 정책 티켓.
+5. NSE 이식 + **fastlane 번들 ID/확장 프로파일 수선**(D7 정오 1항 — RN 무관하게 선행 필요) + TestFlight → App Store.
+6. **Android 레인 + cleartext 정책 티켓** → **보류, 재개 시점 = iOS v0가 TestFlight에 오른 직후**(2026-08-02 성재 결정 6·6-b).
+
+**6-b. Android 재개 시점을 왜 "iOS v0 TestFlight 직후"로 박는가** (성재 "리소스 대비 추천이면 안드도 해도 돼"에 대한 권고, 2026-08-02)
+- **싼 쪽은 UI다** — RN이라 iOS와 같은 코드이고, 지킬 기존 자산이 0이라 `expo prebuild --platform android` 골격으로 시작한다.
+- **비싼 쪽은 푸시다.** iOS는 Swift 329줄 + 기존 PushRelay의 APNs 경로를 **승계**하지만 Android는 그 승계가 **0**이다. FCM 발송 경로를 서버에 새로 지어야 하는데 **그 체인이 지금 전부 Swift이고 Rust 미이식**이다(D7 정오 6항). 지금 Android를 열면 FCM을 **Swift에 한 번, Rust에 또 한 번** 짓거나 Rust 이식이 끝날 때까지 막힌다.
+- **기다려서 잃는 것이 없다.** `expo prebuild`·Android 기기 루프·Play 레인은 나중에 해도 비용이 동일하고, **FCM만 나중이 더 싸다**(Rust 이식 후 한 번만 짓는다). 반대로 지금 열면 **iOS 판정(게이트 1·5)이 나오기 전에 스파이크 표면이 두 배**가 된다.
+- **지금 지킬 규율 하나**: 스캐폴드에 **iOS 전용 가정을 넣지 않는다**(RN이라 대체로 공짜다). 그 외 Android 작업은 하지 않는다.

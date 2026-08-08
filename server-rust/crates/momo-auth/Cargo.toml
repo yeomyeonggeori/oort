@@ -1,0 +1,28 @@
+[package]
+name = "momo-auth"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+momo-wire = { path = "../momo-wire" }
+jsonwebtoken.workspace = true
+# `token_store` owns the MOMO-300 revocation lookup, so this crate touches the
+# DB — runtime query API only (no `query!` macro: the workspace must build
+# without a live database). It takes a caller-supplied connection, so the RLS
+# GUC seam stays in momo-db.
+sqlx.workspace = true
+serde.workspace = true
+# B4: the Centrifugo connection token's `info` claim is a JSON **string**, so
+# this crate renders one (`realtime::realtime_info_string`). No new crate enters
+# the dependency tree — `jsonwebtoken` already links serde_json.
+serde_json.workspace = true
+uuid.workspace = true
+thiserror.workspace = true
+# B2.2: `workhost::normalize_public_key_b64` validates a registration key the way
+# Swift does (32 raw bytes that decompress to a usable Ed25519 point), so these
+# two moved from dev-dependencies to dependencies. No new crate enters the tree:
+# `momo-wire` already links both.
+ed25519-dalek.workspace = true
+base64.workspace = true

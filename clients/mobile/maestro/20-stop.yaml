@@ -1,0 +1,106 @@
+appId: app.momo.ios
+name: 20-stop
+# No `env:` block — see the note at the top of 00-login.yaml.
+---
+# 20-stop — 턴 중 중단 탭 → 확정 문장 → 확정 → 영수증.
+#
+# The subject is the CONFIRMATION, not the cancel. A one-tap stop would pass a
+# flow that only checked "the run ended"; what has to hold is that the app says
+# what stopping costs before it does it, and that a person who taps twice in
+# the same reflex is refused rather than obeyed (the 400ms guard,
+# ApprovalDecision.tsx CONFIRM_GUARD_MS).
+#
+# `MAESTRO SLOW` is what makes this flow possible at all: the stop control only
+# renders while a turn is open and its runId is known, so the mock has to hold
+# the turn open long enough to arm and commit inside it.
+- launchApp:
+    appId: app.momo.ios
+- runFlow: subflows/ensure-signed-in.yaml
+
+- tapOn:
+    id: "sidebar-row-channel:${GENERAL_CHANNEL_ID}"
+- extendedWaitUntil:
+    visible:
+      id: "composer-input"
+    timeout: 60000
+- runFlow:
+    when:
+      visible:
+        id: "long-press-hint"
+    commands:
+      - tapOn:
+          id: "long-press-hint-dismiss"
+- runFlow: subflows/dismiss-dev-logbox.yaml
+
+- tapOn:
+    id: "composer-input"
+- inputText: "@kim"
+- extendedWaitUntil:
+    visible:
+      id: "mention-list"
+    timeout: 20000
+- tapOn:
+    id: "mention-option"
+    index: 0
+- inputText: "MAESTRO TEXT MAESTRO SLOW phone lane stop check"
+- tapOn:
+    id: "composer-send"
+
+- extendedWaitUntil:
+    visible:
+      id: "composer-working"
+    timeout: 60000
+
+# Arm. The control is two-tap on purpose, so the first tap must NOT cancel
+# anything — asserted by the fact that the confirm sentence is what appears next
+# and the turn is still running under it.
+- extendedWaitUntil:
+    visible:
+      id: "turn-stop-${AGENT_MEMBER_ID}-arm"
+    timeout: 30000
+- tapOn:
+    id: "turn-stop-${AGENT_MEMBER_ID}-arm"
+
+# The consequence sentence, verbatim (runCancel.ts cancelConfirmSentence). This
+# is the assertion the flow exists for: a confirm step that appears but says
+# nothing specific is a confirm step that trains people to tap through it.
+- assertVisible:
+    id: "turn-stop-${AGENT_MEMBER_ID}-confirm"
+- assertVisible: ".*중단하면 이 실행이 여기서 끝납니다. 다시 시킬 수 있습니다.*"
+- assertVisible:
+    id: "turn-stop-${AGENT_MEMBER_ID}-dismiss"
+
+# The 400ms guard sits between arm and commit. Maestro's own step overhead is
+# already past it, but that is an accident of timing rather than a promise, so
+# the wait is explicit — and if it were ever violated the failure would be the
+# `-too-fast` notice, asserted absent below.
+- waitForAnimationToEnd:
+    timeout: 3000
+- tapOn:
+    id: "turn-stop-${AGENT_MEMBER_ID}-commit"
+- assertNotVisible:
+    id: "turn-stop-${AGENT_MEMBER_ID}-too-fast"
+
+# The receipt. `-outcome-cancelled` and not just "-outcome": the control also
+# renders `alreadyOver` (the turn finished first — a real 409, and a PASS the
+# lane must not accept as proof that stopping works) and `error`.
+- extendedWaitUntil:
+    visible:
+      id: "turn-stop-outcome-cancelled"
+    timeout: 60000
+- assertVisible: ".*김인턴의 실행을 중단했습니다.*"
+
+# The receipt is local to the person who tapped; the system line is what the
+# CHANNEL is told. Both are asserted because a stop that only the actor can see
+# is a different (and wrong) product — everyone reading the channel has to be
+# able to tell the run did not simply die.
+- extendedWaitUntil:
+    visible: ".*실행이 사람에 의해 중지되었습니다.*"
+    timeout: 60000
+
+# …and the turn is actually over: the working bar clears without the reply ever
+# landing.
+- extendedWaitUntil:
+    notVisible:
+      id: "composer-working"
+    timeout: 60000

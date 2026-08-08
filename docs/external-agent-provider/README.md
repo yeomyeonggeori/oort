@@ -8,38 +8,38 @@
 
 ## Integration Paths
 
-External Hermes can connect to momo through two product-supported paths:
+External Hermes can connect to oort through two product-supported paths:
 
-- **AgentWorker SSE path**: momo owns the worker loop and calls a
+- **AgentWorker SSE path**: oort owns the worker loop and calls a
   Hermes/OpenAI-compatible `/v1/chat/completions` endpoint. This remains the
   deterministic default for local gates.
-- **Hermes gateway native platform path**: Hermes treats momo like a
-  Slack/Telegram-style messaging platform, receives momo `agent.job` events,
-  and reports status/results back to momo REST. See
+- **Hermes gateway native platform path**: Hermes treats oort like a
+  Slack/Telegram-style messaging platform, receives oort `agent.job` events,
+  and reports status/results back to oort REST. See
   [`hermes-gateway-native-platform.md`](hermes-gateway-native-platform.md).
   Real readiness is checked with `scripts/momo hermes-gateway-smoke --real`;
   the actual provider OAuth/login still happens inside Hermes and is user-owned.
 
-Both paths keep momo as the source of truth for channel messages, approval,
+Both paths keep oort as the source of truth for channel messages, approval,
 usage, and audit.
 
 ## Boundary
 
-momo treats an agent as a first-class `member.kind='agent'`. The external agent
+oort treats an agent as a first-class `member.kind='agent'`. The external agent
 runtime is the provider process behind that member. In v0 the concrete boundary
 is an OpenAI-compatible `/v1/chat/completions` endpoint, usually Hermes, but the
 smoke is intentionally provider-layer oriented:
 
-- momo owns workspace, channel, membership, Context Packet projection, approval,
+- oort owns workspace, channel, membership, Context Packet projection, approval,
   cost, audit, message order, and the REST -> Postgres -> outbox write path.
 - the provider runtime owns GPT/OpenAI API keys, Codex/OpenAI OAuth
   authorization, access/refresh token storage, provider account refresh, and
   provider-specific revocation.
-- momo receives only a Hermes-facing `HERMES_API_KEY` and a redacted endpoint
-  label. That key is never stored in momo DB and must not appear in logs,
+- oort receives only a Hermes-facing `HERMES_API_KEY` and a redacted endpoint
+  label. That key is never stored in oort DB and must not appear in logs,
   diagnostics, local gate evidence, message props, or status responses.
-- the provider must not publish directly to Centrifugo or mutate momo DB state.
-  User-visible writes still enter through momo REST, Postgres, and outbox.
+- the provider must not publish directly to Centrifugo or mutate oort DB state.
+  User-visible writes still enter through oort REST, Postgres, and outbox.
 
 ## Secret Env Format
 

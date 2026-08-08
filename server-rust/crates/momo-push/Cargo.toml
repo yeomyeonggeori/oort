@@ -1,0 +1,24 @@
+[package]
+name = "momo-push"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# shared infrastructure — consumed by public API only, never re-implemented.
+momo-db = { path = "../momo-db" }         # with_tenant_tx = the sole RLS GUC seam
+# `active_workspace_role` — so "active member of this workspace" keeps one
+# definition across every route rather than gaining a push-flavoured copy.
+momo-messaging = { path = "../momo-messaging" }
+
+async-trait.workspace = true
+chrono.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true }

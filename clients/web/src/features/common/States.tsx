@@ -62,8 +62,10 @@ export function InlineBanner({
   tone = "error",
   message,
   items,
+  icon,
   actionLabel,
   onAction,
+  actionBusy = false,
   separator = true,
   heading = false,
   testId,
@@ -72,8 +74,23 @@ export function InlineBanner({
   message: string;
   /** Rendered as a real list under `message`. Omit for a one-sentence banner. */
   items?: readonly string[];
+  /**
+   * Leading indicator, for a banner that has to be FINDABLE rather than merely
+   * present. The neutral tone deliberately looks like chrome, which is right
+   * for a banner the reader arrived at and wrong for one that appears while
+   * they are looking elsewhere (the shell's connection line, goal B8 B2). Pass
+   * a lucide icon carrying a status token; leave it out and nothing changes.
+   */
+  icon?: React.ReactNode;
   actionLabel?: string;
   onAction?: () => void;
+  /**
+   * The action is running. `aria-busy` and a changed label, never `disabled`
+   * and never dimmed: a control that goes grey mid-action reads as "you may not
+   * do this" rather than "this is happening" (gate-shell-layout asserts exactly
+   * that shape for the consent dialog's confirm).
+   */
+  actionBusy?: boolean;
   separator?: boolean;
   /**
    * This banner REPLACED the page, so its sentence is the page's heading.
@@ -106,6 +123,11 @@ export function InlineBanner({
           : "border-line bg-surface-hover text-ink"
       )}
     >
+      {icon && (
+        <span aria-hidden="true" className="mt-px shrink-0">
+          {icon}
+        </span>
+      )}
       {/* Wraps, never truncates: this banner also runs in the sidebar column,
           and half an error message is worse than none. */}
       <div className="flex min-w-0 flex-1 flex-col gap-1">
@@ -123,6 +145,7 @@ export function InlineBanner({
           variant="outline"
           size="sm"
           className="shrink-0"
+          aria-busy={actionBusy || undefined}
           onClick={onAction}
         >
           {actionLabel}
@@ -145,12 +168,19 @@ export function EmptyInvite({
   detail,
   actions,
   heading = false,
+  className,
   testId,
   dataAttrs,
 }: {
   headline: string;
   detail?: string;
   actions?: React.ReactNode;
+  /**
+   * 자리 조정용. 이 상자는 기본으로 자기 여백(px-4)을 갖는데, 이미 여백을 가진
+   * 상자 안에 들어가면 그만큼 안으로 더 들어가 앉는다. `cn()`이 tailwind-merge를
+   * 거치므로 `px-0` 한 마디로 기본값을 덮을 수 있다.
+   */
+  className?: string;
   /**
    * This state REPLACED the page, so its headline is the page's heading. Same
    * opt-in and same reason as `InlineBanner.heading`: an empty list inside a
@@ -165,7 +195,10 @@ export function EmptyInvite({
   const Headline = heading ? "h1" : "p";
   return (
     <div
-      className="flex break-keep flex-col items-start gap-3 px-4 py-6"
+      className={cn(
+        "flex break-keep flex-col items-start gap-3 px-4 py-6",
+        className
+      )}
       data-testid={testId}
       {...dataAttrs}
     >

@@ -10,7 +10,7 @@
 //   2. 이력 A·B 병기 — one goal's history shows BOTH actors. This is the whole
 //      evidence of ADR-0143 D2: continuity belongs to the workstream, so the
 //      Run that A started and the Run the agent continued stand side by side.
-//   3. 이어받기 왕복 — the takeover POSTs the EXISTING lineage resume with the
+//   3. 인수 왕복 — the takeover POSTs the EXISTING lineage resume with the
 //      chosen host, the reader's own Run then joins the history, and the focus
 //      lands on the confirmation instead of falling to <body> when the button
 //      that was just pressed unmounts (1R M2).
@@ -26,15 +26,15 @@
 //   6. 필터 탭 키보드 — 상태 필터는 인박스와 같은 탭 컨트롤이므로 탭 정거장이
 //      1개(roving tabindex)이고 ←/→로 이동하며, 선택된 알약이 `멈춤` 상태칩과
 //      같은 배지가 아니다(1R H2, 손으로 만든 버튼 5개는 정거장이 5개였다).
-//   7. 끝난 목표 — 완료·취소된 목표는 원장에 고아 실행이 남아 있어도 이어받기를
+//   7. 끝난 목표 — 완료·취소된 목표는 원장에 고아 실행이 남아 있어도 인수를
 //      제안하지 않고, 그 자리에 자기 문장을 놓는다(1R M1). 실행만 보고 목표를
-//      보지 않으면 완료 칩 180px 아래에 활성화된 이어받기가 그려진다.
+//      보지 않으면 완료 칩 180px 아래에 활성화된 인수 버튼이 그려진다.
 //   8. 피커 형태와 위계 — 자격 호스트가 넷인 화면에서, 고르는 일은 `<select>`
 //      한 줄이 지고 결정은 채움 버튼 **하나**가 진다. 열린 토글은 ghost로
 //      물러나고, 그룹 라벨은 스크린리더 전용이 아니며, 그룹 안에서 칠해진
 //      컨트롤은 정확히 하나다(MOMO-679 M3, 2R H2). 픽스처가 자격 호스트를
 //      하나만 주던 동안에는 이 중 어느 것도 화면에 나타난 적이 없다.
-//  11. 진행 중 버튼 — 이어받기가 나가 있는 동안 확정 버튼은 disabled가 아니고,
+//  11. 진행 중 버튼 — 인수 요청이 나가 있는 동안 확정 버튼은 disabled가 아니고,
 //      불투명도 1이고, 라벨 대비가 AA를 지키며(라이트·다크 양쪽 실측),
 //      **Enter로 눌렀을 때 포커스가 그 버튼에 남는다**. v1은 진행 중인 자기
 //      자신까지 disabled로 만들어 라벨을 라이트 2.20:1 / 다크 3.23:1로 떨어뜨렸고,
@@ -58,7 +58,7 @@
 //   WORKSTREAM_GATE_PROVE_RED_RUNS=1 npm run gate:workstream
 //     expected failure: "실행 이력 A·B 병기"
 //   WORKSTREAM_GATE_PROVE_RED_RESUME=1 npm run gate:workstream
-//     expected failure: "이어받기 왕복"
+//     expected failure: "인수 왕복"
 //   WORKSTREAM_GATE_PROVE_RED_DENIAL=1 npm run gate:workstream
 //     expected failure: "비멤버 404/403 분기"
 //   WORKSTREAM_GATE_PROVE_RED_LEDGER=1 npm run gate:workstream
@@ -92,7 +92,7 @@
 //     실측된 실패: "좁은 판 피커: 확정 버튼이 전폭이 됐다 (328px / 그룹 328px)".
 //     같은 단정의 쌓임 절반은 `<Select>` 블록을 v1의 `targets.map(...)` 버튼
 //     N개로 되돌리면 붉는데, 그 되돌림은 #8과 #12를 함께 무너뜨리므로 가장 먼저
-//     나오는 실패는 왕복 단정의 "이어받기 왕복: waited for this and it never
+//     나오는 실패는 왕복 단정의 "인수 왕복: waited for this and it never
 //     happened"(고르는 컨트롤 자체가 사라졌다)이다.
 //   목록 목표 말줄임 — WorkstreamListRoute의 목표 span에서 `line-clamp-2`를
 //     `truncate`로 되돌린다. 단정이 "1줄로 그려졌다"로 실패한다.
@@ -351,7 +351,7 @@ function newState(mode) {
     ],
     // 완료된 목표의 원장. 고아 실행이 하나 남아 있는 것이 요점이다: 일을 완료로
     // 부른 뒤 호스트가 죽으면 실제로 이 모양이 되고, 실행만 보는 UI는 완료 칩
-    // 아래에 이어받기를 제안한다(1R M1).
+    // 아래에 인수를 제안한다(1R M1).
     doneRuns: [
       {
         id: doneRunId,
@@ -1256,7 +1256,7 @@ async function assertBusyAffordance(browser, scheme) {
   );
   if (afterFailure === "<body>") {
     throw new Error(
-      `진행 중 버튼(${scheme}): 실패한 이어받기가 포커스를 문서 최상단으로 떨어뜨렸다`
+      `진행 중 버튼(${scheme}): 실패한 인수가 포커스를 문서 최상단으로 떨어뜨렸다`
     );
   }
   console.log(`busy(${scheme}): 실패 뒤에도 포커스는 ${afterFailure}에 남는다`);
@@ -1508,7 +1508,7 @@ async function assertListAndHistory(browser) {
   // "A -> 에이전트 -> C" 원장에서 가운데 칸의 책임 주체. 토큰 색만으로는 그
   // 에이전트를 누구에게 물어야 하는지가 화면에 없다(skill §9).
   const agentOwner = await text(agentRow.getByTestId("workstream-run-owner"));
-  if (agentOwner !== "managed by 곽성재") {
+  if (agentOwner !== "곽성재 님이 관리") {
     throw new Error(
       `에이전트 소유자 병기: 에이전트 실행이 책임 주체를 말하지 않는다 (${agentOwner || "없음"})`
     );
@@ -1543,11 +1543,11 @@ async function assertListAndHistory(browser) {
   await assertNoHorizontalScroll(page, "detail at 760");
   await page.setViewportSize({ width: 1280, height: 800 });
 
-  // ---- 3. 이어받기 왕복 -----------------------------------------------------
+  // ---- 3. 인수 왕복 -----------------------------------------------------
   const block = page.getByTestId("workstream-continue");
   if ((await block.getAttribute("data-state")) !== "ready") {
     throw new Error(
-      `이어받기 왕복: takeover was not offered for an orphaned Run (${await block.getAttribute("data-state")})`
+      `인수 왕복: takeover was not offered for an orphaned Run (${await block.getAttribute("data-state")})`
     );
   }
   const toggle = page.getByTestId("workstream-continue-toggle");
@@ -1556,7 +1556,7 @@ async function assertListAndHistory(browser) {
   );
   await toggle.click();
   const hostSelect = page.getByTestId("workstream-continue-host-select");
-  await claim("이어받기 왕복", () => hostSelect.waitFor({ timeout: 10_000 }));
+  await claim("인수 왕복", () => hostSelect.waitFor({ timeout: 10_000 }));
 
   // ---- 8. 피커 형태와 위계 (MOMO-679 M3, 2R H2) -----------------------------
   // 넷: workspace scope 둘, 읽는 사람 소유의 member scope 하나, 그리고 v1부터
@@ -1584,20 +1584,20 @@ async function assertListAndHistory(browser) {
   const confirm = page.getByTestId("workstream-continue-confirm");
   if ((await confirm.getAttribute("data-host-id")) !== liveHostId) {
     throw new Error(
-      `이어받기 왕복: 확정 버튼이 고른 호스트를 따라가지 않는다 (${await confirm.getAttribute("data-host-id")})`
+      `인수 왕복: 확정 버튼이 고른 호스트를 따라가지 않는다 (${await confirm.getAttribute("data-host-id")})`
     );
   }
   await confirm.click();
-  await claim("이어받기 왕복", () => resumeResponse);
+  await claim("인수 왕복", () => resumeResponse);
   if (
     state.resumeSessionId !== agentRunId ||
     state.resumeBody?.targetHostId !== liveHostId
   ) {
     throw new Error(
-      `이어받기 왕복: the takeover did not POST the orphaned Run and chosen host (${state.resumeSessionId}, ${JSON.stringify(state.resumeBody)})`
+      `인수 왕복: the takeover did not POST the orphaned Run and chosen host (${state.resumeSessionId}, ${JSON.stringify(state.resumeBody)})`
     );
   }
-  await claim("이어받기 왕복", () =>
+  await claim("인수 왕복", () =>
     page.getByTestId("workstream-continue-done").waitFor({ timeout: 10_000 })
   );
   // 성공은 방금 누른 버튼을 없앤다(고아였던 실행이 더 이상 고아가 아니다). 포커스를
@@ -1608,10 +1608,10 @@ async function assertListAndHistory(browser) {
   );
   if (landed !== "workstream-continue-done") {
     throw new Error(
-      `이어받기 왕복: 성공한 이어받기가 포커스를 ${landed ?? "<body>"}로 떨어뜨렸다`
+      `인수 왕복: 성공한 인수가 포커스를 ${landed ?? "<body>"}로 떨어뜨렸다`
     );
   }
-  await claim("이어받기 왕복", () =>
+  await claim("인수 왕복", () =>
     page.waitForFunction(
       () =>
         document.querySelectorAll('[data-testid="workstream-run-row"]').length ===
@@ -1625,24 +1625,24 @@ async function assertListAndHistory(browser) {
     .evaluateAll((nodes) => nodes.map((node) => node.textContent?.trim()));
   if (!afterActors.includes("곽성재")) {
     throw new Error(
-      `이어받기 왕복: the reader's own Run never joined the history (${JSON.stringify(afterActors)})`
+      `인수 왕복: the reader's own Run never joined the history (${JSON.stringify(afterActors)})`
     );
   }
   if ((await text(page.getByTestId("workstream-detail-actors"))) !== "3") {
-    throw new Error("이어받기 왕복: 참여자 count did not follow the new Run");
+    throw new Error("인수 왕복: 참여자 count did not follow the new Run");
   }
   const afterState = await page
     .getByTestId("workstream-continue")
     .getAttribute("data-state");
   if (afterState !== "no-stopped-run") {
     throw new Error(
-      `이어받기 왕복: a taken-over goal still advertises a takeover (${afterState})`
+      `인수 왕복: a taken-over goal still advertises a takeover (${afterState})`
     );
   }
   const blockedCopy = await text(page.getByTestId("workstream-continue-blocked"));
   if (blockedCopy.includes("미커밋") || blockedCopy.includes("가져")) {
     throw new Error(
-      "이어받기 왕복: the blocked copy promises the working tree (ADR-0143 D3)"
+      "인수 왕복: the blocked copy promises the working tree (ADR-0143 D3)"
     );
   }
 
@@ -1650,7 +1650,7 @@ async function assertListAndHistory(browser) {
 }
 
 /**
- * 끝난 목표는 이어받기를 제안하지 않는다.
+ * 끝난 목표는 인수를 제안하지 않는다.
  *
  * 모델 테스트가 잡을 수 없는 절반이 여기 있다: `continuationState`가 상태를 받게
  * 만드는 것과, 상세 라우트가 그 자리에 실제로 workstream.status를 넘기는 것은
@@ -1678,22 +1678,22 @@ async function assertClosedGoal(browser) {
   const kind = await block.getAttribute("data-state");
   if (kind !== "closed") {
     throw new Error(
-      `끝난 목표: 완료된 목표의 이어받기 상태가 ${kind}다. 같은 화면의 원장에는 고아 실행이 있으므로, 목표 자체를 안 보면 여기서 ready가 나온다`
+      `끝난 목표: 완료된 목표의 인수 상태가 ${kind}다. 같은 화면의 원장에는 고아 실행이 있으므로, 목표 자체를 안 보면 여기서 ready가 나온다`
     );
   }
   if ((await page.getByTestId("workstream-continue-toggle").count()) !== 0) {
     throw new Error(
-      "끝난 목표: 완료 칩 아래에 활성화된 이어받기 버튼이 남아 있다"
+      "끝난 목표: 완료 칩 아래에 활성화된 인수 버튼이 남아 있다"
     );
   }
   const copy = await text(page.getByTestId("workstream-continue-blocked"));
-  if (!copy.includes("완료") || copy.includes("이어받을 수 있습니다")) {
+  if (!copy.includes("완료") || copy.includes("인수할 수 있습니다")) {
     throw new Error(
-      `끝난 목표: 끝난 목표에 이어받기를 다시 권하고 있다 (${copy})`
+      `끝난 목표: 끝난 목표에 인수를 다시 권하고 있다 (${copy})`
     );
   }
   // 증거는 남는다: 제안이 사라지는 것과 이력이 사라지는 것은 다른 일이다. 남아
-  // 있는 그 실행이 바로 고아 실행이라, 이 화면은 "이어받을 수 있는 실행이 있는데도
+  // 있는 그 실행이 바로 고아 실행이라, 이 화면은 "인수할 수 있는 실행이 있는데도
   // 제안하지 않는다"를 보여준다.
   const rows = page.getByTestId("workstream-run-row");
   if ((await rows.count()) !== 1) {
@@ -1821,7 +1821,7 @@ async function assertDenialAsymmetry(browser) {
   );
   if (refusedFocus === "<body>") {
     throw new Error(
-      "비멤버 404/403 분기: 거절된 이어받기가 포커스를 문서 최상단으로 떨어뜨렸다"
+      "비멤버 404/403 분기: 거절된 인수가 포커스를 문서 최상단으로 떨어뜨렸다"
     );
   }
   if ((await page.getByTestId("workstream-continue-done").count()) !== 0) {
@@ -1973,7 +1973,7 @@ async function captureScreens(browser) {
     await page.setViewportSize({ width: 1280, height: 800 });
 
     // 끝난 목표. 새로 생긴 문장이 사는 유일한 자리이고, 리뷰가 읽을 수 있어야 한다:
-    // 완료 칩 아래에서 이어받기가 사라지되 실행 이력은 남는다는 것이 이 화면의 주장
+    // 완료 칩 아래에서 인수가 사라지되 실행 이력은 남는다는 것이 이 화면의 주장
     // 전부다(1R M1).
     await page.goto(`${origin}/#/workstreams/${doneWorkstreamId}`);
     await claim("캡처", () =>

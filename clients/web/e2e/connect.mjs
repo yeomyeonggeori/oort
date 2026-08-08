@@ -3,9 +3,9 @@
 //
 // What each step proves, and why it is done this way:
 //
-//   deep-link fallback   A browser has no `momo://` scheme, so the invite
+//   deep-link fallback   A browser has no `oort://` scheme, so the invite
 //                        parameters ride the page URL. The run opens a wrapped
-//                        `?join=momo://join?server=...&code=...`, asserts both
+//                        `?join=oort://join?server=...&code=...`, asserts both
 //                        fields are prefilled and the invite code is GONE from
 //                        the address bar afterwards (it is a bearer secret).
 //   validation           `ws://...` is rejected inline, at the field, and no
@@ -68,7 +68,7 @@ const readStoredServer = () =>
 let result = { e2e: "p2-connect", base: BASE };
 try {
   // ---- 1) deep-link prefill through the browser query fallback -------------
-  const deepLink = `momo://join?server=${encodeURIComponent(
+  const deepLink = `oort://join?server=${encodeURIComponent(
     BASE
   )}&code=not-a-real-invite-code`;
   await page.goto(`${BASE}/?join=${encodeURIComponent(deepLink)}`, {

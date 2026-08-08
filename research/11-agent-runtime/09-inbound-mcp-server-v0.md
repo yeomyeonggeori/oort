@@ -5,16 +5,16 @@
 
 ## 1. Purpose
 
-Inbound MCP Server v0 defines how external agent hosts such as Claude, Codex, Cursor, or a local IDE agent can use momo as a governed tool surface.
+Inbound MCP Server v0 defines how external agent hosts such as Claude, Codex, Cursor, or a local IDE agent can use oort as a governed tool surface.
 
 It answers four questions:
 
-1. What can an external host read from momo?
-2. What can it write back into momo?
+1. What can an external host read from oort?
+2. What can it write back into oort?
 3. How do Context Packet, Memory Plane, and Capability Cache constrain that access?
-4. How does momo keep approval-safe external actions auditable?
+4. How does oort keep approval-safe external actions auditable?
 
-This server is inbound to momo: the host is the MCP client and momo is the MCP server. It is not the canonical agent runtime path, and it does not replace AgentWorker, Hermes, Kim Intern, or the REST message send path.
+This server is inbound to oort: the host is the MCP client and oort is the MCP server. It is not the canonical agent runtime path, and it does not replace AgentWorker, Hermes, Kim Intern, or the REST message send path.
 
 ## 2. Protocol Baseline
 
@@ -32,14 +32,14 @@ References:
 - https://modelcontextprotocol.io/specification/2025-06-18/server/prompts
 - https://modelcontextprotocol.io/specification/2025-06-18/basic/authorization
 
-v0 SHOULD support HTTP transport for remote hosts and MAY support stdio for local developer hosts. HTTP transport uses momo-issued access tokens or OAuth-compatible resource server authorization when that is implemented. Stdio transport may read a token from the environment for local development, but that token still maps to momo `token`, `member`, workspace, channel, and audit policy.
+v0 SHOULD support HTTP transport for remote hosts and MAY support stdio for local developer hosts. HTTP transport uses oort-issued access tokens or OAuth-compatible resource server authorization when that is implemented. Stdio transport may read a token from the environment for local development, but that token still maps to oort `token`, `member`, workspace, channel, and audit policy.
 
 ## 3. Non-Negotiable Rules
 
 - Postgres remains the source of truth. The MCP server never publishes directly to Centrifugo.
 - All user-facing reads and writes run with `SET LOCAL app.workspace_id` and RLS. BYPASSRLS is forbidden for inbound MCP requests.
 - The MCP host never receives database URLs, provider refresh tokens, raw secret values, private cross-channel history, or broad plugin credentials.
-- The MCP host is represented by a momo principal: a `member` row for write-capable hosts or a delegated token bound to a member/subject pair.
+- The MCP host is represented by an oort principal: a `member` row for write-capable hosts or a delegated token bound to a member/subject pair.
 - A host may not impersonate a human message author. Delegation is recorded through token subject/audit metadata, not hidden author substitution.
 - Search and thread fetch return bounded excerpts and source refs, not unbounded transcript dumps.
 - Memory Plane retrieval is explicit. Message search results are not durable memory and do not create memory items.
@@ -49,7 +49,7 @@ v0 SHOULD support HTTP transport for remote hosts and MAY support stdio for loca
 
 ## 4. v0 Capabilities
 
-During initialization, momo declares server capabilities for tools, resources, and prompts.
+During initialization, oort declares server capabilities for tools, resources, and prompts.
 
 ```json
 {
@@ -68,7 +68,7 @@ During initialization, momo declares server capabilities for tools, resources, a
 }
 ```
 
-v0 does not request MCP client-side sampling, roots, or elicitation. Future versions may add elicitation for approval clarification, but approval decisions stay inside momo first-party UI and API.
+v0 does not request MCP client-side sampling, roots, or elicitation. Future versions may add elicitation for approval clarification, but approval decisions stay inside oort first-party UI and API.
 
 ## 5. Identity and Authorization Model
 
@@ -105,13 +105,13 @@ Author rule:
 
 ## 6. Minimal Tool Surface
 
-v0 exposes exactly four normative tools. Provider/plugin tools are not exported one-by-one to the host. The host asks momo to search, fetch, post, or propose a tool call; momo enforces local policy.
+v0 exposes exactly four normative tools. Provider/plugin tools are not exported one-by-one to the host. The host asks oort to search, fetch, post, or propose a tool call; oort enforces local policy.
 
 | MCP tool | Risk | Direct side effect | Purpose |
 |---|---|---|---|
 | `momo.search_messages` | read | none | Search visible channel/thread messages and return bounded citeable results. |
 | `momo.fetch_thread` | read | none | Fetch a visible thread with seq ordering, participants, source refs, and optional Context Packet seed data. |
-| `momo.post_message` | write | momo timeline only | Post a visible message through the canonical message write path. |
+| `momo.post_message` | write | oort timeline only | Post a visible message through the canonical message write path. |
 | `momo.create_tool_call` | write/propose | proposal only | Create an approval-safe tool proposal; no external provider execution. |
 
 ### `momo.search_messages`
@@ -237,10 +237,10 @@ Input:
 Rules:
 
 - Requires `mcp.tool.propose`.
-- If `context_packet_id` is present, momo rechecks packet expiry, workspace, actor, channel, and `tool_grants`.
-- If no packet is present, momo may build a small `request.surface = "api"` Context Packet before accepting the proposal.
+- If `context_packet_id` is present, oort rechecks packet expiry, workspace, actor, channel, and `tool_grants`.
+- If no packet is present, oort may build a small `request.surface = "api"` Context Packet before accepting the proposal.
 - Tool name and arguments are validated against Capability Cache `schema_ref` and current workspace/provider policy.
-- Read-only tools may be proposed, but v0 still records them as momo-visible `tool_call` proposals rather than executing hidden provider calls through MCP.
+- Read-only tools may be proposed, but v0 still records them as oort-visible `tool_call` proposals rather than executing hidden provider calls through MCP.
 - Write/spend/deploy/identity/admin tools always create an `approval` row with `status = "pending"` and an `approval_request` message/card.
 - The external provider call is not executed by the MCP server. Execution is a later AgentWorker/plugin executor concern after approval.
 - Writes `audit_log.action = "mcp.tool_call.proposed"`.
@@ -261,7 +261,7 @@ Output:
 
 ## 7. Resource Candidates
 
-v0 resources are read-only views over governed momo state. They are URI-addressed and must not expose hidden policy internals or credentials.
+v0 resources are read-only views over governed oort state. They are URI-addressed and must not expose hidden policy internals or credentials.
 
 | Resource template | Meaning |
 |---|---|
@@ -301,7 +301,7 @@ Mapping:
 | `post_message` | May cite a prior packet id in `message.props.context_packet_id`, but posting does not require a packet. |
 | `create_tool_call` | Requires an unexpired packet with a matching `tool_grant`, or triggers new packet assembly with surface `api`. |
 
-The packet remains immutable for a run. If a host retries after policy changes, momo must rebuild or reject rather than reuse stale grants.
+The packet remains immutable for a run. If a host retries after policy changes, oort must rebuild or reject rather than reuse stale grants.
 
 ## 10. Relationship to Memory Plane v0
 
@@ -317,7 +317,7 @@ Denials should return `withheld_memory` redactions without revealing hidden chan
 
 ## 11. Relationship to Capability Cache v0
 
-The inbound MCP server exposes stable momo meta-tools. It does not mirror every plugin/provider capability as an MCP tool.
+The inbound MCP server exposes stable oort meta-tools. It does not mirror every plugin/provider capability as an MCP tool.
 
 Capability Cache still controls tool proposals:
 
@@ -336,7 +336,7 @@ There are two write classes in v0:
 
 | Write class | Examples | Gate |
 |---|---|---|
-| momo timeline write | `momo.post_message` | actor/channel permission + canonical message transaction + audit |
+| oort timeline write | `momo.post_message` | actor/channel permission + canonical message transaction + audit |
 | external action proposal | `momo.create_tool_call` for GitHub/Jira/Drive/etc. | Capability Cache validation + Context Packet grant + pending approval |
 
 `momo.create_tool_call` transaction should create, in order:
@@ -347,7 +347,7 @@ There are two write classes in v0:
 4. Outbox rows for post-commit realtime delivery.
 5. An `audit_log` row with actor, subject, token, run/packet id, capability evidence, and idempotency key.
 
-If multiple messages are created in one transaction, momo allocates contiguous `message.seq` values through the `channel_seq` row counter. It still never uses database sequences for channel ordering.
+If multiple messages are created in one transaction, oort allocates contiguous `message.seq` values through the `channel_seq` row counter. It still never uses database sequences for channel ordering.
 
 The executor later revalidates:
 
@@ -377,7 +377,7 @@ Audit detail must include ids and policy versions, not raw hidden data or creden
 
 ## 14. Error Semantics
 
-Use JSON-RPC protocol errors for malformed MCP requests and unknown tools. Use tool execution errors for authorized requests that fail momo policy.
+Use JSON-RPC protocol errors for malformed MCP requests and unknown tools. Use tool execution errors for authorized requests that fail oort policy.
 
 Recommended `structuredContent.error.code` values:
 
@@ -406,7 +406,7 @@ These are intentionally out of v0:
 - Full transcript dump.
 - Memory creation/update/delete.
 - Capability policy mutation.
-- Sampling requests from momo server to MCP client.
+- Sampling requests from oort server to MCP client.
 - Roots/filesystem access from the host.
 
 ## 16. Fixture Index

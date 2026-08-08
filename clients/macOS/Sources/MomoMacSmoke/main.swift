@@ -14,7 +14,7 @@ import MomoMac
 @main
 struct MomoMacSmoke {
     static func main() async {
-        print("== momo macOS smoke ==")
+        print("== oort macOS smoke ==")
 
         // 1) MomoCore model round-trip.
         let ws = WorkspaceID()

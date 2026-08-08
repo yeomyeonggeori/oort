@@ -1,4 +1,4 @@
-# momo web — canonical UI (ADR-0133 §1)
+# oort web — canonical UI (ADR-0133 §1)
 
 TS + React 18 + Vite. The same bundle runs in the browser and inside the Tauri
 shell (`clients/desktop`). Origin: the MOMO-595 P0 spike, promoted to this path
@@ -49,6 +49,131 @@ npm run dev                          # http://localhost:5173 (proxies /v1 → mo
   (`infra/centrifugo.json`), so the realtime WS handshake is accepted.
 - Credentials come from the login form (or `VITE_MOMO_DEV_*` in `.env.local`),
   never from source.
+
+## Viewports: one shell, two shapes (goal B6)
+
+The shell is a two-pane grid down to 600px, and a single pane with an overlay
+drawer below it. **600px is one number living in two places** and they must not
+drift: the `@media (width < 600px)` blocks in `src/design/tokens.css` and
+`MOBILE_SHELL_QUERY` in `src/app/shellNav.tsx`. The stylesheet decides the
+shape; the script decides what is focusable and what each header draws, and a
+mismatch means a hamburger beside a sidebar that is already standing.
+
+Why 600 and not 640/768: the narrowest board the existing gates measure as a
+desktop starts at 600 (`gate:workstream` reads its picker inside a 600x800
+window whose detail column is `600 - 240`), and every phone this targets is
+390~430 wide in portrait. A phone in landscape (844) keeps the two-pane shell,
+which is right there: a 240px column still leaves 604px of channel.
+
+What changes below 600px:
+
+| surface | wide | phone |
+|---|---|---|
+| sidebar | 240px column | 280px overlay drawer, `inert` while closed |
+| 스레드 패널 | 320px column | covers the channel surface |
+| 작업 세션 패널 | 320px column (already full-surface below 900) | covers it |
+| 설정 | 192px nav + body | nav on top, body below |
+| touch targets | 28~32px controls | 44px minimum (`tap-target`) |
+| composer | last row of the column | same, plus `env(safe-area-inset-bottom)` |
+| shell height | `100%` | `--app-viewport-height` (goal B9, below) |
+| shell top | `0` | `env(safe-area-inset-top)` |
+| form controls | `--text-body` (14px) | `--text-title` (16px), or iOS zooms in |
+
+`npm run capture:design` shoots both: 1280x800 first (the frames that must not
+change), then 390x844 (`mobile-*.png`) in light and dark, at
+`deviceScaleFactor: 3` under an iPhone user agent. `CAPTURE_PROFILE=mobile`
+(or `desktop`) runs one of the two while working on it. The phone pass is also
+a check, so a broken board fails the run instead of shipping as a screenshot:
+
+- no horizontal overflow on any phone screen — of the **document** and of
+  **every scroll container on it**,
+- the drawer sits at x=0, leaves a visible strip of the surface behind it, puts
+  the caret inside itself, and marks the covered surface `inert`,
+- 채널 목록 열기 / 컴포저 / 전송 measure at least 44px tall,
+- the header row is at least 44px and `.app-shell` declares
+  `env(safe-area-inset-top)`,
+- the composer stays inside the visible viewport, including with the iOS bottom
+  toolbar emulated,
+- a 74-character unbroken token appended to every server-written string in the
+  channel surface still does not make anything drag sideways.
+
+### The phone is not a small desktop (goal B9)
+
+Three things a 390px Chromium window does NOT reproduce, each measured against
+성재's iPhone captures (2026-08-02) and each now carried by the capture:
+
+- **The visible viewport is not the layout viewport.** iOS Safari's bottom
+  toolbar covers ~100px without shrinking the layout viewport, so `height: 100%`
+  and `100dvh` both answer 844px on an 844px screen while 744px is what the
+  reader can see; the composer sat 88px behind the toolbar (measured). Resizing
+  a desktop window shrinks both together and can never show this. The shell now
+  takes its height from `--app-viewport-height`, written by
+  `src/app/viewportHeight.ts` from `visualViewport`, and the capture reproduces
+  the mismatch by making `VisualViewport.prototype.height` answer 100px short —
+  the platform's behaviour, not ours, so an implementation that ignores
+  `visualViewport` fails the assertion.
+- **The document cannot overflow, so measuring the document proves nothing.**
+  `.app-shell` is `overflow: clip`, so a leak inside the shell never reaches
+  `document.scrollWidth`; it turns the timeline scroller into something you can
+  drag sideways instead (measured at +781px with long tokens, while the document
+  read 0). The assertion now covers every box whose computed `overflow-x` is
+  `auto`/`scroll`, and names the widest descendant that pushed it.
+- **Short fixture sentences do not exercise line breaking.** `overflow-wrap:
+  break-word` does not lower a flex item's automatic minimum size, so a token
+  with no break opportunity — a gateway URL, a digest, a path — sizes its box to
+  itself. `tokens.css` now sets `overflow-wrap: anywhere` on the text elements
+  (`:where(...)`, zero specificity, so `truncate` still truncates), and the
+  capture ends with a stress frame that appends such a token to every
+  server-written string in the timeline and the channel list.
+
+## Desktop cross-origin + boot budgets (DESK-1)
+
+Two things made the packaged desktop app unusable while web and phone were fine.
+Both come from the one fact that only the desktop is cross-origin: the shell
+serves the bundle from `tauri://localhost` and the API lives on a real host, so
+every `/v1/*` call is a genuine cross-origin request (`apiBase()` is always
+absolute there — see the connect surface below). Web is same-origin and React
+Native does not implement CORS at all.
+
+- **The server had no CORS.** `OPTIONS /v1/auth/login` answered 405 and no
+  response carried an `Access-Control-*` header, so the webview blocked the login
+  POST before it was sent and the connect screen said "서버에 닿지 못했습니다".
+  Fixed server-side (MOMO-605, `server-rust/bins/momo-server/src/cors.rs`): set
+  `MOMO_CORS_ALLOWED_ORIGINS=tauri://localhost` on the api service. Unset is
+  still the default and still mounts nothing.
+- **Boot waited on the network.** `initSessionStore()` blocked the *first paint*
+  (blank window) on desktop keychain IPC, and `restoreSession()` then held the
+  skeleton for one `/v1/auth/refresh` bounded only by `REQUEST_TIMEOUT_MS`
+  (15 000 ms). Both are now budgeted in `src/app/boot.ts` — measured against a
+  server that never answers, the connect screen went from **15 411 ms to
+  2 834 ms** (`npm run gate:boot`, red proof `BOOT_GATE_PROVE_RED=1`). Neither
+  budget cancels its work: a keychain or a rotation that lands late still
+  resumes the session.
+
+mDNS discovery is *not* on this path and never was — `discovery_start` returns
+as soon as it spawns its browse thread and is only called from `ConnectPage`'s
+own effect. Discovered servers appear when they arrive; they never hold the
+screen.
+
+### Build-time env this client reads
+
+Values live in `.env.local` (gitignored); `.env.local.example` carries the names.
+
+| name | default | meaning |
+|---|---|---|
+| `VITE_MOMO_API_BASE` | `""` | build-time API fallback; the connect screen's choice wins |
+| `VITE_MOMO_WORKSPACE` | `""` | workspace prefill; blank omits the key entirely |
+| `VITE_MOMO_DEV_EMAIL` | `""` | **test-period login prefill** — email |
+| `VITE_MOMO_DEV_PASSWORD` | `""` | **test-period login prefill** — password |
+| `VITE_MOMO_HYDRATE_BUDGET_MS` | `1200` | first-paint budget; gate seam, do not set in a deploy |
+| `VITE_MOMO_BOOT_RESTORE_BUDGET_MS` | `2500` | resume budget; gate seam, do not set in a deploy |
+
+The two prefill knobs are **build-time only and blank by default**, so the
+production web `dist` and any desktop build made without them prefill nothing —
+unchanged behaviour. A build that sets either one shows a "테스트 프리필이 켜진
+빌드입니다" banner on the connect screen naming the email (never the password),
+because a filled password nobody typed is exactly the thing that stops being
+noticed right before it ships. No credential is ever committed to this repo.
 
 ## Connect surface + dynamic API base (MOMO-604, P2)
 
@@ -116,7 +241,7 @@ how to show a banner, and this decides when one is worth showing.
   approval request whose ledger status is still `pending` — the agent card's
   `awaiting-approval` state, the one row in the product actively waiting on a
   human.
-- **The window having focus suppresses everything.** momo in front means the
+- **The window having focus suppresses everything.** oort in front means the
   message is already on screen or one keystroke away, so a banner would be pure
   noise. Also suppressed: one's own writing, a muted channel (server truth,
   `Channel.muted`), an edit of a message that already had its chance, a repeat of
@@ -163,9 +288,19 @@ export MOMO_EMAIL=... MOMO_PASSWORD=...
 node gates/inject.mjs 120           # seed the spike-745-gate channel (never #general)
 node gates/gate-seq.mjs             # GATE 1
 node gates/gate-resume.mjs 25       # GATE 2
-npm run preview -- --host 127.0.0.1 # then, in another shell:
-node gates/gate-scroll.mjs          # GATE 3 (+ web cold start), headless Chromium
 ```
+
+GATE 3(1k 스크롤 프로파일 + 콜드 스타트)은 **더 이상 자격증명도 외부 preview도
+요구하지 않는다**(#1089). `?stress=N` 은 행을 클라이언트에서 만들고 네트워크를
+타지 않으므로 필요한 것은 로그인 왕복 하나뿐이었고, 그건 형제 게이트들이 쓰는
+라우트 스텁으로 대체된다:
+
+```sh
+npm run build && npm run gate:scroll     # 자체 preview(5185) + 스텁 세션
+```
+
+라이브 서버를 상대로 재려면 `SCROLL_GATE_BASE` 와 `MOMO_EMAIL`/`MOMO_PASSWORD` 를
+**함께** 준다 — 그 조합에서만 스텁이 비활성이다.
 
 The shell layout gate needs neither creds nor a backend (it mocks `/v1` the way
 `scripts/capture-screens.mjs` does) and brings up its own preview server:
@@ -187,10 +322,10 @@ CSP_GATE_PROVE_RED_STYLE=1 npm run gate:csp   # red proof: MUST fail (xterm need
 The huddle browser gate uses REST and Centrifugo protocol fixtures, without a
 backend, credentials, microphone, or LiveKit server. Its `huddle-gate` build
 mode replaces only the audio connector while preserving the production lazy
-import in normal builds. It locks the fail-closed 503 state, active
-badge/participant names, the `huddle_ended` transition, the joined 760x480
-header width contract, and joined exit controls across an injected projection
-500:
+import in normal builds. It locks the two absent-capability shapes (503
+configured-off and 404 not-built-yet, goal B6), active badge/participant names,
+the `huddle_ended` transition, the joined 760x480 header width contract, and
+joined exit controls across an injected projection 500:
 
 ```sh
 npm run build && npm run gate:huddle
@@ -198,16 +333,26 @@ HUDDLE_GATE_PROVE_RED_503=1 npm run gate:huddle     # MUST fail
 HUDDLE_GATE_PROVE_RED_ENDED=1 npm run gate:huddle   # MUST fail
 ```
 
-Width red proof: temporarily remove `max-w-pane` from
-`HuddleHeaderControl.tsx`; the 760px title/toggle geometry assertion must fail
-with a long participant fixture. Projection-isolation red proof: restore the
-old `status === "error"` early return above the joined branch; the joined
-microphone/leave assertions after the injected 500 must fail.
+`HUDDLE_GATE_PROVE_RED_503=1` inverts the absent-capability count: it expects
+one leftover huddle node, which is what appears the moment 404/503 stops being
+read as "this server has no huddles"
+(`huddleModel.isHuddleUnsupportedStatus`). Width red proof: temporarily remove
+`max-w-pane` from `HuddleHeaderControl.tsx`; the 760px title/toggle geometry
+assertion must fail with a long participant fixture. Projection-isolation red
+proof: restore the old `status === "error"` early return above the joined
+branch; the joined microphone/leave assertions after the injected 500 must fail.
 
-The gate writes the four fixture captures to `artifacts/huddle/`:
-`unconfigured.png`, `idle.png`, `active.png`, and `error.png`. A joined capture
-requires a real LiveKit room and browser microphone grant; the orchestrator
-records it as `artifacts/huddle/joined.png`.
+A server without huddles renders **nothing**: no control, no banner, no error.
+The 미구성 banner that used to sit under every channel header said one
+unchanging sentence forever, and on the servers that answer 404 the same state
+was drawn in `--danger` as an outage. Both are gone; a 503 answered to a
+start/join the reader actually pressed still gets a sentence, because there the
+person did something and silence would not say whether it landed.
+
+The gate writes the five fixture captures to `artifacts/huddle/`:
+`unconfigured.png`, `unimplemented.png`, `idle.png`, `active.png`, and
+`error.png`. A joined capture requires a real LiveKit room and browser
+microphone grant; the orchestrator records it as `artifacts/huddle/joined.png`.
 
 The my-session continuity gate also needs no backend or credentials. Its long
 DM fixture locks `전체` and `내 세션` at full width while only the channel chip
@@ -345,7 +490,7 @@ has no shell, so a short window must still reach the sign-in button.
 
 `src/features/work/ObserverTerminal.tsx` + `observerStream.ts`. The capability
 call is REST (`POST .../work-sessions/{id}/terminal-attach {"mode":"observer"}`),
-the bytes are a **direct** WebSocket to the host: momo servers carry no terminal
+the bytes are a **direct** WebSocket to the host: oort servers carry no terminal
 stream, by design. xterm.js is bundled locally and code split
 (`terminalRuntime.ts`, 334 kB js + 5 kB css, loaded on the first 관전 시작).
 
@@ -420,3 +565,55 @@ The liveness claim, and the two things a terminal costs:
   nothing left to do, so the notice names the window instead of pointing at a
   button that is not there (R2 M2: measured at 880px, 79 columns against the
   host's 80, with both 넓게 보기 controls correctly absent).
+
+## 홈 화면 앱 (goal B10, RN 앞의 임시 다리)
+
+**이것은 ADR-0137(RN 채택)을 대체하지 않는다.** 네이티브 클라이언트가 나오기
+전까지 폰에서 쓰는 사람의 체감을 메우는 다리다. 발단은 구체적이다: 사파리
+주소창이 컴포저를 가려서, 메시지를 쓰는 동안 자기가 친 글자가 보이지 않았다.
+
+네 조각이고, 각각 다른 파일이 갖고 있다.
+
+| 조각 | 어디 | 요점 |
+|---|---|---|
+| 매니페스트 | `public/manifest.json` | `display: standalone`, 아이콘 192/512/maskable |
+| iOS 메타 | `index.html` | `apple-mobile-web-app-capable`, 상태바 `default` |
+| 서비스 워커 | `src/features/pwa/sw.js` + `vite.config.ts` | 셸만 캐시, 데이터는 캐시하지 않음 |
+| 안내 한 줄 | `src/features/pwa/*` + `src/main.tsx` | 설치 안내(기기당 1회), 새 버전 알림 |
+
+**오프라인 정직성이 이 배치의 계약이다.** 워커는 `/v1`과 `/health`를 손대지
+않고 그대로 통과시킨다. 그래서 네트워크가 없을 때 뜨는 것은 캐시된 셸 + 각
+표면의 오프라인 상태이지, 어제 받아 둔 메시지가 아니다. 낡은 목록을 최신인 척
+보여주면 그 화면에서 사람이 내리는 판단("아무도 답을 안 했네")이 틀리게 되고,
+그 판단은 되돌릴 수 없다. 오프라인 동기화는 RN이 세션·읽음 상태와 함께 설계할
+몫이다. 푸시 알림도 같은 이유로 없다(ADR-0120의 경로는 NSE).
+
+캐시 세대는 빌드 하나다. `vite.config.ts`의 `momoServiceWorker` 플러그인이
+번들 파일 이름(내용 해시 포함)에서 빌드 아이디를 뽑아 `sw.js`에 새겨 넣으므로,
+배포하면 워커의 바이트가 바뀌고 브라우저가 업데이트를 알아본다. `public/`에 정적
+파일로 두면 바이트가 영원히 같아서 그 일이 일어나지 않는다. 새 워커는 즉시
+활성화되지만(낡은 셸 고착 금지) 화면을 몰래 바꾸지는 않는다: 앱이 "새 버전이
+준비됐습니다" 한 줄을 띄우고, 새로고침을 누르는 것은 사람이다.
+
+**워커는 https에서만 등록된다**(`store.ts serviceWorkerEligible`). Tauri 셸은
+패키징 CSP가 `worker-src 'none'`이고 자기 업데이터를 갖고 있으며, dev/캡처/게이트
+빌드는 모의한 `/v1` 위에 워커가 끼어들면 실패 원인이 두 겹이 된다. 로컬 preview
+에서 같은 경로를 걸으려면 `?pwa`를 붙인다(`?stress`, `?agentwork`과 같은 종류의
+seam). iOS의 홈 화면 추가 자체는 워커와 무관하므로 http에서도 전체 화면으로 뜬다.
+
+```bash
+npm run icons:pwa           # favicon.svg -> public/icon-*.png (마크를 고쳤을 때만)
+npm run capture:standalone  # 실측 + artifacts/pwa/*.png
+```
+
+`capture:standalone`은 스크린샷 전에 먼저 잰다: 매니페스트가 JSON MIME으로 오고
+크로미움 파서를 통과하는가, 아이콘이 선언한 크기 그대로인가, 워커가 셸을 미리
+받아 두는가, **캐시에 `/v1` 응답이 하나도 없는가**, 끊었을 때 셸이 뜨는가,
+그리고 홈 화면 모드에서 `#root`가 상단 안전 영역만큼 물러나고도 문서가 창보다
+커지지 않는가. 하나라도 어긋나면 캡처 전에 실패한다.
+
+한계 하나는 적어 둔다: 크로미움은 `display-mode`를 흉내 내지 못한다(CDP
+`Emulation.setEmulatedMedia`가 아는 미디어 기능 목록에 없다). 그래서 그 규칙은
+두 조각으로 나눠 잰다 — 배포되는 스타일시트 안에 `@media (display-mode:
+standalone)` 규칙이 있는가, 그리고 그 선언이 기기가 준 안전 영역 값으로 풀리는가
+(`Emulation.setSafeAreaInsetsOverride`는 실측 가능하다).

@@ -10,9 +10,9 @@ The macOS app has an `Updates` popover in the session bar. In SwiftPM developmen
 The v0 dogfood experience is:
 
 1. operator creates or updates a local/file-hosted manifest;
-2. tester opens momo and clicks `Updates`;
+2. tester opens oort and clicks `Updates`;
 3. app shows current version, available version, channel, manifest state, and download target;
-4. if the manifest announces a newer build, tester uses `Open Download`, follows the install/relaunch steps, then reopens momo.
+4. if the manifest announces a newer build, tester uses `Open Download`, follows the install/relaunch steps, then reopens oort.
 
 This is operator-assisted. It does not self-replace the running app and does not claim notarized distribution readiness.
 

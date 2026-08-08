@@ -18,7 +18,7 @@ struct StoredWorkHostEngine: Sendable, Equatable {
 ///
 /// ADR-0004: the row carries only an engine LABEL — never a provider key, OAuth
 /// token, or host-local path. `codex-local` selects the user host's own Codex;
-/// the credential boundary stays outside momo.
+/// the credential boundary stays outside oort.
 enum WorkHostEngineStore {
     /// Read the workspace's engine row, or nil when it has never been set. A nil
     /// result means the effective engine is the boot default (opencode) and the

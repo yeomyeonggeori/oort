@@ -1,0 +1,50 @@
+[package]
+name = "momo-agent"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# The sole RLS GUC seam, and the owner of `audit_log` (the gateway event
+# de-duplication read lives there, not here).
+momo-db = { path = "../momo-db" }
+
+sqlx.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+# NOTE the two dependencies this crate deliberately does NOT have, because the
+# writes they front are other crates' chokepoints and composing them is the
+# caller's job (inside one `with_tenant_tx`, so everything commits together):
+#   * `momo-outbox`   — the gateway job lease is columns on an `outbox` row
+#                       (crates/momo-outbox/src/gateway.rs), and the single
+#                       egress is `emit_outbox` (invariant #3).
+#   * `momo-messaging` — the final timeline message is a MESSAGE: same
+#                       `channel_seq` bump, same `client_msg_id` idempotency,
+#                       same broadcast. A second INSERT here would drift from it.
+# This crate therefore owns no `outbox` and no `message` SQL, exactly like
+# `momo-t3` owns no `outbox` SQL.
+#
+# B5.2 kept both absences under pressure, which is the point of writing them
+# down: `mention.rs` builds the `agent_job` payload but does not enqueue it, and
+# `mention.rs` builds the paused-agent system line's body/props but does not
+# insert the message. The route layer composes all three in one transaction
+# (bins/momo-server/src/routes/agent_mentions.rs), so the chokepoints hold.
+
+[dev-dependencies]
+# DB-backed conformance harness (tests/conformance_pg.rs, all #[ignore]) — the
+# orchestrator's docker gate. Not part of the DB-free `cargo test --workspace`.
+# `momo-outbox` is here (and only here) because the suite plays the part of a
+# gateway consumer: it enqueues an agent_job and claims its lease.
+tokio = { workspace = true }
+momo-outbox = { path = "../momo-outbox" }
+# goal SRV-T1's `approval_pg.rs` composes the producer exactly as the worker
+# does — the tool_call/approval_request messages go through the message spine,
+# because a suite that inserted them by hand would prove nothing about the seq
+# and outbox invariants it exists to guard.
+momo-messaging = { path = "../momo-messaging" }
+chrono.workspace = true
+sqlx.workspace = true

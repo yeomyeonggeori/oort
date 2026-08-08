@@ -14,6 +14,40 @@
 # non-default host ports, and tears it down afterwards. It never touches
 # containers from other compose projects.
 #
+# ---- 이 게이트는 두 개의 샘플 패스다 (SRV-B7 / #1042) ------------------------
+#   1차 — 스펙 ↔ Swift : 아래 본문. e2e 컴포즈(swift:6.2)에서 스펙 **전 연산**을
+#          샘플한다. known-unsampled(scripts/openapi_known_unsampled.txt)는 이
+#          패스만의 부채 장부다. **2026-08-06부터 기본 off**(아래 강등 절).
+#   2차 — 스펙 ↔ Rust  : scripts/verify_openapi_contract_rust.sh (스테이지 6).
+#          infra/rust 부분집합 스택(postgres·centrifugo·api)에서
+#          scripts/openapi_sampled_on_rust.txt 에 등재된 연산을 왕복시킨다.
+#          **기본 단독 패스.**
+#
+# 왜 둘인가: 스펙이 서술하는 대상은 이제 Rust 배포본이다(#1040). 정본이 Rust 로
+# 넘어간 경로에서 1차 패스의 초록은 "스펙대로 배포된다"가 아니라 "Swift 가 스펙을
+# 지킨다"만 증명한다. sampled-on-rust 매니페스트는 **늘어날 수만 있는** 목록이라,
+# 이식이 진행될수록 2차 패스가 1차를 잠식하고 끝내 대체한다.
+#
+# ---- 1차(Swift) 패스 강등 (ADR-0145 증보 2-② / #1089) -----------------------
+# **1차 패스는 기본 off 다. `OPENAPI_GATE_SWIFT_PASS=1` 로만 켠다.**
+#
+# 근거(ADR-0145 증보 2, 2026-08-06 성재 승인): Swift 서버는 삭제 전이라도 상시
+# 빌드·테스트 대상이 아니다. 스펙이 Rust 를 서술하는 이상 1차 패스는 **죽을 서버를
+# 스펙과 대조하며 매 실행 40분짜리 콜드 Swift 빌드를 태우는 일**이다. 커버리지의
+# 권위는 sampled-on-rust 매니페스트(#1042의 잠식 기제)가 승계한다.
+#
+# 강등이 정직하려면 대가를 이름 붙여야 한다. 1차 패스가 꺼지면 매니페스트 **밖**의
+# 연산은 "스펙에 있으나 어느 패스도 보지 않는" 상태가 된다 — 이전에는 1차가 보던
+# 자리다. 그래서 이 스크립트는 그 목록을 매 실행 **경고로 전부 출력한다**. 커버리지가
+# 조용히 사라지는 상태는 만들지 않는다: 잠식이 끝날 때까지의 과도기는 눈에 보여야 한다.
+#
+# 불변인 것: known-unsampled(scripts/openapi_known_unsampled.txt)의 의미는 그대로
+# **1차 패스만의 부채 장부**다. 1차가 꺼진 실행에서는 아예 참조되지 않는다(그 패스가
+# 돌지 않으므로 그 패스의 부채도 성립하지 않는다). 목록에 줄을 더하는 것은 여전히 금지.
+#
+# 두 패스를 동시에 끄는 조합(OPENAPI_GATE_SWIFT_PASS=0 + OPENAPI_GATE_RUST_PASS=0)은
+# **거부한다** — 아무도 샘플하지 않는 초록은 게이트가 아니다.
+#
 # Environment:
 #   BASE_URL                       Verify an already-running server instead of
 #                                  booting compose. Requires
@@ -55,12 +89,26 @@
 #                                  them (default: run to the end).
 #   OPENAPI_GATE_MAX_FAILURES      Abort after this many failures to bound
 #                                  cascade noise (default: 30).
+#   OPENAPI_GATE_RUST_PASS=0       Skip stage 6 (스펙 ↔ Rust 2차 샘플 패스).
+#                                  기본 1. 그 패스 자신의 환경변수는
+#                                  scripts/verify_openapi_contract_rust.sh 헤더
+#                                  참조(OPENAPI_RUST_GATE_*, MOMO_RUST_IMAGE).
+#   OPENAPI_GATE_SWIFT_PASS=1      1차(스펙 ↔ Swift) 패스를 되살린다. **기본 0**
+#                                  (ADR-0145 증보 2-② 강등). 0 일 때 이 스크립트는
+#                                  e2e 컴포즈를 아예 띄우지 않고, 감시받지 않는
+#                                  연산 목록을 경고로 찍은 뒤 2차 패스만 돌린다.
+#                                  위의 BASE_URL/OPENAPI_GATE_* 컴포즈 변수는
+#                                  전부 1차 패스 전용이라 =1 일 때만 의미가 있다.
 # =============================================================================
 set -euo pipefail
 
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 REPO_ROOT="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)"
 cd "$REPO_ROOT"
+
+# 스펙 YAML -> JSON 변환은 두 패스가 공유하는 한 벌이다(#1185).
+# shellcheck source=scripts/openapi_spec_to_json.sh
+. "$SCRIPT_DIR/openapi_spec_to_json.sh"
 
 need() {
   command -v "$1" >/dev/null 2>&1 || {
@@ -114,6 +162,14 @@ BOOT_TIMEOUT="${OPENAPI_GATE_BOOT_TIMEOUT:-2400}"
 EXTERNAL_BASE_URL="${BASE_URL:-}"
 MANAGED_STACK=0
 
+# 1차(Swift) 패스는 ADR-0145 증보 2-②로 기본 off — 켜려면 opt-in.
+SWIFT_PASS="${OPENAPI_GATE_SWIFT_PASS:-0}"
+RUST_PASS="${OPENAPI_GATE_RUST_PASS:-1}"
+if [ "$SWIFT_PASS" != "1" ] && [ "$RUST_PASS" != "1" ]; then
+  echo "[openapi] OPENAPI_GATE_SWIFT_PASS=0 + OPENAPI_GATE_RUST_PASS=0 — 두 패스를 모두 끄면 이 게이트는 아무것도 증명하지 않는다. 하나는 켜라." >&2
+  exit 1
+fi
+
 RUN_EPOCH="$(date -u +%s)"
 RUN_ID="${RUN_EPOCH}-$$"
 TMP_DIR="${TMPDIR:-/tmp}/momo-openapi-gate-$RUN_ID"
@@ -122,6 +178,32 @@ COMPOSE_OVERRIDE="$TMP_DIR/gate-env.yml"
 SPEC_JSON="$TMP_DIR/openapi.json"
 MANIFEST="$TMP_DIR/manifest.jsonl"
 : >"$MANIFEST"
+
+# ---- 정본이 Rust 로 넘어간 연산 (SRV-B7 / #1042) -----------------------------
+# #1040 이 스펙의 승인 스키마를 **배포된 와이어**(Rust, camelCase)에 맞춘 순간부터,
+# 이 패스가 띄우는 Swift 서버(snake_case)는 그 연산들에서 구조적으로 스펙과 어긋난다.
+# 그건 이 패스가 잡아야 할 드리프트가 아니라 **이 패스가 더 이상 그 연산의 권위가
+# 아니라는 사실**이다. 그래서 sampled-on-rust 에 오른 연산은 여기서 응답을 기록하지
+# 않고(=스펙과 대조하지 않고) 커버리지에서도 면제한다 — 2차 패스가 소유한다.
+#
+# 요청 자체는 그대로 보낸다: 상태코드 단정은 살아 있으므로 Swift 가 그 경로에서
+# 500 을 내기 시작하면 여전히 여기서 빨강이 된다. 넘겨준 것은 '모양의 권위'뿐이다.
+#
+# 2차 패스를 끄면(OPENAPI_GATE_RUST_PASS=0) 이 목록은 비어 있는 것으로 취급한다 —
+# 아무도 샘플하지 않는 연산이 조용히 면제되는 상태를 만들지 않기 위해서다.
+SAMPLED_ON_RUST="$SCRIPT_DIR/openapi_sampled_on_rust.txt"
+RUST_OWNED="$TMP_DIR/rust-owned-ops.txt"
+: >"$RUST_OWNED"
+if [ "$RUST_PASS" = "1" ] && [ -f "$SAMPLED_ON_RUST" ]; then
+  sed -e 's/#.*//' "$SAMPLED_ON_RUST" \
+    | awk 'NF { print tolower($1) " " $2 }' | sort -u >"$RUST_OWNED"
+fi
+
+rust_owned() {
+  # $1 = method, $2 = spec path TEMPLATE
+  [ -s "$RUST_OWNED" ] || return 1
+  grep -qxF "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]') $2" "$RUST_OWNED"
+}
 
 # ---- Failure accumulation (MOMO-654) ----------------------------------------
 # The gate used to abort on the FIRST assertion failure. With a ~40min cold
@@ -302,35 +384,84 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-# ---- 1) Spec YAML -> JSON (ruby is a docs-gate dependency; python-yaml fallback)
-convert_spec() {
-  if command -v ruby >/dev/null 2>&1; then
-    if ruby -ryaml -rjson -e \
-      'puts JSON.generate(YAML.load_file(ARGV[0], aliases: true))' \
-      "$SPEC_YAML" >"$SPEC_JSON" 2>/dev/null; then
-      return 0
-    fi
-    if ruby -ryaml -rjson -e \
-      'puts JSON.generate(YAML.load_file(ARGV[0]))' \
-      "$SPEC_YAML" >"$SPEC_JSON" 2>/dev/null; then
-      return 0
-    fi
-  fi
-  if "$PYTHON_BIN" -c "import yaml" >/dev/null 2>&1; then
-    "$PYTHON_BIN" -c \
-      'import json,sys,yaml; json.dump(yaml.safe_load(open(sys.argv[1])), sys.stdout)' \
-      "$SPEC_YAML" >"$SPEC_JSON"
-    return 0
-  fi
-  echo "[openapi] need ruby (with yaml/json) or python3+PyYAML to parse the spec" >&2
-  exit 1
-}
-convert_spec
+# ---- 1) Spec YAML -> JSON (#1185: 변환 정본은 scripts/openapi_spec_to_json.sh)
+# 여기 있던 ruby/python 사다리는 2차 패스에도 복사돼 있었고 사본 쪽만 psych 3
+# 재시도가 빠져 있었다. 두 패스가 같은 함수를 부르면 그 드리프트가 다시 생길 수
+# 없다. 어느 리더로 뛰었는지는 함수가 한 줄 출력한다.
+momo_openapi_spec_to_json "$SPEC_YAML" "$SPEC_JSON" openapi "$PYTHON_BIN" || exit 1
 jq -e '.openapi and .paths' "$SPEC_JSON" >/dev/null || {
   echo "[openapi] spec did not parse into an OpenAPI document" >&2
   exit 1
 }
 echo "[openapi] spec parsed: $SPEC_YAML"
+
+# ---- 1.5) 어느 패스도 보지 않는 연산 (ADR-0145 증보 2-② / #1089) -------------
+# 1차 패스가 꺼진 실행에서만 의미가 있다. 켜져 있으면 스테이지 5의 역방향 커버리지
+# 검사가 그 자리를 지키므로 이 경고는 중복이다.
+#
+# 여기서 세는 것은 **스펙 연산 - sampled-on-rust 매니페스트**다. 그 차집합이 곧
+# "스펙에 성문화돼 있는데 이번 실행에서 아무도 왕복시키지 않는" 연산이고, 강등이
+# 만든 과도기 부채의 정확한 크기다. 목록은 매니페스트가 자랄수록 줄어들고, 0 이
+# 되는 날 1차 패스는 되살릴 이유가 사라진다(#1042의 잠식 완료).
+report_unwatched_operations() {
+  local spec_ops="$TMP_DIR/spec-ops.txt"
+  local unwatched="$TMP_DIR/unwatched-ops.txt"
+  jq -r '
+    .paths | to_entries[] as $p
+    | $p.value | to_entries[]
+    | select(.key | test("^(get|put|post|delete|patch|head|options|trace)$"))
+    | .key + " " + $p.key
+  ' "$SPEC_JSON" | sort -u >"$spec_ops"
+  comm -23 "$spec_ops" "$RUST_OWNED" >"$unwatched"
+
+  local total watched missing
+  total="$(wc -l <"$spec_ops" | tr -d ' ')"
+  watched="$(wc -l <"$RUST_OWNED" | tr -d ' ')"
+  missing="$(wc -l <"$unwatched" | tr -d ' ')"
+
+  echo ""
+  echo "[openapi] ===== 1차(Swift) 패스 off — 감시받지 않는 연산 $missing/$total ====="
+  echo "[openapi] sampled-on-rust 가 덮는 연산: $watched — 나머지는 이번 실행에서 어느 패스도 왕복시키지 않는다."
+  if [ "$missing" -gt 0 ]; then
+    while IFS= read -r op; do
+      [ -n "$op" ] || continue
+      printf '[openapi] WARN unwatched  %s\n' "$op"
+    done <"$unwatched"
+    echo "[openapi] 이 목록은 부채이지 면제가 아니다. scripts/openapi_sampled_on_rust.txt 가 자라면 줄어들고,"
+    echo "[openapi] 당장 스펙 대조가 필요하면 OPENAPI_GATE_SWIFT_PASS=1 로 1차 패스를 되살려라(ADR-0145 증보 2-②)."
+  else
+    echo "[openapi] 감시 공백 0 — sampled-on-rust 가 스펙 전 연산을 덮었다. 1차 패스는 되살릴 이유가 없다(#1042 잠식 완료)."
+  fi
+  echo "[openapi] ================================================================"
+  echo ""
+}
+
+# ---- 2차 샘플 패스 실행부 (1차 on/off 양쪽에서 같은 코드로 돈다) -------------
+run_spec_rust_pass() {
+  local rc=0
+  if [ "$RUST_PASS" != "1" ]; then
+    echo "[openapi] OPENAPI_GATE_RUST_PASS=0 — skipping the spec-Rust sample pass"
+    return 0
+  fi
+  echo "[openapi] ===== 2차 샘플 패스: 스펙 - Rust (#1042) ====="
+  "$SCRIPT_DIR/verify_openapi_contract_rust.sh" || rc=$?
+  return "$rc"
+}
+
+if [ "$SWIFT_PASS" != "1" ]; then
+  echo "[openapi] 1차(스펙 - Swift) 패스는 기본 off 다 — ADR-0145 증보 2-②. 되살리려면 OPENAPI_GATE_SWIFT_PASS=1."
+  report_unwatched_operations
+  RUST_PASS_RC=0
+  run_spec_rust_pass || RUST_PASS_RC=$?
+  if [ "$RUST_PASS_RC" -ne 0 ]; then
+    echo "[openapi] FAIL OpenAPI contract drift gate — spec-Rust pass rc=$RUST_PASS_RC (evidence: $TMP_DIR)" >&2
+    exit 1
+  fi
+  echo "[openapi] PASS OpenAPI contract drift gate (spec-Rust pass only; swift pass demoted; evidence: $TMP_DIR)"
+  exit 0
+fi
+
+echo "[openapi] OPENAPI_GATE_SWIFT_PASS=1 — 1차(스펙 - Swift) 패스를 켠 채로 돈다"
 
 port_in_use() {
   (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null && { exec 3>&- 3<&-; return 0; }
@@ -511,6 +642,10 @@ sample() {
     gate_fail "$name" "expected HTTP $expected, got $RESPONSE_STATUS" "$RESPONSE_BODY"
     return 0
   fi
+  if rust_owned "$method" "$template"; then
+    echo "[openapi] RUST-OWNED $name -> $expected (모양 검증은 2차 패스가 소유)"
+    return 0
+  fi
   SAMPLE_INDEX=$((SAMPLE_INDEX + 1))
   local file
   file="$(printf '%s/sample-%02d-%s.json' "$TMP_DIR" "$SAMPLE_INDEX" "$name")"
@@ -528,6 +663,10 @@ record_sample() {
     gate_fail "$name" "expected HTTP $expected, got $RESPONSE_STATUS" "$RESPONSE_BODY"
     return 0
   fi
+  if rust_owned "$method" "$template"; then
+    echo "[openapi] RUST-OWNED $name -> $expected (모양 검증은 2차 패스가 소유)"
+    return 0
+  fi
   SAMPLE_INDEX=$((SAMPLE_INDEX + 1))
   local file
   file="$(printf '%s/sample-%02d-%s.json' "$TMP_DIR" "$SAMPLE_INDEX" "$name")"
@@ -543,6 +682,10 @@ record_binary_sample() {
   local name="$1" method="$2" template="$3" expected="$4" body_file="$5" media_type="$6"
   if [ "$RESPONSE_STATUS" != "$expected" ]; then
     gate_fail "$name" "expected HTTP $expected, got $RESPONSE_STATUS"
+    return 0
+  fi
+  if rust_owned "$method" "$template"; then
+    echo "[openapi] RUST-OWNED $name -> $expected (모양 검증은 2차 패스가 소유)"
     return 0
   fi
   SAMPLE_INDEX=$((SAMPLE_INDEX + 1))
@@ -1155,6 +1298,26 @@ sample reaction-remove delete "/v1/workspaces/{workspaceId}/messages/{messageId}
   "/v1/workspaces/$WS/messages/$SENT_ID/reactions/%F0%9F%91%8D" 200 "" "$ACCESS"
 guard_jq '.action == "removed" and .emoji == "👍"' "reaction removal delta"
 
+# pin (이슈 #1112): pin → list → unpin, before the tombstone below sweeps it.
+# The list guard is the one that matters — it is what proves the header surface
+# receives the message projection and not just an id it would have to look up.
+sample pin-add put "/v1/workspaces/{workspaceId}/messages/{messageId}/pin" \
+  "/v1/workspaces/$WS/messages/$SENT_ID/pin" 200 "" "$ACCESS"
+guard_jq --argjson seq "$SENT_SEQ" \
+  '.action == "pinned" and .changed == true and (.pinned.seq == $seq)' \
+  "pin delta carries the list entry at the message's own seq"
+
+sample pin-list get "/v1/workspaces/{workspaceId}/channels/{channelId}/pins" \
+  "/v1/workspaces/$WS/channels/$GENERAL_ID/pins" 200 "" "$ACCESS"
+guard_jq --arg id "$(printf '%s' "$SENT_ID" | tr '[:upper:]' '[:lower:]')" \
+  'any(.pins[]; (.messageId | ascii_downcase) == $id and (.pinnedAtMs > 0))' \
+  "pin list contains the pinned message"
+
+sample pin-remove delete "/v1/workspaces/{workspaceId}/messages/{messageId}/pin" \
+  "/v1/workspaces/$WS/messages/$SENT_ID/pin" 200 "" "$ACCESS"
+guard_jq '.action == "unpinned" and .changed == true and (has("pinned") | not)' \
+  "unpin delta names no projection"
+
 sample message-delete delete "/v1/workspaces/{workspaceId}/messages/{messageId}" \
   "/v1/workspaces/$WS/messages/$SENT_ID" 200 "" "$ACCESS"
 guard_jq --argjson seq "$SENT_SEQ" \
@@ -1557,11 +1720,36 @@ SHAPE_RC=0
   --manifest "$TMP_DIR/manifest.json" \
   --server-route-manifest "$TMP_DIR/server-routes.json" \
   --require-operation-coverage \
-  --known-unsampled "$SCRIPT_DIR/openapi_known_unsampled.txt" || SHAPE_RC=$?
+  --known-unsampled "$SCRIPT_DIR/openapi_known_unsampled.txt" \
+  --sampled-elsewhere "$RUST_OWNED" || SHAPE_RC=$?
 
-if [ "$FAILURE_COUNT" -gt 0 ] || [ "$SHAPE_RC" -ne 0 ]; then
-  echo "[openapi] FAIL OpenAPI contract drift gate — $FAILURE_COUNT assertion failure(s), shape check rc=$SHAPE_RC (evidence: $TMP_DIR)" >&2
+# ---- 6) 2차 샘플 패스: 스펙 ↔ Rust (SRV-B7 / #1042) --------------------------
+# 위의 1차 패스는 e2e 컴포즈의 swift:6.2 서버를 샘플한다. 그런데 스펙이 서술하는
+# 대상은 이제 Rust 배포본이므로(#1040), 정본이 Rust 로 넘어간 경로에서는 1차 패스의
+# 초록이 "스펙대로 배포된다"를 증명하지 않는다 — Swift 가 스펙을 지킨다만 증명한다.
+# 2차 패스는 scripts/openapi_sampled_on_rust.txt 에 등재된 연산을 infra/rust 부분집합
+# 스택(postgres·centrifugo·api)에서 실제로 왕복시켜 그 간극을 닫는다. 매니페스트는
+# 성장형이라, 이식이 진행될수록 이 패스가 1차 패스를 잠식하고 끝내 대체한다.
+# known-unsampled 계약은 건드리지 않는다 — 그 목록은 1차 패스만의 부채 장부다.
+#
+# 1차 스택을 먼저 내린다: 두 스택을 동시에 띄우면 Docker VM 자원이 누적된다
+# (compose 자원 회수는 이 레포의 하드 룰).
+RUST_PASS_RC=0
+if [ "${OPENAPI_GATE_RUST_PASS:-1}" = "1" ]; then
+  if [ "$MANAGED_STACK" -eq 1 ] && [ "${OPENAPI_GATE_KEEP:-0}" != "1" ]; then
+    echo "[openapi] releasing the swift pass stack before the spec-Rust pass"
+    compose down -v --remove-orphans >/dev/null 2>&1 || true
+    MANAGED_STACK=0
+  fi
+  echo "[openapi] ===== 2차 샘플 패스: 스펙 - Rust (#1042) ====="
+  "$SCRIPT_DIR/verify_openapi_contract_rust.sh" || RUST_PASS_RC=$?
+else
+  echo "[openapi] OPENAPI_GATE_RUST_PASS=0 — skipping the spec-Rust sample pass"
+fi
+
+if [ "$FAILURE_COUNT" -gt 0 ] || [ "$SHAPE_RC" -ne 0 ] || [ "$RUST_PASS_RC" -ne 0 ]; then
+  echo "[openapi] FAIL OpenAPI contract drift gate — $FAILURE_COUNT assertion failure(s), shape check rc=$SHAPE_RC, spec-Rust pass rc=$RUST_PASS_RC (evidence: $TMP_DIR)" >&2
   exit 1
 fi
 
-echo "[openapi] PASS OpenAPI contract drift gate (evidence: $TMP_DIR)"
+echo "[openapi] PASS OpenAPI contract drift gate (swift pass + spec-Rust pass; evidence: $TMP_DIR)"

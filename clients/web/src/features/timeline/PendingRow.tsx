@@ -2,7 +2,15 @@ import { useState } from "react";
 import { memberFor, type Directory } from "@/features/workspace/useWorkspace";
 import { cn } from "@/design/lib/cn";
 import { Avatar } from "./MessageRow";
-import type { PendingMessage } from "./model";
+import { MessageBody } from "./MessageBody";
+import { QuoteBlock } from "./QuoteBlock";
+import type { PendingMessage } from "@momo/core/features/timeline/model";
+import { resolveQuote } from "@momo/core/features/timeline/quote";
+import type { Message } from "@momo/core/lib/api";
+import {
+  ROW_CONTINUATION_PAD_CLASS,
+  ROW_GROUP_START_PAD_CLASS,
+} from "./spacing";
 
 // =============================================================================
 // Optimistic echo row (M10, R-1 §3 "내 메시지는 seq 미확정이어도 로컬 echo").
@@ -23,17 +31,29 @@ export function PendingRow({
   pending,
   startsGroup,
   directory,
+  quoteLookup,
   onResend,
 }: {
   pending: PendingMessage;
   startsGroup: boolean;
   directory: Directory;
+  /** 이 echo가 인용한 원본을 화면에 있는 행에서 찾는다 (ADR-0148). */
+  quoteLookup?: (messageId: string) => Message | undefined;
   onResend?: (clientMsgId: string) => Promise<void> | void;
 }) {
   const [resending, setResending] = useState(false);
   const author = memberFor(directory, pending.authorMemberId);
   const name = author?.displayName ?? "나";
   const failed = pending.status === "failed";
+  // 확정된 행과 **같은 것**을 그린다 (ADR-0148). echo가 인용을 안 그렸다가 seq가
+  // 도착하는 순간 하나 자라면, 읽는 사람 눈 아래에서 본문이 아래로 밀린다 - 이
+  // 파일이 마크다운을 echo에도 그리기로 한 것과 같은 이유다(goal B8 H6).
+  // 점프는 주지 않는다: 아직 보내지지도 않은 글에서 원본으로 떠나는 길은, 돌아왔을
+  // 때 그 글이 어디 있는지 아무도 보장하지 못한다.
+  const quote =
+    pending.replyToId === undefined
+      ? null
+      : resolveQuote({ replyToId: pending.replyToId }, quoteLookup);
 
   return (
     <article
@@ -42,11 +62,18 @@ export function PendingRow({
       data-status={pending.status}
       className={cn(
         "flex gap-2 px-4 hover:bg-surface-hover",
-        startsGroup ? "pt-3 pb-1" : "py-1"
+        // 확정된 행과 **같은 다리**를 쓴다 (U4-6 리뷰 M-1). 이 자리는 `pt-3 pb-1`
+        // /`py-1` 이라는 손으로 적은 값이었고, 그래서 묶음 안 간격이 8px(4+4)
+        // 이었다 — 코어가 말하는 12(`ROW_SPACE.withinGroup`)가 아니다. echo 행은
+        // 서버 echo 가 도착하면 `MessageRow` 로 **교체된다.** 두 행의 패딩이
+        // 다르면 그 순간 글이 4px 아래로 내려앉는다: 이 파일 머리말이 「같은
+        // 그리드를 빌려 쓰는 이유는 행이 제자리로 튀지 않게 하려는 것」이라고
+        // 적은 그 성질을, 정작 간격에서만 지키지 않고 있었다.
+        startsGroup ? ROW_GROUP_START_PAD_CLASS : ROW_CONTINUATION_PAD_CLASS
       )}
     >
-      <div className="w-6 shrink-0">
-        {startsGroup && <Avatar member={author} name={name} />}
+      <div className="w-8 shrink-0">
+        {startsGroup && <Avatar member={author} />}
       </div>
       <div className="min-w-0 flex-1">
         {startsGroup && (
@@ -57,9 +84,11 @@ export function PendingRow({
                 ordering the timeline does not have. */}
           </div>
         )}
-        <p className="whitespace-pre-wrap break-words text-body leading-relaxed text-ink-muted">
-          {pending.body}
-        </p>
+        {quote && <QuoteBlock block={quote} directory={directory} />}
+        {/* Same body renderer as the confirmed row (goal B8 H6): an echo that
+            showed raw asterisks and then re-flowed into bold the moment its seq
+            landed would move the text under the reader's eye. */}
+        <MessageBody body={pending.body} muted />
         {failed ? (
           <span
             className="flex flex-wrap items-center gap-2 text-meta text-danger"

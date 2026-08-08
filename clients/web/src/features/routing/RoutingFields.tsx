@@ -2,14 +2,14 @@ import { cn } from "@/design/lib/cn";
 import { Select } from "@/design/ui/select";
 import {
   applyModelChange,
+  clearUnsupportedEffort,
   effectiveModel,
   effortLabel,
   effortsForModel,
   hasUnattestedModels,
-  supportsEffort,
   type EffortTable,
   type RoutingDraft,
-} from "./routingModel";
+} from "@momo/core/features/routing/routingModel";
 
 // =============================================================================
 // 모델 + 추론 강도, 한 쌍 (ADR-0134 D2·D3).
@@ -57,6 +57,16 @@ export function RoutingFields({
   /** agent별 allow-list를 온전한 모양으로 받았을 때만 true다. */
   allowedModelsReceived = false,
   /**
+   * 고른 모델(`null` = 상속)에서 **고를 수 있는 강도들**. 한 명을 부른 화면은
+   * 넘기지 않고, 그때 기준은 표에 적힌 그 모델의 행이다.
+   *
+   * 여럿을 부른 컴포저만 이것을 넘긴다. 그 줄이 보내는 `routing` 블록 하나는
+   * 부른 모두에게 같이 가므로, 유효한 강도는 각자의 표 행이 아니라 그 교집합이다
+   * (`sharedEfforts`). 목록과 자동 클리어 판정이 **같은 함수**를 보게 해서, 상자에
+   * 올라온 값과 비워지는 값이 갈라지지 않는다.
+   */
+  effortsFor,
+  /**
    * `stack`은 다이얼로그(512px 패널에서 한 칸씩), `row`는 컴포저다. 컴포저에서
    * 세로로 쌓으면 1600px 창에서 모델 상자 하나가 1500px이 되는데, 모델 핸들은
    * 20자를 넘지 않으므로 그 폭은 전부 빈 곳이고 라벨과 값이 멀어진다
@@ -83,6 +93,7 @@ export function RoutingFields({
   ignoredNotice?: string | null;
   modelError?: string | null;
   layout?: "stack" | "row";
+  effortsFor?: (modelOverride: string | null) => readonly string[];
 }) {
   const modelId = `${idPrefix}-model`;
   const effortId = `${idPrefix}-effort`;
@@ -94,7 +105,11 @@ export function RoutingFields({
   const modelErrorId = `${idPrefix}-model-error`;
 
   const model = effectiveModel(draft, inheritedModel);
-  const efforts = table ? effortsForModel(table, model).efforts : [];
+  const efforts = table
+    ? effortsFor
+      ? effortsFor(draft.model)
+      : effortsForModel(table, model).efforts
+    : [];
   // 표가 없으면 고를 수 있는 강도가 하나도 없다. 그때는 서버가 준 것이 없다는
   // 사실 그대로 상속 하나만 남은 상자를 잠근다. 임의의 목록을 지어내면 서버가
   // 400으로 거절할 값을 사람에게 권하는 셈이 된다.
@@ -109,7 +124,9 @@ export function RoutingFields({
       onChange({ ...draft, model: next }, null);
       return;
     }
-    const result = applyModelChange(table, draft, next, inheritedModel);
+    const result = effortsFor
+      ? clearUnsupportedEffort(draft, next, effortsFor(next))
+      : applyModelChange(table, draft, next, inheritedModel);
     onChange(result.draft, result.clearedEffort);
   }
 
@@ -131,7 +148,7 @@ export function RoutingFields({
   // 유효값을 아는 경우에만 "쓸 수 없음"이라고 말한다. 표가 없으면 그 판정을 할
   // 근거 자체가 없다.
   const orphanEffortUnusable =
-    orphanEffort !== null && table !== null && !supportsEffort(table, model, orphanEffort);
+    orphanEffort !== null && table !== null && !efforts.includes(orphanEffort);
 
   const row = layout === "row";
   const fieldClass = row ? "flex min-w-0 flex-1 flex-col gap-1" : "flex min-w-0 flex-col gap-1";

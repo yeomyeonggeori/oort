@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   Activity,
   Bot,
@@ -13,9 +13,11 @@ import {
   Settings,
   SquarePen,
   Users,
+  X,
 } from "lucide-react";
-import type { Channel } from "@/lib/api";
+import { uuidEq, type Channel } from "@momo/core/lib/api";
 import { useSession } from "@/app/session";
+import { useInertWhile, useShellNav } from "@/app/shellNav";
 import {
   agentTurnsInChannel,
   useAgentWorkingSignals,
@@ -26,7 +28,7 @@ import {
   agentTurnBadgeCopy,
   UNKNOWN_AGENT_NAME,
 } from "@/features/agents/turnCopy";
-import { agentCoverage } from "@/features/agents/agentRail";
+import { agentCoverage } from "@momo/core/features/agents/agentRail";
 import { agentTurnFixtureMode } from "@/features/agents/turnFixture";
 import {
   channelLabelParts,
@@ -38,11 +40,16 @@ import {
   useReadStates,
   type Directory,
 } from "@/features/workspace/useWorkspace";
-import { canCreateChannelNow } from "@/features/channels/model";
+import { canCreateChannelNow } from "@momo/core/features/channels/model";
 import { useOpenCreateChannel } from "@/features/channels/useCreateChannel";
+import {
+  isSurfaceProvided,
+  serverSurface,
+} from "@momo/core/features/capabilities/serverSurfaces";
 import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/States";
 import { UpdateBadge } from "@/features/updates/UpdateBadge";
 import { SidebarRow, SidebarSection } from "./SidebarRow";
+import { openChannelId } from "./openChannel";
 import { WorkspaceRail } from "./WorkspaceRail";
 import { Button } from "@/design/ui/button";
 
@@ -106,6 +113,21 @@ export function Sidebar({
   const navigate = useNavigate();
   const navRef = useRef<HTMLDivElement>(null);
 
+  // 폰에서 이 사이드바는 서랍이다 (goal B6). 닫혀 있는 동안에는 화면 밖으로
+  // 밀려 있을 뿐 DOM에는 남아 있으므로(스크롤 위치와 마운트를 지킨다), 탭 순서와
+  // 접근성 트리에서는 `inert`로 빠져야 한다. 보이지 않는 것을 읽을 수 있게 두면
+  // 스크린리더 사용자는 열지도 않은 서랍 안을 걷는다.
+  const { isMobile, drawerOpen, closeDrawer } = useShellNav();
+  const asDrawer = isMobile;
+  const drawerRef = useInertWhile<HTMLDivElement>(asDrawer && !drawerOpen);
+  const closeRef = useRef<HTMLButtonElement>(null);
+
+  // 열리면 캐럿이 서랍 안으로 들어간다. 첫 정거장은 닫기 버튼이다: 잘못 열었을
+  // 때 되돌리는 길이 첫 번째여야 하고, 그 다음이 검색과 채널 목록이다.
+  useEffect(() => {
+    if (asDrawer && drawerOpen) closeRef.current?.focus();
+  }, [asDrawer, drawerOpen]);
+
   const channelsQuery = useChannels(workspaceId);
   const directoryQuery = useDirectory(workspaceId);
   const readStates = useReadStates(workspaceId);
@@ -147,10 +169,33 @@ export function Sidebar({
   // ⌥↑/⌥↓: jump between channels that actually have unread (P11 / Slack
   // grammar). Ordering follows the rendered list so the traversal is visible.
   const ordered = useMemo(() => [...channels, ...dms], [channels, dms]);
+
+  // 지금 읽고 있는 채널 (goal B8 H10). ChatShell이 커서를 올리는 PUT은 왕복이
+  // 걸리고 실패할 수도 있으므로, 그 사이 사이드바는 화면에 떠 있는 그 채널에
+  // "새 메시지 1"을 붙인다. 읽고 있는 것은 읽은 것이다. 나머지 행은 그대로
+  // 서버가 세고(P7), 이 규칙은 오직 열려 있는 한 행에만 적용된다.
+  const routePath = useLocation().pathname;
+  const openId = openChannelId(
+    routePath,
+    channels[0]?.id ?? dms[0]?.id ?? null
+  );
+  const unreadCountFor = useCallback(
+    (channel: Channel) => {
+      if (openId !== null && uuidEq(channel.id, openId)) {
+        return { unreadCount: 0, mentionCount: 0 };
+      }
+      const read = unreadFor(readStates.byChannel, channel.id);
+      return {
+        unreadCount: read?.unreadCount ?? 0,
+        mentionCount: read?.mentionCount ?? 0,
+      };
+    },
+    [openId, readStates.byChannel]
+  );
+
   const unreadChannels = useMemo(
-    () =>
-      ordered.filter((c) => (unreadFor(readStates.byChannel, c.id)?.unreadCount ?? 0) > 0),
-    [ordered, readStates.byChannel]
+    () => ordered.filter((c) => unreadCountFor(c).unreadCount > 0),
+    [ordered, unreadCountFor]
   );
 
   useEffect(() => {
@@ -191,7 +236,7 @@ export function Sidebar({
   }, []);
 
   function rowFor(channel: Channel) {
-    const read = unreadFor(readStates.byChannel, channel.id);
+    const counts = unreadCountFor(channel);
     // A DM row is named after a person, and this workspace holds two members
     // called 김인턴, so the row carries the handle whenever the name alone does
     // not decide which one it is (channelLabelParts).
@@ -216,8 +261,8 @@ export function Sidebar({
         label={label.text}
         handle={label.handle}
         agent={label.isAgent}
-        unreadCount={read?.unreadCount ?? 0}
-        mentionCount={read?.mentionCount ?? 0}
+        unreadCount={counts.unreadCount}
+        mentionCount={counts.mentionCount}
         trailing={
           <AgentTurnBadge
             turns={agentTurnsInChannel(turnSignals, channel.id, nowMs)}
@@ -232,15 +277,21 @@ export function Sidebar({
   }
 
   return (
-    <div className="flex h-full">
+    <div
+      ref={drawerRef}
+      id="sidebar-drawer"
+      className="sidebar-drawer flex h-full"
+      data-open={asDrawer && drawerOpen ? "" : undefined}
+      data-testid="sidebar"
+    >
       <WorkspaceRail workspaceName={selfName} connStatus={connStatus} />
 
       <div className="flex h-full w-full min-w-0 flex-col border-r border-line bg-surface-sidebar">
-        <div className="border-b border-line p-2">
+        <div className="flex items-center gap-2 border-b border-line p-2">
           <Button
             variant="outline"
             size="sm"
-            className="w-full justify-between"
+            className="tap-target min-w-0 flex-1 justify-between"
             onClick={onOpenQuickSwitcher}
             data-testid="open-quick-switcher"
           >
@@ -248,8 +299,23 @@ export function Sidebar({
               <Search className="size-4" />
               검색과 이동
             </span>
-            <span className="text-meta text-ink-muted">⌘K</span>
+            {/* 폰에는 ⌘ 키가 없다 (goal B6). 누를 수 없는 단축키를 컨트롤에
+                적어 두면 그만큼의 폭을 쓰면서 아무것도 알려주지 않는다. */}
+            <span className="wide-only text-meta text-ink-muted">⌘K</span>
           </Button>
+          {/* 폰에서만 서는 닫기 (goal B6). 넓은 창에서 사이드바는 닫히는 것이
+              아니라 그냥 거기 있으므로, 이 버튼은 그때 아무 일도 하지 않는다. */}
+          <button
+            ref={closeRef}
+            type="button"
+            onClick={closeDrawer}
+            aria-label="채널 목록 닫기"
+            title="채널 목록 닫기"
+            data-testid="close-sidebar-drawer"
+            className="mobile-only tap-target flex size-control shrink-0 items-center justify-center rounded-sm text-ink-muted transition-colors hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+          >
+            <X className="size-4" aria-hidden="true" />
+          </button>
         </div>
 
         {fixtureMode !== null && (
@@ -266,7 +332,18 @@ export function Sidebar({
         <div
           ref={navRef}
           onKeyDown={onNavKeyDown}
-          className="min-h-0 flex-1 overflow-y-auto"
+          // 목록에서 무언가를 골랐으면 서랍은 할 일을 마쳤다. 라우트가 바뀌는
+          // 경우는 셸이 이미 닫지만(AppShell의 routePath 효과), **이미 열려 있는
+          // 채널**을 다시 고르면 주소가 그대로라 그 효과는 돌지 않는다. 그때도
+          // 사람이 한 일은 "이 채널을 보겠다"이므로 서랍은 비켜야 한다.
+          onClick={(event) => {
+            if (!asDrawer || !drawerOpen) return;
+            if ((event.target as Element).closest("a")) closeDrawer();
+          }}
+          // `overscroll-contain` (goal B9): 채널 목록 끝에서 계속 미는 손가락이
+          // 서랍 바깥으로 넘어가지 않는다 — 덮인 표면이 함께 움직이면 서랍이 종이
+          // 한 장이 아니라 창처럼 느껴진다. 타임라인이 같은 이유로 같은 것을 쓴다.
+          className="overscroll-contain min-h-0 flex-1 overflow-y-auto"
           data-testid="channel-list"
         >
           <nav aria-label="워크스페이스 탐색">
@@ -275,14 +352,45 @@ export function Sidebar({
               <SidebarRow to="/activity" icon={<Activity className="size-4" />} label="활동" testId="nav-activity" />
               <SidebarRow to="/directory" icon={<Users className="size-4" />} label="멤버" testId="nav-directory" />
               <SidebarRow to="/agents" icon={<Bot className="size-4" />} label="에이전트" testId="nav-agents" />
+              {/* 메시지 검색 (goal B12 H5). 전역 목적지인 이유는 인박스와 같다:
+                  가는 곳이지 구독하는 것이 아니다.
+
+                  **이름을 짓지 않고 받아 온다** (이슈 #1146 N4). 1차의 이 줄은
+                  「검색」이라고 적었는데, 도착하는 라우트의 제목도 팔레트의 항목도
+                  폰의 화면도 전부 「메시지 검색」이었다 — 한 목적지에 이름이 둘이면
+                  사람은 그것을 두 기능으로 센다. 바로 위 줄의 「검색과 이동」과
+                  나란히 서면 더 나빠서, 「검색」은 그 팔레트의 짧은 이름처럼 읽혔다.
+                  게다가 팔레트의 빈 상태는 이 줄을 **이름으로 가리킨다**(「메시지
+                  본문은 아래 메시지 검색에서 찾을 수 있습니다」) — 가리키는 이름이
+                  화면에 없으면 그 안내는 없는 곳을 가리킨 것이다.
+
+                  판정은 팔레트가 「멤버 ↔ 디렉터리」에서 이미 내렸다: 사람이
+                  **도착하는 표면이 쓰는 말**이 그 목적지의 이름이다. 그 말은 코어의
+                  표면 판정표에 이미 한 줄로 있으므로(`serverSurface`), 여기서 다시
+                  적지 않고 그것을 든다. */}
+              {isSurfaceProvided("messageSearch") && (
+                <SidebarRow
+                  to="/search"
+                  icon={<Search className="size-4" />}
+                  label={serverSurface("messageSearch").label}
+                  testId="nav-search"
+                />
+              )}
               {/* 작업 흐름 sits with the global destinations for the reason
                   에이전트 does (MOMO-652): it is a place you GO, not a thing you
                   are subscribed to. It is also the one work surface that cannot
                   live in the channel drawer beside it — 작업 세션 is scoped to
                   the channel you are already in and, in its most used range, to
                   your own sessions, while someone looking for work to pick up is
-                  by definition looking for work that is not theirs (ADR-0143). */}
-              <SidebarRow to="/workstreams" icon={<Milestone className="size-4" />} label="작업 흐름" testId="nav-workstreams" />
+                  by definition looking for work that is not theirs (ADR-0143).
+
+                  이 서버가 작업 흐름을 싣지 않으면 줄 자체를 세우지 않는다
+                  (goal B12). 비활성으로 남겨 두는 선택지도 있었지만, 흐릿한 줄은
+                  "권한이 없다"로 읽히고 그것은 사실이 아니다: 없는 것은 권한이
+                  아니라 기능이다. 주소를 직접 열면 라우트가 이유를 말한다. */}
+              {isSurfaceProvided("workstreams") && (
+                <SidebarRow to="/workstreams" icon={<Milestone className="size-4" />} label="작업 흐름" testId="nav-workstreams" />
+              )}
             </ul>
 
             <SidebarSection
@@ -298,7 +406,7 @@ export function Sidebar({
                     aria-label="새 채널 만들기"
                     title="새 채널 만들기"
                     data-testid="new-channel"
-                    className="flex size-control-sm items-center justify-center rounded-sm text-ink-muted transition-colors hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+                    className="tap-target flex size-control-sm items-center justify-center rounded-sm text-ink-muted transition-colors hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
                   >
                     <Plus className="size-4" />
                   </button>
@@ -360,7 +468,7 @@ export function Sidebar({
                     aria-label="새 다이렉트 메시지 시작"
                     title="새 다이렉트 메시지 (⌘⇧K)"
                     data-testid="new-dm"
-                    className="flex size-control-sm items-center justify-center rounded-sm text-ink-muted transition-colors hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+                    className="tap-target flex size-control-sm items-center justify-center rounded-sm text-ink-muted transition-colors hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
                   >
                     <SquarePen className="size-4" />
                   </Link>
@@ -396,7 +504,7 @@ export function Sidebar({
             Renders nothing at all unless there is something to act on. */}
         <UpdateBadge />
 
-        <div className="flex items-center gap-2 border-t border-line p-2">
+        <div className="safe-area-bottom flex items-center gap-2 border-t border-line p-2">
           <span
             className="flex size-6 shrink-0 items-center justify-center rounded-sm bg-surface-hover text-meta font-semibold"
             aria-hidden="true"
@@ -411,7 +519,7 @@ export function Sidebar({
             aria-label="설정 열기"
             title="설정 (⌘,)"
             data-testid="nav-settings"
-            className="flex size-control-sm items-center justify-center rounded-sm text-ink-muted transition-colors hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+            className="tap-target flex size-control-sm items-center justify-center rounded-sm text-ink-muted transition-colors hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
           >
             <Settings className="size-4" />
           </Link>

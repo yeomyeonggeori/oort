@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { ApiError } from "@/lib/api";
-import { NetworkError } from "@/lib/http";
+import { ApiError } from "@momo/core/lib/api";
+import { NetworkError } from "@momo/core/lib/http";
 import fixtures from "./routingFixtures.json";
 import {
+  AGENT_EDIT_UNSUPPORTED_REASON,
   SEND_UNSUPPORTED_REASON,
   UNSUPPORTED_REASON,
   beginSendProbe,
@@ -14,6 +15,7 @@ import {
   settleSendProbe,
   verdictFromBody,
   verdictFromError,
+  verdictFromAgentEditProbe,
   verdictFromSendProbe,
 } from "./capability";
 
@@ -254,5 +256,40 @@ describe("배운 판정 (learned downgrade)", () => {
     noteRoutingUnsupported(SCOPE);
     resetLearnedRoutingSupport();
     expect(learnedRoutingReason(SCOPE)).toBeNull();
+  });
+});
+
+describe("verdictFromAgentEditProbe", () => {
+  // ②를 네 번째 축에 그대로 적용한 것이다. `GET …/agents/{a}/profile`이 200을
+  // 답한다는 사실은 B5.2 서버에도 해당하므로, 그것으로 편집 표면을 판정하면
+  // 허브가 [프로필 변경 저장]을 열어 두고 404를 돌려주게 된다.
+  it("경로를 모른다는 답만 '없다'로 읽는다", () => {
+    for (const status of [404, 405, 501]) {
+      const verdict = verdictFromAgentEditProbe(new ApiError(status, "nope"));
+      expect(verdict.support).toBe("absent");
+      expect(verdict.reason).toBe(AGENT_EDIT_UNSUPPORTED_REASON);
+    }
+  });
+
+  it("권한·오류·네트워크는 '확인하지 못했다'로 남는다", () => {
+    expect(verdictFromAgentEditProbe(new ApiError(403, "x")).support).toBe("unknown");
+    expect(verdictFromAgentEditProbe(new ApiError(500, "x")).support).toBe("unknown");
+    expect(verdictFromAgentEditProbe(new ApiError(429, "x")).reason).toContain(
+      "요청이 잦아"
+    );
+    const network = verdictFromAgentEditProbe(new NetworkError("timeout", 15_000));
+    expect(network.support).toBe("unknown");
+    expect(network.reason).toContain("15초");
+  });
+
+  it("서버 영어 원문을 사람에게 옮기지 않는다", () => {
+    const verdict = verdictFromAgentEditProbe(new ApiError(500, "internal error"));
+    expect(verdict.reason).not.toContain("internal error");
+  });
+
+  it("확정되지 않은 판정은 ready가 아니다", () => {
+    // 잠금이 기본값이다: 적용되지 않을지도 모르는 저장을 받아 두는 것이 이
+    // 표면에서 가장 나쁜 실패다.
+    expect(verdictFromAgentEditProbe(new Error("boom")).support).toBe("unknown");
   });
 });

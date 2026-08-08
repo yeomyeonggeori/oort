@@ -18,7 +18,7 @@ import {
   type WorkTierPolicy,
   type WorkTierPolicyInput,
   type WorkTierScope,
-} from "./api";
+} from "@momo/core/features/settings/api";
 import {
   autoTargetLabel,
   CLOUD_TARGET,
@@ -36,7 +36,7 @@ import {
   workHostStatus,
   workHostTypeLabel,
   workTierPolicySaveMessage,
-} from "./model";
+} from "@momo/core/features/settings/model";
 import {
   ChoiceRadios,
   CopyButton,
@@ -404,7 +404,7 @@ function RegistryBlock({
             again. The copy names the app and the moment that creates the row. */}
         <EmptyInvite
           headline="등록된 호스트가 아직 없습니다."
-          detail="momo 데스크톱 앱을 이 워크스페이스 계정으로 열면 그 자리가 호스트로 등록되고, 리눅스 서버는 workd 데몬이 켜질 때 스스로 등록합니다."
+          detail="oort 데스크톱 앱을 이 워크스페이스 계정으로 열면 그 자리가 호스트로 등록되고, 리눅스 서버는 workd 데몬이 켜질 때 스스로 등록합니다."
           actions={<RegistryRefreshButton hosts={hosts} offline={offline} />}
           testId="work-hosts-empty"
         />
@@ -908,7 +908,7 @@ function AutoTargetField({
     ...(target === NO_TARGET
       ? [{ id: NO_TARGET, label: "대상 고르기", disabled: true }]
       : []),
-    { id: CLOUD_TARGET, label: "momo Cloud" },
+    { id: CLOUD_TARGET, label: "oort Cloud" },
     ...eligible.map((host) => ({ id: host.id, label: host.displayName })),
   ];
 
@@ -942,7 +942,7 @@ function AutoTargetField({
     : unsaved
       ? "아직 저장되지 않았습니다. 저장 버튼을 눌러야 적용됩니다."
       : eligible.length === 0
-        ? "등록된 호스트 중 고를 수 있는 것이 없어 momo Cloud만 고를 수 있습니다."
+        ? "등록된 호스트 중 고를 수 있는 것이 없어 oort Cloud만 고를 수 있습니다."
         : undefined;
 
   return (

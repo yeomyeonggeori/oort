@@ -8,7 +8,7 @@
 
 ## 1. 제안 요약
 
-momo의 슈퍼앱 엔진 v0를 “기능 목록”이 아니라 다음 한 개의 governed execution loop로 정의한다.
+oort의 슈퍼앱 엔진 v0를 “기능 목록”이 아니라 다음 한 개의 governed execution loop로 정의한다.
 
 ```text
 install/grant
@@ -94,7 +94,7 @@ Codex/Hermes/MCP와 Google·GitHub·Notion 공식 표면을 다시 대조한 결
 
 **hard constraints**
 
-- upstream Codex/OpenAI OAuth token/API key는 momo custody 대상이 아니다.
+- upstream Codex/OpenAI OAuth token/API key는 oort custody 대상이 아니다.
 - Hermes-facing bearer는 connector credential과 분리된 runtime secret이다.
 - Google Workspace token storage는 이 ADR이 Accepted되기 전 구현 금지다.
 - Capability Cache에는 schema/reference/version/policy metadata만 저장하고 source body/excerpt/context summary/credential은 저장하지 않는다.
@@ -106,7 +106,7 @@ Codex/Hermes/MCP와 Google·GitHub·Notion 공식 표면을 다시 대조한 결
 
 - `codex exec` batch/fallback와 local `codex app-server` interactive transport의 역할
 - stdio sidecar lifecycle, version pin/compatibility, reconnect/resume
-- Codex thread/turn/item ID와 momo run/approval/message mapping
+- Codex thread/turn/item ID와 oort run/approval/message mapping
 - command/file/permission approval translation, sandbox/approval-policy separation
 - local auth directory와 process/environment isolation
 - provider usage/cost accounting strategy
@@ -116,7 +116,7 @@ Codex/Hermes/MCP와 Google·GitHub·Notion 공식 표면을 다시 대조한 결
 **권고안**
 
 - user-owned host의 app-server stdio를 interactive Work v0.2 경로로 쓴다.
-- remote WebSocket listener와 momo-managed Codex credential은 out of scope다.
+- remote WebSocket listener와 oort-managed Codex credential은 out of scope다.
 - `codex exec`는 read-only batch/fallback로 유지한다.
 - auth/login/token-refresh, config mutation, raw shell RPC, persistent/session-wide permission grant는 v0에서 relay하지 않는다.
 - native approval은 host instance + protocol version + JSON-RPC request ID + thread/turn/item/approval ID + normalized payload hash + allowed decision set + expiry에 바인딩한다.
@@ -352,7 +352,7 @@ ADR-0115 계약에 따라 signed inbound webhook trigger를 첫 reference ingres
 
 #### Goal
 
-user-owned execution host의 Codex app-server protocol을 momo Work에 연결하는 typed, default-deny adapter를 구현한다.
+user-owned execution host의 Codex app-server protocol을 oort Work에 연결하는 typed, default-deny adapter를 구현한다.
 
 #### Context
 
@@ -362,24 +362,24 @@ user-owned execution host의 Codex app-server protocol을 momo Work에 연결하
 
 - app-server version/capability handshake와 thread/turn/item event adapter가 존재한다.
 - auth/login/token-refresh, config mutation, raw shell, dynamic tool, session-wide grant RPC/event는 default deny하고 허용 method/frame만 typed decode한다.
-- native approval request가 host instance, protocol version, JSON-RPC request ID, thread/turn/item/approval ID, normalized payload hash, allowed decision set, expiry와 momo approval ID에 immutable mapping된다.
+- native approval request가 host instance, protocol version, JSON-RPC request ID, thread/turn/item/approval ID, normalized payload hash, allowed decision set, expiry와 oort approval ID에 immutable mapping된다.
 - v0 decision은 one-request accept/decline/cancel과 요청된 turn-scoped subset만 허용하고 session approval/policy amendment/persistent permission을 거부한다.
 - sidecar restart/reconnect 시 `thread/resume`로 이어지고 duplicate approval/result가 생기지 않는다.
 - sandbox와 approval policy가 별도 evidence로 보존된다. ADR-0114가 허용하지 않은 danger/network/session-wide escalation은 fail closed하며, network policy는 ADR-0111을 어떻게 amend할지 ADR-0114에서 확정한다.
-- upstream Codex/OpenAI OAuth token/API key가 momo env/argv/DB/log/state에 0건임을 negative test로 검증한다.
-- user-owned Codex auth는 OS keyring/runtime home에만 두고 sanitized child env/file descriptor를 사용한다. `MOMO_AGENT_TOKEN`은 Codex child에 상속하지 않고 별도 adapter→momo control-plane call에만 쓴다.
+- upstream Codex/OpenAI OAuth token/API key가 oort env/argv/DB/log/state에 0건임을 negative test로 검증한다.
+- user-owned Codex auth는 OS keyring/runtime home에만 두고 sanitized child env/file descriptor를 사용한다. `MOMO_AGENT_TOKEN`은 Codex child에 상속하지 않고 별도 adapter→oort control-plane call에만 쓴다.
 - local alpha의 same-user host adapter는 명시적인 trusted local execution boundary다. adapter가 auth 파일을 읽지 않도록 method/env/log 경계를 두되 OS 수준 비가독성을 주장하지 않는다. production qualification은 dedicated OS user/sandbox 또는 keyring-backed isolation을 요구한다.
 - usage event를 server-owned pricing/reserve/reconcile에 연결하거나, 지원 불가 시 run 시작 전 명시적 unpriced policy로 차단한다. 성공 비용을 0으로 위장하지 않는다.
 
 #### Out of scope
 
-- momo-managed Codex auth, remote public app-server, ChatGPT Work UI 복제, Windows/Linux host packaging, automatic PR merge.
+- oort-managed Codex auth, remote public app-server, ChatGPT Work UI 복제, Windows/Linux host packaging, automatic PR merge.
 
 ### SE-05B — E-WORK-1 credentialed real runtime qualification
 
 #### Goal
 
-SE-05A를 실제 authenticated Codex와 local momo runtime에서 실행해 native approval/resume/reconnect evidence를 남긴다.
+SE-05A를 실제 authenticated Codex와 local oort runtime에서 실행해 native approval/resume/reconnect evidence를 남긴다.
 
 #### Acceptance
 
@@ -477,7 +477,7 @@ SE-03/04A와 후속 GWS write는 SE-02C의 공통 action envelope/executor를 �
 | P-1 Retrieval/cache | memory p95 ≤500ms / 10k fixture, capability warm p95 ≤25ms, invalidation ≤5s. PERF-HARNESS 정본 전에는 관찰값이다. |
 | P-2 Ingress | MCP local read p95 ≤750ms; webhook verify+enqueue p95 ≤200ms; bounded concurrency/backpressure. PERF-HARNESS 정본 전에는 관찰값이다. |
 | R-0 Mock | deterministic provider/Codex/webhook/GWS mocks, retry/failure/revoke/race coverage. |
-| R-1 / E-WORK-1 Real Codex | authenticated host, native approval→momo decision→resume→diff/result, restart/reconnect evidence. M7 `G-*` release namespace와 구분한다. |
+| R-1 / E-WORK-1 Real Codex | authenticated host, native approval→oort decision→resume→diff/result, restart/reconnect evidence. M7 `G-*` release namespace와 구분한다. |
 | R-2A Real GWS runtime | internal test tenant read sync, cursor resume, revoke/delete, SourceRef permission evidence. |
 | R-2B GWS citation UX | SE-06C 이후 citation open/expired/deleted macOS evidence. |
 | R-3 Local gate | affected Swift packages build/test + runtime-db/runtime-agent 또는 신규 profiles; `runtime-unverified`를 provider 단위로 좁게 표기. |
@@ -515,20 +515,20 @@ Gate 이름은 `E-WORK-1`로 둔다. 이는 엔진 qualification gate이며 M7 `
 
 - E-WORK-1 host는 성재가 로그인한 user-owned macOS 로컬 host로 고정하고, 실행 owner는 engine runtime worker, credential 동작은 성재, evidence 검수/merge owner는 `momo-main`으로 분리한다.
 - 해당 host/worktree에 검증된 Codex CLI exact version을 pin하고 app-server capability handshake 실패 시 interactive 경로를 fail closed한다.
-- 사용자가 Codex에 직접 로그인한다. momo server/DB에는 login token/key를 입력하지 않는다.
+- 사용자가 Codex에 직접 로그인한다. oort server/DB에는 login token/key를 입력하지 않는다.
 - adapter는 local app-server stdio child만 spawn하고 네트워크 listener를 열지 않는다.
-- momo용 per-agent bearer는 mode-0600 runtime env에서만 주입한다.
-- DB/log/process argv/state snapshot에서 forbidden credential pattern이 0건인지 preflight한다. momo bearer는 adapter→momo request에만 주입하고 Codex child environment/file descriptor에는 전달하지 않는다.
+- oort용 per-agent bearer는 mode-0600 runtime env에서만 주입한다.
+- DB/log/process argv/state snapshot에서 forbidden credential pattern이 0건인지 preflight한다. oort bearer는 adapter→oort request에만 주입하고 Codex child environment/file descriptor에는 전달하지 않는다.
 
 ### 8.2 필수 시나리오
 
 1. Read-only Work: source inspection → streamed progress → no write → final result.
-2. File write: Codex native file-change approval → momo card → approve → same item resume → diff/result.
+2. File write: Codex native file-change approval → oort card → approve → same item resume → diff/result.
 3. Command/network permission: native permission request → reject → no side effect and terminal rejected status.
 4. Approval timeout: expiry 뒤 decision 거부, Codex turn cancellation/terminal state 정합.
 5. Duplicate decision: same approval replay가 한 번만 effect.
 6. Sidecar crash: approval 전/후 각각 restart, thread resume, no duplicate result.
-7. momo server restart: queued decision/resume replay and outbox delivery.
+7. oort server restart: queued decision/resume replay and outbox delivery.
 8. Sandbox denial: out-of-scope path/danger escalation fail closed.
 9. Cost ceiling: reserve 초과 시 실행 중단, partial usage reconcile.
 10. Credential negative test: process env/argv, adapter state, DB, audit, message props, exported evidence에 upstream credential 0건.
@@ -536,7 +536,7 @@ Gate 이름은 `E-WORK-1`로 둔다. 이는 엔진 qualification gate이며 M7 `
 ### 8.3 evidence bundle
 
 - pinned Codex/momo commit/version과 sanitized config
-- momo run/approval/message/audit IDs ↔ Codex thread/turn/item IDs mapping
+- oort run/approval/message/audit IDs ↔ Codex thread/turn/item IDs mapping
 - ordered event transcript(credential redacted), approval decision timestamps
 - before/after git diff 및 filesystem side-effect proof
 - usage/cost reserve/reconcile ledger

@@ -1,0 +1,74 @@
+# Build-context excludes for `-f relay/PushRelay/Dockerfile` (BuildKit reads
+# `<dockerfile>.dockerignore` in preference to the context root's file). The
+# context is the repo root — this image needs `relay/PushRelay`,
+# `services/MomoMetrics`, and LICENSE/NOTICE; everything else is weight.
+#
+# It is a superset of the repo-root `.dockerignore`, because when this file
+# exists it REPLACES that one: every secret-bearing pattern there is repeated
+# here. If a builder ignores per-Dockerfile ignore files, the root
+# `.dockerignore` applies instead and the build still succeeds (larger context).
+#
+# Same structure as server-rust/Dockerfile.dockerignore.
+
+# --- never in any image context (mirrors the repo root .dockerignore) --------
+.git
+.env
+.env.*
+**/.env
+**/.env.*
+**/*.secret.env
+**/*.secrets.env
+infra/prod/secrets.env
+infra/prod/*.sops.env
+infra/prod/*.plain.env
+infra/prod/*.decrypted
+infra/prod/age.key
+infra/prod/keys.txt
+local-gate-evidence
+
+# An APNs key must never be reachable from a build context. The relay receives
+# its `.p8` as a runtime mount and this image is built without one; these
+# patterns make "accidentally committed next to the checkout" unbuildable rather
+# than silently baked into a layer (ADR-0120 D1-A).
+**/*.p8
+**/*.p12
+**/*.mobileprovision
+push-relay-keys
+**/*-ed25519-private.pem
+
+# --- build output ------------------------------------------------------------
+target
+**/target
+.build
+**/.build
+**/.swiftpm
+**/DerivedData
+**/node_modules
+**/__pycache__
+
+# --- trees this image never copies -------------------------------------------
+adapters
+clients
+docs
+examples
+fastlane
+infra
+legal
+packages
+research
+scripts
+server
+server-rust
+workers
+relay/OutboxRelay
+services/CloudProviderKit
+services/LinkShort
+services/OutboundHTTPPolicy
+BUILD_TICKETS.md
+ROADMAP.md
+STATUS.md
+schema_v0.sql
+Gemfile
+Makefile
+package.json
+package-lock.json

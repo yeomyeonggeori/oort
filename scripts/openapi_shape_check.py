@@ -13,7 +13,13 @@ Drift policy (stricter than plain OpenAPI semantics, by design):
   * an object schema that declares `properties` without `additionalProperties`
     is CLOSED — undeclared response keys are contract drift;
   * `additionalProperties: true` / `{}` (empty schema) opt out for
-    arbitrary-shape fields (Message.props, ApprovalProjection.payload).
+    arbitrary-shape fields (Message.props, ApprovalProjection.payload);
+  * a **single-branch** `allOf` is unwrapped to its one branch. OpenAPI 3.0
+    cannot hang a `description` on a `$ref`, so `allOf: [ {$ref: …} ]` is the
+    idiom the spec uses for exactly that (PinDelta.pinned, Message.replyTo) —
+    and one branch is definitionally that branch. Multi-branch `allOf` and
+    every other combinator stay refused: merging schemas is where a lax
+    validator quietly stops checking.
 
 Usage:
   openapi_shape_check.py --spec <openapi.json> --manifest <manifest.json>
@@ -33,6 +39,22 @@ import sys
 UUID_RE = re.compile(
     r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
     r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+)
+
+
+#: Keywords that describe a schema without constraining it. Stripping them is
+#: how "an empty schema accepts anything" and "a `$ref` wearing a description"
+#: are told apart from a real constraint.
+ANNOTATION_KEYS = frozenset(
+    {
+        "description",
+        "example",
+        "title",
+        "default",
+        "deprecated",
+        "readOnly",
+        "writeOnly",
+    }
 )
 
 
@@ -82,6 +104,22 @@ def validate(spec, schema, value, path, errors):
     if not isinstance(schema, dict):
         raise SpecError(f"schema at {path} is not an object")
 
+    # `allOf: [ X ]` with nothing beside it but annotations IS `X` — OpenAPI 3.0
+    # offers no other way to attach a description to a `$ref`, and the spec uses
+    # that idiom twice. Unwrapping validates strictly MORE than refusing does:
+    # today such a field makes the whole sample a hard SpecError, so nothing
+    # about it is checked at all. A second branch, or a sibling constraint the
+    # unwrap would silently drop (`nullable`, `type`, …), still raises — merging
+    # is the part a validator must not guess at.
+    if (
+        isinstance(schema.get("allOf"), list)
+        and len(schema["allOf"]) == 1
+        and not (set(schema) - {"allOf"} - ANNOTATION_KEYS)
+    ):
+        schema = resolve_ref(spec, schema["allOf"][0])
+        if not isinstance(schema, dict):
+            raise SpecError(f"schema at {path} is not an object")
+
     for combinator in ("oneOf", "anyOf", "allOf", "not"):
         if combinator in schema:
             raise SpecError(
@@ -90,8 +128,7 @@ def validate(spec, schema, value, path, errors):
             )
 
     # Empty schema ({}) accepts anything (used for arbitrary payloads).
-    meaningful = set(schema) - {"description", "example", "title", "default",
-                                "deprecated", "readOnly", "writeOnly"}
+    meaningful = set(schema) - ANNOTATION_KEYS
     if not meaningful:
         return
 
@@ -241,6 +278,15 @@ def main():
         "sample is stale and fails the gate so the list can only shrink",
     )
     parser.add_argument(
+        "--sampled-elsewhere",
+        help="text file of 'METHOD /path' spec operations whose 정본 has moved "
+        "to another server and are sampled by a DIFFERENT pass "
+        "(scripts/openapi_sampled_on_rust.txt); exempt from operation coverage "
+        "here because this pass is no longer the authority on their shape. "
+        "Unlike --known-unsampled (debt, may only shrink) this list may only "
+        "GROW — it is how the second pass encroaches on the first (#1042).",
+    )
+    parser.add_argument(
         "--server-route-manifest",
         help="JSON {operations:[{method,path}]} registered by the server; fail when one is absent from the spec",
     )
@@ -312,15 +358,35 @@ def main():
 
     if args.require_operation_coverage:
         sampled = {(s["method"].lower(), s["path"]) for s in samples}
-        known_unsampled = set()
-        if args.known_unsampled:
-            with open(args.known_unsampled, encoding="utf-8") as handle:
+
+        def load_operation_list(path):
+            ops = set()
+            if not path:
+                return ops
+            with open(path, encoding="utf-8") as handle:
                 for line in handle:
-                    line = line.strip()
-                    if not line or line.startswith("#"):
+                    line = line.split("#", 1)[0].strip()
+                    if not line:
                         continue
-                    method, _, path = line.partition(" ")
-                    known_unsampled.add((method.lower(), path.strip()))
+                    method, _, op_path = line.partition(" ")
+                    ops.add((method.lower(), op_path.strip()))
+            return ops
+
+        known_unsampled = load_operation_list(args.known_unsampled)
+        # 다른 패스가 소유하는 연산. 부채(known_unsampled)와 의미가 다르다:
+        # 저쪽은 "아무도 안 봤다", 이쪽은 "여기 말고 저기서 본다".
+        sampled_elsewhere = load_operation_list(args.sampled_elsewhere)
+        conflicted = sorted(known_unsampled & sampled_elsewhere)
+        if conflicted:
+            failures += 1
+            print(
+                "[openapi-shape] FAIL an operation is both named debt and "
+                "sampled-elsewhere — the two lists mean opposite things and "
+                "cannot overlap:",
+                file=sys.stderr,
+            )
+            for method, path in conflicted:
+                print(f"    - {method.upper()} {path}", file=sys.stderr)
         stale = sorted(known_unsampled & sampled)
         if stale:
             failures += 1
@@ -332,7 +398,9 @@ def main():
             )
             for method, path in stale:
                 print(f"    - {method.upper()} {path}", file=sys.stderr)
-        uncovered = sorted(spec_operations(spec) - sampled - known_unsampled)
+        uncovered = sorted(
+            spec_operations(spec) - sampled - known_unsampled - sampled_elsewhere
+        )
         if uncovered:
             failures += 1
             print(
@@ -343,15 +411,22 @@ def main():
             for method, path in uncovered:
                 print(f"    - {method.upper()} {path}", file=sys.stderr)
         else:
-            suffix = (
-                f", {len(known_unsampled)} named debt entries "
-                f"(scripts/openapi_known_unsampled.txt)"
-                if known_unsampled else ""
-            )
+            parts = []
+            if known_unsampled:
+                parts.append(
+                    f"{len(known_unsampled)} named debt entries "
+                    f"(scripts/openapi_known_unsampled.txt)"
+                )
+            if sampled_elsewhere:
+                parts.append(
+                    f"{len(sampled_elsewhere)} operations owned by another pass "
+                    f"(scripts/openapi_sampled_on_rust.txt)"
+                )
+            suffix = (", " + ", ".join(parts)) if parts else ""
+            covered = spec_operations(spec) - known_unsampled - sampled_elsewhere
             print(
                 f"[openapi-shape] PASS operation coverage "
-                f"({len(spec_operations(spec) - known_unsampled)} operations "
-                f"sampled{suffix})"
+                f"({len(covered)} operations sampled{suffix})"
             )
 
     total = len(samples)

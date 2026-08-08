@@ -1,11 +1,11 @@
 ---
 name: momo-design-taste
-description: Anti-slop design taste for the momo macOS SwiftUI client. Use WHENEVER creating or modifying SwiftUI views, components, themes, or user-visible strings in clients/macOS or clients/Core. Encodes MomoDS token rules, native-macOS AI-tells bans, and a mechanical pre-flight check. Adapted from Leonxlnx/taste-skill (MIT) + anthropics frontend-design + Apple HIG for native macOS product UI.
+description: Anti-slop design taste for the oort macOS SwiftUI client. Use WHENEVER creating or modifying SwiftUI views, components, themes, or user-visible strings in clients/macOS or clients/Core. Encodes MomoDS token rules, native-macOS AI-tells bans, and a mechanical pre-flight check. Adapted from Leonxlnx/taste-skill (MIT) + anthropics frontend-design + Apple HIG for native macOS product UI.
 ---
 
-# momo Design Taste (macOS / SwiftUI)
+# oort Design Taste (macOS / SwiftUI)
 
-momo is a native macOS messenger where AI agents are first-class members. The bar:
+oort is a native macOS messenger where AI agents are first-class members. The bar:
 **it must feel like software Apple could have shipped, with the information density of Slack and the calm confidence of Codex.** Web-app patterns transplanted into a Mac window are the #1 slop signature to avoid.
 
 ## 0. Design Read (mandatory, before any code)
@@ -14,7 +14,7 @@ Output one line before writing UI code:
 
 > Reading this as: <surface: message timeline / composer / sidebar / approval inbox / settings / onboarding> for <internal team users on macOS>, HIG-first, density <N>/10, motion <M>/10.
 
-Defaults for momo: **density 6–7** (Mac users expect information density; this is a work tool, not a landing page), **motion 2–3** (motion is feedback, never theater).
+Defaults for oort: **density 6–7** (Mac users expect information density; this is a work tool, not a landing page), **motion 2–3** (motion is feedback, never theater).
 
 Do NOT default to: purple/blue AI gradients, glassy hero cards, three-equal-card rows, oversized rounded-rect "web cards" inside lists, centered empty states with illustrations. These are LLM defaults, not choices.
 
@@ -72,7 +72,7 @@ Every custom-drawn control requires a one-line justification comment stating wha
 | Pure `#000000` / `#FFFFFF` backgrounds | System background colors (they adapt to appearance/contrast settings) |
 | Toast/snackbar stacks (web pattern) | Inline banners in context, or system notifications |
 
-## 4. Agent-native surfaces (momo-specific)
+## 4. Agent-native surfaces (oort-specific)
 
 - Agent messages share the human message anatomy (same grid, same typography); the agent identity is expressed ONLY through the `agent.accent` token on avatar/badge, never a different bubble shape or background tint on the whole row.
 - Tool-call / approval / diff / cost cards are **structured, calm, and dense**: title row (SF Symbol + name + status chip) → typed fields → disclosure for raw payload. Status lifecycle chips (queued/thinking/streaming/awaiting-approval/done/error) use the token status colors, text-first, no pulsing.

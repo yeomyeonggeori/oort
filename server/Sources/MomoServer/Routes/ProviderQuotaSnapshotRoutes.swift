@@ -9,10 +9,10 @@ import PostgresNIO
 ///   GET  /v1/provider/quota-snapshots   (any active workspace member)
 ///
 /// ADR-0135 D2-A moves the *probe* to the side that already holds the provider
-/// credential (the hermes adapter / provider host). momo therefore never calls a
+/// credential (the hermes adapter / provider host). oort therefore never calls a
 /// provider quota API; it accepts the resulting numbers and stores the latest
 /// snapshot per (provider_ref, window). That keeps ADR-0004 intact: no provider
-/// token, OAuth code, or raw header ever enters momo.
+/// token, OAuth code, or raw header ever enters oort.
 ///
 /// Authorization reuses the existing adapter/gateway credential convention
 /// (ADR-0101 phase 1 + AgentGatewayRoutes): the caller presents an **agent
@@ -32,7 +32,7 @@ import PostgresNIO
 ///      a 400;
 ///   2. credential-shaped screening of every key AND string value, reusing
 ///      `WorkToolProfileRoutes.containsCredentialShape` plus the provider-key
-///      prefixes that shape check cannot see (`sk-`, `ghp_`, JWT `eyJ`, the momo
+///      prefixes that shape check cannot see (`sk-`, `ghp_`, JWT `eyJ`, the oort
 ///      agent bearer prefix, long high-entropy blobs);
 ///   3. type policing — `remainingRatio` must be a JSON number in 0...1 and the
 ///      two timestamps must be ISO8601; a string, bool, array, or out-of-range
@@ -150,7 +150,7 @@ struct ProviderQuotaSnapshotRoutes: Sendable {
     }
 
     /// Canonical field -> accepted spellings. ADR-0135 writes the contract in
-    /// snake_case while every other momo route is camelCase, so both spellings
+    /// snake_case while every other oort route is camelCase, so both spellings
     /// are accepted for the same five fields and nothing else.
     static let fieldAliases: [String: Set<String>] = [
         "providerRef": ["providerRef", "provider_ref"],

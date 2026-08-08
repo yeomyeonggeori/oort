@@ -22,7 +22,7 @@ import NIOCore
 //     serialization, ASCII-lowercased) and must equal an allowlist entry.
 //     `CORSConfig` refuses wildcard and `null` entries at parse time, so
 //     `Access-Control-Allow-Origin: *` can never be produced.
-//   * NO CREDENTIALS. momo carries its session in the `Authorization` bearer
+//   * NO CREDENTIALS. oort carries its session in the `Authorization` bearer
 //     header and sets no cookies, so `Access-Control-Allow-Credentials` is never
 //     sent — clients must use `credentials: "omit"` (the fetch default) and
 //     attach the token header themselves. This keeps the dangerous
@@ -66,7 +66,7 @@ struct OriginAllowlistCORSMiddleware: RouterMiddleware {
         .accept, .authorization, .contentType, .origin,
     ]
 
-    /// Methods the momo REST surface actually routes.
+    /// Methods the oort REST surface actually routes.
     static let allowedMethods: [HTTPRequest.Method] = [
         .get, .post, .put, .patch, .delete, .options,
     ]
@@ -94,7 +94,7 @@ struct OriginAllowlistCORSMiddleware: RouterMiddleware {
     /// The single gate decision, split out so it is unit-testable without a
     /// live `Channel`/`RequestContext`: returns the normalized origin when the
     /// request must receive CORS headers, nil when the middleware has to be a
-    /// no-op. `nil` covers "no Origin header" (every native momo client) and
+    /// no-op. `nil` covers "no Origin header" (every native oort client) and
     /// "origin not on the allowlist" alike.
     static func matchedOrigin(
         originHeader: String?,
@@ -117,7 +117,7 @@ struct OriginAllowlistCORSMiddleware: RouterMiddleware {
             originHeader: request.headers[.origin],
             allowedOrigins: allowedOrigins
         ) != nil else {
-            // No Origin (every native momo client), or an origin we do not
+            // No Origin (every native oort client), or an origin we do not
             // trust: behave exactly as if this middleware were absent.
             return try await next(request, context)
         }

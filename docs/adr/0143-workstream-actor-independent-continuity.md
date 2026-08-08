@@ -30,11 +30,11 @@
 
 - Workstream을 보고 이어받을 수 있는 자 = **앵커 스레드가 속한 채널의 멤버**(RLS FORCE — 에이전트도 member라 같은 게이트). Workstream 단위 명시 할당은 P2.
 - **거부는 강제다**: 비멤버의 재개는 403(실제 REST 로그인 검증기로 잠금). 정보성 경고 방식은 기각 — 강제 없는 경계는 깨진다는 것이 이 레포의 반복 실측(SQL 지름길 픽스처 7회)이다.
-- **WIP 비대칭 명문화**: momo 원장이 노출하는 것은 WIP branch 이름·base commit·checkpoint 메타까지다. git 원격의 실제 접근 권한은 사용자 소유이며 momo 권한 밖 — ADR-0141의 WIP push(`momo/wip/<session-id>`)를 가져올 수 있는지는 git 원격이 판정한다.
+- **WIP 비대칭 명문화**: oort 원장이 노출하는 것은 WIP branch 이름·base commit·checkpoint 메타까지다. git 원격의 실제 접근 권한은 사용자 소유이며 oort 권한 밖 — ADR-0141의 WIP push(`momo/wip/<session-id>`)를 가져올 수 있는지는 git 원격이 판정한다.
 
 ### D4. GPT 문서에서 채택하지 않는 것 (기각 명시)
 
-- **local-first sync 확장**: momo 하드 불변식(Postgres=SoT·단일 쓰기경로·Centrifugo 전송전용)과 정면 충돌. "offline-tolerant client + server-authoritative ledger"로 재해석하고 SoT는 유지. **기각.**
+- **local-first sync 확장**: oort 하드 불변식(Postgres=SoT·단일 쓰기경로·Centrifugo 전송전용)과 정면 충돌. "offline-tolerant client + server-authoritative ledger"로 재해석하고 SoT는 유지. **기각.**
 - **Project 계층 · Request 타입 · RunAttempt 분리 · 우선순위 5단 Queue와 선점 · Workstream별 동시 실행 한도 · 의미 유사도 검색**: 현 단계 과도(④). 필요해지는 시점에 개별 재론.
 - **Task 계층**: 첫 슬라이스에서 Task≈work_session 1:1. 병렬 Subtask·Source Lane·Integration이 필요해질 때 분리(P2) — 그때도 워크트리 병렬은 이 레포 개발 파이프라인이 이미 실증한 문법을 따른다.
 
@@ -48,7 +48,7 @@
 
 ## Consequences
 
-- (+) "A 시작→Agent 이어받기→C 마무리"가 표현 가능해진다 — momo의 agent-native 정체성(에이전트=member)이 작업 연속성까지 확장.
+- (+) "A 시작→Agent 이어받기→C 마무리"가 표현 가능해진다 — oort의 agent-native 정체성(에이전트=member)이 작업 연속성까지 확장.
 - (+) 마이그레이션 최소: member_id 의미 변경 없음, 기존 재개 문법 재사용, 새 권한 체계 없음.
 - (−) 스레드:Workstream 기본 1:1의 예외(한 스레드에서 두 목표)는 P2로 미룸 — 그때까지는 스레드를 나누는 것이 답.
 - (−) 재개 자격 확장은 새 보안 표면: 다른 사람의 WIP 메타가 채널 멤버에게 보인다. D3의 경계(메타까지만)와 검증기로 잠근다.

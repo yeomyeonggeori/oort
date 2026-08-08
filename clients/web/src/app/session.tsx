@@ -3,16 +3,19 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useRef,
   useState,
   useSyncExternalStore,
 } from "react";
-import { logout, restoreSession, type LoginResponse } from "@/lib/api";
+import { BOOT_RESTORE_BUDGET_MS } from "@/app/boot";
+import { logout, restoreSession, type LoginResponse } from "@momo/core/lib/api";
 import {
   clearSession,
   getAuthExpired,
   hasPersistedSession,
   subscribeSession,
 } from "@/lib/session";
+import { clearAllDrafts } from "@/features/chat/draftStore";
 import type { RealtimeHandle, RealtimeStatus } from "@/lib/realtime";
 
 /**
@@ -68,11 +71,38 @@ export function useRestoredSession(): SessionLifecycle {
     hasPersistedSession() ? "restoring" : "anonymous"
   );
 
+  // DESK-1: whether there is something to resume is a LIVE question, not a
+  // one-shot read. Boot no longer blocks the first paint on the desktop keychain
+  // (main.tsx), so the answer can arrive after this hook has already mounted and
+  // said "anonymous" — `hydrate()` notifies the session store when it does.
+  const resumable = useSyncExternalStore(subscribeSession, hasPersistedSession);
+
+  // One resume attempt per app lifetime. Without this the effect would re-fire
+  // on the store notification that a fresh sign-in emits, and rotate a token
+  // that was issued one millisecond ago.
+  const attempted = useRef(false);
+
   useEffect(() => {
-    if (!hasPersistedSession()) return;
+    if (attempted.current || !resumable) return;
+    attempted.current = true;
     let cancelled = false;
+    let settled = false;
+    setStatus("restoring");
+
+    // DESK-1: the screen is not allowed to wait for this. `restoreSession()` is
+    // one `/v1/auth/refresh` rotation bounded only by REQUEST_TIMEOUT_MS
+    // (15 000 ms), and against an unreachable or unresolvable host it spends
+    // every one of them — which is the second half of the ~30 s the packaged app
+    // was showing. When the budget elapses the connect screen takes over; the
+    // rotation is NOT cancelled, so one that lands late still signs the person
+    // in rather than making them retype a password they never needed to.
+    const release = setTimeout(() => {
+      if (!cancelled && !settled) setStatus("anonymous");
+    }, BOOT_RESTORE_BUDGET_MS);
+
     restoreSession()
       .then((restored) => {
+        settled = true;
         if (cancelled) return;
         setSession(restored);
         setStatus(restored ? "signed-in" : "anonymous");
@@ -81,12 +111,16 @@ export function useRestoredSession(): SessionLifecycle {
         // restoreSession already wiped local state on a dead token; anything
         // left here is a transport failure, and the login form is the honest
         // next step rather than an indefinite placeholder.
+        settled = true;
         if (!cancelled) setStatus("anonymous");
-      });
+      })
+      .finally(() => clearTimeout(release));
+
     return () => {
       cancelled = true;
+      clearTimeout(release);
     };
-  }, []);
+  }, [resumable]);
 
   // A 401 that survived a rotation means the refresh token is gone for good.
   // Returning to the login form is the honest response; leaving the shell up to
@@ -100,6 +134,24 @@ export function useRestoredSession(): SessionLifecycle {
   }, [expired]);
 
   const signIn = useCallback((next: LoginResponse) => {
+    // Claim the one resume attempt BEFORE the store notification lands.
+    //
+    // The guard above stops the effect from firing twice; it does not stop it
+    // from firing the FIRST time on a fresh sign-in. Booting without a session
+    // leaves `resumable` false, so nothing is claimed — and then `login()`
+    // writes the session, the store notifies, `resumable` flips true, and the
+    // effect rotates the refresh token that was issued a millisecond earlier.
+    //
+    // That rotation is not free. Refresh tokens are single-use (api.ts's own
+    // comment: "a second concurrent call would present an already-revoked token
+    // and end the session"), so signing in was opening a window where a second
+    // tab could kill the session it had just created. It also made every login
+    // pay a round trip whose only possible outcome is the state we already had.
+    //
+    // Found by a capture-harness failure: the harness stubs `/v1/auth/login` but
+    // not `/v1/auth/refresh`, so this hidden rotation escaped to a real backend,
+    // came back 401, and bounced the app to the login card mid-run.
+    attempted.current = true;
     setSession(next);
     setStatus("signed-in");
   }, []);
@@ -109,6 +161,10 @@ export function useRestoredSession(): SessionLifecycle {
     // and unconditional, so the user is out of the session before the network
     // call resolves, and a failed revoke cannot pin them inside the app.
     void logout();
+    // 초안도 함께 지운다 (U4-f). 로그아웃은 「이 기기에서 내 흔적을 지운다」이고,
+    // 쓰다 만 글은 보낸 메시지보다 사적이다 — 세션 기록과 같은 저장소에 사는 이상
+    // 같은 순간에 사라져야 한다(`draftStore.ts` 머리말의 비용 항목).
+    clearAllDrafts();
     setSession(null);
     setStatus("anonymous");
   }, []);

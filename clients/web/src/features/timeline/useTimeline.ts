@@ -1,13 +1,24 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  deleteMessage as deleteMessageRequest,
+  editMessage as editMessageRequest,
+  fetchChannelPins,
   fetchMessages,
+  fetchReactionSnapshot,
   sendMessage,
+  setPin,
+  setReaction,
   type Message,
-  type RequestRouting,
-} from "@/lib/api";
-import { payloadToMessage, type RealtimeHandle } from "@/lib/realtime";
+  type SendMessageOptions,
+} from "@momo/core/lib/api";
+import {
+  payloadToMessage,
+  pinnedPayloadToWire,
+  type RealtimeHandle,
+} from "@/lib/realtime";
 import {
   addPending,
+  applyTombstone,
   emptyTimeline,
   failPending,
   reconcileMessages,
@@ -17,7 +28,26 @@ import {
   type PendingMessage,
   type RecoveryMarker,
   type TimelineState,
-} from "./model";
+} from "@momo/core/features/timeline/model";
+import {
+  applyReactionDelta,
+  clearMessageReactions,
+  emptyReactions,
+  normalizeReactionSnapshot,
+  toggleDirection,
+  type ReactionMap,
+} from "@momo/core/features/timeline/reactions";
+import {
+  applyPinned,
+  emptyPins,
+  isPinned,
+  normalizePinList,
+  removePin,
+  type PinListStatus,
+  type PinMap,
+} from "@momo/core/features/timeline/pins";
+import { endedStreamRunIds } from "@momo/core/features/timeline/streamStop";
+import { seedEndedRuns } from "@/features/agents/endedRuns";
 
 const HEAD_LIMIT = 50;
 const PAGE_LIMIT = 50;
@@ -40,17 +70,43 @@ export interface UseTimelineResult {
   pending: PendingMessage[];
   /**
    * The one send path: optimistic echo now, server seq when it lands.
-   * `routing` is the composer's per-request override (ADR-0134 D1); it rides
-   * the pending row so a retry re-sends the choice the person actually made
-   * rather than quietly falling back to the inherited value.
+   * `routing` is the composer's per-request override (ADR-0134 D1) and
+   * `replyToId` is ADR-0148's quote binding; both ride the pending row so a
+   * retry re-sends what the person actually chose rather than quietly falling
+   * back to the inherited value or dropping the quote.
    */
-  send: (body: string, routing?: RequestRouting) => Promise<void>;
+  send: (body: string, options?: SendMessageOptions) => Promise<void>;
   /** Re-run a failed echo with the SAME idempotency key. */
   resend: (clientMsgId: string) => Promise<void>;
   loadOlder: () => Promise<void>;
   reload: () => void;
   loadingOlder: boolean;
   reachedStart: boolean;
+  /** B11 — `message id -> emoji -> member ids`, case-folded on ingest. */
+  reactions: ReactionMap;
+  /**
+   * Toggle my reaction on one message. Optimistic, and reverted on failure —
+   * the caller surfaces the refusal as a sentence.
+   */
+  toggleReaction: (message: Message, emoji: string) => Promise<void>;
+  /** 이슈 #1112 — `message id -> the pin`, case-folded on ingest. */
+  pins: PinMap;
+  /**
+   * 이슈 #1146 M2 — where the cold read of `pins` stands. An empty map means
+   * two different things and only this says which.
+   */
+  pinsStatus: PinListStatus;
+  /** Read the channel's pins again. The retry behind the failure sentence. */
+  reloadPins: () => void;
+  /**
+   * Pin or unpin one message. Optimistic only in the unpin direction — see the
+   * implementation for why a pin waits for the server.
+   */
+  togglePin: (message: Message) => Promise<void>;
+  /** Rewrite my own message. The server's row replaces the local one. */
+  editMessage: (message: Message, body: string) => Promise<void>;
+  /** Soft-delete my own message. The tombstone replaces the local row. */
+  deleteMessage: (message: Message) => Promise<void>;
 }
 
 /**
@@ -80,6 +136,62 @@ export function useTimeline(
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [reachedStart, setReachedStart] = useState(false);
   const [reloadNonce, setReloadNonce] = useState(0);
+  // B11. Kept beside the messages rather than inside them: a reaction changes
+  // far more often than the message it annotates, and folding it into the row
+  // would make every 👍 replace a `Message` object the virtualiser then has to
+  // re-render in full.
+  const [reactions, setReactions] = useState<ReactionMap>(emptyReactions);
+  // Read by the optimistic toggle, which must know the current direction
+  // without depending on the state it is about to change (that dependency would
+  // rebuild every row's click handler on every reaction in the channel).
+  const reactionsRef = useRef<ReactionMap>(reactions);
+  // 이슈 #1112. Same shape and the same reason as `reactions` above: a pin is an
+  // annotation on a message, not a field of it.
+  const [pins, setPins] = useState<PinMap>(emptyPins);
+  const pinsRef = useRef<PinMap>(pins);
+  const applyPins = useCallback((next: PinMap) => {
+    pinsRef.current = next;
+    setPins(next);
+  }, []);
+  // 이슈 #1146 M2. The map alone cannot tell "nobody pinned anything" from
+  // "we never found out", and the header list was printing the first sentence
+  // for both.
+  const [pinsStatus, setPinsStatus] = useState<PinListStatus>("loading");
+  // Which read owns the answer. A channel switch and a retry both bump it, so a
+  // slow reply from the channel you just left cannot write over the one you are
+  // in — the same hazard the `cancelled` flag guards in the effect, held in a
+  // ref because the retry is called from outside that effect's closure.
+  const pinReadRef = useRef(0);
+  const loadPins = useCallback(
+    (channel: string) => {
+      const read = ++pinReadRef.current;
+      setPinsStatus("loading");
+      fetchChannelPins(workspaceId, channel)
+        .then((wire) => {
+          if (pinReadRef.current !== read) return;
+          // Merge with the live map on the same side as the reaction snapshot:
+          // a `message.pinned` that arrived while this was in flight wins, since
+          // it is strictly newer than the read it raced.
+          applyPins({ ...normalizePinList(wire), ...pinsRef.current });
+          setPinsStatus("ready");
+        })
+        .catch(() => {
+          if (pinReadRef.current !== read) return;
+          // The channel stays fully usable — that judgement has not changed.
+          // What changes is that the list now says so instead of claiming the
+          // channel has no pins.
+          setPinsStatus("failed");
+        });
+    },
+    [workspaceId, applyPins]
+  );
+  const applyReaction = useCallback(
+    (change: Parameters<typeof applyReactionDelta>[1]) => {
+      reactionsRef.current = applyReactionDelta(reactionsRef.current, change);
+      setReactions(reactionsRef.current);
+    },
+    []
+  );
 
   // Authoritative newest-seq cursor, updated at merge time rather than at
   // render time, so a resubscribe firing between renders still reads truth.
@@ -94,6 +206,12 @@ export function useTimeline(
         newestSeqRef.current = message.seq;
       }
     }
+    // #1166 — 종결 기록의 씨앗을 **머지 자리에서** 심는다. 페이지를 긷는 곳은
+    // 셋(첫 화면·위로 더 읽기·재연결 백필)이고, 그 셋이 전부 이 문을 지난다.
+    // 호출부마다 심게 두면 언젠가 한 곳이 빠지고, 그 한 곳으로 들어온 반쪽 답만
+    // 조용히 완결 행세를 한다. 실시간으로 온 행은 `runEnded` 를 달고 오지
+    // 않으므로 여기서 아무것도 내놓지 않는다.
+    seedEndedRuns(endedStreamRunIds(batch));
     setState((s) => reconcileMessages(s, batch));
   }, []);
 
@@ -133,7 +251,12 @@ export function useTimeline(
           row.channelId,
           row.clientMsgId,
           row.body,
-          row.routing
+          {
+            ...(row.routing ? { routing: row.routing } : {}),
+            ...(row.replyToId === undefined
+              ? {}
+              : { replyToId: row.replyToId }),
+          }
         );
         // The response IS the committed server echo (seq-authoritative), so
         // merging it is not optimistic rendering: it is the same reconcile the
@@ -151,7 +274,7 @@ export function useTimeline(
   );
 
   const send = useCallback(
-    async (body: string, routing?: RequestRouting) => {
+    async (body: string, options?: SendMessageOptions) => {
       const channel = channelId;
       if (channel === null || body === "") return;
       const row: PendingMessage = {
@@ -159,7 +282,12 @@ export function useTimeline(
         channelId: channel,
         authorMemberId,
         body,
-        ...(routing ? { routing } : {}),
+        ...(options?.routing ? { routing: options.routing } : {}),
+        // ADR-0148 - the echo renders its own quote block from this, and a retry
+        // must re-send the SAME request under the same idempotency key.
+        ...(options?.replyToId === undefined
+          ? {}
+          : { replyToId: options.replyToId }),
         // Local clock, used only for grouping and the time label on a row that
         // has not been ordered yet. Ordering still waits for seq.
         createdAtMs: Date.now(),
@@ -232,6 +360,9 @@ export function useTimeline(
     setReachedStart(false);
     setRecoveryMarkers([]);
     setResume({ lastRecovered: null, lastBackfillCount: 0, resubscribeCount: 0 });
+    reactionsRef.current = emptyReactions();
+    setReactions(reactionsRef.current);
+    applyPins(emptyPins());
 
     // 1) REST head (descending page; merge is order-agnostic).
     fetchMessages(workspaceId, channelId, { limit: HEAD_LIMIT })
@@ -244,6 +375,30 @@ export function useTimeline(
       .catch(() => {
         if (!cancelled) setStatus("error");
       });
+
+    // 1b) The channel's reaction map, in parallel and deliberately not fatal.
+    // A channel whose messages loaded but whose chips did not is a channel you
+    // can still read and still send in; turning that into the error state would
+    // trade the whole surface for an annotation.
+    fetchReactionSnapshot(workspaceId, channelId)
+      .then((wire) => {
+        if (cancelled) return;
+        // Merge rather than replace: a reaction that arrived on the realtime
+        // rail while this request was in flight would otherwise be erased by an
+        // older snapshot.
+        const cold = normalizeReactionSnapshot(wire);
+        reactionsRef.current = { ...cold, ...reactionsRef.current };
+        setReactions(reactionsRef.current);
+      })
+      .catch(() => {
+        /* chips stay empty; the channel is still fully usable */
+      });
+
+    // 1c) The channel's pins, on the same terms as the snapshot above: in
+    // parallel, and not fatal. A header list that failed to load is an absent
+    // accessory; a channel that refuses to open because of one is a broken app.
+    // 이슈 #1146 M2 — "absent" is now something the list can say out loud.
+    loadPins(channelId);
 
     // 2) Realtime rail with resume healing.
     const unsub = realtime.subscribeChannel(workspaceId, channelId, {
@@ -276,6 +431,49 @@ export function useTimeline(
         if (cancelled) return;
         applyBatch([payloadToMessage(event.payload)]);
       },
+      // B11 — a tombstone marks the row it names in place. It cannot go through
+      // `applyBatch`: the frame carries only an id (by design, so a delete
+      // never re-broadcasts the body it erased), and the row must keep its seq.
+      onMessageDeleted: (event) => {
+        if (cancelled) return;
+        const messageId = event.payload.message_id;
+        setState((s) => applyTombstone(s, messageId, event.ts));
+        // The server deleted the rows with the message; drop the chips so they
+        // do not report counts for a body nobody can read.
+        reactionsRef.current = clearMessageReactions(
+          reactionsRef.current,
+          messageId
+        );
+        setReactions(reactionsRef.current);
+        // …and its pin, which the server swept with the message. No
+        // `message.unpinned` is published for a delete, so this is the only
+        // place the header list learns about it.
+        applyPins(removePin(pinsRef.current, messageId));
+      },
+      onReaction: (event) => {
+        if (cancelled) return;
+        // Idempotent both ways, which is what lets the echo of my own optimistic
+        // click land harmlessly on top of it.
+        applyReaction({
+          messageId: event.payload.message_id,
+          memberId: event.payload.member_id,
+          emoji: event.payload.emoji,
+          action: event.payload.action,
+        });
+      },
+      // 이슈 #1112 — the header list stays live off these two frames alone. The
+      // `message.pinned` payload IS the list entry, so nothing here re-reads
+      // the list to find out what was pinned.
+      onPin: (event) => {
+        if (cancelled) return;
+        if (event.type === "message.pinned") {
+          applyPins(
+            applyPinned(pinsRef.current, pinnedPayloadToWire(event.payload))
+          );
+        } else {
+          applyPins(removePin(pinsRef.current, event.payload.message_id));
+        }
+      },
     });
 
     return () => {
@@ -288,10 +486,26 @@ export function useTimeline(
     channelId,
     backfillAfter,
     applyBatch,
+    applyReaction,
+    applyPins,
+    loadPins,
     addMarker,
     updatePending,
     reloadNonce,
   ]);
+
+  /**
+   * Read the list again (이슈 #1146 M2).
+   *
+   * Deliberately *not* `reload()`. That one re-runs the whole channel — history,
+   * rail, subscription — and the person pressing this button is answering one
+   * sentence about one accessory. Rebuilding the conversation under them to
+   * refill a header list is the kind of over-reaction that loses their scroll
+   * position.
+   */
+  const reloadPins = useCallback(() => {
+    if (channelId) loadPins(channelId);
+  }, [channelId, loadPins]);
 
   const loadOlder = useCallback(async () => {
     if (!channelId || loadingOlder || reachedStart) return;
@@ -312,6 +526,112 @@ export function useTimeline(
 
   const reload = useCallback(() => setReloadNonce((n) => n + 1), []);
 
+  // ---- message actions (B11) ------------------------------------------------
+
+  /**
+   * Toggle my reaction, optimistically.
+   *
+   * The direction is *derived* from the current map rather than passed in, so
+   * the local update and the request can never disagree about which way the
+   * toggle was going — a mismatch there is how a chip ends up showing the
+   * opposite of what the server stored.
+   *
+   * On failure the optimistic change is reverted with its own inverse, which is
+   * safe because `applyReactionDelta` is idempotent: if the realtime echo of a
+   * *successful* twin already landed, the revert is a no-op rather than a second
+   * wrong write.
+   */
+  const toggleReaction = useCallback(
+    async (message: Message, emoji: string) => {
+      const action = toggleDirection(
+        reactionsRef.current,
+        message.id,
+        authorMemberId,
+        emoji
+      );
+      const change = {
+        messageId: message.id,
+        memberId: authorMemberId,
+        emoji,
+        action,
+      };
+      applyReaction(change);
+      try {
+        await setReaction(workspaceId, message.id, emoji, action);
+      } catch (error) {
+        applyReaction({
+          ...change,
+          action: action === "added" ? "removed" : "added",
+        });
+        throw error;
+      }
+    },
+    [workspaceId, authorMemberId, applyReaction]
+  );
+
+  /**
+   * Rewrite my own message. **Not optimistic**, unlike a reaction: the server
+   * stamps `edited_at` and decides the resulting `state`, and showing the new
+   * text before it is stored would leave the row claiming an edit that a 403
+   * then took back. The round trip here is one request, and the editor says
+   * "저장 중…" while it runs.
+   */
+  const editMessage = useCallback(
+    async (message: Message, body: string) => {
+      const updated = await editMessageRequest(workspaceId, message.id, body);
+      applyBatch([updated]);
+    },
+    [workspaceId, applyBatch]
+  );
+
+  /** Soft-delete my own message; the returned tombstone replaces the row. */
+  const deleteMessage = useCallback(
+    async (message: Message) => {
+      const tombstone = await deleteMessageRequest(workspaceId, message.id);
+      applyBatch([tombstone]);
+      reactionsRef.current = clearMessageReactions(
+        reactionsRef.current,
+        message.id
+      );
+      setReactions(reactionsRef.current);
+      applyPins(removePin(pinsRef.current, message.id));
+    },
+    [workspaceId, applyBatch, applyPins]
+  );
+
+  /**
+   * Pin or unpin one message (이슈 #1112).
+   *
+   * **Asymmetrically optimistic, and the asymmetry is the design.** An unpin is
+   * applied immediately: the entry to remove is already in hand, so a revert is
+   * exact. A pin is not, because the row a header list draws is the server's
+   * projection — `pinnedAtMs` in particular is what the list sorts on, and a
+   * locally invented one would put the entry in the wrong place until a reload,
+   * which is a worse lie than a half-second wait. So the pin direction takes
+   * the delta the server answers with, exactly as `editMessage` takes the row.
+   *
+   * Both directions are idempotent underneath, so the realtime echo of one's own
+   * click lands harmlessly on top of whichever happened first.
+   */
+  const togglePin = useCallback(
+    async (message: Message) => {
+      if (isPinned(pinsRef.current, message.id)) {
+        const previous = pinsRef.current;
+        applyPins(removePin(previous, message.id));
+        try {
+          await setPin(workspaceId, message.id, "unpinned");
+        } catch (error) {
+          applyPins(previous);
+          throw error;
+        }
+        return;
+      }
+      const delta = await setPin(workspaceId, message.id, "pinned");
+      if (delta.pinned) applyPins(applyPinned(pinsRef.current, delta.pinned));
+    },
+    [workspaceId, applyPins]
+  );
+
   return {
     state,
     status,
@@ -324,5 +644,13 @@ export function useTimeline(
     reload,
     loadingOlder,
     reachedStart,
+    reactions,
+    toggleReaction,
+    pins,
+    pinsStatus,
+    reloadPins,
+    togglePin,
+    editMessage,
+    deleteMessage,
   };
 }

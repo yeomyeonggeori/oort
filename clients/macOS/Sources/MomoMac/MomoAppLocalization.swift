@@ -1490,7 +1490,7 @@ struct MomoWorkspaceCopy {
 
     var agentInviteBody: String {
         switch language {
-        case .korean: return "로컬 Hermes gateway가 momo와 통신할 pairing manifest를 만들고, 이 채널에 에이전트를 초대합니다."
+        case .korean: return "로컬 Hermes gateway가 oort와 통신할 pairing manifest를 만들고, 이 채널에 에이전트를 초대합니다."
         case .english: return "Create a pairing manifest for the local Hermes gateway, then invite the agent into this channel."
         }
     }
@@ -1582,8 +1582,8 @@ struct MomoWorkspaceCopy {
 
     var agentInviteNetworkNote: String {
         switch language {
-        case .korean: return "momo는 provider OAuth/token을 저장하지 않습니다. 토큰은 Hermes/provider 런타임 안에만 둡니다."
-        case .english: return "momo does not store provider OAuth tokens. Credentials stay inside the Hermes/provider runtime."
+        case .korean: return "oort는 provider OAuth/token을 저장하지 않습니다. 토큰은 Hermes/provider 런타임 안에만 둡니다."
+        case .english: return "oort does not store provider OAuth tokens. Credentials stay inside the Hermes/provider runtime."
         }
     }
 
@@ -2772,7 +2772,7 @@ struct MomoWorkspaceCopy {
     var downloadDeleteFailedMessage: String {
         switch language {
         case .korean: return "파일이 다운로드 폴더에 있는지와 접근 권한을 확인한 뒤 다시 시도하세요. 이력은 그대로 유지됩니다."
-        case .english: return "Check that the file is in the Downloads folder and that momo has access, then try again. The history entry was kept."
+        case .english: return "Check that the file is in the Downloads folder and that oort has access, then try again. The history entry was kept."
         }
     }
 
@@ -3120,8 +3120,8 @@ struct MomoWorkspaceCopy {
 
     var agentCredentialSectionSubtitle: String {
         switch language {
-        case .korean: return "momo와 Hermes gateway 사이에서만 사용하는 에이전트별 bearer입니다. Provider OAuth 자격증명과는 별개입니다."
-        case .english: return "This per-agent bearer is only for momo and the Hermes gateway. It is separate from provider OAuth credentials."
+        case .korean: return "oort와 Hermes gateway 사이에서만 사용하는 에이전트별 bearer입니다. Provider OAuth 자격증명과는 별개입니다."
+        case .english: return "This per-agent bearer is only for oort and the Hermes gateway. It is separate from provider OAuth credentials."
         }
     }
 

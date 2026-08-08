@@ -1,6 +1,6 @@
 # Internal Alpha Feedback Intake
 
-> Scope: internal alpha feedback only. This is the path from "I tried momo and got stuck" to a reproducible GitHub issue, then to a buildable Codex goal.
+> Scope: internal alpha feedback only. This is the path from "I tried oort and got stuck" to a reproducible GitHub issue, then to a buildable Codex goal.
 > Do not paste secrets, bearer tokens, raw invite codes, production credentials, or private user content. Redact before sharing outside the immediate team.
 
 ## 1. Intake Source

@@ -1,0 +1,24 @@
+[package]
+name = "momo-migrate"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+# A separate binary rather than a `momo-server migrate` subcommand (B1.7):
+#   * the migrate role must boot with DATABASE_URL alone — momo-server's
+#     `Config::from_env` fails closed without JWT_HMAC/realtime URL, which the
+#     prod `migrate`/`runtime-roles` services never set;
+#   * migrating is synchronous psql shell-out: no tokio runtime, no axum router;
+#   * the shipped Swift image already separates its migrate entry
+#     (`infra/prod/docker/internal-smoke-migrate.sh`), so `command: ["migrate"]`
+#     maps 1:1 onto this binary and the compose contract is unchanged.
+[[bin]]
+name = "momo-migrate"
+path = "src/main.rs"
+
+[dependencies]
+# The runner itself is momo-db's (`run_migrations`, psql-based, B0/B1.6). This
+# binary only resolves the environment contract around it — it owns no SQL and
+# re-implements no migration logic.
+momo-db = { path = "../../crates/momo-db" }

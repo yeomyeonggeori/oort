@@ -1,4 +1,4 @@
-# momo — 문서 지도 (INDEX)
+# oort — 문서 지도 (INDEX)
 
 > **전 문서 단일 색인.** 처음 들어온 사람·도구·Codex가 "무엇이 어디에 있고 무엇이 정본인가"를 한 눈에 잡는다.
 > 경로는 모두 리포 루트(`/Users/kwakseongjae/projects/momo`) 기준 상대경로. GitHub: `Dawn-kim-official/momo` (branch `main`).
@@ -65,19 +65,19 @@
 | [`docs/LOCAL_PR_GATE.md`](LOCAL_PR_GATE.md) | GitHub Actions disabled/manual-only 기간 로컬 PR gate(명령/evidence/merge cycle) | M1/M6 |
 | [`docs/external-agent-provider/README.md`](external-agent-provider/README.md) | external agent runtime smoke 계약: provider secret env 형식, mock/local/external 차이, credentialed 1왕복 gate, token 비저장 boundary | M1 |
 | [`docs/external-agent-provider/local-hermes-gpt.md`](external-agent-provider/local-hermes-gpt.md) | local-only Hermes + GPT provider 계약: loopback opt-in, non-loopback HTTP fail-fast, OpenAI credential provider-owned boundary | M1 |
-| [`docs/external-agent-provider/local-hermes-codex-oauth-setup.md`](external-agent-provider/local-hermes-codex-oauth-setup.md) | MOMO-257 local Hermes/Codex OAuth provider setup runbook: 사용자가 provider에서 인증하고 momo는 loopback endpoint + Hermes-facing bearer만 검증 | M1/M7 준비 |
+| [`docs/external-agent-provider/local-hermes-codex-oauth-setup.md`](external-agent-provider/local-hermes-codex-oauth-setup.md) | MOMO-257 local Hermes/Codex OAuth provider setup runbook: 사용자가 provider에서 인증하고 oort는 loopback endpoint + Hermes-facing bearer만 검증 | M1/M7 준비 |
 | [`docs/external-agent-provider/local-hermes-provider.env.example`](external-agent-provider/local-hermes-provider.env.example) | placeholder-only local Hermes provider env template; `$HOME/.momo/local-hermes-provider.env`로 복사해 사용하며 provider OAuth/API key는 포함 금지 | M1/M7 준비 |
 | [`docs/MULTI_SESSION_OPS.md`](MULTI_SESSION_OPS.md) | 5개+ Codex session/worktree 운영 모델(momo-main/worker/handoff/env 충돌 방지) | M1 |
 | [`docs/adr/0001-agentic-work-os-repo-topology.md`](adr/0001-agentic-work-os-repo-topology.md) | Agentic Work OS repo topology + plugin ecosystem + Docker/deploy layering ADR | M1.5 |
 | [`docs/adr/0002-docker-compose-layering.md`](adr/0002-docker-compose-layering.md) | Docker compose/deploy layer ADR: dev/e2e/prod/install/upgrade/backup 경계, image-based prod, optional external DB/TLS/agent runtime | M1.5 |
 | [`docs/adr/0003-macos-packaging-architecture.md`](adr/0003-macos-packaging-architecture.md) | M4 macOS packaging ADR: SwiftPM dev app vs Xcode release app, build-macos-apps 사용 기준, signing/notary/DMG/Sparkle issue split | M4 |
-| [`docs/adr/0004-codex-oauth-hermes-provider-boundary.md`](adr/0004-codex-oauth-hermes-provider-boundary.md) | Codex/OpenAI credential boundary: external runtime provider-owned OAuth/API keys, momo evidence redaction/fail-fast | M1 |
+| [`docs/adr/0004-codex-oauth-hermes-provider-boundary.md`](adr/0004-codex-oauth-hermes-provider-boundary.md) | Codex/OpenAI credential boundary: external runtime provider-owned OAuth/API keys, oort evidence redaction/fail-fast | M1 |
 | [`docs/adr/0005-macos-alpha-update-channel-v0.md`](adr/0005-macos-alpha-update-channel-v0.md) | macOS alpha update channel ADR: Sparkle 2 우선, manual fallback, SwiftPM placeholder surface, secret boundary | M3/M4 준비 |
 | [`docs/adr/0100-decision-governance.md`](adr/0100-decision-governance.md) | **결정 거버넌스 정본(Accepted)**: 결정은 ADR·증거는 STATUS·계획은 ROADMAP, ADR 없는 경계 변경 머지 금지, 소급 결정(SD-1~5) 배정표 | 전반 |
 | [`docs/adr/0101-agent-identity-credentials.md`](adr/0101-agent-identity-credentials.md) | **에이전트 신원 ADR(Accepted — Option A)**: 공유 시크릿 → per-agent `agent_bearer` + Phase 2 delegation. 구현: MOMO-337~339 | M1/보안 |
 | [`docs/adr/0102-agent-execution-path.md`](adr/0102-agent-execution-path.md) | **에이전트 실행 경로 ADR(Accepted — Option C)**: gateway=BYOA / worker=managed 이중 경로 + 서버 소유 보장 매트릭스 + SD-5 소급 승인 | M1/에이전트 |
 | [`docs/architecture/overview.md`](architecture/overview.md) | **아키텍처 정본**: 불변식 6개 + 시스템/수명주기/엔티티 mermaid 다이어그램 + 판정 요약 + ADR 결정 큐. 어긋나는 코드 변경은 같은 PR에서 갱신 | 전반 |
-| [`docs/architecture/bible/README.md`](architecture/bible/README.md) | **메신저 아키텍처 바이블(학습용 파생 문서, 정본 아님)**: 문제 지도 M1~M11 + momo 뼈대 해설 + Slack/Discord/셀프호스팅 계열 비교 + 결정 큐 대조 — 정본과 어긋나면 정본 우선 | 전반 |
+| [`docs/architecture/bible/README.md`](architecture/bible/README.md) | **메신저 아키텍처 바이블(학습용 파생 문서, 정본 아님)**: 문제 지도 M1~M11 + oort 뼈대 해설 + Slack/Discord/셀프호스팅 계열 비교 + 결정 큐 대조 — 정본과 어긋나면 정본 우선 | 전반 |
 | [`docs/ux-bible/README.md`](ux-bible/README.md) | **UX 바이블 정본**: Slack 코퍼스 36선 기반 원칙 P1~P15 — UI/UX 티켓 수용기준이 원칙 번호를 인용 | M3+ |
 | [`docs/planning/README.md`](planning/README.md) | **기획 레이어 운영 정본**: 제품 오너/planner/momo-main/worker 역할, 병렬 planning claim, ADR→티켓→핸드오프 체인, 구현 병렬 최대 5, 이탈 환류 | 전반 |
 | [`docs/planning/CURRENT_STATE.md`](planning/CURRENT_STATE.md) | **컨텍스트 압축 복원 정본**: 활성 planning owner, 결정 대기, 구현 handoff, 다음 체크포인트. `momo-main`만 통합 갱신 | 전반 |
@@ -103,6 +103,10 @@
 | [`docs/cicd/07-crash-analytics-spec.md`](cicd/07-crash-analytics-spec.md) | Sentry Cocoa(self-host) + MetricKit 계측 스펙 |
 | [`docs/cicd/08-e2e-accessibility-performance.md`](cicd/08-e2e-accessibility-performance.md) | XCUITest + performAccessibilityAudit + XCTMetric 테스트 plan |
 | [`docs/cicd/09-qa-codex-tickets.md`](cicd/09-qa-codex-tickets.md) | QA Codex 티켓(Q0~Q7 의존순) |
+| [`docs/cicd/10-ios-signing-identity-runbook.md`](cicd/10-ios-signing-identity-runbook.md) | iOS 서명 아이덴티티 런북(사람이 1회) + **자산 확보 실측표** |
+| [`docs/cicd/11-ios-push-device-check.md`](cicd/11-ios-push-device-check.md) | iOS 푸시 실기기 확인 절차(시뮬레이터로 증명 못 하는 것) |
+| [`docs/cicd/12-push-relay-deploy-runbook.md`](cicd/12-push-relay-deploy-runbook.md) | PushRelay 배포·검증 런북(ADR-0120 P-3) |
+| [`docs/cicd/13-selfhosted-runner-macos.md`](cicd/13-selfhosted-runner-macos.md) | 셀프호스티드 macOS 러너 운영 절차(ADR-0153 D2, 데스크톱 릴리스) |
 
 > **PASS 블록 정본 기록처 = `03-store-readiness-gate.md` 상단**(05 §10 양식). `STATUS.md §5b` 게이트 상태도 OPEN→PASS로 함께 갱신.
 
@@ -162,7 +166,7 @@
 | [`research/11-agent-runtime/14-realtime-client-subscription-contract-v0.md`](../research/11-agent-runtime/14-realtime-client-subscription-contract-v0.md) | Realtime Client Subscription Contract v0 정본 스펙(connection token, channel naming, subscribe auth, event envelope, `message.seq` replay/gap-fill, reconnect, macOS apply boundary) |
 | [`research/11-agent-runtime/fixtures/realtime-client-subscription-contract-v0/`](../research/11-agent-runtime/fixtures/realtime-client-subscription-contract-v0/) | Realtime client subscription JSON fixtures(`message.new`, approval request/decision, `agent.partial`, `agent.status`, gap/backfill scenario) |
 | [`research/11-agent-runtime/15-m3-dbc-real-data-readiness.md`](../research/11-agent-runtime/15-m3-dbc-real-data-readiness.md) | M3 D/B/C real-data readiness 정본(MOMO-020/021/022 unblock 조건, endpoints/events, local gate, follow-up MOMO-200~204 후보) |
-| [`research/12-agentic-work-os/01-agentic-work-os-market-analysis.md`](../research/12-agentic-work-os/01-agentic-work-os-market-analysis.md) | Paca/OpenHands/Linear/Rovo/GitHub/Slack/MCP/A2A 시장 분석 + momo 제품 포지션(agent execution ledger) |
+| [`research/12-agentic-work-os/01-agentic-work-os-market-analysis.md`](../research/12-agentic-work-os/01-agentic-work-os-market-analysis.md) | Paca/OpenHands/Linear/Rovo/GitHub/Slack/MCP/A2A 시장 분석 + oort 제품 포지션(agent execution ledger) |
 | [`research/12-agentic-work-os/02-plugin-manifest-v0.md`](../research/12-agentic-work-os/02-plugin-manifest-v0.md) | Plugin Manifest v0 정본 + `plugin_id`/tools/scopes/runtime boundary/license/provenance + Context Packet `tool_grants`/Capability Cache/approval metadata gate + source/audit/signature policy + catalog class/repo split 기준 |
 | [`research/12-agentic-work-os/03-agent-host-positioning.md`](../research/12-agentic-work-os/03-agent-host-positioning.md) | MOMO-184 agent host 제품 문장 + channel timeline execution ledger 1페이지 비교 + website/README/sales deck reusable copy |
 | [`research/12-agentic-work-os/03-first-party-plugin-repo-strategy.md`](../research/12-agentic-work-os/03-first-party-plugin-repo-strategy.md) | First-party plugin repo strategy 정본(GitHub/GitHub Issues → Google Workspace → Jira-like work items → Docs connector, repo split 순서, plugin surface/audit/source/approval contract) |

@@ -1,6 +1,6 @@
-# momo — 백엔드 멀티팀 운영 배포 (DEPLOY.md, 2026)
+# oort — 백엔드 멀티팀 운영 배포 (DEPLOY.md, 2026)
 
-> **목적:** momo 백엔드(MomoServer + OutboxRelay + AgentWorker + PostgreSQL 18 + Centrifugo v6 + hermes)를 **단일 강력 VPS**에 운영 배포(staging→prod)하고, **멀티팀(10명=1팀, 3개+팀)** 을 워크스페이스로 온보딩·운영하는 절차서.
+> **목적:** oort 백엔드(MomoServer + OutboxRelay + AgentWorker + PostgreSQL 18 + Centrifugo v6 + hermes)를 **단일 강력 VPS**에 운영 배포(staging→prod)하고, **멀티팀(10명=1팀, 3개+팀)** 을 워크스페이스로 온보딩·운영하는 절차서.
 > **로컬 기동은 `docs/RUN.md`**. 이 문서는 **운영 환경(실 VPS + 공인 도메인 + TLS + 시크릿 + 백업 + 모니터링)** 을 다룬다.
 > **실행 주체:** 계획은 ROADMAP(M1 EP-DEPLOY / M2 EP-TENANCY·EP-ADMIN), 실제 작업은 **Codex가 goal로 자율 실행.** 산출물은 이 리포에 실제 파일로 생성한다.
 > 정본 참조: `research/07-deepdive/04-self-build-l4-spec.md`(토폴로지 §1.1·확장 §1.4·횡단 §8) · `schema_v0.sql`(정본 스키마, RLS FORCE) · `infra/*`(dev compose/centrifugo) · `STATUS.md`/`ROADMAP.md`.
@@ -28,8 +28,8 @@
   - ✅ `infra/prod/docker-compose.internal-smoke.yml` + `infra/prod/internal-smoke.env.example` + `scripts/verify_internal_hosting_smoke.sh` — 내부 테스트용 single-node hosting smoke gate (MOMO-216)
   - ✅ `infra/prod/docker/` + `scripts/verify_internal_host_runtime.sh` + `scripts/local_gate.sh --profile host-runtime` — local image 기반 prod+internal-smoke boot/health/migrate/message/relay/mock-agent runtime gate (MOMO-220)
   - ✅ `scripts/verify_backup_restore_rehearsal.sh` + `scripts/local_gate.sh --profile backup` — 임시 PostgreSQL source→dump→별도 restore→marker checksum evidence gate (MOMO-222)
-  - ✅ `scripts/verify_external_agent_provider.sh` + `scripts/local_gate.sh --profile external-agent-provider` — credentials가 있는 환경에서만 real Hermes/Kim Intern SSE + local momo `@김인턴` 1왕복을 검증하는 opt-in gate (MOMO-230)
-  - ✅ `docs/adr/0004-codex-oauth-hermes-provider-boundary.md` — Codex OAuth token은 Hermes/Kim Intern provider-owned이고 momo app/API/DB/local gate가 직접 저장하지 않는 credential boundary (MOMO-234)
+  - ✅ `scripts/verify_external_agent_provider.sh` + `scripts/local_gate.sh --profile external-agent-provider` — credentials가 있는 환경에서만 real Hermes/Kim Intern SSE + local oort `@김인턴` 1왕복을 검증하는 opt-in gate (MOMO-230)
+  - ✅ `docs/adr/0004-codex-oauth-hermes-provider-boundary.md` — Codex OAuth token은 Hermes/Kim Intern provider-owned이고 oort app/API/DB/local gate가 직접 저장하지 않는 credential boundary (MOMO-234)
   - ✅ `docs/AWS_INTERNAL_ALPHA.md` + `infra/prod/aws-internal-alpha.env.example` + `scripts/aws_internal_alpha_preflight.sh` — AWS 1주일 internal alpha topology/cost/security-group/backup/deploy/rollback preflight (MOMO-233)
   - ✅ `server/Migrations/003_onboarding.sql` — invite_code + redemption audit (MOMO-010)
   - ✅ `docs/RUN.md`에 staging smoke gate와 host-runtime 기동/롤백/시크릿/백업 절차 추가 (MOMO-007)
@@ -204,7 +204,7 @@ sops exec-env /secure/momo/prod.sops.env \
    --role member --max-uses 1 --expires-days 7 \
    --output /run/momo/invite-code'
 # stdout 마지막 줄에 신규 멤버 전달용 딥링크가 출력된다:
-#   momo://join?server=https%3A%2F%2Fapi.example.com&code=<code>
+#   oort://join?server=https%3A%2F%2Fapi.example.com&code=<code>
 ```
 
 `member list`와 `invite-create`는 서버 REST 토큰을 우회하는 임의 SQL이 아니라 pinned
@@ -213,7 +213,7 @@ argv나 출력으로 노출되지 않는다. 초대 bearer code 원문도 SQL/�
 노출하지 않으며, 이미 존재하는 파일을 덮어쓰지 않고 요청한 host 경로에 mode 0600으로
 한 번만 기록한다. 전달 후 즉시 해당 파일을 안전하게 제거한다.
 
-`invite-create`는 초대 생성 후 완성된 딥링크(`momo://join?server=…&code=…`)를 stdout에
+`invite-create`는 초대 생성 후 완성된 딥링크(`oort://join?server=…&code=…`)를 stdout에
 출력한다. 이 링크가 운영자→신규 멤버 전달 산출물이며, 링크를 연 클라이언트는 서버
 URL과 초대코드를 프리필한다(멤버는 이름/비밀번호만 입력). server 값은 기본적으로 env의
 `PUBLIC_BASE_URL`(공개 HTTPS origin)을 percent-encoding한 것이고, `--server-url URL`로
@@ -537,7 +537,11 @@ dev `infra/centrifugo.json`의 namespace(ch/dm/agent/user) 스펙은 **그대로
 
 **웹 realtime Origin 허용 — MOMO-398:** Centrifugo v6는 `client.allowed_origins`가 정의되지 않으면 `Origin` 헤더가 요청 Host와 다른 브라우저 websocket 연결을 403으로 거부한다(PR #407 재현: `request Origin is not authorized due to empty allowed_origins`). 이를 위해 prod compose가 centrifugo 서비스에 `CENTRIFUGO_CLIENT_ALLOWED_ORIGINS=${APP_DOMAIN:+https://${APP_DOMAIN}}`를 주입한다 — **operator가 별도 env를 설정하지 않으며, 허용 오리진은 언제나 `https://<APP_DOMAIN>` 단 하나로 파생된다.** `APP_DOMAIN` unset(또는 빈 값) 시 이 env는 빈 문자열로 렌더되는데, Centrifugo v6는 빈 env를 unset으로 간주하므로("Empty environment variables are considered unset (!) and will fall back to the next configuration source" — centrifugal.dev/docs/server/configuration) `centrifugo.prod.json` 그대로 = 기존 동작 완전 무변화(브라우저 realtime fail-closed 유지). 네이티브 클라이언트는 어느 모드에서든 무영향 — Centrifugo는 `Origin` 헤더가 없는 연결을 검사 없이 통과시킨다("Connection requests without `Origin` header set are passing through without any checks", 같은 문서 `client.allowed_origins`). realtime은 `rt.` 도메인(교차 오리진)이므로 SPA의 CSP `connect-src wss://{$REALTIME_DOMAIN}` 허용과 이 allowed_origins 허용이 함께 있어야 브라우저 연결이 열린다. env 파일에 `CENTRIFUGO_CLIENT_ALLOWED_ORIGINS`를 직접 넣지 말 것 — compose 보간은 그 값을 읽지 않으며, `prod_env_preflight.sh` strict 모드가 파생값과 모순되는 설정(예: APP_DOMAIN unset인데 origins 설정, 또는 파생값과 다른 origins)을 fail-fast로 차단한다.
 
-**데스크톱 CORS 오리진 허용 — MOMO-605 (ADR-0133 P2):** 웹 SPA는 같은 오리진(`APP_DOMAIN`)에서 `/v1/*`를 부르므로 CORS가 아예 필요 없다(ADR-0119 D1-A). 반면 **패키징된 Tauri 데스크톱**은 webview가 자기 오리진(`tauri://localhost`, Windows/Android는 `http://tauri.localhost`)에서 프론트를 로드하므로 모든 `/v1/*` 호출이 진짜 교차 오리진이고 브라우저 규칙대로 차단된다. 이를 열려면 api 서비스에 `MOMO_CORS_ALLOWED_ORIGINS`(쉼표 구분, **완전일치** allowlist)를 설정한다 — 예: `MOMO_CORS_ALLOWED_ORIGINS=tauri://localhost`. **미설정·빈값이 기본이며 완전 무변경이다**: 서버가 CORS 미들웨어를 아예 장착하지 않아 `Access-Control-*`/`Vary` 헤더가 하나도 붙지 않고 OPTIONS 동작도 그대로다. MOMO-398의 Centrifugo 허용과 달리 이 값은 **APP_DOMAIN에서 파생하지 않는다** — 데스크톱 오리진은 어떤 도메인으로도 유도할 수 없어 operator가 명시해야 한다. **와일드카드는 금지**다: `*`·`https://*.example.com`·리터럴 `null`·경로/트레일링 슬래시가 붙은 값은 서버가 부팅 시 거부하고 warning을 남기며(오타는 허용범위를 좁힐 뿐 넓히지 않는다), `prod_env_preflight.sh` strict 모드가 compose 기동 전에 같은 값을 fail-fast로 막는다. momo는 쿠키를 발급하지 않고 Authorization 베어러만 쓰므로 `Access-Control-Allow-Credentials`는 절대 보내지 않는다 — 데스크톱 클라는 fetch 기본값(`credentials: 'omit'`)으로 호출하고 토큰 헤더를 직접 붙인다. realtime(wss)은 위 MOMO-398 계약 그대로다: prod는 `https://<APP_DOMAIN>` 단일 파생을 유지하고, dev/e2e/내부알파(`infra/docker-compose.e2e.yml`)는 `infra/centrifugo.json`의 `client.allowed_origins`가 같은 데스크톱 오리진을 허용한다. 검증: `scripts/verify_cors_allowlist.sh`(실 서버 프로세스로 OPTIONS preflight 왕복까지 단정).
+**데스크톱 CORS 오리진 허용 — MOMO-605 (ADR-0133 P2):** 웹 SPA는 같은 오리진(`APP_DOMAIN`)에서 `/v1/*`를 부르므로 CORS가 아예 필요 없다(ADR-0119 D1-A). 반면 **패키징된 Tauri 데스크톱**은 webview가 자기 오리진(`tauri://localhost`, Windows/Android는 `http://tauri.localhost`)에서 프론트를 로드하므로 모든 `/v1/*` 호출이 진짜 교차 오리진이고 브라우저 규칙대로 차단된다. 이를 열려면 api 서비스에 `MOMO_CORS_ALLOWED_ORIGINS`(쉼표 구분, **완전일치** allowlist)를 설정한다 — 예: `MOMO_CORS_ALLOWED_ORIGINS=tauri://localhost`. **미설정·빈값이 기본이며 완전 무변경이다**: 서버가 CORS 미들웨어를 아예 장착하지 않아 `Access-Control-*`/`Vary` 헤더가 하나도 붙지 않고 OPTIONS 동작도 그대로다. MOMO-398의 Centrifugo 허용과 달리 이 값은 **APP_DOMAIN에서 파생하지 않는다** — 데스크톱 오리진은 어떤 도메인으로도 유도할 수 없어 operator가 명시해야 한다. **와일드카드는 금지**다: `*`·`https://*.example.com`·리터럴 `null`·경로/트레일링 슬래시가 붙은 값은 서버가 부팅 시 거부하고 warning을 남기며(오타는 허용범위를 좁힐 뿐 넓히지 않는다), `prod_env_preflight.sh` strict 모드가 compose 기동 전에 같은 값을 fail-fast로 막는다. oort는 쿠키를 발급하지 않고 Authorization 베어러만 쓰므로 `Access-Control-Allow-Credentials`는 절대 보내지 않는다 — 데스크톱 클라는 fetch 기본값(`credentials: 'omit'`)으로 호출하고 토큰 헤더를 직접 붙인다. realtime(wss)은 위 MOMO-398 계약 그대로다: prod는 `https://<APP_DOMAIN>` 단일 파생을 유지하고, dev/e2e/내부알파(`infra/docker-compose.e2e.yml`)는 `infra/centrifugo.json`의 `client.allowed_origins`가 같은 데스크톱 오리진을 허용한다. 검증: `scripts/verify_cors_allowlist.sh`(실 서버 프로세스로 OPTIONS preflight 왕복까지 단정).
+
+**데스크톱 CORS·realtime 실측 정정 — DESK-1 (2026-08-03):** 위 MOMO-605 문단은 **Swift 서버**(`server/Sources/MomoServer`, PR #768) 기준으로 쓰였다. 그 뒤 api는 Rust/Axum으로 재작성됐고(ADR-0145) **CORS 미들웨어가 포팅되지 않았다** — `infra/rust/README.md` §7이 `MOMO_CORS_ALLOWED_ORIGINS`를 "미소비"로 적어 둔 그대로다. 실측(app.oor7.com): `OPTIONS /v1/auth/login` → **405**, 응답에 `Access-Control-*` **0개**. 웹은 same-origin, RN은 CORS 자체가 없어 아무도 못 봤고, 패키징된 데스크톱만 로그인이 아예 안 됐다. DESK-1이 같은 계약(env 이름·완전일치·와일드카드 금지·credentials 미전송·모르는 오리진 무변경)을 `server-rust/bins/momo-server/src/cors.rs`로 포팅했다. 검증은 `scripts/verify_cors_allowlist.sh`(Rust 레이어 추가됨) + `cargo test -p momo-server --test cors_allowlist`.
+
+> **prod realtime은 아직 열려 있지 않다 — 오케스트레이터 조치 필요.** REST는 위 CORS로 열리지만 **wss는 별개**다. prod compose는 `CENTRIFUGO_CLIENT_ALLOWED_ORIGINS: ${APP_DOMAIN:+https://${APP_DOMAIN}}`로 **단일 파생 오리진**(`https://app.oor7.com`)만 주입하고 `infra/prod/centrifugo.prod.json`에는 `client.allowed_origins`가 아예 없다. 데스크톱 webview는 WS 업그레이드에 `Origin: tauri://localhost`를 실어 보내므로 **prod에서 403으로 거부된다**(Origin 헤더가 없는 네이티브 클라만 무검사 통과). dev/e2e/내부알파(`infra/centrifugo.json`)에는 `tauri://localhost`·`http://tauri.localhost`가 **이미 들어 있다** — prod만 비어 있다. MOMO-398의 "APP_DOMAIN 단일 파생" 계약을 바꾸는 결정이라 DESK-1은 설정 파일을 건드리지 않았다.
 
 **초대 관통:** owner/admin이 `POST /v1/workspaces/<workspace-id>/invites`로 초대를 만들면 raw code는 응답에서 한 번만 다룬다. 공유 링크는 `https://<APP_DOMAIN>/i/<code>`다. Caddy가 SPA 폴백보다 먼저 private `linkshort:28190`으로 프록시하고, LinkShort는 compose가 `https://${APP_DOMAIN}`에서 파생한 `MOMO_LINKSHORT_TARGET_BASE_URL`을 사용해 `/join?code=<code>`로 302 응답한다. SPA는 표시명·handle·이메일·비밀번호를 받아 같은 오리진 `POST /v1/join`으로 가입하고, JoinResponse 세션을 저장해 홈으로 진입한 뒤 `history.replaceState`로 코드가 든 URL을 제거한다. LinkShort는 코드를 저장·검증·로그하지 않으며 실제 만료·소진·차단 판정은 대상 서버의 JoinRoutes가 담당한다.
 
@@ -564,7 +568,7 @@ MINIO_PUBLIC_DOMAIN=files.example.com
 MINIO_VOLUME_NAME=momo-minio-data
 ```
 
-MinIO를 선택했다면 `files.example.com`의 A/AAAA는 momo 호스트를 가리켜야 한다. Caddy는
+MinIO를 선택했다면 `files.example.com`의 A/AAAA는 oort 호스트를 가리켜야 한다. Caddy는
 `MINIO_PUBLIC_DOMAIN` site를 TLS로 열고 private compose network의 `minio:9000`으로만
 프록시한다. 따라서 API가 반환하는 15분 presigned PUT/GET URL은 클라이언트가 접근할 수
 있지만 MinIO 관리 포트나 자격증명은 공개되지 않는다. `MINIO_PUBLIC_DOMAIN`이 없으면 해당
@@ -734,7 +738,7 @@ scripts/local_gate.sh --profile external-agent-provider   # real provider creden
 - MOMO-220/MOMO-227 host-runtime gate가 local api/relay/worker/migrate/mock-Hermes images를 빌드하고, prod+internal-smoke stack boot, migration idempotency, `/v1/agent-runtime/status` mock/redaction projection, REST message, relay publish, mock agent roundtrip을 실제 검증한다.
 - MOMO-222 backup gate가 임시 PostgreSQL source→dump→별도 restore→marker checksum evidence를 markdown/json으로 생성한다. `host-runtime` profile도 이 verifier를 포함한다.
 - MOMO-230 external-agent-provider gate는 credentials가 있을 때만 real Hermes/Kim Intern OpenAI-compatible SSE preflight와 local MomoServer/AgentWorker/OutboxRelay `@김인턴` 1왕복을 검증한다.
-- MOMO-234 boundary: Codex OAuth access/refresh token은 provider host 내부 secret이다. momo 운영 env와 smoke에는 `AGENT_PROVIDER_MODE=external-hermes`, `HERMES_BASE_URL`, `HERMES_API_KEY`, `AGENT_MODEL`만 넣고 Codex/OpenAI OAuth token env var를 전달하지 않는다.
+- MOMO-234 boundary: Codex OAuth access/refresh token은 provider host 내부 secret이다. oort 운영 env와 smoke에는 `AGENT_PROVIDER_MODE=external-hermes`, `HERMES_BASE_URL`, `HERMES_API_KEY`, `AGENT_MODEL`만 넣고 Codex/OpenAI OAuth token env var를 전달하지 않는다.
 - MOMO-238 local loopback: `http://127.0.0.1:<port>/v1`/`localhost`는 local-only opt-in smoke에만 허용한다. non-loopback HTTP와 운영 loopback은 계속 fail-fast한다.
 
 `runtime-unverified(public host)`: 실제 `https://api.<domain>/health`, public DNS, TLS 인증서 발급/갱신,

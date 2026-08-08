@@ -1,7 +1,20 @@
+import { normalizeServerUrl } from "@momo/core/lib/serverUrl";
 import { API_BASE_DEFAULT, IS_TAURI } from "./env";
+
+export {
+  normalizeServerUrl,
+  SERVER_URL_PLACEHOLDER,
+  type ServerUrlCheck,
+} from "@momo/core/lib/serverUrl";
 
 // =============================================================================
 // Which server this client talks to (MOMO-604 / ADR-0133 P2).
+//
+// goal RN-C1: the VALIDATION half of this module (`normalizeServerUrl`) moved to
+// `@momo/core/lib/serverUrl` and is re-exported above, so every existing
+// `@/lib/serverBase` import keeps resolving. What stayed is the half that has a
+// platform in it: the stored choice, kept in localStorage here and in MMKV on
+// RN.
 //
 // The P0/P1 build assumed same-origin: the browser asked `/v1/...` and the
 // dev/preview server proxied it. That assumption holds for a web deployment and
@@ -24,59 +37,6 @@ import { API_BASE_DEFAULT, IS_TAURI } from "./env";
 // =============================================================================
 
 const STORAGE_KEY = "momo.web.server.v1";
-
-export type ServerUrlCheck =
-  | { ok: true; base: string }
-  | { ok: false; message: string };
-
-/** Neutral example, never a real host: RFC 2606 reserves example.com. */
-export const SERVER_URL_PLACEHOLDER = "https://momo.example.com";
-
-const SCHEME_RE = /^[a-zA-Z][a-zA-Z0-9+.-]*:/;
-
-/**
- * Validate and normalise a server address (the web sibling of the mac client's
- * `MomoServerSessionForm.validatedBaseURL()`).
- *
- * Accepts a bare host (`momo.example.com:28000`) by reading it as https, which
- * is the safer of the two guesses: a plaintext guess would silently downgrade a
- * TLS server. A LAN server that only speaks http is reached by typing `http://`
- * or by taking the discovery card's suggestion, which carries its own scheme.
- *
- * Returns the origin plus any path prefix (a reverse proxy may mount the API
- * under `/momo`), with the trailing slash, query and fragment dropped so the
- * value concatenates cleanly with `/v1/...`.
- */
-export function normalizeServerUrl(raw: string): ServerUrlCheck {
-  const trimmed = raw.trim();
-  if (trimmed === "") {
-    return { ok: false, message: "서버 주소를 입력하세요." };
-  }
-  const candidate = SCHEME_RE.test(trimmed) ? trimmed : `https://${trimmed}`;
-  let url: URL;
-  try {
-    url = new URL(candidate);
-  } catch {
-    return {
-      ok: false,
-      message: `주소를 확인하세요. 예: ${SERVER_URL_PLACEHOLDER}`,
-    };
-  }
-  if (url.protocol !== "http:" && url.protocol !== "https:") {
-    return {
-      ok: false,
-      message: "주소는 http:// 또는 https:// 로 시작해야 합니다.",
-    };
-  }
-  if (url.hostname === "") {
-    return {
-      ok: false,
-      message: `호스트가 없습니다. 예: ${SERVER_URL_PLACEHOLDER}`,
-    };
-  }
-  const path = url.pathname.replace(/\/+$/, "");
-  return { ok: true, base: `${url.origin}${path}` };
-}
 
 // ---- the stored choice ------------------------------------------------------
 

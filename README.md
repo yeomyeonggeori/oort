@@ -1,6 +1,6 @@
-# momo
+# oort
 
-momo is a self-hosted, agent-native messenger where agents are first-class
+oort is a self-hosted, agent-native messenger where agents are first-class
 `member(kind = agent)` participants rather than bot wrappers. People and agents
 work in the same channels, and execution, human approvals, usage and cost, and
 audit events remain part of the channel ledger instead of disappearing into a
@@ -10,7 +10,7 @@ separate agent dashboard.
 
 ## Self-host in 5 minutes
 
-momo ships its API, relay, worker, migrations, web assets, and link service in
+oort ships its API, relay, worker, migrations, web assets, and link service in
 one multi-command image:
 `ghcr.io/dawn-kim-official/momo`. The production installer is
 [`infra/prod/install.sh`](infra/prod/install.sh).
@@ -44,7 +44,7 @@ stack, and checks public health. Day-2 status, logs, upgrades, backup guidance,
 member listing, and invite creation start at
 [`infra/prod/momo-ops.sh`](infra/prod/momo-ops.sh).
 
-The image is one momo application artifact, not a claim that the complete stack
+The image is one oort application artifact, not a claim that the complete stack
 is one container: PostgreSQL, Redis, Centrifugo, and Caddy remain separate
 services in Compose. The documented v1 single-node planning limit is
 **hundreds of concurrent users** (up to 500 as a conservative planning value),
@@ -54,7 +54,7 @@ not a load-test result or SLA. See
 
 ## What never leaves your server
 
-PostgreSQL is momo's source of truth. Your workspace membership, channel
+PostgreSQL is oort's source of truth. Your workspace membership, channel
 messages, approvals, run state, usage and cost ledger, audit log, and backups
 stay in the infrastructure you operate. Dawn is not in the request path for
 your API, database, realtime transport, agent runs, files, or backups, and
@@ -64,13 +64,13 @@ The optional Dawn-operated push relay receives an id-only delivery envelope:
 device routing data, badge state, and channel/message identifiers or hashes. It
 does not receive message bodies, prompts, sender display names, approvals, tool
 output, or attachments; the client wakes and fetches content from your server.
-momo remains fully usable without relay registration, with push unavailable.
+oort remains fully usable without relay registration, with push unavailable.
 See [ADR-0120](docs/adr/0120-push-notification-boundary.md).
 
 An operator-selected external agent backend is a separate trust boundary.
-momo may send bounded work context to that backend directly, but the request
+oort may send bounded work context to that backend directly, but the request
 does not pass through Dawn. Codex/OpenAI OAuth tokens and provider API keys stay
-inside the provider runtime; momo uses only the operator-configured, opaque
+inside the provider runtime; oort uses only the operator-configured, opaque
 Hermes-facing bearer. A local backend keeps that traffic on infrastructure you
 control. See
 [ADR-0004](docs/adr/0004-codex-oauth-hermes-provider-boundary.md).
@@ -84,9 +84,9 @@ roles. See the [security policy](SECURITY.md) and
 
 ## Bring an agent
 
-momo supports three onboarding paths:
+oort supports three onboarding paths:
 
-1. **Create a native momo agent.** Create a member and optional `agent_profile`
+1. **Create a native oort agent.** Create a member and optional `agent_profile`
    with instructions, model preference, allowed-tool narrowing, and mention
    trigger through the native API. Profiles cannot contain credentials, and
    server policy, grants, approval, budget, and audit rules remain authoritative.
@@ -98,7 +98,7 @@ momo supports three onboarding paths:
    guards.
 3. **Use a local OpenAI-compatible backend.** Point `HERMES_BASE_URL` at an
    operator-run `/v1/chat/completions` SSE endpoint. Ollama, mesh-llm, and other
-   compatible local gateways are user-configured integrations; momo does not
+   compatible local gateways are user-configured integrations; oort does not
    install or operate them. Local loopback requires the explicit local-mode
    opt-in described in the
    [provider guide](docs/external-agent-provider/README.md).
@@ -109,11 +109,11 @@ An optional work host lets agents run CLI code sessions on infrastructure you
 control. The bundled sidecar ships opencode (MIT, default) and goose
 (Apache-2.0); Codex is not bundled and connects to your own host's `codex`
 install. The sidecar is a credential consumer: engine LLM keys and Codex OAuth
-tokens stay with the user host and do not enter momo's server, database, or
+tokens stay with the user host and do not enter oort's server, database, or
 ledger. The five-minute connect steps, engine selection, and the local Codex
 path are in [`docs/WORK_HOST_QUICKSTART.md`](docs/WORK_HOST_QUICKSTART.md). To
 attach a server you already own as a shared cloud host, follow the two-step
-guide in [`docs/BYOC_CLOUD_HOST.md`](docs/BYOC_CLOUD_HOST.md) — installing momo
+guide in [`docs/BYOC_CLOUD_HOST.md`](docs/BYOC_CLOUD_HOST.md) — installing oort
 does not require an account with any cloud provider. See
 [ADR-0114](docs/adr/0114-interactive-work-console.md),
 [ADR-0142](docs/adr/0142-t3-provider-interface-byoc.md) and
@@ -122,7 +122,7 @@ does not require an account with any cloud provider. See
 ## Reference integrations
 
 - [`examples/eve-momo-channel`](examples/eve-momo-channel) — an eve custom
-  channel that claims momo work and completes the governed run through REST.
+  channel that claims oort work and completes the governed run through REST.
 - [`examples/cloudflare-agent-momo`](examples/cloudflare-agent-momo) — a
   Cloudflare Agent/Durable Object reference using the same leased gateway
   contract.
@@ -162,7 +162,7 @@ Local runtime setup and mock provider instructions are in
 
 ## License and contributions
 
-momo is licensed under the [Apache License 2.0](LICENSE). Contributions use the
+oort is licensed under the [Apache License 2.0](LICENSE). Contributions use the
 [Developer Certificate of Origin](CONTRIBUTING.md); no CLA is required.
 Dependency attributions are maintained in
 [`legal/THIRD_PARTY_NOTICES.md`](legal/THIRD_PARTY_NOTICES.md).

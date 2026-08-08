@@ -1,0 +1,29 @@
+appId: app.momo.ios
+name: dismiss-dev-logbox
+---
+# React Native's LogBox notification — the "Open debugger to view warnings."
+# strip — renders in its OWN native window, pinned to the bottom of the screen,
+# directly over the composer dock.
+#
+# It has to be dismissed by coordinate, and that is not laziness: LogBox puts
+# NOTHING in the accessibility hierarchy. `maestro hierarchy` on a screen that
+# visibly has the banner returns zero nodes matching "debugger", "dismiss" or
+# "warning", so there is no id and no text to select, and `runFlow: when:`
+# cannot even be used to ask whether it is there.
+#
+# What it does do is EAT TAPS. `tapOn: {id: "composer-input"}` resolves the
+# composer's real coordinates, taps them, and reports COMPLETED — the tap lands
+# on the LogBox window instead, no keyboard opens, and the `inputText` after it
+# goes nowhere. The flow then fails on the mention list several steps later,
+# pointing at a component that is working fine.
+#
+# Safety when the banner ISN'T there: this point falls on the send button, and
+# every caller runs it with an EMPTY composer, where send is disabled. So the
+# stray tap is a no-op rather than a message sent at the wrong moment. Do not
+# call this after typing.
+#
+# This is a Debug-build-only problem. A release build has no LogBox at all, and
+# `build:sim` is Debug on purpose (it is the build that can reach the keychain —
+# see the header of scripts/build-sim.sh).
+- tapOn:
+    point: "92%,94%"

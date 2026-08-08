@@ -110,11 +110,22 @@ export function Field({
   children: ReactNode;
 }) {
   const errorId = `${htmlFor}-error`;
+  const hintId = `${htmlFor}-hint`;
+  // The hint is part of the control's accessible description, not decoration
+  // beside it. It mattered the moment a field arrived whose hint IS the task
+  // ("~/.codex/auth.json 내용을 그대로"): describing only the error tells a
+  // screen-reader user what went wrong and never what to put in the box.
+  // Order is hint-then-error so the instruction is heard before the complaint.
+  const describedBy =
+    [hint ? hintId : null, error ? errorId : null].filter(Boolean).join(" ") ||
+    undefined;
   const control =
-    error && isValidElement<AriaDescribable>(children)
+    describedBy && isValidElement<AriaDescribable>(children)
       ? cloneElement(children, {
-          "aria-invalid": children.props["aria-invalid"] ?? true,
-          "aria-describedby": children.props["aria-describedby"] ?? errorId,
+          "aria-invalid": error
+            ? (children.props["aria-invalid"] ?? true)
+            : children.props["aria-invalid"],
+          "aria-describedby": children.props["aria-describedby"] ?? describedBy,
         })
       : children;
   return (
@@ -123,7 +134,11 @@ export function Field({
         {label}
       </label>
       {control}
-      {hint && <p className="text-meta text-ink-muted">{hint}</p>}
+      {hint && (
+        <p id={hintId} className="break-keep text-meta text-ink-muted">
+          {hint}
+        </p>
+      )}
       {error && (
         <p className="text-meta text-danger" role="alert" id={errorId}>
           {error}
@@ -181,6 +196,15 @@ export interface KeyValue {
   key: string;
   value: ReactNode;
   numeric?: boolean;
+  /**
+   * The value is a Korean SENTENCE, not a slug/token/number.
+   *
+   * `break-all` is right for the things this list was built for — a base URL, a
+   * masked tail, an id — and wrong for prose: measured at 390px it split words
+   * mid-syllable ("갱/신합니다"). Prose breaks at word boundaries, exactly as
+   * `SectionShell` already decided for the header block (MOMO-676 M-5).
+   */
+  prose?: boolean;
 }
 
 /** Typed key-value rows. Raw payload dumps are banned from operator surfaces. */
@@ -192,7 +216,8 @@ export function KeyValueRows({ rows }: { rows: KeyValue[] }) {
           <dt className="text-meta text-ink-muted">{row.key}</dt>
           <dd
             className={cn(
-              "min-w-0 break-all text-body text-ink",
+              "min-w-0 text-body text-ink",
+              row.prose ? "break-keep" : "break-all",
               row.numeric && "font-mono"
             )}
             data-numeric={row.numeric ? "" : undefined}

@@ -14,7 +14,7 @@
 | 매니페스트 | `update-manifest-alpha.json` (자체 스키마) | `update-next.json` (Tauri static JSON) |
 | 번들 ID | `com.dawnkim.momo` | `app.momo.desktop` |
 
-두 채널이 같은 배포 저장소(`Dawn-kim-official/momo-alpha`)를 쓰지만 태그·자산 이름·매니페스트 파일이 전부 다르므로 서로를 덮지 않는다. 두 앱을 한 맥에 같이 설치해도 파일 이름(`MomoMac.app` / `momo.app`)과 번들 ID가 달라 충돌하지 않는다. **단 하나 겹치는 것은 `momo://` 스킴**이고, macOS LaunchServices 는 핸들러를 하나만 고른다.
+두 채널이 같은 배포 저장소(`Dawn-kim-official/momo-alpha`)를 쓰지만 태그·자산 이름·매니페스트 파일이 전부 다르므로 서로를 덮지 않는다. 두 앱을 한 맥에 같이 설치해도 파일 이름(`MomoMac.app` / `momo.app`)과 번들 ID가 달라 충돌하지 않는다. **단 하나 겹치는 것은 딥링크 스킴(`oort://`, 그리고 하위호환으로 남긴 `momo://`)**이고, macOS LaunchServices 는 핸들러를 하나만 고른다.
 
 ## 1. 버전 체계
 

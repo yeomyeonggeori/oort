@@ -9,7 +9,7 @@
 
 ## 1. 결정 요약
 
-momo의 에이전트 실행 경로 2개를 **역할 분리 이중 경로**로 정본화한다: **gateway = BYOA**(사용자 소유 런타임, 현 Hermes dogfood), **worker = managed**(momo 소유 실행, 향후 호스팅판). 승인·비용·감사 보장은 경로별 구현이 아니라 **서버 기계장치로 통일**한다 — `agent_run` 상태머신·`approval`·`usage_ledger`/`audit_log`는 서버가 소유하고 두 경로는 전달 방식만 다르다. 정본: `docs/adr/0102-agent-execution-path.md`.
+oort의 에이전트 실행 경로 2개를 **역할 분리 이중 경로**로 정본화한다: **gateway = BYOA**(사용자 소유 런타임, 현 Hermes dogfood), **worker = managed**(oort 소유 실행, 향후 호스팅판). 승인·비용·감사 보장은 경로별 구현이 아니라 **서버 기계장치로 통일**한다 — `agent_run` 상태머신·`approval`·`usage_ledger`/`audit_log`는 서버가 소유하고 두 경로는 전달 방식만 다르다. 정본: `docs/adr/0102-agent-execution-path.md`.
 
 ## 2. Goal 체인과 의존 (머지 순서)
 
@@ -38,7 +38,7 @@ momo의 에이전트 실행 경로 2개를 **역할 분리 이중 경로**로 �
 
 ## 4. 지켜야 할 계약
 
-- **ADR-0004**: provider 자격증명은 momo에 절대 비유입. 이 배치는 momo↔agent 전달 계층만 다룬다.
+- **ADR-0004**: provider 자격증명은 oort에 절대 비유입. 이 배치는 oort↔agent 전달 계층만 다룬다.
 - **단일 쓰기경로**: REST→PG→outbox→relay. gateway 이벤트도 서버가 PG 트랜잭션으로 기록 후 outbox로 publish.
 - **actor/run binding**: 콜백 bearer의 agent = run의 agent, run↔channel 위조 불가 (MOMO-337/338 계약).
 - **`agent:` vs `agentwork:`**: observable progress와 private job payload를 한 namespace에 합치지 않는다 (MOMO-338).

@@ -13,6 +13,7 @@ import { memberFor, useDirectory } from "@/features/workspace/useWorkspace";
 import { useSession } from "@/app/session";
 import { RoutingFields } from "./RoutingFields";
 import {
+  useAgentEditingCapability,
   useAllowedAgentModels,
   useRoutingCapability,
   type RoutingCapability,
@@ -35,7 +36,7 @@ import {
   resolveInheritance,
   type RoutingDraft,
   type RoutingInheritance,
-} from "./routingModel";
+} from "@momo/core/features/routing/routingModel";
 import {
   AgentProfileOpenContext,
   OpenAgentProfileContext,
@@ -195,6 +196,7 @@ function AgentProfilePanel({
   const member = memberFor(directory, agentMemberId);
   const capability = useRoutingCapability();
   const allowedModels = useAllowedAgentModels(agentMemberId);
+  const editing = useAgentEditingCapability(agentMemberId);
   const offline = useOffline();
   const handle = useAgentProfile(agentMemberId);
   const formRef = useRef<HTMLFormElement>(null);
@@ -223,9 +225,22 @@ function AgentProfilePanel({
 
   const effortReady = capability.support === "ready" && capability.table !== null;
   const notice = effortNotice(capability);
-  // 모델은 서버 세대와 무관하게 저장된다. 막는 것은 연결이 끊긴 상태 하나뿐이다.
-  const modelEditable = !offline;
-  const effortEditable = effortReady && !offline;
+  // 프로필 쓰기 자체가 있는 서버인가(capability.ts ④). 이 줄이 없던 동안 위
+  // 주석은 "모델은 서버 세대와 무관하게 저장된다"고 적혀 있었고, Swift 서버들에
+  // 대해서는 사실이었다. B5.2 서버에서는 아니다: `GET …/profile`은 200을 답하고
+  // `PUT`은 없다(diff matrix D-4). 그래서 이 다이얼로그는 프로필을 읽어 열리고,
+  // 모델 상자를 열어 주고, [변경 저장]에서 404를 받았다. 읽을 수 있다는 사실이
+  // 저장할 수 있다는 뜻은 아니므로 이제 쓰기 축은 쓰기 축에게 물어본다.
+  const profileWritable = editing.support === "ready";
+  const writeBlockedReason = offline
+    ? "연결이 끊긴 동안에는 바꿀 수 없습니다."
+    : profileWritable
+      ? null
+      : editing.support === "checking"
+        ? "이 서버가 프로필 편집을 받는지 확인하는 중입니다."
+        : editing.reason;
+  const modelEditable = profileWritable && !offline;
+  const effortEditable = effortReady && profileWritable && !offline;
 
   const dirty =
     current !== null && saved !== null && !draftEquals(current, saved);
@@ -250,7 +265,7 @@ function AgentProfilePanel({
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
-    if (!current || handle.saving || offline || !dirty) return;
+    if (!current || handle.saving || offline || !profileWritable || !dirty) return;
     const result = await handle.save(current);
     if (result.ok) {
       setCleared(null);
@@ -284,7 +299,7 @@ function AgentProfilePanel({
         size="sm"
         // 바쁜 것은 비활성이 아니다: 진행 중에는 대비를 유지하고 버튼 안
         // 스피너로 말하며, 클릭은 submit이 막는다(채널 만들기와 같은 규칙).
-        disabled={offline || !dirty}
+        disabled={offline || !profileWritable || !dirty}
         aria-busy={handle.saving || undefined}
         data-testid="agent-profile-save"
       >
@@ -364,8 +379,28 @@ function AgentProfilePanel({
       {handle.missing && (
         <InlineBanner
           tone="neutral"
-          message="이 에이전트에는 아직 프로필이 없습니다. 여기서 저장하면 프로필이 만들어집니다."
+          message={
+            profileWritable
+              ? "이 에이전트에는 아직 프로필이 없습니다. 여기서 저장하면 프로필이 만들어집니다."
+              : "이 에이전트에는 아직 프로필이 없습니다."
+          }
           testId="agent-profile-empty"
+        />
+      )}
+      {/* 확정된 판정만 배너가 된다. 확인 중은 결론이 아니라서 상자 옆 사유로만
+          말하고, 다이얼로그를 열 때마다 배너가 깜빡이지 않는다. */}
+      {(editing.support === "absent" || editing.support === "unknown") && !offline && (
+        <InlineBanner
+          tone={editing.support === "absent" ? "neutral" : "error"}
+          message={
+            editing.support === "absent"
+              ? `${editing.reason ?? ""} 지금 적용된 값은 아래에서 볼 수 있습니다.`.trim()
+              : (editing.reason ?? "이 서버가 프로필 편집을 받는지 확인하지 못했습니다.")
+          }
+          {...(editing.support === "unknown"
+            ? { actionLabel: "다시 확인", onAction: editing.recheck }
+            : {})}
+          testId="agent-profile-write-unsupported"
         />
       )}
       {offline && (
@@ -397,12 +432,12 @@ function AgentProfilePanel({
             onFieldChange(next, clearedEffort, inheritedModel)
           }
           modelDisabled={!modelEditable}
-          modelDisabledReason={
-            offline ? "연결이 끊긴 동안에는 바꿀 수 없습니다." : null
-          }
+          modelDisabledReason={writeBlockedReason}
           effortDisabled={!effortEditable}
           effortDisabledReason={
-            offline ? "연결이 끊긴 동안에는 바꿀 수 없습니다." : notice
+            // 쓰기 자체가 막힌 상태에서 강도 상자가 할 말은 강도 이야기가 아니라
+            // "여기서는 아무것도 저장되지 않는다"이다.
+            writeBlockedReason ?? notice
           }
           clearedNotice={cleared}
           ignoredNotice={

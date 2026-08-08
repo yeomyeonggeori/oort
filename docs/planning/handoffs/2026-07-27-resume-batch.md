@@ -121,7 +121,7 @@ form-action 'none'; frame-src 'none'; worker-src 'none'; manifest-src 'none'
 - **`legal/privacy-policy.md`가 빈칸 템플릿이다** — 제3자 제공·보유기간·책임자 미기재.
   **공개 런치를 막는 항목**이고 법률 검토가 필요하다. #841 보안 문서는 의도적으로 이걸 링크하지 않았다.
 - **#837 MOMO-635 RN 스파이크** — 실기기 5~7일. 1건이라도 FAIL이면 구현 착수 금지.
-- **ADR 결정 2건**: ADR-0138 신규(일반 유저 온보딩 / momo Cloud — ADR-0121 D6-A·D5-A가 막고 있다) ·
+- **ADR 결정 2건**: ADR-0138 신규(일반 유저 온보딩 / oort Cloud — ADR-0121 D6-A·D5-A가 막고 있다) ·
   ADR-0113 증보(3자 OAuth 커넥터).
 - **track→main 머지 승인 3건**(§3).
 

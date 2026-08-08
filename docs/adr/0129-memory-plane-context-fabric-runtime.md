@@ -7,9 +7,9 @@
 ## Context
 
 1. **스펙은 있고 런타임이 없다**(19-00 실사): Context Packet은 5필드 partial projection(`MessageRoutes.swift:2013-2060`, mock tool_grants), Memory Plane은 서버 테이블 0개, Capability Cache는 정적 projection만, pgvector/FTS 부재. 규범 스펙·fixture(research/11 04~06)는 2026-06에 완비.
-2. **업계 수렴 패턴**(19-03): 2-phase 추출(ADD/UPDATE/DELETE/NOOP, mem0 논문) · 삭제 대신 시간축 무효화(Graphiti `invalid_at`) · 프로필 상시 주입+사실 질의 시 조립(memobase/Letta) · workspace→user→agent→session 4단 스코프(momo RLS와 동형) · 하이브리드 검색(semantic+BM25+temporal).
+2. **업계 수렴 패턴**(19-03): 2-phase 추출(ADD/UPDATE/DELETE/NOOP, mem0 논문) · 삭제 대신 시간축 무효화(Graphiti `invalid_at`) · 프로필 상시 주입+사실 질의 시 조립(memobase/Letta) · workspace→user→agent→session 4단 스코프(oort RLS와 동형) · 하이브리드 검색(semantic+BM25+temporal).
 3. **라이선스 지형이 경로를 강제한다**: 그래프 전용 DB는 전멸(Neo4j GPLv3·FalkorDB SSPL·Kuzu 아카이브), 사이드카(mem0 서버 등)는 제2의 SoT를 만들어 "PG=단일 SoT" 하드 룰과 충돌. **Hindsight(MIT)가 PG 단일 백엔드로 그래프 포함 메모리 시스템을 실증** — PG-native가 유일한 permissive 경로.
-4. Slack·업계 비교: Slack은 대화 원장만 갖고 메모리는 각 에이전트 벤더에 위임한다. ChatGPT Enterprise/Claude Team은 메모리를 갖되 메신저가 아니다. **"대화 원장과 메모리를 같은 거버넌스(RLS·감사·출처 역링크) 아래 두는 것"은 self-hosted 메신저인 momo만 가능한 위치.**
+4. Slack·업계 비교: Slack은 대화 원장만 갖고 메모리는 각 에이전트 벤더에 위임한다. ChatGPT Enterprise/Claude Team은 메모리를 갖되 메신저가 아니다. **"대화 원장과 메모리를 같은 거버넌스(RLS·감사·출처 역링크) 아래 두는 것"은 self-hosted 메신저인 oort만 가능한 위치.**
 
 ## Options
 

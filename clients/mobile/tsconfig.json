@@ -1,0 +1,35 @@
+{
+  "extends": "@react-native/typescript-config",
+  "compilerOptions": {
+    "types": ["jest", "node"],
+    // ES2022 for `Error.cause` (set by `@momo/core/lib/http.ts`, supported by
+    // Hermes), and DOM for the web-shaped globals React Native genuinely has:
+    // `fetch`, `Headers`, `RequestInit`, `AbortController`, `WebSocket`, and —
+    // after `src/boot/polyfills.ts` runs — a WHATWG `URL`.
+    //
+    // That last one is why DOM is not optional here. React Native's own
+    // `src/types/globals.d.ts` declares `interface URL` with **`readonly hash`**,
+    // describing its built-in regex URL, which has getters and no setters. The
+    // core assigns `url.hash` in `features/auth/deepLink.ts` when it strips an
+    // invite code out of a URL, so against React Native's declaration the core
+    // does not compile — and the declaration is wrong for THIS app, which
+    // replaces that global before any other module runs. TypeScript cannot relax
+    // a `readonly` through declaration merging (TS2687), so a local override
+    // cannot express the correction; the lib has to.
+    //
+    // The spike's tsconfig said not to carry DOM into the real app, and the
+    // reason it gave was right: DOM also declares `document`, `window` and
+    // `localStorage`, none of which exist here. That reason is answered
+    // MECHANICALLY instead of by omission — `__tests__/projectShape.test.ts`
+    // fails the build if app source references a browser-only global. This is
+    // the same trade the core makes: it does not rely on a `lib` setting to stay
+    // pure, it runs a gate.
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "baseUrl": ".",
+    "paths": {
+      "@momo/core/*": ["../../packages/momo-core/src/*"]
+    }
+  },
+  "include": ["**/*.ts", "**/*.tsx"],
+  "exclude": ["**/node_modules", "**/Pods", "ios"]
+}

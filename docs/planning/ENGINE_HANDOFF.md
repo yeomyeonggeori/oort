@@ -3,6 +3,7 @@
 > 규칙: `docs/TRACKS.md` §4. 상태: `ready`(대기) → `proposed`(성재 제안됨) → `in-progress` → `done`.
 > UXUI 세션은 세션 시작 시 §A를 읽고 ready를 성재에게 "이거 구현할까요?"로 제안하고, 집으면 상태를 갱신한다.
 > 2026-07-18 밤 통합판: UXUI 실서버 연동 배치(A-1/2/3/5/7 + A-4 답글 전송)와 엔진 배치(음소거 MOMO-477·상호작용 MOMO-478·X-1)가 main에 랜딩.
+> **2026-07-31 B4(Rust 백엔드 전환) 실측**: 새 §R 섹션 — 클라 소비 표면 68쌍 전수 대조 결과와 UI 영향. UXUI 코드 수정 요구는 R-1 한 건, 나머지는 가용성 사실이다. 정본 `docs/planning/2026-08-01-b4-contract-diff.md`.
 
 > **2026-07-21 순차 배치 정본**: UXUI 잔여 전량(A-13·A-14 포함 9항목)의 실행 순서·수용기준·함정은 `docs/planning/handoffs/2026-07-21-uxui-sequential-batch.md`가 정본이다 — UXUI 세션은 그 문서 순서대로 처리한다(성재 지시).
 > **2026-07-21 패브릭 배치 가산(PLN-20260721-01 인수)**: 순차 배치의 ⑧(MOMO-518 diff 카드)은 패브릭 Wave U의 첫 장을 겸한다(수용기준은 패브릭 패킷 §2가 우선 — research/19-05 반영 필수). 순차 배치 완료 후 **⑩ MOMO-529**(메모리 브라우저 — 엔진 527·528 랜딩 대기), **⑪ MOMO-532**(도구 관리+ACP 카드 — 엔진 533·531 랜딩 대기)를 잇는다. 정본: `docs/planning/handoffs/2026-07-21-agent-native-fabric-batch.md`.
@@ -35,7 +36,7 @@
 | A-18 | `ready`(MOMO-535 track/engine 리뷰 대기) | **outbound 이벤트 구독 관리 UI** | 관리자 설정에서 URL·이벤트 종류(멘션/승인요청/Work 상태)·활성 상태·누적 실패/자동 비활성 사유를 CRUD에 연결한다. 생성 응답의 one-time signing secret은 확인 전 이탈을 잠그고 확인 즉시 메모리에서 폐기하며 목록/수정 화면에서 재노출을 기대하지 않는다. | `/v1/workspaces/:ws/event-subscriptions`, OpenAPI, `verify_event_subscription.sh` |
 | A-19 | `done`(MOMO-550 #638, track/uxui PR 대기) | **에이전트 주소 온보딩 UI** | 관리자용 주소 입력→공개 능력·인증 요약 동의→confirm을 멤버 디렉터리·설정에 연결하고, 명부 `origin=card|local`을 제품 뱃지로 투영했다. 카드 제공 인증정보는 표시 요약만 소비하며 입력·영속 상태에 두지 않는다. | MOMO-536 `/agents/from-card`·confirm·roster origin, macOS focused tests + 한국어 light/dark snapshot |
 | A-17 | `in-progress`(MOMO-532 #604) | **ACP 세션 카드·도구 프로파일 소비 (MOMO-532)** | 로컬 `MomoLocalACPSession` plan/진행/4방향 승인과 결정 후 불변 카드를 연결하고, 앱 launch spec을 동적 MOMO-533 profile 투영으로 교체했다. 관리자 CRUD는 human bearer, 일반 실행 목록은 등록 Work Host 서명 enabled projection을 소비해 미등재/disabled를 fail-closed한다. 원격 workd 이벤트는 X-11 선행 대기. | `MomoACPSessionCard.swift`, `MomoWorkConsoleDrawer.swift`, MOMO-533 work-tool-profiles, `verify_acp_host.sh` |
-| A-19 | `ready`(MOMO-537 track/engine 리뷰 대기) | **momo 네이티브 에이전트 생성·프로필 폼** | 기존 agent 생성 화면에 이름·핸들·avatar 후속 표면과 instructions(8KB)·model preference·enabled tool 체크·mention 고정/schedule 예약을 한 장으로 연결한다. 생성 뒤 profile GET/PUT version을 사용하고, tool은 서버 grant와 교집합임을 설명하며 credential/provider secret 입력은 만들지 않는다. | ADR-0131, `POST .../agents` optional profile, `GET/PUT .../agents/:agent/profile`, OpenAPI, `verify_agent_profile.sh` |
+| A-19 | `ready`(MOMO-537 track/engine 리뷰 대기) | **oort 네이티브 에이전트 생성·프로필 폼** | 기존 agent 생성 화면에 이름·핸들·avatar 후속 표면과 instructions(8KB)·model preference·enabled tool 체크·mention 고정/schedule 예약을 한 장으로 연결한다. 생성 뒤 profile GET/PUT version을 사용하고, tool은 서버 grant와 교집합임을 설명하며 credential/provider secret 입력은 만들지 않는다. | ADR-0131, `POST .../agents` optional profile, `GET/PUT .../agents/:agent/profile`, OpenAPI, `verify_agent_profile.sh` |
 | A-10 | `done`(main 랜딩 2026-07-20) | **Work 서랍 — SwiftTerm 터미널 + 세션 스레드 브리지 (MOMO-485)** | SwiftTerm(MIT) 임베드 + Control+backtick Work 서랍, 4종 로컬 프로파일, 세션 REST/카드·realtime 투영, 기존 approval 카드 재사용, auto-approve 변경 UI, 명시 발췌/스레드 브리지, `work.control.dispatched` 로컬 실행과 ack를 연결했다. PTY raw·실제 cwd·환경 자격증명은 서버 요청/로그/영속 상태에 넣지 않으며 `work.read`도 사용자 검토·편집 전에는 전송하지 않는다. Xcode 배포 빌드의 App Sandbox는 보안 경계 변경 없이 유지해 로컬 CLI를 fail-closed하고, SwiftPM 개발 빌드에서만 PTY를 허용한다. | ADR-0114(D1~D8), WorkSessionRoutes/WorkControlRoutes, macOS 420 tests + unsigned Xcode build + `macos-ui` gate. 실 Codex 왕복은 C-2, auto-approve 초기 snapshot은 X-6 |
 | A-9 | `done`(X-5 main 랜딩으로 완성 — 2기기 수동 QA는 C-4) | **반응/수정/삭제 UI 개방** | REST/로컬 UI(A-9 배치) + 엔진 X-5(브로커·Core replay·history 복원)로 교차 클라 realtime·재시작 복원까지 보장. UXUI 추가 작업 불요 — tombstone이 이제 history에 내려오므로 목록 렌더만 재확인 권장 | PATCH·DELETE /v1/workspaces/:ws/messages/:id, PUT·DELETE .../reactions/:emoji, GET .../channels/:ch/reactions — openapi 명세·verify_message_interaction.sh 계약 예시 |
 
@@ -59,6 +60,49 @@
 | X-11 | `ready` | A-16(MOMO-529) 전체 수용기준 중 ① `memory_visibility_grant` 목록/회수 REST가 없고 ② run/응답에서 저장 packet ID를 발견할 투영 또는 run별 packet 조회가 없으며 ③ 서버가 발행하는 `memory.updated`가 Core `RealtimeEnvelope`에서 unknown type으로 폐기되고 ④ source_ref에는 message/channel ID만 있으나 ID 단건 조회가 없어 현재 history·검색 cache 밖의 출처로 이동할 수 없다. 현재 공개 계약은 packet ID를 이미 아는 호출자의 단건 GET뿐이다. | 관리자/소유자용 visibility grant list+revoke REST와 OpenAPI, `agent_run`의 credential-free `contextPacketId` 또는 `GET .../agent-runs/:run/context-packets`, Core realtime `memory.updated`, membership을 재검증하는 message ID 단건 조회(또는 source_ref에 seq 투영)를 가산한다. 그 전까지 UXUI는 grant 회수를 거짓 개방하지 않고, packet ID가 기존 메시지 props에 있을 때만 저장 packet을 조회하며, REST mutation 성공 후 재조회하고 source jump 실패를 인라인으로 고지한다. | ADR-0129 D4~D6, BUILD_TICKETS MOMO-529 델타 3, `MemoryRoutes.swift`, `ContextPacketRoutes.swift`, `RealtimeEnvelope.swift` 감사 (2026-07-22) |
 | X-15 | `ready` | MOMO-627(ADR-0135 D1 UI) 전환 표기가 **세션 한정**이라 D1의 감사 요건(전환은 기록한다 · 조용한 전환 금지)을 절반만 만족한다. ① `provider.cascade.fallback` 프레임이 유일한 사용자 증거이고 조회 REST가 없어(X-14에도 없음) 채널을 나중에 여는 사람·새로고침한 사람은 "…프로바이더로 처리됨"을 영영 못 본다. `ch:`가 recoverable이어도 신규 subscribe는 과거 히스토리를 재생하지 않는다. ② 프레임은 와이어 `position`만 싣는데 position은 자격증명 정체성이라 삭제 시 갭이 남으므로(체인 PUT 규칙) 클라이언트는 position→시도 순번 매핑을 만들 수 없고, 체인 GET은 운영자 전용이라 일반 멤버가 읽을 수 없다. | ① 턴 레코드(`momo.agent_gateway.timeline.v0`) props에 전환 요약을 싣거나 run별 전환 조회 REST를 가산한다. ② 프레임/레코드에 그 전환 시점의 **시도 순번(attempt index)**을 함께 실어 클라이언트가 position을 서수로 오역하지 않게 한다. 그 전까지 웹 UI는 서수를 쓰지 않고 엔드포인트 레이블만 주어로 쓰며(`cascadeModel.ts`), 전환 기록이 없는 턴에 "1차에서 처리됨"을 주장하지 않는다. | ADR-0135 D1, `WorkerService.cascadeFallbackBroadcastPayload`, `ProviderLinkChainRoutes.swift`, #818 리뷰 R1 H1/M8 (2026-07-26) |
 
+## R. Rust 백엔드(ADR-0145 B안) 전환이 UI에 미치는 영향 — B4 실측 (2026-07-31)
+
+> 출처: `docs/planning/2026-08-01-b4-contract-diff.md`(클라 소비 표면 68쌍 전수 실측 정본).
+> **UXUI 트랙에 요구하는 코드 수정은 R-1 한 건뿐이다.** 나머지는 "이 백엔드에서는 이 화면이 아직 안 된다"는 **가용성 사실**이며, 새 UI를 만들지 말라는 뜻이지 고치라는 뜻이 아니다.
+> 계약 불일치로 인한 클라 수정 요구는 **0건**이다 — 실측한 모든 갭은 서버(Rust)가 Swift 계약을 아직 안 따라간 것이었고, 부팅 경로 3건은 B4에서 서버측으로 닫았다.
+
+| # | 상태 | 항목 | UI가 할 일 | 근거 |
+|---|---|---|---|---|
+| R-1 | `ready` | **실시간 미구성 서버(503) 카피** — `POST /v1/auth/realtime-token`이 새 상태 **503 `realtime is not configured on this server`**를 답할 수 있다. Rust 서버는 `CENT_TOKEN_HMAC` 없이는 connection 토큰을 발급하지 않고(베이크된 기본 시크릿 금지, fail-closed), centrifuge-js는 `getToken` 실패 사유를 구분하지 않으므로 화면에는 "연결 끊김"만 남아 사용자가 자기 네트워크를 의심한다 | `fetchRealtimeToken`이 `ApiError(503)`을 구분해 실시간 배너/`RuntimeBadge`가 "이 서버는 실시간이 구성되지 않았습니다(운영자 설정 필요)"를 말하게 한다. 재시도 루프를 돌리지 않는다 — 재시도로 해결되는 상태가 아니다 | `server-rust/bins/momo-server/src/routes/realtime.rs::issue_token`, `clients/web/src/lib/api.ts:698`, `lib/realtime.ts:659` |
+| R-2 | `info` | **`routing` 선택기 잠금은 정상이다** — Rust 서버에서 `probeSendRouting`은 `400 "rootId (thread replies) is not served by momo-server yet"`을 받고 판정이 `unknown`으로 떨어져 컴포저의 모델/추론강도 선택기가 잠긴다 | **아무것도 하지 않는다.** 서버 검사 순서를 뒤집어 프로브를 `ready`로 만들면 선택기는 열리지만 실제 전송은 전부 400이다 — 갭을 닫는 게 아니라 거짓말이 된다. `routing` 실구현 배치까지 잠금 유지 | diff 문서 §4.1, `routes/messages.rs:117-140`, `features/routing/capability.ts:197-224` |
+| R-3 | `info` | **이름 표시 저하** — `GET …/roster`가 Rust 서버에 없어 `useDirectory`가 빈 디렉터리로 폴백한다. 타임라인·사이드바가 uuid 파생 라벨을 쓴다(렌더는 막히지 않음) | 새 폴백 UI를 만들지 않는다. roster 배치 랜딩 시 자동 복구 | diff 문서 §7 D-1 |
+| R-4 | `info` | **Rust 백엔드에서 404인 라우트** — 설정 전체(프로바이더 링크/체인/엔진/티어정책/초대/워크스페이스), 승인, 워크스트림, 에이전트 허브, 플러그인, 메모리, 허들, 스레드 답글, 채널 생성 | 도그푸딩 시연 범위에서 제외한다. 이 라우트들의 오류 상태를 "버그"로 리포트하지 않는다 | diff 문서 §4·§7 |
+| R-5 | `info` | **운영 전제 변경** — Rust `api` 컨테이너에 `CENT_TOKEN_HMAC`·`CENT_PROXY_SECRET`을 centrifugo와 **같은 값으로** 주입해야 실시간이 열린다. 하나라도 없으면 connection 토큰 503 / subscribe 콜백 401로 fail-closed | 빌드 고지 시 "실시간 되는 스택인지" 확인. UI 변경 없음 | `infra/rust/docker-compose.rust.yml` (B4에서 반영) |
+
+### R′. B4.1 도그푸딩 차단분 마감 (2026-07-31, `feat/B41-dogfood` → track/engine)
+
+> 근거 정본 `docs/planning/2026-08-01-b4-contract-diff.md` **§9**. **UI 파일은 한 줄도 건드리지 않았다** — 아래는 전부 "이제 이 화면이 실데이터로 열린다"는 가용성 통지이며, R-1 외에 UXUI에 요구하는 코드 수정은 여전히 0건이다.
+
+| # | 상태 | 항목 | UI가 할 일 | 근거 |
+|---|---|---|---|---|
+| R-6 | `ready` | **roster 복구(R-3 해소)** — `GET …/roster`(+`…/members` 별칭) 랜딩. 웹 `isRosterMember`가 요구하는 키(`channelCount`·`channelIds`·`capabilities`·`createdAtMs`·`updatedAtMs`)를 **빈 값이어도 생략하지 않고** 발행하므로 행이 조용히 드랍되지 않는다. 에이전트 행은 `origin`(`card`/`local`)·`agentModel`·`ownerHumanId` 동반. guest는 자기와 공유 채널의 멤버만 보이고, 그 좁힘이 `channelCount`/`channelIds`에도 같이 적용된다 | `useDirectory` 폴백 UI를 새로 만들지 않는다. 이름이 uuid 파생 라벨에서 실이름으로 자동 복구된다 | `routes/roster.rs`, `momo_messaging::list_workspace_roster`, diff §9.1 |
+| R-7 | `ready` | **채널 생성 개방(D-7)** — `POST …/channels` 201, 이름 충돌 409(대소문자 무시), 스펙 위반 400. 응답 `{channel, creatorMembership}`이고 생성자는 이미 `owner` 멤버십을 갖는다. **워크스페이스 owner/admin만** 생성 가능(ADR-0128 — 채널 권한이 아니라 워크스페이스 권한) | 사이드바의 채널 생성 액션을 실데이터로 개방 가능. 이름 규칙은 클라(`CreateChannelInput`)가 이미 같은 규칙으로 정규화하므로 400은 "둘이 어긋났다"는 신호다 | `routes/channels.rs::create`, `momo_messaging::normalize_channel_*`, diff §9.1 |
+| R-8 | `ready` | **스레드 개방(D-2)** — `rootId` 동반 전송, `GET …/messages/{root}/replies`(ASC, `cursor`/`limit`, `nextCursor`), history/replies에 `thread` 롤업 동승(**snake_case** `reply_count`/`last_reply_seq`/`last_reply_at` — `threadRollup()`이 읽는 그대로), 답글마다 `thread.updated` 브로드캐스트(**`version` 없음** — 답글의 `message.new`가 그 seq를 이미 점유했고 브로커는 비증가 version을 조용히 드랍한다). 2단 답글 400, 삭제된 root에 답글 400, 그러나 **삭제된 root의 답글 조회는 200**(대화의 종료가 기록의 삭제는 아니다) | 스레드 패널/배지를 실데이터로 개방 가능. `threadRollup()`은 무수정 | `routes/messages.rs::replies`, `momo_messaging::{list_thread_replies,build_thread_updated_payload}`, diff §9.1 |
+| R-9 | `ready` | **설정 최소분(D-3 부분)** — `GET /v1/workspaces/{ws}` → `{workspace:{id,slug,name,updatedAtMs}}`(rename의 낙관적 동시성 토큰 포함), `PUT …/channels/{ch}/notification-pref` → `{muted}`(본인 것만, 감사행 동반). **여전히 404**: AI 연결·체인·work-host-engine·티어 정책·초대·`POST /v1/workspaces`·`PATCH /v1/workspaces/{ws}` | 설정 패널의 워크스페이스 이름 섹션과 채널 음소거 토글만 개방. 나머지 섹션의 404는 계속 "이 백엔드 범위 밖"이며 버그 리포트 대상이 아니다 | `routes/workspaces.rs`, `routes/channels.rs::notification_pref`, diff §9.3 |
+| R-10 | `info` | **R-2 정정 — `routing` 프로브 판정이 `unknown` → `absent`.** `rootId`를 서빙하게 되면서 프로브의 답이 `400 rootId…`에서 `404 thread root not found`로 바뀌었다. 컴포저의 모델/강도 선택기는 **잠금+「다시 확인」이 아니라 조용한 미노출**이 된다 | **여전히 아무것도 하지 않는다.** 바뀐 것은 표현이지 사실이 아니다 — 이 서버에는 routing 축이 없고, `absent`가 `unknown`보다 정확하다(「다시 확인」해도 달라지지 않는 상태였다). 서버 검사 순서를 뒤집어 `ready`를 만들면 선택기는 열리지만 그 선택기로 보낸 전송은 전부 400 | diff §9.2, `routes/messages.rs::thread_root_then_routing` |
+| R-11 | `info` | **R-4 축소** — 404 목록에서 **roster·채널 생성·스레드 답글·워크스페이스 읽기**가 빠진다. 잔여 404: 설정(프로바이더 링크/체인/엔진/티어정책/초대/워크스페이스 생성·이름변경), 승인, 워크스트림, 에이전트 허브, 플러그인, 메모리, 허들, `routing` — 46쌍 | 도그푸딩 시연 범위를 그만큼 넓힐 수 있다. 단 R-12가 닫히기 전까지는 "코드상 열림"이지 "돌려봤다"가 아니다 | diff §9.1·§9.4 |
+| R-12 | `blocked-on-verification` | **B4.1 런타임 미검증** — 이 배치는 docker 스택을 띄우지 않았다(패킷 규율). 도그푸딩 시퀀스 conformance는 **작성만** 됐고 `#[ignore]`다 | UXUI는 이 표면들로 성재에게 시연하기 전에 오케스트레이터의 docker red 절차 결과를 확인한다. 절차는 diff §9.4 | `bins/momo-server/tests/client_rewire_smoke_pg.rs`(`the_dogfooding_sequence_round_trips`, `a_foreign_tenants_rows_are_zero_under_the_callers_guc`) |
+
+### R″. B4.2 설정 표면 마감 (2026-08-02, `feat/B42-settings` → track/engine)
+
+> 근거 정본 `docs/planning/2026-08-01-b4-contract-diff.md` **§10**. **UI 파일은 한 줄도 건드리지 않았다.** UXUI에 요구하는 코드 수정은 R-13 한 건뿐이고(R-1과 같은 종류 — 새로 생긴 서버 상태에 대한 카피), 나머지는 "이제 이 패널이 실데이터로 열린다"는 가용성 통지다.
+
+| # | 상태 | 항목 | UI가 할 일 | 근거 |
+|---|---|---|---|---|
+| R-13 | `ready` | **provider 미구성 서버(503) 카피** — `PROVIDER_LINK_MASTER_KEY`가 없는 인스턴스에서 `/v1/provider/link[…]` 6개가 **503**을 답한다(R-1의 실시간 503과 같은 fail-closed 자세: 키 없이 저장된 ciphertext를 열거나 새로 봉인할 수 없고, 200을 답하려면 bearer 상태를 지어내야 한다). 지금 AI 연결 패널은 이 상태를 "저장 실패"와 구분하지 않는다 | `fetchProviderLink`/`putProviderLink`가 `ApiError(503)`을 구분해 "이 서버는 AI 연결 저장이 구성되지 않았습니다(운영자 설정 필요)"를 말하게 한다. 재시도 루프를 돌리지 않는다 — 재시도로 해결되는 상태가 아니다. 서버 메시지는 이미 한국어 완성문이라 그대로 써도 된다 | `routes/provider_link.rs::master_key`, `settings/api.ts:132-153`, diff §10.6 |
+| R-14 | `ready` | **설정 패널 전면 개방(R-9 확장, D-3 해소)** — AI 연결(GET·PUT·DELETE)·프로바이더 체인(GET·PUT·DELETE)·연결 확인(POST)·코드 실행 호스트(GET·PUT)·추론 강도 표(GET)·구독 잔여량(GET)·티어 정책(GET·PUT ×2 스코프)·초대 목록/발급(GET·POST)·워크스페이스 생성(POST)이 전부 실데이터로 열린다 | 설정 화면의 해당 섹션들을 도그푸딩 시연 범위에 넣을 수 있다. 클라 파서(`model.ts`·`chainModel.ts`·`quotaModel.ts`)는 **무수정** — 계약이 Swift 정본 그대로다 | diff §10.1 |
+| R-15 | `info` | **연결 확인(`POST …/link/test`)은 반쪽이다** — 켜져 있고 외부이고 사용 가능한 hop은 `ok:false` + `reason:"probe_not_run"`으로 답한다. momo-server에는 HTTP 클라이언트가 없고(불변식 #2), 추가는 ADR 사안이다. 꺼둔 hop·목 모드·키 없음은 정상 판정된다 | **아무것도 하지 않는다.** `chainModel.ts:probeReasonCopy`가 이미 `probe_not_run`을 "확인이 끝나지 않았습니다"로 렌더하고, 최상단은 `providerTestMessage` 기본 갈래를 타 "연결을 확인하지 못했습니다"가 된다 — 일어난 일 그대로다. 이것을 "연결 실패"로 바꿔 쓰지 않는다 | diff §10.3 |
+| R-16 | `info` | **초대는 발급만 열렸다** — `POST …/invites`가 코드를 1회 반환하지만 `POST /v1/join`(그 코드를 소비하는 공개 가입 경로)은 **여전히 404**다. 지금 이 백엔드에서 만든 초대 링크는 **아직 아무도 쓸 수 없다** | 초대 발급 UI는 열되, 시연에서 "이 링크로 지금 가입할 수 있다"고 말하지 않는다. 초대 소비 배치 랜딩 시 자동 해소 | diff §10.2 C, §10.8 이탈 2 |
+| R-17 | `info` | **effort 축 capability 프로브가 `ready`로 뒤집힌다** — `GET /v1/provider/effort-table`이 서빙되므로 `capability.ts`의 ② 판정이 `absent` → `ready`가 된다. 단 그 축의 2층인 `…/agents/{a}/profile`은 아직 404다 | **아무것도 하지 않는다.** 실측 결과 판정을 쓰는 두 곳 모두 프로필 실패를 먼저 검사하므로(`MentionRoutingBar.tsx:148` `profileFailed`가 사유 체인 맨 앞, `AgentProfileDialog`는 프로필 없이 열리지 않음) 열리는 선택기가 없다. 메시지 한 건 오버라이드(③)는 별도 프로브라 `absent` 유지 | diff §10.4 |
+| R-18 | `info` | **R-11 축소** — 잔여 404: 초대 **가입**(`/v1/join`) 1 · 승인 2 · 워크스트림 3 · 에이전트 7 · 메모리 4 · 플러그인 6 · 허들 4 · `routing` 1 = **28쌍**. 설정·워크스페이스·명부 계열은 0 | 시연 범위를 그만큼 넓힐 수 있다. 단 R-19 전까지는 "코드상 열림" | diff §10.1 |
+| R-19 | `blocked-on-verification` | **B4.2 런타임 미검증** — docker 스택을 띄우지 않았다(패킷 규율). 설정 conformance는 **작성만** 됐고 `#[ignore]`다 | 이 표면들로 성재에게 시연하기 전에 오케스트레이터의 docker red 절차 결과를 확인한다. 절차는 diff §10.7 | `bins/momo-server/tests/settings_conformance_pg.rs` |
+| R-20 | `info` | **운영 전제 추가** — `PROVIDER_LINK_MASTER_KEY`(없으면 AI 연결 6개 503) · `PLATFORM_ADMIN_EMAILS`(비어 있으면 인스턴스-전역 표면은 `platform:read` 토큰에만 열림 — 임의의 워크스페이스 owner는 인스턴스 운영자가 아니다, MOMO-583). 마스터키가 `JWT_HMAC`/`OUTBOUND_WEBHOOK_MASTER_KEY`와 같으면 **부팅 실패** | 빌드 고지 시 "AI 연결이 되는 스택인지" 확인. UI 변경 없음 | diff §10.6 |
+
 ## B. 엔진 역요청 — 전량 완료 (main)
 
 B-1 첨부 업로드(MOMO-474) · B-2 검색 FTS(MOMO-475) · B-3 스레드 개방(MOMO-476) · B-4 알림 음소거(ADR-0124, MOMO-477) — 2026-07-18 종결.
@@ -68,7 +112,7 @@ B-1 첨부 업로드(MOMO-474) · B-2 검색 FTS(MOMO-475) · B-3 스레드 개�
 | # | 항목 | 상태 |
 |---|---|---|
 | C-1 | 허들 2-클라 실오디오 왕복 | 성재 마이크 필요 — A-5와 함께 |
-| C-2 | Work 실 Codex↔momo 왕복 | UXUI 자동 계약 검수 완료. 실제 서버·Codex CLI·승인 카드·로컬 PTY·스레드 발췌의 한 사이클은 성재 환경 수동 검수 전까지 `runtime-unverified` |
+| C-2 | Work 실 Codex↔oort 왕복 | UXUI 자동 계약 검수 완료. 실제 서버·Codex CLI·승인 카드·로컬 PTY·스레드 발췌의 한 사이클은 성재 환경 수동 검수 전까지 `runtime-unverified` |
 | C-3 | iOS deep link 실기기 재확인 | 케이블 Run 1회 |
 | C-4 | 상호작용 실 WebSocket 2-클라이언트 E2E | X-5는 history API 실수신+Core 회귀 테스트로 검증됨 — 실 ws 구독 2클라 왕복은 미실증(맥+아이폰 수동 QA로도 대체 가능) |
 
@@ -83,3 +127,12 @@ B-1 첨부 업로드(MOMO-474) · B-2 검색 FTS(MOMO-475) · B-3 스레드 개�
 - **X-14 (ready)**: ADR-0134·0135 엔진층 track/engine 랜딩(2026-07-26, #812~815) — 웹(C2) 소비 가능 표면: ①`routing{model,effort}` run 생성 파라미터(위반 400)+`GET /v1/provider/effort-table`(provider×model 유효값 정본) ②provider 체인 CRUD+`/test` `entries[]`·`cascadeOk`+run 이벤트 `provider.cascade.fallback{from,to,reason}`("2차 프로바이더로 처리됨" 카드 재료) ③`GET /v1/provider/quota-snapshots`(멤버 조회, `ageSeconds` 포함 — "마지막 확인값" 폴백 재료). 후속 미구현(의도): agent_profile.effort_pref REST writer(UI 티켓 소관), 워크스페이스 기본 tier, auto 정책(0134 D4).
 
 - **X-16 (ready)**: MOMO-634 `GET /v1/workspaces/:ws/agents/:agent/allowed-models` — 활성 워크스페이스 멤버가 한 에이전트의 유효 모델 집합만 읽을 수 있다. 값은 `MessageRoutes.allowedAgentModels`와 같은 `agent.model ∪ workspace.settings.allowed_agent_models`이고 정렬돼 있으며, workspace settings·agent profile·자격증명은 노출하지 않는다. UI는 유효 응답일 때만 모델 피커 후보와 교집합을 만들고, 응답 부재/와이어 오류에서는 기존 넓은 목록+고지 폴백을 유지해야 한다. 저장돼 있으나 허용목록 밖인 profile model은 서버가 base model로 폴백하므로 그 표기를 숨기지 않는다. OpenAPI `getAgentAllowedModels`, `scripts/verify_run_routing.sh` layer 2b가 계약 포인터다.
+
+- **X-17 (ready)**: ADR-0155 `stream.outcome` — 멈춘 스트리밍 답이 채널에 남기는 것 (#1160, track/engine). **엔진·클라 양쪽이 이 배치에서 함께 랜딩했으므로 UXUI가 새로 구현할 것은 없고, 아래는 "무엇을 믿어도 되는가"의 통지다.**
+  - **와이어**: `PATCH …/messages/{id}` 의 `stream` 블록에 선택 필드 `outcome`(`"cancelled"`|`"failed"`) 1개. 정상 완결은 **키 부재**(널 아님) — 「이 답이 끝났는가」는 어디서나 키 존재 검사다. `final:true` 와만 동반 가능하고 위반·미정의 값은 400. 하위호환: 이 필드를 모르는 생산자는 전과 똑같이 보내고 전과 똑같은 뜻이다. OpenAPI `StreamEdit.outcome`.
+  - **메시지는 자기서술적이다**: 취소·사망은 본문을 **얼리고**(지우지 않는다 — ADR-0155 B안 기각) `props["momo.stream"].outcome` 에 도장을 남긴다. `state`·`editedAtMs` 불변(「수정됨」이 붙지 않는다), `seq` 소비 없음, 프레임은 그대로 `message.edited`. 취소-동결 메시지는 **보통 메시지**다 — 인용·고정·검색 전부 그대로(인용 회귀는 `stream_edit_conformance_pg` 가 잰다).
+  - **클라가 쓰는 판정 하나**: `@momo/core/features/timeline/streamStop` 의 `streamStopMark(message, runIsOver)` → 「중단됨」 | 「응답이 끊김」 | `null`. 문구 상수도 같은 파일(`STREAM_CANCELLED_MARK`·`STREAM_CUT_OFF_MARK`). 새 표면이 꼬리를 그릴 때 이 함수만 부르면 되고, 자기 판정을 적으면 안 된다(두 입구가 있어 한쪽만 구현해도 대부분의 날에 멀쩡해 보인다).
+  - **톤은 절제**: 꼬리 한 줄 **맨 앞**(본문에 대한 가장 안쪽 서술)에 「수정됨」과 **같은 흐린 잉크**. accent·danger 금지 — 상태이지 강조가 아니다. 웹은 `gate:pin` 이 계산된 색으로 잠갔고(`[stop] "중단됨" · rgb(106,101,95) (=수정됨)`), 폰은 `conversationVisual.test.tsx` 가 `color.textFaint` 동일성으로 잠갔다.
+  - **방어 렌더링의 입력**: 닫는 PATCH 는 best effort 라 실패하면 메시지가 `streaming:true` 로 남는다. 그 경우를 잡으려고 두 클라에 `endedRuns` 스토어(터미널 `agent.status` 를 **본** run 만 적는다)를 두고 `Timeline` 이 행마다 `runEnded` 를 넣는다. **부재를 종결로 읽지 말 것** — 레일은 끝난 run 을 지우므로 부재는 새로고침 직후와 구별되지 않고, 부재 기반 판정은 도착 중인 답에 「응답이 끊김」을 붙인다.
+  - **ephemeral(`agent.partial`) 무접촉**: 진행 중 힌트 경로는 이 ADR 밖이다(durable 한 것이 없으므로 Suppressed 유지).
+  - 미결: `run_turn` 의 in-process 스트리밍 전환은 ADR-0155 결정 5의 **별도 티켓**. 그때까지 이 경로를 실제로 쓰는 것은 REST 로 스트리밍하는 prime·hermes 어댑터뿐이다.

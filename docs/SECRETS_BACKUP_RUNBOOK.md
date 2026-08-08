@@ -1,4 +1,4 @@
-# momo Secret And Backup Runbook
+# oort Secret And Backup Runbook
 
 > Scope: MOMO-006 locks the safe operating contract and file skeleton for
 > SOPS+age secrets and pgBackRest PITR. It does not include real production

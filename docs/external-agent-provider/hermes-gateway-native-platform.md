@@ -10,12 +10,12 @@ Momo supports two Hermes integration paths:
 
 | Path | Owner of agent turn | When to use |
 |---|---|---|
-| AgentWorker SSE | momo worker polls `agent_job`, calls an OpenAI-compatible `/v1/chat/completions` provider, writes the final message | deterministic local gates, existing runtime path, hosted worker control |
-| Hermes gateway native platform | Hermes treats momo as a messaging platform, receives `agent.job`, runs its provider runtime, then reports status/result to momo REST | local 1-person dogfood where Hermes should behave like Slack/Telegram adapter sync |
+| AgentWorker SSE | oort worker polls `agent_job`, calls an OpenAI-compatible `/v1/chat/completions` provider, writes the final message | deterministic local gates, existing runtime path, hosted worker control |
+| Hermes gateway native platform | Hermes treats oort as a messaging platform, receives `agent.job`, runs its provider runtime, then reports status/result to oort REST | local 1-person dogfood where Hermes should behave like Slack/Telegram adapter sync |
 
-Both paths keep the same invariant: **momo is the source of truth for the agent
+Both paths keep the same invariant: **oort is the source of truth for the agent
 execution ledger**. The Hermes adapter must not write directly to Postgres or
-publish directly to Centrifugo. Every user-visible write enters through momo
+publish directly to Centrifugo. Every user-visible write enters through oort
 REST and is persisted as `message` + `outbox` with `message.seq` ordering.
 
 ## Runtime Flow
@@ -29,7 +29,7 @@ REST and is persisted as `message` + `outbox` with `message.seq` ordering.
 4. OutboxRelay publishes the realtime job; AgentWorker intentionally skips
    `method='gateway'`.
 5. Hermes gateway adapter receives `agent.job`, invokes its provider runtime,
-   and reports progress/result to momo REST:
+   and reports progress/result to oort REST:
    - `POST /v1/workspaces/:workspace/agent-runs/:run/gateway/events`
    - `POST /v1/workspaces/:workspace/agent-runs/:run/gateway/complete`
 6. MomoServer records `agent.gateway.*` audit events, writes the durable final
@@ -68,7 +68,7 @@ scripts/momo hermes-gateway-init
 ```
 
 The helper writes `$HOME/.momo/hermes-gateway.env` outside the repo. It contains
-only momo-facing connection values:
+only oort-facing connection values:
 
 ```sh
 MOMO_API_URL=http://127.0.0.1:28180
@@ -84,10 +84,10 @@ MOMO_HOME_CHANNEL_NAME=agent-lab
 ```
 
 The adapter does not accept a human email/password and does not mint its own
-credential. The raw agent token is returned once by momo pairing, stored only in
+credential. The raw agent token is returned once by oort pairing, stored only in
 the chmod-600 env file, and can be rotated or revoked by a human admin.
 The helper also configures the Hermes home target before startup; Hermes
-lifecycle/setup notices remain adapter-local and are not durable momo messages.
+lifecycle/setup notices remain adapter-local and are not durable oort messages.
 
 The `agentwork:` work stream is a Centrifugo subscription, not a durable write path.
 It still goes through MomoServer's subscribe proxy. Dev, local-alpha, and prod
@@ -109,10 +109,10 @@ never carries `agent.job` payloads.
 
 Codex/OpenAI OAuth access tokens, refresh tokens, OpenAI API keys, and provider
 account secrets belong inside the Hermes/provider runtime. They must not be
-written to momo `.env`, momo DB, diagnostics, local gate evidence, or adapter
+written to oort `.env`, oort DB, diagnostics, local gate evidence, or adapter
 manifest files.
 
-`MOMO_AGENT_TOKEN` is a momo credential scoped to this agent's realtime,
+`MOMO_AGENT_TOKEN` is an oort credential scoped to this agent's realtime,
 pending-job, callback, and message surfaces. It is not a provider credential.
 The adapter redacts 401 response detail and never writes the bearer to logs or
 evidence.
@@ -162,7 +162,7 @@ directory requires an uppercase manifest file.
 Operator flow:
 
 1. Install or run Hermes gateway locally.
-2. Generate momo-facing pairing env:
+2. Generate oort-facing pairing env:
    ```sh
    scripts/momo hermes-gateway-init
    ```
@@ -174,12 +174,12 @@ Operator flow:
    `$HOME/.hermes/plugins/momo`. Set `MOMO_HERMES_PLUGIN_INSTALL_MODE=copy` if a
    symlink is not acceptable for the local runtime.
 4. Complete provider OAuth/login inside Hermes. The OAuth/token material stays
-   inside Hermes/provider runtime and is not copied into momo.
-5. Start momo with `AGENT_GATEWAY_MODE=gateway` and legacy secret support off.
+   inside Hermes/provider runtime and is not copied into oort.
+5. Start oort with `AGENT_GATEWAY_MODE=gateway` and legacy secret support off.
 6. Issue the agent credential from pairing and update only `MOMO_AGENT_TOKEN` in
    `$HOME/.momo/hermes-gateway.env`.
 7. Source the env and start Hermes gateway through the user's Hermes flow.
-8. Send `@hermes` from momo and confirm the final response lands in the same
+8. Send `@hermes` from oort and confirm the final response lands in the same
    channel timeline.
 
 Real evidence commands:
@@ -202,15 +202,15 @@ The real verifier writes a summary and events under
 states for:
 
 - `NEEDS_USER_INSTALL`: Hermes CLI is not installed or not on `PATH`.
-- `NEEDS_PLUGIN_INSTALL`: the momo adapter is not visible in the Hermes plugin
+- `NEEDS_PLUGIN_INSTALL`: the oort adapter is not visible in the Hermes plugin
   directory.
 - `NEEDS_PROVIDER_LOGIN`: Hermes exists but the operator has not marked provider
   OAuth/login as complete.
 - `NEEDS_PAIRING`: `MOMO_AGENT_TOKEN` is missing or still a placeholder.
-- `NEEDS_MOMO_SERVER`: momo `/health` is not reachable in gateway mode.
+- `NEEDS_MOMO_SERVER`: oort `/health` is not reachable in gateway mode.
 - `PASS`: `@hermes` produced a same-channel durable response from the agent
   member.
 
 If step 1 is unavailable, keep the real gateway plugin load and provider call as
 `runtime-unverified(real hermes gateway missing)` while relying on the mock
-harness for momo-side ledger guarantees.
+harness for oort-side ledger guarantees.

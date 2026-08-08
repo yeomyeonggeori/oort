@@ -65,7 +65,7 @@ struct Config: Sendable {
     // ---- Hermes gateway native platform adapter (MOMO-325) ----
     var agentGateway: AgentGatewayConfig
 
-    // ---- momo Cloud T3 provider adapter (ADR-0136 + ADR-0142) ----
+    // ---- oort Cloud T3 provider adapter (ADR-0136 + ADR-0142) ----
     // `MOMO_T3_PROVIDER` names an adapter-registry identifier and each managed
     // provider reads its own `MOMO_T3_PROVIDER_<ID>_*` namespace. Operator
     // credentials are optional at process boot; only T3 routes fail closed with
@@ -321,7 +321,7 @@ struct RateLimitConfig: Sendable {
 ///     `file://` documents). Rejected entries are dropped and reported so the
 ///     server can log them once at boot; a typo can therefore only ever make
 ///     the surface *narrower*, never wider.
-///   * Credentials stay off. momo authenticates with a bearer token in the
+///   * Credentials stay off. oort authenticates with a bearer token in the
 ///     `Authorization` header and issues no cookies (`grep Set-Cookie` = 0), so
 ///     `Access-Control-Allow-Credentials` is never sent. Combined with the
 ///     exact-match echo above, the forbidden `Allow-Origin: *` +
@@ -371,7 +371,7 @@ struct CORSConfig: Sendable, Equatable {
     static func normalizedOrigin(_ raw: String) -> String? {
         let candidate = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !candidate.isEmpty, candidate != "null" else { return nil }
-        // Wildcards are banned outright: momo never answers `*`, and a pattern
+        // Wildcards are banned outright: oort never answers `*`, and a pattern
         // entry must not silently degrade into an exact-match miss either.
         guard !candidate.contains("*") else { return nil }
         guard candidate.allSatisfy({ !$0.isWhitespace }) else { return nil }
@@ -464,7 +464,7 @@ enum AgentGatewayMode: String, Sendable {
 /// Hermes platform-adapter path: the server still creates the authoritative
 /// agent_run/context/budget/audit shell, publishes an `agent.job` notification to
 /// the agent realtime channel, and accepts status/result callbacks through a
-/// momo-owned REST endpoint.
+/// oort-owned REST endpoint.
 struct AgentGatewayConfig: Sendable {
     var mode: AgentGatewayMode
     var secret: String

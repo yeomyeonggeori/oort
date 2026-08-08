@@ -24,7 +24,7 @@ ADR-0002(compose 레이어링)에 스토리지 서비스를 추가하지 않아�
 **검증된 정책 사실(2025-2026):**
 - `drive.file` = non-sensitive(검증 간소). `drive`, `drive.readonly`, **그리고 `drive.metadata.readonly`도 restricted**-class.
 - Restricted scope는 연 1회 CASA 평가 요구(Tier 2 ≈ $540-1,800, Tier 3 ≈ $4,500 — 3rd-party 추정치). self-hosted OSS엔 비현실적.
-- **그러나 OAuth 클라이언트의 consent screen이 Internal(같은 Workspace 조직 소유 GCP 프로젝트)이면 Google 검증·CASA 자체가 면제.** self-hosted momo는 배포 조직마다 자기 GCP 프로젝트를 만들므로 정확히 이 케이스다. → scope 상한을 정하는 것은 Google 검증 경제학이 아니라 **momo 자체 정책(비보관·최소권한)**이 된다.
+- **그러나 OAuth 클라이언트의 consent screen이 Internal(같은 Workspace 조직 소유 GCP 프로젝트)이면 Google 검증·CASA 자체가 면제.** self-hosted oort는 배포 조직마다 자기 GCP 프로젝트를 만들므로 정확히 이 케이스다. → scope 상한을 정하는 것은 Google 검증 경제학이 아니라 **oort 자체 정책(비보관·최소권한)**이 된다.
 
 **3-모드 구조 (MOMO-122/123에 1개 모드 추가):**
 
@@ -42,7 +42,7 @@ SA 키는 MOMO-123 boundary 그대로 `credential_storage_ref`(암호화 저장,
 - **한도(공식, ≤10인엔 전부 여유):** 드라이브당 500k 아이템, 멤버 600, 파일 최대 5TB, 업로드 **사용자당 750GB/일**. API 쿼터: 프로젝트당 1M units/min. ⚠️ Google이 무료 임계 초과분 **2026년 과금 전환 예고**(90일 노티) — 워처 필요.
 - **업로드 경로:** 서버가 resumable upload 세션을 발급하고 **Swift 클라가 직접 청크 PUT** → 파일 바이트가 Hummingbird 서버를 경유하지 않음(메모리/대역폭 절약). 업로더가 Google grant 보유 시 본인 `drive.file` grant로(귀속+쿼터가 사용자 단위), 없으면 SA로.
 - **메시지 바인딩:** 기존 `file` 테이블 확장 — `drive_file_id`, `head_revision_id`, `web_view_link` 저장. `thumbnailLink`는 **수 시간 단명+credentialed** → 절대 저장하지 말고 서버 프록시로 on-demand 재파생 (MOMO-122의 "메타데이터만 저장" 규칙과 일치).
-- **권한:** 채널 ACL을 Drive per-file 권한으로 미러링하지 않는다(그건 approval-gated `share_file`/`change_permission` 경로). Drive 접근은 팀 단위로 굵게, 채널 가시성은 momo(Context Packet/RLS)가 집행 — 기존 스펙 그대로. **비공개 채널 첨부는 v0에서 공유 드라이브 제외**(업로더 개인 Drive에 `drive.file`로, momo는 file id만 보관).
+- **권한:** 채널 ACL을 Drive per-file 권한으로 미러링하지 않는다(그건 approval-gated `share_file`/`change_permission` 경로). Drive 접근은 팀 단위로 굵게, 채널 가시성은 oort(Context Packet/RLS)가 집행 — 기존 스펙 그대로. **비공개 채널 첨부는 v0에서 공유 드라이브 제외**(업로더 개인 Drive에 `drive.file`로, oort는 file id만 보관).
 
 ## 4. RAG — 2층 구조 (위키 + 파생 인덱스)
 
@@ -66,14 +66,14 @@ Drive changes.list 폴러 (workspace당 1개, SA credential, driveId 필터, 1~5
 Karpathy의 LLM knowledge base 패턴 + DeepWiki/memory-bank 프랙티스 기반:
 
 - **위키 = 1차 응답 층**: 김인턴이 유지하는 큐레이션 문서(공유 드라이브 안의 Google Docs). 팀 규모에선 위키 전체가 컨텍스트 윈도에 들어가 retrieval이 사소해짐. 사람도 Drive에서 직접 편집 가능.
-- **위키 편집 = approval-gated `propose` write가 채널 타임라인에 노출** — momo의 "거버넌스 인 컨버세이션" 원칙과 정확히 맞물리는 지점. 에이전트의 지식이 감사 가능한 아티팩트가 된다.
+- **위키 편집 = approval-gated `propose` write가 채널 타임라인에 노출** — oort의 "거버넌스 인 컨버세이션" 원칙과 정확히 맞물리는 지점. 에이전트의 지식이 감사 가능한 아티팩트가 된다.
 - **원문 RAG = 증거 층**: "계약서 PDF에 정확히 뭐라고 써 있었나"는 위키가 못 답한다. 위키의 모든 주장에 `source_id → webViewLink` 인용을 강제(Memory Plane의 `artifact_ref`/`external_source_ref` 분리 그대로).
 - 위키 문서 자체도 같은 pgvector 파이프라인에 인덱싱됨(공유 드라이브 안에 있으므로 자동).
 
 ## 5. 기존 스펙 정정·보강 (차기 리비전에 반영)
 
 1. **정정**: MOMO-122의 scope 표가 `drive.metadata.readonly`를 가벼운 metadata scope처럼 다루나 실제로는 **restricted-class**. Internal consent 전제를 명기해야 함.
-2. **보강**: "no full Drive mirrors" 규칙에 **"momo 관리 공유 드라이브에 한해 revocable 파생 인덱스(임베딩+청크 텍스트) 허용"**을 명시 — 사용자 개인 Drive(`drive.file` 선택 파일)는 기존대로 excerpt-only.
+2. **보강**: "no full Drive mirrors" 규칙에 **"oort 관리 공유 드라이브에 한해 revocable 파생 인덱스(임베딩+청크 텍스트) 허용"**을 명시 — 사용자 개인 Drive(`drive.file` 선택 파일)는 기존대로 excerpt-only.
 3. **보강**: MOMO-123 `service_account_boundary`에 `boundary_kind: shared_drive_member` 추가(DWD보다 좁은 제3모드).
 
 ## 6. 티켓 제안 + 검증 필요 항목

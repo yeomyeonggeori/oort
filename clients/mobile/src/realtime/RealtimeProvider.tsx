@@ -1,0 +1,147 @@
+import type {RealtimeStatus} from '@momo/core/lib/realtimeEvents';
+import React, {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react';
+import {getPersistedSession} from '../storage/secureSession';
+import {socketWanted} from './backgroundPolicy';
+import {createChannelRail, type ChannelRail} from './channelRail';
+import {createRealtimeTransport} from './centrifugeTransport';
+
+// =============================================================================
+// One socket for the signed-in tree.
+//
+// Mounted inside `SessionProvider` so it can take a session for granted, and
+// ABOVE the screens so that opening a conversation does not open a socket:
+// building the client per screen would mean a fresh Centrifuge on every
+// navigation, and a fresh client throws away the recovery offset that lets a
+// resubscribe replay the gap instead of cold-starting. That offset is the whole
+// reason this product does not re-sync history over REST the way Mattermost
+// does (ADR-0137 D4).
+//
+// ## The URL is read from the session, never derived
+//
+// ADR-0110: the address login returned is used verbatim. The server is the only
+// authority on where its own websocket is, and deriving `ws://` from the API
+// base is the bug that decision exists to forbid.
+//
+// The web client additionally rewrites an mDNS host down to loopback
+// (`resolveSpikeRealtimeUrl`), because Chrome's resolver hangs on `.local` in
+// that dev environment. That rewrite is NOT ported: it is a browser-resolver
+// workaround, iOS resolves `.local` through Bonjour natively, and carrying it
+// here would mean a rule that silently rewrites a real address on a platform
+// that never needed it.
+//
+// ## KNOWN BLOCKER — `Origin` (spike #837 gate 3)
+//
+// React Native's WebSocket sends an `Origin` header whose value is the socket
+// URL's own origin. Against this repo's `infra/centrifugo.json`
+// `client.allowed_origins`, `wss://app.oor7.com` is accepted and every
+// LAN/loopback address is REJECTED — the handshake fails, the socket never
+// opens, and the symptom is `{"code":2,"message":"transport closed"}` repeating
+// forever. Self-hosting on a LAN is a product property, so a self-hosted server
+// cannot serve this client until that server-side configuration decision is
+// made. Reproduced from this app in `measure/` (원점 캡처) rather than taken on
+// faith, and recorded in the PR. Not fixable here: it is a security decision
+// about a server config file this batch may not touch.
+// =============================================================================
+
+export interface RealtimeContextValue {
+  /** Null until the session yields a websocket address. */
+  rail: ChannelRail | null;
+  status: RealtimeStatus;
+  /**
+   * Does the background policy want a socket at all right now (goal RN-T2)?
+   *
+   * Distinct from `status`, which says what the socket is DOING. A backgrounded
+   * app past its grace period has no socket BY DESIGN, and centrifuge-js reports
+   * that as `connecting` forever — from the status alone it is indistinguishable
+   * from a network outage the app is fighting to recover from.
+   *
+   * Surfaces that pay per subscription (the agent progress rail: up to 32) read
+   * this instead, so they detach when the policy parks the socket and not when
+   * it merely stumbles. The timeline keeps reading `status`, which is the right
+   * question for it: "may I claim this feed is live".
+   */
+  subscriptionsWanted: boolean;
+}
+
+/**
+ * 내보내는 이유는 **캡처 하네스** 하나다 (이슈 1137).
+ *
+ * 소켓 상태를 읽는 표면은 끊긴 판과 연결된 판이 서로 다르게 생겼고, 그 차이는
+ * 나란히 놓인 사진에서만 확인된다(`measure/surfaces.tsx` 가 여백·접기·틴트·잠긴
+ * 픽커에서 이미 네 번 쓴 규율). 시뮬레이터에는 붙일 소켓이 없어 하네스는
+ * 「연결됨」을 만들 방법이 없었다 — `RealtimeProvider` 를 세워도 주소가 없으면
+ * `connecting` 에 머문다.
+ *
+ * 앱 코드는 이것을 쓰지 않는다. 앱에서 읽는 길은 `useRealtime()` 하나다.
+ */
+export const RealtimeContext = createContext<RealtimeContextValue>({
+  rail: null,
+  status: 'connecting',
+  subscriptionsWanted: false,
+});
+
+export function RealtimeProvider({
+  children,
+}: {
+  children: React.ReactNode;
+}): React.JSX.Element {
+  const url = getPersistedSession()?.realtimeWebSocketUrl ?? '';
+  const [status, setStatus] = useState<RealtimeStatus>('connecting');
+  const [rail, setRail] = useState<ChannelRail | null>(null);
+  const [subscriptionsWanted, setSubscriptionsWanted] = useState(false);
+
+  useEffect(() => {
+    if (url === '') return;
+    // `connecting` means two things to centrifuge-js and only one thing to a
+    // reader. Before the first `connected` it is the opening handshake, and
+    // "연결 중" is honest. After it, it is the reconnect loop the client sits in
+    // for as long as the network is gone — `disconnected` is emitted only when
+    // the SERVER closes the session deliberately. Reporting both as "연결 중" is
+    // why a real 40s drop showed no offline state at all on web (measured
+    // there); once we have been connected, not being connected is being
+    // disconnected.
+    let everConnected = false;
+    const transport = createRealtimeTransport({
+      url,
+      onStatus: next => {
+        if (next === 'connected') everConnected = true;
+        setStatus(
+          next === 'connecting' && everConnected ? 'disconnected' : next,
+        );
+      },
+      onPolicy: state => setSubscriptionsWanted(socketWanted(state)),
+    });
+    setRail(createChannelRail(transport.client));
+    transport.start();
+    return () => {
+      setRail(null);
+      // The socket is going away with the transport, so nothing may keep
+      // subscribing against it. Said here rather than left to `onPolicy`: a
+      // disposed transport has stopped dispatching, so it will never say this
+      // itself.
+      setSubscriptionsWanted(false);
+      transport.dispose();
+    };
+  }, [url]);
+
+  const value = useMemo<RealtimeContextValue>(
+    () => ({rail, status, subscriptionsWanted}),
+    [rail, status, subscriptionsWanted],
+  );
+
+  return (
+    <RealtimeContext.Provider value={value}>
+      {children}
+    </RealtimeContext.Provider>
+  );
+}
+
+export function useRealtime(): RealtimeContextValue {
+  return useContext(RealtimeContext);
+}

@@ -2,7 +2,7 @@
 # scripts/verify_hermes_gateway_real_smoke.sh — MOMO-326 real Hermes gateway smoke
 #
 # This verifier is intentionally credential-boundary aware:
-# - It may read momo-facing pairing env from ~/.momo/hermes-gateway.env.
+# - It may read oort-facing pairing env from ~/.momo/hermes-gateway.env.
 # - It never asks for, prints, stores, or forwards Codex/OpenAI provider tokens.
 # - Provider OAuth/login must be completed by the user inside Hermes/provider.
 set -eu
@@ -215,7 +215,7 @@ if [ -f "$GATEWAY_ENV_FILE" ]; then
   # shellcheck disable=SC1090
   . "$GATEWAY_ENV_FILE"
   set +a
-  event env PASS "loaded momo-facing gateway env"
+  event env PASS "loaded oort-facing gateway env"
 else
   event env NEEDS_PAIRING "missing $GATEWAY_ENV_FILE"
 fi

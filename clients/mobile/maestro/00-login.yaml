@@ -1,0 +1,129 @@
+appId: app.momo.ios
+name: 00-login
+# NO flow-level `env:` block — not here and not in any flow in this directory.
+#
+# Maestro 2.8 lets a flow's own `env:` defaults WIN over `--env` on the command
+# line, and the failure that produces is the worst kind available: the run looks
+# healthy for twenty steps, types the DEFAULT password into a real login form,
+# and stops on "이메일 또는 비밀번호가 맞지 않습니다" — which reads as a broken app or a
+# broken fixture, never as "the flow ignored its arguments". Proving it took a
+# capture proxy: the address on screen was the default one while `-e SERVER_URL`
+# pointed somewhere else entirely.
+#
+# Every variable is supplied by scripts/lane-phone.sh through `-e`. One that is
+# missing fails loudly — an uninterpolated `${NAME}` is typed literally and the
+# assertion on the next line reports it.
+#
+#   SERVER_URL EMAIL PASSWORD GENERAL_CHANNEL_ID AGENT_MEMBER_ID AGENT_HANDLE
+---
+# 00-login — 서버 연결 → 로그인 → 채널 목록.
+#
+# `clearState` here and nowhere else: this is the flow that proves a person with
+# nothing stored can reach their channels, so it must start from nothing. The
+# later flows deliberately inherit the session it leaves behind (and re-sign-in
+# themselves if run alone) — re-typing credentials four more times would test
+# this screen four more times and the screens they are named after zero.
+#
+# No `RCT_jsLocation` launch argument, deliberately: Maestro does not
+# interpolate `${...}` inside `launchApp.arguments`, so the port could only be
+# passed as a literal — which would pin the lane to one hard-coded port and
+# silently launch against a red screen the day it moved. The runner instead
+# guarantees Metro is on the app's OWN default port and, critically, that the
+# Metro answering there is serving THIS checkout (it reads back the
+# `x-react-native-project-root` header — the trap gate/run.mjs:111-140
+# documents: another worktree's Metro answers identically and serves its own
+# JavaScript, so a lane could go green against code that is not under test).
+- launchApp:
+    appId: app.momo.ios
+    clearState: true
+
+- runFlow: subflows/dismiss-system-alerts.yaml
+
+# Cold start on a Debug build has to fetch and execute the bundle from Metro
+# before anything is on screen at all, which is why this timeout is minutes and
+# not seconds.
+- extendedWaitUntil:
+    visible:
+      id: "server-url-input"
+    timeout: 180000
+
+- assertVisible: "oort에 연결"
+- assertVisible: "oort는 셀프호스팅입니다. 연결할 서버 주소를 입력하세요."
+
+# The server address is TYPED rather than deep-linked. `oort://join?server=…`
+# is the supported prefill and it parses correctly, but it cannot be used here —
+# see the "deep link" note in the MAESTRO-1 PR body: a warm link never reaches
+# JS on this build, and a cold one relaunches the app WITHOUT the RCT_jsLocation
+# argument above, so the app comes up on a red "No script URL provided" box.
+- tapOn:
+    id: "server-url-input"
+- inputText: ${SERVER_URL}
+
+# The hint is the screen's own echo of what it will actually call. Asserting the
+# resolved URL (not just "some hint appeared") is what makes this step evidence
+# that the app is pointed at THIS lane's stack and not a leftover address.
+- assertVisible:
+    id: "server-url-hint"
+- assertVisible: "요청 주소: ${SERVER_URL}/v1/…"
+
+- tapOn:
+    id: "email-input"
+- inputText: ${EMAIL}
+
+# `eraseText` before typing the password is load-bearing, and it is not
+# defensive tidiness — without it this flow types the right string and the app
+# sends the WRONG one. Measured against a capture server: `tapOn` + `inputText`
+# on this field produced a login body whose password was mangled or empty
+# (empty leaves `canSubmit` false, so the submit tap silently does nothing and
+# the failure reads as "the button is broken"); the same sequence with
+# `eraseText` in front sent `password` byte-exact, every run.
+#
+# It is specific to the secure field — the identical pattern on `email-input`
+# and `server-url-input` above is faithful — which points at the known iOS
+# behaviour where a `secureTextEntry` bound to a controlled `value` clears
+# itself on the first keystroke after focus. `eraseText` settles the field
+# first, so no keystroke is the one that races the clear.
+- tapOn:
+    id: "password-input"
+- eraseText
+- inputText: ${PASSWORD}
+
+# The submit button sits under the keyboard on this device; tapping it while the
+# keyboard is up hits the keyboard.
+- hideKeyboard
+- assertVisible:
+    id: "submit-button"
+- tapOn:
+    id: "submit-button"
+
+# A successful sign-in is what raises the system alerts, and it raises TWO, one
+# after the other — the keychain's "암호를 저장하겠습니까?" as the form submits, then
+# the app's push permission prompt once it reaches a signed-in state. They are
+# seconds apart, so a single dismissal races the second one and the flow then
+# fails on an assertion about a screen that is fully rendered underneath a
+# dialog. Dismissing on a short loop covers the whole window without pinning a
+# fixed sleep to whichever machine this ran on first.
+- repeat:
+    times: 6
+    commands:
+      - runFlow: subflows/dismiss-system-alerts.yaml
+      - waitForAnimationToEnd:
+          timeout: 2000
+
+- extendedWaitUntil:
+    visible:
+      id: "sidebar-list"
+    timeout: 60000
+
+# Signed in AND the workspace actually arrived: the channel the rest of the lane
+# works in is present, and the tab bar the rest of the lane navigates by is up.
+- assertVisible:
+    id: "sidebar-row-channel:${GENERAL_CHANNEL_ID}"
+- assertVisible:
+    id: "tab-channels"
+- assertVisible:
+    id: "tab-inbox"
+- assertVisible:
+    id: "tab-agents"
+- assertNotVisible:
+    id: "server-url-input"

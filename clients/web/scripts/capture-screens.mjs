@@ -21,7 +21,7 @@
 // =============================================================================
 
 import { spawn } from "node:child_process";
-import { mkdirSync, existsSync } from "node:fs";
+import { mkdirSync, existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
@@ -33,6 +33,130 @@ const OUT_DIR = process.env.OUT_DIR
 const PORT = Number(process.env.CAPTURE_PORT || 5178);
 const ORIGIN = `http://127.0.0.1:${PORT}`;
 const VIEWPORT = { width: 1280, height: 800 };
+
+// 폰 프로파일 (goal B6). 390x844는 iPhone 14/15의 CSS 뷰포트이고, 이 티켓을 연
+// 실캡처를 찍은 그 기기다. deviceScaleFactor 3 · hasTouch · isMobile까지 켜는
+// 이유는 이 프로파일이 재는 것이 색이 아니라 **기하**이기 때문이다: 터치
+// 타깃과 가로 오버플로는 포인터 컨텍스트에서는 측정되지 않는다.
+const MOBILE_VIEWPORT = { width: 390, height: 844 };
+
+// 실기기 근사 (goal B9). 렌더 엔진은 여전히 Chromium이지만, UA로 갈리는 코드 경로는
+// 이 문자열을 본다. 성재의 캡처가 이 기기·이 브라우저에서 나왔으므로 프로파일도 그것을
+// 말한다. 엔진 자체를 바꾸는 것(WebKit 프로파일)은 이 배치의 범위 밖이고, 이 배치가
+// 고치는 결함 셋은 전부 기하이지 엔진 차이가 아니다.
+const IPHONE_UA =
+  "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1";
+
+// goal B8 B2: the shell's connection banner waits out a 15s dwell before it
+// claims the rail is down (features/common/connectionAlert.ts SUSTAINED_DOWN_MS).
+// Kept a second over it so the capture is not racing the threshold it is meant
+// to photograph.
+const SUSTAINED_DOWN_WAIT_MS = 16_000;
+
+/**
+ * 폰에서 손가락으로 눌러야 하는 컨트롤과 그 최소 크기(px). 44px는 WCAG 2.5.5 /
+ * Apple HIG의 값이고, tokens.css의 `tap-target`이 같은 수를 판다.
+ *
+ * 이 목록이 캡처 안에 있는 이유: 스크린샷은 버튼이 **작다**는 것을 보여주지
+ * 않는다. 리뷰어가 픽셀을 재지 않으면 28px 버튼과 44px 버튼은 같은 그림이다.
+ */
+const MOBILE_TAP_TARGETS = [
+  ["open-sidebar-drawer", "채널 목록 열기"],
+  ["composer-send", "메시지 보내기"],
+  ["composer-input", "컴포저 입력"],
+  // B6 H1 — 오터치 비용이 가장 큰 1급 액션도 44px을 회귀로 잰다.
+  // optional: 인박스 화면에만 존재 — 있으면 44px을 강제, 없으면 건너뛴다.
+  ["inbox-approval-approve", "인박스 승인", "optional"],
+  ["inbox-approval-reject", "인박스 거부", "optional"],
+  // B11 R2 H3 — 폰의 액션 흐름이 **착지하는** 컨트롤들. 시트 자체는 44px이었지만
+  // 시트가 여는 곳은 아무도 재지 않았고, 셋 중 둘이 44px 아래였다. 전부
+  // optional인 것은 각자 자기 화면에만 존재하기 때문이고, 그 화면을 찍는 프레임이
+  // `assertTapTargets`를 다시 부른다.
+  ["message-editor-save", "수정 저장", "optional"],
+  ["message-editor-cancel", "수정 취소", "optional"],
+  ["delete-message-commit", "삭제 확인", "optional"],
+  ["delete-message-cancel", "삭제 취소", "optional"],
+  ["thread-composer-input", "답글 입력", "optional"],
+  ["thread-composer-send", "답글 보내기", "optional"],
+  ["long-press-hint-dismiss", "안내 닫기", "optional"],
+];
+
+// 연결 화면의 폼 1급 컨트롤 (goal P3 1-4).
+//
+// 위 목록과 나누는 이유: 그쪽은 채팅 표면에만 있는 컨트롤을 **필수**로 재고, 이 넷은
+// 로그인 화면에만 있다. 한 목록에 섞으면 어느 화면에서 재든 절반이 "없음"이 되어
+// 전부 optional로 내려앉고, 그러면 있어야 할 컨트롤이 사라져도 아무도 실패하지
+// 않는다. 각자 자기 화면에서 필수로 재는 편이 더 센 자다.
+//
+// 왜 이 넷인가: `--spacing-control`이 32px이라 로그인 폼 전체가 32px이었다. WCAG
+// 2.5.8 AA(24×24)는 통과하지만 Apple HIG의 44pt는 통과하지 못하고, 로그인은 폰에서
+// 가장 먼저 만나는 화면이라 여기서 잘못 눌린 칸이 이 제품의 첫인상이 된다.
+const LOGIN_TAP_TARGETS = [
+  ["login-server", "서버 주소 입력"],
+  ["login-email", "이메일 입력"],
+  ["login-password", "비밀번호 입력"],
+  ["login-submit", "로그인 버튼"],
+];
+
+// ADR-0134 계약 픽스처. 단위 테스트(routingModel.test.ts)와 라우팅 캡처가 이미
+// 쓰는 그 파일이고, 여기서도 같은 것을 읽어 세 표면이 한 표를 본다.
+const ROUTING_FIXTURES = JSON.parse(
+  readFileSync(resolve(WEB_ROOT, "src/features/routing/routingFixtures.json"), "utf8")
+);
+
+// 설정 > 사용량 · 구독 잔여량 (#1057). 게이트(gate-shell-layout)와 모델 테스트가
+// 계약으로 붙잡는 그 파일들을 그대로 읽는다.
+const USAGE_FIXTURE = JSON.parse(
+  readFileSync(resolve(WEB_ROOT, "src/features/settings/usageFixtures.json"), "utf8")
+).normal;
+const QUOTA_FIXTURE = JSON.parse(
+  readFileSync(resolve(WEB_ROOT, "src/features/settings/quotaFixtures.json"), "utf8")
+).healthy;
+
+// 설정 > 멤버와 초대. 한 장짜리 목록은 이 패널의 실제 길이가 아니다 — 만료·사용
+// 횟수·역할이 섞인 여러 줄이 이 화면의 기본 상태다.
+// 설정 > 앱은 **카탈로그 한 줄과 함께** 찍는다 (이슈 #1125에서 열림).
+//
+// 여기 있던 「빈 카탈로그로 찍는다」는 회피였다. 2026-08-06 실측은 「카탈로그 행이
+// 있으면 다음 섹션에서 `settings-route` 가 30초 안에 돌아오지 않는다」였고, 원인을
+// `앱` 패널의 `wide` 마켓플레이스 레이아웃으로 **추정**해 두었다. 그 추정은 틀렸다 —
+// `wide` 는 `max-width` 한 줄이다. 실제 원인은 짝 없는 `/v1` 요청이 프리뷰 프록시를
+// 타고 진짜 서버로 나간 것이고, 규명과 수리는 `installUnmockedFallback` 머리말에 있다.
+/**
+ * 설정 > 앱 카탈로그의 한 줄. 출하 시드 매니페스트 그대로다
+ * (`gate-shell-layout.mjs` 와 같은 파일, 같은 이유).
+ */
+const PLUGIN_MANIFEST = JSON.parse(
+  readFileSync(
+    resolve(WEB_ROOT, "../../server/Fixtures/plugin-manifests/github.json"),
+    "utf8"
+  )
+);
+const PLUGIN_CATALOG_ITEM = {
+  pluginId: PLUGIN_MANIFEST.plugin.id,
+  name: PLUGIN_MANIFEST.plugin.name,
+  version: PLUGIN_MANIFEST.plugin.version,
+  description: PLUGIN_MANIFEST.plugin.description,
+  official: true,
+  recommended: true,
+  egressDomains: PLUGIN_MANIFEST.momo.egressDomains,
+  recommendedFor: PLUGIN_MANIFEST.momo.recommendedFor,
+  installed: false,
+  enabled: false,
+};
+
+const SETTINGS_INVITES = Array.from({ length: 6 }, (_, i) => ({
+  id: `capture-invite-${i}`,
+  workspaceId: "00000000-0000-7000-8000-000000000001",
+  codePreview: `zz${String(i).padStart(4, "0")}`,
+  role: i % 2 ? "admin" : "member",
+  maxUses: 5,
+  usedCount: i % 5,
+  expiresAtMs: Date.now() + (i + 1) * 86_400_000,
+  createdBy: "019f94e3-7a10-79cd-9dee-208f47edd9a8",
+  createdAtMs: Date.now(),
+  updatedAtMs: Date.now(),
+}));
 
 const WORKSPACE_ID = "00000000-0000-7000-8000-000000000001";
 const GENERAL_ID = "00000000-0000-7000-8000-000000000201";
@@ -301,11 +425,73 @@ const BODIES = [
       },
     },
   ],
+  // goal B8 H6. Agents answer in markdown whether or not anyone asked, and
+  // before this batch the channel printed the asterisks. One row carries every
+  // construct the parser reads, so a review can see bold, code, a list and a
+  // link at the density they actually ship at.
+  [
+    HERMES,
+    "배포 전 확인할 것은 **롤백 경로**입니다.\n" +
+      "- `make deploy` 는 이전 태그를 남깁니다\n" +
+      "- 실패하면 *즉시* 이전 태그로 되돌립니다\n" +
+      "자세한 절차는 [배포 문서](https://momo.example/docs/deploy)에 있습니다.\n" +
+      "```sh\nmake deploy TAG=v0.4.2\n```",
+  ],
+  // design-review 1R B1. Two things a picture has to show, not just a unit test:
+  // a Korean date at the start of a line stays a date (it used to become "1."
+  // with the year eaten), and a quotation that starts at step 3 still says 3.
+  [
+    HERMES,
+    "2026. 07. 30. 배포는 롤백으로 끝났습니다. 런북 기준으로 3단계부터 다시 합니다.\n" +
+      "3. 이전 태그로 되돌리기\n" +
+      "4. 헬스 체크 통과 확인",
+  ],
+  // design-review 3R Blocker, in a picture: two Korean date lines in a row used
+  // to become an ordered list and the browser renumbered the second one, so the
+  // reader saw a date nobody typed (12. 31. -> 13. 31.).
+  [ME, "12. 25. 크리스마스 휴무\n12. 31. 종무식 후 배포 동결"],
+  [ME, "@hermes 어제 실패한 배포 로그도 같이 봐줄래요?"],
+  // goal B8 H2. The worker's failure notice: one Korean sentence in the body,
+  // a machine code in props, and NOTHING of the provider's own text anywhere.
+  // The card's 자세히 carries the repair.
+  [
+    HERMES,
+    "지금은 답변을 만들지 못했습니다. 잠시 뒤에 다시 멘션해 주세요.",
+    "text",
+    {
+      run_id: "0199aa11-2222-7000-8000-0000000000c9",
+      source: "agent_worker.provider_failure.v0",
+      error_code: "provider_failed",
+      trigger_message_id: "0199aa11-2222-7000-8000-0000000000d2",
+      author_member_id: ME,
+    },
+  ],
 ];
+
+// 긴 무공백 토큰 (goal B9 §0.1이 지목한 모양). 위 열 줄에서 가장 긴 낱말은
+// `agentworker.resume_approval.v0`(30자)이고, 390px 폰에서 그 정도는 아무것도 밀어내지
+// 못한다. 실제 팀 채널에 흐르는 것은 이런 것들이다: 게이트웨이가 뱉은 URL 한 줄,
+// 다이제스트, 그리고 사람이 띄어쓰기 없이 이어 쓴 한 덩어리. 셋을 한 줄에 몰아 넣은
+// 것은 억지가 아니라 재현이다 — 502를 붙여 보내는 사람은 요청 URL과 페이로드 해시를
+// 같이 붙인다.
+//
+// **이 줄은 지금 통과한다**(Chromium/WebKit 양쪽 390px에서 접힌다, 실측). 본문에는
+// `min-w-0 flex-1` 조상이 있어 상자 폭이 정해지고, 그러면 `break-words`만으로도 낱말이
+// 쪼개지기 때문이다. 그래도 남기는 이유는 §0.1이 이 모양을 원인 후보로 지목했기
+// 때문이다: 통과하는 픽스처는 주장이 아니라 **울타리**다. 실제로 붉었던 자리와 그것을
+// 재는 방법은 아래 `applyLongTokenStress`에 있다.
+const LONG_URL =
+  "https://gateway.dawn.internal:8443/v1/workspaces/00000000-0000-7000-8000-000000000001/channels/00000000-0000-7000-8000-000000000201/messages?before=1400&limit=200&include=props";
+const LONG_DIGEST =
+  "sha256:9f2b7c14e0a83d5b6f1c2ea47d90b83c5417ae62d0f39b8c74a15e2306bd9fc1";
+// 띄어쓰기 없이 이어 쓴 한글 한 덩어리 (§0.1의 `@oort ...답변이` 모양). 한글은 음절
+// 사이에서 끊을 수 있어 이것만으로는 넘치지 않고, 라틴 토큰과 이어 붙어야 한 낱말이
+// 된다 — 그래서 붙여 쓴다.
+const LONG_HANGUL = "재시작루프가또났는데원인은outbox_drain_worker_restart_loop_2026_08_02";
 
 function makeMessages(count) {
   const base = Date.now() - count * 60_000;
-  return Array.from({ length: count }, (_, i) => {
+  const rows = Array.from({ length: count }, (_, i) => {
     const [author, body, type, props] = BODIES[i % BODIES.length];
     return {
       id: `capture-${i + 1}`,
@@ -321,6 +507,93 @@ function makeMessages(count) {
       createdAtMs: base + i * 60_000,
     };
   });
+  // 메시지 액션이 남기는 자국 세 가지 (goal B11). 새 행을 끼워 넣지 않고 **이미
+  // 있는 행의 상태만 바꾼다**: seq도 개수도 그대로라 기존 프레임과 게이트가 재던
+  // 것이 흔들리지 않는다. 자리는 아래에서 넷째~둘째 — 타임라인이 아래에 붙어
+  // 열리므로 캡처가 서는 자리에서 반드시 렌더된다.
+  //
+  // 삭제된 행이 픽스처에 있다는 것 자체가 요점이다: 지워진 메시지는 목록에서
+  // 조용히 사라지지 않고 자리에 「삭제된 메시지」로 남아야 하며, 그래야 seq에
+  // 구멍이 뚫린 것처럼 보이지 않는다.
+  // 고르는 규칙: **평범한 한 줄짜리 텍스트 행만** 고른다. B8의 실패 카드나 마크다운
+  // 행처럼 구조가 있는 행을 건드리면 그 프레임의 픽스처가 조용히 사라진다 — 처음
+  // 쓴 판이 `rows[count-2]`를 지웠고, 그것이 하필 턴 실패 카드여서 B8 프레임이
+  // `turn-failure`를 못 찾고 죽었다. 실패는 여기서 났는데 증상은 200줄 뒤에서
+  // 났다.
+  const plainText = (row) =>
+    row && row.type === "text" && typeof row.body === "string" && !row.props;
+  const pick = (offset) => {
+    const row = rows[count - offset];
+    return plainText(row) ? row : null;
+  };
+
+  const threaded = pick(4);
+  if (threaded) {
+    threaded.thread = {
+      reply_count: 3,
+      last_reply_seq: 1400 + count - 1,
+      last_reply_at: base + (count - 1) * 60_000,
+    };
+  }
+  const edited = pick(3);
+  if (edited) {
+    edited.state = "edited";
+    edited.editedAtMs = base + count * 60_000;
+  }
+  const removed = pick(1);
+  if (removed) {
+    removed.state = "deleted";
+    removed.body = undefined;
+    removed.deletedAtMs = base + count * 60_000;
+  }
+
+  // 언제나 **가장 최근 줄**이다. 타임라인은 아래에 붙어 열리고(alignToBottom) 가상
+  // 목록이라, 중간에 끼워 넣은 행은 캡처가 서는 자리에서 렌더되지 않을 수 있다.
+  // 게이트가 재지 못하는 픽스처는 픽스처가 아니다.
+  rows.push({
+    id: `capture-${count + 1}`,
+    channelId: GENERAL_ID,
+    seq: 1400 + count,
+    hlcTs: base + count * 60_000,
+    hlcCount: 0,
+    authorMemberId: ME,
+    type: "text",
+    body: `502가 계속 납니다. GET ${LONG_URL} 이고 페이로드는 ${LONG_DIGEST} 입니다. ${LONG_HANGUL}`,
+    state: "sent",
+    createdAtMs: base + count * 60_000,
+  });
+  return rows;
+}
+
+/**
+ * 한 스레드의 답글 (goal B11). 루트는 `capture-13`(makeMessages가 rollup을 다는
+ * 행)이고, 답글은 그 아래 seq를 잇는다.
+ *
+ * 셋을 사람과 에이전트가 번갈아 쓴다: 스레드는 대화이지 전사(transcript)가
+ * 아니라는 것이 이 패널이 답글 컴포저를 갖는 이유이고, 프레임은 그 대화를 보여야
+ * 한다. 답글에는 `rootId`가 있으므로 행의 액션에서 「답글 달기」가 빠진다 —
+ * momo 스레드는 한 단계이고, 답글에 답글을 걸면 서버가 거절한다.
+ */
+function makeThreadReplies() {
+  const base = Date.now() - 6 * 60_000;
+  const rows = [
+    [HERMES, "런북 3단계부터 다시 도는 게 맞습니다. 헬스 체크는 제가 확인할게요."],
+    [ME, "네, 그 사이 배포는 잠급니다."],
+    [HERMES, "헬스 체크 통과했습니다. 다음 배포부터는 태그를 먼저 고정하죠."],
+  ];
+  return rows.map(([author, body], i) => ({
+    id: `capture-reply-${i + 1}`,
+    channelId: GENERAL_ID,
+    rootId: "capture-13",
+    seq: 1500 + i,
+    hlcTs: base + i * 60_000,
+    hlcCount: 0,
+    authorMemberId: author,
+    type: "text",
+    body,
+    state: "sent",
+    createdAtMs: base + i * 60_000,
+  }));
 }
 
 // 코드 실행 호스트 (MOMO-617). The registry is the block a review has to look
@@ -605,10 +878,23 @@ const MEMBER_TIER_POLICY = {
   updatedAtMs: Date.now() - 40 * 60_000,
 };
 
-/** The DM the directory opens onto: a short 1:1 with the agent, not a channel. */
+/**
+ * The DM the directory opens onto: a short 1:1 with the agent, not a channel.
+ *
+ * 꼬리 세 쌍은 goal P3 1-2가 고치는 그 모양이다. 1:1 DM에서는 사람이 쓰는 **모든**
+ * 메시지가 상대 에이전트를 부르므로, 그 에이전트가 멈춰 있으면 서버는 부를 때마다
+ * 시스템 한 줄을 남긴다 — 세 번 말하면 똑같은 문장이 세 줄이다. 픽스처가 세 줄을
+ * 그대로 보내고 화면이 한 줄로 접는 것이, 접기가 서버가 아니라 클라이언트에서
+ * 일어난다는 증거다.
+ *
+ * 대소문자도 실물 그대로다: 알림 행의 `authorMemberId`는 Swift의 `uuidString`이라
+ * 대문자이고, `props`의 두 키는 서버가 손으로 소문자를 적는 자리다
+ * (MessageRoutes.swift:1605-1607). 한 행 안에서 갈리는 값이므로, 접기가 `uuidEq`로
+ * 비교하지 않으면 이 프레임에서 바로 드러난다.
+ */
 function makeDmMessages() {
-  const base = Date.now() - 3 * 60_000;
-  return [
+  const base = Date.now() - 12 * 60_000;
+  const spoken = [
     [ME, "어제 올린 relay 패치, DM으로 짧게만 확인할게요. 롤백 절차는 그대로죠?"],
     [HERMES, "그대로입니다. outbox 재처리 스크립트만 먼저 돌리면 됩니다."],
     [ME, "좋아요. 배포 끝나면 여기로 결과만 남겨주세요."],
@@ -624,7 +910,163 @@ function makeDmMessages() {
     state: "sent",
     createdAtMs: base + i * 60_000,
   }));
+
+  // 그 뒤로 hermes가 멈췄고, 성재는 그것을 모른 채 세 번 더 말한다.
+  const unanswered = [
+    "배포 결과 나왔나요?",
+    "outbox 쪽 지표만 먼저 알려주세요.",
+    "확인되면 알려주세요. 급하진 않습니다.",
+  ];
+  const tail = [];
+  unanswered.forEach((body, i) => {
+    const seq = 4 + i * 2;
+    const at = base + (3 + i * 2) * 60_000;
+    tail.push({
+      id: `capture-dm-${seq}`,
+      channelId: DM_ID,
+      seq,
+      hlcTs: at,
+      hlcCount: 0,
+      authorMemberId: ME,
+      type: "text",
+      body,
+      state: "sent",
+      createdAtMs: at,
+    });
+    tail.push({
+      id: `capture-dm-${seq + 1}`,
+      channelId: DM_ID,
+      seq: seq + 1,
+      hlcTs: at + 1_000,
+      hlcCount: 0,
+      authorMemberId: HERMES.toUpperCase(),
+      type: "system",
+      body: "hermes은(는) 현재 일시정지되어 있습니다.",
+      props: {
+        kind: "agent_paused",
+        agent_member_id: HERMES,
+        source_message_id: `capture-dm-${seq}`,
+      },
+      createdAtMs: at + 1_000,
+    });
+  });
+  return [...spoken, ...tail];
 }
+
+// ---- 에이전트 허브 (goal B5.3b) ---------------------------------------------
+// 세 표면이 여기서 처음 화면에 오른다: 프로필 카드(모델·추론 강도·상태), 채널
+// 배치, 그리고 만들기 폼. allowed-models가 200이라는 것은 이 서버에 프로필 쓰기와
+// 일시정지가 있다는 뜻이고(capability.ts ④), 그래서 편집 컨트롤이 열린 프레임과
+// 404로 잠긴 프레임을 둘 다 찍는다.
+
+const AGENT_PROFILE = {
+  agentMemberId: HERMES,
+  workspaceId: WORKSPACE_ID,
+  instructions:
+    "배포 전에는 롤백 절차부터 확인하고, 근거가 없는 추정은 추정이라고 먼저 말합니다.",
+  modelPref: "hermes-agent",
+  enabledTools: ["shell", "git"],
+  triggers: { mention: true },
+  paused: false,
+  version: 3,
+  updatedBy: ME,
+  updatedAtMs: Date.now() - 6 * 3_600_000,
+};
+
+const ALLOWED_AGENT_MODELS = ["hermes-agent", "hermes-agent-mini"];
+
+/** The id POST /agents answers with: the hub selects it right after. */
+const CREATED_AGENT_ID = "019f9b10-0000-7000-8000-0000000004a1";
+
+/** 결정 대기 (D-5). snake_case on the wire, the way the ledger projects it. */
+/**
+ * 스폰 승인의 `execution` — ADR-0125 D6-A의 호스트 선택기(이슈 1114).
+ *
+ * 후보 넷을 다 싣는다. 자격 있는 둘만 실으면 이 캡처는 라디오가 있다는 것만
+ * 보여주고, 이 배치의 논점 — **자격 없는 줄이 사유와 함께 선다** — 은 사진에
+ * 나오지 않는다. 서버가 실제로 내는 모양 그대로 snake_case다
+ * (`crates/momo-t3/src/work_control.rs` `spawn_execution_object`).
+ */
+const SPAWN_EXECUTION = {
+  kind: "work_session_spawn",
+  tool: "codex",
+  label: "릴레이 재시작 절차 정리",
+  requested_host_id: null,
+  default_host_id: "019f9b10-0000-7000-8000-00000000c001",
+  host_candidates: [
+    {
+      host_id: "019f9b10-0000-7000-8000-00000000c001",
+      display_name: "성재 맥북",
+      host_type: "app",
+      tier: "local",
+      scope: "member",
+      online: true,
+      selectable: true,
+      unavailable_reason: null,
+    },
+    {
+      host_id: "019f9b10-0000-7000-8000-00000000c002",
+      display_name: "팀 VPS (서울)",
+      host_type: "workd",
+      tier: "remote",
+      scope: "workspace",
+      online: true,
+      selectable: true,
+      unavailable_reason: null,
+    },
+    {
+      host_id: "019f9b10-0000-7000-8000-00000000c003",
+      display_name: "작업실 아이맥",
+      host_type: "app",
+      tier: "local",
+      scope: "member",
+      online: false,
+      selectable: false,
+      unavailable_reason: "offline",
+    },
+    {
+      host_id: "019f9b10-0000-7000-8000-00000000c004",
+      display_name: "momo Cloud",
+      host_type: "cloud",
+      tier: "cloud",
+      scope: "workspace",
+      online: true,
+      selectable: false,
+      unavailable_reason: "t3_disabled",
+    },
+  ],
+};
+
+const APPROVALS = [
+  {
+    id: "019f9b10-0000-7000-8000-0000000005a1",
+    workspace_id: WORKSPACE_ID,
+    run_id: "019f9b10-0000-7000-8000-0000000005b1",
+    channel_id: GENERAL_ID,
+    requested_by: HERMES,
+    on_behalf_of: ME,
+    action_type: "work.spawn",
+    status: "pending",
+    is_reversible: false,
+    expires_at_ms: Date.now() + 26 * 60_000,
+    payload: {
+      source: "work_control",
+      tool_call: { call_id: "call-spawn", name: "work.spawn" },
+      execution: SPAWN_EXECUTION,
+    },
+  },
+  {
+    id: "019f9b10-0000-7000-8000-0000000005a2",
+    workspace_id: WORKSPACE_ID,
+    run_id: "019f9b10-0000-7000-8000-0000000005b2",
+    channel_id: "00000000-0000-7000-8000-000000000202",
+    requested_by: HERMES,
+    action_type: "shell.exec",
+    status: "pending",
+    is_reversible: true,
+    expires_at_ms: Date.now() + 3 * 3_600_000,
+  },
+];
 
 function json(route, body) {
   return route.fulfill({
@@ -634,8 +1076,82 @@ function json(route, body) {
   });
 }
 
+/**
+ * 이 하네스가 **답하지 않은** `/v1` 경로들 (이슈 #1125).
+ *
+ * 아래 `unmockedFallback` 이 채운다. 런이 끝날 때 한 번 인쇄되므로, 새 표면이
+ * 붙어 요청이 하나 늘면 다음 사람이 이 목록에서 본다.
+ */
+const unmockedPaths = new Set();
+
+/**
+ * 짝이 없는 `/v1` 요청에 **이 하네스가 직접** 답한다 (이슈 #1125).
+ *
+ * ## 왜 필요한가 — 프리뷰 서버는 `/v1` 을 **진짜 서버로 넘긴다**
+ *
+ * `vite.config.ts` 의 `preview.proxy` 는 `/v1` 을 `http://127.0.0.1:28000` 으로
+ * 보낸다. 그래서 목이 없는 경로는 응답이 **없는 것이 아니라 그 자리에 떠 있는
+ * 아무 서버의 것**이 된다. 실측(2026-08-07): 로컬 스택이 떠 있는 기계에서
+ * `GET …/plugins/{id}` 가 **401** 로 돌아왔고, 코어의 `authed()` 는 계약대로
+ * 회전을 한 번 시도한 뒤(그것도 401) `markAuthExpired()` 를 불러 **앱이 스스로
+ * 로그아웃**했다. 캡처는 그때부터 로그인 화면을 찍는다.
+ *
+ * 그 답이 기계마다 다르다는 것이 이 결함의 성질이다. 28000 에 아무것도 없는
+ * 기계에서는 프록시가 연결 거부로 끝나 화면이 그냥 **매달리고**, 그래서 앞선
+ * 진단은 이것을 「`앱` 패널의 `wide` 마켓플레이스 레이아웃 문제」로 적었다
+ * (설정 스윕 주석, 2026-08-06). `wide` 는 `max-width` 한 줄이고 아무 잘못이
+ * 없었다 — 레이아웃이 아니라 **짝 없는 요청**이 원인이었다.
+ *
+ * ## 왜 404 이고 왜 죽이지 않는가
+ *
+ * 이 하네스가 흉내 내는 것은 「우리가 실제로 이야기하는 서버」이고, 그 서버가
+ * 모르는 경로에 하는 답이 본문 없는 404 다(`capture-honesty.mjs` 의 `absent` 와
+ * 같은 모양·같은 이유). 클라이언트는 그 404 를 **미제공으로 접을 줄 안다**
+ * (`serverSaysAbsent`). 죽이지 않는 이유는 이것이 판정 게이트가 아니라 증거
+ * 레인이기 때문이고, 대신 **조용하지 않게** 한다: 목록이 런 끝에 인쇄된다.
+ *
+ * 등록 순서가 계약이다. Playwright 는 **나중에 등록된 라우트를 먼저** 보므로
+ * 이 포괄 라우트는 반드시 `installMocks` 의 **맨 앞**에 선다. 뒤에 서면 그것이
+ * 모든 목을 이긴다.
+ */
+async function installUnmockedFallback(context) {
+  await context.route("**/v1/**", (route) => {
+    unmockedPaths.add(
+      `${route.request().method()} ${new URL(route.request().url()).pathname}`
+    );
+    return route.fulfill({ status: 404, contentType: "text/plain", body: "" });
+  });
+}
+
 async function installMocks(context) {
+  await installUnmockedFallback(context);
   await context.route("**/v1/auth/login", (route) => json(route, SESSION));
+  // ## 로그인 직후의 토큰 회전까지 막아야 로그인이 유지된다 (goal RN-U2, 선행 결함)
+  //
+  // 이 스텁이 없어서 **하네스 전체가 로그인 화면에서 멈춰 있었다.** 증상은 `signIn`
+  // 이 `channel-list` 를 30초 기다리다 죽는 것이고, 원인은 화면이 아니라 여기다:
+  //
+  //   DESK-1(`2ce728e2`)이 `hasPersistedSession` 을 일회성 읽기에서
+  //   `useSyncExternalStore` 로 바꾸면서, 로그인이 세션을 저장하는 순간 `resumable`
+  //   이 true 로 뒤집혀 **갓 발급된 토큰을 한 번 회전**시킨다. 그 POST 는 라우트
+  //   표에 없으므로 Playwright 를 빠져나가 vite 프록시로 나가고, 무엇이 응답하든
+  //   2xx 가 아니면 코어(`api.ts` `refreshSessionOutcome`)가 `markAuthExpired()` 로
+  //   세션을 지운다 — 앱은 로그인하고, 셸을 잠깐 그린 뒤, 스스로 로그아웃한다.
+  //
+  // 이 스텁은 **어느 리비전에도 없었다**(`git log -S "auth/refresh"` 가 비어 있다).
+  // DESK-1 전에는 회전 자체가 일어나지 않아 가려져 있었을 뿐이다. 다른 게이트들
+  // (`gate-csp`·`gate-wire`·`gate-agent-hub`·`gate-workstream`)은 `**/v1/**` 포괄
+  // 스텁을 갖고 있어 이 구멍이 없다 — 이 파일만 예외였다.
+  //
+  // 응답 **모양**이 load-bearing 이다: `refreshResponseFromWire` 는 두 필드가 모두
+  // 문자열이 아니면 throw 하고, 그 throw 는 `"unreachable"` 로 번역되어 결국 같은
+  // 로그인 화면으로 되돌아간다. 200 이기만 하면 되는 것이 아니다.
+  await context.route("**/v1/auth/refresh", (route) =>
+    json(route, {
+      accessToken: SESSION.accessToken,
+      refreshToken: SESSION.refreshToken,
+    })
+  );
   await context.route("**/v1/auth/realtime-token", (route) =>
     json(route, {
       token: "capture-only-not-a-credential",
@@ -694,6 +1210,84 @@ async function installMocks(context) {
       ? json(route, { channel: DM_CHANNEL, created: false })
       : json(route, { channels: [DM_CHANNEL] })
   );
+  // 추론 강도 표 (ADR-0134 D2). 목이 없으면 이 요청은 프록시로 나가고, 살아
+  // 있는 서버가 401을 답하는 순간 캡처 세션이 로그아웃된다. 축이 있는 서버를
+  // 찍는 이유는 프로필 카드의 "추론 강도" 줄이 그 판정을 그대로 읽기 때문이다.
+  await context.route("**/v1/provider/effort-table", (route) =>
+    json(route, ROUTING_FIXTURES.effortTable)
+  );
+  // 에이전트 허브 (goal B5.3b). 더 긴 경로를 먼저 건다: `**/…/agents`가
+  // `/agents/{id}/profile`을 삼키지 않도록 하는 것과 같은 규칙이다.
+  await context.route("**/v1/workspaces/*/agents/*/allowed-models", (route) =>
+    json(route, { allowedAgentModels: ALLOWED_AGENT_MODELS })
+  );
+  await context.route("**/v1/workspaces/*/agents/*/profile", (route) =>
+    json(route, { profile: AGENT_PROFILE })
+  );
+  await context.route("**/v1/workspaces/*/agents/*/runs*", (route) =>
+    json(route, { runs: [] })
+  );
+  // 만들기는 서버가 답하는 대로: 이미 있는 핸들이면 409(그 거절은 핸들 상자
+  // 밑에 서야 한다), 아니면 201 + 만들어진 멤버.
+  await context.route("**/v1/workspaces/*/agents", (route) => {
+    if (route.request().method() !== "POST") return route.fallback();
+    const body = JSON.parse(route.request().postData() ?? "{}");
+    if (ROSTER.some((member) => member.handle === body.handle)) {
+      return route.fulfill({
+        status: 409,
+        contentType: "application/json",
+        body: JSON.stringify({
+          error: { message: "agent handle already exists" },
+        }),
+      });
+    }
+    return route.fulfill({
+      status: 201,
+      contentType: "application/json",
+      body: JSON.stringify({
+        agent: {
+          id: CREATED_AGENT_ID,
+          handle: body.handle,
+          displayName: body.displayName,
+        },
+      }),
+    });
+  });
+  // 채널 배치 (B5.3a가 여는 표면). 넣기는 upsert, 빼기는 left_at 표시라 둘 다
+  // 멤버십 한 행을 돌려준다.
+  await context.route("**/v1/workspaces/*/channels/*/members**", (route) =>
+    json(route, {
+      membership: {
+        id: "019f9b10-0000-7000-8000-0000000006a1",
+        workspaceId: WORKSPACE_ID,
+        channelId: GENERAL_ID,
+        memberId: HERMES,
+        role: "member",
+        joinedAtMs: Date.now(),
+      },
+    })
+  );
+  // 결정 대기 (D-5): pending만 행이 있고, 나머지 상태 페이지는 비어 있다.
+  //
+  // **지금 이 목은 한 번도 불리지 않는다** (goal P3 후속에서 확인). B12 이후
+  // 인박스는 `isSurfaceProvided("approvals")`를 먼저 보고, `serverSurfaces.ts`가
+  // 그것을 정적으로 false라 답하므로 `useNeedsAction(false)`가 요청 자체를 만들지
+  // 않는다. 정적 판정이 네트워크보다 앞서기 때문에, 이 목을 무엇으로 채우든 승인
+  // 행은 생기지 않는다 — `capture:design`을 30초 타임아웃으로 죽여 놓았던 착시가
+  // 정확히 이것이었다("목이 있으니 데이터도 있겠지").
+  //
+  // 그래도 지우지 않는다. `serverSurfaces.ts`가 스스로 "PR 947은 클라이언트 22개
+  // 파일만 바꿨고 서버 라우트는 올리지 않았다"고 적어 둔 대로 이것은 "없다"가
+  // 아니라 "아직"이고, `provided`가 true로 바뀌는 순간 되살아나야 할 자리다.
+  // 그때 이 목과 위의 APPROVALS 픽스처가 그대로 먹고, 뺀 두 프레임(3g)을 복원하면
+  // 된다. 지웠다가 다시 쓰는 것보다 죽은 이유를 적어 두는 편이 싸다.
+  await context.route("**/v1/workspaces/*/approvals*", (route) => {
+    const url = new URL(route.request().url());
+    return json(route, {
+      approvals:
+        url.searchParams.get("status") === "pending" ? APPROVALS : [],
+    });
+  });
   await context.route("**/v1/workspaces/*/roster", (route) =>
     json(route, { members: ROSTER })
   );
@@ -722,6 +1316,19 @@ async function installMocks(context) {
   await context.route("**/v1/workspaces/*/work-hosts", (route) =>
     json(route, { workHosts: WORK_HOSTS })
   );
+  // 작업 세션 원장 (ADR-0154 D2 / 이슈 1135). **이 라우트가 없으면 캡처가 로그인
+  // 화면으로 되돌아간다** — 아래 스레드 답글 라우트의 주석과 똑같은 덫이다: ADE
+  // 요약 줄이 셸에 상주하면서 이 경로를 읽는데, 목이 없으면 요청이 프리뷰 서버로
+  // 새고, 프리뷰 서버는 모르는 `/v1/*`에 401을 답하며, 클라는 회전에도 401을 받고
+  // 세션을 끝낸다. 화면에는 채팅 대신 로그인 폼이 뜬다.
+  //
+  // 원장을 비워 두는 것은 **선택**이다. 이 캡처가 재는 것은 다른 표면들의 기하이고,
+  // 살아 있는 작업이 0이면 요약 줄은 아예 그리지 않는다(그것이 그 줄의 계약이다).
+  // ADE 표면 자체의 light/dark 캡처는 `npm run gate:ade`가 매 실행마다 다시 만든다
+  // (artifacts/ade/). 여기에 실행 중 세션을 실으면 관계없는 수십 장이 함께 밀린다.
+  await context.route("**/v1/workspaces/*/work-sessions*", (route) =>
+    json(route, { workSessions: [] })
+  );
   // 설정 > AI 연결 (MOMO-627). The chain routes are matched BEFORE the singleton
   // so `**/v1/provider/link` does not swallow `/link/chain` and `/link/test`.
   await context.route("**/v1/provider/link/chain", (route) =>
@@ -737,6 +1344,37 @@ async function installMocks(context) {
   await context.route("**/v1/workspaces/*/work-tier-policy/me", (route) =>
     json(route, { workTierPolicy: MEMBER_TIER_POLICY })
   );
+  // 반응 스냅샷 (goal B11). 서버는 이 맵을 **대문자 id**로 준다(Swift
+  // `uuidString`) — 메시지 투영은 소문자다. 픽스처가 그 두 자리를 그대로
+  // 재현해야 캡처가 접기(case fold)를 실제로 검증한다. `capture-15`가 아니라
+  // `CAPTURE-15`로 쓰는 이유가 그것이다.
+  //
+  // 세 종류를 담는다: 내가 누른 것(강조 칩), 남만 누른 것, 그리고 여러 개가
+  // 한 줄에 놓인 것. 리뷰가 봐야 하는 것은 그 셋의 대비다.
+  await context.route("**/v1/workspaces/*/channels/*/reactions", (route) =>
+    json(route, {
+      // 반드시 **살아 있는** 행에만 단다. 삭제된 메시지의 반응은 서버가 함께
+      // 지우고 스냅샷도 tombstone을 빼고 주므로, 지워진 행에 칩이 달린 픽스처는
+      // 서버가 낼 수 없는 화면을 그린다 — 픽스처가 거짓말을 하면 리뷰가 못 미더운
+      // 것을 승인하게 된다. capture-15는 아래에서 deleted로 표시되는 행이다.
+      "CAPTURE-14": { "👍": [ME.toUpperCase(), HERMES.toUpperCase()] },
+      "CAPTURE-17": {
+        "👍": [HERMES.toUpperCase()],
+        "🎉": [HERMES.toUpperCase(), ME.toUpperCase()],
+        "👀": [HERMES.toUpperCase()],
+      },
+    })
+  );
+  // 스레드 답글 (goal B11). **이 캡처에서 스레드를 연 프레임이 처음이라 이 라우트가
+  // 없었다.** 없으면 요청이 프리뷰 서버로 새고, 프리뷰 서버는 모르는 `/v1/*`에
+  // 401을 답한다 — 클라는 그 401에 토큰 회전을 시도하고, 회전도 401이면 세션을
+  // 끝낸다. 화면에는 스레드 대신 로그인 폼이 뜨고, 원인은 스레드와 아무 상관이
+  // 없어 보인다. `messages*`의 `*`는 `/`를 건너지 않으므로 이 경로는 위 라우트에
+  // 걸리지 않는다(그래서 별도 라우트다).
+  await context.route(
+    "**/v1/workspaces/*/channels/*/messages/*/replies*",
+    (route) => json(route, { messages: makeThreadReplies() })
+  );
   await context.route("**/v1/workspaces/*/channels/*/messages*", (route) => {
     const url = new URL(route.request().url());
     // Older-history and backfill pages are empty: the head page is the shot.
@@ -748,6 +1386,64 @@ async function installMocks(context) {
     }
     return json(route, { messages: makeMessages(16) });
   });
+
+  // ── 설정 나머지 표면의 픽스처 (#1057) ──────────────────────────────────────
+  // 이 하네스는 설정 아홉 섹션 중 **둘**(AI 연결·코드 실행 호스트)만 찍고 있었다.
+  // 나머지 일곱은 라우트가 없어 프리뷰 서버로 새고, 404 HTML 을 받은 패널은
+  // 에러 경계를 그린다 — 즉 "안 찍힌" 것이 아니라 "찍으면 빨간 판"이었다. 그래서
+  // 설정 UI 를 바꾼 PR 은 커밋된 캡처 없이 리뷰됐다(#1056 실측).
+  //
+  // 아래 픽스처는 게이트가 이미 쓰는 것과 같은 출처를 쓴다: 사용량·구독 잔여량은
+  // src/features/settings/{usage,quota}Fixtures.json 이고, 그 파일은 각각의 모델
+  // 테스트가 계약으로 붙잡고 있다. 손으로 지어낸 페이로드는 서버가 낼 수 없는
+  // 화면을 그리므로 리뷰가 못 미더운 것을 승인하게 된다.
+  await context.route("**/v1/workspaces/*/usage/summary*", (route) =>
+    json(route, USAGE_FIXTURE)
+  );
+  await context.route("**/v1/provider/quota-snapshots", (route) =>
+    json(route, QUOTA_FIXTURE)
+  );
+  await context.route("**/v1/workspaces/*/invites*", (route) =>
+    json(route, { invites: SETTINGS_INVITES })
+  );
+  // 설정 > 앱은 **카탈로그 한 줄과 함께** 찍는다 (이슈 #1125).
+  //
+  // 1차는 빈 카탈로그였다. 줄을 하나 얹으면 다음 섹션 진입이 무너졌기 때문인데,
+  // 그 원인은 위 `installUnmockedFallback` 머리말이 규명한 그것이다 — 카탈로그
+  // 행이 여는 `GET …/plugins/{id}` 에 짝이 없어 프리뷰 프록시를 타고 나갔고,
+  // 진짜 서버의 401 이 앱을 로그아웃시켰다. 레이아웃과는 무관했다.
+  //
+  // 목은 `gate-shell-layout` 이 쓰는 것과 같은 출처(출하 시드 매니페스트)를
+  // 그대로 든다. 손으로 지어낸 페이로드는 서버가 낼 수 없는 화면을 그리므로
+  // 리뷰가 못 미더운 것을 승인하게 된다.
+  await context.route("**/v1/workspaces/*/plugins", (route) =>
+    json(route, { plugins: [PLUGIN_CATALOG_ITEM], toolPolicy: { plugins: [] } })
+  );
+  await context.route(`**/v1/workspaces/*/plugins/${PLUGIN_MANIFEST.plugin.id}`, (route) =>
+    json(route, { plugin: { ...PLUGIN_CATALOG_ITEM, manifest: PLUGIN_MANIFEST } })
+  );
+  await context.route(
+    `**/v1/workspaces/*/plugins/${PLUGIN_MANIFEST.plugin.id}/grants`,
+    (route) => json(route, { grants: [] })
+  );
+  // #1112 이 더한 부속 읽기. 이 하네스가 찍는 채널 프레임마다 나가고, 짝이 없으면
+  // 위 포괄 라우트가 404 로 접어 고정 목록이 「불러오지 못했습니다」로 선다 —
+  // 캡처가 보여줄 상태가 아니다.
+  await context.route("**/v1/workspaces/*/channels/*/pins", (route) =>
+    json(route, { pins: [] })
+  );
+  // 워크스페이스 라우트 중 가장 덜 구체적이다. `*` 는 `/` 를 건너지 않으므로 위의
+  // 하위 경로들은 여전히 자기 라우트로 간다.
+  await context.route("**/v1/workspaces/*", (route) =>
+    json(route, {
+      workspace: {
+        id: WORKSPACE_ID,
+        slug: "momowebqa",
+        name: "momo webqa",
+        updatedAtMs: Date.now(),
+      },
+    })
+  );
 }
 
 async function waitForServer(url, timeoutMs = 30_000) {
@@ -765,10 +1461,1461 @@ async function waitForServer(url, timeoutMs = 30_000) {
 }
 
 async function signIn(page) {
+  // 위의 refresh 스텁이 세션을 **살려 두게** 되면서 되살아난 전제 하나: 이 컨텍스트의
+  // 페이지 14장이 localStorage 를 공유하므로, 두 번째 페이지부터는 이미 로그인된
+  // 셸로 자동 복귀해 로그인 카드가 아예 없다. 지금까지는 회전이 실패해 매번
+  // 로그아웃되는 덕에 우연히 로그인 화면이 나왔던 것이다 — 그 우연에 기대던 자리를
+  // 명시적인 초기화로 바꾼다.
+  await page.evaluate("try { localStorage.clear(); } catch (e) {}");
+  await page.reload({ waitUntil: "networkidle" });
   await page.getByTestId("login-email").fill("seongjae@dawn.example");
   await page.getByTestId("login-password").fill("capture-only-not-a-credential");
   await page.getByTestId("login-submit").click();
   await page.getByTestId("channel-list").waitFor({ state: "visible" });
+}
+
+/**
+ * 가로로 새는 것이 있는가 (goal B6, goal B9에서 확대).
+ *
+ * B6은 **문서 하나만** 쟀고, 그 단언은 이 셸에서 구조적으로 아무것도 잡을 수 없다:
+ * `app-shell`이 `overflow: clip`이라 셸 안의 어떤 것도 문서 폭을 넓히지 못하므로
+ * `document.scrollWidth`는 언제나 화면 폭이다. 넘친 것이 있어도 그것은 **셸 안의
+ * 스크롤 상자** 안에서 넘친다 — react-virtuoso의 스크롤러는 `overflow-y: auto`이고,
+ * 한 축만 지정된 상자는 나머지 축이 `auto`로 계산되므로(CSS Overflow §3) 넘친 한
+ * 줄이 타임라인을 좌우로 끌 수 있게 만든다. 실측: 긴 무공백 토큰 아래에서 타임라인
+ * 스크롤러가 +781px일 때에도 문서는 0을 답했다. 화면에서 그것은 왼쪽 아바타와 여백이
+ * 밀려 나간 모습으로 보이고, 성재 실캡처가 보여준 것이 그 모양이다.
+ *
+ * 그래서 이제 재는 것은 문서 + **모든 가로 스크롤 상자**다. 대상은 계산된
+ * `overflow-x`가 `auto`/`scroll`인 상자 전부이고, 판정은 하나다: 가로로 끌 수 있으면
+ * 실패. 세로로만 스크롤할 표면이 가로로도 끌린다는 것은 언제나 새는 것이 있다는 뜻이다.
+ *
+ * `hidden`/`clip` 상자는 세지 않는다. 그 상자들은 자르는 것이 일이고(닫힌 서랍이
+ * `translateX(-100%)`로 밖에 서 있는 것이 그 예다), 잘린 것은 사람이 끌어서 볼 수도
+ * 없으므로 이 단언이 말하는 결함과 성질이 다르다.
+ *
+ * **`data-scroll-x` 상자도 세지 않는다 (goal B11).** 이 단언이 잡으려는 것은
+ * "세로로만 스크롤할 표면"이 가로로 끌리는 것이다. 그런데 어떤 상자는 가로로
+ * 끌리는 것이 **일**이다 — 코드 블록이 그것이고, 넓은 내용은 자기 `overflow-x:
+ * auto` 상자 안에서 스크롤해야 한다는 것이 이 앱의 규칙이다. 코드를 접으면 정렬이
+ * 깨지므로 대안도 없다.
+ *
+ * B11 전까지 이 false positive가 나지 않은 것은 코드 블록이 든 행이 폰 프레임의
+ * 렌더 창 밖에 있었기 때문이다 — 규칙이 맞아서가 아니라 운이었고, 반응 칩이
+ * 레이아웃을 한 행 밀자 바로 드러났다. 실사용에서는 코드 블록이 화면에 있는 매
+ * 순간 걸렸을 것이다.
+ *
+ * 면제는 게이트가 아니라 **컴포넌트가 선언**한다: 가로 스크롤이 자기 일인 상자만
+ * `data-scroll-x`를 달고, 그 속성이 코드 리뷰에서 보인다. 게이트에 이름을 박아
+ * 두면 다음 상자는 조용히 새거나 조용히 면제된다.
+ */
+async function assertNoHorizontalOverflow(page, where) {
+  const measure = await page.evaluate(`(() => {
+    const doc = document.scrollingElement || document.documentElement;
+    const describe = (el) => {
+      const id = el.getAttribute("data-testid");
+      if (id) return '[data-testid=' + id + ']';
+      const cls = (el.getAttribute("class") || "").trim().split(/\\s+/).filter(Boolean);
+      return el.tagName.toLowerCase() + (cls.length ? "." + cls.slice(0, 3).join(".") : "");
+    };
+    const leaks = [];
+    for (const el of document.querySelectorAll("*")) {
+      const overflowX = getComputedStyle(el).overflowX;
+      if (overflowX !== "auto" && overflowX !== "scroll") continue;
+      // 가로로 끌리는 것이 이 상자의 일이다 (goal B11) — 위 주석 참조.
+      if (el.hasAttribute("data-scroll-x")) continue;
+      const over = el.scrollWidth - el.clientWidth;
+      if (over <= 0) continue;
+      // 상자 이름만으로는 고칠 자리를 못 찾는다: 타임라인이 끌린다는 것은
+      // 타임라인의 결함이 아니라 그 안의 어떤 상자가 접히지 않았다는 뜻이다.
+      // 실패 메시지가 그 상자를 지목해야 게이트가 진단이 된다.
+      const edge = el.getBoundingClientRect().left + el.clientWidth;
+      let worst = null;
+      for (const child of el.querySelectorAll("*")) {
+        const past = Math.round(child.getBoundingClientRect().right - edge);
+        if (past > 0 && (worst === null || past > worst.past)) {
+          worst = { past, where: describe(child) };
+        }
+      }
+      leaks.push({
+        where: describe(el),
+        over,
+        scrollWidth: el.scrollWidth,
+        clientWidth: el.clientWidth,
+        worst,
+      });
+    }
+    return {
+      overflowX: doc.scrollWidth - doc.clientWidth,
+      scrollWidth: doc.scrollWidth,
+      clientWidth: doc.clientWidth,
+      leaks,
+    };
+  })()`);
+  if (measure.overflowX > 0) {
+    throw new Error(
+      `가로 오버플로 ${where}: 문서가 ${measure.scrollWidth}px인데 화면은 ${measure.clientWidth}px다`
+    );
+  }
+  if (measure.leaks.length > 0) {
+    const lines = measure.leaks
+      .map(
+        (l) =>
+          `    ${l.where}: ${l.scrollWidth}px 내용 / ${l.clientWidth}px 상자 (+${l.over})` +
+          (l.worst ? `\n      밀어낸 것: ${l.worst.where} (+${l.worst.past}px)` : "")
+      )
+      .join("\n");
+    throw new Error(
+      `가로 오버플로 ${where}: 세로 스크롤 상자 ${measure.leaks.length}개가 가로로도 끌린다\n${lines}`
+    );
+  }
+  console.log(
+    `  overflow-x ${where}: 0 (문서 ${measure.clientWidth}px = ${measure.scrollWidth}px, 스크롤 상자 누수 0)`
+  );
+}
+
+// 긴 무공백 토큰 스트레스 (goal B9).
+//
+// 픽스처에 긴 토큰을 심는 것만으로는 부족하다는 것이 이 배치의 실측에서 드러났다:
+// 메시지 본문·채널 이름·에이전트 핸들·승인 카드 값에 각각 실제 길이의 무공백 토큰을
+// 넣어 재보니 전부 통과했다(본문은 `min-w-0` + `break-words`가 잡고, 이름 계열은
+// `truncate`가 잡는다). 그런데도 실기기에서는 가로로 밀렸다. 픽스처가 짧은 것이 아니라
+// **어느 자리가 약한지 우리가 모른다**는 것이 문제다.
+//
+// 그래서 이 단계는 자리를 고르지 않는다: 서버가 쓴 글이 닿는 영역(타임라인 행과 채널
+// 목록) 안의 **모든 텍스트 노드**에 한 덩어리를 붙이고, 그 뒤 어떤 세로 스크롤 상자도
+// 가로로 끌리지 않아야 한다고 요구한다.
+//
+// 경계는 **누가 그 문자열을 썼는가**다. 이 클라이언트가 쓴 글은 제외한다: 컨트롤
+// 라벨(button/summary/탭), 설명 목록의 **라벨 쪽**(`dt` — 값 쪽인 `dd`는 서버의
+// 것이라 남는다, agentCardModel.ts의 라벨은 고정 목록이다), 시계(`time`), 상태 칩
+// (`*-chip`). 이 넷은 닫힌 문자열 집합이고 길어질 수 없으며, 셋 다 `shrink-0`으로
+// 서 있는 것이 옳다 — 긴 제목 옆에서 상태 칩이 찌그러지면 상태를 읽을 수 없다.
+// 여기에 74자를 붙이는 것은 일어날 수 없는 조건을 만들어 놓고 고치라고 하는 것이다.
+// 나머지 — 본문, 이름, 핸들, 소유자, 채널 이름, 카드의 값 — 는 전부 사람이나 서버가
+// 쓰고, 그래서 전부 스트레스를 받는다.
+const LONG_TOKEN_STRESS =
+  "outbox_drain_worker_restart_loop_2026_08_02_9f2b7c14e0a83d5b6f1c2ea47d90b83c";
+
+/** 이 클라이언트가 쓴 문자열이 사는 자리. 위 주석이 그 경계를 설명한다. */
+const LONG_TOKEN_STRESS_SKIP =
+  'button, summary, [role="button"], [role="tab"], dt, time, [data-testid$="-chip"]';
+
+async function applyLongTokenStress(page) {
+  const touched = await page.evaluate(`(() => {
+    const TOKEN = ${JSON.stringify(LONG_TOKEN_STRESS)};
+    const roots = document.querySelectorAll(
+      '[data-testid="timeline-message"], [data-testid="channel-list"]'
+    );
+    const nodes = [];
+    for (const root of roots) {
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      while (walker.nextNode()) {
+        const node = walker.currentNode;
+        if (!node.nodeValue || node.nodeValue.trim().length < 2) continue;
+        const owner = node.parentElement;
+        if (!owner) continue;
+        if (owner.closest(${JSON.stringify(LONG_TOKEN_STRESS_SKIP)})) continue;
+        nodes.push(node);
+      }
+    }
+    for (const node of nodes) node.nodeValue = node.nodeValue + " " + TOKEN;
+    return nodes.length;
+  })()`);
+  if (touched === 0) throw new Error("긴 토큰 스트레스: 붙일 글이 하나도 없다");
+  return touched;
+}
+
+// iOS 사파리 하단 바가 가리는 높이 (goal B9). 성재 실캡처(2026-08-02 22:54)에서
+// 컴포저가 그 뒤로 들어갔다. 100px는 사파리 하단 툴바(주소 줄 + 탭/공유 줄)의
+// 실측치에 맞춘 값이고, 정확한 숫자보다 중요한 것은 **레이아웃 뷰포트와 보이는
+// 뷰포트가 어긋난 상태**를 만든다는 것이다.
+const BOTTOM_CHROME_PX = 100;
+
+/**
+ * 하단 브라우저 크롬을 켠다 (goal B9).
+ *
+ * Chromium은 이 어긋남을 스스로 만들지 못한다: 창을 줄이면 레이아웃 뷰포트와 시각
+ * 뷰포트가 **함께** 줄어들어 `100dvh`로도 답이 맞아버리고, 그래서 이 결함은 뷰포트를
+ * 줄이는 방식으로는 절대 재현되지 않는다. iOS 사파리가 하는 일은 다르다: 레이아웃
+ * 뷰포트는 그대로 두고(그래서 `height: 100%`도 `100dvh`도 844px을 가리킨다) 시각
+ * 뷰포트만 744px로 줄인 뒤, 남은 100px을 자기 툴바로 덮는다.
+ *
+ * 그 어긋남을 그대로 만든다: `VisualViewport.prototype.height`가 100px 작은 값을
+ * 답하게 하고 `resize`를 울린다. 플랫폼 API를 흉내내는 것이지 우리 코드를 흉내내는
+ * 것이 아니다 — 단언은 "앱이 visualViewport를 읽었는가"가 아니라 "**그려진** 컴포저의
+ * 아랫변이 보이는 높이 안에 있는가"이므로, 읽지 않는 구현은 여기서 반드시 붉어진다.
+ */
+async function emulateBottomChrome(page) {
+  await page.evaluate(`(async () => {
+    const vv = window.visualViewport;
+    const proto = Object.getPrototypeOf(vv);
+    if (!window.__momoBottomChrome) {
+      window.__momoBottomChrome = Object.getOwnPropertyDescriptor(proto, "height");
+    }
+    const original = window.__momoBottomChrome;
+    Object.defineProperty(proto, "height", {
+      configurable: true,
+      get() {
+        return original.get.call(this) - ${BOTTOM_CHROME_PX};
+      },
+    });
+    vv.dispatchEvent(new Event("resize"));
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+  })()`);
+}
+
+/** 크롬을 걷는다. 다음 프레임들은 다시 온전한 화면에서 찍힌다. */
+async function releaseBottomChrome(page) {
+  await page.evaluate(`(async () => {
+    const vv = window.visualViewport;
+    const proto = Object.getPrototypeOf(vv);
+    if (window.__momoBottomChrome) {
+      Object.defineProperty(proto, "height", window.__momoBottomChrome);
+      delete window.__momoBottomChrome;
+    }
+    vv.dispatchEvent(new Event("resize"));
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+  })()`);
+}
+
+/**
+ * 컴포저가 보이는 뷰포트 안에 있는가 (goal B9). 재는 것은 그려진 기하다: 입력창과
+ * 전송 버튼의 아랫변이 둘 다 `visualViewport.height` 안이어야 한다. 한 픽셀의
+ * 반올림은 봐주고 그 이상은 봐주지 않는다 — 성재 캡처에서 가려진 것은 100px였다.
+ */
+async function assertComposerVisible(page, where) {
+  const measure = await page.evaluate(`(() => {
+    const visible = Math.round(window.visualViewport.height);
+    const rect = (id) => {
+      const el = document.querySelector('[data-testid="' + id + '"]');
+      return el ? Math.round(el.getBoundingClientRect().bottom) : null;
+    };
+    const shell = document.querySelector(".app-shell");
+    return {
+      visible,
+      layout: window.innerHeight,
+      input: rect("composer-input"),
+      send: rect("composer-send"),
+      shell: shell ? Math.round(shell.getBoundingClientRect().height) : null,
+    };
+  })()`);
+  for (const [label, bottom] of [
+    ["입력창", measure.input],
+    ["전송 버튼", measure.send],
+  ]) {
+    if (bottom === null) {
+      throw new Error(`컴포저 가시성 ${where}: ${label}이 없다`);
+    }
+    if (bottom > measure.visible + 1) {
+      throw new Error(
+        `컴포저 가시성 ${where}: ${label} 아랫변이 ${bottom}px인데 보이는 높이는 ` +
+          `${measure.visible}px다 (레이아웃 ${measure.layout}px, 셸 ${measure.shell}px) ` +
+          `— 브라우저 하단 바 뒤로 ${bottom - measure.visible}px 들어갔다`
+      );
+    }
+  }
+  console.log(
+    `  composer ${where}: 입력창 ${measure.input}px · 전송 ${measure.send}px <= 보이는 ${measure.visible}px (레이아웃 ${measure.layout}px, 셸 ${measure.shell}px)`
+  );
+}
+
+/**
+ * 위쪽이 답답한가 (goal B9 §0.3). 성재 실캡처 1번의 지적은 "헤더 아래 콘텐츠가 상단에
+ * 붙어 답답"이었고, 그 인상은 두 숫자로 갈린다: 헤더 줄 자체가 손가락 줄만큼 높은가,
+ * 그리고 셸이 위쪽 안전 영역을 인정하는가.
+ *
+ * 안전 영역은 값이 아니라 **선언**을 잰다. 사파리 탭에서 `safe-area-inset-top`은 0이다
+ * (브라우저 크롬이 이미 그 자리를 갖고 있다). 그러니 인셋이 0이라는 사실은 결함이
+ * 아니고, 인셋이 47px인 곳(홈 화면에 추가한 standalone)에서 셸이 그만큼 물러날
+ * 준비가 되어 있는지가 결함이다. 헤드리스 크로미움에는 노치가 없으므로 이 게이트가
+ * 관찰할 수 있는 것은 `.app-shell`이 `env(safe-area-inset-top)`을 실제로 걸어 두었다는
+ * 사실뿐이고, 그것을 컴퓨티드 스타일이 아니라 **선언된 규칙**에서 읽는다.
+ */
+async function assertTopBreathing(page, where) {
+  const measure = await page.evaluate(`(() => {
+    const header = document.querySelector("main header");
+    const shell = document.querySelector(".app-shell");
+    const declared = [];
+    for (const sheet of document.styleSheets) {
+      let rules;
+      try {
+        rules = sheet.cssRules;
+      } catch {
+        continue;
+      }
+      const walk = (list) => {
+        for (const rule of list) {
+          if (rule.cssRules) walk(rule.cssRules);
+          if (
+            rule.selectorText &&
+            rule.selectorText.includes("app-shell") &&
+            rule.style &&
+            rule.style.getPropertyValue("padding-block-start").includes("safe-area-inset-top")
+          ) {
+            declared.push(rule.selectorText);
+          }
+        }
+      };
+      walk(rules);
+    }
+    return {
+      headerHeight: header ? Math.round(header.getBoundingClientRect().height) : null,
+      shellTop: shell ? Math.round(shell.getBoundingClientRect().top) : null,
+      safeAreaTopDeclared: declared.length > 0,
+    };
+  })()`);
+  if (measure.headerHeight === null) {
+    throw new Error(`위쪽 여백 ${where}: 헤더가 없다`);
+  }
+  // 44px는 이 파일이 손가락 타깃에 쓰는 것과 같은 수다(WCAG 2.5.5 / HIG). 헤더는
+  // 한 줄이지만 그 줄에 서 있는 것은 전부 눌러야 하는 것들이라(햄버거, 허들, 패널)
+  // 줄 자체가 그 높이를 가져야 한다.
+  if (measure.headerHeight < 44) {
+    throw new Error(
+      `위쪽 여백 ${where}: 헤더가 ${measure.headerHeight}px다 (최소 44px)`
+    );
+  }
+  if (!measure.safeAreaTopDeclared) {
+    throw new Error(
+      `위쪽 여백 ${where}: .app-shell이 env(safe-area-inset-top)을 걸지 않았다 — ` +
+        `viewport-fit=cover로 노치 아래까지 그리면서 위로 물러나지 않으면 헤더가 상태바에 들어간다`
+    );
+  }
+  console.log(
+    `  top ${where}: 헤더 ${measure.headerHeight}px, 셸 상단 ${measure.shellTop}px, safe-area-top 선언됨`
+  );
+}
+
+/**
+ * 손가락 타깃 실측. 값을 함께 찍어 리뷰가 숫자를 볼 수 있게 한다.
+ *
+ * `targets`로 목록을 갈아끼울 수 있다: 화면마다 재야 할 컨트롤이 다르고, 그 화면에
+ * 없는 것을 필수로 재면 목록 전체가 optional로 물러나기 때문이다 (goal P3 1-4).
+ */
+async function assertTapTargets(page, where, targets = MOBILE_TAP_TARGETS) {
+  const measured = await page.evaluate(
+    `(() => ${JSON.stringify(targets)}.map(([testId, label]) => {
+      const el = document.querySelector('[data-testid="' + testId + '"]');
+      if (!el) return { testId, label, missing: true };
+      const r = el.getBoundingClientRect();
+      return {
+        testId,
+        label,
+        width: Math.round(r.width),
+        height: Math.round(r.height),
+      };
+    }))()`
+  );
+  const optional = new Set(
+    targets.filter((t) => t[2] === "optional").map((t) => t[0])
+  );
+  for (const row of measured) {
+    if (row.missing) {
+      if (optional.has(row.testId)) continue;
+      throw new Error(`손가락 타깃 ${where}: ${row.testId} 없음`);
+    }
+    if (row.height < 44) {
+      throw new Error(
+        `손가락 타깃 ${where}: ${row.label}(${row.testId})가 ${row.width}x${row.height}px다 (최소 44px)`
+      );
+    }
+  }
+  console.log(
+    `  tap targets ${where}: ` +
+      measured.map((r) => `${r.testId} ${r.width}x${r.height}`).join(", ")
+  );
+}
+
+/**
+ * 인박스가 **자리를 잡을 때까지** 기다린다 (goal P3 후속, B12 회귀 복구).
+ *
+ * 이 프레임은 `feed-row`가 보이기를 기다리고 있었다. B12가 `isSurfaceProvided`를
+ * 인박스에 들이고 `serverSurfaces.ts`가 `approvals`를 정적으로 "라우터에 없음
+ * (404)"이라 선언한 뒤로, 인박스는 결정 대기 탭을 지우고 승인 행을 **그리지
+ * 않는다**. 그 동작은 옳다 — 없는 원장을 0으로 세어 "결정할 것이 없다"를 지어내지
+ * 않는 것이 B12의 요점이다. 틀린 것은 사라진 행을 계속 기다린 이 하네스이고,
+ * 그래서 `capture:design`이 30초 타임아웃으로 죽어 있었다. design-review의 증거
+ * 파이프라인 전체가 그 한 줄에 걸려 있었다.
+ *
+ * 그래서 이제 **정착한 결과**를 기다린다: 목록이든 빈 상태든, 스켈레톤이 물러난
+ * 자리면 화면은 준비된 것이다. `waitForTimeout`으로 때우지 않는 이유가 정확히 이
+ * 사고다 — 고정 대기는 표면이 무엇을 그리든 통과하므로, 다음에 인박스가 또 조용히
+ * 바뀌면 이번처럼 **소리 내어 실패하는 대신** 빈 화면을 찍어 보낸다.
+ *
+ * 오류로 정착하면 실패로 친다. 불러오지 못한 인박스를 찍어 두면 리뷰어는 그것을
+ * 제품의 모습으로 읽는다.
+ */
+async function waitForInboxSettled(page, where) {
+  await page.getByTestId("inbox-route").waitFor({ state: "visible" });
+  await page.waitForSelector(
+    '[data-testid="inbox-list"], [data-testid="inbox-empty"], [data-testid="inbox-error"]',
+    { state: "visible" }
+  );
+  const settled = await page.evaluate(`(() => {
+    for (const id of ["inbox-list", "inbox-empty", "inbox-error"]) {
+      if (document.querySelector('[data-testid="' + id + '"]')) return id;
+    }
+    return null;
+  })()`);
+  if (settled === "inbox-error") {
+    throw new Error(`[${where}] 인박스가 오류로 정착했다 — 이 화면은 찍지 않는다`);
+  }
+  console.log(`  inbox ${where}: ${settled}로 정착`);
+  return settled;
+}
+
+/**
+ * 반복된 「일시정지」 알림이 한 줄로 접혔는가 (goal P3 1-2).
+ *
+ * 스크린샷은 이것을 증명하지 못한다. 리뷰어가 픽스처를 열어 서버가 **세 줄을
+ * 보냈다**는 것을 확인하지 않으면, 한 줄만 있는 화면은 그냥 "원래 한 줄이었나
+ * 보다"로 읽힌다. 그래서 여기서 센다: 보낸 것은 셋, 그려진 것은 하나, 그리고 그
+ * 하나가 셋이었다고 말하고 있어야 한다.
+ *
+ * 정보를 없애지 않았다는 쪽도 같이 잰다. 알림 문장 자체는 화면에 그대로 있어야
+ * 하고(사람은 여전히 "왜 답이 없는지"를 알 수 있어야 한다), 사람이 쓴 세 줄은
+ * 하나도 접히면 안 된다 — 접는 것은 반복이지 대화가 아니다.
+ */
+async function assertPausedNoticeFolded(page, where) {
+  const seen = await page.evaluate(`(() => {
+    const rows = Array.from(
+      document.querySelectorAll('[data-testid="timeline-message"]')
+    );
+    const notices = rows.filter((row) =>
+      (row.textContent || "").includes("현재 일시정지되어 있습니다")
+    );
+    const repeat = document.querySelector(
+      '[data-testid="paused-notice-repeat"]'
+    );
+    return {
+      rows: rows.length,
+      notices: notices.length,
+      repeatText: repeat ? (repeat.textContent || "").trim() : null,
+      bodies: rows.map((row) => (row.textContent || "").trim().slice(0, 40)),
+    };
+  })()`);
+
+  if (seen.notices !== 1) {
+    throw new Error(
+      `[${where}] 서버는 「일시정지」 알림 3줄을 보냈는데 화면에 ${seen.notices}줄이 그려졌다 (1줄이어야 한다)`
+    );
+  }
+  if (seen.repeatText !== "응답하지 못한 메시지 3개") {
+    throw new Error(
+      `[${where}] 접힌 개수를 말하지 않는다: ${JSON.stringify(seen.repeatText)}`
+    );
+  }
+  // 사람이 쓴 6줄(초반 3 + 답 없이 보낸 3)은 전부 남아야 한다. 알림 1줄과 합쳐 7.
+  if (seen.rows !== 7) {
+    throw new Error(
+      `[${where}] 접기가 대화를 먹었다: 행 ${seen.rows}개 (기대 7) — ${JSON.stringify(seen.bodies)}`
+    );
+  }
+  console.log(`  paused notice ${where}: 3줄 → 1줄 + "${seen.repeatText}"`);
+}
+
+/**
+ * 「답글 N개」가 **있어야 할 곳에만** 있는가 (goal P3 1-1 → goal RN-U2).
+ *
+ * 이 게이트는 두 번 움직였고, 두 번 다 같은 줄에 대한 것이었다.
+ *
+ * P3 1-1 은 그 줄이 **죽은 버튼**인 것을 잡았다: 패널이 `onOpenThread`를 넘기지
+ * 않는데 행은 `rollup`만 있으면 <button>을 그려서, 포커스가 잡히고 hover에
+ * 반응하면서 눌러도 아무 일이 없는 컨트롤이 스레드 루트에 앉아 있었다. 그 수정은
+ * 버튼을 글로 내렸다.
+ *
+ * RN-U2 는 그 글마저 여기서는 할 말이 없다고 판정한다 — 성재(iOS 실기기): "답글에서
+ * 개수 업데이트는 굳이 왜 해? 목록에 나오면 몇 개의 reply가 있는지는 자연스러운데,
+ * 답글에서 '답글 1개' 이런 식으로 보이는 건 자연스럽지 않은 거 같아." 롤업은 목록의
+ * 장치이고, 이미 그 스레드 안에 있는 사람에게는 정보가 0이다.
+ *
+ * 그래서 패널 쪽 판정이 **뒤집힌다**: 있으면 안 된다. 태그를 보던 자리는 텍스트를
+ * 보는 자리가 되는데, 그것이 더 강하다 — <span>을 지웠는데 다른 조각이 같은 숫자를
+ * 다시 그리는 회귀까지 잡는다.
+ *
+ * 반대쪽은 그대로다. 채널 타임라인에서는 그 자리가 **여전히 살아 있는 버튼**이어야
+ * 한다. 스레드에서 지운다면서 목록의 진입점까지 지우면 스레드로 들어가는 길이
+ * 사라지고, 그것이 이 배치가 만들 수 있는 가장 나쁜 회귀다.
+ */
+async function assertThreadRollupPlacement(page, where) {
+  const seen = await page.evaluate(`(() => {
+    const panel = document.querySelector('[data-testid="thread-panel"]');
+    const inPanel = panel
+      ? Array.from(panel.querySelectorAll('[data-testid="thread-anchor"]'))
+      : [];
+    const outside = Array.from(
+      document.querySelectorAll('[data-testid="thread-anchor"]')
+    ).filter((el) => !panel || !panel.contains(el));
+    const shape = (el) => ({ tag: el.tagName, text: (el.textContent || "").trim() });
+    return {
+      hasPanel: Boolean(panel),
+      inPanel: inPanel.map(shape),
+      outside: outside.map(shape),
+      // 패널 어디에도 개수 문장이 남아 있지 않은가. 앵커를 지우고 다른 자리에
+      // 같은 숫자를 그리는 회귀를 잡는 것은 이쪽이다.
+      panelCount: panel
+        ? (panel.textContent || "").match(/답글\\s*\\d+\\s*개/)
+        : null,
+    };
+  })()`);
+
+  if (!seen.hasPanel) throw new Error(`[${where}] 스레드 패널이 열리지 않았다`);
+  if (seen.inPanel.length > 0) {
+    throw new Error(
+      `[${where}] 스레드 패널에 아직 「${seen.inPanel[0].text}」가 있다 — 롤업은 목록의 장치이고 스레드 안에서는 정보가 0이다`
+    );
+  }
+  if (seen.panelCount) {
+    throw new Error(
+      `[${where}] 스레드 패널이 여전히 답글 수를 말한다: 「${seen.panelCount[0]}」`
+    );
+  }
+  if (seen.outside.length === 0) {
+    throw new Error(
+      `[${where}] 채널 타임라인에 「답글 N개」가 하나도 없다 — 이 게이트가 아무것도 재지 못했다`
+    );
+  }
+  const live = seen.outside.filter((a) => a.tag === "BUTTON");
+  if (live.length === 0) {
+    throw new Error(
+      `[${where}] 채널 타임라인의 「답글 N개」까지 사라졌다 — 스레드로 들어가는 길이 없다`
+    );
+  }
+  console.log(
+    `  thread rollup ${where}: 패널 0개 · 타임라인 ${live.length}개 버튼`
+  );
+}
+
+/**
+ * 액션 진입점이 자기 행의 본문을 덮지 않는가 (goal B11 R2 Blocker).
+ *
+ * 1라운드는 액션 바를 행 위에 음수 오프셋(`-top-3`)으로 띄웠는데, 바 높이가
+ * 32px이라 20px이 언제나 행 안에 남았다 — 연속 행의 첫 줄 오른쪽 끝이 그만큼
+ * 가려졌고, 한국어 문단의 첫 줄은 거의 언제나 오른쪽 끝까지 간다. 스크린샷은
+ * 그것을 보여주지만 **증명하지는** 않는다: 리뷰어가 두 상자를 재야 한다.
+ *
+ * 그래서 여기서 잰다. 본문 상자(`data-row-body`)의 오른쪽 끝보다 진입점이
+ * 왼쪽에서 시작하면 그것이 겹침이고, 몇 px인지까지 말한다. 지금 구조에서는
+ * 진입점이 본문 **밖**의 예약된 열에 있으므로 이 값은 음수여야 한다.
+ */
+async function assertActionGutterClearsBody(page, where) {
+  const rows = await page.evaluate(`(() => {
+    return Array.from(document.querySelectorAll('[data-testid="timeline-message"]'))
+      .map((row) => {
+        const body = row.querySelector('[data-row-body]');
+        const trigger = row.querySelector('[data-testid="message-actions-trigger"]');
+        if (!body || !trigger) return null;
+        const b = body.getBoundingClientRect();
+        const t = trigger.getBoundingClientRect();
+        return {
+          seq: row.getAttribute('data-seq'),
+          overlap: Math.round(b.right - t.left),
+          gap: Math.round(t.left - b.right),
+        };
+      })
+      .filter(Boolean);
+  })()`);
+  if (rows.length === 0) {
+    throw new Error(`[액션 열 ${where}] 잴 행이 하나도 없다`);
+  }
+  const worst = rows.reduce((a, b) => (b.overlap > a.overlap ? b : a));
+  if (worst.overlap > 0) {
+    throw new Error(
+      `[액션 열 ${where}] seq ${worst.seq}: 액션 진입점이 본문 상자를 ${worst.overlap}px 덮는다`
+    );
+  }
+  console.log(
+    `  액션 열 ${where}: ${rows.length}행, 본문과의 최소 간격 ${-worst.overlap}px`
+  );
+}
+
+/**
+ * 행 하나가 키보드에 청구하는 값 (goal B11 R2 H1).
+ *
+ * B11이 행에 심은 컨트롤(진입점·반응 칩·반응 추가·스레드 앵커)만 센다. 카드
+ * 안의 버튼(패치 열기 같은)은 이 배치가 만든 것이 아니고 행 액션도 아니므로
+ * 세지 않는다 — 대신 아래 `countTabStopsToComposer`가 그것까지 포함한 실제
+ * 비용을 잰다.
+ *
+ * 기준은 **행당 1개 이하**다. `opacity-0`으로만 숨긴 버튼은 눈에서만 사라지고
+ * 탭 순서에는 그대로 남는다는 것이 1라운드의 결함이었으므로, 여기서는 보이는지
+ * 가 아니라 `tabIndex`를 본다.
+ */
+async function assertRowTabStops(page, where, limit = 1) {
+  const rows = await page.evaluate(`(() => {
+    const OWNED = [
+      '[data-testid="message-actions-trigger"]',
+      '[data-testid="reaction-chip"]',
+      '[data-testid="reaction-add"]',
+      '[data-testid="thread-anchor"]',
+      '[data-testid="message-resend"]',
+    ].join(',');
+    return Array.from(document.querySelectorAll('[data-testid="timeline-message"]'))
+      .map((row) => {
+        const stops = Array.from(row.querySelectorAll(OWNED)).filter((el) => {
+          if (el.hasAttribute('disabled')) return false;
+          // display:none 은 폭도 높이도 0이다. opacity-0 은 여전히 탭 스톱이고,
+          // 그것이 정확히 이 게이트가 잡아야 하는 상태다.
+          const r = el.getBoundingClientRect();
+          if (r.width === 0 && r.height === 0) return false;
+          return el.tabIndex >= 0;
+        });
+        return {
+          seq: row.getAttribute('data-seq'),
+          stops: stops.length,
+          controls: row.querySelectorAll(OWNED).length,
+        };
+      });
+  })()`);
+  const worst = rows.reduce(
+    (a, b) => (b.stops > a.stops ? b : a),
+    { seq: null, stops: 0, controls: 0 }
+  );
+  if (worst.stops > limit) {
+    throw new Error(
+      `[탭 스톱 ${where}] seq ${worst.seq}: 컨트롤 ${worst.controls}개 중 ${worst.stops}개가 탭 순서에 있다 (행당 ${limit}개 이하)`
+    );
+  }
+  const controls = rows.reduce((sum, r) => sum + r.controls, 0);
+  const stops = rows.reduce((sum, r) => sum + r.stops, 0);
+  console.log(
+    `  탭 스톱 ${where}: ${rows.length}행에 행 컨트롤 ${controls}개, 탭 스톱 ${stops}개 (행당 최대 ${worst.stops})`
+  );
+}
+
+/**
+ * 타임라인 첫 컨트롤에서 컴포저까지, **진짜 Tab을 눌러서** 센다.
+ *
+ * 리뷰가 쓴 숫자(가상 목록 15~25행이면 60~150 스톱)와 같은 자다. 정적 계산이
+ * 아니라 실제 키 입력이므로, 탭 순서에 대한 어떤 가정도 끼어들지 못한다.
+ */
+async function countTabStopsToComposer(page, where, ceiling) {
+  const started = await page.evaluate(`(() => {
+    const first = document.querySelector(
+      '[data-testid="timeline-message"] [data-row-action][tabindex="0"]'
+    );
+    if (!first) return false;
+    first.focus();
+    return document.activeElement === first;
+  })()`);
+  if (!started) {
+    throw new Error(`[탭 경로 ${where}] 타임라인에 시작점이 없다`);
+  }
+  const max = ceiling * 4;
+  for (let presses = 1; presses <= max; presses++) {
+    await page.keyboard.press("Tab");
+    const id = await page.evaluate(
+      `document.activeElement ? (document.activeElement.getAttribute("data-testid") || "") : ""`
+    );
+    if (id === "composer-input") {
+      if (presses > ceiling) {
+        throw new Error(
+          `[탭 경로 ${where}] 타임라인에서 컴포저까지 Tab ${presses}번 (상한 ${ceiling}번)`
+        );
+      }
+      console.log(`  탭 경로 ${where}: 타임라인 → 컴포저 Tab ${presses}번`);
+      return presses;
+    }
+  }
+  throw new Error(
+    `[탭 경로 ${where}] Tab을 ${max}번 눌러도 컴포저에 닿지 못했다`
+  );
+}
+
+/**
+ * 가상 목록 안의 행을 화면에 올린다 — **못 올렸으면 여기서, 이유를 말하고** 죽는다.
+ *
+ * `locator.scrollIntoViewIfNeeded()`를 쓰지 않는 이유가 있다: react-virtuoso는
+ * 스크롤이 부른 재렌더에서 행의 DOM 노드를 **교체**하고, Playwright가 "요소가
+ * 안정될 때까지" 기다리는 사이 그 노드가 떨어져 나가면 액션이 그대로 죽는다
+ * (`Element is not attached to the DOM`). 노드의 정체성은 이 프레임이 증명하려는
+ * 것과 아무 상관이 없고 필요한 것은 "그 행이 보이는가" 하나뿐이므로, 페이지
+ * 안에서 스크롤하고 결과를 다시 묻는다.
+ *
+ * ── goal QA-flake: 이 함수가 `capture:design` 플레이크 1종이었다 ─────────────
+ *
+ * 실측(base `03fbdb81`, 8회): 3 PASS / 5 FAIL, 그 중 4회가
+ * `[스크롤] turn-failure를 6번 시도해도 화면에 올리지 못했다`.
+ *
+ * 원인은 재시도가 모자라서가 **아니었다. 재시도가 아무 일도 하지 않았기
+ * 때문이다.** 이전 판의 루프는 이것이었다:
+ *
+ *     for (6번) { const el = querySelector(testId);
+ *                 if (!el) …아무것도 하지 않는다;
+ *                 await waitForTimeout(250); }
+ *
+ * 행이 렌더 창 밖에 있으면 `querySelector`는 null을 답하고, 그 뒤 이 루프가 한
+ * 일은 250ms를 기다린 것뿐이다. **가상 목록은 시간이 지난다고 행을 마운트하지
+ * 않는다 — 스크롤러가 움직여야 마운트한다.** 그러니 이 루프는 1.5초를 태우고
+ * 같은 null을 여섯 번 본 뒤 죽는, 원리적으로 성공할 수 없는 루프였다. 통과한
+ * 회차는 루프가 고친 회차가 아니라 **행이 아직 창 안에 남아 있던** 회차다.
+ * (그래서 `tries`를 늘리는 것은 고치는 것이 아니라 같은 null을 더 오래 보는
+ * 것이다.)
+ *
+ * 그러면 행은 왜 사라져 있었나. 이전 판이 `turn-failure`를 묻는 바로 그 순간부터
+ * 4초를 50ms 간격으로 80번 표본해 봤다:
+ *
+ *   실패한 회차: `turn-failure` **없음(80/80)** · 마운트된 항목 index
+ *                1000000~1000012 (목록의 **머리**) · scrollTop **0**
+ *   통과한 회차: `turn-failure` 있음(80/80) · index 1000004~1000018 (꼬리)
+ *                · scrollTop 813
+ *
+ * 즉 실패한 회차의 타임라인은 **맨 위에 앉아 있었다**. 바로 앞 단계가
+ * `message-markdown`을 가운데로 올렸는데 그 스크롤이 남아 있지 않은 것이다
+ * (`Timeline`은 `initialItemCount={min(items.length,24)}`로 열려 첫 페인트에는
+ * 전 행이 DOM에 있고, 그 뒤 측정 보정과 `startReached`가 스크롤 위치를 다시
+ * 잡는다). `turn-failure`는 꼬리 행이므로 머리에 앉은 창의 밖이고, 아무도
+ * 스크롤러를 건드리지 않는 한 **영원히** 밖이다 — 80번을 봐도 없었다는 것이 그
+ * 뜻이고, 여섯 번 더 본다고 달라질 것이 아니었다.
+ *
+ * 그런데 바로 앞 단계는 왜 통과했나. 이전 판의 성공 조건이 `isVisible()`이었기
+ * 때문이다. Playwright의 `isVisible()`은 "상자가 있고 `visibility:hidden`이
+ * 아니다"이지 **"화면 안에 있다"가 아니다** — 창 밖으로 스크롤된 마운트된 노드도
+ * 참을 답한다. 그래서 앞 단계는 "행이 마운트돼 있다"를 "행이 내가 둔 자리에
+ * 있다"로 잘못 읽고 돌아왔고, 목록이 그 뒤 머리로 돌아가는 것을 보지 못했다.
+ *
+ * 고치는 자리도 그래서 둘이다: 성공 조건을 **자리(rect)가 멎는 것**으로 바꾸고,
+ * 행이 없을 때는 **스크롤러를 실제로 움직인다**.
+ *
+ * 확인해 둔다: 이 프레임의 **피사체는 이 빌드에 그대로 있다**. `BODIES`의 마지막
+ * 줄이 `agent_worker.provider_failure.v0`이고, `makeMessages(16)`에서 그 줄은
+ * `rows[14]`이며, B11 픽스처 편집기(`pick(4)/pick(3)/pick(1)` = `rows[12]`
+ * `rows[13]` `rows[15]`)는 `plainText` 가드 때문에 그 행을 건드리지 못한다.
+ * P3의 인박스 프레임과 달리 여기서 없어진 것은 피사체가 아니라 **기다림**이었고,
+ * 그래서 프레임은 그대로 두고 재는 방법만 고쳤다.
+ *
+ * 그래서 이제:
+ *  1. 첫 페인트의 정리가 끝나도록 한 프레임 양보한 뒤 본다 — "지금 있다"가 곧
+ *     거짓이 되는 순간에 판단하지 않기 위해서다.
+ *  2. 없으면 스크롤러를 **아래에서 위로 반 화면씩 실제로 훑는다**. 마운트되지
+ *     않은 행에 닿는 방법은 스크롤 범위를 지나가는 것뿐이고, 걸음 수는
+ *     scrollHeight/step으로 유한하다. 아래에서 시작하는 것은 이 하네스가 찾는
+ *     행이 전부 최근 꼬리에 있고 타임라인이 바닥에 붙어 열리기 때문이다.
+ *  3. 찾으면 가운데로 올린 뒤 **자리가 멎을 때까지** 기다린다. virtuoso는 스크롤
+ *     뒤 재측정으로 위치를 보정하므로, 고정 250ms는 보정 중인 화면을 찍는다.
+ *  4. 그래도 못 찾으면 **여기서** 죽되, 세 가지를 갈라 말한다:
+ *     ① 전 범위를 훑었는데 없었다 → 그 행은 이 빌드에 없다(= 프레임을 제품
+ *        사실에 맞출 차례지, 더 기다릴 일이 아니다).
+ *     ② 걸음 상한에 걸렸다 → 훑기가 끝나지 않았다.
+ *     ③ 찾았는데 자리가 멎지 않았다 → 목록이 계속 움직인다.
+ *     어느 쪽이든 그때 화면에 무엇이 있었는지(마운트된 항목 범위·행 수·스크롤러
+ *     기하)를 함께 적는다. 이전 메시지는 그 셋을 구분하지 못했고, 그래서 원인
+ *     지점과 증상 지점이 200줄 떨어져 있었다.
+ */
+async function scrollTimelineRowIntoView(page, testId, where = "") {
+  const label = where ? `${testId} · ${where}` : testId;
+  const seen = await page.evaluate(
+    async ({ testId, maxSteps }) => {
+      // 한 프레임 양보. rAF는 보이지 않는 탭에서 멈출 수 있으므로 상한을 함께
+      // 건다 — 대기로 때우는 값이 아니라 rAF가 오지 않을 때의 안전망이다.
+      const frame = () =>
+        new Promise((resolve) => {
+          let done = false;
+          const finish = () => {
+            if (!done) {
+              done = true;
+              resolve();
+            }
+          };
+          requestAnimationFrame(() => setTimeout(finish, 0));
+          setTimeout(finish, 50);
+        });
+
+      const find = () => document.querySelector(`[data-testid="${testId}"]`);
+      const scrollers = () =>
+        Array.from(
+          new Set([
+            ...document.querySelectorAll("[data-virtuoso-scroller]"),
+            ...document.querySelectorAll('[data-testid="timeline-virtuoso"]'),
+          ])
+        ).filter((el) => el.clientHeight > 0);
+
+      const report = (extra) => {
+        const mounted = Array.from(
+          document.querySelectorAll("[data-item-index]")
+        ).map((el) => Number(el.getAttribute("data-item-index")));
+        return {
+          scrollers: scrollers().map((el) => ({
+            top: Math.round(el.scrollTop),
+            height: Math.round(el.scrollHeight),
+            client: Math.round(el.clientHeight),
+          })),
+          mountedFrom: mounted.length ? Math.min(...mounted) : null,
+          mountedTo: mounted.length ? Math.max(...mounted) : null,
+          mountedCount: mounted.length,
+          rows: document.querySelectorAll('[data-testid="timeline-message"]')
+            .length,
+          ...extra,
+        };
+      };
+
+      await frame();
+
+      let steps = 0;
+      let ceiling = false;
+      let scanned = false;
+      if (!find()) {
+        scanned = true;
+        for (const scroller of scrollers()) {
+          scroller.scrollTop = scroller.scrollHeight;
+          await frame();
+          for (;;) {
+            if (find()) break;
+            if (scroller.scrollTop <= 0) break;
+            if (steps >= maxSteps) {
+              ceiling = true;
+              break;
+            }
+            const step = Math.max(120, Math.round(scroller.clientHeight * 0.6));
+            scroller.scrollTop = Math.max(0, scroller.scrollTop - step);
+            steps++;
+            await frame();
+          }
+          if (find() || ceiling) break;
+        }
+      }
+
+      const el = find();
+      if (!el) return report({ ok: false, steps, ceiling, scanned });
+
+      // 가운데로 올리고, 같은 자리에 세 프레임 연속으로 앉을 때까지 기다린다.
+      el.scrollIntoView({ block: "center" });
+      let key = null;
+      let stable = 0;
+      for (let i = 0; i < 60 && stable < 3; i++) {
+        await frame();
+        const now = find();
+        if (!now) {
+          key = null;
+          stable = 0;
+          continue;
+        }
+        const rect = now.getBoundingClientRect();
+        if (rect.height <= 0) {
+          stable = 0;
+          continue;
+        }
+        const next = `${Math.round(rect.top)}:${Math.round(rect.height)}`;
+        if (next === key) stable++;
+        else {
+          key = next;
+          stable = 0;
+        }
+      }
+      if (stable < 3) {
+        return report({ ok: false, steps, ceiling, scanned, unsettled: true });
+      }
+      return report({ ok: true, steps, ceiling, scanned });
+    },
+    { testId, maxSteps: 400 }
+  );
+
+  const scene =
+    `마운트된 항목 ${seen.mountedCount}개` +
+    (seen.mountedFrom === null
+      ? ""
+      : ` (index ${seen.mountedFrom}~${seen.mountedTo})`) +
+    ` · timeline-message ${seen.rows}행 · 스크롤러 ${JSON.stringify(seen.scrollers)}`;
+
+  if (seen.ok) {
+    const how = seen.scanned
+      ? `창 밖에 있어 스크롤러를 ${seen.steps}걸음 훑어 올림`
+      : "이미 창 안";
+    console.log(`  스크롤 ${label}: ${how} · ${scene}`);
+    return;
+  }
+  if (seen.unsettled) {
+    throw new Error(
+      `[스크롤] ${label}: 행을 찾아 가운데로 올렸는데 자리가 멎지 않았다 — ${scene}`
+    );
+  }
+  if (seen.ceiling) {
+    throw new Error(
+      `[스크롤] ${label}: 스크롤러를 ${seen.steps}걸음 훑고도 끝에 닿지 못했다 — ${scene}`
+    );
+  }
+  throw new Error(
+    `[스크롤] ${label}: 스크롤러 전 범위를 ${seen.steps}걸음으로 훑었는데 ` +
+      `\`[data-testid="${testId}"]\`가 한 번도 마운트되지 않았다. ` +
+      `기다림이 모자란 것이 아니라 **이 빌드에 그 행이 없다** — 픽스처가 그 행을 ` +
+      `내보내는지, 제품이 아직 그 행을 그리는지부터 확인해라 (P3 인박스 프레임과 같은 종류). ` +
+      `— ${scene}`
+  );
+}
+
+/**
+ * 포커스가 **멎은 뒤에** 읽는다 (goal QA-flake — `capture:design` 플레이크 2종 중 둘째).
+ *
+ * 실측(base `03fbdb81`, 8회 중 1회):
+ *   `[메뉴 dark] 방향키가 항목 사이를 돌지 않는다 (menu-react-👍 → menu-react-👍)`
+ * 방향키를 눌렀는데 포커스가 그대로였다는 고발이다. 그런데 **제품은 돌고 있었다.**
+ *
+ * 원인은 Radix에 있다. `@radix-ui/react-roving-focus`의 항목 keydown 핸들러는
+ * 후보를 고른 뒤 마지막 줄이 이것이다:
+ *
+ *     setTimeout(() => focusFirst(candidateNodes));
+ *
+ * **포커스 이동은 다음 매크로태스크에서 일어난다.** 그런데
+ * `keyboard.press("ArrowDown")`은 키 이벤트를 보낸 시점에 끝나고, 바로 뒤따르는
+ * `evaluate`는 그 타이머와 경주한다. 대개 타이머가 이기지만 메인 스레드가 렌더로
+ * 붐비면 CDP 평가가 먼저 들어와 **옮기기 전의 포커스**를 읽는다. 그래서 이 단언은
+ * 멀쩡한 메뉴를 두고 회차마다 붉었다 — 이것이 두 번째 비결정 실패였다.
+ *
+ * 고치는 방향은 대기를 늘리는 쪽이 아니라 **표본을 조건으로 바꾸는** 쪽이다.
+ * 여기서는 "포커스가 이 메뉴의 항목에 앉았고 `not`이 아니다"가 참이 될 때까지
+ * 기다렸다가 그 값을 읽는다. 고정 대기가 없으므로 통과하는 회차는 느려지지
+ * 않고, 정말로 돌지 않으면 그때는 진짜 결함이며 — 아래 메시지가 그 순간 무엇이
+ * 포커스를 쥐고 있었는지, 메뉴가 열려 있기는 했는지, 항목이 몇 개였는지 말한다.
+ */
+async function focusedMenuItem(
+  page,
+  where,
+  { not = null, menu = "message-action-menu" } = {}
+) {
+  try {
+    const handle = await page.waitForFunction(
+      ({ not, menu }) => {
+        const content = document.querySelector(`[data-testid="${menu}"]`);
+        const el = document.activeElement;
+        if (!content || !el || !content.contains(el)) return null;
+        if (el.getAttribute("role") !== "menuitem") return null;
+        const testId =
+          el.getAttribute("data-testid") || el.tagName.toLowerCase();
+        if (not !== null && testId === not) return null;
+        return {
+          testId,
+          items: content.querySelectorAll('[role="menuitem"]').length,
+        };
+      },
+      { not, menu },
+      { timeout: 5_000, polling: 50 }
+    );
+    return await handle.jsonValue();
+  } catch {
+    const scene = await page.evaluate(
+      ({ menu }) => {
+        const content = document.querySelector(`[data-testid="${menu}"]`);
+        const el = document.activeElement;
+        return {
+          open: Boolean(content),
+          focus: el
+            ? el.getAttribute("data-testid") || el.tagName.toLowerCase()
+            : "(없음)",
+          role: el ? el.getAttribute("role") : null,
+          inMenu: Boolean(content) && Boolean(el) && content.contains(el),
+          items: content
+            ? Array.from(content.querySelectorAll('[role="menuitem"]')).map(
+                (item) => item.getAttribute("data-testid")
+              )
+            : [],
+        };
+      },
+      { menu }
+    );
+    throw new Error(
+      `[${where}] ` +
+        (not === null
+          ? "메뉴가 열렸는데 5초 동안 포커스가 항목에 앉지 않았다"
+          : `방향키를 눌렀는데 5초 동안 포커스가 ${not}에서 움직이지 않았다`) +
+        ` — 메뉴 ${scene.open ? "열림" : "닫힘"}, 포커스=${scene.focus}` +
+        `(role=${scene.role ?? "없음"}, 메뉴 안=${scene.inMenu}), ` +
+        `항목 ${scene.items.length}개 [${scene.items.join(", ")}]`
+    );
+  }
+}
+
+/**
+ * 포커스가 그 컨트롤에 **돌아올 때까지** 기다린다.
+ *
+ * `focusedMenuItem`과 같은 이유다: Radix는 닫힐 때 `onCloseAutoFocus`로 진입점에
+ * 포커스를 되돌리는데 그 복원도 즉시가 아니다. 200ms를 재고 한 번 표본을 뜨면
+ * 같은 종류의 거짓 실패가 언제든 다시 난다.
+ */
+async function waitForFocus(page, testId, where, note) {
+  try {
+    await page.waitForFunction(
+      (id) => document.activeElement?.getAttribute("data-testid") === id,
+      testId,
+      { timeout: 5_000, polling: 50 }
+    );
+  } catch {
+    const returned = await page.evaluate(`(() => {
+      const el = document.activeElement;
+      if (!el) return "(없음)";
+      return el.getAttribute("data-testid") || el.tagName.toLowerCase();
+    })()`);
+    throw new Error(
+      `[${where}] ${note} — 5초를 기다려도 포커스가 ${returned}에 남았다 (기대 ${testId})`
+    );
+  }
+}
+
+/**
+ * 진짜 손가락 제스처 (goal B11 R2 H2).
+ *
+ * 1라운드의 이 자리는 합성 `pointerdown` 하나였다 — move도 up도 없었으므로,
+ * "스크롤은 누르기가 아니다" 규칙은 캡처에서 **한 번도 실행되지 않았다**. 훅
+ * 안에서 그 규칙이 죽어 있었던 것도 그래서 아무도 몰랐다.
+ *
+ * 여기서는 CDP로 실제 터치 시퀀스를 낸다: touchStart → 여러 걸음의 touchMove →
+ * 홀드 → touchEnd. 걸음을 나누는 것이 요점이다. 걸음마다 몇 px씩이면 "직전
+ * 위치" 기준의 게이트는 절대 걸리지 않고, 시작점 기준의 게이트만 걸린다.
+ *
+ * 가로로 미는 이유: 타임라인은 세로로만 스크롤하므로 가로 드래그에는 브라우저가
+ * 개입하지 않는다(`pointercancel`이 오지 않는다). 남은 방어는 훅의 거리 게이트
+ * 하나뿐이고, 정확히 그것을 재려는 것이다.
+ *
+ * ## 끝은 touchEnd 가 아니라 touchCancel 이다 (#1099)
+ *
+ * 하네스가 95/118 프레임에서 30초 타임아웃으로 죽던 이유가 여기 있었다. 실측
+ * (2026-08-06, origin/track/engine baseline, `CAPTURE_PROFILE=mobile`):
+ *
+ *   [diag] before touchEnd opened=true
+ *   [diag] +0ms visible=false count=0
+ *   [diag] events [... "mousedown target=sheet-react-👍" "click target=sheet-react-👍"]
+ *
+ * 시트는 홀드 동안 정상적으로 열렸다. 그리고 **touchEnd 가 그 시트를 도로 닫았다.**
+ * Chrome 은 취소되지 않은 터치 시퀀스의 touchEnd 뒤에 호환용 마우스 이벤트
+ * (mousedown/mouseup/click)를 **놓았던 좌표에** 합성한다. 시트는 화면 아래에
+ * 붙는 판이라 길게 누른 그 좌표를 덮는다 — 그래서 손을 떼는 동작이 시트의 첫
+ * 빠른 반응 버튼(`sheet-react-👍`)을 누르고, 그 onClick 이 `close()` 를 부른다.
+ * 두 번째 openSheet() 가 30초를 기다린 것은 그 사이 시트가 닫혔기 때문이다.
+ * (첫 열기가 살아남은 것은 우연이다: 그때는 합성 클릭이 시트의 설명 문단이라는
+ * 죽은 자리에 떨어졌다.)
+ *
+ * 이것은 제품 결함이 아니라 **원시 터치 디스패치의 산물**이다. 실제 Chrome 은
+ * 700ms 홀드를 GestureLongPress 로 인식해 뒤따르는 탭을 소비하지만,
+ * `Input.dispatchTouchEvent` 로 낸 터치는 그 인식기를 거치지 않아 탭이 살아남는다.
+ * touchCancel 은 그 "제스처가 소비됐다"를 정확히 모델링하고, 앱 쪽에서는
+ * `pointercancel` → `useLongPress.onPointerCancel` 로 눌림 상태도 깨끗이 풀린다.
+ */
+async function longPressGesture(page, target, { dx = 0, dy = 0, holdMs = 700 } = {}) {
+  const box = await target.boundingBox();
+  if (!box) throw new Error("길게 누르기 대상의 상자를 잴 수 없다");
+  const x0 = box.x + Math.min(24, box.width / 2);
+  const y0 = box.y + box.height / 2;
+  const cdp = await page.context().newCDPSession(page);
+  const at = (fx, fy) => ({
+    x: x0 + dx * fx,
+    y: y0 + dy * fy,
+    radiusX: 12,
+    radiusY: 12,
+    force: 1,
+  });
+  try {
+    await cdp.send("Input.dispatchTouchEvent", {
+      type: "touchStart",
+      touchPoints: [at(0, 0)],
+    });
+    const steps = 5;
+    for (let i = 1; i <= steps; i++) {
+      await cdp.send("Input.dispatchTouchEvent", {
+        type: "touchMove",
+        touchPoints: [at(i / steps, i / steps)],
+      });
+      await page.waitForTimeout(40);
+    }
+    await page.waitForTimeout(holdMs);
+    const opened = await page
+      .getByTestId("message-action-sheet")
+      .isVisible()
+      .catch(() => false);
+    await cdp.send("Input.dispatchTouchEvent", {
+      type: "touchCancel",
+      touchPoints: [],
+    });
+    return opened;
+  } finally {
+    await cdp.detach();
+  }
+}
+
+/**
+ * 이 컨트롤들이 **보이는** 뷰포트 안에 있는가.
+ *
+ * `assertComposerVisible`과 같은 자인데 대상만 받는다. 스레드 컴포저에 쓰려고
+ * 뽑았다: B9가 답한 질문("키보드가 올라오면 컴포저가 가려지는가")은 채널
+ * 컴포저에만 답한 것이었고, B11이 새 입력창을 하나 더 놓았다.
+ */
+async function assertControlsAboveFold(page, where, ids) {
+  const measure = await page.evaluate(`(() => {
+    const visible = Math.round(window.visualViewport.height);
+    return {
+      visible,
+      layout: window.innerHeight,
+      rows: ${JSON.stringify(ids)}.map((id) => {
+        const el = document.querySelector('[data-testid="' + id + '"]');
+        return { id, bottom: el ? Math.round(el.getBoundingClientRect().bottom) : null };
+      }),
+    };
+  })()`);
+  for (const row of measure.rows) {
+    if (row.bottom === null) {
+      throw new Error(`가시성 ${where}: ${row.id}가 없다`);
+    }
+    if (row.bottom > measure.visible + 1) {
+      throw new Error(
+        `가시성 ${where}: ${row.id} 아랫변이 ${row.bottom}px인데 보이는 높이는 ` +
+          `${measure.visible}px다 — 하단 크롬 뒤로 ${row.bottom - measure.visible}px 들어갔다`
+      );
+    }
+  }
+  console.log(
+    `  가시성 ${where}: ` +
+      measure.rows.map((r) => `${r.id} ${r.bottom}px`).join(" · ") +
+      ` <= 보이는 ${measure.visible}px`
+  );
+}
+
+/**
+ * 폰 (goal B6). 데스크탑 프로파일과 같은 목이고 같은 컴포넌트이며, 다른 것은
+ * 뷰포트뿐이다: 이 셸이 폭에 따라 형태를 바꾼다는 주장을 같은 픽스처로 두 번
+ * 찍어야 리뷰가 두 형태를 나란히 볼 수 있다.
+ *
+ * 다섯 화면인 이유는 그 다섯이 폰에서 형태가 **바뀐** 화면 전부이기 때문이다:
+ * 연결(셸 밖), 채널(단일 pane + 도크된 컴포저), 서랍이 열린 상태, 에이전트 허브
+ * (두 열이 한 열이 되는 표면), 인박스(전역 표면의 헤더에 햄버거가 서는 자리).
+ */
+async function captureMobile(browser, scheme) {
+  const context = await browser.newContext({
+    viewport: MOBILE_VIEWPORT,
+    deviceScaleFactor: 3,
+    isMobile: true,
+    hasTouch: true,
+    userAgent: IPHONE_UA,
+    colorScheme: scheme,
+    reducedMotion: "reduce",
+  });
+  await installMocks(context);
+  const shots = [];
+  const shoot = async (page, name) => {
+    const path = `${OUT_DIR}/mobile-${name}-${scheme}.png`;
+    await page.screenshot({ path });
+    shots.push(path);
+  };
+
+  // 1. 연결 화면. 셸 밖의 유일한 표면이고, 폰에서 문서가 스크롤해도 되는 자리다.
+  const page = await context.newPage();
+  await page.goto(ORIGIN, { waitUntil: "networkidle" });
+  await page.getByTestId("login-submit").waitFor({ state: "visible" });
+  await assertNoHorizontalOverflow(page, `login ${scheme}`);
+  // goal P3 1-4: 폼의 1급 컨트롤은 이 폭에서 44px다. 데스크탑 프레임은 같은
+  // 컨트롤을 32px로 찍으므로, 두 프레임이 함께 "토큰이 아니라 폭이 결정한다"를
+  // 말한다.
+  await assertTapTargets(page, `login ${scheme}`, LOGIN_TAP_TARGETS);
+  await shoot(page, "login");
+
+  // 2. 채널. 사이드바는 열이 아니라 닫힌 서랍이므로 타임라인이 390px 전부를
+  //    받고, 컴포저는 안전 영역 위에 도크된다.
+  await page.getByTestId("login-email").fill("seongjae@dawn.example");
+  await page.getByTestId("login-password").fill("capture-only-not-a-credential");
+  await page.getByTestId("login-submit").click();
+  await page.getByTestId("composer-input").waitFor({ state: "visible" });
+  await page.getByTestId("timeline-message").first().waitFor({ state: "visible" });
+  await page.waitForTimeout(300);
+  await assertNoHorizontalOverflow(page, `chat ${scheme}`);
+  await assertTapTargets(page, `chat ${scheme}`);
+  await assertTopBreathing(page, `chat ${scheme}`);
+  await assertComposerVisible(page, `chat ${scheme}`);
+  await shoot(page, "chat");
+
+  // 2a-1. 폰에 액션이 있다는 것을 말하는 한 줄 (goal B11 R2 H4). 폰의 진입점은
+  //       보이지 않는 제스처 하나뿐이었고, 그래서 이 표면에는 "여기서 무언가 할
+  //       수 있다"고 말하는 것이 하나도 없었다. 손가락 기기에서만, 한 번만.
+  await page.getByTestId("long-press-hint").waitFor({ state: "visible" });
+  // 같은 축의 반대편: hover가 없는 기기에는 액션 열이 아예 없어야 한다. 있으면
+  // 본문이 쓸 수 있었던 폭을, 어떤 제스처로도 열리지 않는 컨트롤에 준 것이다.
+  const gutterOnTouch = await page.evaluate(`(() => {
+    const columns = Array.from(
+      document.querySelectorAll('[data-testid="message-action-column"]')
+    );
+    const shown = columns.filter((el) => el.getBoundingClientRect().width > 0);
+    return { total: columns.length, shown: shown.length };
+  })()`);
+  if (gutterOnTouch.shown > 0) {
+    throw new Error(
+      `[폰 ${scheme}] hover가 없는 기기에 액션 열이 ${gutterOnTouch.shown}개 그려졌다`
+    );
+  }
+  console.log(
+    `  폰 ${scheme}: 액션 열 ${gutterOnTouch.total}개 모두 접힘, 길게 누르기 안내 보임`
+  );
+
+  // 2a-2. 스크롤은 누르기가 아니다 (goal B11 R2 H2). **먼저 열리지 않아야 하는
+  //       제스처부터 잰다.** 1라운드의 이 방어는 죽은 코드였다: `origin`을 채운
+  //       직후 `clear()`가 그것을 지워서 거리 게이트가 한 번도 돌지 않았고,
+  //       그래서 임계 아래에서 천천히 끌다 멈추는 손가락이 시트를 열었다.
+  //
+  //       40px을 다섯 걸음에 나눠 가로로 민다. 걸음마다 8px이므로 "직전 위치"
+  //       기준이라면 다섯 번 다 통과하고, 가로이므로 브라우저가 스크롤로
+  //       가져가지도 않는다(`pointercancel`이 오지 않는다). 남은 방어는 훅의
+  //       시작점 기준 거리 게이트 하나뿐이다.
+  const sheetTarget = page.getByTestId("timeline-message").last();
+  const draggedOpen = await longPressGesture(page, sheetTarget, { dx: 40 });
+  if (draggedOpen) {
+    throw new Error(
+      `[길게 누르기 ${scheme}] 40px 끌린 손가락이 시트를 열었다 — 스크롤은 누르기가 아니다`
+    );
+  }
+  console.log(`  길게 누르기 ${scheme}: 40px 끌기는 시트를 열지 않는다`);
+  await page.waitForTimeout(200);
+
+  // 2a-3. 그리고 진짜 길게 누르기는 연다. 손가락은 가만히 있지 않으므로 4px의
+  //       떨림을 함께 낸다 — 허용 범위 안의 흔들림까지 취소하는 게이트는 열리지
+  //       않는 시트와 같다.
+  const pressedOpen = await longPressGesture(page, sheetTarget, { dx: 4 });
+  if (!pressedOpen) {
+    throw new Error(
+      `[길게 누르기 ${scheme}] 4px 떨림이 있는 길게 누르기가 시트를 열지 못했다`
+    );
+  }
+  await page.getByTestId("message-action-sheet").waitFor({ state: "visible" });
+  await page.waitForTimeout(300);
+  await assertNoHorizontalOverflow(page, `action sheet ${scheme}`);
+  // 시트의 모든 행은 44px 손가락 타깃이어야 한다 — 시트를 여는 이유가 그것이다.
+  const sheetTaps = await page.evaluate(`(() => {
+    const ids = ["sheet-reply", "sheet-edit", "sheet-delete"];
+    return ids
+      .map((id) => {
+        const el = document.querySelector('[data-testid="' + id + '"]');
+        if (!el) return null;
+        const r = el.getBoundingClientRect();
+        return { id, h: Math.round(r.height), w: Math.round(r.width) };
+      })
+      .filter(Boolean);
+  })()`);
+  // 빈 목록은 통과가 아니다 (#1099). 이전 판은 `.filter(Boolean)` 뒤에 for 문만
+  // 있어서, 시트가 닫힌 뒤 이 자리에 오면 **행 0개를 무사통과**했다 — 44px 계약이
+  // 검사된 적 없는데 초록이 나오는 상태였고, 그 조용한 초록이 시트가 닫히고 있다는
+  // 사실을 118프레임 뒤까지 가려 줬다.
+  if (sheetTaps.length !== 3) {
+    throw new Error(
+      `[action sheet ${scheme}] 시트 행 ${sheetTaps.length}/3 — 시트가 닫혔거나 행이 사라졌다`
+    );
+  }
+  for (const tap of sheetTaps) {
+    if (tap.h < 44) {
+      throw new Error(
+        `[action sheet ${scheme}] ${tap.id} 높이 ${tap.h}px < 44px 손가락 타깃`
+      );
+    }
+  }
+  await shoot(page, "b11-action-sheet");
+  await page.keyboard.press("Escape");
+  await page.getByTestId("message-action-sheet").waitFor({ state: "hidden" });
+
+  // 2a-4. 시트가 여는 세 목적지 (goal B11 R2 H3). 1라운드는 폰 흐름을 **시트까지**
+  //       만 증명했고, 시트가 여는 곳은 아무도 폰에서 보지 않았다. 그 중 둘은
+  //       44px 아래 컨트롤에 착지했다(수정 저장·취소 28px, 삭제 확인 32px):
+  //       손가락으로 시작한 흐름이 손가락으로 누를 수 없는 곳에서 끝났다.
+  const openSheet = async () => {
+    const opened = await longPressGesture(page, sheetTarget, { dx: 4 });
+    if (!opened) {
+      throw new Error(`[폰 ${scheme}] 액션 시트를 다시 열지 못했다`);
+    }
+    await page.getByTestId("message-action-sheet").waitFor({ state: "visible" });
+  };
+
+  // (1) 제자리 편집기.
+  await openSheet();
+  await page.getByTestId("sheet-edit").click();
+  await page.getByTestId("message-editor-input").waitFor({ state: "visible" });
+  await page.waitForTimeout(300);
+  await assertNoHorizontalOverflow(page, `inline editor ${scheme}`);
+  await assertTapTargets(page, `inline editor ${scheme}`);
+  await shoot(page, "b11-edit");
+  await page.getByTestId("message-editor-cancel").click();
+  await page
+    .getByTestId("message-editor-input")
+    .waitFor({ state: "detached" });
+
+  // (2) 삭제 확인.
+  await openSheet();
+  await page.getByTestId("sheet-delete").click();
+  await page.getByTestId("delete-message-dialog").waitFor({ state: "visible" });
+  await page.waitForTimeout(300);
+  await assertNoHorizontalOverflow(page, `delete dialog ${scheme}`);
+  await assertTapTargets(page, `delete dialog ${scheme}`);
+  await shoot(page, "b11-delete");
+  await page.getByTestId("delete-message-cancel").click();
+  await page
+    .getByTestId("delete-message-dialog")
+    .waitFor({ state: "hidden" });
+
+  // (3) 스레드 패널과 그 컴포저. 폰에서 이 패널은 열이 아니라 채널을 덮는
+  //     서랍이고, 그 안에 B11이 입력창을 하나 더 놓았다.
+  await page.getByTestId("thread-anchor").first().click();
+  await page.getByTestId("thread-panel").waitFor({ state: "visible" });
+  await page.getByTestId("thread-composer-input").waitFor({ state: "visible" });
+  await page.waitForTimeout(300);
+  await assertNoHorizontalOverflow(page, `thread ${scheme}`);
+  await assertTapTargets(page, `thread ${scheme}`);
+  await shoot(page, "b11-thread");
+
+  //     그리고 B9의 질문을 이 입력창에도 던진다: 하단 크롬이 100px을 가져가면
+  //     답글 컴포저가 그 뒤로 들어가는가. 코드상으로는 `--app-viewport-height`를
+  //     물려받아 안전해 보이지만, 재지 않은 것은 재지 않은 것이다.
+  await emulateBottomChrome(page);
+  await page.waitForTimeout(300);
+  await assertControlsAboveFold(page, `thread + 하단 크롬 ${scheme}`, [
+    "thread-composer-input",
+    "thread-composer-send",
+  ]);
+  await shoot(page, "b11-thread-bottom-chrome");
+  await releaseBottomChrome(page);
+  await page.getByTestId("thread-close").click();
+  await page.getByTestId("thread-panel").waitFor({ state: "detached" });
+
+  // 2b. 하단 브라우저 크롬이 100px을 가져간 상태 (goal B9). 성재 실캡처의 조건이고,
+  //     이 프레임의 요점은 컴포저가 그 선 **위에** 있다는 것이다. 아래 100px이 비어
+  //     보이는 것이 맞다: 실기기에서 거기 있는 것은 사파리의 주소 줄이다.
+  await emulateBottomChrome(page);
+  await assertComposerVisible(page, `chat + 하단 크롬 ${scheme}`);
+  await assertNoHorizontalOverflow(page, `chat + 하단 크롬 ${scheme}`);
+  await shoot(page, "chat-bottom-chrome");
+  await releaseBottomChrome(page);
+
+  // 3. 서랍이 열린 상태. 뒤 표면이 110px 남는 것이 이 프레임의 요점이다: 덮은
+  //    것이 화면 전체가 아니라 서랍이어야 바깥을 눌러 닫을 자리가 보인다.
+  await page.getByTestId("open-sidebar-drawer").click();
+  await page.getByTestId("sidebar-scrim").waitFor({ state: "visible" });
+  await page.waitForTimeout(300);
+  const drawer = await page.evaluate(`(() => {
+    const el = document.querySelector('[data-testid="sidebar"]');
+    const r = el.getBoundingClientRect();
+    const row = document.querySelector("[data-sidebar-row]");
+    const rowRect = row?.getBoundingClientRect();
+    return {
+      left: Math.round(r.left),
+      width: Math.round(r.width),
+      peek: Math.round(window.innerWidth - r.right),
+      rowHeight: rowRect ? Math.round(rowRect.height) : null,
+      mainInert: document
+        .querySelector("main")
+        ?.hasAttribute("inert"),
+      focusInsideDrawer: el.contains(document.activeElement),
+    };
+  })()`);
+  if (drawer.left !== 0 || drawer.peek <= 0) {
+    throw new Error(`서랍 기하 ${scheme}: ${JSON.stringify(drawer)}`);
+  }
+  if (drawer.mainInert !== true) {
+    throw new Error(`서랍이 열렸는데 본문이 inert가 아니다 ${scheme}`);
+  }
+  if (drawer.focusInsideDrawer !== true) {
+    throw new Error(`서랍이 열렸는데 캐럿이 밖에 있다 ${scheme}`);
+  }
+  if (drawer.rowHeight !== null && drawer.rowHeight < 44) {
+    throw new Error(`채널 행이 ${drawer.rowHeight}px다 (최소 44px) ${scheme}`);
+  }
+  console.log(
+    `  drawer ${scheme}: ${drawer.width}px 서랍 + ${drawer.peek}px 잔여, 행 ${drawer.rowHeight}px, 본문 inert=${drawer.mainInert}`
+  );
+  await assertNoHorizontalOverflow(page, `drawer ${scheme}`);
+  await shoot(page, "sidebar-drawer");
+
+  // Esc로 닫힌다. 닫히는 길이 셋(닫기 버튼·스크림·Esc)이라는 주장 중 하나를
+  // 여기서 실제로 걷는다.
+  await page.keyboard.press("Escape");
+  await page.getByTestId("sidebar-scrim").waitFor({ state: "detached" });
+
+  // 3b. 에이전트와의 1:1 DM (goal B13 R2 Medium).
+  //     이 배치가 좁은 폭에 **새로** 만든 것이 여기 있다: 컴포저 힌트 줄은
+  //     원래 통째로 wide-only여서 600px 아래에서는 아예 없었는데, DM일 때는
+  //     "멘션 없이 바로 말하면 …가 답합니다"가 남는다. 즉 폰에서 컴포저 아래
+  //     텍스트 노드가 하나 생기는 유일한 경우다. 채널 캡처는 그 부재만
+  //     증명하므로 존재하는 쪽을 따로 찍는다 — 특히 이름이 긴 에이전트에서
+  //     이 줄이 가로로 새지 않는지가 요점이다.
+  await page.evaluate('location.hash = "/directory"');
+  await page
+    .locator('[data-testid="directory-row"][data-member-kind="agent"]')
+    .first()
+    .click();
+  await page.getByTestId("composer-input").waitFor({ state: "visible" });
+  await page.getByTestId("composer-dm-hint").waitFor({ state: "visible" });
+  await page.waitForTimeout(300);
+  const dmHint = await page.evaluate(`(() => {
+    const el = document.querySelector('[data-testid="composer-dm-hint"]');
+    const line = document.querySelector('[data-testid="composer-hint"]');
+    const keys = document.querySelector('[data-testid="composer-keys-hint"]');
+    return {
+      // innerText는 렌더된 것만 준다. textContent는 display:none도 포함하므로
+      // "접혔는지"를 그것으로 물으면 영원히 안 접힌 것처럼 보인다.
+      text: el?.innerText?.trim() ?? null,
+      lineText: line?.innerText?.trim() ?? null,
+      keysDisplay: keys ? getComputedStyle(keys).display : null,
+      overflow: line ? line.scrollWidth - line.clientWidth : null,
+    };
+  })()`);
+  if (!dmHint.text) {
+    throw new Error(`DM 컴포저 힌트가 폰에서 사라졌다 ${scheme}`);
+  }
+  // 폰에는 ⌘도 물리 키보드 안내도 필요 없다: 그 조각만 wide-only로 접히고
+  // DM 문장은 남는다.
+  if (dmHint.keysDisplay !== "none") {
+    throw new Error(
+      `폰에서 Enter 안내가 접히지 않았다 (wide-only가 풀렸다) ${scheme}: display=${dmHint.keysDisplay}`
+    );
+  }
+  if (dmHint.lineText.includes("Enter로 보내기")) {
+    throw new Error(
+      `폰에서 Enter 안내가 여전히 렌더된다 ${scheme}: ${dmHint.lineText}`
+    );
+  }
+  if (dmHint.overflow > 0) {
+    throw new Error(
+      `DM 힌트가 가로로 샌다 ${scheme}: +${dmHint.overflow}px (${dmHint.lineText})`
+    );
+  }
+  console.log(`  dm hint ${scheme}: "${dmHint.lineText}" (넘침 0)`);
+  await assertNoHorizontalOverflow(page, `dm ${scheme}`);
+  await shoot(page, "dm");
+  await page.evaluate('location.hash = "/"');
+  await page.getByTestId("composer-input").waitFor({ state: "visible" });
+
+  // 4. 에이전트 허브. 900px 아래에서 명부와 상세가 한 열로 쌓이는 표면이라,
+  //    폰에서 그 형태가 실제로 서는지 보는 자리다.
+  await page.evaluate('location.hash = "/agents"');
+  await page.getByTestId("agent-hub-profile-card").waitFor({ state: "visible" });
+  await page.waitForTimeout(300);
+  await assertNoHorizontalOverflow(page, `agent hub ${scheme}`);
+  await shoot(page, "agent-hub");
+
+  // 5. 인박스. 전역 표면의 헤더에도 서랍을 여는 길이 있어야 한다는 것이 이
+  //    프레임의 요점이다: 없으면 채널 밖으로 나간 사람은 갇힌다. 그 요점은 이
+  //    서버가 승인 원장을 갖든 말든 그대로이므로 프레임도 그대로 선다 —
+  //    바뀐 것은 무엇을 기다리느냐뿐이다(`waitForInboxSettled` 주석).
+  //
+  //    `?filter=needs-action`은 일부러 남겨 둔다. 이 서버에 없는 탭을 가리키는
+  //    링크이고, `parseFilter`가 그것을 남은 탭으로 접어 주는지가 여기서 함께
+  //    걸린다 — 죽은 탭을 가리키는 옛 딥링크는 실제로 돌아다닌다.
+  await page.evaluate('location.hash = "/inbox?filter=needs-action"');
+  await waitForInboxSettled(page, `mobile ${scheme}`);
+  await page.getByTestId("open-sidebar-drawer").waitFor({ state: "visible" });
+  await assertNoHorizontalOverflow(page, `inbox ${scheme}`);
+  // 서랍이 폰에서 실제로 **눌리는** 크기인지까지 재고 넘어간다. 전역 표면에서
+  // 채널로 돌아가는 유일한 길이라, 여기서 작으면 갇히는 것과 같다.
+  await assertTapTargets(page, `inbox ${scheme}`, [
+    ["open-sidebar-drawer", "채널 목록 열기"],
+  ]);
+  await shoot(page, "inbox");
+
+  // 6. 긴 무공백 토큰 스트레스 (goal B9). 마지막에 서는 이유는 이 단계가 DOM을
+  //    되돌릴 수 없게 바꾸기 때문이다 — 앞의 다섯 프레임은 손대지 않은 표면에서
+  //    찍히고, 이 한 장만 스트레스가 걸린 채로 남는다.
+  await page.evaluate('location.hash = "/"');
+  await page.getByTestId("composer-input").waitFor({ state: "visible" });
+  await page.getByTestId("timeline-message").first().waitFor({ state: "visible" });
+  await page.waitForTimeout(300);
+  const touched = await applyLongTokenStress(page);
+  await page.waitForTimeout(200);
+  console.log(`  long token ${scheme}: 서버가 쓴 글 ${touched}곳에 74자 무공백 토큰`);
+  await assertNoHorizontalOverflow(page, `long token ${scheme}`);
+  await shoot(page, "long-token");
+
+  await context.close();
+  return shots;
 }
 
 async function captureScheme(browser, scheme) {
@@ -789,12 +2936,30 @@ async function captureScheme(browser, scheme) {
   await login.screenshot({ path: loginShot });
   shots.push(loginShot);
 
+  // 1a-2. 워크스페이스 칸을 펼친 상태 (goal B13 R2 High 1). 접어 둔 것이 "채우는
+  //       법을 지운 것"이 아님을 보이는 프레임이다: 열면 라벨이 "워크스페이스 ID"
+  //       이고 placeholder가 UUID 모양이라, 무엇을 넣는 칸인지 화면에서 읽힌다.
+  await login.getByTestId("login-workspace-toggle").click();
+  await login.getByTestId("login-workspace").waitFor({ state: "visible" });
+  const workspacePlaceholder = await login
+    .getByTestId("login-workspace")
+    .getAttribute("placeholder");
+  if (!/^[0-9a-f-]{36}$/.test(workspacePlaceholder ?? "")) {
+    throw new Error(
+      `워크스페이스 칸이 형식을 보여주지 않는다 ${scheme}: ${workspacePlaceholder}`
+    );
+  }
+  const workspaceShot = `${OUT_DIR}/login-workspace-${scheme}.png`;
+  await login.screenshot({ path: workspaceShot });
+  shots.push(workspaceShot);
+  await login.getByTestId("login-workspace-toggle").click();
+
   // 1b. connect surface, invite path (MOMO-604): the browser fallback for a
-  //     momo://join link fills server and code, so only email/password remain.
+  //     oort://join link fills server and code, so only email/password remain.
   //     The LAN discovery card has no web equivalent (no mDNS in a page), so it
   //     is reviewed in the desktop shell, not here.
   const invite = await context.newPage();
-  const deepLink = `momo://join?server=${encodeURIComponent(
+  const deepLink = `oort://join?server=${encodeURIComponent(
     ORIGIN
   )}&code=momo-alpha-2026`;
   await invite.goto(`${ORIGIN}/?join=${encodeURIComponent(deepLink)}`, {
@@ -808,9 +2973,197 @@ async function captureScheme(browser, scheme) {
   // 2. chat shell, live path: sidebar + timeline + composer + rail status
   await signIn(login);
   await login.getByTestId("timeline-message").first().waitFor({ state: "visible" });
+  // 넓은 창도 같은 자로 잰다 (goal B9). 긴 무공백 토큰은 폰에서만 나는 결함이
+  // 아니다: 1280px 창에서도 타임라인 스크롤러는 세로 전용이어야 하고, 그 상자가
+  // 가로로 끌린다면 새는 것이 있다는 뜻이다. 폭만 다른 같은 주장이다.
+  await assertNoHorizontalOverflow(login, `desktop chat ${scheme}`);
   const chatShot = `${OUT_DIR}/chat-${scheme}.png`;
   await login.screenshot({ path: chatShot });
   shots.push(chatShot);
+
+  // 2c. 메시지 액션 (goal B11). 한 프레임이 네 가지를 한꺼번에 증명한다: 내
+  //     메시지 위에 뜬 액션 바, 위 행들의 반응 칩(내가 누른 것은 강조), 「수정됨」
+  //     표식, 그리고 조용히 사라지지 않고 자리에 남은 「삭제된 메시지」.
+  //
+  //     hover로 띄운다 — 데스크탑의 진입점이 hover이기 때문이다. 폰에는 hover가
+  //     없고, 그쪽은 captureMobile의 길게 누르기 프레임이 맡는다.
+  const actionRow = login.getByTestId("timeline-message").last();
+  await actionRow.hover();
+  await login
+    .getByTestId("message-actions-trigger")
+    .last()
+    .waitFor({ state: "visible" });
+  await login.waitForTimeout(300);
+  // Blocker 회귀 (R2). 진입점은 본문 상자 밖의 예약된 열에 있어야 한다.
+  await assertActionGutterClearsBody(login, `hover ${scheme}`);
+  // H1 회귀 (R2). 행마다 최대 여섯 개였던 탭 스톱이 하나가 되었는가.
+  await assertRowTabStops(login, `hover ${scheme}`);
+  const actionsShot = `${OUT_DIR}/b11-message-actions-${scheme}.png`;
+  await login.screenshot({ path: actionsShot });
+  shots.push(actionsShot);
+
+  // 2d. 키보드 경로 (goal B11 R2 H1). **진짜 Tab으로 만든 프레임이다.**
+  //
+  //     1라운드의 이 프레임은 `locator.focus()`로 찍혔고, 그래서 hover 프레임과
+  //     md5까지 같았다: 프로그래매틱 포커스는 Chromium에서 `:focus-visible`을
+  //     켜지 않으므로 링이 그려지지 않았고, 아무것도 재지 못한 채 "키보드로
+  //     닿는다"고 주장했다. 여기서는 바로 앞 행의 진입점에 포커스를 두고 Tab을
+  //     **눌러서** 다음 진입점에 착지한 뒤, 그 순간의 상태를 직접 확인한다.
+  const landed = await login.evaluate(`(() => {
+    const triggers = Array.from(
+      document.querySelectorAll('[data-testid="message-actions-trigger"]')
+    );
+    if (triggers.length < 2) return false;
+    triggers[triggers.length - 2].focus();
+    return true;
+  })()`);
+  if (!landed) {
+    throw new Error(`[키보드 ${scheme}] 액션 진입점이 두 개 미만이다`);
+  }
+  // 본문 안의 링크도 정당한 탭 스톱이므로(마지막 행에는 긴 URL이 있다) 진입점이
+  // 나올 때까지 Tab을 **누른다**. 중요한 것은 몇 번째냐가 아니라, 실제 키 입력으로
+  // 거기에 닿았고 그 순간 브라우저가 `:focus-visible`을 켰다는 것이다.
+  let landedOn = "";
+  for (let press = 0; press < 8 && landedOn !== "message-actions-trigger"; press++) {
+    await login.keyboard.press("Tab");
+    landedOn = await login.evaluate(
+      `document.activeElement ? (document.activeElement.getAttribute("data-testid") || "") : ""`
+    );
+  }
+  const focusProof = await login.evaluate(`(() => {
+    const el = document.activeElement;
+    if (!el) return { testId: "", focusVisible: false, opacity: 0 };
+    return {
+      testId: el.getAttribute("data-testid") || "",
+      focusVisible: el.matches(":focus-visible"),
+      opacity: Number(getComputedStyle(el).opacity),
+    };
+  })()`);
+  if (focusProof.testId !== "message-actions-trigger") {
+    throw new Error(
+      `[키보드 ${scheme}] Tab이 액션 진입점이 아니라 ${focusProof.testId || "(없음)"}에 닿았다`
+    );
+  }
+  if (!focusProof.focusVisible) {
+    throw new Error(
+      `[키보드 ${scheme}] 진입점이 :focus-visible이 아니다 — 링 없는 프레임은 아무것도 증명하지 않는다`
+    );
+  }
+  if (focusProof.opacity < 1) {
+    throw new Error(
+      `[키보드 ${scheme}] 포커스를 받은 진입점의 opacity가 ${focusProof.opacity}다 (보이지 않는 컨트롤에 포커스가 있다)`
+    );
+  }
+  console.log(`  키보드 ${scheme}: Tab → 진입점, :focus-visible 켜짐`);
+  await login.waitForTimeout(300);
+  const actionsFocusShot = `${OUT_DIR}/b11-message-actions-focus-${scheme}.png`;
+  await login.screenshot({ path: actionsFocusShot });
+  shots.push(actionsFocusShot);
+
+  // 2e. 그 진입점이 여는 것 (goal B11 R2 H1). 키보드 사용자는 행당 하나의
+  //     진입점으로 같은 액션 **전부**에 닿아야 한다. Enter로 열고, 방향키가
+  //     실제로 항목 사이를 도는지 확인하고, Esc가 포커스를 진입점에 돌려주는지
+  //     까지 같은 시퀀스에서 잰다.
+  await login.keyboard.press("Enter");
+  await login.getByTestId("message-action-menu").waitFor({ state: "visible" });
+  await login.waitForTimeout(300);
+  const menuShot = `${OUT_DIR}/b11-message-action-menu-${scheme}.png`;
+  await login.screenshot({ path: menuShot });
+  shots.push(menuShot);
+  //     포커스는 **표본이 아니라 조건**으로 읽는다 (goal QA-flake). 사연은
+  //     `focusedMenuItem` 주석에 있다: Radix의 roving focus가 포커스를
+  //     `setTimeout`으로 옮기므로, 키를 누른 직후의 한 번 읽기는 옮기기 전
+  //     상태를 볼 수 있고 그것이 두 번째 플레이크였다.
+  const firstItem = await focusedMenuItem(login, `메뉴 ${scheme}`);
+  await login.keyboard.press("ArrowDown");
+  //     그리고 포커스가 그 항목을 **떠날 때까지**. 끝내 떠나지 않으면 그때가
+  //     진짜 결함이고, 그 자리에서 무엇이 포커스를 쥐고 있었는지까지 말한다.
+  const secondItem = await focusedMenuItem(login, `메뉴 ${scheme}`, {
+    not: firstItem.testId,
+  });
+  console.log(
+    `  메뉴 ${scheme}: 항목 ${firstItem.items}개, ↓로 ${firstItem.testId} → ${secondItem.testId}`
+  );
+  await login.keyboard.press("Escape");
+  await login.getByTestId("message-action-menu").waitFor({ state: "hidden" });
+  await waitForFocus(
+    login,
+    "message-actions-trigger",
+    `메뉴 ${scheme}`,
+    "Esc 뒤 포커스는 진입점으로 돌아가야 한다"
+  );
+
+  // 2f. 고치기, 제자리에서 (goal B11). 다이얼로그가 아니라 행 안이다: 고치는
+  //     대상이 대화의 한 줄이고, 무엇을 쓸지 알려주는 것은 그 주변 메시지다.
+  await actionRow.hover();
+  await login.getByTestId("message-actions-trigger").last().click();
+  await login.getByTestId("menu-edit").click();
+  await login.getByTestId("message-editor-input").waitFor({ state: "visible" });
+  await login.waitForTimeout(300);
+  // R2 M3 회귀: 편집 중인 행에는 hover 진입점이 없어야 한다. 1라운드에서는 바가
+  // 편집기 테두리에 겹친 채 살아 있었고, 그 상태로 「지우기」가 눌렸다.
+  const triggerWhileEditing = await login.evaluate(`(() => {
+    const row = document.querySelector('[data-testid="message-editor"]')?.closest(
+      '[data-testid="timeline-message"]'
+    );
+    if (!row) return -1;
+    return row.querySelectorAll('[data-testid="message-actions-trigger"]').length;
+  })()`);
+  if (triggerWhileEditing !== 0) {
+    throw new Error(
+      `[편집 ${scheme}] 편집 중인 행에 액션 진입점이 ${triggerWhileEditing}개 남아 있다`
+    );
+  }
+  const editShot = `${OUT_DIR}/b11-message-edit-${scheme}.png`;
+  await login.screenshot({ path: editShot });
+  shots.push(editShot);
+  await login.getByTestId("message-editor-cancel").click();
+
+  // 2g. 지우기 확인 (goal B11). 되돌리기가 아니라 확인이다 — 서버의 삭제는 본문을
+  //     지우는 tombstone이라 되돌릴 것이 남지 않는다.
+  await actionRow.hover();
+  await login.getByTestId("message-actions-trigger").last().click();
+  await login.getByTestId("menu-delete").click();
+  await login.getByTestId("delete-message-dialog").waitFor({ state: "visible" });
+  await login.waitForTimeout(300);
+  const deleteShot = `${OUT_DIR}/b11-message-delete-${scheme}.png`;
+  await login.screenshot({ path: deleteShot });
+  shots.push(deleteShot);
+  await login.getByTestId("delete-message-cancel").click();
+
+  // 2h. 반응 고르기 (goal B11). 이모지 피커 의존성 없이 손으로 짠 격자다: 피커
+  //     라이브러리는 폰트나 스프라이트를 싣는데 이 앱은 외부 호스트가 막힌 CSP와
+  //     오프라인 셸(B10)을 갖고 있다.
+  await actionRow.hover();
+  await login.getByTestId("message-actions-trigger").last().click();
+  await login.getByTestId("menu-react-more").click();
+  await login.getByTestId("reaction-picker").waitFor({ state: "visible" });
+  await login.waitForTimeout(300);
+  const pickerShot = `${OUT_DIR}/b11-reaction-picker-${scheme}.png`;
+  await login.screenshot({ path: pickerShot });
+  shots.push(pickerShot);
+  await login.keyboard.press("Escape");
+
+  // 2h. 스레드, 이제 답글을 쓸 수 있는 (goal B11). 이 패널은 답글을 **읽기만**
+  //     했었고, 그래서 「답글 N개」는 액션이 아니라 전사(transcript) 링크였다.
+  //     컴포저가 그 나머지 반쪽이다.
+  await login.getByTestId("thread-anchor").first().click();
+  await login.getByTestId("thread-panel").waitFor({ state: "visible" });
+  await login.getByTestId("thread-composer-input").waitFor({ state: "visible" });
+  await login.waitForTimeout(300);
+  await assertNoHorizontalOverflow(login, `thread panel ${scheme}`);
+  // goal P3 1-1: 이미 열어 둔 스레드의 「답글 N개」는 읽는 값이지 누르는 것이 아니다.
+  await assertThreadRollupPlacement(login, `thread panel ${scheme}`);
+  const threadShot = `${OUT_DIR}/b11-thread-composer-${scheme}.png`;
+  await login.screenshot({ path: threadShot });
+  shots.push(threadShot);
+  await login.getByTestId("thread-close").click();
+
+  // 2j. 그래서 이 타임라인을 키보드로 지나가는 데 얼마가 드는가 (goal B11 R2 H1).
+  //     리뷰가 센 것과 같은 자다. 실측 16번(그려진 11행 + 본문 링크 + 카드 안
+  //     컨트롤)이고 상한은 24번이다: 행마다 컨트롤이 하나 더 늘면 11이 더해져
+  //     바로 넘는다. 1라운드의 액션 바(행당 6개)는 근처에도 오지 못한다.
+  await countTabStopsToComposer(login, `desktop ${scheme}`, 24);
 
   // 3. focus ring on the composer (focus indication is a hard rule)
   await login.getByTestId("composer-input").focus();
@@ -952,9 +3305,186 @@ async function captureScheme(browser, scheme) {
     .click();
   await directory.getByTestId("composer-input").waitFor({ state: "visible" });
   await directory.getByTestId("timeline-message").first().waitFor({ state: "visible" });
+  await assertPausedNoticeFolded(directory, `dm ${scheme}`);
   const dmShot = `${OUT_DIR}/dm-${scheme}.png`;
   await directory.screenshot({ path: dmShot });
   shots.push(dmShot);
+
+  // 3f. 에이전트 허브 (goal B5.3b, D-4): 명부 왼쪽, 프로필 카드와 채널 배치
+  //     오른쪽. 이 한 판이 "이 에이전트가 무슨 모델로 어디에서 돌고 있나"에
+  //     답해야 하는 화면이라, 카드와 채널 목록이 같은 프레임에 들어와야 한다.
+  const agentHub = await context.newPage();
+  await agentHub.goto(ORIGIN, { waitUntil: "networkidle" });
+  await signIn(agentHub);
+  await agentHub.evaluate('location.hash = "/agents"');
+  await agentHub.getByTestId("agent-hub-profile-card").waitFor({ state: "visible" });
+  await agentHub.getByTestId("agent-hub-channels").waitFor({ state: "visible" });
+  const agentHubShot = `${OUT_DIR}/agent-hub-${scheme}.png`;
+  await agentHub.screenshot({ path: agentHubShot });
+  shots.push(agentHubShot);
+
+  // 3f-2. 에이전트 만들기, 사람이 채우는 대로 채운 상태. 자격증명 줄이 폼 안에
+  //       있는지가 이 프레임의 요점이다 (ADR-0004: 여기에는 키를 넣지 않는다).
+  await agentHub.getByTestId("agent-hub-create").click();
+  await agentHub.getByTestId("create-agent-dialog").waitFor({ state: "visible" });
+  await agentHub.getByTestId("create-agent-display-name").fill("배포당번");
+  await agentHub.getByTestId("create-agent-handle").fill("release-duty");
+  await agentHub.getByTestId("create-agent-model").fill("hermes-agent");
+  await agentHub
+    .getByTestId("create-agent-base-url")
+    .fill("https://gateway.dawn.internal/v1");
+  await agentHub
+    .getByTestId("create-agent-instructions")
+    .fill("배포 전 롤백 절차를 먼저 확인하고, 확인되지 않은 것은 확인되지 않았다고 적습니다.");
+  // 포커스 링은 transition-colors(150ms)를 타므로, 방금 포커스한 프레임을 찍으면
+  // 제품이 한 번도 머무르지 않는 중간 색을 리뷰하게 된다.
+  await agentHub.waitForTimeout(300);
+  const agentCreateShot = `${OUT_DIR}/agent-create-${scheme}.png`;
+  await agentHub.screenshot({ path: agentCreateShot });
+  shots.push(agentCreateShot);
+
+  // 3f-3. 서버 거절은 필드 옆에: 이미 있는 핸들을 보내면 409가 핸들 상자 밑에
+  //       붙고, 입력한 값은 그대로 남는다. 토스트 아님.
+  await agentHub.getByTestId("create-agent-handle").fill("hermes");
+  await agentHub.getByTestId("create-agent-submit").click();
+  await agentHub
+    .getByTestId("create-agent-handle-error")
+    .waitFor({ state: "visible" });
+  await agentHub.waitForTimeout(300);
+  const agentCreateErrorShot = `${OUT_DIR}/agent-create-error-${scheme}.png`;
+  await agentHub.screenshot({ path: agentCreateErrorShot });
+  shots.push(agentCreateErrorShot);
+  await agentHub.getByTestId("create-agent-cancel").click();
+  await agentHub.getByTestId("create-agent-dialog").waitFor({ state: "detached" });
+
+  // 3f-4. 편집 표면이 없는 서버 (diff matrix D-4의 현재 형상): allowed-models가
+  //       404면 프로필 쓰기와 일시정지도 없다. 화면은 읽기는 그대로 두고 저장을
+  //       잠근 채 왜 잠겼는지 말해야 한다. 이 프레임이 없으면 "저장하면
+  //       만들어집니다"라고 약속하고 404를 돌려주던 상태로 되돌아가기 쉽다.
+  const readOnlyHub = await context.newPage();
+  await readOnlyHub.route("**/v1/workspaces/*/agents/*/allowed-models", (route) =>
+    route.fulfill({
+      status: 404,
+      contentType: "application/json",
+      body: JSON.stringify({ error: { message: "not found" } }),
+    })
+  );
+  await readOnlyHub.goto(ORIGIN, { waitUntil: "networkidle" });
+  await signIn(readOnlyHub);
+  await readOnlyHub.evaluate('location.hash = "/agents"');
+  await readOnlyHub
+    .getByTestId("agent-hub-edit-unsupported")
+    .waitFor({ state: "visible" });
+  const agentHubReadOnlyShot = `${OUT_DIR}/agent-hub-readonly-${scheme}.png`;
+  await readOnlyHub.screenshot({ path: agentHubReadOnlyShot });
+  shots.push(agentHubReadOnlyShot);
+
+  // 3g. 결정 대기 두 프레임 — **복원됨** (goal W-AP1 2R M7).
+  //
+  //     이 자리는 goal P3 후속에서 비워져 있었고, 그때의 주석이 되살릴 조건을 미리
+  //     적어 뒀다: "`serverSurfaces.ts`의 `approvals.provided`가 true가 되면 아래
+  //     목이 그대로 다시 먹으므로 두 프레임을 이 자리에 복원하면 된다." 그 조건이
+  //     충족됐다 — goal SRV-T1이 승인 3라우트를 올렸고 W-AP1이 판정을 뒤집었다.
+  //     예고한 자리를 예고한 대로 되살린다. 위 APPROVALS 픽스처와 그 아래 목을
+  //     한 글자도 바꾸지 않고 그대로 쓴다.
+  //
+  //     찍는 것은 둘이고, 각각이 증명하는 것이 다르다:
+  //       ① 목록  판단에 필요한 사실(누가·무엇을·언제까지·되돌릴 수 있는지)이
+  //               행에 이미 있어서, 결정하러 채널로 들어갈 필요가 없다.
+  //       ② 확인  한 번의 무방비 클릭으로는 아무것도 결정되지 않는다
+  //               (SKILL §6: 승인/거부는 무장이고, 확정이 결정이다). 첫 행은
+  //               `is_reversible: false`라 확정 문장이 그 사실을 재진술한다.
+  const approvals = await context.newPage();
+  await approvals.goto(ORIGIN, { waitUntil: "networkidle" });
+  await signIn(approvals);
+  await approvals.evaluate('location.hash = "/inbox?filter=needs-action"');
+  await approvals.getByTestId("inbox-list").waitFor({ state: "visible" });
+  await approvals
+    .getByTestId("inbox-approval-approve")
+    .first()
+    .waitFor({ state: "visible" });
+  const approvalsShot = `${OUT_DIR}/approvals-${scheme}.png`;
+  await approvals.screenshot({ path: approvalsShot });
+  shots.push(approvalsShot);
+
+  await approvals.getByTestId("inbox-approval-approve").first().click();
+  await approvals
+    .getByTestId("inbox-approval-confirm")
+    .first()
+    .waitFor({ state: "visible" });
+  const approvalsConfirmShot = `${OUT_DIR}/approvals-confirm-${scheme}.png`;
+  await approvals.screenshot({ path: approvalsConfirmShot });
+  shots.push(approvalsConfirmShot);
+
+  //     ③ 호스트 선택기 (이슈 1114). 위 두 프레임이 이미 그것을 담고 있지만, 이
+  //        한 장은 **확정 문장이 목적지를 말하는 순간**을 다른 호스트에서 잡는다:
+  //        사람이 팀 VPS로 바꾼 뒤 무장하면 잠긴 라디오 옆에서 문장이
+  //        「팀 VPS」를 말해야 한다. 두 조각(고른 것 / 말한 것)이 어긋나면 사진
+  //        한 장에서 바로 보인다.
+  await approvals.keyboard.press("Escape");
+  await approvals
+    .getByTestId(
+      "inbox-approval-host-radio-019f9b10-0000-7000-8000-00000000c002"
+    )
+    .check();
+  await approvals.getByTestId("inbox-approval-approve").first().click();
+  await approvals
+    .getByTestId("inbox-approval-confirm")
+    .first()
+    .waitFor({ state: "visible" });
+  const spawnPickerShot = `${OUT_DIR}/approvals-host-picker-${scheme}.png`;
+  await approvals.screenshot({ path: spawnPickerShot });
+  shots.push(spawnPickerShot);
+
+  //     ④ **고를 것이 하나도 없을 때** (design-review M2가 미캡처로 남긴 자리).
+  //
+  //        이 갈래가 이 배치의 fail-closed 문이다: 서버가 409로 답할 것을 결정
+  //        전에 말하고, 승인은 실제로 불가용해지며(채움을 버리고 조용한 형태로
+  //        강등된다), 거부만 열린 채 남는다. 앞 판의 캡처 세트는 자격 있는 후보가
+  //        있는 픽스처 하나뿐이라 그 상태를 한 번도 찍지 못했고, 리뷰는 그것을
+  //        「증거 없음」으로 판정했다. 폰은 같은 장면을 이미 갖고 있다
+  //        (`measure/captures/ade1-spawn-picker.png`의 두 번째 카드).
+  //
+  //        라우트를 **갈아끼우지 않고** 쿼리 플래그로 가른다: 같은 목이 두 답을
+  //        내면 어느 프레임이 어느 픽스처였는지 사진만 보고는 말할 수 없다.
+  const blockedPage = await context.newPage();
+  await blockedPage.route("**/v1/workspaces/*/approvals*", (route) => {
+    const url = new URL(route.request().url());
+    if (url.searchParams.get("status") !== "pending") {
+      return json(route, { approvals: [] });
+    }
+    const [spawn, ...rest] = APPROVALS;
+    return json(route, {
+      approvals: [
+        {
+          ...spawn,
+          payload: {
+            ...spawn.payload,
+            execution: {
+              ...SPAWN_EXECUTION,
+              // 서버가 자격 있는 것을 하나도 못 찾으면 기본값이 없다.
+              default_host_id: null,
+              host_candidates: SPAWN_EXECUTION.host_candidates.filter(
+                (candidate) => !candidate.selectable
+              ),
+            },
+          },
+        },
+        ...rest,
+      ],
+    });
+  });
+  await blockedPage.goto(ORIGIN, { waitUntil: "networkidle" });
+  await signIn(blockedPage);
+  await blockedPage.evaluate('location.hash = "/inbox?filter=needs-action"');
+  await blockedPage
+    .getByTestId("inbox-approval-host-blocked")
+    .first()
+    .waitFor({ state: "visible" });
+  const spawnBlockedShot = `${OUT_DIR}/approvals-host-blocked-${scheme}.png`;
+  await blockedPage.screenshot({ path: spawnBlockedShot });
+  shots.push(spawnBlockedShot);
+  await blockedPage.close();
 
   // 3e. agent turn surfaces (MOMO-613): the sidebar pill and the composer
   //     activity list. `?agentwork=live` seeds fixed turns and reports the rail
@@ -1184,6 +3714,61 @@ async function captureScheme(browser, scheme) {
   await aiMock.screenshot({ path: aiMockShot });
   shots.push(aiMockShot);
 
+  // 3k. 설정의 나머지 섹션 (#1057). 위의 3g·3h 는 아홉 섹션 중 둘만 찍었고, 그래서
+  //     계정·알림 규칙·워크스페이스·앱·사용량·멤버와 초대를 바꾼 PR 은 커밋된
+  //     캡처 없이 리뷰됐다 — design-review 하드 룰의 증거 레인에 뚫린 구멍이었다.
+  //
+  //     섹션 사이는 **해시 재진입**으로 이동한다. 나란히 클릭으로 넘기는 판이
+  //     처음 시도였는데, `앱` 패널이 `wide` 레이아웃이라 그 다음 섹션의 nav 버튼
+  //     클릭이 30초 타임아웃으로 죽었다 — 한 섹션의 레이아웃이 다음 섹션의 진입을
+  //     좌우하는 순서 의존이다. `SettingsRoute` 는 `?section=` 을 마운트 시 한 번만
+  //     읽으므로 `/inbox` 로 튕겨 리마운트시킨다(gate-shell-layout 의 `go()` 와 같은
+  //     이유·같은 방식).
+  //
+  //     각 섹션은 자기 패널의 제목(h2)을 기다린 뒤 찍는다. 기다릴 표지가 없으면
+  //     "무엇이 그려졌는지 모르는 스크린샷"이 되고, 그건 에러 경계가 찍힌 판과
+  //     구별되지 않는다. 그래서 찍기 전에 에러 경계 부재를 한 번 더 단정한다.
+  const settingsSweep = await context.newPage();
+  await settingsSweep.goto(ORIGIN, { waitUntil: "networkidle" });
+  await signIn(settingsSweep);
+  for (const [section, heading, name] of [
+    ["account", "계정", "account"],
+    // 설정 > 테마 (U2). 이 스윕은 두 스킴에서 도므로, 선택 화면 **자신이** 라이트와
+    // 다크 각각에서 성립하는지가 리뷰 증거로 남는다. 고르는 값은 localStorage이고
+    // signIn()이 매번 그것을 비우므로, 찍히는 것은 언제나 기본값(시스템)의 화면이다.
+    // 고른 뒤의 화면은 gates/gate-theme.mjs가 실행마다 다시 찍는다.
+    ["appearance", "테마", "appearance"],
+    ["notifications", "알림 규칙", "notifications"],
+    ["workspace", "워크스페이스", "workspace"],
+    ["plugins", "앱", "plugins"],
+    ["usage", "사용량", "usage"],
+    ["members", "멤버와 초대", "members"],
+  ]) {
+    await settingsSweep.evaluate('location.hash = "/inbox"');
+    await settingsSweep.waitForTimeout(200);
+    await settingsSweep.evaluate(
+      `location.hash = "/settings?section=${section}"`
+    );
+    await settingsSweep.getByTestId("settings-route").waitFor({ state: "visible" });
+    await settingsSweep
+      .getByRole("heading", { name: heading, exact: true })
+      .first()
+      .waitFor({ state: "visible" });
+    await settingsSweep.waitForTimeout(250);
+    // 에러 경계가 그려진 판을 "설정 캡처"로 커밋하지 않는다. 이 하네스가 이 섹션들을
+    // 찍지 못하던 이유가 정확히 그것(라우트 부재 → 404 → 경계)이었으므로, 픽스처가
+    // 다시 새면 캡처가 조용히 빨간 판을 남기는 대신 여기서 죽어야 한다.
+    const boundary = await settingsSweep
+      .getByText("이 설정을 열지 못했습니다")
+      .count();
+    if (boundary > 0) {
+      throw new Error(`[설정 ${heading} ${scheme}] 에러 경계가 그려졌다 — 픽스처 누락`);
+    }
+    const sectionShot = `${OUT_DIR}/settings-${name}-${scheme}.png`;
+    await settingsSweep.screenshot({ path: sectionShot });
+    shots.push(sectionShot);
+  }
+
   // 4. dense timeline via the stress path (no realtime rail, 40 rows)
   const stress = await context.newPage();
   await stress.goto(`${ORIGIN}/?stress=40`, { waitUntil: "networkidle" });
@@ -1193,8 +3778,85 @@ async function captureScheme(browser, scheme) {
   await stress.screenshot({ path: stressShot });
   shots.push(stressShot);
 
+  // ── goal B8 ───────────────────────────────────────────────────────────────
+
+  const b8 = await context.newPage();
+  await b8.goto(ORIGIN, { waitUntil: "networkidle" });
+  await signIn(b8);
+  await b8.getByTestId("timeline-message").first().waitFor({ state: "visible" });
+
+  // B8 H6: a markdown body rendered as markdown. The fixture row carries bold,
+  // inline code, a bullet list, a link and a fenced block, so this one frame is
+  // where a reviewer sees whether the timeline stayed dense.
+  await scrollTimelineRowIntoView(b8, "message-markdown", `B8 ${scheme}`);
+  await b8.getByTestId("message-code-block").first().waitFor({ state: "visible" });
+  await b8.waitForTimeout(200);
+  const markdownShot = `${OUT_DIR}/b8-message-markdown-${scheme}.png`;
+  await b8.screenshot({ path: markdownShot });
+  shots.push(markdownShot);
+
+  // B8 H2: the failure notice, with 자세히 open. Two things are on trial here
+  // and both are negatives: no English, and no provider text.
+  await scrollTimelineRowIntoView(b8, "turn-failure", `B8 ${scheme}`);
+  await b8.getByTestId("turn-failure-detail").first().click();
+  await b8.waitForTimeout(200);
+  const failureShot = `${OUT_DIR}/b8-provider-failure-${scheme}.png`;
+  await b8.screenshot({ path: failureShot });
+  shots.push(failureShot);
+
+  // B8 H4: the composer with its Enter hint. Focused, because the hint sits
+  // under the box a person is typing in and that is where it is read.
+  await b8.getByTestId("composer-input").fill("배포 로그 확인 부탁해요");
+  await b8.getByTestId("composer-input").focus();
+  await b8.getByTestId("composer-hint").waitFor({ state: "visible" });
+  await b8.waitForTimeout(300);
+  const hintShot = `${OUT_DIR}/b8-composer-hint-${scheme}.png`;
+  await b8.screenshot({ path: hintShot });
+  shots.push(hintShot);
+
+  // B8 B2: the connection banner. The capture's realtime URL is deliberately
+  // unreachable, which is EXACTLY the QA case (a socket that never came up), so
+  // this frame needs no mock: it needs the dwell. The wait is longer than the
+  // 15s threshold on purpose, because a banner that appears at 14.9s in a test
+  // and 15.1s in the product is a banner nobody can review.
+  await b8.waitForTimeout(SUSTAINED_DOWN_WAIT_MS);
+  await b8.getByTestId("connection-banner").waitFor({ state: "visible" });
+  const bannerShot = `${OUT_DIR}/b8-connection-banner-${scheme}.png`;
+  await b8.screenshot({ path: bannerShot });
+  shots.push(bannerShot);
+
+  // The 900 band the review rubric asks for (web SKILL §11 phase 2), which this
+  // capture had no frame of: the sidebar is still a column, so the channel is
+  // down to ~360px while every new string here is at full length. The banner
+  // sentence plus its button and the composer hint are the two most likely to
+  // wrap badly, and both are on screen in this one shot.
+  await b8.setViewportSize({ width: 900, height: 800 });
+  await b8.waitForTimeout(300);
+  const narrowShot = `${OUT_DIR}/b8-narrow-900-${scheme}.png`;
+  await b8.screenshot({ path: narrowShot });
+  shots.push(narrowShot);
+  const overflow900 = await b8.evaluate(
+    () => document.documentElement.scrollWidth - document.documentElement.clientWidth
+  );
+  if (overflow900 > 0) {
+    throw new Error(`900px 가로 오버플로 ${overflow900}px (${scheme})`);
+  }
+
   await context.close();
   return shots;
+}
+
+/**
+ * 짝 없는 `/v1` 경로를 런 끝에 한 번 인쇄한다 (이슈 #1125).
+ *
+ * 죽이지 않는 이유는 `installUnmockedFallback` 머리말에 있다. 조용하지 않게 두는
+ * 것이 요점이다 — 이 목록이 비어 있지 않은 채로 커밋된 캡처가 다음 사람에게는
+ * 「왜 이 화면이 이렇게 나왔는지 모르겠는 판」이 된다.
+ */
+function reportUnmocked() {
+  if (unmockedPaths.size === 0) return;
+  console.log(`\n[미대응 /v1 경로 ${unmockedPaths.size}건 — 본문 없는 404로 답했다]`);
+  for (const path of [...unmockedPaths].sort()) console.log(`  ${path}`);
 }
 
 async function main() {
@@ -1216,10 +3878,24 @@ async function main() {
     const browser = await chromium.launch();
     try {
       const all = [];
-      for (const scheme of ["light", "dark"]) {
-        all.push(...(await captureScheme(browser, scheme)));
+      // 한 프로파일만 돌리는 문 (goal B9). 폰 기하를 고치는 동안 1280 프레임 60여
+      // 장을 매번 다시 찍는 것은 측정이 아니라 대기다. 기본값은 여전히 둘 다이므로
+      // 게이트가 보는 것은 달라지지 않는다.
+      const profile = process.env.CAPTURE_PROFILE || "all";
+      if (profile !== "mobile") {
+        for (const scheme of ["light", "dark"]) {
+          all.push(...(await captureScheme(browser, scheme)));
+        }
+      }
+      // 폰 프로파일 (goal B6). 데스크탑 프레임 뒤에 붙는 이유는 회귀를 읽는
+      // 순서 때문이다: 1280 프레임이 먼저 전부 나오고, 그 다음이 390이다.
+      if (profile !== "desktop") {
+        for (const scheme of ["light", "dark"]) {
+          all.push(...(await captureMobile(browser, scheme)));
+        }
       }
       for (const path of all) console.log(path);
+      reportUnmocked();
     } finally {
       await browser.close();
     }

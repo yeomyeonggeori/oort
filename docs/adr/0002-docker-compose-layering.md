@@ -6,7 +6,7 @@
 
 ## Context
 
-momo now has three deployment-adjacent surfaces that can easily collide if their ownership is not fixed:
+oort now has three deployment-adjacent surfaces that can easily collide if their ownership is not fixed:
 
 - `infra/docker-compose.yml`: current local development/runtime verification stack for PostgreSQL 18 and Centrifugo v6.
 - `scripts/local_gate.sh`: local PR gate runner while GitHub Actions remain disabled/manual-only.
@@ -18,7 +18,7 @@ This ADR does not deploy production, publish images, enter real secrets, or rehe
 
 ## Decision
 
-momo will use five explicit layers:
+oort will use five explicit layers:
 
 | Layer | Canonical path | Responsibility | Must not do |
 |---|---|---|---|
@@ -170,7 +170,7 @@ Rules:
 
 The product default remains:
 
-- `AgentWorker` inside momo prod compose.
+- `AgentWorker` inside oort prod compose.
 - External OpenAI-compatible/Hermes gateway configured by `HERMES_BASE_URL` and `HERMES_API_KEY`.
 
 Optional local or separately hosted agent runtimes are allowed later if they preserve the same OpenAI-compatible streaming contract and approval/cost/audit semantics. They must not publish directly to Centrifugo or bypass the canonical Postgres/outbox write path.

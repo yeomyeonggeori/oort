@@ -5,11 +5,11 @@
 
 ## 1. Purpose
 
-Context Packet v0 is the single bounded object momo gives to an agent runtime for one request. It answers one question:
+Context Packet v0 is the single bounded object oort gives to an agent runtime for one request. It answers one question:
 
 > What is this agent allowed to know and do for this run, and why?
 
-The packet is assembled by momo, not by Hermes, Kim Intern, a plugin, or a client. Agent runtimes may keep their own session memory, but momo only trusts context that passed through this packet contract.
+The packet is assembled by oort, not by Hermes, Kim Intern, a plugin, or a client. Agent runtimes may keep their own session memory, but oort only trusts context that passed through this packet contract.
 
 ## 2. Non-Negotiable Rules
 
@@ -19,7 +19,7 @@ The packet is assembled by momo, not by Hermes, Kim Intern, a plugin, or a clien
 - External sources such as Google Drive, Gmail, Calendar, Obsidian, Notion, or Confluence enter as citeable refs with permission snapshots.
 - Tool grants are scoped per packet. A runtime cannot infer broader plugin access from past runs.
 - Dangerous writes are pause points: `tool_call -> approval_request -> tool_result -> audit_log`.
-- Packet content is immutable for a run. If policy/source visibility changes, momo creates a new packet or blocks/resumes with a new packet reference.
+- Packet content is immutable for a run. If policy/source visibility changes, oort creates a new packet or blocks/resumes with a new packet reference.
 
 ## 3. Top-Level Shape
 
@@ -84,7 +84,7 @@ All fields use snake_case JSON. IDs are UUID strings unless noted.
 
 Required request fields:
 
-- `request_id`: momo-generated request id.
+- `request_id`: oort-generated request id.
 - `surface`: one of the values above.
 - `actor_member_id`: human or service member initiating the request.
 - `agent_member_id`: target agent member.
@@ -97,7 +97,7 @@ Required request fields:
 
 ## 5. Scope
 
-`scope` records what momo checked before including context.
+`scope` records what oort checked before including context.
 
 Required scope fields:
 
@@ -156,7 +156,7 @@ Allowed `kind` values for v0 fixtures:
 - `confluence`
 - `local_file_ref`
 
-For external systems, the URI should be a provider URL or stable provider id. momo should store enough metadata to cite and revalidate, not a broad copy of the external system.
+For external systems, the URI should be a provider URL or stable provider id. oort should store enough metadata to cite and revalidate, not a broad copy of the external system.
 
 ## 8. Memory References
 
@@ -302,13 +302,13 @@ AgentWorker should pass the packet through an OpenAI-compatible SSE request with
 }
 ```
 
-Hermes and Kim Intern should receive the same envelope shape. Hermes platform-adapter compatibility remains separate from the canonical momo AgentWorker path.
+Hermes and Kim Intern should receive the same envelope shape. Hermes platform-adapter compatibility remains separate from the canonical oort AgentWorker path.
 
 ## 13. OpenClaw Approval Lesson
 
-openclaw's split between availability, presentation, transport, interactions, and observe maps to momo as:
+openclaw's split between availability, presentation, transport, interactions, and observe maps to oort as:
 
-| Concern | momo owner |
+| Concern | oort owner |
 |---|---|
 | Availability | tool grant and policy checks in Context Broker |
 | Presentation | macOS/iOS approval card renderers |

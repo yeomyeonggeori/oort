@@ -8,7 +8,7 @@
 
 1. **웹 자산은 0건이고 로드맵에 웹 트랙 자체가 없다** (`ROADMAP.md:77` — 트랙 정의가 🖥 macOS/📱 iOS/⚙️ 백엔드뿐). 완전 미개척지라 기존 티켓·엔진 큐(ADR-0113~0116)·UX 체인(MOMO-385/386)과 파일군 충돌이 없다 — 위임 조건에 정확히 부합.
 2. **초대 관통의 열쇠다.** 현재 신규 멤버 합류는 macOS 앱 설치가 전제다. 웹이 있으면 초대 링크 → 브라우저 합류(무설치)가 성립하고, 이것이 ADR-0121 universal link 초대의 1차 랜딩 표면이 된다. 스토어 심사가 없어 iOS보다 리드타임이 짧다는 점도 성재의 "웹 먼저" 판단과 정합.
-3. **업계 수렴 답이 명확하다** (`research/15-platform-expansion/02` §2-3): Mattermost/Rocket.Chat/Zulip 모두 서버가 같은 도메인에서 웹 SPA를 직접 서빙 — "설치하면 웹까지 끝, 서버 URL이 곧 웹 주소". Element만 분리 배포인데 셀프호스터가 배포물 2개를 관리하는 마찰이 확인됐다. Slack/Discord도 웹 클라이언트가 곧 데스크톱(Electron 래핑)인 웹-우선 구조다 — momo는 역방향(네이티브 먼저)이므로 웹은 "두 번째 클라이언트"라는 점이 계약 관리 요구를 만든다(D4).
+3. **업계 수렴 답이 명확하다** (`research/15-platform-expansion/02` §2-3): Mattermost/Rocket.Chat/Zulip 모두 서버가 같은 도메인에서 웹 SPA를 직접 서빙 — "설치하면 웹까지 끝, 서버 URL이 곧 웹 주소". Element만 분리 배포인데 셀프호스터가 배포물 2개를 관리하는 마찰이 확인됐다. Slack/Discord도 웹 클라이언트가 곧 데스크톱(Electron 래핑)인 웹-우선 구조다 — oort는 역방향(네이티브 먼저)이므로 웹은 "두 번째 클라이언트"라는 점이 계약 관리 요구를 만든다(D4).
 4. **서버 코드 사실** (2026-07-15 @ b720250 대조):
    - CORS 미들웨어·쿠키 발급 코드가 전혀 없다(server/Sources grep 0건). 브라우저가 다른 오리진에서 `/v1/*`를 호출하면 현재 서버로는 불가능 — 같은 오리진 서빙(D1-A)을 고르면 CORS 문제가 아예 발생하지 않는다.
    - 인증은 JSON body 베어러: login이 `accessToken`(15m)/`refreshToken`(30d, 회전)/`realtimeWebSocketUrl`을 반환한다(`server/Sources/MomoServer/Routes/DTOs.swift:41-58`, `AuthRoutes.swift:105`). 토큰은 DB `token` 테이블에 hash 영속 + revocation(MOMO-300). 웹은 이 토큰을 어디에 두는가가 D3.

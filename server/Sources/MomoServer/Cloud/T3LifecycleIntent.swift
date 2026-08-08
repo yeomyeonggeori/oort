@@ -35,11 +35,11 @@ enum T3LifecycleIntent {
 
     /// The conflict a discarded response produces. It is not a failure of the
     /// operation — the operation may well have happened at the provider — it is
-    /// a statement that momo will not apply an answer to a superseded question.
+    /// a statement that oort will not apply an answer to a superseded question.
     static var staleResponse: HTTPError {
         HTTPError(
             .conflict,
-            message: "momo Cloud 호스트 상태가 변경되어 provider 응답을 폐기했습니다."
+            message: "oort Cloud 호스트 상태가 변경되어 provider 응답을 폐기했습니다."
         )
     }
 }

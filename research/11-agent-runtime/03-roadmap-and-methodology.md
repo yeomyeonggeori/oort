@@ -9,8 +9,8 @@ Use a four-plane method for every agent integration.
 
 | Plane | Question | Owner |
 |---|---|---|
-| Context | What may this agent know for this request? | momo Context Broker |
-| Capability | What can this agent/plugin do, under which policy? | momo capability registry/cache |
+| Context | What may this agent know for this request? | oort Context Broker |
+| Capability | What can this agent/plugin do, under which policy? | oort capability registry/cache |
 | Execution | How does the runtime stream work and tool calls? | AgentWorker / adapter |
 | Ledger | What is recorded for audit, cost, approval, and replay? | Postgres SoT |
 
@@ -71,8 +71,8 @@ An integration is not accepted until all four planes are specified. "The agent c
 
 ## 4. Architectural Defaults
 
-- ADR-0102 Option C defines two official, role-separated paths: AgentWorker = momo-owned managed runtime; Hermes platform adapter = user-owned BYOA runtime.
-- Path selection never transfers Context Packet, approval, cost, audit, ordering, or outbox authority out of momo; the server-owned guarantee matrix is shared.
+- ADR-0102 Option C defines two official, role-separated paths: AgentWorker = oort-owned managed runtime; Hermes platform adapter = user-owned BYOA runtime.
+- Path selection never transfers Context Packet, approval, cost, audit, ordering, or outbox authority out of oort; the server-owned guarantee matrix is shared.
 - `Context Packet` is the only way broad context enters an agent runtime.
 - `Memory Plane` stores typed, sourced memory only.
 - `Capability Cache` is required before broad plugin/MCP tool discovery. Its normative spec is `research/11-agent-runtime/06-capability-cache-v0.md`.

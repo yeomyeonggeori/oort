@@ -1,0 +1,62 @@
+[package]
+name = "momo-notifier"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+# The two loops are a library so conformance tests can run exactly one iteration
+# against an injected provider substrate; `src/main.rs` is the env→run shell.
+[lib]
+name = "momo_notifier"
+path = "src/lib.rs"
+
+[[bin]]
+name = "momo-notifier"
+path = "src/main.rs"
+
+[dependencies]
+# Every statement this binary causes lives in momo-t3 (ADR-0140 D4 is a domain
+# rule, not a worker's private habit): claim, revalidate, converge, settle. This
+# crate owns no SQL — see the module docs in `src/lib.rs`.
+momo-db = { path = "../../crates/momo-db" }
+# goal SRV-T1: the approval expiry sweep. `agent.max_concurrent_runs` defaults
+# to 1 and `awaiting_approval` counts as live, so an approval nobody answers
+# silences its agent permanently — something has to enforce the deadline
+# whether or not a human ever looks.
+momo-agent = { path = "../../crates/momo-agent" }
+momo-messaging = { path = "../../crates/momo-messaging" }
+chrono.workspace = true
+momo-provider = { path = "../../crates/momo-provider" }
+momo-t3 = { path = "../../crates/momo-t3" }
+# P2 (ADR-0120 push drain). `momo-outbox` owns the push_candidate claim (it is
+# outbox SQL); `momo-push` owns judgment, the dispatch-log idempotency claim and
+# the id-only payload. This crate still owns no SQL.
+momo-outbox = { path = "../../crates/momo-outbox" }
+momo-push = { path = "../../crates/momo-push" }
+# `sign_base64` — the Ed25519 the relay authenticates this server by. Reused
+# rather than re-implemented so there is one signing primitive in the workspace.
+momo-wire = { path = "../../crates/momo-wire" }
+
+tokio = { workspace = true, features = ["signal", "time", "sync"] }
+thiserror.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+# The relay hop. This is the notifier's ONLY outbound HTTP, and it terminates at
+# the push relay — never at Apple: this process holds no APNs key.
+reqwest.workspace = true
+async-trait.workspace = true
+base64.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+# Conformance harness (tests/*_pg.rs, all #[ignore]): the real migrations +
+# bootstrap roles, with the in-process mock substrate as the provider so a death
+# can be staged honestly. `axum` plays the push relay on a loopback port so the
+# signed request the notifier really sends can be inspected.
+axum.workspace = true
+chrono.workspace = true
+ed25519-dalek.workspace = true
+futures.workspace = true
+sqlx.workspace = true

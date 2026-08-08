@@ -119,7 +119,7 @@ final class MomoHuddleViewModelTests: XCTestCase {
 
         XCTAssertEqual(
             english.localizedUnavailableReason(MomoHuddleViewModel.serverConnectionRequiredReason),
-            "Connect to a momo server to use huddles."
+            "Connect to an oort server to use huddles."
         )
         XCTAssertEqual(
             english.localizedUnavailableReason(MomoHuddleViewModel.authenticationRequiredReason),

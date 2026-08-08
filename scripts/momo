@@ -36,7 +36,7 @@ Commands:
   hermes-gateway-init
               Create the pre-pairing ~/.momo/hermes-gateway.env template.
   hermes-gateway-status
-              Show momo-facing Hermes gateway adapter status.
+              Show oort-facing Hermes gateway adapter status.
   hermes-gateway-install-plugin
               Link/copy adapters/hermes into the local Hermes plugin directory.
   hermes-gateway-smoke
@@ -532,7 +532,7 @@ hermes_init() {
   fi
 
   cat <<EOF
-[momo] edit this file with only momo-facing provider values:
+[momo] edit this file with only oort-facing provider values:
   $env_file
 
 Required values:
@@ -766,7 +766,7 @@ hermes_gateway_init() {
   else
     umask 077
     cat >"$env_file" <<EOF
-# momo-facing Hermes platform adapter pairing.
+# oort-facing Hermes platform adapter pairing.
 # This file does not contain Codex/OpenAI OAuth or provider API keys.
 MOMO_API_URL=${BASE_URL}
 MOMO_CENTRIFUGO_WS_URL=ws://127.0.0.1:${CENT_PORT}/connection/websocket
@@ -805,7 +805,7 @@ The generated env also sets MOMO_HOME_CHANNEL before startup. Change that UUID
 and MOMO_HOME_CHANNEL_NAME in the env file if Hermes should use another channel;
 gateway lifecycle/setup notices are never posted into the momo timeline.
 
-Load the momo-facing env in a subshell so the agent bearer does not remain in
+Load the oort-facing env in a subshell so the agent bearer does not remain in
 your parent shell, then replace that subshell with Hermes:
   ( set -a; . "$env_file"; set +a; exec env HERMES_ACCEPT_HOOKS=1 hermes gateway run --replace -v )
 

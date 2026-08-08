@@ -7,7 +7,10 @@
 #   1. Static contract gate: the env key spelled identically in both env
 #      templates and both compose files, the Centrifugo e2e/internal-alpha
 #      allowance carrying the same desktop origins, no wildcard committed
-#      anywhere, schema_v0 untouched, swift build + focused unit tests.
+#      anywhere, schema_v0 untouched, swift build + focused unit tests, AND the
+#      Rust momo-server's own mount + socket-level tests (DESK-1 — that binary
+#      is what prod runs, and it shipped without CORS for a whole batch while
+#      this gate was green).
 #   2. LIVE PREFLIGHT ROUNDTRIP against a real MomoServer process. The binary is
 #      booted three times on an isolated port with a dead-end DATABASE_URL — the
 #      whole CORS decision happens in middleware ahead of any DB access, and
@@ -148,6 +151,40 @@ swift build --package-path server >/dev/null
 log "swift test --filter CORSAllowlistTests (server)"
 swift test --package-path server --filter CORSAllowlistTests >/dev/null
 log "PASS worker gate: static contract + build + CORS unit tests green"
+
+# ---- Rust momo-server: the binary prod actually runs (DESK-1) ---------------
+# The Swift layers were the whole gate when this ticket opened, and that was the
+# trap: the Axum rewrite (ADR-0145) never ported the CORS middleware, so this
+# script kept passing while the DEPLOYED server answered no preflight at all and
+# the packaged desktop client could not log in. Whatever else changes, the gate
+# must go red when the shipped binary loses this surface.
+RUST_CORS="server-rust/bins/momo-server/src/cors.rs"
+RUST_CONFIG="server-rust/bins/momo-server/src/config.rs"
+RUST_LIB="server-rust/bins/momo-server/src/lib.rs"
+RUST_TESTS="server-rust/bins/momo-server/tests/cors_allowlist.rs"
+
+for file in "$RUST_CORS" "$RUST_CONFIG" "$RUST_LIB" "$RUST_TESTS"; do
+  test -f "$file" || fail "missing $file (the deployed server would have no CORS)"
+done
+grep -q "\"$ENV_KEY\"" "$RUST_CONFIG" || fail "$RUST_CONFIG lost the $ENV_KEY contract"
+grep -q "cors::allowlist" "$RUST_LIB" || fail "$RUST_LIB does not mount the CORS middleware"
+grep -q "cors.is_enabled()" "$RUST_LIB" \
+  || fail "$RUST_LIB must mount CORS only when the allowlist is non-empty"
+log "PASS rust static: momo-server mounts the allowlist, and only when it is non-empty"
+
+if command -v cargo >/dev/null 2>&1; then
+  # The Rust half's live roundtrip: `tests/cors_allowlist.rs` boots the real
+  # router on an ephemeral port and drives real preflights over a real socket.
+  # No database and no container — the CORS decision is made in middleware ahead
+  # of routing, and the deliberate 503 from the DB-less health route doubles as
+  # the "an error response still carries the header" assertion.
+  log "cargo test -p momo-server --test cors_allowlist (server-rust)"
+  ( cd "$REPO_ROOT/server-rust" && cargo test -p momo-server --test cors_allowlist >/dev/null ) \
+    || fail "rust CORS allowlist tests failed"
+  log "PASS rust live: preflight/echo, hostile denial and fail-closed proved over a socket"
+else
+  log "SKIP rust live: no cargo toolchain on PATH (the static contract above still holds)"
+fi
 
 # =============================================================================
 # Layer 2 — live preflight roundtrip against a booted MomoServer

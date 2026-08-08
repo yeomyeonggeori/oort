@@ -37,7 +37,7 @@
 - Claude Code 플러그인 = plugin.json + marketplace.json + 스킬/훅/MCP — **동형 구조**. 공식 마켓 2종(official/community). [1차]
 - **결정적 증거**: Codex 훅 env에 `CLAUDE_PLUGIN_ROOT`/`CLAUDE_PLUGIN_DATA` 병기 — OpenAI가 Claude 플러그인 포맷 호환을 의도 유지. [1차]
 - Claude 커넥터 디렉터리 = 검증된 **원격 MCP 서버** 목록(343+), 커스텀 커넥터는 Anthropic 클라우드가 접속. [1차]
-- **업계 3층 수렴**: ① 연결=**MCP(+OAuth 2.1)** ② 지시=**SKILL.md** ③ 패키징/배포=**plugin.json + marketplace.json**. momo가 이 3층을 채택하면 Codex/Claude 양쪽 BYOA 에이전트와 자산 호환.
+- **업계 3층 수렴**: ① 연결=**MCP(+OAuth 2.1)** ② 지시=**SKILL.md** ③ 패키징/배포=**plugin.json + marketplace.json**. oort가 이 3층을 채택하면 Codex/Claude 양쪽 BYOA 에이전트와 자산 호환.
 
 ## 2. 아키텍처 — 토큰 커스터디·동적 발견 (완료 트랙)
 
@@ -53,7 +53,7 @@
 | (B) 에이전트 호스트 보관 | Codex CLI/앱: config.toml + `codex mcp login` — 토큰이 사용자 머신에 | 에이전트 호스트 |
 | (C) 벤더 호스티드 remote MCP | Claude 커넥터 343+, ChatGPT 파트너 앱 — 발급/폐기/스코프는 벤더 AS | (주의) access token은 여전히 MCP **클라이언트**가 보유 — 위임되는 건 발급·검증·수명주기 |
 
-- **핵심 통찰**: 스펙상 토큰 보유 주체는 항상 MCP 클라이언트 → **커스터디 질문의 실체 = "누가 MCP 클라이언트인가"**. ChatGPT/Claude는 플랫폼 자신이 클라이언트라 (A). momo는 서버 코드실행·자격증명 비유입 불변식상 **BYOA 에이전트 호스트가 클라이언트가 되는 (B)+(C)가 유일하게 정합** — momo 서버는 카탈로그·설치 정책·스코프 표시·감사만. (A)형 채택은 ADR-0004 경계 변경 ADR이 선행돼야 함.
+- **핵심 통찰**: 스펙상 토큰 보유 주체는 항상 MCP 클라이언트 → **커스터디 질문의 실체 = "누가 MCP 클라이언트인가"**. ChatGPT/Claude는 플랫폼 자신이 클라이언트라 (A). oort는 서버 코드실행·자격증명 비유입 불변식상 **BYOA 에이전트 호스트가 클라이언트가 되는 (B)+(C)가 유일하게 정합** — oort 서버는 카탈로그·설치 정책·스코프 표시·감사만. (A)형 채택은 ADR-0004 경계 변경 ADR이 선행돼야 함.
 
 ### 동적 도구 발견과 컨텍스트 관리
 - 표준: `tools/list`(+listChanged). 도구 폭발 문제: 도구당 ~400-500토큰, 50개≈20-25K. [2차]
@@ -61,7 +61,7 @@
 - 시사점: 에이전트 게이트웨이 계층에 **도구 검색/지연 로드 프리미티브를 처음부터** 설계.
 
 ### 카탈로그 스키마 선례
-- 공식 MCP Registry(registry.modelcontextprotocol.io, preview)의 **`server.json`** 표준 — momo manifest의 MCP 서버 참조부에 재사용 검토. [1차]
+- 공식 MCP Registry(registry.modelcontextprotocol.io, preview)의 **`server.json`** 표준 — oort manifest의 MCP 서버 참조부에 재사용 검토. [1차]
 
 ## 3. 후보 통합별 공식 MCP 현황 (부분 — **재검증 필수**)
 
@@ -83,9 +83,9 @@
 
 ## 5. 결론 4줄
 
-1. **플러그인 기술 정의(권고)**: manifest(plugin.json 계열) + MCP 서버 참조(원격 URL 우선, stdio는 호스트 실행) + 선택 SKILL.md. Codex·Claude 동형 + CLAUDE_* 호환 변수 → **이 포맷이면 momo 플러그인이 BYOA 에이전트 양쪽에서 그대로 동작**.
+1. **플러그인 기술 정의(권고)**: manifest(plugin.json 계열) + MCP 서버 참조(원격 URL 우선, stdio는 호스트 실행) + 선택 SKILL.md. Codex·Claude 동형 + CLAUDE_* 호환 변수 → **이 포맷이면 oort 플러그인이 BYOA 에이전트 양쪽에서 그대로 동작**.
 2. 후보 1순위 GitHub·Notion·Linear(호스티드 remote 예상), Google 3종은 공식 공백 가능성(ChatGPT조차 자체 제작) — 스코프 설계 필요.
-3. 커스터디: **에이전트 호스트=MCP 클라이언트(B) + 벤더 remote 우선(C)**, momo 서버는 카탈로그·정책·감사 전용.
+3. 커스터디: **에이전트 호스트=MCP 클라이언트(B) + 벤더 remote 우선(C)**, oort 서버는 카탈로그·정책·감사 전용.
 4. **원클릭 설치의 실체**: 카탈로그 manifest → 에이전트 호스트 config 주입 → 401→PRM→DCR→PKCE 자동 인증(ON_INSTALL vs 첫 사용 정책) → 워크스페이스 정책 게이트.
 
 ## 출처 (요지)

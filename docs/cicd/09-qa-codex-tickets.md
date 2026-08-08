@@ -1,4 +1,4 @@
-# momo — QA/릴리스 게이트 Codex 실행 티켓 (의존순 · DoD · 명령)
+# oort — QA/릴리스 게이트 Codex 실행 티켓 (의존순 · DoD · 명령)
 
 > 실행 주체: **Codex(goal 자율)**. 컨벤션 = AGENTS.md §3 DoD + 04 등급 차용.
 > 등급: `[infra]`=파일 존재+정합 · `[swift]`=`swift build` green · `[xcode]`=`xcodebuild`/`xcodebuild test` 산출 · `[ci]`=워크플로우 syntax/lint · `[manual]`=사람 1회(Apple 계정·실기기·베타).

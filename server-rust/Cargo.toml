@@ -1,0 +1,69 @@
+# momo server — Rust/Axum rewrite (ADR-0145 B안). B0 = workspace skeleton + 5
+# shared infrastructure crates; B1 = momo-messaging (write-path spine);
+# B1.5 = the first bootable binaries (momo-server, momo-relay).
+[workspace]
+resolver = "2"
+members = ["crates/*", "bins/*"]
+
+[workspace.package]
+edition = "2021"
+version = "0.0.0"
+license = "Apache-2.0"
+rust-version = "1.80"
+
+[workspace.dependencies]
+# async runtime
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+futures = "0.3"
+async-trait = "0.1"
+
+# DB — sqlx runtime query API only (no compile-time query! macro: B0 must build
+# without a live DB, so the "macros" feature is deliberately absent).
+sqlx = { version = "0.8", default-features = false, features = [
+  "runtime-tokio",
+  "tls-rustls",
+  "postgres",
+  "uuid",
+  "chrono",
+  "json",
+] }
+
+# shared value types
+# `v5` (goal SRV-T1): a provider's `call_id` is an arbitrary string but
+# `message.client_msg_id` is a uuid column, so the tool-result key is a
+# deterministic name-based uuid over (run_id, call_id) — that determinism IS the
+# exactly-once guarantee for tool execution.
+uuid = { version = "1", features = ["v4", "v5", "serde"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+
+# crypto / wire (workd Ed25519 signature parity)
+ed25519-dalek = "2"
+sha2 = "0.10"
+base64 = "0.22"
+hex = "0.4"
+
+# auth
+jsonwebtoken = "9"
+
+# HTTP (B1.5 binaries)
+#   axum   — momo-server's router/middleware (D1 §1 stack decision).
+#   reqwest — momo-relay's Centrifugo `/api/publish` client. Invariant #2 keeps
+#             this dependency out of momo-server: only the relay publishes.
+axum = "0.8"
+reqwest = { version = "0.12", default-features = false, features = [
+  "json",
+  "rustls-tls",
+] }
+# ADR-0151: the attachment content proxy *streams* Drive bytes through rather
+# than buffering them, so the 100 MB ceiling is a transfer bound and not a
+# per-download memory one. `bytes` is the currency reqwest and axum already
+# exchange, so pinning it here lets the stream cross momo-drive → momo-server
+# with no copy and no third buffer type in between.
+bytes = "1"
+
+# errors / logging
+thiserror = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

@@ -6,6 +6,7 @@ import {
   agentModelInheritLabel,
   appliedModelLabel,
   applyModelChange,
+  clearUnsupportedEffort,
   clearedEffortNotice,
   draftEquals,
   draftFromProfile,
@@ -24,13 +25,21 @@ import {
   resolveInheritance,
   routingPayload,
   routingRejectionField,
+  sharedClearedEffortNotice,
+  sharedEfforts,
+  sharedModelOptions,
   supportsEffort,
+  type CalledAgentRouting,
   type EffortTable,
   type RoutingDraft,
   type RoutingProfile,
-} from "./routingModel";
-import { mentionRoutingTarget, mentionedHandles } from "./mentionTargets";
-import type { RosterMember } from "@/lib/api";
+} from "@momo/core/features/routing/routingModel";
+import {
+  mentionRoutingTarget,
+  mentionRoutingTargetKey,
+  mentionedHandles,
+} from "@momo/core/features/routing/mentionTargets";
+import type { RosterMember } from "@momo/core/lib/api";
 
 // =============================================================================
 // ADR-0134 계약 픽스처로 고정하는 세 경로: 상속 / 오버라이드 / 무효 클리어.
@@ -409,10 +418,184 @@ describe("mentionRoutingTarget", () => {
     expect(mentionRoutingTarget("@hermez 오타", members).kind).toBe("none");
   });
 
-  it("에이전트가 둘이면 요청이 둘이라 하나의 오버라이드를 붙일 수 없다", () => {
+  it("에이전트가 둘이면 요청도 둘이고, 부른 순서대로 목록이 된다", () => {
     const target = mentionRoutingTarget("@hermes @kim-intern 같이 봐줘", members);
     expect(target.kind).toBe("many");
-    expect(target.kind === "many" && target.agents).toHaveLength(2);
+    expect(target.kind === "many" && target.agents.map((a) => a.handle)).toEqual([
+      "hermes",
+      "kim-intern",
+    ]);
+  });
+});
+
+// =============================================================================
+// 오버라이드가 붙어 있는 상대의 정체 (#1113).
+//
+// 초안을 비우는 기준이 "한 명일 때의 그 한 명"이면, 여럿을 부른 글에서는 이름을
+// 갈아 끼워도 초안이 그대로 남는다. 그것은 사람이 고른 적 없는 상대에게 값을
+// 보내는 일이고, 단일 타깃에서 이 화면이 이미 막아 둔 사고다.
+// =============================================================================
+
+describe("mentionRoutingTargetKey", () => {
+  const members = [
+    agent("hermes", "019f94e3-8b21-7ae0-b3c4-5f1a2d6e7c90"),
+    agent("kim-intern", "019f9a01-0000-7000-8000-000000000404"),
+    agent("atlas", "019f9a01-0000-7000-8000-000000000405"),
+  ];
+  const keyOf = (text: string) =>
+    mentionRoutingTargetKey(mentionRoutingTarget(text, members));
+
+  it("부를 사람이 없으면 붙어 있을 자리도 없다", () => {
+    expect(keyOf("그냥 메모")).toBeNull();
+  });
+
+  it("부른 집합이 바뀌면 정체가 바뀐다", () => {
+    // 이 줄이 빨개지는 회귀: 정체를 한 명일 때의 id 하나로 되돌리면 두 값이
+    // 같아지고, 김인턴에게 고른 강도가 아틀라스에게 그대로 따라간다.
+    expect(keyOf("@hermes @kim-intern 봐줘")).not.toBe(
+      keyOf("@hermes @atlas 봐줘")
+    );
+    expect(keyOf("@hermes 봐줘")).not.toBe(keyOf("@hermes @atlas 봐줘"));
+  });
+
+  it("같은 사람들을 다른 순서로 불렀으면 같은 정체다", () => {
+    // 서버가 만드는 run이 같으므로, 문장 안에서 이름을 옮겼다는 이유로 고른 값이
+    // 사라지면 그것은 사람이 한 적 없는 취소다.
+    expect(keyOf("@hermes @atlas 봐줘")).toBe(keyOf("@atlas @hermes 봐줘"));
+  });
+});
+
+// =============================================================================
+// 여럿을 부른 글의 공통 어휘 (#1113).
+//
+// 전송 표면이 받는 `routing`은 메시지 한 건당 블록 하나이고, 서버는 그 하나를
+// per-agent 루프 안에서 각 에이전트에게 다시 푼다. 그러므로 여럿에게 걸 수 있는
+// 값은 부른 모두가 받아 주는 것들뿐이다: 한 명에게만 유효한 값을 실으면 서버는 그
+// 한 명에서 400을 답하고, 그 400이 전송 트랜잭션 전체를 되돌린다.
+// =============================================================================
+
+function called(
+  handle: string,
+  agentModel: string,
+  allowedModels: string[] | null,
+  profile: RoutingProfile | null = null
+): CalledAgentRouting {
+  return {
+    id: handle,
+    handle,
+    displayName: handle,
+    inheritance: resolveInheritance(table, agentModel, profile, allowedModels),
+    allowedModels,
+  };
+}
+
+describe("sharedModelOptions", () => {
+  it("고를 수 있는 모델은 받은 allow-list들의 교집합이다", () => {
+    const result = sharedModelOptions(
+      [
+        called("hermes", "hermes-agent", ["hermes-agent", "hermes-fast"]),
+        called("kim-intern", "hermes-fast", ["hermes-fast", "hermes-lite"]),
+      ],
+      table
+    );
+    // 합집합이면 hermes-agent가 남고, 그것을 고른 전송은 김인턴에서 400을 받아
+    // **메시지 전체**가 되돌아온다. 이 단정이 그 회귀를 빨갛게 만든다.
+    expect(result.models).toEqual(["hermes-fast"]);
+    expect(result.allowedReceived).toBe(true);
+  });
+
+  it("공통이 하나도 없으면 빈 목록이다. 없는 선택지를 그리지 않는다", () => {
+    const result = sharedModelOptions(
+      [
+        called("hermes", "hermes-agent", ["hermes-agent"]),
+        called("kim-intern", "hermes-fast", ["hermes-fast"]),
+      ],
+      table
+    );
+    expect(result.models).toEqual([]);
+    expect(result.allowedReceived).toBe(true);
+  });
+
+  it("allow-list를 못 받은 에이전트는 목록을 좁히지 않는다", () => {
+    // 모른다는 것은 비었다는 것과 다르다. 못 받은 쪽을 빈 집합으로 셈하면 실제로
+    // 허용된 모델이 피커에서 영영 사라진다(단일 경로 modelOptions와 같은 규칙).
+    const result = sharedModelOptions(
+      [
+        called("hermes", "hermes-agent", null),
+        called("kim-intern", "hermes-fast", ["hermes-fast", "hermes-lite"]),
+      ],
+      table
+    );
+    expect(result.models).toEqual(["hermes-fast", "hermes-lite"]);
+    expect(result.allowedReceived).toBe(false);
+  });
+});
+
+describe("sharedEfforts", () => {
+  const pair = [
+    called("hermes", "hermes-agent", null),
+    called("kim-intern", "hermes-fast", null),
+  ];
+
+  it("부른 모두의 모델이 받아 주는 값만 남는다", () => {
+    // hermes-agent는 max까지 받고 hermes-fast는 medium까지다. 합집합을 올려 두면
+    // max를 고른 전송이 400으로 되돌아오고, 두 명을 부른 메시지가 통째로 안 나간다.
+    expect(sharedEfforts(table, pair, null)).toEqual(["low", "medium"]);
+  });
+
+  it("모델 오버라이드가 걸리면 기준은 그 모델 하나다", () => {
+    // 모두가 그 모델로 돌기 때문이다. 상속 모델을 계속 세면 고를 수 있었던 값이
+    // 이유 없이 사라진다.
+    expect(sharedEfforts(table, pair, "hermes-agent")).toEqual([
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max",
+    ]);
+  });
+
+  it("상속값을 모르는 에이전트가 하나라도 있으면 아무 값도 주장하지 않는다", () => {
+    const unknown: CalledAgentRouting[] = [
+      pair[0],
+      { ...pair[1], inheritance: null },
+    ];
+    expect(sharedEfforts(table, unknown, null)).toEqual([]);
+    expect(sharedEfforts(null, pair, null)).toEqual([]);
+  });
+});
+
+describe("clearUnsupportedEffort", () => {
+  it("목록에서 벗어난 강도는 비우고 무엇을 비웠는지 돌려준다", () => {
+    const draft: RoutingDraft = { model: null, effort: "max" };
+    const result = clearUnsupportedEffort(draft, null, ["low", "medium"]);
+    expect(result.draft).toEqual({ model: null, effort: null });
+    expect(result.clearedEffort).toBe("max");
+    expect(sharedClearedEffortNotice("max")).toBe(
+      "추론 강도 최대를 부른 모두가 쓸 수 있는 것은 아니라 상속으로 되돌렸습니다."
+    );
+  });
+
+  it("받아 주는 강도는 그대로 둔다", () => {
+    const draft: RoutingDraft = { model: null, effort: "low" };
+    expect(clearUnsupportedEffort(draft, "hermes-fast", ["low", "medium"])).toEqual({
+      draft: { model: "hermes-fast", effort: "low" },
+      clearedEffort: null,
+    });
+  });
+
+  it("단일 타깃의 자동 클리어도 같은 규칙 하나를 쓴다", () => {
+    // applyModelChange는 이 함수에 "그 모델의 표 행"을 넘기는 얇은 층이다. 규칙이
+    // 두 벌이 되면 한쪽만 고쳐지는 순간이 오고, 그때 화면은 서버가 400으로 거절할
+    // 조합을 사람에게 남겨 둔다.
+    const draft: RoutingDraft = { model: "hermes-agent", effort: "max" };
+    expect(applyModelChange(table, draft, "hermes-fast", "hermes-agent")).toEqual(
+      clearUnsupportedEffort(
+        draft,
+        "hermes-fast",
+        effortsForModel(table, "hermes-fast").efforts
+      )
+    );
   });
 });
 

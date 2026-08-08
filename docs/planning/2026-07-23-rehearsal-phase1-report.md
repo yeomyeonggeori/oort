@@ -10,7 +10,7 @@
 | ① 정적 게이트 전체(docs 프로파일 — 브랜치스큐·마이그레이션 중복·SPM 라이선스 37deps·번들 픽스처 포함) | PASS | local-gate evidence(sha256 매니페스트 포함) |
 | ② 배포 번들 실생성 | PASS | `make_deploy_bundle.sh` — compose/Caddyfile/centrifugo/env 템플릿/런북만 포함, 소스·시크릿 미포함 확인 |
 | ③ prod RLS 태세 실런 | PASS | `verify_prod_rls_posture.sh`(28170~28173) — API=momo_app, 교차 ws 0행, 카탈로그 쓰기 거부, 수퍼유저 URL 기동 거부 |
-| ④ 통합 이미지 install-동형 호스팅 스모크 | PASS | `verify_internal_host_runtime.sh` — 단일 momo 이미지, install.sh 동형 시퀀스(기반 --wait→원샷 run→앱 --wait), Caddy 엣지, 마이그레이션 멱등 2-pass, REST→relay publish, **@멘션→mock hermes SSE 실왕복** |
+| ④ 통합 이미지 install-동형 호스팅 스모크 | PASS | `verify_internal_host_runtime.sh` — 단일 oort 이미지, install.sh 동형 시퀀스(기반 --wait→원샷 run→앱 --wait), Caddy 엣지, 마이그레이션 멱등 2-pass, REST→relay publish, **@멘션→mock hermes SSE 실왕복** |
 | ⑤ 백업/복원 리허설 | PASS | `verify_backup_restore_rehearsal.sh` — pg dump→복원→검증 쿼리 |
 
 ## 리허설이 잡아낸 결함 4건 (전부 당일 수정·main 랜딩)

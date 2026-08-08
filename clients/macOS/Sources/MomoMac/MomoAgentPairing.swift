@@ -228,7 +228,7 @@ struct MomoAgentPairingManifest: Codable, Equatable, Sendable {
                 kind: "hermes-compatible-gateway",
                 endpoint: MomoAgentPairingSecurity.sanitizedEndpoint(endpoint) ?? "invalid-endpoint",
                 modelLabel: modelLabel.trimmingCharacters(in: .whitespacesAndNewlines),
-                providerCredentialPolicy: "provider-owned; do not paste Codex/OpenAI OAuth tokens into momo"
+                providerCredentialPolicy: "provider-owned; do not paste Codex/OpenAI OAuth tokens into oort"
             ),
             momo: MomoConnection(
                 apiURL: apiURL ?? "http://127.0.0.1:28180",
@@ -245,7 +245,7 @@ struct MomoAgentPairingManifest: Codable, Equatable, Sendable {
             securityNotes: [
                 "This manifest intentionally excludes Codex/OpenAI OAuth tokens, refresh tokens, and provider API keys.",
                 "Provider credentials must stay inside the local Hermes/provider runtime.",
-                "All user-visible writes must return through momo REST so Postgres remains the source of truth.",
+                "All user-visible writes must return through oort REST so Postgres remains the source of truth.",
             ]
         )
     }

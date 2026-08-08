@@ -734,7 +734,7 @@ struct MomoWebhookCopy {
     var label: String { isKorean ? "이름" : "Label" }
     var characterCount: String { isKorean ? "글자 수" : "Character count" }
     var mode: String { isKorean ? "수신 방식" : "Receive mode" }
-    var nativeMode: String { isKorean ? "momo 서명" : "momo signed" }
+    var nativeMode: String { isKorean ? "oort 서명" : "oort signed" }
     var slackCompatibleMode: String { isKorean ? "Slack 호환" : "Slack compatible" }
     func modeDescription(_ mode: MomoWebhookMode) -> String {
         switch (language, mode) {

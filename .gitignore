@@ -27,6 +27,12 @@ node_modules/
 __pycache__/
 *.pyc
 Packages/
+# `Packages/` above is Swift SPM's checkout directory. On a case-insensitive
+# filesystem (macOS default; core.ignorecase=true) it ALSO matches the npm
+# workspace root `packages/` added by ADR-0137 D3, which silently dropped the
+# whole shared core package out of `git status`. Re-include the directory here;
+# `node_modules/` above still excludes its dependencies.
+!/packages/
 *.resolved
 DerivedData/
 .swiftpm/

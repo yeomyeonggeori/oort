@@ -1,4 +1,4 @@
-# momo 기획 현재 상태 (Planning Current State)
+# oort 기획 현재 상태 (Planning Current State)
 
 > **2026-08-09 스냅샷 18 (Fable · momo-main — prime 3번째 provider 승격 완결·CubeSandbox 3/4·8/8 하루 13 PR).** 컴팩트 복원 진입점.
 >
@@ -174,7 +174,7 @@
 > **2026-07-22 저녁 스냅샷(Wave B/C 착수)**: PLN-20260722-01 성재 승인("wave B/C는 진행") — MOMO-534(#615)·536(#616) worker 병렬 가동(어댑터 2종·A2A 카드 온보딩), 이후 535(#617)·539(#620) ready, **537(#618)은 ADR-0131 Proposed 승인 게이트**, 538(#619)은 534 랜딩 후. 실행 정본 handoffs/2026-07-22-agent-onboarding-batch.md, 마이그레이션 032부터, 포트 28120대부터. 527 전 게이트 회귀 완주(runtime-agent rc=0, 제품 결함 1건 수정 e984d9c — 승인 재개 침묵 실패). 동생: #610 반려(Blocker 1 — PR 코멘트 패킷) 수정 대기, 이후 ⑩ A-16(529)·⑪ A-17(532) 개방 상태. 이하 이전 스냅샷:
 > **2026-07-22 스냅샷(패브릭 엔진 배치 종결)**: **PLN-20260721-01 엔진 6장 전부 main 랜딩** — Wave M(526 Memory Plane→527 pgvector 하이브리드→528 Context Packet v0)+Wave A(530 gateway work tool→533 work_tool_profile→531 momo-acp-host)+W-6, 각 docker/mock verifier PASS. 남은 패브릭=Wave U 동생 몫: ⑩ A-16(529 메모리 브라우저+packet 인스펙터)·⑪ A-17(532 도구 관리+ACP 카드) ENGINE_HANDOFF ready. 마이그레이션 028 memory_search·029 tool_profile·030 context_packet 확정(다음=031). verifier 포트 신규=28110대부터(28100~03=528 점유). 회귀 잔여: runtime-agent+게이트 내 memory-search(부하 대기). 리서치 20-00 → MOMO-534(eve/CF 어댑터)/535(outbound 이벤트) 후보+0130 D4 상향 — 성재 결정 대기. 공개 게이트 남은 것: THIRD_PARTY 갱신·법무 패키지. 이하 이전 스냅샷:
 > **2026-07-21 밤 스냅샷(패브릭 인수)**: PLN-20260721-01 인수 완료 — ADR-0129/0130 Accepted, MOMO-518·526~533 BUILD_TICKETS 이관·이슈 발급, Wave M(526→)·Wave A(530→) engine fleet 가동, Wave U는 UXUI 순차 배치에 ⑧⑩⑪로 편성. §4 함정=HANDOFF_TEMPLATE §5.1 승격. **웹 트랙 W-1~W-5 완주**(track/engine=main+2). 멤버십 수명주기(ADR-0128) 서버 완결. 동생: 순차 배치 ③(517)까지 랜딩. 다음 성재 결정: track/*→main 배치 승인(정례), LICENSE/ghcr 공개 게이트. 이하 오전 스냅샷:
-> **2026-07-21 스냅샷**: 슈퍼앱 L5(개발자 콘솔) 진행 중. **main c953322 = track/engine = track/uxui 정렬**(이중트랙 머지 완료). **랜딩(main)**: 메신저 코어 전부(스레드·반응/수정삭제·검색·첨부·음소거·허들·푸시) + Interactive Work Console(ADR-0114 483/484/486 + A-10/A-11) + Host Fabric v0(ADR-0125 487·488·489) + **491 openssl·509 X-7 에이전트생성·511-E D10 attach capability** + macOS 512 focus fix + iOS v1 기반(496 아이콘·497 탭셸). **MOMO-512 차단 해소**(Fable 실디스플레이 real-window 4/4 확증). **진행 중**: 543(iOS 타임라인 v2) 게이트 PASS·시각 QA 후 랜딩 / 509·511 docker 런타임 verifier(runtime-unverified→verified) / iOS 499~506(모바일 플랜 승인 대기) / 511-U SwiftTerm attach UXUI. **T3**: ADR-0125 D3 기질=E2B 확정. momo Cloud 프로비저너=후속 ADR. 정본: docs/TRACKS.md·ENGINE_HANDOFF.md·QA_FOLLOWUP.md·research/17. JOURNAL 최신 우선.
+> **2026-07-21 스냅샷**: 슈퍼앱 L5(개발자 콘솔) 진행 중. **main c953322 = track/engine = track/uxui 정렬**(이중트랙 머지 완료). **랜딩(main)**: 메신저 코어 전부(스레드·반응/수정삭제·검색·첨부·음소거·허들·푸시) + Interactive Work Console(ADR-0114 483/484/486 + A-10/A-11) + Host Fabric v0(ADR-0125 487·488·489) + **491 openssl·509 X-7 에이전트생성·511-E D10 attach capability** + macOS 512 focus fix + iOS v1 기반(496 아이콘·497 탭셸). **MOMO-512 차단 해소**(Fable 실디스플레이 real-window 4/4 확증). **진행 중**: 543(iOS 타임라인 v2) 게이트 PASS·시각 QA 후 랜딩 / 509·511 docker 런타임 verifier(runtime-unverified→verified) / iOS 499~506(모바일 플랜 승인 대기) / 511-U SwiftTerm attach UXUI. **T3**: ADR-0125 D3 기질=E2B 확정. oort Cloud 프로비저너=후속 ADR. 정본: docs/TRACKS.md·ENGINE_HANDOFF.md·QA_FOLLOWUP.md·research/17. JOURNAL 최신 우선.
 > **2026-07-18 운영 정본 이동**: 트랙 파이프라인은 `docs/TRACKS.md`, 트랙 간 작업 큐는 `docs/planning/ENGINE_HANDOFF.md`가 정본이다. main `7e7b283`(UXUI A-1/2/3/5/7 + 엔진 음소거 MOMO-477·상호작용 MOMO-478 동시 랜딩) 기준 두 트랙 브랜치 모두 main과 일치. 아래 스냅샷 세부는 2026-07-16 기준으로 낡았다 — JOURNAL 최신 항목을 우선 신뢰.
 > 기준일: 2026-07-16 · 기준선: **canonical main `05368ea` + PLN-20260716-01 Plugin Platform planning overlay** — Plugin Center·추천 onboarding·동적 capability discovery와 Drive reference vertical 후보를 조사했으며, 기존 GitHub-first 전략과 credential/runtime 경계를 바꾸는 구현은 성재 결정과 Accepted ADR 전까지 열지 않는다. Work v0(362..365)·unread(366/367)·ADR-0112 Wave A+MOMO-379 기반은 유지된다 · 통합 책임: `momo-main`
 > 이 문서는 **컨텍스트 압축/세션 전환 후 가장 먼저 읽는 현재 상태 스냅샷**이다.
@@ -182,7 +182,7 @@
 
 ## 0. 3분 복원
 
-- 제품 방향: momo는 채널 타임라인을 사람·에이전트의 실행/승인/비용/감사 원장으로 만드는 self-hosted agent messenger다.
+- 제품 방향: oort는 채널 타임라인을 사람·에이전트의 실행/승인/비용/감사 원장으로 만드는 self-hosted agent messenger다.
 - 기획 체계: 성재가 최종 결정권자이고, Fable과 GPT 5.6은 동등한 planner다. `momo-main`은 병렬 기획 결과를 순차 통합하는 유일한 sync authority다.
 - 구현 체계: Codex worker가 GitHub Issue 하나를 goal 하나로 claim하고 최대 5개까지 병렬 작업한다. worker는 PR handoff 후 멈춘다.
 - 현재 큰 결정: ADR-0100(거버넌스), ADR-0101(per-agent bearer), **ADR-0102(실행 경로 — Option C 이중 경로 + 서버 보장 매트릭스, 2026-07-12)** 전부 Accepted. 다음 결정 큐는 ADR-0103(로드맵 정렬)부터.
@@ -200,9 +200,9 @@
 엔진 준비도(2026-07-14 코드/정본 대조):
 
 - **코드 랜딩·repo-local mock 검증됨:** Work v0(`agent_run` + codex-workbench BYOA), 승인 pause/resume·결정·재개, per-agent bearer, status/partial, 비용·감사 원장.
-- **런타임 미검증:** 실제 Codex와 momo 사이의 Work 실행 및 승인/resume 왕복은 아직 `runtime-unverified`다.
+- **런타임 미검증:** 실제 Codex와 oort 사이의 Work 실행 및 승인/resume 왕복은 아직 `runtime-unverified`다.
 - **부분 구현:** 채널 히스토리 컨텍스트 조립 v1은 있으나 Context Broker/Context Packet의 권한·source·memory 실조립은 미완; inbound MCP는 skeleton/spec-to-code bridge 수준이다.
-- **스펙만 정본화:** Google Workspace connector/enterprise consent(연구 스펙은 momo connector의 refresh token 암호화 저장을 제안하며, 구현 전 보안 경계 ADR 승인 필요), Plugin Manifest/catalog/repo split, Memory Plane/Capability Cache의 전체 런타임 저장·무효화.
+- **스펙만 정본화:** Google Workspace connector/enterprise consent(연구 스펙은 oort connector의 refresh token 암호화 저장을 제안하며, 구현 전 보안 경계 ADR 승인 필요), Plugin Manifest/catalog/repo split, Memory Plane/Capability Cache의 전체 런타임 저장·무효화.
 - **자리만 있음:** 채널 설정의 웹훅/연동 탭은 placeholder이며 실제 발급·서명·회전·수신 경로는 아직 없다.
 
 ## 1. 활성 기획 레인
@@ -228,7 +228,7 @@
 | `PLN-20260721-01` | 에이전트-네이티브 비전(CTO 피드백 4대 고민+Blaxel) 리서치·설계 고도화 | Fable | **`adr-accepted → handoff-ready`** | 성재 ✓ | **ADR-0129·0130 Accepted**(2026-07-21 성재 지시 승인). **Blaxel 캔슬·E2B 확정**. 실행 정본: `handoffs/2026-07-21-agent-native-fabric-batch.md`(MOMO-518·526~533, Wave M/A/U + 오케스트레이터 인수 프롬프트 §8). 트랙 진단: 2트랙 유지+함정 규율 승격(2026-07-21-track-structure-diagnosis.md). 티켓 발급·정본 통합=오케스트레이터 인수 대기 |
 | `PLN-20260722-02` | buzz 경쟁 분석 → Wave H 집행(태세 정정·게이트·정지권·셀프호스팅 제품화) | Fable | **`plan-ready`** | 성재 | 계획 정본 `2026-07-22-buzz-actions-plan.md`(critic 검수 반영). 승인 대기: H1(MOMO-554~556) / ADR-0132 option(→557~559) / H3(560~563). 554는 리허설 Phase1 선행 |
 | `PLN-20260728-01` | Tauri/RN 전환 이후 경쟁·플러그인·스킬·스케줄·터미널·모션 갭 감사 | GPT 5.6 (`momo-main`) | **`review-ready · conditional-reject`** | 성재 | 독립 red team이 기존 builder DAG를 supersede: 신뢰 경계 4건을 레인별 gate로 분리하고, 단일 plugin runtime bridge 뒤 v1 read-only + owner-only one-schedule만 검수. Fable이 GitHub 중복·severity·#857 privacy gate를 재검증하고 성재 A~E 승인을 받는다. 승인 전 ROADMAP/BUILD_TICKETS/Issue는 변경하지 않는다 |
-| `ADR-0132` | 에이전트 상호작용 안전 계약(휴먼 정지권·루프 방어·발화 의무·실패 고지) | Fable | **`proposed`** | 성재 | buzz 상흔 4종의 momo 번역. D1~D5 option 승인 대기 — Accepted 시 H2(557→558, 559) 발급 |
+| `ADR-0132` | 에이전트 상호작용 안전 계약(휴먼 정지권·루프 방어·발화 의무·실패 고지) | Fable | **`proposed`** | 성재 | buzz 상흔 4종의 oort 번역. D1~D5 option 승인 대기 — Accepted 시 H2(557→558, 559) 발급 |
 | `ADR-0103` | 로드맵 정렬: 멀티팀 알파 vs 로컬 솔로 dogfood | unclaimed | `queued` | 성재 | 내부 팀 알파를 현재 실행 가정으로 검토하되, 확정 표기는 성재 승인과 ADR 정본화 이후로 제한 |
 | `ADR-0104` | 에이전트 presence/typing/streaming 이벤트 | unclaimed | `queued` | 성재 | MOMO-350(status/partial) 결과를 전제로 검토 |
 | `ADR-0105..0108` | 검색·정체성·CI·서버 스택 | unclaimed | `queued` | 성재 | `docs/architecture/overview.md` 결정 큐 순서 준수 |
@@ -280,8 +280,8 @@
 - Postgres가 SoT이고 Centrifugo는 transport only다.
 - 모든 user-visible write는 REST → Postgres transaction → outbox → relay 경로를 지난다.
 - 에이전트는 `member.kind='agent'`인 1급 멤버다.
-- upstream Codex/OpenAI의 OAuth access/refresh token과 API key는 momo에 들어오지 않는다.
-- momo runtime은 Hermes-facing bearer를 runtime secret으로 사용할 수 있다. upstream provider 자격증명과 혼동하지 않는다.
+- upstream Codex/OpenAI의 OAuth access/refresh token과 API key는 oort에 들어오지 않는다.
+- oort runtime은 Hermes-facing bearer를 runtime secret으로 사용할 수 있다. upstream provider 자격증명과 혼동하지 않는다.
 - 공개 API, 보안 경계, DB 계약, 제품 방향, 기술스택 변경은 Accepted ADR 없이 구현 티켓으로 만들지 않는다.
 - 로드맵/ADR의 최종 승인자는 성재다.
 

@@ -1,5 +1,5 @@
 import { MessageSquare } from "lucide-react";
-import type { RosterMember } from "@/lib/api";
+import type { RosterMember } from "@momo/core/lib/api";
 import { cn } from "@/design/lib/cn";
 import { memberFor, type Directory } from "@/features/workspace/useWorkspace";
 import { Avatar } from "@/features/timeline/MessageRow";
@@ -8,7 +8,7 @@ import {
   memberRowLabel,
   roleLabel,
   statusLabel,
-} from "./model";
+} from "@momo/core/features/directory/model";
 
 // =============================================================================
 // One directory row (parity G-3). Flat row, separator, hover background: a
@@ -17,7 +17,7 @@ import {
 // Identity follows the timeline exactly: the shared Avatar carries --agent for
 // an agent and nothing else does, the name sits in the same slot for both
 // kinds, and an agent is attributed to the human accountable for it with the
-// same "managed by {owner}" line the message row and the inbox already use.
+// same "{owner} 님이 관리" line the message row and the inbox already use.
 //
 // The row IS the action (parity G-4): the whole thing is one button that opens
 // the DM, because opening a conversation with someone is the only thing this
@@ -81,7 +81,7 @@ export function MemberRow({
       </span>
       {owner && (
         <span className="text-meta text-ink-muted">
-          managed by {owner.displayName}
+          {owner.displayName} 님이 관리
         </span>
       )}
     </span>
@@ -119,7 +119,7 @@ export function MemberRow({
       <li>
         <div {...shared} className={ROW_CLASS}>
           <span className={CONTENT_CLASS}>
-            <Avatar member={member} name={member.displayName} />
+            <Avatar member={member} />
             {identity}
             {/* Self is marked here; an inactive member already carries its
                 status beside the name, so the trailing slot stays empty rather
@@ -159,7 +159,7 @@ export function MemberRow({
             "disabled:cursor-default disabled:opacity-50"
           )}
         >
-          <Avatar member={member} name={member.displayName} />
+          <Avatar member={member} />
           {identity}
           {pending ? (
             <span className="shrink-0 text-meta text-ink-muted">여는 중</span>

@@ -32,7 +32,7 @@ export function RuntimeBadge() {
       className="rounded-sm border border-line px-2 py-1 text-timestamp font-medium text-ink-muted"
       title={
         IS_TAURI
-          ? "momo 데스크톱 앱(Tauri 셸)에서 실행 중"
+          ? "oort 데스크톱 앱(Tauri 셸)에서 실행 중"
           : "브라우저 탭에서 실행 중"
       }
     >

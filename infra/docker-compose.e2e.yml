@@ -66,12 +66,29 @@ services:
     labels: *momo-janitor-labels
     restart: "no"
     command: centrifugo --config=/centrifugo/centrifugo.json
+    # List form (not a mapping) so the last entry can be a bare PASS-THROUGH:
+    # compose omits a bare name entirely when the host has not exported it, and
+    # "omitted" is the only value that leaves infra/centrifugo.json in charge.
+    # `${VAR:-}` would export an EMPTY string, which Centrifugo reads as "the
+    # allow-list is empty" and every existing gate's websocket handshake dies.
     environment:
-      CENTRIFUGO_CLIENT_TOKEN_HMAC_SECRET_KEY: ${CENT_TOKEN_HMAC:-change-me-cent-token-hmac}
-      CENTRIFUGO_HTTP_API_KEY: ${CENT_API_KEY:-change-me-cent-api-key}
+      - CENTRIFUGO_CLIENT_TOKEN_HMAC_SECRET_KEY=${CENT_TOKEN_HMAC:-change-me-cent-token-hmac}
+      - CENTRIFUGO_HTTP_API_KEY=${CENT_API_KEY:-change-me-cent-api-key}
       # MOMO-300: subscribe proxy shared-secret header (must match the api
       # service's CENT_PROXY_SECRET below; unauthenticated callbacks are 401).
-      CENTRIFUGO_CHANNEL_PROXY_SUBSCRIBE_HTTP_STATIC_HEADERS: '{"X-Centrifugo-Proxy-Secret":"${CENT_PROXY_SECRET:-change-me-cent-proxy-secret}"}'
+      - CENTRIFUGO_CHANNEL_PROXY_SUBSCRIBE_HTTP_STATIC_HEADERS={"X-Centrifugo-Proxy-Secret":"${CENT_PROXY_SECRET:-change-me-cent-proxy-secret}"}
+      # A per-run widening of the allow-list, for a caller that connects over a
+      # loopback host port whose number is only known at run time — React
+      # Native's WebSocket sends `Origin: http://127.0.0.1:<port>`, a value
+      # infra/centrifugo.json cannot contain (clients/mobile/README.md documents
+      # the rejection).
+      #
+      # MAESTRO-1's phone lane was that caller and no longer is: #1022 moved it
+      # onto the Rust stack, where the same widening is spelled
+      # `CENTRIFUGO_ALLOWED_ORIGINS` (infra/rust/docker-compose.rust.yml:74).
+      # Kept here because the pass-through is inert unless someone exports it,
+      # and removing a working seam costs more than leaving it.
+      - CENTRIFUGO_CLIENT_ALLOWED_ORIGINS
     ports:
       - "${CENT_PORT:-8000}:8000"
     volumes:
@@ -93,6 +110,14 @@ services:
     restart: "no"
     working_dir: /workspace
     command: ["python3", "scripts/mock_hermes.py", "--host", "0.0.0.0", "--port", "8088"]
+    # Bare PASS-THROUGH entries: compose omits a name the host has not exported,
+    # so this block is inert for every existing verifier and mock_hermes.py falls
+    # back to its own defaults (scripts/mock_hermes.py:32, 51). MAESTRO-1's
+    # runner exports the first one to widen the 「작업 중」 window it asserts on.
+    environment:
+      - MOCK_HERMES_MAESTRO_SLOW_SECONDS
+      - MOCK_HERMES_EVENT_DELAY_SECONDS
+      - MOCK_HERMES_TOOL_CALLS
     ports:
       - "${HERMES_PORT:-8088}:8088"
     volumes:
@@ -232,6 +257,17 @@ services:
       MOMO_T3_PROVIDER_MOCK_B_API_KEY: ${MOMO_T3_PROVIDER_MOCK_B_API_KEY:-}
       MOMO_T3_PROVIDER_MOCK_B_IMAGE_REF: ${MOMO_T3_PROVIDER_MOCK_B_IMAGE_REF:-}
       MOMO_T3_PROVIDER_MOCK_B_INSTANCE_TIMEOUT_SECONDS: ${MOMO_T3_PROVIDER_MOCK_B_INSTANCE_TIMEOUT_SECONDS:-3600}
+      # ADR-0156 D4-③/④ — the first managed substrate. Empty by default, and the
+      # emptiness is the switch: with no base URL and no key the adapter is not
+      # built at all, so the API refuses managed acquisition (503) and the
+      # notifier refuses to resolve the id (`Unwired`). Nothing here activates
+      # T3 on its own — MOMO_T3_ENABLED still does.
+      MOMO_T3_PROVIDER_CUBESANDBOX_API_BASE_URL: ${MOMO_T3_PROVIDER_CUBESANDBOX_API_BASE_URL:-}
+      MOMO_T3_PROVIDER_CUBESANDBOX_API_KEY: ${MOMO_T3_PROVIDER_CUBESANDBOX_API_KEY:-}
+      MOMO_T3_PROVIDER_CUBESANDBOX_IMAGE_REF: ${MOMO_T3_PROVIDER_CUBESANDBOX_IMAGE_REF:-}
+      MOMO_T3_PROVIDER_CUBESANDBOX_INSTANCE_TIMEOUT_SECONDS: ${MOMO_T3_PROVIDER_CUBESANDBOX_INSTANCE_TIMEOUT_SECONDS:-3600}
+      MOMO_T3_PROVIDER_CUBESANDBOX_MAX_INSTANCES: ${MOMO_T3_PROVIDER_CUBESANDBOX_MAX_INSTANCES:-}
+      MOMO_T3_PROVIDER_CUBESANDBOX_SWEEP_SECONDS: ${MOMO_T3_PROVIDER_CUBESANDBOX_SWEEP_SECONDS:-}
       MOMO_PUBLIC_BASE_URL: ${MOMO_PUBLIC_BASE_URL:-}
       MOMO_T3_RATE_MICRO_USD_PER_SECOND: ${MOMO_T3_RATE_MICRO_USD_PER_SECOND:-25}
     ports:
@@ -492,6 +528,17 @@ services:
       MOMO_T3_PROVIDER_MOCK_B_API_KEY: ${MOMO_T3_PROVIDER_MOCK_B_API_KEY:-}
       MOMO_T3_PROVIDER_MOCK_B_IMAGE_REF: ${MOMO_T3_PROVIDER_MOCK_B_IMAGE_REF:-}
       MOMO_T3_PROVIDER_MOCK_B_INSTANCE_TIMEOUT_SECONDS: ${MOMO_T3_PROVIDER_MOCK_B_INSTANCE_TIMEOUT_SECONDS:-3600}
+      # ADR-0156 D4-③/④ — the first managed substrate. Empty by default, and the
+      # emptiness is the switch: with no base URL and no key the adapter is not
+      # built at all, so the API refuses managed acquisition (503) and the
+      # notifier refuses to resolve the id (`Unwired`). Nothing here activates
+      # T3 on its own — MOMO_T3_ENABLED still does.
+      MOMO_T3_PROVIDER_CUBESANDBOX_API_BASE_URL: ${MOMO_T3_PROVIDER_CUBESANDBOX_API_BASE_URL:-}
+      MOMO_T3_PROVIDER_CUBESANDBOX_API_KEY: ${MOMO_T3_PROVIDER_CUBESANDBOX_API_KEY:-}
+      MOMO_T3_PROVIDER_CUBESANDBOX_IMAGE_REF: ${MOMO_T3_PROVIDER_CUBESANDBOX_IMAGE_REF:-}
+      MOMO_T3_PROVIDER_CUBESANDBOX_INSTANCE_TIMEOUT_SECONDS: ${MOMO_T3_PROVIDER_CUBESANDBOX_INSTANCE_TIMEOUT_SECONDS:-3600}
+      MOMO_T3_PROVIDER_CUBESANDBOX_MAX_INSTANCES: ${MOMO_T3_PROVIDER_CUBESANDBOX_MAX_INSTANCES:-}
+      MOMO_T3_PROVIDER_CUBESANDBOX_SWEEP_SECONDS: ${MOMO_T3_PROVIDER_CUBESANDBOX_SWEEP_SECONDS:-}
       MOMO_PUBLIC_BASE_URL: ${MOMO_PUBLIC_BASE_URL:-}
     volumes:
       - *source-mount

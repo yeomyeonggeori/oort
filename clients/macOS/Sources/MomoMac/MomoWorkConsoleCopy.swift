@@ -333,7 +333,7 @@ extension MomoWorkspaceCopy {
     var workTierPolicyT1Only: String { language == .korean ? "이 Mac에서만" : "This Mac only" }
     var workTierPolicyAsk: String { language == .korean ? "연결 끊김 시 묻기" : "Ask when disconnected" }
     var workTierPolicyAuto: String { language == .korean ? "자동 재개" : "Resume automatically" }
-    var workTierPolicyCloud: String { language == .korean ? "momo Cloud" : "momo Cloud" }
+    var workTierPolicyCloud: String { language == .korean ? "oort Cloud" : "oort Cloud" }
     var workTierPolicyUpdating: String { language == .korean ? "정책 저장 중" : "Saving policy" }
     var workTierPolicyFailed: String {
         language == .korean ? "정책을 불러오지 못했습니다. 기존 세션은 그대로 유지됩니다." : "Could not load the policy. Existing sessions are unchanged."

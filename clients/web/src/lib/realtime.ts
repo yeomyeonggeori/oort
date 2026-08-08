@@ -1,202 +1,55 @@
 import { Centrifuge, type Subscription } from "centrifuge";
-import { fetchRealtimeToken, type Message } from "./api";
+import { fetchRealtimeToken } from "@momo/core/lib/api";
+import {
+  asCascadeFallbackFrame,
+  asHuddleLifecycleFrame,
+  asMessageDeletedFrame,
+  asPinFrame,
+  asReactionFrame,
+  asTypingFrame,
+  asWorkSessionACPFrame,
+  asWorkSessionLifecycleFrame,
+  asWorkSessionObserverFrame,
+  asWorkSessionToolTransitionFrame,
+  centrifugoAgentChannelName,
+  centrifugoChannelName,
+  centrifugoTypingChannelName,
+  createReplayGate,
+  type AgentProgressEvent,
+  type CascadeFallbackFrame,
+  type HuddleLifecycleFrame,
+  type MessageDeletedEvent,
+  type MessageNewEvent,
+  type PinEvent,
+  type ReactionEvent,
+  type RealtimeHandle,
+  type RealtimeStatus,
+  type SubscribedRecoveryContext,
+  type TypingFrame,
+  type WorkSessionACPFrame,
+  type WorkSessionLifecycleFrame,
+  type WorkSessionObserverFrame,
+  type WorkSessionToolTransitionFrame,
+} from "@momo/core/lib/realtimeEvents";
+import { isTerminalProgressFrame } from "@momo/core/features/agents/agentRail";
 import { apiBase } from "./serverBase";
 
 // =============================================================================
-// Realtime rail (transport-only; Postgres is the SoT). Mirrors the ADR-0119
-// client contract:
-//   - the WS address is EXCLUSIVELY the login `realtimeWebSocketUrl` (ADR-0110);
-//   - the connection JWT comes from POST /v1/auth/realtime-token (getToken);
-//   - channel subscriptions are recoverable+positioned so a reconnect replays
-//     missed publications with ctx.recovered; when NOT recovered the caller
-//     heals via REST `?after=<seq>` backfill, and the resume gate exercises both;
-//   - Centrifugo channel names are case-sensitive and the relay bakes UUIDs as
-//     Swift UUID.uuidString (UPPERCASE), so ids must be uppercased.
+// Realtime TRANSPORT (goal RN-C1 / ADR-0137 D3).
+//
+// The frame vocabulary this file used to carry — every event interface, every
+// `as*Frame` narrowing, the replay gate, the channel-name builders and the
+// `RealtimeHandle` interface itself — now lives in
+// `@momo/core/lib/realtimeEvents`, because none of it knows what a socket is.
+// What stayed is the half that does: the centrifuge client, and the loopback
+// rewrite that reads `window.location`.
+//
+// Re-exported wholesale so every existing `@/lib/realtime` import keeps
+// resolving to the same names. This module is the web IMPLEMENTATION of the
+// core's `RealtimeHandle` port; RN will supply its own with the same interface.
 // =============================================================================
 
-export type RealtimeStatus = "connecting" | "connected" | "disconnected";
-
-export interface MessageNewEvent {
-  type: "message.new" | "message.edited";
-  v: number;
-  ts: number;
-  seq: number;
-  payload: {
-    id: string;
-    channel_id: string;
-    seq: number;
-    type: string;
-    body?: string | null;
-    author_member_id: string;
-    hlc_ts: number;
-    hlc_count: number;
-    created_at_ms?: number;
-    state?: string;
-    root_id?: string | null;
-    /**
-     * Server-decided message properties, forwarded verbatim by the relay
-     * (server `MessageRoutes.broadcastPayload`, omitted when empty). This is
-     * where `mention_member_ids` and the approval fields live, so a live frame
-     * carries the same facts the REST page does.
-     */
-    props?: Record<string, unknown>;
-  };
-}
-
-/**
- * A realtime frame as the rest of the app sees messages. Shared by the timeline
- * and the notification rail so a live row and a REST row are the same object
- * shape — a second converter is how the two drift apart.
- *
- * `created_at_ms` is NOT in the broadcast envelope, so the local clock stands in
- * for the grouping label only; ordering is `seq` and the server time the
- * notification rail reads is `hlc_ts`.
- */
-export function payloadToMessage(p: MessageNewEvent["payload"]): Message {
-  const message: Message = {
-    id: p.id,
-    channelId: p.channel_id,
-    seq: p.seq,
-    hlcTs: p.hlc_ts,
-    hlcCount: p.hlc_count,
-    authorMemberId: p.author_member_id,
-    type: (p.type as Message["type"]) ?? "text",
-    body: p.body ?? undefined,
-    state: (p.state as Message["state"]) ?? "sent",
-    createdAtMs: p.created_at_ms ?? Date.now(),
-  };
-  if (typeof p.root_id === "string") message.rootId = p.root_id;
-  if (p.props && typeof p.props === "object") message.props = p.props;
-  return message;
-}
-
-export function centrifugoChannelName(
-  workspaceId: string,
-  channelId: string
-): string {
-  return `ch:ws${workspaceId.toUpperCase()}.${channelId.toUpperCase()}`;
-}
-
-// ---- agent progress rail (AX-5 / MOMO-613) ---------------------------------
-// `agent:ws<workspace>.<channel>.<agentMember>` is the exact-channel observable
-// progress namespace (research/11-agent-runtime/14, verified by
-// scripts/verify_agent_live_channel.sh): the subscribe proxy authorises it only
-// when the observer AND the target agent are both active members of that exact
-// channel, which is why one subscription is needed per (channel, agent) pair
-// rather than one per channel.
-//
-// Two payload facts, measured against momowebqa rather than assumed:
-//   - ids arrive in MIXED case. `run_id` is a Swift `uuidString` (UPPERCASE)
-//     while `channel_id` comes back lowercase, so every comparison downstream
-//     folds case (agentRail.ts `keyOf`).
-//   - `agent.partial` carries NO `agent_member_id`. The delta is attributed to
-//     the agent whose channel it arrived on, which the subscription already
-//     knows; deriving it from the run id would need a status frame that may not
-//     have arrived yet.
-
-/** Run lifecycle (`run_status`) as the worker publishes it. */
-export type AgentRunStatusWire =
-  | "queued"
-  | "running"
-  | "awaiting_approval"
-  | "paused"
-  | "succeeded"
-  | "failed"
-  | "cancelled"
-  | "timed_out";
-
-/** Stream phase (`phase`) as the worker publishes it. */
-export type AgentPhaseWire =
-  | "queued"
-  | "thinking"
-  | "streaming"
-  | "done"
-  | "error";
-
-export interface AgentStatusEvent {
-  type: "agent.status";
-  v: number;
-  ts: number;
-  payload: {
-    run_id: string;
-    agent_member_id: string;
-    channel_id: string;
-    phase: AgentPhaseWire;
-    run_status: AgentRunStatusWire;
-    /** Tool name behind the current step. Internal vocabulary, never rendered. */
-    detail?: string;
-    reserved_micro_usd?: number;
-    spent_micro_usd?: number;
-  };
-}
-
-export interface AgentPartialEvent {
-  type: "agent.partial";
-  v: number;
-  ts: number;
-  payload: {
-    run_id: string;
-    channel_id: string;
-    message_id?: string;
-    /** Appended slice of the streaming answer. */
-    text_delta?: string;
-    /** The full text so far (worker convenience field). */
-    text?: string;
-    tool_call_id?: string;
-    tool_call_name?: string;
-    tool_call_args?: unknown;
-    tool_call_args_truncated?: boolean;
-    spent_micro_usd?: number;
-  };
-}
-
-export type AgentProgressEvent = AgentStatusEvent | AgentPartialEvent;
-
-export function centrifugoAgentChannelName(
-  workspaceId: string,
-  channelId: string,
-  agentMemberId: string
-): string {
-  return `agent:ws${workspaceId.toUpperCase()}.${channelId.toUpperCase()}.${agentMemberId.toUpperCase()}`;
-}
-
-/** Subset of the centrifuge subscribed context the replay gate reads. */
-export interface SubscribedRecoveryContext {
-  recovered?: boolean;
-  hasRecoveredPublications?: boolean;
-}
-
-/**
- * Tells replayed publications apart from live ones.
- *
- * The `agent` namespace recovers WHATEVER THE CLIENT ASKS FOR: infra/centrifugo.json
- * gives it `force_recovery: true` with 100 frames of 24h history, and a live
- * subscribe against momowebqa comes back `recoverable:true positioned:true` even
- * for a subscription created with both flags off. Measured on 2026-07-25: after
- * a 25s disconnect that spanned a whole @kim-intern turn, the resubscribe
- * answered `recovered:true` and replayed all 8 frames of that finished turn.
- *
- * centrifuge-js flushes those recovered publications synchronously, immediately
- * after it emits `subscribed` (`Subscription._handleSubscribeResult`). So the
- * gate raises on that event and lowers on the next microtask: it covers exactly
- * the replayed batch, and nothing that arrives later can be mistaken for it.
- * `schedule` is the seam that lets a test drive the lowering by hand.
- */
-export function createReplayGate(schedule: (task: () => void) => void = queueMicrotask) {
-  let replaying = false;
-  return {
-    onSubscribed(ctx: SubscribedRecoveryContext): void {
-      if (ctx.recovered !== true && ctx.hasRecoveredPublications !== true) return;
-      replaying = true;
-      schedule(() => {
-        replaying = false;
-      });
-    },
-    isReplaying(): boolean {
-      return replaying;
-    },
-  };
-}
+export * from "@momo/core/lib/realtimeEvents";
 
 function isLoopbackHost(host: string): boolean {
   return host === "127.0.0.1" || host === "localhost" || host === "::1";
@@ -259,395 +112,6 @@ export function resolveSpikeRealtimeUrl(
     /* leave malformed URLs untouched */
   }
   return url;
-}
-
-// ---- work session rail (AX-3 / MOMO-618) -----------------------------------
-// Work sessions publish on the CHANNEL namespace, not the agent one: the server
-// builds both frames with `ch:ws<ws>.<channel>` (WorkSessionRoutes
-// `lifecyclePayload` / `acpEventPayload`), so watching a session is watching the
-// channel it lives in. Two frame families arrive there beyond message.new:
-//
-//   - `work.session.started` / `work.session.ended`, the ledger lifecycle;
-//   - the projected ACP event, whose `data.type` is the RAW event name
-//     (`agent.status`, `agent.partial`, `approval.requested`,
-//     `approval.decided`) and whose payload carries `work_session_id`. That
-//     field is the discriminator against the identically named frames on the
-//     agent namespace, which are about `agent_run` and carry no session id.
-//
-// Measured against momowebqa on 2026-07-26 (host-signed PATCH round trip):
-// `run_id` inside a work-session ACP payload is the WORK SESSION id, not an
-// agent_run id. The server enforces it (`validatedACPEvent` requires
-// `run_id == work_session_id == {session}`), so it must never be handed to
-// /agent-runs/{run}/cancel; that call answers 404, as verified.
-
-export type WorkSessionACPType =
-  | "agent.status"
-  | "agent.partial"
-  | "approval.requested"
-  | "approval.decided";
-
-export interface WorkSessionLifecycleFrame {
-  type: "work.session.started" | "work.session.ended";
-  v: number;
-  ts: number;
-  seq: number;
-  payload: {
-    session_id: string;
-    channel_id: string;
-    root_message_id: string;
-    member_id: string;
-    host_id: string;
-    tool: string;
-    label: string;
-    started_at?: number;
-    ended_at?: number;
-    exit_code?: number;
-    end_reason?: string;
-    resumed_from_session_id?: string;
-  };
-}
-
-export type WorkSessionToolTransitionType =
-  | "work.session.idle"
-  | "work.session.resumed-to-running";
-
-/**
- * A tool completion or restart inside one still-live work session
- * (ADR-0139 D1). Swift emits every UUID through `uuidString`, so these ids are
- * uppercase on the wire; callers compare them through `uuidEq`.
- */
-export interface WorkSessionToolTransitionFrame {
-  type: WorkSessionToolTransitionType;
-  v: number;
-  ts: number;
-  seq: number;
-  payload: {
-    session_id: string;
-    channel_id: string;
-    root_message_id: string;
-    member_id: string;
-    host_id: string;
-    status: "idle" | "running";
-    exit_code?: number;
-    idle_at?: number;
-    resumed_at?: number;
-  };
-}
-
-export interface WorkSessionACPFrame {
-  type: WorkSessionACPType;
-  v: number;
-  ts: number;
-  seq: number;
-  payload: {
-    work_session_id: string;
-    run_id: string;
-    channel_id: string;
-    event_id: string;
-    message_id: string;
-    root_message_id: string;
-  } & Record<string, unknown>;
-}
-
-/**
- * Observer count projection (ADR-0126 D1, `TerminalAttachRoutes.observerPayload`).
- * Published on the same channel when an observer capability is issued, and the
- * payload is deliberately two fields: the session and the count. It says nothing
- * about WHO, so nothing here can grow into an attendance list.
- */
-export interface WorkSessionObserverFrame {
-  type: "work.session.observer";
-  v: number;
-  ts: number;
-  seq: number;
-  payload: {
-    session_id: string;
-    observer_count: number;
-  };
-}
-
-export function asWorkSessionObserverFrame(
-  data: unknown
-): WorkSessionObserverFrame | null {
-  if (typeof data !== "object" || data === null) return null;
-  const frame = data as Partial<WorkSessionObserverFrame>;
-  if (frame.type !== "work.session.observer") return null;
-  const payload = frame.payload as Record<string, unknown> | undefined;
-  if (!payload || typeof payload.session_id !== "string") return null;
-  if (typeof payload.observer_count !== "number") return null;
-  return frame as WorkSessionObserverFrame;
-}
-
-const WORK_ACP_TYPES: ReadonlySet<string> = new Set<WorkSessionACPType>([
-  "agent.status",
-  "agent.partial",
-  "approval.requested",
-  "approval.decided",
-]);
-
-/** A publication carrying a projected ACP event for a work session. */
-export function asWorkSessionACPFrame(
-  data: unknown
-): WorkSessionACPFrame | null {
-  if (typeof data !== "object" || data === null) return null;
-  const frame = data as Partial<WorkSessionACPFrame>;
-  if (typeof frame.type !== "string" || !WORK_ACP_TYPES.has(frame.type)) {
-    return null;
-  }
-  const payload = frame.payload as Record<string, unknown> | undefined;
-  if (!payload || typeof payload.work_session_id !== "string") return null;
-  return frame as WorkSessionACPFrame;
-}
-
-/** A publication carrying a work-session lifecycle transition. */
-export function asWorkSessionLifecycleFrame(
-  data: unknown
-): WorkSessionLifecycleFrame | null {
-  if (typeof data !== "object" || data === null) return null;
-  const frame = data as Partial<WorkSessionLifecycleFrame>;
-  if (
-    frame.type !== "work.session.started" &&
-    frame.type !== "work.session.ended"
-  ) {
-    return null;
-  }
-  const payload = frame.payload as Record<string, unknown> | undefined;
-  if (!payload || typeof payload.session_id !== "string") return null;
-  return frame as WorkSessionLifecycleFrame;
-}
-
-const WORK_TOOL_TRANSITION_TYPES: ReadonlySet<string> =
-  new Set<WorkSessionToolTransitionType>([
-    "work.session.idle",
-    "work.session.resumed-to-running",
-  ]);
-
-/**
- * A publication carrying a live-session tool transition. Every field is
- * checked before the frame reaches React: a string/number inversion returns
- * null rather than creating a plausible but wrong state.
- */
-export function asWorkSessionToolTransitionFrame(
-  data: unknown
-): WorkSessionToolTransitionFrame | null {
-  if (typeof data !== "object" || data === null) return null;
-  const frame = data as Partial<WorkSessionToolTransitionFrame>;
-  if (
-    typeof frame.type !== "string" ||
-    !WORK_TOOL_TRANSITION_TYPES.has(frame.type) ||
-    typeof frame.v !== "number" ||
-    typeof frame.ts !== "number" ||
-    typeof frame.seq !== "number"
-  ) {
-    return null;
-  }
-  const payload = frame.payload as Record<string, unknown> | undefined;
-  if (
-    !payload ||
-    typeof payload.session_id !== "string" ||
-    typeof payload.channel_id !== "string" ||
-    typeof payload.root_message_id !== "string" ||
-    typeof payload.member_id !== "string" ||
-    typeof payload.host_id !== "string" ||
-    typeof payload.status !== "string" ||
-    (payload.exit_code !== undefined && typeof payload.exit_code !== "number")
-  ) {
-    return null;
-  }
-  if (frame.type === "work.session.idle") {
-    if (payload.status !== "idle" || typeof payload.idle_at !== "number") {
-      return null;
-    }
-    if (payload.resumed_at !== undefined) return null;
-  } else {
-    if (
-      payload.status !== "running" ||
-      typeof payload.resumed_at !== "number"
-    ) {
-      return null;
-    }
-    if (payload.idle_at !== undefined) return null;
-  }
-  return frame as WorkSessionToolTransitionFrame;
-}
-
-// ---- huddle lifecycle rail (ADR-0122 / MOMO-643) ---------------------------
-// Huddles use underscore event names because those are the Core/server contract,
-// not a web-side spelling choice. Their channel publication is only an
-// invalidation hint: participant display names remain a REST projection, so a
-// started/changed frame asks the caller to refetch instead of inventing rows
-// from participant_member_ids.
-
-export type HuddleEventType =
-  | "huddle_started"
-  | "huddle_participants_changed"
-  | "huddle_ended";
-
-export interface HuddleLifecycleFrame {
-  type: HuddleEventType;
-  v: number;
-  ts: number;
-  payload: {
-    huddle_id: string;
-    channel_id: string;
-    participant_member_ids: string[];
-  };
-}
-
-const HUDDLE_EVENT_TYPES: ReadonlySet<string> = new Set<HuddleEventType>([
-  "huddle_started",
-  "huddle_participants_changed",
-  "huddle_ended",
-]);
-
-/**
- * A publication carrying a huddle transition, or null for every malformed
- * field. This deliberately matches the defensive work-session parsers beside
- * it: a type inversion never escapes into the UI as a plausible event.
- */
-export function asHuddleLifecycleFrame(
-  data: unknown
-): HuddleLifecycleFrame | null {
-  if (typeof data !== "object" || data === null) return null;
-  const frame = data as Partial<HuddleLifecycleFrame>;
-  if (typeof frame.type !== "string" || !HUDDLE_EVENT_TYPES.has(frame.type)) {
-    return null;
-  }
-  if (typeof frame.v !== "number" || typeof frame.ts !== "number") return null;
-  const payload = frame.payload as Record<string, unknown> | undefined;
-  if (
-    !payload ||
-    typeof payload.huddle_id !== "string" ||
-    typeof payload.channel_id !== "string" ||
-    !Array.isArray(payload.participant_member_ids) ||
-    !payload.participant_member_ids.every((id) => typeof id === "string")
-  ) {
-    return null;
-  }
-  return frame as HuddleLifecycleFrame;
-}
-
-// ---- provider cascade rail (ADR-0135 D1 / MOMO-622) -------------------------
-// A turn that fell over to the next provider publishes ONE frame per transition
-// on the CHANNEL namespace, beside the message rail (AgentWorker
-// `cascadeFallbackBroadcastPayload`). "조용한 전환 금지" is the whole reason it
-// exists: cost and governance moved to a different provider, and the person who
-// asked for the turn is entitled to know.
-//
-// Three facts about this frame, all from the worker that writes it:
-//   - it carries NO `seq` and no Centrifugo version, because it is not a
-//     message and claims no place in the channel's order;
-//   - `run_id` is a Swift `uuidString` (UPPERCASE) and can be null when the
-//     fallback happened before a run row existed, so every comparison folds
-//     case and a null id is dropped rather than guessed;
-//   - the payload carries redacted endpoint LABELS (host:port), never a base
-//     URL and never a bearer (ADR-0004 evidence rule).
-//
-// Unlike the agent progress rail this one does NOT gate replays. The `ch:`
-// namespace is recoverable, so a reconnect replays the gap, and that is wanted
-// here: a fallback is a durable fact about a finished turn, not a running
-// clock, and the outbox already keys one row per (run, transition) so the same
-// transition dedupes on `${runId}:${from}-${to}` instead of stacking.
-
-export interface CascadeFallbackFrame {
-  type: "provider.cascade.fallback";
-  v: number;
-  ts: number;
-  payload: {
-    channel_id: string;
-    run_id: string | null;
-    /** Cascade position that failed. 0 is the operator's provider link. */
-    from: number;
-    /** Cascade position that served the turn instead. */
-    to: number;
-    /** Machine label (`provider_unreachable`, …), never user copy. */
-    reason: string;
-    from_endpoint_label: string;
-    to_endpoint_label: string;
-  };
-}
-
-export function asCascadeFallbackFrame(
-  data: unknown
-): CascadeFallbackFrame | null {
-  if (typeof data !== "object" || data === null) return null;
-  const frame = data as Partial<CascadeFallbackFrame>;
-  if (frame.type !== "provider.cascade.fallback") return null;
-  const payload = frame.payload as Record<string, unknown> | undefined;
-  if (!payload) return null;
-  if (typeof payload.from !== "number" || typeof payload.to !== "number") {
-    return null;
-  }
-  if (typeof payload.reason !== "string") return null;
-  return frame as CascadeFallbackFrame;
-}
-
-export interface RealtimeHandle {
-  /**
-   * Watch one channel. Callers are independent: the timeline and the desktop
-   * notification rail both want the open channel, and neither can end the
-   * other's feed (see the refcount below).
-   */
-  subscribeChannel: (
-    workspaceId: string,
-    channelId: string,
-    handlers: {
-      onSubscribed: (recovered: boolean) => void;
-      onMessage: (event: MessageNewEvent) => void;
-    }
-  ) => () => void;
-  /**
-   * Watch one agent's progress inside one channel (`agent.status` /
-   * `agent.partial`). Same refcount as `subscribeChannel`, so two surfaces may
-   * watch the same agent without either ending the other's feed.
-   */
-  subscribeAgent: (
-    workspaceId: string,
-    channelId: string,
-    agentMemberId: string,
-    handlers: { onEvent: (event: AgentProgressEvent) => void }
-  ) => () => void;
-  /**
-   * Watch the work sessions of one channel. Shares the channel subscription
-   * with `subscribeChannel` (same refcount), and drops replayed publications
-   * instead of folding them in: see `subscribeWorkSession` below.
-   */
-  subscribeWorkSession: (
-    workspaceId: string,
-    channelId: string,
-    handlers: {
-      onLifecycle: (frame: WorkSessionLifecycleFrame) => void;
-      onToolTransition: (frame: WorkSessionToolTransitionFrame) => void;
-      onAcpEvent: (frame: WorkSessionACPFrame) => void;
-      /** An observer capability was issued: re-read the count from Postgres. */
-      onObserver: (frame: WorkSessionObserverFrame) => void;
-      /** A replayed or non-recovered (re)subscribe: heal from REST instead. */
-      onResync: () => void;
-    }
-  ) => () => void;
-  /**
-   * Watch provider cascade transitions in one channel (ADR-0135 D1). Shares the
-   * channel subscription with `subscribeChannel` through the same refcount.
-   */
-  subscribeCascade: (
-    workspaceId: string,
-    channelId: string,
-    handlers: { onFallback: (frame: CascadeFallbackFrame) => void }
-  ) => () => void;
-  /**
-   * Watch huddle lifecycle changes in one channel. The publication is an
-   * invalidation signal; the caller re-reads the active REST projection for
-   * names and joined timestamps.
-   */
-  subscribeHuddle: (
-    workspaceId: string,
-    channelId: string,
-    handlers: {
-      onLifecycle: (frame: HuddleLifecycleFrame) => void;
-      onResync: () => void;
-    }
-  ) => () => void;
-  dispose: () => void;
 }
 
 export function createRealtime(
@@ -731,6 +195,9 @@ export function createRealtime(
     handlers: {
       onSubscribed: (recovered: boolean) => void;
       onMessage: (event: MessageNewEvent) => void;
+      onMessageDeleted?: (event: MessageDeletedEvent) => void;
+      onReaction?: (event: ReactionEvent) => void;
+      onPin?: (event: PinEvent) => void;
     }
   ): () => void {
     return attach(
@@ -747,7 +214,26 @@ export function createRealtime(
             event.payload
           ) {
             handlers.onMessage(event);
+            return;
           }
+          // B11 — the two interaction frames. They ride the same channel as the
+          // message they annotate and reuse its `seq`, so they arrive here in
+          // order behind it rather than on a rail of their own.
+          const tombstone = asMessageDeletedFrame(ctx.data);
+          if (tombstone) {
+            handlers.onMessageDeleted?.(tombstone);
+            return;
+          }
+          const reaction = asReactionFrame(ctx.data);
+          if (reaction) {
+            handlers.onReaction?.(reaction);
+            return;
+          }
+          // 이슈 #1112 — pin rides the same channel for the same reason, and
+          // reuses the target's `seq` too, so the header list and the timeline
+          // never disagree about which message a frame is about.
+          const pin = asPinFrame(ctx.data);
+          if (pin) handlers.onPin?.(pin);
         };
         sub.on("subscribed", onSubscribed);
         sub.on("publication", onPublication);
@@ -781,20 +267,79 @@ export function createRealtime(
         const onSubscribed = (ctx: SubscribedRecoveryContext) =>
           gate.onSubscribed(ctx);
         const onPublication = (ctx: { data?: unknown }) => {
-          if (gate.isReplaying()) return;
           const event = ctx.data as AgentProgressEvent | undefined;
           if (
-            event &&
-            (event.type === "agent.status" || event.type === "agent.partial") &&
-            event.payload
+            !event ||
+            (event.type !== "agent.status" && event.type !== "agent.partial") ||
+            !event.payload
           ) {
-            handlers.onEvent(event);
+            return;
           }
+          // The replay batch is dropped EXCEPT for the frames that can only END
+          // a turn — the same hole RN punched in this gate (channelRail.ts,
+          // issue 994 2R H1), adopted here from the same core predicate so the two
+          // clients cannot answer "is this turn over" differently.
+          //
+          // `isTerminalProgressFrame` records why letting them through is safe
+          // BY CONSTRUCTION: `applyStatus`'s terminal branch only ever deletes
+          // from the run table, so a replayed terminal frame cannot create a
+          // turn, cannot refresh one, and cannot move a clock.
+          //
+          // What makes it necessary on the web is the laptop. A lid closed for
+          // a minute is a socket gap, and a turn that ends inside that gap sends
+          // its terminal frame into it; the resubscribe's replay is the only
+          // place that frame is ever offered again. Dropping it left the sidebar
+          // badge and the composer line claiming 「작업 중」 until the 90s TTL
+          // swept them. 작업 패널(goal WEB-WP1) makes that worse rather than
+          // equal: the panel is a surface someone is READING, and a run whose
+          // ending we discarded sits there with a live-looking state chip.
+          if (gate.isReplaying() && !isTerminalProgressFrame(event)) return;
+          handlers.onEvent(event);
         };
         sub.on("subscribed", onSubscribed);
         sub.on("publication", onPublication);
         return () => {
           sub.off("subscribed", onSubscribed);
+          sub.off("publication", onPublication);
+        };
+      }
+    );
+  }
+
+  /**
+   * 「작성 중」 (ADR-0149). **새 소켓이 아니다** — 이 파일의 `attach()`가 이미
+   * 관리하는 그 centrifuge 클라이언트에 채널 하나를 더 붙인다.
+   *
+   * 세 가지가 다른 레일들과 다르고, 셋 다 서버 설정에서 따라 나온 것이다:
+   *
+   *   - **replay gate가 없다.** `agent` 네임스페이스에서 게이트가 필요했던 이유는
+   *     `force_recovery`로 24시간 히스토리를 되쏘기 때문인데, `typing`은
+   *     `history_size: 0`이다(infra/centrifugo.json). 되살릴 과거가 존재하지 않으므로
+   *     막을 것도 없다.
+   *   - **복구를 요구하지 않는다.** 끊긴 동안의 작성 중은 이미 만료됐다. 재구독 뒤
+   *     첫 신호가 곧 현재 상태이고, 그것이 REST로 물어볼 것이 없는 유일한 레일인
+   *     이유다.
+   *   - **이미 만료된 신호는 버린다.** 지연된 프레임을 명부에 넣으면 다음 sweep까지
+   *     한 번 깜박인다. 여기서 거르는 편이 값싸고, 판정 근거는 신호 자신이 들고 온
+   *     `expires_at`이다(가드 4).
+   */
+  function subscribeTyping(
+    workspaceId: string,
+    channelId: string,
+    handlers: { onTyping: (frame: TypingFrame) => void }
+  ): () => void {
+    return attach(
+      centrifugoTypingChannelName(workspaceId, channelId),
+      { recoverable: false, positioned: false },
+      (sub) => {
+        const onPublication = (ctx: { data?: unknown }) => {
+          const frame = asTypingFrame(ctx.data);
+          if (!frame) return;
+          if (frame.payload.expires_at <= Date.now()) return;
+          handlers.onTyping(frame);
+        };
+        sub.on("publication", onPublication);
+        return () => {
           sub.off("publication", onPublication);
         };
       }
@@ -923,9 +468,14 @@ export function createRealtime(
   return {
     subscribeChannel,
     subscribeAgent,
+    subscribeTyping,
     subscribeWorkSession,
     subscribeCascade,
     subscribeHuddle,
+    reconnect: () => {
+      client.disconnect();
+      client.connect();
+    },
     dispose: () => {
       shared.clear();
       client.disconnect();

@@ -7,7 +7,7 @@
 
 ## 0. 결론
 
-momo의 큰 방향은 맞다. 데스크톱은 React/Vite + Tauri, 모바일은 bare React Native로 가고, Rust는 네이티브 경계와 Windows 이식이 필요한 곳부터 쓰는 현재 결정이 경쟁사 흐름과도 맞는다. 지금 필요한 것은 또 한 번의 전면 재작성이나 terminal renderer 교체가 아니라 다음 네 층을 제품으로 닫는 일이다.
+oort의 큰 방향은 맞다. 데스크톱은 React/Vite + Tauri, 모바일은 bare React Native로 가고, Rust는 네이티브 경계와 Windows 이식이 필요한 곳부터 쓰는 현재 결정이 경쟁사 흐름과도 맞는다. 지금 필요한 것은 또 한 번의 전면 재작성이나 terminal renderer 교체가 아니라 다음 네 층을 제품으로 닫는 일이다.
 
 1. **에이전트 통제면**: #860 Agent Hub와 #861 전역 run 이력을 먼저 완결한다.
 2. **플러그인 번들**: 현재의 MCP 도구 카탈로그에 다중 skill, 사용자 연결, 버전/서명, 역할 배포를 더한다.
@@ -52,7 +52,7 @@ momo의 큰 방향은 맞다. 데스크톱은 React/Vite + Tauri, 모바일은 b
 
 ## 3. 경쟁사에서 실제로 커지는 축
 
-| 신호 | 확인된 움직임 | momo가 취할 것 | 취하지 않을 것 |
+| 신호 | 확인된 움직임 | oort가 취할 것 | 취하지 않을 것 |
 |---|---|---|---|
 | Slack | [AgentExchange·Slackbot MCP Client·Block Kit](https://slack.com/blog/news/slack-is-where-agents-work), 공유 skill과 schedule/message/reaction trigger | Agent directory + governance, channel 안 interactive action, trigger/run history | Slack API 호환을 제품 코어로 만들기 |
 | Microsoft | [MCP Apps/Apps SDK로 대화 안 interactive UI](https://www.microsoft.com/en-us/microsoft-365/blog/2026/04/13/bring-your-everyday-business-apps-into-the-flow-of-work-with-agents-in-microsoft-365-copilot/), [Agent 365 identity·observability](https://learn.microsoft.com/en-us/microsoft-agent-365/developer/agent-365-sdk) | 에이전트별 identity, permission, audit, rich in-chat app | Microsoft control plane 종속 |
@@ -69,7 +69,7 @@ momo의 큰 방향은 맞다. 데스크톱은 React/Vite + Tauri, 모바일은 b
 
 Jack은 2026-07-26 답글에서 “Buzz는 multiplayer agent harness”라는 제3자 표현에 [“yes!”](https://x.com/jack/status/2081409291785785735), agent의 로컬 암호학적 소유 주장에 [“yes”](https://x.com/jack/status/2081484649386135761)라고 답했다. 이 문장은 원 게시자의 주장이고 Jack의 직접 발언은 동의다.
 
-제품 신호는 충분하다. 경쟁 프레임이 “Slack에 AI를 붙인다”에서 **여러 사람과 여러 agent가 같은 실행 기록을 공유하는 multiplayer harness**로 옮겨 가고 있다. momo의 `member.kind='agent'`, channel thread, approval/cost ledger는 이 프레임에 이미 맞는다. 필요한 것은 보이는 통제면과 반복 실행 제품화다.
+제품 신호는 충분하다. 경쟁 프레임이 “Slack에 AI를 붙인다”에서 **여러 사람과 여러 agent가 같은 실행 기록을 공유하는 multiplayer harness**로 옮겨 가고 있다. oort의 `member.kind='agent'`, channel thread, approval/cost ledger는 이 프레임에 이미 맞는다. 필요한 것은 보이는 통제면과 반복 실행 제품화다.
 
 ### 3.2 Buzz의 plugin 약세를 정확히 표현하면
 
@@ -81,19 +81,19 @@ Buzz에 확장 기능이 없는 것은 아니다. 공개 repo에는 ACP/MCP, YAM
 - version/signature/update/permission diff
 - skill authoring/recording/evaluation lifecycle
 
-momo는 반대 모양이다. registry/install/grant/audit와 risk/egress/provenance는 강하지만, 실제 연결·skill·developer marketplace가 비어 있다. 따라서 “Buzz보다 plugin 개수가 많다”가 아니라 **권한과 원장을 가진 plugin 운영면을 먼저 완성한다**가 차별화다.
+oort는 반대 모양이다. registry/install/grant/audit와 risk/egress/provenance는 강하지만, 실제 연결·skill·developer marketplace가 비어 있다. 따라서 “Buzz보다 plugin 개수가 많다”가 아니라 **권한과 원장을 가진 plugin 운영면을 먼저 완성한다**가 차별화다.
 
 ## 4. Herdr, Hermes, hermes를 분리한다
 
 이름이 비슷한 세 기술이 섞이기 쉽다.
 
-| 이름 | 정체 | momo 관계 |
+| 이름 | 정체 | oort 관계 |
 |---|---|---|
 | **Herdr** | [Rust agent-aware terminal multiplexer](https://github.com/ogulcancelik/herdr). persistent server, pane/workspace, detach/attach, semantic wait/socket API. 현재 master의 [Cargo.toml](https://github.com/ogulcancelik/herdr/blob/master/Cargo.toml)·LICENSE 기준 Apache-2.0 | 현재 미사용. Buzz/T3/Codex가 내부 공용 기반으로 쓴다는 근거 없음 |
 | **Hermes (React Native)** | Meta의 RN JavaScript engine. Discord RN 전환 사례의 Hermes | RN #837에서 쓰게 될 모바일 런타임 축. terminal과 무관 |
-| **momo hermes gateway** | `adapters/hermes`와 AgentWorker가 대화하는 OpenAI-compatible agent gateway | 현재 agent 실행 경로. RN Hermes나 Herdr와 무관 |
+| **oort hermes gateway** | `adapters/hermes`와 AgentWorker가 대화하는 OpenAI-compatible agent gateway | 현재 agent 실행 경로. RN Hermes나 Herdr와 무관 |
 
-Herdr에서 빌릴 것은 상태 문법(`working/blocked/done`), wait API, tool별 resume ID, worktree 계층, detach/attach다. 이 중 상태·worktree·replay 상당수는 이미 momo에 구현됐거나 #857~#860으로 진행 중이다.
+Herdr에서 빌릴 것은 상태 문법(`working/blocked/done`), wait API, tool별 resume ID, worktree 계층, detach/attach다. 이 중 상태·worktree·replay 상당수는 이미 oort에 구현됐거나 #857~#860으로 진행 중이다.
 
 ## 5. 터미널: 현재 구조와 결정
 
@@ -140,11 +140,11 @@ flowchart LR
 
 ## 6. Codex 스크린샷 방향은 얼마나 반영됐나
 
-| 스크린샷 표면 | momo 현재 | 판정 |
+| 스크린샷 표면 | oort 현재 | 판정 |
 |---|---|---|
 | plugin 검색/목록/상세 | `PluginSection.tsx`, catalog/detail API | **반영** |
 | 설치/삭제 | workspace install/uninstall | **반영** |
-| scope 동의와 위험/egress/provenance | #839, manifest metadata | **momo가 더 강한 부분** |
+| scope 동의와 위험/egress/provenance | #839, manifest metadata | **oort가 더 강한 부분** |
 | top-level “플러그인 / 스킬” IA | 설정 > 앱 한 곳 | **미반영** |
 | plugin 내부 MCP 서버 목록/토글 | manifest는 단일 MCP endpoint + tools, per-module toggle 없음 | **미반영** |
 | plugin 내부 여러 skill과 토글 | v1은 optional skill reference 하나, 공식 fixture 전부 null | **미반영** |
@@ -220,7 +220,7 @@ ADR-0140은 `triggers.schedule`에 cron parser 하나를 다는 문서가 되어
 
 Slack Block Kit, Microsoft Apps SDK, OpenAI Apps, MCP Apps가 같은 방향으로 수렴한다. agent 답변이 “링크를 눌러 다른 앱으로 가라”가 아니라 채널 안에서 폼, 승인, 차트, 문서 preview를 보여 준다.
 
-MCP Apps는 2026-01-26 stable extension으로 `ui://` resource, tool metadata, sandboxed iframe, CSP, JSON-RPC `postMessage` bridge를 정의한다. momo가 만들 때의 경계:
+MCP Apps는 2026-01-26 stable extension으로 `ui://` resource, tool metadata, sandboxed iframe, CSP, JSON-RPC `postMessage` bridge를 정의한다. oort가 만들 때의 경계:
 
 - host가 capability를 협상하지 못하면 기존 typed card/text로 graceful fallback.
 - third-party remote URL을 임의 iframe으로 열지 않음.
@@ -342,7 +342,7 @@ flowchart TD
 
 - Nostr/BLE를 핵심 메시지 경로에 넣는 ticket.
 - Ghostty/libghostty 전환 ticket. 병목이 측정되기 전에는 spike조차 열지 않는다.
-- Herdr를 momo의 process/session SoT로 삼는 ticket.
+- Herdr를 oort의 process/session SoT로 삼는 ticket.
 - skill 녹화 영상을 그대로 재생하는 macro runner.
 - client-side cron 또는 앱이 켜져 있어야만 도는 schedule.
 - plugin UI가 임의 remote webview를 열거나 기존 approval/grant를 우회하는 경로.

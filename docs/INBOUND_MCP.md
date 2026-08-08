@@ -45,7 +45,7 @@ MOMO-172 fixes the same four tools from MOMO-163 in compiled Swift descriptors:
 |---|---|---|---|
 | `momo.search_messages` | `mcp.read` | none | auth/RLS/member preflight + stub |
 | `momo.fetch_thread` | `mcp.read` | none | auth/RLS/member/channel preflight + stub |
-| `momo.post_message` | `mcp.post` | momo timeline only | preflight + stub; must later reuse the canonical message tx |
+| `momo.post_message` | `mcp.post` | oort timeline only | preflight + stub; must later reuse the canonical message tx |
 | `momo.create_tool_call` | `mcp.tool.propose` | proposal only | preflight + stub; must later create approval-safe rows |
 
 The server also exposes the resource template and prompt descriptors from the MOMO-163 discovery

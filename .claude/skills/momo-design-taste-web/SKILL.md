@@ -1,11 +1,11 @@
 ---
 name: momo-design-taste-web
-description: Anti-slop design taste for the momo web client (TS/React + Tailwind + shadcn/ui + Tauri shell). Use WHENEVER creating or modifying React components, Tailwind styles, tokens, or user-visible strings in clients/web. Web translation of momo-design-taste (macOS/SwiftUI): Dawn palette CSS tokens, fixed Tailwind scale, web AI-tell bans, mandatory four states, keyboard/focus rules, and a mechanical grep-able pre-flight. Adapted from momo-design-taste (mac) + ADR-0133 stack decision.
+description: Anti-slop design taste for the oort web client (TS/React + Tailwind + shadcn/ui + Tauri shell). Use WHENEVER creating or modifying React components, Tailwind styles, tokens, or user-visible strings in clients/web. Web translation of momo-design-taste (macOS/SwiftUI): Dawn palette CSS tokens, fixed Tailwind scale, web AI-tell bans, mandatory four states, keyboard/focus rules, and a mechanical grep-able pre-flight. Adapted from momo-design-taste (mac) + ADR-0133 stack decision.
 ---
 
-# momo Design Taste (Web / React + Tailwind + shadcn)
+# oort Design Taste (Web / React + Tailwind + shadcn)
 
-momo-web is the canonical UI (ADR-0133): TS + React + Vite, Tailwind + shadcn/ui(Radix), react-virtuoso, cmdk, wrapped by Tauri 2 for desktop. The bar is the same as the mac client:
+oort web is the canonical UI (ADR-0133): TS + React + Vite, Tailwind + shadcn/ui(Radix), react-virtuoso, cmdk, wrapped by Tauri 2 for desktop. The bar is the same as the mac client:
 **it must feel like a native-grade work tool with the information density of Slack and the calm confidence of Codex, not a marketing web app.** Landing-page patterns transplanted into the product surface are the #1 slop signature to avoid. This is the web sibling of `momo-design-taste`; the hard rules are identical in intent, translated to CSS/Tailwind/React.
 
 Three files carry the load, and they are checked in, not aspirational:
@@ -22,7 +22,7 @@ Output one line before writing UI code:
 
 > Reading this as: <surface: message timeline / composer / sidebar / inbox / agent card / settings / onboarding> for <internal team users on web+Tauri>, density <N>/10, motion <M>/10.
 
-Defaults for momo: **density 6-7** (work tool, not a landing page), **motion 2-3** (motion is feedback, never theater).
+Defaults for oort: **density 6-7** (work tool, not a landing page), **motion 2-3** (motion is feedback, never theater).
 
 Do NOT default to: purple/blue/indigo AI gradients, glassy hero cards, three-equal-card feature rows, oversized rounded "web cards" wrapping every list row, centered empty states with illustrations, toast stacks. These are LLM defaults, not choices.
 
@@ -108,9 +108,9 @@ Every surface ships **empty / loading / error / offline**:
 | Count-up / animated number theater | Numbers change at data speed, `data-numeric` |
 | Custom titlebar breaking OS window controls | Tauri standard window chrome |
 
-## 9. Agent-native surfaces (momo-specific)
+## 9. Agent-native surfaces (oort-specific)
 
-- Agent messages share the human message anatomy (same grid, same typography); agent identity is expressed ONLY via `--agent` on avatar/badge, plus "managed by {owner}" attribution. Never a different bubble shape or full-row background tint. The token test asserts a >= 90 degree hue gap from `--accent`, so human and agent identity cannot converge by a well-meant tweak.
+- Agent messages share the human message anatomy (same grid, same typography); agent identity is expressed ONLY via `--agent` on avatar/badge, plus "{owner} 님이 관리" attribution (the term the mac client already ships, `MomoAgentOwnerLabel.swift`). Never a different bubble shape or full-row background tint. The token test asserts a >= 90 degree hue gap from `--accent`, so human and agent identity cannot converge by a well-meant tweak.
 - Tool-call / approval / diff / cost cards are **structured, calm, dense**: title row (icon + name + status chip) then typed fields then a disclosure for raw payload. Status lifecycle chips (`queued / thinking / streaming / awaiting-approval / done / error`) use token status colors, text-first, no pulsing. Approval status maps to the real model (`pending / approved / rejected / expired / cancelled`).
 - Render only server-provided public fields; tool arguments, paths, credentials, and cost internals stay opaque even behind disclosure (matches `approvalCardModel` basic-mode contract).
 - Agent activity reads as "the agent did {verb} to {object} → {outcome}". Frame absence (timeout, silence, cache miss) as `stalled`, never promote it to `error` or a false story (agent-interaction-safety, ADR-0132).
@@ -122,11 +122,11 @@ scripts/design_preflight_web.sh          # exit 0 pass, 1 violation
 scripts/design_preflight_web.sh --list   # every hit per category, no gating
 ```
 
-Ten grep categories, **hard zero** (unlike the mac ratchet: `clients/web` was converted to the Dawn tokens in one pass, MOMO-597, so there is no legacy debt to grandfather):
+Ten categories (nine grep + one AST, see 10.1), **hard zero** (unlike the mac ratchet: `clients/web` was converted to the Dawn tokens in one pass, MOMO-597, so there is no legacy debt to grandfather):
 
 | # | key | catches |
 |---|---|---|
-| 1 | `emdash` | em-dash inside a quoted string, and anything in `index.html` |
+| 1 | `emdash` | em-dash in a string literal or JSX text (**AST**, see 10.1), and anything in `index.html` |
 | 2 | `raw_color` | hex / `rgb()` / `hsl()` outside the token definition |
 | 3 | `inline_style` | `style={{...}}` or `style=` (house rule, §1: the `'unsafe-inline'` in the shipped `style-src` is for xterm.js, not for components) |
 | 4 | `arbitrary_tw` | `className="... [13px] ..."` arbitrary values |
@@ -137,7 +137,31 @@ Ten grep categories, **hard zero** (unlike the mac ratchet: `clients/web` was co
 | 9 | `hype` | filler-hype vocabulary |
 | 10 | `pure_bw` | `bg-black` / `bg-white` / `#000000` / `#ffffff` |
 
-`src/design/tokens.css` and `tokens.contrast.test.ts` are excluded (defining and measuring raw values is their job). A deliberate, reviewed exception is marked on the offending line with the comment marker `design-preflight-allow` and justified in the PR body.
+`src/design/tokens.css` and `tokens.contrast.test.ts` are excluded (defining and measuring raw values is their job). A deliberate, reviewed exception is marked with the comment marker `design-preflight-allow` and justified in the PR body — on the offending line, or (for the two AST categories) in the leading comment of the field, attribute or `throw` that owns the string.
+
+### 10.1 The AST stage: core, and the web `emdash` category (issue #1141)
+
+The ten categories above scan `clients/web/src` only — but a large share of what this client puts on screen is not there. It lives in `packages/momo-core`, and both TS clients render it verbatim. That gap is what carried em-dashes to the edge of a release in #1138 B2.
+
+So the same command runs a second stage over the core. The core is pure TS with no markup, which means there is no syntactic marker separating "text that gets rendered" from "prose written for a reader" (comments, docstrings, test names) — line-based grep does not survive there. The separation rule is therefore an AST one, held with its evidence in `scripts/design_preflight_core.mjs`:
+
+- only **string-literal nodes** in shipped code are checked; the parser never hands a comment to the scan, so "how do I recognise a comment" stops being a question
+- `*.test.ts` is excluded whole: a test quotes the surface, it does not produce it (measured — 70 of 72 core em-dash hits were `describe`/`it` names)
+- categories are `emdash`, `raw_color`, `hype`. The other seven are markup/CSS checks and the core cannot hold markup (`packages/momo-core/scripts/purity.mjs` rejects `.tsx`/`.css` outright)
+- the same `design-preflight-allow` marker applies, and may sit either on the literal's own line or in the leading comment of the field it belongs to
+
+Core is **hard zero** as well, with no ratchet file: applying the separation rule dropped #1141's measured backlog from em-dash 73 / raw_color 47 to em-dash 2 / raw_color 0, and both survivors are strings their own docstrings describe as never rendered.
+
+**The web `emdash` category uses the same scanner** (`scripts/design_preflight_web_strings.mjs`; the rule itself lives once, in `scripts/design_preflight_ast.mjs`). It was line-based until #1141, and its 12-hit backlog turned out to be 10 `describe`/`it` names, 1 JSX comment, and 1 developer-facing `throw` — 11 of 12 were false positives that the AST simply does not see. Moving closed a miss at the same time: web text is often written **without quotes**, between tags (`<p>… — …</p>`), which the quoted-literal grep had never once looked at. JSX text is a node, a JSX comment is not.
+
+The other nine categories stay line-based on purpose. They ask about class names, CSS and markup — questions a string-literal node cannot answer — and `raw_color` has to read `.css`, where there is no TS AST at all.
+
+```sh
+scripts/design_preflight_web.sh --selftest   # all three discriminators, as cases
+npm run gate:copy                            # the core stage alone
+```
+
+Both stages are gated rather than remembered: `scripts/verify_merge_tree.sh` runs the copy scan as a lane on the **merge result**, and `scripts/local_gate.sh --profile web` runs the whole pre-flight.
 
 Two more mechanical checks that are not grep:
 

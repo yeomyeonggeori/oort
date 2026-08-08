@@ -7,7 +7,7 @@
 
 Do not claim "perfect security" or "Telegram-level secure" in broad terms. Telegram itself distinguishes Secret Chats from default cloud chats in its public FAQ: [Telegram FAQ](https://telegram.org/faq).
 
-momo's stronger claim is:
+oort's stronger claim is:
 
 > self-hostable agent execution ledger for teams that need data sovereignty, approval, cost control, audit, and optional local processing.
 
@@ -21,7 +21,7 @@ Key points:
 
 ## 2. Enterprise Trust Roadmap
 
-| Stage | Target | momo deliverable |
+| Stage | Target | oort deliverable |
 |---|---|---|
 | Trust-0 | Secure SDLC | Threat model, secure coding checklist, dependency policy, secret scanning, local PR gate |
 | Trust-1 | Supply chain | SBOM, SLSA-oriented provenance plan, license scan, reproducible release notes |
@@ -38,11 +38,11 @@ Primary references:
 
 ## 3. Mattermost License Caveat
 
-Mattermost is useful as a self-hosted collaboration reference, but momo should not copy code.
+Mattermost is useful as a self-hosted collaboration reference, but oort should not copy code.
 
 - Running Mattermost commercially and copying/modifying/distributing Mattermost code are different legal questions.
 - Mattermost has MIT-licensed compiled platform artifacts in parts of its distribution, but source builds and enterprise-only plugin code can involve AGPLv3, source-available, or commercial-license constraints.
-- momo should use Mattermost only as API/UX/architecture reference and keep dependencies permissive.
+- oort should use Mattermost only as API/UX/architecture reference and keep dependencies permissive.
 
 References:
 

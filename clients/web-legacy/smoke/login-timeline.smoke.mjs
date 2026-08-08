@@ -646,13 +646,32 @@ try {
     );
   }
 
+  // The settle barrier here used to be the mere PRESENCE of an
+  // `approval-state` element: it rendered only once `status !== null &&
+  // status !== "pending"`. #577 (cdcf3229) replaced it with an ALWAYS-rendered
+  // status chip (`approval-status-chip`, ApprovalCard.tsx) that reads 대기 중
+  // while pending, so presence no longer proves settlement — waiting on the
+  // chip would return instantly and read the pre-receipt text. What still
+  // flips is the card root's `data-approval-status`, so wait on that. Kept
+  // status-AGNOSTIC (`:not(pending)`) on purpose: it reproduces the old render
+  // condition exactly, which is what leaves the 승인됨 assertions below their
+  // discriminating power instead of turning them into tautologies.
+  const settledStateOf = async (approvalId) => {
+    const id = approvalId.toLowerCase();
+    await page
+      .locator(
+        `[data-testid="approval-card"][data-approval-id="${id}"]:not([data-approval-status="pending"])`
+      )
+      .waitFor({ timeout: 20000 });
+    return await page
+      .locator(
+        `[data-testid="approval-card"][data-approval-id="${id}"] [data-testid="approval-status-chip"]`
+      )
+      .innerText();
+  };
+
   await approvalCard1.getByTestId("approval-approve").click();
-  await approvalCard1
-    .locator('[data-testid="approval-state"]')
-    .waitFor({ timeout: 20000 });
-  const card1State = await approvalCard1
-    .locator('[data-testid="approval-state"]')
-    .innerText();
+  const card1State = await settledStateOf(APPROVAL_ID);
   if (!card1State.includes("승인됨")) {
     failures.push(`approved card shows "${card1State}"; expected 승인됨`);
   }
@@ -674,31 +693,57 @@ try {
     );
   }
 
-  // 409 path: settle the second fixture EXTERNALLY first, then decide the
-  // opposite way in the browser. The 409 receipt must transition the card to
-  // the authoritative status — quiet note, no error surface.
-  await api(
-    `/v1/workspaces/${workspaceId}/approvals/${APPROVAL2_ID}/decision`,
-    {
-      method: "POST",
-      token,
-      body: {
-        approval_id: APPROVAL2_ID,
-        approve: true,
-        client_decision_id: crypto.randomUUID(),
-      },
-    }
-  );
+  // 409 path: the browser decides one way while the approval has ALREADY been
+  // settled the other way elsewhere. The 409 receipt must transition the card
+  // to the authoritative status — quiet note, no error surface.
+  //
+  // The external decision can no longer be made BEFORE the click. #577
+  // (a717abf9, the same goal that renamed the status chip) gave the card an
+  // `approval.*` realtime rail, so a decision made elsewhere reaches this tab
+  // as a PUSH in milliseconds and unmounts the 거부 button — the click then
+  // dies on "element was detached from the DOM". Pre-settling here would only
+  // ever exercise the push, never the receipt.
+  //
+  // So sequence it the way that is still deterministic AND still the thing
+  // this assertion is named after: click while the card is genuinely pending,
+  // and settle it externally INSIDE the route handler, before the browser's
+  // own request is forwarded. Same idiom as the composer 500 above — the
+  // interceptor orders a race that is otherwise decided by the network.
   const approvalCard2 = page.locator(
     `[data-testid="approval-card"][data-approval-id="${APPROVAL2_ID.toLowerCase()}"]`
   );
+  const APPROVAL2_DECISION_ROUTE = "**/v1/workspaces/*/approvals/*/decision";
+  let externalDecisionSent = false;
+  await page.route(APPROVAL2_DECISION_ROUTE, async (route) => {
+    const url = route.request().url().toLowerCase();
+    if (externalDecisionSent || !url.includes(APPROVAL2_ID.toLowerCase())) {
+      return route.continue();
+    }
+    externalDecisionSent = true;
+    // Commits server-side BEFORE the browser's 거부 is forwarded, so the
+    // server answers that request with the 409 receipt this block asserts on.
+    await api(
+      `/v1/workspaces/${workspaceId}/approvals/${APPROVAL2_ID}/decision`,
+      {
+        method: "POST",
+        token,
+        body: {
+          approval_id: APPROVAL2_ID,
+          approve: true,
+          client_decision_id: crypto.randomUUID(),
+        },
+      }
+    );
+    return route.continue();
+  });
   await approvalCard2.getByTestId("approval-reject").click();
-  await approvalCard2
-    .locator('[data-testid="approval-state"]')
-    .waitFor({ timeout: 20000 });
-  const card2State = await approvalCard2
-    .locator('[data-testid="approval-state"]')
-    .innerText();
+  const card2State = await settledStateOf(APPROVAL2_ID);
+  await page.unroute(APPROVAL2_DECISION_ROUTE);
+  if (!externalDecisionSent) {
+    failures.push(
+      "409 setup never intercepted the browser's decision POST — the card was not exercised against a pre-settled approval"
+    );
+  }
   const card2Errors = await approvalCard2
     .locator('[data-testid="approval-error"]')
     .count();

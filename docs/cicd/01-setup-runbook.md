@@ -1,11 +1,14 @@
-# momo — CI/CD 1회 셋업 런북 (사람이 직접, 순서대로)
+# oort — CI/CD 1회 셋업 런북 (사람이 직접, 순서대로)
 
 > Codex는 코드/워크플로우 파일을 만들 수 있지만, **Apple 계정 액션·비밀값 등록은 사람이 1회** 해야 한다.
 > org=`dawnkim`, repo=`momo`. 검증 표기는 docs/cicd/00 참조.
 
 ## 사전 요건
 - Apple Developer Program 멤버십(유료, 연 $99 — 법률/계약 변동 가능, 본인 확인). 등록주체 결정, D-U-N-S(조직 선택 시), 사람 handoff 절차는 `docs/legal/01-entity-apple-runbook.md`를 먼저 따른다.
-- App Store Connect에 **App 레코드 생성** + Bundle ID `com.dawnkim.momo`(또는 실제 값) 등록.
+- App Store Connect에 **App 레코드 생성** + Bundle ID 등록. **어떤 번들 ID에 어떤 capability와
+  프로파일이 필요한지는 `docs/cicd/10-ios-signing-identity-runbook.md`가 정본**이다
+  (iOS 앱 `app.momo.ios` + 알림 확장 `app.momo.ios.NotificationService`는 **각각** 필요,
+  macOS는 `com.dawnkim.momo`). 이 문서를 보고 번들 ID를 짐작하지 말 것.
 - macOS 직접배포면 **Developer ID Application 인증서** 권한(Account Holder/Admin).
 
 ## 1. App Store Connect API Key(Team Key) 발급
@@ -27,9 +30,15 @@ export ASC_KEY_ID="..."; export ASC_ISSUER_ID="..."
 export ASC_KEY_P8_BASE64="$(base64 -i AuthKey_XXXX.p8 | tr -d '\n')"
 
 bundle exec fastlane match init            # Matchfile 확인
-bundle exec fastlane match appstore        # iOS App Store 인증서/프로파일 생성·업로드
-bundle exec fastlane match developer_id    # macOS 직접배포(공증)용 Developer ID
+# iOS — Matchfile 기본값이 앱 + 알림 확장 둘 다라 한 번에 처리된다.
+bundle exec fastlane match appstore
+# macOS — 번들 ID도 타입도 다르다. 명시하지 않으면 iOS 기본값이 잘못 쓰인다.
+bundle exec fastlane match developer_id --platform macos --app_identifier com.dawnkim.momo
 ```
+
+> 위 두 명령 전에 App Group·App ID capability를 먼저 만들어 두면 재작업이 없다 —
+> `docs/cicd/10-ios-signing-identity-runbook.md` §1~2. 실행 전후로
+> `./scripts/verify_ios_signing.sh`(자격증명 불필요)로 식별자 정합을 확인한다.
 
 ## 3. GitHub Secrets 등록 (docs/cicd/02 목록)
 ```bash

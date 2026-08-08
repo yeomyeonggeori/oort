@@ -181,8 +181,8 @@ public struct MomoMacUpdateManifest: Codable, Equatable, Sendable {
         if restartInstructions.isEmpty {
             return [
                 "Open the download from the alpha operator.",
-                "Replace or move the new momo app into place.",
-                "Quit and relaunch momo, then reopen Updates.",
+                "Replace or move the new oort app into place.",
+                "Quit and relaunch oort, then reopen Updates.",
             ]
         }
         return restartInstructions

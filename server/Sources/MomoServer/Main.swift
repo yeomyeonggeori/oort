@@ -2,7 +2,7 @@ import Foundation
 import Hummingbird
 import Logging
 
-/// Entry point for the momo API server (L4 §1.1 / §9.3).
+/// Entry point for the oort API server (L4 §1.1 / §9.3).
 ///
 /// Loads config from the environment, builds the Hummingbird application (router +
 /// middleware + supervised PostgresClient pool), and runs it under a ServiceGroup
