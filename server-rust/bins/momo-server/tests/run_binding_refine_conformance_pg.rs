@@ -1,4 +1,4 @@
-//! ADR-0158 D1~D5 — **the adapter's write, end to end over HTTP.**
+//! ADR-0158 D1~D5 + 증보 1 D7 — **the adapter's write, end to end over HTTP.**
 //!
 //! Three closed loops, against the real router, real Postgres, real RLS and the
 //! real `momo_app` role, because every claim below is about something only the
@@ -7,27 +7,34 @@
 //! 1. **`runId` is served, and fail-closed** (D5). Three checks — the run
 //!    exists, it is in this workspace, the caller is its agent — and each one is
 //!    asserted by the request it must refuse rather than by reading the code.
-//! 2. **A cancel now closes a stream an adapter opened.** Before D5 the REST
-//!    path could not name its run, so `open_stream_message_for_run_in_tx` had
-//!    nothing to find and ADR-0155's closing PATCH silently did nothing for
-//!    exactly the producers (prime, hermes) it was written for. This suite makes
-//!    the REST-opened message pass the *same six assertions*
+//! 2. **An adapter streams with its own credential, and a cancel closes what it
+//!    opened.** Two gaps met here, and both were invisible for the same reason —
+//!    the streaming contract had only ever been exercised by a human login.
+//!    Before D5 the REST path could not name its run, so
+//!    `open_stream_message_for_run_in_tx` had nothing to find and ADR-0155's
+//!    closing PATCH silently did nothing for exactly the producers (prime,
+//!    hermes) it was written for. Before D7 an agent bearer could not reach
+//!    `PATCH …/messages/{id}` at all, so those producers could not write a
+//!    second slice. This suite drives the whole turn on the adapter's own token
+//!    and then makes the REST-opened message pass the *same six assertions*
 //!    `stream_message_conformance_pg::a_cancelled_run_freezes_its_answer…` makes
 //!    for the in-process one — deliberately the same list, in the same order, so
 //!    "동형" is a diffable claim rather than an adjective.
 //! 3. **One refinement is one line, however many times it is announced** (D4).
 //!
-//! ## The red proofs, and why two of them are *executed* rather than described
+//! ## The red proofs, and why three of them are *executed* rather than described
 //!
 //! | # | claim | how it is proved |
 //! |---|---|---|
 //! | ① | someone else's run is refused | the request is made with a second agent's bearer and must be 403 |
 //! | ② | the workspace check is load-bearing | the suite performs the write **with the check removed** — `send_message_in_tx` with a foreign `run_id`, in workspace B's own tenant transaction — and asserts it *succeeds*. Nothing below the route stops it: `message.run_id`'s FK (`schema_v0.sql:302`) names `agent_run(id)` with no workspace pair, and RLS never sees the value because inserting a uuid into a column is not a read of the row it points at |
 //! | ③ | the derived key is what deduplicates | the same refinement is announced twice under a **fresh** `clientMsgId` (the shape a producer without D4 would produce) and the channel is asserted to hold **two** lines |
+//! | ④ | D7's scope row is what opens the slice door | drop the `PATCH` row from `momo_auth::required_agent_scope` and the slice below is 403 again — the exact state this file pinned before the decision landed |
+//! | ⑤ | authorship, not the scope, is what keeps it narrow | a **second agent** holding the same `messages:write` scope PATCHes the first one's message and must be 403. Drop the authorship check in `stream_message_body_in_tx` and it succeeds, putting one agent's words inside another's answer |
 //!
-//! ② and ③ are run, not narrated, because both are claims about what happens
-//! when a guard is absent — and a guard whose absence was never observed is a
-//! guard nobody has measured.
+//! ②, ③ and ⑤ are run, not narrated, because all three are claims about what
+//! happens when a guard is absent — and a guard whose absence was never observed
+//! is a guard nobody has measured.
 //!
 //! ```text
 //! DATABASE_URL=postgres://momo:momo@localhost:15432/momo \
@@ -687,49 +694,83 @@ async fn srv_0158_d5_a_cancel_closes_the_stream_an_adapter_opened_over_rest() {
     assert_eq!(status, 201, "the opening write creates: {opened}");
     let message_id: Uuid = opened["id"].as_str().expect("id").parse().expect("uuid");
 
-    // ── DISCOVERED BLOCKER, pinned here so it is measured and not assumed ───
+    // ── ADR-0158 증보 1 D7 — the slice, written with the adapter's own token ──
     //
-    // **An agent bearer cannot PATCH.** `momo_auth::required_agent_scope` maps
-    // exactly one message route — `POST …/channels/{ch}/messages` — and returns
-    // `None` (fail-closed) for everything else, `PATCH …/messages/{id}`
-    // included. The Swift original it was ported from never listed it either,
-    // and #1152/#1173's own conformance suite proves the streaming contract with
-    // a *human* login, so nobody had asked this question before.
-    //
-    // The consequence is bigger than this test: an out-of-process adapter
-    // authenticates with an agent bearer, so ADR-0158 D6's "stream 계약 소비"
-    // (#1152 edit + #1183 opening marker + ADR-0155 outcome close) is
-    // **unreachable from an adapter's own credential** until the route→scope
-    // table is widened — which is a security-boundary change and therefore an
-    // ADR-0100 decision, not a worker's. It is reported in the PR's 계획 이탈.
-    //
-    // The assertion is written the way it is *because* it is expected to flip:
-    // when the decision lands and PATCH becomes agent-reachable, this line fails
-    // and points at itself.
+    // **This assertion was a 403.** W-N pinned it that way on purpose: the
+    // route→scope table listed only the POST, so an adapter could open an answer
+    // and never continue it, and #1152/#1173 had proved the streaming contract
+    // with a *human* login where the question never arose. It is the literal
+    // reason the prime spike posted 17 messages for one 3,661-character answer.
+    // D7 opened the door, and the line that used to fail closed now measures the
+    // door being open — which is what pinning it was for.
+    let frozen = "배포 로그를 살펴보면 첫 번째 원인은";
     let slice = http
         .patch(format!(
             "{base}/v1/workspaces/{}/messages/{message_id}",
             tenant.workspace
         ))
         .bearer_auth(&tenant.prime_bearer)
-        .json(&json!({ "body": "배포 로그를 살펴보면 첫 번째 원인은", "stream": { "rev": 1, "final": false } }))
+        .json(&json!({ "body": frozen, "stream": { "rev": 1, "final": false } }))
         .send()
         .await
         .expect("slice");
     assert_eq!(
         slice.status(),
-        403,
-        "DISCOVERED BLOCKER (#1130 W-N): `PATCH …/messages/{{id}}` is absent from \
-         `required_agent_scope`, so an adapter cannot write its own slices. If \
-         this is now 200, the boundary decision landed — delete this assertion \
-         and restore the intermediate slice below."
+        200,
+        "D7 — an adapter writes the slices of the answer it opened, with the \
+         credential it opened it with (red proof: drop the PATCH row from \
+         `required_agent_scope` and this is 403 again)"
+    );
+    let slice_body: Value = slice.json().await.expect("slice body");
+    assert_eq!(
+        slice_body["id"]
+            .as_str()
+            .and_then(|id| id.parse::<Uuid>().ok()),
+        Some(message_id),
+        "one turn is one message that grows — the slice continued the row rather \
+         than opening a second one"
+    );
+    assert!(
+        slice_body["editedAtMs"].is_null(),
+        "a machine assembling an answer stamps no 「수정됨」 (#1152), and reaching \
+         this route with an agent token does not change that"
     );
 
-    // So the frozen body is the opening write's own text. That is enough for the
-    // claim this test exists to make — D5's is about whether the close can
-    // *find* an adapter's message, and #1173 already fixed the marker that makes
-    // the opening write a stream in the first place.
-    let frozen = "배포 로그를 살펴보면";
+    // ── D7's other half: reachability is not authority ──────────────────────
+    //
+    // The second agent is a real member of this channel holding a real bearer
+    // with the very same `messages:write` scope. The only thing it lacks is
+    // authorship. **No check was added for this** — `stream_message_body_in_tx`
+    // already refuses a non-author with `NotAuthorForEdit` before it looks at
+    // anything else, and the actor it compares against is the credential's
+    // member, which no request body can assert. The rule an agent is held to is
+    // therefore the same one a human is held to rather than a parallel one
+    // written for agents. Measured rather than assumed, because "the existing
+    // check covers it" is exactly the kind of claim that is true until it is not.
+    let intruder = http
+        .patch(format!(
+            "{base}/v1/workspaces/{}/messages/{message_id}",
+            tenant.workspace
+        ))
+        .bearer_auth(&tenant.other_bearer)
+        .json(&json!({ "body": "제가 이어서 쓰겠습니다", "stream": { "rev": 2, "final": false } }))
+        .send()
+        .await
+        .expect("intruder slice");
+    assert_eq!(
+        intruder.status(),
+        403,
+        "D7 — an agent may continue only what it wrote itself (red proof: drop \
+         the authorship check in `stream_message_body_in_tx` and this is 200, \
+         with another agent's words inside someone else's answer)"
+    );
+    let (_, _, body_after_intruder, _) = message_row(&su, message_id).await;
+    assert_eq!(
+        body_after_intruder.as_deref(),
+        Some(frozen),
+        "and the refusal wrote nothing — the answer still says what its author said"
+    );
+
     let seq_before = channel_last_seq(&su, tenant.channel).await;
 
     // The human presses stop — the real statement the cancel route runs.
