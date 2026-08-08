@@ -71,7 +71,7 @@ jobs:
           # codesign --sign "Developer ID Application: ..." "build/oort-*.dmg"
 
       - name: GitHub Release 업로드
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: build/oort-*.dmg
           fail_on_unmatched_files: true
