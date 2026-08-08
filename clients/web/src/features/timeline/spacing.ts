@@ -95,6 +95,13 @@ export function spacingPx(className: string): number {
   const suffix = className.slice(className.indexOf("-") + 1);
   const value = SPACING_SCALE_PX[suffix];
   if (value === undefined) {
+    // design-preflight-allow — 이 문구는 사람이 읽는 화면에 도달하지 않는다.
+    // 개발자에게 던지는 진단이고, 근거는 둘이다: ① `spacingPx`를 부르는 자리는
+    // 이 파일의 테스트뿐이다(`git grep spacingPx`), ② 그래도 렌더 중에 던져진다면
+    // 받는 것은 `RenderErrorBoundary`인데 그 폴백은 자기 `message` prop을 그리고
+    // `componentDidCatch`는 "intentionally avoids exposing application details in
+    // UI"라고 적혀 있다 — `error.message`는 화면에 나가는 경로가 없다.
+    // 그래서 문장을 고치는 대신 검토된 예외로 표시한다 (#1141).
     throw new Error(
       `이 레포의 간격 표에 없는 단계다: "${className}". 이 앱의 스케일은 고정이라 ` +
         "여기 없는 단계는 클래스 이름만 있고 CSS 규칙이 없다 — 화면에서는 0px이 된다 " +
