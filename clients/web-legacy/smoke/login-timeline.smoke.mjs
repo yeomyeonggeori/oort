@@ -693,26 +693,57 @@ try {
     );
   }
 
-  // 409 path: settle the second fixture EXTERNALLY first, then decide the
-  // opposite way in the browser. The 409 receipt must transition the card to
-  // the authoritative status — quiet note, no error surface.
-  await api(
-    `/v1/workspaces/${workspaceId}/approvals/${APPROVAL2_ID}/decision`,
-    {
-      method: "POST",
-      token,
-      body: {
-        approval_id: APPROVAL2_ID,
-        approve: true,
-        client_decision_id: crypto.randomUUID(),
-      },
-    }
-  );
+  // 409 path: the browser decides one way while the approval has ALREADY been
+  // settled the other way elsewhere. The 409 receipt must transition the card
+  // to the authoritative status — quiet note, no error surface.
+  //
+  // The external decision can no longer be made BEFORE the click. #577
+  // (a717abf9, the same goal that renamed the status chip) gave the card an
+  // `approval.*` realtime rail, so a decision made elsewhere reaches this tab
+  // as a PUSH in milliseconds and unmounts the 거부 button — the click then
+  // dies on "element was detached from the DOM". Pre-settling here would only
+  // ever exercise the push, never the receipt.
+  //
+  // So sequence it the way that is still deterministic AND still the thing
+  // this assertion is named after: click while the card is genuinely pending,
+  // and settle it externally INSIDE the route handler, before the browser's
+  // own request is forwarded. Same idiom as the composer 500 above — the
+  // interceptor orders a race that is otherwise decided by the network.
   const approvalCard2 = page.locator(
     `[data-testid="approval-card"][data-approval-id="${APPROVAL2_ID.toLowerCase()}"]`
   );
+  const APPROVAL2_DECISION_ROUTE = "**/v1/workspaces/*/approvals/*/decision";
+  let externalDecisionSent = false;
+  await page.route(APPROVAL2_DECISION_ROUTE, async (route) => {
+    const url = route.request().url().toLowerCase();
+    if (externalDecisionSent || !url.includes(APPROVAL2_ID.toLowerCase())) {
+      return route.continue();
+    }
+    externalDecisionSent = true;
+    // Commits server-side BEFORE the browser's 거부 is forwarded, so the
+    // server answers that request with the 409 receipt this block asserts on.
+    await api(
+      `/v1/workspaces/${workspaceId}/approvals/${APPROVAL2_ID}/decision`,
+      {
+        method: "POST",
+        token,
+        body: {
+          approval_id: APPROVAL2_ID,
+          approve: true,
+          client_decision_id: crypto.randomUUID(),
+        },
+      }
+    );
+    return route.continue();
+  });
   await approvalCard2.getByTestId("approval-reject").click();
   const card2State = await settledStateOf(APPROVAL2_ID);
+  await page.unroute(APPROVAL2_DECISION_ROUTE);
+  if (!externalDecisionSent) {
+    failures.push(
+      "409 setup never intercepted the browser's decision POST — the card was not exercised against a pre-settled approval"
+    );
+  }
   const card2Errors = await approvalCard2
     .locator('[data-testid="approval-error"]')
     .count();
