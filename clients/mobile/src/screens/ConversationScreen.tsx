@@ -145,6 +145,16 @@ function railSubtitle(status: RealtimeStatus): string | undefined {
  */
 const READ_CURSOR_COALESCE_MS = 600;
 
+/**
+ * 걸어 둔 발원 앵커의 수명, ms (#1193 리뷰 M2).
+ *
+ * 「대화로」를 누르고 목적지 방이 뜨기까지 넉넉한 시간이되, 사람이 그 행동을
+ * 잊을 만큼 길지는 않다. 이 시한이 지나면 앵커는 조용히 사라지고, 나중에 그
+ * 방에 들어가도 아무 일도 일어나지 않는다 — 몇 분 전에 누른 것의 결과가 지금
+ * 튀어나오는 것은 사람에게 원인 없는 사건이다.
+ */
+const PENDING_ANCHOR_TTL_MS = 30_000;
+
 export default function ConversationScreen({
   channelId,
   title,
@@ -633,24 +643,43 @@ export default function ConversationScreen({
   // 채널이 바뀔 때 도는 초기화(`setJumpTarget(null)`)보다 **뒤에** 선언돼 있는
   // 것이 load-bearing 이다: 같은 커밋에서 둘 다 돌면 순서는 선언 순서이고,
   // 반대로 두면 초기화가 방금 건 점프를 지운다.
-  const [pendingAnchorId, setPendingAnchorId] = useState<string | null>(null);
+  // **어느 방의 앵커인지 함께 든다** (리뷰 M2). 1차 판은 id 하나만 들고 「타임라인이
+  // 준비되면 쏜다」였다. 목적지 방이 끝내 준비되지 않고(오프라인·조회 실패) 사람이
+  // 다른 방을 열면 그 방에서 발사돼 「이 작업을 시작한 메시지를 이 화면에서 찾지
+  // 못했습니다」를 띄운다 — 그 방이 한 번도 들고 있던 적 없는 메시지에 대해서.
+  // 이 배치가 없애려고 나온 바로 그 종류의 거짓 문장이다.
+  //
+  // 그리고 **늙는다.** 방이 영영 안 열리면 앵커는 조용히 사라져야 한다: 몇 분 뒤
+  // 우연히 그 방에 들어갔을 때 튀어나오는 점프는 사람이 방금 한 행동의 결과가 아니다.
+  const [pendingAnchor, setPendingAnchor] = useState<{
+    channelId: string;
+    messageId: string;
+  } | null>(null);
   useEffect(() => {
-    if (pendingAnchorId === null || timeline.status !== 'ready') return;
-    setPendingAnchorId(null);
+    if (pendingAnchor === null) return undefined;
+    const timer = setTimeout(() => setPendingAnchor(null), PENDING_ANCHOR_TTL_MS);
+    return () => clearTimeout(timer);
+  }, [pendingAnchor]);
+  useEffect(() => {
+    if (pendingAnchor === null) return;
+    // 아직 그 방이 아니다. 다른 방에서는 **절대** 쏘지 않는다.
+    if (!uuidEq(pendingAnchor.channelId, channelId)) return;
+    if (timeline.status !== 'ready') return;
+    setPendingAnchor(null);
     jumpSubjectRef.current = 'session';
     setJumpMissed(null);
     setJumpTarget(current => ({
-      messageId: pendingAnchorId,
+      messageId: pendingAnchor.messageId,
       // 세션 원장은 순서값을 나르지 않는다. 없는 seq 를 지어내지 않고, 그 대가로
       // 못 찾았을 때의 문장은 「더 위에 있다」로 정밀해지지 못한다.
       seq: null,
       token: (current?.token ?? 0) + 1,
     }));
-  }, [pendingAnchorId, timeline.status]);
+  }, [pendingAnchor, channelId, timeline.status]);
 
   const onOpenAdeAnchor = useCallback(
     (targetChannelId: string, targetTitle: string, messageId: string) => {
-      setPendingAnchorId(messageId);
+      setPendingAnchor({channelId: targetChannelId, messageId});
       // 이미 그 방이면 방을 다시 열지 않는다. 셸에 같은 대화를 한 번 더 밀어도
       // 화면은 그대로지만, 그 왕복은 「눌렀는데 아무 일도 안 일어난 것 같은」
       // 한 프레임을 만든다.
@@ -924,7 +953,7 @@ export default function ConversationScreen({
                   headline={jumpMissed.headline}
                   detail={jumpMissed.detail}
                   onDismiss={clearJumpNotice}
-                  testID="quote-jump-missed"
+                  testID="jump-missed"
                 />
               </View>
             ) : null}

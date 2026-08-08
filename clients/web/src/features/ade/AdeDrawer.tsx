@@ -98,6 +98,17 @@ const DURABILITY_TONE_CLASS = {
   warn: "text-warn",
 } as const;
 
+/**
+ * 「대화로」의 글자와 그 칸 (#1193 · 리뷰 H1·H2).
+ *
+ * 라벨과 기하가 **한 곳**에 있는 이유: 이 칸은 동사가 있는 행과 없는 행에서 폭이
+ * 글자 하나까지 같아야 하고(H1 의 수리가 그것이다), 두 자리에 나눠 적으면 다음에
+ * 라벨을 고치는 사람이 유령만 옛 폭으로 남긴다.
+ */
+const ANCHOR_LABEL = "대화로";
+const ANCHOR_CELL_CLASS =
+  "flex shrink-0 items-center border-s px-3 text-body font-medium";
+
 function AdeCard({
   item,
   channelName,
@@ -249,26 +260,58 @@ function AdeCard({
        * 왜 시작됐는지가 적힌 줄로 간다. 서랍이 워크스페이스 전역이라 그 줄은
        * 대개 지금 보고 있는 방에 없다.
        *
-       * **앵커가 없으면 그리지 않는다.** 턴 카드에는 원장 행이 없어 발원
-       * 메시지도 없고(코어 `AdeItem.anchorMessageId`), 거기에 이 버튼을 세우면
-       * 눌러도 아무 데도 안 가는 컨트롤이 목록의 절반에 하나씩 선다.
+       * ## 칸은 **모든 행에 있다** (리뷰 H1)
        *
-       * 접근 이름이 보이는 글자를 **품는다**: 「대화로」 세 글자는 카드 옆에서
-       * 짧아야 하지만, 카드가 다섯 장이면 낭독은 같은 낱말을 다섯 번 듣는다.
-       * 요약 줄의 `adeSummaryLabel` 이 같은 규칙을 쓴다. */}
-      {item.anchorMessageId !== undefined && (
+       * 1차 판은 앵커가 있을 때만 칸을 세웠고, 그래서 사람이 이 표면에서 가장
+       * 먼저 훑는 열(상태 칩 + 경과)이 카드 종류에 따라 두 오른쪽 끝을 갖게
+       * 됐다. 실측: 세션 행 x=806 · 턴 행 x=861 이 여섯 줄에서 번갈아 섰다.
+       * 목록에서 눈이 따라가는 것은 그 모서리이지 각 행의 내용이 아니다.
+       *
+       * 그래서 동사가 없는 행은 **같은 폭의 유령**을 세운다. 지워진 글자로 폭을
+       * 잡는 것은 이 카드가 diff 칸에서 이미 하는 일이고(zero-width space), 임의
+       * 픽셀값을 새로 짓지 않는 유일한 방법이기도 하다 — 칸의 폭은 라벨이 정한다.
+       *
+       * **버튼은 그리지 않는다.** 유령은 `visibility: hidden` 이라 탭 순서에도
+       * 낭독에도 클릭에도 없다(리뷰가 잰 「턴 카드에 두 번째 정거장 없음」은 그대로
+       * 참이다). 죽은 버튼 금지는 자리가 아니라 **컨트롤**에 대한 규율이다.
+       *
+       * ## 컨트롤처럼 읽히게 (리뷰 H2)
+       *
+       * `text-meta text-ink-muted` 는 이 카드의 **메타데이터** 역할이라, 바로 옆
+       * 「이어서 보기」(누를 수 없는 힌트)와 같은 잉크·거의 같은 크기로 섰다.
+       * 정지 화면에서 어느 쪽이 눌리는지 말하는 것이 하나도 없었다.
+       *
+       * 색으로 갚지 않는다: 여섯 장짜리 목록에서 accent 낱말 넷은 accent 가 아니게
+       * 된다. 대신 비색 축 셋이다 — `text-body`(토큰 정의가 "message body and
+       * **controls**" 라고 적어 둔 그 단), `font-medium`, 그리고 컨트롤 테두리로
+       * 3:1 을 만족하는 `--line-strong`. 유령도 폭이 같아야 하므로 같은 타이포를
+       * 든다.
+       *
+       * 접근 이름이 보이는 글자를 **품는다**(WCAG 2.5.3). 그리고 그 안에서
+       * 목적지를 정확히 말한다: 이 카드에서 본체도 「대화」로 가므로(폰에서는 같은
+       * 방이다) 낱말만으로는 둘이 구별되지 않는다. */}
+      {item.anchorMessageId === undefined ? (
+        <span
+          aria-hidden="true"
+          data-testid="ade-card-anchor-ghost"
+          className={cn(ANCHOR_CELL_CLASS, "invisible border-line")}
+        >
+          {ANCHOR_LABEL}
+        </span>
+      ) : (
         <button
           type="button"
           onClick={onOpenAnchor}
-          aria-label={`${item.title} 대화로 이동`}
+          aria-label={`${item.title}, 이 작업을 시작한 메시지가 있는 ${ANCHOR_LABEL} 이동`}
           data-testid="ade-card-anchor"
           className={cn(
-            "shrink-0 border-s border-line px-3 text-meta text-ink-muted",
+            ANCHOR_CELL_CLASS,
+            "border-line-strong text-ink-muted",
             "transition-colors hover:bg-surface-hover hover:text-ink",
             "focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent"
           )}
         >
-          대화로
+          {ANCHOR_LABEL}
         </button>
       )}
     </li>

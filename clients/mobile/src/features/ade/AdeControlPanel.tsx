@@ -131,6 +131,16 @@ const buildDurabilityText = (
 /** 명부가 아직이거나 내가 못 보는 방. 방 이름을 지어내지 않는다(웹과 같은 낱말). */
 const UNRESOLVED_CHANNEL = '다른 채널';
 
+/**
+ * 「대화로」의 글자 (#1193 · 리뷰 H1).
+ *
+ * 상수인 이유는 이 낱말이 **폭을 정하기 때문**이다: 동사가 있는 카드와 유령 칸이
+ * 글자 하나까지 같은 폭이어야 목록의 오른쪽 끝이 하나로 선다. 두 자리에 나눠
+ * 적으면 다음에 라벨을 고치는 사람이 유령만 옛 폭으로 남긴다. 웹의 같은 칸도
+ * 같은 이유로 상수를 든다(`AdeDrawer.ANCHOR_LABEL`).
+ */
+const ANCHOR_LABEL = '대화로';
+
 function AdeCard({
   item,
   channelName,
@@ -240,17 +250,43 @@ function AdeCard({
       )}
     </Pressable>
     {/* 「대화로」 — 이 작업을 낳은 줄로 (#1193).
-        앵커가 없는 카드(턴)에는 서지 않는다. 접근 이름이 보이는 글자를 품는
-        이유는 목록에서 같은 낱말이 카드 수만큼 반복되기 때문이고, 그 규칙을
-        요약 줄의 `adeSummaryLabel` 이 이미 쓴다. */}
-    {item.anchorMessageId === undefined ? null : (
+     *
+     * ## 칸은 **모든 카드에 있다** (리뷰 H1)
+     *
+     * 1차 판은 앵커가 있을 때만 칸을 세웠고, 그래서 이 화면에서 가장 먼저 훑는
+     * 열(상태 칩 + 경과)이 카드 종류에 따라 두 오른쪽 끝을 갖게 됐다 — 실측 54pt
+     * 차이로 목록이 지그재그였다. 동사가 없는 카드는 이제 같은 폭의 **유령**을
+     * 세운다. 폭을 라벨이 정하므로 새 상수도, 나중에 어긋날 두 번째 숫자도 없다.
+     *
+     * 유령은 `Pressable` 이 아니라 `View` 이고 낭독에서도 빠진다. 자리는
+     * 예약하되 컨트롤은 만들지 않는다 — 죽은 버튼 금지는 자리가 아니라
+     * **컨트롤**에 대한 규율이다.
+     *
+     * ## 컨트롤처럼 읽히게 (리뷰 H2)
+     *
+     * 1차 판의 `font.meta` + `textMuted` 는 바로 옆 `cardElapsed` 와 크기도 잉크도
+     * 같았다. 색으로 갚지 않는다 — 여섯 장 목록에서 accent 낱말 넷은 accent 가
+     * 아니게 된다. 크기(`font.label`)와 굵기와 경계로 말한다.
+     *
+     * 접근 이름이 보이는 글자를 품고(WCAG 2.5.3), 그 안에서 목적지를 정확히
+     * 말한다: 폰에서는 카드 본체도 **같은 방**을 열어서 낱말만으로는 둘이
+     * 구별되지 않는다(리뷰 M1). */}
+    {item.anchorMessageId === undefined ? (
+      <View
+        style={[styles.cardAnchor, styles.cardAnchorGhost]}
+        accessibilityElementsHidden
+        importantForAccessibility="no-hide-descendants"
+        testID={`ade-card-anchor-ghost-${item.key}`}>
+        <Text style={styles.cardAnchorLabel}>{ANCHOR_LABEL}</Text>
+      </View>
+    ) : (
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={`${item.title} 대화로 이동`}
+        accessibilityLabel={`${item.title}, 이 작업을 시작한 메시지가 있는 ${ANCHOR_LABEL} 이동`}
         onPress={onPressAnchor}
         style={({pressed}) => [styles.cardAnchor, pressed && styles.pressed]}
         testID={`ade-card-anchor-${item.key}`}>
-        <Text style={styles.cardAnchorLabel}>대화로</Text>
+        <Text style={styles.cardAnchorLabel}>{ANCHOR_LABEL}</Text>
       </Pressable>
     )}
     </View>
@@ -445,9 +481,28 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     borderLeftWidth: 1,
     borderLeftColor: color.border,
   },
+  /**
+   * 동사가 없는 카드의 **자리만** (리뷰 H1).
+   *
+   * `opacity: 0` **하나뿐**인 것이 중요하다. 1차 수리는 여기서 `borderLeftWidth`
+   * 까지 0으로 지웠는데, 그 1pt 가 곧 폭이라 유령 칸이 진짜 칸보다 1pt 좁아졌다 —
+   * 캡처에서 잰 결과 턴 카드의 경과 글자가 세션 카드보다 3px(=1pt) 오른쪽에서
+   * 끝났다. 지그재그를 55pt 에서 1pt 로 줄인 것은 고친 것이 아니다.
+   *
+   * 투명도가 0이면 테두리도 함께 사라지므로 「아무것도 없는 칸에 선만 선다」는
+   * 걱정도 성립하지 않는다: 자리는 남고, 보이는 것은 없다.
+   */
+  cardAnchorGhost: {opacity: 0},
+  /**
+   * 컨트롤의 글자 (리뷰 H2). `font.meta`/`textMuted` 였던 1차 판은 바로 옆
+   * `cardElapsed` 와 크기도 잉크도 같아 컨트롤로 읽히지 않았다. accent 로 갚지
+   * 않는 이유는 이 낱말이 목록에서 카드 수만큼 반복되기 때문이고, 그래서 크기와
+   * 굵기로 말한다 — `font.label` 은 이 앱에서 텍스트 액션이 서는 단이다
+   * (`atoms.retryLabel` · `ConversationScreen.headerActionLabel`).
+   */
   cardAnchorLabel: {
-    fontSize: font.meta,
-    lineHeight: line.meta,
+    fontSize: font.label,
+    lineHeight: line.label,
     color: color.textMuted,
     fontWeight: '600',
   },

@@ -297,7 +297,7 @@ describe('H-5 — 실패가 아닌 것을 실패로 말하지 않는다', () => 
     // 말한다. `atoms` 에 이 경우를 위한 컴포넌트가 이미 있었다.
     // 두 고지가 **둘 다** 사실 진술이다. 인용 점프 고지만 고치면 M1 이 세운
     // 「같은 사실을 두 모양으로 말하지 않는다」가 깨진다.
-    for (const id of ['quote-jump-missed', 'anchor-missed']) {
+    for (const id of ['jump-missed', 'anchor-missed']) {
       const at = code.indexOf(`testID="${id}"`);
       expect(at).toBeGreaterThan(-1);
       const block = code.slice(Math.max(0, at - 240), at + 40);
@@ -354,15 +354,34 @@ describe('H-5 — 실패가 아닌 것을 실패로 말하지 않는다', () => 
 
   // #1193 — 「대화로」를 누른 사람은 인용을 누른 적이 없다.
   it('주어가 갈린다 — 인용과 세션 앵커는 다른 것을 찾고 있다', () => {
+    const quote = jumpMissedNotice('unknown', 'quote');
+    const session = jumpMissedNotice('unknown', 'session');
+    expect(quote.headline).not.toBe(session.headline);
+    expect(quote.headline).toContain('인용');
+    expect(session.headline).not.toContain('인용');
+    // 무엇을 하면 되는지는 같은 사실이라 같은 문장이다.
+    expect(quote.detail).toBe(session.detail);
+  });
+
+  // 리뷰 N1 — 배송되지 않는 문구를 들고 있지 않는다. 세션 앵커는 seq 를 모르므로
+  // 「더 위쪽에 있습니다」에 도달할 길이 없고, 그러면 그 문장은 없어야 한다.
+  it('세션 주어는 말할 자격이 없는 문장을 만들지 않는다', () => {
     for (const reason of ['older', 'unknown'] as const) {
-      const quote = jumpMissedNotice(reason, 'quote');
-      const session = jumpMissedNotice(reason, 'session');
-      expect(quote.headline).not.toBe(session.headline);
-      expect(quote.headline).toContain('인용');
-      expect(session.headline).not.toContain('인용');
-      // 무엇을 하면 되는지는 같은 사실이라 같은 문장이다.
-      expect(quote.detail).toBe(session.detail);
+      expect(jumpMissedNotice(reason, 'session').headline).not.toContain('위쪽');
     }
+    expect(jumpMissedNotice('older', 'session')).toEqual(
+      jumpMissedNotice('unknown', 'session'),
+    );
+  });
+
+  // 그리고 하네스가 그 문장을 **사진으로** 찍는다 (리뷰 M3). 문장이 코드에만
+  // 있으면 다음 리뷰는 배송되는 화면이 아니라 소스를 읽게 된다.
+  it('세션 문장이 측정 표면에 서 있다', () => {
+    const surfaces = codeOnly(
+      fs.readFileSync(path.resolve(__dirname, '../measure/surfaces.tsx'), 'utf8'),
+    );
+    expect(surfaces).toContain("jumpMissedNotice('unknown', 'session')");
+    expect(surfaces).toContain('jump-missed-session');
   });
 });
 

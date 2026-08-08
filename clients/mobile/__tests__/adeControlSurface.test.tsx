@@ -866,13 +866,13 @@ describe('「대화로」 — 그 작업을 낳은 줄까지', () => {
     fireEvent.press(screen.getByTestId('ade-card-anchor-session|session-running'));
 
     await waitFor(() =>
-      expect(screen.getByTestId('quote-jump-missed')).toBeTruthy(),
+      expect(screen.getByTestId('jump-missed')).toBeTruthy(),
     );
     const notice = jumpMissedNotice('unknown', 'session');
-    expect(screen.getByTestId('quote-jump-missed')).toHaveTextContent(
+    expect(screen.getByTestId('jump-missed')).toHaveTextContent(
       new RegExp(notice.headline),
     );
-    expect(screen.getByTestId('quote-jump-missed')).not.toHaveTextContent(
+    expect(screen.getByTestId('jump-missed')).not.toHaveTextContent(
       /인용한 원본/,
     );
   });
@@ -886,17 +886,40 @@ describe('「대화로」 — 그 작업을 낳은 줄까지', () => {
     fireEvent.press(screen.getByTestId('ade-summary'));
     await waitFor(() => expect(screen.getByTestId('ade-card-list')).toBeTruthy());
 
-    const anchors: string[] = screen.UNSAFE_root
-      .findAll((node: {props?: {testID?: unknown}}) =>
-        String(node.props?.testID ?? '').startsWith('ade-card-anchor-'),
-      )
-      .map((node: {props?: {testID?: unknown}}) => String(node.props?.testID));
-    // 세션 카드 셋(running · orphaned · idle)에만 선다. 턴 둘에는 없다.
-    expect(anchors.every((id: string) => id.includes('anchor-session|'))).toBe(
-      true,
-    );
-    expect(anchors.some((id: string) => id.includes('anchor-run|'))).toBe(false);
-    expect(new Set(anchors).size).toBe(3);
+    const withPrefix = (prefix: string): string[] =>
+      screen.UNSAFE_root
+        .findAll((node: {props?: {testID?: unknown}}) =>
+          String(node.props?.testID ?? '').startsWith(prefix),
+        )
+        .map((node: {props?: {testID?: unknown}}) => String(node.props?.testID));
+
+    // 컨트롤은 세션 카드 셋(running · orphaned · idle)에만 선다.
+    expect(new Set(withPrefix('ade-card-anchor-session|')).size).toBe(3);
+    // 턴 둘에는 컨트롤이 없다. 있는 것은 **자리**뿐이다 (리뷰 H1) — 목록의
+    // 오른쪽 끝이 카드 종류에 따라 흔들리지 않게.
+    expect(withPrefix('ade-card-anchor-run|')).toHaveLength(0);
+    const ghosts = withPrefix('ade-card-anchor-ghost-');
+    expect(new Set(ghosts).size).toBe(2);
+    expect(ghosts.every((id: string) => id.includes('ghost-run|'))).toBe(true);
+  });
+
+  // 유령은 **자리**이지 컨트롤이 아니다 (리뷰 H1). 누를 수도 없고 낭독에도 없다.
+  it('예약된 칸은 버튼이 아니다 — 자리만 잡는다', async () => {
+    installFetch();
+    await openConversation();
+    await openBothTurns();
+    await waitFor(() => expect(screen.getByTestId('ade-summary')).toBeTruthy());
+    fireEvent.press(screen.getByTestId('ade-summary'));
+    await waitFor(() => expect(screen.getByTestId('ade-card-list')).toBeTruthy());
+
+    const ghost = screen.UNSAFE_root.findAll((node: {props?: {testID?: unknown}}) =>
+      String(node.props?.testID ?? '').startsWith('ade-card-anchor-ghost-'),
+    )[0] as unknown as {props: Record<string, unknown>};
+    expect(ghost.props.accessibilityRole).toBeUndefined();
+    expect(ghost.props.onPress).toBeUndefined();
+    expect(ghost.props.accessibilityElementsHidden).toBe(true);
+    // 폭은 컨트롤과 같은 규칙에서 온다: 같은 스타일, 같은 글자.
+    expect(flatStyle(ghost.props.style).opacity).toBe(0);
   });
 
   it('다른 방의 카드는 그 방을 열고 나서 착지한다', async () => {
