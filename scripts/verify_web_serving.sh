@@ -92,25 +92,31 @@ until curl -fsS -H "Host: $APP_HOST" "$BASE_URL/health" >/dev/null 2>&1; do
   sleep 3
 done
 
+# These three assertions ask "is this the BUILT SPA index, or a placeholder /
+# error page?" — so they match the SPA mount point plus vite's injected bundle
+# path, not the product name. They used to match `<title>momo</title>`, which
+# the rebrand (3fc628ab, ADR-0152 D2-1) rewrote to `<title>oort</title>`,
+# turning all three into hard reds that nothing surfaced because this verifier
+# is Docker-gated. `oort` would only re-arm the trap for the next rename;
+# `id="root"` + `/assets/` is what actually distinguishes the built artifact,
+# and the brand string itself is already asserted by gate_oort_user_facing.sh.
+built_spa_index() {
+  case "$1" in
+    *'id="root"'*'/assets/'*|*'/assets/'*'id="root"'*) return 0 ;;
+  esac
+  return 1
+}
+
 index_body="$(curl -fsS -H "Host: $APP_HOST" "$BASE_URL/")" || fail "GET / failed"
-case "$index_body" in
-  *'<title>momo</title>'*) ;;
-  *) fail "GET / did not return the built momo index.html" ;;
-esac
-pass "1/9 GET / serves the built momo index.html"
+built_spa_index "$index_body" || fail "GET / did not return the built SPA index.html"
+pass "1/9 GET / serves the built SPA index.html"
 
 route_body="$(curl -fsS -H "Host: $APP_HOST" "$BASE_URL/some/spa/route")" || fail "SPA deep route failed"
-case "$route_body" in
-  *'<title>momo</title>'*) ;;
-  *) fail "SPA deep route did not fall back to index.html" ;;
-esac
+built_spa_index "$route_body" || fail "SPA deep route did not fall back to index.html"
 pass "2/9 SPA deep route falls back to index.html"
 
 join_body="$(curl -fsS -H "Host: $APP_HOST" "$BASE_URL/join")" || fail "GET /join failed"
-case "$join_body" in
-  *'<title>momo</title>'*) ;;
-  *) fail "GET /join did not fall back to the momo SPA" ;;
-esac
+built_spa_index "$join_body" || fail "GET /join did not fall back to the SPA index.html"
 pass "3/9 GET /join falls back to index.html"
 
 invite_headers="$(curl -sS -D - -o /dev/null -H "Host: $APP_HOST" "$BASE_URL/i/verifier-code" | tr -d '\r')" || fail "GET /i/verifier-code failed"

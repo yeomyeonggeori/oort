@@ -240,13 +240,21 @@ echo "[web-smoke] api health is green"
 echo "[web-smoke] starting relay and web-edge (staggered after the api build)"
 compose up -d relay web-edge
 
+# The readiness marker is the SPA mount point and vite's injected bundle path,
+# NOT the product name. It used to be `*momo*`, and the rebrand (3fc628ab,
+# ADR-0152 D2-1) rewrote `<title>momo</title>` to `<title>oort</title>` — after
+# which nothing in the served index.html contained the word, this loop could
+# only ever exhaust, and the whole smoke died at boot with every assertion
+# unrun. Swapping in `oort` would just re-arm the same trap for the next
+# rename; `id="root"` + `/assets/` say "this is the built SPA" without saying
+# what the product is called.
 echo "[web-smoke] waiting for web-edge to serve the SPA"
 edge_ok=0
 for _ in $(seq 1 60); do
   edge_body="$(curl -ksS --resolve "$APP_HOST:$EDGE_HTTPS:127.0.0.1" \
     "https://$APP_HOST:$EDGE_HTTPS/" 2>/dev/null || true)"
   case "$edge_body" in
-    *momo*) edge_ok=1; break ;;
+    *'id="root"'*'/assets/'*|*'/assets/'*'id="root"'*) edge_ok=1; break ;;
   esac
   sleep 1
 done
