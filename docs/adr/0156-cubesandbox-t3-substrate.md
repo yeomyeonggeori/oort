@@ -38,3 +38,13 @@ Cursor/Codex Cloud류는 관리형 샌드박스를 재판매(E2B·Modal)하거�
 ## 증보 2 — U1 실측: 표준 KVM 모드가 1차, PVM은 폴백 (2026-08-09)
 
 U1 판정(scratchpad `u1-verdict.md`·JOURNAL 2026-08-09): PVM 호스트 커널은 NCP 표준 VM에서 부팅된다(PASS — 3회 부팅·ioctl 실증). 그러나 더 큰 실측: **NCP 표준 VM은 이미 `/dev/kvm`(nested=Y)을 주고 L2 게스트 KVM 가속 부팅이 실동작**한다 — D3의 "1차 후보 PVM" 전제(일반 클라우드 VM=KVM 없음)가 NCP에는 해당하지 않는다. 따라서 **1차 시도=표준 KVM 모드(커널 교체 없음 — out-of-tree 종속·`pti=off` 완화 약화 회피)**, PVM=표준 모드 성능 미달 시 폴백. A/B 성능 비교는 D4-②. PVM 채택 시 상류 결함 3건 필수 우회(BLS 무효 `host_grub_config.sh`→`grubby`·`kvm_intel` 선점 블랙리스트·`console=` de-dup 버그 — 판정 보고서 절차 참조).
+
+## 증보 3 — D4-② 실기동 실측 (2026-08-09, `research/2026-08-09-cubesandbox-d42-spike.md`)
+
+**표준 KVM 모드로 전 과업 완주**(설치 91초·preflight 9/9·create→exec→pause→resume→kill 실왕복·신규 호스트→첫 샌드박스 ≈10분) — 증보 2의 "표준 1차" 판단이 실물로 확정됐고 커널 교체는 불요다. 그러나 **D5의 "부속 컴포넌트를 전부 쓰지 않는다"는 사실이 아니다**: CubeProxy·CoreDNS는 exec 경로의 **필수 종속**(죽이면 SDK 전면 마비 실증). D5는 "우리가 **직접 소비하는** 표면은 수명주기 API뿐이고, 스택 내부 종속은 설치물의 일부"로 정정한다.
+
+**어댑터 계약 수정 5건**(#1197로 티켓화): B1 "이미 목표 상태"가 409가 아니라 **500**(code 130490) → ADR-0140 수렴표의 `500→revert`가 플랩을 만든다(4xx/5xx 전부 probe 재판정) · B2 **probe lossy가 예측보다 나쁘다** — VMM SIGKILL 후 5분간 `running` 200 응답, 자력 수렴 0 → `provider_missing`이 크래시에서 발화하지 않으므로 원장이 하트비트 근거로 **능동 destroy**를 발행해야 한다 · H1 `timeout`은 idle이 아니라 **생성 기준 절대 TTL** → `/refreshes` keepalive 의무 신설(ADR-0156 D6②의 "sweep×4·onTimeout kill"은 이 사실 위에서 재해석) · H2 `pauseSecondsPerGiB` 0.2 → 실측 0.67~0.87(**1.0 보수 선언**) · H3 `metadata` 응답에 내부 키 혼입(`cube.*`·`X-Caller`).
+
+**#1179 이탈 1 해소**: idle 시계는 조회성 GET·목록·SDK exec·인-샌드박스 CPU·아웃바운드 다섯 자극 어느 것도 리셋하지 않는다(리컨실러 probe는 안전) — 리셋은 `/refreshes`·`/timeout`뿐.
+
+**발주 사양은 유지, 근거 정정**: 기저 메모리는 3.1GB(1st-party 7.2GB 주장의 43% — "8GB 불가"는 과했다). 다만 세션당 실사용이 지배(워킹셋 800MB 시 834MB/개)해 32GB=동시 ~14개가 여전히 최소선. 시스템 50GB는 `/var/lib/containerd` 2.1GB로 실물 근거.
