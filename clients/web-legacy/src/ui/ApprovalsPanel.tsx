@@ -1,5 +1,9 @@
 import type { ApprovalProjection } from "../api/client";
 import type { ApprovalsStore } from "../state/approvals";
+import {
+  approvalActionType,
+  approvalRequestedBy,
+} from "../state/approvalModel";
 import ApprovalCard from "./ApprovalCard";
 
 interface ApprovalsPanelProps {
@@ -28,8 +32,16 @@ function approvalText(approval: ApprovalProjection): {
       summary = payload.summary;
     }
   }
+  // No payload title: name the action instead. When the row carries no action
+  // type in either notation there is nothing true to name, and a stringified
+  // `undefined` in the heading would be worse than the shorter sentence.
+  const actionType = approvalActionType(approval);
   const result: { title: string; summary?: string } = {
-    title: title ?? `${approval.action_type} 실행 승인 요청`,
+    title:
+      title ??
+      (actionType !== undefined
+        ? `${actionType} 실행 승인 요청`
+        : "실행 승인 요청"),
   };
   if (summary !== undefined) result.summary = summary;
   return result;
@@ -63,13 +75,21 @@ export default function ApprovalsPanel({
         <ul className="approvals-list">
           {approvals.pending.map((approval) => {
             const text = approvalText(approval);
+            // `displayNameFor` indexes by id, so an absent requester cannot go
+            // through it — it would throw on `undefined.toLowerCase()` and take
+            // the whole panel down with it (#1176). Say so instead.
+            const requestedBy = approvalRequestedBy(approval);
             return (
               <li key={approval.id.toLowerCase()}>
                 <ApprovalCard
                   approvalId={approval.id}
                   title={text.title}
                   summary={text.summary}
-                  requesterName={displayNameFor(approval.requested_by)}
+                  requesterName={
+                    requestedBy !== undefined
+                      ? displayNameFor(requestedBy)
+                      : "알 수 없는 멤버"
+                  }
                   status={approvals.statusFor(approval.id)}
                   decide={approvals.decide}
                 />
