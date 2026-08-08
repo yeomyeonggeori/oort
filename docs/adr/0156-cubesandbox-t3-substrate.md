@@ -22,6 +22,7 @@ E2B 은퇴(ADR-0142) 후 T3 관리형 provider 자리가 비어 있었고, ADR-0
    - **증보 1 (2026-08-08, D4-① 실측 — `research/2026-08-08-cubesandbox-requirements-adapter-mapping.md`)**: 하한 8GB는 설치기 거부선일 뿐 — 1st-party 벤치가 시스템 기저 ~7GB를 실측. **발주 사양: x86_64 · 8~16 vCPU · RAM 32GB · 시스템 50GB + 데이터 디스크 200GB 별도(XFS — `/data/cubelet` 필수) · Ubuntu 22.04 · 콘솔(VNC) 접근 필수(커널 교체 실패 대비) · VPC 대역 192.168.0.0/18 회피**. PVM=커널 교체+GRUB 기본 변경+재부팅(x86_64 전용, 투기실행 완화 일부 강제 해제 — PG 물리분리 근거 강화). 스케일아웃은 베어메탈(중첩가상화 미지원). aarch64는 베어메탈 경로만.
 4. **D4 — 단계**: ①**요건 실측+어댑터 매핑**(호스트 사양 확정 재료 — 인프라 발주 전) ②전용 호스트에서 **실기동 스파이크**(리서치 미확인 목록: 성능 주장·PVM 부팅·디스크 실점유) ③어댑터 구현(+mock conformance 동형) ④프로비저너 연동 — T3 활성화는 ADR-0140의 게이트(T-2~T-4+실 smoke) 그대로.
 5. **D5 — 유보**: CubeSandbox 부속 컴포넌트(CubeProxy·CubeEgress·CubeDB 등)는 전부 쓰지 않는다 — 우리가 소비하는 표면은 수명주기 API뿐. egress 정책은 ADR-0150 계열에서 별도 결정.
+6. **D6 — 어댑터 계약 결정 2건 (2026-08-08 성재 승인)**: ①사양 종속 capability(`maxConcurrentInstances`)는 **운영자 설정 주입 허용**(기본값 보수적 — ADR-0142 D2 증보: "호스트 사양 종속 capability는 설정 주입 허용") ②idle 회수는 **원장 sweep=1차(ADR-0141 그대로) + CubeSandbox `timeout`=sweep 주기×4·`onTimeout: kill` 최후 안전망** — 좀비 과금 상한 보장, 안전망 발화는 probe의 `provider_missing` 수렴(ADR-0140 D4)으로 이름 있는 상태가 된다. probe lossy(비Paused→running 접힘) 실측에 따라 **`running`은 liveness 증거로 쓰지 않는다 — workd 하트비트가 정본**.
 
 ## Slack·업계 비교
 
