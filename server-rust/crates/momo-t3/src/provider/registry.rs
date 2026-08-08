@@ -66,15 +66,27 @@ pub fn is_registered(provider_id: &str) -> bool {
 
 /// Wall-clock cost of a CubeSandbox pause, per GiB of instance memory.
 ///
-/// The 1st-party PVM benchmark measures a serial pause of a 2 GiB sandbox at
-/// **370.8 ms** (≈0.185 s/GiB), rounded up. It is an *upper* bound: pause is
-/// still a full-memory copy upstream and the soft-dirty incremental path is
-/// announced, so this number can only fall.
+/// **Measured, not derived (#1197 H2).** The previous `0.2` came from the
+/// 1st-party PVM benchmark's 370.8 ms/2 GiB. D4-② put a stopwatch on a real
+/// host and got **1,264–1,693 ms for a 1.95 GiB sandbox = 0.65–0.87 s/GiB**
+/// (`research/2026-08-09-cubesandbox-d42-spike.md` §2, and re-measured at
+/// 0.647/0.667 s/GiB while fixing this ticket) — three to four times the
+/// declared figure.
 ///
-/// It is ~20× cheaper than `mock-a`'s `4.0`, which is an E2B-derived figure. The
-/// two must not be confused: copying `mock-a`'s constant here would silently
-/// price every pause twenty times over.
-pub const CUBESANDBOX_PAUSE_SECONDS_PER_GIB: f64 = 0.2;
+/// So `1.0` is a **ceiling declared conservatively**, and the direction of the
+/// error is the whole point. This number is what policy budgets a pause against;
+/// under-declaring it means the ledger expects a pause to be over long before it
+/// is, and bills a still-running host as paused. Over-declaring only wastes a
+/// little patience. `0.2` was never observed on any real host, so it is not a
+/// number to round toward.
+///
+/// It stays far from `mock-a`'s `4.0`, which is an E2B-derived figure for a
+/// different substrate; the two must not be confused in either direction.
+///
+/// The 3–4× gap against the 1st-party number is plausibly CPU generation
+/// (Xeon Gold 5220 vs EPYC 9K65) rather than a CubeSandbox regression, so
+/// ADR-0156 D4-④ re-measures on the production host before this is lowered.
+pub const CUBESANDBOX_PAUSE_SECONDS_PER_GIB: f64 = 1.0;
 
 /// Conservative default for `max_concurrent_instances` when the operator injects
 /// nothing (ADR-0156 D6①).
@@ -86,6 +98,37 @@ pub const CUBESANDBOX_PAUSE_SECONDS_PER_GIB: f64 = 0.2;
 /// ADR-0156 D3's 증보 orders. A bigger box raises it — through
 /// [`cubesandbox_max_concurrent_instances`], never through an edit here.
 pub const CUBESANDBOX_DEFAULT_MAX_CONCURRENT_INSTANCES: i64 = 10;
+
+/// How long a CubeSandbox instance lives without a renewal (#1197 H1).
+///
+/// **This is the number D4-② changed the meaning of.** `timeout` was documented
+/// — and modelled here — as an *idle* clock. It is not: it is an absolute TTL
+/// measured from creation, and the spike could not move it with any of five
+/// stimuli (detail GET, list GET, SDK exec, in-sandbox CPU burn, outbound
+/// HTTPS). Only `POST /sandboxes/{id}/refreshes` moves it
+/// (`research/2026-08-09-cubesandbox-d42-spike.md` §4).
+///
+/// That inverts the old reasoning. The retired constant was 24 h **because** the
+/// clock was believed unresettable by momo's outbound heartbeat, so the only
+/// safe net was a very long one — 96 h of zombie billing. With an explicit
+/// renewal the calculus flips: the lease is the **zombie ceiling**, and the
+/// shorter it is the better, right up to the point where a momentary renewal
+/// outage would start killing live sessions.
+///
+/// 360 s is that point, and it is not a free choice. It is
+/// `MOMO_HOST_OFFLINE_GRACE_S` (90 s — the window after which momo itself
+/// declares a host lost) × 4, so:
+///
+/// * a live instance survives **four** consecutive renewal failures;
+/// * an instance momo has stopped renewing — because momo is dead, or because
+///   its daemon went quiet — is reclaimed by the substrate roughly when momo
+///   would have given up on it anyway.
+///
+/// The second property is what makes this the answer to #1197 B2 as well as H1:
+/// a crashed VM reports `running` forever and never self-converges (measured:
+/// 15 probes over 300 s, zero convergence), so the *only* automatic reclaim path
+/// is the one that stops when momo stops.
+pub const CUBESANDBOX_DEFAULT_LEASE_SECONDS: i64 = 360;
 
 /// Capability descriptor for a registry id, or [`T3Error::UnknownProvider`] —
 /// an unknown provider fails closed (054 header comment) rather than defaulting
@@ -105,6 +148,7 @@ pub fn capabilities_for(provider_id: &str) -> Result<CloudProviderCapabilities, 
             continuous_runtime_limit_seconds: None,
             pause_seconds_per_gib: None,
             max_concurrent_instances: None,
+            instance_lease_seconds: None,
         },
         MOCK_A_PROVIDER_ID => CloudProviderCapabilities {
             provider_id: MOCK_A_PROVIDER_ID.to_string(),
@@ -114,6 +158,9 @@ pub fn capabilities_for(provider_id: &str) -> Result<CloudProviderCapabilities, 
             continuous_runtime_limit_seconds: Some(3_600),
             pause_seconds_per_gib: Some(4.0),
             max_concurrent_instances: Some(20),
+            // No lease: `mock-a` instances live until momo destroys them, which
+            // is what every substrate before CubeSandbox did.
+            instance_lease_seconds: None,
         },
         MOCK_B_PROVIDER_ID => CloudProviderCapabilities {
             provider_id: MOCK_B_PROVIDER_ID.to_string(),
@@ -123,6 +170,7 @@ pub fn capabilities_for(provider_id: &str) -> Result<CloudProviderCapabilities, 
             continuous_runtime_limit_seconds: Some(900),
             pause_seconds_per_gib: None,
             max_concurrent_instances: Some(5),
+            instance_lease_seconds: None,
         },
         // ADR-0156 D2 / the 매핑표 §2.7 draft, value for value.
         CUBESANDBOX_PROVIDER_ID => CloudProviderCapabilities {
@@ -142,6 +190,12 @@ pub fn capabilities_for(provider_id: &str) -> Result<CloudProviderCapabilities, 
             continuous_runtime_limit_seconds: None,
             pause_seconds_per_gib: Some(CUBESANDBOX_PAUSE_SECONDS_PER_GIB),
             max_concurrent_instances: Some(CUBESANDBOX_DEFAULT_MAX_CONCURRENT_INSTANCES),
+            // The first substrate that expires instances on a clock of its own
+            // (#1197 H1). Declared here so the renewal loop can see *that* a
+            // deadline exists without learning whose it is; the adapter
+            // overrides the value from the operator's tuning, exactly as it does
+            // for `max_concurrent_instances`.
+            instance_lease_seconds: Some(CUBESANDBOX_DEFAULT_LEASE_SECONDS),
         },
         other => return Err(T3Error::UnknownProvider(other.to_string())),
     })
@@ -188,7 +242,7 @@ pub fn environment_namespace(provider_id: &str) -> String {
 /// scanner can assert that none of these *values* reached PostgreSQL.
 ///
 /// **Tuning knobs are deliberately absent.** The adapter-specific numbers
-/// (`_MAX_INSTANCES`, `_SWEEP_SECONDS`) are small integers, so feeding them to a
+/// (`_MAX_INSTANCES`, `_RENEWAL_SECONDS`) are small integers, so feeding them to a
 /// substring scan of a database dump would report a leak every time a row
 /// happened to contain `10`. This list is the *credential-bearing* namespace,
 /// and its usefulness comes from every entry being a high-entropy secret.
@@ -360,16 +414,47 @@ mod tests {
             caps.continuous_runtime_limit_seconds, None,
             "cubesandbox imposes no wall-clock ceiling; a Some(..) here would be an e2b tier"
         );
-        assert_eq!(caps.pause_seconds_per_gib, Some(0.2));
+        // #1197 H2 — the measured ceiling, not the vendor benchmark.
+        assert_eq!(caps.pause_seconds_per_gib, Some(1.0));
+        let declared = caps.pause_seconds_per_gib.expect("declared");
+        assert!(
+            declared >= 0.87,
+            "named regression: D4-② measured 0.65–0.87 s/GiB on a real host (re-measured at \
+             0.647/0.667 while fixing #1197). A declaration below the slowest observation makes \
+             the ledger expect a pause to be finished while the host is still copying memory, \
+             and bill a running instance as paused. Saw {declared}"
+        );
 
-        // Named regression: `mock-a` carries E2B-derived numbers. Copying them
-        // into a substrate measured at ~20x faster would misprice every pause.
+        // Named regression: `mock-a` carries E2B-derived numbers for a different
+        // substrate. The two must not be confused in either direction.
         let mock_a = capabilities_for(MOCK_A_PROVIDER_ID).expect("registered");
         assert_ne!(caps.pause_seconds_per_gib, mock_a.pause_seconds_per_gib);
         assert_ne!(
             caps.continuous_runtime_limit_seconds,
             mock_a.continuous_runtime_limit_seconds
         );
+    }
+
+    /// #1197 H1 — the lease is a fact about this substrate and nobody else's.
+    #[test]
+    fn only_cubesandbox_expires_instances_on_a_clock_of_its_own() {
+        let cube = capabilities_for(CUBESANDBOX_PROVIDER_ID).expect("registered");
+        assert_eq!(
+            cube.instance_lease_seconds,
+            Some(CUBESANDBOX_DEFAULT_LEASE_SECONDS)
+        );
+        assert!(cube.supports(CloudProviderOperation::RenewLease));
+        assert_eq!(cube.lease_renewal_period_seconds(), Some(90));
+
+        for other in [BYOC_PROVIDER_ID, MOCK_A_PROVIDER_ID, MOCK_B_PROVIDER_ID] {
+            let caps = capabilities_for(other).expect("registered");
+            assert_eq!(
+                caps.instance_lease_seconds, None,
+                "named regression: {other} does not expire instances, and declaring a lease it \
+                 does not have would start a renewal loop against an operation it cannot serve"
+            );
+            assert!(!caps.supports(CloudProviderOperation::RenewLease));
+        }
     }
 
     /// ADR-0156 D6① — the ceiling follows the box, not the source tree.

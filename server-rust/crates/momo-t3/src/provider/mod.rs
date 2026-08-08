@@ -40,17 +40,19 @@ pub mod registry;
 
 pub use byoc::ByocProviderAdapter;
 pub use cubesandbox::{
-    create_body, presence_for_status, CubeSandboxProviderAdapter, CubeSandboxTuning,
-    DEFAULT_SWEEP_SECONDS, IDLE_TIMEOUT_SWEEP_MULTIPLE, METADATA_PROVISION_KEY,
-    METADATA_WORKSPACE_KEY, ON_TIMEOUT_KILL,
+    create_body, momo_metadata, presence_for_status, refusal_needs_reprobe,
+    CubeSandboxProviderAdapter, CubeSandboxTuning, DEFAULT_RENEWAL_SECONDS,
+    LEASE_RENEWALS_PER_LEASE, METADATA_KEY_PREFIX, METADATA_PROVISION_KEY, METADATA_WORKSPACE_KEY,
+    ON_TIMEOUT_KILL,
 };
 pub use mock::{MockCall, MockInstanceState, MockProviderAdapter};
 pub use registry::{
     capabilities_for, cubesandbox_max_concurrent_instances, environment_keys,
     environment_namespace, is_registered, load_endpoints, load_endpoints_from_process_env,
     registered_provider_ids, T3ProviderEndpoint, BYOC_PROVIDER_ID,
-    CUBESANDBOX_DEFAULT_MAX_CONCURRENT_INSTANCES, CUBESANDBOX_PAUSE_SECONDS_PER_GIB,
-    CUBESANDBOX_PROVIDER_ID, FALLBACK_PROVIDER_ID, MOCK_A_PROVIDER_ID, MOCK_B_PROVIDER_ID,
+    CUBESANDBOX_DEFAULT_LEASE_SECONDS, CUBESANDBOX_DEFAULT_MAX_CONCURRENT_INSTANCES,
+    CUBESANDBOX_PAUSE_SECONDS_PER_GIB, CUBESANDBOX_PROVIDER_ID, FALLBACK_PROVIDER_ID,
+    MOCK_A_PROVIDER_ID, MOCK_B_PROVIDER_ID,
 };
 
 /// The adapter for one registry id, or `None` when this build has no client for

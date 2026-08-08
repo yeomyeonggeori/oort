@@ -93,6 +93,14 @@ pub struct NotifierConfig {
     pub reconcile_interval: Duration,
     /// ADR-0125 D11 tier-fallback cadence.
     pub sweep_interval: Duration,
+    /// #1197 H1 lease-renewal cadence — how often the renewal loop *wakes*.
+    ///
+    /// Deliberately not the renewal period itself. Each adapter declares how
+    /// long its own lease is and the loop simply renews every candidate on every
+    /// tick, so this only has to be comfortably shorter than the shortest lease
+    /// any configured provider declares. The default (30 s) leaves twelve ticks
+    /// inside CubeSandbox's 360 s lease.
+    pub lease_renewal_interval: Duration,
     /// Candidates claimed per iteration, per loop.
     pub claim_batch_size: i64,
     /// How long a `*ing` intent must sit before its first claim.
@@ -131,12 +139,14 @@ impl NotifierConfig {
         let poll_ms: u64 = env_number("NOTIFIER_POLL_INTERVAL_MS", 300u64)?;
         let reconcile_ms: u64 = env_number("MOMO_NOTIFIER_RECONCILE_INTERVAL_MS", poll_ms)?;
         let sweep_ms: u64 = env_number("MOMO_NOTIFIER_SWEEP_INTERVAL_MS", poll_ms)?;
+        let lease_ms: u64 = env_number("MOMO_NOTIFIER_LEASE_RENEWAL_INTERVAL_MS", 30_000u64)?;
 
         Ok(NotifierConfig {
             database_url,
             max_connections: env_number("NOTIFIER_DB_MAX_CONNECTIONS", 4u32)?,
             reconcile_interval: Duration::from_millis(reconcile_ms.max(1)),
             sweep_interval: Duration::from_millis(sweep_ms.max(1)),
+            lease_renewal_interval: Duration::from_millis(lease_ms.max(1)),
             claim_batch_size: env_number("NOTIFIER_CLAIM_BATCH", 32i64)?.max(1),
             lifecycle_claim_delay_seconds: env_number("MOMO_T3_LIFECYCLE_CLAIM_DELAY_S", 5i64)?
                 .max(0),
@@ -153,6 +163,7 @@ impl NotifierConfig {
             max_connections: 4,
             reconcile_interval: Duration::from_millis(300),
             sweep_interval: Duration::from_millis(300),
+            lease_renewal_interval: Duration::from_millis(300),
             claim_batch_size: 32,
             lifecycle_claim_delay_seconds: 5,
             host_offline_grace_seconds: 90,
