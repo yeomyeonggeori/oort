@@ -53,6 +53,7 @@ pub mod identity;
 pub mod interaction;
 pub mod message;
 pub mod read_state;
+pub mod refine;
 pub mod search;
 
 pub use attachment::{
@@ -112,6 +113,12 @@ pub use read_state::{
     build_read_state_payload, contains_mention, effective_cursor, list_read_state,
     mention_id_token, read_state_channel, record_mentions_in_tx, unread_count,
     update_read_cursor_in_tx, ReadCursorUpdate, ReadState, MENTION_PROPS_KEY,
+};
+pub use refine::{
+    harness_refine_client_msg_id, harness_refine_input_props, validate_harness_refine,
+    HarnessRefine, HarnessRefineEdit, HarnessRefineInvalid, HarnessRefineTrigger,
+    HARNESS_REFINE_EDITS_MAX, HARNESS_REFINE_ID_MAX_CHARS, HARNESS_REFINE_PROPS_KEY,
+    HARNESS_REFINE_SCOPE, HARNESS_REFINE_SUMMARY_MAX_CHARS,
 };
 pub use search::{
     clamp_search_limit, decode_search_cursor, encode_search_cursor, literal_like_pattern,

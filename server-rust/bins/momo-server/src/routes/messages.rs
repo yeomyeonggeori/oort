@@ -33,7 +33,7 @@ use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::{Extension, Json};
-use momo_agent::terminal_run_ids_in_tx;
+use momo_agent::{terminal_run_ids_in_tx, RunBindingRejected};
 use momo_auth::Principal;
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::{with_tenant_tx, DbError};
@@ -42,12 +42,13 @@ use momo_messaging::{
     delete_message_in_tx, edit_message_in_tx, is_channel_member, list_channel_page,
     list_thread_replies, open_stream_run_id, parse_replies_cursor, resolve_member_signing_key,
     send_message_with_mentions_in_tx, set_pin_in_tx, set_reaction_in_tx, stream_message_body_in_tx,
-    validate_quote_target_in_tx, validate_reaction_emoji, validate_replies_root_in_tx,
-    validate_thread_root_in_tx, AttachmentLinkRejected, HistoryCursor, InteractionMessage,
-    InteractionRefused, MessageAttachment, MessageSignature, MessageType, NewMessage, PagedMessage,
-    PinAction, PinnedMessage, ProvenanceRejected, QuoteTargetInvalid, QuotedMessage,
-    ReactionAction, ReactionSnapshot, SendExtras, SendRejected, StoredMessage, StreamCloseOutcome,
-    StreamEdit, ThreadRollup, ThreadRootInvalid, OPENING_STREAM_REV, STREAM_PROPS_KEY,
+    validate_harness_refine, validate_quote_target_in_tx, validate_reaction_emoji,
+    validate_replies_root_in_tx, validate_thread_root_in_tx, AttachmentLinkRejected, HarnessRefine,
+    HarnessRefineInvalid, HistoryCursor, InteractionMessage, InteractionRefused, MessageAttachment,
+    MessageSignature, MessageType, NewMessage, PagedMessage, PinAction, PinnedMessage,
+    ProvenanceRejected, QuoteTargetInvalid, QuotedMessage, ReactionAction, ReactionSnapshot,
+    SendExtras, SendRejected, StoredMessage, StreamCloseOutcome, StreamEdit, ThreadRollup,
+    ThreadRootInvalid, HARNESS_REFINE_PROPS_KEY, OPENING_STREAM_REV, STREAM_PROPS_KEY,
 };
 use serde_json::{Map, Value};
 use std::collections::HashSet;
@@ -74,7 +75,29 @@ const SERVER_OWNED_PROPS_KEY: &str = "mention_member_ids";
 /// client that could write that key could park a huge revision on someone's
 /// message and freeze every later slice of it as "stale". A trusted key that a
 /// client can write is not a trusted key.
-const SERVER_OWNED_PROPS_KEYS: [&str; 2] = [SERVER_OWNED_PROPS_KEY, STREAM_PROPS_KEY];
+///
+/// [`HARNESS_REFINE_PROPS_KEY`] joins it with ADR-0158 D2, for a different
+/// danger with the same answer. Nothing reads this key back to make a decision,
+/// so the risk is not a poisoned guard but a **forged claim**: the block is what
+/// a client will eventually key "이 에이전트가 스스로를 갱신했습니다" off, and a
+/// props map any member can write is not somewhere that sentence can be sourced
+/// from. The validated block arrives as `harnessRefine` instead, and
+/// `momo_messaging::refine` is what turns it into this key.
+const SERVER_OWNED_PROPS_KEYS: [&str; 3] = [
+    SERVER_OWNED_PROPS_KEY,
+    STREAM_PROPS_KEY,
+    HARNESS_REFINE_PROPS_KEY,
+];
+
+/// The props key that carries an agent run's id for readers (#1166).
+///
+/// Not in [`SERVER_OWNED_PROPS_KEYS`], and the asymmetry is deliberate. A
+/// producer that names its run in props without sending `runId` is the
+/// pre-ADR-0158 shape and still works unchanged — stripping it would break every
+/// adapter written against the wire as it stood. What ADR-0158 adds is that when
+/// a **validated** `runId` *is* sent, the server writes this key from it, so the
+/// column and the readable copy cannot disagree. See [`bind_run_props`].
+const RUN_ID_PROPS_KEY: &str = "run_id";
 
 /// Resolve `{ws}`/`{ch}` and enforce that the path workspace matches the token's
 /// (Swift `MessageRoutes.scopeIDs`, :2824-2839).
@@ -215,28 +238,110 @@ fn paged_dto(paged: &PagedMessage, include_state: bool, ended_runs: &HashSet<Uui
     )
 }
 
-/// Reject the request keys this server does not serve. Visible failure beats a
-/// silently dropped attachment/run intent (ADR-0134 D1 reasoning).
+/// A refused `runId` → its HTTP answer (ADR-0158 D5).
 ///
-/// The list keeps shrinking, and each departure is a batch: `rootId` left in
-/// B4.1 (threads are served), `routing` left in B5.3a (the model/effort tier is
-/// served — see [`thread_root_rejection`] for what that did to the probe), and
-/// `attachmentIds` left in ADR-0151 (the three Drive routes are served, and the
-/// binding runs inside this send's own transaction).
-///
-/// `runId` is the last one standing.
-fn reject_unsupported(request: &SendMessageRequest) -> Result<(), ApiError> {
-    let unsupported = if request.run_id.is_some() {
-        Some("runId (agent-run binding)")
-    } else {
-        None
-    };
-    match unsupported {
-        Some(field) => Err(ApiError::bad_request(format!(
-            "{field} is not served by momo-server yet"
-        ))),
-        None => Ok(()),
+/// **404 for an unknown run and 403 for someone else's**, which is the same
+/// disclosure split [`attachment_link_rejection`] makes and for the same reason.
+/// A run in another workspace is invisible under RLS and lands in the `Unknown`
+/// branch, so answering anything more specific than "not found" would confirm
+/// the existence of rows the caller may not see. A run in *this* workspace, by
+/// contrast, is one the caller can already read through `GET …/agent-runs`, so
+/// hiding it would protect nothing while making "that run is not yours"
+/// indistinguishable from a typo.
+fn run_binding_rejection(rejected: RunBindingRejected) -> ApiError {
+    match rejected {
+        RunBindingRejected::Unknown => ApiError::not_found(rejected.to_string()),
+        RunBindingRejected::NotRunAgent => ApiError::forbidden(rejected.to_string()),
     }
+}
+
+/// The validated refinement block a send carries, if any (ADR-0158 D1~D4).
+///
+/// Runs **before the transaction opens**, exactly where `routing` and the
+/// `stream` marker are checked and for the same reason: every failure here is a
+/// malformed request the caller can fix, and answering it costs no connection.
+///
+/// Three checks live here rather than in the domain crate because all three are
+/// about *this request as a whole* rather than about the block's own values:
+///
+/// 1. **`type` must be `system`** (D2). The announcement reuses an existing type
+///    on purpose — no client learns a new frame — and a refinement posted as
+///    `text` would be a machine notice sitting in the conversation as if someone
+///    had said it.
+/// 2. **a body is required.** §2.2's rule is "본문은 사람 문장, 근거는 props",
+///    the same discipline the approval card follows. A bodyless announcement
+///    renders as a blank line whose meaning is only in a props object no human
+///    reads.
+/// 3. **`clientMsgId` must be the derived key** (D4). The server could compute
+///    it and overwrite the caller's silently; it refuses instead, because a
+///    silently rewritten idempotency key is one the caller cannot use to retry.
+///    The sentence names the expected uuid, so a producer is never stuck.
+fn harness_refine(
+    request: &SendMessageRequest,
+    message_type: MessageType,
+) -> Result<Option<HarnessRefine>, ApiError> {
+    let Some(block) = request.harness_refine.as_ref() else {
+        return Ok(None);
+    };
+    let refuse = |invalid: HarnessRefineInvalid| ApiError::bad_request(invalid.to_string());
+    if message_type != MessageType::System {
+        return Err(refuse(HarnessRefineInvalid::NotSystemMessage));
+    }
+    if !request
+        .body
+        .as_deref()
+        .map(str::trim)
+        .is_some_and(|body| !body.is_empty())
+    {
+        return Err(refuse(HarnessRefineInvalid::MissingBody));
+    }
+    let edits: Vec<(String, String, String)> = block
+        .edits
+        .iter()
+        .map(|edit| (edit.action.clone(), edit.kind.clone(), edit.id.clone()))
+        .collect();
+    let refine = validate_harness_refine(
+        &block.refinement_id,
+        &block.trigger,
+        &block.scope,
+        &edits,
+        block.summary.as_deref(),
+        block.rollback_id.as_deref(),
+    )
+    .map_err(refuse)?;
+
+    let expected = refine.client_msg_id();
+    if request.client_msg_id != expected {
+        return Err(refuse(HarnessRefineInvalid::ClientMsgId { expected }));
+    }
+    Ok(Some(refine))
+}
+
+/// Stamp a validated run binding onto the message about to be written.
+///
+/// Both halves, always together, which is the whole point of doing it in one
+/// function: the **column** is what `open_stream_message_for_run_in_tx` looks a
+/// half-written answer up by (so a server-side close can reach an adapter's
+/// message at all), and the **props copy** is what `open_stream_run_id` reads
+/// when a page decides whether to draw #1166's "run ended" tail. The in-process
+/// producer writes both (`momo-agent-worker`'s `opening_props`); a REST producer
+/// that wrote only one would be findable by exactly one of the two readers.
+///
+/// The props value is the server's, not the caller's — a `run_id` prop sent
+/// alongside a validated `runId` is overwritten rather than merged with, for the
+/// same reason `opening_props` overwrites it in-process: "the run id is not the
+/// caller's to omit or to override".
+fn bind_run_props(message: &mut NewMessage, run_id: Uuid) {
+    message.run_id = Some(run_id);
+    let mut object = match std::mem::take(&mut message.props) {
+        Value::Object(object) => object,
+        _ => Map::new(),
+    };
+    object.insert(
+        RUN_ID_PROPS_KEY.to_string(),
+        Value::String(run_id.to_string()),
+    );
+    message.props = Value::Object(object);
 }
 
 /// A refused attachment binding → its status (Swift `linkAttachments`' throws,
@@ -452,6 +557,18 @@ fn opens_stream(request: &SendMessageRequest) -> Result<bool, ApiError> {
 /// The two paths now open the same shape, so `PATCH …/messages/{id}` with a
 /// `stream` block continues an adapter's message exactly as it continues the
 /// worker's, and no reader has to know which one wrote it.
+///
+/// **An optional `runId` binds the write to an agent run** (ADR-0158 D5), and
+/// that is what finishes the sentence #1173 started. The opening marker made an
+/// adapter's half-answer *look* like the in-process one; the run binding is what
+/// makes it *findable* — `open_stream_message_for_run_in_tx` is keyed on the
+/// `run_id` column, so before this the closing PATCH ADR-0155 promises simply
+/// had nothing to close on the REST path. The field was decoded and refused for
+/// exactly as long as it could not be validated; see [`run_binding_rejection`]
+/// for the three checks that replaced the refusal.
+///
+/// **An optional `harnessRefine` block announces a self-modification**
+/// (ADR-0158 D1~D4) as one `system` line the room can scroll back to.
 pub async fn send(
     State(state): State<AppState>,
     Extension(principal): Extension<Principal>,
@@ -459,7 +576,6 @@ pub async fn send(
     Json(request): Json<SendMessageRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
     let (workspace_id, channel_id) = scope_ids(&workspace, &channel, &principal)?;
-    reject_unsupported(&request)?;
     // #1173 — shape only, and before any connection is taken, for the same
     // reason `routing` is validated here: a malformed declaration is the
     // caller's mistake and costs nothing to answer.
@@ -470,6 +586,9 @@ pub async fn send(
         Some(label) => MessageType::from_db_label(label)
             .ok_or_else(|| ApiError::bad_request("unsupported message type"))?,
     };
+    // ADR-0158 D1~D4 — shape and vocabulary, on the same "before any connection"
+    // rule. The run binding below cannot join it there: it is a tenant read.
+    let refine = harness_refine(&request, message_type)?;
 
     let client_msg_id = request.client_msg_id;
     let root_id = request.root_id;
@@ -490,15 +609,30 @@ pub async fn send(
     let via_token_id = audit_via_token_id(&principal);
     let gateway_enabled = state.agent_gateway.enabled();
     let context_max_messages = state.mentions.context_max_messages;
-    let new_message = NewMessage {
+    // ADR-0158 D2 — the refinement block becomes props here, *before* the
+    // transaction, because it is a pure rewrite of an already-validated value.
+    // The key it writes into is server-owned (`SERVER_OWNED_PROPS_KEYS`), so
+    // `props_value` has already stripped any client attempt at it and this is
+    // its only writer.
+    let props = match refine.as_ref() {
+        None => props_value(request.props.as_ref()),
+        Some(refine) => {
+            momo_messaging::harness_refine_input_props(props_value(request.props.as_ref()), refine)
+        }
+    };
+    let requested_run_id = request.run_id;
+    let mut new_message = NewMessage {
         channel_id,
         author_member_id: principal.member_id,
         message_type,
         body: request.body.clone(),
-        props: props_value(request.props.as_ref()),
+        props,
         root_id,
         reply_to_id,
         client_msg_id: Some(client_msg_id),
+        // ADR-0158 D5 — filled in inside the transaction, and only after
+        // `authorize_run_binding_in_tx` has agreed. `None` here is not a default
+        // to be tidied away: it is what an unauthorized binding stays.
         run_id: None,
         hlc_ts: None,
         hlc_count: None,
@@ -543,6 +677,24 @@ pub async fn send(
                 {
                     return Err(SendFailure::Rejected(quote_target_rejection(invalid)));
                 }
+            }
+            // ADR-0158 D5 — fail-closed, inside this transaction and not before
+            // it. The check is a tenant read (`agent_run` under RLS), so hoisting
+            // it out of the transaction that writes the message would both lose
+            // the GUC and open a window in which a run could be created,
+            // cancelled or moved between the check and the insert.
+            if let Some(run_id) = requested_run_id {
+                if let Err(rejected) = momo_agent::authorize_run_binding_in_tx(
+                    conn,
+                    workspace_id,
+                    run_id,
+                    principal.member_id,
+                )
+                .await?
+                {
+                    return Err(SendFailure::Rejected(run_binding_rejection(rejected)));
+                }
+                bind_run_props(&mut new_message, run_id);
             }
             let signature = match provenance_signature {
                 None => None,
@@ -611,6 +763,24 @@ pub async fn send(
                 .await?
                 {
                     return Err(SendFailure::Rejected(rejection));
+                }
+            }
+            // ADR-0158 D3 — the ledger half. `!deduped` for the same reason the
+            // mention pass carries it: a retried announcement is the same
+            // refinement, and a second audit row would claim a second
+            // self-modification that never happened.
+            if !sent.deduped {
+                if let Some(refine) = refine.as_ref() {
+                    record_refine_audit(
+                        conn,
+                        workspace_id,
+                        channel_id,
+                        sent.message.id,
+                        principal.member_id,
+                        via_token_id,
+                        refine,
+                    )
+                    .await?;
                 }
             }
             Ok(Some(sent))
@@ -1066,6 +1236,56 @@ async fn record_stream_audit(
                 "channel_id": channel_id,
                 "event_type": "message.streamed",
                 "final_rev": final_rev,
+            }),
+        );
+    write_audit(conn, &entry).await?;
+    Ok(())
+}
+
+/// The audit row a refinement announcement leaves (ADR-0158 D3).
+///
+/// D3 says `rollbackId` is "원장/감사에만" — the ledger and the audit trail, and
+/// no channel affordance — so this row is half of what that sentence promises;
+/// the message's own props are the other half. Written here rather than left to
+/// the message row alone because the two answer different questions: the channel
+/// answers "when did this colleague change", and this answers "by whom, under
+/// which credential, and can it be undone" — the question an operator asks after
+/// the fact, against a table that keeps `via_token_id`.
+///
+/// `agent.harness_refined` rather than a `message.*` action, deliberately: the
+/// subject is the agent's behaviour, not the message that reported it, and an
+/// auditor reading `message.*` for "who changed what they said" must not have to
+/// filter machine notices out of the answer (the same argument
+/// [`record_stream_audit`] makes for `message.streamed`).
+async fn record_refine_audit(
+    conn: &mut momo_db::PgConnection,
+    workspace_id: Uuid,
+    channel_id: Uuid,
+    message_id: Uuid,
+    actor_member_id: Uuid,
+    via_token_id: Option<Uuid>,
+    refine: &HarnessRefine,
+) -> Result<(), DbError> {
+    let entry = AuditEntry::new(workspace_id, "agent.harness_refined")
+        .by(actor_member_id)
+        // The agent is the actor *and* the subject, and naming it twice would
+        // read as two members. `target` names the message the room can scroll to.
+        .about_optional(None)
+        .target("message", message_id)
+        .via_token(via_token_id)
+        .with_schema(
+            "momo.harness_refine.v1",
+            serde_json::json!({
+                "channel_id": channel_id,
+                "event_type": "agent.harness_refined",
+                "refinement_id": refine.refinement_id,
+                "trigger": refine.trigger.wire(),
+                "scope": momo_messaging::HARNESS_REFINE_SCOPE,
+                // The count, not the list: the audit row is bound by the same
+                // disclosure rule as the props block (§2.2), and an auditor who
+                // needs the entry ids reads them off the message it names.
+                "edit_count": refine.edits.len(),
+                "rollback_id": refine.rollback_id,
             }),
         );
     write_audit(conn, &entry).await?;
@@ -1693,9 +1913,8 @@ mod tests {
         assert!(response_props(&serde_json::json!({"k": "v"})).is_some());
     }
 
-    #[test]
-    fn unsupported_send_fields_fail_visibly() {
-        let base = || SendMessageRequest {
+    fn send_request() -> SendMessageRequest {
+        SendMessageRequest {
             client_msg_id: Uuid::nil(),
             root_id: None,
             reply_to_id: None,
@@ -1707,45 +1926,158 @@ mod tests {
             routing: None,
             signature: None,
             stream: None,
-        };
-        assert!(reject_unsupported(&base()).is_ok());
+            harness_refine: None,
+        }
+    }
 
-        // B4.1: threads are served, so a rootId is no longer refused here.
-        let mut threaded = base();
-        threaded.root_id = Some(Uuid::nil());
+    fn refine_request() -> SendMessageRequest {
+        let mut request = send_request();
+        request.message_type = Some("system".to_string());
+        request.body = Some("김인턴이 자기 작업 방식을 갱신했습니다 — 기억 1건 추가".to_string());
+        request.harness_refine = Some(crate::dto::HarnessRefineRequest {
+            refinement_id: "refine_20260807041452415".to_string(),
+            trigger: "command".to_string(),
+            scope: "workspace".to_string(),
+            edits: vec![crate::dto::HarnessRefineEditRequest {
+                action: "create".to_string(),
+                kind: "memory".to_string(),
+                id: "oort-refine-probe".to_string(),
+            }],
+            summary: None,
+            rollback_id: None,
+        });
+        request.client_msg_id =
+            momo_messaging::harness_refine_client_msg_id("refine_20260807041452415");
+        request
+    }
+
+    /// **The list of decoded-but-unserved keys is empty, and `runId` is why.**
+    ///
+    /// This test used to assert the opposite for `runId` — a 400 saying "not
+    /// served by momo-server yet". ADR-0158 D5 serves it, so what replaces the
+    /// assertion is the shape of the new refusal: nothing is refused *here* at
+    /// all, because a run binding can only be judged against tenant rows and is
+    /// therefore judged inside the send transaction.
+    #[test]
+    fn a_run_binding_is_no_longer_refused_by_shape() {
+        let mut with_run = send_request();
+        with_run.run_id = Some(Uuid::nil());
         assert!(
-            reject_unsupported(&threaded).is_ok(),
-            "rootId is served now; its validation happens against the DB"
+            harness_refine(&with_run, MessageType::Text)
+                .expect("no refine block, no shape refusal")
+                .is_none(),
+            "runId is not a pre-transaction concern; `authorize_run_binding_in_tx` owns it"
+        );
+    }
+
+    /// Both halves of the binding land, because two different readers need
+    /// different ones (see [`bind_run_props`]).
+    #[test]
+    fn a_bound_run_is_written_to_the_column_and_the_readable_copy() {
+        let run = Uuid::from_u128(0x5150);
+        let mut message = NewMessage::text(Uuid::from_u128(1), Uuid::from_u128(2), "답이 자");
+        message.props = serde_json::json!({ "harness": "prime-agent" });
+        bind_run_props(&mut message, run);
+
+        assert_eq!(message.run_id, Some(run), "the close path reads the column");
+        assert_eq!(
+            message.props["run_id"],
+            serde_json::json!(run.to_string()),
+            "#1166's page annotation reads props"
+        );
+        assert_eq!(
+            message.props["harness"],
+            serde_json::json!("prime-agent"),
+            "the producer's own props survive the stamp"
         );
 
-        let mut with_run = base();
-        with_run.run_id = Some(Uuid::nil());
+        // The run id is not the caller's to override — the same rule
+        // `opening_props` holds in-process.
+        let mut hijacked = NewMessage::text(Uuid::from_u128(1), Uuid::from_u128(2), "답");
+        hijacked.props = serde_json::json!({ "run_id": Uuid::from_u128(99).to_string() });
+        bind_run_props(&mut hijacked, run);
+        assert_eq!(hijacked.props["run_id"], serde_json::json!(run.to_string()));
+    }
+
+    /// ADR-0158 D2 — a refinement is a `system` line or it is nothing.
+    ///
+    /// Posted as `text` it would sit in the conversation as if a member had said
+    /// it, which is precisely the "봇 래핑" shape the product refuses.
+    #[test]
+    fn a_refinement_announced_as_text_is_refused() {
+        let request = refine_request();
+        let refused = harness_refine(&request, MessageType::Text).expect_err("not a system line");
+        assert_eq!(refused.status, StatusCode::BAD_REQUEST);
+        assert!(harness_refine(&request, MessageType::System)
+            .expect("system is the type D2 chose")
+            .is_some());
+    }
+
+    /// §2.2 — "본문은 사람 문장, 근거는 props". A blank body would render as an
+    /// empty line whose meaning lives only in an object no human reads.
+    #[test]
+    fn a_refinement_without_a_human_sentence_is_refused() {
+        let mut request = refine_request();
+        request.body = Some("   ".to_string());
         assert_eq!(
-            reject_unsupported(&with_run).expect_err("runId").status,
+            harness_refine(&request, MessageType::System)
+                .expect_err("blank body")
+                .status,
             StatusCode::BAD_REQUEST
         );
+        request.body = None;
+        assert!(harness_refine(&request, MessageType::System).is_err());
+    }
 
-        // ADR-0151: attachments are served, so `attachmentIds` left this list
-        // too. Its refusals are now about the *rows* — the uploader, the
-        // channel, the lifecycle state — and every one of them is made inside
-        // the send transaction, not by a shape check here.
-        let mut with_attachments = base();
-        with_attachments.attachment_ids = Some(vec![Uuid::nil()]);
+    /// **D4, at the door.** The derived key is not a suggestion: a caller that
+    /// sends its own uuid is refused, and told which one this refinement has.
+    ///
+    /// The alternative — overwriting silently — would leave a producer holding a
+    /// key that names nothing, so its retry would open a second announcement of
+    /// one refinement. That is the exact duplicate D4 exists to prevent.
+    #[test]
+    fn a_refinement_must_be_sent_under_its_derived_key() {
+        let mut request = refine_request();
+        request.client_msg_id = Uuid::from_u128(0xbad);
+        let refused = harness_refine(&request, MessageType::System).expect_err("wrong key");
+        assert_eq!(refused.status, StatusCode::BAD_REQUEST);
+        let expected =
+            momo_messaging::harness_refine_client_msg_id("refine_20260807041452415").to_string();
         assert!(
-            reject_unsupported(&with_attachments).is_ok(),
-            "attachmentIds is served now; a bad id is refused by the binding"
+            refused.message.contains(&expected),
+            "the refusal names the key so a producer is never stuck: {}",
+            refused.message
         );
+    }
 
-        // An empty array carries no intent, and neither does an absent key.
-        let mut empty_attachments = base();
-        empty_attachments.attachment_ids = Some(vec![]);
-        assert!(reject_unsupported(&empty_attachments).is_ok());
+    /// The domain's vocabulary refusals reach the wire as 400s rather than being
+    /// swallowed into a generic one — `scope: "global"` is the one that matters,
+    /// because passing it through would publish a claim about other workspaces.
+    #[test]
+    fn a_scope_the_server_cannot_vouch_for_is_a_400() {
+        let mut request = refine_request();
+        if let Some(block) = request.harness_refine.as_mut() {
+            block.scope = "global".to_string();
+        }
+        let refused = harness_refine(&request, MessageType::System).expect_err("global scope");
+        assert_eq!(refused.status, StatusCode::BAD_REQUEST);
+        assert!(refused.message.contains("workspace"), "{}", refused.message);
+    }
 
-        // B5.3a: routing is served, so it is not on this list either. Its
-        // validation is the shape check below, not a refusal.
-        let mut with_routing = base();
-        with_routing.routing = Some(serde_json::json!({"model": "x"}));
-        assert!(reject_unsupported(&with_routing).is_ok());
+    /// The server-owned key cannot be smuggled in as a flat client prop —
+    /// `props_value` strips it, so `momo_messaging::refine` stays its only writer.
+    #[test]
+    fn a_hand_written_refine_prop_never_reaches_the_row() {
+        let props = std::collections::BTreeMap::from([
+            (
+                HARNESS_REFINE_PROPS_KEY.to_string(),
+                "{\"refinementId\":\"forged\"}".to_string(),
+            ),
+            ("harness".to_string(), "prime-agent".to_string()),
+        ]);
+        let stored = props_value(Some(&props));
+        assert!(stored.get(HARNESS_REFINE_PROPS_KEY).is_none());
+        assert_eq!(stored["harness"], serde_json::json!("prime-agent"));
     }
 
     /// **The probe contract, now answered the other way — truthfully.**

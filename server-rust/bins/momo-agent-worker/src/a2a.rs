@@ -13,12 +13,19 @@
 //! ## What the worker has that the route did not
 //!
 //! B5.2 refuses an agent-authored mention (`a2a_source_run_unavailable`) because
-//! the HTTP send path has no source run: `POST /messages` refuses a `runId`, so
-//! the child would have to be created at `depth = 0` and the hop cap would be
+//! the HTTP send path has no source run *this crate can trust as a parent*: the
+//! child would have to be created at `depth = 0` and the hop cap would be
 //! unenforceable. **Here the source run is the thing being committed.** The
 //! child therefore gets a real `parent_run_id` and `depth = parent + 1`, which
 //! is what makes every cap in [`momo_agent::a2a`] enforceable rather than
 //! decorative.
+//!
+//! ADR-0158 D5 gave the HTTP path a `runId` it validates (the run exists, is in
+//! this workspace, and belongs to the caller), which narrows but does not close
+//! that gap: a validated *authorship* binding is not a validated *parentage*
+//! claim, and treating it as one would hand hop-depth selection to the producer
+//! being capped. The route's skip therefore stands until a decision says
+//! otherwise.
 //!
 //! ## Where it runs, and why exactly there
 //!

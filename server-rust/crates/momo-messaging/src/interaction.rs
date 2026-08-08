@@ -654,13 +654,19 @@ impl StreamOutcome {
 ///
 /// ## Why props and not the `run_id` column
 ///
-/// The column is set by the in-process producer (`MessageStream::open`) and is
-/// **never serialized on the wire** — `stream.rs` says so where it merges the id
-/// into props for this very reason. An out-of-process adapter (prime, hermes)
-/// streams over REST, where `POST …/messages` refuses a `runId` field outright,
-/// so for those turns props is not merely the readable copy but the only one.
-/// Keying on the column would answer for in-process turns and stay silent for
-/// exactly the adapters #1152 was built for.
+/// The column is **never serialized on the wire** — `stream.rs` says so where it
+/// merges the id into props for this very reason — so props is the only copy a
+/// *reader* can see, and this function answers a reader's question. Both
+/// producers now write both: in-process since #1161 (`MessageStream::open`), and
+/// over REST since ADR-0158 D5, where a validated `runId` stamps the column and
+/// this props key together (`routes::messages::bind_run_props`). Keying on the
+/// column would still be the wrong choice even now that it is populated on both
+/// paths, because it would answer a question about what a client can see using a
+/// field it cannot.
+///
+/// Historical note worth keeping: before D5 the REST path refused `runId`
+/// outright, so for adapter turns props was not merely the readable copy but the
+/// only one. That is why this function was written against props first.
 ///
 /// ## Why `streaming: true` only
 ///

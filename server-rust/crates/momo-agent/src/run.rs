@@ -340,6 +340,77 @@ pub async fn load_agent_run_in_tx(
         .map_err(DbError::from)
 }
 
+/// Why a REST write's `runId` was refused (ADR-0158 D5).
+///
+/// Two variants and not three, and the missing one is the point: "no such run"
+/// and "a run in another workspace" are **one answer** here, because under RLS
+/// they are one observation. A tenant transaction cannot see another tenant's
+/// `agent_run` row at all, so a third variant would be a branch no request could
+/// ever reach and a sentence that confirmed the existence of rows the caller may
+/// not see. The workspace predicate in [`authorize_run_binding_in_tx`] is still
+/// written out explicitly — see there for why belt and braces are both worn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum RunBindingRejected {
+    /// No run with this id is visible to this workspace.
+    #[error("runId names no agent run in this workspace")]
+    Unknown,
+    /// The run exists here, but the caller is not the agent it belongs to.
+    #[error("runId belongs to another member's agent run")]
+    NotRunAgent,
+}
+
+/// May this caller bind a message to this run? (ADR-0158 D5.)
+///
+/// **Fail-closed, and the closure is the whole feature.** Until now
+/// `POST …/messages` refused every `runId` outright, which cost an out-of-process
+/// adapter (prime, hermes) the one name that lets a *server-side* close find the
+/// message its run left open (ADR-0155 — see
+/// [`momo_messaging::open_stream_message_for_run_in_tx`], which is keyed on the
+/// `run_id` column). Serving the field means the column stops being
+/// server-authored, so every property a reader draws from it has to be re-earned
+/// at this door:
+///
+/// | check | what a missing check would let through |
+/// |---|---|
+/// | the run exists | a message bound to an id nobody issued — `runEnded` would answer "not ended" forever, and the tail #1166 draws would never appear |
+/// | in **this** workspace | a cross-tenant handle in a tenant's own timeline. `message.run_id`'s FK (`schema_v0.sql:302`) is global — it names `agent_run(id)` with no workspace pair — so **nothing below this function stops it**: the FK is satisfied, and RLS never sees the value because an INSERT of a uuid into a column is not a read of the row it points at |
+/// | the caller **is** that run's agent | any member could claim authorship of any agent's turn, and the close path would then be closing a stream on behalf of a producer that never opened one |
+///
+/// The third check is an identity comparison rather than a
+/// `PrincipalKind::Agent` test, deliberately: `agent_run.agent_member_id` always
+/// names a `member` with `kind = 'agent'`, so equality with it *is* the agent
+/// check. A second, separate kind test would be a second thing to keep in
+/// agreement with the first.
+///
+/// ## Why the workspace predicate is written twice
+///
+/// `load_agent_run_in_tx` carries `AND workspace_id = $2` and the transaction
+/// carries RLS, so inside a tenant transaction the predicate is redundant today.
+/// It stays because the redundancy is one-directional: RLS protects the *read*,
+/// while what this function authorizes is a *write of a foreign uuid into a
+/// column*, and those two are only the same thing for as long as the lookup
+/// stays inside the tenant transaction. A caller that ever hoisted it out would
+/// lose RLS silently and keep the predicate.
+pub async fn authorize_run_binding_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    run_id: Uuid,
+    member_id: Uuid,
+) -> Result<Result<(), RunBindingRejected>, DbError> {
+    let Some(run) = load_agent_run_in_tx(conn, workspace_id, run_id).await? else {
+        return Ok(Err(RunBindingRejected::Unknown));
+    };
+    // Unreachable while the lookup above keeps its own predicate; asserted
+    // anyway, because "unreachable" is a property of today's call sites.
+    if run.workspace_id != workspace_id {
+        return Ok(Err(RunBindingRejected::Unknown));
+    }
+    if run.agent_member_id != member_id {
+        return Ok(Err(RunBindingRejected::NotRunAgent));
+    }
+    Ok(Ok(()))
+}
+
 /// Which of these runs have **ended** — the durable half of ADR-0155's
 /// defensive render (#1166).
 ///

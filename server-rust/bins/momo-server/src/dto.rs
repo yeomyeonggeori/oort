@@ -114,11 +114,12 @@ pub struct MemberDto {
 /// `POST …/messages` request (Swift `SendMessageRequest`).
 ///
 /// Closed-world like the Swift decoder (ADR-0134 D1): an unknown key is a 400,
-/// never a silently dropped field. The keys this server still does not serve
-/// (`runId`) are decoded so the handler can reject them **visibly** instead of
-/// accepting the request and dropping the intent on the floor. `rootId` left
-/// that list in B4.1, `routing` in B5.3a and `attachmentIds` in ADR-0151 — each
-/// departure is a batch that started serving the field.
+/// never a silently dropped field.
+///
+/// **There is no longer a list of decoded-but-unserved keys.** `rootId` left it
+/// in B4.1, `routing` in B5.3a, `attachmentIds` in ADR-0151, and `runId` — the
+/// last one standing — in ADR-0158 D5. Each departure was a batch that started
+/// serving the field, and this one empties the list.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SendMessageRequest {
@@ -139,8 +140,23 @@ pub struct SendMessageRequest {
     #[serde(default)]
     pub body: Option<String>,
     /// Flat string→string map in v0 (Swift `[String: String]?`).
+    ///
+    /// Flat, and therefore **unable to carry a structured server-owned block** —
+    /// which is why ADR-0158's refinement announcement arrives in
+    /// [`SendMessageRequest::harness_refine`] rather than as a props key. Widening
+    /// this map to arbitrary JSON would have been the shorter diff and the wrong
+    /// one: it would let any client author `momo.`-namespaced objects the server
+    /// is supposed to vouch for.
     #[serde(default)]
     pub props: Option<BTreeMap<String, String>>,
+    /// ADR-0158 D5 — the agent run this write belongs to.
+    ///
+    /// Served since ADR-0158 and refused before it. Three things are checked
+    /// inside the send transaction and the send is refused if any fails
+    /// ([`momo_agent::authorize_run_binding_in_tx`]): the run exists, it is in
+    /// this workspace, and the caller **is** its agent. Only then is the value
+    /// written to `message.run_id`, which is what lets a server-side close find
+    /// the message an out-of-process producer left open (ADR-0155).
     #[serde(default)]
     pub run_id: Option<Uuid>,
     /// ADR-0151 — the completed attachments this message binds, in the order the
@@ -170,6 +186,59 @@ pub struct SendMessageRequest {
     /// able to author.
     #[serde(default)]
     pub stream: Option<StreamOpenRequest>,
+    /// ADR-0158 D1~D4 — present when this send **announces that the agent
+    /// changed itself**.
+    ///
+    /// A top-level block rather than a props key, for the reason spelled on
+    /// [`SendMessageRequest::props`]: v0 props is a flat string map, and the
+    /// stored shape is a structured object under a `momo.`-namespaced key the
+    /// server has to be the sole author of. So the wire says *that* a refinement
+    /// happened and what it touched; `momo_messaging::refine` says what the
+    /// stored block looks like — the same division of labour `stream` above
+    /// makes.
+    #[serde(default)]
+    pub harness_refine: Option<HarnessRefineRequest>,
+}
+
+/// The `harnessRefine` block on [`SendMessageRequest`] (ADR-0158 D1~D4).
+///
+/// `deny_unknown_fields` is the load-bearing attribute here, and not for tidiness
+/// (#1183's discipline, one layer up). §2.2 of the design sketch forbids the
+/// harness's *text* from reaching a channel — memories can quote the
+/// conversation that produced them. That rule is only mechanical if a producer
+/// that adds `before`/`after`/`content` is **refused**: a serde default that
+/// ignored unknown keys would accept the request, drop the payload, and leave
+/// the producer believing it had delivered what it sent.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct HarnessRefineRequest {
+    /// `RefinementResult.id` — the harness's own stable key, and the seed of the
+    /// derived `clientMsgId` (D4).
+    pub refinement_id: String,
+    /// `command` | `turn_interval` | `compact` | `observed-drift`.
+    pub trigger: String,
+    /// Must be `workspace`. The harness's `"global"` is our workspace, and
+    /// repeating the harness's word would over-claim
+    /// (`momo_messaging::HARNESS_REFINE_SCOPE`).
+    pub scope: String,
+    /// The entries this refinement touched — id and kind only.
+    #[serde(default)]
+    pub edits: Vec<HarnessRefineEditRequest>,
+    /// The human sentence's supporting detail. Bounded.
+    #[serde(default)]
+    pub summary: Option<String>,
+    /// D3 — recorded on the row, with no channel affordance promised.
+    #[serde(default)]
+    pub rollback_id: Option<String>,
+}
+
+/// One entry a refinement touched — **name and kind, never text**.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct HarnessRefineEditRequest {
+    pub action: String,
+    pub kind: String,
+    pub id: String,
 }
 
 /// The reply rollup embedded in a message (Swift `ThreadRollupDTO`,
