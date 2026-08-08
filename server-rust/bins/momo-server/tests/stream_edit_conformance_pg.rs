@@ -300,6 +300,64 @@ async fn open(
     response.json().await.expect("opening message body")
 }
 
+/// `POST …/messages` with whatever body a test wants to send (#1173).
+///
+/// Raw rather than typed because half of what this proves is about requests the
+/// server must **refuse** — an opening block that declares the wrong revision, a
+/// closing verb where no close can happen — and a helper that could only build
+/// valid ones would be unable to ask the question.
+async fn post_message(
+    http: &reqwest::Client,
+    base: &str,
+    token: &str,
+    fx: &Fixture,
+    request: Value,
+) -> (reqwest::StatusCode, Value) {
+    let response = http
+        .post(format!(
+            "{base}/v1/workspaces/{}/channels/{}/messages",
+            fx.workspace, fx.channel
+        ))
+        .bearer_auth(token)
+        .json(&request)
+        .send()
+        .await
+        .expect("post a message");
+    let status = response.status();
+    let body = response.json().await.unwrap_or(Value::Null);
+    (status, body)
+}
+
+/// The opening `POST` an out-of-process producer makes (#1173): the first text,
+/// the turn's idempotency key, the run it belongs to, and the block that says
+/// this message is being assembled.
+async fn open_streaming(
+    http: &reqwest::Client,
+    base: &str,
+    token: &str,
+    fx: &Fixture,
+    turn: Uuid,
+    run: Uuid,
+    body: &str,
+) -> (reqwest::StatusCode, Value) {
+    post_message(
+        http,
+        base,
+        token,
+        fx,
+        json!({
+            "clientMsgId": turn.to_string(),
+            "body": body,
+            // `run_id` in props is how an out-of-process producer names its run:
+            // the `runId` request field is still unserved (agent-run binding),
+            // and props is where #1166's "has the run ended?" verdict reads it.
+            "props": { "run_id": run.to_string() },
+            "stream": { "rev": 0, "streaming": true },
+        }),
+    )
+    .await
+}
+
 /// `PATCH …/messages/{id}` with a `stream` block — one slice.
 ///
 /// `body` is the **whole text so far**, never a delta: the writer owns the
@@ -1079,5 +1137,298 @@ async fn an_outcome_is_refused_off_the_final_slice_and_outside_its_two_values() 
         after.get("momo.stream"),
         before.get("momo.stream"),
         "neither refusal moved the revision, which would refuse the writer's own next slice as stale"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// #1173 — the opening write's marker, over REST
+// ---------------------------------------------------------------------------
+
+/// **RED proof.** The window this ticket closes, reproduced and then shut.
+///
+/// A stream's first write is a `POST`, not a `PATCH` — the opening text rides
+/// the insert. In-process the marker rides it too (#1161), so a turn that dies
+/// before its first slice still leaves a message that *says* it was being
+/// assembled. Over REST there was no way to say it, and act 1 below is that
+/// state: a half sentence with nothing on it, indistinguishable from an answer
+/// the agent chose to end there.
+///
+/// Delete the stamping in `send_message_with_mentions_in_tx` and act 2 goes red
+/// by becoming act 1 — same unmarked row, same invisible half answer.
+///
+/// The last two acts are the properties that make the marker safe to add:
+/// the producer's arithmetic does not move (first slice is still `rev: 1`), and
+/// a **retried** opening write cannot rewind an answer that has already grown,
+/// because the send's idempotency makes it a no-op rather than a second insert.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn an_opening_post_can_mark_the_message_before_its_first_slice() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let fx = seed(&su, &app_pool).await;
+    let base = start_server(app_pool).await;
+    let http = reqwest::Client::new();
+    let token = login(&http, &base, fx.workspace, &fx.author).await;
+
+    // Act 1 — the shape before this ticket: an opening write with no way to say
+    // what it is. The producer dies here and this is all anybody ever sees.
+    let unmarked_run = Uuid::new_v4();
+    let (status, unmarked) = post_message(
+        &http,
+        &base,
+        &token,
+        &fx,
+        json!({
+            "clientMsgId": Uuid::new_v4().to_string(),
+            "body": "그건 아마",
+            "props": { "run_id": unmarked_run.to_string() },
+        }),
+    )
+    .await;
+    assert_eq!(status, 201, "an ordinary send is unchanged: {unmarked}");
+    let (_, _, _, unmarked_props) = stored(
+        &su,
+        Uuid::parse_str(unmarked["id"].as_str().unwrap()).unwrap(),
+    )
+    .await;
+    assert!(
+        unmarked_props.get("momo.stream").is_none(),
+        "a send that says nothing about streams still says nothing"
+    );
+    assert_eq!(
+        momo_messaging::open_stream_run_id(&unmarked_props),
+        None,
+        "the half sentence this ticket exists for: no marker, so no reader and \
+         no closer can tell it apart from a finished answer"
+    );
+
+    // Act 2 — the same write, now able to say it.
+    let run = Uuid::new_v4();
+    let turn = Uuid::new_v4();
+    let (status, opened) = open_streaming(&http, &base, &token, &fx, turn, run, "그건 아마").await;
+    assert_eq!(status, 201, "the opening block is accepted: {opened}");
+    let message_id = opened["id"].as_str().expect("message id").to_string();
+    let uuid = Uuid::parse_str(&message_id).unwrap();
+
+    assert_eq!(
+        opened["props"]["momo.stream"],
+        json!({ "rev": 0, "streaming": true }),
+        "the 201 already carries the marker — the sender's own echo says the \
+         message is being assembled"
+    );
+    let (body, state, edited_at_ms, props) = stored(&su, uuid).await;
+    assert_eq!(body.as_deref(), Some("그건 아마"));
+    assert_eq!(state, "sent", "opening a stream is not an edit");
+    assert_eq!(edited_at_ms, None);
+    assert_eq!(props["momo.stream"], json!({ "rev": 0, "streaming": true }));
+    assert_eq!(
+        props["run_id"],
+        json!(run.to_string()),
+        "the marker joins the producer's props rather than replacing them"
+    );
+    assert_eq!(
+        momo_messaging::open_stream_run_id(&props),
+        Some(run),
+        "and the run behind a half-written answer is now findable — the same \
+         question #1166 answers on every page read"
+    );
+
+    // The realtime reader is the one this window was open on: a person watching
+    // the channel sees the marker on the `message.new` frame itself, without
+    // waiting for a slice that may never come.
+    let frames = broadcasts(&su, fx.channel).await;
+    let opening_frame = frames.last().expect("the opening broadcast");
+    assert_eq!(opening_frame["type"], json!("message.new"));
+    assert_eq!(
+        opening_frame["payload"]["props"]["momo.stream"],
+        json!({ "rev": 0, "streaming": true }),
+        "the frame a live reader receives says the message is being assembled"
+    );
+
+    // Act 3 — the arithmetic did not move: the first slice is still rev 1.
+    let (status, sliced) = slice(
+        &http,
+        &base,
+        &token,
+        &fx,
+        &message_id,
+        "그건 아마 이렇게 될 겁니다",
+        1,
+        false,
+    )
+    .await;
+    assert_eq!(status, 200, "rev 1 follows rev 0: {sliced}");
+    let (body, _, _, props) = stored(&su, uuid).await;
+    assert_eq!(body.as_deref(), Some("그건 아마 이렇게 될 겁니다"));
+    assert_eq!(props["momo.stream"]["rev"], json!(1));
+
+    // Act 4 — a retried opening write is the send's own idempotency, and the
+    // marker does not make it a rewind. Without this, any adapter retry after a
+    // network hiccup would re-open a message mid-answer at rev 0 and hand the
+    // reader back a sentence that had already grown past it.
+    let (status, replayed) =
+        open_streaming(&http, &base, &token, &fx, turn, run, "그건 아마").await;
+    assert_eq!(status, 201, "a retried open is still a 201: {replayed}");
+    let (body, _, _, props) = stored(&su, uuid).await;
+    assert_eq!(
+        body.as_deref(),
+        Some("그건 아마 이렇게 될 겁니다"),
+        "the replay wrote nothing over the answer"
+    );
+    assert_eq!(props["momo.stream"]["rev"], json!(1), "and nothing rewound");
+    assert_eq!(
+        message_count(&su, fx.channel).await,
+        2,
+        "two turns, two messages — the retry opened nothing new"
+    );
+    // 실측: **3**, not 2. The spine bumps `channel_seq` in the same statement as
+    // the insert (a CTE `UPDATE … RETURNING` feeding `ON CONFLICT DO NOTHING`),
+    // so a deduped send spends a seq without leaving a row. That is the send
+    // path's own long-standing behaviour — the marker neither causes it nor
+    // changes it — and it is asserted here rather than glossed over so that a
+    // future change to it fails a test instead of surprising a reader.
+    assert_eq!(
+        channel_last_seq(&su, fx.channel).await,
+        3,
+        "the retried open consumed a counter value and wrote no message"
+    );
+
+    // Act 5 — the close is the one it always was: the marker a `POST` wrote is
+    // the same one a final `PATCH` clears.
+    let (status, closed) = slice(
+        &http,
+        &base,
+        &token,
+        &fx,
+        &message_id,
+        "그건 아마 이렇게 될 겁니다.",
+        2,
+        true,
+    )
+    .await;
+    assert_eq!(status, 200, "the final slice lands: {closed}");
+    let (_, _, _, props) = stored(&su, uuid).await;
+    assert_eq!(props["momo.stream"]["streaming"], json!(false));
+    assert_eq!(
+        momo_messaging::open_stream_run_id(&props),
+        None,
+        "a finished answer is not an open stream"
+    );
+    assert_eq!(
+        audit_actions(&su, fx.workspace).await,
+        vec!["message.streamed".to_string()],
+        "one assembled message, one audit row — opening a stream audits nothing \
+         on its own"
+    );
+}
+
+/// **RED proof.** An opening block that declares something the server will not
+/// write is refused, and refused **before the channel moves**.
+///
+/// The block carries no value that is stored: the marker is always
+/// `{rev: 0, streaming: true}`. So dropping the two guards in `opens_stream`
+/// changes nothing in Postgres — which is exactly why they are load-bearing.
+/// Remove them and both requests below turn into 201s whose rows say what they
+/// always said, while the producer walks away believing something else:
+///
+/// * `rev: 9` — its first slice will be numbered 10 against a row holding 0. The
+///   slices still apply (10 > 0), so nothing fails; the producer's own revision
+///   ledger is simply fiction from then on.
+/// * `streaming: false` — it believes it posted a finished answer. What is in
+///   the channel is a message that says it is still being assembled, and the
+///   producer has no reason to ever send the slice that would close it.
+///
+/// The third request is the decoder's own refusal: `final` belongs to the
+/// `PATCH`, and a silently ignored one here would be a producer trying to open
+/// and close in a single write.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn an_opening_marker_that_declares_the_wrong_thing_is_refused_by_name() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let fx = seed(&su, &app_pool).await;
+    let base = start_server(app_pool).await;
+    let http = reqwest::Client::new();
+    let token = login(&http, &base, fx.workspace, &fx.author).await;
+
+    let refusal = |body: &Value| {
+        body["error"]["message"]
+            .as_str()
+            .or(body["message"].as_str())
+            .unwrap_or_default()
+            .to_string()
+    };
+
+    let (status, error) = post_message(
+        &http,
+        &base,
+        &token,
+        &fx,
+        json!({
+            "clientMsgId": Uuid::new_v4().to_string(),
+            "body": "답이 자",
+            "stream": { "rev": 9, "streaming": true },
+        }),
+    )
+    .await;
+    assert_eq!(status, 400, "only rev 0 opens a stream: {error}");
+    let message = refusal(&error);
+    assert!(
+        message.contains("rev 0") && message.contains("rev 1"),
+        "the sentence names both floors so an adapter author can fix it without \
+         reading our source: {message}"
+    );
+
+    let (status, error) = post_message(
+        &http,
+        &base,
+        &token,
+        &fx,
+        json!({
+            "clientMsgId": Uuid::new_v4().to_string(),
+            "body": "답이 자",
+            "stream": { "rev": 0, "streaming": false },
+        }),
+    )
+    .await;
+    assert_eq!(status, 400, "a send cannot open a closed stream: {error}");
+    let message = refusal(&error);
+    assert!(
+        message.contains("streaming: true") && message.contains("final PATCH"),
+        "and it names where a close actually happens: {message}"
+    );
+
+    let (status, error) = post_message(
+        &http,
+        &base,
+        &token,
+        &fx,
+        json!({
+            "clientMsgId": Uuid::new_v4().to_string(),
+            "body": "답이 자",
+            "stream": { "rev": 0, "streaming": true, "final": true },
+        }),
+    )
+    .await;
+    // 422 and not 400: this refusal is the closed-world **decoder's**, the same
+    // answer any unknown key on a send already gets (ADR-0134 D1), and it comes
+    // before the handler runs at all. A route-level check would have to accept
+    // the key in order to reject it, which is one more place the shape can drift.
+    assert_eq!(
+        status, 422,
+        "the closing verbs are not keys of the opening block: {error}"
+    );
+
+    assert_eq!(
+        message_count(&su, fx.channel).await,
+        0,
+        "a refused declaration leaves no message behind"
+    );
+    assert_eq!(
+        channel_last_seq(&su, fx.channel).await,
+        0,
+        "and no seq — the refusal happens before a connection is even taken"
     );
 }

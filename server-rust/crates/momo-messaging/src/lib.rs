@@ -92,7 +92,8 @@ pub use interaction::{
     validate_reaction_emoji, DeletedMessage, InteractionMessage, InteractionRefused, LockedMessage,
     OpenStreamMessage, PinAction, PinDelta, PinnedMessage, ReactionAction, ReactionDelta,
     ReactionEmojiInvalid, ReactionSnapshot, StreamCloseOutcome, StreamEdit, StreamOutcome,
-    CHANNEL_PIN_LIMIT, MESSAGE_REACTION_LIMIT, REACTION_EMOJI_MAX_CHARS, STREAM_PROPS_KEY,
+    CHANNEL_PIN_LIMIT, MESSAGE_REACTION_LIMIT, OPENING_STREAM_REV, REACTION_EMOJI_MAX_CHARS,
+    STREAM_PROPS_KEY,
 };
 pub use message::{
     agent_auto_reply_streak_in_tx, agent_context_window_in_tx, build_broadcast_payload,

@@ -50,6 +50,17 @@ pub enum ProvenanceRejected {
     /// else's speech.
     #[error("a member may only sign its own message")]
     SignerIsNotAuthor,
+    /// #1173 — a signed send may not also open a stream.
+    ///
+    /// The digest is derived from the props **as inserted**
+    /// (`crate::message::send_message_with_mentions_in_tx` step 2), and the
+    /// opening marker is authored by the server on that same insert — after the
+    /// sender signed. So the combination can only ever end in
+    /// [`Self::SignatureRejected`], which blames the signature for a key the
+    /// signer was never shown. Refusing it by name is the difference between
+    /// "these two do not go together" and "your signature is wrong".
+    #[error("a signed send cannot also open a stream")]
+    SignedStreamOpen,
 }
 
 impl From<sqlx::Error> for MessagingError {

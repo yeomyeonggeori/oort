@@ -537,8 +537,18 @@ pub const STREAM_PROPS_KEY: &str = "momo.stream";
 /// first slice is revision 1 whether or not it found this block: no producer's
 /// arithmetic changes, and a message that never streamed still reads as 0.
 pub fn opening_stream_props() -> Value {
-    json!({ "rev": 0, "streaming": true })
+    json!({ "rev": OPENING_STREAM_REV, "streaming": true })
 }
+
+/// The revision an opening marker carries, named because two paths must agree on
+/// it (#1173).
+///
+/// In-process, [`opening_stream_props`] writes it. Over REST, the opening `POST`
+/// **declares** it — and the route refuses any other number, because the server
+/// writes this one regardless and a producer whose first slice is numbered from
+/// a different floor would be doing arithmetic against a row that never held its
+/// value.
+pub const OPENING_STREAM_REV: i64 = 0;
 
 /// How a stream stopped, when it did not simply finish (ADR-0155).
 ///

@@ -3563,6 +3563,8 @@ export interface components {
             attachmentIds?: string[];
             /** @description Per-request agent model/effort override for mention runs. */
             routing?: components["schemas"]["RunRoutingInput"];
+            /** @description #1173 — marks this send as the opening write of a growing answer. Optional and additive; omitting it is the ordinary send. */
+            stream?: components["schemas"]["StreamOpen"];
         };
         RunRoutingInput: {
             model?: string;
@@ -3587,6 +3589,20 @@ export interface components {
              * @enum {string}
              */
             outcome?: "cancelled" | "failed";
+        };
+        /** @description #1173 — the `stream` block on a send, marking it as the **opening write** of a growing answer. A stream's first write is a POST, not a PATCH (the opening text rides the insert), so without this block a producer that died before its first slice left a half sentence with nothing on it — indistinguishable from an answer the agent chose to end there, and invisible to the close path that could have marked it. With it, the message carries `props["momo.stream"] = {rev: 0, streaming: true}` from its first byte, exactly like one opened in-process, and the first PATCH slice is `rev: 1` as always. Neither field is stored as sent: the marker is server-owned, and these are the producer's declaration of the arithmetic it is about to do — which is why a wrong one is refused instead of silently corrected. */
+        StreamOpen: {
+            /**
+             * Format: int64
+             * @description Must be `0` — the floor the strictly-greater rule already stands on, so a message that never streamed and one that just opened read the same. Any other value is a 400: the server would write `0` anyway, and a producer numbering its slices from a different floor would be keeping a revision ledger the row never held.
+             * @enum {integer}
+             */
+            rev: 0;
+            /**
+             * @description Must be `true`. A send opens a stream; only the final PATCH slice closes one. `false` is a 400 rather than a no-op, because a producer that believed it had posted a finished answer would never send the slice that closes the message the channel is actually showing.
+             * @enum {boolean}
+             */
+            streaming: true;
         };
         ReactionDelta: {
             /** @enum {string} */
@@ -8575,7 +8591,7 @@ export interface operations {
                     "application/json": components["schemas"]["Message"];
                 };
             };
-            /** @description Invalid workspace/channel id, deleted root, nested reply root, or a deleted quote target. */
+            /** @description Invalid workspace/channel id, deleted root, nested reply root, a deleted quote target, an opening `stream` block that declares anything other than `rev: 0` / `streaming: true`, or a signed send that also opens a stream (the provenance digest binds the props as inserted, and the opening marker is written by the server after the signature was made). */
             400: {
                 headers: {
                     [name: string]: unknown;
