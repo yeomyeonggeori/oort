@@ -6,7 +6,7 @@
 >
 > **신규 ADR**: 0156 Accepted(CubeSandbox=T3 기질·발주 사양 32GB 증보) · 0157 **Proposed**(샌드박스 네트워크 경계 — 성재 검토 대기) · 0158 Accepted(prime 승격·D7) · 0129 증보 1(kind 분리·사후 필터링 금지). 리서치 정본: `2026-08-08-oss-sandbox-memory-evaluation.md`(Tencent Memory 4중 위반 배제·vibesdk 배제)·`2026-08-08-cubesandbox-requirements-adapter-mapping.md`(발주 체크리스트·probe lossy).
 >
-> **라이브**: 웹 `index-C3szaFWl` · 서버 `momo-rust:08e0c9d9`(롤백 892b342f 단일) — 단 **#1188·#1189는 미배포**(다음 배포 묶음). 폰 아카이브 재빌드 대기(#1186 다크 포함 — 기기 검수 시).
+> **라이브(8/9 갱신)**: 웹 `index-C3szaFWl` · 서버 `momo-rust:2afae645`(prime 승격 포함·롤백 08e0c9d9 단일). 이후 랜딩 #1191(주석)·#1192(골든 벡터)는 배포 무관(산문·테스트). 폰 아카이브 재빌드 대기(#1186 다크 포함 — 기기 검수 시). oort 리브랜딩 5배치 완주(#1118 종결)·#1130/#1190 종결·워크트리 디렉토리 0B(684-3 브랜치 ref만 보존 — Swift 퇴역분 폐기 여부 성재 판단).
 >
 > **SSH 사건 종결 기록**: 원인=logind 런타임 걸림(NCP API 재부팅=정답·ncp-power.py 재작성—서명 v2·~/.ncp 자격+pem이 원본)+비번 파일 tmp 소실(getRootPassword API 재복호화 절차가 정본)+root 일시 잠금(1분 자동 해제).
 >
