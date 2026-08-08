@@ -1945,3 +1945,8 @@
 - **#1179 머지**: `cubesandbox` provider 어댑터(fake 상류 검증 — 실 호스트 불요). blocker 2 해소가 구조적: 멱등=metadata 각인+재구성(조회 실패=생성 중단 fail-closed)+advisory 락 / probe lossy=**`presence_for_status`가 state 인자를 안 받는 시그니처가 곧 계약**+실DB 단정(fake가 running 보고해도 stale 하트비트=고아 처리). capability=D6·max instances env 주입. red proof 3종. **이탈 채택 2**: ①sweep 정의 모호→ADR-0141 24h 기준(env 조정)+D4-② 실측 항목 추가(reconciler probe가 idle 시계 리셋하는가 — inbound만 리셋·workd는 outbound) ②pause 409=재프로브(mock 방식이 오히려 결함 — 살아있는 머신 과금 중단 위험). notifier=Unwired(D4-④ 경계). cargo 808·병합 트리 7/7.
 - 운영 노트: NCP SSH 경로 스톨(HTTPS 정상 — 관리 경로만) — 웹 `index-C3szaFwl` 교체·서버 e8b604e0 전송 대기. 연결 회복 후 재시도(반복 재시도는 MaxStartups 악화 위험이라 중단).
 - #1177=D4-② 실기동만 잔여(전용 호스트 — 성재 발주 체크리스트 전달됨). 다음 후보: D4-④ 프로비저너 연동(어댑터 랜딩으로 전제 충족)·#1178(메모리 플레인 흡수)·#1168·#1164·#1176.
+
+## 2026-08-08 (밤) · Fable · D4-④ 랜딩(#1180)·#1178 종결 — CubeSandbox 체인 3/4 완결
+- **#1180 머지(D4-④)**: 프로비저닝 폐곡선(티어 정책→create→env 등록 토큰→기존 register→세션 201) — 사본 0·마이그레이션 0·토큰은 응답에 실리지 않음이 계약(부정형 단정). red proof 3(결정성 2형태·미활성=상류 요청 0). 이탈 채택 3(provisioning→failed 비신설·권한=활성 멤버+티어 정책·bootstrapToken 부재). cargo 821·실DB 신규 8/8·병합 트리 7/7.
+- **하루 아크 완성**: OSS 발제(아침)→인터뷰→리서치→ADR-0156 Accepted→D4-① 요건→D4-③ 어댑터→D4-④ 프로비저너(밤) — **잔여=D4-② 실기동만**(성재 전용 호스트 대기). #1178은 ADR-0129 증보 1로 직접 반영·종결(kind 분리·사후 필터링 금지).
+- 성재 대기: 전용 호스트 발주(체크리스트 전달됨)·서버 배포 대행(SSH 스톨 회복 후 — e8b604e0는 D4-③/④ 미포함이라 회복 시 최신 head로 재빌드 판단)·구구 태그. 큐 잔여: #1168(실물 확인)·#1164(결정)·#1176(web-legacy)·#1173(어댑터 POST 표식).
