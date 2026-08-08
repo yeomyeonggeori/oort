@@ -11,10 +11,11 @@
 #   - 패키지·타깃·crate 이름(@momo/core, MomoMac, momo-desktop …) · 리포/URL · 파일 경로
 #   - 저장 키·이벤트명·accessibilityIdentifier·로그 태그·Bonjour 서비스 타입(_momo._tcp)
 #   - 주석 · 테스트 · 픽스처 · 예시 도메인(momo.local, momo.test)
-#   - Swift `server/` (아직 옛 이름 — 별도 배치. 잔존은 #1118 에 명시돼 있다)
 #
 # `server-rust/` 는 #1118 에서 합류했다(3절). 클라가 "oort Cloud"를 말하는데 서버가
 # 돌려주는 오류 문장이 "momo Cloud"면 사람 눈에는 두 제품이다 — 그 갈라짐을 여기서 잰다.
+# Swift `server/` 는 #1118 배치 4 에서 합류했다(4절). prod 이미지가 아직 이쪽을 빌드하므로
+# (`infra/prod/docker/momo.Dockerfile`) 사용자가 실제로 받는 문장은 여전히 여기서 나온다.
 # 위 형태들은 IDENTIFIER_PATTERNS 로 문자열 리터럴 단위에서 걸러지고, 패턴으로 못 가르는
 # 몇 건은 ALLOW 에 이유와 함께 하나씩 적혀 있다. 규칙을 넓혀야 하면 근거는 ADR 이어야
 # 한다 — 여기서 조용히 넓히면 게이트가 아무것도 재지 않게 된다.
@@ -264,9 +265,79 @@ def scan_server_rust():
                 )
 
 
+# ── 4. Swift server/ 가 사람에게 돌려주는 문장 (#1118 배치 4) ──────────────
+# server-rust 로 포팅 중이지만 prod 이미지는 아직 이쪽을 빌드한다. 3절과 같은 것을
+# 재되, Swift 이므로 `"""` 여러 줄 리터럴(에이전트가 매 턴 읽는 preamble 이 여기 산다)도
+# 본다. `server/Tests`·`server/Fixtures` 는 walk 대상이 아니다.
+SWIFT_SERVER_ROOT = "server/Sources"
+SWIFT_MULTILINE = re.compile(r'"""(.*?)"""', re.S)
+
+# 패턴으로 못 가르는 잔존. 전부 "형태가 맨 momo 인 계약값"이다.
+SWIFT_SERVER_ALLOW = {
+    ("server/Sources/MomoServer/Config.swift", "momo"):
+        "POSTGRES_USER/PASSWORD/DB 기본값 + PG URL 파싱 폴백 + 취약 시크릿 거부 목록 — 인프라 계약값(D1)",
+    ("server/Sources/MomoServer/DB/Database.swift", "momo"):
+        "PG URL 파싱의 데이터베이스명 폴백 — 같은 계약값",
+    ("server/Sources/MomoServer/Plugins/PluginManifestValidator.swift", "momo"):
+        "플러그인 매니페스트 v0 의 최상위 키 이름 — 와이어 계약(momo.plugin.v1)",
+    ("server/Sources/MomoServer/Plugins/PluginManifestValidator.swift", "unknown or missing field at momo"):
+        "위 키 이름을 그대로 인용하는 검증 실패 경로 라벨",
+    ("server/Sources/MomoServer/Drive/DriveBackend.swift", "momo Drive stub text"):
+        "MOMO_DRIVE_BACKEND=stub 전용 결정론 픽스처 — staging/prod 부팅이 거부하는 모드",
+    ("server/Sources/MomoServer/Drive/DriveBackend.swift", "momo Drive stub document"):
+        "같은 스텁 픽스처",
+    ("server/Sources/MomoServer/Auth/WorkHostAuthenticator.swift", "momohost"):
+        "Authorization 스킴 토큰 — 와이어 계약",
+    ("server/Sources/MomoServer/Routes/AttachmentRoutes.swift", "momo.\\(action).v1"):
+        "audit_log detail 의 wire schema id — 보간이 점 뒤에 오는 탓에 점 식별자 패턴이 못 가른다",
+}
+
+
+def scan_swift_server():
+    global checked
+    root = os.path.join(ROOT, SWIFT_SERVER_ROOT)
+    if not os.path.isdir(root):
+        return
+    for dirpath, dirnames, filenames in os.walk(root):
+        if SKIP_PATH.search(rel(dirpath)):
+            dirnames[:] = []
+            continue
+        for name in sorted(filenames):
+            if not name.endswith(".swift") or SKIP_FILE.search(name):
+                continue
+            path = os.path.join(dirpath, name)
+            checked += 1
+            body = strip_comments(open(path, encoding="utf-8").read())
+            spans = []
+            for m in SWIFT_MULTILINE.finditer(body):
+                spans.append((m.group(1), m.start()))
+            # 여러 줄 리터럴은 따옴표 셋이라 한 줄 스캐너가 잘못 자른다 — 먼저 비운다.
+            flat = SWIFT_MULTILINE.sub(lambda m: " " * (m.end() - m.start()), body)
+            for m in re.finditer(r'"((?:[^"\\\n]|\\.)*)"', flat):
+                spans.append((m.group(1), m.start()))
+            for literal, start in spans:
+                prose = INTERPOLATION.sub(" ", literal)
+                if not BRAND_RE.search(prose):
+                    continue
+                if IDENTIFIER_RE.search(prose):
+                    continue
+                # 보간을 지운 형태와 원문 둘 다로 조회한다 — 보간이 낀 계약값은
+                # 원문 그대로 적어야 ALLOW 가 읽힌다.
+                if (rel(path), prose) in SWIFT_SERVER_ALLOW:
+                    continue
+                if (rel(path), literal) in SWIFT_SERVER_ALLOW:
+                    continue
+                line = body.count("\n", 0, start) + 1
+                failures.append(
+                    "%s:%d 서버가 돌려주는 문장에 옛 이름이 남았다: %r"
+                    % (rel(path), line, literal.strip()[:90])
+                )
+
+
 scan_sources()
 check_structured()
 scan_server_rust()
+scan_swift_server()
 
 if failures:
     print("GATE FAIL: oort 사용자 노출 잔여 %d 건" % len(failures))
