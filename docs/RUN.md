@@ -214,7 +214,7 @@ unlink는 provider 내부에서만 처리하고, oort app/API/DB/diagnostics/loc
 | `MOMO_S3_FORCE_PATH_STYLE` | 서버 | `0` | `1`이면 `<endpoint>/<bucket>/<key>` path-style. compose MinIO에서는 필수이며 AWS/R2/B2는 제공자 endpoint 정책에 맞춘다. |
 | `MOMO_DRIVE_SA_KEY_PATH` | 서버 | (미설정) | repo 밖 SA JSON 파일 경로. 키 바이트는 로그·응답·DB에 저장하지 않는다. |
 | `MOMO_DRIVE_SHARED_DRIVE_ID` | 서버 | (미설정) | 경로 C가 접근할 공유 드라이브 1개의 ID. 미설정이면 `tools/call`이 fail-closed 오류를 반환한다. |
-| `PUBLIC_BASE_URL` | 서버 | (요청 origin) | momo-hosted MCP 상대 endpoint를 descriptor의 절대 URL로 조립할 public HTTPS origin. localhost HTTP만 개발 fallback 허용. |
+| `PUBLIC_BASE_URL` | 서버 | (요청 origin) | oort-hosted MCP 상대 endpoint를 descriptor의 절대 URL로 조립할 public HTTPS origin. localhost HTTP만 개발 fallback 허용. |
 | `CENT_CONNECTION_TOKEN_TTL_SECONDS` | 서버 | `300` | `/v1/auth/realtime-token` Centrifugo connection JWT TTL. dev 값은 60~1800초로 clamp된다. |
 | `RELAY_DATABASE_URL` | relay/worker | (= `DATABASE_URL`) | relay/worker 전용 **BYPASSRLS `momo_relay`** 접속(§2.2/§10.1). 설정 시 우선. |
 | `RELAY_POSTGRES_USER` / `RELAY_POSTGRES_PASSWORD` | relay/worker | (= `POSTGRES_*`) | 위와 동일 목적의 분리 자격증명. |
@@ -336,7 +336,7 @@ AGENT_MODEL=gpt-via-local-hermes \
 scripts/local_gate.sh --profile external-agent-provider
 ```
 
-Credentialed smoke에 필요한 momo-side env는 위 네 가지
+Credentialed smoke에 필요한 oort-side env는 위 네 가지
 `AGENT_PROVIDER_MODE`, `HERMES_BASE_URL`, `HERMES_API_KEY`, `AGENT_MODEL`뿐이다. local loopback은
 여기에 `MOMO_ENV=local`, `AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1`이 추가로 필요하다.
 credentialed PASS에서는 `/v1/agent-runtime/status`가 `available`이고 `degradedReason`이 비어 있어야
@@ -406,7 +406,7 @@ transaction에서 `agent_profile`을 함께 만든다. 별도 생성/갱신은 a
 workspace owner/admin이 `GET/PUT /v1/workspaces/{workspace}/agents/{agent}/profile`로 수행한다.
 instructions는 UTF-8 8KB, triggers는 `mention=true` 고정+미집행 schedule 예약이며 자격증명 형태
 필드는 재귀적으로 거부된다. 1번은 **채널을 자동 추가하지 않는다**. 2번은 기존 human/agent 공용 membership 경로를
-그대로 재사용한다. 3번의 원문 bearer는 provider OAuth/API key가 아니라 momo-facing agent
+그대로 재사용한다. 3번의 원문 bearer는 provider OAuth/API key가 아니라 oort-facing agent
 credential이며 서버에는 sha256만 저장된다. `baseUrl`/`config`에는 Codex/OpenAI OAuth token,
 provider API key, userinfo/query/fragment credential을 넣을 수 없다. non-loopback은 HTTPS만,
 loopback HTTP는 `MOMO_ENV=local AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1`과 명시적 포트가 있을 때만
@@ -480,7 +480,7 @@ MOMO_HERMES_PROVIDER_READY=1 scripts/momo hermes-gateway-smoke --real --trigger
 macOS dogfood 앱에서는 초대 전 Hermes member 자체가 존재하지 않으며 roster에도 보이지 않는다.
 멤버 섹션의 `+` 버튼에서 **에이전트 초대**를 선택하고 `@hermes` alias, 표시 이름, endpoint
 label, model label, permission scope, avatar를 확인한다. 앱은 pairing manifest와 invite code를
-생성하고 copy/export affordance를 제공한다. manifest에는 momo-facing connection metadata와
+생성하고 copy/export affordance를 제공한다. manifest에는 oort-facing connection metadata와
 `$HOME/.momo/hermes-gateway.env:MOMO_AGENT_TOKEN` 설정 위치만 들어가며, 토큰 원문이나
 Codex/OpenAI OAuth token, refresh token, provider API key 값은 절대 포함하지 않는다.
 non-loopback `http://...` endpoint는 사용자가 명시적으로 opt-in하지 않으면 초대 완료가 막힌다.

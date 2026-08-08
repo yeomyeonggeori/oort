@@ -69,13 +69,13 @@ or `http://localhost` is allowed only with `MOMO_ENV=local` and
    http://127.0.0.1:<provider-port>/v1/chat/completions
    ```
 
-3. Create the momo-facing env file outside this repository.
+3. Create the oort-facing env file outside this repository.
 
    ```bash
    scripts/momo hermes-init
    ```
 
-   Edit only the momo-facing values:
+   Edit only the oort-facing values:
 
    ```bash
    MOMO_ENV=local

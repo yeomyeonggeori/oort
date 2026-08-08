@@ -669,7 +669,7 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Explicitly provision one paid momo Cloud host on the configured provider.
+         * Explicitly provision one paid oort Cloud host on the configured provider.
          * @description Human bearer only. Requires confirmPaidCloud=true, positive workspace credit, an available work-pool slot, and a managed provider adapter configured on this instance (ADR-0142 D2). Returns 202 while the cloud workd is consuming its one-shot bootstrap token and 201 if registration completed before create returned. An instance whose provider is the degenerate BYOC adapter answers 409 and points at the enrollment path below rather than pretending it can create hosts.
          */
         post: operations["provisionCloudWorkHost"];
@@ -690,7 +690,7 @@ export interface paths {
         put?: never;
         /**
          * Issue a one-shot token so a host the workspace already owns can enroll.
-         * @description ADR-0142 D1. The base acquisition path: a workspace admin installs `momo-workd` on their own VM and spends this token at the cloud register endpoint. momo never creates or destroys a BYOC host — its lifetime belongs to its owner — but scheduling, observation and billing are identical to a managed host. Workspace-shared hosts only; a `scope` other than `workspace` is refused by name. The token is returned exactly once: only its SHA-256 digest reaches storage, so a replayed idempotencyRef answers 409 rather than re-revealing it.
+         * @description ADR-0142 D1. The base acquisition path: a workspace admin installs `momo-workd` on their own VM and spends this token at the cloud register endpoint. oort never creates or destroys a BYOC host — its lifetime belongs to its owner — but scheduling, observation and billing are identical to a managed host. Workspace-shared hosts only; a `scope` other than `workspace` is refused by name. The token is returned exactly once: only its SHA-256 digest reaches storage, so a replayed idempotencyRef answers 409 rather than re-revealing it.
          */
         post: operations["enrollBYOCWorkHost"];
         delete?: never;
@@ -1086,7 +1086,7 @@ export interface paths {
         head?: never;
         /**
          * Report tool lifecycle, end a live session, change observation, or relay an ACP event.
-         * @description A MomoHost-signed execution host bound to the session reports running-to-idle with the last tool exitCode and idle-to-running without replacing the session. The corresponding realtime frames are work.session.idle with payload keys session_id, channel_id, root_message_id, member_id, host_id, status, idle_at, exit_code, and work.session.resumed-to-running with the same identity/status fields plus resumed_at and the preserved exit_code. Idle also commits one system thread message ("작업 완료 — idle 대기") so NotifierWorker can notify only the owner through the existing id-only push envelope. When the bound host is a momo Cloud host whose adapter declares pause support, running-to-idle also pauses its provider instance and opens a zero-active-seconds paused interval; idle-to-running resumes it before reopening active usage. An adapter that declares no pause is skipped rather than faked. A provider-confirmed missing instance closes usage, destroys and revokes the cloud host, and schedules the existing offline sweep to publish the orphaned lifecycle. The creating member, or the bound host, may explicitly end a running or idle session. The ledger row and card props update beside a no-version work.session.ended outbox. A human session owner may instead set observation to open or owner_only; owner_only invalidates live observer grants and blocks new ones. A MomoHost-signed caller may alternatively append one bounded normalized ACP event to the session thread ledger; the message row and message.new plus ACP realtime outbox projections commit atomically. Raw ACP metadata and terminal streams are forbidden. A MomoHost-signed caller may also publish its direct PTY attach binding (ptyId + attachEndpoint) onto its own running or idle session exactly once; the same call with a different binding is 409.
+         * @description A MomoHost-signed execution host bound to the session reports running-to-idle with the last tool exitCode and idle-to-running without replacing the session. The corresponding realtime frames are work.session.idle with payload keys session_id, channel_id, root_message_id, member_id, host_id, status, idle_at, exit_code, and work.session.resumed-to-running with the same identity/status fields plus resumed_at and the preserved exit_code. Idle also commits one system thread message ("작업 완료 — idle 대기") so NotifierWorker can notify only the owner through the existing id-only push envelope. When the bound host is an oort Cloud host whose adapter declares pause support, running-to-idle also pauses its provider instance and opens a zero-active-seconds paused interval; idle-to-running resumes it before reopening active usage. An adapter that declares no pause is skipped rather than faked. A provider-confirmed missing instance closes usage, destroys and revokes the cloud host, and schedules the existing offline sweep to publish the orphaned lifecycle. The creating member, or the bound host, may explicitly end a running or idle session. The ledger row and card props update beside a no-version work.session.ended outbox. A human session owner may instead set observation to open or owner_only; owner_only invalidates live observer grants and blocks new ones. A MomoHost-signed caller may alternatively append one bounded normalized ACP event to the session thread ledger; the message row and message.new plus ACP realtime outbox projections commit atomically. Raw ACP metadata and terminal streams are forbidden. A MomoHost-signed caller may also publish its direct PTY attach binding (ptyId + attachEndpoint) onto its own running or idle session exactly once; the same call with a different binding is 409.
          */
         patch: operations["updateWorkSession"];
         trace?: never;
@@ -1387,7 +1387,10 @@ export interface paths {
         delete: operations["deleteMessage"];
         options?: never;
         head?: never;
-        /** Edit an authored, undeleted message without changing its seq. */
+        /**
+         * Edit an authored, undeleted message without changing its seq.
+         * @description Two writes share this route. Without a `stream` block it is a human revision: `state` becomes `edited` and `editedAtMs` is stamped. With one (#1130 전제①) it is a slice of a growing answer — same 200, same `message.edited` broadcast, but no edit stamp, and a `rev` that is not newer than the stored one is a no-op. Authorship, membership, the tombstone rule and "no interaction consumes a seq" guard both. The slice that closes a stream may also name an `outcome` (ADR-0155) when the answer was stopped rather than completed.
+         */
         patch: operations["editMessage"];
         trace?: never;
     };
@@ -1404,6 +1407,50 @@ export interface paths {
         post?: never;
         /** Remove the authenticated member's reaction idempotently. */
         delete: operations["removeMessageReaction"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{workspaceId}/messages/{messageId}/pin": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Pin a message to its channel idempotently.
+         * @description A pin is the **channel's** fact, not the pinner's: `message_pin` is unique on the message alone, so two members pinning the same message produce one header entry, and any channel member may unpin it — including one who did not pin it. Requiring the pinner would strand every pin whose author left. Pinning consumes no `message.seq` and does not modify the message; the `message.pinned` broadcast reuses the target's own seq. The response carries the full list entry so the caller can insert it without re-reading.
+         */
+        put: operations["pinMessage"];
+        post?: never;
+        /**
+         * Unpin a message from its channel idempotently.
+         * @description Any channel member may unpin, not only the pinner. Unpinning a message that is not pinned is also a success (changed=false) and publishes nothing. Deleting a message sweeps its pin without a separate `message.unpinned` frame — the client drops it on `message.deleted`.
+         */
+        delete: operations["unpinMessage"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{workspaceId}/channels/{channelId}/pins": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List a channel's pinned messages, most recently pinned first.
+         * @description The cold-load counterpart of the pin verbs, the way the reaction snapshot is to the reaction toggle: read once per channel, then kept live by `message.pinned` / `message.unpinned`. Deleted messages are excluded. Empty channels return an empty array.
+         */
+        get: operations["getChannelPins"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -1749,7 +1796,7 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Receive a native momo HMAC-signed webhook.
+         * Receive a native oort HMAC-signed webhook.
          * @description Public ingress authenticated by X-Momo-Signature-Version, X-Momo-Key-Id, X-Momo-Timestamp, X-Momo-Delivery-Id, and X-Momo-Signature. The signature base and replay window are defined by ADR-0115. A first delivery returns 201; an idempotent replay returns 200.
          */
         post: operations["receiveNativeWebhook"];
@@ -2006,7 +2053,7 @@ export interface paths {
         /**
          * Read the provider and model effort capabilities used by routing.
          * @description Any authenticated principal — human access token or agent gateway bearer, both sent as `Authorization: Bearer`. The table carries no tenant row and no provider credential (ADR-0134 D2), and a model absent from it resolves to the conservative low/medium/high fallback rather than silently accepting a level the provider would reject.
-         *     Two provider groups are served. `hermes` holds momo's own provider-agnostic gateway handles (ADR-0130). `openai-codex` holds model ids the upstream publishes in its own catalog, measured 2026-08-04 from GET https://chatgpt.com/backend-api/codex/models — the base URL an ADR-0147 OAuth link stores. The upstream lists a sixth level, `ultra`, on some of those models; momo deliberately does not serve it, so `levels` stays low/medium/high/xhigh/max and an `ultra` request is a 400.
+         *     Two provider groups are served. `hermes` holds oort's own provider-agnostic gateway handles (ADR-0130). `openai-codex` holds model ids the upstream publishes in its own catalog, measured 2026-08-04 from GET https://chatgpt.com/backend-api/codex/models — the base URL an ADR-0147 OAuth link stores. The upstream lists a sixth level, `ultra`, on some of those models; oort deliberately does not serve it, so `levels` stays low/medium/high/xhigh/max and an `ultra` request is a 400.
          */
         get: operations["getProviderEffortTable"];
         put?: never;
@@ -2819,7 +2866,7 @@ export interface components {
             /** @description Always the degenerate `byoc` adapter identifier. */
             provider: string;
             state: string;
-            /** @description Shown exactly once. Only its SHA-256 digest is stored, so momo cannot show it again. */
+            /** @description Shown exactly once. Only its SHA-256 digest is stored, so oort cannot show it again. */
             bootstrapToken: string;
             /** Format: int64 */
             bootstrapExpiresAtMs: number;
@@ -3524,6 +3571,22 @@ export interface components {
         };
         EditMessageRequest: {
             body: string;
+            stream?: components["schemas"]["StreamEdit"];
+        };
+        /** @description #1130 전제① — marks this PATCH as a slice of a growing answer rather than a human revising what they already said. Present only for streaming producers. With it, `body` is the whole text so far (never a delta), the response leaves `editedAtMs` null and `state` at `sent`, the message keeps its original `seq`, and the realtime frame is the usual `message.edited` carrying the whole body — so a client renders a slice without re-reading anything. */
+        StreamEdit: {
+            /**
+             * Format: int64
+             * @description The writer's own monotonic revision, starting at 1. Not a `seq`: it orders one message's slices and lives in that message's server-owned `props["momo.stream"]`. A `rev` that is not strictly greater than the stored one is accepted as a 200 no-op — nothing is written, published or audited — which is the honest answer to both a replayed slice and one overtaken by its own successor. A value below 1 is a 400.
+             */
+            rev: number;
+            /** @description True on the last slice. Clears `props["momo.stream"].streaming` and is the point at which the single `message.streamed` audit row is written — one per assembled message, not one per slice. */
+            final: boolean;
+            /**
+             * @description ADR-0155 — how the stream ended, when it did not simply finish. Optional and additive: a normal completion omits it (and the key is then absent from `props["momo.stream"]`, not null), so a producer written before this field sends what it always sent and means what it always meant. `cancelled` is a human pressing stop; `failed` is the provider dying mid-answer. In both cases the partial body is left exactly as it stood and clients draw a restrained tail from this value. Only valid together with `final: true` — an outcome on a non-final slice is a 400, because "this is how it ended" and "more is coming" cannot both be true. Any other value is a 400.
+             * @enum {string}
+             */
+            outcome?: "cancelled" | "failed";
         };
         ReactionDelta: {
             /** @enum {string} */
@@ -3538,6 +3601,44 @@ export interface components {
             [key: string]: {
                 [key: string]: string[];
             };
+        };
+        /** @description One entry of a channel's pin list — the pin plus enough of the message to draw a header row without a second read. A pin's whole point is a message that is not on screen, so an ids-only projection would force a lookup that misses. `seq` is the message's own; pinning never mints one. */
+        PinnedMessage: {
+            /** Format: uuid */
+            messageId: string;
+            /** Format: uuid */
+            channelId: string;
+            /** Format: int64 */
+            seq: number;
+            /** Format: uuid */
+            authorMemberId: string;
+            type: string;
+            state: string;
+            body?: string | null;
+            /** Format: int64 */
+            createdAtMs: number;
+            /**
+             * Format: uuid
+             * @description Where the pin came from. A pin is the channel's fact, not the pinner's — any channel member may unpin, including one who did not pin it. This field grants nothing.
+             */
+            pinnedBy: string;
+            /** Format: int64 */
+            pinnedAtMs: number;
+        };
+        PinDelta: {
+            /** @enum {string} */
+            action: "pinned" | "unpinned";
+            /** Format: uuid */
+            messageId: string;
+            /** Format: uuid */
+            channelId: string;
+            /** @description false when the message was already in the requested state. The call still succeeded — pin and unpin are idempotent — but nothing was recorded and nothing was published. */
+            changed: boolean;
+            /** @description Present on an effective pin only; absent on unpin and on a no-op. */
+            pinned?: components["schemas"]["PinnedMessage"];
+        };
+        PinList: {
+            pins: components["schemas"]["PinnedMessage"][];
         };
         CreateAttachmentUploadRequest: {
             name: string;
@@ -3632,6 +3733,13 @@ export interface components {
             /** @description Completed attachments bound to this message, ordered by creation time. Omitted when empty. Upload capability URLs and archive provider identifiers are never included; download bytes through the authenticated content proxy. */
             attachments?: components["schemas"]["MessageAttachment"][];
             thread?: components["schemas"]["ThreadRollup"];
+            /**
+             * @description ADR-0155 방어 렌더링의 durable한 절반 (#1166). Present, and only ever `true`, on a page read (history, thread replies) whose row is still marked `momo.stream.streaming: true` while the `run_id` in its props names an agent run that has reached a terminal status. A reader that sees it draws the same "응답이 끊김" tail a closed stream's `outcome` would have drawn, so a closing PATCH that never landed survives a reload instead of dressing a half answer as a finished one.
+             *     **Omitted otherwise — never `false`.** Absence covers three different silences (this message never streamed, its stream is already closed and self-describing, or the run is not over), and a client must not read any of them as an ending. Optional and additive: a client that ignores the key behaves exactly as it did before the key existed.
+             *     Never present on the send echo, on an edit/stream response, or on a realtime `message.new`/`message.edited` frame — those describe a write, and a connected client learns a run's ending from its terminal `agent.status` frame.
+             * @enum {boolean}
+             */
+            runEnded?: true;
         };
         /** @description The quoted message a client draws above a reply (ADR-0148). A reference resolved on every read, never a copy: editing the original changes what this says, and deleting it leaves a tombstone with no `body` at all. The author is named by id only, like every other row in the response — the client resolves it against the roster it already holds. */
         QuotedMessage: {
@@ -3775,9 +3883,28 @@ export interface components {
             requestedBy: string;
             /** @description Delegation subject, projected from `payload.on_behalf_of`. The Rust server does not currently emit this field at all. */
             onBehalfOf?: string;
-            /** @description e.g. `tool_call`, `deploy`, `spend`. */
+            /** @description e.g. `tool_call`, `deploy`, `spend`. `work.spawn` marks a work-control approval, whose decision settles the linked `work_control` row instead of resuming an agent turn. */
             actionType: string;
-            payload: unknown;
+            /**
+             * @description Free-form approval payload. Two keys are contractual for the spawn card (ADR-0125 D6-A, #1114) and absent everywhere else:
+             *
+             *     * `execution.host_candidates[]` — the hosts this approval offers,
+             *       each `{host_id, display_name, host_type, tier, scope, online,
+             *       selectable, unavailable_reason}`. `tier` is `local` | `remote` |
+             *       `cloud`; a `cloud` row is always `selectable: false` with
+             *       `unavailable_reason: "t3_disabled"` while ADR-0136 keeps momo Cloud
+             *       off. Unselectable rows are listed with their reason rather than
+             *       hidden.
+             *
+             *     * `execution.default_host_id` — the pre-selected host (online local
+             *       first, then remote), or null when nothing is eligible.
+             *
+             *
+             *     The picker's answer is sent back as `ApprovalDecisionRequest.hostId`. No host-local path, environment, process state, or credential ever appears here.
+             */
+            payload: {
+                [key: string]: unknown;
+            };
             /** @enum {string} */
             status: "pending" | "approved" | "rejected" | "expired" | "cancelled";
             /**
@@ -4013,6 +4140,11 @@ export interface components {
              * @description Client-generated idempotency key for the decision.
              */
             client_decision_id: string;
+            /**
+             * Format: uuid
+             * @description ADR-0125 D6-A. The work host the approver chose from the card's picker, for an approval whose payload carries an `execution` object (a `work.spawn` control or a `work.session.spawn` tool call). Omit to accept `execution.default_host_id`; sending it on an approval that offers no picker is a 400, and sending one outside `execution.host_candidates[].selectable` is a 403. Not part of the idempotency key: a replayed decision answers the original receipt.
+             */
+            hostId?: string;
         };
         /**
          * @description Decision acknowledgement. Committed decisions carry status approved/rejected; expected failures reuse this shape with a diagnostic status (e.g. idempotency_conflict, forbidden, not_found, bad_request, expired, or the approval's current status on a 409).
@@ -6983,7 +7115,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description The bound momo Cloud sandbox no longer exists; orphaned fallback is scheduled. */
+            /** @description The bound oort Cloud sandbox no longer exists; orphaned fallback is scheduled. */
             410: {
                 headers: {
                     [name: string]: unknown;
@@ -6993,7 +7125,7 @@ export interface operations {
                 };
             };
             429: components["responses"]["RateLimited"];
-            /** @description The momo Cloud provisioner is unavailable; non-cloud hosts do not use it. */
+            /** @description The oort Cloud provisioner is unavailable; non-cloud hosts do not use it. */
             503: {
                 headers: {
                     [name: string]: unknown;
@@ -7039,7 +7171,7 @@ export interface operations {
                 content?: never;
             };
             401: components["responses"]["Unauthorized"];
-            /** @description Human caller is not the source session owner. */
+            /** @description Caller is not an active member of the source session's anchor channel (ADR-0143 D3 — eligibility is channel membership, not the source member_id), or the target is a member-scoped work host owned by somebody else. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -7053,7 +7185,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Source is not orphaned, target host is revoked/unavailable/outside policy, or the workspace/member pool has no available slot. */
+            /** @description Source is not orphaned, target host is revoked/unavailable/outside policy, target host is the source host, or the workspace/member pool has no available slot. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -8029,7 +8161,7 @@ export interface operations {
                     "application/json": components["schemas"]["Message"];
                 };
             };
-            /** @description Empty body, malformed id, or an already-deleted message. */
+            /** @description Empty body, malformed id, an already-deleted message, a stream `rev` below 1, or an `outcome` that is unknown or not on a final slice. */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -8167,6 +8299,157 @@ export interface operations {
             };
             /** @description Message not found. */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    pinMessage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+                messageId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Pinned delta; an already-pinned message is also success (changed=false). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PinDelta"];
+                };
+            };
+            /** @description Malformed message id, or the message is deleted. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Not a channel member, or workspace scope mismatch. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Message not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The channel already has the maximum 100 pinned messages. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    unpinMessage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+                messageId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Unpinned delta; an already-absent pin is also success. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PinDelta"];
+                };
+            };
+            /** @description Malformed message id. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Not a channel member, or workspace scope mismatch. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Message not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    getChannelPins: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+                /** @description Channel UUID. */
+                channelId: components["parameters"]["ChannelId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The channel's pins, ordered by pinnedAtMs descending. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PinList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Not a channel member, or workspace scope mismatch. */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };

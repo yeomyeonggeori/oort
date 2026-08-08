@@ -65,7 +65,7 @@ struct Config: Sendable {
     // ---- Hermes gateway native platform adapter (MOMO-325) ----
     var agentGateway: AgentGatewayConfig
 
-    // ---- momo Cloud T3 provider adapter (ADR-0136 + ADR-0142) ----
+    // ---- oort Cloud T3 provider adapter (ADR-0136 + ADR-0142) ----
     // `MOMO_T3_PROVIDER` names an adapter-registry identifier and each managed
     // provider reads its own `MOMO_T3_PROVIDER_<ID>_*` namespace. Operator
     // credentials are optional at process boot; only T3 routes fail closed with
@@ -464,7 +464,7 @@ enum AgentGatewayMode: String, Sendable {
 /// Hermes platform-adapter path: the server still creates the authoritative
 /// agent_run/context/budget/audit shell, publishes an `agent.job` notification to
 /// the agent realtime channel, and accepts status/result callbacks through a
-/// momo-owned REST endpoint.
+/// oort-owned REST endpoint.
 struct AgentGatewayConfig: Sendable {
     var mode: AgentGatewayMode
     var secret: String

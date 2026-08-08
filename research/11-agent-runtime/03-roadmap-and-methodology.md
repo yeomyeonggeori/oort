@@ -71,7 +71,7 @@ An integration is not accepted until all four planes are specified. "The agent c
 
 ## 4. Architectural Defaults
 
-- ADR-0102 Option C defines two official, role-separated paths: AgentWorker = momo-owned managed runtime; Hermes platform adapter = user-owned BYOA runtime.
+- ADR-0102 Option C defines two official, role-separated paths: AgentWorker = oort-owned managed runtime; Hermes platform adapter = user-owned BYOA runtime.
 - Path selection never transfers Context Packet, approval, cost, audit, ordering, or outbox authority out of oort; the server-owned guarantee matrix is shared.
 - `Context Packet` is the only way broad context enters an agent runtime.
 - `Memory Plane` stores typed, sourced memory only.

@@ -31,7 +31,7 @@ truthy() {
 write_evidence() {
   local provider_env_label="$PROVIDER_ENV_FILE"
   if [ "${INLINE_MOMO_FACING_PROVIDER_ENV:-0}" = "1" ]; then
-    provider_env_label="<inline momo-facing provider env>"
+    provider_env_label="<inline oort-facing provider env>"
   fi
   {
     echo "## MOMO-257 Local Hermes/Codex OAuth Credentialed Smoke"
@@ -139,7 +139,7 @@ fi
 write_evidence
 
 if [ "${INLINE_MOMO_FACING_PROVIDER_ENV:-0}" = "1" ]; then
-  echo "[local-hermes-credentialed] using inline momo-facing provider env (secret values not printed)"
+  echo "[local-hermes-credentialed] using inline oort-facing provider env (secret values not printed)"
 else
   echo "[local-hermes-credentialed] using out-of-repo provider env file (contents not printed)"
 fi

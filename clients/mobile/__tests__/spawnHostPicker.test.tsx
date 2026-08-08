@@ -113,7 +113,7 @@ function executionPayload(over: Record<string, unknown> = {}) {
         },
         {
           host_id: CLOUD,
-          display_name: 'momo Cloud',
+          display_name: 'oort Cloud',
           host_type: 'cloud',
           tier: 'cloud',
           scope: 'workspace',
@@ -223,8 +223,8 @@ describe('픽커가 그리는 것', () => {
     );
     // 「왜 내 랩탑을 못 고르지」의 답은 짧은 목록이 아니라 사유가 붙은 줄이다.
     expect(screen.getByText('낡은 맥 (오프라인)')).toBeTruthy();
-    // T3 자리 — ADR-0136이 momo Cloud를 꺼 둔 동안의 표기.
-    expect(screen.getByText('momo Cloud (준비 중)')).toBeTruthy();
+    // T3 자리 — ADR-0136이 oort Cloud를 꺼 둔 동안의 표기.
+    expect(screen.getByText('oort Cloud (준비 중)')).toBeTruthy();
     expect(screen.getByText('내 맥')).toBeTruthy();
   });
 

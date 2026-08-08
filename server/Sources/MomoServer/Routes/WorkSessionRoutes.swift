@@ -865,7 +865,7 @@ struct WorkSessionRoutes: Sendable {
                     guard resumedRows.first != nil else {
                         throw HTTPError(
                             .conflict,
-                            message: "momo Cloud 호스트 상태가 변경되었습니다."
+                            message: "oort Cloud 호스트 상태가 변경되었습니다."
                         )
                     }
                 }
@@ -1083,7 +1083,7 @@ struct WorkSessionRoutes: Sendable {
         guard targetStatus == "idle" else {
             throw HTTPError(
                 .conflict,
-                message: "paused momo Cloud sessions must be resumed by the human cloud resume endpoint"
+                message: "paused oort Cloud sessions must be resumed by the human cloud resume endpoint"
             )
         }
         // ADR-0142 D2: idle pause is an optimization, not an obligation. A
@@ -1178,7 +1178,7 @@ struct WorkSessionRoutes: Sendable {
             guard let sandboxID, let cloudState else {
                 throw HTTPError(
                     .serviceUnavailable,
-                    message: "momo Cloud 샌드박스 연결 정보가 준비되지 않았습니다."
+                    message: "oort Cloud 샌드박스 연결 정보가 준비되지 않았습니다."
                 )
             }
             if targetStatus == "running" {
@@ -1194,7 +1194,7 @@ struct WorkSessionRoutes: Sendable {
             guard cloudState == expectedCloudState else {
                 throw HTTPError(
                     .conflict,
-                    message: "momo Cloud 호스트 상태가 세션 상태와 일치하지 않습니다."
+                    message: "oort Cloud 호스트 상태가 세션 상태와 일치하지 않습니다."
                 )
             }
             let operationID = UUID()
@@ -1222,19 +1222,19 @@ struct WorkSessionRoutes: Sendable {
                 logger: db.logger
             ).collect()
             guard let intentRow = intentRows.first else {
-                throw HTTPError(.conflict, message: "momo Cloud host lifecycle changed; retry")
+                throw HTTPError(.conflict, message: "oort Cloud host lifecycle changed; retry")
             }
             let operationVersion = try intentRow.decode((UUID, Int64).self).1
             guard let cloudHostID else {
                 throw HTTPError(
                     .conflict,
-                    message: "momo Cloud host lifecycle changed; retry"
+                    message: "oort Cloud host lifecycle changed; retry"
                 )
             }
             guard let rowProviderID else {
                 throw HTTPError(
                     .conflict,
-                    message: "momo Cloud host lifecycle changed; retry"
+                    message: "oort Cloud host lifecycle changed; retry"
                 )
             }
             return CloudLifecycleTarget(
@@ -1267,7 +1267,7 @@ struct WorkSessionRoutes: Sendable {
             logger: db.logger
         ).collect()
         guard rows.first != nil else {
-            throw HTTPError(.conflict, message: "momo Cloud 호스트 상태가 변경되었습니다.")
+            throw HTTPError(.conflict, message: "oort Cloud 호스트 상태가 변경되었습니다.")
         }
     }
 
@@ -1287,7 +1287,7 @@ struct WorkSessionRoutes: Sendable {
         ) else {
             throw HTTPError(
                 .conflict,
-                message: "momo Cloud host lifecycle changed; retry"
+                message: "oort Cloud host lifecycle changed; retry"
             )
         }
         try await withTenantLifecycleTransactionUnwrapped(
@@ -1343,7 +1343,7 @@ struct WorkSessionRoutes: Sendable {
                 logger: db.logger
             ).collect()
             guard let rowProviderID = try cloudRows.first?.decode(String.self) else {
-                throw HTTPError(.conflict, message: "momo Cloud 호스트 상태가 변경되었습니다.")
+                throw HTTPError(.conflict, message: "oort Cloud 호스트 상태가 변경되었습니다.")
             }
             _ = try await conn.query(
                 """

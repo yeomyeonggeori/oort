@@ -68,7 +68,7 @@ scripts/momo hermes-gateway-init
 ```
 
 The helper writes `$HOME/.momo/hermes-gateway.env` outside the repo. It contains
-only momo-facing connection values:
+only oort-facing connection values:
 
 ```sh
 MOMO_API_URL=http://127.0.0.1:28180
@@ -112,7 +112,7 @@ account secrets belong inside the Hermes/provider runtime. They must not be
 written to oort `.env`, oort DB, diagnostics, local gate evidence, or adapter
 manifest files.
 
-`MOMO_AGENT_TOKEN` is a oort credential scoped to this agent's realtime,
+`MOMO_AGENT_TOKEN` is an oort credential scoped to this agent's realtime,
 pending-job, callback, and message surfaces. It is not a provider credential.
 The adapter redacts 401 response detail and never writes the bearer to logs or
 evidence.
@@ -162,7 +162,7 @@ directory requires an uppercase manifest file.
 Operator flow:
 
 1. Install or run Hermes gateway locally.
-2. Generate momo-facing pairing env:
+2. Generate oort-facing pairing env:
    ```sh
    scripts/momo hermes-gateway-init
    ```
@@ -213,4 +213,4 @@ states for:
 
 If step 1 is unavailable, keep the real gateway plugin load and provider call as
 `runtime-unverified(real hermes gateway missing)` while relying on the mock
-harness for momo-side ledger guarantees.
+harness for oort-side ledger guarantees.

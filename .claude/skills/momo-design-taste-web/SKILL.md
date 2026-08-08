@@ -1,11 +1,11 @@
 ---
 name: momo-design-taste-web
-description: Anti-slop design taste for the momo web client (TS/React + Tailwind + shadcn/ui + Tauri shell). Use WHENEVER creating or modifying React components, Tailwind styles, tokens, or user-visible strings in clients/web. Web translation of momo-design-taste (macOS/SwiftUI): Dawn palette CSS tokens, fixed Tailwind scale, web AI-tell bans, mandatory four states, keyboard/focus rules, and a mechanical grep-able pre-flight. Adapted from momo-design-taste (mac) + ADR-0133 stack decision.
+description: Anti-slop design taste for the oort web client (TS/React + Tailwind + shadcn/ui + Tauri shell). Use WHENEVER creating or modifying React components, Tailwind styles, tokens, or user-visible strings in clients/web. Web translation of momo-design-taste (macOS/SwiftUI): Dawn palette CSS tokens, fixed Tailwind scale, web AI-tell bans, mandatory four states, keyboard/focus rules, and a mechanical grep-able pre-flight. Adapted from momo-design-taste (mac) + ADR-0133 stack decision.
 ---
 
-# momo Design Taste (Web / React + Tailwind + shadcn)
+# oort Design Taste (Web / React + Tailwind + shadcn)
 
-momo-web is the canonical UI (ADR-0133): TS + React + Vite, Tailwind + shadcn/ui(Radix), react-virtuoso, cmdk, wrapped by Tauri 2 for desktop. The bar is the same as the mac client:
+oort web is the canonical UI (ADR-0133): TS + React + Vite, Tailwind + shadcn/ui(Radix), react-virtuoso, cmdk, wrapped by Tauri 2 for desktop. The bar is the same as the mac client:
 **it must feel like a native-grade work tool with the information density of Slack and the calm confidence of Codex, not a marketing web app.** Landing-page patterns transplanted into the product surface are the #1 slop signature to avoid. This is the web sibling of `momo-design-taste`; the hard rules are identical in intent, translated to CSS/Tailwind/React.
 
 Three files carry the load, and they are checked in, not aspirational:
@@ -22,7 +22,7 @@ Output one line before writing UI code:
 
 > Reading this as: <surface: message timeline / composer / sidebar / inbox / agent card / settings / onboarding> for <internal team users on web+Tauri>, density <N>/10, motion <M>/10.
 
-Defaults for momo: **density 6-7** (work tool, not a landing page), **motion 2-3** (motion is feedback, never theater).
+Defaults for oort: **density 6-7** (work tool, not a landing page), **motion 2-3** (motion is feedback, never theater).
 
 Do NOT default to: purple/blue/indigo AI gradients, glassy hero cards, three-equal-card feature rows, oversized rounded "web cards" wrapping every list row, centered empty states with illustrations, toast stacks. These are LLM defaults, not choices.
 
@@ -108,7 +108,7 @@ Every surface ships **empty / loading / error / offline**:
 | Count-up / animated number theater | Numbers change at data speed, `data-numeric` |
 | Custom titlebar breaking OS window controls | Tauri standard window chrome |
 
-## 9. Agent-native surfaces (momo-specific)
+## 9. Agent-native surfaces (oort-specific)
 
 - Agent messages share the human message anatomy (same grid, same typography); agent identity is expressed ONLY via `--agent` on avatar/badge, plus "{owner} 님이 관리" attribution (the term the mac client already ships, `MomoAgentOwnerLabel.swift`). Never a different bubble shape or full-row background tint. The token test asserts a >= 90 degree hue gap from `--accent`, so human and agent identity cannot converge by a well-meant tweak.
 - Tool-call / approval / diff / cost cards are **structured, calm, dense**: title row (icon + name + status chip) then typed fields then a disclosure for raw payload. Status lifecycle chips (`queued / thinking / streaming / awaiting-approval / done / error`) use token status colors, text-first, no pulsing. Approval status maps to the real model (`pending / approved / rejected / expired / cancelled`).

@@ -51,7 +51,7 @@ message ordering, and realtime delivery.
 
 ## Credentialed Smoke
 
-The momo-side credentialed smoke requires only:
+The oort-side credentialed smoke requires only:
 
 - `AGENT_PROVIDER_MODE=external-hermes`
 - `HERMES_BASE_URL=https://<provider>/v1`

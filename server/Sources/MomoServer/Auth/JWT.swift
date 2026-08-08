@@ -66,7 +66,7 @@ struct RealtimeTokenMeta: Codable, Equatable, Sendable {
 
 /// Centrifugo connection JWT payload.
 ///
-/// Required Centrifugo claims: `sub` and `exp`. momo-specific workspace claim:
+/// Required Centrifugo claims: `sub` and `exp`. oort-specific workspace claim:
 /// `ws`. The `info` string is JSON so Centrifugo can pass it through as client
 /// info without giving it authorization power.
 struct CentrifugoConnectionJWTPayload: JWTPayload {

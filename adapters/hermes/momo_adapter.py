@@ -29,7 +29,7 @@ All writes go REST → PG commit → outbox → relay publishes. The adapter onl
 
 ------------------------------------------------------------------------------
 Credentialed runtime boundary:
-  This module is the momo-side plugin adapter that the Hermes gateway loads
+  This module is the oort-side plugin adapter that the Hermes gateway loads
   (it imports `BasePlatformAdapter` from the Hermes plugin SDK). The repository
   can verify the adapter contract and momo server bearer surfaces without a
   provider credential:
@@ -1644,7 +1644,7 @@ class MomoAdapter(BasePlatformAdapter):
             self._finish_trigger(trigger_key, handled=handled)
 
     async def _handle_agent_job(self, evt: Mapping[str, Any]) -> None:
-        """Execute a momo-created agent job and report the result back to momo.
+        """Execute an oort-created agent job and report the result back to oort.
 
         This is the MOMO-325 product path for Hermes-as-platform-gateway:
         momo creates agent_run/context/budget/audit + `agent.job`, Hermes owns
@@ -1983,7 +1983,7 @@ class MomoAdapter(BasePlatformAdapter):
         )
 
     def _sync_provider_chain(self, payload: Mapping[str, Any]) -> None:
-        """Install the momo-supplied chain (base_url + mode, ordered)."""
+        """Install the oort-supplied chain (base_url + mode, ordered)."""
         raw = payload.get("provider_chain")
         if raw is None:
             raw = payload.get("providerChain")
@@ -2109,7 +2109,7 @@ class MomoAdapter(BasePlatformAdapter):
     async def _run_gateway_job_via_chain(
         self, payload: Mapping[str, Any]
     ) -> dict[str, Any]:
-        """Execute the job over the momo-supplied provider chain."""
+        """Execute the job over the oort-supplied provider chain."""
         cascade = provider_chain.ProviderCascade(
             self._provider_adapters, on_fallback=self._provider_fallback_sink(payload)
         )
@@ -2251,7 +2251,7 @@ class MomoAdapter(BasePlatformAdapter):
         if self._provider_adapters:
             return await self._run_gateway_job_via_chain(payload)
 
-        raise RuntimeError("Hermes runtime does not expose a momo-compatible job method")
+        raise RuntimeError("Hermes runtime does not expose an oort-compatible job method")
 
     def _runtime_chat_effort_kwargs(
         self, payload: Mapping[str, Any]

@@ -37,7 +37,7 @@ flowchart LR
     CENT -->|"ws push: ch:/dm:/agent:/user:"| MAC
     CENT -->|"private agentwork: wake-up"| HG
     PG -->|"agent_job claim<br/>AGENT_GATEWAY_MODE=worker"| AW
-    AW -->|"momo-owned state transitions<br/>progress·approval·usage/outbox"| PG
+    AW -->|"oort-owned state transitions<br/>progress·approval·usage/outbox"| PG
     WD -->|"서명 heartbeat · pending poll<br/>session/control REST"| API
 ```
 
@@ -375,7 +375,7 @@ sequenceDiagram
     alt AGENT_GATEWAY_MODE=worker (managed)
         P-->>W: durable agent_job claim
         W->>W: provider OpenAI-compatible SSE
-        W->>P: momo-owned progress / approval / usage / outbox transitions
+        W->>P: oort-owned progress / approval / usage / outbox transitions
     else AGENT_GATEWAY_MODE=gateway (BYOA)
         P-->>R: relay: agent.job → private agentwork: wake-up
         R-->>H: push (신뢰 입력 아님)

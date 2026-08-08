@@ -434,7 +434,7 @@ idempotent credential rotation, and active-session revocation. Worker handoff
 leaves this Docker verifier `runtime-unverified` for the orchestrator.
 
 For the external provider profile, keep stack ports in `.env.worktree` and pass
-only momo-facing provider endpoint/key values through the shell or, preferably,
+only oort-facing provider endpoint/key values through the shell or, preferably,
 a separate untracked file. Codex/OpenAI OAuth login and provider API keys stay
 inside the provider runtime:
 
@@ -468,7 +468,7 @@ scripts/local_gate.sh --profile external-agent-provider
 ```
 
 The wrapper/verifier never prints the API key. If no out-of-repo provider env
-file or inline momo-facing endpoint/key is configured, the profile exits
+file or inline oort-facing endpoint/key is configured, the profile exits
 successfully with explicit `NEEDS_USER_CREDENTIAL` /
 `runtime-unverified(external provider credentials)` evidence so default mock
 runtime gates remain deterministic. If `AGENT_PROVIDER_MODE=external-hermes` is

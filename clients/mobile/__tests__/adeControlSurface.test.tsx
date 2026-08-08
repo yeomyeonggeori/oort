@@ -206,7 +206,7 @@ function workHost(id: string, type: string, displayName: string) {
 
 const WORK_HOSTS = [
   workHost('HOST-APP', 'app', '성재의 맥'),
-  workHost('HOST-CLOUD', 'cloud', 'momo Cloud'),
+  workHost('HOST-CLOUD', 'cloud', 'oort Cloud'),
 ];
 
 function jsonResponse(status: number, body: unknown): Response {

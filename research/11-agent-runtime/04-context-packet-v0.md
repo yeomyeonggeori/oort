@@ -84,7 +84,7 @@ All fields use snake_case JSON. IDs are UUID strings unless noted.
 
 Required request fields:
 
-- `request_id`: momo-generated request id.
+- `request_id`: oort-generated request id.
 - `surface`: one of the values above.
 - `actor_member_id`: human or service member initiating the request.
 - `agent_member_id`: target agent member.

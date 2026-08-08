@@ -39,7 +39,7 @@ enum T3LifecycleIntent {
     static var staleResponse: HTTPError {
         HTTPError(
             .conflict,
-            message: "momo Cloud 호스트 상태가 변경되어 provider 응답을 폐기했습니다."
+            message: "oort Cloud 호스트 상태가 변경되어 provider 응답을 폐기했습니다."
         )
     }
 }
