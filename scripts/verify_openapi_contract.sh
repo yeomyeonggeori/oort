@@ -106,6 +106,10 @@ SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 REPO_ROOT="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)"
 cd "$REPO_ROOT"
 
+# 스펙 YAML -> JSON 변환은 두 패스가 공유하는 한 벌이다(#1185).
+# shellcheck source=scripts/openapi_spec_to_json.sh
+. "$SCRIPT_DIR/openapi_spec_to_json.sh"
+
 need() {
   command -v "$1" >/dev/null 2>&1 || {
     echo "[openapi] missing required command: $1" >&2
@@ -380,30 +384,11 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-# ---- 1) Spec YAML -> JSON (ruby is a docs-gate dependency; python-yaml fallback)
-convert_spec() {
-  if command -v ruby >/dev/null 2>&1; then
-    if ruby -ryaml -rjson -e \
-      'puts JSON.generate(YAML.load_file(ARGV[0], aliases: true))' \
-      "$SPEC_YAML" >"$SPEC_JSON" 2>/dev/null; then
-      return 0
-    fi
-    if ruby -ryaml -rjson -e \
-      'puts JSON.generate(YAML.load_file(ARGV[0]))' \
-      "$SPEC_YAML" >"$SPEC_JSON" 2>/dev/null; then
-      return 0
-    fi
-  fi
-  if "$PYTHON_BIN" -c "import yaml" >/dev/null 2>&1; then
-    "$PYTHON_BIN" -c \
-      'import json,sys,yaml; json.dump(yaml.safe_load(open(sys.argv[1])), sys.stdout)' \
-      "$SPEC_YAML" >"$SPEC_JSON"
-    return 0
-  fi
-  echo "[openapi] need ruby (with yaml/json) or python3+PyYAML to parse the spec" >&2
-  exit 1
-}
-convert_spec
+# ---- 1) Spec YAML -> JSON (#1185: 변환 정본은 scripts/openapi_spec_to_json.sh)
+# 여기 있던 ruby/python 사다리는 2차 패스에도 복사돼 있었고 사본 쪽만 psych 3
+# 재시도가 빠져 있었다. 두 패스가 같은 함수를 부르면 그 드리프트가 다시 생길 수
+# 없다. 어느 리더로 뛰었는지는 함수가 한 줄 출력한다.
+momo_openapi_spec_to_json "$SPEC_YAML" "$SPEC_JSON" openapi "$PYTHON_BIN" || exit 1
 jq -e '.openapi and .paths' "$SPEC_JSON" >/dev/null || {
   echo "[openapi] spec did not parse into an OpenAPI document" >&2
   exit 1
