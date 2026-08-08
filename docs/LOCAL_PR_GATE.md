@@ -99,7 +99,7 @@ Profiles:
 
 | Profile | Use when | What it runs |
 |---|---|---|
-| `docs` | docs/spec/script-only changes, including internal alpha runbook/feedback/AWS topology updates | whitespace diff, workflow YAML parse, actionlint if installed, e2e compose config, AWS internal alpha topology preflight fixture, JSON syntax, shell syntax, Python syntax, Hermes adapter smoke |
+| `docs` | docs/spec/script-only changes, including internal alpha runbook/feedback/AWS topology updates | whitespace diff, workflow YAML parse, actionlint if installed, e2e compose config, AWS internal alpha topology preflight fixture, JSON syntax, shell syntax, Python syntax, Hermes adapter smoke, prime adapter contract tests + closed-loop smoke (`adapters/prime/tests/`, no docker/network/credential) |
 | `swift` | Swift package/model/view changes | `docs` profile + design pre-flight ratchet (`scripts/verify_design_preflight.sh`) + `make build` + `make test` |
 | `diagnostics` | diagnostics/observability bundle changes | `docs` profile + `scripts/collect_diagnostics.sh --smoke` redaction check |
 | `staging-smoke` | staging/prod/internal-hosting config or runbook changes that do not have real VPS secrets | `docs` profile + `scripts/verify_staging_smoke.sh` + `scripts/verify_internal_hosting_smoke.sh` for prod compose config, internal single-node smoke overlay, Caddyfile structure, Centrifugo Redis config, API health route wiring, relay/worker enablement, secret-template guard, public/staging preflight evidence markdown/json, and SOPS/pgBackRest checklist |
