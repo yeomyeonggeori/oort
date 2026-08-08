@@ -886,14 +886,16 @@ describe('「대화로」 — 그 작업을 낳은 줄까지', () => {
     fireEvent.press(screen.getByTestId('ade-summary'));
     await waitFor(() => expect(screen.getByTestId('ade-card-list')).toBeTruthy());
 
-    const anchors = screen.UNSAFE_root
+    const anchors: string[] = screen.UNSAFE_root
       .findAll((node: {props?: {testID?: unknown}}) =>
         String(node.props?.testID ?? '').startsWith('ade-card-anchor-'),
       )
       .map((node: {props?: {testID?: unknown}}) => String(node.props?.testID));
     // 세션 카드 셋(running · orphaned · idle)에만 선다. 턴 둘에는 없다.
-    expect(anchors.every(id => id.includes('anchor-session|'))).toBe(true);
-    expect(anchors.some(id => id.includes('anchor-run|'))).toBe(false);
+    expect(anchors.every((id: string) => id.includes('anchor-session|'))).toBe(
+      true,
+    );
+    expect(anchors.some((id: string) => id.includes('anchor-run|'))).toBe(false);
     expect(new Set(anchors).size).toBe(3);
   });
 
