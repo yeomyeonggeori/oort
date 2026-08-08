@@ -31,13 +31,14 @@ PACKAGE_ROOT = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, PACKAGE_ROOT)
 sys.path.insert(0, HERE)
 
-from fake_oort import STREAM_PROPS_KEY, FakeOort  # noqa: E402
+from fake_oort import REFINE_PROPS_KEY, STREAM_PROPS_KEY, FakeOort  # noqa: E402
 from prime.oort_client import OortClient, OortError, stable_key, string_props  # noqa: E402
 from prime.refine import (  # noqa: E402
-    REFINE_PROPS_KEY,
     TRIGGER_OBSERVED_DRIFT,
     HarnessObserver,
     RefineAnnouncer,
+    drift_refinement_id,
+    harness_refine_client_msg_id,
     refine_body,
 )
 from prime.stream_relay import StreamRelay  # noqa: E402
@@ -70,7 +71,7 @@ class WireShape(unittest.TestCase):
             payload = oort.model.requests[0]["payload"]
             self.assertEqual(payload["stream"], {"rev": 0, "streaming": True})
             message = next(iter(oort.model.messages.values()))
-            self.assertEqual(json.loads(message["props"][STREAM_PROPS_KEY]), {"rev": 0, "streaming": True})
+            self.assertEqual(message["props"][STREAM_PROPS_KEY], {"rev": 0, "streaming": True})
 
     def test_the_server_owns_the_stream_props_key(self):
         """A client-supplied `momo.stream` is dropped, not honoured."""
@@ -84,7 +85,7 @@ class WireShape(unittest.TestCase):
                 opens_stream=True,
             )
             message = next(iter(oort.model.messages.values()))
-            self.assertEqual(json.loads(message["props"][STREAM_PROPS_KEY])["rev"], 0)
+            self.assertEqual(message["props"][STREAM_PROPS_KEY]["rev"], 0)
 
     def test_an_outcome_only_rides_the_final_slice(self):
         with FakeOort() as oort:
@@ -187,30 +188,38 @@ class StreamArithmetic(unittest.TestCase):
 class RefineAnnouncement(unittest.TestCase):
     """contract — ADR-0158 D1~D4 as the channel sees them."""
 
-    def test_the_props_carry_exactly_the_four_named_fields(self):
+    def test_the_block_is_top_level_and_the_props_are_the_server_s(self):
         with FakeOort() as oort:
             announcer = RefineAnnouncer(client_for(oort), agent_handle="김인턴")
             announcer.announce_refine_complete(
                 {
                     "id": "refine_1",
                     "scope": "global",
+                    "summary": "기억 1건 추가",
+                    "rollbackId": "rollback_1",
                     "appliedEdits": [{"action": "create", "kind": "memory", "id": "e1", "applied": True}],
                 }
             )
+            sent = oort.model.requests[0]["payload"]
+            self.assertIn("harnessRefine", sent, "a top-level block, not a props key")
+            self.assertNotIn(REFINE_PROPS_KEY, sent.get("props", {}))
             message = next(iter(oort.model.messages.values()))
             self.assertEqual(message["type"], "system", "ADR-0158 D2 — no new message type")
-            evidence = json.loads(message["props"][REFINE_PROPS_KEY])
-            self.assertEqual(set(evidence), {"trigger", "entryIds", "refinementIds", "scope"})
-            self.assertEqual(evidence["entryIds"], ["e1"])
-            self.assertEqual(evidence["refinementIds"], ["refine_1"])
+            stored = message["props"][REFINE_PROPS_KEY]
+            self.assertEqual(stored["refinementId"], "refine_1")
+            self.assertEqual(stored["edits"], [{"action": "create", "kind": "memory", "id": "e1"}])
+            self.assertEqual(stored["summary"], "기억 1건 추가")
+            self.assertEqual(stored["rollbackId"], "rollback_1", "D3 — recorded, nothing promised")
 
     def test_the_harness_global_scope_is_never_repeated_to_the_channel(self):
         with FakeOort() as oort:
             announcer = RefineAnnouncer(client_for(oort))
             announcer.announce_refine_complete({"id": "refine_1", "scope": "global", "appliedEdits": []})
-            evidence = json.loads(next(iter(oort.model.messages.values()))["props"][REFINE_PROPS_KEY])
+            sent = oort.model.requests[0]["payload"]["harnessRefine"]
+            self.assertEqual(sent["scope"], "workspace", "the harness's word is not repeated on the wire")
+            stored = next(iter(oort.model.messages.values()))["props"][REFINE_PROPS_KEY]
             self.assertEqual(
-                evidence["scope"],
+                stored["scope"],
                 "workspace",
                 "one workspace per HOME means the harness's 'global' is our workspace",
             )
@@ -231,8 +240,10 @@ class RefineAnnouncement(unittest.TestCase):
             announcer.announce_observed_drift(
                 {"after": {"sha256": "abc"}, "newEntryIds": ["e9"], "newRefinementIds": []}
             )
-            evidence = json.loads(next(iter(oort.model.messages.values()))["props"][REFINE_PROPS_KEY])
-            self.assertEqual(evidence["trigger"], TRIGGER_OBSERVED_DRIFT)
+            stored = next(iter(oort.model.messages.values()))["props"][REFINE_PROPS_KEY]
+            self.assertEqual(stored["trigger"], TRIGGER_OBSERVED_DRIFT)
+            self.assertEqual(stored["refinementId"], drift_refinement_id("abc"))
+            self.assertNotIn("summary", stored, "we saw a file change, not a decision")
 
     def test_the_body_is_a_sentence_and_the_ids_are_not_in_it(self):
         body = refine_body("김인턴", 2, "command")
@@ -256,14 +267,14 @@ class Idempotency(unittest.TestCase):
             announcer = RefineAnnouncer(client_for(oort))
             announcer.announce_refine_complete({"id": "refine_42", "appliedEdits": []})
             message = next(iter(oort.model.messages.values()))
-            self.assertEqual(message["clientMsgId"], stable_key("refinement", "refine_42"))
+            self.assertEqual(message["clientMsgId"], harness_refine_client_msg_id("refine_42"))
             uuid.UUID(message["clientMsgId"])  # the route decodes it or nothing else matters
-            self.assertNotEqual(message["clientMsgId"], stable_key("refinement", "refine_43"))
+            self.assertNotEqual(message["clientMsgId"], harness_refine_client_msg_id("refine_43"))
 
     def test_an_observed_drift_key_is_stable_for_the_same_state(self):
-        first = stable_key("drift", "sha-abc")
-        second = stable_key("drift", "sha-abc")
-        third = stable_key("drift", "sha-def")
+        first = harness_refine_client_msg_id(drift_refinement_id("sha-abc"))
+        second = harness_refine_client_msg_id(drift_refinement_id("sha-abc"))
+        third = harness_refine_client_msg_id(drift_refinement_id("sha-def"))
         self.assertEqual(first, second)
         self.assertNotEqual(first, third)
 
@@ -280,16 +291,22 @@ class RedProofs(unittest.TestCase):
     """RED PROOF — remove the guard, reproduce the measured failure."""
 
     def test_removing_the_idempotency_key_duplicates_the_announcement(self):
-        """D4's key, deleted: two lines for one refinement.
+        """D4's key, deleted — in both worlds, because they fail differently.
 
-        The mutation is exactly the spike's behaviour — `RestSink` minted a fresh
+        The mutation is exactly the spike's behaviour: `RestSink` minted a fresh
         `clientMsgId` per write, and spike §8 wrote down that a retry would
-        therefore duplicate. This test is that sentence turned into a failing
-        run, so the guard cannot be removed quietly.
+        therefore duplicate. Here it is that sentence turned into a failing run.
+
+        Against a server **without** D4 the mutation duplicates the announcement,
+        which is the damage. Against the landed server it is refused by name,
+        which is the guard working from the other side — and the refusal is
+        worth asserting because a server that silently rewrote the key would
+        leave the producer holding a key it could not retry with.
         """
-        with FakeOort() as oort:
-            client = client_for(oort)
-            mutated = RefineAnnouncer(client, key_factory=lambda _id, _digest: str(uuid.uuid4()))
+        mutate = lambda _refinement_id: str(uuid.uuid4())  # noqa: E731
+
+        with FakeOort(validates_refine_key=False) as oort:
+            mutated = RefineAnnouncer(client_for(oort), key_factory=mutate)
             for _ in range(2):
                 mutated.announce_refine_complete({"id": "refine_42", "appliedEdits": [{"id": "e1"}]})
             self.assertEqual(
@@ -297,13 +314,48 @@ class RedProofs(unittest.TestCase):
             )
             self.assertEqual(len(oort.model.of_type("system")), 2)
 
-        # ...and with the key in place, the same two calls are one message.
+        with FakeOort() as oort:
+            mutated = RefineAnnouncer(client_for(oort), key_factory=mutate)
+            with self.assertRaises(OortError) as caught:
+                mutated.announce_refine_complete({"id": "refine_42", "appliedEdits": [{"id": "e1"}]})
+            self.assertEqual(caught.exception.status, 400)
+            self.assertIn(harness_refine_client_msg_id("refine_42"), caught.exception.body)
+            self.assertEqual(len(oort.model.messages), 0)
+
+        # ...and with the derivation in place, two announcements are one message.
         with FakeOort() as oort:
             announcer = RefineAnnouncer(client_for(oort))
             for _ in range(2):
                 announcer.emitted.clear()
                 announcer.announce_refine_complete({"id": "refine_42", "appliedEdits": [{"id": "e1"}]})
             self.assertEqual(len(oort.model.messages), 1)
+
+    def test_sending_harness_text_is_refused_not_trimmed(self):
+        """RED PROOF for the disclosure rule (§2.2).
+
+        `_wire_edits` drops `before`/`after` at the source. If it ever stopped,
+        the block would reach a `deny_unknown_fields` server and be refused —
+        the outer of the two locks. Asserting the refusal here is what proves the
+        outer lock exists, rather than trusting that our own filter is enough.
+        """
+        with FakeOort() as oort:
+            client = client_for(oort)
+            secret = "사용자가 어제 말한 배포 비밀"
+            with self.assertRaises(OortError) as caught:
+                client.post_message(
+                    client_msg_id=harness_refine_client_msg_id("refine_leak"),
+                    message_type="system",
+                    body="김인턴이 자기 작업 방식을 갱신했습니다",
+                    harness_refine={
+                        "refinementId": "refine_leak",
+                        "trigger": "command",
+                        "scope": "workspace",
+                        "edits": [{"action": "create", "kind": "memory", "id": "e1", "before": secret}],
+                    },
+                )
+            self.assertEqual(caught.exception.status, 400)
+            self.assertIn("before", caught.exception.body)
+            self.assertEqual(len(oort.model.messages), 0)
 
     def test_a_non_increasing_rev_freezes_the_answer(self):
         """The monotone counter, deleted: the message stops growing.

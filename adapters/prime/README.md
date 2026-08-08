@@ -102,37 +102,55 @@ which claims only what we saw.
 
 ```json
 {
+  "clientMsgId": "<uuid5(b\"momo.harnessRefi\", refinementId)>",
   "type": "system",
   "body": "김인턴이 자기 작업 방식을 갱신했습니다 (항목 1건)",
-  "props": {
-    "harness": "prime-agent",
-    "momo.harnessRefine": "{\"entryIds\":[…],\"refinementIds\":[…],\"scope\":\"workspace\",\"trigger\":\"command\"}"
+  "props": { "harness": "prime-agent" },
+  "harnessRefine": {
+    "refinementId": "refine_20260808132649962",
+    "trigger": "command",
+    "scope": "workspace",
+    "edits": [{ "action": "create", "kind": "memory", "id": "oort-refine-probe" }],
+    "summary": "기억 1건 추가"
   }
 }
 ```
 
-* **ids and counts only, never content.** Harness entries can quote the
-  conversation that produced them; the full text stays on the worker host.
-* **`scope` is always `workspace`.** The harness calls a cross-session write
-  "global", but this adapter runs one workspace per `HOME`, so its global *is*
-  our workspace. Repeating its word would be a lie in the one direction that
-  matters.
-* **`rollbackId` is not sent** (D3: ledger and audit only, no channel UI).
-* **`props` values are strings.** v0 props are a flat `string -> string` map, so
-  the evidence object travels as compact JSON with sorted keys — same evidence,
-  same bytes, on every retry.
+* **A top-level block, not a props key.** v0 props are a flat `string -> string`
+  map, while the stored value is a structured object under a `momo.`-namespaced
+  key the server must be the sole author of — a key a client could spell by hand
+  is one a client could forge a server-vouched claim under. The server writes
+  `props["momo.harnessRefine"]` from the validated block.
+* **ids and kinds only, never text.** `_wire_edits` drops
+  `before`/`after`/`content` at the source, and the server's
+  `deny_unknown_fields` refuses them if it ever stopped. Two locks, one door.
+* **`scope` is always `workspace`**, and the server writes its own constant
+  rather than copying ours. The harness calls a cross-session write "global",
+  but this adapter runs one workspace per `HOME`, so its global *is* our
+  workspace.
+* **`summary` travels, bounded** (500 chars, server-enforced). It is the
+  harness's one-line description of what it changed, which is the least-leaky
+  useful thing a reader can be given; the entries themselves stay on the host.
+* **`rollbackId` travels** (D3): recorded on the row for an operator asking "can
+  this be undone", with no channel affordance promised.
 
 ### Idempotency, and the one place the ADR's letter had to bend
 
-D4 says `clientMsgId = RefinementResult.id`. The *property* is what matters and
-it is preserved: the harness's own stable name for a refinement decides the
-message, so a restart that forgot what it announced lands on the row that exists.
-The literal value cannot be used — `clientMsgId` is a `Uuid` on the server, and
-posting `refine_20260808132649962` answers **422** (`UUID parsing failed`,
-measured). The key is therefore `uuid5("refinement", <RefinementResult.id>)`: a
-pure function of exactly the value D4 named. An observed drift has no such id, so
-its key is `uuid5("drift", <sha256 of the state file>)` — the same state names
-the same message, and only a real further change names a new one.
+D4 says `clientMsgId = RefinementResult.id`. The *property* is preserved exactly:
+the harness's own stable name for a refinement decides the message, so a restart
+that forgot what it announced lands on the row that exists. The literal value
+cannot be used — `clientMsgId` is a `Uuid` on the server, and posting
+`refine_20260808132649962` answers **422** (`UUID parsing failed`, measured
+before the server side landed). Both sides therefore derive
+`uuid5(b"momo.harnessRefi", refinementId)`, and the server **refuses** an
+announcement carrying any other key rather than rewriting it silently — a
+rewritten idempotency key is one the caller cannot retry with. That derivation is
+one function implemented twice, once per side, and `harness_refine_client_msg_id`
+here must stay byte-identical to `momo_messaging`'s.
+
+An observed drift has no harness-assigned id, so this adapter mints one that is
+still a pure function of what it saw: `drift_<sha256 of the state file>`. The
+same state names the same announcement.
 
 ## Isolation: the container is the boundary
 
@@ -166,24 +184,30 @@ loudly the day upstream fixes the leak, and the green one fails loudly the day
 our isolation stops working. Reduced isolation refuses to start without
 `OORT_PRIME_ALLOW_UNSAFE_ISOLATION=1`.
 
-## Which credential (open gap)
+## Which credential
 
-The adapter needs a bearer that can reach **both** message routes. Today an oort
-*agent bearer* cannot: `momo_auth::required_agent_scope` allows
-`POST …/channels/{ch}/messages` and lists no `PATCH`, so every slice is a 403.
-Measured on a local stack with a real `agent_bearer` row scoped
-`messages:write`:
+The adapter needs a bearer that can reach **both** message routes, and it is the
+agent's own: an agent is a `member`, and an adapter writing as anyone else would
+put a person's name on the agent's answer.
+
+That was not possible until ADR-0158 증보 1 (D7). Measured on a local stack with a
+real `agent_bearer` row scoped `messages:write`, before D7:
 
 ```
 POST  /v1/workspaces/{ws}/channels/{ch}/messages   -> 201   (stream opened)
 PATCH /v1/workspaces/{ws}/messages/{id}            -> 403   agent bearer is not allowed for this route
 ```
 
-That combination is worse than a plain refusal: the stream opens and can never be
-closed, so the message stays marked `streaming` forever. The adapter surfaces the
-403 with its reason rather than swallowing it, and the local-stack runs above use
-a member credential. **Extending the agent-scope allow-list is a server-lane
-change and is not made here.**
+`momo_auth::required_agent_scope` listed `POST …/channels/{ch}/messages` and no
+`PATCH`, so every slice was refused — and the combination is worse than a plain
+refusal, because the stream *opens* and can then never be closed, leaving a
+message marked `streaming` forever. D7 adds the slice route to the allow-list,
+author-only, which is what makes the agent bearer the whole adapter's credential
+rather than half of one.
+
+Either way the adapter surfaces a 403 with its reason instead of swallowing it: a
+scope refusal that looks like a network fault is one an operator debugs for an
+hour.
 
 ## Approval decisions
 

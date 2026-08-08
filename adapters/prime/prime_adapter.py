@@ -424,7 +424,7 @@ class PrimeAdapter:
             "turns": self.turn_index,
             "writes": list(self.client.writes),
             "refinements": [
-                {"clientMsgId": item["clientMsgId"], "evidence": item["evidence"]}
+                {"clientMsgId": item["clientMsgId"], "harnessRefine": item["harnessRefine"]}
                 for item in self.announcer.announcements
             ],
             "uiRequests": list(self.ui_requests),

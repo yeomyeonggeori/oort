@@ -37,14 +37,14 @@ from typing import Any
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(os.path.dirname(HERE)))
 
-from prime.oort_client import OortClient, stable_key  # noqa: E402
+from prime.oort_client import OortClient  # noqa: E402
 from prime.prime_adapter import AdapterSettings, PrimeAdapter  # noqa: E402
-from prime.refine import REFINE_PROPS_KEY, HarnessObserver  # noqa: E402
+from prime.refine import harness_refine_client_msg_id  # noqa: E402
 from prime.rpc import JsonlRpc  # noqa: E402
 from prime.stream_relay import StreamRelay  # noqa: E402
 
 sys.path.insert(0, HERE)
-from fake_oort import FakeOort  # noqa: E402
+from fake_oort import REFINE_PROPS_KEY, FakeOort  # noqa: E402
 
 FAKE_PRIME = os.path.join(HERE, "fake_prime.py")
 RESULTS: list[tuple[str, str]] = []
@@ -168,14 +168,13 @@ def scenario_refine(tmp: str) -> None:
     )
     systems = model.of_type("system")
     assert len(systems) == 1, f"one refinement, one line, got {len(systems)}"
-    evidence = json.loads(systems[0]["props"][REFINE_PROPS_KEY])
-    assert evidence["trigger"] == "command", evidence
-    assert evidence["scope"] == "workspace", "the harness's 'global' must not be repeated to the channel"
-    assert evidence["entryIds"] == ["oort-adapter-probe"], evidence
-    assert set(evidence) == {"trigger", "entryIds", "refinementIds", "scope"}, evidence
-    assert systems[0]["clientMsgId"] == stable_key(
-        "refinement", "refine_20260808000000000"
-    ), "the key is a pure function of the RefinementResult id (D4)"
+    stored = systems[0]["props"][REFINE_PROPS_KEY]
+    assert stored["trigger"] == "command", stored
+    assert stored["scope"] == "workspace", "the harness's 'global' must not be repeated to the channel"
+    assert [edit["id"] for edit in stored["edits"]] == ["oort-adapter-probe"], stored
+    assert systems[0]["clientMsgId"] == harness_refine_client_msg_id(
+        "refine_20260808000000000"
+    ), "the server derives the key from the RefinementResult id (D4)"
     assert adapter.event_counts.get("refine_complete") == 1, adapter.event_counts
     record("refine", "1 announcement, replay deduped, props keys exact")
 
@@ -185,9 +184,9 @@ def scenario_silent_drift(tmp: str) -> None:
     adapter, model = run_session("silent-drift", harness_state=state)
     systems = model.of_type("system")
     assert len(systems) == 1, f"the kernel path must still be announced, got {len(systems)}"
-    evidence = json.loads(systems[0]["props"][REFINE_PROPS_KEY])
-    assert evidence["trigger"] == "observed-drift", evidence
-    assert evidence["entryIds"] == ["oort-adapter-probe"], evidence
+    stored = systems[0]["props"][REFINE_PROPS_KEY]
+    assert stored["trigger"] == "observed-drift", stored
+    assert [edit["id"] for edit in stored["edits"]] == ["oort-adapter-probe"], stored
     assert adapter.event_counts.get("refine_complete", 0) == 0, "the kernel path emits no event, by definition"
     record("silent-drift", "0 protocol events, 1 observed-drift announcement")
 
@@ -262,12 +261,14 @@ def scenario_run_id() -> None:
 
 
 def scenario_agent_bearer_patch() -> None:
-    """The agent-bearer scope gap, measured (see README, 'Which credential').
+    """A scope refusal on a slice must arrive with its reason.
 
-    `momo_auth::required_agent_scope` allows an agent bearer to POST a message
-    and nothing else, so every slice is a 403. This is not something the adapter
-    can fix from its own lane; what it can do is fail with the reason attached
-    instead of looking like a network fault.
+    This is the world before ADR-0158 증보 1 (D7), when
+    `momo_auth::required_agent_scope` let an agent bearer POST a message and
+    nothing else, so every slice was a 403. D7 opened the slice route to the
+    message's own author, and this scenario stays because the shape outlives the
+    gap: any future scope regression looks exactly like this, and the difference
+    between "403, here is why" and a silent stall is an hour of someone's day.
     """
     from prime.oort_client import OortError
 

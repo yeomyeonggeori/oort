@@ -246,8 +246,16 @@ class OortClient:
         body: str,
         props: Mapping[str, Any] | None = None,
         opens_stream: bool = False,
+        harness_refine: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """One finished message, or the opening write of a growing one."""
+        """One finished message, or the opening write of a growing one.
+
+        `harness_refine` is a **top-level block**, not a props key, for the same
+        reason `stream` is: the stored value is a structured object under a
+        `momo.`-namespaced key the server must be the sole author of, while v0
+        props is a flat string map. The request says *that* a refinement
+        happened; the server writes what the row shows.
+        """
         wire_props = string_props(props)
         payload: dict[str, Any] = {
             "clientMsgId": client_msg_id,
@@ -259,6 +267,8 @@ class OortClient:
             payload["props"] = wire_props
         if opens_stream:
             payload["stream"] = {"rev": OPENING_STREAM_REV, "streaming": True}
+        if harness_refine is not None:
+            payload["harnessRefine"] = dict(harness_refine)
         result = self._request("POST", self.messages_url, payload)
         self.writes.append(
             {

@@ -25,15 +25,20 @@ ADR-0158 D4 says the key is `RefinementResult.id`, and the *property* it wants i
 what this module delivers: the harness's own stable name for a refinement decides
 the message, so a retry lands on the message that exists.
 
-The id itself cannot be the key, and that is measured, not assumed.
+The id itself cannot be the key, and that is measured rather than assumed.
 `SendMessageRequest.client_msg_id` is a `Uuid` on the server, so posting
-`refine_20260807041452415` answers **422** *"clientMsgId: UUID parsing failed:
-invalid character: found `r` at 0"*. The key is therefore
-`uuid5("refinement", <RefinementResult.id>)` — a pure function of exactly the
-value D4 named, which keeps its guarantee while being a value the route can
-decode. For an observed drift there is no such id, so the key is a UUIDv5 over
-the **content hash of the state file**: observing the same state twice names the
-same message, and only a real further change names a new one.
+`refine_20260807041452415` answers **422** (`UUID parsing failed`). The server
+therefore *derives* the key — `uuid5(b"momo.harnessRefi", refinementId)` — and
+**refuses** an announcement sent under any other one rather than rewriting it
+silently, because a silently rewritten idempotency key is one the caller cannot
+retry with. `harness_refine_client_msg_id` below is that same derivation, and the
+two must stay byte-identical: it is one function implemented twice on purpose,
+once on each side of the wire, and the conformance for it is a real POST.
+
+An observed drift has no harness-assigned id, so this module mints one that is
+still a pure function of what was seen: `drift_<sha256 of the state file>`. The
+same state names the same announcement; only a real further change names a new
+one.
 
 The in-process `emitted` set is the first line and the server's `clientMsgId`
 unique index is the second. Neither alone is enough: the set forgets across a
@@ -41,16 +46,29 @@ restart, and the index cannot stop us from minting a fresh key.
 
 ## What the channel is told, and what it is not
 
-Props carry `trigger`, `entryIds`, `refinementIds`, `scope` — ids and shape, no
-content. Harness entries can quote the conversation that produced them, so
-pouring them into a channel would leak a summary of everything the agent read.
-The full text stays in the worker host's file; the channel gets "what kind, how
-many".
+The announcement is a **top-level `harnessRefine` block**, not a props key. Props
+are a flat string map in v0, while the stored value is a structured object under
+a `momo.`-namespaced key the server must be the sole author of — a key a client
+could spell by hand is one a client could forge a server-vouched claim under. So
+the request states what happened and the server writes what the row shows.
 
-`scope` is always `workspace`. The harness's own word for a cross-session write
-is "global", but this adapter runs one workspace per HOME (see
-`container/entrypoint.sh`), so the harness's global *is* our workspace. Passing
-its word through would be a lie in the one direction that matters.
+The block carries `refinementId`, `trigger`, `scope`, `edits[]`
+(`action`/`kind`/`id` only) and an optional bounded `summary` / `rollbackId`. It
+is `deny_unknown_fields` on the server, which is what makes the disclosure rule
+mechanical rather than aspirational: a producer that adds `before`/`after`/
+`content` is refused, not silently trimmed. Harness entries can quote the
+conversation that produced them, so the full text stays in the worker host's file
+and the channel gets "what kind, how many".
+
+`scope` is always `workspace`, and the server writes its own value rather than
+copying ours. The harness's word for a cross-session write is "global", but this
+adapter runs one workspace per HOME (see `container/entrypoint.sh`), so the
+harness's global *is* our workspace. Passing its word through would be a lie in
+the one direction that matters.
+
+`rollbackId` travels when the harness gave one (D3): recorded on the row for an
+operator asking "can this be undone, and by what id", with no channel affordance
+promised.
 """
 
 from __future__ import annotations
@@ -58,21 +76,49 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import uuid
 from typing import Any
 
-from .oort_client import OortClient, stable_key
+from .oort_client import OortClient
 
 TRIGGER_COMMAND = "command"
 TRIGGER_TURN_INTERVAL = "turn_interval"
 TRIGGER_COMPACT = "compact"
 TRIGGER_OBSERVED_DRIFT = "observed-drift"
+TRIGGERS = (TRIGGER_COMMAND, TRIGGER_TURN_INTERVAL, TRIGGER_COMPACT, TRIGGER_OBSERVED_DRIFT)
 
-#: The props key ADR-0158 D2 puts the evidence under. Namespaced under `momo.`
-#: like `momo.stream`, because the wire namespace is frozen (ADR-0152 D1).
+#: The props key ADR-0158 D2 stores the announcement under. Namespaced under
+#: `momo.` like `momo.stream`, because the wire namespace is frozen (ADR-0152
+#: D1). **Server-owned**: this package never writes it, it only reads it back.
 REFINE_PROPS_KEY = "momo.harnessRefine"
 
 #: Scope as the channel is allowed to read it. See the module docstring.
 WORKSPACE_SCOPE = "workspace"
+
+#: The namespace the server derives the announcement's `clientMsgId` under
+#: (`momo_messaging::refine::HARNESS_REFINE_NAMESPACE`). Sixteen ASCII bytes, so
+#: its version nibble is `6` while every `agent_run.id` is a v7 — the refinement
+#: key space cannot collide with the tool-card one at its root.
+HARNESS_REFINE_NAMESPACE = uuid.UUID(bytes=b"momo.harnessRefi")
+
+#: Server-side caps (`momo_messaging::refine`). Enforced here too, so an
+#: over-long summary is trimmed at the source rather than costing a round trip
+#: and a 400 — the cap is a disclosure rule, and the adapter is the side holding
+#: the text it is a rule about.
+REFINE_ID_MAX_CHARS = 200
+REFINE_SUMMARY_MAX_CHARS = 500
+REFINE_EDITS_MAX = 50
+
+
+def harness_refine_client_msg_id(refinement_id: str) -> str:
+    """The derived key an announcement must be sent under (D4).
+
+    The same function as `momo_messaging::harness_refine_client_msg_id`. The
+    server computes it independently and **refuses** a POST that carries any
+    other value, naming the expected one — so a mismatch here is a loud 400, not
+    a duplicated line.
+    """
+    return str(uuid.uuid5(HARNESS_REFINE_NAMESPACE, refinement_id))
 
 
 class HarnessObserver:
@@ -171,24 +217,26 @@ def default_harness_state_path() -> str:
     return os.path.join(agent_dir, "harness", "harness_state.json")
 
 
-def default_client_msg_id(refinement_id: str | None, digest: str | None) -> str:
-    """The announcement's idempotency key (D4), as a value the route can decode.
+def drift_refinement_id(digest: str | None) -> str:
+    """A refinement id for the path that has none.
 
-    Both branches are pure functions of something the harness owns: the
-    refinement's own id, or the content hash of the state file it wrote. Nothing
-    here consults a clock or a counter, which is the whole property — two
-    processes observing the same fact name the same message.
+    The kernel writes `harness_state.json` and says nothing, so there is no
+    `RefinementResult.id` to key on. The content hash of what we saw is the next
+    best stable name: the same state produces the same id, and therefore the same
+    derived `clientMsgId`, so two adapters watching one workspace announce one
+    line. The `drift_` prefix keeps it obviously ours rather than something the
+    harness assigned.
     """
-    if refinement_id:
-        return stable_key("refinement", refinement_id)
-    return stable_key("drift", digest or "")
+    return ("drift_" + (digest or "unknown"))[:REFINE_ID_MAX_CHARS]
 
 
 def refine_body(handle: str, entry_count: int, trigger: str) -> str:
-    """The human sentence. Evidence lives in props; this is what a person reads.
+    """The human sentence. The evidence is in props; this is what a person reads.
 
     Same discipline as the approval card: the body is a plain statement, and the
-    ids that back it are one layer down for whoever wants them.
+    ids that back it are one layer down for whoever wants them. The server
+    refuses an announcement with no body, and rightly so — a bodyless one renders
+    as a blank line whose meaning lives only in an object nobody reads.
     """
     who = handle or "에이전트"
     if trigger == TRIGGER_OBSERVED_DRIFT:
@@ -205,8 +253,9 @@ class RefineAnnouncer:
 
     Type `system` rather than a new message type is ADR-0158 D2: the timeline
     already has a quiet line for "something happened that is not someone
-    talking", and adding a type costs every client a branch. The props key is
-    what a future filter would split on if the demand ever shows up.
+    talking", and adding a type costs every client a branch. The props key the
+    server writes is what a future filter would split on, if the demand ever
+    shows up.
     """
 
     def __init__(
@@ -221,9 +270,11 @@ class RefineAnnouncer:
         self.agent_handle = agent_handle
         self.observer = observer
         # Seam for the red proof: swapping in a per-call unique key reproduces
-        # the duplicate announcement that D4 exists to prevent. Production code
-        # never passes this.
-        self._key_factory = key_factory or default_client_msg_id
+        # the duplicate announcement D4 exists to prevent. Production code never
+        # passes this — and against a server that has landed D4, the mutation is
+        # answered with a 400 naming the key it should have used, which is the
+        # guard working from the other side.
+        self._key_factory = key_factory or harness_refine_client_msg_id
         self.emitted: set[str] = set()
         self.announcements: list[dict[str, Any]] = []
 
@@ -231,18 +282,19 @@ class RefineAnnouncer:
         self, result: dict[str, Any], *, trigger: str = TRIGGER_COMMAND
     ) -> dict[str, Any] | None:
         """The RPC path — `refine_complete` carried a `RefinementResult`."""
-        refinement_id = str(result.get("id") or "") or None
-        applied = [edit for edit in (result.get("appliedEdits") or []) if isinstance(edit, dict)]
-        entry_ids = sorted({str(edit.get("id")) for edit in applied if edit.get("id")})
-        refinement_ids = [refinement_id] if refinement_id else []
-        digest = None
-        if self.observer is not None:
-            digest = self.observer.snapshot().get("sha256")
+        refinement_id = str(result.get("id") or "").strip()
+        if not refinement_id:
+            # Without the harness's id there is no stable key, and an
+            # announcement we cannot make idempotent is one that will duplicate.
+            # The drift path already covers "we know the file changed".
+            return None
+        edits = _wire_edits(result.get("appliedEdits"))
         announcement = self._announce(
-            client_msg_id=self._key_factory(refinement_id, digest),
+            refinement_id=refinement_id,
             trigger=trigger,
-            entry_ids=entry_ids,
-            refinement_ids=refinement_ids,
+            edits=edits,
+            summary=result.get("summary"),
+            rollback_id=result.get("rollbackId"),
         )
         if self.observer is not None:
             # The refinement just wrote the file; adopt that as the new baseline
@@ -251,14 +303,22 @@ class RefineAnnouncer:
         return announcement
 
     def announce_observed_drift(self, drift: dict[str, Any]) -> dict[str, Any] | None:
-        """The kernel path — nothing said anything, the file simply changed."""
+        """The kernel path — nothing said anything, the file simply changed.
+
+        No `summary`: we did not see one, and inventing a sentence about what the
+        agent decided is exactly what `observed-drift` exists not to do.
+        """
         after = drift.get("after") or {}
-        digest = after.get("sha256")
+        edits = [
+            {"action": "observed", "kind": "entry", "id": str(entry_id)}
+            for entry_id in (drift.get("newEntryIds") or [])
+        ][:REFINE_EDITS_MAX]
         announcement = self._announce(
-            client_msg_id=self._key_factory(None, digest),
+            refinement_id=drift_refinement_id(after.get("sha256")),
             trigger=TRIGGER_OBSERVED_DRIFT,
-            entry_ids=list(drift.get("newEntryIds") or []),
-            refinement_ids=list(drift.get("newRefinementIds") or []),
+            edits=edits,
+            summary=None,
+            rollback_id=None,
         )
         if self.observer is not None:
             self.observer.accept()
@@ -267,28 +327,66 @@ class RefineAnnouncer:
     def _announce(
         self,
         *,
-        client_msg_id: str,
+        refinement_id: str,
         trigger: str,
-        entry_ids: list[str],
-        refinement_ids: list[str],
+        edits: list[dict[str, str]],
+        summary: Any,
+        rollback_id: Any,
     ) -> dict[str, Any] | None:
+        client_msg_id = self._key_factory(refinement_id)
         if client_msg_id in self.emitted:
             # Second line of defence is the server's unique index; this one keeps
             # a restart-free process from even asking.
             return None
-        evidence = {
+        block: dict[str, Any] = {
+            "refinementId": refinement_id[:REFINE_ID_MAX_CHARS],
             "trigger": trigger,
-            "entryIds": entry_ids,
-            "refinementIds": refinement_ids,
+            # Claimed, then written by the server from its own constant. Sending
+            # it anyway is not redundant: the server refuses any other value, so
+            # this line is where an adapter that started passing the harness's
+            # "global" through would be stopped.
             "scope": WORKSPACE_SCOPE,
+            "edits": edits[:REFINE_EDITS_MAX],
         }
+        if isinstance(summary, str) and summary.strip():
+            block["summary"] = summary.strip()[:REFINE_SUMMARY_MAX_CHARS]
+        if isinstance(rollback_id, str) and rollback_id.strip():
+            block["rollbackId"] = rollback_id.strip()[:REFINE_ID_MAX_CHARS]
+
         result = self.client.post_message(
             client_msg_id=client_msg_id,
             message_type="system",
-            body=refine_body(self.agent_handle, len(entry_ids), trigger),
-            props={"harness": "prime-agent", REFINE_PROPS_KEY: evidence},
+            body=refine_body(self.agent_handle, len(edits), trigger),
+            props={"harness": "prime-agent"},
+            harness_refine=block,
         )
         self.emitted.add(client_msg_id)
-        record = {"clientMsgId": client_msg_id, "evidence": evidence, "result": result}
+        record = {"clientMsgId": client_msg_id, "harnessRefine": block, "result": result}
         self.announcements.append(record)
         return record
+
+
+def _wire_edits(applied: Any) -> list[dict[str, str]]:
+    """`RefinementResult.appliedEdits` reduced to what may leave this host.
+
+    Three fields survive — `action`, `kind`, `id` — and `before`/`after`/
+    `content` are dropped here rather than filtered later, because a redaction
+    that happens next to the transport is one somebody eventually moves. The
+    server refuses the extra keys too (`deny_unknown_fields`), so this is the
+    inner of two locks on the same door.
+    """
+    out: list[dict[str, str]] = []
+    for edit in applied or []:
+        if not isinstance(edit, dict):
+            continue
+        entry_id = str(edit.get("id") or "").strip()
+        if not entry_id:
+            continue
+        out.append(
+            {
+                "action": str(edit.get("action") or "update")[:REFINE_ID_MAX_CHARS],
+                "kind": str(edit.get("kind") or "entry")[:REFINE_ID_MAX_CHARS],
+                "id": entry_id[:REFINE_ID_MAX_CHARS],
+            }
+        )
+    return out
