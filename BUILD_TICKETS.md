@@ -1419,7 +1419,7 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 ### MOMO-162 수용기준 `[spec/python]`
 - [x] GitHub #99를 `scripts/goal_claim.sh 99`로 claim하고 별도 branch/worktree에서 진행한다.
 - [x] `research/11-agent-runtime/11-hermes-adapter-contract-v0.md`에 두 Hermes integration mode를 정본화한다.
-- [x] 당시 product default를 AgentWorker OpenAI-compatible SSE로 결정하고, 판단 기준을 momo-owned Context Packet / approval / cost / audit로 고정한다. 경로 우열은 ADR-0102 Option C가 gateway=BYOA / worker=managed 두 공식 경로로 supersede했으며 서버 소유 판단 기준은 유지한다.
+- [x] 당시 product default를 AgentWorker OpenAI-compatible SSE로 결정하고, 판단 기준을 oort-owned Context Packet / approval / cost / audit로 고정한다. 경로 우열은 ADR-0102 Option C가 gateway=BYOA / worker=managed 두 공식 경로로 supersede했으며 서버 소유 판단 기준은 유지한다.
 - [x] `research/11-agent-runtime/fixtures/hermes-adapter-contract-v0/`에 OpenAI-compatible SSE input fixture와 platform adapter event mapping fixture를 추가한다.
 - [x] `adapters/hermes/tests/test_momo_adapter_contract.py`로 Hermes SDK 없이 payload/mapping contract를 검증한다.
 - [x] 외부 구현 코드는 복사하지 않고 wire shape/decision만 문서화한다.
@@ -2108,7 +2108,7 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 ### ☑ MOMO-457 (`#463`) 수용기준 — SE-04D Drive 경로 C MCP 포장 v0 `[runtime-db]` · 의존: MOMO-449
 - [x] `POST /v1/mcp/drive` stateless MCP 부분집합(initialize/tools.list/tools.call) — agent bearer+위임 binding, tools/call마다 grant 재검증 fail-closed + audit 같은 트랜잭션.
 - [x] read-only 3종(search_files/get_file_metadata/export_text, 공유 드라이브 한정) + DriveBackend 분리(SA env 커스터디, stub 옵트인·prod 거부).
-- [x] drive.json manifest(momo-hosted 표기, descriptor 절대화) + `verify_drive_mcp.sh`(stub, 실 Google 무호출) PASS.
+- [x] drive.json manifest(oort-hosted 표기, descriptor 절대화) + `verify_drive_mcp.sh`(stub, 실 Google 무호출) PASS.
 - [x] 쓰기/업로드/폴러/경로 A 전부 out of scope(GWS-ARCHIVE 트랙). 상세: issue #463 본문(패킷 겸용).
 - 랜딩: PR #465 squash `367442c`(2026-07-17). 오케스트레이터 후속 2커밋: verifier rg→grep(호스트 ripgrep 부재) + registry verifier 시드 4→5. 실런: verify_drive_mcp PASS + runtime-db 게이트 PASS. 관찰: 백엔드 호출이 tx 내 실행(SA 타임아웃 15s 유계) — 후속 개선 후보.
 

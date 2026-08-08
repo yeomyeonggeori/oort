@@ -402,7 +402,7 @@ const ADE_HOSTS = [
     scope: 'workspace',
     ownerMemberId: SELF,
     type: 'cloud',
-    displayName: 'momo Cloud',
+    displayName: 'oort Cloud',
     capabilities: {},
     createdAtMs: 0,
     online: true,
@@ -1487,7 +1487,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
         host('h-1', '성재 맥북', 'local', 'app', true, null),
         host('h-2', '팀 VPS (서울)', 'remote', 'workd', true, null),
         host('h-3', '작업실 아이맥', 'local', 'app', false, 'offline'),
-        host('h-4', 'momo Cloud', 'cloud', 'cloud', false, 't3_disabled'),
+        host('h-4', 'oort Cloud', 'cloud', 'cloud', false, 't3_disabled'),
       ];
       const execution = (rows: typeof candidates, defaultHostId: string | null) => ({
         kind: 'work_session_spawn',

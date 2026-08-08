@@ -116,7 +116,7 @@ Codex/Hermes/MCP와 Google·GitHub·Notion 공식 표면을 다시 대조한 결
 **권고안**
 
 - user-owned host의 app-server stdio를 interactive Work v0.2 경로로 쓴다.
-- remote WebSocket listener와 momo-managed Codex credential은 out of scope다.
+- remote WebSocket listener와 oort-managed Codex credential은 out of scope다.
 - `codex exec`는 read-only batch/fallback로 유지한다.
 - auth/login/token-refresh, config mutation, raw shell RPC, persistent/session-wide permission grant는 v0에서 relay하지 않는다.
 - native approval은 host instance + protocol version + JSON-RPC request ID + thread/turn/item/approval ID + normalized payload hash + allowed decision set + expiry에 바인딩한다.
@@ -373,7 +373,7 @@ user-owned execution host의 Codex app-server protocol을 oort Work에 연결하
 
 #### Out of scope
 
-- momo-managed Codex auth, remote public app-server, ChatGPT Work UI 복제, Windows/Linux host packaging, automatic PR merge.
+- oort-managed Codex auth, remote public app-server, ChatGPT Work UI 복제, Windows/Linux host packaging, automatic PR merge.
 
 ### SE-05B — E-WORK-1 credentialed real runtime qualification
 

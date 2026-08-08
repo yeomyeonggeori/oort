@@ -46,7 +46,7 @@ The second path should be canonical. If Hermes memory suggests context, oort may
 
 - Transport baseline: OpenAI-compatible `/v1/chat/completions` with SSE.
 - Required event normalization: `text_delta`, `tool_call`, `tool_progress`, `usage`, `done`, `error`.
-- Required momo-owned metadata: `workspace_id`, `channel_id`, `run_id`, `trigger_message_id`, `context_packet_id`, `idempotency_key`.
+- Required oort-owned metadata: `workspace_id`, `channel_id`, `run_id`, `trigger_message_id`, `context_packet_id`, `idempotency_key`.
 - Dangerous tool calls must pause `agent_run`; they are not just rendered as cards.
 
 ## 3. internkim / Kim Intern
@@ -61,7 +61,7 @@ Kim Intern should be made compatible with the same minimum contract as Hermes:
 - `stream=true` SSE.
 - Function/tool calls with stable `call_id`, `name`, and JSON arguments.
 - Usage reporting with prompt, completion, cached, and reasoning tokens when available.
-- Idempotency key support, or momo-side idempotency around a stateless endpoint.
+- Idempotency key support, or oort-side idempotency around a stateless endpoint.
 - No direct workspace DB access. All workspace context arrives through `Context Packet v0`.
 
 ### Memory Boundary

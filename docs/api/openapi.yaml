@@ -1,7 +1,7 @@
 openapi: 3.0.3
 
 # =============================================================================
-# momo REST API — web v0 + plugin surface (MOMO-389/MOMO-459)
+# oort REST API — web v0 + plugin surface (MOMO-389/MOMO-459)
 #
 # This file is the canonical client contract for the web v0 surface. Clients
 # (clients/web-legacy via openapi-typescript, and MomoCore as a conformance target)
@@ -34,10 +34,10 @@ openapi: 3.0.3
 # =============================================================================
 
 info:
-  title: momo REST API (web v0 + plugin surface)
+  title: oort REST API (web v0 + plugin surface)
   version: 0.1.0
   description: >
-    Canonical REST contract for the momo web v0 client surface:
+    Canonical REST contract for the oort web v0 client surface:
     login/refresh/logout, public invite join, realtime token issuance,
     workspace roster, channels (list/create), messages (send/history with
     seq-cursor pagination and `?after=` backfill), read-state (bulk read +
@@ -1363,7 +1363,7 @@ paths:
     post:
       tags: [work-hosts]
       operationId: provisionCloudWorkHost
-      summary: Explicitly provision one paid momo Cloud host on the configured provider.
+      summary: Explicitly provision one paid oort Cloud host on the configured provider.
       description: >
         Human bearer only. Requires confirmPaidCloud=true, positive workspace
         credit, an available work-pool slot, and a managed provider adapter
@@ -1428,7 +1428,7 @@ paths:
       description: >
         ADR-0142 D1. The base acquisition path: a workspace admin installs
         `momo-workd` on their own VM and spends this token at the cloud
-        register endpoint. momo never creates or destroys a BYOC host — its
+        register endpoint. oort never creates or destroys a BYOC host — its
         lifetime belongs to its owner — but scheduling, observation and billing
         are identical to a managed host. Workspace-shared hosts only; a
         `scope` other than `workspace` is refused by name. The token is
@@ -2342,7 +2342,7 @@ paths:
         plus resumed_at and the preserved exit_code. Idle also commits one
         system thread message ("작업 완료 — idle 대기") so NotifierWorker can
         notify only the owner through the existing id-only push envelope. When
-        the bound host is a momo Cloud host whose adapter declares pause
+        the bound host is an oort Cloud host whose adapter declares pause
         support, running-to-idle also pauses its provider instance and opens a
         zero-active-seconds paused interval; idle-to-running resumes it before
         reopening active usage. An adapter that declares no pause is skipped
@@ -2406,7 +2406,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "410":
-          description: The bound momo Cloud sandbox no longer exists; orphaned fallback is scheduled.
+          description: The bound oort Cloud sandbox no longer exists; orphaned fallback is scheduled.
           content:
             application/json:
               schema:
@@ -2414,7 +2414,7 @@ paths:
         "429":
           $ref: "#/components/responses/RateLimited"
         "503":
-          description: The momo Cloud provisioner is unavailable; non-cloud hosts do not use it.
+          description: The oort Cloud provisioner is unavailable; non-cloud hosts do not use it.
           content:
             application/json:
               schema:
@@ -4362,7 +4362,7 @@ paths:
     post:
       tags: [webhooks]
       operationId: receiveNativeWebhook
-      summary: Receive a native momo HMAC-signed webhook.
+      summary: Receive a native oort HMAC-signed webhook.
       description: >
         Public ingress authenticated by X-Momo-Signature-Version,
         X-Momo-Key-Id, X-Momo-Timestamp, X-Momo-Delivery-Id, and
@@ -5022,12 +5022,12 @@ paths:
         from it resolves to the conservative low/medium/high fallback rather
         than silently accepting a level the provider would reject.
 
-        Two provider groups are served. `hermes` holds momo's own
+        Two provider groups are served. `hermes` holds oort's own
         provider-agnostic gateway handles (ADR-0130). `openai-codex` holds model
         ids the upstream publishes in its own catalog, measured 2026-08-04 from
         GET https://chatgpt.com/backend-api/codex/models — the base URL an
         ADR-0147 OAuth link stores. The upstream lists a sixth level, `ultra`,
-        on some of those models; momo deliberately does not serve it, so
+        on some of those models; oort deliberately does not serve it, so
         `levels` stays low/medium/high/xhigh/max and an `ultra` request is a
         400.
       security: [{bearerAuth: []}]
@@ -6647,7 +6647,7 @@ components:
         bootstrapToken:
           type: string
           description: >
-            Shown exactly once. Only its SHA-256 digest is stored, so momo
+            Shown exactly once. Only its SHA-256 digest is stored, so oort
             cannot show it again.
         bootstrapExpiresAtMs:
           type: integer

@@ -844,7 +844,7 @@ pub struct ObservedCall {
     /// Which wire the worker resolved for this turn — the fact a routing test
     /// asserts on without needing a socket.
     pub wire: ProviderWire,
-    /// Names of the momo-implemented tools this turn offered (goal SRV-B3f).
+    /// Names of the oort-implemented tools this turn offered (goal SRV-B3f).
     /// Names rather than rendered JSON: the *shape* is pinned by the two wires'
     /// own body tests, and what a wiring test needs to know is whether the
     /// profile's switch reached the request at all.

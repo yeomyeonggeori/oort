@@ -226,7 +226,7 @@ const WORK_HOSTS = [
     scope: 'workspace',
     ownerMemberId: SELF_ID,
     type: 'cloud',
-    displayName: 'momo 클라우드',
+    displayName: 'oort 클라우드',
     publicKey: 'k',
     capabilities: {},
     createdAtMs: 0,

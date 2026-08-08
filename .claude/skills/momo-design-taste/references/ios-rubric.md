@@ -1,6 +1,6 @@
-# momo iOS design rubric
+# oort iOS design rubric
 
-This reference is the canonical iOS variant of momo design taste. iOS surfaces
+This reference is the canonical iOS variant of oort design taste. iOS surfaces
 are companions for receiving, reading, replying, and making decisions. They do
 not imitate the macOS window or attempt desktop feature parity.
 

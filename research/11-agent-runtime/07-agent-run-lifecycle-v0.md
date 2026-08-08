@@ -92,7 +92,7 @@ Rules:
 | Artifact | `message.type='artifact'` + Memory Plane `artifact_ref` | Timeline card is the visible artifact; Memory Plane stores durable references and retrieval policy. |
 | Artifact update | `message.new`/`message.edited` for artifact cards + optional `agent.partial` | Final artifact writes follow REST/DB/outbox. Progress chunks may be ephemeral. |
 | Input required | `agent_run.status='input_required'` + agent question message | Follow-up input resumes the same run context or creates a child run with `parent_run_id`. |
-| Approval required | `agent_run.status='awaiting_approval'` + `approval(status='pending')` + `approval_request` message | This is momo-specific policy control, not a generic A2A input request. |
+| Approval required | `agent_run.status='awaiting_approval'` + `approval(status='pending')` + `approval_request` message | This is oort-specific policy control, not a generic A2A input request. |
 | Cancel task | future cancel endpoint updates `agent_run.status='cancelled'` | Worker must stop/reconcile budget and write audit. |
 | Push notification | outbox/realtime/APNs future path | Push delivery must mirror the same task/message/artifact updates. |
 

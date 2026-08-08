@@ -32,14 +32,14 @@ References:
 - https://modelcontextprotocol.io/specification/2025-06-18/server/prompts
 - https://modelcontextprotocol.io/specification/2025-06-18/basic/authorization
 
-v0 SHOULD support HTTP transport for remote hosts and MAY support stdio for local developer hosts. HTTP transport uses momo-issued access tokens or OAuth-compatible resource server authorization when that is implemented. Stdio transport may read a token from the environment for local development, but that token still maps to oort `token`, `member`, workspace, channel, and audit policy.
+v0 SHOULD support HTTP transport for remote hosts and MAY support stdio for local developer hosts. HTTP transport uses oort-issued access tokens or OAuth-compatible resource server authorization when that is implemented. Stdio transport may read a token from the environment for local development, but that token still maps to oort `token`, `member`, workspace, channel, and audit policy.
 
 ## 3. Non-Negotiable Rules
 
 - Postgres remains the source of truth. The MCP server never publishes directly to Centrifugo.
 - All user-facing reads and writes run with `SET LOCAL app.workspace_id` and RLS. BYPASSRLS is forbidden for inbound MCP requests.
 - The MCP host never receives database URLs, provider refresh tokens, raw secret values, private cross-channel history, or broad plugin credentials.
-- The MCP host is represented by a oort principal: a `member` row for write-capable hosts or a delegated token bound to a member/subject pair.
+- The MCP host is represented by an oort principal: a `member` row for write-capable hosts or a delegated token bound to a member/subject pair.
 - A host may not impersonate a human message author. Delegation is recorded through token subject/audit metadata, not hidden author substitution.
 - Search and thread fetch return bounded excerpts and source refs, not unbounded transcript dumps.
 - Memory Plane retrieval is explicit. Message search results are not durable memory and do not create memory items.
@@ -240,7 +240,7 @@ Rules:
 - If `context_packet_id` is present, oort rechecks packet expiry, workspace, actor, channel, and `tool_grants`.
 - If no packet is present, oort may build a small `request.surface = "api"` Context Packet before accepting the proposal.
 - Tool name and arguments are validated against Capability Cache `schema_ref` and current workspace/provider policy.
-- Read-only tools may be proposed, but v0 still records them as momo-visible `tool_call` proposals rather than executing hidden provider calls through MCP.
+- Read-only tools may be proposed, but v0 still records them as oort-visible `tool_call` proposals rather than executing hidden provider calls through MCP.
 - Write/spend/deploy/identity/admin tools always create an `approval` row with `status = "pending"` and an `approval_request` message/card.
 - The external provider call is not executed by the MCP server. Execution is a later AgentWorker/plugin executor concern after approval.
 - Writes `audit_log.action = "mcp.tool_call.proposed"`.

@@ -523,7 +523,7 @@ flowchart LR
   W -->|"OpenAI-compatible SSE"| HP["Hermes/provider"]
   P -->|"mode=gateway<br/>relay → private agentwork: wake-up"| G["Hermes gateway adapter<br/>BYOA"]
   G -->|"agent_bearer<br/>pending REST re-read"| S
-  W -->|"momo-owned state transitions<br/>approval / usage / outbox"| P
+  W -->|"oort-owned state transitions<br/>approval / usage / outbox"| P
   G -->|"events / tool proposals / usage"| S
   S -->|"server state machine<br/>approval + usage/audit"| P
   P -->|"outbox → relay"| C["Centrifugo<br/>agent: progress + channel message"]

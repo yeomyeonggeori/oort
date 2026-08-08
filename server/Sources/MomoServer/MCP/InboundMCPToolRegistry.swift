@@ -18,8 +18,8 @@ enum InboundMCPToolRegistry {
     static let tools: [InboundMCPToolDescriptor] = [
         .init(
             name: .searchMessages,
-            title: "Search Momo Messages",
-            description: "Search visible momo messages and return bounded source refs. Does not create memory.",
+            title: "Search oort Messages",
+            description: "Search visible oort messages and return bounded source refs. Does not create memory.",
             inputSchema: schema(
                 required: ["workspace_id", "query", "channel_ids", "limit"],
                 properties: [
@@ -55,7 +55,7 @@ enum InboundMCPToolRegistry {
         ),
         .init(
             name: .fetchThread,
-            title: "Fetch Momo Thread",
+            title: "Fetch oort Thread",
             description: "Fetch a visible thread ordered by message.seq with citeable message refs.",
             inputSchema: schema(
                 required: ["workspace_id", "channel_id", "root_message_id", "limit"],
@@ -89,8 +89,8 @@ enum InboundMCPToolRegistry {
         ),
         .init(
             name: .postMessage,
-            title: "Post Momo Message",
-            description: "Post a visible message through momo's canonical message transaction and outbox.",
+            title: "Post oort Message",
+            description: "Post a visible message through oort's canonical message transaction and outbox.",
             inputSchema: schema(
                 required: ["workspace_id", "channel_id", "body", "client_msg_id"],
                 properties: [
@@ -124,7 +124,7 @@ enum InboundMCPToolRegistry {
         .init(
             name: .createToolCall,
             title: "Create Approval-Safe Tool Call",
-            description: "Create a momo-visible tool_call proposal and approval request. Does not execute the provider tool.",
+            description: "Create an oort-visible tool_call proposal and approval request. Does not execute the provider tool.",
             inputSchema: schema(
                 required: [
                     "workspace_id", "channel_id", "tool_name",
@@ -174,42 +174,42 @@ enum InboundMCPToolRegistry {
         .init(
             uriTemplate: "momo://workspaces/{workspace_id}/channels/{channel_id}/messages/{message_id}",
             name: "momo_message",
-            title: "Momo Message",
+            title: "oort Message",
             description: "One visible message with bounded body and props.",
             mimeType: "application/json"
         ),
         .init(
             uriTemplate: "momo://workspaces/{workspace_id}/channels/{channel_id}/threads/{root_message_id}",
             name: "momo_thread",
-            title: "Momo Thread",
+            title: "oort Thread",
             description: "Visible thread ordered by message.seq.",
             mimeType: "application/json"
         ),
         .init(
             uriTemplate: "momo://workspaces/{workspace_id}/context-packets/{context_packet_id}",
             name: "momo_context_packet",
-            title: "Momo Context Packet",
+            title: "oort Context Packet",
             description: "Context Packet projection if the actor still has permission.",
             mimeType: "application/json"
         ),
         .init(
             uriTemplate: "momo://workspaces/{workspace_id}/memory/{memory_id}",
             name: "momo_memory_ref",
-            title: "Momo Memory Projection",
+            title: "oort Memory Projection",
             description: "Memory Plane projection only; no raw source body.",
             mimeType: "application/json"
         ),
         .init(
             uriTemplate: "momo://workspaces/{workspace_id}/capabilities/{cache_entry_id}",
             name: "momo_capability_projection",
-            title: "Momo Capability Projection",
+            title: "oort Capability Projection",
             description: "Capability Cache public projection with schema refs and policy version.",
             mimeType: "application/json"
         ),
         .init(
             uriTemplate: "momo://workspaces/{workspace_id}/approvals/{approval_id}",
             name: "momo_approval",
-            title: "Momo Approval",
+            title: "oort Approval",
             description: "Visible approval request state.",
             mimeType: "application/json"
         ),

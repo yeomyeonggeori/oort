@@ -124,7 +124,7 @@ Fixtures live in `research/11-agent-runtime/fixtures/hermes-adapter-contract-v0/
 
 `adapters/hermes/tests/test_momo_adapter_contract.py` is a stdlib unittest that does not require the Hermes SDK, aiohttp, websockets, Docker, or Postgres. It verifies:
 
-- the SSE fixture carries `stream=true`, `include_usage=true`, and momo-owned control blocks;
+- the SSE fixture carries `stream=true`, `include_usage=true`, and oort-owned control blocks;
 - forbidden runtime inputs are not present in the request body;
 - a platform adapter Centrifugo push unwraps to the expected adapter event;
 - `MomoAdapter.handle_message()` maps that event to REST invoke and final message send shapes;
@@ -135,7 +135,7 @@ Fixtures live in `research/11-agent-runtime/fixtures/hermes-adapter-contract-v0/
 
 ## 8. External Code Policy
 
-No Mattermost, Hermes, OpenClaw, or other external implementation code is copied into oort for this contract. This spec references integration patterns and fixes momo-owned wire shapes only.
+No Mattermost, Hermes, OpenClaw, or other external implementation code is copied into oort for this contract. This spec references integration patterns and fixes oort-owned wire shapes only.
 
 ## 9. Follow-Ups
 

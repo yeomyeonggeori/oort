@@ -69,7 +69,7 @@ ADR-0113 credential/capability/action boundary
 
 Decide credential custody by runtime class:
 
-1. momo-hosted encrypted connector vault
+1. oort-hosted encrypted connector vault
 2. provider-hosted/remote MCP delegated OAuth
 3. user-owned agent host/BYOA credential custody
 4. hybrid policy by plugin runtime

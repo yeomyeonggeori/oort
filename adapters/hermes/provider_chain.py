@@ -63,7 +63,7 @@ PROPAGATE = "propagate"
 
 #: Default effort request field for OpenAI-compatible providers. Providers that
 #: split Effort and Thinking into two axes declare their own field name in the
-#: momo-owned effort table row (`param`), so the adapter maps rather than guesses.
+#: oort-owned effort table row (`param`), so the adapter maps rather than guesses.
 DEFAULT_EFFORT_PARAM = "reasoning_effort"
 
 #: Keys that would mean momo shipped credential material into the adapter.
@@ -198,7 +198,7 @@ def classify_provider_failure(
 
 
 # ---------------------------------------------------------------------------
-# Chain configuration — momo-supplied shape, adapter-owned credentials
+# Chain configuration — oort-supplied shape, adapter-owned credentials
 # ---------------------------------------------------------------------------
 @dataclass(frozen=True, slots=True)
 class ProviderChainEntry:
@@ -238,11 +238,11 @@ def _first(mapping: Mapping[str, Any], *keys: str) -> Any:
 
 
 def parse_provider_chain(raw: Any) -> tuple[ProviderChainEntry, ...]:
-    """Parse the momo-supplied chain into ordered, enabled links.
+    """Parse the oort-supplied chain into ordered, enabled links.
 
     Raises `ProviderCredentialLeak` when the payload carries credential-shaped
     keys — momo must never send those (ADR-0004). Unknown non-credential keys are
-    ignored so a momo-side additive change cannot break a deployed adapter.
+    ignored so an oort-side additive change cannot break a deployed adapter.
     """
     if isinstance(raw, Mapping):
         raw = _first(raw, "chain", "links", "providers", "items") or []
@@ -301,7 +301,7 @@ def _truthy(value: Any) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Credentials — adapter-owned, never momo-supplied (ADR-0004)
+# Credentials — adapter-owned, never oort-supplied (ADR-0004)
 # ---------------------------------------------------------------------------
 @dataclass(frozen=True, slots=True)
 class ProviderCredential:

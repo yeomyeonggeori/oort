@@ -64,9 +64,9 @@ pub const CONTEXT_WINDOW_DEFAULT: i64 = 30;
 pub const CONTEXT_WINDOW_MIN: i64 = 1;
 pub const CONTEXT_WINDOW_MAX: i64 = 200;
 
-/// Swift `MessageRoutes.agentProfilePolicyPreamble` (:1668-1670), verbatim
-/// except for the product name (ADR-0152 D2-1: user- and model-facing copy says
-/// `oort`; Swift still says the old name until it retires).
+/// Swift `MessageRoutes.agentProfilePolicyPreamble` (:1662-1664), verbatim
+/// (ADR-0152 D2-1: user- and model-facing copy says `oort`; Swift said the old
+/// name until #1118 배치 4 brought it across, so both sides now read the same).
 ///
 /// It is the first thing every agent turn reads, and it is the sentence that
 /// makes profile instructions and message content *subordinate* to server

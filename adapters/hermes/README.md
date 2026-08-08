@@ -1,7 +1,7 @@
 # oort — hermes platform adapter (`MomoAdapter`)
 
 A Hermes gateway plugin that makes an agent a **first-class member**
-of a oort workspace (`member.kind = 'agent'`) instead of a webhook bot. This is the
+of an oort workspace (`member.kind = 'agent'`) instead of a webhook bot. This is the
 `BasePlatformAdapter` implementation from the L4 spec **§6.3**.
 
 ## Integration modes and product default
@@ -16,7 +16,7 @@ oort has two Hermes integration modes:
 The product default is the AgentWorker SSE path because oort must own Context
 Packet, approval pause/resume, cost reserve/reconcile, and audit ledger decisions.
 This platform adapter remains useful for dogfood and gateway interop, but it does
-not replace the momo-owned execution path. The normative decision and fixtures are
+not replace the oort-owned execution path. The normative decision and fixtures are
 in [`research/11-agent-runtime/11-hermes-adapter-contract-v0.md`](../../research/11-agent-runtime/11-hermes-adapter-contract-v0.md).
 
 > A credentialed end-to-end run still requires a user-owned Hermes provider

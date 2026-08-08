@@ -29,7 +29,7 @@ The product center remains the channel timeline execution ledger. A plugin is ad
 - `signature.required_for_catalog = true` for any artifact in `momo-plugins`. Dev fixtures may be unsigned only when they are explicitly not catalog installable.
 - `schema_v0.sql` is unchanged by this spec. Runtime tables, registry migrations, and executors are out of scope.
 - Catalog metadata never grants execution. It only lets oort discover signed manifests, compare compatibility, and decide whether a workspace may install or project capabilities.
-- A plugin that cannot produce approval metadata and audit evidence for write-like side effects is not a oort plugin v0 catalog candidate.
+- A plugin that cannot produce approval metadata and audit evidence for write-like side effects is not an oort plugin v0 catalog candidate.
 
 ## 3. Manifest Shape
 
@@ -111,7 +111,7 @@ Catalog admission requires publisher ownership verification and signing key regi
 
 | Kind | Meaning | v0 status |
 |---|---|---|
-| `hosted_connector` | momo-owned connector process or worker path calls provider APIs. | Preferred v0 default. |
+| `hosted_connector` | oort-owned connector process or worker path calls provider APIs. | Preferred v0 default. |
 | `external_webhook` | oort calls a remote HTTPS endpoint controlled by publisher/customer. | Allowed with strict egress/signature policy. |
 | `mcp_tool_proxy` | oort proxies a bounded MCP tool list into Capability Cache. | Allowed after inbound/outbound MCP policy exists. |
 | `internal` | Capability is implemented in the core monorepo but described as plugin-like metadata. | Allowed for first-party bootstrap only. |
