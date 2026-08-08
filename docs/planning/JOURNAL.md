@@ -1995,3 +1995,10 @@
 - **U1 판정 PASS**(25분): PVM 커널 NCP VM 부팅 성공(3회·ioctl 실증). **더 큰 발견: NCP 표준 VM에 /dev/kvm(nested) 실동작** — L2 게스트 KVM 가속 부팅 실증 → ADR-0156 증보 2(**표준 KVM 1차·PVM 폴백**). 상류 결함 3 실측(BLS 무효 스크립트·kvm_intel 선점·console de-dup — 전문 `research/2026-08-09-cubesandbox-u1-verdict.md`). U1 VM(144279772) **terminate 완료**(성재 스크립트 대행).
 - **D4-② 환경 구성**: cube-d42 생성(**인스턴스 144280017**·s8-g3 31GB)+`101.79.20.102` 공인 IP(**인스턴스 144280033**)+**200GB CB1 볼륨(144280036)** — 회수 대상 3개 전부 번호 명기(**종료 책임=오케스트레이터**: terminate+IP 반납+볼륨 삭제). KVM(g3) 스토리지 API 특이(분리 생성 CB1+zone→attach) 실측 기록. D4-② 워커 가동(표준 모드 설치→실 microVM 폐곡선→매핑 실물→idle 시계→ADR-0157 네트워크 실측).
 - 병행: #1193 앵커·자동 refine 실측 워커 진행 중.
+
+## 2026-08-09 (낮) · Fable · D4-② 완주·Swift 감사·#1198 랜딩·#1195 FAIL
+- **D4-② 완주(#1197 발급)**: 표준 KVM 전 과업 성공(설치 91초·호스트→첫 샌드박스 10분). **어댑터가 fake에 맞춰져 있었음이 실물로 드러남** — 이미 목표 상태=500(409 아님)·VMM 크래시 후 5분 running(provider_missing 미발화 → 원장 능동 destroy 필요)·timeout=절대 TTL(keepalive 의무)·pause 4배·metadata 내부 키 혼입. **ADR 문언 2건 실물 정정**: 0156 D5(CubeProxy·CoreDNS는 필수 종속)·**0157 D4=기제 선택이 아니라 기대값 검증**(Cubelet eBPF가 D1~D3를 기본 만족·양성 대조 확인). 부수: 템플릿이 CubeEgress MITM CA를 기본으로 굽는다(ADR-0150 입력).
+- **Swift 감사 — 통째 삭제 불가 판정**: 삭제 불가 4(PushRelay=유일 APNs·**WorkHostDaemon=방금 만든 T3가 띄우는 바이너리**·server/Migrations=배포 DDL·MomoMetrics)·파리티 갭 Swift-only 83(openapi 성문 65)·삭제 가능 573(클라 407 우선)·web-legacy는 독립 Dockerfile.web 보유. **오케스트레이터 실수 적발·복원**: main 머지 a749d765가 ADR-0145 **증보 1(삭제 조건 판정표)을 유실** — 감사가 잡아 원문 복원+고지. 교훈: 문서 충돌 해소 시 "무엇을 취했나"가 아니라 **"무엇이 사라졌나"**를 세라.
+- **#1198 머지 → #1194 종결**: 목 수리 선행(자동 경로 LLM 패스 둘 미구분→모든 자동 refine 조용히 거부=거짓 초록)·유래를 관측에서·로컬 스코프는 RPC 종료 후 질의(경합 회피)·applied 필터. red proof 4.
+- **#1195 리뷰 FAIL(B2·H2)** — 수리 중: B1 깊은 방(45줄+) 앵커가 가상 창 밖이라 착지 실패+**거짓 고지**(이미 로드된 것을 "더 불러오세요")·B2 2회차 무동작(?msg= 미소거).
+- 성재 지시 반영: **검수 표면=데스크톱(Tauri)+모바일(RN)** — macOS 폐기 시 사라지는 표면 목록 감사에 명시(웹훅·이벤트구독 설정·첨부 UI 등). 검수 전 빌드 준비 예정(폰 아카이브·Tauri 번들).
