@@ -38,12 +38,24 @@ pub const BYOC_PROVIDER_ID: &str = "byoc";
 pub const MOCK_A_PROVIDER_ID: &str = "mock-a";
 pub const MOCK_B_PROVIDER_ID: &str = "mock-b";
 
+/// The first **managed** substrate (ADR-0156 D1/D2): a self-hosted CubeSandbox
+/// daemon on a dedicated host, spoken to over its E2B-dialect REST surface.
+///
+/// Passes `054_t3_provider_registry.sql`'s `^[a-z0-9][a-z0-9-]{0,31}$` check, so
+/// a `work_cloud_host.provider` row can name it.
+pub const CUBESANDBOX_PROVIDER_ID: &str = "cubesandbox";
+
 /// Default when the operator names no provider: BYOC needs no credential at all.
 pub const FALLBACK_PROVIDER_ID: &str = BYOC_PROVIDER_ID;
 
 /// Every registered adapter id, ascending.
 pub fn registered_provider_ids() -> Vec<&'static str> {
-    let mut ids = vec![BYOC_PROVIDER_ID, MOCK_A_PROVIDER_ID, MOCK_B_PROVIDER_ID];
+    let mut ids = vec![
+        BYOC_PROVIDER_ID,
+        CUBESANDBOX_PROVIDER_ID,
+        MOCK_A_PROVIDER_ID,
+        MOCK_B_PROVIDER_ID,
+    ];
     ids.sort_unstable();
     ids
 }
@@ -52,9 +64,37 @@ pub fn is_registered(provider_id: &str) -> bool {
     registered_provider_ids().contains(&provider_id)
 }
 
+/// Wall-clock cost of a CubeSandbox pause, per GiB of instance memory.
+///
+/// The 1st-party PVM benchmark measures a serial pause of a 2 GiB sandbox at
+/// **370.8 ms** (≈0.185 s/GiB), rounded up. It is an *upper* bound: pause is
+/// still a full-memory copy upstream and the soft-dirty incremental path is
+/// announced, so this number can only fall.
+///
+/// It is ~20× cheaper than `mock-a`'s `4.0`, which is an E2B-derived figure. The
+/// two must not be confused: copying `mock-a`'s constant here would silently
+/// price every pause twenty times over.
+pub const CUBESANDBOX_PAUSE_SECONDS_PER_GIB: f64 = 0.2;
+
+/// Conservative default for `max_concurrent_instances` when the operator injects
+/// nothing (ADR-0156 D6①).
+///
+/// CubeSandbox declares no concurrency ceiling of its own — the ceiling is a
+/// property of the *host*, and this is the first provider for which that is
+/// true. The 1st-party density measurement gives
+/// `(RAM_GiB − 7 baseline) ÷ per-session GiB`, which is ≈10 on the 32 GiB box
+/// ADR-0156 D3's 증보 orders. A bigger box raises it — through
+/// [`cubesandbox_max_concurrent_instances`], never through an edit here.
+pub const CUBESANDBOX_DEFAULT_MAX_CONCURRENT_INSTANCES: i64 = 10;
+
 /// Capability descriptor for a registry id, or [`T3Error::UnknownProvider`] —
 /// an unknown provider fails closed (054 header comment) rather than defaulting
 /// to something that can create billable instances.
+///
+/// Still a pure function of the id. The one host-spec-dependent value
+/// (`max_concurrent_instances`) resolves to its conservative default here and is
+/// overridden from settings by the adapter that owns the host — see
+/// [`cubesandbox_max_concurrent_instances`] and ADR-0142 D2's 증보.
 pub fn capabilities_for(provider_id: &str) -> Result<CloudProviderCapabilities, T3Error> {
     Ok(match provider_id {
         BYOC_PROVIDER_ID => CloudProviderCapabilities {
@@ -84,8 +124,52 @@ pub fn capabilities_for(provider_id: &str) -> Result<CloudProviderCapabilities, 
             pause_seconds_per_gib: None,
             max_concurrent_instances: Some(5),
         },
+        // ADR-0156 D2 / the 매핑표 §2.7 draft, value for value.
+        CUBESANDBOX_PROVIDER_ID => CloudProviderCapabilities {
+            provider_id: CUBESANDBOX_PROVIDER_ID.to_string(),
+            manages_instance_lifetime: true,
+            // Not a simulation: pause writes a memory snapshot to disk and the
+            // host physically reclaims CPU and RAM.
+            supports_pause: true,
+            // "CPU registers, process memory, TCP state and filesystem mutations
+            // all survive the snapshot" — the sandbox's own outbound sockets are
+            // the documented exception, and they are the reason ADR-0141 D4's
+            // periodic WIP commit is not optional.
+            resume_semantics: CloudResumeSemantics::Memory,
+            // No wall-clock ceiling at all — unlike hosted e2b's 24h/1h tiers,
+            // which is where `mock-a`'s 3600 comes from. `None` here is a fact
+            // about the substrate, not an omission.
+            continuous_runtime_limit_seconds: None,
+            pause_seconds_per_gib: Some(CUBESANDBOX_PAUSE_SECONDS_PER_GIB),
+            max_concurrent_instances: Some(CUBESANDBOX_DEFAULT_MAX_CONCURRENT_INSTANCES),
+        },
         other => return Err(T3Error::UnknownProvider(other.to_string())),
     })
+}
+
+/// The operator's concurrency ceiling for the CubeSandbox host, from an
+/// environment map (ADR-0156 D6① / ADR-0142 D2 증보).
+///
+/// **Why this is a setting and not a constant.** Every other capability in
+/// [`capabilities_for`] is a fact about the *substrate*. This one is a fact
+/// about the *box the operator bought*: the density measurement is
+/// `(RAM_GiB − 7) ÷ per-session GiB`, so pinning it in the registry would mean
+/// editing Rust to use a larger machine. ADR-0142 D2's rule survives intact —
+/// its subject is policy code, which still cannot name `cubesandbox`; it says
+/// nothing about where the registry sources a number.
+///
+/// A value that is absent, unparseable, or non-positive falls back to
+/// [`CUBESANDBOX_DEFAULT_MAX_CONCURRENT_INSTANCES`]. Failing *open* here would
+/// let a typo admit more paid sandboxes than the host can hold.
+pub fn cubesandbox_max_concurrent_instances(env: &BTreeMap<String, String>) -> i64 {
+    let key = format!(
+        "{}_MAX_INSTANCES",
+        environment_namespace(CUBESANDBOX_PROVIDER_ID)
+    );
+    env.get(&key)
+        .and_then(|value| value.trim().parse::<i64>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(CUBESANDBOX_DEFAULT_MAX_CONCURRENT_INSTANCES)
 }
 
 /// `mock-a` → `MOMO_T3_PROVIDER_MOCK_A`. Every non-alphanumeric character folds
@@ -102,6 +186,12 @@ pub fn environment_namespace(provider_id: &str) -> String {
 
 /// The full env key set one managed adapter reads. Exposed so the invariant #7
 /// scanner can assert that none of these *values* reached PostgreSQL.
+///
+/// **Tuning knobs are deliberately absent.** The adapter-specific numbers
+/// (`_MAX_INSTANCES`, `_SWEEP_SECONDS`) are small integers, so feeding them to a
+/// substring scan of a database dump would report a leak every time a row
+/// happened to contain `10`. This list is the *credential-bearing* namespace,
+/// and its usefulness comes from every entry being a high-entropy secret.
 pub fn environment_keys(provider_id: &str) -> Vec<String> {
     let ns = environment_namespace(provider_id);
     vec![
@@ -246,6 +336,69 @@ mod tests {
     fn unknown_provider_fails_closed() {
         let err = capabilities_for("e2b").expect_err("a retired provider id must not resolve");
         assert!(matches!(err, T3Error::UnknownProvider(id) if id == "e2b"));
+        assert!(
+            !registered_provider_ids().contains(&"e2b"),
+            "named regression: adding a managed substrate must not resurrect the retired id"
+        );
+    }
+
+    /// ADR-0156 D2 + the 매핑표 §2.7 draft, value for value.
+    #[test]
+    fn cubesandbox_declares_the_measured_substrate_and_not_the_mock_numbers() {
+        let caps = capabilities_for(CUBESANDBOX_PROVIDER_ID).expect("registered");
+        for op in [
+            CloudProviderOperation::Create,
+            CloudProviderOperation::Pause,
+            CloudProviderOperation::Resume,
+            CloudProviderOperation::Destroy,
+            CloudProviderOperation::Probe,
+        ] {
+            assert!(caps.supports(op), "cubesandbox must support {op:?}");
+        }
+        assert_eq!(caps.resume_semantics, CloudResumeSemantics::Memory);
+        assert_eq!(
+            caps.continuous_runtime_limit_seconds, None,
+            "cubesandbox imposes no wall-clock ceiling; a Some(..) here would be an e2b tier"
+        );
+        assert_eq!(caps.pause_seconds_per_gib, Some(0.2));
+
+        // Named regression: `mock-a` carries E2B-derived numbers. Copying them
+        // into a substrate measured at ~20x faster would misprice every pause.
+        let mock_a = capabilities_for(MOCK_A_PROVIDER_ID).expect("registered");
+        assert_ne!(caps.pause_seconds_per_gib, mock_a.pause_seconds_per_gib);
+        assert_ne!(
+            caps.continuous_runtime_limit_seconds,
+            mock_a.continuous_runtime_limit_seconds
+        );
+    }
+
+    /// ADR-0156 D6① — the ceiling follows the box, not the source tree.
+    #[test]
+    fn the_concurrency_ceiling_is_injected_and_fails_closed_on_nonsense() {
+        let mut env = BTreeMap::new();
+        assert_eq!(
+            cubesandbox_max_concurrent_instances(&env),
+            CUBESANDBOX_DEFAULT_MAX_CONCURRENT_INSTANCES,
+            "an unconfigured host must get the conservative default"
+        );
+
+        env.insert(
+            "MOMO_T3_PROVIDER_CUBESANDBOX_MAX_INSTANCES".to_string(),
+            " 42 ".to_string(),
+        );
+        assert_eq!(cubesandbox_max_concurrent_instances(&env), 42);
+
+        for nonsense in ["0", "-3", "ten", ""] {
+            env.insert(
+                "MOMO_T3_PROVIDER_CUBESANDBOX_MAX_INSTANCES".to_string(),
+                nonsense.to_string(),
+            );
+            assert_eq!(
+                cubesandbox_max_concurrent_instances(&env),
+                CUBESANDBOX_DEFAULT_MAX_CONCURRENT_INSTANCES,
+                "named regression: a malformed ceiling must fall back, never open up ({nonsense:?})"
+            );
+        }
     }
 
     #[test]

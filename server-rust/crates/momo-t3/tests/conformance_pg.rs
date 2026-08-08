@@ -27,6 +27,7 @@
 //! | `d2_t3_3_advisory_lock_serializes_lifecycle_transactions` | remove `acquire_t3_lifecycle_lock` from the prelude |
 //! | `d2_t3_4_double_termination_is_idempotent` | drop the `settled_at IS NULL` guard or the `credit_entry` unique key |
 //! | `d2_t3_7_provider_credentials_never_enter_postgres` | persist any part of the `MOMO_T3_PROVIDER_*` namespace |
+//! | `d2_t3_8_cubesandbox_running_is_not_liveness` | let any settlement path read a provider's reported `state` |
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -39,6 +40,7 @@ use momo_db::migrate::{default_migrations_dir, run_migrations, SeedMode};
 use momo_db::PgPool;
 use momo_provider::{CloudInstanceSpec, CloudProviderAdapter};
 use momo_t3::provider::registry::{load_endpoints, MOCK_A_PROVIDER_ID};
+use momo_t3::sweep::{converge_stale_session, stale_session_candidates};
 use momo_t3::{
     bind_cloud_host_in_tx, cloud_host_state_in_tx, create_work_session_in_tx, pause_usage_in_tx,
     reserve_provisioning_slot_in_tx, resume_usage_in_tx, start_usage_in_tx, terminate,
@@ -1090,4 +1092,155 @@ async fn scan_database_for(su: &PgPool, needle: &str) -> i64 {
         hits += found;
     }
     hits
+}
+
+// ---------------------------------------------------------------------------
+// #8 — CubeSandbox's `running` is not liveness (ADR-0156 D6② / 매핑표 §2.3)
+// ---------------------------------------------------------------------------
+
+/// The acceptance criterion 매핑표 §2.3 writes out in full, run against the
+/// database.
+///
+/// CubeAPI folds every non-paused internal status into `running`, so a wedged
+/// sandbox answers `200 {"state":"running"}` forever. The claim under test is
+/// that momo's settlement path does not care: liveness is the workd heartbeat's
+/// to report, and a session whose heartbeat went quiet is orphaned and settled
+/// **while the substrate is still saying it is running**.
+///
+/// Red when reverted: teach any part of the settlement path to consult the
+/// provider's `state` (or make `probe` answer anything other than `Present` for
+/// `running`) and the sweep stops producing this candidate — a paid session
+/// keeps billing on a machine that is doing nothing.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a fresh pgvector/pg18 DB + momo_app role"]
+async fn d2_t3_8_cubesandbox_running_is_not_liveness() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+
+    // A fake CubeAPI that reports `running` for every sandbox it is asked about,
+    // forever — the lossy fold at its most confident.
+    let sandbox_id = format!("iiny0783cype8gmoawzmx-{}", Uuid::new_v4().simple());
+    let reported = sandbox_id.clone();
+    let router = axum::Router::new().route(
+        "/sandboxes/{id}",
+        axum::routing::get(
+            move |axum::extract::Path(id): axum::extract::Path<String>| {
+                let reported = reported.clone();
+                async move {
+                    axum::Json(serde_json::json!({
+                        "sandboxID": id,
+                        "templateID": "tpl-oort-workd",
+                        // The word that means nothing.
+                        "state": "running",
+                        "metadata": { "momo_provision_id": reported },
+                    }))
+                }
+            },
+        ),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind fake cube api");
+    let address = listener.local_addr().expect("addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, router).await;
+    });
+
+    let adapter = momo_t3::CubeSandboxProviderAdapter::from_env(&BTreeMap::from([
+        (
+            "MOMO_T3_PROVIDER_CUBESANDBOX_API_BASE_URL".to_string(),
+            format!("http://{address}"),
+        ),
+        (
+            "MOMO_T3_PROVIDER_CUBESANDBOX_API_KEY".to_string(),
+            "cube-operator-key-not-a-real-secret".to_string(),
+        ),
+    ]))
+    .expect("the adapter is configured");
+
+    let tenant = seed_tenant(&su).await;
+    let host = seed_cloud_host(
+        &su,
+        &tenant,
+        momo_t3::provider::CUBESANDBOX_PROVIDER_ID,
+        &sandbox_id,
+        &bootstrap_digest(),
+    )
+    .await;
+    let session_id = start_paid_session(&app, &tenant, host).await;
+
+    // The substrate insists the sandbox is up.
+    let instance = momo_provider::CloudInstanceRef {
+        provider_id: momo_t3::provider::CUBESANDBOX_PROVIDER_ID.to_string(),
+        instance_id: sandbox_id.clone(),
+    };
+    assert_eq!(
+        adapter.probe(&instance).await.expect("probe answers"),
+        momo_provider::CloudInstancePresence::Present,
+        "precondition: the fake upstream is reporting the sandbox as `running`"
+    );
+
+    // …and the daemon inside it stopped talking.
+    sqlx::query(
+        "UPDATE work_host SET last_seen_at = clock_timestamp() - interval '30 minutes' \
+          WHERE id = $1 AND workspace_id = $2",
+    )
+    .bind(host.host_id)
+    .bind(tenant.workspace_id)
+    .execute(&su)
+    .await
+    .expect("age the heartbeat");
+
+    // The candidate read is unscoped and runs as a BYPASSRLS role in production
+    // (`momo-notifier`); the superuser pool is this harness's stand-in for it.
+    // The settlement below still goes through the tenant-scoped `momo_app` pool,
+    // which is where the RLS policies and the advisory ladder actually apply.
+    let candidates = stale_session_candidates(&su, 90, 200)
+        .await
+        .expect("sweep candidates");
+    let candidate = candidates
+        .iter()
+        .find(|candidate| candidate.session_id == session_id)
+        .unwrap_or_else(|| {
+            panic!(
+                "named regression: the host-loss sweep must not consult the provider. \
+                 CubeAPI's `running` is every non-paused status folded into one word \
+                 (sandboxes.rs:917-923); liveness is the workd heartbeat (ADR-0156 D6②)"
+            )
+        });
+    assert_eq!(
+        candidate.cloud_host_id,
+        Some(host.cloud_host_id),
+        "the candidate carries the paid host, so the settlement reaches the ledger"
+    );
+
+    let convergence = converge_stale_session(&app, candidate, 90)
+        .await
+        .expect("converge the stale session");
+    assert!(
+        convergence.settled && convergence.transitioned,
+        "a session whose heartbeat is gone is settled and moved off `running`, whatever the \
+         substrate claims: {convergence:?}"
+    );
+
+    // The substrate has not changed its mind, and it never had a vote.
+    assert_eq!(
+        adapter.probe(&instance).await.expect("probe answers"),
+        momo_provider::CloudInstancePresence::Present,
+        "named regression: this is still `present`, and `present` is all it ever meant — the \
+         settlement above happened without it"
+    );
+
+    let status: String =
+        sqlx::query_scalar("SELECT status FROM work_session WHERE id = $1 AND workspace_id = $2")
+            .bind(session_id)
+            .bind(tenant.workspace_id)
+            .fetch_one(&su)
+            .await
+            .expect("read the session back");
+    assert_ne!(
+        status, "running",
+        "the session must not still claim to be running on a host nobody has heard from"
+    );
 }

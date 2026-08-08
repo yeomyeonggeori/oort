@@ -34,6 +34,7 @@ T3 cloud host의 획득 경로를 두 가지로 정의한다. **수명주기·�
 | `probe(ref)` | 사실 조회 — deadline 초과 수렴의 근거 |
 
 - **capability 선언**: `supports_pause`, `resume_semantics`(메모리 보존 여부), `continuous_runtime_limit` 등을 어댑터가 선언한다. ADR-0136/0139/0141의 E2B 고유 수치(pause 4초/GiB·keepMemory·상한 24h)는 전부 이 선언으로 이동한다 — **정책 코드가 특정 provider의 상수를 아는 것을 금지**한다.
+- **증보 (2026-08-08, ADR-0156 D6① — 성재 승인)**: **호스트 사양 종속 capability는 설정 주입을 허용한다.** `max_concurrent_instances`처럼 값이 *기질*이 아니라 *운영자가 확보한 박스*에 달린 항목은 레지스트리에 보수적 기본값을 두고 `MOMO_T3_PROVIDER_<ID>_*` 네임스페이스로 덮어쓴다(미설정·파싱실패·비양수는 기본값으로 fail-closed — 오타가 정원을 넓히지 못한다). D2가 금지하는 것은 **정책 코드가 provider를 아는 것**이지 레지스트리가 값을 어디서 읽는지가 아니므로, 정책은 여전히 `capabilities_for`만 본다. 첫 적용: `cubesandbox`(ADR-0156 D4-③).
 - BYOC는 이 계약에서 `create/destroy`가 없는 **degenerate 어댑터**다(pause/resume도 기본 미지원 — idle 시 과금은 어차피 활성시간 기준이라 사용자 손해 없음).
 
 ### D3. 연속성 무상태 의무 (인터뷰 확정 — 부정형 2개, testable)
