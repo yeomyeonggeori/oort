@@ -92,7 +92,8 @@ pub use lifecycle::{
     WorkSession, WorkSessionDetail,
 };
 pub use provider::{
-    ByocProviderAdapter, MockCall, MockInstanceState, MockProviderAdapter, T3ProviderEndpoint,
+    ByocProviderAdapter, CubeSandboxProviderAdapter, CubeSandboxTuning, MockCall,
+    MockInstanceState, MockProviderAdapter, T3ProviderEndpoint,
 };
 pub use reattach::{
     clamp_replay_limit, list_session_events_in_tx, load_session_reattach_state_in_tx,

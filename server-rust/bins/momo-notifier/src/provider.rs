@@ -38,8 +38,11 @@ pub trait ProviderAdapterResolver: Send + Sync {
 /// whose destroy is momo releasing its own binding. Every other registered id is
 /// **refused**, on purpose:
 ///
-/// * the managed HTTP adapter (Swift `HTTPCloudProviderAdapter`) is not ported
-///   yet — B2.1 shipped BYOC plus the in-process verification substrates;
+/// * `cubesandbox` **exists** as of ADR-0156 D4-③ and is registered, but wiring
+///   it in here is D4-④ (provisioner integration) and is gated on D4-② proving
+///   the substrate boots on a real host. Resolving it today would point the
+///   reconciler at an endpoint nobody has stood up, so the refusal below is the
+///   boundary, stated by name rather than left as a silence;
 /// * substituting an in-process [`momo_t3::MockProviderAdapter`] here would be
 ///   worse than useless: a fresh mock knows no instances, so every probe would
 ///   answer `Absent` and the reconciler would settle live paid sessions on the
@@ -91,7 +94,9 @@ impl ProviderAdapterResolver for FixedAdapterResolver {
 mod tests {
     use super::*;
     use momo_provider::CloudProviderOperation;
-    use momo_t3::provider::registry::{MOCK_A_PROVIDER_ID, MOCK_B_PROVIDER_ID};
+    use momo_t3::provider::registry::{
+        CUBESANDBOX_PROVIDER_ID, MOCK_A_PROVIDER_ID, MOCK_B_PROVIDER_ID,
+    };
 
     #[test]
     fn byoc_resolves_to_the_degenerate_adapter() {
@@ -104,9 +109,17 @@ mod tests {
         assert_eq!(adapter.capabilities().provider_id, BYOC_PROVIDER_ID);
     }
 
+    /// `cubesandbox` is in this list on purpose (ADR-0156 D4-③/D4-④). The
+    /// adapter is built and proved against a fake upstream, but until D4-② has
+    /// stood a real host up, resolving it here would aim the reconciler at
+    /// nothing. The refusal is the D4-④ boundary made visible.
     #[test]
     fn a_managed_provider_with_no_adapter_is_refused_not_guessed() {
-        for provider_id in [MOCK_A_PROVIDER_ID, MOCK_B_PROVIDER_ID] {
+        for provider_id in [
+            MOCK_A_PROVIDER_ID,
+            MOCK_B_PROVIDER_ID,
+            CUBESANDBOX_PROVIDER_ID,
+        ] {
             assert_eq!(
                 RegistryAdapterResolver.adapter_for(provider_id).err(),
                 Some(AdapterError::Unwired(provider_id.to_string())),

@@ -1385,16 +1385,19 @@ name = "momo-t3"
 version = "0.0.0"
 dependencies = [
  "async-trait",
+ "axum",
  "base64",
  "chrono",
  "futures",
  "momo-db",
  "momo-provider",
  "momo-wire",
+ "reqwest",
  "serde_json",
  "sqlx",
  "thiserror 1.0.69",
  "tokio",
+ "tracing",
  "uuid",
 ]
 
