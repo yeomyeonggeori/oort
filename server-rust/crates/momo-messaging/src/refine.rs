@@ -82,6 +82,14 @@ const HARNESS_REFINE_NAMESPACE: Uuid = Uuid::from_bytes(*b"momo.harnessRefi");
 /// after a timeout, the RPC path and the file watcher both noticing the same
 /// event — derive one key, meet the spine's `(channel, author, client_msg_id)`
 /// unique index, and leave one line in the channel.
+///
+/// **This function has a twin** in `adapters/prime/refine.py`, because the wire
+/// has a side in each language, and the twin is the whole risk (#1190): a
+/// mismatch is a 400 that names the expected uuid, which is a production
+/// rejection rather than a caught bug. So the expectation lives in neither
+/// implementation — `docs/api/harness-refine-client-msg-id.golden.json` holds it
+/// once and both test suites read that one file. Editing this body means editing
+/// the golden file, and editing the golden file means changing D4.
 pub fn harness_refine_client_msg_id(refinement_id: &str) -> Uuid {
     Uuid::new_v5(&HARNESS_REFINE_NAMESPACE, refinement_id.as_bytes())
 }
@@ -423,6 +431,106 @@ mod tests {
             harness_refine_client_msg_id("refine_20260807041452416")
         );
         assert_eq!(valid().expect("valid").client_msg_id(), once);
+    }
+
+    /// **#1190 — the cross-language check.** The derivation exists twice, once
+    /// here and once in `adapters/prime/refine.py`, and "they have the same
+    /// property" is not a thing a test can watch. This reads the *shared* golden
+    /// file — the same bytes `test_prime_adapter_contract.py` reads, not a copy
+    /// of it — so a drift on either side turns red here at `cargo test` instead
+    /// of at a production 400.
+    ///
+    /// `include_str!` rather than a runtime read on purpose: moving or deleting
+    /// the file breaks the build, which is the only way "one file, no copies"
+    /// can be a fact rather than an intention. The path is relative to this
+    /// source file: `src/` → crate → `crates/` → `server-rust/` → repo root.
+    #[test]
+    fn the_derived_key_matches_the_golden_vectors_the_python_adapter_reads() {
+        const GOLDEN: &str =
+            include_str!("../../../../docs/api/harness-refine-client-msg-id.golden.json");
+        let golden: Value = serde_json::from_str(GOLDEN).expect("the golden file is JSON");
+
+        assert_eq!(
+            golden["namespace"]["uuid"],
+            json!(HARNESS_REFINE_NAMESPACE.to_string()),
+            "the file and this crate must name one namespace"
+        );
+        assert_eq!(
+            golden["namespace"]["asciiBytes"],
+            json!(std::str::from_utf8(HARNESS_REFINE_NAMESPACE.as_bytes()).unwrap()),
+        );
+
+        let vectors = golden["vectors"].as_array().expect("vectors is an array");
+        assert!(
+            vectors.len() >= 9,
+            "the edge set (empty, unicode, longest, padded) must not be quietly shrunk: {} left",
+            vectors.len()
+        );
+
+        let mut seen_empty = false;
+        let mut seen_multibyte = false;
+        let mut seen_at_cap = false;
+        let mut seen_padded = false;
+
+        for vector in vectors {
+            let name = vector["name"].as_str().expect("every vector is named");
+            let refinement_id = vector["refinementId"]
+                .as_str()
+                .expect("every vector carries the id it hashes");
+            let expected = vector["clientMsgId"]
+                .as_str()
+                .expect("every vector carries its expected uuid");
+
+            // The bytes are asserted before the digest is, so a unicode failure
+            // says which half broke: the JSON decode or the derivation.
+            let hex: String = refinement_id
+                .as_bytes()
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect();
+            assert_eq!(
+                json!(hex),
+                vector["utf8Hex"],
+                "{name}: this side decoded different bytes than the file records"
+            );
+            assert_eq!(
+                // `str::len` is the byte length; the scalar count is the next
+                // assertion, and the file records both because they differ.
+                json!(refinement_id.len()),
+                vector["utf8ByteLength"],
+                "{name}: utf8ByteLength"
+            );
+            assert_eq!(
+                json!(refinement_id.chars().count()),
+                vector["charLength"],
+                "{name}: charLength — the cap both sides enforce is counted in scalars"
+            );
+
+            assert_eq!(
+                harness_refine_client_msg_id(refinement_id).to_string(),
+                expected,
+                "{name}: derived key drifted from the shared golden vector"
+            );
+
+            seen_empty |= refinement_id.is_empty();
+            seen_multibyte |= refinement_id.len() > refinement_id.chars().count();
+            seen_at_cap |= refinement_id.chars().count() == HARNESS_REFINE_ID_MAX_CHARS;
+            seen_padded |= refinement_id.trim() != refinement_id;
+        }
+
+        assert!(seen_empty, "an empty id vector must stay in the set");
+        assert!(
+            seen_multibyte,
+            "a multi-byte id vector must stay in the set"
+        );
+        assert!(
+            seen_padded,
+            "a padded id vector must stay in the set — neither side may start trimming"
+        );
+        assert!(
+            seen_at_cap,
+            "a vector at HARNESS_REFINE_ID_MAX_CHARS must stay in the set"
+        );
     }
 
     /// The namespace is pinned by value, because an adapter in another language

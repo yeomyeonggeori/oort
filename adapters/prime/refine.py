@@ -117,6 +117,13 @@ def harness_refine_client_msg_id(refinement_id: str) -> str:
     server computes it independently and **refuses** a POST that carries any
     other value, naming the expected one — so a mismatch here is a loud 400, not
     a duplicated line.
+
+    A 400 is still a production rejection, though, which is why the pair is
+    watched rather than trusted (#1190):
+    `docs/api/harness-refine-client-msg-id.golden.json` holds the expected uuids
+    once, and both this package's tests and the Rust crate's read **that same
+    file**. There is no second copy to keep in sync; changing what this returns
+    means changing the golden file, and that is an ADR-0158 D4 decision.
     """
     return str(uuid.uuid5(HARNESS_REFINE_NAMESPACE, refinement_id))
 
