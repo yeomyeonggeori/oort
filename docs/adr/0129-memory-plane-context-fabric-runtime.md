@@ -47,3 +47,10 @@ D1-A(PG-native) · D2-A(outbox 2-phase+무효화) · D3-A(pgvector+FTS+RRF) · D
 - (−) 추출 품질은 튜닝 반복이 필요(공개 프롬프트·mem0 논문으로 시작점은 확보).
 - 후속(v1, 2026-07-21 정합 검토): **추출원 확장** — 첨부 텍스트·Drive 문서·웹훅 payload를 메모리 소스로("회사 단위 데이터"의 잔여 절반). v0는 `memory_item.source_kind='message'` 고정 컬럼으로 확장 여지만 선반영.
 - 파생(Accepted 시 발급 예약): **MOMO-526**(엔진 — memory 스키마+RLS+수명주기 원장+추출 워커 v0) · **MOMO-527**(엔진 — pgvector/FTS/RRF 검색 + retrieval 게이트) · **MOMO-528**(엔진 — Context Packet v0 승격: 불변화·memory_refs·budget·mock grant 제거·실 projection 주입) · **MOMO-529**(UXUI — 메모리 브라우저+출처 역링크+정책 스위치+서빙 인스펙터).
+
+## 증보 1 (2026-08-08 — OSS 실사 환류, #1178)
+
+`research/2026-08-08-oss-sandbox-memory-evaluation.md`(TencentDB-Agent-Memory 반면교사 — 하드 룰 4중 위반으로 배제)가 이 ADR의 설계를 독립 검증했다: **두 메모리 수요(에이전트 개인 기억·채널/워크스페이스 공유 지식)는 한 기질을 공유한다 — 갈라지는 것은 저장소가 아니라 술어다.** 구현 티켓에 흡수할 요건 2:
+
+1. **`memory_item.kind` 분리** (MOMO-526 수용기준에 추가): 자동추출 기억(`extracted`)과 큐레이션 지식(`curated`)은 수명주기가 다르다 — kind 없이는 추출 워커의 자동 무효화·감쇠가 큐레이션 지식을 짓밟는다. 소유 술어(에이전트 개인 vs 채널 공유)는 kind가 아니라 기존 RLS 경계 컬럼으로.
+2. **부정형 수용기준** (MOMO-527에 추가): **검색 결과의 앱계층 사후 필터링 금지** — 권한 술어는 RLS가 유일하다. 검색 쿼리가 RLS 밖에서 넓게 긁고 코드로 거르는 구현은 리뷰 Blocker.
