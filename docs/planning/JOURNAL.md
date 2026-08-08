@@ -1940,3 +1940,8 @@
 ## 2026-08-08 (오후) · Fable · CubeSandbox 승격(ADR-0156 Accepted) — D4-① 발사
 - 성재 결정: "cube sandbox 등 적극 활용으로 승격. 인프라 부분은 수정하지 뭐" → **ADR-0156 Accepted**(기질=CubeSandbox·ADR-0144 D1 대체·BYOC 공존·capability 선언 뒤 합류·전용 호스트 신설·부속 컴포넌트 유보). 티켓: #1177(D4-① 요건 실측+어댑터 매핑 — 인프라 발주 전)·#1178(메모리 플레인 흡수 2건 — kind 분리+사후 필터링 금지).
 - 성재 액션 대기: **전용 호스트 확보**(#1177 산출=사양 재료) · 서버 배포 대행 2명령(momo-rust:e8b604e0) · 구구 태그 회수.
+
+## 2026-08-08 (저녁) · Fable · CubeSandbox 어댑터 랜딩(#1179) — D4-③ 완결
+- **#1179 머지**: `cubesandbox` provider 어댑터(fake 상류 검증 — 실 호스트 불요). blocker 2 해소가 구조적: 멱등=metadata 각인+재구성(조회 실패=생성 중단 fail-closed)+advisory 락 / probe lossy=**`presence_for_status`가 state 인자를 안 받는 시그니처가 곧 계약**+실DB 단정(fake가 running 보고해도 stale 하트비트=고아 처리). capability=D6·max instances env 주입. red proof 3종. **이탈 채택 2**: ①sweep 정의 모호→ADR-0141 24h 기준(env 조정)+D4-② 실측 항목 추가(reconciler probe가 idle 시계 리셋하는가 — inbound만 리셋·workd는 outbound) ②pause 409=재프로브(mock 방식이 오히려 결함 — 살아있는 머신 과금 중단 위험). notifier=Unwired(D4-④ 경계). cargo 808·병합 트리 7/7.
+- 운영 노트: NCP SSH 경로 스톨(HTTPS 정상 — 관리 경로만) — 웹 `index-C3szaFwl` 교체·서버 e8b604e0 전송 대기. 연결 회복 후 재시도(반복 재시도는 MaxStartups 악화 위험이라 중단).
+- #1177=D4-② 실기동만 잔여(전용 호스트 — 성재 발주 체크리스트 전달됨). 다음 후보: D4-④ 프로비저너 연동(어댑터 랜딩으로 전제 충족)·#1178(메모리 플레인 흡수)·#1168·#1164·#1176.
