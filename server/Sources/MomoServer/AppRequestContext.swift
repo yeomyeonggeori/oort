@@ -2,7 +2,7 @@ import Foundation
 import Hummingbird
 import NIOCore
 
-/// Per-request context for the momo API.
+/// Per-request context for the oort API.
 ///
 /// Hummingbird threads one of these through every handler. Beyond the core
 /// storage it carries the authenticated principal (decoded from the App JWT) so

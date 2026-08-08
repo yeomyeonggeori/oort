@@ -117,7 +117,7 @@ enum WebhookPayload {
             if token == "!channel" {
                 replacement = "@channel"
             } else if token == "!everyone" || token == "!here" {
-                // H1: render as plain text; momo doesn't interpret Slack broadcasts.
+                // H1: render as plain text; oort doesn't interpret Slack broadcasts.
                 replacement = "@\(token.dropFirst())"
             } else if token.hasPrefix("!subteam^") {
                 replacement = "@team"
@@ -228,7 +228,7 @@ enum WebhookPayload {
         if let footer = try translated("footer") { lines.append(footer) }
 
         // color/author_icon/footer_icon are accepted Mattermost compatibility
-        // metadata but have no trusted text rendering in momo v0.
+        // metadata but have no trusted text rendering in oort v0.
         _ = try validatedOptionalString(object["fallback"], label: "fallback")
         _ = try validatedOptionalString(object["color"], label: "color")
         _ = try validatedURLString(object["author_icon"], label: "author_icon")

@@ -280,9 +280,9 @@ struct CloudProvisionerRoutes: Sendable {
 
     /// ADR-0142 D1 — BYOC enrollment.
     ///
-    /// Same lifecycle, different acquisition: momo issues the one-shot token
+    /// Same lifecycle, different acquisition: oort issues the one-shot token
     /// and the operator installs `momo-workd` wherever they like. There is no
-    /// provider call here at all, which is the whole point — momo never gained
+    /// provider call here at all, which is the whole point — oort never gained
     /// the right to boot or kill that machine.
     @Sendable
     func enroll(_ request: Request, context: AppRequestContext) async throws -> Response {
@@ -399,7 +399,7 @@ struct CloudProvisionerRoutes: Sendable {
             return (provisionID, expiresAt, false)
         }
 
-        // A replayed idempotencyRef cannot re-reveal a token momo never kept.
+        // A replayed idempotencyRef cannot re-reveal a token oort never kept.
         guard !enrollment.replayed else {
             throw HTTPError(
                 .conflict,

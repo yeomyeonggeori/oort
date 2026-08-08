@@ -37,7 +37,7 @@ final class ProviderQuotaSnapshotTests: XCTestCase {
         XCTAssertNotNil(parsed.resetsAt)
     }
 
-    /// ADR-0135 writes the contract in snake_case; the rest of momo is camelCase.
+    /// ADR-0135 writes the contract in snake_case; the rest of oort is camelCase.
     /// Both spellings must land on the same field — and only those.
     func testAcceptsAdrSnakeCaseSpellings() throws {
         let parsed = try ProviderQuotaSnapshotRoutes.validated(
@@ -77,7 +77,7 @@ final class ProviderQuotaSnapshotTests: XCTestCase {
         ))
     }
 
-    // MARK: - ADR-0004: credential-shaped payloads never enter momo
+    // MARK: - ADR-0004: credential-shaped payloads never enter oort
 
     func testRejectsCredentialShapedFields() {
         for key in ["authorization", "bearer", "apiKey", "api_key", "accessToken", "oauthToken"] {

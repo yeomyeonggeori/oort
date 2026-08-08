@@ -35,7 +35,7 @@ enum T3LifecycleIntent {
 
     /// The conflict a discarded response produces. It is not a failure of the
     /// operation — the operation may well have happened at the provider — it is
-    /// a statement that momo will not apply an answer to a superseded question.
+    /// a statement that oort will not apply an answer to a superseded question.
     static var staleResponse: HTTPError {
         HTTPError(
             .conflict,

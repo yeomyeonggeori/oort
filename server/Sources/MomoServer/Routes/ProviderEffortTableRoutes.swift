@@ -10,7 +10,7 @@ import Hummingbird
 /// instead of guessing and eating a 400.
 ///
 /// v0 starts as a compiled constant (`ProviderEffortTable.entries`) rather than
-/// a table: momo's model universe today is the provider-agnostic hermes gateway
+/// a table: oort's model universe today is the provider-agnostic hermes gateway
 /// handle set (`agent.model`, ADR-0130), and a DB table with no writer would be
 /// dead weight. The wire shape is already the extensible one (provider →
 /// models → efforts), so a later DB/registry source can replace the constant
@@ -56,7 +56,7 @@ enum ProviderEffortTable {
         let defaultEffort: String
     }
 
-    /// v0 constant table. `hermes` is momo's provider-agnostic gateway handle
+    /// v0 constant table. `hermes` is oort's provider-agnostic gateway handle
     /// namespace (ADR-0130); the seeded `agent.model` is `hermes-agent`.
     static let entries: [Entry] = [
         Entry(

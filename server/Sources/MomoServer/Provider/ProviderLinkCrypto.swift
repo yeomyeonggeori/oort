@@ -3,7 +3,7 @@ import Foundation
 
 /// Reversible symmetric encryption for the ADR-0004 증보 1 provider bearer.
 ///
-/// Unlike `WebhookCrypto` — which derives *deterministic* HMAC secrets that momo
+/// Unlike `WebhookCrypto` — which derives *deterministic* HMAC secrets that oort
 /// itself generates and never needs to recover — the provider bearer is an opaque
 /// operator-supplied value we must store and later replay as an `Authorization`
 /// header. That requires authenticated, reversible encryption (AES-GCM).

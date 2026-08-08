@@ -1,6 +1,6 @@
 import Foundation
 
-/// Opaque, high-entropy momo credential presented by an agent runtime.
+/// Opaque, high-entropy oort credential presented by an agent runtime.
 ///
 /// The workspace UUID is carried in the token envelope so a NOBYPASSRLS API
 /// process can establish `SET LOCAL app.workspace_id` before looking up the
