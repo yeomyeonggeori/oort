@@ -1987,3 +1987,6 @@
 ## 2026-08-09 (새벽4) · Fable · ADR-0157 Accepted·U1 실기동 개시(성재 승인)
 - **ADR-0157 Accepted**(샌드박스 네트워크 경계 — 성재 승인).
 - **U1 판정 가동**: 성재 승인(비용 확인 — 시간제 몇백 원~천 원대)으로 `cube-u1-test` 생성(**인스턴스 144279772**·rocky-9.8-base — PVM 커널이 EL9 RPM이라 Ubuntu 대신 Rocky 1차·s2-g3·10.0.1.7·점프=프로덕션 경유 통과만). U1 워커 가동 중(PVM 커널 부팅 판정 — 실패도 판정). **종료 책임=오케스트레이터: 판정 후 terminateServerInstances 필수**(과금 유실 방지 — 이 줄이 그 리마인더다).
+
+## 2026-08-09 (새벽5) · Fable · track/engine→main 동기화 완료(a749d765)
+- 525커밋 동기화(위임 사항 — 랜딩 단위). 충돌 3건 전부 문서: 0144=engine(oort화)+대체 헤더 재적용·0145=engine(oort화)+증보 2 이식·JOURNAL=main 초집합(역사 원문 우선 — engine측 구항목 oort화 미채택 기록). **병합 결과 7레인 green 확인 후 푸시** — main=engine 코드 동일. uxui 트랙은 별도(변경 없음 확인 시 생략).
