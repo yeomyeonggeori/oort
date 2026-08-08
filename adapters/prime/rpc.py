@@ -49,6 +49,16 @@ class JsonlRpc:
         )
         self.inbox: "queue.Queue[dict[str, Any]]" = queue.Queue()
         self.stderr_lines: list[str] = []
+        #: How many commands of each type this transport has written, by name.
+        #:
+        #: Transport bookkeeping, like `stderr_lines`, and it exists because of
+        #: what the harness does *not* say: `refine_complete` carries no field
+        #: naming what set the refinement off (실측 §3.2), so the only evidence
+        #: that a given one was the host's doing is that the host asked. Counting
+        #: here rather than at a call site means a caller that sends `refine` on
+        #: the raw transport — `adapter.py` does — is counted too, instead of
+        #: being silently relabelled as automatic.
+        self.sent_counts: dict[str, int] = {}
         self._stderr_tail = stderr_tail
         self._write_lock = threading.Lock()
         threading.Thread(target=self._read_stdout, daemon=True).start()
@@ -92,6 +102,11 @@ class JsonlRpc:
         with self._write_lock:
             stream.write(payload.encode("utf-8"))
             stream.flush()
+            # After the write, not before: a command the harness never received
+            # is not one it can answer, and counting it would mark a host
+            # request in flight forever.
+            name = str(command.get("type") or "?")
+            self.sent_counts[name] = self.sent_counts.get(name, 0) + 1
 
     def close(self, timeout: float = 10.0) -> int | None:
         try:

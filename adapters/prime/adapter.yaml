@@ -87,11 +87,20 @@ optional_env:
     label: Delta flush interval
     description: Seconds before a partial buffer is flushed anyway. Default 0.8.
   - name: OORT_PRIME_HARNESS_STATE_PATH
-    label: Harness state file
+    label: Harness state file (global)
     description: >
-      Override for the file the drift observer watches. Defaults to prime's own
+      Override for prime's *global* harness state file. Defaults to prime's own
       resolution ($PRIME_AGENT_CODING_AGENT_DIR else $HOME/.prime/agent) plus
-      /harness/harness_state.json.
+      /harness/harness_state.json. This is the file the kernel writes; it is not
+      the one automatic refinement writes — see the next entry.
+  - name: OORT_PRIME_HARNESS_LOCAL_ROOT
+    label: Session-artifacts root
+    description: >
+      Where the observer scans for session-local harness state
+      (<root>/<sessionId>/harness/harness_state.json), which is what automatic
+      refinement actually writes (#1194). Defaults to a session-artifacts
+      directory beside the global file, matching prime's own layout. Set it only
+      if that layout does not hold.
   - name: OORT_PRIME_MODEL
     label: Model
     description: Passed to `prime-agent --model`.

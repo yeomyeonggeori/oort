@@ -18,6 +18,12 @@ two doubles is the code that ships. What it proves, per scenario:
   line, and replaying it produces no second line (ADR-0158 D4).
 * **silent-drift** — a harness file rewritten by the kernel with zero protocol
   output still becomes one announcement, honestly labelled `observed-drift`.
+* **auto-refine** — the same event with **nobody having asked** is labelled
+  `turn_interval` rather than `command`, its session-local file is watched rather
+  than missed, and the two together still produce exactly one line (#1194).
+* **compact-refine** — the refinement a compaction scheduled says `compact`.
+* **local-drift** — the automatic path's own silence: a session-local file moves
+  with zero protocol output and is still announced.
 * **retry** — a flush replayed after a transport failure lands on the message it
   already wrote, not beside it.
 
@@ -55,10 +61,26 @@ def record(name: str, detail: str) -> None:
     print(f"  ok  {name:<28} {detail}")
 
 
+def agent_dir(tmp: str, name: str) -> tuple[str, str]:
+    """prime's real two-file layout under a throwaway agent dir.
+
+    Returns `(global_state_path, local_state_path)`. The adapter is told **only**
+    the global one, so the local half of every assertion below is also a test of
+    `session_artifacts_root_for` — if the derivation is wrong, the automatic
+    path's file is invisible again and the scenario fails.
+    """
+    root = os.path.join(tmp, name)
+    return (
+        os.path.join(root, "harness", "harness_state.json"),
+        os.path.join(root, "session-artifacts", "s-0001", "harness", "harness_state.json"),
+    )
+
+
 def run_session(
     scenario: str,
     *,
     harness_state: str,
+    local_harness_state: str = "",
     serves_run_id: bool = False,
     run_id: str | None = None,
     after_prompt=None,
@@ -80,7 +102,16 @@ def run_session(
             send_run_id_field=serves_run_id,
         )
         rpc = JsonlRpc(
-            [sys.executable, FAKE_PRIME, "--scenario", scenario, "--harness-state", harness_state],
+            [
+                sys.executable,
+                FAKE_PRIME,
+                "--scenario",
+                scenario,
+                "--harness-state",
+                harness_state,
+                "--local-harness-state",
+                local_harness_state,
+            ],
             env=dict(os.environ),
         )
         adapter = PrimeAdapter(
@@ -97,9 +128,12 @@ def run_session(
                 after_prompt(adapter, rpc)
                 adapter.pump(time.time() + timeout)
         finally:
+            # The shutdown order `adapter.py` uses, for the reason it uses it: a
+            # deferred refinement lands during `close()` and says nothing.
             adapter.finish()
-            adapter.check_harness_drift()
             rpc.close()
+            adapter.drain()
+            adapter.check_harness_drift()
         if inspect is not None:
             inspect(adapter, oort.model)
         return adapter, oort.model
@@ -189,6 +223,70 @@ def scenario_silent_drift(tmp: str) -> None:
     assert [edit["id"] for edit in stored["edits"]] == ["oort-adapter-probe"], stored
     assert adapter.event_counts.get("refine_complete", 0) == 0, "the kernel path emits no event, by definition"
     record("silent-drift", "0 protocol events, 1 observed-drift announcement")
+
+
+def scenario_auto_refine(tmp: str) -> None:
+    """The measured automatic shape, end to end (#1194 High-1, High-2, Medium).
+
+    One `refine_complete` that no `refine` command preceded, writing the
+    session-local file. Three things have to hold at once and each was a
+    separately measured defect:
+
+    * the channel is told `turn_interval`, not `command` (§4.2);
+    * the local file is *watched*, which is what makes it possible to say
+      anything at all when stdout goes quiet (§4.3);
+    * the edit that did not apply is not counted as an item (§4.4).
+
+    And one thing that only appears once the second is fixed: watching that file
+    means the refinement's own write is a drift too, so without the announcement
+    adopting it as a baseline, every automatic refinement would produce a second
+    line under `observed-drift`.
+    """
+    state, local_state = agent_dir(tmp, "auto")
+    adapter, model = run_session("auto-refine", harness_state=state, local_harness_state=local_state)
+    systems = model.of_type("system")
+    assert len(systems) == 1, f"one refinement, one line, got {len(systems)}"
+    stored = systems[0]["props"][REFINE_PROPS_KEY]
+    assert stored["trigger"] == "turn_interval", f"nobody asked for this one: {stored}"
+    assert [edit["id"] for edit in stored["edits"]] == ["oort-adapter-probe"], (
+        "an appliedEdits entry with applied:false is not an item that happened",
+        stored,
+    )
+    assert "항목 1건" in systems[0]["body"], systems[0]["body"]
+    assert local_state in adapter.observer.baselines, (
+        "the session-local file must be watched, not just written",
+        sorted(adapter.observer.baselines),
+    )
+    assert adapter.event_counts.get("refine_complete") == 1, adapter.event_counts
+    record("auto-refine", "trigger=turn_interval, local file watched, applied:false filtered")
+
+
+def scenario_compact_refine(tmp: str) -> None:
+    state, local_state = agent_dir(tmp, "compact")
+    adapter, model = run_session(
+        "compact-refine", harness_state=state, local_harness_state=local_state
+    )
+    systems = model.of_type("system")
+    assert len(systems) == 1, f"one refinement, one line, got {len(systems)}"
+    stored = systems[0]["props"][REFINE_PROPS_KEY]
+    assert stored["trigger"] == "compact", f"a compaction carried this one: {stored}"
+    assert adapter.compaction_refine_pending is False, "the attribution is spent, not sticky"
+    record("compact-refine", "compaction_end -> trigger=compact")
+
+
+def scenario_local_drift(tmp: str) -> None:
+    """The automatic path with stdout gone — measured 2/2 in the deferred drain."""
+    state, local_state = agent_dir(tmp, "localdrift")
+    adapter, model = run_session(
+        "local-drift", harness_state=state, local_harness_state=local_state
+    )
+    systems = model.of_type("system")
+    assert len(systems) == 1, f"a silent local write must still be announced, got {len(systems)}"
+    stored = systems[0]["props"][REFINE_PROPS_KEY]
+    assert stored["trigger"] == "observed-drift", stored
+    assert [edit["id"] for edit in stored["edits"]] == ["oort-adapter-probe"], stored
+    assert adapter.event_counts.get("refine_complete", 0) == 0, "no event said anything, by definition"
+    record("local-drift", "0 protocol events on a session-local file, 1 announcement")
 
 
 def scenario_retry() -> None:
@@ -296,6 +394,9 @@ def main() -> int:
         scenario_die(tmp)
         scenario_refine(tmp)
         scenario_silent_drift(tmp)
+        scenario_auto_refine(tmp)
+        scenario_compact_refine(tmp)
+        scenario_local_drift(tmp)
         scenario_retry()
         scenario_run_id()
         scenario_agent_bearer_patch()
