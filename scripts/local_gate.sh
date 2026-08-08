@@ -848,6 +848,20 @@ add_web_commands() {
   # fail-closed + strict CSP) -> browser login/timeline smoke (e2e compose)
   # -> OpenAPI runtime drift gate (spec vs live server, MOMO-389).
   add_cmd_once "worktree clean" 'if [ "${LOCAL_GATE_ALLOW_DIRTY:-0}" = "1" ]; then echo "LOCAL_GATE_ALLOW_DIRTY=1; dirty state is recorded but not failed"; git status --short; else test -z "$(git status --porcelain)" || { echo "worktree has uncommitted changes"; git status --short; exit 1; }; fi'
+  # #1141: design pre-flight (clients/web 10 분류 + packages/momo-core 3 분류,
+  # 둘 다 하드 제로). 이 프로파일이 빌드하는 것은 clients/web-legacy 지만, 이
+  # 검사가 답하는 질문은 「이 제품이 화면에 무엇을 내놓는가」이고 그 답은 ADR-0133
+  # 정본 UI(clients/web)와 코어의 문장에 있다. #1171 이 편입을 미뤄 둔 이유는 웹이
+  # base 빨강(emdash 12)이었기 때문인데, 그 12건은 11이 오탐·1이 검토된 예외로
+  # 판정되어 지금 0 이다. 게이트 밖에 남기면 다음 수동 실행까지 침묵하고, 그것이
+  # #1138 B2 가 출하 직전에 사람 눈으로 잡힌 이유였다.
+  #
+  # 순서상 먼저인 것은 값이 싸서다(수 초). 그리고 필요한 것은 워크스페이스 루트의
+  # `typescript` 하나인데(emdash·코어가 AST 단계다) 없으면 pre-flight 가 조용히
+  # 건너뛰지 않고 exit 2 로 실패하므로, 여기서 미리 채운다.
+  add_cmd "design pre-flight deps (workspace root typescript)" 'test -d node_modules/typescript || npm ci --no-audit --no-fund'
+  add_cmd "design pre-flight discriminators (--selftest)" 'scripts/design_preflight_web.sh --selftest'
+  add_cmd "design pre-flight (web 10 + core 3, hard zero)" 'scripts/design_preflight_web.sh'
   add_cmd "web install (npm ci)" '(cd clients/web-legacy && npm ci --no-audit --no-fund)'
   add_cmd "web lint (eslint)" '(cd clients/web-legacy && npm run lint)'
   add_cmd "web unit tests (vitest)" '(cd clients/web-legacy && npm run test)'
@@ -863,6 +877,8 @@ add_web_commands() {
   add_cmd "web serving smoke (Caddy APP_DOMAIN edge + sentinel fail-closed)" 'scripts/web_serving_smoke.sh'
   add_cmd "web login -> timeline browser smoke (e2e compose)" 'scripts/verify_web_login_smoke.sh'
   add_cmd "OpenAPI contract drift gate (spec vs live server)" 'scripts/verify_openapi_contract.sh'
+  add_note_once coverage "#1141 design pre-flight in this profile: scripts/design_preflight_web.sh runs its three discriminators as cases (web raw_color 11, web strings 16, core separation 17) and then gates clients/web at 10/10 categories and packages/momo-core at 3/3, both hard zero. The emdash category is an AST scan over string-literal and JSX-text nodes, so comments, JSX comments and describe/it names are out of scope by construction rather than by a filter; the one reviewed exception (clients/web/src/features/timeline/spacing.ts throw copy) carries design-preflight-allow with its evidence."
+  add_note_once not_covered "The pre-flight is mechanical only: light/dark review, the four states, keyboard path, and long-Korean overflow remain the manual SKILL §10 checklist. It also cannot see an em-dash written as a JSX entity (&mdash;) — there is no such literal in the tree today."
   add_note_once coverage "MOMO-391 web client gate: npm ci install, eslint, Vitest unit tests, tsc typecheck, openapi-typescript generated types verified in sync with docs/api/openapi.yaml, vite production build, and a permissive-only license gate over the full installed transitive closure (markdown inventory written to the gate output dir)."
   add_note_once coverage "MOMO-678 generated-types step is scripts/verify_web_generated_types.sh: it separates generator-failed (unparseable spec / missing openapi-typescript) from types-stale, prints the offending diff plus the committed-vs-regenerated documented-path counts, and restores src/api/schema.d.ts on every exit path so a drift failure cannot resurface as an unrelated worktree-clean failure on the next run. clients/web-legacy is frozen as a UI but still the served artifact (infra/prod/Dockerfile.web, e2e web-init), so this remains the only compile-time check that a shipped web client matches docs/api/openapi.yaml."
   add_note_once coverage "MOMO-390 serving regression via scripts/web_serving_smoke.sh: prod Caddyfile parse matrix (APP_DOMAIN set/unset/empty), SPA deep-link fallback, /v1 proxy wiring, /v1/centrifugo edge 403, strict SPA CSP headers, and APP_DOMAIN-unset sentinel fail-closed ordering (guard before proxy)."

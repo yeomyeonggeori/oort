@@ -122,11 +122,11 @@ scripts/design_preflight_web.sh          # exit 0 pass, 1 violation
 scripts/design_preflight_web.sh --list   # every hit per category, no gating
 ```
 
-Ten grep categories, **hard zero** (unlike the mac ratchet: `clients/web` was converted to the Dawn tokens in one pass, MOMO-597, so there is no legacy debt to grandfather):
+Ten categories (nine grep + one AST, see 10.1), **hard zero** (unlike the mac ratchet: `clients/web` was converted to the Dawn tokens in one pass, MOMO-597, so there is no legacy debt to grandfather):
 
 | # | key | catches |
 |---|---|---|
-| 1 | `emdash` | em-dash inside a quoted string, and anything in `index.html` |
+| 1 | `emdash` | em-dash in a string literal or JSX text (**AST**, see 10.1), and anything in `index.html` |
 | 2 | `raw_color` | hex / `rgb()` / `hsl()` outside the token definition |
 | 3 | `inline_style` | `style={{...}}` or `style=` (house rule, §1: the `'unsafe-inline'` in the shipped `style-src` is for xterm.js, not for components) |
 | 4 | `arbitrary_tw` | `className="... [13px] ..."` arbitrary values |
@@ -137,9 +137,9 @@ Ten grep categories, **hard zero** (unlike the mac ratchet: `clients/web` was co
 | 9 | `hype` | filler-hype vocabulary |
 | 10 | `pure_bw` | `bg-black` / `bg-white` / `#000000` / `#ffffff` |
 
-`src/design/tokens.css` and `tokens.contrast.test.ts` are excluded (defining and measuring raw values is their job). A deliberate, reviewed exception is marked on the offending line with the comment marker `design-preflight-allow` and justified in the PR body.
+`src/design/tokens.css` and `tokens.contrast.test.ts` are excluded (defining and measuring raw values is their job). A deliberate, reviewed exception is marked with the comment marker `design-preflight-allow` and justified in the PR body — on the offending line, or (for the two AST categories) in the leading comment of the field, attribute or `throw` that owns the string.
 
-### 10.1 The core stage (issue #1141)
+### 10.1 The AST stage: core, and the web `emdash` category (issue #1141)
 
 The ten categories above scan `clients/web/src` only — but a large share of what this client puts on screen is not there. It lives in `packages/momo-core`, and both TS clients render it verbatim. That gap is what carried em-dashes to the edge of a release in #1138 B2.
 
@@ -152,12 +152,16 @@ So the same command runs a second stage over the core. The core is pure TS with 
 
 Core is **hard zero** as well, with no ratchet file: applying the separation rule dropped #1141's measured backlog from em-dash 73 / raw_color 47 to em-dash 2 / raw_color 0, and both survivors are strings their own docstrings describe as never rendered.
 
+**The web `emdash` category uses the same scanner** (`scripts/design_preflight_web_strings.mjs`; the rule itself lives once, in `scripts/design_preflight_ast.mjs`). It was line-based until #1141, and its 12-hit backlog turned out to be 10 `describe`/`it` names, 1 JSX comment, and 1 developer-facing `throw` — 11 of 12 were false positives that the AST simply does not see. Moving closed a miss at the same time: web text is often written **without quotes**, between tags (`<p>… — …</p>`), which the quoted-literal grep had never once looked at. JSX text is a node, a JSX comment is not.
+
+The other nine categories stay line-based on purpose. They ask about class names, CSS and markup — questions a string-literal node cannot answer — and `raw_color` has to read `.css`, where there is no TS AST at all.
+
 ```sh
-scripts/design_preflight_web.sh --selftest   # both discriminators, as cases
+scripts/design_preflight_web.sh --selftest   # all three discriminators, as cases
 npm run gate:copy                            # the core stage alone
 ```
 
-`scripts/verify_merge_tree.sh` runs the core stage as a lane, so this one is gated rather than remembered.
+Both stages are gated rather than remembered: `scripts/verify_merge_tree.sh` runs the copy scan as a lane on the **merge result**, and `scripts/local_gate.sh --profile web` runs the whole pre-flight.
 
 Two more mechanical checks that are not grep:
 

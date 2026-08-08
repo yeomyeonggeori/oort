@@ -40,6 +40,12 @@
 //     비용은 `typescript` 하나인데, 코어는 이미 그것을 devDependency 로 갖고
 //     있고 이미 AST 게이트(purity.mjs)를 돌린다. 새 의존이 아니다.
 //
+// 그 (C) 의 구현은 이제 `scripts/design_preflight_ast.mjs` 에 있다. 웹 emdash 도
+// 같은 부류의 오탐(테스트 이름·주석 산문 12건)에 걸려 있었고 같은 판정을 써야
+// 하므로 규칙을 한 벌만 둔다 — 두 곳에 적힌 규칙은 한쪽만 고쳐지는 날이 온다.
+// 여기 남는 것은 **코어의 계약**이다: 무엇을 훑고(packages/momo-core/src), 어떤
+// 분류를 걸고(셋), 어떤 케이스로 그것을 증명하는가(17).
+//
 // 남는 두 축은 규칙이 아니라 **선언**으로 처리한다:
 //
 //   · `*.test.ts` 는 통째로 제외한다. 테스트가 들고 있는 낱말은 **표면을 인용한
@@ -68,34 +74,24 @@
 //   node scripts/design_preflight_core.mjs --selftest 분리 규칙을 케이스로 증명
 // =============================================================================
 
-import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import { join, relative, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createRequire } from "node:module";
+import {
+  ALLOW_MARKER,
+  EMDASH_CATEGORY,
+  loadTypeScript,
+  runCases,
+  scanSource,
+  shipsStrings,
+  walk,
+} from "./design_preflight_ast.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, "..");
 const CORE_SRC = join(REPO_ROOT, "packages/momo-core/src");
 
-// ---- typescript 를 찾는다 ---------------------------------------------------
-//
-// 워크스페이스 루트로 호이스트되기도 하고 패키지 안에 남기도 한다. 못 찾으면
-// **조용히 건너뛰지 않는다**: 안 돌린 것과 초록이 구별되지 않는 상태를 만들지
-// 않는 것이 이 레포의 게이트 규칙이다(verify_merge_tree.sh 머리말).
-const require_ = createRequire(import.meta.url);
-let ts = null;
-for (const candidate of [
-  "typescript",
-  join(REPO_ROOT, "node_modules/typescript"),
-  join(REPO_ROOT, "packages/momo-core/node_modules/typescript"),
-]) {
-  try {
-    ts = require_(candidate);
-    break;
-  } catch {
-    /* 다음 후보 */
-  }
-}
+const ts = loadTypeScript(REPO_ROOT);
 if (!ts) {
   console.error(
     "design pre-flight (core): typescript 를 찾지 못했다.\n" +
@@ -116,11 +112,8 @@ const ISSUE_REF_RE = /#[0-9]{3,5}(?![0-9a-fA-F])/g;
 const COLOR_RE = /#[0-9a-fA-F]{3,8}\b|rgba?\(|hsla?\(/;
 
 const CATEGORIES = [
-  {
-    key: "emdash",
-    rule: "em-dash (—/–) in a user-visible string (SKILL §7: binary fail, use , : ( ) or a line break)",
-    hit: (text) => /—|–/.test(text),
-  },
+  // 대시의 정의는 웹과 공유한다 (design_preflight_ast.mjs).
+  EMDASH_CATEGORY,
   {
     key: "raw_color",
     rule: "raw color literal handed to a client (색은 클라의 토큰이 정한다 — 코어는 역할만 말한다)",
@@ -136,137 +129,9 @@ const CATEGORIES = [
   },
 ];
 
-// 웹 pre-flight 와 **같은 낱말**이다. 다른 마커를 만들면 두 게이트를 함께 통과
-// 하려는 사람이 어느 쪽 마커인지부터 배워야 한다.
-//
-// 다는 자리는 둘이다: 문자열이 시작하는 줄의 뒤꼬리 주석, 또는 그 문자열을 담은
-// **선언의 머리 주석**. 뒤꼬리만 허용하면 사유가 100자짜리 문자열 뒤에 매달려
-// 아무도 읽지 않는데, 검토된 예외에서 정작 읽혀야 하는 것이 그 사유다. 선언
-// 단위인 것은 예외가 붙는 대상이 문자열 조각이 아니라 **그 칸**이기 때문이다
-// (`measured` 는 이어붙인 문자열 여섯 조각이지만 렌더되지 않는 칸은 하나다).
-const ALLOW_MARKER = "design-preflight-allow";
-
-// ---- 파일 분류 --------------------------------------------------------------
-
-/** 이 파일이 사람에게 무언가를 출하하는가. 테스트는 인용할 뿐 출하하지 않는다. */
-function shipsStrings(path) {
-  return path.endsWith(".ts") && !path.endsWith(".test.ts") && !path.endsWith(".d.ts");
-}
-
-function walk(dir, out = []) {
-  for (const entry of readdirSync(dir)) {
-    const p = join(dir, entry);
-    if (statSync(p).isDirectory()) walk(p, out);
-    else out.push(p);
-  }
-  return out;
-}
-
-// ---- 스캔 -------------------------------------------------------------------
-
-/**
- * 한 소스가 **렌더로 흘러갈 수 있는 문자열**을 훑는다.
- *
- * 리터럴 노드만 본다. 주석·독스트링은 파서가 리터럴로 만들지 않으므로 여기에
- * 오지 않는다 — 그것이 이 접근의 전부이자 이유다.
- *
- * 제외하는 리터럴은 하나: `import`/`export`/`import()` 의 모듈 지정자. 경로는
- * 사람이 읽는 글이 아니고, 상대 경로에 하이픈이 들어가는 날 오탐이 된다.
- */
-function scanSource(fileName, text) {
-  const sf = ts.createSourceFile(fileName, text, ts.ScriptTarget.ES2022, true);
-  const lines = text.split("\n");
-  const hits = [];
-
-  const moduleSpecifiers = new Set();
-  const collectSpecifiers = (node) => {
-    if (
-      (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) &&
-      node.moduleSpecifier
-    ) {
-      moduleSpecifiers.add(node.moduleSpecifier);
-    }
-    if (
-      ts.isCallExpression(node) &&
-      node.expression.kind === ts.SyntaxKind.ImportKeyword &&
-      node.arguments[0]
-    ) {
-      moduleSpecifiers.add(node.arguments[0]);
-    }
-    if (ts.isImportTypeNode(node) && node.argument) {
-      moduleSpecifiers.add(node.argument);
-    }
-    ts.forEachChild(node, collectSpecifiers);
-  };
-  collectSpecifiers(sf);
-
-  /** 이 리터럴을 담고 있는 「칸」 — 예외가 붙을 수 있는 가장 가까운 선언. */
-  const enclosingDeclaration = (node) => {
-    let current = node.parent;
-    while (current && !ts.isSourceFile(current)) {
-      if (
-        ts.isPropertyAssignment(current) ||
-        ts.isPropertyDeclaration(current) ||
-        ts.isPropertySignature(current) ||
-        ts.isVariableStatement(current) ||
-        ts.isReturnStatement(current) ||
-        ts.isExpressionStatement(current)
-      ) {
-        return current;
-      }
-      current = current.parent;
-    }
-    return null;
-  };
-
-  const allowed = (node) => {
-    const line = sf.getLineAndCharacterOfPosition(node.getStart(sf)).line;
-    // ① 문자열이 시작하는 줄의 뒤꼬리 주석. 여러 줄 템플릿이면 그 시작 줄이다.
-    if ((lines[line] ?? "").includes(ALLOW_MARKER)) return true;
-    // ② 그 칸의 머리 주석(`//` 든 `/** */` 든). 파서가 붙여 주므로 「주석을
-    //    어떻게 알아보나」를 여기서도 다시 풀지 않는다.
-    const declaration = enclosingDeclaration(node);
-    if (!declaration) return false;
-    const ranges = ts.getLeadingCommentRanges(text, declaration.getFullStart()) ?? [];
-    return ranges.some((r) => text.slice(r.pos, r.end).includes(ALLOW_MARKER));
-  };
-
-  const record = (node, literalText) => {
-    const line = sf.getLineAndCharacterOfPosition(node.getStart(sf)).line;
-    if (allowed(node)) return;
-    for (const category of CATEGORIES) {
-      if (category.hit(literalText)) {
-        hits.push({
-          key: category.key,
-          line: line + 1,
-          text: literalText.replace(/\s+/g, " ").slice(0, 120),
-        });
-      }
-    }
-  };
-
-  const visit = (node) => {
-    if (moduleSpecifiers.has(node)) {
-      ts.forEachChild(node, visit);
-      return;
-    }
-    if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
-      record(node, node.text);
-    } else if (
-      ts.isTemplateHead(node) ||
-      ts.isTemplateMiddle(node) ||
-      ts.isTemplateTail(node)
-    ) {
-      // 치환이 있는 템플릿의 **글자 부분**. `${…}` 안의 식은 자기 노드로 따로
-      // 방문되므로 두 번 세지 않는다.
-      record(node, node.text);
-    }
-    ts.forEachChild(node, visit);
-  };
-  visit(sf);
-
-  return hits;
-}
+// 파일 분류·스캔·허용 마커는 웹과 공유한다 (scripts/design_preflight_ast.mjs).
+// 마커의 낱말(`design-preflight-allow`)과 다는 자리(문자열 줄의 뒤꼬리 주석 또는
+// 그 칸의 머리 주석)도 거기 적혀 있다.
 
 function scanCore() {
   if (!existsSync(CORE_SRC)) {
@@ -276,7 +141,7 @@ function scanCore() {
   const results = [];
   for (const file of walk(CORE_SRC).filter(shipsStrings)) {
     const text = readFileSync(file, "utf8");
-    for (const hit of scanSource(file, text)) {
+    for (const hit of scanSource(ts, file, text, CATEGORIES)) {
       results.push({ ...hit, file: relative(REPO_ROOT, file) });
     }
   }
@@ -404,24 +269,12 @@ const SELFTEST_CASES = [
 ];
 
 function runSelftest() {
-  console.log("== core string-literal separation rule self-test ==");
-  let failures = 0;
-  for (const testCase of SELFTEST_CASES) {
-    const virtual = join(CORE_SRC, testCase.file);
-    const got = shipsStrings(virtual)
-      ? [...new Set(scanSource(virtual, testCase.src).map((h) => h.key))].sort()
-      : [];
-    const want = [...testCase.want].sort();
-    const same = got.length === want.length && got.every((k, i) => k === want[i]);
-    const shape = testCase.src.replace(/\n/g, "\\n");
-    if (same) {
-      console.log(`OK    want=[${want}] ${testCase.why}`);
-    } else {
-      console.log(`FAIL  want=[${want}] got=[${got}]  ${testCase.why}`);
-      console.log(`        ${shape}`);
-      failures += 1;
-    }
-  }
+  const failures = runCases(
+    ts,
+    CORE_SRC,
+    SELFTEST_CASES.map((c) => ({ ...c, categories: CATEGORIES })),
+    "core string-literal separation rule self-test"
+  );
   console.log("");
   if (failures > 0) {
     console.log("RESULT: FAIL, the core separation rule does not hold.");

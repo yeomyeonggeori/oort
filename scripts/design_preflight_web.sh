@@ -10,7 +10,7 @@
 # (MOMO-597), so every category below starts and stays at 0.
 #
 # Categories (SKILL §10.1 .. §10.10):
-#   1  emdash        em-dash (—/–) inside a user-visible string
+#   1  emdash        em-dash (—/–) inside a user-visible string   [AST, #1141]
 #   2  raw_color     hex / rgb() / hsl() literal outside the token definition
 #   3  inline_style  style={{...}} or style= (house rule, SKILL §1)
 #   4  arbitrary_tw  arbitrary Tailwind value: className="... [13px] ..."
@@ -27,6 +27,25 @@
 #   - any line carrying the marker `design-preflight-allow` (deliberate,
 #     reviewed exception, justify it in the PR body)
 #   - a GitHub issue reference inside raw_color (`#1137`); see ISSUE_REF_RE
+#
+# ---- emdash 단계는 줄 기반이 아니라 AST 다 (이슈 #1141) ----------------------
+#
+# 1번 분류만 이 파일 밖에서 판정한다: `scripts/design_preflight_web_strings.mjs`.
+# 그 전까지 emdash 는 「따옴표 쌍 안의 대시가 있는 줄」을 grep 하고 주석처럼 보이는
+# 줄을 뒤에서 걷어냈고, 그 판정이 세운 base 빨강 12건은 건별로 이랬다:
+#
+#   · 10건 = describe/it 의 **테스트 이름** (표면을 인용한 것이지 만든 것이 아니다)
+#   ·  1건 = JSX 주석 안의 산문 (TypingLine.tsx — 꼬리/블록 주석은 줄 규칙이 못 본다)
+#   ·  1건 = 진짜 프로덕션 문자열 (spacing.ts 의 throw 문구 — 마커로 처리, 그 파일 참조)
+#
+# 11/12 가 오탐이었다. #1171 이 코어에서 같은 실측(72건 중 70건이 테스트 이름)을
+# 하고 AST 를 골랐으므로, 웹도 같은 판정을 쓴다. 옮기면서 미탐 한 종류가 함께
+# 닫혔다: 따옴표 없이 태그 사이에 놓인 글자(`<p>… — …</p>`)를 줄 기반은 한 번도
+# 본 적이 없다.
+#
+# 나머지 아홉 분류는 줄 기반 그대로다. 클래스 이름·CSS·마크업에 대한 질문이라
+# 문자열 리터럴 노드가 답할 수 있는 것이 아니고, raw_color 는 `.css` 를 훑어야
+# 하는데 CSS 에는 TS AST 가 없다.
 #
 # ---- 코어 단계 (이슈 #1141) --------------------------------------------------
 #
@@ -45,8 +64,8 @@
 # Usage:
 #   scripts/design_preflight_web.sh            check, exit 0 pass / 1 violation
 #   scripts/design_preflight_web.sh --list     print every hit, never gates
-#   scripts/design_preflight_web.sh --selftest prove both discriminators
-#                                              (web raw_color + core separation)
+#   scripts/design_preflight_web.sh --selftest prove all three discriminators
+#                                              (web raw_color + web strings + core)
 #
 # Compatible with /bin/bash 3.2 (macOS system bash): no associative arrays, no
 # mapfile. LC_ALL=C keeps grep byte-oriented so counts are deterministic.
@@ -72,6 +91,32 @@ fi
 TOKEN_FILE_RE='src/design/(tokens\.css|tokens\.contrast\.test\.ts):'
 # Deliberate reviewed exception marker.
 ALLOW_RE='design-preflight-allow'
+
+# ---- emdash: the AST stage (#1141) -------------------------------------------
+#
+# node 가 없거나 스캐너가 터지면 **건너뛰지 않고 실패한다**. 이 자리를 조용히
+# 통과시키면 emdash 가 0 으로 세어지고, "안 돈 것"이 초록과 구별되지 않는다 —
+# 이 레포가 게이트마다 세워 온 규칙이다(verify_merge_tree.sh 머리말).
+WEB_STRING_SCAN="$SCRIPT_DIR/design_preflight_web_strings.mjs"
+EMDASH_AST_OUT=""
+
+prepare_string_scan() {
+  if [ ! -f "$WEB_STRING_SCAN" ]; then
+    echo "design pre-flight (web): $WEB_STRING_SCAN 없음" >&2
+    exit 2
+  fi
+  if ! command -v node >/dev/null 2>&1; then
+    echo "design pre-flight (web): node 가 없다 — emdash 는 AST 단계라 돌릴 수 없다." >&2
+    echo "  (이 단계는 건너뛰지 않는다: 안 돈 것을 0 으로 세지 않기 위해서다)" >&2
+    exit 2
+  fi
+  EMDASH_AST_OUT="$(mktemp "${TMPDIR:-/tmp}/momo-preflight-emdash.XXXXXX")" || exit 2
+  trap 'rm -f "$EMDASH_AST_OUT"' EXIT
+  if ! node "$WEB_STRING_SCAN" --emit >"$EMDASH_AST_OUT"; then
+    echo "design pre-flight (web): 문자열 AST 스캔이 실패했다 (위 메시지 참조)." >&2
+    exit 2
+  fi
+}
 
 # ---- raw_color: what a color is, and what only looks like one ----------------
 #
@@ -145,11 +190,14 @@ drop_comment_lines() {
 scan_category() {
   case "$1" in
     emdash)
-      # An em-dash inside a quoted literal (", ' or `), plus anything in the
-      # HTML shell, where the title and body text are user-visible as authored.
+      # TS/TSX 는 AST 가 판정한다(위 머리말). 그 결과는 `prepare_string_scan` 이
+      # 한 번만 만들어 두었다 — 분류를 세는 자리와 찍는 자리가 같은 실행을 봐야
+      # 두 숫자가 갈리지 않고, node 실패도 그때 한 번만 판정된다.
+      #
+      # `index.html` 은 TS 가 아니라 셸 문서다. 제목과 본문이 적힌 그대로 사용자에게
+      # 보이므로 여기서는 파서가 아니라 줄 기반으로 훑는다.
       {
-        grep -rnE '"[^"]*(—|–)[^"]*"|'\''[^'\'']*(—|–)[^'\'']*'\''|`[^`]*(—|–)[^`]*`' \
-          "$SRC" --include='*.tsx' --include='*.ts' 2>/dev/null | drop_comment_lines
+        cat "$EMDASH_AST_OUT"
         grep -nE '—|–' "$HTML" 2>/dev/null | sed "s|^|$HTML:|"
       } | filter_common
       ;;
@@ -283,26 +331,37 @@ case "${1:-}" in
     run_selftest
     web_rc=$?
     echo ""
+    if command -v node >/dev/null 2>&1 && [ -f "$WEB_STRING_SCAN" ]; then
+      node "$WEB_STRING_SCAN" --selftest
+      strings_rc=$?
+    else
+      echo "design pre-flight (web strings): node 또는 스캐너가 없다 — 이 판별자를 증명할 수 없다." >&2
+      strings_rc=2
+    fi
+    echo ""
     run_core_stage --selftest
     core_rc=$?
     echo ""
-    if [ "$web_rc" -ne 0 ] || [ "$core_rc" -ne 0 ]; then
-      echo "SELFTEST: FAIL (web raw_color=$web_rc, core separation=$core_rc)"
+    if [ "$web_rc" -ne 0 ] || [ "$strings_rc" -ne 0 ] || [ "$core_rc" -ne 0 ]; then
+      echo "SELFTEST: FAIL (web raw_color=$web_rc, web strings=$strings_rc, core separation=$core_rc)"
       exit 1
     fi
-    echo "SELFTEST: PASS (web raw_color + core separation rule)"
+    echo "SELFTEST: PASS (web raw_color + web strings + core separation rule)"
     exit 0
     ;;
   --help|-h)
     echo "usage: scripts/design_preflight_web.sh [--list|--selftest]"
     echo "  (no args)  hard-zero check: web 10 categories + core string literals"
     echo "  --list     print every current hit per category, no gating"
-    echo "  --selftest raw_color: prove issue refs pass and real hex fails, and"
-    echo "             core: prove render strings fail while prose/tests pass"
+    echo "  --selftest raw_color: prove issue refs pass and real hex fails;"
+    echo "             web strings + core: prove render strings and JSX text fail"
+    echo "             while comments, JSX comments and test names pass"
     echo ""
     echo "rules: .claude/skills/momo-design-taste-web/SKILL.md §10"
     echo "tokens: .claude/skills/momo-design-taste-web/references/tokens.md"
+    echo "emdash: scripts/design_preflight_web_strings.mjs (이슈 #1141 — 웹 AST 단계)"
     echo "core:  scripts/design_preflight_core.mjs (이슈 #1141 — 분리 규칙과 근거)"
+    echo "규칙 구현: scripts/design_preflight_ast.mjs (둘이 함께 쓰는 스캐너)"
     exit 0
     ;;
   "") ;;
@@ -311,6 +370,9 @@ case "${1:-}" in
     exit 2
     ;;
 esac
+
+# 분류를 세기 전에 AST 단계를 한 번 돌려 둔다(check·list 공통).
+prepare_string_scan
 
 if [ "$MODE" = "list" ]; then
   echo "== design pre-flight (web): all current hits =="
@@ -327,6 +389,7 @@ fi
 echo "== design pre-flight (web), SKILL momo-design-taste-web §10 =="
 echo "   scanned: $SRC, $HTML"
 echo "   excluded: src/design/tokens.css, src/design/tokens.contrast.test.ts"
+echo "   emdash:   AST (문자열 리터럴·JSX 텍스트만, *.test.ts(x)·*.d.ts 제외) — #1141"
 echo ""
 
 overall=0

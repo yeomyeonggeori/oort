@@ -211,17 +211,18 @@ else
   run_lane "phone suite" "clients/mobile" npm test
 fi
 
-# 코어의 사용자 가시 문자열 (이슈 #1141).
+# 사용자 가시 문자열 (이슈 #1141) — 웹과 코어를 한 번에.
 #
-# 컴파일도 스위트도 이것을 보지 못한다: 코어에 em-dash 를 적어도 타입은 맞고
-# 테스트는 초록이며, 그 문장은 두 클라가 **그대로** 화면에 내놓는다. #1138 B2 가
-# 출하 직전에 사람 눈으로 잡힌 이유가 그것이다.
+# 컴파일도 스위트도 이것을 보지 못한다: em-dash 를 적어도 타입은 맞고 테스트는
+# 초록이며, 코어의 문장은 두 클라가 **그대로** 화면에 내놓는다. #1138 B2 가 출하
+# 직전에 사람 눈으로 잡힌 이유가 그것이다.
 #
 # 이 게이트에 있는 이유는 여기가 이미 「두 소비자가 코어를 함께 소비한다」를 재는
-# 자리이기 때문이다. 코어 스캔은 하드 제로라 이 레인은 초록으로 시작하고, 웹 쪽
-# 부채(preflight emdash 현재 12건, U4-4R 레인 파일)는 함께 들여오지 않는다.
+# 자리이기 때문이다. #1171 은 코어만 걸었다 — 웹이 base 빨강(emdash 12)이라 함께
+# 들여올 수 없었다. 그 12건이 11 오탐 + 1 검토된 예외로 판정되어 웹도 하드 제로가
+# 된 지금(#1141 완결), 한 실행이 두 층을 다 말한다. 레인 수는 그대로 7 이다.
 # 규칙과 근거는 scripts/design_preflight_core.mjs 머리말.
-run_lane "core copy scan" "." node scripts/design_preflight_core.mjs
+run_lane "copy scan (web + core)" "." bash scripts/design_preflight_web.sh
 
 echo ""
 echo "[merge-tree] ===== 실행표 (병합 결과 $(git rev-parse --short "$MERGE_TREE_OID")) ====="
