@@ -646,13 +646,32 @@ try {
     );
   }
 
+  // The settle barrier here used to be the mere PRESENCE of an
+  // `approval-state` element: it rendered only once `status !== null &&
+  // status !== "pending"`. #577 (cdcf3229) replaced it with an ALWAYS-rendered
+  // status chip (`approval-status-chip`, ApprovalCard.tsx) that reads 대기 중
+  // while pending, so presence no longer proves settlement — waiting on the
+  // chip would return instantly and read the pre-receipt text. What still
+  // flips is the card root's `data-approval-status`, so wait on that. Kept
+  // status-AGNOSTIC (`:not(pending)`) on purpose: it reproduces the old render
+  // condition exactly, which is what leaves the 승인됨 assertions below their
+  // discriminating power instead of turning them into tautologies.
+  const settledStateOf = async (approvalId) => {
+    const id = approvalId.toLowerCase();
+    await page
+      .locator(
+        `[data-testid="approval-card"][data-approval-id="${id}"]:not([data-approval-status="pending"])`
+      )
+      .waitFor({ timeout: 20000 });
+    return await page
+      .locator(
+        `[data-testid="approval-card"][data-approval-id="${id}"] [data-testid="approval-status-chip"]`
+      )
+      .innerText();
+  };
+
   await approvalCard1.getByTestId("approval-approve").click();
-  await approvalCard1
-    .locator('[data-testid="approval-state"]')
-    .waitFor({ timeout: 20000 });
-  const card1State = await approvalCard1
-    .locator('[data-testid="approval-state"]')
-    .innerText();
+  const card1State = await settledStateOf(APPROVAL_ID);
   if (!card1State.includes("승인됨")) {
     failures.push(`approved card shows "${card1State}"; expected 승인됨`);
   }
@@ -693,12 +712,7 @@ try {
     `[data-testid="approval-card"][data-approval-id="${APPROVAL2_ID.toLowerCase()}"]`
   );
   await approvalCard2.getByTestId("approval-reject").click();
-  await approvalCard2
-    .locator('[data-testid="approval-state"]')
-    .waitFor({ timeout: 20000 });
-  const card2State = await approvalCard2
-    .locator('[data-testid="approval-state"]')
-    .innerText();
+  const card2State = await settledStateOf(APPROVAL2_ID);
   const card2Errors = await approvalCard2
     .locator('[data-testid="approval-error"]')
     .count();
