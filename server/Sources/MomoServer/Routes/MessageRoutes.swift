@@ -3,7 +3,7 @@ import Hummingbird
 import Logging
 import PostgresNIO
 
-/// Message endpoints — the core write path of momo (L4 §1.2 / §3.1 / §8.1).
+/// Message endpoints — the core write path of oort (L4 §1.2 / §3.1 / §8.1).
 ///
 ///   POST   /v1/workspaces/{ws}/channels/{ch}/messages   (send, idempotent)
 ///   GET    /v1/workspaces/{ws}/channels/{ch}/messages    (seq-cursor page)

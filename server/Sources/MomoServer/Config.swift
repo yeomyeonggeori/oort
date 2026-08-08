@@ -321,7 +321,7 @@ struct RateLimitConfig: Sendable {
 ///     `file://` documents). Rejected entries are dropped and reported so the
 ///     server can log them once at boot; a typo can therefore only ever make
 ///     the surface *narrower*, never wider.
-///   * Credentials stay off. momo authenticates with a bearer token in the
+///   * Credentials stay off. oort authenticates with a bearer token in the
 ///     `Authorization` header and issues no cookies (`grep Set-Cookie` = 0), so
 ///     `Access-Control-Allow-Credentials` is never sent. Combined with the
 ///     exact-match echo above, the forbidden `Allow-Origin: *` +
@@ -371,7 +371,7 @@ struct CORSConfig: Sendable, Equatable {
     static func normalizedOrigin(_ raw: String) -> String? {
         let candidate = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !candidate.isEmpty, candidate != "null" else { return nil }
-        // Wildcards are banned outright: momo never answers `*`, and a pattern
+        // Wildcards are banned outright: oort never answers `*`, and a pattern
         // entry must not silently degrade into an exact-match miss either.
         guard !candidate.contains("*") else { return nil }
         guard candidate.allSatisfy({ !$0.isWhitespace }) else { return nil }
