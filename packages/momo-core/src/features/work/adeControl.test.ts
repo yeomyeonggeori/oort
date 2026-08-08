@@ -405,3 +405,71 @@ describe("카드의 이어하기 동사", () => {
     expect(cards.every((card) => card.handoff === undefined)).toBe(true);
   });
 });
+
+describe("발원 대화 앵커 (#1193)", () => {
+  const hosts = [host("h-app", "app"), host("h-cloud", "cloud")];
+
+  it("세션 카드는 원장의 발원 메시지를 그대로 나른다", () => {
+    const [card] = adeItemsFromSessions(
+      [session("s1", "running", "h-cloud")],
+      hosts
+    );
+    expect(card.anchorMessageId).toBe("root-s1");
+  });
+
+  // 유휴·고아도 카드로 서고, 그 카드에서도 「대화로」는 성립한다: 발원 메시지는
+  // 세션이 살아 있는지와 무관하게 그 채널에 그대로 있다.
+  it("실행 중이 아닌 카드도 앵커를 잃지 않는다", () => {
+    const cards = adeItemsFromSessions(
+      [
+        session("idle", "idle", "h-app"),
+        session("dead", "orphaned", "h-app"),
+      ],
+      hosts
+    );
+    expect(cards.map((card) => card.anchorMessageId)).toEqual([
+      "root-idle",
+      "root-dead",
+    ]);
+  });
+
+  // 죽은 버튼 금지. 턴에는 원장 행이 없으므로 발원 메시지도 없고, 없는 것을
+  // 빈 문자열로 채우면 화면은 눌러도 아무 데도 안 가는 동사를 그린다.
+  it("턴 카드에는 앵커가 없다", () => {
+    const cards = adeItemsFromTurns(
+      [turn("agent-kim", "working", { runId: "R1" })],
+      nameFor
+    );
+    expect(cards.every((card) => card.anchorMessageId === undefined)).toBe(true);
+  });
+
+  it("원장이 빈 문자열을 답하면 앵커가 아니다", () => {
+    const [card] = adeItemsFromSessions(
+      [session("s1", "running", "h-cloud", { rootMessageId: "   " })],
+      hosts
+    );
+    expect(card.anchorMessageId).toBeUndefined();
+  });
+});
+
+// 게이트의 red seam(#1193 ANCHOR)이 찾아낸 판. 원장이 그 칸을 아예 빼고 답했을 때
+// 예전 판은 `.trim()` 에서 TypeError 를 던졌고, 그 예외는 요약 줄에서 시작해 셸
+// 전체를 흰 화면으로 만들었다. 잃어도 되는 것은 동사 하나뿐이다.
+describe("원장이 앵커 칸을 아예 빼고 답해도 목록은 선다 (#1193)", () => {
+  const hosts = [host("h-cloud", "cloud")];
+
+  it("칸이 없으면 동사가 없고, 카드는 그대로 있다", () => {
+    const { rootMessageId: _dropped, ...rowWithoutAnchor } = session(
+      "s1",
+      "running",
+      "h-cloud"
+    );
+    const items = adeItemsFromSessions(
+      [rowWithoutAnchor as WorkSession],
+      hosts
+    );
+    expect(items).toHaveLength(1);
+    expect(items[0].anchorMessageId).toBeUndefined();
+    expect(items[0].title).toBe("작업 s1");
+  });
+});

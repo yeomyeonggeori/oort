@@ -20,7 +20,7 @@ import { ROUTE_REGION_DOM_ID } from "@/app/shellNav";
 import { CHIP_CLASS } from "@/features/common/chip";
 import { EmptyInvite, InlineBanner } from "@/features/common/States";
 import { openWorkPanel } from "@/features/agents/workLogStore";
-import { workSessionPath } from "@/features/inbox/anchor";
+import { messageAnchorPath, workSessionPath } from "@/features/inbox/anchor";
 import {
   channelLabel,
   useChannels,
@@ -47,6 +47,14 @@ import {
 // (`AgentWorkPanel`, run 단위 진행 스트림)이 이미 그리고, ACP 세션은 작업 세션
 // 패널(`WorkPanel`, 관전 터미널)이 이미 그린다. 세 번째 상세를 세우면 같은 run 을
 // 두 곳에서 다르게 말하게 된다.
+//
+// ## 카드에는 도착지가 둘이다 (#1193)
+//
+// 확대(카드 본체)는 「지금 무엇을 하고 있나」로 가고, 「대화로」는 「왜 시작
+// 됐나」로 간다. 둘을 한 컨트롤에 접을 수 없는 이유는 그 둘이 다른 질문이기
+// 때문이다 — 관전하러 온 사람과 맥락을 찾으러 온 사람은 같은 카드를 다른 이유로
+// 누른다. 서버는 그 두 번째 사실을 처음부터 들고 있었다(`work_session.
+// root_message_id`, 019 마이그레이션); 이 배치는 그것을 화면까지 연결한다.
 //
 // ## 레이아웃을 밀지 않는다
 //
@@ -95,11 +103,13 @@ function AdeCard({
   channelName,
   nowMs,
   onOpen,
+  onOpenAnchor,
 }: {
   item: AdeItem;
   channelName: string;
   nowMs: number;
   onOpen: () => void;
+  onOpenAnchor: () => void;
 }) {
   const durability = itemDurabilityBadge(item);
   const diff = adeDiffLabel(item.diff);
@@ -114,7 +124,12 @@ function AdeCard({
   // 실제로 일어나는 곳으로 데려간다.
   const handoff = item.handoff === undefined ? null : HANDOFF_COPY[item.handoff];
   return (
-    <li>
+    // 행이 둘로 갈린다 (#1193). 「대화로」는 카드 안이 아니라 **옆**에 서는데,
+    // 카드가 이미 <button> 하나라 그 안에 두 번째 버튼을 둘 수 없기 때문이다
+    // (아래 `handoff` 주석이 D3 때 같은 벽을 만나 힌트만 적어 둔 그 자리다).
+    // 형제로 세우는 대신 테두리가 이 <li> 로 올라온다 — 두 컨트롤은 한 행이고,
+    // 행의 아래선이 어느 한쪽의 것이면 다른 쪽 밑에서 선이 끊긴다.
+    <li className="flex items-stretch border-b border-line">
       <button
         type="button"
         onClick={onOpen}
@@ -123,8 +138,9 @@ function AdeCard({
         data-state={item.state}
         data-durability={item.durability}
         data-handoff={item.handoff ?? undefined}
+        data-anchor={item.anchorMessageId === undefined ? undefined : ""}
         className={cn(
-          "flex w-full min-w-0 flex-col gap-1 border-b border-line px-4 py-3 text-left",
+          "flex min-w-0 flex-1 flex-col gap-1 px-4 py-3 text-left",
           "transition-colors hover:bg-surface-hover",
           "focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent"
         )}
@@ -226,6 +242,35 @@ function AdeCard({
           )}
         </span>
       </button>
+      {/* 「대화로」 — 이 작업을 낳은 메시지로 (#1193).
+       *
+       * 카드 본체와 **다른 곳**으로 간다. 본체는 그 작업이 지금 무엇을 하고
+       * 있는지(작업 세션 패널 · 작업 패널)로 확대되고, 이 동사는 그 작업이
+       * 왜 시작됐는지가 적힌 줄로 간다. 서랍이 워크스페이스 전역이라 그 줄은
+       * 대개 지금 보고 있는 방에 없다.
+       *
+       * **앵커가 없으면 그리지 않는다.** 턴 카드에는 원장 행이 없어 발원
+       * 메시지도 없고(코어 `AdeItem.anchorMessageId`), 거기에 이 버튼을 세우면
+       * 눌러도 아무 데도 안 가는 컨트롤이 목록의 절반에 하나씩 선다.
+       *
+       * 접근 이름이 보이는 글자를 **품는다**: 「대화로」 세 글자는 카드 옆에서
+       * 짧아야 하지만, 카드가 다섯 장이면 낭독은 같은 낱말을 다섯 번 듣는다.
+       * 요약 줄의 `adeSummaryLabel` 이 같은 규칙을 쓴다. */}
+      {item.anchorMessageId !== undefined && (
+        <button
+          type="button"
+          onClick={onOpenAnchor}
+          aria-label={`${item.title} 대화로 이동`}
+          data-testid="ade-card-anchor"
+          className={cn(
+            "shrink-0 border-s border-line px-3 text-meta text-ink-muted",
+            "transition-colors hover:bg-surface-hover hover:text-ink",
+            "focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent"
+          )}
+        >
+          대화로
+        </button>
+      )}
     </li>
   );
 }
@@ -318,6 +363,28 @@ export function AdeDrawer() {
     [close, navigate]
   );
 
+  /**
+   * 발원 대화로 (#1193).
+   *
+   * `?msg=` 는 **id 하나로 착지하는 기존 문법**이고(`inbox/anchor.
+   * messageAnchorPath`, MOMO-677), 그 문법이 있는 이유가 정확히 이 경우다 —
+   * 그쪽 주석: "The goal layer knows its anchor thread by `rootMessageId` and
+   * never sees a seq." 세션 원장도 seq 를 나르지 않으므로 같은 열쇠를 쓴다.
+   *
+   * 여기서 워처를 부르지 않는다. `ChatShell` 이 `?msg=` 를 읽고 스스로
+   * `watchForMessageId` 를 걸며, 못 찾았을 때의 문장(`chat-anchor-missed`)도
+   * 그쪽이 든다. 이 서랍이 한 번 더 걸면 같은 행에 두 워처가 붙고, 둘의 만료
+   * 타이머는 서로를 모른다.
+   */
+  const openAnchor = useCallback(
+    (item: AdeItem) => {
+      if (item.anchorMessageId === undefined) return;
+      close();
+      navigate(messageAnchorPath(item.channelId, item.anchorMessageId));
+    },
+    [close, navigate]
+  );
+
   return (
     <>
     <aside
@@ -366,6 +433,7 @@ export function AdeDrawer() {
                 channelName={nameOfChannel(item.channelId)}
                 nowMs={nowMs}
                 onOpen={() => openItem(item)}
+                onOpenAnchor={() => openAnchor(item)}
               />
             ))}
           </ul>

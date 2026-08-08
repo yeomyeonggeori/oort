@@ -340,8 +340,29 @@ describe('H-5 — 실패가 아닌 것을 실패로 말하지 않는다', () => 
 
   it('화면이 그 문장을 손으로 다시 적지 않는다 — 하네스와 갈라지지 않게', () => {
     // 문장이 두 벌이면 사진이 배송되는 화면과 다른 말을 하게 된다.
-    expect(code).toContain('jumpMissedNotice(reason)');
-    expect(code).not.toContain('인용한 원본은 이 대화의');
+    //
+    // #1193 에서 인자가 하나 늘었다(주어). 문장이 **어디 사는가**는 그대로라
+    // 단정도 그대로이되, 호출 형태를 통째로 베끼는 대신 네 문장이 화면에
+    // 없다는 것으로 잰다 — 그쪽이 이 검사가 실제로 지키려던 것이다.
+    expect(code).toContain('jumpMissedNotice(reason,');
+    for (const reason of ['older', 'unknown'] as const) {
+      for (const subject of ['quote', 'session'] as const) {
+        expect(code).not.toContain(jumpMissedNotice(reason, subject).headline);
+      }
+    }
+  });
+
+  // #1193 — 「대화로」를 누른 사람은 인용을 누른 적이 없다.
+  it('주어가 갈린다 — 인용과 세션 앵커는 다른 것을 찾고 있다', () => {
+    for (const reason of ['older', 'unknown'] as const) {
+      const quote = jumpMissedNotice(reason, 'quote');
+      const session = jumpMissedNotice(reason, 'session');
+      expect(quote.headline).not.toBe(session.headline);
+      expect(quote.headline).toContain('인용');
+      expect(session.headline).not.toContain('인용');
+      // 무엇을 하면 되는지는 같은 사실이라 같은 문장이다.
+      expect(quote.detail).toBe(session.detail);
+    }
   });
 });
 

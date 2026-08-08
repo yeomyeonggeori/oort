@@ -47,6 +47,15 @@
 //                    이름으로 말하며, 제목이 「일부」라고 말한다. 한쪽만 있는
 //                    고지는 「전부 복원된다」로 읽힌다.
 //
+// #1193 — 발원 대화 앵커:
+//  15. 착지 정확     세션 카드의 「대화로」가 **원장이 말한 그 줄**에 내려놓는다.
+//                    주소가 그 방을 가리키는 것으로는 부족하다 — 채널 바닥에
+//                    도착하는 것과 그 작업을 낳은 줄에 도착하는 것은 다른 일이라,
+//                    이 검사는 도착한 행의 `data-seq` 를 원장 픽스처가 뜻하는
+//                    seq 와 맞춘다. 그리고 앵커가 없는 카드(턴)에는 그 동사가
+//                    **아예 서지 않는다** — 눌러도 아무 데도 안 가는 버튼을
+//                    목록의 절반에 하나씩 세우지 않는다.
+//
 // 이름 붙은 red proof (버릴 워크트리에서만 돌린다):
 //   ADE_GATE_PROVE_RED_COUNT=1 npm run gate:ade
 //     expected failure: "the summary count disagreed with the ledger"
@@ -68,6 +77,8 @@
 //     expected failure: "a takeover was offered without its preconditions"
 //   ADE_GATE_PROVE_RED_RESTORE=1 npm run gate:ade
 //     expected failure: "the partial restore hid what it loses"
+//   ADE_GATE_PROVE_RED_ANCHOR=1 npm run gate:ade
+//     expected failure: "the anchor landed on the wrong line"
 //
 // red seam 은 **목/드라이버의 행동만** 바꾼다. COUNT 는 원장에 실행 중 세션을 한
 // 줄 더 실어 화면과 기대표를 갈라놓고(단언이 DOM 의 숫자를 실제로 읽는지 증명),
@@ -90,6 +101,10 @@
 // 원본 명부대로 「자격 대상 0 — 확정 버튼이 서면 안 된다」를 들고 있다.
 // RESTORE 는 CSS 로 「새로 시작하는 것」 목록만 숨긴다(BLOCKED·LAYOUT 과 같은
 // 수법 — React 가 들고 있는 노드는 그대로다).
+//
+// ANCHOR(#1193)도 목만 바꾼다: 원장이 `rootMessageId` 를 **빼고** 답한다. 서버가
+// 그 사실을 안 준 판이 그대로 재현되고, 그러면 카드에는 「대화로」가 서지 않아
+// 착지 단정이 도착할 곳을 잃는다. 제품 소스는 한 줄도 건드리지 않는다.
 //
 // 스크린샷은 이 게이트가 만든다(게이트 재생성 규율): artifacts/ade/*.png,
 // light/dark 두 벌. 판정하지 않는다 — design-review 는 별도 레인이다.
@@ -126,6 +141,8 @@ const proveRedOutside = process.env.ADE_GATE_PROVE_RED_OUTSIDE === "1";
 const proveRedVerb = process.env.ADE_GATE_PROVE_RED_VERB === "1";
 const proveRedPrecond = process.env.ADE_GATE_PROVE_RED_PRECOND === "1";
 const proveRedRestore = process.env.ADE_GATE_PROVE_RED_RESTORE === "1";
+// #1193
+const proveRedAnchor = process.env.ADE_GATE_PROVE_RED_ANCHOR === "1";
 
 const PERSISTENT_BADGE = "기기를 꺼도 계속됩니다";
 const DEVICE_BADGE = "이 기기에서만";
@@ -322,8 +339,41 @@ const RED_EXTRA_SESSION = {
   label: "빨간 증명용 여벌",
 };
 
+/**
+ * `release-2026-08` 의 히스토리 (#1193).
+ *
+ * 이 게이트는 여태 빈 타임라인으로 돌았다 — 잴 것이 카드였기 때문이다. 「대화로」는
+ * **도착한 줄**을 재야 하므로 여기서부터 방에 대화가 있어야 하고, 그 방의 한 줄이
+ * S1 의 발원 메시지다(`rootMessageId`). seq 는 연속이고 앵커는 **맨 아래가 아니다**:
+ * 채널 바닥으로 데려다 놓고 「도착했다」고 부르는 회귀를 잡으려면 목적지가 바닥과
+ * 달라야 한다.
+ */
+const ANCHOR_SEQ = 4_102;
+const GENERAL_MESSAGES = [
+  { seq: 4_100, id: "0199AAAA-0000-7000-8000-0000000000E0", body: "릴리스 노트 초안 어디까지 됐어요?" },
+  { seq: 4_101, id: "0199AAAA-0000-7000-8000-0000000000E1", body: "@kim-intern 8월 배포분 정리 부탁해요." },
+  { seq: ANCHOR_SEQ, id: BASE_SESSIONS[0].rootMessageId, body: "작업 세션을 시작했습니다: 릴리스 노트 초안" },
+  { seq: 4_103, id: "0199AAAA-0000-7000-8000-0000000000E3", body: "관전은 열어 뒀습니다." },
+  { seq: 4_104, id: "0199AAAA-0000-7000-8000-0000000000E4", body: "확인했습니다. 초안 나오면 여기 붙일게요." },
+].map((row, index) => ({
+  id: row.id,
+  channelId: generalId,
+  seq: row.seq,
+  hlcTs: 1_760_000_000_000 + index,
+  hlcCount: 0,
+  authorMemberId: index === 2 ? agentId : memberId,
+  type: "text",
+  body: row.body,
+  createdAtMs: 1_760_000_000_000 + index * 1_000,
+}));
+
 function ledger(extra = false) {
-  const rows = extra ? [...BASE_SESSIONS, RED_EXTRA_SESSION] : BASE_SESSIONS;
+  const base = proveRedAnchor
+    ? // red seam(ANCHOR): 원장이 발원 메시지를 안 준다. 그러면 카드에 「대화로」가
+      // 서지 않고, 착지 단정은 도착할 곳을 잃는다.
+      BASE_SESSIONS.map(({ rootMessageId: _dropped, ...row }) => row)
+    : BASE_SESSIONS;
+  const rows = extra ? [...base, RED_EXTRA_SESSION] : base;
   if (!proveRedVerb) return rows;
   // red seam(VERB): 고아 세션을 살아 있는 것으로 실어 화면의 동사를 재개로
   // 뒤집는다. 기대표는 BASE_SESSIONS 에서 나오므로 「이 줄은 인수」로 남는다.
@@ -568,7 +618,15 @@ async function installRoutes(context, options = {}) {
       return json(route, { workSessions: sessions });
     }
     if (path.endsWith("/replies")) return json(route, { messages: [] });
-    if (path.includes("/messages")) return json(route, { messages: [] });
+    if (path.includes("/messages")) {
+      // 히스토리는 **요청한 방에만** 있다 (#1193). 모든 방에 같은 줄을 실으면
+      // 「그 방의 그 줄」이라는 주장이 「아무 방의 아무 줄」이 된다.
+      const history =
+        options.messages !== undefined && path.includes(generalId)
+          ? options.messages
+          : [];
+      return json(route, { messages: history });
+    }
     if (path.endsWith("/huddles/active")) return json(route, { huddle: null });
     return json(route, {});
   });
@@ -1280,6 +1338,106 @@ async function exerciseEmpty(browser) {
   await context.close();
 }
 
+// ---- 15. 발원 대화 앵커 (#1193) ----------------------------------------------
+
+async function exerciseAnchor(browser) {
+  const context = await browser.newContext({
+    viewport: { width: 1280, height: 900 },
+    reducedMotion: "reduce",
+  });
+  const page = await context.newPage();
+  await installRealtimeSocket(page);
+  await installRoutes(context, { messages: GENERAL_MESSAGES });
+  await login(page);
+
+  // 턴 하나를 연다. 「앵커가 없는 카드에는 동사가 없다」는 주장은 그 카드가
+  // 목록에 **있을 때만** 검사할 수 있다.
+  await publish(page, statusFrame(agentId, generalId, "queued", "queued"));
+  await publish(page, statusFrame(agentId, generalId, "streaming", "running"));
+  await page.getByTestId("ade-summary").waitFor({ timeout: 15_000 });
+  await openDrawer(page);
+
+  // ① 동사는 세션 카드에만 선다. 죽은 버튼 금지 — 턴에는 원장 행이 없고,
+  //    따라서 발원 메시지도 없다.
+  const verbs = await page.evaluate(() =>
+    [...document.querySelectorAll('[data-testid="ade-card"]')].map((card) => ({
+      kind: card.dataset.kind,
+      title:
+        card.querySelector('[data-testid="ade-card-title"]')?.textContent ?? "",
+      // 형제로 서므로 카드가 아니라 **행**에 묻는다.
+      hasVerb:
+        card.parentElement?.querySelector('[data-testid="ade-card-anchor"]') !==
+        null,
+    }))
+  );
+  for (const card of verbs) {
+    const shouldHave = card.kind === "session";
+    if (card.hasVerb !== shouldHave) {
+      throw new Error(
+        `the anchor landed on the wrong line: ${card.kind} 카드 "${card.title}" 에 「대화로」가 ${
+          card.hasVerb ? "섰다" : "없다"
+        } (세션 카드만 발원 메시지를 안다)`
+      );
+    }
+  }
+  console.log(
+    `[anchor] 동사 ${verbs.filter((c) => c.hasVerb).length}/${verbs.length} 장 (세션만)`
+  );
+
+  // ② 착지. 하이라이트가 붙은 **그 행**의 seq 를 잡아 둔다 — 표식은 1.6초 뒤
+  //    스스로 걷히므로, 클릭 뒤에 물어보면 늦을 수 있다.
+  await page.evaluate(() => {
+    window.__adeAnchorLandedSeq = null;
+    const look = () => {
+      if (window.__adeAnchorLandedSeq !== null) return;
+      const hit = document.querySelector(
+        '[data-testid="timeline-message"].bg-accent-soft'
+      );
+      if (hit !== null) {
+        window.__adeAnchorLandedSeq = Number(hit.getAttribute("data-seq"));
+      }
+    };
+    new MutationObserver(look).observe(document.body, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      attributeFilter: ["class"],
+    });
+  });
+
+  // 히스토리를 실은 방의 카드다. 목록 맨 위(대기 카드)는 다른 방의 것이고, 그
+  // 방에는 이 게이트가 대화를 싣지 않았다 — 아무 카드나 누르면 이 검사는
+  // 「착지가 틀렸다」와 「그 방에 히스토리가 없다」를 구별하지 못한다.
+  const anchorButton = page.locator(
+    `[data-testid="ade-card-anchor"][aria-label^="${BASE_SESSIONS[0].label}"]`
+  );
+  const target = await anchorButton.getAttribute("aria-label");
+  await anchorButton.click();
+  await page.getByTestId("ade-drawer").waitFor({ state: "detached" });
+
+  const landed = await page
+    .waitForFunction(() => window.__adeAnchorLandedSeq, undefined, {
+      timeout: 10_000,
+    })
+    .then((handle) => handle.jsonValue())
+    .catch(() => null);
+  const hash = await page.evaluate(() => location.hash);
+  if (landed !== ANCHOR_SEQ) {
+    throw new Error(
+      `the anchor landed on the wrong line: "${target}" 를 눌렀는데 표식이 선 줄은 seq ${landed} 다 (원장이 뜻한 줄은 ${ANCHOR_SEQ}, 주소는 ${hash})`
+    );
+  }
+  // 주소도 함께 본다: 표식만 맞고 주소가 없으면 새로고침에서 그 착지가 사라진다.
+  if (!hash.includes("msg=")) {
+    throw new Error(
+      `the anchor landed on the wrong line: 착지는 했는데 주소가 그것을 말하지 않는다 (${hash}) — 새로고침하면 사라지는 착지다`
+    );
+  }
+  console.log(`[anchor] 착지 seq ${landed} · ${hash}`);
+
+  await context.close();
+}
+
 // ---- 캡처 (판정하지 않는다, SKILL §11) ---------------------------------------
 
 async function captureShots(browser) {
@@ -1343,6 +1501,7 @@ async function main() {
     try {
       await exerciseControl(browser);
       await exerciseEmpty(browser);
+      await exerciseAnchor(browser);
       await captureShots(browser);
     } finally {
       await browser.close();
@@ -1360,6 +1519,9 @@ async function main() {
   console.log("           D3: 재개와 인수가 다른 낱말·다른 버튼으로 갈리고,");
   console.log("           자격 대상이 없는 인수는 확정 버튼 대신 「무엇을 하면");
   console.log("           되는지」를 세우며, 복원 고지는 잃는 것을 이름으로 말한다.");
+  console.log("           #1193: 세션 카드의 「대화로」가 원장이 뜻한 그 줄에");
+  console.log("           내려놓고(seq 로 잰다) 주소가 그것을 말하며, 앵커가 없는");
+  console.log("           턴 카드에는 그 동사가 아예 서지 않는다.");
 }
 
 main().catch((error) => {

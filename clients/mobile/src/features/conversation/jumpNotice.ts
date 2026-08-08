@@ -24,20 +24,50 @@ export interface JumpNotice {
 }
 
 /**
+ * **무엇을** 찾다 못 찾았는가 (#1193).
+ *
+ * 같은 기계를 두 곳이 탄다. 인용을 누른 사람에게 「인용한 원본」이라고 말하는
+ * 것과 ADE 카드의 「대화로」를 누른 사람에게 같은 낱말로 말하는 것은 다른 일이다:
+ * 뒤의 사람은 인용을 누른 적이 없고, 그 화면에서 그 문장은 **거짓**이다. 화면이
+ * 「모르면 모른다고 말한다」를 지키는 자리에서 아는 것을 틀리게 말할 수는 없다.
+ *
+ * 조사가 낱말마다 갈린다: 「원본은 · 원본을」과 「메시지는 · 메시지를」. 그래서
+ * 주어를 접두사로 갈아 끼울 수 없고, 문장을 통째로 든다.
+ */
+export type JumpSubject = 'quote' | 'session';
+
+/**
  * 왜 못 갔는지에 따라 다른 문장을 든다.
  *
  * - `older` — 원본의 `seq` 를 안다. 그러면 「위쪽에 있다」고 **단정할 수 있다**.
  * - `unknown` — 라이브 프레임으로 온 인용에는 원본 `seq` 가 없다. 어디 있는지
  *   모르면 모른다고 말한다. 「위에 있습니다」는 그 경우 거짓일 수 있다.
+ *
+ * 세션 앵커(#1193)는 **언제나** `unknown` 이다: 세션 원장이 순서값을 나르지
+ * 않으므로 없는 seq 를 지어내는 대신 아는 만큼만 말한다.
  */
-export function jumpMissedNotice(reason: 'older' | 'unknown'): JumpNotice {
-  return reason === 'older'
-    ? {
-        headline: '인용한 원본은 이 대화의 더 위쪽에 있습니다',
-        detail: '아직 불러오지 않았습니다. 위로 올려 이어서 불러오세요.',
-      }
-    : {
-        headline: '인용한 원본을 이 화면에서 찾지 못했습니다',
-        detail: '위로 올려 이전 대화를 더 불러오세요.',
-      };
+export function jumpMissedNotice(
+  reason: 'older' | 'unknown',
+  subject: JumpSubject = 'quote',
+): JumpNotice {
+  const detail =
+    reason === 'older'
+      ? '아직 불러오지 않았습니다. 위로 올려 이어서 불러오세요.'
+      : '위로 올려 이전 대화를 더 불러오세요.';
+  if (subject === 'session') {
+    return {
+      headline:
+        reason === 'older'
+          ? '이 작업을 시작한 메시지는 이 대화의 더 위쪽에 있습니다'
+          : '이 작업을 시작한 메시지를 이 화면에서 찾지 못했습니다',
+      detail,
+    };
+  }
+  return {
+    headline:
+      reason === 'older'
+        ? '인용한 원본은 이 대화의 더 위쪽에 있습니다'
+        : '인용한 원본을 이 화면에서 찾지 못했습니다',
+    detail,
+  };
 }

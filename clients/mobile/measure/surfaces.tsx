@@ -1754,7 +1754,11 @@ export function Surface({name}: {name: string}): React.JSX.Element {
       // 단정이 지킨다(`__tests__/adeControlSurface.test.tsx`).
       return (
         <RealtimeContext.Provider value={CONNECTED_RAIL}>
-          <AdeControlPanel onClose={() => {}} onOpenChannel={() => {}} />
+          <AdeControlPanel
+            onClose={() => {}}
+            onOpenChannel={() => {}}
+            onOpenAnchor={() => {}}
+          />
         </RealtimeContext.Provider>
       );
     }

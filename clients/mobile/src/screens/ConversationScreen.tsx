@@ -52,7 +52,10 @@ import {useInvalidateApprovals} from '../features/inbox/useInbox';
 import type {ApprovalReceipt} from '../features/conversation/approvalGate';
 import {useOnline} from '../features/inbox/useOnline';
 import {usePendingApprovals} from '../features/conversation/usePendingApprovals';
-import {jumpMissedNotice} from '../features/conversation/jumpNotice';
+import {
+  jumpMissedNotice,
+  type JumpSubject,
+} from '../features/conversation/jumpNotice';
 import {Composer} from '../features/conversation/Composer';
 import {channelDraftKey} from '../features/conversation/drafts';
 import {TypingBar} from '../features/conversation/TypingBar';
@@ -567,10 +570,20 @@ export default function ConversationScreen({
     setJumpTarget(null);
     setJumpMissed(null);
   }, [channelId]);
+  /**
+   * 지금 걸린 점프가 **무엇을 찾고 있는가** (#1193).
+   *
+   * 고지의 주어를 고른다. 상태가 아니라 ref 인 이유는 이 값이 화면을 그리지
+   * 않기 때문이다 — 읽는 것은 `onJumpMissed` 한 곳뿐이고, 상태로 두면 그
+   * 콜백의 동일성이 바뀌어 `Timeline` 의 `renderItem` 을 타고 목록 전체가 다시
+   * 그려진다(이 화면이 `quoteRef` 에서 이미 고른 모양이다).
+   */
+  const jumpSubjectRef = useRef<JumpSubject>('quote');
 
   const onJumpToQuoted = useCallback((message: Message) => {
     const targetId = message.replyToId;
     if (targetId === undefined) return;
+    jumpSubjectRef.current = 'quote';
     setJumpMissed(null);
     setJumpTarget(current => ({
       messageId: targetId,
@@ -597,6 +610,7 @@ export default function ConversationScreen({
    * 사실로 말할 수 있다.
    */
   const onJumpToPinned = useCallback((messageId: string, seq: number) => {
+    jumpSubjectRef.current = 'quote';
     setJumpMissed(null);
     setJumpTarget(current => ({
       messageId,
@@ -604,6 +618,47 @@ export default function ConversationScreen({
       token: (current?.token ?? 0) + 1,
     }));
   }, []);
+
+  // ---- ADE 카드의 「대화로」 (#1193) -----------------------------------------
+  //
+  // 세 번째 호출자이고, **같은 기계**를 탄다(위 둘과 같은 규율). 다른 점은 하나
+  // 뿐이다: 목적지가 다른 방일 수 있다. 서랍 목록은 워크스페이스 전역이라
+  // 「대화로」의 절반은 지금 열려 있지 않은 방으로 간다.
+  //
+  // 그래서 앵커를 **한 박자 들고 있는다**. 방을 여는 것은 셸의 일이고(이 화면은
+  // `channelId` 프롭만 갈아 끼운다), 새 방의 타임라인이 도착하기 전에 점프를
+  // 걸면 목록이 비어 있어 그 즉시 「찾지 못했습니다」가 뜬다 — 사실은 아직
+  // 오는 중인데.
+  //
+  // 채널이 바뀔 때 도는 초기화(`setJumpTarget(null)`)보다 **뒤에** 선언돼 있는
+  // 것이 load-bearing 이다: 같은 커밋에서 둘 다 돌면 순서는 선언 순서이고,
+  // 반대로 두면 초기화가 방금 건 점프를 지운다.
+  const [pendingAnchorId, setPendingAnchorId] = useState<string | null>(null);
+  useEffect(() => {
+    if (pendingAnchorId === null || timeline.status !== 'ready') return;
+    setPendingAnchorId(null);
+    jumpSubjectRef.current = 'session';
+    setJumpMissed(null);
+    setJumpTarget(current => ({
+      messageId: pendingAnchorId,
+      // 세션 원장은 순서값을 나르지 않는다. 없는 seq 를 지어내지 않고, 그 대가로
+      // 못 찾았을 때의 문장은 「더 위에 있다」로 정밀해지지 못한다.
+      seq: null,
+      token: (current?.token ?? 0) + 1,
+    }));
+  }, [pendingAnchorId, timeline.status]);
+
+  const onOpenAdeAnchor = useCallback(
+    (targetChannelId: string, targetTitle: string, messageId: string) => {
+      setPendingAnchorId(messageId);
+      // 이미 그 방이면 방을 다시 열지 않는다. 셸에 같은 대화를 한 번 더 밀어도
+      // 화면은 그대로지만, 그 왕복은 「눌렀는데 아무 일도 안 일어난 것 같은」
+      // 한 프레임을 만든다.
+      if (uuidEq(targetChannelId, channelId)) return;
+      onOpenConversation?.(targetChannelId, targetTitle);
+    },
+    [channelId, onOpenConversation],
+  );
 
   // ===========================================================================
   // 타임라인 승인 (감사 H-1 / goal U4-g)
@@ -653,7 +708,7 @@ export default function ConversationScreen({
   // 찍기 때문**이다(H-5 는 「코드 확인 / 시각 SKIPPED」로 남아 있었다). 하네스가
   // 베껴 적으면 배송되는 문장이 바뀌어도 사진은 옛말을 계속 한다.
   const onJumpMissed = useCallback((reason: 'older' | 'unknown') => {
-    setJumpMissed(jumpMissedNotice(reason));
+    setJumpMissed(jumpMissedNotice(reason, jumpSubjectRef.current));
   }, []);
 
   // Bumped the moment a send is issued — before the round trip, because the
@@ -1007,7 +1062,11 @@ export default function ConversationScreen({
       ) : null}
 
       {adeOpen && onOpenConversation ? (
-        <AdeControlPanel onClose={closeAde} onOpenChannel={onOpenConversation} />
+        <AdeControlPanel
+          onClose={closeAde}
+          onOpenChannel={onOpenConversation}
+          onOpenAnchor={onOpenAdeAnchor}
+        />
       ) : null}
     </Screen>
   );
