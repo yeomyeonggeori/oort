@@ -34,3 +34,7 @@ Cursor/Codex Cloud류는 관리형 샌드박스를 재판매(E2B·Modal)하거�
 - ADR-0144는 D1이 이 문서로 대체됨을 헤더에 표기(후속 커밋).
 - 티켓 체인: D4-① 요건 실측(즉시) → ②스파이크(호스트 후) → ③어댑터 → ④프로비저너.
 - 리스크 기록: Tencent 주도 프로젝트의 로드맵 종속(v1.0 미도래) — capability 선언 뒤에 있으므로 이탈 비용은 어댑터 1개.
+
+## 증보 2 — U1 실측: 표준 KVM 모드가 1차, PVM은 폴백 (2026-08-09)
+
+U1 판정(scratchpad `u1-verdict.md`·JOURNAL 2026-08-09): PVM 호스트 커널은 NCP 표준 VM에서 부팅된다(PASS — 3회 부팅·ioctl 실증). 그러나 더 큰 실측: **NCP 표준 VM은 이미 `/dev/kvm`(nested=Y)을 주고 L2 게스트 KVM 가속 부팅이 실동작**한다 — D3의 "1차 후보 PVM" 전제(일반 클라우드 VM=KVM 없음)가 NCP에는 해당하지 않는다. 따라서 **1차 시도=표준 KVM 모드(커널 교체 없음 — out-of-tree 종속·`pti=off` 완화 약화 회피)**, PVM=표준 모드 성능 미달 시 폴백. A/B 성능 비교는 D4-②. PVM 채택 시 상류 결함 3건 필수 우회(BLS 무효 `host_grub_config.sh`→`grubby`·`kvm_intel` 선점 블랙리스트·`console=` de-dup 버그 — 판정 보고서 절차 참조).
