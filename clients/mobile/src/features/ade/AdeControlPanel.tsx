@@ -385,9 +385,9 @@ const buildStyles = (color: Palette) => StyleSheet.create({
    * (`MessageRow.dividerLabel` 이 같은 이유로 이미 `textMuted` 다), 웹의 쌍둥이 칸도
    * `text-ink-muted` 로 선다(`AdeDrawer`).
    *
-   * 대비도 그 판정을 지지한다 — `textFaint`(#6b7280)는 **카드 surface**(#171a20)
-   * 위에서 3.605:1 이라 본문 AA(4.5:1) 미달이고, 앱 배경 위의 3.909:1 보다 오히려
-   * 나쁘다(카드가 한 단 밝은 만큼). `textMuted` 는 같은 자리에서 6.612:1 이다.
+   * 대비도 그 판정을 지지한다 — `textFaint`(#6f6e73)는 **카드 surface**(#201f24)
+   * 위에서 3.238:1 이라 본문 AA(4.5:1) 미달이고, 앱 배경 위의 3.562:1 보다 오히려
+   * 나쁘다(카드가 한 단 밝은 만큼). `textMuted` 는 같은 자리에서 5.779:1 이다.
    */
   cardElapsed: {
     fontSize: font.meta,

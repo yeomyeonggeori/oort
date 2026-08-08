@@ -670,7 +670,9 @@ describe('#1076 — 인용 점프가 도착했다고 말한다', () => {
 
   it('띠가 아니라 물듦이다 — 고도(`surface`)로 오해되지 않을 만큼만', () => {
     const tint = contrast(color.warnSurface, color.bg);
-    // 배경과 구별은 되고(고도 한 단 1.084 보다 크다),
+    // 배경과 구별은 되고(고도 한 단 1.100 보다 크다 — 이 순위가 #1164 에서 팔레트가
+    // 웹으로 옮겨간 뒤에도 살아 있도록 여섯 상태 채움이 배경 대비 같은 걸음을 들고
+    // 따라갔다),
     expect(tint).toBeGreaterThan(contrast(color.surface, color.bg));
     // 같은 팔레트의 다른 부드러운 단들과 한 계단이다(카드가 되지 않는다).
     expect(tint).toBeLessThan(1.25);
