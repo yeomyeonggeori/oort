@@ -622,4 +622,37 @@ mod tests {
             "a retired provider id must fail closed, not default to something billable"
         );
     }
+
+    /// ADR-0156 D4-④ — `MOMO_T3_PROVIDER` may now name the managed substrate,
+    /// and the retired id is still refused beside it.
+    ///
+    /// The gate reads the ADR-0142 registry, so "joining" a provider to the
+    /// configuration surface is a registry fact rather than a list in this file —
+    /// which is why the assertion below is the whole of the change. What the gate
+    /// deliberately does **not** check is whether an adapter was configured for
+    /// that id: `ready_t3` guards every T3 route, and the BYOC path needs no
+    /// endpoint. The acquisition route asks for the capability separately
+    /// (`cloud_hosts::require_provisioner`), so an instance that named a managed
+    /// provider without an endpoint keeps serving registration and sessions and
+    /// refuses only the one verb it genuinely cannot perform.
+    #[test]
+    fn a_registered_managed_provider_is_a_legal_default_and_a_retired_one_is_not() {
+        let mut settings = T3Settings {
+            enabled: true,
+            public_base_url: Some("https://momo.example.com".into()),
+            ..T3Settings::default()
+        };
+        for provider_id in momo_t3::provider::registered_provider_ids() {
+            settings.default_provider_id = provider_id.to_string();
+            assert!(
+                ready_t3(&settings).is_ok(),
+                "every registered adapter id must be a legal MOMO_T3_PROVIDER ({provider_id})"
+            );
+        }
+        assert!(momo_t3::provider::registered_provider_ids().contains(&"cubesandbox"));
+        assert!(
+            !momo_t3::provider::registered_provider_ids().contains(&"e2b"),
+            "named regression: joining a managed substrate must not resurrect the retired id"
+        );
+    }
 }

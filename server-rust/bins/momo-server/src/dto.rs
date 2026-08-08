@@ -632,6 +632,53 @@ pub struct ByocEnrollmentResponse {
     pub enrollment: ByocEnrollmentDto,
 }
 
+/// `POST …/work-hosts/cloud` request — managed acquisition (ADR-0136 D1-A,
+/// ADR-0156 D4-④).
+///
+/// Same three fields as [`EnrollByocHostRequest`] on purpose: the two paths
+/// differ in who boots the machine, not in what the caller has to say. `scope`
+/// is likewise accepted only so a personal request is refused *by name*.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ProvisionCloudHostRequest {
+    pub display_name: String,
+    #[serde(default)]
+    pub scope: Option<String>,
+    pub idempotency_ref: String,
+}
+
+/// A managed provision, as the acquisition route reports it.
+///
+/// **There is no `bootstrapToken` field, and its absence is the contract.** On
+/// the BYOC path the token must reach a human, because a human installs the
+/// daemon. Here the daemon is booted by momo, so the credential travels in the
+/// instance's environment and never leaves this process — putting it in the
+/// response would hand a one-shot host credential to a client that has no use
+/// for it, and put it in a log, a proxy and a client store on the way.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CloudProvisionDto {
+    pub provision_id: String,
+    pub provider: String,
+    pub state: String,
+    /// The substrate has named an instance. Until this is true a workd's
+    /// registration cannot lift the host past `provisioning`
+    /// (`bind_cloud_host_in_tx`).
+    pub instance_known: bool,
+    pub bootstrap_expires_at_ms: i64,
+    pub register_url: String,
+    /// This `idempotencyRef` had already produced a provision. Not an error: a
+    /// replay converges on the same instance rather than making a second
+    /// billable one.
+    pub replayed: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CloudProvisionResponse {
+    pub provision: CloudProvisionDto,
+}
+
 /// Swift `CloudHostDTO` (:38-44).
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -2791,6 +2838,33 @@ mod tests {
         assert_eq!(json["enrollment"]["bootstrapToken"], "t");
         assert_eq!(json["enrollment"]["bootstrapExpiresAtMs"], 9);
         assert_eq!(json["enrollment"]["registerUrl"], "https://x/register");
+    }
+
+    /// The managed provision DTO, and the field that is deliberately not on it.
+    #[test]
+    fn a_managed_provision_never_carries_the_bootstrap_token() {
+        let json = serde_json::to_value(CloudProvisionResponse {
+            provision: CloudProvisionDto {
+                provision_id: "p".into(),
+                provider: "managed-substrate".into(),
+                state: "provisioning".into(),
+                instance_known: true,
+                bootstrap_expires_at_ms: 9,
+                register_url: "https://x/register".into(),
+                replayed: false,
+            },
+        })
+        .expect("serialize");
+        assert_eq!(json["provision"]["provisionId"], "p");
+        assert_eq!(json["provision"]["instanceKnown"], true);
+        assert_eq!(json["provision"]["bootstrapExpiresAtMs"], 9);
+        assert!(
+            json["provision"].get("bootstrapToken").is_none(),
+            "named regression: on the managed path momo boots the daemon itself, so the one-shot \
+             credential travels in the instance's environment. Returning it here would put a host \
+             credential through every proxy and client store between us and a caller that has no \
+             use for it"
+        );
     }
 
     #[test]

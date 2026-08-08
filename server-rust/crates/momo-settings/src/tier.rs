@@ -76,6 +76,55 @@ pub enum TierTargetRejected {
     OtherMembersHost,
 }
 
+/// Why the tier policy in force refuses to acquire a paid cloud host
+/// (ADR-0136 D1-A's `auto_target = 'cloud'` trigger, ADR-0156 D4-④).
+///
+/// The mirror image of `momo_t3::ResumeTargetRejection`'s two policy arms: that
+/// type asks "may this *existing* host take the session over", this one asks
+/// "may a *new* paid one be acquired at all". Both read the same two columns, so
+/// they are kept in the same vocabulary rather than each inventing one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum CloudAcquisitionRejected {
+    /// `t1_only` (or a mode this build does not know): T3 is not on the table
+    /// for this member, so nothing billable may be created for them.
+    #[error("tier policy does not allow a cloud host")]
+    TierPolicyExcludesCloud,
+    /// `auto` naming one specific host. The policy already says where work goes,
+    /// and it is not a new cloud instance.
+    #[error("tier policy pins work to a specific host")]
+    PolicyPinsAnotherHost,
+}
+
+/// May the policy in force acquire a paid cloud host? `None` is yes.
+///
+/// Three answers, and the middle one is the one worth stating:
+///
+/// * `auto` + `cloud` — **yes**, and this is ADR-0136 D1-A's own trigger.
+/// * `ask` — **yes**. `ask` means the human is consulted per session, and a
+///   request that reached this function *is* that consultation having happened.
+///   Refusing here would make the default policy unable to ever use T3, which is
+///   not what `ask` means.
+/// * `t1_only` / `auto` + a host id — **no**, by name.
+///
+/// An unrecognised mode fails closed: this decision creates billable rows, so
+/// "the policy said something this build cannot read" must not become "yes".
+pub fn cloud_acquisition_rejection(
+    mode: &str,
+    auto_target: Option<&str>,
+) -> Option<CloudAcquisitionRejected> {
+    match mode {
+        "ask" => None,
+        "auto" => match auto_target {
+            Some("cloud") => None,
+            // `validated_auto_target` makes `auto` without a target
+            // unstorable, so a row in this shape is a policy nobody can act on.
+            None => Some(CloudAcquisitionRejected::TierPolicyExcludesCloud),
+            Some(_) => Some(CloudAcquisitionRejected::PolicyPinsAnotherHost),
+        },
+        _ => Some(CloudAcquisitionRejected::TierPolicyExcludesCloud),
+    }
+}
+
 /// Swift `validatedMode` (:186-191). Migration 025's CHECK set, exactly.
 pub fn validated_tier_mode(raw: &str) -> Result<&'static str, TierSpecInvalid> {
     match raw {
@@ -342,6 +391,35 @@ mod tests {
             validated_auto_target(Some("my-laptop"), "auto"),
             Err(TierSpecInvalid::AutoTargetShape)
         );
+    }
+
+    /// ADR-0136 D1-A's trigger, and the two refusals beside it.
+    #[test]
+    fn only_a_cloud_or_ask_policy_may_acquire_a_paid_host() {
+        assert_eq!(cloud_acquisition_rejection("auto", Some("cloud")), None);
+        assert_eq!(cloud_acquisition_rejection("ask", None), None);
+
+        assert_eq!(
+            cloud_acquisition_rejection("t1_only", None),
+            Some(CloudAcquisitionRejected::TierPolicyExcludesCloud)
+        );
+        assert_eq!(
+            cloud_acquisition_rejection("auto", Some(&Uuid::from_u128(4).to_string())),
+            Some(CloudAcquisitionRejected::PolicyPinsAnotherHost)
+        );
+        assert_eq!(
+            cloud_acquisition_rejection("auto", None),
+            Some(CloudAcquisitionRejected::TierPolicyExcludesCloud)
+        );
+        // Fail closed: this decision creates billable rows.
+        for unknown in ["", "AUTO", "t3_only", "cloud"] {
+            assert_eq!(
+                cloud_acquisition_rejection(unknown, Some("cloud")),
+                Some(CloudAcquisitionRejected::TierPolicyExcludesCloud),
+                "named regression: a mode this build cannot read must not read as consent \
+                 ({unknown:?})"
+            );
+        }
     }
 
     #[test]

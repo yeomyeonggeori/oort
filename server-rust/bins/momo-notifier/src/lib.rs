@@ -138,7 +138,15 @@ impl Notifier {
             .connect(&config.database_url)
             .await?;
         let drain = build_push_drain(&pool, &config.push)?;
-        let notifier = Notifier::new(pool, config, Arc::new(RegistryAdapterResolver));
+        // ADR-0156 D4-④: built once, from the process env, so every managed
+        // substrate the operator configured is reachable and every one they did
+        // not is refused by name (`provider::RegistryAdapterResolver`).
+        let resolver = RegistryAdapterResolver::from_process_env();
+        tracing::info!(
+            wired_t3_providers = ?resolver.wired_provider_ids(),
+            "cloud lifecycle adapter resolver ready"
+        );
+        let notifier = Notifier::new(pool, config, Arc::new(resolver));
         Ok(match drain {
             Some(drain) => notifier.with_push(drain),
             None => notifier,
