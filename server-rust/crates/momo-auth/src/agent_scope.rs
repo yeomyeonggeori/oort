@@ -26,7 +26,15 @@
 pub const SCOPE_AGENT_JOBS_READ: &str = "agent:jobs:read";
 /// `POST …/agent-runs/{run}/gateway/{events,complete}` (Swift :234-243).
 pub const SCOPE_AGENT_RUNS_CALLBACK: &str = "agent:runs:callback";
-/// `POST …/channels/{ch}/messages` (Swift :165-173).
+/// `POST …/channels/{ch}/messages` (Swift :165-173) and — since ADR-0158 증보 1
+/// D7 — `PATCH …/messages/{id}`.
+///
+/// **One scope for both verbs, not a new one.** A slice of a growing answer is
+/// the same act as the write that opened it (#1152: one turn is one message that
+/// *grows*), so a second scope would mean an adapter needed two grants to post
+/// one sentence and every already-issued `messages:write` token would have to be
+/// re-minted before it could stream. What keeps PATCH narrow is the authorship
+/// rule in the domain, not a second scope name — see [`required_agent_scope`].
 pub const SCOPE_MESSAGES_WRITE: &str = "messages:write";
 /// `POST …/work-controls` (Swift `AuthMiddleware.swift:152-154`).
 ///
@@ -53,6 +61,42 @@ pub fn required_agent_scope(method: &str, path: &str) -> Option<&'static str> {
         && segments[1] == "workspaces"
         && segments[3] == "channels"
         && segments[5] == "messages"
+    {
+        return Some(SCOPE_MESSAGES_WRITE);
+    }
+
+    // PATCH /v1/workspaces/{ws}/messages/{id} — ADR-0158 증보 1 D7.
+    //
+    // **The gap this closes, and why it went unnoticed.** Swift's table listed
+    // the POST and nothing else, and #1152/#1173 proved the streaming contract
+    // with a *human* login, so nobody asked whether the credential an adapter
+    // actually holds could write the slices. It could not. That is the literal
+    // reason the prime spike posted 17 separate messages for one 3,661-character
+    // answer: `POST` was the only door open to it.
+    //
+    // ## Why PATCH and not DELETE, on a route that serves both
+    //
+    // The same path serves `DELETE` (`routes::messages::delete_message`), and
+    // matching on the method rather than the path is what keeps that door shut.
+    // Continuing one's own sentence and retracting it are different acts: an
+    // adapter must be able to do the first to stream at all, and nothing about
+    // streaming requires the second. Fail-closed means the verb is named, not
+    // the resource.
+    //
+    // ## What actually keeps this narrow
+    //
+    // The scope grants *reachability*, never authority. Authorship is decided in
+    // the domain — `momo_messaging::interaction`'s two edit paths both refuse a
+    // non-author with `NotAuthorForEdit` **before** they look at anything else,
+    // and the actor they compare against is the credential's member, which no
+    // request body can assert. So an agent bearer reaching this route can still
+    // only continue a message it wrote itself, and that rule is the same one a
+    // human is held to rather than a parallel one written for agents.
+    if method == "PATCH"
+        && segments.len() == 5
+        && segments[0] == "v1"
+        && segments[1] == "workspaces"
+        && segments[3] == "messages"
     {
         return Some(SCOPE_MESSAGES_WRITE);
     }
@@ -171,6 +215,64 @@ mod tests {
         assert_eq!(
             required_agent_scope("POST", &format!("/v1/workspaces/{WS}/work-controls")),
             Some(SCOPE_WORK_CONTROL)
+        );
+    }
+
+    /// **ADR-0158 증보 1 D7 — the slice door.**
+    ///
+    /// One turn is one message that grows (#1152), so the write that opens a
+    /// streamed answer and the writes that continue it are the same act and
+    /// carry the same scope. Without this the prime spike's 17-messages-per-turn
+    /// shape was not a design choice, it was the only door open.
+    #[test]
+    fn an_agent_may_continue_its_own_streamed_answer() {
+        assert_eq!(
+            required_agent_scope("PATCH", &format!("/v1/workspaces/{WS}/messages/{RUN}")),
+            Some(SCOPE_MESSAGES_WRITE),
+            "an adapter must be able to write the slices of the answer it opened"
+        );
+        // Case-insensitive on the method, like every other row.
+        assert_eq!(
+            required_agent_scope("patch", &format!("/v1/workspaces/{WS}/messages/{RUN}")),
+            Some(SCOPE_MESSAGES_WRITE)
+        );
+    }
+
+    /// **The verb is named, not the resource** — D7 opened PATCH and nothing else
+    /// on a path that serves two methods and has three sub-surfaces.
+    ///
+    /// Continuing one's own sentence is what streaming needs; retracting it,
+    /// reacting to it and pinning it are not, and each of them would be a
+    /// separate claim about what an adapter credential may do to a channel's
+    /// record. A shape match on the path alone would have granted all four.
+    #[test]
+    fn the_slice_door_opens_for_patch_alone() {
+        for method in ["DELETE", "GET", "PUT", "POST"] {
+            assert_eq!(
+                required_agent_scope(method, &format!("/v1/workspaces/{WS}/messages/{RUN}")),
+                None,
+                "{method} on a message is not a slice of a growing answer"
+            );
+        }
+        // The sub-surfaces hanging off the same prefix stay shut: they are
+        // longer paths, and length is part of the match.
+        for path in [
+            format!("/v1/workspaces/{WS}/messages/{RUN}/reactions/%F0%9F%91%8D"),
+            format!("/v1/workspaces/{WS}/messages/{RUN}/pin"),
+        ] {
+            for method in ["PATCH", "PUT", "DELETE", "POST"] {
+                assert_eq!(required_agent_scope(method, &path), None, "{method} {path}");
+            }
+        }
+        // Shape traps either side of the five-segment edit route.
+        assert_eq!(
+            required_agent_scope("PATCH", &format!("/v1/workspaces/{WS}/messages")),
+            None
+        );
+        assert_eq!(
+            required_agent_scope("PATCH", &format!("/v1/workspaces/{WS}/search/messages")),
+            None,
+            "`messages` in the wrong slot is a different surface"
         );
     }
 

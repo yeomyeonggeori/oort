@@ -72,10 +72,18 @@
 //!   — the memory plane is not on this server, and the B5.1 worker consumes none
 //!   of the three.
 //! * **A2A causality.** An agent-authored mention needs the source run
-//!   (`agent_run.input`'s `parent_run_id`/`depth`) to enforce the depth cap, and
-//!   the send route refuses `runId`. Rather than create a depth-0 run — which
-//!   would make the A2A hop cap unenforceable — an agent-authored mention is
-//!   **skipped and audited**. Fail closed.
+//!   (`agent_run.input`'s `parent_run_id`/`depth`) to enforce the depth cap.
+//!   Rather than create a depth-0 run — which would make the A2A hop cap
+//!   unenforceable — an agent-authored mention is **skipped and audited**. Fail
+//!   closed.
+//!
+//!   The original reason was that the send route refused `runId` outright, so on
+//!   this path the source run had no name at all. ADR-0158 D5 removed that
+//!   refusal — a REST send may now be bound to a validated run — and the skip
+//!   nevertheless stays, deliberately: reading that binding as A2A *parentage*
+//!   would let an out-of-process adapter choose its own hop depth, which is a cap
+//!   semantics decision (`momo_agent::a2a`) rather than a wiring one. Serving
+//!   `runId` made the follow-up possible; it did not make it correct by default.
 
 use momo_agent::{
     create_agent_run_in_tx, load_dm_audience_in_tx, load_mention_candidates_in_tx,
