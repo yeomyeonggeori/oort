@@ -296,10 +296,10 @@ VALUES ('$DEMO_WORKSPACE_ID', '$GENERAL_CHANNEL_ID', '$SMOKE_MEMBER_ID', 'member
 INSERT INTO membership (workspace_id, channel_id, member_id, role)
 VALUES ('$DEMO_WORKSPACE_ID', '$AGENT_LAB_CHANNEL_ID', '$SMOKE_MEMBER_ID', 'member');
 
--- Channel `membership` is not workspace membership: every /v1/workspaces/*
+-- Channel \`membership\` is not workspace membership: every /v1/workspaces/*
 -- route resolves the caller through WorkspaceAuthorization.activeRole, which
 -- reads the ADR-0128 ledger (migration 026 workspace_membership, #564). Without
--- this row even `GET /v1/workspaces/{id}/channels` answers 403 "not a workspace
+-- this row even \`GET /v1/workspaces/{id}/channels\` answers 403 "not a workspace
 -- member" — see the admin fixture below for the same story.
 INSERT INTO workspace_membership (workspace_id, member_id, role)
 VALUES ('$DEMO_WORKSPACE_ID', '$SMOKE_MEMBER_ID', 'member');
@@ -307,13 +307,13 @@ VALUES ('$DEMO_WORKSPACE_ID', '$SMOKE_MEMBER_ID', 'member');
 -- MOMO-401: disposable admin member — invite issuance over REST requires an
 -- active WORKSPACE membership with role owner/admin.
 --
--- The channel `membership` row below is NOT what grants that. This fixture was
+-- The channel \`membership\` row below is NOT what grants that. This fixture was
 -- written when the role came from the highest channel membership
 -- (InviteRoutes.activeWorkspaceRole, a function that no longer exists);
 -- ADR-0128 D1/D3 moved the workspace role to its own ledger (migration 026
 -- workspace_membership) and #564 repointed authorization at it
 -- (WorkspaceAuthorization.activeRole). Without the workspace_membership row the
--- admin resolves to no role at all, so `POST /v1/workspaces/{id}/invites`
+-- admin resolves to no role at all, so \`POST /v1/workspaces/{id}/invites\`
 -- answers 403 "not an active workspace member" and the smoke dies before the
 -- browser opens — which is exactly what it had been doing. Sibling verifiers
 -- already seed this table (verify_channel_management.sh:289).
