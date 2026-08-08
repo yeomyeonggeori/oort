@@ -11,6 +11,37 @@
 //! the "laptop closed, continue on phone" path that is the *most common* billing
 //! end, not an exceptional one (ADR-0140 §T3 상시화 2).
 //!
+//! ## The provider gets no vote, and #1197 B2 is why that is not merely tidy
+//!
+//! Nothing in this module calls an adapter, and that omission is now a measured
+//! requirement rather than a layering preference.
+//!
+//! D4-② SIGKILLed a sandbox's VMM and polled CubeAPI every 20 seconds for five
+//! minutes: **15 probes, every one `200 {"state":"running"}`, zero
+//! convergence** (ADR-0156 D4-②'s 2026-08-09 실기동 spike, §3.3). The
+//! control plane never learns the machine died. So the ADR-0140 D4 verdict that
+//! reclaims a dead instance — `provider_missing`, reached from a 404 — **is
+//! unreachable in the crash case**, and the only thing that reclaimed the
+//! sandbox in the spike was an explicitly issued `DELETE`.
+//!
+//! The rule that follows is worth stating in one line, because the natural
+//! "improvement" someone will one day propose is its exact negation:
+//!
+//! > **A host whose workd heartbeat has expired is destroyed even when the
+//! > provider insists the instance is present.**
+//!
+//! Adding a "don't orphan a session whose provider still reports it" guard here
+//! would feel careful and would strand every crashed sandbox permanently, paid
+//! for and doing nothing. `provider_denies_its_own_absence` (ADR-0142 D3.1)
+//! exists to stop a *provider's* claim of absence from settling a session; it is
+//! not a licence for a provider's claim of presence to block one. Liveness is
+//! the workd heartbeat's to report (ADR-0156 D6②) and this path reads nothing
+//! else.
+//!
+//! [`converge_in_tx`] therefore ends with a destroy intent in **both** of its
+//! branches — see [`declare_destroy_intent_in_tx`]'s call site below for the one
+//! that `t3_terminate` cannot reach.
+//!
 //! Ports Swift `NotifierWorker/TierFallbackSweep.swift` (candidate query :49-96,
 //! `transitionStaleSession` :433-631).
 //!
@@ -30,6 +61,7 @@ use uuid::Uuid;
 
 use crate::error::T3Error;
 use crate::lifecycle::{terminate_in_tx, with_t3_lifecycle_tx, T3LockLadder, TerminationReason};
+use crate::reconcile::declare_destroy_intent_in_tx;
 
 /// The `work_tier_policy.mode` that makes host loss terminal rather than
 /// resumable (025:16). Read from the DB per session; never assumed.
@@ -76,6 +108,16 @@ pub struct StaleConvergence {
     pub settled: bool,
     /// The session left `running`/`idle`.
     pub transitioned: bool,
+    /// A durable destroy intent now stands against the paid instance (#1197 B2).
+    ///
+    /// True for every T3 candidate, by either route: `t3_terminate` writes it as
+    /// part of settling, and [`declare_destroy_intent_in_tx`] writes it when
+    /// there was no ledger row to settle. It is reported separately from
+    /// `settled` because they answer different questions — `settled` is "was
+    /// anyone billed", this is "will the sandbox actually be reclaimed" — and on
+    /// a substrate that reports a crashed VM as `running` forever, the second is
+    /// the one that decides whether the host stops costing money.
+    pub destroy_intended: bool,
 }
 
 /// Sessions whose host is gone, across every tenant.
@@ -199,21 +241,47 @@ pub async fn converge_stale_session(
 }
 
 /// The body both transaction shapes share.
+///
+/// The T3 branch guarantees a durable destroy intent whichever way it goes
+/// (#1197 B2). `t3_terminate` (058:242-268) declares one as part of settling —
+/// but it returns early when there is no unsettled `work_host_usage` row, and
+/// that early return is *before* the intent is written. A paid instance whose
+/// ledger row had already been closed would then be left in a live state with
+/// nobody destroying it, and on this substrate nobody ever would: the crashed
+/// sandbox answers `200 running` forever and the reconciler's `provider_missing`
+/// path waits on a 404 that never comes.
+///
+/// So the branch `t3_terminate` cannot reach gets the same intent explicitly,
+/// through the same statement [`crate::reconcile::terminate_missing_instance_in_tx`]
+/// already uses for its own version of this gap.
 async fn converge_in_tx(
     conn: &mut PgConnection,
     candidate: StaleSessionCandidate,
     grace_seconds: i64,
 ) -> Result<StaleConvergence, T3Error> {
-    let settled = if candidate.cloud_host_id.is_some() {
-        terminate_in_tx(
-            conn,
-            candidate.workspace_id,
-            candidate.session_id,
-            TerminationReason::Orphaned,
-        )
-        .await?
-    } else {
-        false
+    let mut destroy_intended = false;
+    let settled = match candidate.cloud_host_id {
+        Some(cloud_host_id) => {
+            let settled = terminate_in_tx(
+                conn,
+                candidate.workspace_id,
+                candidate.session_id,
+                TerminationReason::Orphaned,
+            )
+            .await?;
+            if settled {
+                // The settlement wrote the intent itself.
+                destroy_intended = true;
+            } else {
+                // Nothing to bill, and therefore nothing to reclaim the instance
+                // either — unless the intent is declared here.
+                declare_destroy_intent_in_tx(conn, candidate.workspace_id, cloud_host_id).await?;
+                destroy_intended = true;
+            }
+            settled
+        }
+        // T1/T2: there is no paid instance to reclaim.
+        None => false,
     };
     let transitioned = transition_stale_session_in_tx(conn, &candidate, grace_seconds).await?;
     if !transitioned && settled {
@@ -222,6 +290,7 @@ async fn converge_in_tx(
     Ok(StaleConvergence {
         settled,
         transitioned,
+        destroy_intended,
     })
 }
 
@@ -343,5 +412,71 @@ mod tests {
             candidate("ask", false).orphan_source(),
             "host_offline_sweep"
         );
+    }
+
+    /// #1197 B2, the static half — the sweep may not learn to ask a provider.
+    ///
+    /// The measured fact this defends: a SIGKILLed VMM answers
+    /// `200 {"state":"running"}` for at least five minutes and never converges,
+    /// so any provider consultation added here would read "present" and, if it
+    /// were allowed to matter, would strand a crashed sandbox in a paid state
+    /// permanently. A green test run cannot show that — the absence has to be
+    /// asserted against the source, the way the adapter asserts its own.
+    #[test]
+    fn the_host_loss_sweep_consults_no_provider() {
+        // Comments are stripped first, for the same reason the adapter's scans
+        // cut the test module off: this file *discusses* probes at length, and a
+        // scan that matched its own prose would be red for the wrong reason —
+        // or, worse, could be silenced by rewording the explanation.
+        let source: String = include_str!("sweep.rs")
+            .split_once("#[cfg(test)]")
+            .expect("this file has a test module")
+            .0
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        for forbidden in [
+            "probe",
+            "CloudInstancePresence",
+            "CloudProviderAdapter",
+            "adapter",
+        ] {
+            assert!(
+                !source.contains(forbidden),
+                "named regression: `{forbidden}` in the host-loss sweep. CubeAPI reports a \
+                 crashed VM as `running` forever (15/15 probes over 300 s, spike §3.3), so a \
+                 provider consultation here can only ever say `present` — and letting that block \
+                 the settlement leaves a dead sandbox billing until someone notices by hand. \
+                 Liveness is the workd heartbeat (ADR-0156 D6②)"
+            );
+        }
+    }
+
+    /// #1197 B2, the shape half. Every T3 candidate leaves a destroy intent
+    /// behind, whether or not there was a ledger row to bill.
+    #[test]
+    fn a_t3_convergence_always_intends_a_destroy() {
+        let settled = StaleConvergence {
+            settled: true,
+            transitioned: true,
+            destroy_intended: true,
+        };
+        let nothing_to_bill = StaleConvergence {
+            settled: false,
+            transitioned: true,
+            destroy_intended: true,
+        };
+        for outcome in [settled, nothing_to_bill] {
+            assert!(
+                outcome.destroy_intended,
+                "named regression: `t3_terminate` returns early — before it writes the destroy \
+                 intent — when there is no unsettled usage row. Without the explicit declaration \
+                 that branch leaves a paid instance alive with nobody destroying it, and this \
+                 substrate never volunteers a 404 to correct it"
+            );
+        }
+        // A T1/T2 session has no paid instance, so it intends nothing.
+        assert!(!StaleConvergence::default().destroy_intended);
     }
 }

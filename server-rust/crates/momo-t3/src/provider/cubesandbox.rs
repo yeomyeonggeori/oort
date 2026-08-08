@@ -57,14 +57,34 @@
 //! the single question asked is *"is it paused?"*, the one branch CubeAPI
 //! reports faithfully.
 //!
-//! ## 수명주기 — an explicit reaper, or somebody else's
+//! ## 수명주기 — a lease, not an idle clock (#1197 H1)
 //!
 //! `lifecycle.onTimeout` defaults to `kill` and `timeout` defaults to the
 //! cluster's `default_timeout_insec`. Sending neither therefore does not mean
 //! "no reaper": it means *a reaper momo did not choose*, deleting paid instances
-//! behind the ledger's back. ADR-0156 D6② settles it — momo always sends both,
-//! and the CubeSandbox clock is the **last-resort** net under the ledger sweep,
-//! never the first mover.
+//! behind the ledger's back. ADR-0156 D6② settles that half — momo always sends
+//! both.
+//!
+//! What D4-② changed is the **meaning** of the number momo sends. `timeout` was
+//! documented as an idle clock; it is an **absolute TTL from creation**, and the
+//! spike could not move it with a detail GET, a list GET, an SDK exec, a 60 s
+//! in-sandbox CPU burn, or outbound HTTPS from the sandbox — five stimuli, zero
+//! milliseconds of movement (`research/2026-08-09-cubesandbox-d42-spike.md` §4).
+//!
+//! That has one good consequence and one bad one, and the bad one is a new
+//! obligation:
+//!
+//! * **good** — a reconciler probe cannot extend a zombie's life, so momo may
+//!   poll as often as it likes. #1179's 이탈 1 is answered.
+//! * **bad** — a healthy session doing real work is deleted at its TTL anyway,
+//!   because activity buys nothing.
+//!
+//! So the adapter renews: [`CubeSandboxProviderAdapter::renew_lease`] issues
+//! `POST /sandboxes/{id}/refreshes`, and the renewal is driven by
+//! `momo_t3::lease`, which withholds it from hosts whose workd heartbeat has
+//! expired. That withholding is the *point* — momo dying stops renewals, so the
+//! substrate reaps behind it and the zombie bill is structurally bounded by one
+//! lease.
 //!
 //! ## What this adapter refuses to touch
 //!
@@ -72,8 +92,8 @@
 //! consumed (ADR-0142 D3.2, ADR-0156 D5): continuity's original is git plus the
 //! momo ledger, and a snapshot is an optimisation momo must never depend on.
 //! `secure` is parsed and ignored upstream, so sending it would attach meaning to
-//! a no-op. `/refreshes` and `/timeout` would extend the idle clock and are
-//! outside the ADR-0140 D4 surface. Each absence is asserted by
+//! a no-op. `/timeout` sets the same deadline `/refreshes` does and would be a
+//! second spelling of one operation. Each absence is asserted by
 //! [`tests::the_adapter_consumes_only_the_lifecycle_surface`], not left to
 //! review.
 
@@ -102,31 +122,50 @@ pub const METADATA_PROVISION_KEY: &str = "momo_provision_id";
 /// whose sandbox is whose. Never filtered on.
 pub const METADATA_WORKSPACE_KEY: &str = "momo_workspace_id";
 
-/// ADR-0156 D6② — the CubeSandbox reaper may not fire until the ledger sweep has
-/// had four clear chances at the same instance. Below that the substrate would
-/// be racing momo for the right to end a paid session.
-pub const IDLE_TIMEOUT_SWEEP_MULTIPLE: i64 = 4;
+/// The prefix that separates momo's metadata from the substrate's own
+/// (#1197 H3). Both keys above start with it, and [`momo_metadata`] is the only
+/// way the rest of the adapter sees a metadata map.
+pub const METADATA_KEY_PREFIX: &str = "momo_";
+
+/// ADR-0156 D6②'s "×4", re-read on the D4-② measurement (#1197 H1).
+///
+/// The multiple survives; what it multiplies changed. It used to mean "four
+/// ledger sweeps", on the belief that `timeout` was an idle clock momo could not
+/// reset. `timeout` is an absolute TTL and momo resets it explicitly, so the
+/// unit is now the **renewal period**: a lease is four renewals long, and a live
+/// instance therefore survives four consecutive renewal failures before the
+/// substrate reaps it.
+pub const LEASE_RENEWALS_PER_LEASE: i64 = 4;
 
 /// `lifecycle.onTimeout`. Same word as the upstream default, sent on purpose:
 /// what momo is choosing is not the *verb* but the *clock* it runs on.
 pub const ON_TIMEOUT_KILL: &str = "kill";
 
-/// The ledger reclaim window the safety net is derived from, when the operator
-/// sets nothing.
+/// How often momo renews a lease, when the operator sets nothing.
 ///
-/// **This is deliberately not the 90 s host-offline grace.** CubeSandbox's
-/// `timeout` is an *idle* clock, and the traffic that resets it is inbound —
-/// SDK calls and HTTP into the sandbox's own services. momo's workd talks
-/// *outbound* (heartbeat, registration), so a perfectly healthy session that
-/// nobody is attached to generates nothing that touches this clock. Deriving the
-/// net from the 90 s grace would therefore kill live sandboxes at six minutes.
-/// The longest legitimate quiet period a T3 host has is ADR-0141's
-/// paused→hibernate reclaim window (24 h), so that is the floor the net is built
-/// on: 24 h × 4 = 96 h of zombie ceiling.
+/// **This is now exactly the 90 s host-offline grace, and it used to be
+/// forbidden to be.** The retired constant was 24 h with a comment explaining
+/// that deriving the net from the 90 s grace "would kill live sandboxes at six
+/// minutes" — true, and the reason was that `timeout` was believed to be an idle
+/// clock momo's outbound heartbeat could not reset, so the net had to outlast
+/// every legitimate quiet period (ADR-0141's 24 h paused→hibernate window),
+/// giving a 96 h zombie ceiling.
 ///
-/// D4-② measures what actually resets the upstream clock; the operator lowers
-/// this through `MOMO_T3_PROVIDER_CUBESANDBOX_SWEEP_SECONDS` once it does.
-pub const DEFAULT_SWEEP_SECONDS: i64 = 86_400;
+/// D4-② found `timeout` is an absolute TTL that *nothing* resets except
+/// `/refreshes`. Once momo renews explicitly the whole argument inverts: quiet
+/// periods stop mattering (a paused host is renewed just like a running one),
+/// and the only number left to choose is how long a zombie may outlive momo.
+/// Six minutes is a good answer to that question, and it is the same 90 s × 4
+/// the old comment named as the danger.
+///
+/// Tying it to `MOMO_HOST_OFFLINE_GRACE_S` is deliberate: an instance stops
+/// being renewed at the moment momo declares its host lost, so the substrate's
+/// reclaim lands about a lease after momo's own verdict rather than at some
+/// unrelated hour.
+///
+/// The operator overrides through
+/// `MOMO_T3_PROVIDER_CUBESANDBOX_RENEWAL_SECONDS`.
+pub const DEFAULT_RENEWAL_SECONDS: i64 = 90;
 
 /// Request timeout for one CubeAPI call.
 ///
@@ -142,15 +181,15 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 pub struct CubeSandboxTuning {
     /// How many paid sandboxes this host can hold at once.
     pub max_concurrent_instances: i64,
-    /// The ledger reclaim period the idle safety net is a multiple of.
-    pub sweep_seconds: i64,
+    /// How often momo renews a lease. The lease is a multiple of this.
+    pub renewal_seconds: i64,
 }
 
 impl Default for CubeSandboxTuning {
     fn default() -> Self {
         CubeSandboxTuning {
             max_concurrent_instances: CUBESANDBOX_DEFAULT_MAX_CONCURRENT_INSTANCES,
-            sweep_seconds: DEFAULT_SWEEP_SECONDS,
+            renewal_seconds: DEFAULT_RENEWAL_SECONDS,
         }
     }
 }
@@ -158,33 +197,42 @@ impl Default for CubeSandboxTuning {
 impl CubeSandboxTuning {
     /// Both knobs from the adapter's own env namespace. Anything absent,
     /// unparseable or non-positive falls back to the conservative default rather
-    /// than opening the host up or shortening the net.
+    /// than opening the host up or shortening the lease.
     pub fn from_env(env: &BTreeMap<String, String>) -> Self {
         let namespace = environment_namespace(CUBESANDBOX_PROVIDER_ID);
-        let sweep_seconds = env
-            .get(&format!("{namespace}_SWEEP_SECONDS"))
+        let renewal_seconds = env
+            .get(&format!("{namespace}_RENEWAL_SECONDS"))
             .and_then(|value| value.trim().parse::<i64>().ok())
             .filter(|value| *value > 0)
-            .unwrap_or(DEFAULT_SWEEP_SECONDS);
+            .unwrap_or(DEFAULT_RENEWAL_SECONDS);
         CubeSandboxTuning {
             max_concurrent_instances: cubesandbox_max_concurrent_instances(env),
-            sweep_seconds,
+            renewal_seconds,
         }
     }
 
-    /// The `timeout` (seconds) every create carries — ADR-0156 D6②.
-    pub fn idle_timeout_seconds(&self) -> i64 {
-        self.sweep_seconds
-            .saturating_mul(IDLE_TIMEOUT_SWEEP_MULTIPLE)
+    /// The `timeout` (seconds) every create carries, and the duration every
+    /// `/refreshes` renews to — ADR-0156 D6② as #1197 H1 re-reads it.
+    pub fn lease_seconds(&self) -> i64 {
+        self.renewal_seconds
+            .saturating_mul(LEASE_RENEWALS_PER_LEASE)
     }
 }
 
-/// What a re-probe after a `409` says about a pause (매핑표 §2.6).
+/// What a re-probe after a refused transition says about the sandbox
+/// (매핑표 §2.6, widened by #1197 B1).
+///
+/// Two values because `paused` is the only branch CubeAPI reports faithfully,
+/// and both the pause intent and the resume intent are decidable from it: a
+/// pause wants [`PauseVerdict::AlreadyPaused`], a resume wants
+/// [`PauseVerdict::NotPaused`]. Neither reads `running` as liveness — they read
+/// "not paused", which is the honest complement.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PauseVerdict {
-    /// The sandbox is paused. The intent holds, whoever satisfied it.
+    /// The sandbox is paused. A pause intent holds, whoever satisfied it.
     AlreadyPaused,
-    /// Still running, or mid-transition. Not paused, so not a success.
+    /// Not paused: running, mid-transition, or in a state this version has no
+    /// name for. A resume intent holds; a pause intent does not.
     NotPaused,
 }
 
@@ -223,6 +271,73 @@ pub fn presence_for_status(status: u16) -> CloudInstancePresence {
         404 => CloudInstancePresence::Absent,
         _ => CloudInstancePresence::Unknown,
     }
+}
+
+/// Whether a refused transition must be re-judged by asking the substrate what
+/// is actually true, rather than read off its status code (#1197 B1).
+///
+/// **The answer is: every refusal except a 404.** The mapping table predicted
+/// `409` for "the sandbox is already in the state you asked for" and gave that
+/// one code a re-probe. D4-② found the substrate does not use 409 at all: a
+/// second `pause` answers
+///
+/// ```text
+/// 500 {"code":500,"message":"CubeMaster returned error code 130490: sandbox is already paused"}
+/// ```
+///
+/// and `/resume` on a running sandbox answers the same 500 with
+/// `sandbox already running`. Under the old shape ADR-0140 D4's table converged
+/// `pause 500 → revert`, so the ledger would put an already-paused host back to
+/// `running`, bill it, and pause it again next tick — a **flap**, powered by a
+/// success the substrate spelled as a failure.
+///
+/// The two available fixes were to parse `130490` out of the message, or to stop
+/// giving refusal codes any meaning at all. This is the second: the status says
+/// only *"the transition did not happen on this call"*, and what is true is a
+/// separate question answered by a separate `GET`. It costs one 2–6 ms round trip
+/// on a path that was already failing, it cannot rot when upstream renumbers its
+/// error codes, and it makes the contract surface no wider than it already was.
+///
+/// 404 keeps its own arm because absence is the one thing a status *can* settle
+/// (there is no `terminated` state upstream; 404 is how a dead sandbox is
+/// expressed) and re-probing it would only ask the same question twice.
+pub fn refusal_needs_reprobe(status: u16) -> bool {
+    !(200..300).contains(&status) && status != 404
+}
+
+/// Our metadata keys, and nothing the substrate mixed in (#1197 H3).
+///
+/// The `metadata` a sandbox comes back with is **not the map momo stamped**.
+/// D4-② measured 12 keys on a sandbox created with 2: alongside
+/// `momo_provision_id` and `momo_workspace_id` the response carries
+/// `cube.master.runtime.snapshot.id`, `cube.master.appsnapshot.template.id`,
+/// `cube.master.instance.type`, `cube.numa_node`, `cube.product`,
+/// `cube.master.components.envd.version`, three more `cube.*` timestamps, and an
+/// entry whose key and value are both the literal string `X-Caller`.
+///
+/// Two rules follow, and this function is how both are enforced rather than
+/// remembered:
+///
+/// * **momo stores none of it.** Persisting the whole dict would put another
+///   system's internal bookkeeping — including whatever it adds next release —
+///   into momo's ledger under momo's schema.
+/// * **momo reads only what momo wrote.** Which matters far more than it looks:
+///   see [`CubeSandboxProviderAdapter::find_stamped_instance`], where trusting
+///   the substrate's server-side filter instead of re-checking our own key is
+///   the difference between a replay adopting *our* sandbox and a replay
+///   adopting *somebody else's*.
+pub fn momo_metadata(value: &Value) -> BTreeMap<String, String> {
+    value
+        .get("metadata")
+        .and_then(Value::as_object)
+        .map(|object| {
+            object
+                .iter()
+                .filter(|(key, _)| key.starts_with(METADATA_KEY_PREFIX))
+                .filter_map(|(key, value)| Some((key.clone(), value.as_str()?.to_string())))
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// The create request body (매핑표 §2.1).
@@ -305,7 +420,7 @@ pub struct CubeSandboxProviderAdapter {
     base_url: String,
     api_key: String,
     template_id: String,
-    idle_timeout_seconds: i64,
+    lease_seconds: i64,
     http: reqwest::Client,
 }
 
@@ -315,7 +430,7 @@ impl std::fmt::Debug for CubeSandboxProviderAdapter {
             .field("base_url", &self.base_url)
             .field("api_key", &"<redacted>")
             .field("template_id", &self.template_id)
-            .field("idle_timeout_seconds", &self.idle_timeout_seconds)
+            .field("lease_seconds", &self.lease_seconds)
             .finish()
     }
 }
@@ -339,12 +454,16 @@ impl CubeSandboxProviderAdapter {
         let mut capabilities = capabilities_for(CUBESANDBOX_PROVIDER_ID)
             .map_err(|_| CloudProviderError::NotConfigured(CUBESANDBOX_PROVIDER_ID.to_string()))?;
         capabilities.max_concurrent_instances = Some(tuning.max_concurrent_instances);
+        // The declared lease and the `timeout` on the wire are the same number by
+        // construction. If they could differ, the renewal loop would be pacing
+        // itself against a deadline the substrate does not actually hold.
+        capabilities.instance_lease_seconds = Some(tuning.lease_seconds());
         Ok(CubeSandboxProviderAdapter {
             capabilities,
             base_url: endpoint.api_base_url().trim_end_matches('/').to_string(),
             api_key: endpoint.api_key().to_string(),
             template_id: endpoint.image_ref().to_string(),
-            idle_timeout_seconds: tuning.idle_timeout_seconds(),
+            lease_seconds: tuning.lease_seconds(),
             http,
         })
     }
@@ -365,9 +484,10 @@ impl CubeSandboxProviderAdapter {
         Self::new(endpoint, CubeSandboxTuning::from_env(env))
     }
 
-    /// The `timeout` this adapter sends on every create.
-    pub fn idle_timeout_seconds(&self) -> i64 {
-        self.idle_timeout_seconds
+    /// The `timeout` this adapter sends on every create, and the `duration`
+    /// every renewal sends. One number, two places.
+    pub fn lease_seconds(&self) -> i64 {
+        self.lease_seconds
     }
 
     fn instance_url(&self, instance_id: &str, suffix: &str) -> Result<Url, CloudProviderError> {
@@ -428,6 +548,42 @@ impl CubeSandboxProviderAdapter {
         Ok((presence, state))
     }
 
+    /// Re-judge a refused transition by asking the substrate what is true
+    /// (#1197 B1).
+    ///
+    /// `wanted` is the state the durable intent is asking for, expressed in the
+    /// only vocabulary CubeAPI reports honestly: a pause wants
+    /// [`PauseVerdict::AlreadyPaused`], a resume wants
+    /// [`PauseVerdict::NotPaused`].
+    ///
+    /// * gone → [`CloudProviderError::InstanceMissing`], terminal either way;
+    /// * present and in the wanted state → `Ok(())`. The *world* matches the
+    ///   intent, whoever put it there — which is a different claim from "our
+    ///   call worked", and the right one for a convergent lifecycle;
+    /// * present and not in it → the original refusal, surfaced verbatim so
+    ///   ADR-0140 D4 sees a failure that really is one;
+    /// * could not ask → also the original refusal. An unanswered question is
+    ///   not an answer (ADR-0142 D3.1), so the intent stays unconfirmed and the
+    ///   billable reading holds.
+    async fn rejudge_refusal(
+        &self,
+        instance_id: &str,
+        refusal: u16,
+        wanted: PauseVerdict,
+    ) -> Result<(), CloudProviderError> {
+        match self.fetch_detail(instance_id).await? {
+            (CloudInstancePresence::Absent, _) => Err(CloudProviderError::InstanceMissing),
+            (CloudInstancePresence::Present, state) => {
+                if pause_verdict_from_state(state.as_deref()) == wanted {
+                    Ok(())
+                } else {
+                    Err(CloudProviderError::UpstreamStatus(refusal))
+                }
+            }
+            (CloudInstancePresence::Unknown, _) => Err(CloudProviderError::UpstreamStatus(refusal)),
+        }
+    }
+
     /// The idempotency reconstruction: the sandbox already stamped with this
     /// key, if any.
     ///
@@ -435,11 +591,25 @@ impl CubeSandboxProviderAdapter {
     /// Treating an unreachable control plane as an empty result is precisely how
     /// a lost create response turns into a second billed instance.
     ///
+    /// **The server-side filter is asked for, then checked (#1197 H3).** The
+    /// `metadata=` query is a real server-side AND on exact values, and D4-②
+    /// confirmed it works — but momo re-verifies its own stamp on every returned
+    /// row anyway, because the failure mode of trusting it is not "a wasted
+    /// create". A filter that silently stopped filtering (an upstream
+    /// regression, a proxy that drops the query string, a version that changes
+    /// `metadata=` semantics) would hand this function *every* sandbox on the
+    /// host, and it would adopt the lexicographically smallest one — another
+    /// workspace's live session, addressed forever after by ours. The local
+    /// re-check turns a cross-tenant adoption into an ordinary miss.
+    ///
+    /// It reads the stamp through [`momo_metadata`], so the substrate's own
+    /// `cube.*` and `X-Caller` entries are not even in scope.
+    ///
     /// More than one match means the advisory lock was bypassed and a real
     /// double-create already happened. Returning the lexicographically smallest
     /// id makes every later replay converge on the *same* survivor instead of
-    /// alternating; the loser is bounded by the idle safety net rather than
-    /// leaking forever, and the anomaly is named in the log.
+    /// alternating; the loser is bounded by the lease rather than leaking
+    /// forever, and the anomaly is named in the log.
     async fn find_stamped_instance(
         &self,
         provision_key: &str,
@@ -461,6 +631,12 @@ impl CubeSandboxProviderAdapter {
         };
         let mut ids: Vec<String> = items
             .iter()
+            .filter(|item| {
+                momo_metadata(item)
+                    .get(METADATA_PROVISION_KEY)
+                    .map(String::as_str)
+                    == Some(provision_key)
+            })
             .filter_map(|item| item.get("sandboxID")?.as_str().map(str::to_string))
             .collect();
         ids.sort();
@@ -470,7 +646,7 @@ impl CubeSandboxProviderAdapter {
                 matches = ids.len(),
                 "more than one sandbox carries the same provision stamp — the ADR-0140 D2 \
                  advisory lock did not hold; converging on the lowest id and leaving the rest \
-                 to the idle safety net"
+                 to the lease"
             );
         }
         Ok(ids.into_iter().next())
@@ -506,7 +682,7 @@ impl CloudProviderAdapter for CubeSandboxProviderAdapter {
             .map_err(|_| CloudProviderError::NotConfigured(CUBESANDBOX_PROVIDER_ID.to_string()))?;
         let body = create_body(
             &self.template_id,
-            self.idle_timeout_seconds,
+            self.lease_seconds,
             idempotency_key,
             &spec.workspace_id.to_string(),
             &workd_env_vars(spec),
@@ -524,15 +700,20 @@ impl CloudProviderAdapter for CubeSandboxProviderAdapter {
         Ok(self.instance(validated_cloud_instance_id(sandbox_id)?.to_string()))
     }
 
-    /// `POST /sandboxes/{id}/pause` → 204.
+    /// `POST /sandboxes/{id}/pause` → 204, and every refusal re-judged
+    /// (#1197 B1).
     ///
-    /// The `409` branch is the interesting one. Upstream folds several reasons
-    /// into "Sandbox cannot be paused" — already paused, mid-`pausing`, or
-    /// genuinely refused — so collapsing it to
-    /// [`CloudProviderError::InstancePaused`] would report a *running* instance
-    /// as paused, and ADR-0140 D4 would stop billing a machine that is still
-    /// burning the host. momo re-asks instead, and only the sandbox's own
-    /// `paused` satisfies the intent.
+    /// Upstream folds several conditions into one refusal — already paused,
+    /// mid-`pausing`, or genuinely unable — and D4-② found it spells that
+    /// refusal `500`, not the `409` the mapping table predicted. Collapsing it
+    /// either way would be wrong in a different direction: reading it as success
+    /// reports a still-running instance as paused and stops billing a machine
+    /// that is burning the host; reading it as failure sends the ledger's
+    /// already-paused host back to `running`, to be paused again next tick,
+    /// forever.
+    ///
+    /// So the code is not read at all beyond [`refusal_needs_reprobe`]. momo
+    /// re-asks, and only the sandbox's own `paused` satisfies the intent.
     async fn pause(
         &self,
         instance: &CloudInstanceRef,
@@ -543,54 +724,54 @@ impl CloudProviderAdapter for CubeSandboxProviderAdapter {
         if status.is_success() {
             return Ok(());
         }
-        match status.as_u16() {
-            404 => Err(CloudProviderError::InstanceMissing),
-            409 => match self.fetch_detail(&instance.instance_id).await? {
-                (CloudInstancePresence::Absent, _) => Err(CloudProviderError::InstanceMissing),
-                (CloudInstancePresence::Present, state) => {
-                    // Already paused: the durable intent ("this host must be
-                    // paused") is satisfied, whoever satisfied it. This is not
-                    // the mock's `InstancePaused` — that substrate is refusing to
-                    // claim work it did not do, which is a statement about the
-                    // *call*. Here the statement is about the *world*, and the
-                    // world matches the intent.
-                    match pause_verdict_from_state(state.as_deref()) {
-                        PauseVerdict::AlreadyPaused => Ok(()),
-                        PauseVerdict::NotPaused => Err(CloudProviderError::UpstreamStatus(409)),
-                    }
-                }
-                // Could not re-ask. ADR-0142 D3.1: an unanswered question is not
-                // an answer, so the pause stays unconfirmed and ADR-0140 D4
-                // reverts to the billable reading.
-                (CloudInstancePresence::Unknown, _) => Err(CloudProviderError::UpstreamStatus(409)),
-            },
-            other => Err(CloudProviderError::UpstreamStatus(other)),
+        let status = status.as_u16();
+        if !refusal_needs_reprobe(status) {
+            // 404 — absence is the one fact a status can settle.
+            return Err(CloudProviderError::InstanceMissing);
         }
+        // Already paused: the durable intent ("this host must be paused") is
+        // satisfied, whoever satisfied it. This is not the mock's
+        // `InstancePaused` — that substrate is refusing to claim work it did not
+        // do, which is a statement about the *call*. Here the statement is about
+        // the *world*, and the world matches the intent.
+        self.rejudge_refusal(&instance.instance_id, status, PauseVerdict::AlreadyPaused)
+            .await
     }
 
     /// Resume via **`POST /sandboxes/{id}/connect`**, never `/resume`.
     ///
-    /// `/resume` is marked `(deprecated)` in the upstream OpenAPI and answers
-    /// `409` when the sandbox is already running — a self-inflicted failure on
-    /// the exact retry ADR-0140 D4 is built to perform. `/connect` returns `200`
-    /// whether the sandbox was paused or already running, which is the
-    /// convergent shape this contract wants. The retired
+    /// `/resume` is marked `(deprecated)` in the upstream OpenAPI and D4-②
+    /// measured it answering `500 …130490: sandbox already running` for an
+    /// already-running sandbox — a self-inflicted failure on the exact retry
+    /// ADR-0140 D4 is built to perform. `/connect` returns `200` whether the
+    /// sandbox was paused or already running (measured both ways, 84 ms and
+    /// 3 ms), which is the convergent shape this contract wants. The retired
     /// `E2BProvisioner.resume()` had already picked `/connect`.
+    ///
+    /// The refusal path gets the same re-judgement as [`Self::pause`], mirrored
+    /// (#1197 B1): a resume's intent is "not paused", so that is what the
+    /// re-probe must find. `/connect` is convergent enough that this should stay
+    /// unreached — which is exactly why it is here rather than assumed.
     async fn resume(
         &self,
         instance: &CloudInstanceRef,
         _idempotency_key: &str,
     ) -> Result<(), CloudProviderError> {
         let url = self.instance_url(&instance.instance_id, "/connect")?;
-        let body = json!({ "timeout": self.idle_timeout_seconds });
+        // Resuming restarts the lease clock too: `timeout` is absolute from the
+        // moment it is set, so a resume that named a stale remainder would hand
+        // back a sandbox already most of the way to its own deletion.
+        let body = json!({ "timeout": self.lease_seconds });
         let (status, _, _) = self.call(Method::POST, url, Some(body)).await?;
         if status.is_success() {
             return Ok(());
         }
-        match status.as_u16() {
-            404 => Err(CloudProviderError::InstanceMissing),
-            other => Err(CloudProviderError::UpstreamStatus(other)),
+        let status = status.as_u16();
+        if !refusal_needs_reprobe(status) {
+            return Err(CloudProviderError::InstanceMissing);
         }
+        self.rejudge_refusal(&instance.instance_id, status, PauseVerdict::NotPaused)
+            .await
     }
 
     /// `DELETE /sandboxes/{id}` — idempotent, and never abandoned.
@@ -643,6 +824,62 @@ impl CloudProviderAdapter for CubeSandboxProviderAdapter {
             // "I could not ask" is the third value, never `Absent`.
             Err(CloudProviderError::RequestFailed) => Ok(CloudInstancePresence::Unknown),
             Err(other) => Err(other),
+        }
+    }
+
+    /// `POST /sandboxes/{id}/refreshes` → 204 in ~2 ms (#1197 H1).
+    ///
+    /// **The duration is the whole lease, never a remainder.** Measured
+    /// semantics are `endAt = now + duration`, an assignment and not an
+    /// extension: the spike sent `duration: 180` to a sandbox with ~226 s left
+    /// and watched its `endAt` move *backwards* by 106 s. A renewal that thought
+    /// it was topping up a lease would therefore be shortening one, and the
+    /// smaller the top-up the closer to death it would push a healthy sandbox.
+    /// `self.lease_seconds` is the same number `create` sent, so every renewal
+    /// restores the full window from the current instant.
+    ///
+    /// **This endpoint does not 404 either, and that is B1's disease on a third
+    /// path.** `pause` and `connect` answer a clean `404` for a sandbox that
+    /// does not exist; `/refreshes` answers
+    /// `500 {"code":500,"message":"CubeMaster returned error code 130404:
+    /// sandbox id not found"}` — a *different* CubeMaster code wrapped in the
+    /// same 500 that means "already paused" on another route. Measured while
+    /// building this ticket's live harness, which is the entire argument for
+    /// having one.
+    ///
+    /// So the refusal is re-judged rather than read, exactly as
+    /// [`Self::pause`] does: a probe says whether the instance is gone, and only
+    /// [`CloudInstancePresence::Absent`] produces
+    /// [`CloudProviderError::InstanceMissing`]. Had this kept its 404 arm, the
+    /// keepalive would have reported every vanished instance as a generic
+    /// upstream failure and gone on "renewing" it forever.
+    ///
+    /// A missing instance is a fact for the reconciler, not something a
+    /// keepalive acts on; every other refusal is surfaced as its status and the
+    /// caller does nothing but count it, because the lease is four renewal
+    /// periods long and this was one of four chances.
+    ///
+    /// **Nothing here writes to the ledger.** A renewal is not a lifecycle
+    /// transition, invents no state, and takes no advisory (ADR-0140 D4's
+    /// vocabulary is untouched by design). It is momo telling the substrate that
+    /// momo is still alive.
+    async fn renew_lease(&self, instance: &CloudInstanceRef) -> Result<(), CloudProviderError> {
+        let url = self.instance_url(&instance.instance_id, "/refreshes")?;
+        let body = json!({ "duration": self.lease_seconds });
+        let (status, _, _) = self.call(Method::POST, url, Some(body)).await?;
+        if status.is_success() {
+            return Ok(());
+        }
+        let status = status.as_u16();
+        if !refusal_needs_reprobe(status) {
+            return Err(CloudProviderError::InstanceMissing);
+        }
+        match self.fetch_detail(&instance.instance_id).await? {
+            (CloudInstancePresence::Absent, _) => Err(CloudProviderError::InstanceMissing),
+            // Present or unanswerable: the lease may or may not have moved, and
+            // the next tick will try again. Never `InstanceMissing` on a guess —
+            // that is the value the reconciler settles paid sessions on.
+            _ => Err(CloudProviderError::UpstreamStatus(status)),
         }
     }
 }
@@ -764,14 +1001,14 @@ mod tests {
         let tuning = CubeSandboxTuning::default();
         let body = create_body(
             "tpl-oort-workd",
-            tuning.idle_timeout_seconds(),
+            tuning.lease_seconds(),
             "prov-1",
             &Uuid::from_u128(9).to_string(),
             &workd_env_vars(&spec()),
         );
         assert_eq!(
             body["timeout"].as_i64(),
-            Some(DEFAULT_SWEEP_SECONDS * IDLE_TIMEOUT_SWEEP_MULTIPLE),
+            Some(DEFAULT_RENEWAL_SECONDS * LEASE_RENEWALS_PER_LEASE),
             "named regression: an absent `timeout` hands the clock to the cluster default, and \
              the ledger never learns when the reaper will run"
         );
@@ -864,10 +1101,12 @@ mod tests {
             "/rollback",
             "/volumes",
             "/templates",
-            "/refreshes",
-            // Deprecated upstream, and it answers 409 on an already-running
-            // sandbox — the exact retry ADR-0140 D4 performs. `/connect` is the
-            // convergent path.
+            // Sets the same deadline `/refreshes` does; two spellings of one
+            // operation is one more than the contract needs.
+            "/timeout",
+            // Deprecated upstream, and D4-② measured it answering
+            // `500 …130490: sandbox already running` — the exact retry
+            // ADR-0140 D4 performs. `/connect` is the convergent path.
             "/resume",
         ] {
             assert!(
@@ -879,6 +1118,16 @@ mod tests {
         assert!(
             source.contains(&format!("{quote}/connect{quote}")),
             "resume must go through /connect"
+        );
+        // #1197 H1 — `/refreshes` moved from the banned list to the required
+        // one. It was banned when `timeout` was believed to be an idle clock the
+        // ledger sweep sat under; D4-② found it is an absolute TTL that nothing
+        // else resets, which makes this the only path that keeps a live session
+        // alive.
+        assert!(
+            source.contains(&format!("{quote}/refreshes{quote}")),
+            "named regression: without `/refreshes` the substrate deletes every sandbox at its \
+             absolute TTL, working or not (spike §4)"
         );
         assert!(
             !source.contains(&format!("{quote}Idempotency-Key{quote}")),
@@ -912,37 +1161,130 @@ mod tests {
         );
     }
 
-    /// The safety net may not outrun the ledger it is underneath (ADR-0156 D6②).
+    /// #1197 H1 — the lease is four renewal periods, and every input that is
+    /// not a positive integer lengthens it rather than shortening it.
     #[test]
-    fn the_idle_safety_net_is_four_sweeps_and_defaults_long() {
+    fn the_lease_is_four_renewal_periods_and_fails_long() {
         let mut env = configured_env();
         env.insert(
-            "MOMO_T3_PROVIDER_CUBESANDBOX_SWEEP_SECONDS".to_string(),
+            "MOMO_T3_PROVIDER_CUBESANDBOX_RENEWAL_SECONDS".to_string(),
             "600".to_string(),
         );
         let tuning = CubeSandboxTuning::from_env(&env);
-        assert_eq!(tuning.sweep_seconds, 600);
-        assert_eq!(tuning.idle_timeout_seconds(), 2_400);
+        assert_eq!(tuning.renewal_seconds, 600);
+        assert_eq!(tuning.lease_seconds(), 2_400);
 
         let default_tuning = CubeSandboxTuning::from_env(&configured_env());
-        assert_eq!(default_tuning.sweep_seconds, DEFAULT_SWEEP_SECONDS);
-        assert!(
-            default_tuning.idle_timeout_seconds() >= 86_400,
-            "named regression: CubeSandbox's `timeout` is an *idle* clock that momo's outbound \
-             heartbeat does not reset. A net derived from the 90 s host-offline grace would \
-             delete healthy sandboxes at six minutes"
+        assert_eq!(default_tuning.renewal_seconds, DEFAULT_RENEWAL_SECONDS);
+        assert_eq!(
+            default_tuning.lease_seconds(),
+            360,
+            "named regression: the default lease is the 90 s host-offline grace x4. Shortening \
+             it below four renewal periods means one flaky renewal window deletes a live paid \
+             session; lengthening it is dead zombie billing after momo stops renewing"
         );
         for nonsense in ["0", "-1", "soon"] {
             env.insert(
-                "MOMO_T3_PROVIDER_CUBESANDBOX_SWEEP_SECONDS".to_string(),
+                "MOMO_T3_PROVIDER_CUBESANDBOX_RENEWAL_SECONDS".to_string(),
                 nonsense.to_string(),
             );
             assert_eq!(
-                CubeSandboxTuning::from_env(&env).sweep_seconds,
-                DEFAULT_SWEEP_SECONDS,
-                "a malformed sweep period must lengthen the net, never shorten it ({nonsense:?})"
+                CubeSandboxTuning::from_env(&env).renewal_seconds,
+                DEFAULT_RENEWAL_SECONDS,
+                "a malformed renewal period must lengthen the lease, never shorten it \
+                 ({nonsense:?})"
             );
         }
+    }
+
+    /// #1197 B1 — the widening itself, stated as a table.
+    ///
+    /// Red when reverted: narrow [`refusal_needs_reprobe`] back to `409` only
+    /// and the 500 row flips to `false`, which is the flap this ticket exists to
+    /// remove.
+    #[test]
+    fn every_refusal_but_a_404_is_re_judged_by_asking() {
+        assert!(
+            refusal_needs_reprobe(500),
+            "named regression: D4-② measured `already paused` and `already running` arriving as \
+             500 (code 130490), not 409. Reading 500 as a plain failure sends ADR-0140 D4's \
+             `pause 500 -> revert` row against an instance that IS paused, and the ledger flaps \
+             between paused and running forever"
+        );
+        for refusal in [400, 401, 403, 408, 409, 429, 502, 503, 504] {
+            assert!(
+                refusal_needs_reprobe(refusal),
+                "{refusal} carries no reliable meaning about the world either"
+            );
+        }
+        assert!(
+            !refusal_needs_reprobe(404),
+            "404 is the one status that settles a fact: there is no `terminated` state upstream, \
+             so absence is only ever expressed this way"
+        );
+        for success in [200, 201, 204] {
+            assert!(
+                !refusal_needs_reprobe(success),
+                "{success} is not a refusal"
+            );
+        }
+    }
+
+    /// #1197 B1 — the two intents read the same honest branch from opposite
+    /// sides, and neither reads `running` as liveness.
+    #[test]
+    fn pause_and_resume_want_opposite_verdicts_from_one_honest_branch() {
+        assert_eq!(
+            pause_verdict_from_state(Some("paused")),
+            PauseVerdict::AlreadyPaused,
+            "a pause is satisfied only by the branch CubeAPI reports faithfully"
+        );
+        assert_eq!(
+            pause_verdict_from_state(Some("running")),
+            PauseVerdict::NotPaused,
+            "a resume is satisfied by `not paused` — which is a claim about the pause state, not \
+             a claim that the machine works"
+        );
+        assert_ne!(PauseVerdict::AlreadyPaused, PauseVerdict::NotPaused);
+    }
+
+    /// #1197 H3 — the substrate's own bookkeeping is not momo's to read.
+    #[test]
+    fn only_momo_keys_survive_the_metadata_filter() {
+        // Verbatim from the D4-② round trip: 2 keys sent, 12 returned.
+        let measured = json!({
+            "metadata": {
+                "momo_provision_id": "prov-cubefix1197",
+                "momo_workspace_id": "ws-cubefix1197",
+                "cube.master.appsnapshot.template.id": "tpl-50622c58811449bbba60cc1e",
+                "cube.master.runtime.restore.snapshot.id": "tpl-50622c58811449bbba60cc1e",
+                "cube.master.runtime.restore.snapshot.attached_at": "2026-08-08T17:04:50Z",
+                "cube.master.runtime.snapshot.id": "tpl-50622c58811449bbba60cc1e",
+                "cube.master.runtime.snapshot.attached_at": "2026-08-08T17:04:50Z",
+                "cube.master.instance.type": "cubebox",
+                "cube.master.components.envd.version": "0.5.11",
+                "cube.numa_node": "0",
+                "cube.product": "cubebox",
+                "X-Caller": "X-Caller"
+            }
+        });
+        let ours = momo_metadata(&measured);
+        assert_eq!(
+            ours.keys().cloned().collect::<Vec<_>>(),
+            vec![
+                METADATA_PROVISION_KEY.to_string(),
+                METADATA_WORKSPACE_KEY.to_string()
+            ],
+            "named regression: the response mixes CubeSandbox's internal keys into the same dict \
+             momo stamped. Storing it whole would put another system's bookkeeping — including \
+             whatever it adds next release — into momo's ledger"
+        );
+        assert_eq!(
+            ours.get(METADATA_PROVISION_KEY).map(String::as_str),
+            Some("prov-cubefix1197")
+        );
+        assert!(momo_metadata(&json!({})).is_empty());
+        assert!(momo_metadata(&json!({ "metadata": "not an object" })).is_empty());
     }
 
     /// ADR-0142 D4 — a half-configured managed provider is refused, not guessed.
