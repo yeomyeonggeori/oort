@@ -1,0 +1,64 @@
+# T3 (cloud provisioning) overlay for docker-compose.rust.yml — goal #1228.
+#
+#   docker compose --env-file infra/rust/rust-smoke.secrets.env \
+#     --env-file infra/rust/overlays.secrets.env \
+#     -f infra/rust/docker-compose.rust.yml \
+#     -f infra/rust/t3.override.yml <command>
+#
+# ## Why this file is new here and old in production
+#
+# app.oor7.com has been running a `t3.override.yml` since 2026-08-04, and until
+# this commit **no such file had ever been committed to any ref of this repo**
+# (`git rev-list --all --objects` over the whole history: zero hits — audit B
+# §2-2). The live deployment's shape, not just its secrets, lived on one disk.
+# This file is that shape, brought back: values are interpolated, structure is
+# committed.
+#
+# ## What it turns on
+#
+# ADR-0140's T3 surfaces on the api (`bins/momo-server/src/config.rs`):
+# the platform-operator routes are **closed** unless `MOMO_T3_ENABLED=1`, and
+# even then they admit only the addresses named in `PLATFORM_ADMIN_EMAILS`
+# (`config.rs:857` — lowercased, comma-split). Both are required here rather
+# than defaulted: an overlay whose only job is to open a surface must not be
+# able to open it by accident, and it must not be able to open it to nobody
+# either.
+#
+# ## Why three keys the base compose already sets are repeated
+#
+# `CENT_TOKEN_HMAC`, `CENT_PROXY_SECRET` and `PROVIDER_LINK_MASTER_KEY` are
+# already on the api in `docker-compose.rust.yml`. The live file repeats them
+# and so does this one — deliberately, because the repetition is what the
+# server actually runs and because both files interpolate the SAME variable
+# from the SAME env file, so the two lines cannot disagree. (They date from
+# before B4 put the two Centrifugo keys in the base file; keeping them is
+# reproduction, removing them would be a silent behaviour change on the next
+# deploy.)
+#
+# ## Known gap, recorded rather than fixed here (#1228 accretion)
+#
+# The T3 *reconciler* is a `momo-notifier` loop and reads its own
+# `MOMO_T3_ENABLED` / `MOMO_T3_LIFECYCLE_CLAIM_DELAY_S`
+# (`bins/momo-notifier/src/config.rs:151,154`). The live overlay does not set
+# them on `notifier`, so the reconciler is OFF in production even though the
+# file is named after it. This file reproduces that, because the packet's
+# reproduction target is the live structure; turning the reconciler on is a
+# behaviour change that needs its own decision.
+
+services:
+  api:
+    environment:
+      # "1" is the only enabling value (config.rs:922 compares to Some("1")).
+      MOMO_T3_ENABLED: ${MOMO_T3_ENABLED:?set MOMO_T3_ENABLED (1 = open the ADR-0140 platform surfaces, 0 = keep them closed)}
+      # Comma-separated. Empty grants the platform surface to nobody, which is
+      # why this is required rather than defaulted — an empty allowlist that
+      # arrived by omission looks exactly like a working deployment until an
+      # operator needs it.
+      PLATFORM_ADMIN_EMAILS: ${PLATFORM_ADMIN_EMAILS:?set PLATFORM_ADMIN_EMAILS (comma-separated operator addresses)}
+      # The address a provisioned workd registers back to (config.rs:926).
+      MOMO_PUBLIC_BASE_URL: ${MOMO_PUBLIC_BASE_URL:?set MOMO_PUBLIC_BASE_URL (this deployment's public https origin)}
+      # Repeated from the base compose — see the header. Same variables, so the
+      # rendered values are identical by construction.
+      CENT_TOKEN_HMAC: ${CENT_TOKEN_HMAC:?set CENT_TOKEN_HMAC}
+      CENT_PROXY_SECRET: ${CENT_PROXY_SECRET:?set CENT_PROXY_SECRET}
+      PROVIDER_LINK_MASTER_KEY: ${PROVIDER_LINK_MASTER_KEY:?set PROVIDER_LINK_MASTER_KEY}

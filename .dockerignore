@@ -11,8 +11,18 @@ node_modules
 # part of a docker build context.
 target
 **/target
+# Web build output and gate artifacts (#1228). The image builds the SPA in its
+# own stage, so a developer's local `dist/` must not ride along in the context
+# — it would be copied and then overwritten, and a stale one is the kind of
+# thing that makes a build "work on my machine" for the wrong reason.
+clients/web/dist
+clients/web/artifacts
+clients/web-legacy/dist
 .env
 .env.*
 infra/prod/secrets.env
 infra/prod/*.sops.env
 local-gate-evidence
+# Secrets templates are committed; their filled-in copies never enter a build
+# context (`*.secrets.env` is gitignored repo-wide).
+**/*.secrets.env

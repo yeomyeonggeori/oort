@@ -1,8 +1,8 @@
 # syntax=docker/dockerfile:1
 #
-# One immutable momo **Rust** application image, four runtime commands:
+# One immutable momo **Rust** application image, six runtime commands:
 # api (momo-server), relay (momo-relay), agent-worker (momo-agent-worker),
-# migrate (momo-migrate).
+# notifier (momo-notifier), migrate (momo-migrate), web-assets (SPA staging).
 # ADR-0145 B안 / batch B1.7 — the deploy path for the Rust stack.
 #
 #   docker build -f server-rust/Dockerfile -t momo-rust:dev .
@@ -25,16 +25,30 @@
 # shipping the binary changes no running deployment; it only makes the drain
 # reachable once compose points at it.
 #
-# Not in this image (deliberate): the Swift workers / T3 / workd / LinkShort /
-# the web SPA. `infra/prod/docker/momo.Dockerfile` remains the Swift image and is
-# untouched.
+# #1228 adds the **web SPA**. It was the last thing a deploy had to carry by
+# hand: `npm run build` on a laptop, `tar | ssh`, bind-mount into Caddy. That
+# made web and API two independently versioned deployments of one product, and
+# it left no way to ask which commit the live bundle came from (audit B §4-1,
+# B-6/B-10). It also was not new ground — the Swift image already bundled its
+# dist and staged it with a `web-assets` command, and the Rust path had simply
+# lost that. So: one image, and pinning it pins the browser too.
+#
+# Not in this image (deliberate): the Swift workers / T3 / workd / LinkShort.
+# `infra/prod/docker/momo.Dockerfile` remains the Swift image and is untouched.
 #
 # No APNs credential is baked in, here or anywhere: this image cannot talk to
 # Apple. The notifier posts id-only dispatches to the push relay, which is the
 # only component that holds a `.p8` (ADR-0120 D1-A).
 
 ARG RUST_IMAGE=rust:1-slim-bookworm
+ARG NODE_IMAGE=node:22-bookworm-slim
 ARG RUNTIME_IMAGE=debian:bookworm-slim
+
+# The commit this image was built from. Stamped into the OCI labels AND into
+# the SPA's `<meta name="momo-build">`, because a deployed artifact that cannot
+# name its own source is a deployment you can only audit by guessing (B-10).
+# `unknown` is honest: an unstamped build says so instead of claiming a commit.
+ARG MOMO_BUILD_SHA=unknown
 
 # ---------------------------------------------------------------------------
 # build — one workspace build for all three binaries
@@ -110,12 +124,61 @@ RUN set -eux; \
     install -Dm755 target/release/momo-notifier /out/momo-notifier
 
 # ---------------------------------------------------------------------------
+# web — the SPA Caddy serves (#1228)
+# ---------------------------------------------------------------------------
+# A stage of its own, sharing nothing with `build`: node and cargo never
+# invalidate each other's layers, so touching a React component does not
+# recompile ~200 crates and touching a crate does not reinstall npm. That
+# independence is a requirement of this ticket, not a nicety — the deploy host
+# builds this image and a cache miss there is measured in tens of minutes.
+FROM ${NODE_IMAGE} AS web-build
+WORKDIR /src/clients/web
+
+# `clients/web` is NOT a member of the root npm workspace (root package.json:
+# `"workspaces": ["packages/*"]`), so it installs from its own lockfile with no
+# root install first. PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD is not an optimisation:
+# the `playwright` devDependency (the e2e gates') downloads three browser
+# bundles in postinstall, none of which a production build can use.
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 \
+    npm_config_audit=false \
+    npm_config_fund=false
+COPY clients/web/package.json clients/web/package-lock.json ./
+RUN npm ci
+
+# `@momo/core` is resolved BY PATH, not through node_modules — vite.config.ts
+# aliases it to `../../packages/momo-core/src` and tsconfig.app.json maps the
+# same paths (ADR-0137 D3, deliberately so an alias cannot drift with a
+# lockfile). The consequence for the image is that the shared package must be
+# in the build context; `npm ci` alone does not bring it.
+COPY packages/momo-core /src/packages/momo-core
+# 16KB of plugin manifests that `src/**/*.test.ts` imports by repo-relative path
+# (`../../../../../server/Fixtures/...`). `npm run build` runs `tsc -b` first
+# and tsconfig.app.json includes all of `src`, so without these four JSON files
+# the image's build and the developer's build are not the same command. Keeping
+# them identical is the whole point of this ticket — an image that builds by a
+# different recipe than the repo is how the two drift apart again.
+COPY server/Fixtures /src/server/Fixtures
+COPY clients/web/ ./
+
+ARG MOMO_BUILD_SHA
+ENV MOMO_BUILD_SHA=${MOMO_BUILD_SHA}
+RUN set -eux; \
+    npm run build; \
+    test -s dist/index.html; \
+    # The stamp is the point of the ARG — if the vite plugin ever stops
+    # injecting it, this build fails here rather than shipping a bundle that
+    # cannot be traced back to a commit.
+    grep -q "content=\"${MOMO_BUILD_SHA}\"" dist/index.html
+
+# ---------------------------------------------------------------------------
 # runtime
 # ---------------------------------------------------------------------------
 FROM ${RUNTIME_IMAGE}
+ARG MOMO_BUILD_SHA
 LABEL org.opencontainers.image.title="momo-rust" \
-      org.opencontainers.image.description="momo Rust runtime — api | relay | agent-worker | notifier | migrate" \
-      org.opencontainers.image.licenses="Apache-2.0"
+      org.opencontainers.image.description="momo Rust runtime — api | relay | agent-worker | notifier | migrate | web-assets" \
+      org.opencontainers.image.licenses="Apache-2.0" \
+      org.opencontainers.image.revision="${MOMO_BUILD_SHA}"
 
 # postgresql-client is NOT optional: the migration runner shells out to psql
 # because migrations 002/006/012 use psql *client* meta-commands (`\if`,
@@ -130,7 +193,11 @@ RUN set -eux; \
       tzdata; \
     rm -rf /var/lib/apt/lists/*; \
     useradd --system --create-home --uid 10001 momo; \
-    mkdir -p /opt/momo/sql /usr/share/licenses/momo-rust
+    mkdir -p /opt/momo/sql /opt/momo/web /srv/web /usr/share/licenses/momo-rust; \
+    # /srv/web is the mount point for the serving volume. Its ownership here is
+    # what Docker copies onto a fresh named volume, and `web-assets` runs as
+    # uid 10001 — a root-owned mount point is a one-shot that cannot write.
+    chown momo:momo /srv/web
 
 COPY --from=build /out/ /usr/local/bin/
 
@@ -145,6 +212,12 @@ COPY infra/prod/bootstrap_owner_if_absent.sql /opt/momo/sql/bootstrap_owner_if_a
 COPY LICENSE NOTICE /usr/share/licenses/momo-rust/
 COPY server-rust/docker-entrypoint.sh /usr/local/bin/momo-rust-entrypoint
 
+# The SPA payload, LAST of the COPYs on purpose: a web-only change then
+# invalidates one thin layer at the end instead of every layer after it.
+# Owned by `momo` so `web-assets` can `cp -a` (ownership preservation by a
+# non-root process only succeeds when the source is already its own).
+COPY --from=web-build --chown=momo:momo /src/clients/web/dist/ /opt/momo/web/
+
 RUN set -eux; \
     chmod +x /usr/local/bin/momo-rust-entrypoint; \
     test -s /opt/momo/migrations/001_init.sql; \
@@ -154,6 +227,7 @@ RUN set -eux; \
     test -s /opt/momo/sql/bootstrap_owner_if_absent.sql; \
     test -s /usr/share/licenses/momo-rust/LICENSE; \
     test -s /usr/share/licenses/momo-rust/NOTICE; \
+    test -s /opt/momo/web/index.html; \
     momo-migrate --help >/dev/null
 
 # The runner resolves every path from the environment (its compiled-in defaults

@@ -1,0 +1,36 @@
+# Centrifugo WSS origin allowlist overlay for docker-compose.rust.yml — #1228.
+#
+#   docker compose --env-file infra/rust/rust-smoke.secrets.env \
+#     --env-file infra/rust/overlays.secrets.env \
+#     -f infra/rust/docker-compose.rust.yml \
+#     -f infra/rust/cent-origin.override.yml <command>
+#
+# ## One line, and every client depends on it
+#
+# Centrifugo checks the browser's `Origin` against this list before it upgrades
+# the socket. If the deployed domain is missing, **every** client gets 403 on
+# connect and the product looks entirely dead while the api answers 200 — the
+# failure the base file's own comment records from 2026-08-01 (QA Blocker B1).
+#
+# The base compose already reads `CENTRIFUGO_ALLOWED_ORIGINS`, but with a
+# **localhost default**. That default is correct for a tunnelled smoke and
+# wrong for every deployment, and a wrong-but-plausible default is exactly how
+# the value ended up living only on the server. This overlay makes it required:
+# name this file and you must say which origins you serve.
+#
+# ## Format trap (2026-08-01 실측, preserved from the base file's comment)
+#
+# Centrifugo v6 parses this env var as a **space-separated** list. A JSON array
+# string becomes one element and matches nothing, so every client is refused.
+# The env value wins over the mounted `infra/centrifugo.json`.
+#
+#   CENTRIFUGO_ALLOWED_ORIGINS=https://app.example.com tauri://localhost
+#
+# The scheme matters: browsers send `https://host` (no trailing slash, no path),
+# and the Tauri shell sends `tauri://localhost`. A desktop build that cannot
+# connect while the browser can is almost always this line.
+
+services:
+  centrifugo:
+    environment:
+      CENTRIFUGO_CLIENT_ALLOWED_ORIGINS: ${CENTRIFUGO_ALLOWED_ORIGINS:?set CENTRIFUGO_ALLOWED_ORIGINS (SPACE-separated origin list, e.g. "https://app.example.com tauri://localhost")}
