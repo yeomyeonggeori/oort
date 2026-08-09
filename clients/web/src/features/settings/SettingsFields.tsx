@@ -7,6 +7,7 @@ import {
   type ReactNode,
 } from "react";
 import { Button } from "@/design/ui/button";
+import { useEscapeLayer } from "@/design/ui/escapeLayer";
 import { cn } from "@/design/lib/cn";
 
 // =============================================================================
@@ -551,13 +552,52 @@ export function CopyButton({
 /**
  * Two-step confirmation for a destructive action. The first click only asks;
  * nothing irreversible ever happens on a single unguarded click.
+ *
+ * Both steps have to survive the keyboard, which is what the first version
+ * missed (PR 1203 design review H2). Step one replaces itself with step two, so
+ * the button that was focused stops existing and the browser drops focus to
+ * `document.body`: a keyboard reader who pressed Enter on 지우기 was returned to
+ * the top of the document and had to Tab back to a row it could no longer tell
+ * from its neighbours. Two things answer that here, and they belong here rather
+ * than in each caller because every caller has the same problem:
+ *
+ *   - Focus MOVES to the question, not to the destructive button. The group is
+ *     what was just opened, its accessible name is the question, and landing on
+ *     it means the thing announced is "지우면 되돌릴 수 없습니다" rather than the
+ *     button that does it. Landing on 지우기 itself would make Enter-Enter
+ *     destroy a row, which is the guard this component exists to be.
+ *   - Cancel RETURNS focus to the trigger. Backing out of a question should put
+ *     the reader where the question found them. So does confirming, so that
+ *     focus is never on `document.body` while the request is in flight; where it
+ *     goes once the ROW itself is gone is the caller's to say, because the
+ *     caller is the only one that knows what the row was next to (PR 1203 R2
+ *     M-R1).
+ *
+ * Esc while the question stands is the third, and it is answered here now. It
+ * used to close the whole settings surface (PR 1203 R2 M-R2, measured again
+ * after this branch met #1205: question open → Esc → `settings-route` gone,
+ * focus on `document.body`, question and list with it). Standing the focus on
+ * the question is what makes that keypress read as "cancel this", so the wrong
+ * outcome was this component's making — but the fix belongs to whoever owns
+ * Esc, and #1205 gave the house an owner: `useEscapeLayer`, one capture-phase
+ * listener over a layer stack, with the settings shell standing down whenever
+ * `escapeIsClaimed()`. So the question CLAIMS A LAYER while it is open, and the
+ * shell's Esc is a layer below it.
+ *
+ * The layer is pushed per open question, not per mounted button, so N rows
+ * mid-confirmation are N layers and each Esc takes the topmost one. Its handler
+ * is `close`, which is the same exit 취소 uses: the reader is put back on the
+ * trigger, not dropped on `document.body`.
  */
 export function ConfirmButton({
   label,
   ariaLabel,
+  subject,
+  describedBy,
   question,
   confirmLabel,
   onConfirm,
+  onAskingChange,
   disabled,
   testId,
 }: {
@@ -567,25 +607,87 @@ export function ConfirmButton({
    * times is eight identical stops in the tab order, and the row a screen
    * reader is about to act on is not recoverable from the button alone. Must
    * contain the visible label so speech input still matches it.
+   *
+   * Prefer `subject`, which names the row once and carries it through BOTH
+   * steps; this stays for callers whose question is already row-qualified.
    */
   ariaLabel?: string;
+  /**
+   * What the destructive action belongs to — the row discriminator, same
+   * convention as `CopyButton`.
+   *
+   * It qualifies all three accessible names (trigger, question group, confirm),
+   * because the identity of the row is not something that may be dropped
+   * halfway through the interaction. A list rendering this per row otherwise
+   * reaches step two as N groups named by one identical sentence and N buttons
+   * named "지우기", at the exact moment the reader most needs to know which one
+   * is about to go.
+   */
+  subject?: string;
+  /**
+   * Id of a sentence that explains why this control is currently unusable.
+   *
+   * For a list that greys N rows for ONE reason: repeating the sentence per row
+   * is the same fact N times on one screen, and dropping it leaves a grey
+   * control that reads as "you may not" (PR 1203 R2 N-R4). Written once, pointed
+   * at from every control it applies to.
+   */
+  describedBy?: string;
   question: string;
   confirmLabel: string;
   onConfirm: () => void;
+  /**
+   * The confirmation opened or closed. For a caller that has to quiet OTHER
+   * actions on the same row while an irreversible one is being asked about.
+   */
+  onAskingChange?: (asking: boolean) => void;
   disabled?: boolean;
   testId?: string;
 }) {
   const [asking, setAsking] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const groupRef = useRef<HTMLDivElement | null>(null);
+  // Both exits land on the trigger. Confirming does too: the row may take a
+  // round trip to disappear, and until it does the trigger is still the place
+  // the reader was. If the row then goes, the CALLER moves focus on.
+  const restoreFocus = useRef(false);
+
+  function close() {
+    restoreFocus.current = true;
+    setAsking(false);
+    onAskingChange?.(false);
+  }
+
+  useEffect(() => {
+    if (asking) {
+      groupRef.current?.focus({ preventScroll: true });
+    } else if (restoreFocus.current) {
+      restoreFocus.current = false;
+      triggerRef.current?.focus({ preventScroll: true });
+    }
+  }, [asking]);
+
+  // Esc cancels the question and nothing else (see the docstring). The layer
+  // stands only while `asking`, so once the question is gone Esc is the shell's
+  // again on the very next press.
+  useEscapeLayer(asking, close);
+
+  const triggerName = ariaLabel ?? (subject ? `${subject} ${label}` : undefined);
 
   if (!asking) {
     return (
       <Button
+        ref={triggerRef}
         type="button"
         variant="outline"
         size="sm"
         disabled={disabled}
-        aria-label={ariaLabel}
-        onClick={() => setAsking(true)}
+        aria-label={triggerName}
+        aria-describedby={disabled ? describedBy : undefined}
+        onClick={() => {
+          setAsking(true);
+          onAskingChange?.(true);
+        }}
         data-testid={testId}
       >
         {label}
@@ -594,12 +696,16 @@ export function ConfirmButton({
   }
 
   // The question names the group, so two rows mid-confirmation stay two
-  // distinct groups instead of four anonymous 빼기/취소 stops.
+  // distinct groups instead of four anonymous 빼기/취소 stops. With a `subject`
+  // they stay distinct even when the question itself is one shared sentence.
   return (
     <div
-      className="flex flex-wrap items-center gap-2"
+      ref={groupRef}
+      tabIndex={-1}
+      className="flex flex-wrap items-center gap-2 rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
       role="group"
-      aria-label={question}
+      aria-label={subject ? `${subject} ${question}` : question}
+      data-testid={testId ? `${testId}-question` : undefined}
     >
       <span className="text-meta text-ink">{question}</span>
       <Button
@@ -607,8 +713,10 @@ export function ConfirmButton({
         variant="destructive"
         size="sm"
         disabled={disabled}
+        aria-label={subject ? `${subject} ${confirmLabel}` : undefined}
+        aria-describedby={disabled ? describedBy : undefined}
         onClick={() => {
-          setAsking(false);
+          close();
           onConfirm();
         }}
         data-testid={testId ? `${testId}-confirm` : undefined}
@@ -619,7 +727,8 @@ export function ConfirmButton({
         type="button"
         variant="ghost"
         size="sm"
-        onClick={() => setAsking(false)}
+        aria-label={subject ? `${subject} ${confirmLabel} 취소` : undefined}
+        onClick={close}
       >
         취소
       </Button>

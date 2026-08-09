@@ -844,6 +844,66 @@ async function exerciseComposer(browser) {
     "본문 없이 파일만 있는데 전송이 열리지 않는다"
   );
 
+  // ③b **Esc 는 이 표면의 것이 아니다** (#1205 가 세운 층 규율 확인).
+  //
+  // 웹훅 축이 셸의 Esc 를 층 스택으로 재작성하면서, 되돌릴 수 없는 값을 든 층은
+  // Esc 를 **삼켜야** 한다는 규율이 생겼다(`useEscapeGuard`). 첨부 트레이는 그
+  // 층이 아니다 — 되돌릴 수 없는 값이 아니고(파일은 디스크에 그대로 있다),
+  // 라우트를 덮지도 않으며, 채팅 라우트에는 애초에 window Esc 리스너가 없다.
+  //
+  // 그래도 **재고 있어야** 한다: 누군가 이 표면 위에 층을 하나 등록하는 날,
+  // 이 단정이 그 층이 트레이를 쓸어 가는지 잡는다. 지금 참인 것은 "Esc 를 눌러도
+  // 아무 일도 일어나지 않는다"이고, 그것이 이 자리의 옳은 답이다.
+  {
+    const before = await page_.getByTestId("attachment-chip").count();
+    const route = page_.url();
+    await page_.getByTestId("composer-input").focus();
+    await page_.keyboard.press("Escape");
+    await page_.locator("body").click({ position: { x: 5, y: 5 } });
+    await page_.keyboard.press("Escape");
+    await wait(200);
+    expect(
+      (await page_.getByTestId("attachment-chip").count()) === before,
+      "Esc 한 번에 올려 둔 첨부가 사라졌다"
+    );
+    expect(page_.url() === route, "Esc 가 첨부를 든 채로 이 화면을 떠났다");
+    console.log(`[esc] 트레이는 층이 아니다 · Esc 2회 후 칩 ${before}개 유지 · 라우트 불변`);
+  }
+
+  // ③c 드래그 강조**는** 층이다. Esc 로 물릴 수 있어야 한다.
+  //
+  // 취소된 끌기가 엔진에 따라 `dragleave` 를 안 보낼 수 있고, 그러면 강조가 켜진
+  // 채 남아 「여기 놓으면 된다」를 영원히 말한다. 층으로 등록해 두면 Esc 가 그것을
+  // 물린다 — 셸을 건드리지 않고 `useEscapeLayer` 만으로.
+  {
+    await page_.evaluate(() => {
+      const composer = document.querySelector('[data-testid="composer"]');
+      const transfer = new DataTransfer();
+      transfer.items.add(new File(["x"], "drop-me.log", { type: "text/plain" }));
+      composer?.dispatchEvent(
+        new DragEvent("dragenter", { bubbles: true, dataTransfer: transfer })
+      );
+    });
+    await page_.waitForFunction(
+      () =>
+        document
+          .querySelector('[data-testid="composer"]')
+          ?.hasAttribute("data-dragging"),
+      undefined,
+      { timeout: 5_000 }
+    );
+    await page_.keyboard.press("Escape");
+    await page_.waitForFunction(
+      () =>
+        !document
+          .querySelector('[data-testid="composer"]')
+          ?.hasAttribute("data-dragging"),
+      undefined,
+      { timeout: 5_000 }
+    );
+    console.log("[esc] 드래그 강조는 층이다 · Esc 한 번에 물러난다");
+  }
+
   // ④ 보내면 트레이가 비고, 보낸 행이 자기 카드를 그린다.
   await page_.getByTestId("composer-send").click();
   await wait(600);

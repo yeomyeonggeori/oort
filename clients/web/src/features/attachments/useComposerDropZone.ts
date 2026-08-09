@@ -1,5 +1,6 @@
 import { useCallback, useRef, useState } from "react";
 import type { ClipboardEvent, DragEvent } from "react";
+import { useEscapeLayer } from "@/design/ui/escapeLayer";
 
 // =============================================================================
 // 파일이 컴포저로 들어오는 세 번째와 네 번째 문 (#1202 첨부 축).
@@ -15,6 +16,21 @@ import type { ClipboardEvent, DragEvent } from "react";
 // `dragenter` 를 받는다. 그래서 불리언 하나로는 커서가 텍스트에어리어 경계를
 // 지날 때마다 강조가 깜빡인다. 깊이를 세는 것이 이 문제의 표준 답이고, 그것이
 // 이 훅에 상태 대신 ref 가 있는 이유다.
+//
+// ## 끌어다 놓기를 그만두는 길 (#1205 의 Esc 층 규율)
+//
+// 강조가 떠 있는 동안은 이 컴포저가 **화면에서 무언가를 주장하고 있는** 상태다.
+// 그 주장을 물리는 보편적인 키는 Esc 이고, 이 앱에는 그것을 소유하는 방법이
+// 이제 하나뿐이다(`useEscapeLayer`) — window 에 리스너를 직접 다는 것은 층
+// 스택을 우회하는 짓이고, 그 우회가 정확히 #1205 가 고친 결함이다.
+//
+// 이 층은 강조가 켜져 있는 몇백 밀리초만 산다. 사는 동안 Esc 는 이 층의 것이라
+// 밑의 컴포저(인용 취소)에 닿지 않는데, 그것이 옳다: 파일을 든 손이 화면 위에
+// 있는 동안 사람이 취소하려는 것은 인용이 아니라 이 드롭이다.
+//
+// 이 층이 없으면 대신 무엇이 문제인가: 취소된 끌기가 엔진에 따라 `dragleave` 를
+// 안 보낼 수 있고, 그러면 강조가 켜진 채 남는다. 자기 힘으로 끌 수 없는 강조는
+// 「여기 놓으면 된다」를 영원히 말하는 거짓말이다.
 //
 // ## 붙여넣은 것이 전부 파일은 아니다
 //
@@ -55,6 +71,10 @@ export function useComposerDropZone(
     depth.current = 0;
     setDragging(false);
   }, []);
+
+  // 강조가 서 있는 동안만 층을 잡는다. 닫힌 표면이 스택에 남으면 그것이 곧
+  // "가장 위 층"이 되어 Esc 가 아무 일도 안 하게 된다(escapeLayer 의 경고).
+  useEscapeLayer(dragging, reset);
 
   const onDragEnter = useCallback(
     (event: DragEvent) => {
