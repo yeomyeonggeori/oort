@@ -1,6 +1,6 @@
 # ADR-0150: 대화 유출 경계 — 에이전트 도구가 대화 내용을 momo 밖으로 내보낼 때
 
-- Status: **Proposed** (2026-08-05 기안 Fable — 성재 결정 대기)
+- Status: **Accepted** (2026-08-05 기안 Fable · 성재 승인 2026-08-09 — 원안 D1~D4)
 - 관련: ADR-0004(provider 자격증명 **유입** 금지 — 본 ADR은 그 **역방향**), SRV-B3b 조사(`docs/planning/2026-08-04-SRV-B3b-websearch-research.md`), agent_profile.enabled_tools(#1018 소비자)
 - 발단: 성재 — *"웹검색은 안 되는 거 같아. 툴이 필요하면 쥐어줘."*
 
