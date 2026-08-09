@@ -7,6 +7,7 @@ import {
   type ReactNode,
 } from "react";
 import { Button } from "@/design/ui/button";
+import { useEscapeLayer } from "@/design/ui/escapeLayer";
 import { cn } from "@/design/lib/cn";
 
 // =============================================================================
@@ -572,14 +573,21 @@ export function CopyButton({
  *     caller is the only one that knows what the row was next to (PR 1203 R2
  *     M-R1).
  *
- * NOT answered here: Esc while the question stands still closes the whole
- * settings surface (PR 1203 R2 M-R2). Standing the focus on the question is
- * what makes that keypress read as "cancel this", so it is this component's
- * problem too — but the shell's Esc handler is the owner and the same defect
- * has a wider form there (the one-time secret card is dismissed by it as well),
- * so #1205 fixes it at the shell. The house answer is `useEscapeLayer`, one
- * capture-phase listener over a layer stack; once the shell speaks it, a layer
- * pushed from here while `asking` is what makes N open questions N layers.
+ * Esc while the question stands is the third, and it is answered here now. It
+ * used to close the whole settings surface (PR 1203 R2 M-R2, measured again
+ * after this branch met #1205: question open → Esc → `settings-route` gone,
+ * focus on `document.body`, question and list with it). Standing the focus on
+ * the question is what makes that keypress read as "cancel this", so the wrong
+ * outcome was this component's making — but the fix belongs to whoever owns
+ * Esc, and #1205 gave the house an owner: `useEscapeLayer`, one capture-phase
+ * listener over a layer stack, with the settings shell standing down whenever
+ * `escapeIsClaimed()`. So the question CLAIMS A LAYER while it is open, and the
+ * shell's Esc is a layer below it.
+ *
+ * The layer is pushed per open question, not per mounted button, so N rows
+ * mid-confirmation are N layers and each Esc takes the topmost one. Its handler
+ * is `close`, which is the same exit 취소 uses: the reader is put back on the
+ * trigger, not dropped on `document.body`.
  */
 export function ConfirmButton({
   label,
@@ -658,6 +666,11 @@ export function ConfirmButton({
       triggerRef.current?.focus({ preventScroll: true });
     }
   }, [asking]);
+
+  // Esc cancels the question and nothing else (see the docstring). The layer
+  // stands only while `asking`, so once the question is gone Esc is the shell's
+  // again on the very next press.
+  useEscapeLayer(asking, close);
 
   const triggerName = ariaLabel ?? (subject ? `${subject} ${label}` : undefined);
 
