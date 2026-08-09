@@ -3886,6 +3886,23 @@ async function captureScheme(browser, scheme) {
   await webhooks.screenshot({ path: revokeShot });
   shots.push(revokeShot);
 
+  // 회전 확인도 찍는다. 이 프레임은 1차 리뷰에 **없었고**, 그래서 회전과 폐기의
+  // 위계(채움은 다르되 경계는 둘 다 컨트롤 경계)를 판단할 근거가 없었다. 확인
+  // 프롬프트가 액션 스트립을 대체한다는 것도 여기서만 보인다.
+  await webhooks.evaluate('location.hash = "/inbox"');
+  await webhooks.waitForTimeout(200);
+  await webhooks.evaluate('location.hash = "/settings?section=webhooks"');
+  await webhooks.getByTestId("webhook-list").waitFor({ state: "visible" });
+  await webhooks.locator('[data-testid^="webhook-rotate-"]').first().click();
+  await webhooks
+    .locator('[data-testid^="webhook-rotate-"][data-testid$="-confirm"]')
+    .first()
+    .waitFor({ state: "visible" });
+  await webhooks.waitForTimeout(150);
+  const rotateShot = `${OUT_DIR}/settings-webhooks-rotate-confirm-${scheme}.png`;
+  await webhooks.screenshot({ path: rotateShot });
+  shots.push(rotateShot);
+
   // 확인 단계를 걷어내고 발급으로 간다. 라우트를 한 번 튕기는 것이 이 셸에서
   // 패널을 처음 상태로 되돌리는 방법이다(설정 스윕이 쓰는 것과 같은 수법).
   await webhooks.evaluate('location.hash = "/inbox"');

@@ -290,6 +290,14 @@ export function webhookCreatedLabel(createdAtMs: number): string {
   return `${formatDay(createdAtMs)} 생성`;
 }
 
+/**
+ * 폐기된 줄이 답해야 하는 질문은 "언제 만들었나"가 아니라 "언제 죽었나"다
+ * (#1205 리뷰 N3). 폐기는 이 행의 마지막 변경이므로 `updatedAtMs` 가 그 시각이다.
+ */
+export function webhookRevokedLabel(updatedAtMs: number): string {
+  return `${formatDay(updatedAtMs)} 폐기`;
+}
+
 // --- receive URL ------------------------------------------------------------
 
 /** The documented native ingress path. Slack-compatible paths come from the server. */
@@ -479,8 +487,13 @@ export function overlapExpiryLabel(seconds: number): string {
   return `${Math.max(1, Math.round(seconds / 60))}분 뒤 만료`;
 }
 
-export function rotateConfirmQuestion(): string {
-  return `비밀값을 회전하면 새 값이 한 번만 표시되고, 이전 값은 ${overlapExpiryLabel(
+/**
+ * 대상을 이름으로 부른다 (#1205 리뷰 M1). 한 목록에 회전 확인이 둘 열리면 이름이
+ * 없는 질문은 서로 구별되지 않는 두 그룹이 되고, 그 구별이 바로 확인 단계가
+ * 존재하는 이유다.
+ */
+export function rotateConfirmQuestion(label: string): string {
+  return `${label}의 비밀값을 회전하면 새 값이 한 번만 표시되고, 이전 값은 ${overlapExpiryLabel(
     WEBHOOK_ROTATE_OVERLAP_SECONDS
   )}됩니다. 회전할까요?`;
 }
@@ -488,6 +501,15 @@ export function rotateConfirmQuestion(): string {
 export function revokeConfirmQuestion(label: string): string {
   return `${label}의 모든 비밀값이 즉시 무효화되고 되돌릴 수 없습니다. 폐기할까요?`;
 }
+
+/**
+ * 서버가 준 경로를 이 서버 주소로 해석하지 못했을 때 (#1205 리뷰 M4).
+ *
+ * Slack 호환에서는 URL 자체가 비밀값이므로, 이 분기는 "발급은 됐는데 그 값을 쓸 수
+ * 없다"는 뜻이다. 무슨 일이 있었는지에서 멈추면 할 일이 없는 사람을 남긴다.
+ */
+export const UNRESOLVABLE_RECEIVE_URL_NOTICE =
+  "서버가 이 서버 주소로 해석되는 수신 URL을 주지 않았습니다. 이 웹훅을 폐기하고 다시 만드세요.";
 
 /** Shown on a Slack-compatible row, where the list can never show the URL again. */
 export const SLACK_URL_RECOVERY_HINT =
@@ -509,6 +531,25 @@ export const SLACK_URL_RECOVERY_HINT =
  * every rejection code the sender will have received, and what each one means.
  * Transcribed from the two ingress operations in docs/api/openapi.yaml.
  */
+/**
+ * 이 표면이 전송 기록을 갖고 있지 않다는 사실.
+ *
+ * 접힌 disclosure 안에 두었더니 폴드 3px 아래에 앉아 아무도 읽지 못했다
+ * (#1205 리뷰 H4, 실측 notesTop=803 / viewportH=800). 정직한 문장이 안 보이면
+ * 아직 정직이 아니므로, 목록 바로 아래 평문으로 나온다.
+ */
+export const WEBHOOK_DELIVERY_RECORD_NOTE =
+  "받은 전송은 채널의 메시지로 남습니다. 거절된 전송은 보낸 쪽에 코드로만 돌아가고, 이 화면에는 기록이 남지 않습니다.";
+
+/**
+ * 접힌 참고 자료의 이름표.
+ *
+ * "전송이 실패할 때 무엇을 확인하나"는 이미 실패를 아는 사람에게 말을 걸었다.
+ * 사람이 실제로 들고 오는 질문은 "웹훅이 조용한데 뭐가 문제인가"이고, 이름표는
+ * 그 질문의 답이 여기 있다고 말해야 한다.
+ */
+export const WEBHOOK_INGRESS_NOTES_LABEL = "웹훅이 조용할 때: 보낸 쪽이 받은 거절 코드";
+
 export function webhookIngressNotes(mode: WebhookMode): readonly string[] {
   if (mode === "native") {
     return [

@@ -979,9 +979,14 @@ async function measureSize(browser, size) {
     ["/settings?section=code", "코드 실행 호스트", "settings-code-bottom", "work-tier-save-workspace"],
     // 웹훅(#1202)이 셋째인 이유는 또 다른 방식으로 넘치기 때문이다: 목록 위에
     // 발급 카드가 끼어들 수 있고, 그 아래로 폼 전체와 참고 자료 disclosure 가
-    // 이어진다. 마지막 컨트롤은 발급 버튼이다 — 거기 닿지 못하면 이 표면에서
-    // 할 수 있는 일이 없다.
-    ["/settings?section=webhooks", "웹훅", "settings-webhooks-bottom", "webhook-create"],
+    // 이어진다.
+    //
+    // 재는 것은 `webhook-ingress-notes` 다. 처음에는 발급 버튼을 적었는데 그것은
+    // **마지막 컨트롤이 아니었고**(disclosure 가 폼 뒤에 온다), 그래서 이 검사는
+    // 자기 바로 옆에서 폴드 3px 아래로 떨어져 있던 요소를 보지 못했다
+    // (#1205 리뷰 H4, 실측 top=803 / viewport=800). 마지막 것을 재지 않는
+    // 도달 검사는 도달을 재지 않는다.
+    ["/settings?section=webhooks", "웹훅", "settings-webhooks-bottom", "webhook-ingress-notes"],
   ]) {
     await go(page, hash);
     const reach = await page.evaluate(`(async () => {

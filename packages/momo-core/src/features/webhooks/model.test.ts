@@ -10,9 +10,14 @@ import {
   resolveReceiveUrl,
   revealDetailRows,
   revokeConfirmQuestion,
+  rotateConfirmQuestion,
+  UNRESOLVABLE_RECEIVE_URL_NOTICE,
+  webhookCreatedLabel,
+  WEBHOOK_DELIVERY_RECORD_NOTE,
   webhookFailureMessage,
   webhookIngressNotes,
   webhookLabelIssue,
+  webhookRevokedLabel,
   WEBHOOK_LABEL_MAX,
   type WebhookInstallation,
 } from "./model";
@@ -377,11 +382,34 @@ describe("webhookLabelIssue", () => {
   });
 });
 
-describe("irreversibility copy", () => {
+describe("confirmation copy", () => {
   it("names the webhook and says the effect cannot be undone", () => {
     const question = revokeConfirmQuestion("배포 알림");
     expect(question).toContain("배포 알림");
     expect(question).toContain("되돌릴 수 없습니다");
+  });
+
+  // #1205 리뷰 M1: 이름 없는 질문은 두 행이 동시에 물을 때 서로 구별되지 않는다.
+  it("names the webhook in the rotate question too", () => {
+    const question = rotateConfirmQuestion("Sentry 이슈 알림");
+    expect(question).toContain("Sentry 이슈 알림");
+    expect(question).toContain("24시간 뒤 만료");
+  });
+});
+
+describe("row date", () => {
+  // #1205 리뷰 N3: 폐기된 줄이 답해야 하는 것은 언제 죽었는가다.
+  it("dates a revoked row by when it was revoked", () => {
+    expect(webhookCreatedLabel(1_754_700_000_000)).toContain("생성");
+    expect(webhookRevokedLabel(1_754_700_000_000)).toContain("폐기");
+  });
+});
+
+describe("honesty copy", () => {
+  // #1205 리뷰 H4: 이 표면에 전송 기록이 없다는 사실은 접힌 자리에 두지 않는다.
+  it("says plainly that no delivery record lives here, with a next step for a dead URL", () => {
+    expect(WEBHOOK_DELIVERY_RECORD_NOTE).toContain("기록이 남지 않습니다");
+    expect(UNRESOLVABLE_RECEIVE_URL_NOTICE).toContain("폐기하고 다시 만드세요");
   });
 });
 

@@ -557,7 +557,6 @@ export function ConfirmButton({
   ariaLabel,
   question,
   confirmLabel,
-  confirmTone = "destructive",
   onConfirm,
   disabled,
   testId,
@@ -572,18 +571,6 @@ export function ConfirmButton({
   ariaLabel?: string;
   question: string;
   confirmLabel: string;
-  /**
-   * The weight of the second click. Default `destructive`, because that is what
-   * every caller of this control wanted when it was written and what an
-   * unqualified "confirm this" means here.
-   *
-   * `secondary` exists for the action that needs a confirmation step without
-   * being a deletion: rotating a webhook credential asks, because it starts a
-   * clock on the old secret, but it destroys nothing and a --danger-fill button
-   * beside 폐기 would put two identical-looking irreversible-shaped controls on
-   * one row. Danger saturation is a hierarchy (MOMO-642 R1 H-2), not decoration.
-   */
-  confirmTone?: "destructive" | "secondary";
   onConfirm: () => void;
   disabled?: boolean;
   testId?: string;
@@ -617,7 +604,7 @@ export function ConfirmButton({
       <span className="text-meta text-ink">{question}</span>
       <Button
         type="button"
-        variant={confirmTone}
+        variant="destructive"
         size="sm"
         disabled={disabled}
         onClick={() => {
