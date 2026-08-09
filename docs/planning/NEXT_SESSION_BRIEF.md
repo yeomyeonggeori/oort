@@ -24,9 +24,9 @@
 
 ### ① #1213 — 프로덕션이 보안 헤더를 하나도 안 보낸다 (미착수·우선순위 높음)
 - 실측: `app.oor7.com` 응답에 **CSP·HSTS·X-Frame-Options·X-Content-Type-Options·Referrer-Policy 전부 없음**.
-- 원인: Caddy 설정 2벌 분기 — #1207이 고친 `infra/prod/Caddyfile`은 셀프호스트용이고, **라이브가 쓰는 `infra/rust/Caddyfile`엔 CSP 블록 자체가 없다**(서버 실측 grep 0건).
+- 원인(2026-08-09 정정 — 우로보로스 적발): 라이브가 쓰는 Caddyfile(서버 `/opt/momo/infra/rust/Caddyfile`)은 **레포에 tracked로 존재하지 않는다**(`git ls-files | grep -i caddy` → `infra/prod/Caddyfile` 1건뿐, main·engine 동일). 프로덕션 설정이 버전관리 밖 — 헤더 부재보다 상위 결함. `gate:csp-deploy`는 셀프호스트용 `infra/prod/Caddyfile`을 읽으므로 **게이트가 지키는 파일 ≠ 라이브 파일**. 0단계 = 라이브 파일을 내용 변경 0줄로 레포 회수(정본 없이 정책 설계 금지).
 - 파생: 첨부 업로드는 브라우저에서도 안 막힌다(막을 정책이 없어서). 대신 클릭재킹·MIME 스니핑·다운그레이드·리퍼러 유출이 열려 있다.
-- 주의: **HSTS는 켜면 브라우저가 기억**하고 CSP는 잘못 좁히면 기능이 죽는다 — #1212가 만든 `gate:csp-deploy`를 **라이브가 쓰는 파일도 재게** 확장하고, 배포 후 라이브 헤더 재실측을 수용기준으로.
+- 주의: **HSTS는 켜면 브라우저가 기억**하고 CSP는 잘못 좁히면 기능이 죽는다 — 특히 `connect-src`에 `googleapis.com` 없으면 첨부 Drive 직접 PUT이 즉사한다(#1206 실측 전례, 3축 이식 코드 기준으로 정책 작성). #1212가 만든 `gate:csp-deploy`를 **라이브가 쓰는 파일도 재게** 확장하고, 배포 후 라이브 헤더 재실측을 수용기준으로. 성재 결정(2026-08-09): 헤더와 미배포 랜딩분은 **같은 배포 창에 묶는다**, HSTS는 짧은 max-age로 시작.
 
 ### ② 배포 + 검수 빌드 (성재 검수 대기 중)
 - 미배포 랜딩분: #1212 이후 전부(웹훅·이벤트구독·첨부 이식 3축, 디자인 수리, 오르트 구름 가드 등).
@@ -35,7 +35,7 @@
 - 성재 검수 표면 = **데스크톱(Tauri) + 모바일(RN)**. macOS 네이티브는 검수 대상 아님.
 
 ### ③ Swift 삭제 1단계
-- **선행조건 충족**(#1202 Tauri 이식 3축 랜딩 완료).
+- **선행조건 미충족 — Blocker**(2026-08-09 정정: 이전 서술 "선행조건 충족"은 오기. 감사 §0-1 판정 — ADR-0145 증보 1(판정표)이 머지 `a749d765`에서 유실됐고, 보류 13패밀리 중 이식 완료는 work-controls·work-auto-approvals 2뿐. **11패밀리 이식/폐기 판정 = 성재의 자리**). #1202 Tauri 이식 3축 랜딩 자체는 완료(사실). 판정재료(감사 engine 재기준화·증보 1 복원 초안·3칸 표)는 워커 발주됨(패킷 `handoffs/2026-08-09-swift-removal-rebaseline-packet.md`).
 - 삭제 가능: 클라 **407파일**(macOS 327·iOS 50·Core 30). **삭제 불가**(살아있는 제품): `relay/PushRelay`(유일 APNs)·`workers/WorkHostDaemon`(T3가 띄우는 바이너리)·`server/Migrations`(배포 DDL)·`services/MomoMetrics`.
 - 정본: `research/2026-08-09-swift-removal-audit.md`(6단계 순서·12 티켓 후보·W-S 워커 지시 초안) · ADR-0145 증보 1(삭제 조건)·2(빌드 퇴역).
 - 동반: **#1201**(check_spm_licenses가 base부터 red — 전 프로파일 게이트 차단. 성재 결정: 삭제와 함께 은퇴).
@@ -49,8 +49,8 @@
 
 ## 4. 상태 스냅샷 (2026-08-09 종료 시점)
 
-- **트랙**: `track/engine` = 개발선(HEAD `4427756a`), `main` = 문서 정본. **양방향 동기화 완료** — engine에도 ADR 0148~0159가 있다(#1211이 "engine ADR이 0147까지"라 지적한 문제 해소됨).
-- **열린 PR**: #1215 하나.
+- **트랙**: `track/engine` = 개발선(HEAD `4427756a`), `main` = 문서 정본. ADR 동기화는 완료(engine에도 0148~0159) — 단 **완전한 양방향은 아니다**(2026-08-09 실측: `docs/cicd/10~13`은 engine에만, engine이 main보다 36커밋 앞섬. engine→main 머지는 성재 승인 대기 = 결정 큐 S10).
+- **열린 PR**: 제품 PR은 #1215 하나 + **dependabot 13건 방치**(최고령 7/22, major bump 포함 — 처리 방침 미결 = 결정 큐 S9).
 - **활성 워커**: 0. **워크트리**: `dsfix-1210`(#1215용·보존) · `deploy5-b727ea4f`(배포용·재사용 가능).
 - NCP 실험 자원(CubeSandbox U1·D4-②)은 **전량 회수 완료**(과금 종료).
 
