@@ -54,7 +54,7 @@
 ## 웹 클라이언트 npm 의존성 (clients/web-legacy, MOMO-391)
 > 브라우저 번들에 포함되는 런타임 의존성만 표기. dev 도구(vite/eslint/
 > typescript/openapi-typescript/playwright 등)는 배포물 미포함 — 전이 포함
-> 전체 인벤토리는 `clients/web-legacy/scripts/check-licenses.mjs`가 게이트마다 생성.
+> 전체 인벤토리는 `scripts/check_npm_licenses.mjs`가 게이트마다 생성(#1225로 이동·재조준).
 > (ADR-0119 v0 — MOMO-596이 `clients/web`에서 `clients/web-legacy`로 이동. 새
 > `clients/web`(ADR-0133) 의존성은 배포물에 아직 포함되지 않아 미표기.)
 
