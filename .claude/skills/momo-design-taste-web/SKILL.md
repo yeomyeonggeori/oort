@@ -16,6 +16,9 @@ Three files carry the load, and they are checked in, not aspirational:
 | token reference + measured contrast | `references/tokens.md` |
 | mechanical pre-flight | `scripts/design_preflight_web.sh` |
 
+> **The system has a name and one canonical page: 오르트 구름 (Oort Cloud) — `docs/design-system/README.md`** (ADR-0159).
+> This skill is the *web dialect*: how to write the code. The canonical page is the *system*: the token layer and its web↔phone relationships, the hierarchy rule (destructive > primary > secondary), the four states, and — most usefully — the **enforcement map**, which says for every axis what machine measures it and **what nothing measures at all**. Read its §5.3 before claiming a rule is "checked".
+
 ## 0. Design Read (mandatory, before any code)
 
 Output one line before writing UI code:
