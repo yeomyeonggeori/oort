@@ -1,5 +1,10 @@
 # Rust 스택 배포 경로 (이미지 + compose)
 
+> **처음 한 번이라면 여기가 아니라 [`docs/SELF_HOST.md`](../../docs/SELF_HOST.md) 다** (#1229).
+> 그 문서는 clone에서 브라우저 로그인까지를 명령 셋·분기 0으로 끝낸다. 이 문서는
+> **그다음 전부**다 — 마이그레이션 로그 읽는 법, 오너 부트스트랩 계약, Centrifugo
+> history로 왕복 증명하기, env 파리티 표, 오버레이 전량, 트러블슈팅.
+
 > ADR-0145 B안 / 배치 **B1.7**. `momo-server`(Rust/Axum) + `momo-relay`를 이미지로 굽고
 > prod-형 compose로 띄우는 경로. NCP 런북 `docs/planning/2026-07-30-ncp-rust-smoke-prep.md`
 > §1 트리거 3번("Rust 서버 이미지 빌드 → prod compose를 Rust 이미지로 스왑")이 이 디렉터리다.
@@ -16,7 +21,8 @@
 | `server-rust/docker-entrypoint.sh` | 역할 선택만. prod Swift 이미지와 동일 계약(`command: ["api"]`) |
 | `docker-compose.rust.yml` | prod compose 미러(최소셋): postgres · centrifugo · runtime-roles · migrate · api · relay |
 | `docker-compose.rust.build.yml` | 로컬 빌드 오버라이드(`build:` 주입). 배포 스택은 항상 이미지 pull |
-| `rust-smoke.env.example` | env 템플릿. 복사본은 반드시 `*.secrets.env`(레포 전역 gitignore) |
+| `rust-smoke.env.example` | env 템플릿. 복사본은 반드시 `*.secrets.env`(레포 전역 gitignore). 셀프호스트 경로는 이 템플릿 대신 `scripts/self_host_env.sh` 가 `local.secrets.env` 를 **생성**한다(#1229) |
+| `local.override.yml` + `Caddyfile.local` | **로컬 셀프호스트 엣지**(#1229) — `web-init` + `web`(Caddy `:80`, 루프백 바인딩, ACME 없음). SPA·`/v1`·`/connection` 을 같은 오리진에서 낸다. 정본 절차는 `docs/SELF_HOST.md` |
 | `docker-compose.lane-phone.yml` | **기본 비활성** MAESTRO 폰 레인 오버레이(#1022) — `mock-hermes` + `agent-worker`의 프로바이더 배선. `clients/mobile/scripts/lane-phone.sh` 전용 |
 | `docker-compose.push.yml` | **기본 비활성** ADR-0120 푸시 경로 오버레이 — `push-relay` + `notifier`. `-f`로 명시할 때만 존재한다 |
 | `docker-compose.push.build.yml` | 위 오버레이의 로컬 빌드(`relay/PushRelay/Dockerfile`) |
