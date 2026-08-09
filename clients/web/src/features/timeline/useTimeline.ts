@@ -9,6 +9,7 @@ import {
   setPin,
   setReaction,
   type Message,
+  type MessageAttachment,
   type SendMessageOptions,
 } from "@momo/core/lib/api";
 import {
@@ -60,6 +61,19 @@ export interface ResumeInfo {
   resubscribeCount: number;
 }
 
+/**
+ * 컴포저가 전송에 실을 수 있는 것들.
+ *
+ * 와이어의 `SendMessageOptions`와 한 자리만 다르다: 그쪽은 첨부를 **id 배열**로
+ * 받고 이쪽은 **행 전체**를 받는다. 이유는 낙관적 echo 다 — id 만으로는 이름도
+ * 크기도 없어서 카드를 그릴 수 없고, 그 값들은 컴포저가 이미 손에 들고 있다.
+ * id 로 줄이는 것은 `post`가 요청을 만들 때 한 번 한다.
+ */
+export interface TimelineSendOptions
+  extends Omit<SendMessageOptions, "attachmentIds"> {
+  attachments?: MessageAttachment[];
+}
+
 export interface UseTimelineResult {
   state: TimelineState;
   status: "loading" | "ready" | "error";
@@ -75,7 +89,7 @@ export interface UseTimelineResult {
    * retry re-sends what the person actually chose rather than quietly falling
    * back to the inherited value or dropping the quote.
    */
-  send: (body: string, options?: SendMessageOptions) => Promise<void>;
+  send: (body: string, options?: TimelineSendOptions) => Promise<void>;
   /** Re-run a failed echo with the SAME idempotency key. */
   resend: (clientMsgId: string) => Promise<void>;
   loadOlder: () => Promise<void>;
@@ -256,6 +270,14 @@ export function useTimeline(
             ...(row.replyToId === undefined
               ? {}
               : { replyToId: row.replyToId }),
+            // ADR-0151 — 재시도가 **같은 파일들**을 다시 묶는다. 서버는 이미
+            // 묶인 첨부를 두 번 묶기를 거절하지만(`AlreadyLinked`), 같은 멱등키의
+            // 재전송은 첫 요청이 만든 메시지를 그대로 돌려주므로 그 거절에
+            // 닿지 않는다. 여기서 id 를 떨구면 재시도가 파일 없는 메시지를
+            // 보내게 되고, 그것이 서버가 롤백으로까지 막는 바로 그 결과다.
+            ...(row.attachments === undefined || row.attachments.length === 0
+              ? {}
+              : { attachmentIds: row.attachments.map((a) => a.id) }),
           }
         );
         // The response IS the committed server echo (seq-authoritative), so
@@ -274,14 +296,20 @@ export function useTimeline(
   );
 
   const send = useCallback(
-    async (body: string, options?: SendMessageOptions) => {
+    async (body: string, options?: TimelineSendOptions) => {
       const channel = channelId;
-      if (channel === null || body === "") return;
+      // 파일만 보내는 메시지는 본문이 빈 문자열이다. 서버는 그것을 받고
+      // (`SendMessageRequest.body` 는 필수가 아니다), mac 도 같은 문을 연다
+      // (`guard !trimmed.isEmpty || !attachments.isEmpty`). 여기서 빈 본문을
+      // 되돌려 보내면 사진 한 장만 붙이고 누른 전송이 아무 일도 하지 않는다.
+      const attachments = options?.attachments ?? [];
+      if (channel === null || (body === "" && attachments.length === 0)) return;
       const row: PendingMessage = {
         clientMsgId: crypto.randomUUID(),
         channelId: channel,
         authorMemberId,
         body,
+        ...(attachments.length === 0 ? {} : { attachments }),
         ...(options?.routing ? { routing: options.routing } : {}),
         // ADR-0148 - the echo renders its own quote block from this, and a retry
         // must re-send the SAME request under the same idempotency key.

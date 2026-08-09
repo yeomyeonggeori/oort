@@ -1,0 +1,153 @@
+import { useCallback, useRef, useState } from "react";
+import type { ClipboardEvent, DragEvent } from "react";
+import { useEscapeLayer } from "@/design/ui/escapeLayer";
+
+// =============================================================================
+// 파일이 컴포저로 들어오는 세 번째와 네 번째 문 (#1202 첨부 축).
+//
+// 첫째는 클립 버튼, 둘째는 파일 선택창. 이 파일은 나머지 둘이다: **끌어다
+// 놓기**와 **붙여넣기**. 웹에서 이 둘 없는 첨부는 절반만 있는 첨부다 — 스크린샷을
+// 찍어 ⌘V 로 넣는 것은 이 도구를 쓰는 사람들이 하루에 몇 번씩 하는 일이다.
+// (mac 클라도 드롭을 갖는다: `MomoFileDropOverlay`.)
+//
+// ## dragenter/dragleave 는 셀 수밖에 없다
+//
+// 자식 요소 위로 커서가 넘어갈 때마다 부모는 `dragleave` 를 받고 곧바로 새
+// `dragenter` 를 받는다. 그래서 불리언 하나로는 커서가 텍스트에어리어 경계를
+// 지날 때마다 강조가 깜빡인다. 깊이를 세는 것이 이 문제의 표준 답이고, 그것이
+// 이 훅에 상태 대신 ref 가 있는 이유다.
+//
+// ## 끌어다 놓기를 그만두는 길 (#1205 의 Esc 층 규율)
+//
+// 강조가 떠 있는 동안은 이 컴포저가 **화면에서 무언가를 주장하고 있는** 상태다.
+// 그 주장을 물리는 보편적인 키는 Esc 이고, 이 앱에는 그것을 소유하는 방법이
+// 이제 하나뿐이다(`useEscapeLayer`) — window 에 리스너를 직접 다는 것은 층
+// 스택을 우회하는 짓이고, 그 우회가 정확히 #1205 가 고친 결함이다.
+//
+// 이 층은 강조가 켜져 있는 몇백 밀리초만 산다. 사는 동안 Esc 는 이 층의 것이라
+// 밑의 컴포저(인용 취소)에 닿지 않는데, 그것이 옳다: 파일을 든 손이 화면 위에
+// 있는 동안 사람이 취소하려는 것은 인용이 아니라 이 드롭이다.
+//
+// 이 층이 없으면 대신 무엇이 문제인가: 취소된 끌기가 엔진에 따라 `dragleave` 를
+// 안 보낼 수 있고, 그러면 강조가 켜진 채 남는다. 자기 힘으로 끌 수 없는 강조는
+// 「여기 놓으면 된다」를 영원히 말하는 거짓말이다.
+//
+// ## 붙여넣은 것이 전부 파일은 아니다
+//
+// 텍스트를 복사하면 클립보드에는 `text/plain` 과 함께 `text/html` 이 오고, 어떤
+// 앱은 거기에 이미지 렌디션까지 얹는다. 파일만 있을 때에만 기본 동작을 막는다 —
+// 안 그러면 글을 붙여넣었는데 입력창에 아무것도 안 들어가는 일이 생긴다.
+// =============================================================================
+
+export interface ComposerDropZone {
+  /** 지금 이 컴포저 위에 파일이 떠 있는가. 강조 한 겹의 근거. */
+  dragging: boolean;
+  onDragEnter: (event: DragEvent) => void;
+  onDragOver: (event: DragEvent) => void;
+  onDragLeave: (event: DragEvent) => void;
+  onDrop: (event: DragEvent) => void;
+  onPaste: (event: ClipboardEvent) => void;
+}
+
+/** 이 끌기가 파일을 나르고 있는가. 텍스트 선택을 끄는 손짓과 구별한다. */
+function carriesFiles(transfer: DataTransfer | null): boolean {
+  if (transfer === null) return false;
+  return Array.from(transfer.types).includes("Files");
+}
+
+/** 드롭 한 번이 나른 것. `folders` 는 받지 못한 폴더 수다(design-review M-4). */
+export interface DroppedBatch {
+  folders: number;
+}
+
+export function useComposerDropZone(
+  onFiles: (files: File[], batch?: DroppedBatch) => void,
+  enabled = true
+): ComposerDropZone {
+  const [dragging, setDragging] = useState(false);
+  const depth = useRef(0);
+
+  const reset = useCallback(() => {
+    depth.current = 0;
+    setDragging(false);
+  }, []);
+
+  // 강조가 서 있는 동안만 층을 잡는다. 닫힌 표면이 스택에 남으면 그것이 곧
+  // "가장 위 층"이 되어 Esc 가 아무 일도 안 하게 된다(escapeLayer 의 경고).
+  useEscapeLayer(dragging, reset);
+
+  const onDragEnter = useCallback(
+    (event: DragEvent) => {
+      if (!enabled || !carriesFiles(event.dataTransfer)) return;
+      event.preventDefault();
+      depth.current += 1;
+      setDragging(true);
+    },
+    [enabled]
+  );
+
+  const onDragOver = useCallback(
+    (event: DragEvent) => {
+      if (!enabled || !carriesFiles(event.dataTransfer)) return;
+      // 막지 않으면 브라우저가 이 파일을 **새 탭에서 열고** 앱을 떠난다.
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "copy";
+    },
+    [enabled]
+  );
+
+  const onDragLeave = useCallback(
+    (event: DragEvent) => {
+      if (!enabled || !carriesFiles(event.dataTransfer)) return;
+      depth.current = Math.max(0, depth.current - 1);
+      if (depth.current === 0) setDragging(false);
+    },
+    [enabled]
+  );
+
+  const onDrop = useCallback(
+    (event: DragEvent) => {
+      if (!enabled || !carriesFiles(event.dataTransfer)) return;
+      event.preventDefault();
+      reset();
+      // 폴더만 거르고, **거른 것을 말한다** (design-review M-4).
+      //
+      // 앞 판은 `file.size > 0 || file.type !== ""` 로 걸렀는데 그 술어는 두 가지를
+      // 한꺼번에 지웠다: 폴더와 **빈 파일**이다. 0바이트 로그를 끌어다 놓으면 아무
+      // 일도 일어나지 않았고, 그것은 같은 PR 이 상한 초과 파일에 대해서는 고지를
+      // 새로 만들어 지키려던 규율("말없이 사라지지 않는다")의 정반대였다. 빈 파일은
+      // 서버가 받는다(`size` 의 `minimum: 0`). 폴더는 못 받으므로 세어서 말한다.
+      const folders = Array.from(event.dataTransfer.items).filter((item) => {
+        if (item.kind !== "file") return false;
+        const entry = item.webkitGetAsEntry?.();
+        return entry !== null && entry !== undefined && entry.isDirectory;
+      }).length;
+      const dropped = Array.from(event.dataTransfer.files);
+      // 폴더는 크기 0 + 타입 없음으로 온다. `items` 와 `files` 는 같은 순서를
+      // 보장하지 않아 인덱스로 짝지을 수 없으므로 그 형상으로 되짚는다.
+      const files =
+        folders === 0
+          ? dropped
+          : dropped.filter((file) => file.size > 0 || file.type !== "");
+      if (files.length > 0 || folders > 0) onFiles(files, { folders });
+    },
+    [enabled, onFiles, reset]
+  );
+
+  const onPaste = useCallback(
+    (event: ClipboardEvent) => {
+      if (!enabled) return;
+      const data = event.clipboardData;
+      if (!data) return;
+      const files = Array.from(data.files);
+      if (files.length === 0) return;
+      // 글과 함께 온 이미지 렌디션이면 글이 우선이다. 파일만 있을 때에만 가로챈다.
+      if (Array.from(data.types).some((type) => type.startsWith("text/"))) return;
+      event.preventDefault();
+      onFiles(files);
+    },
+    [enabled, onFiles]
+  );
+
+  return { dragging, onDragEnter, onDragOver, onDragLeave, onDrop, onPaste };
+}
