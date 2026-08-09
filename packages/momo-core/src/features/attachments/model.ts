@@ -128,8 +128,12 @@ export const ATTACH_COPY = {
   attach: "파일 첨부",
   /** 트레이의 제목 (macOS `localDraft`). */
   tray: "첨부 파일",
-  /** 상한 고지 (macOS `connectionPending`의 뒷절만 남긴 것). */
-  limitNote: "파일당 최대 100MB, 한 메시지에 20개까지 보낼 수 있습니다.",
+  // macOS 의 `connectionPending`("전송할 때 채널에 업로드합니다. 파일당 최대
+  // 100MB입니다.")은 여기 없다. 앞절이 웹에서 거짓이기 때문이다 — 이 클라는
+  // 고르는 즉시 올린다(그래야 진행률을 잴 수 있고 전송이 즉시 끝난다). 뒷절인
+  // 상한 고지만 남길 수도 있었지만, 상한은 **걸렸을 때** 말한다(`too-large`):
+  // 판정이 로컬이라 왕복 비용이 0이고, 컴포저 위에 늘 서 있는 안내 한 줄은
+  // 이 앱이 밀어내는 종류의 상시 소음이다.
   /** 앞 파일이 끝나기를 기다리는 중. macOS `localOnlyStatus`가 선 자리다. */
   queued: "대기 중",
   /** 바이트가 아직 가는 중 (macOS `uploading`). */
