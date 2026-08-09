@@ -1,0 +1,17 @@
+app.oor7.com {
+	encode zstd gzip
+	handle /v1/* {
+		reverse_proxy api:8080
+	}
+	handle /healthz {
+		reverse_proxy api:8080
+	}
+	handle /connection/* {
+		reverse_proxy centrifugo:8000
+	}
+	handle {
+		root * /srv/web
+		try_files {path} /index.html
+		file_server
+	}
+}
