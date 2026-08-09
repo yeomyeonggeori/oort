@@ -2039,3 +2039,8 @@
 - **W2 — #1216(성재 승인 대기, main 대상)**: 패킷 전제 정정 2(증보 1은 `32f31eaa`에서 이미 복원돼 있었음·"engine⊂main" 역전) · 감사 engine 재기준화(소거 4·정정 4·수치 2·좌표 5·신규 결함 2) · 11패밀리+agentRunHistory 3칸 표(판정 칸 공백 — 폐기 유력 후보는 work-tool-profiles·bans·platform 셋뿐, 8패밀리는 클라 호출 생존). **최대 발견: `relay/OutboxRelay`는 삭제 가능이 아니다**(engine-only 36커밋의 .swift 3파일이 전부 이 트리·8/9 웹훅 랜딩·Rust 웹훅 소비자 0건 — 5-A→5-C 강등+T13 필요) + 감사 §9 지시를 문자 그대로 실행하면 `clients/mobile/ios` 삭제 사고(좌표→경로 문자열로 정정).
 - **검수 재료 완비**: 데스크톱 `oort.app`(@6bfc9b82, #1215 디자인 수리 포함 — deploy5 워크트리 bundle/macos) 빌드 완료. 폰은 ASC green 확인 후 TestFlight 경로(배포 준비 토글+내부 테스터 그룹) 제안 예정.
 - 적립: LiveKit 랜딩 티켓에 CSP connect-src 갱신 수용기준 필수 · `infra/prod/Caddyfile` Permissions-Policy가 셀프호스트 허들 마이크를 죽이는 기존 결함(티켓 후보) · dependabot 13건 방침(S9) · engine→main 머지(S10 — 문서 드리프트의 뿌리) · 11패밀리 판정(S5, 입력=#1216 표) · T6/T7 존폐(S7 — OutboxRelay 발견으로 무게 상승).
+
+## 2026-08-09 (심야) · Fable · Swift 판정 종결 + Xcode Cloud 첫 그린
+- **#1216 머지(성재 승인)** → 성재 판정 4결정을 판정표 정본에 기록: **폐기 3**(work-tool-profiles REST — 테이블 존치·bans·platform) · **이식 확정 3**(webhooks·event-subscriptions→**#1222**(T13)·agentRunHistory→**#1223**) · **이월 5+종속 1**(plugins·memories·huddles·workstreams·members잔여=v1 범위, mcp=plugins 종속) · **OutboxRelay=Rust 이식(#1222) 후 Swift 삭제**. 증보 1 "보류 13" 전원 상태 확보 — **W-S 판정 선행조건 종결**(남은 선행 = 감사 §6 순서+패킷).
+- 티켓 발급 근거에 신규 실측: **라이브 compose에 웹훅 송신 서비스가 없다**(웹훅·이벤트구독은 8/9 설정 표면만 출하, 송신·관리 REST는 어디에도 없음 — #1222가 라이브 기능도 깨운다).
+- **Xcode Cloud 첫 완전 그린**: 빌드 2039 진단(#1219가 심음)이 전제 오류를 확정 — 아카이브 단계 서명은 grant 3종을 싣되 application-identifier는 export 재서명에서 주입. **#1221**(성재 승인·분류기 차단 해제 후): 그 키를 선택 검사로, 팀 보증은 keychain 그룹 문자열로 이동(기대 팀 고정 — 종전보다 좁음), 진단 덤프를 하중 단정으로 이관. 재빌드 **track/engine·ci-appid 둘 다 green** — 재지정(워크스페이스+scheme) 이후 전 파이프라인 성립. TestFlight 전환(배포 준비+테스터 그룹)은 성재 원할 때 1클릭 거리.
