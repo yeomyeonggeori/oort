@@ -33,7 +33,8 @@
 
 이미지 안에 들어가는 것: 바이너리 3종, `server/Migrations/*.sql`(그대로 복사),
 `infra/e2e/bootstrap_roles.sql`, `infra/prod/bootstrap_runtime_roles.sql`,
-`infra/prod/set_initial_owner.sql`, LICENSE/NOTICE. 런타임 베이스는
+`infra/prod/set_initial_owner.sql`, `infra/prod/bootstrap_owner_if_absent.sql`(#1227),
+LICENSE/NOTICE. 런타임 베이스는
 `debian:bookworm-slim` + **`postgresql-client`** — 마이그레이션 러너가 psql로
 shell-out 하기 때문이다(002/006/012가 psql 메타커맨드 `\if`/`\getenv`를 쓴다. B0 교훈).
 
@@ -41,8 +42,16 @@ shell-out 하기 때문이다(002/006/012가 psql 메타커맨드 `\if`/`\getenv
 
 ```sh
 cp infra/rust/rust-smoke.env.example infra/rust/rust-smoke.secrets.env
-# change-me-* 전부 교체:  openssl rand -hex 24
+# change-me-* 전부 교체:      openssl rand -hex 24
+# 첫 로그인 2줄도 채운다:      MOMO_INITIAL_OWNER_EMAIL / MOMO_INITIAL_OWNER_PASSWORD
 ```
+
+**첫 로그인 2줄은 선택이 아니다**(#1227). 마이그레이션 012가 시드 오너의 공개
+비밀번호를 잠그므로(fail-closed이고, 옳다) 그 둘을 비운 채 마이그레이션한 DB에는
+**쓸 수 있는 자격증명이 하나도 없다** — API는 healthy한데 모든 로그인이
+`invalid credentials`이고, 재마이그레이션으로는 복구되지 않는다(`applied=0 skipped=N`,
+2026-08-10 실측). 채워 두면 `up -d`의 `migrate` 서비스가 첫 부팅에 로그인을 만든다.
+계약은 §4-2.
 
 주의: `MOMO_APP_POSTGRES_PASSWORD` / `RELAY_POSTGRES_PASSWORD` 값은
 `MOMO_APP_DATABASE_URL` / `RELAY_DATABASE_URL` 안의 비밀번호와 **같아야** 한다
@@ -75,7 +84,13 @@ momorust logs migrate
 #   + APPLY 001_init.sql … 059_…
 #   [migrate] (apply) applied=59 skipped=0 total=59
 #   [migrate] IDEMPOTENCY_OK second-pass applied=0 skipped=59
+#   NOTICE:  MOMO_BOOTSTRAP_OWNER=created bootstrap owner password set from the environment
+#   [migrate] bootstrap owner reconciled (see MOMO_BOOTSTRAP_OWNER notice above)
 ```
+
+마지막 두 줄이 §2에서 채운 첫 로그인이다. 2회차부터는 `MOMO_BOOTSTRAP_OWNER=skipped`로
+바뀌고, 둘을 비워 뒀다면 `[migrate] no bootstrap owner requested …`가 대신 나온다 —
+그 경우 스택은 healthy하지만 아무도 로그인할 수 없다(§4-2).
 
 `migrate` 서비스는 `MOMO_BOOTSTRAP_RUNTIME_ROLES=0`으로 돌기 때문에 세 런타임 롤이
 정확한 least-privilege 자세로 존재하지 않으면 **마이그레이션을 거부한다**(prod와 동일).
@@ -90,10 +105,35 @@ curl -fsS http://127.0.0.1:8080/healthz
 # {"status":"ok","service":"momo-server","database":"ok"}
 ```
 
-### 4-2. 로그인 자격 만들기
+### 4-2. 로그인 자격 (#1227)
 
 기본 시드 모드는 `none`이고, 마이그레이션 012가 시드 오너의 공개 비밀번호를 잠근다
-(fail-closed). 그래서 로그인 자격은 명시적으로 만든다 — prod의 `set-owner`와 같은 경로:
+(fail-closed). **정본 경로는 §2에서 env 2줄을 채우는 것이고, 그러면 `up -d`가 끝나는
+순간 로그인이 존재한다** — 별도 명령이 없다.
+
+| env 상태 | `migrate`가 하는 일 | 로그 |
+|---|---|---|
+| 둘 다 채움, DB에 쓸 수 있는 비번 없음 | 오너 비번을 **1회** 기록 | `MOMO_BOOTSTRAP_OWNER=created` |
+| 둘 다 채움, 이미 비번 있음 | **아무것도 안 함**(멱등) | `MOMO_BOOTSTRAP_OWNER=skipped` |
+| 둘 다 빔 | 아무것도 안 함 — 012의 잠금 유지 | `no bootstrap owner requested …` |
+| 하나만 채움 | **exit 2**, 스택 기동 중단 | `must be set together` |
+| 대문자·공백 섞인 이메일 | **exit 2**, 스택 기동 중단 | `must already be trimmed and lowercase` |
+
+마지막 행은 2026-08-10 실측으로 추가됐다: 자격증명은 `lower(btrim(...))`로 저장되는데
+로그인 조회는 `WHERE h.email = $2`로 **그대로 비교**한다(`momo-messaging::identity`).
+그래서 `Owner@Example.com`을 넣으면 오너 행은 생기는데 그 주소로는 영영 로그인되지
+않는다 — #1227이 없애려는 바로 그 실패다. 조용히 소문자로 바꿔 쓰는 대신 부팅에서
+거부하고, 통하는 철자를 에러 메시지에 보여준다. (로그인 조회 쪽 비대칭 자체는 이
+티켓 범위 밖 — 적립 보고.)
+
+두 번째 행이 계약의 핵심이다. `migrate`는 `up -d`마다 다시 돌기 때문에, 재부팅이
+**바꿔 놓은 비밀번호를 되돌리거나 세션을 로그아웃시키면 안 된다.** 그래서 boot 경로는
+쓸 수 있는 비번이 없을 때만 쓰는 전용 파일(`infra/prod/bootstrap_owner_if_absent.sql`)을
+쓰고, 네 번째 행은 조용한 "off"가 아니라 exit 2다 — 반만 채운 env를 off로 읽으면
+초록색 부팅 로그 뒤에서 잠기게 된다.
+
+**의도적 회전(rotation)은 별개 명령이다.** 이쪽은 항상 덮어쓰고 **활성 세션을 전부
+무효화**한다(prod와 같은 경로, MOMO-561):
 
 ```sh
 MOMO_INITIAL_OWNER_EMAIL=owner@example.com \
@@ -103,8 +143,14 @@ MOMO_INITIAL_OWNER_PASSWORD='<generated>' \
 # [migrate] bootstrap owner credentials updated (no value printed)
 ```
 
+어느 경로든 값은 `\getenv`로만 psql에 들어가므로 argv·stdout·SQL 소스 어디에도
+비밀번호가 남지 않는다(ADR-0004).
+
 (로컬 전용 대안: `MOMO_AGENT_SEED_MODE=e2e`로 fresh 볼륨에서 기동하면 시드 오너
 `demo@momo.local` / `dev-password`가 살아 있다. **공개 비밀번호이므로 NCP 금지.**)
+
+재현 검증기: `scripts/verify_owner_bootstrap_rust.sh`(깨끗한 DB → 문서 경로 부팅 →
+실제 로그인 → 재실행 멱등 → env 없이 기동 시 fail-closed까지 한 번에 증명한다).
 
 ### 4-3. login → send → list
 
@@ -217,7 +263,16 @@ migrate/runtime-roles는 prod의 스위치를 그대로 읽는다: `DATABASE_URL
 `MOMO_AGENT_SEED_MODE`(none|demo|e2e), `MOMO_APP/RELAY/WORKER_POSTGRES_PASSWORD`,
 `MOMO_INITIAL_OWNER_EMAIL`/`_PASSWORD`. 추가로 이미지 경로 오버라이드
 `MOMO_MIGRATIONS_DIR`, `MOMO_BOOTSTRAP_ROLES_SQL`, `MOMO_RUNTIME_ROLES_SQL`,
-`MOMO_SET_OWNER_SQL`(Dockerfile이 `/opt/momo/...`로 세팅)과 `MIGRATE_IDEMPOTENCY_CHECK`.
+`MOMO_SET_OWNER_SQL`, `MOMO_BOOTSTRAP_OWNER_SQL`(Dockerfile이 `/opt/momo/...`로 세팅)과
+`MIGRATE_IDEMPOTENCY_CHECK`.
+
+`MOMO_INITIAL_OWNER_*`는 **두 커맨드가 공유하되 뜻이 다르다**(#1227): `migrate`는
+「없으면 만든다」(멱등, 세션 무손상), `migrate set-owner`는 「무조건 회전한다」(세션 무효화).
+compose는 두 서비스 모두에 이미 이 이름을 넘기고 있었으므로 compose 변경은 없다.
+
+`PROVIDER_LINK_MASTER_KEY`는 `agent-worker`가 `${VAR:?}`로 **요구**한다 — 템플릿에서
+빠져 있던 동안 §2→§3 (0)의 `momorust config`가 무수정 복사본에서 exit 1이었다
+(2026-08-10 buzz-audit-B §3). 지금은 템플릿에 placeholder로 있다.
 
 ## 8. 트러블슈팅
 
