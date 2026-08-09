@@ -155,8 +155,18 @@ oort down -v
 |---|---|
 | 3단계가 `port is already allocated` 로 실패 | 2단계 이후에 그 포트를 누가 잡았다. `down` 후 `local.secrets.env` 의 `MOMO_WEB_PORT` 를 바꾸고 다시 `up`. |
 | 로그인이 `invalid credentials` | 2단계가 알려 준 값을 쓴다(`grep MOMO_INITIAL_OWNER infra/rust/local.secrets.env`). 비밀번호를 바꾸려면 아래 회전 명령. |
-| 화면은 뜨는데 메시지가 실시간으로 안 온다 | `oort logs relay`(위 §멈추기에서 정의한 함수)를 본다. `published` 가 없으면 outbox가 안 빠진 것이다. |
+| 화면은 뜨는데 메시지가 실시간으로 안 온다 | outbox가 빠졌는지 먼저 본다(아래 질의). `broadcast \| done` 이면 서버 쪽은 끝난 것이고 브라우저 쪽을 본다(`oort logs api`). `pending`/`failed` 면 relay다(`oort logs relay`). |
 | 처음부터 다시 하고 싶다 | `down -v` + `rm infra/rust/local.secrets.env` + 2단계부터. |
+
+메시지가 실제로 레일까지 갔는지 보는 질의(`broadcast | done` 이 정상):
+
+```sh
+oort exec postgres psql -U momo -d momo \
+  -c "SELECT kind, status, count(*) FROM outbox GROUP BY 1,2;"
+```
+
+relay는 성공 publish를 **로그하지 않는다**(정상 경로가 조용하다). 그래서 「relay가
+일했나」의 답은 로그가 아니라 위 질의다.
 
 비밀번호 회전(의도적 변경 — 모든 세션이 로그아웃된다):
 
