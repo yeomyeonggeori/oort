@@ -315,6 +315,66 @@
   --color-warn: var(--warn);
 }
 
+/* =============================================================================
+ * `transition-colors` 에서 `outline-color` 를 뺀다 (#1210 D3).
+ *
+ * ## 무엇이 잘못됐었나
+ *
+ * Tailwind v4 의 `transition-colors` 가 전이시키는 속성 목록에는 v3 에 없던
+ * `outline-color` 가 들어 있다 (설치본 v4.3.3 실측):
+ *
+ *   color, background-color, border-color, outline-color,
+ *   text-decoration-color, fill, stroke, --tw-gradient-*
+ *
+ * 이 레포의 포커스 링은 `focus-visible:outline-accent` 로 색을 **상태에서만**
+ * 준다. 그래서 탭으로 포커스가 들어오면 `outline-width` 는 즉시 2px 로 서지만
+ * 색은 정지 상태의 `currentcolor`(= --ink, 본문 잉크)에서 --accent 로 기본
+ * 150ms 동안 번진다 — 키보드가 1급 문법인 제품(ux-bible P11)에서 포커스 표시가
+ * 첫 프레임에 **잉크색으로** 나타났다가 호박이 된다. 보강 증거는 이미 레포에
+ * 있었다: gates/gate-shell-layout.mjs:760-764 가 정확히 이 보간 때문에
+ * getComputedStyle 앞에서 400ms 를 기다린다.
+ *
+ * ## 왜 프리미티브가 아니라 여기인가
+ *
+ * 감사(2026-08-09 design-system-audit §B-4 ⑤)는 「프리미티브 3개만 고치면 25곳이
+ * 함께 낫는다」로 적었다. 실측하면 그렇지 않다: `transition-colors` 와
+ * `focus-visible:outline-*` 을 한 클래스 목록에 함께 든 자리는 21파일 25곳이고,
+ * 그중 프리미티브는 셋(button·input·select)뿐이다. 나머지 22곳은 자기 문자열에
+ * `transition-colors` 를 직접 적은 feature 파일이라, 프리미티브를 고쳐도 그대로
+ * 페이드한다. 셋만 고치면 22곳이 조용히 남고, 다음에 생길 컴포넌트가 같은
+ * 유틸리티를 적으면 또 벌어진다.
+ *
+ * 그래서 고치는 자리는 **유틸리티 자신**이다. 한 선언이 지금 31곳(포커스 링과
+ * 함께 선 25곳 + 링 없는 6곳)과 앞으로 쓰일 모든 자리를 함께 진다. 감사가 이
+ * 결함을 「디자인 시스템이 필요한 이유의 가장 깨끗한 사례」로 부른 그 문장은
+ * 유틸리티 층에서만 참이 된다.
+ *
+ * ## 어떻게 이기나 — 그리고 왜 @utility 가 아닌가
+ *
+ * `@utility transition-colors {…}` 로 적으면 Tailwind 가 같은 이름의 코어 정의와
+ * **한 규칙으로 합치면서 코어 선언을 뒤에 붙인다** — 캐스케이드상 코어가 이겨서
+ * outline-color 가 그대로 남는다(컴파일 산출물로 확인). `@layer utilities` 블록은
+ * 같은 레이어의 **소스 순서 뒤**에 놓이므로 우리 선언이 마지막이 되어 이긴다.
+ * 목록을 새로 발명하는 것이 아니라 한 항목만 빼는 것이라, 남는 여덟은 코어
+ * v4.3.3 의 목록 그대로다.
+ *
+ * 이 승부는 취향이 아니라 검산이다: src/design/transitionColors.test.ts 가 이
+ * 파일을 실제로 컴파일해 `.transition-colors` 의 **마지막** transition-property
+ * 를 읽고, outline-color 가 없고 나머지 여덟이 그대로인지 잰다. 코어가 목록을
+ * 바꾸거나 병합 방식을 바꾸면 그 테스트가 빨개진다.
+ *
+ * 포커스 링을 **의도적으로** 전이시키고 싶은 자리가 생기면 그 자리에서
+ * `transition-[outline-color]` 를 적으면 된다. 그것은 한 컴포넌트의 결정이고,
+ * 유틸리티 하나가 전 앱에 강요하는 것과 다르다.
+ * ========================================================================== */
+@layer utilities {
+  .transition-colors {
+    transition-property:
+      color, background-color, border-color, text-decoration-color, fill,
+      stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to;
+  }
+}
+
 /* Two-pane shell geometry as a named utility, so no component needs an
  * arbitrary grid-cols-[240px_1fr] value.
  *

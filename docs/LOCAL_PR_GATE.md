@@ -210,8 +210,16 @@ scripts/verify_merge_tree.sh --typecheck-only    # 빠른 사전 확인
 
 **코어(`packages/momo-core`)를 만진 PR을 트랙에 머지하기 전에 필수다.** 재는 것은
 브랜치가 아니라 **병합 결과**다: `git merge-tree --write-tree` 로 병합 트리를 만들고
-임시 워크트리에 실체화한 뒤 거기서 웹·폰·코어 3종 typecheck + 스위트를 돌린다.
-브랜치 HEAD 는 한 번도 체크아웃되지 않는다 — 그것이 이미 초록인 판이기 때문이다.
+임시 워크트리에 실체화한 뒤 거기서 여덟 레인을 돌린다 — 웹·폰·코어 3종 typecheck,
+같은 3종 스위트, 카피 스캔(웹+코어), 그리고 정본 웹 클라의 ESLint. 브랜치 HEAD 는
+한 번도 체크아웃되지 않는다 — 그것이 이미 초록인 판이기 때문이다.
+
+여덟 번째 레인(`web lint`)은 #1210 에서 붙었다. `clients/web/eslint.config.js` 의 두
+디자인 규칙(JSX 인라인 `style=` 금지 · `#rrggbb` 리터럴 금지)을 **어느 게이트도
+실행하지 않고** 있었기 때문이다 — `web` 프로파일의 lint 단계가 도는 것은 동결된
+`clients/web-legacy` 다. 그동안 손실이 없었던 것은 `design_preflight_web.sh` 의 그렙
+분류가 같은 두 규칙을 중복 커버한 덕이고, 중복이 유일한 안전망인 상태였다. 문턱은
+error 이고 경고는 통과한다(base 12건).
 
 같은 실패 양식이 두 번 왔기 때문에 세운다: ①U4-4 W-1(게이트 증거를 버려질 판에서
 수집) ②U4-6 B1(웹 PR이 코어 API를 재편, 폰 PR이 옛 API 소비 — 각 브랜치는 초록,
