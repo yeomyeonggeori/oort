@@ -41,8 +41,16 @@ import { useEffect, useRef } from "react";
 // 리스너를 직접 달지 않고 이 훅만 쓴다.
 // =============================================================================
 
+// ## 닫히는 층과 삼키는 층 (#1205 R2 신규 H)
+//
+// 층이라고 해서 전부 Esc 로 닫히는 것은 아니다. 되돌릴 수 없는 값을 들고 있는
+// 표면 — 서버가 원문을 보관하지 않는 웹훅 일회성 비밀값 카드가 그것이다 — 에서
+// Esc 의 올바른 뜻은 **아무 일도 일어나지 않는다**이다. 그런데 그 뜻도 누군가
+// 소유해야 성립한다: 삼키지 않으면 밑에 있는 설정 라우트가 자기 뜻(뒤로 가기)으로
+// 처리해 버리고, 그 한 번에 다시 볼 수 없는 값이 사라진다(실측 — 리뷰 R2).
+// 그래서 `useEscapeGuard` 는 층을 잡되 아무것도 하지 않는다.
 export interface EscapeLayer {
-  /** 이 층을 닫는다. 스택 맨 위일 때만 불린다. */
+  /** 이 층을 닫는다. 스택 맨 위일 때만 불린다. 삼키는 층은 아무것도 안 한다. */
   handle: () => void;
 }
 
@@ -87,7 +95,31 @@ export function resetEscapeLayers(): void {
 }
 
 function dialogIsOpen(): boolean {
+  if (typeof document === "undefined") return false;
   return document.querySelector('[role="dialog"][data-state="open"]') !== null;
+}
+
+/**
+ * Esc 에 이미 임자가 있는가 — 층이 서 있거나 다이얼로그가 열려 있다.
+ *
+ * 층을 열지 **않는** 표면이 window 에서 Esc 를 직접 듣는 자리(설정 라우트의
+ * 뒤로 가기)를 위한 술어다. 그 자리의 규칙은 태그 목록이 아니라 이것이어야
+ * 한다: 지금 화면에 층이 있으면 Esc 는 그 층의 것이고, 아래 라우트는 자기
+ * 것으로 처리하지 않는다.
+ *
+ * 무엇이 이미 참이고 무엇이 새로 참이 되는지 (#1205 R2, 실측):
+ *   - 층이 서 있을 때는 위의 캡처 리스너가 이미 전파를 끊으므로 라우트의
+ *     리스너가 돌지 않는다. 이 술어는 그 규칙을 **판정하는 자리에 적어 두는**
+ *     것이지, 혼자 그 일을 하는 것이 아니다.
+ *   - 다이얼로그는 다르다. Radix 는 층 스택에 들어오지 않고 네이티브 이벤트의
+ *     전파도 끊지 않는다. 그런데도 ⌘K 팔레트에서 이 사고가 나지 않았던 이유는
+ *     **포커스가 팔레트의 입력 칸에 있었기 때문**이다 — 라우트의 옛 면제가
+ *     `INPUT` 을 통과시켰다. 즉 안전이 포커스 위치에 얹혀 있었다. 포커스가
+ *     입력 칸 밖으로 나간 순간(항목 이동·프로그램적 blur) 같은 Esc 가 팔레트와
+ *     라우트를 함께 닫는다. 이 술어는 그 우연을 이유로 바꾼다.
+ */
+export function escapeIsClaimed(): boolean {
+  return stack.length > 0 || dialogIsOpen();
 }
 
 function onKeyDown(event: KeyboardEvent): void {
@@ -130,4 +162,18 @@ export function useEscapeLayer(active: boolean, onEscape: () => void): void {
     pushEscapeLayer(layer);
     return () => removeEscapeLayer(layer);
   }, [active]);
+}
+
+/** 삼키는 층은 아무것도 하지 않는다. 하는 일이 "밑으로 안 넘긴다"이다. */
+const swallow = () => {};
+
+/**
+ * Esc 를 **삼키는** 층을 잡는다 (머리말 「닫히는 층과 삼키는 층」).
+ *
+ * 화면에 다시 만들 수 없는 값이 떠 있는 동안 쓴다. `useEscapeLayer(active, () => {})`
+ * 와 같은 것이지만 이름이 다르다: 빈 콜백은 읽는 사람에게 "닫는 걸 깜빡했다"로
+ * 보이고, 이 이름은 아무것도 하지 않는 것이 **결정**임을 말한다.
+ */
+export function useEscapeGuard(active: boolean): void {
+  useEscapeLayer(active, swallow);
 }

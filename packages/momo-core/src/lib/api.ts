@@ -235,6 +235,18 @@ export interface Message {
   createdAtMs: number;
   editedAtMs?: number;
   deletedAtMs?: number;
+  /**
+   * ADR-0151 — 이 메시지에 묶인 첨부. 완료된 것만, 만들어진 순서로.
+   *
+   * **모든 투영에 실린다**: 전송 응답, 히스토리, 답글, 실시간 프레임까지
+   * (`message_dto` 주석: 실시간 프레임에서만 첨부를 배우는 클라는 새로고침 한
+   * 번에 파일 없는 메시지를 그린다). 그래서 `replyTo`와 달리 이 배열은 어느
+   * 경로로 들어온 행에도 있고, 비어 있다는 것은 첨부가 없다는 뜻이다.
+   *
+   * 업로드 capability URL도 Drive file id도 여기 없다. 바이트로 가는 유일한 길은
+   * 인가 프록시(`GET …/attachments/{id}/content`)다.
+   */
+  attachments?: MessageAttachment[];
   /** 2-hop closure: the reply rollup rides the page, no extra round trip. */
   thread?: {
     reply_count: number;
@@ -1541,6 +1553,16 @@ export interface SendMessageOptions {
    * 트랜잭션 안에서 확인한 뒤 아니면 거절한다. `rootId`와 독립이다.
    */
   replyToId?: string;
+  /**
+   * ADR-0151 — 이 전송에 묶을, **이미 완료된** 첨부의 id들. 서버는 메시지를 쓰는
+   * 그 트랜잭션 안에서 묶고, 한 건이라도 거절되면 메시지째 롤백한다
+   * (`attachment.rs:399-403`). 그래서 이 배열이 비어 있지 않은 전송은 전부
+   * 성공하거나 전부 실패하며, 파일 없이 나간 메시지라는 중간 결과가 없다.
+   *
+   * 없을 때는 키 자체가 빠진다. 전송 요청은 closed-world라 모르는 키는 400이고,
+   * 첨부 없는 전송은 이 티켓 이전과 **바이트 단위로 같은 요청**이어야 한다.
+   */
+  attachmentIds?: string[];
 }
 
 export function sendMessage(
@@ -1560,6 +1582,9 @@ export function sendMessage(
   };
   if (options?.routing) body.routing = options.routing;
   if (options?.replyToId !== undefined) body.replyToId = options.replyToId;
+  if (options?.attachmentIds !== undefined && options.attachmentIds.length > 0) {
+    body.attachmentIds = options.attachmentIds;
+  }
   return request<Message>(
     `/v1/workspaces/${encodeURIComponent(
       workspaceId
@@ -1581,17 +1606,181 @@ export function sendThreadReply(
   channelId: string,
   rootId: string,
   clientMsgId: string,
-  bodyText: string
+  bodyText: string,
+  options?: Pick<SendMessageOptions, "attachmentIds">
 ): Promise<Message> {
+  const body: Record<string, unknown> = {
+    clientMsgId,
+    rootId,
+    type: "text",
+    body: bodyText,
+  };
+  if (options?.attachmentIds !== undefined && options.attachmentIds.length > 0) {
+    body.attachmentIds = options.attachmentIds;
+  }
   return request<Message>(
     `/v1/workspaces/${encodeURIComponent(
       workspaceId
     )}/channels/${encodeURIComponent(channelId)}/messages`,
-    {
-      method: "POST",
-      body: JSON.stringify({ clientMsgId, rootId, type: "text", body: bodyText }),
-    }
+    { method: "POST", body: JSON.stringify(body) }
   );
+}
+
+// ---- 첨부 3경로 (ADR-0151 D1 / openapi tag `attachments`) --------------------
+//
+// 비대칭이 이 세 함수의 전부다: **올라갈 때 바이트는 이 서버를 지나지 않고,
+// 내려올 때는 반드시 지난다.**
+//
+//   POST …/attachments/uploads          → Drive 재개 가능 세션 + pending 행
+//   PUT  <uploadUrl>                    → 브라우저가 Drive에 직접 (여기 없다)
+//   POST …/attachments/{id}/complete    → 크기·mime·file id 대조 후 complete
+//   GET  …/attachments/{id}/content     → 멤버십 확인 후 바이트 프록시
+//
+// 가운데 PUT이 이 파일에 없는 이유는 두 가지다. 첫째, 그것은 **베어러를 실으면
+// 안 되는 유일한 요청**이다(capability URL이 곧 인가다 — mac 테스트가 그
+// Authorization 부재를 단정한다). 둘째, 진행률을 재려면 `XMLHttpRequest`가
+// 필요하고 코어는 그것을 들일 수 없다. 그 절반은
+// `clients/web/src/features/attachments/uploadTransport.ts`에 있다.
+
+/** openapi `MessageAttachment` — 메시지에 묶인 첨부 한 건. */
+export interface MessageAttachment {
+  id: string;
+  name: string;
+  mime: string;
+  sizeBytes: number;
+}
+
+/** openapi `AttachmentUploadResponse`. `uploadUrl`은 불투명한 capability다. */
+export interface AttachmentUpload {
+  id: string;
+  status: "pending";
+  uploadUrl: string;
+}
+
+/** openapi `Attachment` — 완료 라우트가 돌려주는 행. */
+export interface AttachmentRow {
+  id: string;
+  channelId: string;
+  uploaderMemberId: string;
+  messageId?: string;
+  name: string;
+  mime: string;
+  size: number;
+  status: "pending" | "complete" | "failed";
+  createdAtMs: number;
+}
+
+function attachmentPath(workspaceId: string, channelId: string): string {
+  return `/v1/workspaces/${encodeURIComponent(
+    workspaceId
+  )}/channels/${encodeURIComponent(channelId)}/attachments`;
+}
+
+/**
+ * 재개 가능 업로드 세션을 연다. 아직 바이트는 한 바이트도 움직이지 않았다.
+ *
+ * 응답의 `uploadUrl`은 **비밀**이다. 로그에도, 오류 문장에도, 화면에도 남기지
+ * 않는다(mac `MomoServerRESTChatBackend.swift:262-264`이 같은 규율을 적는다).
+ */
+export async function createAttachmentUpload(
+  workspaceId: string,
+  channelId: string,
+  file: { name: string; mime: string; size: number }
+): Promise<AttachmentUpload> {
+  const source = responseRecord(
+    await request<unknown>(`${attachmentPath(workspaceId, channelId)}/uploads`, {
+      method: "POST",
+      body: JSON.stringify(file),
+    })
+  );
+  const id = str(source, "id");
+  const uploadUrl = str(source, "uploadUrl");
+  if (id === undefined || uploadUrl === undefined) throw new WireShapeError();
+  return { id, status: "pending", uploadUrl };
+}
+
+/**
+ * Drive가 실제로 들고 있는 것과 사람이 선언한 것을 대조하게 한다.
+ *
+ * 멱등이다: 이미 complete인 행을 다시 완료하면 그 행이 그대로 돌아온다. 어긋나면
+ * 서버는 `failed`를 **커밋한 뒤** 409로 답한다 — 그 순서가 정직한 순서라고
+ * 서버가 자기 주석에 적어 뒀다.
+ */
+export async function completeAttachmentUpload(
+  workspaceId: string,
+  channelId: string,
+  attachmentId: string
+): Promise<AttachmentRow> {
+  const source = responseRecord(
+    await request<unknown>(
+      `${attachmentPath(workspaceId, channelId)}/${encodeURIComponent(
+        attachmentId
+      )}/complete`,
+      { method: "POST" }
+    )
+  );
+  const id = str(source, "id");
+  const name = str(source, "name");
+  const mime = str(source, "mime");
+  const size = num(source, "size");
+  const status = str(source, "status");
+  if (
+    id === undefined ||
+    name === undefined ||
+    mime === undefined ||
+    size === undefined ||
+    status === undefined
+  ) {
+    throw new WireShapeError();
+  }
+  return {
+    id,
+    channelId: str(source, "channelId") ?? channelId,
+    uploaderMemberId: str(source, "uploaderMemberId") ?? "",
+    ...(str(source, "messageId") === undefined
+      ? {}
+      : { messageId: str(source, "messageId") as string }),
+    name,
+    mime,
+    size,
+    status: status as AttachmentRow["status"],
+    createdAtMs: num(source, "createdAtMs") ?? 0,
+  };
+}
+
+/**
+ * 인가 프록시로 바이트를 받는다.
+ *
+ * `request()`를 쓰지 않는 이유는 그것이 JSON만 아는 문이기 때문이다: `Blob`을
+ * 텍스트로 읽어 `JSON.parse`에 넣는 순간 이미지가 파싱 오류가 된다. 401 회전은
+ * 여기서 다시 한 번 손으로 적는다 — 세션 만료가 첨부에서만 다르게 보이면 안 된다.
+ *
+ * 마감도 다르다. 15초는 REST 한 왕복의 인내심이지 8 MB 이미지의 것이 아니다.
+ */
+export async function fetchAttachmentContent(
+  workspaceId: string,
+  channelId: string,
+  attachmentId: string,
+  signal?: AbortSignal
+): Promise<Blob> {
+  const path = `${attachmentPath(workspaceId, channelId)}/${encodeURIComponent(
+    attachmentId
+  )}/content`;
+  const send = (token: string | null): Promise<Response> => {
+    const headers = new Headers();
+    if (token) headers.set("Authorization", `Bearer ${token}`);
+    return fetch(`${apiBase()}${path}`, {
+      headers,
+      ...(signal ? { signal } : {}),
+    });
+  };
+  let res = await send(coreSession().getAccessToken());
+  if (res.status === 401 && coreSession().getRefreshToken()) {
+    if (await refreshSession()) res = await send(coreSession().getAccessToken());
+  }
+  if (res.status === 401) coreSession().markAuthExpired();
+  if (!res.ok) throw new ApiError(res.status, `HTTP ${res.status}`);
+  return res.blob();
 }
 
 // ---- 휘발 신호: 「작성 중」 (ADR-0149) ---------------------------------------

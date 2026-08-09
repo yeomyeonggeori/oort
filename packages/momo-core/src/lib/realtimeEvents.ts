@@ -1,4 +1,5 @@
-import type { Message, PinnedMessageWire } from "./api";
+import type { Message, MessageAttachment, PinnedMessageWire } from "./api";
+import { num, str } from "./wire";
 
 
 // =============================================================================
@@ -58,6 +59,17 @@ export interface MessageNewEvent {
      */
     edited_at_ms?: number | null;
     deleted_at_ms?: number | null;
+    /**
+     * ADR-0151 — 이 프레임이 나르는 첨부. `reply_to_id` 와 정반대 결정이고,
+     * 서버가 왜 반대인지 자기 자리에 적어 뒀다(`build_broadcast_payload`):
+     * 인용은 계속 변하는 것을 가리키는 포인터라 outbox 행에 박제하면 거짓말이
+     * 되지만, 첨부 행은 complete 된 순간 이름·mime·크기가 불변이고 다른 메시지로
+     * 옮겨 붙지도 못한다. 그래서 한 번 쓰이고 영원히 재생되는 행에 실려도 참이다.
+     *
+     * 안쪽 키는 REST 와 같은 camelCase 다(서버 테스트가 그것을 단정한다).
+     * 첨부가 없는 메시지에는 키 자체가 없다.
+     */
+    attachments?: unknown;
   };
 }
 
@@ -246,7 +258,49 @@ export function payloadToMessage(p: MessageNewEvent["payload"]): Message {
   if (p.props && typeof p.props === "object") message.props = p.props;
   if (typeof p.edited_at_ms === "number") message.editedAtMs = p.edited_at_ms;
   if (typeof p.deleted_at_ms === "number") message.deletedAtMs = p.deleted_at_ms;
+  const attachments = attachmentsFromWire(p.attachments);
+  if (attachments.length > 0) message.attachments = attachments;
   return message;
+}
+
+/**
+ * 프레임이 실어 온 첨부 배열 → 화면이 쓰는 배열.
+ *
+ * 한 건이라도 형상이 어긋나면 **그 건만** 버린다. 배열째 버리면 파일 셋 중 하나가
+ * 이상하다는 이유로 나머지 둘까지 화면에서 사라지고, 통째로 믿으면 `undefined`
+ * 이름이 카드에 찍힌다. `wire.ts` 의 헬퍼들이 서 있는 규율과 같다: 도착한 것을
+ * 서술하되 던지지 않는다.
+ */
+export function attachmentsFromWire(value: unknown): MessageAttachment[] {
+  if (!Array.isArray(value)) return [];
+  const parsed: MessageAttachment[] = [];
+  let dropped = 0;
+  for (const entry of value) {
+    const id = str(entry, "id");
+    const name = str(entry, "name");
+    const mime = str(entry, "mime");
+    const sizeBytes = num(entry, "sizeBytes");
+    if (
+      id === undefined ||
+      name === undefined ||
+      mime === undefined ||
+      sizeBytes === undefined
+    ) {
+      dropped += 1;
+      continue;
+    }
+    parsed.push({ id, name, mime, sizeBytes });
+  }
+  // 화면에는 말하지 않지만 **개발자 채널에는 흔적을 남긴다** (리뷰 N-D).
+  //
+  // 사람에게 알리지 않는 판단은 그대로다: 이것은 사용자의 행위가 아니라 서버
+  // 형상의 오류이고, 받는 쪽에게 애초에 「보낸 줄 아는 파일」이 아니다. 하지만
+  // 계약이 어긋났다는 사실 자체는 누군가 알아야 하고, 아무 데도 안 남으면 그것을
+  // 알 방법이 없다. 값은 싣지 않는다 — 파일 이름은 사람이 쓴 것이다.
+  if (dropped > 0) {
+    console.warn(`[momo] dropped ${dropped} malformed attachment(s) from a frame`);
+  }
+  return parsed;
 }
 
 /**
