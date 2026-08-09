@@ -10,7 +10,8 @@
 >
 > | 하려는 것 | 갈 곳 |
 > |---|---|
-> | 로컬에서 현행 서버 스택 띄우기 | [`infra/rust/README.md`](../infra/rust/README.md) — Rust 이미지 + prod형 compose. **※ §2 준비 절차가 무수정 템플릿만으로는 통과하지 못한다(수리 중 — #1227)** |
+> | **처음 띄운다 — clone에서 브라우저 로그인까지** | [`docs/SELF_HOST.md`](SELF_HOST.md) — **정본**(#1229). 명령 셋 + 브라우저 한 번, 분기 0 |
+> | 그다음 전부(마이그레이션 로그·env 파리티·오버레이·트러블슈팅) | [`infra/rust/README.md`](../infra/rust/README.md) — Rust 이미지 + prod형 compose |
 > | 라이브(app.oor7.com) 배포 | [`docs/runbooks/ncp-rust-deploy.md`](runbooks/ncp-rust-deploy.md) — **정본** |
 > | 현행 스택 빌드·검증 명령 | [`AGENTS.md`](../AGENTS.md) §3 (`cargo …` · `make build`/`make test` · `scripts/local_gate.sh`) |
 > | 웹 클라 개발 | `npm --prefix clients/web ci && npm --prefix clients/web run dev` |
@@ -19,7 +20,8 @@
 > 4장(`make migrate` — `server/Migrations/*.sql`은 **현행 정본 DDL**이고 Rust 이미지가 그대로 싣는다).
 > 그 세 장은 은퇴 대상이 아니다.
 >
-> 전면 재작성(현행 스택 기준 RUN.md)은 **#1229와 병합 후보**로 남겨 두었다 — 이 배너는 그때까지
+> **첫 기동 절차는 이 문서에 남아 있지 않다** — `docs/SELF_HOST.md`가 가져갔다(#1229). 이 파일의
+> 5·6장을 따라 Swift 서비스를 손으로 띄우는 경로는 재작성 대상으로 남아 있고, 그때까지 이 배너가
 > 사람을 잘못된 경로로 보내지 않기 위한 최소 장치다.
 
 > **아래는 은퇴 전 기준의 원문이다 (이 환경의 현실 — Swift 시절).**

@@ -47,16 +47,19 @@
 # neither the live account's counters nor the per-domain issuance limit moved.
 # It is still noise aimed at a production hostname from a laptop.
 #
-# **So: do not name this overlay for local work.** The base stack plus
-# `t3.override.yml` / `cent-origin.override.yml` verifies everything except the
-# TLS edge, and the web volume can be inspected directly:
+# **So: do not name this overlay for local work.** Local work has its own edge
+# now — `infra/rust/local.override.yml` + `infra/rust/Caddyfile.local` (#1229):
+# same two services, same `web-static` staging, but a `:80` site address, which
+# is the one thing that turns automatic HTTPS off. Procedure: `docs/SELF_HOST.md`.
 #
-#   docker run --rm -v <project>_web-static:/srv/web:ro caddy:2-alpine \
-#     caddy file-server --root /srv/web --listen :8080
+# (Before that overlay existed, this header told you to inspect the volume with
+# a hand-rolled `docker run … caddy file-server`. That served the bundle and
+# nothing else — no `/v1`, no `/connection` — so it could never produce a login,
+# which is exactly the gap the local overlay closes.)
 #
 # A structural fix (parameterising the site address, or an `acme_ca` global so
 # a local run can point at the staging CA or `internal`) would change the live
-# TLS file and is left as a decision rather than taken here.
+# TLS file and is left as a decision rather than taken here — goal #1239.
 #
 # ## Volumes are project-scoped on purpose (no `name:` key)
 #

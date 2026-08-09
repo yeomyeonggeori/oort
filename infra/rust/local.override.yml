@@ -1,0 +1,98 @@
+# 로컬 셀프호스트 오버레이 — 브라우저까지 닿게 하는 두 서비스 (#1229).
+# 정본 절차: docs/SELF_HOST.md
+#
+#   docker compose --env-file infra/rust/local.secrets.env \
+#     -f infra/rust/docker-compose.rust.yml \
+#     -f infra/rust/docker-compose.rust.build.yml \
+#     -f infra/rust/local.override.yml up -d --build
+#
+# ## 왜 이 파일이 있나
+#
+# `docker-compose.rust.yml` 은 api·relay·worker까지다. 거기까지 띄운 스택은
+# **healthy한데 화면이 없다** — SPA는 이미지 안(#1228)에 들어 있지만 그것을
+# 사람에게 내주는 서비스가 base에 없기 때문이다. 지금까지 그 자리를 메우는
+# 유일한 파일이 `caddy.override.yml` 이었고, 그 파일은 로컬에서 쓰면 안 된다
+# (운영 도메인으로 ACME 주문이 나간다 — 그 파일 머리말의 2026-08-10 실측).
+#
+# 그래서 셀프호스터가 문서를 따라가다 마지막 한 걸음에서 막혔다: 화면에 닿는
+# 방법이 「vite dev 서버를 따로 띄운다」(node·npm 설치 + CORS + Centrifugo
+# 오리진 허용 목록 손질)뿐이었다. 이 파일이 그 걸음을 없앤다.
+#
+# ## 무엇이 다른가 — caddy.override.yml 과의 관계
+#
+# 두 파일은 **같은 모양의 다른 엣지**다. 서비스 이름부터 다르게(`web` vs
+# `caddy`) 둔 것은 의도다: 한 스택에 둘을 같이 얹는 조합은 존재하지 않으며,
+# 이름이 같으면 `-f` 를 하나 잘못 적었을 때 조용히 섞인다.
+#
+#   caddy.override.yml   80/443 · app.oor7.com · 자동 HTTPS · caddy-data 볼륨
+#   이 파일               127.0.0.1:${MOMO_WEB_PORT} · :80 사이트 · TLS 상태 없음
+#
+# `web-init` 은 양쪽에 같은 계약으로 있다(같은 이미지, `command: ["web-assets"]`,
+# `web-static` 볼륨을 통째로 교체). 볼륨은 양쪽 다 프로젝트 스코프이므로
+# `down -v` 로 회수되고, 다른 프로젝트의 것을 건드리지 않는다.
+#
+# ## 왜 build 선언이 없나
+#
+# `docker-compose.rust.build.yml` 이 api/relay/migrate/runtime-roles에 build를
+# 얹고, 그 빌드 산출물이 `${MOMO_RUST_IMAGE}` 태그로 로컬 데몬에 남는다.
+# `web-init` 과 `agent-worker` 는 같은 태그를 참조하므로 별도 build 선언 없이
+# 그 이미지를 그대로 쓴다 — 태그를 두 곳에서 만들면 두 개가 될 수 있다.
+
+x-momo-janitor-labels: &momo-janitor-labels
+  com.momo.janitor.managed: "true"
+  com.momo.janitor.match-label: com.docker.compose.project
+
+services:
+  # SPA 스테이징 원샷. 이미지 안의 dist를 볼륨으로 **교체 복사**한다(merge 아님):
+  # 다운그레이드가 새 청크를 남겨 두면 낡은 index.html이 없는 파일을 부른다.
+  web-init:
+    image: ${MOMO_RUST_IMAGE:?set MOMO_RUST_IMAGE}
+    command: ["web-assets"]
+    mem_limit: ${MOMO_WEB_INIT_MEM_LIMIT:-128m}
+    labels: *momo-janitor-labels
+    restart: "no"
+    volumes:
+      - web-static:/srv/web
+    # 아무와도 통신하지 않지만 네트워크를 지정한다 — 생략하면 compose가 스택마다
+    # implicit `default` 네트워크를 하나씩 더 만든다(이 호스트의 자원 누적이
+    # 정확히 그런 유령 오브젝트에서 왔다).
+    networks:
+      - private
+
+  # 같은 오리진 엣지. 브라우저는 이 포트 하나만 알면 된다 — SPA도 /v1도
+  # /connection/websocket 도 전부 여기서 나오므로 CORS가 성립할 여지가 없고,
+  # Centrifugo 오리진 허용 목록도 이 주소 하나로 끝난다.
+  web:
+    image: ${MOMO_CADDY_IMAGE:-caddy:2-alpine}
+    mem_limit: ${MOMO_WEB_MEM_LIMIT:-256m}
+    labels: *momo-janitor-labels
+    restart: unless-stopped
+    ports:
+      # 루프백 고정. 이 엣지에는 TLS가 없으므로 0.0.0.0 바인딩은 평문 노출이다.
+      # 공개하려면 caddy.override.yml 로 간다(docs/SELF_HOST.md §운영).
+      - "127.0.0.1:${MOMO_WEB_PORT:-8088}:80"
+    volumes:
+      # 단일 FILE 바인드. 에디터의 "atomic save"(rename)로 갈아치우면 inode가
+      # 갈려 컨테이너는 옛 바이트를 계속 서빙한다 — 제자리에서 써라.
+      - ./Caddyfile.local:/etc/caddy/Caddyfile:ro
+      - web-static:/srv/web:ro
+    depends_on:
+      # 빈 볼륨으로 응답하지 않게 하는 유일한 순서 제약. api/centrifugo에는
+      # 일부러 걸지 않는다 — 엣지는 요청마다 다이얼하므로, 마이그레이션이 긴
+      # 부팅에서 엣지까지 안 뜨면 사람은 "연결 거부"만 보고 이유를 못 본다.
+      web-init:
+        condition: service_completed_successfully
+    networks:
+      - private
+    healthcheck:
+      # 엣지 자신만 잰다(프록시 대상이 아니라). `up --wait` 가 이 신호로 끝난다.
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1/index.html"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+
+volumes:
+  # 이름 없이 프로젝트 스코프로 둔다(base의 pgdata와 다른 규율): `down -v` 가
+  # 회수해야 하고, 고정 이름을 주면 같은 호스트의 다른 스택과 한 볼륨을 공유한다.
+  web-static:

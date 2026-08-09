@@ -18,10 +18,9 @@
 | DDL | **`server/Migrations/*.sql`**(정본, Rust 이미지가 싣는다) + `schema_v0.sql` | — |
 | 제품 표면 | **`clients/web`**(React/Vite) · `clients/desktop`(Tauri 2) · `clients/mobile`(RN) | `clients/macOS` · `clients/iOS` |
 | 공유 코어 | **`packages/momo-core`**(TS, `@momo/core`) | `clients/Core`(Swift) |
-| 기동/배포 | [`infra/rust/README.md`](../infra/rust/README.md)(이미지+compose) · [`docs/runbooks/ncp-rust-deploy.md`](runbooks/ncp-rust-deploy.md)(라이브 정본) | [`docs/RUN.md`](RUN.md)(Swift 기준 — 상단 배너 참조) |
+| 기동/배포 | [`docs/SELF_HOST.md`](SELF_HOST.md)(**처음 한 번** — clone→로그인) · [`infra/rust/README.md`](../infra/rust/README.md)(그다음 전부: 이미지+compose) · [`docs/runbooks/ncp-rust-deploy.md`](runbooks/ncp-rust-deploy.md)(라이브 정본) | [`docs/RUN.md`](RUN.md)(Swift 기준 — 상단 배너 참조) |
 
 - **예외 — 은퇴 아님:** `relay/PushRelay`(라이브 푸시 경로가 지금도 빌드·배포) · `clients/web-legacy`(알파가 실제로 서빙하는 산출물, ADR-0133 parity 게이트 전까지).
-- **`infra/rust/README.md` 각주(수리 중):** §2 준비 → §3 로컬 기동 경로가 **무수정 템플릿만으로는 통과하지 못한다**(env 템플릿에 compose가 `:?`로 요구하는 키가 빠져 있다). 수리는 **#1227** 소관 — 그 전까지는 이 문서를 읽되 막히면 #1227을 보라.
 - 현행 스택 빌드·검증 명령의 정본은 [`AGENTS.md`](../AGENTS.md) §3(그리고 `Makefile`의 `build`/`test`).
 
 ---
@@ -51,7 +50,8 @@
 | [`README.md`](../README.md) | 제품 1줄 + 불변식 + 정직성 표(✅🚧💭) + 아키텍처 | 진입점 |
 | [`NOTICE`](../NOTICE) | Apache 2.0 귀속 — 앱 화면 표기 대상 | 법무 |
 | [`Makefile`](../Makefile) | `build`/`test` = **현행 스택**(cargo + npm), `up`/`down`/`migrate` = dev compose, `swift-build`/`swift-test` = 은퇴 중 트리 | 빌드 명령 |
-| [`infra/rust/README.md`](../infra/rust/README.md) | **현행 스택 기동**: Rust 이미지 + prod형 compose(푸시·폰 오버레이 포함) ※§2 준비 절차 수리 중 — #1227 | 운영 명령 |
+| [`docs/SELF_HOST.md`](SELF_HOST.md) | **셀프호스트 첫 기동 정본**(#1229): clone → `scripts/self_host_env.sh` → `up -d --build --wait` → 브라우저 로그인. 분기 0 | 운영 명령 |
+| [`infra/rust/README.md`](../infra/rust/README.md) | **현행 스택 심화**: Rust 이미지 + prod형 compose(로컬·푸시·폰·TLS 오버레이 전부) | 운영 명령 |
 | [`docs/runbooks/ncp-rust-deploy.md`](runbooks/ncp-rust-deploy.md) | **라이브 배포 정본**(app.oor7.com Rust 스택 — 이미지 태그 교체 + Caddy/헤더 배포) | 운영 명령 |
 | [`scripts/verify_merge_tree.sh`](../scripts/verify_merge_tree.sh) | **병합 결과**(브랜치가 아니라 머지된 트리)에서 웹·폰·코어를 컴파일하는 크로스-클라 게이트(#1108) | 운영 명령 |
 | [`scripts/local_gate.sh`](../scripts/local_gate.sh) | GitHub Actions disabled/manual-only 기간 PR evidence 생성용 로컬 게이트(`docs|web|web-serving|runtime-*|diagnostics|local-alpha|internal-alpha|ios|macos-ui|m3-dbc|swift|all` — `swift`/`macos-ui`는 은퇴 중 트리) | 운영 명령 |
