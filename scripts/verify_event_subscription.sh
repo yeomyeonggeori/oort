@@ -424,21 +424,6 @@ pass "exponential retry and accumulated 5xx auto-disable + audit"
 # 재시도마다 별개의 전송). 목적지가 답한 전송마다 감사 행이 하나씩 서야 하고,
 # 그 넷 중 어느 것도 본문을 담아서는 안 된다.
 # ---------------------------------------------------------------------------
-if [ "${EVENT_SUBSCRIPTION_GATE_PROVE_RED_BODY:-0}" = "1" ]; then
-  # red proof ② — 본문을 손으로 실어 둔다. 아래 부재 단정이 이것을 잡아야 한다.
-  run_sql <<SQL
-INSERT INTO audit_log (workspace_id, action, target_type, target_id, detail)
-VALUES ('$WS_ID', 'event_subscription.delivered', 'event_subscription',
-        '$SUBSCRIPTION_ID',
-        jsonb_build_object(
-          'schema', 'momo.event_subscription.delivered.v1',
-          'event_kind', 'mention',
-          'target_host', '11.30.0.2',
-          'body', '$MENTION_BODY'));
-SQL
-  echo "[event-subscription] RED PROOF: a delivery audit row was given the message body"
-fi
-
 deadline=$(( $(date -u +%s) + 60 ))
 while :; do
   delivery_audits="$(run_sql -tA <<SQL
@@ -479,6 +464,26 @@ SQL
 )"
 audit_shape="$(printf '%s' "$audit_shape" | tr -d '[:space:]')"
 [ "$audit_shape" = "4|4" ] || fail "delivery audit detail shape (got=$audit_shape)"
+
+if [ "${EVENT_SUBSCRIPTION_GATE_PROVE_RED_BODY:-0}" = "1" ]; then
+  # red proof ② — 감사 행 하나에 본문을 손으로 실어 둔다. **폐곡선·형태 단정을
+  # 모두 통과한 뒤에** 넣는 이유는 하나다: 그 앞에서 넣으면 개수가 어긋나 다른
+  # 단정이 먼저 울고, 그러면 이 판이 증명하려던 「본문 부재 단정이 실제로 문다」가
+  # 증명되지 않는다. 그래서 이 행은 아래 스캔에게만 새 사실이다.
+  run_sql <<SQL
+INSERT INTO audit_log (workspace_id, action, target_type, target_id, detail)
+VALUES ('$WS_ID', 'event_subscription.delivered', 'event_subscription',
+        '$SUBSCRIPTION_ID',
+        jsonb_build_object(
+          'schema', 'momo.event_subscription.delivered.v1',
+          'event_kind', 'mention',
+          'event_id', '$MENTION_MESSAGE_ID',
+          'target_host', '11.30.0.2',
+          'outbox_id', 0, 'attempt', 1, 'http_status', 204,
+          'body', '$MENTION_BODY'));
+SQL
+  echo "[event-subscription] RED PROOF: a delivery audit row was given the message body"
+fi
 
 # **본문 부재.** 두 갈래로 잰다: ①금지된 키가 하나도 없다 ②실제로 나간 두
 # 본문 문자열이 감사 어디에도 없다. 키만 보면 다른 이름으로 실린 본문을 놓치고,
