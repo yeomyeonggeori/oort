@@ -329,6 +329,52 @@ describe("optimistic insert (M10)", () => {
     expect(confirmsPending(mine(11, body, { state: "deleted" }), echo)).toBe(false);
   });
 
+  // ---- 첨부가 붙은 echo (ADR-0151) ------------------------------------------
+  //
+  // 본문 대조만 남겨 두면 파일만 보내는 메시지에서 무너진다: 그 본문은 빈
+  // 문자열이라, 같은 사람이 sinceSeq 위에 쓴 **아무** 빈 메시지가 어느 echo나
+  // 정착시킨다. 파일 셋을 잇달아 보내면 카드가 남의 자리에 앉는다.
+
+  const png = (id: string) => ({
+    id,
+    name: `${id}.png`,
+    mime: "image/png",
+    sizeBytes: 1024,
+  });
+
+  it("settles an attachment echo against the message carrying its own file", () => {
+    const echo = pending("k1", "", { attachments: [png("att-1")] });
+    expect(
+      confirmsPending(mine(11, "", { attachments: [png("att-1")] }), echo)
+    ).toBe(true);
+  });
+
+  it("refuses to settle an attachment echo against another file's message", () => {
+    const echo = pending("k1", "", { attachments: [png("att-1")] });
+    expect(
+      confirmsPending(mine(11, "", { attachments: [png("att-2")] }), echo)
+    ).toBe(false);
+    // 첨부가 아직 안 실린 행(구 서버·다른 투영)도 이 echo 의 확정이 아니다.
+    expect(confirmsPending(mine(11, ""), echo)).toBe(false);
+  });
+
+  it("settles two file-only echoes onto their own rows, not FIFO by luck", () => {
+    const first = pending("k1", "", { attachments: [png("att-1")] });
+    const second = pending("k2", "", { attachments: [png("att-2")] });
+    // 두 번째 파일의 행만 먼저 도착했다. 그것이 첫 번째 echo 를 정착시키면 안 된다.
+    expect(
+      unsettledPending([mine(11, "", { attachments: [png("att-2")] })], [
+        first,
+        second,
+      ]).map((p) => p.clientMsgId)
+    ).toEqual(["k1"]);
+  });
+
+  it("leaves a plain text echo unchanged by the attachment rule", () => {
+    const echo = pending("k1", "첨부 없이 보냅니다");
+    expect(confirmsPending(mine(11, "첨부 없이 보냅니다"), echo)).toBe(true);
+  });
+
   // ---- 실패 전이 ------------------------------------------------------------
 
   it("moves a failed send to the failed row state without dropping the text", () => {

@@ -1198,3 +1198,51 @@
     opacity: 1;
   }
 }
+
+/* 업로드 진행 막대 (#1202 첨부 축) -------------------------------------------
+ *
+ * `<progress>`인 이유는 규율 두 개가 같은 답을 가리키기 때문이다. 첫째, 이 앱은
+ * 인라인 `style`을 쓰지 않는다(eslint가 JSX `style=`을 막고, 사전점검 3번 분류가
+ * 같은 것을 센다) — 그런데 진행률은 정의상 매 프레임 바뀌는 값이라, div 두 개로
+ * 그리면 폭을 인라인으로 쓰는 것 말고는 방법이 없다. 둘째, 시스템 우선(SKILL §1):
+ * 보조기술이 이미 아는 컨트롤이 있고, `aria-valuenow`를 손으로 얹은 div는 그것을
+ * 흉내 낸 것에 지나지 않는다.
+ *
+ * 브라우저마다 셰도우 파트 이름이 다르므로 셋을 함께 적는다. `appearance: none`
+ * 없이는 macOS Safari가 자기 파란 막대를 그대로 그린다.
+ *
+ * 색은 --accent 하나다. 이 표면의 유일한 강조색이고(SKILL §2), 진행률은
+ * 「지금 일어나고 있는 일」이라 그 자리를 받을 자격이 있다. 실패는 막대가 아니라
+ * 문장으로 말하므로 여기 빨강은 없다. */
+progress[data-upload-progress] {
+  appearance: none;
+  block-size: var(--spacing-marker);
+  inline-size: 100%;
+  border: 0;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background-color: var(--surface-hover);
+  color: var(--accent);
+}
+
+progress[data-upload-progress]::-webkit-progress-bar {
+  background-color: var(--surface-hover);
+}
+
+progress[data-upload-progress]::-webkit-progress-value {
+  background-color: var(--accent);
+  /* 값이 바뀔 때만 움직인다. 계속 도는 애니메이션이 아니라 상태 변화의 피드백이다
+   * (SKILL §4). 120ms 는 한 번의 progress 이벤트 간격보다 짧아서 막대가 뒤처지지
+   * 않는다. */
+  transition: inline-size 120ms linear;
+}
+
+progress[data-upload-progress]::-moz-progress-bar {
+  background-color: var(--accent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  progress[data-upload-progress]::-webkit-progress-value {
+    transition: none;
+  }
+}

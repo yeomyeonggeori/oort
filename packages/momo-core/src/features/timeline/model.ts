@@ -1,6 +1,7 @@
 import type {
   Channel,
   Message,
+  MessageAttachment,
   RequestRouting,
   RosterMember,
 } from "../../lib/api";
@@ -541,6 +542,15 @@ export interface PendingMessage {
    * instant its seq landed, moving the text under the reader's eye.
    */
   replyToId?: string;
+  /**
+   * ADR-0151 — 이 전송이 달고 나가는 첨부, **이미 업로드가 끝난 것들**.
+   *
+   * `routing`/`replyToId`와 같은 이유로 행을 타고 다닌다(재시도가 같은 멱등키로
+   * 같은 요청을 다시 보내야 한다). 그리고 하나 더: echo 행이 자기 카드를 그린다.
+   * 바이트는 이미 보관소에 있으므로 그 카드는 seq 가 도착하기 전에도 진짜다 —
+   * mac 이 낙관적 행에 첨부를 실어 보내는 것과 같은 근거다.
+   */
+  attachments?: MessageAttachment[];
 }
 
 /** True when `message` is the server's echo of `pending`. */
@@ -552,7 +562,17 @@ export function confirmsPending(
   if (message.state === "deleted") return false;
   if (pending.sinceSeq !== null && message.seq <= pending.sinceSeq) return false;
   if (!uuidEq(message.authorMemberId, pending.authorMemberId)) return false;
-  return (message.body ?? "") === pending.body;
+  if ((message.body ?? "") !== pending.body) return false;
+  // 첨부가 붙은 전송에는 본문 대조만으로 부족하다. 파일만 보내는 메시지는 본문이
+  // 빈 문자열이고, 그러면 이 술어는 "같은 사람이 sinceSeq 위에 쓴 아무 빈 메시지"를
+  // 전부 자기 echo 로 읽는다 — 파일 셋을 잇달아 보내면 아무 카드나 아무 자리에서
+  // 정착한다. 첨부 id 는 서버가 만든 것이고 전송 응답과 실시간 프레임 양쪽에 실려
+  // 오므로, 그것이 이 자리에서 가장 강한 대조다.
+  const expected = pending.attachments ?? [];
+  if (expected.length === 0) return true;
+  const actual = message.attachments ?? [];
+  if (actual.length !== expected.length) return false;
+  return expected.every((want, index) => uuidEq(actual[index].id, want.id));
 }
 
 /**
