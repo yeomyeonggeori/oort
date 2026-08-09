@@ -144,6 +144,10 @@ contains "$headers_lc" "x-frame-options: deny" || fail "missing X-Frame-Options 
 contains "$headers_lc" "content-security-policy:" || fail "missing Content-Security-Policy on SPA response"
 contains "$headers_lc" "default-src 'self'" || fail "CSP default-src must restrict scripts to 'self'"
 contains "$headers_lc" "connect-src 'self' wss://$RT_HOST https://$RT_HOST" || fail "CSP connect-src must allow realtime wss/https"
+# 이슈 #1207: 첨부 바이트는 브라우저가 Drive로 직접 PUT 한다(ADR-0151 D1). 그
+# 호스트가 이 헤더에 없으면 app.oor7.com 에서만 첨부가 조용히 막히고, 데스크톱
+# (Tauri) 검수 표면에서는 영영 재현되지 않는다 — #1206 이 실측한 사각이다.
+contains "$headers_lc" "https://www.googleapis.com" || fail "CSP connect-src must allow the attachment archive host (#1207)"
 contains "$headers_lc" "style-src 'self' 'unsafe-inline'" || fail "CSP style-src must match ADR-0119 D3"
 pass "security headers + ADR-0119 SPA CSP present"
 

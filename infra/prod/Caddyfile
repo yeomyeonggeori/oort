@@ -120,7 +120,14 @@
         # keeps inline script blocked. React's current CSS does not require an
         # inline script hash; style-src keeps the ADR-approved inline style
         # allowance. connect-src permits both realtime transport schemes.
-        header Content-Security-Policy "default-src 'self'; connect-src 'self' wss://{$REALTIME_DOMAIN} https://{$REALTIME_DOMAIN}; img-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'"
+        #
+        # #1207: www.googleapis.com is in connect-src because ADR-0151 D1 puts
+        # the attachment bytes on a path that never touches this server — the
+        # browser PUTs them straight to the Drive resumable session URL. The
+        # host was already trusted with those bytes; naming it here only makes
+        # the declaration match the data path (clients/web/.../uploadTransport.ts).
+        # Nothing else is added: every other attachment call is same-origin /v1.
+        header Content-Security-Policy "default-src 'self'; connect-src 'self' wss://{$REALTIME_DOMAIN} https://{$REALTIME_DOMAIN} https://www.googleapis.com; img-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'"
         # SPA routing fallback: unknown paths rewrite to index.html.
         try_files {path} /index.html
         file_server

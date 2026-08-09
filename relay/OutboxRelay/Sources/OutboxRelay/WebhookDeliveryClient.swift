@@ -6,10 +6,30 @@ import NIOFoundationCompat
 import OutboundHTTPPolicy
 
 enum WebhookDeliveryResult: Equatable, Sendable {
-    case ok
+    case ok(Int)
     case transientServerFailure(Int)
-    case transientFailure(String)
-    case permanentFailure(String)
+    case transientFailure(String, status: Int?)
+    case permanentFailure(String, status: Int?)
+
+    /// The HTTP status the destination answered with, or `nil` when the bytes
+    /// never reached it (이슈 #1204).
+    ///
+    /// This is the discriminator the delivery audit rests on. A status exists
+    /// exactly when `transport.post` returned — that is, when the payload
+    /// (message body included, ADR-0150 territory) was actually handed to the
+    /// external host. `nil` means the SSRF guard refused the destination or the
+    /// request threw before an answer; recording either as a delivery would put
+    /// a false line in the ledger, and both already live in `outbox.last_error`.
+    var deliveredStatus: Int? {
+        switch self {
+        case .ok(let status): return status
+        case .transientServerFailure(let status): return status
+        case .permanentFailure(_, let status): return status
+        // 408/429 also reached the host and therefore carry a status; only a
+        // throw before an answer leaves this `nil`.
+        case .transientFailure(_, let status): return status
+        }
+    }
 }
 
 struct WebhookHTTPRequest: Sendable {
@@ -85,7 +105,9 @@ struct SafeWebhookDeliveryClient<Resolver: OutboundHostResolving, Transport: Web
                 for: checkedURL, resolver: resolver
             )
         } catch {
-            return .permanentFailure("SSRF guard rejected destination")
+            // Nothing left the process: no status, and therefore no delivery
+            // audit row (#1204). `outbox.last_error` is where this lives.
+            return .permanentFailure("SSRF guard rejected destination", status: nil)
         }
 
         let timestamp = String(Int64(Date().timeIntervalSince1970))
@@ -106,14 +128,18 @@ struct SafeWebhookDeliveryClient<Resolver: OutboundHostResolving, Transport: Web
                     body: body
                 )
             )
-            if (200..<300).contains(status) { return .ok }
+            if (200..<300).contains(status) { return .ok(status) }
             if status >= 500 { return .transientServerFailure(status) }
-            if status == 408 || status == 429 { return .transientFailure("HTTP \(status)") }
+            if status == 408 || status == 429 {
+                return .transientFailure("HTTP \(status)", status: status)
+            }
             // Redirects are intentionally not followed. Following a POST redirect
             // would require revalidating and repinning every hop; v0 fails closed.
-            return .permanentFailure("HTTP \(status)")
+            return .permanentFailure("HTTP \(status)", status: status)
         } catch {
-            return .transientFailure("request failed")
+            // The request may or may not have reached the host — an audit row
+            // either way would be a guess. `outbox.last_error` records it.
+            return .transientFailure("request failed", status: nil)
         }
     }
 

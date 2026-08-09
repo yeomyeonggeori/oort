@@ -20,6 +20,7 @@
     "gate:scroll": "node gates/gate-scroll.mjs",
     "gate:wire": "node gates/gate-wire.mjs",
     "gate:csp": "node gates/gate-csp.mjs",
+    "gate:csp-deploy": "npm run build && node gates/gate-csp-deploy.mjs",
     "gate:boot": "node gates/gate-boot-budget.mjs",
     "gate:huddle": "vite build --mode huddle-gate && node gates/gate-huddle.mjs",
     "gate:my-sessions": "vite build --mode my-sessions-gate && node gates/gate-my-sessions.mjs",
