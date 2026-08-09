@@ -140,6 +140,8 @@ COPY server/Migrations /opt/momo/migrations
 COPY infra/e2e/bootstrap_roles.sql /opt/momo/sql/bootstrap_roles.sql
 COPY infra/prod/bootstrap_runtime_roles.sql /opt/momo/sql/bootstrap_runtime_roles.sql
 COPY infra/prod/set_initial_owner.sql /opt/momo/sql/set_initial_owner.sql
+# #1227: the only-if-absent twin the `migrate` command applies at first boot.
+COPY infra/prod/bootstrap_owner_if_absent.sql /opt/momo/sql/bootstrap_owner_if_absent.sql
 COPY LICENSE NOTICE /usr/share/licenses/momo-rust/
 COPY server-rust/docker-entrypoint.sh /usr/local/bin/momo-rust-entrypoint
 
@@ -149,6 +151,7 @@ RUN set -eux; \
     test -s /opt/momo/sql/bootstrap_roles.sql; \
     test -s /opt/momo/sql/bootstrap_runtime_roles.sql; \
     test -s /opt/momo/sql/set_initial_owner.sql; \
+    test -s /opt/momo/sql/bootstrap_owner_if_absent.sql; \
     test -s /usr/share/licenses/momo-rust/LICENSE; \
     test -s /usr/share/licenses/momo-rust/NOTICE; \
     momo-migrate --help >/dev/null
@@ -158,7 +161,8 @@ RUN set -eux; \
 ENV MOMO_MIGRATIONS_DIR=/opt/momo/migrations \
     MOMO_BOOTSTRAP_ROLES_SQL=/opt/momo/sql/bootstrap_roles.sql \
     MOMO_RUNTIME_ROLES_SQL=/opt/momo/sql/bootstrap_runtime_roles.sql \
-    MOMO_SET_OWNER_SQL=/opt/momo/sql/set_initial_owner.sql
+    MOMO_SET_OWNER_SQL=/opt/momo/sql/set_initial_owner.sql \
+    MOMO_BOOTSTRAP_OWNER_SQL=/opt/momo/sql/bootstrap_owner_if_absent.sql
 
 USER momo
 WORKDIR /opt/momo

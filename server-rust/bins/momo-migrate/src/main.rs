@@ -11,6 +11,17 @@
 //! | `migrate` | `["migrate"]` | `MOMO_BOOTSTRAP_RUNTIME_ROLES=0` → verify the three roles, then apply `001..NNN` |
 //! | ops one-shot | `["migrate","set-owner"]` | `MOMO_INITIAL_OWNER_EMAIL`/`_PASSWORD` → `set_initial_owner.sql` |
 //!
+//! **#1227 — first-boot owner bootstrap.** The `migrate` command reads the same
+//! two `MOMO_INITIAL_OWNER_*` variables the ops one-shot does (both compose
+//! files already pass them to this service) and, when both carry a value,
+//! finishes by applying `bootstrap_owner_if_absent.sql`. The two paths are
+//! deliberately not the same write: `set-owner` is a *rotation* — always
+//! overwrite, always revoke live sessions — while the boot-time one writes only
+//! when there is no usable password to preserve, because it re-runs on every
+//! `up -d`. Absent variables change nothing: migration 012's lock stands and the
+//! stack stays unloginable, which is the fail-closed default rather than an
+//! oversight (#1227 red proof).
+//!
 //! What it does NOT do: own any SQL. Every migration is applied by
 //! [`momo_db::migrate::run_migrations`] (psql, single transaction per file,
 //! `schema_migrations` tracking — B0/B1.6), and the two role files are the
@@ -400,14 +411,113 @@ fn migrate() -> Result<(), MigrateError> {
         psql_file(&database_url, &file, "bootstrap-roles")?;
         println!("[migrate] bootstrap roles applied (development passwords)");
     }
-    Ok(())
+
+    // (6) #1227 first-boot owner. Last, because it is the only step that cares
+    // about product rows: 002 must have seeded the owner and 012 must already
+    // have decided whether its password survives.
+    bootstrap_owner(&database_url)
+}
+
+/// The two variables that name the first owner. `set-owner` requires them; the
+/// `migrate` command treats them as an optional first-boot bootstrap.
+const OWNER_ENV_KEYS: [&str; 2] = ["MOMO_INITIAL_OWNER_EMAIL", "MOMO_INITIAL_OWNER_PASSWORD"];
+
+/// #1227 — the first-boot owner bootstrap that runs at the end of `migrate`.
+///
+/// Migration 012 nulls the seeded owner's publicly known `dev-password`, which
+/// is right and which leaves a healthy stack nobody can log into. Before this,
+/// the only exit was a *second*, separately documented command; a fresh
+/// `up -d` could not produce a usable login no matter what the env file said.
+///
+/// Three outcomes, and the boring one is the point:
+///   * neither variable set → **no write**, and a log line that names the fix.
+///     Migration 012's lock stands: this is the fail-closed default.
+///   * exactly one set → exit 2. A half-filled env file is a typo, and treating
+///     it as "off" would lock the operator out with a green boot log.
+///   * both set → apply `bootstrap_owner_if_absent.sql`, which writes only when
+///     the owner has no usable password. Every later `up -d` is a no-op, so a
+///     restart can neither reset a rotated password nor sign anyone out.
+fn bootstrap_owner(database_url: &str) -> Result<(), MigrateError> {
+    let email = env(OWNER_ENV_KEYS[0]);
+    let password = env(OWNER_ENV_KEYS[1]);
+    match plan_owner_bootstrap(email.as_deref(), password.as_deref())? {
+        OwnerBootstrapPlan::Closed => {
+            println!(
+                "[migrate] no bootstrap owner requested — migration 012 keeps the seeded \
+                 password locked and login is closed. Set {} and {} to open it \
+                 (re-runs are no-ops); rotate later with `migrate set-owner`.",
+                OWNER_ENV_KEYS[0], OWNER_ENV_KEYS[1]
+            );
+            Ok(())
+        }
+        OwnerBootstrapPlan::Apply => {
+            let file = resolve_path(
+                env("MOMO_BOOTSTRAP_OWNER_SQL"),
+                "infra/prod/bootstrap_owner_if_absent.sql",
+            );
+            // psql's NOTICE is the verdict and reaches the container log
+            // directly: MOMO_BOOTSTRAP_OWNER=created|skipped|absent. Nothing
+            // here echoes a value.
+            psql_file(database_url, &file, "bootstrap-owner")?;
+            println!("[migrate] bootstrap owner reconciled (see MOMO_BOOTSTRAP_OWNER notice above)");
+            Ok(())
+        }
+    }
+}
+
+/// What [`bootstrap_owner`] does about the two variables, decided without
+/// touching the process environment so the rule itself is testable.
+#[derive(Debug, PartialEq, Eq)]
+enum OwnerBootstrapPlan {
+    /// No bootstrap requested — leave migration 012's lock in place.
+    Closed,
+    /// Both values present: hand them to the only-if-absent SQL.
+    Apply,
+}
+
+fn plan_owner_bootstrap(
+    email: Option<&str>,
+    password: Option<&str>,
+) -> Result<OwnerBootstrapPlan, MigrateError> {
+    match (email, password) {
+        (None, None) => Ok(OwnerBootstrapPlan::Closed),
+        (Some(email), Some(_)) => {
+            // The stored address is `lower(btrim(...))` — the whole codebase
+            // normalises that way (momo-settings::join, workspace_authorization).
+            // The login lookup does NOT: `verify_password_login` compares
+            // `WHERE h.email = $2` verbatim. So `Owner@Example.com` here is
+            // stored as `owner@example.com` and then never matches what the
+            // operator types, producing exactly the healthy-stack-you-cannot-
+            // enter failure this bootstrap exists to remove. Refuse loudly
+            // instead: one env edit beats an unexplainable 401.
+            let normalized = email.trim().to_lowercase();
+            if email != normalized {
+                return Err(MigrateError::Usage(format!(
+                    "{} must already be trimmed and lowercase (expected {normalized:?}) — \
+                     the credential is stored normalised but the login lookup compares \
+                     the address verbatim, so any other spelling cannot sign in",
+                    OWNER_ENV_KEYS[0]
+                )));
+            }
+            Ok(OwnerBootstrapPlan::Apply)
+        }
+        // A half-filled env file is a typo, and reading it as "off" would lock
+        // the operator out behind a green boot log — the exact failure #1227
+        // exists to remove. Exit 2, naming the key that is actually set.
+        (present, _) => Err(MigrateError::Usage(format!(
+            "{} and {} must be set together (only {} has a value)",
+            OWNER_ENV_KEYS[0],
+            OWNER_ENV_KEYS[1],
+            OWNER_ENV_KEYS[usize::from(present.is_none())]
+        ))),
+    }
 }
 
 /// `set-owner` — one-shot bootstrap owner credential takeover (MOMO-561).
 /// Both values reach the SQL through `\getenv`; neither is echoed.
 fn set_owner() -> Result<(), MigrateError> {
     let database_url = require_database_url()?;
-    for key in ["MOMO_INITIAL_OWNER_EMAIL", "MOMO_INITIAL_OWNER_PASSWORD"] {
+    for key in OWNER_ENV_KEYS {
         if env(key).is_none() {
             return Err(MigrateError::Usage(format!("set {key}")));
         }
@@ -456,6 +566,88 @@ mod tests {
             assert_eq!(error.exit_code(), 1);
             assert!(error.to_string().contains("must be exactly 0 or 1"));
         }
+    }
+
+    /// #1227. Absent variables must be a no-op, not a write: that is the
+    /// fail-closed default migration 012 establishes, and the red proof asserts
+    /// a stack booted without them still refuses every login.
+    #[test]
+    fn an_unset_owner_environment_leaves_the_lock_in_place() {
+        assert_eq!(
+            plan_owner_bootstrap(None, None),
+            Ok(OwnerBootstrapPlan::Closed)
+        );
+    }
+
+    #[test]
+    fn both_owner_variables_request_the_only_if_absent_write() {
+        assert_eq!(
+            plan_owner_bootstrap(Some("owner@example.com"), Some("s3cret")),
+            Ok(OwnerBootstrapPlan::Apply)
+        );
+    }
+
+    /// Half-filled is the dangerous case: silently treating it as "off" would
+    /// hand the operator a green boot log and no way in.
+    #[test]
+    fn a_half_filled_owner_environment_is_a_usage_error() {
+        let missing_password =
+            plan_owner_bootstrap(Some("owner@example.com"), None).expect_err("must reject");
+        assert_eq!(missing_password.exit_code(), 2);
+        assert!(missing_password
+            .to_string()
+            .contains("only MOMO_INITIAL_OWNER_EMAIL has a value"));
+
+        let missing_email = plan_owner_bootstrap(None, Some("s3cret")).expect_err("must reject");
+        assert_eq!(missing_email.exit_code(), 2);
+        assert!(missing_email
+            .to_string()
+            .contains("only MOMO_INITIAL_OWNER_PASSWORD has a value"));
+    }
+
+    /// The credential is stored `lower(btrim(...))` but `verify_password_login`
+    /// compares `h.email = $2` verbatim, so a mixed-case address would be
+    /// written and then be unusable. Measured 2026-08-10 against the built
+    /// image: the owner row existed, the login 401'd.
+    #[test]
+    fn a_non_normalised_owner_email_is_refused_rather_than_silently_rewritten() {
+        for spelling in ["Owner@Example.com", " owner@example.com", "owner@example.com "] {
+            let error =
+                plan_owner_bootstrap(Some(spelling), Some("s3cret")).expect_err("must reject");
+            assert_eq!(error.exit_code(), 2);
+            assert!(
+                error.to_string().contains("\"owner@example.com\""),
+                "the message must show the spelling that would work, got: {error}"
+            );
+        }
+    }
+
+    /// The boot-time bootstrap and the ops rotation must stay two files: one
+    /// preserves an existing password, the other deliberately replaces it.
+    #[test]
+    fn the_owner_sql_files_are_distinct_and_present() {
+        let bootstrap = resolve_path(None, "infra/prod/bootstrap_owner_if_absent.sql");
+        let rotate = resolve_path(None, "infra/prod/set_initial_owner.sql");
+        assert!(bootstrap.is_file(), "{}", bootstrap.display());
+        assert!(rotate.is_file(), "{}", rotate.display());
+        assert_ne!(bootstrap, rotate);
+
+        let bootstrap_sql = std::fs::read_to_string(&bootstrap).expect("read bootstrap sql");
+        // The guard is the whole contract: without it a routine `up -d` would
+        // overwrite a rotated password on every restart.
+        assert!(
+            bootstrap_sql.contains("h.password_hash IS NULL OR h.password_hash = ''"),
+            "the boot-time file must only write when no usable password exists"
+        );
+        assert!(
+            !bootstrap_sql.contains("UPDATE token"),
+            "a restart must never revoke live sessions"
+        );
+        let rotate_sql = std::fs::read_to_string(&rotate).expect("read rotate sql");
+        assert!(
+            rotate_sql.contains("UPDATE token"),
+            "the deliberate rotation must still revoke live sessions"
+        );
     }
 
     #[test]
