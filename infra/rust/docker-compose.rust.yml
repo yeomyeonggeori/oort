@@ -7,12 +7,22 @@
 # (`command: ["api"]`, `DATABASE_URL`, `JWT_HMAC`, `CENT_API_*`) — reduced to the
 # minimum set the Rust binaries can actually serve today:
 #
-#   postgres · centrifugo · runtime-roles · migrate · api · relay
+#   postgres · centrifugo · runtime-roles · migrate · api · relay · agent-worker
 #
-# Deliberately absent (B1.7 scope, not an omission): caddy (no TLS edge here —
-# api/centrifugo publish to loopback instead), redis (Centrifugo runs its
-# memory engine, single node), prometheus, worker, notifier, web/linkshort, T3
-# and workd. They return when their Rust counterparts land (B2+).
+# ## Overlays (#1228) — this file is the base, not the whole deployment
+#
+# A production stack is this file plus named overlays. Until #1228 three of
+# them existed only on the deploy host and in no commit, which is why this
+# header used to describe their absence as scope rather than as a gap:
+#
+#   docker-compose.push.yml     push-relay · notifier   (ADR-0120, default-off)
+#   caddy.override.yml          caddy · web-init        (TLS edge + the SPA)
+#   cent-origin.override.yml    the WSS origin allowlist
+#   t3.override.yml             ADR-0140 platform surfaces on the api
+#   docker-compose.rust.build.yml / .lane-phone.yml     local build / phone lane
+#
+# Still deliberately absent everywhere: redis (Centrifugo runs its memory
+# engine, single node), prometheus, linkshort, workd.
 #
 # Static validation (no daemon needed):
 #   docker compose --env-file infra/rust/rust-smoke.secrets.env \
@@ -27,8 +37,10 @@ x-momo-janitor-labels: &momo-janitor-labels
   com.momo.janitor.managed: "true"
   com.momo.janitor.match-label: com.docker.compose.project
 
-# ONE image, three commands (server-rust/Dockerfile). Compose interpolates this
-# anchor per service, so api/relay/migrate/runtime-roles can never drift apart.
+# ONE image, six commands (server-rust/Dockerfile). Compose interpolates this
+# anchor per service, so api/relay/agent-worker/migrate/runtime-roles — and the
+# overlays' notifier and web-init — can never drift apart. Since #1228 the SPA
+# is in that image too, so this one variable pins the browser as well.
 x-rust-image: &rust-image ${MOMO_RUST_IMAGE:?set MOMO_RUST_IMAGE}
 
 services:
@@ -223,8 +235,10 @@ services:
       MOMO_DRIVE_SHARED_DRIVE_ID: ${MOMO_DRIVE_SHARED_DRIVE_ID:-}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     ports:
-      # Loopback only (no Caddy in this stack). The NCP smoke drives it over an
-      # SSH tunnel; nothing is published to the public interface.
+      # Loopback only. The NCP smoke drives it over an SSH tunnel; nothing here
+      # is published to the public interface. Public exposure is the job of
+      # caddy.override.yml, which reaches the api over the `private` network
+      # and never through this host port.
       - "127.0.0.1:${MOMO_RUST_API_PORT:-8080}:8080"
     depends_on:
       postgres:

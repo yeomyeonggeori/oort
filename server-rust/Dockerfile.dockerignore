@@ -37,6 +37,25 @@ target
 # --- trees this image never copies ------------------------------------------
 adapters
 clients
+# …except the canonical web client, which #1228 builds INTO this image (the
+# `web-build` stage). A later pattern wins, so `clients` still excludes every
+# other client tree — Swift, RN, the Tauri shell, web-legacy.
+#
+# **The whole of `clients/web` comes in, not a curated subset.** The first cut
+# of this file also excluded `gates/`, `e2e/`, `scripts/` and `README.md`, on
+# the reasoning that a production build never executes them — and the image
+# then produced a DIFFERENT bundle than `npm run build` on the same commit
+# (`index-VKgaCi6a.css` vs the host's `index-D9zcosSe.css`, and the entry chunk
+# hash with it). Cause: Tailwind v4 has no content globs. `@import "tailwindcss"`
+# (src/design/tokens.css:1) auto-detects by scanning the project's non-ignored
+# files, so taking files OUT of the context takes utility classes OUT of the
+# generated CSS. An image that builds a different artifact than the repo does
+# is the exact drift this ticket exists to end, and ≈1.2MB of build context is
+# not a price worth paying for it. Only build output and installed deps stay out.
+!clients/web
+clients/web/node_modules
+clients/web/dist
+clients/web/artifacts
 docs
 examples
 fastlane

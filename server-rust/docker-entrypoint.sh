@@ -38,6 +38,23 @@ case "$command" in
     # not interpret them.
     exec /usr/local/bin/momo-migrate "$@"
     ;;
+  web-assets)
+    # The SPA staging one-shot (#1228). Same contract as the Swift image's
+    # `web-assets` (infra/prod/docker/momo-entrypoint.sh:25): copy the bundled
+    # dist into the volume Caddy serves, then exit. It is not a server — no
+    # momo binary ever hands out browser assets.
+    [ "$#" -eq 0 ] || {
+      echo "[momo] web-assets does not accept arguments" >&2
+      exit 2
+    }
+    # REPLACE, not merge. A downgrade must not leave a newer content-hashed
+    # chunk behind for the older index.html to never reference — the volume has
+    # to be exactly one build. The globs are guarded because `set -eu` plus a
+    # non-matching glob would abort on an already-empty volume.
+    rm -rf /srv/web/* /srv/web/.[!.]* /srv/web/..?* 2>/dev/null || true
+    cp -a /opt/momo/web/. /srv/web/
+    echo "[momo] web-assets staged $(find /srv/web -type f | wc -l) files into /srv/web"
+    ;;
   set-owner)
     # `docker compose run <service> set-owner` REPLACES the service's
     # `command: ["migrate"]`, so the sub-command arrives here as the role
@@ -47,7 +64,7 @@ case "$command" in
     ;;
   *)
     echo "[momo] unknown command: $command" >&2
-    echo "usage: momo-rust-entrypoint {api|relay|agent-worker|notifier|migrate}" >&2
+    echo "usage: momo-rust-entrypoint {api|relay|agent-worker|notifier|migrate|web-assets}" >&2
     exit 2
     ;;
 esac
