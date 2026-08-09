@@ -566,12 +566,26 @@ export function CopyButton({
  *     button that does it. Landing on 지우기 itself would make Enter-Enter
  *     destroy a row, which is the guard this component exists to be.
  *   - Cancel RETURNS focus to the trigger. Backing out of a question should put
- *     the reader where the question found them.
+ *     the reader where the question found them. So does confirming, so that
+ *     focus is never on `document.body` while the request is in flight; where it
+ *     goes once the ROW itself is gone is the caller's to say, because the
+ *     caller is the only one that knows what the row was next to (PR 1203 R2
+ *     M-R1).
+ *
+ * NOT answered here: Esc while the question stands still closes the whole
+ * settings surface (PR 1203 R2 M-R2). Standing the focus on the question is
+ * what makes that keypress read as "cancel this", so it is this component's
+ * problem too — but the shell's Esc handler is the owner and the same defect
+ * has a wider form there (the one-time secret card is dismissed by it as well),
+ * so #1205 fixes it at the shell. The house answer is `useEscapeLayer`, one
+ * capture-phase listener over a layer stack; once the shell speaks it, a layer
+ * pushed from here while `asking` is what makes N open questions N layers.
  */
 export function ConfirmButton({
   label,
   ariaLabel,
   subject,
+  describedBy,
   question,
   confirmLabel,
   onConfirm,
@@ -602,6 +616,15 @@ export function ConfirmButton({
    * is about to go.
    */
   subject?: string;
+  /**
+   * Id of a sentence that explains why this control is currently unusable.
+   *
+   * For a list that greys N rows for ONE reason: repeating the sentence per row
+   * is the same fact N times on one screen, and dropping it leaves a grey
+   * control that reads as "you may not" (PR 1203 R2 N-R4). Written once, pointed
+   * at from every control it applies to.
+   */
+  describedBy?: string;
   question: string;
   confirmLabel: string;
   onConfirm: () => void;
@@ -616,12 +639,13 @@ export function ConfirmButton({
   const [asking, setAsking] = useState(false);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const groupRef = useRef<HTMLDivElement | null>(null);
-  // Cancel goes back to the trigger; confirming does not, because the row the
-  // trigger belonged to is usually gone by the time the effect runs.
+  // Both exits land on the trigger. Confirming does too: the row may take a
+  // round trip to disappear, and until it does the trigger is still the place
+  // the reader was. If the row then goes, the CALLER moves focus on.
   const restoreFocus = useRef(false);
 
-  function close(restore: boolean) {
-    restoreFocus.current = restore;
+  function close() {
+    restoreFocus.current = true;
     setAsking(false);
     onAskingChange?.(false);
   }
@@ -646,6 +670,7 @@ export function ConfirmButton({
         size="sm"
         disabled={disabled}
         aria-label={triggerName}
+        aria-describedby={disabled ? describedBy : undefined}
         onClick={() => {
           setAsking(true);
           onAskingChange?.(true);
@@ -676,8 +701,9 @@ export function ConfirmButton({
         size="sm"
         disabled={disabled}
         aria-label={subject ? `${subject} ${confirmLabel}` : undefined}
+        aria-describedby={disabled ? describedBy : undefined}
         onClick={() => {
-          close(false);
+          close();
           onConfirm();
         }}
         data-testid={testId ? `${testId}-confirm` : undefined}
@@ -689,7 +715,7 @@ export function ConfirmButton({
         variant="ghost"
         size="sm"
         aria-label={subject ? `${subject} ${confirmLabel} 취소` : undefined}
-        onClick={() => close(true)}
+        onClick={close}
       >
         취소
       </Button>

@@ -88,6 +88,8 @@ export function EventSubscriptionSection({
 
   const [issued, setIssued] = useState<CreatedEventSubscription | null>(null);
   const [rowIssue, setRowIssue] = useState<RowIssue | null>(null);
+  const [removed, setRemoved] = useState("");
+  const offlineReasonId = useId();
 
   // The one-time secret can render below the fold on a short window, and it is
   // the only chance anyone gets to read it. Same landing as the invite code.
@@ -98,6 +100,32 @@ export function EventSubscriptionSection({
     issuedRef.current.scrollIntoView({ block: "nearest" });
   }, [issued]);
 
+  // Where the keyboard goes once a deleted row stops existing (R2 M-R1).
+  //
+  // `ConfirmButton` puts focus back on the trigger, which is right until the
+  // round trip finishes and takes the trigger's row with it. Only this
+  // component knows what the row was NEXT TO, so it picks the landing before
+  // the delete goes out and applies it when the list actually changes: the row
+  // below, else the row above, else the address field of the form — the one
+  // control still on screen when the list empties.
+  const listRef = useRef<HTMLUListElement | null>(null);
+  const createUrlRef = useRef<HTMLInputElement | null>(null);
+  const landing = useRef<string | null>(null);
+  useEffect(() => {
+    const target = landing.current;
+    if (target === null) return;
+    landing.current = null;
+    if (target === "") {
+      createUrlRef.current?.focus({ preventScroll: true });
+      return;
+    }
+    listRef.current
+      ?.querySelector<HTMLElement>(
+        `[data-row-id="${CSS.escape(target)}"] [data-testid="event-subscription-toggle"]`
+      )
+      ?.focus({ preventScroll: true });
+  }, [subscriptions.data]);
+
   const invalidate = () => void client.invalidateQueries({ queryKey });
 
   const toggle = useMutation({
@@ -107,7 +135,10 @@ export function EventSubscriptionSection({
         input.subscription.id,
         input.enabled
       ),
-    onMutate: () => setRowIssue(null),
+    onMutate: () => {
+      setRowIssue(null);
+      setRemoved("");
+    },
     onSuccess: invalidate,
     onError: (error, input) =>
       setRowIssue({
@@ -122,12 +153,23 @@ export function EventSubscriptionSection({
   const remove = useMutation({
     mutationFn: (subscription: EventSubscription) =>
       deleteEventSubscription(workspaceId, subscription.id),
-    onMutate: () => setRowIssue(null),
+    onMutate: () => {
+      setRowIssue(null);
+      setRemoved("");
+    },
     onSuccess: (_deleted, subscription) => {
       // A deleted row's secret is dead material; do not leave it on screen.
       setIssued((current) =>
         current?.eventSubscription.id === subscription.id ? null : current
       );
+      // Nothing on screen says an irreversible thing succeeded — the row simply
+      // stops being there, which a screen reader does not narrate. Say it, and
+      // name the row that went so it is not confusable with any other delete.
+      setRemoved(`${rowSubject(subscription)} 구독을 지웠습니다.`);
+      const rows = subscriptions.data ?? [];
+      const gone = rows.findIndex((row) => row.id === subscription.id);
+      const next = rows[gone + 1] ?? rows[gone - 1];
+      landing.current = next?.id ?? "";
       invalidate();
     },
     onError: (error, subscription) =>
@@ -179,15 +221,21 @@ export function EventSubscriptionSection({
         />
       ) : (
         <ul
+          ref={listRef}
           className="flex min-w-0 flex-col overflow-hidden rounded-md border border-line"
           data-testid="event-subscription-list"
         >
-          {rows.map((subscription) => (
+          {rows.map((subscription, index) => (
             <SubscriptionRow
               key={subscription.id}
               subscription={subscription}
               offline={offline}
               busy={busy}
+              // The reason a row's controls are grey is one fact, so it is
+              // written once and pointed at from all of them (R2 N-R4). Three
+              // rows made it three sentences; twenty would make it twenty.
+              offlineReasonId={offlineReasonId}
+              writesOfflineReason={index === 0}
               issue={rowIssue?.id === subscription.id ? rowIssue.message : null}
               onToggle={(enabled) => toggle.mutate({ subscription, enabled })}
               onDelete={() => remove.mutate(subscription)}
@@ -196,6 +244,19 @@ export function EventSubscriptionSection({
         </ul>
       )}
 
+      {/* A row that stops existing is the only sign the delete worked, and a
+          screen reader does not narrate an absence (R2 M-R1). Not visible: the
+          list already SHOWS the answer, and a standing line repeating it would
+          be an announcement nobody asked to keep. House shape for exactly this
+          — `sr-only` + `role="status"` — as in 사용량's quota block. */}
+      <p
+        className="sr-only"
+        role="status"
+        data-testid="event-subscription-removed"
+      >
+        {removed}
+      </p>
+
       {/* The form is a second thing this panel governs, not more of the list.
           Without a heading the only word marking the boundary was the commit
           button's label, at the very bottom (design review #1203 N2). */}
@@ -203,6 +264,7 @@ export function EventSubscriptionSection({
         <CreateForm
           workspaceId={workspaceId}
           offline={offline}
+          urlRef={createUrlRef}
           onReloadList={() => void subscriptions.refetch()}
           onCreated={(created) => {
             setRowIssue(null);
@@ -225,10 +287,27 @@ export function EventSubscriptionSection({
 
 // --- 목록 --------------------------------------------------------------------
 
+const OFFLINE_ROW_REASON = "연결이 끊겨 지금은 멈추거나 지울 수 없습니다.";
+
+/**
+ * What tells two rows apart, and therefore what every per-row control has to
+ * carry in its accessible name.
+ *
+ * Three "지우기" stops in a tab order are three identical stops, and the row
+ * about to be destroyed is not recoverable from the button alone. Module scope
+ * because the delete announcement names the row that went, and it has to be the
+ * same name the button used (design review #1203 H2, R2 M-R1).
+ */
+function rowSubject(subscription: EventSubscription): string {
+  return `${eventKindsLabel(subscription.eventKinds)} ${subscription.url}`;
+}
+
 function SubscriptionRow({
   subscription,
   offline,
   busy,
+  offlineReasonId,
+  writesOfflineReason,
   issue,
   onToggle,
   onDelete,
@@ -236,6 +315,10 @@ function SubscriptionRow({
   subscription: EventSubscription;
   offline: boolean;
   busy: boolean;
+  /** Id of the one offline sentence this list writes. */
+  offlineReasonId: string;
+  /** This row is the one that renders it. */
+  writesOfflineReason: boolean;
   issue: string | null;
   onToggle: (enabled: boolean) => void;
   onDelete: () => void;
@@ -244,21 +327,17 @@ function SubscriptionRow({
   const state = eventSubscriptionState(subscription);
   const reason = disabledReasonLine(subscription);
   const failures = deliveryFailureLine(subscription.deliveryFailureCount);
-  // The destination is what distinguishes two rows, so it is what a per-row
-  // control has to carry in its accessible name: three "지우기" stops in a tab
-  // order are three identical stops, and the row about to be destroyed is not
-  // recoverable from the button alone. Passed as `subject` so it survives into
-  // the confirmation step too (design review #1203 H2) — dropping the row's
-  // identity at the moment the question is asked is the worst place to drop it.
-  const subject = `${eventKindsLabel(subscription.eventKinds)} ${subscription.url}`;
+  const subject = rowSubject(subscription);
   // A destructive question is being asked about THIS row; nothing else on the
   // row stands beside it while it is open (design review #1203 N4).
   const [confirming, setConfirming] = useState(false);
+  const offlineReason = offline ? offlineReasonId : undefined;
 
   return (
     <li
       className="flex min-w-0 flex-col gap-2 border-b border-line p-3 last:border-b-0"
       data-testid="event-subscription-row"
+      data-row-id={subscription.id}
       data-state={state}
     >
       <div className="flex min-w-0 flex-wrap items-center gap-2">
@@ -327,6 +406,7 @@ function SubscriptionRow({
               ? `${subject} 전송 멈추기`
               : `${subject} 다시 보내기`
           }
+          aria-describedby={offlineReason}
           onClick={() => onToggle(!subscription.enabled)}
           data-testid="event-subscription-toggle"
         >
@@ -335,6 +415,7 @@ function SubscriptionRow({
         <ConfirmButton
           label="구독 지우기"
           subject={subject}
+          describedBy={offlineReason}
           question="지우면 전송이 즉시 끊기고 되돌릴 수 없습니다."
           confirmLabel="지우기"
           disabled={offline || busy}
@@ -346,13 +427,22 @@ function SubscriptionRow({
             the same rule this file already applied to the create button, and
             the one it had not applied here (design review #1203 H3). A control
             that greys with nothing beside it reads as "you may not", which is a
-            different and wrong sentence about a permission this reader has. */}
-        {offline && !confirming && (
+            different and wrong sentence about a permission this reader has.
+
+            Written by the first row and pointed at by every row's controls
+            (R2 N-R4): one fact repeated per row is the same sentence three
+            times on a three-row screen and twenty on a twenty-row one, and the
+            control that needs it most is the one whose reader is standing on
+            it — which `aria-describedby` reaches wherever the row sits. Also
+            shown while a question is open, because the 지우기 in that question
+            greys along with everything else (R2 N-R3). */}
+        {offline && writesOfflineReason && (
           <span
+            id={offlineReasonId}
             className="break-keep text-meta text-ink-muted"
             data-testid="event-subscription-row-offline"
           >
-            연결이 끊겨 지금은 멈추거나 지울 수 없습니다.
+            {OFFLINE_ROW_REASON}
           </span>
         )}
       </div>
@@ -365,11 +455,14 @@ function SubscriptionRow({
 function CreateForm({
   workspaceId,
   offline,
+  urlRef,
   onReloadList,
   onCreated,
 }: {
   workspaceId: string;
   offline: boolean;
+  /** Landing for a delete that emptied the list — see `landing` above. */
+  urlRef: React.Ref<HTMLInputElement>;
   /** The next move the unverified-create sentence names. See below. */
   onReloadList: () => void;
   onCreated: (created: CreatedEventSubscription) => void;
@@ -427,6 +520,7 @@ function CreateForm({
         error={attempted ? urlProblem : null}
       >
         <Input
+          ref={urlRef}
           id={urlFieldId}
           name="url"
           type="url"
@@ -466,12 +560,20 @@ function CreateForm({
                   checked ? "bg-accent-soft" : "hover:bg-surface-hover"
                 )}
               >
+                {/* The NAME is the kind; the two clauses are the DESCRIPTION.
+                    Wrapping everything in the label made the accessible name
+                    the whole block — up to 104 characters that a screen reader
+                    ran together as "승인 요청 메시지 본문과…", so the option lost
+                    the word that identifies it (R2 N-R2). Splitting keeps both
+                    clauses and gives the checkbox back its own name. */}
                 <input
                   type="checkbox"
                   id={id}
                   name="eventKinds"
                   value={kind}
                   checked={checked}
+                  aria-labelledby={`${id}-name`}
+                  aria-describedby={`${id}-content ${id}-ids`}
                   onChange={(event) => toggleKind(kind, event.target.checked)}
                   className="mt-1 accent-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
                 />
@@ -484,11 +586,19 @@ function CreateForm({
                     options answering the same two questions in the same order
                     cannot silently answer one of them for only some of them. */}
                 <span className="flex min-w-0 flex-col gap-px">
-                  <span className="text-body text-ink">{eventKindLabel(kind)}</span>
-                  <span className="break-keep text-meta text-ink-muted">
+                  <span id={`${id}-name`} className="text-body text-ink">
+                    {eventKindLabel(kind)}
+                  </span>
+                  <span
+                    id={`${id}-content`}
+                    className="break-keep text-meta text-ink-muted"
+                  >
                     {payload.content}
                   </span>
-                  <span className="break-keep text-meta text-ink-muted">
+                  <span
+                    id={`${id}-ids`}
+                    className="break-keep text-meta text-ink-muted"
+                  >
                     {payload.identifiers}
                   </span>
                 </span>

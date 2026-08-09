@@ -144,7 +144,12 @@ export function eventKindPayload(kind: EventSubscriptionKind): EventKindPayload 
       return {
         content:
           "이전 상태와 새 상태, 도구 이름, 시작·끝 시각, 종료 코드, 종료 사유가 나갑니다. 메시지 본문은 들어 있지 않습니다.",
-        identifiers: "작업 세션·채널·스레드·멤버 ID가 함께 붙습니다.",
+        // `resumed_from_session_id` is named too. It is not personal data, but
+        // the rule this panel set for itself is that the enumeration is
+        // COMPLETE, and 11 of 12 is the same kind of gap the two message kinds
+        // were sent back for (R2 N-R1).
+        identifiers:
+          "작업 세션·이어받은 세션·채널·스레드·멤버 ID가 함께 붙습니다.",
       };
   }
 }

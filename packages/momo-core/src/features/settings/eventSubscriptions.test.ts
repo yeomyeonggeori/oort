@@ -263,7 +263,10 @@ describe("event kinds", () => {
     for (const fact of ["도구 이름", "종료 코드", "종료 사유", "시작·끝 시각"]) {
       expect(work.content).toContain(fact);
     }
-    expect(work.identifiers).toContain("작업 세션");
+    // 12/12, not 11/12: `resumed_from_session_id` rides along too (R2 N-R1).
+    for (const id of ["작업 세션", "이어받은 세션", "채널", "스레드", "멤버"]) {
+      expect(work.identifiers).toContain(id);
+    }
   });
 });
 
