@@ -29,7 +29,13 @@ import { arrayField, responseRecord } from "../../lib/wire";
 // Same deadline as the shared client (MOMO-609): settings is where someone
 // re-points a device at another server, so an address that answers nothing has
 // to surface here as an error with a retry, not as a section that never loads.
-async function settingsRequest<T>(
+//
+// Exported for the settings modules that live in their OWN file to keep two
+// parallel workers off one hot file (./eventSubscriptions.ts, #1202). That is a
+// different thing from the duplication note above: a sibling settings module
+// reuses this transport rather than growing a second one, so there is still one
+// auth path and one deadline for the whole shell.
+export async function settingsRequest<T>(
   path: string,
   init: RequestInit = {}
 ): Promise<T> {

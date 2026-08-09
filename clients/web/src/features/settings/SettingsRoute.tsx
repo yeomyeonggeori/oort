@@ -13,6 +13,7 @@ import { UpdateSection } from "@/features/updates/UpdateSection";
 import { AccountSection } from "./AccountSection";
 import { AiLinkSection } from "./AiLinkSection";
 import { AppearanceSection } from "./AppearanceSection";
+import { EventSubscriptionSection } from "./EventSubscriptionSection";
 import { InviteSection } from "./InviteSection";
 import { PluginSection } from "@/features/plugins/PluginSection";
 import { SectionShell } from "./SettingsFields";
@@ -40,6 +41,7 @@ type SectionId =
   | "code"
   | "workspace"
   | "plugins"
+  | "events"
   | "usage"
   | "members";
 
@@ -76,6 +78,10 @@ const SECTIONS: SectionMeta[] = [
   { id: "plugins", label: "앱", group: "워크스페이스" },
   { id: "usage", label: "사용량", group: "워크스페이스" },
   { id: "members", label: "멤버와 초대", group: "워크스페이스" },
+  // 마지막인 것은 빈도 순서다 (#1202): 한 번 붙이고 나면 다시 열 일이 드물고,
+  // 여는 사람은 오너나 관리자뿐이다. 이름이 '외부 전송'이 아니라 '이벤트 구독'인
+  // 것은 서버가 그 이름으로 부르기 때문이다 (openapi event-subscriptions).
+  { id: "events", label: "이벤트 구독", group: "워크스페이스" },
 ];
 
 const GROUPS: SectionMeta["group"][] = ["나", "워크스페이스"];
@@ -226,6 +232,9 @@ export function SettingsRoute() {
           {section === "usage" && <UsageSection workspaceId={workspaceId} />}
           {section === "members" && (
             <InviteSection workspaceId={workspaceId} offline={offline} />
+          )}
+          {section === "events" && (
+            <EventSubscriptionSection workspaceId={workspaceId} offline={offline} />
           )}
           </RenderErrorBoundary>
         </div>

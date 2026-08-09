@@ -250,6 +250,38 @@ const INVITES = Array.from({ length: 12 }, (_, i) => ({
   updatedAtMs: Date.now(),
 }));
 
+// 이벤트 구독 (#1202) is a list ON TOP OF a form, so its height is the sum of
+// both and the phone column is where that stops fitting. One row carries the
+// auto-disabled reason line, which is the tallest a row gets.
+const EVENT_SUBSCRIPTIONS = [
+  {
+    id: "019f994c-6a00-7000-8000-000000000001",
+    workspaceId: WORKSPACE_ID,
+    url: "https://hooks.slack.com/services/T0/B0/oort-mentions",
+    eventKinds: ["mention", "approval_request"],
+    enabled: true,
+    deliveryFailureCount: 0,
+    createdBy: ME,
+    updatedBy: ME,
+    createdAtMs: Date.now() - 2 * 86_400_000,
+    updatedAtMs: Date.now() - 2 * 86_400_000,
+  },
+  {
+    id: "019f994c-6a00-7000-8000-000000000002",
+    workspaceId: WORKSPACE_ID,
+    url: "https://ops.dawnlab.example/oort/work-status",
+    eventKinds: ["work.status_changed"],
+    enabled: false,
+    disabledReason: "server_5xx_threshold",
+    deliveryFailureCount: 3,
+    disabledAtMs: Date.now() - 21_600_000,
+    createdBy: ME,
+    updatedBy: ME,
+    createdAtMs: Date.now() - 9 * 86_400_000,
+    updatedAtMs: Date.now() - 21_600_000,
+  },
+];
+
 // 코드 실행 호스트 (MOMO-617) is now three blocks tall, and the 재개 대상 control
 // only exists when a policy is in auto, so the fixture puts both scopes there:
 // the tallest form the section can take is the one to measure. One host carries
@@ -419,6 +451,9 @@ async function installMocks(context) {
   );
   await context.route("**/v1/workspaces/*/invites*", (route) =>
     json(route, { invites: INVITES })
+  );
+  await context.route("**/v1/workspaces/*/event-subscriptions", (route) =>
+    json(route, { eventSubscriptions: EVENT_SUBSCRIPTIONS })
   );
   await context.route("**/v1/workspaces/*/usage/summary*", (route) =>
     json(route, USAGE_FIXTURE)
@@ -957,6 +992,7 @@ async function measureSize(browser, size) {
     ["/settings?section=code", "설정 코드 실행 호스트", "settings-code"],
     ["/settings?section=workspace", "설정 워크스페이스", "settings-workspace"],
     ["/settings?section=usage", "설정 사용량", "settings-usage"],
+    ["/settings?section=events", "설정 이벤트 구독", "settings-events"],
   ]) {
     await go(page, hash);
     await assertShellHeld(page, `${size.name} ${label}`, `${size.name}-${shot}`);
@@ -976,6 +1012,10 @@ async function measureSize(browser, size) {
   for (const [hash, label, shot, selector] of [
     ["/settings?section=members", "멤버와 초대", "settings-bottom", "invite-create"],
     ["/settings?section=code", "코드 실행 호스트", "settings-code-bottom", "work-tier-save-workspace"],
+    // 이벤트 구독 (#1202) overflows for a third reason: a list and a form stacked,
+    // where the form's commit is the LAST control. If that button cannot be
+    // reached, the panel can be read and never used.
+    ["/settings?section=events", "이벤트 구독", "settings-events-bottom", "event-subscription-create"],
   ]) {
     await go(page, hash);
     const reach = await page.evaluate(`(async () => {
