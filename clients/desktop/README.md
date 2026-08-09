@@ -20,7 +20,7 @@ Rust.
 | product / app name | `momo` → `momo.app` (the SwiftUI client is `MomoMac.app`, so both can sit in /Applications) |
 | version | `0.1.0-next.N`, the pre-release train to the `0.1.0` open beta |
 | keychain service | `app.momo.desktop`, account `refresh-token` |
-| updater manifest | `https://dawn-kim-official.github.io/momo-alpha/update-next.json` |
+| updater manifest | `https://yeomyeonggeori.github.io/momo-alpha/update-next.json` |
 
 `oort://` is registered by this bundle **and** by the SwiftUI client. macOS
 LaunchServices picks one handler for the scheme, so on a machine with both

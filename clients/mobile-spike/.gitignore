@@ -32,7 +32,10 @@ local.properties
 *.hprof
 .cxx/
 *.keystore
-!debug.keystore
+# RN 템플릿의 `!debug.keystore` 재포함을 제거했다(#1224). 표준 안드로이드 디버그
+# 키(알리아스 androiddebugkey / 암호 android, 2014년 공개 고정값)라 비밀은 아니지만,
+# 공개 레포에 바이너리 키 자료를 두지 않는 관례를 따른다. 재생성법은
+# android/app/build.gradle 의 signingConfigs.debug 주석 참조.
 .kotlin/
 
 # node.js

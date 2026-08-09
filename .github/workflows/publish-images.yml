@@ -16,7 +16,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  IMAGE: ghcr.io/dawn-kim-official/momo
+  IMAGE: ghcr.io/yeomyeonggeori/momo
   IMAGE_TAG: sha-${{ github.sha }}
 
 jobs:

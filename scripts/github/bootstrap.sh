@@ -5,7 +5,7 @@
 # 실수 실행 방지를 위해 ALLOW_LEGACY_BOOTSTRAP=1 일 때만 동작한다.
 #
 # 사용법:
-#   ALLOW_LEGACY_BOOTSTRAP=1 scripts/github/bootstrap.sh [--repo Dawn-kim-official/momo] [--dry-run] [--skip-issues]
+#   ALLOW_LEGACY_BOOTSTRAP=1 scripts/github/bootstrap.sh [--repo yeomyeonggeori/momo] [--dry-run] [--skip-issues]
 #
 # 전제:
 #   - gh CLI 설치 + `gh auth login` 완료. 토큰 스코프: repo (필수).
@@ -43,7 +43,7 @@ while [ $# -gt 0 ]; do
 done
 
 if [ -z "$REPO" ]; then
-  REPO="$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null || echo "Dawn-kim-official/momo")"
+  REPO="$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null || echo "yeomyeonggeori/momo")"
 fi
 OWNER="${REPO%%/*}"
 NAME="${REPO##*/}"
@@ -62,7 +62,7 @@ command -v gh >/dev/null || { echo "gh CLI 필요. https://cli.github.com" >&2; 
 gh auth status >/dev/null 2>&1 || { echo "gh auth login 먼저." >&2; exit 1; }
 
 if [ "${ALLOW_LEGACY_BOOTSTRAP:-0}" != "1" ]; then
-  echo "scripts/github/bootstrap.sh is legacy. Use scripts/github_bootstrap.sh --org Dawn-kim-official --repo momo." >&2
+  echo "scripts/github/bootstrap.sh is legacy. Use scripts/github_bootstrap.sh --org yeomyeonggeori --repo momo." >&2
   echo "Set ALLOW_LEGACY_BOOTSTRAP=1 only if you intentionally need the old TSV seed." >&2
   exit 2
 fi
@@ -116,7 +116,7 @@ say "완료. Project(roadmap) 추가는 docs/GITHUB_OPS.md §4 참고."
 # ── (선택) Issue Types — org 레벨, admin:org 스코프 필요 ───────────────────────
 # Issue Types(GitHub 1급 분류; type:* 라벨과 다름)는 org 단위 + admin:org 스코프.
 # 출처: docs.github.com/en/rest/orgs/issue-types · github.blog/changelog/2025-03-18-...
-# 예시(수동, Dawn-kim-official org admin 권한 필요):
-#   gh api --method POST orgs/Dawn-kim-official/issue-types \
+# 예시(수동, yeomyeonggeori org admin 권한 필요):
+#   gh api --method POST orgs/yeomyeonggeori/issue-types \
 #     -f name="Feature" -f is_enabled=true -f color="green" -f description="신규 기능"
 # 본 스크립트는 repo 스코프만 가정하므로 type:* 는 라벨로 대체(labels.tsv).

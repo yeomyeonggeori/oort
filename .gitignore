@@ -20,6 +20,16 @@ infra/prod/*.plain.env
 infra/prod/*.decrypted
 infra/prod/age.key
 infra/prod/keys.txt
+
+# 바이너리 키 자료 (#1224). 안드로이드 debug 키스토어처럼 "비밀이 아닌" 키도
+# 공개 레포에는 두지 않는다 — 진짜 서명 키와 눈으로 구분되지 않기 때문이다.
+# 이 규칙 추가 시점에 매칭되는 트래킹 파일은 0건이다(= 무언가를 숨기지 않는다).
+*.keystore
+*.jks
+*.p12
+*.pfx
+*.mobileprovision
+
 .conductor/local.env
 .conductor/*.tmp
 .conductor/setup.local.sh

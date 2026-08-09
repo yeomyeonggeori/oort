@@ -3,7 +3,7 @@
 # Review mode is a worker -> momo-main handoff, not merge permission.
 set -euo pipefail
 
-ORG_REPO="${ORG_REPO:-Dawn-kim-official/momo}"
+ORG_REPO="${ORG_REPO:-yeomyeonggeori/momo}"
 DRY_RUN=0
 ISSUE=""
 MODE=""

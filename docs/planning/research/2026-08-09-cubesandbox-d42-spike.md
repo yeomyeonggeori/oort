@@ -1,6 +1,6 @@
 # CubeSandbox D4-② 실기동 스파이크 — 실측 보고 (ADR-0156 마지막 조각)
 
-- 실행: 2026-08-09, 실측 워커. VM `cube-d42` (`root@101.79.20.102`, Rocky 9.8, 8 vCPU / 31 GB / vda 10G + vdb 200G, nested KVM `/dev/kvm`).
+- 실행: 2026-08-09, 실측 워커. VM `cube-d42` (`root@<redacted>`, Rocky 9.8, 8 vCPU / 31 GB / vda 10G + vdb 200G, nested KVM `/dev/kvm`).
 - 대상 버전: **CubeSandbox v0.6.0** (`online-install.sh` → GitHub latest = v0.6.0, 2026-07-24). 레포 스냅샷 `5cefcca`.
 - 모드: **표준 KVM 모드** (ADR-0156 증보 2). `CUBE_PVM_ENABLE=0`, 커널 교체 없음.
 - 정본 대조: ADR-0156 · ADR-0157 · `research/2026-08-08-cubesandbox-requirements-adapter-mapping.md`(이하 **매핑표**).

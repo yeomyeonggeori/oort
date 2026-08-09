@@ -1,0 +1,188 @@
+# .gitleaksignore — 공개 전 오탐 베이스라인 (#1224)
+#
+# 무엇인가: `gitleaks detect --source . --log-opts "--all"` 로 전 히스토리를 훑었을 때
+# 나오는 탐지 전건을 손으로 판정하고, 오탐만 지문(fingerprint)으로 고정한 파일이다.
+# 목적은 "조용하게 만드는 것"이 아니라 **신호 대 잡음비**다. 이 베이스라인이 없으면
+# 진짜 유출 1건이 오탐 61건에 묻힌다.
+#
+# 생성 근거: docs/planning/research/2026-08-10-buzz-audit-A.md §A3
+#   - 스캔 범위: 2,032 커밋 / ~43 MB
+#   - 탐지 61건 → 전수 수동 트리아지 → **진짜 시크릿 0건**
+#   - 자격증명형 파일명(.pem/.p12/.jks/id_rsa/실 .env …) 전 히스토리 전수 조사도 통과
+#   - 따라서 히스토리 재작성(BFG/filter-repo)도 키 로테이션도 필요 없다
+#
+# 지문 형식: <commit>:<file>:<rule>:<startline>
+#
+# 이 베이스라인이 보증하는 범위 — 정확히 이 명령이다:
+#   gitleaks detect --source . --log-opts "--all" --redact=90     → 탐지 0
+#
+# 알아 둘 것 3가지 (전부 실측으로 확인함):
+# 1. 지문은 **커밋에 고정**된다. 같은 줄을 건드리는 새 커밋은 새 지문을 만들어 다시
+#    탐지로 뜬다 — 의도된 동작이다(그 줄이 정말 그대로인지 다시 보게 만든다).
+# 2. `--no-git`(작업트리 스캔)과 `gitleaks protect`는 커밋 없는 지문을 쓰므로 이 파일이
+#    적용되지 않는다. 그 모드로 돌리면 같은 오탐이 그대로 다시 나온다. 그 모드까지
+#    덮으려면 경로/정규식 allowlist를 담은 gitleaks.toml이 따로 필요하다(미도입).
+# 3. 이 파일의 주석은 탐지된 문자열을 **그대로 인용하지 않는다**. 인용하면 베이스라인
+#    자신이 새 탐지를 만든다(#1224에서 실제로 3건 발생시켜 확인하고 문구를 고쳤다).
+#    항목을 추가할 때도 값은 묘사하고 인용하지 말 것. 근거 없는 무음 처리는 금지.
+
+# ── compose 내부 서비스 주소를 API 키로 오인 (16건) ──────────────────
+# `http://api:8080/...` 는 docker compose 네트워크 안의 서비스 이름:포트다. 호스트에서
+# 도달하지 않고 자격증명도 아니다. generic-api-key 룰이 `api:` 뒤 문자열을 키로 읽는다.
+#   docs/AWS_INTERNAL_ALPHA.md:159  [generic-api-key]
+8d840a1b4cc8e15b31ee045a5a2dd76a9b3f4680:docs/AWS_INTERNAL_ALPHA.md:generic-api-key:159
+#   docs/DEPLOY.md:64  [generic-api-key]
+222e7c5e4a00c49292a3b9a0fdde12ab6ebe004b:docs/DEPLOY.md:generic-api-key:64
+#   docs/DEPLOY.md:159  [generic-api-key]
+222e7c5e4a00c49292a3b9a0fdde12ab6ebe004b:docs/DEPLOY.md:generic-api-key:159
+#   docs/DEPLOY.md:167  [generic-api-key]
+222e7c5e4a00c49292a3b9a0fdde12ab6ebe004b:docs/DEPLOY.md:generic-api-key:167
+#   docs/DEPLOY.md:169  [generic-api-key]
+d036954038bdbefd3c3a750bbbe7f0e061fe9b9d:docs/DEPLOY.md:generic-api-key:169
+#   docs/RUN.md:122  [generic-api-key]
+222e7c5e4a00c49292a3b9a0fdde12ab6ebe004b:docs/RUN.md:generic-api-key:122
+#   docs/RUN.md:372  [generic-api-key]
+0f98bed19e12ce3a34f074e603811c1097c2ed5f:docs/RUN.md:generic-api-key:372
+#   docs/adr/0002-docker-compose-layering.md:161  [generic-api-key]
+e081854e20100db5f9d3aae6ba3beba358b57820:docs/adr/0002-docker-compose-layering.md:generic-api-key:161
+#   infra/centrifugo.json:17  [generic-api-key]
+222e7c5e4a00c49292a3b9a0fdde12ab6ebe004b:infra/centrifugo.json:generic-api-key:17
+#   infra/centrifugo.json:19  [generic-api-key]
+d036954038bdbefd3c3a750bbbe7f0e061fe9b9d:infra/centrifugo.json:generic-api-key:19
+#   infra/centrifugo.json:22  [generic-api-key]
+b4ecc98b1cc7dc35f5900ba65bb6198e5b48e9e1:infra/centrifugo.json:generic-api-key:22
+#   infra/prod/centrifugo.prod.json:52  [generic-api-key]
+b4ecc98b1cc7dc35f5900ba65bb6198e5b48e9e1:infra/prod/centrifugo.prod.json:generic-api-key:52
+#   infra/prod/centrifugo.prod.json:52  [generic-api-key]
+28f80510ca890c74f99f185cd34f6f66dd649e0b:infra/prod/centrifugo.prod.json:generic-api-key:52
+#   research/07-deepdive/04-self-build-l4-spec.md:389  [generic-api-key]
+222e7c5e4a00c49292a3b9a0fdde12ab6ebe004b:research/07-deepdive/04-self-build-l4-spec.md:generic-api-key:389
+#   scripts/verify_internal_hosting_smoke.sh:92  [generic-api-key]
+92da16c2b7e479d6871d731c04f8a5ae1d0839aa:scripts/verify_internal_hosting_smoke.sh:generic-api-key:92
+#   scripts/verify_staging_smoke.sh:82  [generic-api-key]
+d182e4160dc0e60c8e96fbd7af7cd6943fca0648:scripts/verify_staging_smoke.sh:generic-api-key:82
+
+# ── Swift 프로퍼티/타입 이름 (선언이지 값이 아님) (8건) ─────────────────
+# `privateKey` 프로퍼티 뒤에 Curve25519/P256 타입명이 오는 시그니처다. 리터럴 키
+# 자료가 아니라 식별자이며, 실제 키는 Keychain/환경변수에서 주입된다.
+#   clients/macOS/Sources/MomoMac/MomoWorkHostIdentityStore.swift:7  [generic-api-key]
+477bddb46fb8d1ae264ea000ef082e3da90f4642:clients/macOS/Sources/MomoMac/MomoWorkHostIdentityStore.swift:generic-api-key:7
+#   relay/PushRelay/Sources/PushRelay/APNSSender.swift:23  [generic-api-key]
+94b62bc761bf9e63398ceedf31dd0287cadd0120:relay/PushRelay/Sources/PushRelay/APNSSender.swift:generic-api-key:23
+#   relay/PushRelay/Sources/PushRelay/APNSSender.swift:23  [generic-api-key]
+c03e1f45c18952782e0d34536443a20649cff558:relay/PushRelay/Sources/PushRelay/APNSSender.swift:generic-api-key:23
+#   workers/NotifierWorker/Sources/NotifierWorker/PushRelaySigning.swift:7  [generic-api-key]
+94b62bc761bf9e63398ceedf31dd0287cadd0120:workers/NotifierWorker/Sources/NotifierWorker/PushRelaySigning.swift:generic-api-key:7
+#   workers/NotifierWorker/Sources/NotifierWorker/PushRelaySigning.swift:7  [generic-api-key]
+c03e1f45c18952782e0d34536443a20649cff558:workers/NotifierWorker/Sources/NotifierWorker/PushRelaySigning.swift:generic-api-key:7
+#   workers/WorkHostDaemon/Sources/WorkHostDaemon/Signing.swift:11  [generic-api-key]
+323db3118cb8811b68db56224637c72dcf9911ca:workers/WorkHostDaemon/Sources/WorkHostDaemon/Signing.swift:generic-api-key:11
+#   workers/WorkHostDaemon/Sources/WorkHostDaemon/Signing.swift:11  [generic-api-key]
+3bc0a4f1d9904fa4fe4f9df7d2177078448517ef:workers/WorkHostDaemon/Sources/WorkHostDaemon/Signing.swift:generic-api-key:11
+#   workers/WorkHostDaemon/Sources/WorkHostDaemon/Signing.swift:11  [generic-api-key]
+5e40b609369deae724c95ccc43ac12ea958573f8:workers/WorkHostDaemon/Sources/WorkHostDaemon/Signing.swift:generic-api-key:11
+
+# ── PEM 파서 코드 + 테스트가 생성하는 합성 키 (2건) ────────────────────
+# `:77` 은 `text.find("-----BEGIN PRIVATE KEY-----")` 파서 코드, `:289` 는 테스트가
+# `[9u8; 32]` 고정 시드로 PEM을 **만들어내는** 포맷 문자열이다. 커밋된 키가 아니다.
+#   server-rust/bins/momo-notifier/src/push_relay.rs:77  [private-key]
+70b867769397fb9a315e898be64cd0cfd830b57a:server-rust/bins/momo-notifier/src/push_relay.rs:private-key:77
+#   server-rust/bins/momo-notifier/src/push_relay.rs:289  [private-key]
+70b867769397fb9a315e898be64cd0cfd830b57a:server-rust/bins/momo-notifier/src/push_relay.rs:private-key:289
+
+# ── 테스트 픽스처 상수 (10건) ────────────────────────────────────
+# 단위/계약 테스트 안에서만 쓰이는 고정 리터럴이다. 예: `R7dGqk2m…` 는 "게이트 시크릿이
+# 채널 메시지로 새지 않는다"를 증명하려고 만든 가짜 시크릿이고, `Sec-WebSocket-Key: dG…`
+# 는 RFC 6455 문서의 예제 상수다. 어떤 실제 시스템에도 유효하지 않다.
+#   adapters/hermes/tests/test_provider_chain_contract.py:408  [generic-api-key]
+8422d0bc7a5a50e16ccd2792a898add26f13fed4:adapters/hermes/tests/test_provider_chain_contract.py:generic-api-key:408
+#   clients/web/src/features/settings/webhookCredentialScope.test.ts:20  [generic-api-key]
+29bb451a5a9724a12aac9cd0931237743ace6761:clients/web/src/features/settings/webhookCredentialScope.test.ts:generic-api-key:20
+#   packages/momo-core/src/features/webhooks/model.test.ts:22  [generic-api-key]
+9a6feea23a4f303c86cb52ca846498ec38e67b56:packages/momo-core/src/features/webhooks/model.test.ts:generic-api-key:22
+#   server-rust/bins/momo-server/src/routes/agent_gateway.rs:1024  [generic-api-key]
+4a7a9700c3b1409775450b9c09840aa541c3e2c8:server-rust/bins/momo-server/src/routes/agent_gateway.rs:generic-api-key:1024
+#   server-rust/crates/momo-auth/src/ephemeral_grant.rs:416  [generic-api-key]
+a590553769226c0d4701321964aeb68e3433a650:server-rust/crates/momo-auth/src/ephemeral_grant.rs:generic-api-key:416
+#   server/Tests/MomoServerTests/MomoServerTests.swift:732  [generic-api-key]
+b4ecc98b1cc7dc35f5900ba65bb6198e5b48e9e1:server/Tests/MomoServerTests/MomoServerTests.swift:generic-api-key:732
+#   server/Tests/MomoServerTests/MomoServerTests.swift:3633  [generic-api-key]
+083a36fd3f93ce1ebc7f007d348282adde0677df:server/Tests/MomoServerTests/MomoServerTests.swift:generic-api-key:3633
+#   server/Tests/MomoServerTests/MomoServerTests.swift:3633  [generic-api-key]
+51dc6237995a2602d0588d6cf73374a62c16c370:server/Tests/MomoServerTests/MomoServerTests.swift:generic-api-key:3633
+#   server/Tests/MomoServerTests/ProviderCascadeTests.swift:356  [generic-api-key]
+99ecb939b9836e06ff77436005ae47bb9a47e28d:server/Tests/MomoServerTests/ProviderCascadeTests.swift:generic-api-key:356
+#   workers/WorkHostDaemon/Tests/WorkHostDaemonTests/TerminalAttachTests.swift:731  [generic-api-key]
+7544c353166039235f9fa788378273896e66fe34:workers/WorkHostDaemon/Tests/WorkHostDaemonTests/TerminalAttachTests.swift:generic-api-key:731
+
+# ── 검증 스크립트가 tmpdir에 생성하는 합성 env (15건) ──────────────────
+# 같은 히어독 안에서 `*.example.net`(RFC 2606 예약 도메인)과 `$(printf 'a%.0s' {1..64})`
+# 류 더미 다이제스트를 쓴다. 스크립트 실행 시 mktemp 디렉터리에 쓰였다 지워지는 일회용
+# 픽스처이며, 어떤 실 배포에도 대응하지 않는다.
+#   scripts/verify_prod_install_upgrade.sh:90  [generic-api-key]
+f5fc83ba786745337df2fe9a73aa93f4854d944b:scripts/verify_prod_install_upgrade.sh:generic-api-key:90
+#   scripts/verify_prod_install_upgrade.sh:94  [generic-api-key]
+f5fc83ba786745337df2fe9a73aa93f4854d944b:scripts/verify_prod_install_upgrade.sh:generic-api-key:94
+#   scripts/verify_prod_install_upgrade.sh:97  [generic-api-key]
+f5fc83ba786745337df2fe9a73aa93f4854d944b:scripts/verify_prod_install_upgrade.sh:generic-api-key:97
+#   scripts/verify_prod_install_upgrade.sh:98  [generic-api-key]
+f5fc83ba786745337df2fe9a73aa93f4854d944b:scripts/verify_prod_install_upgrade.sh:generic-api-key:98
+#   scripts/verify_prod_install_upgrade.sh:100  [generic-api-key]
+083a36fd3f93ce1ebc7f007d348282adde0677df:scripts/verify_prod_install_upgrade.sh:generic-api-key:100
+#   scripts/verify_prod_install_upgrade.sh:100  [generic-api-key]
+51dc6237995a2602d0588d6cf73374a62c16c370:scripts/verify_prod_install_upgrade.sh:generic-api-key:100
+#   scripts/verify_prod_install_upgrade.sh:102  [generic-api-key]
+083a36fd3f93ce1ebc7f007d348282adde0677df:scripts/verify_prod_install_upgrade.sh:generic-api-key:102
+#   scripts/verify_prod_install_upgrade.sh:102  [generic-api-key]
+51dc6237995a2602d0588d6cf73374a62c16c370:scripts/verify_prod_install_upgrade.sh:generic-api-key:102
+#   scripts/verify_prod_install_upgrade.sh:104  [generic-api-key]
+f5fc83ba786745337df2fe9a73aa93f4854d944b:scripts/verify_prod_install_upgrade.sh:generic-api-key:104
+#   scripts/verify_prod_install_upgrade.sh:105  [generic-api-key]
+ed2b3e3d751fa01df2d3e44e03e86edd2edc8c4b:scripts/verify_prod_install_upgrade.sh:generic-api-key:105
+#   scripts/verify_prod_install_upgrade.sh:105  [generic-api-key]
+028a5080cab8fc46a677fc1ca3840e3c91e95f02:scripts/verify_prod_install_upgrade.sh:generic-api-key:105
+#   scripts/verify_prod_install_upgrade.sh:112  [generic-api-key]
+083a36fd3f93ce1ebc7f007d348282adde0677df:scripts/verify_prod_install_upgrade.sh:generic-api-key:112
+#   scripts/verify_prod_install_upgrade.sh:112  [generic-api-key]
+51dc6237995a2602d0588d6cf73374a62c16c370:scripts/verify_prod_install_upgrade.sh:generic-api-key:112
+#   scripts/verify_staging_smoke.sh:153  [generic-api-key]
+fbbc00a522a2bbab397e61c4b577ccd9ac84108d:scripts/verify_staging_smoke.sh:generic-api-key:153
+#   scripts/verify_staging_smoke.sh:158  [generic-api-key]
+fbbc00a522a2bbab397e61c4b577ccd9ac84108d:scripts/verify_staging_smoke.sh:generic-api-key:158
+
+# ── 명시적 플레이스홀더 / 빈 값 (3건) ──────────────────────────────
+# `CENT_API_KEY` 에 사람이 읽으라고 넣은 티켓번호 섞인 자리표시자, 또는 값이 아예 비어
+# 있는 env 줄이다. 마지막 항목은 근거 문서(buzz-audit-A)가 그 자리표시자를 인용해서
+# 생긴 자기참조 탐지다 — 인용이 곧 새 탐지가 된다는 실측 사례.
+#   clients/mobile/scripts/lane-phone.sh:324  [generic-api-key]
+6d8666bfa61352b1bf7305b1861541e0db5ade14:clients/mobile/scripts/lane-phone.sh:generic-api-key:324
+#   docs/planning/research/2026-08-10-buzz-audit-A.md:146  [generic-api-key]
+173049b16537f3436287312e1dd0ca98b3b4fb9f:docs/planning/research/2026-08-10-buzz-audit-A.md:generic-api-key:146
+#   scripts/verify_eve_profile.sh:109  [generic-api-key]
+15a69bb5bf79e2264576a6f85267a77d6540dbd7:scripts/verify_eve_profile.sh:generic-api-key:109
+
+# ── 테스트가 서명해 만든 JWT (4건) ───────────────────────────────
+# 테스트 하네스가 실행 중에 생성했거나 고정해 둔 토큰이다. 발급자·서명키 모두 테스트
+# 안에 있고 프로덕션 검증기를 통과하지 않는다.
+#   adapters/hermes/tests/test_provider_chain_contract.py:453  [jwt]
+8422d0bc7a5a50e16ccd2792a898add26f13fed4:adapters/hermes/tests/test_provider_chain_contract.py:jwt:453
+#   adapters/hermes/tests/test_provider_chain_contract.py:454  [jwt]
+8422d0bc7a5a50e16ccd2792a898add26f13fed4:adapters/hermes/tests/test_provider_chain_contract.py:jwt:454
+#   adapters/hermes/tests/test_provider_chain_contract.py:469  [jwt]
+8422d0bc7a5a50e16ccd2792a898add26f13fed4:adapters/hermes/tests/test_provider_chain_contract.py:jwt:469
+#   server-rust/bins/momo-server/src/routes/agent_gateway.rs:1058  [jwt]
+4a7a9700c3b1409775450b9c09840aa541c3e2c8:server-rust/bins/momo-server/src/routes/agent_gateway.rs:jwt:1058
+
+# ── CocoaPods 체크섬을 키로 오인 (1건) ──────────────────────────
+# `Podfile.lock` 의 RNKeychain 항목 해시다. lockfile 무결성 값이지 자격증명이 아니다.
+#   clients/mobile/ios/Podfile.lock:2346  [generic-api-key]
+faebfcaf14c702e75af3ba5dafd6b98743467ac8:clients/mobile/ios/Podfile.lock:generic-api-key:2346
+
+# ── 저장 키 이름 / 게이트 로그 산문 (2건) ───────────────────────────
+# 앞의 것은 PWA 초대 배너를 한 번만 띄우려고 두는 localStorage **키 이름** 상수이고
+# (값이 아니라 이름이다), 뒤의 것은 게이트가 통과 증거를 나열하는 echo 문장에서
+# `credential` 단어가 잡힌 것이다.
+#   clients/web/src/features/pwa/store.ts:32  [generic-api-key]
+1c0cfaa92be3a84f5866d01cf83f46c509509787:clients/web/src/features/pwa/store.ts:generic-api-key:32
+#   scripts/verify_auth_hardening.sh:621  [generic-api-key]
+560a2978b8f44e36385f2ac11922f15449a85f56:scripts/verify_auth_hardening.sh:generic-api-key:621

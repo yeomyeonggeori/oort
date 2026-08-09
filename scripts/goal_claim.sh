@@ -2,7 +2,7 @@
 # Claim one GitHub Issue as a momo Codex goal and create an isolated worktree.
 set -euo pipefail
 
-ORG_REPO="${ORG_REPO:-Dawn-kim-official/momo}"
+ORG_REPO="${ORG_REPO:-yeomyeonggeori/momo}"
 BASE_BRANCH="${BASE_BRANCH:-main}"
 WORKTREE_ROOT="${WORKTREE_ROOT:-}"
 DRY_RUN=0
