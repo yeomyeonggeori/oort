@@ -1,6 +1,19 @@
 #!/usr/bin/env bash
 # MOMO-535 outbound event subscription runtime verifier.
 # Docker execution belongs to the orchestrator; workers run `bash -n` only.
+#
+# 이슈 #1204 (2026-08-09) — egress 감사 폐곡선이 여기 붙는다. 이 판은 이미
+# 「본문이 서명돼 외부 주소로 나간다」를 실제 수신기로 재고 있었고, 지금까지
+# 없었던 것은 **그 사실이 워크스페이스에 남는가**였다. 아래 두 red proof 는
+# 제품 소스를 한 줄도 건드리지 않는다 — 둘 다 DB 쪽 이음매다.
+#
+#   EVENT_SUBSCRIPTION_GATE_PROVE_RED_AUDIT=1  (expected FAIL)
+#     063 의 감사 함수를 no-op 으로 바꿔 두고 같은 배달을 시킨다. 수신기는
+#     본문을 그대로 받는데 audit_log 에는 아무것도 없다 — #1204 이전의 상태를
+#     그대로 재현한다.
+#   EVENT_SUBSCRIPTION_GATE_PROVE_RED_BODY=1   (expected FAIL)
+#     감사 행 하나에 본문을 손으로 실어 둔다. 본문 부재 단정이 그것을 잡아야
+#     한다 — 안 잡으면 그 단정은 아무것도 안 재고 있었다는 뜻이다.
 set -euo pipefail
 umask 077
 
@@ -278,6 +291,27 @@ CHANNEL_ID="$(sql_value <<SQL
 SELECT id FROM channel WHERE workspace_id='$WS_ID' ORDER BY created_at, id LIMIT 1;
 SQL
 )"
+MENTION_BODY='MOMO-535 signed mention'
+APPROVAL_BODY='MOMO-535 retry fixture'
+
+# red proof ① — 감사를 들어내고 같은 배달을 시킨다. 함수 시그니처는 그대로라
+# relay 는 아무것도 모르고 호출하며, 본문은 여전히 밖으로 나간다.
+if [ "${EVENT_SUBSCRIPTION_GATE_PROVE_RED_AUDIT:-0}" = "1" ]; then
+  run_sql <<'SQL'
+CREATE OR REPLACE FUNCTION record_event_subscription_delivery(
+  delivery_workspace_id uuid, delivery_subscription_id uuid,
+  delivery_event_kind text, delivery_event_id uuid,
+  delivery_target_host text, delivery_outbox_id bigint,
+  delivery_attempt integer, delivery_http_status integer
+) RETURNS uuid AS $$
+BEGIN
+  RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+SQL
+  echo "[event-subscription] RED PROOF: delivery audit removed for this run"
+fi
+
 MENTION_MESSAGE_ID="$(run_sql -tA <<SQL
 WITH bumped AS (
   UPDATE channel_seq SET last_seq=last_seq+1
@@ -382,6 +416,105 @@ SQL
 retry_state="$(printf '%s' "$retry_state" | tr -d '[:space:]')"
 [ "$retry_state" = "3|failed" ] || fail "retry/outbox terminal assertion (got=$retry_state)"
 pass "exponential retry and accumulated 5xx auto-disable + audit"
+
+# ---------------------------------------------------------------------------
+# 이슈 #1204 — 나간 사실의 폐곡선, 그리고 본문의 부재
+#
+# 지금까지 일어난 egress 는 넷이다: 멘션 1건(수신기 204)과 승인요청 3건(503,
+# 재시도마다 별개의 전송). 목적지가 답한 전송마다 감사 행이 하나씩 서야 하고,
+# 그 넷 중 어느 것도 본문을 담아서는 안 된다.
+# ---------------------------------------------------------------------------
+deadline=$(( $(date -u +%s) + 60 ))
+while :; do
+  delivery_audits="$(run_sql -tA <<SQL
+SELECT
+  count(*) FILTER (WHERE detail->>'http_status' = '204')::text || '|' ||
+  count(*) FILTER (WHERE detail->>'http_status' = '503')::text || '|' ||
+  count(*) FILTER (WHERE detail->>'target_host' = '11.30.0.2')::text || '|' ||
+  count(*) FILTER (WHERE actor_member_id IS NOT NULL)::text
+  FROM audit_log
+ WHERE workspace_id='$WS_ID'
+   AND action='event_subscription.delivered'
+   AND target_type='event_subscription'
+   AND target_id='$SUBSCRIPTION_ID';
+SQL
+)"
+  delivery_audits="$(printf '%s' "$delivery_audits" | tr -d '[:space:]')"
+  [ "$delivery_audits" = "1|3|4|0" ] && break
+  if [ "$(date -u +%s)" -ge "$deadline" ]; then
+    compose logs --tail 120 relay >&2 || true
+    fail "webhook delivery audit closure (want 1x204|3x503|4 host rows|0 actor, got=$delivery_audits)"
+  fi
+  sleep 1
+done
+pass "each answered webhook egress left exactly one audit row (1x204 + 3x503, system actor)"
+
+# 감사가 이벤트를 **이름으로** 부르되 인용하지는 않는다.
+audit_shape="$(run_sql -tA <<SQL
+SELECT count(*)::text || '|' ||
+       count(*) FILTER (
+         WHERE detail ? 'event_kind' AND detail ? 'event_id'
+           AND detail ? 'target_host' AND detail ? 'outbox_id'
+           AND detail ? 'attempt' AND detail ? 'http_status'
+           AND detail->>'schema' = 'momo.event_subscription.delivered.v1'
+       )::text
+  FROM audit_log
+ WHERE workspace_id='$WS_ID' AND action='event_subscription.delivered';
+SQL
+)"
+audit_shape="$(printf '%s' "$audit_shape" | tr -d '[:space:]')"
+[ "$audit_shape" = "4|4" ] || fail "delivery audit detail shape (got=$audit_shape)"
+
+if [ "${EVENT_SUBSCRIPTION_GATE_PROVE_RED_BODY:-0}" = "1" ]; then
+  # red proof ② — 감사 행 하나에 본문을 손으로 실어 둔다. **폐곡선·형태 단정을
+  # 모두 통과한 뒤에** 넣는 이유는 하나다: 그 앞에서 넣으면 개수가 어긋나 다른
+  # 단정이 먼저 울고, 그러면 이 판이 증명하려던 「본문 부재 단정이 실제로 문다」가
+  # 증명되지 않는다. 그래서 이 행은 아래 스캔에게만 새 사실이다.
+  run_sql <<SQL
+INSERT INTO audit_log (workspace_id, action, target_type, target_id, detail)
+VALUES ('$WS_ID', 'event_subscription.delivered', 'event_subscription',
+        '$SUBSCRIPTION_ID',
+        jsonb_build_object(
+          'schema', 'momo.event_subscription.delivered.v1',
+          'event_kind', 'mention',
+          'event_id', '$MENTION_MESSAGE_ID',
+          'target_host', '11.30.0.2',
+          'outbox_id', 0, 'attempt', 1, 'http_status', 204,
+          'body', '$MENTION_BODY'));
+SQL
+  echo "[event-subscription] RED PROOF: a delivery audit row was given the message body"
+fi
+
+# **본문 부재.** 두 갈래로 잰다: ①금지된 키가 하나도 없다 ②실제로 나간 두
+# 본문 문자열이 감사 어디에도 없다. 키만 보면 다른 이름으로 실린 본문을 놓치고,
+# 문자열만 보면 다음 픽스처에서 눈이 먼다.
+body_leak="$(run_sql -tA <<SQL
+SELECT count(*) FILTER (
+         WHERE detail ?| array['body','payload','data','event','text','content']
+       )::text || '|' ||
+       count(*) FILTER (
+         WHERE position('$MENTION_BODY' in detail::text) > 0
+            OR position('$APPROVAL_BODY' in detail::text) > 0
+       )::text
+  FROM audit_log
+ WHERE workspace_id='$WS_ID' AND action='event_subscription.delivered';
+SQL
+)"
+body_leak="$(printf '%s' "$body_leak" | tr -d '[:space:]')"
+[ "$body_leak" = "0|0" ] \
+  || fail "감사가 두 번째 유출 경로가 됐다 — 전송 감사에 본문이 실렸다 (got=$body_leak)"
+
+# 그리고 그 본문은 **정말로 나갔다**. 부재 단정이 「아무것도 안 나갔으니 감사도
+# 비었다」로 초록이 되는 길을 막는다.
+"$PYTHON_BIN" - "$RECEIVER_ROOT/requests.jsonl" "$MENTION_BODY" <<'PY'
+import json, pathlib, sys
+lines = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8").splitlines()
+bodies = [json.loads(line)["body"] for line in lines if line.strip()]
+assert any(sys.argv[2] in body for body in bodies), (
+    "수신기가 본문을 못 받았다 — 본문 부재 단정이 공회전한다"
+)
+PY
+pass "the body reached the subscriber and the audit named the egress without quoting it"
 
 trigger_count="$(sql_value <<SQL
 SELECT count(*) FROM pg_trigger

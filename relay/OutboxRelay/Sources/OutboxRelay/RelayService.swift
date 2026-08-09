@@ -333,6 +333,22 @@ struct RelayService: Service {
             secret: secret,
             body: body
         )
+
+        // 이슈 #1204 — 나간 사실을 남긴다. 이 한 줄이 없으면 멘션·승인요청의
+        // **본문**이 외부 주소로 나가고도 워크스페이스에 아무 흔적이 없다(그것이
+        // #1203 이 실측한 상태다). 감사 자체가 두 번째 유출 경로가 되지 않도록,
+        // 남는 것은 시각·구독·이벤트 종류·대상 **호스트**뿐이고 본문은 없다 —
+        // 그 규율은 `record_event_subscription_delivery` 의 시그니처가 들고 있다
+        // (063_event_subscription_delivery_audit.sql). 여기서 넘길 수 있는 것에
+        // 본문이 없다는 사실이 곧 그 계약이다.
+        await recordWebhookDeliveryAudit(
+            row,
+            subscription: subscription,
+            payload: payload,
+            eventKind: eventKind,
+            result: result
+        )
+
         switch result {
         case .ok:
             await markWebhookDone(row.id, subscriptionID: subscription.id)
@@ -340,9 +356,9 @@ struct RelayService: Service {
             await recordWebhookServerFailure(
                 row, subscription: subscription, status: status
             )
-        case .transientFailure(let reason):
+        case .transientFailure(let reason, _):
             await requeue(row, reason: reason)
-        case .permanentFailure(let reason):
+        case .permanentFailure(let reason, _):
             await markFailed(row.id, reason: reason)
         }
     }
@@ -369,6 +385,64 @@ struct RelayService: Service {
         guard case .object(let object) = event,
               case .string(let kind) = object["kind"] else { return nil }
         return kind
+    }
+
+    /// The source row this event was projected from (`033`'s `event.id`). It is
+    /// an identifier, not content — the audit ledger can name what left without
+    /// quoting it, which is the whole shape of the #1204 decision.
+    static func eventID(_ event: AnyJSON) -> UUID? {
+        guard case .object(let object) = event,
+              case .string(let raw) = object["id"] else { return nil }
+        return UUID(uuidString: raw)
+    }
+
+    // MARK: - Egress audit (#1204)
+
+    /// Write the one durable trace that a webhook payload left this workspace.
+    ///
+    /// Deliberately **outside** the settlement transactions. The settlement says
+    /// what the queue should do next; this says what already happened on the
+    /// wire, and the wire call has already returned by the time either runs. If
+    /// it shared the settlement transaction, a rollback caused by a queue-side
+    /// conflict would erase the record of an egress that really occurred — the
+    /// exact inversion of the atomicity argument that puts a *pre*-commit audit
+    /// inside its action's transaction. A failure to write it is loud (error
+    /// log) and never blocks settlement: the payload is already gone, and
+    /// pretending otherwise by retrying the send would be worse than a gap.
+    ///
+    /// No status = nothing measurably left (SSRF refusal, or a throw before any
+    /// answer) → no row. See `WebhookDeliveryResult.deliveredStatus`.
+    private func recordWebhookDeliveryAudit(
+        _ row: ClaimedRow,
+        subscription: WebhookSubscription,
+        payload: WebhookDeliveryPayload,
+        eventKind: String,
+        result: WebhookDeliveryResult
+    ) async {
+        guard let status = result.deliveredStatus else { return }
+        // `URL.host` and nothing more. Path and query can carry a token the
+        // subscriber put there, and those belong in the ledger no more than the
+        // body does.
+        let host = subscription.url.host ?? "unknown"
+        let eventID = Self.eventID(payload.event)
+        do {
+            _ = try await pg.query(
+                """
+                SELECT record_event_subscription_delivery(
+                  \(subscription.workspaceID)::uuid, \(subscription.id)::uuid,
+                  \(eventKind)::text, \(eventID)::uuid, \(host)::text,
+                  \(row.id)::bigint, \(row.attempts)::integer, \(status)::integer
+                )
+                """,
+                logger: logger
+            ).collect()
+        } catch {
+            logger.error("webhook delivery audit write failed", metadata: [
+                "outboxId": .stringConvertible(row.id),
+                "subscriptionId": .string(subscription.id.uuidString),
+                "error": .string(String(describing: error)),
+            ])
+        }
     }
 
     // MARK: - Status transitions

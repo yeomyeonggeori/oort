@@ -148,6 +148,10 @@ headers="$(curl -fsSI -H "Host: $APP_HOST" "$BASE_URL/" | tr '[:upper:]' '[:lowe
 case "$headers" in *'content-security-policy:'*) ;; *) fail "missing Content-Security-Policy" ;; esac
 case "$headers" in *'x-frame-options: deny'*) ;; *) fail "missing X-Frame-Options DENY" ;; esac
 case "$headers" in *"connect-src 'self' wss://$RT_HOST https://$RT_HOST"*) ;; *) fail "CSP realtime connect-src is incomplete" ;; esac
+# 이슈 #1207 — 첨부 보관소 호스트. Caddy 가 실제로 이 토큰을 내려보내는지는
+# 여기서만 잴 수 있다(clients/web 의 gate:csp-deploy 는 정책 문자열이 앱을
+# 허용하는지를 잰다). 둘이 함께여야 선언과 데이터 경로가 같다고 말할 수 있다.
+case "$headers" in *"https://www.googleapis.com"*) ;; *) fail "CSP connect-src must allow the attachment archive host (#1207)" ;; esac
 pass "7/9 CSP and X-Frame-Options headers are present"
 
 health_status="$(curl -sS -o /dev/null -w '%{http_code}' -H "Host: $APP_HOST" "$BASE_URL/health")" || fail "health proxy request failed"
