@@ -284,6 +284,25 @@ export function acknowledgeRejected(key: string): void {
 }
 
 /**
+ * 전송에 실을 것을 **보기만** 한다.
+ *
+ * 낙관적 echo 가 없는 표면(스레드 컴포저)이 쓴다. 거기서는 전송이 실패해도
+ * 다시 보내기를 대신해 줄 행이 없으므로, 트레이를 비우는 것은 서버가 받았다는
+ * 사실을 확인한 **뒤**여야 한다. 먼저 비우면 실패한 답글의 파일이 사라지고,
+ * 사람은 같은 파일을 다시 찾아 붙여야 한다.
+ */
+export function peekSent(key: string): {
+  attachmentIds: string[];
+  attachments: MessageAttachment[];
+} {
+  const drafts = read(key).drafts;
+  return {
+    attachmentIds: attachmentIdsOf(drafts),
+    attachments: sentAttachmentsOf(drafts),
+  };
+}
+
+/**
  * 전송에 실을 것을 꺼내고 트레이를 비운다.
  *
  * 꺼내는 것과 비우는 것이 한 함수인 이유: 둘 사이에 렌더가 끼면 이미 보낸 파일이

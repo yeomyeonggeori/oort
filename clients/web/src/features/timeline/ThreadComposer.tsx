@@ -13,9 +13,9 @@ import {
   addFiles,
   clearSurface,
   dropDraft,
+  peekSent,
   retryDraft,
   surfaceKey,
-  takeSent,
   useAttachmentSurface,
 } from "@/features/attachments/draftStore";
 import { useComposerDropZone } from "@/features/attachments/useComposerDropZone";
@@ -105,9 +105,11 @@ export function ThreadComposer({
     const body = draft.trim();
     setSending(true);
     setError(null);
-    // 첨부를 먼저 꺼내 트레이를 비운다. 전송이 실패하면 아래 catch 가 id 를 그대로
-    // 들고 있다가 다시 쓴다 — 바이트는 이미 보관소에 있으므로 다시 올릴 것이 없다.
-    const sent = takeSent(trayKey);
+    // 트레이는 **성공한 뒤에** 비운다. 채널 컴포저와 다른 점이 여기다: 그쪽은
+    // 실패한 전송이 타임라인에 「전송 실패 · 다시 보내기」 행으로 남아 첨부를
+    // 계속 들고 있지만, 이 표면에는 그런 행이 없다. 먼저 비우면 실패한 답글의
+    // 파일이 사라지고 사람은 같은 파일을 다시 찾아 붙여야 한다.
+    const sent = peekSent(trayKey);
     // A fresh idempotency key per attempt, like the channel send: a retry after
     // a failure is a new send, not a replay of one that may already have
     // landed.
@@ -116,6 +118,7 @@ export function ThreadComposer({
     })
       .then(() => {
         setDraft("");
+        clearSurface(trayKey);
         onSent();
         ref.current?.focus();
       })

@@ -36,6 +36,7 @@ const {
   addFiles,
   clearSurface,
   dropDraft,
+  peekSent,
   readSurface,
   resetAttachmentDraftsForTest,
   retryDraft,
@@ -258,6 +259,22 @@ describe("upload orchestration", () => {
       mime: "application/octet-stream",
       size: 8,
     });
+  });
+
+  it("lets a surface with no echo row read the ids without losing them", async () => {
+    const upload = manualUpload();
+    addFiles(KEY, TARGET, [file("a.log", 8)]);
+    await settle();
+    upload.finish();
+    await settle();
+    await settle();
+
+    // 스레드 컴포저는 실패한 전송을 대신 들고 있어 줄 행이 없다. 읽고 나서도
+    // 트레이가 그대로 있어야 다시 보내기가 같은 파일을 다시 쓴다.
+    const seen = peekSent(KEY);
+    expect(seen.attachmentIds).toEqual(["att-1"]);
+    expect(readSurface(KEY).drafts).toHaveLength(1);
+    expect(peekSent(KEY).attachmentIds).toEqual(["att-1"]);
   });
 
   it("hands the ids to the send and empties the tray in one step", async () => {
