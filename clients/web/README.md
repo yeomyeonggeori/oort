@@ -436,6 +436,29 @@ join once, verify bidirectional audio, deny microphone once, and record whether
 the shell needs `NSMicrophoneUsageDescription` or another entitlement/config
 change. That shell change is outside MOMO-643.
 
+### 일회성 웹훅 비밀값의 수명 (`gate:webhook`, #1202/#1205)
+
+이 게이트만 힙을 읽는다. 이유는 같은 결함이 두 번 "고쳐졌고" 두 번 다 모듈
+단정이 초록이었기 때문이다 — 1차는 MutationCache 가 원문을 5분 들고 있었고,
+그것을 닫자 이번에는 컴포넌트 안에서 만든 목록 쿼리의 `queryFn` 이 렌더 스코프를
+캡처해 **같은 5분**을 살았다. 캐시에 무엇이 담겼는지가 아니라 힙에서 무엇이
+도달 가능한지를 재야 잡히는 종류다. 그래서 발급 카드를 「저장했습니다」 없이
+떠난 뒤 강제 GC 를 돌리고 스냅샷에서 센티넬을 센다. 같은 실행이 **양성 대조**를
+먼저 찍는다: 카드가 떠 있는 동안에는 센티넬이 힙에 있어야 한다(없으면 그 뒤의
+"없다"는 아무 뜻이 없다). Esc 네 상태(확인 중·카드가 떠 있는 중·아무것도 없을
+때·팔레트가 열린 채)도 같은 게이트가 잰다.
+
+```sh
+npm run build && npm run gate:webhook
+WEBHOOK_GATE_PROVE_RED_LIFETIME=1 npm run gate:webhook  # MUST fail: 닫기 뒤 힙에 원문이 없다
+WEBHOOK_GATE_PROVE_RED_ESC=1 npm run gate:webhook       # MUST fail: Esc 5건(양성 대조는 초록 유지)
+```
+
+되돌림은 목/드라이버만 바꾼다. `_LIFETIME`은 살아 있는 목록 Query 의
+`options.queryFn` 을 화면의 값을 캡처한 인라인 클로저로 바꿔 끼워 리뷰가 힙에서
+찾아낸 리테이너를 그대로 재현하고, `_ESC`는 층 스택이 없던 시절의 리스너(앱보다
+먼저 등록되는 window 캡처 Esc→뒤로가기)를 하나 되살린다.
+
 `gate:csp` walks one path. To put the same packaged policy in front of the much
 wider route walks the other two gates already do — `vite.config.ts` reads the
 header from the environment:
