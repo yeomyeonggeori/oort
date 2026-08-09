@@ -922,6 +922,24 @@ describe('「대화로」 — 그 작업을 낳은 줄까지', () => {
     expect(flatStyle(ghost.props.style).opacity).toBe(0);
   });
 
+  // 리뷰 N-a — 같은 컨트롤의 경계를 두 클라이언트가 다르게 그리지 않는다.
+  it('컨트롤 경계가 3:1 을 넘는 토큰이다 — hairline 토큰이 아니라', async () => {
+    installFetch();
+    await openConversation();
+    await openBothTurns();
+    await waitFor(() => expect(screen.getByTestId('ade-summary')).toBeTruthy());
+    fireEvent.press(screen.getByTestId('ade-summary'));
+    await waitFor(() => expect(screen.getByTestId('ade-card-list')).toBeTruthy());
+
+    const anchor = screen.getByTestId('ade-card-anchor-session|session-running');
+    const style = flatStyle(anchor.props.style);
+    // 웹의 `--line-strong` 과 **바이트로 같은** 값이다(`paletteContrast` 가 그
+    // 짝을 잰다). `border` 는 카드 위에서 1.3~1.4:1 이라 컨트롤의 가장자리가
+    // 되지 못한다 — 같은 파일의 팔레트 게이트가 그 사실을 따로 잠근다.
+    expect(style.borderLeftColor).toBe(color.textFaint);
+    expect(style.borderLeftColor).not.toBe(color.border);
+  });
+
   it('다른 방의 카드는 그 방을 열고 나서 착지한다', async () => {
     installFetch();
     await openConversation(GENERAL);

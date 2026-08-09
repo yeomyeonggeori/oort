@@ -79,6 +79,14 @@
 //     expected failure: "the partial restore hid what it loses"
 //   ADE_GATE_PROVE_RED_ANCHOR=1 npm run gate:ade
 //     expected failure: "the anchor landed on the wrong line"
+//   ADE_GATE_PROVE_RED_ZIGZAG=1 npm run gate:ade
+//     expected failure: "the list zigzagged: 상태·경과 열이 오른쪽 끝을 2 개 갖는다"
+//   ADE_GATE_PROVE_RED_DEEP=1 npm run gate:ade
+//     expected failure: "the anchor landed on the wrong line: … 표식이 선 줄은
+//                        seq null 다 … 이 방은 80줄이고 앵커는 가상 창 밖이다"
+//   ADE_GATE_PROVE_RED_ADDRESS=1 npm run gate:ade
+//     expected failure: "the anchor landed on the wrong line: 첫 누름 뒤에도
+//                        주소가 앵커를 들고 있다"
 //
 // red seam 은 **목/드라이버의 행동만** 바꾼다. COUNT 는 원장에 실행 중 세션을 한
 // 줄 더 실어 화면과 기대표를 갈라놓고(단언이 DOM 의 숫자를 실제로 읽는지 증명),
@@ -105,6 +113,23 @@
 // ANCHOR(#1193)도 목만 바꾼다: 원장이 `rootMessageId` 를 **빼고** 답한다. 서버가
 // 그 사실을 안 준 판이 그대로 재현되고, 그러면 카드에는 「대화로」가 서지 않아
 // 착지 단정이 도착할 곳을 잃는다. 제품 소스는 한 줄도 건드리지 않는다.
+//
+// 셋이 늦게 왔다 (#1199 N-d). #1195 리뷰 수리가 세운 새 단정 — 「칸이 안 붙어
+// 목록이 지그재그다」와 「가상 창 밖의 줄에 두 번 내려앉는다」 — 에는 이름 붙은
+// red proof 가 없었다. 그 판은 직전 빌드가 실제로 빨갰다는 **경험적** 근거로만
+// 서 있었고, 그것은 다음 사람이 다시 돌릴 수 없는 증거다. 셋 다 위 두 수법
+// 안에 있다:
+//
+//   ZIGZAG   CSS 로 유령 칸만 `display:none`. 노드도 React 상태도 그대로이고,
+//            없어지는 것은 **자리**뿐이다 = 칸이 세션 카드에만 서던 1차 판.
+//            그러면 턴 행의 내용 열이 넓어져 상태·경과의 오른쪽 끝이 둘이 된다.
+//   DEEP     드라이버가 타임라인 스크롤러의 `scrollTo` 만 삼킨다(누르기 직전에
+//            켜고, 그 스크롤러 밖에서는 아무것도 안 바꾼다). `bringIntoView` 가
+//            없던 판이 그대로 재현된다 — 목록은 바닥에 머물고, 창 밖의 앵커 행은
+//            영영 마운트되지 않으며, 워처는 오지 않는 행을 기다리다 만료한다.
+//   ADDRESS  `history.replaceState` 에서 **주소가 앵커를 잃는 갱신만** 무시한다.
+//            `?msg=` 가 착지 뒤에도 주소에 남던 판이고, 그 판에서 두 번째 누름은
+//            글자 단위로 같은 주소라 아무 일도 일어나지 않았다.
 //
 // 스크린샷은 이 게이트가 만든다(게이트 재생성 규율): artifacts/ade/*.png,
 // light/dark 두 벌. 판정하지 않는다 — design-review 는 별도 레인이다.
@@ -143,6 +168,10 @@ const proveRedPrecond = process.env.ADE_GATE_PROVE_RED_PRECOND === "1";
 const proveRedRestore = process.env.ADE_GATE_PROVE_RED_RESTORE === "1";
 // #1193
 const proveRedAnchor = process.env.ADE_GATE_PROVE_RED_ANCHOR === "1";
+// #1193 리뷰 수리가 세운 단정들 (#1199 N-d)
+const proveRedZigzag = process.env.ADE_GATE_PROVE_RED_ZIGZAG === "1";
+const proveRedDeep = process.env.ADE_GATE_PROVE_RED_DEEP === "1";
+const proveRedAddress = process.env.ADE_GATE_PROVE_RED_ADDRESS === "1";
 
 const PERSISTENT_BADGE = "기기를 꺼도 계속됩니다";
 const DEVICE_BADGE = "이 기기에서만";
@@ -573,7 +602,7 @@ async function installRealtimeSocket(page) {
 }
 
 /**
- * red seam 둘 (드라이버 쪽에서만 산다, 앱 번들보다 **먼저** 돈다).
+ * red seam 넷 (드라이버 쪽에서만 산다, 앱 번들보다 **먼저** 돈다).
  *
  * SESSION: 1차 판이 지었던 죽은 주소를 되돌린다. 라우트 표에 있는 것은
  *   `c/:channelId` 뿐이라 `#/channels/...` 는 와일드카드가 받아 `/` 로 보내고,
@@ -583,8 +612,48 @@ async function installRealtimeSocket(page) {
  *   먼저 등록되므로 — 그것이 정확히 예전 `AgentWorkPanel` 의 자리였다 —
  *   `stopImmediatePropagation` 도 이것을 막지 못한다. 서랍이 자기 층을 닫는 사이
  *   이 리스너가 작업 패널을 닫아, 한 번의 Esc 가 두 층을 가져간다.
+ *
+ * ADDRESS (#1199 N-d): 주소가 **앵커를 잃는** 갱신만 삼킨다. 나머지 주소 변경은
+ *   그대로 통과하므로 라우팅도 서랍도 평소대로 돈다 — 되살아나는 것은 「읽고도
+ *   지우지 않던」 그 한 가지뿐이고, 그 판에서 두 번째 누름은 첫 번째와 글자 단위로
+ *   같은 주소라 라우터가 아무것도 알리지 않았다.
+ *
+ * DEEP (#1199 N-d): 타임라인 스크롤러의 `scrollTo` 만 삼킨다. **누르기 직전에
+ *   켜지므로**(`window.__adeBlockTimelineScroll`) 첫 페이지 착지와 따라가기는
+ *   평소대로 일어나고, 사라지는 것은 `bringIntoView` 가 목록에 내리는 그 한 번의
+ *   명령이다 = 리뷰 B1 이전의 판. 그 판에서 워처는 가상 창 밖의 행이 마운트되기를
+ *   기다리다 만료하고, 화면은 이미 로드된 줄을 두고 「더 불러오세요」라고 말한다.
  */
 async function installRedSeams(page) {
+  if (proveRedAddress) {
+    await page.addInitScript(() => {
+      const replace = history.replaceState.bind(history);
+      history.replaceState = (state, title, url) => {
+        const dropsAnchor =
+          typeof url === "string" &&
+          !url.includes("msg=") &&
+          location.hash.includes("msg=");
+        if (dropsAnchor) return undefined;
+        return replace(state, title, url);
+      };
+    });
+  }
+  if (proveRedDeep) {
+    await page.addInitScript(() => {
+      window.__adeBlockTimelineScroll = false;
+      const nativeScrollTo = Element.prototype.scrollTo;
+      Element.prototype.scrollTo = function (...args) {
+        if (
+          window.__adeBlockTimelineScroll === true &&
+          typeof this.closest === "function" &&
+          this.closest('[data-testid="timeline-virtuoso"]') !== null
+        ) {
+          return undefined;
+        }
+        return nativeScrollTo.apply(this, args);
+      };
+    });
+  }
   if (proveRedSession) {
     await page.addInitScript(() => {
       const push = history.pushState.bind(history);
@@ -1374,6 +1443,7 @@ async function exerciseAnchor(browser) {
   });
   const page = await context.newPage();
   await installRealtimeSocket(page);
+  await installRedSeams(page);
   await installRoutes(context, { messages: GENERAL_MESSAGES });
   await login(page);
 
@@ -1383,6 +1453,16 @@ async function exerciseAnchor(browser) {
   await publish(page, statusFrame(agentId, generalId, "streaming", "running"));
   await page.getByTestId("ade-summary").waitFor({ timeout: 15_000 });
   await openDrawer(page);
+
+  if (proveRedZigzag) {
+    // red seam: 유령 칸의 **자리만** 없앤다(노드도 React 상태도 그대로). 칸이
+    // 세션 카드에만 서던 1차 판이 그대로 재현되고, 턴 행의 내용 열이 그만큼
+    // 넓어져 상태·경과의 오른쪽 끝이 카드 종류에 따라 갈린다.
+    await page.addStyleTag({
+      content:
+        '[data-testid="ade-card-anchor-ghost"]{display:none!important}',
+    });
+  }
 
   // ① 동사는 세션 카드에만 선다. 죽은 버튼 금지 — 턴에는 원장 행이 없고,
   //    따라서 발원 메시지도 없다.
@@ -1492,6 +1572,14 @@ async function exerciseAnchor(browser) {
    */
   const press = async (label) => {
     await armLandingProbe();
+    if (proveRedDeep) {
+      // red seam: 여기서부터만 목록의 스크롤 명령을 삼킨다 (#1199 N-d). 첫 페이지
+      // 착지와 따라가기는 이미 끝났으므로 사라지는 것은 `bringIntoView` 한 번뿐이고,
+      // 그것이 정확히 리뷰 B1 이전의 판이다.
+      await page.evaluate(() => {
+        window.__adeBlockTimelineScroll = true;
+      });
+    }
     await anchorButton.click();
     await page.getByTestId("ade-drawer").waitFor({ state: "detached" });
     const seq = await page

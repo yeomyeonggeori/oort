@@ -612,15 +612,20 @@ export default function ConversationScreen({
    * 고정 목록에서 원본으로 (이슈 #1112).
    *
    * `onJumpToQuoted` 와 **같은 기계**를 탄다. 고정 목록은 자기 항법을 만들지
-   * 않는다 — 못 찾았을 때의 문장도 이미 저 아래(`anchor-missed`)에 있고, 두
-   * 번째를 그리면 같은 사실을 두 군데서 말하게 된다.
+   * 않는다 — 못 찾았을 때의 문장도 이미 저 아래(`jump-missed`)에 있고, 두
+   * 번째를 그리면 같은 사실을 두 군데서 말하게 된다. 다만 그 문장의 **주어**는
+   * 자기 것이다(#1196, 아래).
    *
    * `seq` 는 **항상** 있다: 서버의 고정 목록 항목이 메시지의 seq 를 나른다(인용
    * 라이브 프레임과 달리). 그래서 못 찾았을 때 「더 위에 있다」를 추측이 아니라
    * 사실로 말할 수 있다.
    */
   const onJumpToPinned = useCallback((messageId: string, seq: number) => {
-    jumpSubjectRef.current = 'quote';
+    // 고정을 누른 사람은 인용을 누른 적이 없다 (#1196). #1193 이 주어 갈래를 열고
+    // 이 호출만 옛 기본값에 남겨 두어, 고정 목록에서 못 찾은 점프가 「인용한
+    // 원본을 이 화면에서 찾지 못했습니다」라고 말했다 — 그 화면에서 거짓인 문장을
+    // 없애려고 만든 바로 그 갈래에서.
+    jumpSubjectRef.current = 'pin';
     setJumpMissed(null);
     setJumpTarget(current => ({
       messageId,
@@ -849,38 +854,52 @@ export default function ConversationScreen({
     ],
   );
 
-  // ---- a search result that we cannot show says so --------------------------
-  // Only once the first page has settled: before that, "not found" would be a
-  // statement about a list that has not loaded yet.
-  const oldestSeq = timeline.state.oldestSeq;
+  // ---- 검색 결과로 들어온 자리에 **내려앉는다** (#1196) -----------------------
   //
-  // **이것도 실패가 아니다** (design-review H-5 의 같은 논리). 리뷰는 인용 점프
-  // 고지만 지목했지만, 이 줄은 M1 에서 내가 **일부러 같은 배너를 쓰게** 만든
-  // 자리다 — 「같은 사실을 두 모양으로 말할 이유가 없다」. 그러므로 한쪽만
-  // 고치면 내가 세운 그 규칙이 깨진다. 둘 다 `NoticeBlock` 으로 간다.
+  // 여태 이 화면은 그 자리를 **말하기만 했다**: 앵커가 로드된 목록에 없으면
+  // 「찾지 못했습니다」를 세우고, 있으면 아무것도 하지 않았다 — 있어도 데려가지
+  // 않았다는 뜻이다. 검색 결과를 누른 사람은 채널 바닥에 도착해 자기가 방금 읽은
+  // 문장을 눈으로 다시 찾아야 했다. 웹은 같은 경로에서 **착지한다**(`?msg=` +
+  // `bringIntoView`), 그래서 같은 제품의 두 클라이언트가 같은 동작에 다른 규율을
+  // 갖고 있었다 (#1195 가 「하지 않은 것」으로 남긴 그 자리).
   //
-  // 다만 닫기는 주지 않는다. 인용 점프 고지는 사람이 방금 누른 것에 대한
-  // **영수증**이라 한 번 읽으면 끝이지만, 이 줄은 「이 화면은 당신이 찾아온
-  // 메시지를 아직 안 들고 있다」는 **상태**다 — 닫아도 여전히 참이고, 닫으면
-  // 사람이 왜 엉뚱한 자리에 있는지 설명하는 유일한 문장이 사라진다.
-  // (`NoticeBlock.onDismiss` 독스트링이 그 갈림을 이미 적어 두었다.)
-  const anchorNotice = useMemo(() => {
+  // 새 기계를 만들지 않는다. 착지 문법은 이 화면에 **이미 있고**(`jumpTarget` —
+  // 인용·고정·세션 앵커 셋이 함께 타는 그것), #1195 가 웹에 이식할 때 베낀 원본이
+  // 정확히 이것이다. 네 번째 호출자가 된다.
+  //
+  // ## 두 번 쏜다, 그리고 두 번뿐이다
+  //
+  // 첫 발은 타임라인이 `ready` 가 된 순간이다. 그때 앵커가 로드된 범위 밖이면
+  // 「위로 올려 이전 대화를 더 불러오세요」가 서고 — 그 지시를 따르면 **그 줄이
+  // 도착한다**. 그 순간이 두 번째 발이다. 그러지 않으면 화면은 사람에게 시킨 일이
+  // 끝난 뒤에도 아무 데도 데려가지 않고, 사람은 여전히 눈으로 찾는다.
+  //
+  // 그래서 발사 조건은 「앵커가 지금 목록에 있는가」의 **변화**이고, 같은 답에
+  // 두 번 쏘지 않게 그 답까지 열쇠에 넣어 기억한다. 상태가 아니라 ref 인 이유는
+  // 이 값이 화면을 그리지 않기 때문이다(`jumpSubjectRef` 와 같은 자리).
+  const entryAnchorPresent = useMemo(() => {
     if (!anchor || timeline.status !== 'ready') return null;
-    const found = timeline.state.messages.some(message =>
+    return timeline.state.messages.some(message =>
       uuidEq(message.id, anchor.messageId),
     );
-    if (found) return null;
-    if (oldestSeq !== null && anchor.seq < oldestSeq) {
-      return {
-        headline: '찾던 메시지는 이 대화의 더 위쪽에 있습니다',
-        detail: '아직 불러오지 않았습니다. 위로 올려 이어서 불러오세요.',
-      };
-    }
-    return {
-      headline: '찾던 메시지를 이 화면에서 찾지 못했습니다',
-      detail: '위로 올려 이전 대화를 더 불러오세요.',
-    };
-  }, [anchor, timeline.status, timeline.state.messages, oldestSeq]);
+  }, [anchor, timeline.status, timeline.state.messages]);
+  const firedEntryAnchorRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!anchor || entryAnchorPresent === null) return;
+    const key = `${anchor.messageId}:${entryAnchorPresent}`;
+    if (firedEntryAnchorRef.current === key) return;
+    firedEntryAnchorRef.current = key;
+    jumpSubjectRef.current = 'search';
+    setJumpMissed(null);
+    setJumpTarget(current => ({
+      messageId: anchor.messageId,
+      // 검색 결과는 `seq` 를 함께 든다(`MessageSearchHit`). 세션 앵커와 갈리는
+      // 유일한 자리이고, 그래서 못 찾았을 때 「더 위쪽에 있다」를 추측이 아니라
+      // 사실로 말할 수 있다 — `Timeline` 이 로드된 가장 오래된 seq 와 견준다.
+      seq: anchor.seq,
+      token: (current?.token ?? 0) + 1,
+    }));
+  }, [anchor, entryAnchorPresent]);
 
   return (
     <Screen>
@@ -917,18 +936,19 @@ export default function ConversationScreen({
       <ConversationLayout
         list={
           <>
-            {anchorNotice ? (
-              <View style={styles.notice}>
-                <NoticeBlock
-                  headline={anchorNotice.headline}
-                  detail={anchorNotice.detail}
-                  testID="anchor-missed"
-                />
-              </View>
-            ) : null}
-            {/* 인용 점프가 빈손으로 돌아온 자리. 검색 앵커와 같은 배너를 쓴다 —
-                같은 사실("이 화면에 그 줄이 없다")을 두 가지 모양으로 말할
-                이유가 없다. */}
+            {/* 점프가 빈손으로 돌아온 자리. **하나뿐이다** (#1196).
+                인용·고정·세션 앵커·검색 진입 넷이 같은 배너를 쓴다 — 같은
+                사실("이 화면에 그 줄이 없다")을 두 가지 모양으로 말할 이유가 없고,
+                이제는 두 벌을 그릴 수도 없다: 검색 진입이 같은 착지 기계를 타므로
+                두 고지를 두면 못 찾은 한 번에 같은 문장이 **두 줄** 선다.
+                (M1 이 두 배너에 같은 모양을 쓰게 한 판단의 끝이 이것이다.)
+
+                옛 검색 배너는 닫기가 없었다 — 「이 화면은 당신이 찾아온 메시지를
+                아직 안 들고 있다」는 **상태**라는 근거였다. 그 근거가 이 커밋에서
+                바뀐다: 이제 그 문장은 사람이 누른 결과에 대한 답이고(눌렀고, 갔고,
+                거기 없었다), 시킨 대로 위로 올려 그 줄이 도착하면 **스스로 물러난다**
+                (두 번째 발이 착지하며 `onJumpLanded`). 닫을 수 있는 영수증의 조건을
+                그대로 갖췄다(`NoticeBlock.onDismiss` 독스트링). */}
             {/* ===================================================
                 실패가 아니라 **사실 진술**이다 (design-review H-5).
 
