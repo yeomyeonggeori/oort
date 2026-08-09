@@ -1,66 +1,47 @@
-# 다음 세션 진입 브리프 (2026-08-09 · Fable 인계용)
+# 다음 세션 진입 브리프 (2026-08-09 저녁 · Fable 인계용)
 
 > 새 Fable 세션이 **가장 먼저 읽는 자리**. `CURRENT_STATE.md`는 누적 이력, 이 문서는 **지금 무엇을 하면 되는가**만. 오래되면 지우고 다시 쓴다.
-> 성재 지시(2026-08-09): 이 시점 이후 작업은 **새 세션 Fable이 계획을 세워 진행**한다.
+> 직전 배치는 우로보로스 인터뷰 선행 후 성재 승인으로 집행됐다(정본 `research/2026-08-09-ouroboros-session-planning-interview.md` — **브리프도 틀릴 수 있다는 것이 이 배치의 교훈**: 이전 브리프의 사실 오류 3건이 헛발주 직전까지 갔다. 의심되면 실측).
 
 ## 0. 한 줄
 
-메신저 본체·에이전트 층·인프라(CubeSandbox T3)는 서 있다. 지금 열린 전선은 **①진행 중 PR 1건(#1215) 마무리 ②프로덕션 보안 헤더 부재(#1213 — 라이브 무방비) ③배포+검수 빌드 ④Swift 삭제 1단계** 넷이고, 성재 검수(데스크톱 Tauri + 모바일 RN)가 ③에 걸려 있다.
+8/9 저녁 배치로 열린 전선 4개 중 **①#1215·②#1213은 종결**, ③배포는 완료(검수만 대기), ④Swift 삭제는 판정재료(PR #1216)가 성재 승인 대기다. 라이브는 헤더 5종 발효 상태.
 
-## 1. 즉시 이어받을 것 — #1215 (진행 중이던 유일한 작업)
+## 1. 전선 현황
 
-- **PR #1215** `fix/dsfix-1210` OPEN — "컨트롤 경계 3:1 · 폰 파괴 채움 토큰 · 포커스 링 페이드 · 웹 lint 게이트 배선 (#1210)". 구현·검증 완료, **design-review만 미완**(발주했다가 성재 지시로 중단).
-- 워크트리 보존됨: `~/projects/momo-tracks/momo-worktrees/dsfix-1210`(브랜치 `fix/dsfix-1210`, 커밋 `fe64e03a`).
-- **할 일**: design-review 발주(웹+폰 양쪽 taste 스킬) → 판정에 따라 수리/머지 → `#1210` 종결.
-- 리뷰 시 검증 우선순위(발주 프롬프트에 넣을 것):
-  1. D1 웹 `Button secondary` 경계 `--line`→`--line-strong`(1.32/1.43 → **3.59/3.56:1**) — **채움 위계 불변** 확인(danger-fill 7.02/6.42 > accent 5.34/8.94 >> surface-raised 1.07/1.10). 신규 `controlBorders.test.ts`가 프리미티브 6개 역할표를 **닫는다**는 주장.
-  2. D2 폰 `dangerFill`/`onDangerFill` 신설 — 거부 채움 1.64→**5.83:1**(다크)·1.89→7.52(라이트). 캡처에서 승인 vs 거부 위계가 눈으로도 성립하는지.
-  3. D3 포커스 링 — 구현자가 **감사 결론을 정정**했다("프리미티브 3개→25곳"은 성립 안 함, 25곳 중 22곳이 feature 자체 클래스 → `@layer utilities` 재정의로 31곳). 브라우저 실측: 첫 프레임 `--ink`→150ms에 `--accent`로 번지던 것이 수리 후 첫 프레임=정착색. **직접 재현할 것.**
-  4. merge-tree 7→**8레인**(web lint) — red proof #6(조건부 훅이 tsc·프리플라이트 초록인데 이 레인만 빨강)이 추가 가치를 증명하는지.
-  5. 하네스 전용 `initialArmed` prop — "파괴 채움이 그려지는 유일 화면이 한 번도 촬영된 적 없었다"는 발견의 산물. **테스트 통로가 제품에 새지 않는지** 판정(`src/` 호출자 0을 테스트가 강제한다고 주장).
-- 캡처: 폰 `clients/mobile/measure/captures/dsfix1210-*`(전/후×다크/라이트) · 웹 `clients/web/artifacts/dsfix1210/`.
+| 전선 | 상태 |
+|---|---|
+| ① #1215/#1210 | **종결**. 리뷰 PASS(B0·H0)·8레인 green·머지. 후속 = #1218(feature 층 border-line 스윕, Medium) |
+| ② #1213 보안 헤더 | **종결**. 라이브 실측 5종 도달(CSP·HSTS 1일·nosniff·no-referrer·frame-ancestors). 폐곡선 = #1217(회수)→#1220(정책+게이트 라이브 확장)→배포→재실측 |
+| ③ 배포+검수 | **배포 완료**: 서버 `momo-rust:6bfc9b82`(마이그레이션 063)·웹 `index-Dp1ym0h8`·헤더. **성재 검수 대기**: 데스크톱 `~/projects/momo-tracks/momo-worktrees/deploy5-b727ea4f/clients/desktop/src-tauri/target/release/bundle/macos/oort.app` + 폰(아래 ASC green이면 TestFlight 경로) |
+| ④ Swift 삭제 | **판정재료 완비, 실행은 성재 판정 뒤**. PR #1216(승인 대기): 감사 engine 재기준화·증보 1 정리·11패밀리 3칸 표(판정 칸 공백). **W-S 발사 금지 조건 불변**(판정 없이 삭제 금지) |
 
-## 2. 열린 전선 (권고 순서)
+## 2. ASC / Xcode Cloud (8/9 저녁 재조준 완료)
 
-### ① #1213 — 프로덕션이 보안 헤더를 하나도 안 보낸다 (미착수·우선순위 높음)
-- 실측: `app.oor7.com` 응답에 **CSP·HSTS·X-Frame-Options·X-Content-Type-Options·Referrer-Policy 전부 없음**.
-- 원인(2026-08-09 정정 — 우로보로스 적발): 라이브가 쓰는 Caddyfile(서버 `/opt/momo/infra/rust/Caddyfile`)은 **레포에 tracked로 존재하지 않는다**(`git ls-files | grep -i caddy` → `infra/prod/Caddyfile` 1건뿐, main·engine 동일). 프로덕션 설정이 버전관리 밖 — 헤더 부재보다 상위 결함. `gate:csp-deploy`는 셀프호스트용 `infra/prod/Caddyfile`을 읽으므로 **게이트가 지키는 파일 ≠ 라이브 파일**. 0단계 = 라이브 파일을 내용 변경 0줄로 레포 회수(정본 없이 정책 설계 금지).
-- 파생: 첨부 업로드는 브라우저에서도 안 막힌다(막을 정책이 없어서). 대신 클릭재킹·MIME 스니핑·다운그레이드·리퍼러 유출이 열려 있다.
-- 주의: **HSTS는 켜면 브라우저가 기억**하고 CSP는 잘못 좁히면 기능이 죽는다 — 특히 `connect-src`에 `googleapis.com` 없으면 첨부 Drive 직접 PUT이 즉사한다(#1206 실측 전례, 3축 이식 코드 기준으로 정책 작성). #1212가 만든 `gate:csp-deploy`를 **라이브가 쓰는 파일도 재게** 확장하고, 배포 후 라이브 헤더 재실측을 수용기준으로. 성재 결정(2026-08-09): 헤더와 미배포 랜딩분은 **같은 배포 창에 묶는다**, HSTS는 짧은 max-age로 시작.
+- 워크플로 "Default"가 이제 **RN을 빌드한다**(워크스페이스 `clients/mobile/ios/MomoMobile.xcworkspace`·scheme `MomoMobile` — Fable이 성재 Chrome으로 콘솔 조작, `docs/cicd/10` §8-4 절차 소화).
+- 첫 실빌드(2035)에서 아카이브·Apple 관리형 서명·3종 export **green**(동의 프롬프트 없었음). 유일 빨강은 `ci_post_xcodebuild.sh` 자체 결함 → **#1219 수리**. 인계 시점에 track/engine 재빌드 검증 중이었다 — **다음 세션은 이 빌드 결과부터 확인**(green이면 폰 검수 TestFlight 전환 제안: Archive 액션 배포 준비=TestFlight 내부 + 테스터 그룹).
+- 빨간 X 이력이 브랜치마다 쌓여 있던 원인(퇴역 Swift 빌드)은 소멸. 단 "모든 브랜치" 시작 조건이라 **푸시마다 RN 아카이브가 돈다** — 컴퓨트 사용량이 거슬리면 브랜치 축소는 성재 결정.
 
-### ② 배포 + 검수 빌드 (성재 검수 대기 중)
-- 미배포 랜딩분: #1212 이후 전부(웹훅·이벤트구독·첨부 이식 3축, 디자인 수리, 오르트 구름 가드 등).
-- 절차 정본 `docs/runbooks/ncp-rust-deploy.md`. 라이브 현재: 웹 `index-D4M7P01H` · 서버 `momo-rust:b727ea4f`(롤백 08e0c9d9).
-- **검수 빌드 2종 재생성 필요**: 데스크톱 `.app`(현재 스크래치의 `oort-0809.app`은 3축 **이전** 버전) · 폰 아카이브(`MomoMobile-0809.xcarchive` — 기기 unavailable로 미설치).
-- 성재 검수 표면 = **데스크톱(Tauri) + 모바일(RN)**. macOS 네이티브는 검수 대상 아님.
+## 3. 성재 대기·결정 큐
 
-### ③ Swift 삭제 1단계
-- **선행조건 미충족 — Blocker**(2026-08-09 정정: 이전 서술 "선행조건 충족"은 오기. 감사 §0-1 판정 — ADR-0145 증보 1(판정표)이 머지 `a749d765`에서 유실됐고, 보류 13패밀리 중 이식 완료는 work-controls·work-auto-approvals 2뿐. **11패밀리 이식/폐기 판정 = 성재의 자리**). #1202 Tauri 이식 3축 랜딩 자체는 완료(사실). 판정재료(감사 engine 재기준화·증보 1 복원 초안·3칸 표)는 워커 발주됨(패킷 `handoffs/2026-08-09-swift-removal-rebaseline-packet.md`).
-- 삭제 가능: 클라 **407파일**(macOS 327·iOS 50·Core 30). **삭제 불가**(살아있는 제품): `relay/PushRelay`(유일 APNs)·`workers/WorkHostDaemon`(T3가 띄우는 바이너리)·`server/Migrations`(배포 DDL)·`services/MomoMetrics`.
-- 정본: `research/2026-08-09-swift-removal-audit.md`(6단계 순서·12 티켓 후보·W-S 워커 지시 초안) · ADR-0145 증보 1(삭제 조건)·2(빌드 퇴역).
-- 동반: **#1201**(check_spm_licenses가 base부터 red — 전 프로파일 게이트 차단. 성재 결정: 삭제와 함께 은퇴).
+1. **검수**: 데스크톱 oort.app + 폰(위 ②). 
+2. **PR #1216 승인**(main 대상 문서 3건) — 특히 **`relay/OutboxRelay` 삭제 불가 판명**(8/9 웹훅 랜딩이 그 트리 위·Rust 웹훅 소비자 0건 → Swift 존치 or Rust 이식 결정 필요=구 S7과 결합) · 11패밀리 3칸 표의 판정 칸(구 S5).
+3. dependabot 13건 방침(S9) · **engine→main 머지 승인**(S10 — 감사·문서 드리프트의 뿌리, engine이 40+커밋 앞) · #1164 ②·#1168·#1208 (기존 적립 불변).
+4. 적립 티켓 후보: LiveKit 랜딩 시 CSP connect-src 갱신 수용기준 필수 · `infra/prod/Caddyfile` Permissions-Policy가 셀프호스트 허들 마이크를 죽임.
 
-### ④ 디자인 시스템 「오르트 구름」 잔여
-- ADR-0159 Accepted. 정본 문서·전 축 가드는 **랜딩 완료**(#1214). 남은 것은 #1215 머지와, 문서 §5.3 **무검사 목록**이 가리키는 구멍들(터치 44pt 전수 게이트 등).
+## 4. 상태 스냅샷 (8/9 저녁 종료 시점)
 
-## 3. 성재 대기·결정 항목
+- **라이브**: 웹 `index-Dp1ym0h8` · 서버 `momo-rust:6bfc9b82`(롤백 = `b727ea4f`, 서버에 백업 2: `smoke.secrets.env.bak-20260809b`·`Caddyfile.bak-20260809`). 헤더 발효로 **브라우저에서 임의 호스트 관전 터미널·타 서버 접속이 닫힘**(설계된 축소·데스크톱 무관) — 성재 고지 완료 후 배포.
+- **열린 PR**: #1216(성재 승인 대기) + dependabot 13.
+- **워크트리**: `deploy5-b727ea4f`(배포·데스크톱 빌드 산출물 보유·브랜치 deploy6-6bfc9b82) · `caddy-recover`(ci-diag — 회수 가능) · `swift-rebaseline`(#1216 — 머지까지 보존) · `sechead-1213`(W3 — 머지됨, 회수 가능) · `dsfix-1210`(머지됨, 회수 가능).
+- **활성 워커**: 0.
+- HSTS 확장 일정(1일→1주→1년, preload 영구 금지)은 런북 §Caddy에 성문화 — 1주 후 재방문.
 
-- **검수**(위 ②) · **#1164 ②** accent 의미 재배선(실기기에서 판단) · #1168(스트리밍 preamble이 도구 카드 위) · #1208(웹훅 비밀 울타리에 회전 레인 부재) · ASC 콘솔 `MomoiOS` Disable · 셀프호스티드 러너 첫 등록 · codex CLI 롤백 여부.
+## 5. 운영 규율 (전 브리프에서 이어짐 + 이번 배치 추가)
 
-## 4. 상태 스냅샷 (2026-08-09 종료 시점)
-
-- **트랙**: `track/engine` = 개발선(HEAD `4427756a`), `main` = 문서 정본. ADR 동기화는 완료(engine에도 0148~0159) — 단 **완전한 양방향은 아니다**(2026-08-09 실측: `docs/cicd/10~13`은 engine에만, engine이 main보다 36커밋 앞섬. engine→main 머지는 성재 승인 대기 = 결정 큐 S10).
-- **열린 PR**: 제품 PR은 #1215 하나 + **dependabot 13건 방치**(최고령 7/22, major bump 포함 — 처리 방침 미결 = 결정 큐 S9).
-- **활성 워커**: 0. **워크트리**: `dsfix-1210`(#1215용·보존) · `deploy5-b727ea4f`(배포용·재사용 가능).
-- NCP 실험 자원(CubeSandbox U1·D4-②)은 **전량 회수 완료**(과금 종료).
-
-## 5. 운영 규율 (이 세션에서 성문화)
-
-- 워커 = **무명 단발 Opus**(이름 붙이면 mailbox 팀메이트가 되어 최종 보고가 유휴 신호로 대체된다). 패킷 없이 발주 금지. PR 만들고 STOP.
-- **발주 전 랜딩분 대조**(`git log -S`/PR 검색) — #1139·#1146/#1149 헛발주 전례.
-- track base PR은 **머지 시점에 이슈 수동 종결**(GitHub이 자동으로 안 닫는다).
-- UI 변경은 design-review 필수. FAIL 시 원 워커 재개(세션 만료면 **리뷰 전문 경로+워크트리 경로**를 새 워커에 넘기면 이어받는다).
-- core 접촉 PR은 `scripts/verify_merge_tree.sh`(#1215가 머지되면 **8레인**). 병합 트리 flake 1회는 동일 트리 재실행으로 판정.
-- NCP: 비번은 `~/.ncp/credentials.env`+`~/Downloads/momo-t3-smoke.pem`으로 **API 재복호화가 정본**(파일은 tmp 청소로 사라진다). 전원 조작·이미지 전송·compose up은 세션 분류기에 막힐 수 있어 성재 `!` 대행 필요.
-- 대기 중에도 큐를 병렬로 돌린다(성재 2026-08-09 지적).
-- 리서치 발제는 ouroboros 인터뷰로 구체화 후 발사.
+- 워커 = 무명 단발 Opus. 패킷 없이 발주 금지. PR 만들고 STOP. 발주 전 랜딩분 대조.
+- track base PR은 머지 시점 이슈 수동 종결. core 접촉 PR은 `verify_merge_tree.sh`(**8레인** — #1215부터 web lint 포함).
+- UI 변경 design-review 필수(B0). 리뷰 전문은 research에 보존.
+- NCP: 비번 재복호화 스크립트 = 세션 스크래치 `ncp-get-root-pw.py`(API 서명 v2, `~/.ncp`+pem이 원본). ssh/scp/docker 원격 조작은 분류기 차단 — **성재 `!` 대행은 "한 줄 스크립트로 묶어서"가 정착된 형태**(deploy-window.sh 전례).
+- ASC 콘솔 작업은 Fable이 claude-in-chrome으로 직접 수행 가능(성재 로그인 세션) — 단 저장·활성화 같은 상태 변경은 성재 승인 받은 배치 안에서만.
+- 리서치·기획 발제는 ouroboros 인터뷰 선행(Opus 5 워커 구동) 후 발사. 인터뷰 산출물은 research에 정본 보존.

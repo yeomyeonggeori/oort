@@ -1,5 +1,15 @@
 # oort 기획 현재 상태 (Planning Current State)
 
+> **2026-08-09 스냅샷 19 (Fable · momo-main — 우로보로스 선행 배치: #1210·#1213 종결·라이브 보안 헤더 발효·ASC 재조준).** 컴팩트 복원 진입점.
+>
+> **저녁 배치(성재 편성 승인)**: 우로보로스 인터뷰(Opus 5)가 브리프 오류 3건·숨은 매듭(ASC)·②③ 결합·감사 낡음을 적발(정본 `research/2026-08-09-ouroboros-session-planning-interview.md`, 전 항목 재검증). 집행 — **#1215 머지·#1210 종결**(리뷰 PASS B0/H0·8레인 green·후속 #1218) · **#1213 종결**(#1217 라이브 Caddyfile 회수 → #1220 헤더 5종+게이트 라이브 확장 red proof 7 → 배포 → 라이브 5종 실측 도달) · **배포**(서버 `momo-rust:6bfc9b82`·웹 `index-Dp1ym0h8`·마이그레이션 063, 롤백 백업 2 서버 보존) · **ASC Xcode Cloud "Default"를 MomoMobile로 재지정**(Fable이 성재 Chrome으로 콘솔 직접 조작 — 아카이브·서명·export green, 유일 빨강=ci_post_xcodebuild 첫 실행 결함 → #1219 수리, 재빌드 검증 중).
+>
+> **라이브(8/9 저녁)**: 웹 `index-Dp1ym0h8` · 서버 `momo-rust:6bfc9b82`(롤백 b727ea4f) · **보안 헤더 발효**(CSP connect-src에 googleapis — 첨부 생존·HSTS 1일 시작·브라우저에서 임의 호스트 관전·타 서버 접속 닫힘=설계된 축소). 검수 재료: 데스크톱 `oort.app`(@6bfc9b82) 빌드 완료(deploy5 워크트리), 폰=ASC green 시 TestFlight 경로 제안.
+>
+> **성재 대기**: ①검수(데스크톱 oort.app + 폰) ②**PR #1216 승인**(Swift 판정재료 — **OutboxRelay 삭제 불가 판명**(8/9 웹훅 랜딩이 그 트리·Rust 소비자 0)·11패밀리 3칸 표=판정 입력) ③11패밀리 판정(S5)·T6/T7(S7)·dependabot 13(S9)·engine→main 머지(S10). 적립: LiveKit 랜딩 시 CSP 갱신 수용기준·infra/prod Permissions-Policy 마이크 결함 티켓.
+>
+> 이하 스냅샷 18:
+
 > **2026-08-09 스냅샷 18 (Fable · momo-main — prime 3번째 provider 승격 완결·CubeSandbox 3/4·8/8 하루 13 PR).** 컴팩트 복원 진입점.
 >
 > **8/8~8/9 랜딩(13 PR·이슈 12 종결)**: 재개 배치(#1171 코어 기계검사 하드제로·#1172 runEnded 동봉) · oort 배치 4+웹 emdash AST(#1174·#1175=#1141 완결) · **CubeSandbox 체인**(ADR-0156 Accepted → #1179 어댑터·#1180 프로비저너 — 잔여 D4-② 실기동만) · web-legacy 계열(#1181·#1184 — 18일 잠복 드리프트) · #1183 여는 표식 · #1186 다크 20역할 파리티(에이전트 색 통일·리뷰 PASS) · #1187 게이트 ruby=사본 드리프트 · **prime 승격**(ADR-0158 Accepted D1~D7 → #1188 서버 축(runId 서비스·D7 PATCH 스코프—Swift 시절 공백 적발)·#1189 어댑터 상주(실연동: 베어러 하나 525 update→메시지 1) → **#1130 종결**).
