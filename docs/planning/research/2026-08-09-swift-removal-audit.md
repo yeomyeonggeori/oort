@@ -454,3 +454,163 @@ git 이력은 남는다 — `git show <sha>:path`로 어떤 파일도 원문 복
 5. **MomoCore 2026-08-07 편집**(`e9d79d87` — `Message.swift`·`RealtimeSubscriptionDriver.swift`)이 macOS/iOS 뷰에서 소비됐는지 미확인.
 6. 라우트 추출은 정규식 기반이다. Swift 173 / Rust 97은 등록 패턴을 놓쳤을 수 있다(특히 Rust `nest()`·`merge()`·매크로 경유). 다만 **Swift-only 65개가 스펙 연산과 교집합**이라는 결론은 게이트 자신의 독립 실측(`docs/LOCAL_PR_GATE.md:163` "125/128")과 같은 방향이라 방법론 오차로 뒤집히지 않는다.
 7. 워크트리 `swiftaudit-wt`는 이 감사가 만들었다(읽기 전용 사용). 정리 필요 시 `git worktree remove`.
+
+---
+
+## 11. 재기준화 — `origin/track/engine` 기준 (2026-08-09 추가)
+
+> 패킷 `docs/planning/handoffs/2026-08-09-swift-removal-rebaseline-packet.md` T-B가 지시한 "§8 재기준화" 절이다. 원문 §8이 이미 리스크 절이므로 번호 충돌을 피해 §11로 단다. **위 §0~§10은 한 줄도 지우지 않았다** — 아래는 전부 *추가되는 정정*이며, 충돌하는 곳은 이 절이 이긴다.
+>
+> - 기준: `origin/track/engine` = **`4427756a`** / 대조 대상: 원 감사의 기준 `origin/main` = `8b9a898d`
+> - 작성: 무명 단발 워커 · 코드 변경 0 · 삭제 0
+
+### 11-A. 【전제 역전】 engine은 더 이상 main의 진부분집합이 아니다
+
+원 감사 §0은 `rev-list --left-right --count origin/main...origin/track/engine` = `179 0`을 근거로 **"engine-only 커밋 0"**이라 적고, 그래서 기준을 main으로 바꿨다. **지금은 거짓이다.**
+
+```
+git rev-list --left-right --count origin/main...origin/track/engine  →  1  36
+git merge-base origin/main origin/track/engine                       →  10da3f43
+origin/main   = 6e19ddbc      origin/track/engine = 4427756a
+```
+
+즉 **engine이 36커밋 앞서고**, main은 engine에 없는 커밋 1개(`6e19ddbc`, 문서)를 갖는다. 감사가 잰 `179 0`은 그 시점의 사실이었고, 그 뒤 engine이 전진하며 무효가 됐다. **패킷의 원래 지시("기준 = origin/track/engine")가 옳았다.**
+
+§0의 두 번째 근거도 함께 무효다 — *"track/engine에는 ADR-0145 증보 2가 없다"*. engine 판본 `docs/adr/0145-server-stack-buzz-fork-rust.md`에는 증보 1(`:161`)과 증보 2(`:175`)가 **둘 다 있다**. 복원 커밋 `32f31eaa`가 merge-base 이전이라 engine이 그대로 승계했다.
+
+### 11-B. 【§0-1 Blocker 절반 해소】 증보 1은 이미 복원됐다
+
+§0-1이 "main에서 유실"이라 판정한 증보 1은 **커밋 `32f31eaa`("docs(adr): 0145 증보 1 복원 — 감사가 적발")로 이미 복원돼 main·engine 양쪽에 있다.** 이 감사가 그 복원을 촉발했다.
+
+남은 Blocker는 **11패밀리 판정 하나뿐**이고, 그 입력이 신설 문서 `docs/planning/research/2026-08-09-swift-family-disposition-table.md`다.
+
+부수 결함 1건 — 그 복원 커밋이 `## 증보 2` 헤딩을 **두 번** 넣었다(`:175`·`:177`). 본 PR이 중복 헤딩만 제거한다(본문 무변경).
+
+### 11-C. 【최대 정정】 `relay/OutboxRelay`는 "삭제 가능"이 아니다 — 감사 이후 **거기에만** 새 코드가 랜딩했다
+
+engine-only 36커밋이 건드린 `.swift` 파일은 **정확히 3개, 전부 `relay/OutboxRelay`**다.
+
+```
+git diff --stat $(git merge-base origin/main origin/track/engine)...origin/track/engine -- '*.swift'
+  relay/OutboxRelay/Sources/OutboxRelay/RelayService.swift          | 78 +++++++-
+  relay/OutboxRelay/Sources/OutboxRelay/WebhookDeliveryClient.swift | 42 ++++-
+  relay/OutboxRelay/Tests/OutboxRelayTests/OutboxRelayTests.swift   | 96 ++++++-
+  3 files changed, 203 insertions(+), 13 deletions(-)
+```
+
+커밋 `2d608ccd`(2026-08-09, *"웹훅 전송이 흔적을 남긴다"*)가 신규 마이그레이션 `server/Migrations/063_event_subscription_delivery_audit.sql`과 신규 검증기 `scripts/verify_event_subscription.sh`를 함께 얹었다.
+
+**Rust에 웹훅 소비자가 없다**(실측):
+
+- `server-rust/crates/momo-outbox/src/emit.rs:40`·`:50` — `OutboxKind::WebhookDelivery`는 **발행 쪽 정의만**.
+- `server-rust/crates/momo-outbox/src/relay.rs:82` — *"the relay publishes to Centrifugo only. `webhook_delivery` / `push_candidate` / `agent_job` rows belong to their own consumers (B1 gate lesson) and **must not be drained here**."*
+- `server-rust/bins/momo-relay/src/lib.rs:23` — 같은 취지(**broadcast only**).
+- 레포 전체에서 `webhook_delivery` 행을 claim/전송하는 Rust 코드 **0건**. 유일한 송신자 = Swift `relay/OutboxRelay/Sources/OutboxRelay/WebhookDeliveryClient.swift`.
+
+그리고 그 검증기가 띄우는 것도 Swift다 — `scripts/verify_event_subscription.sh:48`이 `infra/docker-compose.e2e.yml`을 잡고 `:184` `compose up -d api relay webhook-receiver`를 부르는데, 그 `relay` 서비스는 `infra/docker-compose.e2e.yml:287` **`swift:6.2`** 이미지다.
+
+> **정정**: §5-A의 `relay/OutboxRelay`(8파일, "`momo-relay` 승계") 줄은 **5-C(조건부)로 내려가야 한다.** 조건 = 웹훅/이벤트구독 배달 소비자의 Rust 이식. 더 나아가 이 트리는 **감사 이후에도 활발히 개발 중인 트리**이므로, 삭제 계획서에서 "잔재"로 분류된 상태를 유지하면 안 된다.
+>
+> 파생 정정: §6 **5단계**가 `relay/OutboxRelay` 삭제를 서버·워커와 한 묶음으로 두는데, 그 묶음은 깨져야 한다. §7 티켓 목록에도 **신규 T13 「webhook_delivery/event-subscription 배달 소비자 Rust 이식」**이 필요하다(규모 중, §2-1 PushRelay와 함께 "Rust에 대체물이 아예 없는" 둘째 자리).
+
+### 11-D. 【소거】 T9·T10 — 웹 표면은 랜딩했다
+
+패킷이 지목한 두 티켓은 engine에서 **웹 몫이 닫혔다**.
+
+| 티켓 | 랜딩 커밋 (engine-only) | 산출물 실재 |
+|---|---|---|
+| **T9** 웹훅 설정 표면 | `9a6feea2` | `clients/web/src/features/settings/WebhookSection.tsx`(605줄) · `packages/momo-core/src/features/webhooks/api.ts:6-9`(4연산)·`:62` · `clients/web/src/features/settings/webhookCredentialScope.ts` |
+| **T9** 이벤트 구독 설정 표면 | `33930f94` | `clients/web/src/features/settings/EventSubscriptionSection.tsx`(572줄) · `packages/momo-core/src/features/settings/eventSubscriptions.ts:465` |
+| **T10** 첨부 클라 표면 | `2dae0e06` | `clients/web/src/features/attachments/{AttachmentTray.tsx,draftStore.ts,uploadTransport.ts,useComposerDropZone.ts,content.ts}` · `clients/web/src/features/timeline/AttachmentList.tsx` · `packages/momo-core/src/features/attachments/model.ts` |
+
+감사 §3-2 B가 인용한 두 근거 문장은 **engine에서 뒤집혔다**:
+
+- *"`grep -rni webhook clients/web clients/mobile clients/desktop` → **0**"* → engine 실측 **243건**.
+- *"`ThreadComposer.tsx:21`이 **no attachments**라고 적음"* → engine `clients/web/src/features/timeline/ThreadComposer.tsx:47`이 *"이 자리에는 「no attachments」가 함께 적혀 있었고, 그 판단은 **뒤집힌다**"*로 교체.
+
+**단 RN은 그대로 0이다** — `clients/mobile/src`에서 `attachment`·`webhook`·`eventSubscription` 전부 **0건**. T9·T10은 **웹 한정으로 닫히고 폰 몫만 남는다.**
+
+### 11-E. 【재판정】 R7 — 과대평가였고, 리스크의 주소가 바뀌었다
+
+R7 원문: *"macOS 폐기와 함께 첨부 UI·웹훅/이벤트구독 설정이 제품에서 사라짐(서버는 살아 있음)"*.
+
+- **틀린 절반**: 세 표면 모두 **웹에 이미 섰다**(11-D). macOS를 지워도 웹 사용자는 첨부를 보내고 웹훅·이벤트 구독을 설정한다. 이 방향의 R7은 **해소**.
+- **남는 절반(축소)**: RN(폰)에는 셋 다 없다. 폰 사용자 한정 표면 손실은 유효하나, 이는 macOS 삭제가 만드는 손실이 아니라 **이미 존재하는 폰 공백**이다 — 원인 귀속이 틀렸다.
+- **뒤집힌 방향(새로 커진 쪽)**: 이제 위험한 것은 클라가 아니라 **서버**다. 방금 랜딩한 웹훅 4연산·이벤트 구독 4연산을 **Rust 라우터가 싣지 않는다**(처분표 §1 #2·#7). 즉 웹 표면은 존재하되 Rust 서버에 붙으면 404다. 배달 경로마저 Swift OutboxRelay에 있다(11-C).
+
+> **R7 재서술**: "macOS 폐기로 표면이 사라진다"(과대평가·웹에서 해소) → **"웹에 선 웹훅·이벤트구독 표면이 Rust 서버에 대응 라우트를 갖지 못했고, 그 배달을 아직 Swift가 한다"**(유효·등급 유지). 완화는 T9가 아니라 **11-C의 신규 T13 + 웹훅/이벤트구독 관리 REST 이식**이다.
+
+### 11-F. 인벤토리·수치 정정
+
+| 원문 | 값 | engine 실측 | 비고 |
+|---|---|---|---|
+| §1 `server/Migrations` 파일 수 | 62 | **63** | `063_event_subscription_delivery_audit.sql` 신규 |
+| §5-B `server/Migrations/**` | 62 | **63** | 동상 |
+| §3-1 Rust 총 라우트 | 97 | **97 (동일)** | `grep -oE '\b(get\|post\|put\|patch\|delete)\(routes::' server-rust/bins/momo-server/src/lib.rs \| wc -l` = 97. engine 36커밋이 서버 라우트를 늘리지 않았다 |
+| §3-1 openapi 연산 수 | 131 | **131 (동일)** | `grep -c operationId docs/api/openapi.yaml` |
+| §3-1 "still-unported five" | 5 | **5 (동일)** | `server-rust/bins/momo-server/src/work_host_auth.rs:22-25` 문구 무변경 |
+
+**따라서 §3-1의 라우트 파리티 결론(Swift-only 83 / 스펙 성문화 65)은 engine에서도 유효하다.** 바뀐 것은 클라 표면이지 서버 라우트가 아니다.
+
+### 11-G. file:line 드리프트 — 주장은 유효, 좌표만 이동
+
+아래는 **결론이 바뀐 것이 아니라 줄 번호만 밀린** 것들이다. 삭제 워커가 좌표로 편집하면 엉뚱한 줄을 친다.
+
+| 원 감사 좌표 | engine 실좌표 | 대상 |
+|---|---|---|
+| `server-rust/Dockerfile:130` | **`:139`** | `COPY server/Migrations /opt/momo/migrations` |
+| `server-rust/Dockerfile:141` | **`:148`** | `test -s /opt/momo/migrations/001_init.sql` |
+| `infra/rust/docker-compose.push.yml:47` | **`:62`** | `push-relay:` 서비스 |
+| `scripts/local_gate.sh:878` | **`:880`** | web login smoke `add_cmd` |
+| `docs/LOCAL_PR_GATE.md:163` | **`:164`** | "2026-08-06 실측 125/128" |
+
+**좌표·내용 모두 유효(무변경)**: `scripts/verify_openapi_contract.sh:166`(`OPENAPI_GATE_SWIFT_PASS` 기본 0) · `server-rust/crates/momo-t3/src/provision.rs:14` · `server-rust/bins/momo-server/src/work_host_auth.rs:22-25` · `clients/web/src/features/work/observerStream.ts:13`(*"no encoder for `send_stdin`, `resize` or `kill`"* — §3-2 A "최대 갭" 판정 **유지**) · `scripts/gate_oort_user_facing.sh:272`(`SWIFT_SERVER_ROOT`).
+
+### 11-H. 【삭제 지시 결함】 §9 워커 초안이 금지 트리를 건드린다
+
+§9의 W-S 지시 초안은 이렇게 적는다:
+
+> `scripts/gate_oort_user_facing.sh: :44-49 스캔 루트 5개 중 macOS/iOS 4개, :84-94 예외 4건, :160-162 plist 3건 제거`
+
+engine 실측은 다르다 — 스캔 루트가 **`:44-53`으로 10개**이고, 그중 `.swift` 루트는 8개다:
+
+```
+44 clients/macOS/Sources          45 clients/macOS/XcodeHost
+46 clients/iOS/MomoiOSKit/Sources 47 clients/iOS/XcodeHost
+48 clients/mobile/ios/MomoPushKit          ← 삭제 금지 트리
+49 clients/mobile/ios/MomoMobile           ← 삭제 금지 트리
+50 clients/mobile/ios/NotificationService  ← 삭제 금지 트리
+51 relay/PushRelay/Sources                 ← 삭제 금지 트리
+52 clients/web/src                53 clients/mobile/src
+```
+
+즉 **"`:44-49` 중 4개 제거"를 문자 그대로 실행하면 `clients/mobile/ios/**`(RN 자체 네이티브, §9 금지 목록에 명시)의 스캔 루트를 지운다.** 예외 목록도 같다 — `:90`은 `clients/mobile/ios/MomoPushKit/PushNotification.swift`로 역시 금지 트리다.
+
+> **정정 지시**: 좌표가 아니라 **경로 문자열로** 지워라 — 제거 대상은 `clients/macOS/Sources`·`clients/macOS/XcodeHost`·`clients/iOS/MomoiOSKit/Sources`·`clients/iOS/XcodeHost` 넷뿐이고, `clients/mobile/ios/*` 3개와 `relay/PushRelay/Sources`는 **남긴다**. 예외 목록도 `clients/macOS/…`·`clients/iOS/…` 접두만 제거한다.
+
+### 11-I. 【미확인 해소】 §10-1 — `server/Fixtures`를 Rust는 소비하지 않는다
+
+```
+grep -rn "plugin-manifests\|Fixtures" server-rust/ --include='*.rs' --include='Dockerfile' --include='*.toml'  →  0건
+```
+
+**§10 미확인 #1을 닫는다: Rust `momo-server`는 `server/Fixtures/plugin-manifests/*.json`을 소비하지 않는다.** 다만 *소비자 0 ≠ 삭제 가능*이다 — Swift `server`·게이트·검증기 쪽 소비 여부는 이 절이 재지 않았다. §5-A가 `server/Fixtures`를 "남긴다"로 둔 보수적 처리는 유지하되, 그 사유는 이제 "Rust가 쓸지도 모른다"가 아니라 "Swift 쪽 소비자 미확인"으로 바뀐다.
+
+### 11-J. 소거·정정 총계
+
+| 구분 | 건수 | 항목 |
+|---|---|---|
+| **소거(닫힘)** | 4 | T9 웹 몫 · T10 웹 몫 · §10 미확인 #1(Fixtures) · §0-1 Blocker 전반부(증보 1 복원) |
+| **정정(뒤집힘)** | 4 | §0 브랜치 전제 · §5-A `relay/OutboxRelay` 분류 · §3-2 B 웹훅/이벤트구독/첨부 3줄 · R7 등급·주소 |
+| **수치 정정** | 2 | Migrations 62→63 (2자리: §1·§5-B) |
+| **좌표 드리프트** | 5 | 11-G 표 |
+| **신규 결함 적발** | 2 | §9 지시가 금지 트리 침범(11-H) · ADR-0145 증보 2 헤딩 중복(11-B) |
+| **신규 티켓 제안** | 1 | T13 webhook/event-subscription 배달 소비자 Rust 이식 |
+
+### 11-K. 부수 확인 — Xcode Cloud 전환 잔여 ⑥
+
+`docs/planning/research/2026-08-06-xcode-cloud-transition.md:16`의 ⑥ = *"docs/cicd/10에 워크플로 정본 등재(현재 콘솔에만 존재하는 미기록 자산)"*.
+
+**충족됐다.** `docs/cicd/10-ios-signing-identity-runbook.md`에 §8이 실재하며 하위 4절을 갖는다 — `:197` `## 8. Xcode Cloud — 이 레포의 유일한 자동 PR 체크 (정본)` / `:205` 8-1 무엇이 어디에 있나(체크 이름 `MomoiOS | Default` 포함) / `:218` 8-2 승계 근거 / `:230` 8-3 레포 책임분(#1115 랜딩) / `:253` 8-4 성재 콘솔 절차. 요약표 `:13`도 "레포 준비 완료(#1115)·ASC 콘솔 재지정만 성재 수동"으로 상태를 적는다.
+
+**이 PR은 그 문서를 건드리지 않는다**(패킷 지시대로 보고만).
