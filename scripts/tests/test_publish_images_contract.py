@@ -7,6 +7,10 @@ import re
 
 ROOT = Path(__file__).resolve().parents[2]
 
+# 발행 이미지의 정본 GHCR 경로. 워크플로와 prod env 템플릿 3종이 이 한 문자열에 합의해야 한다.
+# org명이 두 곳에 중복돼 있어 #1224 실소유 재조준 때 한쪽만 고칠 위험이 있었으므로 여기로 모은다.
+CANONICAL_IMAGE = "ghcr.io/yeomyeonggeori/momo"
+
 
 def read(relative: str) -> str:
     return (ROOT / relative).read_text(encoding="utf-8")
@@ -28,7 +32,7 @@ require("push: true" in workflow, "build action must push images")
 require("sha-${{ github.sha }}" in workflow, "image tag must bind to the dispatch commit")
 
 require("matrix:" not in workflow, "workflow must publish exactly one custom image")
-require("IMAGE: ghcr.io/dawn-kim-official/momo" in workflow, "workflow missing canonical momo image")
+require(f"IMAGE: {CANONICAL_IMAGE}" in workflow, "workflow missing canonical momo image")
 require("file: infra/prod/docker/momo.Dockerfile" in workflow, "workflow must use the multi-command Dockerfile")
 require("provenance: mode=max" in workflow, "workflow must publish max provenance")
 require("sbom: true" in workflow, "workflow must publish an SBOM attestation")
@@ -53,7 +57,7 @@ require("MOMO_AGENT_SEED_MODE: none" in compose, "production migration must not 
 
 for relative in ("infra/prod/.env.example", "infra/prod/secrets.env.example", "infra/prod/aws-internal-alpha.env.example"):
     env = read(relative)
-    require("MOMO_IMAGE=ghcr.io/dawn-kim-official/momo:${MOMO_IMAGE_TAG}" in env, f"{relative} missing canonical image")
+    require(f"MOMO_IMAGE={CANONICAL_IMAGE}:${{MOMO_IMAGE_TAG}}" in env, f"{relative} missing canonical image")
     require("MOMO_IMAGE_TAG=" in env, f"{relative} missing the shared image tag")
     for variable in commands:
         require(f"{variable}=${{MOMO_IMAGE}}" in env, f"{relative} must derive {variable} from MOMO_IMAGE")

@@ -64,7 +64,10 @@ esac
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "$REPO_ROOT"
 
-DIST_REPO="${MOMO_DIST_REPO:-Dawn-kim-official/momo-alpha}"
+DIST_REPO="${MOMO_DIST_REPO:-yeomyeonggeori/momo-alpha}"
+# 발행 커밋의 author — 공개 레포에 개인 주소를 두지 않는다(#1224).
+# 실제 발행자는 MOMO_PUBLISH_GIT_EMAIL로 주입한다.
+PUBLISH_GIT_EMAIL="${MOMO_PUBLISH_GIT_EMAIL:-oort-release@users.noreply.github.com}"
 MANIFEST_NAME="update-next.json"
 TAG="next-v${VERSION}"
 BUILD_NUM="$(git rev-list --count HEAD)"
@@ -211,7 +214,7 @@ PY
 (
   cd "$PAGES"
   git add "$MANIFEST_NAME"
-  git -c user.name=momo-main -c user.email=gkffhdnls13@gmail.com \
+  git -c user.name=momo-main -c user.email="$PUBLISH_GIT_EMAIL" \
     commit -qm "next: publish ${VERSION} (build ${BUILD_NUM})"
   git push -q
 )
@@ -219,5 +222,5 @@ PY
 echo "[next-publish] done"
 echo "  updater:  $TARBALL_URL"
 echo "  download: $ZIP_URL"
-echo "  manifest: https://dawn-kim-official.github.io/momo-alpha/${MANIFEST_NAME}"
+echo "  manifest: https://yeomyeonggeori.github.io/momo-alpha/${MANIFEST_NAME}"
 echo "  zip sha256: $ZIP_SHA256"

@@ -75,7 +75,9 @@ IDENTIFIER_PATTERNS = [
     r"momo\.(local|test|invalid)",     # dev/예시 도메인
     r"[/~]\.?momo\b|momo/",            # 파일 경로 (~/.momo, momo/avatars, scripts/momo)
     r"momo-[a-z0-9]",                  # 하이픈 식별자 (momo-core-team, momo-macos …)
-    r"repo:|Dawn-kim-official",        # 리포 참조
+    # 리포 참조. `yeomyeonggeori`가 현행 소유 org이고 `Dawn-kim-official`은 구 org명
+    # (#1224에서 실소유로 재조준). 히스토리 문서·픽스처에 구명이 남아 있으므로 둘 다 식별자로 둔다.
+    r"repo:|yeomyeonggeori|Dawn-kim-official",
 ]
 IDENTIFIER_RE = re.compile("|".join(IDENTIFIER_PATTERNS))
 

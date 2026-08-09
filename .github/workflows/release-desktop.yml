@@ -66,7 +66,7 @@ jobs:
       MOMO_SIGN_IDENTITY: "${{ vars.MOMO_SIGN_IDENTITY || 'Developer ID Application: Kwak Seongjae (YWQQFQM38J)' }}"
       MOMO_NOTARY_PROFILE: ${{ vars.MOMO_NOTARY_PROFILE || 'momo-notary' }}
       MOMO_UPDATER_KEY: ${{ vars.MOMO_UPDATER_KEY || '' }}
-      MOMO_DIST_REPO: ${{ vars.MOMO_DIST_REPO || 'Dawn-kim-official/momo-alpha' }}
+      MOMO_DIST_REPO: ${{ vars.MOMO_DIST_REPO || 'yeomyeonggeori/momo-alpha' }}
 
     steps:
       # clean: false — 러너 작업 디렉터리를 보존한다. 기본값(git clean -ffdx)은
@@ -211,7 +211,7 @@ jobs:
                 echo "- 버전 \`${INPUT_VERSION}\` — 빌드 + Developer ID 서명까지. 공증·발행 없음."
                 ;;
               release)
-                echo "- 버전 \`${INPUT_VERSION}\` — 발행 완료 시 매니페스트: <https://dawn-kim-official.github.io/momo-alpha/update-next.json>"
+                echo "- 버전 \`${INPUT_VERSION}\` — 발행 완료 시 매니페스트: <https://yeomyeonggeori.github.io/momo-alpha/update-next.json>"
                 echo "- Pages 캐시 \`max-age=600\` — 테스터에게 최대 10분 지연 안내 (docs/NEXT_CHANNEL.md §4)"
                 ;;
             esac

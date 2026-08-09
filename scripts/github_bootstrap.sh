@@ -5,13 +5,13 @@
 # 무엇:  gh CLI 로 라벨(labels.json) + 마일스톤(M0~M8) + 시드 이슈(MOMO-NNN)를
 #        ROADMAP.md / SPINE 정본에 맞춰 일괄 생성한다. 모두 멱등(존재 시 skip/update).
 #
-# ⚠️ 실제 생성은 "사용자가 직접 실행"한다. 이 스크립트는 Dawn-kim-official/momo 에 라벨/마일스톤/
+# ⚠️ 실제 생성은 "사용자가 직접 실행"한다. 이 스크립트는 yeomyeonggeori/momo 에 라벨/마일스톤/
 #    이슈를 실제로 만든다(원격 변경). Codex/자동화는 이 파일을 작성·검증만 하고,
 #    트리거(실행)는 권한 가진 사람이 한다. 먼저 --dry-run 으로 검토할 것.
 #
 # 사용법:
 #   scripts/github_bootstrap.sh --dry-run            # 무엇이 만들어질지 출력만 (원격 무변경)
-#   scripts/github_bootstrap.sh                      # 실제 적용 (ORG=Dawn-kim-official REPO=momo 기본)
+#   scripts/github_bootstrap.sh                      # 실제 적용 (ORG=yeomyeonggeori REPO=momo 기본)
 #   scripts/github_bootstrap.sh --labels-only        # 라벨만
 #   scripts/github_bootstrap.sh --skip-issues        # 라벨+마일스톤만
 #   ORG=myorg REPO=myrepo scripts/github_bootstrap.sh   # 대상 변경(환경변수)
@@ -40,7 +40,7 @@
 set -euo pipefail
 
 # ── 대상(ORG/REPO) — 환경변수 또는 플래그로 오버라이드 ─────────────────────────
-ORG="${ORG:-Dawn-kim-official}"
+ORG="${ORG:-yeomyeonggeori}"
 REPO="${REPO:-momo}"
 DRY_RUN=0
 LABELS_ONLY=0
@@ -226,7 +226,7 @@ MOMO-042	M5	type:feature,area:ios,area:server,gate:qa,status:runtime-unverified,
 MOMO-043	M5	type:infra,area:ios,area:store,type:docs,status:runtime-unverified,size:m	PrivacyInfo.xcprivacy + 암호화 export 신고	## Goal\nPrivacyInfo.xcprivacy(수집 데이터 유형 + NSPrivacyAccessedAPITypes required reason + 포함 SDK) + Info.plist ITSAppUsesNonExemptEncryption(표준 TLS/APNs만이면 면제 NO, 자체 암호화면 YES — 의존성 전수 확인) + App Privacy 라벨과 manifest 일관.\n\n## Context\n- Epic EP-IOS · M5 · 1차 출처: developer.apple.com/news/?id=pvszzano (manifest 2024-11-12 필수). 법률 자문 아님.\n\n## Acceptance\n- [ ] [infra] PrivacyInfo.xcprivacy 생성 + SDK required-reason 반영\n- [ ] [infra] ITSAppUsesNonExemptEncryption 결정 + 근거 기록\n- [ ] App Privacy 라벨 일관(문서)\n\n## Depends on: MOMO-040
 MOMO-044	M5	type:feature,area:ios,area:store,gate:qa,status:runtime-unverified,size:l	UGC 모더레이션 4종 + EULA 무관용 (1.2)	## Goal\n게시 전 objectionable material 필터링 + 신고(report) + 차단(block) + 공개 연락처 + EULA objectionable content 무관용(외부 변호사 검토) + 에이전트 생성 콘텐츠 모더레이션 정책(에이전트=1급 멤버).\n\n## Context\n- Epic EP-UGC · M5 · 1차 출처: App Store Review Guideline 1.2 — UGC 4종 강제(필터/신고/차단/연락처). 법률 자문 아님.\n\n## Acceptance\n- [ ] [swift] swift build green: 필터/신고/차단/연락처\n- [ ] [manual] EULA 무관용 명시(외부 변호사 검토 표기)\n- [ ] 에이전트 콘텐츠 모더레이션 정책 문서\n- [ ] runtime-unverified 표기\n\n## Depends on: MOMO-040
 MOMO-050	M6	type:infra,area:ci,status:blocked,size:m	ci-build.yml: swift build/test + xcode-apps 빌드	## Goal\n.github/workflows/ci-build.yml swift build/test 잡 green + xcode-apps 잡 주석 해제(iOS+macOS 무서명 빌드, 경로/scheme 정합) + actionlint 통과.\n\n## Context\n- Epic EP-CICD · M6 · ci · docs/cicd/04-codex-tickets.md\n\n## Acceptance\n- [ ] [ci] swift build/test 잡 green\n- [ ] [ci] xcode-apps 무서명 빌드 green\n- [ ] [ci] actionlint 통과\n\n## Depends on: MOMO-030, MOMO-040
-MOMO-051	M6	type:infra,area:ci,status:blocked,size:m	ASC API Key(Team) + fastlane match 초기화	## Goal\nApp Store Connect API Key(.p8/key_id/issuer_id, Team Key) 발급 + base64 단일 secret + fastlane match appstore(iOS)/developer_id(macOS) 최초 동기화(별도 signing repo, CI readonly) + gh secret list 에 6개 필수 secret 존재.\n\n## Context\n- Epic EP-CICD · M6 · ci · 1차 출처: docs.fastlane.tools (API Key 반드시 Team Key; Individual 불가). 법률 자문 아님.\n\n## Acceptance\n- [ ] [manual] ASC API Key(Team) 발급 + base64 secret\n- [ ] [manual] match appstore/developer_id 최초 동기화\n- [ ] [manual] gh secret list --repo Dawn-kim-official/momo 6개 secret\n\n## Depends on: MOMO-050
+MOMO-051	M6	type:infra,area:ci,status:blocked,size:m	ASC API Key(Team) + fastlane match 초기화	## Goal\nApp Store Connect API Key(.p8/key_id/issuer_id, Team Key) 발급 + base64 단일 secret + fastlane match appstore(iOS)/developer_id(macOS) 최초 동기화(별도 signing repo, CI readonly) + gh secret list 에 6개 필수 secret 존재.\n\n## Context\n- Epic EP-CICD · M6 · ci · 1차 출처: docs.fastlane.tools (API Key 반드시 Team Key; Individual 불가). 법률 자문 아님.\n\n## Acceptance\n- [ ] [manual] ASC API Key(Team) 발급 + base64 secret\n- [ ] [manual] match appstore/developer_id 최초 동기화\n- [ ] [manual] gh secret list --repo yeomyeonggeori/momo 6개 secret\n\n## Depends on: MOMO-050
 MOMO-052	M6	type:infra,area:ci,gate:qa,status:blocked,size:m	release-ios/release-macos dry-run (게이트 전 미트리거)	## Goal\nrelease-ios.yml(gym→pilot) + release-macos.yml(notarytool submit --wait→stapler) syntax/lint 통과 + dry-run 성공(태그 미푸시 또는 environment protection으로 실배포 차단) + altool 미사용(notarytool 전용).\n\n## Context\n- Epic EP-CICD · M6 · ci\n\n## Acceptance\n- [ ] [ci] release-*.yml syntax/lint 통과\n- [ ] [ci] dry-run 성공(실배포 차단)\n- [ ] 🔒 게이트 PASS 전 미트리거 확인\n\n## Depends on: MOMO-051
 MOMO-060	M7	type:feature,area:macos,area:ios,gate:qa,status:blocked,size:m	크래시/분석 계측 (Sentry Cocoa + MetricKit)	## Goal\nSentry Cocoa(self-host) Release Health(crash-free 세션/유저) + MetricKit(MXCrashDiagnostic/MXHangDiagnostic) 인입 + macOS는 TestFlight 없으므로 Sentry/MetricKit 의존(실기기 페이로드) + App Privacy 라벨에 수집 데이터 반영.\n\n## Context\n- Epic EP-QA-GATE · M7 · shared · docs/cicd/07-crash-analytics-spec.md, 05 §G-A\n\n## Acceptance\n- [ ] [swift] sentry-cocoa 의존 추가 후 5패키지 swift build green 유지\n- [ ] [swift] SentrySDK.start 래퍼 + MXMetricManagerSubscriber 골격(DSN은 Config 주입)\n- [ ] App Privacy 라벨 반영(문서)\n- [ ] runtime-unverified(no device) 표기\n\n## Depends on: MOMO-030, MOMO-040
 MOMO-061	M7	type:feature,area:macos,area:ios,gate:qa,status:blocked,size:l	핵심 8플로우 XCUITest + 접근성 + 성능 측정	## Goal\n핵심 8플로우 XCUITest 8/8 PASS + 수동 스모크(치명0) + performAccessibilityAudit 치명 위반 0 + VoiceOver 핵심플로우 조작 + XCTApplicationLaunchMetric 콜드 런치 p90<2s, hang≈0(실기기·Release).\n\n## Context\n- Epic EP-QA-GATE · M7 · shared · docs/cicd/08-e2e-accessibility-performance.md, 05 §G-B/§G-C/§G-D\n\n## Acceptance\n- [ ] [xcode] XCUITest 8/8 + 수동 스모크 치명0\n- [ ] [xcode] performAccessibilityAudit 치명0 + VoiceOver\n- [ ] [xcode] 성능 baseline(런치 p90<2s, hang≈0)\n\n## Depends on: MOMO-060
@@ -257,5 +257,5 @@ say "완료. Project(roadmap) 추가는 docs/GITHUB_OPS.md §4 참고."
 # 출처: docs.github.com/en/rest/orgs/issue-types · github.blog/changelog/2025-03-18-...
 # 본 스크립트는 repo 스코프만 가정하므로 type:* 는 .github/labels.json 의 라벨로 대체.
 # org admin 권한이 생기면 수동 승격 예시:
-#   gh api --method POST orgs/Dawn-kim-official/issue-types \
+#   gh api --method POST orgs/yeomyeonggeori/issue-types \
 #     -f name="Feature" -f is_enabled=true -f color="green" -f description="신규 기능"

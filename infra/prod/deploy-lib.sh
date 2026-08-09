@@ -140,7 +140,7 @@ verify_momo_image_attestations() {
   for image_key in $image_keys; do
     image_ref="${!image_key}"
     if gh attestation verify "oci://$image_ref" \
-      --repo Dawn-kim-official/momo \
+      --repo yeomyeonggeori/momo \
       --predicate-type https://slsa.dev/provenance/v1 >/dev/null 2>&1; then
       deploy_log "verified SLSA provenance attestation for $image_key"
       continue
