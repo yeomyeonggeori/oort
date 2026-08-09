@@ -140,11 +140,14 @@ function jsonResponse(status: number, body: unknown): Response {
   } as unknown as Response;
 }
 
-/**
- * `olderPage` 가 있으면 **두 번째 페이지 요청**(`before=`)에만 그것을 답한다.
- * 첫 페이지는 언제나 머리 두 줄이라, 진입 시점의 화면은 앵커를 들고 있지 않다 —
- * 검색이 정의상 만드는 그 상황이 이 파일의 기본값이다.
- */
+/** 로드된 머리에 서 있는 인용. 가리키는 원본(`HIT_ID`)은 아직 안 왔다. */
+const QUOTING_MESSAGE = message(HEAD_SEQ + 2, {
+  id: 'dddddddd-1111-4111-8111-dddddddddddd',
+  body: '그 줄 이야기입니다',
+  replyToId: HIT_ID,
+  replyTo: {seq: HIT_SEQ},
+});
+
 /**
  * 고정 목록 한 건. 가리키는 메시지는 **로드된 페이지에 없다** — 고정은 대개 오래된
  * 줄이고, 그래서 못 찾는 점프는 이 표면의 가장자리가 아니라 상시 경로다.
@@ -162,7 +165,14 @@ const PINNED_WIRE = {
   pinnedAtMs: T0 + 1_000,
 };
 
-function installFetch(options: {olderPage?: unknown[]; pins?: unknown[]} = {}) {
+/**
+ * `olderPage` 가 있으면 **두 번째 페이지 요청**(`before=`)에만 그것을 답한다.
+ * 첫 페이지는 언제나 머리(+ `headExtra`)라, 진입 시점의 화면은 목적지를 들고 있지
+ * 않다 — 검색·고정·인용이 정의상 만드는 그 상황이 이 파일의 기본값이다.
+ */
+function installFetch(
+  options: {olderPage?: unknown[]; pins?: unknown[]; headExtra?: unknown[]} = {},
+) {
   const mock = jest.fn(async (url: string) => {
     if (url.includes('/search/messages')) {
       return jsonResponse(200, {hits: [SEARCH_HIT]});
@@ -183,7 +193,10 @@ function installFetch(options: {olderPage?: unknown[]; pins?: unknown[]} = {}) {
       if (url.includes('before=')) {
         return jsonResponse(200, {messages: options.olderPage ?? []});
       }
-      return jsonResponse(200, {messages: HEAD_PAGE, nextBefore: HEAD_SEQ});
+      return jsonResponse(200, {
+        messages: [...HEAD_PAGE, ...(options.headExtra ?? [])],
+        nextBefore: HEAD_SEQ,
+      });
     }
     if (url.includes('/reactions')) return jsonResponse(200, {});
     if (url.includes('/pins')) return jsonResponse(200, {pins: []});
@@ -253,6 +266,14 @@ async function openFromSearch(): Promise<void> {
   await waitFor(() =>
     expect(screen.getByTestId('conversation-title')).toBeTruthy(),
   );
+}
+
+/** 화면이 시킨 것: 위로 올려 이전 대화를 더 불러온다. */
+async function pullOlder(): Promise<void> {
+  await act(async () => {
+    fireEvent(screen.getByTestId('timeline-list'), 'startReached');
+    await new Promise(resolve => setTimeout(resolve, 0));
+  });
 }
 
 beforeEach(() => {
@@ -339,11 +360,7 @@ describe('#1196 — 검색 진입 앵커가 착지한다', () => {
     expect(jumpTargetOf()?.messageId).toBe(SEARCH_HIT.messageId);
     const firstToken = jumpTargetOf()?.token;
 
-    // 화면이 시킨 것: 위로 올려 이전 대화를 더 불러온다.
-    await act(async () => {
-      fireEvent(screen.getByTestId('timeline-list'), 'startReached');
-      await new Promise(resolve => setTimeout(resolve, 0));
-    });
+    await pullOlder();
 
     // 두 번째 발. 같은 목적지지만 **새 요청**이라 토큰이 오른다 — 그래야 목록이
     // 다시 움직인다.
@@ -351,6 +368,94 @@ describe('#1196 — 검색 진입 앵커가 착지한다', () => {
       expect(jumpTargetOf()?.token).toBeGreaterThan(firstToken ?? 0),
     );
     expect(jumpTargetOf()?.messageId).toBe(SEARCH_HIT.messageId);
+    // 그리고 착지했으므로 상자는 스스로 물러난다 — 그 사라짐이 「도착했다」의
+    // 유일한 신호다. 남아 있으면 「아직 불러오지 않았습니다」가 거짓이 된다.
+    await waitFor(() => expect(screen.queryByTestId('jump-missed')).toBeNull());
+  });
+});
+
+// =============================================================================
+// #1209 리뷰 High — 같은 상자가 넷에게 하는 같은 약속은 **넷 다** 지켜져야 한다
+//
+// 첫 판은 이 결말을 검색에만 달았다. 실측이 그것을 그대로 말했다:
+//
+//   [probe] search: token 1 -> 2 | 고지 살아있나: false
+//   [probe] pin   : token 1 -> 1 | 고지 살아있나: true
+//
+// 고정·인용에서는 사람이 시킨 대로 위로 올려 그 줄이 화면에 도착해도 아무 일이
+// 없었고, 상자는 그 자리에 서서 이미 거짓이 된 문장을 계속 말했다.
+// =============================================================================
+
+describe('#1209 High — 네 갈래 전부 두 발이다', () => {
+  it('고정 목록 점프도 그 줄이 도착하면 데려가고, 상자는 물러난다', async () => {
+    installFetch({pins: [PINNED_WIRE], olderPage: [HIT_MESSAGE]});
+    await openConversation();
+
+    fireEvent.press(screen.getByTestId('open-pin-list'));
+    await waitFor(() => expect(screen.getByTestId('pin-list')).toBeTruthy());
+    fireEvent.press(screen.getAllByTestId('pin-list-item')[0]);
+
+    await waitFor(() => expect(screen.getByTestId('jump-missed')).toBeTruthy());
+    const firstToken = jumpTargetOf()?.token;
+
+    await pullOlder();
+
+    await waitFor(() =>
+      expect(jumpTargetOf()?.token).toBeGreaterThan(firstToken ?? 0),
+    );
+    expect(jumpTargetOf()?.messageId).toBe(HIT_ID);
+    await waitFor(() => expect(screen.queryByTestId('jump-missed')).toBeNull());
+  });
+
+  it('인용 점프도 마찬가지다 — 주어별로 다르게 굴 이유가 없다', async () => {
+    // 인용은 머리에 서 있고, 그것이 가리키는 원본만 아직 안 왔다.
+    installFetch({headExtra: [QUOTING_MESSAGE], olderPage: [HIT_MESSAGE]});
+    await openConversation();
+
+    await waitFor(() => expect(screen.getByTestId('quote-block')).toBeTruthy());
+    fireEvent.press(screen.getByTestId('quote-block'));
+
+    await waitFor(() => expect(screen.getByTestId('jump-missed')).toBeTruthy());
+    // 주어는 여전히 자기 것이다 — 결말을 공유한다고 낱말까지 섞이지 않는다.
+    expect(screen.getByTestId('jump-missed')).toHaveTextContent(/인용한 원본/);
+    const firstToken = jumpTargetOf()?.token;
+
+    await pullOlder();
+
+    await waitFor(() =>
+      expect(jumpTargetOf()?.token).toBeGreaterThan(firstToken ?? 0),
+    );
+    expect(jumpTargetOf()?.messageId).toBe(HIT_ID);
+    await waitFor(() => expect(screen.queryByTestId('jump-missed')).toBeNull());
+  });
+});
+
+// =============================================================================
+// #1209 리뷰 Medium — 「닫기」는 뒤에 걸린 의도도 무른다
+//
+// 이 배치가 이 고지에 처음으로 「기다렸다가 데려간다」를 달았고, 그 순간 닫기의
+// 뜻이 하나 늘었다. 닫기만 하고 기다림을 남기면 상자를 물리고 자기 이유로 옛
+// 대화를 읽으러 올라간 사람을 그 줄이 도착하는 순간 읽던 자리에서 끌어간다.
+// =============================================================================
+
+describe('#1209 Medium — 닫으면 기다림도 접힌다', () => {
+  it('상자를 물린 뒤에는 그 줄이 도착해도 끌려가지 않는다', async () => {
+    installFetch({olderPage: [HIT_MESSAGE]});
+    await openFromSearch();
+
+    await waitFor(() => expect(screen.getByTestId('jump-missed')).toBeTruthy());
+    const firstToken = jumpTargetOf()?.token;
+
+    // 사람이 상자를 물린다 — 「이 점프는 됐다」.
+    fireEvent.press(screen.getByTestId('jump-missed-dismiss'));
+    await waitFor(() => expect(screen.queryByTestId('jump-missed')).toBeNull());
+
+    // 그리고 자기 이유로 옛 대화를 읽으러 올라간다. 그 줄이 함께 도착한다.
+    await pullOlder();
+
+    // 읽던 자리에 그대로 있다. 무른 의도의 결과가 나중에 튀어나오지 않는다.
+    expect(jumpTargetOf()?.token).toBe(firstToken);
+    expect(screen.queryByTestId('jump-missed')).toBeNull();
   });
 });
 

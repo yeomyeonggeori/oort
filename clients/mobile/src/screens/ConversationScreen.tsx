@@ -576,10 +576,6 @@ export default function ConversationScreen({
     headline: string;
     detail: string;
   } | null>(null);
-  useEffect(() => {
-    setJumpTarget(null);
-    setJumpMissed(null);
-  }, [channelId]);
   /**
    * 지금 걸린 점프가 **무엇을 찾고 있는가** (#1193).
    *
@@ -590,23 +586,109 @@ export default function ConversationScreen({
    */
   const jumpSubjectRef = useRef<JumpSubject>('quote');
 
-  const onJumpToQuoted = useCallback((message: Message) => {
-    const targetId = message.replyToId;
-    if (targetId === undefined) return;
-    jumpSubjectRef.current = 'quote';
+  /**
+   * 빈손으로 돌아온 점프가 **무엇을 기다리는가** (#1209 리뷰 High).
+   *
+   * 첫 판은 이 감시를 검색 진입에만 달았다. 그래서 같은 상자가 넷에게 같은 말을
+   * 하는데 — 「위로 올려 이전 대화를 더 불러오세요」 — 그 말이 약속하는 결말은
+   * **하나에서만** 일어났다. 고정·인용에서는 사람이 시킨 대로 위로 올려 그 줄이
+   * 화면에 도착해도 아무 일이 없었고, 상자는 그 자리에 서서 이미 거짓이 된
+   * 문장을 계속 말했다. 그 화면에서 거짓인 문장을 없애려고 시작한 배치가
+   * 새 거짓 문장을 셋 만든 셈이다.
+   *
+   * 그래서 감시는 **주어의 성질이 아니라 점프의 성질**이다. 「무엇을 눌렀는가」가
+   * 아니라 「목적지가 지금 목록에 있는가」만 본다 — 네 갈래가 이미 같은 기계를
+   * 타고 있었으므로 붙일 자리도 하나다.
+   *
+   * 무장은 **놓친 순간**에만 일어난다(`onJumpMissed`). 놓쳤다는 것은 `Timeline`
+   * 이 `items` 에서 그 줄도, 그것을 대신해 선 접힌 행도 못 찾았다는 뜻이고,
+   * `items` 는 `messages` 에서 파생되므로 그 순간 목적지는 `messages` 에도 없다.
+   * 즉 무장 시점의 답은 언제나 「없다」이고, 그래서 도착은 **변화**로만 온다.
+   */
+  const [awaitingJump, setAwaitingJump] = useState<{
+    messageId: string;
+    seq: number | null;
+  } | null>(null);
+  /**
+   * 한 번의 기다림은 **한 번만** 다시 쏜다.
+   *
+   * 두 번째 발이 또 빈손이면(위 논증이 닫지 못하는 경로가 언젠가 생긴다면)
+   * 무장 → 도착 → 발사 → 무장이 스스로를 물어 렌더 루프가 된다. 새 요청이
+   * 들어오면(`requestJump`) 이 기억은 지워지므로, 막는 것은 **같은 기다림 안의**
+   * 반복뿐이다.
+   */
+  const refiredRef = useRef<string | null>(null);
+
+  // 방을 옮기면 앞선 방의 점프도, 그 방에서 기다리던 줄도 이 화면의 사실이 아니다.
+  //
+  // **아래의 세션 앵커 효과보다 먼저** 선언돼 있는 것이 load-bearing 이다: 같은
+  // 커밋에서 둘 다 돌면 순서는 선언 순서이고, 반대로 두면 이 초기화가 방금 건
+  // 점프를 지운다(#1193 이 그 자리에 이미 적어 둔 계약).
+  useEffect(() => {
+    setJumpTarget(null);
     setJumpMissed(null);
-    setJumpTarget(current => ({
-      messageId: targetId,
+    setAwaitingJump(null);
+    refiredRef.current = null;
+  }, [channelId]);
+
+  /**
+   * 점프 한 번을 건다 — **네 갈래가 전부 이 문을 통과한다** (#1209 리뷰 High).
+   *
+   * 토큰을 올리는 이유: 같은 곳을 두 번 가리키는 것은 **두 번의 요청**이고, id 만
+   * 내려보내면 두 번째 누름에 아무 일도 일어나지 않는다(웹이 `?msg=` 에서 만난
+   * 그 벽과 같은 것이고, 그쪽도 같은 답을 든다).
+   *
+   * 새 요청은 앞선 기다림을 **접는다**: 사람이 다른 곳을 가리켰으면 앞의 목적지는
+   * 더 이상 그가 원하는 곳이 아니다.
+   */
+  const requestJump = useCallback(
+    (subject: JumpSubject, messageId: string, seq: number | null) => {
+      jumpSubjectRef.current = subject;
+      setJumpMissed(null);
+      setAwaitingJump(null);
+      refiredRef.current = null;
+      setJumpTarget(current => ({
+        messageId,
+        seq,
+        token: (current?.token ?? 0) + 1,
+      }));
+    },
+    [],
+  );
+
+  const onJumpToQuoted = useCallback(
+    (message: Message) => {
+      const targetId = message.replyToId;
+      if (targetId === undefined) return;
       // 서버가 인용에 원본의 seq 를 실어 준다. 라이브 프레임으로 온 인용에는
       // 없으므로 `null` 이고, 그때는 「모르겠다」라고 말하게 된다.
-      seq: message.replyTo?.seq ?? null,
-      token: (current?.token ?? 0) + 1,
-    }));
-  }, []);
+      requestJump('quote', targetId, message.replyTo?.seq ?? null);
+    },
+    [requestJump],
+  );
 
   // 점프가 **성공하면** 고지는 스스로 물러난다. 남겨 두면 사람이 이미 도착한
   // 자리 위에 「못 찾았습니다」가 계속 붙어 있게 된다 — 다음 점프나 채널 이동까지.
   const clearJumpNotice = useCallback(() => setJumpMissed(null), []);
+
+  /**
+   * 사람이 상자를 물렸다 — 그러면 **뒤에 걸린 의도도 함께 접는다** (#1209 리뷰 Medium).
+   *
+   * 이 커밋이 이 고지에 처음으로 「기다렸다가 데려간다」를 달았고, 그 순간
+   * 「닫기」의 뜻이 하나 늘었다. 닫기만 하고 기다림을 남기면, 상자를 물리고 자기
+   * 이유로 옛 대화를 읽으러 올라간 사람을 그 줄이 도착하는 순간 읽던 자리에서
+   * **끌어간다** — 사람이 방금 물린 바로 그 의도의 결과로.
+   *
+   * 세션 앵커가 30초 시계를 단 것과 같은 규율이되 **수단이 다르다**. 그쪽의
+   * 대기는 화면에 아무 자국도 남기지 않으므로(방이 열릴 때까지 보이지 않는다)
+   * 사람이 취소할 길이 없고, 그래서 시계가 필요했다. 이쪽의 대기는 **상자 그
+   * 자체**다 — 서 있는 동안 화면에 보이고, 그것을 닫는 것이 곧 취소다. 보이지
+   * 않는 의도에는 시계를, 보이는 의도에는 컨트롤을 준다.
+   */
+  const cancelJump = useCallback(() => {
+    setJumpMissed(null);
+    setAwaitingJump(null);
+  }, []);
 
   /**
    * 고정 목록에서 원본으로 (이슈 #1112).
@@ -620,19 +702,16 @@ export default function ConversationScreen({
    * 라이브 프레임과 달리). 그래서 못 찾았을 때 「더 위에 있다」를 추측이 아니라
    * 사실로 말할 수 있다.
    */
-  const onJumpToPinned = useCallback((messageId: string, seq: number) => {
-    // 고정을 누른 사람은 인용을 누른 적이 없다 (#1196). #1193 이 주어 갈래를 열고
-    // 이 호출만 옛 기본값에 남겨 두어, 고정 목록에서 못 찾은 점프가 「인용한
-    // 원본을 이 화면에서 찾지 못했습니다」라고 말했다 — 그 화면에서 거짓인 문장을
-    // 없애려고 만든 바로 그 갈래에서.
-    jumpSubjectRef.current = 'pin';
-    setJumpMissed(null);
-    setJumpTarget(current => ({
-      messageId,
-      seq,
-      token: (current?.token ?? 0) + 1,
-    }));
-  }, []);
+  const onJumpToPinned = useCallback(
+    (messageId: string, seq: number) => {
+      // 고정을 누른 사람은 인용을 누른 적이 없다 (#1196). #1193 이 주어 갈래를 열고
+      // 이 호출만 옛 기본값에 남겨 두어, 고정 목록에서 못 찾은 점프가 「인용한
+      // 원본을 이 화면에서 찾지 못했습니다」라고 말했다 — 그 화면에서 거짓인 문장을
+      // 없애려고 만든 바로 그 갈래에서.
+      requestJump('pin', messageId, seq);
+    },
+    [requestJump],
+  );
 
   // ---- ADE 카드의 「대화로」 (#1193) -----------------------------------------
   //
@@ -671,16 +750,10 @@ export default function ConversationScreen({
     if (!uuidEq(pendingAnchor.channelId, channelId)) return;
     if (timeline.status !== 'ready') return;
     setPendingAnchor(null);
-    jumpSubjectRef.current = 'session';
-    setJumpMissed(null);
-    setJumpTarget(current => ({
-      messageId: pendingAnchor.messageId,
-      // 세션 원장은 순서값을 나르지 않는다. 없는 seq 를 지어내지 않고, 그 대가로
-      // 못 찾았을 때의 문장은 「더 위에 있다」로 정밀해지지 못한다.
-      seq: null,
-      token: (current?.token ?? 0) + 1,
-    }));
-  }, [pendingAnchor, channelId, timeline.status]);
+    // 세션 원장은 순서값을 나르지 않는다. 없는 seq 를 지어내지 않고, 그 대가로
+    // 못 찾았을 때의 문장은 「더 위에 있다」로 정밀해지지 못한다.
+    requestJump('session', pendingAnchor.messageId, null);
+  }, [pendingAnchor, channelId, timeline.status, requestJump]);
 
   const onOpenAdeAnchor = useCallback(
     (targetChannelId: string, targetTitle: string, messageId: string) => {
@@ -741,8 +814,19 @@ export default function ConversationScreen({
   // 문장은 `jumpNotice.ts` 가 든다 — **측정 하네스가 같은 상수를 읽어 사진을
   // 찍기 때문**이다(H-5 는 「코드 확인 / 시각 SKIPPED」로 남아 있었다). 하네스가
   // 베껴 적으면 배송되는 문장이 바뀌어도 사진은 옛말을 계속 한다.
+  //
+  // 그리고 **무엇을 찾다 놓쳤는지 붙들어 둔다** (#1209 리뷰 High). 상자가 시키는
+  // 일을 사람이 해내면 그때 데려가야 하고, 그러려면 목적지를 기억하고 있어야
+  // 한다. 목적지는 지금 걸린 점프 그 자체이므로 거울(`jumpTargetRef`)에서 읽는다 —
+  // 상태로 받으면 이 콜백의 동일성이 바뀌고, 그것은 `Timeline` 의 `renderItem` 을
+  // 타고 「붙어 있는 모든 행을 다시 그려라」가 된다(`jumpSubjectRef` 와 같은 이유).
+  const jumpTargetRef = useRef<typeof jumpTarget>(null);
+  jumpTargetRef.current = jumpTarget;
   const onJumpMissed = useCallback((reason: 'older' | 'unknown') => {
     setJumpMissed(jumpMissedNotice(reason, jumpSubjectRef.current));
+    const target = jumpTargetRef.current;
+    if (target === null) return;
+    setAwaitingJump({messageId: target.messageId, seq: target.seq});
   }, []);
 
   // Bumped the moment a send is issued — before the round trip, because the
@@ -867,39 +951,48 @@ export default function ConversationScreen({
   // 인용·고정·세션 앵커 셋이 함께 타는 그것), #1195 가 웹에 이식할 때 베낀 원본이
   // 정확히 이것이다. 네 번째 호출자가 된다.
   //
-  // ## 두 번 쏜다, 그리고 두 번뿐이다
-  //
-  // 첫 발은 타임라인이 `ready` 가 된 순간이다. 그때 앵커가 로드된 범위 밖이면
-  // 「위로 올려 이전 대화를 더 불러오세요」가 서고 — 그 지시를 따르면 **그 줄이
-  // 도착한다**. 그 순간이 두 번째 발이다. 그러지 않으면 화면은 사람에게 시킨 일이
-  // 끝난 뒤에도 아무 데도 데려가지 않고, 사람은 여전히 눈으로 찾는다.
-  //
-  // 그래서 발사 조건은 「앵커가 지금 목록에 있는가」의 **변화**이고, 같은 답에
-  // 두 번 쏘지 않게 그 답까지 열쇠에 넣어 기억한다. 상태가 아니라 ref 인 이유는
-  // 이 값이 화면을 그리지 않기 때문이다(`jumpSubjectRef` 와 같은 자리).
-  const entryAnchorPresent = useMemo(() => {
-    if (!anchor || timeline.status !== 'ready') return null;
-    return timeline.state.messages.some(message =>
-      uuidEq(message.id, anchor.messageId),
-    );
-  }, [anchor, timeline.status, timeline.state.messages]);
+  // 한 번만 쏜다. 놓치면 그 다음은 **모든 점프가 함께 쓰는** 기다림이 맡는다
+  // (`awaitingJump`) — 이 경로에만 달려 있던 두 번째 발을 점프 자체의 성질로
+  // 올린 것이 #1209 리뷰 High 의 수리다.
   const firedEntryAnchorRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!anchor || entryAnchorPresent === null) return;
-    const key = `${anchor.messageId}:${entryAnchorPresent}`;
-    if (firedEntryAnchorRef.current === key) return;
-    firedEntryAnchorRef.current = key;
-    jumpSubjectRef.current = 'search';
-    setJumpMissed(null);
+    if (!anchor || timeline.status !== 'ready') return;
+    if (firedEntryAnchorRef.current === anchor.messageId) return;
+    firedEntryAnchorRef.current = anchor.messageId;
+    // 검색 결과는 `seq` 를 함께 든다(`MessageSearchHit`). 세션 앵커와 갈리는
+    // 유일한 자리이고, 그래서 못 찾았을 때 「더 위쪽에 있다」를 추측이 아니라
+    // 사실로 말할 수 있다 — `Timeline` 이 로드된 가장 오래된 seq 와 견준다.
+    requestJump('search', anchor.messageId, anchor.seq);
+  }, [anchor, timeline.status, requestJump]);
+
+  /**
+   * 기다리던 줄이 도착했다 → **그때 데려간다** (#1209 리뷰 High).
+   *
+   * 「위로 올려 이전 대화를 더 불러오세요」를 따른 사람에게 화면이 지키는 약속이
+   * 이 효과다. 없으면 그 문장은 따르고 나면 거짓이 되고, 사람은 자기가 지시를
+   * 완수했다는 사실조차 화면에서 못 읽는다.
+   *
+   * 주어는 그대로 둔다(`jumpSubjectRef`) — 두 번째 발은 같은 사람이 누른 같은
+   * 요청의 계속이지 새 요청이 아니다. 착지하면 `onJumpLanded` 가 상자를 거두고,
+   * 그 사라짐이 곧 「도착했다」의 유일한 신호다.
+   */
+  const awaitingArrived = useMemo(() => {
+    if (awaitingJump === null || timeline.status !== 'ready') return false;
+    return timeline.state.messages.some(message =>
+      uuidEq(message.id, awaitingJump.messageId),
+    );
+  }, [awaitingJump, timeline.status, timeline.state.messages]);
+  useEffect(() => {
+    if (awaitingJump === null || !awaitingArrived) return;
+    if (refiredRef.current === awaitingJump.messageId) return;
+    refiredRef.current = awaitingJump.messageId;
+    setAwaitingJump(null);
     setJumpTarget(current => ({
-      messageId: anchor.messageId,
-      // 검색 결과는 `seq` 를 함께 든다(`MessageSearchHit`). 세션 앵커와 갈리는
-      // 유일한 자리이고, 그래서 못 찾았을 때 「더 위쪽에 있다」를 추측이 아니라
-      // 사실로 말할 수 있다 — `Timeline` 이 로드된 가장 오래된 seq 와 견준다.
-      seq: anchor.seq,
+      messageId: awaitingJump.messageId,
+      seq: awaitingJump.seq,
       token: (current?.token ?? 0) + 1,
     }));
-  }, [anchor, entryAnchorPresent]);
+  }, [awaitingJump, awaitingArrived]);
 
   return (
     <Screen>
@@ -966,13 +1059,19 @@ export default function ConversationScreen({
                 아니다.
 
                 점프가 성공하면 스스로도 물러난다(`clearJumpNotice`).
+
+                그리고 닫기는 **뒤에 걸린 기다림도 접는다**(`cancelJump`, #1209
+                리뷰 Medium). 이 상자는 이제 서 있는 동안 「그 줄이 오면 데려간다」는
+                의도를 함께 들고 있으므로, 상자를 물리는 것이 곧 그 의도를 무르는
+                것이다 — 물리고 자기 이유로 위로 올라간 사람을 나중에 끌어가지
+                않는다.
                 =================================================== */}
             {jumpMissed ? (
               <View style={styles.notice}>
                 <NoticeBlock
                   headline={jumpMissed.headline}
                   detail={jumpMissed.detail}
-                  onDismiss={clearJumpNotice}
+                  onDismiss={cancelJump}
                   testID="jump-missed"
                 />
               </View>

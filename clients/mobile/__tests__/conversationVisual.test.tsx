@@ -315,8 +315,16 @@ describe('H-5 — 실패가 아닌 것을 실패로 말하지 않는다', () => 
 
   it('닫는 길이 있고, 점프가 성공하면 스스로도 물러난다', () => {
     // 첫 판은 채널 이동이나 다음 점프까지 남았다.
-    expect(code).toMatch(/onDismiss=\{clearJumpNotice\}/);
+    //
+    // 닫기와 착지가 **다른 함수**인 것이 #1209 리뷰 Medium 의 수리다: 상자가
+    // 「그 줄이 오면 데려간다」는 의도를 함께 들게 됐으므로 닫기는 문장만이
+    // 아니라 그 의도도 무른다. 착지는 무를 것이 없다 — 이미 도착했다.
+    expect(code).toMatch(/onDismiss=\{cancelJump\}/);
     expect(code).toMatch(/onJumpLanded=\{clearJumpNotice\}/);
+    // 그리고 그 닫기가 실제로 기다림을 접는다. 이름만 갈라 두면 아무것도 아니다.
+    const at = code.indexOf('const cancelJump');
+    expect(at).toBeGreaterThan(-1);
+    expect(code.slice(at, at + 200)).toContain('setAwaitingJump(null)');
     // 그리고 목록이 실제로 그 신호를 낸다.
     const timeline = codeOnly(
       fs.readFileSync(

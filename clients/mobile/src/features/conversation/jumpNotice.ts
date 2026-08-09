@@ -53,6 +53,15 @@ export type JumpSubject = 'quote' | 'pin' | 'search' | 'session';
  * 견주어 판정한다). 셋 다 그 값을 가질 수 있다 — 인용은 서버가 실어 주고, 고정
  * 목록 항목은 언제나 갖고 있으며, 검색 결과는 `messageId` 와 `seq` 를 함께 든다.
  */
+/**
+ * 무엇을 하면 되는지 — **어느 주어에서도, 어느 이유에서도 이 한 문장이다.**
+ *
+ * 그리고 이 문장은 이제 지켜진다: 이대로 하면 그 줄이 도착하는 순간 화면이
+ * 데려간다(`ConversationScreen.awaitingJump`, #1209 리뷰 High). 그 전까지 이
+ * 문장은 넷 중 하나에서만 참이었다.
+ */
+const ASK = '위로 올려 이전 대화를 더 불러오세요.';
+
 const SUBJECT_NOUN: Readonly<Record<'quote' | 'pin' | 'search', [string, string]>> =
   {
     // [「…은/는 더 위쪽에 있습니다」의 주어, 「…을/를 찾지 못했습니다」의 주어]
@@ -75,10 +84,19 @@ export function jumpMissedNotice(
   reason: 'older' | 'unknown',
   subject: JumpSubject = 'quote',
 ): JumpNotice {
-  const detail =
-    reason === 'older'
-      ? '아직 불러오지 않았습니다. 위로 올려 이어서 불러오세요.'
-      : '위로 올려 이전 대화를 더 불러오세요.';
+  // **한 벌뿐이다** (#1209 리뷰 N2). `older` 갈래는 「아직 불러오지 않았습니다.
+  // 위로 올려 **이어서** 불러오세요.」였고, 그래서 한 상자가 같은 사실을 세 번
+  // 말했다 — 제목이 「더 위쪽에 있습니다」라고 말한 뒤에 「아직 안 불러왔다」를
+  // 다시 말하고, 그러고 나서 무엇을 하라고 말한다. 「더 위쪽에 있다」는 이미
+  // 「아직 안 불러왔다」를 뜻한다.
+  //
+  // 더 나쁜 것은 두 갈래가 **같은 손동작을 다른 이름으로** 불렀다는 것이다
+  // (「이어서 불러오세요」 vs 「이전 대화를 더 불러오세요」). 한 상자가 같은
+  // 세션에서 둘 다 보여 줄 수 있으므로, 사람은 배울 동작이 둘인 줄 알게 된다.
+  //
+  // 그래서 이유가 정하는 것은 **제목뿐**이다(어디 있는지 아는가). 무엇을 하면
+  // 되는지는 어느 갈래에서도 같은 한 가지이므로 문장도 하나다.
+  const detail = ASK;
   if (subject === 'session') {
     // **`reason` 을 보지 않는다** (리뷰 N1). 세션 원장은 순서값을 나르지 않으므로
     // 이 주어로 오는 점프는 언제나 seq 를 모르고(`ConversationScreen` 이
@@ -88,7 +106,7 @@ export function jumpMissedNotice(
     // 거짓말은 초록으로 보존된다.
     return {
       headline: '이 작업을 시작한 메시지를 이 화면에서 찾지 못했습니다',
-      detail: '위로 올려 이전 대화를 더 불러오세요.',
+      detail: ASK,
     };
   }
   const [above, missing] = SUBJECT_NOUN[subject];
