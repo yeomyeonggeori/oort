@@ -166,7 +166,12 @@ describe.each(SCHEMES)('%s 팔레트', (_name, palette) => {
     for (const surface of ['bg', 'surface'] as const) {
       expect(contrast(palette.textFaint, palette[surface])).toBeGreaterThanOrEqual(3);
     }
-    expect(contrast(palette.border, palette.bg)).toBeLessThan(3);
+    // **두 바탕 다** 못 넘는다 (리뷰 N-a). `bg` 만 재던 이 단정은 카드 위에 선
+    // 컨트롤 테두리에 대해 아무 말도 하지 않았고, ADE 카드의 「대화로」가 정확히
+    // 그 자리에서 `border` 를 쓰고 있었다 — 실측 라이트 1.409:1 · 다크 1.298:1.
+    for (const surface of ['bg', 'surface'] as const) {
+      expect(contrast(palette.border, palette[surface])).toBeLessThan(3);
+    }
   });
 
   it('surface 는 bg 에서 **멀어지는 쪽**으로 한 단이고, 그 단이 팔레트에서 가장 조용하다', () => {

@@ -479,7 +479,26 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderLeftWidth: 1,
-    borderLeftColor: color.border,
+    /**
+     * **`border` 가 아니다** (리뷰 N-a).
+     *
+     * H2 수리는 웹의 같은 컨트롤을 `--line-strong` 으로 옮겼는데(3.59:1 / 3.56:1)
+     * 폰만 `border` 에 남아 있었다 — 카드 surface 위에서 라이트 1.409:1 · 다크
+     * 1.298:1 로, 컨트롤 경계의 기준선 3:1 한참 아래다. 같은 제품의 같은 컨트롤이
+     * 두 클라이언트에서 다른 세기의 선을 그린다.
+     *
+     * 새 토큰을 만들지 않는다: 폰 팔레트가 그 값을 **이미 갖고 있다**. `textFaint`
+     * 는 `#84817d`/`#6f6e73` 로 웹 `--line-strong` 과 **바이트로 같고**,
+     * `tokens.ts` 머리말이 `textFaint ← --line-strong` 이라고 스스로 적어 두었다.
+     * 이 카드 surface 위에서 라이트 3.844:1 · 다크 3.238:1 로 두 스킴 다 3:1 을
+     * 넘는다.
+     *
+     * 이 앱에서 세 번째로 같은 판단을 하는 자리다 — 테마 칸의 테두리
+     * (`design/ThemeControl.tsx`, 리뷰 M-1)와 인용의 세로 규정선
+     * (`features/conversation/Quote.tsx` 의 `rule`)이 같은 이유로 이미 이 토큰을
+     * 빌려 쓴다. 이름 있는 테두리 토큰이 생기면 **세 자리가 함께** 옮겨 간다.
+     */
+    borderLeftColor: color.textFaint,
   },
   /**
    * 동사가 없는 카드의 **자리만** (리뷰 H1).

@@ -756,7 +756,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
       );
     case 'jump-missed':
       return (
-        <Frame label="점프 실패 — 실패가 아니라 사실 진술이다 (H-5 · #1193)">
+        <Frame label="점프 실패 — 실패가 아니라 사실 진술이다 (H-5 · #1193 · #1196)">
           {/* 두 이유를 **함께** 세운다. 이 고지의 설계 논점이 「어디 있는지
               모르면 모른다고 말한다」인데, 한 장만 찍으면 그 대비가 안 보인다.
               문장은 화면이 쓰는 것과 **같은 상수**에서 온다.
@@ -764,7 +764,16 @@ export function Surface({name}: {name: string}): React.JSX.Element {
               세 번째 줄이 #1193 리뷰 M3 이다: 같은 기계를 ADE 카드의 「대화로」도
               타는데, 그 사람은 인용을 누른 적이 없다. 주어가 갈렸다는 사실은
               **두 문장을 나란히 놓아야** 보이고, 사진이 없으면 그 갈래는 코드에만
-              있는 주장으로 남는다. */}
+              있는 주장으로 남는다.
+
+              넷째·다섯째가 #1196 이다. 고정과 검색 진입이 여태 인용의 낱말을
+              빌려 쓰고 있었고(고정) 화면 안에 따로 적혀 있었다(검색). 이제 넷이
+              한 기계·한 상자를 쓰므로, **다섯 문장이 한 장에 나란히** 서는 이
+              사진이 「주어만 갈리고 나머지는 같다」의 증거가 된다.
+
+              그리고 이 사진은 N-b 의 증거이기도 하다: 가장 긴 제목(세션)이 마지막
+              한 음절만 남기고 끊기던 것을 `hangul-word` 로 고쳤고, 그 결과는
+              픽셀에만 있다. */}
           <View style={styles.noticeStack}>
             <NoticeBlock
               headline={jumpMissedNotice('older').headline}
@@ -783,6 +792,18 @@ export function Surface({name}: {name: string}): React.JSX.Element {
               detail={jumpMissedNotice('unknown', 'session').detail}
               onDismiss={() => {}}
               testID="jump-missed-session"
+            />
+            <NoticeBlock
+              headline={jumpMissedNotice('older', 'pin').headline}
+              detail={jumpMissedNotice('older', 'pin').detail}
+              onDismiss={() => {}}
+              testID="jump-missed-pin"
+            />
+            <NoticeBlock
+              headline={jumpMissedNotice('older', 'search').headline}
+              detail={jumpMissedNotice('older', 'search').detail}
+              onDismiss={() => {}}
+              testID="jump-missed-search"
             />
           </View>
         </Frame>
