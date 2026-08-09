@@ -50,6 +50,7 @@ export function StopTurnControl({
   runCount,
   onOutcome,
   testIDPrefix = 'turn-stop',
+  initialArmed = false,
 }: {
   runId: string;
   /**
@@ -68,10 +69,16 @@ export function StopTurnControl({
    */
   onOutcome: (outcome: CancelOutcome) => void;
   testIDPrefix?: string;
+  /**
+   * 확인 단계에서 시작한다. **`measure/` 하네스 전용** — 근거와 규칙은
+   * `features/inbox/ApprovalDecision.tsx` 의 같은 이름 prop 주석에 있고,
+   * `__tests__/fillTokens.test.ts` 가 `src/` 전수에서 사용을 0 으로 단정한다.
+   */
+  initialArmed?: boolean;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const {workspaceId} = useSession();
-  const [armed, setArmed] = useState(false);
+  const [armed, setArmed] = useState(initialArmed);
   const [busy, setBusy] = useState(false);
   /** 가드 창 안에서 확정 탭이 실제로 있었는가. 죽은 버튼처럼 보이지 않게. */
   const [tooFast, setTooFast] = useState(false);
@@ -201,8 +208,14 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     paddingHorizontal: space.md,
   },
   buttonQuiet: {borderWidth: 1, borderColor: color.border},
-  buttonCommit: {backgroundColor: color.dangerBorder},
-  commitLabel: {fontSize: font.label, fontWeight: '600', color: color.onAccent},
+  // `dangerBorder` 를 채움으로 쓰던 두 자리 중 하나였다 (#1210 D2 — 다른 하나는
+  // `features/inbox/ApprovalDecision.tsx`). 여기서 확정하는 것은 진행 중인 턴의
+  // 중단이고, 그 버튼이 다크에서 카드 위 1.64:1 이면(고친 뒤 5.83:1) 사람이 무엇을
+  // 누르는지 화면이 말하지 않는 것이다. 라벨도 `onAccent` 에서 `onDangerFill` 로
+  // 간다 — 채움이 바뀌었으므로 그 위의 잉크도 그 채움에 매인 값이어야 한다
+  // (옛 조합은 어두운 잉크가 어두운 바탕에 앉아 다크 1.80:1 이었다).
+  buttonCommit: {backgroundColor: color.dangerFill},
+  commitLabel: {fontSize: font.label, fontWeight: '600', color: color.onDangerFill},
   inert: {opacity: 0.6},
   hint: {fontSize: font.meta, color: color.textMuted, lineHeight: 18},
   pressed: {backgroundColor: color.surfacePressed},

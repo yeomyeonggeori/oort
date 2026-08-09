@@ -68,7 +68,7 @@ export function slopTo(size: number): number {
 //
 // 여명(Dawn) 팔레트의 정본은 웹 `clients/web/src/design/tokens.css` 이고, 거기에는
 // 이미 두 스킴이 다 적혀 있다. 그래서 아래 값들은 여기서 새로 고른 것이 아니라 그
-// 파일의 두 항을 **역할로 대응시켜** 옮긴 것이다. 열여섯 역할이 짝을 갖는다:
+// 파일의 두 항을 **역할로 대응시켜** 옮긴 것이다. 열여덟 역할이 짝을 갖는다:
 //
 //   bg ← --surface                  surface ← --surface-raised
 //   surfacePressed ← --surface-hover  border ← --line        text ← --ink
@@ -76,7 +76,12 @@ export function slopTo(size: number): number {
 //   accent ← --accent                 accentSurface ← --accent-soft
 //   onAccent ← --on-accent            agent ← --agent        agentSurface ← --agent-soft
 //   warn ← --warn                     danger ← --danger      ok ← --ok
+//   dangerFill ← --danger-fill        onDangerFill ← --on-danger-fill
 //   scrim ← --scrim
+//
+// 열여섯이었다 (#1210 D2). 파괴 채움 둘은 웹에만 있었고, 그래서 폰의 파괴 버튼은
+// 잴 채움이 없어 **테두리 토큰**을 바탕으로 쓰고 있었다 — 그 값과 결과는
+// `Palette.dangerFill` 주석에 있다.
 //
 // **두 항 다 바이트로 같다.** 라이트가 먼저 왔고(U2), 다크의 accent 가족이 뒤따랐고
 // (#1155), 나머지 다크 역할이 #1164 에서 같은 길로 왔다. 그 전까지 다크는 이 앱이
@@ -192,6 +197,30 @@ export interface Palette {
    * 7.59:1 이고 전자의 값(5.93 · 5.56)보다 위다 — 둘 다 AA 를 지나되 한 단 갈라 둔다.
    */
   dangerText: string;
+  /**
+   * 파괴 액션의 **채움** — 웹 `--danger-fill` (#1210 D2).
+   *
+   * `danger` 는 위험을 **말하는** 톤이고(글자·칩·점), 이것은 위험을 **실행하는**
+   * 버튼의 바탕이다. 두 이름이 나뉜 것은 취향이 아니라 산술의 결과다: 웹이
+   * `--danger-fill` 주석에 적어 둔 대로 전경 톤은 `warn` 보다 채도가 높아야 하고
+   * 채움은 주 액션 `accent` 보다 낮아야 하는데, 다크에서 그 두 구간의 교집합이
+   * 공집합이다.
+   *
+   * 이 역할이 폰에 없어서 무슨 일이 있었나 (감사 2026-08-09 §B-4 ②): 「거부 확정」
+   * 과 「중단」 버튼이 쓸 채움이 없으니 **테두리 토큰**(`dangerBorder`)을 바탕으로
+   * 썼다. 그 결과 다크에서 되돌릴 수 없는 거부 버튼이 카드 표면(`surface`) 위
+   * 1.64:1 이고 그 옆의 승인 버튼(`accent`)이 8.12:1 이었다 — 파괴 쪽이 화면에서
+   * 5배 조용했다(같은 두 값을 `bg` 위에서 재면 1.80 대 8.94다). 웹은
+   * 같은 문제를 이 토큰의 신설로 닫았고(MOMO-642 R1 H-2), 폰의 동기화 가드는 그
+   * 두 토큰을 **명시적으로 제외**한 채 통과하고 있었다. 가드가 자기 구멍을
+   * 문서화하고 지나간 자리다.
+   *
+   * 값은 발명이 아니다 — 웹 `--danger-fill` 의 두 항 그대로이고,
+   * `paletteContrast.test.ts` 가 그 파일을 읽어 바이트로 대조한다.
+   */
+  dangerFill: string;
+  /** 파괴 채움 위에 얹는 글자 — 웹 `--on-danger-fill`. */
+  onDangerFill: string;
   /** A settled success. */
   ok: string;
   okSurface: string;
@@ -312,6 +341,13 @@ export const darkPalette: Palette = {
   dangerSurface: '#312223',
   dangerBorder: '#623635',
   dangerText: '#fec2bd',
+  // 파괴 채움 (#1210 D2). 웹 `--danger-fill` 다크 항 그대로다. 이 자리에 값이 없어서
+  // 「거부 확정」이 `dangerBorder`(#623635, 카드 위 1.64:1)를 바탕으로 쓰고 있었다 —
+  // 그 옆의 「승인 확정」은 같은 카드 위 8.12:1 이다. 이 값은 카드 위 5.83:1 ·
+  // bg 위 6.42:1 이고 채도는 accent 아래다(0.1130 대 0.1336): 파괴가 보이되 주
+  // 액션을 이기지 않는다.
+  dangerFill: '#dc817e',
+  onDangerFill: '#17161a',
   ok: '#57ab5a',
   okSurface: '#1e2a20',
   okBorder: '#38503a',
@@ -351,6 +387,9 @@ export const lightPalette: Palette = {
   dangerSurface: '#fae9e7',
   dangerBorder: '#e2b0ab',
   dangerText: '#8f1d16',
+  // 웹 `--danger-fill` 라이트 항 (#1210 D2). 카드 위 7.52:1 · bg 위 7.02:1.
+  dangerFill: '#8c393d',
+  onDangerFill: '#fffefb',
   ok: '#187533',
   okSurface: '#e3f1e6',
   okBorder: '#a9d2b3',

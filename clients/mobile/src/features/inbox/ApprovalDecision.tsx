@@ -73,6 +73,7 @@ export function ApprovalDecision({
   execution = null,
   onSettled,
   testIDPrefix = 'inbox-approval',
+  initialArmed = null,
 }: {
   approvalId: string;
   /**
@@ -105,10 +106,27 @@ export function ApprovalDecision({
    * 없다.
    */
   testIDPrefix?: string;
+  /**
+   * 확인 단계에서 시작한다. **`measure/` 하네스 전용이고 앱은 절대 넘기지 않는다.**
+   *
+   * 왜 필요한가 (#1210 D2): 확정 버튼은 사람이 한 번 탭해야 나타나고, 시뮬레이터는
+   * 스크립트로 누를 수 없다(스파이크 #837 — RN 요소가 접근성 트리에 없고 좌표 클릭도
+   * 닿지 않는다. `measure/surfaces.tsx` 머리말이 이 하네스가 존재하는 이유로 적어 둔
+   * 바로 그 사실이다). 그래서 이 제품에서 **되돌릴 수 없는 두 버튼이 나란히 서는
+   * 유일한 화면**은 한 번도 사진으로 리뷰된 적이 없고, 감사가 잰 「거부가 승인보다
+   * 5배 조용하다」는 그동안 아무 캡처에도 나타나지 않았다. 다른 상태는 전부 prop 으로
+   * 세울 수 있는데 이 하나만 그럴 수 없었던 것이 그 결함이 오래 산 이유다.
+   *
+   * 기본값이 `null` 이라 앱의 행동은 한 바이트도 바뀌지 않는다. 그리고 넘기면 안 되는
+   * 이유가 하나 더 있다: 여기서 시작하면 `armedAtMs` 가 0 이라 `CONFIRM_GUARD_MS`
+   * 더블탭 가드를 지나친 상태가 된다. 그래서 규칙을 기억에 맡기지 않고 기계가 진다 —
+   * `__tests__/fillTokens.test.ts` 가 `src/` 전수에서 이 prop 의 사용을 0 으로 단정한다.
+   */
+  initialArmed?: Armed;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const {workspaceId} = useSession();
-  const [armed, setArmed] = useState<Armed>(null);
+  const [armed, setArmed] = useState<Armed>(initialArmed);
   const [busy, setBusy] = useState(false);
   const [errorCopy, setErrorCopy] = useState<string | null>(null);
   /** 가드 창 안에서 확정 탭이 실제로 있었는가 (2R M1). 죽은 버튼처럼 보이지 않게. */
@@ -311,7 +329,12 @@ export function ApprovalDecision({
             pressed && !busy && styles.pressed,
           ]}
           testID={`${testIDPrefix}-commit`}>
-          <Text style={styles.buttonCommitLabel}>
+          <Text
+            style={
+              armed === 'approve'
+                ? styles.buttonCommitLabel
+                : styles.buttonRejectLabel
+            }>
             {busy ? '보내는 중' : armed === 'approve' ? '승인 확정' : '거부 확정'}
           </Text>
         </Pressable>
@@ -387,10 +410,20 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   },
   buttonQuiet: {borderWidth: 1, borderColor: color.border},
   buttonCommit: {backgroundColor: color.accent},
-  buttonReject: {backgroundColor: color.dangerBorder},
+  // 채움은 `dangerBorder` 였다 (#1210 D2). 폰에 파괴 **채움** 토큰이 없어서 테두리
+  // 토큰을 바탕으로 쓰고 있었고, 그래서 다크에서 되돌릴 수 없는 「거부 확정」이 이
+  // 카드(`surface`) 위 1.64:1 · 그 옆의 「승인 확정」이 8.12:1 이었다 — 파괴 쪽이
+  // 5배 조용했다. `dangerFill` 은 웹 `--danger-fill` 의 두 항이고, 같은 카드 위
+  // 다크 5.83:1 · 라이트 7.52:1 이면서 채도는 accent 아래다(다크 0.1130 대
+  // 0.1336): 보이되 주 액션을 이기지 않는다.
+  buttonReject: {backgroundColor: color.dangerFill},
   buttonInert: {opacity: 0.6},
   buttonQuietLabel: {fontSize: font.label, fontWeight: '600', color: color.text},
   buttonCommitLabel: {fontSize: font.label, fontWeight: '600', color: color.onAccent},
+  // 두 확정 버튼의 채움이 갈라졌으므로 그 위의 글자도 갈라진다. `onAccent` 하나가
+  // 두 채움을 다 덮던 동안 거부 라벨은 다크에서 어두운 잉크(#17161a)가 어두운
+  // 바탕(#623635) 위에 얹혀 1.80:1 이었다 — AA 는커녕 3:1 도 아니다.
+  buttonRejectLabel: {fontSize: font.label, fontWeight: '600', color: color.onDangerFill},
   error: {fontSize: font.meta, color: color.danger, lineHeight: 18},
   hint: {fontSize: font.meta, color: color.textMuted, lineHeight: 18},
   pressed: {backgroundColor: color.surfacePressed},
