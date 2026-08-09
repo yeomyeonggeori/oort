@@ -110,8 +110,10 @@ echo "ok: MomoKeychainAccessGroup=$app_group in both processes"
 # command substitution would only kill the subshell.
 dump_entitlements() {
   # macOS 13+ prints an XML plist on stdout; anything ahead of the declaration is
-  # codesign's own chatter and would make plutil reject the document.
-  codesign -d --entitlements - --xml "$1" 2>/dev/null | sed -n '/<?xml/,$p' >"$2"
+  # codesign's own chatter and would make plutil reject the document. Chatter can
+  # also FOLLOW the plist (first real Xcode Cloud run, build 2035: every extract
+  # came back empty while the file was non-empty) — cut at </plist>, not EOF.
+  codesign -d --entitlements - --xml "$1" 2>/dev/null | sed -n '/<?xml/,/<\/plist>/p' >"$2"
 }
 entitlement() { plutil -extract "$2" raw -o - "$1" 2>/dev/null || true; }
 
@@ -122,7 +124,15 @@ assert_keychain_grant() {
        If this fires on Xcode Cloud, the workflow is not signing with a profile."
 
   app_id="$(entitlement "$plist" application-identifier)"
-  [ -n "$app_id" ] || fail "$label has no application-identifier entitlement."
+  if [ -z "$app_id" ]; then
+    # Before dying, say what the document actually was — a red assertion that
+    # hides its evidence costs a 12-minute cloud round-trip per guess.
+    log "diagnostic($label): plutil -lint => $(plutil -lint "$plist" 2>&1 || true)"
+    log "diagnostic($label): dumped entitlements (head):"
+    head -c 1200 "$plist" >&2 || true
+    printf '\n' >&2
+    fail "$label has no application-identifier entitlement."
+  fi
   prefix="${app_id%%.*}"
   [ "$prefix" = "$EXPECTED_TEAM" ] ||
     fail "$label is signed under team prefix '$prefix', not $EXPECTED_TEAM.
