@@ -17,6 +17,7 @@ import { InviteSection } from "./InviteSection";
 import { PluginSection } from "@/features/plugins/PluginSection";
 import { SectionShell } from "./SettingsFields";
 import { UsageSection } from "./UsageSection";
+import { WebhookSection } from "./WebhookSection";
 import { WorkHostSection } from "./WorkHostSection";
 import { WorkspaceSection } from "./WorkspaceSection";
 
@@ -41,6 +42,7 @@ type SectionId =
   | "workspace"
   | "plugins"
   | "usage"
+  | "webhooks"
   | "members";
 
 /**
@@ -75,6 +77,10 @@ const SECTIONS: SectionMeta[] = [
   { id: "workspace", label: "워크스페이스", group: "워크스페이스" },
   { id: "plugins", label: "앱", group: "워크스페이스" },
   { id: "usage", label: "사용량", group: "워크스페이스" },
+  // 웹훅은 앱 바로 뒤에 선다: 둘 다 "바깥과 무엇을 주고받는가"이고, 이 순서가
+  // 곧 그 이웃 관계다. 멤버와 초대 앞인 것은 사람이 아니라 시스템을 들이는
+  // 표면이기 때문이다.
+  { id: "webhooks", label: "웹훅", group: "워크스페이스" },
   { id: "members", label: "멤버와 초대", group: "워크스페이스" },
 ];
 
@@ -224,6 +230,13 @@ export function SettingsRoute() {
               the browser's own offline state instead (react-query fetchStatus),
               which is the only signal that actually stops the request. */}
           {section === "usage" && <UsageSection workspaceId={workspaceId} />}
+          {section === "webhooks" && (
+            <WebhookSection
+              workspaceId={workspaceId}
+              memberId={session.member.id}
+              offline={offline}
+            />
+          )}
           {section === "members" && (
             <InviteSection workspaceId={workspaceId} offline={offline} />
           )}
