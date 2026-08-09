@@ -585,8 +585,13 @@ add_swift_commands() {
   # violation fails fast. Pre-existing violations are baselined; only regressions FAIL.
   add_cmd_once "design pre-flight (ratchet)" 'scripts/verify_design_preflight.sh'
   add_cmd_once "SwiftPM license and THIRD_PARTY drift gate" 'scripts/check_spm_licenses.sh --check'
-  add_cmd_once "swift build" 'DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}" make build'
-  add_cmd_once "swift test" 'DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}" make test'
+  # #1226: Makefile 의 `build`/`test` 는 현행 스택(cargo + npm)으로 재조준됐고, 은퇴
+  # 중인 Swift 트리 순회는 `swift-build`/`swift-test` 로 이름이 바뀌었다. 여기서 이름을
+  # 따라가지 않으면 "swift build" 라벨 아래에서 cargo 가 도는 거짓 증거가 되고, 이
+  # 함수를 부르는 runtime-* 프로파일이 곧이어 `swift run` 할 바이너리를 아무도 빌드하지
+  # 않게 된다.
+  add_cmd_once "swift build" 'DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}" make swift-build'
+  add_cmd_once "swift test" 'DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}" make swift-test'
   add_note_once coverage "MOMO-318 design pre-flight: raw Color(red:)/Font.custom/.font(.system(size:))/user-visible em-dash counts are held at or below scripts/design_preflight_baseline.txt; any new violation fails the swift gate."
   add_note_once coverage "MOMO-556 supply-chain gate: all 9 remote SwiftPM roots resolve, every transitive checkout LICENSE is permissive, copyleft families fail closed, and the generated THIRD_PARTY SwiftPM section has no drift."
 }

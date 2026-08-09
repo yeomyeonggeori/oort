@@ -1,21 +1,40 @@
 # oort — 문서 지도 (INDEX)
 
 > **전 문서 단일 색인.** 처음 들어온 사람·도구·Codex가 "무엇이 어디에 있고 무엇이 정본인가"를 한 눈에 잡는다.
-> 경로는 모두 리포 루트(`/Users/kwakseongjae/projects/momo`) 기준 상대경로. GitHub: `Dawn-kim-official/momo` (branch `main`).
+> 경로는 모두 **리포 루트 기준 상대경로**(체크아웃 위치와 무관). GitHub: `yeomyeonggeori/momo`.
 > **정본 우선순위(충돌 시):** `AGENTS.md`(운영 계약) > `ROADMAP.md`(마일스톤) > `docs/BACKLOG.md`(티켓) > 그 외. 스키마는 `schema_v0.sql`(이동·수정 금지)이 항상 정본.
 > 표기: `(검증됨)`=1차 출처 교차확인 · `(추정)`=설계/일정 판단 · **법무 텍스트는 법률 자문 아님 — 외부 변호사 1회 검토.**
 
 ---
 
-## 0. 가장 먼저 읽을 것 (Codex/신규 진입)
+## 0. 지금 무엇으로 짓는가 (스택 한 눈)
+
+> 이 색인의 많은 문서는 **Swift/macOS 시절에 쓰였다.** 그 문서들을 폐기하지 않고 남겨 두되, 어느 것이 현행이고 어느 것이 은퇴 중인지 여기서 먼저 가른다 — 그러지 않으면 문서를 따르는 사람이 **실패하지 않고 잘못된 것을 성공적으로 짓는다**(#1226).
+
+| 층 | 현행(여기서 짓는다) | 은퇴 중(삭제 대기) |
+|---|---|---|
+| 서버 | **`server-rust/`** Rust/Axum(ADR-0145) — `cargo` | `server/Sources`(Hummingbird 2) |
+| 발행/워커 | `bins/momo-relay` · `momo-agent-worker` · `momo-notifier` | `relay/OutboxRelay` · `workers/*` · `services/*` |
+| DDL | **`server/Migrations/*.sql`**(정본, Rust 이미지가 싣는다) + `schema_v0.sql` | — |
+| 제품 표면 | **`clients/web`**(React/Vite) · `clients/desktop`(Tauri 2) · `clients/mobile`(RN) | `clients/macOS` · `clients/iOS` |
+| 공유 코어 | **`packages/momo-core`**(TS, `@momo/core`) | `clients/Core`(Swift) |
+| 기동/배포 | [`infra/rust/README.md`](../infra/rust/README.md)(이미지+compose) · [`docs/runbooks/ncp-rust-deploy.md`](runbooks/ncp-rust-deploy.md)(라이브 정본) | [`docs/RUN.md`](RUN.md)(Swift 기준 — 상단 배너 참조) |
+
+- **예외 — 은퇴 아님:** `relay/PushRelay`(라이브 푸시 경로가 지금도 빌드·배포) · `clients/web-legacy`(알파가 실제로 서빙하는 산출물, ADR-0133 parity 게이트 전까지).
+- **`infra/rust/README.md` 각주(수리 중):** §2 준비 → §3 로컬 기동 경로가 **무수정 템플릿만으로는 통과하지 못한다**(env 템플릿에 compose가 `:?`로 요구하는 키가 빠져 있다). 수리는 **#1227** 소관 — 그 전까지는 이 문서를 읽되 막히면 #1227을 보라.
+- 현행 스택 빌드·검증 명령의 정본은 [`AGENTS.md`](../AGENTS.md) §3(그리고 `Makefile`의 `build`/`test`).
+
+---
+
+## 0.1 가장 먼저 읽을 것 (Codex/신규 진입)
 
 | 순서 | 문서 | 왜 |
 |---|---|---|
-| 1 | [`STATUS.md`](../STATUS.md) | **항상 먼저.** 지금 무엇이 컴파일/런타임 검증됐나(현재 = M1 runtime MOMO-001~004 검증, staging/WebSocket/APNs 후속). |
+| 1 | [`STATUS.md`](../STATUS.md) | **항상 먼저.** 지금 무엇이 컴파일/런타임 검증됐나 — **최상단 항목이 현재**다(이 표에 상태를 적어 두면 즉시 낡는다). |
 | 2 | [`AGENTS.md`](../AGENTS.md) | Codex 자율작업 **운영 계약**(빌드·검증 명령, DoD, 다음 티켓 선택법, 브랜치/PR). 충돌 시 최우선. |
-| 3 | [`ROADMAP.md`](../ROADMAP.md) | M0~M8 **마일스톤 backbone 정본**(의존/게이트/비용). |
-| 4 | [`docs/BACKLOG.md`](BACKLOG.md) | **티켓 정본**(MOMO-NNN, 41티켓/14에픽) — GitHub 이슈 변환원. |
-| 5 | [`CODEX.md`](../CODEX.md) | 사람·도구가 읽는 풀 가이드(AGENTS.md와 핵심 동일). |
+| 3 | [`ROADMAP.md`](../ROADMAP.md) | 릴리스 계획 정본. **v0의 단위는 마일스톤 번호가 아니라 축**이다(상단 축 절이 현행, M0~M8 §1~§7은 은퇴 전제의 역사 기록). |
+| 4 | [`docs/BACKLOG.md`](BACKLOG.md) | 티켓 정본(MOMO-NNN) — GitHub 이슈 변환원. |
+| 5 | [`CODEX.md`](../CODEX.md) | 사람·도구가 읽는 풀 가이드(AGENTS.md와 핵심 동일 — 사본이 둘이라 **같은 PR에서 함께** 고친다). |
 
 ---
 
@@ -24,15 +43,18 @@
 | 파일 | 역할 | 정본 등급 |
 |---|---|---|
 | [`schema_v0.sql`](../schema_v0.sql) | 정본 스키마(PostgreSQL 18, 24 테이블, `uuidv7()` PK, RLS FORCE) | **정본 — 이동/수정 금지**(확장은 `server/Migrations/00N_*.sql` 신규 + RLS DO-block ARRAY 등록) |
-| [`ROADMAP.md`](../ROADMAP.md) | M0~M8 마일스톤/에픽/의존/게이트/비용 | **상위 정본** |
+| [`ROADMAP.md`](../ROADMAP.md) | 릴리스 계획 — 상단 **축**(관전·승인·대화)이 현행, M0~M8 §1~§7은 은퇴 전제의 역사 기록 | **상위 정본** |
 | [`STATUS.md`](../STATUS.md) | 현재 빌드/검증 상태 | 작업 후 **반드시 갱신** |
 | [`BUILD_TICKETS.md`](../BUILD_TICKETS.md) | Phase 0 + v0 데모 의존순 빌드 백로그 + 수용기준 등급 정의 | 빌드 STEPS |
 | [`AGENTS.md`](../AGENTS.md) | Codex 자동 머지 운영 계약 | **운영 정본(최우선)** |
 | [`CODEX.md`](../CODEX.md) | Codex 자율실행 풀 가이드 | AGENTS.md와 동일 핵심 |
-| [`README.md`](../README.md) | 제품 1줄 + 스택 + 아키텍처 + 정식 릴리스 로드맵 | 진입점 |
+| [`README.md`](../README.md) | 제품 1줄 + 불변식 + 정직성 표(✅🚧💭) + 아키텍처 | 진입점 |
 | [`NOTICE`](../NOTICE) | Apache 2.0 귀속 — 앱 화면 표기 대상 | 법무 |
-| [`Makefile`](../Makefile) | `make build/test/up/down/migrate` | 빌드 명령 |
-| [`scripts/local_gate.sh`](../scripts/local_gate.sh) | GitHub Actions disabled/manual-only 기간 PR evidence 생성용 로컬 게이트(`docs|swift|diagnostics|local-alpha|runtime-*|macos-ui|m3-dbc|all`) | 운영 명령 |
+| [`Makefile`](../Makefile) | `build`/`test` = **현행 스택**(cargo + npm), `up`/`down`/`migrate` = dev compose, `swift-build`/`swift-test` = 은퇴 중 트리 | 빌드 명령 |
+| [`infra/rust/README.md`](../infra/rust/README.md) | **현행 스택 기동**: Rust 이미지 + prod형 compose(푸시·폰 오버레이 포함) ※§2 준비 절차 수리 중 — #1227 | 운영 명령 |
+| [`docs/runbooks/ncp-rust-deploy.md`](runbooks/ncp-rust-deploy.md) | **라이브 배포 정본**(app.oor7.com Rust 스택 — 이미지 태그 교체 + Caddy/헤더 배포) | 운영 명령 |
+| [`scripts/verify_merge_tree.sh`](../scripts/verify_merge_tree.sh) | **병합 결과**(브랜치가 아니라 머지된 트리)에서 웹·폰·코어를 컴파일하는 크로스-클라 게이트(#1108) | 운영 명령 |
+| [`scripts/local_gate.sh`](../scripts/local_gate.sh) | GitHub Actions disabled/manual-only 기간 PR evidence 생성용 로컬 게이트(`docs|web|web-serving|runtime-*|diagnostics|local-alpha|internal-alpha|ios|macos-ui|m3-dbc|swift|all` — `swift`/`macos-ui`는 은퇴 중 트리) | 운영 명령 |
 | [`scripts/collect_diagnostics.sh`](../scripts/collect_diagnostics.sh) | 내부 alpha 장애 공유용 redacted diagnostics bundle(directory + tar.gz + summary.md) 생성 | 운영 명령 |
 | [`scripts/goal_status.sh`](../scripts/goal_status.sh) | ready/in-progress/needs-review/blocked issue와 branch/PR/worktree/local gate 상태판 | 운영 명령 |
 | [`scripts/goal_claim.sh`](../scripts/goal_claim.sh) | 이슈 claim + canonical branch/worktree 생성 + remote branch lock + status 갱신 | 운영 명령 |
@@ -43,7 +65,8 @@
 
 ## 2. 릴리스 / 배포 / 게이트 (정식 경로)
 
-> 데스크탑 공증 다운로드 + iOS App Store 출시. 🔒 **스토어 배포(M8)는 검수 게이트(M7) PASS 후에만.**
+> **이 절의 상당수는 Swift/Apple 스토어 경로 문서다(은퇴 전제).** 스토어·법무·CI/CD 항목 자체는 여전히 유효하지만, 그 배포 대상이던 Swift 앱은 삭제 대기다 — 현행 배포 경로는 §0의 기동/배포 행(`infra/rust/README.md` · `docs/runbooks/ncp-rust-deploy.md`)이다.
+> 🔒 **스토어 배포(M8)는 검수 게이트(M7) PASS 후에만.**
 
 | 문서 | 역할 | 마일스톤 |
 |---|---|---|
@@ -58,7 +81,7 @@
 | [`docs/INTERNAL_ALPHA_FEEDBACK.md`](INTERNAL_ALPHA_FEEDBACK.md) | 내부 alpha feedback intake: severity, evidence packet, needs-triage, buildable goal handoff | M3/M7 준비 |
 | [`docs/MACOS_ALPHA_UPDATE_CHANNEL.md`](MACOS_ALPHA_UPDATE_CHANNEL.md) | macOS alpha Dev Update Channel runbook: local/file manifest v0, current/available version CTA, operator-assisted install/relaunch, Sparkle/signing boundary | M3/M4 준비 |
 | [`docs/QA_GATE.md`](QA_GATE.md) | **M7 검수 게이트 단일 진입점**(G-0~G-H + 베타 전략 + 사용성 체크리스트 + GO 판정) | M7 |
-| [`docs/RUN.md`](RUN.md) | 로컬 기동/마이그레이션/롤백 절차(환경변수→`make up`→migrate→서버/relay/worker→macOS) | M0/M1 |
+| [`docs/RUN.md`](RUN.md) | **은퇴 중** — Swift 기준 로컬 기동/마이그레이션/롤백 절차. 상단 배너가 현행 경로를 가리킨다. `.env`·compose·마이그레이션 절(§2~§4)은 스택과 무관하게 여전히 유효 | M0/M1 |
 | [`docs/INBOUND_MCP.md`](INBOUND_MCP.md) | Inbound MCP v0 서버 skeleton endpoint/security/permission model | M2 |
 | [`docs/GWS_INTERNAL_CONSENT_RUNBOOK.md`](GWS_INTERNAL_CONSENT_RUNBOOK.md) | 배포 조직용 GWS 사전 셋업 런북(MOMO-323): GCP 프로젝트 생성 → OAuth consent **Internal**(검증/CASA 면제 전제) → SA 생성/키 발급 → 공유 드라이브 + SA Content Manager 멤버(`boundary_kind=shared_drive_member`, DWD 아님) — 사람 단계 `[manual]` 표기 | M2 |
 | [`docs/GITHUB_OPS.md`](GITHUB_OPS.md) | GitHub 운영 구조(마일스톤=릴리스, 라벨 택소노미, Projects, Codex goal 흐름) | 전반 |
@@ -202,17 +225,31 @@
 
 ## 6. 코드 디렉터리 (책임)
 
+**현행 스택:**
+
 | 경로 | 책임 |
 |---|---|
-| `clients/Core/` | MomoCore: 공유 모델 + `ChatBackend`/`AgentTransport` 프로토콜(외부의존 0) |
-| `clients/macOS/` | MomoMac: SwiftUI 뷰(D/B/C) + smoke ※라이브러리(아직 `.app` 아님, M4에서 Xcode화) |
-| `clients/iOS/` | (M5에서 `MomoiOS.xcodeproj` 생성) |
-| `server/` | MomoServer(Hummingbird 2) — `Routes/`(seq+outbox tx)·`Auth`·`Realtime`·`DB`·`Migrations/00N_*.sql` |
-| `relay/OutboxRelay/` | SKIP LOCKED 폴링 → Centrifugo publish (BYPASSRLS) |
-| `workers/AgentWorker/` | agent_job 클레임 → hermes OpenAI-compat SSE → message PATCH (BYPASSRLS) |
-| `adapters/hermes/` | `momo_adapter.py`(BasePlatformAdapter) + plugin.yaml (py3) |
-| `infra/` | dev `docker-compose.yml`(PG18+Centrifugo v6) · e2e `docker-compose.e2e.yml`(api/relay/worker/mock-Hermes/Postgres/Centrifugo local gate boundary) · `centrifugo.json` · `.env.example`; prod skeleton은 `infra/prod/*`(SOPS/age + pgBackRest 예시, 실제 secret 없음). Compose layer 정본은 `docs/adr/0002-docker-compose-layering.md` |
-| `fastlane/` | `Fastfile`·`Appfile`·`Matchfile` (Gemfile은 루트) |
+| `server-rust/` | **Rust/Axum 워크스페이스**(ADR-0145). `bins/{momo-server,momo-relay,momo-agent-worker,momo-notifier,momo-migrate}` + `crates/momo-*`(messaging=쓰기경로 척추 · outbox · auth · db · agent · provider · push · drive · t3 · wire · settings · ephemeral) |
+| `server/Migrations/` | **정본 DDL**(`00N_*.sql`). Rust 이미지가 그대로 싣는다 — 은퇴 아님 |
+| `packages/momo-core/` | `@momo/core` — 웹·폰이 공유하는 TS 도메인 코어(레포 루트 npm 워크스페이스). **모델 사본 금지** |
+| `clients/web/` | React/Vite SPA — 제품 웹 표면이자 데스크톱이 감싸는 번들 |
+| `clients/desktop/` | Tauri 2 셸(딥링크·mDNS·알림·키체인·업데이터). UI를 포크하지 않는다 |
+| `clients/mobile/` | React Native 앱(현재 iOS) |
+| `clients/web-legacy/` | ADR-0119 v0 웹 — **알파가 실제로 서빙하는 산출물**(parity 게이트 전까지). 생성 타입이 `docs/api/openapi.yaml`과 동기화돼야 한다 |
+| `adapters/hermes/` · `adapters/prime/` | `momo_adapter.py`(BasePlatformAdapter) + plugin.yaml (py3) · prime-agent 어댑터(스트림 릴레이·하네스 refine·RPC) |
+| `infra/rust/` | **라이브 배포 경로** — Rust 이미지 compose + `Caddyfile`(정본) + 푸시/폰 오버레이 |
+| `infra/` | dev `docker-compose.yml`(PG18+Centrifugo v6) · e2e `docker-compose.e2e.yml`(local gate boundary) · `centrifugo.json` · `.env.example`. Compose layer 정본은 `docs/adr/0002-docker-compose-layering.md` |
+
+**은퇴 중(삭제 대기) — 읽어서 이해하는 용도이지 확장 대상이 아니다:**
+
+| 경로 | 책임 |
+|---|---|
+| `clients/Core/` | MomoCore: 공유 모델 + `ChatBackend`/`AgentTransport` 프로토콜 |
+| `clients/macOS/` · `clients/iOS/` | MomoMac(SwiftUI D/B/C) · MomoiOSKit |
+| `server/Sources/` | MomoServer(Hummingbird 2) — Rust 재작성으로 대체됨 |
+| `relay/OutboxRelay/` · `workers/` · `services/` | Swift 실행체(AgentWorker·WorkHostDaemon·NotifierWorker·LinkShort 등) |
+| `relay/PushRelay/` | ※ **예외 — 은퇴 아님**: 라이브 푸시 경로가 지금도 빌드·배포한다 |
+| `infra/prod/` · `fastlane/` | Swift prod compose(SOPS/age + pgBackRest 예시, 실제 secret 없음) · Apple 배포. ※ `infra/prod/Dockerfile.web`은 예외 — web-legacy를 서빙한다 |
 
 ---
 
