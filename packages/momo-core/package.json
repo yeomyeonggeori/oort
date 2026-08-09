@@ -2,6 +2,7 @@
   "name": "@momo/core",
   "private": true,
   "version": "0.0.0",
+  "license": "Apache-2.0",
   "description": "Platform-free domain logic shared by every momo (oort) client (ADR-0137 D3). No UI, no platform API, no runtime dependencies — enforced by scripts/purity.mjs.",
   "type": "module",
   "exports": {

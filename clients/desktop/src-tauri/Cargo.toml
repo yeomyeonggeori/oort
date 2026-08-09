@@ -2,6 +2,10 @@
 name = "momo-desktop"
 version = "0.0.0"
 description = "momo desktop shell — ADR-0133 (MOMO-595 spike, MOMO-603 native plugins, MOMO-606 updater)"
+# Repository license (root LICENSE). Stated explicitly because this crate is not
+# a member of the server-rust workspace and inherits nothing from it; without it
+# the #1225 license gate reports the first-party shell as unlicensed.
+license = "Apache-2.0"
 edition = "2021"
 rust-version = "1.77.2"
 

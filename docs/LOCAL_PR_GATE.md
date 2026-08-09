@@ -116,6 +116,7 @@ Profiles:
 | `m3-dbc` | M3 D/B/C exit evidence or MOMO-020/021/022 close-readiness review | `swift` profile + Docker/migration bootstrap + `verify_agent_worker.sh` D/B evidence + `verify_approval_decision.sh` C evidence + `verify_macos_real_backend_ui.sh` |
 | `web-serving` | `infra/prod/Dockerfile.web`, prod Caddy/compose, LinkShort, or APP_DOMAIN serving verifier changes | `docs` static checks + `scripts/verify_web_serving.sh`; isolated e2e `web` profile on ports 28070-28074, real Vite dist via web-init named volume, `/join` fallback and `/i/*` LinkShort proxy included in the eight-assertion HTTP gate. Public DNS/ACME/TLS and the full invite round-trip are excluded. |
 | `web` | `clients/web-legacy` (ADR-0119 v0), `docs/api/openapi.yaml`, or web serving/smoke script changes | worktree-clean + `npm ci` + `npm run lint` + `npm run test` (Vitest) + `npm run typecheck` + `scripts/verify_web_generated_types.sh` (openapi-typescript output vs committed `src/api/schema.d.ts`; `generator-failed` and `types-stale` are distinct named failures) + `npm run build` + permissive-only license gate (full transitive inventory markdown) + `scripts/web_serving_smoke.sh` + `scripts/verify_web_login_smoke.sh` (e2e compose Chromium login→timeline→realtime) + `scripts/verify_openapi_contract.sh` runtime drift gate |
+| `license` | dependency changes in any cargo/npm tree — `Cargo.lock`, `package-lock.json`, `deny.toml`, or the gate scripts themselves | `docs` profile + `scripts/tests/test_license_gate.sh` (red proofs) + `scripts/check_cargo_licenses.sh` (`cargo deny check licenses` over `server-rust` and `clients/desktop/src-tauri` with the root `deny.toml`) + `scripts/check_npm_licenses.mjs` over the canonical npm trees (workspace root incl. `packages/momo-core`, `clients/web`, `clients/mobile`; inventory markdown to the gate output dir). Requires `cargo-deny`; fails closed with install guidance when absent. Licenses only — no RUSTSEC advisories, no `npm audit` |
 | `all` | merge-critical/runtime-wide changes | broad static/Swift/runtime DB/relay/agent/macOS gate in one run, with shared bootstrap deduped except migration idempotency; run `runtime-live` separately for WebSocket live evidence because it starts host API/relay processes and a compose-network proxy |
 
 Examples:
@@ -137,6 +138,7 @@ LOCAL_GATE_LAUNCH_UI=1 scripts/local_gate.sh --profile macos-ui
 scripts/local_gate.sh --profile m3-dbc
 scripts/local_gate.sh --profile web-serving
 scripts/local_gate.sh --profile web
+scripts/local_gate.sh --profile license
 scripts/local_gate.sh --profile docs --output-dir /tmp/momo-local-gate
 ```
 
@@ -365,11 +367,15 @@ and web-serving changes (ADR-0119 W-2/W-4). Steps, in order:
    documented) — a step that always fails carries no signal.
 3. `vite build` (production bundle must stay CSP-safe: no inline script;
    ADR-0119 permits inline style, and the browser smoke enforces the policy).
-4. License gate: `clients/web-legacy/scripts/check-licenses.mjs` walks the full
-   installed transitive closure from `package-lock.json`, fails on anything
-   outside the permissive allowlist (MIT/Apache-2.0/ISC/BSD family;
-   dev-only reviewed exceptions BlueOak-1.0.0 and Python-2.0), and writes a
-   Markdown license inventory to the gate output dir — attach it to the PR.
+4. License gate: `scripts/check_npm_licenses.mjs --root clients/web-legacy`
+   walks the full transitive closure from `package-lock.json`, fails on
+   anything outside the shared permissive allowlist, and writes a Markdown
+   license inventory to the gate output dir — attach it to the PR.
+   #1225 moved this script out of `clients/web-legacy/scripts/` and pointed
+   its defaults at the canonical trees, so this profile now names the tree it
+   builds. The policy itself (including the reviewed MPL-2.0/BlueOak-1.0.0/
+   Python-2.0/CC-BY-4.0 entries and their reasons) lives in the script's
+   `ALLOWED` map and mirrors `deny.toml`; see the `license` profile.
 5. `scripts/web_serving_smoke.sh` — MOMO-390 regression: Caddyfile parse
    matrix, SPA fallback, `/v1` proxy wiring, centrifugo edge 403, strict
    CSP headers, and the APP_DOMAIN-unset sentinel fail-closed ordering

@@ -1,0 +1,114 @@
+# =============================================================================
+# oort cargo dependency license policy (#1225).
+#
+# One policy file for BOTH cargo workspaces in this repository:
+#   - server-rust/            the live server backbone (ADR-0145)
+#   - clients/desktop/src-tauri/  the Tauri desktop shell (ADR-0133)
+#
+# It is at the repository root on purpose: the policy is the project's, not one
+# workspace's. Run it through the wrapper, which passes --config for you:
+#
+#   scripts/check_cargo_licenses.sh
+#
+# (Running `cargo deny check licenses` from inside a workspace directory without
+# `--config ../deny.toml` uses cargo-deny's empty default allowlist and fails on
+# every crate — that is cargo-deny's behaviour, not a policy failure.)
+#
+# Why this file exists: audit `research/2026-08-10-buzz-audit-A.md` measured that
+# CONTRIBUTING promised a fail-closed license gate while the only gate in the
+# repo inspected 37 SwiftPM packages — cargo's 644 unique crates and npm's 1,258
+# were unchecked (1.9% coverage). This closes the cargo half; the npm half is
+# `scripts/check_npm_licenses.mjs`. Both allowlists are deliberately the same
+# policy expressed twice, so a license accepted for Rust is accepted for npm.
+#
+# Adding a dependency whose license is not below is a FAIL, not a warning. The
+# fix is to add the SPDX id here *with a comment naming the crate and why the
+# license is compatible with redistributing oort under Apache-2.0* — never to
+# widen the list silently.
+#
+# Scope note: this runs `check licenses` only. `cargo deny check advisories`
+# (RUSTSEC) and `bans`/`sources` are a separate follow-up — they need the
+# advisory database and a duplicate-crate policy, and mixing them into the
+# license gate would make a security failure read as a license failure.
+# =============================================================================
+
+[licenses]
+# Every SPDX expression in the graph must be satisfiable by this list. cargo-deny
+# evaluates the expression properly: `A OR B` passes when either side is allowed,
+# `A AND B` needs both. That evaluation order is the point — the older
+# `scripts/check_spm_licenses.sh` matches copyleft *names* before evaluating the
+# expression, which would fail `r-efi` (`MIT OR Apache-2.0 OR LGPL-2.1-or-later`)
+# even though the MIT branch is freely selectable.
+allow = [
+  # --- The four permissive families the project already declares ---------------
+  "MIT",
+  "MIT-0",
+  "Apache-2.0",
+  "ISC",             # ring (Apache-2.0 AND ISC), rustls-webpki, untrusted, simple_asn1, libloading
+  "BSD-2-Clause",
+  "BSD-3-Clause",    # curve25519-dalek, ed25519-dalek, subtle, sha1_smol, alloc-no-stdlib, brotli (AND MIT)
+  "0BSD",
+
+  # --- Reviewed additions. Each is permissive; each names its evidence ---------
+  # Zlib: permissive, no source-distribution or notice obligation beyond
+  # "don't misrepresent origin". foldhash (hashbrown's default hasher) is
+  # Zlib-only; tinyvec/objc2/bytemuck offer it as one OR branch.
+  "Zlib",
+
+  # Unicode-3.0: the ICU4X data/collection crates (icu_*, zerovec, yoke,
+  # tinystr, writeable …) and unicode-ident ("(MIT OR Apache-2.0) AND
+  # Unicode-3.0"). Unicode's own permissive license for its data tables;
+  # attribution only, no copyleft. 36 crates across the two workspaces.
+  "Unicode-3.0",
+
+  # CDLA-Permissive-2.0: webpki-roots / webpki-root-certs — the Mozilla CA root
+  # store repackaged as data. Community Data License Agreement, permissive
+  # variant: no obligations on downstream distribution of the data.
+  "CDLA-Permissive-2.0",
+
+  # CC0-1.0: tiny-keccak (desktop, transitive). Public-domain dedication —
+  # weaker obligations than MIT, nothing to comply with.
+  "CC0-1.0",
+
+  # Apache-2.0 WITH LLVM-exception: target-lexicon carries it alone; rustix,
+  # linux-raw-sys, wasi, wasip2 and wit-bindgen offer it as one OR branch. The
+  # LLVM exception only *removes* a condition (no attribution duty on compiled
+  # output), so it is strictly weaker than plain Apache-2.0.
+  "Apache-2.0 WITH LLVM-exception",
+
+  # MPL-2.0 — REVIEWED POLICY DECISION (2026-08-10 plan §방침, ADR-0100 track).
+  # File-scope weak copyleft: obligations attach to the MPL'd files themselves,
+  # not to a work that merely links them, so redistributing oort under
+  # Apache-2.0 is unaffected (MPL-2.0 §3.3 explicitly permits it). Present in
+  # 5 desktop crates — cssparser, cssparser-macros, dtoa-short, selectors
+  # (Servo CSS stack, pulled in transitively by the Tauri shell) and
+  # option-ext. server-rust has ZERO MPL crates; the backbone stays fully
+  # permissive. block/buzz — the Apache-2.0 project this policy is benchmarked
+  # against — allows MPL-2.0 in its own deny.toml for the same reason.
+  # To reverse this decision, delete this entry: the gate then fails closed on
+  # those 5 crates and the desktop shell needs replacements.
+  "MPL-2.0",
+]
+
+# Fail on a crate whose license cannot be determined at all. There are none
+# today (both lockfiles resolve to 663 crates, 0 with a missing license field),
+# so any hit is a genuinely new unknown and must be looked at, not clarified
+# away by reflex.
+confidence-threshold = 0.8
+
+# First-party crates are covered by the repository LICENSE (Apache-2.0) and
+# declare it in their manifests (server-rust via [workspace.package], the
+# desktop shell directly). They are therefore checked like any other crate
+# rather than skipped, so a first-party manifest that loses its license field
+# fails the gate instead of disappearing from it.
+private = { ignore = false }
+
+# One policy file is evaluated against two independent dependency graphs (and
+# mirrored a third time for npm in scripts/check_npm_licenses.mjs), so an entry
+# that one graph needs is by construction "unused" in the other — MPL-2.0 and
+# CC0-1.0 exist only in the desktop graph, CDLA-Permissive-2.0 mostly in
+# server-rust, 0BSD/MIT-0 only on the npm side. Warning on that would print four
+# to six unactionable warnings on every run and train readers to ignore the
+# gate's output, so unused entries are silent. Pruning is done by reading this
+# file against the audit, not by chasing warnings.
+unused-allowed-license = "allow"

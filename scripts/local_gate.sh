@@ -11,7 +11,7 @@ OUT_DIR="${LOCAL_GATE_OUT_DIR:-${TMPDIR:-/tmp}/momo-local-gate}"
 
 usage() {
   cat <<'EOF'
-Usage: scripts/local_gate.sh [--auto] [--profile docs|swift|diagnostics|staging-smoke|host-runtime|backup|local-alpha|internal-alpha|runtime-db|runtime-relay|runtime-live|runtime-agent|external-agent-provider|macos-ui|ios|m3-dbc|web-serving|web|all]
+Usage: scripts/local_gate.sh [--auto] [--profile docs|swift|diagnostics|staging-smoke|host-runtime|backup|local-alpha|internal-alpha|runtime-db|runtime-relay|runtime-live|runtime-agent|external-agent-provider|macos-ui|ios|m3-dbc|web-serving|web|license|all]
 
 Options:
   --auto              Pick the profile from changed paths (MOMO-316):
@@ -64,7 +64,7 @@ while [ "$#" -gt 0 ]; do
       usage
       exit 0
       ;;
-    docs|swift|diagnostics|staging-smoke|host-runtime|backup|local-alpha|internal-alpha|runtime-db|runtime-relay|runtime-live|runtime-agent|external-agent-provider|macos-ui|ios|m3-dbc|web-serving|web|all)
+    docs|swift|diagnostics|staging-smoke|host-runtime|backup|local-alpha|internal-alpha|runtime-db|runtime-relay|runtime-live|runtime-agent|external-agent-provider|macos-ui|ios|m3-dbc|web-serving|web|license|all)
       PROFILE="$1"
       PROFILE_EXPLICIT=1
       shift
@@ -83,7 +83,7 @@ fi
 
 if [ "$PROFILE_EXPLICIT" -eq 1 ]; then
   case "$PROFILE" in
-    docs|swift|diagnostics|staging-smoke|host-runtime|backup|local-alpha|internal-alpha|runtime-db|runtime-relay|runtime-live|runtime-agent|external-agent-provider|macos-ui|ios|m3-dbc|web-serving|web|all) ;;
+    docs|swift|diagnostics|staging-smoke|host-runtime|backup|local-alpha|internal-alpha|runtime-db|runtime-relay|runtime-live|runtime-agent|external-agent-provider|macos-ui|ios|m3-dbc|web-serving|web|license|all) ;;
     *)
       echo "unknown profile: $PROFILE" >&2
       usage >&2
@@ -135,6 +135,7 @@ AUTO_NEED_STAGING=0
 AUTO_NEED_HOSTRT=0
 AUTO_NEED_DIAG=0
 AUTO_NEED_WEB=0
+AUTO_NEED_LICENSE=0
 AUTO_NEED_ALL=0
 
 auto_classify_script() {
@@ -144,6 +145,8 @@ auto_classify_script() {
       AUTO_NEED_DB=1; AUTO_REASONS+=("$1 -> runtime-db") ;;
     scripts/check_spm_licenses.sh|scripts/tests/test_spm_license_gate.sh|scripts/spm_license_exceptions.tsv)
       AUTO_REASONS+=("$1 -> swift (SwiftPM supply-chain gate)") ;;
+    scripts/check_cargo_licenses.sh|scripts/check_npm_licenses.mjs|scripts/tests/test_license_gate.sh)
+      AUTO_NEED_LICENSE=1; AUTO_REASONS+=("$1 -> license (#1225 cargo/npm dependency license gate)") ;;
     scripts/verify_linkshort.sh)
       AUTO_REASONS+=("$1 -> swift") ;;
     scripts/verify_relay.sh|scripts/verify_push_relay.sh|scripts/push_relay_keygen.sh)
@@ -175,6 +178,10 @@ auto_classify_script() {
 
 auto_classify_path() {
   case "$1" in
+    deny.toml)
+      # #1225 cargo license policy. Its only consumer is the license gate, so
+      # this is targeting rather than narrowing: no build/runtime surface reads it.
+      AUTO_NEED_LICENSE=1; AUTO_REASONS+=("$1 -> license (cargo-deny policy)") ;;
     docs/api/openapi.yaml)
       # The client contract spec: drift is verified against the live server
       # inside the web profile (verify_openapi_contract.sh).
@@ -278,7 +285,7 @@ auto_select_profile() {
   done
   set +f
 
-  local units=$((AUTO_NEED_MACOS + AUTO_NEED_IOS + AUTO_NEED_DB + AUTO_NEED_RELAY + AUTO_NEED_AGENT + AUTO_NEED_LIVE + AUTO_NEED_STAGING + AUTO_NEED_HOSTRT + AUTO_NEED_DIAG + AUTO_NEED_WEB))
+  local units=$((AUTO_NEED_MACOS + AUTO_NEED_IOS + AUTO_NEED_DB + AUTO_NEED_RELAY + AUTO_NEED_AGENT + AUTO_NEED_LIVE + AUTO_NEED_STAGING + AUTO_NEED_HOSTRT + AUTO_NEED_DIAG + AUTO_NEED_WEB + AUTO_NEED_LICENSE))
   if [ "$AUTO_NEED_ALL" -eq 1 ] || [ "$units" -gt 1 ]; then
     AUTO_SUGGESTED="all"
     if [ "$AUTO_NEED_LIVE" -eq 1 ]; then
@@ -310,6 +317,8 @@ auto_select_profile() {
     AUTO_SUGGESTED="diagnostics"
   elif [ "$AUTO_NEED_WEB" -eq 1 ]; then
     AUTO_SUGGESTED="web"
+  elif [ "$AUTO_NEED_LICENSE" -eq 1 ]; then
+    AUTO_SUGGESTED="license"
   else
     AUTO_SUGGESTED="docs"
   fi
@@ -329,7 +338,7 @@ if [ "$AUTO_MODE" -eq 1 ]; then
 fi
 
 case "$PROFILE" in
-  docs|swift|diagnostics|staging-smoke|host-runtime|backup|local-alpha|internal-alpha|runtime-db|runtime-relay|runtime-live|runtime-agent|external-agent-provider|macos-ui|ios|m3-dbc|web-serving|web|all) ;;
+  docs|swift|diagnostics|staging-smoke|host-runtime|backup|local-alpha|internal-alpha|runtime-db|runtime-relay|runtime-live|runtime-agent|external-agent-provider|macos-ui|ios|m3-dbc|web-serving|web|license|all) ;;
   *)
     echo "unknown profile: $PROFILE" >&2
     usage >&2
@@ -503,7 +512,7 @@ add_static_commands() {
   add_cmd_once "Centrifugo exact credential metadata contract" 'test "$(jq -r ".channel.proxy.subscribe.include_connection_meta" infra/centrifugo.json)" = "true"; test "$(jq -r ".channel.proxy.subscribe.include_connection_meta" infra/prod/centrifugo.prod.json)" = "true"; grep -Fq "\"include_connection_meta\": true" scripts/local_alpha_runner.sh'
   add_cmd_once "pgvector image and migration drift contract" "scripts/verify_pgvector_contract.sh"
   add_cmd_once "eve compose profile drift contract" "scripts/verify_eve_profile.sh --config-only"
-  add_cmd_once "shell syntax" 'for f in .conductor/setup.sh adapters/prime/run.sh adapters/prime/container/entrypoint.sh adapters/prime/tests/tenancy_probe.sh scripts/momo scripts/local_gate.sh scripts/planning_context.sh scripts/runtime_process_guard.sh scripts/ensure_runtime_env.sh scripts/check_branch_skew.sh scripts/check_migration_numbers.sh scripts/check_spm_licenses.sh scripts/write_sha256_manifest.sh scripts/install_branch_skew_hook.sh scripts/hooks/pre-push scripts/tests/test_spm_license_gate.sh scripts/tests/test_local_gate_hardening.sh scripts/tests/test_local_gate_drift_guard.sh scripts/tests/test_make_deploy_bundle.sh scripts/cleanup_dogfood_seed_agents.sh scripts/local_soak_monitor.sh scripts/collect_diagnostics.sh scripts/compose_janitor.sh scripts/macos_dev_run.sh scripts/local_alpha_runner.sh scripts/make_deploy_bundle.sh scripts/goal_claim.sh scripts/goal_status.sh scripts/goal_release.sh scripts/github_bootstrap.sh scripts/github/bootstrap.sh scripts/migrate.sh scripts/prod_env_preflight.sh scripts/aws_internal_alpha_preflight.sh scripts/verify_prod_install_upgrade.sh scripts/verify_multibinary_image.sh scripts/verify_momo_ops.sh scripts/verify_momo_ops_runtime.sh scripts/verify_prod_rls_posture.sh scripts/verify_owner_bootstrap.sh scripts/verify_design_preflight.sh scripts/design_preflight_web.sh scripts/verify_pgvector_contract.sh scripts/verify_eve_profile.sh scripts/verify_runtime_role_bootstrap.sh scripts/verify_prod_seed_password.sh scripts/verify_rls.sh scripts/verify_roster.sh scripts/verify_channel_list.sh scripts/verify_channel_management.sh scripts/verify_join.sh scripts/verify_platform_admin.sh scripts/verify_approval_decision.sh scripts/verify_auth_hardening.sh scripts/verify_push_registration.sh scripts/verify_push_notifier.sh scripts/verify_notification_mute.sh scripts/verify_linkshort.sh scripts/push_relay_keygen.sh scripts/verify_push_relay.sh scripts/verify_plugin_registry.sh scripts/verify_signed_webhook_ingress.sh scripts/verify_drive_mcp.sh scripts/verify_attachment_upload.sh scripts/verify_plugin_grant_roundtrip.sh scripts/verify_huddle_lifecycle.sh scripts/verify_workspace_search.sh scripts/verify_thread_reply.sh scripts/verify_work_session.sh scripts/verify_work_control.sh scripts/verify_work_agent_e2e.sh scripts/verify_workd.sh scripts/verify_workd_attach.sh scripts/verify_work_pool.sh scripts/verify_tier_fallback.sh scripts/verify_t3_migration_repair.sh scripts/verify_t3_provider_continuity.sh scripts/verify_t3_convergence.sh scripts/verify_membership_lifecycle.sh scripts/verify_lifecycle_completion.sh scripts/verify_memory_search.sh scripts/verify_context_packet.sh scripts/verify_memory_grant.sh scripts/verify_agent_card_onboarding.sh scripts/verify_agent_profile.sh scripts/verify_openapi_contract.sh scripts/verify_openapi_contract_rust.sh scripts/openapi_spec_to_json.sh scripts/verify_relay.sh scripts/verify_realtime_live.sh scripts/verify_agent_worker_bootstrap.sh scripts/verify_agent_worker.sh scripts/verify_agent_path_equivalence.sh scripts/verify_agent_context_bootstrap.sh scripts/verify_agent_context.sh scripts/verify_agent_live_channel_bootstrap.sh scripts/verify_agent_live_channel.sh scripts/verify_hermes_verifier_bootstrap.sh scripts/verify_external_agent_provider.sh scripts/verify_local_hermes_bridge.sh scripts/verify_hermes_gateway_adapter.sh scripts/verify_hermes_gateway_real_smoke.sh scripts/verify_local_hermes_credentialed_smoke.sh scripts/verify_staging_smoke.sh scripts/verify_internal_hosting_smoke.sh scripts/web_serving_smoke.sh scripts/verify_web_serving.sh scripts/verify_web_login_smoke.sh scripts/verify_web_generated_types.sh scripts/verify_internal_host_runtime.sh scripts/verify_backup_restore_rehearsal.sh scripts/verify_macos_real_backend_ui_bootstrap.sh scripts/verify_macos_real_backend_ui.sh infra/prod/install.sh infra/prod/upgrade.sh infra/prod/momo-ops.sh infra/prod/deploy-lib.sh infra/prod/docker/momo-entrypoint.sh infra/workd/bootstrap.sh infra/workd/momo-workd-run infra/eve/bootstrap_world.sh infra/eve/entrypoint.sh; do [ -e "$f" ] || { echo "missing shell script: $f"; exit 1; }; bash -n "$f"; done'
+  add_cmd_once "shell syntax" 'for f in .conductor/setup.sh adapters/prime/run.sh adapters/prime/container/entrypoint.sh adapters/prime/tests/tenancy_probe.sh scripts/momo scripts/local_gate.sh scripts/planning_context.sh scripts/runtime_process_guard.sh scripts/ensure_runtime_env.sh scripts/check_branch_skew.sh scripts/check_migration_numbers.sh scripts/check_spm_licenses.sh scripts/check_cargo_licenses.sh scripts/write_sha256_manifest.sh scripts/install_branch_skew_hook.sh scripts/hooks/pre-push scripts/tests/test_spm_license_gate.sh scripts/tests/test_license_gate.sh scripts/tests/test_local_gate_hardening.sh scripts/tests/test_local_gate_drift_guard.sh scripts/tests/test_make_deploy_bundle.sh scripts/cleanup_dogfood_seed_agents.sh scripts/local_soak_monitor.sh scripts/collect_diagnostics.sh scripts/compose_janitor.sh scripts/macos_dev_run.sh scripts/local_alpha_runner.sh scripts/make_deploy_bundle.sh scripts/goal_claim.sh scripts/goal_status.sh scripts/goal_release.sh scripts/github_bootstrap.sh scripts/github/bootstrap.sh scripts/migrate.sh scripts/prod_env_preflight.sh scripts/aws_internal_alpha_preflight.sh scripts/verify_prod_install_upgrade.sh scripts/verify_multibinary_image.sh scripts/verify_momo_ops.sh scripts/verify_momo_ops_runtime.sh scripts/verify_prod_rls_posture.sh scripts/verify_owner_bootstrap.sh scripts/verify_design_preflight.sh scripts/design_preflight_web.sh scripts/verify_pgvector_contract.sh scripts/verify_eve_profile.sh scripts/verify_runtime_role_bootstrap.sh scripts/verify_prod_seed_password.sh scripts/verify_rls.sh scripts/verify_roster.sh scripts/verify_channel_list.sh scripts/verify_channel_management.sh scripts/verify_join.sh scripts/verify_platform_admin.sh scripts/verify_approval_decision.sh scripts/verify_auth_hardening.sh scripts/verify_push_registration.sh scripts/verify_push_notifier.sh scripts/verify_notification_mute.sh scripts/verify_linkshort.sh scripts/push_relay_keygen.sh scripts/verify_push_relay.sh scripts/verify_plugin_registry.sh scripts/verify_signed_webhook_ingress.sh scripts/verify_drive_mcp.sh scripts/verify_attachment_upload.sh scripts/verify_plugin_grant_roundtrip.sh scripts/verify_huddle_lifecycle.sh scripts/verify_workspace_search.sh scripts/verify_thread_reply.sh scripts/verify_work_session.sh scripts/verify_work_control.sh scripts/verify_work_agent_e2e.sh scripts/verify_workd.sh scripts/verify_workd_attach.sh scripts/verify_work_pool.sh scripts/verify_tier_fallback.sh scripts/verify_t3_migration_repair.sh scripts/verify_t3_provider_continuity.sh scripts/verify_t3_convergence.sh scripts/verify_membership_lifecycle.sh scripts/verify_lifecycle_completion.sh scripts/verify_memory_search.sh scripts/verify_context_packet.sh scripts/verify_memory_grant.sh scripts/verify_agent_card_onboarding.sh scripts/verify_agent_profile.sh scripts/verify_openapi_contract.sh scripts/verify_openapi_contract_rust.sh scripts/openapi_spec_to_json.sh scripts/verify_relay.sh scripts/verify_realtime_live.sh scripts/verify_agent_worker_bootstrap.sh scripts/verify_agent_worker.sh scripts/verify_agent_path_equivalence.sh scripts/verify_agent_context_bootstrap.sh scripts/verify_agent_context.sh scripts/verify_agent_live_channel_bootstrap.sh scripts/verify_agent_live_channel.sh scripts/verify_hermes_verifier_bootstrap.sh scripts/verify_external_agent_provider.sh scripts/verify_local_hermes_bridge.sh scripts/verify_hermes_gateway_adapter.sh scripts/verify_hermes_gateway_real_smoke.sh scripts/verify_local_hermes_credentialed_smoke.sh scripts/verify_staging_smoke.sh scripts/verify_internal_hosting_smoke.sh scripts/web_serving_smoke.sh scripts/verify_web_serving.sh scripts/verify_web_login_smoke.sh scripts/verify_web_generated_types.sh scripts/verify_internal_host_runtime.sh scripts/verify_backup_restore_rehearsal.sh scripts/verify_macos_real_backend_ui_bootstrap.sh scripts/verify_macos_real_backend_ui.sh infra/prod/install.sh infra/prod/upgrade.sh infra/prod/momo-ops.sh infra/prod/deploy-lib.sh infra/prod/docker/momo-entrypoint.sh infra/workd/bootstrap.sh infra/workd/momo-workd-run infra/eve/bootstrap_world.sh infra/eve/entrypoint.sh; do [ -e "$f" ] || { echo "missing shell script: $f"; exit 1; }; bash -n "$f"; done'
   add_cmd_once "metrics verifier shell syntax" "bash -n scripts/verify_metrics_observability.sh"
   add_cmd_once "message interaction verifier shell syntax" "bash -n scripts/verify_message_interaction.sh"
   add_cmd_once "production migration entrypoint shell syntax" "bash -n infra/prod/docker/internal-smoke-migrate.sh"
@@ -875,7 +884,12 @@ add_web_commands() {
   # restores the file on every exit path.
   add_cmd "web generated API types in sync with docs/api/openapi.yaml" 'scripts/verify_web_generated_types.sh'
   add_cmd "web build (vite, CSP-safe output)" '(cd clients/web-legacy && npm run build)'
-  add_cmd "web dependency license gate (permissive-only, full transitive list)" 'out="${LOCAL_GATE_OUTPUT_DIR:-${TMPDIR:-/tmp}/momo-local-gate}/web-licenses-${LOCAL_GATE_RUN_ID:-manual}.md"; (cd clients/web-legacy && WEB_LICENSE_REPORT="$out" node scripts/check-licenses.mjs) && echo "license inventory: $out"'
+  # #1225: same script as the `license` profile, aimed at the tree this profile
+  # actually builds and serves. The script moved to scripts/check_npm_licenses.mjs
+  # and its default roots are now the canonical trees, so clients/web-legacy has
+  # to be named — a gate that reports on a tree nobody ships is how the audit
+  # found 1,258 packages unchecked.
+  add_cmd "web dependency license gate (clients/web-legacy, shared policy)" 'out="${LOCAL_GATE_OUTPUT_DIR:-${TMPDIR:-/tmp}/momo-local-gate}/web-licenses-${LOCAL_GATE_RUN_ID:-manual}.md"; NPM_LICENSE_REPORT="$out" node scripts/check_npm_licenses.mjs --root clients/web-legacy && echo "license inventory: $out"'
   add_cmd "web serving smoke (Caddy APP_DOMAIN edge + sentinel fail-closed)" 'scripts/web_serving_smoke.sh'
   add_cmd "web login -> timeline browser smoke (e2e compose)" 'scripts/verify_web_login_smoke.sh'
   add_cmd "OpenAPI contract drift gate (spec vs live server)" 'scripts/verify_openapi_contract.sh'
@@ -889,6 +903,26 @@ add_web_commands() {
   add_note_once coverage "Goal #593 (ADR-0119 W-5 / ADR-0121 D2) inside the same browser smoke: REST invite issuance by a disposable admin (expired fixture via SQL back-date, exhausted via a real POST /v1/join), /join?code=<code> deep link with the code stripped from browser history after success and leaked into no non-document request URL or console line, browser join establishing the session from the JoinResponse token pair (spec'd join-login; no separate /v1/auth/login), #general timeline entry, logout -> re-login with the join-created credentials, and distinct Korean error copy for expired/exhausted/invalid codes."
   add_note_once coverage "MOMO-389 runtime drift gate via scripts/verify_openapi_contract.sh: every documented web v0 operation sampled against a disposable live server and shape-checked closed-world against docs/api/openapi.yaml."
   add_note_once not_covered "Real DNS/ACME/TLS on public hosts, app deep links, the full invite-create -> short-link -> join -> message round-trip, and Safari/Firefox coverage (the smoke drives Chromium) remain out of scope for the web v0 gate."
+}
+
+add_license_commands() {
+  # #1225: dependency license gate for the two stacks that actually ship.
+  #
+  # This is a PARALLEL gate, not a replacement for the SwiftPM one in
+  # add_swift_commands. That gate covers 37 SwiftPM packages and retires with the
+  # Swift tree; audit research/2026-08-10-buzz-audit-A.md measured what it left
+  # uncovered — 644 cargo crates and 1,258 npm packages, i.e. 98.1% of the
+  # dependency population, including the MPL-2.0 30 that CONTRIBUTING claimed
+  # were rejected fail-closed. Nothing here touches the Swift path.
+  #
+  # Ordering: the regression test runs first. It is seconds long and it is the
+  # only step that proves the gate can turn red; if it breaks, a green from the
+  # two production checks below means nothing.
+  add_cmd_once "license gate regression (red proofs: cargo AGPL inject, MPL removal, npm aim)" 'scripts/tests/test_license_gate.sh'
+  add_cmd_once "cargo dependency license gate (server-rust + desktop, deny.toml)" 'scripts/check_cargo_licenses.sh'
+  add_cmd_once "npm dependency license gate (clients/web + clients/mobile + packages/momo-core)" 'out="${LOCAL_GATE_OUTPUT_DIR:-${TMPDIR:-/tmp}/momo-local-gate}/npm-licenses-${LOCAL_GATE_RUN_ID:-manual}.md"; NPM_LICENSE_REPORT="$out" node scripts/check_npm_licenses.mjs && echo "license inventory: $out"'
+  add_note_once coverage "#1225 dependency license gate: deny.toml is one policy for both cargo workspaces (server-rust 309 crates + clients/desktop/src-tauri 528, 644 unique third-party) and scripts/check_npm_licenses.mjs applies the same allowlist to the canonical npm trees (workspace root incl. packages/momo-core, clients/web, clients/mobile — 1,750 lockfile entries). SPDX expressions are evaluated before any name matching, so a permissive OR branch (node-forge \"BSD-3-Clause OR GPL-2.0\", r-efi \"MIT OR Apache-2.0 OR LGPL-2.1-or-later\") passes while an AND with a copyleft half fails. scripts/tests/test_license_gate.sh proves red on an injected AGPL-3.0 crate, on removing the reviewed MPL-2.0 allowance (desktop only — the backbone has zero MPL), on an unlicensed first-party workspace package, and proves the npm half reads the canonical trees rather than clients/web-legacy."
+  add_note_once not_covered "#1225 covers licenses only. RUSTSEC advisories (cargo deny check advisories), npm audit, duplicate-crate bans, and source registry pinning are not run — and no license gate runs in GitHub Actions yet, so an external PR is still unchecked until the CI promotion that waits on the public-repo decision."
 }
 
 add_web_serving_commands() {
@@ -1003,10 +1037,15 @@ case "$PROFILE" in
   web)
     add_web_commands
     ;;
+  license)
+    add_static_commands
+    add_license_commands
+    ;;
   all)
     add_static_commands
     add_runtime_env_guard_command
     add_swift_commands
+    add_license_commands
     add_staging_smoke_commands
     add_host_runtime_commands
     add_runtime_db_commands
