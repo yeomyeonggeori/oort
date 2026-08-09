@@ -17,6 +17,8 @@
 
 | 2026-07-18 | MOMO-474 / PR #499 (게이트 선재) | server 전용 PR인데 runtime-db 게이트의 `testChannelCreationSheetEnglishLargeTextSnapshot`(macOS)가 full-suite flake로 실패. server 변경은 macOS 렌더에 영향 불가 = 선재. | 첨부 verifier+서버 107 test+openapi+실 Google smoke PASS 확인 후 track/engine 머지. MOMO-472(#495) 범위를 이 스냅샷까지 확장. | `pending` | MOMO-472에서 두 스냅샷 결정적 렌더 이관. |
 
+| 2026-08-05 | #1042 / PR #1058 (SRV-B7) | 이탈 3건: ①패킷 파일 허용 목록 밖 `openapi_shape_check.py` 가산(`--sampled-elsewhere` — known-unsampled와 의미 반대라 재사용 거부, 겹침 가드 포함) ②패킷 「함정」 전제 오류(repo에 infra/rust 컴포즈 기존재 — 오케스트레이터의 main 체크아웃 실측 오류) ③「예상 빨강」 재해석(빨강은 Rust가 아닌 Swift 선존재 — #1040이 스펙을 Rust 와이어로 맞춘 예정된 귀결. 2차 패스만으론 미해소, 잠식 기제=「등재=응답 모양 권위 이전」 동시 구현 필요). | ①부채(줄어들 수만)/권위 이전(늘어날 수만) 의미 분리 논거 타당 — 뭉개면 게이트가 거짓말을 배움. red proof 2종+겹침 가드 실측 확인. ②재발 방지 교훈: 경로 실측은 origin/track/engine 대상(JOURNAL 기록). ③해석이 완료조건 ①③의 유일한 정합적 동시 성립 — merge-base 선존재 증명 확인. 전 게이트 2연속 green·cargo 713/0. | `accepted` | 오케스트레이터 mid-flight 승인 3건 전부 추인. 후속: 부분집합에 relay/agent-worker 합류(매니페스트 확장 지점)·pgdata 고정이름 볼륨 함정 런북 반영. |
+
 ## 소급 항목 (2026-07-09 감사에서 발견된 역사적 이탈)
 
 아래는 이 로그가 없던 시기의 이탈로, ADR 큐에 이미 배정됨 — 참고용.

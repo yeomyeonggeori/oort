@@ -154,3 +154,28 @@ mac 클라가 `UUID` 로 파싱하고 웹은 `reactions.ts:63-65` 의 `fold()` �
 **드리프트 게이트는 이 계열을 영원히 못 잡는다**(B-1 의 정규식). 대소문자를 계약으로 만들려면
 `openapi.yaml` 에 `pattern:` 을 넣고 `openapi_shape_check.py` 를 대소문자 구분으로 바꿔야 하는데,
 그건 별건 결정이다 — 여기서는 **"게이트가 못 잡는다는 사실"만 기록**한다.
+
+
+> **복원 고지(2026-08-09)**: 이 증보 1은 main 동기화 머지 `a749d765`가 충돌 해소 중 떨어뜨렸던 것을 Swift 삭제 감사(`research/2026-08-09-swift-removal-audit.md`)가 적발해 원문(`06677ee3`)에서 복원했다. 증보 2·ADR-0151이 "위 판정표"로 인용하는 대상이 이 절이다.
+
+## 증보 1 — "parity"의 정의 (2026-08-04, 성재 승인)
+
+삭제 게이트인 **라우트 parity는 Swift 137 유니크 경로 전체가 아니라 "제품이 쓰기로 결정한 라우트 집합"으로 정의한다.** 전 경로 parity는 삭제를 무기한 미루고, 이식 원본이 오래 살수록 "계약의 정답이 두 곳"인 기간이 길어진다(근거: `docs/planning/2026-08-04-handover-verification-and-roadmap-adjustment.md` §2.3).
+
+초기 분류(각 패밀리의 최종 판정은 해당 배치/ADR에서 갱신해 이 절에 반영):
+
+| 판정 | 패밀리 |
+|---|---|
+| **이식 대상(v0)** | ~~attachments 3경로~~(**완료 2026-08-06 #1119** — ADR-0151 실행) · ~~agent-run cancel~~(완료 #993) · agentRunHistory 읽기 경로(잔여 — 실측 확인 필요) |
+| **판정 보류(v1 결정 대기)** | plugins · webhooks · mcp · memories(+policy·consent) · huddles · workstreams · work-controls · work-auto-approvals · event-subscriptions · work-tool-profiles · bans · members 잔여 · platform |
+| **폐기 후보(이식 없이 삭제 인정)** | `__momo_stub` · context-packets v0 형태 |
+
+**삭제 실행 조건**: "이식 대상 + 보류에서 이식으로 승격된 것"이 전부 Rust에 서고, 보류·폐기 판정이 전 패밀리에 대해 내려졌을 때. 그 시점의 판정표가 이 절이다.
+
+## 증보 2 — Swift 상시 빌드·테스트 퇴역 (2026-08-06, 성재 승인)
+
+## 증보 2 — Swift 상시 빌드·테스트 퇴역 (2026-08-06, 성재 승인)
+
+**Swift는 삭제 전이라도 상시 빌드·테스트 대상에서 제외한다.** 소스는 이식 원본(참조 정본)으로 유지하되, 반복 파이프라인에서 Swift를 빌드하는 세 자리를 퇴역시킨다: ①폰 레인 서버 스택 → server-rust 컴포즈로 이관(#1022 — 부수로 #1051 폰 실시간 검증·#1069 콜드 빌드 flake 해소) ②openapi 계약 게이트 1차(Swift) 패스 → 기본 off(opt-in `OPENAPI_GATE_SWIFT_PASS=1`)로 강등 — 스펙이 Rust를 서술(#1040)하는 이상 죽을 서버를 스펙과 대조하는 일이며, 커버리지 권위는 sampled-on-rust 매니페스트(#1042 잠식 기제)가 승계 ③Xcode Cloud의 Swift 클라(MomoiOS) 아카이브 워크플로 비활성(전 PR 상시 실패 소음 — 제품 클라는 RN/Tauri/웹).
+
+근거: 성재 2026-08-06 — "swift는 이제 사실상 버릴 거라서 따로 빌드나 테스트 안 해봐도 될 것 같다." 삭제 실행 조건(위 판정표)은 불변 — 이 증보는 삭제가 아니라 반복 비용 제거다.

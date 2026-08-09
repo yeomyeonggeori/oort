@@ -1,4 +1,4 @@
-# ADR-0144: oort Cloud substrate — k8s 위 microVM 격리·이미지/캐시·샌드박스 자격증명
+# ADR-0144 (D1은 ADR-0156으로 대체 — 기질=CubeSandbox): oort Cloud substrate — k8s 위 microVM 격리·이미지/캐시·샌드박스 자격증명
 
 - Status: **Accepted** (2026-07-29, 성재 — "144는 승인할게". 기안 Fable)
 - 파생: 이행 1(PoC)은 베어메탈 노드 조달(성재) 후. 이행 2(k8s adapter)는 ADR-0142 어댑터 인터페이스 랜딩 후.

@@ -12,6 +12,10 @@
 5. **테넌트 격리는 RLS FORCE** (`app.workspace_id` GUC) + 역할 분리(momo_app NOBYPASSRLS / relay·worker BYPASSRLS).
 6. **provider 자격증명(Codex OAuth 등)은 oort에 절대 들어오지 않는다** (ADR-0004).
 
+> ⚠️ **스택 갱신 (2026-08-03).** 아래 지도와 이후 절은 **Swift/Hummingbird 시절**을 그린다. 현재 배포되는 서버는 **Rust/Axum(`server-rust/`)**이고, 클라이언트는 **웹/Tauri(React) + RN 모바일**이다(ADR-0145 · ADR-0133 · ADR-0137).
+> **`server/`(Swift, 137 라우트)는 이식 원본이며 실행 대상이 아니다** — `server/README.md` 참조. 라우트 parity 도달 시 일괄 삭제한다(성재 승인).
+> **불변식 6개는 그대로 유효하다** — DB(59 마이그레이션 중 44개가 트리거·제약·RLS)가 최종 강제자라 언어 교체가 위협하지 않는다. 현재 위치는 `ROADMAP.md` §0이 정본.
+
 ## 시스템 지도
 
 ```mermaid
