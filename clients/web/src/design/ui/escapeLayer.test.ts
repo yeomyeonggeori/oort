@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  escapeIsClaimed,
   escapeLayerDepth,
   pushEscapeLayer,
   removeEscapeLayer,
@@ -61,5 +62,29 @@ describe("escape layer stack", () => {
     removeEscapeLayer(layer);
     expect(escapeLayerDepth()).toBe(0);
     expect(runTopEscapeLayer(false)).toBe(false);
+  });
+
+  // #1205 R2 신규 H — 삼키는 층. 웹훅 발급 카드가 떠 있는 동안의 Esc 는 아무
+  // 일도 하지 않아야 하는데, 그 "아무 일도"가 성립하려면 누군가 소유해야 한다.
+  it("삼키는 층은 Esc 를 받고 아무것도 하지 않는다 (밑으로도 안 넘긴다)", () => {
+    const route = vi.fn();
+    pushEscapeLayer({ handle: route });
+    // 카드가 그 위를 덮는다: 아무것도 하지 않는 층.
+    pushEscapeLayer({ handle: () => {} });
+
+    // 소비됐다(true) — 그래서 라우트의 리스너까지 가지 않는다.
+    expect(runTopEscapeLayer(false)).toBe(true);
+    expect(route).not.toHaveBeenCalled();
+  });
+
+  describe("escapeIsClaimed — 층을 열지 않는 표면이 묻는 술어", () => {
+    it("층이 서 있으면 Esc 는 이미 임자가 있다", () => {
+      expect(escapeIsClaimed()).toBe(false);
+      const layer = { handle: vi.fn() };
+      pushEscapeLayer(layer);
+      expect(escapeIsClaimed()).toBe(true);
+      removeEscapeLayer(layer);
+      expect(escapeIsClaimed()).toBe(false);
+    });
   });
 });

@@ -3878,7 +3878,7 @@ async function captureScheme(browser, scheme) {
   // 표면의 계약이다(한 번의 무방비 클릭으로 살아 있는 수신 주소가 죽지 않는다).
   await webhooks.locator('[data-testid^="webhook-revoke-"]').first().click();
   await webhooks
-    .locator('[data-testid^="webhook-revoke-"][data-testid$="-confirm"]')
+    .locator('[data-testid^="webhook-revoke-"][data-testid$="-commit"]')
     .first()
     .waitFor({ state: "visible" });
   await webhooks.waitForTimeout(150);
@@ -3895,7 +3895,7 @@ async function captureScheme(browser, scheme) {
   await webhooks.getByTestId("webhook-list").waitFor({ state: "visible" });
   await webhooks.locator('[data-testid^="webhook-rotate-"]').first().click();
   await webhooks
-    .locator('[data-testid^="webhook-rotate-"][data-testid$="-confirm"]')
+    .locator('[data-testid^="webhook-rotate-"][data-testid$="-commit"]')
     .first()
     .waitFor({ state: "visible" });
   await webhooks.waitForTimeout(150);

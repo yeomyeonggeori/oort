@@ -2,13 +2,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/design/ui/button";
 import { Input } from "@/design/ui/input";
+import { useEscapeGuard, useEscapeLayer } from "@/design/ui/escapeLayer";
 import { cn } from "@/design/lib/cn";
 import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/States";
 import { channelLabel, useChannels, useDirectory } from "@/features/workspace/useWorkspace";
 import { resolveServerBaseUrl } from "@momo/core/features/settings/api";
 import {
   createWebhookInstallation,
-  listWebhookInstallations,
   revokeWebhookInstallation,
   rotateWebhookSecret,
 } from "@momo/core/features/webhooks/api";
@@ -16,7 +16,6 @@ import {
   installationReceiveUrl,
   isWebhookOperatorDenied,
   normalizeWebhookLabel,
-  parseInstallations,
   parseRevealedCredential,
   parseRevokedInstallation,
   resolveReceiveUrl,
@@ -58,6 +57,8 @@ import {
 import {
   CREDENTIAL_MUTATION_SCOPE,
   purgeWebhookCredentials,
+  webhookListQuery,
+  webhookListQueryKey,
 } from "./webhookCredentialScope";
 
 // =============================================================================
@@ -77,18 +78,33 @@ import {
 //
 // mac이 시트로 하던 것을 웹은 인라인 카드로 한다. 모달은 이 셸의 어휘가 아니다.
 //
-// ## 비밀값의 수명은 컴포넌트가 **명시적으로** 끝낸다 (리뷰 B1)
+// ## 비밀값을 붙잡을 수 있는 것이 이 화면보다 오래 살지 않는다 (리뷰 B1 · R2)
 //
-// 이 자리에는 원래 "섹션을 벗어나면 언마운트되며 비밀값도 함께 사라진다"고
-// 적혀 있었고, 그 문장이 모달을 쓰지 않은 근거였다. **틀렸다.** React 상태는
-// 사라지지만 mutation 결과는 세션 수명의 MutationCache 에 남고, 기본 gcTime 은
-// 브라우저에서 5분이다(실측 300000ms). 「저장했습니다」 없이 떠난 사람은 원문을
-// 메모리에 남긴 채 떠났다.
+// 이 자리에 두 번 틀린 문장이 있었다. 1차는 "섹션을 벗어나면 언마운트되며
+// 비밀값도 함께 사라진다" — mutation 결과가 세션 수명 MutationCache 에 5분
+// 남았다. 2차는 그 캐시를 닫고 "화면보다 오래 사는 것을 막는다"고 적었는데,
+// 힙 스냅샷은 원문이 **여전히 5분을 살고 있다**고 답했다. 붙잡고 있던 것은
+// 캐시에 담긴 본문이 아니라 캐시에 얹힌 **클로저**였다: 컴포넌트 안에서 만든
+// 목록 쿼리의 `queryFn` 이 렌더 스코프를 통째로 캡처했고, 그 쿼리가 관찰자 0
+// 이후 자기 gcTime 타이머에 붙잡혀 있었다.
 //
-// 그래서 지금은 언마운트가 보장이 아니라 **트리거**다: 아래 정리 효과가
-// `purgeWebhookCredentials` 로 캐시를 동기적으로 비우고, 두 mutation 은
-// `CREDENTIAL_MUTATION_SCOPE`(gcTime 0 + 전용 키)를 달아 그 규율의 대상임을
-// 선언한다. 근거와 red proof 는 ./webhookCredentialScope.ts 와 그 테스트에.
+// 그래서 지금 규율은 둘이고, 둘 다 ./webhookCredentialScope.ts 가 소유한다:
+//   - 쿼리 옵션은 **모듈 스코프**에서 만든다(`webhookListQuery`). 이 컴포넌트는
+//     쿼리 함수를 짓지 않는다 — 지으면 그 클로저가 이 렌더 스코프를 캡처한다.
+//   - 이 표면의 mutation 셋은 전부 `CREDENTIAL_MUTATION_SCOPE`(gcTime 0 + 전용
+//     키)를 달고, 언마운트에서 `purgeWebhookCredentials` 가 동기로 비운다.
+//
+// 이 문장들이 참인지는 파일 안에서 증명되지 않는다. 힙에서 잰다:
+// `npm run build && npm run gate:webhook` — 카드가 떠 있는 동안 원문이 힙에
+// 있고(측정이 볼 수 있다는 증명), 떠난 뒤에는 강제 GC 후 없다.
+//
+// ## Esc 는 이 화면의 것이 아니다 (리뷰 R2 신규 H)
+//
+// 되돌릴 수 없는 것 둘이 이 표면에 있다: 파괴 확인과, 서버가 원문을 보관하지
+// 않는 발급 카드. 설정 셸의 Esc 는 라우트를 닫으므로, 확인 중의 Esc 도 카드가
+// 떠 있는 중의 Esc 도 그 값을 아무 확인 없이 없앴다(실측). 이제 두 상태가 각각
+// Esc 층을 잡는다 — 확인은 취소로 닫히고(확인 프롬프트의 표준 의미), 카드는
+// **삼킨다**(다시 만들 수 없는 값 앞에서 Esc 의 올바른 뜻은 무반응이다).
 //
 // 계약 정본은 docs/api/openapi.yaml의 `webhooks` 태그다. 새로 만든 와이어는 없다.
 // =============================================================================
@@ -111,11 +127,10 @@ export function WebhookSection({
   offline: boolean;
 }) {
   const client = useQueryClient();
-  const webhooks = useQuery({
-    queryKey: ["settings", "webhooks", workspaceId],
-    queryFn: async () => parseInstallations(await listWebhookInstallations(workspaceId)),
-    retry: false,
-  });
+  // 옵션이 모듈 스코프에서 오는 이유는 머리말에 있다: 여기서 `queryFn` 을 지으면
+  // 그 클로저가 이 렌더 스코프(= `revealed` 가 사는 곳)를 캡처하고, 쿼리는
+  // 관찰자가 떨어진 뒤에도 자기 gcTime 만큼 그것을 붙잡는다.
+  const webhooks = useQuery(webhookListQuery(workspaceId));
   const { groups } = useChannels(workspaceId);
   const { directory } = useDirectory(workspaceId);
 
@@ -145,6 +160,11 @@ export function WebhookSection({
   // 「저장했습니다」를 누르지 않고 떠나는 경로가 정확히 이것이고, 그 경로에만
   // 보장이 없었다.
   useEffect(() => () => void purgeWebhookCredentials(client), [client]);
+
+  // 카드가 떠 있는 동안 Esc 는 아무 일도 하지 않는다 (R2 신규 H). 삼키지 않으면
+  // 설정 셸이 그 Esc 로 라우트를 닫고, 서버가 보관하지 않는 값이 확인 한 번 없이
+  // 사라진다. 나가는 길은 이 카드가 이미 이름으로 갖고 있다 — 「저장했습니다」.
+  useEscapeGuard(revealed !== null);
 
   const channelChoices = useMemo(() => {
     const named = groups.channels.map((channel) => ({
@@ -179,7 +199,7 @@ export function WebhookSection({
       setCreateError(null);
       setLabel("");
       void client.invalidateQueries({
-        queryKey: ["settings", "webhooks", workspaceId],
+        queryKey: webhookListQueryKey(workspaceId),
       });
     },
     // 실패는 열려 있던 카드를 지우지 않는다. 아무것도 발급되지 않았으므로 앞선
@@ -207,7 +227,7 @@ export function WebhookSection({
       setRevealed({ credential, from: "rotate" });
       setRowError(null);
       void client.invalidateQueries({
-        queryKey: ["settings", "webhooks", workspaceId],
+        queryKey: webhookListQueryKey(workspaceId),
       });
     },
     onError: (error) => setRowError(webhookFailureMessage("rotate", error)),
@@ -234,6 +254,11 @@ export function WebhookSection({
   }
 
   const revoke = useMutation({
+    // 폐기는 비밀값을 실어 나르지 않는다. 그래도 같은 스코프를 다는 이유는
+    // 아래 `onSuccess` 가 `revealed` 를 읽기 때문이다 — 이 콜백이 세션 수명
+    // 캐시에 남으면 그 렌더 스코프가, 따라서 원문이 함께 남는다. 캐시가 붙잡는
+    // 것은 본문만이 아니다(./webhookCredentialScope.ts 머리말).
+    ...CREDENTIAL_MUTATION_SCOPE,
     mutationFn: async (installation: WebhookInstallation) =>
       parseRevokedInstallation(
         await revokeWebhookInstallation(workspaceId, installation.id),
@@ -249,7 +274,7 @@ export function WebhookSection({
       }
       setChangedRowId(installation.id);
       void client.invalidateQueries({
-        queryKey: ["settings", "webhooks", workspaceId],
+        queryKey: webhookListQueryKey(workspaceId),
       });
     },
     onError: (error) => setRowError(webhookFailureMessage("revoke", error)),
@@ -508,6 +533,17 @@ function WebhookRow({
   const rowRef = useRef<HTMLLIElement | null>(null);
   const returnTo = useRef<"rotate" | "revoke" | null>(null);
 
+  /** 취소와 Esc 는 같은 것을 한다: 묻기 전으로 돌아가고 포커스를 트리거에 돌려준다. */
+  function cancelAsking() {
+    returnTo.current = asking;
+    setAsking(null);
+  }
+
+  // 확인 프롬프트가 열려 있는 동안 Esc 는 이 층의 것이다 (R2 신규 H). 층을
+  // 잡지 않으면 설정 셸이 그 Esc 로 라우트를 닫는다 — 확인 프롬프트에서 Esc 의
+  // 표준 의미는 취소이고, 하물며 그 확인이 지키던 것이 되돌릴 수 없는 폐기다.
+  useEscapeLayer(asking !== null, cancelAsking);
+
   // 물음이 열리면 포커스가 그 안으로 들어간다. 그래야 그룹 이름(= 질문 전문)이
   // 낭독된다 - 이름만 붙이고 포커스를 <body> 에 두면 2단계 가드가 스크린리더에
   // 존재하지 않는 것과 같다. 착지 지점은 취소다: 되돌릴 수 없는 쪽의 기본 답이
@@ -598,7 +634,12 @@ function WebhookRow({
                   if (kind === "revoke") onRevoke();
                   else onRotate();
                 }}
-                data-testid={`webhook-${asking}-${installation.id}-confirm`}
+                // `-commit` 은 이름이 아니라 **옵트인**이다 (리뷰 R2 M5):
+                // tokens.css 는 폰(<600px)에서 `-approve|-reject|-commit|-cancel`
+                // 로 끝나는 testid 에 44px 최소 높이를 준다. 처음에는 `-confirm`
+                // 이라고 지어 확정만 그 규칙 밖에 있었고, 그래서 한 확인 그룹
+                // 안에서 되돌릴 수 없는 쪽이 28px, 취소가 44px 로 갈렸다.
+                data-testid={`webhook-${asking}-${installation.id}-commit`}
               >
                 {asking === "revoke" ? "폐기" : "회전"}
               </Button>
@@ -607,10 +648,7 @@ function WebhookRow({
                 size="sm"
                 variant="ghost"
                 ref={cancelRef}
-                onClick={() => {
-                  returnTo.current = asking;
-                  setAsking(null);
-                }}
+                onClick={cancelAsking}
                 data-testid={`webhook-${asking}-${installation.id}-cancel`}
               >
                 취소
