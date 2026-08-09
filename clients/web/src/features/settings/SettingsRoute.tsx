@@ -5,6 +5,7 @@ import { SidebarDrawerToggle } from "@/app/SidebarDrawerToggle";
 import { queryClient } from "@/app/queryClient";
 import { resetSettingsQueries } from "@/app/retryScope";
 import { Button } from "@/design/ui/button";
+import { escapeIsClaimed } from "@/design/ui/escapeLayer";
 import { cn } from "@/design/lib/cn";
 import { InlineBanner } from "@/features/common/States";
 import { RenderErrorBoundary } from "@/features/common/RenderErrorBoundary";
@@ -17,6 +18,7 @@ import { InviteSection } from "./InviteSection";
 import { PluginSection } from "@/features/plugins/PluginSection";
 import { SectionShell } from "./SettingsFields";
 import { UsageSection } from "./UsageSection";
+import { WebhookSection } from "./WebhookSection";
 import { WorkHostSection } from "./WorkHostSection";
 import { WorkspaceSection } from "./WorkspaceSection";
 
@@ -41,6 +43,7 @@ type SectionId =
   | "workspace"
   | "plugins"
   | "usage"
+  | "webhooks"
   | "members";
 
 /**
@@ -75,6 +78,10 @@ const SECTIONS: SectionMeta[] = [
   { id: "workspace", label: "워크스페이스", group: "워크스페이스" },
   { id: "plugins", label: "앱", group: "워크스페이스" },
   { id: "usage", label: "사용량", group: "워크스페이스" },
+  // 웹훅은 앱 바로 뒤에 선다: 둘 다 "바깥과 무엇을 주고받는가"이고, 이 순서가
+  // 곧 그 이웃 관계다. 멤버와 초대 앞인 것은 사람이 아니라 시스템을 들이는
+  // 표면이기 때문이다.
+  { id: "webhooks", label: "웹훅", group: "워크스페이스" },
   { id: "members", label: "멤버와 초대", group: "워크스페이스" },
 ];
 
@@ -103,14 +110,45 @@ export function SettingsRoute() {
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       if (event.key !== "Escape") return;
+      // Esc 는 지금 열려 있는 **가장 위 층**의 것이다 (#1205 R2 신규 H).
+      //
+      // 이 자리의 면제는 원래 `INPUT|TEXTAREA|SELECT` 라는 태그 목록뿐이었고,
+      // 그 목록은 "무엇을 잃는가"가 아니라 "무슨 태그인가"를 물었다. 그래서 웹훅
+      // 발급 카드(`div[tabindex=-1]`, 서버가 원문을 보관하지 않는 일회성
+      // 비밀값)와 폐기 확인 프롬프트가 둘 다 면제 밖이었다 — 실측: 확인이
+      // 열려 있어도, 다시 볼 수 없는 값이 떠 있어도 Esc 한 번에 설정 전체가
+      // 닫혔다. 태그가 아니라 **층**을 묻는다.
+      //
+      // 층 쪽은 escapeLayer 의 캡처 리스너가 전파를 끊어 이 리스너가 아예 돌지
+      // 않게 하므로, 이 줄은 그 규칙을 판정하는 자리에 적어 두는 것이다. 이 줄이
+      // **혼자** 잡는 것은 다이얼로그다: 팔레트가 열린 채 Esc 를 눌러도 지금까지
+      // 설정이 닫히지 않은 이유는 포커스가 그 입력 칸에 있어 아래 태그 면제에
+      // 걸렸기 때문이고(실측), 포커스가 그 칸을 벗어나면 같은 Esc 가 팔레트와
+      // 설정을 함께 닫는다. 안전이 포커스 위치에 얹혀 있을 이유가 없다.
+      //
+      // 그래서 이 리스너는 **캡처 단계**에 붙는다(아래 addEventListener). 버블에
+      // 서는 이미 늦다: Radix 가 자기 Esc 를 처리하고 React 가 그 상태를 동기로
+      // 흘려보낸 뒤라 `[role=dialog][data-state=open]` 이 DOM 에서 사라져 있고,
+      // 술어는 "열린 다이얼로그 없음"이라고 답한다(실측 — 게이트의 캐럿 밖
+      // 팔레트 레인이 이것을 잡는다). 집이 지금까지 쓰던 방법은 다이얼로그마다
+      // `onEscapeKeyDown` 에서 `stopPropagation` 을 부르는 것이었는데
+      // (PluginSection), 그것은 새 다이얼로그가 생길 때마다 기억해야 하는 규율이다.
+      if (escapeIsClaimed()) return;
       // 3R M5: provider 키 등 명시 저장형 폼을 입력하던 중의 반사적 Esc가
-      // 라우트 이탈로 폼 상태를 날리지 않도록, 편집 중에는 무시한다.
+      // 라우트 이탈로 폼 상태를 날리지 않도록, 편집 중에는 무시한다. 층 규칙이
+      // 이것을 대체하지는 않는다 — 편집 중인 폼은 층이 아니고, 층으로 만드는
+      // 것은 이 표면들이 각자 정할 일이다.
       const target = event.target as HTMLElement | null;
       if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
       close();
     }
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
+    // 캡처인 이유는 위 주석에 있다. 여기서 먼저 본다고 이 라우트가 Esc 를
+    // 가로채는 것은 아니다 — 위 두 관문(층·다이얼로그, 그리고 편집 중인 폼)이
+    // 전부 "내 것이 아니다"라고 답할 때만 닫는다. 그리고 escapeLayer 의 캡처
+    // 리스너와 등록 순서가 어느 쪽이든 결과가 같다: 그쪽이 먼저면 전파가 끊기고,
+    // 이쪽이 먼저면 스택이 비어 있지 않으므로 여기서 물러난다.
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
   }, [close]);
 
   // Arrow keys move focus through the nav; Enter and Space activate through the
@@ -224,6 +262,13 @@ export function SettingsRoute() {
               the browser's own offline state instead (react-query fetchStatus),
               which is the only signal that actually stops the request. */}
           {section === "usage" && <UsageSection workspaceId={workspaceId} />}
+          {section === "webhooks" && (
+            <WebhookSection
+              workspaceId={workspaceId}
+              memberId={session.member.id}
+              offline={offline}
+            />
+          )}
           {section === "members" && (
             <InviteSection workspaceId={workspaceId} offline={offline} />
           )}
