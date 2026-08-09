@@ -123,25 +123,27 @@ centrifugo (전송 전용) <── publish ── relay ┘
 
 ## 멈추기 · 지우기
 
-3단계의 인자 묶음이 길어서, 아래부터는 변수 하나로 줄여 쓴다(한 줄이다):
+3단계의 인자 묶음이 길어서, 아래부터는 함수 하나로 줄여 쓴다. 레포 루트에서
+이 한 줄을 붙여 넣는다(변수가 아니라 **함수**인 것은 의도다 — zsh는 변수를
+단어로 쪼개 주지 않아서 `$OORT down` 은 macOS 기본 셸에서 통하지 않는다):
 
 ```sh
-OORT="docker compose --env-file infra/rust/local.secrets.env -f infra/rust/docker-compose.rust.yml -f infra/rust/docker-compose.rust.build.yml -f infra/rust/local.override.yml"
+oort() { docker compose --env-file infra/rust/local.secrets.env -f infra/rust/docker-compose.rust.yml -f infra/rust/docker-compose.rust.build.yml -f infra/rust/local.override.yml "$@"; }
 ```
 
 ```sh
 # 멈춘다 (데이터는 남는다)
-$OORT down
+oort down
 
 # 다시 켠다
-$OORT up -d --wait
+oort up -d --wait
 
 # 무슨 일이 있었는지 본다
-$OORT logs api
-$OORT logs migrate
+oort logs api
+oort logs migrate
 
 # 데이터까지 지운다 — 메시지·계정·볼륨이 사라진다. 되돌릴 수 없다.
-$OORT down -v
+oort down -v
 ```
 
 `down -v` 로 지운 뒤 처음부터 다시 하려면 `infra/rust/local.secrets.env` 도 지우고
@@ -153,7 +155,7 @@ $OORT down -v
 |---|---|
 | 3단계가 `port is already allocated` 로 실패 | 2단계 이후에 그 포트를 누가 잡았다. `down` 후 `local.secrets.env` 의 `MOMO_WEB_PORT` 를 바꾸고 다시 `up`. |
 | 로그인이 `invalid credentials` | 2단계가 알려 준 값을 쓴다(`grep MOMO_INITIAL_OWNER infra/rust/local.secrets.env`). 비밀번호를 바꾸려면 아래 회전 명령. |
-| 화면은 뜨는데 메시지가 실시간으로 안 온다 | `$OORT logs relay`(위 §멈추기에서 정의한 변수)를 본다. `published` 가 없으면 outbox가 안 빠진 것이다. |
+| 화면은 뜨는데 메시지가 실시간으로 안 온다 | `oort logs relay`(위 §멈추기에서 정의한 함수)를 본다. `published` 가 없으면 outbox가 안 빠진 것이다. |
 | 처음부터 다시 하고 싶다 | `down -v` + `rm infra/rust/local.secrets.env` + 2단계부터. |
 
 비밀번호 회전(의도적 변경 — 모든 세션이 로그아웃된다):
@@ -161,7 +163,7 @@ $OORT down -v
 ```sh
 MOMO_INITIAL_OWNER_EMAIL=owner@oort.local \
 MOMO_INITIAL_OWNER_PASSWORD='<새 비밀번호>' \
-  $OORT run --rm -e MOMO_INITIAL_OWNER_EMAIL -e MOMO_INITIAL_OWNER_PASSWORD migrate set-owner
+  oort run --rm -e MOMO_INITIAL_OWNER_EMAIL -e MOMO_INITIAL_OWNER_PASSWORD migrate set-owner
 ```
 
 더 깊은 것(마이그레이션 로그 읽는 법, Centrifugo history로 왕복 증명, env 파리티
