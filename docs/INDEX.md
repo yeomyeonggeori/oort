@@ -79,6 +79,7 @@
 | [`docs/architecture/overview.md`](architecture/overview.md) | **아키텍처 정본**: 불변식 6개 + 시스템/수명주기/엔티티 mermaid 다이어그램 + 판정 요약 + ADR 결정 큐. 어긋나는 코드 변경은 같은 PR에서 갱신 | 전반 |
 | [`docs/architecture/bible/README.md`](architecture/bible/README.md) | **메신저 아키텍처 바이블(학습용 파생 문서, 정본 아님)**: 문제 지도 M1~M11 + oort 뼈대 해설 + Slack/Discord/셀프호스팅 계열 비교 + 결정 큐 대조 — 정본과 어긋나면 정본 우선 | 전반 |
 | [`docs/ux-bible/README.md`](ux-bible/README.md) | **UX 바이블 정본**: Slack 코퍼스 36선 기반 원칙 P1~P15 — UI/UX 티켓 수용기준이 원칙 번호를 인용 | M3+ |
+| [`docs/design-system/README.md`](design-system/README.md) | **디자인 시스템 정본 「오르트 구름」(ADR-0159)**: 토큰 층(웹 정본 → 폰 번역)·위계 규칙(파괴>주>보조)·상태 규칙 4종·**강제 기제 지도(무엇을 무엇이 재고 무엇이 무검사인가)**·스케일 변경 절차 | M3+ |
 | [`docs/planning/README.md`](planning/README.md) | **기획 레이어 운영 정본**: 제품 오너/planner/momo-main/worker 역할, 병렬 planning claim, ADR→티켓→핸드오프 체인, 구현 병렬 최대 5, 이탈 환류 | 전반 |
 | [`docs/planning/CURRENT_STATE.md`](planning/CURRENT_STATE.md) | **컨텍스트 압축 복원 정본**: 활성 planning owner, 결정 대기, 구현 handoff, 다음 체크포인트. `momo-main`만 통합 갱신 | 전반 |
 | [`docs/planning/HANDOFF_TEMPLATE.md`](planning/HANDOFF_TEMPLATE.md) | 핸드오프 패킷 템플릿 — 기획 맥락을 레포 안에 고정하는 장치, worker 채팅 메시지는 3줄로 | 전반 |

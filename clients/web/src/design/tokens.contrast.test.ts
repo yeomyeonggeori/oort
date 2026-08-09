@@ -291,6 +291,46 @@ describe("Dawn palette", () => {
         }
       });
 
+      // 위 단정의 **반쪽**이었다 (#1211 D3). `--line-strong` 이 3:1 을 넘는다는 것은
+      // 「강한 선을 쓰면 된다」를 말할 뿐, 「약한 선을 쓰면 안 된다」를 말하지 않는다.
+      // 그 둘째 문장이 tokens.css:33 이 선언한 규칙의 실제 내용이고(*"--line
+      // separates, --line-strong outlines controls (3:1)"*), 그것이 값으로 참인지는
+      // 지금까지 아무 데서도 재지 않았다. 실측 최대는 다크 --surface 위 1.43:1 이다.
+      //
+      // 이 단정이 없으면 `designSystem.test.ts` 의 컨트롤 프리미티브 규칙이 근거를
+      // 잃는다: 「`border-line` 은 컨트롤 경계가 될 수 없다」의 이유가 바로 이 수다.
+      it("the separating line never reaches the 3:1 control minimum", () => {
+        for (const bg of CONTROL_SURFACES) {
+          const ratio = contrast(pick("line", scheme.index), pick(bg, scheme.index));
+          expect(
+            Number(ratio.toFixed(2)),
+            `line on ${bg} (${scheme.name})`
+          ).toBeLessThan(3);
+        }
+      });
+
+      // 파괴 액션의 윤곽은 비파괴 컨트롤의 윤곽보다 **진하다** (#1211 D3).
+      //
+      // dark1155 M1 이 증명한 실패 양식을 값이 아니라 관계로 닫는다: 비파괴 컨트롤
+      // 하나의 경계를 3:1 로 올리는 수리가, 그 옆의 파괴 형제를 화면에서 가장 흐린
+      // 선으로 만들었다. 그때 각 값은 개별적으로 옳았고 이 파일의 단정은 전부
+      // 초록이었다 — 위계는 어느 한 값의 성질이 아니라 **두 값 사이의 순서**이기
+      // 때문이다.
+      //
+      // 실측(라이트/다크, --surface 위): danger 6.05/7.03 대 line-strong 3.59/3.56.
+      it("outlines a destructive control louder than a neutral one", () => {
+        for (const bg of CONTROL_SURFACES) {
+          const destructive = contrast(pick("danger", scheme.index), pick(bg, scheme.index));
+          const neutral = contrast(pick("line-strong", scheme.index), pick(bg, scheme.index));
+          expect(
+            [bg, destructive > neutral],
+            `danger ${destructive.toFixed(2)} vs line-strong ${neutral.toFixed(
+              2
+            )} on ${bg} (${scheme.name})`
+          ).toEqual([bg, true]);
+        }
+      });
+
       // The scrim is a direction, not a color: whatever it covers must end up
       // darker, in BOTH schemes. Painting it with --ink passed review by eye in
       // light and inverted in dark (--ink is nearly white there), which is the
