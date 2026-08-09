@@ -7,6 +7,7 @@ import { resetSettingsQueries } from "@/app/retryScope";
 import { Button } from "@/design/ui/button";
 import { cn } from "@/design/lib/cn";
 import { InlineBanner } from "@/features/common/States";
+import { useOffline } from "@/features/common/useOffline";
 import { RenderErrorBoundary } from "@/features/common/RenderErrorBoundary";
 import { isDesktop } from "@/lib/tauri";
 import { UpdateSection } from "@/features/updates/UpdateSection";
@@ -87,7 +88,7 @@ const SECTIONS: SectionMeta[] = [
 const GROUPS: SectionMeta["group"][] = ["나", "워크스페이스"];
 
 export function SettingsRoute() {
-  const { session, workspaceId, connStatus } = useSession();
+  const { session, workspaceId } = useSession();
   const navigate = useNavigate();
   // ?section=updates lets the sidebar badge (and a bug report) land on one
   // panel instead of "open 설정 and click the fourth item".
@@ -133,7 +134,14 @@ export function SettingsRoute() {
     navRefs.current[ids[(from + step) % ids.length]]?.focus();
   }
 
-  const offline = connStatus === "disconnected";
+  // 두 신호를 함께 읽는다 (`useOffline`). 레일의 `disconnected`는 centrifuge가
+  // 재연결을 **포기한** 종단 절단에서만 오기 때문에, 랜선을 뽑고 105초를 기다려도
+  // 상태는 `connecting`에 머문다 (useOffline.ts). 그 신호 하나만 보던 이 셸은
+  // 그래서 실제로 끊긴 사람에게 배너를 보여주지 못했고, 여기 달린 모든 섹션의
+  // 오프라인 문장·비활성 컨트롤이 코드에만 있고 화면에는 없었다 — 설정 표면에서
+  // 저장 가능 여부를 판단하는 다른 폼들이 이미 쓰고 있는 공용 답을 쓴다
+  // (PR 1203 design review H3: "오프라인 상태가 실물로 도달 불가").
+  const offline = useOffline();
 
   return (
     <div className="flex min-w-0 flex-1 flex-col" data-testid="settings-route">

@@ -9,8 +9,8 @@ import {
   destinationError,
   destinationProblem,
   disabledReasonLine,
-  eventKindDetail,
   eventKindLabel,
+  eventKindPayload,
   eventKindsLabel,
   eventSubscriptionErrorMessage,
   eventSubscriptionState,
@@ -92,6 +92,28 @@ describe("destination validation", () => {
     const korean = `https://hooks.example.com/${"경".repeat(700)}`;
     expect(korean.length).toBeLessThan(DESTINATION_MAX_LENGTH);
     expect(destinationProblem(korean)).toBe("too_long");
+  });
+
+  /**
+   * RED PROOF 3 (corrected, design review #1203 M4) — the gate was already
+   * right and the SENTENCE was wrong.
+   *
+   * `destinationProblem` measures bytes because the column and the server do
+   * (`value.utf8.count`), and the original proof for that still stands above.
+   * What nothing asserted was the copy: it said "2048자", so a Korean path that
+   * is 683 characters long got refused by a rule about characters. In a
+   * codebase where mixed Korean and English is the default the two units are
+   * three times apart, and a limit stated in the wrong unit is not a limit
+   * anyone can plan against. Putting "자" back in this message fails here.
+   */
+  it("states the length limit in the unit it actually measures", () => {
+    const korean = `https://hooks.example.com/${"경".repeat(700)}`;
+    const message = destinationError(korean);
+    expect(message).toContain(`${DESTINATION_MAX_LENGTH}바이트`);
+    expect(message).not.toContain(`${DESTINATION_MAX_LENGTH}자`);
+    // And it says why 683 자 tripped a 2048 limit, rather than leaving that a
+    // surprise the reader has to reverse-engineer.
+    expect(message).toContain("3바이트");
   });
 
   it("gives every problem its own next step", () => {
@@ -192,11 +214,56 @@ describe("event kinds", () => {
   });
 
   it("says which events carry the message body", () => {
-    expect(eventKindDetail("mention")).toContain("본문");
-    expect(eventKindDetail("approval_request")).toContain("본문");
-    expect(eventKindDetail("work.status_changed")).toContain(
+    expect(eventKindPayload("mention").content).toContain("본문");
+    expect(eventKindPayload("approval_request").content).toContain("본문");
+    expect(eventKindPayload("work.status_changed").content).toContain(
       "메시지 본문은 들어 있지 않습니다"
     );
+  });
+
+  /**
+   * RED PROOF 4 (design review #1203 H1) — an enumeration is read as a complete
+   * list, so an incomplete one in a complete list's grammar lies.
+   *
+   * Two ways the first version got this wrong, both of which this test catches:
+   * `mention_member_ids` — who was mentioned, the most personal field after the
+   * body itself — was on the wire and not in the sentence; and 멘션 named
+   * 채널/작성자 while 승인 요청 stayed silent about the identical fields, which
+   * reads as "승인 요청 does not send those".
+   *
+   * Dropping the mention clause, or letting one kind describe its identifiers
+   * while another does not, fails here and nowhere else.
+   */
+  it("names every field the trigger puts on the wire, in one grammar", () => {
+    const mention = eventKindPayload("mention");
+    const approval = eventKindPayload("approval_request");
+    const work = eventKindPayload("work.status_changed");
+
+    // 033_event_subscription.sql: both message projections carry the mention
+    // list — `mention_member_ids` directly, `props` as the whole bag.
+    expect(mention.content).toContain("멘션된 멤버 ID");
+    expect(approval.content).toContain("멘션된 멤버 ID");
+
+    // The same identifiers, named by both, in the same clause shape.
+    for (const payload of [mention, approval]) {
+      expect(payload.identifiers).toContain("채널");
+      expect(payload.identifiers).toContain("작성자");
+      expect(payload.identifiers).toContain("순번");
+    }
+
+    // No kind gets to skip the identifier clause: silence is what made the two
+    // message kinds read as if they sent different things.
+    for (const kind of EVENT_SUBSCRIPTION_KINDS) {
+      const payload = eventKindPayload(kind);
+      expect(payload.content).toMatch(/나갑니다\./);
+      expect(payload.identifiers).toMatch(/ID.*함께 붙습니다\.$/);
+    }
+
+    // 작업 상태 변경 says its own full set, message body explicitly excluded.
+    for (const fact of ["도구 이름", "종료 코드", "종료 사유", "시작·끝 시각"]) {
+      expect(work.content).toContain(fact);
+    }
+    expect(work.identifiers).toContain("작업 세션");
   });
 });
 

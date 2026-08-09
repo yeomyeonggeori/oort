@@ -8,11 +8,12 @@ import {
   EVENT_SUBSCRIPTION_KINDS,
   createEventSubscription,
   deleteEventSubscription,
+  UNVERIFIED_CREATE_MESSAGE,
   deliveryFailureLine,
   destinationError,
   disabledReasonLine,
-  eventKindDetail,
   eventKindLabel,
+  eventKindPayload,
   eventKindsLabel,
   eventSubscriptionErrorMessage,
   eventSubscriptionState,
@@ -33,6 +34,7 @@ import {
   OperatorNotice,
   SectionShell,
   StatusChip,
+  Subsection,
 } from "./SettingsFields";
 
 // =============================================================================
@@ -135,40 +137,40 @@ export function EventSubscriptionSection({
       }),
   });
 
-  if (subscriptions.isPending) {
+  // A 403 is the server answering the whole panel, so it replaces the whole
+  // panel: drawing a create form whose save is guaranteed to fail is worse than
+  // saying who can.
+  if (subscriptions.isError && isOperatorDenied(subscriptions.error)) {
     return (
       <SectionShell title="이벤트 구독" lines={LINES}>
-        <SkeletonRows rows={3} />
+        <OperatorNotice
+          who="이벤트 구독은 워크스페이스 오너나 관리자만 만들고 지울 수 있습니다."
+          contact="외부로 보낼 이벤트가 필요하면 워크스페이스 관리자에게 요청하세요."
+        />
       </SectionShell>
     );
   }
 
-  if (subscriptions.isError) {
-    return (
-      <SectionShell title="이벤트 구독" lines={LINES}>
-        {isOperatorDenied(subscriptions.error) ? (
-          <OperatorNotice
-            who="이벤트 구독은 워크스페이스 오너나 관리자만 만들고 지울 수 있습니다."
-            contact="외부로 보낼 이벤트가 필요하면 워크스페이스 관리자에게 요청하세요."
-          />
-        ) : (
-          <InlineBanner
-            message={eventSubscriptionErrorMessage("load", subscriptions.error)}
-            actionLabel="다시 불러오기"
-            onAction={() => void subscriptions.refetch()}
-            testId="event-subscription-error"
-          />
-        )}
-      </SectionShell>
-    );
-  }
-
-  const rows = subscriptions.data;
+  const rows = subscriptions.data ?? [];
   const busy = toggle.isPending || remove.isPending;
 
+  // Every branch below is the LIST's answer, and only the list's. The form
+  // outlives all of them (design review #1203 M5): a 503 on the read says
+  // nothing about POST /event-subscriptions, and letting one failed GET take
+  // the form away leaves a panel with no action on it at all. It also stops the
+  // panel from jumping a form's height when three skeleton rows resolve.
   return (
     <SectionShell title="이벤트 구독" lines={LINES}>
-      {rows.length === 0 ? (
+      {subscriptions.isPending ? (
+        <SkeletonRows rows={3} />
+      ) : subscriptions.isError ? (
+        <InlineBanner
+          message={eventSubscriptionErrorMessage("load", subscriptions.error)}
+          actionLabel="다시 불러오기"
+          onAction={() => void subscriptions.refetch()}
+          testId="event-subscription-error"
+        />
+      ) : rows.length === 0 ? (
         <EmptyInvite
           headline="보내는 구독이 아직 없습니다."
           detail="아래에서 받을 주소와 이벤트를 고르면 그때부터 전송이 시작됩니다."
@@ -194,15 +196,21 @@ export function EventSubscriptionSection({
         </ul>
       )}
 
-      <CreateForm
-        workspaceId={workspaceId}
-        offline={offline}
-        onCreated={(created) => {
-          setRowIssue(null);
-          setIssued(created);
-          invalidate();
-        }}
-      />
+      {/* The form is a second thing this panel governs, not more of the list.
+          Without a heading the only word marking the boundary was the commit
+          button's label, at the very bottom (design review #1203 N2). */}
+      <Subsection title="새 구독 만들기">
+        <CreateForm
+          workspaceId={workspaceId}
+          offline={offline}
+          onReloadList={() => void subscriptions.refetch()}
+          onCreated={(created) => {
+            setRowIssue(null);
+            setIssued(created);
+            invalidate();
+          }}
+        />
+      </Subsection>
 
       {issued && (
         <OneTimeSecret
@@ -239,8 +247,13 @@ function SubscriptionRow({
   // The destination is what distinguishes two rows, so it is what a per-row
   // control has to carry in its accessible name: three "지우기" stops in a tab
   // order are three identical stops, and the row about to be destroyed is not
-  // recoverable from the button alone.
+  // recoverable from the button alone. Passed as `subject` so it survives into
+  // the confirmation step too (design review #1203 H2) — dropping the row's
+  // identity at the moment the question is asked is the worst place to drop it.
   const subject = `${eventKindsLabel(subscription.eventKinds)} ${subscription.url}`;
+  // A destructive question is being asked about THIS row; nothing else on the
+  // row stands beside it while it is open (design review #1203 N4).
+  const [confirming, setConfirming] = useState(false);
 
   return (
     <li
@@ -261,9 +274,11 @@ function SubscriptionRow({
       {/* The address is a token, not prose: it breaks anywhere and keeps the
           monospace column, so two rows pointing at the same host are told
           apart by their path rather than by squinting. */}
+      {/* No `data-numeric`: tokens.md §4 gives tabular figures to things that
+          ARE figures (the date below is one), not to everything that happens to
+          be monospaced (design review #1203 N3). */}
       <p
         className="min-w-0 break-all font-mono text-meta text-ink-muted"
-        data-numeric
         data-testid="event-subscription-url"
       >
         {subscription.url}
@@ -301,12 +316,12 @@ function SubscriptionRow({
         </p>
       )}
 
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
         <Button
           type="button"
           variant="outline"
           size="sm"
-          disabled={offline || busy}
+          disabled={offline || busy || confirming}
           aria-label={
             subscription.enabled
               ? `${subject} 전송 멈추기`
@@ -319,13 +334,27 @@ function SubscriptionRow({
         </Button>
         <ConfirmButton
           label="구독 지우기"
-          ariaLabel={`${subject} 구독 지우기`}
+          subject={subject}
           question="지우면 전송이 즉시 끊기고 되돌릴 수 없습니다."
           confirmLabel="지우기"
           disabled={offline || busy}
           onConfirm={onDelete}
+          onAskingChange={setConfirming}
           testId="event-subscription-delete"
         />
+        {/* Both row controls go grey offline, so the reason stands with them —
+            the same rule this file already applied to the create button, and
+            the one it had not applied here (design review #1203 H3). A control
+            that greys with nothing beside it reads as "you may not", which is a
+            different and wrong sentence about a permission this reader has. */}
+        {offline && !confirming && (
+          <span
+            className="break-keep text-meta text-ink-muted"
+            data-testid="event-subscription-row-offline"
+          >
+            연결이 끊겨 지금은 멈추거나 지울 수 없습니다.
+          </span>
+        )}
       </div>
     </li>
   );
@@ -336,10 +365,13 @@ function SubscriptionRow({
 function CreateForm({
   workspaceId,
   offline,
+  onReloadList,
   onCreated,
 }: {
   workspaceId: string;
   offline: boolean;
+  /** The next move the unverified-create sentence names. See below. */
+  onReloadList: () => void;
   onCreated: (created: CreatedEventSubscription) => void;
 }) {
   const urlFieldId = useId();
@@ -363,6 +395,9 @@ function CreateForm({
 
   const urlProblem = destinationError(url);
   const noKinds = kinds.length === 0;
+  const createFailure = create.isError
+    ? eventSubscriptionErrorMessage("create", create.error)
+    : null;
 
   function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -421,6 +456,7 @@ function CreateForm({
           {EVENT_SUBSCRIPTION_KINDS.map((kind) => {
             const id = `${kindsId}-${kind}`;
             const checked = kinds.includes(kind);
+            const payload = eventKindPayload(kind);
             return (
               <label
                 key={kind}
@@ -439,10 +475,21 @@ function CreateForm({
                   onChange={(event) => toggleKind(kind, event.target.checked)}
                   className="mt-1 accent-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
                 />
+                {/* Two clauses, and every option gets both: what content
+                    leaves, then which identifiers ride along. A partial
+                    enumeration wearing a complete list's grammar was the H1 of
+                    the #1203 review — 멘션 shipped `mention_member_ids` without
+                    saying so, and named 채널/작성자 while 승인 요청 kept quiet
+                    about the identical fields. The shape is the promise: three
+                    options answering the same two questions in the same order
+                    cannot silently answer one of them for only some of them. */}
                 <span className="flex min-w-0 flex-col gap-px">
                   <span className="text-body text-ink">{eventKindLabel(kind)}</span>
                   <span className="break-keep text-meta text-ink-muted">
-                    {eventKindDetail(kind)}
+                    {payload.content}
+                  </span>
+                  <span className="break-keep text-meta text-ink-muted">
+                    {payload.identifiers}
                   </span>
                 </span>
               </label>
@@ -461,16 +508,35 @@ function CreateForm({
       </fieldset>
 
       {create.isError && (
-        <p
-          className="break-keep text-meta text-danger"
-          role="alert"
-          data-testid="event-subscription-create-error"
-        >
-          {eventSubscriptionErrorMessage("create", create.error)}
-        </p>
+        <div className="flex min-w-0 flex-col items-start gap-2">
+          <p
+            className="break-keep text-meta text-danger"
+            role="alert"
+            data-testid="event-subscription-create-error"
+          >
+            {createFailure}
+          </p>
+          {/* The unverified-create sentence tells the reader to re-read the
+              list and delete a row if it is there. That instruction had no
+              control on a panel that loaded fine (design review #1203 M1) —
+              the only 다시 불러오기 lived in the error state, which is exactly
+              the state this is not. It appears for that message alone: a reload
+              button next to a 400 would be advice for a different problem. */}
+          {createFailure === UNVERIFIED_CREATE_MESSAGE && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={onReloadList}
+              data-testid="event-subscription-create-reload"
+            >
+              목록 다시 불러오기
+            </Button>
+          )}
+        </div>
       )}
 
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
         <Button
           type="submit"
           size="sm"
@@ -482,11 +548,26 @@ function CreateForm({
         </Button>
         {/* The button is disabled offline, so the reason has to be next to it:
             a control that went grey with no sentence reads as "you may not do
-            this" rather than "this cannot be sent right now". */}
-        <span className="break-keep text-meta text-ink-muted" role="status">
+            this" rather than "this cannot be sent right now".
+
+            Two nodes, not one with a switching role (design review #1203 N1):
+            the standing hint is a static caption and had no business being a
+            live region, while the offline sentence is the one thing here worth
+            announcing. An EMPTY live region that fills is the shape that
+            announces reliably, and it says nothing at all while online. */}
+        {!offline && (
+          <span className="break-keep text-meta text-ink-muted">
+            만들면 서명 비밀이 한 번만 표시됩니다.
+          </span>
+        )}
+        <span
+          className="break-keep text-meta text-ink-muted"
+          role="status"
+          data-testid="event-subscription-create-offline"
+        >
           {offline
             ? "서버와 연결이 끊겨 지금은 만들 수 없습니다. 다시 연결되면 그대로 보내집니다."
-            : "만들면 서명 비밀이 한 번만 표시됩니다."}
+            : ""}
         </span>
       </div>
     </form>
@@ -551,14 +632,21 @@ function OneTimeSecret({
           subject={created.eventSubscription.url}
           testId="event-subscription-copy-secret"
         />
+        {/* "저장했습니다" was a past-tense statement, so it read as a caption
+            beside a copy button rather than the control that destroys the only
+            copy of this value (design review #1203 M3). Ghost is the house
+            shape for 취소·닫기 and those read as controls because they are
+            verbs; this one now is too. The accessible name says which 닫기,
+            since the settings header has one as well. */}
         <Button
           type="button"
           variant="ghost"
           size="sm"
+          aria-label="서명 비밀 닫기"
           onClick={onDismiss}
           data-testid="event-subscription-secret-dismiss"
         >
-          저장했습니다
+          닫기
         </Button>
       </div>
 

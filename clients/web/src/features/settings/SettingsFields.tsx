@@ -551,13 +551,31 @@ export function CopyButton({
 /**
  * Two-step confirmation for a destructive action. The first click only asks;
  * nothing irreversible ever happens on a single unguarded click.
+ *
+ * Both steps have to survive the keyboard, which is what the first version
+ * missed (PR 1203 design review H2). Step one replaces itself with step two, so
+ * the button that was focused stops existing and the browser drops focus to
+ * `document.body`: a keyboard reader who pressed Enter on 지우기 was returned to
+ * the top of the document and had to Tab back to a row it could no longer tell
+ * from its neighbours. Two things answer that here, and they belong here rather
+ * than in each caller because every caller has the same problem:
+ *
+ *   - Focus MOVES to the question, not to the destructive button. The group is
+ *     what was just opened, its accessible name is the question, and landing on
+ *     it means the thing announced is "지우면 되돌릴 수 없습니다" rather than the
+ *     button that does it. Landing on 지우기 itself would make Enter-Enter
+ *     destroy a row, which is the guard this component exists to be.
+ *   - Cancel RETURNS focus to the trigger. Backing out of a question should put
+ *     the reader where the question found them.
  */
 export function ConfirmButton({
   label,
   ariaLabel,
+  subject,
   question,
   confirmLabel,
   onConfirm,
+  onAskingChange,
   disabled,
   testId,
 }: {
@@ -567,25 +585,71 @@ export function ConfirmButton({
    * times is eight identical stops in the tab order, and the row a screen
    * reader is about to act on is not recoverable from the button alone. Must
    * contain the visible label so speech input still matches it.
+   *
+   * Prefer `subject`, which names the row once and carries it through BOTH
+   * steps; this stays for callers whose question is already row-qualified.
    */
   ariaLabel?: string;
+  /**
+   * What the destructive action belongs to — the row discriminator, same
+   * convention as `CopyButton`.
+   *
+   * It qualifies all three accessible names (trigger, question group, confirm),
+   * because the identity of the row is not something that may be dropped
+   * halfway through the interaction. A list rendering this per row otherwise
+   * reaches step two as N groups named by one identical sentence and N buttons
+   * named "지우기", at the exact moment the reader most needs to know which one
+   * is about to go.
+   */
+  subject?: string;
   question: string;
   confirmLabel: string;
   onConfirm: () => void;
+  /**
+   * The confirmation opened or closed. For a caller that has to quiet OTHER
+   * actions on the same row while an irreversible one is being asked about.
+   */
+  onAskingChange?: (asking: boolean) => void;
   disabled?: boolean;
   testId?: string;
 }) {
   const [asking, setAsking] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const groupRef = useRef<HTMLDivElement | null>(null);
+  // Cancel goes back to the trigger; confirming does not, because the row the
+  // trigger belonged to is usually gone by the time the effect runs.
+  const restoreFocus = useRef(false);
+
+  function close(restore: boolean) {
+    restoreFocus.current = restore;
+    setAsking(false);
+    onAskingChange?.(false);
+  }
+
+  useEffect(() => {
+    if (asking) {
+      groupRef.current?.focus({ preventScroll: true });
+    } else if (restoreFocus.current) {
+      restoreFocus.current = false;
+      triggerRef.current?.focus({ preventScroll: true });
+    }
+  }, [asking]);
+
+  const triggerName = ariaLabel ?? (subject ? `${subject} ${label}` : undefined);
 
   if (!asking) {
     return (
       <Button
+        ref={triggerRef}
         type="button"
         variant="outline"
         size="sm"
         disabled={disabled}
-        aria-label={ariaLabel}
-        onClick={() => setAsking(true)}
+        aria-label={triggerName}
+        onClick={() => {
+          setAsking(true);
+          onAskingChange?.(true);
+        }}
         data-testid={testId}
       >
         {label}
@@ -594,12 +658,16 @@ export function ConfirmButton({
   }
 
   // The question names the group, so two rows mid-confirmation stay two
-  // distinct groups instead of four anonymous 빼기/취소 stops.
+  // distinct groups instead of four anonymous 빼기/취소 stops. With a `subject`
+  // they stay distinct even when the question itself is one shared sentence.
   return (
     <div
-      className="flex flex-wrap items-center gap-2"
+      ref={groupRef}
+      tabIndex={-1}
+      className="flex flex-wrap items-center gap-2 rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
       role="group"
-      aria-label={question}
+      aria-label={subject ? `${subject} ${question}` : question}
+      data-testid={testId ? `${testId}-question` : undefined}
     >
       <span className="text-meta text-ink">{question}</span>
       <Button
@@ -607,8 +675,9 @@ export function ConfirmButton({
         variant="destructive"
         size="sm"
         disabled={disabled}
+        aria-label={subject ? `${subject} ${confirmLabel}` : undefined}
         onClick={() => {
-          setAsking(false);
+          close(false);
           onConfirm();
         }}
         data-testid={testId ? `${testId}-confirm` : undefined}
@@ -619,7 +688,8 @@ export function ConfirmButton({
         type="button"
         variant="ghost"
         size="sm"
-        onClick={() => setAsking(false)}
+        aria-label={subject ? `${subject} ${confirmLabel} 취소` : undefined}
+        onClick={() => close(true)}
       >
         취소
       </Button>

@@ -301,6 +301,39 @@ async function captureScheme(browser, scheme) {
     await page.getByTestId("event-subscription-error").waitFor({ state: "visible" });
   });
 
+  // 7b. 오프라인: the fourth mandatory state, which the first pass shipped as an
+  //     assertion rather than a picture (#1203 design review H3). It is
+  //     reachable now because the settings shell reads `useOffline`, which asks
+  //     the BROWSER as well as the rail: `setOffline` is what a pulled cable
+  //     looks like, and the rail's `disconnected` never arrives from one
+  //     (useOffline.ts). Both row controls go grey here, so the shot has to
+  //     show the sentence standing next to them, not just the shell banner.
+  await shoot("offline", () => ROWS, async (page) => {
+    await page.getByTestId("event-subscription-list").waitFor({ state: "visible" });
+    await page.context().setOffline(true);
+    await page.getByTestId("settings-offline-banner").waitFor({ state: "visible" });
+    await page
+      .getByTestId("event-subscription-row-offline")
+      .first()
+      .waitFor({ state: "visible" });
+  });
+
+  // 7c. 만들기 실패 중 확인 못 한 2xx: the sentence tells the reader to re-read
+  //     the list, so the control that does it is in the same block (#1203 M1).
+  await shoot("create-unverified", () => ROWS, async (page) => {
+    await page.getByTestId("event-subscription-create-form").waitFor({ state: "visible" });
+    // A create that answers 2xx with a body describing a different address.
+    await page.context().route("**/v1/workspaces/*/event-subscriptions", (route) =>
+      route.request().method() === "POST"
+        ? json(route, { ...CREATED, eventSubscription: { ...CREATED.eventSubscription, url: "https://elsewhere.example/oort" } }, 201)
+        : json(route, { eventSubscriptions: ROWS })
+    );
+    await draft(page);
+    await page.getByTestId("event-subscription-create").click();
+    await page.getByTestId("event-subscription-create-reload").waitFor({ state: "visible" });
+    await page.getByTestId("event-subscription-create-reload").scrollIntoViewIfNeeded();
+  });
+
   // 8. 키보드 초점: tabbed into rather than focused programmatically, because
   //    :focus-visible only fires on the real path.
   await shoot("focus", () => ROWS, async (page) => {

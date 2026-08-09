@@ -89,18 +89,63 @@ export function eventKindsLabel(kinds: readonly string[]): string {
   return kinds.map(eventKindLabel).join(" · ");
 }
 
+/** What one event kind puts on the wire, in two clauses. See `eventKindPayload`. */
+export interface EventKindPayload {
+  /** The content — what a person would recognise as their own words or work. */
+  content: string;
+  /** The identifiers riding along. Same clause shape for every kind. */
+  identifiers: string;
+}
+
 /**
- * What the destination actually receives, transcribed from the trigger bodies
- * in 033_event_subscription.sql. Two of the three carry the message text.
+ * What the destination actually receives, transcribed field by field from the
+ * `jsonb_build_object` calls in 033_event_subscription.sql.
+ *
+ * TWO CLAUSES, AND EVERY KIND GETS BOTH. The first names the content, the
+ * second names the identifiers. That split is what keeps the sentence honest:
+ * an enumeration is read as a complete list, so a partial enumeration in a
+ * complete list's grammar says "this is everything" while being less than
+ * everything — and a panel whose entire job is naming what leaves the workspace
+ * cannot afford that. It also stops the kinds from being described in different
+ * grammars: 멘션 naming 채널 ID while 승인 요청 stays silent about the same
+ * field reads as "승인 요청 does not send it", which is false.
+ *
+ * The full projections, for the next person who has to check this against the
+ * migration:
+ *   mention           message_id, channel_id, seq, author_member_id,
+ *                     message_type, body, mention_member_ids, root_id, run_id
+ *   approval_request  message_id, channel_id, seq, author_member_id, body,
+ *                     props (the whole object), run_id
+ *   work.status_changed
+ *                     work_session_id, channel_id, root_message_id, member_id,
+ *                     tool, previous_status, status, started_at, ended_at,
+ *                     exit_code, end_reason, resumed_from_session_id
+ *
+ * `props` on the approval projection is the message's entire property bag, so
+ * it carries `mention_member_ids` too. It is named rather than glossed as
+ * "속성": the whole point is that the reader can tell whether their own data is
+ * in there.
  */
-export function eventKindDetail(kind: EventSubscriptionKind): string {
+export function eventKindPayload(kind: EventSubscriptionKind): EventKindPayload {
   switch (kind) {
     case "mention":
-      return "멘션이 달린 메시지의 본문, 채널 ID, 작성자 ID가 함께 나갑니다.";
+      return {
+        content: "메시지 본문과 멘션된 멤버 ID가 나갑니다.",
+        identifiers:
+          "메시지·채널·작성자·스레드·실행 ID, 메시지 종류, 순번이 함께 붙습니다.",
+      };
     case "approval_request":
-      return "승인 요청 메시지의 본문과 속성이 함께 나갑니다.";
+      return {
+        content:
+          "메시지 본문과 속성 전체가 나갑니다. 속성에는 멘션된 멤버 ID처럼 메시지에 붙은 값이 모두 들어 있습니다.",
+        identifiers: "메시지·채널·작성자·실행 ID, 순번이 함께 붙습니다.",
+      };
     case "work.status_changed":
-      return "작업 세션의 이전 상태, 새 상태, 도구 이름, 종료 코드가 나갑니다. 메시지 본문은 들어 있지 않습니다.";
+      return {
+        content:
+          "이전 상태와 새 상태, 도구 이름, 시작·끝 시각, 종료 코드, 종료 사유가 나갑니다. 메시지 본문은 들어 있지 않습니다.",
+        identifiers: "작업 세션·채널·스레드·멤버 ID가 함께 붙습니다.",
+      };
   }
 }
 
@@ -314,8 +359,12 @@ export function destinationError(raw: string): string | null {
       return null;
     case "empty":
       return "이벤트를 받을 주소를 입력하세요.";
+    // 자가 아니라 바이트다. 게이트는 `TextEncoder`로 재고 서버도 그렇게 재는데
+    // (EventSubscriptionRoutes.swift `value.utf8.count`), 문구만 "자"라고 말하면
+    // 한글 경로를 683자 넣은 사람이 2048자 제한에 걸린 이유를 알 수 없다 — 한영
+    // 혼용이 기본값인 코드베이스에서 두 단위는 3배 어긋난다.
     case "too_long":
-      return `주소는 ${DESTINATION_MAX_LENGTH}자를 넘을 수 없습니다.`;
+      return `주소는 ${DESTINATION_MAX_LENGTH}바이트를 넘을 수 없습니다. 한글은 한 자에 3바이트를 씁니다.`;
     case "unparsable":
       return "주소를 읽지 못했습니다. https://hooks.example.com/oort 형태로 입력하세요.";
     case "scheme":
