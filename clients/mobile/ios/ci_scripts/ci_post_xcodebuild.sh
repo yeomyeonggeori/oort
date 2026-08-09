@@ -123,29 +123,41 @@ assert_keychain_grant() {
        An ad-hoc signature does exactly this; a profile-signed one never does.
        If this fires on Xcode Cloud, the workflow is not signing with a profile."
 
+  # `application-identifier` is injected by the provisioning profile — but WHEN
+  # depends on the signer. Xcode Cloud's archive-stage signature carries the
+  # .entitlements-declared grants (aps-environment, app groups, keychain groups)
+  # and adds this key only at export re-sign — build 2039 diagnostic: lint-clean
+  # plist, all three grants present, this key absent, while every export lane of
+  # the same build was green. The property this script exists to defend is the
+  # keychain grant below, and the team prefix lives inside that group string —
+  # so the team assertion holds either way, and this key is asserted only when
+  # the signer provided it. (성재 승인 2026-08-09 — 검증 게이트 전제 수정)
   app_id="$(entitlement "$plist" application-identifier)"
-  if [ -z "$app_id" ]; then
-    # Before dying, say what the document actually was — a red assertion that
-    # hides its evidence costs a 12-minute cloud round-trip per guess.
+  if [ -n "$app_id" ]; then
+    prefix="${app_id%%.*}"
+    [ "$prefix" = "$EXPECTED_TEAM" ] ||
+      fail "$label is signed under team prefix '$prefix', not $EXPECTED_TEAM.
+       The App IDs, the App Group and the APNs key all live in $EXPECTED_TEAM
+       (docs/cicd/10 §0)."
+    echo "ok: $label application-identifier=$app_id"
+  else
+    echo "ok: $label archive-stage signature — no application-identifier; team is asserted via the keychain group below"
+  fi
+
+  want="$EXPECTED_TEAM.$KEYCHAIN_GROUP_SUFFIX"
+  plutil -extract keychain-access-groups xml1 -o - "$plist" 2>/dev/null |
+    grep -qF "<string>$want</string>" || {
+    # This is now the load-bearing assertion — show the document, not just the
+    # verdict (a red line without evidence costs a 12-minute cloud round-trip).
     log "diagnostic($label): plutil -lint => $(plutil -lint "$plist" 2>&1 || true)"
     log "diagnostic($label): dumped entitlements (head):"
     head -c 1200 "$plist" >&2 || true
     printf '\n' >&2
-    fail "$label has no application-identifier entitlement."
-  fi
-  prefix="${app_id%%.*}"
-  [ "$prefix" = "$EXPECTED_TEAM" ] ||
-    fail "$label is signed under team prefix '$prefix', not $EXPECTED_TEAM.
-       The App IDs, the App Group and the APNs key all live in $EXPECTED_TEAM
-       (docs/cicd/10 §0)."
-
-  want="$prefix.$KEYCHAIN_GROUP_SUFFIX"
-  plutil -extract keychain-access-groups xml1 -o - "$plist" 2>/dev/null |
-    grep -qF "<string>$want</string>" ||
     fail "$label was signed WITHOUT the shared keychain group $want.
        The profile does not carry keychain-access-groups. On device the extension
        then cannot read the push-fetch session, and every notification stays the
        relay placeholder (docs/cicd/11 §3-1)."
+  }
   echo "ok: $label was granted $want"
 }
 
