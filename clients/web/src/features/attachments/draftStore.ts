@@ -67,9 +67,11 @@ interface Surface {
   drafts: AttachmentDraft[];
   /** 한 메시지에 담기지 못하고 버려진 개수. 말없이 사라지지 않게 세어 둔다. */
   rejected: number;
+  /** 폴더라서 받지 못한 개수 (design-review M-4). 같은 규율, 다른 이유. */
+  folders: number;
 }
 
-const EMPTY: Surface = { drafts: [], rejected: 0 };
+const EMPTY: Surface = { drafts: [], rejected: 0, folders: 0 };
 
 let surfaces: ReadonlyMap<string, Surface> = new Map();
 const files = new Map<string, File>();
@@ -85,8 +87,15 @@ function emit(next: ReadonlyMap<string, Surface>): void {
 
 function write(key: string, surface: Surface): void {
   const next = new Map(surfaces);
-  if (surface.drafts.length === 0 && surface.rejected === 0) next.delete(key);
-  else next.set(key, surface);
+  if (
+    surface.drafts.length === 0 &&
+    surface.rejected === 0 &&
+    surface.folders === 0
+  ) {
+    next.delete(key);
+  } else {
+    next.set(key, surface);
+  }
   emit(next);
 }
 
@@ -230,9 +239,17 @@ async function pump(key: string, target: UploadTarget): Promise<void> {
 export function addFiles(
   key: string,
   target: UploadTarget,
-  picked: File[]
+  picked: File[],
+  batch?: { folders?: number }
 ): void {
-  if (picked.length === 0) return;
+  const folders = batch?.folders ?? 0;
+  if (picked.length === 0) {
+    if (folders > 0) {
+      const surface = read(key);
+      write(key, { ...surface, folders: surface.folders + folders });
+    }
+    return;
+  }
   const incoming = picked.map((file) => {
     const localId = crypto.randomUUID();
     files.set(localId, file);
@@ -251,7 +268,11 @@ export function addFiles(
   for (const draft of incoming.slice(incoming.length - rejected)) {
     files.delete(draft.localId);
   }
-  write(key, { drafts: next, rejected: surface.rejected + rejected });
+  write(key, {
+    drafts: next,
+    rejected: surface.rejected + rejected,
+    folders: surface.folders + folders,
+  });
   void pump(key, target);
 }
 
@@ -276,11 +297,11 @@ export function clearSurface(key: string): void {
   write(key, EMPTY);
 }
 
-/** 「자리가 없어 버렸다」 고지를 사람이 읽고 나면 지운다. */
-export function acknowledgeRejected(key: string): void {
+/** 받지 못한 것들에 대한 고지를 사람이 읽고 나면 지운다. */
+export function acknowledgeNotices(key: string): void {
   const surface = read(key);
-  if (surface.rejected === 0) return;
-  write(key, { ...surface, rejected: 0 });
+  if (surface.rejected === 0 && surface.folders === 0) return;
+  write(key, { ...surface, rejected: 0, folders: 0 });
 }
 
 /**

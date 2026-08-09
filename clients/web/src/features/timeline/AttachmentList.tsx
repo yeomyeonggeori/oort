@@ -1,4 +1,4 @@
-import { Download, FileText, ImageIcon } from "lucide-react";
+import { Download, FileText, ImageIcon, Loader2 } from "lucide-react";
 import { useState } from "react";
 import { useSession } from "@/app/session";
 import { cn } from "@/design/lib/cn";
@@ -42,13 +42,25 @@ import {
 /**
  * 로딩·실패에 자리를 잡아 주는 상자. 셔머 없는 중립 면이다(SKILL §5).
  *
- * 높이가 144px 인 것은 추측이다 — 바이트가 도착하기 전에는 이 이미지의 비율을
- * 알 방법이 없다. 추측인 이상 **작게** 추측한다: 400px 짜리 빈 칸을 잡아 두면
- * 실제 이미지가 그보다 작을 때 대화가 위로 접히고, 그 움직임이 자리를 미리
- * 잡아서 막으려던 바로 그 움직임이다.
+ * 320x180 = 16:9. 바이트가 오기 전에는 비율을 알 수 없으니 이것도 추측이지만,
+ * 사람들이 실제로 붙이는 것의 대다수인 스크린샷에서는 도착 순간의 이동이 0 이
+ * 된다. 높이는 자기 이름을 가진 토큰이다(design-review M-2: 앞 판은 다이얼로그
+ * 버튼 최소**폭** 토큰을 높이로 빌려 썼다).
  */
 const PREVIEW_FRAME_CLASS =
-  "flex h-action w-pane max-w-full items-center justify-center overflow-hidden rounded-md border border-line bg-surface-hover";
+  "flex h-preview-frame w-pane max-w-full items-center justify-center overflow-hidden rounded-md border border-line bg-surface-hover";
+
+/**
+ * 한 줄에 「무엇이」와 「무엇을 할 수 있는가」를 놓는 행.
+ *
+ * 파일 카드와 이미지 캡션이 **같은 행 문법**을 쓴다 (design-review H-2). 앞 판은
+ * 카드에서는 624px 폭 끝에 버튼을 못 박고 캡션에서는 이름 바로 옆에 붙여서,
+ * 한 타임라인에서 같은 버튼을 두 번 다른 곳에서 찾아야 했다. 게다가 624px 안에
+ * 두 줄짜리 라벨 하나뿐인 형상은 `tokens.md §4` 가 `max-w-pane-lg` 를 만들며
+ * 경고한 그 읽힘이다 — 라벨과 한 화면 떨어진 오른쪽 열은 카드가 아니라 배너로
+ * 읽힌다. 이제 상자가 내용에 맞춰 줄어들어(`w-fit`) 버튼이 늘 이름 곁에 선다.
+ */
+const ACTION_ROW_CLASS = "flex min-w-0 items-center gap-2";
 
 function MetaLine({ attachment }: { attachment: MessageAttachment }) {
   return (
@@ -63,6 +75,16 @@ function MetaLine({ attachment }: { attachment: MessageAttachment }) {
   );
 }
 
+/**
+ * 내려받기 하나.
+ *
+ * **바쁜 버튼은 비활성 버튼이 아니다** (design-review H-1, `tokens.md §5b` 가
+ * 이 정확한 실수에 이름을 붙여 뒀다). 앞 판은 `disabled + opacity-50` 만으로
+ * 진행을 말했고, 그러면 100MB 짜리를 누른 뒤 수십 초 동안 **흐려진 아이콘이
+ * 유일한 신호**이면서 동시에 대비가 2.2:1 로 떨어진다. 이제 대비를 그대로 두고
+ * 회전을 신호로 쓰며 `aria-busy` 를 단다. 비활성은 「지금 이걸 할 수 없다」의
+ * 언어이고, 여기서는 하고 있는 중이다.
+ */
 function DownloadButton({
   workspaceId,
   channelId,
@@ -78,19 +100,27 @@ function DownloadButton({
   return (
     <button
       type="button"
-      disabled={busy}
+      aria-busy={busy || undefined}
       onClick={() => {
+        // 두 번 누르면 두 번 받는다. 막는 대신 같은 요청을 다시 보내지 않게만
+        // 한다 — 비활성화는 포커스를 <body> 로 던지고 돌려주지 않는다(SKILL §6).
+        if (busy) return;
         setBusy(true);
         void downloadAttachment(workspaceId, channelId, attachment)
           .catch(onFailed)
           .finally(() => setBusy(false));
       }}
       aria-label={`${attachment.name} ${ATTACH_COPY.download}`}
-      title={ATTACH_COPY.download}
+      title={busy ? ATTACH_COPY.downloading : ATTACH_COPY.download}
       data-testid="attachment-download"
-      className="touch-target flex size-control shrink-0 items-center justify-center rounded-sm text-ink-muted hover:bg-surface-hover hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:opacity-50"
+      data-busy={busy ? "" : undefined}
+      className="touch-target flex size-control shrink-0 items-center justify-center rounded-sm text-ink-muted hover:bg-surface-hover hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
     >
-      <Download aria-hidden="true" className="size-4" />
+      {busy ? (
+        <Loader2 aria-hidden="true" className="size-4 spinner-busy" />
+      ) : (
+        <Download aria-hidden="true" className="size-4" />
+      )}
     </button>
   );
 }
@@ -109,7 +139,10 @@ function FileCard({
   return (
     <div
       data-testid="attachment-card"
-      className="flex max-w-pane-lg items-center gap-2 rounded-md border border-line bg-surface-raised px-3 py-2"
+      className={cn(
+        ACTION_ROW_CLASS,
+        "w-fit max-w-pane-lg rounded-md border border-line bg-surface-raised px-3 py-2"
+      )}
     >
       <Icon aria-hidden="true" className="size-4 shrink-0 text-ink-muted" />
       <span className="flex min-w-0 flex-1 flex-col">
@@ -151,7 +184,7 @@ function ImageCard({
     <figure
       data-testid="attachment-image"
       data-preview={preview.status}
-      className="flex max-w-pane-lg flex-col gap-1"
+      className="flex w-fit max-w-pane-lg flex-col gap-1"
     >
       {preview.status === "ready" ? (
         <img
@@ -171,13 +204,17 @@ function ImageCard({
           </span>
         </div>
       )}
-      <figcaption className="flex items-center gap-2">
-        <MetaLine attachment={attachment} />
-        {failed && (
-          <span className="text-meta text-danger" data-testid="attachment-download-failed">
-            {ATTACH_COPY.downloadFailed}
-          </span>
-        )}
+      {/* 카드와 **같은 행**이다 (design-review H-2): 왼쪽에 이름과 메타, 오른쪽
+          끝에 같은 버튼. 두 모양 사이를 오갈 때 같은 동작을 두 번 찾지 않는다. */}
+      <figcaption className={ACTION_ROW_CLASS}>
+        <span className="flex min-w-0 flex-1 flex-col">
+          <MetaLine attachment={attachment} />
+          {failed && (
+            <span className="text-meta text-danger" data-testid="attachment-download-failed">
+              {ATTACH_COPY.downloadFailed}
+            </span>
+          )}
+        </span>
         <DownloadButton
           workspaceId={workspaceId}
           channelId={channelId}

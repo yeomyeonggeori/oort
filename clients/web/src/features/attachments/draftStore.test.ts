@@ -301,6 +301,26 @@ describe("upload orchestration", () => {
     expect(readSurface(KEY).drafts).toHaveLength(1);
   });
 
+  it("keeps a dropped folder from vanishing without a word", async () => {
+    // 리뷰 M-4. 같은 PR 이 상한 초과 파일에는 고지를 새로 만들면서, 드롭 존은
+    // 폴더와 **빈 파일**을 말없이 걸렀다. 폴더는 세어서 말하고 빈 파일은 통과한다.
+    addFiles(KEY, TARGET, [], { folders: 2 });
+    await settle();
+    expect(readSurface(KEY).folders).toBe(2);
+    expect(readSurface(KEY).drafts).toHaveLength(0);
+    expect(createAttachmentUpload).not.toHaveBeenCalled();
+  });
+
+  it("uploads a zero-byte file instead of dropping it in silence", async () => {
+    addFiles(KEY, TARGET, [file("empty.log", 0)]);
+    await settle();
+    expect(createAttachmentUpload).toHaveBeenCalledWith("ws", "ch", {
+      name: "empty.log",
+      mime: "text/plain",
+      size: 0,
+    });
+  });
+
   it("clears everything a surface holds, aborting what was in flight", async () => {
     const upload = manualUpload();
     addFiles(KEY, TARGET, [file("a.log", 8)]);

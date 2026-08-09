@@ -150,6 +150,8 @@ export const ATTACH_COPY = {
   retry: "다시 시도",
   /** 타임라인 카드의 내려받기 (macOS `downloadAttachment`). */
   download: "첨부파일 내려받기",
+  /** 그 내려받기가 진행 중. 바쁜 버튼은 비활성 버튼이 아니다(tokens.md §5b). */
+  downloading: "내려받는 중",
   /** 내려받기가 실패했다 (macOS `attachmentDownloadFailed`). */
   downloadFailed: "내려받기 실패",
   /** 미리보기를 여는 중 */
@@ -158,13 +160,27 @@ export const ATTACH_COPY = {
   previewFailed: "미리보기를 불러오지 못했습니다",
   /** 업로드가 끝나기 전에는 보내지 않는다. */
   sendBlocked: "업로드가 끝나면 보낼 수 있습니다.",
-  /** 실패한 첨부를 달고 보낼 수는 없다. */
-  sendBlockedFailed: "실패한 첨부를 지우거나 다시 시도한 뒤 보낼 수 있습니다.",
+  /**
+   * 실패한 첨부를 달고 보낼 수는 없다 — **다시 눌러 볼 값이 있을 때**.
+   *
+   * 두 문장인 이유는 리뷰 M-1 이다. 앞 판은 어느 실패에나 "다시 시도한 뒤"라고
+   * 말했는데, 6종 중 3종은 재시도 버튼이 서지도 않는다(`isRetryableIssue`).
+   * 그러면 이 줄은 화면에 없는 버튼을 가리키는 안내가 된다.
+   */
+  sendBlockedRetryable: "실패한 첨부를 다시 시도하거나 지운 뒤 보낼 수 있습니다.",
+  /** 되돌릴 값이 없는 실패만 남았을 때. 남은 행동은 제거뿐이다. */
+  sendBlockedFailed: "실패한 첨부를 지운 뒤 보낼 수 있습니다.",
+  /** 드롭이 폴더를 받았다. 폴더는 첨부가 아니다. */
+  folderRejected: "폴더는 붙일 수 없습니다. 안에 있는 파일을 골라 주세요.",
 } as const;
 
 /**
  * 실패 한 건의 문장. macOS의 두 문장은 글자 그대로 남아 있다
  * (`fileTooLarge` = "100MB를 초과함", `unavailable` = "업로드 실패").
+ *
+ * `mismatch` 에서 "다시 시도하세요"를 뺐다 (리뷰 H-4): 그 실패에는 「다시 시도」
+ * 버튼이 **바로 옆에** 서고 트레이 발치도 같은 말을 하므로, 두 줄에 같은 동사가
+ * 세 번 찍혔다. 지시는 컨트롤이 하고 이 문장은 사실만 말한다.
  */
 export function uploadIssueCopy(issue: UploadIssue): string {
   switch (issue) {
@@ -173,9 +189,9 @@ export function uploadIssueCopy(issue: UploadIssue): string {
     case "forbidden":
       return "이 채널에 파일을 올릴 수 없습니다";
     case "no-archive":
-      return "파일 보관소가 연결돼 있지 않습니다. 관리자에게 알리세요";
+      return "파일 보관소가 연결돼 있지 않습니다";
     case "mismatch":
-      return "올라간 파일이 고른 파일과 다릅니다. 다시 시도하세요";
+      return "올라간 파일이 고른 파일과 다릅니다";
     case "blocked":
       return "이 배포의 보안 정책이 보관소 주소를 막았습니다";
     case "unavailable":
@@ -183,9 +199,85 @@ export function uploadIssueCopy(issue: UploadIssue): string {
   }
 }
 
+/**
+ * 그래서 이 사람이 지금 할 수 있는 것 (리뷰 M-1).
+ *
+ * 재시도가 서는 실패에는 없다 — 그 버튼이 곧 다음 행동이고, 옆에 문장으로 또
+ * 적으면 같은 지시가 두 번이 된다(H-4 가 잡은 그 반복). 재시도가 **안 서는**
+ * 셋에만 있고, 값은 `UploadIssue` 독스트링이 이미 알고 있던 것을 화면까지
+ * 옮긴 것이다.
+ */
+export function uploadIssueNext(issue: UploadIssue): string | null {
+  switch (issue) {
+    case "too-large":
+      return "더 작은 파일을 고르세요";
+    case "forbidden":
+      return "채널 관리자에게 문의하세요";
+    case "no-archive":
+      return "서버 관리자에게 알리세요";
+    case "blocked":
+      return "서버 설정을 확인하세요";
+    case "mismatch":
+    case "unavailable":
+      return null;
+  }
+}
+
 /** 다시 눌러 볼 값이 있는 실패인가. 없으면 재시도 버튼을 그리지 않는다. */
 export function isRetryableIssue(issue: UploadIssue): boolean {
   return issue === "mismatch" || issue === "unavailable";
+}
+
+/**
+ * 칩 아래 한 줄. **크기가 항상 앞에 온다** (리뷰 M-7).
+ *
+ * 앞 판은 업로드가 **끝난 뒤에야** 크기를 말했다. 그래서 오래 걸리는 업로드를
+ * 보면서 "이게 몇 MB짜리였지"를 확인할 방법이 화면에 없었다 — 크기가 가장
+ * 궁금한 순간은 정확히 기다리는 동안이다.
+ */
+export function draftStatusLine(draft: AttachmentDraft): {
+  text: string;
+  danger: boolean;
+} {
+  const size = formatBytes(draft.sizeBytes);
+  if (draft.status === "failed") {
+    const issue = draft.issue ?? "unavailable";
+    const next = uploadIssueNext(issue);
+    const reason = uploadIssueCopy(issue);
+    return {
+      text: `${size} · ${reason}${next === null ? "" : `. ${next}`}`,
+      danger: true,
+    };
+  }
+  const word =
+    draft.status === "ready"
+      ? ATTACH_COPY.queued
+      : draft.status === "uploading"
+        ? ATTACH_COPY.uploading
+        : draft.status === "verifying"
+          ? ATTACH_COPY.verifying
+          : ATTACH_COPY.uploaded;
+  return { text: `${size} · ${word}`, danger: false };
+}
+
+/**
+ * 보조기술이 듣는 한 줄 (리뷰 H-3).
+ *
+ * 칩의 상태 문장에는 live region 이 없다. 붙이면 진행률이 바뀔 때마다 초당 몇
+ * 번씩 낭독되고, 그것은 정보가 아니라 소음이다. 그래서 **낱말이 바뀔 때만**
+ * 바뀌는 문장 하나를 따로 만들어 그것만 공손히 알린다 — 이 PR 의 무게중심인
+ * 「확인 중 → 업로드 완료」 전이가 여기서 소리를 얻는다.
+ *
+ * 퍼센트는 일부러 없다. 저 전이는 낱말이고, 퍼센트는 `<progress>` 가 자기
+ * 역할로 이미 노출한다.
+ */
+export function draftAnnouncement(drafts: AttachmentDraft[]): string {
+  if (drafts.length === 0) return "";
+  const parts = drafts.map((draft) => {
+    const line = draftStatusLine(draft);
+    return `${draft.name} ${line.text}`;
+  });
+  return parts.join(", ");
 }
 
 /**
@@ -366,13 +458,35 @@ export function removeDraft(
 export function sendBlockReason(
   drafts: AttachmentDraft[]
 ): "uploading" | "failed" | null {
-  if (drafts.some((d) => d.status === "uploading" || d.status === "verifying")) {
+  // `ready`(대기 중)는 **업로드 쪽**이다 (리뷰 N-2). 앞 판은 그것을 실패 갈래에
+  // 접어 두었고, 그래서 재시도를 누른 직후 한 프레임 동안 — 아직 uploading 으로
+  // 넘어가기 전 — 화면이 "실패한 첨부를…"이라고 말했다. 실패한 것이 없는 순간에
+  // 실패를 말하는 것이고, 줄이 사라졌다 다시 뜨는 깜빡임까지 따라온다.
+  if (
+    drafts.some(
+      (d) =>
+        d.status === "ready" ||
+        d.status === "uploading" ||
+        d.status === "verifying"
+    )
+  ) {
     return "uploading";
   }
-  if (drafts.some((d) => d.status === "failed" || d.status === "ready")) {
-    return "failed";
-  }
+  if (drafts.some((d) => d.status === "failed")) return "failed";
   return null;
+}
+
+/** 지금 막힌 이유에 맞는 발치 문장. 없는 버튼을 가리키지 않는다(M-1). */
+export function sendBlockCopy(drafts: AttachmentDraft[]): string | null {
+  const reason = sendBlockReason(drafts);
+  if (reason === null) return null;
+  if (reason === "uploading") return ATTACH_COPY.sendBlocked;
+  const anyRetryable = drafts.some(
+    (d) => d.status === "failed" && d.issue !== undefined && isRetryableIssue(d.issue)
+  );
+  return anyRetryable
+    ? ATTACH_COPY.sendBlockedRetryable
+    : ATTACH_COPY.sendBlockedFailed;
 }
 
 /** 전송에 실을 id들. 순서는 사람이 고른 순서다. */

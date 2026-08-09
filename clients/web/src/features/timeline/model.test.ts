@@ -370,6 +370,18 @@ describe("optimistic insert (M10)", () => {
     ).toEqual(["k1"]);
   });
 
+  it("settles regardless of the order the server lists the files in", () => {
+    // 리뷰 M-5. 위치로 대조하면 서버가 순서를 다르게 돌려주는 날 낙관적 행이
+    // 영영 확정되지 않고 같은 메시지가 두 벌로 남는다.
+    const echo = pending("k1", "", { attachments: [png("att-1"), png("att-2")] });
+    expect(
+      confirmsPending(
+        mine(11, "", { attachments: [png("att-2"), png("att-1")] }),
+        echo
+      )
+    ).toBe(true);
+  });
+
   it("leaves a plain text echo unchanged by the attachment rule", () => {
     const echo = pending("k1", "첨부 없이 보냅니다");
     expect(confirmsPending(mine(11, "첨부 없이 보냅니다"), echo)).toBe(true);

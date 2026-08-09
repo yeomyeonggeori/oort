@@ -568,11 +568,17 @@ export function confirmsPending(
   // 전부 자기 echo 로 읽는다 — 파일 셋을 잇달아 보내면 아무 카드나 아무 자리에서
   // 정착한다. 첨부 id 는 서버가 만든 것이고 전송 응답과 실시간 프레임 양쪽에 실려
   // 오므로, 그것이 이 자리에서 가장 강한 대조다.
+  //
+  // **집합으로** 대조한다 (리뷰 M-5). 위치로 맞추면 서버가 순서를 다르게 돌려주는
+  // 날 낙관적 행이 영영 확정되지 않고 같은 메시지가 두 벌로 남는다 — 계약이
+  // "만들어진 순서"라고 적은 것은 클라가 고른 순서와 같다는 보장이 아니다.
+  // 순서 가정을 버려도 강도는 그대로다: id 는 서버가 만든 uuid 다.
   const expected = pending.attachments ?? [];
   if (expected.length === 0) return true;
   const actual = message.attachments ?? [];
   if (actual.length !== expected.length) return false;
-  return expected.every((want, index) => uuidEq(actual[index].id, want.id));
+  const arrived = new Set(actual.map((one) => one.id.toLowerCase()));
+  return expected.every((want) => arrived.has(want.id.toLowerCase()));
 }
 
 /**

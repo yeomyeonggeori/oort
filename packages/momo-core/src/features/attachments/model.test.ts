@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   admitDrafts,
+  ATTACH_COPY,
+  draftAnnouncement,
+  draftStatusLine,
   attachmentIdsOf,
   attachmentMetaLine,
   beginUpload,
@@ -18,10 +21,12 @@ import {
   removeDraft,
   requeueUpload,
   rewindUpload,
+  sendBlockCopy,
   sendBlockReason,
   sentAttachmentsOf,
   showsInlinePreview,
   uploadIssueCopy,
+  uploadIssueNext,
   verifyUpload,
   type AttachmentDraft,
 } from "./model";
@@ -159,6 +164,23 @@ describe("send gating", () => {
     expect(sendBlockReason(list)).toBe("uploading");
   });
 
+  it("counts a queued draft as uploading, not as a failure", () => {
+    // 리뷰 N-2: `ready` 를 실패 갈래에 접어 두면 재시도 직후 한 프레임 동안
+    // 실패한 것이 없는데 실패를 말한다.
+    expect(sendBlockReason([picked()])).toBe("uploading");
+    expect(sendBlockCopy([picked()])).toBe(ATTACH_COPY.sendBlocked);
+  });
+
+  it("points at the retry only when a retry button will exist", () => {
+    // 리뷰 M-1: 되돌릴 값이 없는 실패만 남았을 때 "다시 시도한 뒤"는 화면에 없는
+    // 버튼을 가리키는 안내다.
+    const retryable = failUpload([picked()], "local-1", "unavailable");
+    expect(sendBlockCopy(retryable)).toBe(ATTACH_COPY.sendBlockedRetryable);
+    const terminal = failUpload([picked()], "local-1", "forbidden");
+    expect(sendBlockCopy(terminal)).toBe(ATTACH_COPY.sendBlockedFailed);
+    expect(sendBlockCopy(completeUpload([picked()], "local-1", "att-1"))).toBeNull();
+  });
+
   it("blocks on a failure so the server never has to roll the message back", () => {
     const list = [
       completeUpload([picked()], "local-1", "att-1")[0],
@@ -199,6 +221,25 @@ describe("failure vocabulary", () => {
     expect(uploadIssueCopy("unavailable")).toBe("업로드 실패");
   });
 
+  it("says the next action exactly where no retry button will stand", () => {
+    // 리뷰 M-1. 재시도가 서는 둘은 버튼이 곧 다음 행동이라 문장이 없고,
+    // 안 서는 넷은 화면에 남는 행동이 제거뿐이라 문장이 있어야 한다.
+    for (const issue of ["too-large", "forbidden", "no-archive", "blocked"] as const) {
+      expect(isRetryableIssue(issue)).toBe(false);
+      expect(uploadIssueNext(issue)).not.toBeNull();
+    }
+    for (const issue of ["mismatch", "unavailable"] as const) {
+      expect(isRetryableIssue(issue)).toBe(true);
+      expect(uploadIssueNext(issue)).toBeNull();
+    }
+  });
+
+  it("does not repeat the retry verb in the sentence beside the retry button", () => {
+    // 리뷰 H-4: 앞 판은 "…다릅니다. 다시 시도하세요" + 버튼 "다시 시도" +
+    // 발치 "…다시 시도한 뒤" 로 두 줄에 같은 동사를 세 번 찍었다.
+    expect(uploadIssueCopy("mismatch")).not.toContain(ATTACH_COPY.retry);
+  });
+
   it("gives every reason a sentence", () => {
     for (const issue of [
       "too-large",
@@ -210,6 +251,43 @@ describe("failure vocabulary", () => {
     ] as const) {
       expect(uploadIssueCopy(issue).length).toBeGreaterThan(0);
     }
+  });
+});
+
+describe("the line under the name", () => {
+  it("says the size in every state, not only after it finished", () => {
+    // 리뷰 M-7: 크기가 가장 궁금한 순간은 기다리는 동안이다.
+    for (const list of [
+      [picked()],
+      beginUpload([picked()], "local-1"),
+      verifyUpload(beginUpload([picked()], "local-1"), "local-1"),
+      completeUpload([picked()], "local-1", "att-1"),
+      failUpload([picked()], "local-1", "unavailable"),
+    ]) {
+      expect(draftStatusLine(list[0]).text.startsWith("2 KB · ")).toBe(true);
+    }
+  });
+
+  it("carries the reason and the next action on a terminal failure", () => {
+    const failed = failUpload([picked()], "local-1", "too-large")[0];
+    const line = draftStatusLine(failed);
+    expect(line.danger).toBe(true);
+    expect(line.text).toContain(uploadIssueCopy("too-large"));
+    expect(line.text).toContain(uploadIssueNext("too-large") as string);
+  });
+
+  it("announces words, never percentages", () => {
+    // 리뷰 H-3: 진행률을 live region 에 실으면 초당 몇 번씩 낭독된다. 낱말이
+    // 바뀔 때만 바뀌는 문장 하나가 「확인 중 → 업로드 완료」에 소리를 준다.
+    let list = beginUpload([picked()], "local-1");
+    list = progressUpload(list, "local-1", 0.42);
+    expect(draftAnnouncement(list)).not.toContain("42");
+    const verifying = draftAnnouncement(verifyUpload(list, "local-1"));
+    const done = draftAnnouncement(completeUpload(list, "local-1", "att-1"));
+    expect(verifying).toContain(ATTACH_COPY.verifying);
+    expect(done).toContain(ATTACH_COPY.uploaded);
+    expect(verifying).not.toBe(done);
+    expect(draftAnnouncement([])).toBe("");
   });
 });
 

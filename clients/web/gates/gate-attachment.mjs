@@ -9,6 +9,14 @@
 //   2. 100%는 끝이       바이트를 다 건넨 순간은 `complete` 왕복 **전**이다. 그
 //      아니다            사이에 「업로드 완료」가 뜨면 화면이 안 끝난 일을 끝났다고
 //                        말하는 것이고, 이 게이트의 무게중심이 그 한 순간이다.
+//   2b. 막대가 실제로    design-review B-3: 앞 판은 막대의 **존재**만 단정해서
+//      움직인다          「전송 내내 0」이 초록으로 통과했다. 이제 인터셉트되지 않는
+//                        진짜 서버로 4MB 를 올리고 16ms 마다 표본을 남겨, ①첫 측정
+//                        전에는 determinate 가 아니고 ②0 이 아닌 프레임이 있고
+//                        ③업로드 중에 100% 를 말하지 않는 것을 단정한다.
+//   2c. 좁은 폭·상한에서 design-review B-1/B-2: 320/390px 에서 파일명이 0px 로
+//      화면이 무너지지    사라지지 않고 문장이 컨트롤을 덮지 않으며, 첨부 20개(앱
+//      않는다            자신의 상한)에서도 대화가 남고 컴포저가 창을 넘지 않는다.
 //   3. 못 보낼 때는      올라가는 중이거나 실패한 첨부가 있으면 전송이 막히고
 //      막고 말한다       **왜**가 트레이 발치에 있다. 서버는 첨부 한 건의 거절에
 //                        메시지째 롤백하므로, 그 롤백을 만나기 전에 화면이 말한다.
@@ -20,15 +28,18 @@
 //      첨부 노드가 하나도 없고, 컴포저의 전송 조건도 이전과 같다.
 //
 // 이름 붙은 red proof (전부 DOM/네트워크 mock만 건드린다 — 제품 소스는 그대로다):
-//   ATTACH_GATE_PROVE_RED_HONESTY=1  "the chip claims완료 while the server is still checking"
+//   ATTACH_GATE_PROVE_RED_HONESTY=1  "the chip claims 완료 while the server is still checking"
 //   ATTACH_GATE_PROVE_RED_BLOCK=1    "the send button stays live while bytes are moving"
 //   ATTACH_GATE_PROVE_RED_CARD=1     "the timeline draws no card for a message that has one"
+//   ATTACH_GATE_PROVE_RED_ZERO=1     "the bar is pinned to a determinate 0 for the whole upload"
+//   ATTACH_GATE_PROVE_RED_CEILING=1  "the bar reaches 100% before the server has verified anything"
 //
 // 값의 정본은 소스를 읽는다(`ATTACH_COPY`). 여기 베껴 적으면 두 벌이 조용히
 // 갈라지고, 이 레포는 U4-4R W-2에서 그 값을 이미 치렀다.
 
 import { spawn } from "node:child_process";
 import { deflateSync } from "node:zlib";
+import { createServer } from "node:http";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -76,16 +87,49 @@ function issueCopy(issue) {
   return found[1];
 }
 
+/** 트레이 상한의 정본은 `tokens.css` 다 (B-2). 여기 베껴 적으면 갈라진다. */
+function trayMaxPx() {
+  const css = readFileSync(resolve(webRoot, "src/design/tokens.css"), "utf8");
+  const match = css.match(/--spacing-tray-max:\s*(\d+)px/);
+  if (match === null) throw new Error("tokens.css의 --spacing-tray-max를 읽지 못했다");
+  return Number(match[1]);
+}
+
+/** 다음 행동 문구의 정본도 코어다 (design-review M-1). */
+function issueNext(issue) {
+  const source = readFileSync(
+    resolve(
+      webRoot,
+      "../../packages/momo-core/src/features/attachments/model.ts"
+    ),
+    "utf8"
+  );
+  const block = source.slice(source.indexOf("export function uploadIssueNext"));
+  const found = block.match(
+    new RegExp(`case "${issue}":\\s*\\n\\s*return "([^"]+)";`)
+  );
+  if (found === null) throw new Error(`uploadIssueNext(${issue})를 읽지 못했다`);
+  return found[1];
+}
+
 const COPY = attachCopy();
+const TRAY_MAX = trayMaxPx();
 const MISMATCH_COPY = issueCopy("mismatch");
 const TOO_LARGE_COPY = issueCopy("too-large");
+const TOO_LARGE_NEXT = issueNext("too-large");
 
 const port = Number(process.env.ATTACH_GATE_PORT || 5199);
+/** 인터셉트되지 않는 진짜 업로드 목적지 (B-3). */
+const sinkPort = Number(process.env.ATTACH_GATE_SINK_PORT || 5209);
 const origin = `http://127.0.0.1:${port}`;
 
 const proveRedHonesty = process.env.ATTACH_GATE_PROVE_RED_HONESTY === "1";
 const proveRedBlock = process.env.ATTACH_GATE_PROVE_RED_BLOCK === "1";
 const proveRedCard = process.env.ATTACH_GATE_PROVE_RED_CARD === "1";
+// design-review B-3 이 연 두 축. 앞 판의 게이트는 막대의 **존재**만 보았고, 그래서
+// 막대가 전송 내내 0 이어도 초록이었다.
+const proveRedZero = process.env.ATTACH_GATE_PROVE_RED_ZERO === "1";
+const proveRedCeiling = process.env.ATTACH_GATE_PROVE_RED_CEILING === "1";
 
 const workspaceId = "00000000-0000-7000-8000-000000000001";
 const memberId = "00000000-0000-7000-8000-000000000101";
@@ -166,6 +210,54 @@ function crc32(buffer) {
 }
 
 const PREVIEW_PNG = makePng(320, 180);
+
+/**
+ * **진짜** 업로드 목적지 (design-review B-3).
+ *
+ * Playwright 의 라우트 인터셉션은 요청을 브라우저 네트워크 스택 앞에서 가로채므로
+ * `xhr.upload.progress` 가 한 번도 오지 않는다. 앞 판의 게이트가 진행률 축을 한
+ * 번도 못 본 이유가 그것이고, 그 눈먼 자리에서 「막대가 전송 내내 0」이 살았다.
+ *
+ * 그래서 이 서버는 인터셉트되지 않는 별도 포트에 서고, 본문을 **천천히** 읽는다.
+ * 그래야 소켓 버퍼가 차고, 브라우저가 여러 번에 나누어 진행을 보고한다. 느리게
+ * 읽는 것이 이 판의 전부다 — 빠르게 읽으면 로컬에서는 언제나 끝에 한 번이다.
+ */
+function startByteSink(port) {
+  const seen = { authorization: null, contentType: null, bytes: 0 };
+  const server = createServer((req, res) => {
+    const cors = {
+      "access-control-allow-origin": "*",
+      "access-control-allow-methods": "PUT, OPTIONS",
+      "access-control-allow-headers": "content-type",
+      "access-control-max-age": "600",
+    };
+    if (req.method === "OPTIONS") {
+      res.writeHead(204, cors);
+      res.end();
+      return;
+    }
+    seen.authorization = req.headers.authorization ?? null;
+    seen.contentType = req.headers["content-type"] ?? null;
+    seen.bytes = 0;
+    req.on("data", (chunk) => {
+      seen.bytes += chunk.length;
+      // 한 청크를 받을 때마다 잠시 멈춘다. 이 30ms 가 소켓 버퍼를 채우고, 그
+      // 채워짐이 브라우저에게 「아직 다 못 보냈다」를 알게 한다.
+      req.pause();
+      setTimeout(() => req.resume(), 30);
+    });
+    req.on("end", () => {
+      res.writeHead(200, cors);
+      res.end("");
+    });
+  });
+  server.listen(port, "127.0.0.1");
+  return {
+    url: (name) => `http://127.0.0.1:${port}/upload/${encodeURIComponent(name)}`,
+    seen,
+    close: () => server.close(),
+  };
+}
 
 const session = {
   accessToken: "gate-only-not-a-credential",
@@ -364,7 +456,13 @@ function createArchive() {
     };
   };
   const gates = { bytes: latch(), complete: latch(), completeStatus: 200 };
+  /** 클라가 `uploads` 에서 **선언한** mime. 바이트 PUT 이 그것과 같아야 한다. */
+  let declaredMime = null;
   return {
+    declareMime: (mime) => {
+      declaredMime = mime;
+    },
+    declaredMime: () => declaredMime,
     hold: (key) => gates[key].wait(),
     releaseBytes: () => gates.bytes.release(),
     releaseComplete: () => gates.complete.release(),
@@ -379,7 +477,7 @@ function createArchive() {
   };
 }
 
-async function installRoutes(context, archive) {
+async function installRoutes(context, archive, sink) {
   // capability URL 을 **같은 출처**로 발급한다. 실제 배포에서는 Google 의
   // 주소이고, 이 판이 재는 것은 그 주소가 어디냐가 아니라 클라가 그 주소로
   // 베어러 없이 바이트를 보내고 진행을 화면에 옮기느냐다.
@@ -426,12 +524,18 @@ async function installRoutes(context, archive) {
     // ---- 첨부 3경로 -------------------------------------------------------
     if (path.endsWith("/attachments/uploads")) {
       const body = JSON.parse(request.postData() ?? "{}");
+      archive.declareMime(body.mime);
       return json(
         route,
         {
           id: "0199eeee-0000-7000-8000-0000000000aa",
           status: "pending",
-          uploadUrl: `${origin}/__gate/upload/${encodeURIComponent(body.name)}`,
+          // `sink` 가 있으면 **인터셉트되지 않는 진짜 주소**를 준다. 그래야
+          // 브라우저가 진행을 보고한다(B-3). 없으면 붙잡을 수 있는 가짜 주소.
+          uploadUrl:
+            sink === undefined
+              ? `${origin}/__gate/upload/${encodeURIComponent(body.name)}`
+              : sink.url(body.name),
         },
         201
       );
@@ -526,6 +630,45 @@ async function login(page_) {
   await page_.getByTestId("channel-item").first().waitFor();
 }
 
+/**
+ * 페이지 안에서 막대를 계속 지켜본다 (design-review B-3).
+ *
+ * 두 가지를 표본으로 남긴다: **determinate 인가**(= `value` 속성이 있는가)와 그
+ * 값. 이 둘을 나누는 것이 이 게이트의 새 축이다 — 값 없는 막대는 「아직 못 쟀다」
+ * 이고, 값 0 인 막대는 「하나도 안 갔다」는 측정 주장이다.
+ */
+async function installProgressSampler(page_, mutate) {
+  await page_.addInitScript((mutation) => {
+    window.__attachSamples = [];
+    window.__attachPercents = [];
+    setInterval(() => {
+      const bar = document.querySelector('[data-testid="attachment-chip-progress"]');
+      if (bar === null) return;
+      // red proof: 제품 소스가 아니라 **이 판의 DOM** 을 손댄다.
+      //
+      // `zero` 는 첫 프레임부터 값을 박아 「아직 못 쟀다」를 「0 이다」로 바꾼다.
+      // `ceiling` 은 **이미 determinate 가 된 뒤에만** 1 로 밀어 올린다 — 첫
+      // 단정(측정 전에는 값이 없다)을 통과시켜야 두 번째 단정(업로드 중에 100%를
+      // 말하지 않는다)이 실제로 시험되기 때문이다.
+      if (mutation === "zero") bar.setAttribute("value", "0");
+      if (mutation === "ceiling" && bar.hasAttribute("value")) {
+        bar.setAttribute("value", "1");
+      }
+      const determinate = bar.hasAttribute("value");
+      window.__attachSamples.push({
+        determinate,
+        value: determinate ? Number(bar.getAttribute("value")) : null,
+      });
+      const percent = document.querySelector(
+        '[data-testid="attachment-chip-percent"]'
+      );
+      if (percent !== null) {
+        window.__attachPercents.push(Number(percent.textContent.replace("%", "")));
+      }
+    }, 16);
+  }, mutate ?? null);
+}
+
 async function openChannel(page_) {
   await page_.evaluate((id) => {
     window.location.hash = `#/c/${id}`;
@@ -595,10 +738,19 @@ async function exerciseComposer(browser) {
     (await page_.getByTestId("attachment-chip-progress").count()) === 1,
     "업로드 중인데 진행 막대가 없다"
   );
-  expect(
-    (await chip.getByTestId("attachment-chip-status").innerText()) === COPY.uploading,
-    `업로드 중 칩이 "${COPY.uploading}" 라고 말하지 않는다`
-  );
+  {
+    // 상태 줄은 이제 「크기 · 낱말」이다 (design-review M-7: 크기가 가장 궁금한
+    // 순간은 기다리는 동안이다).
+    const line = await chip.getByTestId("attachment-chip-status").innerText();
+    expect(
+      line.includes(COPY.uploading),
+      `업로드 중 칩이 "${COPY.uploading}" 라고 말하지 않는다 (읽은 값: ${line})`
+    );
+    expect(
+      /\d/.test(line),
+      `업로드 중인데 크기를 말하지 않는다 (읽은 값: ${line})`
+    );
+  }
 
   if (proveRedBlock) {
     await page_.evaluate(() => {
@@ -617,7 +769,7 @@ async function exerciseComposer(browser) {
     "막힌 이유가 화면에 없다"
   );
   expect(
-    (await blocked.innerText()) === COPY.sendBlocked,
+    (await blocked.innerText()).trim() === COPY.sendBlocked,
     "막힌 이유를 코어의 문장으로 말하지 않는다"
   );
 
@@ -639,7 +791,7 @@ async function exerciseComposer(browser) {
   }
   const verifyingText = await chip.getByTestId("attachment-chip-status").innerText();
   expect(
-    verifyingText === COPY.verifying,
+    verifyingText.includes(COPY.verifying) && !verifyingText.includes(COPY.uploaded),
     `바이트만 다 갔을 뿐인데 칩이 "${verifyingText}" 라고 말한다`
   );
   expect(
@@ -661,8 +813,15 @@ async function exerciseComposer(browser) {
     { timeout: 10_000 }
   );
   expect(
-    (await page_.getByTestId("attachment-blocked").count()) === 0,
+    (await page_.getByTestId("attachment-blocked").getAttribute("data-block-reason")) ===
+      null,
     "다 올라갔는데 막힘 문장이 남아 있다"
+  );
+  // design-review M-3: 그 문장이 사라질 때 줄이 접히면 대화 전체가 22px 뛴다.
+  // 줄은 비어도 자리를 지킨다.
+  expect(
+    (await page_.getByTestId("attachment-blocked").boundingBox()).height > 0,
+    "막힘 문장이 사라지면서 자기 줄까지 걷어 가 대화가 뛴다"
   );
   expect(
     !(await page_.getByTestId("composer-send").isDisabled()),
@@ -720,10 +879,19 @@ async function exerciseFailure(browser) {
   );
 
   const chip = page_.getByTestId("attachment-chip").first();
-  expect(
-    (await chip.getByTestId("attachment-chip-status").innerText()) === MISMATCH_COPY,
-    "검증 불일치가 그 이유로 말해지지 않는다"
-  );
+  {
+    const line = await chip.getByTestId("attachment-chip-status").innerText();
+    expect(
+      line.includes(MISMATCH_COPY),
+      `검증 불일치가 그 이유로 말해지지 않는다 (읽은 값: ${line})`
+    );
+    // design-review H-4: 바로 옆에 「다시 시도」 버튼이 서므로 문장이 같은 지시를
+    // 되풀이하지 않는다.
+    expect(
+      !line.includes(COPY.retry),
+      `실패 문장이 옆 버튼과 같은 동사를 되풀이한다 (읽은 값: ${line})`
+    );
+  }
   expect(
     (await chip.getByTestId("attachment-chip-retry").count()) === 1,
     "되돌릴 값이 있는 실패에 재시도가 없다"
@@ -766,10 +934,18 @@ async function exerciseFailure(browser) {
     { timeout: 10_000 }
   );
   const second = page_.getByTestId("attachment-chip").nth(1);
-  expect(
-    (await second.getByTestId("attachment-chip-status").innerText()) === TOO_LARGE_COPY,
-    "상한을 넘긴 파일이 그 이유로 말해지지 않는다"
-  );
+  {
+    const line = await second.getByTestId("attachment-chip-status").innerText();
+    expect(
+      line.includes(TOO_LARGE_COPY),
+      `상한을 넘긴 파일이 그 이유로 말해지지 않는다 (읽은 값: ${line})`
+    );
+    // design-review M-1: 재시도가 안 서는 실패에는 다음 행동이 문장에 있어야 한다.
+    expect(
+      line.includes(TOO_LARGE_NEXT),
+      `되돌릴 수 없는 실패인데 다음에 무엇을 할지 말하지 않는다 (읽은 값: ${line})`
+    );
+  }
   expect(
     (await second.getByTestId("attachment-chip-retry").count()) === 0,
     "다시 눌러도 같은 답이 올 실패에 재시도 버튼이 붙었다"
@@ -869,8 +1045,251 @@ async function exerciseTimeline(browser) {
   console.log("[6] 두 모양이 서고, 첨부 없는 경로는 DOM도 요청도 그대로다");
 }
 
+
+// ---- B-3. 막대는 실제로 움직이고, 100%를 먼저 말하지 않는다 ------------------
+//
+// 앞 판의 게이트는 막대의 **존재**만 단정했고, 그래서 「전송 내내 0」이 초록으로
+// 통과했다(design-review B-3). 이 절이 그 눈먼 자리를 닫는다. 인터셉트되지 않는
+// 진짜 서버로 4MB 를 올리고, 페이지 안에서 막대를 16ms 마다 표본으로 남긴다.
+
+async function exerciseProgress(browser) {
+  const sink = startByteSink(sinkPort);
+  const archive = createArchive();
+  const context = await browser.newContext({
+    viewport: { width: 1280, height: 900 },
+    reducedMotion: "reduce",
+  });
+  const page_ = await context.newPage();
+  await installProgressSampler(
+    page_,
+    proveRedZero ? "zero" : proveRedCeiling ? "ceiling" : null
+  );
+  await installRealtimeSocket(page_);
+  await installRoutes(context, archive, sink);
+  await login(page_);
+  await openChannel(page_);
+
+  const big = fixturePath("payload-4mb.bin", Buffer.alloc(4 * 1024 * 1024, 7));
+  await page_.locator('input[type="file"]').first().setInputFiles(big);
+
+  // 첫 표본이 나올 때까지.
+  await page_.waitForFunction(() => window.__attachSamples.length > 0, undefined, {
+    timeout: 15_000,
+  });
+  const early = await page_.evaluate(() => window.__attachSamples.slice(0, 3));
+  expect(
+    early.length > 0 && early.every((sample) => sample.determinate === false),
+    "첫 측정도 오기 전에 막대가 값을 가졌다 (0% 는 「아직 못 쟀다」가 아니라 측정 주장이다)"
+  );
+
+  // 바이트가 다 갈 때까지. sink 가 천천히 읽으므로 그동안 표본이 쌓인다.
+  await page_.waitForFunction(
+    () =>
+      document.querySelector('[data-testid="attachment-chip"]')?.dataset
+        .attachmentStatus !== "uploading",
+    undefined,
+    { timeout: 60_000 }
+  );
+  archive.releaseComplete();
+  await page_.waitForFunction(
+    () =>
+      document.querySelector('[data-testid="attachment-chip"]')?.dataset
+        .attachmentStatus === "uploaded",
+    undefined,
+    { timeout: 30_000 }
+  );
+
+  const samples = await page_.evaluate(() => window.__attachSamples);
+  const percents = await page_.evaluate(() => window.__attachPercents);
+  const moving = samples.filter((s) => s.determinate && s.value > 0);
+  const full = samples.filter((s) => s.determinate && s.value >= 1);
+
+  expect(
+    moving.length > 0,
+    `막대가 0 이 아닌 값을 그린 프레임이 한 번도 없다 (표본 ${samples.length}개)`
+  );
+  expect(
+    full.length === 0,
+    `업로드 중에 막대가 100% 를 말했다 (0.99 상한 회귀, ${full.length}개 프레임)`
+  );
+  expect(
+    percents.length > 0 && percents.every((value) => value > 0 && value < 100),
+    `퍼센트가 0 이거나 100 을 찍었다 (읽은 값: ${percents.slice(0, 5).join(",")})`
+  );
+  expect(
+    sink.seen.authorization === null,
+    "capability URL 로 나간 요청에 베어러가 실렸다"
+  );
+  expect(
+    sink.seen.contentType === archive.declaredMime(),
+    `선언한 mime(${archive.declaredMime()})이 아닌 값으로 올렸다 (${sink.seen.contentType}) — 서버의 complete 대조가 409 로 떨어진다`
+  );
+
+  await context.close();
+  sink.close();
+  console.log(
+    `[B-3] 막대가 실제로 움직였다: 표본 ${samples.length}개 중 0 아닌 프레임 ${moving.length}개, ` +
+      `100% 프레임 0개, 퍼센트 ${Math.min(...percents)}..${Math.max(...percents)}%`
+  );
+}
+
+// ---- B-1. 좁은 폭에서 이름이 사라지지 않고 문장이 컨트롤을 덮지 않는다 -------
+
+async function exerciseNarrow(browser) {
+  for (const width of [390, 320]) {
+    const archive = createArchive();
+    archive.setCompleteStatus(409);
+    const context = await browser.newContext({
+      viewport: { width, height: 844 },
+      reducedMotion: "reduce",
+    });
+    const page_ = await context.newPage();
+    await installRealtimeSocket(page_);
+    await installRoutes(context, archive);
+    await login(page_);
+    await openChannel(page_);
+
+    // 가장 긴 문구가 나는 실패로 몬다(`mismatch`). 파일명도 길게.
+    const named = fixturePath(
+      "release-2026-08-09-드레인-워커-지연-로그-전문.log",
+      "one line\n"
+    );
+    await page_.locator('input[type="file"]').first().setInputFiles(named);
+    await page_.waitForFunction(
+      () =>
+        document.querySelector('[data-testid="attachment-chip"]')?.dataset
+          .attachmentStatus === "uploading",
+      undefined,
+      { timeout: 15_000 }
+    );
+    archive.releaseBytes();
+    archive.releaseComplete();
+    await page_.waitForFunction(
+      () =>
+        document.querySelector('[data-testid="attachment-chip"]')?.dataset
+          .attachmentStatus === "failed",
+      undefined,
+      { timeout: 15_000 }
+    );
+
+    const box = async (testid) =>
+      page_.getByTestId(testid).first().boundingBox();
+    const name = await box("attachment-chip-name");
+    const status = await box("attachment-chip-status");
+    const retry = await box("attachment-chip-retry");
+    const remove = await box("attachment-chip-remove");
+
+    expect(
+      name !== null && name.width > 0,
+      `${width}px 에서 파일명이 0px 로 사라졌다 (무엇이 실패했는지가 화면에 없다)`
+    );
+    for (const [label, control] of [
+      ["다시 시도", retry],
+      ["제거", remove],
+    ]) {
+      expect(
+        control !== null && status !== null && status.x + status.width <= control.x + 1,
+        `${width}px 에서 상태 문장이 「${label}」 위로 ${
+          control === null || status === null
+            ? "?"
+            : Math.round(status.x + status.width - control.x)
+        }px 침범했다`
+      );
+    }
+    // 칩 자체가 트레이 밖으로 나가지 않는다.
+    const tray = await box("attachment-tray");
+    const chip = await box("attachment-chip");
+    expect(
+      tray !== null && chip !== null && chip.x + chip.width <= tray.x + tray.width + 1,
+      `${width}px 에서 칩이 트레이 폭을 넘었다`
+    );
+
+    await context.close();
+    console.log(
+      `[B-1] ${width}px: 이름 ${Math.round(name.width)}px, 문장 우단 ${Math.round(
+        status.x + status.width
+      )} <= 재시도 좌단 ${Math.round(retry.x)}`
+    );
+  }
+}
+
+// ---- B-2. 상한만큼 채워도 대화가 화면에 남고 컴포저가 창을 넘지 않는다 -------
+
+async function exerciseOverflow(browser) {
+  const archive = createArchive();
+  const context = await browser.newContext({
+    viewport: { width: 1280, height: 900 },
+    reducedMotion: "reduce",
+  });
+  const page_ = await context.newPage();
+  await installRealtimeSocket(page_);
+  await installRoutes(context, archive);
+  await login(page_);
+  await openChannel(page_);
+
+  // 23개를 고른다: 상한 20 을 넘겨 고지까지 함께 세우는 수다.
+  const many = Array.from({ length: 23 }, (_, i) =>
+    fixturePath(`batch-${String(i + 1).padStart(2, "0")}.log`, `line ${i}\n`)
+  );
+  await page_.locator('input[type="file"]').first().setInputFiles(many);
+  await page_.waitForFunction(
+    () => document.querySelectorAll('[data-testid="attachment-chip"]').length === 20,
+    undefined,
+    { timeout: 20_000 }
+  );
+
+  const measured = await page_.evaluate(() => {
+    const list = document.querySelector('[data-testid="attachment-list-scroll"]');
+    const tray = document.querySelector('[data-testid="attachment-tray"]');
+    const composer = document.querySelector('[data-testid="composer"]');
+    return {
+      listClient: list.clientHeight,
+      listScroll: list.scrollHeight,
+      trayHeight: Math.round(tray.getBoundingClientRect().height),
+      composerHeight: Math.round(composer.getBoundingClientRect().height),
+      windowHeight: window.innerHeight,
+      messages: document.querySelectorAll('[data-testid="timeline-message"]').length,
+    };
+  });
+
+  expect(
+    measured.listClient <= TRAY_MAX + 1,
+    `트레이 목록이 상한(${TRAY_MAX}px)을 넘었다: ${measured.listClient}px`
+  );
+  expect(
+    measured.listScroll > measured.listClient,
+    "20개가 상한 안에 다 들어갔다 — 이 판이 재려던 상황이 아니다"
+  );
+  expect(
+    measured.composerHeight < measured.windowHeight,
+    `컴포저(${measured.composerHeight}px)가 창(${measured.windowHeight}px)보다 크다 — app-shell 이 clip 이라 잘린 부분을 스크롤로 되찾을 수 없다`
+  );
+  expect(
+    measured.messages > 0,
+    "첨부를 상한까지 채우자 대화가 화면에서 사라졌다"
+  );
+  expect(
+    (await page_.getByTestId("attachment-rejected").count()) === 1,
+    "상한을 넘겨 버린 3개를 말없이 떨궜다"
+  );
+
+  await context.close();
+  console.log(
+    `[B-2] 트레이 ${measured.trayHeight}px (목록 ${measured.listClient}/${measured.listScroll}), ` +
+      `컴포저 ${measured.composerHeight} < 창 ${measured.windowHeight}, 대화 ${measured.messages}행 유지`
+  );
+}
+
 // ---- 캡처 ------------------------------------------------------------------
 
+/**
+ * 증거 세트 (design-review M-6).
+ *
+ * 앞 판의 10장에는 스레드 컴포저(이 PR 이 새로 연 표면)·드래그 강조·「대기 중」
+ * 칸·상한 초과 고지·**0 이 아닌 진행 막대**가 하나도 없었고, 파일 mtime 이 마지막
+ * 커밋보다 3분 오래됐다. 리뷰가 실측으로 찾아낸 세 Blocker 는 전부 그 구멍 안에
+ * 있었다. 그래서 이 함수는 좁은 폭과 상한까지 함께 찍는다.
+ */
 async function captureShots(browser) {
   const outDir = resolve(webRoot, "artifacts/attachment");
   mkdirSync(outDir, { recursive: true });
@@ -878,107 +1297,115 @@ async function captureShots(browser) {
     "drain-2026-08-09.log",
     "2026-08-09T09:10:00Z drain batch=1 lag=12ms\n".repeat(40)
   );
+  const bigFile = fixturePath(
+    "payload-4mb.bin",
+    Buffer.alloc(4 * 1024 * 1024, 7)
+  );
+
+  const shot = async (page_, name) => {
+    await page_.mouse.move(0, 0);
+    await wait(250);
+    await page_.screenshot({ path: resolve(outDir, `${name}.png`) });
+  };
+
+  const openBoard = async (options = {}) => {
+    const archive = createArchive();
+    if (options.completeStatus) archive.setCompleteStatus(options.completeStatus);
+    const sink = options.realUpload ? startByteSink(options.sinkPort) : undefined;
+    const context = await browser.newContext({
+      viewport: options.viewport ?? { width: 1280, height: 900 },
+      reducedMotion: "reduce",
+      colorScheme: options.scheme,
+    });
+    const page_ = await context.newPage();
+    await installRealtimeSocket(page_);
+    await installRoutes(context, archive, sink);
+    await login(page_);
+    await openChannel(page_);
+    return { archive, context, page_, sink };
+  };
+
+  const waitStatus = (page_, status, timeout = 30_000) =>
+    page_.waitForFunction(
+      (want) =>
+        document.querySelector('[data-testid="attachment-chip"]')?.dataset
+          .attachmentStatus === want,
+      status,
+      { timeout }
+    );
 
   for (const scheme of ["light", "dark"]) {
-    // 1) 업로드 중 · 2) 확인 중 — 같은 판에서 연속으로.
+    // ① 업로드 중 — **진짜로 움직이는 막대**를 잡는다 (B-3 의 증거).
     {
-      const archive = createArchive();
-      const context = await browser.newContext({
-        viewport: { width: 1280, height: 900 },
-        reducedMotion: "reduce",
-        colorScheme: scheme,
+      const { context, page_, sink } = await openBoard({
+        scheme,
+        realUpload: true,
+        sinkPort: sinkPort + (scheme === "light" ? 1 : 2),
       });
-      const page_ = await context.newPage();
-      await installRealtimeSocket(page_);
-      await installRoutes(context, archive);
-      await login(page_);
-      await openChannel(page_);
-      await page_.locator('input[type="file"]').first().setInputFiles(logFile);
+      await page_.locator('input[type="file"]').first().setInputFiles(bigFile);
+      // 퍼센트가 실제로 찍힌 뒤에 찍는다. 이 기다림이 없으면 앞 판처럼 「빈 막대」
+      // 한 장이 다시 증거로 남는다.
+      await page_.waitForFunction(
+        () => {
+          const node = document.querySelector(
+            '[data-testid="attachment-chip-percent"]'
+          );
+          return node !== null && Number(node.textContent.replace("%", "")) >= 20;
+        },
+        undefined,
+        { timeout: 30_000 }
+      );
+      await shot(page_, `uploading-${scheme}`);
+      await context.close();
+      sink.close();
+    }
+
+    // ②③ 대기 중 · 확인 중 · 업로드 완료 — 붙잡을 수 있는 판에서.
+    {
+      const { archive, context, page_ } = await openBoard({ scheme });
+      await page_
+        .locator('input[type="file"]')
+        .first()
+        .setInputFiles([logFile, bigFile]);
+      // 두 번째 칩이 「대기 중」으로 서 있는 순간 (앞 판 증거에 없던 칸).
       await page_.waitForFunction(
         () =>
-          document.querySelector('[data-testid="attachment-chip"]')?.dataset
-            .attachmentStatus === "uploading",
+          document.querySelectorAll(
+            '[data-testid="attachment-chip"][data-attachment-status="ready"]'
+          ).length === 1,
         undefined,
-        { timeout: 10_000 }
+        { timeout: 20_000 }
       );
-      await page_.mouse.move(0, 0);
-      await wait(300);
-      await page_.screenshot({ path: resolve(outDir, `uploading-${scheme}.png`) });
+      await shot(page_, `queued-${scheme}`);
 
       archive.releaseBytes();
-      await page_.waitForFunction(
-        () =>
-          document.querySelector('[data-testid="attachment-chip"]')?.dataset
-            .attachmentStatus === "verifying",
-        undefined,
-        { timeout: 10_000 }
-      );
-      await wait(200);
-      await page_.screenshot({ path: resolve(outDir, `verifying-${scheme}.png`) });
+      await waitStatus(page_, "verifying");
+      await shot(page_, `verifying-${scheme}`);
 
       archive.releaseComplete();
-      await page_.waitForFunction(
-        () =>
-          document.querySelector('[data-testid="attachment-chip"]')?.dataset
-            .attachmentStatus === "uploaded",
-        undefined,
-        { timeout: 10_000 }
-      );
-      await wait(200);
-      await page_.screenshot({ path: resolve(outDir, `uploaded-${scheme}.png`) });
+      await waitStatus(page_, "uploaded");
+      await shot(page_, `uploaded-${scheme}`);
       await context.close();
     }
 
-    // 3) 실패 + 재시도.
+    // ④ 실패 + 재시도.
     {
-      const archive = createArchive();
-      archive.setCompleteStatus(409);
-      const context = await browser.newContext({
-        viewport: { width: 1280, height: 900 },
-        reducedMotion: "reduce",
-        colorScheme: scheme,
+      const { archive, context, page_ } = await openBoard({
+        scheme,
+        completeStatus: 409,
       });
-      const page_ = await context.newPage();
-      await installRealtimeSocket(page_);
-      await installRoutes(context, archive);
-      await login(page_);
-      await openChannel(page_);
       await page_.locator('input[type="file"]').first().setInputFiles(logFile);
-      await page_.waitForFunction(
-        () =>
-          document.querySelector('[data-testid="attachment-chip"]')?.dataset
-            .attachmentStatus === "uploading",
-        undefined,
-        { timeout: 10_000 }
-      );
+      await waitStatus(page_, "uploading");
       archive.releaseBytes();
       archive.releaseComplete();
-      await page_.waitForFunction(
-        () =>
-          document.querySelector('[data-testid="attachment-chip"]')?.dataset
-            .attachmentStatus === "failed",
-        undefined,
-        { timeout: 10_000 }
-      );
-      await page_.mouse.move(0, 0);
-      await wait(300);
-      await page_.screenshot({ path: resolve(outDir, `failed-${scheme}.png`) });
+      await waitStatus(page_, "failed");
+      await shot(page_, `failed-${scheme}`);
       await context.close();
     }
 
-    // 4) 타임라인: 이미지 인라인 + 파일 카드.
+    // ⑤ 타임라인: 이미지 인라인 + 파일 카드.
     {
-      const archive = createArchive();
-      const context = await browser.newContext({
-        viewport: { width: 1280, height: 900 },
-        reducedMotion: "reduce",
-        colorScheme: scheme,
-      });
-      const page_ = await context.newPage();
-      await installRealtimeSocket(page_);
-      await installRoutes(context, archive);
-      await login(page_);
-      await openChannel(page_);
+      const { context, page_ } = await openBoard({ scheme });
       await page_.waitForFunction(
         (id) => {
           const node = document.querySelector(
@@ -987,16 +1414,97 @@ async function captureShots(browser) {
           return node?.getAttribute("data-preview") === "ready";
         },
         IMAGE_MSG.toLowerCase(),
-        { timeout: 15_000 }
+        { timeout: 20_000 }
       );
-      await page_.mouse.move(0, 0);
-      await wait(300);
-      await page_.screenshot({ path: resolve(outDir, `timeline-${scheme}.png`) });
+      await shot(page_, `timeline-${scheme}`);
+      await context.close();
+    }
+
+    // ⑥ 스레드 컴포저 — 이 PR 이 새로 연 표면이자 320px 판 (B-1).
+    {
+      const { archive, context, page_ } = await openBoard({
+        scheme,
+        completeStatus: 409,
+      });
+      // 행 액션 → 「답글 달기」. 이 표면으로 가는 길은 그것 하나다.
+      const row = page_.locator(
+        `[data-testid="timeline-message"][data-message-id="${FILE_MSG.toLowerCase()}"]`
+      );
+      await row.hover();
+      await row.getByTestId("message-actions-trigger").click();
+      await page_.getByTestId("menu-reply").click();
+      await page_.getByTestId("thread-composer-input").waitFor({ timeout: 15_000 });
+      await page_
+        .locator('[data-testid="thread-composer"] input[type="file"]')
+        .first()
+        .setInputFiles(logFile);
+      await waitStatus(page_, "uploading", 20_000);
+      archive.releaseBytes();
+      archive.releaseComplete();
+      await waitStatus(page_, "failed", 20_000);
+      await shot(page_, `thread-failed-${scheme}`);
+      await context.close();
+    }
+
+    // ⑦ 폰 폭 390px 실패 칩 (B-1 의 두 번째 판).
+    {
+      const { archive, context, page_ } = await openBoard({
+        scheme,
+        completeStatus: 409,
+        viewport: { width: 390, height: 844 },
+      });
+      const named = fixturePath(
+        "release-2026-08-09-드레인-워커-지연-로그-전문.log",
+        "one line\n"
+      );
+      await page_.locator('input[type="file"]').first().setInputFiles(named);
+      await waitStatus(page_, "uploading");
+      archive.releaseBytes();
+      archive.releaseComplete();
+      await waitStatus(page_, "failed");
+      await shot(page_, `phone-failed-${scheme}`);
+      await context.close();
+    }
+
+    // ⑧ 상한까지 채운 트레이 + 초과 고지 (B-2).
+    {
+      const { context, page_ } = await openBoard({ scheme });
+      const many = Array.from({ length: 23 }, (_, i) =>
+        fixturePath(`batch-${String(i + 1).padStart(2, "0")}.log`, `line ${i}\n`)
+      );
+      await page_.locator('input[type="file"]').first().setInputFiles(many);
+      await page_.waitForFunction(
+        () =>
+          document.querySelectorAll('[data-testid="attachment-chip"]').length === 20,
+        undefined,
+        { timeout: 30_000 }
+      );
+      await shot(page_, `overflow-${scheme}`);
+      await context.close();
+    }
+
+    // ⑨ 드래그 강조 (앞 판 증거에 없던 상태).
+    {
+      const { context, page_ } = await openBoard({ scheme });
+      await page_.evaluate(() => {
+        const composer = document.querySelector('[data-testid="composer"]');
+        const transfer = new DataTransfer();
+        transfer.items.add(new File(["x"], "drop-me.log", { type: "text/plain" }));
+        composer?.dispatchEvent(
+          new DragEvent("dragenter", { bubbles: true, dataTransfer: transfer })
+        );
+        composer?.dispatchEvent(
+          new DragEvent("dragover", { bubbles: true, dataTransfer: transfer })
+        );
+      });
+      await wait(200);
+      await shot(page_, `dragging-${scheme}`);
       await context.close();
     }
   }
   console.log(
-    "[shots] artifacts/attachment/{uploading,verifying,uploaded,failed,timeline}-{light,dark}.png"
+    "[shots] artifacts/attachment/{uploading,queued,verifying,uploaded,failed,timeline," +
+      "thread-failed,phone-failed,overflow,dragging}-{light,dark}.png"
   );
 }
 
@@ -1014,6 +1522,9 @@ async function main() {
     const browser = await chromium.launch();
     try {
       await exerciseComposer(browser);
+      await exerciseProgress(browser);
+      await exerciseNarrow(browser);
+      await exerciseOverflow(browser);
       await exerciseFailure(browser);
       await exerciseTimeline(browser);
       if (process.env.ATTACH_GATE_SHOTS === "1") await captureShots(browser);

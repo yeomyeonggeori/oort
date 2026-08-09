@@ -245,6 +245,27 @@
    * hugs the rows it actually used (MOMO-619 R1 M7). */
   --spacing-terminal-body: 320px;
 
+  /* 첨부 이미지 미리보기의 자리표시자 높이 (#1202 · design-review M-2/N-3).
+   *
+   * 이름이 따로 있는 이유는 앞 판이 `--spacing-action`(다이얼로그 주 버튼의 최소
+   * **폭**)을 높이로 빌려 썼기 때문이다. 그 토큰의 문단이 바로 그 빌려 쓰기를
+   * 금지한다 — 버튼 최소폭을 손보면 이미지 자리가 함께 움직인다.
+   *
+   * 값이 180 인 것은 추측이되 근거 있는 추측이다: 자리는 `--spacing-pane`
+   * (320px) 폭으로 잡히고 320x180 은 16:9 다. 사람들이 실제로 붙이는 것의
+   * 대다수는 스크린샷이고 스크린샷은 16:9 근처라, 도착하는 순간의 이동이 흔한
+   * 경우에 0 이 된다. 144(=action)였을 때 그 이동은 항상 36px 이었다. */
+  --spacing-preview-frame: 180px;
+
+  /* 첨부 트레이가 먹을 수 있는 최대 높이 (#1202 · design-review B-2).
+   *
+   * 상한 20개를 다 채우면 트레이가 803px 로 자라 타임라인이 화면에서 사라지고
+   * 컴포저 하단이 창 밖으로 나갔다(app-shell 이 clip 이라 스크롤로 되찾지도
+   * 못한다). 이 앱이 스스로 광고하는 수에서 화면이 무너지면 그 수는 광고가 아니라
+   * 함정이다. 240px 는 칩 넷이 온전히 보이고 다섯째가 반쯤 걸리는 높이라, 더
+   * 있다는 사실이 스크롤바 없이도 읽힌다. */
+  --spacing-tray-max: 240px;
+
   /* --- radius: three steps, nothing else --------------------------------- */
   --radius-*: initial;
   --radius-sm: 6px; /* buttons, chips, inputs */
@@ -1199,7 +1220,7 @@
   }
 }
 
-/* 업로드 진행 막대 (#1202 첨부 축) -------------------------------------------
+/* 업로드 진행 막대 (#1202 첨부 축 · design-review B-3) ------------------------
  *
  * `<progress>`인 이유는 규율 두 개가 같은 답을 가리키기 때문이다. 첫째, 이 앱은
  * 인라인 `style`을 쓰지 않는다(eslint가 JSX `style=`을 막고, 사전점검 3번 분류가
@@ -1208,8 +1229,18 @@
  * 보조기술이 이미 아는 컨트롤이 있고, `aria-valuenow`를 손으로 얹은 div는 그것을
  * 흉내 낸 것에 지나지 않는다.
  *
- * 브라우저마다 셰도우 파트 이름이 다르므로 셋을 함께 적는다. `appearance: none`
- * 없이는 macOS Safari가 자기 파란 막대를 그대로 그린다.
+ * ## determinate 와 indeterminate 는 서로 다른 주장이다 (리뷰 B-3)
+ *
+ * 값이 정해진 막대가 0 이라는 것은 「아직 안 재 봤다」가 아니라 **「하나도 안
+ * 갔다」는 측정 주장**이다. 그런데 `xhr.upload.progress` 는 회선이 빠르거나 본문이
+ * 작으면 끝에 딱 한 번만 온다 — 그 사이 내내 0 을 그리면 텍스트로 안 찍기로 한
+ * 바로 그 거짓말을 그래픽으로 계속 말하게 된다. 리뷰가 실측한 것이 그것이다
+ * (납품 캡처의 막대 행 938px 전부 트랙색, accent 0px).
+ *
+ * 그래서 첫 측정이 도착하기 전에는 `value` 속성을 아예 달지 않는다. 그것이
+ * 플랫폼이 공짜로 주는 indeterminate 이고, 여기서는 **한 조각이 흐르는 줄**로
+ * 그린다: 「무언가 진행 중인데 얼마인지는 아직 모른다」가 화면에서 0% 와 다르게
+ * 보여야 하기 때문이다.
  *
  * 색은 --accent 하나다. 이 표면의 유일한 강조색이고(SKILL §2), 진행률은
  * 「지금 일어나고 있는 일」이라 그 자리를 받을 자격이 있다. 실패는 막대가 아니라
@@ -1241,8 +1272,43 @@ progress[data-upload-progress]::-moz-progress-bar {
   background-color: var(--accent);
 }
 
+/* 아직 아무것도 재지 못한 막대. 트랙 위를 한 조각이 흐른다.
+ *
+ * 움직임이 곧 정보다(SKILL §4: 장식이 아니라 피드백) — 이 줄이 멈춰 있으면
+ * 그것은 다시 「0%」로 읽힌다. 그래서 `prefers-reduced-motion` 에서도 끄지 않고
+ * `steps()` 로 느리게 만든다. `spinner-busy` 가 같은 이유로 같은 선택을 한다
+ * (tokens.md §5b: 회전 자체가 요청이 아직 열려 있다는 정보다). */
+progress[data-upload-progress]:indeterminate {
+  background-image: linear-gradient(
+    90deg,
+    transparent 0%,
+    var(--accent) 50%,
+    transparent 100%
+  );
+  background-size: 40% 100%;
+  background-repeat: no-repeat;
+  animation: momo-upload-drift 1.1s linear infinite;
+}
+
+progress[data-upload-progress]:indeterminate::-webkit-progress-bar {
+  background-color: transparent;
+}
+
+@keyframes momo-upload-drift {
+  from {
+    background-position: -40% 0;
+  }
+  to {
+    background-position: 140% 0;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   progress[data-upload-progress]::-webkit-progress-value {
     transition: none;
+  }
+
+  progress[data-upload-progress]:indeterminate {
+    animation: momo-upload-drift 3.2s steps(6, end) infinite;
   }
 }

@@ -9,7 +9,7 @@ import {
   AttachmentTray,
 } from "@/features/attachments/AttachmentTray";
 import {
-  acknowledgeRejected,
+  acknowledgeNotices,
   addFiles,
   clearSurface,
   dropDraft,
@@ -20,7 +20,7 @@ import {
 } from "@/features/attachments/draftStore";
 import { useComposerDropZone } from "@/features/attachments/useComposerDropZone";
 import {
-  ATTACH_COPY,
+  sendBlockCopy,
   sendBlockReason,
 } from "@momo/core/features/attachments/model";
 import { useAutoGrow } from "./useAutoGrow";
@@ -85,9 +85,11 @@ export function ThreadComposer({
     () => ({ workspaceId, channelId }),
     [workspaceId, channelId]
   );
-  const onFiles = (files: File[]) => addFiles(trayKey, attachTarget, files);
+  const onFiles = (files: File[], batch?: { folders?: number }) =>
+    addFiles(trayKey, attachTarget, files, batch);
   const drop = useComposerDropZone(onFiles);
   const attachBlock = sendBlockReason(tray.drafts);
+  const attachBlockCopy = sendBlockCopy(tray.drafts);
 
   // 답글도 한 줄로 끝나지 않는다. 메인 컴포저가 1행에서 6행까지 자라는 것과 같은
   // 규칙이다 (R2 M4) — 다른 것은 이 창이 320px 패널 안에 있어서 접히는 줄이 더
@@ -142,10 +144,11 @@ export function ThreadComposer({
       <AttachmentTray
         drafts={tray.drafts}
         rejected={tray.rejected}
+        folders={tray.folders}
         onRemove={(localId) => dropDraft(trayKey, localId)}
         onRetry={(localId) => retryDraft(trayKey, attachTarget, localId)}
         onClear={() => clearSurface(trayKey)}
-        onAcknowledgeRejected={() => acknowledgeRejected(trayKey)}
+        onAcknowledgeNotices={() => acknowledgeNotices(trayKey)}
       />
       <div className="p-3">
         {error && (
@@ -180,11 +183,7 @@ export function ThreadComposer({
             onClick={submit}
             aria-label="답글 보내기"
             title={
-              attachBlock === "uploading"
-                ? ATTACH_COPY.sendBlocked
-                : attachBlock === "failed"
-                  ? ATTACH_COPY.sendBlockedFailed
-                  : "답글 보내기"
+              attachBlockCopy ?? "답글 보내기"
             }
             data-testid="thread-composer-send"
             className="tap-target flex size-control shrink-0 items-center justify-center rounded-sm bg-accent text-on-accent transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:opacity-50"

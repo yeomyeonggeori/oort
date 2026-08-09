@@ -39,8 +39,13 @@ function carriesFiles(transfer: DataTransfer | null): boolean {
   return Array.from(transfer.types).includes("Files");
 }
 
+/** 드롭 한 번이 나른 것. `folders` 는 받지 못한 폴더 수다(design-review M-4). */
+export interface DroppedBatch {
+  folders: number;
+}
+
 export function useComposerDropZone(
-  onFiles: (files: File[]) => void,
+  onFiles: (files: File[], batch?: DroppedBatch) => void,
   enabled = true
 ): ComposerDropZone {
   const [dragging, setDragging] = useState(false);
@@ -85,13 +90,26 @@ export function useComposerDropZone(
       if (!enabled || !carriesFiles(event.dataTransfer)) return;
       event.preventDefault();
       reset();
-      // 폴더는 `File` 로 오지만 크기가 0 이고 타입이 없다. 서버의 mime 검증에서
-      // 400 이 될 것을 알면서 올려 보내지 않는다 (mac 도 같은 자리에서 디렉터리를
-      // 거른다: `!url.hasDirectoryPath`).
-      const files = Array.from(event.dataTransfer.files).filter(
-        (file) => file.size > 0 || file.type !== ""
-      );
-      if (files.length > 0) onFiles(files);
+      // 폴더만 거르고, **거른 것을 말한다** (design-review M-4).
+      //
+      // 앞 판은 `file.size > 0 || file.type !== ""` 로 걸렀는데 그 술어는 두 가지를
+      // 한꺼번에 지웠다: 폴더와 **빈 파일**이다. 0바이트 로그를 끌어다 놓으면 아무
+      // 일도 일어나지 않았고, 그것은 같은 PR 이 상한 초과 파일에 대해서는 고지를
+      // 새로 만들어 지키려던 규율("말없이 사라지지 않는다")의 정반대였다. 빈 파일은
+      // 서버가 받는다(`size` 의 `minimum: 0`). 폴더는 못 받으므로 세어서 말한다.
+      const folders = Array.from(event.dataTransfer.items).filter((item) => {
+        if (item.kind !== "file") return false;
+        const entry = item.webkitGetAsEntry?.();
+        return entry !== null && entry !== undefined && entry.isDirectory;
+      }).length;
+      const dropped = Array.from(event.dataTransfer.files);
+      // 폴더는 크기 0 + 타입 없음으로 온다. `items` 와 `files` 는 같은 순서를
+      // 보장하지 않아 인덱스로 짝지을 수 없으므로 그 형상으로 되짚는다.
+      const files =
+        folders === 0
+          ? dropped
+          : dropped.filter((file) => file.size > 0 || file.type !== "");
+      if (files.length > 0 || folders > 0) onFiles(files, { folders });
     },
     [enabled, onFiles, reset]
   );

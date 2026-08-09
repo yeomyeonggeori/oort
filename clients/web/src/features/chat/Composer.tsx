@@ -59,7 +59,7 @@ import {
   AttachmentTray,
 } from "@/features/attachments/AttachmentTray";
 import {
-  acknowledgeRejected,
+  acknowledgeNotices,
   addFiles,
   clearSurface,
   dropDraft,
@@ -69,7 +69,7 @@ import {
   useAttachmentSurface,
 } from "@/features/attachments/draftStore";
 import {
-  ATTACH_COPY,
+  sendBlockCopy,
   sendBlockReason,
 } from "@momo/core/features/attachments/model";
 import { useComposerDropZone } from "@/features/attachments/useComposerDropZone";
@@ -419,11 +419,15 @@ export function Composer({
     () => ({ workspaceId, channelId }),
     [workspaceId, channelId]
   );
-  const onFiles = (files: File[]) => addFiles(trayKey, attachTarget, files);
+  const onFiles = (files: File[], batch?: { folders?: number }) =>
+    addFiles(trayKey, attachTarget, files, batch);
   // 오프라인에서는 새 파일을 받지 않는다. 전송과 같은 이유이고 더 직접적이다:
   // 업로드는 네트워크 세 왕복이라, 끊긴 채로 시작하면 세 번 다 실패한다.
   const drop = useComposerDropZone(onFiles, !offline);
   const attachBlock = sendBlockReason(tray.drafts);
+  // 발치의 문장과 버튼의 툴팁이 **한 곳**에서 난다. 갈라 두면 하나만 고쳐지고,
+  // 리뷰 M-1 이 잡은 "없는 버튼을 가리키는 안내"가 툴팁에만 남는다.
+  const attachBlockCopy = sendBlockCopy(tray.drafts);
 
   // ── 「작성 중」 (ADR-0149) ────────────────────────────────────────────────
   //
@@ -676,10 +680,11 @@ export function Composer({
       <AttachmentTray
         drafts={tray.drafts}
         rejected={tray.rejected}
+        folders={tray.folders}
         onRemove={(localId) => dropDraft(trayKey, localId)}
         onRetry={(localId) => retryDraft(trayKey, attachTarget, localId)}
         onClear={() => clearSurface(trayKey)}
-        onAcknowledgeRejected={() => acknowledgeRejected(trayKey)}
+        onAcknowledgeNotices={() => acknowledgeNotices(trayKey)}
       />
       {/* 인용 칩 (ADR-0148). 라우팅 줄보다 **위**에 온다: 라우팅은 "이 글이 어떻게
           처리되는가"고 인용은 "이 글이 무엇에 대한 것인가"라서, 읽는 순서가
@@ -820,13 +825,8 @@ export function Composer({
           title={
             offline
               ? COMPOSER_OFFLINE_COPY
-              : attachBlock === "uploading"
-                ? ATTACH_COPY.sendBlocked
-                : attachBlock === "failed"
-                  ? ATTACH_COPY.sendBlockedFailed
-                  : isMobile
-                    ? "메시지 보내기"
-                    : "메시지 보내기 (Enter)"
+              : (attachBlockCopy ??
+                (isMobile ? "메시지 보내기" : "메시지 보내기 (Enter)"))
           }
           data-testid="composer-send"
         >
