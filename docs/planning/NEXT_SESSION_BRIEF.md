@@ -14,12 +14,12 @@
 | ① #1215/#1210 | **종결**. 리뷰 PASS(B0·H0)·8레인 green·머지. 후속 = #1218(feature 층 border-line 스윕, Medium) |
 | ② #1213 보안 헤더 | **종결**. 라이브 실측 5종 도달(CSP·HSTS 1일·nosniff·no-referrer·frame-ancestors). 폐곡선 = #1217(회수)→#1220(정책+게이트 라이브 확장)→배포→재실측 |
 | ③ 배포+검수 | **배포 완료**: 서버 `momo-rust:6bfc9b82`(마이그레이션 063)·웹 `index-Dp1ym0h8`·헤더. **성재 검수 대기**: 데스크톱 `~/projects/momo-tracks/momo-worktrees/deploy5-b727ea4f/clients/desktop/src-tauri/target/release/bundle/macos/oort.app` + 폰(아래 ASC green이면 TestFlight 경로) |
-| ④ Swift 삭제 | **판정재료 완비, 실행은 성재 판정 뒤**. PR #1216(승인 대기): 감사 engine 재기준화·증보 1 정리·11패밀리 3칸 표(판정 칸 공백). **W-S 발사 금지 조건 불변**(판정 없이 삭제 금지) |
+| ④ Swift 삭제 | **판정 종결**(8/9 심야, 성재 4결정 — #1216 머지·판정표 §3 기록): 폐기 3·이식 확정 3(#1222 T13·#1223)·이월 5+종속 1·OutboxRelay=#1222 후 삭제. **W-S 남은 선행 = 감사 §6 순서+패킷 작성뿐** |
 
 ## 2. ASC / Xcode Cloud (8/9 저녁 재조준 완료)
 
 - 워크플로 "Default"가 이제 **RN을 빌드한다**(워크스페이스 `clients/mobile/ios/MomoMobile.xcworkspace`·scheme `MomoMobile` — Fable이 성재 Chrome으로 콘솔 조작, `docs/cicd/10` §8-4 절차 소화).
-- 첫 실빌드(2035)에서 아카이브·Apple 관리형 서명·3종 export **green**(동의 프롬프트 없었음). 유일 빨강은 `ci_post_xcodebuild.sh` 자체 결함 → **#1219 수리**. 인계 시점에 track/engine 재빌드 검증 중이었다 — **다음 세션은 이 빌드 결과부터 확인**(green이면 폰 검수 TestFlight 전환 제안: Archive 액션 배포 준비=TestFlight 내부 + 테스터 그룹).
+- **첫 완전 그린 확정**(8/9 심야): #1219(덤프 절단)+#1221(application-identifier=아카이브 단계 선택 검사, 팀 보증은 keychain 그룹으로) 두 수리 후 track/engine·ci-appid 재빌드 **둘 다 green** — 아카이브·Apple 관리형 서명·3종 export·사후 검증 전 파이프라인 성립. **폰 검수 TestFlight 전환은 1클릭 거리**(Archive 액션 배포 준비=TestFlight 내부 + 테스터 그룹 — 성재 신호 시).
 - 빨간 X 이력이 브랜치마다 쌓여 있던 원인(퇴역 Swift 빌드)은 소멸. 단 "모든 브랜치" 시작 조건이라 **푸시마다 RN 아카이브가 돈다** — 컴퓨트 사용량이 거슬리면 브랜치 축소는 성재 결정.
 
 ## 3. 성재 대기·결정 큐
