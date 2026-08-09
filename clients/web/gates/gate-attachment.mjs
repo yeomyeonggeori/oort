@@ -112,8 +112,24 @@ function issueNext(issue) {
   return found[1];
 }
 
+/** `text/plain` 이 화면에서 불리는 이름. 정본은 코어의 `formatMimeLabel` 이다. */
+function mimeLabelText() {
+  const source = readFileSync(
+    resolve(
+      webRoot,
+      "../../packages/momo-core/src/features/attachments/model.ts"
+    ),
+    "utf8"
+  );
+  const block = source.slice(source.indexOf("export function formatMimeLabel"));
+  const found = block.match(/case "text":\s*\n\s*return "([^"]+)";/);
+  if (found === null) throw new Error("formatMimeLabel 의 text 갈래를 읽지 못했다");
+  return found[1];
+}
+
 const COPY = attachCopy();
 const TRAY_MAX = trayMaxPx();
+const MIME_LABEL_TEXT = mimeLabelText();
 const MISMATCH_COPY = issueCopy("mismatch");
 const TOO_LARGE_COPY = issueCopy("too-large");
 const TOO_LARGE_NEXT = issueNext("too-large");
@@ -987,8 +1003,13 @@ async function exerciseTimeline(browser) {
   expect((await card.count()) === 1, "파일 첨부가 카드로 그려지지 않는다");
   const meta = await card.getByTestId("attachment-meta").innerText();
   expect(
-    meta === "PLAIN · 20 KB",
+    meta === `${MIME_LABEL_TEXT} · 20 KB`,
     `카드가 타입과 크기를 말하지 않는다 (읽은 값: ${meta})`
+  );
+  // design-review M-7a: 서브타입 대문자("PLAIN")는 낱말이 아니다.
+  expect(
+    !/^[A-Z0-9+.-]+ ·/.test(meta),
+    `카드의 타입이 사람이 읽는 낱말이 아니다 (읽은 값: ${meta})`
   );
   expect(
     (await card.getByTestId("attachment-download").count()) === 1,
@@ -1273,10 +1294,31 @@ async function exerciseOverflow(browser) {
     "상한을 넘겨 버린 3개를 말없이 떨궜다"
   );
 
+  // design-review M-A: 한 칩이 바뀔 때마다 목록 전체가 낭독되면 안 된다.
+  // 20개가 순서대로 올라가는 판이 정확히 그 소음이 나던 자리다.
+  await page_.waitForFunction(
+    () =>
+      document.querySelector('[data-testid="attachment-announce"]')?.textContent
+        ?.length > 0,
+    undefined,
+    { timeout: 20_000 }
+  );
+  const said = (await page_.getByTestId("attachment-announce").textContent()) ?? "";
+  const named = (await page_.getByTestId("attachment-chip-name").allInnerTexts())
+    .map((text) => text.trim())
+    .filter((text) => said.includes(text));
+  expect(
+    named.length <= 1,
+    `낭독 한 줄이 칩 ${named.length}개를 한꺼번에 말한다 (M-A: 바뀐 것만 말해야 한다)`
+  );
+
   await context.close();
   console.log(
     `[B-2] 트레이 ${measured.trayHeight}px (목록 ${measured.listClient}/${measured.listScroll}), ` +
       `컴포저 ${measured.composerHeight} < 창 ${measured.windowHeight}, 대화 ${measured.messages}행 유지`
+  );
+  console.log(
+    `[M-A] 첨부 20개 판의 낭독 한 줄 = "${said}" (칩 ${named.length}개 언급, ${said.length}자)`
   );
 }
 

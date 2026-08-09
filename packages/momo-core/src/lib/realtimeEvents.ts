@@ -274,6 +274,7 @@ export function payloadToMessage(p: MessageNewEvent["payload"]): Message {
 export function attachmentsFromWire(value: unknown): MessageAttachment[] {
   if (!Array.isArray(value)) return [];
   const parsed: MessageAttachment[] = [];
+  let dropped = 0;
   for (const entry of value) {
     const id = str(entry, "id");
     const name = str(entry, "name");
@@ -285,9 +286,19 @@ export function attachmentsFromWire(value: unknown): MessageAttachment[] {
       mime === undefined ||
       sizeBytes === undefined
     ) {
+      dropped += 1;
       continue;
     }
     parsed.push({ id, name, mime, sizeBytes });
+  }
+  // 화면에는 말하지 않지만 **개발자 채널에는 흔적을 남긴다** (리뷰 N-D).
+  //
+  // 사람에게 알리지 않는 판단은 그대로다: 이것은 사용자의 행위가 아니라 서버
+  // 형상의 오류이고, 받는 쪽에게 애초에 「보낸 줄 아는 파일」이 아니다. 하지만
+  // 계약이 어긋났다는 사실 자체는 누군가 알아야 하고, 아무 데도 안 남으면 그것을
+  // 알 방법이 없다. 값은 싣지 않는다 — 파일 이름은 사람이 쓴 것이다.
+  if (dropped > 0) {
+    console.warn(`[momo] dropped ${dropped} malformed attachment(s) from a frame`);
   }
   return parsed;
 }

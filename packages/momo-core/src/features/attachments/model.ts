@@ -229,55 +229,111 @@ export function isRetryableIssue(issue: UploadIssue): boolean {
 }
 
 /**
+ * 이 칸을 부르는 **낱말** 하나. 퍼센트도 크기도 없다.
+ *
+ * 낭독(`draftAnnouncement`)이 읽는 것이 이것이고, 그래서 진행률이 움직이는 동안
+ * 이 값은 바뀌지 않는다 — 보조기술이 초당 몇 번씩 같은 줄을 다시 읽지 않는 이유가
+ * 여기 있다(리뷰 H-3).
+ */
+export function draftStatusWord(draft: AttachmentDraft): string {
+  switch (draft.status) {
+    case "ready":
+      return ATTACH_COPY.queued;
+    case "uploading":
+      return ATTACH_COPY.uploading;
+    case "verifying":
+      return ATTACH_COPY.verifying;
+    case "uploaded":
+      return ATTACH_COPY.uploaded;
+    case "failed": {
+      const issue = draft.issue ?? "unavailable";
+      const next = uploadIssueNext(issue);
+      const reason = uploadIssueCopy(issue);
+      return `${reason}${next === null ? "" : `. ${next}`}`;
+    }
+  }
+}
+
+/**
  * 칩 아래 한 줄. **크기가 항상 앞에 온다** (리뷰 M-7).
  *
  * 앞 판은 업로드가 **끝난 뒤에야** 크기를 말했다. 그래서 오래 걸리는 업로드를
  * 보면서 "이게 몇 MB짜리였지"를 확인할 방법이 화면에 없었다 — 크기가 가장
  * 궁금한 순간은 정확히 기다리는 동안이다.
+ *
+ * 퍼센트도 여기 산다 (리뷰 N-B). 앞 판은 그것을 **이름 옆**에 놓았고, 그래서 첫
+ * 측정에 나타나고 「확인 중」에 사라질 때마다 이름 열의 폭이 320px 기준 36px 씩
+ * 두 번 바뀌었다 — 파일명이 잘렸다 풀렸다 한다. 아래 줄에 두면 이름 열은 칩이
+ * 사는 내내 같은 폭이다.
  */
 export function draftStatusLine(draft: AttachmentDraft): {
   text: string;
   danger: boolean;
+  /** 잰 값이 있을 때만. 없으면 화면도 낭독도 수를 말하지 않는다. */
+  percent: number | null;
 } {
   const size = formatBytes(draft.sizeBytes);
-  if (draft.status === "failed") {
-    const issue = draft.issue ?? "unavailable";
-    const next = uploadIssueNext(issue);
-    const reason = uploadIssueCopy(issue);
-    return {
-      text: `${size} · ${reason}${next === null ? "" : `. ${next}`}`,
-      danger: true,
-    };
-  }
-  const word =
-    draft.status === "ready"
-      ? ATTACH_COPY.queued
-      : draft.status === "uploading"
-        ? ATTACH_COPY.uploading
-        : draft.status === "verifying"
-          ? ATTACH_COPY.verifying
-          : ATTACH_COPY.uploaded;
-  return { text: `${size} · ${word}`, danger: false };
+  const word = draftStatusWord(draft);
+  const percent =
+    draft.status === "uploading" && draft.progress > 0
+      ? Math.round(draft.progress * 100)
+      : null;
+  return {
+    text: `${size} · ${word}`,
+    danger: draft.status === "failed",
+    percent,
+  };
+}
+
+/** 이 칩이 지금 어느 칸에 있는가, 낭독이 구분해야 하는 만큼만. */
+function statusKey(draft: AttachmentDraft): string {
+  return `${draft.status}:${draft.issue ?? ""}`;
 }
 
 /**
- * 보조기술이 듣는 한 줄 (리뷰 H-3).
+ * 보조기술이 듣는 한 줄 (리뷰 H-3, 그리고 그 수리가 만든 M-A).
  *
- * 칩의 상태 문장에는 live region 이 없다. 붙이면 진행률이 바뀔 때마다 초당 몇
- * 번씩 낭독되고, 그것은 정보가 아니라 소음이다. 그래서 **낱말이 바뀔 때만**
- * 바뀌는 문장 하나를 따로 만들어 그것만 공손히 알린다 — 이 PR 의 무게중심인
- * 「확인 중 → 업로드 완료」 전이가 여기서 소리를 얻는다.
+ * 칩의 상태 문장에 live region 을 붙이면 진행률이 바뀔 때마다 초당 몇 번씩
+ * 낭독된다. 그래서 낱말만 싣는 줄을 따로 뒀는데, 1차 수리는 그 줄에 **목록
+ * 전체**를 이어 붙였다. 텍스트 노드가 하나라 한 칩이 바뀔 때마다 20줄이 통째로
+ * 다시 읽힌다 — 퍼센트 소음을 피한 자리에서 다른 축의 같은 소음이었다.
  *
- * 퍼센트는 일부러 없다. 저 전이는 낱말이고, 퍼센트는 `<progress>` 가 자기
- * 역할로 이미 노출한다.
+ * 그래서 이 함수는 **바뀐 것만** 말한다. 앞 상태를 받아 낱말이 달라진 칩을
+ * 골라내고, 아무것도 안 바뀌었으면 `null` 을 돌려준다 — 호출부가 그때 텍스트를
+ * 그대로 두면 보조기술은 아무것도 다시 읽지 않는다.
+ *
+ * 여럿이 한꺼번에 바뀌는 경우는 실제로 둘뿐이다: 여러 개를 한 번에 고른 순간
+ * (전부 「대기 중」)과 그것들이 차례로 끝나는 흐름(한 번에 하나). 그래서 같은
+ * 낱말로 묶이면 개수로 요약하고, 섞이면 개수만 말한다.
  */
-export function draftAnnouncement(drafts: AttachmentDraft[]): string {
-  if (drafts.length === 0) return "";
-  const parts = drafts.map((draft) => {
-    const line = draftStatusLine(draft);
-    return `${draft.name} ${line.text}`;
-  });
-  return parts.join(", ");
+export function draftAnnouncement(
+  previous: AttachmentDraft[],
+  next: AttachmentDraft[]
+): string | null {
+  const before = new Map(previous.map((draft) => [draft.localId, statusKey(draft)]));
+  const changed = next.filter(
+    (draft) => before.get(draft.localId) !== statusKey(draft)
+  );
+  if (changed.length === 0) return null;
+  if (changed.length === 1) {
+    const draft = changed[0];
+    return `${draft.name} ${formatBytes(draft.sizeBytes)} · ${draftStatusWord(draft)}`;
+  }
+  // 낱말별로 묶어 개수로 말한다. 「N개 상태가 바뀌었습니다」 같은 요약은 짧지만
+  // 아무것도 말하지 않는다 — 무엇이 몇 개인지가 이 줄의 전부다.
+  const counts = new Map<string, number>();
+  for (const draft of changed) {
+    const word = draftStatusWord(draft);
+    counts.set(word, (counts.get(word) ?? 0) + 1);
+  }
+  const groups = [...counts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([word, count], index) =>
+      index === 0
+        ? `${ATTACH_COPY.tray} ${count}개 ${word}`
+        : `${count}개 ${word}`
+    );
+  return groups.join(", ");
 }
 
 /**
@@ -534,24 +590,79 @@ export function formatBytes(bytes: number): string {
   return `${rounded} ${UNITS[unit]}`;
 }
 
+/** 사람이 읽는 압축 형식들. 확장자는 파일명이 이미 말하므로 묶어서 부른다. */
+const ARCHIVE_SUBTYPES = new Set([
+  "zip",
+  "x-zip-compressed",
+  "gzip",
+  "x-gzip",
+  "x-tar",
+  "x-7z-compressed",
+  "x-rar-compressed",
+]);
+
 /**
- * 타입 한 조각. macOS는 `UTType.localizedDescription`(OS가 번역한 이름)을 쓰고
- * 실패하면 원본 mime로 떨어진다. 웹에는 그 사전이 없으므로 **서브타입 대문자**를
- * 쓴다: `image/png` → "PNG", `application/pdf` → "PDF". 사전을 하나 지어 넣으면
- * 그 사전에 없는 타입에서만 조용히 이상해진다.
+ * 타입 한 조각, **사람이 읽는 낱말로** (리뷰 M-7a).
+ *
+ * 앞 판은 서브타입을 대문자로 찍었다: `text/plain` → "PLAIN". 그것은 낱말이
+ * 아니다. 그때 적은 기각 사유("사전을 지어 넣으면 사전에 없는 타입에서 조용히
+ * 이상해진다")는 **서브타입 사전**에는 맞지만 여기 쓰는 사전에는 맞지 않는다:
+ * 이 함수가 보는 것은 최상위 타입이고, 그것은 IANA 가 정한 여덟 개짜리 사실상
+ * 닫힌 집합이다. 모르는 최상위 타입은 존재하지 않고, 모르는 서브타입은 전부
+ * 「파일」로 떨어진다 — 조용히 틀리는 자리가 없다.
+ *
+ * 구체성은 파일명이 진다. `drain-2026-08-09.log` 옆의 "LOG" 는 같은 말을 두 번
+ * 하는 것이고, 「텍스트」는 확장자가 말하지 않는 것을 말한다.
  */
 export function formatMimeLabel(mime: string): string {
   const trimmed = mime.trim().toLowerCase();
   const slash = trimmed.indexOf("/");
-  if (slash < 0 || slash === trimmed.length - 1) return trimmed.toUpperCase();
-  const subtype = trimmed.slice(slash + 1).split(";")[0] ?? "";
-  const cleaned = subtype.replace(/^x-/, "").replace(/^vnd\..*[.+]/, "");
-  return cleaned === "" ? trimmed.toUpperCase() : cleaned.toUpperCase();
+  const top = slash < 0 ? trimmed : trimmed.slice(0, slash);
+  const subtype = (slash < 0 ? "" : trimmed.slice(slash + 1).split(";")[0]) ?? "";
+  switch (top) {
+    case "image":
+      return "이미지";
+    case "video":
+      return "동영상";
+    case "audio":
+      return "오디오";
+    case "text":
+      return "텍스트";
+    case "font":
+      return "글꼴";
+    default:
+      break;
+  }
+  if (subtype === "pdf") return "PDF";
+  if (ARCHIVE_SUBTYPES.has(subtype)) return "압축";
+  if (subtype === "json" || subtype === "xml" || subtype.endsWith("+xml")) {
+    return "텍스트";
+  }
+  return "파일";
 }
 
 /** 카드 두 번째 줄. macOS `MomoMessageAttachmentCard.metadata`와 같은 조립이다. */
 export function attachmentMetaLine(attachment: MessageAttachment): string {
   return `${formatMimeLabel(attachment.mime)} · ${formatBytes(attachment.sizeBytes)}`;
+}
+
+/**
+ * 파일명을 「앞부분」과 「꼬리」로 가른다 (리뷰 N-A).
+ *
+ * 좁은 폭에서 `truncate` 는 **끝에서** 자르고, 끝에는 확장자가 있다:
+ * `drain-2026-08-09.l…` 처럼 파일을 서로 구별해 주는 조각이 가장 먼저 죽는다.
+ * CSS 에 가운데 생략이 없으므로 문자열을 둘로 나누어, 앞부분만 줄어들게 하고
+ * 꼬리는 그대로 둔다.
+ *
+ * 꼬리 길이는 「확장자 + 그 앞 한두 글자」다. 확장자만 남기면 `…log` 가 되어
+ * 여러 로그 파일이 같은 꼬리를 갖는다.
+ */
+export function splitFileName(name: string): { head: string; tail: string } {
+  const dot = name.lastIndexOf(".");
+  // 확장자가 없거나(숨김 파일의 앞점 포함) 비정상적으로 길면 가를 것이 없다.
+  if (dot <= 0 || name.length - dot > 8) return { head: name, tail: "" };
+  const tailStart = Math.max(dot - 2, 1);
+  return { head: name.slice(0, tailStart), tail: name.slice(tailStart) };
 }
 
 export function isImageMime(mime: string): boolean {

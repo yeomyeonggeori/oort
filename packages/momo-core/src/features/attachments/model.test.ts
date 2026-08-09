@@ -25,6 +25,7 @@ import {
   sendBlockReason,
   sentAttachmentsOf,
   showsInlinePreview,
+  splitFileName,
   uploadIssueCopy,
   uploadIssueNext,
   verifyUpload,
@@ -276,18 +277,64 @@ describe("the line under the name", () => {
     expect(line.text).toContain(uploadIssueNext("too-large") as string);
   });
 
+  it("puts the percentage on the status line, not beside the name", () => {
+    // 리뷰 N-B: 이름 옆에 두면 첫 측정과 「확인 중」에 이름 열 폭이 두 번 바뀐다.
+    const measured = progressUpload(beginUpload([picked()], "local-1"), "local-1", 0.34);
+    expect(draftStatusLine(measured[0]).percent).toBe(34);
+    // 잰 값이 없으면 수를 말하지 않는다 (B-3 과 같은 규율).
+    expect(draftStatusLine(beginUpload([picked()], "local-1")[0]).percent).toBeNull();
+    expect(
+      draftStatusLine(verifyUpload(measured, "local-1")[0]).percent
+    ).toBeNull();
+  });
+
   it("announces words, never percentages", () => {
     // 리뷰 H-3: 진행률을 live region 에 실으면 초당 몇 번씩 낭독된다. 낱말이
-    // 바뀔 때만 바뀌는 문장 하나가 「확인 중 → 업로드 완료」에 소리를 준다.
+    // 바뀔 때만 바뀌는 문장이 「확인 중 → 업로드 완료」에 소리를 준다.
     let list = beginUpload([picked()], "local-1");
-    list = progressUpload(list, "local-1", 0.42);
-    expect(draftAnnouncement(list)).not.toContain("42");
-    const verifying = draftAnnouncement(verifyUpload(list, "local-1"));
-    const done = draftAnnouncement(completeUpload(list, "local-1", "att-1"));
+    const moved = progressUpload(list, "local-1", 0.42);
+    // 진행률만 움직인 렌더는 낭독할 것이 없다.
+    expect(draftAnnouncement(list, moved)).toBeNull();
+    list = moved;
+    const verifying = draftAnnouncement(list, verifyUpload(list, "local-1"));
+    const done = draftAnnouncement(list, completeUpload(list, "local-1", "att-1"));
     expect(verifying).toContain(ATTACH_COPY.verifying);
     expect(done).toContain(ATTACH_COPY.uploaded);
     expect(verifying).not.toBe(done);
-    expect(draftAnnouncement([])).toBe("");
+    expect(draftAnnouncement([], [])).toBeNull();
+  });
+
+  it("speaks only the chip that changed, not the whole tray (M-A)", () => {
+    // 20개를 올리는 동안 한 칩이 바뀔 때마다 20줄이 낭독되던 것이 M-A 다.
+    const many = Array.from({ length: 20 }, (_, i) =>
+      picked({ localId: `l-${i}`, name: `batch-${i}.log` })
+    );
+    const after = completeUpload(beginUpload(many, "l-7"), "l-7", "att-7");
+    const said = draftAnnouncement(many, after) as string;
+    expect(said).toContain("batch-7.log");
+    for (const other of ["batch-0.log", "batch-19.log"]) {
+      expect(said).not.toContain(other);
+    }
+    // 한 줄이다: 목록을 이어 붙이지 않는다.
+    expect(said.split(",")).toHaveLength(1);
+  });
+
+  it("summarises a batch by word and count, never as a vague change", () => {
+    const before: AttachmentDraft[] = [];
+    const after = [
+      picked({ localId: "l-1" }),
+      picked({ localId: "l-2" }),
+      picked({ localId: "l-3" }),
+    ];
+    expect(draftAnnouncement(before, after)).toBe(
+      `${ATTACH_COPY.tray} 3개 ${ATTACH_COPY.queued}`
+    );
+    // 섞이면 낱말별로 세어 말한다. 「N개 상태가 바뀌었습니다」는 아무것도 말하지
+    // 않으므로 쓰지 않는다.
+    const mixed = beginUpload(after, "l-1");
+    expect(draftAnnouncement(before, mixed)).toBe(
+      `${ATTACH_COPY.tray} 2개 ${ATTACH_COPY.queued}, 1개 ${ATTACH_COPY.uploading}`
+    );
   });
 });
 
@@ -301,12 +348,31 @@ describe("presentation", () => {
     expect(formatBytes(-1)).toBe("0 B");
   });
 
-  it("labels a type from its subtype", () => {
-    expect(formatMimeLabel("image/png")).toBe("PNG");
+  it("labels a type with a word a person reads, never a subtype", () => {
+    // 리뷰 M-7a: "PLAIN" 은 낱말이 아니다. 최상위 타입은 IANA 가 정한 여덟 개짜리
+    // 사실상 닫힌 집합이라, 서브타입 사전과 달리 조용히 틀리는 자리가 없다.
+    expect(formatMimeLabel("image/png")).toBe("이미지");
+    expect(formatMimeLabel("text/plain; charset=utf-8")).toBe("텍스트");
     expect(formatMimeLabel("application/pdf")).toBe("PDF");
-    expect(formatMimeLabel("text/plain; charset=utf-8")).toBe("PLAIN");
-    expect(formatMimeLabel("application/x-tar")).toBe("TAR");
-    expect(formatMimeLabel("nonsense")).toBe("NONSENSE");
+    expect(formatMimeLabel("application/x-tar")).toBe("압축");
+    expect(formatMimeLabel("video/quicktime")).toBe("동영상");
+    expect(formatMimeLabel("audio/mpeg")).toBe("오디오");
+    expect(formatMimeLabel("application/json")).toBe("텍스트");
+    // 모르는 것은 「파일」로 떨어진다. 확장자는 파일명이 이미 말한다.
+    expect(formatMimeLabel("application/vnd.acme.thing")).toBe("파일");
+    expect(formatMimeLabel("nonsense")).toBe("파일");
+  });
+
+  it("keeps the extension alive when a narrow chip truncates the name", () => {
+    // 리뷰 N-A: 끝에서 자르면 파일을 서로 구별해 주는 조각이 먼저 죽는다.
+    const split = splitFileName("release-2026-08-09-드레인-워커-지연-로그-전문.log");
+    expect(split.tail).toBe("전문.log");
+    expect(split.head + split.tail).toBe(
+      "release-2026-08-09-드레인-워커-지연-로그-전문.log"
+    );
+    // 확장자가 없으면 가를 것이 없다.
+    expect(splitFileName("Makefile")).toEqual({ head: "Makefile", tail: "" });
+    expect(splitFileName(".gitignore")).toEqual({ head: ".gitignore", tail: "" });
   });
 
   it("builds the card's second line the way mac does", () => {
@@ -317,7 +383,7 @@ describe("presentation", () => {
         mime: "text/plain",
         sizeBytes: 18,
       })
-    ).toBe("PLAIN · 18 B");
+    ).toBe("텍스트 · 18 B");
   });
 
   it("opens an inline preview only for a bounded raster image", () => {

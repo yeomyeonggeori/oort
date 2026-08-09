@@ -1,11 +1,12 @@
 import { FileText, ImageIcon, Paperclip, X } from "lucide-react";
-import { useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { cn } from "@/design/lib/cn";
 import { Button } from "@/design/ui/button";
 import {
   ATTACH_COPY,
   draftAnnouncement,
   draftStatusLine,
+  splitFileName,
   isImageMime,
   isRetryableIssue,
   sendBlockCopy,
@@ -74,11 +75,11 @@ function DraftChip({
   onRetry: (localId: string) => void;
 }) {
   const line = draftStatusLine(draft);
+  const name = splitFileName(draft.name);
   const uploading = draft.status === "uploading";
   // 0 은 「아직 안 쟀다」이지 「하나도 안 갔다」가 아니다 (design-review B-3).
   // 잰 값이 없는 동안은 값 없는 막대(indeterminate)를 그리고 퍼센트를 찍지 않는다.
-  const measured = uploading && draft.progress > 0;
-  const percent = Math.round(draft.progress * 100);
+  const measured = uploading && line.percent !== null;
   const Icon = isImageMime(draft.mime) ? ImageIcon : FileText;
   const retryable =
     draft.status === "failed" &&
@@ -99,23 +100,17 @@ function DraftChip({
         )}
       />
       <span className="flex min-w-0 flex-1 flex-col gap-px">
-        <span className="flex min-w-0 items-baseline gap-2">
-          <span
-            className="min-w-0 truncate text-body text-ink"
-            data-testid="attachment-chip-name"
-            title={draft.name}
-          >
-            {draft.name}
-          </span>
-          {measured && (
-            <span
-              className="shrink-0 text-timestamp text-ink-muted"
-              data-numeric
-              data-testid="attachment-chip-percent"
-            >
-              {percent}%
-            </span>
-          )}
+        {/* 가운데에서 생략한다 (리뷰 N-A). 끝에서 자르면 확장자가 가장 먼저
+            죽고, 확장자는 파일을 서로 구별해 주는 조각이다. 이름 열에는 이제
+            **이름만** 있다 — 퍼센트는 아래 줄로 내려갔다(N-B), 그래서 첫 측정에
+            나타나고 「확인 중」에 사라지는 그 칩이 이름 폭을 흔들지 않는다. */}
+        <span
+          className="flex min-w-0 items-baseline text-body text-ink"
+          data-testid="attachment-chip-name"
+          title={draft.name}
+        >
+          <span className="min-w-0 truncate">{name.head}</span>
+          {name.tail !== "" && <span className="shrink-0">{name.tail}</span>}
         </span>
         {/* `shrink-0` 이 없다. 좁은 폭에서 줄어들어야 하는 것은 이 줄이 아니라
             이 줄의 **줄 수**이고, 그래서 접힌다(B-1). */}
@@ -127,6 +122,14 @@ function DraftChip({
           data-testid="attachment-chip-status"
         >
           {line.text}
+          {line.percent !== null && (
+            <>
+              {" "}
+              <span data-numeric data-testid="attachment-chip-percent">
+                {line.percent}%
+              </span>
+            </>
+          )}
         </span>
         {uploading ? (
           <progress
@@ -224,6 +227,29 @@ export function AttachButton({
 }
 
 /**
+ * 낭독할 한 줄을 **바뀐 것에서만** 만든다 (리뷰 M-A).
+ *
+ * live region 의 텍스트는 바뀔 때만 읽힌다. 1차 수리는 그 자리에 목록 전체를
+ * 이어 붙였고, 텍스트 노드가 하나라 한 칩이 바뀔 때마다 20줄이 통째로 다시
+ * 읽혔다. 이제 앞 상태를 ref 로 들고 다니며 낱말이 달라진 칩만 문장으로 만들고,
+ * 아무것도 안 바뀐 렌더에서는 **문장을 그대로 둔다** — 그러면 노드가 안 바뀌고
+ * 보조기술은 아무것도 다시 읽지 않는다.
+ *
+ * 효과에서 계산하는 이유: 렌더 중에 ref 를 쓰면 StrictMode 의 두 번째 렌더가
+ * 같은 전이를 두 번 삼키고, 그때 첫 번째 전이가 낭독에서 사라진다.
+ */
+function useAttachmentAnnouncement(drafts: AttachmentDraft[]): string {
+  const previous = useRef<AttachmentDraft[]>([]);
+  const [sentence, setSentence] = useState("");
+  useEffect(() => {
+    const next = draftAnnouncement(previous.current, drafts);
+    previous.current = drafts;
+    if (next !== null) setSentence(next);
+  }, [drafts]);
+  return sentence;
+}
+
+/**
  * 트레이 전체. 첨부가 하나도 없고 알릴 것도 없으면 **서지 않는다** — 빈 제목
  * 줄은 컴포저 위의 죽은 공간이다.
  */
@@ -246,11 +272,15 @@ export function AttachmentTray({
   onClear: () => void;
   onAcknowledgeNotices: () => void;
 }) {
-  if (drafts.length === 0 && rejected === 0 && folders === 0) return null;
+  // 훅은 이른 반환보다 위에 있어야 한다: 트레이가 섰다 사라지는 것은 흔한 일이고,
+  // 그 사이에 훅 순서가 달라지면 React 가 상태를 잘못 이어 붙인다.
+  const announcement = useAttachmentAnnouncement(drafts);
   // 비활성 버튼은 자기가 왜 비활성인지 말하지 못한다. 그 문장이 사는 자리는
   // 버튼 옆이 아니라 트레이 발치이고, 그 규율은 오프라인 줄이 이미 세워 뒀다.
   const blocked = sendBlockReason(drafts);
   const blockedCopy = sendBlockCopy(drafts);
+
+  if (drafts.length === 0 && rejected === 0 && folders === 0) return null;
 
   return (
     <div
@@ -262,7 +292,7 @@ export function AttachmentTray({
           소음이 된다. 낱말이 바뀔 때만 바뀌는 문장 하나만 공손히 알린다 — 이 PR 의
           무게중심인 「확인 중 → 업로드 완료」 전이가 여기서 소리를 얻는다. */}
       <p className="sr-only" role="status" data-testid="attachment-announce">
-        {draftAnnouncement(drafts)}
+        {announcement}
       </p>
       {drafts.length > 0 && (
         <div className="flex items-baseline justify-between gap-2 px-2">
