@@ -172,7 +172,25 @@ mac 클라가 `UUID` 로 파싱하고 웹은 `reactions.ts:63-65` 의 `fold()` �
 
 **삭제 실행 조건**: "이식 대상 + 보류에서 이식으로 승격된 것"이 전부 Rust에 서고, 보류·폐기 판정이 전 패밀리에 대해 내려졌을 때. 그 시점의 판정표가 이 절이다.
 
-## 증보 2 — Swift 상시 빌드·테스트 퇴역 (2026-08-06, 성재 승인)
+### 증보 1 갱신 초안 — 2026-08-09 · **성재 승인 대기(미승인)**
+
+> **이 소절은 제안이다. 아직 결정이 아니다.** 위 증보 1의 판정표(2026-08-04 성재 승인분)는 **그대로 둔다** — 아래는 그 승인 이후 랜딩한 사실만 따로 적은 것이고, 성재가 승인하기 전까지 정본은 위 표다.
+> 이 소절은 **판정을 내리지 않는다.** 11패밀리의 판정 칸은 `docs/planning/research/2026-08-09-swift-family-disposition-table.md`에 **비워 두었다**(성재의 자리).
+> 실측 기준: `origin/track/engine` = `4427756a`. 근거: `docs/planning/research/2026-08-09-swift-removal-audit.md` §3-1·§11.
+
+**(1) "판정 보류" 13패밀리 중 둘은 이미 Rust에 섰다 → 잔여 11.**
+
+| 패밀리 | 상태 | 실측 근거 (`origin/track/engine`) |
+|---|---|---|
+| work-controls | **이식 완료** | `server-rust/bins/momo-server/src/lib.rs:579`(`POST …/work-controls`) · `:583`(`…/{control}/ack`) / 구현 `routes/work_controls.rs:6-10` |
+| work-auto-approvals | **이식 완료** | `lib.rs:587`(`GET …/work-auto-approvals`) · `:591-593`(`PUT`/`DELETE …/{tool}`) |
+
+따라서 보류 줄은 **11패밀리**로 줄어든다: plugins · webhooks · mcp · memories(+policy·consent) · huddles · workstreams · event-subscriptions · work-tool-profiles · bans · members 잔여 · platform.
+
+**(2) "이식 대상(v0)"의 잔여 = agentRunHistory 읽기 3경로 — 미이식으로 실측 확인됨.**
+쓰기는 이미 Rust에 있다(`lib.rs:613` `POST …/channels/{ch}/agent-runs`, 게이트웨이 `:660`·`:664`, 취소 `:621`). 없는 것은 **읽기**다 — `GET …/channels/{ch}/agent-runs`는 그 경로가 POST 전용이라 **405**, `GET …/agents/{id}/runs`·`GET …/agent-runs/{id}`는 404. 클라이언트가 같은 사실을 이미 성문화하고 있다(`packages/momo-core/src/features/capabilities/serverSurfaces.ts:157-175`). 증보 1의 "잔여 — 실측 확인 필요"는 이로써 **확인 완료(미이식)**로 바뀐다.
+
+**(3) 삭제 실행 조건은 여전히 미충족.** (1)은 보류를 13에서 11로 줄였을 뿐이고, 그 11에 대한 성재 판정은 아직 없다. (2)의 "이식 대상" 잔여도 남아 있다. **두 조건 모두 미충족이므로 삭제 발사 금지는 유지된다.**
 
 ## 증보 2 — Swift 상시 빌드·테스트 퇴역 (2026-08-06, 성재 승인)
 
