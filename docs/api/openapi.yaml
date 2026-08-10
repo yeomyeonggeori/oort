@@ -1104,6 +1104,81 @@ paths:
         "429":
           $ref: "#/components/responses/RateLimited"
 
+  /v1/workspaces/{workspaceId}/notification-rules:
+    get:
+      tags: [channels]
+      operationId: getNotificationRules
+      summary: Read the caller's member-global notification rules.
+      description: >
+        ADR-0124 증보 1. The signed-in member's own rules (never a memberId from
+        the request). No stored row answers as both switches off. `dnd` suppresses
+        every push for this member across the workspace; `mentionOverridesMute`
+        lets a mention through a channel this member muted in 018.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: The caller's effective notification rules.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationRulesResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Active human membership required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+    put:
+      tags: [channels]
+      operationId: updateNotificationRules
+      summary: Replace the caller's member-global notification rules.
+      description: >
+        ADR-0124 증보 1. Replaces both switches at once; a body with an unknown
+        field is a 400. `dnd` sits above channel mute and the mention exception
+        (pause-everything means everything); `mentionOverridesMute` only affects
+        `reason=mention`, so a muted channel still stays silent for DMs and
+        approval requests. Unread/read-state is untouched.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateNotificationRulesRequest"
+      responses:
+        "200":
+          description: The stored notification rules.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationRulesResponse"
+        "400":
+          description: Invalid or unknown request field.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Active human membership required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
   /v1/workspaces/{workspaceId}/channels/{channelId}/huddles:
     post:
       tags: [huddles]
@@ -6519,6 +6594,27 @@ components:
       required: [muted]
       properties:
         muted:
+          type: boolean
+
+    UpdateNotificationRulesRequest:
+      type: object
+      required: [dnd, mentionOverridesMute]
+      additionalProperties: false
+      properties:
+        dnd:
+          type: boolean
+          description: Suppress every push for this member across the workspace.
+        mentionOverridesMute:
+          type: boolean
+          description: Let a mention through a channel this member muted (018).
+
+    NotificationRulesResponse:
+      type: object
+      required: [dnd, mentionOverridesMute]
+      properties:
+        dnd:
+          type: boolean
+        mentionOverridesMute:
           type: boolean
 
     CreateChannelRequest:

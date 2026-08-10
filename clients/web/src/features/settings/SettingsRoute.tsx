@@ -17,8 +17,8 @@ import { AiLinkSection } from "./AiLinkSection";
 import { AppearanceSection } from "./AppearanceSection";
 import { EventSubscriptionSection } from "./EventSubscriptionSection";
 import { InviteSection } from "./InviteSection";
+import { NotificationRulesSection } from "./NotificationRulesSection";
 import { PluginSection } from "@/features/plugins/PluginSection";
-import { SectionShell } from "./SettingsFields";
 import { UsageSection } from "./UsageSection";
 import { WebhookSection } from "./WebhookSection";
 import { WorkHostSection } from "./WorkHostSection";
@@ -257,7 +257,9 @@ export function SettingsRoute() {
           >
           {section === "account" && <AccountSection />}
           {section === "appearance" && <AppearanceSection />}
-          {section === "notifications" && <NotificationRulesSection />}
+          {section === "notifications" && (
+            <NotificationRulesSection offline={offline} />
+          )}
           {section === "updates" && <UpdateSection />}
           {section === "ai" && <AiLinkSection offline={offline} />}
           {section === "code" && (
@@ -293,27 +295,5 @@ export function SettingsRoute() {
         </div>
       </div>
     </div>
-  );
-}
-
-/**
- * 알림 규칙 (P9): the rule tree lives on the server and has no operator REST
- * yet, so this panel states the contract rather than drawing switches that
- * would write nowhere.
- */
-function NotificationRulesSection() {
-  return (
-    <SectionShell
-      title="알림 규칙"
-      lines={[
-        "알림 규칙은 서버에 하나만 존재합니다. 플랫폼마다 다시 구현하지 않습니다.",
-        "각 알림에는 왜 왔는지가 함께 기록되고, 인박스에서 그 이유를 볼 수 있습니다.",
-      ]}
-    >
-      <p className="text-body text-ink-muted">
-        규칙을 이 화면에서 바꾸는 기능은 아직 없습니다. 지금은 서버 설정으로만
-        바뀝니다.
-      </p>
-    </SectionShell>
   );
 }

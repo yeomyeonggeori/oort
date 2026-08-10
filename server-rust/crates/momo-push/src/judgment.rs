@@ -17,11 +17,21 @@
 //! * **Approval request** — an `approval_request` message notifies the humans
 //!   who can decide it, excluding the requesting agent.
 //! * **Resume offer / idle** — the owning member of the orphaned session.
-//! * **Mute (ADR-0124)** — suppresses every reason, mentions and approvals
-//!   included. Read at judgment time; no cache.
+//! * **Mute (ADR-0124)** — the per-channel `notification_pref` row suppresses
+//!   every reason, mentions and approvals included. Read at judgment time; no
+//!   cache.
+//! * **DND / mention-exception (ADR-0124 증보 1)** — the per-member,
+//!   workspace-global `notification_rule` row. `dnd` suppresses every reason for
+//!   that member (it sits ABOVE channel mute — DND wins even over a mention
+//!   exception). `mention_overrides_mute` lets a `reason='mention'` candidate
+//!   through a channel this member muted, and only a mention: it modifies the
+//!   018 mute, it does not undo it for DMs or approvals.
 //!
 //! Reason precedence per member is `approval_request > mention > dm`, expressed
-//! by the `CASE` arm order below.
+//! by the `CASE` arm order below. Suppression precedence across the two ledgers
+//! is `dnd > channel-mute(with mention exception) > deliver`, expressed by the
+//! `WHERE` clause: absence of a `notification_rule` row is `dnd=false,
+//! mention_overrides_mute=false`, which is the pre-증보 behaviour exactly.
 //!
 //! ## What is *not* read
 //!
@@ -132,13 +142,18 @@ pub async fn judge_targets(
              ON np.workspace_id = $1 \
             AND np.channel_id = (SELECT channel_id FROM msg) \
             AND np.member_id = r.member_id \
+           LEFT JOIN notification_rule nr \
+             ON nr.workspace_id = $1 \
+            AND nr.member_id = r.member_id \
            LEFT JOIN approval a \
              ON a.workspace_id = $1 \
             AND a.request_message_id = $2 \
           WHERE r.reason IS NOT NULL \
+            AND COALESCE(nr.dnd, false) = false \
             AND ( \
               np.member_id IS NULL \
               OR (np.muted_until IS NOT NULL AND np.muted_until <= now()) \
+              OR (r.reason = 'mention' AND COALESCE(nr.mention_overrides_mute, false)) \
             ) \
           ORDER BY r.member_id, t.id",
     )
