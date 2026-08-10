@@ -1118,3 +1118,127 @@ async fn the_database_refuses_to_store_a_non_normalised_email() {
         );
     }
 }
+
+/// #1252 — after 064 the table refused case twins, but the refusal came from the
+/// *normalisation* CHECK: `Twin@x.com` was unstorable in the first place, so the
+/// uniqueness constraint never had to have an opinion. It said
+/// `UNIQUE (workspace_id, email)`, which on its own permits the pair.
+///
+/// Migration 065 moves the opinion into the constraint. The only way to show that
+/// is to take 064 away and see the pair still refused — so this test drops the
+/// CHECK inside a transaction it rolls back. That transaction holds an
+/// ACCESS EXCLUSIVE lock on `human` for the few statements it spans; it is short
+/// and the rollback is unconditional, but this is why the DDL is not left lying
+/// around outside one.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a fresh pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn case_twins_are_refused_by_the_uniqueness_constraint_not_by_the_normalisation_check() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let fixture = seed(&su, &app_pool).await;
+
+    // What the catalogue says, before anything is provoked. `human_email_uniq`
+    // must be gone rather than merely joined by a second index — two uniqueness
+    // constraints where one is implied by the other is how a reader ends up
+    // believing the weaker one is doing the work.
+    let indexes: Vec<String> = sqlx::query_scalar(
+        "SELECT indexname::text FROM pg_indexes \
+          WHERE tablename = 'human' ORDER BY indexname",
+    )
+    .fetch_all(&su)
+    .await
+    .expect("read human's indexes");
+    assert!(
+        indexes.iter().any(|name| name == "human_email_norm_uniq"),
+        "065 must install the folded uniqueness index, got: {indexes:?}"
+    );
+    assert!(
+        indexes.iter().any(|name| name == "human_email_idx"),
+        "065 must leave a plain (workspace_id, email) b-tree for the #1247 lookups, got: {indexes:?}"
+    );
+    assert!(
+        !indexes.iter().any(|name| name == "human_email_uniq"),
+        "065 must retire the case-sensitive uniqueness it replaces, got: {indexes:?}"
+    );
+    let folded: String = sqlx::query_scalar(
+        "SELECT pg_get_indexdef(c.oid) FROM pg_class c WHERE c.relname = 'human_email_norm_uniq'",
+    )
+    .fetch_one(&su)
+    .await
+    .expect("read the folded index definition");
+    assert!(
+        folded.contains("UNIQUE") && folded.contains("lower(btrim(email))"),
+        "the uniqueness must be stated on the repository's one normal form, got: {folded}"
+    );
+
+    // Now the behaviour, with 064 out of the way.
+    let mut tx = su.begin().await.expect("open the probe transaction");
+    sqlx::query("ALTER TABLE human DROP CONSTRAINT human_email_normalized_ck")
+        .execute(&mut *tx)
+        .await
+        .expect("drop 064's CHECK for the duration of this transaction");
+
+    let local = Uuid::new_v4();
+    let first = Uuid::new_v4();
+    let second = Uuid::new_v4();
+    for (member_id, suffix) in [(first, "a"), (second, "b")] {
+        sqlx::query(
+            "INSERT INTO member (id, workspace_id, kind, display_name, handle) \
+             VALUES ($1, $2, 'human', $3, $3)",
+        )
+        .bind(member_id)
+        .bind(fixture.workspace)
+        .bind(format!("twin-{local}-{suffix}"))
+        .execute(&mut *tx)
+        .await
+        .expect("seed a twin member");
+    }
+
+    sqlx::query(
+        "INSERT INTO human (member_id, workspace_id, email, password_hash) \
+         VALUES ($1, $2, $3, momo_password_hash($4))",
+    )
+    .bind(first)
+    .bind(fixture.workspace)
+    .bind(format!("twin-{local}@smoke.test"))
+    .bind(TEST_PASSWORD)
+    .execute(&mut *tx)
+    .await
+    .expect("the normalised spelling stores");
+
+    let refused = sqlx::query(
+        "INSERT INTO human (member_id, workspace_id, email, password_hash) \
+         VALUES ($1, $2, $3, momo_password_hash($4))",
+    )
+    .bind(second)
+    .bind(fixture.workspace)
+    .bind(format!("Twin-{local}@Smoke.Test"))
+    .bind(TEST_PASSWORD)
+    .execute(&mut *tx)
+    .await;
+
+    let error = refused.expect_err("a case twin must not be storable even without 064's CHECK");
+    let message = error.to_string();
+    assert!(
+        message.contains("human_email_norm_uniq"),
+        "the refusal must come from #1252's uniqueness index, got: {message}"
+    );
+
+    tx.rollback()
+        .await
+        .expect("the probe leaves 064's CHECK exactly as it found it");
+
+    // And it really is back: the transaction above changed nothing durable.
+    let still_there: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM pg_constraint \
+          WHERE conrelid = 'human'::regclass AND conname = 'human_email_normalized_ck')",
+    )
+    .fetch_one(&su)
+    .await
+    .expect("re-read the constraint catalogue");
+    assert!(
+        still_there,
+        "the probe transaction must not have leaked its DDL"
+    );
+}

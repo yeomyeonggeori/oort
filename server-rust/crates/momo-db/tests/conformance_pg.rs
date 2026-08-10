@@ -2,7 +2,7 @@
 //!
 //! Proves the two things the DB-free unit tests cannot:
 //!  1. the Rust migration runner reproduces the Swift bootstrap schema on a
-//!     fresh `pgvector/pgvector:pg18` DB — all 64 files apply in place, unmodified
+//!     fresh `pgvector/pgvector:pg18` DB — all 65 files apply in place, unmodified
 //!     (incl. the `vector`/`pg_trgm`/`pgcrypto` extensions and the DDL the whole
 //!     enforcement layer lives in);
 //!  2. `with_tenant_tx` actually sets the `app.workspace_id` RLS GUC (the single
@@ -54,25 +54,25 @@ async fn superuser_pool() -> PgPool {
 
 #[tokio::test]
 #[ignore = "needs DATABASE_URL to a fresh pgvector/pg18 DB"]
-async fn migration_runner_applies_all_64_and_matches_schema() {
+async fn migration_runner_applies_all_65_and_matches_schema() {
     let _guard = migration_lock().await;
     let pool = superuser_pool().await;
     let mut conn = pool.acquire().await.expect("acquire");
 
-    // discovery = exactly the 64 versioned files, contiguous
+    // discovery = exactly the 65 versioned files, contiguous
     let migs = discover_migrations(&default_migrations_dir()).expect("discover");
-    assert_eq!(migs.len(), 64, "expected 64 migrations, got {}", migs.len());
+    assert_eq!(migs.len(), 65, "expected 65 migrations, got {}", migs.len());
 
     // THE runner — applies 001..061 in place via psql (incl. pgvector 028 and
     // the seed migrations' `\if` meta-commands). An ordering/role dependency or
     // a psql-rejected file would surface here as a real finding. Product default
     // seed mode (no legacy agent fixtures).
     let report = run_migrations(&database_url(), &default_migrations_dir(), SeedMode::None)
-        .expect("all 64 migrations apply on a fresh pgvector/pg18 DB");
+        .expect("all 65 migrations apply on a fresh pgvector/pg18 DB");
     assert_eq!(
         report.total(),
-        64,
-        "the runner must consider all 64 files (applying them, or SKIPping the \
+        65,
+        "the runner must consider all 65 files (applying them, or SKIPping the \
          ones a previous run already recorded)"
     );
 
@@ -131,7 +131,7 @@ async fn migration_runner_applies_all_64_and_matches_schema() {
     );
 
     println!(
-        "conformance: 64 migrations applied; outbox_kind={labels:?}; FORCE-RLS tables={forced}"
+        "conformance: 65 migrations applied; outbox_kind={labels:?}; FORCE-RLS tables={forced}"
     );
 }
 

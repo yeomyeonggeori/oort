@@ -71,12 +71,15 @@
 //! So each of the four now normalises **in SQL**, the same way
 //! `momo_messaging::verify_password_login` does after #1234:
 //!
-//! * The **parameter** is folded, never the column. `human_email_uniq` is
-//!   case-sensitive, so a workspace can hold `Twin@Example.com` beside
-//!   `twin@example.com`; folding the column would match both rows and the
-//!   `LIMIT 1` would pick whichever the plan yielded. Folding the parameter
-//!   constant-folds and keeps `human_email_uniq` / `workspace_ban_email_uniq` as
-//!   an `Index Cond`.
+//! * The **parameter** is folded, never the column. When this was written the
+//!   only uniqueness on `human` was case-sensitive, so a workspace could hold
+//!   `Twin@Example.com` beside `twin@example.com`; folding the column would match
+//!   both rows and the `LIMIT 1` would pick whichever the plan yielded. #1252's
+//!   migration 065 (`human_email_norm_uniq`) has since made that pair unstorable,
+//!   but the parameter form stays: it constant-folds and keeps a plain
+//!   `(workspace_id, email)` b-tree (`human_email_idx` after 065, which is why
+//!   065 leaves one behind) / `workspace_ban_email_uniq` as an `Index Cond`,
+//!   where the column form falls to a `Filter`.
 //! * The fold is SQL's `lower(btrim(...))`, not Rust's `trim().to_lowercase()`.
 //!   Every write path — `create_workspace.sql`, `bootstrap_owner_if_absent.sql`,
 //!   `set_initial_owner.sql`, migration 064's `human_email_normalized_ck` and
@@ -548,9 +551,9 @@ pub async fn redeem_invite_in_tx(
             }
             match member.status.as_str() {
                 // A soft-deleted account rejoining is a re-activation, not a
-                // second row: `human_email_uniq` would refuse the second row
-                // anyway, and a new member id would orphan every message the
-                // person already wrote.
+                // second row: `human_email_norm_uniq` (065) would refuse the
+                // second row anyway, and a new member id would orphan every
+                // message the person already wrote.
                 "deleted" => (
                     reactivate_deleted_human(conn, &member, values).await?,
                     false,
@@ -604,11 +607,16 @@ pub async fn redeem_invite_in_tx(
         return Err(JoinRejection::InviteExhausted.into());
     }
 
-    // 10) The durable record of who spent it.
+    // 10) The durable record of who spent it. The address is folded here for the
+    //     same reason the four pre-flight reads fold theirs (#1248): this is the
+    //     one write that took `values.email` verbatim, so a caller that skipped
+    //     `normalized_join_email` left an audit row spelled differently from the
+    //     `human` row the same join created or reused — the redemption history
+    //     and the account it belongs to would disagree about who joined.
     let redemption_id: Option<Uuid> = sqlx::query_scalar(
         "INSERT INTO invite_code_redemption \
            (workspace_id, invite_code_id, member_id, email, user_agent) \
-         VALUES ($1, $2, $3, $4, $5) \
+         VALUES ($1, $2, $3, lower(btrim($4)), $5) \
          ON CONFLICT (invite_code_id, member_id) DO NOTHING \
          RETURNING id",
     )
@@ -883,7 +891,7 @@ async fn create_human_member(
 }
 
 /// `23505` on `member_handle_uniq` specifically. Any *other* unique violation
-/// (an email racing itself into `human_email_uniq`) stays a 500, because Swift
+/// (an email racing itself into `human_email_norm_uniq`) stays a 500, because Swift
 /// has no wording for it and inventing one here would be a wire change.
 fn is_handle_unique_violation(error: &sqlx::Error) -> bool {
     let Some(db_error) = error.as_database_error() else {
