@@ -9,7 +9,9 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        default: "bg-accent text-on-accent hover:opacity-90",
+        // 채움이 --accent 라 인셋 focus-ring 이 --accent 면 amber-on-amber 로 사라진다
+        // (design-review High). focus-ring-on-fill 이 링을 --on-accent 로 돌린다.
+        default: "bg-accent text-on-accent hover:opacity-90 focus-ring-on-fill",
         // 경계는 --line 이었다 (#1210 D1). --line 은 **나누는** 선이고
         // --line-strong 이 **컨트롤을 그리는** 선이라고 tokens.css:33-34 가 이미
         // 적어 두었는데, 이 한 줄만 그 규칙 밖에 있었다. 실측:
@@ -42,7 +44,10 @@ const buttonVariants = cva(
         // 파괴 보조가 주 액션을 이겼다. 채움 순서(accent > danger-fill)도 이제
         // 토큰에서 재진다 — tokens.css의 --danger-fill 주석과 tokens.contrast의
         // "ranks the primary action fill above the destructive fill" 참조.
-        destructive: "bg-danger-fill text-on-danger-fill hover:opacity-90",
+        // default 와 같은 이유: 채움 위 인셋 링이 사라지지 않게 --on-danger-fill(값이
+        // --on-accent 와 같다)로. focus-ring-on-fill 이 그 대비색을 세운다.
+        destructive:
+          "bg-danger-fill text-on-danger-fill hover:opacity-90 focus-ring-on-fill",
         outline:
           "border border-line-strong bg-transparent text-ink hover:bg-surface-hover",
       },

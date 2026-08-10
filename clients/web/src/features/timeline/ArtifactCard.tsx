@@ -82,19 +82,6 @@ const LINE_CLASS: Readonly<Record<DiffLineKind, string>> = {
 };
 
 /**
- * Focus ring for a control that lives INSIDE the clipping diff body.
- *
- * The house pattern is `outline-offset-2`, and it is invisible here: the body
- * is a `max-h-diff-body` scroll container, so its computed overflow clips both
- * axes, and a ring drawn 2px OUTSIDE a child's border box is cut off on every
- * edge that touches the container (the sticky file header lost its ring
- * entirely). Drawing the same 2px ring 2px INSIDE the border box puts it in
- * painted territory the container cannot clip.
- */
-const INSET_FOCUS_RING =
-  "focus-visible:focus-ring";
-
-/**
  * Disclosure open state, kept OUTSIDE the React tree.
  *
  * react-virtuoso unmounts a row the moment it leaves the viewport, so a
@@ -293,7 +280,7 @@ function DiffFileSection({
       <summary
         className={cn(
           "sticky top-0 z-10 flex cursor-pointer items-center gap-2 border-b border-line bg-surface-raised px-3 py-1 hover:bg-surface-hover",
-          INSET_FOCUS_RING
+          "focus-visible:focus-ring"
         )}
       >
         {open ? (
@@ -324,7 +311,7 @@ function DiffFileSection({
           {...scrollStop(lines.scrollable, `${file.path} 변경 내용`)}
           className={cn(
             "scrollbar-visible overflow-x-auto pb-1 font-mono text-meta",
-            INSET_FOCUS_RING
+            "focus-visible:focus-ring"
           )}
         >
           {file.lines.map((line) => (
@@ -421,7 +408,7 @@ function RawPatch({ patch }: { patch: string }) {
       <summary
         className={cn(
           "cursor-pointer px-3 py-2 text-meta text-ink-muted hover:bg-surface-hover",
-          INSET_FOCUS_RING
+          "focus-visible:focus-ring"
         )}
       >
         원본 diff 보기
@@ -431,7 +418,7 @@ function RawPatch({ patch }: { patch: string }) {
         {...scrollStop(body.scrollable, "원본 diff")}
         className={cn(
           "scrollbar-visible max-h-pane overflow-auto px-3 pb-2 font-mono text-meta text-ink",
-          INSET_FOCUS_RING
+          "focus-visible:focus-ring"
         )}
       >
         {patch}

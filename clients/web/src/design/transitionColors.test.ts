@@ -10,8 +10,8 @@ import { describe, expect, it } from "vitest";
  *
  * Tailwind v4 의 `transition-colors` 는 v3 에 없던 `outline-color` 를 전이 목록에
  * 넣는다. 이 레포의 포커스 링은 색을 `outline-color` 로 **상태에서만** 주므로(검수
- * 피드백 #1 이후엔 `@utility focus-ring` = 인셋 accent outline, 그 전엔
- * `focus-visible:outline-accent`), 그 조합은 링이 정지 색(currentcolor = --ink)에서
+ * 피드백 #1 이후엔 `@utility focus-ring` = 인셋 accent 아웃라인, 그 전엔 아웃셋 accent
+ * 아웃라인), 그 조합은 링이 정지 색(currentcolor = --ink)에서
  * --accent 로 150ms 동안 번지게 만든다. `tokens.css` 가 `@layer utilities` 에서 그
  * 한 항목을 빼고, 이 파일이 **컴파일 산출물**에서 그것을 확인한다. focus-ring 도
  * outline-color 로 색을 주므로 이 수리는 그 뒤로도 그대로 load-bearing 이다.

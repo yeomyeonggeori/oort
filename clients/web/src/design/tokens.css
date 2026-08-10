@@ -326,9 +326,9 @@
  *   color, background-color, border-color, outline-color,
  *   text-decoration-color, fill, stroke, --tw-gradient-*
  *
- * 이 레포의 포커스 링은 `outline-color` 를 **상태에서만** 준다(당시엔
- * `focus-visible:outline-accent`, 지금은 아래 `@utility focus-ring`; 둘 다
- * outline-color 를 focus 에서만 세운다). 그래서 탭으로 포커스가 들어오면
+ * 이 레포의 포커스 링은 `outline-color` 를 **상태에서만** 준다(당시엔 아웃셋 accent
+ * 아웃라인, 지금은 아래 `@utility focus-ring`; 둘 다 outline-color 를 focus 에서만
+ * 세운다). 그래서 탭으로 포커스가 들어오면
  * `outline-width` 는 즉시 2px 로 서지만 색은 정지 상태의 `currentcolor`(= --ink,
  * 본문 잉크)에서 --accent 로 기본 150ms 동안 번진다 — 키보드가 1급 문법인
  * 제품(ux-bible P11)에서 포커스 표시가 첫 프레임에 **잉크색으로** 나타났다가
@@ -386,48 +386,57 @@
  *
  * ## 무엇을 고치나 (검수 피드백 #1)
  *
- * 포커스 표시는 `focus-visible:outline-2 outline-offset-2 outline-accent` 로,
- * 63파일 108곳에 **복붙**되어 있었다 — 프리미티브 button·input·select 조차 각자
- * 문자열을 들어서 한 곳 수리로 전파되지 않았다. 그리고 `outline-offset-2`(양수)는
- * 링을 컨트롤 테두리 **바깥 2px** 에 띄운다: 컨트롤에서 떨어져 떠 있는 링이다.
- * 피드백은 그것을 "테두리 바깥 outline 말고 테두리(엣지)에 붙는 표시로" 였다.
+ * 포커스 표시는 옛 집 패턴(포커스 시 2px accent 아웃라인을 +2px offset 으로 컨트롤
+ * 테두리 **바깥** 2px 에)이 63파일 108곳에 **복붙**되어 있었다 — 프리미티브
+ * button·input·select 조차 각자 문자열을 들어서 한 곳 수리로 전파되지 않았다.
+ * 양수 offset 은 링을 컨트롤에서 떨어뜨려 띄운다. 피드백은 그것을 "테두리 바깥
+ * 아웃라인 말고 테두리(엣지)에 붙는 표시로" 였다.
  *
- * ## 왜 literal `border-color` 가 아니라 인셋 outline 인가
+ * ## 왜 literal border-color 가 아니라 인셋 아웃라인인가
  *
- * 피드백은 "border 색상 변경"으로 적혔지만, `focus-visible:border-*` 로 border-color
- * 를 직접 --accent 로 바꾸면 두 가지가 깨진다. 그래서 같은 목표(엣지에 붙는 표시)를
- * outline 으로 달성한다:
- *
+ * 피드백은 "border 색상 변경"으로 적혔지만 border-color 를 직접 --accent 로 바꾸면
+ * 두 가지가 깨진다. 그래서 같은 목표(엣지에 붙는 표시)를 아웃라인으로 달성한다:
  *   1. **다시 페이드한다.** border-color 는 hover 를 위해 `transition-colors` 목록에
- *      남아 있다(#1210 D3 은 outline-color **하나만** 뺐다 — 바로 위 블록). 포커스가
+ *      남아 있다(#1210 D3 은 outline-color 하나만 뺐다 — 바로 위 블록). 포커스가
  *      border-color 를 건드리면 링이 정지색에서 --accent 로 ~150ms 번진다 — #1210 D3
- *      이 잡은 그 결함을 다른 속성으로 되살리는 것이다. transitionColors.test.ts 가
- *      그 철학을 지킨다. 반대로 outline-color 는 #1210 D3 이 목록에서 빼 두었으므로
- *      focus-ring 은 **즉시** 선다(페이드 없음) — 이 유틸은 그 수리 위에 산다.
+ *      이 잡은 결함을 다른 속성으로 되살리는 것이다. outline-color 는 #1210 D3 이
+ *      목록에서 빼 두었으므로 focus-ring 은 즉시 선다 — 이 유틸은 그 수리 위에 산다.
  *   2. **테두리 없는 컨트롤에서 안 보인다.** button 의 default·ghost·destructive,
- *      링크·행·`<summary>`·메뉴 항목은 border-width 가 0 이라 border-color 가 그릴
- *      것이 없다. 108곳의 다수가 그렇다. outline 은 테두리 유무와 무관하게 그려진다.
+ *      링크·행·<summary>·메뉴 항목은 border-width 가 0 이라 border-color 가 그릴
+ *      것이 없다(108곳의 다수). 아웃라인은 테두리 유무와 무관하게 그려진다.
  *
- * outline 은 레이아웃을 밀지 않고(어느 컨트롤에서도 인셋으로 겹쳐도 리플로우 0),
- * forced-colors 모드에서 UA 가 outline-color 를 시스템 색으로 강제해 고대비 사용자의
- * 포커스 표시가 유지된다(색맹·고대비 안전판). offset 을 음수로 당겨 엣지 안쪽 2px 에
- * 두면 시각적으로 '테두리가 accent 로 선' 것과 같으면서 '바깥에 뜬 링'이 아니다.
- * 이미 ADE·WorkPanel 행·ObserverTerminal 등 13곳이 이 인셋 형태를 쓰고 있었고,
- * 이 유틸이 그 형태를 이름 하나로 모아 108곳 전부를 같은 표시로 만든다.
+ * 아웃라인은 레이아웃을 밀지 않고, forced-colors 모드에서 UA 가 outline-color 를
+ * 시스템 색으로 강제해 고대비/색맹 사용자의 표시가 유지된다. offset 을 음수로 당겨
+ * 엣지 안쪽 2px 에 두면 '테두리가 accent 로 선' 것과 같으면서 '바깥에 뜬 링'이 아니다.
+ *
+ * ## 채워진 컨트롤 위의 대비 — --focus-ring-ink (검수 #1 재검토 High)
+ *
+ * 인셋 링은 컨트롤 **채움 위에** 그려진다. 채움이 --accent 인 컨트롤(button 의
+ * default, composer 보내기, 다이얼로그 primary)에서 링도 --accent 면 amber-on-amber
+ * 로 픽셀이 같아 사라진다(design-review High, 옛 아웃셋 링은 바깥 중립 배경 위라
+ * 대비가 있었다). 그래서 링 색을 변수로 두고(--focus-ring-ink) 기본은 --accent,
+ * **채워진 컨트롤은 채움의 전경색으로** 바꾼다: focus-ring-on-fill 이 --focus-ring-ink
+ * 를 --on-accent 로 세운다. --on-accent 는 채움 위 글자색이라 채움과 AA 대비가
+ * 보장되고(링이 반드시 보인다), --on-danger-fill 과 값이 같아(둘 다
+ * light-dark(#fffefb,#17161a)) 파괴 채움 컨트롤도 같은 유틸이 덮는다.
  *
  * ## 왜 @utility 이고 왜 변형과 함께 쓰나
  *
- * `transition-colors` 와 달리 focus-ring 은 코어 유틸리티와 이름이 겹치지 않으므로
- * @utility 정의가 그대로 이긴다(위 블록의 캐스케이드 패배 문제가 없다). 유틸을
- * `focus-visible:focus-ring` 처럼 **변형과 함께** 쓰는 이유는 두 가지다:
+ * `transition-colors` 와 달리 focus-ring 은 코어 유틸리티와 이름이 안 겹쳐 @utility 가
+ * 그대로 이긴다(위 블록의 캐스케이드 패배 문제가 없다). `focus-visible:focus-ring`
+ * 처럼 **변형과 함께** 쓰는 이유는 두 가지다:
  *   - 세 변형(`focus-visible:` · `focus-within:` · `peer-focus-visible:`)이 모두
  *     코드에 있고, 유틸이 스스로 `:focus-visible` 을 품으면 peer 케이스를 못 담는다.
  *   - 클래스 목록에 `focus-visible:` 문자열이 남아 프리플라이트 `naked_focus` 가
  *     `outline-none` 라인(dropdown-menu 항목)에서 그대로 참이 된다.
+ * focus-ring-on-fill 은 변수만 세우므로 변형 없이(bare) 채워진 컨트롤에 붙인다.
  * ========================================================================== */
 @utility focus-ring {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--focus-ring-ink, var(--accent));
   outline-offset: -2px;
+}
+@utility focus-ring-on-fill {
+  --focus-ring-ink: var(--on-accent);
 }
 
 /* Two-pane shell geometry as a named utility, so no component needs an
