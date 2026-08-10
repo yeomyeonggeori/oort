@@ -4,11 +4,16 @@ openapi: 3.0.3
 # oort REST API — web v0 + plugin surface (MOMO-389/MOMO-459)
 #
 # This file is the canonical client contract for the web v0 surface. Clients
-# (clients/web-legacy via openapi-typescript, and MomoCore as a conformance target)
-# follow this spec; the spec itself is kept field-level identical to the
-# server DTOs in server/Sources/MomoServer/Routes/DTOs.swift and the Routes/*
-# handlers. Drift between this spec and the running server is detected by
-# scripts/verify_openapi_contract.sh (docs/LOCAL_PR_GATE.md).
+# (clients/web-legacy via openapi-typescript, and packages/momo-core as a
+# conformance target) follow this spec. The live server is server-rust
+# (bins/momo-server, ADR-0145); drift between this spec and the running server
+# is detected by scripts/verify_openapi_contract.sh (docs/LOCAL_PR_GATE.md).
+#
+# Provenance note: this spec was written field-level identical to the retired
+# Swift DTOs (server/Sources/MomoServer/Routes/DTOs.swift). That tree is being
+# deleted, and the Swift-derived encoding rules below are recorded as the wire
+# contract that server-rust must keep reproducing, not as a description of the
+# code that serves it today.
 #
 # Scope: web v0 (ADR-0119 D5-A) plus admin agent creation, the plugin
 # registry/grant, incoming webhook, hosted Drive MCP, and interactive Work

@@ -1,8 +1,9 @@
 <!--
 momo PR 템플릿 — AGENTS.md §7 정본. 한 PR = 한 이슈 = 한 goal.
-머지 전 `make build`(swift build) green 필수. main 직접 push 금지(브랜치 보호 가정).
-검증 등급: [swift]=swift build green · [infra]/[sql]=파일 존재+정본 정합 · [python]=py_compile ·
-[xcode]=xcodebuild 산출 · [ci]=워크플로우 syntax/lint · [runtime]=docker/psql 필요(미가용 시 runtime-unverified) · [manual]=사람 1회.
+머지 전 `make build`(cargo build + TS typecheck) green 필수. main 직접 push 금지(브랜치 보호 가정).
+검증 등급: [rust]=fmt/clippy/cargo test green · [web]/[mobile]=트리 게이트 + verify_merge_tree.sh green ·
+[infra]/[sql]=파일 존재+정본 정합 · [python]=py_compile · [xcode]=xcodebuild 산출 ·
+[ci]=워크플로우 syntax/lint · [runtime]=docker/psql 필요(미가용 시 runtime-unverified) · [manual]=사람 1회.
 -->
 
 Closes #<issue>
@@ -14,11 +15,11 @@ Closes #<issue>
 - Issue: #<issue>
 - Branch: `<type>/<issue>-<slug>`
 - Worktree: `<local path>`
-- Worker lane: `<runtime/backend|macOS UX|docs/spec/protocol|infra/devtooling>`
+- Worker lane: `<runtime/backend|web·desktop·mobile UX|docs/spec/protocol|infra/devtooling>`
 
-## 검증 (등급: [swift]/[infra]/[sql]/[python]/[xcode]/[ci]/[runtime]/[manual])
-- [ ] Local gate: `scripts/local_gate.sh --profile <docs|swift|runtime-db|runtime-agent|macos-ui>` PASS, or scope-specific manual runtime evidence attached
-- [ ] [swift] `swift build` green: <패키지>
+## 검증 (등급: [rust]/[web]/[mobile]/[infra]/[sql]/[python]/[xcode]/[ci]/[runtime]/[manual])
+- [ ] Local gate: `scripts/local_gate.sh --profile <docs|web|runtime-db|runtime-agent|license|secrets>` PASS, or scope-specific manual runtime evidence attached
+- [ ] [rust]/[web]/[mobile] 해당 트리 게이트 green: <패키지>
 - [ ] 선행 패키지 빌드 안 깨짐 (`make build`)
 - [ ] [sql] schema_v0.sql 정합 (정본 미수정 — 확장은 server/Migrations/NNN_*.sql 신규 + RLS DO-block ARRAY 등록)
 - [ ] runtime 미검증 부분 정직 표기 (no docker/psql) — `runtime-unverified`
@@ -37,7 +38,7 @@ Closes #<issue>
 - <!-- 수용기준·ADR·핸드오프 패킷과 다르게 구현한 모든 지점 + 이유. 없으면 "없음". momo-main이 docs/planning/DEVIATION_LOG.md로 환류한다. -->
 
 ## 🔒 게이트 / 배포 불변식 (해당 시)
-- [ ] 이 PR은 `release-ios.yml`/`release-macos.yml`을 **트리거하지 않는다** (M7 게이트 PASS + docs/cicd/03 PASS 블록 기록 전까지 release 금지)
+- [ ] 이 PR은 `release-desktop.yml`을 **트리거하지 않는다** (M7 게이트 PASS + docs/cicd/03 PASS 블록 기록 전까지 release 금지)
 - [ ] (M4/M5 스토어 관련이면) 검수 게이트(M7) 선행 의존 표기
 
 ## 남은 것 / 후속 이슈 제안
