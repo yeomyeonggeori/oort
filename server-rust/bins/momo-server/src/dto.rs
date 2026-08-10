@@ -1111,6 +1111,75 @@ pub struct AgentRunResponse {
     pub updated_at_ms: i64,
 }
 
+/// Swift `AgentRunPageDTO` (:1266) — the channel work-run list's envelope.
+///
+/// An object with one array rather than a bare array, because a bare array has
+/// nowhere to grow a cursor: this list is `limit`-bounded and unpaged today, and
+/// the day it needs a `nextCursor` the wire must not change shape under clients
+/// that already parse it.
+#[derive(Debug, Serialize)]
+pub struct AgentRunPageResponse {
+    pub runs: Vec<AgentRunResponse>,
+}
+
+/// `?type=&limit=` on the channel run list (Swift `list`, :259-263).
+#[derive(Debug, Deserialize)]
+pub struct AgentRunListQuery {
+    /// Present and not `work` is a 400. Absent means `work`, because the channel
+    /// list has only ever meant the work surface's history.
+    #[serde(default, rename = "type")]
+    pub run_type: Option<String>,
+    #[serde(default)]
+    pub limit: Option<String>,
+}
+
+/// `?cursor=&limit=` on one agent's workspace-global history (MOMO-653).
+#[derive(Debug, Deserialize)]
+pub struct AgentRunHistoryQuery {
+    #[serde(default)]
+    pub cursor: Option<String>,
+    #[serde(default)]
+    pub limit: Option<String>,
+}
+
+/// openapi `AgentRunSummary` — the bounded projection an agent hub reads.
+///
+/// **Every absent field is a deliberate omission**, not an oversight: no
+/// `input`, no `output`, no `error`, no `workspaceId`, no step counters. The
+/// spec pins the object with `additionalProperties: false`, so adding a field
+/// here without adding it there is a contract break the openapi gate reports
+/// rather than a harmless extra.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRunSummaryDto {
+    pub id: String,
+    pub channel_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trigger_message_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trigger_summary: Option<String>,
+    pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub started_at_ms: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub finished_at_ms: Option<i64>,
+    pub created_at_ms: i64,
+    pub updated_at_ms: i64,
+}
+
+/// openapi `AgentRunSummaryPage` (Swift `AgentRunSummaryPageDTO`).
+///
+/// `nextCursor` is omitted rather than serialized as `null` when the page is the
+/// last one: the client reads its presence as "there is more", and `null` would
+/// make "no more" and "the server forgot to say" the same wire value.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRunSummaryPageResponse {
+    pub runs: Vec<AgentRunSummaryDto>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<String>,
+}
+
 /// Swift `AgentRunCancelResponse` (`AgentRunRoutes.swift:1316-1321`).
 ///
 /// Four fields and every one of them load-bearing, which is why none is

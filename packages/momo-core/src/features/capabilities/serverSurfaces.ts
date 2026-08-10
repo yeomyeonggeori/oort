@@ -35,8 +35,10 @@ import { buildMode } from "../../runtime/host";
 //
 // 2026-08-02, `server-rust/bins/momo-server/src/lib.rs`의 등록된 라우트 55개를
 // 클라이언트가 부르는 모든 `/v1/` 경로와 **메서드까지 맞춰** 대조했다. 경로만
-// 비교하면 아래 `agentRunHistory`를 놓친다: 그 경로는 POST로 등록돼 있어서 GET은
-// 404가 아니라 **405**로 돌아온다.
+// 비교하면 그때의 `agentRunHistory`를 놓쳤다: 그 경로는 POST로만 등록돼 있어서
+// GET은 404가 아니라 **405**로 돌아왔다(#1223이 GET을 같은 `.route()`에 얹어
+// 그 405를 없앴다). 메서드까지 맞춰 대조하는 규율은 그래서 남는다 — 다음에
+// 어떤 표면이 같은 모양으로 반쪽만 서 있어도 이 표가 그것을 본다.
 // =============================================================================
 
 import { ApiError } from "../../lib/api";
@@ -50,8 +52,10 @@ import { ApiError } from "../../lib/api";
  * 하게 된다: 잠깐 아픈 서버를 영영 없는 기능으로 만든다.
  *
  * 405가 들어 있는 이유는 취향이 아니라 실측이다. `GET …/channels/{ch}/agent-runs`
- * 는 경로가 POST 전용으로 등록돼 있어 405로 돌아온다. 404만 보는 판정은 그 표면을
- * 장애로 그린다.
+ * 는 경로가 POST 전용으로 등록돼 있어 405로 돌아왔다. 404만 보는 판정은 그 표면을
+ * 장애로 그렸다. #1223이 그 GET을 올려 이 예시 자체는 과거가 됐지만 405는 남는다:
+ * 반쪽만 선 경로는 이 서버에서 실제로 일어나는 일이고, 그날 405를 빼면 판정은 또
+ * 같은 자리에서 "고장"이라고 말한다.
  */
 export const ABSENT_STATUSES: readonly number[] = [404, 405, 501];
 
@@ -157,21 +161,27 @@ const SURFACES: Record<SurfaceId, ServerSurface> = {
   agentRunHistory: {
     id: "agentRunHistory",
     label: "에이전트 작업 기록",
-    provided: false,
-    // 없는 것은 **읽는 경로뿐이다**. 기록 자체는 지금도 쌓인다:
-    // `POST …/channels/{ch}/agent-runs`가 `agent_run` 행을 쓰고(agent_runs.rs의
-    // `create_agent_run_in_tx`), 게이트웨이의 events/complete가 그 행을 이어서
-    // 갱신한다. 그러니 "기록을 남기지 않습니다"는 틀린 문장이었다. 저장되고
-    // 있는 것을 저장 안 된다고 말하는 것은 이 배치가 없애려던 오류를 반대
-    // 방향으로 저지르는 일이다. 사람에게 참인 문장은 "아직 볼 수 없다"이다.
+    // 2026-08-10, 이 표에서 뒤집힌 두 번째 줄이다(#1223). 앞 값(false)은
+    // 2026-08-02에 참이었다: 없던 것은 **읽는 경로뿐**이었고, 기록 자체는 그때도
+    // 쌓이고 있었다(`POST …/channels/{ch}/agent-runs`가 `agent_run` 행을 쓰고
+    // 게이트웨이의 events/complete가 그 행을 이어서 갱신한다). 그래서 그때 참인
+    // 문장은 "기록을 남기지 않습니다"가 아니라 "아직 볼 수 없다"였고, 지금은
+    // 그것도 아니다 — 읽는 경로 셋이 다 섰다.
+    provided: true,
+    // 승인 줄과 같은 이유로 문구는 지우지 않는다: 이 칸은 **이 코드베이스의
+    // 서버가 그 경로를 싣고 있는가**를 말하지, 지금 이야기하는 서버가 그것을
+    // 답하는가를 말하지 않는다. 아직 배포되지 않은 서버에 붙으면 405/404가 오고,
+    // 그때 이 문구를 쓰는 것은 정적 판정이 아니라 `serverSaysAbsent` 폴딩이다.
     absentReason: "이 서버는 에이전트가 한 일의 기록을 아직 보여주지 못합니다.",
     fallback:
       "기록은 쌓이고 있습니다. 지금 확인할 수 있는 것은 에이전트가 채널에 남긴 메시지입니다.",
     measured:
-      "쓰기는 있다: POST …/channels/{ch}/agent-runs(agent_run 행 생성), " +
-      "게이트웨이 events/complete. 없는 것은 읽기다: " +
-      "GET …/channels/{ch}/agent-runs는 경로가 POST 전용이라 405, " +
-      "GET …/agents/{id}/runs와 GET …/agent-runs/{id}는 라우터에 없음(404).",
+      "2026-08-10 실측(#1223): server-rust/bins/momo-server/src/lib.rs에 읽기 셋이 등록됨. " +
+      "GET …/channels/{ch}/agent-runs(routes::agent_runs::list. POST와 같은 .route()에 " +
+      "얹혀 405가 사라졌다), GET …/agents/{id}/runs(list_by_agent), " +
+      "GET …/agent-runs/{id}(detail). 직전 줄은 '쓰기는 있고 읽기 셋이 405/404'였다. " +
+      "이 세 경로가 실제로 서 있는지는 clients/web 의 agentRunHistoryRoutes.test.ts 가 " +
+      "라우터 소스를 읽어 못으로 박는다.",
   },
   plugins: {
     id: "plugins",

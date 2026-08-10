@@ -339,7 +339,12 @@ export default function AgentDetailScreen({
             headline="이 에이전트가 연 작업 세션이 없습니다."
             // 문구 정본은 코어 하나다. 화면이 직접 조립하면 같은 문장의
             // 정본이 둘이 되고, 라우트가 이식되는 날 한쪽만 바뀐다 (R1 Low-3).
-            detail={noSessionsDetail(runHistoryProvided)}
+            //
+            // #1223: 그 「라우트가 이식되는 날」이 왔고, 이 자리에서 드러난 것이
+            // 하나 있다 — 코어의 provided=true 문장은 위 headline 과 **같은
+            // 문장**이라, 그대로 넘기면 한 화면이 같은 말을 두 번 한다. 덧붙일
+            // 말이 없을 때는 덧붙이지 않는다. 문구 정본은 여전히 코어다.
+            detail={runHistoryProvided ? undefined : noSessionsDetail(false)}
             testID="agent-work-empty"
           />
         ) : (

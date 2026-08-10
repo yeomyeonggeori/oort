@@ -743,13 +743,27 @@ describe('what the agent is doing, and whether you can turn things off', () => {
     expect(screen.getByText('터미널 화면은 데스크톱 앱에서 엽니다.')).toBeTruthy();
   });
 
-  it('will not call an empty ledger silence while the run history is unreadable', async () => {
+  it('calls an empty ledger empty now that the run history is readable', async () => {
+    // 이 테스트는 #1223 이전에 정확히 반대를 쟀다: 그때는 읽는 경로가 없어서
+    // (POST 전용 경로라 GET 은 405) 빈 목록을 "조용하다"로 부르면 거짓말이었고,
+    // 화면은 못 본다는 사실을 먼저 말해야 했다. 이제 경로가 섰으므로 빈 목록은
+    // 정말로 비어 있다는 뜻이고, 그 자리에 못 본다는 말이 남아 있으면 그것이
+    // 새 거짓말이 된다.
+    //
+    // 두 문장의 정본은 여전히 코어 하나이고(`noSessionsDetail`), 양쪽 가지는
+    // packages/momo-core 의 agentOps.test.ts 가 계속 못으로 박는다 — 표가
+    // 되돌아가는 날(또는 더 오래된 서버에 붙는 날) 쓸 문장이라 지우지 않는다.
     installFetch({workSessions: () => jsonResponse(200, {workSessions: []})});
     await openAgentsTab();
     fireEvent.press(screen.getByTestId(`agent-row-${KIM_AGENT}`));
     await waitFor(() => expect(screen.getByTestId('agent-work-empty')).toBeTruthy());
-    expect(screen.getByTestId('agent-work-empty')).toHaveTextContent(
-      /기록을 아직 보여주지 못합니다/,
+    const empty = screen.getByTestId('agent-work-empty');
+    expect(empty).toHaveTextContent(/이 에이전트가 연 작업 세션이 없습니다\./);
+    expect(empty).not.toHaveTextContent(/기록을 아직 보여주지 못합니다/);
+    // 덧붙일 말이 없으면 덧붙이지 않는다: 코어의 provided=true 문장은 headline 과
+    // 같은 문장이라, 그대로 넘기면 한 화면이 같은 말을 두 번 한다.
+    expect(screen.queryAllByText('이 에이전트가 연 작업 세션이 없습니다.')).toHaveLength(
+      1,
     );
   });
 });

@@ -495,15 +495,18 @@ export function runningSessionMeta(count: number): string {
  * The line under an agent that owns no sessions.
  *
  * It has to say two different things, because two different facts produce the
- * same empty list and only one of them is about this agent. This server does not
- * serve the run history at all, so "아무것도 안 하고 있습니다" would be a claim
- * built out of a route that does not exist.
+ * same empty list and only one of them is about this agent. Where the run
+ * history cannot be read, "아무것도 안 하고 있습니다" would be a claim built out
+ * of a route that does not answer.
  *
- * The absent-surface words come from `serverSurfaces` rather than being written
- * again here: that table is where a batch that ports the route goes to flip one
- * line, and a second copy of the sentence would survive the flip. The caller
- * passes the verdict (`isSurfaceProvided("agentRunHistory")`) so this stays a
- * pure function of it.
+ * **The false branch did not stop being reachable when #1223 ported the reads.**
+ * The table's verdict is about *this repository's* server; the instance a client
+ * is actually talking to may be older, and `serverSaysAbsent` folds that case
+ * back onto exactly this sentence. So the branch stays, and it stays borrowing
+ * its words from `serverSurfaces` rather than writing them again — that table is
+ * where a batch that ports a route goes to flip one line, and a second copy of
+ * the sentence would survive the flip. The caller passes the verdict
+ * (`isSurfaceProvided("agentRunHistory")`) so this stays a pure function of it.
  */
 export function noSessionsDetail(runHistoryProvided: boolean): string {
   if (runHistoryProvided) return "이 에이전트가 연 작업 세션이 없습니다.";
