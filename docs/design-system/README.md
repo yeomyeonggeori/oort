@@ -48,7 +48,7 @@
 | **웹** | `clients/web` | Dawn 팔레트의 정본이 여기 산다 |
 | **폰** | `clients/mobile` (bare React Native) | 웹을 **번역**한다. 구현은 공유하지 않는다 |
 | ~~데스크톱(Tauri)~~ | `clients/desktop` | **디자인 표면이 아니다** — `frontendDist`가 `../../web/dist`이고, `clients/web/src` 전수에 런타임을 보고 **스타일을 가르는** 분기가 0건이다(§주1) |
-| ~~macOS(SwiftUI)~~ | `clients/macOS` | v0 데모. 검수 표면 아님. 삭제 배치 대기(ADR-0159 D4) |
+| ~~macOS(SwiftUI)~~ | ~~`clients/macOS`~~ | **삭제 완료**(2026-08-10, PR #1253 — W-S1). 역사 기록으로만 남김 |
 
 > **주1 — "스타일 분기 0건"이 "빌드 두 개가 똑같다"는 뜻은 아니다.** 런타임 분기는 있고, 그것은 *무엇을 보여줄지*를 가른다: `app/RuntimeBadge.tsx:26`이 배지 글자를 `desktop`/`web`으로 나누고, `features/settings/SettingsRoute.tsx:78·104`가 「업데이트」 섹션을 데스크톱에서만 렌더한다. 없는 것은 **토큰·레이아웃을 런타임에 따라 다르게 고르는 코드**이고, 디자인 시스템이 걱정하는 것은 그쪽이다. 그래서 표면은 여전히 둘이다.
 
@@ -65,7 +65,7 @@
 | 1 | `clients/web/src/design/tokens.css` | 색 · 간격(리듬 + 이름 축) · 반경 · 텍스트 롤 · 셸 기하 · 터치 타깃 | **아무도 안 따름 = 정본** |
 | 2 | `clients/mobile/src/design/tokens.ts` | 색(×2스킴) · space · radius · font · line · TOUCH_TARGET | ①을 번역 |
 | 3 | `packages/momo-core/src/features/timeline/divider.ts` | `ROW_SPACE` — 타임라인 행 간 거리 | 없음(이 축의 정본). 웹·폰이 각자 소비 |
-| 4 | `clients/macOS/Sources/MomoMac/Theme.swift` | v0 데모의 색·치수 | 아무것도 안 따름. **동결 — 새 작업의 참조 대상이 아니다** |
+| 4 | ~~`clients/macOS/Sources/MomoMac/Theme.swift`~~ | (삭제됨 — PR #1253) | 정본 토큰 파일은 위 1~3의 셋뿐이다 |
 
 ### 2.2 색 — 유일하게 완전히 흐르는 축
 
