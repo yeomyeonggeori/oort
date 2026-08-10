@@ -1353,6 +1353,7 @@ dependencies = [
  "momo-push",
  "momo-settings",
  "momo-t3",
+ "momo-webhook",
  "momo-wire",
  "reqwest",
  "serde",
@@ -1398,6 +1399,46 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "momo-webhook"
+version = "0.0.0"
+dependencies = [
+ "base64",
+ "chrono",
+ "getrandom 0.2.17",
+ "hex",
+ "hmac",
+ "momo-db",
+ "serde",
+ "serde_json",
+ "sha2",
+ "sqlx",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "momo-webhook-sender"
+version = "0.0.0"
+dependencies = [
+ "axum",
+ "chrono",
+ "momo-db",
+ "momo-outbox",
+ "momo-server",
+ "momo-webhook",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
  "uuid",
 ]
 

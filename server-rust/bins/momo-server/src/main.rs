@@ -159,6 +159,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // No deployment did before this batch, so an un-updated env block keeps the
     // surface closed rather than half-open.
     .with_ephemeral(config.ephemeral.clone())
+    // #1222: the webhook families. Unlike the builders above this one closes
+    // nothing when unset — `OUTBOUND_WEBHOOK_MASTER_KEY` falls back to JWT_HMAC
+    // exactly as Swift's `Config` does, because the outbound signing secret is
+    // *derived*: a different key would silently stop every already-installed
+    // subscriber's signature from verifying, with no row anywhere recording it.
+    .with_webhook(config.webhook.clone())
     // ADR-0151: the attachment surface answers 503 unless the operator named a
     // service-account key and a shared drive. The routes are mounted either way,
     // so "no archive here" is distinguishable from "no such route".

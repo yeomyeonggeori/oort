@@ -31,11 +31,19 @@
 //! `WHERE` clause is disjoint from all three by `kind`, so the fourth consumer
 //! keeps its own feed too.
 
+//! #1222 adds [`webhook`], the `webhook_delivery` half (migration 033): the
+//! outbound sender's claim and the transaction-scoped settlement it shares with
+//! the subscription's failure ledger. Its `WHERE` clause is disjoint from all
+//! four by `kind`, so the fifth consumer keeps its own feed too — and it is a
+//! **separate binary** rather than the relay, because the relay's single HTTP
+//! destination is what makes invariant #2 checkable.
+
 pub mod agent_job;
 pub mod emit;
 pub mod gateway;
 pub mod push;
 pub mod relay;
+pub mod webhook;
 
 pub use agent_job::{
     claim_agent_job_batch, retire_pending_agent_jobs_for_run_in_tx, ClaimedAgentJob,
@@ -53,4 +61,7 @@ pub use push::{claim_push_candidate_batch, reclaim_stuck_push_candidates, Claime
 pub use relay::{
     backoff_seconds, claim_batch, claim_broadcast_batch, mark_done, mark_failed, requeue,
     ClaimedRow, NOTIFY_CHANNEL,
+};
+pub use webhook::{
+    claim_webhook_delivery_batch, mark_done_in_tx, mark_failed_in_tx, requeue_in_tx,
 };
