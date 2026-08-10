@@ -28,7 +28,7 @@ export function UpdateBadge() {
       to="/settings?section=updates"
       data-testid="update-badge"
       data-update-state={state.kind}
-      className="flex items-center gap-2 border-t border-line px-2 py-2 text-meta text-ink hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+      className="flex items-center gap-2 border-t border-line px-2 py-2 text-meta text-ink hover:bg-surface-hover focus-visible:focus-ring"
     >
       <ArrowDownToLine className="size-4 shrink-0 text-accent" aria-hidden="true" />
       <span className="min-w-0 flex-1 truncate">{label}</span>

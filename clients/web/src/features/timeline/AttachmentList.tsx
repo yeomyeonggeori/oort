@@ -114,7 +114,7 @@ function DownloadButton({
       title={busy ? ATTACH_COPY.downloading : ATTACH_COPY.download}
       data-testid="attachment-download"
       data-busy={busy ? "" : undefined}
-      className="touch-target flex size-control shrink-0 items-center justify-center rounded-sm text-ink-muted hover:bg-surface-hover hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+      className="touch-target flex size-control shrink-0 items-center justify-center rounded-sm text-ink-muted hover:bg-surface-hover hover:text-ink focus-visible:focus-ring"
     >
       {busy ? (
         <Loader2 aria-hidden="true" className="size-4 spinner-busy" />

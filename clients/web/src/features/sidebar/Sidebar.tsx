@@ -333,7 +333,7 @@ export function Sidebar({
             aria-label="채널 목록 닫기"
             title="채널 목록 닫기"
             data-testid="close-sidebar-drawer"
-            className="mobile-only tap-target flex size-control shrink-0 items-center justify-center rounded-sm text-ink-muted transition-colors hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+            className="mobile-only tap-target flex size-control shrink-0 items-center justify-center rounded-sm text-ink-muted transition-colors hover:bg-surface-hover focus-visible:focus-ring"
           >
             <X className="size-4" aria-hidden="true" />
           </button>
@@ -427,7 +427,7 @@ export function Sidebar({
                     aria-label="새 채널 만들기"
                     title="새 채널 만들기"
                     data-testid="new-channel"
-                    className="tap-target flex size-control-sm items-center justify-center rounded-sm text-ink-muted transition-colors hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+                    className="tap-target flex size-control-sm items-center justify-center rounded-sm text-ink-muted transition-colors hover:bg-surface-hover focus-visible:focus-ring"
                   >
                     <Plus className="size-4" />
                   </button>
@@ -489,7 +489,7 @@ export function Sidebar({
                     aria-label="새 다이렉트 메시지 시작"
                     title="새 다이렉트 메시지 (⌘⇧K)"
                     data-testid="new-dm"
-                    className="tap-target flex size-control-sm items-center justify-center rounded-sm text-ink-muted transition-colors hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+                    className="tap-target flex size-control-sm items-center justify-center rounded-sm text-ink-muted transition-colors hover:bg-surface-hover focus-visible:focus-ring"
                   >
                     <SquarePen className="size-4" />
                   </Link>
@@ -562,7 +562,7 @@ export function Sidebar({
             aria-label="설정 열기"
             title="설정 (⌘,)"
             data-testid="nav-settings"
-            className="tap-target flex size-control-sm items-center justify-center rounded-sm text-ink-muted transition-colors hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+            className="tap-target flex size-control-sm items-center justify-center rounded-sm text-ink-muted transition-colors hover:bg-surface-hover focus-visible:focus-ring"
           >
             <Settings className="size-4" />
           </Link>

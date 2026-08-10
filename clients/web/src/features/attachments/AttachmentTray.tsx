@@ -54,17 +54,6 @@ const PROGRESS_ROW_CLASS = "block h-marker w-full";
 /** 줄 상자를 만드는 공백 한 칸. 빈 <p> 는 높이가 0 이라 예약이 되지 않는다. */
 const NBSP = "\u00a0";
 
-/**
- * 트레이 안쪽 컨트롤의 포커스 링.
- *
- * 집이 쓰는 값은 `outline-offset-2` 인데 여기서는 보이지 않는다: 칩 목록이
- * `overflow-y-auto` 스크롤 컨테이너라(B-2) 자식의 border box **바깥** 2px 에
- * 그려진 링이 위아래 가장자리에서 잘린다. 같은 2px 를 안쪽에 그리면 컨테이너가
- * 자를 수 없는 영역에 들어간다 — `ArtifactCard` 가 같은 이유로 같은 값을 쓴다.
- */
-const INSET_FOCUS_RING =
-  "focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent";
-
 function DraftChip({
   draft,
   onRemove,
@@ -156,7 +145,7 @@ function DraftChip({
           // 위험 톤이 아니다 (design-review H-4). 빨강은 「이것이 잘못됐다」의
           // 언어고 이 컨트롤은 「여기로 나가라」다. 앞 판은 이 표면에서 유일하게
           // 누를 수 있는 것에 위험색을 입히고 hover 에서 중성색으로 물러났다.
-          className={cn("shrink-0", INSET_FOCUS_RING)}
+          className={cn("shrink-0", "focus-visible:focus-ring")}
         >
           {ATTACH_COPY.retry}
         </Button>
@@ -169,7 +158,7 @@ function DraftChip({
         data-testid="attachment-chip-remove"
         className={cn(
           "touch-target flex size-control-sm shrink-0 items-center justify-center rounded-sm text-ink-muted hover:bg-surface-hover hover:text-ink",
-          INSET_FOCUS_RING
+          "focus-visible:focus-ring"
         )}
       >
         <X aria-hidden="true" className="size-4" />
@@ -308,7 +297,7 @@ export function AttachmentTray({
             data-testid="attachment-clear"
             className={cn(
               "touch-target rounded-sm text-meta text-ink-muted underline underline-offset-2 hover:text-ink",
-              INSET_FOCUS_RING
+              "focus-visible:focus-ring"
             )}
           >
             {ATTACH_COPY.clearAll}
@@ -354,7 +343,7 @@ export function AttachmentTray({
             onClick={onAcknowledgeNotices}
             className={cn(
               "touch-target rounded-sm underline underline-offset-2 hover:text-ink",
-              INSET_FOCUS_RING
+              "focus-visible:focus-ring"
             )}
           >
             확인

@@ -79,7 +79,7 @@ export const DropdownMenuItem = React.forwardRef<
       // background is the menu's own language and the browser's default ring is
       // suppressed below. The house focus ring is restored on the same class
       // list (§6): it is what tells a Tab user which row Enter will fire.
-      "flex cursor-default select-none gap-2 rounded-sm px-2 text-body outline-none focus:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+      "flex cursor-default select-none gap-2 rounded-sm px-2 text-body outline-none focus:bg-surface-hover focus-visible:focus-ring data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
       layout === "stack"
         ? // `gap-2` between two lines of ONE item would read as a paragraph
           // break, so a stacked item sets its own vertical rhythm.

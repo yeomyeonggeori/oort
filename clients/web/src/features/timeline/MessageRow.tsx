@@ -468,7 +468,7 @@ export function MessageRow({
         // 정거장에는 보이는 링이 있어야 하고, 링은 **안쪽**에 그린다 — 행은
         // 스크롤 컨테이너 안에 있어서 바깥으로 2px 나간 링은 잘린다
         // (ArtifactCard가 diff 본문 안에서 같은 이유로 같은 선택을 한다).
-        "focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent",
+        "focus-visible:focus-ring",
         actionable && "no-touch-callout",
         // 행 사이 간격은 코어가 정한다 (H-7 · `ROW_SPACE`). 진단이 실측한 값은 연속
         // 행 8px이고, 거기서 한 사람이 연달아 쓴 다섯 발화가 한 문단으로 뭉쳤다.
@@ -703,7 +703,7 @@ export function MessageRow({
                   onClick={() => onOpenThread(message)}
                   data-testid="thread-anchor"
                   data-row-action=""
-                  className="rounded-sm hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+                  className="rounded-sm hover:text-ink focus-visible:focus-ring"
                 >
                   {rollupLabel(rollup)}
                 </button>
@@ -752,7 +752,7 @@ export function MessageRow({
                     setResending(false)
                   );
                 }}
-                className="rounded-sm underline underline-offset-2 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:opacity-50"
+                className="rounded-sm underline underline-offset-2 hover:text-ink focus-visible:focus-ring disabled:opacity-50"
               >
                 {resending ? "보내는 중…" : "다시 보내기"}
               </button>

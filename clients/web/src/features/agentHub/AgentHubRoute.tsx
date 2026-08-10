@@ -201,7 +201,7 @@ function AgentListRow({
         onClick={onSelect}
         aria-current={selected ? "page" : undefined}
         className={cn(
-          "flex w-full items-start gap-3 px-4 py-3 text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
+          "flex w-full items-start gap-3 px-4 py-3 text-left focus-visible:focus-ring",
           selected ? "bg-accent-soft" : "hover:bg-surface-hover"
         )}
         data-testid="agent-hub-agent-row"
@@ -446,7 +446,7 @@ export function AgentHubRoute() {
                             onClick={() => setSection(item.id)}
                             aria-current={section === item.id ? "page" : undefined}
                             className={cn(
-                              "rounded-sm px-3 py-1 text-body focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
+                              "rounded-sm px-3 py-1 text-body focus-visible:focus-ring",
                               section === item.id
                                 ? "bg-accent-soft text-ink"
                                 : "text-ink-muted hover:bg-surface-hover"
@@ -798,7 +798,7 @@ function AgentProfileSection({
             rows={7}
             disabled={offline || !editable}
             className={cn(
-              "w-full resize-y rounded-sm border border-line-strong bg-transparent px-3 py-2 text-body text-ink placeholder:text-ink-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
+              "w-full resize-y rounded-sm border border-line-strong bg-transparent px-3 py-2 text-body text-ink placeholder:text-ink-muted focus-visible:focus-ring",
               // Offline dims the SURFACE, not the text. The house rule for a
               // disabled control is opacity-50, but here that also greys the
               // cached instructions the offline banner promises you can still
@@ -951,7 +951,7 @@ function CurrentWorkValue({
       // 이 컨트롤의 이름은 이 컨트롤이 하는 일이다.
       aria-label={`${agentName} 에이전트의 진행 과정 열기`}
       data-testid="agent-hub-work-open"
-      className="flex items-center gap-1 rounded-sm text-left hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+      className="flex items-center gap-1 rounded-sm text-left hover:bg-surface-hover focus-visible:focus-ring"
     >
       {badge}
       <span className="text-timestamp text-ink-muted">진행 과정 보기</span>
@@ -1570,7 +1570,7 @@ function HistoryRow({
       <button
         type="button"
         onClick={(event) => onOpen(event.currentTarget)}
-        className="flex w-full items-start justify-between gap-3 px-4 py-3 text-left hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+        className="flex w-full items-start justify-between gap-3 px-4 py-3 text-left hover:bg-surface-hover focus-visible:focus-ring"
         data-testid="agent-history-row"
         data-run-id={run.id}
       >

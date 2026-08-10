@@ -153,7 +153,7 @@ function AdeCard({
         className={cn(
           "flex min-w-0 flex-1 flex-col gap-1 px-4 py-3 text-left",
           "transition-colors hover:bg-surface-hover",
-          "focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent"
+          "focus-visible:focus-ring"
         )}
       >
         <span className="flex min-w-0 items-center gap-2">
@@ -308,7 +308,7 @@ function AdeCard({
             ANCHOR_CELL_CLASS,
             "border-line-strong text-ink-muted",
             "transition-colors hover:bg-surface-hover hover:text-ink",
-            "focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent"
+            "focus-visible:focus-ring"
           )}
         >
           {ANCHOR_LABEL}
@@ -447,7 +447,7 @@ export function AdeDrawer() {
           onClick={close}
           aria-label="작업 목록 닫기"
           data-testid="ade-drawer-close"
-          className="flex size-6 shrink-0 items-center justify-center rounded-sm text-ink-muted hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+          className="flex size-6 shrink-0 items-center justify-center rounded-sm text-ink-muted hover:bg-surface-hover focus-visible:focus-ring"
         >
           <X className="size-4" />
         </button>

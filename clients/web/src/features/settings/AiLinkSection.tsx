@@ -620,7 +620,7 @@ export function AiLinkSection({ offline }: { offline: boolean }) {
                 <div
                   ref={previewRef}
                   tabIndex={-1}
-                  className="flex flex-col gap-2 rounded-md border border-line bg-surface-raised p-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+                  className="flex flex-col gap-2 rounded-md border border-line bg-surface-raised p-4 focus-visible:focus-ring"
                   data-testid="ai-link-oauth-preview"
                 >
                   {/* The box vanishing is the only signal a sighted user gets.
@@ -666,7 +666,7 @@ export function AiLinkSection({ offline }: { offline: boolean }) {
                     spellCheck={false}
                     onChange={(e) => readPaste(e.target.value)}
                     data-testid="ai-link-oauth-paste"
-                    className="w-full resize-y rounded-sm border border-line-strong bg-transparent px-3 py-2 font-mono text-body text-ink placeholder:text-ink-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-50"
+                    className="w-full resize-y rounded-sm border border-line-strong bg-transparent px-3 py-2 font-mono text-body text-ink placeholder:text-ink-muted focus-visible:focus-ring disabled:cursor-not-allowed disabled:opacity-50"
                   />
                 </Field>
               )}

@@ -140,7 +140,7 @@ export function ChannelHeaderMenu({
             className={cn(
               "group flex min-w-0 items-center gap-1 rounded-sm px-1 transition-colors",
               "hover:bg-surface-hover data-[state=open]:bg-surface-hover",
-              "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+              "focus-visible:focus-ring"
             )}
           >
             <span className="min-w-0 truncate text-body font-semibold text-ink">

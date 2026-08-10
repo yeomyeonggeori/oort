@@ -107,7 +107,7 @@ export function MemberRow({
       className={cn(
         "h-control-sm shrink-0 rounded-sm border border-line px-2 text-meta text-ink-muted",
         "transition-colors hover:bg-surface-hover hover:text-ink",
-        "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+        "focus-visible:focus-ring"
       )}
     >
       라우팅
@@ -155,7 +155,7 @@ export function MemberRow({
           className={cn(
             "flex min-w-0 flex-1 items-center gap-3 rounded-sm text-left",
             "transition-colors hover:bg-surface-hover",
-            "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
+            "focus-visible:focus-ring",
             "disabled:cursor-default disabled:opacity-50"
           )}
         >

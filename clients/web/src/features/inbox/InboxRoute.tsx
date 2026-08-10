@@ -490,7 +490,7 @@ export function InboxRoute() {
         )}
         <Link
           to="/settings"
-          className="rounded-sm text-meta text-ink-muted underline underline-offset-2 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+          className="rounded-sm text-meta text-ink-muted underline underline-offset-2 hover:text-ink focus-visible:focus-ring"
           data-testid="inbox-notification-rules"
         >
           알림 규칙 설정

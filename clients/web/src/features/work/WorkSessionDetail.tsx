@@ -304,7 +304,7 @@ function ExcerptForm({
         disabled={pending}
         spellCheck={false}
         data-testid="work-excerpt-body"
-        className="w-full resize-y rounded-sm border border-line-strong bg-surface-raised p-2 text-meta text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+        className="w-full resize-y rounded-sm border border-line-strong bg-surface-raised p-2 text-meta text-ink focus-visible:focus-ring"
       />
       <p className="text-meta text-ink-muted">
         토큰, 비밀번호, 개인 경로가 없는지 확인하세요. 공유하면 채널 스레드
@@ -727,7 +727,7 @@ export function WorkSessionDetail({
               onClick={onBack}
               aria-label="세션 목록으로"
               data-testid="work-detail-back"
-              className="flex size-6 shrink-0 items-center justify-center rounded-sm text-ink-muted hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+              className="flex size-6 shrink-0 items-center justify-center rounded-sm text-ink-muted hover:bg-surface-hover focus-visible:focus-ring"
             >
               <ArrowLeft className="size-4" />
             </button>
@@ -783,7 +783,7 @@ export function WorkSessionDetail({
           <p className="border-b border-line text-meta text-ink-muted">
             <Link
               to={`/workstreams/${goal.id}`}
-              className="block truncate px-4 py-1 hover:bg-surface-hover hover:text-ink focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent"
+              className="block truncate px-4 py-1 hover:bg-surface-hover hover:text-ink focus-visible:focus-ring"
               data-testid="work-detail-workstream"
               data-workstream-id={goal.id}
             >
@@ -810,7 +810,7 @@ export function WorkSessionDetail({
               if (!openingThread) onOpenThread();
             }}
             aria-busy={openingThread}
-            className="block w-full truncate px-4 py-1 text-left hover:bg-surface-hover hover:text-ink focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent"
+            className="block w-full truncate px-4 py-1 text-left hover:bg-surface-hover hover:text-ink focus-visible:focus-ring"
             data-testid="work-detail-thread"
           >
             {openingThread ? "세션 스레드 여는 중" : "세션 스레드"} ·{" "}
@@ -833,7 +833,7 @@ export function WorkSessionDetail({
             are reference material you check once, and as always-open chrome
             they cost more height than the ledger they describe. */}
         <details className="border-b border-line" data-testid="work-detail-meta">
-          <summary className="cursor-pointer px-4 py-1 text-meta text-ink-muted hover:bg-surface-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent">
+          <summary className="cursor-pointer px-4 py-1 text-meta text-ink-muted hover:bg-surface-hover focus-visible:focus-ring">
             세션 정보 · {channelName}
           </summary>
           <dl className="pb-1">

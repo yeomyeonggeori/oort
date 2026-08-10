@@ -175,7 +175,7 @@ export function ThreadComposer({
                 submit();
               }
             }}
-            className="tap-target min-h-control w-full resize-none rounded-sm border border-line-strong bg-surface-raised px-3 py-2 text-body text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:opacity-50"
+            className="tap-target min-h-control w-full resize-none rounded-sm border border-line-strong bg-surface-raised px-3 py-2 text-body text-ink focus-visible:focus-ring disabled:opacity-50"
           />
           <button
             type="button"
@@ -186,7 +186,7 @@ export function ThreadComposer({
               attachBlockCopy ?? "답글 보내기"
             }
             data-testid="thread-composer-send"
-            className="tap-target flex size-control shrink-0 items-center justify-center rounded-sm bg-accent text-on-accent transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:opacity-50"
+            className="tap-target flex size-control shrink-0 items-center justify-center rounded-sm bg-accent text-on-accent transition-opacity hover:opacity-90 focus-visible:focus-ring focus-ring-on-fill disabled:opacity-50"
           >
             <SendHorizontal className="size-4" aria-hidden="true" />
           </button>

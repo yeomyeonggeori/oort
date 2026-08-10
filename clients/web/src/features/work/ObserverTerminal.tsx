@@ -991,7 +991,7 @@ export function ObserverTerminal({
             fixed height and ran away entirely against a content height: the
             box grew ~12 rows per frame, forever. So the mount carries no
             padding and no border, and the chrome lives out here. */}
-        <div className="rounded-sm border border-line bg-surface-raised p-2 focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-accent">
+        <div className="rounded-sm border border-line bg-surface-raised p-2 focus-within:focus-ring">
           <div
             // The whole point of a read-only terminal is that it can be read:
             // focus reaches it (xterm puts a textarea inside), selection and
@@ -1193,7 +1193,7 @@ function ScopeButton({
       data-testid={testId}
       data-active={active ? "" : undefined}
       className={cn(
-        "flex items-center gap-1 rounded-sm px-2 py-px text-timestamp focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent",
+        "flex items-center gap-1 rounded-sm px-2 py-px text-timestamp focus-visible:focus-ring",
         active
           ? "bg-accent-soft text-ink"
           : "text-ink-muted hover:bg-surface-hover"

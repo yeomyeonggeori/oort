@@ -20,7 +20,7 @@ export function WorkSessionIdleCard({
       disabled={onOpen === undefined}
       data-testid="work-session-idle-card"
       data-session-id={notice.sessionId}
-      className="mt-1 flex w-full max-w-pane-lg flex-col rounded-md border border-line bg-surface-raised text-left hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:opacity-50"
+      className="mt-1 flex w-full max-w-pane-lg flex-col rounded-md border border-line bg-surface-raised text-left hover:bg-surface-hover focus-visible:focus-ring disabled:opacity-50"
     >
       <span className="flex w-full items-center gap-2 border-b border-line px-3 py-2">
         <SquareTerminal aria-hidden="true" className="size-4 shrink-0 text-ink-muted" />

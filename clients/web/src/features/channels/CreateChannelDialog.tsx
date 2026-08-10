@@ -321,7 +321,7 @@ function CreateChannelPanel({
                     setDraft({ ...draft, kind: choice.id });
                     clearFailure();
                   }}
-                  className="mt-1 accent-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+                  className="mt-1 accent-accent focus-visible:focus-ring"
                 />
                 <span aria-hidden="true" className="mt-px shrink-0 text-ink-muted">
                   {choice.icon}

@@ -150,7 +150,7 @@ function RunRow({
           hover·focus 계약으로 간다. */}
       <Link
         to={workSessionPath(channelId, run.id)}
-        className="flex flex-col px-4 py-2 transition-colors hover:bg-surface-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent"
+        className="flex flex-col px-4 py-2 transition-colors hover:bg-surface-hover focus-visible:focus-ring"
         data-testid="workstream-run-link"
       >
         <span className="flex min-w-0 items-baseline gap-2">
@@ -372,7 +372,7 @@ function ContinuationBlock({
         <p
           ref={errorRef}
           tabIndex={-1}
-          className="mb-2 break-words text-meta text-danger focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+          className="mb-2 break-words text-meta text-danger focus-visible:focus-ring"
           role="alert"
           data-testid="workstream-continue-error"
         >
@@ -386,7 +386,7 @@ function ContinuationBlock({
         <p
           ref={doneRef}
           tabIndex={-1}
-          className="mb-2 break-words text-meta text-ok focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+          className="mb-2 break-words text-meta text-ok focus-visible:focus-ring"
           role="status"
           data-testid="workstream-continue-done"
         >
@@ -481,7 +481,7 @@ export function WorkstreamDetailRoute() {
   const back = (
     <Link
       to="/workstreams"
-      className="flex items-center gap-1 text-meta text-ink-muted hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+      className="flex items-center gap-1 text-meta text-ink-muted hover:text-ink focus-visible:focus-ring"
       data-testid="workstream-detail-back"
     >
       <ArrowLeft aria-hidden="true" className="size-4" />

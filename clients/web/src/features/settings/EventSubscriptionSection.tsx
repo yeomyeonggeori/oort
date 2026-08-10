@@ -575,7 +575,7 @@ function CreateForm({
                   aria-labelledby={`${id}-name`}
                   aria-describedby={`${id}-content ${id}-ids`}
                   onChange={(event) => toggleKind(kind, event.target.checked)}
-                  className="mt-1 accent-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+                  className="mt-1 accent-accent focus-visible:focus-ring"
                 />
                 {/* Two clauses, and every option gets both: what content
                     leaves, then which identifiers ride along. A partial
@@ -710,7 +710,7 @@ function OneTimeSecret({
       ref={focusRef}
       tabIndex={-1}
       role="status"
-      className="flex min-w-0 flex-col gap-3 rounded-md border border-ok bg-surface-raised p-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+      className="flex min-w-0 flex-col gap-3 rounded-md border border-ok bg-surface-raised p-4 focus-visible:focus-ring"
       data-testid="event-subscription-secret"
     >
       <p className="break-keep text-body text-ink">

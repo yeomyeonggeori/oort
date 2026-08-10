@@ -85,7 +85,7 @@ export class RenderErrorBoundary extends Component<{
         // 세로줄로 그려진다(측정됨).
         className={cn(
           "flex min-w-0 max-w-2xl flex-col items-start gap-3 self-start",
-          "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
+          "focus-visible:focus-ring",
           this.props.padded && "p-4"
         )}
         role="alert"

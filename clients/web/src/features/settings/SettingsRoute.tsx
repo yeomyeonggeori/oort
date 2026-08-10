@@ -224,7 +224,7 @@ export function SettingsRoute() {
                       onClick={() => setSection(item.id)}
                       aria-current={section === item.id ? "page" : undefined}
                       className={cn(
-                        "tap-target w-full rounded-sm px-2 py-1 text-left text-body focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
+                        "tap-target w-full rounded-sm px-2 py-1 text-left text-body focus-visible:focus-ring",
                         section === item.id
                           ? "bg-accent-soft text-ink"
                           : "hover:bg-surface-hover"

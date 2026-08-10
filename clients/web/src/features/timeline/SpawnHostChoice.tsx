@@ -148,7 +148,7 @@ export function SpawnHostChoice({
                   checked={checked}
                   disabled={!candidate.selectable}
                   onChange={() => onPick(candidate.hostId)}
-                  className="accent-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:cursor-not-allowed"
+                  className="accent-accent focus-visible:focus-ring disabled:cursor-not-allowed"
                   data-testid={`${testIdPrefix}-host-radio-${candidate.hostId}`}
                 />
                 {/* 한 줄이다. tier를 자기 줄에 내리면 네 후보가 인박스 행 안에서

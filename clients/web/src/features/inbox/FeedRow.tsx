@@ -74,7 +74,7 @@ export function FeedRow({
         data-channel-id={item.channelId}
         {...seqAttrs}
         className={cn(
-          "flex gap-3 px-4 py-2 transition-colors hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
+          "flex gap-3 px-4 py-2 transition-colors hover:bg-surface-hover focus-visible:focus-ring",
           !actions && "border-b border-line"
         )}
       >
@@ -197,7 +197,7 @@ export function FeedList({
       // 캐럿이 여기 착지할 수 있어야 ↑/↓가 바로 이어진다. -1이라 Tab 순서에는
       // 끼어들지 않는다: 이 목록의 정상적인 Tab 경로는 행 링크들이다.
       tabIndex={-1}
-      className="flex flex-col focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+      className="flex flex-col focus-visible:focus-ring"
     >
       {items.map((item) => (
         <FeedRow key={item.key} item={item} actions={renderActions?.(item)} />

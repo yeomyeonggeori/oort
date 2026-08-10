@@ -585,7 +585,7 @@ function WebhookRow({
     <li
       ref={rowRef}
       tabIndex={-1}
-      className="flex min-w-0 flex-col gap-2 border-b border-line p-3 last:border-b-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+      className="flex min-w-0 flex-col gap-2 border-b border-line p-3 last:border-b-0 focus-visible:focus-ring"
       data-testid="webhook-row"
     >
       <div className="flex min-w-0 flex-wrap items-center gap-2">
@@ -724,7 +724,7 @@ function RevealCard({
       tabIndex={-1}
       role="group"
       aria-label={revealHeadline(mode)}
-      className="flex min-w-0 flex-col gap-3 rounded-md border border-ok bg-surface-raised p-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+      className="flex min-w-0 flex-col gap-3 rounded-md border border-ok bg-surface-raised p-4 focus-visible:focus-ring"
       data-testid="webhook-revealed"
     >
       <p className="break-keep text-body font-medium text-ink">
@@ -804,7 +804,7 @@ function IngressNotes() {
       className="min-w-0 rounded-md border border-line"
       data-testid="webhook-ingress-notes"
     >
-      <summary className="cursor-pointer px-3 py-2 text-body text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">
+      <summary className="cursor-pointer px-3 py-2 text-body text-ink focus-visible:focus-ring">
         {WEBHOOK_INGRESS_NOTES_LABEL}
       </summary>
       <div className="flex flex-col gap-3 border-t border-line p-3">

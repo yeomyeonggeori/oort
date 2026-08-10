@@ -266,7 +266,7 @@ export function InviteSection({
         <div
           ref={issuedRef}
           tabIndex={-1}
-          className="flex flex-col gap-3 rounded-md border border-ok bg-surface-raised p-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+          className="flex flex-col gap-3 rounded-md border border-ok bg-surface-raised p-4 focus-visible:focus-ring"
           role="status"
           data-testid="invite-issued"
         >

@@ -102,7 +102,7 @@ function InlineNode({ node }: { node: Inline }) {
         event.preventDefault();
         void openExternalUrl(node.href);
       }}
-      className="text-accent underline decoration-line-strong underline-offset-2 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+      className="text-accent underline decoration-line-strong underline-offset-2 hover:text-ink focus-visible:focus-ring"
     >
       <InlineNodes nodes={node.children} />
     </a>
@@ -136,7 +136,7 @@ function BlockNode({ block }: { block: Block }) {
         className={cn(
           CODE_CLASS,
           "overflow-x-auto border border-line p-3",
-          "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+          "focus-visible:focus-ring"
         )}
         data-testid="message-code-block"
         // 가로로 끌리는 것이 이 상자의 일이다 (goal B11). 폰 캡처의 가로 오버플로

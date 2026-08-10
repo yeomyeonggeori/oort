@@ -236,7 +236,7 @@ export function QuickSwitcher({
         onValueChange={setTyped}
         placeholder="채널, 사람, 설정으로 이동"
         data-testid="quick-switcher-input"
-        className="w-full border-b border-line bg-transparent px-4 py-3 text-body focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent placeholder:text-ink-muted"
+        className="w-full border-b border-line bg-transparent px-4 py-3 text-body focus-visible:focus-ring placeholder:text-ink-muted"
       />
 
       {/* A DM that failed to open keeps the palette up: the message belongs next

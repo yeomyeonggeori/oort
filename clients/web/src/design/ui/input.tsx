@@ -19,7 +19,7 @@ export const Input = React.forwardRef<
       type={type}
       ref={ref}
       className={cn(
-        "tap-target flex h-control w-full rounded-sm border border-line-strong bg-transparent px-3 py-1 text-body text-ink transition-colors placeholder:text-ink-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-50",
+        "tap-target flex h-control w-full rounded-sm border border-line-strong bg-transparent px-3 py-1 text-body text-ink transition-colors placeholder:text-ink-muted focus-visible:focus-ring disabled:cursor-not-allowed disabled:opacity-50",
         className
       )}
       {...props}

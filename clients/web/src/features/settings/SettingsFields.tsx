@@ -326,7 +326,7 @@ export function ChoiceRadios({
               value={choice.id}
               checked={value === choice.id}
               onChange={() => onChange(choice.id)}
-              className="mt-1 accent-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+              className="mt-1 accent-accent focus-visible:focus-ring"
             />
             <span className="flex min-w-0 flex-col gap-px">
               <span className="text-body text-ink">{choice.label}</span>
@@ -418,7 +418,7 @@ export function SelectField({
         aria-describedby={hint ? `${id}-hint` : undefined}
         aria-busy={busy || undefined}
         data-testid={testId}
-        className="h-control-sm w-full min-w-0 rounded-sm border border-line-strong bg-surface-raised px-2 text-body text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-50"
+        className="h-control-sm w-full min-w-0 rounded-sm border border-line-strong bg-surface-raised px-2 text-body text-ink focus-visible:focus-ring disabled:cursor-not-allowed disabled:opacity-50"
       >
         {choices.map((choice) => (
           <option key={choice.id} value={choice.id} disabled={choice.disabled}>
@@ -702,7 +702,7 @@ export function ConfirmButton({
     <div
       ref={groupRef}
       tabIndex={-1}
-      className="flex flex-wrap items-center gap-2 rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+      className="flex flex-wrap items-center gap-2 rounded-sm focus-visible:focus-ring"
       role="group"
       aria-label={subject ? `${subject} ${question}` : question}
       data-testid={testId ? `${testId}-question` : undefined}
