@@ -1,12 +1,12 @@
 ---
 name: momo-design-taste-web
-description: Anti-slop design taste for the oort web client (TS/React + Tailwind + shadcn/ui + Tauri shell). Use WHENEVER creating or modifying React components, Tailwind styles, tokens, or user-visible strings in clients/web. Web translation of momo-design-taste (macOS/SwiftUI): Dawn palette CSS tokens, fixed Tailwind scale, web AI-tell bans, mandatory four states, keyboard/focus rules, and a mechanical grep-able pre-flight. Adapted from momo-design-taste (mac) + ADR-0133 stack decision.
+description: Anti-slop design taste for the oort web client (TS/React + Tailwind + shadcn/ui + Tauri shell). Use WHENEVER creating or modifying React components, Tailwind styles, tokens, or user-visible strings in clients/web or clients/desktop. The web dialect of the oort design system (docs/design-system/README.md), reached through the momo-design-taste router: Dawn palette CSS tokens, fixed Tailwind scale, web AI-tell bans, mandatory four states, keyboard/focus rules, and a mechanical grep-able pre-flight. Adapted from the retired macOS/SwiftUI taste skill + ADR-0133 stack decision.
 ---
 
 # oort Design Taste (Web / React + Tailwind + shadcn)
 
 oort web is the canonical UI (ADR-0133): TS + React + Vite, Tailwind + shadcn/ui(Radix), react-virtuoso, cmdk, wrapped by Tauri 2 for desktop. The bar is the same as the mac client:
-**it must feel like a native-grade work tool with the information density of Slack and the calm confidence of Codex, not a marketing web app.** Landing-page patterns transplanted into the product surface are the #1 slop signature to avoid. This is the web sibling of `momo-design-taste`; the hard rules are identical in intent, translated to CSS/Tailwind/React.
+**it must feel like a native-grade work tool with the information density of Slack and the calm confidence of Codex, not a marketing web app.** Landing-page patterns transplanted into the product surface are the #1 slop signature to avoid. This is the web dialect the `momo-design-taste` router sends web and desktop work to (the mac rulebook it was translated from retired with `clients/macOS`); the hard rules are the canonical system's, translated to CSS/Tailwind/React.
 
 Three files carry the load, and they are checked in, not aspirational:
 
@@ -193,9 +193,6 @@ cd clients/web && npm run build && npm run capture:design   # -> artifacts/desig
 
 The capture mocks `/v1` with realistic Korean+English team fixtures, emulates `prefers-color-scheme` at the browser level (so it exercises the same `light-dark()` path the product uses), and shoots login / chat shell / composer focus / dense timeline in light and dark.
 
-Then request the `design-review` agent (`.claude/agents/design-review.md`) with those screenshots attached. Blockers loop back automatically; only High-Priority-and-below findings go to a human. Rubric: `.claude/skills/momo-design-taste/references/review-rubric.md`, with two web substitutions:
-
-- phase 2 "window behavior" becomes **viewport behavior**: 1280 and 900 wide, sidebar collapsed, long channel names.
-- phase 4 "VoiceOver" becomes **keyboard-only completion + visible focus ring at every stop**, plus `aria-label` on icon-only controls.
+Then request the `design-review` agent (`.claude/agents/design-review.md`) with those screenshots attached. Blockers loop back automatically; only High-Priority-and-below findings go to a human. Rubric: `.claude/skills/momo-design-taste/references/review-rubric.md` — it is written for this surface directly now (#1254), so the two substitutions this section used to describe are the rubric's phases as written rather than translations you apply while reading: phase 2 is viewport behavior (1280 and 900 wide, sidebar collapsed, long channel names) and phase 4 is keyboard-only completion with a visible focus ring at every stop plus `aria-label` on icon-only controls.
 
 Gate target (ADR-0133 parity): design-review Blocker 0, High 0.

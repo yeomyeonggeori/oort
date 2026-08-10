@@ -1210,6 +1210,40 @@ async fn the_join_pre_flight_normalises_the_address_rather_than_trusting_its_cal
         "a lookup must not rewrite the row it looked up"
     );
 
+    // -- (10) invite_code_redemption.email: the audit row agrees (#1252) ----
+    //
+    // Step 10 used to bind `values.email` verbatim, so this very call — the one
+    // that proves the *reads* no longer trust their caller — wrote a redemption
+    // record spelled `  NORM-…@JOIN.TEST  ` against a `human` row spelled
+    // `norm-…@join.test`. Nothing keyed off it, which is why #1248 left it; but
+    // the redemption history is the record of who joined, and it disagreed with
+    // the account it points at. The column has no CHECK (an audit row is not
+    // rewritten after the fact, so 064's repair shape does not apply here) — the
+    // write normalises instead, and this is what holds it to that.
+    let audited: Vec<(String, String)> = sqlx::query_as(
+        "SELECT r.email, h.email FROM invite_code_redemption r \
+           JOIN human h ON h.member_id = r.member_id \
+          WHERE r.member_id = $1",
+    )
+    .bind(member_id)
+    .fetch_all(&su)
+    .await
+    .expect("read the redemption records back");
+    assert!(
+        !audited.is_empty(),
+        "the reuse above must have left a redemption record to check"
+    );
+    for (redeemed_as, account) in &audited {
+        assert_eq!(
+            redeemed_as, account,
+            "the redemption record and the account it names must spell the address the same way"
+        );
+        assert_eq!(
+            redeemed_as, &stored,
+            "and that spelling is the normalised one"
+        );
+    }
+
     // …and it still discriminates. An address nobody has used takes the create
     // arm, so the green above cannot come from a predicate that matches anything.
     let (fresh_code, _) = issue_invite(&http, &base, &token, fixture.workspace, "member", 5).await;

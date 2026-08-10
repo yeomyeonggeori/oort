@@ -1,106 +1,87 @@
 ---
 name: momo-design-taste
-description: Anti-slop design taste for the oort macOS SwiftUI client. Use WHENEVER creating or modifying SwiftUI views, components, themes, or user-visible strings in clients/macOS or clients/Core. Encodes MomoDS token rules, native-macOS AI-tells bans, and a mechanical pre-flight check. Adapted from Leonxlnx/taste-skill (MIT) + anthropics frontend-design + Apple HIG for native macOS product UI.
+description: Entry point for oort UI work — routes a change to the design dialect that governs its surface. Use WHENEVER creating or modifying UI, components, tokens, or user-visible strings in clients/web, clients/desktop or clients/mobile, and before requesting the design-review agent. Names the canonical design system (오르트 구름), delegates web/desktop to momo-design-taste-web, and states what the phone surface is governed by and what nothing measures.
 ---
 
-# oort Design Taste (macOS / SwiftUI)
+# oort Design Taste — surface router
 
-oort is a native macOS messenger where AI agents are first-class members. The bar:
-**it must feel like software Apple could have shipped, with the information density of Slack and the calm confidence of Codex.** Web-app patterns transplanted into a Mac window are the #1 slop signature to avoid.
+This skill used to be the macOS/SwiftUI rulebook. That surface is gone: `clients/macOS`,
+`clients/iOS` and `clients/Core` were deleted (ADR-0145 증보 1~2 / ADR-0159 D4), and a
+rulebook for a tree that does not exist is worse than no rulebook — it answers questions
+about pixels nobody will ever render. So this file no longer holds rules. It holds the
+one thing that cannot live in a per-surface skill: **which document governs the change in
+front of you.**
 
-## 0. Design Read (mandatory, before any code)
+## 0. Route first (10 seconds)
 
-Output one line before writing UI code:
-
-> Reading this as: <surface: message timeline / composer / sidebar / approval inbox / settings / onboarding> for <internal team users on macOS>, HIG-first, density <N>/10, motion <M>/10.
-
-Defaults for oort: **density 6–7** (Mac users expect information density; this is a work tool, not a landing page), **motion 2–3** (motion is feedback, never theater).
-
-Do NOT default to: purple/blue AI gradients, glassy hero cards, three-equal-card rows, oversized rounded-rect "web cards" inside lists, centered empty states with illustrations. These are LLM defaults, not choices.
-
-## 1. System-first rule (inversion of web taste-skill)
-
-Reach for the **native control first**: `List`, `Table`, `NavigationSplitView`, `.searchable`, `Menu`, `.contextMenu`, `Form`, `LabeledContent`, `Toolbar`, `.popover`, `Settings` scene.
-Every custom-drawn control requires a one-line justification comment stating what the system control could not do. No justification → use the system control.
-
-## 2. Hard rules (binary, not "sparingly")
-
-**Color**
-- Semantic colors only in view code: `Color.primary/.secondary`, `.tint`, material backgrounds, or MomoDS semantic tokens (`references/tokens.md`). Zero raw `Color(red:green:blue:)` or hex literals in views.
-- ONE accent per surface = the app tint. Agent identity uses `agent.accent` token only. Status colors (danger/warning/success) come from tokens only.
-- Color Consistency Lock: once a surface's accent is set, the whole surface uses it. Sections do not invert theme. The app has ONE theme per color scheme.
-- Real materials over fake translucency: `.ultraThinMaterial`/`.regularMaterial`/`NSVisualEffectView` — never a semi-transparent fill pretending to be glass.
-
-**Typography**
-- SF Pro via semantic text styles only: `.font(.body)`, `.title3`, `.caption` or MomoDS text roles (`.messageBody`, `.timestamp`, `.channelName`, `.agentPayloadMono`). Zero `Font.custom` and zero fixed `.font(.system(size: N))` in view code (breaks Dynamic Type).
-- Hierarchy via weight and secondary color, not size inflation. Max 2 weights per component.
-- Counters/costs/seq numbers use `.monospacedDigit()`.
-
-**Spacing & shape**
-- Spacing values come from the scale: 4 / 8 / 12 / 16 / 24 / 32. `.padding(13)`, `.frame(width: 237)` and other magic numbers are violations.
-- Shape Consistency Lock: ONE corner-radius scale app-wide (tokens define it). No mixing 6/10/14 by feel.
-
-**Motion**
-- Every animation is feedback for a state change (`.snappy`, `.spring` short). No perpetual/decorative loops. Always guard long animations with `accessibilityReduceMotion`.
-
-**States (mandatory, per surface)**
-- Every surface ships empty / loading / error / offline states. An empty state is an invitation to act (one line + one action), not an illustration poster. See `references/tokens.md` §states.
-
-**Interaction**
-- Every action reachable by keyboard; primary surfaces get shortcuts (Cmd+K palette, Cmd+N, arrow navigation). Context menus for row-level actions (edit/delete/react), not always-visible button rows.
-- Hover states use system conventions (subtle background, not scale transforms).
-
-**Copy (user-visible strings)**
-- Verb-first buttons ("Save changes", "메시지 보내기" — never "Submit"/"확인" alone where a verb fits). Errors state what happened and what to do next; they never apologize and are never vague.
-- ZERO em-dashes (`—`, `–`) in any user-visible string. This is binary: one em-dash = pre-flight fail.
-- No filler-hype vocabulary: "seamless/effortless/unleash/elevate/원활한/손쉽게" banned in UI copy.
-- Fixtures/previews use realistic Korean+English mixed team content, never "John Doe"/"Acme"/"테스트 메시지 1".
-
-## 3. Mac AI-Tells (banned patterns)
-
-| Banned | Instead |
+| Touched | Read, in this order |
 |---|---|
-| Gradient-splash or illustration-centric empty views | One line of copy + one action button |
-| Emoji as functional icons | SF Symbols, one rendering mode + weight per surface |
-| Oversized rounded "web cards" wrapping every list row | Flat list rows with separators/hover; cards only when elevation means grouping |
-| iOS-style full-width filled buttons in Mac dialogs | Standard bordered buttons, trailing-aligned, default action highlighted |
-| Custom title bars breaking traffic-light spacing | Standard `.toolbar` / titlebar APIs |
-| Raw JSON dumps in user-facing cards | Typed key-value rows (`LabeledContent`); raw payload behind a disclosure or inspector |
-| Decorative status dots without meaning | Status indicators only when bound to real state |
-| Section-number eyebrows, "001 · SETTINGS" labels | Plain section headers |
-| Uppercase-tracking micro-labels more than 1 per surface | Sentence-case labels |
-| Pure `#000000` / `#FFFFFF` backgrounds | System background colors (they adapt to appearance/contrast settings) |
-| Toast/snackbar stacks (web pattern) | Inline banners in context, or system notifications |
+| `clients/web/**` · `clients/desktop/**` | `docs/design-system/README.md` → `.claude/skills/momo-design-taste-web/SKILL.md` |
+| `clients/mobile/**` (bare React Native) | `docs/design-system/README.md` → `clients/mobile/src/design/tokens.ts` → §2 below |
+| `packages/momo-core/**` user-visible strings | `docs/design-system/README.md` §4 + the copy rules of whichever client renders them (both do) |
+| A rule you want to *change* rather than follow | `docs/design-system/README.md` §6, then ADR-0159 |
 
-## 4. Agent-native surfaces (oort-specific)
+**`clients/desktop` is not a third surface.** Tauri's `frontendDist` is `../../web/dist` and
+`clients/web/src` carries zero style branches on runtime, so a desktop change is a web
+change (`docs/design-system/README.md` §1, 주1).
 
-- Agent messages share the human message anatomy (same grid, same typography); the agent identity is expressed ONLY through the `agent.accent` token on avatar/badge, never a different bubble shape or background tint on the whole row.
-- Tool-call / approval / diff / cost cards are **structured, calm, and dense**: title row (SF Symbol + name + status chip) → typed fields → disclosure for raw payload. Status lifecycle chips (queued/thinking/streaming/awaiting-approval/done/error) use the token status colors, text-first, no pulsing.
-- Streaming text gets a caret, not a shimmer skeleton. Cost figures are `.monospacedDigit()`, right-aligned, and never animate faster than the data changes.
-- Internal vocabulary ("Context Packet", "Memory Plane", "Capability Cache", run IDs, seq numbers) never appears as user-facing copy outside developer/diagnostic surfaces.
+## 1. The canonical page is `docs/design-system/README.md` (오르트 구름)
 
-## 5. Mechanical Pre-Flight Check (run before claiming done)
+Everything a review can be argued from lives there, with an origin next to each rule:
+the token layers and the web→phone translation direction (§2), the hierarchy rule
+destructive > primary > secondary stated as an *order between two values* rather than a
+value (§3), the four mandatory states (§4), and — the section to open before claiming a
+rule is "checked" — the **enforcement map** (§5), which says for every axis what machine
+measures it and, in §5.3, **what nothing measures at all**.
 
-Run these; ALL must pass. Any failure = the change is not done.
+That last part is why this router exists and why it is short. The design audit's second
+most common defect pattern was "a machine should have caught this and did not" (17 findings
+across 10 reports), and it was mostly caused by nobody knowing which axes are unmeasured.
+A skill that restates rules invites a reader to believe the restatement is the rule; the
+canonical page is versioned with the code that enforces it, and this file is not.
 
-```sh
-# from clients/ — zero hits allowed in view code (Theme/token definition files excluded)
-grep -rn 'Color(red:' macOS/Sources Core/Sources | grep -v 'Theme\|Tokens' ; \
-grep -rn 'Font\.custom\|\.font(.system(size' macOS/Sources | grep -v 'Theme\|Tokens' ; \
-grep -rn '—\|–' macOS/Sources Core/Sources --include='*.swift' | grep -i 'Text(\|String(\|label\|title\|message'
-```
+## 2. The phone surface has no dialect skill, and that is stated rather than papered over
 
-Manual checklist:
-- [ ] Design Read line was produced and the result matches it
-- [ ] Light AND dark mode checked (screenshot or preview both)
-- [ ] Empty/loading/error/offline states exist for the touched surface
-- [ ] All padding/spacing values ∈ {4,8,12,16,24,32}
-- [ ] One accent color; status colors from tokens only
-- [ ] Keyboard path exists for every new action
-- [ ] No banned Mac AI-Tells (§3 table)
-- [ ] Long Korean + English mixed strings don't truncate/overflow (test with a 3-line Korean message)
-- [ ] `reduceMotion` respected for any new animation
+`momo-design-taste-web` is a real dialect: it translates the shared rules into Tailwind
+classes, CSP constraints and shadcn/Radix primitives, and `scripts/design_preflight_web.sh`
+is its executable half. **There is no equivalent for `clients/mobile`.** Until one exists,
+a phone change is governed by:
 
-## 6. Review loop
+- **Tokens** — `clients/mobile/src/design/tokens.ts`, which *translates* the web tokens.
+  The web file is canonical; the phone file follows. Adding a phone-only value is the §6
+  procedure on the canonical page, not a local decision.
+- **Machine checks that do exist** — `clients/mobile/__tests__/designSystem.test.ts` and
+  `clients/mobile/__tests__/paletteContrast.test.ts` (palette saturation order, the `--line`
+  premise, the count of hand-written touch-target numbers), plus the capture lane
+  `clients/mobile/measure/states.tsx`.
+- **Machine checks that do not** — fill order and outline order have no phone token to
+  measure yet, and no systematic check says which component uses which side
+  (canonical page §3.3). On the phone those axes are carried by human review and by the
+  `design-review` agent, and by nothing else.
 
-After implementation, request the `design-review` agent (`.claude/agents/design-review.md`) with screenshots (snapshot tests or `LOCAL_GATE_LAUNCH_UI=1` + `screencapture -l <windowid>`). Blockers loop back automatically; only High-Priority-and-below findings go to a human. Rubric: `references/review-rubric.md`.
+Do not read the web skill's Tailwind-specific sections as phone rules. The intent is shared;
+`p-3` is not.
+
+## 3. What survives here from the mac skill
+
+Two things, because they are surface-independent and the review agent needs them:
+
+- **`references/review-rubric.md`** — the phases and the output format the `design-review`
+  agent scores with, and the ADR-0112 D6 always-Blocker list. Re-aimed to web and phone.
+- **The refusal to accept a green that proves nothing.** A pre-flight that skips because its
+  tool is missing, a screenshot of a surface that was never interacted with, and a rule
+  asserted from a document rather than measured on the render are all the same failure.
+
+The mac token reference and the iOS rubric were deleted with their surfaces. If you are
+looking for `references/tokens.md`, the token canon is `clients/web/src/design/tokens.css`
+plus `.claude/skills/momo-design-taste-web/references/tokens.md`.
+
+## 4. Review loop
+
+Implement against the dialect for your surface, run its mechanical pre-flight
+(`scripts/design_preflight_web.sh` for web; the phone has none — say so in the report rather
+than implying a clean run), capture evidence, then request the `design-review` agent
+(`.claude/agents/design-review.md`) in a **fresh context**. Blockers loop back to the
+implementer automatically; only High-and-below findings go to a human.
+
+Gate target (ADR-0133 parity, CLAUDE.md 하드 룰): **Blocker 0.**
