@@ -315,4 +315,21 @@ volumes:
   pgdata:
     # A distinct default from prod's `momo-pgdata`: this stack must never adopt
     # or overwrite a Swift-stack volume on the same host.
-    name: ${DB_VOLUME_NAME:-momo-rust-pgdata}
+    #
+    # #1238: the default is **project-scoped**. It used to be the bare literal
+    # `momo-rust-pgdata`, which is a single global name — so a worktree running
+    # `-p ws-foo ... down -v` deleted the volume of whatever else was on the
+    # host (observed during #1228/PR #1237). Compose scopes networks by project
+    # automatically but NOT volumes that carry an explicit `name:`.
+    #
+    # Live continuity: the deploy host runs this stack as project `momo-rust`
+    # (`infra/rust/rust-smoke.env.example:17`), so the rendered name stays
+    # `momo-rust-pgdata` — unchanged. It is also unchanged when
+    # COMPOSE_PROJECT_NAME is unset, because the fallback repeats the same
+    # `momo-rust` default the top-level `name:` uses.
+    #
+    # Both ways of naming a project reach this: `COMPOSE_PROJECT_NAME=` in the
+    # env file, and the `-p` flag (compose feeds the flag back into
+    # interpolation, and `-p` wins over the env var — measured, not assumed).
+    # DB_VOLUME_NAME still wins outright when an explicit name is required.
+    name: ${DB_VOLUME_NAME:-${COMPOSE_PROJECT_NAME:-momo-rust}-pgdata}

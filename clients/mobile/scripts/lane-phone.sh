@@ -63,11 +63,13 @@
 # only on the happy path — and the SAME teardown runs at startup, because the
 # way stacks accumulate is a run that died before its own trap.
 #
-# `infra/rust`'s pgdata volume carries a FIXED name (`momo-rust-pgdata`), not a
-# project-scoped one. This lane overrides `DB_VOLUME_NAME` and reclaims the
-# volume by name as well, because without that a lane run would attach to the
-# real smoke stack's database and then delete it on the way out (#1058 measured
-# exactly this in the openapi gate).
+# `infra/rust`'s pgdata volume used to carry a FIXED name (`momo-rust-pgdata`)
+# rather than a project-scoped one, so a lane run would attach to the real smoke
+# stack's database and delete it on the way out (#1058 measured exactly this in
+# the openapi gate). #1238 made the base default project-scoped. This lane still
+# overrides `DB_VOLUME_NAME` and reclaims the volume by name — that override is
+# now redundancy rather than the only thing standing between a lane run and
+# someone else's database.
 #
 # ## Usage
 #

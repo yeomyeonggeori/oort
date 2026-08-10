@@ -99,9 +99,6 @@ HERMES_API_KEY=${HERMES_API_KEY:-dev-insecure-hermes-bearer}
 WORKER_POLL_INTERVAL_MS=${WORKER_POLL_INTERVAL_MS:-100}
 
 CENT_API_URL=${CENT_API_URL:-http://localhost:${CENT_PORT}/api}
-case "$CENT_API_URL" in
-  *centrifugo*) CENT_API_URL="http://localhost:${CENT_PORT}/api" ;;
-esac
 
 HERMES_BASE_URL=${HERMES_BASE_URL:-http://localhost:${HERMES_PORT}/v1}
 

@@ -102,9 +102,6 @@ COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-momo}"
 COMPOSE_NETWORK="${COMPOSE_PROJECT_NAME}_default"
 CENT_API_KEY="${CENT_API_KEY:-dev-insecure-cent-api-key}"
 CENT_API_URL="${CENT_API_URL:-http://localhost:${CENT_PORT}/api}"
-case "$CENT_API_URL" in
-  *centrifugo*) CENT_API_URL="http://localhost:${CENT_PORT}/api" ;;
-esac
 JWT_HMAC="${JWT_HMAC:-dev-insecure-jwt-hmac-change-me}"
 CENT_TOKEN_HMAC="${CENT_TOKEN_HMAC:-dev-insecure-cent-token-hmac}"
 # MOMO-300: must match the dev compose Centrifugo static proxy header.
