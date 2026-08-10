@@ -5,7 +5,7 @@
 
 ## 0. Current Status
 
-As of 2026-06-26, GitHub Actions are disabled manually for `Dawn-kim-official/momo`
+As of 2026-06-26, GitHub Actions are disabled manually for `yeomyeonggeori/oort`
 because the organization is seeing billing/payment failures and should not spend
 paid macOS runner minutes during active development.
 

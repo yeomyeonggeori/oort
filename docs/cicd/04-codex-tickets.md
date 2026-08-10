@@ -51,7 +51,7 @@
 
 ### ☐ M1-asc-key / ☐ M2-match-init `[manual]`
 - Codex: 런북(01) 절차 확인·갱신만. 실제 발급/등록은 사람.
-- DoD: `gh secret list --repo Dawn-kim-official/momo`에 6개 필수 secret 존재.
+- DoD: `gh secret list --repo yeomyeonggeori/oort`에 6개 필수 secret 존재.
 
 ### ☐ CI3-release-ios / ☐ CI4-release-macos `[ci]`
 - [ ] secrets 존재 + 게이트(03) PASS 확인 후 활성.

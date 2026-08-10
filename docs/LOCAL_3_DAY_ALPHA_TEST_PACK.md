@@ -120,7 +120,7 @@ PASS or explicitly recorded as a blocker.
 | App launch | `LOCAL_GATE_LAUNCH_UI=1 ... scripts/local_gate.sh --profile macos-ui` | Foreground process/window/log evidence recorded when UI dogfood is in scope. |
 | External runtime | `scripts/momo hermes-gateway-smoke --real --trigger`, `scripts/local_gate.sh --profile external-agent-provider` with real env, or explicit skip | Credentialed PASS is required for `AWS_READY`; `START_SOLO` requires a provider-owned Hermes gateway roundtrip PASS. A named blocker is valid evidence only for `BLOCKED` or `NEEDS_FIX`. |
 | Evidence root | local path outside repo | Directory exists and contains Day 0 notes. |
-| Issue board | `scripts/goal_status.sh --repo Dawn-kim-official/momo` | No known open P0/P1 blocks the local run. |
+| Issue board | `scripts/goal_status.sh --repo yeomyeonggeori/oort` | No known open P0/P1 blocks the local run. |
 
 Day 0 output:
 

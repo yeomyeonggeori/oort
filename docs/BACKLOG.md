@@ -707,7 +707,7 @@ M0(baseline)
 - **수용기준:**
   - [ ] [manual] App Store Connect API Key(.p8/key_id/issuer_id, **Team Key**) 발급 + base64 단일 secret 보관
   - [ ] [manual] fastlane match appstore(iOS) + developer_id(macOS) 최초 동기화(별도 signing repo, CI readonly)
-  - [ ] [manual] `gh secret list --repo Dawn-kim-official/momo` 에 6개 필수 secret 존재
+  - [ ] [manual] `gh secret list --repo yeomyeonggeori/oort` 에 6개 필수 secret 존재
 - **라벨:** `type:infra`, `area:ci`
 - **참조:** `docs/cicd/01-setup-runbook.md` · `docs/cicd/02-secrets-inventory.md` · Individual Key 불가(provisioning/notaryTool 제한)
 

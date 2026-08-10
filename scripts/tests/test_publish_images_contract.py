@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 # 발행 이미지의 정본 GHCR 경로. 워크플로와 prod env 템플릿 3종이 이 한 문자열에 합의해야 한다.
 # org명이 두 곳에 중복돼 있어 #1224 실소유 재조준 때 한쪽만 고칠 위험이 있었으므로 여기로 모은다.
-CANONICAL_IMAGE = "ghcr.io/yeomyeonggeori/momo"
+CANONICAL_IMAGE = "ghcr.io/yeomyeonggeori/oort"
 
 
 def read(relative: str) -> str:

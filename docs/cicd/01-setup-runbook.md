@@ -1,7 +1,7 @@
 # oort — CI/CD 1회 셋업 런북 (사람이 직접, 순서대로)
 
 > Codex는 코드/워크플로우 파일을 만들 수 있지만, **Apple 계정 액션·비밀값 등록은 사람이 1회** 해야 한다.
-> org=`dawnkim`, repo=`momo`. 검증 표기는 docs/cicd/00 참조.
+> org=`yeomyeonggeori`, repo=`oort`. 검증 표기는 docs/cicd/00 참조.
 
 ## 사전 요건
 - Apple Developer Program 멤버십(유료, 연 $99 — 법률/계약 변동 가능, 본인 확인). 등록주체 결정, D-U-N-S(조직 선택 시), 사람 handoff 절차는 `docs/legal/01-entity-apple-runbook.md`를 먼저 따른다.
@@ -18,6 +18,9 @@
 4. **Key ID**, **Issuer ID** 기록.
 
 ## 2. signing repo 생성 + match 최초 동기화 (개발자 머신)
+
+> `momo-signing` 은 구·신 org 양쪽에서 404 다(2026-08-10 실측 — #1236 항목 4). 아직 만들어진 적이 없으므로 아래 org/이름은 **성재가 실체를 정한 뒤** 확정한다. 나머지 `--repo` 대상은 전부 현행 `yeomyeonggeori/oort` 로 재조준됐다. 상세: [`02-secrets-inventory.md`](02-secrets-inventory.md).
+
 ```bash
 # 별도 private repo
 gh repo create Dawn-kim-official/momo-signing --private
@@ -42,12 +45,12 @@ bundle exec fastlane match developer_id --platform macos --app_identifier com.da
 
 ## 3. GitHub Secrets 등록 (docs/cicd/02 목록)
 ```bash
-gh secret set ASC_KEY_ID        --repo Dawn-kim-official/momo --body "$ASC_KEY_ID"
-gh secret set ASC_ISSUER_ID     --repo Dawn-kim-official/momo --body "$ASC_ISSUER_ID"
-printf '%s' "$ASC_KEY_P8_BASE64" | gh secret set ASC_KEY_P8_BASE64 --repo Dawn-kim-official/momo
-gh secret set MATCH_GIT_URL     --repo Dawn-kim-official/momo --body "$MATCH_GIT_URL"
-gh secret set MATCH_PASSWORD    --repo Dawn-kim-official/momo --body "$MATCH_PASSWORD"
-gh secret set MATCH_GIT_TOKEN   --repo Dawn-kim-official/momo --body "<signing repo 접근 PAT>"
+gh secret set ASC_KEY_ID        --repo yeomyeonggeori/oort --body "$ASC_KEY_ID"
+gh secret set ASC_ISSUER_ID     --repo yeomyeonggeori/oort --body "$ASC_ISSUER_ID"
+printf '%s' "$ASC_KEY_P8_BASE64" | gh secret set ASC_KEY_P8_BASE64 --repo yeomyeonggeori/oort
+gh secret set MATCH_GIT_URL     --repo yeomyeonggeori/oort --body "$MATCH_GIT_URL"
+gh secret set MATCH_PASSWORD    --repo yeomyeonggeori/oort --body "$MATCH_PASSWORD"
+gh secret set MATCH_GIT_TOKEN   --repo yeomyeonggeori/oort --body "<signing repo 접근 PAT>"
 ```
 
 ## 4. 동작 확인

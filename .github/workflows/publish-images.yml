@@ -16,7 +16,10 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  IMAGE: ghcr.io/yeomyeonggeori/momo
+  # 2026-08-10: repo renamed momo -> oort. GHCR package names do not follow a
+  # repo rename, so this dispatch creates the `oort` package on first run;
+  # pre-rename images remain reachable at ghcr.io/yeomyeonggeori/momo:<tag>.
+  IMAGE: ghcr.io/yeomyeonggeori/oort
   IMAGE_TAG: sha-${{ github.sha }}
 
 jobs:

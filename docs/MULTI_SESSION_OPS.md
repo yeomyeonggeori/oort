@@ -30,7 +30,7 @@ More workers are allowed, but do not open two large edits in the same file famil
 `momo-main` starts every orchestration cycle with:
 
 ```bash
-scripts/goal_status.sh --repo Dawn-kim-official/momo
+scripts/goal_status.sh --repo yeomyeonggeori/oort
 ```
 
 The board shows:
@@ -116,7 +116,7 @@ If the script is unavailable in an older checkout, use the manual fallback:
 git fetch origin main
 git worktree add -b <type>/<issue-number>-<slug> ../momo-worktrees/<issue-number>-<slug> origin/main
 git -C ../momo-worktrees/<issue-number>-<slug> push -u origin <type>/<issue-number>-<slug>
-gh issue edit <issue-number> --repo Dawn-kim-official/momo --add-assignee @me --add-label status:in-progress --remove-label status:ready
+gh issue edit <issue-number> --repo yeomyeonggeori/oort --add-assignee @me --add-label status:in-progress --remove-label status:ready
 ```
 
 Do not claim an issue that already has an assignee, an active branch, an open PR, or `status:in-progress`/`status:needs-review`, unless `momo-main` explicitly resolves the conflict.

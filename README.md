@@ -145,7 +145,7 @@ You need Docker and git. Nothing else — the API, relay, worker, migrations,
 and the web UI ship in one image built from this repo.
 
 ```sh
-git clone https://github.com/yeomyeonggeori/momo.git oort && cd oort
+git clone https://github.com/yeomyeonggeori/oort.git oort && cd oort
 scripts/self_host_env.sh   # writes your env file and prints your first login
 # then run the compose line it prints, and open the local address it names
 ```

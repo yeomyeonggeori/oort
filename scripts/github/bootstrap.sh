@@ -5,7 +5,7 @@
 # 실수 실행 방지를 위해 ALLOW_LEGACY_BOOTSTRAP=1 일 때만 동작한다.
 #
 # 사용법:
-#   ALLOW_LEGACY_BOOTSTRAP=1 scripts/github/bootstrap.sh [--repo yeomyeonggeori/momo] [--dry-run] [--skip-issues]
+#   ALLOW_LEGACY_BOOTSTRAP=1 scripts/github/bootstrap.sh [--repo yeomyeonggeori/oort] [--dry-run] [--skip-issues]
 #
 # 전제:
 #   - gh CLI 설치 + `gh auth login` 완료. 토큰 스코프: repo (필수).
@@ -43,7 +43,7 @@ while [ $# -gt 0 ]; do
 done
 
 if [ -z "$REPO" ]; then
-  REPO="$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null || echo "yeomyeonggeori/momo")"
+  REPO="$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null || echo "yeomyeonggeori/oort")"
 fi
 OWNER="${REPO%%/*}"
 NAME="${REPO##*/}"
@@ -62,7 +62,7 @@ command -v gh >/dev/null || { echo "gh CLI 필요. https://cli.github.com" >&2; 
 gh auth status >/dev/null 2>&1 || { echo "gh auth login 먼저." >&2; exit 1; }
 
 if [ "${ALLOW_LEGACY_BOOTSTRAP:-0}" != "1" ]; then
-  echo "scripts/github/bootstrap.sh is legacy. Use scripts/github_bootstrap.sh --org yeomyeonggeori --repo momo." >&2
+  echo "scripts/github/bootstrap.sh is legacy. Use scripts/github_bootstrap.sh --org yeomyeonggeori --repo oort." >&2
   echo "Set ALLOW_LEGACY_BOOTSTRAP=1 only if you intentionally need the old TSV seed." >&2
   exit 2
 fi

@@ -86,7 +86,7 @@ ps`와 확인할 서비스만 안내하며 시크릿 값은 출력하지 않는�
 공개 릴리스 후보 검증에서는 G-H 공급망 증거가 필수이므로 인증된 `gh`와 발행 완료를
 전제로 `MOMO_ATTESTATION_POLICY=required`를 사용한다. 이 모드에서 누락·신원 불일치·
 provenance 검증 실패는 pull 전에 fail-closed된다. 검증 신원은
-`Dawn-kim-official/momo`, predicate는 SLSA provenance v1으로 고정한다.
+`yeomyeonggeori/oort`, predicate는 SLSA provenance v1으로 고정한다.
 
 prod/e2e compose의 모든 서비스에는 `mem_limit`과
 `com.momo.janitor.managed=true` 라벨이 있다. 기본 상한은 DB·에이전트
