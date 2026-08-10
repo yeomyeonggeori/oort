@@ -57,6 +57,7 @@ Enforced by the database and the gates, not by convention:
 - Run outcomes, usage/cost ledger, and audit events inside the conversation
 - Attachments v0: browser uploads go directly to your Drive backend — bytes never transit the oort server
 - Work observation: watch an agent's terminal session live from the desktop app
+- A measured self-host path: clone → env script → compose up → logged in. Three shell commands, zero branches — see below
 - A design system (「Oort cloud」) whose contrast and spacing rules are enforced by tests and gates, in light and dark
 - Security headers (CSP · HSTS · nosniff · referrer policy) on the reference deployment
 
@@ -65,7 +66,6 @@ Enforced by the database and the gates, not by convention:
 - Webhook & event-subscription **delivery** — the settings surfaces shipped; the Rust delivery worker is in flight
 - Agent run history reads — writes already land; the history views are waiting on three routes
 - Retiring the original Swift codebase — the product now runs on Rust + TypeScript + React Native
-- A reproducible self-host path on the current stack — **earlier revisions of this README promised "self-host in 5 minutes" against a container image that was never published; that path targets the retired stack and is withdrawn until it is real**
 - Public CI, releases, and a contribution pipeline
 
 💭 **Strong opinions, pending code**
@@ -139,31 +139,31 @@ flowchart LR
 | `server/Migrations/` | PostgreSQL DDL — the load-bearing walls (most of it is triggers, constraints, and RLS) |
 | `docs/adr/` | 150+ architecture decision records — the project's memory |
 
-## Getting started
+## Self-host
 
-oort is in heavy dogfooding: we run it in production for ourselves every day,
-and we are auditing — in the open, in this repo — the gap between *works for
-us* and *works for you*: license gate coverage, reproducible self-hosting,
-public CI, operations.
-
-Until that lands, two honest notes:
-
-- There is **no supported one-command self-host path yet.** The one this README
-  used to advertise pointed at the retired stack and an unpublished image.
-- The deployment we support today is the one we operate ourselves
-  ([runbook](docs/runbooks/ncp-rust-deploy.md)); a reproducible path is being
-  rebuilt on the Rust stack.
-
-To explore now:
+You need Docker and git. Nothing else — the API, relay, worker, migrations,
+and the web UI ship in one image built from this repo.
 
 ```sh
-git clone https://github.com/yeomyeonggeori/momo.git
+git clone https://github.com/yeomyeonggeori/momo.git oort && cd oort
+scripts/self_host_env.sh   # writes your env file and prints your first login
+# then run the compose line it prints, and open the local address it names
 ```
 
-Start with [`docs/architecture/overview.md`](docs/architecture/overview.md) and
-the [ADRs](docs/adr/) — the decisions explain the code better than the code
-does. The moment a supported install path exists, it will be the first thing in
-this README.
+Three commands, no branches, and no promised minute count — measured from a
+clean clone to a message round-trip in the browser: about a minute on a warm
+Docker cache. The full walk-through, what each step does, and how to stop or
+reset live in [`docs/SELF_HOST.md`](docs/SELF_HOST.md). Production (a real
+domain, TLS, the Caddy overlay) starts from the
+[deploy runbook](docs/runbooks/ncp-rust-deploy.md).
+
+## Getting started with the code
+
+oort is in heavy dogfooding: we run it in production for ourselves every day,
+and we audit — in the open, in this repo — the gap between *works for us* and
+*works for you*. Start with
+[`docs/architecture/overview.md`](docs/architecture/overview.md) and the
+[ADRs](docs/adr/) — the decisions explain the code better than the code does.
 
 ### Development
 
