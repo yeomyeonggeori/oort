@@ -27,7 +27,9 @@ pub mod signal;
 
 pub use publisher::{EphemeralPublishOutcome, EphemeralPublisher};
 pub use signal::{
-    ephemeral_channel, now_epoch_ms, EphemeralSignal, TypingSignal, EPHEMERAL_NAMESPACE,
+    ephemeral_channel, ephemeral_presence_channel, now_epoch_ms, EphemeralSignal, PresenceSignal,
+    TypingSignal, EPHEMERAL_NAMESPACE, PRESENCE_EVENT_TYPE, PRESENCE_EVENT_VERSION,
+    PRESENCE_NAMESPACE, PRESENCE_REPUBLISH_INTERVAL_MS, PRESENCE_SIGNAL_TTL_MS,
     TYPING_AGGREGATE_THRESHOLD, TYPING_EVENT_TYPE, TYPING_REPUBLISH_INTERVAL_MS,
     TYPING_SIGNAL_TTL_MS,
 };

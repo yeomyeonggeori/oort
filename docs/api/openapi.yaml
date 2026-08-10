@@ -5984,6 +5984,17 @@ components:
             a public system line in the channel saying so, and the rest of the
             profile (instructions, enabled tools, triggers) stays behind the
             owner-gated profile read.
+        presenceStatus:
+          type: string
+          enum: [auto, away, dnd]
+          description: >
+            Declared presence status (ADR-0160 ③), present for humans only.
+            `member.presence_status`; the durable intent, not the effective dot,
+            which the client computes as f(this, availability) and never stores.
+            `auto` means no manual override (renders online when connected,
+            offline otherwise); `away`/`dnd` are the two manual overrides.
+            Absent for agents (presence is human-only, their liveness is
+            agent_run) and absent from a server too old to carry the column.
         createdAtMs:
           type: integer
           format: int64

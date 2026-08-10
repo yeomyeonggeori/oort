@@ -40,7 +40,7 @@ use momo_auth::{
     EPHEMERAL_GRANT_TTL_SECONDS,
 };
 use momo_server::config::EphemeralSettings;
-use momo_server::dto::TypingSignalRequest;
+use momo_server::dto::{AvailabilitySignalRequest, TypingSignalRequest};
 use momo_server::routes::ephemeral;
 use momo_server::AppState;
 use serde_json::{json, Value};
@@ -156,6 +156,24 @@ async fn publish(
     .map_err(|response| response.status())
 }
 
+async fn publish_availability(
+    state: &AppState,
+    principal: &Principal,
+    workspace: Uuid,
+    channel: Uuid,
+    grant: String,
+) -> Result<StatusCode, StatusCode> {
+    ephemeral::availability(
+        State(state.clone()),
+        Extension(principal.clone()),
+        Path((workspace.to_string(), channel.to_string())),
+        Json(AvailabilitySignalRequest { grant }),
+    )
+    .await
+    .map(|(status, _)| status)
+    .map_err(|response| response.status())
+}
+
 // ---------------------------------------------------------------------------
 // The control
 // ---------------------------------------------------------------------------
@@ -253,6 +271,90 @@ async fn the_publish_path_answers_with_no_database_at_all() {
     let rendered = published.body.to_string();
     assert!(!rendered.contains("outbox"), "{rendered}");
     assert!(!rendered.contains("message.new"), "{rendered}");
+}
+
+/// ADR-0160 ② red proof — 「가용성 휘발 미저장」. The availability heartbeat is a
+/// second `EphemeralSignal` variant, and it must inherit guard 3 whole: add any
+/// query to its path and this 202 turns into a 500. It publishes on the
+/// `presence:` rail, never `ch:`/`typing:`, and carries no `seq`/`version` —
+/// availability is stored nowhere, on the client's own clock exactly like typing.
+#[tokio::test]
+async fn the_availability_path_answers_with_no_database_at_all() {
+    let (url, captured) = spawn_mock_centrifugo().await;
+    let state = state_with(Some(&url), 0);
+    let workspace = Uuid::new_v4();
+    let channel = Uuid::new_v4();
+    let member = Uuid::new_v4();
+    let principal = human(workspace, member);
+    let grant = grant_for(EphemeralGrantScope {
+        member_id: member,
+        workspace_id: workspace,
+        channel_id: channel,
+    });
+
+    assert_eq!(
+        publish_availability(&state, &principal, workspace, channel, grant).await,
+        Ok(StatusCode::ACCEPTED),
+        "the 가용성 path must complete with Postgres unreachable (ADR-0160 ②)"
+    );
+
+    let publishes = captured.lock().expect("sink").clone();
+    assert_eq!(publishes.len(), 1);
+    let published = &publishes[0];
+    assert_eq!(
+        published.body["channel"],
+        json!(momo_ephemeral::ephemeral_presence_channel(workspace, channel)),
+        "availability rides the presence namespace, never ch:/typing:"
+    );
+    assert_eq!(
+        published.body["data"]["type"],
+        json!("ephemeral.presence"),
+        "a subscriber tells availability from 작성 중 by the type"
+    );
+    assert_eq!(
+        published.body["data"]["payload"]["member_id"],
+        json!(member.to_string().to_uppercase())
+    );
+    // Nothing ordered, nothing durable: same absences as the typing frame.
+    assert!(published.body["data"].get("seq").is_none(), "{}", published.body);
+    assert!(published.body.get("version").is_none(), "{}", published.body);
+    assert!(
+        published.body.get("idempotency_key").is_none(),
+        "{}",
+        published.body
+    );
+    let rendered = published.body.to_string();
+    assert!(!rendered.contains("outbox"), "{rendered}");
+}
+
+/// An agent holding a valid channel grant is still refused an availability
+/// heartbeat: 프레즌스 사람 전용 (ADR-0160 D4), the same rule typing keeps.
+#[tokio::test]
+async fn an_agent_cannot_signal_that_it_is_available() {
+    let (url, captured) = spawn_mock_centrifugo().await;
+    let state = state_with(Some(&url), 0);
+    let workspace = Uuid::new_v4();
+    let channel = Uuid::new_v4();
+    let agent_member = Uuid::new_v4();
+    let mut agent = human(workspace, agent_member);
+    agent.kind = PrincipalKind::Agent;
+
+    assert_eq!(
+        publish_availability(
+            &state,
+            &agent,
+            workspace,
+            channel,
+            grant_for(EphemeralGrantScope {
+                member_id: agent_member,
+                workspace_id: workspace,
+                channel_id: channel,
+            })
+        )
+        .await,
+        Err(StatusCode::FORBIDDEN)
+    );
+    assert!(captured.lock().expect("sink").is_empty());
 }
 
 // ---------------------------------------------------------------------------
@@ -556,6 +658,50 @@ fn the_ephemeral_namespace_keeps_no_history_in_every_environment() {
                 );
             }
         }
+    }
+}
+
+/// ADR-0160 ②: the `presence` availability namespace keeps no history in every
+/// environment either. Same reasoning as `typing` — a replayed "online" on
+/// reconnect renders a ghost — and the same client-publish-stays-shut guard.
+#[test]
+fn the_presence_namespace_keeps_no_history_in_every_environment() {
+    let infra = repo_root().join("infra");
+    let mut configs = Vec::new();
+    collect_centrifugo_configs(&infra, &mut configs);
+    configs.sort();
+    assert!(configs.len() >= 2, "dev and prod configs expected: {configs:?}");
+
+    for path in &configs {
+        let raw = std::fs::read_to_string(path).expect("read config");
+        let parsed: Value = serde_json::from_str(&raw).expect("parse config");
+        let namespaces = parsed["channel"]["namespaces"]
+            .as_array()
+            .unwrap_or_else(|| panic!("{} has no channel.namespaces", path.display()));
+        let presence = namespaces
+            .iter()
+            .find(|entry| entry["name"] == json!(momo_ephemeral::PRESENCE_NAMESPACE))
+            .unwrap_or_else(|| {
+                panic!(
+                    "{} is missing the `{}` namespace — availability that only works in \
+                     one environment is worse than none",
+                    path.display(),
+                    momo_ephemeral::PRESENCE_NAMESPACE
+                )
+            });
+        assert_eq!(
+            presence["history_size"],
+            json!(0),
+            "{}: a replayed online on reconnect is a ghost",
+            path.display()
+        );
+        assert_ne!(presence["force_recovery"], json!(true), "{}", path.display());
+        assert_eq!(
+            presence["subscribe_proxy_enabled"],
+            json!(true),
+            "{}: without the proxy anyone could watch any channel's presence",
+            path.display()
+        );
     }
 }
 

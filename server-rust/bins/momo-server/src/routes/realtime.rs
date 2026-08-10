@@ -156,14 +156,16 @@ pub async fn issue_token(
 /// A parsed Centrifugo channel name (Swift `CentrifugoRoutes.ParsedChannel`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ParsedChannel {
-    /// `ch:ws<WS>.<CHANNEL>` / `dm:ws<WS>.<CHANNEL>` — the message rail — and
-    /// `typing:ws<WS>.<CHANNEL>`, the 휘발 신호 rail beside it (ADR-0149).
+    /// `ch:ws<WS>.<CHANNEL>` / `dm:ws<WS>.<CHANNEL>` — the message rail — plus
+    /// the two 휘발 신호 rails beside it: `typing:ws<WS>.<CHANNEL>` (ADR-0149) and
+    /// `presence:ws<WS>.<CHANNEL>`, the 가용성(②) rail (ADR-0160 D5).
     ///
-    /// The three share one variant because they share one **rule**: you may
-    /// watch a channel's 「작성 중」 exactly when you may watch its messages. A
-    /// separate variant would be a second place for that rule to live, and the
-    /// two would eventually disagree — which is the failure where someone can
-    /// see who is typing in a channel they were removed from.
+    /// The four share one variant because they share one **rule**: you may watch
+    /// a channel's 「작성 중」 — or who is online in it — exactly when you may
+    /// watch its messages. A separate variant would be a second place for that
+    /// rule to live, and the two would eventually disagree: someone would see who
+    /// is typing, or who is online, in a channel they were removed from. ADR-0160
+    /// D5 makes this reuse explicit: 가용성 구독은 채널 멤버십 검사를 재사용한다.
     Channel { workspace: Uuid, channel: Uuid },
     /// `agent:ws<WS>.<CHANNEL>.<AGENT>` — observable progress, per channel.
     Agent {
@@ -211,10 +213,14 @@ pub fn parse_channel(name: &str) -> Option<ParsedChannel> {
     if segments.len() >= 2 {
         if let Ok(workspace) = Uuid::parse_str(segments[0]) {
             return match namespace {
-                // `typing` (ADR-0149) rides this arm on purpose: the ephemeral
-                // rail's subscribe rule IS the message rail's. See
-                // `ParsedChannel::Channel`.
-                "ch" | "dm" | momo_ephemeral::EPHEMERAL_NAMESPACE if segments.len() == 2 => {
+                // `typing` (ADR-0149) and `presence` (ADR-0160 ②) ride this arm
+                // on purpose: both ephemeral rails' subscribe rule IS the message
+                // rail's. See `ParsedChannel::Channel`.
+                "ch" | "dm"
+                | momo_ephemeral::EPHEMERAL_NAMESPACE
+                | momo_ephemeral::PRESENCE_NAMESPACE
+                    if segments.len() == 2 =>
+                {
                     let channel = Uuid::parse_str(segments[1]).ok()?;
                     Some(ParsedChannel::Channel { workspace, channel })
                 }
@@ -477,6 +483,40 @@ mod tests {
             None
         );
         assert_eq!(parse_channel(&format!("typing:ws.{channel}")), None);
+    }
+
+    /// ADR-0160 D5: the 가용성 channel resolves to the SAME authorization
+    /// decision as the message channel it shadows, exactly like `typing:`. If
+    /// these diverge, someone watches who-is-online in a channel they may not
+    /// read.
+    #[test]
+    fn the_presence_channel_is_authorized_exactly_like_the_message_channel() {
+        let workspace = Uuid::new_v4();
+        let channel = Uuid::new_v4();
+        let durable = cent_channel(workspace, channel);
+        let availability = momo_ephemeral::ephemeral_presence_channel(workspace, channel);
+        assert_ne!(durable, availability, "D5: separate namespace");
+        assert_ne!(
+            availability,
+            momo_ephemeral::ephemeral_channel(workspace, channel),
+            "and separate from the typing rail"
+        );
+        assert_eq!(
+            parse_channel(&availability),
+            parse_channel(&durable),
+            "one rule, not two"
+        );
+        assert_eq!(
+            parse_channel(&availability),
+            Some(ParsedChannel::Channel { workspace, channel })
+        );
+        // The shape rules still apply: no three-segment form, no legacy fallback.
+        let agent = Uuid::new_v4();
+        assert_eq!(
+            parse_channel(&format!("presence:ws{workspace}.{channel}.{agent}")),
+            None
+        );
+        assert_eq!(parse_channel(&format!("presence:ws.{channel}")), None);
     }
 
     #[test]

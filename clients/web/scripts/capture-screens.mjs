@@ -79,6 +79,11 @@ const MOBILE_TAP_TARGETS = [
   ["thread-composer-input", "답글 입력", "optional"],
   ["thread-composer-send", "답글 보내기", "optional"],
   ["long-press-hint-dismiss", "안내 닫기", "optional"],
+  // 프레즌스 6b H2 — 하단 프로필 행의 상태 트리거. 바로 옆 설정 톱니가 44px인데
+  // 이것만 24×24였다(design-review 실측): 같은 줄에서 엄지가 노리는 두 컨트롤이
+  // 서로 다른 확률로 눌린다. optional인 것은 사이드바(폰에서는 서랍)가 열린
+  // 프레임에서만 보이기 때문이고, 그 프레임이 `assertTapTargets`를 다시 부른다.
+  ["presence-control", "내 상태 변경", "optional"],
 ];
 
 // 연결 화면의 폼 1급 컨트롤 (goal P3 1-4).

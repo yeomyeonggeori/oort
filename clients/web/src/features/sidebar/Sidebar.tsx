@@ -53,7 +53,12 @@ import { UpdateBadge } from "@/features/updates/UpdateBadge";
 import { SidebarRow, SidebarSection } from "./SidebarRow";
 import { openChannelId } from "./openChannel";
 import { WorkspaceRail } from "./WorkspaceRail";
-import { connectionCopy, connectionDotClass } from "./connStatusIndicator";
+import { PresenceControl } from "./PresenceControl";
+import {
+  connectionBarClass,
+  connectionCopy,
+  showsConnectionBar,
+} from "./connStatusIndicator";
 import { Button } from "@/design/ui/button";
 import { cn } from "@/design/lib/cn";
 
@@ -526,38 +531,49 @@ export function Sidebar({
             Renders nothing at all unless there is something to act on. */}
         <UpdateBadge />
 
-        {/* The identity row is "who I am". The connection dot (①) moved here from
-            the workspace rail (검수 #6 / 프레즌스 6a) because "am I attached" reads
-            truest next to identity; the load-bearing disconnect signal stays with
-            the shell's ConnectionBanner, so nothing is lost on any viewport.
-            6b seam: the self declared-status control (away/dnd, ADR-0160 ③) lands
-            adjacent here without moving the dot — the avatar below becomes its
-            click target, or a button slot opens between the name and the dot. 6a
-            adds no presence vocabulary; only the connection indicator moved. */}
+        {/* The identity row is "who I am". Two DIFFERENT facts can appear here and
+            ADR-0160 keeps them apart (guard 6) — 6b design-review H1 is what made
+            the separation real rather than asserted:
+            • the presence control (③) is the avatar: the declared status
+              (auto/away/dnd) as a ROUND badge on the avatar, the universally read
+              presence spot. It is the only thing on this row that is ever green.
+            • the connection indicator (①, moved here in 6a) is a BAR next to the
+              gear, and only when the rail is unhealthy. It used to be an 8px
+              `rounded-sm` dot, which the radius clamp rendered as a circle: two
+              circles on one row, contradicting each other at away/dnd (amber
+              badge, green dot). Now health is silence and trouble is a bar, so
+              the two indicators cannot be read as one signal at any pixel size.
+            Nothing is lost by the silence: ConnectionBanner carries the
+            load-bearing disconnect story shell-wide on every viewport. */}
         <div className="safe-area-bottom flex items-center gap-2 border-t border-line p-2">
-          <span
-            className="flex size-6 shrink-0 items-center justify-center rounded-sm bg-surface-hover text-meta font-semibold"
-            aria-hidden="true"
-          >
-            {selfName.slice(0, 1)}
-          </span>
+          <PresenceControl
+            workspaceId={workspaceId}
+            selfMemberId={session.member.id}
+            selfMember={selfMember}
+            selfName={selfName}
+            connected={connStatus === "connected"}
+          />
           <span className="min-w-0 flex-1 truncate text-body" data-testid="self-name">
             {selfName}
           </span>
-          {/* Bound to real connStatus, never decorative (SKILL §8): color and
-              accessible name always derive from the status. shrink-0 keeps it in
-              place while a long name truncates. */}
-          <span
-            data-testid="conn-status"
-            data-status={connStatus}
-            role="img"
-            aria-label={connectionCopy(connStatus)}
-            title={connectionCopy(connStatus)}
-            className={cn(
-              "size-2 shrink-0 rounded-sm",
-              connectionDotClass(connStatus)
-            )}
-          />
+          {/* Bound to real connStatus, never decorative (SKILL §8): the colour and
+              the accessible name both derive from the status, and while connected
+              the element is not rendered at all. 12x4 bar = the workspace rail's
+              marker grammar, deliberately not the avatar badge's circle.
+              shrink-0 keeps it in place while a long name truncates. */}
+          {showsConnectionBar(connStatus) && (
+            <span
+              data-testid="conn-status"
+              data-status={connStatus}
+              role="img"
+              aria-label={connectionCopy(connStatus)}
+              title={connectionCopy(connStatus)}
+              className={cn(
+                "h-1 w-3 shrink-0 rounded-full",
+                connectionBarClass(connStatus)
+              )}
+            />
+          )}
           <Link
             to="/settings"
             aria-label="설정 열기"
