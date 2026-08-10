@@ -1,4 +1,4 @@
-# oort — 경량 PR CI (#1241). PR마다 자동으로 도는 유일한 워크플로다.
+# oort — PR CI (#1241 신설 · #1243 적립 집행). PR마다 자동으로 도는 유일한 워크플로다.
 #
 # 왜 신설했나: 감사 D(research/2026-08-10-buzz-audit-D.md §6)의 실측 —
 #   · 워크플로 5개가 전부 `workflow_dispatch`(2026-06-26 과금 중단 조치)
@@ -10,19 +10,31 @@
 # `scripts/check_npm_licenses.mjs` 게이트가 `scripts/local_gate.sh`에서만 돌고
 # CI에는 없어서, 외부 PR은 라이선스 검사를 한 번도 받지 않는다.
 #
-# 설계 제약(private + GitHub Free = 월 2,000분, ubuntu 1배·macOS 10배 과금):
-#   · **ubuntu-latest 전용.** macOS 러너는 이 워크플로에 들어오지 못한다.
-#   · 세 잡뿐이고, 문서 전용 PR은 `changes` 한 잡(≈1분)만 태운다.
-#   · `cancel-in-progress`로 연속 푸시의 앞선 런을 즉시 회수한다.
-#   · 잡마다 `timeout-minutes`로 소모 상한을 못박는다(런당 최악 32분).
+# ── 2026-08-10 공개 전환: 분 상한 논리 폐기, 스위트 확장 ───────────────────
+# 이 파일의 원래 설계는 **private + GitHub Free = 월 2,000분**이라는 제약 위에
+# 서 있었다(#1243 §4: PR 495건/월 × 2.9분 ≈ 1,440~1,870분, 여유 7~28%). 그래서
+# `cargo check`이지 `cargo test`가 아니었고, 타입체크는 있어도 단위 테스트는
+# 없었다 — 둘 다 "분이 없어서" 내린 결정이지 "검증이 불필요해서"가 아니다.
+# 레포가 public이 되면서 Actions는 **무료·무제한**이 됐고, 그 제약이 사라졌다.
+# 따라서:
+#   · **분 상한 논리는 제거한다.** ubuntu 전용도, 잡 수 최소화도, 런당 32분
+#     상한도 더는 근거가 없다. `timeout-minutes`는 남기되 의미가 바뀐다 —
+#     소모 상한이 아니라 **행(hang) 방지 안전장치**다(그래서 넉넉하다).
+#   · **path filter와 `cancel-in-progress`는 유지한다.** 이 둘은 과금 장치가
+#     아니라 피드백 지연 장치다. 문서 PR을 8분 기다리게 하지 않는 것과, 3초 뒤
+#     푸시한 커밋이 앞선 런을 죽이는 것은 무료여도 여전히 옳다.
+#   · **스위트를 확장한다**(#1243 적립 3): `cargo check` → `cargo test
+#     --workspace`, 타입체크 3트리 → 타입체크 + 단위 테스트 3트리.
 #
-# 스코프: 이 워크플로는 **전체 스위트가 아니다.** 컴파일·타입·라이선스까지만
-# 본다. 런타임 검증기·Docker 스택·e2e·Swift 트리는 `docs/LOCAL_PR_GATE.md`의
-# 로컬 게이트 몫으로 남는다(공개 전환으로 Actions가 무료가 되면 확장 후보).
-# 남은 휴면 워크플로(publish-images·release-desktop)는 무접촉이다 — 그쪽은
-# `actions/checkout@v4`(Node 20 런타임)를 쓰고 휴면 중이라 건드리지 않는다.
-# 매 PR마다 도는 이 워크플로만 `@v5`로 올려, Node 20 폐기 경고가 모든 런에
-# 상시로 붙는 것을 막는다(상시 경고는 주석을 읽지 않게 만든다).
+# 확장을 기존 잡에 **흡수**시켰지 잡을 늘리지 않았다. `cargo test`는 lib·bin·
+# test 타깃을 전부 컴파일하므로 `cargo check --workspace`를 그대로 포함한다 —
+# 둘을 함께 두면 같은 크레이트를 두 번 컴파일한다. Node도 같은 이유로 한 잡
+# 안에서 `npm ci` 한 번에 타입체크와 테스트를 모두 태운다.
+#
+# 스코프: 여전히 **전체 게이트가 아니다.** DB가 필요한 러스트 conformance
+# 테스트(`*_pg.rs`, 전부 `#[ignore]`)·런타임 검증기·Docker 스택·e2e·웹 e2e
+# 게이트는 `docs/LOCAL_PR_GATE.md`의 로컬 게이트 몫으로 남는다.
+# 남은 휴면 워크플로(release-desktop)는 무접촉이다.
 # (W-S1 #1215: `ci-build`·`release-ios`·`release-macos` 셋은 Swift 클라 3트리와
 #  함께 삭제됐다 — 전부 `workflow_dispatch` 전용이었고 자동 실행 0이었다.)
 name: pr-ci
@@ -34,8 +46,8 @@ on:
       # main으로 간다. 둘 다 걸어야 PR CI가 실제 머지 경로를 덮는다.
       - main
       - track/engine
-  # PR 없이 레인을 한 번 돌려보고 싶을 때(과금 판단·러너 실측용). 이때는
-  # 변경 파일 목록이 없으므로 두 레인을 모두 돈다.
+  # PR 없이 레인을 한 번 돌려보고 싶을 때. 이때는 변경 파일 목록이 없으므로
+  # 두 레인을 모두 돈다.
   workflow_dispatch:
 
 permissions:
@@ -90,14 +102,23 @@ jobs:
           # 레인별 관심 경로. 목록에 없는 경로(docs/·STATUS.md·infra/·scripts/·
           # 은퇴 중인 Swift 트리 server/·relay/·workers/·services/)만 바뀐 PR은
           # 두 레인 모두 skip된다. skip된 잡은 GitHub에서 성공으로 집계되므로,
-          # 공개 전환 후 required check으로 승격해도 문서 PR이 막히지 않는다.
+          # required check으로 승격해도 문서 PR이 막히지 않는다.
+          #
+          # 테스트를 돌리기 시작하면서 레인이 **자기 트리 밖의 입력**도 읽게
+          # 됐다. 그 둘은 실측으로 찾아 목록에 넣었다(넣지 않으면 그 파일만
+          # 바꾼 PR이 초록으로 통과한 뒤 base에서 빨강이 된다):
+          #   · `server/Fixtures/plugin-manifests/*.json` — `clients/web`의
+          #     `features/plugins/model.test.ts`·`lib/pluginApi.test.ts`가
+          #     레포 상대경로로 import한다.
+          #   · `docs/api/harness-refine-client-msg-id.golden.json` —
+          #     `momo-messaging/src/refine.rs`가 `include_str!`로 굽는다.
           rust=false
           node=false
           printf '%s\n' "$files" | grep -Eq \
-            '^(server-rust/|clients/desktop/src-tauri/|deny\.toml$|scripts/check_cargo_licenses\.sh$|\.github/workflows/pr-ci\.yml$)' \
+            '^(server-rust/|clients/desktop/src-tauri/|deny\.toml$|scripts/check_cargo_licenses\.sh$|docs/api/harness-refine-client-msg-id\.golden\.json$|\.github/workflows/pr-ci\.yml$)' \
             && rust=true
           printf '%s\n' "$files" | grep -Eq \
-            '^(clients/web/|clients/mobile/|packages/|package\.json$|package-lock\.json$|scripts/check_npm_licenses\.mjs$|\.github/workflows/pr-ci\.yml$)' \
+            '^(clients/web/|clients/mobile/|packages/|server/Fixtures/|package\.json$|package-lock\.json$|scripts/check_npm_licenses\.mjs$|\.github/workflows/pr-ci\.yml$)' \
             && node=true
 
           echo "→ rust=$rust node=$node"
@@ -105,15 +126,22 @@ jobs:
           echo "node=$node" >> "$GITHUB_OUTPUT"
 
   # ── ② Rust 레인 ─────────────────────────────────────────────────────────
-  # `cargo check`이지 `cargo build`도 `cargo test`도 아니다. 목표는 "라이브
-  # 서버가 컴파일은 되는가"라는, 지금 CI에 통째로 비어 있는 사실 하나다.
-  # 테스트 스위트는 DB가 필요한 것이 섞여 있어 로컬 게이트에 남긴다.
+  # `cargo test --workspace` + 카고 라이선스 게이트.
+  #
+  # 공개 전환 전에는 `cargo check`이었다. `cargo test`는 그것을 포함하면서
+  # 회귀까지 잡으므로 대체이지 추가가 아니다 — 두 명령을 함께 두면 같은
+  # 크레이트를 두 번 컴파일한다.
+  #
+  # DB가 필요한 conformance 테스트는 전부 `#[ignore]`라 여기서 자동으로
+  # 빠진다(파일 37개·`#[ignore]` 수가 `#[test]` 수 이상임을 실측). 그것들은
+  # 실제 pgvector/pg18 컨테이너를 세우는 로컬 게이트 몫이다.
   rust:
-    name: cargo check + 카고 라이선스 게이트
+    name: cargo test + 카고 라이선스 게이트
     needs: changes
     if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # 행 방지용 상한이지 소모 상한이 아니다(공개 전환으로 분은 무료·무제한).
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v5
 
@@ -131,13 +159,11 @@ jobs:
           workspaces: |
             server-rust
             clients/desktop/src-tauri
-          # 캐시가 없거나 상해도 게이트 결과는 같다. 오직 시간(=분당 소모)만
-          # 달라진다: cold ≈ 5-7분, warm ≈ 1-2분.
 
-      - name: cargo check --workspace (server-rust)
+      - name: cargo test --workspace (server-rust)
         # --locked: Cargo.lock을 고쳐야 하는 매니페스트 변경이 락 커밋 없이
         # 들어오면 여기서 빨강. 락 갱신은 리뷰 대상이지 CI의 부작용이 아니다.
-        run: cargo check --workspace --locked --manifest-path server-rust/Cargo.toml
+        run: cargo test --workspace --locked --manifest-path server-rust/Cargo.toml
 
       - name: cargo-deny 설치
         uses: taiki-e/install-action@v2
@@ -151,14 +177,18 @@ jobs:
         run: scripts/check_cargo_licenses.sh
 
   # ── ③ Node 레인 ─────────────────────────────────────────────────────────
-  # 타입체크 3트리 + npm 라이선스 게이트. lint·단위테스트·vite 빌드는 넣지
-  # 않는다(로컬 `web` 프로파일 몫 — 이 레인의 목표는 "타입이 맞는가"다).
+  # npm 라이선스 게이트 + 타입체크 3트리 + 단위 테스트 3트리.
+  #
+  # 한 잡 안에 둔다: `npm ci`가 3트리에서 가장 비싼 단계인데, 타입체크와
+  # 테스트를 잡으로 쪼개면 그 설치를 두 번 한다. 테스트는 각 트리가 이미 쓰는
+  # 스크립트를 그대로 호출한다(core·web = vitest, mobile = jest) — CI가 러너를
+  # 다시 고르면 개발자가 로컬에서 돌리는 것과 다른 명령이 된다.
   node:
-    name: TS 타입체크 + npm 라이선스 게이트
+    name: TS 타입체크 + 단위 테스트 + npm 라이선스 게이트
     needs: changes
     if: needs.changes.outputs.node == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v5
 
@@ -182,6 +212,11 @@ jobs:
         run: npm ci
 
       - name: npm ci (clients/web)
+        # playwright devDependency의 postinstall이 브라우저 3종을 내려받는데,
+        # 이 레인은 e2e를 돌리지 않으므로 전부 버려지는 다운로드다
+        # (server-rust/Dockerfile의 web 스테이지와 같은 이유·같은 변수).
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
         run: npm ci --prefix clients/web
 
       - name: npm ci (clients/mobile)
@@ -195,3 +230,14 @@ jobs:
 
       - name: typecheck — clients/mobile
         run: npm --prefix clients/mobile run typecheck
+
+      # 타입체크가 초록이어도 동작은 틀릴 수 있다. 세 트리의 단위 테스트는
+      # 타입이 못 보는 계약(seq 순서·재연결 복원·카피·권한 표면)을 본다.
+      - name: test — @momo/core (vitest)
+        run: npm run test --workspace @momo/core
+
+      - name: test — clients/web (vitest)
+        run: npm --prefix clients/web run test
+
+      - name: test — clients/mobile (jest)
+        run: npm --prefix clients/mobile run test
