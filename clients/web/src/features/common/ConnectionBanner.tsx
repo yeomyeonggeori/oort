@@ -15,8 +15,8 @@ import {
 //
 // It lives in the shell rather than in the channel because the fact it reports
 // is true of every surface: an 인박스 that stops updating and a 활동 feed that
-// stops updating look exactly like a quiet day. The workspace rail's 8px dot
-// stays where it is; it is a glance-level indicator and this is the sentence.
+// stops updating look exactly like a quiet day. The 8px dot in the profile
+// panel is a glance-level indicator; this banner is the sentence.
 //
 // The dwell (connectionAlert.ts) is why this can be a banner at all: without it
 // every two-second blip would push the content down and pull it back up.

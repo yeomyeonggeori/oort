@@ -6,6 +6,7 @@ import {
   memoryGrantPageFromWire,
   memoryPageFromWire,
   memorySearchFromWire,
+  notificationPrefFromWire,
 } from "./api";
 import { WireShapeError } from "./wire";
 
@@ -137,5 +138,22 @@ describe("에이전트 만들기 · 채널 배치 REST decoders", () => {
         },
       })
     ).toThrow(WireShapeError);
+  });
+});
+
+// 검수 피드백 #3 — 알림 끄기 응답. 서버는 저장한 플래그를 그대로 돌려준다.
+describe("notificationPrefFromWire", () => {
+  it("reads the stored flag back, both true and false", () => {
+    expect(notificationPrefFromWire({ muted: true })).toBe(true);
+    expect(notificationPrefFromWire({ muted: false })).toBe(false);
+  });
+
+  it("refuses a body without the flag rather than guessing a default", () => {
+    // muted가 빠진 응답을 false로 접으면 "껐는데 안 꺼졌다"가 조용히 지나간다.
+    expect(() => notificationPrefFromWire({})).toThrow(WireShapeError);
+    expect(() => notificationPrefFromWire({ muted: "true" })).toThrow(
+      WireShapeError
+    );
+    expect(() => notificationPrefFromWire(null)).toThrow(WireShapeError);
   });
 });

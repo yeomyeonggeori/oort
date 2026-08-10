@@ -2,10 +2,17 @@ import { describe, expect, it } from "vitest";
 import { ApiError } from "../../lib/api";
 import { NetworkError } from "../../lib/http";
 import {
+  CHANNEL_LEAVE_LABEL,
+  CHANNEL_MUTE_LABEL,
   CHANNEL_NAME_MAX,
   CHANNEL_TOPIC_MAX,
+  CHANNEL_UNMUTE_LABEL,
   canCreateChannel,
   canCreateChannelNow,
+  canLeaveChannel,
+  channelLeaveConfirmBody,
+  channelLeaveFailureMessage,
+  channelMuteToggleLabel,
   channelNameIssue,
   channelNameIssueMessage,
   channelTopicIssue,
@@ -158,5 +165,74 @@ describe("createChannelFailure", () => {
     expect(failure.field).toBeNull();
     expect(failure.message).toContain("다시 시도");
     expect(failure.message).not.toMatch(/죄송|알 수 없는/);
+  });
+});
+
+// 검수 피드백 #3 — 채널 헤더 메뉴. 낱말과 「어떤 항목이 서는가」의 규칙이 정본이다.
+
+describe("channelMuteToggleLabel", () => {
+  it("makes the word the state: 켜져 있으면 「끄기」, 꺼져 있으면 「켜기」", () => {
+    expect(channelMuteToggleLabel(false)).toBe(CHANNEL_MUTE_LABEL);
+    expect(channelMuteToggleLabel(true)).toBe(CHANNEL_UNMUTE_LABEL);
+    // 두 낱말이 뒤바뀌지 않는다: 껐다 켰다가 같은 글자면 항목이 상태를 잃는다.
+    expect(CHANNEL_MUTE_LABEL).not.toBe(CHANNEL_UNMUTE_LABEL);
+  });
+});
+
+describe("canLeaveChannel", () => {
+  it("offers leaving only to owner/admin, the roles the server lets remove a membership", () => {
+    // remove_member는 `role_of_actor.is_admin()`를 요구한다(channels.rs). 일반
+    // 멤버에게 내놓으면 확인 뒤 403으로 끝나는 막다른 길이다.
+    expect(canLeaveChannel("owner")).toBe(true);
+    expect(canLeaveChannel("admin")).toBe(true);
+    expect(canLeaveChannel("member")).toBe(false);
+    expect(canLeaveChannel("guest")).toBe(false);
+  });
+
+  it("offers it when the role has not arrived, and lets the server have the last word", () => {
+    // canCreateChannel과 같은 규율: 필드가 늦게 온다고 유일한 길을 숨기지 않는다.
+    expect(canLeaveChannel(undefined)).toBe(true);
+  });
+});
+
+describe("channelLeaveFailureMessage", () => {
+  it("maps the admin-only 403 to a next step rather than echoing the server", () => {
+    const message = channelLeaveFailureMessage(new ApiError(403, "forbidden"));
+    expect(message).toContain("관리자");
+    expect(message).not.toContain("forbidden");
+  });
+
+  it("reads a 404 as 'already not a member' rather than a failure", () => {
+    expect(channelLeaveFailureMessage(new ApiError(404, "not found"))).toContain(
+      "이미"
+    );
+  });
+
+  it("reuses the transport's measured copy when nothing answered, and never apologises", () => {
+    expect(
+      channelLeaveFailureMessage(new NetworkError("timeout", 15_000))
+    ).toContain("15초");
+    const generic = channelLeaveFailureMessage(new Error("boom"));
+    expect(generic).toContain("다시 시도");
+    expect(generic).not.toMatch(/죄송/);
+  });
+});
+
+describe("channelLeaveConfirmBody", () => {
+  it("names the channel and states that re-entry needs an admin", () => {
+    const body = channelLeaveConfirmBody("release-2026-08");
+    expect(body).toContain("release-2026-08");
+    expect(body).toContain("관리자");
+  });
+});
+
+describe("channel header menu labels", () => {
+  it("keeps the three action words distinct", () => {
+    const words = new Set([
+      CHANNEL_MUTE_LABEL,
+      CHANNEL_UNMUTE_LABEL,
+      CHANNEL_LEAVE_LABEL,
+    ]);
+    expect(words.size).toBe(3);
   });
 });

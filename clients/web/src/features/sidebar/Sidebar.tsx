@@ -15,7 +15,9 @@ import {
   Users,
   X,
 } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
 import { uuidEq, type Channel } from "@momo/core/lib/api";
+import { fetchWorkspace } from "@momo/core/features/settings/api";
 import { useSession } from "@/app/session";
 import { useInertWhile, useShellNav } from "@/app/shellNav";
 import {
@@ -51,7 +53,9 @@ import { UpdateBadge } from "@/features/updates/UpdateBadge";
 import { SidebarRow, SidebarSection } from "./SidebarRow";
 import { openChannelId } from "./openChannel";
 import { WorkspaceRail } from "./WorkspaceRail";
+import { connectionCopy, connectionDotClass } from "./connStatusIndicator";
 import { Button } from "@/design/ui/button";
+import { cn } from "@/design/lib/cn";
 
 // =============================================================================
 // Sidebar (R-1 §1): workspace header, the two global surfaces (인박스 / 활동),
@@ -132,6 +136,16 @@ export function Sidebar({
   const directoryQuery = useDirectory(workspaceId);
   const readStates = useReadStates(workspaceId);
   const { channels, dms } = channelsQuery.groups;
+
+  // 레일이 그리는 이름은 워크스페이스의 것이다 (검수 피드백 #4a-1). 소스는 이미
+  // 있는 GET /v1/workspaces/{ws} 이고, 설정 > 워크스페이스가 쓰는 것과 같은
+  // 쿼리 키라 캐시를 나눠 써 중복 페치가 없다. 그전엔 이 자리에 selfName(사용자
+  // 표시명)이 꽂혀 있어 현재 워크스페이스 타일이 사용자 이니셜을 그렸다.
+  const workspaceQuery = useQuery({
+    queryKey: ["settings", "workspace", workspaceId],
+    queryFn: () => fetchWorkspace(workspaceId),
+    retry: false,
+  });
 
   const selfMember = memberFor(directoryQuery.directory, session.member.id);
   const selfName = selfMember?.displayName ?? session.member.displayName;
@@ -284,7 +298,14 @@ export function Sidebar({
       data-open={asDrawer && drawerOpen ? "" : undefined}
       data-testid="sidebar"
     >
-      <WorkspaceRail workspaceName={selfName} connStatus={connStatus} />
+      <WorkspaceRail
+        workspace={{
+          name: workspaceQuery.data?.name,
+          isPending: workspaceQuery.isPending,
+          isError: workspaceQuery.isError,
+        }}
+        workspaceId={workspaceId}
+      />
 
       <div className="flex h-full w-full min-w-0 flex-col border-r border-line bg-surface-sidebar">
         <div className="flex items-center gap-2 border-b border-line p-2">
@@ -504,6 +525,14 @@ export function Sidebar({
             Renders nothing at all unless there is something to act on. */}
         <UpdateBadge />
 
+        {/* The identity row is "who I am". The connection dot (①) moved here from
+            the workspace rail (검수 #6 / 프레즌스 6a) because "am I attached" reads
+            truest next to identity; the load-bearing disconnect signal stays with
+            the shell's ConnectionBanner, so nothing is lost on any viewport.
+            6b seam: the self declared-status control (away/dnd, ADR-0160 ③) lands
+            adjacent here without moving the dot — the avatar below becomes its
+            click target, or a button slot opens between the name and the dot. 6a
+            adds no presence vocabulary; only the connection indicator moved. */}
         <div className="safe-area-bottom flex items-center gap-2 border-t border-line p-2">
           <span
             className="flex size-6 shrink-0 items-center justify-center rounded-sm bg-surface-hover text-meta font-semibold"
@@ -514,6 +543,20 @@ export function Sidebar({
           <span className="min-w-0 flex-1 truncate text-body" data-testid="self-name">
             {selfName}
           </span>
+          {/* Bound to real connStatus, never decorative (SKILL §8): color and
+              accessible name always derive from the status. shrink-0 keeps it in
+              place while a long name truncates. */}
+          <span
+            data-testid="conn-status"
+            data-status={connStatus}
+            role="img"
+            aria-label={connectionCopy(connStatus)}
+            title={connectionCopy(connStatus)}
+            className={cn(
+              "size-2 shrink-0 rounded-sm",
+              connectionDotClass(connStatus)
+            )}
+          />
           <Link
             to="/settings"
             aria-label="설정 열기"

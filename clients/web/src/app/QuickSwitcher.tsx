@@ -33,6 +33,7 @@ import {
   useAgentProfileOpen,
   useOpenAgentProfile,
 } from "@/features/routing/useAgentProfile";
+import { useAddWorkspaceOpen } from "@/features/workspace/useAddWorkspace";
 import { InlineBanner } from "@/features/common/States";
 import {
   isSurfaceProvided,
@@ -112,7 +113,9 @@ export function QuickSwitcher({
   // 훅이 어떤 렌더에서는 호출되지 않는다.
   const createChannelOpen = useCreateChannelOpen();
   const agentProfileOpen = useAgentProfileOpen();
-  const formDialogOpen = createChannelOpen || agentProfileOpen;
+  const addWorkspaceOpen = useAddWorkspaceOpen();
+  const formDialogOpen =
+    createChannelOpen || agentProfileOpen || addWorkspaceOpen;
 
   // 에이전트 라우팅도 팔레트에 자리가 있다 (R1 M7). 같은 규칙이 채널 만들기를
   // 여기에 앉혔고(SKILL §6 "모든 액션에 키보드 경로"), 이 액션은 그것보다 더
