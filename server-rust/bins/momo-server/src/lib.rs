@@ -45,7 +45,7 @@ use momo_db::PgPool;
 
 use crate::config::{
     AgentGatewaySettings, CorsConfig, EphemeralSettings, MentionSettings, RateLimitConfig,
-    RealtimeSettings, SettingsConfig, T3Settings,
+    RealtimeSettings, SettingsConfig, T3Settings, WebhookSettings,
 };
 use crate::rate_limit::SlidingWindowRateLimiter;
 
@@ -167,6 +167,13 @@ pub struct AppState {
     /// mismatch branch: a test supplies its own archive without a test-only
     /// branch existing anywhere in the handlers.
     pub drive: Arc<dyn momo_drive::DriveArchive>,
+    /// #1222 — the two webhook families' knobs. Default: no dedicated outbound
+    /// master key (the JWT secret stands in, as it does in Swift) and HTTPS
+    /// required. Nothing here is a switch that *closes* a surface: an operator
+    /// who configured nothing still gets working webhook management, because the
+    /// derivation has a defined fallback and the strict URL policy is the safe
+    /// end of its own axis.
+    pub webhook: Arc<WebhookSettings>,
     /// The key `ephemeral_grant`s are signed and verified with, derived once at
     /// startup from the app JWT secret (`momo_auth::ephemeral_grant_key`).
     ///
@@ -193,6 +200,7 @@ impl AppState {
             mentions: Arc::new(MentionSettings::default()),
             cors: Arc::new(CorsConfig::default()),
             ephemeral: Arc::new(EphemeralState::default()),
+            webhook: Arc::new(WebhookSettings::default()),
             drive: Arc::new(momo_drive::UnavailableDriveArchive),
             ephemeral_grant_key: Arc::new(ephemeral_grant_key),
         }
@@ -279,6 +287,12 @@ impl AppState {
     /// — the two are one value because the credential *is* the switch.
     pub fn with_ephemeral(mut self, settings: EphemeralSettings) -> Self {
         self.ephemeral = Arc::new(EphemeralState::new(settings));
+        self
+    }
+
+    /// Attach the operator's webhook configuration (#1222).
+    pub fn with_webhook(mut self, settings: WebhookSettings) -> Self {
+        self.webhook = Arc::new(settings);
         self
     }
 }
@@ -688,6 +702,41 @@ pub fn build_app(state: AppState) -> Router {
         .route(
             "/v1/workspaces/{ws}/usage/summary",
             get(routes::usage::summary),
+        )
+        // #1222 (T13) — the two webhook families, both workspace owner/admin.
+        //
+        // They are mounted together because they are one decision surface even
+        // though they point in opposite directions: `/webhooks` is what an
+        // outside system may push INTO a channel, `/event-subscriptions` is what
+        // oort pushes OUT of the workspace. Both were live on the Swift server
+        // and both had a deployed client waiting on them
+        // (`features/webhooks/api.ts`, `features/settings/eventSubscriptions.ts`),
+        // so until this block existed the two settings panels talked to a 404.
+        //
+        // The outbound half is the one with a privacy boundary attached: the 033
+        // mention/approval projections carry the message BODY to a third-party
+        // address, which is why the sender writes an egress audit row (#1204)
+        // and why this surface — the only place a person can turn that off —
+        // takes the owner/admin gate rather than plain membership.
+        .route(
+            "/v1/workspaces/{ws}/webhooks",
+            get(routes::webhooks::list).post(routes::webhooks::create),
+        )
+        .route(
+            "/v1/workspaces/{ws}/webhooks/{installation}/rotate",
+            post(routes::webhooks::rotate),
+        )
+        .route(
+            "/v1/workspaces/{ws}/webhooks/{installation}",
+            delete(routes::webhooks::revoke),
+        )
+        .route(
+            "/v1/workspaces/{ws}/event-subscriptions",
+            get(routes::event_subscriptions::list).post(routes::event_subscriptions::create),
+        )
+        .route(
+            "/v1/workspaces/{ws}/event-subscriptions/{subscription}",
+            put(routes::event_subscriptions::update).delete(routes::event_subscriptions::delete),
         )
         .route_layer(axum::middleware::from_fn_with_state(
             state.clone(),

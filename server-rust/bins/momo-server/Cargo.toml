@@ -44,6 +44,13 @@ momo-agent = { path = "../../crates/momo-agent" }
 # route layer still owns no SQL of its own and the plaintext bearer exists only
 # between the PUT body that carried it and the seal call.
 momo-settings = { path = "../../crates/momo-settings" }
+# #1222 (T13 웹훅·이벤트구독). `momo-webhook` owns every `webhook_installation`,
+# `webhook_secret_key` and `event_subscription` statement the eight management
+# routes mount, plus the ADR-0115 secret derivation and the SSRF destination
+# policy. It carries **no HTTP client** — the outbound delivery transport lives
+# in `bins/momo-webhook-sender` — so mounting this surface does not give
+# momo-server an arbitrary outbound-HTTP dependency (see the NOTE below).
+momo-webhook = { path = "../../crates/momo-webhook" }
 # P2 (푸시 등록 표면). `momo-push` owns every `device` / `push_token` statement the
 # devices route mounts. It carries no HTTP client of its own, so mounting the
 # registration surface here does not give momo-server an outbound HTTP
@@ -80,6 +87,11 @@ tracing-subscriber.workspace = true
 # a persisted message travels.
 
 [dev-dependencies]
+# #1222 conformance only: `tests/webhook_admin_conformance_pg.rs` recomputes the
+# revealed outbound secret from the stored reference and drives the two domain
+# reads under a foreign tenant's GUC. Already a runtime dependency above; named
+# here so the intent of the test-side use is explicit.
+momo-webhook = { path = "../../crates/momo-webhook" }
 # goal SRV-B3e: the conformance suite implements `ChatProvider` to drive the
 # streaming seam, and that trait is `#[async_trait]`.
 async-trait = { workspace = true }

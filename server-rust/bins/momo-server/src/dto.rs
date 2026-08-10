@@ -2761,6 +2761,168 @@ pub struct ApprovalListQuery {
     pub limit: Option<String>,
 }
 
+// ---------------------------------------------------------------------------
+// webhooks — incoming installations (#1222, openapi `webhooks`)
+//
+// Two of these responses can carry a credential and they are the only two on
+// this server that ever will: create and rotate. Both are answered `no-store`
+// by the handler, and neither the list row nor the revoke row has a field a
+// secret could be put in — the shape is the guard, exactly as it is on the
+// client side (`packages/momo-core/src/features/webhooks/model.ts`).
+// ---------------------------------------------------------------------------
+
+/// One installation as `listWebhookInstallations` returns it. No `secret`, no
+/// `url`: the list response carries neither by contract.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WebhookInstallationDto {
+    pub id: String,
+    pub channel_id: String,
+    pub author_member_id: String,
+    pub mode: String,
+    pub label: String,
+    /// `active` | `revoked`.
+    pub status: String,
+    pub created_at_ms: i64,
+    pub updated_at_ms: i64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WebhookInstallationListResponse {
+    pub installations: Vec<WebhookInstallationDto>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateWebhookRequest {
+    pub channel_id: String,
+    pub mode: String,
+    #[serde(default)]
+    pub label: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RotateWebhookRequest {
+    #[serde(default)]
+    pub overlap_seconds: Option<i64>,
+}
+
+/// The one-time reveal, from create (201) and rotate (200).
+///
+/// `secret` is native-mode only; in Slack-compatible mode the credential is
+/// *inside* `url`, which is why the client treats the two identically. Every
+/// optional field is omitted rather than null, matching Swift's
+/// `encodeIfPresent`.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WebhookSecretResponse {
+    pub installation: WebhookInstallationDto,
+    pub key_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub secret: Option<String>,
+    /// Relative ingress path — `/v1/webhooks/{ws}/{id}` or `/hooks/{token}`.
+    pub url: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signature_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub algorithm: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub overlap_seconds: Option<i64>,
+}
+
+/// `revoked: false` with a 200 would be a server saying it did not do the
+/// irreversible thing, so the handler only ever sends `true` — the client
+/// checks it (`parseRevokedInstallation`) and this field exists to be checked.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WebhookRevokeResponse {
+    pub installation: WebhookInstallationDto,
+    pub revoked: bool,
+}
+
+// ---------------------------------------------------------------------------
+// event subscriptions — outbound (#1222, openapi `event-subscriptions`)
+// ---------------------------------------------------------------------------
+
+/// One subscription. `secret` and `secretRef` are absent from this shape on
+/// purpose: the signing secret is answered once, by create, on a different type.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EventSubscriptionDto {
+    pub id: String,
+    pub workspace_id: String,
+    pub url: String,
+    pub event_kinds: Vec<String>,
+    pub enabled: bool,
+    pub delivery_failure_count: i32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub disabled_at_ms: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub disabled_reason: Option<String>,
+    pub created_by: String,
+    pub updated_by: String,
+    pub created_at_ms: i64,
+    pub updated_at_ms: i64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EventSubscriptionsResponse {
+    pub event_subscriptions: Vec<EventSubscriptionDto>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EventSubscriptionResponse {
+    pub event_subscription: EventSubscriptionDto,
+}
+
+/// The create response — the only place the outbound signing secret exists on
+/// this server's wire. Never selected from PG, never logged, never repeated.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreatedEventSubscriptionResponse {
+    pub event_subscription: EventSubscriptionDto,
+    pub secret: String,
+    pub signature_version: &'static str,
+    pub algorithm: &'static str,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CreateEventSubscriptionRequest {
+    pub url: String,
+    pub event_kinds: Vec<String>,
+    #[serde(default)]
+    pub enabled: Option<bool>,
+}
+
+/// Every field optional — `null` means "leave alone", and an entirely empty body
+/// is a 400 rather than a no-op that answers 200.
+///
+/// `deny_unknown_fields` is Swift's hand-written dynamic-key check
+/// (`EventSubscriptionRoutes.swift:24-30`) in one attribute: a typo'd
+/// `eventkinds` must be a rejection, not a silently ignored field that leaves
+/// the subscription sending something the admin thought they had changed.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct UpdateEventSubscriptionRequest {
+    #[serde(default)]
+    pub url: Option<String>,
+    #[serde(default)]
+    pub event_kinds: Option<Vec<String>>,
+    #[serde(default)]
+    pub enabled: Option<bool>,
+}
+
+impl UpdateEventSubscriptionRequest {
+    pub fn is_empty(&self) -> bool {
+        self.url.is_none() && self.event_kinds.is_none() && self.enabled.is_none()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

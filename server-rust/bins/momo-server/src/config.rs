@@ -76,6 +76,11 @@ pub struct Config {
     /// process the Centrifugo publish credential**, which no deployment did
     /// before this batch.
     pub ephemeral: EphemeralSettings,
+    /// #1222 웹훅 — the outbound signing master key and the local-only plain-HTTP
+    /// escape hatch. Never fatal and never closing: an operator who set neither
+    /// gets `OUTBOUND_WEBHOOK_MASTER_KEY = JWT_HMAC` (Swift's own fallback) and
+    /// an HTTPS-only destination policy.
+    pub webhook: WebhookSettings,
     /// MOMO-605 CORS origin allowlist — **empty unless the operator names an
     /// origin**, and an empty one mounts no middleware at all.
     pub cors: CorsConfig,
@@ -954,6 +959,84 @@ impl T3Settings {
     }
 }
 
+/// The two webhook families' knobs (#1222).
+///
+/// ## Why there are two master keys and not one
+///
+/// The **inbound** native ingress secret is derived from `JWT_HMAC`
+/// (Swift `App.swift:265` hands `WebhookRoutes` `config.jwtHMAC`), while the
+/// **outbound** event-subscription secret is derived from
+/// `OUTBOUND_WEBHOOK_MASTER_KEY` (`App.swift:207`). This struct carries only the
+/// second, because the first is already on [`crate::AppState::jwt_secret`] and a
+/// duplicate would be a second value that could drift from it.
+///
+/// `outbound_master_key` is `None` when the operator set nothing, and the
+/// resolver ([`WebhookSettings::outbound_master_key_or`]) then falls back to the
+/// JWT secret — byte-for-byte Swift's `env("OUTBOUND_WEBHOOK_MASTER_KEY", jwtHMAC)`.
+/// That fallback is what lets an un-updated deployment keep verifying the
+/// credentials it has already issued: a subscription's secret is *derived*, so
+/// changing the key silently invalidates every live subscriber. Swift's strict
+/// environments still refuse to boot when the two are equal, and that check is
+/// unchanged — it lives in `SettingsConfig::boot_error`'s family, not here.
+#[derive(Clone, PartialEq, Eq)]
+pub struct WebhookSettings {
+    /// `OUTBOUND_WEBHOOK_MASTER_KEY`. Held in memory only; never logged, never
+    /// echoed, used for nothing but HMAC derivation.
+    pub outbound_master_key: Option<String>,
+    /// `MOMO_ENV=local` **and** `MOMO_EVENT_SUBSCRIPTION_ALLOW_HTTP=1`.
+    ///
+    /// Both halves are required, which is the same pair the Swift relay reads
+    /// (`relay/OutboxRelay/.../Config.swift:66-68`). A single flag would be one
+    /// typo away from letting a staging instance ship message bodies over plain
+    /// HTTP; requiring the environment label too means the flag cannot be
+    /// effective anywhere it should not be.
+    pub allow_development_http: bool,
+}
+
+impl Default for WebhookSettings {
+    /// Fail-closed: no dedicated key (fall back to the JWT secret, as Swift
+    /// does) and HTTPS required.
+    fn default() -> Self {
+        WebhookSettings {
+            outbound_master_key: None,
+            allow_development_http: false,
+        }
+    }
+}
+
+impl std::fmt::Debug for WebhookSettings {
+    /// Hand-written for the same reason [`SettingsConfig`]'s is: the field is a
+    /// master key, and a `{:?}` in a log line is how one reaches an aggregator.
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("WebhookSettings")
+            .field(
+                "outbound_master_key_configured",
+                &self.outbound_master_key.is_some(),
+            )
+            .field("allow_development_http", &self.allow_development_http)
+            .finish_non_exhaustive()
+    }
+}
+
+impl WebhookSettings {
+    pub fn from_env() -> WebhookSettings {
+        WebhookSettings {
+            outbound_master_key: env("OUTBOUND_WEBHOOK_MASTER_KEY"),
+            allow_development_http: env_or("MOMO_ENV", "local")
+                .trim()
+                .eq_ignore_ascii_case("local")
+                && env_or("MOMO_EVENT_SUBSCRIPTION_ALLOW_HTTP", "0").trim() == "1",
+        }
+    }
+
+    /// The key outbound secrets are derived from, falling back to the app JWT
+    /// secret exactly as Swift does.
+    pub fn outbound_master_key_or<'a>(&'a self, jwt_secret: &'a str) -> &'a str {
+        self.outbound_master_key.as_deref().unwrap_or(jwt_secret)
+    }
+}
+
 fn env(key: &str) -> Option<String> {
     match std::env::var(key) {
         Ok(value) if !value.trim().is_empty() => Some(value),
@@ -1039,6 +1122,12 @@ impl Config {
             // here, and byte-for-byte today's behaviour for a deployment that
             // does not update its env block.
             ephemeral: EphemeralSettings::from_env(),
+            // #1222: never fatal. `OUTBOUND_WEBHOOK_MASTER_KEY` is optional
+            // precisely because it has a defined fallback — changing the key an
+            // outbound secret is derived from invalidates every already-issued
+            // subscriber credential, so a missing value must mean "keep the one
+            // in use", not "pick a new one".
+            webhook: WebhookSettings::from_env(),
             // MOMO-605: never fatal. A malformed entry narrows the allowlist and
             // the boot warns; refusing to start over a browser knob would take
             // the whole instance down for a desktop-only concern.
