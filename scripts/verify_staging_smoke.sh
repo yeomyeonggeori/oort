@@ -169,6 +169,39 @@ grep -Eq 'placeholder|change-me|example|local value|unsafe|missing required env'
 "$PREFLIGHT" --env-file "$PROD_DIR/internal-smoke.env.example" --mode internal-smoke
 
 STRICT_ENV="$(mktemp "${TMPDIR:-/tmp}/momo-public-preflight.XXXXXX")"
+# This fixture is the positive case for prod_env_preflight.sh strict mode: it
+# must satisfy every key in that script's strict `require_vars` list plus the
+# shape assertions that follow it. When a ticket adds a required key and this
+# block is not updated, the preflight rejects the fixture and the whole
+# staging-smoke gate dies here — MOMO-554 (runtime-role split) and MOMO-572
+# (PROVIDER_LINK_MASTER_KEY) both landed without touching it, and the gate was
+# red from 2026-07-23 until #1246 behind an earlier failure in
+# verify_prod_install_upgrade.sh (#1236/PR #1245) that hid it.
+#
+# The fixture must therefore track three contracts that moved after it was
+# written:
+#   1. runtime roles (MOMO-554): the owner role is migration-only, and the API,
+#      relay and worker authenticate as momo_app/momo_relay/momo_worker. There
+#      is no top-level DATABASE_URL any more — docker-compose.prod.yml derives
+#      each service's DATABASE_URL from MIGRATE_/MOMO_APP_DATABASE_URL.
+#   2. the unified multi-command image (MOMO-565): MOMO_IMAGE is canonical and
+#      the six per-service aliases converge on it. The pre-multibinary
+#      per-service repositories (momo-server, momo-outbox-relay, ...) were never
+#      published under the post-rename org.
+#   3. key separation (MOMO-572 / ADR-0004): JWT_HMAC, OUTBOUND_WEBHOOK_MASTER_KEY
+#      and PROVIDER_LINK_MASTER_KEY are three distinct compromise domains and
+#      preflight asserts all three values differ.
+#
+# Every credential value this block introduces is deliberately degenerate
+# (`<role>-fixture-1246-` + zero padding, Shannon entropy < 3.5). A fixture that
+# merely *looks* random is a gitleaks finding that has to be hand-triaged into
+# .gitleaksignore forever after, and each such line makes the secret gate blunter
+# (#1224 baselined three from this file alone; this change adds none). Measured,
+# not assumed: `relay_20260701_operator_generated_shape` — the obvious sibling of
+# the values already here — trips generic-api-key at entropy 3.95. Its neighbours
+# survive only because gitleaks' stopword allowlist happens to contain their role
+# words, which is not a property worth depending on. Keep new values below the
+# threshold rather than betting on the wordlist.
 cat > "$STRICT_ENV" <<'EOF'
 COMPOSE_PROJECT_NAME=momo-staging
 MOMO_ENV=staging
@@ -182,17 +215,23 @@ ACME_EMAIL=ops@momo-alpha.dev
 HTTP_PORT=80
 HTTPS_PORT=443
 MOMO_IMAGE_TAG=sha-0123456789abcdef0123456789abcdef01234567
-MOMO_API_IMAGE=ghcr.io/yeomyeonggeori/momo-server:${MOMO_IMAGE_TAG}
-MOMO_RELAY_IMAGE=ghcr.io/yeomyeonggeori/momo-outbox-relay:${MOMO_IMAGE_TAG}
-MOMO_WORKER_IMAGE=ghcr.io/yeomyeonggeori/momo-agent-worker:${MOMO_IMAGE_TAG}
-MOMO_MIGRATE_IMAGE=ghcr.io/yeomyeonggeori/momo-migrate:${MOMO_IMAGE_TAG}
-MOMO_WEB_IMAGE=ghcr.io/yeomyeonggeori/momo-web:${MOMO_IMAGE_TAG}
-MOMO_LINKSHORT_IMAGE=ghcr.io/yeomyeonggeori/momo-linkshort:${MOMO_IMAGE_TAG}
+MOMO_IMAGE=ghcr.io/yeomyeonggeori/oort:${MOMO_IMAGE_TAG}
+MOMO_API_IMAGE=${MOMO_IMAGE}
+MOMO_RELAY_IMAGE=${MOMO_IMAGE}
+MOMO_WORKER_IMAGE=${MOMO_IMAGE}
+MOMO_MIGRATE_IMAGE=${MOMO_IMAGE}
+MOMO_WEB_IMAGE=${MOMO_IMAGE}
+MOMO_LINKSHORT_IMAGE=${MOMO_IMAGE}
 POSTGRES_DB=momo
 POSTGRES_USER=momo
-POSTGRES_PASSWORD=postgres_20260701_operator_generated_shape
-DATABASE_URL=postgres://momo:postgres_20260701_operator_generated_shape@postgres:5432/momo
-RELAY_DATABASE_URL=postgres://momo_relay:relay_20260701_operator_generated_shape@postgres:5432/momo
+POSTGRES_PASSWORD=postgres-fixture-1246-000000000000000000
+MIGRATE_DATABASE_URL=postgres://momo:postgres-fixture-1246-000000000000000000@postgres:5432/momo
+MOMO_APP_POSTGRES_PASSWORD=app-fixture-1246-000000000000000000
+MOMO_APP_DATABASE_URL=postgres://momo_app:app-fixture-1246-000000000000000000@postgres:5432/momo
+RELAY_POSTGRES_PASSWORD=relay-fixture-1246-000000000000000000
+RELAY_DATABASE_URL=postgres://momo_relay:relay-fixture-1246-000000000000000000@postgres:5432/momo
+WORKER_POSTGRES_PASSWORD=worker-fixture-1246-000000000000000000
+WORKER_DATABASE_URL=postgres://momo_worker:worker-fixture-1246-000000000000000000@postgres:5432/momo
 DB_VOLUME_NAME=momo-staging-pgdata
 REDIS_PASSWORD=redis_20260701_operator_generated_shape
 CENTRIFUGO_REDIS_ADDRESS=redis://:redis_20260701_operator_generated_shape@redis:6379/0
@@ -201,6 +240,8 @@ CENT_TOKEN_HMAC=cent_token_hmac_20260701_operator_generated_shape
 CENT_API_KEY=cent_api_key_20260701_operator_generated_shape
 CENT_PROXY_SECRET=cent_proxy_secret_20260706_operator_generated_shape
 JWT_HMAC=jwt_hmac_20260701_operator_generated_shape
+OUTBOUND_WEBHOOK_MASTER_KEY=outbound-webhook-fixture-1246-000000000000000000
+PROVIDER_LINK_MASTER_KEY=provider-link-fixture-1246-000000000000000000
 AGENT_PROVIDER_MODE=external-hermes
 AGENT_MODEL=hermes-agent
 HERMES_BASE_URL=https://hermes.staging.momo-alpha.dev/v1
