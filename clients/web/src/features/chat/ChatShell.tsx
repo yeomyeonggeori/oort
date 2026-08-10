@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { Hash, Lock, MessageSquare, SquareTerminal } from "lucide-react";
+import { Hash, Lock, MessageSquare, SquareTerminal, Users } from "lucide-react";
 import {
   fetchMessages,
   updateReadState,
@@ -32,6 +32,7 @@ import {
 } from "@momo/core/features/timeline/quote";
 import { Timeline, type TimelineJump } from "@/features/timeline/Timeline";
 import { PinListMenu } from "@/features/timeline/PinListMenu";
+import { ChannelHeaderMenu } from "@/features/chat/ChannelHeaderMenu";
 import { CascadeProvider } from "@/features/timeline/cascadeRail";
 import { ThreadPanel } from "@/features/timeline/ThreadPanel";
 import { LongPressHint } from "@/features/timeline/LongPressHint";
@@ -631,20 +632,16 @@ export function ChatShell() {
     stressCount,
   ]);
 
-  const memberSummary = useMemo(() => {
-    // A DM's participants are the title and me. Repeating "데모 사용자, 김인턴"
-    // beside a title that already says 김인턴 @intern-kim adds a second, less
-    // precise copy of the same fact.
-    if (!channel || channel.kind === "dm") return "";
-    const ids = directory.members
-      .filter((m) => m.channelIds.some((id) => uuidEq(id, channel.id)))
-      .map((m) => m.id);
-    const names = ids
-      .map((id) => memberFor(directory, id)?.displayName)
-      .filter((name): name is string => Boolean(name));
-    if (names.length === 0) return "";
-    if (names.length <= 3) return names.join(", ");
-    return `${names.slice(0, 3).join(", ")} 외 ${names.length - 3}`;
+  // 검수 피드백 #3 ①: 이름 목록이 아니라 인원수다. 긴 이름 나열은 제목보다 폭을
+  // 먼저 가져갔고(폰에서 채널 이름이 두 글자로 줄었다), 같은 사실은 사람 아이콘과
+  // 숫자 하나로 온전하다. 인원수는 명부에서 이 채널의 멤버(사람·에이전트 모두)를
+  // 세어 얻는다 — 서버 count 필드가 없어(실측) 클라가 센다. DM은 참여자가 제목과
+  // 나뿐이라 세지 않는다.
+  const memberCount = useMemo(() => {
+    if (!channel || channel.kind === "dm") return 0;
+    return directory.members.filter((m) =>
+      m.channelIds.some((id) => uuidEq(id, channel.id))
+    ).length;
   }, [channel, directory]);
 
   const offline = stressCount === 0 && isOffline;
@@ -666,16 +663,32 @@ export function ChatShell() {
               <Hash className="size-4" />
             )}
           </span>
-          <h1
-            className={cn(
-              "min-w-0 truncate text-body font-semibold",
-              labelParts?.isAgent && stressCount === 0 && "text-agent"
-            )}
-          >
-            {stressCount > 0
-              ? `스크롤 측정 (${stressCount})`
-              : labelParts?.text ?? label}
-          </h1>
+          {/* 검수 피드백 #3 ②: 채널 이름을 누르면 채널을 다루는 메뉴가 선다.
+              진짜 채널(공개/비공개)에서만 — DM은 이름을 바꾸거나 나갈 대상이
+              아니고, 스트레스 픽스처는 뒤에 서버 행이 없다. h1은 그대로 제목의
+              지표(landmark)로 남고, 트리거 버튼이 그 안에 산다. */}
+          {stressCount === 0 && channel && channel.kind !== "dm" ? (
+            <h1 className="flex min-w-0 items-center text-body font-semibold">
+              <ChannelHeaderMenu
+                workspaceId={workspaceId}
+                channel={channel}
+                title={labelParts?.text ?? label}
+                selfMemberId={session.member.id}
+                selfRole={memberFor(directory, session.member.id)?.role}
+              />
+            </h1>
+          ) : (
+            <h1
+              className={cn(
+                "min-w-0 truncate text-body font-semibold",
+                labelParts?.isAgent && stressCount === 0 && "text-agent"
+              )}
+            >
+              {stressCount > 0
+                ? `스크롤 측정 (${stressCount})`
+                : labelParts?.text ?? label}
+            </h1>
+          )}
           {stressCount === 0 && labelParts?.handle && (
             <span
               className="shrink-0 text-meta text-ink-muted"
@@ -684,12 +697,17 @@ export function ChatShell() {
               {labelParts.handle}
             </span>
           )}
-          {memberSummary && (
-            /* 폰에서는 접는다 (goal B6): 390px 헤더에서 이 요약이 제목보다 먼저
-               폭을 가져가 채널 이름이 두 글자로 줄었다. 같은 사실은 멤버 목록에
-               온전히 있다. */
-            <span className="wide-only min-w-0 truncate text-meta text-ink-muted">
-              {memberSummary}
+          {memberCount > 0 && (
+            /* 폰에서는 접는다 (goal B6): 좁은 헤더에서는 채널 이름에 폭을 양보한다.
+               같은 인원수는 멤버 목록에 온전히 있다. */
+            <span
+              className="wide-only flex shrink-0 items-center gap-1 text-meta text-ink-muted"
+              data-testid="channel-member-count"
+            >
+              <Users className="size-4" aria-hidden="true" />
+              <span data-numeric aria-label={`멤버 ${memberCount}명`}>
+                {memberCount}
+              </span>
             </span>
           )}
           <span className="sr-only" data-testid="message-count">

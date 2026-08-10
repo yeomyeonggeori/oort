@@ -1079,6 +1079,40 @@ export async function removeChannelMember(
   );
 }
 
+/**
+ * Decode the `{ muted }` body the notification-pref write answers with. Pulled
+ * out so the wire shape is asserted in one place rather than only inside the
+ * async wrapper (same split as `channelMembershipFromWire`).
+ */
+export function notificationPrefFromWire(value: unknown): boolean {
+  const source = responseRecord(value);
+  const muted = bool(source, "muted");
+  if (muted === undefined) throw new WireShapeError();
+  return muted;
+}
+
+/**
+ * Mute or unmute this channel FOR THE CALLING MEMBER
+ * (`PUT …/channels/{ch}/notification-pref`, ADR-0124). The body carries only the
+ * flag: the preference's owner is the authenticated principal, so no `memberId`
+ * is sent and one member cannot silence another. Requires an active channel
+ * membership (not ownership); the server answers with the flag it stored.
+ */
+export async function setChannelNotificationPref(
+  workspaceId: string,
+  channelId: string,
+  muted: boolean
+): Promise<boolean> {
+  return notificationPrefFromWire(
+    await request<unknown>(
+      `/v1/workspaces/${encodeURIComponent(
+        workspaceId
+      )}/channels/${encodeURIComponent(channelId)}/notification-pref`,
+      { method: "PUT", body: JSON.stringify({ muted }) }
+    )
+  );
+}
+
 // ---- Plugin registry: catalog, manifest and caller-owned grants ------------
 //
 // `PluginRoutes` deliberately separates these projections. The catalog carries
