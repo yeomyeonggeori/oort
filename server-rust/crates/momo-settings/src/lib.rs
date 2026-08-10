@@ -106,6 +106,8 @@ pub use tier::{
     TierSpecInvalid, TierTargetRejected,
 };
 pub use workspace::{
-    create_workspace_in_tx, normalized_workspace_name, normalized_workspace_slug, CreatedWorkspace,
+    create_workspace_in_tx, lock_membership_mutation, normalized_workspace_name,
+    normalized_workspace_slug, revoke_member_tokens_in_tx, terminate_workspace_membership_in_tx,
+    workspace_has_another_active_owner, CreatedWorkspace, RevokedTokens,
     WorkspaceProvisionRejected, WorkspaceSpecInvalid,
 };

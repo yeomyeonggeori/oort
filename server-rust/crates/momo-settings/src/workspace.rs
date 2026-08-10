@@ -229,6 +229,115 @@ pub async fn create_workspace_in_tx(
     }))
 }
 
+// ---------------------------------------------------------------------------
+// Self-leave (ADR-0161 D4 — Swift `MemberLifecycleRoutes.leaveWorkspace`, :234)
+// ---------------------------------------------------------------------------
+
+/// Serialize every membership mutation in a workspace against the others (Swift
+/// `WorkspaceAuthorization.lockMembershipMutation`, :82). This is the guard the
+/// last-owner check leans on: without it two owners leaving at the same instant
+/// would each read "another owner exists" (the other one) and both commit,
+/// orphaning the workspace. Must be the transaction's first statement, before any
+/// read whose result a concurrent write could change.
+pub async fn lock_membership_mutation(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+) -> Result<(), DbError> {
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1::text, 128))")
+        .bind(workspace_id.to_string())
+        .execute(&mut *conn)
+        .await?;
+    Ok(())
+}
+
+/// Is there another **active** owner besides `excluding` (Swift
+/// `requireAnotherOwner`, :566). The workspace must always retain one owner, so a
+/// last owner's self-leave is refused (409) — ownership transfer is a separate,
+/// deliberate act (ADR-0117 D3). Reads `workspace_membership.role`, the
+/// per-workspace authority row (independent of any channel role).
+pub async fn workspace_has_another_active_owner(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    excluding_member_id: Uuid,
+) -> Result<bool, DbError> {
+    let exists: bool = sqlx::query_scalar(
+        "SELECT EXISTS ( \
+           SELECT 1 FROM workspace_membership wm \
+             JOIN member m ON m.workspace_id = wm.workspace_id AND m.id = wm.member_id \
+            WHERE wm.workspace_id = $1 \
+              AND wm.role = 'owner' \
+              AND wm.member_id <> $2 \
+              AND m.status = 'active' \
+              AND m.deleted_at IS NULL)",
+    )
+    .bind(workspace_id)
+    .bind(excluding_member_id)
+    .fetch_one(&mut *conn)
+    .await?;
+    Ok(exists)
+}
+
+/// How many tokens a self-leave revoked, split so the audit can name the agent
+/// credentials that went with the human (Swift `revokeTokens`, :595).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct RevokedTokens {
+    pub total: i64,
+    pub agent_bearers: i64,
+}
+
+/// Revoke every live token the leaving member authenticates with or is the
+/// subject of, and report the split. `COALESCE(revoked_at, now())` keeps an
+/// already-revoked token's original timestamp (Swift parity).
+pub async fn revoke_member_tokens_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+) -> Result<RevokedTokens, DbError> {
+    let kinds: Vec<String> = sqlx::query_scalar(
+        "UPDATE token SET revoked_at = COALESCE(revoked_at, now()) \
+          WHERE workspace_id = $1 \
+            AND (actor_member_id = $2 OR subject_member_id = $2) \
+            AND revoked_at IS NULL \
+        RETURNING kind::text",
+    )
+    .bind(workspace_id)
+    .bind(member_id)
+    .fetch_all(&mut *conn)
+    .await?;
+    let agent_bearers = kinds.iter().filter(|k| k.as_str() == "agent_bearer").count() as i64;
+    Ok(RevokedTokens {
+        total: kinds.len() as i64,
+        agent_bearers,
+    })
+}
+
+/// End the member's whole presence in the workspace (Swift `leaveWorkspace`
+/// writes, :254-265): every channel membership, the workspace-authority row, and
+/// the member row's soft-delete. All three together, in the caller's transaction,
+/// **after** the last-owner refusal — a rejected leave must not have written any
+/// of these.
+pub async fn terminate_workspace_membership_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+) -> Result<(), DbError> {
+    sqlx::query("DELETE FROM membership WHERE workspace_id = $1 AND member_id = $2")
+        .bind(workspace_id)
+        .bind(member_id)
+        .execute(&mut *conn)
+        .await?;
+    sqlx::query("DELETE FROM workspace_membership WHERE workspace_id = $1 AND member_id = $2")
+        .bind(workspace_id)
+        .bind(member_id)
+        .execute(&mut *conn)
+        .await?;
+    sqlx::query("UPDATE member SET status = 'deleted', updated_at = now() WHERE id = $1")
+        .bind(member_id)
+        .execute(&mut *conn)
+        .await?;
+    Ok(())
+}
+
 /// `23505` — the unique-violation SQLSTATE Swift matches on (:165).
 fn is_unique_violation(error: &sqlx::Error) -> bool {
     matches!(

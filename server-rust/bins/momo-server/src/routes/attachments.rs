@@ -66,7 +66,7 @@ use crate::AppState;
 /// account is an upstream problem with the instance's configuration, not the
 /// caller lacking permission. Answering 403 would tell a member who is perfectly
 /// entitled to the file that they are not.
-fn drive_error(error: DriveError) -> ApiError {
+pub(crate) fn drive_error(error: DriveError) -> ApiError {
     let message = error.safe_message();
     match error {
         DriveError::Unavailable => ApiError::new(StatusCode::SERVICE_UNAVAILABLE, message),

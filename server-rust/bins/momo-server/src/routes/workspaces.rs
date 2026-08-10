@@ -31,18 +31,24 @@ use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use momo_auth::Principal;
 use momo_db::audit::{write_audit, AuditEntry};
-use momo_messaging::{read_workspace_for_active_member, WorkspaceIdentity, WorkspaceRead};
+use momo_messaging::{
+    active_workspace_role, read_workspace_for_active_member, WorkspaceIdentity, WorkspaceRead,
+    WorkspaceRole,
+};
 use momo_settings::{
-    create_workspace_in_tx, normalized_workspace_name, normalized_workspace_slug,
-    WorkspaceProvisionRejected,
+    create_workspace_in_tx, lock_membership_mutation, normalized_workspace_name,
+    normalized_workspace_slug, revoke_member_tokens_in_tx, terminate_workspace_membership_in_tx,
+    workspace_has_another_active_owner, WorkspaceProvisionRejected,
 };
 
 use crate::dto::{
-    CreateWorkspaceRequest, CreateWorkspaceResponse, WorkspaceDto, WorkspaceResponse,
+    CreateWorkspaceRequest, CreateWorkspaceResponse, MembershipLifecycleResponse, WorkspaceDto,
+    WorkspaceResponse,
 };
 use crate::error::ApiError;
 use crate::routes::shared::{
-    agent_tenant_tx, require_instance_operator, settle_db, workspace_scope, DbRejectable,
+    agent_tenant_tx, audit_via_token_id, require_human, require_instance_operator, settle_db,
+    workspace_scope, DbRejectable,
 };
 use crate::AppState;
 
@@ -52,6 +58,15 @@ fn workspace_dto(workspace: &WorkspaceIdentity) -> WorkspaceDto {
         slug: workspace.slug.clone(),
         name: workspace.name.clone(),
         updated_at_ms: workspace.updated_at_ms,
+        // The content path with the media id as an immutable version token
+        // (ADR-0161 D5). It changes on replacement, so a cached avatar is never
+        // stale; absent when the workspace has no avatar (rail shows the initial).
+        avatar_url: workspace.avatar_media_id.map(|media_id| {
+            format!(
+                "/v1/workspaces/{}/avatar/content?v={}",
+                workspace.id, media_id
+            )
+        }),
     }
 }
 
@@ -181,6 +196,82 @@ pub async fn create(
         .into_response())
 }
 
+/// `DELETE /v1/workspaces/{ws}/members/me` — self-leave (ADR-0161 D4, Swift
+/// `MemberLifecycleRoutes.leaveWorkspace`).
+///
+/// The last owner cannot leave: ownership must transfer first, so a workspace is
+/// never orphaned. That refusal is a **409** (a precondition violation), distinct
+/// from a non-member's 403 — and distinct in copy from *channel* leave, which is
+/// the lower-scoped act (D4, "혼동 금지").
+///
+/// Every rejection is produced BEFORE the first write, because the tenant-tx's
+/// `Ok(Err(_))` channel commits (shared.rs `DbRejectable`): the advisory lock,
+/// the role read, and the last-owner check all run first, then the deletes.
+pub async fn leave(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path(workspace): Path<String>,
+) -> Result<Json<MembershipLifecycleResponse>, ApiError> {
+    let workspace_id = workspace_scope(&workspace, &principal)?;
+    // Only a person resigns from a workspace; an agent is operated, not a member
+    // who leaves (parity with Swift `requireHumanPrincipal`).
+    require_human(&principal, "only a human member can leave a workspace")?;
+    let member_id = principal.member_id;
+    let via_token_id = audit_via_token_id(&principal);
+
+    let outcome: DbRejectable<MembershipLifecycleResponse> =
+        agent_tenant_tx(&state.pool, workspace_id, move |conn| {
+            Box::pin(async move {
+                // First statement: serialize against concurrent membership
+                // mutations so two owners cannot both pass the last-owner check.
+                lock_membership_mutation(conn, workspace_id).await?;
+
+                // The workspace is the caller's own (workspace_scope enforced it),
+                // so a missing membership means they already left: 403, not 404.
+                let role = match active_workspace_role(conn, workspace_id, member_id).await? {
+                    Some(role) => role,
+                    None => return Ok(Err(ApiError::forbidden("not a workspace member"))),
+                };
+                if role == WorkspaceRole::Owner
+                    && !workspace_has_another_active_owner(conn, workspace_id, member_id).await?
+                {
+                    return Ok(Err(ApiError::new(
+                        StatusCode::CONFLICT,
+                        "workspace must retain at least one owner",
+                    )));
+                }
+
+                // Past every refusal: now write.
+                let revoked = revoke_member_tokens_in_tx(conn, workspace_id, member_id).await?;
+                terminate_workspace_membership_in_tx(conn, workspace_id, member_id).await?;
+                write_audit(
+                    conn,
+                    &AuditEntry::new(workspace_id, "workspace.left")
+                        .by(member_id)
+                        .target("member", member_id)
+                        .via_token(via_token_id)
+                        .with_schema(
+                            "momo.workspace.member_left.v1",
+                            serde_json::json!({
+                                "old": "active",
+                                "new": "deleted",
+                                "tokens_revoked": revoked.total.to_string(),
+                                "agent_credentials_revoked": revoked.agent_bearers.to_string(),
+                            }),
+                        ),
+                )
+                .await?;
+                Ok(Ok(MembershipLifecycleResponse {
+                    member_id: member_id.to_string(),
+                    status: "deleted".to_string(),
+                }))
+            })
+        })
+        .await;
+
+    Ok(Json(settle_db("workspaces.leave", outcome)?))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -197,6 +288,7 @@ mod tests {
                 slug: "momo".into(),
                 name: "모모".into(),
                 updated_at_ms: 1_700_000_000_123,
+                avatar_media_id: None,
             }),
         })
         .expect("serialize");
@@ -204,5 +296,24 @@ mod tests {
         assert_eq!(json["workspace"]["slug"], "momo");
         assert_eq!(json["workspace"]["name"], "모모");
         assert_eq!(json["workspace"]["updatedAtMs"], 1_700_000_000_123_i64);
+        // No avatar → the key is absent, not null (skip_serializing_if).
+        assert!(json["workspace"].get("avatarUrl").is_none(), "{json}");
+    }
+
+    /// A set avatar surfaces as a versioned content path — the `?v={media}` is
+    /// what makes the cached bytes immutable and busts on replacement (D5).
+    #[test]
+    fn a_set_avatar_is_a_versioned_content_path() {
+        let dto = workspace_dto(&WorkspaceIdentity {
+            id: Uuid::from_u128(1),
+            slug: "momo".into(),
+            name: "모모".into(),
+            updated_at_ms: 1_700_000_000_123,
+            avatar_media_id: Some(Uuid::from_u128(42)),
+        });
+        let url = dto.avatar_url.expect("avatar url present");
+        assert!(url.starts_with("/v1/workspaces/"), "{url}");
+        assert!(url.contains("/avatar/content?v="), "{url}");
+        assert!(url.ends_with(&Uuid::from_u128(42).to_string()), "{url}");
     }
 }

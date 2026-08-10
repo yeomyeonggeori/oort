@@ -305,6 +305,7 @@ export function Sidebar({
           isError: workspaceQuery.isError,
         }}
         workspaceId={workspaceId}
+        avatarUrl={workspaceQuery.data?.avatarUrl}
       />
 
       <div className="flex h-full w-full min-w-0 flex-col border-r border-line bg-surface-sidebar">

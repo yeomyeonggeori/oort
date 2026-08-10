@@ -431,6 +431,14 @@ export interface WorkspaceIdentity {
   slug: string;
   name: string;
   updatedAtMs: number;
+  /**
+   * The workspace avatar content path with an immutable version token
+   * (`/v1/workspaces/{ws}/avatar/content?v={media}`), or absent when there is no
+   * avatar (ADR-0161 D5). The rail renders it (via `fetchWorkspaceAvatar`, since
+   * `<img src>` cannot carry the bearer) and falls back to the name initial. The
+   * `?v` changes on replacement, so a cache is never stale.
+   */
+  avatarUrl?: string;
 }
 
 export function createWorkspace(
