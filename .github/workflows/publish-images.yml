@@ -56,9 +56,9 @@ jobs:
       image: ${{ env.IMAGE }}
       digest: ${{ steps.build.outputs.digest }}
     steps:
-      # @v4는 Node 20 런타임이다. 이 워크플로는 이번이 첫 실행이므로 폐기
-      # 경고를 안고 시작할 이유가 없다(pr-ci가 #1243에서 v5로 올린 것과 동일).
-      - uses: actions/checkout@v5
+      # 첫 실행 전 최신 메이저로 시작한다 — v7 breaking(fork PR 체크아웃 차단)은
+      # 이 레포 트리거에 해당 없음(W-DEP #667 판정).
+      - uses: actions/checkout@v7
 
       - name: Enable linux/arm64 emulation
         uses: docker/setup-qemu-action@v3

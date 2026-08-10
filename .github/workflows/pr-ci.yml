@@ -145,7 +145,7 @@ jobs:
     # 잡 전체 1분32초. 20분은 그 ~10배 여유다.
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: 툴체인 확인(러너 사전설치 stable)
         # rustup 툴체인 액션을 쓰지 않는다. 레포에 rust-toolchain.toml이 없어
@@ -194,7 +194,7 @@ jobs:
     # 테스트 3 38초). 15분은 그 ~10배 여유다.
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-node@v5
         with:
