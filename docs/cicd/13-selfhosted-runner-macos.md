@@ -23,13 +23,13 @@ ADR-0153 D2 는 macOS 러너를 "릴리스 때만 온라인"으로 못박았다.
 오케스트레이터의 `gh` 권한이 ADMIN 이므로 API로 바로 발급한다(웹 UI 불필요). 토큰은 **1시간 만료**이며 러너 하나를 등록할 수 있는 자격이다 — 로그·PR·이슈에 붙이지 말 것.
 
 ```sh
-gh api -X POST repos/yeomyeonggeori/momo/actions/runners/registration-token --jq .token
+gh api -X POST repos/yeomyeonggeori/oort/actions/runners/registration-token --jq .token
 ```
 
 권한만 확인하고 토큰 값은 남기고 싶지 않을 때:
 
 ```sh
-gh api -X POST repos/yeomyeonggeori/momo/actions/runners/registration-token --jq '"ok, expires_at=" + .expires_at'
+gh api -X POST repos/yeomyeonggeori/oort/actions/runners/registration-token --jq '"ok, expires_at=" + .expires_at'
 ```
 
 ### 2.2 설치·구성
@@ -41,8 +41,8 @@ curl -fsSLO "https://github.com/actions/runner/releases/download/v${RUNNER_VERSI
 tar xzf "actions-runner-osx-arm64-${RUNNER_VERSION}.tar.gz"
 
 ./config.sh \
-  --url https://github.com/yeomyeonggeori/momo \
-  --token "$(gh api -X POST repos/yeomyeonggeori/momo/actions/runners/registration-token --jq .token)" \
+  --url https://github.com/yeomyeonggeori/oort \
+  --token "$(gh api -X POST repos/yeomyeonggeori/oort/actions/runners/registration-token --jq .token)" \
   --name seongjae-mac \
   --labels release-desktop \
   --work _work \
@@ -51,7 +51,7 @@ tar xzf "actions-runner-osx-arm64-${RUNNER_VERSION}.tar.gz"
 
 - `self-hosted` · `macOS` · `ARM64` 라벨은 GitHub가 자동으로 붙인다. 워크플로의 `runs-on: [self-hosted, macOS]`(ADR-0153 명시)가 이것으로 매칭된다. `--labels release-desktop` 은 나중에 러너가 늘었을 때 구분하려고 붙이는 여분이다.
 - `--replace` 는 같은 이름의 죽은 등록이 남아 있을 때 덮어쓴다.
-- 등록 확인: `gh api repos/yeomyeonggeori/momo/actions/runners --jq '[.runners[] | {name, status, labels: [.labels[].name]}]'`
+- 등록 확인: `gh api repos/yeomyeonggeori/oort/actions/runners --jq '[.runners[] | {name, status, labels: [.labels[].name]}]'`
 
 ## 3. 릴리스마다 하는 것
 
@@ -94,11 +94,13 @@ gh run watch "$(gh run list --workflow=release-desktop.yml -L1 --json databaseId
 | Variable | `MOMO_SIGN_IDENTITY` | 위 Developer ID 문자열이 기본값 |
 | Variable | `MOMO_NOTARY_PROFILE` | `momo-notary` |
 | Variable | `MOMO_UPDATER_KEY` | `~/.momo-secrets/momo-updater.key` |
-| Variable | `MOMO_DIST_REPO` | `Dawn-kim-official/momo-alpha` |
+| Variable | `MOMO_DIST_REPO` | `yeomyeonggeori/momo-alpha` |
 | Secret | `MOMO_DIST_TOKEN` | 러너 사용자의 `gh`/git 자격을 그대로 쓴다(기본 경로) |
 | Secret | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | 빈 문자열 |
 
-`MOMO_DIST_TOKEN` 이 별도 항목인 이유: 발행 대상은 **다른 저장소**(`Dawn-kim-official/momo-alpha` — 릴리스 자산 + Pages 매니페스트)라 `secrets.GITHUB_TOKEN` 으로는 닿지 않는다. 러너가 성재 맥이라면 그 계정의 자격이 이미 있으므로 비워 두는 편이 맞다.
+`momo-alpha` 는 본 레포(`yeomyeonggeori/oort`)의 개명과 **무관하다** — 별개의 공개 배포 저장소로 이름 그대로 존재한다(2026-08-10 실측). 구 org 이름만 현행 소유자로 바꿨다.
+
+`MOMO_DIST_TOKEN` 이 별도 항목인 이유: 발행 대상은 **다른 저장소**(`yeomyeonggeori/momo-alpha` — 릴리스 자산 + Pages 매니페스트)라 `secrets.GITHUB_TOKEN` 으로는 닿지 않는다. 러너가 성재 맥이라면 그 계정의 자격이 이미 있으므로 비워 두는 편이 맞다.
 
 ## 5. 세 모드
 
@@ -129,7 +131,7 @@ gh run watch "$(gh run list --workflow=release-desktop.yml -L1 --json databaseId
 
 ```sh
 cd ~/actions-runner
-./config.sh remove --token "$(gh api -X POST repos/yeomyeonggeori/momo/actions/runners/remove-token --jq .token)"
+./config.sh remove --token "$(gh api -X POST repos/yeomyeonggeori/oort/actions/runners/remove-token --jq .token)"
 ```
 
 ## 9. 보안 경계

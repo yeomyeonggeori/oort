@@ -1,6 +1,6 @@
 # oort — RELEASE PLAYBOOK (데스크탑 공증 + iOS App Store + CI/CD)
 
-> 작성: 2026-06-24 · 대상 실행 주체: **Codex (goal 자율 실행)** · REPO: `/Users/kwakseongjae/projects/momo` · GitHub: `Dawn-kim-official/momo` (branch `main`).
+> 작성: 2026-06-24 · 대상 실행 주체: **Codex (goal 자율 실행)** · REPO: `/Users/kwakseongjae/projects/momo` · GitHub: `yeomyeonggeori/oort` (branch `main`).
 > 범위: **(A) macOS 데스크탑 Developer ID 공증 직접배포(notarytool/stapler/DMG/Sparkle)** + **(B) iOS App Store 전 과정(가입→인증서→TestFlight→Review→배포)** + **(C) CI/CD(fastlane match/gym/pilot/deliver + ASC API Key + GitHub Actions)**.
 > 표기: `(검증됨)` = 2026 기준 Apple/GitHub/fastlane 1차 출처 교차확인 · `(추정)` = 설계 판단(보장 아님) · `[manual]` = 사람 1회 실행 · `[runtime]` = docker/psql 필요.
 >
@@ -130,13 +130,13 @@ STAGE C CI/CD 배선(게이트 전 dry-run) ─┤
 ### 4.2 비밀값 6종 등록 (`gh secret`) `[manual]`
 ```bash
 base64 -i AuthKey_XXXX.p8 | tr -d '\n' | pbcopy   # macOS: 개행 없는 base64
-gh secret set ASC_KEY_ID        --repo Dawn-kim-official/momo --body "<KEY_ID>"
-gh secret set ASC_ISSUER_ID     --repo Dawn-kim-official/momo --body "<ISSUER_UUID>"
-gh secret set ASC_KEY_P8_BASE64 --repo Dawn-kim-official/momo < <(base64 -i AuthKey_XXXX.p8 | tr -d '\n')
-gh secret set MATCH_GIT_URL     --repo Dawn-kim-official/momo --body "https://github.com/Dawn-kim-official/momo-signing.git"
-gh secret set MATCH_PASSWORD    --repo Dawn-kim-official/momo --body "<강한 패스프레이즈>"
-gh secret set MATCH_GIT_TOKEN   --repo Dawn-kim-official/momo --body "<signing repo PAT(repo scope)>"
-gh secret list --repo Dawn-kim-official/momo   # 6개 확인
+gh secret set ASC_KEY_ID        --repo yeomyeonggeori/oort --body "<KEY_ID>"
+gh secret set ASC_ISSUER_ID     --repo yeomyeonggeori/oort --body "<ISSUER_UUID>"
+gh secret set ASC_KEY_P8_BASE64 --repo yeomyeonggeori/oort < <(base64 -i AuthKey_XXXX.p8 | tr -d '\n')
+gh secret set MATCH_GIT_URL     --repo yeomyeonggeori/oort --body "https://github.com/Dawn-kim-official/momo-signing.git"
+gh secret set MATCH_PASSWORD    --repo yeomyeonggeori/oort --body "<강한 패스프레이즈>"
+gh secret set MATCH_GIT_TOKEN   --repo yeomyeonggeori/oort --body "<signing repo PAT(repo scope)>"
+gh secret list --repo yeomyeonggeori/oort   # 6개 확인
 ```
 
 ### 4.3 fastlane match 초기화 (개발자 머신 1회, 쓰기) `[manual]`
@@ -327,7 +327,7 @@ xcrun stapler validate build/MomoMac.dmg
   xcodebuild build-for-testing -scheme MomoiOS -destination 'platform=iOS Simulator,name=iPhone 16,OS=latest' CODE_SIGNING_ALLOWED=NO
   bundle exec fastlane ios ci_build            # [ci] 무서명
   actionlint .github/workflows/*.yml           # [ci] 워크플로우 lint
-  gh secret list --repo Dawn-kim-official/momo           # 6 secret 확인
+  gh secret list --repo yeomyeonggeori/oort           # 6 secret 확인
   spctl --assess --type execute --verbose build/MomoMac.app   # [manual] Gatekeeper
   ```
 

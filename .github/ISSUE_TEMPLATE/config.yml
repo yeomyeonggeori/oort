@@ -1,8 +1,8 @@
 blank_issues_enabled: false
 contact_links:
   - name: "운영 구조 문서 (GitHub Ops)"
-    url: https://github.com/yeomyeonggeori/momo/blob/main/docs/GITHUB_OPS.md
+    url: https://github.com/yeomyeonggeori/oort/blob/main/docs/GITHUB_OPS.md
     about: "Milestones=릴리스, Labels 택소노미, Projects, Codex goal 흐름은 여기를 먼저 읽으세요."
   - name: "에이전트 운영 계약 (AGENTS.md)"
-    url: https://github.com/yeomyeonggeori/momo/blob/main/AGENTS.md
+    url: https://github.com/yeomyeonggeori/oort/blob/main/AGENTS.md
     about: "Codex 자율작업 규칙: 빌드/검증 명령, DoD, 다음 티켓 선택법, 브랜치/PR."

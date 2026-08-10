@@ -68,7 +68,7 @@ Manifest schema v0:
   "minimum_macos": "14.0",
   "summary": "Short operator-facing release summary.",
   "download_url": "file:///Users/Shared/momo-alpha/MomoMac-0.4.5-alpha.2.zip",
-  "release_notes_url": "https://github.com/Dawn-kim-official/momo/releases/tag/macos-alpha-0.4.5-alpha.2",
+  "release_notes_url": "https://github.com/yeomyeonggeori/oort/releases/tag/macos-alpha-0.4.5-alpha.2",
   "restart_instructions": [
     "Open the downloaded alpha artifact.",
     "Replace the previous MomoMac app or rerun the operator-provided install command.",

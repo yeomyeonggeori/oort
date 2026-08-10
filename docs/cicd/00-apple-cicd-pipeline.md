@@ -33,7 +33,7 @@
 
 | 질문 | 권고 | 근거 |
 |---|---|---|
-| 어떤 CI? | **GitHub Actions `macos-15`(Apple Silicon) self-hosted 아님, GitHub-hosted** 우선 | org=dawnkim repo=momo가 이미 GitHub. fastlane 생태계 성숙. Xcode Cloud는 보조/백업. |
+| 어떤 CI? | **GitHub Actions `macos-15`(Apple Silicon) self-hosted 아님, GitHub-hosted** 우선 | org=yeomyeonggeori repo=oort가 이미 GitHub. fastlane 생태계 성숙. Xcode Cloud는 보조/백업. |
 | 인증 | **App Store Connect API Key(.p8 + key_id + issuer_id) 단일화** | 비대화형·2FA 불필요·notarytool/pilot/deliver/provisioning 전부 커버(Team Key). (검증됨) |
 | 코드사이닝 | **fastlane match(읽기전용 on CI)** + 별도 private git repo 저장 | 인증서/프로파일 재현성. CI에선 `readonly: true`. (검증됨) |
 | macOS 공증 | **`xcrun notarytool submit --wait` + `xcrun stapler staple`** (API Key) | altool은 2023-11-01부터 폐기. notarytool이 유일 경로. (검증됨) |
@@ -65,13 +65,13 @@
 # .p8를 base64 한 줄로 (개행 없이)
 base64 -i AuthKey_7UD13000.p8 | tr -d '\n' | pbcopy   # macOS
 
-# gh CLI로 등록 (org=dawnkim, repo=momo)
-gh secret set ASC_KEY_ID            --repo Dawn-kim-official/momo --body "7UD13000"
-gh secret set ASC_ISSUER_ID         --repo Dawn-kim-official/momo --body "6bc36aee-...."
-gh secret set ASC_KEY_P8_BASE64     --repo Dawn-kim-official/momo < <(base64 -i AuthKey_7UD13000.p8 | tr -d '\n')
-gh secret set MATCH_GIT_URL         --repo Dawn-kim-official/momo --body "https://github.com/Dawn-kim-official/momo-signing.git"
-gh secret set MATCH_PASSWORD        --repo Dawn-kim-official/momo --body "<match 암호화 패스프레이즈>"
-gh secret set MATCH_GIT_TOKEN       --repo Dawn-kim-official/momo --body "<signing repo 접근 PAT 또는 deploy key>"
+# gh CLI로 등록 (org=yeomyeonggeori, repo=oort)
+gh secret set ASC_KEY_ID            --repo yeomyeonggeori/oort --body "7UD13000"
+gh secret set ASC_ISSUER_ID         --repo yeomyeonggeori/oort --body "6bc36aee-...."
+gh secret set ASC_KEY_P8_BASE64     --repo yeomyeonggeori/oort < <(base64 -i AuthKey_7UD13000.p8 | tr -d '\n')
+gh secret set MATCH_GIT_URL         --repo yeomyeonggeori/oort --body "https://github.com/Dawn-kim-official/momo-signing.git"
+gh secret set MATCH_PASSWORD        --repo yeomyeonggeori/oort --body "<match 암호화 패스프레이즈>"
+gh secret set MATCH_GIT_TOKEN       --repo yeomyeonggeori/oort --body "<signing repo 접근 PAT 또는 deploy key>"
 ```
 
 ### 1.4 fastlane에서 키 로드 (base64 in-memory, 파일 미기록)

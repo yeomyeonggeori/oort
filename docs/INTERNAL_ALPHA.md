@@ -575,7 +575,7 @@ Severity guide:
 | P2 | Usability friction: flow works but is confusing, brittle, stale, missing expected feedback, or requires an undocumented workaround. |
 | P3 | Polish: copy, layout, visual fit, minor papercut, or non-blocking affordance issue. |
 
-momo-main triages feedback with `scripts/goal_status.sh --repo Dawn-kim-official/momo`.
+momo-main triages feedback with `scripts/goal_status.sh --repo yeomyeonggeori/oort`.
 Rows in `status:needs-triage` are not claimable worker goals until severity,
 evidence, labels, milestone, and acceptance are fixed.
 

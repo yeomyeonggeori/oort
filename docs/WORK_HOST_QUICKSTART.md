@@ -49,7 +49,7 @@ prod 환경 파일(예: `/run/momo-prod.env`)에 아래를 추가한다.
 
 ```sh
 # 필수: 사이드카 이미지(다이제스트 핀 권장)와 대상 워크스페이스
-MOMO_WORKHOST_IMAGE=ghcr.io/dawn-kim-official/momo-workhost:<tag>@sha256:<digest>
+MOMO_WORKHOST_IMAGE=ghcr.io/yeomyeonggeori/momo-workhost:<tag>@sha256:<digest>
 MOMO_WORKHOST_WORKSPACE_ID=<workspace-uuid>
 
 # 필수(최초 1회): owner/admin access token. 등록 후 이 줄을 지운다.

@@ -1,7 +1,8 @@
 # oort — CI/CD 비밀값 인벤토리
 
-> 전부 GitHub repo Secrets(`Dawn-kim-official/momo`). 로컬은 `.env`(gitignore됨) 또는 export.
+> 전부 GitHub repo Secrets(`yeomyeonggeori/oort`). 로컬은 `.env`(gitignore됨) 또는 export.
 > ⚠️ 어떤 비밀값도 로그/PR/커밋에 노출 금지. .p8는 base64로만.
+> ⚠️ **`momo-signing` 은 구·신 org 양쪽에서 404**(2026-08-10 실측 — #1236 항목 4, 성재 확인 대기). 실체가 정해지기 전까지 이 문서들의 `Dawn-kim-official/momo-signing` 문자열은 **일부러 재조준하지 않았다**(없는 곳을 가리키게 바꿔 봐야 거짓 확신만 는다). 다른 `--repo` 대상은 전부 현행 `yeomyeonggeori/oort` 다.
 
 | Secret | 용도 | 형식 | 발급처 |
 |---|---|---|---|

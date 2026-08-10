@@ -2,7 +2,7 @@
 # Show the issue/branch/worktree/PR board used by momo-main orchestration.
 set -euo pipefail
 
-ORG_REPO="${ORG_REPO:-yeomyeonggeori/momo}"
+ORG_REPO="${ORG_REPO:-yeomyeonggeori/oort}"
 LIMIT="${LIMIT:-120}"
 WORKTREE_ROOT="${WORKTREE_ROOT:-}"
 

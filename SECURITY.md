@@ -23,7 +23,7 @@ latest tag when possible.
 
 Do not open a public issue, discussion, or pull request for a suspected
 vulnerability. Use GitHub's private
-[Report a vulnerability](https://github.com/yeomyeonggeori/momo/security/advisories/new)
+[Report a vulnerability](https://github.com/yeomyeonggeori/oort/security/advisories/new)
 form to create a private Security Advisory.
 
 Include:

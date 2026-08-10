@@ -217,7 +217,7 @@ The alpha host must not need a source checkout.
 
 1. Build the multi-command oort image on a builder machine or CI.
 2. Push one immutable tag or digest to GHCR/ECR, for example
-   `ghcr.io/dawn-kim-official/momo:sha-<gitsha>`.
+   `ghcr.io/yeomyeonggeori/oort:sha-<gitsha>`.
    The manual-only `publish-images` workflow publishes the `api`, `relay`,
    `worker`, `migrate`, `web-assets`, and `linkshort` payload for `linux/arm64`
    under one `MOMO_IMAGE_TAG=sha-<40-char-gitsha>`.

@@ -14,7 +14,9 @@
 | 매니페스트 | `update-manifest-alpha.json` (자체 스키마) | `update-next.json` (Tauri static JSON) |
 | 번들 ID | `com.dawnkim.momo` | `app.momo.desktop` |
 
-두 채널이 같은 배포 저장소(`Dawn-kim-official/momo-alpha`)를 쓰지만 태그·자산 이름·매니페스트 파일이 전부 다르므로 서로를 덮지 않는다. 두 앱을 한 맥에 같이 설치해도 파일 이름(`MomoMac.app` / `momo.app`)과 번들 ID가 달라 충돌하지 않는다. **단 하나 겹치는 것은 딥링크 스킴(`oort://`, 그리고 하위호환으로 남긴 `momo://`)**이고, macOS LaunchServices 는 핸들러를 하나만 고른다.
+> **배포 저장소 이름 각주(2026-08-10)**: 본 레포는 `yeomyeonggeori/momo` → `yeomyeonggeori/oort` 로 개명됐지만 **배포 저장소 `momo-alpha` 는 개명 대상이 아니다** — 별개의 공개 저장소로 이름 그대로 존재한다(`gh api repos/yeomyeonggeori/momo-alpha` 200, `has_pages: true`). Pages 경로는 발행 저장소명 기준이므로 `https://yeomyeonggeori.github.io/momo-alpha/…` 도 그대로다(실측: 루트·`update-next.json`·`update-manifest-alpha.json` 전부 200). 구 org(`dawn-kim-official`) 부분만 현행 소유자로 재조준했다.
+
+두 채널이 같은 배포 저장소(`yeomyeonggeori/momo-alpha`)를 쓰지만 태그·자산 이름·매니페스트 파일이 전부 다르므로 서로를 덮지 않는다. 두 앱을 한 맥에 같이 설치해도 파일 이름(`MomoMac.app` / `momo.app`)과 번들 ID가 달라 충돌하지 않는다. **단 하나 겹치는 것은 딥링크 스킴(`oort://`, 그리고 하위호환으로 남긴 `momo://`)**이고, macOS LaunchServices 는 핸들러를 하나만 고른다.
 
 ## 1. 버전 체계
 
@@ -72,7 +74,7 @@ scripts/publish_next_build.sh --version 0.1.0-next.2 --notes "인박스 필터�
   "platforms": {
     "darwin-aarch64": {
       "signature": "dW50cnVzdGVk…",
-      "url": "https://github.com/Dawn-kim-official/momo-alpha/releases/download/next-v0.1.0-next.2/momo-next-0.1.0-next.2-darwin-aarch64.app.tar.gz"
+      "url": "https://github.com/yeomyeonggeori/momo-alpha/releases/download/next-v0.1.0-next.2/momo-next-0.1.0-next.2-darwin-aarch64.app.tar.gz"
     }
   }
 }
@@ -98,7 +100,7 @@ scripts/publish_next_build.sh --version 0.1.0-next.2 --notes "인박스 필터�
 scripts/publish_next_build.sh --version 0.1.0-next.9 --dry-run
 
 # 매니페스트가 실제로 서비스되는지
-curl -sS https://dawn-kim-official.github.io/momo-alpha/update-next.json | python3 -m json.tool
+curl -sS https://yeomyeonggeori.github.io/momo-alpha/update-next.json | python3 -m json.tool
 
 # 배포된 tar.gz 가 서명·공증을 유지하는지 (다운로드 후)
 tar -xzf momo-next-*.app.tar.gz -C /tmp/check

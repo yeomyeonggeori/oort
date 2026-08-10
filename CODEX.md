@@ -145,7 +145,7 @@ make swift-build ; make swift-test
 
 ## 3. 컨벤션 (브랜치 / 커밋 / PR)
 
-**브랜치 (GitHub org `Dawn-kim-official`, repo `momo`):**
+**브랜치 (GitHub org `yeomyeonggeori`, repo `oort`):**
 - `feat/<issue#>-<slug>` · `fix/<issue#>-<slug>` · `chore/<issue#>-<slug>` · `docs/<issue#>-<slug>`.
 - 티켓 id 형태가 `MOMO-NNN`이면 `feat/MOMO-NNN-<slug>`도 허용(SPINE 티켓 id 규약). **main 직접 push 금지**(브랜치 보호 가정).
 

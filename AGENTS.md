@@ -144,7 +144,7 @@ make swift-build ; make swift-test
 10. **계획 이탈 보고**: 구현이 수용기준·ADR·핸드오프 패킷과 달라진 모든 지점(스코프 축소, 우회, 발견된 설계 결함 포함)을 PR `## 계획 이탈` 섹션에 정직하게 기록한다(없으면 "없음"). 설계 판단이 필요하면 임의 재설계 대신 `scripts/goal_release.sh <issue> --blocked`로 멈춘다. 이 보고는 `docs/planning/DEVIATION_LOG.md` 환류 파이프라인의 입력이다.
 
 ## 5. 컨벤션 (브랜치 / 커밋 / PR)
-- **브랜치(org `Dawn-kim-official`/repo `momo`):** `feat/<issue#>-<slug>` · `fix/…` · `chore/…` · `docs/…`. SPINE 티켓 id면 `feat/MOMO-NNN-<slug>`도 허용. **main 직접 push 금지**(브랜치 보호 가정).
+- **브랜치(org `yeomyeonggeori`/repo `oort`):** `feat/<issue#>-<slug>` · `fix/…` · `chore/…` · `docs/…`. SPINE 티켓 id면 `feat/MOMO-NNN-<slug>`도 허용. **main 직접 push 금지**(브랜치 보호 가정).
 - **커밋:** Conventional Commits — `feat(server): channel_seq 발급 트랜잭션 (#NN)`. 타입/스코프는 영문, 본문 한국어 OK.
 - **PR:** 1 PR = 1 이슈. 머지 전 §3의 해당 등급 게이트 green 필수. PR 본문 템플릿:
 ```

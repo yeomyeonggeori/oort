@@ -80,7 +80,7 @@ Evidence may be missing for a chat-only note, but momo-main must mark exactly wh
 Use the status board before starting triage or worker assignment:
 
 ```bash
-scripts/goal_status.sh --repo Dawn-kim-official/momo
+scripts/goal_status.sh --repo yeomyeonggeori/oort
 ```
 
 `status:needs-triage` rows are alpha feedback intake. Their `evidence` column should read `triage-feedback`; they are not claimable worker goals yet.
@@ -88,7 +88,7 @@ scripts/goal_status.sh --repo Dawn-kim-official/momo
 For a raw GitHub CLI query:
 
 ```bash
-gh issue list --repo Dawn-kim-official/momo --label status:needs-triage --state open --json number,title,labels,assignees,url
+gh issue list --repo yeomyeonggeori/oort --label status:needs-triage --state open --json number,title,labels,assignees,url
 ```
 
 ## 6. Local Gate Pairing

@@ -1,7 +1,7 @@
 # oort — GitHub 운영 구조 (Codex가 goal로 자율작업)
 
 > 목적: **계획은 사람/워크플로우가, 실제 작업은 Codex가 GitHub Issue를 goal로 받아 자율 실행**하는 운영 골격.
-> repo: `Dawn-kim-official/momo` · branch: `main` · 모든 사실은 2026 기준 1차 출처로 확인했고 추정은 "(추정)"으로 표기.
+> repo: `yeomyeonggeori/oort` · branch: `main` · 모든 사실은 2026 기준 1차 출처로 확인했고 추정은 "(추정)"으로 표기.
 
 ---
 
@@ -55,7 +55,7 @@
 
 생성: `gh label create ... --force`(있으면 갱신, 없으면 생성 → idempotent).
 
-> **Labels vs Issue Types:** GitHub은 2025-03부터 **Issue Types**(1급 분류)와 sub-issues·advanced search를 GA했다([changelog](https://github.blog/changelog/2025-03-18-github-issues-projects-rest-api-support-for-issue-types/)). 단 Issue Types는 **org 레벨 + `admin:org` 스코프**가 필요하다([REST docs](https://docs.github.com/en/rest/orgs/issue-types)). repo 스코프만 있는 환경에서는 `type:*` **라벨**로 대체하고, org admin 권한이 생기면 `scripts/github_bootstrap.sh` 하단 주석의 `gh api orgs/Dawn-kim-official/issue-types`로 승격한다.
+> **Labels vs Issue Types:** GitHub은 2025-03부터 **Issue Types**(1급 분류)와 sub-issues·advanced search를 GA했다([changelog](https://github.blog/changelog/2025-03-18-github-issues-projects-rest-api-support-for-issue-types/)). 단 Issue Types는 **org 레벨 + `admin:org` 스코프**가 필요하다([REST docs](https://docs.github.com/en/rest/orgs/issue-types)). repo 스코프만 있는 환경에서는 `type:*` **라벨**로 대체하고, org admin 권한이 생기면 `scripts/github_bootstrap.sh` 하단 주석의 `gh api orgs/yeomyeonggeori/issue-types`로 승격한다.
 
 ---
 
@@ -119,7 +119,7 @@ Codex(cloud)는 `@codex` 멘션으로 이슈를 받으면 **이슈 본문을 작
 - worker thread는 한 GitHub Issue만 claim하고, remote branch를 lock으로 사용한다.
 - 시작 명령:
   ```bash
-  scripts/goal_status.sh --repo Dawn-kim-official/momo
+  scripts/goal_status.sh --repo yeomyeonggeori/oort
   scripts/goal_claim.sh <issue-number>
   ```
 - worker는 완료 시 issue, branch, worktree path, PR URL, local gate, remaining risks를 `momo-main`에 보고한다.
@@ -135,8 +135,8 @@ Codex(cloud)는 `@codex` 멘션으로 이슈를 받으면 **이슈 본문을 작
 - buildable goal로 바꿀 때만 `## Goal / ## Context / ## Acceptance / ## Out of scope`를 채우고 `status:ready`로 전환한다.
 - 상태 확인:
   ```bash
-  scripts/goal_status.sh --repo Dawn-kim-official/momo
-  gh issue list --repo Dawn-kim-official/momo --label status:needs-triage --state open
+  scripts/goal_status.sh --repo yeomyeonggeori/oort
+  gh issue list --repo yeomyeonggeori/oort --label status:needs-triage --state open
   ```
 
 ### 3.3 의존성 표현
@@ -157,10 +157,10 @@ Codex cloud는 네트워크 격리 sandbox에서 돌고, **GitHub 브랜치 보�
 4. 이슈 일괄 추가:
    ```bash
    # Project 번호 확인
-   gh project list --owner Dawn-kim-official
+   gh project list --owner yeomyeonggeori
    # 마일스톤별 이슈를 Project에 추가 (예시)
-   gh issue list --repo Dawn-kim-official/momo --milestone "M1 Backend 런타임 + 배포(staging)" --json url -q '.[].url' \
-     | xargs -I{} gh project item-add <PROJECT_NUMBER> --owner Dawn-kim-official --url {}
+   gh issue list --repo yeomyeonggeori/oort --milestone "M1 Backend 런타임 + 배포(staging)" --json url -q '.[].url' \
+     | xargs -I{} gh project item-add <PROJECT_NUMBER> --owner yeomyeonggeori --url {}
    ```
 - Project 한도: 50,000 items([GA changelog](https://github.com/orgs/community/discussions/154148)). oort 규모에 충분.
 - 자동화: Project workflow로 "이슈 closed → Done", "PR merged → 이슈 status 갱신"을 설정(수동 1회).
@@ -174,13 +174,13 @@ Codex cloud는 네트워크 격리 sandbox에서 돌고, **GitHub 브랜치 보�
 gh auth status
 
 # 1) dry-run 으로 검토
-scripts/github_bootstrap.sh --dry-run --org Dawn-kim-official --repo momo
+scripts/github_bootstrap.sh --dry-run --org yeomyeonggeori --repo oort
 
 # 2) 실제 적용 (idempotent: 재실행해도 중복 0)
-scripts/github_bootstrap.sh --org Dawn-kim-official --repo momo
+scripts/github_bootstrap.sh --org yeomyeonggeori --repo oort
 
 # 옵션
-scripts/github_bootstrap.sh --org Dawn-kim-official --repo momo --skip-issues   # 라벨/마일스톤만
+scripts/github_bootstrap.sh --org yeomyeonggeori --repo oort --skip-issues   # 라벨/마일스톤만
 ```
 생성 순서: 라벨 → 마일스톤(중복 skip) → 이슈(동일 title 열린 이슈 skip). 데이터 정본은 `.github/labels.json`과 `scripts/github_bootstrap.sh`의 `MILESTONES`/`TICKETS` heredoc이다.
 

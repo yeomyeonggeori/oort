@@ -30,7 +30,7 @@ compose가 가져온다. 도메인·TLS 인증서·외부 API 키도 이 경로�
 ## 1. 클론
 
 ```sh
-git clone https://github.com/Dawn-kim-official/momo.git oort
+git clone https://github.com/yeomyeonggeori/oort.git oort
 cd oort
 ```
 
