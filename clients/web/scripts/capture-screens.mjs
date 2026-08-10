@@ -4024,7 +4024,7 @@ async function captureAddMemberScenes(browser, scheme) {
   const shots = [];
   const RELEASE_NOTES_ID = CHANNELS[3].id;
 
-  async function shoot(name, overrideRoster) {
+  async function shoot(name, overrideRoster, settleTestId) {
     const context = await browser.newContext({
       viewport: VIEWPORT,
       deviceScaleFactor: 2,
@@ -4060,9 +4060,16 @@ async function captureAddMemberScenes(browser, scheme) {
     await page
       .getByTestId("add-channel-member-dialog")
       .waitFor({ state: "visible" });
-    // 스켈레톤 상태는 목이 응답하기 전에 찍어야 하므로 여기서 오래 기다리지
-    // 않는다. 애니메이션은 reducedMotion으로 이미 꺼져 있어 200ms면 안정된다.
-    await page.waitForTimeout(200);
+    if (settleTestId) {
+      // 이 상태는 목의 재시도 백오프를 지나 정착해야 찍힌다: 500은 queryClient의
+      // retry:1 + 기본 ~1000ms 백오프 때문에 열자마자는 아직 pending(재시도 중)
+      // 이라 스켈레톤이 뜬다. 그 testid가 보일 때까지 기다려 실제 상태를 찍는다.
+      await page.getByTestId(settleTestId).waitFor({ state: "visible" });
+    } else {
+      // 스켈레톤/정상은 목이 곧바로(또는 영영) 응답하므로 200ms면 안정된다.
+      // 애니메이션은 reducedMotion으로 이미 꺼져 있다.
+      await page.waitForTimeout(200);
+    }
     const path = `${OUT_DIR}/add-member-${name}-${scheme}.png`;
     await page.screenshot({ path });
     shots.push(path);
@@ -4073,13 +4080,17 @@ async function captureAddMemberScenes(browser, scheme) {
   await shoot("normal", null);
   // 빈: 워크스페이스에 나뿐. 카피 + "멤버 초대하기" 액션(F-1)이 보인다.
   await shoot("empty", (route) => json(route, { members: [ROSTER[0]] }));
-  // 에러: 로스터 읽기 실패 → 인라인 배너 + 다시 시도.
-  await shoot("error", (route) =>
-    route.fulfill({
-      status: 500,
-      contentType: "application/json",
-      body: JSON.stringify({ error: { message: "roster unavailable" } }),
-    })
+  // 에러: 로스터 읽기 실패 → 인라인 배너 + 다시 시도. 500은 재시도 백오프를
+  // 지나야 error로 정착하므로, 200ms가 아니라 error 배너가 뜰 때까지 기다린다.
+  await shoot(
+    "error",
+    (route) =>
+      route.fulfill({
+        status: 500,
+        contentType: "application/json",
+        body: JSON.stringify({ error: { message: "roster unavailable" } }),
+      }),
+    "add-member-roster-error"
   );
   // 로딩: 로스터 요청을 영영 붙잡아 스켈레톤이 화면에 남게 한다. 응답하지
   // 않으므로 fulfill이 없고, 컨텍스트가 닫히면 요청은 그대로 버려진다(닫힌
