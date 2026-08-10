@@ -1,0 +1,48 @@
+[package]
+name = "momo-webhook"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# The RLS GUC seam and the audit writer. Every statement in this crate takes a
+# caller-supplied `&mut PgConnection`, so `momo_db::with_tenant_tx` stays the
+# only wiring point for `app.workspace_id` (invariant #6).
+momo-db = { path = "../momo-db" }
+
+sqlx.workspace = true
+uuid.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+# ADR-0115 secret derivation. Both webhook secret families are HMAC-SHA256 over
+# a domain-separated string with a server-owned master key, which is why the DB
+# stores a random *reference* and never a secret: the value is recomputable and
+# therefore never has to be kept. Same construction as Swift `WebhookCrypto`, so
+# a credential issued by either server verifies on the other.
+hmac.workspace = true
+sha2.workspace = true
+base64.workspace = true
+hex.workspace = true
+# `secret_ref` / Slack URL tokens are 32 bytes of CSPRNG. `getrandom` is the OS
+# entropy call and nothing else — deliberately not a general PRNG, because a
+# seedable generator is one refactor away from a predictable webhook secret.
+getrandom = "0.2"
+
+# DNS for the SSRF guard (`outbound`). `tokio::net::lookup_host` is the whole
+# use; no HTTP client is or may be added here — see the NOTE at the bottom.
+tokio = { workspace = true, features = ["net"] }
+
+# NOTE (invariant #2 / ADR-0149's narrowed form): this crate must NEVER depend on
+# `reqwest`. `momo-server` links it for the eight management operations, and the
+# guard that keeps a route handler from building an arbitrary outbound request is
+# exactly that no crate in the api's dependency graph carries an HTTP client. The
+# outbound *delivery* client therefore lives in `bins/momo-webhook-sender`, not
+# here, even though it shares this crate's signing and SSRF policy.
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net"] }

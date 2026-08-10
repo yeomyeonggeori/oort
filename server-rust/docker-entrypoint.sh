@@ -26,6 +26,13 @@ case "$command" in
     # Centrifugo — the reply travels the message write path like any other.
     exec /usr/local/bin/momo-agent-worker "$@"
     ;;
+  webhook-sender)
+    # The outbound event-subscription drain (#1222). It holds the outbound
+    # signing master key and NO Centrifugo credential: it cannot publish to the
+    # durable rail, and the relay cannot POST to a subscriber. Two workers, two
+    # disjoint capabilities, by construction rather than by convention.
+    exec /usr/local/bin/momo-webhook-sender "$@"
+    ;;
   notifier)
     # The durability + notification worker (B2.3 + P2). Both of its opt-in loops
     # are default-off: T3 needs MOMO_T3_ENABLED=1, the ADR-0120 push drain needs
@@ -64,7 +71,7 @@ case "$command" in
     ;;
   *)
     echo "[momo] unknown command: $command" >&2
-    echo "usage: momo-rust-entrypoint {api|relay|agent-worker|notifier|migrate|web-assets}" >&2
+    echo "usage: momo-rust-entrypoint {api|relay|agent-worker|webhook-sender|notifier|migrate|web-assets}" >&2
     exit 2
     ;;
 esac

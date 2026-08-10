@@ -43,6 +43,10 @@ ed25519-dalek = "2"
 sha2 = "0.10"
 base64 = "0.22"
 hex = "0.4"
+# ADR-0115 webhook secret derivation + the outbound delivery signature (#1222).
+# Both webhook families are HMAC-SHA256 over a domain-separated string, which is
+# exactly what lets Postgres store a random *reference* instead of a secret.
+hmac = "0.12"
 
 # auth
 jsonwebtoken = "9"

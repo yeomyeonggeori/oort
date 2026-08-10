@@ -8,6 +8,7 @@
 # minimum set the Rust binaries can actually serve today:
 #
 #   postgres · centrifugo · runtime-roles · migrate · api · relay · agent-worker
+#   webhook-sender
 #
 # ## Overlays (#1228) — this file is the base, not the whole deployment
 #
@@ -37,7 +38,7 @@ x-momo-janitor-labels: &momo-janitor-labels
   com.momo.janitor.managed: "true"
   com.momo.janitor.match-label: com.docker.compose.project
 
-# ONE image, six commands (server-rust/Dockerfile). Compose interpolates this
+# ONE image, seven commands (server-rust/Dockerfile). Compose interpolates this
 # anchor per service, so api/relay/agent-worker/migrate/runtime-roles — and the
 # overlays' notifier and web-init — can never drift apart. Since #1228 the SPA
 # is in that image too, so this one variable pins the browser as well.
@@ -278,6 +279,52 @@ services:
       postgres:
         condition: service_healthy
       centrifugo:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - private
+
+  # #1222 — the outbound event-subscription sender. The base file, not an
+  # overlay, and the reason is what this stack looked like before it:
+  # `docker-compose.rust.yml` had NO webhook consumer at all (the three webhook
+  # mentions in it were comments), so the api's 이벤트 구독 panel could register a
+  # destination that would then never be delivered to — a settings surface whose
+  # promise nothing in the stack kept. An overlay would have reproduced exactly
+  # that, one `-f` at a time.
+  #
+  # It is the only service besides agent-worker that makes outbound HTTP to a
+  # third party, and unlike the relay it holds NO Centrifugo credential: it
+  # cannot publish to the durable rail, and the relay cannot POST to a
+  # subscriber. Two workers, two disjoint capabilities.
+  #
+  # `OUTBOUND_WEBHOOK_MASTER_KEY` uses the `:-` optional form on purpose. The
+  # outbound signing secret is DERIVED from it, so an unset key must mean "keep
+  # using the one already in use" (the binary falls back to JWT_HMAC, exactly as
+  # the Swift server and relay do) — a required `:?` here would make an operator
+  # invent a new key and silently break every already-installed subscriber.
+  webhook-sender:
+    image: *rust-image
+    command: ["webhook-sender"]
+    mem_limit: ${MOMO_WEBHOOK_SENDER_MEM_LIMIT:-256m}
+    labels: *momo-janitor-labels
+    restart: unless-stopped
+    environment:
+      MOMO_ENV: ${MOMO_ENV:-staging}
+      # momo_relay — BYPASSRLS: the drain crosses every tenant, same as the relay.
+      # WEBHOOK_SENDER_DATABASE_URL takes precedence when an operator wants to
+      # give this worker a credential of its own.
+      RELAY_DATABASE_URL: ${RELAY_DATABASE_URL:?set RELAY_DATABASE_URL}
+      WEBHOOK_SENDER_DATABASE_URL: ${WEBHOOK_SENDER_DATABASE_URL:-}
+      JWT_HMAC: ${JWT_HMAC:?set JWT_HMAC}
+      OUTBOUND_WEBHOOK_MASTER_KEY: ${OUTBOUND_WEBHOOK_MASTER_KEY:-}
+      WEBHOOK_SENDER_POLL_INTERVAL_MS: ${WEBHOOK_SENDER_POLL_INTERVAL_MS:-300}
+      WEBHOOK_SENDER_CLAIM_BATCH: ${WEBHOOK_SENDER_CLAIM_BATCH:-16}
+      WEBHOOK_SENDER_MAX_ATTEMPTS: ${WEBHOOK_SENDER_MAX_ATTEMPTS:-8}
+      WEBHOOK_DISABLE_AFTER_5XX: ${WEBHOOK_DISABLE_AFTER_5XX:-5}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    depends_on:
+      postgres:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
