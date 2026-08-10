@@ -980,3 +980,141 @@ async fn b13_login_refuses_a_workspace_it_cannot_parse_and_keeps_the_blank_fallb
         "the session is scoped to the workspace that was asked for: {body}"
     );
 }
+
+/// #1234 — the address the operator typed must be the address that signs in.
+///
+/// Every write path stores `lower(btrim(...))`; this lookup used to compare
+/// `h.email = $2` verbatim. So an owner created from `Owner@Example.com` had a
+/// row, a password and a workspace — and a 401 forever. Measured on PR #1231
+/// against the built image before it was fixed.
+///
+/// Three halves, because fixing one by breaking another is the obvious wrong
+/// turn:
+///   1. every spelling of a normalised address logs in;
+///   2. a **wrong** address still 401s (normalising is not "match anything");
+///   3. the stored row is untouched by the login — normalisation happens on the
+///      parameter, not by rewriting rows at read time.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a fresh pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn login_resolves_an_email_regardless_of_the_case_the_person_typed() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let fixture = seed(&su, &app_pool).await;
+    let base = start_server(app_pool).await;
+    let http = reqwest::Client::new();
+
+    // The seeded address is normalised — migration 064's CHECK constraint means
+    // nothing else can be stored, so these are the spellings a *person* types.
+    let stored = fixture.email.clone();
+    assert_eq!(
+        stored,
+        stored.to_lowercase(),
+        "the fixture stores normalised"
+    );
+
+    let typed = [
+        stored.to_uppercase(),
+        format!("  {stored}  "),
+        format!("  {}  ", stored.to_uppercase()),
+        stored.clone(),
+    ];
+
+    for spelling in typed {
+        let response = http
+            .post(format!("{base}/v1/auth/login"))
+            .json(&json!({
+                "email": spelling,
+                "password": TEST_PASSWORD,
+                "workspace": fixture.workspace.to_string(),
+            }))
+            .send()
+            .await
+            .expect("login");
+        assert_eq!(
+            response.status(),
+            200,
+            "{spelling:?} is the same account as {stored:?} and must sign in"
+        );
+        let body: Value = response.json().await.expect("login body");
+        assert_eq!(
+            body["member"]["id"],
+            json!(fixture.member.to_string()),
+            "…and it must resolve THAT member, not merely some member: {body}"
+        );
+    }
+
+    // Normalising the input is not the same as matching loosely: a genuinely
+    // different address is still nobody.
+    let stranger = http
+        .post(format!("{base}/v1/auth/login"))
+        .json(&json!({
+            "email": format!("NOT-{stored}"),
+            "password": TEST_PASSWORD,
+            "workspace": fixture.workspace.to_string(),
+        }))
+        .send()
+        .await
+        .expect("stranger login");
+    assert_eq!(stranger.status(), 401, "an unknown address is still 401");
+
+    // The row is exactly as seeded. A read path that "repairs" data is a write
+    // path wearing a disguise.
+    let after: String = sqlx::query_scalar("SELECT email FROM human WHERE member_id = $1")
+        .bind(fixture.member)
+        .fetch_one(&su)
+        .await
+        .expect("read back the stored address");
+    assert_eq!(
+        after, stored,
+        "logging in must not rewrite the stored address"
+    );
+}
+
+/// #1234 — the constraint migration 064 installs is the reason the lookup may
+/// normalise only its input. If a non-normalised row could exist, that shape
+/// would make it unreachable; this asserts the database refuses to hold one.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a fresh pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn the_database_refuses_to_store_a_non_normalised_email() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let fixture = seed(&su, &app_pool).await;
+
+    let intruder = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO member (id, workspace_id, kind, display_name, handle) \
+         VALUES ($1, $2, 'human', $3, $3)",
+    )
+    .bind(intruder)
+    .bind(fixture.workspace)
+    .bind(intruder.to_string())
+    .execute(&su)
+    .await
+    .expect("seed intruder member");
+
+    for bad in [
+        format!("Mixed-{intruder}@Smoke.Test"),
+        format!(" {intruder}@smoke.test"),
+        format!("{intruder}@smoke.test "),
+    ] {
+        let refused = sqlx::query(
+            "INSERT INTO human (member_id, workspace_id, email, password_hash) \
+             VALUES ($1, $2, $3, momo_password_hash($4))",
+        )
+        .bind(intruder)
+        .bind(fixture.workspace)
+        .bind(&bad)
+        .bind(TEST_PASSWORD)
+        .execute(&su)
+        .await;
+
+        let error = refused.expect_err(&format!("{bad:?} must not be storable"));
+        let message = error.to_string();
+        assert!(
+            message.contains("human_email_normalized_ck"),
+            "the refusal must name the #1234 constraint, got: {message}"
+        );
+    }
+}

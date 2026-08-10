@@ -324,6 +324,34 @@ pub enum PasswordLogin {
 /// [`momo_db::with_tenant_tx`]); the RLS policies then scope the lookup to the
 /// workspace being logged into. Neither the raw password nor the stored hash is
 /// ever returned or logged by this function.
+///
+/// ## The address is normalised on the **input** side only (#1234)
+///
+/// Every write path stores `lower(btrim(...))` — `create_workspace.sql`,
+/// `bootstrap_owner_if_absent.sql`, `set_initial_owner.sql` and
+/// `momo_settings::normalized_join_email` all agree — and migration 064 turns
+/// that convention into `human_email_normalized_ck`, so a stored address is a
+/// normalised address. This lookup used to compare `h.email = $2` verbatim,
+/// which meant an owner created from `Owner@Example.com` existed but could
+/// never sign in: the row said `owner@example.com` and the login said
+/// `Owner@Example.com`. A healthy stack nobody can enter.
+///
+/// Normalising the **parameter** rather than the column is deliberate, and
+/// measured rather than assumed:
+///
+/// * `lower(btrim(h.email)) = lower(btrim($2))` would fold the column too, and
+///   because `human_email_uniq` is case-**sensitive** a workspace can hold both
+///   `Twin@Example.com` and `twin@example.com` (verified by insert). That shape
+///   matches *both* rows, and with no `ORDER BY` the winner is whatever the plan
+///   yields — signing someone into an arbitrary one of two accounts. That is the
+///   failure `resolve_login_workspace` already refuses by name.
+/// * The parameter form constant-folds and keeps `human_email_uniq` as an
+///   `Index Cond`; the column form degrades to a `Filter` over the whole index.
+///
+/// Using SQL's own `lower(btrim(...))` rather than Rust's `trim().to_lowercase()`
+/// keeps this comparison byte-identical to what the write paths produced —
+/// `btrim` and Rust's `trim` do not agree on non-space whitespace, and that
+/// disagreement is exactly how this bug class comes back.
 pub async fn verify_password_login(
     conn: &mut PgConnection,
     email: &str,
@@ -339,7 +367,7 @@ pub async fn verify_password_login(
                 momo_password_verify($1, h.password_hash) AS password_ok \
            FROM human h \
            JOIN member m ON m.id = h.member_id \
-          WHERE h.email = $2",
+          WHERE h.email = lower(btrim($2))",
     )
     .bind(password)
     .bind(email)
