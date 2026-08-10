@@ -19,10 +19,12 @@
 # 스코프: 이 워크플로는 **전체 스위트가 아니다.** 컴파일·타입·라이선스까지만
 # 본다. 런타임 검증기·Docker 스택·e2e·Swift 트리는 `docs/LOCAL_PR_GATE.md`의
 # 로컬 게이트 몫으로 남는다(공개 전환으로 Actions가 무료가 되면 확장 후보).
-# 기존 워크플로 5개(ci-build·publish-images·release-*)는 무접촉이다 — 그쪽은
-# `actions/checkout@v4`(Node 20 런타임)를 쓰고 휴면 중이라 이번에 건드리지
-# 않는다. 매 PR마다 도는 이 워크플로만 `@v5`로 올려, Node 20 폐기 경고가 모든
-# 런에 상시로 붙는 것을 막는다(상시 경고는 주석을 읽지 않게 만든다).
+# 남은 휴면 워크플로(publish-images·release-desktop)는 무접촉이다 — 그쪽은
+# `actions/checkout@v4`(Node 20 런타임)를 쓰고 휴면 중이라 건드리지 않는다.
+# 매 PR마다 도는 이 워크플로만 `@v5`로 올려, Node 20 폐기 경고가 모든 런에
+# 상시로 붙는 것을 막는다(상시 경고는 주석을 읽지 않게 만든다).
+# (W-S1 #1215: `ci-build`·`release-ios`·`release-macos` 셋은 Swift 클라 3트리와
+#  함께 삭제됐다 — 전부 `workflow_dispatch` 전용이었고 자동 실행 0이었다.)
 name: pr-ci
 
 on:
@@ -86,7 +88,7 @@ jobs:
           printf '%s\n' "$files"
 
           # 레인별 관심 경로. 목록에 없는 경로(docs/·STATUS.md·infra/·scripts/·
-          # 은퇴한 Swift 트리 server/·relay/·workers/·clients/macOS/)만 바뀐 PR은
+          # 은퇴 중인 Swift 트리 server/·relay/·workers/·services/)만 바뀐 PR은
           # 두 레인 모두 skip된다. skip된 잡은 GitHub에서 성공으로 집계되므로,
           # 공개 전환 후 required check으로 승격해도 문서 PR이 막히지 않는다.
           rust=false

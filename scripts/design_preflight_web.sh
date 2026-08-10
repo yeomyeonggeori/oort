@@ -4,10 +4,15 @@
 # (MOMO-597, ADR-0133 P1).
 #
 # Executable form of `.claude/skills/momo-design-taste-web/SKILL.md` §10. Where
-# the mac counterpart (scripts/verify_design_preflight.sh) needs a ratchet
+# the mac counterpart (scripts/verify_design_preflight.sh) needed a ratchet
 # baseline because the v0 SwiftUI demo surface shipped with violations, this one
 # is a HARD ZERO gate: clients/web was converted to the Dawn tokens in one pass
 # (MOMO-597), so every category below starts and stays at 0.
+#
+# 2026-08-10 (W-S1 / #1215): that mac counterpart retired with `clients/macOS`
+# and `clients/Core`. This script is now the only mechanical design pre-flight
+# in the repo, and it runs in two places — `local_gate.sh --profile web` and the
+# "copy scan (web + core)" lane of `scripts/verify_merge_tree.sh`.
 #
 # Categories (SKILL §10.1 .. §10.10):
 #   1  emdash        em-dash (—/–) inside a user-visible string   [AST, #1141]

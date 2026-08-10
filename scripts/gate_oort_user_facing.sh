@@ -41,10 +41,6 @@ def rel(p):
 # ── 1. 문자열 리터럴 스캐너 ────────────────────────────────────────────────
 # 사람이 읽는 카피가 사는 소스만 본다.
 SOURCE_DIRS = [
-    ("clients/macOS/Sources", (".swift",)),
-    ("clients/macOS/XcodeHost", (".swift",)),
-    ("clients/iOS/MomoiOSKit/Sources", (".swift",)),
-    ("clients/iOS/XcodeHost", (".swift",)),
     ("clients/mobile/ios/MomoPushKit", (".swift",)),
     ("clients/mobile/ios/MomoMobile", (".swift",)),
     ("clients/mobile/ios/NotificationService", (".swift",)),
@@ -83,18 +79,10 @@ IDENTIFIER_RE = re.compile("|".join(IDENTIFIER_PATTERNS))
 
 # 패턴으로 못 가르는 잔존. 전부 "식별자인데 형태가 맨 momo" 인 경우다.
 ALLOW = {
-    ("clients/macOS/Sources/MomoMac/MomoDeepLink.swift", "momo"):
-        "구 딥링크 스킴 수용 목록 — 발급은 oort://, 이미 보낸 링크는 계속 열려야 한다",
-    ("clients/iOS/MomoiOSKit/Sources/MomoiOSKit/PushRegistration.swift", "momo"):
-        "구 푸시 딥링크 스킴 수용 — 서버가 이미 보낸 알림 안에 살아 있다",
-    ("clients/iOS/MomoiOSKit/Sources/MomoiOSPushKit/PushNotification.swift", "momo"):
-        "구 딥링크 스킴 발급부(동결 킷, ADR-0137 D8) — 스킴 전환은 별도 ADR",
     ("clients/mobile/ios/MomoPushKit/PushNotification.swift", "momo"):
-        "위 동결 킷의 바이트 단위 승계 복사본",
+        "구 딥링크 스킴 발급부 — 서버가 이미 보낸 알림 안에 살아 있다. 스킴 전환은 별도 ADR",
     ("packages/momo-core/src/features/auth/deepLink.ts", "momo"):
         "구 딥링크 스킴 수용 목록 (코어)",
-    ("clients/macOS/Sources/MomoMac/MomoWorkHostIdentityStore.swift", "momo"):
-        "Application Support 하위 디렉터리 경로 — 옮기면 기존 호스트 신원을 잃는다",
 }
 
 BRAND_RE = re.compile(r"momo|모모", re.IGNORECASE)
@@ -159,9 +147,6 @@ def check_structured():
 
     # 화면·OS에 노출되는 plist 값만 본다. 나머지 키(번들 ID·App Group·APNs)는 동결층이다.
     for path in [
-        "clients/macOS/XcodeHost/Info.plist",
-        "clients/iOS/XcodeHost/Info.plist",
-        "clients/iOS/NotificationService/Info.plist",
         "clients/mobile/ios/MomoMobile/Info.plist",
         "clients/mobile/ios/NotificationService/Info.plist",
         "clients/desktop/src-tauri/Info.plist",
@@ -182,15 +167,11 @@ def check_structured():
     title = re.search(r"<title>(.*?)</title>", html, re.S)
     expect("clients/web-legacy/index.html <title>", title and title.group(1).strip(), "oort")
 
-    # 사용자가 받는 산출물 이름: DMG 볼륨명과 .dmg 파일명만 본다.
-    # build/MomoMac.app 은 Xcode 타깃 산출물(축2 식별자)이라 여기서 재지 않는다.
-    checked += 1
-    wf = open(".github/workflows/release-macos.yml", encoding="utf-8").read()
-    artifacts = re.findall(r"-{1,2}volname\s+\"([^\"]+)\"", wf)
-    artifacts += re.findall(r"([A-Za-z0-9_./${}\- ]*\.dmg)", wf)
-    for token in artifacts:
-        if BRAND_RE.search(token):
-            failures.append("release-macos.yml 산출물 이름에 옛 이름: %r" % token)
+    # 사용자가 받는 산출물 이름. 이 검사의 원래 대상이던
+    # `.github/workflows/release-macos.yml`(Swift MomoMac 공증·DMG 레인)은 W-S1
+    # (#1215)에서 클라 트리와 함께 삭제됐다. 지금 사용자가 받는 macOS 산출물은
+    # Tauri 셸이고, 그 이름은 아래 publish_next_build.sh ↔ tauri productName
+    # 검사가 이미 잰다 — 그래서 자리를 옮긴 것이지 검사를 잃은 것이 아니다.
 
     # 데스크톱 산출물 경로는 productName 을 따라간다 — 갈라지면 발행이 깨진다.
     checked += 1

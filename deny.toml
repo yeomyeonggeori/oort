@@ -35,10 +35,11 @@
 [licenses]
 # Every SPDX expression in the graph must be satisfiable by this list. cargo-deny
 # evaluates the expression properly: `A OR B` passes when either side is allowed,
-# `A AND B` needs both. That evaluation order is the point — the older
-# `scripts/check_spm_licenses.sh` matches copyleft *names* before evaluating the
-# expression, which would fail `r-efi` (`MIT OR Apache-2.0 OR LGPL-2.1-or-later`)
-# even though the MIT branch is freely selectable.
+# `A AND B` needs both. That evaluation order is the point — the retired
+# `scripts/check_spm_licenses.sh` (removed with the Swift client trees, #1201)
+# matched copyleft *names* before evaluating the expression, which would fail
+# `r-efi` (`MIT OR Apache-2.0 OR LGPL-2.1-or-later`) even though the MIT branch
+# is freely selectable. Do not reintroduce name-first matching here.
 allow = [
   # --- The four permissive families the project already declares ---------------
   "MIT",

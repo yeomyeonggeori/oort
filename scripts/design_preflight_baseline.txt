@@ -1,9 +1,0 @@
-# scripts/design_preflight_baseline.txt
-# MOMO-318 design pre-flight ratchet baseline (per-category violation counts).
-# Format: <key> <count>. New violations above these counts FAIL the swift gate.
-# Regenerate after an intentional change with:
-#   scripts/verify_design_preflight.sh --update-baseline
-color_red 0
-font_custom 0
-font_system_size 0
-emdash_string 1

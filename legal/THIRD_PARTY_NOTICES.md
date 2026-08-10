@@ -1,9 +1,18 @@
 # Third-party notices
 
-<!-- BEGIN GENERATED: SPM LICENSES (scripts/check_spm_licenses.sh) -->
+<!-- BEGIN GENERATED: SPM LICENSES (generator retired 2026-08-10, #1201) -->
 ## Swift Package Manager dependencies
 
-> Generated from 10 Package.resolved graphs and checkout LICENSE files. Do not edit this section manually.
+> Generated from 10 Package.resolved graphs and checkout LICENSE files.
+>
+> **Frozen snapshot.** The generator `scripts/check_spm_licenses.sh` retired with
+> the Swift client trees (#1201 — it had been red at base and was blocking every
+> gate profile). Nothing regenerates or drift-checks this section any more, and
+> the two rows below that came from `clients/Core`/`clients/macOS` graphs are
+> kept as the historical record of what those trees shipped. If you change a
+> SwiftPM dependency in a surviving Swift tree (`server`, `relay/*`,
+> `workers/*`, `services/*`), edit this table by hand and say so in the PR.
+> cargo and npm licenses are gated separately by `--profile license` (#1225).
 
 | Package | Version | License | Source |
 |---|---|---|---|

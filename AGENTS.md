@@ -23,7 +23,7 @@
 oort = AI 에이전트가 사람과 **동등한 1급 멤버**(`member.kind='agent'`)로 참여하는 자체구축 슬랙형 메신저. 서버는 **Rust/Axum**(`server-rust/`, ADR-0145) + **Centrifugo v6** + **PostgreSQL 18**, 제품 표면은 **웹(React/Vite `clients/web`) · 데스크톱(Tauri 2 `clients/desktop` — 같은 웹 번들을 감싼다) · 모바일(React Native `clients/mobile`)**이고 공유 도메인 코어는 TypeScript `packages/momo-core`다(ADR-0119/0133/0137). 에이전트 게이트웨이 = 김인턴/hermes(OpenAI 호환 `/v1/chat/completions` + SSE). 전 의존성 permissive 타깃.
 
 > ### ⚠️ Swift 트리는 은퇴 중 — 여기에 새로 짓지 마라
-> `clients/macOS`·`clients/iOS`·`clients/Core`, `server/Sources`(Hummingbird 2), `relay/OutboxRelay`, `workers/*`, `services/*`는 **아직 레포에 있지만 삭제 대기**다. 문서가 `swift build`를 시키더라도 그것은 현행 제품을 짓는 명령이 아니다 — 그 경로는 **실패하지 않고 잘못된 것을 성공적으로 짓는다**.
+> `clients/macOS`·`clients/iOS`·`clients/Core`는 **삭제됐다**(W-S1 / #1215 — 이식 원본은 git 이력에 있다). `server/Sources`(Hummingbird 2), `relay/OutboxRelay`, `workers/*`, `services/*`는 **아직 레포에 있지만 삭제 대기**다. 문서가 `swift build`를 시키더라도 그것은 현행 제품을 짓는 명령이 아니다 — 그 경로는 **실패하지 않고 잘못된 것을 성공적으로 짓는다**.
 > **은퇴 아님(계속 살아 있는 것):** ① `server/Migrations/*.sql` — Rust 이미지가 그대로 싣는 **정본 DDL**. ② `relay/PushRelay` — 라이브 푸시 경로가 지금도 빌드·배포하는 Swift 컴포넌트(`infra/rust/docker-compose.push.build.yml`). ③ `clients/web-legacy` — UI 개발은 `clients/web`로 옮겨 갔지만 **알파가 실제로 서빙하는 산출물**은 아직 이쪽이다(`infra/prod/Dockerfile.web`, ADR-0133 parity 게이트 전까지).
 
 **핵심 쓰기경로(절대 깨지 말 것):** `REST send → (channel_seq bump + message INSERT + outbox INSERT) 단일 tx → momo-relay가 Centrifugo /api/publish`. 클라는 절대 Centrifugo로 직접 publish 안 함. Postgres=SoT, Centrifugo=전송계층. 순서 SoT=`message.seq`.
@@ -73,14 +73,12 @@ legal/                   privacy-policy · agent-disclosure · THIRD_PARTY_NOTIC
 
 **은퇴 중 — 삭제 대기(§0 상자). 읽어서 이해하는 용도이지 확장 대상이 아니다:**
 ```
-clients/Core/            MomoCore: 공유 모델 + ChatBackend/AgentTransport 프로토콜
-clients/macOS/           MomoMac: SwiftUI 뷰(D/B/C 경험) + smoke
-clients/iOS/             MomoiOSKit
 server/Sources/          MomoServer(Hummingbird 2) — Rust 재작성으로 대체됨
 relay/OutboxRelay/       outbox SKIP LOCKED 폴링 → Centrifugo publish (BYPASSRLS)
 relay/PushRelay/         ※ 예외: 라이브 푸시 경로가 지금도 빌드·배포한다(은퇴 아님)
 workers/·services/       AgentWorker·WorkHostDaemon·NotifierWorker·LinkShort 등 Swift 실행체
-fastlane/·infra/prod/    Apple 배포·Swift prod compose 계열
+infra/prod/              Swift prod compose 계열
+(삭제됨 — W-S1/#1215) clients/{Core,macOS,iOS}/ · fastlane/ · .github/workflows/{ci-build,release-ios,release-macos}.yml
 ```
 **BYPASSRLS:** relay·agent-worker(`momo-relay`·`momo-agent-worker`)만(전 테넌트 폴링). **쓰기 경로엔 BYPASSRLS 금지**. 그 외 모든 경로는 `SET LOCAL app.workspace_id` + RLS FORCE.
 

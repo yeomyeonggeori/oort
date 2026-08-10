@@ -8,9 +8,11 @@
 #   모바일       `clients/mobile`(React Native)
 #   공유 코어    `packages/momo-core`(레포 루트 npm 워크스페이스)
 #
-# **Swift 트리는 은퇴 중이다.** `clients/macOS`·`clients/iOS`·`clients/Core`,
-# `server/Sources`(Hummingbird 2), `relay/OutboxRelay`, `workers/*`, `services/*`는
-# 아직 레포에 있지만 삭제 대기이며 새 작업의 기준이 아니다. 그 빌드는 이 파일에서
+# **Swift 트리는 은퇴 중이다.** 클라 3트리(`clients/macOS`·`clients/iOS`·`clients/Core`)는
+# W-S1(#1215)에서 **삭제됐다**. `server/Sources`(Hummingbird 2), `relay/OutboxRelay`,
+# `workers/*`, `services/*`는 아직 레포에 있지만 삭제 대기이며 새 작업의 기준이
+# 아니다(순서는 감사 `docs/planning/research/2026-08-09-swift-removal-audit.md` §6).
+# 그 빌드는 이 파일에서
 # `build`/`test`가 아니라 **`swift-build`/`swift-test`**로 이름이 바뀌었다
 # (`scripts/local_gate.sh`의 Swift 단계가 그 이름을 부른다).
 # 예외 — 은퇴 아님: `server/Migrations/*.sql`은 Rust 이미지가 그대로 싣는 정본 DDL이고,
@@ -25,8 +27,11 @@ CARGO_MANIFEST := server-rust/Cargo.toml
 NPM_TREES      := . clients/web clients/mobile
 
 # --- 은퇴 중(Swift) ------------------------------------------------------------
-# 의존 순서: Core → server/relay/worker/notifier/service → macOS
-SWIFT_PKGS := clients/Core services/OutboundHTTPPolicy services/MomoMetrics services/CloudProviderKit server relay/OutboxRelay relay/PushRelay workers/AgentWorker workers/WorkHostDaemon workers/NotifierWorker services/LinkShort clients/macOS
+# 의존 순서: services → server/relay/worker/notifier
+# (클라 3트리는 W-S1 에서 삭제됨. `clients/Core` 를 경로 의존하던 것은
+#  `clients/macOS`·`clients/iOS` 뿐이었고 — 서버·워커·릴레이·서비스는
+#  `import MomoCore` 가 0건이다 — 그래서 이 목록에서 함께 빠진다.)
+SWIFT_PKGS := services/OutboundHTTPPolicy services/MomoMetrics services/CloudProviderKit server relay/OutboxRelay relay/PushRelay workers/AgentWorker workers/WorkHostDaemon workers/NotifierWorker services/LinkShort
 
 COMPOSE        := docker compose
 COMPOSE_FILE   := infra/docker-compose.yml

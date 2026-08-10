@@ -100,20 +100,19 @@ Profiles:
 | Profile | Use when | What it runs |
 |---|---|---|
 | `docs` | docs/spec/script-only changes, including internal alpha runbook/feedback/AWS topology updates | whitespace diff, **secret scan over all refs (#1236)**, workflow YAML parse, actionlint if installed, e2e compose config, AWS internal alpha topology preflight fixture, JSON syntax, shell syntax, Python syntax, Hermes adapter smoke, prime adapter contract tests + closed-loop smoke (`adapters/prime/tests/`, no docker/network/credential) |
-| `swift` | Swift package/model/view changes | `docs` profile + design pre-flight ratchet (`scripts/verify_design_preflight.sh`) + `make build` + `make test` |
+| `swift` | 잔존 Swift 트리(`server`·`relay/*`·`workers/*`·`services/*`) 변경 | `docs` profile + `make swift-build` + `make swift-test`. **mac 디자인 pre-flight 래칫과 SwiftPM 라이선스 게이트는 W-S1(#1215/#1201)에서 은퇴** — 후속은 각각 `design_preflight_web.sh`(web/병합 트리)와 `--profile license`(cargo+npm) |
 | `diagnostics` | diagnostics/observability bundle changes | `docs` profile + `scripts/collect_diagnostics.sh --smoke` redaction check |
 | `staging-smoke` | staging/prod/internal-hosting config or runbook changes that do not have real VPS secrets | `docs` profile + `scripts/verify_staging_smoke.sh` + `scripts/verify_internal_hosting_smoke.sh` for prod compose config, internal single-node smoke overlay, Caddyfile structure, Centrifugo Redis config, API health route wiring, relay/worker enablement, secret-template guard, public/staging preflight evidence markdown/json, and SOPS/pgBackRest checklist |
 | `backup` | backup/PITR runbook or internal hosting changes that must prove restore rehearsal evidence before review | `docs` profile + `scripts/verify_backup_restore_rehearsal.sh` for temporary PostgreSQL 18 source DB marker writes, `pg_dump -Fc`, separate restore DB `pg_restore`, marker checksum equality, and markdown/json evidence generation |
 | `host-runtime` | internal single-node host-runtime smoke before internal test hosting | `docs` profile + `scripts/verify_internal_host_runtime.sh` + `scripts/verify_backup_restore_rehearsal.sh`; proves local image prod+internal-smoke boot/health/agent-runtime-status redaction/migrate/message/relay/mock-agent and repo-local restore evidence |
-| `local-alpha` | AWS 전 1인 local Docker alpha RC gate | `docs` profile + host-runtime boot/health/migrate/message/relay/mock Kim Intern + backup restore rehearsal + macOS real-backend smoke + redacted diagnostics bundle in one `local-alpha-<run-id>/` packet; add `LOCAL_GATE_LAUNCH_UI=1` for foreground MomoMacDevApp process/window/log evidence |
-| `internal-alpha` | internal alpha evidence packet before reviewer handoff | `docs` profile + host-runtime image boot/health/migrate/message/relay/mock Kim Intern evidence + backup restore rehearsal + `LOCAL_GATE_LAUNCH_UI=1` MomoMacDevApp real-backend process/window evidence + redacted diagnostics bundle |
+| `local-alpha` | AWS 전 1인 local Docker alpha RC gate | `docs` profile + host-runtime boot/health/migrate/message/relay/mock Kim Intern + backup restore rehearsal + redacted diagnostics bundle in one `local-alpha-<run-id>/` packet |
+| `internal-alpha` | internal alpha evidence packet before reviewer handoff | `docs` profile + host-runtime image boot/health/migrate/message/relay/mock Kim Intern evidence + backup restore rehearsal + redacted diagnostics bundle |
 | `runtime-db` | migrations/server/RLS/join changes | `swift` profile + `make up` (compose `--wait`) + `make migrate` (single run: apply + idempotency verify pass with `IDEMPOTENCY_OK` marker) + `scripts/verify_rls.sh` + `scripts/verify_join.sh` + `scripts/verify_push_registration.sh` + `scripts/verify_push_notifier.sh` + `scripts/verify_plugin_registry.sh` + `scripts/verify_signed_webhook_ingress.sh` + `scripts/verify_drive_mcp.sh` + `scripts/verify_attachment_upload.sh` (both stub-only; no Google call) |
 | `runtime-relay` | outbox/relay/realtime changes | `swift` profile + Docker/migration bootstrap + `scripts/verify_relay.sh` for server send, outbox pending, relay claim, Centrifugo history, outbox done, and `version=message.seq` evidence |
 | `runtime-live` | realtime-token/WebSocket live subscribe changes | `swift` profile + Docker/migration bootstrap + host MomoServer/OutboxRelay + compose-network `api:8080` proxy + `scripts/verify_realtime_live.sh` for token issuance, subscribe, REST send, live `message.new`, `payload.message.seq`, and invalid token rejection evidence |
 | `runtime-agent` | AgentWorker/hermes/cost/projection/agent live-channel changes | `swift` profile + Docker/migration bootstrap + `scripts/verify_agent_worker.sh` + `scripts/verify_agent_live_channel.sh` |
 | `external-agent-provider` | real external agent runtime credentialed smoke, opt-in only | `docs` profile + `scripts/verify_local_hermes_credentialed_smoke.sh`; with credentials it delegates to the external verifier, checks OpenAI-compatible SSE, `/v1/agent-runtime/status` redaction/degraded reason, Hermes active agent + `#agent-lab` invite precondition, and one local MomoServer/AgentWorker/OutboxRelay `@hermes` roundtrip; without credentials it writes `NEEDS_USER_CREDENTIAL` / `runtime-unverified(external provider credentials)` evidence |
-| `macos-ui` | MomoMac UI/run changes | `swift` profile + `MomoMacSmoke`; set `LOCAL_GATE_LAUNCH_UI=1` to run `scripts/macos_dev_run.sh --verify --logs --terminate` |
-| `m3-dbc` | M3 D/B/C exit evidence or MOMO-020/021/022 close-readiness review | `swift` profile + Docker/migration bootstrap + `verify_agent_worker.sh` D/B evidence + `verify_approval_decision.sh` C evidence + `verify_macos_real_backend_ui.sh` |
+| `m3-dbc` | M3 D/B/C exit evidence or MOMO-020/021/022 close-readiness review | `swift` profile + Docker/migration bootstrap + `verify_agent_worker.sh` D/B evidence + `verify_approval_decision.sh` C evidence |
 | `web-serving` | `infra/prod/Dockerfile.web`, prod Caddy/compose, LinkShort, or APP_DOMAIN serving verifier changes | `docs` static checks + `scripts/verify_web_serving.sh`; isolated e2e `web` profile on ports 28070-28074, real Vite dist via web-init named volume, `/join` fallback and `/i/*` LinkShort proxy included in the eight-assertion HTTP gate. Public DNS/ACME/TLS and the full invite round-trip are excluded. |
 | `web` | `clients/web-legacy` (ADR-0119 v0), `docs/api/openapi.yaml`, or web serving/smoke script changes | worktree-clean + `npm ci` + `npm run lint` + `npm run test` (Vitest) + `npm run typecheck` + `scripts/verify_web_generated_types.sh` (openapi-typescript output vs committed `src/api/schema.d.ts`; `generator-failed` and `types-stale` are distinct named failures) + `npm run build` + permissive-only license gate (full transitive inventory markdown) + `scripts/web_serving_smoke.sh` + `scripts/verify_web_login_smoke.sh` (e2e compose Chromium login→timeline→realtime) + `scripts/verify_openapi_contract.sh` runtime drift gate |
 | `license` | dependency changes in any cargo/npm tree — `Cargo.lock`, `package-lock.json`, `deny.toml`, or the gate scripts themselves | `docs` profile + `scripts/tests/test_license_gate.sh` (red proofs) + `scripts/check_cargo_licenses.sh` (`cargo deny check licenses` over `server-rust` and `clients/desktop/src-tauri` with the root `deny.toml`) + `scripts/check_npm_licenses.mjs` over the canonical npm trees (workspace root incl. `packages/momo-core`, `clients/web`, `clients/mobile`; inventory markdown to the gate output dir). Requires `cargo-deny`; fails closed with install guidance when absent. Licenses only — no RUSTSEC advisories, no `npm audit` |
@@ -135,7 +134,6 @@ scripts/local_gate.sh --profile runtime-live
 scripts/local_gate.sh --profile runtime-agent
 scripts/local_gate.sh --profile external-agent-provider
 scripts/verify_local_hermes_credentialed_smoke.sh
-LOCAL_GATE_LAUNCH_UI=1 scripts/local_gate.sh --profile macos-ui
 scripts/local_gate.sh --profile m3-dbc
 scripts/local_gate.sh --profile web-serving
 scripts/local_gate.sh --profile web
@@ -550,28 +548,25 @@ scripts/local_gate.sh --profile local-alpha
 
 This profile does not call AWS APIs or require public DNS/TLS. It writes a
 run-specific `local-alpha-<run-id>/` packet with host-runtime boot/health/
-migrate/message/relay/mock Kim Intern evidence, backup restore rehearsal,
-macOS real-backend smoke, and a redacted diagnostics bundle. The default keeps
-foreground GUI launch optional so it can run from a background Codex session.
-Add `LOCAL_GATE_LAUNCH_UI=1` when the gate must prove `MomoMacDevApp`
-process/window/log launch against the local MomoServer too.
+migrate/message/relay/mock Kim Intern evidence, backup restore rehearsal, and a
+redacted diagnostics bundle. The SwiftUI macOS app evidence this packet used to
+carry was removed with the client trees (W-S1 / #1215); product-surface evidence
+now comes from the web/desktop/RN lanes.
 
 For internal alpha reviewer handoff, use the stricter combined packet instead
 of pasting separate host/runtime/UI/diagnostics snippets:
 
 ```bash
-LOCAL_GATE_LAUNCH_UI=1 scripts/local_gate.sh --profile internal-alpha
+scripts/local_gate.sh --profile internal-alpha
 ```
 
-The profile requires foreground GUI permission because it must launch
-`MomoMacDevApp` against a real local MomoServer and record process/window
-evidence. It writes verifier artifacts under a run-specific directory below the
+It writes verifier artifacts under a run-specific directory below the
 local gate output directory:
-`internal-alpha-<run-id>/{host-runtime,backup-restore,macos-real-backend,diagnostics}/`.
+`internal-alpha-<run-id>/{host-runtime,backup-restore,diagnostics}/`.
 The final `## Local Gate` block includes those paths plus the top-level local
 gate markdown/log. It is the preferred evidence packet when a PR needs to show
 host-runtime boot/health/migrate/message/relay/mock Kim Intern, backup restore
-rehearsal, macOS real-backend UI, and diagnostics bundle coverage together.
+rehearsal, and diagnostics bundle coverage together.
 
 For internal alpha runbook, feedback packet, one-person dogfood checklist, or
 AWS promotion threshold updates, use:
@@ -602,8 +597,7 @@ preflight are internally consistent. It does not by itself mark the product
 redacted diagnostics evidence.
 
 If the change modifies diagnostics collection or expected bundle shape, use
-`scripts/local_gate.sh --profile diagnostics`. If the change claims macOS app
-launch evidence, add `LOCAL_GATE_LAUNCH_UI=1 scripts/local_gate.sh --profile macos-ui`.
+`scripts/local_gate.sh --profile diagnostics`.
 The human-facing alpha path lives in [`docs/INTERNAL_ALPHA.md`](INTERNAL_ALPHA.md);
 feedback intake and triage live in
 [`docs/INTERNAL_ALPHA_FEEDBACK.md`](INTERNAL_ALPHA_FEEDBACK.md).
@@ -634,12 +628,6 @@ for the host-wide load and stale-stack policy:
 scripts/compose_janitor.sh --cleanup
 ```
 
-For macOS UI PRs, the default `macos-ui` profile stays GUI-safe for headless or
-background Codex runs: it executes `MomoMacSmoke` only. Opt-in GUI evidence uses
-`LOCAL_GATE_LAUNCH_UI=1`, which stages `dist/MomoMacDevApp.app`, launches it with
-`open -n`, verifies the process and System Events window count, captures unified
-logs under `${TMPDIR:-/tmp}/momo-macos-dev-run`, then terminates the app.
-
 For M3 D/B/C exit PRs, use:
 
 ```bash
@@ -650,11 +638,9 @@ This composed profile records one PR-ready evidence block for:
 D Live Tool-Call (`agent.partial` mock OpenAI-compatible SSE tool_call progress
 and final `tool_result`/`message.new` with `version=message.seq`), B Cost
 Projection (`usage_ledger`/`budget_window` reserve/reconcile plus
-`/cost-snapshots` and MomoMac `CostSnapshot` binding), and C Approval Inbox
+`/cost-snapshots` projection), and C Approval Inbox
 (`/approvals` pending projection plus approve/reject/idempotency/audit/resume
-effects). Add `LOCAL_GATE_LAUNCH_UI=1` when a foreground macOS dev app
-process/window smoke is wanted; by default the profile keeps GUI launch opt-in
-and still verifies the real-backend REST/UI data path.
+effects).
 
 ### Secret scan gate (#1236)
 
@@ -737,14 +723,13 @@ Use the profile that matches the changed surface.
 | `staging-smoke` | MOMO-005/006/007/229/406 deploy config, Caddy/Centrifugo, install/upgrade matrix, public host preflight, secret/backup runbooks | `scripts/local_gate.sh --profile staging-smoke` |
 | `backup` | backup/PITR restore rehearsal evidence | `scripts/local_gate.sh --profile backup` |
 | `host-runtime` | internal single-node runtime smoke, Kim Intern provider status/redaction, plus restore rehearsal evidence | `scripts/local_gate.sh --profile host-runtime` |
-| `local-alpha` | AWS-free local Docker alpha RC packet | `scripts/local_gate.sh --profile local-alpha`; add `LOCAL_GATE_LAUNCH_UI=1` for MomoMacDevApp process/window/log launch evidence |
+| `local-alpha` | AWS-free local Docker alpha RC packet | `scripts/local_gate.sh --profile local-alpha` |
 | `internal-alpha` | internal alpha combined evidence packet | `LOCAL_GATE_LAUNCH_UI=1 scripts/local_gate.sh --profile internal-alpha` |
 | `runtime-db` | migrations/server/RLS/join/push-registration/push-notifier/work-session tier-fallback/plugin-registry/webhook-ingress changes | `scripts/local_gate.sh --profile runtime-db` |
 | `runtime-relay` | outbox/relay/realtime changes | `scripts/local_gate.sh --profile runtime-relay` |
 | `runtime-live` | realtime-token/WebSocket live subscribe changes | `scripts/local_gate.sh --profile runtime-live` |
 | `runtime-agent` | AgentWorker/hermes/cost/projection/agent live-channel changes | `scripts/local_gate.sh --profile runtime-agent` |
 | `external-agent-provider` | opt-in credentialed external agent runtime smoke | `scripts/local_gate.sh --profile external-agent-provider`; set `AGENT_PROVIDER_MODE=external-hermes`, `HERMES_BASE_URL`, and `HERMES_API_KEY` for PASS evidence |
-| `macos-ui` | MomoMac UI/run changes | `scripts/local_gate.sh --profile macos-ui`; add `LOCAL_GATE_LAUNCH_UI=1` for dev `.app` launch, process/window smoke, logs, and termination |
 | `m3-dbc` | M3 D/B/C exit evidence or MOMO-020/021/022 close-readiness review | `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile m3-dbc`; add `LOCAL_GATE_LAUNCH_UI=1` for GUI process/window evidence |
 | `web` | `clients/web-legacy` (ADR-0119 v0), `docs/api/openapi.yaml`, web serving/login smoke changes | `scripts/local_gate.sh --profile web` (install/lint/typecheck/types-sync/build/license gate + serving smoke + Chromium login→timeline e2e smoke + OpenAPI runtime drift gate) |
 
@@ -766,55 +751,30 @@ Paste the block printed by `scripts/local_gate.sh`. Shape:
 - Not covered:
 ```
 
-## 6. Design Pre-Flight (Ratchet) And UI PR Evidence
+## 6. Design Pre-Flight And UI PR Evidence
 
-Every `swift`-inclusive profile now runs `scripts/verify_design_preflight.sh`, the
-mechanical grep half of `.claude/skills/momo-design-taste/SKILL.md` §5, before
-`make build`. It scans view code (`clients/macOS/Sources` + `clients/Core/Sources`;
-Theme/Tokens definition files and `Tests/` are excluded) for four banned patterns:
+**은퇴(2026-08-10, W-S1 / #1215).** 이 절이 문서화하던 mac 래칫
+`scripts/verify_design_preflight.sh` + `scripts/design_preflight_baseline.txt`은
+스캔 대상이 `clients/macOS/Sources`와 `clients/Core/Sources` 둘뿐이었고, 그 두
+트리가 삭제되면서 함께 폐기됐다. 래칫이 실제로 무엇을 재고 있었는지의 원문은
+git 이력에 있다 — 삭제 직전 판본은 `git show <이 PR의 부모 SHA>:scripts/verify_design_preflight.sh`.
 
-| Category (baseline key) | Banned in view code | Use instead |
-|---|---|---|
-| `color_red` | raw `Color(red:…)` | a MomoDS semantic token |
-| `font_custom` | `Font.custom(…)` | a semantic text style / role |
-| `font_system_size` | `.font(.system(size: N))` fixed points | a text style (keeps Dynamic Type) |
-| `emdash_string` | em-dash (`—`/`–`) inside a user-visible string literal | rewrite the copy (SKILL §2, binary rule) |
+**현행 승계자는 `scripts/design_preflight_web.sh`다.** 같은 SKILL §5 규율을 정본 UI에
+적용하며, 두 자리에서 돈다:
 
-**Ratchet, not a wall.** The v0 demo surface already carries pre-existing
-violations, so the gate compares against per-category counts in
-`scripts/design_preflight_baseline.txt` instead of demanding zero:
+- `scripts/local_gate.sh --profile web` — 판별자 3종(`--selftest`) + `clients/web`
+  10/10 카테고리 · `packages/momo-core` 3/3, **하드 제로**(래칫 아님).
+- `scripts/verify_merge_tree.sh` 여덟 레인 중 "copy scan (web + core)" — 병합
+  **결과** 트리에서 다시 잰다.
 
-- **current > baseline → FAIL.** A new violation leaked in; the offenders are
-  printed as `file:line` evidence. Fix it with a token / text role.
-- **current < baseline → PASS**, with a hint to lock the win by lowering the
-  baseline (`scripts/verify_design_preflight.sh --update-baseline`).
-- **current == baseline → PASS.**
+색·인라인 스타일 규칙은 `clients/web/eslint.config.js`의 `no-restricted-syntax`가
+중복으로 지고, 그 lint는 병합 트리 8번째 레인이 실행한다(#1210).
 
-This is a deliberate change from the SKILL's "zero hits" phrasing: a hard zero
-gate would block every unrelated PR until the whole v0 surface is migrated to
-MomoDS (that migration is MOMO-303). The ratchet blocks *new* debt now and lets
-the baseline tighten as tokens land. If a new violation is a reviewed, deliberate
-exception, regenerate the baseline and justify it in the PR body.
-
-`scripts/verify_design_preflight.sh --list` prints every current violation without
-gating; use it while migrating a surface to tokens.
-
-**UI PR evidence (design-review agent).** Per `AGENTS.md` §5, a macOS/Core UI PR
-must include a `design-review` agent report (`.claude/agents/design-review.md`)
-with **zero Blockers** in the PR body, alongside the `## Local Gate` block.
-Screenshots for the review come from the snapshot tests
-(`clients/macOS/Tests/MomoMacTests/__Snapshots__/`) or from
-`LOCAL_GATE_LAUNCH_UI=1` + `screencapture -l <windowid>`. The mechanical
-pre-flight and the snapshot tests are the automated floor; the design-review
-report (Blocker 0) is the human/agent taste gate on top of them. Only
-High-priority-and-below findings reach the human reviewer.
-
-**Snapshot tests.** `MessageBubbleSnapshotTests` records deterministic light/dark
-PNG references under `__Snapshots__/`. They are committed and compared on re-run
-(recording a *new* reference fails, so a leaked/undecided snapshot is caught).
-Comparison uses `perceptualPrecision: 0.98` to tolerate sub-pixel font rendering
-differences across macOS point releases; it is macOS-local evidence only (this
-repo phase runs no CI). `Package.resolved` stays uncommitted (`AGENTS.md` §5).
+**UI PR 증거(design-review 에이전트).** `AGENTS.md` §5대로 UI PR은 PR 본문에
+`design-review` 리포트(Blocker 0)를 `## Local Gate` 블록과 함께 담는다. 스크린샷은
+이제 웹/데스크톱/RN 표면에서 온다 — macOS 스냅샷 테스트
+(`clients/macOS/Tests/MomoMacTests/__Snapshots__/`)는 클라 트리와 함께 삭제됐다.
+기계 pre-flight가 자동 바닥이고, design-review(Blocker 0)가 그 위의 취향 게이트다.
 
 ## 7. Worker Handoff And Merge Cycle
 

@@ -4,7 +4,10 @@
 #   scripts/publish_next_build.sh --version 0.1.0-next.2 [--notes "..."] [--dry-run]
 #
 # 무엇이 다른가 (alpha 채널과의 관계)
-#   scripts/publish_alpha_build.sh  = macOS SwiftUI 클라이언트(MomoMac), 수동 설치
+#   alpha 채널 = macOS SwiftUI 클라이언트(MomoMac), 수동 설치. 그 발행 스크립트
+#     `scripts/publish_alpha_build.sh` 는 클라 트리와 함께 삭제됐다(W-S1 / #1215).
+#     alpha 태그·자산·매니페스트는 배포 저장소에 남아 있으므로 아래 네임스페이스
+#     분리는 계속 유효하다 — 겹치면 기존 설치본의 업데이트 경로가 흔들린다.
 #   scripts/publish_next_build.sh   = Tauri 2 + React 셸(clients/desktop), 자동 업데이트
 # 두 채널은 같은 배포 저장소(momo-alpha)를 쓰되 태그·자산·매니페스트가 겹치지 않는다.
 #   alpha : 태그 v0.0.N        자산 momo-macos-0.0.N.zip        매니페스트 update-manifest-alpha.json

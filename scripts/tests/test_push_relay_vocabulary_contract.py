@@ -6,7 +6,7 @@ the day someone changes it, they change it deliberately:
 
   1. The judgment layer can emit `work_session_idle`
      (`server-rust/crates/momo-push/src/judgment.rs`, `dispatch.rs`).
-  2. Every downstream validator — the relay, the iOS NSE, the RN kit, the RN JS
+  2. Every downstream validator — the relay, the RN NSE kit, the RN JS
      mirror — accepts only the OTHER FOUR reasons. Such a dispatch is answered
      400, classified permanent, settled, and dropped without delivery.
   3. `scripts/mock_push_relay.py` performs **no vocabulary validation at all**,
@@ -51,7 +51,9 @@ UNDELIVERABLE_REASON = "work_session_idle"
 RELAY = "relay/PushRelay/Sources/PushRelay/PushDispatch.swift"
 RUST_DISPATCH = "server-rust/crates/momo-push/src/dispatch.rs"
 RUST_JUDGMENT = "server-rust/crates/momo-push/src/judgment.rs"
-IOS_KIT = "clients/iOS/MomoiOSKit/Sources/MomoiOSPushKit/PushNotification.swift"
+# The frozen `clients/iOS` kit that RN_KIT was copied from byte-for-byte was
+# deleted with the Swift client trees (W-S1 / #1215); the copy below is now the
+# only Swift NSE on the delivery path.
 RN_KIT = "clients/mobile/ios/MomoPushKit/PushNotification.swift"
 RN_JS = "clients/mobile/src/push/contract.ts"
 MOCK = "scripts/mock_push_relay.py"
@@ -92,7 +94,7 @@ assert (
     UNDELIVERABLE_REASON not in relay
 ), f"{RELAY}: relay now knows {UNDELIVERABLE_REASON} — update ADR-0120 부록 A"
 
-for path in (IOS_KIT, RN_KIT):
+for path in (RN_KIT,):
     source = read(path)
     assert (
         f"{swift_allowlist}.contains(payload.reason)" in source

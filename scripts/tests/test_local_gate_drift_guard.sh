@@ -144,37 +144,28 @@ PATH="$FAKE_BIN:$PATH" ENV_FILE="$ENV_FIXTURE" MOMO_CENTRIFUGO_AUTO_RECREATE=1 \
   || fail "opt-in recreate did not apply current config fingerprint"
 echo "[drift-guard-test] PASS Centrifugo match/drift/opt-in recreate scenarios (fake Docker only)"
 
-# MOMO-450: macos-ui must assemble and own the same runtime bootstrap as the
-# runtime-* profiles. This is a static plan check: it never invokes Docker.
+# MOMO-450 (재조준, W-S1 #1215): 이 자리는 원래 `macos-ui` 프로파일이 runtime-*
+# 와 같은 런타임 부트스트랩을 스스로 조립하는지 재는 정적 계획 검사였다. 그
+# 프로파일은 `clients/macOS` 삭제와 함께 은퇴했으므로, 남은 주장 — **런타임
+# Compose 를 켜는 프로파일은 부하 가드와 teardown 가드를 함께 가진다** — 만
+# 남긴다. 이건 프로파일 이름이 아니라 incident class 에 붙은 계약이다.
 LOCAL_GATE="$REPO_ROOT/scripts/local_gate.sh"
-macos_profile_block="$(awk '/^  macos-ui\)$/,/^    ;;$/' "$LOCAL_GATE")"
-grep -Fq 'add_runtime_bootstrap_commands' <<<"$macos_profile_block" \
-  || fail "macos-ui profile omitted runtime bootstrap"
-
-swift_line="$(printf '%s\n' "$macos_profile_block" | grep -nF 'add_swift_commands' | cut -d: -f1)"
-bootstrap_line="$(printf '%s\n' "$macos_profile_block" | grep -nF 'add_runtime_bootstrap_commands' | cut -d: -f1)"
-macos_line="$(printf '%s\n' "$macos_profile_block" | grep -nF 'add_macos_ui_commands' | cut -d: -f1)"
-[ "$swift_line" -lt "$bootstrap_line" ] && [ "$bootstrap_line" -lt "$macos_line" ] \
-  || fail "macos-ui runtime bootstrap is not between Swift and UI commands"
-
 load_guard_block="$(awk '/^RUNTIME_COMPOSE_PROFILE=0$/,/^if \[ "\$RUNTIME_COMPOSE_PROFILE" -eq 1 \]; then/' "$LOCAL_GATE")"
-grep -Fq 'runtime-agent|macos-ui|all' <<<"$load_guard_block" \
-  || fail "macos-ui profile omitted host load guard"
+grep -Fq 'runtime-agent|all' <<<"$load_guard_block" \
+  || fail "runtime compose profiles omitted the host load guard"
 grep -Fq 'add_cmd "docker compose up (--wait healthy)" "make up"' "$LOCAL_GATE" \
   || fail "runtime bootstrap evidence label omitted compose up step"
 grep -Fq 'if [ "$RUNTIME_COMPOSE_STARTED" -eq 1 ] && [ "$KEEP_STACK" -eq 0 ]' "$LOCAL_GATE" \
   || fail "default runtime Compose teardown guard is missing"
-echo "[drift-guard-test] PASS macos-ui bootstrap/load-guard/teardown plan (Docker not invoked)"
+echo "[drift-guard-test] PASS runtime-compose load-guard/teardown plan (Docker not invoked)"
 
-# MOMO-462: the iOS-specific path must precede the broad clients rule, and its
-# isolated profile must keep static checks before simulator verification.
-ios_path_line="$(grep -nF 'clients/iOS/*)' "$LOCAL_GATE" | cut -d: -f1)"
-clients_path_line="$(grep -nF 'clients/*)' "$LOCAL_GATE" | cut -d: -f1)"
-[ -n "$ios_path_line" ] && [ "$ios_path_line" -lt "$clients_path_line" ] \
-  || fail "clients/iOS auto classification is missing or shadowed by clients/*"
-ios_profile_block="$(awk '/^  ios\)$/,/^    ;;$/' "$LOCAL_GATE")"
-grep -Fq 'add_static_commands' <<<"$ios_profile_block" \
-  || fail "ios profile omitted static commands"
-grep -Fq 'add_ios_commands' <<<"$ios_profile_block" \
-  || fail "ios profile omitted simulator verification"
-echo "[drift-guard-test] PASS ios auto-classification/profile plan (simulator not invoked)"
+# W-S1 (#1215): `clients/macOS`·`clients/iOS`·`clients/Core` 가 삭제되면서
+# MOMO-462 의 iOS 자동분류·`ios` 프로파일 검사도 함께 은퇴했다. 대신 남은
+# 계약을 잰다 — **분류가 없는 `clients/*` 는 좁히지 않고 넓힌다.** 이걸 잃으면
+# 새 클라 트리가 조용히 잘못된(좁은) 프로파일로 초록을 받는다.
+clients_case_block="$(awk "/^    clients\\/\\*\\)\$/,/;;/" "$LOCAL_GATE")"
+grep -Fq 'AUTO_NEED_ALL=1' <<<"$clients_case_block" \
+  || fail "unclassified clients/* no longer widens to the all profile"
+grep -Fq "clients/iOS/*)" "$LOCAL_GATE" \
+  && fail "clients/iOS auto classification came back after the tree was deleted"
+echo "[drift-guard-test] PASS unclassified clients/* widening (no simulator lane left)"

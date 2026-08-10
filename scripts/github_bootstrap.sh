@@ -181,6 +181,16 @@ say "시드 이슈 생성 (MOMO-NNN, 동일 title 이슈 있으면 skip)"
 existing_issues="$(gh issue list --repo "$SLUG" --state all --limit 1000 --json title -q '.[].title' 2>/dev/null || true)"
 
 # TICKETS heredoc 포맷:  id<TAB>Mn<TAB>labels(comma)<TAB>title<TAB>body(\n=개행)
+#
+# ⚠️ 이력 고지 (W-S1 / #1215, 2026-08-10): 아래 M3~M5 행 중 SwiftUI macOS·iOS 클라를
+#    짓는 것들(MOMO-020~022 · 030~032 · 040~043)은 **은퇴한 계획**이다. 그 트리
+#    (`clients/macOS`·`clients/iOS`·`clients/Core`)는 삭제됐고, 행이 참조하는
+#    `area:macos`·`area:ios` 라벨도 `.github/labels.json`에서 함께 제거됐다.
+#    이 스크립트는 동일 title 이슈가 있으면 skip 하는 멱등 구조라 기존 레포에서는
+#    아무 일도 하지 않지만, **빈 레포에 새로 부트스트랩하면 그 행들이 없는 라벨로
+#    실패한다.** 행 자체를 지우는 것은 ROADMAP M4/M5 정본을 바꾸는 일이라 이 배치의
+#    범위 밖이다(기획 결정 대기 — 적립됨). 새 부트스트랩이 필요하면 그 행들을 먼저
+#    드롭하거나 라벨을 현행 택소노미로 재매핑하라.
 # title 은 "MOMO-NNN: <title>" 로 만들어 멱등 매칭/추적 용이.
 created=0; skipped=0
 while IFS=$'\t' read -r tid tms tlabels ttitle tbody; do
