@@ -81,6 +81,74 @@ export function channelTopicIssueMessage(issue: ChannelTopicIssue): string {
   }
 }
 
+// =============================================================================
+// 채널 헤더 메뉴 (검수 피드백 #3). 채널 이름을 누르면 서는 메뉴의 낱말과, 어떤
+// 항목이 서는가의 규칙. 낱말을 코어에 두는 이유는 만들기 폼과 같다: 두 클라(그리고
+// 게이트)가 한 문장을 읽게 한다.
+//
+// 「이름 수정」은 이 메뉴에 없다. 2026-08-10 서버 라우트 전수 실측에서 채널 이름을
+// 바꾸는 라우트(`PATCH …/channels/{ch}` 류)가 없었고, 누를 수 없는 항목을 그리는
+// 것은 없는 항목보다 나쁘다. 별도 티켓으로 남긴다.
+// =============================================================================
+
+export const CHANNEL_MUTE_LABEL = "알림 끄기";
+export const CHANNEL_UNMUTE_LABEL = "알림 켜기";
+export const CHANNEL_LEAVE_LABEL = "채널 나가기";
+
+/** 항목의 낱말은 상태다: 켜져 있으면 「끄기」, 꺼져 있으면 「켜기」. */
+export function channelMuteToggleLabel(muted: boolean): string {
+  return muted ? CHANNEL_UNMUTE_LABEL : CHANNEL_MUTE_LABEL;
+}
+
+/**
+ * 이 사람에게 「채널 나가기」를 내놓는가.
+ *
+ * 서버의 `remove_member`는 워크스페이스 오너/관리자만 멤버십을 지울 수 있게
+ * 막는다(2026-08-10 실측, `channels.rs:378` `role_of_actor.is_admin()`) — 자기
+ * 자신을 지우는 것도 포함이다. 그래서 일반 멤버에게 「나가기」를 내놓으면 확인
+ * 다이얼로그 뒤에서 403으로 끝나는 막다른 길이 된다. 채널 만들기가 같은 이유로
+ * `canCreateChannel`을 두는 것과 같은 규율이고, role이 아직 안 온 경우는(roster의
+ * 선택 필드) 내놓고 서버가 마지막 말을 하게 둔다.
+ */
+export function canLeaveChannel(role: MembershipRole | undefined): boolean {
+  if (role === undefined) return true;
+  return role === "owner" || role === "admin";
+}
+
+/** 알림 설정을 바꾸지 못했을 때, 그 항목 자리에서 하는 말(토스트가 아니다). */
+export const CHANNEL_MUTE_FAILURE =
+  "알림 설정을 바꾸지 못했습니다. 잠시 뒤에 다시 시도하세요.";
+
+/** 나가기 확인 다이얼로그의 제목. */
+export const CHANNEL_LEAVE_CONFIRM_TITLE = "이 채널에서 나갈까요?";
+
+/**
+ * 확인 다이얼로그의 본문. 「관리자가 다시 추가해야」가 참인 이유: 채널에 멤버를
+ * 넣는 라우트(`add_member`)도 오너/관리자 권한이라, 나간 뒤 스스로 다시 들어올
+ * 길이 없다.
+ */
+export function channelLeaveConfirmBody(name: string): string {
+  return `${name} 채널이 사이드바에서 사라집니다. 다시 들어오려면 워크스페이스 관리자가 다시 추가해야 합니다.`;
+}
+
+/** 나가기가 실패했을 때, 그 자리에서 하는 말. `createChannelFailure`와 같은 결. */
+export function channelLeaveFailureMessage(error: unknown): string {
+  if (error instanceof ApiError) {
+    if (error.status === 403) {
+      // remove_member는 오너/관리자만 허용한다. `canLeaveChannel`이 앞에서
+      // 걸러도, role이 늦게 왔거나 도중에 강등된 경우 서버가 여기로 답한다.
+      return "채널에서 나갈 권한이 없습니다. 워크스페이스 관리자에게 요청하세요.";
+    }
+    if (error.status === 404) {
+      return "이미 이 채널의 멤버가 아닙니다.";
+    }
+  }
+  if (error instanceof NetworkError) {
+    return `채널에서 나가지 못했습니다. ${error.message}`;
+  }
+  return "채널에서 나가지 못했습니다. 잠시 뒤에 다시 시도하세요.";
+}
+
 /**
  * May this member create a channel at all?
  *
