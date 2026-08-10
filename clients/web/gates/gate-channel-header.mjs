@@ -62,8 +62,7 @@ function canonicalCopy(root) {
   return { mute: mute[1], unmute: unmute[1], leave: leave[1] };
 }
 
-const { mute: MUTE_LABEL, unmute: UNMUTE_LABEL, leave: LEAVE_LABEL } =
-  canonicalCopy(webRoot);
+const { mute: MUTE_LABEL, unmute: UNMUTE_LABEL } = canonicalCopy(webRoot);
 
 const proveRedCount = process.env.HEADER_GATE_PROVE_RED_COUNT === "1";
 const proveRedRename = process.env.HEADER_GATE_PROVE_RED_RENAME === "1";
