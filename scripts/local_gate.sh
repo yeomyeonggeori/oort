@@ -11,7 +11,7 @@ OUT_DIR="${LOCAL_GATE_OUT_DIR:-${TMPDIR:-/tmp}/momo-local-gate}"
 
 usage() {
   cat <<'EOF'
-Usage: scripts/local_gate.sh [--auto] [--profile docs|swift|diagnostics|staging-smoke|host-runtime|backup|local-alpha|internal-alpha|runtime-db|runtime-relay|runtime-live|runtime-agent|external-agent-provider|macos-ui|ios|m3-dbc|web-serving|web|license|all]
+Usage: scripts/local_gate.sh [--auto] [--profile docs|swift|diagnostics|staging-smoke|host-runtime|backup|local-alpha|internal-alpha|runtime-db|runtime-relay|runtime-live|runtime-agent|external-agent-provider|macos-ui|ios|m3-dbc|web-serving|web|license|secrets|all]
 
 Options:
   --auto              Pick the profile from changed paths (MOMO-316):
@@ -64,7 +64,7 @@ while [ "$#" -gt 0 ]; do
       usage
       exit 0
       ;;
-    docs|swift|diagnostics|staging-smoke|host-runtime|backup|local-alpha|internal-alpha|runtime-db|runtime-relay|runtime-live|runtime-agent|external-agent-provider|macos-ui|ios|m3-dbc|web-serving|web|license|all)
+    docs|swift|diagnostics|staging-smoke|host-runtime|backup|local-alpha|internal-alpha|runtime-db|runtime-relay|runtime-live|runtime-agent|external-agent-provider|macos-ui|ios|m3-dbc|web-serving|web|license|secrets|all)
       PROFILE="$1"
       PROFILE_EXPLICIT=1
       shift
@@ -83,7 +83,7 @@ fi
 
 if [ "$PROFILE_EXPLICIT" -eq 1 ]; then
   case "$PROFILE" in
-    docs|swift|diagnostics|staging-smoke|host-runtime|backup|local-alpha|internal-alpha|runtime-db|runtime-relay|runtime-live|runtime-agent|external-agent-provider|macos-ui|ios|m3-dbc|web-serving|web|license|all) ;;
+    docs|swift|diagnostics|staging-smoke|host-runtime|backup|local-alpha|internal-alpha|runtime-db|runtime-relay|runtime-live|runtime-agent|external-agent-provider|macos-ui|ios|m3-dbc|web-serving|web|license|secrets|all) ;;
     *)
       echo "unknown profile: $PROFILE" >&2
       usage >&2
@@ -136,6 +136,7 @@ AUTO_NEED_HOSTRT=0
 AUTO_NEED_DIAG=0
 AUTO_NEED_WEB=0
 AUTO_NEED_LICENSE=0
+AUTO_NEED_SECRETS=0
 AUTO_NEED_ALL=0
 
 auto_classify_script() {
@@ -147,6 +148,8 @@ auto_classify_script() {
       AUTO_REASONS+=("$1 -> swift (SwiftPM supply-chain gate)") ;;
     scripts/check_cargo_licenses.sh|scripts/check_npm_licenses.mjs|scripts/tests/test_license_gate.sh)
       AUTO_NEED_LICENSE=1; AUTO_REASONS+=("$1 -> license (#1225 cargo/npm dependency license gate)") ;;
+    scripts/check_secrets.sh|scripts/tests/test_secrets_gate.sh)
+      AUTO_NEED_SECRETS=1; AUTO_REASONS+=("$1 -> secrets (#1236 gitleaks history scan)") ;;
     scripts/verify_linkshort.sh)
       AUTO_REASONS+=("$1 -> swift") ;;
     scripts/verify_relay.sh|scripts/verify_push_relay.sh|scripts/push_relay_keygen.sh)
@@ -182,6 +185,12 @@ auto_classify_path() {
       # #1225 cargo license policy. Its only consumer is the license gate, so
       # this is targeting rather than narrowing: no build/runtime surface reads it.
       AUTO_NEED_LICENSE=1; AUTO_REASONS+=("$1 -> license (cargo-deny policy)") ;;
+    .gitleaksignore)
+      # #1236 secret-scan triage baseline. Same shape as deny.toml: the secret
+      # gate is its only reader. The scan itself runs in every profile (it is in
+      # add_static_commands), so this only picks the cheapest lane that proves
+      # an edited baseline still behaves.
+      AUTO_NEED_SECRETS=1; AUTO_REASONS+=("$1 -> secrets (gitleaks triage baseline)") ;;
     docs/api/openapi.yaml)
       # The client contract spec: drift is verified against the live server
       # inside the web profile (verify_openapi_contract.sh).
@@ -285,7 +294,7 @@ auto_select_profile() {
   done
   set +f
 
-  local units=$((AUTO_NEED_MACOS + AUTO_NEED_IOS + AUTO_NEED_DB + AUTO_NEED_RELAY + AUTO_NEED_AGENT + AUTO_NEED_LIVE + AUTO_NEED_STAGING + AUTO_NEED_HOSTRT + AUTO_NEED_DIAG + AUTO_NEED_WEB + AUTO_NEED_LICENSE))
+  local units=$((AUTO_NEED_MACOS + AUTO_NEED_IOS + AUTO_NEED_DB + AUTO_NEED_RELAY + AUTO_NEED_AGENT + AUTO_NEED_LIVE + AUTO_NEED_STAGING + AUTO_NEED_HOSTRT + AUTO_NEED_DIAG + AUTO_NEED_WEB + AUTO_NEED_LICENSE + AUTO_NEED_SECRETS))
   if [ "$AUTO_NEED_ALL" -eq 1 ] || [ "$units" -gt 1 ]; then
     AUTO_SUGGESTED="all"
     if [ "$AUTO_NEED_LIVE" -eq 1 ]; then
@@ -319,6 +328,8 @@ auto_select_profile() {
     AUTO_SUGGESTED="web"
   elif [ "$AUTO_NEED_LICENSE" -eq 1 ]; then
     AUTO_SUGGESTED="license"
+  elif [ "$AUTO_NEED_SECRETS" -eq 1 ]; then
+    AUTO_SUGGESTED="secrets"
   else
     AUTO_SUGGESTED="docs"
   fi
@@ -338,7 +349,7 @@ if [ "$AUTO_MODE" -eq 1 ]; then
 fi
 
 case "$PROFILE" in
-  docs|swift|diagnostics|staging-smoke|host-runtime|backup|local-alpha|internal-alpha|runtime-db|runtime-relay|runtime-live|runtime-agent|external-agent-provider|macos-ui|ios|m3-dbc|web-serving|web|license|all) ;;
+  docs|swift|diagnostics|staging-smoke|host-runtime|backup|local-alpha|internal-alpha|runtime-db|runtime-relay|runtime-live|runtime-agent|external-agent-provider|macos-ui|ios|m3-dbc|web-serving|web|license|secrets|all) ;;
   *)
     echo "unknown profile: $PROFILE" >&2
     usage >&2
@@ -501,6 +512,11 @@ add_note_once() {
 add_static_commands() {
   add_cmd_once "branch skew preflight" 'scripts/check_branch_skew.sh'
   add_cmd_once "worktree clean" 'if [ "${LOCAL_GATE_ALLOW_DIRTY:-0}" = "1" ]; then echo "LOCAL_GATE_ALLOW_DIRTY=1; dirty state is recorded but not failed"; git status --short; else test -z "$(git status --porcelain)" || { echo "worktree has uncommitted changes"; git status --short; exit 1; }; fi'
+  # #1236: the secret scan is part of the static block, not a profile someone has
+  # to remember. #1224 landed the triage baseline and measured that nothing
+  # executed it — a baseline with no executor is a comment. See
+  # add_secrets_commands for the cost measurement and the caveats.
+  add_secrets_commands
   add_cmd_once "migration number uniqueness" 'scripts/check_migration_numbers.sh server/Migrations'
   add_cmd_once "diff whitespace" 'base="${LOCAL_GATE_BASE_REF:-origin/main}"; if git rev-parse --verify "$base" >/dev/null 2>&1; then git diff --check "$base"...HEAD; else echo "base ref $base unavailable; falling back to working tree whitespace checks"; fi; git diff --cached --check; git diff --check'
   add_cmd_once "workflow yaml parse" "ruby -e 'require \"yaml\"; Dir[\".github/workflows/*.yml\"].sort.each { |f| YAML.load_file(f); puts f }'"
@@ -514,7 +530,7 @@ add_static_commands() {
   add_note_once coverage "#1229 self-host quickstart drift contract: docs/SELF_HOST.md and scripts/self_host_env.sh must keep naming the same three compose files and the generated env path (a renamed overlay fails the gate instead of failing a self-hoster), infra/rust/Caddyfile.local must keep a port-only site address so a local run cannot order a certificate for the live domain at boot (#1239), and local.override.yml must never mount the production Caddyfile."
   add_cmd_once "pgvector image and migration drift contract" "scripts/verify_pgvector_contract.sh"
   add_cmd_once "eve compose profile drift contract" "scripts/verify_eve_profile.sh --config-only"
-  add_cmd_once "shell syntax" 'for f in .conductor/setup.sh adapters/prime/run.sh adapters/prime/container/entrypoint.sh adapters/prime/tests/tenancy_probe.sh scripts/momo scripts/local_gate.sh scripts/planning_context.sh scripts/self_host_env.sh scripts/runtime_process_guard.sh scripts/ensure_runtime_env.sh scripts/check_branch_skew.sh scripts/check_migration_numbers.sh scripts/check_spm_licenses.sh scripts/check_cargo_licenses.sh scripts/write_sha256_manifest.sh scripts/install_branch_skew_hook.sh scripts/hooks/pre-push scripts/tests/test_spm_license_gate.sh scripts/tests/test_license_gate.sh scripts/tests/test_local_gate_hardening.sh scripts/tests/test_local_gate_drift_guard.sh scripts/tests/test_make_deploy_bundle.sh scripts/cleanup_dogfood_seed_agents.sh scripts/local_soak_monitor.sh scripts/collect_diagnostics.sh scripts/compose_janitor.sh scripts/macos_dev_run.sh scripts/local_alpha_runner.sh scripts/make_deploy_bundle.sh scripts/goal_claim.sh scripts/goal_status.sh scripts/goal_release.sh scripts/github_bootstrap.sh scripts/github/bootstrap.sh scripts/migrate.sh scripts/prod_env_preflight.sh scripts/aws_internal_alpha_preflight.sh scripts/verify_prod_install_upgrade.sh scripts/verify_multibinary_image.sh scripts/verify_momo_ops.sh scripts/verify_momo_ops_runtime.sh scripts/verify_prod_rls_posture.sh scripts/verify_owner_bootstrap.sh scripts/verify_owner_bootstrap_rust.sh scripts/verify_design_preflight.sh scripts/design_preflight_web.sh scripts/verify_pgvector_contract.sh scripts/verify_eve_profile.sh scripts/verify_runtime_role_bootstrap.sh scripts/verify_prod_seed_password.sh scripts/verify_rls.sh scripts/verify_roster.sh scripts/verify_channel_list.sh scripts/verify_channel_management.sh scripts/verify_join.sh scripts/verify_platform_admin.sh scripts/verify_approval_decision.sh scripts/verify_auth_hardening.sh scripts/verify_push_registration.sh scripts/verify_push_notifier.sh scripts/verify_notification_mute.sh scripts/verify_linkshort.sh scripts/push_relay_keygen.sh scripts/verify_push_relay.sh scripts/verify_plugin_registry.sh scripts/verify_signed_webhook_ingress.sh scripts/verify_drive_mcp.sh scripts/verify_attachment_upload.sh scripts/verify_plugin_grant_roundtrip.sh scripts/verify_huddle_lifecycle.sh scripts/verify_workspace_search.sh scripts/verify_thread_reply.sh scripts/verify_work_session.sh scripts/verify_work_control.sh scripts/verify_work_agent_e2e.sh scripts/verify_workd.sh scripts/verify_workd_attach.sh scripts/verify_work_pool.sh scripts/verify_tier_fallback.sh scripts/verify_t3_migration_repair.sh scripts/verify_t3_provider_continuity.sh scripts/verify_t3_convergence.sh scripts/verify_membership_lifecycle.sh scripts/verify_lifecycle_completion.sh scripts/verify_memory_search.sh scripts/verify_context_packet.sh scripts/verify_memory_grant.sh scripts/verify_agent_card_onboarding.sh scripts/verify_agent_profile.sh scripts/verify_openapi_contract.sh scripts/verify_openapi_contract_rust.sh scripts/openapi_spec_to_json.sh scripts/verify_relay.sh scripts/verify_realtime_live.sh scripts/verify_agent_worker_bootstrap.sh scripts/verify_agent_worker.sh scripts/verify_agent_path_equivalence.sh scripts/verify_agent_context_bootstrap.sh scripts/verify_agent_context.sh scripts/verify_agent_live_channel_bootstrap.sh scripts/verify_agent_live_channel.sh scripts/verify_hermes_verifier_bootstrap.sh scripts/verify_external_agent_provider.sh scripts/verify_local_hermes_bridge.sh scripts/verify_hermes_gateway_adapter.sh scripts/verify_hermes_gateway_real_smoke.sh scripts/verify_local_hermes_credentialed_smoke.sh scripts/verify_staging_smoke.sh scripts/verify_internal_hosting_smoke.sh scripts/web_serving_smoke.sh scripts/verify_web_serving.sh scripts/verify_web_login_smoke.sh scripts/verify_web_generated_types.sh scripts/verify_internal_host_runtime.sh scripts/verify_backup_restore_rehearsal.sh scripts/verify_macos_real_backend_ui_bootstrap.sh scripts/verify_macos_real_backend_ui.sh infra/prod/install.sh infra/prod/upgrade.sh infra/prod/momo-ops.sh infra/prod/deploy-lib.sh infra/prod/docker/momo-entrypoint.sh infra/workd/bootstrap.sh infra/workd/momo-workd-run infra/eve/bootstrap_world.sh infra/eve/entrypoint.sh; do [ -e "$f" ] || { echo "missing shell script: $f"; exit 1; }; bash -n "$f"; done'
+  add_cmd_once "shell syntax" 'for f in .conductor/setup.sh adapters/prime/run.sh adapters/prime/container/entrypoint.sh adapters/prime/tests/tenancy_probe.sh scripts/momo scripts/local_gate.sh scripts/planning_context.sh scripts/self_host_env.sh scripts/runtime_process_guard.sh scripts/ensure_runtime_env.sh scripts/check_branch_skew.sh scripts/check_migration_numbers.sh scripts/check_spm_licenses.sh scripts/check_cargo_licenses.sh scripts/check_secrets.sh scripts/write_sha256_manifest.sh scripts/install_branch_skew_hook.sh scripts/hooks/pre-push scripts/tests/test_spm_license_gate.sh scripts/tests/test_license_gate.sh scripts/tests/test_secrets_gate.sh scripts/tests/test_local_gate_hardening.sh scripts/tests/test_local_gate_drift_guard.sh scripts/tests/test_make_deploy_bundle.sh scripts/cleanup_dogfood_seed_agents.sh scripts/local_soak_monitor.sh scripts/collect_diagnostics.sh scripts/compose_janitor.sh scripts/macos_dev_run.sh scripts/local_alpha_runner.sh scripts/make_deploy_bundle.sh scripts/goal_claim.sh scripts/goal_status.sh scripts/goal_release.sh scripts/github_bootstrap.sh scripts/github/bootstrap.sh scripts/migrate.sh scripts/prod_env_preflight.sh scripts/aws_internal_alpha_preflight.sh scripts/verify_prod_install_upgrade.sh scripts/verify_multibinary_image.sh scripts/verify_momo_ops.sh scripts/verify_momo_ops_runtime.sh scripts/verify_prod_rls_posture.sh scripts/verify_owner_bootstrap.sh scripts/verify_owner_bootstrap_rust.sh scripts/verify_design_preflight.sh scripts/design_preflight_web.sh scripts/verify_pgvector_contract.sh scripts/verify_eve_profile.sh scripts/verify_runtime_role_bootstrap.sh scripts/verify_prod_seed_password.sh scripts/verify_rls.sh scripts/verify_roster.sh scripts/verify_channel_list.sh scripts/verify_channel_management.sh scripts/verify_join.sh scripts/verify_platform_admin.sh scripts/verify_approval_decision.sh scripts/verify_auth_hardening.sh scripts/verify_push_registration.sh scripts/verify_push_notifier.sh scripts/verify_notification_mute.sh scripts/verify_linkshort.sh scripts/push_relay_keygen.sh scripts/verify_push_relay.sh scripts/verify_plugin_registry.sh scripts/verify_signed_webhook_ingress.sh scripts/verify_drive_mcp.sh scripts/verify_attachment_upload.sh scripts/verify_plugin_grant_roundtrip.sh scripts/verify_huddle_lifecycle.sh scripts/verify_workspace_search.sh scripts/verify_thread_reply.sh scripts/verify_work_session.sh scripts/verify_work_control.sh scripts/verify_work_agent_e2e.sh scripts/verify_workd.sh scripts/verify_workd_attach.sh scripts/verify_work_pool.sh scripts/verify_tier_fallback.sh scripts/verify_t3_migration_repair.sh scripts/verify_t3_provider_continuity.sh scripts/verify_t3_convergence.sh scripts/verify_membership_lifecycle.sh scripts/verify_lifecycle_completion.sh scripts/verify_memory_search.sh scripts/verify_context_packet.sh scripts/verify_memory_grant.sh scripts/verify_agent_card_onboarding.sh scripts/verify_agent_profile.sh scripts/verify_openapi_contract.sh scripts/verify_openapi_contract_rust.sh scripts/openapi_spec_to_json.sh scripts/verify_relay.sh scripts/verify_realtime_live.sh scripts/verify_agent_worker_bootstrap.sh scripts/verify_agent_worker.sh scripts/verify_agent_path_equivalence.sh scripts/verify_agent_context_bootstrap.sh scripts/verify_agent_context.sh scripts/verify_agent_live_channel_bootstrap.sh scripts/verify_agent_live_channel.sh scripts/verify_hermes_verifier_bootstrap.sh scripts/verify_external_agent_provider.sh scripts/verify_local_hermes_bridge.sh scripts/verify_hermes_gateway_adapter.sh scripts/verify_hermes_gateway_real_smoke.sh scripts/verify_local_hermes_credentialed_smoke.sh scripts/verify_staging_smoke.sh scripts/verify_internal_hosting_smoke.sh scripts/web_serving_smoke.sh scripts/verify_web_serving.sh scripts/verify_web_login_smoke.sh scripts/verify_web_generated_types.sh scripts/verify_internal_host_runtime.sh scripts/verify_backup_restore_rehearsal.sh scripts/verify_macos_real_backend_ui_bootstrap.sh scripts/verify_macos_real_backend_ui.sh infra/prod/install.sh infra/prod/upgrade.sh infra/prod/momo-ops.sh infra/prod/deploy-lib.sh infra/prod/docker/momo-entrypoint.sh infra/workd/bootstrap.sh infra/workd/momo-workd-run infra/eve/bootstrap_world.sh infra/eve/entrypoint.sh; do [ -e "$f" ] || { echo "missing shell script: $f"; exit 1; }; bash -n "$f"; done'
   add_cmd_once "metrics verifier shell syntax" "bash -n scripts/verify_metrics_observability.sh"
   add_cmd_once "message interaction verifier shell syntax" "bash -n scripts/verify_message_interaction.sh"
   add_cmd_once "production migration entrypoint shell syntax" "bash -n infra/prod/docker/internal-smoke-migrate.sh"
@@ -932,6 +948,24 @@ add_license_commands() {
   add_note_once not_covered "#1225 covers licenses only. RUSTSEC advisories (cargo deny check advisories), npm audit, duplicate-crate bans, and source registry pinning are not run — and no license gate runs in GitHub Actions yet, so an external PR is still unchecked until the CI promotion that waits on the public-repo decision."
 }
 
+add_secrets_commands() {
+  # #1236: the executor #1224 was missing. `.gitleaksignore` pins 61 reviewed
+  # false positives by fingerprint so one real leak stops being buried; until now
+  # nothing ran the scanner that reads it.
+  #
+  # Ordering matches the license gate: the regression test runs first because it
+  # is the only step that proves the gate can turn red. If it breaks, a green
+  # from the scan below is indistinguishable from a gate that fires at nothing.
+  #
+  # Cost, measured on this tree: 0.2s for the regression test, ~2s for the scan
+  # (2,046 commits / 43 MB). That is why this group sits in add_static_commands
+  # and therefore in every profile, rather than in a lane someone has to choose.
+  add_cmd_once "secret gate regression (red proofs: committed credential, absent scanner, baseline aim)" 'scripts/tests/test_secrets_gate.sh'
+  add_cmd_once "secret scan over all refs (gitleaks + .gitleaksignore baseline)" 'scripts/check_secrets.sh'
+  add_note_once coverage "#1236 secret scan via scripts/check_secrets.sh: gitleaks over every ref (--log-opts --all), with .gitleaksignore applied — the exact command the baseline documents as the range it guarantees. Missing gitleaks fails the gate instead of skipping it, and there is no reviewed-override env: \"skip the secret scan\" is not a reviewable exception. No findings report file is written even in the artifact dir, because a gitleaks JSON report carries the matched values while --redact only covers stdout. scripts/tests/test_secrets_gate.sh proves red on a committed high-entropy credential in a throwaway repository, red on an absent scanner, red on a missing baseline, red on a baseline line whose fingerprint does not match, and green once the real fingerprint is pinned."
+  add_note_once not_covered "#1236 covers committed history only. Uncommitted work has no commit and therefore no fingerprint, so the baseline cannot speak about it — the \"worktree clean\" static check is what closes that gap, and gitleaks --no-git/protect are deliberately not run because the commit-scoped baseline does not apply to them (the regression test measures that divergence rather than asserting it). Rule coverage is stock gitleaks: no repo-specific gitleaks.toml exists yet, so a credential shape gitleaks does not know is still invisible."
+}
+
 add_web_serving_commands() {
   # MOMO-576 (ADR-0119 W-3): infrastructure-only runtime profile. It uses the
   # e2e web profile and never joins runtime-db or a developer compose project.
@@ -1047,6 +1081,13 @@ case "$PROFILE" in
   license)
     add_static_commands
     add_license_commands
+    ;;
+  secrets)
+    # Deliberately without add_static_commands: this is the ~3s standalone lane
+    # for "did I just commit a credential", and the same two steps already run
+    # inside every other profile through the static block.
+    add_secrets_commands
+    add_note_once not_covered "The secrets profile runs the secret scan alone. It is not a substitute for a profile gate — no build, no docs/CI validation, no runtime evidence."
     ;;
   all)
     add_static_commands

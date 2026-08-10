@@ -19,6 +19,18 @@ Signed-off-by: Your Name <your@email.com>
 3. 하드 불변식(Postgres=SoT, 단일 쓰기경로, RLS FORCE, 자격증명 비유입 — `docs/architecture/overview.md`)을 위반하는 PR은 수용되지 않습니다.
 4. UI 변경은 `.claude/skills/momo-design-taste` 규율의 검토를 거칩니다.
 
+## 시크릿
+
+커밋에 자격증명이 들어갔는지는 게이트가 봅니다. 모든 프로파일이 이 검사를 포함하므로 따로 기억할 필요는 없고, 커밋 직후 단독으로 확인하고 싶으면 이쪽이 3초입니다.
+
+```bash
+scripts/local_gate.sh --profile secrets   # = 회귀 테스트 + scripts/check_secrets.sh
+```
+
+`gitleaks`가 필요하며(`brew install gitleaks`), 없으면 **건너뛰지 않고 실패합니다** — 스캐너 없이 얻은 초록은 깨끗한 히스토리와 검사되지 않은 히스토리를 구분하지 못합니다.
+
+오탐이면 `.gitleaksignore`에 지문(`<commit>:<file>:<rule>:<line>`) 한 줄을 판정 근거와 함께 남기세요. **근거에 탐지된 값을 그대로 인용하지 마세요** — 인용문 자체가 새 탐지가 됩니다. 진짜 유출이면 지문을 추가하기 전에 먼저 키를 로테이션하세요. 자세한 규칙은 `docs/LOCAL_PR_GATE.md`의 "Secret scan gate (#1236)".
+
 ## 의존성 라이선스
 
 oort는 permissive 스택입니다. 의존성을 추가·변경했다면 해당 게이트를 PR 전에 돌리고 결과를 붙이세요.

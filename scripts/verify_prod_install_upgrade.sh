@@ -85,6 +85,19 @@ OLD_E="$(printf '5%.0s' {1..64})"
 OLD_F="$(printf '6%.0s' {1..64})"
 ENV_FILE="$TMP_ROOT/prod.env"
 
+# This fixture has to satisfy every key in prod_env_preflight.sh's strict
+# require_vars list, because install.sh runs that preflight before its own
+# checks. When a ticket adds a required key and this file is not updated with it,
+# the preflight rejects the fixture first and every assertion past this point
+# reports the wrong cause — MOMO-572 added PROVIDER_LINK_MASTER_KEY on
+# 2026-07-23 and the tag-only case below has been red with a digest-guard message
+# ever since (#1236). If a case here fails claiming install "did not reach" some
+# guard, read the captured output: a missing required key looks exactly like that.
+#
+# Values are deliberately not high-entropy unless a check needs them to be. They
+# are fixtures, and every random-looking one is a gitleaks finding that has to be
+# hand-triaged into .gitleaksignore forever after (#1224 baselined eight from
+# this file alone).
 cat > "$ENV_FILE" <<EOF
 COMPOSE_PROJECT_NAME=momo-406-static
 MOMO_ENV=staging
@@ -126,6 +139,7 @@ CENT_API_KEY=69fed31405fb4696b3677e12a4f09737
 CENT_PROXY_SECRET=b3b355af9df54d2f9df7b46d51aad7dc
 JWT_HMAC=231171fc80c5458a84c0c52cd5b9f284
 OUTBOUND_WEBHOOK_MASTER_KEY=1524c03919df48adb80eb29568e8ef1f
+PROVIDER_LINK_MASTER_KEY=00000000000000000000000000001236
 AGENT_PROVIDER_MODE=external-hermes
 AGENT_MODEL=hermes-agent
 HERMES_BASE_URL=https://gateway.momo-install.example.net/v1
