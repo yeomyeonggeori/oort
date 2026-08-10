@@ -664,12 +664,31 @@ function refreshResponseFromWire(value: unknown): RefreshResponse {
   return { accessToken: source.accessToken, refreshToken: source.refreshToken };
 }
 
+/**
+ * The address as the server will store it: trimmed and lowercased.
+ *
+ * This is a courtesy, not the comparison. Since #1234/#1248 every server-side
+ * email lookup folds its own argument with SQL's `lower(btrim(...))`, so an
+ * un-normalised address already resolves correctly — what this fixes is the
+ * client sending one spelling while the account holds another, which shows up
+ * the moment any surface echoes "signed in as …".
+ *
+ * It is deliberately no cleverer than trim+lowercase. The client must not try to
+ * *replace* the server's normalisation (that is the mistake #1234 was about);
+ * it only sends the address in the form the server would have written anyway.
+ * JS `trim()` also removes the non-space whitespace that Postgres `btrim` leaves
+ * alone, so a pasted address with a stray tab now lands instead of 401-ing.
+ */
+export function normalizeEmail(raw: string): string {
+  return raw.trim().toLowerCase();
+}
+
 export async function login(
   email: string,
   password: string,
   workspace?: string
 ): Promise<LoginResponse> {
-  const body: Record<string, string> = { email, password };
+  const body: Record<string, string> = { email: normalizeEmail(email), password };
   if (workspace && workspace.trim()) body.workspace = workspace.trim();
   const res = await rawRequest(
     "/v1/auth/login",
@@ -727,16 +746,20 @@ export async function joinWithInvite(
   email: string,
   password: string
 ): Promise<LoginResponse> {
-  const trimmedEmail = email.trim();
+  // Normalised rather than merely trimmed, and the derivations read the same
+  // value: the row this creates will hold `lower(btrim(...))`, so deriving the
+  // display name from any other spelling would name the account after a string
+  // it does not contain (`ADA@…` had been shouting "ADA" back at people).
+  const normalizedEmail = normalizeEmail(email);
   const res = await rawRequest(
     "/v1/join",
     {
       method: "POST",
       body: JSON.stringify({
         code: code.trim(),
-        email: trimmedEmail,
-        displayName: displayNameFromEmail(trimmedEmail),
-        handle: handleFromEmail(trimmedEmail),
+        email: normalizedEmail,
+        displayName: displayNameFromEmail(normalizedEmail),
+        handle: handleFromEmail(normalizedEmail),
         password,
         timeZone: browserTimeZone(),
       }),

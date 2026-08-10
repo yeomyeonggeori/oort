@@ -56,6 +56,38 @@
 //! not the `Ok(Err(_))` shape the settings routes use — that shape commits, which
 //! is safe only when no rejection can follow a write, and here several can
 //! (a lost redemption race is detected after the member row is inserted).
+//!
+//! ## The lookups normalise their own argument (#1248)
+//!
+//! Four pre-flight reads are keyed by the joining address — the ban check, the
+//! duplicate-redemption check, the role-escalation check and the create-or-reuse
+//! read. They used to compare the argument verbatim (`h.email = $1`,
+//! `email_norm = lower($1)`), which was safe only because every caller ran
+//! [`normalized_join_email`] first. That is a rule living in the callers rather
+//! than in the statement, and #1234 is what it looks like when one caller forgets
+//! it: `verify_password_login` skipped exactly this step and an account that
+//! existed could not sign in.
+//!
+//! So each of the four now normalises **in SQL**, the same way
+//! `momo_messaging::verify_password_login` does after #1234:
+//!
+//! * The **parameter** is folded, never the column. `human_email_uniq` is
+//!   case-sensitive, so a workspace can hold `Twin@Example.com` beside
+//!   `twin@example.com`; folding the column would match both rows and the
+//!   `LIMIT 1` would pick whichever the plan yielded. Folding the parameter
+//!   constant-folds and keeps `human_email_uniq` / `workspace_ban_email_uniq` as
+//!   an `Index Cond`.
+//! * The fold is SQL's `lower(btrim(...))`, not Rust's `trim().to_lowercase()`.
+//!   Every write path — `create_workspace.sql`, `bootstrap_owner_if_absent.sql`,
+//!   `set_initial_owner.sql`, migration 064's `human_email_normalized_ck` and
+//!   026's `workspace_ban_email_norm_ck` — produced its bytes with those two
+//!   functions, and `btrim` and Rust's `trim` disagree about non-space
+//!   whitespace. Comparing with the same functions that wrote the row is what
+//!   closes the disagreement rather than moving it.
+//!
+//! [`normalized_join_email`] stays where it is: it still validates shape (a 400
+//! for an address with no `@`) and it still decides what a *new* row stores. What
+//! changed is that the reads no longer depend on it having run.
 
 use momo_db::DbError;
 use sqlx::PgConnection;
@@ -105,10 +137,15 @@ pub fn normalized_invite_code(raw: &str) -> Result<String, JoinSpecInvalid> {
 /// Swift `normalizedEmail` (:724-734): trimmed, lowercased, 3..=320 characters,
 /// contains an `@` that is neither the first nor the last character.
 ///
-/// Lowercasing here is load-bearing rather than cosmetic — `human_email_uniq`,
-/// the `workspace_ban.email_norm` predicate and the duplicate-redemption check
-/// all compare this exact value, so a mixed-case address must resolve to the
-/// same account it did last time.
+/// Lowercasing here is load-bearing rather than cosmetic: this is the value a
+/// *new* `human` row stores, and migration 064's `human_email_normalized_ck`
+/// refuses anything else.
+///
+/// It is no longer what makes the pre-flight lookups find their rows — since
+/// #1248 those fold their own argument in SQL (see this module's "the lookups
+/// normalise their own argument"). Dropping this call would still be a bug, but
+/// it would now be caught by the constraint instead of silently creating a
+/// second account for someone who already had one.
 pub fn normalized_join_email(raw: &str) -> Result<String, JoinSpecInvalid> {
     let value = raw.trim().to_lowercase();
     let length = value.chars().count();
@@ -640,7 +677,7 @@ pub async fn is_handle_banned_in_tx(
 ) -> Result<bool, DbError> {
     let banned: bool = sqlx::query_scalar(
         "SELECT EXISTS ( \
-           SELECT 1 FROM workspace_ban WHERE handle_norm = lower($1::text) \
+           SELECT 1 FROM workspace_ban WHERE handle_norm = lower(btrim($1::text)) \
          )",
     )
     .bind(handle)
@@ -654,11 +691,17 @@ async fn is_banned(conn: &mut PgConnection, email: &str, handle: &str) -> Result
     // load-bearing here for a different reason: `lower` is overloaded on
     // `anyrange`/`anymultirange` as well as `text`, and an untyped bind
     // parameter would leave the resolution ambiguous.
+    //
+    // `btrim` joins `lower` for the reason in this module's "the lookups
+    // normalise their own argument" section: 026's `workspace_ban_email_norm_ck`
+    // and `workspace_ban_handle_norm_ck` store `lower(btrim(...))`, so a
+    // `lower()`-only comparison cannot reach a ban row whenever the argument
+    // still carries edge whitespace.
     let banned: bool = sqlx::query_scalar(
         "SELECT EXISTS ( \
            SELECT 1 FROM workspace_ban \
-            WHERE email_norm = lower($1::text) \
-               OR handle_norm = lower($2::text) \
+            WHERE email_norm = lower(btrim($1::text)) \
+               OR handle_norm = lower(btrim($2::text)) \
          )",
     )
     .bind(email)
@@ -668,6 +711,12 @@ async fn is_banned(conn: &mut PgConnection, email: &str, handle: &str) -> Result
     Ok(banned)
 }
 
+/// Has this invite already been spent by this address? — keyed by email because
+/// the member row may not exist yet.
+///
+/// The parameter carries `lower(btrim(...))` for the reason in this module's
+/// "the lookups normalise their own argument" section: a miss here is a second
+/// redemption of a single-use link.
 async fn redeemed_by_email(
     conn: &mut PgConnection,
     invite_id: Uuid,
@@ -679,7 +728,7 @@ async fn redeemed_by_email(
              FROM invite_code_redemption r \
              JOIN human h ON h.member_id = r.member_id \
             WHERE r.invite_code_id = $1 \
-              AND h.email = $2 \
+              AND h.email = lower(btrim($2)) \
          )",
     )
     .bind(invite_id)
@@ -708,6 +757,11 @@ async fn redeemed_by_member(
     Ok(redeemed)
 }
 
+/// The role this address already holds in the transaction's workspace, if any.
+///
+/// The parameter carries `lower(btrim(...))` for the reason in this module's
+/// "the lookups normalise their own argument" section: a miss here reads as
+/// "holds no role", which is the answer that lets an `admin` link through.
 async fn workspace_role_for_email(
     conn: &mut PgConnection,
     email: &str,
@@ -718,7 +772,7 @@ async fn workspace_role_for_email(
            JOIN workspace_membership wm \
              ON wm.workspace_id = h.workspace_id \
             AND wm.member_id = h.member_id \
-          WHERE h.email = $1 \
+          WHERE h.email = lower(btrim($1)) \
           LIMIT 1",
     )
     .bind(email)
@@ -755,6 +809,11 @@ fn member_from_row(row: MemberRow) -> JoinedMember {
     }
 }
 
+/// The member this address already belongs to, if any — "create or reuse".
+///
+/// The parameter carries `lower(btrim(...))` for the reason in this module's
+/// "the lookups normalise their own argument" section: a miss here sends the
+/// join down the *create* arm for somebody who already exists.
 async fn find_human_by_email(
     conn: &mut PgConnection,
     email: &str,
@@ -764,7 +823,7 @@ async fn find_human_by_email(
                 m.display_name, m.handle \
            FROM human h \
            JOIN member m ON m.id = h.member_id \
-          WHERE h.email = $1 \
+          WHERE h.email = lower(btrim($1)) \
           LIMIT 1",
     )
     .bind(email)
@@ -962,7 +1021,7 @@ mod tests {
     }
 
     #[test]
-    fn the_email_is_lowercased_because_three_predicates_compare_it() {
+    fn the_email_is_lowercased_because_that_is_the_form_a_new_row_stores() {
         assert_eq!(
             normalized_join_email("  Ada@Example.COM ").expect("ok"),
             "ada@example.com"

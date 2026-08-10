@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { ApiError, displayNameFromEmail, handleFromEmail } from "@momo/core/lib/api";
+import {
+  ApiError,
+  displayNameFromEmail,
+  handleFromEmail,
+  normalizeEmail,
+} from "@momo/core/lib/api";
 import { NetworkError } from "@momo/core/lib/http";
 import { normalizeServerUrl } from "@/lib/serverBase";
 import { resolveSpikeRealtimeUrl } from "@/lib/realtime";
@@ -379,5 +384,13 @@ describe("identity derived from an email (mac client parity)", () => {
 
   it("never produces an empty handle", () => {
     expect(handleFromEmail("...@example.com")).toBe("oort-user");
+  });
+
+  // #1248. The join derives the display name from the NORMALISED address, so the
+  // name matches the row the server writes instead of shouting back whatever
+  // caps lock was doing.
+  it("names the account after the address the server will store", () => {
+    expect(normalizeEmail("  SEONG.JAE@Example.COM\t")).toBe("seong.jae@example.com");
+    expect(displayNameFromEmail(normalizeEmail("SEONG.JAE@Example.COM"))).toBe("Seong Jae");
   });
 });

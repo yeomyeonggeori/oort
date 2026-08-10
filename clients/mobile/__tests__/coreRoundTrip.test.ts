@@ -135,6 +135,23 @@ describe('login, end to end through the core', () => {
     expect(coreSession().getAccessToken()).toBe('access-token-1');
   });
 
+  // #1248. The server folds the address itself now (SQL `lower(btrim(...))`), so
+  // this is not what makes the login work — it is what stops the client holding
+  // one spelling of an account the database holds under another. The tab is the
+  // interesting half: Postgres `btrim` removes spaces only, so an address pasted
+  // with one would have missed no matter how carefully the server normalised.
+  it('sends the address in the form the server stores it', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, LOGIN_BODY));
+
+    await login('\t  SeongJae@Example.COM  ', 'pw');
+
+    const [, init] = fetchMock.mock.calls[0];
+    expect(JSON.parse(String(init?.body))).toEqual({
+      email: 'seongjae@example.com',
+      password: 'pw',
+    });
+  });
+
   it('puts the refresh token in the keychain and NOT in MMKV', async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse(200, LOGIN_BODY));
     await login('seongjae@example.com', 'pw');
