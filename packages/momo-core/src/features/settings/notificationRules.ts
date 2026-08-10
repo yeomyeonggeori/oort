@@ -3,7 +3,7 @@
 //
 // Wire contract: docs/api/openapi.yaml `notification-rules` (GET/PUT),
 // server-rust/bins/momo-server/src/routes/notification_rules.rs,
-// server/Migrations/068_notification_rule.sql.
+// server/Migrations/066_notification_rule.sql.
 //
 // Two orthogonal switches, both the SIGNED-IN member's own, workspace-global:
 //   * dnd                   — suppress every push for me in this workspace.

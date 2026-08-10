@@ -122,8 +122,8 @@ export function NotificationRulesSection({ offline }: { offline: boolean }) {
         />
         <RuleToggle
           testId="notification-rules-mention"
-          name="음소거한 채널에서도 멘션은 받기"
-          description="채널을 음소거해도 나를 멘션한 알림은 옵니다. 방해 금지가 켜져 있으면 멘션도 오지 않습니다."
+          name="알림을 끈 채널에서도 멘션은 받기"
+          description="채널 알림을 꺼도 나를 멘션한 알림은 옵니다. 방해 금지가 켜져 있으면 멘션도 오지 않습니다."
           checked={current.mentionOverridesMute}
           disabled={disabled}
           describedBy={offline ? offlineReasonId : undefined}
