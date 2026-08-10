@@ -190,14 +190,17 @@ pub use routing::{
     ROUTING_KEYS,
 };
 pub use run::{
-    authorize_run_binding_in_tx, cancel_run_in_tx, completion_status, consume_run_step_in_tx,
-    create_agent_run_in_tx, end_parked_run_in_tx, find_agent_run_by_trigger_in_tx,
-    finish_run_in_tx, is_active_agent_in_tx, is_active_human_channel_member_in_tx,
-    linked_work_session_ids_in_tx, live_run_count_in_tx, load_agent_run_in_tx,
-    load_eligible_agent_in_tx, lock_gateway_run_in_tx, lock_run_for_cancel_in_tx,
-    mark_run_started_in_tx, park_run_for_approval_in_tx, requeue_run_from_approval_in_tx,
-    terminal_run_ids_in_tx, AgentRunRow, CancellableRun, CompletionStatusError, CreatedRun,
-    EligibleAgent, GatewayRunSnapshot, NewAgentRun, RunBindingRejected, RunStatus, RunTrigger,
+    agent_run_cursor_is_visible_in_tx, authorize_run_binding_in_tx, cancel_run_in_tx,
+    completion_status, consume_run_step_in_tx, create_agent_run_in_tx, end_parked_run_in_tx,
+    find_agent_run_by_trigger_in_tx, finish_run_in_tx, is_active_agent_in_tx,
+    is_active_human_channel_member_in_tx, linked_work_session_ids_in_tx,
+    list_agent_run_summaries_in_tx, list_channel_work_runs_in_tx, live_run_count_in_tx,
+    load_agent_run_in_tx, load_agent_run_with_visibility_in_tx, load_eligible_agent_in_tx,
+    lock_gateway_run_in_tx, lock_run_for_cancel_in_tx, mark_run_started_in_tx,
+    park_run_for_approval_in_tx, requeue_run_from_approval_in_tx, terminal_run_ids_in_tx,
+    trigger_summary, validated_run_limit, AgentRunRow, AgentRunSummaryPage, AgentRunSummaryRow,
+    CancellableRun, CompletionStatusError, CreatedRun, EligibleAgent, GatewayRunSnapshot,
+    NewAgentRun, RunBindingRejected, RunStatus, RunTrigger, TRIGGER_SUMMARY_LIMIT,
 };
 pub use status::{
     agent_partial_payload, agent_partial_tool_call_payload, agent_status_channel,

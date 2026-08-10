@@ -44,18 +44,22 @@ describe("미제공 판정", () => {
 });
 
 describe("표면 판정표", () => {
-  it("2026-08-04 실측: 검색과 승인 결정이 제공되고 나머지는 아직 없다", () => {
+  it("2026-08-10 실측: 검색·승인 결정·작업 기록이 제공되고 나머지는 아직 없다", () => {
     // 승인은 2026-08-02에 false였고, goal SRV-T1(#979)이 서버 라우트 셋을 올린
-    // 뒤 뒤집혔다(lib.rs:555-564). 이 목록은 표의 값을 못으로 박아 두는 자리라,
+    // 뒤 뒤집혔다(lib.rs:555-564). 작업 기록은 2026-08-04까지 false였고 #1223이
+    // 읽기 3경로를 올린 뒤 뒤집혔다. 이 목록은 표의 값을 못으로 박아 두는 자리라,
     // 뒤집힌 줄을 지우지 않고 위 칸으로 옮긴다: 다음에 어떤 표면이 이식되면
     // 이 테스트가 이름을 부르며 실패해서 표와 함께 고쳐지게 된다.
-    for (const id of ["messageSearch", "approvals"] as const) {
+    //
+    // 이 줄이 재는 것은 **표의 값**이지 서버의 사실이 아니다. 그 사실을 못으로
+    // 박는 것은 라우터 소스를 직접 읽는 웹 스위트(clients/web 의
+    // `features/agents/agentRunHistoryRoutes.test.ts`)이고, 둘은 함께 읽어야 한다.
+    for (const id of ["messageSearch", "approvals", "agentRunHistory"] as const) {
       expect(isSurfaceProvided(id)).toBe(true);
     }
     for (const id of [
       "workstreams",
       "huddles",
-      "agentRunHistory",
       "plugins",
       "agentMemory",
     ] as const) {

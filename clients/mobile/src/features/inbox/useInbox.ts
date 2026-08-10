@@ -50,21 +50,21 @@ import {fetchMentionsAfter} from './mentions';
 // partial result renders, and the aggregate only reports failure when there is
 // genuinely nothing to show.
 //
-// ## One of these three feeds is dark on the current server
+// ## 세 피드 중 어두운 것은 이제 없다
 //
-// **이 문단은 2026-08-05 에 정정됐다.** 이전 판은 `approvals` 와
-// `agentRunHistory` 가 **둘 다** `provided: false` 라고 적고 있었는데(2026-08-02
-// 측정), `approvals` 는 그 뒤 #979 로 랜딩해서 표가 이미 `provided: true` 다
-// (`serverSurfaces.ts` — GET list + POST decision). `InboxScreen` 머리말은 그
-// 사실을 알고 있었으므로 **같은 저장소 안에서 두 주석이 반대를 말하고 있었다.**
+// **이 문단은 두 번 정정됐다.** 첫 판(2026-08-02 측정)은 `approvals` 와
+// `agentRunHistory` 가 둘 다 `provided: false` 라고 적었다. 2026-08-05 에
+// `approvals` 를 지웠다 — #979 가 그 라우트를 올렸고, `InboxScreen` 머리말은 이미
+// 그 사실을 알고 있어서 **같은 저장소 안에서 두 주석이 반대를 말하고 있었다.**
+// 2026-08-10 에 `agentRunHistory` 도 지운다: #1223 이 읽기 3경로를 올렸다.
 //
-// 지금 어두운 것은 `agentRunHistory` 하나다. 판정은 여전히
+// 그래서 이 문단이 지금 남기는 것은 상태가 아니라 **규율**이다. 판정은 언제나
 // `@momo/core/features/capabilities/serverSurfaces` 표가 하고, 화면은
 // `availableInboxFilters` 로 탭을 감춘다 — 사람은 언제나 비어 있을 탭을 보지
-// 않고, 그 경로가 랜딩하는 날 바뀌는 것은 표의 한 줄뿐이다. 그 표가 그러라고
-// 있다.
+// 않고, 어떤 경로가 랜딩하는 날 바뀌는 것은 표의 한 줄뿐이다. 두 번 다 그랬다.
+// 여기에 상태를 다시 적지 말 것: 그러면 세 번째 낡은 주석이 된다.
 //
-// (U4-4 M1 이 이 표면 위에 타임라인 승인 컨트롤을 세우면서 정정했다 — 그
+// (U4-4 M1 이 이 표면 위에 타임라인 승인 컨트롤을 세우면서 첫 정정을 했다 — 그
 // goal 이 「승인 경로가 어둡다」는 낡은 주석을 근거로 취소될 뻔했다.)
 // =============================================================================
 

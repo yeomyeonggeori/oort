@@ -340,6 +340,316 @@ pub async fn load_agent_run_in_tx(
         .map_err(DbError::from)
 }
 
+// ---------------------------------------------------------------------------
+// the read surfaces (#1223)
+//
+// Every write above has had a reader on the client since the Swift server:
+// `agent_run` rows have been accumulating on this server all along, and the
+// three statements below are the first ones that let a person see them. They
+// are `SELECT`-only and they live here rather than in the binary for the reason
+// the module header gives — one place holds the `agent_run` vocabulary, so the
+// list's visibility predicate and the detail's cannot drift apart.
+// ---------------------------------------------------------------------------
+
+/// The bounded, credential-free projection of a run (MOMO-653 — openapi
+/// `AgentRunSummary`).
+///
+/// **What is missing is the feature.** No `input`, no `output`, no `error`, no
+/// idempotency key: a workspace-global history is read by anyone who shares a
+/// room with the agent, and the brief a person typed into one channel is not
+/// theirs to read from another. `trigger_summary` is the one sentence that
+/// crosses, bounded to [`TRIGGER_SUMMARY_LIMIT`] characters, and it is derived
+/// inside [`decode_run_summary`] so the struct has nowhere to keep the raw
+/// object even by accident.
+#[derive(Debug, Clone)]
+pub struct AgentRunSummaryRow {
+    pub id: Uuid,
+    pub channel_id: Uuid,
+    pub trigger_message_id: Option<Uuid>,
+    pub trigger_summary: Option<String>,
+    pub status: RunStatus,
+    pub started_at: Option<DateTime<Utc>>,
+    pub finished_at: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// One keyset page of [`AgentRunSummaryRow`], newest first.
+///
+/// `next_cursor` is `Some` only when a further page genuinely exists — the query
+/// asks for `limit + 1` rows and reports the cursor only if the extra one came
+/// back. A cursor that is always present would make a client page forever
+/// through an empty tail.
+#[derive(Debug, Clone)]
+pub struct AgentRunSummaryPage {
+    pub runs: Vec<AgentRunSummaryRow>,
+    pub next_cursor: Option<Uuid>,
+}
+
+/// The character cap on `trigger_summary` (Swift `runSummaryFieldsSQL`
+/// `left(…, 200)`, and openapi's `maxLength: 200`).
+pub const TRIGGER_SUMMARY_LIMIT: usize = 200;
+
+/// The one sentence a summary may carry about why a run exists.
+///
+/// Both shapes of trigger are covered because both reach the same column: a work
+/// run stores the person's `title`, a mention run stores the `prompt`. Anything
+/// else summarizes to `None` rather than to a guess — an unknown input shape is
+/// exactly the case where reaching into it would leak a field nobody vetted.
+///
+/// Shared with the full detail projection (`routes::shared::run_response`) on
+/// purpose: two derivations of "the excerpt a client shows" is how a channel
+/// list and an agent hub come to disagree about what the same run was for.
+pub fn trigger_summary(input: &Value) -> Option<String> {
+    let raw = match input.get("type").and_then(Value::as_str) {
+        Some("work") => input.get("title").and_then(Value::as_str),
+        _ => match input.get("surface").and_then(Value::as_str) {
+            Some("mention") => input.get("prompt").and_then(Value::as_str),
+            _ => None,
+        },
+    };
+    raw.map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.chars().take(TRIGGER_SUMMARY_LIMIT).collect())
+}
+
+/// `?limit=` for both history reads (Swift `validatedLimit`, :614-616).
+///
+/// An unparsable value falls back to the default instead of 400ing, matching
+/// Swift's `flatMap(Int.init)`: a client that sends `limit=all` gets a page, not
+/// a refusal it cannot act on.
+pub fn validated_run_limit(raw: Option<&str>) -> i64 {
+    raw.and_then(|raw| raw.trim().parse::<i64>().ok())
+        .unwrap_or(50)
+        .clamp(1, 200)
+}
+
+/// Qualified with the `r` alias, unlike [`RUN_COLS`], because the only statement
+/// that uses it joins `membership` — and `channel_id` is a column of both tables,
+/// so a bare list is an ambiguous-reference error at runtime rather than a
+/// compile-time one.
+const SUMMARY_COLS: &str = "r.id, r.channel_id, r.trigger_message_id, \
+     r.status::text AS status_label, r.input, r.started_at, r.finished_at, \
+     r.created_at, r.updated_at";
+
+fn decode_run_summary(row: &sqlx::postgres::PgRow) -> Result<AgentRunSummaryRow, sqlx::Error> {
+    let label: String = row.try_get("status_label")?;
+    let status = RunStatus::from_db_label(&label)
+        .ok_or_else(|| sqlx::Error::Decode(format!("unknown run_status '{label}'").into()))?;
+    // `input` is read and immediately reduced to the bounded excerpt. It is a
+    // local, never a field: the struct this returns cannot carry the object out
+    // of this function even if a later caller wanted it to.
+    let input: Value = row.try_get("input")?;
+    Ok(AgentRunSummaryRow {
+        id: row.try_get("id")?,
+        channel_id: row.try_get("channel_id")?,
+        trigger_message_id: row.try_get("trigger_message_id")?,
+        trigger_summary: trigger_summary(&input),
+        status,
+        started_at: row.try_get("started_at")?,
+        finished_at: row.try_get("finished_at")?,
+        created_at: row.try_get("created_at")?,
+        updated_at: row.try_get("updated_at")?,
+    })
+}
+
+/// One channel's **work** runs, newest first (Swift `list`, :253-296).
+///
+/// `agent_scope` is `Some(member)` when the caller is an agent bearer, and it
+/// narrows the page to that agent's own runs. It is `None` for a human, who sees
+/// every work run in a room they are in. The membership check itself is the
+/// caller's — this statement is the projection, not the door.
+///
+/// `input->>'type' = 'work'` is the same predicate the create route writes
+/// against, and it is why a mention run never appears here: the channel list is
+/// the work surface's history, and a mention's history is the timeline itself.
+pub async fn list_channel_work_runs_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    channel_id: Uuid,
+    agent_scope: Option<Uuid>,
+    limit: i64,
+) -> Result<Vec<AgentRunRow>, DbError> {
+    let sql = format!(
+        "SELECT {RUN_COLS} FROM agent_run \
+          WHERE workspace_id = $1 \
+            AND channel_id = $2 \
+            AND input->>'type' = 'work' \
+            AND ($3::uuid IS NULL OR agent_member_id = $3::uuid) \
+          ORDER BY created_at DESC, id DESC \
+          LIMIT $4"
+    );
+    let rows = sqlx::query(&sql)
+        .bind(workspace_id)
+        .bind(channel_id)
+        .bind(agent_scope)
+        .bind(limit)
+        .fetch_all(&mut *conn)
+        .await?;
+    rows.iter()
+        .map(decode_run)
+        .collect::<Result<Vec<_>, sqlx::Error>>()
+        .map_err(DbError::from)
+}
+
+/// Is this cursor a run the viewer could have been handed? (Swift :336-356.)
+///
+/// Checked before the page query so an unknown or invisible cursor is a **400**
+/// rather than a silently empty page. The distinction is the whole reason this
+/// is a separate statement: an empty page means "you have reached the end", and
+/// answering that to someone holding a cursor from another agent's history would
+/// be a lie about their own data.
+///
+/// It carries the same `JOIN membership` the page carries, so a cursor naming a
+/// run in a room the viewer has left is "not found" and not "found but hidden".
+pub async fn agent_run_cursor_is_visible_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    agent_member_id: Uuid,
+    viewer_member_id: Uuid,
+    cursor: Uuid,
+) -> Result<bool, DbError> {
+    let found: Option<i32> = sqlx::query_scalar(
+        "SELECT 1 \
+           FROM agent_run r \
+           JOIN membership visible \
+             ON visible.workspace_id = r.workspace_id \
+            AND visible.channel_id = r.channel_id \
+            AND visible.member_id = $3 \
+            AND visible.left_at IS NULL \
+          WHERE r.workspace_id = $1 \
+            AND r.agent_member_id = $2 \
+            AND r.id = $4 \
+          LIMIT 1",
+    )
+    .bind(workspace_id)
+    .bind(agent_member_id)
+    .bind(viewer_member_id)
+    .bind(cursor)
+    .fetch_optional(&mut *conn)
+    .await?;
+    Ok(found.is_some())
+}
+
+/// One agent's workspace-global history, restricted to rooms the viewer is in
+/// (Swift `listByAgent`, :304-390 — MOMO-653).
+///
+/// ## The visibility join is the authorization
+///
+/// `JOIN membership visible` is not an optimization: an agent hub is reachable
+/// by any workspace member, and this agent has been working in rooms the reader
+/// may never have been in. Filtering after the fact would still have read those
+/// rows into the process; joining makes "runs in rooms I am in" the *only* set
+/// the statement can produce.
+///
+/// ## Why the keyset is `(created_at, id)` and not an offset
+///
+/// Runs are inserted while a person pages. An `OFFSET` would show a row twice or
+/// skip one every time a new run lands between two requests. The pair is a total
+/// order (`id` breaks ties inside one clock tick), so a page boundary keeps
+/// meaning the same row no matter what else was written.
+pub async fn list_agent_run_summaries_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    agent_member_id: Uuid,
+    viewer_member_id: Uuid,
+    cursor: Option<Uuid>,
+    limit: i64,
+) -> Result<AgentRunSummaryPage, DbError> {
+    let sql = format!(
+        "SELECT {SUMMARY_COLS} \
+           FROM agent_run r \
+           JOIN membership visible \
+             ON visible.workspace_id = r.workspace_id \
+            AND visible.channel_id = r.channel_id \
+            AND visible.member_id = $3 \
+            AND visible.left_at IS NULL \
+          WHERE r.workspace_id = $1 \
+            AND r.agent_member_id = $2 \
+            AND ($4::uuid IS NULL OR (r.created_at, r.id) < ( \
+                  SELECT cursor_row.created_at, cursor_row.id \
+                    FROM agent_run cursor_row \
+                   WHERE cursor_row.workspace_id = $1 \
+                     AND cursor_row.agent_member_id = $2 \
+                     AND cursor_row.id = $4::uuid \
+                )) \
+          ORDER BY r.created_at DESC, r.id DESC \
+          LIMIT $5"
+    );
+    let rows = sqlx::query(&sql)
+        .bind(workspace_id)
+        .bind(agent_member_id)
+        .bind(viewer_member_id)
+        .bind(cursor)
+        .bind(limit + 1)
+        .fetch_all(&mut *conn)
+        .await?;
+    let mut decoded = rows
+        .iter()
+        .map(decode_run_summary)
+        .collect::<Result<Vec<_>, sqlx::Error>>()
+        .map_err(DbError::from)?;
+
+    // The extra row is a probe, never a result: it answers "is there more?" and
+    // is then dropped, so a page is exactly `limit` long or is the last one.
+    let has_more = decoded.len() as i64 > limit;
+    decoded.truncate(limit.max(0) as usize);
+    let next_cursor = if has_more {
+        decoded.last().map(|run| run.id)
+    } else {
+        None
+    };
+    Ok(AgentRunSummaryPage {
+        runs: decoded,
+        next_cursor,
+    })
+}
+
+/// A run plus **whether the caller is in the room it belongs to** (Swift
+/// `detail`, :393-434).
+///
+/// The membership is read in the same statement as the row rather than in a
+/// second query, because the two answers have to be about the same instant: a
+/// caller who left the channel between the two reads would otherwise be served a
+/// run out of a room they are no longer in.
+///
+/// Returning the pair instead of `Option<AgentRunRow>` keeps the *decision* in
+/// the route, where the difference between "no such run" (404) and "not your
+/// room" (403) is a product sentence and needs the caller's principal kind,
+/// which this crate deliberately does not know.
+pub async fn load_agent_run_with_visibility_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    run_id: Uuid,
+    viewer_member_id: Uuid,
+) -> Result<Option<(AgentRunRow, bool)>, DbError> {
+    let sql = format!(
+        "SELECT {RUN_COLS}, \
+                EXISTS ( \
+                  SELECT 1 FROM membership ms \
+                   WHERE ms.workspace_id = r.workspace_id \
+                     AND ms.channel_id = r.channel_id \
+                     AND ms.member_id = $3 \
+                     AND ms.left_at IS NULL \
+                ) AS has_channel_membership \
+           FROM agent_run r \
+          WHERE r.id = $1 AND r.workspace_id = $2 \
+          LIMIT 1"
+    );
+    let row = sqlx::query(&sql)
+        .bind(run_id)
+        .bind(workspace_id)
+        .bind(viewer_member_id)
+        .fetch_optional(&mut *conn)
+        .await?;
+    let Some(row) = row else { return Ok(None) };
+    let visible: bool = row
+        .try_get("has_channel_membership")
+        .map_err(DbError::from)?;
+    let run = decode_run(&row).map_err(DbError::from)?;
+    Ok(Some((run, visible)))
+}
+
 /// Why a REST write's `runId` was refused (ADR-0158 D5).
 ///
 /// Two variants and not three, and the missing one is the point: "no such run"
@@ -1336,6 +1646,69 @@ mod tests {
         assert_eq!(
             CompletionStatusError::Unknown.to_string(),
             "unknown gateway completion status"
+        );
+    }
+
+    // ---- the read surfaces (#1223) ----------------------------------------
+
+    /// The excerpt reads **both** trigger shapes, because both write the same
+    /// column: a work run's `title` and a mention run's `prompt`.
+    #[test]
+    fn the_trigger_excerpt_covers_both_shapes_of_run() {
+        assert_eq!(
+            trigger_summary(&serde_json::json!({"type": "work", "title": "  배포 준비  "})),
+            Some("배포 준비".to_string()),
+            "trimmed, like the projection Swift computes in SQL"
+        );
+        assert_eq!(
+            trigger_summary(&serde_json::json!({"surface": "mention", "prompt": "이거 고쳐줘"})),
+            Some("이거 고쳐줘".to_string())
+        );
+    }
+
+    /// An unrecognized input shape summarizes to **nothing**, and that is the
+    /// safety property: reaching into an object nobody vetted is how a raw brief
+    /// ends up in a list view of a room its author never posted to.
+    #[test]
+    fn an_unknown_input_shape_summarizes_to_nothing() {
+        for input in [
+            serde_json::json!({"type": "work", "title": "   "}),
+            serde_json::json!({"type": "work"}),
+            serde_json::json!({"type": "something_new", "title": "t", "secret": "s"}),
+            serde_json::json!({"surface": "mention"}),
+            serde_json::json!("a bare string"),
+            serde_json::Value::Null,
+        ] {
+            assert_eq!(trigger_summary(&input), None, "{input}");
+        }
+    }
+
+    /// The cap is on **characters**, not bytes: a Korean title truncated by byte
+    /// length would either cut a syllable in half or overshoot the openapi
+    /// `maxLength: 200` depending on which end you measured.
+    #[test]
+    fn the_excerpt_is_capped_in_characters() {
+        let long = "가".repeat(TRIGGER_SUMMARY_LIMIT + 50);
+        let summary = trigger_summary(&serde_json::json!({"type": "work", "title": long}))
+            .expect("a long title still summarizes");
+        assert_eq!(summary.chars().count(), TRIGGER_SUMMARY_LIMIT);
+        assert!(summary.ends_with('가'), "no half-character at the boundary");
+    }
+
+    /// Swift's `validatedLimit` clamps rather than refuses, and an unparsable
+    /// value falls back to the default: a client that sends `limit=all` gets a
+    /// page it can render, not a 400 it cannot act on.
+    #[test]
+    fn the_limit_clamps_instead_of_refusing() {
+        assert_eq!(validated_run_limit(None), 50);
+        assert_eq!(validated_run_limit(Some("all")), 50, "unparsable = default");
+        assert_eq!(validated_run_limit(Some(" 20 ")), 20);
+        assert_eq!(validated_run_limit(Some("0")), 1, "the floor is one row");
+        assert_eq!(validated_run_limit(Some("-5")), 1);
+        assert_eq!(
+            validated_run_limit(Some("100000")),
+            200,
+            "the ceiling is openapi's maximum, so a page cannot be asked to be a dump"
         );
     }
 }

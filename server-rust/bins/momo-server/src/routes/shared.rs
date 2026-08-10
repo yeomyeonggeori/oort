@@ -414,22 +414,15 @@ pub(crate) fn epoch_ms(at: chrono::DateTime<chrono::Utc>) -> i64 {
 /// Project an `agent_run` row onto the wire DTO (Swift `runProjectionSQL`,
 /// `AgentRunRoutes.swift:800-840`).
 ///
-/// `triggerSummary` is the same `CASE` the projection SQL computes, kept here so
-/// the two run-shaped surfaces cannot drift: a work run shows its title, a
-/// mention run shows its prompt, and anything else shows nothing rather than
-/// leaking a raw input blob into a list view.
+/// `triggerSummary` is the same excerpt the bounded history page carries, and it
+/// is computed by the **same function** (`momo_agent::trigger_summary`): a work
+/// run shows its title, a mention run shows its prompt, and anything else shows
+/// nothing rather than leaking a raw input blob into a list view. #1223 mounted
+/// the second surface that renders this string, so the derivation moved to the
+/// domain — two copies is how a channel list and an agent hub come to disagree
+/// about what the same run was for.
 pub(crate) fn run_response(run: &momo_agent::AgentRunRow) -> crate::dto::AgentRunResponse {
-    const SUMMARY_LIMIT: usize = 200;
-    let summary = match run.input.get("type").and_then(serde_json::Value::as_str) {
-        Some("work") => run.input.get("title").and_then(serde_json::Value::as_str),
-        _ => match run.input.get("surface").and_then(serde_json::Value::as_str) {
-            Some("mention") => run.input.get("prompt").and_then(serde_json::Value::as_str),
-            _ => None,
-        },
-    }
-    .map(str::trim)
-    .filter(|value| !value.is_empty())
-    .map(|value| value.chars().take(SUMMARY_LIMIT).collect::<String>());
+    let summary = momo_agent::trigger_summary(&run.input);
 
     crate::dto::AgentRunResponse {
         id: run.id.to_string(),

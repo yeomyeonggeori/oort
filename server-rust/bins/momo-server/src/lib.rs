@@ -609,9 +609,26 @@ pub fn build_app(state: AppState) -> Router {
         )
         // agent runs (B2.6) — creation is human-only; the gateway callbacks below
         // are the agent/gateway half of the same run's life.
+        //
+        // #1223 mounted the `GET` beside the `POST`. Until it did, this path was
+        // POST-only, so a read answered **405** rather than 404 — which is why
+        // the client's absence judgement has to read 405 as "not here" at all
+        // (`features/capabilities/serverSurfaces.ts`). Writing the pair on one
+        // `.route()` is the shape that keeps them from drifting apart.
         .route(
             "/v1/workspaces/{ws}/channels/{ch}/agent-runs",
-            post(routes::agent_runs::create),
+            post(routes::agent_runs::create).get(routes::agent_runs::list),
+        )
+        // The other two reads of the same record (#1223): one agent's
+        // workspace-global history (MOMO-653 — bounded summaries, joined to the
+        // reader's own channel membership) and one run in full.
+        .route(
+            "/v1/workspaces/{ws}/agents/{agent}/runs",
+            get(routes::agent_runs::list_by_agent),
+        )
+        .route(
+            "/v1/workspaces/{ws}/agent-runs/{run}",
+            get(routes::agent_runs::detail),
         )
         // goal SRV-C2 — the other end of that life, and the one that was
         // missing: a person's "멈춰라". Human-only like creation, but authorized

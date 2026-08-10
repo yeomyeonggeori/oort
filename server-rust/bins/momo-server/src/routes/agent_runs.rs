@@ -1,23 +1,56 @@
-//! Agent-run creation and the human stop — Swift `AgentRunRoutes.create`
-//! (:29-250) and `AgentRunRoutes.cancel` (:437-607) parity.
+//! Agent-run creation, the human stop, and the three reads — Swift
+//! `AgentRunRoutes` parity for `create` (:29-250), `cancel` (:437-607),
+//! `list` (:253-296), `listByAgent` (:304-390) and `detail` (:393-434).
 //!
 //! ```text
 //! POST /v1/workspaces/{ws}/channels/{ch}/agent-runs
+//! GET  /v1/workspaces/{ws}/channels/{ch}/agent-runs?type=work&limit=
+//! GET  /v1/workspaces/{ws}/agents/{agent}/runs?cursor=&limit=
+//! GET  /v1/workspaces/{ws}/agent-runs/{run}
 //! POST /v1/workspaces/{ws}/agent-runs/{run}/cancel
 //! ```
 //!
-//! The two are a pair: one is the only way to start a run on purpose, the other
-//! is the only way to stop one. Until goal SRV-C2 this file held just the first
-//! half, and the product said so out loud — the phone's stop copy read "이미 실행
-//! 중인 작업은 그대로 끝까지 갑니다", which was an accurate description of a server
-//! with no cancel route.
+//! ## Why the reads arrived last (#1223)
 //!
-//! This is the **writer** half of the B2.6 spine: it creates the authoritative
-//! `agent_run` row and enqueues the `agent_job` a gateway will claim. Everything
-//! after it (claim → events → complete → ledger) lives in
+//! The writers landed first and the record has been accumulating ever since —
+//! `agent_run` rows, their gateway progress, their terminal status. What was
+//! missing was any way to *look*: the channel path answered `405` because it was
+//! mounted `POST`-only, and the other two answered `404`. Both clients have been
+//! calling all three since the Swift server (`packages/momo-core`'s
+//! `fetchAgentRuns` / `fetchAgentRunSummaries` / `fetchAgentRunDetail`), and
+//! `features/capabilities/serverSurfaces.ts` folded the surface away rather than
+//! drawing the absence as a fault. These three handlers are what lets that line
+//! flip to `provided: true`.
+//!
+//! ## Three reads, three different visibility rules — and each is the room's
+//!
+//! | route | who may read | what it returns |
+//! |---|---|---|
+//! | channel list | an active member of that channel | the channel's **work** runs, full projection |
+//! | agent history | an active human workspace member, per-row joined to their channel membership | a bounded summary page (no input/output/error) |
+//! | detail | a caller in the run's channel | the full projection of one run |
+//!
+//! The middle row is the one that carries a rule the other two do not need: an
+//! agent hub is workspace-wide, so the same agent's runs span rooms the reader
+//! may never have entered. The membership `JOIN` in
+//! [`momo_agent::list_agent_run_summaries_in_tx`] is that rule, and the reduced
+//! projection is its belt: even inside a room they are in, a reader gets the
+//! bounded excerpt rather than someone else's brief.
+//!
+//! ## The two writes
+//!
+//! `create` and `cancel` are a pair: one is the only way to start a run on
+//! purpose, the other is the only way to stop one. Until goal SRV-C2 this file
+//! held just the first half, and the product said so out loud — the phone's stop
+//! copy read "이미 실행 중인 작업은 그대로 끝까지 갑니다", which was an accurate
+//! description of a server with no cancel route.
+//!
+//! `create` is the **writer** half of the B2.6 spine: it creates the
+//! authoritative `agent_run` row and enqueues the `agent_job` a gateway will
+//! claim. Everything after it (claim → events → complete → ledger) lives in
 //! [`crate::routes::agent_gateway`].
 //!
-//! ## Three properties this route is responsible for
+//! ## Three properties `create` is responsible for
 //!
 //! 1. **Human-only.** `requireHumanPrincipal` (:643-649): an agent cannot start
 //!    an agent. The allow-list in `momo_auth::agent_scope` already makes this
@@ -33,16 +66,19 @@
 //! Everything in the transaction below is ordered rejection-before-write, the
 //! `Rejectable` discipline `routes::shared` documents.
 
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::{Extension, Json};
+use momo_agent::approval::is_active_channel_member_in_tx;
 use momo_agent::{
-    cancel_pending_approvals_for_run_in_tx, cancel_run_in_tx, create_agent_run_in_tx,
-    is_active_human_channel_member_in_tx, linked_work_session_ids_in_tx, load_agent_run_in_tx,
-    load_eligible_agent_in_tx, lock_run_for_cancel_in_tx, NewAgentRun, RequestedRouting, RunStatus,
-    RunTrigger,
+    agent_run_cursor_is_visible_in_tx, cancel_pending_approvals_for_run_in_tx, cancel_run_in_tx,
+    create_agent_run_in_tx, is_active_agent_in_tx, is_active_human_channel_member_in_tx,
+    linked_work_session_ids_in_tx, list_agent_run_summaries_in_tx, list_channel_work_runs_in_tx,
+    load_agent_run_in_tx, load_agent_run_with_visibility_in_tx, load_eligible_agent_in_tx,
+    lock_run_for_cancel_in_tx, validated_run_limit, AgentRunSummaryRow, NewAgentRun,
+    RequestedRouting, RunStatus, RunTrigger,
 };
-use momo_auth::Principal;
+use momo_auth::{Principal, PrincipalKind};
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::sqlx;
 use momo_db::PgConnection;
@@ -51,7 +87,10 @@ use momo_outbox::{emit_outbox, retire_pending_agent_jobs_for_run_in_tx, OutboxKi
 use serde_json::{json, Map, Value};
 use uuid::Uuid;
 
-use crate::dto::{AgentRunCancelResponse, AgentRunResponse, CreateAgentRunRequest};
+use crate::dto::{
+    AgentRunCancelResponse, AgentRunHistoryQuery, AgentRunListQuery, AgentRunPageResponse,
+    AgentRunResponse, AgentRunSummaryDto, AgentRunSummaryPageResponse, CreateAgentRunRequest,
+};
 use crate::error::ApiError;
 use crate::routes::shared::{
     agent_tenant_tx, audit_via_token_id, emit_rail_frame, emit_terminal_agent_status, epoch_ms,
@@ -271,6 +310,240 @@ pub async fn create(
         StatusCode::OK
     };
     Ok((status, Json(run_response(&run))))
+}
+
+// ---------------------------------------------------------------------------
+// the three reads (#1223)
+// ---------------------------------------------------------------------------
+
+/// `GET /v1/workspaces/{ws}/channels/{ch}/agent-runs` (Swift `list`, :253-296).
+///
+/// **The route that answered 405.** It shared a path with `create` and nothing
+/// was mounted for `GET`, so the client's judgement table had to list `405`
+/// alongside `404` as "this server does not have that" — see the comment on
+/// `ABSENT_STATUSES` in `features/capabilities/serverSurfaces.ts`. Mounting this
+/// is what makes that 405 stop being a fact about the product.
+///
+/// `?type=` accepts `work` or nothing. Any other value is a 400 rather than an
+/// empty page: a client asking for `type=mention` is asking for a surface that
+/// does not exist here, and answering `{"runs": []}` would tell it there simply
+/// were none.
+pub async fn list(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path((workspace, channel)): Path<(String, String)>,
+    Query(query): Query<AgentRunListQuery>,
+) -> Result<Json<AgentRunPageResponse>, ApiError> {
+    let workspace_id = workspace_scope(&workspace, &principal)?;
+    let channel_id = path_uuid(&channel, "invalid channel id")?;
+    if let Some(requested) = query.run_type.as_deref() {
+        if requested != "work" {
+            return Err(ApiError::bad_request("only type=work is supported"));
+        }
+    }
+    let limit = validated_run_limit(query.limit.as_deref());
+    let member_id = principal.member_id;
+    // An agent bearer sees only its own runs (Swift :283-284). No agent can
+    // reach this route today — `momo_auth::required_agent_scope` is a closed
+    // allow-list and this path is not on it — so the narrowing is written for
+    // the day one is admitted rather than left to be remembered then.
+    let agent_scope = match principal.kind {
+        PrincipalKind::Agent => Some(member_id),
+        PrincipalKind::Human | PrincipalKind::WorkHost => None,
+    };
+
+    let runs = settle_db(
+        "agent_runs.list",
+        agent_tenant_tx(&state.pool, workspace_id, move |conn| {
+            Box::pin(async move {
+                // The room is the authorization, and it is checked before the
+                // projection runs: a non-member must not learn how many runs a
+                // channel has by timing the answer.
+                if !is_active_channel_member_in_tx(conn, channel_id, member_id).await? {
+                    return Ok(Err(ApiError::forbidden("not an active channel member")));
+                }
+                Ok(Ok(list_channel_work_runs_in_tx(
+                    conn,
+                    workspace_id,
+                    channel_id,
+                    agent_scope,
+                    limit,
+                )
+                .await?))
+            })
+        })
+        .await,
+    )?;
+
+    Ok(Json(AgentRunPageResponse {
+        runs: runs.iter().map(run_response).collect(),
+    }))
+}
+
+/// `GET /v1/workspaces/{ws}/agents/{agent}/runs` (Swift `listByAgent`,
+/// :304-390 — MOMO-653, openapi `listAgentRuns`).
+///
+/// Human-only, unlike the channel list. An agent hub is a person's view of what
+/// one agent has been doing across the workspace, and there is no reading of
+/// that page an agent credential needs.
+///
+/// ## The three refusals, and why each is the status it is
+///
+/// | condition | status |
+/// |---|---|
+/// | not a human principal | 403 — the surface is a person's |
+/// | no such active agent in this workspace | 404 |
+/// | a cursor that is not a run this caller can see | 400 |
+///
+/// The last one is the one worth stating: a bad cursor could be answered with an
+/// empty page, and that reads as "you have reached the end" to a client that is
+/// actually holding a handle to someone else's history. 400 says the handle is
+/// wrong, which is the only true sentence available.
+pub async fn list_by_agent(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path((workspace, agent)): Path<(String, String)>,
+    Query(query): Query<AgentRunHistoryQuery>,
+) -> Result<Json<AgentRunSummaryPageResponse>, ApiError> {
+    require_human(&principal, "human member required")?;
+    let workspace_id = workspace_scope(&workspace, &principal)?;
+    let agent_member_id = path_uuid(&agent, "invalid agent id")?;
+    let cursor = match query
+        .cursor
+        .as_deref()
+        .map(str::trim)
+        .filter(|raw| !raw.is_empty())
+    {
+        Some(raw) => Some(path_uuid(raw, "invalid agent run cursor")?),
+        None => None,
+    };
+    let limit = validated_run_limit(query.limit.as_deref());
+    let member_id = principal.member_id;
+
+    let page = settle_db(
+        "agent_runs.list_by_agent",
+        agent_tenant_tx(&state.pool, workspace_id, move |conn| {
+            Box::pin(async move {
+                if !is_active_agent_in_tx(conn, workspace_id, agent_member_id).await? {
+                    return Ok(Err(ApiError::not_found("active agent not found")));
+                }
+                if let Some(cursor) = cursor {
+                    if !agent_run_cursor_is_visible_in_tx(
+                        conn,
+                        workspace_id,
+                        agent_member_id,
+                        member_id,
+                        cursor,
+                    )
+                    .await?
+                    {
+                        return Ok(Err(ApiError::bad_request("agent run cursor was not found")));
+                    }
+                }
+                Ok(Ok(list_agent_run_summaries_in_tx(
+                    conn,
+                    workspace_id,
+                    agent_member_id,
+                    member_id,
+                    cursor,
+                    limit,
+                )
+                .await?))
+            })
+        })
+        .await,
+    )?;
+
+    Ok(Json(AgentRunSummaryPageResponse {
+        runs: page.runs.iter().map(summary_dto).collect(),
+        next_cursor: page.next_cursor.map(|id| id.to_string()),
+    }))
+}
+
+/// `GET /v1/workspaces/{ws}/agent-runs/{run}` (Swift `detail`, :393-434).
+///
+/// A 404 for a run that is not in this workspace and a **403** for one that is
+/// but whose room the caller is not in. Collapsing the two into 404 would hide
+/// less than it looks: under RLS a cross-tenant id is already invisible here, so
+/// the only thing the 403 discloses is that a run the caller has an id for
+/// belongs to a room they are not in — which is what they asked, and what a
+/// client needs in order to say "이 작업은 다른 채널의 것입니다" rather than
+/// "없는 작업입니다".
+pub async fn detail(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path((workspace, run)): Path<(String, String)>,
+) -> Result<Json<AgentRunResponse>, ApiError> {
+    let workspace_id = workspace_scope(&workspace, &principal)?;
+    let run_id = path_uuid(&run, "invalid run id")?;
+    let member_id = principal.member_id;
+    let kind = principal.kind;
+
+    let run = settle_db(
+        "agent_runs.detail",
+        agent_tenant_tx(&state.pool, workspace_id, move |conn| {
+            Box::pin(async move {
+                let Some((run, in_channel)) =
+                    load_agent_run_with_visibility_in_tx(conn, workspace_id, run_id, member_id)
+                        .await?
+                else {
+                    return Ok(Err(ApiError::not_found("agent run not found")));
+                };
+                if !can_read_run(kind, member_id, run.agent_member_id, in_channel) {
+                    return Ok(Err(ApiError::forbidden(
+                        "work run is not bound to this actor",
+                    )));
+                }
+                Ok(Ok(run))
+            })
+        })
+        .await,
+    )?;
+
+    Ok(Json(run_response(&run)))
+}
+
+/// Swift `canReadRun` (:626-641).
+///
+/// Channel membership is the floor for everyone; above it the kinds differ. A
+/// human in the room reads any run in it. An agent reads only **its own** run,
+/// because an agent that could read a sibling's run could read the brief a
+/// person wrote for a different agent. A work-host credential reads none: it
+/// identifies a machine that executes sessions, and nothing it does requires the
+/// run record.
+///
+/// Neither non-human branch is reachable today (`required_agent_scope` does not
+/// list this route and work-host signing is confined to its own paths); they are
+/// written because the alternative is a `true` that becomes wrong silently the
+/// day one of those doors opens.
+fn can_read_run(
+    kind: PrincipalKind,
+    principal_member_id: Uuid,
+    run_agent_member_id: Uuid,
+    has_channel_membership: bool,
+) -> bool {
+    if !has_channel_membership {
+        return false;
+    }
+    match kind {
+        PrincipalKind::Human => true,
+        PrincipalKind::Agent => run_agent_member_id == principal_member_id,
+        PrincipalKind::WorkHost => false,
+    }
+}
+
+fn summary_dto(row: &AgentRunSummaryRow) -> AgentRunSummaryDto {
+    AgentRunSummaryDto {
+        id: row.id.to_string(),
+        channel_id: row.channel_id.to_string(),
+        trigger_message_id: row.trigger_message_id.map(|id| id.to_string()),
+        trigger_summary: row.trigger_summary.clone(),
+        status: row.status.as_db_label().to_string(),
+        started_at_ms: row.started_at.map(epoch_ms),
+        finished_at_ms: row.finished_at.map(epoch_ms),
+        created_at_ms: epoch_ms(row.created_at),
+        updated_at_ms: epoch_ms(row.updated_at),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -964,5 +1237,102 @@ mod tests {
             .as_str()
             .unwrap()
             .starts_with("agentwork:ws"));
+    }
+
+    // ---- the reads (#1223) -------------------------------------------------
+
+    const VIEWER: Uuid = Uuid::from_u128(0x11);
+    const RUN_AGENT: Uuid = Uuid::from_u128(0x22);
+
+    /// Channel membership is the floor for **every** kind, and it is checked
+    /// first: without the room, the principal kind never gets to matter.
+    #[test]
+    fn nobody_reads_a_run_from_a_room_they_are_not_in() {
+        for kind in [
+            PrincipalKind::Human,
+            PrincipalKind::Agent,
+            PrincipalKind::WorkHost,
+        ] {
+            assert!(
+                !can_read_run(kind, VIEWER, RUN_AGENT, false),
+                "{kind:?} is outside the run's channel"
+            );
+        }
+        // The agent's own run is no exception — the room still decides.
+        assert!(!can_read_run(
+            PrincipalKind::Agent,
+            RUN_AGENT,
+            RUN_AGENT,
+            false
+        ));
+    }
+
+    /// Above that floor the three kinds diverge, and the divergence is the
+    /// point: an agent that could read a sibling agent's run could read a brief
+    /// a person wrote for someone else.
+    #[test]
+    fn in_the_room_a_person_reads_any_run_and_an_agent_reads_only_its_own() {
+        assert!(can_read_run(PrincipalKind::Human, VIEWER, RUN_AGENT, true));
+        assert!(can_read_run(
+            PrincipalKind::Agent,
+            RUN_AGENT,
+            RUN_AGENT,
+            true
+        ));
+        assert!(
+            !can_read_run(PrincipalKind::Agent, VIEWER, RUN_AGENT, true),
+            "another agent's run stays closed even inside the room"
+        );
+        assert!(
+            !can_read_run(PrincipalKind::WorkHost, VIEWER, RUN_AGENT, true),
+            "a machine that executes sessions has no business in the run record"
+        );
+    }
+
+    /// **The summary carries nothing the openapi schema does not name**
+    /// (`AgentRunSummary`, `additionalProperties: false`).
+    ///
+    /// The assertion is on the serialized key set rather than on individual
+    /// fields, because the failure this guards against is *addition*: a later
+    /// edit that widens `AgentRunSummaryRow` and mirrors it into the DTO would
+    /// put a run's input into a workspace-global page, and every per-field test
+    /// would still pass.
+    #[test]
+    fn the_history_summary_serializes_exactly_the_bounded_field_set() {
+        let now = chrono::Utc::now();
+        let dto = summary_dto(&AgentRunSummaryRow {
+            id: Uuid::from_u128(1),
+            channel_id: Uuid::from_u128(2),
+            trigger_message_id: Some(Uuid::from_u128(3)),
+            trigger_summary: Some("배포 준비".to_string()),
+            status: RunStatus::Running,
+            started_at: Some(now),
+            finished_at: None,
+            created_at: now,
+            updated_at: now,
+        });
+        let wire = serde_json::to_value(&dto).expect("the summary serializes");
+        let mut keys: Vec<&str> = wire
+            .as_object()
+            .expect("an object")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            [
+                "channelId",
+                "createdAtMs",
+                "id",
+                "startedAtMs",
+                "status",
+                "triggerMessageId",
+                "triggerSummary",
+                "updatedAtMs",
+            ],
+            "a finished_at of None is omitted, and nothing else may appear"
+        );
+        assert_eq!(wire["status"], json!("running"));
     }
 }
