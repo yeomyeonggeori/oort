@@ -24,12 +24,12 @@ import {
 // surface exists to do. Rows that cannot be a DM target (yourself, a member who
 // is not active) render as plain rows instead of dead buttons, and say why.
 //
-// Measure: the hover background and the separator run the full pane, but the
-// CONTENT is capped at max-w-pane-lg, the same 640px the search field above it
-// uses. Left full-bleed on a 1600px window the trailing glyph landed ~900px
-// from the name it belongs to, which is the exact failure tokens.md §4 names
-// (a right-aligned column a screen away from its label stops reading as a row
-// and starts reading as a banner).
+// Measure: the row runs the full pane, matching 인박스 and 활동. The 640px
+// content cap this row used to carry (tokens.md §4, "a card is not a banner")
+// left a dead band on the right of every row on a wide window and stranded the
+// hover in the left 640px; 성재 결정(2026-08-10 검수 배치 2)이 전체폭으로
+// 통일했다. The avatar leads, the identity takes the slack, and the trailing DM
+// glyph closes the row at the pane edge, one measure with the header and search.
 // =============================================================================
 
 // Exported because the loading state has to predict this exact geometry. A
@@ -39,7 +39,7 @@ import {
 export const ROW_CLASS =
   "flex w-full items-center border-b border-line px-4 py-2 text-left";
 
-export const CONTENT_CLASS = "flex w-full max-w-pane-lg items-center gap-3";
+export const CONTENT_CLASS = "flex w-full items-center gap-3";
 
 export function MemberRow({
   member,
@@ -135,8 +135,8 @@ export function MemberRow({
   }
 
   // 행 하나에 액션이 둘이 되면서, 전체를 감싸던 <button>이 <li> 안의 두 형제로
-  // 갈라졌다. ROW_CLASS/CONTENT_CLASS는 그대로 쓰므로 구분선, 여백, 640px 측정
-  // 폭, 그리고 그 상수들로 만든 로딩 스켈레톤의 예측은 변하지 않는다. 바뀐 것은
+  // 갈라졌다. ROW_CLASS/CONTENT_CLASS는 그대로 쓰므로 구분선, 여백, 전체폭 측정,
+  // 그리고 그 상수들로 만든 로딩 스켈레톤의 예측은 변하지 않는다. 바뀐 것은
   // hover 배경이 행 전체가 아니라 DM 버튼에 걸린다는 점 하나인데, 그편이 지금
   // 사실에 더 가깝다: 배경이 덮은 곳을 눌러도 대화가 열리는 영역만 그렇다.
   return (

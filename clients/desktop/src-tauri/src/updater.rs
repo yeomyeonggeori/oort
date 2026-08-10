@@ -75,6 +75,31 @@ pub struct DownloadProgress {
     pub total: Option<u64>,
 }
 
+/// Whether this build must NOT self-update — the dev guard (W-B2-5).
+///
+/// A dev run (`tauri dev`) and a local debug bundle (`tauri build --debug`) both
+/// report the version baked into `tauri.conf.json` — `0.1.0-next.1` — which the
+/// published alpha manifest, several `next.N` ahead, always outranks. So an
+/// auto-check on a fresh local build offers to "update" it *down* to the last
+/// released bundle, replacing newer local code with older published code. There
+/// is nothing a local build can meaningfully self-update to, so the check is
+/// skipped before it touches the network.
+///
+/// Only a production `tauri build` (release) is exempt from the guard: it has the
+/// `custom-protocol` feature on (so `is_dev()` is false) and `debug_assertions`
+/// off, so it falls through and updates exactly as before — the published channel
+/// is untouched.
+///
+///   `tauri dev`            is_dev=true  debug=true  -> skip
+///   `tauri build --debug`  is_dev=false debug=true  -> skip
+///   `tauri build` (release) is_dev=false debug=false -> check normally
+///
+/// Split from the runtime facts so the branch is unit-testable without an
+/// `AppHandle` or a network.
+const fn update_check_disabled(is_dev: bool, debug: bool) -> bool {
+    is_dev || debug
+}
+
 /// Ask the manifest whether there is a newer build. `Ok(None)` = up to date.
 ///
 /// Errors are returned rather than swallowed: unlike discovery, a failed update
@@ -83,6 +108,18 @@ pub struct DownloadProgress {
 /// is invisible until someone files the bug that was fixed a week ago.
 #[tauri::command]
 pub async fn updater_check(app: AppHandle) -> Result<Option<AvailableUpdate>, String> {
+    // Dev guard (W-B2-5): a local/dev build reports `next.1`, which the published
+    // manifest (`next.N`) always outranks, so an unguarded check would offer to
+    // downgrade it to the last release. Report "up to date" without a network
+    // call — the most honest state for a build with nothing to update to — and
+    // clear any pending download. Production release builds skip this branch.
+    if update_check_disabled(tauri::is_dev(), cfg!(debug_assertions)) {
+        eprintln!("[momo] updater: dev/debug build — skipping update check");
+        let state = app.state::<UpdaterState>();
+        *state.pending.lock().expect("updater state poisoned") = None;
+        return Ok(None);
+    }
+
     let updater = app.updater().map_err(|error| error.to_string())?;
     let found = updater.check().await.map_err(|error| error.to_string())?;
 
@@ -148,4 +185,29 @@ pub async fn updater_install(app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 pub fn updater_relaunch(app: AppHandle) {
     app.restart();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::update_check_disabled;
+
+    // The dev guard's whole truth table (W-B2-5). The one row that must stay
+    // `false` is the production release build — everything else is a build the
+    // published manifest would downgrade, so it must skip the check.
+    #[test]
+    fn production_release_is_the_only_build_that_checks() {
+        // is_dev=false, debug=false — `tauri build` (release, custom-protocol on).
+        // This is the ONLY build allowed through to the network.
+        assert!(!update_check_disabled(false, false));
+    }
+
+    #[test]
+    fn dev_and_debug_builds_are_guarded() {
+        // `tauri dev`: dev server, debug assertions on.
+        assert!(update_check_disabled(true, true));
+        // `tauri build --debug`: real bundle but debug assertions on.
+        assert!(update_check_disabled(false, true));
+        // A dev-server run compiled without debug assertions is still dev.
+        assert!(update_check_disabled(true, false));
+    }
 }

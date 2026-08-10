@@ -176,12 +176,13 @@ export function DirectoryRoute() {
 
   return (
     <div className="flex min-w-0 flex-1 flex-col" data-testid="directory-route">
-      {/* The rule and the padding run the full pane, the CONTENT does not: the
-          search field below and every row below that stop at max-w-pane-lg, and
-          a header that did not would push its count 1200px away from the title
-          it belongs to on a 1600px window. Same measure, one column. */}
+      {/* Full pane, matching 인박스 and 활동: the title sits at the left edge and
+          the count at the right. The 640px content cap this route used to carry
+          stranded the count mid-pane and left a dead band beside every row on a
+          wide window; 성재 결정(2026-08-10 검수 배치 2)이 전체폭으로 통일했다. The
+          search field and rows below share the same full measure. */}
       <header className="border-b border-line px-4 py-2">
-        <div className="flex w-full max-w-pane-lg items-center justify-between gap-3">
+        <div className="flex w-full items-center justify-between gap-3">
           <div className="flex min-w-0 items-center gap-2">
             <SidebarDrawerToggle />
             <h1 className="text-body font-semibold">멤버</h1>
@@ -211,9 +212,6 @@ export function DirectoryRoute() {
           aria-label="멤버 검색"
           placeholder="이름이나 핸들로 검색"
           data-testid="directory-search"
-          // A search field that runs the full width of a 1600px pane reads as a
-          // web form; capped, it reads as a control on a work surface.
-          className="max-w-pane-lg"
         />
       </div>
 
