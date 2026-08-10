@@ -52,6 +52,7 @@ pub mod error;
 pub mod identity;
 pub mod interaction;
 pub mod message;
+pub mod notification_rule;
 pub mod read_state;
 pub mod refine;
 pub mod search;
@@ -108,6 +109,9 @@ pub use message::{
     SendRejected, SentMessage, StoredMessage, ThreadReplyPage, ThreadRollup, ThreadRootInvalid,
     ThreadRootState, HISTORY_LIMIT_DEFAULT, HISTORY_LIMIT_MAX, REPLIES_LIMIT_DEFAULT,
     REPLIES_LIMIT_MAX,
+};
+pub use notification_rule::{
+    get_notification_rule_in_tx, set_notification_rule_in_tx, NotificationRule,
 };
 pub use read_state::{
     build_read_state_payload, contains_mention, effective_cursor, list_read_state,

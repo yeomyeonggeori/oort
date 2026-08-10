@@ -487,6 +487,15 @@ pub fn build_app(state: AppState) -> Router {
             get(routes::work_tier_policy::get_member_override)
                 .put(routes::work_tier_policy::put_member_override),
         )
+        // ADR-0124 증보 1 — the caller's member-global notification rules (DND +
+        // mention exception). A PER-WORKSPACE self-scoped row like
+        // `work-tier-policy/me`: the member id is the credential's, never the
+        // path's, so it takes an active-membership gate rather than the operator
+        // one. The per-CHANNEL sibling is `channels/{ch}/notification-pref` above.
+        .route(
+            "/v1/workspaces/{ws}/notification-rules",
+            get(routes::notification_rules::get).put(routes::notification_rules::put),
+        )
         .route(
             "/v1/workspaces/{ws}/invites",
             get(routes::invites::list).post(routes::invites::create),

@@ -1,7 +1,7 @@
-//! Migration runner — applies the existing 65 SQL files **in place, unmodified**
+//! Migration runner — applies the existing 66 SQL files **in place, unmodified**
 //! via `psql`, matching `scripts/migrate.sh` (L4 §8.7 canonical mechanism).
 //!
-//! ADR-0145 / D2 §3: the 65 migrations under `server/Migrations/NNN_*.sql` are
+//! ADR-0145 / D2 §3: the 66 migrations under `server/Migrations/NNN_*.sql` are
 //! Postgres DDL, language independent, and are the enforcement layer we inherit.
 //!
 //! **Why psql, not `sqlx::raw_sql`.** Several seed migrations (002/006/012) use
@@ -330,18 +330,18 @@ mod tests {
     /// #1252's `human_email_norm_uniq` — the same address uniqueness, said by the
     /// uniqueness constraint itself instead of borrowed from 064's CHECK.
     #[test]
-    fn discovers_contiguous_migrations_001_to_065() {
+    fn discovers_contiguous_migrations_001_to_066() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
         assert_eq!(
             migrations.len(),
-            65,
-            "expected 65 migrations under {}",
+            66,
+            "expected 66 migrations under {}",
             dir.display()
         );
         assert_eq!(migrations.first().unwrap().version, 1);
-        assert_eq!(migrations.last().unwrap().version, 65);
+        assert_eq!(migrations.last().unwrap().version, 66);
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
 
         for (i, migration) in migrations.iter().enumerate() {

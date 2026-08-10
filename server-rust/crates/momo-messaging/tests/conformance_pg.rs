@@ -34,7 +34,8 @@ use std::sync::Mutex;
 use momo_db::migrate::{default_migrations_dir, run_migrations, SeedMode};
 use momo_db::{with_tenant_tx, DbError, PgPool};
 use momo_messaging::{
-    create_channel, send_message, send_message_in_tx, ChannelKind, NewChannel, NewMessage,
+    create_channel, get_notification_rule_in_tx, send_message, send_message_in_tx,
+    set_notification_rule_in_tx, ChannelKind, NewChannel, NewMessage, NotificationRule,
 };
 use serde_json::Value;
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
@@ -580,4 +581,106 @@ async fn d2_6_rls_blocks_cross_tenant_reads() {
     .await
     .expect("scoped count as momo_app");
     assert_eq!(total_visible, 1, "A sees exactly its own single message");
+}
+
+// ---------------------------------------------------------------------------
+// ADR-0124 증보 1 — member-global notification_rule helper (DND + mention exception)
+// ---------------------------------------------------------------------------
+
+/// The helper upserts the caller's rule and reads it back, and FORCE RLS keeps
+/// one tenant's rule invisible to another — all exercised as the runtime
+/// `momo_app` role, the only faithful way to hit the 068 policy.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a fresh pgvector/pg18 DB + momo_app role"]
+async fn notification_rule_upserts_and_isolates_by_tenant() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+
+    let ws_a = Uuid::new_v4();
+    let ws_b = Uuid::new_v4();
+    let member_a = Uuid::new_v4();
+    let member_b = Uuid::new_v4();
+    seed_workspace(&su, ws_a).await;
+    seed_workspace(&su, ws_b).await;
+    seed_member(&su, ws_a, member_a, "human").await;
+    seed_member(&su, ws_b, member_b, "human").await;
+
+    // Absence is the default: a member who never touched the setting reads both
+    // switches off, which is the pre-증보 behaviour.
+    let default_rule = with_tenant_tx(&app, ws_a, move |conn| {
+        Box::pin(async move { get_notification_rule_in_tx(conn, ws_a, member_a).await })
+    })
+    .await
+    .expect("read default rule as momo_app");
+    assert_eq!(default_rule, NotificationRule::default());
+
+    // Turn both on, then flip one off: the second write updates the same row
+    // (PK is (workspace, member)), it does not stack.
+    with_tenant_tx(&app, ws_a, move |conn| {
+        Box::pin(async move {
+            set_notification_rule_in_tx(
+                conn,
+                ws_a,
+                member_a,
+                NotificationRule {
+                    dnd: true,
+                    mention_overrides_mute: true,
+                },
+            )
+            .await
+        })
+    })
+    .await
+    .expect("first upsert");
+    let after = with_tenant_tx(&app, ws_a, move |conn| {
+        Box::pin(async move {
+            set_notification_rule_in_tx(
+                conn,
+                ws_a,
+                member_a,
+                NotificationRule {
+                    dnd: false,
+                    mention_overrides_mute: true,
+                },
+            )
+            .await?;
+            get_notification_rule_in_tx(conn, ws_a, member_a).await
+        })
+    })
+    .await
+    .expect("second upsert + read");
+    assert_eq!(
+        after,
+        NotificationRule {
+            dnd: false,
+            mention_overrides_mute: true
+        },
+        "the second write replaces the row rather than inserting a duplicate"
+    );
+    let row_count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM notification_rule WHERE workspace_id = $1 AND member_id = $2",
+    )
+    .bind(ws_a)
+    .bind(member_a)
+    .fetch_one(&su)
+    .await
+    .expect("count rule rows");
+    assert_eq!(
+        row_count, 1,
+        "(workspace, member) upsert keeps exactly one row"
+    );
+
+    // Tenant B's transaction cannot see tenant A's rule: FORCE RLS filters on
+    // app.workspace_id, so the read comes back as the default.
+    let cross = with_tenant_tx(&app, ws_b, move |conn| {
+        Box::pin(async move { get_notification_rule_in_tx(conn, ws_a, member_a).await })
+    })
+    .await
+    .expect("cross-tenant read as momo_app");
+    assert_eq!(
+        cross,
+        NotificationRule::default(),
+        "tenant B must not read tenant A's notification rule"
+    );
 }

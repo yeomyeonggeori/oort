@@ -488,8 +488,11 @@ export function InboxRoute() {
             모두 읽음 처리
           </Button>
         )}
+        {/* Land on the 알림 규칙 panel, not the settings root: SettingsRoute reads
+            ?section= (default 계정), so a bare /settings dropped this link on the
+            first panel instead of the rules it names (ADR-0124 증보 1). */}
         <Link
-          to="/settings"
+          to="/settings?section=notifications"
           className="rounded-sm text-meta text-ink-muted underline underline-offset-2 hover:text-ink focus-visible:focus-ring"
           data-testid="inbox-notification-rules"
         >

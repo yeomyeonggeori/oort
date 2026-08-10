@@ -1519,6 +1519,29 @@ pub struct NotificationPrefResponse {
     pub muted: bool,
 }
 
+/// `PUT …/notification-rules` request (ADR-0124 증보 1). The member-global rule
+/// is replaced as a whole — both booleans are required so a body can never leave
+/// one switch's meaning implicit, and `deny_unknown_fields` keeps a future
+/// switch (keyword, DND schedule) from being silently accepted before it exists.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct UpdateNotificationRulesRequest {
+    /// Do not disturb: suppress every push for this member in this workspace.
+    pub dnd: bool,
+    /// Let a mention through a channel this member muted (ADR-0124 D3).
+    pub mention_overrides_mute: bool,
+}
+
+/// `GET/PUT …/notification-rules` response (ADR-0124 증보 1) — the effective rule,
+/// re-read by the caller, not an echo. Absence of a stored row answers as both
+/// `false`, the pre-증보 behaviour.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NotificationRulesResponse {
+    pub dnd: bool,
+    pub mention_overrides_mute: bool,
+}
+
 /// `POST …/channels/{ch}/members` request (Swift `AddChannelMemberRequest`,
 /// `DTOs.swift:523-538`).
 ///

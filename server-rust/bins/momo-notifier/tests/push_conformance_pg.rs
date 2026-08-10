@@ -26,6 +26,9 @@
 //! | `judgment_never_reaches_another_tenants_devices` | drop a `workspace_id` predicate from the judgment join |
 //! | `the_drain_claims_only_push_candidate_rows` | widen the claim's `kind` filter |
 //! | `a_muted_channel_suppresses_the_notification` | drop the `notification_pref` join |
+//! | `dnd_suppresses_every_reason` (ADR-0124 증보 1) | drop the `notification_rule.dnd` predicate |
+//! | `a_mention_exception_delivers_through_a_channel_mute` (증보 1) | drop the `mention_overrides_mute` arm from the mute clause |
+//! | `dnd_outranks_a_mention_exception` (증보 1) | move the `dnd` predicate below the mention-exception arm |
 //! | `a_transient_relay_failure_requeues_instead_of_dropping` | settle on transient failure |
 
 use std::path::PathBuf;
@@ -358,6 +361,36 @@ async fn send_message(su: &PgPool, fixture: &Fixture, body: &str, seq: i64) -> U
     .expect("insert message (fires push_candidate_enqueue_trg)")
 }
 
+/// Insert a message that mentions `mentioned`, firing the 011 trigger. In the DM
+/// fixture this makes the recipient's reason `'mention'` — the judgment `CASE`
+/// checks the mention arm before the `dm` arm, so a mention in a DM is a mention.
+/// The projection is the same `props.mention_member_ids` the real send path
+/// writes; judgment never re-parses the body.
+async fn send_mention_message(
+    su: &PgPool,
+    fixture: &Fixture,
+    body: &str,
+    seq: i64,
+    mentioned: Uuid,
+) -> Uuid {
+    sqlx::query_scalar(
+        "INSERT INTO message \
+           (workspace_id, channel_id, seq, hlc_ts, hlc_count, author_member_id, type, body, props) \
+         VALUES ($1, $2, $3, $3, 0, $4, 'text', $5, \
+                 jsonb_build_object('mention_member_ids', jsonb_build_array($6::text))) \
+         RETURNING id",
+    )
+    .bind(fixture.workspace_id)
+    .bind(fixture.channel_id)
+    .bind(seq)
+    .bind(fixture.author_id)
+    .bind(body)
+    .bind(mentioned.to_string())
+    .fetch_one(su)
+    .await
+    .expect("insert mention message (fires push_candidate_enqueue_trg)")
+}
+
 async fn candidate_status(su: &PgPool, workspace_id: Uuid) -> Vec<(String, i32)> {
     sqlx::query(
         "SELECT status::text AS status, attempts FROM outbox \
@@ -662,6 +695,173 @@ async fn a_muted_channel_suppresses_the_notification() {
         statuses,
         vec![("done".to_string(), 1)],
         "nobody to notify is a completed candidate, not a failure"
+    );
+}
+
+/// ADR-0124 증보 1: a member's DND row suppresses every reason across the whole
+/// workspace, no channel mute required. Here the channel is NOT muted and the
+/// candidate is a plain DM — only the `notification_rule.dnd` row stops it.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_notifier role"]
+async fn dnd_suppresses_every_reason() {
+    let _guard = drain_test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let secrets = Secrets::mint();
+    let fixture = seed_dm_fixture(&su, &secrets).await;
+    focus_candidates(&su, &[fixture.workspace_id]).await;
+
+    sqlx::query(
+        "INSERT INTO notification_rule (workspace_id, member_id, dnd) VALUES ($1, $2, true)",
+    )
+    .bind(fixture.workspace_id)
+    .bind(fixture.recipient_id)
+    .execute(&su)
+    .await
+    .expect("turn on DND for the recipient");
+
+    send_message(&su, &fixture, &secrets.body, 1).await;
+
+    let relay = RecordingDispatcher::accepting();
+    let pool = momo_notifier_pool().await;
+    let stats = drain(&pool, relay.clone())
+        .drain_once(32)
+        .await
+        .expect("drain");
+
+    assert_eq!(
+        stats.claimed, 1,
+        "the candidate is still produced and consumed"
+    );
+    assert!(
+        relay.sent().is_empty(),
+        "DND must suppress every reason — judgment drops the target, the trigger does not"
+    );
+    let statuses = candidate_status(&su, fixture.workspace_id).await;
+    assert_eq!(
+        statuses,
+        vec![("done".to_string(), 1)],
+        "nobody to notify is a completed candidate, not a failure"
+    );
+    let rows: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM push_dispatch_log WHERE member_id = $1")
+            .bind(fixture.recipient_id)
+            .fetch_one(&su)
+            .await
+            .expect("count dispatch log");
+    assert_eq!(
+        rows, 0,
+        "a DND-suppressed candidate must leave no dispatch-log row"
+    );
+}
+
+/// ADR-0124 증보 1 (D3's reserved switch): with `mention_overrides_mute` a
+/// mention pierces a channel this member muted in 018 — and ONLY a mention. The
+/// DM in the same muted channel stays suppressed, so the exception modifies the
+/// mute, it does not undo it.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_notifier role"]
+async fn a_mention_exception_delivers_through_a_channel_mute() {
+    let _guard = drain_test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let secrets = Secrets::mint();
+    let fixture = seed_dm_fixture(&su, &secrets).await;
+    focus_candidates(&su, &[fixture.workspace_id]).await;
+
+    sqlx::query(
+        "INSERT INTO notification_pref (workspace_id, channel_id, member_id, muted_until) \
+         VALUES ($1, $2, $3, now() + interval '1 day')",
+    )
+    .bind(fixture.workspace_id)
+    .bind(fixture.channel_id)
+    .bind(fixture.recipient_id)
+    .execute(&su)
+    .await
+    .expect("mute the channel for the recipient");
+    sqlx::query(
+        "INSERT INTO notification_rule (workspace_id, member_id, mention_overrides_mute) \
+         VALUES ($1, $2, true)",
+    )
+    .bind(fixture.workspace_id)
+    .bind(fixture.recipient_id)
+    .execute(&su)
+    .await
+    .expect("let mentions through the mute for the recipient");
+
+    // A plain DM in the muted channel: the exception is mention-only, so this
+    // stays suppressed.
+    send_message(&su, &fixture, &secrets.body, 1).await;
+    // A mention in the same muted channel: this one gets through.
+    let mention_id =
+        send_mention_message(&su, &fixture, "please review", 2, fixture.recipient_id).await;
+
+    let relay = RecordingDispatcher::accepting();
+    let pool = momo_notifier_pool().await;
+    drain(&pool, relay.clone())
+        .drain_once(32)
+        .await
+        .expect("drain");
+
+    let sent = relay.sent();
+    assert_eq!(
+        sent.len(),
+        1,
+        "exactly the mention pierces the mute; the DM does not"
+    );
+    assert_eq!(
+        sent[0].message_id,
+        mention_id.to_string(),
+        "the delivered notification is the mention, not the muted DM"
+    );
+    assert_eq!(sent[0].reason, "mention");
+}
+
+/// ADR-0124 증보 1: DND sits ABOVE the mention exception. A member who is both
+/// DND and has the exception on still hears nothing, because the panel presents
+/// DND as "pause everything" and a leaked mention would break that promise.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_notifier role"]
+async fn dnd_outranks_a_mention_exception() {
+    let _guard = drain_test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let secrets = Secrets::mint();
+    let fixture = seed_dm_fixture(&su, &secrets).await;
+    focus_candidates(&su, &[fixture.workspace_id]).await;
+
+    sqlx::query(
+        "INSERT INTO notification_pref (workspace_id, channel_id, member_id, muted_until) \
+         VALUES ($1, $2, $3, now() + interval '1 day')",
+    )
+    .bind(fixture.workspace_id)
+    .bind(fixture.channel_id)
+    .bind(fixture.recipient_id)
+    .execute(&su)
+    .await
+    .expect("mute the channel for the recipient");
+    sqlx::query(
+        "INSERT INTO notification_rule (workspace_id, member_id, dnd, mention_overrides_mute) \
+         VALUES ($1, $2, true, true)",
+    )
+    .bind(fixture.workspace_id)
+    .bind(fixture.recipient_id)
+    .execute(&su)
+    .await
+    .expect("DND on AND mention exception on");
+
+    send_mention_message(&su, &fixture, "urgent @you", 1, fixture.recipient_id).await;
+
+    let relay = RecordingDispatcher::accepting();
+    let pool = momo_notifier_pool().await;
+    drain(&pool, relay.clone())
+        .drain_once(32)
+        .await
+        .expect("drain");
+
+    assert!(
+        relay.sent().is_empty(),
+        "DND must win over a mention exception — pause-everything means everything"
     );
 }
 
