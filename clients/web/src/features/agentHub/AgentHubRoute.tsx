@@ -320,7 +320,7 @@ export function AgentHubRoute() {
       data-testid="agent-hub-route"
     >
       <header className="border-b border-line px-4 py-2">
-        <div className="flex w-full max-w-pane-lg flex-wrap items-center justify-between gap-3">
+        <div className="flex w-full flex-wrap items-center justify-between gap-3">
           <div>
             <div className="flex min-w-0 items-center gap-2">
               <SidebarDrawerToggle />
@@ -425,7 +425,7 @@ export function AgentHubRoute() {
           {selected && (
             <>
               <div className="border-b border-line px-4 py-2">
-                <div className="flex w-full max-w-pane-lg items-center justify-between gap-3">
+                <div className="flex w-full items-center justify-between gap-3">
                   <div className="min-w-0 flex-1">
                     <h2 className="truncate text-title font-semibold text-ink">
                       {selected.displayName}
@@ -620,7 +620,7 @@ function AgentProfileSection({
       <AgentHubLoading
         message="에이전트 프로필을 불러오는 중입니다."
         rows={6}
-        className="max-w-pane-lg p-4"
+        className="p-4"
       />
     );
   }
@@ -641,7 +641,7 @@ function AgentProfileSection({
   const owner = memberFor(directory, agent.ownerHumanId);
 
   return (
-    <div className="flex max-w-pane-lg flex-col gap-6 p-4">
+    <div className="flex flex-col gap-6 p-4">
       {handle.missing && (
         <InlineBanner
           tone="neutral"
@@ -1091,7 +1091,7 @@ function AgentMemorySection({
   }
 
   return (
-    <div className="flex max-w-pane-lg flex-col">
+    <div className="flex flex-col">
       <form
         onSubmit={submitSearch}
         className="flex items-start gap-2 border-b border-line p-4"
@@ -1481,7 +1481,7 @@ function AgentHistorySection({
   const runs = query.data ? mergeRunPages(query.data.pages) : [];
 
   return (
-    <div className="flex max-w-pane-lg flex-col">
+    <div className="flex flex-col">
       {query.isPending ? (
         <AgentHubLoading
           message="에이전트 작업 이력을 불러오는 중입니다."
