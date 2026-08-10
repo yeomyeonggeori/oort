@@ -50,23 +50,32 @@ export function WorkspaceRail({
       <span
         aria-current="true"
         aria-busy={tile.loading || undefined}
-        className="relative flex size-rail-tile items-center justify-center overflow-hidden rounded-md bg-accent-soft text-title font-semibold text-ink"
+        className="relative flex size-rail-tile items-center justify-center rounded-md bg-accent-soft text-title font-semibold text-ink"
         title={tile.label}
         aria-label={tile.label}
         data-testid="workspace-current"
       >
-        {/* 마커는 아바타 위로 서야 하므로 z 순서 앞에 둔다. -left-1(-4px)는 56px
-            레일 안 44px 타일의 왼쪽 인셋(6px)을 넘지 않아 뷰포트 안에 온전히 선다
-            (2R design-review: 앞 판의 -left-2 가 4px 인셋을 넘겨 전량 클리핑됐다).
-            높이는 타일보다 짧은 pill(--spacing-rail-marker 24px)이라 "선택됨"을
-            말하되 타일을 다 덮지 않는다 — R-1 §1 현재 WS 액센트 바. */}
+        {/* 마커는 타일 상자 **밖**(-left-1 → x −4..−2px)에 선다. 그래서 이 상자는
+            자르면 안 된다 — 3R design-review 실측: 아바타 모서리를 자르려 타일에
+            overflow-hidden 을 얹었더니 마커가 전량 클리핑돼(가시 폭 0px, 두 스킴)
+            아바타가 걸린 워크스페이스에서 「현재」 신호가 사라졌다. 앞 판 주석이
+            말한 "온전히 선다"의 기준은 뷰포트였는데, 클리핑 상자가 부모로 바뀌면서
+            그 문장이 거짓이 된 것이다.
+            자르는 일은 이미지가 자기 border-radius 로 한다(아래 img 의 rounded-md).
+            부모가 자를 이유는 처음부터 없었다.
+            56px 레일 안 44px 타일은 좌우 인셋이 6px이라 −4px 는 레일 **안쪽**
+            (x 2..4px)에 떨어진다. 높이는 타일보다 짧은 pill
+            (--spacing-rail-marker 24px)이라 「선택됨」을 말하되 타일을 다 덮지
+            않는다 — R-1 §1 현재 WS 액센트 바. z 순서는 아바타 위. */}
         <span
           aria-hidden="true"
           className="absolute -left-1 z-10 h-rail-marker w-marker rounded-sm bg-accent"
         />
         {avatarDataUrl ? (
-          // 아바타가 있으면 이미지가 타일을 채운다(object-cover). 없거나 아직
-          // 받는 중이면 아래 이니셜이 designed empty state 다(D5 "없으면 이니셜").
+          // 아바타가 있으면 이미지가 타일을 채운다(object-cover). 모서리는 이미지
+          // 자신의 rounded-md 가 자른다(부모는 자르지 않는다 — 위 마커 주석).
+          // 없거나 아직 받는 중이면 아래 이니셜이 designed empty state 다
+          // (D5 "없으면 이니셜").
           <img
             src={avatarDataUrl}
             alt=""

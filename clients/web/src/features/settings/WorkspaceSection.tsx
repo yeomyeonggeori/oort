@@ -23,6 +23,7 @@ import {
   workspaceNameError,
 } from "@momo/core/features/settings/model";
 import {
+  ConfirmButton,
   Field,
   KeyValueRows,
   OperatorNotice,
@@ -135,7 +136,9 @@ function WorkspaceAvatarField({
             없음
           </div>
         )}
-        <div className="flex flex-col gap-1">
+        {/* items-start: 열의 기본 stretch 는 버튼을 아래 설명 문장만큼(실측 316px)
+            늘여 액션이 막대가 된다 (3R M-1). 버튼은 자기 라벨만 하다. */}
+        <div className="flex flex-col items-start gap-1">
           <Button
             type="button"
             variant="outline"
@@ -186,12 +189,28 @@ function WorkspaceAvatarField({
 }
 
 /**
- * Leave the current workspace (ADR-0161 D4). Confirms in place (the house
- * pattern, not an AlertDialog): a destructive action that logs you out of this
- * tenant should show the cost before it fires. The last owner is refused by the
- * server (409) with a message that says to transfer ownership first; on success
- * the local session is cleared, since with a single session leaving *is* signing
- * out (multi-workspace session switching is ADR-0161 4b-3).
+ * Leave the current workspace (ADR-0161 D4).
+ *
+ * The confirmation is the house `ConfirmButton`, not a hand-rolled two-state
+ * pair. The first cut here WAS hand-rolled, and design review measured the three
+ * things this component exists to prevent (3R H-2): focus was born ON the
+ * destructive button (the node was reused, so Enter-Enter left the workspace and
+ * signed the reader out in one breath), Esc while the question stood closed the
+ * whole settings surface instead of the question, and there was no question
+ * sentence at all — the reused node just faded `danger-fill` in under
+ * `transition-colors`, showing bare text on the first frame. `ConfirmButton`
+ * answers all three (focus moves to the question group, `useEscapeLayer` claims
+ * Esc, the question is its own named node), which is why four other settings
+ * sections already use it.
+ *
+ * The pending signal rides a SIBLING status line rather than a new axis on the
+ * shared component — the same shape `AiLinkSection` uses for 연결 확인, and it
+ * keeps the other four call sites untouched.
+ *
+ * The last owner is refused by the server (409) and told to transfer ownership
+ * first; on success the local session is cleared, since with a single session
+ * leaving *is* signing out (multi-workspace switching is ADR-0161 4b-3). That
+ * cost is stated in the question itself (3R M-2), not only in the body copy.
  */
 function LeaveWorkspace({
   workspaceId,
@@ -201,7 +220,6 @@ function LeaveWorkspace({
   offline: boolean;
 }) {
   const session = useSession();
-  const [confirming, setConfirming] = useState(false);
 
   const leave = useMutation({
     mutationFn: () => leaveWorkspace(workspaceId),
@@ -216,7 +234,7 @@ function LeaveWorkspace({
   const otherError = leave.isError && !lastOwner ? errorMessage(leave.error) : null;
 
   return (
-    <div className="flex flex-col gap-2 rounded-md border border-line bg-surface-raised p-4">
+    <div className="flex flex-col items-start gap-2 rounded-md border border-line bg-surface-raised p-4">
       <h3 className="text-body font-medium text-ink">워크스페이스 나가기</h3>
       <p className="text-meta text-ink-muted">
         이 워크스페이스에서 내 멤버십을 끝냅니다. 다시 들어오려면 초대가 필요합니다.
@@ -231,45 +249,28 @@ function LeaveWorkspace({
           {otherError}
         </p>
       )}
-      {confirming ? (
-        <div className="flex flex-wrap items-center gap-2">
-          <Button
-            type="button"
-            variant="destructive"
-            size="sm"
-            disabled={offline || leave.isPending}
-            aria-busy={leave.isPending || undefined}
-            onClick={() => leave.mutate()}
-            data-testid="workspace-leave-confirm"
+      <div className="flex flex-wrap items-center gap-2">
+        <ConfirmButton
+          label="워크스페이스 나가기"
+          question="나가면 멤버십이 끝나고, 확인하면 바로 로그아웃됩니다. 다시 들어오려면 초대가 필요합니다."
+          confirmLabel="나가기"
+          disabled={offline || leave.isPending}
+          onConfirm={() => leave.mutate()}
+          testId="workspace-leave"
+        />
+        {/* 요청이 나가 있는 동안의 유일한 신호. 성공하면 셸 자체가 사라지므로
+            (로그아웃) 이 줄은 실패했을 때만 오래 산다. */}
+        {leave.isPending && (
+          <span
+            className="flex items-center gap-1 text-meta text-ink-muted"
+            role="status"
+            data-testid="workspace-leave-pending"
           >
-            {leave.isPending && <Loader2 aria-hidden="true" className="spinner-busy" />}
-            {leave.isPending ? "나가는 중" : "나가기 확인"}
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            disabled={leave.isPending}
-            onClick={() => setConfirming(false)}
-            data-testid="workspace-leave-cancel"
-          >
-            취소
-          </Button>
-        </div>
-      ) : (
-        <div className="flex flex-wrap items-center gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            disabled={offline}
-            onClick={() => setConfirming(true)}
-            data-testid="workspace-leave"
-          >
-            워크스페이스 나가기
-          </Button>
-        </div>
-      )}
+            <Loader2 aria-hidden="true" className="spinner-busy" />
+            나가는 중
+          </span>
+        )}
+      </div>
     </div>
   );
 }

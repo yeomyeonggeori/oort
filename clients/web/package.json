@@ -48,6 +48,7 @@
     "capture:honesty": "npm run build && node scripts/capture-honesty.mjs",
     "capture:routing": "npm run build && node scripts/capture-routing.mjs",
     "capture:standalone": "npm run build && node scripts/capture-standalone.mjs",
+    "capture:w4b": "npm run build && node scripts/capture-w4b.mjs",
     "icons:pwa": "node scripts/render-pwa-icons.mjs"
   },
   "dependencies": {
