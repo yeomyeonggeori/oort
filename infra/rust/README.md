@@ -257,7 +257,9 @@ Rust 바이너리는 prod compose가 쓰는 **이름 그대로** 읽는다.
 | `CENT_TOKEN_HMAC` / `CENT_PROXY_SECRET` | ✅ `realtime` (B4) | 브로커의 **인가** 절반: 연결 토큰 서명 + subscribe 프록시 인증. 둘 다 publish 권한은 없다 |
 | `CENT_API_URL` / `CENT_API_KEY` | ✅ `ephemeral` (SRV-T2 / ADR-0149) | 브로커의 **발행** 절반. 이 줄은 "momo-server에는 HTTP 클라이언트가 없다(불변식 #2)"라서 오래 미소비였고, **ADR-0149가 그 문장을 바꾼 결정**이다 — 「작성 중」은 outbox를 못 탄다(타이퍼 1명 5분이면 절대 안 읽힐 100행). 대신 이미지 안에서 Centrifugo에 닿을 수 있는 코드는 `momo-ephemeral` 하나뿐이고 그 crate의 전 API는 봉인된 `EphemeralSignal`만 받는다. **미설정이 지원되는 기본값**: 휘발 라우트 2개만 503, 나머지는 무변경 |
 | `MOMO_EPHEMERAL_PER_CHANNEL`·`MOMO_EPHEMERAL_PER_MEMBER`·`MOMO_EPHEMERAL_GRANT_LIMIT`·`MOMO_EPHEMERAL_WINDOW_SECONDS` | ✅ `ephemeral` (선택) | ADR-0149 가드 5. 기본 30·120·10 / 60s. 0=해당 축 비활성 |
-| `OUTBOUND_WEBHOOK_MASTER_KEY`·`PROVIDER_LINK_MASTER_KEY`·`AGENT_*`·`HERMES_*`·`MEMORY_*`·`MOMO_ARCHIVE_BACKEND`·`MOMO_S3_*`·`MOMO_METRICS_*` | ❌ 미소비 | 해당 기능 배치에서 복귀. **부팅을 막지 않는다** |
+| `OUTBOUND_WEBHOOK_MASTER_KEY` | ✅ `webhook` (#1222) | 이벤트구독 **발신** secret 파생 전용. **미설정 = `JWT_HMAC` 폴백**(Swift `Config.swift:100` 동형)이고 그것이 안전한 기본값이다 — 발신 secret 은 이 키에서 매번 파생되므로, 키를 바꾸면 이미 설치된 구독자 전원의 서명 검증이 아무 기록 없이 깨진다. 인바운드(ADR-0115 native) secret 은 `JWT_HMAC` 에서 파생한다 |
+| `MOMO_EVENT_SUBSCRIPTION_ALLOW_HTTP` | ✅ `webhook` (#1222, 선택) | `MOMO_ENV=local` **이면서** 이 값이 `1` 일 때만 `http://` 목적지를 받는다. 두 조건을 다 요구하므로 staging/prod 에서는 이 플래그가 효력을 가질 수 없다 |
+| `PROVIDER_LINK_MASTER_KEY`·`AGENT_*`·`HERMES_*`·`MEMORY_*`·`MOMO_ARCHIVE_BACKEND`·`MOMO_S3_*`·`MOMO_METRICS_*` | ❌ 미소비 | 해당 기능 배치에서 복귀. **부팅을 막지 않는다** |
 | `MOMO_CORS_ALLOWED_ORIGINS` | ✅ `cors` (DESK-1) | MOMO-605 계약 그대로 포팅. 빈값·미설정=미들웨어 미장착=완전 무변경. 이 줄이 "미소비"였던 동안 패키징된 데스크톱은 로그인이 아예 안 됐다 |
 
 | prod relay env | Rust momo-relay |
@@ -266,7 +268,15 @@ Rust 바이너리는 prod compose가 쓰는 **이름 그대로** 읽는다.
 | `CENT_API_URL` / `CENT_API_KEY` | ✅ |
 | `RELAY_POLL_INTERVAL_MS` / `RELAY_CLAIM_BATCH` / `RELAY_MAX_ATTEMPTS` | ✅ (300/64/8) |
 | `LOG_LEVEL` | ✅ |
-| `MOMO_ENV`·`OUTBOUND_WEBHOOK_MASTER_KEY`·`MOMO_METRICS_*` | ❌ 미소비, 비차단 |
+| `MOMO_ENV`·`OUTBOUND_WEBHOOK_MASTER_KEY`·`MOMO_METRICS_*` | ❌ 미소비, 비차단 — **발신은 relay 가 아니라 `webhook-sender` 몫이다**(#1222, 아래) |
+
+| `webhook-sender` env | Rust momo-webhook-sender (#1222) |
+|---|---|
+| `WEBHOOK_SENDER_DATABASE_URL` | ✅ (없으면 `RELAY_DATABASE_URL` → `DATABASE_URL` 폴백). BYPASSRLS 역할 — drain 은 전 테넌트를 가로지른다 |
+| `OUTBOUND_WEBHOOK_MASTER_KEY` | ✅ (없으면 `JWT_HMAC`). 이 프로세스가 api 와 달리 쥐는 유일한 자격이고, **Centrifugo 키는 쥐지 않는다** — 발신자는 durable rail 에 발행할 수 없고 relay 는 구독자에게 POST 할 수 없다 |
+| `WEBHOOK_SENDER_POLL_INTERVAL_MS` / `_CLAIM_BATCH` / `_MAX_ATTEMPTS` / `_TIMEOUT_MS` | ✅ (300 / 16 / 8 / 5000) |
+| `WEBHOOK_DISABLE_AFTER_5XX` | ✅ (기본 5, 최소 1). 연속 목적지 5xx 가 이 수에 닿으면 구독을 자동 비활성하고 `event_subscription.auto_disabled` 감사행을 남긴다 |
+| `MOMO_ENV` / `MOMO_EVENT_SUBSCRIPTION_ALLOW_HTTP` / `LOG_LEVEL` | ✅ (api 와 같은 규칙) |
 
 migrate/runtime-roles는 prod의 스위치를 그대로 읽는다: `DATABASE_URL`,
 `MOMO_RUNTIME_ROLE_PROVISION`(0|1), `MOMO_BOOTSTRAP_RUNTIME_ROLES`(0|1),

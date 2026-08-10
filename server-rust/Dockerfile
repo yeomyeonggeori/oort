@@ -1,8 +1,9 @@
 # syntax=docker/dockerfile:1
 #
-# One immutable momo **Rust** application image, six runtime commands:
+# One immutable momo **Rust** application image, seven runtime commands:
 # api (momo-server), relay (momo-relay), agent-worker (momo-agent-worker),
-# notifier (momo-notifier), migrate (momo-migrate), web-assets (SPA staging).
+# webhook-sender (momo-webhook-sender), notifier (momo-notifier),
+# migrate (momo-migrate), web-assets (SPA staging).
 # ADR-0145 B안 / batch B1.7 — the deploy path for the Rust stack.
 #
 #   docker build -f server-rust/Dockerfile -t momo-rust:dev .
@@ -17,6 +18,13 @@
 # an answer, so an image that cannot run it cannot dogfood the product. It ships
 # beside api/relay rather than in an image of its own because all four are one
 # `cargo build` of one workspace.
+#
+# #1222 adds `webhook-sender`: the outbound event-subscription drain. It is a
+# separate command rather than a branch inside `relay` because the relay's single
+# HTTP destination (Centrifugo) is what makes invariant #2 checkable from its
+# dependency graph — a relay able to POST an operator-supplied URL would make the
+# invariant unprovable even while it stayed true. Shipping the binary changes no
+# running deployment; it only makes the drain reachable once compose names it.
 #
 # P2 adds `notifier`. It was previously excluded because "its compose wiring is
 # still open" — but it now carries the ADR-0120 push-candidate drain, and an
@@ -51,7 +59,7 @@ ARG RUNTIME_IMAGE=debian:bookworm-slim
 ARG MOMO_BUILD_SHA=unknown
 
 # ---------------------------------------------------------------------------
-# build — one workspace build for all three binaries
+# build — one workspace build for every binary
 # ---------------------------------------------------------------------------
 FROM ${RUST_IMAGE} AS build
 WORKDIR /src/server-rust
@@ -85,12 +93,14 @@ COPY server-rust/crates/momo-provider/Cargo.toml crates/momo-provider/
 COPY server-rust/crates/momo-push/Cargo.toml crates/momo-push/
 COPY server-rust/crates/momo-settings/Cargo.toml crates/momo-settings/
 COPY server-rust/crates/momo-t3/Cargo.toml crates/momo-t3/
+COPY server-rust/crates/momo-webhook/Cargo.toml crates/momo-webhook/
 COPY server-rust/crates/momo-wire/Cargo.toml crates/momo-wire/
 COPY server-rust/bins/momo-agent-worker/Cargo.toml bins/momo-agent-worker/
 COPY server-rust/bins/momo-migrate/Cargo.toml bins/momo-migrate/
 COPY server-rust/bins/momo-notifier/Cargo.toml bins/momo-notifier/
 COPY server-rust/bins/momo-relay/Cargo.toml bins/momo-relay/
 COPY server-rust/bins/momo-server/Cargo.toml bins/momo-server/
+COPY server-rust/bins/momo-webhook-sender/Cargo.toml bins/momo-webhook-sender/
 RUN set -eux; \
     for manifest in crates/*/Cargo.toml bins/*/Cargo.toml; do \
       dir=$(dirname "$manifest"); \
@@ -100,7 +110,7 @@ RUN set -eux; \
     done; \
     cargo build --release --locked \
       --bin momo-server --bin momo-relay --bin momo-agent-worker \
-      --bin momo-migrate --bin momo-notifier; \
+      --bin momo-webhook-sender --bin momo-migrate --bin momo-notifier; \
     find crates bins -name '*.rs' -delete
 
 # Real sources. `--locked` keeps the dependency graph byte-identical to the
@@ -116,10 +126,11 @@ RUN set -eux; \
     find crates bins -name '*.rs' -exec touch {} +; \
     cargo build --release --locked \
       --bin momo-server --bin momo-relay --bin momo-agent-worker \
-      --bin momo-migrate --bin momo-notifier; \
+      --bin momo-webhook-sender --bin momo-migrate --bin momo-notifier; \
     install -Dm755 target/release/momo-server /out/momo-server; \
     install -Dm755 target/release/momo-relay /out/momo-relay; \
     install -Dm755 target/release/momo-agent-worker /out/momo-agent-worker; \
+    install -Dm755 target/release/momo-webhook-sender /out/momo-webhook-sender; \
     install -Dm755 target/release/momo-migrate /out/momo-migrate; \
     install -Dm755 target/release/momo-notifier /out/momo-notifier
 
@@ -176,7 +187,7 @@ RUN set -eux; \
 FROM ${RUNTIME_IMAGE}
 ARG MOMO_BUILD_SHA
 LABEL org.opencontainers.image.title="momo-rust" \
-      org.opencontainers.image.description="momo Rust runtime — api | relay | agent-worker | notifier | migrate | web-assets" \
+      org.opencontainers.image.description="momo Rust runtime — api | relay | agent-worker | webhook-sender | notifier | migrate | web-assets" \
       org.opencontainers.image.licenses="Apache-2.0" \
       org.opencontainers.image.revision="${MOMO_BUILD_SHA}"
 

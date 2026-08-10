@@ -1423,6 +1423,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "momo-webhook-sender"
+version = "0.0.0"
+dependencies = [
+ "axum",
+ "chrono",
+ "momo-db",
+ "momo-outbox",
+ "momo-server",
+ "momo-webhook",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
 name = "momo-wire"
 version = "0.0.0"
 dependencies = [

@@ -1,0 +1,49 @@
+[package]
+name = "momo-webhook-sender"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+# The drain loop is a library so the conformance test can run exactly one
+# iteration against a mock subscriber; `src/main.rs` is the env→serve shell.
+# Same split, and same reason, as `momo-relay`.
+[lib]
+name = "momo_webhook_sender"
+path = "src/lib.rs"
+
+[[bin]]
+name = "momo-webhook-sender"
+path = "src/main.rs"
+
+[dependencies]
+# All outbox SQL comes from momo-outbox (invariant #3) and all
+# event_subscription SQL from momo-webhook: this crate contains neither
+# statement of its own. What it owns is the HTTP hop and the order the two
+# settlements happen in.
+momo-db = { path = "../../crates/momo-db" }
+momo-outbox = { path = "../../crates/momo-outbox" }
+momo-webhook = { path = "../../crates/momo-webhook" }
+
+# The outbound transport. This is the reason the sender is a separate binary
+# rather than a branch inside `momo-relay`: the relay's single HTTP destination
+# is Centrifugo, and that fact is what makes invariant #2 ("Centrifugo =
+# transport-only, and only the relay publishes") checkable by reading its
+# dependency graph. A relay that could POST an operator-supplied URL would make
+# the invariant unprovable even if it stayed true.
+reqwest.workspace = true
+tokio = { workspace = true, features = ["net", "signal", "time", "sync"] }
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[dev-dependencies]
+# Conformance harness (tests/webhook_delivery_conformance_pg.rs, #[ignore]): a
+# mock subscriber (axum) that verifies the HMAC signature exactly as a real one
+# would, plus the real management routes to install the subscription.
+axum.workspace = true
+momo-server = { path = "../momo-server" }

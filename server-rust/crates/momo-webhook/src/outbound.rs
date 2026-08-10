@@ -100,13 +100,23 @@ impl HostResolver for SystemHostResolver {
 /// rendered as a 500.
 pub const MAX_URL_BYTES: usize = 2_048;
 
-/// Stage one: the literal.
+/// Stage one, **shape only**: an absolute http(s) URL with no embedded
+/// credentials and no fragment, within the column's length bound.
+///
+/// Deliberately does NOT apply the address policy, and the split is what lets
+/// the guard live in exactly one place. The sender needs to turn a stored string
+/// into a host and an absolute form *before* it can decide anything (including
+/// what to write in the audit's `target_host`), and if that parse also refused
+/// private addresses there would be two places refusing them — one of which runs
+/// nowhere near the connection it is supposed to protect. So: parse here, refuse
+/// in [`validated_url`] (the save path) and in [`validated_resolved_addresses`]
+/// (the connect path, immediately before the socket).
 ///
 /// `allow_development_http` is the ONLY way an `http://` destination is accepted
 /// and it is off everywhere but a local instance — the caller passes
 /// `MOMO_ENV=local && MOMO_EVENT_SUBSCRIPTION_ALLOW_HTTP=1`, the same pair the
 /// Swift relay reads (`relay/OutboxRelay/.../Config.swift:66-68`).
-pub fn validated_url(
+pub fn parse_outbound_url(
     raw: &str,
     allow_development_http: bool,
 ) -> Result<OutboundUrl, OutboundUrlError> {
@@ -150,9 +160,6 @@ pub fn validated_url(
     if host.is_empty() {
         return Err(OutboundUrlError::InvalidUrl);
     }
-    if is_denied_address(&host) {
-        return Err(OutboundUrlError::PrivateAddress);
-    }
 
     let path_and_query = if path_and_query.is_empty() {
         "/".to_string()
@@ -175,6 +182,22 @@ pub fn validated_url(
         path_and_query,
         absolute,
     })
+}
+
+/// Stage one **plus the literal address policy** — what a save path wants.
+///
+/// A private/loopback/reserved literal is refused here without any DNS work at
+/// all, so an admin typing `http://169.254.169.254/` gets an immediate 400 and
+/// the resolver is never handed a caller-controlled name for nothing.
+pub fn validated_url(
+    raw: &str,
+    allow_development_http: bool,
+) -> Result<OutboundUrl, OutboundUrlError> {
+    let url = parse_outbound_url(raw, allow_development_http)?;
+    if is_denied_address(&url.host) {
+        return Err(OutboundUrlError::PrivateAddress);
+    }
+    Ok(url)
 }
 
 /// Re-add the brackets an IPv6 literal needs in a URL. `host` is stored

@@ -51,8 +51,8 @@ pub use installations::{
     DEFAULT_ROTATION_OVERLAP_SECONDS, LABEL_MAX_CHARS, MAX_ROTATION_OVERLAP_SECONDS, PLUGIN_ID,
 };
 pub use outbound::{
-    is_denied_address, validated_resolved_addresses, validated_url, HostResolver, OutboundUrl,
-    OutboundUrlError, SystemHostResolver, MAX_URL_BYTES,
+    is_denied_address, parse_outbound_url, validated_resolved_addresses, validated_url,
+    HostResolver, OutboundUrl, OutboundUrlError, SystemHostResolver, MAX_URL_BYTES,
 };
 pub use subscriptions::{
     create_subscription, delete_subscription, list_subscriptions, load_delivery_target,

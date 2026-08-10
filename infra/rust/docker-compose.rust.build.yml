@@ -18,9 +18,9 @@ x-rust-build: &rust-build
   context: ../..
   dockerfile: server-rust/Dockerfile
 
-# All four services declare the same build so `docker compose build` (no service
-# argument) works and every one of them resolves to the identical local tag;
-# after the first, each is a full layer-cache hit.
+# Every service declares the same build so `docker compose build` (no service
+# argument) works and all of them resolve to the identical local tag; after the
+# first, each is a full layer-cache hit.
 services:
   runtime-roles:
     build: *rust-build
@@ -32,4 +32,14 @@ services:
     build: *rust-build
 
   relay:
+    build: *rust-build
+
+  agent-worker:
+    build: *rust-build
+
+  # #1222 — the outbound event-subscription sender. Listed here for the same
+  # reason as the rest: `docker compose build` with no service argument must
+  # cover every service the base file declares, or a local `up` pulls a tag that
+  # was never built.
+  webhook-sender:
     build: *rust-build
