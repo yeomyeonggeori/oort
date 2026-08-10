@@ -75,7 +75,7 @@ jobs:
       # src-tauri/target(1.1GB, 295 crate)과 node_modules 를 매번 지워서 릴리스마다
       # 콜드 빌드를 강요한다. 대신 추적 파일이 더러운 채로 빌드되는 일이 없도록
       # 바로 다음 단계에서 확인한다.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           clean: false
 
