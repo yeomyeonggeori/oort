@@ -41,4 +41,7 @@ pub mod work_controls;
 pub mod work_hosts;
 pub mod work_sessions;
 pub mod work_tier_policy;
+/// ADR-0161 D5 — the workspace avatar media surface (upload session, completion,
+/// the content proxy), the attachment surface re-aimed at a workspace.
+pub mod workspace_avatar;
 pub mod workspaces;

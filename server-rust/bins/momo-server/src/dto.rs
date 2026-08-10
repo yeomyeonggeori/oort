@@ -1664,6 +1664,13 @@ pub struct WorkspaceDto {
     /// The rename endpoint's optimistic-concurrency token, so the read hands out
     /// the exact value a later write compares against.
     pub updated_at_ms: i64,
+    /// The avatar content path with an immutable version token
+    /// (`/v1/workspaces/{ws}/avatar/content?v={media}`), or absent when the
+    /// workspace has no avatar (ADR-0161 D5). The rail renders it and falls back
+    /// to the name initial otherwise; the `?v=` changes on replacement, which is
+    /// what lets the client cache the bytes immutably.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub avatar_url: Option<String>,
 }
 
 /// Swift `WorkspaceResponse` (`DTOs.swift:777-779`). The client unwraps
@@ -1673,6 +1680,59 @@ pub struct WorkspaceDto {
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceResponse {
     pub workspace: WorkspaceDto,
+}
+
+// ---------------------------------------------------------------------------
+// workspace self-leave (ADR-0161 D4 — Swift `MemberLifecycleRoutes`)
+// ---------------------------------------------------------------------------
+
+/// The result of `DELETE /v1/workspaces/{ws}/members/me`. Mirrors Swift
+/// `MembershipLifecycleResponse` (`memberId`, `status`), so the client learns the
+/// member row is now `deleted` and can drop the local session.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MembershipLifecycleResponse {
+    pub member_id: String,
+    pub status: String,
+}
+
+// ---------------------------------------------------------------------------
+// workspace avatar media (ADR-0161 D5). The attachment DTOs re-aimed at a
+// workspace: same upload/complete shape, no channel/message binding.
+// ---------------------------------------------------------------------------
+
+/// `POST /v1/workspaces/{ws}/avatar/uploads` request. Same three fields as
+/// `CreateAttachmentUploadRequest`; `mime` must be an image type.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CreateAvatarUploadRequest {
+    pub name: String,
+    pub mime: String,
+    pub size: i64,
+}
+
+/// `AttachmentUploadResponse`'s twin: the media id, its `pending` status, and the
+/// opaque Drive capability URL the client PUTs to (never logged).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AvatarUploadResponse {
+    pub id: String,
+    pub status: String,
+    pub upload_url: String,
+}
+
+/// The completed avatar media row (`POST …/avatar/{id}/complete`).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AvatarResponse {
+    pub id: String,
+    pub workspace_id: String,
+    pub uploader_member_id: String,
+    pub name: String,
+    pub mime: String,
+    pub size: i64,
+    pub status: String,
+    pub created_at_ms: i64,
 }
 
 // ---------------------------------------------------------------------------

@@ -1840,6 +1840,104 @@ export async function fetchAttachmentContent(
   return res.blob();
 }
 
+// ---- 워크스페이스 아바타 (ADR-0161 D5) --------------------------------------
+//
+// 첨부(위)의 세 경로를 워크스페이스에 맞춰 다시 쓴 것이다. 올릴 때 바이트는 이
+// 서버를 지나지 않고(Drive capability URL), 내려올 때는 인가 프록시를 지난다 —
+// 같은 비대칭. 다른 것은 셋: 채널이 아니라 워크스페이스에 묶이고, content 는
+// 워크스페이스 멤버 누구나 읽으며(레일 상시 렌더), 세터는 owner/admin 이다.
+
+/** `AvatarUploadResponse` — `uploadUrl` 은 불투명한 Drive capability다(로그 금지). */
+export interface WorkspaceAvatarUpload {
+  id: string;
+  status: "pending";
+  uploadUrl: string;
+}
+
+function avatarPath(workspaceId: string): string {
+  return `/v1/workspaces/${encodeURIComponent(workspaceId)}/avatar`;
+}
+
+/** 재개 가능 아바타 업로드 세션을 연다(owner/admin 만). `mime` 은 image/* 여야 한다. */
+export async function createWorkspaceAvatarUpload(
+  workspaceId: string,
+  file: { name: string; mime: string; size: number }
+): Promise<WorkspaceAvatarUpload> {
+  const source = responseRecord(
+    await request<unknown>(`${avatarPath(workspaceId)}/uploads`, {
+      method: "POST",
+      body: JSON.stringify(file),
+    })
+  );
+  const id = str(source, "id");
+  const uploadUrl = str(source, "uploadUrl");
+  if (id === undefined || uploadUrl === undefined) throw new WireShapeError();
+  return { id, status: "pending", uploadUrl };
+}
+
+/** Drive 가 실제로 든 것과 선언한 것을 대조하게 하고, 맞으면 워크스페이스 아바타를 교체한다. */
+export async function completeWorkspaceAvatarUpload(
+  workspaceId: string,
+  mediaId: string
+): Promise<{ id: string; status: string }> {
+  const source = responseRecord(
+    await request<unknown>(
+      `${avatarPath(workspaceId)}/${encodeURIComponent(mediaId)}/complete`,
+      { method: "POST" }
+    )
+  );
+  const id = str(source, "id");
+  const status = str(source, "status");
+  if (id === undefined || status === undefined) throw new WireShapeError();
+  return { id, status };
+}
+
+/**
+ * 아바타 바이트를 인가 프록시로 받는다(`fetchAttachmentContent` 와 같은 이유로
+ * `request()` 를 쓰지 않는다: JSON 문이 이미지를 파싱 오류로 만든다).
+ *
+ * `avatarUrl` 은 서버 DTO 가 준 same-origin content 경로다(`?v={media}` 로 immutable).
+ * 서버가 준 값만 받으므로 그 형태를 확인하고 넘긴다 — 임의 주소를 베어러로 치지
+ * 않게 한다.
+ */
+export async function fetchWorkspaceAvatar(avatarUrl: string): Promise<Blob> {
+  if (!/^\/v1\/workspaces\/[^/]+\/avatar\/content(\?|$)/.test(avatarUrl)) {
+    throw new ApiError(400, "not a workspace avatar content path");
+  }
+  const send = (token: string | null): Promise<Response> => {
+    const headers = new Headers();
+    if (token) headers.set("Authorization", `Bearer ${token}`);
+    return fetch(`${apiBase()}${avatarUrl}`, { headers });
+  };
+  let res = await send(coreSession().getAccessToken());
+  if (res.status === 401 && coreSession().getRefreshToken()) {
+    if (await refreshSession()) res = await send(coreSession().getAccessToken());
+  }
+  if (res.status === 401) coreSession().markAuthExpired();
+  if (!res.ok) throw new ApiError(res.status, `HTTP ${res.status}`);
+  return res.blob();
+}
+
+// ---- 워크스페이스 나가기 (ADR-0161 D4) --------------------------------------
+// DELETE /v1/workspaces/{ws}/members/me — 마지막 owner 는 409(먼저 이전).
+// 채널 나가기(removeChannelMember)와는 다른 상위 개념이다.
+
+/** 자기 워크스페이스 멤버십을 종료한다. 마지막 owner 면 서버가 409 로 거절한다. */
+export async function leaveWorkspace(
+  workspaceId: string
+): Promise<{ memberId: string; status: string }> {
+  const source = responseRecord(
+    await request<unknown>(
+      `/v1/workspaces/${encodeURIComponent(workspaceId)}/members/me`,
+      { method: "DELETE" }
+    )
+  );
+  const memberId = str(source, "memberId");
+  const status = str(source, "status");
+  if (memberId === undefined || status === undefined) throw new WireShapeError();
+  return { memberId, status };
+}
+
 // ---- 휘발 신호: 「작성 중」 (ADR-0149) ---------------------------------------
 // POST /v1/workspaces/{ws}/channels/{ch}/typing/grant   ← 멤버십 읽기 1회
 // POST /v1/workspaces/{ws}/channels/{ch}/typing         ← 발행, **PG 미접촉**

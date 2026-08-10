@@ -56,6 +56,7 @@ pub mod notification_rule;
 pub mod read_state;
 pub mod refine;
 pub mod search;
+pub mod workspace_avatar;
 
 pub use attachment::{
     create_pending_upload_in_tx, is_attachment_channel_member, link_attachments_in_tx,
@@ -79,6 +80,11 @@ pub use dm::{
     DirectMessageTargetInvalid, OpenedDirectMessage, DM_LIST_LIMIT,
 };
 pub use error::{MessagingError, ProvenanceRejected};
+pub use workspace_avatar::{
+    create_pending_avatar_upload_in_tx, load_avatar_media_in_tx, read_current_avatar_media_in_tx,
+    settle_avatar_upload_in_tx, validate_avatar_mime, validate_avatar_name, AvatarMedia,
+    AvatarSpecInvalid, MAX_WORKSPACE_AVATAR_BYTES, WORKSPACE_AVATAR_TEXT_MAX_CHARS,
+};
 pub use identity::{
     active_workspace_role, can_observe_agent, clamp_roster_limit, get_member, get_workspace,
     is_active_agent, is_channel_member, list_workspace_roster, parse_roster_kind_filter,

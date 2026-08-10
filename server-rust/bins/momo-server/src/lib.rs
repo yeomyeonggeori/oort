@@ -404,6 +404,22 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/channels/{ch}/attachments/{attachment}/content",
             get(routes::attachments::content),
         )
+        // ADR-0161 D5 — the workspace avatar media surface. The attachment three
+        // re-aimed at a workspace: owner/admin sets, any member reads, the bytes
+        // ride the same Drive primitive. `content` carries the rail's avatar for
+        // everyone (a wider read scope than an attachment's channel membership).
+        .route(
+            "/v1/workspaces/{ws}/avatar/uploads",
+            post(routes::workspace_avatar::avatar_create_upload),
+        )
+        .route(
+            "/v1/workspaces/{ws}/avatar/{id}/complete",
+            post(routes::workspace_avatar::avatar_complete),
+        )
+        .route(
+            "/v1/workspaces/{ws}/avatar/content",
+            get(routes::workspace_avatar::avatar_content),
+        )
         // B4 — the client's first authenticated read after login. Without it the
         // sidebar has nothing and there is no way into a conversation.
         // B4.1 adds the write beside it (D-7): a dogfooding workspace that
@@ -437,6 +453,13 @@ pub fn build_app(state: AppState) -> Router {
         // B4.1 — the settings panel's first read (workspace name + the rename
         // endpoint's concurrency token).
         .route("/v1/workspaces/{ws}", get(routes::workspaces::get))
+        // ADR-0161 D4 — self-leave. The higher-scoped sibling of channel leave:
+        // ends the caller's whole workspace membership. The last owner is refused
+        // (409) so a workspace is never orphaned.
+        .route(
+            "/v1/workspaces/{ws}/members/me",
+            delete(routes::workspaces::leave),
+        )
         // B4.2 — 설정 표면 (diff matrix D-3). Three authorization tiers sit in
         // this block and the grouping is deliberate:
         //

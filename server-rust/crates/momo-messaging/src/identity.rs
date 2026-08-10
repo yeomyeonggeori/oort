@@ -675,6 +675,12 @@ pub struct WorkspaceIdentity {
     pub slug: String,
     pub name: String,
     pub updated_at_ms: i64,
+    /// The current avatar media (ADR-0161 D5), or `None` for the initial
+    /// fallback. Carried on this read so the settings panel and the rail get the
+    /// avatar in the same round trip that already fetches the name — the rail's
+    /// `avatarUrl` is derived from it (`GET …/avatar/content?v={media}`), and its
+    /// change on replacement is what busts the client's immutable cache.
+    pub avatar_media_id: Option<Uuid>,
 }
 
 /// Why a workspace read produced no workspace — the distinction Swift's
@@ -715,6 +721,7 @@ pub async fn read_workspace_for_active_member(
                 w.id AS workspace_id, \
                 w.slug, \
                 w.name, \
+                w.avatar_media_id, \
                 floor(extract(epoch from w.updated_at) * 1000)::bigint AS updated_at_ms \
            FROM (SELECT 1) AS anchor \
            LEFT JOIN workspace w \
@@ -742,6 +749,7 @@ pub async fn read_workspace_for_active_member(
             slug: row.try_get("slug")?,
             name: row.try_get("name")?,
             updated_at_ms: row.try_get("updated_at_ms")?,
+            avatar_media_id: row.try_get("avatar_media_id")?,
         })),
         None => {
             let exists: bool = row.try_get("workspace_exists")?;

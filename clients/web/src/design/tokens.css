@@ -227,6 +227,19 @@
   --spacing-pane-md: 512px; /* the overlay measure: dialog panel, ⌘K palette */
   --spacing-pane-lg: 640px; /* agent card measure: a card is not a banner */
 
+  /* 워크스페이스 레일 (검수 #4b / ADR-0161). 32px 레일은 디스코드형 스위처가 서기엔
+   * 좁다 — 타일이 어느 컨트롤 높이(28·32·40)보다 작아 아바타가 이니셜 한 글자로만
+   * 읽히고, 히트영역이 손가락 밑에서 빗나간다. 레일 폭도 타일도 리듬 스케일(최대
+   * 32) 밖의 셸 기하라(--w-sidebar와 같은 축) 숫자가 아니라 이름으로 들어온다.
+   *   - rail 56px = tile 44px + 양쪽 6px. 44는 우연이 아니라 --tap-target(44)과
+   *     같은 측정이다: 타일 전체가 곧 클릭 대상이므로 그 크기가 히트영역이고,
+   *     "히트영역 44pt"(패킷)를 데스크탑에서도 도형 크기로 지킨다.
+   *   - marker 24px는 44px 타일의 현재-워크스페이스 액센트 바 높이(타일보다 짧은
+   *     pill이라 "선택됨"을 말하되 타일을 다 덮지 않는다). */
+  --spacing-rail: 56px;
+  --spacing-rail-tile: 44px;
+  --spacing-rail-marker: 24px;
+
   /* Diff body measure (MOMO-620 / ADR-0126 D2). A diff scrolls INSIDE its card
    * at this height, the same 400px cap the mac card uses, so a 500 line change
    * never grows the timeline row and the page never gains a horizontal scroll.
