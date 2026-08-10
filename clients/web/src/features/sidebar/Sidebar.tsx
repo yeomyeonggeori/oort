@@ -15,7 +15,9 @@ import {
   Users,
   X,
 } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
 import { uuidEq, type Channel } from "@momo/core/lib/api";
+import { fetchWorkspace } from "@momo/core/features/settings/api";
 import { useSession } from "@/app/session";
 import { useInertWhile, useShellNav } from "@/app/shellNav";
 import {
@@ -132,6 +134,16 @@ export function Sidebar({
   const directoryQuery = useDirectory(workspaceId);
   const readStates = useReadStates(workspaceId);
   const { channels, dms } = channelsQuery.groups;
+
+  // 레일이 그리는 이름은 워크스페이스의 것이다 (검수 피드백 #4a-1). 소스는 이미
+  // 있는 GET /v1/workspaces/{ws} 이고, 설정 > 워크스페이스가 쓰는 것과 같은
+  // 쿼리 키라 캐시를 나눠 써 중복 페치가 없다. 그전엔 이 자리에 selfName(사용자
+  // 표시명)이 꽂혀 있어 현재 워크스페이스 타일이 사용자 이니셜을 그렸다.
+  const workspaceQuery = useQuery({
+    queryKey: ["settings", "workspace", workspaceId],
+    queryFn: () => fetchWorkspace(workspaceId),
+    retry: false,
+  });
 
   const selfMember = memberFor(directoryQuery.directory, session.member.id);
   const selfName = selfMember?.displayName ?? session.member.displayName;
@@ -284,7 +296,15 @@ export function Sidebar({
       data-open={asDrawer && drawerOpen ? "" : undefined}
       data-testid="sidebar"
     >
-      <WorkspaceRail workspaceName={selfName} connStatus={connStatus} />
+      <WorkspaceRail
+        workspace={{
+          name: workspaceQuery.data?.name,
+          isPending: workspaceQuery.isPending,
+          isError: workspaceQuery.isError,
+        }}
+        workspaceId={workspaceId}
+        connStatus={connStatus}
+      />
 
       <div className="flex h-full w-full min-w-0 flex-col border-r border-line bg-surface-sidebar">
         <div className="flex items-center gap-2 border-b border-line p-2">
