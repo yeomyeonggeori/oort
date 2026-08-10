@@ -1,5 +1,24 @@
 # momo multi-command image publication for the source-checkout-free alpha host.
 # Manual-only: owner approval is required before dispatch.
+#
+# ── 2026-08-10 W-P1 정합 검사 — dispatch 전에 읽을 것 ──────────────────────
+# 이 워크플로는 **한 번도 실행된 적이 없다**(감사 B §5-1: runs 0). 공개 전환으로
+# Actions가 무료가 되어 첫 발행이 가능해졌고, 그 첫 발행이 만드는 패키지가
+# `ghcr.io/yeomyeonggeori/oort`다. 검사 결과 **실행은 된다** — 빌드 컨텍스트가
+# 요구하는 경로 21개 전수 존재, `scripts/tests/test_publish_images_contract.py`
+# PASS. 다만 발행되는 내용에 대해 두 가지를 알고 눌러야 한다(둘 다 워크플로
+# 밖의 결정이라 이 워커는 고치지 않았다):
+#
+# ① **이 워크플로가 짓는 것은 Swift 스택이고, 라이브가 도는 것은 Rust다**
+#    (감사 B §5 6축 불일치표). Dockerfile = `momo.Dockerfile`(Swift 6.2 +
+#    `clients/web-legacy`) vs 라이브 `server-rust/Dockerfile`(Rust +
+#    `clients/web`). 커맨드도 6종(api·relay·worker·migrate·web-assets·
+#    linkshort) vs 5종(momo-server·relay·agent-worker·notifier·migrate).
+# ② **`platforms: linux/arm64` 단일이고 라이브 호스트는 amd64**다(감사 B §6-1).
+#
+# 둘 다 `test_publish_images_contract.py`가 Swift Dockerfile·arm64를 **강제로
+# 단정**하고 있어(감사 B-11 "게이트가 죽은 경로를 지키고 있다") 워크플로만
+# 바꿔서는 닫히지 않는다. 이 PR의 수용기준이 "계약 테스트 green 유지"다.
 name: publish-images
 
 on:
@@ -26,12 +45,20 @@ jobs:
   publish:
     name: publish momo (linux/arm64)
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    # 90분이었다. 이 잡은 Swift 6.2 릴리스 빌드 4개(MomoServer·OutboxRelay·
+    # AgentWorker·LinkShort)를 **QEMU arm64 에뮬레이션 위에서** 돌린다 —
+    # 네이티브 대비 배수가 큰 작업이고, 캐시(`type=gha`)는 실행 이력이 0이라
+    # 첫 dispatch에서 반드시 콜드다. 공개 전환으로 분이 무료·무제한이 된 지금
+    # 90분은 "예산"이 아니라 "첫 발행이 타임아웃으로 죽을 확률"일 뿐이라
+    # 넉넉히 올린다(행 방지 상한으로만 남긴다).
+    timeout-minutes: 240
     outputs:
       image: ${{ env.IMAGE }}
       digest: ${{ steps.build.outputs.digest }}
     steps:
-      - uses: actions/checkout@v4
+      # @v4는 Node 20 런타임이다. 이 워크플로는 이번이 첫 실행이므로 폐기
+      # 경고를 안고 시작할 이유가 없다(pr-ci가 #1243에서 v5로 올린 것과 동일).
+      - uses: actions/checkout@v5
 
       - name: Enable linux/arm64 emulation
         uses: docker/setup-qemu-action@v3
@@ -57,6 +84,16 @@ jobs:
           platforms: linux/arm64
           push: true
           tags: ${{ env.IMAGE }}:${{ env.IMAGE_TAG }}
+          # GHCR 패키지를 레포에 **연결**하는 것은 이 라벨이다. 없으면 공개
+          # 레포가 된 뒤에도 패키지 페이지가 소스·README·라이선스로 이어지지
+          # 않고, 익명 방문자에게는 출처 없는 바이너리로 보인다. 첫 공개 발행
+          # 이므로 여기서 붙인다(Dockerfile은 무접촉 — 라벨은 워크플로가
+          # 덧씌운다). revision은 이미지가 자기 커밋을 말할 수 있게 한다.
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.url=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.licenses=Apache-2.0
           cache-from: type=gha,scope=momo-arm64
           cache-to: type=gha,mode=max,scope=momo-arm64
           provenance: mode=max
