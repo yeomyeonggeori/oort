@@ -141,7 +141,9 @@ jobs:
     if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
     # 행 방지용 상한이지 소모 상한이 아니다(공개 전환으로 분은 무료·무제한).
-    timeout-minutes: 40
+    # 러너 실측(이 PR): `cargo test --workspace` 콜드 107초 · 캐시 히트 77초,
+    # 잡 전체 1분32초. 20분은 그 ~10배 여유다.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v5
 
@@ -188,7 +190,9 @@ jobs:
     needs: changes
     if: needs.changes.outputs.node == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    # 러너 실측(이 PR): 잡 전체 1분32초(npm ci 3트리 29초 · 타입체크 3 16초 ·
+    # 테스트 3 38초). 15분은 그 ~10배 여유다.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
 
