@@ -104,8 +104,8 @@ docker run --rm --entrypoint sh "$IMAGE" -c \
 # ---------------------------------------------------------------------------
 gen() { openssl rand -hex 24; }
 PG_PASSWORD="$(gen)"; APP_PASSWORD="$(gen)"; RELAY_PASSWORD="$(gen)"; WORKER_PASSWORD="$(gen)"
-# Lowercase on purpose: the address is stored normalised while the login lookup
-# compares it verbatim, so anything else is refused at boot (phase 5b).
+# Lowercase because phases 1-4 assert on this exact spelling in both directions;
+# the mixed-case round trip that #1234 fixed gets its own address in phase 5b.
 OWNER_EMAIL="owner-$(printf '%s' "$RUN_TAG" | tr 'A-Z' 'a-z')@momo.local"
 OWNER_PASSWORD="first-$(gen)"
 ROTATED_PASSWORD="rotated-$(gen)"
@@ -243,24 +243,43 @@ set -e
 grep -Fq 'must be set together' "$TMP_DIR/half-set.log" ||
   fail "the half-set failure did not name the contract"
 
-# 5b. A mixed-case address would be stored lowercased and then never match the
-# verbatim login lookup — a healthy stack nobody can enter, which is the whole
-# failure this ticket removes. It must be refused, not silently rewritten.
-set +e
-compose run --rm -e "MOMO_INITIAL_OWNER_EMAIL=Owner@Example.COM" migrate \
-  >"$TMP_DIR/mixed-case.log" 2>&1
-mixed_case_status=$?
-set -e
-[ "$mixed_case_status" -eq 2 ] ||
-  { cat "$TMP_DIR/mixed-case.log" >&2; fail "a mixed-case owner email exited $mixed_case_status, expected 2"; }
-grep -Fq 'owner@example.com' "$TMP_DIR/mixed-case.log" ||
-  fail "the rejection did not show the spelling that would work"
-note 'phase 5 PASS'
+# 5b. #1234 — the mixed-case round trip, end to end.
+#
+# This assertion used to be the mirror image: a mixed-case address had to exit 2,
+# because the credential was stored lower(btrim(...)) while verify_password_login
+# compared `h.email = $2` verbatim, so booting with it produced a healthy stack
+# nobody could enter. The lookup now normalises its own input and migration 064
+# makes the stored form a CHECK constraint, so the correct behaviour is the
+# opposite: accept the spelling the operator typed and let them sign in with it.
+#
+# The login half is what makes this a proof rather than an exit-code check — it
+# drives the exact 401 from #1234 through the real HTTP route.
+MIXED_CASE_EMAIL="Owner-$(printf '%s' "$RUN_TAG" | tr 'a-z' 'A-Z')@Example.COM"
+MIXED_CASE_NORMALISED="$(printf '%s' "$MIXED_CASE_EMAIL" | tr 'A-Z' 'a-z')"
+MIXED_CASE_PASSWORD="mixed-$(gen)"
+
+# A fresh database: the bootstrap only writes when no usable password exists, and
+# phases 1-4 have already claimed the seeded owner in this one.
+compose down -v >"$TMP_DIR/down-mixed-case.log" 2>&1 || true
+write_env "$MIXED_CASE_EMAIL" "$MIXED_CASE_PASSWORD"
+compose up -d >"$TMP_DIR/up-mixed-case.log" 2>&1 ||
+  { tail -20 "$TMP_DIR/up-mixed-case.log" >&2; fail "the stack did not start with a mixed-case owner email"; }
+wait_for_api
+
+migrate_log >"$TMP_DIR/migrate-mixed-case.log"
+grep -Fq 'MOMO_BOOTSTRAP_OWNER=created' "$TMP_DIR/migrate-mixed-case.log" ||
+  { cat "$TMP_DIR/migrate-mixed-case.log" >&2; fail "a mixed-case owner email was refused instead of bootstrapped"; }
+
+login_works "$MIXED_CASE_EMAIL" "$MIXED_CASE_PASSWORD" ||
+  fail "#1234: the operator cannot log in with the address they typed into the env file"
+login_works "$MIXED_CASE_NORMALISED" "$MIXED_CASE_PASSWORD" ||
+  fail "#1234: the normalised spelling of the same address does not log in"
+note 'phase 5 PASS — mixed-case owner email boots and signs in both ways (#1234)'
 
 # ---------------------------------------------------------------------------
 # secret hygiene across every log this run produced
 # ---------------------------------------------------------------------------
-for secret in "$OWNER_PASSWORD" "$ROTATED_PASSWORD" "$PG_PASSWORD" "$APP_PASSWORD"; do
+for secret in "$OWNER_PASSWORD" "$ROTATED_PASSWORD" "$MIXED_CASE_PASSWORD" "$PG_PASSWORD" "$APP_PASSWORD"; do
   if grep -rqF "$secret" "$TMP_DIR" --include='*.log' 2>/dev/null; then
     fail "a generated secret leaked into command output"
   fi

@@ -459,7 +459,9 @@ fn bootstrap_owner(database_url: &str) -> Result<(), MigrateError> {
             // directly: MOMO_BOOTSTRAP_OWNER=created|skipped|absent. Nothing
             // here echoes a value.
             psql_file(database_url, &file, "bootstrap-owner")?;
-            println!("[migrate] bootstrap owner reconciled (see MOMO_BOOTSTRAP_OWNER notice above)");
+            println!(
+                "[migrate] bootstrap owner reconciled (see MOMO_BOOTSTRAP_OWNER notice above)"
+            );
             Ok(())
         }
     }
@@ -481,26 +483,20 @@ fn plan_owner_bootstrap(
 ) -> Result<OwnerBootstrapPlan, MigrateError> {
     match (email, password) {
         (None, None) => Ok(OwnerBootstrapPlan::Closed),
-        (Some(email), Some(_)) => {
-            // The stored address is `lower(btrim(...))` — the whole codebase
-            // normalises that way (momo-settings::join, workspace_authorization).
-            // The login lookup does NOT: `verify_password_login` compares
-            // `WHERE h.email = $2` verbatim. So `Owner@Example.com` here is
-            // stored as `owner@example.com` and then never matches what the
-            // operator types, producing exactly the healthy-stack-you-cannot-
-            // enter failure this bootstrap exists to remove. Refuse loudly
-            // instead: one env edit beats an unexplainable 401.
-            let normalized = email.trim().to_lowercase();
-            if email != normalized {
-                return Err(MigrateError::Usage(format!(
-                    "{} must already be trimmed and lowercase (expected {normalized:?}) — \
-                     the credential is stored normalised but the login lookup compares \
-                     the address verbatim, so any other spelling cannot sign in",
-                    OWNER_ENV_KEYS[0]
-                )));
-            }
-            Ok(OwnerBootstrapPlan::Apply)
-        }
+        // #1234 retired the spelling guard that used to stand here. It refused a
+        // mixed-case `MOMO_INITIAL_OWNER_EMAIL` because the address was stored
+        // `lower(btrim(...))` while `verify_password_login` compared
+        // `WHERE h.email = $2` verbatim — so `Owner@Example.com` was written and
+        // then could never sign in, and refusing beat an unexplainable 401.
+        //
+        // That premise is now false. The login lookup normalises its own input
+        // the same way (`h.email = lower(btrim($2))`) and migration 064 turns the
+        // stored form into `human_email_normalized_ck` rather than a convention,
+        // so every spelling of the operator's address resolves to the one row.
+        // Keeping a fail-closed refusal whose stated reason no longer holds is
+        // worse than no guard: it teaches the next reader something untrue about
+        // the auth path and charges an env edit for nothing.
+        (Some(_), Some(_)) => Ok(OwnerBootstrapPlan::Apply),
         // A half-filled env file is a typo, and reading it as "off" would lock
         // the operator out behind a green boot log — the exact failure #1227
         // exists to remove. Exit 2, naming the key that is actually set.
@@ -605,19 +601,28 @@ mod tests {
             .contains("only MOMO_INITIAL_OWNER_PASSWORD has a value"));
     }
 
-    /// The credential is stored `lower(btrim(...))` but `verify_password_login`
-    /// compares `h.email = $2` verbatim, so a mixed-case address would be
-    /// written and then be unusable. Measured 2026-08-10 against the built
-    /// image: the owner row existed, the login 401'd.
+    /// #1234 inverted this case. It used to be exit 2 ("type it lowercase"),
+    /// because the address was stored `lower(btrim(...))` while the login lookup
+    /// compared verbatim — measured 2026-08-10 against the built image: the owner
+    /// row existed and the login 401'd.
+    ///
+    /// The lookup now normalises its input (`h.email = lower(btrim($2))`) and
+    /// migration 064 enforces the stored form, so every spelling reaches the same
+    /// row. Accepting is therefore the honest answer, and the operator is spared
+    /// an env edit that no longer buys anything. The end-to-end proof — boot with
+    /// `Owner@Example.COM`, then log in with it — is phase 5b of
+    /// `scripts/verify_owner_bootstrap_rust.sh`.
     #[test]
-    fn a_non_normalised_owner_email_is_refused_rather_than_silently_rewritten() {
-        for spelling in ["Owner@Example.com", " owner@example.com", "owner@example.com "] {
-            let error =
-                plan_owner_bootstrap(Some(spelling), Some("s3cret")).expect_err("must reject");
-            assert_eq!(error.exit_code(), 2);
-            assert!(
-                error.to_string().contains("\"owner@example.com\""),
-                "the message must show the spelling that would work, got: {error}"
+    fn any_spelling_of_the_owner_email_is_accepted_now_that_the_lookup_normalises() {
+        for spelling in [
+            "Owner@Example.com",
+            " owner@example.com",
+            "owner@example.com ",
+        ] {
+            assert_eq!(
+                plan_owner_bootstrap(Some(spelling), Some("s3cret")),
+                Ok(OwnerBootstrapPlan::Apply),
+                "{spelling:?} must boot, not be refused"
             );
         }
     }
