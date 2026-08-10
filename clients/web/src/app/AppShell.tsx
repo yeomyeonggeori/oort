@@ -23,6 +23,7 @@ import { ConnectionBanner } from "@/features/common/ConnectionBanner";
 import { QuickSwitcher } from "@/app/QuickSwitcher";
 import { Sidebar } from "@/features/sidebar/Sidebar";
 import { CreateChannelProvider } from "@/features/channels/CreateChannelDialog";
+import { AddWorkspaceProvider } from "@/features/workspace/AddWorkspaceDialog";
 import { AgentProfileProvider } from "@/features/routing/AgentProfileDialog";
 import { InboxHotkeys } from "@/features/inbox/InboxHotkeys";
 import { DesktopNotifications } from "@/features/notifications/DesktopNotifications";
@@ -203,6 +204,10 @@ export function AppShell({
        * 마다 다이얼로그를 두면 폼 상태가 세 벌이 되고 그중 하나는 낡는다. */}
       <ShellNavProvider value={{ isMobile, drawerOpen, openDrawer, closeDrawer }}>
       <CreateChannelProvider>
+      {/* 워크스페이스 추가도 같은 규칙이다 (검수 피드백 #4a-2). 레일의 [+]가
+       * 설정으로 새던 것을 하나의 다이얼로그로 모으고, 스위처·인박스 단축키가
+       * 이 모달 위에서 물러설 수 있게 열림 상태를 함께 내린다. */}
+      <AddWorkspaceProvider>
         <AgentProfileProvider>
           <div className="app-shell">
             <Sidebar onOpenQuickSwitcher={() => setSwitcherOpen(true)} />
@@ -286,6 +291,7 @@ export function AppShell({
           {turnFixture !== null && <AgentTurnFixture mode={turnFixture} />}
           <QuickSwitcher open={switcherOpen} onOpenChange={setSwitcherOpen} />
         </AgentProfileProvider>
+      </AddWorkspaceProvider>
       </CreateChannelProvider>
       </ShellNavProvider>
     </SessionProvider>
