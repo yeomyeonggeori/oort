@@ -14,7 +14,7 @@
 oort = AI 에이전트가 사람과 **동등한 1급 멤버**(`member.kind='agent'`)로 참여하는 자체구축 슬랙형 메신저. 서버는 **Rust/Axum**(`server-rust/`, ADR-0145) + **Centrifugo v6** + **PostgreSQL 18**, 제품 표면은 **웹(React/Vite `clients/web`) · 데스크톱(Tauri 2 `clients/desktop` — 같은 웹 번들) · 모바일(React Native `clients/mobile`)**이고 공유 도메인 코어는 TypeScript `packages/momo-core`다(ADR-0119/0133/0137). 에이전트 게이트웨이 = 김인턴/hermes(OpenAI 호환 `/v1/chat/completions` + SSE). 전 의존성 **permissive** 타깃.
 
 > ### ⚠️ Swift 트리는 은퇴 중 — 여기에 새로 짓지 마라
-> `clients/macOS`·`clients/iOS`·`clients/Core`, `server/Sources`(Hummingbird 2), `relay/OutboxRelay`, `workers/*`, `services/*`는 **아직 레포에 있지만 삭제 대기**다. 그 경로는 **실패하지 않고 잘못된 것을 성공적으로 짓는다** — 그래서 더 나쁘다.
+> `clients/macOS`·`clients/iOS`·`clients/Core`는 **삭제됐다**(W-S1 / #1215 — 이식 원본은 git 이력에 있다). `server/Sources`(Hummingbird 2), `relay/OutboxRelay`, `workers/*`, `services/*`는 **아직 레포에 있지만 삭제 대기**다. 그 경로는 **실패하지 않고 잘못된 것을 성공적으로 짓는다** — 그래서 더 나쁘다.
 > **은퇴 아님:** ① `server/Migrations/*.sql`(Rust 이미지가 싣는 정본 DDL) ② `relay/PushRelay`(라이브 푸시 경로가 지금도 빌드·배포) ③ `clients/web-legacy`(알파가 실제로 서빙하는 산출물, ADR-0133 parity 게이트 전까지).
 
 **핵심 쓰기경로(절대 깨지 말 것):**
@@ -74,14 +74,12 @@ STATUS.md / ROADMAP.md   현재 상태(항상 먼저) / 릴리스 계획. AGENTS
 
 **은퇴 중 — 삭제 대기. 읽어서 이해하는 용도이지 확장 대상이 아니다:**
 ```
-clients/Core/            MomoCore: 공유 모델 + ChatBackend/AgentTransport 프로토콜.
-clients/macOS/           MomoMac: SwiftUI 뷰(D Live Tool-Call / B 비용 호흡 링 / C 승인 인박스).
-clients/iOS/             MomoiOSKit.
 server/Sources/          MomoServer(Hummingbird 2) — Rust 재작성으로 대체됨.
 relay/OutboxRelay/       Swift outbox relay — Rust momo-relay로 대체됨.
 relay/PushRelay/         ※ 예외: 라이브 푸시 경로가 지금도 빌드·배포한다(은퇴 아님).
 workers/·services/       AgentWorker·WorkHostDaemon·NotifierWorker·LinkShort 등 Swift 실행체.
-fastlane/·infra/prod/    Apple 배포·Swift prod compose 계열(infra/prod/Dockerfile.web은 예외 — web-legacy 서빙).
+infra/prod/              Swift prod compose 계열(infra/prod/Dockerfile.web은 예외 — web-legacy 서빙).
+(삭제됨 — W-S1/#1215) clients/{Core,macOS,iOS}/ · fastlane/ · .github/workflows/{ci-build,release-ios,release-macos}.yml
 ```
 
 **역할별 BYPASSRLS:** relay·agent-worker(`momo-relay`·`momo-agent-worker`)만 전 테넌트 폴링을 위해 BYPASSRLS. **쓰기 경로엔 BYPASSRLS 금지**(읽기 추적 전용). 그 외 모든 경로는 `SET LOCAL app.workspace_id` + RLS FORCE.
@@ -181,7 +179,7 @@ Closes #<issue>
 - 무관한 리팩터 끼워넣기, 의존성 메이저 임의 변경, 다른 패키지 깨기.
 - **게이트(M7) PASS 기록 전 `release-*.yml` 트리거**(§7 참조).
 
-**Swift 네이밍/구조:** 타입 `PascalCase`, 함수/프로퍼티/let `camelCase`, enum case `camelCase`. 모델은 `MomoCore`에만 두고 다른 패키지가 import. 프로토콜 `ChatBackend`/`AgentTransport`가 클라↔서버 계약(L4 §5.3/§6.1). SwiftPM 의존은 최신 안정 태그로 resolve, `*.resolved` 비커밋. 서버 쓰기경로는 단일 트랜잭션, async/await(블로킹 금지).
+**Swift 네이밍/구조(잔존 트리 한정):** 타입 `PascalCase`, 함수/프로퍼티/let `camelCase`, enum case `camelCase`. SwiftPM 의존은 최신 안정 태그로 resolve, `*.resolved` 비커밋. 서버 쓰기경로는 단일 트랜잭션, async/await(블로킹 금지). (`MomoCore`·`ChatBackend`/`AgentTransport` 클라 계약은 클라 3트리와 함께 삭제됐다 — 현행 공유 코어는 TS `packages/momo-core`다.)
 
 ---
 
@@ -267,7 +265,7 @@ oort는 5개 설계축 + 3개 보강(outbox / 비용회계 / APNs)을 단일 정
 **🔒 게이트 불변식(스토어/공증 배포 차단):**
 - 스토어/공증 배포(M8) 및 **external TestFlight**는 **사용성 검수 게이트(M7)가 PASS 된 후에만** 진행한다.
 - 통과 조건: `docs/cicd/05-qa-release-gate.md`의 **G-0~G-G 전부 PASS + 증거 첨부** → `docs/cicd/03-store-readiness-gate.md` 상단에 **PASS 블록(날짜 + 커밋 해시 + 빌드# + 증거 링크)** 기록 → `STATUS.md` 게이트 상태 OPEN→PASS 갱신.
-- **기록 없는 release = 규칙 위반.** 게이트 PASS 전에는 `release-ios.yml`/`release-macos.yml`을 트리거하지 않는다. 현재 GitHub Actions는 비용 방지를 위해 disabled/manual-only이며, owner approval 전에는 재활성/수동 실행하지 않는다.
+- **기록 없는 release = 규칙 위반.** 게이트 PASS 전에는 `release-desktop.yml`을 트리거하지 않는다(`release-ios.yml`·`release-macos.yml`은 W-S1/#1215에서 삭제). 현재 GitHub Actions는 비용 방지를 위해 disabled/manual-only이며, owner approval 전에는 재활성/수동 실행하지 않는다.
 
 **permissive 라이선스 규칙:**
 - 전 의존성을 **permissive(Apache-2.0 / MIT / BSD / PostgreSQL License)** 로 유지. 확정 스택: Rust(tokio·axum·sqlx — MIT/Apache-2.0), Centrifugo v6(Apache-2.0), PostgreSQL 18(PostgreSQL License), React/Vite/Tauri(MIT/Apache-2.0). **비-permissive(GPL/AGPL/상용 제약) 의존 추가 금지.** 라이선스 게이트의 커버리지·정책 정본은 `CONTRIBUTING.md`이며 Rust/npm 정본 트리로의 이설은 #1225에서 다룬다.

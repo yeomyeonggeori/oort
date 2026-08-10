@@ -45,7 +45,6 @@ scripts/local_gate.sh --profile license   # cargo + npm 한 번에
 |---|---|---|
 | cargo (`server-rust`, `clients/desktop/src-tauri`) | 루트 `deny.toml` | `scripts/check_cargo_licenses.sh` (`cargo-deny` 필요) |
 | npm (워크스페이스 루트 = `packages/momo-core`, `clients/web`, `clients/mobile`) | `scripts/check_npm_licenses.mjs`의 `ALLOWED` | 같은 스크립트 |
-| SwiftPM (은퇴 예정) | `scripts/check_spm_licenses.sh` | `--profile swift` |
 
 - **허용**: MIT · Apache-2.0 · ISC · BSD 계열 · 0BSD · Zlib · Unicode-3.0 · Unlicense · CC0-1.0 · CDLA-Permissive-2.0 · BlueOak-1.0.0 · Python-2.0 · CC-BY-4.0(데이터) · **MPL-2.0**.
 - **거부(fail-closed)**: GPL/AGPL/LGPL·SSPL·BUSL·EPL·CDDL·CC-BY-SA/NC 등 copyleft 및 상용 제한 계열, 그리고 **라이선스를 알 수 없는 것**.
@@ -55,8 +54,6 @@ scripts/local_gate.sh --profile license   # cargo + npm 한 번에
 
 ## 서드파티 고지
 
-SwiftPM 의존성을 추가·변경했다면 `scripts/check_spm_licenses.sh --write`로 `legal/THIRD_PARTY_NOTICES.md`를 재생성하고 변경을 같은 PR에 포함하세요. `--check`는 각 SwiftPM 그래프의 checkout LICENSE 원문과 고지 드리프트를 검사합니다.
+**SwiftPM 라이선스 게이트(`scripts/check_spm_licenses.sh`)는 은퇴했습니다**(2026-08-10, #1201 — base부터 red라 전 프로파일을 막고 있었고, Swift 클라 3트리 삭제와 함께 제거). `legal/THIRD_PARTY_NOTICES.md`의 SwiftPM 섹션은 **그 시점의 동결 스냅샷**이며 재생성기가 없습니다. 잔존 Swift 트리(`server`·`relay/*`·`workers/*`·`services/*`)의 SwiftPM 의존을 바꾸는 경우 그 섹션을 손으로 갱신하고 PR에서 근거를 밝히세요.
 
-> 주의: 이 SwiftPM 게이트는 현재 실패 상태입니다 — 기대 루트 수(10)와 실제(11, `services/MomoMetrics` 등 추가분)가 어긋납니다. Swift 트리 은퇴 작업에서 함께 정리하며, 그때까지 `--profile swift`/`--profile all`은 이 단계에서 빨강입니다. 위 cargo·npm 게이트(`--profile license`)는 이와 독립이며 초록입니다.
-
-cargo·npm 의존성의 **고지(NOTICE) 생성**은 아직 자동화되어 있지 않습니다 — 현재 `legal/THIRD_PARTY_NOTICES.md` 커버리지는 SwiftPM 그래프뿐입니다. 라이선스 *검사*는 위 표대로 전 스택을 덮습니다.
+cargo·npm 의존성의 **고지(NOTICE) 생성**은 아직 자동화되어 있지 않습니다 — 현재 `legal/THIRD_PARTY_NOTICES.md` 커버리지는 동결된 SwiftPM 스냅샷뿐입니다. 라이선스 *검사*는 위 표대로 cargo·npm 전 스택을 덮습니다(`--profile license`).

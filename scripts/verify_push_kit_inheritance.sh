@@ -16,6 +16,12 @@
 # 킷이 은퇴하면(ADR-0137 D8) 원본이 사라진다. 그때는 **SKIP** 으로 떨어지되
 # 조용히 지나가지 않고 그 사실을 출력한다 — 게이트가 무의미해진 것과 게이트가
 # 통과한 것은 다른 사건이다.
+#
+# 2026-08-10 (W-S1 / #1215): 그 날이 왔다. `clients/iOS` 가 삭제되면서 두 비교
+# 모두 원본이 없다. 이 스크립트는 **exit 0 을 유지**하되(폰 스위트
+# `clients/mobile/__tests__/pushContract.test.ts` 가 이걸 spawn 한다) 전부
+# SKIP 인 실행에서는 "일치한다"고 말하지 않는다. 남은 일은 복사본 헤더 정리이며
+# 그건 `clients/mobile/**` 소관이라 이 배치가 건드리지 않았다(적립).
 # =============================================================================
 set -euo pipefail
 
@@ -28,6 +34,8 @@ log() { echo "[push-inherit] $*"; }
 SENTINEL='===== SENTINEL: INHERITED BYTES BEGIN ====='
 
 FAILURES=0
+SKIPPED=0
+COMPARED=0
 fail() { FAILURES=$((FAILURES + 1)); log "FAIL: $*"; }
 
 # 복사본에서 provenance 헤더를 떼어 낸 나머지(= 승계 바이트)를 낸다.
@@ -47,6 +55,7 @@ compare() {
   local label="$1" copy="$2" origin="$3" strip_import="$4"
 
   if [ ! -f "$origin" ]; then
+    SKIPPED=$((SKIPPED + 1))
     log "SKIP: $label — 원본이 없다($origin). 동결 킷이 은퇴했다면 이 게이트와 복사본 헤더를 함께 정리해라"
     return 0
   fi
@@ -73,6 +82,7 @@ compare() {
           원본을 고쳤다면 복사본에 그대로 반영해라. 아래가 차이다:"
     diff <(printf '%s\n' "$b") <(printf '%s\n' "$a") | head -40 || true
   else
+    COMPARED=$((COMPARED + 1))
     log "OK: $label ($(printf '%s\n' "$a" | wc -l | tr -d ' ') 줄 일치)"
   fi
 }
@@ -92,4 +102,12 @@ if [ "$FAILURES" -ne 0 ]; then
   exit 1
 fi
 
-log 'PASS: 승계 소스가 동결 킷과 바이트 단위로 일치한다'
+if [ "$COMPARED" -eq 0 ]; then
+  # 아무것도 대조하지 않은 실행에서 PASS 라고 적으면, 게이트가 죽은 것과 게이트가
+  # 통과한 것이 같은 문장이 된다. 그 구별이 이 스크립트의 존재 이유다.
+  log "VACUOUS: 대조 0건 / SKIP $SKIPPED 건 — 동결 원본이 레포에 없다(ADR-0137 D8 은퇴)."
+  log '          이 게이트는 더 이상 드리프트를 막지 않는다. 복사본 헤더 정리와 함께 폐기 판정을 받아라.'
+  exit 0
+fi
+
+log "PASS: 승계 소스가 동결 킷과 바이트 단위로 일치한다(대조 $COMPARED / SKIP $SKIPPED)"

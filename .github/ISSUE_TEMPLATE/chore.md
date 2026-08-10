@@ -9,7 +9,7 @@ labels: ["type:chore", "status:ready", "agent:codex-ok"]
 > 문서 위주면 `type:docs`로, CI면 `area:ci`로 라벨을 보정한다. Acceptance에 검증 등급(`[ci]=syntax/lint, [infra]=파일 존재+정합, [manual]=사람 1회` 등)을 명시.
 
 ## Goal
-<!-- 한 문장. 예: .github/workflows/ci-build.yml 의 xcode-apps 잡 주석 해제 + actionlint 통과. -->
+<!-- 한 문장. 예: .github/workflows/pr-ci.yml 의 node 레인에 lint 단계 추가 + actionlint 통과. -->
 
 ## Context
 <!-- 근거 경로/링크. 예: docs/cicd/04-codex-tickets.md CI2 티켓, ROADMAP MOMO-050. -->
@@ -20,7 +20,7 @@ labels: ["type:chore", "status:ready", "agent:codex-ok"]
 ## Acceptance (검증 등급 + 체크박스)
 - [ ] [ci]/[infra]/[manual] <검증 명령 또는 산출 파일>
 - [ ] 기존 빌드/워크플로우 안 깨짐 (`make build` green 유지)
-- [ ] (release 관련이면) 🔒 게이트(M7) PASS 전 `release-*.yml` 미트리거 불변식 준수
+- [ ] (release 관련이면) 🔒 게이트(M7) PASS 전 `release-desktop.yml` 미트리거 불변식 준수
 - [ ] STATUS.md / 관련 docs 갱신
 
 ## Depends on

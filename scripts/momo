@@ -4,7 +4,6 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
-APP_SCRIPT="$REPO_ROOT/scripts/macos_dev_run.sh"
 ALPHA_SCRIPT="$REPO_ROOT/scripts/local_alpha_runner.sh"
 
 BASE_URL="${MOMO_BASE_URL:-http://127.0.0.1:28180}"
@@ -13,7 +12,6 @@ POSTGRES_PORT="${MOMO_POSTGRES_PORT:-28132}"
 CENT_PORT="${MOMO_CENT_PORT:-28100}"
 HERMES_PORT="${MOMO_HERMES_PORT:-28188}"
 HERMES_MODE="${MOMO_HERMES_MODE:-mock}"
-APP_WAIT="${MOMO_APP_WAIT:-20}"
 LOGIN_EMAIL="${MOMO_LOGIN_EMAIL:-demo@momo.local}"
 LOGIN_PASSWORD="${MOMO_LOGIN_PASSWORD:-dev-password}"
 LOGIN_SMOKE_ALLOW_NON_LOOPBACK="${MOMO_LOGIN_SMOKE_ALLOW_NON_LOOPBACK:-0}"
@@ -26,10 +24,9 @@ usage() {
 Usage: scripts/momo <command>
 
 Commands:
-  start       Start local alpha if needed, then open the macOS app.
+  start       Start the local alpha stack (alias of `up`).
   up          Start local alpha only.
-  app         Open the macOS app only.
-  status      Show app/server/Docker status.
+  status      Show server/Docker status.
   hermes      Show local Hermes provider setup status and next steps.
   hermes-init Create ~/.momo/local-hermes-provider.env from the safe template.
   hermes-smoke Run the credentialed Hermes provider smoke wrapper.
@@ -45,8 +42,7 @@ Commands:
               Copy a target-compatible momo-workd and install its user service.
   cleanup-seeded-agents
               Retire historical dogfood seed agents; requires explicit --yes.
-  stop        Stop the app and the local alpha stack when it can be identified.
-  stop-app    Stop the macOS app only.
+  stop        Stop the local alpha stack when it can be identified.
   stop-stack  Stop the local alpha stack only.
   help        Show this help.
 
@@ -166,17 +162,6 @@ print_health() {
   return 1
 }
 
-activate_app() {
-  osascript -e 'tell application "MomoMacDevApp" to activate' >/dev/null 2>&1 || true
-}
-
-launch_app() {
-  info "opening MomoMacDevApp"
-  DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}" \
-    "$APP_SCRIPT" --launch --verify --wait "$APP_WAIT"
-  activate_app
-}
-
 latest_stop_script() {
   find "$ALPHA_EVIDENCE_ROOT" -name stop-local-alpha.sh -type f -print 2>/dev/null | sort | tail -n 1
 }
@@ -279,11 +264,6 @@ start_stack() {
   fi
 }
 
-stop_app() {
-  info "stopping MomoMacDevApp"
-  "$APP_SCRIPT" --terminate-only
-}
-
 stop_with_script() {
   local stop_script="$1"
   if [ -n "$stop_script" ] && [ -x "$stop_script" ]; then
@@ -356,18 +336,11 @@ stop_stack() {
   fi
 
   if [ "$stopped" = "0" ]; then
-    warn "no local alpha stack was identified. App stop still completed."
+    warn "no local alpha stack was identified."
   fi
 }
 
 show_status() {
-  info "app"
-  if pgrep -x MomoMacDevApp >/dev/null 2>&1; then
-    pgrep -fl MomoMacDevApp || true
-  else
-    echo "  not running"
-  fi
-
   info "server"
   if print_health; then
     if ! login_smoke_allowed; then
@@ -957,15 +930,8 @@ host_command() {
 
 command="${1:-help}"
 case "$command" in
-  start)
+  start|up)
     start_stack
-    launch_app
-    ;;
-  up)
-    start_stack
-    ;;
-  app)
-    launch_app
     ;;
   status)
     show_status
@@ -1005,11 +971,7 @@ case "$command" in
     "$REPO_ROOT/scripts/cleanup_dogfood_seed_agents.sh" "$@"
     ;;
   stop)
-    stop_app
     stop_stack
-    ;;
-  stop-app)
-    stop_app
     ;;
   stop-stack)
     stop_stack

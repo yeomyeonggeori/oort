@@ -39,8 +39,8 @@ Modes:
 
   execute | --execute
       Start Docker PG18+Centrifugo, run migrations/RLS prep, start optional
-      mock Hermes, start MomoServer/OutboxRelay/AgentWorker, run macOS smoke,
-      and write evidence/logs.
+      mock Hermes, start MomoServer/OutboxRelay/AgentWorker, and write
+      evidence/logs.
 
 Options:
   --hermes mock|external
@@ -462,28 +462,13 @@ write_summary() {
     if [ "$HERMES_MODE" = "mock" ]; then
       echo "- mock Hermes: $LOG_DIR/mock-hermes.log"
     fi
-    echo "- macOS smoke: $LOG_DIR/macos-smoke.log"
     echo
-    echo "## macOS Dev Launch"
+    echo "## Client"
     echo
-    echo "For the default fixed-port dogfood launcher:"
-    echo
-    echo '```sh'
-    echo "scripts/momo start"
-    echo '```'
-    echo
-    echo "For this exact runner stack and ports:"
-    echo
-    echo '```sh'
-    echo "MOMO_SERVER_BASE_URL=http://127.0.0.1:${PORT} \\"
-    echo "MOMO_CENTRIFUGO_WS_URL=ws://127.0.0.1:${CENT_PORT}/connection/websocket \\"
-    echo "MOMO_LOGIN_EMAIL=demo@momo.local \\"
-    echo "MOMO_LOGIN_PASSWORD=dev-password \\"
-    echo "MACOS_DEV_RUN_DIRECT_EXEC=1 \\"
-    echo "  scripts/macos_dev_run.sh --launch --verify --wait 20"
-    echo '```'
-    echo
-    echo "> The runner itself keeps the GUI launch out of the default smoke path. Use the commands above when you want the foreground MomoMacDevApp."
+    echo "This runner starts the backend only. The product surfaces are the web"
+    echo "client (clients/web), the Tauri desktop shell (clients/desktop) and the"
+    echo "React Native app (clients/mobile) — the SwiftUI macOS app this section"
+    echo "used to launch was deleted with the Swift client trees (#1215)."
     echo
     echo "## Stop"
     echo
@@ -530,8 +515,7 @@ print_plan() {
   else
     echo "  6. mock Hermes locally or verify external Hermes env"
   fi
-  echo "  7. swift run --package-path clients/macOS MomoMacSmoke"
-  echo "  8. evidence summary with app launch commands, URLs, redacted env, logs, and stop command"
+  echo "  7. evidence summary with URLs, redacted env, logs, and stop command"
 }
 
 while [ "$#" -gt 0 ]; do
@@ -745,8 +729,6 @@ assert_pid_alive "$SERVER_PID" server "$LOG_DIR/server.log"
 assert_pid_alive "$RELAY_PID" relay "$LOG_DIR/relay.log"
 assert_pid_alive "$WORKER_PID" worker "$LOG_DIR/worker.log"
 
-run_cmd macos-smoke swift run --package-path clients/macOS MomoMacSmoke
-
 write_summary
 
 echo
@@ -758,8 +740,6 @@ if [ "$HERMES_MODE" = "mock" ]; then
 else
   echo "[local-alpha] external Hermes: $(redact_url "$HERMES_BASE_URL")"
 fi
-echo "[local-alpha] macOS dev launch: swift run --package-path clients/macOS MomoMacSmoke"
-echo "[local-alpha] foreground app: scripts/momo start, or use SUMMARY for this stack's exact env"
 echo "[local-alpha] evidence summary: $SUMMARY"
 echo "[local-alpha] logs: $LOG_DIR"
 echo "[local-alpha] stop: $STOP_SCRIPT"

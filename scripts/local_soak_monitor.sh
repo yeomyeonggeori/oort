@@ -7,9 +7,6 @@ INTERVAL_SECONDS="${LOCAL_SOAK_INTERVAL_SECONDS:-300}"
 MAX_SAMPLES="${LOCAL_SOAK_SAMPLES:-0}"
 OUT_PARENT="${LOCAL_SOAK_EVIDENCE_DIR:-${TMPDIR:-/tmp}/momo-local-soak}"
 ENV_FILE="${ENV_FILE:-}"
-MACOS_EVIDENCE=""
-LAUNCH_MACOS_SMOKE=0
-REQUIRE_MACOS_EVIDENCE=0
 COMPOSE_FILE="${LOCAL_SOAK_COMPOSE_FILE:-infra/docker-compose.yml}"
 
 OUTBOX_WARN_COUNT="${LOCAL_SOAK_OUTBOX_WARN_COUNT:-10}"
@@ -34,9 +31,6 @@ Options:
   --evidence-dir DIR       Parent directory outside the repo. Default: $TMPDIR/momo-local-soak.
   --env-file FILE          Env file to source. Default: .env.worktree, .env, then infra/.env.example.
   --compose-file FILE      Compose file for compose ps fallback. Default: infra/docker-compose.yml.
-  --macos-evidence PATH    Existing macOS launch/smoke evidence file or directory to link in summary.
-  --launch-macos-smoke     Run scripts/macos_dev_run.sh --verify --logs once before snapshots.
-  --require-macos-evidence Treat missing macOS app process/evidence as FAIL instead of WARN.
   --smoke                  One snapshot, no sleep. Does not require a 72h run.
   -h, --help               Show this help.
 
@@ -81,18 +75,6 @@ while [ "$#" -gt 0 ]; do
     --compose-file)
       COMPOSE_FILE="${2:-}"
       shift 2
-      ;;
-    --macos-evidence)
-      MACOS_EVIDENCE="${2:-}"
-      shift 2
-      ;;
-    --launch-macos-smoke)
-      LAUNCH_MACOS_SMOKE=1
-      shift
-      ;;
-    --require-macos-evidence)
-      REQUIRE_MACOS_EVIDENCE=1
-      shift
       ;;
     --smoke)
       DURATION_HOURS=0
@@ -405,7 +387,7 @@ check_docker() {
 check_processes() {
   local snap_dir="$1"
   local process_file="$snap_dir/momo-processes.txt"
-  run_capture "$process_file" "ps ax -o pid,ppid,stat,etime,command | grep -E 'MomoServer|OutboxRelay|AgentWorker|MomoMacDevApp|MomoMacSmoke|mock_hermes' | grep -v grep || true" || true
+  run_capture "$process_file" "ps ax -o pid,ppid,stat,etime,command | grep -E 'MomoServer|OutboxRelay|AgentWorker|mock_hermes' | grep -v grep || true" || true
 
   if grep -E "OutboxRelay" "$process_file" >/dev/null 2>&1 || docker ps --format '{{.Names}}' 2>/dev/null | grep -Ei 'relay|outbox' >/dev/null 2>&1; then
     record_event "PASS" "relay" "OutboxRelay process/container observed"
@@ -419,15 +401,10 @@ check_processes() {
     record_event "WARN" "worker" "AgentWorker process/container not observed"
   fi
 
-  if grep -E "MomoMacDevApp|MomoMacSmoke" "$process_file" >/dev/null 2>&1; then
-    record_event "PASS" "macos-app" "MomoMac process observed"
-  elif [ -n "$MACOS_EVIDENCE" ] && [ -e "$MACOS_EVIDENCE" ]; then
-    record_event "PASS" "macos-app" "macOS launch/smoke evidence exists at $MACOS_EVIDENCE"
-  elif [ "$REQUIRE_MACOS_EVIDENCE" -eq 1 ]; then
-    record_event "FAIL" "macos-app" "no MomoMac process or macOS evidence observed"
-  else
-    record_event "WARN" "macos-app" "no MomoMac process or macOS evidence observed"
-  fi
+  # W-S1(#1215): 여기 있던 `macos-app` 관측(MomoMacDevApp/MomoMacSmoke 프로세스,
+  # --launch-macos-smoke, --require-macos-evidence)은 SwiftUI 클라 트리 삭제와 함께
+  # 제거됐다. 클라이언트 표면의 소크 증거는 이제 웹/데스크톱/RN 쪽 몫이며, 이
+  # 모니터는 백엔드(서버·릴레이·워커·outbox·Docker·디스크)만 잰다.
 }
 
 check_disk() {
@@ -469,21 +446,6 @@ write_snapshot_index() {
   } >"$md"
 }
 
-run_macos_smoke_once() {
-  local smoke_dir="$RUN_DIR/macos-smoke"
-  mkdir -p "$smoke_dir"
-  if [ ! -x scripts/macos_dev_run.sh ]; then
-    record_event "FAIL" "macos-app" "scripts/macos_dev_run.sh is missing or not executable"
-    return 0
-  fi
-  if run_capture "$smoke_dir/macos-dev-run.log" "scripts/macos_dev_run.sh --verify --logs"; then
-    MACOS_EVIDENCE="$smoke_dir/macos-dev-run.log"
-    record_event "PASS" "macos-app" "macOS launch smoke completed"
-  else
-    record_event "FAIL" "macos-app" "macOS launch smoke failed"
-  fi
-}
-
 write_summary() {
   local summary="$RUN_DIR/summary.md"
   local fail_count warn_count pass_count result finish_time
@@ -519,7 +481,7 @@ write_summary() {
     echo "### PASS/WARN/FAIL Criteria"
     echo "- PASS: every required health/resource check responds and no operational warning is recorded."
     echo "- WARN: no required check failed, but at least one P1 signal was observed, such as relay/worker/app not observed, outbox backlog crossing warn thresholds, or low free disk."
-    echo "- FAIL: any P0 signal was observed, such as API/Centrifugo/DB unavailable, Docker unavailable/unhealthy, outbox backlog crossing fail thresholds, required macOS evidence missing, or critically low free disk."
+    echo "- FAIL: any P0 signal was observed, such as API/Centrifugo/DB unavailable, Docker unavailable/unhealthy, outbox backlog crossing fail thresholds, or critically low free disk."
     echo
     echo "### P0/P1 Detection Thresholds"
     echo "- P0: API \`/health\`, Centrifugo \`/health\`, or DB connectivity fails in a snapshot."
@@ -527,7 +489,7 @@ write_summary() {
     echo "- P0: pending outbox rows >= \`$OUTBOX_FAIL_COUNT\` or oldest pending outbox age >= \`${OUTBOX_FAIL_AGE_SECONDS}s\`."
     echo "- P0: free disk at the evidence directory drops below \`${DISK_FAIL_FREE_GB}GB\`."
     echo "- P1: pending outbox rows >= \`$OUTBOX_WARN_COUNT\` or oldest pending outbox age >= \`${OUTBOX_WARN_AGE_SECONDS}s\`."
-    echo "- P1: relay, worker, or MomoMac app process/evidence is not observed while the soak is running."
+    echo "- P1: relay or worker process/container is not observed while the soak is running."
     echo "- P1: free disk at the evidence directory drops below \`${DISK_WARN_FREE_GB}GB\`."
     echo
     echo "### Events"
@@ -541,11 +503,6 @@ write_summary() {
     find "$RUN_DIR/snapshots" -maxdepth 2 -type f 2>/dev/null | sort | sed "s#^$RUN_DIR/##" | while IFS= read -r file; do
       echo "- \`$file\`"
     done
-    if [ -n "$MACOS_EVIDENCE" ]; then
-      echo
-      echo "### macOS Evidence"
-      echo "- \`$MACOS_EVIDENCE\`"
-    fi
   } >"$summary"
 }
 
@@ -604,10 +561,6 @@ EVENTS_FILE="$RUN_DIR/events.tsv"
   echo "interval_seconds: $INTERVAL_SECONDS"
   echo "sample_cap: $MAX_SAMPLES"
 } | tee "$RUN_DIR/monitor.log"
-
-if [ "$LAUNCH_MACOS_SMOKE" -eq 1 ]; then
-  run_macos_smoke_once
-fi
 
 start_epoch="$(date -u +%s)"
 duration_seconds=$((DURATION_HOURS * 3600))

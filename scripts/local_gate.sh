@@ -11,7 +11,7 @@ OUT_DIR="${LOCAL_GATE_OUT_DIR:-${TMPDIR:-/tmp}/momo-local-gate}"
 
 usage() {
   cat <<'EOF'
-Usage: scripts/local_gate.sh [--auto] [--profile docs|swift|diagnostics|staging-smoke|host-runtime|backup|local-alpha|internal-alpha|runtime-db|runtime-relay|runtime-live|runtime-agent|external-agent-provider|macos-ui|ios|m3-dbc|web-serving|web|license|secrets|all]
+Usage: scripts/local_gate.sh [--auto] [--profile docs|swift|diagnostics|staging-smoke|host-runtime|backup|local-alpha|internal-alpha|runtime-db|runtime-relay|runtime-live|runtime-agent|external-agent-provider|m3-dbc|web-serving|web|license|secrets|all]
 
 Options:
   --auto              Pick the profile from changed paths (MOMO-316):
@@ -28,7 +28,6 @@ Options:
 
 Environment:
   LOCAL_GATE_OUT_DIR      Override evidence output directory.
-  LOCAL_GATE_LAUNCH_UI=1  In macos-ui/local-alpha/all, launch MomoMacDevApp instead of smoke only.
                           Required by internal-alpha.
   LOCAL_GATE_ALLOW_DIRTY=1 Allow pre-commit exploratory runs with dirty files.
   LOCAL_GATE_BASE_REF      Defaults to origin/main for committed PR diff checks and
@@ -64,7 +63,7 @@ while [ "$#" -gt 0 ]; do
       usage
       exit 0
       ;;
-    docs|swift|diagnostics|staging-smoke|host-runtime|backup|local-alpha|internal-alpha|runtime-db|runtime-relay|runtime-live|runtime-agent|external-agent-provider|macos-ui|ios|m3-dbc|web-serving|web|license|secrets|all)
+    docs|swift|diagnostics|staging-smoke|host-runtime|backup|local-alpha|internal-alpha|runtime-db|runtime-relay|runtime-live|runtime-agent|external-agent-provider|m3-dbc|web-serving|web|license|secrets|all)
       PROFILE="$1"
       PROFILE_EXPLICIT=1
       shift
@@ -83,7 +82,7 @@ fi
 
 if [ "$PROFILE_EXPLICIT" -eq 1 ]; then
   case "$PROFILE" in
-    docs|swift|diagnostics|staging-smoke|host-runtime|backup|local-alpha|internal-alpha|runtime-db|runtime-relay|runtime-live|runtime-agent|external-agent-provider|macos-ui|ios|m3-dbc|web-serving|web|license|secrets|all) ;;
+    docs|swift|diagnostics|staging-smoke|host-runtime|backup|local-alpha|internal-alpha|runtime-db|runtime-relay|runtime-live|runtime-agent|external-agent-provider|m3-dbc|web-serving|web|license|secrets|all) ;;
     *)
       echo "unknown profile: $PROFILE" >&2
       usage >&2
@@ -125,8 +124,6 @@ local_gate_load_1m() {
 AUTO_SUGGESTED=""
 AUTO_BASE_DESC=""
 declare -a AUTO_REASONS=()
-AUTO_NEED_MACOS=0
-AUTO_NEED_IOS=0
 AUTO_NEED_DB=0
 AUTO_NEED_RELAY=0
 AUTO_NEED_AGENT=0
@@ -144,8 +141,6 @@ auto_classify_script() {
   case "$1" in
     scripts/migrate.sh|scripts/verify_runtime_role_bootstrap.sh|scripts/verify_prod_seed_password.sh|scripts/verify_owner_bootstrap.sh|scripts/verify_rls.sh|scripts/verify_prod_rls_posture.sh|scripts/verify_roster.sh|scripts/verify_channel_list.sh|scripts/verify_channel_management.sh|scripts/verify_join.sh|scripts/verify_platform_admin.sh|scripts/verify_approval_decision.sh|scripts/verify_auth_hardening.sh|scripts/verify_push_registration.sh|scripts/verify_push_notifier.sh|scripts/verify_notification_mute.sh|scripts/verify_plugin_registry.sh|scripts/verify_signed_webhook_ingress.sh|scripts/verify_drive_mcp.sh|scripts/verify_attachment_upload.sh|scripts/verify_plugin_grant_roundtrip.sh|scripts/verify_huddle_lifecycle.sh|scripts/verify_workspace_search.sh|scripts/verify_thread_reply.sh|scripts/verify_message_interaction.sh|scripts/verify_work_session.sh|scripts/verify_work_session_idle.sh|scripts/verify_work_control.sh|scripts/verify_work_agent_e2e.sh|scripts/verify_work_host.sh|scripts/verify_workd.sh|scripts/verify_workd_attach.sh|scripts/terminal_attach_probe.py|scripts/terminal_attach_tls_proxy.py|scripts/verify_work_pool.sh|scripts/verify_tier_fallback.sh|scripts/verify_t3_migration_repair.sh|scripts/verify_t3_lifecycle_concurrency.sh|scripts/verify_t3_convergence.sh|scripts/verify_work_tool_profile.sh|scripts/verify_agent_create.sh|scripts/verify_agent_card_onboarding.sh|scripts/verify_agent_profile.sh|scripts/verify_agent_run_history.sh|scripts/verify_agent_interaction_safety.sh|scripts/verify_memory_grant.sh|scripts/verify_membership_lifecycle.sh|scripts/verify_lifecycle_completion.sh|scripts/verify_t3_provider_continuity.sh|scripts/verify_workstream_continuity.sh|scripts/mock_push_relay.py)
       AUTO_NEED_DB=1; AUTO_REASONS+=("$1 -> runtime-db") ;;
-    scripts/check_spm_licenses.sh|scripts/tests/test_spm_license_gate.sh|scripts/spm_license_exceptions.tsv)
-      AUTO_REASONS+=("$1 -> swift (SwiftPM supply-chain gate)") ;;
     scripts/check_cargo_licenses.sh|scripts/check_npm_licenses.mjs|scripts/tests/test_license_gate.sh)
       AUTO_NEED_LICENSE=1; AUTO_REASONS+=("$1 -> license (#1225 cargo/npm dependency license gate)") ;;
     scripts/check_secrets.sh|scripts/tests/test_secrets_gate.sh)
@@ -162,10 +157,6 @@ auto_classify_script() {
       AUTO_NEED_STAGING=1; AUTO_REASONS+=("$1 -> staging-smoke") ;;
     scripts/verify_internal_host_runtime.sh|scripts/verify_backup_restore_rehearsal.sh)
       AUTO_NEED_HOSTRT=1; AUTO_REASONS+=("$1 -> host-runtime") ;;
-    scripts/verify_ios_build.sh)
-      AUTO_NEED_IOS=1; AUTO_REASONS+=("$1 -> ios") ;;
-    scripts/verify_macos_real_backend_ui_bootstrap.sh|scripts/verify_macos_real_backend_ui.sh|scripts/macos_dev_run.sh)
-      AUTO_NEED_MACOS=1; AUTO_REASONS+=("$1 -> macos-ui") ;;
     scripts/web_serving_smoke.sh|scripts/verify_web_login_smoke.sh|scripts/verify_web_generated_types.sh)
       AUTO_NEED_WEB=1; AUTO_REASONS+=("$1 -> web") ;;
     scripts/verify_openapi_contract.sh|scripts/openapi_shape_check.py)
@@ -209,10 +200,11 @@ auto_classify_path() {
       AUTO_NEED_ALL=1; AUTO_REASONS+=("$1 -> all (ADR-0133 stack has no gate profile yet; widen, do not narrow)") ;;
     docs/*|research/*|legal/*|*.md)
       AUTO_REASONS+=("$1 -> docs") ;;
-    clients/iOS/*)
-      AUTO_NEED_IOS=1; AUTO_REASONS+=("$1 -> ios") ;;
     clients/*)
-      AUTO_NEED_MACOS=1; AUTO_REASONS+=("$1 -> swift+macos-ui") ;;
+      # W-S1: clients/macOS·clients/iOS·clients/Core 는 삭제됐다. 남은
+      # clients/* 는 위에서 이미 잡히므로(web-legacy / web / desktop), 여기까지
+      # 내려오는 것은 새로 생겼거나 분류가 없는 트리다 — 좁히지 않고 넓힌다.
+      AUTO_NEED_ALL=1; AUTO_REASONS+=("$1 -> all (unclassified clients/ tree; widen, do not narrow)") ;;
     server/Migrations/*)
       AUTO_NEED_DB=1; AUTO_REASONS+=("$1 -> runtime-db") ;;
     server/*)
@@ -294,7 +286,7 @@ auto_select_profile() {
   done
   set +f
 
-  local units=$((AUTO_NEED_MACOS + AUTO_NEED_IOS + AUTO_NEED_DB + AUTO_NEED_RELAY + AUTO_NEED_AGENT + AUTO_NEED_LIVE + AUTO_NEED_STAGING + AUTO_NEED_HOSTRT + AUTO_NEED_DIAG + AUTO_NEED_WEB + AUTO_NEED_LICENSE + AUTO_NEED_SECRETS))
+  local units=$((AUTO_NEED_DB + AUTO_NEED_RELAY + AUTO_NEED_AGENT + AUTO_NEED_LIVE + AUTO_NEED_STAGING + AUTO_NEED_HOSTRT + AUTO_NEED_DIAG + AUTO_NEED_WEB + AUTO_NEED_LICENSE + AUTO_NEED_SECRETS))
   if [ "$AUTO_NEED_ALL" -eq 1 ] || [ "$units" -gt 1 ]; then
     AUTO_SUGGESTED="all"
     if [ "$AUTO_NEED_LIVE" -eq 1 ]; then
@@ -306,10 +298,6 @@ auto_select_profile() {
     if [ "$AUTO_NEED_WEB" -eq 1 ]; then
       AUTO_REASONS+=("note: profile 'all' does not include the web profile; run --profile web separately")
     fi
-  elif [ "$AUTO_NEED_MACOS" -eq 1 ]; then
-    AUTO_SUGGESTED="macos-ui"
-  elif [ "$AUTO_NEED_IOS" -eq 1 ]; then
-    AUTO_SUGGESTED="ios"
   elif [ "$AUTO_NEED_DB" -eq 1 ]; then
     AUTO_SUGGESTED="runtime-db"
   elif [ "$AUTO_NEED_RELAY" -eq 1 ]; then
@@ -349,7 +337,7 @@ if [ "$AUTO_MODE" -eq 1 ]; then
 fi
 
 case "$PROFILE" in
-  docs|swift|diagnostics|staging-smoke|host-runtime|backup|local-alpha|internal-alpha|runtime-db|runtime-relay|runtime-live|runtime-agent|external-agent-provider|macos-ui|ios|m3-dbc|web-serving|web|license|secrets|all) ;;
+  docs|swift|diagnostics|staging-smoke|host-runtime|backup|local-alpha|internal-alpha|runtime-db|runtime-relay|runtime-live|runtime-agent|external-agent-provider|m3-dbc|web-serving|web|license|secrets|all) ;;
   *)
     echo "unknown profile: $PROFILE" >&2
     usage >&2
@@ -360,8 +348,8 @@ esac
 RUNTIME_COMPOSE_PROFILE=0
 RUNTIME_COMPOSE_PREEXISTING=0
 case "$PROFILE" in
-  runtime-db|runtime-relay|runtime-live|runtime-agent|macos-ui|all|m3-dbc|web-serving)
-    # macos-ui/all/m3-dbc included: they run the same `make up` bootstrap and
+  runtime-db|runtime-relay|runtime-live|runtime-agent|all|m3-dbc|web-serving)
+    # all/m3-dbc included: they run the same `make up` bootstrap and
     # are Docker-heavy — the incident class this guard exists for.
     RUNTIME_COMPOSE_PROFILE=1
     ;;
@@ -418,7 +406,7 @@ export LOCAL_GATE_INTERNAL_ALPHA_DIR="$RUN_ARTIFACT_DIR/internal-alpha-${RUN_ID}
 export MOMO_RUNTIME_GUARD_REPO_ROOT="$REPO_ROOT"
 RUNTIME_COMPOSE_STARTED=0
 case "$PROFILE" in
-  local-alpha|internal-alpha|runtime-db|runtime-relay|runtime-live|runtime-agent|external-agent-provider|macos-ui|m3-dbc|all)
+  local-alpha|internal-alpha|runtime-db|runtime-relay|runtime-live|runtime-agent|external-agent-provider|m3-dbc|all)
     # shellcheck source=scripts/runtime_process_guard.sh
     . "$REPO_ROOT/scripts/runtime_process_guard.sh"
     if ! momo_guard_begin_gate_run "$RUN_ID" >/dev/null; then
@@ -530,7 +518,7 @@ add_static_commands() {
   add_note_once coverage "#1229 self-host quickstart drift contract: docs/SELF_HOST.md and scripts/self_host_env.sh must keep naming the same three compose files and the generated env path (a renamed overlay fails the gate instead of failing a self-hoster), infra/rust/Caddyfile.local must keep a port-only site address so a local run cannot order a certificate for the live domain at boot (#1239), and local.override.yml must never mount the production Caddyfile."
   add_cmd_once "pgvector image and migration drift contract" "scripts/verify_pgvector_contract.sh"
   add_cmd_once "eve compose profile drift contract" "scripts/verify_eve_profile.sh --config-only"
-  add_cmd_once "shell syntax" 'for f in .conductor/setup.sh adapters/prime/run.sh adapters/prime/container/entrypoint.sh adapters/prime/tests/tenancy_probe.sh scripts/momo scripts/local_gate.sh scripts/planning_context.sh scripts/self_host_env.sh scripts/runtime_process_guard.sh scripts/ensure_runtime_env.sh scripts/check_branch_skew.sh scripts/check_migration_numbers.sh scripts/check_spm_licenses.sh scripts/check_cargo_licenses.sh scripts/check_secrets.sh scripts/write_sha256_manifest.sh scripts/install_branch_skew_hook.sh scripts/hooks/pre-push scripts/tests/test_spm_license_gate.sh scripts/tests/test_license_gate.sh scripts/tests/test_secrets_gate.sh scripts/tests/test_local_gate_hardening.sh scripts/tests/test_local_gate_drift_guard.sh scripts/tests/test_make_deploy_bundle.sh scripts/cleanup_dogfood_seed_agents.sh scripts/local_soak_monitor.sh scripts/collect_diagnostics.sh scripts/compose_janitor.sh scripts/macos_dev_run.sh scripts/local_alpha_runner.sh scripts/make_deploy_bundle.sh scripts/goal_claim.sh scripts/goal_status.sh scripts/goal_release.sh scripts/github_bootstrap.sh scripts/github/bootstrap.sh scripts/migrate.sh scripts/prod_env_preflight.sh scripts/aws_internal_alpha_preflight.sh scripts/verify_prod_install_upgrade.sh scripts/verify_multibinary_image.sh scripts/verify_momo_ops.sh scripts/verify_momo_ops_runtime.sh scripts/verify_prod_rls_posture.sh scripts/verify_owner_bootstrap.sh scripts/verify_owner_bootstrap_rust.sh scripts/verify_design_preflight.sh scripts/design_preflight_web.sh scripts/verify_pgvector_contract.sh scripts/verify_eve_profile.sh scripts/verify_runtime_role_bootstrap.sh scripts/verify_prod_seed_password.sh scripts/verify_rls.sh scripts/verify_roster.sh scripts/verify_channel_list.sh scripts/verify_channel_management.sh scripts/verify_join.sh scripts/verify_platform_admin.sh scripts/verify_approval_decision.sh scripts/verify_auth_hardening.sh scripts/verify_push_registration.sh scripts/verify_push_notifier.sh scripts/verify_notification_mute.sh scripts/verify_linkshort.sh scripts/push_relay_keygen.sh scripts/verify_push_relay.sh scripts/verify_plugin_registry.sh scripts/verify_signed_webhook_ingress.sh scripts/verify_drive_mcp.sh scripts/verify_attachment_upload.sh scripts/verify_plugin_grant_roundtrip.sh scripts/verify_huddle_lifecycle.sh scripts/verify_workspace_search.sh scripts/verify_thread_reply.sh scripts/verify_work_session.sh scripts/verify_work_control.sh scripts/verify_work_agent_e2e.sh scripts/verify_workd.sh scripts/verify_workd_attach.sh scripts/verify_work_pool.sh scripts/verify_tier_fallback.sh scripts/verify_t3_migration_repair.sh scripts/verify_t3_provider_continuity.sh scripts/verify_t3_convergence.sh scripts/verify_membership_lifecycle.sh scripts/verify_lifecycle_completion.sh scripts/verify_memory_search.sh scripts/verify_context_packet.sh scripts/verify_memory_grant.sh scripts/verify_agent_card_onboarding.sh scripts/verify_agent_profile.sh scripts/verify_openapi_contract.sh scripts/verify_openapi_contract_rust.sh scripts/openapi_spec_to_json.sh scripts/verify_relay.sh scripts/verify_realtime_live.sh scripts/verify_agent_worker_bootstrap.sh scripts/verify_agent_worker.sh scripts/verify_agent_path_equivalence.sh scripts/verify_agent_context_bootstrap.sh scripts/verify_agent_context.sh scripts/verify_agent_live_channel_bootstrap.sh scripts/verify_agent_live_channel.sh scripts/verify_hermes_verifier_bootstrap.sh scripts/verify_external_agent_provider.sh scripts/verify_local_hermes_bridge.sh scripts/verify_hermes_gateway_adapter.sh scripts/verify_hermes_gateway_real_smoke.sh scripts/verify_local_hermes_credentialed_smoke.sh scripts/verify_staging_smoke.sh scripts/verify_internal_hosting_smoke.sh scripts/web_serving_smoke.sh scripts/verify_web_serving.sh scripts/verify_web_login_smoke.sh scripts/verify_web_generated_types.sh scripts/verify_internal_host_runtime.sh scripts/verify_backup_restore_rehearsal.sh scripts/verify_macos_real_backend_ui_bootstrap.sh scripts/verify_macos_real_backend_ui.sh infra/prod/install.sh infra/prod/upgrade.sh infra/prod/momo-ops.sh infra/prod/deploy-lib.sh infra/prod/docker/momo-entrypoint.sh infra/workd/bootstrap.sh infra/workd/momo-workd-run infra/eve/bootstrap_world.sh infra/eve/entrypoint.sh; do [ -e "$f" ] || { echo "missing shell script: $f"; exit 1; }; bash -n "$f"; done'
+  add_cmd_once "shell syntax" 'for f in .conductor/setup.sh adapters/prime/run.sh adapters/prime/container/entrypoint.sh adapters/prime/tests/tenancy_probe.sh scripts/momo scripts/local_gate.sh scripts/planning_context.sh scripts/self_host_env.sh scripts/runtime_process_guard.sh scripts/ensure_runtime_env.sh scripts/check_branch_skew.sh scripts/check_migration_numbers.sh scripts/check_cargo_licenses.sh scripts/check_secrets.sh scripts/write_sha256_manifest.sh scripts/install_branch_skew_hook.sh scripts/hooks/pre-push scripts/tests/test_license_gate.sh scripts/tests/test_secrets_gate.sh scripts/tests/test_local_gate_hardening.sh scripts/tests/test_local_gate_drift_guard.sh scripts/tests/test_make_deploy_bundle.sh scripts/cleanup_dogfood_seed_agents.sh scripts/local_soak_monitor.sh scripts/collect_diagnostics.sh scripts/compose_janitor.sh scripts/local_alpha_runner.sh scripts/make_deploy_bundle.sh scripts/goal_claim.sh scripts/goal_status.sh scripts/goal_release.sh scripts/github_bootstrap.sh scripts/github/bootstrap.sh scripts/migrate.sh scripts/prod_env_preflight.sh scripts/aws_internal_alpha_preflight.sh scripts/verify_prod_install_upgrade.sh scripts/verify_multibinary_image.sh scripts/verify_momo_ops.sh scripts/verify_momo_ops_runtime.sh scripts/verify_prod_rls_posture.sh scripts/verify_owner_bootstrap.sh scripts/verify_owner_bootstrap_rust.sh scripts/design_preflight_web.sh scripts/verify_pgvector_contract.sh scripts/verify_eve_profile.sh scripts/verify_runtime_role_bootstrap.sh scripts/verify_prod_seed_password.sh scripts/verify_rls.sh scripts/verify_roster.sh scripts/verify_channel_list.sh scripts/verify_channel_management.sh scripts/verify_join.sh scripts/verify_platform_admin.sh scripts/verify_approval_decision.sh scripts/verify_auth_hardening.sh scripts/verify_push_registration.sh scripts/verify_push_notifier.sh scripts/verify_notification_mute.sh scripts/verify_linkshort.sh scripts/push_relay_keygen.sh scripts/verify_push_relay.sh scripts/verify_plugin_registry.sh scripts/verify_signed_webhook_ingress.sh scripts/verify_drive_mcp.sh scripts/verify_attachment_upload.sh scripts/verify_plugin_grant_roundtrip.sh scripts/verify_huddle_lifecycle.sh scripts/verify_workspace_search.sh scripts/verify_thread_reply.sh scripts/verify_work_session.sh scripts/verify_work_control.sh scripts/verify_work_agent_e2e.sh scripts/verify_workd.sh scripts/verify_workd_attach.sh scripts/verify_work_pool.sh scripts/verify_tier_fallback.sh scripts/verify_t3_migration_repair.sh scripts/verify_t3_provider_continuity.sh scripts/verify_t3_convergence.sh scripts/verify_membership_lifecycle.sh scripts/verify_lifecycle_completion.sh scripts/verify_memory_search.sh scripts/verify_context_packet.sh scripts/verify_memory_grant.sh scripts/verify_agent_card_onboarding.sh scripts/verify_agent_profile.sh scripts/verify_openapi_contract.sh scripts/verify_openapi_contract_rust.sh scripts/openapi_spec_to_json.sh scripts/verify_relay.sh scripts/verify_realtime_live.sh scripts/verify_agent_worker_bootstrap.sh scripts/verify_agent_worker.sh scripts/verify_agent_path_equivalence.sh scripts/verify_agent_context_bootstrap.sh scripts/verify_agent_context.sh scripts/verify_agent_live_channel_bootstrap.sh scripts/verify_agent_live_channel.sh scripts/verify_hermes_verifier_bootstrap.sh scripts/verify_external_agent_provider.sh scripts/verify_local_hermes_bridge.sh scripts/verify_hermes_gateway_adapter.sh scripts/verify_hermes_gateway_real_smoke.sh scripts/verify_local_hermes_credentialed_smoke.sh scripts/verify_staging_smoke.sh scripts/verify_internal_hosting_smoke.sh scripts/web_serving_smoke.sh scripts/verify_web_serving.sh scripts/verify_web_login_smoke.sh scripts/verify_web_generated_types.sh scripts/verify_internal_host_runtime.sh scripts/verify_backup_restore_rehearsal.sh infra/prod/install.sh infra/prod/upgrade.sh infra/prod/momo-ops.sh infra/prod/deploy-lib.sh infra/prod/docker/momo-entrypoint.sh infra/workd/bootstrap.sh infra/workd/momo-workd-run infra/eve/bootstrap_world.sh infra/eve/entrypoint.sh; do [ -e "$f" ] || { echo "missing shell script: $f"; exit 1; }; bash -n "$f"; done'
   add_cmd_once "metrics verifier shell syntax" "bash -n scripts/verify_metrics_observability.sh"
   add_cmd_once "message interaction verifier shell syntax" "bash -n scripts/verify_message_interaction.sh"
   add_cmd_once "production migration entrypoint shell syntax" "bash -n infra/prod/docker/internal-smoke-migrate.sh"
@@ -568,18 +556,10 @@ add_static_commands() {
   add_cmd_once "deploy bundle synthetic fixture" 'scripts/tests/test_make_deploy_bundle.sh'
   add_cmd_once "local gate drift guard isolated regression" 'scripts/tests/test_local_gate_drift_guard.sh'
   add_cmd_once "local gate hardening isolated regression" 'scripts/tests/test_local_gate_hardening.sh'
-  add_cmd_once "SPM license gate isolated regression" 'scripts/tests/test_spm_license_gate.sh'
   add_cmd_once "local alpha Centrifugo agent proxy contract" 'agent_block="$(awk '\''/"name": "agent"/,/},/'\'' scripts/local_alpha_runner.sh)"; work_block="$(awk '\''/"name": "agentwork"/,/},/'\'' scripts/local_alpha_runner.sh)"; printf "%s\n" "$agent_block" | grep -F "\"subscribe_proxy_enabled\": true"; printf "%s\n" "$agent_block" | grep -F "\"channel_regex\": \"^ws[0-9A-Fa-f-]{36}\\\\\\\\.[0-9A-Fa-f-]{36}\\\\\\\\.[0-9A-Fa-f-]{36}$\""; printf "%s\n" "$work_block" | grep -F "\"subscribe_proxy_enabled\": true"; printf "%s\n" "$work_block" | grep -F "\"channel_regex\": \"^ws[0-9A-Fa-f-]{36}\\\\\\\\.[0-9A-Fa-f-]{36}$\""'
-  add_cmd_once "python syntax" 'PYTHONPYCACHEPREFIX="${TMPDIR:-/tmp}/momo-pycache" python3 -m py_compile adapters/hermes/momo_adapter.py adapters/hermes/provider_chain.py adapters/hermes/adapter.py scripts/mock_hermes.py scripts/mock_push_relay.py scripts/openapi_shape_check.py scripts/terminal_attach_probe.py scripts/terminal_attach_tls_proxy.py adapters/hermes/tests/test_momo_adapter_contract.py adapters/hermes/tests/test_provider_chain_contract.py adapters/hermes/tests/smoke_momo_adapter.py adapters/prime/__init__.py adapters/prime/adapter.py adapters/prime/prime_adapter.py adapters/prime/oort_client.py adapters/prime/stream_relay.py adapters/prime/refine.py adapters/prime/rpc.py adapters/prime/tests/fake_oort.py adapters/prime/tests/fake_prime.py adapters/prime/tests/mock_provider.py adapters/prime/tests/auto_refine_probe.py adapters/prime/tests/rpc_probe.py adapters/prime/tests/harness_probe.py adapters/prime/tests/test_prime_adapter_contract.py adapters/prime/tests/smoke_prime_adapter.py scripts/tests/test_agent_seed_policy_contract.py scripts/tests/test_momo354_roster_contract.py scripts/tests/test_push_relay_vocabulary_contract.py && PYTHONPYCACHEPREFIX="${TMPDIR:-/tmp}/momo-pycache" python3 adapters/hermes/tests/test_momo_adapter_contract.py && PYTHONPYCACHEPREFIX="${TMPDIR:-/tmp}/momo-pycache" python3 adapters/hermes/tests/test_provider_chain_contract.py && PYTHONPYCACHEPREFIX="${TMPDIR:-/tmp}/momo-pycache" python3 adapters/hermes/tests/smoke_momo_adapter.py && PYTHONPYCACHEPREFIX="${TMPDIR:-/tmp}/momo-pycache" python3 adapters/prime/tests/test_prime_adapter_contract.py && PYTHONPYCACHEPREFIX="${TMPDIR:-/tmp}/momo-pycache" python3 adapters/prime/tests/smoke_prime_adapter.py && PYTHONPYCACHEPREFIX="${TMPDIR:-/tmp}/momo-pycache" python3 scripts/tests/test_agent_seed_policy_contract.py && PYTHONPYCACHEPREFIX="${TMPDIR:-/tmp}/momo-pycache" python3 scripts/tests/test_momo354_roster_contract.py && PYTHONPYCACHEPREFIX="${TMPDIR:-/tmp}/momo-pycache" python3 scripts/tests/test_push_relay_vocabulary_contract.py'
+  add_cmd_once "python syntax" 'PYTHONPYCACHEPREFIX="${TMPDIR:-/tmp}/momo-pycache" python3 -m py_compile adapters/hermes/momo_adapter.py adapters/hermes/provider_chain.py adapters/hermes/adapter.py scripts/mock_hermes.py scripts/mock_push_relay.py scripts/openapi_shape_check.py scripts/terminal_attach_probe.py scripts/terminal_attach_tls_proxy.py adapters/hermes/tests/test_momo_adapter_contract.py adapters/hermes/tests/test_provider_chain_contract.py adapters/hermes/tests/smoke_momo_adapter.py adapters/prime/__init__.py adapters/prime/adapter.py adapters/prime/prime_adapter.py adapters/prime/oort_client.py adapters/prime/stream_relay.py adapters/prime/refine.py adapters/prime/rpc.py adapters/prime/tests/fake_oort.py adapters/prime/tests/fake_prime.py adapters/prime/tests/mock_provider.py adapters/prime/tests/auto_refine_probe.py adapters/prime/tests/rpc_probe.py adapters/prime/tests/harness_probe.py adapters/prime/tests/test_prime_adapter_contract.py adapters/prime/tests/smoke_prime_adapter.py scripts/tests/test_agent_seed_policy_contract.py scripts/tests/test_push_relay_vocabulary_contract.py && PYTHONPYCACHEPREFIX="${TMPDIR:-/tmp}/momo-pycache" python3 adapters/hermes/tests/test_momo_adapter_contract.py && PYTHONPYCACHEPREFIX="${TMPDIR:-/tmp}/momo-pycache" python3 adapters/hermes/tests/test_provider_chain_contract.py && PYTHONPYCACHEPREFIX="${TMPDIR:-/tmp}/momo-pycache" python3 adapters/hermes/tests/smoke_momo_adapter.py && PYTHONPYCACHEPREFIX="${TMPDIR:-/tmp}/momo-pycache" python3 adapters/prime/tests/test_prime_adapter_contract.py && PYTHONPYCACHEPREFIX="${TMPDIR:-/tmp}/momo-pycache" python3 adapters/prime/tests/smoke_prime_adapter.py && PYTHONPYCACHEPREFIX="${TMPDIR:-/tmp}/momo-pycache" python3 scripts/tests/test_agent_seed_policy_contract.py && PYTHONPYCACHEPREFIX="${TMPDIR:-/tmp}/momo-pycache" python3 scripts/tests/test_push_relay_vocabulary_contract.py'
   add_note_once coverage "#1194 자동 refine 유래·범위·적용 여부: refine_complete에는 트리거 필드가 없어(실측 §3.2) 어댑터가 상수 command를 박고 있었다 — 이제 유래는 관측(호스트 refine 명령의 in-flight 창 · 성공한 compaction_end)에서 정하고, 자동 경로가 실제로 쓰는 session-artifacts/<sid>/harness 파일까지 스캔하며, applied:false 편집은 업스트림(agent-session.js:6283)과 동형으로 걸러낸다. 결함당 red proof 1개가 AutoRefineRedProofs에 있고(수리 되돌리면 각각 빨강), 컨테이너 회귀는 adapters/prime/run.sh auto-refine{,-rejected} — 실제 prime-agent v0.7.0에 세션 ON(프로브 자신의 OORT_PRIME_NO_SESSION=0, 출고 기본값 불변)·--network none·자격증명 0. 목 프로바이더는 리뷰 게이트와 플랜 패스를 구분하지 못해 모든 자동 refine을 조용히 거부하고 있었으므로(실측 §4.5) 그 수리가 이 회귀의 선행 조건이다."
   add_note_once coverage "#1190 uuid5 파생 크로스체크: refine 멱등 키 uuid5(momo.harnessRefi, refinementId)는 Rust(momo-messaging)·Python(adapters/prime) 양측 사본이라, 기대 uuid는 docs/api/harness-refine-client-msg-id.golden.json 한 파일에만 있고 양쪽 테스트가 그 같은 경로를 읽어 대조한다(사본 없음 — Rust는 include_str!이라 파일이 사라지면 빌드가 깨진다). 벡터는 실측 RPC id·observed-drift id에 더해 빈 문자열·한글·BMP 밖·200자 상한·양끝 공백 엣지를 포함하고, 파생 바이트(utf8Hex)를 uuid보다 먼저 대조해 실패가 '인코딩'인지 '파생'인지 구분한다."
-}
-
-add_ios_commands() {
-  add_cmd_once "iOS verifier shell syntax" "bash -n scripts/verify_ios_build.sh"
-  add_cmd "iOS simulator build and unit tests" "scripts/verify_ios_build.sh"
-  add_note_once coverage "MOMO-462 iOS gate: builds MomoiOS for the generic iOS Simulator, dynamically selects an available iPhone simulator, runs build-for-testing and test-without-building with signing disabled and repo-local DerivedData, then restores simulator state."
-  add_note_once not_covered "Push signing and real APNs delivery remain manual IOS-4/IOS-5 scope."
 }
 
 add_runtime_env_guard_command() {
@@ -598,11 +578,13 @@ add_diagnostics_commands() {
 }
 
 add_swift_commands() {
-  # MOMO-318: mechanical design pre-flight (SKILL momo-design-taste §5) as a ratchet
-  # gate. Runs before the multi-minute build so a new raw-color/fixed-size/em-dash
-  # violation fails fast. Pre-existing violations are baselined; only regressions FAIL.
-  add_cmd_once "design pre-flight (ratchet)" 'scripts/verify_design_preflight.sh'
-  add_cmd_once "SwiftPM license and THIRD_PARTY drift gate" 'scripts/check_spm_licenses.sh --check'
+  # W-S1(#1215): 이 함수에서 두 자리가 은퇴했다.
+  #   · mac 디자인 pre-flight 래칫(MOMO-318) — 스캔 대상이 `clients/macOS/Sources`
+  #     + `clients/Core/Sources` 둘뿐이었고 그 트리가 삭제됐다. 정본 UI 의 후속은
+  #     `scripts/design_preflight_web.sh`(web 프로파일 + 병합 트리 8레인)다.
+  #   · SwiftPM 라이선스/THIRD_PARTY 드리프트 게이트 — #1201(base 부터 red, 전
+  #     프로파일 차단). 성재 기결정으로 Swift 클라 삭제와 함께 은퇴하고,
+  #     현행 스택의 후속은 add_license_commands(#1225, cargo+npm)다.
   # #1226: Makefile 의 `build`/`test` 는 현행 스택(cargo + npm)으로 재조준됐고, 은퇴
   # 중인 Swift 트리 순회는 `swift-build`/`swift-test` 로 이름이 바뀌었다. 여기서 이름을
   # 따라가지 않으면 "swift build" 라벨 아래에서 cargo 가 도는 거짓 증거가 되고, 이
@@ -610,8 +592,7 @@ add_swift_commands() {
   # 않게 된다.
   add_cmd_once "swift build" 'DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}" make swift-build'
   add_cmd_once "swift test" 'DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}" make swift-test'
-  add_note_once coverage "MOMO-318 design pre-flight: raw Color(red:)/Font.custom/.font(.system(size:))/user-visible em-dash counts are held at or below scripts/design_preflight_baseline.txt; any new violation fails the swift gate."
-  add_note_once coverage "MOMO-556 supply-chain gate: all 9 remote SwiftPM roots resolve, every transitive checkout LICENSE is permissive, copyleft families fail closed, and the generated THIRD_PARTY SwiftPM section has no drift."
+  add_note_once not_covered "W-S1(#1215): SwiftPM 공급망 게이트(MOMO-556)는 #1201 로 은퇴했다 — 잔존 Swift 트리(server·relay·workers·services)의 SwiftPM 의존 라이선스는 지금 어떤 게이트도 재지 않는다. 현행 스택은 add_license_commands(cargo+npm)가 덮는다."
 }
 
 add_staging_smoke_commands() {
@@ -830,28 +811,15 @@ add_external_agent_provider_commands() {
   add_note_once not_covered "The default runtime-agent profile remains repo-local mock Hermes only; real provider side effects are covered only by the external-agent-provider opt-in profile."
 }
 
-add_macos_ui_commands() {
-  add_cmd "macOS real-backend verifier bootstrap rollback" "scripts/verify_macos_real_backend_ui_bootstrap.sh"
-  add_cmd "macOS real-backend REST/UI smoke" "scripts/verify_macos_real_backend_ui.sh"
-  if [ "${LOCAL_GATE_LAUNCH_UI:-0}" = "1" ]; then
-    add_note_once coverage "MOMO-348 MomoMacDevApp launched against an isolated marker/OID-owned migrated DB with marker-bound app/worker/relay roles and self-seeded demo/Hermes fixtures; REST login/invite/join/channel/member/history/send/mention plus approval/cost fixture, source DB digest preservation, process/window smoke, log capture, and termination are automated."
-  else
-    add_note_once coverage "MOMO-348 MomoMac real-backend REST smoke: pre-marker exact-OID rollback plus an isolated marker/OID-owned migrated DB with marker-bound app(NOBYPASSRLS)/worker+relay(BYPASSRLS) roles, per-run channel UUID, self-seeded demo/Hermes fixtures, REST login/invite/join/channel/member/history/send/mention, approval/cost structured history, and source dogfood DB digest preservation."
-    add_note_once not_covered "MomoMacDevApp process/window launch is skipped by default; rerun with LOCAL_GATE_LAUNCH_UI=1 scripts/local_gate.sh --profile macos-ui for GUI process/window evidence."
-  fi
-}
-
 add_internal_alpha_commands() {
   add_static_commands
   add_runtime_env_guard_command
-  add_cmd "internal alpha UI launch guard" 'test "${LOCAL_GATE_LAUNCH_UI:-0}" = "1" || { echo "internal-alpha requires LOCAL_GATE_LAUNCH_UI=1 for MomoMacDevApp process/window evidence"; exit 1; }'
   add_cmd "internal alpha packet directory" 'mkdir -p "${LOCAL_GATE_INTERNAL_ALPHA_DIR:-${LOCAL_GATE_OUTPUT_DIR:-${TMPDIR:-/tmp}/momo-local-gate}/internal-alpha-manual}"'
   add_cmd "internal alpha host-runtime evidence" 'packet="${LOCAL_GATE_INTERNAL_ALPHA_DIR:-${LOCAL_GATE_OUTPUT_DIR:-${TMPDIR:-/tmp}/momo-local-gate}/internal-alpha-manual}"; out="$packet/host-runtime"; mkdir -p "$out"; LOCAL_GATE_OUT_DIR="$out" scripts/verify_internal_host_runtime.sh'
   add_cmd "internal alpha backup restore evidence" 'packet="${LOCAL_GATE_INTERNAL_ALPHA_DIR:-${LOCAL_GATE_OUTPUT_DIR:-${TMPDIR:-/tmp}/momo-local-gate}/internal-alpha-manual}"; out="$packet/backup-restore"; mkdir -p "$out"; BACKUP_REHEARSAL_OUT_DIR="$out" scripts/verify_backup_restore_rehearsal.sh'
-  add_cmd "internal alpha macOS real-backend UI evidence" 'packet="${LOCAL_GATE_INTERNAL_ALPHA_DIR:-${LOCAL_GATE_OUTPUT_DIR:-${TMPDIR:-/tmp}/momo-local-gate}/internal-alpha-manual}"; out="$packet/macos-real-backend"; mkdir -p "$out"; MACOS_REAL_BACKEND_OUT_DIR="$out" scripts/verify_macos_real_backend_ui.sh'
   add_cmd "internal alpha diagnostics bundle" 'packet="${LOCAL_GATE_INTERNAL_ALPHA_DIR:-${LOCAL_GATE_OUTPUT_DIR:-${TMPDIR:-/tmp}/momo-local-gate}/internal-alpha-manual}"; out="$packet/diagnostics"; mkdir -p "$out"; scripts/collect_diagnostics.sh --output-dir "$out" --since 30m'
-  add_note_once coverage "MOMO-225 internal alpha combined local gate: creates one PR-ready packet with host-runtime image boot/health/migrate/message/relay/mock Kim Intern evidence, backup restore rehearsal evidence, MomoMacDevApp real-backend process/window evidence, and a redacted diagnostics bundle path."
-  add_note_once coverage "internal-alpha writes verifier artifacts under a run-specific packet directory below the local gate output directory: internal-alpha-<run-id>/{host-runtime,backup-restore,macos-real-backend,diagnostics}/, plus the top-level local-gate markdown/log."
+  add_note_once coverage "MOMO-225 internal alpha combined local gate: creates one PR-ready packet with host-runtime image boot/health/migrate/message/relay/mock Kim Intern evidence, backup restore rehearsal evidence, and a redacted diagnostics bundle path."
+  add_note_once coverage "internal-alpha writes verifier artifacts under a run-specific packet directory below the local gate output directory: internal-alpha-<run-id>/{host-runtime,backup-restore,diagnostics}/, plus the top-level local-gate markdown/log."
   add_note_once not_covered "Public TLS/DNS, real registry pull, SOPS production secret injection, external Hermes staging connectivity, production pgBackRest stanza/check/full backup, WAL archive push, and time-target PITR remain runtime-unverified(public host)."
 }
 
@@ -861,15 +829,9 @@ add_local_alpha_commands() {
   add_cmd "local alpha packet directory" 'mkdir -p "${LOCAL_GATE_LOCAL_ALPHA_DIR:-${LOCAL_GATE_OUTPUT_DIR:-${TMPDIR:-/tmp}/momo-local-gate}/local-alpha-manual}"'
   add_cmd "local alpha host-runtime evidence" 'packet="${LOCAL_GATE_LOCAL_ALPHA_DIR:-${LOCAL_GATE_OUTPUT_DIR:-${TMPDIR:-/tmp}/momo-local-gate}/local-alpha-manual}"; out="$packet/host-runtime"; mkdir -p "$out"; LOCAL_GATE_OUT_DIR="$out" scripts/verify_internal_host_runtime.sh'
   add_cmd "local alpha backup restore evidence" 'packet="${LOCAL_GATE_LOCAL_ALPHA_DIR:-${LOCAL_GATE_OUTPUT_DIR:-${TMPDIR:-/tmp}/momo-local-gate}/local-alpha-manual}"; out="$packet/backup-restore"; mkdir -p "$out"; BACKUP_REHEARSAL_OUT_DIR="$out" scripts/verify_backup_restore_rehearsal.sh'
-  add_cmd "local alpha macOS real-backend evidence" 'packet="${LOCAL_GATE_LOCAL_ALPHA_DIR:-${LOCAL_GATE_OUTPUT_DIR:-${TMPDIR:-/tmp}/momo-local-gate}/local-alpha-manual}"; out="$packet/macos-real-backend"; mkdir -p "$out"; MACOS_REAL_BACKEND_OUT_DIR="$out" scripts/verify_macos_real_backend_ui.sh'
   add_cmd "local alpha diagnostics bundle" 'packet="${LOCAL_GATE_LOCAL_ALPHA_DIR:-${LOCAL_GATE_OUTPUT_DIR:-${TMPDIR:-/tmp}/momo-local-gate}/local-alpha-manual}"; out="$packet/diagnostics"; mkdir -p "$out"; scripts/collect_diagnostics.sh --output-dir "$out" --since 30m'
-  add_note_once coverage "MOMO-237 local-alpha RC gate: creates one local Docker evidence packet with host-runtime image boot/health/migration idempotency/REST message/OutboxRelay publish/mock Kim Intern roundtrip, repo-local backup restore rehearsal, macOS real-backend smoke, and a redacted diagnostics bundle."
+  add_note_once coverage "MOMO-237 local-alpha RC gate: creates one local Docker evidence packet with host-runtime image boot/health/migration idempotency/REST message/OutboxRelay publish/mock Kim Intern roundtrip, repo-local backup restore rehearsal, and a redacted diagnostics bundle."
   add_note_once coverage "local-alpha is AWS-free: it uses local Docker, local Swift packages, repo-local mock Hermes, and local diagnostics only. It does not call AWS APIs, create cloud resources, trigger release workflows, or require public DNS/TLS."
-  if [ "${LOCAL_GATE_LAUNCH_UI:-0}" = "1" ]; then
-    add_note_once coverage "LOCAL_GATE_LAUNCH_UI=1 upgrades local-alpha macOS evidence to include MomoMacDevApp process/window/log launch against the local MomoServer."
-  else
-    add_note_once coverage "The default local-alpha profile keeps foreground GUI launch optional; rerun with LOCAL_GATE_LAUNCH_UI=1 for MomoMacDevApp process/window/log evidence."
-  fi
   add_note_once not_covered "Public AWS/staging resources, public TLS/DNS, real registry pull, SOPS production secret injection, external Hermes staging connectivity, production pgBackRest stanza/check/full backup, WAL archive push, time-target PITR, notarization, TestFlight, iOS/APNs, and M7 release gate PASS remain out of scope."
 }
 
@@ -931,12 +893,13 @@ add_web_commands() {
 add_license_commands() {
   # #1225: dependency license gate for the two stacks that actually ship.
   #
-  # This is a PARALLEL gate, not a replacement for the SwiftPM one in
-  # add_swift_commands. That gate covers 37 SwiftPM packages and retires with the
-  # Swift tree; audit research/2026-08-10-buzz-audit-A.md measured what it left
+  # This was written as a PARALLEL gate to the SwiftPM one in add_swift_commands.
+  # That gate retired with the Swift client trees (W-S1 / #1201), so this is now
+  # the only dependency license gate in the repo. Audit
+  # research/2026-08-10-buzz-audit-A.md measured what the SwiftPM one left
   # uncovered — 644 cargo crates and 1,258 npm packages, i.e. 98.1% of the
   # dependency population, including the MPL-2.0 30 that CONTRIBUTING claimed
-  # were rejected fail-closed. Nothing here touches the Swift path.
+  # were rejected fail-closed.
   #
   # Ordering: the regression test runs first. It is seconds long and it is the
   # only step that proves the gate can turn red; if it breaks, a green from the
@@ -984,11 +947,9 @@ add_m3_dbc_commands() {
   add_runtime_host_api_cleanup_command "Cleanup host MomoServer after D/B verifier"
   add_cmd "M3 C approval decision runtime evidence" "scripts/verify_approval_decision.sh"
   add_runtime_host_api_cleanup_command "Cleanup host MomoServer after C verifier"
-  add_macos_ui_commands
   add_note_once coverage "M3 D evidence: repo-local OpenAI-compatible SSE mock emits agent.partial text plus tool_call_name/tool_call_args progress; AgentWorker reconciles to final tool_result/message.new with outbox version equal to message.seq."
-  add_note_once coverage "M3 B evidence: AgentWorker reserve/reconcile writes usage_ledger and budget_window, then MomoServer /cost-snapshots exposes the server-owned CostSnapshot projection consumed by MomoMac."
+  add_note_once coverage "M3 B evidence: AgentWorker reserve/reconcile writes usage_ledger and budget_window, then MomoServer /cost-snapshots exposes the server-owned CostSnapshot projection."
   add_note_once coverage "M3 C evidence: /approvals pending projection, approve/reject, client_decision_id idempotency, conflict, expired click, channel membership guard, audit_log, and resume agent_job durable effects are verified."
-  add_note_once coverage "M3 macOS evidence: real-backend smoke verifies REST login/channel list/history/send plus approval/cost structured props; LOCAL_GATE_LAUNCH_UI=1 upgrades this profile to require MomoMacDevApp process/window/log evidence."
   add_note_once coverage "MOMO-020 close-readiness: when this profile passes in the PR evidence, the old staging/Hermes wording can be closed under the MOMO-204 local-gate reinterpretation after review/merge; worker does not close #12."
   add_note_once not_covered "External Hermes/staging provider side effects, M4 Xcode packaging/signing/notary, iOS/APNs, and agent: namespace production presence remain out of scope for MOMO-204."
 }
@@ -1058,17 +1019,6 @@ case "$PROFILE" in
     add_runtime_env_guard_command
     add_external_agent_provider_commands
     ;;
-  macos-ui)
-    add_static_commands
-    add_runtime_env_guard_command
-    add_swift_commands
-    add_runtime_bootstrap_commands
-    add_macos_ui_commands
-    ;;
-  ios)
-    add_static_commands
-    add_ios_commands
-    ;;
   m3-dbc)
     add_m3_dbc_commands
     ;;
@@ -1103,7 +1053,6 @@ case "$PROFILE" in
     add_runtime_agent_cleanup_command "Pre-clean runtime agent host processes"
     add_runtime_agent_commands
     add_runtime_agent_final_cleanup_command "Cleanup runtime agent host processes after agent verifier"
-    add_macos_ui_commands
     add_note_once not_covered "Realtime WebSocket live subscribe is isolated in scripts/local_gate.sh --profile runtime-live because it starts host API/relay processes plus a compose-network api proxy for Centrifugo subscribe callbacks."
     ;;
 esac
@@ -1357,7 +1306,7 @@ write_evidence() {
       fi
       echo "- ${packet_label}:"
       echo "  - packet: \`${packet_dir}\`"
-      for artifact_dir in host-runtime backup-restore macos-real-backend diagnostics; do
+      for artifact_dir in host-runtime backup-restore diagnostics; do
         path="$packet_dir/$artifact_dir"
         if [ -d "$path" ]; then
           echo "  - ${artifact_dir}: \`$path\`"

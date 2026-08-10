@@ -15,8 +15,8 @@ Collects best-effort diagnostics for internal alpha debugging:
   - git commit/status and toolchain shape
   - redacted env/config shape
   - Docker/Centrifugo logs when available
-  - recent server/relay/worker/local gate/macOS evidence files
-  - recent MomoMac unified logs when available
+  - recent server/relay/worker/local gate evidence files
+  - recent oort-subsystem unified logs when available
   - markdown summary plus optional tar.gz
 
 The collector is failure-tolerant: missing Docker, stopped services, absent logs,
@@ -190,7 +190,7 @@ capture_cmd "git/status.txt" "git status" "git status --short --branch"
 capture_cmd "git/diff-stat.txt" "git diff stat" "base=\"\${LOCAL_GATE_BASE_REF:-origin/main}\"; if git rev-parse --verify \"\$base\" >/dev/null 2>&1; then git diff --stat \"\$base\"...HEAD; git diff --name-status \"\$base\"...HEAD; else git diff --stat; git diff --name-status; fi"
 
 capture_cmd "system/toolchain.txt" "toolchain" "hostname; sw_vers 2>/dev/null || uname -a; swift --version 2>/dev/null || true; xcodebuild -version 2>/dev/null || true; docker --version 2>/dev/null || true; docker compose version 2>/dev/null || true; psql --version 2>/dev/null || /opt/homebrew/opt/libpq/bin/psql --version 2>/dev/null || true"
-capture_cmd "system/processes.txt" "momo process snapshot" "ps ax -o pid,ppid,stat,command | grep -E 'MomoServer|OutboxRelay|AgentWorker|MomoMac|centrifugo|postgres|mock_hermes' | grep -v grep || true"
+capture_cmd "system/processes.txt" "momo process snapshot" "ps ax -o pid,ppid,stat,command | grep -E 'MomoServer|OutboxRelay|AgentWorker|centrifugo|postgres|mock_hermes' | grep -v grep || true"
 capture_cmd "env/process-env.txt" "process environment redacted" "env | sort"
 
 for candidate in "$REPO_ROOT/.env.worktree" "$REPO_ROOT/.env" "$REPO_ROOT/.conductor/local.env" "$REPO_ROOT/infra/.env.example" "$REPO_ROOT/infra/prod/internal-smoke.env.example" "$REPO_ROOT/infra/prod/secrets.env.example"; do
@@ -214,7 +214,10 @@ else
 fi
 
 if [ -x /usr/bin/log ]; then
-  capture_cmd "logs/macos-unified-momomac.log" "MomoMac unified logs" "/usr/bin/log show --style compact --last '$SINCE' --predicate 'process == \"MomoMacDevApp\" OR process == \"MomoMacSmoke\" OR subsystem CONTAINS \"momo\"' || true"
+  # W-S1(#1215): MomoMacDevApp/MomoMacSmoke 프로세스 술어는 그 앱이 삭제되면서
+  # 빠졌다. subsystem 술어는 남는다 — 데스크톱(Tauri) 셸과 잔존 Swift 실행체가
+  # 같은 subsystem 접두를 쓴다.
+  capture_cmd "logs/macos-unified-oort.log" "oort unified logs" "/usr/bin/log show --style compact --last '$SINCE' --predicate 'subsystem CONTAINS \"momo\"' || true"
 else
   capture_cmd "logs/macos-unified-unavailable.txt" "macOS unified logs unavailable" "echo '/usr/bin/log unavailable; macOS unified logs skipped.'"
 fi

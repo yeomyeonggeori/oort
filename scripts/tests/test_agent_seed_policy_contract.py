@@ -77,7 +77,6 @@ def main() -> None:
         "scripts/verify_agent_live_channel.sh",
         "scripts/verify_external_agent_provider.sh",
         "scripts/verify_hermes_gateway_adapter.sh",
-        "scripts/verify_macos_real_backend_ui.sh",
     ]
     for verifier in isolated_verifiers:
         require(read(verifier), 'MOMO_AGENT_SEED_MODE=none "$REPO_ROOT/scripts/migrate.sh"')
@@ -101,10 +100,6 @@ def main() -> None:
             "('${HUMAN_MEMBER_ID}', '${WORKSPACE_ID}', 'human', 'active'",
             "('${AGENT_ID}', '${WORKSPACE_ID}', 'agent', 'active'",
         ),
-        "scripts/verify_macos_real_backend_ui.sh": (
-            "('${HUMAN_ID}', '${WORKSPACE_ID}', 'human', 'active'",
-            "('${AGENT_ID}', '${WORKSPACE_ID}', 'agent', 'active'",
-        ),
     }
     for verifier, member_rows in fixed_seed_member_fixtures.items():
         require(read(verifier), "INSERT INTO member", *member_rows)
@@ -114,7 +109,6 @@ def main() -> None:
         "scripts/verify_agent_live_channel.sh",
         "scripts/verify_external_agent_provider.sh",
         "scripts/verify_hermes_gateway_adapter.sh",
-        "scripts/verify_macos_real_backend_ui.sh",
     ]
     for verifier in digest_verifiers:
         require(
@@ -153,18 +147,11 @@ def main() -> None:
         "INSERT INTO membership",
     )
 
-    macos = read("scripts/verify_macos_real_backend_ui.sh")
-    require(
-        macos,
-        'MOMO_AGENT_SEED_MODE=none "$REPO_ROOT/scripts/migrate.sh"',
-        "VERIFIER_DB_MARKER_PREFIX=",
-        "VERIFIER_DB_CREATED_OID",
-        "SOURCE_DIGEST_BEFORE",
-        "exit 96",
-        'CHANNEL_ID="$(python3 -c',
-        "tr '[:lower:]' '[:upper:]'",
-        "seeding isolated demo/Hermes and approval/cost fixtures",
-    )
+    # W-S1(#1215): `scripts/verify_macos_real_backend_ui.sh` 가 이 세 목록
+    # (isolated_verifiers · fixed_seed_member_fixtures · digest_verifiers)과 아래
+    # 전용 블록에서 함께 빠졌다. SwiftUI macOS 클라가 삭제되면서 그 검증기도 사라졌고,
+    # 그것이 지고 있던 seed-none·marker/OID·source-digest 계약은 남은 다섯 검증기가
+    # 같은 문장으로 계속 진다 — 계약이 준 것이 아니라 소비자 하나가 은퇴한 것이다.
 
     cleanup = read("scripts/cleanup_dogfood_seed_agents.sh")
     require(

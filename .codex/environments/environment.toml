@@ -8,4 +8,6 @@ script = ""
 [[actions]]
 name = "Run"
 icon = "run"
-command = "./scripts/macos_dev_run.sh"
+# W-S1(#1215): 이 Run 액션은 삭제된 ./scripts/macos_dev_run.sh(MomoMacDevApp)를
+# 가리키고 있었다. 현행 제품 표면은 웹이다.
+command = "npm --prefix clients/web run dev"
