@@ -31,7 +31,7 @@ jobs:
       image: ${{ env.IMAGE }}
       digest: ${{ steps.build.outputs.digest }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Enable linux/arm64 emulation
         uses: docker/setup-qemu-action@v3
