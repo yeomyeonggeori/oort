@@ -373,7 +373,7 @@ describe("Dawn palette", () => {
       // tones side by side and would silently invert with the tokens: the app
       // consent dialog and the ToolRow chips under 설정 > 앱, the quota chips
       // and bars under 설정 > 사용량, the AI 연결 체인 status lines, and the
-      // workspace rail's connection dot. Ratios, not bare `>`, so a token that
+      // profile panel's connection dot. Ratios, not bare `>`, so a token that
       // merely ties cannot pass (the old dark danger sat at 0.48x of warn).
       it("ranks danger louder than warn, and warn louder than muted", () => {
         const c = (token: string) => chroma(pick(token, scheme.index));
