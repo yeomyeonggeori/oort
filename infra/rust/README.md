@@ -220,8 +220,12 @@ momorust down            # 컨테이너만
 momorust down -v         # 볼륨(momo-rust-pgdata)까지 — fresh 마이그레이션 재현용
 ```
 
-volume 기본 이름은 `momo-rust-pgdata`로 prod(`momo-pgdata`)와 분리돼 있다. 모든 서비스에
-janitor 라벨이 붙어 있어 프로젝트 라벨로 회수된다.
+volume 기본 이름은 **프로젝트 스코프**다: `${COMPOSE_PROJECT_NAME:-momo-rust}-pgdata`.
+이 런북의 기본 프로젝트명이 `momo-rust`이므로 기본 이름은 `momo-rust-pgdata`이고
+prod(`momo-pgdata`)와 분리돼 있다. 다른 프로젝트명으로 띄우면 볼륨도 함께 갈라지므로
+(#1238) 워크트리·게이트의 `down -v`가 남의 DB를 지우지 않는다 — 격리하려면 `-p` 또는
+`COMPOSE_PROJECT_NAME`을 주면 되고, 명시 이름이 필요하면 `DB_VOLUME_NAME`이 이긴다.
+모든 서비스에 janitor 라벨이 붙어 있어 프로젝트 라벨로 회수된다.
 
 ## 6. NCP 런북과의 연결
 

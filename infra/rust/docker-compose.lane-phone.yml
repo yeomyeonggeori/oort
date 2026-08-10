@@ -26,9 +26,10 @@
 #     -f infra/rust/docker-compose.lane-phone.yml up -d api relay agent-worker
 #
 # 자원 회수: 베이스의 janitor 라벨을 그대로 상속한다. `DB_VOLUME_NAME` 은 러너가
-# **반드시** 덮어쓴다 — 베이스의 pgdata 는 프로젝트 스코프가 아닌 고정 이름이라
-# (`momo-rust-pgdata`), 덮어쓰지 않으면 레인이 실제 스모크 스택의 볼륨을 붙잡고
-# 마지막 `down -v` 로 지워버린다(#1058 실측).
+# 덮어쓴다 — 예전에는 그것이 필수였다(베이스의 pgdata 가 프로젝트 스코프가 아닌
+# 고정 이름 `momo-rust-pgdata` 였고, 덮어쓰지 않으면 레인이 실제 스모크 스택의
+# 볼륨을 붙잡고 마지막 `down -v` 로 지워버렸다 — #1058 실측). #1238 이 베이스
+# 기본값을 프로젝트 스코프로 바꿨으므로 지금의 덮어쓰기는 이중 방어다.
 # =============================================================================
 
 x-momo-janitor-labels: &momo-janitor-labels

@@ -76,9 +76,6 @@ PORT="${PORT:-8080}"
 CENT_PORT="${CENT_PORT:-8000}"
 CENT_API_KEY="${CENT_API_KEY:-dev-insecure-cent-api-key}"
 CENT_API_URL="${CENT_API_URL:-http://localhost:${CENT_PORT}/api}"
-case "$CENT_API_URL" in
-  *centrifugo*) CENT_API_URL="http://localhost:${CENT_PORT}/api" ;;
-esac
 JWT_HMAC="${JWT_HMAC:-dev-insecure-jwt-hmac-change-me}"
 CENT_TOKEN_HMAC="${CENT_TOKEN_HMAC:-dev-insecure-cent-token-hmac}"
 RELAY_POLL_INTERVAL_MS="${RELAY_POLL_INTERVAL_MS:-100}"

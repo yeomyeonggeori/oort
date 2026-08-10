@@ -219,9 +219,6 @@ load_env_file() {
   HERMES_PORT=${HERMES_PORT:-8088}
   DATABASE_URL=${DATABASE_URL:-postgres://${POSTGRES_USER:-momo}:${POSTGRES_PASSWORD:-momo}@localhost:${POSTGRES_PORT}/${POSTGRES_DB}}
   CENT_API_URL=${CENT_API_URL:-http://localhost:${CENT_PORT}/api}
-  case "$CENT_API_URL" in
-    *centrifugo*) CENT_API_URL=http://localhost:${CENT_PORT}/api ;;
-  esac
   HERMES_BASE_URL=${HERMES_BASE_URL:-http://localhost:${HERMES_PORT}/v1}
   HERMES_API_KEY=${HERMES_API_KEY:-}
   CENT_API_KEY=${CENT_API_KEY:-}

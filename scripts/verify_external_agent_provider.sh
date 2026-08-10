@@ -1036,9 +1036,6 @@ BASE_URL="${BASE_URL:-http://127.0.0.1:${PORT}}"
 CENT_PORT="${CENT_PORT:-8000}"
 CENT_API_KEY="${CENT_API_KEY:-dev-insecure-cent-api-key}"
 CENT_API_URL="${CENT_API_URL:-http://localhost:${CENT_PORT}/api}"
-case "$CENT_API_URL" in
-  *centrifugo*) CENT_API_URL="http://localhost:${CENT_PORT}/api" ;;
-esac
 
 WORKSPACE_ID=00000000-0000-7000-8000-000000000001
 HUMAN_ID=00000000-0000-7000-8000-000000000101
