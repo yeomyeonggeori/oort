@@ -29,6 +29,7 @@ import {
   useCreateChannelOpen,
   useOpenCreateChannel,
 } from "@/features/channels/useCreateChannel";
+import { useAddChannelMemberOpen } from "@/features/channels/useAddChannelMember";
 import {
   useAgentProfileOpen,
   useOpenAgentProfile,
@@ -109,13 +110,14 @@ export function QuickSwitcher({
   );
 
   // 폼 다이얼로그가 떠 있는 동안 전역 단축키는 물러선다 (R2 M4).
-  // 두 훅을 각각 부른 뒤 합친다: ||를 그대로 쓰면 단축 평가 때문에 두 번째
-  // 훅이 어떤 렌더에서는 호출되지 않는다.
+  // 세 훅을 각각 부른 뒤 합친다: ||를 그대로 쓰면 단축 평가 때문에 뒤 훅이
+  // 어떤 렌더에서는 호출되지 않는다.
   const createChannelOpen = useCreateChannelOpen();
+  const addMemberOpen = useAddChannelMemberOpen();
   const agentProfileOpen = useAgentProfileOpen();
   const addWorkspaceOpen = useAddWorkspaceOpen();
   const formDialogOpen =
-    createChannelOpen || agentProfileOpen || addWorkspaceOpen;
+    createChannelOpen || addMemberOpen || agentProfileOpen || addWorkspaceOpen;
 
   // 에이전트 라우팅도 팔레트에 자리가 있다 (R1 M7). 같은 규칙이 채널 만들기를
   // 여기에 앉혔고(SKILL §6 "모든 액션에 키보드 경로"), 이 액션은 그것보다 더

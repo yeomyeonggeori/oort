@@ -48,6 +48,7 @@ import {
 import { Composer } from "@/features/chat/Composer";
 import { canCreateChannelNow } from "@momo/core/features/channels/model";
 import { useOpenCreateChannel } from "@/features/channels/useCreateChannel";
+import { useOpenAddChannelMember } from "@/features/channels/useAddChannelMember";
 import {
   HuddleHeaderBanner,
   HuddleHeaderControl,
@@ -779,6 +780,11 @@ export function ChatShell() {
   // 있는지 말한다. 명부가 도착하기 전에는 아무 말도 하지 않는다: 늦게 오는
   // 버튼보다 왔다가 사라지는 버튼이 나쁘다 (R2 M5).
   const openCreateChannel = useOpenCreateChannel();
+  // 빈 채널의 "멤버 초대하기"는 /settings의 워크스페이스 초대 링크 생성기로
+  // 보내던 막다른 길이었다(검수 #2). 이제 같은 자리에서 이 채널에 워크스페이스
+  // 멤버를 넣는 다이얼로그를 연다. 워크스페이스 초대(새 사람 부르기)는 별개라
+  // 설정에 그대로 있다.
+  const openAddMember = useOpenAddChannelMember();
   const canCreate = canCreateChannelNow(
     !directoryQuery.isPending,
     memberFor(directory, session.member.id)?.role
@@ -874,7 +880,10 @@ export function ChatShell() {
               onResendPending={stressCount > 0 ? undefined : timeline.resend}
               channelKind={channel?.kind}
               peer={peer}
-              onInviteMember={() => navigate("/settings?section=members")}
+              onInviteMember={() => {
+                if (channelId && channel)
+                  openAddMember({ id: channelId, name: channel.name ?? label });
+              }}
               onStartWriting={focusComposer}
             />
           ) : channelsQuery.isLoading ? (
