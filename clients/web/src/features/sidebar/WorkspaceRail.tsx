@@ -1,6 +1,4 @@
 import { Plus } from "lucide-react";
-import type { RealtimeStatus } from "@/lib/realtime";
-import { cn } from "@/design/lib/cn";
 import { useOpenAddWorkspace } from "@/features/workspace/useAddWorkspace";
 import {
   workspaceRailTile,
@@ -11,16 +9,9 @@ import {
 // shadcn/Radix primitive, so it is hand-drawn; the switcher menu itself will
 // use DropdownMenu when multi-workspace lands (ADR-0117 / ADR-0161 4b-3).
 
-function connectionCopy(status: RealtimeStatus): string {
-  if (status === "connected") return "실시간 연결됨";
-  if (status === "connecting") return "연결 중";
-  return "연결 끊김, 재연결 중";
-}
-
 export function WorkspaceRail({
   workspace,
   workspaceId,
-  connStatus,
 }: {
   // The tile draws the WORKSPACE (검수 피드백 #4a-1). It is a name-query object,
   // NOT a bare string, on purpose: a bare string is exactly what let the shell
@@ -29,7 +20,6 @@ export function WorkspaceRail({
   workspace: WorkspaceNameState;
   /** Bound workspace id, used only for the honest error fallback (never a name). */
   workspaceId: string;
-  connStatus: RealtimeStatus;
 }) {
   const tile = workspaceRailTile(workspace, workspaceId);
   const openAddWorkspace = useOpenAddWorkspace();
@@ -83,21 +73,10 @@ export function WorkspaceRail({
         <Plus className="size-4" />
       </button>
 
-      <span className="flex-1" />
-
-      {/* Connection state: bound to the real rail status, never decorative. */}
-      <span
-        data-testid="conn-status"
-        data-status={connStatus}
-        title={connectionCopy(connStatus)}
-        aria-label={connectionCopy(connStatus)}
-        className={cn(
-          "size-2 rounded-sm",
-          connStatus === "connected" && "bg-ok",
-          connStatus === "connecting" && "bg-warn",
-          connStatus === "disconnected" && "bg-danger"
-        )}
-      />
+      {/* 연결 상태 점은 하단 프로필 패널로 옮겨졌다(검수 #6 / 프레즌스 6a).
+          "내가 붙어 있는가"는 "내가 누구인가"의 자리 옆이 더 맞는 집이고,
+          끊김이라는 무거운 상태는 셸의 ConnectionBanner가 별도로 덮는다.
+          이 점은 사용자 프레즌스(가용성/away/dnd, ADR-0160 6b)가 아니다. */}
     </nav>
   );
 }
