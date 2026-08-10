@@ -19,7 +19,10 @@
 # 스코프: 이 워크플로는 **전체 스위트가 아니다.** 컴파일·타입·라이선스까지만
 # 본다. 런타임 검증기·Docker 스택·e2e·Swift 트리는 `docs/LOCAL_PR_GATE.md`의
 # 로컬 게이트 몫으로 남는다(공개 전환으로 Actions가 무료가 되면 확장 후보).
-# 기존 워크플로 5개(ci-build·publish-images·release-*)는 무접촉이다.
+# 기존 워크플로 5개(ci-build·publish-images·release-*)는 무접촉이다 — 그쪽은
+# `actions/checkout@v4`(Node 20 런타임)를 쓰고 휴면 중이라 이번에 건드리지
+# 않는다. 매 PR마다 도는 이 워크플로만 `@v5`로 올려, Node 20 폐기 경고가 모든
+# 런에 상시로 붙는 것을 막는다(상시 경고는 주석을 읽지 않게 만든다).
 name: pr-ci
 
 on:
@@ -110,7 +113,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: 툴체인 확인(러너 사전설치 stable)
         # rustup 툴체인 액션을 쓰지 않는다. 레포에 rust-toolchain.toml이 없어
@@ -155,9 +158,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           # clients/mobile/package.json engines = ">= 22.11.0"이 레포의 유일한
           # 선언 제약이고, 24는 개발 머신에서 실제로 npm ci가 도는 버전이다.
