@@ -4007,6 +4007,88 @@ function reportUnmocked() {
   for (const path of [...unmockedPaths].sort()) console.log(`  ${path}`);
 }
 
+// 채널에 멤버 추가 다이얼로그 (검수 #2 / design-review F-4). This dialog had no
+// scene, so its four states went to review unseen. Each state is shot in its
+// own context because the roster is a react-query cache: to make the SAME
+// dialog show a skeleton, an empty list, an error and a full roster, the roster
+// route has to answer differently from app load, and re-answering a cached
+// query mid-session does not. The POST that adds a member is the members mock
+// installMocks already carries (**/channels/*/members**), so a click in the
+// normal shot lands on a real 2xx.
+//
+// The entry point IS the real one: release-notes is emptied of messages so the
+// 빈 채널 "멤버 초대하기" button — the exact control this batch rewired — is on
+// screen to click. release-notes is a good target because HERMES is in every
+// channel (renders the "멤버" already-in row) while the rest are addable.
+async function captureAddMemberScenes(browser, scheme) {
+  const shots = [];
+  const RELEASE_NOTES_ID = CHANNELS[3].id;
+
+  async function shoot(name, overrideRoster) {
+    const context = await browser.newContext({
+      viewport: VIEWPORT,
+      deviceScaleFactor: 2,
+      colorScheme: scheme,
+      reducedMotion: "reduce",
+    });
+    await installMocks(context);
+    // 대상 채널만 메시지를 비운다 → 빈 채널 상태의 초대 버튼이 뜬다. 다른 채널은
+    // 원래 목으로 되돌린다(fallback). Playwright는 나중에 등록한 라우트를 먼저
+    // 보므로 이 둘이 installMocks의 것을 이긴다.
+    await context.route("**/v1/workspaces/*/channels/*/messages*", (route) => {
+      const url = new URL(route.request().url());
+      return url.pathname.includes(RELEASE_NOTES_ID)
+        ? json(route, { messages: [] })
+        : route.fallback();
+    });
+    if (overrideRoster) {
+      await context.route("**/v1/workspaces/*/roster", overrideRoster);
+    }
+
+    const page = await context.newPage();
+    await page.goto(ORIGIN, { waitUntil: "networkidle" });
+    await signIn(page);
+    // 사이드바 행을 눌러 SPA 안에서 이동한다(딥링크 goto가 아니라). 라우터가
+    // 해시 기반이라 href는 `#/c/{id}` 꼴이다 — 이 앱이 실제로 쓰는 경로를 그대로
+    // 고른다.
+    await page
+      .locator(`[data-testid="channel-list"] a[href="#/c/${RELEASE_NOTES_ID}"]`)
+      .click();
+    const empty = page.getByTestId("timeline-empty");
+    await empty.waitFor({ state: "visible" });
+    await empty.getByRole("button", { name: "멤버 초대하기" }).click();
+    await page
+      .getByTestId("add-channel-member-dialog")
+      .waitFor({ state: "visible" });
+    // 스켈레톤 상태는 목이 응답하기 전에 찍어야 하므로 여기서 오래 기다리지
+    // 않는다. 애니메이션은 reducedMotion으로 이미 꺼져 있어 200ms면 안정된다.
+    await page.waitForTimeout(200);
+    const path = `${OUT_DIR}/add-member-${name}-${scheme}.png`;
+    await page.screenshot({ path });
+    shots.push(path);
+    await context.close();
+  }
+
+  // 정상: 기본 로스터. 추가 가능(사람 셋·에이전트 하나) + 이미 멤버(hermes).
+  await shoot("normal", null);
+  // 빈: 워크스페이스에 나뿐. 카피 + "멤버 초대하기" 액션(F-1)이 보인다.
+  await shoot("empty", (route) => json(route, { members: [ROSTER[0]] }));
+  // 에러: 로스터 읽기 실패 → 인라인 배너 + 다시 시도.
+  await shoot("error", (route) =>
+    route.fulfill({
+      status: 500,
+      contentType: "application/json",
+      body: JSON.stringify({ error: { message: "roster unavailable" } }),
+    })
+  );
+  // 로딩: 로스터 요청을 영영 붙잡아 스켈레톤이 화면에 남게 한다. 응답하지
+  // 않으므로 fulfill이 없고, 컨텍스트가 닫히면 요청은 그대로 버려진다(닫힌
+  // 컨텍스트에 뒤늦게 응답해 터지는 일이 없다).
+  await shoot("loading", () => new Promise(() => {}));
+
+  return shots;
+}
+
 async function main() {
   if (!existsSync(resolve(WEB_ROOT, "dist/index.html"))) {
     throw new Error("dist/ is missing. Run `npm run capture:design`.");
@@ -4033,6 +4115,7 @@ async function main() {
       if (profile !== "mobile") {
         for (const scheme of ["light", "dark"]) {
           all.push(...(await captureScheme(browser, scheme)));
+          all.push(...(await captureAddMemberScenes(browser, scheme)));
         }
       }
       // 폰 프로파일 (goal B6). 데스크탑 프레임 뒤에 붙는 이유는 회귀를 읽는

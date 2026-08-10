@@ -1,4 +1,12 @@
-import { useCallback, useMemo, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
+import { useNavigate } from "react-router-dom";
 import { Check, Loader2 } from "lucide-react";
 import type { RosterMember } from "@momo/core/lib/api";
 import {
@@ -56,6 +64,7 @@ function CandidateRow({
   failure,
   offline,
   onAdd,
+  onBecameMember,
 }: {
   member: RosterMember;
   directory: Directory;
@@ -64,13 +73,31 @@ function CandidateRow({
   failure: string | undefined;
   offline: boolean;
   onAdd: (memberId: string) => void;
+  /** This row just flipped to "멤버"; the panel decides where the caret goes. */
+  onBecameMember: (memberId: string, rowEl: HTMLElement) => void;
 }) {
   const isAgent = member.kind === "agent";
   const owner = isAgent ? memberFor(directory, member.ownerHumanId) : null;
   const already = isChannelMember(member, channelId);
 
+  // 낙관적 추가로 [추가] 버튼이 "멤버" 표시로 바뀌면 그 버튼은 언마운트되고
+  // 키보드 포커스가 <body>로 떨어진다 — 여러 명을 넣는 피커에서 매번 맨 위부터
+  // Tab을 다시 해야 했다(design-review F-2). 뒤집힘을 커밋 직후(레이아웃 이펙트,
+  // paint 전)에 잡아 패널에 알리고, 패널이 다음 추가 가능 버튼으로 캐럿을
+  // 옮긴다. 같은 프레임에서 옮기므로 포커스가 사라진 프레임이 그려지지 않는다.
+  const rowRef = useRef<HTMLLIElement>(null);
+  const wasAlready = useRef(already);
+  useLayoutEffect(() => {
+    const was = wasAlready.current;
+    wasAlready.current = already;
+    if (!was && already && rowRef.current) {
+      onBecameMember(member.id, rowRef.current);
+    }
+  }, [already, member.id, onBecameMember]);
+
   return (
     <li
+      ref={rowRef}
       className="flex flex-col border-b border-line last:border-b-0"
       data-testid="add-member-row"
       data-member-id={member.id}
@@ -131,7 +158,8 @@ function CandidateRow({
 
       {failure && (
         // 이 멤버에 대한 거절은 이 멤버의 행 아래에 붙는다(토스트 아님). 다시
-        // [추가]를 누르면 훅이 이 문구를 지우고 재시도한다.
+        // [추가]를 누르면 훅이 이 문구를 지우고 재시도한다. role="alert"라 캐럿을
+        // 훔치지 않고도 스크린리더가 실패를 읽는다.
         <p
           className="px-4 pb-2 text-meta text-danger"
           role="alert"
@@ -156,11 +184,20 @@ function AddChannelMemberPanel({
   onOpenChange: (open: boolean) => void;
 }) {
   const { session, workspaceId } = useSession();
+  const navigate = useNavigate();
   const rosterQuery = useDirectory(workspaceId);
   const directory = rosterQuery.directory;
   const { pendingIds, failures, add } = useAddChannelMember(target.id);
   const offline = useOffline();
   const [query, setQuery] = useState("");
+
+  const listRef = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+  // 사용자가 방금 추가를 누른 멤버. 그 행이 "멤버"로 뒤집힐 때에만 캐럿을 옮기고,
+  // 배경 갱신(남이 추가)으로 뒤집힌 행에서는 훔치지 않게 하는 표식이다.
+  const focusAfterFlip = useRef<string | null>(null);
+
+  const anyPending = pendingIds.size > 0;
 
   const roster = {
     pending: rosterQuery.isPending,
@@ -174,6 +211,44 @@ function AddChannelMemberPanel({
     directory.members,
     target.id,
     session.member.id
+  );
+
+  const handleAdd = useCallback(
+    (memberId: string) => {
+      focusAfterFlip.current = memberId;
+      void add(memberId);
+    },
+    [add]
+  );
+
+  const onBecameMember = useCallback(
+    (memberId: string, rowEl: HTMLElement) => {
+      if (focusAfterFlip.current !== memberId) return;
+      focusAfterFlip.current = null;
+      const list = listRef.current;
+      if (!list) return;
+      const buttons = Array.from(
+        list.querySelectorAll<HTMLElement>('[data-testid="add-member-button"]')
+      );
+      // 다음(이 행 뒤) 추가 버튼으로, 없으면 이전 버튼으로, 그것도 없으면(전원
+      // 추가 완료) 검색 칸으로. 한 번의 Tab도 없이 다음 사람을 추가할 수 있다.
+      const following = buttons.find(
+        (b) =>
+          (rowEl.compareDocumentPosition(b) &
+            Node.DOCUMENT_POSITION_FOLLOWING) !==
+          0
+      );
+      const preceding = [...buttons]
+        .reverse()
+        .find(
+          (b) =>
+            (rowEl.compareDocumentPosition(b) &
+              Node.DOCUMENT_POSITION_PRECEDING) !==
+            0
+        );
+      (following ?? preceding ?? searchRef.current)?.focus();
+    },
+    []
   );
 
   const section = useCallback(
@@ -192,14 +267,15 @@ function AddChannelMemberPanel({
                 pending={pendingIds.has(member.id)}
                 failure={failures.get(member.id)}
                 offline={offline}
-                onAdd={add}
+                onAdd={handleAdd}
+                onBecameMember={onBecameMember}
               />
             ))}
           </ul>
         </section>
       );
     },
-    [directory, target.id, pendingIds, failures, offline, add]
+    [directory, target.id, pendingIds, failures, offline, handleAdd, onBecameMember]
   );
 
   let body: ReactNode;
@@ -216,12 +292,26 @@ function AddChannelMemberPanel({
     );
   } else if (groups.total === 0) {
     // 워크스페이스에 나 말고 아무도 없다. 채널에 넣을 사람 자체가 없으므로,
-    // 워크스페이스에 사람을 부르는 것이 다음 행동임을 말한다(그건 설정의
-    // 워크스페이스 초대라 여기서 하지 않는다).
+    // 다음 행동(워크스페이스에 사람을 부르기)으로 데려가는 액션을 하나 둔다 —
+    // 그건 설정의 워크스페이스 초대라, 눌러서 그리 보내고 이 다이얼로그는 닫는다.
+    // 카피만 있고 액션이 없으면 이 배치가 없애려던 막다른 길이 여기서 재발한다
+    // (design-review F-1, 오르트 구름 §4).
     body = (
       <EmptyInvite
         headline="이 워크스페이스에 다른 멤버가 없습니다."
-        detail="설정에서 워크스페이스에 멤버를 초대한 뒤 이 채널에 추가할 수 있습니다."
+        detail="먼저 워크스페이스에 멤버를 초대하면 이 채널에 추가할 수 있습니다."
+        actions={
+          <Button
+            size="sm"
+            onClick={() => {
+              navigate("/settings?section=members");
+              onOpenChange(false);
+            }}
+            data-testid="add-member-invite-workspace"
+          >
+            멤버 초대하기
+          </Button>
+        }
         testId="add-member-empty-workspace"
       />
     );
@@ -258,7 +348,19 @@ function AddChannelMemberPanel({
   }
 
   return (
-    <DialogContent data-testid="add-channel-member-dialog">
+    <DialogContent
+      data-testid="add-channel-member-dialog"
+      // 추가가 진행 중일 때는 닫기를 막는다(CreateChannelDialog와 같은 규칙,
+      // design-review F-3): 열려 있는 패널이 실패를 인라인으로 되돌려 보여주는데,
+      // 그 사이 Esc나 바깥 클릭으로 닫으면 실패가 아무도 안 보는 곳에서 조용히
+      // 롤백된다. 추가는 REST 한 번이라 이 잠금은 짧다.
+      onEscapeKeyDown={(event) => {
+        if (anyPending) event.preventDefault();
+      }}
+      onInteractOutside={(event) => {
+        if (anyPending) event.preventDefault();
+      }}
+    >
       <div className="flex flex-col gap-1 border-b border-line p-4">
         <DialogTitle>멤버 추가</DialogTitle>
         <DialogDescription>
@@ -279,6 +381,7 @@ function AddChannelMemberPanel({
 
       <div className="border-b border-line p-4">
         <Input
+          ref={searchRef}
           type="search"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
@@ -291,6 +394,7 @@ function AddChannelMemberPanel({
       </div>
 
       <div
+        ref={listRef}
         className="min-h-0 flex-1 overflow-y-auto"
         data-testid="add-member-list"
       >
@@ -302,6 +406,7 @@ function AddChannelMemberPanel({
           type="button"
           variant="outline"
           size="sm"
+          disabled={anyPending}
           onClick={() => onOpenChange(false)}
           data-testid="add-member-close"
         >
