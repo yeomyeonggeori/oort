@@ -176,8 +176,8 @@ const SURFACES: Record<SurfaceId, ServerSurface> = {
     fallback:
       "기록은 쌓이고 있습니다. 지금 확인할 수 있는 것은 에이전트가 채널에 남긴 메시지입니다.",
     measured:
-      "2026-08-10 실측(#1223): server-rust/bins/momo-server/src/lib.rs에 읽기 셋이 등록됨 — " +
-      "GET …/channels/{ch}/agent-runs(routes::agent_runs::list — POST와 같은 .route()에 " +
+      "2026-08-10 실측(#1223): server-rust/bins/momo-server/src/lib.rs에 읽기 셋이 등록됨. " +
+      "GET …/channels/{ch}/agent-runs(routes::agent_runs::list. POST와 같은 .route()에 " +
       "얹혀 405가 사라졌다), GET …/agents/{id}/runs(list_by_agent), " +
       "GET …/agent-runs/{id}(detail). 직전 줄은 '쓰기는 있고 읽기 셋이 405/404'였다. " +
       "이 세 경로가 실제로 서 있는지는 clients/web 의 agentRunHistoryRoutes.test.ts 가 " +

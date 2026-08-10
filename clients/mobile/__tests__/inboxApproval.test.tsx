@@ -1038,29 +1038,28 @@ describe('아직 배포되지 않은 서버 (3R N-A)', () => {
   });
 });
 
-describe('반쪽 원장인 「에이전트」 탭 (3R N-B)', () => {
-  it('작업 기록을 아직 못 본다는 사실을 먼저 말하고, 목록은 남긴다', async () => {
-    // 이 탭은 승인 원장과 작업 실행 기록 **두** 원장 위에 서 있는데 이 서버는
-    // 뒤의 것을 읽는 경로가 없다(POST 전용 경로라 GET은 405). 그 사실을 삼키면
-    // 승인 기록만 담긴 목록을 놓고 "조용한 게 정상"이라 말하게 된다.
+describe('더는 반쪽이 아닌 「에이전트」 탭 (3R N-B → #1223)', () => {
+  it('두 원장이 다 서면 반쪽 고지를 걷고, 목록은 그대로 둔다', async () => {
+    // 이 탭은 승인 원장과 작업 실행 기록 **두** 원장 위에 서 있다. #1223 이전에는
+    // 뒤의 것을 읽는 경로가 없어서(POST 전용 경로라 GET 은 405) 여기 반쪽 고지가
+    // 떴다. 그 고지가 없었다면 승인 기록만 담긴 목록을 놓고 "조용한 게 정상"이라
+    // 말하는 화면이 됐을 것이다.
+    //
+    // 지금은 읽기 3경로가 섰고, 그러면 고지가 남아 있는 쪽이 반대 방향의 같은
+    // 거짓말이다: 다 보이는 목록을 반쪽이라 부른다. 판정 자체
+    // (`agentsFeedPartial`)는 코어가 하고 양쪽 가지는 core 스위트가 계속 못으로
+    // 박는다 — 여기서 재는 것은 이 화면이 그 판정을 정말 소비하는가다.
     installFetch();
     await openPendingRow();
     fireEvent.press(screen.getByTestId('inbox-tab-agents'));
 
     await waitFor(() =>
-      expect(screen.getByTestId('inbox-agents-partial')).toBeTruthy(),
+      expect(screen.getByTestId(`feed-row-approval:${PENDING}`)).toBeTruthy(),
     );
-    expect(screen.getByTestId('inbox-agents-partial')).toHaveTextContent(
-      /한 일의 기록을 아직 보여주지 못합니다/,
-    );
-    expect(screen.getByTestId('inbox-agents-partial')).toHaveTextContent(
-      /아래 목록은 승인 기록만 담고 있습니다/,
-    );
-    // 있는 절반은 그대로 보인다.
-    expect(screen.getByTestId(`feed-row-approval:${PENDING}`)).toBeTruthy();
+    expect(screen.queryByTestId('inbox-agents-partial')).toBeNull();
   });
 
-  it('결정 대기 탭에는 그 고지가 없다 — 그 탭은 반쪽이 아니다', async () => {
+  it('결정 대기 탭에도 그 고지가 없다', async () => {
     installFetch();
     await openPendingRow();
     expect(screen.queryByTestId('inbox-agents-partial')).toBeNull();
