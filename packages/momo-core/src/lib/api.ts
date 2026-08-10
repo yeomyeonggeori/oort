@@ -56,6 +56,25 @@ export interface LoginResponse {
 export type MembershipRole = "owner" | "admin" | "member" | "guest";
 
 /**
+ * Declared presence status ③ (ADR-0160). The **durable intent**, not the dot on
+ * screen: `auto` means "no manual override" and resolves to online/offline by
+ * availability, `away`/`dnd` are the two manual overrides. The effective dot is
+ * `f(this, availability)`, computed at the render edge and never stored — the
+ * wire carries only this intent. Human only; an agent's liveness is its
+ * `agent_run`, so its roster row omits the field entirely.
+ */
+export type PresenceStatus = "auto" | "away" | "dnd";
+
+/** The three labels a client may send, for a runtime membership test. */
+export const PRESENCE_STATUSES: readonly PresenceStatus[] = ["auto", "away", "dnd"];
+
+export function isPresenceStatus(value: unknown): value is PresenceStatus {
+  return (
+    value === "auto" || value === "away" || value === "dnd"
+  );
+}
+
+/**
  * Roster entry (GET /roster). Superset of `Member`: adds the agent/human split
  * fields the sidebar and timeline need to attribute a message to a real member
  * (display name, handle, owner) instead of a raw uuid prefix.
@@ -91,6 +110,16 @@ export interface RosterMember {
    * consumer goes through `rosterPaused` rather than touching it directly.
    */
   paused?: boolean;
+  /**
+   * Declared presence status ③ (ADR-0160), human only.
+   *
+   * ABSENT is a real answer, exactly like `paused`: the server carries the
+   * column only for `kind === "human"`, and a server that predates the projection
+   * sends it for nobody. So `undefined` means "no declared status to show" — the
+   * effective dot then falls back to availability alone — and is never read as a
+   * default. Consumers go through `effectivePresence` rather than touching this.
+   */
+  presenceStatus?: PresenceStatus;
   createdAtMs: number;
   updatedAtMs: number;
 }
@@ -113,10 +142,21 @@ export interface RosterMember {
  */
 function sanitizeRosterMember(value: unknown): unknown {
   if (typeof value !== "object" || value === null) return value;
-  const row = value as Record<string, unknown>;
-  if (!("paused" in row) || typeof row.paused === "boolean") return value;
-  const { paused: _unreadable, ...rest } = row;
-  return rest;
+  let row = value as Record<string, unknown>;
+  // A `paused` that is not a boolean drops out (see the doc above), keeping the
+  // member on the roster rather than deleting them over one unreadable column.
+  if ("paused" in row && typeof row.paused !== "boolean") {
+    const { paused: _unreadable, ...rest } = row;
+    row = rest;
+  }
+  // Same treatment for a `presenceStatus` the enum does not name: a status this
+  // client cannot render is dropped to `undefined` (no declared status) rather
+  // than surfaced as a value the effective-dot logic would then have to guess at.
+  if ("presenceStatus" in row && !isPresenceStatus(row.presenceStatus)) {
+    const { presenceStatus: _unknown, ...rest } = row;
+    row = rest;
+  }
+  return row;
 }
 
 function isRosterMember(value: unknown): value is RosterMember {
@@ -934,6 +974,60 @@ export async function fetchRoster(workspaceId: string): Promise<RosterMember[]> 
   return (arrayField(res, "members") ?? [])
     .map(sanitizeRosterMember)
     .filter(isRosterMember);
+}
+
+// ---- Presence (ADR-0160, 사용자 프레즌스 6b) -------------------------------
+//   GET /v1/workspaces/{ws}/presence   — the caller's own declared status
+//   PUT /v1/workspaces/{ws}/presence   — set it (single write path)
+//
+// This is the durable ③ half. Availability ② rides the ephemeral rail and never
+// comes back through this API; the connection ① fact is the client's own
+// `connStatus`. The effective dot is composed on the client via
+// `effectivePresence`.
+
+/**
+ * The four values that actually get rendered — `f(declared, available)`
+ * (ADR-0160 D3). Never stored anywhere; computed at the render edge from the
+ * durable declared status and a live availability boolean.
+ *
+ *   * `dnd` wins outright (it means "do not ping me", true even while connected);
+ *   * `away` next;
+ *   * `auto` resolves by availability: online when available, offline otherwise.
+ *
+ * `declared` may be `undefined` (a server too old to carry it, or a member with
+ * none), in which case only availability decides — online vs offline.
+ */
+export type EffectivePresence = "online" | "away" | "dnd" | "offline";
+
+export function effectivePresence(
+  declared: PresenceStatus | undefined,
+  available: boolean
+): EffectivePresence {
+  if (declared === "dnd") return "dnd";
+  if (declared === "away") return "away";
+  return available ? "online" : "offline";
+}
+
+/** Read the caller's own declared status (auto/away/dnd). */
+export async function fetchPresenceStatus(
+  workspaceId: string
+): Promise<PresenceStatus> {
+  const res = await request<{ status: string }>(
+    `/v1/workspaces/${encodeURIComponent(workspaceId.toLowerCase())}/presence`
+  );
+  return isPresenceStatus(res.status) ? res.status : "auto";
+}
+
+/** Set the caller's own declared status. Broadcasts to co-members server-side. */
+export async function setPresenceStatus(
+  workspaceId: string,
+  status: PresenceStatus
+): Promise<PresenceStatus> {
+  const res = await request<{ status: string }>(
+    `/v1/workspaces/${encodeURIComponent(workspaceId.toLowerCase())}/presence`,
+    { method: "PUT", body: JSON.stringify({ status }) }
+  );
+  return isPresenceStatus(res.status) ? res.status : status;
 }
 
 // ---- 에이전트 만들기 · 채널 배치 -------------------------------------------

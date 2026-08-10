@@ -17,6 +17,8 @@ use momo_db::DbError;
 use sqlx::{PgConnection, Row};
 use uuid::Uuid;
 
+use crate::presence::{decode_optional_presence, PresenceStatus};
+
 /// `member_kind` enum (`001_init.sql:11`). Humans and agents share one table;
 /// this is the sole discriminator.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -493,6 +495,13 @@ pub struct RosterMember {
     /// `instructions`, `enabled_tools`, `triggers` — stays behind its gate, which
     /// is why this is one boolean rather than an embedded profile.
     pub paused: Option<bool>,
+    /// `member.presence_status` — the declared presence ③ of ADR-0160, **human
+    /// only**. `None` for an agent (프레즌스 is 사람 전용, D4) and for a server
+    /// too old to carry the column, so the field is omitted from the wire exactly
+    /// like `paused` is for a human. A booting client reads its co-members'
+    /// declared status from here without a re-fetch (ADR-0160 D2), and computes
+    /// the effective dot as `f(this, availability)` at the render edge.
+    pub presence_status: Option<PresenceStatus>,
     pub created_at_ms: i64,
     pub updated_at_ms: i64,
 }
@@ -522,6 +531,9 @@ fn decode_roster_member(row: &sqlx::postgres::PgRow) -> Result<RosterMember, sql
         max_concurrent_runs: row.try_get("max_concurrent_runs")?,
         max_run_steps: row.try_get("max_run_steps")?,
         paused: row.try_get("paused")?,
+        presence_status: decode_optional_presence(
+            row.try_get::<Option<String>, _>("presence_status")?.as_deref(),
+        ),
         created_at_ms: row.try_get("created_at_ms")?,
         updated_at_ms: row.try_get("updated_at_ms")?,
     })
@@ -599,6 +611,7 @@ pub async fn list_workspace_roster(
                 a.max_concurrent_runs, \
                 a.max_run_steps, \
                 CASE WHEN m.kind = 'agent' THEN COALESCE(ap.paused, false) END AS paused, \
+                CASE WHEN m.kind = 'human' THEN m.presence_status::text END AS presence_status, \
                 floor(extract(epoch from m.created_at) * 1000)::bigint AS created_at_ms, \
                 floor(extract(epoch from m.updated_at) * 1000)::bigint AS updated_at_ms \
            FROM member m \

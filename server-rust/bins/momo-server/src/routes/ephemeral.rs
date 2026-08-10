@@ -67,12 +67,16 @@ use momo_auth::{
     EPHEMERAL_GRANT_TTL_SECONDS,
 };
 use momo_ephemeral::{
-    ephemeral_channel, now_epoch_ms, EphemeralPublishOutcome, EphemeralSignal, TypingSignal,
-    TYPING_AGGREGATE_THRESHOLD, TYPING_REPUBLISH_INTERVAL_MS, TYPING_SIGNAL_TTL_MS,
+    ephemeral_channel, now_epoch_ms, EphemeralPublishOutcome, EphemeralSignal, PresenceSignal,
+    TypingSignal, PRESENCE_REPUBLISH_INTERVAL_MS, PRESENCE_SIGNAL_TTL_MS, TYPING_AGGREGATE_THRESHOLD,
+    TYPING_REPUBLISH_INTERVAL_MS, TYPING_SIGNAL_TTL_MS,
 };
 use momo_messaging::is_channel_member;
 
-use crate::dto::{TypingGrantResponse, TypingSignalRequest, TypingSignalResponse};
+use crate::dto::{
+    AvailabilitySignalRequest, AvailabilitySignalResponse, TypingGrantResponse,
+    TypingSignalRequest, TypingSignalResponse,
+};
 use crate::error::ApiError;
 use crate::rate_limit::Verdict;
 use crate::routes::shared::{
@@ -96,6 +100,11 @@ fn ephemeral_disabled() -> ApiError {
 /// unnecessary here but wrong.
 const AGENTS_DO_NOT_TYPE: &str =
     "typing is a human signal; an agent's work is its agent_run (ADR-0149)";
+
+/// Human-only for the same reason typing is (ADR-0160 D4): 프레즌스 is 사람 전용,
+/// an agent's liveness is its `agent_run`.
+const AGENTS_HAVE_NO_PRESENCE: &str =
+    "presence is a human signal; an agent's liveness is its agent_run (ADR-0160)";
 
 /// Apply one limiter axis (guard 5). `None` = allowed; `Some(response)` is the
 /// 429 to return.
@@ -321,6 +330,105 @@ pub async fn typing(
     ))
 }
 
+// ---------------------------------------------------------------------------
+// POST /v1/workspaces/{ws}/channels/{ch}/availability  (ADR-0160 ② 가용성)
+// ---------------------------------------------------------------------------
+
+/// Publish one availability(②) heartbeat. **Issues no database statement of any
+/// kind** — the exact same 휘발 discipline as [`typing`], with the same order and
+/// the same channel-scoped grant.
+///
+/// This is the transport half of ADR-0160's presence model. The client
+/// republishes while its own connection is up (the connection edge is the
+/// availability source, ADR-0160 미결 #1), and the signal's expiry is the offline
+/// transition — the server holds no idle timer and no map of who is online. The
+/// effective dot a co-member renders is `f(this availability, that member's
+/// durable declared status)`; this route carries only the availability half, and
+/// carries it without touching Postgres.
+pub async fn availability(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path((workspace, channel)): Path<(String, String)>,
+    Json(request): Json<AvailabilitySignalRequest>,
+) -> Result<(StatusCode, Json<AvailabilitySignalResponse>), axum::response::Response> {
+    use axum::response::IntoResponse;
+
+    let Some(publisher) = state.ephemeral.publisher.as_ref() else {
+        return Err(ephemeral_disabled().into_response());
+    };
+    require_human(&principal, AGENTS_HAVE_NO_PRESENCE).map_err(IntoResponse::into_response)?;
+    let workspace_id =
+        workspace_scope(&workspace, &principal).map_err(IntoResponse::into_response)?;
+    let channel_id =
+        path_uuid(&channel, "invalid channel id").map_err(IntoResponse::into_response)?;
+    let member_id = principal.member_id;
+
+    // Guard 5, both axes, on their own keys so an availability heartbeat and a
+    // typing signal do not share a budget (a member typing hard must not exhaust
+    // the budget that keeps them showing as online).
+    if let Some(refusal) = gate(
+        &state,
+        &format!("eph:presence:{member_id}:{channel_id}"),
+        state.ephemeral.settings.per_channel_limit,
+        state.ephemeral.settings.window_seconds,
+    ) {
+        return Err(refusal);
+    }
+    if let Some(refusal) = gate(
+        &state,
+        &format!("eph:presence:{member_id}"),
+        state.ephemeral.settings.per_member_limit,
+        state.ephemeral.settings.window_seconds,
+    ) {
+        return Err(refusal);
+    }
+
+    verify_ephemeral_grant(
+        &request.grant,
+        EphemeralGrantScope {
+            member_id,
+            workspace_id,
+            channel_id,
+        },
+        &state.ephemeral_grant_key,
+    )
+    .map_err(|rejection| ApiError::forbidden(rejection.message()).into_response())?;
+
+    let now_ms = now_epoch_ms();
+    let signal = EphemeralSignal::Presence(PresenceSignal::starting_at(
+        workspace_id,
+        channel_id,
+        member_id,
+        now_ms,
+        PRESENCE_SIGNAL_TTL_MS,
+    ));
+    let channel_name = signal.channel();
+    let expires_at_ms = signal.expires_at_ms();
+
+    match publisher.publish(&signal).await {
+        EphemeralPublishOutcome::Ok => {}
+        EphemeralPublishOutcome::Unavailable(reason) => {
+            tracing::warn!(%reason, "availability publish unavailable");
+            return Err(
+                ApiError::new(StatusCode::BAD_GATEWAY, "realtime transport unavailable")
+                    .into_response(),
+            );
+        }
+        EphemeralPublishOutcome::Rejected(reason) => {
+            return Err(ApiError::internal("ephemeral.availability", reason).into_response());
+        }
+    }
+
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(AvailabilitySignalResponse {
+            channel: channel_name,
+            expires_at_ms,
+            republish_after_ms: PRESENCE_REPUBLISH_INTERVAL_MS,
+        }),
+    ))
+}
+
 /// The ids a `typing:` channel names, for the tests and the subscribe parser to
 /// agree on. Kept here so `momo-ephemeral` needs no parser at all — it only ever
 /// builds names.
@@ -403,6 +511,25 @@ mod tests {
         assert_ne!(
             key(member, channel),
             format!("eph:grant:{member}:{channel}")
+        );
+        // …and availability has its own budget, separate from typing: a member
+        // typing at full rate must not silence their own online heartbeat.
+        assert_ne!(
+            key(member, channel),
+            format!("eph:presence:{member}:{channel}")
+        );
+    }
+
+    /// ADR-0160 D4, enforced rather than documented: an agent principal is
+    /// refused an availability heartbeat before anything else happens.
+    #[test]
+    fn an_agent_may_not_signal_that_it_is_available() {
+        let error = require_human(&principal(PrincipalKind::Agent), AGENTS_HAVE_NO_PRESENCE)
+            .expect_err("403");
+        assert_eq!(error.status, StatusCode::FORBIDDEN);
+        assert!(error.message.contains("agent_run"), "{}", error.message);
+        assert!(
+            require_human(&principal(PrincipalKind::Human), AGENTS_HAVE_NO_PRESENCE).is_ok()
         );
     }
 }

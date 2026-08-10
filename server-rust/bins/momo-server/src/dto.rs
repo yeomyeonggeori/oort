@@ -1623,6 +1623,15 @@ pub struct RosterMemberDto {
     /// not look identical to a list that draws a sleep badge.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub paused: Option<bool>,
+    /// `member.presence_status` — ADR-0160 ③, human only (`auto`/`away`/`dnd`).
+    ///
+    /// Skipped for an agent (프레즌스 사람 전용, D4) like every other kind-specific
+    /// field, and skipped by a server too old to carry it, so the two are
+    /// indistinguishable on the wire and both read as "no declared status". The
+    /// client computes the effective dot as `f(this, availability)` at the render
+    /// edge; the wire never carries the effective value, only this durable intent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub presence_status: Option<String>,
     pub created_at_ms: i64,
     pub updated_at_ms: i64,
 }
@@ -1897,6 +1906,57 @@ pub struct TypingSignalResponse {
     pub channel: String,
     /// When subscribers will drop this signal. The publisher is told so it can
     /// render its own state from the same clock everyone else uses.
+    pub expires_at_ms: i64,
+    pub republish_after_ms: i64,
+}
+
+// ---------------------------------------------------------------------------
+// Presence — ADR-0160 (사용자 프레즌스 6b)
+// ---------------------------------------------------------------------------
+
+/// `PUT /v1/workspaces/{ws}/presence` request body — the declared status ③.
+///
+/// The member is the credential's, never the body's: there is no `memberId`
+/// field, the same discipline read-state keeps, so one person cannot set
+/// another's status. `deny_unknown_fields` refuses a smuggled owner id outright
+/// rather than ignoring it.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SetPresenceRequest {
+    /// One of `auto` / `away` / `dnd`. A value the enum does not name is a 400
+    /// with a sentence, not a serde reject, so the client learns which field was
+    /// wrong.
+    pub status: String,
+}
+
+/// `GET`/`PUT /v1/workspaces/{ws}/presence` response — the caller's own durable
+/// declared status. Availability(②) and the effective dot are **not** here: the
+/// server does not know if the caller is connected, and the effective value is
+/// computed at the render edge and never stored (ADR-0160 D3).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PresenceStatusResponse {
+    pub status: String,
+}
+
+/// `POST /v1/workspaces/{ws}/channels/{ch}/availability` request body — the
+/// 가용성(②) heartbeat. Reuses the same channel-scoped grant the typing route
+/// mints (`EphemeralGrantScope` is `{member, workspace, channel}`, not
+/// signal-specific), so one grant authorizes both ephemeral signals on a channel
+/// and there is no second capability surface to keep in step.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AvailabilitySignalRequest {
+    pub grant: String,
+}
+
+/// `POST …/channels/{ch}/availability` response (202).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AvailabilitySignalResponse {
+    pub channel: String,
+    /// When subscribers will drop this member to offline unless a fresher
+    /// heartbeat arrives. Same clock everyone renders from.
     pub expires_at_ms: i64,
     pub republish_after_ms: i64,
 }

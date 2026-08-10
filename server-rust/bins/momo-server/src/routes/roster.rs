@@ -84,6 +84,9 @@ fn roster_dto(member: &RosterMember) -> RosterMemberDto {
         max_concurrent_runs: member.max_concurrent_runs,
         max_run_steps: member.max_run_steps,
         paused: member.paused,
+        presence_status: member
+            .presence_status
+            .map(|status| status.as_db_label().to_string()),
         created_at_ms: member.created_at_ms,
         updated_at_ms: member.updated_at_ms,
     }
@@ -144,7 +147,7 @@ pub async fn roster(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use momo_messaging::{ROSTER_LIMIT_DEFAULT, ROSTER_LIMIT_MAX};
+    use momo_messaging::{PresenceStatus, ROSTER_LIMIT_DEFAULT, ROSTER_LIMIT_MAX};
     use uuid::Uuid;
 
     fn query(kind: Option<&str>, member_kind: Option<&str>, limit: Option<&str>) -> RosterQuery {
@@ -202,6 +205,9 @@ mod tests {
             // (`CASE WHEN m.kind = 'agent' …`), so the fixture mirrors that
             // rather than defaulting both kinds to the same thing.
             paused: (kind == MemberKind::Agent).then_some(false),
+            // Presence is the mirror image: a human carries a declared status,
+            // an agent carries NULL here (프레즌스 사람 전용, ADR-0160 D4).
+            presence_status: (kind == MemberKind::Human).then_some(PresenceStatus::Auto),
             created_at_ms: 1_700_000_000_000,
             updated_at_ms: 1_700_000_000_001,
         }
@@ -252,6 +258,31 @@ mod tests {
         assert_eq!(json["kind"], "human");
         assert!(json.get("origin").is_none(), "{json}");
         assert_eq!(json["role"], "member");
+    }
+
+    /// ADR-0160 D4: 프레즌스 is 사람 전용. A human row carries `presenceStatus`,
+    /// an agent row omits it entirely — the exact mirror of how `paused` is
+    /// agent-only. A booting client reads a co-member's declared status from this
+    /// field without a second request.
+    #[test]
+    fn only_a_human_row_reports_presence_status() {
+        let human = serde_json::to_value(roster_dto(&member(MemberKind::Human))).expect("serialize");
+        assert_eq!(
+            human["presenceStatus"],
+            serde_json::json!("auto"),
+            "a person carries their declared status: {human}"
+        );
+
+        let mut away = member(MemberKind::Human);
+        away.presence_status = Some(PresenceStatus::Away);
+        let away = serde_json::to_value(roster_dto(&away)).expect("serialize");
+        assert_eq!(away["presenceStatus"], serde_json::json!("away"));
+
+        let agent = serde_json::to_value(roster_dto(&member(MemberKind::Agent))).expect("serialize");
+        assert!(
+            agent.get("presenceStatus").is_none(),
+            "an agent has no declared presence, its liveness is agent_run: {agent}"
+        );
     }
 
     /// goal SRV-R2: an agent row always carries `paused`, **including when it is

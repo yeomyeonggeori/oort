@@ -53,6 +53,7 @@ pub mod identity;
 pub mod interaction;
 pub mod message;
 pub mod notification_rule;
+pub mod presence;
 pub mod read_state;
 pub mod refine;
 pub mod search;
@@ -102,6 +103,10 @@ pub use interaction::{
     ReactionEmojiInvalid, ReactionSnapshot, StreamCloseOutcome, StreamEdit, StreamOutcome,
     CHANNEL_PIN_LIMIT, MESSAGE_REACTION_LIMIT, OPENING_STREAM_REV, REACTION_EMOJI_MAX_CHARS,
     STREAM_PROPS_KEY,
+};
+pub use presence::{
+    build_presence_payload, decode_optional_presence, presence_status_for,
+    set_presence_status_in_tx, PresenceStatus, PresenceUpdate, PRESENCE_BROADCAST_TYPE,
 };
 pub use message::{
     agent_auto_reply_streak_in_tx, agent_context_window_in_tx, build_broadcast_payload,

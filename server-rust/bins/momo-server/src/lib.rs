@@ -543,6 +543,17 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/channels/{ch}/typing",
             post(routes::ephemeral::typing),
         )
+        // Presence (ADR-0160, 프레즌스 6b). Declared status ③ is durable
+        // (REST→PG→outbox), availability ② rides the same channel-scoped grant
+        // the typing route mints and the same 휘발 rail beside it.
+        .route(
+            "/v1/workspaces/{ws}/presence",
+            get(routes::presence::get_presence).put(routes::presence::set_presence),
+        )
+        .route(
+            "/v1/workspaces/{ws}/channels/{ch}/availability",
+            post(routes::ephemeral::availability),
+        )
         // messenger breadth (B1.2) — DM, read state, search. All three sit
         // behind the same credential gate as messages: there is no anonymous
         // read of a workspace's conversations.

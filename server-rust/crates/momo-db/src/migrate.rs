@@ -1,7 +1,7 @@
-//! Migration runner — applies the existing 66 SQL files **in place, unmodified**
+//! Migration runner — applies the existing 68 SQL files **in place, unmodified**
 //! via `psql`, matching `scripts/migrate.sh` (L4 §8.7 canonical mechanism).
 //!
-//! ADR-0145 / D2 §3: the 66 migrations under `server/Migrations/NNN_*.sql` are
+//! ADR-0145 / D2 §3: the 68 migrations under `server/Migrations/NNN_*.sql` are
 //! Postgres DDL, language independent, and are the enforcement layer we inherit.
 //!
 //! **Why psql, not `sqlx::raw_sql`.** Several seed migrations (002/006/012) use
@@ -332,25 +332,29 @@ mod tests {
     /// ADR-0124 증보 1's `notification_rule` — the user-editable half of the
     /// notifier's decision tree. 067 is ADR-0161 D5's `workspace_avatar_media` —
     /// the attachment lifecycle re-aimed at a workspace (avatar upload/complete +
-    /// `workspace.avatar_media_id`).
+    /// `workspace.avatar_media_id`). 068 is ADR-0160 ③'s `member.presence_status`
+    /// — the durable declared-presence column (사용자 프레즌스 6b), the first the
+    /// presence feature added.
     ///
-    /// 066/067 are the collision this test's own docstring predicted: two
-    /// parallel batches both claimed 066, and the second to land renumbered on
-    /// rebase rather than leaving a gap. That is the intended resolution — the
-    /// contiguity assertion below is what forces it to be noticed at all.
+    /// 066/067/068 are the collision this test's own docstring predicted: three
+    /// parallel batches of the same review round each claimed the next free
+    /// number, and every one after the first renumbered on rebase rather than
+    /// leaving a gap. That is the intended resolution — the contiguity assertion
+    /// below is what forces it to be noticed at all, and it is what caught this
+    /// one: presence was authored as 066 against a tree where 065 was the head.
     #[test]
-    fn discovers_contiguous_migrations_001_to_067() {
+    fn discovers_contiguous_migrations_001_to_068() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
         assert_eq!(
             migrations.len(),
-            67,
-            "expected 67 migrations under {}",
+            68,
+            "expected 68 migrations under {}",
             dir.display()
         );
         assert_eq!(migrations.first().unwrap().version, 1);
-        assert_eq!(migrations.last().unwrap().version, 67);
+        assert_eq!(migrations.last().unwrap().version, 68);
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
 
         for (i, migration) in migrations.iter().enumerate() {

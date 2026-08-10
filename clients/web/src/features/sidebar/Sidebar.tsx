@@ -53,6 +53,7 @@ import { UpdateBadge } from "@/features/updates/UpdateBadge";
 import { SidebarRow, SidebarSection } from "./SidebarRow";
 import { openChannelId } from "./openChannel";
 import { WorkspaceRail } from "./WorkspaceRail";
+import { PresenceControl } from "./PresenceControl";
 import { connectionCopy, connectionDotClass } from "./connStatusIndicator";
 import { Button } from "@/design/ui/button";
 import { cn } from "@/design/lib/cn";
@@ -526,21 +527,25 @@ export function Sidebar({
             Renders nothing at all unless there is something to act on. */}
         <UpdateBadge />
 
-        {/* The identity row is "who I am". The connection dot (①) moved here from
-            the workspace rail (검수 #6 / 프레즌스 6a) because "am I attached" reads
-            truest next to identity; the load-bearing disconnect signal stays with
-            the shell's ConnectionBanner, so nothing is lost on any viewport.
-            6b seam: the self declared-status control (away/dnd, ADR-0160 ③) lands
-            adjacent here without moving the dot — the avatar below becomes its
-            click target, or a button slot opens between the name and the dot. 6a
-            adds no presence vocabulary; only the connection indicator moved. */}
+        {/* The identity row is "who I am". Two indicators sit here, and ADR-0160
+            keeps them deliberately apart (guard 6):
+            • the connection dot (①) moved here in 6a because "am I attached" reads
+              truest next to identity; the load-bearing disconnect signal stays
+              with the shell's ConnectionBanner, so nothing is lost on any
+              viewport;
+            • the presence control (③, 프레즌스 6b) is the avatar itself, now the
+              click target for the self status chip + change dropdown the 6a move
+              left room for. It carries the declared status (auto/away/dnd) and an
+              effective badge, NOT the connection fact. One is near the gear, one
+              is on the avatar, so the two never read as the same thing. */}
         <div className="safe-area-bottom flex items-center gap-2 border-t border-line p-2">
-          <span
-            className="flex size-6 shrink-0 items-center justify-center rounded-sm bg-surface-hover text-meta font-semibold"
-            aria-hidden="true"
-          >
-            {selfName.slice(0, 1)}
-          </span>
+          <PresenceControl
+            workspaceId={workspaceId}
+            selfMemberId={session.member.id}
+            selfMember={selfMember}
+            selfName={selfName}
+            connected={connStatus === "connected"}
+          />
           <span className="min-w-0 flex-1 truncate text-body" data-testid="self-name">
             {selfName}
           </span>

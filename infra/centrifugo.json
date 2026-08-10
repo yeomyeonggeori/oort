@@ -58,6 +58,13 @@
         "history_ttl": "0s",
         "subscribe_proxy_enabled": true,
         "channel_regex": "^ws[0-9A-Fa-f-]{36}\\.[0-9A-Fa-f-]{36}$"
+      },
+      {
+        "name": "presence",
+        "history_size": 0,
+        "history_ttl": "0s",
+        "subscribe_proxy_enabled": true,
+        "channel_regex": "^ws[0-9A-Fa-f-]{36}\\.[0-9A-Fa-f-]{36}$"
       }
     ],
     "proxy": {
