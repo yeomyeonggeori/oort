@@ -237,6 +237,22 @@ jobs:
         run: npm run test --workspace @momo/core
 
       - name: test — clients/web (vitest)
+        # TZ 고정은 **임시 조치**다. 근거를 남긴다(런 31364003821, 이 확장의
+        # 첫 런):`src/features/settings/quotaModel.test.ts`가 UTC 인스턴트를
+        # 넣고 KST로 렌더된 문자열을 단정한다(`"2026-07-26T13:00:00Z"` →
+        # `"22:00"`, 주석에도 "05:00 KST"라 적혀 있다). 그런데 타임존을 어디에도
+        # 고정하지 않아서 **개발 머신이 Asia/Seoul이라는 사실에 의존**하고
+        # 있었다. 러너는 UTC라 9시간 어긋나 9개가 빨강이 됐다 — 이 스위트가
+        # 서울 밖에서 돈 것이 이번이 처음이라 지금까지 아무도 못 봤다.
+        # (50파일 중 정확히 이 1파일. 나머지 49 + core + mobile은 UTC에서 초록.)
+        #
+        # 여기서 TZ를 박는 것은 러너를 개발 머신에 맞추는 것일 뿐, 결함을
+        # 고치는 게 아니다. 정본 수리는 `clients/web` 몫이다(테스트가 타임존을
+        # 스스로 고정하거나, KST 단정을 걷어내거나) — 그 전까지는 다른 표준시의
+        # 외부 기여자가 로컬에서 `npm test`를 돌리면 여전히 빨강이다.
+        # PR 본문 §5 적립 6.
+        env:
+          TZ: Asia/Seoul
         run: npm --prefix clients/web run test
 
       - name: test — clients/mobile (jest)
