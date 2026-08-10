@@ -1,7 +1,7 @@
-//! Migration runner — applies the existing 64 SQL files **in place, unmodified**
+//! Migration runner — applies the existing 65 SQL files **in place, unmodified**
 //! via `psql`, matching `scripts/migrate.sh` (L4 §8.7 canonical mechanism).
 //!
-//! ADR-0145 / D2 §3: the 64 migrations under `server/Migrations/NNN_*.sql` are
+//! ADR-0145 / D2 §3: the 65 migrations under `server/Migrations/NNN_*.sql` are
 //! Postgres DDL, language independent, and are the enforcement layer we inherit.
 //!
 //! **Why psql, not `sqlx::raw_sql`.** Several seed migrations (002/006/012) use
@@ -326,20 +326,22 @@ mod tests {
     /// the write helper the outbound webhook path calls once a payload has
     /// actually left for an external host. 064 is 이슈 #1234's
     /// `human_email_normalized_ck` — the constraint that lets the login lookup
-    /// normalise only its input and still reach every stored address.
+    /// normalise only its input and still reach every stored address. 065 is 이슈
+    /// #1252's `human_email_norm_uniq` — the same address uniqueness, said by the
+    /// uniqueness constraint itself instead of borrowed from 064's CHECK.
     #[test]
-    fn discovers_contiguous_migrations_001_to_064() {
+    fn discovers_contiguous_migrations_001_to_065() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
         assert_eq!(
             migrations.len(),
-            64,
-            "expected 64 migrations under {}",
+            65,
+            "expected 65 migrations under {}",
             dir.display()
         );
         assert_eq!(migrations.first().unwrap().version, 1);
-        assert_eq!(migrations.last().unwrap().version, 64);
+        assert_eq!(migrations.last().unwrap().version, 65);
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
 
         for (i, migration) in migrations.iter().enumerate() {

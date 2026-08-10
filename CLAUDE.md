@@ -27,4 +27,4 @@
 - 티켓은 핸드오프 패킷(`docs/planning/handoffs/`) 없이 worker에 넘기지 않는다.
 - planner는 자기 planning ID의 ADR/research만 수정하고, 공용 정본과 GitHub Issue는 성재 승인 뒤 `momo-main`이 통합한다.
 - 머지는 순차, worker는 merge/close 금지, `schema_v0.sql` 수정·이동 금지, 시크릿 커밋 금지.
-- UI 변경 리뷰 시 `momo-design-taste` 스킬 + design-review 에이전트 (Blocker 0).
+- UI 변경 리뷰 시 `momo-design-taste` 스킬(표면 라우터 — 웹/데스크톱은 `momo-design-taste-web`, 폰은 정본 `docs/design-system/README.md`) + design-review 에이전트 (Blocker 0).

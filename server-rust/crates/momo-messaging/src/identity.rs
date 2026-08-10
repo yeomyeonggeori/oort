@@ -340,13 +340,21 @@ pub enum PasswordLogin {
 /// measured rather than assumed:
 ///
 /// * `lower(btrim(h.email)) = lower(btrim($2))` would fold the column too, and
-///   because `human_email_uniq` is case-**sensitive** a workspace can hold both
-///   `Twin@Example.com` and `twin@example.com` (verified by insert). That shape
-///   matches *both* rows, and with no `ORDER BY` the winner is whatever the plan
-///   yields — signing someone into an arbitrary one of two accounts. That is the
-///   failure `resolve_login_workspace` already refuses by name.
-/// * The parameter form constant-folds and keeps `human_email_uniq` as an
+///   at the time this was written the only uniqueness on the table was
+///   case-**sensitive**, so a workspace could hold both `Twin@Example.com` and
+///   `twin@example.com` (verified by insert). That shape matches *both* rows, and
+///   with no `ORDER BY` the winner is whatever the plan yields — signing someone
+///   into an arbitrary one of two accounts. That is the failure
+///   `resolve_login_workspace` already refuses by name. Migration 065's
+///   `human_email_norm_uniq` has since made the pair unstorable, so the column
+///   form is no longer *ambiguous* — but it is still slower (below) and still
+///   states the comparison in a second dialect.
+/// * The parameter form constant-folds and keeps a plain `(workspace_id, email)`
+///   b-tree — `human_email_uniq` before 065, `human_email_idx` after it, which is
+///   why 065 leaves that index behind when it retires the constraint — as an
 ///   `Index Cond`; the column form degrades to a `Filter` over the whole index.
+///   A functional index on `lower(btrim(email))` does not help here: the planner
+///   cannot derive `email = lower(btrim(email))` from 064's CHECK.
 ///
 /// Using SQL's own `lower(btrim(...))` rather than Rust's `trim().to_lowercase()`
 /// keeps this comparison byte-identical to what the write paths produced —

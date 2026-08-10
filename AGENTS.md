@@ -170,7 +170,7 @@ Closes #<issue>
 - **절대 하지 말 것:** 시크릿 커밋(`.env`, `.env.worktree`), `schema_v0.sql` 수정/이동, `.build/`·`*.resolved`·`DerivedData/`·`.swiftpm/` 커밋, 무관한 리팩터, 의존성 메이저 임의 변경, 다른 패키지 깨기, **게이트(M7) PASS 기록 전 `release-*.yml` 트리거**(§7).
 - **Rust:** `rustfmt` 기본값(`cargo fmt`), clippy 경고 0(`-D warnings`). 도메인은 crate 경계로 가른다 — 쓰기경로는 `momo-messaging`, 발행은 `momo-outbox`. 쓰기 경로는 **단일 트랜잭션**, `sqlx` 런타임 쿼리 API(컴파일타임 `query!` 매크로 금지 — 라이브 DB 없이 빌드돼야 한다).
 - **TypeScript:** 도메인 모델은 `@momo/core`에만 두고 웹·폰이 import(사본 금지 — 사본이 갈라진 자리가 U4-6 B1이다). 생성 타입(`clients/web-legacy/src/api/schema.d.ts` — 서빙 산출물 쪽)은 손으로 고치지 말고 `docs/api/openapi.yaml`에서 재생성(`scripts/verify_web_generated_types.sh`가 드리프트를 잡는다).
-- **UI 작업:** 웹은 `.claude/skills/momo-design-taste-web/SKILL.md`, macOS(은퇴 중)는 `momo-design-taste`. 하드 룰(시맨틱 컬러/텍스트 롤/스페이싱 스케일/AI-Tells 금지)과 mechanical pre-flight를 준수하고, 사람 리뷰 요청 전 design-review 리포트(Blocker 0)를 PR evidence에 포함한다.
+- **UI 작업:** `.claude/skills/momo-design-taste/SKILL.md`가 표면 라우터다 — 웹·데스크톱(`clients/desktop`은 `clients/web/dist`를 그대로 낸다)은 `momo-design-taste-web`, 폰(`clients/mobile`)은 전용 dialect가 **없고** 정본 `docs/design-system/README.md` + `clients/mobile/src/design/tokens.ts`가 규칙이다. 하드 룰(토큰 색/텍스트 롤/스페이싱 스케일/AI-Tells 금지)과 mechanical pre-flight(`scripts/design_preflight_web.sh` — 폰에는 없으니 리포트에 그렇게 적는다)를 준수하고, 사람 리뷰 요청 전 design-review 리포트(Blocker 0)를 PR evidence에 포함한다.
 
 ## 6. 다음 티켓 선택법 (자율 picker)
 진실 원천: **ROADMAP.md(마일스톤 순서·의존) → BUILD_TICKETS.md(STEPS) → 티켓 deps**.
