@@ -53,7 +53,7 @@ export function WorkspaceRail({
         to="/settings"
         aria-label="워크스페이스 추가"
         title="워크스페이스 추가"
-        className="flex size-6 items-center justify-center rounded-sm border border-line-strong text-ink-muted transition-colors hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+        className="flex size-6 items-center justify-center rounded-sm border border-line-strong text-ink-muted transition-colors hover:bg-surface-hover focus-visible:focus-ring"
       >
         <Plus className="size-4" />
       </Link>

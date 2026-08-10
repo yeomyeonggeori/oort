@@ -134,7 +134,7 @@ export function MessageActionColumn({
               title="메시지 액션"
               className={cn(
                 "absolute right-0 top-0 flex size-control-sm items-center justify-center rounded-sm text-ink-muted transition-opacity",
-                "hover:bg-surface-hover hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
+                "hover:bg-surface-hover hover:text-ink focus-visible:focus-ring",
                 // Invisible and un-clickable until the row is under the pointer
                 // or holds focus. `pointer-events-none` matters: an invisible
                 // button that still takes clicks is a trap in the gutter.
@@ -270,7 +270,7 @@ function SheetAction({
       data-testid={testId}
       onClick={onSelect}
       className={cn(
-        "tap-target flex w-full items-center gap-3 rounded-sm px-3 text-body transition-colors hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
+        "tap-target flex w-full items-center gap-3 rounded-sm px-3 text-body transition-colors hover:bg-surface-hover focus-visible:focus-ring",
         tone === "danger" ? "text-danger" : "text-ink"
       )}
     >
@@ -330,7 +330,7 @@ export function MessageActionSheet({
                   callbacks.onReact(emoji);
                   close();
                 }}
-                className="tap-target flex items-center justify-center rounded-sm text-title transition-colors hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+                className="tap-target flex items-center justify-center rounded-sm text-title transition-colors hover:bg-surface-hover focus-visible:focus-ring"
               >
                 <span aria-hidden="true">{emoji}</span>
               </button>
@@ -343,7 +343,7 @@ export function MessageActionSheet({
                 close();
                 onOpenPicker();
               }}
-              className="tap-target flex items-center justify-center rounded-sm px-3 text-ink-muted transition-colors hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+              className="tap-target flex items-center justify-center rounded-sm px-3 text-ink-muted transition-colors hover:bg-surface-hover focus-visible:focus-ring"
             >
               <Smile className="size-4" aria-hidden="true" />
             </button>
@@ -465,7 +465,7 @@ export function ReactionPickerDialog({
                 onPick(emoji);
                 onOpenChange(false);
               }}
-              className="tap-target flex size-control items-center justify-center rounded-sm text-title transition-colors hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+              className="tap-target flex size-control items-center justify-center rounded-sm text-title transition-colors hover:bg-surface-hover focus-visible:focus-ring"
             >
               <span aria-hidden="true">{emoji}</span>
             </button>

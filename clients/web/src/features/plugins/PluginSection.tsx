@@ -379,8 +379,8 @@ export function PluginSection({ offline }: { offline: boolean }) {
                     }}
                     aria-current={active ? "true" : undefined}
                     className={active
-                      ? "plugin-marketplace-row flex w-full flex-col gap-2 bg-accent-soft p-3 text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
-                      : "plugin-marketplace-row flex w-full flex-col gap-2 p-3 text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:cursor-wait"}
+                      ? "plugin-marketplace-row flex w-full flex-col gap-2 bg-accent-soft p-3 text-left focus-visible:focus-ring"
+                      : "plugin-marketplace-row flex w-full flex-col gap-2 p-3 text-left focus-visible:focus-ring disabled:cursor-wait"}
                   >
                     <span className="flex min-w-0 flex-wrap items-center gap-2">
                       <span className="flex size-control shrink-0 items-center justify-center rounded-sm border border-line bg-surface-raised text-body font-semibold text-ink" aria-hidden="true">
@@ -921,7 +921,7 @@ function DetailRow({ label, value }: { label: string; value: string }) {
 }
 
 function DetailLink({ label, href }: { label: string; href: string }) {
-  return <div className="flex min-w-0 flex-col gap-px"><dt className="text-meta text-ink-muted">{label}</dt><dd><a className="break-all text-body text-ink underline decoration-line-strong underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent" href={href} rel="noreferrer" target="_blank">{href}</a></dd></div>;
+  return <div className="flex min-w-0 flex-col gap-px"><dt className="text-meta text-ink-muted">{label}</dt><dd><a className="break-all text-body text-ink underline decoration-line-strong underline-offset-2 focus-visible:focus-ring" href={href} rel="noreferrer" target="_blank">{href}</a></dd></div>;
 }
 
 function PluginScopeConsentDialog({
@@ -1073,7 +1073,7 @@ function PluginScopeConsentDialog({
                             ? [...current, scope]
                             : current.filter((item) => item !== scope));
                         }}
-                        className="mt-px size-4 shrink-0 rounded-sm border-line-strong accent-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+                        className="mt-px size-4 shrink-0 rounded-sm border-line-strong accent-accent focus-visible:focus-ring"
                         data-testid={`plugin-scope-${scope}`}
                       />
                       <span className="flex min-w-0 flex-col gap-1">

@@ -10,7 +10,7 @@ import { cn } from "@/design/lib/cn";
 // 유틸리티가 아무 규칙도 갖지 않으므로 목록 밀도는 그대로다.
 const rowClass =
   "tap-target flex w-full items-center gap-2 rounded-sm px-2 py-1 text-left text-body " +
-  "transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent";
+  "transition-colors focus-visible:focus-ring";
 
 const inactiveClass =
   "text-ink hover:bg-surface-hover";

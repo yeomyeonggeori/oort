@@ -558,7 +558,7 @@ export function Timeline({
                   : "smooth",
               });
             }}
-            className="pointer-events-auto flex h-control-sm items-center gap-2 rounded-sm border border-line-strong bg-surface-raised px-3 text-meta text-ink hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+            className="pointer-events-auto flex h-control-sm items-center gap-2 rounded-sm border border-line-strong bg-surface-raised px-3 text-meta text-ink hover:bg-surface-hover focus-visible:focus-ring"
           >
             <ArrowDown className="size-4 shrink-0" aria-hidden="true" />
             {/* 라벨은 **한 조각**이다. 조각을 나누어 flex의 자식으로 두면 `gap-2`가

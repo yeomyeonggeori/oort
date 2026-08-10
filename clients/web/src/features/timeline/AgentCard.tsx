@@ -119,7 +119,7 @@ function PayloadDisclosure({ detail }: { detail: PayloadDetail }) {
   if (detail.rows.length === 0 && detail.withheld === 0) return null;
   return (
     <details className="border-t border-line" data-testid="agent-payload">
-      <summary className="cursor-pointer px-3 py-2 text-meta text-ink-muted hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">
+      <summary className="cursor-pointer px-3 py-2 text-meta text-ink-muted hover:bg-surface-hover focus-visible:focus-ring">
         원본 데이터 보기
       </summary>
       <dl className="pb-2">
@@ -410,7 +410,7 @@ function TurnBody({ card }: { card: AgentTurnCard }) {
           // sibling folds where only one carries a separator read as one
           // control and one stray line.
           <details className="border-t border-line" data-testid="turn-failure-detail">
-            <summary className="cursor-pointer px-3 py-2 text-meta text-ink-muted hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">
+            <summary className="cursor-pointer px-3 py-2 text-meta text-ink-muted hover:bg-surface-hover focus-visible:focus-ring">
               자세히
             </summary>
             {/* 실패 상세도 같은 예산을 쓴다 (진단 H-8: 「실패 상세도 별도
@@ -540,7 +540,7 @@ function CardFrame({
       // max-w-pane-lg: the card has a measure. Let it run the full timeline
       // width and the numeric column ends up a screen away from its label,
       // which stops reading as a card and starts reading as a banner.
-      className="mt-2 max-w-pane-lg rounded-md border border-line bg-surface-raised focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+      className="mt-2 max-w-pane-lg rounded-md border border-line bg-surface-raised focus-visible:focus-ring"
     >
       <div className="flex items-center gap-2 border-b border-line px-3 py-2">
         <span className="shrink-0 text-ink-muted">{icon}</span>

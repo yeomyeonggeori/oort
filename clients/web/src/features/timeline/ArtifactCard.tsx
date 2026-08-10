@@ -92,7 +92,7 @@ const LINE_CLASS: Readonly<Record<DiffLineKind, string>> = {
  * painted territory the container cannot clip.
  */
 const INSET_FOCUS_RING =
-  "focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent";
+  "focus-visible:focus-ring";
 
 /**
  * Disclosure open state, kept OUTSIDE the React tree.
@@ -670,7 +670,7 @@ function OpenLinkRow({ url, storageKey }: { url: string; storageKey: string }) {
         }}
         className={cn(
           "flex items-center gap-2 border-t border-line px-3 py-2 text-meta text-accent hover:bg-surface-hover",
-          "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+          "focus-visible:focus-ring"
         )}
       >
         <ExternalLink className="size-4 shrink-0" aria-hidden="true" />

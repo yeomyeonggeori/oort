@@ -139,7 +139,7 @@ function RowAction({
       aria-expanded={expanded}
       aria-controls={expanded ? "composer-routing-fields" : undefined}
       data-testid={testId}
-      className="flex shrink-0 items-center gap-1 rounded-sm text-meta text-ink-muted underline underline-offset-2 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+      className="flex shrink-0 items-center gap-1 rounded-sm text-meta text-ink-muted underline underline-offset-2 hover:text-ink focus-visible:focus-ring"
     >
       {children}
     </button>

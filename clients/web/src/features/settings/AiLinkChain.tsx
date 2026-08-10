@@ -208,7 +208,7 @@ function HopRow({
             disabled={locked}
             aria-label={`${ordinal} provider 사용`}
             onChange={(event) => onPatch({ enabled: event.target.checked })}
-            className="accent-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-50"
+            className="accent-accent focus-visible:focus-ring disabled:cursor-not-allowed disabled:opacity-50"
           />
           사용
         </label>

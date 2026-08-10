@@ -273,7 +273,7 @@ function AgentActivityBar({
                 // 시계가 들어가고, 보조기술이 그 줄을 초당 한 번 다시 읽는다.
                 aria-label={`${activityText(line)}. 진행 과정 열기`}
                 data-testid="composer-working-open"
-                className="flex min-w-0 items-baseline gap-2 rounded-sm text-left hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+                className="flex min-w-0 items-baseline gap-2 rounded-sm text-left hover:bg-surface-hover focus-visible:focus-ring"
               >
                 {body}
               </button>
@@ -811,7 +811,7 @@ export function Composer({
           placeholder={`${channelLabel}에 메시지 보내기`}
           aria-describedby={hasHint ? "composer-hint" : undefined}
           data-testid="composer-input"
-          className="tap-target min-w-0 flex-1 resize-none rounded-md border border-line-strong bg-transparent px-3 py-2 text-body leading-relaxed placeholder:text-ink-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+          className="tap-target min-w-0 flex-1 resize-none rounded-md border border-line-strong bg-transparent px-3 py-2 text-body leading-relaxed placeholder:text-ink-muted focus-visible:focus-ring"
         />
         <Button
           type="submit"

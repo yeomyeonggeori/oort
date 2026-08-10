@@ -202,7 +202,7 @@ function PanelHeader({
           onClick={onClose}
           aria-label="작업 패널 닫기"
           data-testid="agent-work-panel-close"
-          className="tap-target flex size-6 shrink-0 items-center justify-center rounded-sm text-ink-muted hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+          className="tap-target flex size-6 shrink-0 items-center justify-center rounded-sm text-ink-muted hover:bg-surface-hover focus-visible:focus-ring"
         >
           <X className="size-4" />
         </button>
@@ -483,7 +483,7 @@ function ToolRow({
             onClick={() => setOpen((current) => !current)}
             aria-expanded={open}
             data-testid="agent-work-panel-args-toggle"
-            className="tap-target flex items-center gap-1 rounded-sm py-1 text-timestamp text-ink-muted hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+            className="tap-target flex items-center gap-1 rounded-sm py-1 text-timestamp text-ink-muted hover:bg-surface-hover focus-visible:focus-ring"
           >
             {open ? (
               <ChevronDown className="size-3" aria-hidden="true" />

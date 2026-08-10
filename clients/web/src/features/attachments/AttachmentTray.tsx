@@ -63,7 +63,7 @@ const NBSP = "\u00a0";
  * 자를 수 없는 영역에 들어간다 — `ArtifactCard` 가 같은 이유로 같은 값을 쓴다.
  */
 const INSET_FOCUS_RING =
-  "focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent";
+  "focus-visible:focus-ring";
 
 function DraftChip({
   draft,

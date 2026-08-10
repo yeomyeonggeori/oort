@@ -88,7 +88,7 @@ export function AdeSummaryLine() {
         "tap-target flex w-full shrink-0 items-center justify-between gap-2",
         "border-b border-line px-4 py-2 text-left text-meta",
         "transition-colors hover:bg-surface-hover",
-        "focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent",
+        "focus-visible:focus-ring",
         open && "bg-surface-hover"
       )}
     >

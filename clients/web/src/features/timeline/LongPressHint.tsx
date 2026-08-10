@@ -92,7 +92,7 @@ export function LongPressHint() {
         type="button"
         onClick={dismiss}
         data-testid="long-press-hint-dismiss"
-        className="tap-target shrink-0 rounded-sm px-2 underline underline-offset-2 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+        className="tap-target shrink-0 rounded-sm px-2 underline underline-offset-2 hover:text-ink focus-visible:focus-ring"
       >
         닫기
       </button>

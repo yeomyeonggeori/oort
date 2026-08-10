@@ -363,7 +363,7 @@ function CreateAgentPanel({
             onChange={onInput("instructions")}
             rows={4}
             disabled={pending}
-            className="w-full resize-y rounded-sm border border-line-strong bg-transparent px-3 py-2 text-body text-ink placeholder:text-ink-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-50"
+            className="w-full resize-y rounded-sm border border-line-strong bg-transparent px-3 py-2 text-body text-ink placeholder:text-ink-muted focus-visible:focus-ring disabled:cursor-not-allowed disabled:opacity-50"
             placeholder="검증 근거를 먼저 보여 주고, 확실하지 않으면 확실하지 않다고 말합니다."
             aria-invalid={instructionsError ? true : undefined}
             aria-describedby={

@@ -81,7 +81,7 @@ export function TakeoverBlock({
         <p
           ref={errorRef}
           tabIndex={-1}
-          className="mt-2 break-words text-meta text-danger focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+          className="mt-2 break-words text-meta text-danger focus-visible:focus-ring"
           role="alert"
           data-testid={`${testId}-error`}
         >

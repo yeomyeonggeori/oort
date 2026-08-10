@@ -218,7 +218,7 @@ export function QuoteBlock({
         RAIL,
         // hover도 중성이다 (B-1). `hover:bg-surface-hover`는 이 앱의 하우스 hover
         // 패턴이고, 레일은 앰버로 가는 대신 잉크 쪽으로 한 단 올라간다.
-        "mb-1 w-full rounded-sm hover:border-ink hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+        "mb-1 w-full rounded-sm hover:border-ink hover:text-ink focus-visible:focus-ring"
       )}
     >
       <QuoteContent block={block} directory={directory} />
@@ -259,7 +259,7 @@ export function QuoteChip({
         aria-label={QUOTE_CANCEL_LABEL}
         title={QUOTE_CANCEL_LABEL}
         data-testid="composer-quote-cancel"
-        className="flex size-control-sm shrink-0 items-center justify-center rounded-sm text-ink-muted hover:bg-surface-hover hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+        className="flex size-control-sm shrink-0 items-center justify-center rounded-sm text-ink-muted hover:bg-surface-hover hover:text-ink focus-visible:focus-ring"
       >
         <X className="size-4" aria-hidden="true" />
       </button>

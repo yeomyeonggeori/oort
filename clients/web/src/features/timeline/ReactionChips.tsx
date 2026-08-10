@@ -55,7 +55,7 @@ export function ReactionChips({
           }
           onClick={() => onToggle(chip.emoji)}
           className={cn(
-            "tap-target flex items-center gap-1 rounded-sm border px-2 py-px text-meta transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:opacity-50",
+            "tap-target flex items-center gap-1 rounded-sm border px-2 py-px text-meta transition-colors focus-visible:focus-ring disabled:opacity-50",
             chip.mine
               ? "border-accent bg-accent-soft text-ink"
               : "border-line bg-surface-raised text-ink-muted hover:bg-surface-hover"
@@ -80,7 +80,7 @@ export function ReactionChips({
           aria-label="다른 반응 고르기"
           title="다른 반응 고르기"
           onClick={onOpenPicker}
-          className="tap-target flex items-center rounded-sm border border-line bg-surface-raised px-2 py-px text-ink-muted transition-colors hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:opacity-50"
+          className="tap-target flex items-center rounded-sm border border-line bg-surface-raised px-2 py-px text-ink-muted transition-colors hover:bg-surface-hover focus-visible:focus-ring disabled:opacity-50"
         >
           <Smile className="size-4" aria-hidden="true" />
         </button>

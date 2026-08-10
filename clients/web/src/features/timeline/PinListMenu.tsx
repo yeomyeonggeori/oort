@@ -102,7 +102,7 @@ export function PinListMenu({
           data-testid="open-pin-list"
           data-pin-count={entries.length}
           className={cn(
-            "flex shrink-0 items-center gap-1 rounded-sm px-1 transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
+            "flex shrink-0 items-center gap-1 rounded-sm px-1 transition-colors focus-visible:focus-ring",
             "min-h-control-sm text-ink-muted hover:bg-surface-hover",
             "data-[state=open]:bg-surface-hover data-[state=open]:text-ink"
           )}

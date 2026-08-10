@@ -9,10 +9,12 @@ import { describe, expect, it } from "vitest";
  * 포커스 링은 페이드하지 않는다 (#1210 D3).
  *
  * Tailwind v4 의 `transition-colors` 는 v3 에 없던 `outline-color` 를 전이 목록에
- * 넣는다. 이 레포의 포커스 링은 색을 `focus-visible:outline-accent` 로 **상태에서만**
- * 주므로, 그 조합은 링이 정지 색(currentcolor = --ink)에서 --accent 로 150ms 동안
- * 번지게 만든다. `tokens.css` 가 `@layer utilities` 에서 그 한 항목을 빼고, 이
- * 파일이 **컴파일 산출물**에서 그것을 확인한다.
+ * 넣는다. 이 레포의 포커스 링은 색을 `outline-color` 로 **상태에서만** 주므로(검수
+ * 피드백 #1 이후엔 `@utility focus-ring` = 인셋 accent outline, 그 전엔
+ * `focus-visible:outline-accent`), 그 조합은 링이 정지 색(currentcolor = --ink)에서
+ * --accent 로 150ms 동안 번지게 만든다. `tokens.css` 가 `@layer utilities` 에서 그
+ * 한 항목을 빼고, 이 파일이 **컴파일 산출물**에서 그것을 확인한다. focus-ring 도
+ * outline-color 로 색을 주므로 이 수리는 그 뒤로도 그대로 load-bearing 이다.
  *
  * 왜 grep 이 아니라 컴파일인가: 이 수리는 「우리 선언이 코어 선언보다 뒤에 온다」는
  * 캐스케이드 사실 위에 서 있다. 소스를 읽어서는 그 사실을 알 수 없고, 실제로
@@ -101,9 +103,11 @@ describe("#1210 D3 — transition-colors", () => {
   });
 
   it("포커스 링과 함께 서는 자리가 이 한 선언으로 전부 덮인다", async () => {
-    // 감사(§B-4 ⑤)는 「프리미티브 3개」로 적었지만, 25곳 중 22곳은 자기 문자열에
-    // transition-colors 를 직접 든 feature 파일이다. 그 사실을 여기서 세어 둔다 —
-    // 이 숫자가 3 으로 줄지 않는 한 프리미티브 수리는 답이 될 수 없다.
+    // 감사(§B-4 ⑤)는 「프리미티브 3개」로 적었지만, 포커스 링(검수 #1 이후 `focus-ring`)
+    // 과 transition-colors 를 한 클래스 목록에 함께 든 자리는 프리미티브 밖 feature
+    // 파일이 더 많다. 그 사실을 여기서 세어 둔다 — 이 숫자가 3(design/ui) 으로 줄지
+    // 않는 한, transition-colors 에서 outline-color 를 빼는 수리는 프리미티브가 아니라
+    // 유틸리티 층에서만 전부를 덮는다.
     const { globSync } = await import("node:fs");
     const files = globSync("**/*.{ts,tsx}", { cwd: `${HERE}/..` });
     let withRing = 0;
@@ -112,7 +116,7 @@ describe("#1210 D3 — transition-colors", () => {
       const source = readFileSync(`${HERE}/../${file}`, "utf8");
       for (const line of source.split("\n")) {
         if (!line.includes("transition-colors")) continue;
-        if (!line.includes("focus-visible:outline")) continue;
+        if (!line.includes("focus-ring")) continue;
         withRing += 1;
         if (file.startsWith("design/ui/")) inPrimitives += 1;
       }

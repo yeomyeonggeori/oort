@@ -740,7 +740,7 @@ export function ChatShell() {
               title="작업 세션 패널"
               data-testid="open-work-panel"
               className={cn(
-                "flex size-control-sm shrink-0 items-center justify-center rounded-sm transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
+                "flex size-control-sm shrink-0 items-center justify-center rounded-sm transition-colors focus-visible:focus-ring",
                 workOpen
                   ? "bg-accent-soft text-accent"
                   : "text-ink-muted hover:bg-surface-hover"

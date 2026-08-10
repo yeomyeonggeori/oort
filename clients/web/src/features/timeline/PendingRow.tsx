@@ -119,7 +119,7 @@ export function PendingRow({
                     () => setResending(false)
                   );
                 }}
-                className="rounded-sm underline underline-offset-2 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:opacity-50"
+                className="rounded-sm underline underline-offset-2 hover:text-ink focus-visible:focus-ring disabled:opacity-50"
               >
                 {resending ? "보내는 중…" : "다시 보내기"}
               </button>
