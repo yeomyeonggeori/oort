@@ -65,6 +65,40 @@ DropdownMenuContent.displayName = MenuPrimitive.Content.displayName;
  * glyph. That is exactly what happened once here. A variant cannot lose that
  * fight, and the 32px measure becomes the floor rather than the height.
  */
+/**
+ * The class list every row of this menu wears, in ONE place.
+ *
+ * It is a function rather than two copies because the menu now has two row
+ * primitives (`Item` and `RadioItem`, the latter added for the presence control's
+ * menuitemradio semantics). A second hand-copied list is how one of them quietly
+ * loses the focus ring or the 32px measure while both keep passing their tests.
+ *
+ * Radix walks focus through the rows with the arrow keys, so the moving
+ * background is the menu's own language and the browser's default ring is
+ * suppressed. The house focus ring is restored on the same class list (§6): it
+ * is what tells a Tab user which row Enter will fire.
+ */
+function menuRowClass({
+  tone,
+  layout = "row",
+  className,
+}: {
+  tone?: "danger";
+  layout?: "row" | "stack";
+  className?: string;
+}) {
+  return cn(
+    "flex cursor-default select-none gap-2 rounded-sm px-2 text-body outline-none focus:bg-surface-hover focus-visible:focus-ring data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+    layout === "stack"
+      ? // `gap-2` between two lines of ONE item would read as a paragraph
+        // break, so a stacked item sets its own vertical rhythm.
+        "min-h-control flex-col items-start gap-px py-1"
+      : "h-control items-center",
+    tone === "danger" ? "text-danger" : "text-ink",
+    className
+  );
+}
+
 export const DropdownMenuItem = React.forwardRef<
   React.ElementRef<typeof MenuPrimitive.Item>,
   React.ComponentPropsWithoutRef<typeof MenuPrimitive.Item> & {
@@ -74,24 +108,39 @@ export const DropdownMenuItem = React.forwardRef<
 >(({ className, tone, layout = "row", ...props }, ref) => (
   <MenuPrimitive.Item
     ref={ref}
-    className={cn(
-      // Radix walks focus through the items with the arrow keys, so the moving
-      // background is the menu's own language and the browser's default ring is
-      // suppressed below. The house focus ring is restored on the same class
-      // list (§6): it is what tells a Tab user which row Enter will fire.
-      "flex cursor-default select-none gap-2 rounded-sm px-2 text-body outline-none focus:bg-surface-hover focus-visible:focus-ring data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
-      layout === "stack"
-        ? // `gap-2` between two lines of ONE item would read as a paragraph
-          // break, so a stacked item sets its own vertical rhythm.
-          "min-h-control flex-col items-start gap-px py-1"
-        : "h-control items-center",
-      tone === "danger" ? "text-danger" : "text-ink",
-      className
-    )}
+    className={menuRowClass({ tone, layout, className })}
     {...props}
   />
 ));
 DropdownMenuItem.displayName = MenuPrimitive.Item.displayName;
+
+/**
+ * A menu whose rows are a **single choice among several**, not a list of
+ * actions (presence 6b design-review M1).
+ *
+ * The distinction is not decorative: a plain `Item` announces as `menuitem` and
+ * carries no selected state, so a screen-reader user opening the status menu
+ * heard three equal commands and could not tell which one they are currently in.
+ * `RadioGroup` + `RadioItem` announce as `menuitemradio` with `aria-checked`
+ * computed from the group's `value`, which is the same fact the check mark shows
+ * sighted users. Radix owns the wiring, so the two cannot disagree.
+ */
+export const DropdownMenuRadioGroup = MenuPrimitive.RadioGroup;
+
+export const DropdownMenuRadioItem = React.forwardRef<
+  React.ElementRef<typeof MenuPrimitive.RadioItem>,
+  React.ComponentPropsWithoutRef<typeof MenuPrimitive.RadioItem>
+>(({ className, ...props }, ref) => (
+  <MenuPrimitive.RadioItem
+    ref={ref}
+    // Same row measure and same focus ring as `DropdownMenuItem`: a radio row is
+    // a row first. It does NOT reserve an indicator gutter — the caller draws the
+    // check it wants, exactly as the action rows do.
+    className={menuRowClass({ className })}
+    {...props}
+  />
+));
+DropdownMenuRadioItem.displayName = MenuPrimitive.RadioItem.displayName;
 
 export const DropdownMenuSeparator = React.forwardRef<
   React.ElementRef<typeof MenuPrimitive.Separator>,

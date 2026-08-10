@@ -369,12 +369,15 @@ describe("Dawn palette", () => {
       });
 
       // The risk hierarchy is an ORDER, not a taste: --danger > --warn >
-      // --ink-muted, in both schemes. Four shipping surfaces put two of these
+      // --ink-muted, in both schemes. Five shipping surfaces put two of these
       // tones side by side and would silently invert with the tokens: the app
       // consent dialog and the ToolRow chips under 설정 > 앱, the quota chips
-      // and bars under 설정 > 사용량, the AI 연결 체인 status lines, and the
-      // profile panel's connection dot. Ratios, not bare `>`, so a token that
-      // merely ties cannot pass (the old dark danger sat at 0.48x of warn).
+      // and bars under 설정 > 사용량, the AI 연결 체인 status lines, the profile
+      // panel's connection bar (warn while connecting, danger while
+      // disconnected, and nothing at all while healthy — presence 6b H1), and
+      // the presence badge on the same row's avatar (warn = 자리 비움, danger =
+      // 방해 금지). Ratios, not bare `>`, so a token that merely ties cannot
+      // pass (the old dark danger sat at 0.48x of warn).
       it("ranks danger louder than warn, and warn louder than muted", () => {
         const c = (token: string) => chroma(pick(token, scheme.index));
         expect(

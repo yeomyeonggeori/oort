@@ -17,27 +17,28 @@
 
 import type { EffectivePresence, PresenceStatus } from "../../lib/api";
 
-export interface PresenceOption {
-  status: PresenceStatus;
-  label: string;
-}
+/**
+ * The status-change dropdown: the declared statuses, **in order and nothing
+ * else**.
+ *
+ * It deliberately carries no labels (design-review M2). The first cut paired
+ * each status with a `label` string that repeated `declaredStatusLabel`'s
+ * answer, which is two sources for one word: renaming 자리 비움 in the function
+ * would leave the menu rendering the stale copy while every test stayed green,
+ * because the tests read the same stale field. The order is the only thing this
+ * list knows; the words come from the function below, always.
+ */
+export const PRESENCE_OPTIONS: readonly PresenceStatus[] = ["auto", "away", "dnd"];
 
 /**
- * The status-change dropdown, in order.
+ * The label for a declared status, as the dropdown words it.
  *
- * `auto` is presented as 온라인 because that is exactly what it renders as while
- * the client is connected, and picking it is how a person clears a manual
- * away/dnd — the same model Slack's "Active" follows. The stored value is still
- * `auto` (the enum deliberately avoids `active`, a lifecycle label); this is only
- * how the choice is worded.
+ * `auto` is worded 온라인 because that is exactly what it renders as while the
+ * client is connected, and picking it is how a person clears a manual away/dnd —
+ * the same model Slack's "Active" follows. The stored value is still `auto` (the
+ * enum deliberately avoids `active`, a lifecycle label); this is only how the
+ * choice is worded.
  */
-export const PRESENCE_OPTIONS: readonly PresenceOption[] = [
-  { status: "auto", label: "온라인" },
-  { status: "away", label: "자리 비움" },
-  { status: "dnd", label: "방해 금지" },
-];
-
-/** The label for a declared status, as the dropdown words it. */
 export function declaredStatusLabel(status: PresenceStatus): string {
   switch (status) {
     case "auto":

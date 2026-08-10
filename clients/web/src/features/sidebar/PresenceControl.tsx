@@ -17,7 +17,8 @@ import {
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuItem,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from "@/design/ui/dropdown-menu";
 import { InlineBanner } from "@/features/common/States";
@@ -29,11 +30,13 @@ import { cn } from "@/design/lib/cn";
 // move left open ("the avatar below becomes its click target").
 //
 // This is the DECLARED-status control (③), a separate vocabulary from the
-// connection dot (①) beside it: the connection dot says "am I attached", this
-// says "what did I choose to appear as". ADR-0160 keeps them apart (guard 6), so
-// the two indicators read differently by position and shape — the connection dot
-// is a small square near the settings gear, this is a round badge on the avatar,
-// the universally-read "presence badge" spot.
+// connection indicator (①) further along the row: that one says "am I attached",
+// this says "what did I choose to appear as". ADR-0160 keeps them apart (guard
+// 6), and design-review H1 is what made the separation visible rather than
+// merely intended: the connection indicator is now a BAR that appears only when
+// the rail is unhealthy, while this is a round badge on the avatar — the
+// universally read presence spot. Two circles on one row, one of them
+// permanently green, was the collision (see connStatusIndicator.ts).
 //
 // The badge is bound to REAL state, never decorative (SKILL §8): its color and
 // accessible name always derive from the effective value `f(declared, connected)`
@@ -138,28 +141,39 @@ export function PresenceControl({
       }}
     >
       <DropdownMenuTrigger asChild>
+        {/* `tap-target` (44px under 600px wide) matches the settings gear beside
+            it — design-review H2 measured this trigger at 24x24 on a touch
+            viewport while its neighbour was 44x44, so the two controls a thumb
+            reaches for on the same row had different odds of being hit. The
+            avatar itself stays 24px; only the hit area grows. */}
         <button
           type="button"
           data-testid="presence-control"
           data-effective={effective}
           aria-label={presenceTriggerLabel(effective)}
-          className="relative flex size-6 shrink-0 items-center justify-center rounded-sm focus-visible:focus-ring"
+          title={presenceTriggerLabel(effective)}
+          className="tap-target flex size-6 shrink-0 items-center justify-center rounded-sm focus-visible:focus-ring"
         >
+          {/* The badge anchors to THIS span, not to the button. On a touch
+              viewport the button is 44px and the avatar is 24px, so a badge
+              anchored to the button's corner would float away from the avatar it
+              is supposed to sit on — the trap that makes "just enlarge the
+              button" a half repair. */}
           <span
-            className="flex size-6 items-center justify-center rounded-sm bg-surface-hover text-meta font-semibold"
+            className="relative flex size-6 items-center justify-center rounded-sm bg-surface-hover text-meta font-semibold"
             aria-hidden="true"
           >
             {selfName.slice(0, 1)}
+            {/* The presence badge. Bound to `effective`, ringed in the sidebar
+                surface so it reads as a badge sitting on the avatar rather than a
+                hole punched through it. */}
+            <span
+              className={cn(
+                "absolute bottom-0 right-0 size-2 rounded-full border",
+                effectiveBadgeClass(effective)
+              )}
+            />
           </span>
-          {/* The presence badge. Bound to `effective`, punched out of the avatar
-              with a 1px sidebar-colored ring so it reads as a badge, not a hole. */}
-          <span
-            aria-hidden="true"
-            className={cn(
-              "absolute bottom-0 right-0 size-2 rounded-full border",
-              effectiveBadgeClass(effective)
-            )}
-          />
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent
@@ -174,36 +188,48 @@ export function PresenceControl({
             testId="presence-error"
           />
         )}
-        {PRESENCE_OPTIONS.map((option) => {
-          const isCurrent = option.status === current;
-          return (
-            <DropdownMenuItem
-              key={option.status}
-              data-testid={`presence-option-${option.status}`}
-              data-current={isCurrent ? "" : undefined}
-              disabled={mutation.isPending}
-              onSelect={(event) => {
-                // One REST round trip; keep the menu open on failure so the
-                // banner above is readable (the mute toggle's discipline).
-                event.preventDefault();
-                if (option.status === current) {
-                  setOpen(false);
-                  return;
-                }
-                mutation.mutate(option.status);
-              }}
-            >
-              <span
-                aria-hidden="true"
-                className={cn("size-2 shrink-0 rounded-full", optionDotClass(option.status))}
-              />
-              <span className="flex-1">{declaredStatusLabel(option.status)}</span>
-              {isCurrent && (
-                <Check className="size-4 shrink-0 text-ink-muted" aria-hidden="true" />
-              )}
-            </DropdownMenuItem>
-          );
-        })}
+        {/* A single choice among three, so the rows are `menuitemradio` and the
+            group's `value` is what computes `aria-checked` (design-review M1).
+            Before this, a screen-reader user heard three equal commands and had
+            no way to learn which one they were already in — the check mark said
+            it to sighted users only. Selection is still handled per-row in
+            `onSelect` (not `onValueChange`) so a failed write can hold the menu
+            open with its banner; the group's value is the a11y state, not a
+            second event path. */}
+        <DropdownMenuRadioGroup value={current}>
+          {PRESENCE_OPTIONS.map((status) => {
+            const isCurrent = status === current;
+            return (
+              <DropdownMenuRadioItem
+                key={status}
+                value={status}
+                data-testid={`presence-option-${status}`}
+                disabled={mutation.isPending}
+                onSelect={(event) => {
+                  // One REST round trip; keep the menu open on failure so the
+                  // banner above is readable (the mute toggle's discipline).
+                  event.preventDefault();
+                  if (isCurrent) {
+                    setOpen(false);
+                    return;
+                  }
+                  mutation.mutate(status);
+                }}
+              >
+                <span
+                  aria-hidden="true"
+                  className={cn("size-2 shrink-0 rounded-full", optionDotClass(status))}
+                />
+                <span className="flex-1">{declaredStatusLabel(status)}</span>
+                {/* Decoration for the eye only: `aria-checked` above already
+                    carries this fact to a screen reader. */}
+                {isCurrent && (
+                  <Check className="size-4 shrink-0 text-ink-muted" aria-hidden="true" />
+                )}
+              </DropdownMenuRadioItem>
+            );
+          })}
+        </DropdownMenuRadioGroup>
       </DropdownMenuContent>
     </DropdownMenu>
   );

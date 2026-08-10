@@ -33,12 +33,19 @@ describe("effectivePresence (ADR-0160 D3)", () => {
 
 describe("presence copy", () => {
   it("offers the three declared statuses in order, auto worded as online", () => {
-    expect(PRESENCE_OPTIONS.map((option) => option.status)).toEqual([
-      "auto",
-      "away",
-      "dnd",
-    ]);
-    expect(PRESENCE_OPTIONS[0]?.label).toBe("온라인");
+    expect(PRESENCE_OPTIONS).toEqual(["auto", "away", "dnd"]);
+    expect(declaredStatusLabel(PRESENCE_OPTIONS[0]!)).toBe("온라인");
+  });
+
+  // design-review M2: the option list carries statuses and nothing else. A
+  // `label` field here would be a second source for a word `declaredStatusLabel`
+  // already owns, and the two drift while every test stays green — because the
+  // tests would read the same stale field the menu does.
+  it("keeps no label strings of its own on the option list", () => {
+    for (const option of PRESENCE_OPTIONS) {
+      expect(typeof option).toBe("string");
+      expect(declaredStatusLabel(option).length).toBeGreaterThan(0);
+    }
   });
 
   it("names every declared and effective value", () => {
