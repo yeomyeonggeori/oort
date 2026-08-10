@@ -24,6 +24,7 @@ import { QuickSwitcher } from "@/app/QuickSwitcher";
 import { Sidebar } from "@/features/sidebar/Sidebar";
 import { CreateChannelProvider } from "@/features/channels/CreateChannelDialog";
 import { AddWorkspaceProvider } from "@/features/workspace/AddWorkspaceDialog";
+import { AddChannelMemberProvider } from "@/features/channels/AddChannelMemberDialog";
 import { AgentProfileProvider } from "@/features/routing/AgentProfileDialog";
 import { InboxHotkeys } from "@/features/inbox/InboxHotkeys";
 import { DesktopNotifications } from "@/features/notifications/DesktopNotifications";
@@ -208,6 +209,10 @@ export function AppShell({
        * 설정으로 새던 것을 하나의 다이얼로그로 모으고, 스위처·인박스 단축키가
        * 이 모달 위에서 물러설 수 있게 열림 상태를 함께 내린다. */}
       <AddWorkspaceProvider>
+        {/* 채널에 멤버 추가 다이얼로그도 셸에 한 벌만 있다(검수 #2): 빈 채널의
+         * 초대 진입점이 이 하나를 열고, 헤더 메뉴가 생기면 그것도 같은 하나를
+         * 연다. 채널 만들기와 같은 이유로 폼 상태가 여러 벌이 되지 않는다. */}
+        <AddChannelMemberProvider>
         <AgentProfileProvider>
           <div className="app-shell">
             <Sidebar onOpenQuickSwitcher={() => setSwitcherOpen(true)} />
@@ -291,6 +296,7 @@ export function AppShell({
           {turnFixture !== null && <AgentTurnFixture mode={turnFixture} />}
           <QuickSwitcher open={switcherOpen} onOpenChange={setSwitcherOpen} />
         </AgentProfileProvider>
+        </AddChannelMemberProvider>
       </AddWorkspaceProvider>
       </CreateChannelProvider>
       </ShellNavProvider>
