@@ -877,8 +877,9 @@
 
 /* Agent Hub keeps its roster and detail side by side while both have useful
  * reading width. In a narrow shell they become one column, so neither is asked
- * to survive in the remainder left after two fixed rails. The roster keeps one
- * named pane of height and scrolls inside it; detail receives the rest. */
+ * to survive in the remainder left after two fixed rails. The roster flexes
+ * within a min/max band instead of a rigid pane so it yields the extra width to
+ * the detail, which now runs full measure; detail receives the rest. */
 @utility agent-hub-layout {
   display: flex;
   min-block-size: 0;
@@ -890,13 +891,20 @@
 }
 
 @utility agent-hub-roster {
-  inline-size: var(--spacing-pane);
-  flex-shrink: 0;
+  /* base 320 (--spacing-pane), floors to 192 (--spacing-pane-sm) when space is
+   * tight, never grows past 320: a roster is a nav column, the detail is the
+   * content and takes the slack. */
+  flex: 0 1 var(--spacing-pane);
+  min-inline-size: var(--spacing-pane-sm);
+  max-inline-size: var(--spacing-pane);
   overflow-y: auto;
   border-inline-end: 1px solid var(--line);
 
   @media (width < 900px) {
+    flex: initial;
     inline-size: auto;
+    min-inline-size: 0;
+    max-inline-size: none;
     block-size: var(--spacing-pane-sm);
     border-inline-end: 0;
     border-block-end: 1px solid var(--line);
