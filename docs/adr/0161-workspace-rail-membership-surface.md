@@ -1,6 +1,6 @@
 # ADR-0161 — 워크스페이스 레일: 멀티 워크스페이스 멤버십 표면·아바타 미디어·세션 전환
 
-- Status: **Proposed** (기안 2026-08-10 Fable/W-QA5 — 검수 피드백 #4. **Accepted는 성재**)
+- Status: **Accepted** (기안 2026-08-10 Fable/W-QA5 · 성재 승인 2026-08-10 검수 배치 2)
 - Date: 2026-08-10
 - 관련: **ADR-0117**(멀티 워크스페이스 생성·멤버십·권한 — 본 ADR의 기반. D5-A/D1-A를 **재개봉하지 않는다**) · ADR-0128(멤버십·권한 수명주기 — self-leave 경계) · **ADR-0151**(첨부 v0 Drive 계약 — 아바타 미디어가 재사용하는 전송 프리미티브) · ADR-0121(셀프호스팅 온보딩 — 초대 관통) · 편성 `docs/planning/2026-08-10-desktop-qa-feedback-batch1.md`(웨이브 C #4) · 패킷 `docs/planning/handoffs/2026-08-10-qa-batch1-packet.md`(W-QA5) · 구현 계획 `docs/planning/handoffs/2026-08-10-workspace-rail-qa5-packet.md`
 - 발단: 성재 데스크탑 검수(oort.app) #4 — 「워크스페이스 레일(디스코드형)」. 조사 판정: **멀티 워크스페이스가 세션·데이터·API 전부 미완**(ADR-0117 미실현). 레일이 현재 그리는 "데" 글자는 워크스페이스가 아니라 **로그인 사용자 이름 첫 글자**다(prop 오배선). 목록·나가기·이미지 업로드 API와 워크스페이스 아바타 필드가 전무하다.
