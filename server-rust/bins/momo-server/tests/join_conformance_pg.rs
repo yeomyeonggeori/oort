@@ -1132,3 +1132,181 @@ async fn a_foreign_tenant_sees_none_of_the_rows_a_join_wrote() {
     );
     assert_ne!(resolved, Some(stranger.workspace));
 }
+
+// ---------------------------------------------------------------------------
+// 6. the pre-flight lookups normalise their own argument (#1248)
+// ---------------------------------------------------------------------------
+
+/// The four email-keyed pre-flight reads must find their rows **without** the
+/// caller having normalised first.
+///
+/// This is the one property the HTTP route cannot express, and that is exactly
+/// why the defect existed: `POST /v1/join` runs `normalized_join_email` before
+/// anything else, so every request that reaches `redeem_invite_in_tx` through the
+/// route arrives pre-folded and the raw `h.email = $1` comparisons looked correct
+/// forever. The discipline lived in the callers — and #1234 is what it looks like
+/// when one caller forgets it (`verify_password_login` skipped precisely this
+/// step, and an account that existed could not sign in).
+///
+/// So this test calls `redeem_invite_in_tx` **directly**, with a
+/// `JoinRequestValues` built by hand from the spelling a person types rather than
+/// the spelling the database holds. Each of the four predicates is reached in
+/// turn, in the order the transaction evaluates them, so a green result cannot
+/// come from an earlier check absorbing a later one.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn the_join_pre_flight_normalises_the_address_rather_than_trusting_its_caller() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let fixture = seed(&su, "join-email-norm").await;
+    let base = start_server(app_pool.clone(), RateLimitConfig::default()).await;
+    let http = reqwest::Client::new();
+    let token = owner_token(&http, &base, &fixture).await;
+
+    // The spelling the database holds, and the spelling somebody types. The
+    // padding is not decoration: `btrim` is half of the fix, and `lower()` alone
+    // would still miss on it.
+    let stored = format!("norm-{}@join.test", Uuid::new_v4());
+    let typed = format!("  {}  ", stored.to_uppercase());
+
+    // -- the account, created the ordinary way (the route DOES normalise) --
+    let (first_code, _) = issue_invite(&http, &base, &token, fixture.workspace, "member", 5).await;
+    let created = post_join(&http, &base, join_payload(&first_code, &stored)).await;
+    assert_eq!(created.status, 201, "{}", created.body);
+    let member_id: Uuid = created.body["member"]["id"]
+        .as_str()
+        .and_then(|id| Uuid::parse_str(id).ok())
+        .expect("member id");
+
+    // -- (6) find_human_by_email: the un-normalised spelling REUSES the row --
+    //
+    // Without the fix this call does not merely mis-answer: it falls through to
+    // the create arm and asks `human` to store `  NORM-…@JOIN.TEST  `, which
+    // migration 064's `human_email_normalized_ck` refuses. That refusal is the
+    // backstop the issue credits — it is why this is a lookup miss rather than a
+    // duplicate account — and it is a 500, not a join.
+    let (reuse_code, _) = issue_invite(&http, &base, &token, fixture.workspace, "member", 5).await;
+    let reused = redeem_directly(&app_pool, fixture.workspace, &reuse_code, &typed).await;
+    let outcome = reused.expect("an un-normalised address must still resolve to its account");
+    assert!(
+        !outcome.created_member,
+        "the join reused the existing member rather than creating a second one"
+    );
+    assert_eq!(
+        outcome.member.id, member_id,
+        "and it reused THAT member, not merely some member"
+    );
+
+    // The read path did not become a write path: the stored spelling is intact.
+    let after: String = sqlx::query("SELECT email FROM human WHERE member_id = $1")
+        .bind(member_id)
+        .fetch_one(&su)
+        .await
+        .expect("read the stored address back")
+        .get(0);
+    assert_eq!(
+        after, stored,
+        "a lookup must not rewrite the row it looked up"
+    );
+
+    // …and it still discriminates. An address nobody has used takes the create
+    // arm, so the green above cannot come from a predicate that matches anything.
+    let (fresh_code, _) = issue_invite(&http, &base, &token, fixture.workspace, "member", 5).await;
+    let stranger_email = format!("norm-other-{}@join.test", Uuid::new_v4());
+    let stranger = redeem_directly(&app_pool, fixture.workspace, &fresh_code, &stranger_email)
+        .await
+        .expect("an unknown address joins");
+    assert!(
+        stranger.created_member,
+        "an unknown address is a new member"
+    );
+    assert_ne!(stranger.member.id, member_id);
+
+    // -- (4) redeemed_by_email: the same code, the typed spelling again ----
+    let twice = redeem_directly(&app_pool, fixture.workspace, &reuse_code, &typed).await;
+    assert_rejected(
+        twice,
+        momo_settings::JoinRejection::AlreadyRedeemed,
+        "a code already spent by this address",
+    );
+
+    // -- (5) workspace_role_for_email: an admin link for an existing member --
+    let (admin_code, _) = issue_invite(&http, &base, &token, fixture.workspace, "admin", 5).await;
+    let escalation = redeem_directly(&app_pool, fixture.workspace, &admin_code, &typed).await;
+    assert_rejected(
+        escalation,
+        momo_settings::JoinRejection::RoleEscalation,
+        "an admin link offered to an existing member",
+    );
+
+    // -- (3) is_banned: last, because a ban short-circuits everything above --
+    sqlx::query(
+        "INSERT INTO workspace_ban (workspace_id, email_norm, created_by, reason) \
+         VALUES ($1, $2, $3, 'email-normalisation conformance')",
+    )
+    .bind(fixture.workspace)
+    .bind(&stored)
+    .bind(fixture.owner)
+    .execute(&su)
+    .await
+    .expect("seed workspace_ban");
+    let (banned_code, _) = issue_invite(&http, &base, &token, fixture.workspace, "member", 5).await;
+    let banned = redeem_directly(&app_pool, fixture.workspace, &banned_code, &typed).await;
+    assert_rejected(
+        banned,
+        momo_settings::JoinRejection::Banned,
+        "a ban recorded against the normalised address",
+    );
+}
+
+/// Spend a code through `redeem_invite_in_tx` with an email that never met
+/// `normalized_join_email` — the caller the route is not.
+///
+/// `with_tenant_tx` rather than the route's `join_tenant_tx` (which is
+/// `pub(crate)`): the rejections this test provokes are all raised in steps 3-5,
+/// before the transaction's first write, so committing an empty transaction on a
+/// refusal is a no-op here. It would not be for a step-9/10 refusal, which is
+/// why the production path uses the rolling-back wrapper.
+async fn redeem_directly(
+    pool: &PgPool,
+    workspace: Uuid,
+    code: &str,
+    email: &str,
+) -> Result<momo_settings::JoinOutcome, momo_settings::JoinError> {
+    let values = momo_settings::JoinRequestValues {
+        email: email.to_string(),
+        display_name: "Un-normalised Caller".to_string(),
+        requested_handle: None,
+        fallback_handle: format!("probe-{}", &Uuid::new_v4().to_string()[..8]),
+        password: JOIN_PASSWORD.to_string(),
+        time_zone: "Asia/Seoul".to_string(),
+    };
+    let code = code.to_string();
+    momo_db::with_tenant_tx(pool, workspace, move |conn| {
+        Box::pin(async move {
+            Ok(momo_settings::redeem_invite_in_tx(conn, workspace, &code, &values, None).await)
+        })
+    })
+    .await
+    .expect("the tenant transaction itself must not fail")
+}
+
+fn assert_rejected(
+    result: Result<momo_settings::JoinOutcome, momo_settings::JoinError>,
+    expected: momo_settings::JoinRejection,
+    case: &str,
+) {
+    match result {
+        Ok(outcome) => panic!(
+            "{case}: expected {expected:?}, but the join succeeded (member {})",
+            outcome.member.id
+        ),
+        Err(momo_settings::JoinError::Rejected(rejection)) => {
+            assert_eq!(rejection, expected, "{case}")
+        }
+        Err(momo_settings::JoinError::Db(error)) => {
+            panic!("{case}: expected {expected:?}, got a database failure: {error}")
+        }
+    }
+}
