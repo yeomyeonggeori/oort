@@ -11,7 +11,7 @@ RUN npm ci --no-audit --no-fund
 COPY clients/web-legacy/ ./
 RUN npm run build
 
-FROM alpine:3.21
+FROM alpine:3.24
 
 RUN mkdir -p /opt/momo-web /srv/momo-web
 COPY --from=build /workspace/clients/web-legacy/dist/ /opt/momo-web/
