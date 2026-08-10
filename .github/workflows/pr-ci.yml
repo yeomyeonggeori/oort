@@ -256,4 +256,13 @@ jobs:
         run: npm --prefix clients/web run test
 
       - name: test — clients/mobile (jest)
-        run: npm --prefix clients/mobile run test
+        # `--maxWorkers=1`도 임시 조치다(런 31364354293·재실행 모두 같은 1건이
+        # 빨강 — 플레이키가 아니라 러너에서 결정적으로 실패한다).
+        # `__tests__/inboxApproval.test.tsx`의 「행이 목록에서 빠지면 …」 하나가
+        # RNTL `waitFor` 기본 예산(1초) 안에 결정 POST → 목록 재조회 → 재렌더
+        # 사슬을 못 끝낸다. 러너가 이 머신보다 느려서다(같은 파일 로컬 6.5초 /
+        # 러너 19.5초). 워커를 줄이면 그 파일이 CPU를 온전히 받는다.
+        # 정본 수리는 `clients/mobile` 몫이다 — 시간 예산에 기대는 단정을
+        # 고치거나 `jest.setup.js`에서 `configure({asyncUtilTimeout})`을 올리는
+        # 것. 그래야 느린 기여자 머신에서도 초록이 된다. PR 본문 §5 적립 7.
+        run: npm --prefix clients/mobile run test -- --maxWorkers=1
