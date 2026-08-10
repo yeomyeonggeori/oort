@@ -13,7 +13,7 @@
     "typecheck": "tsc --noEmit",
     "gen:api": "openapi-typescript ../../docs/api/openapi.yaml -o src/api/schema.d.ts",
     "generate:types": "npm run gen:api",
-    "check:licenses": "node scripts/check-licenses.mjs"
+    "check:licenses": "node ../../scripts/check_npm_licenses.mjs --root clients/web-legacy"
   },
   "dependencies": {
     "@xterm/xterm": "^5.5.0",

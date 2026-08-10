@@ -26,7 +26,12 @@ done
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "$REPO_ROOT"
-DIST_REPO="Dawn-kim-official/momo-alpha"
+DIST_REPO="yeomyeonggeori/momo-alpha"
+# 발행 커밋의 author. 공개 레포에 개인 주소를 두지 않는다(#1224) — 실제 발행자는
+# MOMO_PUBLISH_GIT_EMAIL로 주입한다. 기본값은 GitHub이 어떤 계정에도 귀속시키지
+# 않는 noreply 자리표시자(RFC 2606 example.com은 git이 거부하진 않으나 GitHub이
+# 유효 주소로 오인해 초대 메일을 시도할 수 있어 noreply 쪽이 더 안전하다).
+PUBLISH_GIT_EMAIL="${MOMO_PUBLISH_GIT_EMAIL:-oort-release@users.noreply.github.com}"
 BUILD_NUM="$(git rev-list --count HEAD)"
 GIT_SHA="$(git rev-parse --short HEAD)"
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/momo-alpha-build.XXXXXX")"
@@ -129,9 +134,9 @@ manifest = {
 json.dump(manifest, open(sys.argv[1], "w"), ensure_ascii=False, indent=2)
 PY
 (cd "$PAGES" && git add update-manifest-alpha.json && \
- git -c user.name=momo-main -c user.email=gkffhdnls13@gmail.com commit -qm "publish ${VERSION} (build ${BUILD_NUM})" && git push -q)
+ git -c user.name=momo-main -c user.email="$PUBLISH_GIT_EMAIL" commit -qm "publish ${VERSION} (build ${BUILD_NUM})" && git push -q)
 
 echo "[alpha-publish] 5/5 done"
 echo "  download: $DOWNLOAD_URL"
-echo "  page:     https://dawn-kim-official.github.io/momo-alpha/"
+echo "  page:     https://yeomyeonggeori.github.io/momo-alpha/"
 echo "  sha256:   $SHA256"

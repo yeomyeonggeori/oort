@@ -341,9 +341,31 @@ export function NoticeBlock({
   return (
     <View style={styles.notice} testID={testID}>
       <View style={styles.noticeHead}>
+        {/* ## 낱말 가운데서 끊지 않는다 (리뷰 N-b)
+
+            iOS 기본 줄바꿈은 한글을 **글자 단위**로 끊는다. 402pt 화면에서 제목은
+            「닫기」와 폭을 나눠 쓰므로 두 줄은 불가피한데, 끊기는 자리가 하필
+            마지막 한 음절이면(실측: 「…찾지 못했습니 / 다」) 사람은 둘째 줄의 그
+            한 글자를 오타나 잘린 글로 읽는다.
+
+            문장을 깎아 맞추지 않는다 — 그러면 다음 문장에서 같은 일이 다시
+            일어나고, 이 상자는 앞으로도 문장을 더 받는다. 플랫폼이 이 경우를 위해
+            든 값을 쓴다: `hangul-word` = `NSLineBreakStrategyHangulWordPriority`,
+            한국어 워드프로세서의 규칙(어절 우선)이다. 화면이 좁아져도 규칙이 함께
+            간다.
+
+            `NoticeBlock` **전체**가 받는다. 이 컴포넌트가 드는 것은 언제나 완성된
+            한국어 문장이고(인용·고정·검색·세션 앵커의 네 고지 + 서버 능력 고지),
+            그중 하나만 예외로 두면 같은 상자가 문장마다 다르게 끊긴다. */}
         <View style={styles.noticeText}>
-          <Text style={styles.noticeHeadline}>{headline}</Text>
-          {detail ? <Text style={styles.noticeDetail}>{detail}</Text> : null}
+          <Text style={styles.noticeHeadline} lineBreakStrategyIOS="hangul-word">
+            {headline}
+          </Text>
+          {detail ? (
+            <Text style={styles.noticeDetail} lineBreakStrategyIOS="hangul-word">
+              {detail}
+            </Text>
+          ) : null}
         </View>
         {onDismiss ? (
           <Pressable

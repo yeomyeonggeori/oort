@@ -4,14 +4,41 @@
 //
 // The destination row lives in the virtualised timeline, which mounts rows on
 // demand, so the jump is two parts: the route carries the target seq in the URL
-// (inspectable, and it survives a reload), and a short watcher scrolls the row
-// into view once virtuoso has actually mounted it.
+// (inspectable, and it names the destination rather than hiding it in component
+// state), and a short watcher scrolls the row into view once virtuoso has
+// actually mounted it.
 //
 // The watcher reads the DOM rather than calling into the timeline because P1
 // wave2 runs four surfaces in parallel and this ticket owns inbox/activity
 // only; `data-seq` is already the timeline's published row identity (it is what
 // the seq gate asserts against), so this leans on a contract that exists rather
 // than reaching into another surface's state.
+//
+// ## 이 주소는 **한 번 쓰이고 지워진다** — 그래서 새로고침을 못 견딘다 (#1199 N-c)
+//
+// 이 머리말은 원래 "it survives a reload" 라고 적고 있었다. #1195 리뷰 B2 가 그
+// 계약을 **뒤집었고**, 그 대가가 어디에도 적혀 있지 않다는 것이 이 문단의 이유다.
+//
+// 무슨 일이 있었나: `ChatShell` 이 `?msg=`/`?seq=` 를 읽은 **직후 주소에서 지운다**
+// (`?work=` 가 이미 하던 규율). 지우지 않았을 때 같은 앵커를 두 번 가리키면 두
+// 번째 주소가 첫 번째와 글자 단위로 같아 라우터가 아무것도 알리지 않았고, 그래서
+// 서랍만 닫히고 아무 일도 일어나지 않았다 — 사람에게는 「눌렀는데 무동작」이다.
+// 한 번의 누름이 한 번의 착지가 되는 것이 이 표면의 최소 계약이므로 그 수리가 옳고,
+// 되돌리지 않는다.
+//
+// 그 대가는 이것이다: **붙여넣은 딥링크가 새로고침을 견디지 못한다.** 링크를 열면
+// 착지하고, 그 순간 주소는 `#/c/{channel}` 이 된다. 거기서 F5 를 누르면 채널만
+// 열린다(그 줄로 다시 가지 않는다). 링크를 다시 열면 다시 착지하므로 **공유는
+// 멀쩡하고**, 잃는 것은 착지 뒤의 재적재 한 가지다.
+//
+// 되살리려면 「소비했음」을 주소가 아닌 곳에 적어야 하는데(예: 세션 스토리지의
+// 토큰), 그러면 주소가 든 사실과 착지가 든 사실이 두 벌이 되고 둘은 반드시
+// 갈라진다 — 지금 이 파일이 갖고 있지 않은 종류의 상태다. 값이 비용을 넘는다고
+// 판단되면 그때 여는 것이 옳고, 이 문단이 그 판단의 재료다.
+//
+// 게이트가 이 계약을 **양방향으로** 잠근다: `gate-ade.mjs` 는 착지 뒤 주소에
+// `msg=` 가 남아 있으면 실패하고(`ADE_GATE_PROVE_RED_ADDRESS` 가 그 실패를 이름
+// 붙여 재현한다), 곧이어 같은 카드를 한 번 더 눌러 두 번째 착지를 단정한다.
 // =============================================================================
 
 /** How long to keep looking for the row before giving up quietly. */

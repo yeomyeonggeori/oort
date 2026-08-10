@@ -7,7 +7,11 @@ import {
   type KeyboardEvent,
 } from "react";
 import { SendHorizontal } from "lucide-react";
-import type { RequestRouting, RosterMember } from "@momo/core/lib/api";
+import type {
+  MessageAttachment,
+  RequestRouting,
+  RosterMember,
+} from "@momo/core/lib/api";
 import { Button } from "@/design/ui/button";
 import { cn } from "@/design/lib/cn";
 import { useSession } from "@/app/session";
@@ -50,6 +54,25 @@ import { clearDraft, readDraft, writeDraft } from "@/features/chat/draftStore";
 import { rememberSendLearned, useSendHintNeeded } from "@/features/chat/sendHint";
 import { useAutoGrow } from "@/features/timeline/useAutoGrow";
 import { useOffline } from "@/features/common/useOffline";
+import {
+  AttachButton,
+  AttachmentTray,
+} from "@/features/attachments/AttachmentTray";
+import {
+  acknowledgeNotices,
+  addFiles,
+  clearSurface,
+  dropDraft,
+  retryDraft,
+  surfaceKey,
+  takeSent,
+  useAttachmentSurface,
+} from "@/features/attachments/draftStore";
+import {
+  sendBlockCopy,
+  sendBlockReason,
+} from "@momo/core/features/attachments/model";
+import { useComposerDropZone } from "@/features/attachments/useComposerDropZone";
 
 // =============================================================================
 // Composer (R-1 §3). Send plus the @mention skeleton. ↵ sends, ⇧↵ is a line
@@ -334,7 +357,11 @@ export function Composer({
    */
   onSend: (
     body: string,
-    options?: { routing?: RequestRouting; replyToId?: string }
+    options?: {
+      routing?: RequestRouting;
+      replyToId?: string;
+      attachments?: MessageAttachment[];
+    }
   ) => Promise<void> | void;
 }) {
   // 초안은 이 채널의 것이다. 첫 렌더에서 바로 읽는 이유는 한 프레임의 빈 입력창이
@@ -380,6 +407,27 @@ export function Composer({
   // 키 배치 설명이 아직 필요한가 (감사 M-7). 이 기기에서 ↵로 한 번 보내면 꺼진다.
   const keysHintNeeded = useSendHintNeeded();
   const signals = useAgentWorkingSignals();
+
+  // ── 첨부 (ADR-0151 D2) ────────────────────────────────────────────────────
+  //
+  // 트레이는 이 컴포넌트 밖에 산다(`draftStore.ts`). 30 MB 를 60% 올려 둔 상태에서
+  // 스레드를 열었다 닫는 것이 그 60% 를 버릴 이유가 아니고, 이 컴포넌트는 채널
+  // 전환에 언마운트되지 않으므로 상태가 여기 있으면 채널마다 갈라지지도 않는다.
+  const trayKey = surfaceKey(workspaceId, channelId);
+  const tray = useAttachmentSurface(trayKey);
+  const attachTarget = useMemo(
+    () => ({ workspaceId, channelId }),
+    [workspaceId, channelId]
+  );
+  const onFiles = (files: File[], batch?: { folders?: number }) =>
+    addFiles(trayKey, attachTarget, files, batch);
+  // 오프라인에서는 새 파일을 받지 않는다. 전송과 같은 이유이고 더 직접적이다:
+  // 업로드는 네트워크 세 왕복이라, 끊긴 채로 시작하면 세 번 다 실패한다.
+  const drop = useComposerDropZone(onFiles, !offline);
+  const attachBlock = sendBlockReason(tray.drafts);
+  // 발치의 문장과 버튼의 툴팁이 **한 곳**에서 난다. 갈라 두면 하나만 고쳐지고,
+  // 리뷰 M-1 이 잡은 "없는 버튼을 가리키는 안내"가 툴팁에만 남는다.
+  const attachBlockCopy = sendBlockCopy(tray.drafts);
 
   // ── 「작성 중」 (ADR-0149) ────────────────────────────────────────────────
   //
@@ -481,6 +529,21 @@ export function Composer({
     });
   }
 
+  /**
+   * 지금 이 전송이 나갈 수 있는가.
+   *
+   * 본문이 비어도 첨부가 있으면 보낼 수 있다(파일만 보내는 메시지). 반대로,
+   * 올라가는 중이거나 실패한 첨부가 하나라도 있으면 본문이 있어도 못 보낸다 —
+   * 서버가 첨부 한 건의 거절에 메시지째 롤백하므로, 그 롤백을 만나기 전에
+   * 화면이 먼저 말하는 쪽이 낫다.
+   */
+  const hasReadyAttachments =
+    tray.drafts.length > 0 && attachBlock === null;
+  const canSend =
+    !offline &&
+    attachBlock === null &&
+    (text.trim().length > 0 || hasReadyAttachments);
+
   function submit(body: string) {
     // 오버라이드는 이 전송분과 함께 떠난다. 값을 먼저 읽어 두고 상태를 비우는
     // 순서인 이유는 "1회"라는 라벨이 지켜져야 하기 때문이다: 보낸 뒤에도 줄이
@@ -499,17 +562,23 @@ export function Composer({
     // 화면에서 사라진 글은 저장소에서도 사라진다. 여기서 지우지 않으면 이 채널을
     // 다시 열 때 방금 보낸 문장이 입력창에 복원돼 두 번 보내진다.
     clearDraft(workspaceId, channelId);
+    // 첨부도 이 전송분과 함께 떠난다. 꺼내는 것과 트레이를 비우는 것이 한
+    // 함수인 이유는 그 사이에 렌더가 끼면 이미 보낸 파일이 한 프레임 동안 트레이에
+    // 남고, 그 프레임에 전송을 한 번 더 누를 수 있기 때문이다.
+    const sent = takeSent(trayKey);
     void onSend(body, {
       ...(payload ? { routing: payload } : {}),
       ...(replyToId === undefined ? {} : { replyToId }),
+      ...(sent.attachments.length === 0
+        ? {}
+        : { attachments: sent.attachments }),
     });
   }
 
   function onSubmit(event: FormEvent) {
     event.preventDefault();
-    const body = text.trim();
-    if (!body || offline) return;
-    submit(body);
+    if (!canSend) return;
+    submit(text.trim());
   }
 
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
@@ -546,10 +615,9 @@ export function Composer({
         // 않는다 — 그 사람은 키가 어디 있는지 아직 모르고, 힌트 줄은 정확히 그
         // 사람을 위한 것이다. 오프라인이라 보내지 못한 누름도 세지 않는다: 배운
         // 것은 「이 키가 전송이다」인데 그 누름은 그것을 보여 주지 못했다.
-        const body = text.trim();
-        if (body && !offline) {
+        if (canSend) {
           rememberSendLearned();
-          submit(body);
+          submit(text.trim());
         }
         return;
       }
@@ -589,7 +657,35 @@ export function Composer({
     // `safe-area-bottom` (goal B6): 폰에서 컴포저는 셸의 마지막 줄이고, 그 아래는
     // iOS 홈 인디케이터다. 안전 영역만큼 물러나지 않으면 전송 버튼의 아랫부분이
     // 시스템 제스처 영역에 들어가 눌리지 않는다.
-    <div className="safe-area-bottom border-t border-line">
+    <div
+      // 드롭은 컴포저 **전체**가 받는다. 텍스트에어리어만 받으면 트레이나 힌트 줄
+      // 위에 놓은 파일이 브라우저의 기본 동작으로 넘어가 새 탭에서 열린다.
+      onDragEnter={drop.onDragEnter}
+      onDragOver={drop.onDragOver}
+      onDragLeave={drop.onDragLeave}
+      onDrop={drop.onDrop}
+      data-dragging={drop.dragging ? "" : undefined}
+      className={cn(
+        "safe-area-bottom border-t border-line",
+        // 강조는 배경 한 겹이다. 점선 테두리와 가운데 정렬된 큼직한 안내는
+        // 랜딩 페이지의 문법이고, 이 자리에서 필요한 것은 "여기 놓으면 된다"를
+        // 말하는 최소한이다.
+        drop.dragging && "bg-accent-soft"
+      )}
+      data-testid="composer"
+    >
+      {/* 첨부 트레이 (ADR-0151 D2). 인용 칩보다 **위**다: 순서는 여전히
+          맥락 → 처리 → 입력이고, 파일은 이 메시지가 무엇을 나르는가라서 인용보다
+          한 겹 바깥이다. 첨부가 없으면 서지 않는다. */}
+      <AttachmentTray
+        drafts={tray.drafts}
+        rejected={tray.rejected}
+        folders={tray.folders}
+        onRemove={(localId) => dropDraft(trayKey, localId)}
+        onRetry={(localId) => retryDraft(trayKey, attachTarget, localId)}
+        onClear={() => clearSurface(trayKey)}
+        onAcknowledgeNotices={() => acknowledgeNotices(trayKey)}
+      />
       {/* 인용 칩 (ADR-0148). 라우팅 줄보다 **위**에 온다: 라우팅은 "이 글이 어떻게
           처리되는가"고 인용은 "이 글이 무엇에 대한 것인가"라서, 읽는 순서가
           맥락 -> 처리 -> 입력이다. */}
@@ -657,6 +753,10 @@ export function Composer({
           </ul>
         )}
 
+        {/* 클립은 입력창 **왼쪽**이다. 전송이 오른쪽 끝을 갖는 것과 짝이고
+            (넣는 것은 앞, 보내는 것은 뒤), Slack·Discord·Linear 가 전부 같은
+            자리를 쓴다 — 이 자리는 배울 필요가 없는 자리다. */}
+        <AttachButton onPick={onFiles} disabled={offline} />
         <label className="sr-only" htmlFor="composer-input">
           {channelLabel}에 보낼 메시지
         </label>
@@ -687,6 +787,9 @@ export function Composer({
             setCaret((event.target as HTMLTextAreaElement).selectionStart ?? 0)
           }
           onKeyDown={onKeyDown}
+          // 스크린샷을 ⌘V 로 넣는 것은 이 도구를 쓰는 사람이 하루에 몇 번씩 하는
+          // 일이다. 글이 함께 온 붙여넣기는 가로채지 않는다(`useComposerDropZone`).
+          onPaste={drop.onPaste}
           // The composition window, in three lines. `compositionstart` closes
           // the guard (a new session cannot be a stale commit), `compositionend`
           // opens it, and any key release closes it again, which bounds the
@@ -717,14 +820,13 @@ export function Composer({
           // 오프라인에서는 보낼 수 없다 (진단 H-10). 누르면 실패 행 하나를 만들고
           // 끝나므로, 막고 **왜**를 아래 한 줄이 말한다. 입력창은 잠그지 않는다:
           // 연결이 끊겼다고 글을 못 쓸 이유가 없고, 그동안 쓴 것은 초안이 지킨다.
-          disabled={text.trim().length === 0 || offline}
+          disabled={!canSend}
           aria-label="메시지 보내기"
           title={
             offline
               ? COMPOSER_OFFLINE_COPY
-              : isMobile
-                ? "메시지 보내기"
-                : "메시지 보내기 (Enter)"
+              : (attachBlockCopy ??
+                (isMobile ? "메시지 보내기" : "메시지 보내기 (Enter)"))
           }
           data-testid="composer-send"
         >

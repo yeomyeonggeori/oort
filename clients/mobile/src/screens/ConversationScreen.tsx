@@ -52,7 +52,10 @@ import {useInvalidateApprovals} from '../features/inbox/useInbox';
 import type {ApprovalReceipt} from '../features/conversation/approvalGate';
 import {useOnline} from '../features/inbox/useOnline';
 import {usePendingApprovals} from '../features/conversation/usePendingApprovals';
-import {jumpMissedNotice} from '../features/conversation/jumpNotice';
+import {
+  jumpMissedNotice,
+  type JumpSubject,
+} from '../features/conversation/jumpNotice';
 import {Composer} from '../features/conversation/Composer';
 import {channelDraftKey} from '../features/conversation/drafts';
 import {TypingBar} from '../features/conversation/TypingBar';
@@ -141,6 +144,16 @@ function railSubtitle(status: RealtimeStatus): string | undefined {
  * 쏟아지는 프레임을 한 번의 PUT + 한 번의 무효화로 접을 만큼은 길다.
  */
 const READ_CURSOR_COALESCE_MS = 600;
+
+/**
+ * 걸어 둔 발원 앵커의 수명, ms (#1193 리뷰 M2).
+ *
+ * 「대화로」를 누르고 목적지 방이 뜨기까지 넉넉한 시간이되, 사람이 그 행동을
+ * 잊을 만큼 길지는 않다. 이 시한이 지나면 앵커는 조용히 사라지고, 나중에 그
+ * 방에 들어가도 아무 일도 일어나지 않는다 — 몇 분 전에 누른 것의 결과가 지금
+ * 튀어나오는 것은 사람에게 원인 없는 사건이다.
+ */
+const PENDING_ANCHOR_TTL_MS = 30_000;
 
 export default function ConversationScreen({
   channelId,
@@ -563,47 +576,196 @@ export default function ConversationScreen({
     headline: string;
     detail: string;
   } | null>(null);
+  /**
+   * 지금 걸린 점프가 **무엇을 찾고 있는가** (#1193).
+   *
+   * 고지의 주어를 고른다. 상태가 아니라 ref 인 이유는 이 값이 화면을 그리지
+   * 않기 때문이다 — 읽는 것은 `onJumpMissed` 한 곳뿐이고, 상태로 두면 그
+   * 콜백의 동일성이 바뀌어 `Timeline` 의 `renderItem` 을 타고 목록 전체가 다시
+   * 그려진다(이 화면이 `quoteRef` 에서 이미 고른 모양이다).
+   */
+  const jumpSubjectRef = useRef<JumpSubject>('quote');
+
+  /**
+   * 빈손으로 돌아온 점프가 **무엇을 기다리는가** (#1209 리뷰 High).
+   *
+   * 첫 판은 이 감시를 검색 진입에만 달았다. 그래서 같은 상자가 넷에게 같은 말을
+   * 하는데 — 「위로 올려 이전 대화를 더 불러오세요」 — 그 말이 약속하는 결말은
+   * **하나에서만** 일어났다. 고정·인용에서는 사람이 시킨 대로 위로 올려 그 줄이
+   * 화면에 도착해도 아무 일이 없었고, 상자는 그 자리에 서서 이미 거짓이 된
+   * 문장을 계속 말했다. 그 화면에서 거짓인 문장을 없애려고 시작한 배치가
+   * 새 거짓 문장을 셋 만든 셈이다.
+   *
+   * 그래서 감시는 **주어의 성질이 아니라 점프의 성질**이다. 「무엇을 눌렀는가」가
+   * 아니라 「목적지가 지금 목록에 있는가」만 본다 — 네 갈래가 이미 같은 기계를
+   * 타고 있었으므로 붙일 자리도 하나다.
+   *
+   * 무장은 **놓친 순간**에만 일어난다(`onJumpMissed`). 놓쳤다는 것은 `Timeline`
+   * 이 `items` 에서 그 줄도, 그것을 대신해 선 접힌 행도 못 찾았다는 뜻이고,
+   * `items` 는 `messages` 에서 파생되므로 그 순간 목적지는 `messages` 에도 없다.
+   * 즉 무장 시점의 답은 언제나 「없다」이고, 그래서 도착은 **변화**로만 온다.
+   */
+  const [awaitingJump, setAwaitingJump] = useState<{
+    messageId: string;
+    seq: number | null;
+  } | null>(null);
+  /**
+   * 한 번의 기다림은 **한 번만** 다시 쏜다.
+   *
+   * 두 번째 발이 또 빈손이면(위 논증이 닫지 못하는 경로가 언젠가 생긴다면)
+   * 무장 → 도착 → 발사 → 무장이 스스로를 물어 렌더 루프가 된다. 새 요청이
+   * 들어오면(`requestJump`) 이 기억은 지워지므로, 막는 것은 **같은 기다림 안의**
+   * 반복뿐이다.
+   */
+  const refiredRef = useRef<string | null>(null);
+
+  // 방을 옮기면 앞선 방의 점프도, 그 방에서 기다리던 줄도 이 화면의 사실이 아니다.
+  //
+  // **아래의 세션 앵커 효과보다 먼저** 선언돼 있는 것이 load-bearing 이다: 같은
+  // 커밋에서 둘 다 돌면 순서는 선언 순서이고, 반대로 두면 이 초기화가 방금 건
+  // 점프를 지운다(#1193 이 그 자리에 이미 적어 둔 계약).
   useEffect(() => {
     setJumpTarget(null);
     setJumpMissed(null);
+    setAwaitingJump(null);
+    refiredRef.current = null;
   }, [channelId]);
 
-  const onJumpToQuoted = useCallback((message: Message) => {
-    const targetId = message.replyToId;
-    if (targetId === undefined) return;
-    setJumpMissed(null);
-    setJumpTarget(current => ({
-      messageId: targetId,
+  /**
+   * 점프 한 번을 건다 — **네 갈래가 전부 이 문을 통과한다** (#1209 리뷰 High).
+   *
+   * 토큰을 올리는 이유: 같은 곳을 두 번 가리키는 것은 **두 번의 요청**이고, id 만
+   * 내려보내면 두 번째 누름에 아무 일도 일어나지 않는다(웹이 `?msg=` 에서 만난
+   * 그 벽과 같은 것이고, 그쪽도 같은 답을 든다).
+   *
+   * 새 요청은 앞선 기다림을 **접는다**: 사람이 다른 곳을 가리켰으면 앞의 목적지는
+   * 더 이상 그가 원하는 곳이 아니다.
+   */
+  const requestJump = useCallback(
+    (subject: JumpSubject, messageId: string, seq: number | null) => {
+      jumpSubjectRef.current = subject;
+      setJumpMissed(null);
+      setAwaitingJump(null);
+      refiredRef.current = null;
+      setJumpTarget(current => ({
+        messageId,
+        seq,
+        token: (current?.token ?? 0) + 1,
+      }));
+    },
+    [],
+  );
+
+  const onJumpToQuoted = useCallback(
+    (message: Message) => {
+      const targetId = message.replyToId;
+      if (targetId === undefined) return;
       // 서버가 인용에 원본의 seq 를 실어 준다. 라이브 프레임으로 온 인용에는
       // 없으므로 `null` 이고, 그때는 「모르겠다」라고 말하게 된다.
-      seq: message.replyTo?.seq ?? null,
-      token: (current?.token ?? 0) + 1,
-    }));
-  }, []);
+      requestJump('quote', targetId, message.replyTo?.seq ?? null);
+    },
+    [requestJump],
+  );
 
   // 점프가 **성공하면** 고지는 스스로 물러난다. 남겨 두면 사람이 이미 도착한
   // 자리 위에 「못 찾았습니다」가 계속 붙어 있게 된다 — 다음 점프나 채널 이동까지.
   const clearJumpNotice = useCallback(() => setJumpMissed(null), []);
 
   /**
+   * 사람이 상자를 물렸다 — 그러면 **뒤에 걸린 의도도 함께 접는다** (#1209 리뷰 Medium).
+   *
+   * 이 커밋이 이 고지에 처음으로 「기다렸다가 데려간다」를 달았고, 그 순간
+   * 「닫기」의 뜻이 하나 늘었다. 닫기만 하고 기다림을 남기면, 상자를 물리고 자기
+   * 이유로 옛 대화를 읽으러 올라간 사람을 그 줄이 도착하는 순간 읽던 자리에서
+   * **끌어간다** — 사람이 방금 물린 바로 그 의도의 결과로.
+   *
+   * 세션 앵커가 30초 시계를 단 것과 같은 규율이되 **수단이 다르다**. 그쪽의
+   * 대기는 화면에 아무 자국도 남기지 않으므로(방이 열릴 때까지 보이지 않는다)
+   * 사람이 취소할 길이 없고, 그래서 시계가 필요했다. 이쪽의 대기는 **상자 그
+   * 자체**다 — 서 있는 동안 화면에 보이고, 그것을 닫는 것이 곧 취소다. 보이지
+   * 않는 의도에는 시계를, 보이는 의도에는 컨트롤을 준다.
+   */
+  const cancelJump = useCallback(() => {
+    setJumpMissed(null);
+    setAwaitingJump(null);
+  }, []);
+
+  /**
    * 고정 목록에서 원본으로 (이슈 #1112).
    *
    * `onJumpToQuoted` 와 **같은 기계**를 탄다. 고정 목록은 자기 항법을 만들지
-   * 않는다 — 못 찾았을 때의 문장도 이미 저 아래(`anchor-missed`)에 있고, 두
-   * 번째를 그리면 같은 사실을 두 군데서 말하게 된다.
+   * 않는다 — 못 찾았을 때의 문장도 이미 저 아래(`jump-missed`)에 있고, 두
+   * 번째를 그리면 같은 사실을 두 군데서 말하게 된다. 다만 그 문장의 **주어**는
+   * 자기 것이다(#1196, 아래).
    *
    * `seq` 는 **항상** 있다: 서버의 고정 목록 항목이 메시지의 seq 를 나른다(인용
    * 라이브 프레임과 달리). 그래서 못 찾았을 때 「더 위에 있다」를 추측이 아니라
    * 사실로 말할 수 있다.
    */
-  const onJumpToPinned = useCallback((messageId: string, seq: number) => {
-    setJumpMissed(null);
-    setJumpTarget(current => ({
-      messageId,
-      seq,
-      token: (current?.token ?? 0) + 1,
-    }));
-  }, []);
+  const onJumpToPinned = useCallback(
+    (messageId: string, seq: number) => {
+      // 고정을 누른 사람은 인용을 누른 적이 없다 (#1196). #1193 이 주어 갈래를 열고
+      // 이 호출만 옛 기본값에 남겨 두어, 고정 목록에서 못 찾은 점프가 「인용한
+      // 원본을 이 화면에서 찾지 못했습니다」라고 말했다 — 그 화면에서 거짓인 문장을
+      // 없애려고 만든 바로 그 갈래에서.
+      requestJump('pin', messageId, seq);
+    },
+    [requestJump],
+  );
+
+  // ---- ADE 카드의 「대화로」 (#1193) -----------------------------------------
+  //
+  // 세 번째 호출자이고, **같은 기계**를 탄다(위 둘과 같은 규율). 다른 점은 하나
+  // 뿐이다: 목적지가 다른 방일 수 있다. 서랍 목록은 워크스페이스 전역이라
+  // 「대화로」의 절반은 지금 열려 있지 않은 방으로 간다.
+  //
+  // 그래서 앵커를 **한 박자 들고 있는다**. 방을 여는 것은 셸의 일이고(이 화면은
+  // `channelId` 프롭만 갈아 끼운다), 새 방의 타임라인이 도착하기 전에 점프를
+  // 걸면 목록이 비어 있어 그 즉시 「찾지 못했습니다」가 뜬다 — 사실은 아직
+  // 오는 중인데.
+  //
+  // 채널이 바뀔 때 도는 초기화(`setJumpTarget(null)`)보다 **뒤에** 선언돼 있는
+  // 것이 load-bearing 이다: 같은 커밋에서 둘 다 돌면 순서는 선언 순서이고,
+  // 반대로 두면 초기화가 방금 건 점프를 지운다.
+  // **어느 방의 앵커인지 함께 든다** (리뷰 M2). 1차 판은 id 하나만 들고 「타임라인이
+  // 준비되면 쏜다」였다. 목적지 방이 끝내 준비되지 않고(오프라인·조회 실패) 사람이
+  // 다른 방을 열면 그 방에서 발사돼 「이 작업을 시작한 메시지를 이 화면에서 찾지
+  // 못했습니다」를 띄운다 — 그 방이 한 번도 들고 있던 적 없는 메시지에 대해서.
+  // 이 배치가 없애려고 나온 바로 그 종류의 거짓 문장이다.
+  //
+  // 그리고 **늙는다.** 방이 영영 안 열리면 앵커는 조용히 사라져야 한다: 몇 분 뒤
+  // 우연히 그 방에 들어갔을 때 튀어나오는 점프는 사람이 방금 한 행동의 결과가 아니다.
+  const [pendingAnchor, setPendingAnchor] = useState<{
+    channelId: string;
+    messageId: string;
+  } | null>(null);
+  useEffect(() => {
+    if (pendingAnchor === null) return undefined;
+    const timer = setTimeout(() => setPendingAnchor(null), PENDING_ANCHOR_TTL_MS);
+    return () => clearTimeout(timer);
+  }, [pendingAnchor]);
+  useEffect(() => {
+    if (pendingAnchor === null) return;
+    // 아직 그 방이 아니다. 다른 방에서는 **절대** 쏘지 않는다.
+    if (!uuidEq(pendingAnchor.channelId, channelId)) return;
+    if (timeline.status !== 'ready') return;
+    setPendingAnchor(null);
+    // 세션 원장은 순서값을 나르지 않는다. 없는 seq 를 지어내지 않고, 그 대가로
+    // 못 찾았을 때의 문장은 「더 위에 있다」로 정밀해지지 못한다.
+    requestJump('session', pendingAnchor.messageId, null);
+  }, [pendingAnchor, channelId, timeline.status, requestJump]);
+
+  const onOpenAdeAnchor = useCallback(
+    (targetChannelId: string, targetTitle: string, messageId: string) => {
+      setPendingAnchor({channelId: targetChannelId, messageId});
+      // 이미 그 방이면 방을 다시 열지 않는다. 셸에 같은 대화를 한 번 더 밀어도
+      // 화면은 그대로지만, 그 왕복은 「눌렀는데 아무 일도 안 일어난 것 같은」
+      // 한 프레임을 만든다.
+      if (uuidEq(targetChannelId, channelId)) return;
+      onOpenConversation?.(targetChannelId, targetTitle);
+    },
+    [channelId, onOpenConversation],
+  );
 
   // ===========================================================================
   // 타임라인 승인 (감사 H-1 / goal U4-g)
@@ -652,8 +814,19 @@ export default function ConversationScreen({
   // 문장은 `jumpNotice.ts` 가 든다 — **측정 하네스가 같은 상수를 읽어 사진을
   // 찍기 때문**이다(H-5 는 「코드 확인 / 시각 SKIPPED」로 남아 있었다). 하네스가
   // 베껴 적으면 배송되는 문장이 바뀌어도 사진은 옛말을 계속 한다.
+  //
+  // 그리고 **무엇을 찾다 놓쳤는지 붙들어 둔다** (#1209 리뷰 High). 상자가 시키는
+  // 일을 사람이 해내면 그때 데려가야 하고, 그러려면 목적지를 기억하고 있어야
+  // 한다. 목적지는 지금 걸린 점프 그 자체이므로 거울(`jumpTargetRef`)에서 읽는다 —
+  // 상태로 받으면 이 콜백의 동일성이 바뀌고, 그것은 `Timeline` 의 `renderItem` 을
+  // 타고 「붙어 있는 모든 행을 다시 그려라」가 된다(`jumpSubjectRef` 와 같은 이유).
+  const jumpTargetRef = useRef<typeof jumpTarget>(null);
+  jumpTargetRef.current = jumpTarget;
   const onJumpMissed = useCallback((reason: 'older' | 'unknown') => {
-    setJumpMissed(jumpMissedNotice(reason));
+    setJumpMissed(jumpMissedNotice(reason, jumpSubjectRef.current));
+    const target = jumpTargetRef.current;
+    if (target === null) return;
+    setAwaitingJump({messageId: target.messageId, seq: target.seq});
   }, []);
 
   // Bumped the moment a send is issued — before the round trip, because the
@@ -765,38 +938,61 @@ export default function ConversationScreen({
     ],
   );
 
-  // ---- a search result that we cannot show says so --------------------------
-  // Only once the first page has settled: before that, "not found" would be a
-  // statement about a list that has not loaded yet.
-  const oldestSeq = timeline.state.oldestSeq;
+  // ---- 검색 결과로 들어온 자리에 **내려앉는다** (#1196) -----------------------
   //
-  // **이것도 실패가 아니다** (design-review H-5 의 같은 논리). 리뷰는 인용 점프
-  // 고지만 지목했지만, 이 줄은 M1 에서 내가 **일부러 같은 배너를 쓰게** 만든
-  // 자리다 — 「같은 사실을 두 모양으로 말할 이유가 없다」. 그러므로 한쪽만
-  // 고치면 내가 세운 그 규칙이 깨진다. 둘 다 `NoticeBlock` 으로 간다.
+  // 여태 이 화면은 그 자리를 **말하기만 했다**: 앵커가 로드된 목록에 없으면
+  // 「찾지 못했습니다」를 세우고, 있으면 아무것도 하지 않았다 — 있어도 데려가지
+  // 않았다는 뜻이다. 검색 결과를 누른 사람은 채널 바닥에 도착해 자기가 방금 읽은
+  // 문장을 눈으로 다시 찾아야 했다. 웹은 같은 경로에서 **착지한다**(`?msg=` +
+  // `bringIntoView`), 그래서 같은 제품의 두 클라이언트가 같은 동작에 다른 규율을
+  // 갖고 있었다 (#1195 가 「하지 않은 것」으로 남긴 그 자리).
   //
-  // 다만 닫기는 주지 않는다. 인용 점프 고지는 사람이 방금 누른 것에 대한
-  // **영수증**이라 한 번 읽으면 끝이지만, 이 줄은 「이 화면은 당신이 찾아온
-  // 메시지를 아직 안 들고 있다」는 **상태**다 — 닫아도 여전히 참이고, 닫으면
-  // 사람이 왜 엉뚱한 자리에 있는지 설명하는 유일한 문장이 사라진다.
-  // (`NoticeBlock.onDismiss` 독스트링이 그 갈림을 이미 적어 두었다.)
-  const anchorNotice = useMemo(() => {
-    if (!anchor || timeline.status !== 'ready') return null;
-    const found = timeline.state.messages.some(message =>
-      uuidEq(message.id, anchor.messageId),
+  // 새 기계를 만들지 않는다. 착지 문법은 이 화면에 **이미 있고**(`jumpTarget` —
+  // 인용·고정·세션 앵커 셋이 함께 타는 그것), #1195 가 웹에 이식할 때 베낀 원본이
+  // 정확히 이것이다. 네 번째 호출자가 된다.
+  //
+  // 한 번만 쏜다. 놓치면 그 다음은 **모든 점프가 함께 쓰는** 기다림이 맡는다
+  // (`awaitingJump`) — 이 경로에만 달려 있던 두 번째 발을 점프 자체의 성질로
+  // 올린 것이 #1209 리뷰 High 의 수리다.
+  const firedEntryAnchorRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!anchor || timeline.status !== 'ready') return;
+    if (firedEntryAnchorRef.current === anchor.messageId) return;
+    firedEntryAnchorRef.current = anchor.messageId;
+    // 검색 결과는 `seq` 를 함께 든다(`MessageSearchHit`). 세션 앵커와 갈리는
+    // 유일한 자리이고, 그래서 못 찾았을 때 「더 위쪽에 있다」를 추측이 아니라
+    // 사실로 말할 수 있다 — `Timeline` 이 로드된 가장 오래된 seq 와 견준다.
+    requestJump('search', anchor.messageId, anchor.seq);
+  }, [anchor, timeline.status, requestJump]);
+
+  /**
+   * 기다리던 줄이 도착했다 → **그때 데려간다** (#1209 리뷰 High).
+   *
+   * 「위로 올려 이전 대화를 더 불러오세요」를 따른 사람에게 화면이 지키는 약속이
+   * 이 효과다. 없으면 그 문장은 따르고 나면 거짓이 되고, 사람은 자기가 지시를
+   * 완수했다는 사실조차 화면에서 못 읽는다.
+   *
+   * 주어는 그대로 둔다(`jumpSubjectRef`) — 두 번째 발은 같은 사람이 누른 같은
+   * 요청의 계속이지 새 요청이 아니다. 착지하면 `onJumpLanded` 가 상자를 거두고,
+   * 그 사라짐이 곧 「도착했다」의 유일한 신호다.
+   */
+  const awaitingArrived = useMemo(() => {
+    if (awaitingJump === null || timeline.status !== 'ready') return false;
+    return timeline.state.messages.some(message =>
+      uuidEq(message.id, awaitingJump.messageId),
     );
-    if (found) return null;
-    if (oldestSeq !== null && anchor.seq < oldestSeq) {
-      return {
-        headline: '찾던 메시지는 이 대화의 더 위쪽에 있습니다',
-        detail: '아직 불러오지 않았습니다. 위로 올려 이어서 불러오세요.',
-      };
-    }
-    return {
-      headline: '찾던 메시지를 이 화면에서 찾지 못했습니다',
-      detail: '위로 올려 이전 대화를 더 불러오세요.',
-    };
-  }, [anchor, timeline.status, timeline.state.messages, oldestSeq]);
+  }, [awaitingJump, timeline.status, timeline.state.messages]);
+  useEffect(() => {
+    if (awaitingJump === null || !awaitingArrived) return;
+    if (refiredRef.current === awaitingJump.messageId) return;
+    refiredRef.current = awaitingJump.messageId;
+    setAwaitingJump(null);
+    setJumpTarget(current => ({
+      messageId: awaitingJump.messageId,
+      seq: awaitingJump.seq,
+      token: (current?.token ?? 0) + 1,
+    }));
+  }, [awaitingJump, awaitingArrived]);
 
   return (
     <Screen>
@@ -833,18 +1029,19 @@ export default function ConversationScreen({
       <ConversationLayout
         list={
           <>
-            {anchorNotice ? (
-              <View style={styles.notice}>
-                <NoticeBlock
-                  headline={anchorNotice.headline}
-                  detail={anchorNotice.detail}
-                  testID="anchor-missed"
-                />
-              </View>
-            ) : null}
-            {/* 인용 점프가 빈손으로 돌아온 자리. 검색 앵커와 같은 배너를 쓴다 —
-                같은 사실("이 화면에 그 줄이 없다")을 두 가지 모양으로 말할
-                이유가 없다. */}
+            {/* 점프가 빈손으로 돌아온 자리. **하나뿐이다** (#1196).
+                인용·고정·세션 앵커·검색 진입 넷이 같은 배너를 쓴다 — 같은
+                사실("이 화면에 그 줄이 없다")을 두 가지 모양으로 말할 이유가 없고,
+                이제는 두 벌을 그릴 수도 없다: 검색 진입이 같은 착지 기계를 타므로
+                두 고지를 두면 못 찾은 한 번에 같은 문장이 **두 줄** 선다.
+                (M1 이 두 배너에 같은 모양을 쓰게 한 판단의 끝이 이것이다.)
+
+                옛 검색 배너는 닫기가 없었다 — 「이 화면은 당신이 찾아온 메시지를
+                아직 안 들고 있다」는 **상태**라는 근거였다. 그 근거가 이 커밋에서
+                바뀐다: 이제 그 문장은 사람이 누른 결과에 대한 답이고(눌렀고, 갔고,
+                거기 없었다), 시킨 대로 위로 올려 그 줄이 도착하면 **스스로 물러난다**
+                (두 번째 발이 착지하며 `onJumpLanded`). 닫을 수 있는 영수증의 조건을
+                그대로 갖췄다(`NoticeBlock.onDismiss` 독스트링). */}
             {/* ===================================================
                 실패가 아니라 **사실 진술**이다 (design-review H-5).
 
@@ -862,14 +1059,20 @@ export default function ConversationScreen({
                 아니다.
 
                 점프가 성공하면 스스로도 물러난다(`clearJumpNotice`).
+
+                그리고 닫기는 **뒤에 걸린 기다림도 접는다**(`cancelJump`, #1209
+                리뷰 Medium). 이 상자는 이제 서 있는 동안 「그 줄이 오면 데려간다」는
+                의도를 함께 들고 있으므로, 상자를 물리는 것이 곧 그 의도를 무르는
+                것이다 — 물리고 자기 이유로 위로 올라간 사람을 나중에 끌어가지
+                않는다.
                 =================================================== */}
             {jumpMissed ? (
               <View style={styles.notice}>
                 <NoticeBlock
                   headline={jumpMissed.headline}
                   detail={jumpMissed.detail}
-                  onDismiss={clearJumpNotice}
-                  testID="quote-jump-missed"
+                  onDismiss={cancelJump}
+                  testID="jump-missed"
                 />
               </View>
             ) : null}
@@ -1007,7 +1210,11 @@ export default function ConversationScreen({
       ) : null}
 
       {adeOpen && onOpenConversation ? (
-        <AdeControlPanel onClose={closeAde} onOpenChannel={onOpenConversation} />
+        <AdeControlPanel
+          onClose={closeAde}
+          onOpenChannel={onOpenConversation}
+          onOpenAnchor={onOpenAdeAnchor}
+        />
       ) : null}
     </Screen>
   );

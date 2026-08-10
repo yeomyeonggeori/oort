@@ -53,6 +53,9 @@ pub mod billing;
 pub mod cloud_host;
 pub mod convergence;
 pub mod error;
+/// #1197 H1 — instance lease renewal, on a substrate that expires instances on
+/// a clock momo does not otherwise touch.
+pub mod lease;
 pub mod lifecycle;
 pub mod provider;
 /// ADR-0136 D1 / ADR-0156 D4-④ — the managed half of cloud-host acquisition.
@@ -83,6 +86,7 @@ pub use convergence::{
     CloudLifecycleConvergence, CloudLifecyclePhase,
 };
 pub use error::T3Error;
+pub use lease::{renewable_lease_candidates, LeaseRenewalCandidate};
 pub use lifecycle::{
     bind_cloud_host_in_tx, card_props, cloud_host_state_in_tx, create_resumed_work_session_in_tx,
     create_work_session_in_tx, create_work_session_with_id_in_tx, end_work_session_in_tx,

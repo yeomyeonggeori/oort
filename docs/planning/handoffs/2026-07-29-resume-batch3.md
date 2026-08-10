@@ -54,7 +54,10 @@
 ## 3. NCP T3 smoke (별건, 진행 중)
 
 - **서버**: `momo-t3-smoke` / 인스턴스 `143929369` / **RUN** / Ubuntu 22.04(KVM) / s2-g3(2vCPU·8GB) / KR-2
-- **자원**: VPC `144489` · Subnet `314600` · ACG `377539`(SSH를 `211.209.174.249/32`로만) · SSH키 `~/Downloads/momo-t3-smoke.pem`
+- **자원**: VPC `<redacted>` · Subnet `<redacted>` · ACG `<redacted>`(SSH를 운영자 개인 회선 `<redacted>/32`로만) · SSH키 `~/Downloads/momo-t3-smoke.pem`
+  <!-- #1224 공개 준비: NCP 계정 리소스 ID와 방화벽 허용 출발지 /32(개인 회선)를 소거했다.
+       구조(자원 4종을 번호로 명기하고 SSH를 단일 /32로 제한)는 이력 가치가 있어 남기고 값만 지웠다.
+       실제 값은 NCP 콘솔이 정본. -->
 - **공인 IP 할당 완료**: `101.79.11.189`(publicIpInstanceNo `143929852`). **SSH 접속 확인됨.**
 - **접속 방법(중요 — 키 인증 아님)**: NCP KVM Ubuntu 이미지는 pem 직접 로그인이 안 되고, pem으로 **root 비밀번호를 복호화**해 받아야 한다. `getRootPassword` API에 privateKey를 넘겨 받은 뒤 `sshpass`로 접속:
   `SSHPASS="$(cat scratchpad/.ncp-root-pw)" sshpass -e ssh root@101.79.11.189`

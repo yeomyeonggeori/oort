@@ -116,6 +116,7 @@ Profiles:
 | `m3-dbc` | M3 D/B/C exit evidence or MOMO-020/021/022 close-readiness review | `swift` profile + Docker/migration bootstrap + `verify_agent_worker.sh` D/B evidence + `verify_approval_decision.sh` C evidence + `verify_macos_real_backend_ui.sh` |
 | `web-serving` | `infra/prod/Dockerfile.web`, prod Caddy/compose, LinkShort, or APP_DOMAIN serving verifier changes | `docs` static checks + `scripts/verify_web_serving.sh`; isolated e2e `web` profile on ports 28070-28074, real Vite dist via web-init named volume, `/join` fallback and `/i/*` LinkShort proxy included in the eight-assertion HTTP gate. Public DNS/ACME/TLS and the full invite round-trip are excluded. |
 | `web` | `clients/web-legacy` (ADR-0119 v0), `docs/api/openapi.yaml`, or web serving/smoke script changes | worktree-clean + `npm ci` + `npm run lint` + `npm run test` (Vitest) + `npm run typecheck` + `scripts/verify_web_generated_types.sh` (openapi-typescript output vs committed `src/api/schema.d.ts`; `generator-failed` and `types-stale` are distinct named failures) + `npm run build` + permissive-only license gate (full transitive inventory markdown) + `scripts/web_serving_smoke.sh` + `scripts/verify_web_login_smoke.sh` (e2e compose Chromium login→timeline→realtime) + `scripts/verify_openapi_contract.sh` runtime drift gate |
+| `license` | dependency changes in any cargo/npm tree — `Cargo.lock`, `package-lock.json`, `deny.toml`, or the gate scripts themselves | `docs` profile + `scripts/tests/test_license_gate.sh` (red proofs) + `scripts/check_cargo_licenses.sh` (`cargo deny check licenses` over `server-rust` and `clients/desktop/src-tauri` with the root `deny.toml`) + `scripts/check_npm_licenses.mjs` over the canonical npm trees (workspace root incl. `packages/momo-core`, `clients/web`, `clients/mobile`; inventory markdown to the gate output dir). Requires `cargo-deny`; fails closed with install guidance when absent. Licenses only — no RUSTSEC advisories, no `npm audit` |
 | `all` | merge-critical/runtime-wide changes | broad static/Swift/runtime DB/relay/agent/macOS gate in one run, with shared bootstrap deduped except migration idempotency; run `runtime-live` separately for WebSocket live evidence because it starts host API/relay processes and a compose-network proxy |
 
 Examples:
@@ -137,6 +138,7 @@ LOCAL_GATE_LAUNCH_UI=1 scripts/local_gate.sh --profile macos-ui
 scripts/local_gate.sh --profile m3-dbc
 scripts/local_gate.sh --profile web-serving
 scripts/local_gate.sh --profile web
+scripts/local_gate.sh --profile license
 scripts/local_gate.sh --profile docs --output-dir /tmp/momo-local-gate
 ```
 
@@ -210,8 +212,16 @@ scripts/verify_merge_tree.sh --typecheck-only    # 빠른 사전 확인
 
 **코어(`packages/momo-core`)를 만진 PR을 트랙에 머지하기 전에 필수다.** 재는 것은
 브랜치가 아니라 **병합 결과**다: `git merge-tree --write-tree` 로 병합 트리를 만들고
-임시 워크트리에 실체화한 뒤 거기서 웹·폰·코어 3종 typecheck + 스위트를 돌린다.
-브랜치 HEAD 는 한 번도 체크아웃되지 않는다 — 그것이 이미 초록인 판이기 때문이다.
+임시 워크트리에 실체화한 뒤 거기서 여덟 레인을 돌린다 — 웹·폰·코어 3종 typecheck,
+같은 3종 스위트, 카피 스캔(웹+코어), 그리고 정본 웹 클라의 ESLint. 브랜치 HEAD 는
+한 번도 체크아웃되지 않는다 — 그것이 이미 초록인 판이기 때문이다.
+
+여덟 번째 레인(`web lint`)은 #1210 에서 붙었다. `clients/web/eslint.config.js` 의 두
+디자인 규칙(JSX 인라인 `style=` 금지 · `#rrggbb` 리터럴 금지)을 **어느 게이트도
+실행하지 않고** 있었기 때문이다 — `web` 프로파일의 lint 단계가 도는 것은 동결된
+`clients/web-legacy` 다. 그동안 손실이 없었던 것은 `design_preflight_web.sh` 의 그렙
+분류가 같은 두 규칙을 중복 커버한 덕이고, 중복이 유일한 안전망인 상태였다. 문턱은
+error 이고 경고는 통과한다(base 12건).
 
 같은 실패 양식이 두 번 왔기 때문에 세운다: ①U4-4 W-1(게이트 증거를 버려질 판에서
 수집) ②U4-6 B1(웹 PR이 코어 API를 재편, 폰 PR이 옛 API 소비 — 각 브랜치는 초록,
@@ -357,11 +367,15 @@ and web-serving changes (ADR-0119 W-2/W-4). Steps, in order:
    documented) — a step that always fails carries no signal.
 3. `vite build` (production bundle must stay CSP-safe: no inline script;
    ADR-0119 permits inline style, and the browser smoke enforces the policy).
-4. License gate: `clients/web-legacy/scripts/check-licenses.mjs` walks the full
-   installed transitive closure from `package-lock.json`, fails on anything
-   outside the permissive allowlist (MIT/Apache-2.0/ISC/BSD family;
-   dev-only reviewed exceptions BlueOak-1.0.0 and Python-2.0), and writes a
-   Markdown license inventory to the gate output dir — attach it to the PR.
+4. License gate: `scripts/check_npm_licenses.mjs --root clients/web-legacy`
+   walks the full transitive closure from `package-lock.json`, fails on
+   anything outside the shared permissive allowlist, and writes a Markdown
+   license inventory to the gate output dir — attach it to the PR.
+   #1225 moved this script out of `clients/web-legacy/scripts/` and pointed
+   its defaults at the canonical trees, so this profile now names the tree it
+   builds. The policy itself (including the reviewed MPL-2.0/BlueOak-1.0.0/
+   Python-2.0/CC-BY-4.0 entries and their reasons) lives in the script's
+   `ALLOWED` map and mirrors `deny.toml`; see the `license` profile.
 5. `scripts/web_serving_smoke.sh` — MOMO-390 regression: Caddyfile parse
    matrix, SPA fallback, `/v1` proxy wiring, centrifugo edge 403, strict
    CSP headers, and the APP_DOMAIN-unset sentinel fail-closed ordering

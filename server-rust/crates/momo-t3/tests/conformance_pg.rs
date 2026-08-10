@@ -1243,4 +1243,378 @@ async fn d2_t3_8_cubesandbox_running_is_not_liveness() {
         status, "running",
         "the session must not still claim to be running on a host nobody has heard from"
     );
+
+    // ---------------------------------------------------------------------
+    // #1197 B2 — settling the session is only half of it.
+    // ---------------------------------------------------------------------
+    //
+    // The original version of this test stopped above, and that gap is what the
+    // ticket found. Billing stops, the session moves — and the sandbox keeps
+    // existing, keeps costing money, and keeps answering `200 running`. On this
+    // substrate nothing ever corrects that on its own: D4-② SIGKILLed a VMM and
+    // watched 15 consecutive probes over 300 s report `running`, with zero
+    // self-convergence. `provider_missing` is reached from a 404 that never
+    // arrives.
+    //
+    // So the sweep has to leave behind a *durable destroy intent*, issued on
+    // momo's own evidence (the expired heartbeat) while the provider is still
+    // insisting the instance is present. That intent is what the ADR-0140 D4
+    // reconciler then drives to a real DELETE — the one thing the spike found
+    // actually reclaims a crashed sandbox.
+    assert!(
+        convergence.destroy_intended,
+        "named regression: a settled session whose instance is never destroyed is a paid sandbox \
+         nobody is paying attention to. The substrate will not volunteer the 404 that would \
+         reclaim it"
+    );
+    let host_state: String =
+        sqlx::query_scalar("SELECT state FROM work_cloud_host WHERE id = $1 AND workspace_id = $2")
+            .bind(host.cloud_host_id)
+            .bind(tenant.workspace_id)
+            .fetch_one(&su)
+            .await
+            .expect("read the cloud host back");
+    assert_eq!(
+        host_state, "destroy_pending",
+        "named regression: the durable destroy intent must stand against the paid instance even \
+         though the provider answered `present` for it moments ago. Adding a `don't destroy what \
+         the provider still reports` guard would feel careful and would strand every crashed \
+         sandbox permanently"
+    );
+    let kind: Option<String> = sqlx::query_scalar(
+        "SELECT lifecycle_operation_kind FROM work_cloud_host WHERE id = $1 AND workspace_id = $2",
+    )
+    .bind(host.cloud_host_id)
+    .bind(tenant.workspace_id)
+    .fetch_one(&su)
+    .await
+    .expect("read the intent kind");
+    assert_eq!(
+        kind.as_deref(),
+        Some("destroy"),
+        "the intent the reconciler will claim is a destroy, in ADR-0140 D4's existing vocabulary \
+         — #1197 B2 invents no new state"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// #9 — the lease renewal and the host-loss sweep are complements (#1197 H1/B2)
+// ---------------------------------------------------------------------------
+
+/// The property that makes an unrenewed lease safe rather than reckless.
+///
+/// #1197 H1 shortened the CubeSandbox `timeout` from 96 h to 360 s, which is
+/// only defensible if two things hold at once:
+///
+/// 1. every host momo still wants **is** renewed — including paused ones, whose
+///    workd is frozen inside a memory snapshot and emits no heartbeat, and which
+///    would otherwise all die at one lease, taking ADR-0141's 24 h
+///    paused→hibernate window with them;
+/// 2. every host momo has given up on **is not** — because that silence is the
+///    only reclaim path that survives momo itself dying, and on a substrate
+///    where a crashed VM answers `200 running` forever (D4-② §3.3) it is the
+///    only automatic one that exists at all.
+///
+/// Those are exactly the two sides of `stale_session_candidates`' exclusion, so
+/// this runs both queries against the same rows and asserts they partition.
+///
+/// Red when reverted: drop the heartbeat predicate from
+/// `renewable_lease_candidates` and the dead host below shows up in both lists —
+/// momo would be paying to keep alive the very instance it is orphaning.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a fresh pgvector/pg18 DB + momo_app role"]
+async fn d2_t3_9_lease_renewal_is_the_complement_of_host_loss() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+
+    // Host A: alive and working. Host B: its daemon went quiet 30 minutes ago.
+    let tenant = seed_tenant(&su).await;
+    let alive = seed_cloud_host(
+        &su,
+        &tenant,
+        momo_t3::provider::CUBESANDBOX_PROVIDER_ID,
+        "lease-alive",
+        &bootstrap_digest(),
+    )
+    .await;
+    let alive_session = start_paid_session(&app, &tenant, alive).await;
+
+    let dead_tenant = seed_tenant(&su).await;
+    let dead = seed_cloud_host(
+        &su,
+        &dead_tenant,
+        momo_t3::provider::CUBESANDBOX_PROVIDER_ID,
+        "lease-dead",
+        &bootstrap_digest(),
+    )
+    .await;
+    let dead_session = start_paid_session(&app, &dead_tenant, dead).await;
+    sqlx::query(
+        "UPDATE work_host SET last_seen_at = clock_timestamp() - interval '30 minutes' \
+          WHERE id = $1 AND workspace_id = $2",
+    )
+    .bind(dead.host_id)
+    .bind(dead_tenant.workspace_id)
+    .execute(&su)
+    .await
+    .expect("age the heartbeat");
+
+    let renewable = momo_t3::lease::renewable_lease_candidates(&su, 90, 500, None)
+        .await
+        .expect("lease candidates");
+    let stale = stale_session_candidates(&su, 90, 500)
+        .await
+        .expect("sweep candidates");
+
+    let renews = |id: Uuid| renewable.iter().any(|c| c.cloud_host_id == id);
+    let orphans = |id: Uuid| stale.iter().any(|c| c.cloud_host_id == Some(id));
+
+    assert!(
+        renews(alive.cloud_host_id),
+        "named regression: a live paid host must keep being renewed. With the lease at 360 s, a \
+         host that stops being renewed is deleted by the substrate six minutes later — working \
+         or not, because `timeout` is absolute and activity does not reset it"
+    );
+    assert!(!orphans(alive.cloud_host_id));
+
+    assert!(
+        orphans(dead.cloud_host_id),
+        "precondition: a host quiet past the grace window is the sweep's candidate"
+    );
+    assert!(
+        !renews(dead.cloud_host_id),
+        "named regression: momo must stop renewing the lease of a host it is orphaning. That \
+         silence is the only reclaim path that works when momo is not running to issue a \
+         DELETE — and this substrate never volunteers the 404 that would trigger one"
+    );
+
+    // A paused host is renewed even though nothing is heartbeating for it: its
+    // workd is inside the memory snapshot.
+    with_t3_lifecycle_tx(
+        &app,
+        tenant.workspace_id,
+        T3LockLadder::host(alive.cloud_host_id),
+        move |conn| {
+            Box::pin(async move {
+                transition_cloud_host_in_tx(
+                    conn,
+                    tenant.workspace_id,
+                    alive.cloud_host_id,
+                    CloudHostState::Pausing,
+                )
+                .await?;
+                transition_cloud_host_in_tx(
+                    conn,
+                    tenant.workspace_id,
+                    alive.cloud_host_id,
+                    CloudHostState::Paused,
+                )
+                .await
+            })
+        },
+    )
+    .await
+    .expect("park the host");
+    sqlx::query(
+        "UPDATE work_host SET last_seen_at = clock_timestamp() - interval '30 minutes' \
+          WHERE id = $1 AND workspace_id = $2",
+    )
+    .bind(alive.host_id)
+    .bind(tenant.workspace_id)
+    .execute(&su)
+    .await
+    .expect("freeze the paused host's heartbeat");
+
+    let renewable = momo_t3::lease::renewable_lease_candidates(&su, 90, 500, None)
+        .await
+        .expect("lease candidates");
+    let stale = stale_session_candidates(&su, 90, 500)
+        .await
+        .expect("sweep candidates");
+    assert!(
+        renewable
+            .iter()
+            .any(|c| c.cloud_host_id == alive.cloud_host_id),
+        "named regression: a paused sandbox's lease ticks exactly like a running one's, and its \
+         daemon is frozen so no heartbeat arrives. Keying renewal on heartbeat freshness alone \
+         deletes every paused session at one lease"
+    );
+    assert!(
+        !stale
+            .iter()
+            .any(|c| c.cloud_host_id == Some(alive.cloud_host_id)),
+        "a parked host's quiet heartbeat is the pause working, not a loss"
+    );
+
+    // The keyset walk really walks: a batch size of 1 must still reach every
+    // renewable host, because a renewal writes nothing and so cannot advance the
+    // ordering the way the reconciler's claim does. If this ever caps, hosts
+    // past the batch are deleted by the substrate one lease later while healthy.
+    let mut walked: Vec<Uuid> = Vec::new();
+    let mut cursor: Option<Uuid> = None;
+    // Bounded on purpose. A cursor that does not advance — the exact shape of
+    // the bug this asserts against — makes an unbounded walk spin forever, and a
+    // regression that hangs CI is strictly worse than one that fails it.
+    for _ in 0..(renewable.len() + 8) {
+        let page = momo_t3::lease::renewable_lease_candidates(&su, 90, 1, cursor)
+            .await
+            .expect("lease page");
+        let Some(last) = page.last() else { break };
+        assert_ne!(
+            Some(last.cloud_host_id),
+            cursor,
+            "named regression: the cursor did not advance, so the walk is standing still. \
+             Renewal writes nothing, so nothing else can move it along"
+        );
+        cursor = Some(last.cloud_host_id);
+        walked.extend(page.iter().map(|c| c.cloud_host_id));
+    }
+    let mut expected: Vec<Uuid> = renewable.iter().map(|c| c.cloud_host_id).collect();
+    expected.sort();
+    let mut walked_sorted = walked.clone();
+    walked_sorted.sort();
+    walked_sorted.dedup();
+    assert_eq!(
+        walked_sorted.len(),
+        walked.len(),
+        "named regression: the keyset walk returned a host twice — the cursor and the ORDER BY \
+         have drifted apart"
+    );
+    assert_eq!(
+        walked_sorted, expected,
+        "named regression: paging with batch size 1 must reach exactly the same hosts one big \
+         page does. A cap here silently stops renewing the tail of the fleet"
+    );
+
+    let _ = (alive_session, dead_session);
+}
+
+// ---------------------------------------------------------------------------
+// #10 — a stale T3 host is condemned even when there is nothing to bill (B2)
+// ---------------------------------------------------------------------------
+
+/// The branch `t3_terminate` returns early from, and the leak it used to leave.
+///
+/// `t3_terminate` (058:116) declares the durable destroy intent as part of
+/// settling — but it returns `false` at its very first `IF v_usage_id IS NULL`
+/// check, which is *before* that declaration. A stale T3 host with no open
+/// ledger row therefore reached the end of the sweep with its session moved,
+/// nothing billed, and **its paid sandbox still alive in a live state, with no
+/// intent standing against it**.
+///
+/// This is the same defensive branch
+/// `momo_t3::reconcile::terminate_missing_instance_in_tx` already guards with
+/// `declare_destroy_intent_in_tx` (Swift :437-452); the sweep simply did not.
+/// The window that produces it is a session bound to a cloud host whose usage
+/// row is absent — a crash between the two writes, or a repair that removed one.
+///
+/// It matters more here than it would have on any previous substrate. Elsewhere
+/// an un-condemned host is eventually rescued by the reconciler's
+/// `provider_missing` path when the provider starts answering 404. D4-② proved
+/// this substrate never does: 15 consecutive `200 running` replies over 300 s
+/// after the VMM was SIGKILLed, zero self-convergence. Nothing rescues it, so
+/// the intent has to be declared here or not at all.
+///
+/// Red when reverted: drop the explicit declaration from `converge_in_tx` and
+/// this host stays `running` with a live sandbox nobody will ever destroy.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a fresh pgvector/pg18 DB + momo_app role"]
+async fn d2_t3_10_a_stale_host_is_condemned_even_with_nothing_to_bill() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+
+    let tenant = seed_tenant(&su).await;
+    let host = seed_cloud_host(
+        &su,
+        &tenant,
+        momo_t3::provider::CUBESANDBOX_PROVIDER_ID,
+        "nothing-to-bill",
+        &bootstrap_digest(),
+    )
+    .await;
+    let session_id = start_paid_session(&app, &tenant, host).await;
+
+    // Remove the ledger row, leaving a live paid host with a running session and
+    // nothing for `t3_terminate` to find. The settlement guard (053:86) refuses
+    // an application-side `settled_at`, so the window is reproduced by deleting
+    // the row rather than by closing it.
+    sqlx::query(
+        "DELETE FROM work_host_usage_interval i \
+          USING work_host_usage u \
+          WHERE i.usage_id = u.id AND u.session_id = $1",
+    )
+    .bind(session_id)
+    .execute(&su)
+    .await
+    .expect("drop the open interval");
+    let removed = sqlx::query("DELETE FROM work_host_usage WHERE session_id = $1")
+        .bind(session_id)
+        .execute(&su)
+        .await
+        .expect("drop the usage row")
+        .rows_affected();
+    assert_eq!(removed, 1, "precondition: there is now nothing to bill");
+
+    // The host is up and billable; the daemon has gone quiet.
+    let state: String =
+        sqlx::query_scalar("SELECT state FROM work_cloud_host WHERE id = $1 AND workspace_id = $2")
+            .bind(host.cloud_host_id)
+            .bind(tenant.workspace_id)
+            .fetch_one(&su)
+            .await
+            .expect("read the host");
+    assert_eq!(
+        state, "running",
+        "precondition: the sandbox is alive and billable"
+    );
+    sqlx::query(
+        "UPDATE work_host SET last_seen_at = clock_timestamp() - interval '30 minutes' \
+          WHERE id = $1 AND workspace_id = $2",
+    )
+    .bind(host.host_id)
+    .bind(tenant.workspace_id)
+    .execute(&su)
+    .await
+    .expect("age the heartbeat");
+
+    let candidates = stale_session_candidates(&su, 90, 500)
+        .await
+        .expect("sweep candidates");
+    let candidate = candidates
+        .iter()
+        .find(|candidate| candidate.session_id == session_id)
+        .expect("the host is quiet past the grace window");
+
+    let convergence = converge_stale_session(&app, candidate, 90)
+        .await
+        .expect("converge");
+    assert!(
+        !convergence.settled,
+        "precondition: there was nothing left to bill, which is exactly the branch \
+         `t3_terminate` returns early from"
+    );
+    assert!(
+        convergence.transitioned,
+        "the session still leaves `running` — that half never depended on the ledger"
+    );
+    assert!(
+        convergence.destroy_intended,
+        "named regression: nothing to bill is not nothing to reclaim. Without the explicit \
+         declaration this host keeps a live paid sandbox with no intent standing against it, and \
+         this substrate never volunteers the 404 that would rescue it"
+    );
+
+    let state: String =
+        sqlx::query_scalar("SELECT state FROM work_cloud_host WHERE id = $1 AND workspace_id = $2")
+            .bind(host.cloud_host_id)
+            .bind(tenant.workspace_id)
+            .fetch_one(&su)
+            .await
+            .expect("read the host back");
+    assert_eq!(
+        state, "destroy_pending",
+        "the reconciler can only destroy what carries a durable destroy intent"
+    );
 }

@@ -290,28 +290,41 @@ describe('H-5 — 실패가 아닌 것을 실패로 말하지 않는다', () => 
     'utf8',
   );
   const code = codeOnly(SCREEN);
+  /** 이 기계를 타는 주어 전부. 늘어나면 여기 한 줄이고, 아래는 전부 따라온다. */
+  const SUBJECTS = ['quote', 'pin', 'search', 'session'] as const;
 
   it('점프 고지가 danger 상자를 쓰지 않는다', () => {
     // 사람이 인용을 눌렀고, 원본은 존재하며, 아직 안 불러왔을 뿐이다. 빨간
     // 상자(`failure` = dangerSurface + dangerBorder)는 「내가 뭔가 잘못했다」를
     // 말한다. `atoms` 에 이 경우를 위한 컴포넌트가 이미 있었다.
-    // 두 고지가 **둘 다** 사실 진술이다. 인용 점프 고지만 고치면 M1 이 세운
-    // 「같은 사실을 두 모양으로 말하지 않는다」가 깨진다.
-    for (const id of ['quote-jump-missed', 'anchor-missed']) {
-      const at = code.indexOf(`testID="${id}"`);
+    // 고지는 이제 **한 벌**이다 (#1196). 인용·고정·검색 진입·세션 앵커 넷이 같은
+    // 착지 기계를 타므로 상자도 하나이고, 그래서 M1 이 세운 「같은 사실을 두
+    // 모양으로 말하지 않는다」는 두 상자를 맞추는 일이 아니라 **한 상자로 합치는
+    // 일**이 됐다. 검색 전용 배너(`anchor-missed`)는 그 합류로 사라졌다.
+    {
+      const at = code.indexOf('testID="jump-missed"');
       expect(at).toBeGreaterThan(-1);
       const block = code.slice(Math.max(0, at - 240), at + 40);
       expect(block).toContain('NoticeBlock');
       expect(block).not.toContain('FailureBanner');
     }
+    expect(code).not.toContain('anchor-missed');
     // 그리고 이 화면에는 `FailureBanner` 를 쓰는 자리가 더 이상 없다.
     expect(code).not.toMatch(/<FailureBanner/);
   });
 
   it('닫는 길이 있고, 점프가 성공하면 스스로도 물러난다', () => {
     // 첫 판은 채널 이동이나 다음 점프까지 남았다.
-    expect(code).toMatch(/onDismiss=\{clearJumpNotice\}/);
+    //
+    // 닫기와 착지가 **다른 함수**인 것이 #1209 리뷰 Medium 의 수리다: 상자가
+    // 「그 줄이 오면 데려간다」는 의도를 함께 들게 됐으므로 닫기는 문장만이
+    // 아니라 그 의도도 무른다. 착지는 무를 것이 없다 — 이미 도착했다.
+    expect(code).toMatch(/onDismiss=\{cancelJump\}/);
     expect(code).toMatch(/onJumpLanded=\{clearJumpNotice\}/);
+    // 그리고 그 닫기가 실제로 기다림을 접는다. 이름만 갈라 두면 아무것도 아니다.
+    const at = code.indexOf('const cancelJump');
+    expect(at).toBeGreaterThan(-1);
+    expect(code.slice(at, at + 200)).toContain('setAwaitingJump(null)');
     // 그리고 목록이 실제로 그 신호를 낸다.
     const timeline = codeOnly(
       fs.readFileSync(
@@ -340,8 +353,86 @@ describe('H-5 — 실패가 아닌 것을 실패로 말하지 않는다', () => 
 
   it('화면이 그 문장을 손으로 다시 적지 않는다 — 하네스와 갈라지지 않게', () => {
     // 문장이 두 벌이면 사진이 배송되는 화면과 다른 말을 하게 된다.
-    expect(code).toContain('jumpMissedNotice(reason)');
-    expect(code).not.toContain('인용한 원본은 이 대화의');
+    //
+    // #1193 에서 인자가 하나 늘었다(주어). 문장이 **어디 사는가**는 그대로라
+    // 단정도 그대로이되, 호출 형태를 통째로 베끼는 대신 네 문장이 화면에
+    // 없다는 것으로 잰다 — 그쪽이 이 검사가 실제로 지키려던 것이다.
+    expect(code).toContain('jumpMissedNotice(reason,');
+    for (const reason of ['older', 'unknown'] as const) {
+      for (const subject of SUBJECTS) {
+        expect(code).not.toContain(jumpMissedNotice(reason, subject).headline);
+      }
+    }
+  });
+
+  // #1193 — 「대화로」를 누른 사람은 인용을 누른 적이 없다.
+  // #1196 — 고정을 누른 사람도, 검색 결과를 누른 사람도 마찬가지다.
+  it('주어가 넷으로 갈린다 — 넷은 서로 다른 것을 찾고 있다', () => {
+    const headlines = SUBJECTS.map(
+      subject => jumpMissedNotice('unknown', subject).headline,
+    );
+    // 넷 다 다른 문장이다. 하나라도 겹치면 그 화면은 남의 낱말로 말하고 있다.
+    expect(new Set(headlines).size).toBe(SUBJECTS.length);
+    // 「인용」은 인용의 것이다.
+    for (const subject of SUBJECTS) {
+      const headline = jumpMissedNotice('unknown', subject).headline;
+      expect(headline.includes('인용')).toBe(subject === 'quote');
+    }
+    // 무엇을 하면 되는지는 같은 사실이라 같은 문장이다.
+    const details = SUBJECTS.map(
+      subject => jumpMissedNotice('unknown', subject).detail,
+    );
+    expect(new Set(details).size).toBe(1);
+  });
+
+  // 셋은 seq 를 아는 주어라 「더 위쪽에 있습니다」에 도달할 길이 **있다**. 그
+  // 갈래를 지우면 아는 것을 모른다고 말하게 된다 (N1 의 반대편).
+  it('seq 를 아는 주어 셋은 두 갈래를 갖는다', () => {
+    for (const subject of ['quote', 'pin', 'search'] as const) {
+      expect(jumpMissedNotice('older', subject).headline).toContain('위쪽');
+      expect(jumpMissedNotice('unknown', subject).headline).not.toContain('위쪽');
+    }
+  });
+
+  // 리뷰 N1 — 배송되지 않는 문구를 들고 있지 않는다. 세션 앵커는 seq 를 모르므로
+  // 「더 위쪽에 있습니다」에 도달할 길이 없고, 그러면 그 문장은 없어야 한다.
+  it('세션 주어는 말할 자격이 없는 문장을 만들지 않는다', () => {
+    for (const reason of ['older', 'unknown'] as const) {
+      expect(jumpMissedNotice(reason, 'session').headline).not.toContain('위쪽');
+    }
+    expect(jumpMissedNotice('older', 'session')).toEqual(
+      jumpMissedNotice('unknown', 'session'),
+    );
+  });
+
+  // 그리고 하네스가 그 문장을 **사진으로** 찍는다 (리뷰 M3). 문장이 코드에만
+  // 있으면 다음 리뷰는 배송되는 화면이 아니라 소스를 읽게 된다.
+  it('네 주어의 문장이 모두 측정 표면에 서 있다', () => {
+    const surfaces = codeOnly(
+      fs.readFileSync(path.resolve(__dirname, '../measure/surfaces.tsx'), 'utf8'),
+    );
+    expect(surfaces).toContain("jumpMissedNotice('unknown', 'session')");
+    expect(surfaces).toContain('jump-missed-session');
+    // #1196 — 새 주어 둘도 사진에 든다. 코드에만 있는 문장은 다음 리뷰에게
+    // 소스를 읽으라는 말이고, 그것이 M3 이 없앤 드리프트다.
+    for (const subject of ['pin', 'search'] as const) {
+      expect(surfaces).toContain(`jumpMissedNotice('older', '${subject}')`);
+      expect(surfaces).toContain(`jump-missed-${subject}`);
+    }
+  });
+
+  // 리뷰 N-b — 한글 문장을 낱말 가운데서 끊지 않는다. 상자가 드는 것은 언제나
+  // 완성된 문장이므로 제목과 설명 **둘 다** 그 규칙을 받는다.
+  it('고지 상자가 어절 우선 줄바꿈을 쓴다', () => {
+    const atoms = codeOnly(
+      fs.readFileSync(path.resolve(__dirname, '../src/design/atoms.tsx'), 'utf8'),
+    );
+    const at = atoms.indexOf('export function NoticeBlock');
+    expect(at).toBeGreaterThan(-1);
+    const block = atoms.slice(at, atoms.indexOf('export function', at + 10));
+    expect(
+      block.match(/lineBreakStrategyIOS="hangul-word"/g) ?? [],
+    ).toHaveLength(2);
   });
 });
 

@@ -10,6 +10,7 @@ import { cn } from "@/design/lib/cn";
 import { InlineBanner } from "@/features/common/States";
 import { AgentCard } from "./AgentCard";
 import { ArtifactCard } from "./ArtifactCard";
+import { AttachmentList } from "./AttachmentList";
 import { MessageBody } from "./MessageBody";
 import { CascadeNotice } from "./CascadeNotice";
 import { turnRecordRunId } from "@momo/core/features/timeline/cascadeModel";
@@ -330,6 +331,9 @@ export function MessageRow({
   const owner = isAgent ? memberFor(directory, author?.ownerHumanId) : null;
   const deleted = message.state === "deleted";
   const failed = message.state === "failed";
+  // ADR-0151 — 서버가 완료된 것만 실어 준다. 없으면 빈 배열이고, 빈 배열은
+  // `AttachmentList`가 아무것도 그리지 않는다.
+  const attachments = message.attachments ?? [];
   const rollup = showRollup ? threadRollup(message) : null;
   const showsEditedMark = message.state === "edited" && !editing;
   // 이슈 #1146 M3 — 이 행이 고정돼 있다는 흔적. 왜 그리는지·왜 이 줄인지·왜
@@ -614,6 +618,17 @@ export function MessageRow({
             // virtuoso는 그 사이에 이 행을 언마운트한다 (fold.ts).
             <MessageBody body={message.body ?? ""} foldKey={message.id} />
           ))}
+        {/* 첨부는 본문 **바로 아래**다 (ADR-0151 D2). 카드·아티팩트보다 앞인
+            이유는 순서가 안쪽에서 바깥쪽이기 때문이다: 파일은 작성자가 이 메시지에
+            직접 붙인 것이고, 그 아래 카드들은 그 메시지에 **대해** 서버가 말하는
+            것이다. 삭제된 행에는 그리지 않는다 — 묘비는 본문을 지운 자리이고,
+            거기 파일 카드가 남아 있으면 지워진 것이 무엇인지 말이 어긋난다. */}
+        {!deleted && attachments.length > 0 && (
+          <AttachmentList
+            channelId={message.channelId}
+            attachments={attachments}
+          />
+        )}
         {idleNotice && (
           <WorkSessionIdleCard
             notice={idleNotice}

@@ -1,7 +1,7 @@
-//! Migration runner — applies the existing 62 SQL files **in place, unmodified**
+//! Migration runner — applies the existing 63 SQL files **in place, unmodified**
 //! via `psql`, matching `scripts/migrate.sh` (L4 §8.7 canonical mechanism).
 //!
-//! ADR-0145 / D2 §3: the 62 migrations under `server/Migrations/NNN_*.sql` are
+//! ADR-0145 / D2 §3: the 63 migrations under `server/Migrations/NNN_*.sql` are
 //! Postgres DDL, language independent, and are the enforcement layer we inherit.
 //!
 //! **Why psql, not `sqlx::raw_sql`.** Several seed migrations (002/006/012) use
@@ -310,7 +310,7 @@ mod tests {
     use super::*;
 
     /// Structural conformance without a DB: the on-disk migration set is exactly
-    /// 001..=062, contiguous, correctly ordered, and starts at `001_init`.
+    /// 001..=063, contiguous, correctly ordered, and starts at `001_init`.
     ///
     /// The count is asserted rather than derived on purpose: it is what makes a
     /// **second** file claiming a taken prefix, or a file dropped from the
@@ -322,20 +322,22 @@ mod tests {
     /// 060 is ADR-0146's `action_signature` sidecar — the first migration this
     /// rewrite added rather than inherited (B2.5). 061 is ADR-0125 D6-A's
     /// per-member last-used host (#1114), the second. 062 is 이슈 #1112's
-    /// `message_pin`.
+    /// `message_pin`. 063 is 이슈 #1204's event-subscription delivery audit —
+    /// the write helper the outbound webhook path calls once a payload has
+    /// actually left for an external host.
     #[test]
-    fn discovers_contiguous_migrations_001_to_062() {
+    fn discovers_contiguous_migrations_001_to_063() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
         assert_eq!(
             migrations.len(),
-            62,
-            "expected 62 migrations under {}",
+            63,
+            "expected 63 migrations under {}",
             dir.display()
         );
         assert_eq!(migrations.first().unwrap().version, 1);
-        assert_eq!(migrations.last().unwrap().version, 62);
+        assert_eq!(migrations.last().unwrap().version, 63);
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
 
         for (i, migration) in migrations.iter().enumerate() {

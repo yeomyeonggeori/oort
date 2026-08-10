@@ -27,6 +27,8 @@ import {
 } from '../src/features/conversation/MessageRow';
 import {jumpMissedNotice} from '../src/features/conversation/jumpNotice';
 import {SpawnHostChoice} from '../src/features/inbox/SpawnHostChoice';
+import {ApprovalDecision} from '../src/features/inbox/ApprovalDecision';
+import {StopTurnControl} from '../src/features/agents/StopTurnControl';
 import {AdeControlPanel} from '../src/features/ade/AdeControlPanel';
 import {AdeSummaryLine} from '../src/features/ade/AdeSummaryLine';
 import {AgentActivityBar} from '../src/features/agents/turnSurfaces';
@@ -756,22 +758,54 @@ export function Surface({name}: {name: string}): React.JSX.Element {
       );
     case 'jump-missed':
       return (
-        <Frame label="인용 점프 실패 — 실패가 아니라 사실 진술이다 (H-5)">
+        <Frame label="점프 실패 — 실패가 아니라 사실 진술이다 (H-5 · #1193 · #1196)">
           {/* 두 이유를 **함께** 세운다. 이 고지의 설계 논점이 「어디 있는지
               모르면 모른다고 말한다」인데, 한 장만 찍으면 그 대비가 안 보인다.
-              문장은 화면이 쓰는 것과 **같은 상수**에서 온다. */}
+              문장은 화면이 쓰는 것과 **같은 상수**에서 온다.
+
+              세 번째 줄이 #1193 리뷰 M3 이다: 같은 기계를 ADE 카드의 「대화로」도
+              타는데, 그 사람은 인용을 누른 적이 없다. 주어가 갈렸다는 사실은
+              **두 문장을 나란히 놓아야** 보이고, 사진이 없으면 그 갈래는 코드에만
+              있는 주장으로 남는다.
+
+              넷째·다섯째가 #1196 이다. 고정과 검색 진입이 여태 인용의 낱말을
+              빌려 쓰고 있었고(고정) 화면 안에 따로 적혀 있었다(검색). 이제 넷이
+              한 기계·한 상자를 쓰므로, **다섯 문장이 한 장에 나란히** 서는 이
+              사진이 「주어만 갈리고 나머지는 같다」의 증거가 된다.
+
+              그리고 이 사진은 N-b 의 증거이기도 하다: 가장 긴 제목(세션)이 마지막
+              한 음절만 남기고 끊기던 것을 `hangul-word` 로 고쳤고, 그 결과는
+              픽셀에만 있다. */}
           <View style={styles.noticeStack}>
             <NoticeBlock
               headline={jumpMissedNotice('older').headline}
               detail={jumpMissedNotice('older').detail}
               onDismiss={() => {}}
-              testID="quote-jump-missed"
+              testID="jump-missed"
             />
             <NoticeBlock
               headline={jumpMissedNotice('unknown').headline}
               detail={jumpMissedNotice('unknown').detail}
               onDismiss={() => {}}
-              testID="quote-jump-missed-unknown"
+              testID="jump-missed-unknown"
+            />
+            <NoticeBlock
+              headline={jumpMissedNotice('unknown', 'session').headline}
+              detail={jumpMissedNotice('unknown', 'session').detail}
+              onDismiss={() => {}}
+              testID="jump-missed-session"
+            />
+            <NoticeBlock
+              headline={jumpMissedNotice('older', 'pin').headline}
+              detail={jumpMissedNotice('older', 'pin').detail}
+              onDismiss={() => {}}
+              testID="jump-missed-pin"
+            />
+            <NoticeBlock
+              headline={jumpMissedNotice('older', 'search').headline}
+              detail={jumpMissedNotice('older', 'search').detail}
+              onDismiss={() => {}}
+              testID="jump-missed-search"
             />
           </View>
         </Frame>
@@ -1754,7 +1788,11 @@ export function Surface({name}: {name: string}): React.JSX.Element {
       // 단정이 지킨다(`__tests__/adeControlSurface.test.tsx`).
       return (
         <RealtimeContext.Provider value={CONNECTED_RAIL}>
-          <AdeControlPanel onClose={() => {}} onOpenChannel={() => {}} />
+          <AdeControlPanel
+            onClose={() => {}}
+            onOpenChannel={() => {}}
+            onOpenAnchor={() => {}}
+          />
         </RealtimeContext.Provider>
       );
     }
@@ -1798,6 +1836,49 @@ export function Surface({name}: {name: string}): React.JSX.Element {
           <SearchBody search={search('error')} renderItem={() => <View />} />
         </Frame>
       );
+    // ---- #1210 D2: 되돌릴 수 없는 확정 버튼 ----------------------------------
+    //
+    // 이 제품에서 **파괴 채움이 실제로 그려지는 유일한 화면**이고, 그동안 한 번도
+    // 촬영된 적이 없었다. 이유는 픽스처의 게으름이 아니라 도달 불가였다: 확정
+    // 버튼은 사람이 한 번 탭해야 나타나고 시뮬레이터는 스크립트로 누를 수 없다
+    // (스파이크 #837 — 이 파일 머리말이 하네스가 존재하는 이유로 적어 둔 그 사실).
+    // 그래서 「거부가 승인보다 다크에서 5배 조용하다」(감사 2026-08-09 §B-4 ②)는
+    // 코드에는 있고 사진에는 없었다. `initialArmed` 가 그 도달 불가를 닫는다.
+    //
+    // 세 줄을 한 장에 세운다. 논점이 **위계**라서 한 줄만 찍으면 사진에 안 나온다:
+    //   ① 승인 확정 — 주 액션 채움(`accent`)
+    //   ② 거부 확정 — 파괴 채움(`dangerFill`). 이 goal 이 고친 자리다.
+    //   ③ 턴 중단 확정 — 같은 파괴 채움을 쓰는 두 번째 컨트롤
+    // 라이트 판은 `-momoMeasure LIGHT-DESTRUCTIVE-CONFIRM`.
+    case 'destructive-confirm':
+      return (
+        <Frame label="확정 단계 — 승인 · 거부 · 중단 (#1210 D2)">
+          {/* 가로 인셋은 하네스가 준다. 앱에서 이 컨트롤은 언제나 `SAFE_GUTTER`
+              가 걸린 행·카드 안에 앉으므로, 인셋 없이 찍으면 버튼이 화면 가장
+              자리에 붙어 실제로 배송되는 폭이 아닌 것이 사진에 남는다. */}
+          <View style={styles.noticeStack}>
+            <ApprovalDecision
+              approvalId="ap-1"
+              initialArmed="approve"
+              onSettled={() => {}}
+              testIDPrefix="measure-approve"
+            />
+            <ApprovalDecision
+              approvalId="ap-2"
+              initialArmed="reject"
+              onSettled={() => {}}
+              testIDPrefix="measure-reject"
+            />
+            <StopTurnControl
+              runId="run-1"
+              agentName="김인턴"
+              initialArmed
+              onOutcome={() => {}}
+              testIDPrefix="measure-stop"
+            />
+          </View>
+        </Frame>
+      );
     case 'search-results':
       return (
         <Frame label="검색 · 결과">
@@ -1811,7 +1892,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
             sheet · delete · editor · editor-error · row · row-lead ·
             approval-card · approval-notes · avatar · composer-offline ·
             group · dividers · ade-summary · ade-summary-empty · ade-panel ·
-            search-entry · search-idle ·
+            destructive-confirm · search-entry · search-idle ·
             search-searching · search-empty · search-error · search-results
           </Text>
         </Frame>

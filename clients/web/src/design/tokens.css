@@ -245,6 +245,27 @@
    * hugs the rows it actually used (MOMO-619 R1 M7). */
   --spacing-terminal-body: 320px;
 
+  /* 첨부 이미지 미리보기의 자리표시자 높이 (#1202 · design-review M-2/N-3).
+   *
+   * 이름이 따로 있는 이유는 앞 판이 `--spacing-action`(다이얼로그 주 버튼의 최소
+   * **폭**)을 높이로 빌려 썼기 때문이다. 그 토큰의 문단이 바로 그 빌려 쓰기를
+   * 금지한다 — 버튼 최소폭을 손보면 이미지 자리가 함께 움직인다.
+   *
+   * 값이 180 인 것은 추측이되 근거 있는 추측이다: 자리는 `--spacing-pane`
+   * (320px) 폭으로 잡히고 320x180 은 16:9 다. 사람들이 실제로 붙이는 것의
+   * 대다수는 스크린샷이고 스크린샷은 16:9 근처라, 도착하는 순간의 이동이 흔한
+   * 경우에 0 이 된다. 144(=action)였을 때 그 이동은 항상 36px 이었다. */
+  --spacing-preview-frame: 180px;
+
+  /* 첨부 트레이가 먹을 수 있는 최대 높이 (#1202 · design-review B-2).
+   *
+   * 상한 20개를 다 채우면 트레이가 803px 로 자라 타임라인이 화면에서 사라지고
+   * 컴포저 하단이 창 밖으로 나갔다(app-shell 이 clip 이라 스크롤로 되찾지도
+   * 못한다). 이 앱이 스스로 광고하는 수에서 화면이 무너지면 그 수는 광고가 아니라
+   * 함정이다. 240px 는 칩 넷이 온전히 보이고 다섯째가 반쯤 걸리는 높이라, 더
+   * 있다는 사실이 스크롤바 없이도 읽힌다. */
+  --spacing-tray-max: 240px;
+
   /* --- radius: three steps, nothing else --------------------------------- */
   --radius-*: initial;
   --radius-sm: 6px; /* buttons, chips, inputs */
@@ -292,6 +313,66 @@
   --color-on-danger-fill: var(--on-danger-fill);
   --color-ok: var(--ok);
   --color-warn: var(--warn);
+}
+
+/* =============================================================================
+ * `transition-colors` 에서 `outline-color` 를 뺀다 (#1210 D3).
+ *
+ * ## 무엇이 잘못됐었나
+ *
+ * Tailwind v4 의 `transition-colors` 가 전이시키는 속성 목록에는 v3 에 없던
+ * `outline-color` 가 들어 있다 (설치본 v4.3.3 실측):
+ *
+ *   color, background-color, border-color, outline-color,
+ *   text-decoration-color, fill, stroke, --tw-gradient-*
+ *
+ * 이 레포의 포커스 링은 `focus-visible:outline-accent` 로 색을 **상태에서만**
+ * 준다. 그래서 탭으로 포커스가 들어오면 `outline-width` 는 즉시 2px 로 서지만
+ * 색은 정지 상태의 `currentcolor`(= --ink, 본문 잉크)에서 --accent 로 기본
+ * 150ms 동안 번진다 — 키보드가 1급 문법인 제품(ux-bible P11)에서 포커스 표시가
+ * 첫 프레임에 **잉크색으로** 나타났다가 호박이 된다. 보강 증거는 이미 레포에
+ * 있었다: gates/gate-shell-layout.mjs:760-764 가 정확히 이 보간 때문에
+ * getComputedStyle 앞에서 400ms 를 기다린다.
+ *
+ * ## 왜 프리미티브가 아니라 여기인가
+ *
+ * 감사(2026-08-09 design-system-audit §B-4 ⑤)는 「프리미티브 3개만 고치면 25곳이
+ * 함께 낫는다」로 적었다. 실측하면 그렇지 않다: `transition-colors` 와
+ * `focus-visible:outline-*` 을 한 클래스 목록에 함께 든 자리는 21파일 25곳이고,
+ * 그중 프리미티브는 셋(button·input·select)뿐이다. 나머지 22곳은 자기 문자열에
+ * `transition-colors` 를 직접 적은 feature 파일이라, 프리미티브를 고쳐도 그대로
+ * 페이드한다. 셋만 고치면 22곳이 조용히 남고, 다음에 생길 컴포넌트가 같은
+ * 유틸리티를 적으면 또 벌어진다.
+ *
+ * 그래서 고치는 자리는 **유틸리티 자신**이다. 한 선언이 지금 31곳(포커스 링과
+ * 함께 선 25곳 + 링 없는 6곳)과 앞으로 쓰일 모든 자리를 함께 진다. 감사가 이
+ * 결함을 「디자인 시스템이 필요한 이유의 가장 깨끗한 사례」로 부른 그 문장은
+ * 유틸리티 층에서만 참이 된다.
+ *
+ * ## 어떻게 이기나 — 그리고 왜 @utility 가 아닌가
+ *
+ * `@utility transition-colors {…}` 로 적으면 Tailwind 가 같은 이름의 코어 정의와
+ * **한 규칙으로 합치면서 코어 선언을 뒤에 붙인다** — 캐스케이드상 코어가 이겨서
+ * outline-color 가 그대로 남는다(컴파일 산출물로 확인). `@layer utilities` 블록은
+ * 같은 레이어의 **소스 순서 뒤**에 놓이므로 우리 선언이 마지막이 되어 이긴다.
+ * 목록을 새로 발명하는 것이 아니라 한 항목만 빼는 것이라, 남는 여덟은 코어
+ * v4.3.3 의 목록 그대로다.
+ *
+ * 이 승부는 취향이 아니라 검산이다: src/design/transitionColors.test.ts 가 이
+ * 파일을 실제로 컴파일해 `.transition-colors` 의 **마지막** transition-property
+ * 를 읽고, outline-color 가 없고 나머지 여덟이 그대로인지 잰다. 코어가 목록을
+ * 바꾸거나 병합 방식을 바꾸면 그 테스트가 빨개진다.
+ *
+ * 포커스 링을 **의도적으로** 전이시키고 싶은 자리가 생기면 그 자리에서
+ * `transition-[outline-color]` 를 적으면 된다. 그것은 한 컴포넌트의 결정이고,
+ * 유틸리티 하나가 전 앱에 강요하는 것과 다르다.
+ * ========================================================================== */
+@layer utilities {
+  .transition-colors {
+    transition-property:
+      color, background-color, border-color, text-decoration-color, fill,
+      stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to;
+  }
 }
 
 /* Two-pane shell geometry as a named utility, so no component needs an
@@ -1196,5 +1277,98 @@
 @media (hover: none) {
   [data-row-clock] {
     opacity: 1;
+  }
+}
+
+/* 업로드 진행 막대 (#1202 첨부 축 · design-review B-3) ------------------------
+ *
+ * `<progress>`인 이유는 규율 두 개가 같은 답을 가리키기 때문이다. 첫째, 이 앱은
+ * 인라인 `style`을 쓰지 않는다(eslint가 JSX `style=`을 막고, 사전점검 3번 분류가
+ * 같은 것을 센다) — 그런데 진행률은 정의상 매 프레임 바뀌는 값이라, div 두 개로
+ * 그리면 폭을 인라인으로 쓰는 것 말고는 방법이 없다. 둘째, 시스템 우선(SKILL §1):
+ * 보조기술이 이미 아는 컨트롤이 있고, `aria-valuenow`를 손으로 얹은 div는 그것을
+ * 흉내 낸 것에 지나지 않는다.
+ *
+ * ## determinate 와 indeterminate 는 서로 다른 주장이다 (리뷰 B-3)
+ *
+ * 값이 정해진 막대가 0 이라는 것은 「아직 안 재 봤다」가 아니라 **「하나도 안
+ * 갔다」는 측정 주장**이다. 그런데 `xhr.upload.progress` 는 회선이 빠르거나 본문이
+ * 작으면 끝에 딱 한 번만 온다 — 그 사이 내내 0 을 그리면 텍스트로 안 찍기로 한
+ * 바로 그 거짓말을 그래픽으로 계속 말하게 된다. 리뷰가 실측한 것이 그것이다
+ * (납품 캡처의 막대 행 938px 전부 트랙색, accent 0px).
+ *
+ * 그래서 첫 측정이 도착하기 전에는 `value` 속성을 아예 달지 않는다. 그것이
+ * 플랫폼이 공짜로 주는 indeterminate 이고, 여기서는 **한 조각이 흐르는 줄**로
+ * 그린다: 「무언가 진행 중인데 얼마인지는 아직 모른다」가 화면에서 0% 와 다르게
+ * 보여야 하기 때문이다.
+ *
+ * 색은 --accent 하나다. 이 표면의 유일한 강조색이고(SKILL §2), 진행률은
+ * 「지금 일어나고 있는 일」이라 그 자리를 받을 자격이 있다. 실패는 막대가 아니라
+ * 문장으로 말하므로 여기 빨강은 없다. */
+progress[data-upload-progress] {
+  appearance: none;
+  block-size: var(--spacing-marker);
+  inline-size: 100%;
+  border: 0;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background-color: var(--surface-hover);
+  color: var(--accent);
+}
+
+progress[data-upload-progress]::-webkit-progress-bar {
+  background-color: var(--surface-hover);
+}
+
+progress[data-upload-progress]::-webkit-progress-value {
+  background-color: var(--accent);
+  /* 값이 바뀔 때만 움직인다. 계속 도는 애니메이션이 아니라 상태 변화의 피드백이다
+   * (SKILL §4). 120ms 는 한 번의 progress 이벤트 간격보다 짧아서 막대가 뒤처지지
+   * 않는다. */
+  transition: inline-size 120ms linear;
+}
+
+progress[data-upload-progress]::-moz-progress-bar {
+  background-color: var(--accent);
+}
+
+/* 아직 아무것도 재지 못한 막대. 트랙 위를 한 조각이 흐른다.
+ *
+ * 움직임이 곧 정보다(SKILL §4: 장식이 아니라 피드백) — 이 줄이 멈춰 있으면
+ * 그것은 다시 「0%」로 읽힌다. 그래서 `prefers-reduced-motion` 에서도 끄지 않고
+ * `steps()` 로 느리게 만든다. `spinner-busy` 가 같은 이유로 같은 선택을 한다
+ * (tokens.md §5b: 회전 자체가 요청이 아직 열려 있다는 정보다). */
+progress[data-upload-progress]:indeterminate {
+  background-image: linear-gradient(
+    90deg,
+    transparent 0%,
+    var(--accent) 50%,
+    transparent 100%
+  );
+  background-size: 40% 100%;
+  background-repeat: no-repeat;
+  animation: momo-upload-drift 1.1s linear infinite;
+}
+
+progress[data-upload-progress]:indeterminate::-webkit-progress-bar {
+  background-color: transparent;
+}
+
+@keyframes momo-upload-drift {
+  from {
+    background-position: -40% 0;
+  }
+  to {
+    background-position: 140% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  progress[data-upload-progress]::-webkit-progress-value {
+    transition: none;
+  }
+
+  progress[data-upload-progress]:indeterminate {
+    animation: momo-upload-drift 3.2s steps(6, end) infinite;
   }
 }

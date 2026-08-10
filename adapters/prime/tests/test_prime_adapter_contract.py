@@ -21,10 +21,13 @@ from __future__ import annotations
 
 import json
 import os
+import queue
 import subprocess
 import sys
 import unittest
 import uuid
+from typing import Any
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PACKAGE_ROOT = os.path.dirname(os.path.dirname(HERE))
@@ -33,16 +36,22 @@ sys.path.insert(0, PACKAGE_ROOT)
 sys.path.insert(0, HERE)
 
 from fake_oort import REFINE_PROPS_KEY, STREAM_PROPS_KEY, FakeOort  # noqa: E402
+from prime import refine as refine_module  # noqa: E402
 from prime.oort_client import OortClient, OortError, stable_key, string_props  # noqa: E402
+from prime.prime_adapter import AdapterSettings, PrimeAdapter  # noqa: E402
 from prime.refine import (  # noqa: E402
     HARNESS_REFINE_NAMESPACE,
     REFINE_ID_MAX_CHARS,
+    TRIGGER_COMMAND,
+    TRIGGER_COMPACT,
     TRIGGER_OBSERVED_DRIFT,
+    TRIGGER_TURN_INTERVAL,
     HarnessObserver,
     RefineAnnouncer,
     drift_refinement_id,
     harness_refine_client_msg_id,
     refine_body,
+    session_artifacts_root_for,
 )
 from prime.stream_relay import StreamRelay  # noqa: E402
 
@@ -58,6 +67,55 @@ GOLDEN_VECTORS = os.path.join(REPO_ROOT, "docs", "api", "harness-refine-client-m
 def client_for(oort: FakeOort, **kwargs) -> OortClient:
     kwargs.setdefault("backoff", 0.0)
     return OortClient(oort.url, WS, CH, "test-bearer", **kwargs)
+
+
+class StubRpc:
+    """Enough of `JsonlRpc` to drive `PrimeAdapter` without a subprocess.
+
+    Including `sent_counts`, because that tally is not bookkeeping the adapter
+    can do without: it is the only evidence on this side that a refinement was
+    the host's doing (#1194).
+    """
+
+    def __init__(self) -> None:
+        self.inbox: "queue.Queue[dict[str, Any]]" = queue.Queue()
+        self.sent: list[dict[str, Any]] = []
+        self.sent_counts: dict[str, int] = {}
+        self.stderr_lines: list[str] = []
+
+    def send(self, command: dict[str, Any]) -> None:
+        self.sent.append(command)
+        name = str(command.get("type") or "?")
+        self.sent_counts[name] = self.sent_counts.get(name, 0) + 1
+
+
+def refinement_result(refinement_id: str = "refine_1", **overrides: Any) -> dict[str, Any]:
+    """The measured `RefinementResult` shape (실측 §3.2) — automatic flavour."""
+    result: dict[str, Any] = {
+        "id": refinement_id,
+        "scope": "local",
+        "summary": "track where this task got to",
+        "appliedEdits": [{"action": "create", "kind": "memory", "id": "e1", "applied": True}],
+    }
+    result.update(overrides)
+    return result
+
+
+def prime_layout(root: str) -> tuple[str, str]:
+    """prime's own two paths under `root`, spelled the way prime spells them."""
+    return (
+        os.path.join(root, "harness", "harness_state.json"),
+        os.path.join(root, "session-artifacts", "s-0001", "harness", "harness_state.json"),
+    )
+
+
+def write_state(path: str, entry_id: str, refinement_id: str | None = None) -> None:
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    state: dict[str, Any] = {"entries": {"memory": {entry_id: {}}}}
+    if refinement_id is not None:
+        state["refinements"] = [{"id": refinement_id}]
+    with open(path, "w", encoding="utf-8") as handle:
+        json.dump(state, handle)
 
 
 class WireShape(unittest.TestCase):
@@ -253,11 +311,253 @@ class RefineAnnouncement(unittest.TestCase):
             self.assertEqual(stored["refinementId"], drift_refinement_id("abc"))
             self.assertNotIn("summary", stored, "we saw a file change, not a decision")
 
+    def test_an_edit_that_did_not_apply_is_not_an_item(self):
+        """`appliedEdits` is what was *attempted* (#1194 §4.4).
+
+        Measured: a refinement that tried to re-create an existing entry ended
+        with `applied: false` and the channel was still told "항목 1건". Upstream's
+        own extension emit counts `appliedEdits.filter(e => e.applied).length`,
+        so this is that filter on our side of the wire.
+        """
+        with FakeOort() as oort:
+            announcer = RefineAnnouncer(client_for(oort), agent_handle="김인턴")
+            announcer.announce_refine_complete(
+                {
+                    "id": "refine_1",
+                    "appliedEdits": [
+                        {"action": "create", "kind": "memory", "id": "e-ok", "applied": True},
+                        {"action": "create", "kind": "memory", "id": "e-failed", "applied": False},
+                    ],
+                }
+            )
+            message = next(iter(oort.model.messages.values()))
+            stored = message["props"][REFINE_PROPS_KEY]
+            self.assertEqual([edit["id"] for edit in stored["edits"]], ["e-ok"])
+            self.assertIn("항목 1건", message["body"])
+
+    def test_a_refinement_that_applied_nothing_counts_nothing(self):
+        with FakeOort() as oort:
+            announcer = RefineAnnouncer(client_for(oort), agent_handle="김인턴")
+            announcer.announce_refine_complete(
+                {"id": "refine_1", "appliedEdits": [{"id": "e-failed", "applied": False}]}
+            )
+            message = next(iter(oort.model.messages.values()))
+            self.assertEqual(message["props"][REFINE_PROPS_KEY]["edits"], [])
+            self.assertNotIn("항목", message["body"], "no count is honest; a wrong count is not")
+
     def test_the_body_is_a_sentence_and_the_ids_are_not_in_it(self):
         body = refine_body("김인턴", 2, "command")
         self.assertIn("김인턴", body)
         self.assertNotIn("{", body)
         self.assertNotIn("—", body, "em-dash is banned in user-visible copy")
+
+
+class AdapterCase(unittest.TestCase):
+    """A `PrimeAdapter` over a temp agent dir, a stub transport and a fake oort."""
+
+    def setUp(self):
+        import tempfile
+
+        self.dir = tempfile.mkdtemp(prefix="oort-prime-adapter-")
+        self.state, self.local_state = prime_layout(self.dir)
+        self.oort = FakeOort()
+        self.oort.__enter__()
+
+    def tearDown(self):
+        import shutil
+
+        self.oort.__exit__(None, None, None)
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    def adapter(self, **observer_kwargs: Any) -> PrimeAdapter:
+        rpc = StubRpc()
+        observer = HarnessObserver(self.state, **observer_kwargs) if observer_kwargs else None
+        return PrimeAdapter(
+            rpc,  # type: ignore[arg-type]
+            client_for(self.oort),
+            AdapterSettings(agent_handle="김인턴", harness_state_path=self.state),
+            session_key="contract",
+            observer=observer,
+        )
+
+    def announced(self) -> list[dict[str, Any]]:
+        return [
+            message["props"][REFINE_PROPS_KEY]
+            for message in self.oort.model.of_type("system")
+            if REFINE_PROPS_KEY in message["props"]
+        ]
+
+
+class RefinementProvenance(AdapterCase):
+    """contract (#1194) — the trigger the channel is told is one we can defend.
+
+    `refine_complete` names no trigger (실측 §3.2), so every value here comes
+    from something the adapter observed rather than from a constant.
+    """
+
+    def test_a_refinement_nobody_asked_for_is_not_called_a_command(self):
+        adapter = self.adapter()
+        adapter.handle({"type": "turn_end"})
+        adapter.handle({"type": "refine_complete", "result": refinement_result()})
+        self.assertEqual([block["trigger"] for block in self.announced()], [TRIGGER_TURN_INTERVAL])
+
+    def test_a_refinement_the_host_asked_for_still_says_command(self):
+        adapter = self.adapter()
+        adapter.rpc.send({"id": "refine-1", "type": "refine", "global": True})
+        # Measured order: the event precedes its own `response`, so the window is
+        # still open when it arrives.
+        adapter.handle({"type": "refine_complete", "result": refinement_result()})
+        adapter.handle({"type": "response", "command": "refine", "success": True})
+        self.assertEqual([block["trigger"] for block in self.announced()], [TRIGGER_COMMAND])
+
+    def test_a_finished_command_does_not_claim_the_next_refinement(self):
+        adapter = self.adapter()
+        adapter.rpc.send({"id": "refine-1", "type": "refine", "global": True})
+        adapter.handle({"type": "refine_complete", "result": refinement_result("refine_1")})
+        adapter.handle({"type": "response", "command": "refine", "success": True})
+        adapter.handle({"type": "refine_complete", "result": refinement_result("refine_2")})
+        self.assertEqual(
+            [block["trigger"] for block in self.announced()],
+            [TRIGGER_COMMAND, TRIGGER_TURN_INTERVAL],
+            "the window closes with the response, not with the process",
+        )
+
+    def test_a_failed_refine_command_closes_its_window_too(self):
+        """A `refine` that errors emits no `refine_complete`, only a response.
+
+        Counting the event instead of the response would leave the window open
+        over every later automatic refinement — one host mistake and the label is
+        wrong for the rest of the session.
+        """
+        adapter = self.adapter()
+        adapter.rpc.send({"id": "refine-1", "type": "refine"})
+        adapter.handle(
+            {"type": "response", "command": "refine", "success": False, "error": "no session"}
+        )
+        adapter.handle({"type": "refine_complete", "result": refinement_result()})
+        self.assertEqual([block["trigger"] for block in self.announced()], [TRIGGER_TURN_INTERVAL])
+
+    def test_a_compaction_claims_the_refinement_it_scheduled(self):
+        adapter = self.adapter()
+        adapter.handle(
+            {"type": "compaction_end", "reason": "manual", "result": {"summary": "…"}, "aborted": False}
+        )
+        adapter.handle({"type": "refine_complete", "result": refinement_result("refine_1")})
+        adapter.handle({"type": "refine_complete", "result": refinement_result("refine_2")})
+        self.assertEqual(
+            [block["trigger"] for block in self.announced()],
+            [TRIGGER_COMPACT, TRIGGER_TURN_INTERVAL],
+            "one compaction schedules one refinement, not a mode",
+        )
+
+    def test_a_compaction_that_did_not_compact_claims_nothing(self):
+        """실측 case G — *"Session is too short to compact"*, zero refine passes.
+
+        The unsuccessful shape carries `result: undefined`, reaches no
+        `_scheduleAutoRefineAfterCompaction`, and must not colour a later
+        `turn_interval` refinement with a compaction that never happened.
+        """
+        adapter = self.adapter()
+        adapter.handle(
+            {
+                "type": "compaction_end",
+                "reason": "manual",
+                "result": None,
+                "aborted": False,
+                "errorMessage": "Session is too short to compact",
+            }
+        )
+        adapter.handle({"type": "refine_complete", "result": refinement_result()})
+        self.assertEqual([block["trigger"] for block in self.announced()], [TRIGGER_TURN_INTERVAL])
+
+    def test_an_aborted_compaction_claims_nothing(self):
+        adapter = self.adapter()
+        adapter.handle(
+            {"type": "compaction_end", "reason": "manual", "result": {"summary": "…"}, "aborted": True}
+        )
+        adapter.handle({"type": "refine_complete", "result": refinement_result()})
+        self.assertEqual([block["trigger"] for block in self.announced()], [TRIGGER_TURN_INTERVAL])
+
+
+class LocalScopeWatching(AdapterCase):
+    """contract (#1194) — the file the automatic path actually writes."""
+
+    def test_the_local_root_is_derived_from_primes_own_layout(self):
+        self.assertEqual(
+            session_artifacts_root_for(self.state), os.path.join(self.dir, "session-artifacts")
+        )
+        self.assertEqual(HarnessObserver(self.state).local_root, os.path.join(self.dir, "session-artifacts"))
+
+    def test_a_session_file_written_with_no_event_is_still_announced(self):
+        """The measured 2/2 shape: the file moved, stdout said nothing (§2.4)."""
+        adapter = self.adapter()
+        write_state(self.local_state, "e-local")
+        self.assertEqual(len(self.announced()), 0, "nothing has been checked yet")
+        adapter.check_harness_drift()
+        blocks = self.announced()
+        self.assertEqual([block["trigger"] for block in blocks], [TRIGGER_OBSERVED_DRIFT])
+        self.assertEqual([edit["id"] for edit in blocks[0]["edits"]], ["e-local"])
+
+    def test_a_session_file_that_predates_the_adapter_is_history_not_news(self):
+        write_state(self.local_state, "e-old")
+        adapter = self.adapter()
+        adapter.check_harness_drift()
+        self.assertEqual(self.announced(), [], "a previous session's state is not this session's news")
+
+    def test_a_mid_turn_check_leaves_the_local_file_to_its_own_event(self):
+        """Why `include_local` exists: a race would make the trigger a coin toss.
+
+        The file is written immediately before `refine_complete` is emitted, so a
+        checkpoint landing in that window would announce the same refinement as
+        `observed-drift` and take the trigger with it.
+        """
+        adapter = self.adapter()
+        write_state(self.local_state, "e-local", "refine_1")
+        adapter.handle({"type": "turn_end"})
+        self.assertEqual(self.announced(), [], "mid-turn, the event still owns this file")
+        adapter.handle(
+            {"type": "refine_complete", "result": refinement_result("refine_1", harnessStatePath=self.local_state)}
+        )
+        adapter.check_harness_drift()
+        self.assertEqual(
+            [block["trigger"] for block in self.announced()],
+            [TRIGGER_TURN_INTERVAL],
+            "one refinement, one line, and the honest trigger",
+        )
+
+    def test_an_announcement_adopts_only_the_file_it_names(self):
+        """Accepting everything would swallow a kernel write in the same window."""
+        adapter = self.adapter()
+        write_state(self.local_state, "e-local", "refine_1")
+        write_state(self.state, "e-kernel")  # the kernel path, concurrently
+        adapter.handle(
+            {"type": "refine_complete", "result": refinement_result("refine_1", harnessStatePath=self.local_state)}
+        )
+        adapter.check_harness_drift()
+        self.assertEqual(
+            [block["trigger"] for block in self.announced()],
+            [TRIGGER_TURN_INTERVAL, TRIGGER_OBSERVED_DRIFT],
+            "the kernel's own write is a separate fact and survives the accept",
+        )
+
+    def test_a_drift_that_names_a_refinement_keys_on_the_harness_s_id(self):
+        """One refinement is one line however it was noticed (D4).
+
+        Both observations derive the same `clientMsgId`, so the file watcher and
+        the event cannot each add a line for the same refinement.
+        """
+        adapter = self.adapter()
+        write_state(self.local_state, "e-local", "refine_1")
+        adapter.check_harness_drift()
+        adapter.announcer.emitted.clear()  # a restart that forgot
+        adapter.handle(
+            {"type": "refine_complete", "result": refinement_result("refine_1", harnessStatePath=self.local_state)}
+        )
+        self.assertEqual(len(self.oort.model.of_type("system")), 1)
+        self.assertEqual(
+            self.oort.model.of_type("system")[0]["clientMsgId"],
+            harness_refine_client_msg_id("refine_1"),
+        )
 
 
 class Idempotency(unittest.TestCase):
@@ -494,6 +794,100 @@ class RedProofs(unittest.TestCase):
             relay.add("둘째")
             relay.close("text_end")
             self.assertEqual(next(iter(oort.model.messages.values()))["body"], "첫둘째")
+
+
+class AutoRefineRedProofs(AdapterCase):
+    """RED PROOF (#1194) — the three measured defects, one mutation each.
+
+    Each of these was a real announcement this adapter made before #1194, and
+    each mutation below is the exact pre-fix code path rather than an
+    approximation of it: restore the mutation permanently and the corresponding
+    line comes back.
+    """
+
+    def test_a_constant_trigger_tells_the_channel_a_person_asked(self):
+        """§4.2 — `announce_refine_complete(result, trigger=TRIGGER_COMMAND)`.
+
+        The pre-fix line was a constant, so all three measured automatic shapes
+        (case B ×3, case C, case G4) announced `trigger: "command"` — a claim
+        that someone in the channel had asked for the change. The mutation is
+        that constant, and the assertion is the sentence it produced.
+        """
+        adapter = self.adapter()
+        with mock.patch.object(PrimeAdapter, "refine_trigger", lambda _self: TRIGGER_COMMAND):
+            adapter.handle({"type": "refine_complete", "result": refinement_result()})
+        self.assertEqual(
+            [block["trigger"] for block in self.announced()],
+            [TRIGGER_COMMAND],
+            "the measured falsehood: nobody sent a refine command in this session",
+        )
+        self.assertEqual(adapter.rpc.sent_counts.get("refine", 0), 0, "and the transport agrees")
+
+        # ...and with the observation in place, the same event is labelled for
+        # what it was.
+        adapter.announcer.emitted.clear()
+        adapter.handle({"type": "refine_complete", "result": refinement_result("refine_2")})
+        self.assertEqual(self.announced()[-1]["trigger"], TRIGGER_TURN_INTERVAL)
+
+    def test_watching_only_the_global_file_leaves_no_audit_trail_at_all(self):
+        """§4.3 — the observer watched `<agentDir>/harness/harness_state.json`.
+
+        The automatic path writes `session-artifacts/<id>/harness/…`, so the
+        watched path did not merely miss a change: in the measured runs it
+        `exists: false`d and `check_harness_drift()` produced zero observations
+        ever. Paired with the compaction-deferred drain, where stdout is also
+        silent, that is a self-modification with no witness anywhere.
+        """
+        blind = self.adapter(scan_local=False)  # mutation: the pre-#1194 observer
+        seeing = self.adapter()  # both baselined before the write, so both could see it
+        write_state(self.local_state, "e-local")
+
+        blind.check_harness_drift()
+        self.assertEqual(self.announced(), [], "file changed, stdout silent, channel empty")
+        self.assertFalse(
+            os.path.exists(blind.observer.path), "and the watched path never existed"
+        )
+
+        seeing.check_harness_drift()
+        self.assertEqual([block["trigger"] for block in self.announced()], [TRIGGER_OBSERVED_DRIFT])
+
+    def test_counting_unapplied_edits_announces_a_change_that_did_not_happen(self):
+        """§4.4 — `_wire_edits` without the `applied` check.
+
+        Measured on case B: refinements 2 and 3 failed to re-create an entry and
+        the channel was told "항목 1건" three times for one entry that existed
+        once.
+        """
+        result = {
+            "id": "refine_1",
+            "appliedEdits": [{"action": "create", "kind": "memory", "id": "e1", "applied": False}],
+        }
+
+        def unfiltered(applied: Any) -> list[dict[str, str]]:  # the pre-fix body
+            return [
+                {
+                    "action": str(edit.get("action") or "update"),
+                    "kind": str(edit.get("kind") or "entry"),
+                    "id": str(edit.get("id")),
+                }
+                for edit in applied or []
+                if isinstance(edit, dict) and str(edit.get("id") or "").strip()
+            ]
+
+        with FakeOort() as oort:
+            announcer = RefineAnnouncer(client_for(oort), agent_handle="김인턴")
+            with mock.patch.object(refine_module, "_wire_edits", unfiltered):
+                announcer.announce_refine_complete(result)
+            message = next(iter(oort.model.messages.values()))
+            self.assertIn("항목 1건", message["body"], "the measured sentence")
+            self.assertEqual(len(message["props"][REFINE_PROPS_KEY]["edits"]), 1)
+
+        with FakeOort() as oort:
+            announcer = RefineAnnouncer(client_for(oort), agent_handle="김인턴")
+            announcer.announce_refine_complete(result)
+            message = next(iter(oort.model.messages.values()))
+            self.assertNotIn("항목", message["body"])
+            self.assertEqual(message["props"][REFINE_PROPS_KEY]["edits"], [])
 
 
 class IsolationLever(unittest.TestCase):

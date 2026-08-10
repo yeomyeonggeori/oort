@@ -24,8 +24,9 @@ already has a type for. What the spike did **not** have and this adds:
 | `tool_execution_end` | a `tool_result` message |
 | `extension_ui_request` (dialog) | an `approval_request` message, answered on stdin |
 | `extension_ui_request` (fire-and-forget) | a `system` message, never answered |
+| `compaction_end` (successful) | nothing said; the next automatic refinement is attributed to it |
 | `refine_complete` | a `system` refinement announcement |
-| `agent_end` / EOF | close whatever is open, then check the harness file |
+| `agent_end` / EOF | close whatever is open, then check the harness files |
 
 `tool_execution_update` is deliberately not relayed. It is partial tool output,
 it arrives at the same cadence as token deltas, and relaying it would be the
@@ -42,6 +43,41 @@ A turn ends three ways and the channel must be able to tell them apart:
   adapter cannot always write itself (if the *adapter* is what died), and it is
   exactly why the opening POST carries a run binding: the server can then find
   the half-written message and mark it.
+
+## Where a refinement came from (#1194)
+
+`refine_complete` carries **no field naming its trigger** — not `reason`, not
+`trigger` (실측 `research/2026-08-09-prime-auto-refine-measurement.md` §3.2), and
+until #1194 this adapter answered that by writing `trigger: "command"` on every
+one of them. Measured consequence: an automatic refinement told the channel a
+person had asked for it, in all three measured automatic shapes.
+
+The adapter cannot read the harness's `reason`, but it is not guessing either —
+it knows two things the event does not carry:
+
+1. **whether it asked.** A host `refine` command is in flight from the moment the
+   transport writes it until its `response(command: "refine")` comes back, and
+   `refine_complete` arrives *inside* that window (the event precedes its own
+   response — spike-measured order, and `fake_prime` reproduces it). Outside the
+   window nobody on this side asked, so the refinement is automatic.
+2. **whether a compaction just carried one.** A successful `compaction_end`
+   schedules exactly one compaction-triggered refinement
+   (`_scheduleAutoRefineAfterCompaction`), immediately or deferred, so the next
+   automatic refinement after one is that one.
+
+Everything else automatic is `turn_interval`, which is prime's own name for the
+on-by-default timer (`agent-session.js:2853` `_maybeAutoRefine("turn_interval")`)
+and one of the four values ADR-0158 fixed on the wire.
+
+Two residues, written down rather than papered over:
+
+* if a compaction's review gate **declines**, no refinement follows it, and the
+  pending attribution is spent by a later `turn_interval` one. Both are still
+  honestly "automatic"; the finer word can be wrong.
+* a refinement the agent starts itself from a kernel cell (`refine.run`, session-
+  gated like the automatic path) is indistinguishable from `turn_interval` on
+  stdout. Naming it would need a fifth `trigger` value, and that enum is a landed
+  wire contract in two languages — an ADR-0158 amendment, not an adapter change.
 """
 
 from __future__ import annotations
@@ -56,6 +92,8 @@ from typing import Any
 from .oort_client import OUTCOME_CANCELLED, OUTCOME_FAILED, OortClient, stable_key
 from .refine import (
     TRIGGER_COMMAND,
+    TRIGGER_COMPACT,
+    TRIGGER_TURN_INTERVAL,
     HarnessObserver,
     RefineAnnouncer,
 )
@@ -66,6 +104,15 @@ from .stream_relay import StreamRelay
 #: (see `refine.py`), so it is spelled once and re-measured on every version bump.
 REFINE_COMPLETE_EVENT = "refine_complete"
 REFINE_FAILED_EVENT = "refine_failed"
+
+#: The harness command whose in-flight window makes a refinement the host's.
+REFINE_COMMAND = "refine"
+
+#: Compaction's two events. Only the end matters here, and only a successful one:
+#: an unsuccessful `compaction_end` carries `result: undefined`
+#: (`_endCompactionUnsuccessfully`) and schedules no refinement at all, which is
+#: measured as case G — *"Session is too short to compact"*, zero refine passes.
+COMPACTION_END_EVENT = "compaction_end"
 
 #: `extension_ui_request` methods that block the agent until the host answers.
 #: The others (notify/setStatus/setWidget/setTitle/set_editor_text) must NOT be
@@ -87,6 +134,10 @@ class AdapterSettings:
     flush_interval: float = 0.8
     ui_policy: str = "none"  # approve | deny | cancel | none
     harness_state_path: str | None = None
+    #: The session-artifacts root the automatic path writes under (#1194). `None`
+    #: derives it from `harness_state_path`, which is what production wants; an
+    #: explicit value exists for an operator whose layout is not prime's default.
+    harness_local_root: str | None = None
     turn_timeout: float = 300.0
 
 
@@ -110,7 +161,14 @@ class PrimeAdapter:
         # right anchor when there is one: two adapter processes serving the same
         # run must not mint different keys for the same turn.
         self.session_key = session_key or client.run_id or stable_key("session", str(time.time()))
-        self.observer = observer if observer is not None else HarnessObserver(self.settings.harness_state_path)
+        self.observer = (
+            observer
+            if observer is not None
+            else HarnessObserver(
+                self.settings.harness_state_path,
+                local_root=self.settings.harness_local_root,
+            )
+        )
         self.announcer = announcer or RefineAnnouncer(
             client, agent_handle=self.settings.agent_handle, observer=self.observer
         )
@@ -124,6 +182,12 @@ class PrimeAdapter:
         self.tool_started = threading.Event()
         self.cancelled = False
         self.ended_by_eof = False
+        #: `response(command: "refine")` records seen. Compared against the
+        #: transport's outbound tally, this is the in-flight window that makes a
+        #: refinement the host's rather than the harness's own idea.
+        self.refine_responses = 0
+        #: A successful compaction whose scheduled refinement has not arrived yet.
+        self.compaction_refine_pending = False
 
     # -- transcript --------------------------------------------------------
 
@@ -196,6 +260,7 @@ class PrimeAdapter:
             "tool_execution_update": self._on_tool_update,
             "tool_execution_end": self._on_tool_end,
             "extension_ui_request": self._on_ui_request,
+            COMPACTION_END_EVENT: self._on_compaction_end,
             REFINE_COMPLETE_EVENT: self._on_refine_complete,
             REFINE_FAILED_EVENT: self._on_refine_failed,
             "agent_end": self._on_agent_end,
@@ -209,6 +274,12 @@ class PrimeAdapter:
         handler(record)
 
     def _on_response(self, record: dict[str, Any]) -> None:
+        if record.get("command") == REFINE_COMMAND:
+            # Closes the in-flight window opened by the transport's write. A
+            # failed `refine` answers here too and emits no `refine_complete`, so
+            # counting the response rather than the event is what keeps a failure
+            # from leaving the window open over the next automatic refinement.
+            self.refine_responses += 1
         self.note(
             kind="response",
             command=record.get("command"),
@@ -337,11 +408,54 @@ class PrimeAdapter:
             response["value"] = "oort-prime-adapter"
         return response
 
+    def _on_compaction_end(self, record: dict[str, Any]) -> None:
+        # Only a compaction that actually compacted schedules a refinement. The
+        # unsuccessful shape carries `result: undefined` and an `errorMessage`,
+        # and an aborted one carries `aborted: true` — neither reaches
+        # `_scheduleAutoRefineAfterCompaction`, so neither may claim the next
+        # automatic refinement.
+        compacted = bool(record.get("result")) and not record.get("aborted")
+        if compacted:
+            self.compaction_refine_pending = True
+        self.note(
+            kind="compaction_end",
+            reason=record.get("reason"),
+            compacted=compacted,
+            error=record.get("errorMessage"),
+        )
+
+    def host_refine_in_flight(self) -> bool:
+        """Is a `refine` command this host sent still unanswered?
+
+        The transport counts what was written and this counts what was answered,
+        so any caller's `refine` opens the window — including `adapter.py`'s own
+        `rpc.send`, which does not go through this class.
+        """
+        return self.rpc.sent_counts.get(REFINE_COMMAND, 0) > self.refine_responses
+
+    def refine_trigger(self) -> str:
+        """What set this refinement off, from what the adapter actually knows.
+
+        See the module docstring for why the event itself cannot answer this and
+        what the two observations are. The compaction attribution is consumed
+        here rather than at `compaction_end`, because a compaction's refinement
+        can be deferred past several turns before it lands (실측 case G4).
+        """
+        if self.host_refine_in_flight():
+            return TRIGGER_COMMAND
+        if self.compaction_refine_pending:
+            self.compaction_refine_pending = False
+            return TRIGGER_COMPACT
+        return TRIGGER_TURN_INTERVAL
+
     def _on_refine_complete(self, record: dict[str, Any]) -> None:
         result = record.get("result") or {}
-        announcement = self.announcer.announce_refine_complete(result, trigger=TRIGGER_COMMAND)
+        trigger = self.refine_trigger()
+        announcement = self.announcer.announce_refine_complete(result, trigger=trigger)
         self.note(
             kind="refine_complete",
+            trigger=trigger,
+            scope=result.get("scope"),
             announced=announcement is not None,
             clientMsgId=(announcement or {}).get("clientMsgId"),
         )
@@ -354,12 +468,15 @@ class PrimeAdapter:
         self.note(kind="refine_failed", error=record.get("error"))
 
     def _on_turn_end(self, _record: dict[str, Any]) -> None:
-        self.check_harness_drift()
+        self.check_harness_drift(include_local=False)
 
     def _on_agent_end(self, _record: dict[str, Any]) -> None:
         self._close_stream("agent_end")
         self.agent_ended.set()
-        self.check_harness_drift()
+        # Still global-only: a compaction can defer its refinement past several
+        # `agent_end`s before landing (실측 case G4), so the session is not over
+        # and the event may still be coming.
+        self.check_harness_drift(include_local=False)
         self.note(kind="agent_end")
 
     def _on_eof(self, _record: dict[str, Any]) -> None:
@@ -376,17 +493,41 @@ class PrimeAdapter:
 
     # -- lifecycle ---------------------------------------------------------
 
-    def check_harness_drift(self) -> dict[str, Any] | None:
-        """The kernel path: did `harness_state.json` change without an event?"""
-        drift = self.observer.drift()
-        if drift is None:
-            return None
-        announcement = self.announcer.announce_observed_drift(drift)
-        self.note(
-            kind="observed_drift",
-            announced=announcement is not None,
-            newEntryIds=drift.get("newEntryIds"),
-        )
+    def check_harness_drift(self, *, include_local: bool = True) -> dict[str, Any] | None:
+        """Did a harness state file change without an event saying so?
+
+        Two silences, one check. The kernel writes the global file through
+        `rlm.harness` and emits nothing at all; a compaction-deferred automatic
+        refinement writes a **session-local** file and emits nothing either,
+        because by the time the queue drains the RPC is already down (실측 §2.4,
+        2/2 runs). Both are a file that moved with no line in the channel, so
+        both are announced the same way and with the same honest trigger.
+
+        The two scopes are **not** asked about at the same moments, and that is
+        the whole of `include_local`:
+
+        * the global file has a writer that never speaks (`rlm.harness`), so
+          every checkpoint asks about it and the answer is timely;
+        * a session-local file has exactly one writer — the refine machinery —
+          and it *does* speak, so asking mid-turn only creates a race between the
+          file and its own imminent `refine_complete`. Whichever won would decide
+          the announcement's trigger, which is how a label becomes a coin toss.
+          Once the RPC is down, nothing further can explain the file, and that is
+          when the question is worth asking.
+
+        Returns the last announcement, for the callers that only ever expect one.
+        """
+        announcement = None
+        for drift in self.observer.drifts(include_local=include_local):
+            announcement = self.announcer.announce_observed_drift(drift)
+            after = drift.get("after") or {}
+            self.note(
+                kind="observed_drift",
+                path=after.get("path"),
+                scope=after.get("scope"),
+                announced=announcement is not None,
+                newEntryIds=drift.get("newEntryIds"),
+            )
         return announcement
 
     def cancel(self, reason: str = "cancel", *, tell_harness: bool = True) -> None:
@@ -431,5 +572,16 @@ class PrimeAdapter:
             "cancelled": self.cancelled,
             "endedByEof": self.ended_by_eof,
             "harness": self.observer.baseline,
+            # Which files were actually watched, not which one was configured.
+            # The measured failure this answers (#1194 §4.3) is an operator
+            # reading `observerWatchPath` and finding it never existed, with no
+            # way to tell "nothing changed" from "nothing was looked at".
+            "harnessSources": list(self.observer.baselines),
+            # And separately, what the *scan* finds — because a baseline can also
+            # be added by an announcement adopting the file it just wrote. Only
+            # this list answers "would a file nobody told us about be seen".
+            "harnessLocalWatched": self.observer.local_sources(),
+            "harnessLocalRoot": self.observer.local_root,
+            "commandsSent": dict(self.rpc.sent_counts),
             "stderr": self.rpc.stderr_lines[-40:],
         }

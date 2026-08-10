@@ -1,9 +1,9 @@
 //! `momo-notifier` — the durability + notification worker (ADR-0145 B안,
 //! batches B2.3 and P2).
 //!
-//! All three of the Swift `NotifierWorker`'s loops. The first two decide money
-//! and session state when a host or a process dies; the third decides who hears
-//! about a message:
+//! The Swift `NotifierWorker`'s loops. The first three decide money and session
+//! state when a host or a process dies; the last decides who hears about a
+//! message:
 //!
 //! 1. **cloud lifecycle reconciliation** (ADR-0140 D4) — claim a durable intent,
 //!    ask the provider, converge. One iteration is
@@ -11,7 +11,13 @@
 //! 2. **tier fallback sweep** (ADR-0125 D11 / MOMO-656) — a session whose host
 //!    stopped answering settles and stops claiming to be running. One iteration
 //!    is [`Notifier::sweep_once`].
-//! 3. **push-candidate drain** (ADR-0120, batch P2) — a committed message wakes
+//! 3. **instance lease renewal** (#1197 H1) — a managed substrate that expires
+//!    instances on a clock of its own is told, repeatedly, which instances momo
+//!    still wants. One iteration is [`Notifier::renew_leases_once`]. Its
+//!    *silences* matter as much as its calls: it renews exactly the hosts loop 2
+//!    is not orphaning, so an instance momo has given up on is reclaimed by the
+//!    substrate even if momo never runs again.
+//! 4. **push-candidate drain** (ADR-0120, batch P2) — a committed message wakes
 //!    the devices that should hear about it, carrying ids only. One iteration is
 //!    [`push::PushDrain::drain_once`].
 //!
@@ -53,11 +59,12 @@ use std::sync::Arc;
 use momo_db::sqlx::postgres::PgListener;
 use momo_db::PgPool;
 use momo_outbox::NOTIFY_CHANNEL;
-use momo_provider::CloudInstancePresence;
+use momo_provider::{CloudInstancePresence, CloudProviderError, CloudProviderOperation};
 use momo_t3::convergence::{
     after_deadline, after_provider_call, provider_denies_its_own_absence,
     CloudLifecycleConvergence, CloudLifecyclePhase,
 };
+use momo_t3::lease::renewable_lease_candidates;
 use momo_t3::reconcile::{
     apply_convergence_to_intent, claim_lifecycle_intent, due_lifecycle_candidates,
     ActionableIntent, AppliedConvergence,
@@ -115,7 +122,27 @@ pub struct SweepStats {
     pub transitioned: usize,
     /// Ledger rows `t3_terminate` closed and billed.
     pub settled: usize,
+    /// Paid instances now under a durable destroy intent (#1197 B2).
+    pub destroy_intended: usize,
     pub failed: usize,
+}
+
+/// What one lease-renewal iteration did (#1197 H1).
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct LeaseStats {
+    /// Live instances whose host still deserves to be kept alive.
+    pub candidates: usize,
+    pub renewed: usize,
+    /// The provider has no lease to renew, so nothing was owed. Not a failure —
+    /// it is every substrate except CubeSandbox.
+    pub no_lease: usize,
+    /// The renewal was refused or the adapter could not be resolved. Counted,
+    /// logged, and otherwise ignored: the lease is four renewal periods long, so
+    /// this was one of four chances.
+    pub failed: usize,
+    /// The substrate says the instance is already gone. The reconciler owns that
+    /// fact; a keepalive does not act on it.
+    pub missing: usize,
 }
 
 #[derive(Clone)]
@@ -422,6 +449,7 @@ impl Notifier {
                             host_id = %candidate.host_id,
                             terminal = candidate.is_terminal(),
                             settled = outcome.settled,
+                            destroy_intended = outcome.destroy_intended,
                             orphan_source = candidate.orphan_source(),
                             grace_seconds = self.config.host_offline_grace_seconds,
                             "orphaned a stale work session"
@@ -429,6 +457,13 @@ impl Notifier {
                     }
                     if outcome.settled {
                         stats.settled += 1;
+                    }
+                    if outcome.destroy_intended {
+                        // #1197 B2: the instance will actually be reclaimed. On a
+                        // substrate that reports a crashed VM as `running`
+                        // forever, this — not `settled` — is the number that says
+                        // the host stops costing money.
+                        stats.destroy_intended += 1;
                     }
                 }
                 Err(error) => {
@@ -445,6 +480,111 @@ impl Notifier {
     }
 
     // -----------------------------------------------------------------------
+    // loop 3 — #1197 H1 instance lease renewal
+    // -----------------------------------------------------------------------
+
+    /// Renew the lease on every instance momo still intends to keep alive.
+    ///
+    /// The substrate this exists for expires instances at an absolute TTL from
+    /// creation that no ordinary traffic resets (D4-② measured five stimuli
+    /// moving it zero milliseconds), so a healthy paid session is deleted on the
+    /// substrate's clock unless something says otherwise every lease period.
+    ///
+    /// **Which hosts are skipped is the interesting half.**
+    /// [`renewable_lease_candidates`] withholds renewal from exactly the hosts
+    /// the tier sweep is orphaning, so a host momo has given up on stops being
+    /// paid for. That is the only reclaim path that survives momo itself dying —
+    /// and on this substrate it is not a nicety, because a SIGKILLed VM answers
+    /// `200 running` forever and never produces the 404 the reconciler's
+    /// `provider_missing` verdict waits on.
+    ///
+    /// Nothing here writes to the database. A renewal is not a lifecycle
+    /// transition, and every failure is simply counted: the lease is four
+    /// renewal periods long, so any single tick is one of four chances.
+    pub async fn renew_leases_once(&self) -> Result<LeaseStats, NotifierError> {
+        let batch = self.config.claim_batch_size.max(1);
+        let mut stats = LeaseStats::default();
+        let mut cursor: Option<uuid::Uuid> = None;
+
+        // **Every candidate, every tick — the batch size paginates, it does not
+        // cap.** A renewal writes nothing, so unlike the reconciler's claim or
+        // the sweep's transition it cannot advance a queue: acting on a host
+        // leaves it exactly where it was in the ordering. Stopping at one batch
+        // would mean hosts past it were never renewed at all and were deleted by
+        // the substrate one lease later, healthy and mid-session.
+        loop {
+            let page = renewable_lease_candidates(
+                &self.pool,
+                self.config.host_offline_grace_seconds,
+                batch,
+                cursor,
+            )
+            .await?;
+            if page.is_empty() {
+                break;
+            }
+            let short_page = (page.len() as i64) < batch;
+            cursor = page.last().map(|candidate| candidate.cloud_host_id);
+            stats.candidates += page.len();
+            self.renew_page(page, &mut stats).await;
+            if short_page {
+                break;
+            }
+        }
+        Ok(stats)
+    }
+
+    /// One page of [`Self::renew_leases_once`].
+    async fn renew_page(&self, page: Vec<momo_t3::LeaseRenewalCandidate>, stats: &mut LeaseStats) {
+        for candidate in page {
+            let adapter = match self.resolver.adapter_for(&candidate.instance.provider_id) {
+                Ok(adapter) => adapter,
+                Err(error) => {
+                    tracing::warn!(
+                        cloud_host_id = %candidate.cloud_host_id,
+                        error = %error,
+                        "no provider adapter; cannot renew this instance's lease"
+                    );
+                    stats.failed += 1;
+                    continue;
+                }
+            };
+            // ADR-0142 D2: the loop asks whether a lease exists, never whose.
+            if !adapter
+                .capabilities()
+                .supports(CloudProviderOperation::RenewLease)
+            {
+                stats.no_lease += 1;
+                continue;
+            }
+            match adapter.renew_lease(&candidate.instance).await {
+                Ok(()) => stats.renewed += 1,
+                Err(CloudProviderError::InstanceMissing) => {
+                    // Whatever this lease belonged to is gone. That is a fact for
+                    // the reconciler, reached through its own durable intent —
+                    // a keepalive does not get to settle a paid session.
+                    tracing::info!(
+                        cloud_host_id = %candidate.cloud_host_id,
+                        state = %candidate.state,
+                        "lease renewal found the instance already gone"
+                    );
+                    stats.missing += 1;
+                }
+                Err(error) => {
+                    tracing::warn!(
+                        cloud_host_id = %candidate.cloud_host_id,
+                        state = %candidate.state,
+                        error = %error,
+                        "lease renewal refused; the instance has fewer attempts left before the \
+                         substrate reclaims it"
+                    );
+                    stats.failed += 1;
+                }
+            }
+        }
+    }
+
+    // -----------------------------------------------------------------------
     // supervision
     // -----------------------------------------------------------------------
 
@@ -457,6 +597,7 @@ impl Notifier {
         tracing::info!(
             reconcile_interval_ms = self.config.reconcile_interval.as_millis() as u64,
             sweep_interval_ms = self.config.sweep_interval.as_millis() as u64,
+            lease_renewal_interval_ms = self.config.lease_renewal_interval.as_millis() as u64,
             claim_batch = self.config.claim_batch_size,
             host_offline_grace_seconds = self.config.host_offline_grace_seconds,
             t3_enabled = self.config.t3_enabled,
@@ -493,6 +634,29 @@ impl Notifier {
             }
         });
 
+        // ---- loop 3: #1197 H1 instance lease renewal -----------------------
+        //
+        // Its own task, and T3-only like the reconciler: leases exist only on
+        // managed substrates. It must not share the reconciler's task, because a
+        // provider call that is timing out inside a *convergence* would then
+        // stop every other instance's lease from being renewed — and on this
+        // substrate an unrenewed lease is a deleted sandbox, not a delayed one.
+        let renewer = self.clone();
+        let lease_task = tokio::spawn(async move {
+            if !renewer.config.t3_enabled {
+                tracing::info!("t3 disabled; instance lease renewal idle");
+                return;
+            }
+            let mut ticker = tokio::time::interval(renewer.config.lease_renewal_interval);
+            ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            loop {
+                ticker.tick().await;
+                if let Err(error) = renewer.renew_leases_once().await {
+                    tracing::error!(error = %error, "instance lease renewal iteration failed");
+                }
+            }
+        });
+
         // ---- loop 2b: the approval expiry sweep (goal SRV-T1) --------------
         //
         // Its own task, and NOT folded into the tier sweep above, for the
@@ -516,7 +680,7 @@ impl Notifier {
             }
         });
 
-        // ---- loop 3: ADR-0120 push-candidate drain -------------------------
+        // ---- loop 4: ADR-0120 push-candidate drain -------------------------
         let (push_task, push_listener) = match self.push.clone() {
             None => {
                 // Say so out loud. A disabled drain that logged nothing would be
@@ -558,6 +722,7 @@ impl Notifier {
         shutdown.await;
         reconcile_task.abort();
         sweep_task.abort();
+        lease_task.abort();
         approval_sweep_task.abort();
         if let Some(task) = push_task {
             task.abort();

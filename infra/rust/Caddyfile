@@ -1,0 +1,105 @@
+app.oor7.com {
+	encode zstd gzip
+
+	# ── 보안 헤더 (#1213) ────────────────────────────────────────────────
+	# 이 사이트가 내려보내는 **모든** 응답에 붙는다: SPA 문서, /v1 JSON,
+	# /healthz, /connection 핸드셰이크. Caddy의 지시어 순서에서 `header`는
+	# `handle`보다 앞이므로(caddyfile 어댑터의 directiveOrder), 아래 handle
+	# 블록 중 어느 것이 응답하든 이 세 줄은 이미 붙어 있다.
+	#
+	# CSP는 여기 없다 — SPA를 서빙하는 마지막 handle 블록에만 붙는다.
+	# `infra/prod/Caddyfile`이 같은 모양이고, 그래야 게이트가 「이 파일의
+	# CSP는 하나」라는 단정을 유지한다(정책이 두 개면 어느 것을 재는지 모른다).
+	header {
+		# HSTS: 브라우저가 **기억하는** 헤더다. 한 번 받은 브라우저는 max-age
+		# 동안 이 호스트를 평문으로 열지 않고, 그 기억은 서버에서 취소할 수
+		# 없다(헤더를 지워도 이미 받은 브라우저는 만료까지 기억한다). 그래서
+		# 1일에서 시작한다. 확장 일정은 docs/runbooks/ncp-rust-deploy.md.
+		#
+		# `preload` 없음 — 프리로드 목록 등재는 브라우저 소스에 박히는 것이고
+		# 제거에 수개월이 걸린다. 도그푸딩 단계에서 살 물건이 아니다.
+		#
+		# `includeSubDomains` 없음 — 2026-08-09 dig 실측: app.oor7.com 만
+		# A 레코드를 갖고(101.79.11.189), *.app.oor7.com 은 와일드카드도 개별
+		# 레코드도 없다. 지킬 하위도메인이 0개인 지시어는 얻는 것 없이
+		# 「앞으로 생길 하위도메인도 전부 HTTPS여야 한다」는 기억만 남긴다.
+		# max-age를 늘리는 창에서 같이 판단한다.
+		Strict-Transport-Security "max-age=86400"
+		# MIME 스니핑 금지. /v1 응답은 전부 application/json 이고 SPA 자산은
+		# Caddy file_server가 확장자로 타입을 붙인다 — 브라우저가 그 선언을
+		# 추측으로 덮어쓸 이유가 없다.
+		X-Content-Type-Options "nosniff"
+		# 첨부 업로드 목적지(www.googleapis.com)로 나가는 요청에 이 사이트의
+		# 주소를 싣지 않는다. 이 앱은 리퍼러를 읽는 표면이 없고(OAuth 리디렉트
+		# 플로우 없음 — ADR-0147 링크는 붙여넣기다), 외부로 여는 링크도 리퍼러를
+		# 요구하지 않으므로 가장 좁은 값이 아무것도 깨뜨리지 않는다.
+		Referrer-Policy "no-referrer"
+	}
+
+	handle /v1/* {
+		reverse_proxy api:8080
+	}
+	handle /healthz {
+		reverse_proxy api:8080
+	}
+	handle /connection/* {
+		reverse_proxy centrifugo:8000
+	}
+	handle {
+		root * /srv/web
+		# ── CSP: 모든 소스는 clients/web 실측이다 (#1213) ────────────────
+		# 근거표 전문은 PR 본문에. 요약:
+		#
+		#  default-src 'self'
+		#    index.html은 인라인 <script>가 없다(주석이 그 이유를 적어 두고
+		#    있다). 진입점 · /theme-boot.js · /manifest.json · /sw.js ·
+		#    코드분할 청크(terminalRuntime · huddleRuntime)가 전부 같은 오리진의
+		#    파일이다. 번들에 eval/new Function/WebAssembly/new Worker 0건
+		#    (dist 실측). 서비스워커는 /sw.js 이고 worker-src는 default-src로
+		#    떨어진다. 웹폰트 없음(빌드된 CSS에 url() 0건)이라 font-src도 같다.
+		#
+		#  connect-src 'self' wss://app.oor7.com https://www.googleapis.com
+		#    'self' = REST(/v1/*) 와 첨부 다운로드/미리보기 프록시
+		#    (/v1/.../attachments/{id}/content). 둘 다 이 오리진이다.
+		#    wss://app.oor7.com = 레일. 주소는 로그인 응답의
+		#    realtimeWebSocketUrl(ADR-0110)이고 라이브 값은
+		#    wss://app.oor7.com/connection/websocket 이다. 같은 호스트라
+		#    CSP3의 'self'가 덮어야 하지만 ws(s)에 대한 'self' 해석은 엔진마다
+		#    갈렸던 자리다 — 명시가 싸고 확실하다.
+		#    https://www.googleapis.com = **첨부 바이트가 이 서버를 지나지 않는
+		#    유일한 요청**(ADR-0151 D1). 브라우저가 Drive 재개 가능 세션 주소로
+		#    직접 PUT 한다. 이 한 토큰이 빠지면 첨부 업로드가 즉사한다 — #1206이
+		#    실제로 밟았고 #1207이 닫은 그 사고다. 호스트는 추측이 아니라 서버가
+		#    강제한다: momo-drive/src/google.rs:380 이 Location 헤더가
+		#    "https://www.googleapis.com/" 로 시작하지 않으면 세션을 거절한다.
+		#
+		#  img-src 'self' data:
+		#    'self' = /favicon.svg · /apple-touch-icon.png · PWA 아이콘.
+		#    data: = 인라인 미리보기. 첨부 이미지는 베어러가 필요한 프록시에서
+		#    오므로 <img src>에 주소를 걸 수 없고, Blob을 data: URL로 읽어
+		#    건다(clients/web/src/features/attachments/content.ts 머리말이 blob:
+		#    을 배제한 이유를 적어 두고 있다). 아바타도 같은 계약을 코어가
+		#    강제한다: renderableAvatarUrl은 같은 오리진 경로와 data:image/ 만
+		#    통과시킨다(packages/momo-core/src/features/workspace/avatar.ts).
+		#
+		#  style-src 'self' 'unsafe-inline'
+		#    'self' = Vite가 내보내는 스타일시트(xterm.css 포함, 청크에 묶여
+		#    같은 오리진으로 서빙된다). 'unsafe-inline'은 xterm.js 몫이다 —
+		#    DOM 렌더러가 <style> 하나를 심고 truecolor 셀마다
+		#    setAttribute("style", …)을 한다(terminalRuntime.ts 머리말의 실측).
+		#    앱 코드에는 style={{…}} 가 0건이므로 이 완화의 수요는 그 한 곳뿐이고,
+		#    xterm을 걷어내는 날 같이 좁힐 수 있다.
+		#
+		#  frame-ancestors 'none'
+		#    클릭재킹 방어. X-Frame-Options를 함께 쓰지 않는 이유: 두 헤더는
+		#    같은 것을 말하고, CSP2를 이해하는 브라우저는 frame-ancestors가
+		#    있으면 X-Frame-Options를 무시한다. 이 번들은 ES 모듈 + React 18이라
+		#    frame-ancestors를 모르는 브라우저에서는 애초에 실행되지 않는다 —
+		#    그런 브라우저를 위한 두 번째 줄은 지켜 줄 대상이 없는 중복이다.
+		#    (infra/prod/Caddyfile은 셀프호스트 배포용이라 둘 다 갖고 있고,
+		#     그 파일은 이 티켓에서 건드리지 않는다.)
+		header Content-Security-Policy "default-src 'self'; connect-src 'self' wss://app.oor7.com https://www.googleapis.com; img-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'"
+		try_files {path} /index.html
+		file_server
+	}
+}

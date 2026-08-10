@@ -1,0 +1,136 @@
+# TLS edge + web serving overlay for docker-compose.rust.yml — goal #1228.
+#
+#   docker compose --env-file infra/rust/rust-smoke.secrets.env \
+#     --env-file infra/rust/overlays.secrets.env \
+#     -f infra/rust/docker-compose.rust.yml \
+#     -f infra/rust/caddy.override.yml <command>
+#
+# ## What this file recovers
+#
+# `docker-compose.rust.yml` says caddy is "deliberately absent (B1.7 scope)".
+# That sentence was true for the smoke and false for production: app.oor7.com
+# has been fronted by a `caddy.override.yml` that existed on exactly one disk
+# and in no commit (audit B §2-2). The runbook could not even name its own
+# service — `docs/runbooks/ncp-rust-deploy.md` used to read "서비스 이름은
+# caddy.override.yml 에서 확인" because the file was not here to look at.
+#
+# `infra/rust/Caddyfile` (the routing + the five security headers, #1213/#1217)
+# was already canonical in the repo; what was missing was the six lines that
+# mount it. They are below.
+#
+# ## The web volume — why web-init exists (#1228 임무 B)
+#
+# The live overlay mounted the SPA as `/opt/momo/web:/srv/web:ro`: a host bind
+# whose contents arrived by `tar | ssh` from somebody's laptop. That made the
+# web and the API two independently versioned deployments, and it made "which
+# commit is the live bundle?" unanswerable (audit B-6, B-10).
+#
+# So the dist now ships INSIDE the momo image (`server-rust/Dockerfile`, web
+# stage → `/opt/momo/web`), and `web-init` copies it into a named volume that
+# Caddy reads read-only. This is not a new invention — it is the shape the
+# Swift path already had (`infra/prod/docker-compose.prod.yml` web-init +
+# `momo-web-static`) and that the Rust path lost. Pinning MOMO_RUST_IMAGE now
+# pins the web too: one tag, one deploy, one answer.
+#
+# ## ⚠ Naming this file OFF the deploy host talks to Let's Encrypt (#1228 실측)
+#
+# `infra/rust/Caddyfile` names a real public site (`app.oor7.com`) with no
+# scheme, so Caddy turns on automatic HTTPS and starts an ACME order **the
+# moment the container boots** — before any request, and regardless of which
+# host ports you mapped. Measured on 2026-08-10 during this ticket's local
+# verification: 4 failed challenges (http-01 + tls-alpn-01, two orders) against
+# the production Let's Encrypt directory for the live domain.
+#
+# What it did NOT do, and why the live edge was unharmed: the container had an
+# empty `caddy-data`, so Caddy registered a NEW ACME account. Failed-validation
+# limits are counted per account+hostname, and no certificate was issued, so
+# neither the live account's counters nor the per-domain issuance limit moved.
+# It is still noise aimed at a production hostname from a laptop.
+#
+# **So: do not name this overlay for local work.** Local work has its own edge
+# now — `infra/rust/local.override.yml` + `infra/rust/Caddyfile.local` (#1229):
+# same two services, same `web-static` staging, but a `:80` site address, which
+# is the one thing that turns automatic HTTPS off. Procedure: `docs/SELF_HOST.md`.
+#
+# (Before that overlay existed, this header told you to inspect the volume with
+# a hand-rolled `docker run … caddy file-server`. That served the bundle and
+# nothing else — no `/v1`, no `/connection` — so it could never produce a login,
+# which is exactly the gap the local overlay closes.)
+#
+# A structural fix (parameterising the site address, or an `acme_ca` global so
+# a local run can point at the staging CA or `internal`) would change the live
+# TLS file and is left as a decision rather than taken here — goal #1239.
+#
+# ## Volumes are project-scoped on purpose (no `name:` key)
+#
+# `pgdata` in the base file carries an explicit global `name:`. These two do
+# not, and must not. `caddy-data` holds the ACME account and the issued
+# certificates; the live volume is `<project>_caddy-data`, and giving it a
+# fixed name here would point a deployed Caddy at a DIFFERENT, empty volume on
+# the next `up -d` — a full certificate re-issue against Let's Encrypt rate
+# limits, caused by a cosmetic edit. Project scope also means `down -v`
+# reclaims both, which is what the local verification path needs.
+
+# YAML anchors do not cross files (same reason docker-compose.push.yml
+# redeclares them). The janitor labels are load bearing on the deploy host.
+x-momo-janitor-labels: &momo-janitor-labels
+  com.momo.janitor.managed: "true"
+  com.momo.janitor.match-label: com.docker.compose.project
+
+services:
+  # One-shot SPA initializer. Same image, same role contract as every other
+  # service here (`command: ["web-assets"]` → server-rust/docker-entrypoint.sh).
+  # It replaces the volume's contents rather than merging into them, so a
+  # downgrade cannot leave a newer chunk behind for a stale index.html to miss.
+  web-init:
+    image: ${MOMO_RUST_IMAGE:?set MOMO_RUST_IMAGE}
+    command: ["web-assets"]
+    mem_limit: ${MOMO_WEB_INIT_MEM_LIMIT:-128m}
+    labels: *momo-janitor-labels
+    restart: "no"
+    volumes:
+      - web-static:/srv/web
+    # It talks to nothing, but an unspecified network makes compose create an
+    # implicit `default` one — an extra network per stack on a host whose
+    # resource accumulation was traced to exactly this kind of stray object.
+    networks:
+      - private
+
+  caddy:
+    # The live tag. Unlike postgres/centrifugo above it is NOT digest-pinned —
+    # `caddy:2-alpine` moves. Recorded as a finding rather than silently
+    # changed: pinning it is a deploy-visible decision (a new digest means a
+    # new binary at the TLS edge), and this variable is how you make it without
+    # editing the file.
+    image: ${MOMO_CADDY_IMAGE:-caddy:2-alpine}
+    labels: *momo-janitor-labels
+    restart: unless-stopped
+    ports:
+      # 80/443 on the deploy host. Overridable only so that a local
+      # verification run can hold the same stack on unprivileged ports; the
+      # defaults are the live values and ACME HTTP-01 needs exactly them.
+      - "${CADDY_HTTP_PORT:-80}:80"
+      - "${CADDY_HTTPS_PORT:-443}:443"
+    volumes:
+      # Single-FILE bind. Replacing it by rename (editor "atomic save", `mv`)
+      # splits the inode and the container keeps serving the old bytes —
+      # write in place (`scp`/`cp`/`sed -i`). See the runbook.
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Was `/opt/momo/web:/srv/web:ro`. Now the image's own dist, staged by
+      # web-init. `root * /srv/web` in the Caddyfile is unchanged — the file
+      # never knew where the bytes came from.
+      - web-static:/srv/web:ro
+      - caddy-data:/data
+    depends_on:
+      # The one ordering constraint that matters: Caddy must not answer with an
+      # empty volume. api/centrifugo are deliberately NOT depended on — the
+      # reverse_proxy dials per request, and making the edge wait on them turns
+      # a slow migration into a site that is not listening at all.
+      web-init:
+        condition: service_completed_successfully
+    networks:
+      - private
+
+volumes:
+  web-static:
+  caddy-data:

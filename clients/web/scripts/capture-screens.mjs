@@ -158,6 +158,46 @@ const SETTINGS_INVITES = Array.from({ length: 6 }, (_, i) => ({
   updatedAtMs: Date.now(),
 }));
 
+// 설정 > 웹훅 (#1202). 세 줄이 서로 다른 것을 말한다: oort 서명 활성, Slack 호환
+// 활성(목록에서 URL을 되찾을 수 없다는 안내가 붙는 줄), 그리고 폐기된 줄. 리뷰가
+// 봐야 하는 것은 이 셋의 대비이고, 특히 폐기된 줄에 액션이 하나도 없다는 사실이다.
+const SETTINGS_WEBHOOKS = [
+  {
+    id: "019f9b10-0000-7000-8000-0000000009a1",
+    channelId: "00000000-0000-7000-8000-000000000204",
+    authorMemberId: "019f94e3-7a10-79cd-9dee-208f47edd9a8",
+    mode: "native",
+    label: "배포 알림 (GitHub Actions)",
+    status: "active",
+    createdAtMs: Date.now() - 3 * 86_400_000,
+    updatedAtMs: Date.now() - 3 * 86_400_000,
+  },
+  {
+    id: "019f9b10-0000-7000-8000-0000000009a2",
+    channelId: "00000000-0000-7000-8000-000000000202",
+    authorMemberId: "019f94e3-7a10-79cd-9dee-208f47edd9a8",
+    mode: "slack_compatible",
+    label: "Sentry 이슈 알림",
+    status: "active",
+    createdAtMs: Date.now() - 9 * 86_400_000,
+    updatedAtMs: Date.now() - 9 * 86_400_000,
+  },
+  {
+    id: "019f9b10-0000-7000-8000-0000000009a3",
+    channelId: "00000000-0000-7000-8000-000000000201",
+    authorMemberId: "019f94e3-7a10-79cd-9dee-208f47edd9a8",
+    mode: "native",
+    label: "구 CI 서버 (2026-07 폐기)",
+    status: "revoked",
+    createdAtMs: Date.now() - 40 * 86_400_000,
+    updatedAtMs: Date.now() - 20 * 86_400_000,
+  },
+];
+
+// 캡처 전용 값이다. 진짜 비밀값이 커밋된 스크린샷에 들어가는 일이 없도록, 화면에
+// 찍혔을 때 그 사실이 값 자체에서 읽히는 문자열을 쓴다.
+const WEBHOOK_CAPTURE_SECRET = "whsec_captureonlynotarealsecret00";
+
 const WORKSPACE_ID = "00000000-0000-7000-8000-000000000001";
 const GENERAL_ID = "00000000-0000-7000-8000-000000000201";
 const ME = "019f94e3-7a10-79cd-9dee-208f47edd9a8";
@@ -1406,6 +1446,59 @@ async function installMocks(context) {
   await context.route("**/v1/workspaces/*/invites*", (route) =>
     json(route, { invites: SETTINGS_INVITES })
   );
+  // 설정 > 웹훅 (#1202). 발급/회전은 **한 번만 돌아오는** 응답이라, 이 목이 없으면
+  // 리뷰가 볼 수 없는 화면이 정확히 그 화면이다. 목록은 상태를 바꾸지 않는다:
+  // 이 하네스가 재는 것은 발급 카드와 폐기 확인의 기하이지 서버의 상태 전이가
+  // 아니고, 그쪽은 코어 스위트가 계약으로 붙잡고 있다.
+  await context.route("**/v1/workspaces/*/webhooks", (route) => {
+    if (route.request().method() !== "POST") {
+      return json(route, { installations: SETTINGS_WEBHOOKS });
+    }
+    const body = JSON.parse(route.request().postData() || "{}");
+    const created = {
+      id: "019f9b10-0000-7000-8000-0000000009c1",
+      channelId: body.channelId,
+      authorMemberId: ME,
+      mode: body.mode,
+      label: body.label,
+      status: "active",
+      createdAtMs: Date.now(),
+      updatedAtMs: Date.now(),
+    };
+    return json(route, {
+      installation: created,
+      keyId: "019f9b10-0000-7000-8000-0000000009d1",
+      ...(body.mode === "native"
+        ? {
+            secret: WEBHOOK_CAPTURE_SECRET,
+            url: `/v1/webhooks/${WORKSPACE_ID}/${created.id}`,
+            signatureVersion: "v1",
+            algorithm: "HMAC-SHA256",
+          }
+        : { url: `/hooks/${WEBHOOK_CAPTURE_SECRET}` }),
+    });
+  });
+  await context.route("**/v1/workspaces/*/webhooks/*/rotate", (route) => {
+    const id = new URL(route.request().url()).pathname.split("/").at(-2);
+    const row = SETTINGS_WEBHOOKS.find((item) => item.id === id);
+    return json(route, {
+      installation: row,
+      keyId: "019f9b10-0000-7000-8000-0000000009d2",
+      secret: WEBHOOK_CAPTURE_SECRET,
+      url: `/v1/webhooks/${WORKSPACE_ID}/${id}`,
+      signatureVersion: "v1",
+      algorithm: "HMAC-SHA256",
+      overlapSeconds: 86_400,
+    });
+  });
+  await context.route("**/v1/workspaces/*/webhooks/*", (route) => {
+    const id = new URL(route.request().url()).pathname.split("/").at(-1);
+    const row = SETTINGS_WEBHOOKS.find((item) => item.id === id);
+    return json(route, {
+      installation: { ...row, status: "revoked", updatedAtMs: Date.now() },
+      revoked: true,
+    });
+  });
   // 설정 > 앱은 **카탈로그 한 줄과 함께** 찍는다 (이슈 #1125).
   //
   // 1차는 빈 카탈로그였다. 줄을 하나 얹으면 다음 섹션 진입이 무너졌기 때문인데,
@@ -3742,6 +3835,7 @@ async function captureScheme(browser, scheme) {
     ["workspace", "워크스페이스", "workspace"],
     ["plugins", "앱", "plugins"],
     ["usage", "사용량", "usage"],
+    ["webhooks", "웹훅", "webhooks"],
     ["members", "멤버와 초대", "members"],
   ]) {
     await settingsSweep.evaluate('location.hash = "/inbox"');
@@ -3768,6 +3862,60 @@ async function captureScheme(browser, scheme) {
     await settingsSweep.screenshot({ path: sectionShot });
     shots.push(sectionShot);
   }
+
+  // ── 설정 > 웹훅 (#1202) ────────────────────────────────────────────────────
+  //
+  // 스윕이 찍는 것은 목록이 놓인 평상시의 판이다. 아래 두 장은 이 표면에서
+  // 한 번뿐이거나 되돌릴 수 없는 두 순간이고, 스크린샷 말고는 리뷰가 볼 방법이
+  // 없다: 폐기 확인의 두 번째 단계와, 발급 직후 한 번만 보이는 비밀값 카드.
+  const webhooks = await context.newPage();
+  await webhooks.goto(ORIGIN, { waitUntil: "networkidle" });
+  await signIn(webhooks);
+  await webhooks.evaluate('location.hash = "/settings?section=webhooks"');
+  await webhooks.getByTestId("webhook-list").waitFor({ state: "visible" });
+
+  // 확정하지 않는다. 찍는 것은 **묻는 판**이고, 그 판이 존재한다는 사실이 이
+  // 표면의 계약이다(한 번의 무방비 클릭으로 살아 있는 수신 주소가 죽지 않는다).
+  await webhooks.locator('[data-testid^="webhook-revoke-"]').first().click();
+  await webhooks
+    .locator('[data-testid^="webhook-revoke-"][data-testid$="-commit"]')
+    .first()
+    .waitFor({ state: "visible" });
+  await webhooks.waitForTimeout(150);
+  const revokeShot = `${OUT_DIR}/settings-webhooks-revoke-confirm-${scheme}.png`;
+  await webhooks.screenshot({ path: revokeShot });
+  shots.push(revokeShot);
+
+  // 회전 확인도 찍는다. 이 프레임은 1차 리뷰에 **없었고**, 그래서 회전과 폐기의
+  // 위계(채움은 다르되 경계는 둘 다 컨트롤 경계)를 판단할 근거가 없었다. 확인
+  // 프롬프트가 액션 스트립을 대체한다는 것도 여기서만 보인다.
+  await webhooks.evaluate('location.hash = "/inbox"');
+  await webhooks.waitForTimeout(200);
+  await webhooks.evaluate('location.hash = "/settings?section=webhooks"');
+  await webhooks.getByTestId("webhook-list").waitFor({ state: "visible" });
+  await webhooks.locator('[data-testid^="webhook-rotate-"]').first().click();
+  await webhooks
+    .locator('[data-testid^="webhook-rotate-"][data-testid$="-commit"]')
+    .first()
+    .waitFor({ state: "visible" });
+  await webhooks.waitForTimeout(150);
+  const rotateShot = `${OUT_DIR}/settings-webhooks-rotate-confirm-${scheme}.png`;
+  await webhooks.screenshot({ path: rotateShot });
+  shots.push(rotateShot);
+
+  // 확인 단계를 걷어내고 발급으로 간다. 라우트를 한 번 튕기는 것이 이 셸에서
+  // 패널을 처음 상태로 되돌리는 방법이다(설정 스윕이 쓰는 것과 같은 수법).
+  await webhooks.evaluate('location.hash = "/inbox"');
+  await webhooks.waitForTimeout(200);
+  await webhooks.evaluate('location.hash = "/settings?section=webhooks"');
+  await webhooks.getByTestId("webhook-list").waitFor({ state: "visible" });
+  await webhooks.getByTestId("webhook-label").fill("배포 알림 (GitHub Actions)");
+  await webhooks.getByTestId("webhook-create").click();
+  await webhooks.getByTestId("webhook-revealed").waitFor({ state: "visible" });
+  await webhooks.waitForTimeout(200);
+  const revealShot = `${OUT_DIR}/settings-webhooks-created-${scheme}.png`;
+  await webhooks.screenshot({ path: revealShot });
+  shots.push(revealShot);
 
   // 4. dense timeline via the stress path (no realtime rail, 40 rows)
   const stress = await context.newPage();

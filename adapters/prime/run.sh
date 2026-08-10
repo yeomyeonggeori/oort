@@ -4,6 +4,8 @@
 #   adapters/prime/run.sh build                 # build the pinned image
 #   adapters/prime/run.sh session [args...]     # one relayed session
 #   adapters/prime/run.sh mock-session [args...]# same, with the loopback provider
+#   adapters/prime/run.sh auto-refine           # automatic refine, real harness (#1194)
+#   adapters/prime/run.sh auto-refine-rejected  # the same run with the gate closed
 #   adapters/prime/run.sh tenancy-leak          # red proof: isolation off -> leak
 #   adapters/prime/run.sh tenancy               # isolation full -> no leak
 #
@@ -43,14 +45,30 @@ forward_env() {
   done
 }
 
+# `OORT_PRIME_MOUNT_SOURCE=1` runs the working tree's adapter inside the pinned
+# image, read-only, instead of the copy baked at build time. It is how the
+# refine measurements were run (`research/2026-08-09-prime-auto-refine-measurement.md`)
+# and it exists because the two halves have different costs: rebuilding the image
+# needs network for the npm tarball, uv, and the kernel prewarm, while changing
+# this package needs neither. The pin still holds — the harness under test is
+# still the image's v0.7.0, and only `/opt/oort/prime` is replaced.
+source_mount() {
+  if [ "${OORT_PRIME_MOUNT_SOURCE:-0}" = "1" ]; then
+    printf -- '-v\n%s:/opt/oort/prime:ro\n' "$HERE"
+  fi
+}
+
 docker_run() { # docker_run <network> <extra-env-file> -- <command...>
   local network="$1"; shift
   local -a env_args=()
   while IFS= read -r line; do [ -n "$line" ] && env_args+=("$line"); done < <(forward_env)
+  local -a mount_args=()
+  while IFS= read -r line; do [ -n "$line" ] && mount_args+=("$line"); done < <(source_mount)
   docker run --rm --network "$network" \
     -v "$OUT:/work/out" \
     --add-host=host.docker.internal:host-gateway \
     -e "OORT_PRIME_WORKSPACE_ID=$WORKSPACE" \
+    "${mount_args[@]}" \
     "${env_args[@]}" \
     "$@"
 }
@@ -73,6 +91,30 @@ case "${1:-help}" in
       "$IMAGE" \
       python3 -m prime.adapter --model oort-mock/oort-mock-1 \
         --transcript /work/out/transcript.json "$@"
+    ;;
+  auto-refine|auto-refine-rejected)
+    # #1194 — the automatic path against the real harness, with sessions ON for
+    # this run only (the shipped `--no-session` default is untouched; the probe
+    # exports `OORT_PRIME_NO_SESSION=0` for itself). `--network none`, loopback
+    # mock provider, `fake_oort` in-process: no credential and no egress.
+    case "$1" in
+      auto-refine)          review=approve ;;
+      auto-refine-rejected) review=reject  ;;
+    esac
+    shift
+    local_mount=()
+    while IFS= read -r line; do [ -n "$line" ] && local_mount+=("$line"); done < <(source_mount)
+    docker run --rm --network "${OORT_PRIME_NETWORK:-none}" \
+      -v "$OUT:/work/out" \
+      "${local_mount[@]}" \
+      -e "OORT_PRIME_WORKSPACE_ID=$WORKSPACE" \
+      -e OORT_PRIME_MOCK_PROVIDER=1 \
+      -e "MOCK_SCENARIO=${MOCK_SCENARIO:-text}" \
+      -e "MOCK_AUTO_REFINE_REVIEW=$review" \
+      -e "MOCK_PASS_LOG=/work/out/auto-refine-$review/passes.json" \
+      "$IMAGE" \
+      python3 /opt/oort/prime/tests/auto_refine_probe.py \
+        --review "$review" --out "/work/out/auto-refine-$review" "$@"
     ;;
   tenancy-leak|tenancy-home|tenancy)
     # #1130 ③ — two workspaces inside ONE container, as a shared worker host

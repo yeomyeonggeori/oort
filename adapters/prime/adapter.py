@@ -110,6 +110,7 @@ def build_settings(args: argparse.Namespace) -> AdapterSettings:
         flush_interval=env_float("FLUSH_INTERVAL", 0.8),
         ui_policy=args.ui_policy or env("UI_POLICY", "none") or "none",
         harness_state_path=env("HARNESS_STATE_PATH"),
+        harness_local_root=env("HARNESS_LOCAL_ROOT"),
         turn_timeout=args.timeout,
     )
 
@@ -188,10 +189,15 @@ def main(argv: list[str] | None = None) -> int:
         exit_code = int(exc.code or 0)
     finally:
         adapter.finish()
-        # The harness can write its state after the last event, so the drift
-        # check runs once more on the way out.
-        adapter.check_harness_drift()
+        # Order matters, and it is measured. A refinement the harness deferred
+        # (`_compactAutoRefinePending`) is drained at **disposal** — the passes
+        # happen exactly when stdin closes, and they produce zero stdout because
+        # the RPC is already down (실측 §2.4, 2/2 runs). A drift check before
+        # this line is a check that runs one step too early and sees nothing; the
+        # file is the only witness left, and it is written during `close()`.
         rpc.close()
+        adapter.drain()
+        adapter.check_harness_drift()
 
     summary: dict[str, Any] = adapter.summary()
     if args.transcript:

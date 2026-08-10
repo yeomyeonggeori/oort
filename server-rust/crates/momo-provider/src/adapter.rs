@@ -55,6 +55,33 @@ pub trait CloudProviderAdapter: Send + Sync {
         &self,
         instance: &CloudInstanceRef,
     ) -> Result<CloudInstancePresence, CloudProviderError>;
+
+    /// Push the instance's expiry back out to a full
+    /// [`CloudProviderCapabilities::instance_lease_seconds`] from now.
+    ///
+    /// Only substrates that declare a lease implement this; the default refuses
+    /// rather than silently succeeding, because a no-op default is precisely how
+    /// momo would come to believe it was renewing a lease it was not, and
+    /// discover otherwise when live sessions started dying on the substrate's
+    /// clock.
+    ///
+    /// **Absolute, never a delta.** The one substrate that has this operation
+    /// implements it as "expire at `now + duration`", so a renewal carrying
+    /// anything less than the whole lease *shortens* the instance's life
+    /// (measured: `research/2026-08-09-cubesandbox-d42-spike.md` §4 — a 180 s
+    /// refresh on a sandbox with 226 s left moved its `endAt` **backwards**).
+    /// Hence no duration parameter: the adapter renews to its own declared
+    /// lease and a caller cannot ask for a shorter one.
+    ///
+    /// Idempotent and safe to repeat; a lease that is already long enough is
+    /// simply set again.
+    async fn renew_lease(&self, instance: &CloudInstanceRef) -> Result<(), CloudProviderError> {
+        let _ = instance;
+        Err(CloudProviderError::Unsupported {
+            operation: CloudProviderOperation::RenewLease,
+            provider_id: self.capabilities().provider_id.clone(),
+        })
+    }
 }
 
 /// Everything an adapter needs to start one instance. Deliberately carries NO

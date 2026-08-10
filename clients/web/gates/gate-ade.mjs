@@ -47,6 +47,15 @@
 //                    이름으로 말하며, 제목이 「일부」라고 말한다. 한쪽만 있는
 //                    고지는 「전부 복원된다」로 읽힌다.
 //
+// #1193 — 발원 대화 앵커:
+//  15. 착지 정확     세션 카드의 「대화로」가 **원장이 말한 그 줄**에 내려놓는다.
+//                    주소가 그 방을 가리키는 것으로는 부족하다 — 채널 바닥에
+//                    도착하는 것과 그 작업을 낳은 줄에 도착하는 것은 다른 일이라,
+//                    이 검사는 도착한 행의 `data-seq` 를 원장 픽스처가 뜻하는
+//                    seq 와 맞춘다. 그리고 앵커가 없는 카드(턴)에는 그 동사가
+//                    **아예 서지 않는다** — 눌러도 아무 데도 안 가는 버튼을
+//                    목록의 절반에 하나씩 세우지 않는다.
+//
 // 이름 붙은 red proof (버릴 워크트리에서만 돌린다):
 //   ADE_GATE_PROVE_RED_COUNT=1 npm run gate:ade
 //     expected failure: "the summary count disagreed with the ledger"
@@ -68,6 +77,16 @@
 //     expected failure: "a takeover was offered without its preconditions"
 //   ADE_GATE_PROVE_RED_RESTORE=1 npm run gate:ade
 //     expected failure: "the partial restore hid what it loses"
+//   ADE_GATE_PROVE_RED_ANCHOR=1 npm run gate:ade
+//     expected failure: "the anchor landed on the wrong line"
+//   ADE_GATE_PROVE_RED_ZIGZAG=1 npm run gate:ade
+//     expected failure: "the list zigzagged: 상태·경과 열이 오른쪽 끝을 2 개 갖는다"
+//   ADE_GATE_PROVE_RED_DEEP=1 npm run gate:ade
+//     expected failure: "the anchor landed on the wrong line: … 표식이 선 줄은
+//                        seq null 다 … 이 방은 80줄이고 앵커는 가상 창 밖이다"
+//   ADE_GATE_PROVE_RED_ADDRESS=1 npm run gate:ade
+//     expected failure: "the anchor landed on the wrong line: 첫 누름 뒤에도
+//                        주소가 앵커를 들고 있다"
 //
 // red seam 은 **목/드라이버의 행동만** 바꾼다. COUNT 는 원장에 실행 중 세션을 한
 // 줄 더 실어 화면과 기대표를 갈라놓고(단언이 DOM 의 숫자를 실제로 읽는지 증명),
@@ -90,6 +109,27 @@
 // 원본 명부대로 「자격 대상 0 — 확정 버튼이 서면 안 된다」를 들고 있다.
 // RESTORE 는 CSS 로 「새로 시작하는 것」 목록만 숨긴다(BLOCKED·LAYOUT 과 같은
 // 수법 — React 가 들고 있는 노드는 그대로다).
+//
+// ANCHOR(#1193)도 목만 바꾼다: 원장이 `rootMessageId` 를 **빼고** 답한다. 서버가
+// 그 사실을 안 준 판이 그대로 재현되고, 그러면 카드에는 「대화로」가 서지 않아
+// 착지 단정이 도착할 곳을 잃는다. 제품 소스는 한 줄도 건드리지 않는다.
+//
+// 셋이 늦게 왔다 (#1199 N-d). #1195 리뷰 수리가 세운 새 단정 — 「칸이 안 붙어
+// 목록이 지그재그다」와 「가상 창 밖의 줄에 두 번 내려앉는다」 — 에는 이름 붙은
+// red proof 가 없었다. 그 판은 직전 빌드가 실제로 빨갰다는 **경험적** 근거로만
+// 서 있었고, 그것은 다음 사람이 다시 돌릴 수 없는 증거다. 셋 다 위 두 수법
+// 안에 있다:
+//
+//   ZIGZAG   CSS 로 유령 칸만 `display:none`. 노드도 React 상태도 그대로이고,
+//            없어지는 것은 **자리**뿐이다 = 칸이 세션 카드에만 서던 1차 판.
+//            그러면 턴 행의 내용 열이 넓어져 상태·경과의 오른쪽 끝이 둘이 된다.
+//   DEEP     드라이버가 타임라인 스크롤러의 `scrollTo` 만 삼킨다(누르기 직전에
+//            켜고, 그 스크롤러 밖에서는 아무것도 안 바꾼다). `bringIntoView` 가
+//            없던 판이 그대로 재현된다 — 목록은 바닥에 머물고, 창 밖의 앵커 행은
+//            영영 마운트되지 않으며, 워처는 오지 않는 행을 기다리다 만료한다.
+//   ADDRESS  `history.replaceState` 에서 **주소가 앵커를 잃는 갱신만** 무시한다.
+//            `?msg=` 가 착지 뒤에도 주소에 남던 판이고, 그 판에서 두 번째 누름은
+//            글자 단위로 같은 주소라 아무 일도 일어나지 않았다.
 //
 // 스크린샷은 이 게이트가 만든다(게이트 재생성 규율): artifacts/ade/*.png,
 // light/dark 두 벌. 판정하지 않는다 — design-review 는 별도 레인이다.
@@ -126,6 +166,12 @@ const proveRedOutside = process.env.ADE_GATE_PROVE_RED_OUTSIDE === "1";
 const proveRedVerb = process.env.ADE_GATE_PROVE_RED_VERB === "1";
 const proveRedPrecond = process.env.ADE_GATE_PROVE_RED_PRECOND === "1";
 const proveRedRestore = process.env.ADE_GATE_PROVE_RED_RESTORE === "1";
+// #1193
+const proveRedAnchor = process.env.ADE_GATE_PROVE_RED_ANCHOR === "1";
+// #1193 리뷰 수리가 세운 단정들 (#1199 N-d)
+const proveRedZigzag = process.env.ADE_GATE_PROVE_RED_ZIGZAG === "1";
+const proveRedDeep = process.env.ADE_GATE_PROVE_RED_DEEP === "1";
+const proveRedAddress = process.env.ADE_GATE_PROVE_RED_ADDRESS === "1";
 
 const PERSISTENT_BADGE = "기기를 꺼도 계속됩니다";
 const DEVICE_BADGE = "이 기기에서만";
@@ -235,12 +281,12 @@ const workHosts = [
  */
 const BASE_SESSIONS = [
   {
-    id: "0199AAAA-0000-7000-8000-0000000000S1",
+    id: "0199AAAA-0000-7000-8000-0000000015e5",
     workspaceId,
     channelId: generalId,
     memberId,
     hostId: CLOUD_HOST,
-    rootMessageId: "0199AAAA-0000-7000-8000-0000000000M1",
+    rootMessageId: "0199AAAA-0000-7000-8000-000000001ada",
     tool: "codex",
     label: "릴리스 노트 초안",
     status: "running",
@@ -250,12 +296,12 @@ const BASE_SESSIONS = [
     startedAtMs: Date.now() - 240_000,
   },
   {
-    id: "0199AAAA-0000-7000-8000-0000000000S2",
+    id: "0199AAAA-0000-7000-8000-0000000025e5",
     workspaceId,
     channelId: engineId,
     memberId,
     hostId: APP_HOST,
-    rootMessageId: "0199AAAA-0000-7000-8000-0000000000M2",
+    rootMessageId: "0199AAAA-0000-7000-8000-000000002ada",
     tool: "codex",
     label: "마이그레이션 042 검토",
     status: "running",
@@ -265,12 +311,12 @@ const BASE_SESSIONS = [
     startedAtMs: Date.now() - 120_000,
   },
   {
-    id: "0199AAAA-0000-7000-8000-0000000000S3",
+    id: "0199AAAA-0000-7000-8000-0000000035e5",
     workspaceId,
     channelId: engineId,
     memberId,
     hostId: APP_HOST,
-    rootMessageId: "0199AAAA-0000-7000-8000-0000000000M3",
+    rootMessageId: "0199AAAA-0000-7000-8000-000000003ada",
     tool: "codex",
     label: "관전 터미널 회귀",
     status: "orphaned",
@@ -280,12 +326,12 @@ const BASE_SESSIONS = [
     startedAtMs: Date.now() - 600_000,
   },
   {
-    id: "0199AAAA-0000-7000-8000-0000000000S4",
+    id: "0199AAAA-0000-7000-8000-0000000045e5",
     workspaceId,
     channelId: generalId,
     memberId,
     hostId: APP_HOST,
-    rootMessageId: "0199AAAA-0000-7000-8000-0000000000M4",
+    rootMessageId: "0199AAAA-0000-7000-8000-000000004ada",
     tool: "codex",
     label: "스크롤 프로파일",
     status: "idle",
@@ -295,12 +341,12 @@ const BASE_SESSIONS = [
     startedAtMs: Date.now() - 900_000,
   },
   {
-    id: "0199AAAA-0000-7000-8000-0000000000S5",
+    id: "0199AAAA-0000-7000-8000-0000000055e5",
     workspaceId,
     channelId: generalId,
     memberId,
     hostId: CLOUD_HOST,
-    rootMessageId: "0199AAAA-0000-7000-8000-0000000000M5",
+    rootMessageId: "0199AAAA-0000-7000-8000-000000005ada",
     tool: "codex",
     label: "지난 배포 되돌리기",
     status: "ended",
@@ -318,12 +364,72 @@ const BASE_SESSIONS = [
 // 반드시 깨진다.
 const RED_EXTRA_SESSION = {
   ...BASE_SESSIONS[0],
-  id: "0199AAAA-0000-7000-8000-0000000000S9",
+  id: "0199AAAA-0000-7000-8000-0000000095e5",
   label: "빨간 증명용 여벌",
 };
 
+/**
+ * `release-2026-08` 의 히스토리 (#1193).
+ *
+ * 이 게이트는 여태 빈 타임라인으로 돌았다 — 잴 것이 카드였기 때문이다. 「대화로」는
+ * **도착한 줄**을 재야 하므로 여기서부터 방에 대화가 있어야 한다.
+ *
+ * ## 왜 80줄인가 (리뷰 M4 — 얕은 픽스처는 실패할 줄 모른다)
+ *
+ * 1차 픽스처는 다섯 줄이었고 그 다섯은 가상 창 안에 통째로 들어갔다. 그래서 이
+ * 게이트는 초록인 채로 B1 을 통과시켰다: 리뷰가 잰 표에 따르면 창은 1280x900 에서
+ * 36줄이고 45줄 방부터 앵커가 DOM 에서 사라진다. **제품이 실패하는 방식으로
+ * 실패할 수 없는 게이트는 그 실패에 대해 아무 말도 하지 않는다.**
+ *
+ * 그래서 방은 80줄이고 앵커는 위에서 세 번째다 — 창 밖이고 바닥에서 멀다. 바닥에
+ * 데려다 놓고 「도착했다」고 부르는 회귀와, 창 밖이라 못 찾고 「더 불러오세요」라고
+ * 말하는 회귀를 **한 장의 픽스처가 동시에** 잡는다.
+ *
+ * id 는 진짜 16진수다 (리뷰 N3): 서버가 낼 수 없는 문자열로 증명한 착지는 증명이
+ * 아니다.
+ */
+const ANCHOR_SEQ = 4_102;
+const GENERAL_DEPTH = 80;
+const CHATTER = [
+  "릴리스 노트 초안 어디까지 됐어요?",
+  "관전은 열어 뒀습니다.",
+  "확인했습니다. 초안 나오면 여기 붙일게요.",
+  "migration 042 는 스테이징에서 먼저 돌립니다.",
+  "@kim-intern 8월 배포분 정리 부탁해요.",
+];
+const GENERAL_MESSAGES = Array.from({ length: GENERAL_DEPTH }, (_, index) => {
+  const seq = 4_100 + index;
+  const isAnchor = seq === ANCHOR_SEQ;
+  return {
+    // 앵커 줄만 원장이 말한 그 id 다. 나머지는 이 방의 평범한 대화이고, 그 대비가
+    // 「어느 줄에 내려놓았나」를 잴 수 있게 한다.
+    id: isAnchor
+      ? BASE_SESSIONS[0].rootMessageId
+      : `0199AAAA-0000-7000-8000-${(0xe00000000000 + index).toString(16)}`,
+    channelId: generalId,
+    seq,
+    hlcTs: 1_760_000_000_000 + index,
+    hlcCount: 0,
+    authorMemberId: isAnchor ? agentId : memberId,
+    type: "text",
+    body: isAnchor
+      ? "작업 세션을 시작했습니다: 릴리스 노트 초안"
+      : `${CHATTER[index % CHATTER.length]} (${index + 1})`,
+    createdAtMs: 1_760_000_000_000 + index * 1_000,
+  };
+});
+
 function ledger(extra = false) {
-  const rows = extra ? [...BASE_SESSIONS, RED_EXTRA_SESSION] : BASE_SESSIONS;
+  const base = proveRedAnchor
+    ? // red seam(ANCHOR): 원장이 발원 메시지를 안 준다. 그러면 카드에 「대화로」가
+      // 서지 않고, 착지 단정은 도착할 곳을 잃는다.
+      BASE_SESSIONS.map((row) => {
+        const stripped = { ...row };
+        delete stripped.rootMessageId;
+        return stripped;
+      })
+    : BASE_SESSIONS;
+  const rows = extra ? [...base, RED_EXTRA_SESSION] : base;
   if (!proveRedVerb) return rows;
   // red seam(VERB): 고아 세션을 살아 있는 것으로 실어 화면의 동사를 재개로
   // 뒤집는다. 기대표는 BASE_SESSIONS 에서 나오므로 「이 줄은 인수」로 남는다.
@@ -496,7 +602,7 @@ async function installRealtimeSocket(page) {
 }
 
 /**
- * red seam 둘 (드라이버 쪽에서만 산다, 앱 번들보다 **먼저** 돈다).
+ * red seam 넷 (드라이버 쪽에서만 산다, 앱 번들보다 **먼저** 돈다).
  *
  * SESSION: 1차 판이 지었던 죽은 주소를 되돌린다. 라우트 표에 있는 것은
  *   `c/:channelId` 뿐이라 `#/channels/...` 는 와일드카드가 받아 `/` 로 보내고,
@@ -506,8 +612,48 @@ async function installRealtimeSocket(page) {
  *   먼저 등록되므로 — 그것이 정확히 예전 `AgentWorkPanel` 의 자리였다 —
  *   `stopImmediatePropagation` 도 이것을 막지 못한다. 서랍이 자기 층을 닫는 사이
  *   이 리스너가 작업 패널을 닫아, 한 번의 Esc 가 두 층을 가져간다.
+ *
+ * ADDRESS (#1199 N-d): 주소가 **앵커를 잃는** 갱신만 삼킨다. 나머지 주소 변경은
+ *   그대로 통과하므로 라우팅도 서랍도 평소대로 돈다 — 되살아나는 것은 「읽고도
+ *   지우지 않던」 그 한 가지뿐이고, 그 판에서 두 번째 누름은 첫 번째와 글자 단위로
+ *   같은 주소라 라우터가 아무것도 알리지 않았다.
+ *
+ * DEEP (#1199 N-d): 타임라인 스크롤러의 `scrollTo` 만 삼킨다. **누르기 직전에
+ *   켜지므로**(`window.__adeBlockTimelineScroll`) 첫 페이지 착지와 따라가기는
+ *   평소대로 일어나고, 사라지는 것은 `bringIntoView` 가 목록에 내리는 그 한 번의
+ *   명령이다 = 리뷰 B1 이전의 판. 그 판에서 워처는 가상 창 밖의 행이 마운트되기를
+ *   기다리다 만료하고, 화면은 이미 로드된 줄을 두고 「더 불러오세요」라고 말한다.
  */
 async function installRedSeams(page) {
+  if (proveRedAddress) {
+    await page.addInitScript(() => {
+      const replace = history.replaceState.bind(history);
+      history.replaceState = (state, title, url) => {
+        const dropsAnchor =
+          typeof url === "string" &&
+          !url.includes("msg=") &&
+          location.hash.includes("msg=");
+        if (dropsAnchor) return undefined;
+        return replace(state, title, url);
+      };
+    });
+  }
+  if (proveRedDeep) {
+    await page.addInitScript(() => {
+      window.__adeBlockTimelineScroll = false;
+      const nativeScrollTo = Element.prototype.scrollTo;
+      Element.prototype.scrollTo = function (...args) {
+        if (
+          window.__adeBlockTimelineScroll === true &&
+          typeof this.closest === "function" &&
+          this.closest('[data-testid="timeline-virtuoso"]') !== null
+        ) {
+          return undefined;
+        }
+        return nativeScrollTo.apply(this, args);
+      };
+    });
+  }
   if (proveRedSession) {
     await page.addInitScript(() => {
       const push = history.pushState.bind(history);
@@ -568,7 +714,15 @@ async function installRoutes(context, options = {}) {
       return json(route, { workSessions: sessions });
     }
     if (path.endsWith("/replies")) return json(route, { messages: [] });
-    if (path.includes("/messages")) return json(route, { messages: [] });
+    if (path.includes("/messages")) {
+      // 히스토리는 **요청한 방에만** 있다 (#1193). 모든 방에 같은 줄을 실으면
+      // 「그 방의 그 줄」이라는 주장이 「아무 방의 아무 줄」이 된다.
+      const history =
+        options.messages !== undefined && path.includes(generalId)
+          ? options.messages
+          : [];
+      return json(route, { messages: history });
+    }
     if (path.endsWith("/huddles/active")) return json(route, { huddle: null });
     return json(route, {});
   });
@@ -1280,6 +1434,195 @@ async function exerciseEmpty(browser) {
   await context.close();
 }
 
+// ---- 15. 발원 대화 앵커 (#1193) ----------------------------------------------
+
+async function exerciseAnchor(browser) {
+  const context = await browser.newContext({
+    viewport: { width: 1280, height: 900 },
+    reducedMotion: "reduce",
+  });
+  const page = await context.newPage();
+  await installRealtimeSocket(page);
+  await installRedSeams(page);
+  await installRoutes(context, { messages: GENERAL_MESSAGES });
+  await login(page);
+
+  // 턴 하나를 연다. 「앵커가 없는 카드에는 동사가 없다」는 주장은 그 카드가
+  // 목록에 **있을 때만** 검사할 수 있다.
+  await publish(page, statusFrame(agentId, generalId, "queued", "queued"));
+  await publish(page, statusFrame(agentId, generalId, "streaming", "running"));
+  await page.getByTestId("ade-summary").waitFor({ timeout: 15_000 });
+  await openDrawer(page);
+
+  if (proveRedZigzag) {
+    // red seam: 유령 칸의 **자리만** 없앤다(노드도 React 상태도 그대로). 칸이
+    // 세션 카드에만 서던 1차 판이 그대로 재현되고, 턴 행의 내용 열이 그만큼
+    // 넓어져 상태·경과의 오른쪽 끝이 카드 종류에 따라 갈린다.
+    await page.addStyleTag({
+      content:
+        '[data-testid="ade-card-anchor-ghost"]{display:none!important}',
+    });
+  }
+
+  // ① 동사는 세션 카드에만 선다. 죽은 버튼 금지 — 턴에는 원장 행이 없고,
+  //    따라서 발원 메시지도 없다.
+  const verbs = await page.evaluate(() =>
+    [...document.querySelectorAll('[data-testid="ade-card"]')].map((card) => ({
+      kind: card.dataset.kind,
+      title:
+        card.querySelector('[data-testid="ade-card-title"]')?.textContent ?? "",
+      // 형제로 서므로 카드가 아니라 **행**에 묻는다.
+      hasVerb:
+        card.parentElement?.querySelector('[data-testid="ade-card-anchor"]') !==
+        null,
+      // 동사가 없는 행은 **자리만** 갖는다 (리뷰 H1). 둘 다 없으면 그 행의
+      // 내용 열이 다른 행보다 넓어지고, 목록의 오른쪽 끝이 갈린다.
+      hasCell:
+        card.parentElement?.querySelector(
+          '[data-testid="ade-card-anchor"], [data-testid="ade-card-anchor-ghost"]'
+        ) !== null,
+    }))
+  );
+  for (const card of verbs) {
+    const shouldHave = card.kind === "session";
+    if (card.hasVerb !== shouldHave) {
+      throw new Error(
+        `the anchor landed on the wrong line: ${card.kind} 카드 "${card.title}" 에 「대화로」가 ${
+          card.hasVerb ? "섰다" : "없다"
+        } (세션 카드만 발원 메시지를 안다)`
+      );
+    }
+    if (!card.hasCell) {
+      throw new Error(
+        `the list zigzagged: ${card.kind} 카드 "${card.title}" 에 액션 칸이 아예 없다 (동사가 없는 행도 자리는 지킨다)`
+      );
+    }
+  }
+  console.log(
+    `[anchor] 동사 ${verbs.filter((c) => c.hasVerb).length}/${verbs.length} 장 (세션만), 칸은 ${verbs.length}장 전부`
+  );
+
+  // ② 정렬 (리뷰 H1). 상태 칩 + 경과 열은 **모든 행에서 같은 오른쪽 끝**을 갖는다.
+  //    1차 판은 액션 칸이 세션 카드에서만 서서 그 모서리가 카드 종류에 따라
+  //    번갈았고(실측 806 / 861), 목록에서 눈이 따라가는 것이 정확히 그 선이다.
+  const edges = await page.evaluate(() =>
+    [...document.querySelectorAll('[data-testid="ade-card"]')].map((card) => ({
+      kind: card.dataset.kind,
+      title:
+        card.querySelector('[data-testid="ade-card-title"]')?.textContent ?? "",
+      right: Math.round(
+        card
+          .querySelector('[data-testid="ade-card-elapsed"]')
+          ?.getBoundingClientRect().right ?? -1
+      ),
+    }))
+  );
+  const distinct = [...new Set(edges.map((row) => row.right))];
+  if (distinct.length !== 1) {
+    const spread = edges
+      .map((row) => `${row.kind}:${row.title.trim()}=${row.right}`)
+      .join(" · ");
+    throw new Error(
+      `the list zigzagged: 상태·경과 열이 오른쪽 끝을 ${distinct.length} 개 갖는다 (${spread}) — 액션 칸이 있는 행과 없는 행이 다른 폭을 쓰고 있다`
+    );
+  }
+  console.log(
+    `[anchor] 상태·경과 오른쪽 끝 ${distinct[0]}px, ${edges.length}행 공통`
+  );
+
+  // ③ 착지. 하이라이트가 붙은 **그 행**의 seq 를 잡아 둔다 — 표식은 1.6초 뒤
+  //    스스로 걷히므로, 클릭 뒤에 물어보면 늦을 수 있다.
+  const armLandingProbe = () =>
+    page.evaluate(() => {
+      window.__adeAnchorLandedSeq = null;
+      if (window.__adeAnchorObserver !== undefined) return;
+      const look = () => {
+        if (window.__adeAnchorLandedSeq !== null) return;
+        const hit = document.querySelector(
+          '[data-testid="timeline-message"].bg-accent-soft'
+        );
+        if (hit !== null) {
+          window.__adeAnchorLandedSeq = Number(hit.getAttribute("data-seq"));
+        }
+      };
+      window.__adeAnchorObserver = new MutationObserver(look);
+      window.__adeAnchorObserver.observe(document.body, {
+        subtree: true,
+        childList: true,
+        attributes: true,
+        attributeFilter: ["class"],
+      });
+    });
+
+  // 히스토리를 실은 방의 카드다. 목록 맨 위(대기 카드)는 다른 방의 것이고, 그
+  // 방에는 이 게이트가 대화를 싣지 않았다 — 아무 카드나 누르면 이 검사는
+  // 「착지가 틀렸다」와 「그 방에 히스토리가 없다」를 구별하지 못한다.
+  const anchorButton = page.locator(
+    `[data-testid="ade-card-anchor"][aria-label^="${BASE_SESSIONS[0].label}"]`
+  );
+  const target = await anchorButton.getAttribute("aria-label");
+
+  /**
+   * 한 번 누르고, 착지한 줄의 seq 와 그때의 주소를 본다.
+   *
+   * **두 번 부른다** (리뷰 B2). 착지한 뒤 아래로 읽어 내려가고 서랍을 다시 열어
+   * 같은 카드를 누르는 것이 이 컨트롤의 자연스러운 왕복인데, 1차 판은 그 두
+   * 번째에서 아무 일도 하지 않았다 — 주소가 첫 번째와 글자 단위로 같아 라우터가
+   * 아무것도 알리지 않았기 때문이다. 서랍은 닫히므로 성공처럼 보인다.
+   */
+  const press = async (label) => {
+    await armLandingProbe();
+    if (proveRedDeep) {
+      // red seam: 여기서부터만 목록의 스크롤 명령을 삼킨다 (#1199 N-d). 첫 페이지
+      // 착지와 따라가기는 이미 끝났으므로 사라지는 것은 `bringIntoView` 한 번뿐이고,
+      // 그것이 정확히 리뷰 B1 이전의 판이다.
+      await page.evaluate(() => {
+        window.__adeBlockTimelineScroll = true;
+      });
+    }
+    await anchorButton.click();
+    await page.getByTestId("ade-drawer").waitFor({ state: "detached" });
+    const seq = await page
+      .waitForFunction(() => window.__adeAnchorLandedSeq, undefined, {
+        timeout: 10_000,
+      })
+      .then((handle) => handle.jsonValue())
+      .catch(() => null);
+    const hash = await page.evaluate(() => location.hash);
+    if (seq !== ANCHOR_SEQ) {
+      throw new Error(
+        `the anchor landed on the wrong line: ${label}에 "${target}" 를 눌렀는데 표식이 선 줄은 seq ${seq} 다 (원장이 뜻한 줄은 ${ANCHOR_SEQ}, 주소는 ${hash}). 이 방은 ${GENERAL_DEPTH}줄이고 앵커는 가상 창 밖이다 — 로드된 줄을 못 찾는 착지는 착지가 아니다`
+      );
+    }
+    // 읽고 나면 주소에서 지운다(`?work=` 와 같은 규율). 남으면 두 번째 누름이
+    // 같은 주소가 되어 아무 일도 일어나지 않는다.
+    if (hash.includes("msg=")) {
+      throw new Error(
+        `the anchor landed on the wrong line: ${label} 뒤에도 주소가 앵커를 들고 있다 (${hash}) — 다음 누름은 같은 주소라 아무 일도 일어나지 않는다`
+      );
+    }
+    return { seq, hash };
+  };
+
+  // 창 밖의 줄에 처음 내려앉는다. 이 방은 80줄이라 앵커는 DOM 에 없다.
+  const first = await press("첫 누름");
+  if ((await page.getByTestId("chat-anchor-missed").count()) !== 0) {
+    throw new Error(
+      "the anchor landed on the wrong line: 착지했는데 「더 불러오세요」가 함께 서 있다 — 이미 로드된 줄에 대고 하는 거짓 지시다"
+    );
+  }
+  console.log(`[anchor] 첫 누름: 착지 seq ${first.seq} · 주소 정리됨`);
+
+  // 같은 카드를 한 번 더. 사람이 실제로 하는 왕복이고, 두 번째가 무동작이면
+  // 서랍만 닫혀 성공처럼 보인다.
+  await page.getByTestId("ade-summary").click();
+  await page.getByTestId("ade-drawer").waitFor();
+  const second = await press("두 번째 누름");
+  console.log(`[anchor] 두 번째 누름: 착지 seq ${second.seq}`);
+
+  await context.close();
+}
+
 // ---- 캡처 (판정하지 않는다, SKILL §11) ---------------------------------------
 
 async function captureShots(browser) {
@@ -1343,6 +1686,7 @@ async function main() {
     try {
       await exerciseControl(browser);
       await exerciseEmpty(browser);
+      await exerciseAnchor(browser);
       await captureShots(browser);
     } finally {
       await browser.close();
@@ -1360,6 +1704,12 @@ async function main() {
   console.log("           D3: 재개와 인수가 다른 낱말·다른 버튼으로 갈리고,");
   console.log("           자격 대상이 없는 인수는 확정 버튼 대신 「무엇을 하면");
   console.log("           되는지」를 세우며, 복원 고지는 잃는 것을 이름으로 말한다.");
+  console.log("           #1193: 세션 카드의 「대화로」가 80줄 방에서 — 앵커가");
+  console.log("           가상 창 밖인 그 방에서 — 원장이 뜻한 줄에 내려놓고(seq 로");
+  console.log("           잰다), 두 번째 누름도 같은 곳에 내려놓으며, 주소는 읽고");
+  console.log("           나면 비워지고, 액션 칸은 모든 행에 있어 상태·경과 열이");
+  console.log("           오른쪽 끝 하나를 공유하며, 앵커 없는 턴 카드에는 동사가");
+  console.log("           서지 않는다.");
 }
 
 main().catch((error) => {

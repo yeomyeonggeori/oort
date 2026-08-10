@@ -132,6 +132,10 @@ const BODY_INK: ReadonlyArray<readonly [keyof Palette, keyof Palette]> = [
   ['onAccent', 'accent'],
   ['onAccent', 'accentPressed'],
   ['onWarn', 'warn'],
+  // 파괴 채움 위의 글자 (#1210 D2). 이 줄이 없던 동안 「거부 확정」의 라벨은
+  // `onAccent` 였고, 다크에서 그것은 **어두운** 잉크(#17161a)를 어두운 테두리
+  // 색(#623635) 위에 얹는 것이었다 — 실측 1.80:1 (라이트 1.89:1).
+  ['onDangerFill', 'dangerFill'],
   ['agent', 'bg'],
   ['agent', 'surface'],
   ['agent', 'agentSurface'],
@@ -166,7 +170,12 @@ describe.each(SCHEMES)('%s 팔레트', (_name, palette) => {
     for (const surface of ['bg', 'surface'] as const) {
       expect(contrast(palette.textFaint, palette[surface])).toBeGreaterThanOrEqual(3);
     }
-    expect(contrast(palette.border, palette.bg)).toBeLessThan(3);
+    // **두 바탕 다** 못 넘는다 (리뷰 N-a). `bg` 만 재던 이 단정은 카드 위에 선
+    // 컨트롤 테두리에 대해 아무 말도 하지 않았고, ADE 카드의 「대화로」가 정확히
+    // 그 자리에서 `border` 를 쓰고 있었다 — 실측 라이트 1.409:1 · 다크 1.298:1.
+    for (const surface of ['bg', 'surface'] as const) {
+      expect(contrast(palette.border, palette[surface])).toBeLessThan(3);
+    }
   });
 
   it('surface 는 bg 에서 **멀어지는 쪽**으로 한 단이고, 그 단이 팔레트에서 가장 조용하다', () => {
@@ -331,10 +340,16 @@ describe('#1155·#1164 — 두 팔레트가 웹 정본과 값 단위로 같다',
   /**
    * 웹에 짝이 있는 역할 전부. 대응은 `tokens.ts` 머리 주석의 표 그대로다.
    *
-   * 웹에만 있고 폰에 짝이 **없는** 토큰은 여기 없다: `--surface-sidebar`(폰에는
-   * 사이드바 표면이 따로 없다) · `--danger-fill`/`--on-danger-fill`(폰에는 파괴
-   * 액션의 채움 토큰이 아직 없다 — 역할을 새로 만드는 것은 정렬이 아니라 신설이라
-   * #1164 밖이다).
+   * 웹에만 있고 폰에 짝이 **없는** 토큰은 이제 하나뿐이다: `--surface-sidebar`
+   * (폰에는 사이드바 표면이 따로 없다).
+   *
+   * `--danger-fill`/`--on-danger-fill` 이 여기 있었다 (#1210 D2). 제외의 근거는
+   * *"역할을 새로 만드는 것은 정렬이 아니라 신설이라 #1164 밖이다"* 였고 그 판정은
+   * 그때 옳았다. 다만 그 뒤로 이 주석이 실제로 한 일은 **가드가 자기 구멍을
+   * 문서화하고 통과하는 것**이었다: 잴 토큰이 없으니 폰의 파괴 채움에 대해 아무
+   * 단정도 설 수 없었고, 그동안 「거부 확정」은 `dangerBorder` 를 바탕으로 쓰며
+   * 다크에서 1.64:1 로 출하됐다(감사 2026-08-09 §B-4 ②). 신설이 끝났으므로 제외도
+   * 끝난다.
    */
   const PAIRS: ReadonlyArray<readonly [keyof Palette, string]> = [
     ['bg', 'surface'],
@@ -351,6 +366,8 @@ describe('#1155·#1164 — 두 팔레트가 웹 정본과 값 단위로 같다',
     ['agentSurface', 'agent-soft'],
     ['warn', 'warn'],
     ['danger', 'danger'],
+    ['dangerFill', 'danger-fill'],
+    ['onDangerFill', 'on-danger-fill'],
     ['ok', 'ok'],
   ];
 
@@ -478,6 +495,52 @@ describe('#1155·#1164 — 두 팔레트가 웹 정본과 값 단위로 같다',
       const c = (role: keyof Palette) => chroma(palette[role]);
       expect(c('danger')).toBeGreaterThan(c('warn'));
       expect(c('warn')).toBeGreaterThan(c('textMuted'));
+    },
+  );
+
+  // ---------------------------------------------------------------------------
+  // 파괴 **채움** 의 두 단정 (#1210 D2)
+  //
+  // 값은 웹 항이고 위 PAIRS 가 바이트로 대조한다. 여기서 지는 것은 그 값이 **폰의
+  // 표면 위에서** 지켜야 하는 관계다 — 웹은 자기 표면 목록에서 같은 것을 잰다.
+  //
+  // 이 두 단정이 없던 동안 무엇이 통과했는지가 이 자리의 근거다: 「거부 확정」은
+  // `dangerBorder` 를 채움으로 쓰고 카드 위 다크 1.64:1 로 출하됐고, 그 옆 「승인
+  // 확정」은 같은 카드 위 8.12:1 이었다. 산술 가드는 그 내내 전부 초록이었다 —
+  // 잴 토큰이 없었기 때문이다.
+  // ---------------------------------------------------------------------------
+
+  it.each(SCHEMES)(
+    '%s — 파괴 채움은 자기가 서는 표면에서 3:1 을 넘는다',
+    (_name, palette) => {
+      // 비텍스트 대비(WCAG 1.4.11). 이 버튼은 채움으로만 자기를 말하므로(테두리가
+      // 없다) 그 채움이 3:1 을 못 넘으면 화면에서 버튼이 아니라 자국이 된다.
+      // 실측 (bg/surface): 다크 6.42/5.83 · 라이트 7.02/7.52. 옛 값
+      // (`dangerBorder`)은 다크 1.80/1.64 · 라이트 1.76/1.89 로 넷 다 미달이었다.
+      for (const surface of ['bg', 'surface'] as const) {
+        expect([
+          surface,
+          contrast(palette.dangerFill, palette[surface]) >= 3,
+        ]).toEqual([surface, true]);
+      }
+    },
+  );
+
+  it.each(SCHEMES)(
+    '%s — 파괴 채움은 보이되 주 액션을 이기지 않는다',
+    (_name, palette) => {
+      // 웹 `--danger-fill` 주석이 적어 둔 순서 그대로다. 자는 대비가 아니라 채도다:
+      // 두 채움 다 3:1 을 한참 넘으므로 「어느 쪽이 먼저 눈에 들어오는가」를 가르는
+      // 것은 콜로풀니스이고, 파괴 보조가 주 액션을 이기면 화면이 사람에게 되돌릴 수
+      // 없는 쪽을 먼저 권하게 된다(MOMO-642 R1 H-2 가 웹에서 고친 것).
+      //
+      // 문턱 1.15 는 웹이 이미 쓰는 값이다 — 여기서 새로 고른 숫자가 아니다.
+      // 실측 비: 다크 1.18배(0.1336 대 0.1130) · 라이트 1.20배(0.1360 대 0.1133).
+      expect(chroma(palette.accent) / chroma(palette.dangerFill)).toBeGreaterThanOrEqual(1.15);
+
+      // 그리고 여전히 **위험 계열**이다. 조용해지느라 색을 잃으면 그것은 파괴가
+      // 아니라 또 하나의 회색 버튼이다. 문턱 15° 도 웹의 값.
+      expect(hueGap(palette.dangerFill, palette.danger)).toBeLessThan(15);
     },
   );
 });

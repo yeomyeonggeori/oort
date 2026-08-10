@@ -220,9 +220,38 @@ fi
 # 이 게이트에 있는 이유는 여기가 이미 「두 소비자가 코어를 함께 소비한다」를 재는
 # 자리이기 때문이다. #1171 은 코어만 걸었다 — 웹이 base 빨강(emdash 12)이라 함께
 # 들여올 수 없었다. 그 12건이 11 오탐 + 1 검토된 예외로 판정되어 웹도 하드 제로가
-# 된 지금(#1141 완결), 한 실행이 두 층을 다 말한다. 레인 수는 그대로 7 이다.
+# 된 지금(#1141 완결), 한 실행이 두 층을 다 말한다.
 # 규칙과 근거는 scripts/design_preflight_core.mjs 머리말.
 run_lane "copy scan (web + core)" "." bash scripts/design_preflight_web.sh
+
+# 정본 웹 클라의 ESLint — 여덟 번째 레인 (#1210).
+#
+# `clients/web/eslint.config.js` 는 두 디자인 규칙을 `no-restricted-syntax` 로
+# 진다: JSX `style=` 금지(셸의 CSP `style-src 'self'`)와 `#rrggbb` 리터럴 금지
+# (색은 tokens.css 에서만 온다). **그 규칙을 지금까지 어느 게이트도 실행하지
+# 않았다.** `local_gate.sh --profile web` 의 lint 단계가 도는 것은
+# `clients/web-legacy`(ADR-0119 v0, UI 로는 동결)이고, 이 표에는 lint 가 없었다.
+# 정본 UI 의 규칙은 사람이 `npm run lint` 를 손으로 칠 때만 돌고 있었다
+# (감사 2026-08-09 §B-5 ②).
+#
+# 지금까지 손실이 없었던 이유는 `design_preflight_web.sh` 의 raw_color·inline_style
+# 분류가 같은 두 규칙을 그렙으로 **중복** 커버했기 때문이다. 즉 안전망이 중복
+# 하나뿐이었고, 그 중복이 걷히는 날 조용해진다.
+#
+# 그리고 이 레인이 더하는 것은 그 두 규칙만이 아니다. 실측한 예: 조건 안에서
+# 부른 훅(`react-hooks/rules-of-hooks`, error)은 **tsc 초록 · 그렙 프리플라이트
+# 초록 · 이 레인만 빨강**이다. 정본 UI 의 lint 가 게이트 밖이던 동안 그런 결함은
+# 사람이 손으로 `npm run lint` 를 칠 때까지 아무 데서도 붉지 않았다.
+#
+# 새 프로파일을 세우지 않고 이 표에 한 줄을 더한 이유: 여기가 이미 웹의
+# node_modules 를 세워 두고 병합 **결과**에서 도는 자리다. 새 실행 단위를 만들면
+# 그 단위를 돌릴 보장이 다시 사람이 되고, 그것이 §B-5 ① 이 지적한 구멍 자체다.
+#
+# 문턱은 error 다(경고는 통과). base 실측 `origin/track/engine` 2204c321:
+# 0 errors · 12 warnings — react-refresh/only-export-components 11 +
+# react-hooks/exhaustive-deps 1. 그 12건까지 빨갛게 만들면 이 레인은 첫날부터
+# 우회되는 레인이 된다.
+run_lane "web lint (eslint)" "clients/web" npm run lint
 
 echo ""
 echo "[merge-tree] ===== 실행표 (병합 결과 $(git rev-parse --short "$MERGE_TREE_OID")) ====="

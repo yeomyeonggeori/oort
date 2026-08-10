@@ -91,8 +91,46 @@ function momoServiceWorker(): Plugin {
   };
 }
 
+/**
+ * 배포된 번들을 커밋으로 되돌린다 (#1228).
+ *
+ * 지금까지 라이브 번들의 정체를 확인하는 방법은 **로컬에서 다시 빌드해 파일 이름
+ * 해시를 대조하는 것**뿐이었다(감사 B-10: `clients/web`에 BUILD_SHA·버전 주입
+ * 0건). 내용 해시는 「무엇이 바뀌었나」는 말해 주지만 「어느 커밋인가」는 말하지
+ * 못한다 — 같은 산출물을 내는 커밋이 여럿이고, 그 대응은 한쪽으로만 흐른다.
+ *
+ * 그래서 이미지가 이미 알고 있는 커밋(`server-rust/Dockerfile`의 MOMO_BUILD_SHA)을
+ * 문서에 한 줄로 적는다. 밖에서 curl 한 번으로 읽힌다:
+ *
+ *   curl -s https://app.oor7.com/ | grep momo-build
+ *
+ * 값이 없을 때 `unknown`을 적는 것은 게으름이 아니라 정직이다 — 스탬프 없는
+ * 빌드가 「없다」고 말하는 것과 아무 커밋이나 주장하는 것은 다르다. 개발 서버에는
+ * 붙지 않는다(`apply: "build"`): 커밋이 아직 없는 자리다.
+ *
+ * 이 한 줄은 번들 그래프 밖이라 `momoServiceWorker`의 BUILD_ID를 바꾸지 않는다.
+ * 그것이 옳다 — 같은 코드를 다른 커밋에서 빌드했다는 이유로 모든 사용자에게
+ * 서비스워커 업데이트를 시키는 것은 스탬프 한 줄이 살 값이 아니다.
+ */
+function momoBuildStamp(): Plugin {
+  const sha = (process.env.MOMO_BUILD_SHA ?? "").trim() || "unknown";
+  return {
+    name: "momo-build-stamp",
+    apply: "build",
+    transformIndexHtml() {
+      return [
+        {
+          tag: "meta",
+          attrs: { name: "momo-build", content: sha },
+          injectTo: "head",
+        },
+      ];
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [react(), tailwind(), momoServiceWorker()],
+  plugins: [react(), tailwind(), momoServiceWorker(), momoBuildStamp()],
   resolve: {
     // `@momo/core` is the shared, platform-free domain layer (ADR-0137 D3). It
     // is an npm workspace at packages/momo-core, but the web client resolves it

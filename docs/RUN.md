@@ -1,13 +1,37 @@
 # oort — 로컬 기동 가이드 (RUN.md)
 
-> **이 환경의 현실 (반드시 먼저 읽기).**
+> ## ⚠️ 이 문서는 **은퇴 중인 Swift 스택** 기준으로 쓰였다 (2026-08 현행화, #1226)
+>
+> 아래 5·6장이 띄우는 `MomoServer`(Hummingbird 2) · `OutboxRelay` · `AgentWorker` · macOS 앱은
+> **삭제 대기 중인 트리**다. 여기 적힌 대로 따라 하면 실패하지 않는다 — **잘못된 것을 성공적으로 짓는다.**
+> 그게 이 배너가 있는 이유다.
+>
+> **현행 스택으로 기동하려면:**
+>
+> | 하려는 것 | 갈 곳 |
+> |---|---|
+> | **처음 띄운다 — clone에서 브라우저 로그인까지** | [`docs/SELF_HOST.md`](SELF_HOST.md) — **정본**(#1229). 명령 셋 + 브라우저 한 번, 분기 0 |
+> | 그다음 전부(마이그레이션 로그·env 파리티·오버레이·트러블슈팅) | [`infra/rust/README.md`](../infra/rust/README.md) — Rust 이미지 + prod형 compose |
+> | 라이브(app.oor7.com) 배포 | [`docs/runbooks/ncp-rust-deploy.md`](runbooks/ncp-rust-deploy.md) — **정본** |
+> | 현행 스택 빌드·검증 명령 | [`AGENTS.md`](../AGENTS.md) §3 (`cargo …` · `make build`/`make test` · `scripts/local_gate.sh`) |
+> | 웹 클라 개발 | `npm --prefix clients/web ci && npm --prefix clients/web run dev` |
+>
+> **스택과 무관하게 아직 유효한 것:** 2장(`.env` 키 목록) · 3장(`make up` — PG18 + Centrifugo v6) ·
+> 4장(`make migrate` — `server/Migrations/*.sql`은 **현행 정본 DDL**이고 Rust 이미지가 그대로 싣는다).
+> 그 세 장은 은퇴 대상이 아니다.
+>
+> **첫 기동 절차는 이 문서에 남아 있지 않다** — `docs/SELF_HOST.md`가 가져갔다(#1229). 이 파일의
+> 5·6장을 따라 Swift 서비스를 손으로 띄우는 경로는 재작성 대상으로 남아 있고, 그때까지 이 배너가
+> 사람을 잘못된 경로로 보내지 않기 위한 최소 장치다.
+
+> **아래는 은퇴 전 기준의 원문이다 (이 환경의 현실 — Swift 시절).**
 > 로컬 검증 기준으로 **Swift 6.2.3, Docker Desktop, PostgreSQL 18 client(psql)는 있다. hermes 게이트웨이는 없다.**
 > 따라서:
-> - **모든 Swift 패키지는 `swift build`로 컴파일이 검증된다 (green).**
+> - **모든 Swift 패키지는 컴파일이 검증된다 (green).**
 > - **DB·실시간 런타임은 Docker Desktop으로 검증 가능하다.**
 > - **에이전트 hermes SSE 경로만 실제 hermes 또는 OpenAI-compatible mock이 필요하다.**
 >
-> 즉 **`swift build`가 통과한다고 해서 서버/relay/worker가 "돈다"는 뜻은 아니다.**
+> 즉 **컴파일이 통과한다고 해서 서버/relay/worker가 "돈다"는 뜻은 아니다.**
 > 실제 기동은 **PostgreSQL 18 + Centrifugo v6**(+ 에이전트 데모는 hermes 게이트웨이)가
 > 떠 있어야 한다. 이 둘은 `infra/docker-compose.yml`로 한 번에 띄운다.
 > docker/psql이 없는 머신에서는 빌드/정적 점검 단계까지만 수행 가능하다.
@@ -31,7 +55,7 @@ backup/restore, image-based deploy/rollback, `scripts/aws_internal_alpha_preflig
 
 | 요구 | 확인 | 비고 |
 |---|---|---|
-| **Swift 6.2** | `swift --version` → `6.2.x` | `.swift-version` = `6.2`. 빌드 게이트의 전제. |
+| **Swift 6.2** ※은퇴 중 | `swift --version` → `6.2.x` | 5·6장(삭제 대기 트리) 전용. **현행 스택은 cargo + Node 20+**(AGENTS.md §3). |
 | **Docker + Docker Compose v2** | `docker compose version` | `make up`이 사용. MOMO-001/002에서 Docker Desktop 기준 검증됨. |
 | **psql (PostgreSQL 18 client)** | `psql --version` | `make migrate`(`scripts/migrate.sh`)가 사용. Homebrew `libpq` 경로도 자동 감지. |
 | **hermes 게이트웨이** | (외부) | 에이전트 Live Tool-Call 데모(D)에만 필요. 없어도 D 외 경로는 동작. |
@@ -45,23 +69,25 @@ backup/restore, image-based deploy/rollback, `scripts/aws_internal_alpha_preflig
 ## 1. 기동 순서 (한눈에)
 
 ```
-(1) cp infra/.env.example .env   →  값 채움                # 환경변수
-(2) make up                      →  docker compose up      # PG18 + Centrifugo v6
-(3) make migrate                 →  scripts/migrate.sh     # schema + 데모 시드
-(4) swift run … MomoServer       →  Hummingbird API :8080  # REST + JWT + publish proxy
-(5) swift run … OutboxRelay      →  outbox → Centrifugo    # 쓰기경로 fan-out
-    swift run … AgentWorker      →  agent_job → hermes     # 에이전트 턴 (D 데모)
-    swift run … momo-workd       →  signed REST poll        # 선택: 사용자 실행 호스트
-(6) make build  /  swift run MomoMacDevApp                 # macOS 클라(개발용 window)
+(1) cp infra/.env.example .env   →  값 채움                # 환경변수      [현행 유효]
+(2) make up                      →  docker compose up      # PG18 + Centrifugo v6  [현행 유효]
+(3) make migrate                 →  scripts/migrate.sh     # 정본 DDL + 시드      [현행 유효]
+--- 여기까지가 스택 무관. 아래 (4)~(6)은 은퇴 중인 Swift 실행체다 ---
+(4) MomoServer   (Hummingbird API :8080)   → 현행 대체: server-rust `momo-server`
+(5) OutboxRelay / AgentWorker / momo-workd → 현행 대체: `momo-relay` · `momo-agent-worker`
+(6) MomoMacDevApp (macOS 개발 window)      → 현행 대체: clients/web (npm run dev) · clients/desktop
 ```
+
+> (4)~(6)의 **현행 스택 절차는 이 문서에 없다** — [`infra/rust/README.md`](../infra/rust/README.md)(수리 중 #1227)와
+> [`AGENTS.md`](../AGENTS.md) §3에 있다. 아래 원문은 삭제 대기 트리를 돌려야 할 때의 참고용으로 보존한다.
 
 의존성: **DB·Centrifugo(2) → 마이그레이션(3) → 서버(4) → relay/worker(5)**.
 relay/worker는 DB와 Centrifugo에만 의존하므로 서버와 **병렬 기동**해도 무방하지만,
 스키마(`outbox` 테이블 등)가 먼저 적용돼 있어야 한다.
 
-> **빌드만 검증할 때(docker/psql 없음):** (1)에서 멈추지 말고 바로 `make build`로
-> 전 Swift 패키지 컴파일을 확인하고, `python3 -m py_compile adapters/hermes/momo_adapter.py`로
-> hermes 어댑터를 정적 점검하면 된다. (2)~(5)의 런타임은 `runtime-unverified`.
+> **빌드만 검증할 때(docker/psql 없음):** 현행 스택은 `make build`(cargo + TS 타입체크),
+> 어댑터는 `python3 -m py_compile adapters/hermes/momo_adapter.py`. 은퇴 중 트리를 확인해야 하면
+> `make swift-build`. (2)~(5)의 런타임은 `runtime-unverified`.
 
 내부 alpha smoke의 권장 순서는 `make up` -> `make migrate` -> `MomoServer`/`OutboxRelay`
 -> mock Hermes + `AgentWorker` -> `MomoMacDevApp` real-server mode다. 세부 명령은
@@ -833,7 +859,11 @@ docker compose -f infra/docker-compose.yml exec -T postgres \
 
 ---
 
-## 5. 서비스 기동 (Swift 실행 바이너리)
+## 5. 서비스 기동 (Swift 실행 바이너리) — 🚧 **은퇴 중**
+
+> 이 장의 실행체는 삭제 대기다. 현행 서버 스택은 `server-rust/`의 `momo-server`·`momo-relay`·`momo-agent-worker`이고,
+> 기동 절차는 [`infra/rust/README.md`](../infra/rust/README.md)(수리 중 #1227) · [`docs/runbooks/ncp-rust-deploy.md`](runbooks/ncp-rust-deploy.md)에 있다.
+> 아래는 그 트리가 아직 레포에 있는 동안의 참고 절차이며, **새 작업의 기준이 아니다.**
 
 Makefile에는 `build`/`test`/`up`/`down`/`migrate`만 있고 **서비스 실행 타깃은 없다** —
 서비스는 각 패키지에서 `swift run`으로 직접 띄운다(데모 중 코드 수정·재기동이 잦으므로 의도적).
@@ -1156,6 +1186,7 @@ human access token이 필요하고, 등록 뒤 heartbeat/poll/session/control ac
 보내지 않고 기본 `~/.momo/workd-output/` 아래 mode `0600` 파일로 보관한다.
 
 ```sh
+# 🚧 은퇴 중 트리(workers/WorkHostDaemon) — 삭제 대기. 새 작업의 빌드 경로가 아니다.
 swift build --package-path workers/WorkHostDaemon
 
 mkdir -p "$HOME/.momo"
@@ -1320,7 +1351,10 @@ swift test --disable-sandbox --package-path workers/WorkHostDaemon \
 
 ---
 
-## 6. macOS 클라이언트 (데모 surface: D / B / C)
+## 6. macOS 클라이언트 (데모 surface: D / B / C) — 🚧 **은퇴 중**
+
+> `clients/macOS`는 삭제 대기다. 현행 제품 표면은 `clients/web`(React/Vite) · `clients/desktop`(Tauri 2, 같은 웹 번들) · `clients/mobile`(React Native)이며,
+> 개발 실행은 `npm --prefix clients/web ci && npm --prefix clients/web run dev`다. 아래는 삭제 전까지의 참고 절차다.
 
 macOS 패키지(`clients/macOS`)는 v0에서 **SwiftUI 라이브러리 + 빌드검증 smoke 실행파일 +
 SwiftPM 개발용 window 앱 + 릴리스용 Xcode thin host app**으로 구성된다. 데모 경험
@@ -1359,7 +1393,7 @@ LOCAL_GATE_LAUNCH_UI=1 scripts/local_gate.sh --profile macos-ui
 # M3 D/B/C combined exit evidence: D tool-call + B cost + C approval + REST/UI data path
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile m3-dbc
 
-# M4 릴리스용 Xcode thin host app 무서명 build
+# M4 릴리스용 Xcode thin host app 무서명 build — 🚧 은퇴 중(clients/macOS 삭제 대기)
 ( cd clients/macOS && \
   xcodebuild build -scheme MomoMac -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO )
 ```
@@ -1397,7 +1431,7 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh -
 - REST dev mode 검증 범위: message history fetch와 send는 실제 MomoServer REST/DB 경로를 탄다.
   서버가 `realtimeWebSocketUrl`을 광고하면 별도 앱 env 없이 WebSocket/Centrifugo live
   subscription도 실제 SwiftCentrifuge adapter를 탄다. production reconnect UX polish는 후속 범위다.
-- `scripts/macos_dev_run.sh`: build-macos-apps SwiftPM GUI workflow에 맞춘 dev-only run loop다.
+- `scripts/macos_dev_run.sh`(🚧 은퇴 중): build-macos-apps SwiftPM GUI workflow에 맞춘 dev-only run loop다.
   `swift build --package-path clients/macOS --product MomoMacDevApp` 후 `dist/MomoMacDevApp.app`을
   생성하고 `/usr/bin/open -n`으로 띄운다. `--verify`는 process/window smoke, `--logs`는 unified
   log capture, `--telemetry`는 bundle subsystem log capture, `--terminate`는 evidence 수집 후 종료,
@@ -1667,8 +1701,10 @@ M1 staging 완료로 표시하지 않는다.
 
 | 타깃 | 실제 커맨드 | 검증 가능성 |
 |---|---|---|
-| `make build` | `SWIFT_PKGS` 중 `Package.swift` 있는 패키지 각각 `swift build` (Core/server/relay/worker/macOS) | **build-verifiable** (Swift 6.2 있음) |
-| `make test` | 동일 패키지 각각 `swift test` | build-verifiable |
+| `make build` | **현행 스택** — `cargo build --workspace`(server-rust) + TS 타입체크(momo-core/web/mobile) | build-verifiable (cargo + Node 20+ 필요) |
+| `make test` | **현행 스택** — `cargo test --workspace` + npm test | build-verifiable |
+| `make swift-build` | 🚧 은퇴 중 — `SWIFT_PKGS` 중 `Package.swift` 있는 패키지 각각 빌드 | build-verifiable (Swift 6.2 있음) |
+| `make swift-test` | 🚧 은퇴 중 — 동일 패키지 각각 테스트 | build-verifiable |
 | `make migrate` | `sh scripts/migrate.sh` → `psql`로 `server/Migrations/*.sql` 번호순 적용 | runtime-verifiable; MOMO-001/002에서 pass |
 | `make up` | `docker compose -f infra/docker-compose.yml up -d` | runtime-verifiable; MOMO-001/002에서 pass |
 | `make down` | `docker compose -f infra/docker-compose.yml down` | runtime-verifiable |
@@ -1676,7 +1712,7 @@ M1 staging 완료로 표시하지 않는다.
 - 서비스 실행(`MomoServer`/`OutboxRelay`/`AgentWorker`)은 Makefile 타깃이 아니라
   **5장의 `swift run … <Executable>`로 직접** 띄운다. macOS GUI 개발 앱은 6장의
   `scripts/macos_dev_run.sh`를 사용해 dev-only `.app` bundle로 띄운다.
-- `make build`/`make test`는 **`Package.swift`가 실제로 존재하는 패키지만** 순회하므로,
+- `make swift-build`/`make swift-test`는 **`Package.swift`가 실제로 존재하는 패키지만** 순회하므로,
   일부 패키지가 없어도 안전하게 동작한다.
 
 ---
@@ -1705,8 +1741,8 @@ M1 staging 완료로 표시하지 않는다.
 
 ```sh
 # --- 빌드/정적 점검만 (docker/psql 없는 환경에서 가능한 전부) ---
-make build
-swift build --package-path clients/macOS && swift run --package-path clients/macOS MomoMacSmoke
+make build                       # 현행 스택: cargo build --workspace + TS 타입체크
+make swift-build                 # 🚧 은퇴 중 트리를 확인해야 할 때만
 python3 -m py_compile adapters/hermes/momo_adapter.py
 jq empty infra/prod/centrifugo.prod.json
 

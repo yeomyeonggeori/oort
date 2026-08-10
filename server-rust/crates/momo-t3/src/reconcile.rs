@@ -462,6 +462,23 @@ pub async fn terminate_missing_instance_in_tx(
 /// Declare the durable destroy intent for a host with no ledger row to settle
 /// (Swift :437-452). `t3_terminate` writes the same intent for the settled path;
 /// this is the branch that statement never reaches.
+///
+/// **The whole operation triple is written, not just the kind (#1197 B2).**
+/// `work_cloud_host_operation_ck` (049:28-36) admits only all-three-null or
+/// all-three-present, so setting `lifecycle_operation_kind` alone is legal
+/// exactly when the row *already* carried an id — which was true of every
+/// pre-#1197 caller, since they reach here from an intermediate state whose
+/// operation was minted by the claim. Called on a plain `running` host, as
+/// [`crate::sweep::converge_in_tx`] now does, the same statement violated the
+/// constraint and rolled the whole sweep transaction back.
+///
+/// The `COALESCE`s are what let it be correct from both directions: an existing
+/// operation keeps its id (the stale-response guard, 057:154, keys on that id
+/// plus the version, so replacing it would silently invalidate a response
+/// already in flight) and a fresh one gets a new id and a start time. It is the
+/// same shape `t3_terminate` writes at 058:242-268 — deliberately, because two
+/// statements that mean "this host must be destroyed" should not disagree about
+/// what that looks like.
 pub async fn declare_destroy_intent_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -470,7 +487,10 @@ pub async fn declare_destroy_intent_in_tx(
     let moved = sqlx::query(
         "UPDATE work_cloud_host \
             SET state = 'destroy_pending', \
+                lifecycle_operation_id = COALESCE(lifecycle_operation_id, uuidv7()), \
                 lifecycle_operation_kind = 'destroy', \
+                lifecycle_operation_started_at = \
+                  COALESCE(lifecycle_operation_started_at, clock_timestamp()), \
                 lifecycle_operation_version = lifecycle_operation_version + 1, \
                 updated_at = clock_timestamp() \
           WHERE workspace_id = $1 \
