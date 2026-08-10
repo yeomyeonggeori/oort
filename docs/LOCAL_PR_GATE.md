@@ -99,7 +99,7 @@ Profiles:
 
 | Profile | Use when | What it runs |
 |---|---|---|
-| `docs` | docs/spec/script-only changes, including internal alpha runbook/feedback/AWS topology updates | whitespace diff, workflow YAML parse, actionlint if installed, e2e compose config, AWS internal alpha topology preflight fixture, JSON syntax, shell syntax, Python syntax, Hermes adapter smoke, prime adapter contract tests + closed-loop smoke (`adapters/prime/tests/`, no docker/network/credential) |
+| `docs` | docs/spec/script-only changes, including internal alpha runbook/feedback/AWS topology updates | whitespace diff, **secret scan over all refs (#1236)**, workflow YAML parse, actionlint if installed, e2e compose config, AWS internal alpha topology preflight fixture, JSON syntax, shell syntax, Python syntax, Hermes adapter smoke, prime adapter contract tests + closed-loop smoke (`adapters/prime/tests/`, no docker/network/credential) |
 | `swift` | Swift package/model/view changes | `docs` profile + design pre-flight ratchet (`scripts/verify_design_preflight.sh`) + `make build` + `make test` |
 | `diagnostics` | diagnostics/observability bundle changes | `docs` profile + `scripts/collect_diagnostics.sh --smoke` redaction check |
 | `staging-smoke` | staging/prod/internal-hosting config or runbook changes that do not have real VPS secrets | `docs` profile + `scripts/verify_staging_smoke.sh` + `scripts/verify_internal_hosting_smoke.sh` for prod compose config, internal single-node smoke overlay, Caddyfile structure, Centrifugo Redis config, API health route wiring, relay/worker enablement, secret-template guard, public/staging preflight evidence markdown/json, and SOPS/pgBackRest checklist |
@@ -117,6 +117,7 @@ Profiles:
 | `web-serving` | `infra/prod/Dockerfile.web`, prod Caddy/compose, LinkShort, or APP_DOMAIN serving verifier changes | `docs` static checks + `scripts/verify_web_serving.sh`; isolated e2e `web` profile on ports 28070-28074, real Vite dist via web-init named volume, `/join` fallback and `/i/*` LinkShort proxy included in the eight-assertion HTTP gate. Public DNS/ACME/TLS and the full invite round-trip are excluded. |
 | `web` | `clients/web-legacy` (ADR-0119 v0), `docs/api/openapi.yaml`, or web serving/smoke script changes | worktree-clean + `npm ci` + `npm run lint` + `npm run test` (Vitest) + `npm run typecheck` + `scripts/verify_web_generated_types.sh` (openapi-typescript output vs committed `src/api/schema.d.ts`; `generator-failed` and `types-stale` are distinct named failures) + `npm run build` + permissive-only license gate (full transitive inventory markdown) + `scripts/web_serving_smoke.sh` + `scripts/verify_web_login_smoke.sh` (e2e compose Chromium login→timeline→realtime) + `scripts/verify_openapi_contract.sh` runtime drift gate |
 | `license` | dependency changes in any cargo/npm tree — `Cargo.lock`, `package-lock.json`, `deny.toml`, or the gate scripts themselves | `docs` profile + `scripts/tests/test_license_gate.sh` (red proofs) + `scripts/check_cargo_licenses.sh` (`cargo deny check licenses` over `server-rust` and `clients/desktop/src-tauri` with the root `deny.toml`) + `scripts/check_npm_licenses.mjs` over the canonical npm trees (workspace root incl. `packages/momo-core`, `clients/web`, `clients/mobile`; inventory markdown to the gate output dir). Requires `cargo-deny`; fails closed with install guidance when absent. Licenses only — no RUSTSEC advisories, no `npm audit` |
+| `secrets` | fast standalone "did I just commit a credential" lane, or `.gitleaksignore` / secret-gate script changes | `scripts/tests/test_secrets_gate.sh` (red proofs) + `scripts/check_secrets.sh` — gitleaks over every ref with the `.gitleaksignore` triage baseline applied. ~3s, no static checks. The same two steps already run inside **every** other profile through the static block, so this profile is a convenience lane, not extra coverage. Requires `gitleaks`; fails closed with install guidance when absent, with no override env |
 | `all` | merge-critical/runtime-wide changes | broad static/Swift/runtime DB/relay/agent/macOS gate in one run, with shared bootstrap deduped except migration idempotency; run `runtime-live` separately for WebSocket live evidence because it starts host API/relay processes and a compose-network proxy |
 
 Examples:
@@ -139,6 +140,7 @@ scripts/local_gate.sh --profile m3-dbc
 scripts/local_gate.sh --profile web-serving
 scripts/local_gate.sh --profile web
 scripts/local_gate.sh --profile license
+scripts/local_gate.sh --profile secrets
 scripts/local_gate.sh --profile docs --output-dir /tmp/momo-local-gate
 ```
 
@@ -653,6 +655,46 @@ Projection (`usage_ledger`/`budget_window` reserve/reconcile plus
 effects). Add `LOCAL_GATE_LAUNCH_UI=1` when a foreground macOS dev app
 process/window smoke is wanted; by default the profile keeps GUI launch opt-in
 and still verifies the real-backend REST/UI data path.
+
+### Secret scan gate (#1236)
+
+`.gitleaksignore` landed in #1224 with 61 hand-triaged false positives pinned by
+fingerprint. Nothing executed it: gitleaks appeared in three planning documents
+and in no gate. `scripts/check_secrets.sh` is that executor, and it runs in the
+static block, so **every** profile carries it.
+
+```bash
+scripts/check_secrets.sh            # or: scripts/local_gate.sh --profile secrets
+```
+
+It runs exactly the command the baseline documents as the range it guarantees —
+`gitleaks detect --source <root> --log-opts "--all" --redact=90` — and four
+properties of that choice are load-bearing:
+
+- **Git mode, not `--no-git`.** Fingerprints are `<commit>:<file>:<rule>:<line>`,
+  so a commit-less scan cannot read the baseline and the same false positives
+  come straight back. `scripts/tests/test_secrets_gate.sh` measures that
+  divergence rather than asserting it, so the rationale stays falsifiable.
+- **All refs.** A credential committed on any local branch is a credential in the
+  repository.
+- **Committed history only.** Uncommitted work has no commit, hence no
+  fingerprint. The `worktree clean` static check is what closes that gap; the two
+  checks are complementary.
+- **No findings report file**, even into the gate artifact directory: a gitleaks
+  JSON report carries the matched values while `--redact` covers only stdout.
+
+Missing `gitleaks` fails the gate (`brew install gitleaks`). There is
+deliberately no override env — unlike the branch-skew guard, "skip the secret
+scan" is not a reviewable exception.
+
+**When it goes red on a line you did not write:** fingerprints are pinned to a
+commit, so a new commit touching a baselined line produces a new fingerprint and
+a new finding. That is intended — it forces a fresh look. Add the new fingerprint
+with a reason that *describes* the value instead of quoting it; quoting it
+creates another finding (#1224 did this to itself three times).
+
+Rule coverage is stock gitleaks. No repo-specific `gitleaks.toml` exists yet, so
+a credential shape gitleaks does not know is still invisible.
 
 ## 3. Manual Fallback
 

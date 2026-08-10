@@ -85,6 +85,19 @@ OLD_E="$(printf '5%.0s' {1..64})"
 OLD_F="$(printf '6%.0s' {1..64})"
 ENV_FILE="$TMP_ROOT/prod.env"
 
+# This fixture has to satisfy every key in prod_env_preflight.sh's strict
+# require_vars list, because install.sh runs that preflight before its own
+# checks. When a ticket adds a required key and this file is not updated with it,
+# the preflight rejects the fixture first and every assertion past this point
+# reports the wrong cause — MOMO-572 added PROVIDER_LINK_MASTER_KEY on
+# 2026-07-23 and the tag-only case below has been red with a digest-guard message
+# ever since (#1236). If a case here fails claiming install "did not reach" some
+# guard, read the captured output: a missing required key looks exactly like that.
+#
+# Values are deliberately not high-entropy unless a check needs them to be. They
+# are fixtures, and every random-looking one is a gitleaks finding that has to be
+# hand-triaged into .gitleaksignore forever after (#1224 baselined eight from
+# this file alone).
 cat > "$ENV_FILE" <<EOF
 COMPOSE_PROJECT_NAME=momo-406-static
 MOMO_ENV=staging
@@ -98,13 +111,13 @@ ACME_EMAIL=ops@momo-install.example.net
 HTTP_PORT=80
 HTTPS_PORT=443
 MOMO_IMAGE_TAG=sha-0123456789abcdef0123456789abcdef01234567
-MOMO_IMAGE=ghcr.io/yeomyeonggeori/momo@sha256:$DIGEST_A
-MOMO_API_IMAGE=ghcr.io/yeomyeonggeori/momo@sha256:$DIGEST_A
-MOMO_RELAY_IMAGE=ghcr.io/yeomyeonggeori/momo@sha256:$DIGEST_A
-MOMO_WORKER_IMAGE=ghcr.io/yeomyeonggeori/momo@sha256:$DIGEST_A
-MOMO_MIGRATE_IMAGE=ghcr.io/yeomyeonggeori/momo@sha256:$DIGEST_A
-MOMO_WEB_IMAGE=ghcr.io/yeomyeonggeori/momo@sha256:$DIGEST_A
-MOMO_LINKSHORT_IMAGE=ghcr.io/yeomyeonggeori/momo@sha256:$DIGEST_A
+MOMO_IMAGE=ghcr.io/yeomyeonggeori/oort@sha256:$DIGEST_A
+MOMO_API_IMAGE=ghcr.io/yeomyeonggeori/oort@sha256:$DIGEST_A
+MOMO_RELAY_IMAGE=ghcr.io/yeomyeonggeori/oort@sha256:$DIGEST_A
+MOMO_WORKER_IMAGE=ghcr.io/yeomyeonggeori/oort@sha256:$DIGEST_A
+MOMO_MIGRATE_IMAGE=ghcr.io/yeomyeonggeori/oort@sha256:$DIGEST_A
+MOMO_WEB_IMAGE=ghcr.io/yeomyeonggeori/oort@sha256:$DIGEST_A
+MOMO_LINKSHORT_IMAGE=ghcr.io/yeomyeonggeori/oort@sha256:$DIGEST_A
 POSTGRES_DB=momo
 POSTGRES_USER=momo
 POSTGRES_PASSWORD=8d96741fb02c4e1ca8dd803a5f121c11
@@ -126,6 +139,7 @@ CENT_API_KEY=69fed31405fb4696b3677e12a4f09737
 CENT_PROXY_SECRET=b3b355af9df54d2f9df7b46d51aad7dc
 JWT_HMAC=231171fc80c5458a84c0c52cd5b9f284
 OUTBOUND_WEBHOOK_MASTER_KEY=1524c03919df48adb80eb29568e8ef1f
+PROVIDER_LINK_MASTER_KEY=00000000000000000000000000001236
 AGENT_PROVIDER_MODE=external-hermes
 AGENT_MODEL=hermes-agent
 HERMES_BASE_URL=https://gateway.momo-install.example.net/v1
@@ -141,13 +155,13 @@ EOF
 
 cat > "$TMP_ROOT/state/$DEPLOY_STATE_NAME" <<EOF
 MOMO_IMAGE_TAG=sha-fedcba9876543210fedcba9876543210fedcba98
-MOMO_IMAGE=ghcr.io/yeomyeonggeori/momo@sha256:$OLD_A
-MOMO_API_IMAGE=ghcr.io/yeomyeonggeori/momo@sha256:$OLD_A
-MOMO_RELAY_IMAGE=ghcr.io/yeomyeonggeori/momo@sha256:$OLD_A
-MOMO_WORKER_IMAGE=ghcr.io/yeomyeonggeori/momo@sha256:$OLD_A
-MOMO_MIGRATE_IMAGE=ghcr.io/yeomyeonggeori/momo@sha256:$OLD_A
-MOMO_WEB_IMAGE=ghcr.io/yeomyeonggeori/momo@sha256:$OLD_A
-MOMO_LINKSHORT_IMAGE=ghcr.io/yeomyeonggeori/momo@sha256:$OLD_A
+MOMO_IMAGE=ghcr.io/yeomyeonggeori/oort@sha256:$OLD_A
+MOMO_API_IMAGE=ghcr.io/yeomyeonggeori/oort@sha256:$OLD_A
+MOMO_RELAY_IMAGE=ghcr.io/yeomyeonggeori/oort@sha256:$OLD_A
+MOMO_WORKER_IMAGE=ghcr.io/yeomyeonggeori/oort@sha256:$OLD_A
+MOMO_MIGRATE_IMAGE=ghcr.io/yeomyeonggeori/oort@sha256:$OLD_A
+MOMO_WEB_IMAGE=ghcr.io/yeomyeonggeori/oort@sha256:$OLD_A
+MOMO_LINKSHORT_IMAGE=ghcr.io/yeomyeonggeori/oort@sha256:$OLD_A
 EOF
 chmod 600 "$TMP_ROOT/state/$DEPLOY_STATE_NAME"
 cp "$TMP_ROOT/state/$DEPLOY_STATE_NAME" "$TMP_ROOT/state/$DEPLOY_STATE_NAME.previous"
@@ -166,7 +180,7 @@ grep -Fq 'missing --env-file FILE or --from-env' "$TMP_ROOT/missing-source.out" 
 pass "install rejects missing/ambiguous non-interactive input"
 
 TAG_ENV="$TMP_ROOT/tag.env"
-sed -E "/^MOMO_(IMAGE|API_IMAGE|RELAY_IMAGE|WORKER_IMAGE|MIGRATE_IMAGE|WEB_IMAGE|LINKSHORT_IMAGE)=/s|=.*|=ghcr.io/yeomyeonggeori/momo:\${MOMO_IMAGE_TAG}|" \
+sed -E "/^MOMO_(IMAGE|API_IMAGE|RELAY_IMAGE|WORKER_IMAGE|MIGRATE_IMAGE|WEB_IMAGE|LINKSHORT_IMAGE)=/s|=.*|=ghcr.io/yeomyeonggeori/oort:\${MOMO_IMAGE_TAG}|" \
   "$ENV_FILE" > "$TAG_ENV"
 if run_capture "$TMP_ROOT/tag.out" "$INSTALL" --env-file "$TAG_ENV" --mode staging --state-dir "$TMP_ROOT/tag-state" --dry-run; then
   fail "install accepted a tag-only app image"
@@ -179,7 +193,7 @@ run_capture "$TMP_ROOT/attestation-success.out" "$INSTALL" --env-file "$ENV_FILE
   --state-dir "$TMP_ROOT/attestation-success-state" --dry-run
 [ "$(wc -l < "$GH_TRACE" | tr -d ' ')" -eq 1 ] ||
   fail "install did not converge provenance verification on one momo image"
-grep -Fq -- '--repo yeomyeonggeori/momo --predicate-type https://slsa.dev/provenance/v1' "$GH_TRACE" ||
+grep -Fq -- '--repo yeomyeonggeori/oort --predicate-type https://slsa.dev/provenance/v1' "$GH_TRACE" ||
   fail "attestation verification lost the repository/provenance identity policy"
 pass "install verifies one pinned momo image against repository SLSA provenance"
 
@@ -303,14 +317,14 @@ pass "legacy four-image deploy state upgrades without losing rollback safety dis
 printf '{"result":"PASS"}\n' > "$TMP_ROOT/backup.json"
 FAILURE_MARKER="$TMP_ROOT/new-api-failed"
 if PATH="$FAKE_BIN:$PATH" MOMO406_DOCKER_TRACE="$TRACE" \
-  MOMO406_FAIL_NEW_API_ONCE=1 MOMO406_NEW_API_IMAGE="ghcr.io/yeomyeonggeori/momo@sha256:$DIGEST_A" \
+  MOMO406_FAIL_NEW_API_ONCE=1 MOMO406_NEW_API_IMAGE="ghcr.io/yeomyeonggeori/oort@sha256:$DIGEST_A" \
   MOMO406_FAILURE_MARKER="$FAILURE_MARKER" \
   "$UPGRADE" --env-file "$ENV_FILE" --mode staging --state-dir "$TMP_ROOT/state" \
   --backup-evidence "$TMP_ROOT/backup.json" >"$TMP_ROOT/failed-upgrade.out" 2>&1; then
   fail "simulated new-api failure unexpectedly reported upgrade success"
 fi
 [ -f "$FAILURE_MARKER" ] || fail "simulated new-api restart failure did not execute"
-grep -Fq "api_image=ghcr.io/yeomyeonggeori/momo@sha256:$OLD_A args=" "$TRACE" ||
+grep -Fq "api_image=ghcr.io/yeomyeonggeori/oort@sha256:$OLD_A args=" "$TRACE" ||
   fail "failed upgrade did not execute the previous-api digest rollback"
 grep -Fq 'previous app images restored, database migrations remain forward-only' "$TMP_ROOT/failed-upgrade.out" ||
   fail "failed upgrade did not report successful app rollback and DB asymmetry"

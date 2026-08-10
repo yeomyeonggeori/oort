@@ -232,6 +232,13 @@ RUST_ALLOW = {
         "예약 핸들 목록 + POSTGRES_DB 기본값 — 와이어/인프라 계약값(D1)",
     ("server-rust/crates/momo-settings/src/provider.rs", "momo"):
         "예약 핸들 목록 — 같은 계약값의 도메인 쪽 복사본",
+    ("server-rust/crates/momo-t3/src/provider/cubesandbox.rs", "momo_"):
+        "CubeSandbox 인스턴스 메타데이터 키의 접두사 상수 METADATA_KEY_PREFIX(#1197 H3). "
+        "같은 파일의 momo_provision_id·momo_workspace_id 가 공유하는 앞부분이고, "
+        "프로바이더 API 에 실려 나가는 계약값이지 사람이 제품 안에서 읽는 카피가 아니다 "
+        "— ADR-0152 D1 동결층의 momo_* 네임스페이스와 같은 부류다. 접두사 단독이라 "
+        "뒤에 글자가 오는 형태만 가르는 momo_[a-z] 패턴이 못 가른다. 패턴을 맨 momo_ 로 "
+        "넓히면 그 글자열을 품은 진짜 카피까지 통과하므로, 넓히지 않고 여기 한 줄로 적는다(#1236).",
 }
 
 
