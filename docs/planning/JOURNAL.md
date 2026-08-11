@@ -2093,3 +2093,10 @@
 - dependabot 정리: 티켓 승계 파손 4건(#758·672·669·1082) close — 검수 중 PR 더미 축소. examples 2·docker 3은 rebase/GHCR 대기.
 - 미처리(검수 무관): Xcode Cloud 경로 필터(Chrome 미연결 — 유령 체크 소음, 검수 비차단).
 - **다음 = 성재 데스크탑 검수 피드백 인테이크**(대량 예고, 규율: 전량 티켓화→시리즈 편성).
+
+## 2026-08-11 — 검수 배치 2 완결 + 배포 창 5 (Fable 오케스트레이션)
+- **배치 2 랜딩 5/5**: #1280 updater dev 가드 · #1282 레이아웃 전체폭 · #1284 알림규칙 실기능(ADR-0124 증보1, DND+멘션예외, 키워드는 P9 본문미판독 불변식으로 제외) · #1285 프레즌스 6b(ADR-0160) · #1286 워크스페이스 4b(ADR-0161). ADR-0160·0161 성재 승인으로 Accepted. 병렬 마이그 충돌은 066(알림규칙)→067(WS아바타)→068(프레즌스) 순차 재부여.
+- **design-review 사이클**: FAIL 2건(High 4 — 연결점/상태칩 동형 이중·마커 0px·손제작 확인·탭타깃) 전부 실측 지적→수정→재리뷰 PASS. 이음매 판정: 연결 표시는 "건강할 때 침묵"(이상시에만 바 형태) — 성재의 원 오독(연결점=상태칩)을 두 배로 만들 뻔한 결함 차단.
+- **배포 창 5** (`a5193e5e`, live 검증 200/스탬프/presence 마커/401): 1차 실패 — prod 정본 centrifugo.json 통째 덮기(redis 엔진 전제·placeholder secret)로 centrifugo fatal→API 다운. 백업 복원으로 라이브 복구 후, presence 네임스페이스만 외과 삽입(recovery류 필드 strip — "history required for recovery" fatal 해소)+**checkconfig 사전 게이트**+자동 롤백 내장으로 완결. **교훈: 서버 config는 호스트 적응본 — 통째 덮기 금지, 백업+외과 삽입+기계 사전검증(checkconfig)이 표준.**
+- 검수앱: ~/Desktop/oort.app = --debug 빌드(a5193e5e) — dev 가드 런타임 실증("skipping update check", 매니페스트 접촉 0). 롤백 원천 차단.
+- 적립: #1281 매니페스트 재발행(성재 맥) · #1283 검색폭 · #1287/#1288 캡처 픽스처 · #1275 self-leave 권한. ADR-0124 증보1은 랜딩됨 — 성재 최종 승인 대기.
