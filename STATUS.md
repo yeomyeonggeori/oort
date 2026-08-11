@@ -1,5 +1,9 @@
 # oort 진행 현황
 
+## Secret gate RED proof 결정화 (#1296, 2026-08-12)
+
+- 확률적으로 entropy 임계값을 못 넘던 random-hex fixture를 완성 literal 없이 런타임 조립되는 gitleaks 내장 AWS 형상으로 교체했다. 실제 history scan·비노출·fingerprint baseline·nonmatching baseline·missing-scanner fail-closed 계약은 그대로다.
+
 ## ADR-0158 서버 축 — `runId` 서비스 개시 · refine 공지 · 어댑터 스트림 (#1130 W-N, 2026-08-08)
 
 - **`POST …/messages`의 `runId` 거절이 풀렸다(D5).** 검증 3종은 전송 트랜잭션 **안**에서 fail-closed다(`momo_agent::authorize_run_binding_in_tx`): run 실재 · 같은 워크스페이스 · 요청 주체가 그 run의 에이전트(`agent_run.agent_member_id == principal.member_id`). 안 보이는 run은 **404**(RLS가 타 테넌트 행을 감추므로 더 구체적인 답은 존재 확인이 된다), 보이지만 남의 것이면 **403**. 통과하면 `message.run_id` 컬럼과 `props.run_id` 사본을 **함께** 쓴다 — 전자는 서버측 닫기가 미완성 답을 찾는 키, 후자는 히스토리 페이지가 `runEnded`를 정하는 키라, 하나만 쓰면 두 독자 중 하나가 못 본다.
