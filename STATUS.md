@@ -14,11 +14,12 @@
 ## Policy status live provenance (#1307, 2026-08-12)
 
 - 첫 live `pull_request_target`에서 commit status creator는 GitHub Actions App id가 아니라 `github-actions[bot]`/user id `41898282`/`Bot`으로, check-suite는 별도 App id `15368`/slug `github-actions`로 실측됐다. verifier와 RED fixture가 status bot identity와 run/suite/job App identity를 분리해 각각 exact 결속하며 provenance JSON도 두 축을 따로 기록한다.
-- PR #1306에서 #1307 구현을 사용한 read-only 진단은 live status→run attempt→suite→job 결속과 provenance JSON을 끝까지 확인했다. 다만 이것은 후보 구현 진단이지 merge 권위가 아니며, 기존 exact-base verifier 자체의 live-shape 결함을 고치는 #1307 track/engine→main 랜딩 체인만 독립 리뷰·두 required context·local gate를 근거로 한 reviewed bootstrap 예외다. main 랜딩 뒤 갱신된 exact-base wrapper로 #1306을 다시 검증하며, 그때부터 예외 재사용은 없다. 남은 `runtime-unverified`는 원격 branch-protection apply/readback과 아직 관측하지 않은 대체 run-head 형상이다.
+- PR #1306에서 #1307 구현을 사용한 read-only 진단은 live status→run attempt→suite→job 결속과 provenance JSON을 끝까지 확인했다. 다만 이것은 후보 구현 진단이지 merge 권위가 아니며, 기존 exact-base verifier 자체의 live-shape 결함을 고치는 #1307 track/engine→main 랜딩 체인만 독립 리뷰·두 required context·local gate를 근거로 한 reviewed bootstrap 예외다. main 랜딩 뒤 갱신된 exact-base wrapper로 새 #1306 head를 재검증하는 것이 이 예외의 폐쇄 조건이며 결과는 PR #1306 evidence에 기록한다. 남은 `runtime-unverified`는 원격 branch-protection apply/readback과 아직 관측하지 않은 대체 run-head 형상이다.
 
 ## Secret gate RED proof 결정화 (#1296, 2026-08-12)
 
 - 확률적으로 entropy 임계값을 못 넘던 random-hex fixture를 완성 literal 없이 런타임 조립되는 gitleaks 내장 AWS 형상으로 교체했다. 실제 history scan·비노출·fingerprint baseline·nonmatching baseline·missing-scanner fail-closed 계약은 그대로다.
+
 ## OpenAPI 생성 타입 재동기화 — web-legacy 게이트 복구 (#1295, 2026-08-12)
 
 - lockfile에 고정된 `openapi-typescript 7.13.0`으로 `docs/api/openapi.yaml`을 다시 생성해 `clients/web-legacy/src/api/schema.d.ts`를 byte-identical하게 맞췄다. 빠졌던 notification-rules 경로·DTO와 human `presenceStatus`, 그 사이 추가된 run binding/refine 계약도 정본에서 그대로 복구됐다.
