@@ -12,6 +12,7 @@ import {
   Plus,
   Search,
   Settings,
+  SquareTerminal,
   SquarePen,
   Users,
   X,
@@ -448,6 +449,12 @@ export function Sidebar({
               <SidebarRow to="/activity" icon={<Activity className="size-4" />} label="활동" testId="nav-activity" />
               <SidebarRow to="/directory" icon={<Users className="size-4" />} label="멤버" testId="nav-directory" />
               <SidebarRow to="/agents" icon={<Bot className="size-4" />} label="에이전트" testId="nav-agents" />
+              <SidebarRow
+                to="/work"
+                icon={<SquareTerminal className="size-4" />}
+                label="작업 콘솔"
+                testId="nav-work-console"
+              />
               {/* 메시지 검색 (goal B12 H5). 전역 목적지인 이유는 인박스와 같다:
                   가는 곳이지 구독하는 것이 아니다.
 

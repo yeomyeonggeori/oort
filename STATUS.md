@@ -1,5 +1,11 @@
 # oort 진행 현황
 
+## Work Console v1 — 전용 작업 관제와 T1/T2/T3 위치 표식 (#1289, 2026-08-11)
+
+- 웹과 같은 번들을 쓰는 Tauri 데스크톱에 `/work` 전용 master-detail 진입점을 추가했다. 워크스페이스 작업 세션을 상태·담당자·채널·도구·명시 시각과 함께 보고, `?session=` 주소로 같은 기존 세션 상세에 다시 들어가며 목록을 접어 상세·터미널을 전체 route 폭으로 볼 수 있다.
+- 실행 위치는 서버 정본 `work_host.type`만으로 `T1 · 데스크톱 앱`·`T2 · 셀프호스트`·`T3 · 클라우드`를 판정하며 상태와 별도 icon+text로 표시한다. Project/repo/worktree/cwd는 현 계약에 없으므로 추론하지 않는다.
+- 터미널은 기존 host-direct observer를 그대로 재사용한 **읽기 전용** 표면이다. 실제 Tauri↔Rust workd 관전 폐곡선, controller 입력 PTY, Project 계층과 GUI preview는 후속 계약·goal이며 `runtime-unverified`다.
+
 ## 데스크톱 셸 집중 모드 — 56px 레일 유지 + 184px 탐색 패널 접기 (#1291, 2026-08-11)
 
 - **웹/Tauri 공용 AppShell에 비지속 접기를 추가했다.** 텍스트+아이콘 `탐색 패널 접기`와 레일의 `열기`가 왕복하고, 채널/프로필 패널만 빠져 채팅과 같은 주 표면이 정확히 184px 넓어진다. 이미 열린 WorkPanel의 subtree와 wide 상태는 왕복 중 유지된다. `/work`도 #1290 합류 뒤 같은 두 번째 shell track을 그대로 받으며 별도 레이아웃 분기는 없다.

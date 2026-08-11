@@ -21,6 +21,7 @@ import { SurfaceUnavailableRoute } from "@/features/capabilities/SurfaceUnavaila
 import { forgetQuota } from "@momo/core/features/settings/quotaModel";
 import { forgetUsage } from "@momo/core/features/settings/usageModel";
 import { resetAdeDrawer } from "@/features/ade/adeDrawerStore";
+import { WorkConsoleRoute } from "@/features/workConsole/WorkConsoleRoute";
 
 // HashRouter, not BrowserRouter: the Tauri release build loads the bundle from
 // `tauri://localhost` with no server to rewrite deep paths, so the same routes
@@ -101,6 +102,7 @@ export function App() {
           <Route path="activity" element={<ActivityRoute />} />
           <Route path="directory" element={<DirectoryRoute />} />
           <Route path="agents" element={<AgentHubRoute />} />
+          <Route path="work" element={<WorkConsoleRoute />} />
           {/* 메시지 검색 (goal B12 H5). 서버가 이미 싣고 있는 경로 위에 선다. */}
           <Route
             path="search"
