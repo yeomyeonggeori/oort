@@ -306,7 +306,7 @@ The shell layout gate needs neither creds nor a backend (it mocks `/v1` the way
 `scripts/capture-screens.mjs` does) and brings up its own preview server:
 
 ```sh
-npm run build && npm run gate:shell      # SHELL_GATE_SCHEME=light for the paper scheme
+npm run gate:shell                       # builds exact source; SHELL_GATE_SCHEME=light for paper
 ```
 
 The desktop shell's Content-Security-Policy has its own gate (MOMO-640), which
