@@ -40,7 +40,8 @@ extract_change_filter() {
 
 workflow_compliant() {
   local workflow="$1"
-  local changes alignment rust node contract gate license_line install_line verify_line
+  local bootstrap_allowlist changes alignment rust node contract gate
+  local license_line install_line verify_line
   changes="$(job_block "$workflow" changes)"
   alignment="$(job_block "$workflow" alignment)"
   rust="$(job_block "$workflow" rust)"
@@ -60,6 +61,8 @@ workflow_compliant() {
   grep -Fq '(.filename, (.previous_filename // empty))' <<<"$changes" || return 1
   grep -Fq 'scripts/check_npm_licenses\.mjs$' <<<"$changes" || return 1
   grep -Fq 'git show "origin/main:scripts/check_track_alignment.sh"' <<<"$alignment" || return 1
+  bootstrap_allowlist='915d00bff14fda55b909fcdda72067e3d480dbda|27718c0e68715ae44fc65cdb632e70b8a347ea7c|38587b53c088049e42f9fba1f8d0118985523faf)'
+  grep -Fq "$bootstrap_allowlist" <<<"$alignment" || return 1
   grep -Fq 'scripts/tests/test_track_alignment_guard.sh' <<<"$alignment" || return 1
   grep -Fq 'scripts/tests/test_pr_ci_guardrails.sh' <<<"$alignment" || return 1
   grep -Fq 'scripts/tests/test_github_track_guardrails.sh' <<<"$alignment" || return 1
@@ -166,6 +169,14 @@ cp "$WORKFLOW" "$TMP_DIR/rename-source-dropped.yml"
 sed -i.bak 's/(.filename, (.previous_filename \/\/ empty))/.filename/' "$TMP_DIR/rename-source-dropped.yml"
 if workflow_compliant "$TMP_DIR/rename-source-dropped.yml"; then
   fail "classifier without rename source path was accepted"
+fi
+
+cp "$WORKFLOW" "$TMP_DIR/wrong-bootstrap-base.yml"
+sed -i.bak \
+  's/38587b53c088049e42f9fba1f8d0118985523faf/38587b53c088049e42f9fba1f8d0118985523fa0/' \
+  "$TMP_DIR/wrong-bootstrap-base.yml"
+if workflow_compliant "$TMP_DIR/wrong-bootstrap-base.yml"; then
+  fail "unreviewed #1302 bootstrap base was accepted"
 fi
 
 # Execute the exact embedded classifier with a fake GitHub API. These fixtures
