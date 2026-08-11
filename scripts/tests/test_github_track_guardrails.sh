@@ -29,6 +29,7 @@ reset_mutations() {
   : >"$STATE/puts.log"
   : >"$STATE/put_attempts.log"
   : >"$STATE/actions_puts.log"
+  rm -f "$STATE"/put_attempt.*.json
 }
 
 assert_put_zero() {
@@ -298,6 +299,33 @@ if [[ "$endpoint" == repos/fixture/oort/branches/*/protection ]]; then
     require_recent_policy_verification
     echo "$branch" >>"$state/put_attempts.log"
     attempt="$(wc -l <"$state/put_attempts.log" | tr -d ' ')"
+    cp "$input" "$state/put_attempt.$attempt.json"
+    if jq -e '
+      (.required_status_checks | has("contexts")) and
+      (.required_status_checks | has("checks"))
+    ' "$input" >/dev/null; then
+      echo 'gh: Validation Failed (HTTP 422): required_status_checks matches more than one schema' >&2
+      exit 1
+    fi
+    if ! jq -e --argjson app_id 15368 '
+      (.required_status_checks | keys | sort) == ["checks", "strict"] and
+      (.required_status_checks.strict == true) and
+      ((.required_status_checks.checks | type) == "array") and
+      all(.required_status_checks.checks[];
+        ((.context | type) == "string") and
+        ((.context | length) > 0) and
+        ((.app_id | type) == "number")
+      ) and
+      any(.required_status_checks.checks[];
+        .context == "PR CI gate" and .app_id == $app_id
+      ) and
+      any(.required_status_checks.checks[];
+        .context == "Policy integrity gate" and .app_id == $app_id
+      )
+    ' "$input" >/dev/null; then
+      echo 'gh: Validation Failed (HTTP 422): required_status_checks is not the exact checks-only contract' >&2
+      exit 1
+    fi
     fail_at="$(cat "$state/fail_branch_put_at" 2>/dev/null || echo 0)"
     if [ "$fail_at" -gt 0 ] && [ "$attempt" -eq "$fail_at" ]; then
       echo "fixture branch PUT $attempt failed" >&2
@@ -910,12 +938,89 @@ jq -n '{
   allow_fork_syncing: false
 }' >"$STATE/main.json"
 
+# A recorded live-API regression rejects the former `contexts` + `checks`
+# payload as ambiguous. Reinsert that single field into an otherwise trusted
+# guard copy and prove the first branch mutation turns RED with no successful
+# remote write.
+MUTATION_ROOT="$SANDBOX/mixed-schema-mutation"
+MUTATED_GUARD="$MUTATION_ROOT/scripts/github_track_guardrails.sh"
+mkdir -p "$MUTATION_ROOT/scripts"
+awk '
+  { print }
+  $0 == "          strict: true," {
+    print "          contexts: [],"
+    inserted += 1
+  }
+  END { if (inserted != 1) exit 1 }
+' "$GUARD" >"$MUTATED_GUARD" \
+  || fail "could not build the mixed required_status_checks mutation"
+chmod +x "$MUTATED_GUARD"
+printf '%s\n' "$MUTATED_GUARD" >"$STATE/guard.source"
+reset_mutations
+if MOMO_TEST_GUARD_PATH="$MUTATED_GUARD" run_guard --apply \
+  >"$SANDBOX/out" 2>&1; then
+  fail "mixed contexts/checks mutation passed the live-compatible transport"
+fi
+grep -Fq 'HTTP 422): required_status_checks matches more than one schema' "$SANDBOX/out" \
+  || fail "mixed contexts/checks mutation did not reproduce the live 422"
+[ "$(wc -l <"$STATE/put_attempts.log" | tr -d ' ')" = 1 ] \
+  || fail "mixed contexts/checks mutation did not stop on the first branch"
+jq -e '
+  (.required_status_checks | has("contexts")) and
+  (.required_status_checks | has("checks"))
+' "$STATE/put_attempt.1.json" >/dev/null \
+  || fail "mixed-schema mutation fixture did not exercise the ambiguous payload"
+assert_put_zero "mixed contexts/checks mutation"
+printf '%s\n' "$GUARD" >"$STATE/guard.source"
+
 reset_mutations
 run_guard --apply >"$SANDBOX/out" 2>&1 || fail "first apply failed: $(cat "$SANDBOX/out")"
 [ "$(wc -l <"$STATE/puts.log" | tr -d ' ')" = 3 ] || fail "first apply did not update exactly three branches"
 [ ! -s "$STATE/actions_puts.log" ] || fail "compliant Actions permissions were rewritten"
 assert_final_policy_verification "first apply"
+EXPECTED_MAIN_PAYLOAD="$SANDBOX/expected-main-payload.json"
+ACTUAL_MAIN_PAYLOAD="$SANDBOX/actual-main-payload.json"
+jq -n --argjson app_id "$APP_ID" '{
+  required_status_checks: {
+    strict: true,
+    checks: [
+      {context: "PR CI gate", app_id: -1},
+      {context: "PR CI gate", app_id: 777},
+      {context: "PR CI gate", app_id: $app_id},
+      {context: "Policy integrity gate", app_id: $app_id},
+      {context: "legacy context", app_id: -1},
+      {context: "security gate", app_id: 99}
+    ]
+  },
+  enforce_admins: true,
+  required_pull_request_reviews: {
+    dismissal_restrictions: {
+      users: ["review-admin"], teams: [], apps: []
+    },
+    dismiss_stale_reviews: true,
+    require_code_owner_reviews: true,
+    required_approving_review_count: 2,
+    require_last_push_approval: true,
+    bypass_pull_request_allowances: {users: [], teams: [], apps: []}
+  },
+  restrictions: {
+    users: ["deploy-admin"], teams: ["release"], apps: ["deploy-app"]
+  },
+  required_linear_history: true,
+  allow_force_pushes: false,
+  allow_deletions: false,
+  block_creations: true,
+  required_conversation_resolution: true,
+  lock_branch: false,
+  allow_fork_syncing: false
+}' | jq -S . >"$EXPECTED_MAIN_PAYLOAD"
+jq -S . "$STATE/put_attempt.1.json" >"$ACTUAL_MAIN_PAYLOAD"
+if ! cmp -s "$EXPECTED_MAIN_PAYLOAD" "$ACTUAL_MAIN_PAYLOAD"; then
+  diff -u "$EXPECTED_MAIN_PAYLOAD" "$ACTUAL_MAIN_PAYLOAD" >&2 || true
+  fail "main branch PUT did not match the exact live-compatible payload fixture"
+fi
 jq -e --argjson app_id "$APP_ID" '
+  (.required_status_checks | has("contexts") | not) and
   any(.required_status_checks.checks[]; .context == "PR CI gate" and .app_id == $app_id) and
   any(.required_status_checks.checks[]; .context == "Policy integrity gate" and .app_id == $app_id) and
   any(.required_status_checks.checks[]; .context == "PR CI gate" and .app_id == -1) and
