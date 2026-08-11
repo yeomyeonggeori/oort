@@ -30,12 +30,12 @@
 // =============================================================================
 
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import {
-  assertExactSourceGateInvocation,
+  buildExactSourceBeforePreview,
   matchesInsetFocusRing,
   parseInsetFocusRingContract,
 } from "./gate-shell-layout-contract.mjs";
@@ -60,9 +60,6 @@ async function waitForPageCondition(page, expression, timeoutMs = 30_000) {
 }
 
 const WEB_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const PACKAGE_JSON = JSON.parse(
-  readFileSync(resolve(WEB_ROOT, "package.json"), "utf8")
-);
 const FOCUS_RING_CONTRACT = parseInsetFocusRingContract(
   readFileSync(resolve(WEB_ROOT, "src/design/tokens.css"), "utf8")
 );
@@ -1624,13 +1621,7 @@ async function waitForServer(url, timeoutMs = 30_000) {
 }
 
 async function main() {
-  assertExactSourceGateInvocation({
-    script: PACKAGE_JSON.scripts?.["gate:shell"],
-    lifecycleEvent: process.env.npm_lifecycle_event,
-  });
-  if (!existsSync(resolve(WEB_ROOT, "dist/index.html"))) {
-    throw new Error("dist/ is missing after gate:shell's exact-source build.");
-  }
+  await buildExactSourceBeforePreview({ webRoot: WEB_ROOT });
   mkdirSync(OUT_DIR, { recursive: true });
 
   const server = spawn(

@@ -2,7 +2,7 @@
 
 ## Shell layout gate exact-source · 인셋 포커스 계약 (#1314, 2026-08-12)
 
-- `gate:shell`이 매번 현재 checkout을 먼저 빌드하고 그 npm lifecycle 밖의 직접 실행은 stale `dist`로 간주해 fail-closed한다. 수리 전에는 source를 `-2px`로 복구한 뒤에도 앞서 `+2px`로 만든 산출물을 그대로 읽어 전체 gate가 거짓 PASS하는 것을 실측했고, 회귀 fixture가 build-first 누락과 직접 실행을 각각 RED로 고정한다.
+- `gate:shell` 실행 파일 자체가 매번 현재 checkout의 build를 spawn·await하고, build 실패 또는 산출물 부재는 기존 `dist`가 있어도 preview 전에 fail-closed한다. 수리 전에는 source를 `-2px`로 복구한 뒤에도 앞서 `+2px`로 만든 산출물을 그대로 읽어 전체 gate가 거짓 PASS하는 것을 실측했고, stale 산출물 + 실패 build fixture와 실제 child-process exit 23 fixture가 재발을 RED로 고정한다.
 - 포커스 단정은 값을 복사하지 않고 `tokens.css`의 `@utility focus-ring`을 읽어 `outline-offset == -outline-width`인 인셋 관계를 강제한다. `+2px` fixture는 RED, 실제 `2px/-2px`는 1280/900/760 전 구간과 기존 keyboard/layout 단정에서 PASS했다. 제품 CSS와 시각 디자인은 바꾸지 않았고 이 goal의 별도 `runtime-unverified`는 없다.
 
 ## Canonical track 정렬 가드레일 (#1297, 2026-08-12)

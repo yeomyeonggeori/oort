@@ -1,20 +1,40 @@
-const EXACT_GATE_SCRIPT = "npm run build && node gates/gate-shell-layout.mjs";
+import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
+import { resolve } from "node:path";
 
 /**
- * `gate:shell` may only enter the preview through the package script that
- * rebuilds the current checkout first. An existing dist is not evidence: it
- * may have been produced by a different source tree, as #1314 demonstrated.
+ * Build inside the gate executable, then verify that the build produced its
+ * entry point. Awaiting this before preview is the load-bearing part: a failed
+ * build must never fall through to an existing dist from another source tree.
  */
-export function assertExactSourceGateInvocation({ script, lifecycleEvent }) {
-  if (script !== EXACT_GATE_SCRIPT) {
-    throw new Error(
-      `gate:shell must build the exact source before preview (expected: ${EXACT_GATE_SCRIPT})`
-    );
-  }
-  if (lifecycleEvent !== "gate:shell") {
-    throw new Error(
-      "gate:shell refuses a potentially stale dist. Run `npm run gate:shell` from clients/web."
-    );
+async function runNpmBuild(webRoot) {
+  const npm = process.platform === "win32" ? "npm.cmd" : "npm";
+  await new Promise((resolveBuild, rejectBuild) => {
+    const child = spawn(npm, ["run", "build"], {
+      cwd: webRoot,
+      stdio: "inherit",
+    });
+    child.once("error", (error) => {
+      rejectBuild(new Error(`gate:shell exact-source build could not start: ${error.message}`));
+    });
+    child.once("close", (code, signal) => {
+      if (code === 0) {
+        resolveBuild();
+        return;
+      }
+      const outcome = signal ? `signal ${signal}` : `exit ${code ?? "unknown"}`;
+      rejectBuild(new Error(`gate:shell exact-source build failed (${outcome})`));
+    });
+  });
+}
+
+export async function buildExactSourceBeforePreview({
+  webRoot,
+  runBuild = runNpmBuild,
+}) {
+  await runBuild(webRoot);
+  if (!existsSync(resolve(webRoot, "dist/index.html"))) {
+    throw new Error("dist/index.html is missing after gate:shell exact-source build");
   }
 }
 
