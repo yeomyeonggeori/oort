@@ -1,5 +1,5 @@
 {
-  "_comment": "momo 라벨 택소노미 (정본). scripts/github_bootstrap.sh 가 jq로 읽어 `gh label create --force`로 멱등 생성/갱신한다. color 는 # 없는 6자리 hex. 축: type / status / priority / area / size / gate / agent. 기존 scripts/github/labels.tsv 와 정합(+ area:legal, agent:codex-ok 통합). Issue Types(GitHub 1급 분류, org+admin:org 필요)는 여기에 없음 — repo 스코프에선 type:* 라벨로 대체(bootstrap.sh 하단 주석 참조).",
+  "_comment": "momo 라벨 택소노미 (정본). scripts/github_bootstrap.sh 가 jq로 읽어 `gh label create --force`로 멱등 생성/갱신한다. color 는 # 없는 6자리 hex. 축: type / status / priority / area / size / gate / agent / policy approval. 기존 scripts/github/labels.tsv 와 정합(+ area:legal, agent:codex-ok 통합). Issue Types(GitHub 1급 분류, org+admin:org 필요)는 여기에 없음 — repo 스코프에선 type:* 라벨로 대체(bootstrap.sh 하단 주석 참조).",
   "labels": [
     { "name": "type:feature", "color": "1d76db", "description": "신규 기능/경험" },
     { "name": "type:bug", "color": "d73a4a", "description": "결함" },
@@ -38,6 +38,7 @@
     { "name": "size:l", "color": "c5def5", "description": "큼(분할 권장)" },
 
     { "name": "gate:qa", "color": "fef2c0", "description": "사용성 검수 게이트(스토어 제출 선행, M7)" },
+    { "name": "policy-change-approved", "color": "b60205", "description": "exact-head 지정 policy owner 감사 후 승인. head/comment/label 변경 시 재부여." },
     { "name": "agent:codex-ok", "color": "0e8a16", "description": "Codex 자율 실행 적합(명확한 goal+검증)" }
   ]
 }

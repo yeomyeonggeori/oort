@@ -84,10 +84,9 @@ Codex(cloud)는 `@codex` 멘션으로 이슈를 받으면 **이슈 본문을 작
 - **완료 기준:** PR 생성이 끝이 아니다. 리뷰 스킬/에이전트 검수 → 최종 테스트 → merge → `main` local gate 확인까지가 한 사이클이다. GitHub Actions를 다시 주 gate로 켠 기간에는 Actions green도 함께 확인한다.
 - **대기 시간 사용:** CI를 기다리는 동안 로드맵 위치, 기술스택/중요 결정 변경 여부, 새 리스크나 참고 소스가 생겼는지 점검한다. 변화가 있으면 `STATUS.md`/`ROADMAP.md`/이슈로 반영하거나 후속 이슈를 제안한다.
 
-### 3.2a GitHub Actions 비주요 기간: Local PR Gate
+### 3.2a PR CI + Local PR Gate
 
-당분간 GitHub Actions를 merge의 주 gate로 쓰지 않는 기간에도 PR 품질 기준은 유지한다.
-2026-06-26 현재 `ci-build`, `release-ios`, `release-macos`는 조직 과금/결제 이슈 때문에 원격에서 `disabled_manually` 상태이며, workflow 파일도 자동 `push`/`pull_request`/tag 트리거 없이 `workflow_dispatch` 전용으로 둔다.
+공개 레포 전환 뒤 canonical PR은 `main`·`track/engine`·`track/uxui`에서 `PR CI gate`와 base-trusted `Policy integrity gate` 두 required context를 쓴다(ADR-0153 D5). Rust/Node/legacy 생성계약은 `pr-ci`가 변경 경로별로 실행한다. DB·Centrifugo·Docker·외부 provider runtime은 계속 local gate가 정본이다. release/유료 macOS workflow의 owner/M7 제한은 그대로다.
 
 - 정본: [`docs/LOCAL_PR_GATE.md`](LOCAL_PR_GATE.md), 실행 진입점: `scripts/local_gate.sh`.
 - PR body에는 `scripts/local_gate.sh --profile ...`가 출력하는 `Local Gate: PASS`, 날짜, machine/toolchain, 실행 명령, runtime coverage, 미검증 범위를 붙인다.
@@ -109,8 +108,91 @@ Codex(cloud)는 `@codex` 멘션으로 이슈를 받으면 **이슈 본문을 작
   ```
 - runtime 변경은 해당 profile을 사용한다. `runtime-relay`는 `scripts/verify_relay.sh`가 생기기 전까지 PASS를 만들 수 없고, MOMO-002 수동 relay 검증 경로를 PR evidence로 남긴다.
 - 내부 alpha 장애 공유는 `scripts/collect_diagnostics.sh --output-dir /tmp/momo-diagnostics --since 15m`로 redacted bundle을 만들고, diagnostics tooling 변경 PR은 `scripts/local_gate.sh --profile diagnostics` evidence를 붙인다.
-- merge 후에는 `main`을 갱신하고 같은 local gate를 한 번 더 실행한다. Actions 확인 단계는 Actions를 다시 주 gate로 켤 때 복원한다.
-- Actions를 다시 켜려면 owner approval, billing 상태 확인, branch protection required-check 정리, 그리고 local gate evidence 운영이 유지되는지 먼저 확인한다.
+- merge 직전에 현재 PR head의 `PR CI gate`·`Policy integrity gate`와 exact-base wrapper provenance를 모두 확인한다. merge 후에는 `main`을 갱신하고 같은 local gate를 한 번 더 실행하며 `track-alignment` 결과도 확인한다.
+- 세 canonical branch 보호 상태와 repository Actions 기본 권한은 `scripts/github_track_guardrails.sh --check`로 확인한다. read-only check는 GitHub Actions 공식 App ID와 `main → track/*` 조상 topology를 사용하므로 정상적인 track-ahead 상태에서도 동작한다. workflow 기본 권한은 read·PR 승인 불가다. apply는 기존의 더 강한 check/review/restriction/linear-history 설정을 보존하며, 동시 변경이나 404 이외의 조회 실패에서는 fail-closed하고 부분 적용이면 즉시 `--check`로 남은 드리프트를 확인해 같은 bootstrap 창에서 수리한다.
+
+#### Trusted policy-integrity gate (#1302)
+
+공개/Free 저장소에는 Enterprise ruleset을 전제하지 않는다. `policy-integrity.yml`의
+`pull_request_target`은 **base**의 `scripts/verify_policy_integrity.sh`와 GitHub API
+metadata만 평가한다. 후보 checkout·후보 스크립트 실행·의존성 설치를 하지 않는다.
+그 결과 `Policy integrity gate` 정적 status는 정확한 PR head에, exact run attempt를
+target으로 게시된다.
+
+그러나 같은 GitHub Actions App과 status 이름은 위조 가능한 표면이다. 통합 직전에는
+후보/topic checkout이 아닌 **현재 PR의 exact canonical base branch/HEAD에서 wrapper bytes가
+그 base와 일치하는 checkout**으로 반드시 다음을 실행한다. wrapper는 자기 bytes와
+HEAD가 PR API의 exact base commit인지 확인하고 그 commit object에서 verifier를 추출한다.
+따라서 worktree/candidate verifier bytes는 무시되고 실행되지 않는다.
+추출된 verifier는 현재 PR head/base를 workflow ID/path, `pull_request_target` event,
+run-attempt, current default-main workflow authority가 포함된 base-controlled run-name,
+check-suite app, evaluator job에 묶고 현재 changed-files/audit evidence 및 마지막 API
+재읽기까지 수행한다.
+
+```bash
+scripts/verify_policy_integrity_from_base.sh \
+  --repo yeomyeonggeori/oort --pr <PR-number>
+```
+
+정책 파일 변경은 PR author가 지정 policy owner `kwakseongjae`(stable GitHub user id
+`87296259`)이고, 같은 지정 owner의 exact `Policy-Integrity-Audit: <40sha>` comment가
+있어야 한다. 그 뒤에도 같은 login+id의 지정 owner가 현재
+`policy-change-approved` label을 붙여야 한다. org 저장소에서 해당 계정의
+`author_association`은 `MEMBER`이므로 `OWNER` association 문자열을 권한 증거로 쓰지
+않는다. head가 바뀌거나 audit comment/label transition이 수정되면 label을 다시 붙여야
+하며, 기존 승인은 재사용되지 않는다. local gate fixture는 이 재승인·run binding·후보
+실행 금지 RED를 고정하고, required context는 `PR CI gate`와 `Policy integrity gate` 두
+개다. Actions REST run/check-suite/job head 의미는 첫 live bootstrap PR에서 캡처하기
+전까지 `runtime-unverified`이며, verifier는 어느 의미도 추정하지 않고 세 객체의 내부
+SHA 일치만 요구한다.
+
+초기 bootstrap은 workflow가 아직 base에 없는 **#1302의 track/engine→main 최초 랜딩
+체인 전체**만 예외로 허용한다. main 랜딩 후 세 canonical ref를 동일 SHA로 맞추는 순간부터
+예외는 없다. 먼저 main의 정본 label 정의를 확인하고 지정 owner가 원격 label을 만든다.
+
+```bash
+scripts/github_bootstrap.sh --dry-run --labels-only
+scripts/github_bootstrap.sh --labels-only
+gh label view policy-change-approved --repo yeomyeonggeori/oort \
+  --json name --jq 'select(.name == "policy-change-approved") | .name'
+```
+
+그 동일 base에서 각 target branch마다 docs-only bootstrap PR 하나를 열어 다음처럼
+target별 PR을 정확히 매핑한다. `--apply` 자체도 clean·exact-equal canonical main에서만
+실행되며, 각 cycle마다 PR exact base object의 verifier를 다시 추출한다.
+
+```bash
+scripts/github_track_guardrails.sh --repo yeomyeonggeori/oort --apply \
+  --policy-pr 'main=N,track/engine=N,track/uxui=N'
+scripts/github_track_guardrails.sh --repo yeomyeonggeori/oort --check
+```
+
+guard가 세 PR 모두를 verify한 뒤에만 보호를 적용한다. PR들은 merge하지 않고 닫는다.
+workflow_dispatch로 status를 seed하지 않는다. default main이 전진했으면 과거 authority의
+run을 재사용할 수 없으므로 label toggle 등 새 `pull_request_target` event로 status를
+갱신한 뒤 verifier를 다시 실행한다.
+
+#### 지정 policy owner 회전 / break-glass
+
+계획된 계정 회전은 **기존 지정 owner를 아직 신뢰할 수 있을 때** old policy 아래의 최소
+정책 PR로 수행한다. verifier의 login+numeric id, label 설명과 이 절차 문서만 바꾸고,
+기존 owner가 그 PR exact head에 audit comment → label 순서로 승인한다. 정상 wrapper와 두
+required context로 랜딩·canonical 정렬한 뒤 각 target에 fresh docs-only verification PR을
+열어 새 owner evidence로 세 branch를 검증하고 닫는다. 열린 기존 PR은 label toggle 등 새
+event/run을 만들며, 마지막에 `scripts/github_track_guardrails.sh --check`를 기록한다.
+
+기존 계정을 잃었거나 침해가 의심되면 그 계정의 comment/label은 사용하지 않는다. 먼저
+공개 incident issue에 사유·승인 actor·UTC 시작시각·세 canonical SHA·영향받은 PR/status/run
+ID와 변경 전 protection JSON을 기록하고 **모든 merge를 중지**한다. 저장소 관리자가 세
+branch에서 오직 `Policy integrity gate` required context만 임시 제거하고 PR-only,
+`PR CI gate`, admin enforcement, conversation resolution, force/delete 금지는 유지한다.
+새 login+numeric id와 이 runbook만 바꾸는 최소 recovery PR을 독립 검토·local gate 후
+track→main 초기 체인과 같은 명시적 예외로 랜딩한다. 즉시 세 ref를 같은 SHA로 정렬하고,
+label 정본을 적용/readback한 뒤 target별 fresh bootstrap PR 세 개로 `--apply` → `--check`를
+완료해 두 context를 복구한다. bootstrap PR은 unmerged close한다. incident issue에는 exact
+recovery PR/merge SHA, 임시 protection 변경 actor/time, fresh run IDs, 최종 `--check`와
+복구시각을 추가한다. direct/force push, workflow_dispatch seed, 다른 보호 완화, 비감사
+예외 재사용은 금지한다.
 
 ### 3.2b 5개+ session/worktree 운영
 

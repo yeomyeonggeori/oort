@@ -34,8 +34,8 @@
 # =============================================================================
 set -euo pipefail
 
-SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
-REPO_ROOT="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)"
+SCRIPT_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
+REPO_ROOT="$(CDPATH='' cd -- "$SCRIPT_DIR/.." && pwd)"
 cd "$REPO_ROOT"
 
 BASE_REF="${MERGE_TREE_BASE:-origin/track/engine}"
@@ -65,6 +65,24 @@ need() {
 need git
 need npm
 
+# The ancestry gate below is only meaningful against fresh remote refs. Always
+# refresh main plus any origin/* base/head actually requested. This preserves
+# the canonical default while allowing an OSS fork without track/* branches to
+# run `--base origin/main` instead of failing on unrelated missing refs.
+FETCH_SPECS=(+refs/heads/main:refs/remotes/origin/main)
+for requested_ref in "$BASE_REF" "$HEAD_REF"; do
+  case "$requested_ref" in
+    origin/*)
+      requested_branch="${requested_ref#origin/}"
+      FETCH_SPECS+=("+refs/heads/$requested_branch:refs/remotes/origin/$requested_branch")
+      ;;
+  esac
+done
+if ! git fetch --no-tags origin "${FETCH_SPECS[@]}"; then
+  echo "[merge-tree] canonical ref fetch failed; refusing stale merge-tree evidence" >&2
+  exit 1
+fi
+
 # git merge-tree --write-tree 는 2.38 부터다. 그 이전 git 의 merge-tree 는 전혀
 # 다른 것(트리 3개 진단 출력)이라 조용히 틀린 답을 내므로 여기서 막는다.
 git_version="$(git --version | awk '{print $3}')"
@@ -84,6 +102,11 @@ HEAD_OID="$(git rev-parse --verify "${HEAD_REF}^{commit}" 2>/dev/null)" || {
   echo "[merge-tree] head ref 를 못 찾는다: $HEAD_REF" >&2
   exit 1
 }
+
+# A stale track base can produce a perfectly green synthetic tree that still
+# omits work already on main. The fetch above makes this an actual remote
+# freshness proof rather than a comparison of potentially stale tracking refs.
+scripts/check_track_alignment.sh --contains-main "$BASE_OID"
 
 echo "[merge-tree] base $BASE_REF ($(git rev-parse --short "$BASE_OID"))"
 echo "[merge-tree] head $HEAD_REF ($(git rev-parse --short "$HEAD_OID"))"

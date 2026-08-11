@@ -13,6 +13,18 @@ fail() {
   exit 1
 }
 
+# The canonical alignment preflight must be an unconditional consumer, not a
+# helper reachable only from selected profiles. Keep exactly one top-level call
+# before the profile switch; deleting or moving it turns this fixture red.
+alignment_calls="$(grep -Ec '^add_track_alignment_preflight$' "$REPO_ROOT/scripts/local_gate.sh")"
+[ "$alignment_calls" = 1 ] || fail "local gate must have exactly one unconditional alignment preflight"
+alignment_line="$(grep -En '^add_track_alignment_preflight$' "$REPO_ROOT/scripts/local_gate.sh" | cut -d: -f1)"
+profile_switch_line="$(awk -v start="$alignment_line" \
+  'NR > start && /^case "\$PROFILE" in$/ { print NR; exit }' "$REPO_ROOT/scripts/local_gate.sh")"
+[ "$alignment_line" -lt "$profile_switch_line" ] \
+  || fail "alignment preflight must run before profile selection"
+echo "[local-gate-hardening-test] PASS every profile consumes canonical alignment preflight"
+
 init_repo() {
   local repo="$1"
   mkdir -p "$repo"
@@ -64,8 +76,14 @@ grep -Fq 'shared.txt' "$SANDBOX/skew.out" || fail "skew failure omitted overlapp
 POSITIVE_REMOTE="$SANDBOX/skew-positive-origin.git"
 git clone -q --bare "$POSITIVE_REPO" "$POSITIVE_REMOTE"
 git -C "$POSITIVE_REPO" remote add origin "$POSITIVE_REMOTE"
+positive_main_sha="$(git -C "$POSITIVE_REPO" rev-parse main)"
+git -C "$POSITIVE_REMOTE" update-ref refs/heads/track/engine "$positive_main_sha"
+git -C "$POSITIVE_REMOTE" update-ref refs/heads/track/uxui "$positive_main_sha"
+git -C "$POSITIVE_REPO" config branch.main.remote origin
+git -C "$POSITIVE_REPO" config branch.main.merge refs/heads/main
 mkdir -p "$POSITIVE_REPO/scripts/hooks"
 cp "$REPO_ROOT/scripts/check_branch_skew.sh" "$POSITIVE_REPO/scripts/"
+cp "$REPO_ROOT/scripts/check_track_alignment.sh" "$POSITIVE_REPO/scripts/"
 cp "$REPO_ROOT/scripts/hooks/pre-push" "$POSITIVE_REPO/scripts/hooks/"
 feature_sha="$(git -C "$POSITIVE_REPO" rev-parse feature)"
 if printf 'refs/heads/feature %s refs/heads/feature %040d\n' "$feature_sha" 0 | \
@@ -73,6 +91,154 @@ if printf 'refs/heads/feature %s refs/heads/feature %040d\n' "$feature_sha" 0 | 
   fail "pre-push final consumer did not reject overlapping changes"
 fi
 grep -Fq 'shared.txt' "$SANDBOX/pre-push.out" || fail "pre-push failure omitted overlapping path"
+
+# Canonical identity is derived from Git's URL argument, not the spelling of
+# the remote name. Exercise every supported transport, optional .git suffixes,
+# a configured alias, and a direct URL invocation.
+CANONICAL_SCP='git@github.com:yeomyeonggeori/oort.git'
+CANONICAL_SSH='ssh://git@github.com/yeomyeonggeori/oort'
+CANONICAL_HTTPS='https://github.com/yeomyeonggeori/oort.git'
+REAL_GIT="$(command -v git)"
+FAKE_GIT_BIN="$SANDBOX/fake-git-bin"
+mkdir -p "$FAKE_GIT_BIN"
+{
+  printf '#!/usr/bin/env bash\n'
+  # shellcheck disable=SC2016 # The generated shim must evaluate its own $1.
+  printf 'if [ "${1:-}" = "fetch" ]; then exit 0; fi\n'
+  # shellcheck disable=SC2016 # The generated shim must evaluate its own $1.
+  printf 'if [ "${1:-}" = "ls-remote" ]; then\n'
+  printf "  printf '%%s\\t%%s\\n' '%s' 'refs/heads/main'\n" "$positive_main_sha"
+  printf "  printf '%%s\\t%%s\\n' '%s' 'refs/heads/track/engine'\n" "$positive_main_sha"
+  printf "  printf '%%s\\t%%s\\n' '%s' 'refs/heads/track/uxui'\n" "$positive_main_sha"
+  printf '  exit 0\n'
+  printf 'fi\n'
+  printf 'exec %q "$@"\n' "$REAL_GIT"
+} >"$FAKE_GIT_BIN/git"
+chmod +x "$FAKE_GIT_BIN/git"
+git -C "$POSITIVE_REPO" remote set-url origin "$CANONICAL_HTTPS"
+git -C "$POSITIVE_REPO" remote add deploy "$CANONICAL_SCP"
+git -C "$POSITIVE_REPO" remote add mirror "$CANONICAL_SSH"
+
+if printf '(delete) %040d refs/heads/track/uxui %s\n' 0 "$positive_main_sha" | \
+  (cd "$POSITIVE_REPO" && PATH="$FAKE_GIT_BIN:$PATH" \
+    scripts/hooks/pre-push deploy "$CANONICAL_SCP") \
+    >"$SANDBOX/pre-push-delete.out" 2>&1; then
+  fail "pre-push allowed canonical branch deletion through an alias"
+fi
+grep -Fq 'deleting a canonical branch is blocked: refs/heads/track/uxui' \
+  "$SANDBOX/pre-push-delete.out" || fail "pre-push deletion failure omitted canonical target"
+if printf '(unknown) %s refs/heads/track/uxui %s\n' "$feature_sha" "$positive_main_sha" | \
+  (cd "$POSITIVE_REPO" && PATH="$FAKE_GIT_BIN:$PATH" \
+    scripts/hooks/pre-push mirror "$CANONICAL_SSH") \
+    >"$SANDBOX/pre-push-unknown.out" 2>&1; then
+  fail "pre-push allowed a stale canonical update through a canonical alias"
+fi
+grep -Fq 'not a fast-forward of origin/track/uxui' "$SANDBOX/pre-push-unknown.out" \
+  || fail "pre-push raw-revision failure omitted the canonical fast-forward reason"
+if printf '(delete) %040d refs/heads/main %s\n' 0 "$positive_main_sha" | \
+  (cd "$POSITIVE_REPO" && PATH="$FAKE_GIT_BIN:$PATH" \
+    scripts/hooks/pre-push "$CANONICAL_HTTPS" "$CANONICAL_HTTPS") \
+    >"$SANDBOX/pre-push-direct.out" 2>&1; then
+  fail "pre-push allowed canonical branch deletion through a direct URL"
+fi
+grep -Fq 'deleting a canonical branch is blocked: refs/heads/main' \
+  "$SANDBOX/pre-push-direct.out" || fail "direct-URL deletion failure omitted canonical target"
+printf '(unknown) %s refs/heads/main %s\n' "$positive_main_sha" "$positive_main_sha" | \
+  (cd "$POSITIVE_REPO" && PATH="$FAKE_GIT_BIN:$PATH" \
+    scripts/hooks/pre-push "$CANONICAL_HTTPS" "$CANONICAL_HTTPS") \
+    >"$SANDBOX/pre-push-direct-valid.out" 2>&1 \
+  || fail "pre-push rejected a valid canonical candidate through a direct URL"
+
+# A canonical destination must not trust comparison refs after origin itself is
+# rewired. The refusal stays generic so origin credentials cannot leak either.
+ORIGIN_SECRET_URL='https://origin-secret@example.invalid/yeomyeonggeori/oort.git'
+git -C "$POSITIVE_REPO" remote set-url origin "$ORIGIN_SECRET_URL"
+if printf '(delete) %040d refs/heads/main %s\n' 0 "$positive_main_sha" | \
+  (cd "$POSITIVE_REPO" && PATH="$FAKE_GIT_BIN:$PATH" \
+    scripts/hooks/pre-push deploy "$CANONICAL_SCP") \
+    >"$SANDBOX/pre-push-origin-rewired.out" 2>&1; then
+  fail "canonical push trusted comparison refs after origin was rewired"
+fi
+grep -Fq 'unable to verify canonical origin' "$SANDBOX/pre-push-origin-rewired.out" \
+  || fail "rewired origin did not fail closed clearly"
+if grep -Fq 'origin-secret' "$SANDBOX/pre-push-origin-rewired.out"; then
+  fail "rewired-origin diagnostic leaked credentials"
+fi
+git -C "$POSITIVE_REPO" remote set-url origin "$CANONICAL_HTTPS"
+
+# A recognized noncanonical GitHub fork must not receive canonical protected-
+# target rules, but branch-skew still runs for actual local branches.
+FORK_URL='https://github.com/example-fork/oort.git'
+printf '(delete) %040d refs/heads/track/uxui %s\n' 0 "$positive_main_sha" | \
+  (cd "$POSITIVE_REPO" && PATH="$FAKE_GIT_BIN:$PATH" \
+    scripts/hooks/pre-push fork "$FORK_URL") \
+    >"$SANDBOX/pre-push-fork.out" 2>&1 \
+  || fail "recognized fork deletion was blocked by canonical candidate policy"
+if printf 'refs/heads/feature %s refs/heads/track/uxui %s\n' "$feature_sha" "$positive_main_sha" | \
+  (cd "$POSITIVE_REPO" && PATH="$FAKE_GIT_BIN:$PATH" \
+    scripts/hooks/pre-push fork "$FORK_URL") \
+    >"$SANDBOX/pre-push-fork-skew.out" 2>&1; then
+  fail "recognized fork push bypassed ordinary branch-skew"
+fi
+grep -Fq 'shared.txt' "$SANDBOX/pre-push-fork-skew.out" \
+  || fail "recognized fork skew failure omitted overlapping path"
+
+# Unsupported/ambiguous destinations fail closed for protected branch names,
+# and a credential-bearing raw URL must never appear in diagnostics.
+SECRET_URL='https://hook-secret@example.invalid/yeomyeonggeori/oort.git'
+if printf '(delete) %040d refs/heads/main %s\n' 0 "$positive_main_sha" | \
+  (cd "$POSITIVE_REPO" && PATH="$FAKE_GIT_BIN:$PATH" \
+    scripts/hooks/pre-push mystery "$SECRET_URL") \
+    >"$SANDBOX/pre-push-unknown-url.out" 2>&1; then
+  fail "unknown push URL was allowed to delete a protected branch"
+fi
+grep -Fq 'unable to verify push destination for protected branch' \
+  "$SANDBOX/pre-push-unknown-url.out" || fail "unknown URL did not fail closed clearly"
+if grep -Fq 'hook-secret' "$SANDBOX/pre-push-unknown-url.out"; then
+  fail "unknown URL diagnostic leaked credentials"
+fi
+
+# Installer safely upgrades the exact previous oort-managed hook, backs it up,
+# and still refuses an arbitrary user hook. A fork exposing byte-for-byte
+# canonical ref names is insufficient: the normalized repository identity must
+# also be exact. A git shim keeps this fixture network-free while returning the
+# same three ls-remote refs for every configured URL.
+cp "$REPO_ROOT/scripts/install_branch_skew_hook.sh" "$POSITIVE_REPO/scripts/"
+hook_target="$(git -C "$POSITIVE_REPO" rev-parse --path-format=absolute --git-path hooks/pre-push)"
+mkdir -p "$(dirname "$hook_target")"
+
+git -C "$POSITIVE_REPO" remote set-url origin 'https://github.com/example-fork/oort.git'
+if (cd "$POSITIVE_REPO" && PATH="$FAKE_GIT_BIN:$PATH" scripts/install_branch_skew_hook.sh) \
+  >"$SANDBOX/hook-wrong-repo.out" 2>&1; then
+  fail "installer accepted a fork that exposed the three canonical ref names"
+fi
+grep -Fq 'origin is not the exact canonical GitHub repository' \
+  "$SANDBOX/hook-wrong-repo.out" || fail "installer wrong-repository refusal was not clear"
+
+git -C "$POSITIVE_REPO" remote set-url origin "$CANONICAL_HTTPS"
+cp "$REPO_ROOT/scripts/tests/fixtures/pre-push-branch-skew-v1" "$hook_target"
+chmod +x "$hook_target"
+(cd "$POSITIVE_REPO" && PATH="$FAKE_GIT_BIN:$PATH" scripts/install_branch_skew_hook.sh) \
+  >"$SANDBOX/hook-install.out" \
+  || fail "installer did not upgrade the previous managed hook: $(cat "$SANDBOX/hook-install.out")"
+cmp -s "$POSITIVE_REPO/scripts/hooks/pre-push" "$hook_target" \
+  || fail "installer did not install the current managed hook"
+[ -f "$hook_target.pre-1297.bak" ] || fail "managed-hook upgrade did not keep a backup"
+
+# Installer URL normalization covers all supported canonical forms too.
+for canonical_url in "$CANONICAL_SCP" "$CANONICAL_SSH"; do
+  git -C "$POSITIVE_REPO" remote set-url origin "$canonical_url"
+  (cd "$POSITIVE_REPO" && PATH="$FAKE_GIT_BIN:$PATH" scripts/install_branch_skew_hook.sh) \
+    >/dev/null || fail "installer rejected supported canonical URL form"
+done
+
+printf '#!/usr/bin/env bash\necho custom\n' >"$hook_target"
+if (cd "$POSITIVE_REPO" && PATH="$FAKE_GIT_BIN:$PATH" scripts/install_branch_skew_hook.sh) \
+  >"$SANDBOX/hook-custom.out" 2>&1; then
+  fail "installer overwrote a non-managed hook"
+fi
+grep -Fq 'refusing to overwrite non-managed pre-push hook' "$SANDBOX/hook-custom.out" \
+  || fail "custom-hook refusal was not named"
 echo "[local-gate-hardening-test] PASS branch-skew helper/hook negative/positive/override fixtures"
 
 # Migration number negative/positive fixtures, including 37 vs 037 normalization.
@@ -143,6 +309,7 @@ if [ -n "$REAL_RUBY" ]; then
   {
     printf '#!/usr/bin/env bash\n'
     printf 'for arg in "$@"; do\n'
+    # shellcheck disable=SC2016 # The generated shim must evaluate its own $arg.
     printf '  case "$arg" in\n'
     printf '    *aliases:*)\n'
     printf '      echo "unknown keyword: aliases (ArgumentError)" >&2\n'
@@ -157,6 +324,7 @@ if [ -n "$REAL_RUBY" ]; then
   # PyYAML 갈래가 대신 받아내서 초록을 만드는 일이 없도록 python 도 봉한다.
   # 이 픽스처가 증명해야 하는 것은 **ruby 갈래 안에서의 강등**이다.
   (
+    # shellcheck disable=SC2030 # PATH confinement to this fixture subshell is intentional.
     PATH="$SPEC_SANDBOX/fakebin:$PATH"
     export PATH
     # shellcheck source=scripts/openapi_spec_to_json.sh
@@ -201,6 +369,7 @@ chmod +x "$SPEC_SANDBOX/fakebin/ruby-dead"
 mkdir -p "$SPEC_SANDBOX/deadbin"
 cp "$SPEC_SANDBOX/fakebin/ruby-dead" "$SPEC_SANDBOX/deadbin/ruby"
 (
+  # shellcheck disable=SC2031 # Prior PATH mutation was intentionally subshell-local.
   PATH="$SPEC_SANDBOX/deadbin:$PATH"
   export PATH
   # shellcheck source=scripts/openapi_spec_to_json.sh

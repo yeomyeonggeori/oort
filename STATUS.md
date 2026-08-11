@@ -1,5 +1,20 @@
 # oort 진행 현황
 
+## Canonical track 정렬 가드레일 (#1297, 2026-08-12)
+
+- `main`은 두 `track/*`의 조상이어야 하고 track-ahead는 정상이라는 topology를 `scripts/check_track_alignment.sh`로 기계화했다. remote/local behind·divergence, canonical upstream 오배선, ref 누락, non-fast-forward candidate는 이름을 대고 실패하며, 격리 fixture가 각 RED와 ahead PASS를 고정한다.
+- local gate·pre-push·merge-tree가 같은 checker를 소비하고, `track-alignment` workflow가 세 canonical branch push + 매일 + 수동 실행에서 remote drift를 감시한다. `pr-ci`는 이제 `main`·`track/engine`·`track/uxui` 모두에서 돌며, branch protection은 `PR CI gate`와 #1302의 `Policy integrity gate` 두 context를 요구한다.
+- #1295 재발 방지로 OpenAPI 또는 `clients/web-legacy` 생성 계약이 바뀌면 전용 CI lane이 legacy lockfile을 검사한 뒤 permissive license와 generated-type 정합을 함께 검증한다. GitHub 보호는 `scripts/github_track_guardrails.sh`가 정상 track-ahead에서도 동작하는 기본 read-only check와 bootstrap-only `--apply`로 PR-only·conversation resolution·GitHub Actions app-ID 고정 context·force/delete 금지와 Actions 기본 read·PR 승인 금지를 관리한다. 다만 app-ID만으로 후보 workflow 자기변조를 막을 수 없으므로 trusted policy-integrity gate #1302가 main에 랜딩하기 전에는 보호를 적용하지 않는다. 실제 apply는 #1297·#1302 main 랜딩, 세 트랙 동일 SHA 정렬, 두 context 생성 후 통합자 몫이다.
+
+## Trusted policy integrity (#1302, 2026-08-12)
+
+- public/Free 환경에서 Enterprise ruleset을 가정하지 않고, base-only `pull_request_target` evaluator가 후보 checkout·실행·의존성 설치 없이 API metadata만 검증해 exact PR head/run attempt에 `Policy integrity gate`를 게시한다(ADR-0153 D5). 같은 Actions App/name status는 충분하지 않으므로 통합 직전 **현재 PR의 exact canonical base branch/HEAD에서 wrapper bytes가 그 base와 일치하는 checkout**으로 `scripts/verify_policy_integrity_from_base.sh --repo yeomyeonggeori/oort --pr <PR>`를 실행한다. wrapper는 PR API exact base object의 verifier를 추출하며 worktree/candidate verifier bytes는 무시하고 실행하지 않는다. 그런 다음 head/base·current default-main workflow authority·workflow ID/path·event·attempt·base run-name·check-suite app·evaluator job·live policy evidence와 최종 재읽기를 묶는다.
+- 정책 변경은 지정 policy owner `kwakseongjae`/GitHub user id `87296259` author, 같은 지정 owner의 exact `Policy-Integrity-Audit: <40sha>` comment, 그 뒤 같은 owner가 적용한 현재 `policy-change-approved` label을 모두 요구하고 head/comment/label transition 변경 후 재승인한다. workflow가 아직 base에 없는 **#1302의 track/engine→main 최초 랜딩 체인 전체**만 reviewed bootstrap 예외이며, main 랜딩·동일 SHA 정렬 뒤부터는 예외가 없다. 그때 target별 docs-only unmerged bootstrap PR을 `--policy-pr main=N,track/engine=N,track/uxui=N` verify → apply → check로 처리한다. workflow_dispatch seeding은 쓰지 않는다. Actions REST run/check-suite/job head 의미의 live 캡처만 첫 bootstrap까지 `runtime-unverified`이며 verifier는 그 의미를 추정하지 않고 내부 SHA 일치를 검사한다.
+
+## Secret gate RED proof 결정화 (#1296, 2026-08-12)
+
+- 확률적으로 entropy 임계값을 못 넘던 random-hex fixture를 완성 literal 없이 런타임 조립되는 gitleaks 내장 AWS 형상으로 교체했다. 실제 history scan·비노출·fingerprint baseline·nonmatching baseline·missing-scanner fail-closed 계약은 그대로다.
+
 ## ADR-0158 서버 축 — `runId` 서비스 개시 · refine 공지 · 어댑터 스트림 (#1130 W-N, 2026-08-08)
 
 - **`POST …/messages`의 `runId` 거절이 풀렸다(D5).** 검증 3종은 전송 트랜잭션 **안**에서 fail-closed다(`momo_agent::authorize_run_binding_in_tx`): run 실재 · 같은 워크스페이스 · 요청 주체가 그 run의 에이전트(`agent_run.agent_member_id == principal.member_id`). 안 보이는 run은 **404**(RLS가 타 테넌트 행을 감추므로 더 구체적인 답은 존재 확인이 된다), 보이지만 남의 것이면 **403**. 통과하면 `message.run_id` 컬럼과 `props.run_id` 사본을 **함께** 쓴다 — 전자는 서버측 닫기가 미완성 답을 찾는 키, 후자는 히스토리 페이지가 `runEnded`를 정하는 키라, 하나만 쓰면 두 독자 중 하나가 못 본다.

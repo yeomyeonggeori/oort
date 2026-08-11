@@ -42,17 +42,17 @@ name: pr-ci
 on:
   pull_request:
     branches:
-      # 트랙 파이프라인(docs/TRACKS.md): 워커 PR은 track/engine으로, 통합만
-      # main으로 간다. 둘 다 걸어야 PR CI가 실제 머지 경로를 덮는다.
+      # 트랙 파이프라인(docs/TRACKS.md): 워커 PR은 자기 track으로, 통합만
+      # main으로 간다. 셋 모두 걸어야 실제 머지 경로를 덮는다.
       - main
       - track/engine
+      - track/uxui
   # PR 없이 레인을 한 번 돌려보고 싶을 때. 이때는 변경 파일 목록이 없으므로
   # 두 레인을 모두 돈다.
   workflow_dispatch:
 
 permissions:
   contents: read
-  pull-requests: read
 
 concurrency:
   group: pr-ci-${{ github.ref }}
@@ -65,11 +65,15 @@ jobs:
   # 않는 이유도 같다 — 이 판정에 공급망을 하나 더 늘릴 이유가 없다.
   changes:
     name: 변경 경로로 레인 선택
+    permissions:
+      contents: read
+      pull-requests: read
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
       rust: ${{ steps.filter.outputs.rust }}
       node: ${{ steps.filter.outputs.node }}
+      contract: ${{ steps.filter.outputs.contract }}
     steps:
       - id: filter
         env:
@@ -80,9 +84,12 @@ jobs:
           set -uo pipefail
 
           run_all() {
-            echo "→ rust=true node=true ($1)"
-            echo "rust=true" >> "$GITHUB_OUTPUT"
-            echo "node=true" >> "$GITHUB_OUTPUT"
+            echo "→ rust=true node=true contract=true ($1)"
+            {
+              echo "rust=true"
+              echo "node=true"
+              echo "contract=true"
+            } >> "$GITHUB_OUTPUT"
             exit 0
           }
 
@@ -91,12 +98,61 @@ jobs:
 
           # 조회 실패는 "변경 없음"이 아니라 "모르겠음"이다. 모르면 전부 돈다
           # (fail-open의 방향이 CI를 *거르는* 쪽이 되면 게이트가 무의미해진다).
-          if ! files="$(gh api --paginate "repos/$REPO/pulls/$PR/files" --jq '.[].filename')"; then
+          metadata="$RUNNER_TEMP/pr-$PR-metadata.json"
+          pages="$RUNNER_TEMP/pr-$PR-files-pages.json"
+          if ! gh api "repos/$REPO/pulls/$PR" > "$metadata"; then
+            run_all "could not read pull request metadata"
+          fi
+          if ! jq -e '
+            type == "object"
+            and (.changed_files | type == "number" and . >= 1 and floor == .)
+          ' "$metadata" >/dev/null; then
+            run_all "malformed pull request metadata"
+          fi
+          expected_count="$(jq -r '.changed_files' "$metadata")"
+
+          # REST lists at most 3,000 PR files. At exactly that boundary we cannot
+          # prove completeness, even if the metadata count also says 3,000.
+          [ "$expected_count" -lt 3000 ] || run_all "3,000-file API cap is ambiguous"
+
+          if ! gh api --paginate --slurp \
+            "repos/$REPO/pulls/$PR/files?per_page=100" > "$pages"; then
             run_all "could not list changed files"
           fi
-          [ -n "$files" ] || run_all "empty file list"
+          if ! jq -e '
+            type == "array"
+            and length > 0
+            and all(.[]; type == "array")
+            and all(.[][];
+              type == "object"
+              and (.filename | type == "string" and length > 0)
+              and (
+                (has("previous_filename") | not)
+                or .previous_filename == null
+                or (.previous_filename | type == "string" and length > 0)
+              )
+            )
+          ' "$pages" >/dev/null; then
+            run_all "malformed changed-files response"
+          fi
 
-          echo "changed files:"
+          row_count="$(jq -r '[.[][]] | length' "$pages")"
+          unique_count="$(jq -r '[.[][] | .filename] | unique | length' "$pages")"
+          if [ "$row_count" -ne "$expected_count" ] \
+            || [ "$unique_count" -ne "$expected_count" ]; then
+            run_all "incomplete or duplicate changed-files response: expected=$expected_count rows=$row_count unique=$unique_count"
+          fi
+          [ "$row_count" -lt 3000 ] || run_all "3,000-file retrieval cap is ambiguous"
+
+          # A rename can move code out of a guarded tree. Classify both the new
+          # path and previous_filename, then deduplicate the union.
+          files="$(jq -r '
+            [.[][] | (.filename, (.previous_filename // empty))]
+            | unique[]
+          ' "$pages")"
+          [ -n "$files" ] || run_all "empty changed path set"
+
+          echo "changed paths (including rename sources):"
           printf '%s\n' "$files"
 
           # 레인별 관심 경로. 목록에 없는 경로(docs/·STATUS.md·infra/·scripts/·
@@ -114,16 +170,92 @@ jobs:
           #     `momo-messaging/src/refine.rs`가 `include_str!`로 굽는다.
           rust=false
           node=false
+          contract=false
           printf '%s\n' "$files" | grep -Eq \
             '^(server-rust/|clients/desktop/src-tauri/|deny\.toml$|scripts/check_cargo_licenses\.sh$|docs/api/harness-refine-client-msg-id\.golden\.json$|\.github/workflows/pr-ci\.yml$)' \
             && rust=true
           printf '%s\n' "$files" | grep -Eq \
             '^(clients/web/|clients/mobile/|packages/|server/Fixtures/|package\.json$|package-lock\.json$|scripts/check_npm_licenses\.mjs$|\.github/workflows/pr-ci\.yml$)' \
             && node=true
+          # #1295: the served legacy client's generated contract previously
+          # drifted while both broad build lanes stayed green. Keep this lane
+          # narrow: either side of the generated pair, its lockfile, or verifier
+          # must install the exact generator and compare. Do not trigger on this
+          # workflow alone: #1295 lands on track/uxui while this goal lands on
+          # track/engine, and cross-track product commits stay out of this PR.
+          printf '%s\n' "$files" | grep -Eq \
+            '^(docs/api/openapi\.yaml$|clients/web-legacy/|scripts/check_npm_licenses\.mjs$|scripts/verify_web_generated_types\.sh$)' \
+            && contract=true
 
-          echo "→ rust=$rust node=$node"
-          echo "rust=$rust" >> "$GITHUB_OUTPUT"
-          echo "node=$node" >> "$GITHUB_OUTPUT"
+          echo "→ rust=$rust node=$node contract=$contract"
+          {
+            echo "rust=$rust"
+            echo "node=$node"
+            echo "contract=$contract"
+          } >> "$GITHUB_OUTPUT"
+
+  # Every PR gets a topology check, including documentation-only changes. For
+  # track targets, GitHub's synthetic merge commit must contain current main;
+  # workflow_dispatch checks the remote canonical graph instead.
+  alignment:
+    name: canonical track alignment
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: canonical refs 새로고침
+        run: |
+          git fetch --no-tags origin \
+            +refs/heads/main:refs/remotes/origin/main \
+            +refs/heads/track/engine:refs/remotes/origin/track/engine \
+            +refs/heads/track/uxui:refs/remotes/origin/track/uxui
+
+      - name: PR candidate 또는 remote topology 검사
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          CANDIDATE_SHA: ${{ github.sha }}
+        run: |
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            trusted_checker="$RUNNER_TEMP/check_track_alignment.sh"
+            base_oid="$(git rev-parse "origin/$BASE_REF")"
+            if git show "origin/main:scripts/check_track_alignment.sh" > "$trusted_checker" 2>/dev/null; then
+              : # Normal path: execute the canonical policy from main, not PR code.
+            else
+              # One-time #1297/#1302 bootstrap. The checker does not exist on
+              # main during this initial integration chain; only these reviewed
+              # immutable bases may use the candidate copy. Once main lands the
+              # chain, this path is dead.
+              case "$base_oid" in
+                915d00bff14fda55b909fcdda72067e3d480dbda|27718c0e68715ae44fc65cdb632e70b8a347ea7c|38587b53c088049e42f9fba1f8d0118985523faf)
+                  cp scripts/check_track_alignment.sh "$trusted_checker"
+                  ;;
+                *)
+                  echo "trusted base alignment checker is unavailable" >&2
+                  exit 1
+                  ;;
+              esac
+            fi
+            chmod +x "$trusted_checker"
+            "$trusted_checker" --candidate "$BASE_REF" "$CANDIDATE_SHA"
+          else
+            trusted_checker="$RUNNER_TEMP/check_track_alignment.sh"
+            git show origin/main:scripts/check_track_alignment.sh > "$trusted_checker"
+            chmod +x "$trusted_checker"
+            "$trusted_checker" --remote
+          fi
+
+      - name: alignment/required-gate policy regression fixtures
+        run: |
+          scripts/tests/test_track_alignment_guard.sh
+          scripts/tests/test_pr_ci_guardrails.sh
+          scripts/tests/test_github_track_guardrails.sh
+          scripts/tests/test_policy_integrity_gate.sh
+          scripts/tests/test_trusted_policy_runner.sh
 
   # ── ② Rust 레인 ─────────────────────────────────────────────────────────
   # `cargo test --workspace` + 카고 라이선스 게이트.
@@ -145,7 +277,9 @@ jobs:
     # 잡 전체 1분32초. 20분은 그 ~10배 여유다.
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
 
       - name: 툴체인 확인(러너 사전설치 stable)
         # rustup 툴체인 액션을 쓰지 않는다. 레포에 rust-toolchain.toml이 없어
@@ -156,7 +290,7 @@ jobs:
           cargo --version
 
       - name: cargo 캐시(레지스트리 + target)
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: |
             server-rust
@@ -168,9 +302,9 @@ jobs:
         run: cargo test --workspace --locked --manifest-path server-rust/Cargo.toml
 
       - name: cargo-deny 설치
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@7f4eb899022d8fe70b20c4f3de697aa85c309026 # v2
         with:
-          tool: cargo-deny
+          tool: cargo-deny@0.20.2
 
       - name: 카고 의존 라이선스 게이트(deny.toml, 두 워크스페이스)
         # #1225가 만든 게이트를 그대로 호출한다. 여기서 CI가 정책을 다시 쓰면
@@ -194,9 +328,11 @@ jobs:
     # 테스트 3 38초). 15분은 그 ~10배 여유다.
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           # clients/mobile/package.json engines = ">= 22.11.0"이 레포의 유일한
           # 선언 제약이고, 24는 개발 머신에서 실제로 npm ci가 도는 버전이다.
@@ -281,3 +417,74 @@ jobs:
           npm --prefix clients/mobile run test -- \
             --testPathIgnorePatterns=/node_modules/ \
             --testPathIgnorePatterns='__tests__/inboxApproval\.test\.tsx'
+
+  # #1295 regression lane. clients/web-legacy remains the committed generated
+  # consumer even while product UI work happens in clients/web.
+  contract:
+    name: OpenAPI ↔ web-legacy generated contract
+    needs: changes
+    if: needs.changes.outputs.contract == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: clients/web-legacy/package-lock.json
+
+      - name: permissive npm license gate (clients/web-legacy lockfile)
+        run: node scripts/check_npm_licenses.mjs --root clients/web-legacy
+
+      - name: npm ci --ignore-scripts (clients/web-legacy)
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+        run: npm ci --ignore-scripts --prefix clients/web-legacy
+
+      - name: committed generated types match OpenAPI
+        run: scripts/verify_web_generated_types.sh
+
+  # Branch protection requires this one stable context. Optional path lanes may
+  # be skipped, but a failure/cancellation in any selected lane keeps it red.
+  gate:
+    name: PR CI gate
+    needs:
+      - changes
+      - alignment
+      - rust
+      - node
+      - contract
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      CHANGES_RESULT: ${{ needs.changes.result }}
+      ALIGNMENT_RESULT: ${{ needs.alignment.result }}
+      RUST_RESULT: ${{ needs.rust.result }}
+      NODE_RESULT: ${{ needs.node.result }}
+      CONTRACT_RESULT: ${{ needs.contract.result }}
+      RUST_SELECTED: ${{ needs.changes.outputs.rust }}
+      NODE_SELECTED: ${{ needs.changes.outputs.node }}
+      CONTRACT_SELECTED: ${{ needs.changes.outputs.contract }}
+    steps:
+      - name: required and selected lanes are green
+        run: |
+          set -euo pipefail
+          test "$CHANGES_RESULT" = success
+          test "$ALIGNMENT_RESULT" = success
+          require_optional_lane() {
+            selected="$1"
+            result="$2"
+            label="$3"
+            case "$selected:$result" in
+              true:success|false:skipped) ;;
+              *) echo "$label lane selection/result mismatch: selected=$selected result=$result" >&2; exit 1 ;;
+            esac
+          }
+          require_optional_lane "$RUST_SELECTED" "$RUST_RESULT" rust
+          require_optional_lane "$NODE_SELECTED" "$NODE_RESULT" node
+          require_optional_lane "$CONTRACT_SELECTED" "$CONTRACT_RESULT" contract

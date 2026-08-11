@@ -64,12 +64,17 @@ git -C "$FIXTURE" config user.email "secrets-gate-test@example.invalid"
 git -C "$FIXTURE" config user.name "secrets gate test"
 git -C "$FIXTURE" config commit.gpgsign false
 
-if command -v openssl >/dev/null 2>&1; then
-  FAKE_VALUE="$(openssl rand -hex 24)"
-else
-  FAKE_VALUE="$(head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n')"
-fi
-[ "${#FAKE_VALUE}" -ge 32 ] || fail "could not generate a high-entropy fixture value"
+# Build a provider-shaped credential only at runtime. The former random hex
+# fixture depended on the stock generic-api-key rule's entropy threshold: a
+# perfectly random sample can still have low *observed* entropy and make this
+# RED proof flaky. This shape targets gitleaks' built-in aws-access-token rule,
+# whose alphabet/length contract is deterministic. Keep the prefix split so no
+# complete credential-shaped literal ever enters this repository's history.
+FAKE_PREFIX="AK"
+FAKE_PREFIX="${FAKE_PREFIX}IA"
+FAKE_SUFFIX="234567ABCDEFGHJK"
+FAKE_VALUE="${FAKE_PREFIX}${FAKE_SUFFIX}"
+[ "${#FAKE_VALUE}" -eq 20 ] || fail "could not build the deterministic credential fixture"
 
 printf 'HERMES_API_KEY=%s\n' "$FAKE_VALUE" > "$FIXTURE/service.env"
 git -C "$FIXTURE" add service.env
@@ -125,6 +130,17 @@ print(findings[0].get("Fingerprint", ""))
 PY
 )"
 [ -n "$FINGERPRINT" ] || fail "could not read a fingerprint out of the gitleaks report"
+RULE_ID="$(python3 - "$SANDBOX/report.json" <<'PY'
+import json, sys
+with open(sys.argv[1], encoding="utf-8") as fh:
+    findings = json.load(fh)
+if not findings:
+    raise SystemExit("")
+print(findings[0].get("RuleID", ""))
+PY
+)"
+[ "$RULE_ID" = "aws-access-token" ] ||
+  fail "deterministic credential fixture hit an unexpected gitleaks rule: ${RULE_ID:-none}"
 printf '%s\n' "$FINGERPRINT" > "$BASELINE"
 
 out="$(run_gate)"

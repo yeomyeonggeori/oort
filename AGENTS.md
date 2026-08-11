@@ -39,12 +39,12 @@ oort = AI 에이전트가 사람과 **동등한 1급 멤버**(`member.kind='agen
 2. 이슈를 claim한 뒤 가능하면 worktree에서 진행한다. 시작 전 `scripts/goal_status.sh`로 충돌을 확인하고, `scripts/goal_claim.sh <issue>`로 branch/worktree/assignee/status lock을 잡는다. 스크립트가 없는 checkout에서는 수동으로 별도 branch/worktree를 만든다.
 3. 작업 전 `STATUS.md` → `ROADMAP.md` → `BUILD_TICKETS.md` → 이슈 본문 순으로 계획을 확인한다. 계획이 미흡하면 추가 리서치를 하고, 계획이 충분하면 현재 사실을 한 번 더 검증한다.
 4. 구현은 이슈 범위에 맞춘다. 범위가 커지면 새 이슈로 제안한다.
-5. 구현 후 해당 검증 등급의 테스트를 실행한다. GitHub Actions disabled/manual-only 기간에는 `scripts/local_gate.sh --profile ...`를 우선 사용하고, 서버 변경은 `cargo fmt --check`/`clippy -D warnings`/`cargo test --workspace`, 웹·폰·코어 변경은 해당 트리 게이트 + `scripts/verify_merge_tree.sh`를 하드 게이트로 본다.
+5. 구현 후 해당 검증 등급의 테스트를 실행한다. `pr-ci`는 세 canonical branch PR의 보조 게이트이고, runtime 범위는 `scripts/local_gate.sh --profile ...`가 정본이다. 서버 변경은 `cargo fmt --check`/`clippy -D warnings`/`cargo test --workspace`, 웹·폰·코어 변경은 해당 트리 게이트 + `scripts/verify_merge_tree.sh`를 하드 게이트로 본다.
 6. worker는 커밋하고 push한 뒤 PR을 연다. PR은 해당 이슈 하나만 닫고, PR 본문에 local gate evidence를 붙인다.
 7. worker는 `scripts/goal_release.sh <issue> --review --pr <PR URL>`로 이슈를 `status:needs-review`로 전환하고 `momo-main`에 handoff한 뒤 멈춘다.
 8. **merge/close/main gate/로드맵 조정은 `momo-main`만 수행한다.** worker는 PR 생성 후 임의 merge, 이슈 close, main 재검증, 로드맵/백로그 재배열을 하지 않는다.
 9. `momo-main`은 코드리뷰 에이전트 또는 리뷰 스킬로 보안·코드 품질·회귀 위험을 점검하고, 필요한 수정만 worker 또는 같은 이슈 worktree에 위임한다.
-10. `momo-main`은 리뷰 반영 후 최종 local gate를 다시 실행한다. GitHub Actions disabled/manual-only 기간에는 `scripts/local_gate.sh`가 출력한 local evidence를 primary merge gate로 쓰고, merge 후 workflow가 계속 `disabled_manually`인지 확인한다. Actions를 다시 주 gate로 켠 기간에만 main GitHub Actions green을 확인한다.
+10. `momo-main`은 리뷰 반영 후 최종 local gate를 다시 실행하고 현재 PR head의 `PR CI gate`와 `Policy integrity gate`를 모두 확인한다(ADR-0153 D5). 머지 직전에는 **현재 PR의 exact canonical base branch/HEAD에서 wrapper bytes가 그 base와 일치하는 checkout**으로 `scripts/verify_policy_integrity_from_base.sh --repo yeomyeonggeori/oort --pr <PR>`를 실행해 exact base commit에서 추출한 verifier로 status/run provenance와 현재 정책 증거를 재검증한다. worktree/candidate verifier bytes는 무시하고 실행하지 않으며, 같은 Actions App/context만 믿지 않는다. local evidence가 DB·Docker·외부 provider runtime의 primary merge evidence다. release/유료 macOS workflow는 owner/M7 정책을 그대로 지킨다.
 11. 최종 보고에는 이번 작업 결과, 검증, 로드맵 영향, 새로 알게 된 리스크/자료, 다음 goal 추천을 포함한다.
 
 ## 2. 리포 맵 (디렉터리 → 책임)
@@ -68,7 +68,7 @@ infra/                   dev docker-compose(PG18+Centrifugo v6) · e2e compose �
 scripts/                 local_gate.sh · verify_*.sh · verify_merge_tree.sh · goal_claim/status/release.sh · migrate.sh
 docs/                    INDEX.md(문서 지도) · adr/(결정 정본) · architecture/overview.md · api/openapi.yaml · runbooks/
 legal/                   privacy-policy · agent-disclosure · THIRD_PARTY_NOTICES (법률 자문 아님)
-.github/                 ISSUE_TEMPLATE/ · workflows/(전부 workflow_dispatch — 비용 방지)
+.github/                 ISSUE_TEMPLATE/ · workflows/(pr-ci + track-alignment 자동, release는 owner/M7 게이트)
 ```
 
 **은퇴 중 — 삭제 대기(§0 상자). 읽어서 이해하는 용도이지 확장 대상이 아니다:**
@@ -103,7 +103,7 @@ make test                            # = rust-test  + ts-test
 # 병합 결과 검증 — 브랜치가 아니라 "머지된 트리"를 잰다(#1108). 웹·폰·코어 크로스
 scripts/verify_merge_tree.sh                       # 기본 base=origin/track/engine
 
-# 게이트 (GitHub Actions는 비용 방지로 disabled/manual-only)
+# 게이트 (PR CI는 보조, runtime local evidence가 정본)
 scripts/local_gate.sh --profile docs               # 문서/정적 — 문서만 건드려도 이건 돌린다
 scripts/local_gate.sh --profile web                # 웹 클라 게이트(설치·lint·vitest·tsc·빌드·라이선스)
 scripts/local_gate.sh --profile runtime-db
@@ -192,7 +192,7 @@ Closes #<issue>
 
 **런타임 미검증:** Docker/psql로 가능한 PG18+Centrifugo 검증은 각 goal에서 실제 수행한다. hermes, APNs 등 외부 의존이 남으면 실제 의존성 또는 mock 준비를 먼저 검토하고, 그래도 못 닫는 범위만 좁게 `runtime-unverified` 표기 + 절차를 문서에 남긴다(현행 스택 절차는 `infra/rust/README.md`).
 
-**🔒 게이트 불변식:** 스토어/공증 배포(M8)·external TestFlight는 **사용성 검수 게이트(M7) PASS 후에만**. 조건: `docs/cicd/05-qa-release-gate.md` G-0~G-G 전부 PASS + 증거 → `docs/cicd/03-store-readiness-gate.md` 상단 PASS 블록(날짜+커밋해시+빌드#+증거) 기록 → STATUS.md 게이트 OPEN→PASS. **기록 없는 release = 규칙 위반.** PASS 전 `release-*.yml` 미트리거. 현재 GitHub Actions는 비용 방지를 위해 disabled/manual-only이며, owner approval 전에는 재활성/수동 실행하지 않는다.
+**🔒 게이트 불변식:** 스토어/공증 배포(M8)·external TestFlight는 **사용성 검수 게이트(M7) PASS 후에만**. 조건: `docs/cicd/05-qa-release-gate.md` G-0~G-G 전부 PASS + 증거 → `docs/cicd/03-store-readiness-gate.md` 상단 PASS 블록(날짜+커밋해시+빌드#+증거) 기록 → STATUS.md 게이트 OPEN→PASS. **기록 없는 release = 규칙 위반.** PASS 전 `release-*.yml` 미트리거. 자동 `pr-ci`·`track-alignment`는 이 release 권한을 넓히지 않으며, release/유료 macOS workflow는 owner approval 전 미트리거다.
 
 **permissive 라이선스:** 전 의존성 permissive(Apache-2.0/MIT/BSD/PostgreSQL License) 유지 — Rust(tokio·axum·sqlx MIT/Apache-2.0)·Centrifugo v6(Apache-2.0)·PostgreSQL 18(PostgreSQL License)·React/Vite/Tauri(MIT/Apache-2.0). **비-permissive(GPL/AGPL/상용 제약) 의존 추가 금지.** 라이선스 게이트의 커버리지·정책 정본은 `CONTRIBUTING.md`이며 Rust/npm 정본 트리로의 이설은 #1225에서 다룬다. 새 의존 추가 시 라이선스 확인 + `legal/THIRD_PARTY_NOTICES.md`/`NOTICE` 귀속 반영. 외부 배포/상용 전 법무 검토 1회 필수 — 법무·스토어 정책 텍스트는 **법률 자문이 아님**(사실은 Apple/GitHub 1차 출처, 추정은 `(추정)`).
 

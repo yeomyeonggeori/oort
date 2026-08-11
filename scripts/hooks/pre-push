@@ -1,22 +1,120 @@
 #!/usr/bin/env bash
-# Optional momo pre-push hook. Install with scripts/install_branch_skew_hook.sh.
+# Optional oort track-alignment + branch-skew pre-push hook.
+# Install with scripts/install_branch_skew_hook.sh.
 set -euo pipefail
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "$REPO_ROOT"
+PUSH_REMOTE="${1:-}"
+PUSH_URL="${2:-}"
+CANONICAL_REPO="yeomyeonggeori/oort"
 
-git fetch --quiet origin main || {
-  echo "[branch-skew] unable to refresh origin/main; push blocked fail-closed" >&2
+normalize_github_repo_url() {
+  local input="${1:-}"
+  local path
+
+  case "$input" in
+    git@github.com:*) path="${input#git@github.com:}" ;;
+    ssh://git@github.com/*) path="${input#ssh://git@github.com/}" ;;
+    https://github.com/*) path="${input#https://github.com/}" ;;
+    *) return 1 ;;
+  esac
+
+  case "$path" in
+    *.git) path="${path%.git}" ;;
+  esac
+  [[ "$path" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || return 1
+  printf '%s\n' "$path" | tr '[:upper:]' '[:lower:]'
+}
+
+# Git always supplies both the remote name and URL. The fallback keeps direct
+# fixture/manual invocations safe: resolve a configured alias first, then try
+# the first argument itself as a direct URL. Raw values are never logged because
+# they may contain credentials.
+if [ -z "$PUSH_URL" ] && [ -n "$PUSH_REMOTE" ]; then
+  case "$PUSH_REMOTE" in
+    git@*|ssh://*|https://*) PUSH_URL="$PUSH_REMOTE" ;;
+    *) PUSH_URL="$(git remote get-url -- "$PUSH_REMOTE" 2>/dev/null || printf '%s' "$PUSH_REMOTE")" ;;
+  esac
+fi
+
+PUSH_IDENTITY="unknown"
+if push_repo="$(normalize_github_repo_url "$PUSH_URL")"; then
+  if [ "$push_repo" = "$CANONICAL_REPO" ]; then
+    PUSH_IDENTITY="canonical"
+  else
+    PUSH_IDENTITY="github-fork"
+  fi
+fi
+
+# Candidate checks compare against refs fetched from origin. Re-verify that
+# trust anchor on every canonical push; installation-time proof alone would be
+# stale if somebody later rewired origin.
+if [ "$PUSH_IDENTITY" = "canonical" ]; then
+  origin_url="$(git remote get-url origin 2>/dev/null)" || {
+    echo "[track-alignment] unable to verify canonical origin; push blocked fail-closed" >&2
+    exit 1
+  }
+  origin_repo="$(normalize_github_repo_url "$origin_url")" || {
+    echo "[track-alignment] unable to verify canonical origin; push blocked fail-closed" >&2
+    exit 1
+  }
+  if [ "$origin_repo" != "$CANONICAL_REPO" ]; then
+    echo "[track-alignment] unable to verify canonical origin; push blocked fail-closed" >&2
+    exit 1
+  fi
+fi
+
+git fetch --quiet origin \
+  +refs/heads/main:refs/remotes/origin/main \
+  +refs/heads/track/engine:refs/remotes/origin/track/engine \
+  +refs/heads/track/uxui:refs/remotes/origin/track/uxui 2>/dev/null || {
+  echo "[track-alignment] unable to refresh canonical refs; push blocked fail-closed" >&2
   exit 1
 }
 
+scripts/check_track_alignment.sh --local-existing
+
 checked=0
-while read -r local_ref local_sha _remote_ref _remote_sha; do
+while read -r local_ref local_sha remote_ref _remote_sha; do
+  case "$local_sha" in
+    0000000000000000000000000000000000000000)
+      case "$remote_ref" in
+        refs/heads/main|refs/heads/track/engine|refs/heads/track/uxui)
+          case "$PUSH_IDENTITY" in
+            canonical)
+              echo "[track-alignment] deleting a canonical branch is blocked: $remote_ref" >&2
+              exit 1
+              ;;
+            unknown)
+              echo "[track-alignment] unable to verify push destination for protected branch; push blocked fail-closed: $remote_ref" >&2
+              exit 1
+              ;;
+          esac
+          ;;
+      esac
+      continue
+      ;;
+  esac
+  case "$remote_ref" in
+    refs/heads/main|refs/heads/track/engine|refs/heads/track/uxui)
+      case "$PUSH_IDENTITY" in
+        canonical)
+          # Git supplies local_ref=(unknown) for pushes sourced from a raw SHA
+          # or rev expression. The protected target, not source spelling,
+          # decides whether the candidate check is mandatory.
+          checked=1
+          scripts/check_track_alignment.sh --candidate "$remote_ref" "$local_sha"
+          ;;
+        unknown)
+          echo "[track-alignment] unable to verify push destination for protected branch; push blocked fail-closed: $remote_ref" >&2
+          exit 1
+          ;;
+      esac
+      ;;
+  esac
   case "$local_ref" in
     refs/heads/*)
-      case "$local_sha" in
-        0000000000000000000000000000000000000000) continue ;;
-      esac
       checked=1
       MOMO_GATE_HEAD_REF="$local_sha" scripts/check_branch_skew.sh
       ;;
