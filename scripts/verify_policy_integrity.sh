@@ -6,9 +6,9 @@
 # executes the candidate tree.
 #
 # --verify-run is the local momo-main merge gate. A same-name status produced
-# by the GitHub Actions App is not sufficient: the status target must resolve
+# by the GitHub Actions bot is not sufficient: the status target must resolve
 # to this exact trusted workflow, event, run attempt, PR head/base binding, and
-# successful evaluator job.
+# successful evaluator job from the separate GitHub Actions App authority.
 set -euo pipefail
 
 MODE=""
@@ -25,6 +25,10 @@ POLICY_WORKFLOW_PATH=".github/workflows/policy-integrity.yml"
 POLICY_WORKFLOW_API_NAME="policy-integrity.yml"
 POLICY_WORKFLOW_NAME="policy-integrity"
 POLICY_JOB_NAME="Trusted policy integrity evaluator"
+POLICY_STATUS_CREATOR_LOGIN="github-actions[bot]"
+POLICY_STATUS_CREATOR_ID=41898282
+POLICY_STATUS_CREATOR_TYPE="Bot"
+POLICY_ACTIONS_APP_ID=15368
 POLICY_LABEL="policy-change-approved"
 POLICY_AUTHOR="kwakseongjae"
 POLICY_AUTHOR_ID=87296259
@@ -583,7 +587,9 @@ verify_run_provenance() {
       (.state | type == "string" and length > 0) and
       ((.target_url == null) or (.target_url | type == "string")) and
       (.created_at | type == "string") and
-      (.creator.login | type == "string" and length > 0))
+      (.creator.login | type == "string" and length > 0) and
+      (.creator.id | type == "number" and floor == . and . > 0) and
+      (.creator.type | type == "string" and length > 0))
   ' "$statuses" >/dev/null 2>&1; then
     fail "PR-head commit statuses response is malformed"
   fi
@@ -595,13 +601,17 @@ verify_run_provenance() {
   ' "$statuses" >"$status"; then
     fail "latest '$POLICY_CONTEXT' status is missing on current PR head"
   fi
-  jq -e --arg head "$head" '
+  jq -e \
+    --arg creator_login "$POLICY_STATUS_CREATOR_LOGIN" \
+    --argjson creator_id "$POLICY_STATUS_CREATOR_ID" \
+    --arg creator_type "$POLICY_STATUS_CREATOR_TYPE" '
     .state == "success" and
-    .sha == $head and
-    .creator.login == "github-actions[bot]" and
+    .creator.login == $creator_login and
+    .creator.id == $creator_id and
+    .creator.type == $creator_type and
     (.target_url | type == "string")
   ' "$status" >/dev/null \
-    || fail "latest '$POLICY_CONTEXT' status is not a successful GitHub Actions status for the current head"
+    || fail "latest '$POLICY_CONTEXT' status from the exact current-head endpoint is not a successful trusted GitHub Actions bot status"
   target_url="$(jq -r '.target_url' "$status")"
   case "$target_url" in
     "https://github.com/$REPO/actions/runs/"*"/attempts/"*) ;;
@@ -662,9 +672,10 @@ verify_run_provenance() {
     || fail "trusted workflow check suite is unavailable"
   if ! app_id="$(jq -er \
     --argjson suite_id "$check_suite_id" \
-    --arg run_execution_sha "$run_execution_sha" '
+    --arg run_execution_sha "$run_execution_sha" \
+    --argjson expected_app_id "$POLICY_ACTIONS_APP_ID" '
     select(.id == $suite_id and .head_sha == $run_execution_sha)
-    | select(.app.slug == "github-actions")
+    | select(.app.slug == "github-actions" and .app.id == $expected_app_id)
     | .app.id
     | select(type == "number" and floor == . and . > 0)
   ' "$suite")"; then
@@ -745,6 +756,9 @@ verify_run_provenance() {
       --arg authority_ref "$authority_ref" \
       --arg authority_sha "$authority_sha" \
       --arg context "$POLICY_CONTEXT" \
+      --arg status_creator_login "$POLICY_STATUS_CREATOR_LOGIN" \
+      --argjson status_creator_id "$POLICY_STATUS_CREATOR_ID" \
+      --arg status_creator_type "$POLICY_STATUS_CREATOR_TYPE" \
       --argjson workflow_id "$workflow_id" \
       --arg workflow_path "$POLICY_WORKFLOW_PATH" \
       --arg workflow_run_path "$run_workflow_path" \
@@ -757,6 +771,9 @@ verify_run_provenance() {
         repo: $repo, pr: $pr, head_sha: $head, base_ref: $base,
         base_sha: $base_sha, authority_ref: $authority_ref,
         authority_sha: $authority_sha, context: $context,
+        status_creator_login: $status_creator_login,
+        status_creator_id: $status_creator_id,
+        status_creator_type: $status_creator_type,
         workflow_id: $workflow_id, workflow_path: $workflow_path,
         workflow_run_path: $workflow_run_path,
         event: $event, run_id: $run_id, run_attempt: $run_attempt,
