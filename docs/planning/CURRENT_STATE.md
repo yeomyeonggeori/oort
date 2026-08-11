@@ -1,5 +1,13 @@
 # oort 기획 현재 상태 (Planning Current State)
 
+> **2026-08-11 스냅샷 20 (Fable · momo-main — 검수 배치 1·2 완결 라이브·sol 인수인계).** 컴팩트 복원 진입점.
+>
+> **검수 배치 1(6건)+2(5건) 전부 랜딩·배포**: 라이브 `momo-rust:a5193e5e`(main=engine 0/0, f808d9cb)·마이그 068·centrifugo presence 네임스페이스 발효. ADR-0160(프레즌스)·0161(워크스페이스) **Accepted·구현 완료**, ADR-0124 증보1(알림규칙 v0=DND+멘션예외) 랜딩·성재 최종 승인 대기. 데스크탑 검수앱 `~/Desktop/oort.app`(--debug=dev 가드로 자동업데이트 롤백 원천 차단, #1280). **배포 사고 교훈 성문화**(JOURNAL 8/11): 서버 config 통째 덮기 금지 — 백업+외과 삽입+checkconfig 게이트.
+>
+> **인수인계**: 당분간 기획·리뷰 주도 = **sol(GPT 5.6, Codex)**. 패킷 정본 `docs/planning/handoffs/2026-08-11-sol-handoff.md`(미션 4: 동향 파악·코드 리뷰·취약점 분석·오픈소스/셀프호스팅 준비. 취약점 후보 1순위 = 라이브 centrifugo proxy secret이 dev-insecure 값). 성재 결정 큐 6건은 그 문서 §6.
+>
+> 이하 스냅샷 19:
+
 > **2026-08-09 스냅샷 19 (Fable · momo-main — 우로보로스 선행 배치: #1210·#1213 종결·라이브 보안 헤더 발효·ASC 재조준).** 컴팩트 복원 진입점.
 >
 > **저녁 배치(성재 편성 승인)**: 우로보로스 인터뷰(Opus 5)가 브리프 오류 3건·숨은 매듭(ASC)·②③ 결합·감사 낡음을 적발(정본 `research/2026-08-09-ouroboros-session-planning-interview.md`, 전 항목 재검증). 집행 — **#1215 머지·#1210 종결**(리뷰 PASS B0/H0·8레인 green·후속 #1218) · **#1213 종결**(#1217 라이브 Caddyfile 회수 → #1220 헤더 5종+게이트 라이브 확장 red proof 7 → 배포 → 라이브 5종 실측 도달) · **배포**(서버 `momo-rust:6bfc9b82`·웹 `index-Dp1ym0h8`·마이그레이션 063, 롤백 백업 2 서버 보존) · **ASC Xcode Cloud "Default"를 MomoMobile로 재지정**(Fable이 성재 Chrome으로 콘솔 직접 조작 — 아카이브·서명·export green, 유일 빨강=ci_post_xcodebuild 첫 실행 결함 → #1219 수리, 재빌드 검증 중).
