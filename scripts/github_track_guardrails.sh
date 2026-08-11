@@ -1006,9 +1006,11 @@ build_policy_payload() {
         | (.required_pull_request_reviews.required_approving_review_count // 0)
         | if type == "number" then . else 0 end] | max) as $review_count
     | {
+        # The live GitHub PUT schema treats legacy `contexts` and app-pinned
+        # `checks` as mutually exclusive oneOf shapes. Legacy contexts were
+        # normalized above; never emit the `contexts` field alongside checks.
         required_status_checks: {
           strict: true,
-          contexts: [],
           checks: $required_checks
         },
         enforce_admins: true,

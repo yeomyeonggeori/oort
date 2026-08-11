@@ -1,5 +1,10 @@
 # oort 진행 현황
 
+## GitHub branch protection live payload 호환 (#1318, 2026-08-12)
+
+- 첫 attended bootstrap에서 GitHub가 `required_status_checks.contexts=[]`와 app-pinned `checks`를 함께 받은 요청을 서로 다른 OpenAPI `oneOf` 형상에 동시에 맞는 HTTP 422로 거절했다. 보호 PUT은 이제 `strict: true`와 `checks`만 내보내며, 기존 legacy `contexts`는 의미를 버리지 않고 `{context, app_id: -1}` check로 정규화한다.
+- 오프라인 transport가 혼합 형상을 live 422처럼 거절하고, 혼합 필드를 되살린 mutation이 첫 PUT에서 RED·성공 write 0인지와 stronger policy를 포함한 exact checks-only payload를 함께 고정한다. 원격 attended apply/readback은 이 수정의 track/engine→main 랜딩 뒤 새 bootstrap provenance로 재시도하므로 아직 `runtime-unverified`다.
+
 ## Canonical track 정렬 가드레일 (#1297, 2026-08-12)
 
 - `main`은 두 `track/*`의 조상이어야 하고 track-ahead는 정상이라는 topology를 `scripts/check_track_alignment.sh`로 기계화했다. remote/local behind·divergence, canonical upstream 오배선, ref 누락, non-fast-forward candidate는 이름을 대고 실패하며, 격리 fixture가 각 RED와 ahead PASS를 고정한다.
