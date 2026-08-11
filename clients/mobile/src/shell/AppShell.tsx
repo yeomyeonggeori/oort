@@ -24,10 +24,12 @@ import ConversationScreen from '../screens/ConversationScreen';
 import InboxScreen from '../screens/InboxScreen';
 import SearchScreen from '../screens/SearchScreen';
 import SidebarScreen from '../screens/SidebarScreen';
+import WorkConsoleScreen from '../screens/WorkConsoleScreen';
+import WorkSessionDetailScreen from '../screens/WorkSessionDetailScreen';
 import {SessionProvider} from '../session/useSession';
 
 // =============================================================================
-// The signed-in tree: three tabs, and the surfaces that cover them.
+// The signed-in tree: four tabs, and the surfaces that cover them.
 //
 // `SessionProvider` is mounted here rather than in `App.tsx` so that everything
 // below can take a signed-in member for granted. The gate above has already
@@ -107,6 +109,11 @@ function Shell(): React.JSX.Element {
     (agent: OpenAgent) => dispatch({type: 'openAgent', agent}),
     [],
   );
+  const onOpenWorkSession = useCallback(
+    (sessionId: string) =>
+      dispatch({type: 'openWorkSession', workSession: {sessionId}}),
+    [],
+  );
 
   // Which tabs have ever been the current one. A ref rather than state: it is
   // derived from `nav.tab` and is only ever read during the render that already
@@ -147,6 +154,14 @@ function Shell(): React.JSX.Element {
             <AgentsScreen onOpenAgent={onOpenAgent} />
           </View>
         ) : null}
+        {visited.current.has('work') ? (
+          <View style={nav.tab === 'work' ? styles.visible : styles.hidden}>
+            <WorkConsoleScreen
+              active={nav.tab === 'work' && nav.workSession === null}
+              onOpenSession={onOpenWorkSession}
+            />
+          </View>
+        ) : null}
       </View>
 
       <TabBar current={nav.tab} onSelect={tab => dispatch({type: 'selectTab', tab})} />
@@ -175,6 +190,24 @@ function Shell(): React.JSX.Element {
         </EdgeSwipeBack>
       ) : null}
 
+      {/* The 작업 detail is a phone-native push over its list. A conversation
+          opened from it sits above this layer, so one back returns here and a
+          second back returns to the workspace-wide list. */}
+      {nav.workSession ? (
+        <EdgeSwipeBack
+          accessibilityViewIsModal={nav.conversation === null}
+          style={styles.overlay}
+          onBack={onBack}
+          testID="work-detail-pane">
+            <WorkSessionDetailScreen
+              active={nav.conversation === null}
+              sessionId={nav.workSession.sessionId}
+            onBack={onBack}
+            onOpenConversation={onOpenConversation}
+          />
+        </EdgeSwipeBack>
+      ) : null}
+
       {/* ## 좌측 엣지에서 밀면 닫힌다 (goal RN-U2)
           성재: "화면 좌측을 슥 넘기면 뒤로가게 해주면 안돼?"
 
@@ -186,7 +219,11 @@ function Shell(): React.JSX.Element {
           탭 전환에는 걸지 않는다 — 탭은 push 가 아니라 나란한 두 곳이고, 그
           사이를 스와이프로 잇는 것은 이 피드백이 요청한 것이 아니다. */}
       {nav.conversation ? (
-        <EdgeSwipeBack style={styles.overlay} onBack={onBack}>
+        <EdgeSwipeBack
+          accessibilityViewIsModal={nav.workSession !== null}
+          style={styles.overlay}
+          onBack={onBack}
+          testID="conversation-pane">
           <ConversationScreen
             channelId={nav.conversation.channelId}
             title={nav.conversation.title}
@@ -231,7 +268,9 @@ function TabBar({
             style={({pressed}) => [styles.tab, pressed && styles.pressed]}
             testID={`tab-${tab}`}>
             <View style={styles.tabInner}>
-              <Text style={[styles.tabLabel, selected && styles.tabLabelActive]}>
+              <Text
+                style={[styles.tabLabel, selected && styles.tabLabelActive]}
+                testID={`tab-label-${tab}`}>
                 {tabLabel(tab)}
               </Text>
               <CountBadge count={badge} tone="mention" label={`멘션 ${badge}개`} />
@@ -258,14 +297,23 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     paddingHorizontal: SAFE_GUTTER,
     paddingTop: space.sm,
   },
-  tab: {flex: 1, minHeight: TOUCH_TARGET, justifyContent: 'center'},
+  tab: {flex: 1, minWidth: 0, minHeight: TOUCH_TARGET, justifyContent: 'center'},
   tabInner: {
-    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: space.xs,
+    minWidth: 0,
+    paddingHorizontal: space.xs,
   },
-  tabLabel: {fontSize: font.label, color: color.textMuted},
+  // Do not cap Dynamic Type or force one line. At 320pt, four equal slots are
+  // 72pt wide; a large Korean label must grow the bar vertically, not clip.
+  tabLabel: {
+    alignSelf: 'stretch',
+    flexShrink: 1,
+    textAlign: 'center',
+    fontSize: font.label,
+    color: color.textMuted,
+  },
   tabLabelActive: {color: color.text, fontWeight: '700'},
   pressed: {opacity: 0.6},
   overlay: {

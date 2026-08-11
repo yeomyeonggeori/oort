@@ -1,5 +1,11 @@
 # oort 진행 현황
 
+## React Native 작업 콘솔 — T1/T2/T3 위치·읽기 전용 상세 (#1292, 2026-08-11)
+
+- 모바일 하단 탭에 워크스페이스 범위 `작업` 목록을 추가했다. 최근 최대 200개를 진행 우선으로 보여 주고 `전체`/`진행`(`running|idle`)을 가르며, 호스트·채널·담당자·도구·시작/종료 시각과 공유 `workExecutionLocation`의 정확한 `T1 · 데스크톱 앱` / `T2 · 셀프호스트` / `T3 · 클라우드` / `실행 위치 확인 필요` 표식을 함께 쓴다. 기존 AgentDetail의 눈에 보이는 실행 위치도 같은 정본 mapper로 통일했다.
+- 폰 전용 상세는 durable typed lifecycle·tool·ACP 요약과 발원 대화 이동만 제공한다. raw PTY·명령 입력/출력·cwd/env·controller/owner 제어·observer attach·새 native/WebView 의존성은 추가하지 않았고, 숨은 작업 탭은 polling/realtime을 유지하지 않는다.
+- 검증: review 보정 뒤 mobile typecheck·lint(오류 0)·전체 Jest 1,144/1,144와 core typecheck·lint·전체 Vitest 1,173/1,173, lane/measure shell syntax·Maestro YAML parse, `verify_merge_tree.sh --base origin/track/uxui --head HEAD --install`의 웹·폰·코어 8레인이 green이다. 좁은 4탭은 Dynamic Type 줄바꿈, 필터는 3:1 경계, 상세↔대화↔목록은 VoiceOver 초점 복귀, 긴 상세는 rotor heading을 보장하며 light/dark·긴 한국어·접근성 글자 캡처가 measure lane에 포함됐다. 현재 booted Simulator가 없어 캡처·Maestro 실주행은 `runtime-unverified`다.
+
 ## ADR-0158 서버 축 — `runId` 서비스 개시 · refine 공지 · 어댑터 스트림 (#1130 W-N, 2026-08-08)
 
 - **`POST …/messages`의 `runId` 거절이 풀렸다(D5).** 검증 3종은 전송 트랜잭션 **안**에서 fail-closed다(`momo_agent::authorize_run_binding_in_tx`): run 실재 · 같은 워크스페이스 · 요청 주체가 그 run의 에이전트(`agent_run.agent_member_id == principal.member_id`). 안 보이는 run은 **404**(RLS가 타 테넌트 행을 감추므로 더 구체적인 답은 존재 확인이 된다), 보이지만 남의 것이면 **403**. 통과하면 `message.run_id` 컬럼과 `props.run_id` 사본을 **함께** 쓴다 — 전자는 서버측 닫기가 미완성 답을 찾는 키, 후자는 히스토리 페이지가 `runEnded`를 정하는 키라, 하나만 쓰면 두 독자 중 하나가 못 본다.

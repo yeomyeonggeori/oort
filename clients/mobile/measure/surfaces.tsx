@@ -50,6 +50,8 @@ import {
 import type {MessageSearch} from '../src/features/search/useMessageSearch';
 import type {Palette} from '../src/design/tokens';
 import {FixedScheme, useStyles, type ColorScheme} from '../src/design/theme';
+import WorkConsoleScreen from '../src/screens/WorkConsoleScreen';
+import WorkSessionDetailScreen from '../src/screens/WorkSessionDetailScreen';
 
 // =============================================================================
 // goal RN-C5 의 표면들을 사진 찍을 수 있게 세워 두는 하네스. **앱 코드가 아니다.**
@@ -1796,6 +1798,20 @@ export function Surface({name}: {name: string}): React.JSX.Element {
         </RealtimeContext.Provider>
       );
     }
+    // ---- #1292: workspace-wide RN Work Console + read-only detail ---------
+    case 'work-console':
+      return (
+        <WorkConsoleScreen active onOpenSession={() => {}} />
+      );
+    case 'work-detail':
+      return (
+        <WorkSessionDetailScreen
+          active
+          sessionId="measure-work-t1"
+          onBack={() => {}}
+          onOpenConversation={() => {}}
+        />
+      );
     // 이슈 #1146 N4 — 「메시지 검색」으로 가는 두 문을 한 장에.
     //
     // 이름은 이제 셋(도착한 화면의 제목과 이 두 문)이 코어의 표면 판정표 한 줄
@@ -1892,6 +1908,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
             sheet · delete · editor · editor-error · row · row-lead ·
             approval-card · approval-notes · avatar · composer-offline ·
             group · dividers · ade-summary · ade-summary-empty · ade-panel ·
+            work-console · work-detail ·
             destructive-confirm · search-entry · search-idle ·
             search-searching · search-empty · search-error · search-results
           </Text>
@@ -1983,6 +2000,125 @@ const harnessClient = new QueryClient({
   },
 });
 
+const WORK_CONSOLE_HOSTS = [
+  ...ADE_HOSTS,
+  {
+    id: 'host-workd',
+    workspaceId: ADE_WS,
+    scope: 'workspace',
+    ownerMemberId: SELF,
+    type: 'workd',
+    displayName: '서울 셀프호스트 · 장시간 회귀 검증 전용 실행기',
+    capabilities: {},
+    createdAtMs: 0,
+    online: true,
+  },
+] as const;
+
+const WORK_CONSOLE_SESSIONS = [
+  adeSession({
+    id: 'measure-work-t1',
+    hostId: 'host-mac',
+    rootMessageId: 'measure-work-root',
+    label: '릴레이 재시작과 장애 복구 절차를 실제 배포 전에 끝까지 검증하는 작업',
+    tool: 'codex-app-server',
+    startedAtMs: NOW - 900_000,
+  }),
+  adeSession({
+    id: 'measure-work-t2',
+    hostId: 'host-workd',
+    label: '셀프호스트 회귀 테스트',
+    tool: 'prime',
+    status: 'idle',
+    startedAtMs: NOW - 1_800_000,
+  }),
+  adeSession({
+    id: 'measure-work-unknown',
+    hostId: 'retired-host',
+    label: '호스트가 사라진 마이그레이션',
+    tool: 'claude',
+    status: 'orphaned',
+    startedAtMs: NOW - 2_700_000,
+  }),
+  adeSession({
+    id: 'measure-work-t3',
+    hostId: 'host-cloud',
+    label: '클라우드 배포 점검',
+    tool: 'hermes',
+    status: 'ended',
+    startedAtMs: NOW - 3_600_000,
+    endedAtMs: NOW - 3_000_000,
+  }),
+];
+
+/** Seed the exact query keys the shipping Work Console reads, without a socket. */
+function seedWorkConsole(): void {
+  const shift = Date.now() - NOW;
+  harnessClient.setQueryData(['roster', ADE_WS], ADE_ROSTER);
+  harnessClient.setQueryData(
+    ['channels', ADE_WS],
+    ADE_CHANNELS.map(channel =>
+      channel.id === 'ch-deploy'
+        ? {...channel, name: '배포와 장애 복구를 함께 검토하는 긴 이름의 대화'}
+        : channel,
+    ),
+  );
+  harnessClient.setQueryData(['work-hosts', ADE_WS], WORK_CONSOLE_HOSTS);
+  harnessClient.setQueryData(
+    ['work-sessions', ADE_WS],
+    WORK_CONSOLE_SESSIONS.map(session => ({
+      ...session,
+      startedAtMs: session.startedAtMs + shift,
+      ...(session.status === 'ended'
+        ? {endedAtMs: Date.now() - 3_000_000}
+        : {}),
+    })),
+  );
+  harnessClient.setQueryData(
+    ['work-session-events', ADE_WS, 'ch-deploy', 'measure-work-root'],
+    {
+      truncated: false,
+      events: [
+        {
+          eventId: 'measure-event-created',
+          type: 'agent.status',
+          sessionId: 'measure-work-t1',
+          atMs: Date.now() - 780_000,
+          seq: 101,
+          payload: {
+            work_session_id: 'measure-work-t1',
+            terminal_event: 'created',
+          },
+        },
+        {
+          eventId: 'measure-event-tool',
+          type: 'agent.status',
+          sessionId: 'measure-work-t1',
+          atMs: Date.now() - 120_000,
+          seq: 102,
+          payload: {
+            work_session_id: 'measure-work-t1',
+            tool_call_name: 'read_file',
+            detail:
+              '배포 구성과 롤백 순서를 확인하고, 장애가 반복될 때 담당자가 따라야 할 복구 단계를 긴 설명으로 검증했습니다.',
+            plan: [
+              {
+                content: '배포 구성과 셀프호스트 환경 변수의 정합성을 끝까지 확인',
+                status: 'completed',
+              },
+              {
+                content: '좁은 화면에서도 읽을 수 있는 장시간 회귀 테스트 실행',
+                status: 'in_progress',
+              },
+              {content: '결과 정리', status: 'pending'},
+            ],
+          },
+        },
+      ],
+    },
+  );
+}
+
 const buildStyles = (color: Palette) => StyleSheet.create({
     lockedFrame: {paddingHorizontal: 16, paddingTop: 8},
     // 하네스 자신의 라벨. 제품이 아니라 **사진의 캡션**이라 토큰을 든다: 라이트
@@ -2021,4 +2157,11 @@ if (
   )
 ) {
   seedAdeControl();
+}
+if (
+  LAUNCHED !== null &&
+  LAUNCHED.kind === 'surface' &&
+  (LAUNCHED.name === 'work-console' || LAUNCHED.name === 'work-detail')
+) {
+  seedWorkConsole();
 }

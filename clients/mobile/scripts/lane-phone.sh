@@ -8,7 +8,7 @@
 #     -> disposable fixture member + agent profile + work session
 #     -> a realtime assertion with the phone's own Origin
 #     -> simulator build + install
-#     -> five Maestro flows against the real app
+#     -> six Maestro flows against the real app
 #     -> PASS/FAIL table with a screenshot path for every failure
 #     -> stack torn down, volumes included
 #
@@ -138,7 +138,7 @@ DO_BUILD=1
 KEEP=0
 SKIP_FLOWS=0
 ONLY_FLOW=""
-FLOWS=(00-login 10-mention-working 20-stop 30-approval 40-agents-tab)
+FLOWS=(00-login 10-mention-working 20-stop 30-approval 40-agents-tab 45-work-console)
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
