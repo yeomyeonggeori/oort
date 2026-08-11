@@ -44,7 +44,7 @@ oort = AI 에이전트가 사람과 **동등한 1급 멤버**(`member.kind='agen
 7. worker는 `scripts/goal_release.sh <issue> --review --pr <PR URL>`로 이슈를 `status:needs-review`로 전환하고 `momo-main`에 handoff한 뒤 멈춘다.
 8. **merge/close/main gate/로드맵 조정은 `momo-main`만 수행한다.** worker는 PR 생성 후 임의 merge, 이슈 close, main 재검증, 로드맵/백로그 재배열을 하지 않는다.
 9. `momo-main`은 코드리뷰 에이전트 또는 리뷰 스킬로 보안·코드 품질·회귀 위험을 점검하고, 필요한 수정만 worker 또는 같은 이슈 worktree에 위임한다.
-10. `momo-main`은 리뷰 반영 후 최종 local gate를 다시 실행하고 `PR CI gate`를 확인한다. local evidence가 DB·Docker·외부 provider runtime의 primary merge evidence다. release/유료 macOS workflow는 owner/M7 정책을 그대로 지킨다.
+10. `momo-main`은 리뷰 반영 후 최종 local gate를 다시 실행하고 현재 PR head의 `PR CI gate`와 `Policy integrity gate`를 모두 확인한다(ADR-0153 D5). 머지 직전에는 **현재 PR의 exact canonical base branch/HEAD에서 wrapper bytes가 그 base와 일치하는 checkout**으로 `scripts/verify_policy_integrity_from_base.sh --repo yeomyeonggeori/oort --pr <PR>`를 실행해 exact base commit에서 추출한 verifier로 status/run provenance와 현재 정책 증거를 재검증한다. worktree/candidate verifier bytes는 무시하고 실행하지 않으며, 같은 Actions App/context만 믿지 않는다. local evidence가 DB·Docker·외부 provider runtime의 primary merge evidence다. release/유료 macOS workflow는 owner/M7 정책을 그대로 지킨다.
 11. 최종 보고에는 이번 작업 결과, 검증, 로드맵 영향, 새로 알게 된 리스크/자료, 다음 goal 추천을 포함한다.
 
 ## 2. 리포 맵 (디렉터리 → 책임)

@@ -1,32 +1,60 @@
 #!/usr/bin/env bash
 # Idempotently check/apply the GitHub protection policy for the three canonical
 # branches. Default is read-only check. Apply is deliberately locked behind the
-# post-main sequence: all branch heads equal and the latest PR CI gate is green.
+# post-main sequence: all branch heads equal, the latest PR CI gate is green,
+# and one trusted Policy integrity gate bootstrap PR is verified per branch.
 set -euo pipefail
 
+SCRIPT_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
+REPO_ROOT="$(CDPATH='' cd -- "$SCRIPT_DIR/.." && pwd)"
 MODE="check"
 REPO=""
 REQUIRED_CONTEXT="PR CI gate"
+POLICY_CONTEXT="Policy integrity gate"
 REQUIRED_APP_SLUG="github-actions"
+PR_CI_WORKFLOW_NAME="pr-ci"
+PR_CI_WORKFLOW_PATH=".github/workflows/pr-ci.yml"
+POLICY_WORKFLOW_NAME="policy-integrity"
+POLICY_WORKFLOW_PATH=".github/workflows/policy-integrity.yml"
 GH_BIN="${MOMO_GH_BIN:-gh}"
+GIT_BIN="git"
 BRANCHES=(main track/engine track/uxui)
 TRACK_BRANCHES=(track/engine track/uxui)
 CANONICAL_SHA=""
 REQUIRED_APP_ID=""
 ACTIONS_PERMISSIONS_JSON=""
+POLICY_PR_SPEC=""
+POLICY_PR_MAIN=""
+POLICY_PR_ENGINE=""
+POLICY_PR_UXUI=""
 MUTATED_TARGETS=()
 ATTEMPTED_TARGETS=()
 
 usage() {
   cat <<'EOF'
-Usage: scripts/github_track_guardrails.sh [--check|--apply] [--repo OWNER/REPO]
+Usage:
+  scripts/github_track_guardrails.sh [--check] [--repo OWNER/REPO]
+
+  scripts/github_track_guardrails.sh --apply [--repo OWNER/REPO] \
+    --policy-pr main=N,track/engine=N,track/uxui=N
 
 Default --check performs no remote mutation and accepts tracks ahead of main
-when main remains their ancestor. Bootstrap-only --apply is accepted only after:
-  1. main, track/engine, and track/uxui point to the same commit; and
-  2. the latest `PR CI gate` check on that commit succeeded from GitHub Actions.
+when main remains their ancestor. It resolves the official GitHub Actions App
+and checks that both `PR CI gate` and `Policy integrity gate` are pinned to it;
+it does not depend on a recent policy PR or workflow run.
 
-The managed policy requires PRs and the GitHub-Actions-pinned stable context,
+Bootstrap-only --apply is accepted only after:
+  1. main, track/engine, and track/uxui point to the same commit; and
+  2. the latest `PR CI gate` check on that commit succeeded from GitHub Actions;
+  3. --policy-pr provides exactly one distinct open trusted bootstrap PR for
+     each canonical target; and
+  4. every PR passes verify_policy_integrity.sh for its exact target/base SHA.
+
+The apply process itself must run from that exact remote-main commit with a
+clean tracked guard file. The verifier is extracted from the exact canonical
+commit object for every provenance cycle; a worktree verifier is never run.
+
+The managed policy requires PRs and both GitHub-Actions-pinned stable contexts,
 includes administrators, requires conversation resolution, and forbids force
 pushes/deletion. Existing stricter checks, review rules, push restrictions, and
 linear-history rules are preserved rather than overwritten.
@@ -47,10 +75,59 @@ while [ "$#" -gt 0 ]; do
       REPO="$2"
       shift 2
       ;;
+    --policy-pr)
+      [ "$#" -ge 2 ] || { echo "[github-guardrails] --policy-pr needs branch=PR mappings" >&2; exit 2; }
+      [ -z "$POLICY_PR_SPEC" ] || {
+        echo "[github-guardrails] --policy-pr may be provided only once" >&2
+        exit 2
+      }
+      POLICY_PR_SPEC="$2"
+      shift 2
+      ;;
     -h|--help) usage; exit 0 ;;
     *) echo "[github-guardrails] unknown argument: $1" >&2; usage >&2; exit 2 ;;
   esac
 done
+
+if [ "$MODE" = "apply" ]; then
+  resolved_gh=""
+  if [ -n "${MOMO_POLICY_INTEGRITY_VERIFIER:-}" ]; then
+    echo "[github-guardrails] MOMO_POLICY_INTEGRITY_VERIFIER is forbidden for --apply; verifier trust comes from the exact canonical Git blob" >&2
+    exit 1
+  fi
+  case "${MOMO_GITHUB_GUARDRAILS_TEST_MODE:-}" in
+    "")
+      if [ -n "${MOMO_GITHUB_GUARDRAILS_TEST_GIT:-}" ] || [ -n "${MOMO_GH_BIN:-}" ]; then
+        echo "[github-guardrails] transport overrides are forbidden for production --apply" >&2
+        exit 1
+      fi
+      GH_BIN="gh"
+      GIT_BIN="git"
+      ;;
+    offline-fixture-v1)
+      [ -n "${MOMO_GH_BIN:-}" ] && [ -n "${MOMO_GITHUB_GUARDRAILS_TEST_GIT:-}" ] || {
+        echo "[github-guardrails] invalid offline guardrails test configuration" >&2
+        exit 1
+      }
+      GIT_BIN="$MOMO_GITHUB_GUARDRAILS_TEST_GIT"
+      ;;
+    *)
+      echo "[github-guardrails] invalid offline guardrails test configuration" >&2
+      exit 1
+      ;;
+  esac
+  if ! resolved_gh="$(command -v "$GH_BIN")"; then
+    echo "[github-guardrails] gh CLI is required" >&2
+    exit 1
+  fi
+  case "$resolved_gh" in
+    /*) GH_BIN="$resolved_gh" ;;
+    *)
+      echo "[github-guardrails] apply requires an external absolute gh executable, not a shell override" >&2
+      exit 1
+      ;;
+  esac
+fi
 
 command -v "$GH_BIN" >/dev/null 2>&1 || {
   echo "[github-guardrails] gh CLI is required" >&2
@@ -77,9 +154,135 @@ case "$REPO" in
   *) echo "[github-guardrails] invalid repository slug: $REPO" >&2; exit 2 ;;
 esac
 
+parse_policy_pr_mapping() {
+  local remaining="$POLICY_PR_SPEC"
+  local entry branch pr
+
+  [ -n "$remaining" ] || {
+    echo "[github-guardrails] --apply requires --policy-pr main=N,track/engine=N,track/uxui=N" >&2
+    return 1
+  }
+  case "$remaining" in
+    ,*|*,|*,,*)
+      echo "[github-guardrails] invalid empty --policy-pr mapping" >&2
+      return 1
+      ;;
+  esac
+
+  while :; do
+    entry="${remaining%%,*}"
+    if [ "$entry" = "$remaining" ]; then
+      remaining=""
+    else
+      remaining="${remaining#*,}"
+    fi
+    [ -n "$entry" ] || {
+      echo "[github-guardrails] invalid empty --policy-pr mapping" >&2
+      return 1
+    }
+    case "$entry" in
+      *=*) ;;
+      *)
+        echo "[github-guardrails] invalid --policy-pr mapping: $entry" >&2
+        return 1
+        ;;
+    esac
+    branch="${entry%%=*}"
+    pr="${entry#*=}"
+    printf '%s\n' "$pr" | grep -Eq '^[1-9][0-9]*$' || {
+      echo "[github-guardrails] invalid policy PR number for $branch: $pr" >&2
+      return 1
+    }
+    case "$branch" in
+      main)
+        [ -z "$POLICY_PR_MAIN" ] || {
+          echo "[github-guardrails] duplicate --policy-pr mapping for main" >&2
+          return 1
+        }
+        POLICY_PR_MAIN="$pr"
+        ;;
+      track/engine)
+        [ -z "$POLICY_PR_ENGINE" ] || {
+          echo "[github-guardrails] duplicate --policy-pr mapping for track/engine" >&2
+          return 1
+        }
+        POLICY_PR_ENGINE="$pr"
+        ;;
+      track/uxui)
+        [ -z "$POLICY_PR_UXUI" ] || {
+          echo "[github-guardrails] duplicate --policy-pr mapping for track/uxui" >&2
+          return 1
+        }
+        POLICY_PR_UXUI="$pr"
+        ;;
+      *)
+        echo "[github-guardrails] unknown --policy-pr target: $branch" >&2
+        return 1
+        ;;
+    esac
+    [ -z "$remaining" ] && break
+  done
+
+  if [ -z "$POLICY_PR_MAIN" ] || [ -z "$POLICY_PR_ENGINE" ] || [ -z "$POLICY_PR_UXUI" ]; then
+    echo "[github-guardrails] --policy-pr must map main, track/engine, and track/uxui exactly once" >&2
+    return 1
+  fi
+  if [ "$POLICY_PR_MAIN" = "$POLICY_PR_ENGINE" ] \
+    || [ "$POLICY_PR_MAIN" = "$POLICY_PR_UXUI" ] \
+    || [ "$POLICY_PR_ENGINE" = "$POLICY_PR_UXUI" ]; then
+    echo "[github-guardrails] --policy-pr must use a distinct PR for each canonical target" >&2
+    return 1
+  fi
+}
+
+if [ "$MODE" = "apply" ]; then
+  resolved_git=""
+  parse_policy_pr_mapping || exit 2
+  if [ -n "${MOMO_GITHUB_GUARDRAILS_TEST_MODE:-}" ]; then
+    [ "$REPO" = "fixture/oort" ] || {
+      echo "[github-guardrails] invalid offline guardrails test configuration" >&2
+      exit 1
+    }
+  fi
+  if ! resolved_git="$(command -v "$GIT_BIN")"; then
+    echo "[github-guardrails] git executable is unavailable: $GIT_BIN" >&2
+    exit 1
+  fi
+  case "$resolved_git" in
+    /*) GIT_BIN="$resolved_git" ;;
+    *)
+      echo "[github-guardrails] apply requires an external absolute git executable, not a shell override" >&2
+      exit 1
+      ;;
+  esac
+  "$GIT_BIN" --version >/dev/null 2>&1 || {
+    echo "[github-guardrails] git executable is unusable: $GIT_BIN" >&2
+    exit 1
+  }
+elif [ -n "$POLICY_PR_SPEC" ]; then
+  echo "[github-guardrails] --policy-pr is valid only with --apply" >&2
+  exit 2
+fi
+
 TEMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/oort-github-guardrails.XXXXXX")"
 cleanup() { rm -rf "$TEMP_ROOT"; }
 trap cleanup EXIT INT TERM
+
+trusted_git() {
+  env \
+    -u GIT_DIR \
+    -u GIT_WORK_TREE \
+    -u GIT_INDEX_FILE \
+    -u GIT_OBJECT_DIRECTORY \
+    -u GIT_ALTERNATE_OBJECT_DIRECTORIES \
+    -u GIT_COMMON_DIR \
+    -u GIT_NAMESPACE \
+    -u GIT_REPLACE_REF_BASE \
+    "$GIT_BIN" --no-replace-objects \
+      -c core.fsmonitor=false \
+      -c core.hooksPath=/dev/null \
+      "$@"
+}
 
 urlencode() {
   jq -rn --arg value "$1" '$value | @uri'
@@ -95,6 +298,70 @@ branch_endpoint() {
   local encoded
   encoded="$(urlencode "$1")"
   printf 'repos/%s/branches/%s\n' "$REPO" "$encoded"
+}
+
+extract_exact_git_blob() {
+  local sha="$1"
+  local path="$2"
+  local output="$3"
+  local error="$TEMP_ROOT/git-show.$$.err"
+
+  rm -f "$output"
+  if ! trusted_git -C "$REPO_ROOT" show "$sha:$path" >"$output" 2>"$error"; then
+    echo "[github-guardrails] apply blocked: exact canonical blob is unavailable: $sha:$path" >&2
+    sed -n '1,4p' "$error" >&2 || true
+    rm -f "$output"
+    return 1
+  fi
+  if [ ! -s "$output" ]; then
+    echo "[github-guardrails] apply blocked: exact canonical blob is empty: $sha:$path" >&2
+    rm -f "$output"
+    return 1
+  fi
+}
+
+ensure_apply_guard_trusted() {
+  local expected_sha="$1"
+  local top head status trusted_guard
+
+  if ! top="$(trusted_git -C "$REPO_ROOT" rev-parse --show-toplevel 2>/dev/null)" \
+    || [ "$top" != "$REPO_ROOT" ]; then
+    echo "[github-guardrails] apply blocked: guard is not running from its repository root" >&2
+    return 1
+  fi
+  if ! head="$(trusted_git -C "$REPO_ROOT" rev-parse --verify HEAD 2>/dev/null)"; then
+    echo "[github-guardrails] apply blocked: current HEAD is unavailable" >&2
+    return 1
+  fi
+  if [ "$head" != "$expected_sha" ]; then
+    echo "[github-guardrails] apply blocked: current HEAD $head is not exact remote main $expected_sha" >&2
+    return 1
+  fi
+  if ! status="$(trusted_git -C "$REPO_ROOT" status --porcelain=v1 --untracked-files=no -- scripts/github_track_guardrails.sh)"; then
+    echo "[github-guardrails] apply blocked: could not inspect tracked guard cleanliness" >&2
+    return 1
+  fi
+  if [ -n "$status" ]; then
+    echo "[github-guardrails] apply blocked: tracked guard file is dirty in the index or worktree" >&2
+    return 1
+  fi
+
+  trusted_guard="$TEMP_ROOT/trusted-guard-$expected_sha.sh"
+  extract_exact_git_blob "$expected_sha" scripts/github_track_guardrails.sh "$trusted_guard" \
+    || return 1
+  if ! cmp -s "$SCRIPT_DIR/github_track_guardrails.sh" "$trusted_guard"; then
+    echo "[github-guardrails] apply blocked: executing guard bytes do not match exact remote main" >&2
+    return 1
+  fi
+  echo "[github-guardrails] PASS guard trust: HEAD=$expected_sha tracked-clean exact-main bytes"
+}
+
+extract_trusted_policy_verifier() {
+  local expected_sha="$1"
+  local output="$2"
+  extract_exact_git_blob "$expected_sha" scripts/verify_policy_integrity.sh "$output" \
+    || return 1
+  chmod 0500 "$output"
 }
 
 api_get_json() {
@@ -228,17 +495,60 @@ check_actions_permissions() {
   return 1
 }
 
-check_workflow_active() {
-  local json="$TEMP_ROOT/workflow.json"
-  api_get_json "repos/$REPO/actions/workflows/pr-ci.yml" "$json" || {
-    echo "[github-guardrails] FAIL: pr-ci workflow is unavailable" >&2
+check_repository_identity() {
+  local json="$TEMP_ROOT/repository-identity.json"
+
+  api_get_json "repos/$REPO" "$json" || {
+    echo "[github-guardrails] FAIL: repository identity/default branch is unavailable" >&2
     return 1
   }
-  if [ "$(jq -r '.state // ""' "$json")" != "active" ]; then
-    echo "[github-guardrails] FAIL: pr-ci workflow is not active" >&2
+  if ! jq -e \
+    --arg repo "$REPO" '
+      .full_name == $repo and .default_branch == "main"
+    ' "$json" >/dev/null 2>&1; then
+    echo "[github-guardrails] FAIL: repository full_name/default branch must be exactly $REPO/main" >&2
     return 1
   fi
-  echo "[github-guardrails] PASS workflow: pr-ci is active"
+  echo "[github-guardrails] PASS repository: full_name=$REPO default_branch=main"
+}
+
+check_workflows_active() {
+  local api_name expected_name expected_path json
+
+  for api_name in pr-ci.yml policy-integrity.yml; do
+    case "$api_name" in
+      pr-ci.yml)
+        expected_name="$PR_CI_WORKFLOW_NAME"
+        expected_path="$PR_CI_WORKFLOW_PATH"
+        ;;
+      policy-integrity.yml)
+        expected_name="$POLICY_WORKFLOW_NAME"
+        expected_path="$POLICY_WORKFLOW_PATH"
+        ;;
+      *)
+        echo "[github-guardrails] internal error: unknown required workflow $api_name" >&2
+        return 1
+        ;;
+    esac
+    json="$TEMP_ROOT/workflow-$expected_name.json"
+    api_get_json "repos/$REPO/actions/workflows/$api_name" "$json" || {
+      echo "[github-guardrails] FAIL: $expected_name workflow is unavailable" >&2
+      return 1
+    }
+    if ! jq -e \
+      --arg name "$expected_name" \
+      --arg path "$expected_path" '
+        .name == $name and .path == $path
+      ' "$json" >/dev/null 2>&1; then
+      echo "[github-guardrails] FAIL: $expected_name workflow identity/path is invalid" >&2
+      return 1
+    fi
+    if [ "$(jq -r '.state // ""' "$json")" != "active" ]; then
+      echo "[github-guardrails] FAIL: $expected_name workflow is not active" >&2
+      return 1
+    fi
+    echo "[github-guardrails] PASS workflow: $expected_name path=$expected_path state=active"
+  done
 }
 
 resolve_required_app() {
@@ -264,12 +574,144 @@ resolve_required_app() {
   REQUIRED_APP_ID="$app_id"
 }
 
+policy_pr_for_branch() {
+  case "$1" in
+    main) printf '%s\n' "$POLICY_PR_MAIN" ;;
+    track/engine) printf '%s\n' "$POLICY_PR_ENGINE" ;;
+    track/uxui) printf '%s\n' "$POLICY_PR_UXUI" ;;
+    *)
+      echo "[github-guardrails] internal error: no policy PR slot for $1" >&2
+      return 1
+      ;;
+  esac
+}
+
+verify_policy_pr_base_bindings() {
+  local expected_sha="$1"
+  local head_snapshot_dir="$2"
+  local snapshot_mode="$3"
+  local branch pr key json head_sha snapshot expected_head
+
+  case "$snapshot_mode" in
+    capture|assert) ;;
+    *)
+      echo "[github-guardrails] internal error: invalid bootstrap PR snapshot mode: $snapshot_mode" >&2
+      return 1
+      ;;
+  esac
+
+  for branch in "${BRANCHES[@]}"; do
+    pr="$(policy_pr_for_branch "$branch")" || return 1
+    key="$(printf '%s' "$branch" | tr '/' '_')"
+    json="$TEMP_ROOT/policy-pr-base-$key.json"
+    api_get_json "repos/$REPO/pulls/$pr" "$json" || {
+      echo "[github-guardrails] apply blocked: bootstrap PR #$pr metadata is unavailable" >&2
+      return 1
+    }
+    if ! jq -e \
+      --argjson pr "$pr" \
+      --arg repo "$REPO" \
+      --arg branch "$branch" \
+      --arg sha "$expected_sha" '
+        .number == $pr and
+        .state == "open" and
+        .base.ref == $branch and
+        .base.sha == $sha and
+        .base.repo.full_name == $repo and
+        (.head.sha | type == "string" and test("^[0-9a-f]{40}$"))
+      ' "$json" >/dev/null 2>&1; then
+      echo "[github-guardrails] apply blocked: bootstrap PR #$pr does not have exact open base $branch@$expected_sha" >&2
+      return 1
+    fi
+    if ! head_sha="$(jq -er '.head.sha' "$json")"; then
+      echo "[github-guardrails] apply blocked: bootstrap PR #$pr head SHA is unavailable" >&2
+      return 1
+    fi
+    snapshot="$head_snapshot_dir/$key.sha"
+    if [ "$snapshot_mode" = "capture" ]; then
+      printf '%s\n' "$head_sha" >"$snapshot"
+    else
+      if [ ! -f "$snapshot" ]; then
+        echo "[github-guardrails] apply blocked: bootstrap PR #$pr head snapshot is unavailable" >&2
+        return 1
+      fi
+      expected_head="$(cat "$snapshot")"
+      if [ "$head_sha" != "$expected_head" ]; then
+        echo "[github-guardrails] apply blocked: bootstrap PR #$pr head moved during provenance verification" >&2
+        return 1
+      fi
+    fi
+  done
+  echo "[github-guardrails] PASS bootstrap PR bindings: exact open bases at $expected_sha with $snapshot_mode heads"
+}
+
+verify_policy_pr_mappings() {
+  local expected_sha="$1"
+  local expected_app_id="$2"
+  local branch pr key output trusted_verifier stable_verifier head_snapshot_dir expected_head
+
+  trusted_verifier="$TEMP_ROOT/policy-verifier-$expected_sha.sh"
+  stable_verifier="$TEMP_ROOT/policy-verifier-$expected_sha.stable.sh"
+  head_snapshot_dir="$TEMP_ROOT/policy-pr-heads-$expected_sha"
+  mkdir -p "$head_snapshot_dir"
+  verify_policy_pr_base_bindings "$expected_sha" "$head_snapshot_dir" capture || return 1
+  extract_trusted_policy_verifier "$expected_sha" "$trusted_verifier" || return 1
+
+  for branch in "${BRANCHES[@]}"; do
+    pr="$(policy_pr_for_branch "$branch")" || return 1
+    key="$(printf '%s' "$branch" | tr '/' '_')"
+    output="$TEMP_ROOT/policy-provenance-$key.json"
+    expected_head="$(cat "$head_snapshot_dir/$key.sha")"
+    rm -f "$output"
+    if ! MOMO_GH_BIN="$GH_BIN" "$trusted_verifier" \
+      --verify-run \
+      --repo "$REPO" \
+      --pr "$pr" \
+      --expected-base "$branch" \
+      --expected-base-sha "$expected_sha" \
+      --output "$output"; then
+      echo "[github-guardrails] apply blocked: Policy integrity gate provenance failed for $branch PR #$pr" >&2
+      return 1
+    fi
+    if ! jq -e \
+      --arg repo "$REPO" \
+      --argjson pr "$pr" \
+      --arg head "$expected_head" \
+      --arg branch "$branch" \
+      --arg sha "$expected_sha" \
+      --arg context "$POLICY_CONTEXT" \
+      --argjson app_id "$expected_app_id" '
+        type == "object" and
+        .repo == $repo and
+        .pr == $pr and
+        .head_sha == $head and
+        .base_ref == $branch and
+        .base_sha == $sha and
+        .context == $context and
+        .app_id == $app_id
+      ' "$output" >/dev/null 2>&1; then
+      echo "[github-guardrails] apply blocked: Policy integrity gate provenance output mismatched for $branch PR #$pr" >&2
+      return 1
+    fi
+    echo "[github-guardrails] PASS policy provenance: $branch PR #$pr context=$POLICY_CONTEXT app=$REQUIRED_APP_SLUG/$expected_app_id"
+  done
+
+  # Re-extract the immutable exact-SHA object instead of assuming the first
+  # local read stayed stable throughout all three potentially long API checks.
+  extract_trusted_policy_verifier "$expected_sha" "$stable_verifier" || return 1
+  if ! cmp -s "$trusted_verifier" "$stable_verifier"; then
+    echo "[github-guardrails] apply blocked: exact-base policy verifier bytes changed during provenance cycle" >&2
+    return 1
+  fi
+  verify_policy_pr_base_bindings "$expected_sha" "$head_snapshot_dir" assert || return 1
+}
+
 read_branch_sha() {
   local branch="$1"
   local json
   json="$TEMP_ROOT/branch-$(printf '%s' "$branch" | tr '/' '_').json"
   api_get_json "$(branch_endpoint "$branch")" "$json" || return 1
-  if ! CANONICAL_SHA_READ="$(jq -er '.commit.sha | select(type == "string" and test("^[0-9a-fA-F]{40}$"))' "$json")"; then
+  if ! CANONICAL_SHA_READ="$(jq -er '.commit.sha | select(type == "string" and test("^[0-9a-f]{40}$"))' "$json")"; then
     echo "[github-guardrails] FAIL $branch: branch head SHA is missing or invalid" >&2
     return 1
   fi
@@ -426,10 +868,16 @@ load_latest_required_check() {
 
 protection_is_compliant() {
   local json="$1"
-  jq -e --arg context "$REQUIRED_CONTEXT" --argjson app_id "$REQUIRED_APP_ID" '
+  jq -e \
+    --arg pr_context "$REQUIRED_CONTEXT" \
+    --arg policy_context "$POLICY_CONTEXT" \
+    --argjson app_id "$REQUIRED_APP_ID" '
     (.required_status_checks.strict == true) and
     any(.required_status_checks.checks[]?;
-      .context == $context and .app_id == $app_id
+      .context == $pr_context and .app_id == $app_id
+    ) and
+    any(.required_status_checks.checks[]?;
+      .context == $policy_context and .app_id == $app_id
     ) and
     (.required_pull_request_reviews != null) and
     ((.required_pull_request_reviews.required_approving_review_count | type) == "number") and
@@ -455,15 +903,22 @@ report_noncompliance() {
   check_expr() {
     local label="$1"
     local expr="$2"
-    if ! jq -e --arg context "$REQUIRED_CONTEXT" --argjson app_id "$REQUIRED_APP_ID" "$expr" "$json" >/dev/null; then
+    if ! jq -e \
+      --arg pr_context "$REQUIRED_CONTEXT" \
+      --arg policy_context "$POLICY_CONTEXT" \
+      --argjson app_id "$REQUIRED_APP_ID" \
+      "$expr" "$json" >/dev/null; then
       echo "[github-guardrails] FAIL $branch: $label" >&2
       failed=1
     fi
   }
   check_expr "required status checks are not strict" '.required_status_checks.strict == true'
-  # shellcheck disable=SC2016 # $context/$app_id are jq variables.
+  # shellcheck disable=SC2016 # context/app_id names are jq variables.
   check_expr "GitHub-Actions-pinned required check missing: $REQUIRED_CONTEXT/$REQUIRED_APP_ID" \
-    'any(.required_status_checks.checks[]?; .context == $context and .app_id == $app_id)'
+    'any(.required_status_checks.checks[]?; .context == $pr_context and .app_id == $app_id)'
+  # shellcheck disable=SC2016 # context/app_id names are jq variables.
+  check_expr "GitHub-Actions-pinned required check missing: $POLICY_CONTEXT/$REQUIRED_APP_ID" \
+    'any(.required_status_checks.checks[]?; .context == $policy_context and .app_id == $app_id)'
   check_expr "PR-only rule missing" '.required_pull_request_reviews != null'
   check_expr "approval count is missing or invalid" \
     '((.required_pull_request_reviews.required_approving_review_count | type) == "number") and (.required_pull_request_reviews.required_approving_review_count >= 0)'
@@ -512,7 +967,10 @@ build_policy_payload() {
   # this invocation has observed. This makes a retry-safe monotonic merge:
   # concurrent stronger checks/settings are carried into the next PUT instead
   # of being overwritten by a payload built from the initial read.
-  jq -s --arg context "$REQUIRED_CONTEXT" --argjson app_id "$REQUIRED_APP_ID" '
+  jq -s \
+    --arg pr_context "$REQUIRED_CONTEXT" \
+    --arg policy_context "$POLICY_CONTEXT" \
+    --argjson app_id "$REQUIRED_APP_ID" '
     def enabled($value):
       if ($value | type) == "object" then
         (if ($value.enabled | type) == "boolean" then $value.enabled else false end)
@@ -538,7 +996,10 @@ build_policy_payload() {
 
     . as $sources
     | (([$sources[] | normalized_checks[]]
-        + [{context: $context, app_id: $app_id}])
+        + [
+            {context: $pr_context, app_id: $app_id},
+            {context: $policy_context, app_id: $app_id}
+          ])
        | unique_by([.context, .app_id])
        | sort_by([.context, .app_id])) as $required_checks
     | ([$sources[]
@@ -677,15 +1138,31 @@ protection_preserves_contract() {
 }
 
 load_runtime_basis() {
-  check_workflow_active || return 1
+  local expected_sha expected_app_id
+  check_repository_identity || return 1
+  check_workflows_active || return 1
   load_canonical_heads || return 1
+  expected_sha="$CANONICAL_SHA"
+  ensure_apply_guard_trusted "$expected_sha" || return 1
   resolve_required_app || return 1
-  load_latest_required_check "$CANONICAL_SHA" "$REQUIRED_APP_ID" || return 1
+  expected_app_id="$REQUIRED_APP_ID"
+  load_latest_required_check "$expected_sha" "$expected_app_id" || return 1
   read_actions_permissions || return 1
+  verify_policy_pr_mappings "$expected_sha" "$expected_app_id" || return 1
+
+  # Provenance verification performs several API reads. Close that window so
+  # the bootstrap snapshot cannot move underneath a successful verifier call.
+  load_canonical_heads "$expected_sha" || return 1
+  resolve_required_app "$expected_app_id" || return 1
+  load_latest_required_check "$expected_sha" "$expected_app_id" || return 1
+  read_actions_permissions || return 1
+  check_repository_identity || return 1
+  CANONICAL_SHA="$expected_sha"
 }
 
 load_check_basis() {
-  check_workflow_active || return 1
+  check_repository_identity || return 1
+  check_workflows_active || return 1
   load_check_topology || return 1
   resolve_required_app || return 1
   read_actions_permissions || return 1
@@ -694,11 +1171,39 @@ load_check_basis() {
 revalidate_runtime_basis() {
   local expected_sha="$1"
   local expected_app_id="$2"
-  check_workflow_active || return 1
+  check_repository_identity || return 1
+  check_workflows_active || return 1
+  load_canonical_heads "$expected_sha" || return 1
+  ensure_apply_guard_trusted "$expected_sha" || return 1
+  resolve_required_app "$expected_app_id" || return 1
+  load_latest_required_check "$expected_sha" "$expected_app_id" || return 1
+  read_actions_permissions || return 1
+  verify_policy_pr_mappings "$expected_sha" "$expected_app_id" || return 1
+
+  # Each verifier closes its own PR/workflow races. Re-read the canonical
+  # runtime basis as well so a branch/App/check change during the three-PR
+  # verification cannot precede a mutation or final success.
   load_canonical_heads "$expected_sha" || return 1
   resolve_required_app "$expected_app_id" || return 1
   load_latest_required_check "$expected_sha" "$expected_app_id" || return 1
   read_actions_permissions || return 1
+  # Close default-branch/repository identity movement across the long three-PR
+  # provenance pass. Callers perform only local checks and the final protection
+  # refresh before a branch PUT.
+  check_repository_identity || return 1
+  CANONICAL_SHA="$expected_sha"
+}
+
+revalidate_runtime_snapshot() {
+  local expected_sha="$1"
+  local expected_app_id="$2"
+  check_workflows_active || return 1
+  load_canonical_heads "$expected_sha" || return 1
+  resolve_required_app "$expected_app_id" || return 1
+  load_latest_required_check "$expected_sha" "$expected_app_id" || return 1
+  read_actions_permissions || return 1
+  check_repository_identity || return 1
+  CANONICAL_SHA="$expected_sha"
 }
 
 record_mutation() {
@@ -851,6 +1356,7 @@ verify_preservation_contracts() {
 
 apply_policy() {
   local branch key existing contract empty endpoint fresh presence
+  local pre_provenance pre_provenance_presence
   local actions_payload="$TEMP_ROOT/actions-permissions-payload.json"
   empty="$TEMP_ROOT/empty-policy.json"
   printf '{}\n' >"$empty"
@@ -904,7 +1410,7 @@ apply_policy() {
     # Every whole-document branch-protection PUT gets a fresh runtime basis and
     # a fresh branch policy. This cannot make GitHub's API transactional, but it
     # prevents stale initial payloads from erasing changes made between PUTs.
-    if ! revalidate_runtime_basis "$CANONICAL_SHA" "$REQUIRED_APP_ID"; then
+    if ! revalidate_runtime_snapshot "$CANONICAL_SHA" "$REQUIRED_APP_ID"; then
       report_apply_incomplete "workflow, branch SHA, or required check changed"
       return 1
     fi
@@ -930,7 +1436,7 @@ apply_policy() {
     # merely the loop-entry read. GitHub exposes no conditional ETag for this
     # whole-document endpoint, so the final preservation read remains the last
     # line of defense against an unavoidable in-flight race.
-    if ! revalidate_runtime_basis "$CANONICAL_SHA" "$REQUIRED_APP_ID"; then
+    if ! revalidate_runtime_snapshot "$CANONICAL_SHA" "$REQUIRED_APP_ID"; then
       report_apply_incomplete "workflow, branch SHA, or required check changed immediately before $branch PUT"
       return 1
     fi
@@ -950,6 +1456,38 @@ apply_policy() {
       echo "[github-guardrails] unchanged: $branch became compliant before PUT"
       continue
     fi
+    pre_provenance="$TEMP_ROOT/pre-provenance-$key.json"
+    pre_provenance_presence="$TEMP_ROOT/pre-provenance-$key.presence"
+    cp "$fresh" "$pre_provenance"
+    cp "$presence" "$pre_provenance_presence"
+
+    # The policy refresh above is another remote read window. Verify all three
+    # base-trusted bootstrap PRs and the exact-equal canonical refs once more as
+    # the last remote prerequisite before this whole-document mutation.
+    if ! revalidate_runtime_basis "$CANONICAL_SHA" "$REQUIRED_APP_ID"; then
+      report_apply_incomplete "trusted policy provenance or runtime basis changed immediately before $branch PUT"
+      return 1
+    fi
+    if ! check_actions_permissions; then
+      report_apply_incomplete "Actions permissions drifted immediately before $branch PUT"
+      return 1
+    fi
+    # Provenance verification is deliberately thorough and can take long enough
+    # for an administrator to strengthen protection after the payload snapshot.
+    # Re-read immediately before PUT and abort on any semantic change instead of
+    # overwriting concurrent policy with a payload from the earlier snapshot.
+    if ! refresh_preservation_contract "$branch" "$key"; then
+      report_apply_incomplete "$branch post-provenance protection refresh failed"
+      return 1
+    fi
+    fresh="$TEMP_ROOT/fresh-$key.json"
+    presence="$TEMP_ROOT/fresh-$key.presence"
+    if ! cmp -s "$pre_provenance_presence" "$presence" \
+      || ! jq -s -e '.[0] == .[1]' "$pre_provenance" "$fresh" >/dev/null 2>&1; then
+      echo "[github-guardrails] apply blocked: $branch protection changed during trusted provenance revalidation" >&2
+      report_apply_incomplete "$branch protection changed immediately before PUT"
+      return 1
+    fi
     endpoint="$(protection_endpoint "$branch")"
     record_attempt "$branch"
     if ! api_put_json "$endpoint" "$contract"; then
@@ -963,7 +1501,7 @@ apply_policy() {
   # Remote state may change while PUTs are in flight. Never report success
   # until both the canonical SHA and the exact app-pinned latest check survive
   # a post-apply read.
-  if ! revalidate_runtime_basis "$CANONICAL_SHA" "$REQUIRED_APP_ID"; then
+  if ! revalidate_runtime_snapshot "$CANONICAL_SHA" "$REQUIRED_APP_ID"; then
     report_apply_incomplete "final workflow, branch SHA, or required check changed"
     return 1
   fi
@@ -973,6 +1511,17 @@ apply_policy() {
   fi
   if ! verify_preservation_contracts; then
     report_apply_incomplete "final protection preservation check failed"
+    return 1
+  fi
+
+  # Final success is itself security-sensitive evidence. Make the trusted PR
+  # provenance and exact canonical SHA the last remote basis we accept.
+  if ! revalidate_runtime_basis "$CANONICAL_SHA" "$REQUIRED_APP_ID"; then
+    report_apply_incomplete "final trusted policy provenance or runtime basis changed"
+    return 1
+  fi
+  if ! check_actions_permissions; then
+    report_apply_incomplete "final Actions permissions drifted after preservation check"
     return 1
   fi
 }
@@ -991,7 +1540,7 @@ if [ "$MODE" = "check" ]; then
 fi
 
 load_runtime_basis
-echo "[github-guardrails] PASS apply preflight: all branches=$CANONICAL_SHA and context green"
+echo "[github-guardrails] PASS apply preflight: all branches=$CANONICAL_SHA and both required gates are trusted"
 echo "[github-guardrails] attended bootstrap: keep this process running through final verification"
 if ! apply_policy; then
   exit 1

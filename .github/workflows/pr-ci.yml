@@ -226,11 +226,12 @@ jobs:
             if git show "origin/main:scripts/check_track_alignment.sh" > "$trusted_checker" 2>/dev/null; then
               : # Normal path: execute the canonical policy from main, not PR code.
             else
-              # One-time #1297 bootstrap. The checker does not exist on either
-              # pre-goal base yet; only these reviewed immutable heads may use
-              # the candidate copy. Once main lands #1297 this path is dead.
+              # One-time #1297/#1302 bootstrap. The checker does not exist on
+              # main during this initial integration chain; only these reviewed
+              # immutable bases may use the candidate copy. Once main lands the
+              # chain, this path is dead.
               case "$base_oid" in
-                915d00bff14fda55b909fcdda72067e3d480dbda|27718c0e68715ae44fc65cdb632e70b8a347ea7c)
+                915d00bff14fda55b909fcdda72067e3d480dbda|27718c0e68715ae44fc65cdb632e70b8a347ea7c|38587b53c088049e42f9fba1f8d0118985523faf)
                   cp scripts/check_track_alignment.sh "$trusted_checker"
                   ;;
                 *)
@@ -253,6 +254,8 @@ jobs:
           scripts/tests/test_track_alignment_guard.sh
           scripts/tests/test_pr_ci_guardrails.sh
           scripts/tests/test_github_track_guardrails.sh
+          scripts/tests/test_policy_integrity_gate.sh
+          scripts/tests/test_trusted_policy_runner.sh
 
   # ── ② Rust 레인 ─────────────────────────────────────────────────────────
   # `cargo test --workspace` + 카고 라이선스 게이트.

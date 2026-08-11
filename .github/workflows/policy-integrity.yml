@@ -1,0 +1,100 @@
+# Trusted policy self-mutation gate for public/Free GitHub repositories.
+# SECURITY: pull_request_target has a write-capable token. This workflow must
+# never fetch/checkout the PR head, execute candidate files, or install candidate
+# dependencies. Only the immutable base SHA and GitHub API metadata are read.
+name: policy-integrity
+run-name: policy-integrity authority=${{ github.workflow_sha }} pr=${{ github.event.pull_request.number }} head=${{ github.event.pull_request.head.sha }} base=${{ github.event.pull_request.base.ref }}@${{ github.event.pull_request.base.sha }}
+
+on:
+  pull_request_target:
+    branches:
+      - main
+      - track/engine
+      - track/uxui
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - edited
+      - labeled
+      - unlabeled
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+  # The pull_request_target job check can be associated with the base SHA.
+  # Publish one static context on the exact PR head. A same-App/same-name status
+  # is still forgeable, so momo-main MUST run --verify-run before merge.
+  statuses: write
+
+concurrency:
+  group: policy-integrity-${{ github.repository }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  evaluate:
+    name: Trusted policy integrity evaluator
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout only the trusted base evaluator
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+          sparse-checkout: scripts/verify_policy_integrity.sh
+          sparse-checkout-cone-mode: false
+
+      - name: Prove checkout is the event base, never the candidate
+        env:
+          EXPECTED_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_BASE_SHA"
+
+      - id: policy
+        name: Evaluate API metadata with the trusted base policy
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          EXPECTED_BASE_REF: ${{ github.event.pull_request.base.ref }}
+          EXPECTED_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          bash scripts/verify_policy_integrity.sh \
+            --evaluate \
+            --repo "$REPO" \
+            --pr "$PR_NUMBER" \
+            --expected-head "$EXPECTED_HEAD_SHA" \
+            --expected-base "$EXPECTED_BASE_REF" \
+            --expected-base-sha "$EXPECTED_BASE_SHA"
+
+      - name: Publish the static context on the exact PR head
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          POLICY_OUTCOME: ${{ steps.policy.outcome }}
+        run: |
+          set -euo pipefail
+          state=failure
+          description="trusted policy evaluation failed"
+          if [ "$POLICY_OUTCOME" = success ]; then
+            state=success
+            description="trusted base policy accepted this exact head"
+          fi
+          run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT"
+          gh api --method POST "repos/$REPO/statuses/$HEAD_SHA" \
+            --raw-field state="$state" \
+            --raw-field context="Policy integrity gate" \
+            --raw-field description="$description" \
+            --raw-field target_url="$run_url" >/dev/null
+
+      - name: Fail the workflow when policy evaluation failed
+        if: always()
+        env:
+          POLICY_OUTCOME: ${{ steps.policy.outcome }}
+        run: test "$POLICY_OUTCOME" = success
