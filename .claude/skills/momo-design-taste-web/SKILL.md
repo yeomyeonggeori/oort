@@ -78,7 +78,7 @@ Every surface ships **empty / loading / error / offline**:
 ## 6. Interaction, keyboard, focus, a11y
 
 - **Keyboard path for every action** (P11): cmdk Cmd+K switcher, Cmd+N, arrow navigation, unread traversal. Row-level actions live in `ContextMenu`, not always-visible button rows.
-- **Focus ring is mandatory and visible.** The house pattern is `focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent`. If you set `outline-none`, you must add a `focus-visible:` ring in the same class list; the pre-flight fails a naked `outline-none`.
+- **Focus ring is mandatory and visible.** The house pattern is `focus-visible:focus-ring`: a 2px accent outline inset by its width (`outline-offset: -2px`). Filled accent controls additionally use `focus-ring-on-fill`. If you set `outline-none`, you must add a `focus-visible:` ring in the same class list; the pre-flight fails a naked `outline-none`.
 - **Destructive and approval actions require confirmation** (`AlertDialog`), never fire on a single unguarded click or a bare hover.
 - **Hover uses subtle background change** (`hover:bg-surface-hover`), not scale transforms.
 - **Contrast AA**: guaranteed by the token test for token pairs. What the test cannot see is your composition: check that accent-on-accent-soft combinations you invent are in the measured table, and give icon-only controls an `aria-label`.
