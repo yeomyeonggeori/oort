@@ -35,7 +35,25 @@
    - 세션이 "main에 머지할까요?"라고 묻고 성재가 승인, 또는
    - 성재가 먼저 "main에 머지하자"라고 말할 때.
    그 외 어떤 자동 main 머지도 금지. (성재는 특히 UXUI에서 더 다듬고 싶은 경우가 많다 — 머지 재촉 금지.)
-3. main 머지 실행은 통합자(현재 Fable)가 순차 수행하고, 머지 후 **두 트랙 브랜치를 main 위로 갱신(rebase/merge)** 해 드리프트를 막는다.
+3. main 머지 실행은 통합자(현재 Fable)가 순차 수행하고, 머지 후 **두 트랙 브랜치를 fast-forward하거나 main을 merge commit으로 합류**시켜 드리프트를 막는다. 원격 track의 rebase/history rewrite와 force-push는 금지한다.
+
+### 3.1 정렬 topology와 기계 가드
+
+- 허용 상태는 `main`이 `track/engine`과 `track/uxui` 각각의 조상인 상태다. 트랙이 main보다 앞서는 것은 승인 대기 작업이므로 정상이다. 트랙이 main보다 뒤처지거나 양쪽에 고유 커밋이 생긴 divergence는 정렬 실패다.
+- canonical local upstream은 정확히 `main → origin/main`, `track/engine → origin/track/engine`, `track/uxui → origin/track/uxui`다. local ahead는 push 대기 상태라 허용하지만 local behind/divergence와 upstream 없음·오배선은 실패한다.
+- 상태 확인은 `scripts/check_track_alignment.sh --remote --local-existing`. 모든 local canonical branch까지 요구하는 메인테이너 감사는 `--all`. checker는 fetch나 ref 이동을 하지 않으므로 먼저 `git fetch origin --prune`한다.
+- `scripts/local_gate.sh`·선택적 pre-push hook·`scripts/verify_merge_tree.sh`가 같은 checker를 소비한다. GitHub에서는 `track-alignment.yml`이 세 canonical branch push, 일일 schedule, 수동 실행에서 remote topology를 감시한다.
+- main 통합 직후 track이 behind/diverged면 다음 goal을 시작하지 말고 main을 각 track에 합류시킨다. 이미 PR-only 보호가 켜졌다면 main→track PR로 수리한다. force-push, branch 삭제, 자동 충돌 해결, 승인되지 않은 track→main 통합은 금지다.
+
+### 3.2 GitHub 보호 적용 순서
+
+1. #1297과 trusted policy-integrity gate #1302가 main에 들어간다. #1297의 GitHub Actions app-ID pin만으로는 후보 PR이 `pr-ci.yml` 자체를 약화하는 자기변조를 막지 못하므로, #1302 전에는 이 보호를 완결된 신뢰 경계로 간주하거나 `--apply`하지 않는다.
+2. `main`·`track/engine`·`track/uxui`를 같은 SHA로 정렬한다.
+3. `pr-ci.yml`과 #1302의 trusted workflow를 실행해 그 SHA에 안정 context `PR CI gate`와 `Policy integrity gate`를 만든다.
+4. `scripts/github_track_guardrails.sh --repo yeomyeonggeori/oort --check`로 현재 차이를 확인한다.
+5. 통합자가 attended bootstrap 창에서 명시적으로 `--apply`한 뒤 다시 `--check`한다. 기본 호출은 항상 read-only다. `--apply`는 세 ref가 같은 SHA이고 두 required gate의 신뢰가 확인된 최초/bootstrap 수리 창에서만 허용되며, 이후 정상적인 track-ahead 상태의 상시 감사에는 `--check`만 쓴다.
+
+관리 정책은 세 branch 모두 PR-only, GitHub Actions app ID에 고정된 strict `PR CI gate`와 #1302의 base-trusted `Policy integrity gate`, 관리자 포함, conversation resolution 필수, force-push·삭제 금지다. repository Actions 기본 권한은 read이며 workflow의 PR 승인은 금지한다. 새 보호의 승인 수는 solo-owner 운영과 성재의 채팅 승인을 보존하기 위해 0이며, 코드리뷰·local gate evidence 계약은 그대로다. 이미 더 강한 required check·review 수/code-owner·last-push·push restriction·linear-history 설정이 있으면 `--apply`는 낮추지 않고 보존한다. 보호 조회는 명시적 404만 미설정으로 취급하며, auth/network/5xx/잘못된 JSON과 감지한 동시 변경은 fail-closed한다. read-only `--check`는 GitHub Actions app ID를 공식 App endpoint에서 읽고 `main`이 두 track의 조상인 정상 track-ahead topology에서도 계속 동작한다.
 
 ## 4. 엔진→UXUI 핸드오프 루프
 

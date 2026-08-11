@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# Optional momo pre-push hook. Install with scripts/install_branch_skew_hook.sh.
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "$REPO_ROOT"
+
+git fetch --quiet origin main || {
+  echo "[branch-skew] unable to refresh origin/main; push blocked fail-closed" >&2
+  exit 1
+}
+
+checked=0
+while read -r local_ref local_sha _remote_ref _remote_sha; do
+  case "$local_ref" in
+    refs/heads/*)
+      case "$local_sha" in
+        0000000000000000000000000000000000000000) continue ;;
+      esac
+      checked=1
+      MOMO_GATE_HEAD_REF="$local_sha" scripts/check_branch_skew.sh
+      ;;
+  esac
+done
+
+if [ "$checked" -eq 0 ]; then
+  echo "[branch-skew] no branch refs in this push; nothing to check"
+fi

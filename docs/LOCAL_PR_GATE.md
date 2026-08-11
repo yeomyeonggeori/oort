@@ -5,15 +5,14 @@
 
 ## 0. Current Status
 
-As of 2026-06-26, GitHub Actions are disabled manually for `yeomyeonggeori/oort`
-because the organization is seeing billing/payment failures and should not spend
-paid macOS runner minutes during active development.
+As of 2026-08-12, public-repository `pr-ci` is active for PRs into `main`,
+`track/engine`, and `track/uxui`; `track-alignment` watches canonical topology.
+Release and paid macOS workflows remain manual and owner-gated.
 
-- Remote workflow state must stay `disabled_manually` unless the owner explicitly approves re-enabling it.
-- Repo workflow files are manual-only (`workflow_dispatch`) so a future re-enable cannot start jobs from every push, PR, or tag.
-- The merge gate during this period is local evidence + review pass + no unrelated dirty files.
+- `PR CI gate` is the stable branch-protection context. Rust, Node, and generated-contract jobs may skip by path, while the aggregator itself always reports one result.
+- Local evidence remains the primary runtime merge gate because PR CI intentionally does not boot PostgreSQL/Centrifugo/Docker e2e or external providers.
 - Workers use local evidence to open a PR and hand it off; workers do not merge. `momo-main` owns review, final local gate, merge, issue close, and post-merge `main` verification.
-- Do not wait for GitHub Actions green during this period; record `Actions disabled by policy` in PR evidence when relevant.
+- Release workflow activation and M7/M8 gates are unchanged; green PR CI is not release authorization.
 
 ## 1. Rule
 
@@ -42,7 +41,9 @@ conservative mapping — ambiguous paths widen to `all`, never narrow — and
 records the suggested profile plus per-path reasons in the evidence markdown.
 An explicit `--profile` always wins over `--auto`.
 
-Every profile starts with two fail-fast repository checks:
+Full profiles include the static repository checks below. Independently of the
+selected profile, canonical local track wiring is always added before the
+profile switch, so focused `web` and `secrets` runs cannot bypass it:
 
 - `scripts/check_branch_skew.sh` computes the merge-base with
   `${MOMO_GATE_SKEW_REF:-origin/main}` and fails when upstream and the current
@@ -50,6 +51,10 @@ Every profile starts with two fail-fast repository checks:
   listed paths before rerunning. A reviewed exceptional run may set
   `MOMO_GATE_SKIP_SKEW='specific reason'`; the reason is printed and embedded in
   the final evidence. Blank or reasonless overrides are rejected.
+- `scripts/check_track_alignment.sh --local-existing` validates exact upstream
+  and no-behind/no-divergence state for installed canonical local branches.
+  Track/local ahead is allowed. Global remote topology is monitored separately
+  so a repair PR is not blocked by the drift it is intended to repair.
 - `scripts/check_migration_numbers.sh server/Migrations` rejects duplicate
   numeric prefixes before any database connection. `037_name.sql` and
   `37_other.sql` are treated as the same number. `scripts/migrate.sh` runs the
@@ -62,10 +67,22 @@ hook:
 scripts/install_branch_skew_hook.sh
 ```
 
-The installer only writes an absent or identical `pre-push` hook and refuses to
-overwrite another hook. It does not modify the shared worktree `post-checkout`
-bootstrap hook. The pre-push hook refreshes `origin/main` and fails closed when
-that fetch or the overlap check fails.
+The installer is maintainer-only: it first normalizes `origin` and proves it is
+exactly `yeomyeonggeori/oort`, then proves that remote exposes all three
+canonical refs. Supported canonical URL forms are `git@github.com:...`,
+`ssh://git@github.com/...`, and `https://github.com/...`, with an optional
+`.git` suffix. It writes an absent/identical hook, safely upgrades the exact
+previous oort-managed version with a `.pre-1297.bak`, and refuses every unknown
+hook. It does not modify the shared worktree `post-checkout` bootstrap hook.
+
+The pre-push hook uses Git's remote-name **and** remote-URL arguments, so a
+canonical alias or direct canonical URL receives the same candidate/deletion
+protection as `origin`. Before a canonical push it re-verifies that `origin` is
+still the canonical trust anchor used to refresh comparison refs. A recognized
+noncanonical GitHub fork receives only the ordinary branch-skew check. If the
+destination URL cannot be normalized, an update or deletion of a canonical
+branch name fails closed; diagnostics never echo the raw URL because it may
+contain credentials.
 
 The script writes a log, Markdown evidence file, and `.sha256` manifest under
 `${TMPDIR:-/tmp}/momo-local-gate` by default, then prints a PR-ready
@@ -788,7 +805,7 @@ git 이력에 있다 — 삭제 직전 판본은 `git show <이 PR의 부모 SHA
 6. Worker must not merge, close the issue, run the post-merge `main` gate, or adjust roadmap/backlog state.
 7. `momo-main` reviews for security, correctness, and scope.
 8. `momo-main` runs the final local gate after review fixes.
-9. `momo-main` merges only if the local gate passes and no blocker remains.
+9. `momo-main` merges only if the local gate passes, the current PR head has a successful required `PR CI gate`, and no blocker remains. After #1302 lands, its base-trusted `Policy integrity gate` is an additional mandatory condition; the app-pinned `PR CI gate` alone does not prove workflow identity.
 10. `momo-main` updates `main` locally and reruns the relevant local gate on `main`.
 11. `momo-main` updates issue status, `STATUS.md`, roadmap/backlog if decisions changed, and recommends the next goal.
-12. If Actions are intentionally disabled, `momo-main` confirms workflow state remains `disabled_manually` instead of waiting for remote CI.
+12. If a non-required release/manual workflow is intentionally disabled, `momo-main` confirms that workflow remains `disabled_manually`; this exception never substitutes for the active required PR gates in step 9.
