@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Explicit opt-in installer. It only owns pre-push and never edits post-checkout.
+# Explicit opt-in installer for alignment + branch-skew pre-push checks. It only
+# owns pre-push and never edits post-checkout.
 set -euo pipefail
 
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {
@@ -16,5 +17,5 @@ fi
 
 mkdir -p "$(dirname "$TARGET")"
 install -m 0755 "$SOURCE" "$TARGET"
-echo "installed momo branch-skew pre-push hook: $TARGET"
+echo "installed oort track-alignment + branch-skew pre-push hook: $TARGET"
 echo "existing post-checkout hook was not modified"

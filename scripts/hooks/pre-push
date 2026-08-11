@@ -1,22 +1,45 @@
 #!/usr/bin/env bash
-# Optional momo pre-push hook. Install with scripts/install_branch_skew_hook.sh.
+# Optional oort track-alignment + branch-skew pre-push hook.
+# Install with scripts/install_branch_skew_hook.sh.
 set -euo pipefail
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "$REPO_ROOT"
 
-git fetch --quiet origin main || {
-  echo "[branch-skew] unable to refresh origin/main; push blocked fail-closed" >&2
+git fetch --quiet origin \
+  +refs/heads/main:refs/remotes/origin/main \
+  +refs/heads/track/engine:refs/remotes/origin/track/engine \
+  +refs/heads/track/uxui:refs/remotes/origin/track/uxui || {
+  echo "[track-alignment] unable to refresh canonical refs; push blocked fail-closed" >&2
   exit 1
 }
 
+scripts/check_track_alignment.sh --local-existing
+
 checked=0
-while read -r local_ref local_sha _remote_ref _remote_sha; do
+while read -r local_ref local_sha remote_ref _remote_sha; do
+  case "$local_sha" in
+    0000000000000000000000000000000000000000)
+      case "$remote_ref" in
+        refs/heads/main|refs/heads/track/engine|refs/heads/track/uxui)
+          echo "[track-alignment] deleting a canonical branch is blocked: $remote_ref" >&2
+          exit 1
+          ;;
+      esac
+      continue
+      ;;
+  esac
+  case "$remote_ref" in
+    refs/heads/main|refs/heads/track/engine|refs/heads/track/uxui)
+      # Git supplies local_ref=(unknown) for pushes sourced from a raw SHA or
+      # rev expression. The protected target, not the spelling of the source,
+      # decides whether the canonical candidate check is mandatory.
+      checked=1
+      scripts/check_track_alignment.sh --candidate "$remote_ref" "$local_sha"
+      ;;
+  esac
   case "$local_ref" in
     refs/heads/*)
-      case "$local_sha" in
-        0000000000000000000000000000000000000000) continue ;;
-      esac
       checked=1
       MOMO_GATE_HEAD_REF="$local_sha" scripts/check_branch_skew.sh
       ;;

@@ -13,6 +13,18 @@ fail() {
   exit 1
 }
 
+# The canonical alignment preflight must be an unconditional consumer, not a
+# helper reachable only from selected profiles. Keep exactly one top-level call
+# before the profile switch; deleting or moving it turns this fixture red.
+alignment_calls="$(grep -Ec '^add_track_alignment_preflight$' "$REPO_ROOT/scripts/local_gate.sh")"
+[ "$alignment_calls" = 1 ] || fail "local gate must have exactly one unconditional alignment preflight"
+alignment_line="$(grep -En '^add_track_alignment_preflight$' "$REPO_ROOT/scripts/local_gate.sh" | cut -d: -f1)"
+profile_switch_line="$(awk -v start="$alignment_line" \
+  'NR > start && /^case "\$PROFILE" in$/ { print NR; exit }' "$REPO_ROOT/scripts/local_gate.sh")"
+[ "$alignment_line" -lt "$profile_switch_line" ] \
+  || fail "alignment preflight must run before profile selection"
+echo "[local-gate-hardening-test] PASS every profile consumes canonical alignment preflight"
+
 init_repo() {
   local repo="$1"
   mkdir -p "$repo"
@@ -64,8 +76,14 @@ grep -Fq 'shared.txt' "$SANDBOX/skew.out" || fail "skew failure omitted overlapp
 POSITIVE_REMOTE="$SANDBOX/skew-positive-origin.git"
 git clone -q --bare "$POSITIVE_REPO" "$POSITIVE_REMOTE"
 git -C "$POSITIVE_REPO" remote add origin "$POSITIVE_REMOTE"
+positive_main_sha="$(git -C "$POSITIVE_REPO" rev-parse main)"
+git -C "$POSITIVE_REMOTE" update-ref refs/heads/track/engine "$positive_main_sha"
+git -C "$POSITIVE_REMOTE" update-ref refs/heads/track/uxui "$positive_main_sha"
+git -C "$POSITIVE_REPO" config branch.main.remote origin
+git -C "$POSITIVE_REPO" config branch.main.merge refs/heads/main
 mkdir -p "$POSITIVE_REPO/scripts/hooks"
 cp "$REPO_ROOT/scripts/check_branch_skew.sh" "$POSITIVE_REPO/scripts/"
+cp "$REPO_ROOT/scripts/check_track_alignment.sh" "$POSITIVE_REPO/scripts/"
 cp "$REPO_ROOT/scripts/hooks/pre-push" "$POSITIVE_REPO/scripts/hooks/"
 feature_sha="$(git -C "$POSITIVE_REPO" rev-parse feature)"
 if printf 'refs/heads/feature %s refs/heads/feature %040d\n' "$feature_sha" 0 | \
@@ -73,6 +91,18 @@ if printf 'refs/heads/feature %s refs/heads/feature %040d\n' "$feature_sha" 0 | 
   fail "pre-push final consumer did not reject overlapping changes"
 fi
 grep -Fq 'shared.txt' "$SANDBOX/pre-push.out" || fail "pre-push failure omitted overlapping path"
+if printf '(delete) %040d refs/heads/track/uxui %s\n' 0 "$positive_main_sha" | \
+  (cd "$POSITIVE_REPO" && scripts/hooks/pre-push) >"$SANDBOX/pre-push-delete.out" 2>&1; then
+  fail "pre-push allowed canonical branch deletion"
+fi
+grep -Fq 'deleting a canonical branch is blocked: refs/heads/track/uxui' \
+  "$SANDBOX/pre-push-delete.out" || fail "pre-push deletion failure omitted canonical target"
+if printf '(unknown) %s refs/heads/track/uxui %s\n' "$feature_sha" "$positive_main_sha" | \
+  (cd "$POSITIVE_REPO" && scripts/hooks/pre-push) >"$SANDBOX/pre-push-unknown.out" 2>&1; then
+  fail "pre-push allowed a stale canonical update sourced from a raw revision"
+fi
+grep -Fq 'not a fast-forward of origin/track/uxui' "$SANDBOX/pre-push-unknown.out" \
+  || fail "pre-push raw-revision failure omitted the canonical fast-forward reason"
 echo "[local-gate-hardening-test] PASS branch-skew helper/hook negative/positive/override fixtures"
 
 # Migration number negative/positive fixtures, including 37 vs 037 normalization.

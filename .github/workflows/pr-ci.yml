@@ -42,10 +42,11 @@ name: pr-ci
 on:
   pull_request:
     branches:
-      # 트랙 파이프라인(docs/TRACKS.md): 워커 PR은 track/engine으로, 통합만
-      # main으로 간다. 둘 다 걸어야 PR CI가 실제 머지 경로를 덮는다.
+      # 트랙 파이프라인(docs/TRACKS.md): 워커 PR은 자기 track으로, 통합만
+      # main으로 간다. 셋 모두 걸어야 실제 머지 경로를 덮는다.
       - main
       - track/engine
+      - track/uxui
   # PR 없이 레인을 한 번 돌려보고 싶을 때. 이때는 변경 파일 목록이 없으므로
   # 두 레인을 모두 돈다.
   workflow_dispatch:
@@ -70,6 +71,7 @@ jobs:
     outputs:
       rust: ${{ steps.filter.outputs.rust }}
       node: ${{ steps.filter.outputs.node }}
+      contract: ${{ steps.filter.outputs.contract }}
     steps:
       - id: filter
         env:
@@ -80,9 +82,12 @@ jobs:
           set -uo pipefail
 
           run_all() {
-            echo "→ rust=true node=true ($1)"
-            echo "rust=true" >> "$GITHUB_OUTPUT"
-            echo "node=true" >> "$GITHUB_OUTPUT"
+            echo "→ rust=true node=true contract=true ($1)"
+            {
+              echo "rust=true"
+              echo "node=true"
+              echo "contract=true"
+            } >> "$GITHUB_OUTPUT"
             exit 0
           }
 
@@ -114,16 +119,60 @@ jobs:
           #     `momo-messaging/src/refine.rs`가 `include_str!`로 굽는다.
           rust=false
           node=false
+          contract=false
           printf '%s\n' "$files" | grep -Eq \
             '^(server-rust/|clients/desktop/src-tauri/|deny\.toml$|scripts/check_cargo_licenses\.sh$|docs/api/harness-refine-client-msg-id\.golden\.json$|\.github/workflows/pr-ci\.yml$)' \
             && rust=true
           printf '%s\n' "$files" | grep -Eq \
             '^(clients/web/|clients/mobile/|packages/|server/Fixtures/|package\.json$|package-lock\.json$|scripts/check_npm_licenses\.mjs$|\.github/workflows/pr-ci\.yml$)' \
             && node=true
+          # #1295: the served legacy client's generated contract previously
+          # drifted while both broad build lanes stayed green. Keep this lane
+          # narrow: either side of the generated pair, its lockfile, or verifier
+          # must install the exact generator and compare. Do not trigger on this
+          # workflow alone: #1295 lands on track/uxui while this goal lands on
+          # track/engine, and cross-track product commits stay out of this PR.
+          printf '%s\n' "$files" | grep -Eq \
+            '^(docs/api/openapi\.yaml$|clients/web-legacy/|scripts/verify_web_generated_types\.sh$)' \
+            && contract=true
 
-          echo "→ rust=$rust node=$node"
-          echo "rust=$rust" >> "$GITHUB_OUTPUT"
-          echo "node=$node" >> "$GITHUB_OUTPUT"
+          echo "→ rust=$rust node=$node contract=$contract"
+          {
+            echo "rust=$rust"
+            echo "node=$node"
+            echo "contract=$contract"
+          } >> "$GITHUB_OUTPUT"
+
+  # Every PR gets a topology check, including documentation-only changes. For
+  # track targets, GitHub's synthetic merge commit must contain current main;
+  # workflow_dispatch checks the remote canonical graph instead.
+  alignment:
+    name: canonical track alignment
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+
+      - name: canonical refs 새로고침
+        run: |
+          git fetch --no-tags origin \
+            +refs/heads/main:refs/remotes/origin/main \
+            +refs/heads/track/engine:refs/remotes/origin/track/engine \
+            +refs/heads/track/uxui:refs/remotes/origin/track/uxui
+
+      - name: PR candidate 또는 remote topology 검사
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          CANDIDATE_SHA: ${{ github.sha }}
+        run: |
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            scripts/check_track_alignment.sh --candidate "$BASE_REF" "$CANDIDATE_SHA"
+          else
+            scripts/check_track_alignment.sh --remote
+          fi
 
   # ── ② Rust 레인 ─────────────────────────────────────────────────────────
   # `cargo test --workspace` + 카고 라이선스 게이트.
@@ -281,3 +330,63 @@ jobs:
           npm --prefix clients/mobile run test -- \
             --testPathIgnorePatterns=/node_modules/ \
             --testPathIgnorePatterns='__tests__/inboxApproval\.test\.tsx'
+
+  # #1295 regression lane. clients/web-legacy remains the committed generated
+  # consumer even while product UI work happens in clients/web.
+  contract:
+    name: OpenAPI ↔ web-legacy generated contract
+    needs: changes
+    if: needs.changes.outputs.contract == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: clients/web-legacy/package-lock.json
+
+      - name: npm ci (clients/web-legacy)
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+        run: npm ci --prefix clients/web-legacy
+
+      - name: permissive npm license gate (clients/web-legacy)
+        run: node scripts/check_npm_licenses.mjs --root clients/web-legacy
+
+      - name: committed generated types match OpenAPI
+        run: scripts/verify_web_generated_types.sh
+
+  # Branch protection requires this one stable context. Optional path lanes may
+  # be skipped, but a failure/cancellation in any selected lane keeps it red.
+  gate:
+    name: PR CI gate
+    needs:
+      - changes
+      - alignment
+      - rust
+      - node
+      - contract
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      CHANGES_RESULT: ${{ needs.changes.result }}
+      ALIGNMENT_RESULT: ${{ needs.alignment.result }}
+      RUST_RESULT: ${{ needs.rust.result }}
+      NODE_RESULT: ${{ needs.node.result }}
+      CONTRACT_RESULT: ${{ needs.contract.result }}
+    steps:
+      - name: required and selected lanes are green
+        run: |
+          set -euo pipefail
+          test "$CHANGES_RESULT" = success
+          test "$ALIGNMENT_RESULT" = success
+          for result in "$RUST_RESULT" "$NODE_RESULT" "$CONTRACT_RESULT"; do
+            case "$result" in
+              success|skipped) ;;
+              *) echo "selected PR CI lane is not green: $result" >&2; exit 1 ;;
+            esac
+          done

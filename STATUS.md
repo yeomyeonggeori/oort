@@ -1,5 +1,11 @@
 # oort 진행 현황
 
+## Canonical track 정렬 가드레일 (#1297, 2026-08-12)
+
+- `main`은 두 `track/*`의 조상이어야 하고 track-ahead는 정상이라는 topology를 `scripts/check_track_alignment.sh`로 기계화했다. remote/local behind·divergence, canonical upstream 오배선, ref 누락, non-fast-forward candidate는 이름을 대고 실패하며, 격리 fixture가 각 RED와 ahead PASS를 고정한다.
+- local gate·pre-push·merge-tree가 같은 checker를 소비하고, `track-alignment` workflow가 세 canonical branch push + 매일 + 수동 실행에서 remote drift를 감시한다. `pr-ci`는 이제 `main`·`track/engine`·`track/uxui` 모두에서 돌고 branch protection이 요구할 단일 context `PR CI gate`를 낸다.
+- #1295 재발 방지로 OpenAPI 또는 `clients/web-legacy` 생성 계약이 바뀌면 전용 CI lane이 legacy lockfile로 설치한 뒤 permissive license와 generated-type 정합을 함께 검사한다. GitHub 보호는 `scripts/github_track_guardrails.sh`가 기본 read-only check, 명시적 `--apply`로 PR-only·conversation resolution·GitHub Actions app-ID 고정 context·force/delete 금지와 Actions 기본 read·PR 승인 금지를 멱등 관리한다. 기존의 더 강한 check/review/restriction/linear-history와 동시변경 fail-closed도 보존하며, 실제 apply는 #1297 main 랜딩·세 트랙 정렬·context 생성 후 통합자 몫이다.
+
 ## Secret gate RED proof 결정화 (#1296, 2026-08-12)
 
 - 확률적으로 entropy 임계값을 못 넘던 random-hex fixture를 완성 literal 없이 런타임 조립되는 gitleaks 내장 AWS 형상으로 교체했다. 실제 history scan·비노출·fingerprint baseline·nonmatching baseline·missing-scanner fail-closed 계약은 그대로다.

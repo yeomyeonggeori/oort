@@ -1,0 +1,38 @@
+name: track-alignment
+
+on:
+  push:
+    branches:
+      - main
+      - track/engine
+      - track/uxui
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: track-alignment
+  cancel-in-progress: true
+
+jobs:
+  topology:
+    name: main is ancestor of both tracks
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+
+      - name: canonical refs 새로고침
+        run: |
+          git fetch --no-tags origin \
+            +refs/heads/main:refs/remotes/origin/main \
+            +refs/heads/track/engine:refs/remotes/origin/track/engine \
+            +refs/heads/track/uxui:refs/remotes/origin/track/uxui
+
+      - name: remote topology 검사
+        run: scripts/check_track_alignment.sh --remote

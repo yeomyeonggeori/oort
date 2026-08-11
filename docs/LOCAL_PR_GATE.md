@@ -5,15 +5,14 @@
 
 ## 0. Current Status
 
-As of 2026-06-26, GitHub Actions are disabled manually for `yeomyeonggeori/oort`
-because the organization is seeing billing/payment failures and should not spend
-paid macOS runner minutes during active development.
+As of 2026-08-12, public-repository `pr-ci` is active for PRs into `main`,
+`track/engine`, and `track/uxui`; `track-alignment` watches canonical topology.
+Release and paid macOS workflows remain manual and owner-gated.
 
-- Remote workflow state must stay `disabled_manually` unless the owner explicitly approves re-enabling it.
-- Repo workflow files are manual-only (`workflow_dispatch`) so a future re-enable cannot start jobs from every push, PR, or tag.
-- The merge gate during this period is local evidence + review pass + no unrelated dirty files.
+- `PR CI gate` is the stable branch-protection context. Rust, Node, and generated-contract jobs may skip by path, while the aggregator itself always reports one result.
+- Local evidence remains the primary runtime merge gate because PR CI intentionally does not boot PostgreSQL/Centrifugo/Docker e2e or external providers.
 - Workers use local evidence to open a PR and hand it off; workers do not merge. `momo-main` owns review, final local gate, merge, issue close, and post-merge `main` verification.
-- Do not wait for GitHub Actions green during this period; record `Actions disabled by policy` in PR evidence when relevant.
+- Release workflow activation and M7/M8 gates are unchanged; green PR CI is not release authorization.
 
 ## 1. Rule
 
@@ -42,7 +41,9 @@ conservative mapping — ambiguous paths widen to `all`, never narrow — and
 records the suggested profile plus per-path reasons in the evidence markdown.
 An explicit `--profile` always wins over `--auto`.
 
-Every profile starts with two fail-fast repository checks:
+Full profiles include the static repository checks below. Independently of the
+selected profile, canonical local track wiring is always added before the
+profile switch, so focused `web` and `secrets` runs cannot bypass it:
 
 - `scripts/check_branch_skew.sh` computes the merge-base with
   `${MOMO_GATE_SKEW_REF:-origin/main}` and fails when upstream and the current
@@ -50,6 +51,10 @@ Every profile starts with two fail-fast repository checks:
   listed paths before rerunning. A reviewed exceptional run may set
   `MOMO_GATE_SKIP_SKEW='specific reason'`; the reason is printed and embedded in
   the final evidence. Blank or reasonless overrides are rejected.
+- `scripts/check_track_alignment.sh --local-existing` validates exact upstream
+  and no-behind/no-divergence state for installed canonical local branches.
+  Track/local ahead is allowed. Global remote topology is monitored separately
+  so a repair PR is not blocked by the drift it is intended to repair.
 - `scripts/check_migration_numbers.sh server/Migrations` rejects duplicate
   numeric prefixes before any database connection. `037_name.sql` and
   `37_other.sql` are treated as the same number. `scripts/migrate.sh` runs the
@@ -64,8 +69,9 @@ scripts/install_branch_skew_hook.sh
 
 The installer only writes an absent or identical `pre-push` hook and refuses to
 overwrite another hook. It does not modify the shared worktree `post-checkout`
-bootstrap hook. The pre-push hook refreshes `origin/main` and fails closed when
-that fetch or the overlap check fails.
+bootstrap hook. The pre-push hook refreshes all three canonical remote refs,
+validates installed upstreams, rejects stale/non-fast-forward canonical updates
+and canonical deletion, then runs the existing overlap check.
 
 The script writes a log, Markdown evidence file, and `.sha256` manifest under
 `${TMPDIR:-/tmp}/momo-local-gate` by default, then prints a PR-ready

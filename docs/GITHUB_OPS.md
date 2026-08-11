@@ -84,10 +84,9 @@ Codex(cloud)는 `@codex` 멘션으로 이슈를 받으면 **이슈 본문을 작
 - **완료 기준:** PR 생성이 끝이 아니다. 리뷰 스킬/에이전트 검수 → 최종 테스트 → merge → `main` local gate 확인까지가 한 사이클이다. GitHub Actions를 다시 주 gate로 켠 기간에는 Actions green도 함께 확인한다.
 - **대기 시간 사용:** CI를 기다리는 동안 로드맵 위치, 기술스택/중요 결정 변경 여부, 새 리스크나 참고 소스가 생겼는지 점검한다. 변화가 있으면 `STATUS.md`/`ROADMAP.md`/이슈로 반영하거나 후속 이슈를 제안한다.
 
-### 3.2a GitHub Actions 비주요 기간: Local PR Gate
+### 3.2a PR CI + Local PR Gate
 
-당분간 GitHub Actions를 merge의 주 gate로 쓰지 않는 기간에도 PR 품질 기준은 유지한다.
-2026-06-26 현재 `ci-build`, `release-ios`, `release-macos`는 조직 과금/결제 이슈 때문에 원격에서 `disabled_manually` 상태이며, workflow 파일도 자동 `push`/`pull_request`/tag 트리거 없이 `workflow_dispatch` 전용으로 둔다.
+공개 레포 전환 뒤 `pr-ci`는 `main`·`track/engine`·`track/uxui` PR에서 자동 실행되고, `PR CI gate` 하나를 required context로 쓴다. Rust/Node/legacy 생성계약은 변경 경로별로 실행한다. DB·Centrifugo·Docker·외부 provider runtime은 계속 local gate가 정본이다. release/유료 macOS workflow의 owner/M7 제한은 그대로다.
 
 - 정본: [`docs/LOCAL_PR_GATE.md`](LOCAL_PR_GATE.md), 실행 진입점: `scripts/local_gate.sh`.
 - PR body에는 `scripts/local_gate.sh --profile ...`가 출력하는 `Local Gate: PASS`, 날짜, machine/toolchain, 실행 명령, runtime coverage, 미검증 범위를 붙인다.
@@ -109,8 +108,8 @@ Codex(cloud)는 `@codex` 멘션으로 이슈를 받으면 **이슈 본문을 작
   ```
 - runtime 변경은 해당 profile을 사용한다. `runtime-relay`는 `scripts/verify_relay.sh`가 생기기 전까지 PASS를 만들 수 없고, MOMO-002 수동 relay 검증 경로를 PR evidence로 남긴다.
 - 내부 alpha 장애 공유는 `scripts/collect_diagnostics.sh --output-dir /tmp/momo-diagnostics --since 15m`로 redacted bundle을 만들고, diagnostics tooling 변경 PR은 `scripts/local_gate.sh --profile diagnostics` evidence를 붙인다.
-- merge 후에는 `main`을 갱신하고 같은 local gate를 한 번 더 실행한다. Actions 확인 단계는 Actions를 다시 주 gate로 켤 때 복원한다.
-- Actions를 다시 켜려면 owner approval, billing 상태 확인, branch protection required-check 정리, 그리고 local gate evidence 운영이 유지되는지 먼저 확인한다.
+- merge 후에는 `main`을 갱신하고 같은 local gate를 한 번 더 실행하며 `PR CI gate`와 `track-alignment` 결과도 확인한다.
+- 세 canonical branch 보호 상태와 repository Actions 기본 권한은 `scripts/github_track_guardrails.sh --check`로 확인한다. 실제 `--apply`는 #1297 main 랜딩·세 트랙 정렬·해당 SHA의 GitHub Actions `PR CI gate` 생성 뒤 통합자만 실행한다. required check는 이름뿐 아니라 GitHub Actions app ID에 고정되고, workflow 기본 권한은 read·PR 승인 불가다. apply는 기존의 더 강한 check/review/restriction/linear-history 설정을 보존하며, 보호 snapshot 동시 변경이나 404 이외의 조회 실패에서는 원격 쓰기 전에 중단한다.
 
 ### 3.2b 5개+ session/worktree 운영
 
