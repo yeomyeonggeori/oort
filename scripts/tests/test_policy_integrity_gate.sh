@@ -24,6 +24,9 @@ RUN_ID=9001
 RUN_ATTEMPT=2
 CHECK_SUITE_ID=8801
 APP_ID=15368
+STATUS_CREATOR_LOGIN="github-actions[bot]"
+STATUS_CREATOR_ID=41898282
+STATUS_CREATOR_TYPE="Bot"
 
 cleanup() { rm -rf "$SANDBOX"; }
 trap cleanup EXIT INT TERM
@@ -244,12 +247,15 @@ write_valid_provenance() {
     path: ".github/workflows/policy-integrity.yml", state: "active"
   }' >"$STATE/workflow.json"
   jq -n \
-    --arg sha "$HEAD_SHA" --argjson run "$RUN_ID" --argjson attempt "$RUN_ATTEMPT" '[[{
-      id: 501, sha: $sha, context: "Policy integrity gate", state: "success",
+    --argjson run "$RUN_ID" --argjson attempt "$RUN_ATTEMPT" \
+    --arg creator_login "$STATUS_CREATOR_LOGIN" \
+    --argjson creator_id "$STATUS_CREATOR_ID" \
+    --arg creator_type "$STATUS_CREATOR_TYPE" '[[{
+      id: 501, context: "Policy integrity gate", state: "success",
       target_url: ("https://github.com/example/oort/actions/runs/" + ($run|tostring) +
         "/attempts/" + ($attempt|tostring)),
       created_at: "2026-08-12T02:00:00Z",
-      creator: {login: "github-actions[bot]"}
+      creator: {login: $creator_login, id: $creator_id, type: $creator_type}
     }]]' >"$STATE/statuses.json"
   jq -n \
     --argjson id "$RUN_ID" --argjson attempt "$RUN_ATTEMPT" \
@@ -585,14 +591,23 @@ expect_evaluate_red head-toctou 'PR head does not match the trusted event head'
 # Happy-path provenance, including workflow/check-suite App identity output.
 write_valid_provenance
 run_verify >/dev/null || fail "valid trusted run provenance failed"
+grep -Fq "repos/example/oort/commits/$HEAD_SHA/statuses?per_page=100" "$STATE/calls.log" \
+  || fail "provenance did not request statuses from the exact current-head endpoint"
 jq -e \
   --arg head "$HEAD_SHA" --arg base_sha "$BASE_SHA" \
   --arg authority "$AUTHORITY_SHA" \
+  --arg status_creator_login "$STATUS_CREATOR_LOGIN" \
+  --argjson status_creator_id "$STATUS_CREATOR_ID" \
+  --arg status_creator_type "$STATUS_CREATOR_TYPE" \
   --argjson workflow "$WORKFLOW_ID" --argjson run "$RUN_ID" \
   --argjson attempt "$RUN_ATTEMPT" --argjson app "$APP_ID" '
   .head_sha == $head and .base_ref == "track/engine" and
   .base_sha == $base_sha and .authority_ref == "main" and
-  .authority_sha == $authority and .workflow_id == $workflow and
+  .authority_sha == $authority and
+  .status_creator_login == $status_creator_login and
+  .status_creator_id == $status_creator_id and
+  .status_creator_type == $status_creator_type and
+  .workflow_id == $workflow and
   .workflow_path == ".github/workflows/policy-integrity.yml" and
   .workflow_run_path == ".github/workflows/policy-integrity.yml@main" and
   .event == "pull_request_target" and .run_id == $run and
@@ -655,9 +670,32 @@ printf '%s\n' '[[]]' >"$STATE/statuses.json"
 expect_verify_red missing-status "latest 'Policy integrity gate' status is missing"
 
 write_valid_provenance
-jq 'del(.[0][0].sha)' "$STATE/statuses.json" >"$STATE/tmp.json"
+jq '.[0][0].creator.login = "lookalike-actions[bot]"' \
+  "$STATE/statuses.json" >"$STATE/tmp.json"
 mv "$STATE/tmp.json" "$STATE/statuses.json"
-expect_verify_red status-without-exact-sha "is not a successful GitHub Actions status for the current head"
+expect_verify_red wrong-status-creator-login "is not a successful trusted GitHub Actions bot status"
+
+write_valid_provenance
+jq '.[0][0].creator.id = 31337' \
+  "$STATE/statuses.json" >"$STATE/tmp.json"
+mv "$STATE/tmp.json" "$STATE/statuses.json"
+expect_verify_red wrong-status-creator-id "is not a successful trusted GitHub Actions bot status"
+
+write_valid_provenance
+jq '.[0][0].creator.type = "User"' \
+  "$STATE/statuses.json" >"$STATE/tmp.json"
+mv "$STATE/tmp.json" "$STATE/statuses.json"
+expect_verify_red wrong-status-creator-type "is not a successful trusted GitHub Actions bot status"
+
+write_valid_provenance
+jq '.app.id = 31337' "$STATE/suite.json" >"$STATE/tmp.json"
+mv "$STATE/tmp.json" "$STATE/suite.json"
+expect_verify_red wrong-actions-app-id "trusted workflow check suite GitHub Actions provenance is invalid"
+
+write_valid_provenance
+jq '.app.slug = "lookalike-actions"' "$STATE/suite.json" >"$STATE/tmp.json"
+mv "$STATE/tmp.json" "$STATE/suite.json"
+expect_verify_red wrong-actions-app-slug "trusted workflow check suite GitHub Actions provenance is invalid"
 
 write_valid_provenance
 jq '.run_attempt = 3' "$STATE/run.json" >"$STATE/tmp.json"

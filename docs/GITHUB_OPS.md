@@ -129,6 +129,13 @@ run-attempt, current default-main workflow authority가 포함된 base-controlle
 check-suite app, evaluator job에 묶고 현재 changed-files/audit evidence 및 마지막 API
 재읽기까지 수행한다.
 
+commit status와 Check Suite의 신원 축은 같지 않다. 2026-08-12 첫 live PR 실측에서
+status creator는 exact `github-actions[bot]`(GitHub user id `41898282`, type `Bot`)이고,
+run/check-suite/job의 실행 주체는 별도 GitHub Actions App(id `15368`, slug
+`github-actions`)이었다. verifier는 status의 context/state/current-head/target run-attempt와
+bot login+id+type을 먼저 결속한 뒤, target run의 suite/job을 App id+slug에 따로 결속한다.
+bot user id를 App id처럼 비교하거나 둘 중 한 축만으로 provenance를 주장하지 않는다.
+
 ```bash
 scripts/verify_policy_integrity_from_base.sh \
   --repo yeomyeonggeori/oort --pr <PR-number>
@@ -142,13 +149,19 @@ scripts/verify_policy_integrity_from_base.sh \
 않는다. head가 바뀌거나 audit comment/label transition이 수정되면 label을 다시 붙여야
 하며, 기존 승인은 재사용되지 않는다. local gate fixture는 이 재승인·run binding·후보
 실행 금지 RED를 고정하고, required context는 `PR CI gate`와 `Policy integrity gate` 두
-개다. Actions REST run/check-suite/job head 의미는 첫 live bootstrap PR에서 캡처하기
-전까지 `runtime-unverified`이며, verifier는 어느 의미도 추정하지 않고 세 객체의 내부
-SHA 일치만 요구한다.
+개다. 첫 live PR에서 status creator와 run/suite/job App 축, bare run path, PR-head
+run/suite/job SHA 형상을 확인했다. API가 반환할 수 있는 다른 run-head 형상은 의미를
+추정하지 않고 세 객체의 내부 SHA 일치만 요구하며, 원격 branch-protection apply/readback은
+bootstrap 완료 전까지 `runtime-unverified`다.
 
 초기 bootstrap은 workflow가 아직 base에 없는 **#1302의 track/engine→main 최초 랜딩
-체인 전체**만 예외로 허용한다. main 랜딩 후 세 canonical ref를 동일 SHA로 맞추는 순간부터
-예외는 없다. 먼저 main의 정본 label 정의를 확인하고 지정 owner가 원격 label을 만든다.
+체인 전체**와, 첫 live 응답에서 드러난 status-user/App identity 불일치 때문에 기존
+exact-base verifier가 genuine run을 거부하는 **#1307의 track/engine→main 수리 체인**만
+reviewed exception으로 허용한다. #1307은 후보 verifier를 merge 권위로 사용하지 않고 독립
+보안 리뷰, 두 required context, focused/static/docs local gate, live read-only 진단을 모두
+기록한다. #1307이 main에 랜딩하면 갱신된 exact-base wrapper로 대기 중인 PR을 다시 검증하며,
+세 canonical ref를 동일 SHA로 맞추는 순간부터 예외는 없다. 먼저 main의 정본 label 정의를
+확인하고 지정 owner가 원격 label을 만든다.
 
 ```bash
 scripts/github_bootstrap.sh --dry-run --labels-only
