@@ -524,6 +524,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/workspaces/{workspaceId}/notification-rules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the caller's member-global notification rules.
+         * @description ADR-0124 증보 1. The signed-in member's own rules (never a memberId from the request). No stored row answers as both switches off. `dnd` suppresses every push for this member across the workspace; `mentionOverridesMute` lets a mention through a channel this member muted in 018.
+         */
+        get: operations["getNotificationRules"];
+        /**
+         * Replace the caller's member-global notification rules.
+         * @description ADR-0124 증보 1. Replaces both switches at once; a body with an unknown field is a 400. `dnd` sits above channel mute and the mention exception (pause-everything means everything); `mentionOverridesMute` only affects `reason=mention`, so a muted channel still stays silent for DMs and approval requests. Unread/read-state is untouched.
+         */
+        put: operations["updateNotificationRules"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/workspaces/{workspaceId}/channels/{channelId}/huddles": {
         parameters: {
             query?: never;
@@ -2409,6 +2433,11 @@ export interface components {
             maxRunSteps?: number;
             /** @description Present for agents only, and always present for them including when false, so a list can tell "awake" apart from "not reported". `agent_profile.paused`; an agent with no profile row reports false. This is not a new disclosure: mentioning a paused agent already posts a public system line in the channel saying so, and the rest of the profile (instructions, enabled tools, triggers) stays behind the owner-gated profile read. */
             paused?: boolean;
+            /**
+             * @description Declared presence status (ADR-0160 ③), present for humans only. `member.presence_status`; the durable intent, not the effective dot, which the client computes as f(this, availability) and never stores. `auto` means no manual override (renders online when connected, offline otherwise); `away`/`dnd` are the two manual overrides. Absent for agents (presence is human-only, their liveness is agent_run) and absent from a server too old to carry the column.
+             * @enum {string}
+             */
+            presenceStatus?: "auto" | "away" | "dnd";
             /** Format: int64 */
             createdAtMs: number;
             /** Format: int64 */
@@ -2794,6 +2823,16 @@ export interface components {
         };
         NotificationPrefResponse: {
             muted: boolean;
+        };
+        UpdateNotificationRulesRequest: {
+            /** @description Suppress every push for this member across the workspace. */
+            dnd: boolean;
+            /** @description Let a mention through a channel this member muted (018). */
+            mentionOverridesMute: boolean;
+        };
+        NotificationRulesResponse: {
+            dnd: boolean;
+            mentionOverridesMute: boolean;
         };
         CreateChannelRequest: {
             /** @enum {string} */
@@ -3550,15 +3589,19 @@ export interface components {
              */
             type: "text" | "tool_call" | "tool_result" | "diff" | "artifact" | "approval_request" | "system";
             body?: string;
-            /** @description Simplified structured payload for v0 — a flat string-to-string map on send. The server-owned `mention_member_ids` key is stripped and recomputed server-side. */
+            /** @description Simplified structured payload for v0 — a flat string-to-string map on send. Server-owned keys are stripped and rewritten server-side: `mention_member_ids` (recomputed from the body), `momo.stream` (the streaming staleness marker) and `momo.harnessRefine` (ADR-0158 — send the `harnessRefine` block instead). Because the map is flat, a structured block cannot be sent through it at all. */
             props?: {
                 [key: string]: string;
             };
             /**
              * Format: uuid
-             * @description Agent-run binding; agent principals only.
+             * @description ADR-0158 D5 — the agent run this write belongs to. Served since ADR-0158; earlier builds decoded the field and answered `400 runId (agent-run binding) is not served by momo-server yet`, so a producer can detect support by sending it.
+             *     Validated **fail-closed inside the send transaction**, and all three checks must pass: the run exists, it is in this workspace, and the caller is that run's agent (`agent_run.agent_member_id` equals the credential's member — which is what makes this an agent-bearer field in practice, a human credential being refused by the same rule rather than by a separate one). A run this workspace cannot see — including one in another tenant, which RLS makes invisible — answers **404**; a run it can see but does not own answers **403**.
+             *     On success the id is written to `message.run_id` *and* mirrored into `props.run_id`, overwriting any `run_id` the request put in `props`. The column is what a server-side close looks a half-written answer up by (ADR-0155), and the props copy is what a history page reads to decide `runEnded` (#1166); an out-of-process producer needs both in order to behave exactly like the in-process one. Sending `runId` together with `stream` is the intended adapter shape — it is what makes a cancel able to close the stream that adapter opened.
              */
             runId?: string;
+            /** @description ADR-0158 D1–D4 — announces that the agent rewrote its own harness. Optional and additive; omitting it is the ordinary send. */
+            harnessRefine?: components["schemas"]["HarnessRefine"];
             /** @description Completed attachments uploaded by this actor in this channel. They are linked to the new message inside the canonical message transaction. */
             attachmentIds?: string[];
             /** @description Per-request agent model/effort override for mention runs. */
@@ -3570,6 +3613,37 @@ export interface components {
             model?: string;
             /** @enum {string} */
             effort?: "low" | "medium" | "high" | "xhigh" | "max";
+        };
+        /**
+         * @description ADR-0158 D1–D4 — the block that turns "the agent rewrote its own instructions" into one line the room can scroll back to.
+         *     A prime harness refines itself on a timer without any host command (`autoRefine.enabled` defaults true, `turnInterval` 25, `cooldownMs` 20 min — measured), and D1 decided that in a product where an agent is a first-class member the team is owed that fact rather than one host's log.
+         *     The send that carries this block must be `type: system` (D2 — no new message type is introduced) and must carry a human-readable `body`; the reasons live in props, the sentence lives in the channel. The stored object is `props["momo.harnessRefine"]`, written by the server: `scope` is re-stated rather than copied, and the key is stripped from any client-supplied `props`.
+         *     **`clientMsgId` is derived, not chosen** (D4). It must equal `uuidv5(namespace = 6d6f6d6f-2e68-6172-6e65-737352656669, name = refinementId)` — the 16 ASCII bytes `momo.harnessRefi`. `message.client_msg_id` is a uuid column and `RefinementResult.id` is an arbitrary string, so the string is hashed into the column's type, exactly as `tool_result` keys are. Any other value is a 400 that names the expected uuid. The point is that the two paths which can observe one refinement — the `refine_complete` RPC event and the file watcher that covers the kernel's silent writes — derive the same key and collapse into a single announcement.
+         *     Unlike most request objects here this one is strictly closed (`additionalProperties: false`, on the edits too). That is a disclosure rule, not tidiness: harness memories can quote the conversation that produced them, so an edit may name *what* changed and never carry the text. A producer that adds `before`/`after` is refused rather than silently trimmed.
+         */
+        HarnessRefine: {
+            /** @description `RefinementResult.id` as the harness assigned it (e.g. `refine_20260807041452415`). The seed of the derived `clientMsgId`. */
+            refinementId: string;
+            /**
+             * @description What set the refinement off. `command` is an explicit `refine` RPC; `turn_interval` and `compact` are the harness's own timers; `observed-drift` is the honest name for the kernel path, where `rlm.harness` writes `harness_state.json` and the protocol emits nothing at all (measured: 6 runs × 37 events, `refine_complete` = 0). An adapter using `observed-drift` is stating "we saw the file change", never "the agent decided X". The mixed casing is the contract's, not a typo. An unrecognised value is a 400 — the server does not repeat a story it cannot read.
+             * @enum {string}
+             */
+            trigger: "command" | "turn_interval" | "compact" | "observed-drift";
+            /**
+             * @description Always `workspace`, and any other value is a 400. The harness calls a global refinement `"global"`, but an adapter runs one `HOME` per workspace, so repeating that word would claim something about other workspaces that is not true.
+             * @enum {string}
+             */
+            scope: "workspace";
+            /** @description The harness entries this refinement touched — names only. */
+            edits?: {
+                action: string;
+                kind: string;
+                id: string;
+            }[];
+            /** @description Supporting detail for the human sentence. Bounded for the same disclosure reason the edits are: an unbounded summary is the harness text reaching the channel under a friendlier name. */
+            summary?: string;
+            /** @description D3 — recorded on the row and in the audit trail, with **no channel affordance promised**. What a rewind should look like to a room is an open question; storing the id keeps the cheap half (an operator can answer "can this be undone, and by what id") without shipping a half-answer that would be harder to withdraw than to add. */
+            rollbackId?: string;
         };
         EditMessageRequest: {
             body: string;
@@ -5621,6 +5695,87 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             /** @description Active channel membership required. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    getNotificationRules: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The caller's effective notification rules. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationRulesResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Active human membership required. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    updateNotificationRules: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateNotificationRulesRequest"];
+            };
+        };
+        responses: {
+            /** @description The stored notification rules. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationRulesResponse"];
+                };
+            };
+            /** @description Invalid or unknown request field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Active human membership required. */
             403: {
                 headers: {
                     [name: string]: unknown;

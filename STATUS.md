@@ -1,5 +1,10 @@
 # oort 진행 현황
 
+## OpenAPI 생성 타입 재동기화 — web-legacy 게이트 복구 (#1295, 2026-08-12)
+
+- lockfile에 고정된 `openapi-typescript 7.13.0`으로 `docs/api/openapi.yaml`을 다시 생성해 `clients/web-legacy/src/api/schema.d.ts`를 byte-identical하게 맞췄다. 빠졌던 notification-rules 경로·DTO와 human `presenceStatus`, 그 사이 추가된 run binding/refine 계약도 정본에서 그대로 복구됐다.
+- `verify_web_generated_types.sh` green과 임시 dummy path의 이름 있는 `types-stale` red proof·생성물 bytes 복원을 확인했다. 정적 생성물 동기화라 별도 runtime 미검증 범위는 없다.
+
 ## React Native 작업 콘솔 — T1/T2/T3 위치·읽기 전용 상세 (#1292, 2026-08-11)
 
 - 모바일 하단 탭에 워크스페이스 범위 `작업` 목록을 추가했다. 최근 최대 200개를 진행 우선으로 보여 주고 `전체`/`진행`(`running|idle`)을 가르며, 호스트·채널·담당자·도구·시작/종료 시각과 공유 `workExecutionLocation`의 정확한 `T1 · 데스크톱 앱` / `T2 · 셀프호스트` / `T3 · 클라우드` / `실행 위치 확인 필요` 표식을 함께 쓴다. 기존 AgentDetail의 눈에 보이는 실행 위치도 같은 정본 mapper로 통일했다.
