@@ -17,9 +17,16 @@ import {
 } from "./gate-shell-layout-contract.mjs";
 
 const WEB_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const packageJson = JSON.parse(readFileSync(resolve(WEB_ROOT, "package.json"), "utf8"));
 const tokensCss = readFileSync(resolve(WEB_ROOT, "src/design/tokens.css"), "utf8");
 
 describe("shell layout gate contract", () => {
+  it("keeps the named package entrypoint wired to the exact-source executable", () => {
+    expect(packageJson.scripts["gate:shell"]).toBe(
+      "node gates/gate-shell-layout.mjs"
+    );
+  });
+
   it("fails closed instead of consuming an existing stale dist", async () => {
     const fixtureRoot = mkdtempSync(resolve(tmpdir(), "momo-shell-gate-"));
     try {
