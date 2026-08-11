@@ -14,11 +14,34 @@
 ## Policy status live provenance (#1307, 2026-08-12)
 
 - 첫 live `pull_request_target`에서 commit status creator는 GitHub Actions App id가 아니라 `github-actions[bot]`/user id `41898282`/`Bot`으로, check-suite는 별도 App id `15368`/slug `github-actions`로 실측됐다. verifier와 RED fixture가 status bot identity와 run/suite/job App identity를 분리해 각각 exact 결속하며 provenance JSON도 두 축을 따로 기록한다.
-- PR #1306에서 #1307 구현을 사용한 read-only 진단은 live status→run attempt→suite→job 결속과 provenance JSON을 끝까지 확인했다. 다만 이것은 후보 구현 진단이지 merge 권위가 아니며, 기존 exact-base verifier 자체의 live-shape 결함을 고치는 #1307 track/engine→main 랜딩 체인만 독립 리뷰·두 required context·local gate를 근거로 한 reviewed bootstrap 예외다. main 랜딩 뒤 갱신된 exact-base wrapper로 #1306을 다시 검증하며, 그때부터 예외 재사용은 없다. 남은 `runtime-unverified`는 원격 branch-protection apply/readback과 아직 관측하지 않은 대체 run-head 형상이다.
+- PR #1306에서 #1307 구현을 사용한 read-only 진단은 live status→run attempt→suite→job 결속과 provenance JSON을 끝까지 확인했다. 다만 이것은 후보 구현 진단이지 merge 권위가 아니며, 기존 exact-base verifier 자체의 live-shape 결함을 고치는 #1307 track/engine→main 랜딩 체인만 독립 리뷰·두 required context·local gate를 근거로 한 reviewed bootstrap 예외다. main 랜딩 뒤 갱신된 exact-base wrapper로 새 #1306 head를 재검증하는 것이 이 예외의 폐쇄 조건이며 결과는 PR #1306 evidence에 기록한다. 남은 `runtime-unverified`는 원격 branch-protection apply/readback과 아직 관측하지 않은 대체 run-head 형상이다.
 
 ## Secret gate RED proof 결정화 (#1296, 2026-08-12)
 
 - 확률적으로 entropy 임계값을 못 넘던 random-hex fixture를 완성 literal 없이 런타임 조립되는 gitleaks 내장 AWS 형상으로 교체했다. 실제 history scan·비노출·fingerprint baseline·nonmatching baseline·missing-scanner fail-closed 계약은 그대로다.
+
+## OpenAPI 생성 타입 재동기화 — web-legacy 게이트 복구 (#1295, 2026-08-12)
+
+- lockfile에 고정된 `openapi-typescript 7.13.0`으로 `docs/api/openapi.yaml`을 다시 생성해 `clients/web-legacy/src/api/schema.d.ts`를 byte-identical하게 맞췄다. 빠졌던 notification-rules 경로·DTO와 human `presenceStatus`, 그 사이 추가된 run binding/refine 계약도 정본에서 그대로 복구됐다.
+- `verify_web_generated_types.sh` green과 임시 dummy path의 이름 있는 `types-stale` red proof·생성물 bytes 복원을 확인했다. 정적 생성물 동기화라 별도 runtime 미검증 범위는 없다.
+
+## React Native 작업 콘솔 — T1/T2/T3 위치·읽기 전용 상세 (#1292, 2026-08-11)
+
+- 모바일 하단 탭에 워크스페이스 범위 `작업` 목록을 추가했다. 최근 최대 200개를 진행 우선으로 보여 주고 `전체`/`진행`(`running|idle`)을 가르며, 호스트·채널·담당자·도구·시작/종료 시각과 공유 `workExecutionLocation`의 정확한 `T1 · 데스크톱 앱` / `T2 · 셀프호스트` / `T3 · 클라우드` / `실행 위치 확인 필요` 표식을 함께 쓴다. 기존 AgentDetail의 눈에 보이는 실행 위치도 같은 정본 mapper로 통일했다.
+- 폰 전용 상세는 durable typed lifecycle·tool·ACP 요약과 발원 대화 이동만 제공한다. raw PTY·명령 입력/출력·cwd/env·controller/owner 제어·observer attach·새 native/WebView 의존성은 추가하지 않았고, 숨은 작업 탭은 polling/realtime을 유지하지 않는다.
+- 검증: review 보정 뒤 mobile typecheck·lint(오류 0)·전체 Jest 1,144/1,144와 core typecheck·lint·전체 Vitest 1,173/1,173, lane/measure shell syntax·Maestro YAML parse, `verify_merge_tree.sh --base origin/track/uxui --head HEAD --install`의 웹·폰·코어 8레인이 green이다. 좁은 4탭은 Dynamic Type 줄바꿈, 필터는 3:1 경계, 상세↔대화↔목록은 VoiceOver 초점 복귀, 긴 상세는 rotor heading을 보장하며 light/dark·긴 한국어·접근성 글자 캡처가 measure lane에 포함됐다. 현재 booted Simulator가 없어 캡처·Maestro 실주행은 `runtime-unverified`다.
+
+## Work Console v1 — 전용 작업 관제와 T1/T2/T3 위치 표식 (#1289, 2026-08-11)
+
+- 웹과 같은 번들을 쓰는 Tauri 데스크톱에 `/work` 전용 master-detail 진입점을 추가했다. 워크스페이스 작업 세션을 상태·담당자·채널·도구·명시 시각과 함께 보고, `?session=` 주소로 같은 기존 세션 상세에 다시 들어가며 목록을 접어 상세·터미널을 전체 route 폭으로 볼 수 있다.
+- 실행 위치는 서버 정본 `work_host.type`만으로 `T1 · 데스크톱 앱`·`T2 · 셀프호스트`·`T3 · 클라우드`를 판정하며 상태와 별도 icon+text로 표시한다. Project/repo/worktree/cwd는 현 계약에 없으므로 추론하지 않는다.
+- 터미널은 기존 host-direct observer를 그대로 재사용한 **읽기 전용** 표면이다. 실제 Tauri↔Rust workd 관전 폐곡선, controller 입력 PTY, Project 계층과 GUI preview는 후속 계약·goal이며 `runtime-unverified`다.
+
+## 데스크톱 셸 집중 모드 — 56px 레일 유지 + 184px 탐색 패널 접기 (#1291, 2026-08-11)
+
+- **웹/Tauri 공용 AppShell에 비지속 접기를 추가했다.** 텍스트+아이콘 `탐색 패널 접기`와 레일의 `열기`가 왕복하고, 채널/프로필 패널만 빠져 채팅과 같은 주 표면이 정확히 184px 넓어진다. 이미 열린 WorkPanel의 subtree와 wide 상태는 왕복 중 유지된다. `/work`도 #1290 합류 뒤 같은 두 번째 shell track을 그대로 받으며 별도 레이아웃 분기는 없다.
+- **포커스와 모바일 경계를 닫았다.** 숨은 패널의 모든 포커스 대상은 탭/AX 트리에서 빠지고 포커스는 살아 있는 토글로 이동한다. 데스크톱 토글을 쥔 채 `<600px`로 가면 현재 route의 모바일 opener가 이어받되, route에 이미 가시 포커스가 있으면 빼앗지 않는다. 서랍·스크림·Escape는 독립이며 새 AppShell 마운트에는 접힘 상태가 남지 않는다.
+- **검증.** typecheck · build · web 891 tests · lint 0 errors(기존 warning 7) · design pre-flight 10/10+3/3 · #1291 집중 shell gate 1280/900/760 + 390px, light/dark 전부 PASS. 양 스킴 캡처 직접 검수 Blocker 0; 전체 `gate:shell`의 기존 플러그인 포커스 링 offset 단정 3건은 이 변경과 무관한 baseline RED로 별도 관측했다.
 
 ## ADR-0158 서버 축 — `runId` 서비스 개시 · refine 공지 · 어댑터 스트림 (#1130 W-N, 2026-08-08)
 

@@ -22,6 +22,7 @@ import {
 import {channelPlacement} from '@momo/core/features/agents/channelPlacement';
 import {isSurfaceProvided} from '@momo/core/features/capabilities/serverSurfaces';
 import {sortSessions, workSessionStatus} from '@momo/core/features/work/workSessionModel';
+import {workExecutionLocation} from '@momo/core/features/work/workLocation';
 import {attachParticle} from '@momo/core/lib/koreanParticle';
 import {channelLabel} from '@momo/core/features/workspace/directory';
 import {useMutation} from '@tanstack/react-query';
@@ -436,6 +437,7 @@ function SessionRow({
   const styles = useStyles(buildStyles);
   const status = workSessionStatus(session);
   const survival = sessionSurvival(session, hosts);
+  const location = workExecutionLocation(session, hosts);
   return (
     <View
       style={styles.sessionRow}
@@ -443,7 +445,7 @@ function SessionRow({
       // a label but without it is not an accessibility element on iOS, so the
       // assembled sentence below was never spoken (R1 Medium-3).
       accessible
-      accessibilityLabel={`${session.label}, ${status.label}, ${survival.tier.label}. ${survival.sentence}`}
+      accessibilityLabel={`${session.label}, ${status.label}, ${location.label}. ${survival.sentence}`}
       testID={`agent-session-${session.id}`}>
       <View style={styles.sessionHead}>
         <Text style={styles.sessionLabel} numberOfLines={1} ellipsizeMode="tail">
@@ -457,7 +459,7 @@ function SessionRow({
           {status.label}
         </Text>
       </View>
-      <Text style={styles.meta}>{`${session.tool} · ${survival.tier.label}`}</Text>
+      <Text style={styles.meta}>{`${session.tool} · ${location.label}`}</Text>
       <Text
         style={[styles.meta, survival.atRisk && styles.survivalWarn]}
         testID={`agent-session-tier-${session.id}`}>
