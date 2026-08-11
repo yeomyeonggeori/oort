@@ -103,6 +103,7 @@ export function ScreenHeader({
       ) : null}
       <View style={styles.headerText}>
         <Text
+          accessibilityRole="header"
           style={styles.headerTitle}
           numberOfLines={1}
           ellipsizeMode="tail"
@@ -130,17 +131,21 @@ export function TapRow({
   onPress,
   accessibilityLabel,
   selected,
+  rowRef,
   testID,
 }: {
   children: React.ReactNode;
   onPress: () => void;
   accessibilityLabel: string;
   selected?: boolean;
+  /** Optional native handle for restoring VoiceOver focus after a pushed screen. */
+  rowRef?: React.Ref<React.ElementRef<typeof Pressable>>;
   testID?: string;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   return (
     <Pressable
+      ref={rowRef}
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel}
       accessibilityState={selected === undefined ? undefined : {selected}}
@@ -413,7 +418,9 @@ export function SectionLabel({label}: {label: string}): React.JSX.Element {
   const styles = useStyles(buildStyles);
   return (
     <View style={styles.sectionLabel}>
-      <Text style={styles.sectionLabelText}>{label}</Text>
+      <Text accessibilityRole="header" style={styles.sectionLabelText}>
+        {label}
+      </Text>
     </View>
   );
 }

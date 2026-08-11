@@ -1,5 +1,11 @@
 # oort 진행 현황
 
+## React Native 작업 콘솔 — T1/T2/T3 위치·읽기 전용 상세 (#1292, 2026-08-11)
+
+- 모바일 하단 탭에 워크스페이스 범위 `작업` 목록을 추가했다. 최근 최대 200개를 진행 우선으로 보여 주고 `전체`/`진행`(`running|idle`)을 가르며, 호스트·채널·담당자·도구·시작/종료 시각과 공유 `workExecutionLocation`의 정확한 `T1 · 데스크톱 앱` / `T2 · 셀프호스트` / `T3 · 클라우드` / `실행 위치 확인 필요` 표식을 함께 쓴다. 기존 AgentDetail의 눈에 보이는 실행 위치도 같은 정본 mapper로 통일했다.
+- 폰 전용 상세는 durable typed lifecycle·tool·ACP 요약과 발원 대화 이동만 제공한다. raw PTY·명령 입력/출력·cwd/env·controller/owner 제어·observer attach·새 native/WebView 의존성은 추가하지 않았고, 숨은 작업 탭은 polling/realtime을 유지하지 않는다.
+- 검증: review 보정 뒤 mobile typecheck·lint(오류 0)·전체 Jest 1,144/1,144와 core typecheck·lint·전체 Vitest 1,173/1,173, lane/measure shell syntax·Maestro YAML parse, `verify_merge_tree.sh --base origin/track/uxui --head HEAD --install`의 웹·폰·코어 8레인이 green이다. 좁은 4탭은 Dynamic Type 줄바꿈, 필터는 3:1 경계, 상세↔대화↔목록은 VoiceOver 초점 복귀, 긴 상세는 rotor heading을 보장하며 light/dark·긴 한국어·접근성 글자 캡처가 measure lane에 포함됐다. 현재 booted Simulator가 없어 캡처·Maestro 실주행은 `runtime-unverified`다.
+
 ## Work Console v1 — 전용 작업 관제와 T1/T2/T3 위치 표식 (#1289, 2026-08-11)
 
 - 웹과 같은 번들을 쓰는 Tauri 데스크톱에 `/work` 전용 master-detail 진입점을 추가했다. 워크스페이스 작업 세션을 상태·담당자·채널·도구·명시 시각과 함께 보고, `?session=` 주소로 같은 기존 세션 상세에 다시 들어가며 목록을 접어 상세·터미널을 전체 route 폭으로 볼 수 있다.

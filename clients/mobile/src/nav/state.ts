@@ -48,7 +48,10 @@
 /**
  * The v0 tabs.
  *
- * Three, because D5 named three axes and the third one had no surface at all:
+ * Four: 대화·인박스·에이전트 plus a workspace-wide 작업 console. The fourth
+ * tab adds one nullable detail layer, not an independent navigation stack.
+ *
+ * D5 named three axes and the third one had no surface at all:
  * 대화 and 인박스 covered 대화·승인, and 관전 — what the agents are actually
  * DOING — was reachable only on the desktop. A messenger where the agent can
  * only be talked to is a chat with a bot in it, which is the shape ADR-0101
@@ -57,9 +60,9 @@
  * This list is the only place the set is written down. `TabBar` maps over it and
  * `tabLabel` names it, so a fourth tab is one line here and nowhere else.
  */
-export type Tab = 'channels' | 'inbox' | 'agents';
+export type Tab = 'channels' | 'inbox' | 'agents' | 'work';
 
-export const TABS: readonly Tab[] = ['channels', 'inbox', 'agents'];
+export const TABS: readonly Tab[] = ['channels', 'inbox', 'agents', 'work'];
 
 const TAB_LABELS: Readonly<Record<Tab, string>> = {
   channels: '대화',
@@ -67,6 +70,7 @@ const TAB_LABELS: Readonly<Record<Tab, string>> = {
   // 세 글자. 「에이전트」는 이 제품이 그것을 부르는 이름이고(사이드바 섹션
   // 라벨과 같다), 줄여 부르면 두 화면이 같은 것을 다르게 부르게 된다.
   agents: '에이전트',
+  work: '작업',
 };
 
 export function tabLabel(tab: Tab): string {
@@ -108,6 +112,11 @@ export interface OpenAgent {
   handle: string;
 }
 
+/** One read-only work-session detail pushed over the 작업 tab. */
+export interface OpenWorkSession {
+  sessionId: string;
+}
+
 export interface NavState {
   tab: Tab;
   /** Pushed over the whole shell, or null when the tabs are visible. */
@@ -134,6 +143,8 @@ export interface NavState {
    * the place, and this is one row of it opened up.
    */
   agent: OpenAgent | null;
+  /** 작업 탭의 목록 위, 그리고 그 상세가 여는 대화 아래. */
+  workSession: OpenWorkSession | null;
 }
 
 export const INITIAL_NAV: NavState = {
@@ -141,6 +152,7 @@ export const INITIAL_NAV: NavState = {
   conversation: null,
   search: null,
   agent: null,
+  workSession: null,
 };
 
 export type NavAction =
@@ -148,6 +160,7 @@ export type NavAction =
   | {type: 'openConversation'; conversation: OpenConversation}
   | {type: 'openSearch'; initialQuery?: string}
   | {type: 'openAgent'; agent: OpenAgent}
+  | {type: 'openWorkSession'; workSession: OpenWorkSession}
   | {type: 'back'}
   | {type: 'reset'};
 
@@ -161,7 +174,8 @@ export function navReducer(state: NavState, action: NavAction): NavState {
         state.tab === action.tab &&
         state.conversation === null &&
         state.search === null &&
-        state.agent === null
+        state.agent === null &&
+        state.workSession === null
       ) {
         return state;
       }
@@ -169,13 +183,31 @@ export function navReducer(state: NavState, action: NavAction): NavState {
       // while one is open (the tab bar is behind it), but a deep link or a
       // notification will be able to, and landing on a tab with a conversation
       // still stacked over it would look like the tap did nothing.
-      return {tab: action.tab, conversation: null, search: null, agent: null};
+      return {
+        tab: action.tab,
+        conversation: null,
+        search: null,
+        agent: null,
+        workSession: null,
+      };
     case 'openConversation':
       return {...state, conversation: action.conversation};
     case 'openSearch':
-      return {...state, search: {initialQuery: action.initialQuery ?? ''}};
+      return {
+        ...state,
+        search: {initialQuery: action.initialQuery ?? ''},
+        agent: null,
+        workSession: null,
+      };
     case 'openAgent':
-      return {...state, agent: action.agent};
+      return {...state, search: null, agent: action.agent, workSession: null};
+    case 'openWorkSession':
+      return {
+        ...state,
+        search: null,
+        agent: null,
+        workSession: action.workSession,
+      };
     case 'back':
       // One step at a time, innermost first: a conversation opened FROM a search
       // result (or from an agent's own screen) goes back to where it was opened
@@ -183,6 +215,7 @@ export function navReducer(state: NavState, action: NavAction): NavState {
       if (state.conversation !== null) return {...state, conversation: null};
       if (state.search !== null) return {...state, search: null};
       if (state.agent !== null) return {...state, agent: null};
+      if (state.workSession !== null) return {...state, workSession: null};
       return state;
     case 'reset':
       // Sign-out. The next person to sign in must not land in the previous
