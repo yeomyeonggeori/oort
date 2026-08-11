@@ -253,6 +253,8 @@ jobs:
           scripts/tests/test_track_alignment_guard.sh
           scripts/tests/test_pr_ci_guardrails.sh
           scripts/tests/test_github_track_guardrails.sh
+          scripts/tests/test_policy_integrity_gate.sh
+          scripts/tests/test_trusted_policy_runner.sh
 
   # ── ② Rust 레인 ─────────────────────────────────────────────────────────
   # `cargo test --workspace` + 카고 라이선스 게이트.

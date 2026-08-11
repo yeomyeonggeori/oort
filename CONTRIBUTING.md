@@ -19,6 +19,28 @@ Signed-off-by: Your Name <your@email.com>
 3. 하드 불변식(Postgres=SoT, 단일 쓰기경로, RLS FORCE, 자격증명 비유입 — `docs/architecture/overview.md`)을 위반하는 PR은 수용되지 않습니다.
 4. UI 변경은 `.claude/skills/momo-design-taste` 규율의 검토를 거칩니다.
 
+## PR 신뢰 게이트
+
+canonical branch PR은 현재 head의 `PR CI gate`와 base-only
+`Policy integrity gate`가 모두 필요합니다. 같은 GitHub Actions App/context만으로는
+workflow provenance가 증명되지 않으므로 통합자는 후보 checkout의 스크립트를 실행하지
+않습니다. ADR-0153 D5에 따라 현재 PR의 exact canonical base branch/HEAD에서 wrapper
+bytes가 그 base와 일치하는 checkout으로 다음 exact-base wrapper를 머지 직전에 실행합니다.
+wrapper는 base object의 verifier만 추출해 실행하며 worktree/candidate verifier bytes는 무시합니다.
+
+```bash
+scripts/verify_policy_integrity_from_base.sh \
+  --repo yeomyeonggeori/oort --pr <PR-number>
+```
+
+보호 정책 파일 변경은 지정 policy owner `kwakseongjae`(GitHub user id
+`87296259`)가 PR author여야 하며, 같은 지정 owner의 exact
+`Policy-Integrity-Audit: <40sha>` comment 뒤 같은 owner가
+`policy-change-approved` label을 적용해야 합니다. GitHub org에서는 해당 계정의
+`author_association`이 `MEMBER`이므로 문자열 `OWNER`를 권한 증거로 사용하지 않습니다.
+head/comment/label transition이 바뀌면 증거를 다시 만들어야 합니다. 세부 trust 및 bootstrap
+절차는 `docs/GITHUB_OPS.md`와 `docs/LOCAL_PR_GATE.md`가 정본입니다.
+
 ## 시크릿
 
 커밋에 자격증명이 들어갔는지는 게이트가 봅니다. 모든 프로파일이 이 검사를 포함하므로 따로 기억할 필요는 없고, 커밋 직후 단독으로 확인하고 싶으면 이쪽이 3초입니다.

@@ -1,6 +1,6 @@
 # ADR-0153 — CI 스택: 로컬 게이트 권위 유지 + 셀프호스티드 러너 (클라우드 CI 과금 0)
 
-- Status: **Accepted** (2026-08-06 성재 — "괜찮아 보여. 한 번 더 검토하고 괜찮으면 해당 조합으로 ㄱㄱ" / 재검토 실측 반영)
+- Status: **Accepted** (2026-08-06 성재 — "괜찮아 보여. 한 번 더 검토하고 괜찮으면 해당 조합으로 ㄱㄱ" / 2026-08-12 public/Free trust 증보 #1297·#1302 구현 승인)
 - Date: 2026-08-06
 - 발단: 성재 — "github action말고 jenkins나 argo cd 같은 걸로 대체할 수 없을까? 비용 부담이 좀 있는데."
 - 관련: ADR-0107(로컬 게이트=머지 권위 관례) · ADR-0145 증보 2(Swift 퇴역) · #1108(병합 트리 검증 스크립트) · #1116(Tauri CI 신설) · research/2026-08-06-xcode-cloud-transition.md
@@ -29,6 +29,35 @@
 
 **D4 · CD = 현행 런북 대행 유지**(compose 단일 서버) — 자동화가 필요해지는 시점에 pull 기반 경량 스크립트로 재론(Argo CD 아님).
 
+## 2026-08-12 증보 — public/Free PR 신뢰 경계
+
+저장소가 public으로 전환되고 세 canonical branch에 자동 `pr-ci`를 두면서 Context의
+private/수동-only 전제는 역사 사실이 됐다. D1의 **로컬 runtime evidence가 최종 merge
+권위**라는 결정은 유지하되, public/Free에서 후보가 workflow 자체를 바꿔 같은 Actions
+App/context를 위조할 수 있는 새 경계를 다음처럼 보강한다.
+승인 근거는 2026-08-12 성재의 “main·track/engine·track/uxui가 잘 얼라인되도록
+가드레일을 수립하고 main 통합을 준비하라”는 지시와 #1297·#1302 구현 승인이다.
+
+**D5 · required PR gate = `PR CI gate` + base-trusted `Policy integrity gate`.** Enterprise
+ruleset은 전제하지 않는다. 후자는 write 권한을 최소 `statuses:write`로 한정한
+`pull_request_target` workflow이며, 후보 head를 checkout/fetch/execute하거나 후보
+dependency를 설치하지 않는다. GitHub API의 complete·rename-aware changed-files metadata로
+정책 경로를 분류하고 exact head에 static status를 게시한다.
+
+같은 App/context status만으로 workflow provenance를 주장하지 않는다. `momo-main`은 머지
+직전에 PR의 exact canonical base branch/HEAD에서 base commit object의 verifier를 추출하는
+`scripts/verify_policy_integrity_from_base.sh`를 실행한다. 검증기는 current head/base,
+current default-main workflow authority, workflow ID/path, event, run attempt, run-name,
+check-suite/job App binding과 현재 policy audit evidence를 재검증하고 마지막 API read로
+TOCTOU를 닫는다. 정책 변경은 지정 policy owner의 login+stable numeric GitHub id,
+exact-head audit comment, 그 뒤 같은 identity의 최신 label transition을 요구한다.
+
+최초 #1302 track/engine→main landing 체인만 base에 workflow가 없는 명시적 reviewed exception이다.
+그 뒤에는 세 canonical ref를 exact-equal로 정렬하고 target별 unmerged bootstrap PR을 검증한
+후 branch protection에 두 App-pinned context를 적용하며 예외를 재사용하지 않는다. 계정
+회전과 account-loss/compromise는 `docs/GITHUB_OPS.md`의 audited rotation/break-glass 절차만
+사용한다.
+
 ## Slack·업계 비교
 
 소규모 팀의 표준 절감 경로가 정확히 이것(워크플로 호환성을 유지한 채 러너만 자체 호스팅)이다. Jenkins 전환은 러너 절감과 같은 돈을 아끼면서 CI 정의 이관·운영 부담을 추가로 지불하는 선택이라 열위. Argo CD는 k8s 채택 이후의 도구다.
@@ -38,3 +67,7 @@
 - (+) 전 수요 과금 0 · 워크플로 자산 보존 · 새 운영 표면 최소(러너 데몬뿐).
 - (−) 러너 가용성이 우리 하드웨어에 결합(성재 맥 오프라인이면 macOS 잡 대기) — 릴리스 빈도가 낮아 수용.
 - (−) NCP 러너는 prod 동거 — D2의 경량 한정·리소스 제한이 가드. 위반 시(빌드가 prod를 느리게 하면) 즉시 별도 박스 재론.
+- (+) public 후보가 같은-name Actions status를 만들더라도 exact trusted workflow/run과
+  live policy evidence를 로컬 merge 단계에서 다시 결속한다.
+- (−) default main 또는 policy evidence가 바뀌면 과거 success를 재사용하지 못해 fresh
+  `pull_request_target` event가 필요하다. 이는 fail-closed freshness 비용으로 수용한다.

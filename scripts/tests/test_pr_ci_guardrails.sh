@@ -63,6 +63,8 @@ workflow_compliant() {
   grep -Fq 'scripts/tests/test_track_alignment_guard.sh' <<<"$alignment" || return 1
   grep -Fq 'scripts/tests/test_pr_ci_guardrails.sh' <<<"$alignment" || return 1
   grep -Fq 'scripts/tests/test_github_track_guardrails.sh' <<<"$alignment" || return 1
+  grep -Fq 'scripts/tests/test_policy_integrity_gate.sh' <<<"$alignment" || return 1
+  grep -Fq 'scripts/tests/test_trusted_policy_runner.sh' <<<"$alignment" || return 1
   grep -Fq "if: needs.changes.outputs.rust == 'true'" <<<"$rust" || return 1
   grep -Fq "if: needs.changes.outputs.node == 'true'" <<<"$node" || return 1
   grep -Fq "if: needs.changes.outputs.contract == 'true'" <<<"$contract" || return 1

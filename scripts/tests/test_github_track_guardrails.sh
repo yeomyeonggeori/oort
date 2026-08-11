@@ -9,10 +9,13 @@ GUARD="$REPO_ROOT/scripts/github_track_guardrails.sh"
 SANDBOX="$(mktemp -d "${TMPDIR:-/tmp}/oort-github-guardrails.XXXXXX")"
 STATE="$SANDBOX/state"
 FAKE_GH="$SANDBOX/gh"
+FAKE_GIT="$SANDBOX/git"
+FAKE_VERIFIER="$SANDBOX/verify-policy-integrity"
 SHA_A="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 SHA_B="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 SHA_C="cccccccccccccccccccccccccccccccccccccccc"
 APP_ID=15368
+POLICY_MAPPING="main=101,track/engine=102,track/uxui=103"
 cleanup() { rm -rf "$SANDBOX"; }
 trap cleanup EXIT INT TERM
 mkdir -p "$STATE"
@@ -31,6 +34,20 @@ reset_mutations() {
 assert_put_zero() {
   [ ! -s "$STATE/puts.log" ] || fail "$1 wrote branch protection"
   [ ! -s "$STATE/actions_puts.log" ] || fail "$1 wrote Actions permissions"
+}
+
+assert_final_policy_verification() {
+  local current last
+  current="$(wc -l <"$STATE/verifier_calls.log" | tr -d ' ')"
+  last="$(cat "$STATE/verifier_count_at_last_mutation" 2>/dev/null || echo 0)"
+  [ "$current" -ge $((last + 3)) ] \
+    || fail "$1 lacked a fresh three-target provenance pass after the final mutation"
+  tail -n 3 "$STATE/verifier_calls.log" | grep -Fqx "main:101:$SHA_A" \
+    || fail "$1 final provenance pass missed main"
+  tail -n 3 "$STATE/verifier_calls.log" | grep -Fqx "track/engine:102:$SHA_A" \
+    || fail "$1 final provenance pass missed track/engine"
+  tail -n 3 "$STATE/verifier_calls.log" | grep -Fqx "track/uxui:103:$SHA_A" \
+    || fail "$1 final provenance pass missed track/uxui"
 }
 
 make_all_branches_need_put() {
@@ -65,9 +82,12 @@ write_valid_checks() {
 for branch_key in main track_engine track_uxui; do
   printf '%s\n' "$SHA_A" >"$STATE/$branch_key.sha"
 done
+printf '%s\n' "$SHA_A" >"$STATE/canonical.sha"
+printf '%s\n' "$SHA_A" >"$STATE/git.head"
 printf '{"default_workflow_permissions":"read","can_approve_pull_request_reviews":false}\n' \
   >"$STATE/actions.json"
 printf '{"id":%s,"slug":"github-actions"}\n' "$APP_ID" >"$STATE/app.json"
+printf '{"full_name":"fixture/oort","default_branch":"main"}\n' >"$STATE/repo.json"
 reset_mutations
 : >"$STATE/check_calls.log"
 write_valid_checks
@@ -82,7 +102,7 @@ case "${1:-}" in
   auth) [ "${2:-}" = status ] && exit 0 ;;
   repo)
     [ "${2:-}" = view ] || exit 2
-    echo 'yeomyeonggeori/oort'
+    echo 'fixture/oort'
     exit 0
     ;;
   api) ;;
@@ -115,6 +135,34 @@ respond() {
   exit "$rc"
 }
 
+require_recent_policy_verification() {
+  current="$(wc -l <"$state/verifier_calls.log" | tr -d ' ')"
+  previous="$(cat "$state/verifier_count_at_last_mutation" 2>/dev/null || echo 0)"
+  if [ "$current" -lt $((previous + 3)) ]; then
+    echo "fixture mutation lacked a fresh three-target policy provenance pass" >&2
+    exit 1
+  fi
+  recent="$(tail -n 3 "$state/verifier_calls.log")"
+  printf '%s\n' "$recent" | grep -Fqx 'main:101:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' \
+    || { echo 'fixture pre-mutation provenance missed main' >&2; exit 1; }
+  printf '%s\n' "$recent" | grep -Fqx 'track/engine:102:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' \
+    || { echo 'fixture pre-mutation provenance missed track/engine' >&2; exit 1; }
+  printf '%s\n' "$recent" | grep -Fqx 'track/uxui:103:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' \
+    || { echo 'fixture pre-mutation provenance missed track/uxui' >&2; exit 1; }
+  printf '%s\n' "$current" >"$state/verifier_count_at_last_mutation"
+}
+
+if [ "$endpoint" = 'repos/fixture/oort' ]; then
+  mode="$(cat "$state/repo.mode" 2>/dev/null || echo ok)"
+  case "$mode" in
+    ok) cat "$state/repo.json"; exit 0 ;;
+    network) exit 1 ;;
+    500) echo 'fixture HTTP 500' >&2; exit 1 ;;
+    invalid) echo 'not-json'; exit 0 ;;
+    *) exit 2 ;;
+  esac
+fi
+
 if [ "$endpoint" = 'apps/github-actions' ]; then
   mode="$(cat "$state/app.mode" 2>/dev/null || echo ok)"
   case "$mode" in
@@ -126,7 +174,35 @@ if [ "$endpoint" = 'apps/github-actions' ]; then
   esac
 fi
 
-if [[ "$endpoint" == repos/yeomyeonggeori/oort/compare/* ]]; then
+if [[ "$endpoint" == repos/fixture/oort/pulls/* ]]; then
+  pr="${endpoint#repos/fixture/oort/pulls/}"
+  case "$pr" in
+    101) base=main ;;
+    102) base=track/engine ;;
+    103) base=track/uxui ;;
+    *) exit 1 ;;
+  esac
+  key="pr_$pr"
+  reads_file="$state/$key.reads"
+  reads="$(cat "$reads_file" 2>/dev/null || echo 0)"
+  reads=$((reads + 1))
+  printf '%s\n' "$reads" >"$reads_file"
+  base="$(cat "$state/$key.base_ref" 2>/dev/null || echo "$base")"
+  base_sha="$(cat "$state/$key.base_sha" 2>/dev/null || cat "$state/canonical.sha")"
+  head_sha="$(cat "$state/$key.head_sha" 2>/dev/null || echo dddddddddddddddddddddddddddddddddddddddd)"
+  if [ "$reads" -gt 1 ] && [ -f "$state/$key.base_sha_after_first" ]; then
+    base_sha="$(cat "$state/$key.base_sha_after_first")"
+  fi
+  if [ "$reads" -gt 1 ] && [ -f "$state/$key.head_sha_after_first" ]; then
+    head_sha="$(cat "$state/$key.head_sha_after_first")"
+  fi
+  pr_state="$(cat "$state/$key.state" 2>/dev/null || echo open)"
+  printf '{"number":%s,"state":"%s","base":{"ref":"%s","sha":"%s","repo":{"full_name":"fixture/oort"}},"head":{"sha":"%s"}}\n' \
+    "$pr" "$pr_state" "$base" "$base_sha" "$head_sha"
+  exit 0
+fi
+
+if [[ "$endpoint" == repos/fixture/oort/compare/* ]]; then
   mode="$(cat "$state/compare.mode" 2>/dev/null || echo ahead)"
   case "$mode" in
     network) exit 1 ;;
@@ -137,7 +213,7 @@ if [[ "$endpoint" == repos/yeomyeonggeori/oort/compare/* ]]; then
     diverged) ;;
     *) exit 2 ;;
   esac
-  pair="${endpoint#repos/yeomyeonggeori/oort/compare/}"
+  pair="${endpoint#repos/fixture/oort/compare/}"
   base="${pair%%...*}"
   head="${pair#*...}"
   if [ "$mode" = ahead ]; then
@@ -155,19 +231,33 @@ if [[ "$endpoint" == repos/yeomyeonggeori/oort/compare/* ]]; then
   exit 0
 fi
 
-if [ "$endpoint" = 'repos/yeomyeonggeori/oort/actions/workflows/pr-ci.yml' ]; then
-  workflow_state="$(cat "$state/workflow.state" 2>/dev/null || echo active)"
-  disable_after="$(cat "$state/workflow.disable_after_put" 2>/dev/null || echo 0)"
-  successful_puts="$(wc -l <"$state/puts.log" | tr -d ' ')"
-  if [ "$disable_after" -gt 0 ] && [ "$successful_puts" -ge "$disable_after" ]; then
-    workflow_state=disabled_manually
-  fi
-  printf '{"state":"%s"}\n' "$workflow_state"
+case "$endpoint" in
+  repos/fixture/oort/actions/workflows/pr-ci.yml)
+    workflow_name=pr-ci
+    workflow_path=.github/workflows/pr-ci.yml
+    workflow_state="$(cat "$state/workflow.state" 2>/dev/null || echo active)"
+    disable_after="$(cat "$state/workflow.disable_after_put" 2>/dev/null || echo 0)"
+    successful_puts="$(wc -l <"$state/puts.log" | tr -d ' ')"
+    if [ "$disable_after" -gt 0 ] && [ "$successful_puts" -ge "$disable_after" ]; then
+      workflow_state=disabled_manually
+    fi
+    ;;
+  repos/fixture/oort/actions/workflows/policy-integrity.yml)
+    workflow_name=policy-integrity
+    workflow_path=.github/workflows/policy-integrity.yml
+    workflow_state="$(cat "$state/policy_workflow.state" 2>/dev/null || echo active)"
+    ;;
+  *) workflow_name="" ;;
+esac
+if [ -n "$workflow_name" ]; then
+  printf '{"name":"%s","path":"%s","state":"%s"}\n' \
+    "$workflow_name" "$workflow_path" "$workflow_state"
   exit 0
 fi
 
-if [ "$endpoint" = 'repos/yeomyeonggeori/oort/actions/permissions/workflow' ]; then
+if [ "$endpoint" = 'repos/fixture/oort/actions/permissions/workflow' ]; then
   if [ "$method" = PUT ]; then
+    require_recent_policy_verification
     cp "$input" "$state/actions.json"
     echo actions >>"$state/actions_puts.log"
     exit 0
@@ -182,7 +272,7 @@ if [ "$endpoint" = 'repos/yeomyeonggeori/oort/actions/permissions/workflow' ]; t
   esac
 fi
 
-if [[ "$endpoint" == repos/yeomyeonggeori/oort/commits/*/check-runs\?* ]]; then
+if [[ "$endpoint" == repos/fixture/oort/commits/*/check-runs\?* ]]; then
   echo "$endpoint" >>"$state/check_calls.log"
   query="${endpoint#*\?}"
   page="$(printf '%s\n' "$query" | tr '&' '\n' | sed -n 's/^page=//p')"
@@ -198,13 +288,14 @@ if [[ "$endpoint" == repos/yeomyeonggeori/oort/commits/*/check-runs\?* ]]; then
   exit 0
 fi
 
-if [[ "$endpoint" == repos/yeomyeonggeori/oort/branches/*/protection ]]; then
-  encoded="${endpoint#repos/yeomyeonggeori/oort/branches/}"
+if [[ "$endpoint" == repos/fixture/oort/branches/*/protection ]]; then
+  encoded="${endpoint#repos/fixture/oort/branches/}"
   encoded="${encoded%/protection}"
   branch="$(printf '%s' "$encoded" | sed 's/%2F/\//g')"
   key="$(printf '%s' "$branch" | tr '/' '_')"
   policy="$state/$key.json"
   if [ "$method" = PUT ]; then
+    require_recent_policy_verification
     echo "$branch" >>"$state/put_attempts.log"
     attempt="$(wc -l <"$state/put_attempts.log" | tr -d ' ')"
     fail_at="$(cat "$state/fail_branch_put_at" 2>/dev/null || echo 0)"
@@ -241,6 +332,17 @@ if [[ "$endpoint" == repos/yeomyeonggeori/oort/branches/*/protection ]]; then
     cp "$state/$key.json_after_first_get" "$state/$key.json"
     rm -f "$state/$key.json_after_first_get"
     policy="$state/$key.json"
+  fi
+  if [ -f "$state/$key.inject_after_verifier_count" ] \
+    && [ -f "$state/$key.json_after_provenance" ]; then
+    verifier_count="$(wc -l <"$state/verifier_calls.log" | tr -d ' ')"
+    inject_after="$(cat "$state/$key.inject_after_verifier_count")"
+    if [ "$verifier_count" -ge "$inject_after" ]; then
+      cp "$state/$key.json_after_provenance" "$state/$key.json"
+      rm -f "$state/$key.json_after_provenance" \
+        "$state/$key.inject_after_verifier_count"
+      policy="$state/$key.json"
+    fi
   fi
   body="$(jq '
     def actors($kind): map(
@@ -284,8 +386,8 @@ if [[ "$endpoint" == repos/yeomyeonggeori/oort/branches/*/protection ]]; then
   respond 200 OK "$body" 0
 fi
 
-if [[ "$endpoint" == repos/yeomyeonggeori/oort/branches/* ]]; then
-  encoded="${endpoint#repos/yeomyeonggeori/oort/branches/}"
+if [[ "$endpoint" == repos/fixture/oort/branches/* ]]; then
+  encoded="${endpoint#repos/fixture/oort/branches/}"
   branch="$(printf '%s' "$encoded" | sed 's/%2F/\//g')"
   key="$(printf '%s' "$branch" | tr '/' '_')"
   reads_file="$state/$key.reads"
@@ -305,10 +407,165 @@ exit 2
 FAKE
 chmod +x "$FAKE_GH"
 
+cat >"$FAKE_VERIFIER" <<'FAKE_VERIFIER_SCRIPT'
+#!/usr/bin/env bash
+set -euo pipefail
+state="${FAKE_GH_STATE:?}"
+mode="$(cat "$state/verifier.mode" 2>/dev/null || echo ok)"
+repo=""
+pr=""
+base=""
+base_sha=""
+output=""
+
+[ "${1:-}" = "--verify-run" ] || exit 2
+shift
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --repo) repo="$2"; shift 2 ;;
+    --pr) pr="$2"; shift 2 ;;
+    --expected-base) base="$2"; shift 2 ;;
+    --expected-base-sha) base_sha="$2"; shift 2 ;;
+    --output) output="$2"; shift 2 ;;
+    *) exit 2 ;;
+  esac
+done
+
+[ "$repo" = "fixture/oort" ] || exit 1
+[ -n "$output" ] || exit 1
+case "$pr" in
+  101) expected_base=main ;;
+  102) expected_base=track/engine ;;
+  103) expected_base=track/uxui ;;
+  *) echo "fixture unknown PR: $pr" >&2; exit 1 ;;
+esac
+[ "$base" = "$expected_base" ] || {
+  echo "fixture PR base mismatch: pr=$pr expected=$expected_base actual=$base" >&2
+  exit 1
+}
+[ "$base_sha" = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" ] || {
+  echo "fixture PR base SHA mismatch: $base_sha" >&2
+  exit 1
+}
+
+printf '%s\n' "$base:$pr:$base_sha" >>"$state/verifier_calls.log"
+call_count="$(wc -l <"$state/verifier_calls.log" | tr -d ' ')"
+move_at="$(cat "$state/verifier.move_sha_at" 2>/dev/null || echo 0)"
+if [ "$move_at" -gt 0 ] && [ "$call_count" -eq "$move_at" ]; then
+  printf '%s\n' bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb >"$state/track_uxui.sha"
+fi
+
+case "$mode" in
+  ok) app_id=15368; context='Policy integrity gate' ;;
+  fail) echo 'fixture verifier failure' >&2; exit 1 ;;
+  app_mismatch) app_id=999; context='Policy integrity gate' ;;
+  context_mismatch) app_id=15368; context='Policy integrity impostor' ;;
+  malformed) printf 'not-json\n' >"$output"; exit 0 ;;
+  *) exit 2 ;;
+esac
+
+# Every interpolated value above is matched against a fixed fixture alphabet
+# (repo, numeric PR/app ids, canonical branch, lowercase hex SHA, fixed context).
+printf '{"repo":"%s","pr":%s,"head_sha":"dddddddddddddddddddddddddddddddddddddddd","base_ref":"%s","base_sha":"%s","authority_ref":"main","authority_sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","context":"%s","workflow_id":9001,"workflow_path":".github/workflows/policy-integrity.yml","event":"pull_request_target","run_id":7001,"run_attempt":1,"run_execution_branch":"main","run_execution_sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","app_id":%s}\n' \
+  "$repo" "$pr" "$base" "$base_sha" "$context" "$app_id" >"$output"
+FAKE_VERIFIER_SCRIPT
+chmod +x "$FAKE_VERIFIER"
+printf '%s\n' "$GUARD" >"$STATE/guard.source"
+printf '%s\n' "$FAKE_VERIFIER" >"$STATE/verifier.source"
+
+cat >"$FAKE_GIT" <<'FAKE_GIT_SCRIPT'
+#!/usr/bin/env bash
+set -euo pipefail
+state="${FAKE_GH_STATE:?}"
+
+if [ "${1:-}" = "--version" ]; then
+  echo 'git version fixture'
+  exit 0
+fi
+[ "${1:-}" != "--no-replace-objects" ] || shift
+while [ "${1:-}" = "-c" ]; do
+  shift 2
+done
+[ "${1:-}" = "-C" ] || exit 2
+repo_root="$2"
+shift 2
+command_name="${1:-}"
+shift
+
+case "$command_name" in
+  rev-parse)
+    case "${1:-}" in
+      --show-toplevel) printf '%s\n' "$repo_root" ;;
+      --verify)
+        [ "${2:-}" = HEAD ] || exit 2
+        cat "$state/git.head"
+        ;;
+      *) exit 2 ;;
+    esac
+    ;;
+  status)
+    if [ -f "$state/guard_dirty" ]; then
+      printf ' M scripts/github_track_guardrails.sh\n'
+    fi
+    ;;
+  show)
+    spec="${1:-}"
+    sha="${spec%%:*}"
+    path="${spec#*:}"
+    [ "$sha" = "$(cat "$state/canonical.sha")" ] || exit 1
+    printf '%s\n' "$spec" >>"$state/git_show_calls.log"
+    mode="$(cat "$state/git.show.mode" 2>/dev/null || echo ok)"
+    case "$path" in
+      scripts/github_track_guardrails.sh)
+        [ "$mode" != missing_guard ] || exit 1
+        cat "$(cat "$state/guard.source")"
+        if [ "$mode" = guard_mismatch ]; then
+          printf '\n# fixture mismatched canonical guard bytes\n'
+        fi
+        ;;
+      scripts/verify_policy_integrity.sh)
+        [ "$mode" != missing_verifier ] || exit 1
+        count_file="$state/verifier_show_count"
+        count="$(cat "$count_file" 2>/dev/null || echo 0)"
+        count=$((count + 1))
+        printf '%s\n' "$count" >"$count_file"
+        cat "$(cat "$state/verifier.source")"
+        if [ "$mode" = unstable_verifier ] && [ "$count" -gt 1 ]; then
+          printf '\n# fixture unstable exact-base bytes\n'
+        fi
+        ;;
+      *) exit 1 ;;
+    esac
+    ;;
+  *) exit 2 ;;
+esac
+FAKE_GIT_SCRIPT
+chmod +x "$FAKE_GIT"
+
 run_guard() {
+  local has_apply=0
+  local has_policy_mapping=0
+  local arg
+  local args=("$@")
   rm -f "$STATE"/*.reads
+  rm -f "$STATE/verifier_count_at_last_mutation"
+  rm -f "$STATE/verifier_show_count"
   : >"$STATE/check_calls.log"
-  FAKE_GH_STATE="$STATE" MOMO_GH_BIN="$FAKE_GH" "$GUARD" --repo yeomyeonggeori/oort "$@"
+  : >"$STATE/verifier_calls.log"
+  : >"$STATE/git_show_calls.log"
+  for arg in "${args[@]}"; do
+    [ "$arg" = "--apply" ] && has_apply=1
+    [ "$arg" = "--policy-pr" ] && has_policy_mapping=1
+  done
+  if [ "$has_apply" -eq 1 ] && [ "$has_policy_mapping" -eq 0 ] \
+    && [ "${MOMO_TEST_OMIT_POLICY_MAPPING:-0}" != "1" ]; then
+    args+=(--policy-pr "$POLICY_MAPPING")
+  fi
+  FAKE_GH_STATE="$STATE" \
+    MOMO_GH_BIN="$FAKE_GH" \
+    MOMO_GITHUB_GUARDRAILS_TEST_MODE=offline-fixture-v1 \
+    MOMO_GITHUB_GUARDRAILS_TEST_GIT="$FAKE_GIT" \
+    "${MOMO_TEST_GUARD_PATH:-$GUARD}" --repo fixture/oort "${args[@]}"
 }
 
 # Default mode is read-only. Explicit 404 alone means unprotected; it is still
@@ -319,6 +576,206 @@ if run_guard --check >"$SANDBOX/out" 2>&1; then
 fi
 grep -Fq 'branch is unprotected' "$SANDBOX/out" || fail "check did not name explicit 404 as unprotected"
 assert_put_zero "default check"
+[ ! -s "$STATE/verifier_calls.log" ] || fail "read-only check invoked policy PR provenance verifier"
+
+# Apply itself must execute from the exact remote-main commit with a clean
+# tracked guard. Legacy arbitrary-verifier injection is forbidden.
+reset_mutations
+if MOMO_POLICY_INTEGRITY_VERIFIER="$FAKE_VERIFIER" run_guard --apply \
+  >"$SANDBOX/out" 2>&1; then
+  fail "apply accepted the legacy arbitrary verifier override"
+fi
+grep -Fq 'MOMO_POLICY_INTEGRITY_VERIFIER is forbidden for --apply' "$SANDBOX/out" \
+  || fail "legacy verifier override was not rejected explicitly"
+assert_put_zero "legacy verifier override"
+
+reset_mutations
+if FAKE_GH_STATE="$STATE" MOMO_GH_BIN="$FAKE_GH" \
+  "$GUARD" --repo fixture/oort --apply --policy-pr "$POLICY_MAPPING" \
+  >"$SANDBOX/out" 2>&1; then
+  fail "production apply accepted a transport override without explicit fixture mode"
+fi
+grep -Fq 'transport overrides are forbidden for production --apply' "$SANDBOX/out" \
+  || fail "production transport override was not rejected explicitly"
+assert_put_zero "production transport override"
+
+printf '%s\n' "$SHA_B" >"$STATE/git.head"
+reset_mutations
+if run_guard --apply >"$SANDBOX/out" 2>&1; then
+  fail "apply accepted a candidate HEAD instead of exact remote main"
+fi
+grep -Fq "current HEAD $SHA_B is not exact remote main $SHA_A" "$SANDBOX/out" \
+  || fail "noncanonical guard HEAD was not named"
+assert_put_zero "noncanonical guard HEAD"
+printf '%s\n' "$SHA_A" >"$STATE/git.head"
+
+: >"$STATE/guard_dirty"
+reset_mutations
+if run_guard --apply >"$SANDBOX/out" 2>&1; then
+  fail "apply accepted a dirty tracked guard file"
+fi
+grep -Fq 'tracked guard file is dirty in the index or worktree' "$SANDBOX/out" \
+  || fail "dirty candidate guard was not named"
+assert_put_zero "dirty candidate guard"
+rm -f "$STATE/guard_dirty"
+
+for extraction_mode in missing_guard guard_mismatch missing_verifier unstable_verifier; do
+  printf '%s\n' "$extraction_mode" >"$STATE/git.show.mode"
+  reset_mutations
+  if run_guard --apply >"$SANDBOX/out" 2>&1; then
+    fail "exact-base extraction mode $extraction_mode passed"
+  fi
+  case "$extraction_mode" in
+    missing_guard)
+      grep -Fq "$SHA_A:scripts/github_track_guardrails.sh" "$SANDBOX/out" \
+        || fail "missing exact-base guard blob was not named"
+      ;;
+    guard_mismatch)
+      grep -Fq 'executing guard bytes do not match exact remote main' "$SANDBOX/out" \
+        || fail "mismatched exact-main guard bytes were not named"
+      ;;
+    missing_verifier)
+      grep -Fq "$SHA_A:scripts/verify_policy_integrity.sh" "$SANDBOX/out" \
+        || fail "missing exact-base verifier blob was not named"
+      ;;
+    unstable_verifier)
+      grep -Fq 'exact-base policy verifier bytes changed during provenance cycle' "$SANDBOX/out" \
+        || fail "unstable exact-base verifier extraction was not named"
+      ;;
+  esac
+  assert_put_zero "exact-base extraction $extraction_mode"
+done
+rm -f "$STATE/git.show.mode"
+
+# A hostile worktree sibling verifier is ignored. The guard copy remains exact,
+# while `git show <canonical>:scripts/verify_policy_integrity.sh` supplies the
+# trusted failing fixture instead of executing this local marker script.
+CANDIDATE_ROOT="$SANDBOX/candidate-root"
+mkdir -p "$CANDIDATE_ROOT/scripts"
+cp "$GUARD" "$CANDIDATE_ROOT/scripts/github_track_guardrails.sh"
+cat >"$CANDIDATE_ROOT/scripts/verify_policy_integrity.sh" <<MALICIOUS_VERIFIER
+#!/usr/bin/env bash
+printf 'executed\n' >"$SANDBOX/local-verifier-executed"
+exit 0
+MALICIOUS_VERIFIER
+chmod +x "$CANDIDATE_ROOT/scripts/github_track_guardrails.sh" \
+  "$CANDIDATE_ROOT/scripts/verify_policy_integrity.sh"
+printf 'fail\n' >"$STATE/verifier.mode"
+reset_mutations
+if MOMO_TEST_GUARD_PATH="$CANDIDATE_ROOT/scripts/github_track_guardrails.sh" \
+  run_guard --apply >"$SANDBOX/out" 2>&1; then
+  fail "trusted extracted verifier failure was bypassed by a local candidate verifier"
+fi
+grep -Fq 'Policy integrity gate provenance failed' "$SANDBOX/out" \
+  || fail "trusted extracted verifier was not executed"
+[ ! -e "$SANDBOX/local-verifier-executed" ] \
+  || fail "candidate/worktree verifier was executed"
+grep -Fq "$SHA_A:scripts/verify_policy_integrity.sh" "$STATE/git_show_calls.log" \
+  || fail "exact-base verifier blob was not extracted"
+assert_put_zero "candidate local verifier mutation"
+rm -f "$STATE/verifier.mode"
+
+# Apply requires one distinct bootstrap PR mapping per canonical target. Missing,
+# duplicate-target, reused-PR, and wrong-base mappings all fail before mutation.
+reset_mutations
+if MOMO_TEST_OMIT_POLICY_MAPPING=1 run_guard --apply >"$SANDBOX/out" 2>&1; then
+  fail "apply passed without --policy-pr mappings"
+fi
+grep -Fq -- '--apply requires --policy-pr main=N,track/engine=N,track/uxui=N' "$SANDBOX/out" \
+  || fail "missing policy PR mapping was not named"
+assert_put_zero "missing policy PR mapping"
+
+reset_mutations
+if run_guard --apply --policy-pr 'main=101,main=104,track/engine=102,track/uxui=103' \
+  >"$SANDBOX/out" 2>&1; then
+  fail "apply accepted duplicate mappings for one canonical target"
+fi
+grep -Fq 'duplicate --policy-pr mapping for main' "$SANDBOX/out" \
+  || fail "duplicate policy PR target was not named"
+assert_put_zero "duplicate policy PR target"
+
+reset_mutations
+if run_guard --apply --policy-pr 'main=101,track/engine=101,track/uxui=103' \
+  >"$SANDBOX/out" 2>&1; then
+  fail "apply accepted one bootstrap PR reused across targets"
+fi
+grep -Fq 'must use a distinct PR for each canonical target' "$SANDBOX/out" \
+  || fail "reused policy PR was not named"
+assert_put_zero "reused policy PR"
+
+reset_mutations
+if run_guard --apply --policy-pr 'main=102,track/engine=101,track/uxui=103' \
+  >"$SANDBOX/out" 2>&1; then
+  fail "apply accepted bootstrap PRs mapped to the wrong bases"
+fi
+grep -Fq "bootstrap PR #102 does not have exact open base main@$SHA_A" "$SANDBOX/out" \
+  || fail "wrong-base policy PR was not named"
+assert_put_zero "wrong-base policy PR"
+
+printf 'closed\n' >"$STATE/pr_101.state"
+reset_mutations
+if run_guard --apply >"$SANDBOX/out" 2>&1; then
+  fail "apply accepted a closed bootstrap PR"
+fi
+grep -Fq "bootstrap PR #101 does not have exact open base main@$SHA_A" "$SANDBOX/out" \
+  || fail "closed bootstrap PR was not named"
+assert_put_zero "closed bootstrap PR"
+rm -f "$STATE/pr_101.state"
+
+printf '%s\n' "$SHA_B" >"$STATE/pr_102.base_sha_after_first"
+reset_mutations
+if run_guard --apply >"$SANDBOX/out" 2>&1; then
+  fail "apply accepted a bootstrap PR base SHA that moved during provenance verification"
+fi
+grep -Fq "bootstrap PR #102 does not have exact open base track/engine@$SHA_A" "$SANDBOX/out" \
+  || fail "moving bootstrap PR base SHA was not named"
+assert_put_zero "moving bootstrap PR base SHA"
+rm -f "$STATE/pr_102.base_sha_after_first"
+
+printf '%s\n' "$SHA_C" >"$STATE/pr_102.head_sha_after_first"
+reset_mutations
+if run_guard --apply >"$SANDBOX/out" 2>&1; then
+  fail "apply accepted a bootstrap PR head SHA that moved after provenance verification"
+fi
+grep -Fq 'bootstrap PR #102 head moved during provenance verification' "$SANDBOX/out" \
+  || fail "moving bootstrap PR head SHA was not named"
+assert_put_zero "moving bootstrap PR head SHA"
+rm -f "$STATE/pr_102.head_sha_after_first"
+
+# The wrapper does not trust a verifier exit status alone. Its structured
+# provenance must pin the exact context and official GitHub Actions App id.
+for mode in fail app_mismatch context_mismatch malformed; do
+  printf '%s\n' "$mode" >"$STATE/verifier.mode"
+  reset_mutations
+  if run_guard --apply >"$SANDBOX/out" 2>&1; then
+    fail "policy verifier mode $mode passed"
+  fi
+  case "$mode" in
+    fail)
+      grep -Fq 'Policy integrity gate provenance failed' "$SANDBOX/out" \
+        || fail "verifier failure was not named"
+      ;;
+    *)
+      grep -Fq 'Policy integrity gate provenance output mismatched' "$SANDBOX/out" \
+        || fail "verifier output mismatch $mode was not named"
+      ;;
+  esac
+  assert_put_zero "policy verifier $mode"
+done
+rm -f "$STATE/verifier.mode"
+
+# A canonical ref moving while all three provenance records are being checked
+# invalidates their common base snapshot and remains a PUT-zero failure.
+printf '2\n' >"$STATE/verifier.move_sha_at"
+reset_mutations
+if run_guard --apply >"$SANDBOX/out" 2>&1; then
+  fail "apply accepted canonical SHA movement during provenance verification"
+fi
+grep -Fq 'canonical branch SHA changed during apply' "$SANDBOX/out" \
+  || fail "provenance-window canonical SHA movement was not named"
+assert_put_zero "provenance-window canonical SHA movement"
+printf '%s\n' "$SHA_A" >"$STATE/track_uxui.sha"
+rm -f "$STATE/verifier.move_sha_at"
 
 # Apply is fail-closed until all canonical refs share one SHA.
 printf '%s\n' "$SHA_B" >"$STATE/track_uxui.sha"
@@ -457,8 +914,10 @@ reset_mutations
 run_guard --apply >"$SANDBOX/out" 2>&1 || fail "first apply failed: $(cat "$SANDBOX/out")"
 [ "$(wc -l <"$STATE/puts.log" | tr -d ' ')" = 3 ] || fail "first apply did not update exactly three branches"
 [ ! -s "$STATE/actions_puts.log" ] || fail "compliant Actions permissions were rewritten"
+assert_final_policy_verification "first apply"
 jq -e --argjson app_id "$APP_ID" '
   any(.required_status_checks.checks[]; .context == "PR CI gate" and .app_id == $app_id) and
+  any(.required_status_checks.checks[]; .context == "Policy integrity gate" and .app_id == $app_id) and
   any(.required_status_checks.checks[]; .context == "PR CI gate" and .app_id == -1) and
   any(.required_status_checks.checks[]; .context == "PR CI gate" and .app_id == 777) and
   any(.required_status_checks.checks[]; .context == "legacy context" and .app_id == -1) and
@@ -473,6 +932,87 @@ jq -e --argjson app_id "$APP_ID" '
   (.required_linear_history == true) and
   (.block_creations == true)
 ' "$STATE/main.json" >/dev/null || fail "apply weakened the existing stronger main policy"
+for expected_call in \
+  "main:101:$SHA_A" \
+  "track/engine:102:$SHA_A" \
+  "track/uxui:103:$SHA_A"; do
+  grep -Fq "$expected_call" "$STATE/verifier_calls.log" \
+    || fail "apply did not verify exact bootstrap mapping $expected_call"
+done
+
+# Steady-state policy compliance includes the trusted workflow identity itself,
+# not only the branch-protection context left behind by an older run.
+printf 'disabled_manually\n' >"$STATE/policy_workflow.state"
+reset_mutations
+if run_guard --check >"$SANDBOX/out" 2>&1; then
+  fail "check passed while policy-integrity workflow was disabled"
+fi
+grep -Fq 'policy-integrity workflow is not active' "$SANDBOX/out" \
+  || fail "disabled policy-integrity workflow was not named"
+assert_put_zero "disabled policy-integrity workflow check"
+rm -f "$STATE/policy_workflow.state"
+
+# Repository identity and canonical default-branch authority are part of the
+# same read-only basis. A renamed default branch, wrong repository identity, or
+# unreadable/malformed endpoint must fail closed without remote mutation.
+jq '.default_branch = "trunk"' "$STATE/repo.json" >"$STATE/tmp.json"
+mv "$STATE/tmp.json" "$STATE/repo.json"
+reset_mutations
+if run_guard --check >"$SANDBOX/out" 2>&1; then
+  fail "check passed with default_branch=trunk"
+fi
+grep -Fq 'repository full_name/default branch must be exactly fixture/oort/main' \
+  "$SANDBOX/out" || fail "noncanonical default branch was not named"
+assert_put_zero "noncanonical default branch check"
+
+printf '{"full_name":"fixture/impostor","default_branch":"main"}\n' >"$STATE/repo.json"
+reset_mutations
+if run_guard --check >"$SANDBOX/out" 2>&1; then
+  fail "check passed with a mismatched repository full_name"
+fi
+grep -Fq 'repository full_name/default branch must be exactly fixture/oort/main' \
+  "$SANDBOX/out" || fail "mismatched repository full_name was not named"
+assert_put_zero "mismatched repository full_name check"
+
+printf '{"full_name":"fixture/oort","default_branch":"main"}\n' >"$STATE/repo.json"
+for mode in network 500 invalid; do
+  printf '%s\n' "$mode" >"$STATE/repo.mode"
+  reset_mutations
+  if run_guard --check >"$SANDBOX/out" 2>&1; then
+    fail "repository identity endpoint mode $mode passed"
+  fi
+  grep -Fq 'repository identity/default branch is unavailable' "$SANDBOX/out" \
+    || fail "repository identity endpoint failure $mode was not named"
+  assert_put_zero "repository identity endpoint $mode"
+done
+rm -f "$STATE/repo.mode"
+
+# Both app-pinned contexts are mandatory. Removing only the policy context must
+# make check red, while apply restores it without dropping unrelated checks.
+jq '
+  .required_status_checks.checks |= map(
+    select(.context != "Policy integrity gate")
+  )
+' "$STATE/main.json" >"$STATE/tmp.json"
+mv "$STATE/tmp.json" "$STATE/main.json"
+reset_mutations
+if run_guard --check >"$SANDBOX/out" 2>&1; then
+  fail "check passed without Policy integrity gate"
+fi
+grep -Fq "GitHub-Actions-pinned required check missing: Policy integrity gate/$APP_ID" \
+  "$SANDBOX/out" || fail "missing Policy integrity gate was not named"
+assert_put_zero "missing Policy integrity gate check"
+reset_mutations
+run_guard --apply >/dev/null || fail "Policy integrity gate repair apply failed"
+[ "$(wc -l <"$STATE/puts.log" | tr -d ' ')" = 1 ] \
+  || fail "Policy integrity gate repair did not update exactly one branch"
+jq -e --argjson app_id "$APP_ID" '
+  any(.required_status_checks.checks[];
+    .context == "Policy integrity gate" and .app_id == $app_id) and
+  any(.required_status_checks.checks[];
+    .context == "security gate" and .app_id == 99)
+' "$STATE/main.json" >/dev/null \
+  || fail "Policy integrity gate repair lost an unrelated required check"
 
 # The latest check lived on page 2, and the request must pin exact endpoint
 # filters rather than accepting a broad commit check list.
@@ -485,6 +1025,7 @@ printf '%s\n' "$SHA_B" >"$STATE/track_uxui.sha"
 reset_mutations
 run_guard --check >"$SANDBOX/out" 2>&1 || fail "track-ahead read-only check failed: $(cat "$SANDBOX/out")"
 [ ! -s "$STATE/check_calls.log" ] || fail "read-only check depended on a recent PR CI run"
+[ ! -s "$STATE/verifier_calls.log" ] || fail "read-only check depended on a recent policy PR/run"
 assert_put_zero "track-ahead check"
 reset_mutations
 if run_guard --apply >"$SANDBOX/out" 2>&1; then
@@ -553,6 +1094,28 @@ reset_mutations
 run_guard --apply >"$SANDBOX/out" 2>&1 || fail "idempotent apply failed: $(cat "$SANDBOX/out")"
 assert_put_zero "idempotent apply"
 grep -Fq 'unchanged: track/uxui already compliant' "$SANDBOX/out" || fail "idempotency was not reported"
+
+# The final three-PR provenance pass is intentionally long. Inject a stronger
+# review requirement after its ninth verifier call (the main pre-PUT cycle),
+# but before the next protection GET. The final refresh must observe the drift
+# and abort without overwriting it or issuing any branch-protection PUT.
+cp "$STATE/main.json" "$STATE/main.before_post_provenance_change.json"
+jq '.allow_force_pushes = true' "$STATE/main.json" >"$STATE/tmp.json"
+mv "$STATE/tmp.json" "$STATE/main.json"
+jq '.required_pull_request_reviews.required_approving_review_count += 1' \
+  "$STATE/main.json" >"$STATE/main.json_after_provenance"
+printf '9\n' >"$STATE/main.inject_after_verifier_count"
+reset_mutations
+if run_guard --apply >"$SANDBOX/out" 2>&1; then
+  fail "apply overwrote a stronger protection added during provenance revalidation"
+fi
+grep -Fq 'main protection changed during trusted provenance revalidation' "$SANDBOX/out" \
+  || fail "post-provenance stronger protection change was not named"
+assert_put_zero "post-provenance stronger protection change"
+cp "$STATE/main.before_post_provenance_change.json" "$STATE/main.json"
+rm -f "$STATE/main.before_post_provenance_change.json" \
+  "$STATE/main.json_after_provenance" \
+  "$STATE/main.inject_after_verifier_count"
 
 # Dismissal and push restrictions are authorization allowlists, so neither a
 # union nor a subset heuristic is safe. Removal, replacement, and addition
@@ -792,4 +1355,4 @@ grep -Fq "latest 'PR CI gate' is not successful" "$SANDBOX/out" || fail "post-PU
 [ -s "$STATE/puts.log" ] || fail "post-PUT context fixture never reached mutation"
 rm -f "$STATE/checks.after.page1.json" "$STATE/checks.after.page2.json"
 
-echo "[github-guardrails-test] PASS topology, app pin, fail-closed reads, preservation, TOCTOU, and idempotency"
+echo "[github-guardrails-test] PASS dual app pins, policy provenance mapping, fail-closed reads, preservation, TOCTOU, and idempotency"
