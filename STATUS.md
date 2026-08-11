@@ -1,5 +1,10 @@
 # oort 진행 현황
 
+## Shell layout gate exact-source · 인셋 포커스 계약 (#1314, 2026-08-12)
+
+- `gate:shell` 실행 파일 자체가 매번 현재 checkout의 build를 spawn·await하고, build 실패 또는 산출물 부재는 기존 `dist`가 있어도 preview 전에 fail-closed한다. 수리 전에는 source를 `-2px`로 복구한 뒤에도 앞서 `+2px`로 만든 산출물을 그대로 읽어 전체 gate가 거짓 PASS하는 것을 실측했고, package entrypoint 배선·stale 산출물 + 실패 build·실제 child-process exit 23 fixture가 재발을 RED로 고정한다.
+- 포커스 단정은 값을 복사하지 않고 `tokens.css`의 `@utility focus-ring`을 읽어 `outline-offset == -outline-width`인 인셋 관계를 강제한다. `+2px` fixture는 RED, 실제 `2px/-2px`는 1280/900/760 전 구간과 기존 keyboard/layout 단정에서 PASS했다. 제품 CSS와 시각 디자인은 바꾸지 않았고 이 goal의 별도 `runtime-unverified`는 없다.
+
 ## GitHub branch protection live payload 호환 (#1318, 2026-08-12)
 
 - 첫 attended bootstrap에서 GitHub가 `required_status_checks.contexts=[]`와 app-pinned `checks`를 함께 받은 요청을 서로 다른 OpenAPI `oneOf` 형상에 동시에 맞는 HTTP 422로 거절했다. 보호 PUT은 이제 `strict: true`와 `checks`만 내보내며, 기존 legacy `contexts`는 의미를 버리지 않고 `{context, app_id: -1}` check로 정규화한다.

@@ -19,7 +19,7 @@
 //     virtualizes, because both depend on the shell handing down a definite
 //     height.
 //
-//   npm run build && npm run gate:shell
+//   npm run gate:shell  # builds this exact checkout before previewing it
 //   SHELL_GATE_FOCUS_ONLY=1 npm run gate:shell  # #1291 geometry/focus lane
 //
 // No backend and no credentials: /v1 is fulfilled from the fixtures below, the
@@ -30,10 +30,15 @@
 // =============================================================================
 
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
+import {
+  buildExactSourceBeforePreview,
+  matchesInsetFocusRing,
+  parseInsetFocusRingContract,
+} from "./gate-shell-layout-contract.mjs";
 
 
 // CSP-safe wait: page.evaluate travels over CDP and is exempt from the page's
@@ -55,6 +60,9 @@ async function waitForPageCondition(page, expression, timeoutMs = 30_000) {
 }
 
 const WEB_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const FOCUS_RING_CONTRACT = parseInsetFocusRingContract(
+  readFileSync(resolve(WEB_ROOT, "src/design/tokens.css"), "utf8")
+);
 
 // 설정 > 사용량 (MOMO-616) is the tallest settings panel, so it is measured from
 // the same contract fixture usageModel.test.ts asserts rather than from an
@@ -1128,11 +1136,10 @@ async function assertPluginScopeConsent(page, size) {
     };
   })()`);
   check(
-    `${size.name} Tab 랩 뒤 첫 체크박스 포커스 링 위쪽 여백이 남는다`,
+    `${size.name} Tab 랩 뒤 첫 체크박스 인셋 포커스 링과 위쪽 여백이 남는다`,
     wrappedFocus.missing !== true &&
       wrappedFocus.gapAboveElement >= 4 &&
-      wrappedFocus.outlineWidth === "2px" &&
-      wrappedFocus.outlineOffset === "2px",
+      matchesInsetFocusRing(wrappedFocus, FOCUS_RING_CONTRACT),
     JSON.stringify(wrappedFocus)
   );
 
@@ -1614,9 +1621,7 @@ async function waitForServer(url, timeoutMs = 30_000) {
 }
 
 async function main() {
-  if (!existsSync(resolve(WEB_ROOT, "dist/index.html"))) {
-    throw new Error("dist/ is missing. Run `npm run build` first.");
-  }
+  await buildExactSourceBeforePreview({ webRoot: WEB_ROOT });
   mkdirSync(OUT_DIR, { recursive: true });
 
   const server = spawn(
