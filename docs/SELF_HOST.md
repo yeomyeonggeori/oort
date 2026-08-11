@@ -2,10 +2,13 @@
 
 > **이 문서 하나로 끝난다.** 끝까지 따르면 당신의 머신에서 돌아가는 oort에
 > **브라우저로 로그인해 메시지를 주고받는다.**
-> 명령 셋 + 브라우저 한 번. 분기 없음. 중간에 소스를 열어 볼 일 없음.
+> 처음에 이미지 공급 방식만 하나 고른다: 현재 checkout을 짓는
+> **로컬 빌드**, 또는 공개된 불변 이미지를 받는 **digest pull**. 둘은
+> 같은 Rust 스택을 띄우며 스크립트가 두 경로를 섞지 못하게 막는다.
 >
-> 시간은 약속하지 않는다 — 첫 기동은 이미지를 처음부터 굽고, 그건 당신의 머신이
-> 정하는 값이다. 약속하는 것은 **결과**다: 저 넷을 마치면 화면이 있다.
+> 시간은 약속하지 않는다. 로컬 모드는 이미지를 처음부터 굽고,
+> digest 모드는 레지스트리에서 받는다. 약속하는 것은 **결과**다: 저
+> 넷을 마치면 화면이 있다.
 >
 > 근거: 2026-08-10 재실측(#1229). 깨끗한 클론에서 이 문서를 그대로 밟아
 > 브라우저 왕복까지 갔고, **문서에 없는 임기응변은 0회**였다. 그 전 측정(같은 날,
@@ -37,23 +40,44 @@ cd oort
 > 공개 시점·이미지 배포는 아직 결정 중이라, 지금 이 URL은 접근 권한이 있는 계정에서만
 > 통한다. 그 결정과 무관하게 아래 절차는 체크아웃만 있으면 그대로 성립한다.
 
-## 2. env 만들기
+## 2. 이미지 모드 고르고 env 만들기
+
+다음 둘 중 **하나만** 실행한다.
+
+### A. 로컬 빌드
 
 ```sh
-scripts/self_host_env.sh
+scripts/self_host_env.sh --local-build
 ```
+
+현재 checkout의 `server-rust/Dockerfile`로 `oort:local`을 만든다. Rust·Node는
+호스트에 설치할 필요가 없고 Docker 빌드 스테이지 안에서만 쓴다.
+
+### B. 공개 digest pull
+
+```sh
+IMAGE_REF='ghcr.io/yeomyeonggeori/oort@sha256:REPLACE_WITH_64_LOWERCASE_HEX'
+scripts/self_host_env.sh --published-image "$IMAGE_REF"
+```
+
+`latest`나 `sha-<commit>` 태그는 받지 않는다. **반드시 `@sha256:`로 pin된
+`ghcr.io/yeomyeonggeori/oort`만** 받으며, 형식이 틀리면 env를 만들기 전에
+실패한다. #1266은 발행 **경로**를 준비하는 goal이고 실제 첫 digest 발행·
+공개는 owner/M7 게이트 후속이다. 릴리스에 정확한 digest가 없으면 A를 쓴다.
 
 `infra/rust/local.secrets.env` 를 만든다 — **채워 넣을 자리가 하나도 없는** 파일이다.
 시크릿 아홉 개를 `openssl` 로 만들고, 서로 같아야 하는 값들(런타임 롤 비밀번호와
 접속 URL 안의 비밀번호)을 같게 쓰고, 포트가 이미 쓰이고 있으면 비어 있는 다음
-포트를 골라 알려 준다. 그리고 **첫 로그인 계정**을 함께 만든다.
+포트를 골라 알려 준다. 그리고 **첫 로그인 계정**과 선택한
+`MOMO_SELF_HOST_MODE`를 함께 기록한다.
 
 끝에 이런 것이 찍힌다 — 다음 두 단계가 전부 여기 있다:
 
 ```
 [self-host] infra/rust/local.secrets.env 를 만들었다 (권한 600).
 
-[self-host] 준비됐다. 다음 한 줄이 스택을 띄운다:
+[self-host] 준비됐다. 모드: 로컬 빌드 — 현재 checkout을 server-rust/Dockerfile로 짓는다.
+[self-host] 다음 한 줄이 스택을 띄운다:
 
   docker compose --env-file infra/rust/local.secrets.env \
   -f infra/rust/docker-compose.rust.yml \
@@ -72,11 +96,12 @@ scripts/self_host_env.sh
 비밀번호는 파일 안에도 있다(`infra/rust/local.secrets.env`, 권한 600, 커밋 대상
 아님). 이 스크립트는 **파일이 이미 있으면 절대 덮어쓰지 않는다** — 이미 마이그레이션한
 DB가 있는데 시크릿을 다시 만들면 그 DB와 어긋나기 때문이다. 다시 실행하면 현재
-로그인 정보만 다시 보여 준다.
+로그인 정보만 다시 보여 준다. 기존 env와 다른 모드나 다른 digest를 주면
+조용히 바꾸지 않고 실패한다.
 
 ## 3. 기동
 
-2단계가 찍어 준 명령을 그대로 붙여 넣는다.
+2단계가 찍어 준 명령을 그대로 붙여 넣는다. 로컬 모드는 다음과 같다.
 
 ```sh
 docker compose --env-file infra/rust/local.secrets.env \
@@ -86,8 +111,18 @@ docker compose --env-file infra/rust/local.secrets.env \
   up -d --build --wait
 ```
 
+digest 모드는 빌드 오버레이와 `--build`가 없다. 스크립트가 이 명령을
+출력한다:
+
+```sh
+docker compose --env-file infra/rust/local.secrets.env \
+  -f infra/rust/docker-compose.rust.yml \
+  -f infra/rust/local.override.yml \
+  up -d --pull missing --wait
+```
+
 `--wait` 가 붙어 있으므로 **이 명령이 끝났다는 것이 준비가 끝났다는 뜻이다.**
-그 사이에 순서대로 일어나는 일: 이미지 빌드 → PostgreSQL 기동 → 최소권한 런타임
+그 사이에 순서대로 일어나는 일: 이미지 빌드 또는 pull → PostgreSQL 기동 → 최소권한 런타임
 롤 생성 → 마이그레이션 전량 적용(+2패스 멱등 검사) → 첫 로그인 계정 생성 →
 api·relay·agent-worker·웹 엣지 기동.
 
@@ -124,11 +159,15 @@ centrifugo (전송 전용) <── publish ── relay ┘
 ## 멈추기 · 지우기
 
 3단계의 인자 묶음이 길어서, 아래부터는 함수 하나로 줄여 쓴다. 레포 루트에서
-이 한 줄을 붙여 넣는다(변수가 아니라 **함수**인 것은 의도다 — zsh는 변수를
-단어로 쪼개 주지 않아서 `$OORT down` 은 macOS 기본 셸에서 통하지 않는다):
+**자신이 고른 모드의 한 줄만** 붙여 넣는다(변수가 아니라 함수인 것은
+의도다 — zsh는 변수를 단어로 쪼개 주지 않는다):
 
 ```sh
+# local-build
 oort() { docker compose --env-file infra/rust/local.secrets.env -f infra/rust/docker-compose.rust.yml -f infra/rust/docker-compose.rust.build.yml -f infra/rust/local.override.yml "$@"; }
+
+# published-digest
+oort() { docker compose --env-file infra/rust/local.secrets.env -f infra/rust/docker-compose.rust.yml -f infra/rust/local.override.yml "$@"; }
 ```
 
 ```sh

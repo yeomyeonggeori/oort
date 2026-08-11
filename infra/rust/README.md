@@ -17,10 +17,10 @@
 
 | 파일 | 역할 |
 |---|---|
-| `server-rust/Dockerfile` | 멀티스테이지 이미지 — 하나의 이미지, 3개 커맨드(`api`/`relay`/`migrate`) |
+| `server-rust/Dockerfile` | 멀티스테이지 이미지 — 하나의 이미지, 7개 커맨드(`api`/`relay`/`agent-worker`/`webhook-sender`/`notifier`/`migrate`/`web-assets`) |
 | `server-rust/docker-entrypoint.sh` | 역할 선택만. prod Swift 이미지와 동일 계약(`command: ["api"]`) |
 | `docker-compose.rust.yml` | prod compose 미러(최소셋): postgres · centrifugo · runtime-roles · migrate · api · relay |
-| `docker-compose.rust.build.yml` | 로컬 빌드 오버라이드(`build:` 주입). 배포 스택은 항상 이미지 pull |
+| `docker-compose.rust.build.yml` | 로컬 빌드 전용 오버라이드(`build:` 주입). 발행 digest 경로는 이 파일과 `--build`를 둘 다 빼고 이미지를 pull(#1266) |
 | `rust-smoke.env.example` | env 템플릿. 복사본은 반드시 `*.secrets.env`(레포 전역 gitignore). 셀프호스트 경로는 이 템플릿 대신 `scripts/self_host_env.sh` 가 `local.secrets.env` 를 **생성**한다(#1229) |
 | `local.override.yml` + `Caddyfile.local` | **로컬 셀프호스트 엣지**(#1229) — `web-init` + `web`(Caddy `:80`, 루프백 바인딩, ACME 없음). SPA·`/v1`·`/connection` 을 같은 오리진에서 낸다. 정본 절차는 `docs/SELF_HOST.md` |
 | `docker-compose.lane-phone.yml` | **기본 비활성** MAESTRO 폰 레인 오버레이(#1022) — `mock-hermes` + `agent-worker`의 프로바이더 배선. `clients/mobile/scripts/lane-phone.sh` 전용 |
@@ -233,7 +233,7 @@ prod(`momo-pgdata`)와 분리돼 있다. 다른 프로젝트명으로 띄우면 
 
 | 런북 단계 | 이 디렉터리에서 |
 |---|---|
-| 3-1 이미지 퍼블리시 확인 | `server-rust/Dockerfile`로 빌드 → 레지스트리 push는 **오케스트레이터/CI 몫(후속)**. 그 전에는 서버에서 직접 빌드하거나 `docker save/load` |
+| 3-1 이미지 퍼블리시 확인 | 수동 `publish-images.yml`이 `server-rust/Dockerfile`를 native `linux/amd64`로 빌드하는 경로는 #1266에서 정본화. 실 dispatch·digest 핀·익명 pull은 owner/M7 후속(`runtime-unverified`) |
 | 3-3 Docker 설치 | 그대로 |
 | 3-4 스택 기동 | `docker-compose.rust.yml`(caddy·redis·worker 제외판). `MOMO_RUST_IMAGE`만 퍼블리시된 ref로 바꾸면 build 오버레이 없이 pull 경로 |
 | 3-5 마이그레이션 001~059 | `migrate` 서비스(psql 러너). seed 모드는 NCP에서 `none` |
