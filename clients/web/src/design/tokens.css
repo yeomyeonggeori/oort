@@ -489,6 +489,16 @@
   position: relative;
   overflow: clip;
 
+  /* 데스크톱 집중 모드 (#1291). 워크스페이스 문맥을 잃지 않도록 56px 레일은
+   * 남기고, 240px 셸 열에서 그 레일을 뺀 채널/프로필 패널 184px만 본문에
+   * 돌려준다. 전환을 두지 않는다: 콘텐츠가 움직이는 장식이 아니라 즉시 폭을
+   * 확보하는 셸 조작이고, 포커스 왕복은 Sidebar가 별도로 소유한다. */
+  @media (width >= 600px) {
+    &[data-sidebar-collapsed] {
+      grid-template-columns: var(--spacing-rail) 1fr;
+    }
+  }
+
   /* 폰 (B6). 240px 열은 390px 화면의 62%를 남기고, 그 남은 150px 안에 채널
    * 제목·타임라인·컴포저가 전부 들어가야 했다(성재 iPhone 실캡처). 그래서 이
    * 폭에서는 사이드바가 행을 나눠 갖지 않는다: 격자는 한 열이 되고 사이드바는
@@ -522,6 +532,15 @@
  * 그보다 길어지면 대기가 된다. reduced-motion에서는 전환 없이 자리에 나타난다 —
  * 위치 정보는 그림자와 스크림이 이미 말하고 있으므로 잃는 것이 없다. */
 @utility sidebar-drawer {
+  /* 접힌 패널의 검색·채널·프로필은 보이지 않을 뿐 아니라 탭/AX 트리에서도
+   * 함께 빠져야 한다. 모바일에서는 이 규칙을 적용하지 않아 기존 280px 서랍이
+   * AppShell의 데스크톱 상태와 독립적으로 온전히 열린다. */
+  @media (width >= 600px) {
+    &[data-pane-collapsed] [data-sidebar-channel-pane] {
+      display: none;
+    }
+  }
+
   @media (width < 600px) {
     position: absolute;
     inset-block: 0;
@@ -779,6 +798,40 @@
     inset: 0;
     inline-size: auto;
     z-index: 20;
+  }
+}
+
+/* 작업 콘솔 전용 master-detail. 넓은 창에서는 320px 세션 목록과 상세가 함께
+ * 서고, 900px 아래에서는 선택 전 목록 / 선택 후 상세 중 하나만 선다. 기존
+ * work-pane과 같은 문턱을 쓰는 이유는 상세가 같은 80열 터미널을 품기 때문이다.
+ * 임의 grid-template 값을 컴포넌트에 흩뿌리지 않고 이름 붙은 기하 한 줄로 둔다. */
+@utility work-console-layout {
+  display: grid;
+  grid-template-columns: var(--spacing-pane) minmax(0, 1fr);
+
+  &[data-detail-wide] {
+    grid-template-columns: minmax(0, 1fr);
+
+    > [data-work-console-list] {
+      display: none;
+    }
+  }
+
+  @media (width < 900px) {
+    display: flex;
+
+    &[data-detail] > [data-work-console-list] {
+      display: none;
+    }
+
+    &:not([data-detail]) > [data-work-console-detail] {
+      display: none;
+    }
+
+    > [data-work-console-list],
+    > [data-work-console-detail] {
+      flex: 1;
+    }
   }
 }
 
