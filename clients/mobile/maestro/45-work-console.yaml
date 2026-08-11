@@ -1,0 +1,84 @@
+appId: app.momo.ios
+name: 45-work-console
+---
+# #1292 — workspace-wide Work Console, exact T1 location, read-only detail,
+# and the two-step detail -> origin conversation -> detail navigation stack.
+- launchApp:
+    appId: app.momo.ios
+- runFlow: subflows/ensure-signed-in.yaml
+
+# Dismiss the development LogBox away from the tab bar, using the same safe
+# detour as 40-agents-tab.
+- tapOn:
+    id: "sidebar-row-channel:${GENERAL_CHANNEL_ID}"
+- extendedWaitUntil:
+    visible:
+      id: "composer-input"
+    timeout: 60000
+- runFlow: subflows/dismiss-dev-logbox.yaml
+- tapOn:
+    id: "header-back"
+
+- tapOn:
+    id: "tab-work"
+- extendedWaitUntil:
+    visible:
+      id: "work-list"
+    timeout: 60000
+- assertVisible:
+    id: "work-title"
+- assertVisible:
+    id: "work-filter-all"
+- assertVisible:
+    id: "work-filter-active"
+- assertVisible:
+    id: "work-row-${WORK_SESSION_ID}"
+- assertVisible:
+    id: "work-location-${WORK_SESSION_ID}"
+- assertVisible: ".*T1 · 데스크톱 앱.*"
+
+# In the full lane 30-approval has ended this fixture; when this flow runs alone
+# it is still running. Both are legitimate server states, so the conditional
+# assertions keep `--flow 45-work-console` independently runnable.
+- tapOn:
+    id: "work-filter-active"
+- runFlow:
+    when:
+      visible:
+        id: "work-active-empty"
+    commands:
+      - assertVisible:
+          id: "work-active-empty"
+- runFlow:
+    when:
+      visible:
+        id: "work-row-${WORK_SESSION_ID}"
+    commands:
+      - assertVisible:
+          id: "work-row-${WORK_SESSION_ID}"
+- tapOn:
+    id: "work-filter-all"
+- assertVisible:
+    id: "work-row-${WORK_SESSION_ID}"
+
+- tapOn:
+    id: "work-row-${WORK_SESSION_ID}"
+- extendedWaitUntil:
+    visible:
+      id: "work-detail-readonly"
+    timeout: 60000
+- assertVisible:
+    id: "work-detail-location"
+- assertVisible: ".*T1 · 데스크톱 앱.*"
+- assertVisible: ".*읽기 전용으로 확인할 수 있습니다.*"
+
+- tapOn:
+    id: "work-detail-origin"
+- extendedWaitUntil:
+    visible:
+      id: "conversation-title"
+    timeout: 60000
+- tapOn:
+    id: "header-back"
+- assertVisible:
+    id: "work-detail-readonly"

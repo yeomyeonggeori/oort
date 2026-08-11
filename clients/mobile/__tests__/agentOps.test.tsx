@@ -718,9 +718,22 @@ describe('what the agent is doing, and whether you can turn things off', () => {
     await waitFor(() =>
       expect(
         screen.getByLabelText(
-          /어제 끝난 작업, 종료됨, 데스크톱 앱\. 끝난 작업입니다\./,
+          /어제 끝난 작업, 종료됨, T1 · 데스크톱 앱\. 끝난 작업입니다\./,
         ),
       ).toBeTruthy(),
+    );
+  });
+
+  it('uses the shared exact execution-location labels on existing agent detail rows', async () => {
+    installFetch();
+    await openKimWork();
+    await waitFor(() =>
+      expect(screen.getByTestId('agent-session-SESSION-APP')).toHaveTextContent(
+        /T1 · 데스크톱 앱/,
+      ),
+    );
+    expect(screen.getByTestId('agent-session-SESSION-CLOUD')).toHaveTextContent(
+      /T3 · 클라우드/,
     );
   });
 
@@ -734,6 +747,9 @@ describe('what the agent is doing, and whether you can turn things off', () => {
       expect(screen.getByTestId('agent-session-tier-SESSION-APP')).toHaveTextContent(
         /무엇을 꺼도 되는지 말할 수 없습니다/,
       ),
+    );
+    expect(screen.getByTestId('agent-session-SESSION-APP')).toHaveTextContent(
+      /실행 위치 확인 필요/,
     );
   });
 

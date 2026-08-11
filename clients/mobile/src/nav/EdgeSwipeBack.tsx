@@ -99,6 +99,7 @@ export function EdgeSwipeBack({
   children,
   style,
   enabled = true,
+  accessibilityViewIsModal,
   progressRef,
   testID = 'edge-swipe-pane',
 }: {
@@ -112,6 +113,8 @@ export function EdgeSwipeBack({
    * 꺼야 하는 화면(전체화면 캔버스 같은)이 생기면 여기다.
    */
   enabled?: boolean;
+  /** iOS VoiceOver modal boundary; it must live on this actual overlay sibling. */
+  accessibilityViewIsModal?: boolean;
   progressRef?: EdgeSwipeProgressRef;
   testID?: string;
 }): React.JSX.Element {
@@ -294,6 +297,7 @@ export function EdgeSwipeBack({
   return (
     <NestingContext.Provider value={nesting}>
       <Animated.View
+        accessibilityViewIsModal={accessibilityViewIsModal}
         style={[
           style,
           styles.pane,

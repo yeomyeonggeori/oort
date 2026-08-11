@@ -146,12 +146,15 @@ export function ObserverTerminal({
   hostName,
   wide,
   onWideChange,
+  headingLevel = 4,
 }: {
   session: WorkSession;
   hostName: string | null;
   /** The pane is showing at full surface width (WorkPanel owns the state). */
   wide: boolean;
   onWideChange: (wide: boolean) => void;
+  /** Follows the WorkSessionDetail heading in its route or panel context. */
+  headingLevel?: 3 | 4;
 }) {
   const { session: auth, workspaceId } = useSession();
   const queryClient = useQueryClient();
@@ -770,6 +773,7 @@ export function ObserverTerminal({
   // over zero controls. The remedy at that width is the window, so the notice
   // says the window instead of pointing at a button that is not there.
   const paneAtFullWidth = wide || paneAtWindowWidth;
+  const Heading = headingLevel === 3 ? "h3" : "h4";
 
   return (
     <section
@@ -779,7 +783,9 @@ export function ObserverTerminal({
       data-link={link ?? undefined}
     >
       <div className="flex flex-wrap items-center gap-2">
-        <h4 className="min-w-0 flex-1 text-meta text-ink-muted">터미널 관전</h4>
+        <Heading className="min-w-0 flex-1 text-meta text-ink-muted">
+          터미널 관전
+        </Heading>
         {/* 읽기 전용 is a property of the surface, so it is stated once where
             the surface is named. It used to be three muted lines under the
             terminal, repeated in every state, in a 320px column that was

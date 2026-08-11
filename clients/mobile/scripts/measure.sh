@@ -7,6 +7,7 @@
 #   2. anchor movement when older messages are prepended
 #   3. the gap between the composer's bottom edge and the keyboard's top edge
 #   4. the `Origin` header React Native's WebSocket sends
+#   5. Work Console/detail in both schemes and an accessibility text size
 #
 # Simulator, deliberately. Spike #837 established that this is the one property
 # where the simulator does NOT lie: the reversed-list numbers came out the same
@@ -56,6 +57,7 @@ sleep 2
 PROJECT_ROOT="$(pwd)"
 METRO_PORT=8081
 OWN_METRO_PID=""
+ORIGINAL_CONTENT_SIZE=""
 
 metro_root() {
   curl -s -D - -o /dev/null "http://127.0.0.1:$1/status" 2>/dev/null \
@@ -71,7 +73,7 @@ else
   node node_modules/react-native/cli.js start --port "$METRO_PORT" \
     > "$OUT_DIR/metro.log" 2>&1 &
   OWN_METRO_PID=$!
-  trap 'kill "$STUB_PID" 2>/dev/null || true; [ -n "$OWN_METRO_PID" ] && kill "$OWN_METRO_PID" 2>/dev/null || true' EXIT
+  trap 'kill "$STUB_PID" 2>/dev/null || true; [ -n "$OWN_METRO_PID" ] && kill "$OWN_METRO_PID" 2>/dev/null || true; [ -n "$ORIGINAL_CONTENT_SIZE" ] && xcrun simctl ui booted content_size "$ORIGINAL_CONTENT_SIZE" >/dev/null 2>&1 || true' EXIT
   for _ in $(seq 1 90); do
     [ "$(metro_root "$METRO_PORT")" = "$PROJECT_ROOT" ] && break
     sleep 1
@@ -81,6 +83,10 @@ else
     exit 1
   fi
 fi
+
+# From here on a failure must also restore the simulator's Dynamic Type setting.
+# `OWN_METRO_PID` is empty when this checkout was already being served.
+trap 'kill "$STUB_PID" 2>/dev/null || true; [ -n "$OWN_METRO_PID" ] && kill "$OWN_METRO_PID" 2>/dev/null || true; [ -n "$ORIGINAL_CONTENT_SIZE" ] && xcrun simctl ui booted content_size "$ORIGINAL_CONTENT_SIZE" >/dev/null 2>&1 || true' EXIT
 
 echo "==> launching with -momoMeasure YES"
 xcrun simctl terminate booted "$BUNDLE_ID" 2>/dev/null || true
@@ -112,9 +118,37 @@ xcrun simctl launch booted "$BUNDLE_ID" --args \
 sleep 6
 xcrun simctl io booted screenshot "$OUT_DIR/states.png"
 
+# #1292 Work Console surfaces. Both schemes are explicit and the seeded rows
+# contain long Korean project/host/channel/plan copy so narrow-width wrapping is
+# reviewed on the exact shipping components rather than inferred from styles.
+capture_surface() {
+  local mode="$1"
+  local file="$2"
+  xcrun simctl terminate booted "$BUNDLE_ID" 2>/dev/null || true
+  xcrun simctl launch booted "$BUNDLE_ID" --args \
+    -momoMeasure "$mode" -RCT_jsLocation "127.0.0.1:$METRO_PORT"
+  sleep 6
+  xcrun simctl io booted screenshot "$OUT_DIR/$file"
+}
+
+capture_surface WORK-CONSOLE work-console-dark.png
+capture_surface WORK-DETAIL work-detail-dark.png
+capture_surface LIGHT-WORK-CONSOLE work-console-light.png
+capture_surface LIGHT-WORK-DETAIL work-detail-light.png
+
+ORIGINAL_CONTENT_SIZE="$(xcrun simctl ui booted content_size)"
+xcrun simctl ui booted content_size accessibility-extra-extra-large
+capture_surface WORK-CONSOLE work-console-accessibility-text.png
+capture_surface WORK-DETAIL work-detail-accessibility-text.png
+xcrun simctl ui booted content_size "$ORIGINAL_CONTENT_SIZE"
+ORIGINAL_CONTENT_SIZE=""
+
 echo
 echo "---- Origin stub ----"
 cat "$OUT_DIR/origin-stub.log"
 echo
 echo "screenshot: $OUT_DIR/measure.png"
+echo "work console screenshots: $OUT_DIR/work-console-{dark,light}.png"
+echo "work detail screenshots: $OUT_DIR/work-detail-{dark,light}.png"
+echo "accessibility text screenshots: $OUT_DIR/work-{console,detail}-accessibility-text.png"
 echo "the numbers are also on the Metro log, one line prefixed MOMO_MEASURE"
