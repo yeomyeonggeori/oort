@@ -8,6 +8,7 @@ import {
   Lock,
   MessageSquare,
   Milestone,
+  PanelLeftClose,
   Plus,
   Search,
   Settings,
@@ -115,8 +116,12 @@ function AgentTurnBadge({
 
 export function Sidebar({
   onOpenQuickSwitcher,
+  channelPaneCollapsed,
+  onChannelPaneCollapsedChange,
 }: {
   onOpenQuickSwitcher: () => void;
+  channelPaneCollapsed: boolean;
+  onChannelPaneCollapsedChange: (collapsed: boolean) => void;
 }) {
   const { session, workspaceId, connStatus } = useSession();
   const navigate = useNavigate();
@@ -130,12 +135,63 @@ export function Sidebar({
   const asDrawer = isMobile;
   const drawerRef = useInertWhile<HTMLDivElement>(asDrawer && !drawerOpen);
   const closeRef = useRef<HTMLButtonElement>(null);
+  const collapsePaneRef = useRef<HTMLButtonElement>(null);
+  const expandPaneRef = useRef<HTMLButtonElement>(null);
+  const previousCollapsedRef = useRef(channelPaneCollapsed);
+  const previousDrawerRef = useRef(asDrawer);
+  const desktopToggleFocusedRef = useRef(false);
+
+  const onDesktopToggleBlur = (event: React.FocusEvent<HTMLButtonElement>) => {
+    const next = event.relatedTarget;
+    // Removing the focused desktop toggle during a breakpoint change reports
+    // body/null. Keep that fact until the effect below can hand it to the mobile
+    // opener. A real visible destination means the user already chose a better
+    // place, so the shell must not steal focus back.
+    if (
+      next instanceof HTMLElement &&
+      next !== document.body &&
+      next.getClientRects().length > 0
+    ) {
+      desktopToggleFocusedRef.current = false;
+    }
+  };
 
   // 열리면 캐럿이 서랍 안으로 들어간다. 첫 정거장은 닫기 버튼이다: 잘못 열었을
   // 때 되돌리는 길이 첫 번째여야 하고, 그 다음이 검색과 채널 목록이다.
   useEffect(() => {
     if (asDrawer && drawerOpen) closeRef.current?.focus();
   }, [asDrawer, drawerOpen]);
+
+  // 접는 버튼은 자기 패널과 함께 사라진다. React 커밋 뒤에도 포커스를 그
+  // 보이지 않는 노드에 두면 다음 Tab이 문서 처음으로 튀므로, 살아남는 레일
+  // 컨트롤로 명시적으로 넘긴다. 다시 열 때도 같은 왕복을 지켜 사용자가 방금
+  // 조작한 자리에서 계속 간다. 폰 서랍은 독립 상태라 접기 변화에 참여하지
+  // 않는다. 폭 전환으로 현재 토글이 사라지면서 포커스가 고립된 경우에만
+  // (본문의 살아 있는 포커스는 빼앗지 않고) 반대 폭의 현재 토글로 회수한다.
+  useEffect(() => {
+    const changed = previousCollapsedRef.current !== channelPaneCollapsed;
+    const movedToDrawer = !previousDrawerRef.current && asDrawer;
+    const returnedToDesktop = previousDrawerRef.current && !asDrawer;
+    previousCollapsedRef.current = channelPaneCollapsed;
+    previousDrawerRef.current = asDrawer;
+    const active = document.activeElement;
+    const focusStranded =
+      active === null ||
+      active === document.body ||
+      (active instanceof HTMLElement && active.getClientRects().length === 0);
+    if (asDrawer) {
+      if (movedToDrawer && desktopToggleFocusedRef.current && focusStranded) {
+        const opener = document.querySelector<HTMLButtonElement>(
+          '[data-testid="open-sidebar-drawer"]'
+        );
+        if (opener?.getClientRects().length) opener.focus();
+      }
+      desktopToggleFocusedRef.current = false;
+      return;
+    }
+    if (!changed && (!returnedToDesktop || !focusStranded)) return;
+    (channelPaneCollapsed ? expandPaneRef : collapsePaneRef).current?.focus();
+  }, [asDrawer, channelPaneCollapsed]);
 
   const channelsQuery = useChannels(workspaceId);
   const directoryQuery = useDirectory(workspaceId);
@@ -301,6 +357,7 @@ export function Sidebar({
       id="sidebar-drawer"
       className="sidebar-drawer flex h-full"
       data-open={asDrawer && drawerOpen ? "" : undefined}
+      data-pane-collapsed={channelPaneCollapsed ? "" : undefined}
       data-testid="sidebar"
     >
       <WorkspaceRail
@@ -311,9 +368,21 @@ export function Sidebar({
         }}
         workspaceId={workspaceId}
         avatarUrl={workspaceQuery.data?.avatarUrl}
+        showChannelPaneExpand={channelPaneCollapsed && !asDrawer}
+        channelPaneExpandRef={expandPaneRef}
+        onExpandChannelPane={() => onChannelPaneCollapsedChange(false)}
+        onChannelPaneExpandFocus={() => {
+          desktopToggleFocusedRef.current = true;
+        }}
+        onChannelPaneExpandBlur={onDesktopToggleBlur}
       />
 
-      <div className="flex h-full w-full min-w-0 flex-col border-r border-line bg-surface-sidebar">
+      <div
+        id="sidebar-channel-pane"
+        data-sidebar-channel-pane
+        data-testid="sidebar-channel-pane"
+        className="flex h-full w-full min-w-0 flex-col border-r border-line bg-surface-sidebar"
+      >
         <div className="flex items-center gap-2 border-b border-line p-2">
           <Button
             variant="outline"
@@ -530,6 +599,34 @@ export function Sidebar({
             belongs where the eye already lands when it leaves the channel list.
             Renders nothing at all unless there is something to act on. */}
         <UpdateBadge />
+
+        {/* 데스크톱 전용 텍스트+아이콘 컨트롤 (#1291). 접힌 뒤에는 이 노드가
+            패널과 함께 사라지고 WorkspaceRail의 열기 컨트롤이 같은 aria-controls
+            관계를 이어받는다. 모바일 서랍은 기존 닫기 버튼/Escape만 쓴다. */}
+        {!asDrawer && (
+          <div className="border-t border-line p-2">
+            <Button
+              ref={collapsePaneRef}
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => onChannelPaneCollapsedChange(true)}
+              onFocus={() => {
+                desktopToggleFocusedRef.current = true;
+              }}
+              onBlur={onDesktopToggleBlur}
+              aria-label="탐색 패널 접기"
+              aria-expanded="true"
+              aria-controls="sidebar-channel-pane"
+              title="탐색 패널 접기"
+              data-testid="sidebar-collapse"
+              className="w-full justify-start text-ink-muted"
+            >
+              <PanelLeftClose aria-hidden="true" />
+              탐색 패널 접기
+            </Button>
+          </div>
+        )}
 
         {/* The identity row is "who I am". Two DIFFERENT facts can appear here and
             ADR-0160 keeps them apart (guard 6) — 6b design-review H1 is what made

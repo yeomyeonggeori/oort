@@ -56,6 +56,10 @@ export function AppShell({
   const [realtime, setRealtime] = useState<RealtimeHandle | null>(null);
   const [connStatus, setConnStatus] = useState<RealtimeStatus>("connecting");
   const [switcherOpen, setSwitcherOpen] = useState(false);
+  // 데스크톱의 184px 채널/프로필 패널은 필요할 때만 비킨다 (#1291).
+  // 저장소나 URL에 쓰지 않는 셸 수명 상태다: 라우트를 오가는 동안은 선택을
+  // 지키되 새 창·새 로그인까지 과거의 접힌 상태를 가져가지 않는다.
+  const [sidebarPaneCollapsed, setSidebarPaneCollapsed] = useState(false);
   // The route boundary resets when the user navigates: a failed channel must
   // not keep the next one from rendering.
   const routePath = useLocation().pathname;
@@ -214,8 +218,15 @@ export function AppShell({
          * 연다. 채널 만들기와 같은 이유로 폼 상태가 여러 벌이 되지 않는다. */}
         <AddChannelMemberProvider>
         <AgentProfileProvider>
-          <div className="app-shell">
-            <Sidebar onOpenQuickSwitcher={() => setSwitcherOpen(true)} />
+          <div
+            className="app-shell"
+            data-sidebar-collapsed={sidebarPaneCollapsed ? "" : undefined}
+          >
+            <Sidebar
+              onOpenQuickSwitcher={() => setSwitcherOpen(true)}
+              channelPaneCollapsed={sidebarPaneCollapsed}
+              onChannelPaneCollapsedChange={setSidebarPaneCollapsed}
+            />
             {/* 스크림은 사이드바 **다음**에 있어야 한다: 서랍이 열린 동안 탭이 갈
              * 수 있는 곳은 서랍과 이 버튼뿐이고(본문은 inert), DOM 순서가 곧 그
              * 순환이다. 아이콘도 글자도 없는 표면이지만 진짜 버튼인 이유는

@@ -1,5 +1,11 @@
 # oort 진행 현황
 
+## 데스크톱 셸 집중 모드 — 56px 레일 유지 + 184px 탐색 패널 접기 (#1291, 2026-08-11)
+
+- **웹/Tauri 공용 AppShell에 비지속 접기를 추가했다.** 텍스트+아이콘 `탐색 패널 접기`와 레일의 `열기`가 왕복하고, 채널/프로필 패널만 빠져 채팅과 같은 주 표면이 정확히 184px 넓어진다. 이미 열린 WorkPanel의 subtree와 wide 상태는 왕복 중 유지된다. `/work`도 #1290 합류 뒤 같은 두 번째 shell track을 그대로 받으며 별도 레이아웃 분기는 없다.
+- **포커스와 모바일 경계를 닫았다.** 숨은 패널의 모든 포커스 대상은 탭/AX 트리에서 빠지고 포커스는 살아 있는 토글로 이동한다. 데스크톱 토글을 쥔 채 `<600px`로 가면 현재 route의 모바일 opener가 이어받되, route에 이미 가시 포커스가 있으면 빼앗지 않는다. 서랍·스크림·Escape는 독립이며 새 AppShell 마운트에는 접힘 상태가 남지 않는다.
+- **검증.** typecheck · build · web 891 tests · lint 0 errors(기존 warning 7) · design pre-flight 10/10+3/3 · #1291 집중 shell gate 1280/900/760 + 390px, light/dark 전부 PASS. 양 스킴 캡처 직접 검수 Blocker 0; 전체 `gate:shell`의 기존 플러그인 포커스 링 offset 단정 3건은 이 변경과 무관한 baseline RED로 별도 관측했다.
+
 ## ADR-0158 서버 축 — `runId` 서비스 개시 · refine 공지 · 어댑터 스트림 (#1130 W-N, 2026-08-08)
 
 - **`POST …/messages`의 `runId` 거절이 풀렸다(D5).** 검증 3종은 전송 트랜잭션 **안**에서 fail-closed다(`momo_agent::authorize_run_binding_in_tx`): run 실재 · 같은 워크스페이스 · 요청 주체가 그 run의 에이전트(`agent_run.agent_member_id == principal.member_id`). 안 보이는 run은 **404**(RLS가 타 테넌트 행을 감추므로 더 구체적인 답은 존재 확인이 된다), 보이지만 남의 것이면 **403**. 통과하면 `message.run_id` 컬럼과 `props.run_id` 사본을 **함께** 쓴다 — 전자는 서버측 닫기가 미완성 답을 찾는 키, 후자는 히스토리 페이지가 `runEnded`를 정하는 키라, 하나만 쓰면 두 독자 중 하나가 못 본다.

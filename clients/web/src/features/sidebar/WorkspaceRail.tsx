@@ -1,4 +1,5 @@
-import { Plus } from "lucide-react";
+import type { FocusEventHandler, Ref } from "react";
+import { PanelLeftOpen, Plus } from "lucide-react";
 import { useOpenAddWorkspace } from "@/features/workspace/useAddWorkspace";
 import { useWorkspaceAvatar } from "./useWorkspaceAvatar";
 import {
@@ -17,6 +18,11 @@ export function WorkspaceRail({
   workspace,
   workspaceId,
   avatarUrl,
+  showChannelPaneExpand,
+  channelPaneExpandRef,
+  onExpandChannelPane,
+  onChannelPaneExpandFocus,
+  onChannelPaneExpandBlur,
 }: {
   // The tile draws the WORKSPACE (검수 피드백 #4a-1). It is a name-query object,
   // NOT a bare string, on purpose: a bare string is exactly what let the shell
@@ -31,6 +37,12 @@ export function WorkspaceRail({
    * `data:` URL — an `<img src>` to the proxy cannot authenticate.
    */
   avatarUrl?: string;
+  /** Desktop-only reopen control; the mobile drawer remains an independent layer. */
+  showChannelPaneExpand: boolean;
+  channelPaneExpandRef: Ref<HTMLButtonElement>;
+  onExpandChannelPane: () => void;
+  onChannelPaneExpandFocus: () => void;
+  onChannelPaneExpandBlur: FocusEventHandler<HTMLButtonElement>;
 }) {
   const tile = workspaceRailTile(workspace, workspaceId);
   const avatarDataUrl = useWorkspaceAvatar(avatarUrl);
@@ -104,6 +116,25 @@ export function WorkspaceRail({
       >
         <Plus className="size-6" />
       </button>
+
+      {showChannelPaneExpand && (
+        <button
+          ref={channelPaneExpandRef}
+          type="button"
+          onClick={onExpandChannelPane}
+          onFocus={onChannelPaneExpandFocus}
+          onBlur={onChannelPaneExpandBlur}
+          aria-label="탐색 패널 열기"
+          aria-expanded="false"
+          aria-controls="sidebar-channel-pane"
+          title="탐색 패널 열기"
+          data-testid="sidebar-expand"
+          className="mt-auto flex size-rail-tile flex-col items-center justify-center gap-px rounded-md text-ink-muted transition-colors hover:bg-surface-hover focus-visible:focus-ring"
+        >
+          <PanelLeftOpen className="size-4" aria-hidden="true" />
+          <span className="text-timestamp">열기</span>
+        </button>
+      )}
 
       {/* 연결 상태 점은 하단 프로필 패널로 옮겨졌다(검수 #6 / 프레즌스 6a).
           "내가 붙어 있는가"는 "내가 누구인가"의 자리 옆이 더 맞는 집이고,
