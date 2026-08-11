@@ -449,11 +449,26 @@ async function assertConsole(context, state) {
 
   await rows.filter({ hasText: "클라우드에서 빌드" }).click();
   await page.getByTestId("work-detail").waitFor();
-  if (
-    (await page.getByTestId("work-detail").locator("h2").textContent())?.trim() !==
-    "클라우드에서 빌드"
-  ) {
-    throw new Error("route detail skipped the h2 heading level");
+  const headingOutline = await page
+    .getByTestId("work-console-route")
+    .locator("h1, h2, h3, h4, h5, h6")
+    .evaluateAll((headings) =>
+      headings.map((heading) => ({
+        level: Number(heading.tagName.slice(1)),
+        text: heading.textContent?.trim() ?? "",
+      }))
+    );
+  const expectedHeadingOutline = [
+    { level: 1, text: "작업 콘솔" },
+    { level: 2, text: "클라우드에서 빌드" },
+    { level: 3, text: "터미널 관전" },
+  ];
+  if (JSON.stringify(headingOutline) !== JSON.stringify(expectedHeadingOutline)) {
+    throw new Error(
+      `route detail heading outline is not h1 -> h2 -> h3: ${JSON.stringify(
+        headingOutline
+      )}`
+    );
   }
   const observer = page.getByTestId("work-observer");
   await observer.waitFor();
@@ -838,7 +853,7 @@ async function main() {
     server.kill("SIGTERM");
   }
   console.log(
-    "PASS work console: delayed load, projection errors and cached stale fallback, unclipped T1/T2/T3/unknown hosts, cloud icon, observer-only terminal, h2 route detail, linkable selection, responsive keyboard focus, cached/cold offline, empty/error"
+    "PASS work console: delayed load, projection errors and cached stale fallback, unclipped T1/T2/T3/unknown hosts, cloud icon, observer-only terminal, h1/h2/h3 route outline, linkable selection, responsive keyboard focus, cached/cold offline, empty/error"
   );
 }
 

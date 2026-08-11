@@ -97,11 +97,18 @@ function MetaRow({ label, children }: { label: string; children: React.ReactNode
   );
 }
 
-function PlanBlock({ plan }: { plan: ReturnType<typeof foldSessionEvents>["plan"] }) {
+function PlanBlock({
+  plan,
+  headingLevel,
+}: {
+  plan: ReturnType<typeof foldSessionEvents>["plan"];
+  headingLevel: 3 | 4;
+}) {
   if (plan.length === 0) return null;
+  const Heading = headingLevel === 3 ? "h3" : "h4";
   return (
     <section className="border-b border-line px-4 py-2" data-testid="work-plan">
-      <h4 className="pb-1 text-meta text-ink-muted">계획</h4>
+      <Heading className="pb-1 text-meta text-ink-muted">계획</Heading>
       <ul className="flex flex-col gap-1">
         {plan.map((item, index) => (
           <li
@@ -499,10 +506,12 @@ function SessionActions({
 function HandoffSection({
   session,
   hosts,
+  headingLevel,
   onResumed,
 }: {
   session: WorkSession;
   hosts: readonly WorkHost[] | undefined;
+  headingLevel: 3 | 4;
   onResumed: (sessionId: string) => void;
 }) {
   const { session: auth, workspaceId } = useSession();
@@ -563,10 +572,13 @@ function HandoffSection({
 
   if (verb !== "takeover") return null;
 
+  const Heading = headingLevel === 3 ? "h3" : "h4";
   return (
     <section className="border-b border-line px-4 py-2" data-testid="work-detail-handoff">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-meta text-ink-muted">{HANDOFF_COPY.takeover.verb}</h2>
+        <Heading className="text-meta text-ink-muted">
+          {HANDOFF_COPY.takeover.verb}
+        </Heading>
         <Button
           type="button"
           variant={open ? "ghost" : "default"}
@@ -724,6 +736,11 @@ export function WorkSessionDetail({
   const streamOpen =
     live && hostOnline !== false && trust === "local" && !slow;
   const Heading = headingLevel === 2 ? "h2" : "h3";
+  // WorkSessionDetail also lives under two different parents: the global route
+  // owns h1, while WorkPanel owns h2. Every section inside this detail must move
+  // with its session heading; hard-coded h4s made /work jump h2 -> h4, and the
+  // takeover heading used to jump back to h2.
+  const childHeadingLevel = headingLevel === 2 ? 3 : 4;
 
   return (
     <div
@@ -844,6 +861,7 @@ export function WorkSessionDetail({
         <HandoffSection
           session={session}
           hosts={hosts}
+          headingLevel={childHeadingLevel}
           onResumed={onResumed}
         />
 
@@ -913,6 +931,7 @@ export function WorkSessionDetail({
             hostName={hostName}
             wide={wide}
             onWideChange={onWideChange}
+            headingLevel={childHeadingLevel}
           />
         )}
 
@@ -944,7 +963,7 @@ export function WorkSessionDetail({
           />
         )}
 
-        <PlanBlock plan={folded.plan} />
+        <PlanBlock plan={folded.plan} headingLevel={childHeadingLevel} />
 
         {query.isPending && <SkeletonRows rows={5} className="p-4" />}
         {query.error !== null && (
