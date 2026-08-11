@@ -1,5 +1,11 @@
 # oort 진행 현황
 
+## Work Console v1 — 전용 작업 관제와 T1/T2/T3 위치 표식 (#1289, 2026-08-11)
+
+- 웹과 같은 번들을 쓰는 Tauri 데스크톱에 `/work` 전용 master-detail 진입점을 추가했다. 워크스페이스 작업 세션을 상태·담당자·채널·도구·명시 시각과 함께 보고, `?session=` 주소로 같은 기존 세션 상세에 다시 들어간다.
+- 실행 위치는 서버 정본 `work_host.type`만으로 `T1 · 데스크톱 앱`·`T2 · 셀프호스트`·`T3 · 클라우드`를 판정하며 상태와 별도 icon+text로 표시한다. Project/repo/worktree/cwd는 현 계약에 없으므로 추론하지 않는다.
+- 터미널은 기존 host-direct observer를 그대로 재사용한 **읽기 전용** 표면이다. 실제 Tauri↔Rust workd 관전 폐곡선, controller 입력 PTY, Project 계층과 GUI preview는 후속 계약·goal이며 `runtime-unverified`다.
+
 ## ADR-0158 서버 축 — `runId` 서비스 개시 · refine 공지 · 어댑터 스트림 (#1130 W-N, 2026-08-08)
 
 - **`POST …/messages`의 `runId` 거절이 풀렸다(D5).** 검증 3종은 전송 트랜잭션 **안**에서 fail-closed다(`momo_agent::authorize_run_binding_in_tx`): run 실재 · 같은 워크스페이스 · 요청 주체가 그 run의 에이전트(`agent_run.agent_member_id == principal.member_id`). 안 보이는 run은 **404**(RLS가 타 테넌트 행을 감추므로 더 구체적인 답은 존재 확인이 된다), 보이지만 남의 것이면 **403**. 통과하면 `message.run_id` 컬럼과 `props.run_id` 사본을 **함께** 쓴다 — 전자는 서버측 닫기가 미완성 답을 찾는 키, 후자는 히스토리 페이지가 `runEnded`를 정하는 키라, 하나만 쓰면 두 독자 중 하나가 못 본다.

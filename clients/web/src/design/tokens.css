@@ -782,6 +782,32 @@
   }
 }
 
+/* 작업 콘솔 전용 master-detail. 넓은 창에서는 320px 세션 목록과 상세가 함께
+ * 서고, 900px 아래에서는 선택 전 목록 / 선택 후 상세 중 하나만 선다. 기존
+ * work-pane과 같은 문턱을 쓰는 이유는 상세가 같은 80열 터미널을 품기 때문이다.
+ * 임의 grid-template 값을 컴포넌트에 흩뿌리지 않고 이름 붙은 기하 한 줄로 둔다. */
+@utility work-console-layout {
+  display: grid;
+  grid-template-columns: var(--spacing-pane) minmax(0, 1fr);
+
+  @media (width < 900px) {
+    display: flex;
+
+    &[data-detail] > [data-work-console-list] {
+      display: none;
+    }
+
+    &:not([data-detail]) > [data-work-console-detail] {
+      display: none;
+    }
+
+    > [data-work-console-list],
+    > [data-work-console-detail] {
+      flex: 1;
+    }
+  }
+}
+
 /* The 넓게 보기 controls exist only where the pane is not ALREADY the whole
  * surface. Below 900px the rule above has widened it, so the toggle's only
  * possible effect has already happened and pressing it would do nothing. The

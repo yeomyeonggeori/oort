@@ -610,6 +610,11 @@ export function WorkSessionDetail({
   onBack,
   openingThread,
   onOpenThread,
+  headingLevel = 3,
+  threadActionCopy = {
+    idle: "세션 스레드",
+    busy: "세션 스레드 여는 중",
+  },
   onResumed,
 }: {
   session: WorkSession;
@@ -635,6 +640,14 @@ export function WorkSessionDetail({
    * 모든 행이 도착하는 한 곳이고, 채널 이름을 이미 말하고 있다.
    */
   onOpenThread: () => void;
+  /** Page routes use h2; the channel panel keeps its existing h3 hierarchy. */
+  headingLevel?: 2 | 3;
+  /**
+   * 같은 상세를 채널 패널 밖에서 재사용할 때의 정직한 목적지 이름.
+   * 기본값은 기존 패널의 실제 스레드 열기이고, 작업 콘솔 라우트는 메시지 앵커로
+   * 이동하므로 그 동사를 별도로 말한다. 상세 본문과 터미널은 한 벌 그대로다.
+   */
+  threadActionCopy?: { idle: string; busy: string };
   /**
    * 인수가 성공했다 — 후계 세션의 id. 서버가 **새 행**을 만들기 때문에 필요한
    * 콜백이다(원본은 `ended`로 닫히고 새 id가 돌아온다). 이 화면이 스스로
@@ -710,9 +723,14 @@ export function WorkSessionDetail({
   // the caret was claiming.
   const streamOpen =
     live && hostOnline !== false && trust === "local" && !slow;
+  const Heading = headingLevel === 2 ? "h2" : "h3";
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col" data-testid="work-detail">
+    <div
+      className="flex min-h-0 flex-1 flex-col"
+      data-live={live ? "" : undefined}
+      data-testid="work-detail"
+    >
       {/* ONE scroll column. Everything above the ledger scrolls with it; only
           the two things you steer by stay put. */}
       <div
@@ -731,9 +749,9 @@ export function WorkSessionDetail({
             >
               <ArrowLeft className="size-4" />
             </button>
-            <h3 className="min-w-0 flex-1 truncate text-body font-medium text-ink">
+            <Heading className="min-w-0 flex-1 truncate text-body font-medium text-ink">
               {session.label}
-            </h3>
+            </Heading>
             {/* The clock rides with the title rather than living in the meta
                 list: it is the one number that keeps changing, and it is the
                 one the survival signal colours. */}
@@ -813,7 +831,7 @@ export function WorkSessionDetail({
             className="block w-full truncate px-4 py-1 text-left hover:bg-surface-hover hover:text-ink focus-visible:focus-ring"
             data-testid="work-detail-thread"
           >
-            {openingThread ? "세션 스레드 여는 중" : "세션 스레드"} ·{" "}
+            {openingThread ? threadActionCopy.busy : threadActionCopy.idle} ·{" "}
             <span className="text-ink">{channelName}</span>
           </button>
         </p>
