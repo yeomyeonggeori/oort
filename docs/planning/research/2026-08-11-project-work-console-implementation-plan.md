@@ -82,7 +82,8 @@ Project명, repository, worktree, branch, cwd, 현재 shell command는 현재 �
 - master: 워크스페이스 전체 WorkSession 목록. 검색 파라미터 `?session=<id>`로 선택 상태를 링크할 수 있다.
 - detail: 기존 `WorkSessionDetail`을 재사용한다. 새 terminal 구현을 복제하지 않는다.
 - narrow width: master에서 detail로 한 단계 들어가고 뒤로 돌아온다.
-- wide width: master와 detail을 동시에 둔다.
+- wide width: master와 detail을 동시에 두되, 사용자가 `상세 넓게 보기`를 누르면
+  master만 접고 같은 detail·observer terminal을 전체 route 폭으로 확장한다.
 - 발원 대화 이동: `channelId`, `rootMessageId`, `sessionId`라는 기존 사실만 사용한다.
 
 Project가 없는 동안 master의 정본 단위는 **작업 세션**이다. channel은 대화 맥락으로 표시할 수 있지만 Project 그룹으로 이름을 바꾸지 않는다.
@@ -119,6 +120,8 @@ T3 표식은 compact row에서도 생략하지 않는다. 모든 표식은 icon+
 - keyboard: sidebar, session row, 뒤로가기와 발원 대화 이동이 focus-visible로 조작 가능.
   narrow detail에서 뒤로가면 방금 고른 session row로, 유효하지 않은 selection을
   닫으면 첫 번째 남은 session row로 focus가 복귀한다.
+- detail focus: 넓게 보기 전후에 선택 URL·읽기 전용 terminal·버튼 focus를 유지하고,
+  `세션 목록 보이기`로 기본 master-detail을 되돌릴 수 있다.
 - selection: URL과 시각 선택이 일치하고 text/ARIA로도 드러남
 - light/dark, compact/wide에서 cloud tag와 상태 chip이 잘리거나 색에만 의존하지 않음
 - 기존 design token과 flat list 문법을 쓰고, 외부 제품을 닮은 장식용 카드·gradient를 만들지 않음

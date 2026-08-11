@@ -1,5 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Cloud, CircleHelp, Laptop, Server } from "lucide-react";
+import {
+  Cloud,
+  CircleHelp,
+  Laptop,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Server,
+} from "lucide-react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { cn } from "@/design/lib/cn";
 import { useSession } from "@/app/session";
@@ -91,6 +98,7 @@ function WorkConsoleRow({
   ownerName,
   selected,
   rowRef,
+  onSelect,
 }: {
   session: WorkSession;
   hosts: readonly WorkHost[] | undefined;
@@ -98,6 +106,7 @@ function WorkConsoleRow({
   ownerName: string;
   selected: boolean;
   rowRef: (element: HTMLAnchorElement | null) => void;
+  onSelect: () => void;
 }) {
   const location = workConsoleLocation(session, hosts);
   const status = workSessionContinuityStatus(session, hosts);
@@ -111,6 +120,7 @@ function WorkConsoleRow({
       <Link
         ref={rowRef}
         to={workConsoleSessionPath(session.id)}
+        onClick={onSelect}
         aria-current={selected ? "page" : undefined}
         className={cn(
           "flex min-w-0 flex-col gap-1 px-4 py-2 transition-colors focus-visible:focus-ring",
@@ -250,24 +260,30 @@ export function WorkConsoleRoute() {
     (hostsQuery.error !== null && hostsQuery.data === undefined);
   const hasCachedProjection =
     sessionsQuery.data !== undefined && hostsQuery.data !== undefined;
-  const [restoreRowId, setRestoreRowId] = useState<string | null>(null);
+  const [wideSessionId, setWideSessionId] = useState<string | null>(null);
+  const detailWide =
+    selected !== null &&
+    wideSessionId !== null &&
+    uuidEq(selected.id, wideSessionId);
   const rowRefs = useRef(new Map<string, HTMLAnchorElement>());
   const listRef = useRef<HTMLElement>(null);
+  const previousSelectedParam = useRef(selectedParam);
 
   function clearSelection() {
-    if (selectedParam !== null) setRestoreRowId(selectedParam);
+    setWideSessionId(null);
     const next = new URLSearchParams(params);
     next.delete("session");
     setParams(next, { replace: true });
   }
 
   useEffect(() => {
-    if (restoreRowId === null) return;
-    setRestoreRowId(null);
-    const row = rowRefs.current.get(restoreRowId.toLowerCase());
+    const previous = previousSelectedParam.current;
+    previousSelectedParam.current = selectedParam;
+    if (previous === null || selectedParam !== null) return;
+    const row = rowRefs.current.get(previous.toLowerCase());
     const firstSurvivingRow = rowRefs.current.values().next().value;
     (row ?? firstSurvivingRow ?? listRef.current)?.focus();
-  }, [restoreRowId]);
+  }, [selectedParam]);
 
   return (
     <div className="flex min-w-0 flex-1 flex-col" data-testid="work-console-route">
@@ -352,8 +368,10 @@ export function WorkConsoleRoute() {
       <div
         className="work-console-layout min-h-0 flex-1"
         data-detail={showingDetail ? "" : undefined}
+        data-detail-wide={detailWide ? "" : undefined}
       >
         <section
+          id="work-console-session-list"
           ref={listRef}
           tabIndex={-1}
           aria-label="작업 세션 목록"
@@ -392,6 +410,7 @@ export function WorkConsoleRoute() {
                   channelName={channelNameOf(session.channelId)}
                   ownerName={ownerNameOf(session.memberId)}
                   selected={uuidEq(session.id, selected?.id)}
+                  onSelect={() => setWideSessionId(null)}
                   rowRef={(element) => {
                     const key = session.id.toLowerCase();
                     if (element) rowRefs.current.set(key, element);
@@ -420,13 +439,33 @@ export function WorkConsoleRoute() {
           ) : selected !== null && selectedLocation !== null ? (
             <>
               <div
-                className="flex min-w-0 items-center gap-2 border-b border-line px-4 py-2"
+                className="flex min-w-0 items-center justify-between gap-2 border-b border-line px-4 py-2"
                 data-testid="work-console-detail-location"
               >
-                <LocationBadge location={selectedLocation} />
-                <span className="min-w-0 truncate text-meta text-ink-muted">
-                  {selectedLocation?.host?.displayName ?? "호스트 정보 없음"}
+                <span className="flex min-w-0 items-center gap-2">
+                  <LocationBadge location={selectedLocation} />
+                  <span className="min-w-0 truncate text-meta text-ink-muted">
+                    {selectedLocation?.host?.displayName ?? "호스트 정보 없음"}
+                  </span>
                 </span>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setWideSessionId(detailWide ? null : selected.id)
+                  }
+                  aria-pressed={detailWide}
+                  aria-label="세션 상세 넓게 보기"
+                  aria-controls="work-console-session-list"
+                  title={detailWide ? "세션 목록 보이기" : "상세 넓게 보기"}
+                  data-testid="work-console-detail-wide"
+                  className="pane-wide-toggle flex size-6 shrink-0 items-center justify-center rounded-sm text-ink-muted hover:bg-surface-hover focus-visible:focus-ring"
+                >
+                  {detailWide ? (
+                    <PanelLeftOpen className="size-4" />
+                  ) : (
+                    <PanelLeftClose className="size-4" />
+                  )}
+                </button>
               </div>
               <WorkSessionDetail
                 session={selected}
@@ -437,8 +476,10 @@ export function WorkConsoleRoute() {
                 live={live}
                 nowMs={nowMs}
                 headingLevel={2}
-                wide
-                onWideChange={() => {}}
+                wide={detailWide}
+                onWideChange={(nextWide) =>
+                  setWideSessionId(nextWide ? selected.id : null)
+                }
                 onBack={clearSelection}
                 openingThread={false}
                 onOpenThread={() =>

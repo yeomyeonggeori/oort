@@ -790,6 +790,14 @@
   display: grid;
   grid-template-columns: var(--spacing-pane) minmax(0, 1fr);
 
+  &[data-detail-wide] {
+    grid-template-columns: minmax(0, 1fr);
+
+    > [data-work-console-list] {
+      display: none;
+    }
+  }
+
   @media (width < 900px) {
     display: flex;
 

@@ -493,6 +493,94 @@ async function assertConsole(context, state) {
     throw new Error("desktop detail replaced the master list instead of standing beside it");
   }
 
+  const consoleLayout = page.locator(".work-console-layout");
+  const detailPane = page.locator("[data-work-console-detail]");
+  const defaultDetailWidth = await detailPane.evaluate(
+    (element) => element.getBoundingClientRect().width
+  );
+  const wideToggle = page.getByTestId("work-console-detail-wide");
+  if (
+    (await wideToggle.getAttribute("aria-label")) !== "세션 상세 넓게 보기" ||
+    (await wideToggle.getAttribute("title")) !== "상세 넓게 보기" ||
+    (await wideToggle.getAttribute("aria-controls")) !==
+      "work-console-session-list"
+  ) {
+    throw new Error("work console detail focus action is not named truthfully");
+  }
+  await observer.evaluate((element) => {
+    window.__workConsoleObserverNode = element;
+    element.dataset.gateMountMarker = "before-wide";
+  });
+  await wideToggle.click();
+  await page.waitForFunction(() => {
+    const layout = document.querySelector(".work-console-layout");
+    return layout instanceof HTMLElement && layout.hasAttribute("data-detail-wide");
+  });
+  if (await page.getByTestId("work-console-list").isVisible()) {
+    throw new Error("detail focus mode left the session master visible");
+  }
+  const focusedDetailWidth = await detailPane.evaluate(
+    (element) => element.getBoundingClientRect().width
+  );
+  if (focusedDetailWidth < defaultDetailWidth + 250) {
+    throw new Error(
+      `detail focus recovered too little width: ${defaultDetailWidth} -> ${focusedDetailWidth}`
+    );
+  }
+  if (
+    (await consoleLayout.getAttribute("data-detail-wide")) === null ||
+    (await wideToggle.getAttribute("aria-pressed")) !== "true" ||
+    (await wideToggle.getAttribute("aria-label")) !== "세션 상세 넓게 보기" ||
+    (await wideToggle.getAttribute("title")) !== "세션 목록 보이기"
+  ) {
+    throw new Error("detail focus state is not exposed to assistive technology");
+  }
+  if (!page.url().includes(`session=${sessions[2].id}`)) {
+    throw new Error("detail focus mode discarded the selected session URL");
+  }
+  if (!(await readOnly.isVisible())) {
+    throw new Error("detail focus mode replaced the observer terminal");
+  }
+  const observerRemounted = await observer.evaluate(
+    (element) =>
+      window.__workConsoleObserverNode !== element ||
+      element.dataset.gateMountMarker !== "before-wide"
+  );
+  if (observerRemounted) {
+    throw new Error("detail focus remounted the observer terminal subtree");
+  }
+  if (captureShots) {
+    mkdirSync(shotsDir, { recursive: true });
+    await page.screenshot({
+      path: resolve(shotsDir, "console-detail-focus-light.png"),
+      fullPage: false,
+    });
+    await page.emulateMedia({ colorScheme: "dark" });
+    await page.waitForTimeout(220);
+    await page.screenshot({
+      path: resolve(shotsDir, "console-detail-focus-dark.png"),
+      fullPage: false,
+    });
+    await page.emulateMedia({ colorScheme: "light" });
+    await page.waitForTimeout(220);
+  }
+  await page.goBack();
+  await page.waitForFunction(() => !window.location.hash.includes("session="));
+  await page.getByTestId("work-console-list").waitFor({ state: "visible" });
+  await assertFocus(page, `a[data-session-id="${sessions[2].id}"]`);
+  await rows.filter({ hasText: "클라우드에서 빌드" }).click();
+  await page.getByTestId("work-detail").waitFor();
+  const restoredWideToggle = page.getByTestId("work-console-detail-wide");
+  if ((await restoredWideToggle.getAttribute("aria-pressed")) !== "false") {
+    throw new Error("history back leaked detail focus into a fresh selection");
+  }
+  await restoredWideToggle.click();
+  await restoredWideToggle.click();
+  await page.getByTestId("work-console-list").waitFor({ state: "visible" });
+  if ((await restoredWideToggle.getAttribute("aria-pressed")) !== "false") {
+    throw new Error("restoring the session list did not release detail focus");
+  }
+
   await assertCachedRefetchFailure(page, state, "host");
   await assertCachedRefetchFailure(page, state, "session");
   if (captureShots) {
@@ -509,6 +597,28 @@ async function assertConsole(context, state) {
     });
     await page.emulateMedia({ colorScheme: "light" });
     await page.waitForTimeout(220);
+  }
+
+  for (const [width, expectSplit] of [
+    [900, true],
+    [899, false],
+  ]) {
+    await page.setViewportSize({ width, height: 700 });
+    await page.goto(`${origin}/#/work?session=${sessions[1].id}`);
+    await page.getByTestId("work-detail").waitFor();
+    const listVisible = await page.getByTestId("work-console-list").isVisible();
+    const toggleVisible = await page
+      .getByTestId("work-console-detail-wide")
+      .isVisible();
+    if (listVisible !== expectSplit || toggleVisible !== expectSplit) {
+      throw new Error(
+        `${width}px breakpoint drifted: list=${listVisible} toggle=${toggleVisible}`
+      );
+    }
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1
+    );
+    if (overflow) throw new Error(`${width}px work console created document overflow`);
   }
 
   await page.setViewportSize({ width: 760, height: 700 });
@@ -530,6 +640,9 @@ async function assertConsole(context, state) {
   await page.getByTestId("work-detail").waitFor();
   if (await page.getByTestId("work-console-list").isVisible()) {
     throw new Error("narrow console kept the list beside the terminal detail");
+  }
+  if (await page.getByTestId("work-console-detail-wide").isVisible()) {
+    throw new Error("narrow console exposed a focus action that cannot widen it further");
   }
   if (captureShots) {
     await page.emulateMedia({ colorScheme: "dark" });
