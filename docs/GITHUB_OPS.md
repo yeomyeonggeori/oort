@@ -109,7 +109,7 @@ Codex(cloud)는 `@codex` 멘션으로 이슈를 받으면 **이슈 본문을 작
 - runtime 변경은 해당 profile을 사용한다. `runtime-relay`는 `scripts/verify_relay.sh`가 생기기 전까지 PASS를 만들 수 없고, MOMO-002 수동 relay 검증 경로를 PR evidence로 남긴다.
 - 내부 alpha 장애 공유는 `scripts/collect_diagnostics.sh --output-dir /tmp/momo-diagnostics --since 15m`로 redacted bundle을 만들고, diagnostics tooling 변경 PR은 `scripts/local_gate.sh --profile diagnostics` evidence를 붙인다.
 - merge 후에는 `main`을 갱신하고 같은 local gate를 한 번 더 실행하며 `PR CI gate`와 `track-alignment` 결과도 확인한다.
-- 세 canonical branch 보호 상태와 repository Actions 기본 권한은 `scripts/github_track_guardrails.sh --check`로 확인한다. 실제 `--apply`는 #1297 main 랜딩·세 트랙 정렬·해당 SHA의 GitHub Actions `PR CI gate` 생성 뒤 통합자만 실행한다. required check는 이름뿐 아니라 GitHub Actions app ID에 고정되고, workflow 기본 권한은 read·PR 승인 불가다. apply는 기존의 더 강한 check/review/restriction/linear-history 설정을 보존하며, 보호 snapshot 동시 변경이나 404 이외의 조회 실패에서는 원격 쓰기 전에 중단한다.
+- 세 canonical branch 보호 상태와 repository Actions 기본 권한은 `scripts/github_track_guardrails.sh --check`로 확인한다. read-only check는 GitHub Actions 공식 App ID와 `main → track/*` 조상 topology를 사용하므로 정상적인 track-ahead 상태에서도 동작한다. 단, app-ID pin은 실행 주체만 증명하고 후보가 `pr-ci.yml` 자체를 약화하는 자기변조는 막지 못한다. 따라서 base의 정본만 읽고 후보 코드를 실행하지 않는 trusted policy-integrity gate #1302가 main에 랜딩해 필수 context가 되기 전에는 #1297 보호를 완결된 신뢰 경계로 간주하거나 `--apply`하지 않는다. 실제 `--apply`는 #1297·#1302 main 랜딩, 세 트랙 동일 SHA 정렬, 그 SHA의 두 required context 생성 뒤 통합자가 attended bootstrap 수리 용도로만 실행한다. workflow 기본 권한은 read·PR 승인 불가다. apply는 기존의 더 강한 check/review/restriction/linear-history 설정을 보존하며, 동시 변경이나 404 이외의 조회 실패에서는 fail-closed하고 부분 적용이면 즉시 `--check`로 남은 드리프트를 확인해 같은 bootstrap 창에서 수리한다.
 
 ### 3.2b 5개+ session/worktree 운영
 

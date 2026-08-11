@@ -26,6 +26,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: canonical refs 새로고침
         run: |
@@ -35,4 +36,8 @@ jobs:
             +refs/heads/track/uxui:refs/remotes/origin/track/uxui
 
       - name: remote topology 검사
-        run: scripts/check_track_alignment.sh --remote
+        run: |
+          trusted_checker="$RUNNER_TEMP/check_track_alignment.sh"
+          git show origin/main:scripts/check_track_alignment.sh > "$trusted_checker"
+          chmod +x "$trusted_checker"
+          "$trusted_checker" --remote

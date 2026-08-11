@@ -47,12 +47,13 @@
 
 ### 3.2 GitHub 보호 적용 순서
 
-1. #1297 코드가 main에 들어가고 `main`·`track/engine`·`track/uxui`를 같은 SHA로 정렬한다.
-2. `pr-ci.yml`을 `workflow_dispatch`하여 그 SHA에 안정 context `PR CI gate`를 만든다.
-3. `scripts/github_track_guardrails.sh --repo yeomyeonggeori/oort --check`로 현재 차이를 확인한다.
-4. 통합자가 명시적으로 `--apply`한 뒤 다시 `--check`한다. 기본 호출은 항상 read-only다.
+1. #1297과 trusted policy-integrity gate #1302가 main에 들어간다. #1297의 GitHub Actions app-ID pin만으로는 후보 PR이 `pr-ci.yml` 자체를 약화하는 자기변조를 막지 못하므로, #1302 전에는 이 보호를 완결된 신뢰 경계로 간주하거나 `--apply`하지 않는다.
+2. `main`·`track/engine`·`track/uxui`를 같은 SHA로 정렬한다.
+3. `pr-ci.yml`과 #1302의 trusted workflow를 실행해 그 SHA에 안정 context `PR CI gate`와 `Policy integrity gate`를 만든다.
+4. `scripts/github_track_guardrails.sh --repo yeomyeonggeori/oort --check`로 현재 차이를 확인한다.
+5. 통합자가 attended bootstrap 창에서 명시적으로 `--apply`한 뒤 다시 `--check`한다. 기본 호출은 항상 read-only다. `--apply`는 세 ref가 같은 SHA이고 두 required gate의 신뢰가 확인된 최초/bootstrap 수리 창에서만 허용되며, 이후 정상적인 track-ahead 상태의 상시 감사에는 `--check`만 쓴다.
 
-관리 정책은 세 branch 모두 PR-only, GitHub Actions app ID에 고정된 strict `PR CI gate`, 관리자 포함, conversation resolution 필수, force-push·삭제 금지다. repository Actions 기본 권한은 read이며 workflow의 PR 승인은 금지한다. 새 보호의 승인 수는 solo-owner 운영과 성재의 채팅 승인을 보존하기 위해 0이며, 코드리뷰·local gate evidence 계약은 그대로다. 이미 더 강한 required check·review 수/code-owner·last-push·push restriction·linear-history 설정이 있으면 `--apply`는 낮추지 않고 보존한다. 보호 조회는 명시적 404만 미설정으로 취급하며, 최초 snapshot 뒤 동시 변경이나 auth/network/5xx/잘못된 JSON은 첫 PUT 전에 실패한다.
+관리 정책은 세 branch 모두 PR-only, GitHub Actions app ID에 고정된 strict `PR CI gate`와 #1302의 base-trusted `Policy integrity gate`, 관리자 포함, conversation resolution 필수, force-push·삭제 금지다. repository Actions 기본 권한은 read이며 workflow의 PR 승인은 금지한다. 새 보호의 승인 수는 solo-owner 운영과 성재의 채팅 승인을 보존하기 위해 0이며, 코드리뷰·local gate evidence 계약은 그대로다. 이미 더 강한 required check·review 수/code-owner·last-push·push restriction·linear-history 설정이 있으면 `--apply`는 낮추지 않고 보존한다. 보호 조회는 명시적 404만 미설정으로 취급하며, auth/network/5xx/잘못된 JSON과 감지한 동시 변경은 fail-closed한다. read-only `--check`는 GitHub Actions app ID를 공식 App endpoint에서 읽고 `main`이 두 track의 조상인 정상 track-ahead topology에서도 계속 동작한다.
 
 ## 4. 엔진→UXUI 핸드오프 루프
 

@@ -11,6 +11,7 @@ STATE="$SANDBOX/state"
 FAKE_GH="$SANDBOX/gh"
 SHA_A="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 SHA_B="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+SHA_C="cccccccccccccccccccccccccccccccccccccccc"
 APP_ID=15368
 cleanup() { rm -rf "$SANDBOX"; }
 trap cleanup EXIT INT TERM
@@ -23,12 +24,21 @@ fail() {
 
 reset_mutations() {
   : >"$STATE/puts.log"
+  : >"$STATE/put_attempts.log"
   : >"$STATE/actions_puts.log"
 }
 
 assert_put_zero() {
   [ ! -s "$STATE/puts.log" ] || fail "$1 wrote branch protection"
   [ ! -s "$STATE/actions_puts.log" ] || fail "$1 wrote Actions permissions"
+}
+
+make_all_branches_need_put() {
+  local branch_key
+  for branch_key in main track_engine track_uxui; do
+    jq '.allow_force_pushes = true' "$STATE/$branch_key.json" >"$STATE/tmp.json"
+    mv "$STATE/tmp.json" "$STATE/$branch_key.json"
+  done
 }
 
 write_valid_checks() {
@@ -57,6 +67,7 @@ for branch_key in main track_engine track_uxui; do
 done
 printf '{"default_workflow_permissions":"read","can_approve_pull_request_reviews":false}\n' \
   >"$STATE/actions.json"
+printf '{"id":%s,"slug":"github-actions"}\n' "$APP_ID" >"$STATE/app.json"
 reset_mutations
 : >"$STATE/check_calls.log"
 write_valid_checks
@@ -104,8 +115,54 @@ respond() {
   exit "$rc"
 }
 
+if [ "$endpoint" = 'apps/github-actions' ]; then
+  mode="$(cat "$state/app.mode" 2>/dev/null || echo ok)"
+  case "$mode" in
+    ok) cat "$state/app.json"; exit 0 ;;
+    network) exit 1 ;;
+    500) echo 'fixture HTTP 500' >&2; exit 1 ;;
+    invalid) echo 'not-json'; exit 0 ;;
+    *) exit 2 ;;
+  esac
+fi
+
+if [[ "$endpoint" == repos/yeomyeonggeori/oort/compare/* ]]; then
+  mode="$(cat "$state/compare.mode" 2>/dev/null || echo ahead)"
+  case "$mode" in
+    network) exit 1 ;;
+    500) echo 'fixture HTTP 500' >&2; exit 1 ;;
+    invalid) echo 'not-json'; exit 0 ;;
+    ahead) ;;
+    long_ahead) ;;
+    diverged) ;;
+    *) exit 2 ;;
+  esac
+  pair="${endpoint#repos/yeomyeonggeori/oort/compare/}"
+  base="${pair%%...*}"
+  head="${pair#*...}"
+  if [ "$mode" = ahead ]; then
+    printf '{"status":"ahead","ahead_by":1,"behind_by":0,"base_commit":{"sha":"%s"},"merge_base_commit":{"sha":"%s"},"commits":[{"sha":"%s"}]}\n' \
+      "$base" "$base" "$head"
+  elif [ "$mode" = long_ahead ]; then
+    # GitHub truncates the commits array on long comparisons. The ancestry
+    # metadata remains authoritative and refs are re-read by the guard.
+    printf '{"status":"ahead","ahead_by":501,"behind_by":0,"base_commit":{"sha":"%s"},"merge_base_commit":{"sha":"%s"},"commits":[{"sha":"%s"}]}\n' \
+      "$base" "$base" cccccccccccccccccccccccccccccccccccccccc
+  else
+    printf '{"status":"diverged","ahead_by":1,"behind_by":1,"base_commit":{"sha":"%s"},"merge_base_commit":{"sha":"%s"},"commits":[{"sha":"%s"}]}\n' \
+      "$base" bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb "$head"
+  fi
+  exit 0
+fi
+
 if [ "$endpoint" = 'repos/yeomyeonggeori/oort/actions/workflows/pr-ci.yml' ]; then
-  echo '{"state":"active"}'
+  workflow_state="$(cat "$state/workflow.state" 2>/dev/null || echo active)"
+  disable_after="$(cat "$state/workflow.disable_after_put" 2>/dev/null || echo 0)"
+  successful_puts="$(wc -l <"$state/puts.log" | tr -d ' ')"
+  if [ "$disable_after" -gt 0 ] && [ "$successful_puts" -ge "$disable_after" ]; then
+    workflow_state=disabled_manually
+  fi
+  printf '{"state":"%s"}\n' "$workflow_state"
   exit 0
 fi
 
@@ -148,6 +205,13 @@ if [[ "$endpoint" == repos/yeomyeonggeori/oort/branches/*/protection ]]; then
   key="$(printf '%s' "$branch" | tr '/' '_')"
   policy="$state/$key.json"
   if [ "$method" = PUT ]; then
+    echo "$branch" >>"$state/put_attempts.log"
+    attempt="$(wc -l <"$state/put_attempts.log" | tr -d ' ')"
+    fail_at="$(cat "$state/fail_branch_put_at" 2>/dev/null || echo 0)"
+    if [ "$fail_at" -gt 0 ] && [ "$attempt" -eq "$fail_at" ]; then
+      echo "fixture branch PUT $attempt failed" >&2
+      exit 1
+    fi
     cp "$input" "$policy"
     echo "$branch" >>"$state/puts.log"
     echo '{}'
@@ -167,8 +231,16 @@ if [[ "$endpoint" == repos/yeomyeonggeori/oort/branches/*/protection ]]; then
     *) exit 2 ;;
   esac
   [ -f "$policy" ] || respond 404 NotFound '{}' 1
+  successful_puts="$(wc -l <"$state/puts.log" | tr -d ' ')"
+  if [ "$successful_puts" -gt 0 ] && [ -f "$state/$key.json_after_put_$successful_puts" ]; then
+    cp "$state/$key.json_after_put_$successful_puts" "$state/$key.json"
+    rm -f "$state/$key.json_after_put_$successful_puts"
+    policy="$state/$key.json"
+  fi
   if [ "$protection_reads" -gt 1 ] && [ -f "$state/$key.json_after_first_get" ]; then
-    policy="$state/$key.json_after_first_get"
+    cp "$state/$key.json_after_first_get" "$state/$key.json"
+    rm -f "$state/$key.json_after_first_get"
+    policy="$state/$key.json"
   fi
   body="$(jq '
     def actors($kind): map(
@@ -281,6 +353,18 @@ grep -Fq "came from app 'untrusted-ci'" "$SANDBOX/out" || fail "wrong App was no
 assert_put_zero "wrong App"
 write_valid_checks
 
+jq '.check_runs[0].app.id = 999' \
+  "$STATE/checks.before.page2.json" >"$STATE/tmp.json"
+mv "$STATE/tmp.json" "$STATE/checks.before.page2.json"
+reset_mutations
+if run_guard --apply >"$SANDBOX/out" 2>&1; then
+  fail "apply accepted the GitHub Actions slug with the wrong App id"
+fi
+grep -Fq 'required check app id changed during apply' "$SANDBOX/out" \
+  || fail "wrong GitHub Actions App id was not named"
+assert_put_zero "wrong GitHub Actions App id"
+write_valid_checks
+
 printf '{"total_count":0,"check_runs":[]}\n' >"$STATE/checks.before.page1.json"
 printf '{"total_count":0,"check_runs":[]}\n' >"$STATE/checks.before.page2.json"
 reset_mutations
@@ -314,14 +398,27 @@ for mode in 500 network invalid; do
 done
 rm -f "$STATE/actions.mode"
 
+# The read-only drift check resolves the official GitHub Actions App directly;
+# it must fail closed without depending on a recent successful workflow run.
+for mode in 500 network invalid; do
+  printf '%s\n' "$mode" >"$STATE/app.mode"
+  reset_mutations
+  if run_guard --check >"$SANDBOX/out" 2>&1; then
+    fail "GitHub Actions App lookup mode $mode passed"
+  fi
+  assert_put_zero "GitHub Actions App lookup $mode"
+done
+rm -f "$STATE/app.mode"
+
 # A branch moving between preflight and the pre-mutation recheck is a PUT-zero
 # TOCTOU failure.
 printf '%s\n' "$SHA_B" >"$STATE/track_uxui.sha_after_first"
 reset_mutations
 if run_guard --apply >"$SANDBOX/out" 2>&1; then
-  fail "apply ignored a pre-PUT canonical SHA change"
+  fail "apply ignored a pre-PUT canonical SHA change: $(cat "$SANDBOX/out")"
 fi
-grep -Fq 'canonical branch SHA changed during apply' "$SANDBOX/out" || fail "pre-PUT TOCTOU was not named"
+grep -Eq 'canonical branch SHA changed during apply|canonical branches are not at one SHA' "$SANDBOX/out" \
+  || fail "pre-PUT TOCTOU was not named: $(cat "$SANDBOX/out")"
 assert_put_zero "pre-PUT TOCTOU"
 rm -f "$STATE/track_uxui.sha_after_first"
 
@@ -330,8 +427,12 @@ rm -f "$STATE/track_uxui.sha_after_first"
 # history. The other explicit 404s are safe to create.
 jq -n '{
   required_status_checks: {
-    strict: true, contexts: [],
-    checks: [{context: "security gate", app_id: 99}]
+    strict: true, contexts: ["legacy context", "PR CI gate"],
+    checks: [
+      {context: "security gate", app_id: 99},
+      {context: "PR CI gate", app_id: -1},
+      {context: "PR CI gate", app_id: 777}
+    ]
   },
   enforce_admins: false,
   required_pull_request_reviews: {
@@ -358,6 +459,9 @@ run_guard --apply >"$SANDBOX/out" 2>&1 || fail "first apply failed: $(cat "$SAND
 [ ! -s "$STATE/actions_puts.log" ] || fail "compliant Actions permissions were rewritten"
 jq -e --argjson app_id "$APP_ID" '
   any(.required_status_checks.checks[]; .context == "PR CI gate" and .app_id == $app_id) and
+  any(.required_status_checks.checks[]; .context == "PR CI gate" and .app_id == -1) and
+  any(.required_status_checks.checks[]; .context == "PR CI gate" and .app_id == 777) and
+  any(.required_status_checks.checks[]; .context == "legacy context" and .app_id == -1) and
   any(.required_status_checks.checks[]; .context == "security gate" and .app_id == 99) and
   (.required_pull_request_reviews.required_approving_review_count == 2) and
   (.required_pull_request_reviews.require_code_owner_reviews == true) and
@@ -375,20 +479,72 @@ jq -e --argjson app_id "$APP_ID" '
 grep -Fq 'check_name=PR%20CI%20gate&filter=latest&per_page=100&page=2' \
   "$STATE/check_calls.log" || fail "latest check query did not paginate/filter by exact name"
 
+# Normal steady state permits tracks to advance from main. Read-only policy
+# drift checks stay green, while --apply remains a bootstrap-only exact-SHA gate.
+printf '%s\n' "$SHA_B" >"$STATE/track_uxui.sha"
+reset_mutations
+run_guard --check >"$SANDBOX/out" 2>&1 || fail "track-ahead read-only check failed: $(cat "$SANDBOX/out")"
+[ ! -s "$STATE/check_calls.log" ] || fail "read-only check depended on a recent PR CI run"
+assert_put_zero "track-ahead check"
+reset_mutations
+if run_guard --apply >"$SANDBOX/out" 2>&1; then
+  fail "bootstrap apply accepted track-ahead heads"
+fi
+grep -Fq 'canonical branches are not at one SHA' "$SANDBOX/out" || fail "track-ahead apply was not blocked"
+assert_put_zero "track-ahead apply"
+printf '%s\n' "$SHA_A" >"$STATE/track_uxui.sha"
+
+# Long-ahead compares truncate `.commits`; ancestry metadata plus live ref
+# re-reads must still accept the healthy topology.
+printf '%s\n' "$SHA_B" >"$STATE/track_uxui.sha"
+printf 'long_ahead\n' >"$STATE/compare.mode"
+reset_mutations
+run_guard --check >"$SANDBOX/out" 2>&1 \
+  || fail "long-ahead truncated compare failed: $(cat "$SANDBOX/out")"
+assert_put_zero "long-ahead topology check"
+printf '%s\n' "$SHA_A" >"$STATE/track_uxui.sha"
+rm -f "$STATE/compare.mode"
+
+printf '%s\n' "$SHA_B" >"$STATE/track_engine.sha"
+printf '%s\n' "$SHA_C" >"$STATE/track_engine.sha_after_first"
+reset_mutations
+if run_guard --check >"$SANDBOX/out" 2>&1; then
+  fail "read-only check accepted a track ref that moved after compare"
+fi
+grep -Fq 'branch moved while ancestry was checked' "$SANDBOX/out" \
+  || fail "post-compare ref re-read was not enforced"
+assert_put_zero "moving track topology check"
+printf '%s\n' "$SHA_A" >"$STATE/track_engine.sha"
+rm -f "$STATE/track_engine.sha_after_first"
+
+printf '%s\n' "$SHA_B" >"$STATE/track_engine.sha"
+printf 'diverged\n' >"$STATE/compare.mode"
+reset_mutations
+if run_guard --check >"$SANDBOX/out" 2>&1; then
+  fail "read-only check accepted a diverged track"
+fi
+grep -Fq 'main is not an ancestor of the track head' "$SANDBOX/out" \
+  || fail "diverged track topology was not named"
+assert_put_zero "diverged topology check"
+printf '%s\n' "$SHA_A" >"$STATE/track_engine.sha"
+rm -f "$STATE/compare.mode"
+
 # An administrator adding a stronger policy after the first read must not have
-# that change silently overwritten by a stale payload. The second protection
-# snapshot is compared before any repository mutation.
+# that change silently overwritten by a stale payload. A fresh read folds it
+# into the monotonic preservation contract.
 jq '
   .required_status_checks.checks += [{context: "concurrent security gate", app_id: 314}] |
   .required_linear_history = true
 ' "$STATE/track_engine.json" >"$STATE/track_engine.json_after_first_get"
 reset_mutations
-if run_guard --apply >"$SANDBOX/out" 2>&1; then
-  fail "apply overwrote a concurrent stronger protection change"
-fi
-grep -Fq 'track/engine protection changed during apply' "$SANDBOX/out" \
-  || fail "concurrent protection drift was not named"
-assert_put_zero "concurrent protection drift"
+run_guard --apply >"$SANDBOX/out" 2>&1 \
+  || fail "concurrent stronger protection merge failed: $(cat "$SANDBOX/out")"
+jq -e '
+  any(.required_status_checks.checks[];
+    .context == "concurrent security gate" and .app_id == 314) and
+  .required_linear_history == true
+' "$STATE/track_engine.json" >/dev/null \
+  || fail "concurrent stronger protection was not retained"
 rm -f "$STATE/track_engine.json_after_first_get"
 
 reset_mutations
@@ -397,6 +553,138 @@ reset_mutations
 run_guard --apply >"$SANDBOX/out" 2>&1 || fail "idempotent apply failed: $(cat "$SANDBOX/out")"
 assert_put_zero "idempotent apply"
 grep -Fq 'unchanged: track/uxui already compliant' "$SANDBOX/out" || fail "idempotency was not reported"
+
+# Dismissal and push restrictions are authorization allowlists, so neither a
+# union nor a subset heuristic is safe. Removal, replacement, and addition
+# between the initial read and fresh pre-PUT read all abort before mutation.
+cp "$STATE/main.json" "$STATE/main.actor_baseline.json"
+for actor_change in removal replacement addition; do
+  cp "$STATE/main.actor_baseline.json" "$STATE/main.json"
+  case "$actor_change" in
+    removal)
+      jq '.required_pull_request_reviews.dismissal_restrictions.users = []' \
+        "$STATE/main.json" >"$STATE/main.json_after_first_get"
+      ;;
+    replacement)
+      jq '.restrictions.users = ["replacement-admin"]' \
+        "$STATE/main.json" >"$STATE/main.json_after_first_get"
+      ;;
+    addition)
+      jq '.restrictions.teams += ["intruder-team"]' \
+        "$STATE/main.json" >"$STATE/main.json_after_first_get"
+      ;;
+  esac
+  reset_mutations
+  if run_guard --apply >"$SANDBOX/out" 2>&1; then
+    fail "actor allowlist $actor_change passed instead of failing closed"
+  fi
+  grep -Fq 'main authorization allowlist changed during apply' "$SANDBOX/out" \
+    || fail "actor allowlist $actor_change was not named"
+  assert_put_zero "actor allowlist $actor_change"
+done
+cp "$STATE/main.actor_baseline.json" "$STATE/main.json"
+rm -f "$STATE/main.actor_baseline.json" "$STATE/main.json_after_first_get"
+
+# `allow_fork_syncing` is also an allow switch: false is stricter. Any
+# initial→fresh direction change is concurrent authority drift, so both
+# true→false and false→true fail before a branch PUT rather than guessing.
+jq '.allow_fork_syncing = true' "$STATE/main.json" >"$STATE/tmp.json"
+mv "$STATE/tmp.json" "$STATE/main.json"
+jq '.allow_fork_syncing = false' "$STATE/main.json" >"$STATE/main.json_after_first_get"
+reset_mutations
+if run_guard --apply >"$SANDBOX/out" 2>&1; then
+  fail "allow_fork_syncing true-to-false drift passed"
+fi
+grep -Fq 'main authorization allowlist changed during apply' "$SANDBOX/out" \
+  || fail "allow_fork_syncing true-to-false drift was not named"
+assert_put_zero "allow_fork_syncing true-to-false"
+rm -f "$STATE/main.json_after_first_get"
+jq '.allow_fork_syncing = false' "$STATE/main.json" >"$STATE/tmp.json"
+mv "$STATE/tmp.json" "$STATE/main.json"
+
+jq '.allow_fork_syncing = true' "$STATE/main.json" >"$STATE/main.json_after_first_get"
+reset_mutations
+if run_guard --apply >"$SANDBOX/out" 2>&1; then
+  fail "allow_fork_syncing false-to-true drift passed"
+fi
+grep -Fq 'main authorization allowlist changed during apply' "$SANDBOX/out" \
+  || fail "allow_fork_syncing false-to-true drift was not named"
+assert_put_zero "allow_fork_syncing false-to-true"
+rm -f "$STATE/main.json_after_first_get"
+jq '.allow_fork_syncing = false' "$STATE/main.json" >"$STATE/tmp.json"
+mv "$STATE/tmp.json" "$STATE/main.json"
+
+# A stronger track/engine change landing after main's PUT is folded into the
+# next fresh payload, including same-context/different-App pairs and higher
+# review requirements. This is the lost-update boundary for sequential PUTs.
+make_all_branches_need_put
+jq '
+  .required_status_checks.checks += [
+    {context: "between-put security", app_id: 2718},
+    {context: "PR CI gate", app_id: 4242}
+  ] |
+  .required_pull_request_reviews.required_approving_review_count = 4 |
+  .required_pull_request_reviews.require_code_owner_reviews = true |
+  .lock_branch = true
+' "$STATE/track_engine.json" >"$STATE/track_engine.json_after_put_1"
+reset_mutations
+run_guard --apply >"$SANDBOX/out" 2>&1 \
+  || fail "between-PUT stronger mutation failed: $(cat "$SANDBOX/out")"
+[ "$(wc -l <"$STATE/puts.log" | tr -d ' ')" = 3 ] \
+  || fail "between-PUT fixture did not exercise all three branch PUTs"
+jq -e '
+  any(.required_status_checks.checks[];
+    .context == "between-put security" and .app_id == 2718) and
+  any(.required_status_checks.checks[];
+    .context == "PR CI gate" and .app_id == 4242) and
+  (.required_pull_request_reviews.required_approving_review_count == 4) and
+  (.required_pull_request_reviews.require_code_owner_reviews == true) and
+  (.lock_branch == true)
+' "$STATE/track_engine.json" >/dev/null \
+  || fail "between-PUT stronger requirements were lost"
+
+# Workflow activity is part of every pre-PUT basis. A disable after main's
+# successful write stops the next branch and emits an actionable partial-apply
+# marker instead of a false success.
+make_all_branches_need_put
+printf '1\n' >"$STATE/workflow.disable_after_put"
+reset_mutations
+if run_guard --apply >"$SANDBOX/out" 2>&1; then
+  fail "apply continued after pr-ci was disabled between branch PUTs"
+fi
+grep -Fq 'pr-ci workflow is not active' "$SANDBOX/out" \
+  || fail "between-PUT workflow disable was not named"
+grep -Fq 'APPLY_INCOMPLETE recovery_required=true completed=main' "$SANDBOX/out" \
+  || fail "workflow disable did not report partial-apply recovery"
+[ "$(wc -l <"$STATE/puts.log" | tr -d ' ')" = 1 ] \
+  || fail "workflow disable did not stop before the second branch PUT"
+rm -f "$STATE/workflow.disable_after_put"
+reset_mutations
+run_guard --apply >/dev/null || fail "workflow-disable recovery apply failed"
+
+# GitHub protection writes are not atomic across branches. Failures on the
+# second and third attempted PUT must stop immediately, identify completed
+# targets, and remain safely retryable.
+for fail_at in 2 3; do
+  make_all_branches_need_put
+  printf '%s\n' "$fail_at" >"$STATE/fail_branch_put_at"
+  reset_mutations
+  if run_guard --apply >"$SANDBOX/out" 2>&1; then
+    fail "apply succeeded when branch PUT $fail_at failed"
+  fi
+  expected_successes=$((fail_at - 1))
+  [ "$(wc -l <"$STATE/put_attempts.log" | tr -d ' ')" = "$fail_at" ] \
+    || fail "branch PUT $fail_at failure did not stop at the expected attempt"
+  [ "$(wc -l <"$STATE/puts.log" | tr -d ' ')" = "$expected_successes" ] \
+    || fail "branch PUT $fail_at failure reported the wrong successful write count"
+  grep -Fq 'APPLY_INCOMPLETE recovery_required=true' "$SANDBOX/out" \
+    || fail "branch PUT $fail_at failure lacked the partial-apply marker"
+  grep -Fq 'recovery: fix' "$SANDBOX/out" \
+    || fail "branch PUT $fail_at failure lacked retry guidance"
+  rm -f "$STATE/fail_branch_put_at"
+  reset_mutations
+  run_guard --apply >/dev/null || fail "branch PUT $fail_at recovery apply failed"
+done
 
 # Any PR bypass actor makes compliance red; apply removes exactly that bypass
 # while retaining all unrelated settings.
@@ -436,6 +724,47 @@ run_guard --apply >/dev/null || fail "Actions permissions repair failed"
 jq -e '.default_workflow_permissions == "read" and .can_approve_pull_request_reviews == false' \
   "$STATE/actions.json" >/dev/null || fail "Actions permissions repair payload is unsafe"
 
+# A late authorization expansion after main's PUT must fail the exact-payload
+# assertion. Superset acceptance would silently authorize the new actor.
+cp "$STATE/main.json" "$STATE/main.before_actor_expansion.json"
+jq '.allow_force_pushes = true' "$STATE/main.json" >"$STATE/tmp.json"
+mv "$STATE/tmp.json" "$STATE/main.json"
+jq '
+  .allow_force_pushes = false |
+  .restrictions.users += ["late-intruder"]
+' "$STATE/main.json" >"$STATE/main.json_after_put_1"
+reset_mutations
+if run_guard --apply >"$SANDBOX/out" 2>&1; then
+  fail "apply accepted a final unauthorized actor expansion"
+fi
+grep -Fq 'final authorization allowlist differs from the exact fresh payload' "$SANDBOX/out" \
+  || fail "final unauthorized actor expansion was not named"
+grep -Fq 'APPLY_INCOMPLETE recovery_required=true' "$SANDBOX/out" \
+  || fail "final unauthorized actor expansion lacked recovery signal"
+cp "$STATE/main.before_actor_expansion.json" "$STATE/main.json"
+rm -f "$STATE/main.before_actor_expansion.json" "$STATE/main.json_after_put_1"
+
+# The final verification must compare against the accumulated contract, not
+# just today's baseline. Simulate a late actor removing an initially observed
+# custom check after this invocation wrote main.
+cp "$STATE/main.json" "$STATE/main.before_lost_update.json"
+jq '.allow_force_pushes = true' "$STATE/main.json" >"$STATE/tmp.json"
+mv "$STATE/tmp.json" "$STATE/main.json"
+jq '
+  .allow_force_pushes = false |
+  .required_status_checks.checks |= map(select(.context != "security gate"))
+' "$STATE/main.json" >"$STATE/main.json_after_put_1"
+reset_mutations
+if run_guard --apply >"$SANDBOX/out" 2>&1; then
+  fail "apply reported success after an observed stronger check was lost"
+fi
+grep -Fq 'an observed stronger protection requirement was lost' "$SANDBOX/out" \
+  || fail "post-apply preservation loss was not named"
+grep -Fq 'APPLY_INCOMPLETE recovery_required=true' "$SANDBOX/out" \
+  || fail "post-apply preservation loss lacked recovery signal"
+cp "$STATE/main.before_lost_update.json" "$STATE/main.json"
+rm -f "$STATE/main.before_lost_update.json" "$STATE/main.json_after_put_1"
+
 # Post-apply branch and context reads are mandatory. These fixtures move the
 # branch or replace the latest context only after a repair PUT and must turn the
 # overall operation red instead of reporting a stale success.
@@ -463,4 +792,4 @@ grep -Fq "latest 'PR CI gate' is not successful" "$SANDBOX/out" || fail "post-PU
 [ -s "$STATE/puts.log" ] || fail "post-PUT context fixture never reached mutation"
 rm -f "$STATE/checks.after.page1.json" "$STATE/checks.after.page2.json"
 
-echo "[github-guardrails-test] PASS fail-closed reads, latest app pin, preservation, permissions, TOCTOU, and idempotency"
+echo "[github-guardrails-test] PASS topology, app pin, fail-closed reads, preservation, TOCTOU, and idempotency"

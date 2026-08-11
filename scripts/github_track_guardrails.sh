@@ -10,15 +10,19 @@ REQUIRED_CONTEXT="PR CI gate"
 REQUIRED_APP_SLUG="github-actions"
 GH_BIN="${MOMO_GH_BIN:-gh}"
 BRANCHES=(main track/engine track/uxui)
+TRACK_BRANCHES=(track/engine track/uxui)
 CANONICAL_SHA=""
 REQUIRED_APP_ID=""
 ACTIONS_PERMISSIONS_JSON=""
+MUTATED_TARGETS=()
+ATTEMPTED_TARGETS=()
 
 usage() {
   cat <<'EOF'
 Usage: scripts/github_track_guardrails.sh [--check|--apply] [--repo OWNER/REPO]
 
-Default --check performs no remote mutation. --apply is accepted only after:
+Default --check performs no remote mutation and accepts tracks ahead of main
+when main remains their ancestor. Bootstrap-only --apply is accepted only after:
   1. main, track/engine, and track/uxui point to the same commit; and
   2. the latest `PR CI gate` check on that commit succeeded from GitHub Actions.
 
@@ -26,6 +30,11 @@ The managed policy requires PRs and the GitHub-Actions-pinned stable context,
 includes administrators, requires conversation resolution, and forbids force
 pushes/deletion. Existing stricter checks, review rules, push restrictions, and
 linear-history rules are preserved rather than overwritten.
+
+`--apply` is an attended, non-transactional bootstrap. Keep it running through
+the final verification. If a later write or recheck fails, the script prints an
+APPLY_INCOMPLETE recovery marker and the targets already updated; repair the
+reported prerequisite, run `--check`, and then safely retry `--apply`.
 EOF
 }
 
@@ -232,6 +241,29 @@ check_workflow_active() {
   echo "[github-guardrails] PASS workflow: pr-ci is active"
 }
 
+resolve_required_app() {
+  local expected_id="${1:-}"
+  local json="$TEMP_ROOT/required-app.json"
+  local app_id
+  api_get_json "apps/$REQUIRED_APP_SLUG" "$json" || {
+    echo "[github-guardrails] FAIL: could not resolve GitHub Actions app identity" >&2
+    return 1
+  }
+  if ! app_id="$(jq -er --arg slug "$REQUIRED_APP_SLUG" '
+    select(.slug == $slug)
+    | .id
+    | select(type == "number" and . > 0 and floor == .)
+  ' "$json")"; then
+    echo "[github-guardrails] FAIL: GitHub Actions app identity is invalid" >&2
+    return 1
+  fi
+  if [ -n "$expected_id" ] && [ "$app_id" != "$expected_id" ]; then
+    echo "[github-guardrails] apply blocked: GitHub Actions app id changed during apply" >&2
+    return 1
+  fi
+  REQUIRED_APP_ID="$app_id"
+}
+
 read_branch_sha() {
   local branch="$1"
   local json
@@ -260,6 +292,64 @@ load_canonical_heads() {
     fi
   done
   CANONICAL_SHA="$first"
+}
+
+load_check_topology() {
+  local main_sha track track_sha compare_json expected_file
+  read_branch_sha main || return 1
+  main_sha="$CANONICAL_SHA_READ"
+  printf '%s\n' "$main_sha" >"$TEMP_ROOT/topology-main.sha"
+  for track in "${TRACK_BRANCHES[@]}"; do
+    read_branch_sha "$track" || return 1
+    track_sha="$CANONICAL_SHA_READ"
+    expected_file="$TEMP_ROOT/topology-$(printf '%s' "$track" | tr '/' '_').sha"
+    printf '%s\n' "$track_sha" >"$expected_file"
+    if [ "$track_sha" = "$main_sha" ]; then
+      continue
+    fi
+    compare_json="$TEMP_ROOT/compare-$(printf '%s' "$track" | tr '/' '_').json"
+    api_get_json "repos/$REPO/compare/$main_sha...$track_sha" "$compare_json" || {
+      echo "[github-guardrails] FAIL $track: could not verify main ancestry" >&2
+      return 1
+    }
+    if ! jq -e --arg base "$main_sha" '
+      .base_commit.sha == $base and
+      .merge_base_commit.sha == $base and
+      .status == "ahead" and
+      .behind_by == 0 and
+      ((.ahead_by | type) == "number") and .ahead_by > 0
+    ' "$compare_json" >/dev/null; then
+      echo "[github-guardrails] FAIL $track: main is not an ancestor of the track head" >&2
+      return 1
+    fi
+
+    # The compare response is not a ref lock, and its commits array is capped
+    # for long histories. Re-read both refs instead of treating commits[-1] as
+    # the live head.
+    read_branch_sha main || return 1
+    if [ "$CANONICAL_SHA_READ" != "$main_sha" ]; then
+      echo "[github-guardrails] FAIL: main moved while track ancestry was checked" >&2
+      return 1
+    fi
+    read_branch_sha "$track" || return 1
+    if [ "$CANONICAL_SHA_READ" != "$track_sha" ]; then
+      echo "[github-guardrails] FAIL $track: branch moved while ancestry was checked" >&2
+      return 1
+    fi
+  done
+
+  # Close movement of the first track while the second comparison was in
+  # flight. A check never succeeds from a mixed ref snapshot.
+  for track in main "${TRACK_BRANCHES[@]}"; do
+    expected_file="$TEMP_ROOT/topology-$(printf '%s' "$track" | tr '/' '_').sha"
+    read_branch_sha "$track" || return 1
+    if [ "$CANONICAL_SHA_READ" != "$(cat "$expected_file")" ]; then
+      echo "[github-guardrails] FAIL $track: branch moved while topology was checked" >&2
+      return 1
+    fi
+  done
+  CANONICAL_SHA="$main_sha"
+  echo "[github-guardrails] PASS topology: main is the base of both canonical tracks"
 }
 
 load_latest_required_check() {
@@ -353,7 +443,8 @@ protection_is_compliant() {
     (.enforce_admins.enabled == true) and
     (.required_conversation_resolution.enabled == true) and
     (.allow_force_pushes.enabled == false) and
-    (.allow_deletions.enabled == false)
+    (.allow_deletions.enabled == false) and
+    (.allow_fork_syncing.enabled == false)
   ' "$json" >/dev/null
 }
 
@@ -386,6 +477,7 @@ report_noncompliance() {
   check_expr "conversation resolution is not required" '.required_conversation_resolution.enabled == true'
   check_expr "force-pushes are allowed" '.allow_force_pushes.enabled == false'
   check_expr "branch deletion is allowed" '.allow_deletions.enabled == false'
+  check_expr "fork syncing is allowed" '.allow_fork_syncing.enabled == false'
   return "$failed"
 }
 
@@ -412,34 +504,46 @@ check_protections() {
 }
 
 build_policy_payload() {
-  local existing="$1"
-  local output="$2"
-  jq --arg context "$REQUIRED_CONTEXT" --argjson app_id "$REQUIRED_APP_ID" '
-    def bool_or($value; $fallback):
-      if ($value | type) == "boolean" then $value else $fallback end;
-    def enabled_or($value; $fallback):
-      if ($value.enabled | type) == "boolean" then $value.enabled
+  local observed="$1"
+  local retained="$2"
+  local output="$3"
+
+  # The second input is the accumulated preservation contract from every state
+  # this invocation has observed. This makes a retry-safe monotonic merge:
+  # concurrent stronger checks/settings are carried into the next PUT instead
+  # of being overwritten by a payload built from the initial read.
+  jq -s --arg context "$REQUIRED_CONTEXT" --argjson app_id "$REQUIRED_APP_ID" '
+    def enabled($value):
+      if ($value | type) == "object" then
+        (if ($value.enabled | type) == "boolean" then $value.enabled else false end)
       elif ($value | type) == "boolean" then $value
-      else $fallback end;
+      else false end;
     def actor_names($kind):
       map(
         if type == "string" then .
         elif $kind == "user" then (.login // .name // empty)
         else (.slug // .name // empty)
         end
-      ) | map(select(type == "string" and length > 0));
+      ) | map(select(type == "string" and length > 0)) | unique | sort;
+    def normalized_checks:
+      (((.required_status_checks.checks // []) | map(
+        select((.context | type) == "string" and (.context | length) > 0)
+        | {context: .context,
+           app_id: (if (.app_id | type) == "number" then .app_id else -1 end)}
+      )) +
+      ((.required_status_checks.contexts // []) | map(
+        select(type == "string" and length > 0)
+        | {context: ., app_id: -1}
+      )));
 
-    . as $existing
-    | ($existing.required_status_checks // {}) as $status
-    | ($existing.required_pull_request_reviews // {}) as $reviews
-    | (($status.checks // []) | map(
-        select((.context | type) == "string")
-        | {context: .context}
-          + (if (.app_id | type) == "number" then {app_id: .app_id} else {} end)
-      )) as $checks
-    | (reduce (($status.contexts // [])[]? | select(type == "string")) as $legacy
-        ($checks; if any(.[]; .context == $legacy) then . else . + [{context: $legacy}] end)) as $all_checks
-    | (($all_checks | map(select(.context != $context))) + [{context: $context, app_id: $app_id}]) as $required_checks
+    . as $sources
+    | (([$sources[] | normalized_checks[]]
+        + [{context: $context, app_id: $app_id}])
+       | unique_by([.context, .app_id])
+       | sort_by([.context, .app_id])) as $required_checks
+    | ([$sources[]
+        | (.required_pull_request_reviews.required_approving_review_count // 0)
+        | if type == "number" then . else 0 end] | max) as $review_count
     | {
         required_status_checks: {
           strict: true,
@@ -449,124 +553,345 @@ build_policy_payload() {
         enforce_admins: true,
         required_pull_request_reviews: {
           dismissal_restrictions: {
-            users: (($reviews.dismissal_restrictions.users // []) | actor_names("user")),
-            teams: (($reviews.dismissal_restrictions.teams // []) | actor_names("team")),
-            apps: (($reviews.dismissal_restrictions.apps // []) | actor_names("app"))
+            users: ([$sources[]
+              | ((.required_pull_request_reviews.dismissal_restrictions.users // [])
+                 | actor_names("user"))[]] | unique | sort),
+            teams: ([$sources[]
+              | ((.required_pull_request_reviews.dismissal_restrictions.teams // [])
+                 | actor_names("team"))[]] | unique | sort),
+            apps: ([$sources[]
+              | ((.required_pull_request_reviews.dismissal_restrictions.apps // [])
+                 | actor_names("app"))[]] | unique | sort)
           },
           dismiss_stale_reviews: true,
-          require_code_owner_reviews: bool_or($reviews.require_code_owner_reviews; false),
-          required_approving_review_count: (
-            if ($reviews.required_approving_review_count | type) == "number"
-            then $reviews.required_approving_review_count else 0 end
-          ),
-          require_last_push_approval: bool_or($reviews.require_last_push_approval; false),
+          require_code_owner_reviews: any($sources[];
+            .required_pull_request_reviews.require_code_owner_reviews == true),
+          required_approving_review_count: $review_count,
+          require_last_push_approval: any($sources[];
+            .required_pull_request_reviews.require_last_push_approval == true),
           bypass_pull_request_allowances: {users: [], teams: [], apps: []}
         },
         restrictions: (
-          if $existing.restrictions == null then null else {
-            users: (($existing.restrictions.users // []) | actor_names("user")),
-            teams: (($existing.restrictions.teams // []) | actor_names("team")),
-            apps: (($existing.restrictions.apps // []) | actor_names("app"))
-          } end
+          if any($sources[]; .restrictions != null) then {
+            users: ([$sources[]
+              | ((.restrictions.users // []) | actor_names("user"))[]]
+              | unique | sort),
+            teams: ([$sources[]
+              | ((.restrictions.teams // []) | actor_names("team"))[]]
+              | unique | sort),
+            apps: ([$sources[]
+              | ((.restrictions.apps // []) | actor_names("app"))[]]
+              | unique | sort)
+          } else null end
         ),
-        required_linear_history: enabled_or($existing.required_linear_history; false),
+        required_linear_history: any($sources[]; enabled(.required_linear_history)),
         allow_force_pushes: false,
         allow_deletions: false,
-        block_creations: enabled_or($existing.block_creations; false),
+        block_creations: any($sources[]; enabled(.block_creations)),
         required_conversation_resolution: true,
-        lock_branch: enabled_or($existing.lock_branch; false),
-        allow_fork_syncing: enabled_or($existing.allow_fork_syncing; false)
+        lock_branch: any($sources[]; enabled(.lock_branch)),
+        # Fork-sync permission is an allow switch, so false is the restrictive
+        # lattice bottom. Never resurrect true from an older observation.
+        allow_fork_syncing: false
       }
-  ' "$existing" >"$output"
+  ' "$observed" "$retained" >"$output"
+}
+
+protection_preserves_contract() {
+  local actual="$1"
+  local contract="$2"
+  jq -e --slurpfile expected "$contract" '
+    def enabled($value):
+      if ($value | type) == "object" then
+        (if ($value.enabled | type) == "boolean" then $value.enabled else false end)
+      elif ($value | type) == "boolean" then $value
+      else false end;
+    def actor_names($kind):
+      map(
+        if type == "string" then .
+        elif $kind == "user" then (.login // .name // empty)
+        else (.slug // .name // empty)
+        end
+      ) | map(select(type == "string" and length > 0)) | unique | sort;
+    def normalized_checks:
+      (((.required_status_checks.checks // []) | map(
+        select((.context | type) == "string" and (.context | length) > 0)
+        | {context: .context,
+           app_id: (if (.app_id | type) == "number" then .app_id else -1 end)}
+      )) +
+      ((.required_status_checks.contexts // []) | map(
+        select(type == "string" and length > 0)
+        | {context: ., app_id: -1}
+      ))) | unique_by([.context, .app_id]);
+    def contains_all($actual; $wanted):
+      all($wanted[]; . as $item | ($actual | index($item)) != null);
+
+    . as $actual
+    | $expected[0] as $wanted
+    | ($actual | normalized_checks) as $actual_checks
+    | ($wanted | normalized_checks) as $wanted_checks
+    | (($actual.required_pull_request_reviews // {}) as $actual_reviews
+      | ($wanted.required_pull_request_reviews // {}) as $wanted_reviews
+      | ($actual.restrictions // null) as $actual_restrictions
+      | ($wanted.restrictions // null) as $wanted_restrictions
+      | contains_all($actual_checks; $wanted_checks)
+      and ($actual.required_status_checks.strict == true)
+      and ($actual.required_pull_request_reviews != null)
+      and (($actual_reviews.required_approving_review_count // -1)
+        >= ($wanted_reviews.required_approving_review_count // 0))
+      and (($wanted_reviews.require_code_owner_reviews != true)
+        or ($actual_reviews.require_code_owner_reviews == true))
+      and (($wanted_reviews.require_last_push_approval != true)
+        or ($actual_reviews.require_last_push_approval == true))
+      and (($wanted_reviews.dismiss_stale_reviews != true)
+        or ($actual_reviews.dismiss_stale_reviews == true))
+      and ((($actual_reviews.dismissal_restrictions.users // []) | actor_names("user"))
+        == (($wanted_reviews.dismissal_restrictions.users // []) | actor_names("user")))
+      and ((($actual_reviews.dismissal_restrictions.teams // []) | actor_names("team"))
+        == (($wanted_reviews.dismissal_restrictions.teams // []) | actor_names("team")))
+      and ((($actual_reviews.dismissal_restrictions.apps // []) | actor_names("app"))
+        == (($wanted_reviews.dismissal_restrictions.apps // []) | actor_names("app")))
+      and (((($actual_reviews.bypass_pull_request_allowances.users // []) | length) == 0)
+        and ((($actual_reviews.bypass_pull_request_allowances.teams // []) | length) == 0)
+        and ((($actual_reviews.bypass_pull_request_allowances.apps // []) | length) == 0))
+      and ((($wanted_restrictions == null) and ($actual_restrictions == null)) or (
+        ($wanted_restrictions != null)
+        and ($actual_restrictions != null)
+        and ((($actual_restrictions.users // []) | actor_names("user"))
+          == (($wanted_restrictions.users // []) | actor_names("user")))
+        and ((($actual_restrictions.teams // []) | actor_names("team"))
+          == (($wanted_restrictions.teams // []) | actor_names("team")))
+        and ((($actual_restrictions.apps // []) | actor_names("app"))
+          == (($wanted_restrictions.apps // []) | actor_names("app")))
+      ))
+      and (enabled($actual.enforce_admins))
+      and (($wanted.required_linear_history != true)
+        or enabled($actual.required_linear_history))
+      and (($wanted.block_creations != true) or enabled($actual.block_creations))
+      and (enabled($actual.required_conversation_resolution))
+      and (($wanted.lock_branch != true) or enabled($actual.lock_branch))
+      and (enabled($actual.allow_fork_syncing) == false)
+      and (enabled($actual.allow_force_pushes) == false)
+      and (enabled($actual.allow_deletions) == false))
+  ' "$actual" >/dev/null
 }
 
 load_runtime_basis() {
-  check_workflow_active
-  load_canonical_heads
-  load_latest_required_check "$CANONICAL_SHA"
-  read_actions_permissions
+  check_workflow_active || return 1
+  load_canonical_heads || return 1
+  resolve_required_app || return 1
+  load_latest_required_check "$CANONICAL_SHA" "$REQUIRED_APP_ID" || return 1
+  read_actions_permissions || return 1
+}
+
+load_check_basis() {
+  check_workflow_active || return 1
+  load_check_topology || return 1
+  resolve_required_app || return 1
+  read_actions_permissions || return 1
 }
 
 revalidate_runtime_basis() {
   local expected_sha="$1"
   local expected_app_id="$2"
-  load_canonical_heads "$expected_sha"
-  load_latest_required_check "$expected_sha" "$expected_app_id"
-  read_actions_permissions
+  check_workflow_active || return 1
+  load_canonical_heads "$expected_sha" || return 1
+  resolve_required_app "$expected_app_id" || return 1
+  load_latest_required_check "$expected_sha" "$expected_app_id" || return 1
+  read_actions_permissions || return 1
 }
 
-revalidate_protection_snapshots() {
-  local branch key initial presence fresh rc
-  local initial_sorted fresh_sorted
+record_mutation() {
+  MUTATED_TARGETS+=("$1")
+}
+
+record_attempt() {
+  ATTEMPTED_TARGETS+=("$1")
+}
+
+report_apply_incomplete() {
+  local reason="$1"
+  local completed="none"
+  local attempted="none"
+  if [ "${#MUTATED_TARGETS[@]}" -gt 0 ]; then
+    completed="$(IFS=,; printf '%s' "${MUTATED_TARGETS[*]}")"
+  fi
+  if [ "${#ATTEMPTED_TARGETS[@]}" -gt 0 ]; then
+    attempted="$(IFS=,; printf '%s' "${ATTEMPTED_TARGETS[*]}")"
+  fi
+  if [ "${#ATTEMPTED_TARGETS[@]}" -gt 0 ] || [ "${#MUTATED_TARGETS[@]}" -gt 0 ]; then
+    echo "[github-guardrails] APPLY_INCOMPLETE recovery_required=true completed=$completed attempted=$attempted" >&2
+    echo "[github-guardrails] remote writes are non-transactional; some targets may already be compliant" >&2
+  else
+    echo "[github-guardrails] APPLY_ABORTED remote_mutations=0" >&2
+  fi
+  echo "[github-guardrails] recovery: fix '$reason', run --check, then retry the attended --apply bootstrap" >&2
+}
+
+read_protection_observation() {
+  local branch="$1"
+  local output="$2"
+  local presence_output="$3"
+  local rc
+  if get_protection "$branch" "$output"; then
+    printf 'protected\n' >"$presence_output"
+    return 0
+  else
+    rc=$?
+  fi
+  if [ "$rc" -eq 4 ]; then
+    printf '{}\n' >"$output"
+    printf 'unprotected\n' >"$presence_output"
+    return 0
+  fi
+  return 1
+}
+
+write_actor_allowlist_snapshot() {
+  local policy="$1"
+  local output="$2"
+  jq -S '
+    def enabled($value):
+      if ($value | type) == "object" then
+        (if ($value.enabled | type) == "boolean" then $value.enabled else false end)
+      elif ($value | type) == "boolean" then $value
+      else false end;
+    def actor_names($kind):
+      map(
+        if type == "string" then .
+        elif $kind == "user" then (.login // .name // empty)
+        else (.slug // .name // empty)
+        end
+      ) | map(select(type == "string" and length > 0)) | unique | sort;
+    {
+      dismissal: {
+        users: ((.required_pull_request_reviews.dismissal_restrictions.users // [])
+          | actor_names("user")),
+        teams: ((.required_pull_request_reviews.dismissal_restrictions.teams // [])
+          | actor_names("team")),
+        apps: ((.required_pull_request_reviews.dismissal_restrictions.apps // [])
+          | actor_names("app"))
+      },
+      push: {
+        enabled: (.restrictions != null),
+        users: ((.restrictions.users // []) | actor_names("user")),
+        teams: ((.restrictions.teams // []) | actor_names("team")),
+        apps: ((.restrictions.apps // []) | actor_names("app"))
+      },
+      fork_sync_allowed: enabled(.allow_fork_syncing)
+    }
+  ' "$policy" >"$output"
+}
+
+actor_allowlists_match() {
+  local left="$1"
+  local right="$2"
+  local left_snapshot="$TEMP_ROOT/allowlists-left.json"
+  local right_snapshot="$TEMP_ROOT/allowlists-right.json"
+  write_actor_allowlist_snapshot "$left" "$left_snapshot" || return 1
+  write_actor_allowlist_snapshot "$right" "$right_snapshot" || return 1
+  cmp -s "$left_snapshot" "$right_snapshot"
+}
+
+refresh_preservation_contract() {
+  local branch="$1"
+  local key="$2"
+  local observation="$TEMP_ROOT/fresh-$key.json"
+  local presence="$TEMP_ROOT/fresh-$key.presence"
+  local contract="$TEMP_ROOT/contract-$key.json"
+  local merged="$TEMP_ROOT/contract-$key.merged.json"
+  local initial="$TEMP_ROOT/existing-$key.json"
+
+  read_protection_observation "$branch" "$observation" "$presence" || {
+    echo "[github-guardrails] apply blocked: could not safely refresh $branch protection" >&2
+    return 1
+  }
+  if ! actor_allowlists_match "$observation" "$initial"; then
+    echo "[github-guardrails] apply blocked: $branch authorization allowlist changed during apply" >&2
+    return 1
+  fi
+  build_policy_payload "$observation" "$contract" "$merged" || return 1
+  mv "$merged" "$contract"
+
+  if ! jq -e --slurpfile initial "$initial" '. == $initial[0]' "$observation" >/dev/null 2>&1; then
+    echo "[github-guardrails] observed concurrent $branch protection change; rebuilt a monotonic payload"
+  fi
+}
+
+verify_preservation_contracts() {
+  local branch key actual presence contract
   for branch in "${BRANCHES[@]}"; do
     key="$(printf '%s' "$branch" | tr '/' '_')"
-    initial="$TEMP_ROOT/existing-$key.json"
-    presence="$TEMP_ROOT/existing-$key.presence"
-    fresh="$TEMP_ROOT/recheck-$key.json"
-    initial_sorted="$TEMP_ROOT/existing-$key.sorted.json"
-    fresh_sorted="$TEMP_ROOT/recheck-$key.sorted.json"
-
-    if get_protection "$branch" "$fresh"; then
-      if [ "$(cat "$presence")" != "protected" ]; then
-        echo "[github-guardrails] apply blocked: $branch protection changed during apply" >&2
-        return 1
-      fi
-      jq -S . "$initial" >"$initial_sorted"
-      jq -S . "$fresh" >"$fresh_sorted"
-      if ! cmp -s "$initial_sorted" "$fresh_sorted"; then
-        echo "[github-guardrails] apply blocked: $branch protection changed during apply" >&2
-        return 1
-      fi
-    else
-      rc=$?
-      if [ "$rc" -eq 4 ] && [ "$(cat "$presence")" = "unprotected" ]; then
-        continue
-      fi
-      if [ "$rc" -eq 4 ]; then
-        echo "[github-guardrails] apply blocked: $branch protection changed during apply" >&2
-      else
-        echo "[github-guardrails] apply blocked: could not safely re-read all protections" >&2
-      fi
+    actual="$TEMP_ROOT/final-$key.json"
+    presence="$TEMP_ROOT/final-$key.presence"
+    contract="$TEMP_ROOT/contract-$key.json"
+    if ! read_protection_observation "$branch" "$actual" "$presence"; then
+      echo "[github-guardrails] FAIL $branch: final protection read failed" >&2
       return 1
     fi
+    if [ "$(cat "$presence")" != "protected" ]; then
+      echo "[github-guardrails] FAIL $branch: protection disappeared during apply" >&2
+      return 1
+    fi
+    if ! protection_is_compliant "$actual"; then
+      report_noncompliance "$branch" "$actual" || true
+      return 1
+    fi
+    if ! actor_allowlists_match "$actual" "$contract"; then
+      echo "[github-guardrails] FAIL $branch: final authorization allowlist differs from the exact fresh payload" >&2
+      return 1
+    fi
+    if ! protection_preserves_contract "$actual" "$contract"; then
+      echo "[github-guardrails] FAIL $branch: an observed stronger protection requirement was lost" >&2
+      return 1
+    fi
+    echo "[github-guardrails] PASS preservation: $branch"
   done
 }
 
 apply_policy() {
-  local branch key existing payload endpoint rc
+  local branch key existing contract empty endpoint fresh presence
   local actions_payload="$TEMP_ROOT/actions-permissions-payload.json"
+  empty="$TEMP_ROOT/empty-policy.json"
+  printf '{}\n' >"$empty"
 
   # Read every branch before the first PUT. A 404 is the only absence that may
   # be repaired; auth/network/5xx/protocol/JSON failures abort with PUT 0.
   for branch in "${BRANCHES[@]}"; do
     key="$(printf '%s' "$branch" | tr '/' '_')"
     existing="$TEMP_ROOT/existing-$key.json"
-    if get_protection "$branch" "$existing"; then
-      printf 'protected\n' >"$TEMP_ROOT/existing-$key.presence"
-    else
-      rc=$?
-      if [ "$rc" -eq 4 ]; then
-        printf '{}\n' >"$existing"
-        printf 'unprotected\n' >"$TEMP_ROOT/existing-$key.presence"
-      else
-        echo "[github-guardrails] apply blocked: could not safely read all protections" >&2
-        return 1
-      fi
+    if ! read_protection_observation \
+      "$branch" "$existing" "$TEMP_ROOT/existing-$key.presence"; then
+      echo "[github-guardrails] apply blocked: could not safely read all protections" >&2
+      return 1
     fi
-    payload="$TEMP_ROOT/payload-$key.json"
-    build_policy_payload "$existing" "$payload"
+    contract="$TEMP_ROOT/contract-$key.json"
+    if ! build_policy_payload "$existing" "$empty" "$contract"; then
+      echo "[github-guardrails] apply blocked: could not build $branch preservation contract" >&2
+      return 1
+    fi
   done
 
-  # Close the read/build race before any mutation.
-  revalidate_runtime_basis "$CANONICAL_SHA" "$REQUIRED_APP_ID"
-  revalidate_protection_snapshots
+  # Close the initial read/build race before any mutation.
+  if ! revalidate_runtime_basis "$CANONICAL_SHA" "$REQUIRED_APP_ID"; then
+    report_apply_incomplete "runtime preflight changed"
+    return 1
+  fi
 
   if ! actions_permissions_are_compliant; then
-    jq -n '{
+    if ! jq -n '{
       default_workflow_permissions: "read",
       can_approve_pull_request_reviews: false
-    }' >"$actions_payload"
-    api_put_no_content "repos/$REPO/actions/permissions/workflow" "$actions_payload"
+    }' >"$actions_payload"; then
+      report_apply_incomplete "Actions permission payload build failed"
+      return 1
+    fi
+    record_attempt "actions-permissions"
+    if ! api_put_no_content "repos/$REPO/actions/permissions/workflow" "$actions_payload"; then
+      report_apply_incomplete "Actions permission write failed"
+      return 1
+    fi
+    record_mutation "actions-permissions"
     echo "[github-guardrails] applied: repository Actions workflow permissions"
   else
     echo "[github-guardrails] unchanged: repository Actions workflow permissions already compliant"
@@ -574,34 +899,101 @@ apply_policy() {
 
   for branch in "${BRANCHES[@]}"; do
     key="$(printf '%s' "$branch" | tr '/' '_')"
-    existing="$TEMP_ROOT/existing-$key.json"
-    payload="$TEMP_ROOT/payload-$key.json"
-    if [ "$(jq -r 'length' "$existing")" -gt 0 ] && protection_is_compliant "$existing"; then
+    contract="$TEMP_ROOT/contract-$key.json"
+
+    # Every whole-document branch-protection PUT gets a fresh runtime basis and
+    # a fresh branch policy. This cannot make GitHub's API transactional, but it
+    # prevents stale initial payloads from erasing changes made between PUTs.
+    if ! revalidate_runtime_basis "$CANONICAL_SHA" "$REQUIRED_APP_ID"; then
+      report_apply_incomplete "workflow, branch SHA, or required check changed"
+      return 1
+    fi
+    if ! check_actions_permissions; then
+      report_apply_incomplete "Actions permissions drifted"
+      return 1
+    fi
+    if ! refresh_preservation_contract "$branch" "$key"; then
+      report_apply_incomplete "$branch protection refresh failed"
+      return 1
+    fi
+    fresh="$TEMP_ROOT/fresh-$key.json"
+    presence="$TEMP_ROOT/fresh-$key.presence"
+    if [ "$(cat "$presence")" = "protected" ] \
+      && protection_is_compliant "$fresh" \
+      && protection_preserves_contract "$fresh" "$contract"; then
       echo "[github-guardrails] unchanged: $branch already compliant"
       continue
     fi
+
+    # A mutation is now known to be necessary. Re-run both halves once more so
+    # neither the runtime basis nor the protection snapshot used by the PUT is
+    # merely the loop-entry read. GitHub exposes no conditional ETag for this
+    # whole-document endpoint, so the final preservation read remains the last
+    # line of defense against an unavoidable in-flight race.
+    if ! revalidate_runtime_basis "$CANONICAL_SHA" "$REQUIRED_APP_ID"; then
+      report_apply_incomplete "workflow, branch SHA, or required check changed immediately before $branch PUT"
+      return 1
+    fi
+    if ! check_actions_permissions; then
+      report_apply_incomplete "Actions permissions drifted immediately before $branch PUT"
+      return 1
+    fi
+    if ! refresh_preservation_contract "$branch" "$key"; then
+      report_apply_incomplete "$branch final protection refresh failed"
+      return 1
+    fi
+    fresh="$TEMP_ROOT/fresh-$key.json"
+    presence="$TEMP_ROOT/fresh-$key.presence"
+    if [ "$(cat "$presence")" = "protected" ] \
+      && protection_is_compliant "$fresh" \
+      && protection_preserves_contract "$fresh" "$contract"; then
+      echo "[github-guardrails] unchanged: $branch became compliant before PUT"
+      continue
+    fi
     endpoint="$(protection_endpoint "$branch")"
-    api_put_json "$endpoint" "$payload"
+    record_attempt "$branch"
+    if ! api_put_json "$endpoint" "$contract"; then
+      report_apply_incomplete "$branch protection write failed"
+      return 1
+    fi
+    record_mutation "$branch"
     echo "[github-guardrails] applied: $branch"
   done
 
   # Remote state may change while PUTs are in flight. Never report success
   # until both the canonical SHA and the exact app-pinned latest check survive
   # a post-apply read.
-  revalidate_runtime_basis "$CANONICAL_SHA" "$REQUIRED_APP_ID"
-  check_actions_permissions
-  check_protections
+  if ! revalidate_runtime_basis "$CANONICAL_SHA" "$REQUIRED_APP_ID"; then
+    report_apply_incomplete "final workflow, branch SHA, or required check changed"
+    return 1
+  fi
+  if ! check_actions_permissions; then
+    report_apply_incomplete "final Actions permissions drifted"
+    return 1
+  fi
+  if ! verify_preservation_contracts; then
+    report_apply_incomplete "final protection preservation check failed"
+    return 1
+  fi
 }
 
 if [ "$MODE" = "check" ]; then
-  load_runtime_basis
-  check_actions_permissions
-  check_protections
-  echo "[github-guardrails] PASS: canonical branch protection is compliant"
+  load_check_basis
+  check_failed=0
+  check_actions_permissions || check_failed=1
+  check_protections || check_failed=1
+  if [ "$check_failed" -ne 0 ]; then
+    echo "[github-guardrails] FAIL: canonical GitHub track guardrails drifted" >&2
+    exit 1
+  fi
+  echo "[github-guardrails] PASS: canonical GitHub track guardrails are compliant"
   exit 0
 fi
 
 load_runtime_basis
 echo "[github-guardrails] PASS apply preflight: all branches=$CANONICAL_SHA and context green"
-apply_policy
-echo "[github-guardrails] PASS: canonical branch protection is compliant"
+echo "[github-guardrails] attended bootstrap: keep this process running through final verification"
+if ! apply_policy; then
+  exit 1
+fi
+echo "[github-guardrails] PASS: canonical GitHub track guardrails are compliant"

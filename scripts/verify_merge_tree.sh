@@ -65,14 +65,20 @@ need() {
 need git
 need npm
 
-# The ancestry gate below is only meaningful against fresh canonical remote
-# refs. A stale local origin/main can otherwise certify a synthetic tree that
-# silently omits commits already merged to main. Fetch all three together and
-# fail closed before resolving BASE_REF/HEAD_REF or spending time on npm lanes.
-if ! git fetch --no-tags origin \
-  +refs/heads/main:refs/remotes/origin/main \
-  +refs/heads/track/engine:refs/remotes/origin/track/engine \
-  +refs/heads/track/uxui:refs/remotes/origin/track/uxui; then
+# The ancestry gate below is only meaningful against fresh remote refs. Always
+# refresh main plus any origin/* base/head actually requested. This preserves
+# the canonical default while allowing an OSS fork without track/* branches to
+# run `--base origin/main` instead of failing on unrelated missing refs.
+FETCH_SPECS=(+refs/heads/main:refs/remotes/origin/main)
+for requested_ref in "$BASE_REF" "$HEAD_REF"; do
+  case "$requested_ref" in
+    origin/*)
+      requested_branch="${requested_ref#origin/}"
+      FETCH_SPECS+=("+refs/heads/$requested_branch:refs/remotes/origin/$requested_branch")
+      ;;
+  esac
+done
+if ! git fetch --no-tags origin "${FETCH_SPECS[@]}"; then
   echo "[merge-tree] canonical ref fetch failed; refusing stale merge-tree evidence" >&2
   exit 1
 fi

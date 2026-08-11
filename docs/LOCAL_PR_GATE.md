@@ -67,11 +67,22 @@ hook:
 scripts/install_branch_skew_hook.sh
 ```
 
-The installer only writes an absent or identical `pre-push` hook and refuses to
-overwrite another hook. It does not modify the shared worktree `post-checkout`
-bootstrap hook. The pre-push hook refreshes all three canonical remote refs,
-validates installed upstreams, rejects stale/non-fast-forward canonical updates
-and canonical deletion, then runs the existing overlap check.
+The installer is maintainer-only: it first normalizes `origin` and proves it is
+exactly `yeomyeonggeori/oort`, then proves that remote exposes all three
+canonical refs. Supported canonical URL forms are `git@github.com:...`,
+`ssh://git@github.com/...`, and `https://github.com/...`, with an optional
+`.git` suffix. It writes an absent/identical hook, safely upgrades the exact
+previous oort-managed version with a `.pre-1297.bak`, and refuses every unknown
+hook. It does not modify the shared worktree `post-checkout` bootstrap hook.
+
+The pre-push hook uses Git's remote-name **and** remote-URL arguments, so a
+canonical alias or direct canonical URL receives the same candidate/deletion
+protection as `origin`. Before a canonical push it re-verifies that `origin` is
+still the canonical trust anchor used to refresh comparison refs. A recognized
+noncanonical GitHub fork receives only the ordinary branch-skew check. If the
+destination URL cannot be normalized, an update or deletion of a canonical
+branch name fails closed; diagnostics never echo the raw URL because it may
+contain credentials.
 
 The script writes a log, Markdown evidence file, and `.sha256` manifest under
 `${TMPDIR:-/tmp}/momo-local-gate` by default, then prints a PR-ready
@@ -794,7 +805,7 @@ git 이력에 있다 — 삭제 직전 판본은 `git show <이 PR의 부모 SHA
 6. Worker must not merge, close the issue, run the post-merge `main` gate, or adjust roadmap/backlog state.
 7. `momo-main` reviews for security, correctness, and scope.
 8. `momo-main` runs the final local gate after review fixes.
-9. `momo-main` merges only if the local gate passes and no blocker remains.
+9. `momo-main` merges only if the local gate passes, the current PR head has a successful required `PR CI gate`, and no blocker remains. After #1302 lands, its base-trusted `Policy integrity gate` is an additional mandatory condition; the app-pinned `PR CI gate` alone does not prove workflow identity.
 10. `momo-main` updates `main` locally and reruns the relevant local gate on `main`.
 11. `momo-main` updates issue status, `STATUS.md`, roadmap/backlog if decisions changed, and recommends the next goal.
-12. If Actions are intentionally disabled, `momo-main` confirms workflow state remains `disabled_manually` instead of waiting for remote CI.
+12. If a non-required release/manual workflow is intentionally disabled, `momo-main` confirms that workflow remains `disabled_manually`; this exception never substitutes for the active required PR gates in step 9.
