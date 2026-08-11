@@ -1,6 +1,6 @@
 # ADR-0153 — CI 스택: 로컬 게이트 권위 유지 + 셀프호스티드 러너 (클라우드 CI 과금 0)
 
-- Status: **Accepted** (2026-08-06 성재 — "괜찮아 보여. 한 번 더 검토하고 괜찮으면 해당 조합으로 ㄱㄱ" / 2026-08-12 public/Free trust 증보 #1297·#1302 구현 승인)
+- Status: **Accepted** (2026-08-06 성재 — "괜찮아 보여. 한 번 더 검토하고 괜찮으면 해당 조합으로 ㄱㄱ" / 2026-08-12 public/Free trust 증보 #1297·#1302 구현 승인, 첫 live provenance 수리 #1307)
 - Date: 2026-08-06
 - 발단: 성재 — "github action말고 jenkins나 argo cd 같은 걸로 대체할 수 없을까? 비용 부담이 좀 있는데."
 - 관련: ADR-0107(로컬 게이트=머지 권위 관례) · ADR-0145 증보 2(Swift 퇴역) · #1108(병합 트리 검증 스크립트) · #1116(Tauri CI 신설) · research/2026-08-06-xcode-cloud-transition.md
@@ -52,11 +52,16 @@ check-suite/job App binding과 현재 policy audit evidence를 재검증하고 �
 TOCTOU를 닫는다. 정책 변경은 지정 policy owner의 login+stable numeric GitHub id,
 exact-head audit comment, 그 뒤 같은 identity의 최신 label transition을 요구한다.
 
-최초 #1302 track/engine→main landing 체인만 base에 workflow가 없는 명시적 reviewed exception이다.
-그 뒤에는 세 canonical ref를 exact-equal로 정렬하고 target별 unmerged bootstrap PR을 검증한
-후 branch protection에 두 App-pinned context를 적용하며 예외를 재사용하지 않는다. 계정
-회전과 account-loss/compromise는 `docs/GITHUB_OPS.md`의 audited rotation/break-glass 절차만
-사용한다.
+최초 #1302 track/engine→main landing 체인은 base에 workflow가 없는 명시적 reviewed
+exception이다. 첫 live PR에서 status creator가 GitHub Actions App이 아니라 별도 bot user
+identity로 반환되어 기존 exact-base verifier가 genuine run을 거부한 #1307도 그 verifier
+자체를 수리하는 track/engine→main 체인에 한해서만 reviewed exception으로 추가한다. 이때
+후보 verifier는 merge 권위가 아니며 독립 보안 리뷰, 두 required context, local gate와
+read-only live 진단을 모두 기록한다. #1307 main 랜딩 직후 갱신된 exact-base wrapper로
+대기 PR을 재검증한다. 그 뒤에는 세 canonical ref를 exact-equal로 정렬하고 target별
+unmerged bootstrap PR을 검증한 후 branch protection에 두 App-pinned context를 적용하며
+예외를 재사용하지 않는다. 계정 회전과 account-loss/compromise는 `docs/GITHUB_OPS.md`의
+audited rotation/break-glass 절차만 사용한다.
 
 ## Slack·업계 비교
 

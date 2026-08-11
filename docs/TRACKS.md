@@ -57,7 +57,23 @@
 
 같은 App/name status는 위조 가능한 표면이다. 통합자는 머지 직전에 **현재 PR의 exact canonical base branch/HEAD에서 wrapper bytes가 그 base와 일치하는 checkout**으로 `scripts/verify_policy_integrity_from_base.sh --repo yeomyeonggeori/oort --pr <PR>`를 실행한다. wrapper는 PR API exact base SHA의 commit object에서 verifier를 추출하고 worktree/candidate verifier bytes는 무시한다. 그런 다음 current head/base, current default-main workflow authority, workflow ID/path, event, run attempt, base-controlled run-name, check-suite app, evaluator job, 현재 policy evidence 및 최종 API 재읽기를 함께 확인한다. 정책 변경은 지정 policy owner `kwakseongjae`(stable GitHub user id `87296259`) author + 같은 지정 owner의 exact `Policy-Integrity-Audit: <40sha>` comment + 이후 같은 login/id owner의 현재 `policy-change-approved` label이 모두 필요하며, GitHub `author_association`의 `OWNER` 문자열은 사용하지 않는다. head/comment/label transition 수정 시 label을 재부여한다.
 
-workflow가 base에 아직 없는 #1302의 track/engine→main 최초 랜딩 체인 전체만 reviewed bootstrap exception이고, main 랜딩·동일 SHA 정렬 뒤부터 예외는 없다. 그 뒤 세 target마다 docs-only bootstrap PR을 열어 `scripts/github_track_guardrails.sh --repo yeomyeonggeori/oort --apply --policy-pr 'main=N,track/engine=N,track/uxui=N'` → `--check` 후 unmerged close한다. workflow_dispatch seed는 금지다. repository Actions 기본 권한은 read이며 workflow의 PR 승인은 금지한다. 새 보호의 승인 수는 solo-owner 운영과 성재의 채팅 승인을 보존하기 위해 0이며, 코드리뷰·local gate evidence 계약은 그대로다. 이미 더 강한 required check·review 수/code-owner·last-push·push restriction·linear-history 설정이 있으면 `--apply`는 낮추지 않고 보존한다. 보호 조회는 명시적 404만 미설정으로 취급하며, auth/network/5xx/잘못된 JSON과 감지한 동시 변경은 fail-closed한다. read-only `--check`는 GitHub Actions app ID를 공식 App endpoint에서 읽고 `main`이 두 track의 조상인 정상 track-ahead topology에서도 계속 동작한다. Actions REST run/check-suite/job head 의미는 첫 live bootstrap에서 캡처할 때까지 `runtime-unverified`이며, verifier는 세 객체의 내부 SHA 일치만 요구한다.
+workflow가 base에 아직 없는 #1302의 track/engine→main 최초 랜딩 체인과 첫 live
+status-user/App identity 불일치로 기존 exact-base verifier가 genuine run을 거부하는 #1307의
+track/engine→main 수리 체인만 reviewed bootstrap exception이다. #1307은 후보 verifier를
+merge 권위로 쓰지 않고 독립 보안 리뷰, 두 required context, focused/static/docs local gate,
+read-only live 진단을 모두 기록한다. #1307 main 랜딩 직후 갱신된 exact-base wrapper로
+대기 PR을 재검증하며 그 뒤부터 예외는 없다. 세 target마다 docs-only bootstrap PR을 열어
+`scripts/github_track_guardrails.sh --repo yeomyeonggeori/oort --apply --policy-pr 'main=N,track/engine=N,track/uxui=N'`
+→ `--check` 후 unmerged close한다. workflow_dispatch seed는 금지다. repository Actions 기본
+권한은 read이며 workflow의 PR 승인은 금지한다. 새 보호의 승인 수는 solo-owner 운영과 성재의
+채팅 승인을 보존하기 위해 0이며, 코드리뷰·local gate evidence 계약은 그대로다. 이미 더
+강한 required check·review 수/code-owner·last-push·push restriction·linear-history 설정이
+있으면 `--apply`는 낮추지 않고 보존한다. 보호 조회는 명시적 404만 미설정으로 취급하며,
+auth/network/5xx/잘못된 JSON과 감지한 동시 변경은 fail-closed한다. read-only `--check`는
+GitHub Actions app ID를 공식 App endpoint에서 읽고 `main`이 두 track의 조상인 정상
+track-ahead topology에서도 계속 동작한다. 첫 live PR에서 status bot, run/suite/job App,
+bare workflow path와 PR-head 내부 SHA 형상을 관측했다. 아직 관측하지 않은 대체 API 형상은
+의미를 추정하지 않고 내부 SHA 일치로 fail-closed한다.
 
 ## 4. 엔진→UXUI 핸드오프 루프
 
