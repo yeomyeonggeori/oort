@@ -7,6 +7,7 @@ TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/oort-self-host-modes.XXXXXX")"
 trap 'rm -rf "$TMP_ROOT"' EXIT INT TERM
 
 GOOD_DIGEST="ghcr.io/yeomyeonggeori/oort@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+printf -v DOTENV_DOLLAR '\x24'
 
 hash_file() {
   if command -v shasum >/dev/null 2>&1; then
@@ -29,12 +30,22 @@ make_fixture() {
   local fixture="$TMP_ROOT/$name"
   mkdir -p "$fixture/scripts" "$fixture/infra/rust" "$fixture/fake-bin"
   cp "$ROOT/scripts/self_host_env.sh" "$fixture/scripts/self_host_env.sh"
+  cp "$ROOT/infra/rust/docker-compose.rust.yml" "$fixture/infra/rust/docker-compose.rust.yml"
+  cp "$ROOT/infra/rust/docker-compose.rust.build.yml" "$fixture/infra/rust/docker-compose.rust.build.yml"
+  cp "$ROOT/infra/rust/local.override.yml" "$fixture/infra/rust/local.override.yml"
 
   cat >"$fixture/fake-bin/docker" <<'EOF'
 #!/usr/bin/env sh
 # Model the Compose precedence that caused #1331's review finding: process env
 # wins over --env-file. The generator must remove that ambient override before
 # asking for the rendered application images.
+if [ -n "${SELF_HOST_DOCKER_ENV_TRACE:-}" ]; then
+  {
+    printf 'DOCKER_HOST=%s\n' "${DOCKER_HOST:-}"
+    printf 'DOCKER_CONTEXT=%s\n' "${DOCKER_CONTEXT:-}"
+    printf 'DOCKER_CONFIG=%s\n' "${DOCKER_CONFIG:-}"
+  } >"$SELF_HOST_DOCKER_ENV_TRACE"
+fi
 env_file=""
 previous=""
 is_images=0
@@ -94,7 +105,7 @@ run_generator "$local_fixture" "$local_output" 49100 --local-build
 grep -Fxq 'MOMO_SELF_HOST_MODE=local-build' "$local_fixture/infra/rust/local.secrets.env"
 grep -Fxq 'MOMO_RUST_IMAGE=oort:local' "$local_fixture/infra/rust/local.secrets.env"
 test "$(file_mode "$local_fixture/infra/rust/local.secrets.env")" = "600"
-grep -Fq 'infra/rust/docker-compose.rust.build.yml' "$local_output"
+grep -Fq 'scripts/self_host_env.sh --compose' "$local_output"
 grep -Fq -- 'up -d --build --wait' "$local_output"
 if grep -Fq -- '--pull missing' "$local_output"; then
   echo "local-build output unexpectedly contains pull-only argv" >&2
@@ -116,10 +127,7 @@ run_generator "$published_fixture" "$published_output" 49200 --published-image "
 grep -Fxq 'MOMO_SELF_HOST_MODE=published-digest' "$published_fixture/infra/rust/local.secrets.env"
 grep -Fxq "MOMO_RUST_IMAGE=$GOOD_DIGEST" "$published_fixture/infra/rust/local.secrets.env"
 grep -Fq -- 'up -d --pull missing --wait' "$published_output"
-if grep -Fq 'infra/rust/docker-compose.rust.build.yml' "$published_output"; then
-  echo "published-digest output unexpectedly contains the build overlay" >&2
-  exit 1
-fi
+grep -Fq 'scripts/self_host_env.sh --compose' "$published_output"
 if grep -Fq -- '--build' "$published_output"; then
   echo "published-digest output unexpectedly contains --build" >&2
   exit 1
@@ -135,7 +143,7 @@ if grep -Fq "$published_password" "$published_fixture/rerun-output"; then
   exit 1
 fi
 
-# Ambient Compose interpolation must not replace the env-file digest.
+# Ambient Compose interpolation must not replace the generated env authority.
 override_fixture="$(make_fixture ambient-image-override)"
 (
   export MOMO_RUST_IMAGE=busybox:latest
@@ -143,28 +151,96 @@ override_fixture="$(make_fixture ambient-image-override)"
     --published-image "$GOOD_DIGEST"
 )
 grep -Fxq "MOMO_RUST_IMAGE=$GOOD_DIGEST" "$override_fixture/infra/rust/local.secrets.env"
-grep -Fq 'env -u MOMO_RUST_IMAGE docker compose' "$override_fixture/output"
+grep -Fq 'scripts/self_host_env.sh --compose' "$override_fixture/output"
 
-# Compose itself, not a string fixture, must resolve all seven application
-# consumers to the exact digest and no process-env override.
-real_env="$TMP_ROOT/real-compose.env"
-awk -v image="$GOOD_DIGEST" '
-  /^MOMO_RUST_IMAGE=/ { print "MOMO_RUST_IMAGE=" image; next }
-  { print }
-' "$ROOT/infra/rust/rust-smoke.env.example" >"$real_env"
-real_images="$(
-  env -u MOMO_RUST_IMAGE docker compose \
-    --project-directory "$ROOT" \
-    --env-file "$real_env" \
-    -f "$ROOT/infra/rust/docker-compose.rust.yml" \
-    -f "$ROOT/infra/rust/local.override.yml" \
-    config --images
-)"
+# Compose itself, not a fake/string fixture, must resolve the exact generated
+# secret/URL/port/project/image values even when every category has an ambient
+# collision. COMPOSE_FILE/PROFILE/ENV_FILES controls must not add another
+# config source. Docker daemon/context variables remain available by design.
+real_config="$published_fixture/real-compose.json"
+real_docker_dir="$(dirname -- "$(command -v docker)")"
+ambient_marker="review-ambient-secret-marker"
+(
+  cd "$published_fixture"
+  PATH="$real_docker_dir:/usr/bin:/bin" \
+    JWT_HMAC="$ambient_marker" \
+    MOMO_APP_DATABASE_URL="postgres://$ambient_marker@invalid/momo" \
+    MOMO_CENTRIFUGO_WS_URL="wss://$ambient_marker.invalid/connection" \
+    MOMO_WEB_PORT=59990 MOMO_RUST_API_PORT=59991 CENT_HOST_PORT=59992 \
+    MOMO_RUST_IMAGE=busybox:latest MOMO_CADDY_IMAGE=busybox:latest \
+    COMPOSE_PROJECT_NAME=ambient-project COMPOSE_FILE=/does/not/exist \
+    COMPOSE_ENV_FILES=/also/missing COMPOSE_PROFILES=ambient-profile \
+    bash scripts/self_host_env.sh --compose config --format json
+) >"$real_config" 2>"$published_fixture/real-compose.stderr"
+expected_jwt="$(sed -n 's/^JWT_HMAC=//p' "$published_fixture/infra/rust/local.secrets.env")"
+expected_db_url="$(sed -n 's/^MOMO_APP_DATABASE_URL=//p' "$published_fixture/infra/rust/local.secrets.env")"
+expected_ws_url="$(sed -n 's/^MOMO_CENTRIFUGO_WS_URL=//p' "$published_fixture/infra/rust/local.secrets.env")"
+jq -e \
+  --arg image "$GOOD_DIGEST" \
+  --arg jwt "$expected_jwt" \
+  --arg db "$expected_db_url" \
+  --arg ws "$expected_ws_url" '
+    .name == "oort" and
+    .services.api.image == $image and
+    .services.api.environment.JWT_HMAC == $jwt and
+    .services.api.environment.DATABASE_URL == $db and
+    .services.api.environment.MOMO_CENTRIFUGO_WS_URL == $ws and
+    .services.web.image == "caddy:2-alpine" and
+    .services.web.ports[0].published == "49200" and
+    .services.api.ports[0].published == "49201" and
+    .services.centrifugo.ports[0].published == "49202"
+  ' "$real_config" >/dev/null
+if grep -Fq "$ambient_marker" "$real_config" "$published_fixture/real-compose.stderr"; then
+  echo "ambient Compose value reached rendered output or diagnostics" >&2
+  exit 1
+fi
+real_images="$(jq -r '.services[].image' "$real_config")"
 real_count="$(printf '%s\n' "$real_images" | awk -v expected="$GOOD_DIGEST" '
   $0 == expected { count += 1 }
   END { print count + 0 }
 ')"
 test "$real_count" -eq 7
+
+# Caller argv cannot add a second config source or replace canonical
+# env/project/profile authority. A literal service-command argument with the
+# same spelling remains possible after an explicit `--` delimiter.
+for bypass in \
+  '-f /tmp/evil.yml config' \
+  '-f/tmp/evil.yml config' \
+  '-pevil config' \
+  'config --file=/tmp/evil.yml' \
+  'config --env-file=/tmp/evil.env' \
+  'config --project-name=evil' \
+  'config --project-directory=/tmp' \
+  'config --profile=evil' \
+  'config --all-resources' \
+  'config --ansi=never' \
+  'up --compatibility' \
+  'up --dry-run' \
+  'up --parallel=1' \
+  'up --progress=plain'; do
+  bypass_output="$published_fixture/bypass-$(printf '%s' "$bypass" | tr -c 'A-Za-z0-9' '_')"
+  # Deliberate word splitting models shell argv from the fixed test literals.
+  # shellcheck disable=SC2086
+  if run_generator "$published_fixture" "$bypass_output" 49200 --compose $bypass; then
+    echo "compose config-source bypass unexpectedly succeeded: $bypass" >&2
+    exit 1
+  fi
+  grep -Eq '허용된 compose subcommand|canonical env/file/project/profile' "$bypass_output"
+done
+run_generator "$published_fixture" "$published_fixture/service-argv-output" 49200 \
+  --compose run --rm migrate -- --file literal-service-argument
+
+docker_env_trace="$published_fixture/docker-env.trace"
+DOCKER_HOST='unix:///review-preserved.sock' \
+DOCKER_CONTEXT='review-preserved-context' \
+DOCKER_CONFIG='/review/preserved/config' \
+SELF_HOST_DOCKER_ENV_TRACE="$docker_env_trace" \
+  run_generator "$published_fixture" "$published_fixture/docker-env-output" 49200 \
+    --compose ps
+grep -Fxq 'DOCKER_HOST=unix:///review-preserved.sock' "$docker_env_trace"
+grep -Fxq 'DOCKER_CONTEXT=review-preserved-context' "$docker_env_trace"
+grep -Fxq 'DOCKER_CONFIG=/review/preserved/config' "$docker_env_trace"
 
 invalid_fixture="$(make_fixture invalid)"
 if run_generator "$invalid_fixture" "$invalid_fixture/output" 49300 \
@@ -227,6 +303,74 @@ if (
   exit 1
 fi
 test ! -e "$cr_injection_fixture/infra/rust/local.secrets.env"
+
+# Compose dotenv metacharacters are not record separators, but they still
+# expand, quote, escape, or comment the credential. Reject them before writing
+# and never repeat the rejected secret in diagnostics.
+metachar_index=0
+for bad_password in \
+  "review-${DOTENV_DOLLAR}JWT_HMAC" \
+  'review secret value' \
+  'review#comment-value' \
+  'review-"quoted"-value' \
+  "review-'single'-value" \
+  'review-\backslash-value'; do
+  metachar_index=$((metachar_index + 1))
+  metachar_fixture="$(make_fixture "password-metachar-$metachar_index")"
+  if MOMO_INITIAL_OWNER_PASSWORD="$bad_password" \
+    run_generator "$metachar_fixture" "$metachar_fixture/output" "$((49410 + metachar_index * 3))" --local-build; then
+    echo "dotenv metacharacter password unexpectedly succeeded" >&2
+    exit 1
+  fi
+  test ! -e "$metachar_fixture/infra/rust/local.secrets.env"
+  grep -Fq 'dotenv-safe literal' "$metachar_fixture/output"
+  if grep -Fq "$bad_password" "$metachar_fixture/output"; then
+    echo "rejected metacharacter password leaked to diagnostics" >&2
+    exit 1
+  fi
+done
+
+email_fixture="$(make_fixture email-metachar)"
+bad_email="owner-${DOTENV_DOLLAR}JWT_HMAC@oort.local"
+if MOMO_INITIAL_OWNER_EMAIL="$bad_email" \
+  run_generator "$email_fixture" "$email_fixture/output" 49430 --local-build; then
+  echo "dotenv metacharacter email unexpectedly succeeded" >&2
+  exit 1
+fi
+test ! -e "$email_fixture/infra/rust/local.secrets.env"
+grep -Fq 'dotenv-safe 소문자 이메일' "$email_fixture/output"
+if grep -Fq "$bad_email" "$email_fixture/output"; then
+  echo "rejected metacharacter email leaked to diagnostics" >&2
+  exit 1
+fi
+
+# Safe custom credentials round-trip byte-for-byte; already-existing files get
+# the same validation instead of being grandfathered into an unsafe render.
+safe_fixture="$(make_fixture safe-custom-credential)"
+safe_email='owner+review@oort.local'
+safe_password='Safe-Alpha_123!@%=,.:/+~'
+MOMO_INITIAL_OWNER_EMAIL="$safe_email" MOMO_INITIAL_OWNER_PASSWORD="$safe_password" \
+  run_generator "$safe_fixture" "$safe_fixture/output" 49440 --local-build
+grep -Fxq "MOMO_INITIAL_OWNER_EMAIL=$safe_email" "$safe_fixture/infra/rust/local.secrets.env"
+grep -Fxq "MOMO_INITIAL_OWNER_PASSWORD=$safe_password" "$safe_fixture/infra/rust/local.secrets.env"
+
+existing_unsafe_fixture="$(make_fixture existing-unsafe-credential)"
+run_generator "$existing_unsafe_fixture" "$existing_unsafe_fixture/first-output" 49450 --local-build
+existing_unsafe_marker="existing-${DOTENV_DOLLAR}JWT_HMAC-secret-marker"
+awk -v replacement="MOMO_INITIAL_OWNER_PASSWORD=$existing_unsafe_marker" '
+  /^MOMO_INITIAL_OWNER_PASSWORD=/ { print replacement; next }
+  { print }
+' "$existing_unsafe_fixture/infra/rust/local.secrets.env" >"$existing_unsafe_fixture/replacement.env"
+mv "$existing_unsafe_fixture/replacement.env" "$existing_unsafe_fixture/infra/rust/local.secrets.env"
+if run_generator "$existing_unsafe_fixture" "$existing_unsafe_fixture/rerun-output" 49450 --local-build; then
+  echo "existing dotenv-unsafe credential unexpectedly succeeded" >&2
+  exit 1
+fi
+grep -Fq 'dotenv-safe literal' "$existing_unsafe_fixture/rerun-output"
+if grep -Fq "$existing_unsafe_marker" "$existing_unsafe_fixture/rerun-output"; then
+  echo "existing unsafe credential leaked to diagnostics" >&2
+  exit 1
+fi
 
 # An already-poisoned env must be rejected by exact-once parsing. Compose uses
 # the last duplicate, so validating only the first value is not a boundary.

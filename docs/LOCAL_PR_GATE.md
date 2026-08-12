@@ -179,11 +179,15 @@ subject name/digest/OCI-referrer bindings to prove each removal turns red. A fak
 The second executes isolated fixtures and proves the two quickstart modes do
 not cross: local-build includes the build overlay and `--build`;
 published-digest requires the canonical full sha256 ref and omits both. It also
-rejects LF/CR env-file injection, duplicate keys, process-env image overrides,
-and non-decimal arithmetic input before modifying an env file. A real
-`docker compose config --images` assertion locks all seven application
-consumers to the exact digest. Neither test dispatches a workflow nor pulls
-from GHCR.
+rejects LF/CR and dotenv-metachar credential injection, duplicate keys,
+config-source argv replacement, and non-decimal arithmetic input before
+modifying an env file. The canonical `--compose` launcher derives its unset
+boundary from every actual env-file key and canonical Compose interpolation,
+adds explicit Compose control keys, and preserves Docker daemon/context
+selection. A real `docker compose config` fixture proves ambient secret, DB/WS
+URL, three ports, project, image, and file/profile controls cannot replace the
+generated authority while all seven application consumers use the exact
+digest. Neither test dispatches a workflow nor pulls from GHCR.
 
 ### OpenAPI contract drift gate (MOMO-389)
 

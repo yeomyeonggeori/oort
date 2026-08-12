@@ -71,7 +71,10 @@ scripts/self_host_env.sh --published-image "$IMAGE_REF"
 로컬 빌드 경로를 사용하거나 후속 arm64 릴리스를 기다린다.
 
 발행 workflow는 `main` ref의 수동 실행만 허용하고, GitHub `release` Environment의
-owner 승인 뒤 pushed digest에 SLSA v1 provenance를 OCI referrer로 붙인다. `sha-*`
+owner 승인 뒤 pushed digest에 SLSA v1 provenance를 OCI referrer로 붙인다. 2026-08-12
+attended 설정/readback에서 required reviewer는 `kwakseongjae`(user id `87296259`),
+`prevent_self_review=false`, deployment branch policy는 custom `main` branch 하나임을
+확인했다. `sha-*`
 태그는 커밋을 찾기 위한 이동 가능한 표식일 뿐 불변 신원이 아니다. 실제 첫 발행 뒤에는
 다음처럼 **digest 자체**를 검증한다(`gh`가 설치된 운영자용 선택 단계):
 
@@ -81,8 +84,8 @@ gh attestation verify "oci://$IMAGE_REF" \
   --predicate-type https://slsa.dev/provenance/v1
 ```
 
-실 `release` Environment 보호 설정, 첫 workflow dispatch, 위 명령의 공개 GHCR
-왕복은 아직 `runtime-unverified`이며 이 문서가 릴리스 권한을 주지는 않는다.
+첫 workflow dispatch와 위 명령의 공개 GHCR 왕복은 아직 `runtime-unverified`이며
+이 문서가 릴리스 권한을 주지는 않는다.
 
 `infra/rust/local.secrets.env` 를 만든다 — **채워 넣을 자리가 하나도 없는** 파일이다.
 시크릿 아홉 개를 `openssl` 로 만들고, 서로 같아야 하는 값들(런타임 롤 비밀번호와
@@ -92,8 +95,10 @@ gh attestation verify "oci://$IMAGE_REF" \
 
 환경변수에서 파일로 들어가는 모든 값은 한 줄 scalar인지 먼저 검사한다. LF/CR을
 포함한 값, 중복 env 키, 1..65535 밖이거나 ASCII 10진수가 아닌 포트는 파일을 쓰거나
-셸 산술을 하기 전에 실패한다. POSIX argv/env 자체가 NUL을 표현할 수 없다는 경계도
-스크립트 주석과 계약 테스트에 고정돼 있다. 오류와 stdout에는 비밀번호를 출력하지 않는다.
+셸 산술을 하기 전에 실패한다. 이메일과 비밀번호는 Compose dotenv가 보간·인용·주석으로
+재해석하지 않는 literal 형식만 받으며 비밀번호는 12..128자다. 기존 env도 같은 검사를
+다시 통과해야 한다. POSIX argv/env 자체가 NUL을 표현할 수 없다는 경계도 스크립트 주석과
+계약 테스트에 고정돼 있다. 오류와 stdout에는 비밀번호를 출력하지 않는다.
 
 끝에 이런 것이 찍힌다 — 다음 두 단계가 전부 여기 있다:
 
@@ -103,11 +108,7 @@ gh attestation verify "oci://$IMAGE_REF" \
 [self-host] 준비됐다. 모드: 로컬 빌드 — 현재 checkout을 server-rust/Dockerfile로 짓는다.
 [self-host] 다음 한 줄이 스택을 띄운다:
 
-  env -u MOMO_RUST_IMAGE docker compose --env-file infra/rust/local.secrets.env \
-  -f infra/rust/docker-compose.rust.yml \
-  -f infra/rust/docker-compose.rust.build.yml \
-  -f infra/rust/local.override.yml \
-    up -d --build --wait
+  scripts/self_host_env.sh --compose up -d --build --wait
 
 [self-host] --wait 가 붙어 있으므로 그 명령이 끝나면 준비가 끝난 것이다.
 [self-host] 브라우저에서 열고 아래로 로그인한다:
@@ -125,24 +126,24 @@ DB가 있는데 시크릿을 다시 만들면 그 DB와 어긋나기 때문이�
 
 ## 3. 기동
 
-2단계가 찍어 준 명령을 그대로 붙여 넣는다. 로컬 모드는 다음과 같다.
+2단계가 찍어 준 명령을 그대로 붙여 넣는다. `--compose` 경유는 필수다. generated
+env의 모든 실제 키, canonical Compose 파일의 모든 interpolation 키와 `COMPOSE_FILE`·
+`COMPOSE_PROFILES` 같은 제어 키를 process env에서 제거한 뒤 정본 env/file set을
+호출한다. caller의 config-source 대체 인자와 Compose global control 인자도
+fail-closed로 거절한다. `DOCKER_HOST`·`DOCKER_CONTEXT`는 운영자가 고른 daemon 권위라
+보존한다. 이 launcher의 정본 파일은 `infra/rust/docker-compose.rust.yml`,
+`infra/rust/docker-compose.rust.build.yml`, `infra/rust/local.override.yml`이다.
+로컬 모드는 다음과 같다.
 
 ```sh
-env -u MOMO_RUST_IMAGE docker compose --env-file infra/rust/local.secrets.env \
-  -f infra/rust/docker-compose.rust.yml \
-  -f infra/rust/docker-compose.rust.build.yml \
-  -f infra/rust/local.override.yml \
-  up -d --build --wait
+scripts/self_host_env.sh --compose up -d --build --wait
 ```
 
 digest 모드는 빌드 오버레이와 `--build`가 없다. 스크립트가 이 명령을
 출력한다:
 
 ```sh
-env -u MOMO_RUST_IMAGE docker compose --env-file infra/rust/local.secrets.env \
-  -f infra/rust/docker-compose.rust.yml \
-  -f infra/rust/local.override.yml \
-  up -d --pull missing --wait
+scripts/self_host_env.sh --compose up -d --pull missing --wait
 ```
 
 `--wait` 가 붙어 있으므로 **이 명령이 끝났다는 것이 준비가 끝났다는 뜻이다.**
@@ -188,11 +189,8 @@ centrifugo (전송 전용) <── publish ── relay ┘
 의도다 — zsh는 변수를 단어로 쪼개 주지 않는다):
 
 ```sh
-# local-build
-oort() { env -u MOMO_RUST_IMAGE docker compose --env-file infra/rust/local.secrets.env -f infra/rust/docker-compose.rust.yml -f infra/rust/docker-compose.rust.build.yml -f infra/rust/local.override.yml "$@"; }
-
-# published-digest
-oort() { env -u MOMO_RUST_IMAGE docker compose --env-file infra/rust/local.secrets.env -f infra/rust/docker-compose.rust.yml -f infra/rust/local.override.yml "$@"; }
+# 두 모드 공통 — env의 MOMO_SELF_HOST_MODE가 canonical file set을 고른다.
+oort() { scripts/self_host_env.sh --compose "$@"; }
 ```
 
 ```sh

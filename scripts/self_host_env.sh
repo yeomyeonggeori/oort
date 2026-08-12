@@ -43,6 +43,10 @@
 #   MOMO_RUST_IMAGE             --local-build 태그(기본 oort:local)
 #   MOMO_INITIAL_OWNER_EMAIL    기본 owner@oort.local (소문자여야 한다)
 #   MOMO_INITIAL_OWNER_PASSWORD 기본 생성
+#
+# 생성 뒤의 모든 Compose 명령은 이 스크립트의 `--compose` 경유로 실행한다.
+# `--env-file`보다 process env가 우선인 Compose 규칙 때문에, 파일을 만들 때만
+# 검증하고 사용 시점의 ambient env를 그대로 두면 같은 파일이 다른 스택이 된다.
 set -euo pipefail
 umask 077
 
@@ -51,17 +55,29 @@ REPO_ROOT="$(CDPATH='' cd -- "$SCRIPT_DIR/.." && pwd)"
 cd "$REPO_ROOT"
 
 ENV_FILE="infra/rust/local.secrets.env"
-LOCAL_COMPOSE_ARGS="--env-file $ENV_FILE \\
-  -f infra/rust/docker-compose.rust.yml \\
-  -f infra/rust/docker-compose.rust.build.yml \\
-  -f infra/rust/local.override.yml"
-PUBLISHED_COMPOSE_ARGS="--env-file $ENV_FILE \\
-  -f infra/rust/docker-compose.rust.yml \\
-  -f infra/rust/local.override.yml"
 CANONICAL_PUBLISHED_IMAGE="ghcr.io/yeomyeonggeori/oort"
 PUBLISHED_IMAGE_CONSUMERS=7
 REQUESTED_MODE=""
 REQUESTED_IMAGE=""
+REQUESTED_ACTION="prepare"
+COMPOSE_COMMAND_ARGS=()
+
+# Compose contract의 단일 권위는 generated env의 실제 KEY= 행 + canonical file
+# 세 개의 `${KEY...}` interpolation이다. `compose_ambient_keys`가 둘을 실행 시
+# 추출하므로 새 secret/URL/port가 추가돼도 static unset 목록과 갈라지지 않는다.
+# 아래에는 파일 밖에서 동작을 바꾸는 Compose CLI 제어 키만 명시한다.
+COMPOSE_CONTRACT_FILES=(
+  infra/rust/docker-compose.rust.yml
+  infra/rust/docker-compose.rust.build.yml
+  infra/rust/local.override.yml
+)
+COMPOSE_CONTROL_KEYS=(
+  COMPOSE_ANSI COMPOSE_BAKE COMPOSE_CONVERT_WINDOWS_PATHS
+  COMPOSE_DISABLE_ENV_FILE COMPOSE_ENV_FILES COMPOSE_EXPERIMENTAL COMPOSE_FILE
+  COMPOSE_IGNORE_ORPHANS COMPOSE_MENU COMPOSE_PARALLEL_LIMIT
+  COMPOSE_PATH_SEPARATOR COMPOSE_PROFILES COMPOSE_PROGRESS
+  COMPOSE_REMOVE_ORPHANS COMPOSE_STATUS_STDOUT
+)
 
 fail() { printf '[self-host] %s\n' "$*" >&2; exit 1; }
 
@@ -70,8 +86,11 @@ usage() {
 Usage:
   scripts/self_host_env.sh --local-build
   scripts/self_host_env.sh --published-image ghcr.io/yeomyeonggeori/oort@sha256:<64 lowercase hex>
+  scripts/self_host_env.sh --compose <docker-compose arguments...>
 
 No argument is a backwards-compatible alias for --local-build.
+After preparation, use --compose for every start/stop/log command so ambient
+Compose variables cannot override infra/rust/local.secrets.env.
 EOF
 }
 
@@ -88,6 +107,15 @@ while [ "$#" -gt 0 ]; do
       REQUESTED_MODE="published-digest"
       REQUESTED_IMAGE="$2"
       shift 2
+      ;;
+    --compose)
+      [ "$REQUESTED_ACTION" = "prepare" ] || fail "--compose는 한 번만 지정하라."
+      [ -z "$REQUESTED_MODE" ] || fail "--compose와 이미지 생성 모드를 함께 지정할 수 없다."
+      shift
+      [ "$#" -gt 0 ] || fail "--compose 뒤에 docker compose 인자가 필요하다."
+      REQUESTED_ACTION="compose"
+      COMPOSE_COMMAND_ARGS=("$@")
+      set --
       ;;
     -h|--help)
       usage
@@ -132,6 +160,24 @@ validate_env_scalar() {
   esac
 }
 
+validate_owner_email() {
+  local email="$1"
+  validate_env_scalar MOMO_INITIAL_OWNER_EMAIL "$email"
+  [ "${#email}" -le 254 ] &&
+    [[ "$email" =~ ^[a-z0-9][a-z0-9._%+-]{0,63}@[a-z0-9]([a-z0-9.-]{0,187}[a-z0-9])?$ ]] ||
+    fail "MOMO_INITIAL_OWNER_EMAIL은 dotenv-safe 소문자 이메일 형식이어야 한다."
+}
+
+validate_owner_password() {
+  local password="$1"
+  validate_env_scalar MOMO_INITIAL_OWNER_PASSWORD "$password"
+  # Compose dotenv에서 $, quotes, backslash, whitespace, #는 보간/인용/주석
+  # 의미가 있다. 생성 경로는 hex이고, 수동 override도 아래 literal 집합으로
+  # 제한해 파일 bytes와 컨테이너 credential이 정확히 같게 만든다.
+  [[ "$password" =~ ^[-A-Za-z0-9._~!@%^+=,:/]{12,128}$ ]] ||
+    fail "MOMO_INITIAL_OWNER_PASSWORD는 12..128자 dotenv-safe literal이어야 한다."
+}
+
 validate_project_name() {
   local project="$1"
   validate_env_scalar COMPOSE_PROJECT_NAME "$project"
@@ -172,16 +218,87 @@ reject_duplicate_env_keys() {
   [ -z "$duplicate" ] || fail "${ENV_FILE}에 중복 env 키가 있다: $duplicate"
 }
 
+compose_ambient_keys() {
+  local file key
+  {
+    awk -F= '/^[A-Za-z_][A-Za-z0-9_]*=/ { print $1 }' "$ENV_FILE"
+    for file in "${COMPOSE_CONTRACT_FILES[@]}"; do
+      awk '
+        {
+          line = $0
+          while (match(line, /\$\{[A-Za-z_][A-Za-z0-9_]*/)) {
+            print substr(line, RSTART + 2, RLENGTH - 2)
+            line = substr(line, RSTART + RLENGTH)
+          }
+        }
+      ' "$file"
+    done
+    for key in "${COMPOSE_CONTROL_KEYS[@]}"; do
+      printf '%s\n' "$key"
+    done
+  } | LC_ALL=C sort -u
+}
+
+validate_compose_command_args() {
+  local subcommand="${1:-}" argument after_delimiter=0
+  case "$subcommand" in
+    build|config|cp|create|down|events|exec|help|images|kill|logs|ls|pause|port|ps|pull|restart|rm|run|start|stop|top|unpause|up|version|wait|watch) ;;
+    *) fail "--compose는 허용된 compose subcommand로 시작해야 한다." ;;
+  esac
+  for argument in "$@"; do
+    if [ "$after_delimiter" -eq 1 ]; then
+      continue
+    fi
+    if [ "$argument" = "--" ]; then
+      after_delimiter=1
+      continue
+    fi
+    case "$argument" in
+      -f|-f?*|--file|--file=*|-p|-p?*|--project-name|--project-name=*|--env-file|--env-file=*|--project-directory|--project-directory=*|--profile|--profile=*|--all-resources|--ansi|--ansi=*|--compatibility|--dry-run|--parallel|--parallel=*|--progress|--progress=*)
+        fail "--compose에서는 canonical env/file/project/profile 또는 Compose global control을 바꾸는 인자를 사용할 수 없다."
+        ;;
+    esac
+  done
+}
+
+run_self_host_compose() {
+  local mode="$1"
+  shift
+  local key
+  local -a unset_args=() compose_args=(
+    --env-file "$ENV_FILE"
+    -f infra/rust/docker-compose.rust.yml
+  )
+  validate_compose_command_args "$@"
+  for key in "${COMPOSE_CONTRACT_FILES[@]}"; do
+    [ -f "$key" ] || fail "canonical Compose file이 없다: $key"
+  done
+  while IFS= read -r key; do
+    case "$key" in
+      DOCKER_HOST|DOCKER_CONTEXT|DOCKER_CONFIG) continue ;;
+    esac
+    unset_args+=(-u "$key")
+  done < <(compose_ambient_keys)
+  case "$mode" in
+    local-build)
+      compose_args+=(
+        -f infra/rust/docker-compose.rust.build.yml
+        -f infra/rust/local.override.yml
+      )
+      ;;
+    published-digest)
+      compose_args+=(-f infra/rust/local.override.yml)
+      ;;
+    *) fail "저장된 MOMO_SELF_HOST_MODE가 잘못됐다: $mode" ;;
+  esac
+  env "${unset_args[@]}" "$DOCKER_BIN" compose "${compose_args[@]}" "$@"
+}
+
 verify_published_compose_image() {
   local expected_image="$1" rendered_images count
   validate_published_image "$expected_image"
-  rendered_images="$(
-    env -u MOMO_RUST_IMAGE docker compose \
-      --env-file "$ENV_FILE" \
-      -f infra/rust/docker-compose.rust.yml \
-      -f infra/rust/local.override.yml \
-      config --images
-  )" || fail "published-digest Compose 렌더링에 실패했다."
+  rendered_images="$(run_self_host_compose published-digest config --images)" ||
+    fail "published-digest Compose 렌더링에 실패했다."
   count="$(printf '%s\n' "$rendered_images" | awk -v expected="$expected_image" '
     $0 == expected { count += 1 }
     END { print count + 0 }
@@ -191,7 +308,8 @@ verify_published_compose_image() {
 }
 
 command -v openssl >/dev/null 2>&1 || fail "openssl 없음 — 시크릿을 만들 수 없다."
-command -v docker  >/dev/null 2>&1 || fail "docker 없음 — https://docs.docker.com/get-docker/"
+DOCKER_BIN="$(command -v docker || true)"
+[ -n "$DOCKER_BIN" ] || fail "docker 없음 — https://docs.docker.com/get-docker/"
 
 # 이미 쓰이는 포트인가. bash /dev/tcp 로만 재므로 추가 의존이 없다.
 port_busy() {
@@ -216,15 +334,13 @@ pick_port() {
 
 print_next_steps() {
   local mode="$1" web_port="$2" owner_email="$3"
-  local compose_args up_args mode_summary
+  local up_args mode_summary
   case "$mode" in
     local-build)
-      compose_args="$LOCAL_COMPOSE_ARGS"
       up_args="up -d --build --wait"
       mode_summary="로컬 빌드 — 현재 checkout을 server-rust/Dockerfile로 짓는다."
       ;;
     published-digest)
-      compose_args="$PUBLISHED_COMPOSE_ARGS"
       # Pull only absent artifacts. The oort ref is immutable, while `always`
       # would also refresh unrelated mutable helper images such as caddy:2-alpine.
       up_args="up -d --pull missing --wait"
@@ -237,8 +353,7 @@ print_next_steps() {
 [self-host] 준비됐다. 모드: $mode_summary
 [self-host] 다음 한 줄이 스택을 띄운다:
 
-  env -u MOMO_RUST_IMAGE docker compose $compose_args \\
-    $up_args
+  scripts/self_host_env.sh --compose $up_args
 
 [self-host] --wait 가 붙어 있으므로 그 명령이 끝나면 준비가 끝난 것이다.
 [self-host] 브라우저에서 열고 아래로 로그인한다:
@@ -259,6 +374,7 @@ if [ -e "$ENV_FILE" ]; then
   existing_image="$(env_value_once MOMO_RUST_IMAGE)"
   existing_web_port="$(env_value_once MOMO_WEB_PORT)"
   existing_email="$(env_value_once MOMO_INITIAL_OWNER_EMAIL)"
+  existing_password="$(env_value_once MOMO_INITIAL_OWNER_PASSWORD)"
   mode_count="$(env_key_count MOMO_SELF_HOST_MODE)"
   [ "$mode_count" -le 1 ] ||
     fail "${ENV_FILE}의 MOMO_SELF_HOST_MODE 항목은 최대 한 번만 있어야 한다."
@@ -267,7 +383,8 @@ if [ -e "$ENV_FILE" ]; then
     existing_mode="$(env_value_once MOMO_SELF_HOST_MODE)"
   fi
   validate_env_scalar MOMO_RUST_IMAGE "$existing_image"
-  validate_env_scalar MOMO_INITIAL_OWNER_EMAIL "$existing_email"
+  validate_owner_email "$existing_email"
+  validate_owner_password "$existing_password"
   existing_web_port="$(normalize_port MOMO_WEB_PORT "$existing_web_port")"
 
   # #1229로 이미 만든 로컬 파일은 mode marker가 없다. 이미지만 보고
@@ -294,12 +411,18 @@ if [ -e "$ENV_FILE" ]; then
   if [ "$existing_mode" = "published-digest" ]; then
     verify_published_compose_image "$existing_image"
   fi
+  if [ "$REQUESTED_ACTION" = "compose" ]; then
+    run_self_host_compose "$existing_mode" "${COMPOSE_COMMAND_ARGS[@]}"
+    exit $?
+  fi
   printf '[self-host] %s 는 이미 있다 — 그대로 둔다.\n' "$ENV_FILE"
   printf '[self-host] 시크릿을 다시 만들면 이미 마이그레이션된 DB의 롤 비밀번호와 어긋난다.\n'
   printf '[self-host] 정말 처음부터 다시 하려면: 스택을 down -v 로 내리고 이 파일을 지운 뒤 다시 실행.\n'
   print_next_steps "$existing_mode" "$existing_web_port" "${existing_email:-?}"
   exit 0
 fi
+
+[ "$REQUESTED_ACTION" = "prepare" ] || fail "$ENV_FILE 없음 — 먼저 이미지 모드를 선택해 env를 생성하라."
 
 # ---------------------------------------------------------------------------
 # 값
@@ -334,10 +457,11 @@ CENT_PORT="$(pick_port "$REQUESTED_CENT_PORT")"
 RAW_OWNER_EMAIL="${MOMO_INITIAL_OWNER_EMAIL:-owner@oort.local}"
 validate_env_scalar MOMO_INITIAL_OWNER_EMAIL "$RAW_OWNER_EMAIL"
 OWNER_EMAIL="$(printf '%s' "$RAW_OWNER_EMAIL" | LC_ALL=C tr '[:upper:]' '[:lower:]')"
+validate_owner_email "$OWNER_EMAIL"
 # 사람이 브라우저에 타이핑할 값이라 hex로 만든다(96비트). 복붙도 쉽고, base64가
 # 흘리는 +/= 가 env 파일과 셸 인용을 지나며 만드는 사고가 없다.
 OWNER_PASSWORD="${MOMO_INITIAL_OWNER_PASSWORD:-$(openssl rand -hex 12)}"
-validate_env_scalar MOMO_INITIAL_OWNER_PASSWORD "$OWNER_PASSWORD"
+validate_owner_password "$OWNER_PASSWORD"
 
 PG_PASSWORD="$(gen)"
 APP_PASSWORD="$(gen)"

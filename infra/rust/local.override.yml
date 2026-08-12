@@ -1,10 +1,7 @@
 # 로컬 셀프호스트 오버레이 — 브라우저까지 닿게 하는 두 서비스 (#1229).
 # 정본 절차: docs/SELF_HOST.md
 #
-#   docker compose --env-file infra/rust/local.secrets.env \
-#     -f infra/rust/docker-compose.rust.yml \
-#     -f infra/rust/docker-compose.rust.build.yml \
-#     -f infra/rust/local.override.yml up -d --build
+#   scripts/self_host_env.sh --compose up -d --build --wait
 #
 # `docs/SELF_HOST.md` selects one image source. Local-build uses the command
 # above; published-digest omits the build overlay and `--build`, then supplies
