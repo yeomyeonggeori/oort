@@ -1,9 +1,21 @@
 # oort 진행 현황
 
+## Rust/NCP Centrifugo internal-only edge · secret rotation evidence (#1329, 2026-08-12)
+
+- `infra/rust/Caddyfile`이 일반 `/v1/*` 프록시보다 먼저 `/v1/centrifugo/*`를 explicit 403으로 끝내므로 no-header/wrong/current secret 어느 요청도 공개 엣지에서 API 인증 표면에 닿지 않는다. compose-private API의 기존 constant-time 경계(no/old 401, current + malformed body 400)는 바꾸지 않았고 schema/API/DB/제품 동작 변경은 없다.
+- 정적 contract와 mutation/redaction fixture가 deny 누락·순서 역전·API/Centrifugo secret source drift·회전/rollback 문서 누락·과거 공개 401/401/400·hash 불일치·current 401·원문 evidence 유출을 fail-closed로 고정한다. H1 재리뷰 뒤 운영 verifier의 공개 origin은 canonical `infra/rust/Caddyfile` 단일 site에서만 파생하며, attacker/오타/포트/userinfo/path/query/fragment/punycode 불일치는 secret read·Docker exec·network 전에 거절한다. curl은 redirect를 따르지 않고 3xx를 RED로 본다. test-only loopback은 env-file `MOMO_ENV=test` + exact loopback allowlist + synthetic fixture secret을 모두 요구한다.
+- `docs/runbooks/ncp-rust-deploy.md`에 같은 창의 api+centrifugo recreate, old-env 검증, rollback을 고정했다. 이 goal은 운영 secret·NCP 배포를 변경하지 않으므로 실제 `app.oor7.com` reload/403/hash equality/회전 증거는 승인된 배포 창 전까지 `runtime-unverified(public host)`다.
+
 ## Shell layout gate exact-source · 인셋 포커스 계약 (#1314, 2026-08-12)
 
 - `gate:shell` 실행 파일 자체가 매번 현재 checkout의 build를 spawn·await하고, build 실패 또는 산출물 부재는 기존 `dist`가 있어도 preview 전에 fail-closed한다. 수리 전에는 source를 `-2px`로 복구한 뒤에도 앞서 `+2px`로 만든 산출물을 그대로 읽어 전체 gate가 거짓 PASS하는 것을 실측했고, package entrypoint 배선·stale 산출물 + 실패 build·실제 child-process exit 23 fixture가 재발을 RED로 고정한다.
 - 포커스 단정은 값을 복사하지 않고 `tokens.css`의 `@utility focus-ring`을 읽어 `outline-offset == -outline-width`인 인셋 관계를 강제한다. `+2px` fixture는 RED, 실제 `2px/-2px`는 1280/900/760 전 구간과 기존 keyboard/layout 단정에서 PASS했다. 제품 CSS와 시각 디자인은 바꾸지 않았고 이 goal의 별도 `runtime-unverified`는 없다.
+
+## GHCR 발행·셀프호스팅을 현행 Rust 스택으로 일치 (#1266, 2026-08-12)
+
+- 수동 `publish-images` 경로가 은퇴 중인 Swift/QEMU arm64 이미지 대신 라이브와 같은 `server-rust/Dockerfile` 단일 이미지를 native `linux/amd64`로 짓는다. `MOMO_BUILD_SHA=github.sha`를 SPA·OCI revision에 동시에 각인하고 digest 보고·max provenance·SBOM·Apache-2.0 메타데이터를 유지한다. 모든 action은 full commit SHA로 pin됐고, `main` ref 검사와 GitHub `release` Environment owner 승인 경계를 통과한 pushed digest에 `actions/attest` SLSA provenance를 OCI referrer로 발급한다. `sha-<gitsha>`는 이동 가능한 commit locator이며 digest만 불변이다. arm64 공개 artifact는 아직 지원하지 않는다.
+- `scripts/self_host_env.sh`는 `local-build`와 `published-digest`를 env에 기록하는 배타적 모드로 나뉘었다. 발행 모드는 `ghcr.io/yeomyeonggeori/oort@sha256:<64hex>`만 받고 build 오버레이·`--build`를 빼며, mutable tag·잘못된 digest·기존 env의 mode/digest 교체를 쓰기 전에 거절한다. 외부 env-file 값의 LF/CR을 공용 scalar guard로 차단하고 owner email/password는 dotenv-safe literal만 받으며 기존 파일도 재검증한다. 중복 키는 거절하고 포트는 ASCII 10진수 1..65535로 정규화한 뒤에만 산술·연결에 사용한다. 모든 실제 env key·canonical Compose interpolation·Compose control env를 실행 시 process env에서 제거하는 `--compose` launcher가 정본 file set만 호출하고, config-source 교체 argv도 거절한다. 실제 `docker compose config`에서 secret·DB URL·WS URL·3개 port·project/image ambient 충돌이 모두 파일 값으로 수렴하고 앱 소비자 7개가 exact digest임을 확인하며 시크릿은 stdout/오류에 출력하지 않는다.
+- 구조·행동 계약은 main-ref guard, full-SHA action, registry push↔attestation subject name+digest+OCI referrer, deploy-lib의 exact repository+SLSA v1 검증, env newline/dotenv-metachar/duplicate/process override·Compose argv 우회와 산술 주입 RED fixture를 고정한다. 로컬 `buildx --platform linux/amd64 --load`는 실제 이미지를 완성했고, inspect에서 amd64·`momo` 사용자·entrypoint·build SHA/Apache label, 컨테이너 안에서 바이너리 6종+엔트리포인트·LICENSE/NOTICE·SPA SHA stamp, 잘못된 role의 exit 2, 이미지 env의 시크릿 키 0개를 확인했다. `release` Environment는 attended readback으로 required reviewer `kwakseongjae`(id `87296259`)·`prevent_self_review=false`·custom branch policy `main` 하나를 확인했다(무 dispatch). 첫 GHCR publish·실 digest 핀·익명 pull·실 attestation 검증은 owner/M7 후속이라 `runtime-unverified`다. 이미지에 `NOTICE`는 동봉되지만 공개 재배포 전 의존성 귀속 완전성과 사람 법무 검토는 별도 게이트이며 이 티켓이 완결을 주장하지 않는다(법률 자문 아님).
 
 ## GitHub branch protection live payload 호환 (#1318, 2026-08-12)
 
