@@ -1,5 +1,33 @@
 # oort 기획 현재 상태 (Planning Current State)
 
+> **2026-08-12 스냅샷 22 (GPT 5.6 sol · momo-main — #1343 외부 에이전트 축 재검수·사실 교정).** 스냅샷 21을 supersede하는 컴팩트 복원 진입점.
+>
+> **스냅샷 21 교정:** 당시 “산출물 전부 랜딩” 표기는 틀렸다. 리서치·ADR-0162/0163·계획·패킷은 루트의 untracked/dirty 초안이었고 canonical branch에서 읽을 수 없었다. 이 스냅샷 시점에는 #1343 전용 엔진 goal worktree에서 검수·정본화 중이며, PR 리뷰와 `track/engine` 랜딩 전이다. Proposed ADR을 Accepted 또는 구현 완료로 읽지 않는다.
+>
+> **구독·실측 교정:** Grok Bot 공식 안내에는 개인용 **one-time trial**이 있으므로 $200~300 유료 구독을 Wave 0의 필수조건으로 두지 않는다. 다만 실제 계정에 trial과 커스텀 MCP·routine 표면이 노출되는지는 앱에서 아직 확인하지 못했다(`runtime-unverified`). 비밀번호·MFA·토큰을 전달받지 않고, 성재의 앱 설치·동의 승인 뒤 #1344에서 실측한다. trial 미노출 시 구매하지 않고 Grok 프리셋만 blocked로 남긴다.
+>
+> **코드 사실 교정:** `work_tool_profile`은 부재하지 않는다 — `server/Migrations/029_work_tool_profile.sql`·`034_work_tool_profile_env_policy.sql`과 Rust `momo-t3` lifecycle/work-control 소비 경로가 있다. 반면 현행 Rust에는 외부 hosted agent가 접속할 MCP crate/router가 없고, `/v1/mcp/drive` 구현은 퇴역 중인 Swift 표면에만 남아 있다. 따라서 #1345는 “ACP 전부 좌초·원장 0” 복구가 아니라, 살아 있는 Rust 원장·gateway 위에서 stdio ACP/BYOA 포장과 현행 MCP 갭만 다시 산정하는 별도 감사다.
+>
+> **성재 승인 방향:** 런칭 메시지는 **“Bring your hosted agent”**. Grok Bot은 벤더 종속 코어가 아니라 첫 설정 프리셋·실증 대상이다. v0 감지는 roster 스크래핑 대신 봇이 만료되는 proof를 들고 먼저 접속하는 1회 pairing(`pairing_pending → detected → active`)이고, 사람이 이름·채널·권한을 확인한 뒤 별도 active credential proof와 전용 member unpause까지 완료해 활성화한다. UI에는 `pairing_pending`을 “waiting for agent”로 표시한다. **1 Bot = 1 connection = 1 dedicated agent member = 1 deterministic routine**을 기본 단위로 한다.
+>
+> **해제 계약:** 해제 요청 즉시 oort credential을 폐기하고 pause·신규 job/write 차단을 적용한다. 이후 `cleanup_pending`에서 Grok routine과 MCP connector 제거를 안내·확인하며, 공개 삭제 API가 없으면 사용자 확인으로만 `disconnected`에 들어간다. 멤버·메시지·작업 이력은 보존하고 외부 routine 자동 삭제를 약속하지 않는다.
+>
+> **현재 실행 상태:** GitHub Project **oort roadmap #44**에 #1343~#1345를 편성했다. #1343은 M1·In Progress, #1344는 유료구독이 아니라 앱 설치/one-time trial 실측 대기로 blocked, #1345는 현재 런칭 축과 분리된 ACP 감사로 blocked다. ROADMAP에는 이 축을 관전·승인·대화 v0 임계경로를 대체하지 않는 **병렬 런칭 보조축**으로만 둔다. 경계 변경 구현은 ADR-0162 Accepted + BUILD_TICKETS + ready handoff + 구현 이슈가 갖춰진 뒤 시작한다.
+>
+> **다음:** #1343 문서 PR·리뷰 → 성재 ADR-0162 기술계약 승인 → 동시에 #1344 trial 실측(설치 승인 시) → 범용 credential/MCP/pairing → durable inbox/gateway → 웹·Tauri pairing·disconnect, 모바일 read-only → Grok 1-bot E2E. ACP live-chain은 #1345 판정 뒤, managed/self-host catalog는 ADR-0163 별도 승인 뒤 각각 편성한다.
+>
+> 이하 스냅샷 21은 **당시 기록을 원문 보존한 역사 자료**다. 그 안의 `API 전무`, `유료구독 필수`, `work_tool_profile rust 부재`, `전부 랜딩` 판정은 현재 사실이 아니며 스냅샷 22가 명시적으로 대체한다. 구현·승인·계정 판단에는 아래 문장을 인용하지 않는다.
+
+> **2026-08-12 스냅샷 21 (Fable · momo-main — 외부 에이전트 수용 축 개설·sol 2차 핸드오프. PLN-20260812-01).** 컴팩트 복원 진입점.
+>
+> **발단**: Grok Bot(SpaceXAI+Cursor, 08-11 베타) 출시 → 성재 방향 "사용자의 호스팅 봇을 oort 팀메이트로(다이얼인) + 주=연동형(BYOA/ACP)·부=관리형 동봉 호스팅(개별 업데이트 버튼)". 웹 리서치 6기(2배치) 완료 — 인바운드 불가 확정(API 전무+AUP 3중 저촉), 역방향 조건부 성립(커스텀 MCP 커넥터+루틴 웨이크업, Slack 트리거 실동작 검증). 설계 감사: ADR-0102가 이미 "BYOA=핵심" 철학이나 **ADR-0130 ACP 체인이 Swift 퇴역으로 부분 좌초**(MomoACPHost 퇴역·work_tool_profile rust 부재·X-11 정지), 동봉·업데이트는 설계 공백.
+>
+> **산출물(전부 랜딩)**: 리서치 정본 `research/2026-08-12-grok-bot-integration-feasibility.md`·`research/2026-08-12-grok-bot-reverse-teammate-direction.md`(§8 감사) · **ADR-0162 Proposed**(3분류 관리형/연동형/다이얼인형 + Agent Port MCP 표면 — 도구 6종·스코프드 봇 토큰·REST 파사드) · **ADR-0163 Proposed**(agent_catalog·온보딩 "에이전트 고르기"·개별 업데이트 v0=안내→v1=호스트 헬퍼) · 로드맵 `2026-08-12-external-agent-reception-plan.md`(웨이브 R/0/A/1/2/3) · 이슈 **#1343**(sol 검수)·**#1344**(스파이크 — 구독 계정 게이트 blocked)·**#1345**(0130 재랜딩 감사) · **sol 패킷 `handoffs/2026-08-12-sol-external-agent-reception-packet.md`(§부록=성재 복사용 핸드오프 프롬프트)**.
+>
+> **다음**: 성재가 sol에게 핸드오프(프롬프트 준비됨) → sol 검수(#1343)·감사(#1345) → 성재 결정 5건(0162 승인+네이밍·0163 승인·스파이크 계정·Slack 초인종 opt-in·Wave 2 편성). 경계 변경 구현은 Accepted 전 착수 금지.
+>
+> 이하 스냅샷 20:
+
 > **2026-08-11 스냅샷 20 (Fable · momo-main — 검수 배치 1·2 완결 라이브·sol 인수인계).** 컴팩트 복원 진입점.
 >
 > **검수 배치 1(6건)+2(5건) 전부 랜딩·배포**: 라이브 `momo-rust:a5193e5e`(main=engine 0/0, f808d9cb)·마이그 068·centrifugo presence 네임스페이스 발효. ADR-0160(프레즌스)·0161(워크스페이스) **Accepted·구현 완료**, ADR-0124 증보1(알림규칙 v0=DND+멘션예외) 랜딩·성재 최종 승인 대기. 데스크탑 검수앱 `~/Desktop/oort.app`(--debug=dev 가드로 자동업데이트 롤백 원천 차단, #1280). **배포 사고 교훈 성문화**(JOURNAL 8/11): 서버 config 통째 덮기 금지 — 백업+외과 삽입+checkconfig 게이트.

@@ -1,5 +1,11 @@
 # oort 진행 현황
 
+## Bring your hosted agent · Grok pairing 기획 정합 (#1343, 2026-08-12)
+
+- `ROADMAP.md`에 기존 v0 관전·승인·대화 임계경로를 대체하지 않는 병렬 런칭 보조축을 추가하고, 제품 문장을 **“Bring your hosted agent”**로 고정했다. Grok Bot은 코어 종속성이 아니라 첫 setup preset·실증 대상으로 두며, 공식 개인 one-time trial부터 확인하고 trial 미노출 시 구매하지 않는다.
+- ADR-0162는 `Proposed` 상태에서 bot-initiated pairing(`pairing_pending → detected → active`), pairing challenge와 active credential 분리, **one Bot=one connection=one dedicated agent member=one routine**, 별도 active proof와 같은 activation 경계의 member unpause, 기존 gateway/message spine의 MCP thin binding, channel-local `message.seq`와 별도 durable inbox cursor, revoke 후 routine·connector cleanup을 결정 후보로 정리했다. ADR-0163 관리형 카탈로그와 #1345 ACP/self-hosted host 감사는 별도 deferred 축이다.
+- 현재 변경은 문서·계획 정합뿐이며 제품/API/schema/runtime 동작은 바꾸지 않았다. 실제 계정의 Grok trial·custom MCP·routine·cleanup UI는 공식 앱 설치 승인 뒤 #1344에서 확인할 `runtime-unverified`이고, 공개 credential/API/schema 구현은 ADR-0162 Accepted 전 시작하지 않는다.
+
 ## Rust/NCP Centrifugo internal-only edge · secret rotation evidence (#1329, 2026-08-12)
 
 - `infra/rust/Caddyfile`이 일반 `/v1/*` 프록시보다 먼저 `/v1/centrifugo/*`를 explicit 403으로 끝내므로 no-header/wrong/current secret 어느 요청도 공개 엣지에서 API 인증 표면에 닿지 않는다. compose-private API의 기존 constant-time 경계(no/old 401, current + malformed body 400)는 바꾸지 않았고 schema/API/DB/제품 동작 변경은 없다.
