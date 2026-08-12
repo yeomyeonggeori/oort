@@ -168,14 +168,22 @@ python3 scripts/tests/test_publish_images_contract.py
 scripts/tests/test_self_host_env_modes.sh
 ```
 
-The first keeps the manual workflow on `server-rust/Dockerfile`, native
+The first parses the workflow and keeps it on `server-rust/Dockerfile`, native
 `linux/amd64`, exact `MOMO_BUILD_SHA`, one seven-command image, embedded
-LICENSE/NOTICE, provenance, and SBOM. The second executes isolated fixtures and
-proves the two quickstart modes do not cross: local-build includes the build
-overlay and `--build`; published-digest requires the canonical full sha256 ref,
-omits both local-build inputs, and refuses mutable tags or an in-place mode or
-digest switch before modifying an existing env file. Neither test dispatches a
-workflow or pulls from GHCR.
+LICENSE/NOTICE, provenance, and SBOM. It behaviorally exercises the `main` ref
+guard and mutates full-SHA action pins, registry push, and the attestation
+subject name/digest/OCI-referrer bindings to prove each removal turns red. A fake
+`gh` also proves the deploy library verifies the selected OCI digest against the
+`yeomyeonggeori/oort` repository and SLSA provenance v1.
+
+The second executes isolated fixtures and proves the two quickstart modes do
+not cross: local-build includes the build overlay and `--build`;
+published-digest requires the canonical full sha256 ref and omits both. It also
+rejects LF/CR env-file injection, duplicate keys, process-env image overrides,
+and non-decimal arithmetic input before modifying an env file. A real
+`docker compose config --images` assertion locks all seven application
+consumers to the exact digest. Neither test dispatches a workflow nor pulls
+from GHCR.
 
 ### OpenAPI contract drift gate (MOMO-389)
 

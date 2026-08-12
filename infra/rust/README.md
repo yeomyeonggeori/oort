@@ -28,6 +28,12 @@
 | `docker-compose.push.build.yml` | 위 오버레이의 로컬 빌드(`relay/PushRelay/Dockerfile`) |
 | `push-relay.env.example` | 푸시 경로 env 템플릿. `rust-smoke.secrets.env` **위에** 겹쳐 쓴다 |
 
+공개 digest 형상은 현재 `linux/amd64` 하나뿐이고 native `linux/arm64`/Apple
+Silicon pull은 지원하지 않는다. 수동 발행은 `main` ref와 GitHub `release`
+Environment owner 승인 경계 뒤에만 진행하며, tag가 아니라 pushed digest에 SLSA v1
+provenance를 결속한다. 실제 첫 dispatch와 공개 digest 검증은 아직
+`runtime-unverified`다.
+
 푸시 오버레이는 `docker-compose.rust.yml`을 **한 줄도 바꾸지 않는다** — 평소의
 `momorust up -d`는 relay를 띄우지도, 새 변수에서 깨지지도 않는다. 절차는
 `docs/cicd/12-push-relay-deploy-runbook.md`.
@@ -233,7 +239,7 @@ prod(`momo-pgdata`)와 분리돼 있다. 다른 프로젝트명으로 띄우면 
 
 | 런북 단계 | 이 디렉터리에서 |
 |---|---|
-| 3-1 이미지 퍼블리시 확인 | 수동 `publish-images.yml`이 `server-rust/Dockerfile`를 native `linux/amd64`로 빌드하는 경로는 #1266에서 정본화. 실 dispatch·digest 핀·익명 pull은 owner/M7 후속(`runtime-unverified`) |
+| 3-1 이미지 퍼블리시 확인 | 수동 `publish-images.yml`이 `main`+`release` 승인 경계에서 `server-rust/Dockerfile`를 native `linux/amd64`로 빌드하고 pushed digest에 SLSA v1 provenance를 발급하는 경로는 #1266에서 정본화. arm64는 미지원. 실 dispatch·digest 핀·익명 pull·attestation 검증은 owner/M7 후속(`runtime-unverified`) |
 | 3-3 Docker 설치 | 그대로 |
 | 3-4 스택 기동 | `docker-compose.rust.yml`(caddy·redis·worker 제외판). `MOMO_RUST_IMAGE`만 퍼블리시된 ref로 바꾸면 build 오버레이 없이 pull 경로 |
 | 3-5 마이그레이션 001~059 | `migrate` 서비스(psql 러너). seed 모드는 NCP에서 `none` |

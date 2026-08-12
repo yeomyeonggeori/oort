@@ -1,6 +1,7 @@
 # oort Rust multi-command image publication for source-checkout-free hosts.
-# Manual-only: owner approval and the release gates remain required before a
-# dispatch. This workflow prepares a package; it does not authorize a release.
+# Manual-only: the `release` GitHub Environment is the owner-approval boundary,
+# and the selected workflow ref must be main. Repository Environment protection
+# still needs an attended owner setup before the first dispatch.
 #
 # The artifact matches the live stack: `server-rust/Dockerfile`, the current
 # `clients/web` bundle, and native linux/amd64. A future arm64 lane must use a
@@ -32,27 +33,40 @@ jobs:
     name: publish oort Rust image (linux/amd64)
     runs-on: ubuntu-24.04
     timeout-minutes: 90
+    environment: release
     outputs:
       image: ${{ env.IMAGE }}
       digest: ${{ steps.build.outputs.digest }}
     steps:
+      - name: Require a main-branch dispatch
+        env:
+          DISPATCH_REF: ${{ github.ref }}
+        run: |
+          if [ "$DISPATCH_REF" != "refs/heads/main" ]; then
+            echo "::error::publish-images must be dispatched from refs/heads/main (got $DISPATCH_REF)"
+            exit 1
+          fi
+
       # 첫 실행 전 최신 메이저로 시작한다 — v7 breaking(fork PR 체크아웃 차단)은
       # 이 레포 트리거에 해당 없음(W-DEP #667 판정).
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
 
       - name: Authenticate to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push immutable multi-command image
+      # `sha-<gitsha>` is a convenient commit locator, not an immutable
+      # registry identity: a writer can move a tag. Only the returned digest is
+      # immutable and every downstream trust step binds to that digest.
+      - name: Build and push commit-addressed multi-command image
         id: build
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: .
           file: server-rust/Dockerfile
@@ -76,7 +90,19 @@ jobs:
           provenance: mode=max
           sbom: true
 
-      - name: Report immutable image digest
+      - name: Attest the pushed image digest
+        id: attest
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+          # The attestation API + OCI referrer are sufficient for
+          # `gh attestation verify`. Avoid artifact-metadata:write by not
+          # creating the optional organization storage record.
+          create-storage-record: false
+
+      - name: Report digest-pinned image
         env:
           DIGEST: ${{ steps.build.outputs.digest }}
         run: |

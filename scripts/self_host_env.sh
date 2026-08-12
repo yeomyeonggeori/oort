@@ -59,6 +59,7 @@ PUBLISHED_COMPOSE_ARGS="--env-file $ENV_FILE \\
   -f infra/rust/docker-compose.rust.yml \\
   -f infra/rust/local.override.yml"
 CANONICAL_PUBLISHED_IMAGE="ghcr.io/yeomyeonggeori/oort"
+PUBLISHED_IMAGE_CONSUMERS=7
 REQUESTED_MODE=""
 REQUESTED_IMAGE=""
 
@@ -101,20 +102,92 @@ done
 
 validate_local_image() {
   local image="$1"
+  validate_env_scalar MOMO_RUST_IMAGE "$image"
   # `grep` would validate line by line: a valid first line followed by an
   # injected `KEY=value` line could then enter the generated env file. Match
   # the Bash string as one value so embedded newlines fail closed.
   [[ "$image" =~ ^[a-z0-9][a-z0-9./:_-]*$ ]] ||
-    fail "로컬 빌드 이미지는 공백 없는 소문자 OCI tag여야 한다: $image"
+    fail "로컬 빌드 이미지는 공백 없는 소문자 OCI tag여야 한다."
   case "$image" in
-    *@*) fail "--local-build에서는 digest ref를 받지 않는다: $image" ;;
+    *@*) fail "--local-build에서는 digest ref를 받지 않는다." ;;
   esac
 }
 
 validate_published_image() {
   local image="$1"
+  validate_env_scalar MOMO_RUST_IMAGE "$image"
   [[ "$image" =~ ^ghcr\.io/yeomyeonggeori/oort@sha256:[0-9a-f]{64}$ ]] ||
     fail "공개 이미지는 ${CANONICAL_PUBLISHED_IMAGE}@sha256:<64 lowercase hex>로 pin해야 한다."
+}
+
+# Docker env files are line-oriented. Every external value written to one must
+# remain one scalar line; otherwise a password can become a second KEY=value
+# assignment. POSIX argv/environment entries cannot contain NUL (execve rejects
+# it and Bash cannot represent it); reject both representable record separators
+# before the file exists. Diagnostics name only the key, never a secret value.
+validate_env_scalar() {
+  local key="$1" value="$2"
+  case "$value" in
+    *$'\n'*|*$'\r'*) fail "$key 값에는 LF/CR 줄바꿈을 넣을 수 없다." ;;
+  esac
+}
+
+validate_project_name() {
+  local project="$1"
+  validate_env_scalar COMPOSE_PROJECT_NAME "$project"
+  [[ "$project" =~ ^[a-z0-9][a-z0-9_-]*$ ]] && [ "${#project}" -le 63 ] ||
+    fail "COMPOSE_PROJECT_NAME은 63자 이하 소문자 영숫자·_·- 형식이어야 한다."
+}
+
+normalize_port() {
+  local key="$1" raw="$2" port
+  validate_env_scalar "$key" "$raw"
+  [[ "$raw" =~ ^[0123456789]{1,5}$ ]] ||
+    fail "$key 값은 1..65535 범위의 ASCII 10진수여야 한다."
+  port=$((10#$raw))
+  [ "$port" -ge 1 ] && [ "$port" -le 65535 ] ||
+    fail "$key 값은 1..65535 범위의 ASCII 10진수여야 한다."
+  printf '%s' "$port"
+}
+
+env_key_count() {
+  local key="$1"
+  awk -v key="$key" 'index($0, key "=") == 1 { count += 1 } END { print count + 0 }' "$ENV_FILE"
+}
+
+env_value_once() {
+  local key="$1" count
+  count="$(env_key_count "$key")"
+  [ "$count" -eq 1 ] || fail "${ENV_FILE}의 $key 항목은 정확히 한 번 있어야 한다."
+  awk -v key="$key" 'index($0, key "=") == 1 { print substr($0, length(key) + 2) }' "$ENV_FILE"
+}
+
+reject_duplicate_env_keys() {
+  local duplicate
+  duplicate="$(awk -F= '
+    /^[A-Za-z_][A-Za-z0-9_]*=/ {
+      if (++seen[$1] == 2) { print $1; exit }
+    }
+  ' "$ENV_FILE")"
+  [ -z "$duplicate" ] || fail "${ENV_FILE}에 중복 env 키가 있다: $duplicate"
+}
+
+verify_published_compose_image() {
+  local expected_image="$1" rendered_images count
+  validate_published_image "$expected_image"
+  rendered_images="$(
+    env -u MOMO_RUST_IMAGE docker compose \
+      --env-file "$ENV_FILE" \
+      -f infra/rust/docker-compose.rust.yml \
+      -f infra/rust/local.override.yml \
+      config --images
+  )" || fail "published-digest Compose 렌더링에 실패했다."
+  count="$(printf '%s\n' "$rendered_images" | awk -v expected="$expected_image" '
+    $0 == expected { count += 1 }
+    END { print count + 0 }
+  ')"
+  [ "$count" -eq "$PUBLISHED_IMAGE_CONSUMERS" ] ||
+    fail "published-digest Compose의 앱 이미지가 pin과 다르다(expected consumers=$PUBLISHED_IMAGE_CONSUMERS, matched=$count)."
 }
 
 command -v openssl >/dev/null 2>&1 || fail "openssl 없음 — 시크릿을 만들 수 없다."
@@ -129,7 +202,11 @@ port_busy() {
 
 # 요청한 포트가 비어 있으면 그대로, 아니면 비어 있는 다음 포트를 돌려준다.
 pick_port() {
-  local port="$1" limit=$((${1} + 40))
+  local port="$1" limit
+  # The caller has normalized `port`. Never feed an untrusted string to Bash
+  # arithmetic: arithmetic expressions recursively evaluate their contents.
+  limit=$((port + 40))
+  [ "$limit" -le 65536 ] || limit=65536
   while [ "$port" -lt "$limit" ]; do
     port_busy "$port" || { printf '%s' "$port"; return 0; }
     port=$((port + 1))
@@ -138,7 +215,7 @@ pick_port() {
 }
 
 print_next_steps() {
-  local mode="$1" web_port="$2" owner_email="$3" owner_password="$4"
+  local mode="$1" web_port="$2" owner_email="$3"
   local compose_args up_args mode_summary
   case "$mode" in
     local-build)
@@ -160,7 +237,7 @@ print_next_steps() {
 [self-host] 준비됐다. 모드: $mode_summary
 [self-host] 다음 한 줄이 스택을 띄운다:
 
-  docker compose $compose_args \\
+  env -u MOMO_RUST_IMAGE docker compose $compose_args \\
     $up_args
 
 [self-host] --wait 가 붙어 있으므로 그 명령이 끝나면 준비가 끝난 것이다.
@@ -168,9 +245,9 @@ print_next_steps() {
 
   http://localhost:${web_port}
   email    ${owner_email}
-  password ${owner_password}
+  password $ENV_FILE 의 MOMO_INITIAL_OWNER_PASSWORD 값
 
-[self-host] 이 자격증명은 $ENV_FILE 안에도 있다(파일 권한 600).
+[self-host] 비밀번호는 stdout에 쓰지 않는다. $ENV_FILE 에서 직접 확인하라(파일 권한 600).
 EOF
 }
 
@@ -178,11 +255,20 @@ EOF
 # 이미 있으면 다시 만들지 않는다
 # ---------------------------------------------------------------------------
 if [ -e "$ENV_FILE" ]; then
-  existing_mode="$(sed -n 's/^MOMO_SELF_HOST_MODE=//p' "$ENV_FILE" | head -1)"
-  existing_image="$(sed -n 's/^MOMO_RUST_IMAGE=//p' "$ENV_FILE" | head -1)"
-  existing_web_port="$(sed -n 's/^MOMO_WEB_PORT=//p' "$ENV_FILE" | head -1)"
-  existing_email="$(sed -n 's/^MOMO_INITIAL_OWNER_EMAIL=//p' "$ENV_FILE" | head -1)"
-  existing_password="$(sed -n 's/^MOMO_INITIAL_OWNER_PASSWORD=//p' "$ENV_FILE" | head -1)"
+  reject_duplicate_env_keys
+  existing_image="$(env_value_once MOMO_RUST_IMAGE)"
+  existing_web_port="$(env_value_once MOMO_WEB_PORT)"
+  existing_email="$(env_value_once MOMO_INITIAL_OWNER_EMAIL)"
+  mode_count="$(env_key_count MOMO_SELF_HOST_MODE)"
+  [ "$mode_count" -le 1 ] ||
+    fail "${ENV_FILE}의 MOMO_SELF_HOST_MODE 항목은 최대 한 번만 있어야 한다."
+  existing_mode=""
+  if [ "$mode_count" -eq 1 ]; then
+    existing_mode="$(env_value_once MOMO_SELF_HOST_MODE)"
+  fi
+  validate_env_scalar MOMO_RUST_IMAGE "$existing_image"
+  validate_env_scalar MOMO_INITIAL_OWNER_EMAIL "$existing_email"
+  existing_web_port="$(normalize_port MOMO_WEB_PORT "$existing_web_port")"
 
   # #1229로 이미 만든 로컬 파일은 mode marker가 없다. 이미지만 보고
   # 가역적으로 승격하되, digest가 없는 ref를 published로 추정하지 않는다.
@@ -197,7 +283,7 @@ if [ -e "$ENV_FILE" ]; then
   case "$existing_mode" in
     local-build) validate_local_image "$existing_image" ;;
     published-digest) validate_published_image "$existing_image" ;;
-    *) fail "${ENV_FILE}의 MOMO_SELF_HOST_MODE가 잘못됐다: $existing_mode" ;;
+    *) fail "${ENV_FILE}의 MOMO_SELF_HOST_MODE가 잘못됐다." ;;
   esac
   if [ -n "$REQUESTED_MODE" ] && [ "$REQUESTED_MODE" != "$existing_mode" ]; then
     fail "${ENV_FILE}은 $existing_mode 모드다. 볼륨을 내리고 env를 지운 뒤 모드를 바꾸라."
@@ -205,10 +291,13 @@ if [ -e "$ENV_FILE" ]; then
   if [ "$REQUESTED_MODE" = "published-digest" ] && [ "$REQUESTED_IMAGE" != "$existing_image" ]; then
     fail "${ENV_FILE}이 다른 digest를 pin하고 있다. 업그레이드는 별도 절차로 하라."
   fi
+  if [ "$existing_mode" = "published-digest" ]; then
+    verify_published_compose_image "$existing_image"
+  fi
   printf '[self-host] %s 는 이미 있다 — 그대로 둔다.\n' "$ENV_FILE"
   printf '[self-host] 시크릿을 다시 만들면 이미 마이그레이션된 DB의 롤 비밀번호와 어긋난다.\n'
   printf '[self-host] 정말 처음부터 다시 하려면: 스택을 down -v 로 내리고 이 파일을 지운 뒤 다시 실행.\n'
-  print_next_steps "$existing_mode" "${existing_web_port:-8088}" "${existing_email:-?}" "${existing_password:-?}"
+  print_next_steps "$existing_mode" "$existing_web_port" "${existing_email:-?}"
   exit 0
 fi
 
@@ -218,6 +307,7 @@ fi
 gen() { openssl rand -hex 24; }
 
 PROJECT="${COMPOSE_PROJECT_NAME:-oort}"
+validate_project_name "$PROJECT"
 MODE="${REQUESTED_MODE:-local-build}"
 case "$MODE" in
   local-build)
@@ -231,22 +321,40 @@ case "$MODE" in
   *) fail "이미지 모드가 잘못됐다: $MODE" ;;
 esac
 
-WEB_PORT="$(pick_port "${MOMO_WEB_PORT:-8088}")"
-API_PORT="$(pick_port "${MOMO_RUST_API_PORT:-8080}")"
-CENT_PORT="$(pick_port "${CENT_HOST_PORT:-8000}")"
+REQUESTED_WEB_PORT="$(normalize_port MOMO_WEB_PORT "${MOMO_WEB_PORT:-8088}")"
+REQUESTED_API_PORT="$(normalize_port MOMO_RUST_API_PORT "${MOMO_RUST_API_PORT:-8080}")"
+REQUESTED_CENT_PORT="$(normalize_port CENT_HOST_PORT "${CENT_HOST_PORT:-8000}")"
+WEB_PORT="$(pick_port "$REQUESTED_WEB_PORT")"
+API_PORT="$(pick_port "$REQUESTED_API_PORT")"
+CENT_PORT="$(pick_port "$REQUESTED_CENT_PORT")"
 
 # 오너 주소는 소문자여야 한다: 자격증명은 lower(btrim(...))로 저장되는데 로그인
 # 조회는 입력을 그대로 비교하므로, 대문자가 섞이면 계정은 생기고 로그인은 영영
 # 안 된다. migrate가 부팅에서 거부하지만, 여기서 미리 막는 편이 싸다.
-OWNER_EMAIL="$(printf '%s' "${MOMO_INITIAL_OWNER_EMAIL:-owner@oort.local}" | tr 'A-Z' 'a-z')"
+RAW_OWNER_EMAIL="${MOMO_INITIAL_OWNER_EMAIL:-owner@oort.local}"
+validate_env_scalar MOMO_INITIAL_OWNER_EMAIL "$RAW_OWNER_EMAIL"
+OWNER_EMAIL="$(printf '%s' "$RAW_OWNER_EMAIL" | LC_ALL=C tr '[:upper:]' '[:lower:]')"
 # 사람이 브라우저에 타이핑할 값이라 hex로 만든다(96비트). 복붙도 쉽고, base64가
 # 흘리는 +/= 가 env 파일과 셸 인용을 지나며 만드는 사고가 없다.
 OWNER_PASSWORD="${MOMO_INITIAL_OWNER_PASSWORD:-$(openssl rand -hex 12)}"
+validate_env_scalar MOMO_INITIAL_OWNER_PASSWORD "$OWNER_PASSWORD"
 
 PG_PASSWORD="$(gen)"
 APP_PASSWORD="$(gen)"
 RELAY_PASSWORD="$(gen)"
 WORKER_PASSWORD="$(gen)"
+JWT_SECRET="$(gen)"
+CENT_TOKEN_SECRET="$(gen)"
+CENT_API_SECRET="$(gen)"
+CENT_PROXY_SECRET_VALUE="$(gen)"
+PROVIDER_LINK_SECRET="$(gen)"
+
+# Keep every interpolation used by the env-file sink on the same scalar guard.
+for key in MODE IMAGE PG_PASSWORD APP_PASSWORD RELAY_PASSWORD WORKER_PASSWORD \
+           JWT_SECRET CENT_TOKEN_SECRET CENT_API_SECRET CENT_PROXY_SECRET_VALUE \
+           PROVIDER_LINK_SECRET WEB_PORT API_PORT CENT_PORT OWNER_EMAIL; do
+  validate_env_scalar "$key" "${!key}"
+done
 
 mkdir -p "$(dirname "$ENV_FILE")"
 cat >"$ENV_FILE" <<EOF
@@ -276,11 +384,11 @@ MOMO_APP_DATABASE_URL=postgres://momo_app:$APP_PASSWORD@postgres:5432/momo
 RELAY_DATABASE_URL=postgres://momo_relay:$RELAY_PASSWORD@postgres:5432/momo
 
 # --- 앱 시크릿 --------------------------------------------------------------
-JWT_HMAC=$(gen)
-CENT_TOKEN_HMAC=$(gen)
-CENT_API_KEY=$(gen)
-CENT_PROXY_SECRET=$(gen)
-PROVIDER_LINK_MASTER_KEY=$(gen)
+JWT_HMAC=$JWT_SECRET
+CENT_TOKEN_HMAC=$CENT_TOKEN_SECRET
+CENT_API_KEY=$CENT_API_SECRET
+CENT_PROXY_SECRET=$CENT_PROXY_SECRET_VALUE
+PROVIDER_LINK_MASTER_KEY=$PROVIDER_LINK_SECRET
 
 # --- 주소 -------------------------------------------------------------------
 # 브라우저가 여는 곳. SPA · /v1 · /connection 이 전부 이 오리진에서 나오므로
@@ -308,11 +416,16 @@ MOMO_INITIAL_OWNER_PASSWORD=$OWNER_PASSWORD
 EOF
 chmod 600 "$ENV_FILE"
 
+reject_duplicate_env_keys
+if [ "$MODE" = "published-digest" ]; then
+  verify_published_compose_image "$IMAGE"
+fi
+
 printf '[self-host] %s 를 만들었다 (권한 600).\n' "$ENV_FILE"
-for requested in "MOMO_WEB_PORT ${MOMO_WEB_PORT:-8088} $WEB_PORT" \
-                 "MOMO_RUST_API_PORT ${MOMO_RUST_API_PORT:-8080} $API_PORT" \
-                 "CENT_HOST_PORT ${CENT_HOST_PORT:-8000} $CENT_PORT"; do
-  set -- $requested
-  [ "$2" = "$3" ] || printf '[self-host] 포트 %s 가 사용 중이라 %s=%s 로 잡았다.\n' "$2" "$1" "$3"
-done
-print_next_steps "$MODE" "$WEB_PORT" "$OWNER_EMAIL" "$OWNER_PASSWORD"
+[ "$REQUESTED_WEB_PORT" = "$WEB_PORT" ] ||
+  printf '[self-host] 포트 %s 가 사용 중이라 MOMO_WEB_PORT=%s 로 잡았다.\n' "$REQUESTED_WEB_PORT" "$WEB_PORT"
+[ "$REQUESTED_API_PORT" = "$API_PORT" ] ||
+  printf '[self-host] 포트 %s 가 사용 중이라 MOMO_RUST_API_PORT=%s 로 잡았다.\n' "$REQUESTED_API_PORT" "$API_PORT"
+[ "$REQUESTED_CENT_PORT" = "$CENT_PORT" ] ||
+  printf '[self-host] 포트 %s 가 사용 중이라 CENT_HOST_PORT=%s 로 잡았다.\n' "$REQUESTED_CENT_PORT" "$CENT_PORT"
+print_next_steps "$MODE" "$WEB_PORT" "$OWNER_EMAIL"
