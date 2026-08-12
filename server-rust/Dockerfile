@@ -241,13 +241,10 @@ RUN set -eux; \
     test -s /opt/momo/web/index.html; \
     momo-migrate --help >/dev/null
 
-# The runner resolves every path from the environment (its compiled-in defaults
-# are repo-relative and would not exist here). Nothing secret is baked in.
-ENV MOMO_MIGRATIONS_DIR=/opt/momo/migrations \
-    MOMO_BOOTSTRAP_ROLES_SQL=/opt/momo/sql/bootstrap_roles.sql \
-    MOMO_RUNTIME_ROLES_SQL=/opt/momo/sql/bootstrap_runtime_roles.sql \
-    MOMO_SET_OWNER_SQL=/opt/momo/sql/set_initial_owner.sql \
-    MOMO_BOOTSTRAP_OWNER_SQL=/opt/momo/sql/bootstrap_owner_if_absent.sql
+# The binary binds the production image to these baked `/opt/momo` payloads and
+# rejects every migration/role/owner path override. Source-checkout fixtures may
+# still use repo-relative paths when this immutable image marker is absent.
+ENV MOMO_IN_CONTAINER=1
 
 USER momo
 WORKDIR /opt/momo

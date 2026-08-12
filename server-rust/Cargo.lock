@@ -1244,7 +1244,14 @@ dependencies = [
 name = "momo-migrate"
 version = "0.0.0"
 dependencies = [
+ "chrono",
+ "hex",
+ "hmac",
+ "libc",
  "momo-db",
+ "serde",
+ "serde_json",
+ "sha2",
 ]
 
 [[package]]

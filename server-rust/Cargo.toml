@@ -47,6 +47,7 @@ hex = "0.4"
 # Both webhook families are HMAC-SHA256 over a domain-separated string, which is
 # exactly what lets Postgres store a random *reference* instead of a secret.
 hmac = "0.12"
+libc = "0.2"
 
 # auth
 jsonwebtoken = "9"

@@ -23,6 +23,8 @@ Major bundled/linked components:
 - LiveKit JavaScript Client SDK / livekit-client (Apache-2.0) — https://github.com/livekit/client-sdk-js
 - SwiftProtobuf (Apache-2.0) — https://github.com/apple/swift-protobuf
 - pgvector (PostgreSQL License) — https://github.com/pgvector/pgvector
+- pgBackRest (MIT) — https://github.com/pgbackrest/pgbackrest
+- libssh2 (BSD-3-Clause/ISC) — https://github.com/libssh2/libssh2
 - Node.js (MIT) — https://github.com/nodejs/node
 - eve (Apache-2.0) — https://github.com/vercel/eve
 - Workflow Postgres World (Apache-2.0) — https://github.com/vercel/workflow

@@ -104,8 +104,12 @@ local_output="$local_fixture/output"
 run_generator "$local_fixture" "$local_output" 49100 --local-build
 grep -Fxq 'MOMO_SELF_HOST_MODE=local-build' "$local_fixture/infra/rust/local.secrets.env"
 grep -Fxq 'MOMO_RUST_IMAGE=oort:local' "$local_fixture/infra/rust/local.secrets.env"
+grep -Fxq 'MOMO_MIGRATE_ENV=development' "$local_fixture/infra/rust/local.secrets.env"
+grep -Fxq 'MOMO_PITR_EVIDENCE_REQUIRED=0' "$local_fixture/infra/rust/local.secrets.env"
+grep -Fxq 'MOMO_PITR_BOOTSTRAP_EMPTY=0' "$local_fixture/infra/rust/local.secrets.env"
 test "$(file_mode "$local_fixture/infra/rust/local.secrets.env")" = "600"
 grep -Fq 'scripts/self_host_env.sh --compose' "$local_output"
+grep -Fq 'production 백업/PITR가 아니다' "$local_output"
 grep -Fq -- 'up -d --build --wait' "$local_output"
 if grep -Fq -- '--pull missing' "$local_output"; then
   echo "local-build output unexpectedly contains pull-only argv" >&2
@@ -185,6 +189,9 @@ jq -e \
     .services.api.environment.JWT_HMAC == $jwt and
     .services.api.environment.DATABASE_URL == $db and
     .services.api.environment.MOMO_CENTRIFUGO_WS_URL == $ws and
+    .services.migrate.environment.MOMO_ENV == "development" and
+    .services.migrate.environment.MOMO_PITR_EVIDENCE_REQUIRED == "0" and
+    .services.migrate.environment.MOMO_PITR_BOOTSTRAP_EMPTY == "0" and
     .services.web.image == "caddy:2-alpine" and
     .services.web.ports[0].published == "49200" and
     .services.api.ports[0].published == "49201" and

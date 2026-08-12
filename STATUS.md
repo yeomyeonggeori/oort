@@ -1,5 +1,11 @@
 # oort 진행 현황
 
+## Rust PG18 pgBackRest/WAL/PITR 폐곡선 · signed migration gate (#1330, 2026-08-12)
+
+- 기존 PG18 단일 named volume·`archive_mode=off` 경로와 logical `pg_dump` smoke를 production backup 증거로 보지 않는다. pinned PostgreSQL 18+pgBackRest image와 encrypted POSIX/S3-compatible overlay가 exact wrapper archive command·60초 timeout·secret-file-only 경계를 고정하고, app/database 두 image는 각각 SBOM·max provenance·returned-digest SLSA attestation 뒤에만 release summary를 낸다.
+- 로컬 closed loop는 marker A → online full backup → backup 이후 target UTC → marker B+강제 WAL archive → source와 다른 새 volume의 time-target restore → A=1/B=0·같은 system identifier·promote·archive off를 실측한다. active/used/nonempty restore target, repo/cipher/archive drift와 labeled resource leak은 evidence 생성 전에 RED다.
+- `momo-migrate`는 production/staging SQL 전에 strict `momo-pitr-evidence/v1` HMAC, 15분 freshness, caller nonce·commit, source/restore/repo, 두 image digest, candidate migration bytes, live system identifier, backup/LSN/WAL/A-B/cleanup을 재검증하고, live migration 이력이 candidate set을 벗어난 schema downgrade도 거절한다. runner의 daemon-wide fixed-name lock container가 첫 lineage 검사부터 최종 healthy rollout까지 모든 signed migrate를 직렬화해 newer-schema/older-image 교차 배포를 막는다. 첫 install의 empty-bootstrap만 실제 빈 DB에서 별도 허용하고 local quickstart는 명시적 development warning posture다. 실제 NCP attach/S3 object-store/첫 GHCR database image publish·pull·attestation, scheduled full/differential host timer·실패 알림, #1332 귀속·사람 법무는 attended 후속 전까지 각각 `runtime-unverified(public host/schedule/legal)`다.
+
 ## Rust/NCP Centrifugo internal-only edge · secret rotation evidence (#1329, 2026-08-12)
 
 - `infra/rust/Caddyfile`이 일반 `/v1/*` 프록시보다 먼저 `/v1/centrifugo/*`를 explicit 403으로 끝내므로 no-header/wrong/current secret 어느 요청도 공개 엣지에서 API 인증 표면에 닿지 않는다. compose-private API의 기존 constant-time 경계(no/old 401, current + malformed body 400)는 바꾸지 않았고 schema/API/DB/제품 동작 변경은 없다.

@@ -1,0 +1,77 @@
+# Production backup/PITR overlay (#1330, ADR-0002).
+#
+# Render together with docker-compose.rust.yml. The PostgreSQL replacement is
+# digest-only and contains the pgBackRest binary used by archive_command. The
+# encrypted repository is a distinct, project-scoped volume. A restore target
+# is deliberately absent: the rehearsal creates a run-scoped volume only after
+# proving it is neither the active source nor mounted by another container.
+#
+# Secret files are host bind mounts, not Compose `secrets:`. Local Compose may
+# ignore uid/gid/mode on file-backed secrets; the image and migrate binary both
+# require owner-only files and refuse symlinks/world-readable material.
+
+services:
+  postgres:
+    image: ${MOMO_POSTGRES_PGBACKREST_IMAGE:?set digest-only MOMO_POSTGRES_PGBACKREST_IMAGE}
+    command:
+      - postgres
+      - -c
+      - archive_mode=on
+      - -c
+      - archive_timeout=60s
+      - -c
+      - archive_command=/usr/local/bin/oort-pgbackrest --stanza=momo archive-push %p
+    volumes:
+      - pgdata:/var/lib/postgresql
+      - pgbackrest_repo:/var/lib/pgbackrest
+      - ./pgbackrest.conf:/etc/pgbackrest/pgbackrest.conf:ro
+      - ${MOMO_PGBACKREST_CIPHER_FILE:?set absolute MOMO_PGBACKREST_CIPHER_FILE}:/run/secrets/pgbackrest_repo1_cipher_pass:ro
+
+  migrate:
+    environment:
+      MOMO_ENV: ${MOMO_MIGRATE_ENV:-production}
+      MOMO_PITR_EVIDENCE_REQUIRED: ${MOMO_PITR_EVIDENCE_REQUIRED:-1}
+      MOMO_PITR_BOOTSTRAP_EMPTY: ${MOMO_PITR_BOOTSTRAP_EMPTY:-0}
+      MOMO_PITR_EVIDENCE_PATH: /run/momo-pitr/evidence.json
+      MOMO_PITR_HMAC_KEY_PATH: /run/secrets/momo_pitr_hmac_key
+      MOMO_PITR_EXPECT_RUN_ID: ${MOMO_PITR_EXPECT_RUN_ID:-}
+      MOMO_PITR_EXPECT_GIT_COMMIT: ${MOMO_PITR_EXPECT_GIT_COMMIT:-}
+      MOMO_PITR_EXPECT_COMPOSE_PROJECT: ${MOMO_PITR_EXPECT_COMPOSE_PROJECT:-}
+      MOMO_PITR_EXPECT_SOURCE_VOLUME: ${MOMO_PITR_EXPECT_SOURCE_VOLUME:-}
+      MOMO_PITR_EXPECT_RESTORE_VOLUME: ${MOMO_PITR_EXPECT_RESTORE_VOLUME:-}
+      MOMO_PITR_EXPECT_REPO_VOLUME: ${MOMO_PITR_EXPECT_REPO_VOLUME:-}
+      MOMO_PITR_EXPECT_POSTGRES_IMAGE_DIGEST: ${MOMO_PITR_EXPECT_POSTGRES_IMAGE_DIGEST:-}
+      MOMO_PITR_EXPECT_MIGRATE_IMAGE_DIGEST: ${MOMO_PITR_EXPECT_MIGRATE_IMAGE_DIGEST:-}
+      MOMO_PITR_EXPECT_STANZA: ${MOMO_PITR_EXPECT_STANZA:-}
+      MOMO_PITR_EXPECT_CIPHER_TYPE: ${MOMO_PITR_EXPECT_CIPHER_TYPE:-}
+      MOMO_PITR_EXPECT_CIPHER_FINGERPRINT: ${MOMO_PITR_EXPECT_CIPHER_FINGERPRINT:-}
+      MOMO_PITR_EXPECT_SYSTEM_IDENTIFIER: ${MOMO_PITR_EXPECT_SYSTEM_IDENTIFIER:-}
+    volumes:
+      - type: bind
+        # Empty first-install bootstrap still needs safe placeholder files so
+        # Compose can render one invariant mount graph. The binary does not
+        # read them in bootstrap mode; install/preflight creates them uid 10001
+        # mode 0400 and replaces them before any evidence-required run.
+        source: ${MOMO_PITR_EVIDENCE_FILE:?set absolute MOMO_PITR_EVIDENCE_FILE}
+        target: /run/momo-pitr/evidence.json
+        read_only: true
+      - type: bind
+        source: ${MOMO_PITR_HMAC_KEY_FILE:?set absolute MOMO_PITR_HMAC_KEY_FILE}
+        target: /run/secrets/momo_pitr_hmac_key
+        read_only: true
+      - type: bind
+        # PostgreSQL runs as uid 999 while migrate runs as uid 10001. Owner-only
+        # files therefore require separate host inodes with identical payloads;
+        # the signed HMAC fingerprint rejects a stale or foreign copy.
+        source: ${MOMO_PITR_MIGRATE_CIPHER_FILE:?set absolute MOMO_PITR_MIGRATE_CIPHER_FILE}
+        target: /run/secrets/pgbackrest_repo1_cipher_pass
+        read_only: true
+
+volumes:
+  pgbackrest_repo:
+    name: ${PGBACKREST_REPO_VOLUME_NAME:-${COMPOSE_PROJECT_NAME:-momo-rust}-pgbackrest-repo}
+    labels:
+      com.momo.pitr.managed: "true"
+      com.momo.pitr.role: repo
+      com.momo.janitor.managed: "true"
+      com.momo.janitor.match-label: com.docker.compose.project

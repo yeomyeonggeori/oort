@@ -76,6 +76,9 @@ RENDERINGS=(
   "rust + push path (docs/cicd/12-push-relay-deploy-runbook.md)|infra/rust/rust-smoke.env.example infra/rust/push-relay.env.example|infra/rust/docker-compose.rust.yml infra/rust/docker-compose.push.yml"
   "rust + deploy overlays (docs/runbooks/ncp-rust-deploy.md)|infra/rust/rust-smoke.env.example infra/rust/overlays.env.example|infra/rust/docker-compose.rust.yml infra/rust/t3.override.yml infra/rust/caddy.override.yml infra/rust/cent-origin.override.yml"
   "rust + local edge (docs/SELF_HOST.md)|infra/rust/rust-smoke.env.example|infra/rust/docker-compose.rust.yml infra/rust/local.override.yml"
+  "rust + encrypted POSIX backup pre-proof transition (docs/runbooks/pgbackrest-pitr.md)|infra/rust/rust-smoke.env.example infra/rust/backup-preproof.env.example|infra/rust/docker-compose.rust.yml infra/rust/docker-compose.backup.yml"
+  "rust + encrypted POSIX backup/PITR signed run (docs/runbooks/pgbackrest-pitr.md)|infra/rust/rust-smoke.env.example infra/rust/backup.env.example infra/rust/pitr-bindings.env.example|infra/rust/docker-compose.rust.yml infra/rust/docker-compose.backup.yml"
+  "rust + S3-compatible backup/PITR seam (docs/runbooks/pgbackrest-pitr.md)|infra/rust/rust-smoke.env.example infra/rust/backup.env.example infra/rust/pitr-bindings.env.example infra/rust/pgbackrest-s3.env.example|infra/rust/docker-compose.rust.yml infra/rust/docker-compose.backup.yml infra/rust/pgbackrest.s3.override.yml"
 )
 
 # Env templates under infra/prod and infra/rust that are NOT compose env files.
