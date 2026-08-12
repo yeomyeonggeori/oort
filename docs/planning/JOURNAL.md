@@ -5,6 +5,24 @@
 
 ---
 
+## 2026-08-12 (GPT 5.6 sol · momo-main) · #1344 3차 — private MCP transport·Routine·cleanup 측정 완료
+- 공식 MIT Create Plugin으로 비공개 local plugin을 만들자 loader의 legacy `POST initialize`·fallback `GET`이 공개 Agent Port에서 HTTP/2 404로 끝났다. 최신 2026-07-28 modern core는 `server/discover`/per-request metadata이고, #1363은 exact 2025-11-25 compatibility를 함께 소유한다.
+- Active-off monthly routine은 수동 Test run 약 1분 뒤 sentinel과 `Succeeded`를 냈고, Delete가 확인 없이 즉시 목록에서 제거했다.
+- connector Uninstall은 앱 목록만 지우고 local plugin source를 남겼다. Bot Delete는 취소해 Bot을 보존했고 연쇄 cleanup은 미확인이다.
+- #1344 측정 goal은 완료 가능; real auth/pair→work→disconnect는 #1363/#1364·#1361로 이관. HAP/UX #1358~#1369를 M1·Project #44·native `blockedBy`·BUILD_TICKETS에 결속해 패킷을 `ready`로 승격했다. 첫 wave는 static bearer이며 OAuth AS/동의 UX는 #1368→#1369 후속이다.
+
+## 2026-08-12 (GPT 5.6 sol · momo-main) · #1344 2차 — personal access·Plugin/Routine 표면
+- personal account 인증 뒤 Bot 1개·채팅 화면까지 도달했고 결제/구독 UI·구매는 0건이다. account·Bot 식별정보는 기록하지 않았다.
+- Marketplace remote-MCP 설명 plugin·Create Plugin·Yours Installed/Private와 Routine draft/7종 trigger source를 확인했다.
+- 임의 custom MCP URL/auth UI는 아직 못 찾았고 trigger 없는 draft는 비지속이라 routine 생성·실행 0건이다.
+- Bot Delete는 agent/chat history만 고지해 routine/plugin 연쇄 cleanup은 미확인; 삭제는 취소했고 #1344는 in-progress다.
+
+## 2026-08-12 (GPT 5.6 sol · momo-main) · #1344 trial-first 1차 — team privacy policy gate
+- 공식 Grok Bot 0.16.0 arm64 배포본의 DMG checksum·서명·Gatekeeper notarization을 확인했고 account/team/secret은 기록하지 않았다.
+- 현재 team account는 `trialEligible=true`였으나 강제 `NO_STORAGE`가 `TEAM_PRIVACY_MODE`로 접근을 막아 `PAYMENT_REQUIRED`; UI는 `Request sent`와 personal account를 안내했다.
+- trial 시작·결제 0건이며 MCP/auth/routine/pairing/cleanup은 미도달 `runtime-unverified`; evidence는 `2026-08-12-grok-bot-trial-spike-report.md`에 고정했다.
+- #1344는 personal account 재시도 대기로 in-progress. Grok 검증 claim은 보류하되 generic HAP issue chain은 계약 정본화 뒤 진행한다.
+
 ## 2026-08-12 (GPT 5.6 sol · momo-main) · #1343 재검수 — hosted-agent 축 사실 교정·병렬 런칭 순서 확정
 - 스냅샷 21을 supersede했다: 초안은 canonical landing 전이었고, `work_tool_profile`은 Rust 경로에 존재하며, 현행 Rust MCP ingress는 아직 없다.
 - Grok Wave 0는 유료구독 필수가 아니라 개인용 one-time trial 노출·커스텀 MCP·routine·cleanup 실측으로 교정했다. 계정 비밀은 받지 않고 앱 설치/동의만 성재 게이트다.

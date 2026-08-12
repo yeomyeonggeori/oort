@@ -1,10 +1,16 @@
 # oort 진행 현황
 
+## Grok Bot trial-first 실측 완료 — private MCP transport·Routine·cleanup (#1344, 2026-08-12)
+
+- 성재가 공식 앱 설치와 ADR-0162 기술 방향을 승인한 뒤 Cursor 배포본 `Grok Bot 0.16.0`(`com.anysphere.sand`, arm64)을 설치했다. DMG SHA-256과 `hdiutil` checksum을 확인했고, app strict code-sign verification과 Gatekeeper `accepted`/`Notarized Developer ID`(Anysphere Incorporated `DCNK4UB866`)가 통과했다. team account는 `trialEligible=true`였지만 강제 `NO_STORAGE` 정책에 막혔고, personal account는 별도 trial entitlement/start 문구나 결제·구독 UI 없이 Bot 1개와 기본 채팅까지 동작했다. 구매·유료 전환은 0건이다.
+- 공식 MIT `Create Plugin`을 설치해 비공개·미게시 로컬 plugin `oort-integration-trial`의 `plugin.json`과 `mcp.json`만으로 공개 `https://app.oor7.com/v1/mcp/agent-port`를 등록했다. Grok/Cursor loader는 legacy-era `POST initialize`와 fallback `GET`을 보냈고 둘 다 Caddy를 거쳐 HTTP/2 404 empty response로 끝나 UI가 `HTTP`·URL·`Tools 0`·`Failed to load`를 표시했다. 이는 custom MCP transport 도달을 검증하지만 Rust route 부재 전 단계의 auth challenge/mode·pairing·tool call은 검증하지 않는다. 공식 `Create Plugin` helper는 측정 뒤 uninstall했다.
+- Active off·monthly trigger인 test routine은 저장됐고 수동 Test run이 약 1분 뒤 `OORT_ROUTINE_TRIAL_OK`로 `Succeeded`했다. Delete는 확인창 없이 즉시 목록에서 routine을 제거했다. connector Uninstall은 앱 connector 목록에서 제거했지만 로컬 plugin directory/files는 남겼고, 관측 뒤 test source만 recoverable Trash로 옮겼다. Bot Delete는 agent/chat history를 고지해 최종 삭제를 취소하고 Bot을 보존했다. 공식 Bot→owned-routine cascade는 문서로 확인했지만 live 미실측이고 connector/local-source cascade는 미문서·미실측이다. #1344의 **측정 goal은 완료**했으며 real pairing/auth/tool call/full E2E는 HAP-E2/E3 및 후속 Grok E2E의 `runtime-unverified`로 이관한다. account·Bot 표시명, 로컬 경로, screenshot, credential은 기록하지 않았다. 상세 redacted evidence는 `docs/planning/2026-08-12-grok-bot-trial-spike-report.md`에 있다.
+
 ## Bring your hosted agent · Grok pairing 기획 정합 (#1343, 2026-08-12)
 
 - `ROADMAP.md`에 기존 v0 관전·승인·대화 임계경로를 대체하지 않는 병렬 런칭 보조축을 추가하고, 제품 문장을 **“Bring your hosted agent”**로 고정했다. Grok Bot은 코어 종속성이 아니라 첫 setup preset·실증 대상으로 두며, 공식 개인 one-time trial부터 확인하고 trial 미노출 시 구매하지 않는다.
-- ADR-0162는 `Proposed` 상태에서 bot-initiated pairing(`pairing_pending → detected → active`), pairing challenge와 active credential 분리, **one Bot=one connection=one dedicated agent member=one routine**, 별도 active proof와 같은 activation 경계의 member unpause, 기존 gateway/message spine의 MCP thin binding, channel-local `message.seq`와 별도 durable inbox cursor, revoke 후 routine·connector cleanup을 결정 후보로 정리했다. ADR-0163 관리형 카탈로그와 #1345 ACP/self-hosted host 감사는 별도 deferred 축이다.
-- 현재 변경은 문서·계획 정합뿐이며 제품/API/schema/runtime 동작은 바꾸지 않았다. 실제 계정의 Grok trial·custom MCP·routine·cleanup UI는 공식 앱 설치 승인 뒤 #1344에서 확인할 `runtime-unverified`이고, 공개 credential/API/schema 구현은 ADR-0162 Accepted 전 시작하지 않는다.
+- #1343 당시 ADR-0162는 `Proposed` 상태에서 bot-initiated pairing(`pairing_pending → detected → active`), pairing challenge와 active credential 분리, **one Bot=one connection=one dedicated agent member=one routine**, 별도 active proof와 같은 activation 경계의 member unpause, 기존 gateway/message spine의 MCP thin binding, channel-local `message.seq`와 별도 durable inbox cursor, revoke 후 routine·connector cleanup을 결정 후보로 정리했다. 이후 성재 승인으로 Accepted됐으며 ADR-0163 관리형 카탈로그와 #1345 ACP/self-hosted host 감사는 별도 deferred 축이다.
+- #1343 자체는 문서·계획 정합만 수행해 제품/API/schema/runtime 동작을 바꾸지 않았다. 당시 `runtime-unverified`였던 Grok trial-first 측정 결과는 위 #1344 최신 섹션이 대체한다. 공개 credential/API/schema 구현은 #1358~#1369, M1, Project #44, native `blockedBy`, `BUILD_TICKETS.md`, ready handoff에 결속했으며 #1344 Accepted ADR landing 뒤 #1358/#1363부터 시작한다. #1363은 modern MCP 2026-07-28과 exact 2025-11-25 legacy adapter를 명시적으로 분리하고 첫 wave는 static bearer만 제공한다. OAuth AS·동의 UI는 #1368/#1369가 모두 닫힐 때까지 비활성이다.
 
 ## Rust/NCP Centrifugo internal-only edge · secret rotation evidence (#1329, 2026-08-12)
 

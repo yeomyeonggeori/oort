@@ -1,5 +1,43 @@
 # oort 기획 현재 상태 (Planning Current State)
 
+> **2026-08-12 스냅샷 25 (GPT 5.6 sol · momo-main — #1344 private MCP transport·Routine·cleanup 실측 완료).** 스냅샷 24를 supersede한다.
+>
+> **custom MCP transport 검증:** 공식 MIT `Create Plugin`을 설치하고 비공개·미게시 local plugin `oort-integration-trial`을 `plugin.json`·`mcp.json` 두 파일로 만들었다. 공개 `https://app.oor7.com/v1/mcp/agent-port`를 등록하자 Grok/Cursor loader가 legacy-era `POST initialize`와 fallback `GET`을 보냈고, Caddy를 지난 두 요청 모두 아직 없는 route에서 HTTP/2 404 empty response로 끝났다. Yours UI는 수동 추가·HTTP·URL·`Tools 0`과 load failure를 표시했다. 이는 loader→oort transport를 검증하지만 auth challenge 이전 실패라 requested legacy version·auth mode·pairing·tool call을 증명하지 않는다. 공식 `Create Plugin` helper는 측정 뒤 uninstall했다.
+>
+> **Routine 검증:** Active off·monthly trigger인 안전 routine을 저장하고 수동 Test run을 실행했다. 약 1분 뒤 exact sentinel `OORT_ROUTINE_TRIAL_OK`와 `Succeeded`가 확인됐다. Delete는 별도 확인 없이 즉시 routine을 목록에서 제거했다. 이 결과는 manual execution과 개별 삭제를 검증하며 schedule cadence·MCP tool invocation을 증명하지 않는다.
+>
+> **cleanup 관측:** connector Uninstall 뒤 앱 connector 목록에서는 사라졌지만 local plugin directory와 두 파일은 남았다. 관측 뒤 test source만 recoverable Trash로 옮겼으며, 따라서 UX-2는 provider connector 목록 제거와 local source 제거를 같은 것으로 취급하지 않는다. Bot Delete는 agent/chat history 삭제를 고지했고 최종 삭제를 취소해 Bot을 보존했다. 공식 문서는 Bot-owned routine 제거를 약속하지만 live cascade는 미실측이며 connector/local source 연쇄는 미문서·미실측이다. account·Bot 표시명, local path, screenshot, secret은 기록하지 않았다.
+>
+> **현재/다음:** #1344의 측정 goal은 완료 가능하며 문서 게이트·리뷰 뒤 종료한다. auth/pairing/tool call/full pair→work→disconnect E2E는 #1363/#1364와 #1361로 이관했다. HAP/UX #1358~#1369, M1, Project #44, native `blockedBy`, `BUILD_TICKETS.md` binding을 완료해 런칭 패킷은 `ready`다. #1363은 modern 2026-07-28과 exact 2025-11-25 legacy adapter를 분리하고 첫 wave는 static bearer만 지원한다. OAuth AS와 동의 UI는 #1368→#1369 후속이다. “Grok Bot 연결 검증됨” 카피는 #1361 전까지 금지한다.
+>
+> 이하 스냅샷 24는 **private plugin 생성·실제 loader HTTP·persistent Routine 실행 전의 역사 기록**이다. 그 안의 custom URL 미발견, persistent routine 0건, #1344 in-progress 표기는 스냅샷 25가 대체한다.
+>
+> **2026-08-12 스냅샷 24 (GPT 5.6 sol · momo-main — #1344 personal account 제품 표면 실측).** 스냅샷 23을 supersede한다.
+>
+> **personal access 검증:** 성재가 personal account 로그인과 Grok Bot 앱 인증을 직접 완료했고, `0.16.0`에서 Bot 1개를 생성해 채팅 화면에 도달했다. 결제·구독 UI와 구매·유료 전환은 0건이다. account·Bot 표시명, screenshot, token은 기록하지 않았다. 1차 team account의 `NO_STORAGE` policy gate는 team 경로의 역사 증거이며 personal 경로를 막지 않았다.
+>
+> **Plugin/Routine 표면:** Marketplace에 remote MCP 설명 plugin과 `Create Plugin`, Yours의 Installed/Private, Bot details의 Routines가 보였다. Routine draft에는 Active/Delete/Test run/Name/Instruction/Add trigger와 schedule·Slack·Git·Teams·Linear·Sentry·PagerDuty source가 있다. trigger 없는 안전 draft는 Back 뒤 목록에 남지 않아 persistent routine 생성·실행은 0건이다.
+>
+> **남은 불확실성:** 현재 UI에서 임의 custom MCP URL 직접 등록/auth 표면을 찾지 못했으므로 부재를 단정하지 않고 `runtime-unverified`로 둔다. Bot Delete 경고는 agent와 chat history 삭제만 말하고 routine/plugin cleanup을 명시하지 않았으며 최종 삭제는 취소했다. custom MCP auth·pairing·routine 실행/삭제·Bot 연쇄 cleanup은 아직 검증되지 않았다.
+>
+> **현재/다음:** #1344는 `status:in-progress` 유지. Create Plugin/private skill 경로의 custom remote MCP 가능성 → 비활성 routine 저장·Test run/provenance → routine/plugin 개별 cleanup → 마지막 Bot 삭제 연쇄 cleanup 순으로 측정한다. 이 폐곡선 전에는 “Grok Bot 연결 검증됨”을 주장하지 않는다. 정본 evidence는 `docs/planning/2026-08-12-grok-bot-trial-spike-report.md`다.
+>
+> 이하 스냅샷 23은 **team policy gate 뒤 personal account 재시도 전의 역사 기록**이다. 그 안의 “personal account 재시도 대기”와 MCP 전면 미도달 표기는 스냅샷 24가 대체한다.
+>
+> **2026-08-12 스냅샷 23 (GPT 5.6 sol · momo-main — #1344 Grok trial-first 1차 실측).** 스냅샷 22를 supersede하는 컴팩트 복원 진입점.
+>
+> **정본 랜딩·승인:** #1343은 PR #1346으로 `track/engine@ee463206aeab4d0eaa53e3a2a46d5d9625b44e7c`에 랜딩했다. 성재는 공식 Grok Bot 앱 설치와 ADR-0162 기술 방향을 모두 명시 승인했다. 공개 API/schema 구현은 Accepted ADR만으로 즉시 착수하는 것이 아니라 BUILD_TICKETS 계약, ready handoff, 1 goal=1 Issue binding까지 갖춘 뒤 진행한다.
+>
+> **#1344 1차 실측:** 공식 Cursor DMG의 SHA-256·container checksum과 설치 앱 `0.16.0`/`com.anysphere.sand`/arm64, strict code signature, Gatekeeper `accepted`·`Notarized Developer ID`를 확인했다. 계정 식별정보는 기록하지 않았다. 공급망·redaction 정본은 `docs/planning/2026-08-12-grok-bot-trial-spike-report.md`다.
+>
+> **trial 판정 교정:** 현재 조직 관리 team account는 `trialEligible=true`였지만 team-enforced Privacy Mode `NO_STORAGE`가 `TEAM_PRIVACY_MODE`로 접근을 막아 앱 상태가 `PAYMENT_REQUIRED`에 머물렀다. UI는 `Request sent`와 personal account 사용을 권고했다. 따라서 이는 **trial 미노출 또는 유료구독 필요 판정이 아니며**, trial 시작·구매·유료 전환은 0건이다.
+>
+> **현재 실행 상태:** #1344는 personal account 재시도 경로가 남아 있어 `status:in-progress`다. custom MCP/auth, routine, pairing, credential 갱신, cleanup은 아직 `runtime-unverified`다. 개인 계정 경로가 불가능하거나 성재가 재시도를 원하지 않는다고 확정될 때만 `team privacy policy / personal account required` 사유로 blocked 전환한다.
+>
+> **다음:** personal account에서 결제 없이 trial 접근을 재확인한다. Grok 실증 결과와 무관하게 vendor-neutral HAP-E1~E6는 Accepted ADR + BUILD_TICKETS + ready packet + issue DAG를 갖춘 뒤 진행할 수 있지만, 실제 Grok E2E 전에는 “Grok Bot 연결 검증됨”을 주장하지 않는다. #1345 ACP 감사와 ADR-0163 managed/self-host catalog는 계속 별도 deferred 레인이다.
+>
+> 이하 스냅샷 22는 **#1343 랜딩과 #1344 첫 실측 전의 역사 기록**이다. 그 안의 “ADR 승인 대기”, “앱 미설치”, “trial 전면 runtime-unverified”, “#1344 blocked” 표기는 현재 상태가 아니며 스냅샷 23이 대체한다.
+>
 > **2026-08-12 스냅샷 22 (GPT 5.6 sol · momo-main — #1343 외부 에이전트 축 재검수·사실 교정).** 스냅샷 21을 supersede하는 컴팩트 복원 진입점.
 >
 > **스냅샷 21 교정:** 당시 “산출물 전부 랜딩” 표기는 틀렸다. 리서치·ADR-0162/0163·계획·패킷은 루트의 untracked/dirty 초안이었고 canonical branch에서 읽을 수 없었다. 이 스냅샷 시점에는 #1343 전용 엔진 goal worktree에서 검수·정본화 중이며, PR 리뷰와 `track/engine` 랜딩 전이다. Proposed ADR을 Accepted 또는 구현 완료로 읽지 않는다.

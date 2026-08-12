@@ -4,7 +4,7 @@
 >
 > 방향 승인: **Bring your hosted agent**를 상위 런칭 트랙으로 두고, Grok Bot은 첫 setup preset으로 강조한다. 외부 Bot 감지는 계정 roster 수집이 아니라 bot-initiated pairing으로 푼다. 연결 해제는 oort 권한 폐기와 routine/MCP connector cleanup을 모두 포함한다.
 >
-> 기술 판정: **조건부 성립.** Grok Bot이 custom MCP를 소비하고 routine으로 깨어나는 실제 조합은 개인 one-time trial에서 확인해야 한다. Agent Port 자체는 벤더 중립 foundation으로 설계할 수 있다.
+> 기술 판정: **transport·manual wake 부분 성립.** 개인 계정 Bot과 비공개 local plugin에서 Grok/Cursor MCP loader가 oort 공개 endpoint로 실제 `POST initialize`·`GET`을 보냈고, Active-off routine의 manual Test run도 성공했다. 현재 endpoint가 HTTP 404라 auth/pairing/tool consumption은 아직 확인하지 못했다. Agent Port의 벤더 중립 foundation 경계는 ADR-0162 Accepted로 고정됐다.
 
 ## 1. 제품 관점의 재정의
 
@@ -22,7 +22,7 @@
 
 - Hero: **Bring your hosted agent**
 - Preset/보조 문장: **Grok Bot도 몇 단계로 연결할 수 있습니다**
-- 정확성 guard: trial E2E 전에는 “즉시”, “seamless”, 실시간 응답을 약속하지 않는다.
+- 정확성 guard: #1344의 transport/manual routine 증거를 실제 pair→tool→reply E2E로 과장하지 않는다. 그 폐곡선 전에는 “즉시”, “seamless”, 실시간 응답을 약속하지 않는다.
 
 ## 2. 세 실행 경로의 관계
 
@@ -78,7 +78,7 @@ flowchart LR
 1. 사용자가 Agent Hub에서 **호스팅 에이전트 연결**을 선택해 전용 agent member를 만든다.
 2. provider preset에서 Grok Bot 또는 Generic MCP agent를 고른다.
 3. oort가 짧게 만료되는 one-time pairing 값, MCP endpoint, deterministic 이름을 발급한다.
-4. 사용자가 provider UI에 MCP connector와 routine을 만든다.
+4. 사용자가 provider UI에서 비공개 plugin/connector와 routine을 만든다. #1344는 이 단계의 arbitrary HTTPS URL 등록과 manual routine 실행까지만 실측했다.
 5. Bot의 첫 제한 handshake가 도착하면 oort가 `detected`로 표시한다.
 6. 사람이 연결할 agent member, channel, permission을 검토한다.
 7. 확인 뒤 pairing 값과 별도인 active credential을 한 번 발급하거나 OAuth/token exchange를 완료한다. static bearer만 지원하면 사용자가 connector의 소비된 setup secret을 두 번째 값으로 교체한다.
@@ -115,7 +115,7 @@ Cleanup: connector [ ] routine [ ] provider secret [ ]
 
 현행 Rust router에는 MCP server가 없다. `/v1/mcp/drive`는 OpenAPI·검증 스크립트와 은퇴 중인 Swift route에 남은 계약 선례이지, 복사 가능한 Rust 기반이 아니다.
 
-따라서 첫 engine 작업은 MCP 2026-07-28에 맞는 stateless HTTP transport, discovery, authorization metadata, bounded payload, rate limit, audit, revoke다. vendor-specific tool부터 만들지 않는다.
+따라서 첫 engine 작업은 MCP 2026-07-28의 modern stateless HTTP(`server/discover`, per-request metadata)와 Grok 실측을 위한 exact 2025-11-25 legacy compatibility adapter, bounded payload, static-bearer auth, rate limit, audit, revoke다. OAuth authorization server가 없는 동안 protected-resource metadata를 가장하거나 OAuth mode를 광고하지 않으며 vendor-specific tool부터 만들지 않는다.
 
 ### 5.2 Conversation은 기존 쓰기경로를 사용한다
 
@@ -148,8 +148,9 @@ Cleanup: connector [ ] routine [ ] provider secret [ ]
 
 UI는 manifest를 이용해 다음 checklist를 보여준다.
 
-- `Oort Inbox: <workspace> / <agent>` routine 제거 또는 비활성화
+- `Oort Inbox: <workspace> / <agent>` routine 제거(`Active off`만으로 cleanup 완료 처리하지 않음)
 - 해당 oort MCP connector 제거
+- setup이 만든 local plugin source 제거(connector Uninstall과 별도; filesystem path는 서버에 저장하지 않음)
 - provider UI에 남은 oort secret 제거
 - 정리 완료 확인
 
@@ -159,7 +160,7 @@ provider cleanup API가 나중에 생기면 검증 결과로 자동 종결할 �
 
 Grok preset은 protocol fork가 아니라 setup recipe다.
 
-- trial availability 확인
+- 무료/trial 진입과 Bot 생성 가능 여부 확인
 - connector 설정 위치와 endpoint 입력 안내
 - 지원되는 auth 방식에 맞춘 설정
 - deterministic connector/routine 이름
@@ -172,15 +173,15 @@ routine template의 최소 의미는 다음과 같다.
 
 > oort inbox를 확인한다. 처리할 항목이 있으면 기존 lease 계약으로 claim하고, 필요한 thread context를 읽은 뒤 결과를 원래 thread에 idempotent하게 게시한다. 처리할 항목이 없으면 외부 부작용 없이 종료한다.
 
-실제 provider prompt 문법과 최소 주기는 trial evidence로 확정한다.
+#1344에서 안전한 exact-sentinel instruction과 manual Test run은 동작했다. 실제 inbox/tool prompt 문법, scheduled wake의 최소 주기와 retry는 HAP-E2/E3 이후 E2E evidence로 확정한다.
 
 ## 8. 권장 실행 순서와 기대효과
 
 | 순서 | 실질 작업 | 완료 신호 | 기대효과 |
 |---:|---|---|---|
-| 1 | 사실 오류, ADR, roadmap/issue metadata 정합 | ADR-0162가 승인 가능한 Proposed이고 issue DAG가 현실과 일치 | 잘못된 Rust MCP·cursor·가격 전제 위 구현 방지 |
-| 2 | Grok 개인 one-time trial capability spike | custom MCP/auth/routine/cleanup 표와 redacted evidence | 결제·과설계 없이 첫 preset의 실제 한계 확정 |
-| 3 | vendor-neutral MCP foundation | generic client로 discovery/auth/revoke/rate-limit green | Grok rollout이 바뀌어도 재사용되는 수용구 확보 |
+| 1 | 사실 오류, ADR, roadmap/issue metadata 정합 — 완료 | ADR-0162 Accepted, issue DAG가 현실과 일치 | 잘못된 Rust MCP·cursor·가격 전제 위 구현 방지 |
+| 2 | Grok trial-first capability spike — 완료 | 구매 0; Bot·채팅, private plugin loader→공개 URL HTTP 왕복, Active-off routine manual success/delete, connector uninstall/local-source 잔류 evidence | 첫 preset의 transport·routine·cleanup 실제 한계를 auth/pairing/tool 구현과 분리 |
+| 3 | vendor-neutral MCP foundation | modern `server/discover` + legacy initialize compatibility, static auth/revoke/rate-limit green | Grok rollout이 바뀌어도 재사용되는 수용구 확보 |
 | 4 | credential lifecycle + pairing | replay/expiry/human-confirm red tests green | roster 권한 없이 안전한 Bot 감지 UX 성립 |
 | 5 | durable inbox + gateway binding | cross-channel seq 충돌·lease 경쟁 E2E green | 누락 없는 pull teammate와 기존 job SoT 보존 |
 | 6 | web/Tauri setup·disconnect UX | 기다림→감지→확인→active→cleanup 폐곡선 | 사용자가 연결과 정리 상태를 이해하고 복구 가능 |
@@ -201,7 +202,7 @@ generic foundation과 Grok spike를 분리하면 Grok trial이 막혀도 core �
 ### 정직하게 남길 한계
 
 - Bot wake-up, 지연, routine 유지, 사용량/과금은 provider가 소유한다.
-- custom MCP와 auth가 개인 trial에 노출되는지는 아직 `runtime-unverified`다.
+- 개인 계정 Bot·채팅, custom-MCP loader transport, manual routine 실행과 개별 UI cleanup은 확인됐지만, 별도 trial entitlement의 정확한 상태, auth·pairing·tool call·scheduled wake·full disconnect는 아직 `runtime-unverified`다. 공식 Bot-owned-routine cascade는 문서로 확인했지만 live 미실측이고 connector/local source cascade는 미문서·미실측이다.
 - 공개 control/delete API가 없는 동안 provider cleanup은 사람 확인을 포함한다.
 - shared persistent computer는 Bot별 isolation을 보장하지 않는다.
 - Agent Port가 ACP/self-host runtime packaging gap을 해결하지 않는다. 두 lane은 별도 roadmap이다.
@@ -210,12 +211,12 @@ generic foundation과 Grok spike를 분리하면 Grok trial이 막혀도 core �
 
 | 리스크 | 완화 |
 |---|---|
-| Grok rollout에서 custom MCP/auth가 달라짐 | Grok은 preset, core는 generic MCP contract로 유지 |
-| routine 최소 주기·지연 미확인 | trial 실측 전 SLA 금지, 상태에 마지막 성공/다음 확인 표시 |
+| Grok rollout에서 private plugin/auth가 달라짐 | Grok은 preset, core는 generic MCP contract로 유지; 관측 앱 버전을 evidence에 고정 |
+| routine 최소 주기·지연 미확인 | manual success를 schedule SLA로 일반화하지 않고 상태에 마지막 성공/다음 확인 표시 |
 | pairing secret 탈취·replay | hash-only, 짧은 만료, 1회 소비, active 전 data capability 0 |
 | cross-channel 누락 | channel-local `message.seq` 대신 별도 durable inbox cursor |
 | 중복 task state | existing gateway의 thin binding만 허용 |
-| 연결 해제 후 routine 잔존 | local revoke 즉시 + `cleanup_pending` checklist + 명시 확인 |
+| 연결 해제 후 routine 또는 local plugin source 잔존 | local revoke 즉시 + routine/connector/local-source를 구분한 `cleanup_pending` checklist + 명시 확인 |
 | provider shared computer credential 확산 | connection 최소 scope·정기 rotate·cleanup 때 provider secret 제거 |
 | self-host endpoint 공개 노출 | HTTPS, discovery/auth metadata, RLS 재검증, rate limit/audit |
 
@@ -223,13 +224,16 @@ generic foundation과 Grok spike를 분리하면 Grok trial이 막혀도 core �
 
 - [Grok Bot 공식 소개](https://x.ai/news/introducing-grok-bot)
 - [Grok Bot — Bots](https://docs.x.ai/grok-bot/bots)
-- [Grok Bot 시작과 trial](https://docs.x.ai/grok-bot/get-started)
+- [Grok Bot 시작](https://docs.x.ai/grok-bot/get-started)
+- [Grok Bot availability — individual paid plan 또는 one-time trial](https://docs.x.ai/grok-bot/teams-and-enterprises)
 - [Skills, routines and automations](https://docs.x.ai/grok-bot/skills-routines-and-automations)
 - [Computer and apps](https://docs.x.ai/grok-bot/computer-and-apps)
 - [Grok connectors](https://docs.x.ai/grok/connectors)
 - [MCP 2026-07-28 specification](https://modelcontextprotocol.io/specification/2026-07-28)
+- [MCP 2026-07-28 key changes — initialize/session/ping 제거](https://modelcontextprotocol.io/specification/2026-07-28/changelog)
+- [MCP 2025-11-25 legacy lifecycle](https://modelcontextprotocol.io/specification/2025-11-25/basic/lifecycle)
 - [MCP authorization](https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization)
 - [Cursor Cloud Agents API](https://cursor.com/docs/cloud-agent/api/endpoints)
 - [ACP v1 overview](https://agentclientprotocol.com/protocol/v1/overview)
-- ADR 제안: `docs/adr/0162-external-agent-reception-agent-port.md`
+- Accepted ADR: `docs/adr/0162-external-agent-reception-agent-port.md`
 - 독립 감사: `docs/planning/research/2026-08-12-external-agent-reception-audit.md`
