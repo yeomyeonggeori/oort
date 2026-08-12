@@ -36,6 +36,14 @@ app.oor7.com {
 		Referrer-Policy "no-referrer"
 	}
 
+	# ADR-0002: the subscribe callback belongs only to the compose-private
+	# Centrifugo -> api hop.  Keep this matcher before the general /v1 proxy so
+	# neither a missing nor a guessed CENT_PROXY_SECRET can reach the API from
+	# the public edge.  The API's own constant-time secret check remains the
+	# second, private-network boundary.
+	handle /v1/centrifugo/* {
+		respond 403
+	}
 	handle /v1/* {
 		reverse_proxy api:8080
 	}
