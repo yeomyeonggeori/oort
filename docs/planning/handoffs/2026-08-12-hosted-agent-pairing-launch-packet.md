@@ -1,16 +1,16 @@
 # Hosted-agent pairing 런칭 패킷 — “Bring your hosted agent” (2026-08-12)
 
-> Status: `draft` — 제품 방향·권장 순서는 승인됐으나 ADR-0162 technical boundary가 Proposed이므로 구현 인수 금지
+> Status: `ready` — ADR-0162 승인, HAP/UX Issue·M1·Project #44·`BUILD_TICKETS.md` binding 완료. #1358/#1363은 #1344 ADR landing 전까지 blocked
 > Planning ID: `PLN-20260812-02` · Planner owner: GPT 5.6 (`momo-main`) · Integrator: `momo-main`
-> 발급: 2026-08-12 · 기준 커밋: `1b623576fd05be3c370d6560b7822eb008823b1a` · Supersedes: `docs/planning/handoffs/2026-08-12-sol-external-agent-reception-packet.md`
-> 근거 ADR: `ADR-0162 (Proposed)` · 대상 goal: `#1343`, `#1344`, HAP-E1~E6, UX-1~3 · 병렬 가능: §5 DAG 준수
-> GitHub binding: `#1343=planning integration`, `#1344=Grok trial spike`, `#1345=deferred ACP audit`; HAP/UX issue는 미발급
+> 발급: 2026-08-12 · 기준 커밋: `ee463206aeab4d0eaa53e3a2a46d5d9625b44e7c` · Supersedes: `docs/planning/handoffs/2026-08-12-sol-external-agent-reception-packet.md`
+> 근거 ADR: `ADR-0162 (Accepted, 2026-08-12)` · 대상 goal: `#1343`, `#1344`, `#1358`~`#1369` · 병렬 가능: §5 DAG 준수
+> GitHub binding: `#1358=E1`, `#1363=E2`, `#1364=E3`, `#1365=E4`, `#1366=E5`, `#1367=E6`, `#1368=E7 OAuth 후속`, `#1360=UX1`, `#1362=UX2`, `#1359=UX3`, `#1369=UX4 OAuth 동의 후속`, `#1361=Grok E2E`
 >
-> 추적: **#1343**(문서·ADR·로드맵 정합) · **#1344**(Grok one-time trial 실측) · **#1345**(ACP 잔여 감사, deferred)
+> 추적: **#1343**(문서·ADR·로드맵 정합 완료) · **#1344**(Grok trial-first 측정 완료·리뷰 대기) · **#1345**(ACP 잔여 감사, deferred)
 >
 > 트랙: #1343 및 HAP-E*는 **엔진**(`track/engine`), UX-*는 **UXUI**(`track/uxui`). 1 Issue=1 goal, 각 PR은 자기 트랙 branch를 base로 한다. track→main은 성재의 별도 명시 승인 없이는 하지 않는다.
 >
-> 기술 경계: 제품 방향·권장 순서는 성재 승인. 공개 API·credential·pairing schema는 ADR-0162 Accepted 후 HAP 이슈를 발급한다.
+> 기술 경계: 제품 방향·권장 순서와 공개 API·credential·pairing schema의 벤더 중립 경계는 성재 승인으로 ADR-0162 Accepted. #1344는 Grok의 비공개 custom-MCP loader transport와 manual routine 실행·개별 cleanup을 실측했다. 다만 route 404가 auth challenge보다 먼저 발생해 preset auth mode·pairing·tool call/full E2E는 미지정이며, #1358~#1369의 계약으로 구현·검증한다.
 
 ## 0. 목표와 성공 문장
 
@@ -22,19 +22,19 @@
 
 | 시점 | 성재가 할 일 | Codex가 받지 않는 것 |
 |---|---|---|
-| #1344 앱 설치 직전 | 공식 Grok Bot 앱 설치를 명시 승인 | macOS 관리자 비밀번호 |
-| 앱 첫 실행 | 본인이 Cursor/xAI 로그인·MFA·consent 완료 | password, MFA code, cookie, xAI/Cursor token |
-| trial 확인 | one-time trial이 보이면 직접 시작 승인 | 결제정보 |
-| trial 미노출 | blocked evidence 확인 | 유료 구독 구매 요청 없음 |
-| ADR gate | ADR-0162의 technical boundary Accepted/수정 결정 | provider credential 없음 |
+| #1344 앱 설치 | **완료:** 공식 Grok Bot 앱 설치를 명시 승인 | macOS 관리자 비밀번호 |
+| 앱 첫 실행 | **완료:** 본인이 개인 계정 로그인·MFA·consent 처리 | password, MFA code, cookie, xAI/Cursor token |
+| 무료/trial 진입 | **완료:** 별도 trial entitlement/start 문구나 구매 없이 Bot 1개·기본 채팅 실행 | 결제정보 |
+| capability 실측 | **완료:** 비공개 custom-MCP loader 왕복, Active-off routine 수동 실행, routine/connector 개별 제거 동작 확인 | provider secret, 결제정보 |
+| ADR gate | **완료:** ADR-0162의 벤더 중립 technical boundary 승인 | provider credential 없음 |
 
-**금지:** trial 미노출을 이유로 Codex가 유료 구독·결제를 시작하지 않는다. screenshot과 로그는 계정 이메일, token, connector secret을 redaction한다.
+**금지:** Bot 생성이나 기능 실측이 유료 전환에 막혀도 Codex가 구독·결제를 시작하지 않는다. screenshot과 로그는 계정 이메일, token, connector secret을 redaction한다.
 
 ## 2. 먼저 읽을 정본
 
-1. `docs/adr/0162-external-agent-reception-agent-port.md` — hosted-agent pairing/auth/MCP 경계(Proposed until accepted)
+1. `docs/adr/0162-external-agent-reception-agent-port.md` — Accepted hosted-agent pairing/auth/MCP 경계; Grok preset auth mode는 현재 route 404가 auth challenge보다 먼저라 미지정
 2. `docs/planning/2026-08-12-external-agent-reception-plan.md` — 승인된 권장 순서·효과·완료 정의
-3. `docs/planning/research/2026-08-12-grok-bot-integration-feasibility.md` — Grok 공식 표면/제약; 출시 초기 정보는 #1344에서 재실측
+3. `docs/planning/research/2026-08-12-grok-bot-integration-feasibility.md` — Grok 공식 표면/제약과 #1344 transport·Routine·cleanup 실측
 4. `docs/planning/research/2026-08-12-grok-bot-reverse-teammate-direction.md` — 역방향 pull 가설, 감지·pairing·cleanup UX와 권장 실행 순서
 5. ADR-0101·0102 — agent bearer와 worker/gateway 이중 경로
 6. `server-rust/bins/momo-server/src/routes/agent_gateway.rs`, `server-rust/crates/momo-outbox/src/gateway.rs` — 재사용할 durable gateway 계약
@@ -79,31 +79,38 @@
 8. disconnect는 history 삭제가 아니다. local authority를 즉시 끊고 외부 artifact 정리 상태를 정직하게 표시한다.
 9. provider password/MFA/token은 oort, 이슈, PR, 로그로 유입하지 않는다.
 10. v0의 운영 단위는 **한 Bot = 한 connection = 한 dedicated agent member = 한 deterministic routine**이다. 기존 managed/BYOA member에 hosted connection을 덧붙이지 않고, 외부 roster를 scraping하거나 여러 봇을 한 token으로 가장하지 않는다.
+11. `agent:port:connect`는 route reachability뿐이다. product tools는 inbox read=`agent:inbox:read`, conversation read=`messages:read`, post=`messages:write`, jobs claim/renew/release=`agent:jobs:read`, run event/complete=`agent:runs:callback`의 닫힌 추가 mapping을 각각 만족해야 하며 신규 read scope와 connect scope는 default 0이다.
+12. hosted credential 발급은 위 6개 scope의 immutable allowlist를 shared validator로 강제하고 `agent:port:connect`를 필수로 한다. `work:control`, `realtime:subscribe`, `provider:quota:write`와 미래 generic scope는 static confirm/OAuth consent 어느 경로에서도 hosted bearer에 들어가지 않는다.
+13. hosted static/OAuth credential은 canonical `/v1/mcp/agent-port`에서만 principal로 성립한다. shared auth가 generic REST/realtime route-scope dispatch 전에 connection·audience를 거부하며, MCP adapter만 기존 message/gateway typed domain port를 호출한다. generic non-hosted bearer의 기존 REST 표면은 유지한다.
 
 ## 5. Issue DAG와 소유권
 
-아래 HAP/UX ID는 예약용 논리 ID다. #1343과 ADR-0162 technical approval 뒤 실제 GitHub Issue/Milestone/Project를 발급한다.
+아래 논리 ID는 실제 GitHub Issue, M1, Project #44 `Todo`, native `blockedBy`, `BUILD_TICKETS.md`에 결속됐다. #1358/#1363은 #1344의 Accepted ADR landing gate 뒤 `status:ready`로 전환하고, 나머지는 표의 native dependency가 닫힐 때까지 `status:blocked`를 유지한다.
 
 | ID | 트랙·주 소유 파일 | Goal | 핵심 수용기준 | deps |
 |---|---|---|---|---|
 | **#1343** | 엔진 docs/ADR/planning | 사실 교정, ADR/roadmap/handoff/issue 정합 | docs gate, independent review, stale 패킷 superseded | — |
-| **#1344** | 엔진 spike docs/evidence only | official app one-time trial에서 Grok MCP/routine capability 측정 | 구매 0; app/version/account tier/capability 결과; 미노출=blocked evidence | #1343 |
-| **HAP-E1** | 엔진 `momo-auth`, server routes/OpenAPI | hosted agent credential issue/list/rotate/revoke + audit | raw once/no-store, hash-at-rest, scope/actor/expiry/revoke/redaction/RLS tests | ADR-0162 Accepted |
-| **HAP-E2** | 엔진 신규 Rust MCP 경계/router | stateless remote MCP discovery/transport/auth/rate limit foundation | unauth/wrong audience/wrong workspace fail closed, no direct DB write | ADR-0162 Accepted |
-| **HAP-E3** | 엔진 migration + pairing domain/routes | dedicated member+paused profile+connection 원자 생성, `pairing_pending→detected→active`, expiry/replay, artifact manifest | live connection/member 1:1 uniqueness, pending/detected/expired delivery 0, one-time consume atomicity, concurrent detect race, separate active proof + same-tx member unpause required | E1+E2 |
-| **HAP-E4** | 엔진 migration + inbox projection | agent-scoped durable inbox cursor | cross-channel same seq recovery, pagination/replay/dedupe, RLS | E3 |
-| **HAP-E5** | 엔진 MCP tools + mention delivery selector + gateway/message adapters | inbox/job/message tools를 기존 gateway·message spine에 thin binding하고 active hosted connection만 per-agent gateway delivery | managed+hosted mixed routing; pending/lease/takeover/events/complete equivalence; idempotent post; approval/audit unchanged | E3, E4 |
-| **HAP-E6** | 엔진 connection/credential/gateway guards | local revoke + `cleanup_pending` enforcement | revoke/pause/new claims/writes block atomic; old lease/credential rejected; history preserved | E3, E5 |
-| **UX-1** | UXUI `packages/momo-core`, `clients/web`; Tauri는 같은 bundle | `/agents` hosted-agent pairing wizard + Grok preset | setup→waiting→detected→confirm→active credential 전달/교환→provider 갱신·검증→test; keyboard/a11y/expiry/replay states | E3, E5 |
-| **UX-2** | UXUI core+web | disconnect dialog, routine+connector cleanup checklist | local revoke result distinct; `cleanup_pending`; explicit manual ack; preserved history copy | E6 |
-| **UX-3** | UXUI core+mobile | mobile connection/cleanup read-only status | no pair/disconnect mutation; status/error/refresh tests | E3 shared contract |
-| **Grok E2E** | #1344 evidence + engine/UX runtime | 실제 Grok routine pair→job→reply→disconnect→cleanup | redacted timestamped evidence; residual routine/connector 0 | #1344, E1..E6, UX-1/2 |
+| **#1344** | 엔진 spike docs/evidence only | official app의 무구매 진입과 Grok MCP/routine/cleanup capability 측정 | Bot·채팅, private plugin loader→공개 URL HTTP 왕복, Active-off routine manual run, routine/connector 개별 제거 evidence; 구매 0. auth/pairing/tool/full E2E는 후속 이관 | #1343 |
+| **HAP-E1 · #1358** | 엔진 `momo-auth`, server routes/OpenAPI | hosted agent credential issue/list/rotate/revoke + audit | raw once/no-store, hash-at-rest, scope/actor/expiry/revoke/redaction/RLS tests | #1344 landing gate |
+| **HAP-E2 · #1363** | 엔진 신규 Rust MCP 경계/router | 2026-07-28 modern stateless core + exact 2025-11-25 sessionless legacy compatibility, static-bearer auth/rate limit | modern/legacy 혼동·unauth/wrong route/scope/workspace fail closed, no direct DB write | #1344 landing gate |
+| **HAP-E3 · #1364** | 엔진 migration + pairing domain/routes | dedicated member+paused profile+connection 원자 생성, `pairing_pending→detected→active`, expiry/replay, artifact manifest | live connection/member 1:1 uniqueness, pending/detected/expired delivery 0, one-time consume atomicity, concurrent detect race, separate active proof + same-tx member unpause, hosted generic credential mutation 409, Agent Port 외 principal 0 | #1358, #1363 |
+| **HAP-E4 · #1365** | 엔진 migration + inbox projection | agent-scoped durable inbox cursor | cross-channel same seq recovery, pagination/replay/dedupe, RLS | #1364 |
+| **HAP-E5 · #1366** | 엔진 MCP tools + mention delivery selector + gateway/message adapters | inbox/job/message tools를 기존 gateway·message spine에 thin binding하고 active hosted connection만 per-agent gateway delivery | managed+hosted mixed routing; pending/lease/takeover/events/complete equivalence; idempotent post; approval/audit unchanged | #1364, #1365 |
+| **HAP-E6 · #1367** | 엔진 connection/credential/gateway guards | local revoke + `cleanup_pending` enforcement | revoke/pause/new claims/writes block atomic; unexpected token invalidation pauses+cleans up; direct REST/realtime audience bypass 0; history preserved | #1364, #1366 |
+| **HAP-E7 · #1368** | 엔진 ADR+`momo-auth`, migration, server routes | ADR-0162 OAuth lifecycle 증보 + MCP OAuth 2.1 authorization-server mode | existing connection binding, issuer/resource/PKCE/code/token/revoke/RLS attack matrix; no static fallback | #1364; v0 static pairing 비차단 |
+| **HAP-UX1 · #1360** | UXUI `packages/momo-core`, `clients/web`; Tauri는 같은 bundle | `/agents` hosted-agent pairing wizard + Grok preset | setup→waiting→detected→confirm→active credential 전달/교환→provider 갱신·검증→test; keyboard/a11y/expiry/replay states | #1364, #1366 |
+| **HAP-UX2 · #1362** | UXUI core+web | disconnect dialog, routine+connector+optional local-source cleanup checklist | local revoke result distinct; `cleanup_pending`; explicit manual ack; preserved history copy | #1367 |
+| **HAP-UX3 · #1359** | UXUI core+mobile | mobile connection/cleanup read-only status | no pair/disconnect mutation; status/error/refresh tests | #1364 shared contract |
+| **HAP-UX4 · #1369** | UXUI core+web | OAuth resource-owner 로그인·동의 + pairing wizard 복귀 | human session owner/admin, consent/deny/expiry/a11y, same connection active 복귀, token·verifier 비노출 | #1368, #1360; v0 static pairing 비차단 |
+| **HAP-GROK-E2E · #1361** | #1344 evidence + engine/UX runtime | 실제 Grok routine pair→scheduled wake→job→reply→disconnect→cleanup | manual Test 없이 scheduled trigger, wake latency/cadence/retry provenance; active credential/routine/connector/local test source 0, Bot/chat disposition 명시 | #1344, #1358, #1363~#1367, #1360, #1362 |
 
 ```text
-E1 || E2 -> E3 -> E4 -> E5 -> UX-1
-                 E5 -> E6 -> UX-2
-            E3 ------------> UX-3
-#1344 + E1..E6 + UX-1/2 ---> Grok E2E
+#1358 || #1363 -> #1364 -> #1365 -> #1366 -> #1360
+                                   #1366 -> #1367 -> #1362
+                            #1364 -------------> #1359
+#1364 -> #1368 OAuth AS ----> #1369 OAuth consent/wizard UX (후속)
+                   #1360 ----/
+#1344 + #1358 + #1363..#1367 + #1360/#1362 ---> #1361
 ```
 
 ## 6. 파일 경계와 구현 함정
@@ -119,6 +126,9 @@ E1 || E2 -> E3 -> E4 -> E5 -> UX-1
 - exact supported MCP spec/date와 auth discovery는 이슈 claim 시 official primary source로 재검증한다.
 - pending challenge secret과 active agent bearer를 같은 값으로 재사용하지 않는다.
 - dedicated agent member, `paused=true` profile, pairing row는 한 transaction으로 만들며 실패 시 부분 member/profile/connection을 남기지 않는다. pairing row는 workspace, member, challenge hash, expiry, consumed time, detected client fingerprint의 최소 정보만 가진다. 기존 managed/BYOA member 선택과 한 member의 동시 live hosted connection은 거절한다.
+- hosted dedicated member는 generic agent credential issue/rotate/revoke 대상이 아니다. 세 mutation을 `409 hosted_connection_managed`로 거부하고, credential 발급·교체는 activation/disconnect 내부 경로와 새 pairing namespace로만 한다.
+- hosted credential은 exact Agent Port audience에서만 인증한다. active 여부와 무관하게 message POST/PATCH, gateway pending/lease/event/complete, realtime-token REST에 직접 제시하면 shared auth가 generic principal 생성 전에 거부하고 mutation을 만들지 않는다.
+- E3가 active를 만들더라도 E5(#1366) selector와 E6(#1367) disconnect/invalid-token guard가 모두 랜딩하기 전 production hosted delivery를 0으로 유지한다. E5 runtime test만 synthetic override를 쓸 수 있고, 사용자-facing gate는 UX1(#1360)+UX2(#1362)까지 요구한다. 중간 배포에서 server-global mode나 managed worker로 fallback하지 않는다.
 - client-declared `provider=grok`는 preset telemetry이지 신뢰 근거가 아니다.
 
 ### HAP-E4 — inbox
@@ -132,6 +142,8 @@ E1 || E2 -> E3 -> E4 -> E5 -> UX-1
 - `pending`, lease claim/renew/release, events, complete의 기존 transaction과 dedupe를 호출한다. MCP 전용 task 상태머신을 복제하지 않는다.
 - 현행 서버 전역 `AGENT_GATEWAY_MODE`는 hosted connection 권위가 아니다. mention transaction이 active hosted connection을 가진 dedicated member만 기존 gateway pending으로 보내고 managed/BYOA member의 기존 publish/delivery는 유지하는 per-agent selector를 사용한다. pending/detected/expired/cleanup/disconnected hosted member는 managed fallback 없이 delivery 0으로 거절한다.
 - 같은 workspace에서 managed와 hosted agent를 동시에 mention하는 fixture가 각 목적지 1건, 교차 claim 0, 전역 모드 변경 0을 증명한다.
+- `tools/list`와 `tools/call`은 `agent:port:connect`에 더해 inbox=`agent:inbox:read`, conversation=`messages:read`, post=`messages:write`, jobs=`agent:jobs:read`, callbacks=`agent:runs:callback`의 exact mapping을 동일하게 적용한다. connect-only credential은 product tools 0이고, 신규 read scope는 non-default다.
+- E3 static confirm과 E7 OAuth consent는 같은 `HOSTED_AGENT_PORT_GRANTABLE_SCOPES` validator를 호출하며 allowlist 밖 scope 요청은 credential/code 발급 전에 거부하고 bounded denial audit를 남긴다.
 - MCP의 message post도 `momo-messaging` 쓰기경로를 호출한다. `message.seq`를 직접 발급하지 않는다.
 - tool 응답은 provider credential, internal lease token, 다른 channel/workspace 데이터를 노출하지 않는다.
 
@@ -143,7 +155,10 @@ active -- local revoke --> cleanup_pending -- external cleanup confirm/manual ac
 
 - local revoke 성공 뒤 외부 cleanup이 남아도 active로 되돌리지 않는다.
 - credential revoke와 connection 전용 agent member pause, 새 delivery/write 차단은 같은 fail-closed 경계에서 일어나며 다른 member/runtime 상태는 변하지 않아야 한다.
+- 만료나 operator emergency revoke로 결속 credential이 무효화되면 첫 MCP/inbox/message/job guard가 어떤 capability도 수행하기 전에 dedicated member pause와 `cleanup_pending` 전이를 같은 transaction으로 적용한다. rotate/revoke/disconnect 경쟁은 한 serial outcome만 허용한다.
+- active·pre-proof·disconnected hosted static/OAuth credential의 direct REST/realtime 호출은 connection 상태와 무관하게 audience 단계에서 거부한다. generic non-hosted bearer는 기존 REST 계약을 그대로 유지한다.
 - Grok routine/connector public deletion API가 확인되기 전에는 자동 삭제를 구현·표방하지 않는다.
+- #1344에서 connector Uninstall은 앱 목록만 제거하고 local plugin source를 남겼다. UX는 provider connector 제거와 사용자 local source 정리를 별도 항목으로 표시하며 filesystem path는 서버에 저장하지 않는다.
 - manifest의 routine 이름은 `Oort Inbox: <workspace> / <agent>`로 deterministic하게 제시한다.
 - manual acknowledgement에는 누가, 언제, 어떤 routine/connector를 정리했다고 확인했는지 audit를 남긴다.
 - 재연결은 새 challenge/token으로 한다.
@@ -159,13 +174,13 @@ Bring your hosted agent
   -> waiting for agent (expiry/새 코드)
   -> detected (client facts, 아직 권한 없음)
   -> human confirms name/channel/scopes
-  -> 별도 active credential을 한 번 전달 또는 OAuth token exchange
-  -> static bearer이면 provider connector의 소비된 setup secret을 active credential로 교체
+  -> 별도 active credential을 한 번 전달
+  -> provider connector의 소비된 setup secret을 active credential로 교체
   -> active credential 검증 handshake + dedicated member unpause가 같은 activation 경계에서 성공해야 active
   -> test mention
 ```
 
-- pairing challenge는 감지 시 소비되며 active bearer로 승격하지 않는다. provider가 OAuth/token exchange를 지원하면 교환 결과를 사용하고, static bearer만 지원하면 사용자가 두 번째 secret을 connector에 명시적으로 갱신한다. 이 분기는 #1344 실측과 ADR-0162 Accepted에서 고정하며, 갱신 전에는 연결 테스트·inbox/job/message capability를 열지 않는다.
+- pairing challenge는 감지 시 소비되며 active bearer로 승격하지 않는다. ADR-0162는 connection마다 `oauth | static_bearer` 하나를 activation 전에 명시하고 fallback/downgrade하지 않는 경계를 고정하되, 첫 wave는 `static_bearer`만 활성화한다. #1344에서는 loader가 공개 endpoint까지 도달했지만 route 404가 auth challenge 전에 끝났으므로 Grok preset의 mode는 여전히 미지정이다. 사용자는 두 번째 secret을 connector에 명시적으로 갱신하고 proof 전에는 연결 테스트·inbox/job/message capability를 열지 않는다. OAuth UI/metadata/token exchange는 #1368 authorization server와 #1369 consent/wizard 복귀가 모두 검증되기 전 광고하거나 선택할 수 없다.
 - 제품 내 카피는 과도한 “seamless/손쉽게” 약속 대신 단계와 현재 상태를 정확히 보여준다.
 - status transition은 live region으로 알리고 focus를 잃지 않는다. expired, network retry, late callback, duplicate/replay를 각각 렌더한다.
 - Tauri UI는 `clients/web` bundle을 재사용하며 별도 포크하지 않는다.
@@ -175,25 +190,26 @@ Bring your hosted agent
 | Goal | 필수 gate | runtime/red proof |
 |---|---|---|
 | #1343 | `scripts/local_gate.sh --profile docs` | 링크·상태·issue DAG 대조 |
-| #1344 | docs/static + manual evidence review | trial 노출/미노출, custom MCP, routine, provenance; 구매 0 |
+| #1344 | docs/static + manual evidence review | 앱 provenance, team policy gate, personal Bot·채팅, private plugin loader의 `POST initialize`/`GET` 404, Active-off routine manual success/delete, connector uninstall/local-source 잔류; 구매 0 |
 | E1/E2 | cargo fmt, clippy `-D warnings`, test workspace | secret replay, revoke, wrong scope/audience/workspace, redaction, rate limit |
 | E3/E4 | `[rust]+[sql]+runtime-db` | concurrent consume, expiry, RLS, cross-channel same seq=1, restart/recovery |
 | E5/E6 | `[rust]+runtime-agent` with mock hosted agent | lease takeover, duplicate complete/post, revoke during lease, history preservation |
-| UX-1/2 | web typecheck/test/build, design preflight/review, merge-tree gate | keyboard/screen reader, expired/late/replay, pairing-secret 재사용 불가, static bearer 교체 또는 OAuth exchange, active credential 검증 전 capability 0, cleanup pending/manual ack |
+| UX-1/2 | web typecheck/test/build, design preflight/review, merge-tree gate | keyboard/screen reader, expired/late/replay, pairing-secret 재사용 불가, static bearer 교체, active credential 검증 전 capability 0, 미지원 OAuth 선택 0, cleanup pending/manual ack |
 | UX-3 | mobile typecheck/test + merge-tree gate | read-only enforcement, refresh/offline status |
-| Grok E2E | runtime-agent + manual redacted evidence | pair→detect→confirm→job→reply→revoke→routine/connector cleanup |
+| Grok E2E | runtime-agent + manual redacted evidence | pair→detect→confirm→manual Test 없는 scheduled wake→job→reply→revoke→routine/connector/local-source cleanup; wake latency/cadence/retry 기록 |
 
 서버 또는 shared-core 계약이 UXUI 트랙에 전달될 때 `docs/planning/ENGINE_HANDOFF.md`에 ready 항목을 추가한다.
 
 ## 8. runtime-unverified 대장
 
-다음은 #1344/실제 E2E 전까지 검증됨으로 쓰지 않는다.
+개인 계정 Bot·채팅, private plugin의 custom URL 등록과 loader→공개 endpoint 실제 HTTP, Active-off routine의 manual success·개별 삭제, connector UI uninstall까지 검증됐다. 다음은 HAP-E2/E3와 실제 Grok E2E 전까지 검증됨으로 쓰지 않는다.
 
-- 해당 개인 계정에 one-time Grok trial이 실제 노출되는지
-- Grok Bot 앱에서 custom remote MCP connector를 추가할 수 있는지와 auth UI 형상
-- routine이 custom MCP tool을 호출하는지, 최소 cadence, 유휴 시 pause 정책
-- Cursor backend proxy의 source IP/header와 connector error/retry 동작
-- routine/connector 삭제를 외부 API로 확인할 수 있는지(현재는 manual cleanup 가정)
+- Agent Port의 성공한 modern `server/discover`/per-request metadata, pinned legacy initialize compatibility와 실제 tool 목록·호출
+- Grok/Cursor loader의 auth challenge/UI, `oauth | static_bearer` mode, redirect/header 동작 — 현재는 route 404가 auth 전에 종료
+- routine이 custom MCP tool을 호출하는지, schedule 최소 cadence·유휴 pause·retry 정책
+- Cursor backend proxy의 source IP/header와 connector retry 동작
+- connector Uninstall 뒤 남은 local plugin source의 안전한 정리와 공개 provider cleanup API 존재 여부
+- 공식 문서는 Bot 삭제가 그 Bot 소유 routine을 제거한다고 설명하지만 이번에는 Bot 보존을 위해 최종 삭제를 취소했다. connector/local plugin source까지의 연쇄 cleanup은 문서화·실측되지 않았다.
 - 실제 Grok runtime에서 pairing code expiry/retry와 disconnect 후 호출 차단이 재현되는지
 
 미실증 상태에서도 generic mock hosted-agent E2E는 닫을 수 있다. 이 경우 출시 표면은 “generic hosted-agent pairing + Grok setup preset(runtime-unverified)”로 정직하게 분리한다.
