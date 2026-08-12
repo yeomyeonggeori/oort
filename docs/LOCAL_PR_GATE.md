@@ -116,10 +116,10 @@ Profiles:
 
 | Profile | Use when | What it runs |
 |---|---|---|
-| `docs` | docs/spec/script-only changes, including internal alpha runbook/feedback/AWS topology updates | whitespace diff, **secret scan over all refs (#1236)**, workflow YAML parse, actionlint if installed, e2e compose config, AWS internal alpha topology preflight fixture, **Rust publish + self-host image-mode contracts (#1266)**, JSON syntax, shell syntax, Python syntax, Hermes adapter smoke, prime adapter contract tests + closed-loop smoke (`adapters/prime/tests/`, no docker/network/credential) |
+| `docs` | docs/spec/script-only changes, including internal alpha runbook/feedback/AWS topology updates | whitespace diff, **secret scan over all refs (#1236)**, workflow YAML parse, actionlint if installed, e2e compose config, AWS internal alpha topology preflight fixture, **Rust publish + self-host image-mode contracts (#1266)**, NCP Centrifugo internal-only contract + mutation/redaction fixtures (#1329), JSON/shell/Python syntax, Hermes adapter smoke, prime adapter contract tests + closed-loop smoke (`adapters/prime/tests/`, no docker/network/credential) |
 | `swift` | 잔존 Swift 트리(`server`·`relay/*`·`workers/*`·`services/*`) 변경 | `docs` profile + `make swift-build` + `make swift-test`. **mac 디자인 pre-flight 래칫과 SwiftPM 라이선스 게이트는 W-S1(#1215/#1201)에서 은퇴** — 후속은 각각 `design_preflight_web.sh`(web/병합 트리)와 `--profile license`(cargo+npm) |
 | `diagnostics` | diagnostics/observability bundle changes | `docs` profile + `scripts/collect_diagnostics.sh --smoke` redaction check |
-| `staging-smoke` | staging/prod/internal-hosting config or runbook changes that do not have real VPS secrets | `docs` profile + `scripts/verify_staging_smoke.sh` + `scripts/verify_internal_hosting_smoke.sh` for prod compose config, internal single-node smoke overlay, Caddyfile structure, Centrifugo Redis config, API health route wiring, relay/worker enablement, secret-template guard, public/staging preflight evidence markdown/json, and SOPS/pgBackRest checklist |
+| `staging-smoke` | staging/prod/internal-hosting/NCP Rust config or runbook changes that do not have real VPS secrets | `docs` profile + `scripts/verify_staging_smoke.sh` + `scripts/verify_internal_hosting_smoke.sh` for prod compose config, internal single-node smoke overlay, Caddyfile structure, Centrifugo Redis config, API health route wiring, relay/worker enablement, secret-template guard, public/staging preflight evidence markdown/json, and SOPS/pgBackRest checklist. The static block also fixes the Rust/NCP edge 403, shared-secret source, rotation-runbook, and redacted verifier contracts |
 | `backup` | backup/PITR runbook or internal hosting changes that must prove restore rehearsal evidence before review | `docs` profile + `scripts/verify_backup_restore_rehearsal.sh` for temporary PostgreSQL 18 source DB marker writes, `pg_dump -Fc`, separate restore DB `pg_restore`, marker checksum equality, and markdown/json evidence generation |
 | `host-runtime` | internal single-node host-runtime smoke before internal test hosting | `docs` profile + `scripts/verify_internal_host_runtime.sh` + `scripts/verify_backup_restore_rehearsal.sh`; proves local image prod+internal-smoke boot/health/agent-runtime-status redaction/migrate/message/relay/mock-agent and repo-local restore evidence |
 | `local-alpha` | AWS 전 1인 local Docker alpha RC gate | `docs` profile + host-runtime boot/health/migrate/message/relay/mock Kim Intern + backup restore rehearsal + redacted diagnostics bundle in one `local-alpha-<run-id>/` packet |
@@ -488,6 +488,44 @@ container. `scripts/verify_staging_smoke.sh` still performs the real
 `docker compose config --quiet` render; the orchestrator records that Docker
 gate separately.
 
+#1329 adds two deliberately separate NCP checks. The static
+`scripts/verify_ncp_centrifugo_contract.sh` and
+`scripts/tests/test_ncp_centrifugo_boundary.sh` run in every full local-gate
+profile. They fail on a missing/reordered `/v1/centrifugo/*` 403, a compose
+secret-source drift, a missing rotation/rollback contract, the old public
+401/401/400 shape, unequal runtime fingerprints, a current secret that still
+gets 401, raw-secret leakage into stdout/evidence, or a runtime edge origin
+that is not the exact HTTPS origin derived from the canonical Rust Caddyfile.
+The H1 negative matrix covers attacker/typo/wrong-port/userinfo/path/query/
+fragment/punycode inputs and proves secret-read, Docker exec, curl/network, and
+evidence-write counts all stay zero. It also proves 3xx is never followed and
+production/staging cannot activate the synthetic-secret-only loopback escape.
+These fixtures do not contact NCP.
+
+The read-only runtime closure is intentionally operator-attended and is not a
+PR CI or ordinary local-gate step:
+
+```bash
+/opt/momo/scripts/verify_ncp_centrifugo_boundary.sh \
+  --env-file /opt/momo/infra/rust/smoke.secrets.env \
+  --old-env-file /opt/momo/infra/rust/smoke.secrets.env.before-cent-proxy-<UTC> \
+  --edge-url https://app.oor7.com \
+  --evidence-dir /opt/momo/evidence/cent-proxy-<UTC>
+```
+
+It performs no reload/recreate/rotation. `--edge-url` is an assertion, not a
+trust input: the verifier derives `https://<site>` from its adjacent canonical
+`infra/rust/Caddyfile` and requires an exact byte match before reading
+`CENT_PROXY_SECRET`, invoking Docker, or touching the network. curl ignores
+curlrc, allows only HTTPS, follows zero redirects, and treats every 3xx as RED.
+It records public no-header/wrong/current as 403, compose-private no/old as 401
+and current + malformed body as 400 (authentication passed), then records only
+the equal SHA-256 fingerprint of the host env, API env, and Centrifugo injected
+header. Until an approved deploy window runs that command, NCP public-host and
+real secret-rotation evidence stays
+`runtime-unverified(public host)`; the exact rotation/rollback sequence is
+[`runbooks/ncp-rust-deploy.md`](runbooks/ncp-rust-deploy.md).
+
 MOMO-561 adds `scripts/verify_owner_bootstrap.sh` to `runtime-db`. It builds the
 pinned migrate image and verifies the env-only `set-owner` command on reserved
 port 28200, including exact bootstrap-owner selection, secret non-disclosure,
@@ -767,7 +805,7 @@ Use the profile that matches the changed surface.
 | `docs` | docs/spec only | `scripts/local_gate.sh --profile docs` |
 | `swift` | Swift package/model/view changes | `scripts/local_gate.sh --profile swift` (includes design pre-flight ratchet + snapshot tests) |
 | `diagnostics` | diagnostics/observability bundle changes | `scripts/local_gate.sh --profile diagnostics` |
-| `staging-smoke` | MOMO-005/006/007/229/406 deploy config, Caddy/Centrifugo, install/upgrade matrix, public host preflight, secret/backup runbooks | `scripts/local_gate.sh --profile staging-smoke` |
+| `staging-smoke` | MOMO-005/006/007/229/406 and #1329 deploy config, Caddy/Centrifugo, install/upgrade matrix, public host preflight, secret/backup/rotation runbooks | `scripts/local_gate.sh --profile staging-smoke` |
 | `backup` | backup/PITR restore rehearsal evidence | `scripts/local_gate.sh --profile backup` |
 | `host-runtime` | internal single-node runtime smoke, Kim Intern provider status/redaction, plus restore rehearsal evidence | `scripts/local_gate.sh --profile host-runtime` |
 | `local-alpha` | AWS-free local Docker alpha RC packet | `scripts/local_gate.sh --profile local-alpha` |
