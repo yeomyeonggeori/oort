@@ -22,6 +22,7 @@
 | `infra/rust/rust-smoke.env.example` | `smoke.secrets.env` | `MOMO_RUST_IMAGE=<태그>` 포함 — **배포란 이 태그를 바꾸는 일이다** |
 | `infra/rust/push-relay.env.example` | `push-relay.secrets.env` | APNs `.p8` 호스트 경로 등 |
 | `infra/rust/overlays.env.example` | `overlays.secrets.env` | 오버레이 3개가 요구하는 키 (T3 · origin 목록 · caddy 포트) |
+| `scripts/verify_ncp_centrifugo_boundary.sh` | `/opt/momo/scripts/` | 공개 403 · private API 인증 단계 · `CENT_PROXY_SECRET` SHA-256 동일성의 **읽기 전용** 배포 증거 |
 | — | APNs `.p8` · relay Ed25519 개인키 | 레포 비유입이 **정상**(ADR-0004/0120) |
 
 > ⚠️ **오버레이 3개는 레포에 있지만 `caddy.override.yml`은 로컬에서 켜지 말 것.** `Caddyfile`이 실도메인(`app.oor7.com`)을 스킴 없이 선언하므로 Caddy는 **컨테이너 기동 즉시** 그 도메인으로 실제 ACME 주문을 시작한다 — 요청 한 번 없어도, 호스트 포트를 어디로 옮겨도. (2026-08-10 #1228 검증 중 실측: 프로덕션 Let's Encrypt에 챌린지 4회 실패. 빈 `caddy-data`라 새 ACME 계정이 만들어졌고 인증서 발급은 0이라 라이브 계정·도메인 한도는 움직이지 않았다.) 로컬 검증은 base + `t3` + `cent-origin`까지만 올리고, 웹 볼륨은 따로 들여다본다:
@@ -43,8 +44,11 @@
    이 이미지 하나에 **웹 SPA가 들어 있다**(#1228). 별도의 웹 배포 단계는 없다 — 아래 「웹(정적 SPA) 배포」 참조.
 2. (서버, 오버레이가 바뀐 창에서만) 레포 파일 동기화 — **덮어쓰기는 반드시 제자리에서**(`scp`/`cp`, `mv` 금지: 아래 inode 함정):
    ```bash
+   ssh root@101.79.11.189 'install -d -m 0755 /opt/momo/scripts'
    scp infra/rust/{docker-compose.rust.yml,docker-compose.push.yml,t3.override.yml,caddy.override.yml,cent-origin.override.yml,Caddyfile} \
      root@101.79.11.189:/opt/momo/infra/rust/
+   scp scripts/verify_ncp_centrifugo_boundary.sh \
+     root@101.79.11.189:/opt/momo/scripts/
    ```
    `*.secrets.env`는 **절대 덮어쓰지 않는다** — 값의 정본은 서버다.
 3. (서버) 태그 갱신 + 기동 — **파일 5개·env 3개 전부, 빠지면 안 된다**:
@@ -64,6 +68,7 @@
    ```bash
    curl -s -o /dev/null -w '%{http_code}' https://app.oor7.com/healthz            # 200
    curl -s -o /dev/null -w '%{http_code}' https://app.oor7.com/v1/workspaces/<ws>/approvals  # 401(=서빙), 404면 구 이미지
+   curl -s -o /dev/null -w '%{http_code}' -X POST https://app.oor7.com/v1/centrifugo/subscribe  # 403(=공개 엣지에서 종료)
    # 배포된 웹이 어느 커밋인지 — 1번에서 넘긴 SHA와 같아야 한다 (#1228)
    curl -s https://app.oor7.com/ | grep -o 'name="momo-build" content="[^"]*"'
    # 보안 헤더 5종 (#1213). 아래 「Caddy 설정 배포」를 한 창에서는 이 줄이 수용기준이다.
@@ -71,6 +76,130 @@
    ```
    + `docker ps`에서 momo-rust 4서비스(api·relay·agent-worker·notifier)가 **전부 새 태그**인지 — notifier는 push.yml 소속이라 파일을 빼먹으면 혼자 구 이미지로 남는다(2026-08-04 실증).
    + 이미지 자신에게 물어도 된다: `docker image inspect momo-rust:<태그> --format '{{index .Config.Labels "org.opencontainers.image.revision"}}'`
+
+## CENT_PROXY_SECRET 회전
+
+`CENT_PROXY_SECRET`은 사용자 자격증명이 아니라 Centrifugo가 compose-private API
+subscribe callback을 호출할 때 쓰는 공유 인증값이다. 그래도 **무중단 이중 키
+기간은 없다**. API와 Centrifugo가 다른 값을 든 순간 모든 신규 구독이 401로
+실패하므로, 둘을 같은 attended 창에서 함께 recreate하고 아래 verifier가 끝날
+때까지 창을 닫지 않는다. 원문은 터미널 출력·이슈·PR·evidence에 붙이지 않는다.
+
+아래 절차에서 `set +x`는 필수다. verifier는 env 파일과 두 컨테이너의 실행 환경을
+읽지만 변경하지 않으며, 외부 요청에는 no-header/wrong/current를 각각 보내도
+Caddy가 모두 403으로 끝내는지 확인한다. compose-private API에는 no/old/current를
+보내 401/401/400인지 확인한다. current + 고의로 잘못된 JSON의 400은 **secret 인증을
+통과한 뒤 body 검증에서 거절됐다는 증거**다. 마지막으로 host env · API env ·
+Centrifugo static header 값의 SHA-256이 같은지 비교하고 hash만 기록한다.
+
+`--edge-url`은 목적지를 신뢰하게 만드는 입력이 아니라 **정본과 같다는 주장**이다.
+verifier는 자기와 함께 배포된 `/opt/momo/infra/rust/Caddyfile`의 단일 site label에서
+`https://<site>`를 파생하고, 인자가 그 origin과 정확히 같지 않으면 env secret을
+읽거나 Docker/curl을 실행하기 전에 종료한다. curlrc는 끄고 HTTPS만 허용하며
+redirect는 0회라 3xx도 RED다. 따라서 오타·포트·userinfo·path/query/fragment 또는
+다른 호스트로 현재 secret을 보내는 진단 명령으로 사용할 수 없다.
+
+`--allow-http-local`은 회귀/격리 테스트 전용이다. env 파일의 `MOMO_ENV=test`,
+프로세스의 exact `MOMO_NCP_TEST_TRUSTED_ORIGIN=http://127.0.0.1:<port>`, 그리고
+`fixture-` synthetic secret을 모두 요구한다. production/staging env나 운영 secret은
+이 escape를 활성화할 수 없으므로 NCP 호스트에서는 사용하지 않는다.
+
+1. 서버에서 기존 env를 0600으로 백업하고 새 값을 **stdout 없이** 파일에 쓴다.
+   env 파일은 컨테이너 bind mount가 아니므로 임시파일→replace가 안전하다.
+
+   ```bash
+   set +x
+   umask 077
+   cd /opt/momo/infra/rust
+   stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+   old_env="smoke.secrets.env.before-cent-proxy-${stamp}"
+   cp -p smoke.secrets.env "$old_env"
+
+   new_secret="$(openssl rand -hex 32)"
+   printf '%s\n' "$new_secret" | python3 -c '
+import os, pathlib, sys
+path = pathlib.Path(sys.argv[1])
+secret = sys.stdin.readline().strip()
+if not secret or any(ch.isspace() for ch in secret):
+    raise SystemExit("generated secret has an invalid shape")
+lines = path.read_text().splitlines(keepends=True)
+hits = [i for i, line in enumerate(lines) if line.startswith("CENT_PROXY_SECRET=")]
+if len(hits) != 1:
+    raise SystemExit(f"expected exactly one CENT_PROXY_SECRET line, got {len(hits)}")
+lines[hits[0]] = f"CENT_PROXY_SECRET={secret}\n"
+tmp = path.with_name(path.name + ".rotate")
+tmp.write_text("".join(lines))
+os.chmod(tmp, 0o600)
+os.replace(tmp, path)
+' smoke.secrets.env
+   unset new_secret
+   chmod 600 smoke.secrets.env "$old_env"
+   ```
+
+2. **다섯 compose 파일·세 env 파일을 그대로 유지한 채** 렌더링을 먼저 확인하고,
+   secret을 소비하는 `api`와 `centrifugo`만 같은 명령에서 recreate한다. 이 짧은
+   창에는 신규 realtime 연결이 재시도될 수 있지만, DB/message/outbox는 바뀌지 않는다.
+
+   ```bash
+   docker compose --env-file smoke.secrets.env --env-file push-relay.secrets.env \
+     --env-file overlays.secrets.env \
+     -f docker-compose.rust.yml -f docker-compose.push.yml -f t3.override.yml \
+     -f caddy.override.yml -f cent-origin.override.yml config >/dev/null
+
+   docker compose --env-file smoke.secrets.env --env-file push-relay.secrets.env \
+     --env-file overlays.secrets.env \
+     -f docker-compose.rust.yml -f docker-compose.push.yml -f t3.override.yml \
+     -f caddy.override.yml -f cent-origin.override.yml \
+     up -d --no-deps --force-recreate api centrifugo
+   ```
+
+3. health 뒤 읽기 전용 verifier를 실행한다. 이 출력/JSON/Markdown에는 원문이 없고
+   SHA-256 동일성과 403/401/400만 남는다. `--old-env-file`을 빼면 old-secret 자리에
+   합성 invalid 값만 쓰므로, **회전 증거에는 반드시 백업 파일을 넘긴다**.
+
+   ```bash
+   curl -fsS https://app.oor7.com/healthz >/dev/null
+   /opt/momo/scripts/verify_ncp_centrifugo_boundary.sh \
+     --env-file /opt/momo/infra/rust/smoke.secrets.env \
+     --old-env-file "/opt/momo/infra/rust/$old_env" \
+     --edge-url https://app.oor7.com \
+     --evidence-dir "/opt/momo/evidence/cent-proxy-${stamp}"
+   ```
+
+   PASS 뒤에도 백업은 즉시 지우지 않는다. 해당 배포 창 evidence와 직전 롤백 보존
+   기간이 끝난 뒤 운영자 정책에 따라 회수한다. Git·이슈·PR에는 올리지 않는다.
+
+### 회전 롤백
+
+recreate 또는 verifier가 실패하면 새 env를 별도 0600 파일로 보존한 뒤 직전 env를
+제자리 복원하고 **동일한 두 서비스**를 다시 recreate한다. 롤백 검증에서는 실패한
+새 env가 `--old-env-file`이다. 즉, 이전 값으로 돌아온 API가 새 값을 401로 거절하는
+것까지 확인한다.
+
+```bash
+set +x
+cd /opt/momo/infra/rust
+failed_env="smoke.secrets.env.failed-cent-proxy-${stamp}"
+cp -p smoke.secrets.env "$failed_env"
+cp -p "$old_env" smoke.secrets.env
+chmod 600 smoke.secrets.env "$failed_env"
+
+docker compose --env-file smoke.secrets.env --env-file push-relay.secrets.env \
+  --env-file overlays.secrets.env \
+  -f docker-compose.rust.yml -f docker-compose.push.yml -f t3.override.yml \
+  -f caddy.override.yml -f cent-origin.override.yml \
+  up -d --no-deps --force-recreate api centrifugo
+
+/opt/momo/scripts/verify_ncp_centrifugo_boundary.sh \
+  --env-file /opt/momo/infra/rust/smoke.secrets.env \
+  --old-env-file "/opt/momo/infra/rust/$failed_env" \
+  --edge-url https://app.oor7.com \
+  --evidence-dir "/opt/momo/evidence/cent-proxy-rollback-${stamp}"
+```
+
+이 PR/goal 자체는 운영 secret 회전이나 NCP reload/recreate를 수행하지 않는다.
+따라서 실제 `app.oor7.com`의 403·hash equality·old-secret 401 증거는 배포 전까지
+`runtime-unverified(public host)`이며, 위 attended 절차가 그 미검증 범위를 닫는다.
 
 ## Caddy 설정(보안 헤더 포함) 배포
 
@@ -81,7 +210,9 @@
 1. (로컬 → 서버) **덮어쓰기는 반드시 제자리에서.**
    ```bash
    # 워크트리에서 서버로. scp/cp 는 같은 inode에 쓴다.
+   ssh root@101.79.11.189 'install -d -m 0755 /opt/momo/scripts'
    scp infra/rust/Caddyfile root@101.79.11.189:/opt/momo/infra/rust/Caddyfile
+   scp scripts/verify_ncp_centrifugo_boundary.sh root@101.79.11.189:/opt/momo/scripts/
    ```
    > ⚠️ `caddy.override.yml`은 **파일 하나**를 `./Caddyfile:/etc/caddy/Caddyfile:ro`로 bind mount 한다. 디렉터리 마운트와 같은 함정이 파일 단위로 있다: `mv new Caddyfile`(rename)로 바꾸면 inode가 갈리고 컨테이너는 **옛 파일을 계속 본다**. `scp`·`cp`·`sed -i`는 제자리에 쓰므로 안전하고, 에디터의 「원자적 저장」(임시파일→rename)은 안전하지 않다.
 
@@ -104,6 +235,15 @@
    curl -sI https://app.oor7.com | grep -iE 'content-security|strict-transport|x-content-type|referrer|frame'
    ```
    5종이 다 보여야 한다: `content-security-policy`(`frame-ancestors 'none'` 포함 — 클릭재킹 축은 이 안에 있고 `x-frame-options`는 없는 것이 정상이다) · `strict-transport-security` · `x-content-type-options` · `referrer-policy`. 첨부는 헤더만으로 확인되지 않으니 **실제 파일 하나를 올려 본다** — `connect-src`에서 `https://www.googleapis.com`이 빠지면 업로드가 즉사한다(#1206).
+
+   `/v1/centrifugo/*`가 바뀐 창은 header 확인만으로 끝내지 않는다. 현재 env에 대한
+   읽기 전용 경계 검증도 이어서 실행한다(회전이 아니라면 `--old-env-file`은 생략):
+   ```bash
+   /opt/momo/scripts/verify_ncp_centrifugo_boundary.sh \
+     --env-file /opt/momo/infra/rust/smoke.secrets.env \
+     --edge-url https://app.oor7.com \
+     --evidence-dir /opt/momo/evidence/cent-proxy-caddy-reload
+   ```
 
 ### HSTS 확장 일정
 
