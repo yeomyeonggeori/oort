@@ -1,10 +1,11 @@
 # 로컬 셀프호스트 오버레이 — 브라우저까지 닿게 하는 두 서비스 (#1229).
 # 정본 절차: docs/SELF_HOST.md
 #
-#   docker compose --env-file infra/rust/local.secrets.env \
-#     -f infra/rust/docker-compose.rust.yml \
-#     -f infra/rust/docker-compose.rust.build.yml \
-#     -f infra/rust/local.override.yml up -d --build
+#   scripts/self_host_env.sh --compose up -d --build --wait
+#
+# `docs/SELF_HOST.md` selects one image source. Local-build uses the command
+# above; published-digest omits the build overlay and `--build`, then supplies
+# a canonical `@sha256:` MOMO_RUST_IMAGE instead.
 #
 # ## 왜 이 파일이 있나
 #
@@ -33,10 +34,11 @@
 #
 # ## 왜 build 선언이 없나
 #
-# `docker-compose.rust.build.yml` 이 api/relay/migrate/runtime-roles에 build를
-# 얹고, 그 빌드 산출물이 `${MOMO_RUST_IMAGE}` 태그로 로컬 데몬에 남는다.
-# `web-init` 과 `agent-worker` 는 같은 태그를 참조하므로 별도 build 선언 없이
-# 그 이미지를 그대로 쓴다 — 태그를 두 곳에서 만들면 두 개가 될 수 있다.
+# 로컬 모드에서는 `docker-compose.rust.build.yml`이
+# api/relay/migrate/runtime-roles에 build를 얹고 결과를 `${MOMO_RUST_IMAGE}`
+# 태그로 남긴다. 발행 모드에서는 그 변수가 이미 불변 digest ref다.
+# `web-init`과 `agent-worker`는 두 모드 모두 같은 ref를 참조하므로 이 파일에
+# 별도 build 선언을 두지 않는다 — 이미지를 두 곳에서 만들면 둘이 될 수 있다.
 
 x-momo-janitor-labels: &momo-janitor-labels
   com.momo.janitor.managed: "true"

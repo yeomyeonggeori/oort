@@ -17,16 +17,23 @@
 
 | 파일 | 역할 |
 |---|---|
-| `server-rust/Dockerfile` | 멀티스테이지 이미지 — 하나의 이미지, 3개 커맨드(`api`/`relay`/`migrate`) |
+| `server-rust/Dockerfile` | 멀티스테이지 이미지 — 하나의 이미지, 7개 커맨드(`api`/`relay`/`agent-worker`/`webhook-sender`/`notifier`/`migrate`/`web-assets`) |
 | `server-rust/docker-entrypoint.sh` | 역할 선택만. prod Swift 이미지와 동일 계약(`command: ["api"]`) |
 | `docker-compose.rust.yml` | prod compose 미러(최소셋): postgres · centrifugo · runtime-roles · migrate · api · relay |
-| `docker-compose.rust.build.yml` | 로컬 빌드 오버라이드(`build:` 주입). 배포 스택은 항상 이미지 pull |
+| `docker-compose.rust.build.yml` | 로컬 빌드 전용 오버라이드(`build:` 주입). 발행 digest 경로는 이 파일과 `--build`를 둘 다 빼고 이미지를 pull(#1266) |
 | `rust-smoke.env.example` | env 템플릿. 복사본은 반드시 `*.secrets.env`(레포 전역 gitignore). 셀프호스트 경로는 이 템플릿 대신 `scripts/self_host_env.sh` 가 `local.secrets.env` 를 **생성**한다(#1229) |
 | `local.override.yml` + `Caddyfile.local` | **로컬 셀프호스트 엣지**(#1229) — `web-init` + `web`(Caddy `:80`, 루프백 바인딩, ACME 없음). SPA·`/v1`·`/connection` 을 같은 오리진에서 낸다. 정본 절차는 `docs/SELF_HOST.md` |
 | `docker-compose.lane-phone.yml` | **기본 비활성** MAESTRO 폰 레인 오버레이(#1022) — `mock-hermes` + `agent-worker`의 프로바이더 배선. `clients/mobile/scripts/lane-phone.sh` 전용 |
 | `docker-compose.push.yml` | **기본 비활성** ADR-0120 푸시 경로 오버레이 — `push-relay` + `notifier`. `-f`로 명시할 때만 존재한다 |
 | `docker-compose.push.build.yml` | 위 오버레이의 로컬 빌드(`relay/PushRelay/Dockerfile`) |
 | `push-relay.env.example` | 푸시 경로 env 템플릿. `rust-smoke.secrets.env` **위에** 겹쳐 쓴다 |
+
+공개 digest 형상은 현재 `linux/amd64` 하나뿐이고 native `linux/arm64`/Apple
+Silicon pull은 지원하지 않는다. 수동 발행은 `main` ref와 GitHub `release`
+Environment owner 승인 경계 뒤에만 진행하며, tag가 아니라 pushed digest에 SLSA v1
+provenance를 결속한다. `release`는 attended readback에서 required reviewer
+`kwakseongjae`(id `87296259`)와 custom `main` branch policy 하나를 확인했다. 실제 첫
+dispatch와 공개 digest 검증은 아직 `runtime-unverified`다.
 
 푸시 오버레이는 `docker-compose.rust.yml`을 **한 줄도 바꾸지 않는다** — 평소의
 `momorust up -d`는 relay를 띄우지도, 새 변수에서 깨지지도 않는다. 절차는
@@ -233,9 +240,9 @@ prod(`momo-pgdata`)와 분리돼 있다. 다른 프로젝트명으로 띄우면 
 
 | 런북 단계 | 이 디렉터리에서 |
 |---|---|
-| 3-1 이미지 퍼블리시 확인 | `server-rust/Dockerfile`로 빌드 → 레지스트리 push는 **오케스트레이터/CI 몫(후속)**. 그 전에는 서버에서 직접 빌드하거나 `docker save/load` |
+| 3-1 이미지 퍼블리시 확인 | 수동 `publish-images.yml`이 `main`+`release` 승인 경계에서 `server-rust/Dockerfile`를 native `linux/amd64`로 빌드하고 pushed digest에 SLSA v1 provenance를 발급하는 경로는 #1266에서 정본화. arm64는 미지원. 실 dispatch·digest 핀·익명 pull·attestation 검증은 owner/M7 후속(`runtime-unverified`) |
 | 3-3 Docker 설치 | 그대로 |
-| 3-4 스택 기동 | `docker-compose.rust.yml`(caddy·redis·worker 제외판). `MOMO_RUST_IMAGE`만 퍼블리시된 ref로 바꾸면 build 오버레이 없이 pull 경로 |
+| 3-4 스택 기동 | 셀프호스트는 `scripts/self_host_env.sh --compose …`가 generated env·canonical file set을 ambient override 없이 실행한다. 발행 모드는 build 오버레이 없이 exact digest pull |
 | 3-5 마이그레이션 001~059 | `migrate` 서비스(psql 러너). seed 모드는 NCP에서 `none` |
 | 3-6 BYOC/T3 smoke | **아직 불가** — T3(B2)·workd(B5)가 Rust로 서야 한다. 이 배치는 메신저 부분까지 |
 

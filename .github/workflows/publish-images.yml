@@ -1,24 +1,11 @@
-# momo multi-command image publication for the source-checkout-free alpha host.
-# Manual-only: owner approval is required before dispatch.
+# oort Rust multi-command image publication for source-checkout-free hosts.
+# Manual-only: the `release` GitHub Environment is the owner-approval boundary,
+# and the selected workflow ref must be main. Repository Environment protection
+# still needs an attended owner setup before the first dispatch.
 #
-# ── 2026-08-10 W-P1 정합 검사 — dispatch 전에 읽을 것 ──────────────────────
-# 이 워크플로는 **한 번도 실행된 적이 없다**(감사 B §5-1: runs 0). 공개 전환으로
-# Actions가 무료가 되어 첫 발행이 가능해졌고, 그 첫 발행이 만드는 패키지가
-# `ghcr.io/yeomyeonggeori/oort`다. 검사 결과 **실행은 된다** — 빌드 컨텍스트가
-# 요구하는 경로 21개 전수 존재, `scripts/tests/test_publish_images_contract.py`
-# PASS. 다만 발행되는 내용에 대해 두 가지를 알고 눌러야 한다(둘 다 워크플로
-# 밖의 결정이라 이 워커는 고치지 않았다):
-#
-# ① **이 워크플로가 짓는 것은 Swift 스택이고, 라이브가 도는 것은 Rust다**
-#    (감사 B §5 6축 불일치표). Dockerfile = `momo.Dockerfile`(Swift 6.2 +
-#    `clients/web-legacy`) vs 라이브 `server-rust/Dockerfile`(Rust +
-#    `clients/web`). 커맨드도 6종(api·relay·worker·migrate·web-assets·
-#    linkshort) vs 5종(momo-server·relay·agent-worker·notifier·migrate).
-# ② **`platforms: linux/arm64` 단일이고 라이브 호스트는 amd64**다(감사 B §6-1).
-#
-# 둘 다 `test_publish_images_contract.py`가 Swift Dockerfile·arm64를 **강제로
-# 단정**하고 있어(감사 B-11 "게이트가 죽은 경로를 지키고 있다") 워크플로만
-# 바꿔서는 닫히지 않는다. 이 PR의 수용기준이 "계약 테스트 green 유지"다.
+# The artifact matches the live stack: `server-rust/Dockerfile`, the current
+# `clients/web` bundle, and native linux/amd64. A future arm64 lane must use a
+# native runner and merge digests; QEMU is intentionally absent here.
 name: publish-images
 
 on:
@@ -43,47 +30,51 @@ env:
 
 jobs:
   publish:
-    name: publish momo (linux/arm64)
+    name: publish oort Rust image (linux/amd64)
     runs-on: ubuntu-24.04
-    # 90분이었다. 이 잡은 Swift 6.2 릴리스 빌드 4개(MomoServer·OutboxRelay·
-    # AgentWorker·LinkShort)를 **QEMU arm64 에뮬레이션 위에서** 돌린다 —
-    # 네이티브 대비 배수가 큰 작업이고, 캐시(`type=gha`)는 실행 이력이 0이라
-    # 첫 dispatch에서 반드시 콜드다. 공개 전환으로 분이 무료·무제한이 된 지금
-    # 90분은 "예산"이 아니라 "첫 발행이 타임아웃으로 죽을 확률"일 뿐이라
-    # 넉넉히 올린다(행 방지 상한으로만 남긴다).
-    timeout-minutes: 240
+    timeout-minutes: 90
+    environment: release
     outputs:
       image: ${{ env.IMAGE }}
       digest: ${{ steps.build.outputs.digest }}
     steps:
+      - name: Require a main-branch dispatch
+        env:
+          DISPATCH_REF: ${{ github.ref }}
+        run: |
+          if [ "$DISPATCH_REF" != "refs/heads/main" ]; then
+            echo "::error::publish-images must be dispatched from refs/heads/main (got $DISPATCH_REF)"
+            exit 1
+          fi
+
       # 첫 실행 전 최신 메이저로 시작한다 — v7 breaking(fork PR 체크아웃 차단)은
       # 이 레포 트리거에 해당 없음(W-DEP #667 판정).
-      - uses: actions/checkout@v7
-
-      - name: Enable linux/arm64 emulation
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: arm64
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
 
       - name: Authenticate to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push immutable multi-command image
+      # `sha-<gitsha>` is a convenient commit locator, not an immutable
+      # registry identity: a writer can move a tag. Only the returned digest is
+      # immutable and every downstream trust step binds to that digest.
+      - name: Build and push commit-addressed multi-command image
         id: build
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: .
-          file: infra/prod/docker/momo.Dockerfile
-          platforms: linux/arm64
+          file: server-rust/Dockerfile
+          platforms: linux/amd64
           push: true
           tags: ${{ env.IMAGE }}:${{ env.IMAGE_TAG }}
+          build-args: |
+            MOMO_BUILD_SHA=${{ github.sha }}
           # GHCR 패키지를 레포에 **연결**하는 것은 이 라벨이다. 없으면 공개
           # 레포가 된 뒤에도 패키지 페이지가 소스·README·라이선스로 이어지지
           # 않고, 익명 방문자에게는 출처 없는 바이너리로 보인다. 첫 공개 발행
@@ -94,12 +85,24 @@ jobs:
             org.opencontainers.image.url=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.licenses=Apache-2.0
-          cache-from: type=gha,scope=momo-arm64
-          cache-to: type=gha,mode=max,scope=momo-arm64
+          cache-from: type=gha,scope=oort-rust-amd64
+          cache-to: type=gha,mode=max,scope=oort-rust-amd64
           provenance: mode=max
           sbom: true
 
-      - name: Report immutable image digest
+      - name: Attest the pushed image digest
+        id: attest
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+          # The attestation API + OCI referrer are sufficient for
+          # `gh attestation verify`. Avoid artifact-metadata:write by not
+          # creating the optional organization storage record.
+          create-storage-record: false
+
+      - name: Report digest-pinned image
         env:
           DIGEST: ${{ steps.build.outputs.digest }}
         run: |

@@ -116,7 +116,7 @@ Profiles:
 
 | Profile | Use when | What it runs |
 |---|---|---|
-| `docs` | docs/spec/script-only changes, including internal alpha runbook/feedback/AWS topology updates | whitespace diff, **secret scan over all refs (#1236)**, workflow YAML parse, actionlint if installed, e2e compose config, AWS internal alpha topology preflight fixture, JSON syntax, shell syntax, Python syntax, Hermes adapter smoke, prime adapter contract tests + closed-loop smoke (`adapters/prime/tests/`, no docker/network/credential) |
+| `docs` | docs/spec/script-only changes, including internal alpha runbook/feedback/AWS topology updates | whitespace diff, **secret scan over all refs (#1236)**, workflow YAML parse, actionlint if installed, e2e compose config, AWS internal alpha topology preflight fixture, **Rust publish + self-host image-mode contracts (#1266)**, JSON syntax, shell syntax, Python syntax, Hermes adapter smoke, prime adapter contract tests + closed-loop smoke (`adapters/prime/tests/`, no docker/network/credential) |
 | `swift` | 잔존 Swift 트리(`server`·`relay/*`·`workers/*`·`services/*`) 변경 | `docs` profile + `make swift-build` + `make swift-test`. **mac 디자인 pre-flight 래칫과 SwiftPM 라이선스 게이트는 W-S1(#1215/#1201)에서 은퇴** — 후속은 각각 `design_preflight_web.sh`(web/병합 트리)와 `--profile license`(cargo+npm) |
 | `diagnostics` | diagnostics/observability bundle changes | `docs` profile + `scripts/collect_diagnostics.sh --smoke` redaction check |
 | `staging-smoke` | staging/prod/internal-hosting config or runbook changes that do not have real VPS secrets | `docs` profile + `scripts/verify_staging_smoke.sh` + `scripts/verify_internal_hosting_smoke.sh` for prod compose config, internal single-node smoke overlay, Caddyfile structure, Centrifugo Redis config, API health route wiring, relay/worker enablement, secret-template guard, public/staging preflight evidence markdown/json, and SOPS/pgBackRest checklist |
@@ -158,6 +158,36 @@ scripts/local_gate.sh --profile license
 scripts/local_gate.sh --profile secrets
 scripts/local_gate.sh --profile docs --output-dir /tmp/momo-local-gate
 ```
+
+### Rust image publication + self-host modes (#1266)
+
+Every profile's static block runs both contracts:
+
+```bash
+python3 scripts/tests/test_publish_images_contract.py
+scripts/tests/test_self_host_env_modes.sh
+```
+
+The first parses the workflow and keeps it on `server-rust/Dockerfile`, native
+`linux/amd64`, exact `MOMO_BUILD_SHA`, one seven-command image, embedded
+LICENSE/NOTICE, provenance, and SBOM. It behaviorally exercises the `main` ref
+guard and mutates full-SHA action pins, registry push, and the attestation
+subject name/digest/OCI-referrer bindings to prove each removal turns red. A fake
+`gh` also proves the deploy library verifies the selected OCI digest against the
+`yeomyeonggeori/oort` repository and SLSA provenance v1.
+
+The second executes isolated fixtures and proves the two quickstart modes do
+not cross: local-build includes the build overlay and `--build`;
+published-digest requires the canonical full sha256 ref and omits both. It also
+rejects LF/CR and dotenv-metachar credential injection, duplicate keys,
+config-source argv replacement, and non-decimal arithmetic input before
+modifying an env file. The canonical `--compose` launcher derives its unset
+boundary from every actual env-file key and canonical Compose interpolation,
+adds explicit Compose control keys, and preserves Docker daemon/context
+selection. A real `docker compose config` fixture proves ambient secret, DB/WS
+URL, three ports, project, image, and file/profile controls cannot replace the
+generated authority while all seven application consumers use the exact
+digest. Neither test dispatches a workflow nor pulls from GHCR.
 
 ### OpenAPI contract drift gate (MOMO-389)
 
