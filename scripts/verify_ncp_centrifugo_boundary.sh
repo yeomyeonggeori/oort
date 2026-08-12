@@ -14,6 +14,9 @@ OLD_ENV_FILE=""
 EDGE_URL=""
 EVIDENCE_DIR="${LOCAL_GATE_OUTPUT_DIR:-${TMPDIR:-/tmp}/momo-ncp-cent-boundary}"
 ALLOW_HTTP_LOCAL=0
+TEST_MODE=0
+TRUSTED_ORIGIN_SOURCE=""
+EDGE_CURL_PROTO=""
 
 usage() {
   cat <<'EOF'
@@ -25,9 +28,12 @@ Options:
   --env-file PATH       Host env file used by docker-compose.rust.yml.
   --old-env-file PATH   Optional pre-rotation env backup. Its old secret must
                         get 401 on the compose-private API.
-  --edge-url URL        Public Caddy origin. HTTPS is mandatory by default.
+  --edge-url URL        Must exactly equal the HTTPS origin derived from the
+                        canonical infra/rust/Caddyfile site label.
   --evidence-dir DIR    Redacted markdown/json output directory.
-  --allow-http-local    Test-only: permit a loopback http:// edge URL.
+  --allow-http-local    Test-only: permit the exact loopback origin in
+                        MOMO_NCP_TEST_TRUSTED_ORIGIN, and only with MOMO_ENV=test
+                        in the env file and synthetic fixture secrets.
 
 The running Compose project must contain services `api` and `centrifugo`.
 The verifier is read-only and never performs a reload, recreate, or rotation.
@@ -80,20 +86,81 @@ done
 [ -z "$OLD_ENV_FILE" ] || [ -f "$OLD_ENV_FILE" ] || fail "old_env_file_missing"
 [ -n "$EDGE_URL" ] || fail "edge_url_required"
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+BASE_COMPOSE="$REPO_ROOT/infra/rust/docker-compose.rust.yml"
+CADDYFILE="$REPO_ROOT/infra/rust/Caddyfile"
+[ -f "$BASE_COMPOSE" ] || fail "base_compose_missing"
+[ -f "$CADDYFILE" ] || fail "canonical_caddyfile_missing"
+[ -z "${MOMO_NCP_RUNTIME_ROOT:-}" ] || fail "runtime_root_override_forbidden"
+
+derive_caddy_origin() {
+  local sites site_count site
+  sites="$(awk '
+    /^[[:alnum:]][[:alnum:].-]*[[:space:]]+\{[[:space:]]*$/ { print $1 }
+  ' "$CADDYFILE")"
+  site_count="$(printf '%s\n' "$sites" | awk 'NF { count += 1 } END { print count + 0 }')"
+  [ "$site_count" = "1" ] || fail "canonical_caddy_site_count expected=1 actual=$site_count"
+  site="$sites"
+  if ! awk -v host="$site" 'BEGIN {
+    if (host !~ /^[a-z0-9.-]+$/ || host ~ /^\./ || host ~ /\.$/ || host ~ /\.\./) exit 1
+    count = split(host, labels, ".")
+    if (count < 2 || length(host) > 253) exit 1
+    for (i = 1; i <= count; i += 1) {
+      if (length(labels[i]) > 63 || labels[i] !~ /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/) exit 1
+    }
+  }'; then
+    fail "canonical_caddy_site_invalid"
+  fi
+  printf 'https://%s' "$site"
+}
+
+read_env_mode() {
+  local count line value
+  count="$(grep -Ec '^[[:space:]]*(export[[:space:]]+)?MOMO_ENV=' "$ENV_FILE" || true)"
+  [ "$count" = "1" ] || fail "test_env_mode_line_count expected=1 actual=$count"
+  line="$(grep -E '^[[:space:]]*(export[[:space:]]+)?MOMO_ENV=' "$ENV_FILE")"
+  value="${line#*=}"
+  case "$value" in
+    \"*\") value="${value#\"}"; value="${value%\"}" ;;
+    \'*\') value="${value#\'}"; value="${value%\'}" ;;
+  esac
+  printf '%s' "$value"
+}
+
+# Trust is resolved before CENT_PROXY_SECRET is read, before Docker is invoked,
+# and before curl can touch the network.  In production there is no caller-
+# supplied allowlist: the tracked/deployed Caddy site is the only authority.
 case "$EDGE_URL" in
-  https://*) ;;
-  http://127.0.0.1:*|http://localhost:*)
+  https://*)
+    [ "$ALLOW_HTTP_LOCAL" = "0" ] || fail "test_override_only_for_loopback"
+    [ -z "${MOMO_NCP_TEST_TRUSTED_ORIGIN:-}" ] || fail "test_trusted_origin_forbidden_in_production_mode"
+    trusted_origin="$(derive_caddy_origin)"
+    [ "$EDGE_URL" = "$trusted_origin" ] || fail "edge_origin_not_trusted"
+    TRUSTED_ORIGIN_SOURCE="canonical-caddy"
+    EDGE_CURL_PROTO="=https"
+    ;;
+  http://127.0.0.1:*)
     [ "$ALLOW_HTTP_LOCAL" = "1" ] || fail "https_required (loopback http needs --allow-http-local)"
+    case "${MOMO_ENV:-}" in
+      production|prod|staging|live) fail "test_override_forbidden_for_process_env" ;;
+    esac
+    env_mode="$(read_env_mode)"
+    [ "$env_mode" = "test" ] || fail "test_override_requires_env_file_MOMO_ENV=test"
+    trusted_origin="${MOMO_NCP_TEST_TRUSTED_ORIGIN:-}"
+    [ -n "$trusted_origin" ] || fail "test_trusted_origin_required"
+    if [[ ! "$trusted_origin" =~ ^http://127\.0\.0\.1:([0-9]+)$ ]]; then
+      fail "test_trusted_origin_invalid"
+    fi
+    trusted_port="${BASH_REMATCH[1]}"
+    [ "$trusted_port" -ge 1024 ] && [ "$trusted_port" -le 65535 ] \
+      || fail "test_trusted_origin_port_invalid"
+    [ "$EDGE_URL" = "$trusted_origin" ] || fail "edge_origin_not_trusted"
+    TEST_MODE=1
+    TRUSTED_ORIGIN_SOURCE="test-only-exact"
+    EDGE_CURL_PROTO="=http"
     ;;
   *) fail "https_required" ;;
-esac
-
-# Evidence must name only an origin. Reject userinfo, paths, queries, fragments,
-# and whitespace so an accidental credential-bearing URL can never be recorded.
-EDGE_URL="${EDGE_URL%/}"
-edge_authority="${EDGE_URL#*://}"
-case "$edge_authority" in
-  ""|*/*|*@*|*\?*|*\#*|*[[:space:]]*) fail "edge_url_must_be_origin" ;;
 esac
 
 need curl
@@ -106,11 +173,6 @@ elif command -v sha256sum >/dev/null 2>&1; then
 else
   fail "missing_command name=shasum-or-sha256sum"
 fi
-
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="${MOMO_NCP_RUNTIME_ROOT:-$(cd "$SCRIPT_DIR/.." && pwd)}"
-BASE_COMPOSE="$REPO_ROOT/infra/rust/docker-compose.rust.yml"
-[ -f "$BASE_COMPOSE" ] || fail "base_compose_missing"
 
 read_env_secret() {
   local path="$1"
@@ -136,10 +198,22 @@ read_env_secret() {
 }
 
 host_secret="$(read_env_secret "$ENV_FILE" host)"
+if [ "$TEST_MODE" = "1" ]; then
+  case "$host_secret" in
+    fixture-*) ;;
+    *) fail "test_secret_must_be_synthetic" ;;
+  esac
+fi
 old_secret="oort-invalid-proxy-secret-1329"
 old_secret_source="synthetic-invalid"
 if [ -n "$OLD_ENV_FILE" ]; then
   old_secret="$(read_env_secret "$OLD_ENV_FILE" old)"
+  if [ "$TEST_MODE" = "1" ]; then
+    case "$old_secret" in
+      fixture-*) ;;
+      *) fail "test_old_secret_must_be_synthetic" ;;
+    esac
+  fi
   [ "$old_secret" != "$host_secret" ] || fail "old_secret_not_rotated"
   old_secret_source="previous-env"
 fi
@@ -187,18 +261,24 @@ edge_status() {
   local url="${EDGE_URL%/}/v1/centrifugo/subscribe"
   case "$mode" in
     no-header)
-      curl -sS --connect-timeout 5 --max-time 20 -o /dev/null -w '%{http_code}' \
+      curl --disable --silent --show-error --connect-timeout 5 --max-time 20 \
+        --max-redirs 0 --proto "$EDGE_CURL_PROTO" --proto-redir "$EDGE_CURL_PROTO" \
+        -o /dev/null -w '%{http_code}' \
         -H 'Content-Type: application/json' -X POST --data-binary 'not-json' "$url"
       ;;
     wrong-secret)
-      curl -sS --connect-timeout 5 --max-time 20 -o /dev/null -w '%{http_code}' \
+      curl --disable --silent --show-error --connect-timeout 5 --max-time 20 \
+        --max-redirs 0 --proto "$EDGE_CURL_PROTO" --proto-redir "$EDGE_CURL_PROTO" \
+        -o /dev/null -w '%{http_code}' \
         -H 'Content-Type: application/json' \
         -H "X-Centrifugo-Proxy-Secret: $wrong_secret" \
         -X POST --data-binary 'not-json' "$url"
       ;;
     current-secret)
       printf 'X-Centrifugo-Proxy-Secret: %s\n' "$host_secret" \
-        | curl -sS --connect-timeout 5 --max-time 20 -o /dev/null -w '%{http_code}' \
+        | curl --disable --silent --show-error --connect-timeout 5 --max-time 20 \
+          --max-redirs 0 --proto "$EDGE_CURL_PROTO" --proto-redir "$EDGE_CURL_PROTO" \
+          -o /dev/null -w '%{http_code}' \
           --header @- -H 'Content-Type: application/json' \
           -X POST --data-binary 'not-json' "$url"
       ;;
@@ -214,25 +294,29 @@ direct_status() {
     url="http://127.0.0.1:8080/v1/centrifugo/subscribe"
     case "$mode" in
       no-header)
-        curl -sS --connect-timeout 3 --max-time 10 -o /dev/null -w "%{http_code}" \
+        curl --disable --silent --show-error --connect-timeout 3 --max-time 10 \
+          --max-redirs 0 --proto "=http" --proto-redir "=http" -o /dev/null -w "%{http_code}" \
           -H "Content-Type: application/json" -X POST --data-binary "not-json" "$url"
         ;;
       old-secret)
         IFS= read -r presented
         printf "X-Centrifugo-Proxy-Secret: %s\\n" "$presented" \
-          | curl -sS --connect-timeout 3 --max-time 10 -o /dev/null -w "%{http_code}" \
+          | curl --disable --silent --show-error --connect-timeout 3 --max-time 10 \
+            --max-redirs 0 --proto "=http" --proto-redir "=http" -o /dev/null -w "%{http_code}" \
             --header @- -H "Content-Type: application/json" \
             -X POST --data-binary "not-json" "$url"
         ;;
       wrong-secret)
-        curl -sS --connect-timeout 3 --max-time 10 -o /dev/null -w "%{http_code}" \
+        curl --disable --silent --show-error --connect-timeout 3 --max-time 10 \
+          --max-redirs 0 --proto "=http" --proto-redir "=http" -o /dev/null -w "%{http_code}" \
           -H "Content-Type: application/json" \
           -H "X-Centrifugo-Proxy-Secret: oort-invalid-proxy-secret-1329" \
           -X POST --data-binary "not-json" "$url"
         ;;
       current-secret)
         printf "X-Centrifugo-Proxy-Secret: %s\\n" "$CENT_PROXY_SECRET" \
-          | curl -sS --connect-timeout 3 --max-time 10 -o /dev/null -w "%{http_code}" \
+          | curl --disable --silent --show-error --connect-timeout 3 --max-time 10 \
+            --max-redirs 0 --proto "=http" --proto-redir "=http" -o /dev/null -w "%{http_code}" \
             --header @- -H "Content-Type: application/json" \
             -X POST --data-binary "not-json" "$url"
         ;;
@@ -270,6 +354,7 @@ md_file="$EVIDENCE_DIR/ncp-centrifugo-boundary-${stamp}.md"
 jq -n \
   --arg checkedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
   --arg edgeUrl "$EDGE_URL" \
+  --arg trustedOriginSource "$TRUSTED_ORIGIN_SOURCE" \
   --arg secretSha256 "$host_hash" \
   --arg edgeNo "$edge_no" --arg edgeWrong "$edge_wrong" --arg edgeCurrent "$edge_current" \
   --arg directNo "$direct_no" --arg directWrong "$direct_wrong" --arg directCurrent "$direct_current" \
@@ -279,6 +364,8 @@ jq -n \
     result: "PASS",
     checkedAt: $checkedAt,
     edgeUrl: $edgeUrl,
+    trustedOriginSource: $trustedOriginSource,
+    redirectPolicy: "no-follow",
     secretEquality: {algorithm: "SHA-256", host: $secretSha256, api: $secretSha256, centrifugo: $secretSha256},
     edge: {noHeader: ($edgeNo|tonumber), wrongSecret: ($edgeWrong|tonumber), currentSecret: ($edgeCurrent|tonumber)},
     composePrivateApi: {noHeader: ($directNo|tonumber), oldSecret: ($directWrong|tonumber), oldSecretSource: $oldSecretSource, currentSecretMalformedBody: ($directCurrent|tonumber)}
@@ -290,6 +377,7 @@ cat > "$md_file" <<EOF
 - Result: **PASS**
 - Checked at: $(date -u +%Y-%m-%dT%H:%M:%SZ)
 - Edge: $EDGE_URL
+- Trusted origin source: $TRUSTED_ORIGIN_SOURCE (exact match; redirects disabled)
 - Secret equality: host = api = Centrifugo static header (SHA-256 \`$host_hash\`; raw value not recorded)
 - Public edge: no header \`$edge_no\`, wrong secret \`$edge_wrong\`, current secret \`$edge_current\`
 - Compose-private API: no header \`$direct_no\`, old secret \`$direct_wrong\` ($old_secret_source), current secret + malformed body \`$direct_current\` (authentication passed; body validation rejected)

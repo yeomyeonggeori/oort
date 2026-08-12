@@ -464,7 +464,13 @@ gate separately.
 profile. They fail on a missing/reordered `/v1/centrifugo/*` 403, a compose
 secret-source drift, a missing rotation/rollback contract, the old public
 401/401/400 shape, unequal runtime fingerprints, a current secret that still
-gets 401, or raw-secret leakage into stdout/evidence. They do not contact NCP.
+gets 401, raw-secret leakage into stdout/evidence, or a runtime edge origin
+that is not the exact HTTPS origin derived from the canonical Rust Caddyfile.
+The H1 negative matrix covers attacker/typo/wrong-port/userinfo/path/query/
+fragment/punycode inputs and proves secret-read, Docker exec, curl/network, and
+evidence-write counts all stay zero. It also proves 3xx is never followed and
+production/staging cannot activate the synthetic-secret-only loopback escape.
+These fixtures do not contact NCP.
 
 The read-only runtime closure is intentionally operator-attended and is not a
 PR CI or ordinary local-gate step:
@@ -477,11 +483,16 @@ PR CI or ordinary local-gate step:
   --evidence-dir /opt/momo/evidence/cent-proxy-<UTC>
 ```
 
-It performs no reload/recreate/rotation. It records public no-header/wrong/current
-as 403, compose-private no/old as 401 and current + malformed body as 400
-(authentication passed), then records only the equal SHA-256 fingerprint of the
-host env, API env, and Centrifugo injected header. Until an approved deploy window
-runs that command, NCP public-host and real secret-rotation evidence stays
+It performs no reload/recreate/rotation. `--edge-url` is an assertion, not a
+trust input: the verifier derives `https://<site>` from its adjacent canonical
+`infra/rust/Caddyfile` and requires an exact byte match before reading
+`CENT_PROXY_SECRET`, invoking Docker, or touching the network. curl ignores
+curlrc, allows only HTTPS, follows zero redirects, and treats every 3xx as RED.
+It records public no-header/wrong/current as 403, compose-private no/old as 401
+and current + malformed body as 400 (authentication passed), then records only
+the equal SHA-256 fingerprint of the host env, API env, and Centrifugo injected
+header. Until an approved deploy window runs that command, NCP public-host and
+real secret-rotation evidence stays
 `runtime-unverified(public host)`; the exact rotation/rollback sequence is
 [`runbooks/ncp-rust-deploy.md`](runbooks/ncp-rust-deploy.md).
 

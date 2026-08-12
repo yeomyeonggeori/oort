@@ -92,6 +92,18 @@ Caddy가 모두 403으로 끝내는지 확인한다. compose-private API에는 n
 통과한 뒤 body 검증에서 거절됐다는 증거**다. 마지막으로 host env · API env ·
 Centrifugo static header 값의 SHA-256이 같은지 비교하고 hash만 기록한다.
 
+`--edge-url`은 목적지를 신뢰하게 만드는 입력이 아니라 **정본과 같다는 주장**이다.
+verifier는 자기와 함께 배포된 `/opt/momo/infra/rust/Caddyfile`의 단일 site label에서
+`https://<site>`를 파생하고, 인자가 그 origin과 정확히 같지 않으면 env secret을
+읽거나 Docker/curl을 실행하기 전에 종료한다. curlrc는 끄고 HTTPS만 허용하며
+redirect는 0회라 3xx도 RED다. 따라서 오타·포트·userinfo·path/query/fragment 또는
+다른 호스트로 현재 secret을 보내는 진단 명령으로 사용할 수 없다.
+
+`--allow-http-local`은 회귀/격리 테스트 전용이다. env 파일의 `MOMO_ENV=test`,
+프로세스의 exact `MOMO_NCP_TEST_TRUSTED_ORIGIN=http://127.0.0.1:<port>`, 그리고
+`fixture-` synthetic secret을 모두 요구한다. production/staging env나 운영 secret은
+이 escape를 활성화할 수 없으므로 NCP 호스트에서는 사용하지 않는다.
+
 1. 서버에서 기존 env를 0600으로 백업하고 새 값을 **stdout 없이** 파일에 쓴다.
    env 파일은 컨테이너 bind mount가 아니므로 임시파일→replace가 안전하다.
 

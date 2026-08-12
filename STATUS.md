@@ -3,7 +3,7 @@
 ## Rust/NCP Centrifugo internal-only edge · secret rotation evidence (#1329, 2026-08-12)
 
 - `infra/rust/Caddyfile`이 일반 `/v1/*` 프록시보다 먼저 `/v1/centrifugo/*`를 explicit 403으로 끝내므로 no-header/wrong/current secret 어느 요청도 공개 엣지에서 API 인증 표면에 닿지 않는다. compose-private API의 기존 constant-time 경계(no/old 401, current + malformed body 400)는 바꾸지 않았고 schema/API/DB/제품 동작 변경은 없다.
-- 정적 contract와 mutation/redaction fixture가 deny 누락·순서 역전·API/Centrifugo secret source drift·회전/rollback 문서 누락·과거 공개 401/401/400·hash 불일치·current 401·원문 evidence 유출을 fail-closed로 고정한다. 운영용 읽기 전용 verifier는 host env/API env/Centrifugo injected header의 동일 SHA-256과 공개 403 3종/private 401·401·400을 JSON/Markdown에 값 비노출로 기록한다.
+- 정적 contract와 mutation/redaction fixture가 deny 누락·순서 역전·API/Centrifugo secret source drift·회전/rollback 문서 누락·과거 공개 401/401/400·hash 불일치·current 401·원문 evidence 유출을 fail-closed로 고정한다. H1 재리뷰 뒤 운영 verifier의 공개 origin은 canonical `infra/rust/Caddyfile` 단일 site에서만 파생하며, attacker/오타/포트/userinfo/path/query/fragment/punycode 불일치는 secret read·Docker exec·network 전에 거절한다. curl은 redirect를 따르지 않고 3xx를 RED로 본다. test-only loopback은 env-file `MOMO_ENV=test` + exact loopback allowlist + synthetic fixture secret을 모두 요구한다.
 - `docs/runbooks/ncp-rust-deploy.md`에 같은 창의 api+centrifugo recreate, old-env 검증, rollback을 고정했다. 이 goal은 운영 secret·NCP 배포를 변경하지 않으므로 실제 `app.oor7.com` reload/403/hash equality/회전 증거는 승인된 배포 창 전까지 `runtime-unverified(public host)`다.
 
 ## Shell layout gate exact-source · 인셋 포커스 계약 (#1314, 2026-08-12)

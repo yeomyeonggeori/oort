@@ -96,6 +96,19 @@ if grep -Eq 'CENT_PROXY_SECRET: \$\{CENT_PROXY_SECRET:-|X-Centrifugo-Proxy-Secre
 fi
 pass "api and Centrifugo header require the same no-default env source"
 
+# shellcheck disable=SC2016 # Runtime shell expressions must remain literal.
+grep -Fq 'trusted_origin="$(derive_caddy_origin)"' "$RUNTIME_VERIFIER" \
+  || fail "runtime_origin_binding missing canonical Caddy derivation"
+# shellcheck disable=SC2016 # Runtime shell expressions must remain literal.
+grep -Fq '[ "$EDGE_URL" = "$trusted_origin" ] || fail "edge_origin_not_trusted"' "$RUNTIME_VERIFIER" \
+  || fail "runtime_origin_binding missing exact origin comparison"
+# shellcheck disable=SC2016 # Runtime shell expressions must remain literal.
+grep -Fq -- '--max-redirs 0 --proto "$EDGE_CURL_PROTO" --proto-redir "$EDGE_CURL_PROTO"' "$RUNTIME_VERIFIER" \
+  || fail "runtime_redirect_policy missing no-follow protocol pin"
+grep -Fq 'test_secret_must_be_synthetic' "$RUNTIME_VERIFIER" \
+  || fail "runtime_test_escape missing synthetic-secret guard"
+pass "runtime binds canonical origin before secret use and disables redirects"
+
 grep -Fq 'scripts/verify_ncp_centrifugo_boundary.sh' "$RUNBOOK" \
   || fail "runbook_missing runtime verifier command"
 grep -Fq '## CENT_PROXY_SECRET 회전' "$RUNBOOK" \
@@ -104,6 +117,9 @@ grep -Fq 'SHA-256' "$RUNBOOK" \
   || fail "runbook_missing non-disclosing SHA-256 equality step"
 grep -Fq '### 회전 롤백' "$RUNBOOK" \
   || fail "runbook_missing rotation rollback"
+# shellcheck disable=SC2016 # Markdown backticks must remain literal.
+grep -Fq '`--edge-url`은 목적지를 신뢰하게 만드는 입력이 아니라' "$RUNBOOK" \
+  || fail "runbook_missing trusted-origin boundary"
 pass "runbook pins attended verification, rotation, and rollback"
 
 printf '[ncp-cent-contract] PASS complete\n'
