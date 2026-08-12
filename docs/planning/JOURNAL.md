@@ -5,6 +5,30 @@
 
 ---
 
+## 2026-08-12 (GPT 5.6 sol · momo-main) · #1343 재검수 — hosted-agent 축 사실 교정·병렬 런칭 순서 확정
+- 스냅샷 21을 supersede했다: 초안은 canonical landing 전이었고, `work_tool_profile`은 Rust 경로에 존재하며, 현행 Rust MCP ingress는 아직 없다.
+- Grok Wave 0는 유료구독 필수가 아니라 개인용 one-time trial 노출·커스텀 MCP·routine·cleanup 실측으로 교정했다. 계정 비밀은 받지 않고 앱 설치/동의만 성재 게이트다.
+- 성재 승인 제품축은 “Bring your hosted agent”; Grok은 첫 프리셋. bot-initiated pairing, 1 Bot=1 connection=1 dedicated agent member=1 routine, 즉시 로컬 revoke 뒤 외부 정리 `cleanup_pending`을 v0 계약으로 정리했다.
+- ROADMAP에는 관전·승인·대화를 대체하지 않는 병렬 런칭 보조축만 추가했다. #1343은 PR 전, #1344 trial 대기, #1345는 ACP 별도 감사이고 ADR-0163 managed/self-host catalog는 deferred다. ADR-0162 Accepted 전 hosted-agent 구현은 없다.
+
+## 2026-08-12 (Fable) · 외부 에이전트 수용 축 개설 — ADR 초안 2건·이슈 3건·sol 핸드오프 준비 완료
+- 성재 지시("리서치→로드맵화→ADR 초안→sol 검수→실작업 체인 준비")로 축 전체를 패키징. planning ID **PLN-20260812-01**.
+- **ADR-0162 Proposed**(3분류 명명+Agent Port — MCP 도구 6종·스코프드 봇 토큰·REST 파사드·접속 허용 명문화) · **ADR-0163 Proposed**(agent_catalog·동봉 온보딩·개별 업데이트 v0=C→v1=A). 로드맵 정본 `2026-08-12-external-agent-reception-plan.md`(웨이브 R/0/A/1/2/3·DAG).
+- 이슈: #1343(sol 검수 미션)·#1344(Grok Bot 스파이크 — 구독 계정 성재 게이트)·#1345(0130 ACP 재랜딩 감사). 구현 티켓은 ADR Accepted 후 분해(체인 규율 준수).
+- sol 패킷 `handoffs/2026-08-12-sol-external-agent-reception-packet.md` — 검수 포인트 6개(자신 없는 순: 0163 업데이트 주체·0162 gateway 계약 중복 여부·인증 v0)+성재 복사용 프롬프트 부록. CURRENT_STATE 스냅샷 21 갱신.
+
+## 2026-08-12 (Fable) · Grok Bot 역방향 팀메이트 방향 리서치 — 조건부 성립, Agent Port 표면 제안
+- 성재 방향성("hermes형 — oort 일감을 봇이 감지·처리, 배포 허들 0 실마리")으로 2차 리서치 3기(감지 루프/Cursor 표면/프로토콜 선례). 정본 `research/2026-08-12-grok-bot-reverse-teammate-direction.md`.
+- 판정: **조건부 성립** — 커스텀 MCP 소비(Cursor 체계 공유 확정, 개인 계정 실증만 남음)+루틴 웨이크업(Slack 트리거 실동작 검증)으로 배치형 팀메이트 오늘 구성 가능. 분 단위 스케줄 미확인·웨이크업 주권=xAI/Cursor·고빈도 폴링 비경제가 한계. provider 선택 불가 확인(봇=번들, ADR-0004 정합).
+- 제안: 벤더 중립 "oort Agent Port"(원격 MCP 도구 6종, seq 커서, REST 파사드 — ADR-0130 체인+/v1/mcp/drive 선례 위) → Phase 2 Centrifugo 구독 겹. Slack 초인종은 신호만(내용 0) 옵션.
+- 성재 결정 대기: ①Wave 0 스파이크(구독 계정 $200~300/월 필요) ②Agent Port ADR 기안 ③Slack 브리지 스코프. 워커 발사 없음.
+
+## 2026-08-12 (Fable) · Grok Bot 연동 가능성 리서치 — 인바운드 불가 판정, 역방향 2경로 제안
+- 성재 발제("Grok bot 바이럴 런칭 — 사용자의 ~50개 호스팅 봇을 oort로 가져오는 구조 가능?")로 웹 리서치 3기 병렬 실측. 정본 `research/2026-08-12-grok-bot-integration-feasibility.md`.
+- 전제 교정: Grok Bot=SpaceXAI+Cursor의 2026-08-11 베타(독립 앱, X는 홍보 채널), "50"=봇 수가 아니라 봇당 루틴 한도, 무료 티어 없음($120~300/월).
+- 판정: 봇 인바운드 반입은 **현재 불가**(열거/호출/위임 OAuth/export 전무 실측 + 우회는 AUP 3중 저촉·사용자 계정 리스크 전가). 성립 경로=A 에이전트 로그인 공식 허용(선언 기반, 연동 0줄) · B oort MCP 서버 노출(ADR 사안) · C xAI API provider(ADR-0147 그릇 재사용) · D 금주 Grok 4.6 롤아웃 재실측.
+- 공용 정본·Issue 미변경. 다음: 성재 판단 — 경로 A/B의 ADR 기안 여부 + D 재실측 시점.
+
 ## 2026-07-28 (GPT 5.6 · momo-main) · Fable 산출물 통합 → 리소스 최적 정본 후보
 - #860/#875 완료를 재계획에서 제거하고, clean/pushed #876~#878 배치 하나만 active로 고정했다.
 - 3-Issue/1-PR가 운영 계약과 충돌함을 발견해 #876 umbrella+absorbed(권고) 또는 명시적 예외 승인 gate를 추가했다.

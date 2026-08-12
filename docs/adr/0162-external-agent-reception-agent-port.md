@@ -1,0 +1,201 @@
+# ADR-0162: 외부 호스팅 에이전트 수용 — Agent Port와 pairing lifecycle
+
+- Status: **Proposed** (2026-08-12 · 제품 방향 승인, 기술 결정 승인 대기)
+- 관련: ADR-0100(결정 거버넌스), ADR-0101(에이전트 신원·bearer), ADR-0102(worker/gateway 실행 경로), ADR-0130(외부 에이전트 fabric·ACP), ADR-0145(Rust/Axum), ADR-0150(대화 반출 경계)
+- 리서치: `docs/planning/research/2026-08-12-grok-bot-integration-feasibility.md`, `docs/planning/research/2026-08-12-grok-bot-reverse-teammate-direction.md`, `docs/planning/research/2026-08-12-external-agent-reception-audit.md`
+- 제품 문장: **Bring your hosted agent.** Grok Bot은 첫 setup preset이자 실증 클라이언트이며, 코어 계약은 벤더 중립이다.
+
+## Review Notes
+
+- **제품 방향 승인(2026-08-12, 성재):** 사용자가 이미 호스팅한 에이전트를 oort의 1급 팀메이트로 연결하는 방향, Grok Bot도 몇 단계로 연결할 수 있다는 런칭 메시지, 연결 해제 시 메신저 자격증명뿐 아니라 routine과 MCP connector 정리까지 안내하는 범위를 승인했다.
+- **기술 승인 대기:** 아래 D1~D8은 공개 API, 인증 경계, 신규 내구 cursor, lifecycle 스키마를 바꾸는 제안이다. ADR-0100에 따라 이 문서가 `Accepted`로 바뀌기 전에는 구현 티켓을 머지하지 않는다.
+- **실측 선행:** Grok Bot 개인 one-time trial에서 custom MCP 노출, 지원 인증, routine 최소 주기, cleanup UI를 확인한다. 실측 결과가 인증 선택을 바꿀 수 있으므로 D4의 최종 방식은 승인 시점에 확정한다.
+
+## Context
+
+oort가 지금 수용하는 에이전트는 두 실행 경로를 쓴다.
+
+1. **관리형(managed):** oort의 worker/provider 체인이 실행을 주도한다.
+2. **연동형(BYOA):** 사용자 소유 gateway 또는 self-host work host가 oort의 job을 가져간다.
+
+Grok Bot 같은 호스팅 에이전트는 둘과 접속 방향이 다르다. 문서화된 공개 Bot roster/run/control API를 찾을 수 없고, oort가 Bot 프로세스를 spawn하거나 직접 호출할 수도 없다. 대신 Bot이 사용자가 등록한 원격 MCP 서버를 소비하고 routine으로 깨어날 가능성이 있다. 따라서 oort가 상대를 호출하는 것이 아니라 **상대 에이전트가 oort로 다이얼인해 inbox와 기존 gateway 계약을 소비**해야 한다.
+
+현행 코드에는 재사용할 자산과 새로 만들어야 할 경계가 분명히 갈린다.
+
+| 구분 | 현행 사실 | 이 ADR의 처리 |
+|---|---|---|
+| 에이전트 신원 | `member.kind='agent'`, agent bearer, scope 검사 존재 | 새 신원 종류를 만들지 않는다 |
+| 메시지 쓰기 | REST → PG transaction → outbox → relay가 유일한 쓰기경로 | MCP는 이 경로의 얇은 facade다 |
+| job/run | Rust gateway의 pending/lease/renew/release/events/complete가 SoT | 별도 task 상태기계를 만들지 않는다 |
+| MCP 서버 | Rust router/crate에는 현행 MCP 서버가 없다 | MCP 2026-07-28 기반을 새로 만든다 |
+| `/v1/mcp/drive` | OpenAPI·검증 스크립트와 은퇴 중인 Swift 구현에 남은 선례 | Rust 기반이 아니라 계약 참고 자료로만 쓴다 |
+| 순서 | `message.seq`는 채널별 gapless 순번 | cross-channel inbox cursor로 쓰지 않는다 |
+
+## Decisions (Proposed)
+
+### D1. 제품 분류와 런칭 표면
+
+실행 방식은 다음 세 부류로 설명한다.
+
+| 분류 | 실행 주체 | oort 접속 방식 |
+|---|---|---|
+| **관리형(managed)** | oort worker/provider | 서버가 실행·배정 |
+| **연동형(BYOA)** | 사용자 self-host agent/work host | gateway 또는 ACP v1 stdio host |
+| **다이얼인형(dial-in)** | 외부 hosted agent | 원격 Agent Port를 pull |
+
+다이얼인형은 새 `member.kind`가 아니라 **connection mode**다. 제품의 상위 문장은 “Bring your hosted agent”, 첫 preset은 Grok Bot으로 둔다. Grok 전용 route, schema, token type은 만들지 않는다.
+
+ACP는 이 원격 수용 표면이 아니다. ACP v1은 trusted self-host host가 로컬 agent 프로세스와 stdio로 대화하는 경로이고, Agent Port는 외부 호스팅 에이전트가 HTTPS로 oort를 소비하는 경로다.
+
+### D2. Agent Port는 MCP 2026-07-28 stateless HTTP 서버다
+
+- 공개 표면은 `/v1/mcp/agent-port`의 MCP Streamable HTTP endpoint와 mandatory discovery metadata로 구성한다.
+- 서버는 세션 메모리에 권한이나 cursor를 두지 않는다. 각 요청은 인증·workspace·agent·membership·scope를 다시 검증한다.
+- 장기 연결에 의존하지 않는다. polling 요청의 서버 대기 상한은 구현 티켓에서 짧게 고정하며, timeout 뒤 클라이언트가 cursor로 재접속한다.
+- transport/version negotiation, discovery, authorization resource metadata는 MCP 2026-07-28 계약을 기준으로 한다. 은퇴한 Swift Drive MCP의 2025-06-18 wire shape를 복사하지 않는다.
+- rate limit, audit, payload bound, replay bound를 foundation 수용기준에 포함한다.
+
+### D3. 도구는 기존 메시지·gateway 계약의 얇은 바인딩이다
+
+Agent Port v0의 capability는 세 묶음이다. 최종 tool 이름과 JSON schema는 구현 전 OpenAPI/MCP contract issue에서 봉인한다.
+
+1. **Inbox:** 내구 cursor 이후의 mention·assignment·subscription event를 읽는다.
+2. **Conversation:** 권한 있는 channel/thread를 읽고, 필수 idempotency key로 메시지를 게시한다.
+3. **Gateway:** 현행 pending claim, lease renew/release, run events, complete를 그대로 호출한다.
+
+MCP facade는 PG에 직접 쓰지 않는다. 메시지 게시가 기존 `momo-messaging` 트랜잭션과 outbox를 우회하거나, MCP용 job/task 테이블을 따로 만들거나, MCP Tasks extension을 oort job queue의 SoT로 삼는 구현을 금지한다. MCP Tasks는 장기 RPC 결과 handle이고, oort gateway lease와 같은 상태기계가 아니다.
+
+현재 Rust mention delivery는 서버 전역 `AGENT_GATEWAY_MODE`로 managed publish와 gateway pending 중 하나를 고른다. hosted-agent v0는 이 전역 스위치를 connection 권위로 사용하지 않는다. 활성 hosted connection이 결속된 dedicated agent member만 기존 gateway pending 경로로 보내고, managed/BYOA member는 각자의 기존 delivery를 유지하는 **per-agent delivery selector**를 추가한다. selector는 새 task SoT가 아니라 동일 mention transaction에서 기존 publish/gateway 도착지를 고르는 정책이며, connection revoke/pause 상태를 같은 권위로 재검증한다. dedicated hosted member의 connection이 pending/detected/expired/cleanup/disconnected이면 managed fallback으로 보내지 않고 delivery를 fail-closed한다.
+
+### D4. 인증은 connection-scoped credential이며 trial 실측 뒤 최종 봉인한다
+
+- 기존 agent bearer 검증·hash-only 저장·revoke/expiry/audit 원칙을 재사용한다. raw credential은 발급 순간 한 번만 보이고 응답은 `Cache-Control: no-store`다.
+- credential의 authority는 `workspace_id + agent_id + connection_id + audience + scopes`다. 채널 접근은 token에 적힌 목록만 믿지 않고 매 호출 현재 membership과 교집합을 재검증한다.
+- 정적 bearer가 Grok Bot custom MCP에서 동작하면 v0 compatibility 방식으로 허용할 수 있다. 지원되지 않거나 공개 배포 경계에 맞지 않으면 MCP authorization metadata와 OAuth flow를 선택한다.
+- 실제 Bot/Cursor 계정 credential, session cookie, provider token은 oort와 문서에 들어오지 않는다.
+- pending pairing challenge와 active agent credential은 같은 secret을 재사용하지 않는다. 승인 뒤 active credential을 provider에 전달하는 방식은 MCP OAuth/token exchange가 지원되면 그 표준 흐름을 쓰고, static bearer만 가능하면 사용자가 두 번째 값을 명시적으로 갱신하는 정직한 setup 단계로 둔다.
+
+정확한 인증 방식은 one-time trial 실측 결과를 Review Notes에 반영한 뒤 `Accepted` 전환 시 고정한다. 실측 전에 static bearer 또는 OAuth 하나를 이미 확정된 것처럼 구현하지 않는다.
+
+### D5. cross-channel inbox에는 별도 내구 sequence를 둔다
+
+`message.seq`는 채널별 순번이므로 단일 `after_seq`로 여러 채널을 소비할 수 없다. 다이얼인 inbox는 agent connection에 전달할 event마다 단조 증가하는 **별도 내구 `inbox_seq`** 를 발급한다.
+
+- event는 원본을 복제하지 않고 `(workspace_id, agent_id, channel_id, message_id, message_seq, event_kind)`를 참조한다.
+- `inbox_seq`는 해당 inbox의 delivery cursor일 뿐 메시지 순서의 새 SoT가 아니다. 채널 안의 권위는 계속 `message.seq`다.
+- 내부 정렬 키는 `inbox_seq`지만 외부 API는 workspace/agent/connection/schema version에 묶인 **opaque cursor**를 주고받는다. consumer는 이 cursor로 at-least-once 소비하며, 재접속·중복 consumer는 누락 없이 중복 허용으로 처리한다.
+- event를 읽을 때 현재 agent membership, 원본 가시성, revoke 상태를 다시 검사한다. 과거에 보였다는 사실이 현재 권한을 대신하지 않는다.
+
+정확한 table/sequence 발급 방식, opaque cursor encoding과 보존 기간은 migration issue에서 결정하되, vector cursor를 API에 노출하거나 channel-local seq를 전역처럼 취급하지 않는다.
+
+### D6. Bot 감지는 roster 수집이 아니라 one-time pairing handshake다
+
+문서화된 Bot roster API가 없으므로 oort가 외부 계정의 Bot들을 자동 열거·스크랩하지 않는다. v0 연결은 Bot이 먼저 다이얼인하는 handshake다.
+
+1. 사용자가 oort에서 hosted connection 전용 agent member를 만든다. 서버는 dedicated member, `paused=true`인 agent profile, `pairing_pending` connection과 pairing challenge를 한 transaction으로 생성한다. v0에서는 기존 agent member에 hosted connection을 덧붙이지 않으며, 생성 실패 시 어느 일부도 남기지 않는다.
+2. Grok preset은 deterministic routine 이름과 connector 설정 단계, 최소 권한을 보여준다. pairing challenge와 active credential은 별도 secret이다.
+3. Bot이 pairing secret으로 제한된 handshake를 수행하면 상태가 `pairing_pending → detected`로 전이한다. 이 단계에서는 대화 읽기·쓰기·job claim을 허용하지 않는다.
+4. 사람이 감지된 연결의 이름, dedicated agent member, channel/permission 범위를 확인하면 **별도의** active credential을 한 번 발급하거나 표준 token exchange를 완료한다. provider가 그 credential로 제한된 proof를 성공시키고, 같은 activation transaction이 dedicated member의 pause를 해제한 뒤에만 `detected → active`로 전이한다. static bearer만 지원하면 사용자가 provider connector의 소비된 pairing 값을 active credential로 명시적으로 교체해야 한다.
+
+pairing secret은 짧은 만료, hash-only 저장, 1회 소비, replay 거부를 강제한다. 감지에 소비된 pairing secret은 active bearer로 승격하거나 다시 쓰지 않는다. 만료되면 `expired`가 되고 새 secret을 발급해야 한다. 클라이언트가 제출한 provider/Bot metadata는 표시용 힌트일 뿐 권한의 근거가 아니다.
+
+v0의 운영 단위는 **one Bot = one connection = one dedicated agent member = one deterministic routine**이다. 한 dedicated member에는 `pairing_pending|detected|active|cleanup_pending` connection이 동시에 하나만 존재할 수 있다. 따라서 disconnect의 pause는 그 connection 전용 member만 멈추며 managed/BYOA/다른 hosted runtime을 함께 정지시키지 않는다. 재연결은 이전 connection이 `disconnected`가 된 뒤 같은 dedicated member에 새 pairing/credential을 발급하는 순차 흐름이다. 예시 routine label은 `Oort Inbox: <workspace> / <agent>`이며, 실제 이름·connector id·생성 시각을 cleanup manifest에 기록한다.
+
+### D7. 연결 해제는 local revoke와 provider cleanup을 분리한다
+
+연결 해제 요청은 먼저 oort의 권한을 끊는다.
+
+- active credential 즉시 revoke
+- connection 전용 agent member pause 및 새 inbox read, message write, job claim/renew/event/complete 거부
+- 이미 잡힌 lease는 새 갱신을 거부하고 기존 만료 규율로 회수
+- agent member, 과거 메시지, 완료된 run과 audit history는 보존
+
+그 다음 connection은 `cleanup_pending`이 된다. 공개 Grok Bot control/delete API가 문서화돼 있지 않으므로 oort가 routine이나 MCP connector를 자동 삭제했다고 주장하지 않는다. UI는 connection별 manifest에 따라 다음을 안내한다.
+
+1. `Oort Inbox: <workspace> / <agent>` routine 제거 또는 비활성화
+2. 해당 oort MCP connector 제거
+3. 남아 있는 oort secret이 있다면 provider UI에서 제거
+
+provider cleanup API가 나중에 문서화되고 사용자가 권한을 부여한 경우에는 API 확인으로 종결할 수 있다. v0는 사용자의 명시적 완료 확인을 받아 `cleanup_pending → disconnected`로 전이한다. 확인 전에도 oort 쪽 credential은 이미 폐기돼 있어 외부 artifact가 권한을 되살릴 수 없다.
+
+canonical lifecycle은 다음과 같다.
+
+```text
+pairing_pending ──handshake──> detected ──human confirm + separate active proof + member unpause──> active
+      │                           │                         │ disconnect
+      │ expiry                    │ expiry                  v
+      v                           v                  cleanup_pending
+   expired                     expired                     │ provider cleanup verified
+                                                          │ or explicit user acknowledgement
+                                                          v
+                                                     disconnected
+```
+
+### D8. Grok preset은 검증된 setup recipe이며 코어 protocol이 아니다
+
+Grok preset은 다음만 제공한다.
+
+- endpoint와 one-time pairing 값을 복사하는 설정 단계
+- deterministic connector/routine 이름
+- “oort inbox를 확인하고, 할 일이 있으면 claim한 뒤 결과를 원래 thread에 게시한다”는 routine template
+- `pairing_pending`, `detected`, `active`, `cleanup_pending` 상태와 복구 안내
+- routine/MCP connector 제거 체크리스트
+
+개인 trial에서 custom MCP/auth/routine 폐곡선을 실측하기 전에는 “즉시”, “seamless”, 최소 응답 시간 같은 표현을 쓰지 않는다. 검증 뒤 런칭 카피는 **“Bring your hosted agent”**, 보조 문장은 **“Grok Bot도 몇 단계로 연결할 수 있습니다”**로 제한한다.
+
+## 명시적 비목표
+
+- Grok 계정의 Bot/group chat roster 자동 감지, scraping, reverse API, credential replay
+- Grok Bot 정의·memory·shared computer 파일의 oort 반입
+- oort가 routine 또는 connector를 공개되지 않은 API로 생성·삭제
+- Agent Port 안에 새 task/job SoT 구축
+- ACP remote transport 또는 A2A를 Agent Port v0에 혼합
+- Slack 초인종 bridge, 지속 Centrifugo subscription, provider/model 선택
+- 과거 agent member·메시지·run의 cascade 삭제
+
+## Consequences
+
+- (+) 사용자는 별도 agent 서버를 배포하지 않고 이미 호스팅된 agent를 oort 멤버로 데려올 수 있다.
+- (+) Grok Bot을 첫 preset으로 활용하면서도 Cursor Cloud Agents, 다른 MCP-capable hosted agent를 같은 계약으로 수용할 수 있다.
+- (+) 메시지·job SoT와 RLS/outbox 불변식을 재사용해 중복 상태기계를 피한다.
+- (+) Bot roster 권한 없이도 handshake로 사용자가 의도한 Bot만 안전하게 연결한다.
+- (−) 응답 지연과 wake-up은 외부 routine에 종속된다. 실시간 agent라고 약속할 수 없다.
+- (−) self-host oort는 외부 agent가 접근 가능한 HTTPS endpoint와 올바른 인증 metadata가 필요하다.
+- (−) 공개 provider cleanup API가 없는 동안 연결 해제는 사람의 마지막 확인 단계를 포함한다.
+- (−) 별도 durable inbox와 connection lifecycle schema가 추가되므로 migration/RLS/audit 설계가 필요하다.
+
+## 불변식 대조
+
+| 불변식 | 판정 |
+|---|---|
+| Postgres = SoT | 유지 — connection/inbox cursor는 PG 내구, 외부 metadata는 권위가 아님 |
+| Centrifugo = 전송전용 | 유지 — Agent Port가 직접 publish하지 않음 |
+| 단일 쓰기경로 | 유지 — message post는 기존 REST/domain transaction의 facade |
+| 순서 SoT = `message.seq` | 유지 — `inbox_seq`는 delivery cursor이며 채널 메시지 순서를 대체하지 않음 |
+| 에이전트 = member | 유지 — dial-in은 connection mode일 뿐 새 kind가 아님 |
+| RLS FORCE | 유지·주의 — 모든 호출에서 workspace/agent/membership을 재검증하고 신규 table을 RLS 목록에 포함 |
+| gateway job/run | 유지 — 기존 pending/lease/events/complete만 사용 |
+
+## 검증 계약 (Accepted 후 구현 수용기준)
+
+1. 만료·재사용·다른 connection의 pairing secret은 handshake에 실패하고 active data 접근이 0건이다.
+2. `detected` 상태는 사람 확인과 별도 active credential proof, dedicated member unpause가 같은 activation 경계에서 모두 끝나기 전 inbox/thread/message/gateway capability를 사용할 수 없다.
+3. pairing_pending/detected/expired dedicated member mention은 managed fallback·gateway pending·worker job을 만들지 않고, profile은 `paused=true`를 유지한다. 오직 successful activation transaction만 connection active와 member unpause를 함께 커밋한다.
+4. expired, revoked, wrong-audience credential은 즉시 거부되고, token raw 값은 로그·DB·audit payload에 남지 않는다.
+5. workspace/channel 밖 접근과 membership 회수 뒤 접근이 fail-closed한다.
+6. 동일 idempotency key의 message 재시도는 메시지·outbox 각 1건을 유지한다.
+7. 두 channel이 각각 `message.seq=1`을 가져도 inbox cursor가 둘을 누락 없이 전달한다.
+8. reconnect와 duplicate consumer에서 누락은 없고 중복은 cursor/idempotency로 안전하다.
+9. MCP gateway tools가 기존 lease 경쟁·expiry·renew/release·complete 규율과 동일한 결과를 낸다.
+10. 같은 workspace의 managed agent와 active hosted dedicated agent를 함께 mention하면 managed agent는 기존 delivery로, hosted agent만 기존 gateway pending으로 가며 서로의 job을 claim하지 않는다. 서버 전역 gateway mode를 바꾸지 않아도 혼합 구성이 성립한다.
+11. disconnect 직후 새 read/write/claim/renew/event/complete가 거부되고, history는 보존된다.
+12. provider artifact 미정리 시 `cleanup_pending`이 유지되며, API 확인 또는 명시적 사람 확인 전 자동으로 `disconnected`가 되지 않는다.
+13. generic MCP client 폐곡선을 먼저 통과하고, Grok Bot 실계정 E2E는 별도 `[manual]/[runtime]` evidence로 기록한다.
+
+## 승인 전 남은 결정
+
+1. Grok Bot trial에서 확인한 auth 방식과 MCP discovery/redirect/header 동작
+2. durable inbox의 retention·compaction·backfill 범위
+3. pairing/connection schema와 agent credential lifecycle API의 정확한 route
+4. disconnect 시 active lease 처리의 사용자 표시와 최대 회수 시간
+5. 공개 런칭 전 자동화 에이전트 접속·외부 provider artifact에 관한 약관/법무 문구 검토(법률 자문 아님)
