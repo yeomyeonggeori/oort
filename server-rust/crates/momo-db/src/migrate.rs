@@ -1,7 +1,7 @@
-//! Migration runner — applies the existing 68 SQL files **in place, unmodified**
+//! Migration runner — applies the existing 69 SQL files **in place, unmodified**
 //! via `psql`, matching `scripts/migrate.sh` (L4 §8.7 canonical mechanism).
 //!
-//! ADR-0145 / D2 §3: the 68 migrations under `server/Migrations/NNN_*.sql` are
+//! ADR-0145 / D2 §3: the 69 migrations under `server/Migrations/NNN_*.sql` are
 //! Postgres DDL, language independent, and are the enforcement layer we inherit.
 //!
 //! **Why psql, not `sqlx::raw_sql`.** Several seed migrations (002/006/012) use
@@ -343,18 +343,18 @@ mod tests {
     /// below is what forces it to be noticed at all, and it is what caught this
     /// one: presence was authored as 066 against a tree where 065 was the head.
     #[test]
-    fn discovers_contiguous_migrations_001_to_068() {
+    fn discovers_contiguous_migrations_001_to_069() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
         assert_eq!(
             migrations.len(),
-            68,
-            "expected 68 migrations under {}",
+            69,
+            "expected 69 migrations under {}",
             dir.display()
         );
         assert_eq!(migrations.first().unwrap().version, 1);
-        assert_eq!(migrations.last().unwrap().version, 68);
+        assert_eq!(migrations.last().unwrap().version, 69);
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
 
         for (i, migration) in migrations.iter().enumerate() {

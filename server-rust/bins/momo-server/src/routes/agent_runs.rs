@@ -157,6 +157,15 @@ pub async fn create(
                 else {
                     return Ok(Err(ApiError::not_found("active channel agent not found")));
                 };
+                // Hosted delivery remains production-disabled before any run,
+                // job, outbox, or message row can exist. Idempotency cannot
+                // override this boundary because no hosted run is legal yet.
+                if agent.hosted_delivery_disabled {
+                    return Ok(Err(ApiError::new(
+                        StatusCode::CONFLICT,
+                        "hosted agent delivery is not enabled",
+                    )));
+                }
 
                 // The run may already exist — a retry of a request whose response
                 // was lost. Resolve that BEFORE the eligibility conflicts below,

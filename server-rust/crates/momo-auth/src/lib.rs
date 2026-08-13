@@ -64,6 +64,7 @@ pub mod agent_bearer;
 pub mod agent_credential;
 pub mod agent_scope;
 pub mod ephemeral_grant;
+pub mod hosted_connection;
 pub mod issue;
 pub mod jwt;
 pub mod realtime;
@@ -74,20 +75,22 @@ pub mod workhost;
 pub mod workspace_authorization;
 
 pub use agent_bearer::{
-    agent_bearer_workspace_id, finalize_agent_bearer_use_in_tx, resolve_agent_bearer_in_tx,
-    AgentBearerIdentity, AgentBearerRejection, AgentBearerResolution, AGENT_BEARER_PREFIX,
-    AUDIT_ACTION_SCOPE_DENIED, AUDIT_ACTION_USED, AUDIT_DETAIL_SCHEMA,
+    agent_bearer_workspace_id, classify_agent_bearer_in_tx, finalize_agent_bearer_use_in_tx,
+    resolve_agent_bearer_in_tx, AgentBearerClass, AgentBearerIdentity, AgentBearerRejection,
+    AgentBearerResolution, AGENT_BEARER_PREFIX, AUDIT_ACTION_SCOPE_DENIED, AUDIT_ACTION_USED,
+    AUDIT_DETAIL_SCHEMA,
 };
 pub use agent_credential::{
-    active_agent_for_credential_list, agent_credential_requires_instance_operator,
-    issue_agent_credential_in_tx, list_agent_credentials_in_tx, mint_agent_bearer,
-    normalized_agent_credential_label, normalized_agent_credential_reason,
-    normalized_agent_credential_scopes, revoke_agent_credential_in_tx,
-    validated_agent_credential_expiry, validated_rotation_grace_seconds, AgentCredentialInputError,
-    AgentCredentialIssuance, AgentCredentialIssueError, AgentCredentialMutation,
-    AgentCredentialMutationPolicy, AgentCredentialRecord, AgentCredentialRevocation,
-    AgentCredentialStatus, AUDIT_ACTION_ISSUED, AUDIT_ACTION_REVOKED, AUDIT_SCHEMA_ISSUED,
-    AUDIT_SCHEMA_REVOKED, DEFAULT_AGENT_CREDENTIAL_LABEL, DEFAULT_AGENT_CREDENTIAL_SCOPES,
+    active_agent_for_credential_list, agent_credential_mutation_policy_in_tx,
+    agent_credential_requires_instance_operator, issue_agent_credential_in_tx,
+    list_agent_credentials_in_tx, mint_agent_bearer, normalized_agent_credential_label,
+    normalized_agent_credential_reason, normalized_agent_credential_scopes,
+    revoke_agent_credential_in_tx, validated_agent_credential_expiry,
+    validated_rotation_grace_seconds, AgentCredentialInputError, AgentCredentialIssuance,
+    AgentCredentialIssueError, AgentCredentialMutation, AgentCredentialMutationPolicy,
+    AgentCredentialRecord, AgentCredentialRevocation, AgentCredentialStatus, AUDIT_ACTION_ISSUED,
+    AUDIT_ACTION_REVOKED, AUDIT_SCHEMA_ISSUED, AUDIT_SCHEMA_REVOKED,
+    DEFAULT_AGENT_CREDENTIAL_LABEL, DEFAULT_AGENT_CREDENTIAL_SCOPES,
     DEFAULT_ROTATION_GRACE_SECONDS, HOSTED_CONNECTION_MANAGED_CODE, MAXIMUM_ROTATION_GRACE_SECONDS,
 };
 pub use agent_scope::{
@@ -98,6 +101,16 @@ pub use ephemeral_grant::{
     ephemeral_grant_key, sign_ephemeral_grant, verify_ephemeral_grant, EphemeralGrantClaims,
     EphemeralGrantRejection, EphemeralGrantScope, IssuedEphemeralGrant,
     EPHEMERAL_GRANT_TTL_SECONDS, EPHEMERAL_GRANT_TYP,
+};
+pub use hosted_connection::{
+    confirm_hosted_connection_in_tx, create_hosted_connection_in_tx, detect_pairing_in_tx,
+    get_hosted_connection_in_tx, is_hosted_agent_activated_in_tx, is_hosted_agent_in_tx,
+    list_hosted_connections_in_tx, pairing_workspace_id, prove_hosted_binding_in_tx,
+    regenerate_pairing_in_tx, resolve_pairing_in_tx, validate_channel_ids, validate_hosted_scopes,
+    HostedActivationIssuance, HostedConnection, HostedConnectionApproval, HostedInputError,
+    HostedMutation, HostedPairingIssuance, HostedProof, HOSTED_AGENT_INERT_BASE_URL,
+    HOSTED_AGENT_MODEL, HOSTED_AGENT_PORT_AUDIENCE, HOSTED_AGENT_SCOPES, HOSTED_PAIRING_PREFIX,
+    HOSTED_PAIRING_TTL_SECONDS,
 };
 pub use issue::{
     sign_access, sign_app_token, sign_refresh, IssuedToken, ACCESS_TTL_SECONDS, REFRESH_TTL_SECONDS,

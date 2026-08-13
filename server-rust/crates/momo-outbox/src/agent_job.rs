@@ -248,6 +248,11 @@ pub async fn claim_agent_job_batch(
                       ) \
                     ) \
                 AND NOT EXISTS ( \
+                      SELECT 1 FROM hosted_agent_connection hc \
+                       WHERE hc.workspace_id = o.workspace_id \
+                         AND hc.agent_member_id = o.partition_key \
+                    ) \
+                AND NOT EXISTS ( \
                       SELECT 1 \
                         FROM outbox inflight \
                        WHERE inflight.kind = 'agent_job' \

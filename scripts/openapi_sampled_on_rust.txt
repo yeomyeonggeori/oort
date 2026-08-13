@@ -196,6 +196,11 @@ PUT /v1/workspaces/{workspaceId}/agents/{agentId}/profile
 PUT /v1/workspaces/{workspaceId}/agents/{agentId}/pause
 GET /v1/workspaces/{workspaceId}/agents/{agentId}/allowed-models
 POST /v1/workspaces/{workspaceId}/agent-runs/{runId}/cancel
+POST /v1/workspaces/{workspaceId}/hosted-agent-connections
+GET /v1/workspaces/{workspaceId}/hosted-agent-connections
+GET /v1/workspaces/{workspaceId}/hosted-agent-connections/{connectionId}
+POST /v1/workspaces/{workspaceId}/hosted-agent-connections/{connectionId}/confirm
+POST /v1/workspaces/{workspaceId}/hosted-agent-connections/{connectionId}/pairing-challenge/regenerate
 
 # ── work host 레지스트리 + work session 원장 (ADR-0125 / ADR-0114) ──────────
 # heartbeat 는 bearer 가 아니라 Ed25519 서명 v1 으로 인증되는 PUBLIC 라우트다 —

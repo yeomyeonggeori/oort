@@ -51,6 +51,37 @@ pub struct HttpResponse {
     pub content_type: Option<&'static str>,
 }
 
+/// Protocol-valid foundation calls that may advance hosted pairing/proof.
+/// Notifications and ping deliberately have no variant.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FoundationRequest {
+    ModernDiscover,
+    ModernToolsList,
+    LegacyInitialize,
+    LegacyToolsList,
+}
+
+pub fn classify_foundation_request(request: HttpRequest<'_>) -> Option<FoundationRequest> {
+    if dispatch(request).status != 200 {
+        return None;
+    }
+    let value: Value = serde_json::from_slice(request.body).ok()?;
+    let method = value.get("method")?.as_str()?;
+    match (request.protocol_version, method) {
+        (Some(MODERN_PROTOCOL_VERSION), "server/discover") => {
+            Some(FoundationRequest::ModernDiscover)
+        }
+        (Some(MODERN_PROTOCOL_VERSION), "tools/list") => Some(FoundationRequest::ModernToolsList),
+        (Some(LEGACY_PROTOCOL_VERSION), "initialize") | (None, "initialize") => {
+            Some(FoundationRequest::LegacyInitialize)
+        }
+        (Some(LEGACY_PROTOCOL_VERSION), "tools/list") | (None, "tools/list") => {
+            Some(FoundationRequest::LegacyToolsList)
+        }
+        _ => None,
+    }
+}
+
 impl HttpResponse {
     fn empty(status: u16) -> Self {
         Self {
@@ -811,4 +842,107 @@ fn validate_bounds(root: &Value) -> Result<(), &'static str> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn request<'a>(
+        protocol: Option<&'a str>,
+        method: Option<&'a str>,
+        body: &'a [u8],
+    ) -> HttpRequest<'a> {
+        HttpRequest {
+            content_type: Some(JSON_CONTENT_TYPE),
+            accept: Some("application/json, text/event-stream"),
+            protocol_version: protocol,
+            mcp_method: method,
+            mcp_name: None,
+            body,
+        }
+    }
+
+    #[test]
+    fn modern_discover_and_list_are_foundation_requests() {
+        for (method, expected) in [
+            ("server/discover", FoundationRequest::ModernDiscover),
+            ("tools/list", FoundationRequest::ModernToolsList),
+        ] {
+            let body = serde_json::to_vec(&serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": method,
+                "params": {"_meta": {
+                    META_PROTOCOL_VERSION: MODERN_PROTOCOL_VERSION,
+                    META_CLIENT_CAPABILITIES: {},
+                    META_CLIENT_INFO: {"name": "fixture", "version": "1"}
+                }}
+            }))
+            .unwrap();
+            assert_eq!(
+                classify_foundation_request(request(
+                    Some(MODERN_PROTOCOL_VERSION),
+                    Some(method),
+                    &body
+                )),
+                Some(expected)
+            );
+        }
+    }
+
+    #[test]
+    fn legacy_initialize_and_list_are_foundation_requests() {
+        let initialize = serde_json::to_vec(&serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": LEGACY_PROTOCOL_VERSION,
+                "capabilities": {},
+                "clientInfo": {"name": "fixture", "version": "1"}
+            }
+        }))
+        .unwrap();
+        assert_eq!(
+            classify_foundation_request(request(None, None, &initialize)),
+            Some(FoundationRequest::LegacyInitialize)
+        );
+
+        let list = br#"{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}"#;
+        assert_eq!(
+            classify_foundation_request(request(
+                Some(LEGACY_PROTOCOL_VERSION),
+                Some("tools/list"),
+                list
+            )),
+            Some(FoundationRequest::LegacyToolsList)
+        );
+    }
+
+    #[test]
+    fn ping_notifications_and_invalid_requests_never_advance_pairing() {
+        let ping = br#"{"jsonrpc":"2.0","id":1,"method":"ping","params":{}}"#;
+        assert_eq!(
+            classify_foundation_request(request(Some(LEGACY_PROTOCOL_VERSION), Some("ping"), ping)),
+            None
+        );
+        let initialized = br#"{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}"#;
+        assert_eq!(
+            classify_foundation_request(request(
+                Some(LEGACY_PROTOCOL_VERSION),
+                Some("notifications/initialized"),
+                initialized
+            )),
+            None
+        );
+        assert_eq!(
+            classify_foundation_request(request(
+                Some(MODERN_PROTOCOL_VERSION),
+                Some("server/discover"),
+                br#"{"jsonrpc":"2.0","id":1,"method":"server/discover","params":{}}"#
+            )),
+            None
+        );
+    }
 }

@@ -187,8 +187,47 @@ needle_scan_state() {
 # Envelope-shaped agent bearers are secrets regardless of JSON key, response
 # status, or whether the exact value has already been registered as a needle.
 # This is the final guard used by every diagnostic output path.
-redact_agent_envelopes() {
-  sed -E 's/momo_agent_v1\.[A-Za-z0-9._~-]+/[REDACTED_AGENT_BEARER]/g'
+redact_private_envelopes() {
+  sed -E \
+    -e 's/momo_agent_v1\.[A-Za-z0-9._~-]+/[REDACTED_AGENT_BEARER]/g' \
+    -e 's/momo_pair_v1\.[A-Za-z0-9._~-]+/[REDACTED_PAIRING_CREDENTIAL]/g'
+}
+
+private_envelopes_in_file() {
+  LC_ALL=C grep -Eo 'momo_(agent|pair)_v1\.[A-Za-z0-9._~-]+' -- "$1"
+}
+
+# Shared by daemon-free regression and the live gate. The secret itself travels
+# only over stdin/files; argv receives the private needle-file path alone.
+redact_with_needles_file() {
+  local needles_file="$1"
+  if [ ! -f "$needles_file" ] || [ ! -r "$needles_file" ] || [ -L "$needles_file" ]; then
+    cat >/dev/null
+    printf '%s' '[diagnostic withheld: secret registry unavailable]'
+    return
+  fi
+  python3 -c '
+import pathlib, re, sys
+needles = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8").splitlines()
+text = sys.stdin.read()
+for needle in sorted({value for value in needles if value}, key=len, reverse=True):
+    text = text.replace(needle, "[REDACTED_REGISTERED_SECRET]")
+text = re.sub(r"momo_agent_v1\.[A-Za-z0-9._~-]+", "[REDACTED_AGENT_BEARER]", text)
+text = re.sub(r"momo_pair_v1\.[A-Za-z0-9._~-]+", "[REDACTED_PAIRING_CREDENTIAL]", text)
+sys.stdout.write(text)
+' "$needles_file"
+}
+
+render_safe_failure() {
+  local needles_file="$1" count="$2" name="$3" detail="$4" body="${5:-}"
+  printf '[%s] %s: %s\n' "$count" "$name" "$detail" | redact_with_needles_file "$needles_file"
+  [ -z "$body" ] || printf '%s\n' "$body" | redact_with_needles_file "$needles_file"
+}
+
+private_envelope_valid() {
+  local value="$1" prefix="$2"
+  [ "${#value}" -le 8192 ] &&
+    [[ "$value" =~ ^${prefix}\.[0-9a-f-]{36}\.[A-Za-z0-9._~-]+$ ]]
 }
 
 if [ "${1:-}" = "--verify-cleanup-contract" ]; then
@@ -212,6 +251,11 @@ if [ "${1:-}" = "--verify-cleanup-contract" ]; then
     echo "[openapi-rust] bearer validator accepted curl-config directive injection" >&2
     exit 1
   fi
+  malicious_envelope=$'momo_agent_v1.00000000-0000-7000-8000-000000000001.good"\noutput=/tmp/exfil'
+  ! private_envelope_valid "$malicious_envelope" momo_agent_v1 || {
+    echo "[openapi-rust] private envelope validator accepted curl-config injection" >&2
+    exit 1
+  }
   valid_fixture_id="$(printf 'a%.0s' {1..64})"
   selftest_dir="$(mktemp -d "${TMPDIR:-/tmp}/momo-openapi-docker-selftest.XXXXXX")"
   large_refs="$valid_fixture_id"$'\n'"$(awk 'BEGIN { line=""; for (j=0; j<64; j++) line=line "b"; for (i=1; i<200000; i++) print line }')"
@@ -298,10 +342,50 @@ if [ "${1:-}" = "--verify-cleanup-contract" ]; then
   needle_scan_state "$selftest_dir/needles" "$selftest_dir/missing-headers" || header_scan_rc=$?
   [ "$header_scan_rc" -eq 2 ] || { echo "[openapi-rust] response-header read error was false-clean" >&2; exit 1; }
   unknown_key_fixture='{"unexpectedDebug":"momo_agent_v1.00000000-0000-7000-8000-000000000001.unknownSecret"}'
-  non_201_fixture='HTTP 500 echoed momo_agent_v1.00000000-0000-7000-8000-000000000001.non201Secret'
-  redacted_fixture="$(printf '%s\n%s' "$unknown_key_fixture" "$non_201_fixture" | redact_agent_envelopes)"
-  ! printf '%s' "$redacted_fixture" | grep -Fq 'momo_agent_v1.' || {
-    echo "[openapi-rust] unknown-key/non-201 bearer envelope escaped global redaction" >&2; exit 1;
+  non_201_fixture='HTTP 500 echoed momo_pair_v1.00000000-0000-7000-8000-000000000001.non201Secret'
+  redacted_fixture="$(printf '%s\n%s' "$unknown_key_fixture" "$non_201_fixture" | redact_private_envelopes)"
+  ! printf '%s' "$redacted_fixture" | grep -Eq 'momo_(agent|pair)_v1\.' || {
+    echo "[openapi-rust] unknown-key/non-201 private envelope escaped global redaction" >&2; exit 1;
+  }
+  printf '%s\n' 'HTTP/1.1 418' 'X-Debug: momo_pair_v1.00000000-0000-7000-8000-000000000001.headerSecret' >"$selftest_dir/headers-private"
+  [ "$(private_envelopes_in_file "$selftest_dir/headers-private")" = 'momo_pair_v1.00000000-0000-7000-8000-000000000001.headerSecret' ] || {
+    echo "[openapi-rust] unknown-status response-header private envelope was not detected" >&2; exit 1;
+  }
+  # Assemble at runtime so the committed verifier fixture is not itself a
+  # credential-shaped gitleaks finding.
+  arbitrary_jwt='eyJhbGciOiJIUzI1NiJ9.'
+  arbitrary_jwt+='eyJzdWIiOiJkYWVtb24tZnJlZSJ9.'
+  arbitrary_jwt+='arbitraryRegisteredJwtValue123'
+  arbitrary_prefix="${arbitrary_jwt:0:24}"
+  arbitrary_digest="$(printf '%s' "$arbitrary_jwt" | shasum -a 256 | awk '{print $1}')"
+  printf '%s\n%s\n%s\n' "$arbitrary_jwt" "$arbitrary_prefix" "$arbitrary_digest" >"$selftest_dir/registered-needles"
+  render_safe_failure "$selftest_dir/registered-needles" 1 reflected-jwt \
+    "detail=$arbitrary_jwt header=$arbitrary_prefix" \
+    "body=$arbitrary_jwt digest=$arbitrary_digest" >"$selftest_dir/redacted-output" 2>&1
+  ! grep -Fq -f "$selftest_dir/registered-needles" -- "$selftest_dir/redacted-output" || {
+    echo "[openapi-rust] registered JWT or derivative escaped daemon-free redaction" >&2; exit 1;
+  }
+  [ "$(grep -Fo '[REDACTED_REGISTERED_SECRET]' "$selftest_dir/redacted-output" | wc -l | tr -d ' ')" -ge 4 ] || {
+    echo "[openapi-rust] daemon-free reflected JWT fixture did not traverse the shared redactor" >&2; exit 1;
+  }
+  render_safe_failure "$selftest_dir/missing-needles" 2 read-error \
+    "detail=$arbitrary_jwt" "body=$arbitrary_jwt" >"$selftest_dir/read-error-output" 2>&1
+  ! grep -Fq "$arbitrary_jwt" "$selftest_dir/read-error-output" && \
+    grep -Fq '[diagnostic withheld: secret registry unavailable]' "$selftest_dir/read-error-output" || {
+      echo "[openapi-rust] redactor registry read error was not fail-closed" >&2; exit 1;
+    }
+  signal_secret="$selftest_dir/signal-secret"
+  set +e
+  sh -c 'trap '\''rm -f -- "$1"; exit 143'\'' TERM
+    umask 077
+    : >"$1"
+    printf "%s" "momo_agent_v1.signal.fixture" >"$1"
+    kill -TERM $$' sh "$signal_secret"
+  signal_rc=$?
+  set -e
+  [ "$signal_rc" -eq 143 ] && [ ! -e "$signal_secret" ] || {
+    echo "[openapi-rust] TERM cleanup retained registered-style secret scratch" >&2
+    exit 1
   }
   DOCKER_BIN="$original_docker_bin"
   unset FAKE_DOCKER_STATE FAKE_DOCKER_REF FAKE_INSPECT FAKE_LIST FAKE_REMOVE
@@ -487,11 +571,14 @@ FAILURE_LOG="$TMP_DIR/failures.txt"
 FAILURE_COUNT=0
 
 gate_fail() {
-  local name="$1" detail="$2" body="${3:-}"
+  local name="$1" detail="$2" body="${3:-}" safe_render safe_line safe_body
   FAILURE_COUNT=$((FAILURE_COUNT + 1))
-  printf '%s\n' "[$FAILURE_COUNT] $name: $detail" >>"$FAILURE_LOG"
-  echo "[openapi-rust] FAIL $name: $detail" >&2
-  [ -n "$body" ] && printf '%s\n' "$body" | redact_agent_envelopes >&2
+  safe_render="$(render_safe_failure "$SECRET_NEEDLES" "$FAILURE_COUNT" "$name" "$detail" "$body")"
+  safe_line="${safe_render%%$'\n'*}"
+  safe_body="${safe_render#"$safe_line"}"
+  printf '%s\n' "$safe_line" >>"$FAILURE_LOG"
+  printf '%s\n' "[openapi-rust] FAIL ${safe_line#*] }" >&2
+  [ -z "$safe_body" ] || printf '%s\n' "${safe_body#$'\n'}" >&2
   return 0
 }
 
@@ -499,7 +586,7 @@ print_failure_summary() {
   [ "$FAILURE_COUNT" -gt 0 ] || return 0
   echo "" >&2
   echo "[openapi-rust] ===== $FAILURE_COUNT failed assertion(s) =====" >&2
-  cat "$FAILURE_LOG" >&2
+  redact_registered_secrets <"$FAILURE_LOG" >&2
   echo "[openapi-rust] ============================================" >&2
 }
 
@@ -521,7 +608,7 @@ redact_json() {
         then .value = "[REDACTED]"
         else . end
       )
-    elif type == "string" and (contains_secret or test("momo_agent_v1\\.[A-Za-z0-9._~-]+")) then "[REDACTED]"
+    elif type == "string" and (contains_secret or test("momo_(agent|pair)_v1\\.[A-Za-z0-9._~-]+")) then "[REDACTED]"
     else . end
   )' 2>/dev/null || printf '%s' '[non-json response redacted]'
 }
@@ -573,6 +660,7 @@ CENT_TOKEN_HMAC="$(rand_hex)"
 CENT_API_KEY="$(rand_hex)"
 CENT_PROXY_SECRET="$(rand_hex)"
 PROVIDER_LINK_MASTER_KEY="$(rand_hex)"
+GATEWAY_SECRET="$(rand_hex)"
 
 # 볼륨 이름은 프로젝트명에서 파생한다: infra/rust 의 기본값은 고정 이름이라
 # 게이트가 실제 스모크 스택의 데이터를 붙잡을 수 있다(그리고 down -v 로 지운다).
@@ -611,6 +699,10 @@ services:
   api:
     labels:
       $OWNERSHIP_LABEL: "$RUN_NONCE"
+    environment:
+      AGENT_GATEWAY_MODE: \${AGENT_GATEWAY_MODE}
+      AGENT_GATEWAY_SECRET: \${AGENT_GATEWAY_SECRET}
+      MOMO_ALLOW_LEGACY_GATEWAY_SECRET: \${MOMO_ALLOW_LEGACY_GATEWAY_SECRET}
 networks:
   private:
     labels:
@@ -701,10 +793,25 @@ append_secret_with_derivatives() {
   append_secret_needle "$digest"
 }
 
+# Diagnostic text is untrusted too: candidates may reflect any already-known
+# credential (including a human JWT) in a body, header or error string. Read the
+# needle file by path—not argv—and replace longest values first before the
+# envelope-shaped fallback runs.
+redact_registered_secrets() {
+  if ! secret_needles_are_safe; then
+    # Consume potentially sensitive input but never echo it when the registry
+    # cannot itself be trusted.
+    cat >/dev/null
+    printf '%s' '[diagnostic withheld: secret registry unavailable]'
+    return
+  fi
+  redact_with_needles_file "$SECRET_NEEDLES"
+}
+
 load_private_response_body() {
   local matches='' scan_rc=0 match
   [ "$(file_identity "$RAW_RESPONSE_FILE")" = "${SECRET_IDENTITIES[3]}" ] || return 1
-  matches="$(LC_ALL=C grep -Eo 'momo_agent_v1\.[A-Za-z0-9._~-]+' -- "$RAW_RESPONSE_FILE")" || scan_rc=$?
+  matches="$(private_envelopes_in_file "$RAW_RESPONSE_FILE")" || scan_rc=$?
   case "$scan_rc" in
     0)
       while IFS= read -r match; do
@@ -726,6 +833,14 @@ set_curl_bearer() {
   [ "$(file_identity "$CURL_AUTH_CONFIG")" = "${SECRET_IDENTITIES[1]}" ] || return 1
   : >"$CURL_AUTH_CONFIG"
   [ -z "$token" ] || printf 'header = "Authorization: Bearer %s"\n' "$token" >"$CURL_AUTH_CONFIG"
+}
+
+require_private_envelope() {
+  local value="$1" prefix="$2"
+  private_envelope_valid "$value" "$prefix" || {
+      echo "[openapi-rust] candidate returned an invalid credential envelope" >&2
+      exit 1
+    }
 }
 
 canonical_uuid() {
@@ -754,6 +869,7 @@ for secret_value in \
     exit 1
   }
 done
+append_secret_with_derivatives "$GATEWAY_SECRET"
 
 ENV_FILE="$TMP_DIR/rust-gate.env"
 (umask 077; : >"$ENV_FILE")
@@ -782,6 +898,9 @@ CENT_TOKEN_HMAC=$CENT_TOKEN_HMAC
 CENT_API_KEY=$CENT_API_KEY
 CENT_PROXY_SECRET=$CENT_PROXY_SECRET
 PROVIDER_LINK_MASTER_KEY=$PROVIDER_LINK_MASTER_KEY
+AGENT_GATEWAY_MODE=gateway
+AGENT_GATEWAY_SECRET=$GATEWAY_SECRET
+MOMO_ALLOW_LEGACY_GATEWAY_SECRET=1
 
 MOMO_CENTRIFUGO_WS_URL=ws://127.0.0.1:$CENT_PORT/connection/websocket
 
@@ -816,7 +935,7 @@ secret_needles_are_safe() {
 }
 
 load_scanned_response_headers() {
-  local scan_rc=0
+  local matches='' envelope_rc=0 match scan_rc=0
   [ "$(file_identity "$RAW_HEADERS_FILE")" = "${SECRET_IDENTITIES[4]}" ] || {
     echo "[openapi-rust] candidate response header scratch ownership changed" >&2
     return 1
@@ -825,6 +944,21 @@ load_scanned_response_headers() {
     echo "[openapi-rust] candidate response header needle file is unsafe" >&2
     return 1
   }
+  # A candidate may reflect a newly minted private envelope in any header and
+  # on any status. Register it before headers can reach any diagnostic path.
+  matches="$(private_envelopes_in_file "$RAW_HEADERS_FILE")" || envelope_rc=$?
+  case "$envelope_rc" in
+    0)
+      while IFS= read -r match; do
+        append_secret_with_derivatives "$match" || return 1
+      done <<<"$matches"
+      ;;
+    1) ;;
+    *)
+      echo "[openapi-rust] candidate response header envelope scan failed; headers withheld" >&2
+      return 1
+      ;;
+  esac
   needle_scan_state "$SECRET_NEEDLES" "$RAW_HEADERS_FILE" || scan_rc=$?
   case "$scan_rc" in
     1)
@@ -1807,6 +1941,34 @@ REFRESH="$(printf '%s' "$RESPONSE_BODY" | jq -er '.refreshToken')"
 append_secret_with_derivatives "$ACCESS"
 append_secret_with_derivatives "$REFRESH"
 
+# A malicious Agent Port may reflect the human bearer in an unexpected error
+# header and body. Exercise the exact gate_fail path and require zero registered
+# secret needles in both its persisted failure line and emitted diagnostics.
+REFLECTED_FAILURE_LOG="$TMP_DIR/reflected-access-failure.log"
+REFLECTED_OUTPUT="$TMP_DIR/reflected-access-output.log"
+(umask 077; : >"$REFLECTED_FAILURE_LOG"; : >"$REFLECTED_OUTPUT")
+register_secret_file "$REFLECTED_FAILURE_LOG"
+register_secret_file "$REFLECTED_OUTPUT"
+(
+  FAILURE_COUNT=0
+  FAILURE_LOG="$REFLECTED_FAILURE_LOG"
+  gate_fail agent-port-reflected-access \
+    "unexpected status 418; X-Debug: $ACCESS" \
+    "{\"error\":\"reflected bearer $ACCESS\"}"
+) >"$REFLECTED_OUTPUT" 2>&1
+needle_scan_state "$SECRET_NEEDLES" "$REFLECTED_FAILURE_LOG" || {
+  echo "[openapi-rust] reflected Agent Port access bearer reached failure storage" >&2
+  exit 1
+}
+needle_scan_state "$SECRET_NEEDLES" "$REFLECTED_OUTPUT" || {
+  echo "[openapi-rust] reflected Agent Port access bearer reached diagnostics" >&2
+  exit 1
+}
+grep -Fq '[REDACTED_REGISTERED_SECRET]' "$REFLECTED_OUTPUT" || {
+  echo "[openapi-rust] reflected Agent Port fixture did not exercise registered-secret redaction" >&2
+  exit 1
+}
+
 sample realtime-token post "/v1/auth/realtime-token" "/v1/auth/realtime-token" 200 \
   "" "$ACCESS"
 REALTIME_SECRET="$(printf '%s' "$RESPONSE_BODY" | jq -r '.token // empty')"
@@ -1891,6 +2053,932 @@ MODERN_DISCOVER_BODY="$(jq -cn --arg id "$MODERN_DISCOVER_ID" '
       }
     }
   }')"
+
+# HAP-E3 dedicated identity: create -> foundation detection -> confirm ->
+# active proof. Every secret is registered before another command can print it.
+HOSTED_HANDLE="hosted-gate-$RUN_EPOCH"
+# An audit failure at the tail of create must roll back the dedicated member,
+# agent/profile, connection and audit as one transaction. Retrying the exact
+# handle after removing the fault proves there was no hidden orphan.
+HOSTED_CREATE_ZERO_BEFORE="$(run_sql -Atc "SELECT count(*) FROM member WHERE workspace_id='$WS' AND handle='$HOSTED_HANDLE';")"
+run_sql <<'SQL'
+CREATE OR REPLACE FUNCTION test_fail_hosted_create_audit() RETURNS trigger
+LANGUAGE plpgsql AS $$ BEGIN
+  IF NEW.action = 'hosted_agent.connection.created' THEN
+    RAISE EXCEPTION 'injected hosted create audit failure';
+  END IF;
+  RETURN NEW;
+END $$;
+DROP TRIGGER IF EXISTS test_fail_hosted_create_audit ON audit_log;
+CREATE TRIGGER test_fail_hosted_create_audit BEFORE INSERT ON audit_log
+FOR EACH ROW EXECUTE FUNCTION test_fail_hosted_create_audit();
+SQL
+api post "/v1/workspaces/$WS/hosted-agent-connections" \
+  "$(jq -cn --arg h "$HOSTED_HANDLE" '{displayName:"Hosted Gate",handle:$h,authMode:"static_bearer"}')" "$ACCESS"
+[ "$RESPONSE_STATUS" = "500" ] || gate_fail hosted-create-rollback-status "injected create failure was not 500" "$(redacted_body)"
+run_sql -Atc "SELECT \
+  ((SELECT count(*) FROM member WHERE workspace_id='$WS' AND handle='$HOSTED_HANDLE')=$HOSTED_CREATE_ZERO_BEFORE)::text || ':' || \
+  ((SELECT count(*) FROM agent a JOIN member m ON m.workspace_id=a.workspace_id AND m.id=a.member_id WHERE m.workspace_id='$WS' AND m.handle='$HOSTED_HANDLE')=0)::text || ':' || \
+  ((SELECT count(*) FROM hosted_agent_connection hc JOIN member m ON m.workspace_id=hc.workspace_id AND m.id=hc.agent_member_id WHERE m.workspace_id='$WS' AND m.handle='$HOSTED_HANDLE')=0)::text || ':' || \
+  ((SELECT count(*) FROM audit_log WHERE workspace_id='$WS' AND action='hosted_agent.connection.created' AND detail->>'schema'='momo.hosted_agent.connection.created.v1')=0)::text;" | \
+  grep -qx 'true:true:true:true' || gate_fail hosted-create-rollback-delta0 "failed create left a member/agent/connection/audit orphan" "database evidence withheld"
+run_sql -c "DROP TRIGGER test_fail_hosted_create_audit ON audit_log; DROP FUNCTION test_fail_hosted_create_audit();"
+api post "/v1/workspaces/$WS/hosted-agent-connections" \
+  "$(jq -cn --arg h "$HOSTED_HANDLE" '{displayName:"Hosted Gate",handle:$h,authMode:"static_bearer"}')" "$ACCESS"
+if [ "$RESPONSE_STATUS" != "201" ]; then
+  gate_fail hosted-agent-create "expected HTTP 201, got $RESPONSE_STATUS" "$(redacted_body)"
+fi
+HOSTED_CONNECTION_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.connection.id')"
+HOSTED_AGENT_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.connection.agentMemberId')"
+HOSTED_PAIRING="$(printf '%s' "$RESPONSE_BODY" | jq -er '.pairingCredential')"
+append_secret_with_derivatives "$HOSTED_PAIRING"
+record_sample hosted-agent-create post "/v1/workspaces/{workspaceId}/hosted-agent-connections" 201
+CONCURRENT_DIR="$TMP_DIR/hosted-concurrency"
+mkdir -m 700 "$CONCURRENT_DIR"
+# Register every concurrency scratch inode before a bearer or one-time response
+# is written. This makes EXIT/INT/TERM cleanup complete even when a worker or
+# assertion fails midway through a race.
+for concurrency_name in \
+  one.auth one.body one.headers one.response one.status \
+  two.auth two.body two.headers two.response two.status \
+  proof-one.auth proof-one.body proof-one.response proof-one.status \
+  proof-two.auth proof-two.body proof-two.response proof-two.status \
+  gateway-secret.auth gateway-claim.response gateway-claim.status \
+  redetect.auth redetect.body redetect.response redetect.status \
+  regenerate.auth regenerate.response regenerate.status \
+  reconfirm.auth reconfirm.body reconfirm.response reconfirm.status \
+  rereg.auth rereg.response rereg.status \
+  proof-reg-proof.auth proof-reg-proof.body proof-reg-proof.response proof-reg-proof.status \
+  proof-reg-admin.auth proof-reg-admin.response proof-reg-admin.status; do
+  concurrency_path="$CONCURRENT_DIR/$concurrency_name"
+  (umask 077; : >"$concurrency_path")
+  register_secret_file "$concurrency_path" || {
+    echo "[openapi-rust] FAIL could not register concurrency scratch" >&2
+    exit 1
+  }
+done
+# New-table RLS is asserted directly under momo_app rather than inferred from
+# HTTP path scoping or the global table list.
+run_sql -Atc "SELECT (NOT rolbypassrls)::text FROM pg_roles WHERE rolname='momo_app'; \
+  SELECT relforcerowsecurity::text FROM pg_class WHERE oid='public.hosted_agent_connection'::regclass;" | \
+  grep -qx $'true\ntrue' || gate_fail hosted-rls-flags "momo_app bypass or FORCE RLS invariant failed" "database evidence withheld"
+RLS_FOREIGN_WS="$(lower_uuid)"
+run_sql -Atc "BEGIN; SET LOCAL ROLE momo_app; \
+  SELECT count(*) FROM public.hosted_agent_connection WHERE id='$HOSTED_CONNECTION_ID'; ROLLBACK;" | \
+  grep -qx '0' || gate_fail hosted-rls-select "unset GUC exposed hosted connection" "database evidence withheld"
+run_sql -Atc "BEGIN; SET LOCAL ROLE momo_app; SET LOCAL app.workspace_id='$RLS_FOREIGN_WS'; \
+  SELECT count(*) FROM public.hosted_agent_connection WHERE id='$HOSTED_CONNECTION_ID'; ROLLBACK;" | \
+  grep -qx '0' || gate_fail hosted-rls-select "wrong GUC exposed hosted connection" "database evidence withheld"
+RLS_INSERT_ID="$(lower_uuid)"
+set +e
+run_sql >/dev/null 2>&1 <<SQL
+BEGIN;
+SET LOCAL ROLE momo_app;
+SET LOCAL app.workspace_id='$RLS_FOREIGN_WS';
+INSERT INTO public.hosted_agent_connection(
+ id,workspace_id,agent_member_id,status,pairing_challenge_hash,pairing_expires_at,created_by
+) VALUES (
+ '$RLS_INSERT_ID','$WS','$HOSTED_AGENT_ID','pairing_pending',digest('rls-red','sha256'),now()+interval '1 hour','$GATE_MEMBER_ID'
+);
+COMMIT;
+SQL
+rls_insert_rc=$?
+set -e
+[ "$rls_insert_rc" -ne 0 ] || gate_fail hosted-rls-insert "wrong GUC insert unexpectedly succeeded" "database evidence withheld"
+run_sql -Atc "SELECT count(*) FROM hosted_agent_connection WHERE id='$RLS_INSERT_ID';" | grep -qx '0' || \
+  gate_fail hosted-rls-insert "wrong GUC insert left a row" "database evidence withheld"
+# A temp relation named agent must never influence the trigger's lookup. The
+# managed non-sentinel agent has a valid composite FK, so trigger rejection is
+# the only acceptable failure.
+SHADOW_INSERT_ID="$(lower_uuid)"
+set +e
+run_sql >/dev/null 2>&1 <<SQL
+BEGIN;
+SET LOCAL ROLE momo_app;
+SET LOCAL app.workspace_id='$WS';
+CREATE TEMP TABLE agent (LIKE public.agent INCLUDING ALL);
+INSERT INTO agent SELECT * FROM public.agent WHERE workspace_id='$WS' AND member_id='$GATE_AGENT_ID';
+UPDATE agent SET model='hosted-agent',base_url='https://hosted-agent.invalid/disabled',config=jsonb_build_object('execution_mode','hosted_dial_in');
+INSERT INTO public.hosted_agent_connection(
+ id,workspace_id,agent_member_id,status,pairing_challenge_hash,pairing_expires_at,created_by
+) VALUES (
+ '$SHADOW_INSERT_ID','$WS','$GATE_AGENT_ID','pairing_pending',digest('shadow-red','sha256'),now()+interval '1 hour','$GATE_MEMBER_ID'
+);
+COMMIT;
+SQL
+shadow_insert_rc=$?
+set -e
+[ "$shadow_insert_rc" -ne 0 ] || gate_fail hosted-trigger-shadow "temp agent shadow bypassed sentinel trigger" "database evidence withheld"
+run_sql -Atc "SELECT count(*) FROM hosted_agent_connection WHERE id='$SHADOW_INSERT_ID';" | grep -qx '0' || \
+  gate_fail hosted-trigger-shadow "shadow bypass left a connection" "database evidence withheld"
+run_sql -c "INSERT INTO membership(workspace_id,channel_id,member_id,role) VALUES ('$WS','$GENERAL_CHANNEL_ID','$HOSTED_AGENT_ID','member') ON CONFLICT (channel_id,member_id) DO UPDATE SET left_at=NULL;"
+assert_hosted_mention_disabled() {
+  local phase="$1" handle="$2" agent_id="$3" run_before job_before client_id
+  run_before="$(run_sql -Atc "SELECT count(*) FROM agent_run WHERE workspace_id='$WS' AND agent_member_id='$agent_id';")"
+  job_before="$(run_sql -Atc "SELECT count(*) FROM outbox WHERE workspace_id='$WS' AND kind='agent_job' AND partition_key='$agent_id';")"
+  client_id="$(lower_uuid)"
+  api post "/v1/workspaces/$WS/channels/$GENERAL_CHANNEL_ID/messages" \
+    "$(jq -cn --arg id "$client_id" --arg body "@$handle must remain disabled" '{clientMsgId:$id,body:$body}')" "$ACCESS"
+  [ "$RESPONSE_STATUS" = "201" ] || gate_fail "hosted-mention-$phase" "mention send failed" "$(redacted_body)"
+  run_sql -Atc "SELECT \
+    ((SELECT count(*) FROM agent_run WHERE workspace_id='$WS' AND agent_member_id='$agent_id')=$run_before)::text || ':' || \
+    ((SELECT count(*) FROM outbox WHERE workspace_id='$WS' AND kind='agent_job' AND partition_key='$agent_id')=$job_before)::text;" | \
+    grep -qx 'true:true' || gate_fail "hosted-mention-$phase" "mention produced hosted run/job" "database evidence withheld"
+}
+assert_hosted_mention_disabled pending "$HOSTED_HANDLE" "$HOSTED_AGENT_ID"
+assert_hosted_resume_denied() {
+  local phase="$1" agent_id="${2:-$HOSTED_AGENT_ID}" before
+  before="$(run_sql -Atc "SELECT count(*) FROM audit_log WHERE workspace_id='$WS' AND target_id='$agent_id' AND action='hosted_agent.connection.resume_denied';")"
+  api put "/v1/workspaces/$WS/agents/$agent_id/pause" '{"paused":false}' "$ACCESS"
+  [ "$RESPONSE_STATUS" = "409" ] || gate_fail "hosted-resume-$phase" "pre-proof resume was not 409" "$(redacted_body)"
+  run_sql -Atc "SELECT ap.paused::text || ':' || \
+    ((SELECT count(*) FROM audit_log a WHERE a.workspace_id=ap.workspace_id AND a.target_id=ap.agent_member_id \
+      AND a.action='hosted_agent.connection.resume_denied')=$((before + 1)))::text \
+    FROM agent_profile ap WHERE ap.workspace_id='$WS' AND ap.agent_member_id='$agent_id';" | \
+    grep -qx 'true:true' || gate_fail "hosted-resume-$phase" "resume denial mutated profile or audit cardinality" "database evidence withheld"
+}
+assert_hosted_resume_denied pending
+api post "/v1/workspaces/$WS/hosted-agent-connections/$HOSTED_CONNECTION_ID/pairing-challenge/regenerate" "" "$ACCESS"
+if [ "$RESPONSE_STATUS" != "200" ]; then
+  gate_fail hosted-agent-regenerate "expected HTTP 200, got $RESPONSE_STATUS" "$(redacted_body)"
+fi
+HOSTED_PAIRING="$(printf '%s' "$RESPONSE_BODY" | jq -er '.pairingCredential')"
+append_secret_with_derivatives "$HOSTED_PAIRING"
+record_sample hosted-agent-regenerate post "/v1/workspaces/{workspaceId}/hosted-agent-connections/{connectionId}/pairing-challenge/regenerate" 200
+
+sample hosted-agent-list get "/v1/workspaces/{workspaceId}/hosted-agent-connections" \
+  "/v1/workspaces/$WS/hosted-agent-connections" 200 "" "$ACCESS"
+sample hosted-agent-get get "/v1/workspaces/{workspaceId}/hosted-agent-connections/{connectionId}" \
+  "/v1/workspaces/$WS/hosted-agent-connections/$HOSTED_CONNECTION_ID" 200 "" "$ACCESS"
+
+expect_agent_port hosted-agent-non-foundation-does-not-detect 401 \
+  '{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}' \
+  "$HOSTED_PAIRING" "2025-11-25" "notifications/initialized"
+api get "/v1/workspaces/$WS/hosted-agent-connections/$HOSTED_CONNECTION_ID" "" "$ACCESS"
+guard_jq '.connection.status == "pairing_pending"' \
+  "non-foundation request leaves pairing pending"
+
+# Even ordinary-looking provider clientInfo is raw third-party text and must be
+# absent from persistence; only server-owned finite booleans may survive.
+api post "/v1/workspaces/$WS/hosted-agent-connections" \
+  "$(jq -cn --arg h "hosted-clientinfo-${RUN_ID:0:8}" '{displayName:"Hosted ClientInfo",handle:$h,authMode:"static_bearer"}')" "$ACCESS"
+[ "$RESPONSE_STATUS" = "201" ] || gate_fail hosted-clientinfo-create "expected 201" "$(redacted_body)"
+CLIENTINFO_CONNECTION_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.connection.id')"
+CLIENTINFO_PAIRING="$(printf '%s' "$RESPONSE_BODY" | jq -er '.pairingCredential')"
+append_secret_with_derivatives "$CLIENTINFO_PAIRING"
+expect_agent_port hosted-clientinfo-normal-detect 200 "$MODERN_DISCOVER_BODY" \
+  "$CLIENTINFO_PAIRING" "2026-07-28" "server/discover"
+run_sql -Atc "SELECT (detected_client_name IS NULL)::text || ':' || \
+  (detected_client_version IS NULL)::text FROM hosted_agent_connection \
+  WHERE workspace_id='$WS' AND id='$CLIENTINFO_CONNECTION_ID';" | \
+  grep -qx 'true:true' || gate_fail hosted-clientinfo-raw-null "normal raw clientInfo was persisted" "database evidence withheld"
+
+HOSTED_ADVERSARIAL_DISCOVER_BODY="$(printf '%s' "$MODERN_DISCOVER_BODY" | jq -c '
+  .params._meta["io.modelcontextprotocol/clientInfo"] = {
+    name:"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1",
+    version:"v11111111111111111111111"
+  }
+  | .params._meta["io.modelcontextprotocol/clientCapabilities"] = {
+      tools:{listChanged:true,tokenEndpoint:true,note:"momo_agent_v1.00000000-0000-7000-8000-000000000001.capLeak"},
+      authorization:{enabled:true},sampling:false,telemetry:true,
+      experimental:{safeLookingUnknown:true,numericVersion:"123456789012345678901234"},
+      values:["secret"],count:7
+    }')"
+sample_agent_port hosted-agent-detect 200 "$HOSTED_ADVERSARIAL_DISCOVER_BODY" \
+  "$HOSTED_PAIRING" "2026-07-28" "server/discover"
+run_sql -Atc "SELECT (detected_client_name IS NULL)::text || ':' || \
+  (detected_client_version IS NULL)::text || ':' || \
+  (detected_capabilities = '{\"sampling\": false, \"tools\": {\"listChanged\": true}}'::jsonb)::text || ':' || \
+  (detected_capabilities::text !~ 'momo_(agent|pair)_v1|token|secret|authorization|telemetry|experimental')::text \
+  FROM hosted_agent_connection WHERE workspace_id='$WS' AND id='$HOSTED_CONNECTION_ID';" | \
+  grep -qx 'true:true:true:true' || gate_fail hosted-observation-sanitizer "untrusted client metadata survived the closed projection" "database evidence withheld"
+api get "/v1/workspaces/$WS/hosted-agent-connections/$HOSTED_CONNECTION_ID" "" "$ACCESS"
+guard_jq '.connection.status == "detected"
+  and (tostring | contains("oort-openapi-rust-gate") | not)' \
+  "foundation detection never projects provider metadata"
+assert_hosted_mention_disabled detected "$HOSTED_HANDLE" "$HOSTED_AGENT_ID"
+assert_hosted_resume_denied detected
+expect_agent_port hosted-agent-pairing-replay-denied 401 "$MODERN_DISCOVER_BODY" \
+  "$HOSTED_PAIRING" "2026-07-28" "server/discover"
+for rejected_scope in messages:write work:control future:hosted:scope; do
+  scope_audit_before="$(run_sql -Atc "SELECT count(*) FROM audit_log WHERE workspace_id='$WS' AND target_id='$HOSTED_CONNECTION_ID' AND action='hosted_agent.connection.confirm_scope_denied';")"
+  scope_membership_before="$(run_sql -Atc "SELECT count(*) FROM membership WHERE workspace_id='$WS' AND member_id='$HOSTED_AGENT_ID';")"
+  api post "/v1/workspaces/$WS/hosted-agent-connections/$HOSTED_CONNECTION_ID/confirm" \
+    "$(jq -cn --arg agent "$HOSTED_AGENT_ID" --arg scope "$rejected_scope" '{agentMemberId:$agent,audience:"/v1/mcp/agent-port",approvedChannelIds:[],approvedScopes:(if $scope=="messages:write" then [$scope] else ["agent:port:connect",$scope] end),authMode:"static_bearer"}')" "$ACCESS"
+  [ "$RESPONSE_STATUS" = "400" ] || \
+    gate_fail hosted-agent-confirm-scope-denied "expected HTTP 400 for excluded/future scope, got $RESPONSE_STATUS" "$(redacted_body)"
+  run_sql -Atc "SELECT (hc.status='detected')::text || ':' || (hc.active_token_id IS NULL)::text || ':' || \
+    ((SELECT count(*) FROM token t WHERE t.workspace_id=hc.workspace_id AND t.hosted_connection_id=hc.id)=0)::text || ':' || \
+    ((SELECT count(*) FROM membership ms WHERE ms.workspace_id=hc.workspace_id AND ms.member_id=hc.agent_member_id)=$scope_membership_before)::text || ':' || \
+    ((SELECT count(*) FROM audit_log a WHERE a.workspace_id=hc.workspace_id AND a.target_id=hc.id \
+      AND a.action='hosted_agent.connection.confirm_scope_denied')=$((scope_audit_before + 1)))::text || ':' || \
+    ((SELECT count(*) FROM audit_log a WHERE a.workspace_id=hc.workspace_id AND a.target_id=hc.id \
+      AND a.action='hosted_agent.connection.confirm_scope_denied' AND a.detail ?& ARRAY['schema','code','requested_scope_count'] \
+      AND NOT EXISTS (SELECT 1 FROM jsonb_object_keys(a.detail) k WHERE k NOT IN ('schema','code','requested_scope_count')))=$((scope_audit_before + 1)))::text \
+    FROM hosted_agent_connection hc WHERE hc.workspace_id='$WS' AND hc.id='$HOSTED_CONNECTION_ID';" | \
+    grep -qx 'true:true:true:true:true:true' || gate_fail hosted-confirm-scope-zero-partial "scope denial mutated issuance or emitted unbounded audit" "database evidence withheld"
+done
+api post "/v1/workspaces/$WS/hosted-agent-connections/$HOSTED_CONNECTION_ID/confirm" \
+  "$(jq -cn --arg agent "$HOSTED_AGENT_ID" '{agentMemberId:$agent,audience:"/v1/mcp/agent-port",approvedChannelIds:[],approvedScopes:["agent:port:connect"],authMode:"oauth"}')" "$ACCESS"
+[ "$RESPONSE_STATUS" = "400" ] || \
+  gate_fail hosted-agent-confirm-oauth-denied "expected HTTP 400, got $RESPONSE_STATUS" "$(redacted_body)"
+api post "/v1/workspaces/$WS/hosted-agent-connections/$HOSTED_CONNECTION_ID/confirm" \
+  "$(jq -cn --arg agent "$GATE_AGENT_ID" '{agentMemberId:$agent,audience:"/v1/mcp/agent-port",approvedChannelIds:[],approvedScopes:["agent:port:connect"],authMode:"static_bearer"}')" "$ACCESS"
+[ "$RESPONSE_STATUS" = "409" ] || \
+  gate_fail hosted-agent-confirm-wrong-member "wrong detected member was not rejected" "response withheld"
+api post "/v1/workspaces/$WS/hosted-agent-connections/$HOSTED_CONNECTION_ID/confirm" \
+  "$(jq -cn --arg agent "$HOSTED_AGENT_ID" '{agentMemberId:$agent,audience:"/v1/messages",approvedChannelIds:[],approvedScopes:["agent:port:connect"],authMode:"static_bearer"}')" "$ACCESS"
+[ "$RESPONSE_STATUS" = "400" ] || gate_fail hosted-agent-confirm-wrong-audience "wrong audience was not rejected" "$(redacted_body)"
+api post "/v1/workspaces/$WS/hosted-agent-connections/$HOSTED_CONNECTION_ID/confirm" \
+  "$(jq -cn --arg agent "$HOSTED_AGENT_ID" '{agentMemberId:$agent,approvedChannelIds:[],approvedScopes:["agent:port:connect"]}')" "$ACCESS"
+[ "$RESPONSE_STATUS" = "422" ] || gate_fail hosted-agent-confirm-omission "approval omission was not rejected" "$(redacted_body)"
+ARCHIVED_CHANNEL_ID="$(uuidgen | tr '[:upper:]' '[:lower:]')"
+DM_CHANNEL_ID="$(uuidgen | tr '[:upper:]' '[:lower:]')"
+run_sql -c "INSERT INTO channel(id,workspace_id,kind,name,archived_at) VALUES \
+  ('$ARCHIVED_CHANNEL_ID','$WS','private','archived-hosted',now()); \
+  INSERT INTO channel(id,workspace_id,kind,dm_key) VALUES \
+  ('$DM_CHANNEL_ID','$WS','dm','hosted-dm-$RUN_EPOCH');"
+for rejected_channel in "$ARCHIVED_CHANNEL_ID" "$DM_CHANNEL_ID"; do
+  api post "/v1/workspaces/$WS/hosted-agent-connections/$HOSTED_CONNECTION_ID/confirm" \
+    "$(jq -cn --arg agent "$HOSTED_AGENT_ID" --arg channel "$rejected_channel" '{agentMemberId:$agent,audience:"/v1/mcp/agent-port",approvedChannelIds:[$channel],approvedScopes:["agent:port:connect"],authMode:"static_bearer"}')" "$ACCESS"
+  [ "$RESPONSE_STATUS" = "400" ] || gate_fail hosted-agent-confirm-channel "archived/DM channel was not rejected" "$(redacted_body)"
+done
+# Confirm's active bearer, memberships, state transition and audit are one
+# commit. A failing terminal audit must leave an exact delta of zero.
+HOSTED_CONFIRM_ZERO_BEFORE="$(run_sql -Atc "SELECT \
+  (SELECT count(*) FROM token WHERE workspace_id='$WS' AND hosted_connection_id='$HOSTED_CONNECTION_ID')::text || ':' || \
+  (SELECT count(*) FROM membership WHERE workspace_id='$WS' AND member_id='$HOSTED_AGENT_ID')::text || ':' || \
+  (SELECT count(*) FROM audit_log WHERE workspace_id='$WS' AND target_id='$HOSTED_CONNECTION_ID' AND action='hosted_agent.connection.confirmed')::text;")"
+run_sql <<'SQL'
+CREATE OR REPLACE FUNCTION test_fail_hosted_confirm_audit() RETURNS trigger
+LANGUAGE plpgsql AS $$ BEGIN
+  IF NEW.action = 'hosted_agent.connection.confirmed' THEN
+    RAISE EXCEPTION 'injected hosted confirm audit failure';
+  END IF;
+  RETURN NEW;
+END $$;
+DROP TRIGGER IF EXISTS test_fail_hosted_confirm_audit ON audit_log;
+CREATE TRIGGER test_fail_hosted_confirm_audit BEFORE INSERT ON audit_log
+FOR EACH ROW EXECUTE FUNCTION test_fail_hosted_confirm_audit();
+SQL
+api post "/v1/workspaces/$WS/hosted-agent-connections/$HOSTED_CONNECTION_ID/confirm" \
+  "$(jq -cn --arg agent "$HOSTED_AGENT_ID" '{agentMemberId:$agent,audience:"/v1/mcp/agent-port",approvedChannelIds:[],approvedScopes:["agent:port:connect"],authMode:"static_bearer"}')" "$ACCESS"
+[ "$RESPONSE_STATUS" = "500" ] || gate_fail hosted-confirm-rollback-status "injected confirm failure was not 500" "$(redacted_body)"
+HOSTED_CONFIRM_ZERO_AFTER="$(run_sql -Atc "SELECT \
+  (SELECT count(*) FROM token WHERE workspace_id='$WS' AND hosted_connection_id='$HOSTED_CONNECTION_ID')::text || ':' || \
+  (SELECT count(*) FROM membership WHERE workspace_id='$WS' AND member_id='$HOSTED_AGENT_ID')::text || ':' || \
+  (SELECT count(*) FROM audit_log WHERE workspace_id='$WS' AND target_id='$HOSTED_CONNECTION_ID' AND action='hosted_agent.connection.confirmed')::text;")"
+[ "$HOSTED_CONFIRM_ZERO_AFTER" = "$HOSTED_CONFIRM_ZERO_BEFORE" ] || gate_fail hosted-confirm-rollback-delta0 "failed confirm changed token/membership/audit counts" "database evidence withheld"
+run_sql -Atc "SELECT (status='detected')::text || ':' || (confirmed_at IS NULL)::text || ':' || (active_token_id IS NULL)::text FROM hosted_agent_connection WHERE workspace_id='$WS' AND id='$HOSTED_CONNECTION_ID';" | \
+  grep -qx 'true:true:true' || gate_fail hosted-confirm-rollback-state "failed confirm left a transition" "database evidence withheld"
+run_sql -c "DROP TRIGGER test_fail_hosted_confirm_audit ON audit_log; DROP FUNCTION test_fail_hosted_confirm_audit();"
+api post "/v1/workspaces/$WS/hosted-agent-connections/$HOSTED_CONNECTION_ID/confirm" \
+  "$(jq -cn --arg agent "$HOSTED_AGENT_ID" '{agentMemberId:$agent,audience:"/v1/mcp/agent-port",approvedChannelIds:[],approvedScopes:["agent:port:connect","agent:inbox:read","messages:read","messages:write","agent:jobs:read","agent:runs:callback"],authMode:"static_bearer"}')" "$ACCESS"
+if [ "$RESPONSE_STATUS" != "201" ]; then
+  gate_fail hosted-agent-confirm "expected HTTP 201, got $RESPONSE_STATUS" "$(redacted_body)"
+fi
+HOSTED_ACTIVE="$(printf '%s' "$RESPONSE_BODY" | jq -er '.credential')"
+HOSTED_ACTIVE_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.credentialId')"
+append_secret_with_derivatives "$HOSTED_ACTIVE"
+record_sample hosted-agent-confirm post "/v1/workspaces/{workspaceId}/hosted-agent-connections/{connectionId}/confirm" 201
+expect_agent_port hosted-agent-pre-proof-non-foundation-denied 401 \
+  '{"jsonrpc":"2.0","id":2,"method":"ping","params":{}}' \
+  "$HOSTED_ACTIVE" "2025-11-25" "ping"
+api get "/v1/workspaces/$WS/agents/$HOSTED_AGENT_ID/gateway/jobs/pending" "" "$HOSTED_ACTIVE"
+[ "$RESPONSE_STATUS" = "403" ] || gate_fail hosted-pre-proof-gateway-denied "expected HTTP 403, got $RESPONSE_STATUS" "$(redacted_body)"
+api get "/v1/workspaces/$WS/hosted-agent-connections/$HOSTED_CONNECTION_ID" "" "$ACCESS"
+guard_jq '.connection.status == "detected" and .connection.activeCredentialId != null' \
+  "pre-proof non-foundation call preserves detected state"
+assert_hosted_mention_disabled confirmed "$HOSTED_HANDLE" "$HOSTED_AGENT_ID"
+assert_hosted_resume_denied confirmed
+sample_agent_port hosted-agent-proof 200 "$MODERN_DISCOVER_BODY" \
+  "$HOSTED_ACTIVE" "2026-07-28" "server/discover"
+api get "/v1/workspaces/$WS/hosted-agent-connections/$HOSTED_CONNECTION_ID" "" "$ACCESS"
+guard_jq '.connection.status == "active"' \
+  "first active foundation call proves binding"
+
+# Detection TTL remains authoritative through confirm and proof. Expiration
+# always closes the lifecycle, pauses the member and leaves no live token.
+api post "/v1/workspaces/$WS/hosted-agent-connections" \
+  "$(jq -cn --arg h "hosted-exp-confirm-${RUN_ID:0:8}" '{displayName:"Hosted Expired Confirm",handle:$h,authMode:"static_bearer"}')" "$ACCESS"
+[ "$RESPONSE_STATUS" = "201" ] || gate_fail hosted-exp-confirm-create "expected 201" "$(redacted_body)"
+EXP_CONFIRM_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.connection.id')"
+EXP_CONFIRM_AGENT="$(printf '%s' "$RESPONSE_BODY" | jq -er '.connection.agentMemberId')"
+EXP_CONFIRM_PAIR="$(printf '%s' "$RESPONSE_BODY" | jq -er '.pairingCredential')"
+append_secret_with_derivatives "$EXP_CONFIRM_PAIR"
+expect_agent_port hosted-exp-confirm-detect 200 "$MODERN_DISCOVER_BODY" \
+  "$EXP_CONFIRM_PAIR" "2026-07-28" "server/discover"
+run_sql -c "UPDATE hosted_agent_connection SET pairing_expires_at=now()-interval '1 second' WHERE workspace_id='$WS' AND id='$EXP_CONFIRM_ID';"
+api post "/v1/workspaces/$WS/hosted-agent-connections/$EXP_CONFIRM_ID/confirm" \
+  "$(jq -cn --arg agent "$EXP_CONFIRM_AGENT" '{agentMemberId:$agent,audience:"/v1/mcp/agent-port",approvedChannelIds:[],approvedScopes:["agent:port:connect"],authMode:"static_bearer"}')" "$ACCESS"
+[ "$RESPONSE_STATUS" = "409" ] || gate_fail hosted-exp-confirm-denied "expired detected confirm was not 409" "$(redacted_body)"
+run_sql -Atc "SELECT (hc.status='expired')::text || ':' || ap.paused::text || ':' || \
+  (hc.active_token_id IS NULL)::text || ':' || \
+  (NOT EXISTS(SELECT 1 FROM token t WHERE t.workspace_id=hc.workspace_id AND t.hosted_connection_id=hc.id AND t.revoked_at IS NULL))::text \
+  FROM hosted_agent_connection hc JOIN agent_profile ap ON ap.workspace_id=hc.workspace_id AND ap.agent_member_id=hc.agent_member_id \
+  WHERE hc.workspace_id='$WS' AND hc.id='$EXP_CONFIRM_ID';" | grep -qx 'true:true:true:true' || \
+  gate_fail hosted-exp-confirm-state "expired confirm retained authority" "database evidence withheld"
+
+api post "/v1/workspaces/$WS/hosted-agent-connections" \
+  "$(jq -cn --arg h "hosted-exp-proof-${RUN_ID:0:8}" '{displayName:"Hosted Expired Proof",handle:$h,authMode:"static_bearer"}')" "$ACCESS"
+[ "$RESPONSE_STATUS" = "201" ] || gate_fail hosted-exp-proof-create "expected 201" "$(redacted_body)"
+EXP_PROOF_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.connection.id')"
+EXP_PROOF_AGENT="$(printf '%s' "$RESPONSE_BODY" | jq -er '.connection.agentMemberId')"
+EXP_PROOF_PAIR="$(printf '%s' "$RESPONSE_BODY" | jq -er '.pairingCredential')"
+append_secret_with_derivatives "$EXP_PROOF_PAIR"
+expect_agent_port hosted-exp-proof-detect 200 "$MODERN_DISCOVER_BODY" \
+  "$EXP_PROOF_PAIR" "2026-07-28" "server/discover"
+api post "/v1/workspaces/$WS/hosted-agent-connections/$EXP_PROOF_ID/confirm" \
+  "$(jq -cn --arg agent "$EXP_PROOF_AGENT" '{agentMemberId:$agent,audience:"/v1/mcp/agent-port",approvedChannelIds:[],approvedScopes:["agent:port:connect"],authMode:"static_bearer"}')" "$ACCESS"
+[ "$RESPONSE_STATUS" = "201" ] || gate_fail hosted-exp-proof-confirm "expected 201" "$(redacted_body)"
+EXP_PROOF_ACTIVE="$(printf '%s' "$RESPONSE_BODY" | jq -er '.credential')"
+append_secret_with_derivatives "$EXP_PROOF_ACTIVE"
+run_sql -c "UPDATE hosted_agent_connection SET pairing_expires_at=now()-interval '1 second' WHERE workspace_id='$WS' AND id='$EXP_PROOF_ID';"
+expect_agent_port hosted-exp-proof-denied 401 "$MODERN_DISCOVER_BODY" \
+  "$EXP_PROOF_ACTIVE" "2026-07-28" "server/discover"
+run_sql -Atc "SELECT (hc.status='expired')::text || ':' || ap.paused::text || ':' || \
+  (hc.active_token_id IS NULL)::text || ':' || \
+  (NOT EXISTS(SELECT 1 FROM token t WHERE t.workspace_id=hc.workspace_id AND t.hosted_connection_id=hc.id AND t.revoked_at IS NULL))::text \
+  FROM hosted_agent_connection hc JOIN agent_profile ap ON ap.workspace_id=hc.workspace_id AND ap.agent_member_id=hc.agent_member_id \
+  WHERE hc.workspace_id='$WS' AND hc.id='$EXP_PROOF_ID';" | grep -qx 'true:true:true:true' || \
+  gate_fail hosted-exp-proof-state "expired proof retained authority" "database evidence withheld"
+
+# Loss of the active member/workspace authority invalidates the lifecycle, and
+# restoring the row never resurrects the old pairing/active credential.
+api post "/v1/workspaces/$WS/hosted-agent-connections" \
+  "$(jq -cn --arg h "hosted-live-detect-${RUN_ID:0:8}" '{displayName:"Hosted Liveness Detect",handle:$h,authMode:"static_bearer"}')" "$ACCESS"
+[ "$RESPONSE_STATUS" = "201" ] || gate_fail hosted-live-detect-create "expected 201" "$(redacted_body)"
+LIVE_DETECT_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.connection.id')"
+LIVE_DETECT_AGENT="$(printf '%s' "$RESPONSE_BODY" | jq -er '.connection.agentMemberId')"
+LIVE_DETECT_PAIR="$(printf '%s' "$RESPONSE_BODY" | jq -er '.pairingCredential')"
+append_secret_with_derivatives "$LIVE_DETECT_PAIR"
+run_sql -c "UPDATE member SET status='suspended' WHERE workspace_id='$WS' AND id='$LIVE_DETECT_AGENT';"
+expect_agent_port hosted-live-detect-denied 401 "$MODERN_DISCOVER_BODY" \
+  "$LIVE_DETECT_PAIR" "2026-07-28" "server/discover"
+run_sql -c "UPDATE member SET status='active' WHERE workspace_id='$WS' AND id='$LIVE_DETECT_AGENT';"
+expect_agent_port hosted-live-detect-not-restored 401 "$MODERN_DISCOVER_BODY" \
+  "$LIVE_DETECT_PAIR" "2026-07-28" "server/discover"
+run_sql -Atc "SELECT (status='expired')::text FROM hosted_agent_connection WHERE workspace_id='$WS' AND id='$LIVE_DETECT_ID';" | \
+  grep -qx 'true' || gate_fail hosted-live-detect-state "identity restoration resurrected pairing" "database evidence withheld"
+
+api post "/v1/workspaces/$WS/hosted-agent-connections" \
+  "$(jq -cn --arg h "hosted-live-confirm-${RUN_ID:0:8}" '{displayName:"Hosted Liveness Confirm",handle:$h,authMode:"static_bearer"}')" "$ACCESS"
+[ "$RESPONSE_STATUS" = "201" ] || gate_fail hosted-live-confirm-create "expected 201" "$(redacted_body)"
+LIVE_CONFIRM_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.connection.id')"
+LIVE_CONFIRM_AGENT="$(printf '%s' "$RESPONSE_BODY" | jq -er '.connection.agentMemberId')"
+LIVE_CONFIRM_PAIR="$(printf '%s' "$RESPONSE_BODY" | jq -er '.pairingCredential')"
+append_secret_with_derivatives "$LIVE_CONFIRM_PAIR"
+expect_agent_port hosted-live-confirm-detect 200 "$MODERN_DISCOVER_BODY" \
+  "$LIVE_CONFIRM_PAIR" "2026-07-28" "server/discover"
+run_sql -c "DELETE FROM workspace_membership WHERE workspace_id='$WS' AND member_id='$LIVE_CONFIRM_AGENT';"
+api post "/v1/workspaces/$WS/hosted-agent-connections/$LIVE_CONFIRM_ID/confirm" \
+  "$(jq -cn --arg agent "$LIVE_CONFIRM_AGENT" '{agentMemberId:$agent,audience:"/v1/mcp/agent-port",approvedChannelIds:[],approvedScopes:["agent:port:connect"],authMode:"static_bearer"}')" "$ACCESS"
+[ "$RESPONSE_STATUS" = "409" ] || gate_fail hosted-live-confirm-denied "missing workspace authority confirm was not 409" "$(redacted_body)"
+run_sql -c "INSERT INTO workspace_membership(workspace_id,member_id,role) VALUES ('$WS','$LIVE_CONFIRM_AGENT','member');"
+api post "/v1/workspaces/$WS/hosted-agent-connections/$LIVE_CONFIRM_ID/confirm" \
+  "$(jq -cn --arg agent "$LIVE_CONFIRM_AGENT" '{agentMemberId:$agent,audience:"/v1/mcp/agent-port",approvedChannelIds:[],approvedScopes:["agent:port:connect"],authMode:"static_bearer"}')" "$ACCESS"
+[ "$RESPONSE_STATUS" = "409" ] || gate_fail hosted-live-confirm-not-restored "restored workspace authority reused confirm" "$(redacted_body)"
+run_sql -Atc "SELECT (status='expired')::text || ':' || (active_token_id IS NULL)::text || ':' || \
+  (NOT EXISTS(SELECT 1 FROM token t WHERE t.workspace_id=hosted_agent_connection.workspace_id AND t.hosted_connection_id=hosted_agent_connection.id AND t.revoked_at IS NULL))::text \
+  FROM hosted_agent_connection WHERE workspace_id='$WS' AND id='$LIVE_CONFIRM_ID';" | grep -qx 'true:true:true' || \
+  gate_fail hosted-live-confirm-state "workspace authority restoration resurrected confirm" "database evidence withheld"
+
+api post "/v1/workspaces/$WS/hosted-agent-connections" \
+  "$(jq -cn --arg h "hosted-live-proof-${RUN_ID:0:8}" '{displayName:"Hosted Liveness Proof",handle:$h,authMode:"static_bearer"}')" "$ACCESS"
+[ "$RESPONSE_STATUS" = "201" ] || gate_fail hosted-live-proof-create "expected 201" "$(redacted_body)"
+LIVE_PROOF_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.connection.id')"
+LIVE_PROOF_AGENT="$(printf '%s' "$RESPONSE_BODY" | jq -er '.connection.agentMemberId')"
+LIVE_PROOF_PAIR="$(printf '%s' "$RESPONSE_BODY" | jq -er '.pairingCredential')"
+append_secret_with_derivatives "$LIVE_PROOF_PAIR"
+expect_agent_port hosted-live-proof-detect 200 "$MODERN_DISCOVER_BODY" \
+  "$LIVE_PROOF_PAIR" "2026-07-28" "server/discover"
+api post "/v1/workspaces/$WS/hosted-agent-connections/$LIVE_PROOF_ID/confirm" \
+  "$(jq -cn --arg agent "$LIVE_PROOF_AGENT" '{agentMemberId:$agent,audience:"/v1/mcp/agent-port",approvedChannelIds:[],approvedScopes:["agent:port:connect"],authMode:"static_bearer"}')" "$ACCESS"
+[ "$RESPONSE_STATUS" = "201" ] || gate_fail hosted-live-proof-confirm "expected 201" "$(redacted_body)"
+LIVE_PROOF_ACTIVE="$(printf '%s' "$RESPONSE_BODY" | jq -er '.credential')"
+append_secret_with_derivatives "$LIVE_PROOF_ACTIVE"
+run_sql -c "DELETE FROM workspace_membership WHERE workspace_id='$WS' AND member_id='$LIVE_PROOF_AGENT';"
+expect_agent_port hosted-live-proof-denied 401 "$MODERN_DISCOVER_BODY" \
+  "$LIVE_PROOF_ACTIVE" "2026-07-28" "server/discover"
+run_sql -c "INSERT INTO workspace_membership(workspace_id,member_id,role) VALUES ('$WS','$LIVE_PROOF_AGENT','member');"
+expect_agent_port hosted-live-proof-not-restored 401 "$MODERN_DISCOVER_BODY" \
+  "$LIVE_PROOF_ACTIVE" "2026-07-28" "server/discover"
+run_sql -Atc "SELECT (hc.status='expired')::text || ':' || ap.paused::text || ':' || \
+  (NOT EXISTS(SELECT 1 FROM token t WHERE t.workspace_id=hc.workspace_id AND t.hosted_connection_id=hc.id AND t.revoked_at IS NULL))::text \
+  FROM hosted_agent_connection hc JOIN agent_profile ap ON ap.workspace_id=hc.workspace_id AND ap.agent_member_id=hc.agent_member_id \
+  WHERE hc.workspace_id='$WS' AND hc.id='$LIVE_PROOF_ID';" | grep -qx 'true:true:true' || \
+  gate_fail hosted-live-proof-state "workspace authority restoration resurrected proof" "database evidence withheld"
+
+# Missing profile row is an injected zero-row UPDATE. The internal failure must
+# roll back token touch/status/audit rather than treating it as an activation.
+api post "/v1/workspaces/$WS/hosted-agent-connections" \
+  "$(jq -cn --arg h "hosted-profile-zero-${RUN_ID:0:8}" '{displayName:"Hosted Profile Zero",handle:$h,authMode:"static_bearer"}')" "$ACCESS"
+[ "$RESPONSE_STATUS" = "201" ] || gate_fail hosted-profile-zero-create "expected 201" "$(redacted_body)"
+PROFILE_ZERO_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.connection.id')"
+PROFILE_ZERO_AGENT="$(printf '%s' "$RESPONSE_BODY" | jq -er '.connection.agentMemberId')"
+PROFILE_ZERO_PAIR="$(printf '%s' "$RESPONSE_BODY" | jq -er '.pairingCredential')"
+append_secret_with_derivatives "$PROFILE_ZERO_PAIR"
+expect_agent_port hosted-profile-zero-detect 200 "$MODERN_DISCOVER_BODY" \
+  "$PROFILE_ZERO_PAIR" "2026-07-28" "server/discover"
+api post "/v1/workspaces/$WS/hosted-agent-connections/$PROFILE_ZERO_ID/confirm" \
+  "$(jq -cn --arg agent "$PROFILE_ZERO_AGENT" '{agentMemberId:$agent,audience:"/v1/mcp/agent-port",approvedChannelIds:[],approvedScopes:["agent:port:connect"],authMode:"static_bearer"}')" "$ACCESS"
+[ "$RESPONSE_STATUS" = "201" ] || gate_fail hosted-profile-zero-confirm "expected 201" "$(redacted_body)"
+PROFILE_ZERO_ACTIVE="$(printf '%s' "$RESPONSE_BODY" | jq -er '.credential')"
+append_secret_with_derivatives "$PROFILE_ZERO_ACTIVE"
+run_sql -c "DELETE FROM agent_profile WHERE workspace_id='$WS' AND agent_member_id='$PROFILE_ZERO_AGENT';"
+expect_agent_port hosted-profile-zero-proof 500 "$MODERN_DISCOVER_BODY" \
+  "$PROFILE_ZERO_ACTIVE" "2026-07-28" "server/discover"
+run_sql -Atc "SELECT (hc.status='detected')::text || ':' || (hc.proved_at IS NULL)::text || ':' || \
+  (t.last_used_at IS NULL)::text || ':' || \
+  ((SELECT count(*) FROM audit_log a WHERE a.workspace_id=hc.workspace_id AND a.target_id=hc.id AND a.action='hosted_agent.connection.activated')=0)::text \
+  FROM hosted_agent_connection hc JOIN token t ON t.workspace_id=hc.workspace_id AND t.id=hc.active_token_id \
+  WHERE hc.workspace_id='$WS' AND hc.id='$PROFILE_ZERO_ID';" | grep -qx 'true:true:true:true' || \
+  gate_fail hosted-profile-zero-rollback "zero profile update left partial proof state" "database evidence withheld"
+# Expired ledgers are delivery-disabled too. Build a distinct dedicated identity
+# so the primary active connection remains available for the audience matrix.
+EXPIRED_HANDLE="hosted-expired-${RUN_ID:0:8}"
+api post "/v1/workspaces/$WS/hosted-agent-connections" \
+  "$(jq -cn --arg h "$EXPIRED_HANDLE" '{displayName:"Hosted Expired",handle:$h,authMode:"static_bearer"}')" "$ACCESS"
+[ "$RESPONSE_STATUS" = "201" ] || gate_fail hosted-expired-create "expected 201" "$(redacted_body)"
+EXPIRED_CONNECTION_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.connection.id')"
+EXPIRED_AGENT_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.connection.agentMemberId')"
+run_sql -c "UPDATE hosted_agent_connection SET status='expired',pairing_expires_at=now()-interval '1 second',updated_at=now() WHERE workspace_id='$WS' AND id='$EXPIRED_CONNECTION_ID'; \
+ INSERT INTO membership(workspace_id,channel_id,member_id,role) VALUES ('$WS','$GENERAL_CHANNEL_ID','$EXPIRED_AGENT_ID','member') ON CONFLICT (channel_id,member_id) DO UPDATE SET left_at=NULL;"
+assert_hosted_mention_disabled expired "$EXPIRED_HANDLE" "$EXPIRED_AGENT_ID"
+assert_hosted_resume_denied expired "$EXPIRED_AGENT_ID"
+# Make every pre-existing run eligibility predicate explicit. The API-created
+# dedicated identity remains the subject; this only removes fixture ambiguity.
+run_sql -c "INSERT INTO workspace_membership(workspace_id,member_id,role) VALUES ('$WS','$HOSTED_AGENT_ID','member') ON CONFLICT (workspace_id,member_id) DO NOTHING; \
+  INSERT INTO membership(workspace_id,channel_id,member_id,role) VALUES ('$WS','$GENERAL_CHANNEL_ID','$HOSTED_AGENT_ID','member') \
+  ON CONFLICT (channel_id,member_id) DO UPDATE SET left_at=NULL; \
+  UPDATE member SET status='active',deleted_at=NULL WHERE workspace_id='$WS' AND id='$HOSTED_AGENT_ID'; \
+  UPDATE agent_profile SET paused=false WHERE workspace_id='$WS' AND agent_member_id='$HOSTED_AGENT_ID';"
+# The connection ledger, never mutable sentinel strings, is the delivery
+# authority. Corrupting both sentinel columns must not bypass the route guard.
+run_sql -c "ALTER TABLE hosted_agent_connection DISABLE TRIGGER hosted_agent_connection_sentinel_guard; \
+  UPDATE agent SET model='mutated-hosted-sentinel',base_url='https://mutated.invalid/v1' WHERE workspace_id='$WS' AND member_id='$HOSTED_AGENT_ID'; \
+  ALTER TABLE hosted_agent_connection ENABLE TRIGGER hosted_agent_connection_sentinel_guard;"
+HOSTED_RUN_CLIENT_ID="$(lower_uuid)"
+HOSTED_RUN_BEFORE="$(run_sql -Atc "SELECT count(*) FROM agent_run WHERE workspace_id='$WS';")"
+HOSTED_OUTBOX_BEFORE="$(run_sql -Atc "SELECT count(*) FROM outbox WHERE workspace_id='$WS';")"
+HOSTED_JOB_BEFORE="$(run_sql -Atc "SELECT count(*) FROM outbox WHERE workspace_id='$WS' AND kind='agent_job';")"
+HOSTED_MESSAGE_BEFORE="$(run_sql -Atc "SELECT count(*) FROM message WHERE workspace_id='$WS';")"
+api post "/v1/workspaces/$WS/channels/$GENERAL_CHANNEL_ID/agent-runs" \
+  "$(jq -cn --arg agent "$HOSTED_AGENT_ID" --arg client "$HOSTED_RUN_CLIENT_ID" '{agent_member_id:$agent,client_run_id:$client,input:{type:"work",title:"deny hosted",brief:"must not enqueue"}}')" "$ACCESS"
+[ "$RESPONSE_STATUS" = "409" ] || gate_fail hosted-agent-run-denied "expected HTTP 409, got $RESPONSE_STATUS" "$(redacted_body)"
+run_sql -Atc "SELECT ((SELECT count(*) FROM agent_run WHERE workspace_id='$WS')=$HOSTED_RUN_BEFORE)::text || ':' || \
+  ((SELECT count(*) FROM outbox WHERE workspace_id='$WS')=$HOSTED_OUTBOX_BEFORE)::text || ':' || \
+  ((SELECT count(*) FROM outbox WHERE workspace_id='$WS' AND kind='agent_job')=$HOSTED_JOB_BEFORE)::text || ':' || \
+  ((SELECT count(*) FROM message WHERE workspace_id='$WS')=$HOSTED_MESSAGE_BEFORE)::text;" | grep -qx 'true:true:true:true' || \
+  gate_fail hosted-agent-run-zero-partial "hosted run changed run/job/outbox/message counts" "database evidence withheld"
+run_sql -c "UPDATE agent SET model='hosted-agent',base_url='https://hosted-agent.invalid/disabled' WHERE workspace_id='$WS' AND member_id='$HOSTED_AGENT_ID';"
+
+GATEWAY_DUMMY_ID="$(lower_uuid)"
+GATEWAY_AUDIT_BEFORE="$(run_sql -Atc "SELECT count(*) FROM audit_log WHERE workspace_id='$WS';")"
+api get "/v1/workspaces/$WS/agents/$HOSTED_AGENT_ID/gateway/jobs/pending" "" "$HOSTED_ACTIVE"
+[ "$RESPONSE_STATUS" = "403" ] || gate_fail hosted-gateway-pending-denied "expected HTTP 403, got $RESPONSE_STATUS" "$(redacted_body)"
+api post "/v1/workspaces/$WS/agents/$HOSTED_AGENT_ID/gateway/jobs/1/lease/renew" \
+  "$(jq -cn --arg lease "$GATEWAY_DUMMY_ID" '{job_id:1,lease_id:$lease}')" "$HOSTED_ACTIVE"
+[ "$RESPONSE_STATUS" = "403" ] || gate_fail hosted-gateway-lease-denied "expected HTTP 403, got $RESPONSE_STATUS" "$(redacted_body)"
+api post "/v1/workspaces/$WS/agent-runs/$GATEWAY_DUMMY_ID/gateway/events" \
+  "$(jq -cn --arg event "$GATEWAY_DUMMY_ID" '{event_id:$event,status:"running"}')" "$HOSTED_ACTIVE"
+[ "$RESPONSE_STATUS" = "403" ] || gate_fail hosted-gateway-event-denied "expected HTTP 403, got $RESPONSE_STATUS" "$(redacted_body)"
+api post "/v1/workspaces/$WS/agent-runs/$GATEWAY_DUMMY_ID/gateway/complete" \
+  '{"status":"succeeded","body":"must not persist"}' "$HOSTED_ACTIVE"
+[ "$RESPONSE_STATUS" = "403" ] || gate_fail hosted-gateway-complete-denied "expected HTTP 403, got $RESPONSE_STATUS" "$(redacted_body)"
+run_sql -Atc "SELECT ((SELECT count(*) FROM agent_run WHERE workspace_id='$WS')=$HOSTED_RUN_BEFORE)::text || ':' || \
+ ((SELECT count(*) FROM outbox WHERE workspace_id='$WS')=$HOSTED_OUTBOX_BEFORE)::text || ':' || \
+ ((SELECT count(*) FROM message WHERE workspace_id='$WS')=$HOSTED_MESSAGE_BEFORE)::text || ':' || \
+ ((SELECT count(*) FROM audit_log WHERE workspace_id='$WS')=$GATEWAY_AUDIT_BEFORE)::text;" | grep -qx 'true:true:true:true' || \
+ gate_fail hosted-gateway-zero-partial "gateway negative matrix changed durable state/audit cardinality" "database evidence withheld"
+HOSTED_CLAIM_OUTBOX_ID="$(run_sql -Atc "INSERT INTO outbox(workspace_id,kind,status,method,payload,partition_key) \
+ VALUES ('$WS','agent_job','pending','gateway',jsonb_build_object('agent_member_id','$HOSTED_AGENT_ID'),'$HOSTED_AGENT_ID') RETURNING id;")"
+# Exercise the real gateway route and therefore claim_gateway_jobs_in_tx with
+# the legacy process credential. The hosted row must stay pending/unleased; a
+# copied eligibility predicate is not accepted as runtime evidence.
+(umask 077
+ printf 'header = "X-Momo-Agent-Gateway-Secret: %s"\n' "$GATEWAY_SECRET" >"$CONCURRENT_DIR/gateway-secret.auth"
+ curl -sS -o "$CONCURRENT_DIR/gateway-claim.response" -w '%{http_code}' \
+   --config "$CONCURRENT_DIR/gateway-secret.auth" \
+   "$BASE_URL/v1/workspaces/$WS/agents/$HOSTED_AGENT_ID/gateway/jobs/pending" \
+   >"$CONCURRENT_DIR/gateway-claim.status")
+[ "$(cat "$CONCURRENT_DIR/gateway-claim.status")" = "200" ] || \
+  gate_fail hosted-claim-defense "legacy gateway claim did not reach the real claim route" "response withheld"
+jq -e '.jobs == []' "$CONCURRENT_DIR/gateway-claim.response" >/dev/null || \
+  gate_fail hosted-claim-defense "real gateway claim admitted a hosted job" "response withheld"
+run_sql -Atc "SELECT (status='pending')::text || ':' || (lease_owner IS NULL)::text || ':' || \
+  (lease_acquired_at IS NULL)::text || ':' || (lease_expires_at IS NULL)::text \
+  FROM outbox WHERE workspace_id='$WS' AND id=$HOSTED_CLAIM_OUTBOX_ID;" | \
+ grep -qx 'true:true:true:true' || gate_fail hosted-claim-defense "real gateway claim mutated hosted job lease" "database evidence withheld"
+run_sql -c "DELETE FROM outbox WHERE workspace_id='$WS' AND id=$HOSTED_CLAIM_OUTBOX_ID;"
+HOSTED_CLASSIFICATION_BEFORE="$(run_sql -Atc "SELECT COALESCE(last_used_at::text,'') || ':' || \
+  (SELECT count(*) FROM audit_log WHERE workspace_id='$WS' AND via_token_id='$HOSTED_ACTIVE_ID')::text \
+  FROM token WHERE workspace_id='$WS' AND id='$HOSTED_ACTIVE_ID';")"
+api post "/v1/auth/realtime-token" "" "$HOSTED_ACTIVE"
+[ "$RESPONSE_STATUS" = "403" ] || \
+  gate_fail hosted-agent-generic-rest-denied "expected HTTP 403, got $RESPONSE_STATUS" "$(redacted_body)"
+HOSTED_FORBIDDEN_MESSAGE_ID="$(lower_uuid)"
+api post "/v1/workspaces/$WS/channels/$GENERAL_CHANNEL_ID/messages" \
+  "$(jq -cn --arg id "$(lower_uuid)" '{clientMsgId:$id,body:"must not persist"}')" "$HOSTED_ACTIVE"
+[ "$RESPONSE_STATUS" = "403" ] || gate_fail hosted-agent-message-post-denied "hosted bearer reached message POST" "$(redacted_body)"
+api patch "/v1/workspaces/$WS/messages/$HOSTED_FORBIDDEN_MESSAGE_ID" \
+  '{"body":"must not persist"}' "$HOSTED_ACTIVE"
+[ "$RESPONSE_STATUS" = "403" ] || gate_fail hosted-agent-message-patch-denied "hosted bearer reached message PATCH" "$(redacted_body)"
+HOSTED_CLASSIFICATION_AFTER="$(run_sql -Atc "SELECT COALESCE(last_used_at::text,'') || ':' || \
+  (SELECT count(*) FROM audit_log WHERE workspace_id='$WS' AND via_token_id='$HOSTED_ACTIVE_ID')::text \
+  FROM token WHERE workspace_id='$WS' AND id='$HOSTED_ACTIVE_ID';")"
+[ "$HOSTED_CLASSIFICATION_AFTER" = "$HOSTED_CLASSIFICATION_BEFORE" ] || \
+  gate_fail hosted-classification-select-only "closed generic routes touched hosted last_used/audit" "database evidence withheld"
+api post "/v1/workspaces/$WS/hosted-agent-connections/$HOSTED_CONNECTION_ID/confirm" \
+  "$(jq -cn --arg agent "$HOSTED_AGENT_ID" '{agentMemberId:$agent,audience:"/v1/mcp/agent-port",approvedChannelIds:[],approvedScopes:["agent:port:connect"],authMode:"static_bearer"}')" "$ACCESS"
+[ "$RESPONSE_STATUS" = "409" ] || \
+  gate_fail hosted-agent-confirm-replay-denied "expected HTTP 409, got $RESPONSE_STATUS" "$(redacted_body)"
+api post "/v1/workspaces/$WS/hosted-agent-connections/$HOSTED_CONNECTION_ID/pairing-challenge/regenerate" "" "$ACCESS"
+[ "$RESPONSE_STATUS" = "409" ] || gate_fail hosted-agent-regenerate-active "active regenerate was not 409" "$(redacted_body)"
+ABSENT_HOSTED_CONNECTION_ID="$(uuidgen | tr '[:upper:]' '[:lower:]')"
+api post "/v1/workspaces/$WS/hosted-agent-connections/$ABSENT_HOSTED_CONNECTION_ID/confirm" \
+  "$(jq -cn --arg agent "$HOSTED_AGENT_ID" '{agentMemberId:$agent,audience:"/v1/mcp/agent-port",approvedChannelIds:[],approvedScopes:["agent:port:connect"],authMode:"static_bearer"}')" "$ACCESS"
+[ "$RESPONSE_STATUS" = "404" ] || gate_fail hosted-agent-confirm-absent "absent confirm was not 404" "$(redacted_body)"
+
+# Actual HTTP concurrency: two confirmations race on one detected row. Each
+# worker owns private 0600 config/body/response/status files, so neither bearer
+# nor one-time response can enter argv or another worker's scratch.
+api post "/v1/workspaces/$WS/hosted-agent-connections" \
+  "$(jq -cn --arg h "hosted-race-$RUN_EPOCH" '{displayName:"Hosted Race",handle:$h,authMode:"static_bearer"}')" "$ACCESS"
+[ "$RESPONSE_STATUS" = "201" ] || gate_fail hosted-race-create "expected 201" "$(redacted_body)"
+RACE_CONNECTION_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.connection.id')"
+RACE_AGENT_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.connection.agentMemberId')"
+RACE_PAIRING="$(printf '%s' "$RESPONSE_BODY" | jq -er '.pairingCredential')"
+append_secret_with_derivatives "$RACE_PAIRING"
+expect_agent_port hosted-race-detect 200 "$MODERN_DISCOVER_BODY" \
+  "$RACE_PAIRING" "2026-07-28" "server/discover"
+
+concurrent_confirm() {
+  local worker="$1" auth="$CONCURRENT_DIR/$1.auth" body="$CONCURRENT_DIR/$1.body"
+  local response="$CONCURRENT_DIR/$1.response" headers="$CONCURRENT_DIR/$1.headers"
+  local status="$CONCURRENT_DIR/$1.status"
+  (umask 077
+   printf 'header = "Authorization: Bearer %s"\n' "$ACCESS" >"$auth"
+   jq -cn --arg agent "$RACE_AGENT_ID" '{agentMemberId:$agent,audience:"/v1/mcp/agent-port",approvedChannelIds:[],approvedScopes:["agent:port:connect"],authMode:"static_bearer"}' >"$body"
+   curl -sS -o "$response" -D "$headers" -w '%{http_code}' -X POST \
+     -H 'Content-Type: application/json' --config "$auth" --data-binary "@$body" \
+     "$BASE_URL/v1/workspaces/$WS/hosted-agent-connections/$RACE_CONNECTION_ID/confirm" >"$status")
+}
+concurrent_confirm one & confirm_one_pid=$!
+concurrent_confirm two & confirm_two_pid=$!
+wait "$confirm_one_pid"; wait "$confirm_two_pid"
+confirm_statuses="$(sort "$CONCURRENT_DIR/one.status" "$CONCURRENT_DIR/two.status" | tr '\n' ' ')"
+[ "$confirm_statuses" = "201 409 " ] || \
+  gate_fail hosted-race-confirm "expected one 201 and one 409, got $confirm_statuses" "responses withheld"
+RACE_ACTIVE="$(for response in "$CONCURRENT_DIR"/*.response; do jq -er '.credential // empty' "$response" 2>/dev/null || true; done)"
+[ "$(printf '%s\n' "$RACE_ACTIVE" | sed '/^$/d' | wc -l | tr -d ' ')" = "1" ] || \
+  gate_fail hosted-race-confirm-secret "expected exactly one active bearer" "responses withheld"
+require_private_envelope "$RACE_ACTIVE" momo_agent_v1
+append_secret_with_derivatives "$RACE_ACTIVE"
+run_sql -Atc "SELECT (count(DISTINCT t.id) = 1)::text || ':' || \
+  (count(*) FILTER (WHERE action = 'hosted_agent.connection.confirmed') = 1)::text \
+  FROM token t LEFT JOIN audit_log a ON a.workspace_id=t.workspace_id \
+    AND a.target_id=t.hosted_connection_id \
+  WHERE t.workspace_id='$WS' AND t.hosted_connection_id='$RACE_CONNECTION_ID' \
+    AND t.credential_class='hosted_active';" | grep -qx 'true:true' || \
+  gate_fail hosted-race-confirm-db "confirm did not create exactly one bearer/audit" "database evidence withheld"
+
+# Two proof calls race on the same active bearer. Both may receive the normal
+# foundation response after serialization, but only one transition/unpause and
+# one proved timestamp/audit outcome may exist.
+parallel_agent_port() {
+  local worker="$1" auth="$CONCURRENT_DIR/proof-$1.auth" body="$CONCURRENT_DIR/proof-$1.body"
+  local response="$CONCURRENT_DIR/proof-$1.response" status="$CONCURRENT_DIR/proof-$1.status"
+  (umask 077
+   printf 'header = "Authorization: Bearer %s"\n' "$RACE_ACTIVE" >"$auth"
+   printf '%s' "$MODERN_DISCOVER_BODY" >"$body"
+   curl -sS -o "$response" -w '%{http_code}' -X POST \
+     -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+     -H 'MCP-Protocol-Version: 2026-07-28' -H 'Mcp-Method: server/discover' \
+     --config "$auth" --data-binary "@$body" "$BASE_URL/v1/mcp/agent-port" >"$status")
+}
+parallel_agent_port one & proof_one_pid=$!
+parallel_agent_port two & proof_two_pid=$!
+wait "$proof_one_pid"; wait "$proof_two_pid"
+proof_statuses="$(sort "$CONCURRENT_DIR/proof-one.status" "$CONCURRENT_DIR/proof-two.status" | tr '\n' ' ')"
+[ "$proof_statuses" = "200 200 " ] || \
+  gate_fail hosted-race-proof "concurrent proofs returned unexpected statuses: $proof_statuses" "responses withheld"
+run_sql -Atc "SELECT (hc.status='active')::text || ':' || (NOT ap.paused)::text || ':' || \
+  (ap.version = 2)::text || ':' || (hc.proved_at IS NOT NULL)::text || ':' || \
+  ((SELECT count(*) FROM audit_log a WHERE a.workspace_id=hc.workspace_id \
+     AND a.target_id=hc.id AND a.action='hosted_agent.connection.activated') = 1)::text \
+  FROM hosted_agent_connection hc JOIN agent_profile ap \
+    ON ap.workspace_id=hc.workspace_id AND ap.agent_member_id=hc.agent_member_id \
+  WHERE hc.workspace_id='$WS' AND hc.id='$RACE_CONNECTION_ID';" | grep -qx 'true:true:true:true:true' || \
+  gate_fail hosted-race-proof-db "proof was not exactly-one active/unpause transition" "database evidence withheld"
+
+# Inject the activation-audit failure at the database boundary. Because proof,
+# unpause, status, last_used and audit share one tenant transaction, the HTTP
+# 500 must leave every transition column untouched and zero partial audit rows.
+api post "/v1/workspaces/$WS/hosted-agent-connections" \
+  "$(jq -cn --arg h "hosted-rollback-$RUN_EPOCH" '{displayName:"Hosted Rollback",handle:$h,authMode:"static_bearer"}')" "$ACCESS"
+[ "$RESPONSE_STATUS" = "201" ] || gate_fail hosted-rollback-create "expected 201" "$(redacted_body)"
+ROLLBACK_CONNECTION_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.connection.id')"
+ROLLBACK_AGENT_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.connection.agentMemberId')"
+ROLLBACK_PAIRING="$(printf '%s' "$RESPONSE_BODY" | jq -er '.pairingCredential')"
+append_secret_with_derivatives "$ROLLBACK_PAIRING"
+expect_agent_port hosted-rollback-detect 200 "$MODERN_DISCOVER_BODY" \
+  "$ROLLBACK_PAIRING" "2026-07-28" "server/discover"
+api post "/v1/workspaces/$WS/hosted-agent-connections/$ROLLBACK_CONNECTION_ID/confirm" \
+  "$(jq -cn --arg agent "$ROLLBACK_AGENT_ID" '{agentMemberId:$agent,audience:"/v1/mcp/agent-port",approvedChannelIds:[],approvedScopes:["agent:port:connect"],authMode:"static_bearer"}')" "$ACCESS"
+[ "$RESPONSE_STATUS" = "201" ] || gate_fail hosted-rollback-confirm "expected 201" "$(redacted_body)"
+ROLLBACK_ACTIVE="$(printf '%s' "$RESPONSE_BODY" | jq -er '.credential')"
+append_secret_with_derivatives "$ROLLBACK_ACTIVE"
+run_sql <<'SQL'
+CREATE OR REPLACE FUNCTION test_fail_hosted_activation_audit() RETURNS trigger
+LANGUAGE plpgsql AS $$ BEGIN
+  IF NEW.action = 'hosted_agent.connection.activated' THEN
+    RAISE EXCEPTION 'injected hosted activation audit failure';
+  END IF;
+  RETURN NEW;
+END $$;
+DROP TRIGGER IF EXISTS test_fail_hosted_activation_audit ON audit_log;
+CREATE TRIGGER test_fail_hosted_activation_audit BEFORE INSERT ON audit_log
+FOR EACH ROW EXECUTE FUNCTION test_fail_hosted_activation_audit();
+SQL
+expect_agent_port hosted-rollback-proof 500 "$MODERN_DISCOVER_BODY" \
+  "$ROLLBACK_ACTIVE" "2026-07-28" "server/discover"
+run_sql -Atc "SELECT (hc.status='detected')::text || ':' || ap.paused::text || ':' || \
+  (hc.proved_at IS NULL)::text || ':' || (t.last_used_at IS NULL)::text || ':' || \
+  ((SELECT count(*) FROM audit_log a WHERE a.workspace_id=hc.workspace_id \
+     AND a.target_id=hc.id AND a.action='hosted_agent.connection.activated') = 0)::text \
+  FROM hosted_agent_connection hc JOIN agent_profile ap \
+    ON ap.workspace_id=hc.workspace_id AND ap.agent_member_id=hc.agent_member_id \
+  JOIN token t ON t.workspace_id=hc.workspace_id AND t.id=hc.active_token_id \
+  WHERE hc.workspace_id='$WS' AND hc.id='$ROLLBACK_CONNECTION_ID';" | \
+  grep -qx 'true:true:true:true:true' || \
+  gate_fail hosted-rollback-zero-partial "failed proof left partial state" "database evidence withheld"
+run_sql -c "DROP TRIGGER test_fail_hosted_activation_audit ON audit_log; DROP FUNCTION test_fail_hosted_activation_audit();"
+
+# A competing authority mutation that obtains its row lock first must make the
+# blocked proof fail closed. No touch/unpause/activation/audit is allowed after
+# either token revocation or workspace-membership removal wins the race.
+for authority_loss in revoke membership; do
+  api post "/v1/workspaces/$WS/hosted-agent-connections" \
+    "$(jq -cn --arg h "ha-$authority_loss-${RUN_ID:0:8}" '{displayName:"Hosted Authority Race",handle:$h,authMode:"static_bearer"}')" "$ACCESS"
+  [ "$RESPONSE_STATUS" = "201" ] || gate_fail hosted-authority-create "expected 201" "$(redacted_body)"
+  AUTHORITY_CONNECTION_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.connection.id')"
+  AUTHORITY_AGENT_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.connection.agentMemberId')"
+  AUTHORITY_PAIRING="$(printf '%s' "$RESPONSE_BODY" | jq -er '.pairingCredential')"
+  append_secret_with_derivatives "$AUTHORITY_PAIRING"
+  expect_agent_port "hosted-authority-$authority_loss-detect" 200 "$MODERN_DISCOVER_BODY" \
+    "$AUTHORITY_PAIRING" "2026-07-28" "server/discover"
+  api post "/v1/workspaces/$WS/hosted-agent-connections/$AUTHORITY_CONNECTION_ID/confirm" \
+    "$(jq -cn --arg agent "$AUTHORITY_AGENT_ID" '{agentMemberId:$agent,audience:"/v1/mcp/agent-port",approvedChannelIds:[],approvedScopes:["agent:port:connect"],authMode:"static_bearer"}')" "$ACCESS"
+  [ "$RESPONSE_STATUS" = "201" ] || gate_fail hosted-authority-confirm "expected 201" "$(redacted_body)"
+  AUTHORITY_ACTIVE="$(printf '%s' "$RESPONSE_BODY" | jq -er '.credential')"
+  AUTHORITY_TOKEN_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.credentialId')"
+  append_secret_with_derivatives "$AUTHORITY_ACTIVE"
+  if [ "$authority_loss" = revoke ]; then AUTHORITY_LOCK_KEY=1; else AUTHORITY_LOCK_KEY=2; fi
+  AUTHORITY_FIFO="$CONCURRENT_DIR/authority-$authority_loss.fifo"
+  mkfifo "$AUTHORITY_FIFO"
+  ( { printf '%s\n' "SELECT pg_advisory_lock(1364, $AUTHORITY_LOCK_KEY);";
+      cat "$AUTHORITY_FIFO"; } | run_sql >/dev/null ) & authority_holder_pid=$!
+  for _ in $(seq 1 500); do
+    [ "$(run_sql -Atc "SELECT count(*) FROM pg_locks WHERE locktype='advisory' AND classid=1364 AND objid=$AUTHORITY_LOCK_KEY AND granted;")" = 1 ] && break
+    sleep 0.02
+  done
+  [ "$(run_sql -Atc "SELECT count(*) FROM pg_locks WHERE locktype='advisory' AND classid=1364 AND objid=$AUTHORITY_LOCK_KEY AND granted;")" = 1 ] || gate_fail "hosted-authority-$authority_loss-holder" "advisory holder did not signal readiness" "database evidence withheld"
+  if [ "$authority_loss" = "revoke" ]; then
+    authority_mutation="UPDATE token SET revoked_at=now() WHERE workspace_id='$WS' AND id='$AUTHORITY_TOKEN_ID';"
+  else
+    authority_mutation="DELETE FROM workspace_membership WHERE workspace_id='$WS' AND member_id='$AUTHORITY_AGENT_ID';"
+  fi
+  (run_sql >/dev/null <<SQL
+BEGIN;
+SET LOCAL app.workspace_id='$WS';
+$authority_mutation
+SELECT pg_advisory_xact_lock(1364, $AUTHORITY_LOCK_KEY);
+COMMIT;
+SQL
+  ) & authority_pid=$!
+  for _ in $(seq 1 500); do
+    [ "$(run_sql -Atc "SELECT count(*) FROM pg_locks WHERE locktype='advisory' AND classid=1364 AND objid=$AUTHORITY_LOCK_KEY AND NOT granted;")" = 1 ] && break
+    sleep 0.02
+  done
+  [ "$(run_sql -Atc "SELECT count(*) FROM pg_locks WHERE locktype='advisory' AND classid=1364 AND objid=$AUTHORITY_LOCK_KEY AND NOT granted;")" = 1 ] || gate_fail "hosted-authority-$authority_loss-mutation" "row-lock owner did not signal readiness" "database evidence withheld"
+  (expect_agent_port "hosted-authority-$authority_loss-proof-denied" 401 "$MODERN_DISCOVER_BODY" \
+    "$AUTHORITY_ACTIVE" "2026-07-28" "server/discover") & authority_proof_pid=$!
+  authority_proof_blocked=0
+  for _ in $(seq 1 500); do
+    kill -0 "$authority_proof_pid" 2>/dev/null || break
+    if [ "$(run_sql -Atc "SELECT count(*) FROM pg_stat_activity WHERE usename='momo_app' AND state='active' AND wait_event_type='Lock';")" -ge 1 ]; then
+      authority_proof_blocked=1
+      break
+    fi
+    sleep 0.02
+  done
+  if [ "$authority_proof_blocked" -ne 1 ] || ! kill -0 "$authority_proof_pid" 2>/dev/null; then
+    gate_fail "hosted-authority-$authority_loss-proof-barrier" \
+      "proof process was not observably blocked behind the authority row lock" \
+      "database evidence withheld"
+  fi
+  printf '%s\n' "SELECT pg_advisory_unlock(1364, $AUTHORITY_LOCK_KEY);" '\q' >"$AUTHORITY_FIFO"
+  wait "$authority_pid"
+  wait "$authority_holder_pid"
+  wait "$authority_proof_pid"
+  run_sql -Atc "SELECT (hc.status='expired')::text || ':' || ap.paused::text || ':' || \
+    (hc.proved_at IS NULL)::text || ':' || (hc.active_token_id IS NULL)::text || ':' || \
+    (NOT EXISTS(SELECT 1 FROM token t WHERE t.workspace_id=hc.workspace_id AND t.hosted_connection_id=hc.id AND t.revoked_at IS NULL))::text || ':' || \
+    ((SELECT count(*) FROM audit_log a WHERE a.workspace_id=hc.workspace_id AND a.target_id=hc.id \
+      AND a.action='hosted_agent.connection.activated')=0)::text \
+    FROM hosted_agent_connection hc JOIN agent_profile ap ON ap.workspace_id=hc.workspace_id AND ap.agent_member_id=hc.agent_member_id \
+    WHERE hc.workspace_id='$WS' AND hc.id='$AUTHORITY_CONNECTION_ID';" | grep -qx 'true:true:true:true:true:true' || \
+    gate_fail "hosted-authority-$authority_loss-zero-partial" "authority loss left partial proof state" "database evidence withheld"
+done
+
+# Regenerate and detection race on the old challenge. Regenerate is the sole
+# surviving authority regardless of lock order: final state is pending under a
+# new hash, and the old challenge can no longer authenticate.
+api post "/v1/workspaces/$WS/hosted-agent-connections" \
+  "$(jq -cn --arg h "hosted-redetect-$RUN_EPOCH" '{displayName:"Hosted Redetect",handle:$h,authMode:"static_bearer"}')" "$ACCESS"
+[ "$RESPONSE_STATUS" = "201" ] || gate_fail hosted-redetect-create "expected 201" "$(redacted_body)"
+REDETECT_CONNECTION_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.connection.id')"
+REDETECT_PAIRING="$(printf '%s' "$RESPONSE_BODY" | jq -er '.pairingCredential')"
+require_private_envelope "$REDETECT_PAIRING" momo_pair_v1
+append_secret_with_derivatives "$REDETECT_PAIRING"
+(umask 077
+ printf 'header = "Authorization: Bearer %s"\n' "$REDETECT_PAIRING" >"$CONCURRENT_DIR/redetect.auth"
+ printf '%s' "$MODERN_DISCOVER_BODY" >"$CONCURRENT_DIR/redetect.body"
+ curl -sS -o "$CONCURRENT_DIR/redetect.response" -w '%{http_code}' -X POST \
+   -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+   -H 'MCP-Protocol-Version: 2026-07-28' -H 'Mcp-Method: server/discover' \
+   --config "$CONCURRENT_DIR/redetect.auth" --data-binary "@$CONCURRENT_DIR/redetect.body" \
+   "$BASE_URL/v1/mcp/agent-port" >"$CONCURRENT_DIR/redetect.status") & redetect_pid=$!
+(umask 077
+ printf 'header = "Authorization: Bearer %s"\n' "$ACCESS" >"$CONCURRENT_DIR/regenerate.auth"
+ curl -sS -o "$CONCURRENT_DIR/regenerate.response" -w '%{http_code}' -X POST \
+   -H 'Content-Type: application/json' --config "$CONCURRENT_DIR/regenerate.auth" \
+   "$BASE_URL/v1/workspaces/$WS/hosted-agent-connections/$REDETECT_CONNECTION_ID/pairing-challenge/regenerate" \
+   >"$CONCURRENT_DIR/regenerate.status") & regenerate_pid=$!
+wait "$redetect_pid"; wait "$regenerate_pid"
+[ "$(cat "$CONCURRENT_DIR/regenerate.status")" = "200" ] || \
+  gate_fail hosted-redetect-regenerate "regenerate lost its serialized outcome" "response withheld"
+case "$(cat "$CONCURRENT_DIR/redetect.status")" in 200|401) ;; *)
+  gate_fail hosted-redetect-detect "detect returned an unexpected race outcome" "response withheld";; esac
+api get "/v1/workspaces/$WS/hosted-agent-connections/$REDETECT_CONNECTION_ID" "" "$ACCESS"
+guard_jq '.connection.status == "pairing_pending"' "regenerate wins detect race"
+expect_agent_port hosted-redetect-old-pairing-denied 401 "$MODERN_DISCOVER_BODY" \
+  "$REDETECT_PAIRING" "2026-07-28" "server/discover"
+
+# Confirm and regenerate race from detected. Regenerate serializes after or
+# before confirm, revokes any just-created bearer, and returns the connection to
+# pending. Any captured losing active bearer must fail proof.
+api post "/v1/workspaces/$WS/hosted-agent-connections" \
+  "$(jq -cn --arg h "hosted-reconfirm-$RUN_EPOCH" '{displayName:"Hosted Reconfirm",handle:$h,authMode:"static_bearer"}')" "$ACCESS"
+[ "$RESPONSE_STATUS" = "201" ] || gate_fail hosted-reconfirm-create "expected 201" "$(redacted_body)"
+RECONFIRM_CONNECTION_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.connection.id')"
+RECONFIRM_AGENT_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.connection.agentMemberId')"
+RECONFIRM_PAIRING="$(printf '%s' "$RESPONSE_BODY" | jq -er '.pairingCredential')"
+append_secret_with_derivatives "$RECONFIRM_PAIRING"
+expect_agent_port hosted-reconfirm-detect 200 "$MODERN_DISCOVER_BODY" \
+  "$RECONFIRM_PAIRING" "2026-07-28" "server/discover"
+(umask 077
+ printf 'header = "Authorization: Bearer %s"\n' "$ACCESS" >"$CONCURRENT_DIR/reconfirm.auth"
+ jq -cn --arg agent "$RECONFIRM_AGENT_ID" '{agentMemberId:$agent,audience:"/v1/mcp/agent-port",approvedChannelIds:[],approvedScopes:["agent:port:connect"],authMode:"static_bearer"}' >"$CONCURRENT_DIR/reconfirm.body"
+ curl -sS -o "$CONCURRENT_DIR/reconfirm.response" -w '%{http_code}' -X POST \
+   -H 'Content-Type: application/json' --config "$CONCURRENT_DIR/reconfirm.auth" \
+   --data-binary "@$CONCURRENT_DIR/reconfirm.body" \
+   "$BASE_URL/v1/workspaces/$WS/hosted-agent-connections/$RECONFIRM_CONNECTION_ID/confirm" \
+   >"$CONCURRENT_DIR/reconfirm.status") & reconfirm_pid=$!
+(umask 077
+ printf 'header = "Authorization: Bearer %s"\n' "$ACCESS" >"$CONCURRENT_DIR/rereg.auth"
+ curl -sS -o "$CONCURRENT_DIR/rereg.response" -w '%{http_code}' -X POST \
+   -H 'Content-Type: application/json' --config "$CONCURRENT_DIR/rereg.auth" \
+   "$BASE_URL/v1/workspaces/$WS/hosted-agent-connections/$RECONFIRM_CONNECTION_ID/pairing-challenge/regenerate" \
+   >"$CONCURRENT_DIR/rereg.status") & rereg_pid=$!
+wait "$reconfirm_pid"; wait "$rereg_pid"
+[ "$(cat "$CONCURRENT_DIR/rereg.status")" = "200" ] || \
+  gate_fail hosted-reconfirm-regenerate "regenerate lost confirm race" "response withheld"
+case "$(cat "$CONCURRENT_DIR/reconfirm.status")" in 201|409) ;; *)
+  gate_fail hosted-reconfirm-confirm "confirm returned an unexpected race outcome" "response withheld";; esac
+RECONFIRM_ACTIVE="$(jq -er '.credential // empty' "$CONCURRENT_DIR/reconfirm.response" 2>/dev/null || true)"
+if [ -n "$RECONFIRM_ACTIVE" ]; then
+  require_private_envelope "$RECONFIRM_ACTIVE" momo_agent_v1
+  append_secret_with_derivatives "$RECONFIRM_ACTIVE"
+  expect_agent_port hosted-reconfirm-proof-denied 401 "$MODERN_DISCOVER_BODY" \
+    "$RECONFIRM_ACTIVE" "2026-07-28" "server/discover"
+fi
+reconfirm_db_state="$(run_sql -Atc "SELECT (hc.status='pairing_pending')::text || ':' || \
+  (count(t.id) FILTER (WHERE t.revoked_at IS NULL) = 0)::text \
+  FROM hosted_agent_connection hc LEFT JOIN token t \
+    ON t.workspace_id=hc.workspace_id AND t.hosted_connection_id=hc.id \
+  WHERE hc.workspace_id='$WS' AND hc.id='$RECONFIRM_CONNECTION_ID' GROUP BY hc.status;")"
+[ "$reconfirm_db_state" = "true:true" ] || gate_fail hosted-reconfirm-db "race left live authority ($reconfirm_db_state)" "database evidence withheld"
+
+# Proof and regeneration contend from the confirmed/detected state using the
+# shared connection->token lock order. Exactly two serialized outcomes are
+# valid: proof wins (200/409, active) or regeneration wins (401/200, pending).
+api post "/v1/workspaces/$WS/hosted-agent-connections" \
+  "$(jq -cn --arg h "hosted-proof-reg-${RUN_ID:0:8}" '{displayName:"Hosted Proof Regenerate",handle:$h,authMode:"static_bearer"}')" "$ACCESS"
+[ "$RESPONSE_STATUS" = "201" ] || gate_fail hosted-proof-reg-create "expected 201" "$(redacted_body)"
+PROOF_REG_CONNECTION_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.connection.id')"
+PROOF_REG_AGENT_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.connection.agentMemberId')"
+PROOF_REG_PAIRING="$(printf '%s' "$RESPONSE_BODY" | jq -er '.pairingCredential')"
+append_secret_with_derivatives "$PROOF_REG_PAIRING"
+expect_agent_port hosted-proof-reg-detect 200 "$MODERN_DISCOVER_BODY" \
+  "$PROOF_REG_PAIRING" "2026-07-28" "server/discover"
+api post "/v1/workspaces/$WS/hosted-agent-connections/$PROOF_REG_CONNECTION_ID/confirm" \
+  "$(jq -cn --arg agent "$PROOF_REG_AGENT_ID" '{agentMemberId:$agent,audience:"/v1/mcp/agent-port",approvedChannelIds:[],approvedScopes:["agent:port:connect"],authMode:"static_bearer"}')" "$ACCESS"
+[ "$RESPONSE_STATUS" = "201" ] || gate_fail hosted-proof-reg-confirm "expected 201" "$(redacted_body)"
+PROOF_REG_ACTIVE="$(printf '%s' "$RESPONSE_BODY" | jq -er '.credential')"
+require_private_envelope "$PROOF_REG_ACTIVE" momo_agent_v1
+append_secret_with_derivatives "$PROOF_REG_ACTIVE"
+(umask 077
+ printf 'header = "Authorization: Bearer %s"\n' "$PROOF_REG_ACTIVE" >"$CONCURRENT_DIR/proof-reg-proof.auth"
+ printf '%s' "$MODERN_DISCOVER_BODY" >"$CONCURRENT_DIR/proof-reg-proof.body"
+ curl -sS -o "$CONCURRENT_DIR/proof-reg-proof.response" -w '%{http_code}' -X POST \
+   -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+   -H 'MCP-Protocol-Version: 2026-07-28' -H 'Mcp-Method: server/discover' \
+   --config "$CONCURRENT_DIR/proof-reg-proof.auth" --data-binary "@$CONCURRENT_DIR/proof-reg-proof.body" \
+   "$BASE_URL/v1/mcp/agent-port" >"$CONCURRENT_DIR/proof-reg-proof.status") & proof_reg_proof_pid=$!
+(umask 077
+ printf 'header = "Authorization: Bearer %s"\n' "$ACCESS" >"$CONCURRENT_DIR/proof-reg-admin.auth"
+ curl -sS -o "$CONCURRENT_DIR/proof-reg-admin.response" -w '%{http_code}' -X POST \
+   --config "$CONCURRENT_DIR/proof-reg-admin.auth" \
+   "$BASE_URL/v1/workspaces/$WS/hosted-agent-connections/$PROOF_REG_CONNECTION_ID/pairing-challenge/regenerate" \
+   >"$CONCURRENT_DIR/proof-reg-admin.status") & proof_reg_admin_pid=$!
+wait "$proof_reg_proof_pid"; wait "$proof_reg_admin_pid"
+proof_reg_pair="$(cat "$CONCURRENT_DIR/proof-reg-proof.status"):$(cat "$CONCURRENT_DIR/proof-reg-admin.status")"
+case "$proof_reg_pair" in 200:409|401:200) ;; *)
+  gate_fail hosted-proof-reg-race "unexpected proof/regenerate outcome $proof_reg_pair" "responses withheld";; esac
+case "$proof_reg_pair" in
+  200:409) expected_proof_reg='active:true:true' ;;
+  401:200) expected_proof_reg='pairing_pending:false:false' ;;
+esac
+run_sql -Atc "SELECT hc.status::text || ':' || (hc.proved_at IS NOT NULL)::text || ':' || \
+  (EXISTS(SELECT 1 FROM token t WHERE t.workspace_id=hc.workspace_id AND t.hosted_connection_id=hc.id AND t.revoked_at IS NULL))::text \
+  FROM hosted_agent_connection hc WHERE hc.workspace_id='$WS' AND hc.id='$PROOF_REG_CONNECTION_ID';" | \
+  grep -qx "$expected_proof_reg" || gate_fail hosted-proof-reg-db "race state did not match serialized HTTP winner" "database evidence withheld"
+
+# The identity uniqueness contract is live-lifecycle scoped: a disconnected
+# ledger may reconnect, while a second simultaneous live ledger is rejected.
+api post "/v1/workspaces/$WS/hosted-agent-connections" \
+  "$(jq -cn --arg h "hosted-reconnect-${RUN_ID:0:8}" '{displayName:"Hosted Reconnect",handle:$h,authMode:"static_bearer"}')" "$ACCESS"
+[ "$RESPONSE_STATUS" = "201" ] || gate_fail hosted-reconnect-create "expected 201" "$(redacted_body)"
+RECONNECT_OLD_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.connection.id')"
+RECONNECT_AGENT_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.connection.agentMemberId')"
+RECONNECT_NEW_ID="$(lower_uuid)"
+RECONNECT_DUP_ID="$(lower_uuid)"
+run_sql -c "UPDATE hosted_agent_connection SET status='disconnected',updated_at=now() WHERE workspace_id='$WS' AND id='$RECONNECT_OLD_ID'; \
+ INSERT INTO hosted_agent_connection(id,workspace_id,agent_member_id,status,pairing_challenge_hash,pairing_expires_at,created_by) \
+ VALUES ('$RECONNECT_NEW_ID','$WS','$RECONNECT_AGENT_ID','pairing_pending',digest('reconnect-live','sha256'),now()+interval '1 hour','$GATE_MEMBER_ID');"
+set +e
+run_sql -c "INSERT INTO hosted_agent_connection(id,workspace_id,agent_member_id,status,pairing_challenge_hash,pairing_expires_at,created_by) \
+ VALUES ('$RECONNECT_DUP_ID','$WS','$RECONNECT_AGENT_ID','pairing_pending',digest('duplicate-live','sha256'),now()+interval '1 hour','$GATE_MEMBER_ID');" >/dev/null 2>&1
+duplicate_live_rc=$?
+set -e
+[ "$duplicate_live_rc" -ne 0 ] || gate_fail hosted-live-unique "second live connection for one agent succeeded" "database evidence withheld"
+run_sql -Atc "SELECT \
+ ((SELECT count(*) FROM hosted_agent_connection WHERE workspace_id='$WS' AND agent_member_id='$RECONNECT_AGENT_ID' AND status='disconnected')=1)::text || ':' || \
+ ((SELECT count(*) FROM hosted_agent_connection WHERE workspace_id='$WS' AND agent_member_id='$RECONNECT_AGENT_ID' AND status NOT IN ('expired','disconnected'))=1)::text || ':' || \
+ ((SELECT count(*) FROM hosted_agent_connection WHERE id='$RECONNECT_DUP_ID')=0)::text;" | \
+ grep -qx 'true:true:true' || gate_fail hosted-live-unique "partial live uniqueness state mismatch" "database evidence withheld"
+
+# A caller whose JWT is pinned to this workspace receives the same bounded
+# denial for a real foreign workspace and a nonexistent one; no connection
+# lookup becomes a tenant enumeration oracle.
+FOREIGN_WS="$(uuidgen | tr '[:upper:]' '[:lower:]')"
+run_sql -Atc "INSERT INTO workspace(id,slug,name) VALUES ('$FOREIGN_WS','foreign-$RUN_EPOCH','foreign');"
+api get "/v1/workspaces/$FOREIGN_WS/hosted-agent-connections/$RACE_CONNECTION_ID" "" "$ACCESS"
+foreign_status="$RESPONSE_STATUS"; foreign_body="$RESPONSE_BODY"
+api get "/v1/workspaces/00000000-0000-0000-0000-000000000001/hosted-agent-connections/$RACE_CONNECTION_ID" "" "$ACCESS"
+[ "$foreign_status:$foreign_body" = "$RESPONSE_STATUS:$RESPONSE_BODY" ] || \
+  gate_fail hosted-cross-workspace "foreign and absent workspace responses differed" "response withheld"
+
+api post "/v1/workspaces/$WS/agents/$HOSTED_AGENT_ID/credentials" \
+  '{"scopes":["agent:port:connect"]}' "$ACCESS"
+if [ "$RESPONSE_STATUS" != "409" ]; then
+  gate_fail hosted-agent-generic-credential-denied \
+    "expected HTTP 409, got $RESPONSE_STATUS" "$(redacted_body)"
+fi
+api post "/v1/workspaces/$WS/agents/$HOSTED_AGENT_ID/credentials" \
+  '{"scopes":["work:control"]}' "$ACCESS"
+[ "$RESPONSE_STATUS" = "409" ] || gate_fail hosted-agent-excluded-scope-stable "hosted excluded scope did not return stable 409" "$(redacted_body)"
+api post "/v1/workspaces/$WS/agents/$HOSTED_AGENT_ID/credentials" \
+  '{"scopes":["future:generic:scope"]}' "$ACCESS"
+[ "$RESPONSE_STATUS" = "409" ] || gate_fail hosted-agent-future-scope-stable "hosted future scope did not return stable 409" "$(redacted_body)"
+api post "/v1/workspaces/$WS/agents/$HOSTED_AGENT_ID/credentials/$HOSTED_ACTIVE_ID/revoke" '{}' "$ACCESS"
+[ "$RESPONSE_STATUS" = "409" ] || gate_fail hosted-agent-generic-revoke-denied "hosted generic revoke was not 409" "$(redacted_body)"
+api post "/v1/workspaces/$WS/agents/$HOSTED_AGENT_ID/credentials" \
+  "$(jq -cn --arg label "$(printf 'x%.0s' {1..300})" '{label:$label}')" "$ACCESS"
+[ "$RESPONSE_STATUS" = "409" ] || gate_fail hosted-agent-malformed-label-stable "hosted malformed label was not 409" "$(redacted_body)"
+api post "/v1/workspaces/$WS/agents/$HOSTED_AGENT_ID/credentials" '{"expiresAtMs":1}' "$ACCESS"
+[ "$RESPONSE_STATUS" = "409" ] || gate_fail hosted-agent-past-expiry-stable "hosted past expiry was not 409" "$(redacted_body)"
+api post "/v1/workspaces/$WS/agents/$HOSTED_AGENT_ID/credentials" '{"rotationGraceSeconds":999999999}' "$ACCESS"
+[ "$RESPONSE_STATUS" = "409" ] || gate_fail hosted-agent-bad-grace-stable "hosted bad grace was not 409" "$(redacted_body)"
+api post "/v1/workspaces/$WS/agents/$HOSTED_AGENT_ID/credentials/$HOSTED_ACTIVE_ID/revoke" \
+  "$(jq -cn --arg reason "$(printf 'r%.0s' {1..2000})" '{reason:$reason}')" "$ACCESS"
+[ "$RESPONSE_STATUS" = "409" ] || gate_fail hosted-agent-bad-reason-stable "hosted bad revoke reason was not 409" "$(redacted_body)"
+run_sql -Atc "SELECT count(*) FROM audit_log WHERE workspace_id='$WS' \
+  AND subject_member_id='$HOSTED_AGENT_ID' AND action='agent.credential.hosted_managed_denied';" | \
+  grep -qx '8' || gate_fail hosted-agent-denial-audit-cardinality "expected eight bounded issue/revoke denial audits" "database evidence withheld"
+
 sample_agent_port agent-port-modern-discover 200 "$MODERN_DISCOVER_BODY" \
   "$GATE_AGENT_TOKEN" "2026-07-28" "server/discover"
 guard_jq --arg id "$MODERN_DISCOVER_ID" '
@@ -2601,6 +3689,24 @@ fi
 # Secret-bearing request-builder files are scratch, not evidence. Remove them
 # with the same inode/owner binding before enumerating retained evidence; the
 # global cleanup still owns all remaining registered secrets and signal paths.
+# Concurrent HTTP scratch contains one-time credentials by construction. Adopt
+# every exact regular file into the existing immutable-identity cleanup ledger,
+# then delete only those registered files before retained-evidence scanning.
+if [ -d "${CONCURRENT_DIR:-}" ] && [ ! -L "$CONCURRENT_DIR" ]; then
+  while IFS= read -r concurrency_secret; do
+    register_secret_file "$concurrency_secret" || {
+      echo "[openapi-rust] FAIL concurrent scratch ownership changed before cleanup" >&2
+      exit 1
+    }
+    concurrency_secret_index=$((${#SECRET_FILES[@]} - 1))
+    [ "$(file_identity "$concurrency_secret")" = "${SECRET_IDENTITIES[$concurrency_secret_index]}" ] || {
+      echo "[openapi-rust] FAIL concurrent scratch identity changed before cleanup" >&2
+      exit 1
+    }
+    rm -f -- "$concurrency_secret"
+  done < <(find "$CONCURRENT_DIR" -type f -maxdepth 1 -print)
+fi
+
 for request_secret in "$LOGIN_PASSWORD_FILE" "$INVITE_CODE_FILE" "$JOIN_PASSWORD_FILE"; do
   request_secret_index=-1
   for ((index = 0; index < ${#SECRET_FILES[@]}; index++)); do

@@ -269,10 +269,12 @@ async fn lock_agent_credential_target(
     workspace_id: Uuid,
     agent_member_id: Uuid,
 ) -> Result<Option<AgentCredentialMutationPolicy>, sqlx::Error> {
-    let found: Option<i32> = sqlx::query_scalar(
-        "SELECT 1 \
+    let found: Option<bool> = sqlx::query_scalar(
+        "SELECT (hc.id IS NOT NULL) \
            FROM agent a \
            JOIN member m ON m.workspace_id = a.workspace_id AND m.id = a.member_id \
+           LEFT JOIN hosted_agent_connection hc \
+             ON hc.workspace_id = a.workspace_id AND hc.agent_member_id = a.member_id \
           WHERE a.workspace_id = $1 AND a.member_id = $2 \
             AND m.kind = 'agent' AND m.status = 'active' AND m.deleted_at IS NULL \
           FOR UPDATE OF a",
@@ -281,7 +283,21 @@ async fn lock_agent_credential_target(
     .bind(agent_member_id)
     .fetch_optional(&mut *conn)
     .await?;
-    Ok(found.map(|_| AgentCredentialMutationPolicy::Generic))
+    Ok(found.map(|hosted| {
+        if hosted {
+            AgentCredentialMutationPolicy::HostedConnectionManaged
+        } else {
+            AgentCredentialMutationPolicy::Generic
+        }
+    }))
+}
+
+pub async fn agent_credential_mutation_policy_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    agent_member_id: Uuid,
+) -> Result<Option<AgentCredentialMutationPolicy>, sqlx::Error> {
+    lock_agent_credential_target(conn, workspace_id, agent_member_id).await
 }
 
 pub async fn active_agent_for_credential_list(

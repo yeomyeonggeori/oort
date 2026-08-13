@@ -10,14 +10,14 @@ use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use momo_auth::{
     active_agent_for_credential_list, active_workspace_role,
-    agent_credential_requires_instance_operator, issue_agent_credential_in_tx,
-    list_agent_credentials_in_tx, mint_agent_bearer, normalized_agent_credential_label,
-    normalized_agent_credential_reason, normalized_agent_credential_scopes,
-    revoke_agent_credential_in_tx, validated_agent_credential_expiry,
-    validated_rotation_grace_seconds, verified_operator_email, AgentCredentialInputError,
-    AgentCredentialMutation, AgentCredentialRecord, Principal, AUDIT_ACTION_ISSUED,
-    AUDIT_ACTION_REVOKED, AUDIT_SCHEMA_ISSUED, AUDIT_SCHEMA_REVOKED,
-    HOSTED_CONNECTION_MANAGED_CODE,
+    agent_credential_mutation_policy_in_tx, agent_credential_requires_instance_operator,
+    issue_agent_credential_in_tx, list_agent_credentials_in_tx, mint_agent_bearer,
+    normalized_agent_credential_label, normalized_agent_credential_reason,
+    normalized_agent_credential_scopes, revoke_agent_credential_in_tx,
+    validated_agent_credential_expiry, validated_rotation_grace_seconds, verified_operator_email,
+    AgentCredentialInputError, AgentCredentialMutation, AgentCredentialMutationPolicy,
+    AgentCredentialRecord, Principal, AUDIT_ACTION_ISSUED, AUDIT_ACTION_REVOKED,
+    AUDIT_SCHEMA_ISSUED, AUDIT_SCHEMA_REVOKED, HOSTED_CONNECTION_MANAGED_CODE,
 };
 use momo_db::audit::{write_audit, AuditEntry};
 use serde_json::json;
@@ -63,6 +63,32 @@ fn hosted_connection_managed() -> ApiError {
     ApiError::new(StatusCode::CONFLICT, HOSTED_CONNECTION_MANAGED_CODE)
 }
 
+async fn deny_hosted_mutation(
+    conn: &mut momo_db::PgConnection,
+    workspace_id: uuid::Uuid,
+    actor_member_id: uuid::Uuid,
+    agent_member_id: uuid::Uuid,
+    via_token_id: Option<uuid::Uuid>,
+    operation: &str,
+) -> Result<(), momo_db::DbError> {
+    write_audit(
+        conn,
+        &AuditEntry::new(workspace_id, "agent.credential.hosted_managed_denied")
+            .by(actor_member_id)
+            .about(agent_member_id)
+            .via_token(via_token_id)
+            .with_schema(
+                "momo.agent_credential.hosted_managed_denied.v1",
+                json!({
+                    "operation": operation,
+                    "code": HOSTED_CONNECTION_MANAGED_CODE
+                }),
+            ),
+    )
+    .await?;
+    Ok(())
+}
+
 /// `POST /v1/workspaces/{ws}/agents/{agent}/credentials`.
 pub async fn create(
     State(state): State<AppState>,
@@ -77,13 +103,10 @@ pub async fn create(
     // All shape decisions happen before the transaction. Entropy is consumed
     // only after the human-admin and operator gates pass inside that same
     // tenant transaction.
-    let scopes =
-        normalized_agent_credential_scopes(request.scopes.as_deref()).map_err(input_error)?;
-    let label = normalized_agent_credential_label(request.label.as_deref()).map_err(input_error)?;
-    let expires_at_ms =
-        validated_agent_credential_expiry(request.expires_at_ms, now_ms()).map_err(input_error)?;
-    let rotation_grace_seconds =
-        validated_rotation_grace_seconds(request.rotation_grace_seconds).map_err(input_error)?;
+    let requested_scopes = request.scopes;
+    let requested_label = request.label;
+    let requested_expiry = request.expires_at_ms;
+    let requested_grace = request.rotation_grace_seconds;
     let actor_member_id = principal.member_id;
     let via_token_id = audit_via_token_id(&principal);
     let carries_platform_read = principal
@@ -91,7 +114,6 @@ pub async fn create(
         .iter()
         .any(|scope| scope == PLATFORM_READ_SCOPE);
     let operator_emails = state.settings.platform_admin_emails.clone();
-    let requires_instance_operator = agent_credential_requires_instance_operator(&scopes);
     let (issued, raw_token) = settle_db(
         "agent_credentials.create",
         agent_tenant_tx(&state.pool, workspace_id, move |conn| {
@@ -101,7 +123,45 @@ pub async fn create(
                     return Ok(Err(ApiError::forbidden("workspace admin required")));
                 }
 
-                if requires_instance_operator && !carries_platform_read {
+                match agent_credential_mutation_policy_in_tx(conn, workspace_id, agent_member_id)
+                    .await?
+                {
+                    Some(AgentCredentialMutationPolicy::HostedConnectionManaged) => {
+                        deny_hosted_mutation(
+                            conn,
+                            workspace_id,
+                            actor_member_id,
+                            agent_member_id,
+                            via_token_id,
+                            "issue",
+                        )
+                        .await?;
+                        return Ok(Err(hosted_connection_managed()));
+                    }
+                    Some(AgentCredentialMutationPolicy::Generic) => {}
+                    None => return Ok(Err(ApiError::not_found("active agent not found"))),
+                }
+
+                let label = match normalized_agent_credential_label(requested_label.as_deref()) {
+                    Ok(value) => value,
+                    Err(error) => return Ok(Err(input_error(error))),
+                };
+                let expires_at_ms =
+                    match validated_agent_credential_expiry(requested_expiry, now_ms()) {
+                        Ok(value) => value,
+                        Err(error) => return Ok(Err(input_error(error))),
+                    };
+                let rotation_grace_seconds = match validated_rotation_grace_seconds(requested_grace)
+                {
+                    Ok(value) => value,
+                    Err(error) => return Ok(Err(input_error(error))),
+                };
+
+                let scopes = match normalized_agent_credential_scopes(requested_scopes.as_deref()) {
+                    Ok(scopes) => scopes,
+                    Err(error) => return Ok(Err(input_error(error))),
+                };
+                if agent_credential_requires_instance_operator(&scopes) && !carries_platform_read {
                     let email =
                         verified_operator_email(conn, workspace_id, actor_member_id).await?;
                     if !email.is_some_and(|email| operator_emails.contains(&email)) {
@@ -136,7 +196,16 @@ pub async fn create(
                         return Ok(Err(ApiError::not_found("active agent not found")))
                     }
                     AgentCredentialMutation::HostedConnectionManaged => {
-                        return Ok(Err(hosted_connection_managed()))
+                        deny_hosted_mutation(
+                            conn,
+                            workspace_id,
+                            actor_member_id,
+                            agent_member_id,
+                            via_token_id,
+                            "issue",
+                        )
+                        .await?;
+                        return Ok(Err(hosted_connection_managed()));
                     }
                     // The request expired while waiting for the per-agent
                     // rotation lock. The atomic SQL statement changed nothing.
@@ -243,12 +312,7 @@ pub async fn revoke(
     let workspace_id = workspace_scope(&workspace, &principal)?;
     let agent_member_id = path_uuid(&agent, "invalid agent id")?;
     let credential_id = path_uuid(&credential, "invalid credential id")?;
-    let reason = normalized_agent_credential_reason(
-        request
-            .as_ref()
-            .and_then(|Json(body)| body.reason.as_deref()),
-    )
-    .map_err(input_error)?;
+    let requested_reason = request.and_then(|Json(body)| body.reason);
     let actor_member_id = principal.member_id;
     let via_token_id = audit_via_token_id(&principal);
 
@@ -260,6 +324,26 @@ pub async fn revoke(
                 if !role.is_some_and(|role| role.is_admin()) {
                     return Ok(Err(ApiError::forbidden("workspace admin required")));
                 }
+                if matches!(
+                    agent_credential_mutation_policy_in_tx(conn, workspace_id, agent_member_id)
+                        .await?,
+                    Some(AgentCredentialMutationPolicy::HostedConnectionManaged)
+                ) {
+                    deny_hosted_mutation(
+                        conn,
+                        workspace_id,
+                        actor_member_id,
+                        agent_member_id,
+                        via_token_id,
+                        "revoke",
+                    )
+                    .await?;
+                    return Ok(Err(hosted_connection_managed()));
+                }
+                let reason = match normalized_agent_credential_reason(requested_reason.as_deref()) {
+                    Ok(value) => value,
+                    Err(error) => return Ok(Err(input_error(error))),
+                };
                 let revoked = match revoke_agent_credential_in_tx(
                     conn,
                     workspace_id,
@@ -270,7 +354,16 @@ pub async fn revoke(
                 {
                     AgentCredentialMutation::Applied(revoked) => revoked,
                     AgentCredentialMutation::HostedConnectionManaged => {
-                        return Ok(Err(hosted_connection_managed()))
+                        deny_hosted_mutation(
+                            conn,
+                            workspace_id,
+                            actor_member_id,
+                            agent_member_id,
+                            via_token_id,
+                            "revoke",
+                        )
+                        .await?;
+                        return Ok(Err(hosted_connection_managed()));
                     }
                     AgentCredentialMutation::AgentNotFound
                     | AgentCredentialMutation::CredentialNotFound => {

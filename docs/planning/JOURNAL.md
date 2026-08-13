@@ -5,6 +5,34 @@
 
 ---
 
+## 2026-08-13 (GPT 5.6 sol) · #1364 raw clientInfo 제거·redaction selftest 정본화
+- 정상/opaque 여부를 추측하지 않고 clientInfo name/version raw persistence를 전면 제거했다. capability는 finite boolean paths만 저장한다.
+- cleanup mode가 shared gate-failure redactor로 arbitrary JWT+prefix+digest 반사 raw0와 registry read-error fail-closed를 Docker 전에 직접 검증한다.
+- `1e0f13b0` exact runtime은 host-blocked이고, 65/65+62/62·PG18 2/2는 `c9aaf7cf`의 별도 provenance임을 교정했다.
+- 기존 commit/비소유 dirty를 보존하고 이 축소만 새 local commit으로 동결한다. push/PR 없음.
+
+## 2026-08-13 (GPT 5.6 sol) · #1364 strict-review H2/M2 후속
+- metadata를 low-entropy client display grammar+고정 capability bool paths로 닫고 opaque/sk-prefix/unknown key 저장을 금지했다.
+- failure 출력은 등록 secret/JWT 파생값까지 전역 치환하며 reflected ACCESS body/header output0 fixture를 추가했다. authority race는 proof DB-lock wait를 관측한 뒤 해제한다.
+- 이전 항목의 workspace fmt green 표현은 철회한다. 소유 Rust fmt만 PASS이고 exact commit의 whole-workspace fmt는 선재 비소유 13 drift로 inherited RED다.
+- Rust/clippy/tests/cleanup/leak0은 green. actual-image·PG 재실행은 Docker 내부 DB I/O로 기동 전 host-blocked이고 owned resource/scratch 잔존 0; 직전 product-image evidence는 보존한다. 후속만 별도 local commit, push/PR 금지다.
+
+## 2026-08-13 (GPT 5.6 sol) · #1364 final-review A–H 수리·재동결
+- hosted bearer pre-scope 분류, rollback delta0, closed MCP metadata projection, 전역 agent/pair envelope 차단을 반영했다.
+- detected TTL·identity/membership 상실을 expired+paused+revoke로 닫고, proof profile 0건은 전체 rollback, race fixture는 advisory/row-lock barrier로 결정화했다.
+- fmt/clippy/workspace tests, focused unit, cleanup, 실제 PG18+deploy image, actual-image OpenAPI 65/65+62/62가 green이다.
+- 별도 로컬 final-review commit만 만들고 push/PR은 하지 않는다. 무관 rustfmt 13파일은 계속 제외하며 독립 reviewer C/H/M=0 뒤 handoff한다.
+
+## 2026-08-13 (GPT 5.6 sol · momo-main) · #1364 네트워크 중단 안전 체크포인트
+- #1364 worker 구현은 29개 소유 파일에서 self-review C0/H0/M0, Rust/PG18/actual worker+A2A/OpenAPI 65/65+62/leak0까지 닫았다. owned aggregate는 `44cfd88…`다.
+- 사용자의 중단 요청으로 마지막 exact-freeze 독립 reviewer를 즉시 멈췄다. 최종 reviewer C/H/M은 미완료이므로 현재 바이트를 승인·PR-ready로 부르지 않는다.
+- 구현과 planning checkpoint는 로컬 커밋으로만 보존하고 push/PR하지 않는다. 재개 시 exact committed tree 검수부터 시작하며, 무관 rustfmt drift 13파일은 계속 제외한다.
+
+## 2026-08-13 (GPT 5.6 sol · momo-main) · HAP-E1/E2 랜딩, HAP-E3 시작
+- #1363은 #1371/`1e5115fd`, #1358은 #1372/`c5badf5f`로 track/engine에 랜딩했고 양쪽 PR CI·exact-base policy·security C0/H0/M0과 실제 PG18/OpenAPI 증거를 닫았다.
+- #1364 dependency를 해제해 ready/Todo로 전환하고 최신 engine base에서 claim했다. claim helper의 main-base branch는 변경 전에 즉시 engine base로 교정했다.
+- 다음 구현은 dedicated paused member+connection, one-time pairing→detected, human confirm의 별도 bearer, active proof+unpause 원자성 순서다. static-only·exact Agent Port audience·delivery hard-disable를 유지한다.
+
 ## 2026-08-13 (GPT 5.6 sol · momo-main) · HAP-E2 final freeze C0/H0/M0
 - #1363은 dual-era sessionless MCP, membership-bound static bearer, atomic limiter와 closed transport/OpenAPI를 구현하고 실제 PG18·deploy image·OpenAPI 57/57+54/54를 통과했다.
 - verifier의 secret/foreign-resource/signal/tri-state/header/SIGPIPE 경계를 적대 fixture와 teardown-before-PASS로 닫았고 독립 security 최종 판정은 C0/H0/M0, Docker·lock 잔존은 0이다.

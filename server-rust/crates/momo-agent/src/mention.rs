@@ -111,6 +111,7 @@ pub struct MentionCandidate {
     /// `workspace.settings`, needed raw for the ADR-0131 D2 allow-list.
     pub workspace_settings: Value,
     pub paused: bool,
+    pub hosted_delivery_disabled: bool,
     /// Is the agent an active member of the channel the mention happened in?
     /// A mention of an agent that is not in the channel is a **no-op**, not an
     /// error (Swift :1464-1478) — fail closed, audited, no run.
@@ -137,6 +138,9 @@ pub async fn load_mention_candidates_in_tx(
                 ap.instructions, ap.model_pref, ap.effort_pref, ap.enabled_tools, \
                 ap.version AS profile_version, \
                 COALESCE(ap.paused, false) AS paused, \
+                EXISTS (SELECT 1 FROM hosted_agent_connection hc \
+                         WHERE hc.workspace_id = m.workspace_id AND hc.agent_member_id = m.id) \
+                  AS hosted_delivery_disabled, \
                 EXISTS ( \
                   SELECT 1 FROM membership ms \
                    WHERE ms.channel_id = $2 \
@@ -210,6 +214,9 @@ pub async fn load_mention_candidates_in_tx(
             enabled_tools,
             workspace_settings: row.try_get("workspace_settings").map_err(DbError::from)?,
             paused: row.try_get("paused").map_err(DbError::from)?,
+            hosted_delivery_disabled: row
+                .try_get("hosted_delivery_disabled")
+                .map_err(DbError::from)?,
             is_channel_member: row.try_get("is_channel_member").map_err(DbError::from)?,
         });
     }
@@ -758,6 +765,7 @@ mod tests {
             max_run_steps: 50,
             workspace_settings: json!({}),
             paused: false,
+            hosted_delivery_disabled: false,
             is_channel_member: true,
         }
     }

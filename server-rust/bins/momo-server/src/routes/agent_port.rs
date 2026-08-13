@@ -121,6 +121,18 @@ pub async fn post(State(state): State<AppState>, request: Request) -> Response {
         || matches!(name, UniqueHeader::Invalid)
         || accept.is_err();
 
+    let foundation = if body_limit_error.is_none() && !query_error && !duplicate_transport_header {
+        momo_mcp::classify_foundation_request(momo_mcp::HttpRequest {
+            content_type: content_type.value(),
+            accept: accept.as_ref().ok().and_then(Option::as_deref),
+            protocol_version: protocol_version.value(),
+            mcp_method: method.value(),
+            mcp_name: name.value(),
+            body: &bytes,
+        })
+    } else {
+        None
+    };
     let protocol_response = if let Some(response) = body_limit_error {
         response
     } else if query_error || duplicate_transport_header {
@@ -140,6 +152,9 @@ pub async fn post(State(state): State<AppState>, request: Request) -> Response {
         });
         dispatched_response(dispatched)
     };
+    let (detected_client_name, detected_client_version, detected_capabilities) = foundation
+        .and_then(|kind| foundation_metadata(&bytes, kind))
+        .unwrap_or_else(|| (None, None, serde_json::json!({})));
 
     // Authentication happens even for a malformed protocol request so no wire
     // detail becomes an unauthenticated oracle. The body is already bounded,
@@ -150,7 +165,16 @@ pub async fn post(State(state): State<AppState>, request: Request) -> Response {
         }
         UniqueHeader::Invalid => return auth_failure(AgentPortAuthError::InvalidToken),
         UniqueHeader::One(value) => {
-            match authenticate_and_admit_agent_port_credential(&state, Some(value)).await {
+            match authenticate_and_admit_agent_port_credential(
+                &state,
+                Some(value),
+                foundation.is_some(),
+                detected_client_name.as_deref(),
+                detected_client_version.as_deref(),
+                &detected_capabilities,
+            )
+            .await
+            {
                 Ok(admission) => admission,
                 Err(error) => return auth_failure(error),
             }
@@ -168,6 +192,43 @@ pub async fn post(State(state): State<AppState>, request: Request) -> Response {
     let _incoming_session = parts.headers.get(MCP_SESSION_ID);
     let _incoming_event = parts.headers.get(LAST_EVENT_ID);
     protocol_response
+}
+
+fn foundation_metadata(
+    body: &[u8],
+    foundation: momo_mcp::FoundationRequest,
+) -> Option<(Option<String>, Option<String>, serde_json::Value)> {
+    let value: serde_json::Value = serde_json::from_slice(body).ok()?;
+    let params = value.get("params")?;
+    let (info, capabilities) = match foundation {
+        momo_mcp::FoundationRequest::ModernDiscover
+        | momo_mcp::FoundationRequest::ModernToolsList => {
+            let meta = params.get("_meta")?;
+            (
+                meta.get(momo_mcp::META_CLIENT_INFO),
+                meta.get(momo_mcp::META_CLIENT_CAPABILITIES),
+            )
+        }
+        momo_mcp::FoundationRequest::LegacyInitialize => {
+            (params.get("clientInfo"), params.get("capabilities"))
+        }
+        momo_mcp::FoundationRequest::LegacyToolsList => (None, None),
+    };
+    let name = info
+        .and_then(|value| value.get("name"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string);
+    let version = info
+        .and_then(|value| value.get("version"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string);
+    Some((
+        name,
+        version,
+        capabilities
+            .cloned()
+            .unwrap_or_else(|| serde_json::json!({})),
+    ))
 }
 
 fn auth_failure(error: AgentPortAuthError) -> Response {

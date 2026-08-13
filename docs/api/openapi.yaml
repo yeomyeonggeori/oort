@@ -663,6 +663,99 @@ paths:
         "429":
           $ref: "#/components/responses/RateLimited"
 
+  /v1/workspaces/{workspaceId}/hosted-agent-connections:
+    post:
+      tags: [agents]
+      operationId: createHostedAgentConnection
+      summary: Create a dedicated paused hosted-agent identity and one-time pairing challenge.
+      security: [{bearerAuth: []}]
+      parameters: [{$ref: "#/components/parameters/WorkspaceId"}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: "#/components/schemas/CreateHostedAgentConnectionRequest"}}}
+      responses:
+        "201":
+          description: Dedicated identity and pairing challenge created atomically.
+          headers:
+            Cache-Control: {required: true, schema: {type: string, enum: [no-store]}}
+            Pragma: {required: true, schema: {type: string, enum: [no-cache]}}
+          content: {application/json: {schema: {$ref: "#/components/schemas/CreateHostedAgentConnectionResponse"}}}
+        "400": {description: Invalid closed input, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {description: Human workspace owner/admin required, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "409": {description: Handle already exists, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+    get:
+      tags: [agents]
+      operationId: listHostedAgentConnections
+      summary: List bounded secret-free hosted connection metadata.
+      security: [{bearerAuth: []}]
+      parameters: [{$ref: "#/components/parameters/WorkspaceId"}]
+      responses:
+        "200": {description: Hosted connections, content: {application/json: {schema: {$ref: "#/components/schemas/HostedAgentConnectionListResponse"}}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {description: Human workspace owner/admin required, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+
+  /v1/workspaces/{workspaceId}/hosted-agent-connections/{connectionId}:
+    get:
+      tags: [agents]
+      operationId: getHostedAgentConnection
+      summary: Get secret-free hosted connection metadata.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - {name: connectionId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200": {description: Hosted connection, content: {application/json: {schema: {$ref: "#/components/schemas/HostedAgentConnectionResponse"}}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {description: Human workspace owner/admin required, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "404": {description: Hosted connection not found, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+
+  /v1/workspaces/{workspaceId}/hosted-agent-connections/{connectionId}/pairing-challenge/regenerate:
+    post:
+      tags: [agents]
+      operationId: regenerateHostedAgentPairingChallenge
+      summary: Invalidate prior material and return one replacement pairing challenge.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - {name: connectionId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: Pairing challenge regenerated.
+          headers:
+            Cache-Control: {required: true, schema: {type: string, enum: [no-store]}}
+            Pragma: {required: true, schema: {type: string, enum: [no-cache]}}
+          content: {application/json: {schema: {$ref: "#/components/schemas/CreateHostedAgentConnectionResponse"}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {description: Human workspace owner/admin required, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "404": {description: Hosted connection not found, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "409": {description: Active connection cannot regenerate, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+
+  /v1/workspaces/{workspaceId}/hosted-agent-connections/{connectionId}/confirm:
+    post:
+      tags: [agents]
+      operationId: confirmHostedAgentConnection
+      summary: Approve exact channels/scopes and issue the one-time active Agent Port credential.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - {name: connectionId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: "#/components/schemas/ConfirmHostedAgentConnectionRequest"}}}
+      responses:
+        "201":
+          description: Credential issued once; first valid foundation call proves binding and unpauses.
+          headers:
+            Cache-Control: {required: true, schema: {type: string, enum: [no-store]}}
+            Pragma: {required: true, schema: {type: string, enum: [no-cache]}}
+          content: {application/json: {schema: {$ref: "#/components/schemas/ConfirmHostedAgentConnectionResponse"}}}
+        "400": {description: Invalid closed scopes/channels/auth mode, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {description: Human workspace owner/admin required, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "404": {description: Hosted connection not found, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "409": {description: Connection has not been detected or was already confirmed, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+
   /v1/workspaces/{workspaceId}/agents/{agentId}/credentials:
     post:
       tags: [agents]
@@ -6672,6 +6765,79 @@ components:
         - provider:quota:write
         - agent:port:connect
         - agent:inbox:read
+
+    HostedAgentScope:
+      type: string
+      enum: [agent:port:connect, agent:inbox:read, messages:read, messages:write, agent:jobs:read, agent:runs:callback]
+
+    HostedAgentConnection:
+      type: object
+      additionalProperties: false
+      required: [id, agentMemberId, status, authMode, audience, approvedChannelIds, approvedScopes, createdAtMs, updatedAtMs]
+      properties:
+        id: {type: string, format: uuid}
+        agentMemberId: {type: string, format: uuid}
+        status: {type: string, enum: [pairing_pending, detected, active, expired, cleanup_pending, disconnected]}
+        authMode: {type: string, enum: [static_bearer]}
+        audience: {type: string, enum: [/v1/mcp/agent-port]}
+        approvedChannelIds: {type: array, uniqueItems: true, items: {type: string, format: uuid}}
+        approvedScopes: {type: array, uniqueItems: true, items: {$ref: "#/components/schemas/HostedAgentScope"}}
+        activeCredentialId: {type: string, format: uuid}
+        createdAtMs: {type: integer, format: int64}
+        updatedAtMs: {type: integer, format: int64}
+
+    CreateHostedAgentConnectionRequest:
+      type: object
+      additionalProperties: false
+      required: [displayName, handle]
+      properties:
+        displayName: {type: string, minLength: 1}
+        handle: {type: string, minLength: 1}
+        authMode: {type: string, enum: [static_bearer], default: static_bearer}
+
+    CreateHostedAgentConnectionResponse:
+      type: object
+      additionalProperties: false
+      required: [connection, pairingCredential, pairingExpiresAtMs]
+      properties:
+        connection: {$ref: "#/components/schemas/HostedAgentConnection"}
+        pairingCredential: {type: string, readOnly: true, minLength: 1, description: One-time pairing bearer; only SHA-256 is persisted.}
+        pairingExpiresAtMs: {type: integer, format: int64}
+
+    HostedAgentConnectionResponse:
+      type: object
+      additionalProperties: false
+      required: [connection]
+      properties:
+        connection: {$ref: "#/components/schemas/HostedAgentConnection"}
+
+    HostedAgentConnectionListResponse:
+      type: object
+      additionalProperties: false
+      required: [connections]
+      properties:
+        connections: {type: array, maxItems: 100, items: {$ref: "#/components/schemas/HostedAgentConnection"}}
+
+    ConfirmHostedAgentConnectionRequest:
+      type: object
+      additionalProperties: false
+      required: [agentMemberId, audience, approvedChannelIds, approvedScopes, authMode]
+      properties:
+        agentMemberId: {type: string, format: uuid}
+        audience: {type: string, enum: [/v1/mcp/agent-port]}
+        approvedChannelIds: {type: array, uniqueItems: true, items: {type: string, format: uuid}}
+        approvedScopes: {type: array, minItems: 1, uniqueItems: true, items: {$ref: "#/components/schemas/HostedAgentScope"}}
+        authMode: {type: string, enum: [static_bearer]}
+
+    ConfirmHostedAgentConnectionResponse:
+      type: object
+      additionalProperties: false
+      required: [connection, credentialId, credential, tokenType]
+      properties:
+        connection: {$ref: "#/components/schemas/HostedAgentConnection"}
+        credentialId: {type: string, format: uuid}
+        credential: {type: string, readOnly: true, minLength: 1, description: One-time Agent Port bearer; only SHA-256 is persisted.}
+        tokenType: {type: string, enum: [Bearer]}
 
     AgentCredential:
       type: object

@@ -779,6 +779,7 @@ add_runtime_db_commands() {
   add_cmd "Fresh-DB admin agent creation verification (MOMO-509)" "scripts/verify_agent_create.sh"
   add_note_once coverage "MOMO-509 agent creation via scripts/verify_agent_create.sh: isolated seed-none e2e API stack on preflight-checked reserved 27970-27973 ports verifies admin atomic member(kind=agent)+agent+audit creation, no automatic channel membership, workspace handle duplicate 409 without partial rows, non-admin 403, ADR-0004 endpoint/config credential rejection, explicit existing membership-path reuse, sha256-only agent credential issuance, and member/agent/membership/token/audit FORCE RLS isolation."
   add_cmd "Generic agent credential lifecycle verification (#1358)" "scripts/verify_agent_credentials_rust.sh"
+  add_cmd_once "Hosted agent pairing/activation verification (#1364)" "scripts/verify_openapi_contract.sh"
   add_note_once coverage "#1358 Rust agent credential lifecycle via scripts/verify_agent_credentials_rust.sh: a fresh pinned PG18 database plus the real Axum router running as momo_app verifies owner/admin issue-list-rotate-revoke, one-time no-store reveal and digest-only persistence, closed/non-default scopes, agent/human/tenant/target fail-closed authorization, expiry and revoke authentication, idempotent revoke audit, no secret-shaped response/audit projection, no-expiry-extension, and serialized concurrent rotation. Its adversarial ownership fixture independently proves high-entropy per-invocation naming and fail-closed cleanup across id, name, label, and create-collision takeovers without deleting a foreign container."
   add_cmd "A2A Agent Card onboarding verification (MOMO-536)" "scripts/verify_agent_card_onboarding.sh"
   add_note_once coverage "MOMO-536 Agent Card onboarding via scripts/verify_agent_card_onboarding.sh: isolated API plus Python http.server card mock on preflight-checked 28124-28128 ports verifies fetch-to-pending, consent confirmation, atomic agent member plus SHA-256-only gateway bearer and audits, card/local roster origin, loopback SSRF rejection with no partial ledger row, and FORCE RLS isolation."
@@ -834,6 +835,7 @@ add_runtime_live_commands() {
 
 add_runtime_agent_commands() {
   add_runtime_bootstrap_commands
+  add_cmd_once "Hosted agent pairing/activation verification (#1364)" "scripts/verify_openapi_contract.sh"
   add_cmd "AgentWorker fresh DB bootstrap, rollback, and persistent repeat verification" "scripts/verify_agent_worker_bootstrap.sh"
   add_cmd "Agent context verifier bootstrap rollback" "scripts/verify_agent_context_bootstrap.sh"
   add_cmd "Agent context assembly verification" "scripts/verify_agent_context.sh"
