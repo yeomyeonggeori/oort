@@ -172,6 +172,10 @@ pub async fn claim_gateway_jobs_in_tx(
                    AND m.status = 'active' \
                    AND m.deleted_at IS NULL \
               ) \
+              AND NOT EXISTS ( \
+                SELECT 1 FROM hosted_agent_connection hc \
+                 WHERE hc.workspace_id = $1 AND hc.agent_member_id = $2 \
+              ) \
             ORDER BY o.id ASC \
             FOR UPDATE OF o SKIP LOCKED \
             LIMIT $3 \

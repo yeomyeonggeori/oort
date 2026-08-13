@@ -74,6 +74,10 @@ pub struct AgentBearerIdentity {
     pub member_id: Uuid,
     pub workspace_id: Uuid,
     pub scopes: Vec<String>,
+    /// Present only for a connection-managed hosted credential. Generic REST
+    /// middleware rejects this class; the canonical Agent Port consumes it.
+    pub hosted_connection_id: Option<Uuid>,
+    pub audience: Option<String>,
 }
 
 /// Outcome of looking an agent bearer up (Swift `AgentBearerResolution`).
@@ -190,7 +194,7 @@ pub async fn resolve_agent_bearer_in_tx(
     required_scope: &str,
 ) -> Result<AgentBearerResolution, sqlx::Error> {
     let row = sqlx::query(
-        "SELECT t.id, t.actor_member_id, t.scopes, \
+        "SELECT t.id, t.actor_member_id, t.scopes, t.hosted_connection_id, t.audience, \
                 t.revoked_at IS NOT NULL AS revoked, \
                 (t.expires_at IS NOT NULL AND t.expires_at <= now()) AS expired \
            FROM token t \
@@ -210,10 +214,16 @@ pub async fn resolve_agent_bearer_in_tx(
             AND t.kind = 'agent_bearer' \
             AND t.subject_member_id IS NULL \
             AND t.token_hash = digest($2::text, 'sha256') \
+            AND (t.credential_class = 'generic' OR ( \
+              t.credential_class = 'hosted_active' \
+              AND $3 = 'agent:port:connect' \
+              AND t.audience = '/v1/mcp/agent-port' \
+            )) \
           LIMIT 1",
     )
     .bind(workspace_id)
     .bind(raw_token)
+    .bind(required_scope)
     .fetch_optional(&mut *conn)
     .await?;
 
@@ -238,6 +248,8 @@ pub async fn resolve_agent_bearer_in_tx(
             member_id,
             workspace_id,
             scopes,
+            hosted_connection_id: row.try_get("hosted_connection_id")?,
+            audience: row.try_get("audience")?,
         },
         scope_granted,
     })
@@ -265,6 +277,11 @@ pub async fn finalize_agent_bearer_use_in_tx(
             AND t.actor_member_id = $3 \
             AND t.kind = 'agent_bearer' \
             AND t.subject_member_id IS NULL \
+            AND (t.credential_class = 'generic' OR ( \
+              t.credential_class = 'hosted_active' \
+              AND $4 = 'agent:port:connect' \
+              AND t.audience = '/v1/mcp/agent-port' \
+            )) \
             AND t.revoked_at IS NULL \
             AND (t.expires_at IS NULL OR t.expires_at > now()) \
             AND $4 = ANY(t.scopes) \
@@ -364,6 +381,8 @@ mod tests {
             member_id: Uuid::from_u128(2),
             workspace_id: Uuid::from_u128(3),
             scopes: vec!["agent:jobs:read".to_string()],
+            hosted_connection_id: None,
+            audience: None,
         };
         let denied = AgentBearerResolution::Active {
             identity: identity.clone(),

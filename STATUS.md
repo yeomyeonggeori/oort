@@ -1,5 +1,9 @@
 # oort 진행 현황
 
+## Hosted agent dedicated pairing·activation lifecycle (#1364, 2026-08-13)
+
+- `static_bearer` 전용 hosted connection이 dedicated paused agent identity와 일회성 pairing challenge를 원자 생성하고, protocol-valid foundation request의 `pairing_pending → detected`, human confirm의 exact channel/closed scope 승인과 별도 active credential 발급, 첫 valid proof의 `active` 전환+unpause를 tenant transaction으로 닫는다. Hosted bearer는 exact `/v1/mcp/agent-port` 외 REST에서 거절되고 generic credential mutation은 409+bounded audit이며, E5/E6 전 mention/run/A2A/gateway/worker delivery·claim은 이중 차단된다. PostgreSQL 18 001→069/RLS FORCE, Rust fmt·clippy·workspace test, generated OpenAPI와 Rust image lifecycle이 green이고 실제 concurrent confirm/proof 및 regenerate↔detect/confirm race, cross-workspace non-enumeration, injected activation-audit failure의 zero-partial rollback까지 실측했다. OAuth/provider delivery/inbox/data tools/UI는 후속이라 열지 않았다.
+
 ## Hosted Agent Port dual-era foundation (#1363, 2026-08-13)
 
 - Rust에 sessionless `POST /v1/mcp/agent-port`를 추가해 modern `2026-07-28` discovery/empty tools와 exact legacy `2025-11-25` initialize/initialized/ping/empty tools를 분리했다. 첫 wave는 `agent:port:connect` static agent bearer만 허용하며 product tool·message/job/inbox 쓰기·OAuth metadata는 열지 않는다.

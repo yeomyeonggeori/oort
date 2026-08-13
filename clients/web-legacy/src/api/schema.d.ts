@@ -338,6 +338,75 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/workspaces/{workspaceId}/hosted-agent-connections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List bounded secret-free hosted connection metadata. */
+        get: operations["listHostedAgentConnections"];
+        put?: never;
+        /** Create a dedicated paused hosted-agent identity and one-time pairing challenge. */
+        post: operations["createHostedAgentConnection"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{workspaceId}/hosted-agent-connections/{connectionId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get secret-free hosted connection metadata. */
+        get: operations["getHostedAgentConnection"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{workspaceId}/hosted-agent-connections/{connectionId}/pairing-challenge/regenerate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Invalidate prior material and return one replacement pairing challenge. */
+        post: operations["regenerateHostedAgentPairingChallenge"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{workspaceId}/hosted-agent-connections/{connectionId}/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Approve exact channels/scopes and issue the one-time active Agent Port credential. */
+        post: operations["confirmHostedAgentConnection"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/workspaces/{workspaceId}/agents/{agentId}/credentials": {
         parameters: {
             query?: never;
@@ -2741,6 +2810,69 @@ export interface components {
         };
         /** @enum {string} */
         AgentCredentialScope: "agent:jobs:read" | "agent:runs:callback" | "messages:read" | "messages:write" | "realtime:subscribe" | "work:control" | "provider:quota:write" | "agent:port:connect" | "agent:inbox:read";
+        /** @enum {string} */
+        HostedAgentScope: "agent:port:connect" | "agent:inbox:read" | "messages:read" | "messages:write" | "agent:jobs:read" | "agent:runs:callback";
+        HostedAgentConnection: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            agentMemberId: string;
+            /** @enum {string} */
+            status: "pairing_pending" | "detected" | "active" | "expired" | "cleanup_pending" | "disconnected";
+            /** @enum {string} */
+            authMode: "static_bearer";
+            /** @enum {string} */
+            audience: "/v1/mcp/agent-port";
+            approvedChannelIds: string[];
+            approvedScopes: components["schemas"]["HostedAgentScope"][];
+            /** Format: uuid */
+            activeCredentialId?: string;
+            /** Format: int64 */
+            createdAtMs: number;
+            /** Format: int64 */
+            updatedAtMs: number;
+        };
+        CreateHostedAgentConnectionRequest: {
+            displayName: string;
+            handle: string;
+            /**
+             * @default static_bearer
+             * @enum {string}
+             */
+            authMode: "static_bearer";
+        };
+        CreateHostedAgentConnectionResponse: {
+            connection: components["schemas"]["HostedAgentConnection"];
+            /** @description One-time pairing bearer; only SHA-256 is persisted. */
+            readonly pairingCredential: string;
+            /** Format: int64 */
+            pairingExpiresAtMs: number;
+        };
+        HostedAgentConnectionResponse: {
+            connection: components["schemas"]["HostedAgentConnection"];
+        };
+        HostedAgentConnectionListResponse: {
+            connections: components["schemas"]["HostedAgentConnection"][];
+        };
+        ConfirmHostedAgentConnectionRequest: {
+            /** Format: uuid */
+            agentMemberId: string;
+            /** @enum {string} */
+            audience: "/v1/mcp/agent-port";
+            approvedChannelIds: string[];
+            approvedScopes: components["schemas"]["HostedAgentScope"][];
+            /** @enum {string} */
+            authMode: "static_bearer";
+        };
+        ConfirmHostedAgentConnectionResponse: {
+            connection: components["schemas"]["HostedAgentConnection"];
+            /** Format: uuid */
+            credentialId: string;
+            /** @description One-time Agent Port bearer; only SHA-256 is persisted. */
+            readonly credential: string;
+            /** @enum {string} */
+            tokenType: "Bearer";
+        };
         AgentCredential: {
             /** Format: uuid */
             id: string;
@@ -5535,6 +5667,260 @@ export interface operations {
                 };
             };
             429: components["responses"]["RateLimited"];
+        };
+    };
+    listHostedAgentConnections: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Hosted connections */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HostedAgentConnectionListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Human workspace owner/admin required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    createHostedAgentConnection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateHostedAgentConnectionRequest"];
+            };
+        };
+        responses: {
+            /** @description Dedicated identity and pairing challenge created atomically. */
+            201: {
+                headers: {
+                    "Cache-Control": "no-store";
+                    Pragma: "no-cache";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreateHostedAgentConnectionResponse"];
+                };
+            };
+            /** @description Invalid closed input */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Human workspace owner/admin required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Handle already exists */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    getHostedAgentConnection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+                connectionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Hosted connection */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HostedAgentConnectionResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Human workspace owner/admin required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Hosted connection not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    regenerateHostedAgentPairingChallenge: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+                connectionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Pairing challenge regenerated. */
+            200: {
+                headers: {
+                    "Cache-Control": "no-store";
+                    Pragma: "no-cache";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreateHostedAgentConnectionResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Human workspace owner/admin required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Hosted connection not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Active connection cannot regenerate */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    confirmHostedAgentConnection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+                connectionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConfirmHostedAgentConnectionRequest"];
+            };
+        };
+        responses: {
+            /** @description Credential issued once; first valid foundation call proves binding and unpauses. */
+            201: {
+                headers: {
+                    "Cache-Control": "no-store";
+                    Pragma: "no-cache";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfirmHostedAgentConnectionResponse"];
+                };
+            };
+            /** @description Invalid closed scopes/channels/auth mode */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Human workspace owner/admin required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Hosted connection not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Connection has not been detected or was already confirmed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     listAgentCredentials: {

@@ -188,6 +188,18 @@ pub async fn route_a2a_mentions_in_tx(
             .await?;
             continue;
         }
+        if agent.hosted_delivery_disabled {
+            skip_reason(
+                &mut *conn,
+                &send,
+                &trigger,
+                agent,
+                "hosted_delivery_not_enabled",
+                None,
+            )
+            .await?;
+            continue;
+        }
         if agent.paused {
             paused(&mut *conn, &send, &trigger, agent).await?;
             continue;
@@ -668,6 +680,7 @@ mod tests {
             max_run_steps: 50,
             workspace_settings: serde_json::json!({}),
             paused: false,
+            hosted_delivery_disabled: false,
             is_channel_member: true,
         };
         let block = A2aBlock::Depth {

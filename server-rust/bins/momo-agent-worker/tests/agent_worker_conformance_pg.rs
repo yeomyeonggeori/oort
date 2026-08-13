@@ -47,7 +47,8 @@ use std::process::Command;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use momo_agent::{create_agent_run_in_tx, NewAgentRun, RunTrigger};
+use momo_agent::{create_agent_run_in_tx, A2aLimits, NewAgentRun, RunTrigger};
+use momo_agent_worker::a2a::{route_a2a_mentions_in_tx, A2aSend};
 use momo_agent_worker::provider::{ChatProvider, MockChatProvider, ProviderError};
 use momo_agent_worker::{AgentWorker, WorkerConfig};
 use momo_db::migrate::{default_migrations_dir, run_migrations, SeedMode};
@@ -1451,4 +1452,193 @@ async fn a_provider_death_mid_answer_freezes_what_the_reader_already_read() {
     );
     let (status, _, _) = job_row(&su, job_id).await;
     assert_eq!(status, "failed");
+}
+
+/// HAP-E3 production exclusion is enforced by the actual worker consumer and
+/// the actual A2A producer, not merely by matching copies of their predicates.
+#[tokio::test]
+#[ignore = "requires DATABASE_URL to a throwaway pgvector/pg18 database"]
+async fn hosted_identities_never_enter_worker_claim_or_a2a_delivery() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    settle_residual_worker_jobs(&su).await;
+    let tenant = seed_tenant(&su).await;
+    let (source_run_id, _, source_job_id) =
+        enqueue_mention_turn(&su, &tenant, tenant.agent_id, "source run").await;
+    sqlx::query("UPDATE outbox SET status='done',processed_at=now() WHERE id=$1")
+        .bind(source_job_id)
+        .execute(&su)
+        .await
+        .expect("retire source fixture job");
+
+    for status in ["pairing_pending", "detected", "expired", "active"] {
+        let initial_status = if status == "active" {
+            "detected"
+        } else {
+            status
+        };
+        let hosted_id = seed_second_agent(&su, &tenant).await;
+        let connection_id = Uuid::new_v4();
+        sqlx::query(
+            "UPDATE agent SET model='hosted-agent', \
+               base_url='https://hosted-agent.invalid/disabled', \
+               config=jsonb_build_object('execution_mode','hosted_dial_in') \
+             WHERE workspace_id=$1 AND member_id=$2",
+        )
+        .bind(tenant.workspace_id)
+        .bind(hosted_id)
+        .execute(&su)
+        .await
+        .expect("seal hosted sentinel");
+        sqlx::query(
+            "INSERT INTO hosted_agent_connection( \
+               id,workspace_id,agent_member_id,status,pairing_challenge_hash,pairing_expires_at, \
+               pairing_consumed_at,detected_at,detected_by,confirmed_by,confirmed_at, \
+               approved_scopes,created_by \
+             ) VALUES ($1,$2,$3,$4,digest($5,'sha256'), \
+               CASE WHEN $4='expired' THEN now()-interval '1 second' ELSE now()+interval '1 hour' END, \
+               CASE WHEN $4 IN ('detected','active') THEN now() END, \
+               CASE WHEN $4 IN ('detected','active') THEN now() END, \
+               CASE WHEN $4 IN ('detected','active') THEN $3 END, \
+               CASE WHEN $4='active' THEN $6 END, CASE WHEN $4='active' THEN now() END, \
+               CASE WHEN $4='active' THEN ARRAY['agent:port:connect']::text[] ELSE '{}'::text[] END,$6)",
+        )
+        .bind(connection_id)
+        .bind(tenant.workspace_id)
+        .bind(hosted_id)
+        .bind(initial_status)
+        .bind(format!("hosted-{status}"))
+        .bind(tenant.human_id)
+        .execute(&su)
+        .await
+        .expect("seed hosted lifecycle row");
+        if status == "active" {
+            let token_id = Uuid::new_v4();
+            sqlx::query(
+                "WITH inserted AS (INSERT INTO token(id,workspace_id,actor_member_id,kind,token_hash,scopes,label, \
+                  credential_class,hosted_connection_id,audience,created_by) \
+                 VALUES ($1,$2,$3,'agent_bearer',digest('hosted-active','sha256'), \
+                  ARRAY['agent:port:connect'],'hosted test','hosted_active',$4, \
+                  '/v1/mcp/agent-port',$5) RETURNING id), \
+                 updated AS (UPDATE hosted_agent_connection SET status='active', \
+                  active_token_id=(SELECT id FROM inserted),confirmed_by=$5,confirmed_at=now(), \
+                  approved_scopes=ARRAY['agent:port:connect'],proved_at=now(),proved_by=$3 \
+                  WHERE workspace_id=$2 AND id=$4 RETURNING id), \
+                 profiled AS (INSERT INTO agent_profile(workspace_id,agent_member_id,paused,updated_by) \
+                  SELECT $2,$3,false,$5 FROM updated RETURNING agent_member_id) \
+                 SELECT count(*) FROM profiled",
+            )
+            .bind(token_id)
+            .bind(tenant.workspace_id)
+            .bind(hosted_id)
+            .bind(connection_id)
+            .bind(tenant.human_id)
+            .execute(&su)
+            .await
+            .expect("activate hosted fixture");
+        }
+
+        let hosted_job_id: i64 = sqlx::query_scalar(
+            "INSERT INTO outbox(workspace_id,kind,status,method,payload,partition_key) \
+             VALUES ($1,'agent_job','pending','publish',jsonb_build_object('agent_member_id',$2),$2) \
+             RETURNING id",
+        )
+        .bind(tenant.workspace_id)
+        .bind(hosted_id)
+        .fetch_one(&su)
+        .await
+        .expect("seed hosted worker job");
+        let claimed = momo_outbox::claim_agent_job_batch(
+            &momo_worker_pool().await,
+            100,
+            DEFAULT_WORKER_LEASE_SECONDS,
+        )
+        .await
+        .expect("invoke actual worker claim");
+        assert!(
+            claimed.iter().all(|job| job.id != hosted_job_id),
+            "{status}: actual worker claim admitted hosted job"
+        );
+        let claim_state: (String, i32, bool) = sqlx::query_as(
+            "SELECT status::text,attempts,lease_owner IS NULL FROM outbox WHERE id=$1",
+        )
+        .bind(hosted_job_id)
+        .fetch_one(&su)
+        .await
+        .expect("read hosted claim state");
+        assert_eq!(claim_state, ("pending".into(), 0, true));
+
+        let body = format!("@{} do not delegate", hosted_id);
+        let workspace_id = tenant.workspace_id;
+        let channel_id = tenant.channel_id;
+        let author_id = tenant.agent_id;
+        let (run_before, jobs_before, messages_before): (i64, i64, i64) = sqlx::query_as(
+            "SELECT (SELECT count(*) FROM agent_run WHERE workspace_id=$1 AND agent_member_id=$2), \
+                    (SELECT count(*) FROM outbox WHERE workspace_id=$1 AND kind='agent_job'), \
+                    (SELECT count(*) FROM message WHERE workspace_id=$1)",
+        )
+        .bind(workspace_id)
+        .bind(hosted_id)
+        .fetch_one(&su)
+        .await
+        .expect("read A2A baseline");
+        let routing = with_tenant_tx(&su, workspace_id, move |conn| {
+            Box::pin(async move {
+                let reply = send_message_in_tx(
+                    conn,
+                    workspace_id,
+                    NewMessage::text(channel_id, author_id, body.clone()),
+                )
+                .await?;
+                route_a2a_mentions_in_tx(
+                    conn,
+                    A2aSend {
+                        workspace_id,
+                        channel_id,
+                        message_id: reply.message.id,
+                        message_seq: reply.message.seq,
+                        author_agent_member_id: author_id,
+                        source_run_id,
+                        body: &body,
+                        hlc_ts: reply.message.hlc_ts,
+                        gateway_enabled: false,
+                        context_max_messages: 20,
+                        limits: A2aLimits::default(),
+                    },
+                )
+                .await
+            })
+        })
+        .await
+        .expect("invoke actual A2A producer");
+        assert!(
+            routing.delegated.is_empty(),
+            "{status}: A2A delegated hosted identity"
+        );
+        let after: (i64, i64, i64) = sqlx::query_as(
+            "SELECT (SELECT count(*) FROM agent_run WHERE workspace_id=$1 AND agent_member_id=$2), \
+                    (SELECT count(*) FROM outbox WHERE workspace_id=$1 AND kind='agent_job'), \
+                    (SELECT count(*) FROM message WHERE workspace_id=$1)",
+        )
+        .bind(workspace_id)
+        .bind(hosted_id)
+        .fetch_one(&su)
+        .await
+        .expect("read A2A result");
+        assert_eq!(after.0, run_before, "{status}: A2A inserted hosted run");
+        assert_eq!(
+            after.1, jobs_before,
+            "{status}: A2A inserted hosted job/outbox"
+        );
+        assert_eq!(
+            after.2,
+            messages_before + 1,
+            "{status}: only source reply may persist"
+        );
+        sqlx::query("UPDATE outbox SET status='done',processed_at=now() WHERE id=$1")
+            .bind(hosted_job_id)
+            .execute(&su)
+            .await
+            .expect("retire hosted fixture job");
+    }
 }

@@ -825,6 +825,7 @@ pub struct EligibleAgent {
     /// `agent_profile.paused`, defaulted to `false` when the agent has no
     /// profile row: an agent nobody has configured is not a paused agent.
     pub paused: bool,
+    pub hosted_delivery_disabled: bool,
     /// `agent.tool_schema` — the operator's own provider-format function defs
     /// (goal SRV-B5a). Read here so a **work** run carries the same two tool
     /// sources a mention does; before this the work payload had no `tools` key
@@ -855,6 +856,9 @@ pub async fn load_eligible_agent_in_tx(
         "SELECT a.model, a.max_run_steps, a.max_concurrent_runs, \
                 a.tool_schema, ap.enabled_tools, \
                 COALESCE(ap.paused, false) AS paused \
+                , EXISTS (SELECT 1 FROM hosted_agent_connection hc \
+                           WHERE hc.workspace_id = m.workspace_id AND hc.agent_member_id = m.id) \
+                    AS hosted_delivery_disabled \
            FROM member m \
            JOIN agent a ON a.member_id = m.id AND a.workspace_id = m.workspace_id \
            JOIN membership ms \
@@ -899,6 +903,7 @@ pub async fn load_eligible_agent_in_tx(
         max_run_steps: row.try_get("max_run_steps")?,
         max_concurrent_runs: row.try_get("max_concurrent_runs")?,
         paused: row.try_get("paused")?,
+        hosted_delivery_disabled: row.try_get("hosted_delivery_disabled")?,
         tool_schema: row.try_get("tool_schema")?,
         enabled_tools,
     }))

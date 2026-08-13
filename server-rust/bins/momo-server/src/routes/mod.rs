@@ -22,6 +22,7 @@ pub mod ephemeral;
 /// #1222 — 이벤트 구독: what leaves the workspace, and who said it could.
 pub mod event_subscriptions;
 pub mod health;
+pub mod hosted_agent_connections;
 pub mod invites;
 pub mod join;
 pub mod messages;

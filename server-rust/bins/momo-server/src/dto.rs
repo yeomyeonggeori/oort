@@ -2617,6 +2617,74 @@ pub struct CreateAgentResponse {
     pub agent: AgentMemberDto,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CreateHostedAgentConnectionRequest {
+    pub display_name: String,
+    pub handle: String,
+    #[serde(default = "default_static_bearer")]
+    pub auth_mode: String,
+}
+
+fn default_static_bearer() -> String {
+    "static_bearer".to_string()
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HostedAgentConnectionDto {
+    pub id: String,
+    pub agent_member_id: String,
+    pub status: String,
+    pub auth_mode: String,
+    pub audience: String,
+    pub approved_channel_ids: Vec<String>,
+    pub approved_scopes: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub active_credential_id: Option<String>,
+    pub created_at_ms: i64,
+    pub updated_at_ms: i64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateHostedAgentConnectionResponse {
+    pub connection: HostedAgentConnectionDto,
+    /// Returned once. PostgreSQL stores only sha256(pairingCredential).
+    pub pairing_credential: String,
+    pub pairing_expires_at_ms: i64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct HostedAgentConnectionResponse {
+    pub connection: HostedAgentConnectionDto,
+}
+
+#[derive(Debug, Serialize)]
+pub struct HostedAgentConnectionListResponse {
+    pub connections: Vec<HostedAgentConnectionDto>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ConfirmHostedAgentConnectionRequest {
+    pub agent_member_id: Uuid,
+    pub audience: String,
+    pub approved_channel_ids: Vec<Uuid>,
+    pub approved_scopes: Vec<String>,
+    pub auth_mode: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfirmHostedAgentConnectionResponse {
+    pub connection: HostedAgentConnectionDto,
+    pub credential_id: String,
+    /// Returned once. PostgreSQL stores only sha256(credential).
+    pub credential: String,
+    pub token_type: &'static str,
+}
+
 /// Generic agent bearer metadata. There is deliberately no raw token, digest,
 /// or envelope prefix in this reusable projection.
 #[derive(Debug, Serialize)]

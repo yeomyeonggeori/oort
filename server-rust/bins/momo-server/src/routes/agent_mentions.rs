@@ -233,6 +233,21 @@ pub(crate) async fn route_agent_mentions_in_tx(
             .await?;
             continue;
         }
+        // HAP-E3 provisions reachability and identity only. Until E5/E6 land,
+        // a hosted connection must not enter the legacy gateway/outbox path,
+        // even after proof atomically unpauses its profile.
+        if agent.hosted_delivery_disabled {
+            skip(
+                &mut *conn,
+                &send,
+                &trigger,
+                agent,
+                *addressing,
+                "hosted_delivery_not_enabled",
+            )
+            .await?;
+            continue;
+        }
         if agent.paused {
             paused(&mut *conn, &send, &trigger, agent, *addressing).await?;
             continue;
@@ -585,6 +600,7 @@ mod tests {
             max_run_steps: 50,
             workspace_settings: serde_json::json!({}),
             paused: false,
+            hosted_delivery_disabled: false,
             is_channel_member: true,
         }
     }

@@ -735,6 +735,23 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/agents/{agent}/credentials/{credential}/revoke",
             post(routes::agent_credentials::revoke),
         )
+        .route(
+            "/v1/workspaces/{ws}/hosted-agent-connections",
+            post(routes::hosted_agent_connections::create)
+                .get(routes::hosted_agent_connections::list),
+        )
+        .route(
+            "/v1/workspaces/{ws}/hosted-agent-connections/{connection}",
+            get(routes::hosted_agent_connections::get),
+        )
+        .route(
+            "/v1/workspaces/{ws}/hosted-agent-connections/{connection}/pairing-challenge/regenerate",
+            post(routes::hosted_agent_connections::regenerate),
+        )
+        .route(
+            "/v1/workspaces/{ws}/hosted-agent-connections/{connection}/confirm",
+            post(routes::hosted_agent_connections::confirm),
+        )
         // B5.3a completes the pair: B5.2 could read a profile and respect
         // `paused`, but nothing could write either — an agent's behaviour was
         // fixed at birth and the only way to stop one was to remove it from
