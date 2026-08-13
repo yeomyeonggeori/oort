@@ -5,6 +5,22 @@
 
 ---
 
+## 2026-08-13 (GPT 5.6 sol · momo-main) · HAP-E2 final freeze C0/H0/M0
+- #1363은 dual-era sessionless MCP, membership-bound static bearer, atomic limiter와 closed transport/OpenAPI를 구현하고 실제 PG18·deploy image·OpenAPI 57/57+54/54를 통과했다.
+- verifier의 secret/foreign-resource/signal/tri-state/header/SIGPIPE 경계를 적대 fixture와 teardown-before-PASS로 닫았고 독립 security 최종 판정은 C0/H0/M0, Docker·lock 잔존은 0이다.
+- Fable 복구 순서는 이 planning checkpoint 랜딩 → #1363 PR/review/track-engine 랜딩 → #1358 rebase·재검증·PR이며 #1364는 계속 blocked다.
+
+## 2026-08-13 (GPT 5.6 sol · momo-main) · HAP-E1 안전 커밋·E2 security closure
+- #1358은 foreign-resource 보존 cleanup, 실제 PG18, Rust/OpenAPI/generated gates를 닫고 `79af361f`로 branch push했다. full runtime-db는 기존 prod verifier required-env drift로 중단했으며 PR은 #1363 뒤 rebase·재검증할 때 연다.
+- #1363은 SELECT-only bearer+membership resolve와 atomic token/member limiter, allow-only use mutation으로 429 DB-write flood를 수리했다.
+- 남은 일은 #1363 verifier secret/Compose ownership·transport bounds·runtime gates와 독립 보안 freeze다. 통합 순서 #1363→#1358, #1364 blocked는 불변이다.
+
+## 2026-08-13 (GPT 5.6 sol · momo-main) · HAP-E1/E2 중단 복구·재개
+- #1358/#1363 독립 worktree의 HEAD·dirty file set·binary diff/file manifest SHA-256을 재고정하고 원격 Issue에 Fable용 복구 체크포인트를 남겼다. 두 Project item은 실제 작업 상태에 맞춰 `In Progress`로 정렬했다.
+- #1358은 foreign Docker resource 보존형 cleanup과 실제 PG18/Rust/OpenAPI 게이트를 닫는 중이고, #1363은 429 이전 DB side effect·membership 재검증 누락·secret argv·transport bounds를 우선 수정 중이다.
+- 통합은 공용 파일 충돌을 줄이기 위해 #1363 먼저 리뷰·랜딩, #1358 rebase·재검증 후 랜딩으로 고정했다. #1364는 둘 다 닫힐 때까지 blocked다.
+- 각 중요한 결정/blocker/gate는 Issue comment와 PR `STATUS.md`/계획 이탈에 즉시 남기며, PR handoff/랜딩마다 CURRENT_STATE를 다시 supersede한다.
+
 ## 2026-08-12 (GPT 5.6 sol · momo-main) · #1344 3차 — private MCP transport·Routine·cleanup 측정 완료
 - 공식 MIT Create Plugin으로 비공개 local plugin을 만들자 loader의 legacy `POST initialize`·fallback `GET`이 공개 Agent Port에서 HTTP/2 404로 끝났다. 최신 2026-07-28 modern core는 `server/discover`/per-request metadata이고, #1363은 exact 2025-11-25 compatibility를 함께 소유한다.
 - Active-off monthly routine은 수동 Test run 약 1분 뒤 sentinel과 `Succeeded`를 냈고, Delete가 확인 없이 즉시 목록에서 제거했다.

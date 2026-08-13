@@ -1,5 +1,37 @@
 # oort 기획 현재 상태 (Planning Current State)
 
+> **2026-08-13 스냅샷 28 (GPT 5.6 sol · momo-main — HAP-E2 최종 보안 승인, PR 준비).** 스냅샷 27을 supersede한다.
+>
+> **#1363 HAP-E2 최종 고정본:** modern MCP `2026-07-28`와 exact legacy `2025-11-25`의 sessionless Agent Port foundation, static bearer 전용 auth, active workspace membership 재검증, side-effect-free resolve→atomic token/member limiter→allow-only usage finalize, closed transport/OpenAPI 계약을 구현했다. runtime verifier는 secret argv·mutable image·foreign resource·signal cleanup·Docker 판독 오류·response-header leak·SIGPIPE absence 오판을 fail-closed로 수리했다. 최종 diff/32-file manifest SHA-256은 `b38dea2073969c2ce24df979c653b3352abae8bedb42f36fea9f834f11fcb758` / `2356f0ff200071a7a20fb13e66c1fd1d391f38f749602ac97f2af61ef04877e9`이며 독립 security 판정은 C0/H0/M0이다.
+>
+> **검증:** workspace clippy `-D warnings`와 tests, changed-Rust fmt, protocol 22/22, transport 5/5, limiter 9/9, 실제 PG18/RLS 2/2+deploy-image smoke, OpenAPI 57/57 samples+54/54 operations, daemon-free adversarial cleanup fixtures가 PASS했다. 두 실제 gate 모두 teardown/absence proof 뒤 PASS했고 exact/global Docker resource와 invocation lock 잔존은 0이다. process-local limiter의 restart/replica 배수, rotating-IP cardinality, 실제 Grok exact-version/tool-call은 명시적 nonblocking/runtime-unverified다.
+>
+> **다음 복구 행동:** 이 체크포인트를 `track/engine`에 먼저 랜딩한 뒤 #1363을 최신 base에 rebase하고 PR/needs-review/policy-integrity 절차를 수행한다. #1363 랜딩 뒤에만 #1358 commit `79af361f`를 rebase해 공용 auth/OpenAPI/local-gate 충돌을 해소하고 재검증한다. #1364는 계속 blocked다.
+>
+> 이하 스냅샷 27의 #1358 안전 커밋 정보는 유효하지만 #1363의 “수리 중/freeze 전” 상태는 스냅샷 28이 대체한다.
+
+> **2026-08-13 스냅샷 27 (GPT 5.6 sol · momo-main — HAP-E1 안전 커밋, E2 보안 수리 진행).** 스냅샷 26을 supersede한다.
+>
+> **#1358 HAP-E1:** credential issue/list/rotate/revoke lifecycle과 Rust/PG18/OpenAPI/verifier 계약을 commit `79af361fe5fe44969d3b502b43b951900a9c9cc9`(tree `10342b1587a5149841a2af88f539dc8581ee5794`)로 branch에 push했다. branch는 upstream과 ahead/behind 0/0, worktree clean이다. focused PG18, workspace clippy/tests, Rust-image OpenAPI, generated/docs/cleanup mutation은 PASS했다. full runtime-db는 #1358 밖 기존 prod verifier의 required env drift(`PROVIDER_LINK_MASTER_KEY` 다음 `MOMO_WORKHOST_IMAGE` 누락)로 82단계 뒤 중단했고 반복 실행하지 않았다. PR은 #1363 선랜딩 후 rebase·재검증한 최종 바이트에서 연다.
+>
+> **#1363 HAP-E2:** Agent Port auth를 SELECT-only bearer+active membership resolve → token/member atomic multi-axis limiter → allow-only conditional `last_used_at`+used audit으로 재구성했다. denied 축이 open 축 quota를 소비하지 않고 Retry-After는 ceil하며, 429 audit은 window당 bounded다. runtime/OpenAPI verifier의 raw secret argv·고정 Compose project/foreign cleanup·secret evidence retention과 transport header bounds를 함께 수리 중이다. 아직 freeze/PR 전이다.
+>
+> **다음 복구 행동:** #1363 focused PG·runtime image·OpenAPI·Rust hard gates와 독립 security C/H/M=0을 닫고 먼저 PR handoff한다. 그 뒤 #1358을 최신 `track/engine`에 rebase해 공용 auth/OpenAPI/local-gate 충돌을 해소하고 전체 focused gate를 재실행한다. #1364는 계속 blocked다.
+>
+> 이하 스냅샷 26의 중단 시점 SHA와 발견 blocker는 역사 증거로 유효하지만, #1358의 dirty-worktree 표기는 스냅샷 27이 대체한다.
+
+> **2026-08-13 스냅샷 26 (GPT 5.6 sol · momo-main — HAP-E1/E2 중단 복구·구현 재개).** 스냅샷 25를 supersede하는 구현 복구 지점이다.
+>
+> **활성 goal:** 엔진 트랙에서 #1358(HAP-E1 credential lifecycle)과 #1363(HAP-E2 dual-era MCP Agent Port)이 `status:in-progress`, Project #44 `In Progress`다. 둘 다 `track/engine@6aee53e8d5d6fc80b83deee62e1c7bb2943b6663`에서 만든 독립 worktree에 있으며 root/main은 수정하지 않는다. #1358 중단 diff/manifest SHA-256은 각각 `2c438c891b5b03e5e75c820926c7ecae5928ad5b9b2d86191aee793c9587f773` / `bd1e7fd2615d3199bb4a29545597d7667f29ff8251685acd009f74d01ad973e6`, #1363은 `1cfb82beba34563f028314c87e4f04ecc09d620adebb6c151621a5ad3bfd4bc4` / `b56e9721ef9a8e22fc8848998e0c59e2bd99118dfa0647fd6362eb384a12f94d`로 보존을 확인했다. 같은 내용은 각 원격 Issue의 2026-08-13 재개 체크포인트에 있다.
+>
+> **#1358 현재:** Rust issue/list/rotate/revoke, one-time raw response, hash-at-rest, scope/expiry/revoke/audit/RLS, OpenAPI/generated/PG verifier가 구현됐다. runtime verifier cleanup은 128-bit invocation label과 Docker immutable ID/name/label 결속으로 보강했고 foreign-resource mutation fixture와 실제 PG18 conformance가 PASS했다. workspace clippy/test, Rust-image OpenAPI도 PASS; docs/runtime-db 전체 gate와 final diff review가 남았다. 변경 밖 기준 브랜치의 선재 rustfmt drift는 별도 deviation/evidence로 기록하고 무관 파일은 수정하지 않는다.
+>
+> **#1363 현재:** modern MCP `2026-07-28` + exact legacy `2025-11-25` pure dispatcher(20 tests), Agent Port route/auth/origin/rate/OpenAPI/docs/runtime skeleton까지 구현됐다. 보안 재검수에서 (1) token/agent 429 전에 `last_used_at`·used audit을 commit하는 DB-write flood, (2) 매 요청 `workspace_membership` 재검증 누락, (3) verifier secret의 argv 노출, (4) malformed/oversize transport header 경계를 발견했다. side-effect-free tenant resolver → stable-ID limiter → allow-only finalize, bounded first-denial audit 및 membership/revoke concurrency RED로 수정 중이다. Docker Desktop은 재시작 뒤 응답하며 비소유 자원 삭제는 금지한다.
+>
+> **통합 순서·Fable 인계:** 구현 검증은 병렬로 끝내지만 공용 `momo-auth/src/lib.rs`, OpenAPI, `scripts/local_gate.sh` 충돌 때문에 momo-main은 **#1363 리뷰·랜딩 → #1358 최신 `track/engine` rebase·재검증·랜딩** 순서로 통합한다. 결정·blocker·gate는 Issue checkpoint + 각 PR의 `STATUS.md`/계획 이탈에 누적하고, 첫 랜딩과 각 PR handoff 때 이 스냅샷/JOURNAL을 다시 갱신한다. #1364는 두 dependency가 모두 닫히기 전까지 blocked다.
+>
+> 이하 스냅샷 25는 **HAP-E1/E2 구현 착수 전의 제품 실측 완료 상태**다. 제품 증거는 여전히 유효하지만 활성 구현·blocker·머지 순서는 스냅샷 26이 대체한다.
+
 > **2026-08-12 스냅샷 25 (GPT 5.6 sol · momo-main — #1344 private MCP transport·Routine·cleanup 실측 완료).** 스냅샷 24를 supersede한다.
 >
 > **custom MCP transport 검증:** 공식 MIT `Create Plugin`을 설치하고 비공개·미게시 local plugin `oort-integration-trial`을 `plugin.json`·`mcp.json` 두 파일로 만들었다. 공개 `https://app.oor7.com/v1/mcp/agent-port`를 등록하자 Grok/Cursor loader가 legacy-era `POST initialize`와 fallback `GET`을 보냈고, Caddy를 지난 두 요청 모두 아직 없는 route에서 HTTP/2 404 empty response로 끝났다. Yours UI는 수동 추가·HTTP·URL·`Tools 0`과 load failure를 표시했다. 이는 loader→oort transport를 검증하지만 auth challenge 이전 실패라 requested legacy version·auth mode·pairing·tool call을 증명하지 않는다. 공식 `Create Plugin` helper는 측정 뒤 uninstall했다.
