@@ -2617,6 +2617,71 @@ pub struct CreateAgentResponse {
     pub agent: AgentMemberDto,
 }
 
+/// Generic agent bearer metadata. There is deliberately no raw token, digest,
+/// or envelope prefix in this reusable projection.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentCredentialDto {
+    pub id: String,
+    pub agent_member_id: String,
+    pub status: &'static str,
+    pub scopes: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_used_at_ms: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expires_at_ms: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub revoked_at_ms: Option<i64>,
+    pub created_at_ms: i64,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CreateAgentCredentialRequest {
+    #[serde(default)]
+    pub scopes: Option<Vec<String>>,
+    #[serde(default)]
+    pub label: Option<String>,
+    #[serde(default)]
+    pub expires_at_ms: Option<i64>,
+    #[serde(default)]
+    pub rotation_grace_seconds: Option<i64>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateAgentCredentialResponse {
+    pub credential: AgentCredentialDto,
+    /// Returned once; PostgreSQL stores only `sha256(token)`.
+    pub token: String,
+    pub token_type: &'static str,
+    pub rotated_credential_count: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rotation_grace_ends_at_ms: Option<i64>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AgentCredentialListResponse {
+    pub credentials: Vec<AgentCredentialDto>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RevokeAgentCredentialRequest {
+    #[serde(default)]
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RevokeAgentCredentialResponse {
+    pub credential: AgentCredentialDto,
+    pub revoked_now: bool,
+    pub already_revoked: bool,
+}
+
 /// Swift `AgentProfileDTO` (:562-575).
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]

@@ -61,6 +61,7 @@
 //! makes the 휘발 publish path provably Postgres-free (ADR-0149 guard 3).
 
 pub mod agent_bearer;
+pub mod agent_credential;
 pub mod agent_scope;
 pub mod ephemeral_grant;
 pub mod issue;
@@ -76,6 +77,18 @@ pub use agent_bearer::{
     agent_bearer_workspace_id, finalize_agent_bearer_use_in_tx, resolve_agent_bearer_in_tx,
     AgentBearerIdentity, AgentBearerRejection, AgentBearerResolution, AGENT_BEARER_PREFIX,
     AUDIT_ACTION_SCOPE_DENIED, AUDIT_ACTION_USED, AUDIT_DETAIL_SCHEMA,
+};
+pub use agent_credential::{
+    active_agent_for_credential_list, agent_credential_requires_instance_operator,
+    issue_agent_credential_in_tx, list_agent_credentials_in_tx, mint_agent_bearer,
+    normalized_agent_credential_label, normalized_agent_credential_reason,
+    normalized_agent_credential_scopes, revoke_agent_credential_in_tx,
+    validated_agent_credential_expiry, validated_rotation_grace_seconds, AgentCredentialInputError,
+    AgentCredentialIssuance, AgentCredentialIssueError, AgentCredentialMutation,
+    AgentCredentialMutationPolicy, AgentCredentialRecord, AgentCredentialRevocation,
+    AgentCredentialStatus, AUDIT_ACTION_ISSUED, AUDIT_ACTION_REVOKED, AUDIT_SCHEMA_ISSUED,
+    AUDIT_SCHEMA_REVOKED, DEFAULT_AGENT_CREDENTIAL_LABEL, DEFAULT_AGENT_CREDENTIAL_SCOPES,
+    DEFAULT_ROTATION_GRACE_SECONDS, HOSTED_CONNECTION_MANAGED_CODE, MAXIMUM_ROTATION_GRACE_SECONDS,
 };
 pub use agent_scope::{
     is_gateway_callback_route, required_agent_scope, SCOPE_AGENT_JOBS_READ,

@@ -22,10 +22,9 @@
 # **사람 bearer 하나로는 닿을 수 없는 표면**을 갖게 됐다. 그래서 호출자가 셋이다:
 #
 #   * App JWT (`Authorization: Bearer …`) — 로그인이 준다. 대부분의 표본.
-#   * agent bearer (`momo_agent_v1.{ws}.{secret}`) — `POST …/work-controls`와
-#     POST-only Agent Port가 각각 닫힌 scope로 요구한다(momo_auth::agent_scope).
-#     이 검증기는 #1358 lifecycle의 랜딩 순서와 무관하게 scope를 정확히 고정하려고
-#     전용 SQL fixture를 사용한다.
+#   * agent bearer (`momo_agent_v1.{ws}.{secret}`) — HAP-E1 관리 API가 한 번만
+#     반환하고 `POST …/work-controls`와 POST-only Agent Port가 각각 닫힌 scope로
+#     요구한다. 발급 API부터 두 consumer까지 실제 한 경로로 왕복한다.
 #   * work-host 서명 (`Authorization: MomoHost {hostId}` + v2 서명 3 헤더) —
 #     데몬이 `pending-controls` 를 읽고 `…/ack` 로 「실행했다」를 보고하는 경로.
 #     ack 을 요청자와 **다른** 자격증명이 하는 것이 #1143 이 연 그 문장이므로,
@@ -185,6 +184,13 @@ needle_scan_state() {
   esac
 }
 
+# Envelope-shaped agent bearers are secrets regardless of JSON key, response
+# status, or whether the exact value has already been registered as a needle.
+# This is the final guard used by every diagnostic output path.
+redact_agent_envelopes() {
+  sed -E 's/momo_agent_v1\.[A-Za-z0-9._~-]+/[REDACTED_AGENT_BEARER]/g'
+}
+
 if [ "${1:-}" = "--verify-cleanup-contract" ]; then
   owned_binding_matches id1 id1 /name /name nonce nonce project project || exit 1
   for mutation in id name nonce project; do
@@ -291,6 +297,12 @@ if [ "${1:-}" = "--verify-cleanup-contract" ]; then
   header_scan_rc=0
   needle_scan_state "$selftest_dir/needles" "$selftest_dir/missing-headers" || header_scan_rc=$?
   [ "$header_scan_rc" -eq 2 ] || { echo "[openapi-rust] response-header read error was false-clean" >&2; exit 1; }
+  unknown_key_fixture='{"unexpectedDebug":"momo_agent_v1.00000000-0000-7000-8000-000000000001.unknownSecret"}'
+  non_201_fixture='HTTP 500 echoed momo_agent_v1.00000000-0000-7000-8000-000000000001.non201Secret'
+  redacted_fixture="$(printf '%s\n%s' "$unknown_key_fixture" "$non_201_fixture" | redact_agent_envelopes)"
+  ! printf '%s' "$redacted_fixture" | grep -Fq 'momo_agent_v1.' || {
+    echo "[openapi-rust] unknown-key/non-201 bearer envelope escaped global redaction" >&2; exit 1;
+  }
   DOCKER_BIN="$original_docker_bin"
   unset FAKE_DOCKER_STATE FAKE_DOCKER_REF FAKE_INSPECT FAKE_LIST FAKE_REMOVE
   rm -r -- "$selftest_dir"
@@ -479,7 +491,7 @@ gate_fail() {
   FAILURE_COUNT=$((FAILURE_COUNT + 1))
   printf '%s\n' "[$FAILURE_COUNT] $name: $detail" >>"$FAILURE_LOG"
   echo "[openapi-rust] FAIL $name: $detail" >&2
-  [ -n "$body" ] && printf '%s\n' "$body" >&2
+  [ -n "$body" ] && printf '%s\n' "$body" | redact_agent_envelopes >&2
   return 0
 }
 
@@ -509,7 +521,7 @@ redact_json() {
         then .value = "[REDACTED]"
         else . end
       )
-    elif type == "string" and contains_secret then "[REDACTED]"
+    elif type == "string" and (contains_secret or test("momo_agent_v1\\.[A-Za-z0-9._~-]+")) then "[REDACTED]"
     else . end
   )' 2>/dev/null || printf '%s' '[non-json response redacted]'
 }
@@ -538,17 +550,11 @@ GATE_PEER_ID="$(lower_uuid)"          # DM 상대. 자기 자신과는 DM 이 �
 GATE_PEER_EMAIL="rust-gate-peer-$RUN_ID@momo.local"
 GATE_AGENT_ID="$(lower_uuid)"         # work-control 을 요청하는 에이전트.
 GATE_AGENT_HANDLE="rust-gate-agent-$RUN_EPOCH"
-# agent bearer 형식은 `momo_agent_v1.{ws}.{secret}` 이고 저장되는 것은 sha256
-# 다이제스트뿐이다(momo_auth::agent_bearer). 이 gate는 #1358 lifecycle을 호출하지
-# 않고 SQL fixture로 exact scope를 심어 두 goal의 실행·랜딩 순서를 독립시킨다.
-# 첫 토큰은 work-control과 Agent Port를 각각 실제 scope로 왕복시키며, 둘째는
-# Agent Port의 insufficient_scope 경계를 증명하는 대조군이다.
-GATE_AGENT_TOKEN="momo_agent_v1.$DEMO_WORKSPACE_ID.$(rand_hex)$(rand_hex)"
-GATE_AGENT_NO_PORT_TOKEN="momo_agent_v1.$DEMO_WORKSPACE_ID.$(rand_hex)$(rand_hex)"
-GATE_AGENT_SECRET="${GATE_AGENT_TOKEN##*.}"
-GATE_AGENT_NO_PORT_SECRET="${GATE_AGENT_NO_PORT_TOKEN##*.}"
-GATE_AGENT_TOKEN_HASH="$(printf '%s' "$GATE_AGENT_TOKEN" | "$OPENSSL_BIN" dgst -sha256 -binary | xxd -p -c 256)"
-GATE_AGENT_NO_PORT_TOKEN_HASH="$(printf '%s' "$GATE_AGENT_NO_PORT_TOKEN" | "$OPENSSL_BIN" dgst -sha256 -binary | xxd -p -c 256)"
+# HAP-E1 관리 API에서 런타임에 발급한다. 둘 다 원문은 프로세스의 private
+# scratch에서만 읽고 즉시 secret needle로 등록한다.
+GATE_AGENT_TOKEN=""
+GATE_AGENT_NO_PORT_TOKEN=""
+GATE_AGENT_CREDENTIAL_ID=""
 CONTROL_RUN_UUID="$(lower_uuid)"      # work-control 이 붙을 running 런.
 CANCEL_RUN_UUID="$(lower_uuid)"       # 사람의 「멈춰라」 표본용 queued 런.
 INVITE_CODE="rust-gate-invite-$RUN_ID"
@@ -695,6 +701,22 @@ append_secret_with_derivatives() {
   append_secret_needle "$digest"
 }
 
+load_private_response_body() {
+  local matches='' scan_rc=0 match
+  [ "$(file_identity "$RAW_RESPONSE_FILE")" = "${SECRET_IDENTITIES[3]}" ] || return 1
+  matches="$(LC_ALL=C grep -Eo 'momo_agent_v1\.[A-Za-z0-9._~-]+' -- "$RAW_RESPONSE_FILE")" || scan_rc=$?
+  case "$scan_rc" in
+    0)
+      while IFS= read -r match; do
+        append_secret_with_derivatives "$match" || return 1
+      done <<<"$matches"
+      ;;
+    1) ;;
+    *) return 1 ;;
+  esac
+  RESPONSE_BODY="$(cat "$RAW_RESPONSE_FILE")"
+}
+
 set_curl_bearer() {
   local token="$1"
   if [ -n "$token" ]; then
@@ -723,8 +745,7 @@ refresh_request_body() {
 }
 
 for secret_value in \
-  "$GATE_AGENT_TOKEN" "$GATE_AGENT_NO_PORT_TOKEN" \
-  "$GATE_AGENT_SECRET" "$GATE_AGENT_NO_PORT_SECRET" "$GATE_PASSWORD" \
+  "$GATE_PASSWORD" \
   "$JOIN_PASSWORD" "$PG_PASSWORD" "$APP_PASSWORD" "$RELAY_PASSWORD" \
   "$WORKER_PASSWORD" "$INVITE_CODE" "$JWT_HMAC" "$CENT_TOKEN_HMAC" \
   "$CENT_API_KEY" "$CENT_PROXY_SECRET" "$PROVIDER_LINK_MASTER_KEY"; do
@@ -1498,16 +1519,6 @@ VALUES ('$GATE_AGENT_ID', '$DEMO_WORKSPACE_ID', 'hermes-agent',
         'https://hermes.openapi.example.test/v1',
         'openapi rust sample pass', '$GATE_MEMBER_ID');
 
--- 원문 토큰은 이 셸에만 있고 PostgreSQL 에는 sha256 다이제스트만 들어간다.
-INSERT INTO token
-  (workspace_id, kind, actor_member_id, subject_member_id, token_hash, scopes, label)
-VALUES ('$DEMO_WORKSPACE_ID', 'agent_bearer', '$GATE_AGENT_ID', NULL,
-        decode('$GATE_AGENT_TOKEN_HASH', 'hex'),
-        ARRAY['work:control', 'agent:port:connect'], 'openapi rust gate'),
-       ('$DEMO_WORKSPACE_ID', 'agent_bearer', '$GATE_AGENT_ID', NULL,
-        decode('$GATE_AGENT_NO_PORT_TOKEN_HASH', 'hex'),
-        ARRAY['work:control'], 'openapi rust gate no agent port');
-
 -- /v1/join 표본의 코드. 원문은 이 런에만 있고 저장되는 것은 해시다.
 INSERT INTO invite_code
   (workspace_id, code_hash, code_preview, role, max_uses, expires_at, created_by)
@@ -1558,7 +1569,10 @@ api() {
     args+=(--data-binary "@$CURL_BODY_FILE")
   fi
   RESPONSE_STATUS="$(curl "${args[@]}" "$BASE_URL$path")"
-  RESPONSE_BODY="$(cat "$out")"
+  load_private_response_body || {
+    echo "[openapi-rust] candidate response secret scan failed; response withheld" >&2
+    return 1
+  }
   load_scanned_response_headers
 }
 
@@ -1581,7 +1595,10 @@ agent_port_api() {
     args+=(--data-binary "@$CURL_BODY_FILE")
   fi
   RESPONSE_STATUS="$(curl "${args[@]}" "$BASE_URL/v1/mcp/agent-port")"
-  RESPONSE_BODY="$(cat "$out")"
+  load_private_response_body || {
+    echo "[openapi-rust] candidate Agent Port response secret scan failed; response withheld" >&2
+    return 1
+  }
   load_scanned_response_headers
 }
 
@@ -1691,7 +1708,10 @@ work_host_signed_sample() {
     args+=(--data-binary "@$CURL_BODY_FILE")
   fi
   RESPONSE_STATUS="$(curl "${args[@]}" "$BASE_URL$path")"
-  RESPONSE_BODY="$(cat "$out")"
+  load_private_response_body || {
+    echo "[openapi-rust] candidate work-host response secret scan failed; response withheld" >&2
+    return 1
+  }
   record_sample "$name" "$method" "$template" "$expected"
 }
 
@@ -1793,6 +1813,63 @@ REALTIME_SECRET="$(printf '%s' "$RESPONSE_BODY" | jq -r '.token // empty')"
 append_secret_with_derivatives "$REALTIME_SECRET"
 guard_jq '.tokenType == "centrifugo.connection.jwt" and (.expiresAtMs | type == "number")' \
   "realtime token is a centrifugo connection jwt"
+
+# ---------------------------------------------------------------------------
+# generic per-agent bearer — issue from the real HAP-E1 API, then consume the
+# same credential through both the Agent Port and work-control surfaces.
+# ---------------------------------------------------------------------------
+api post "/v1/workspaces/$WS/agents/$GATE_AGENT_ID/credentials" \
+  '{"scopes":["work:control"],"label":"openapi rust no-port control"}' "$ACCESS"
+if [ "$RESPONSE_STATUS" != "201" ]; then
+  gate_fail agent-credential-no-port-fixture \
+    "expected HTTP 201, got $RESPONSE_STATUS" "$(redacted_body)"
+fi
+GATE_AGENT_NO_PORT_TOKEN="$(printf '%s' "$RESPONSE_BODY" | jq -er '.token' 2>/dev/null || true)"
+append_secret_with_derivatives "$GATE_AGENT_NO_PORT_TOKEN" || {
+  echo "[openapi-rust] could not register no-port credential secret" >&2
+  exit 1
+}
+[ -n "$GATE_AGENT_NO_PORT_TOKEN" ] || {
+  echo "[openapi-rust] no-port credential response contained no token" >&2
+  exit 1
+}
+
+api post "/v1/workspaces/$WS/agents/$GATE_AGENT_ID/credentials" \
+  '{"scopes":["work:control","agent:port:connect"],"label":"openapi rust gate"}' "$ACCESS"
+if [ "$RESPONSE_STATUS" != "201" ]; then
+  gate_fail agent-credential-create \
+    "expected HTTP 201, got $RESPONSE_STATUS" "$(redacted_body)"
+fi
+GATE_AGENT_TOKEN="$(printf '%s' "$RESPONSE_BODY" | jq -er '.token' 2>/dev/null || true)"
+GATE_AGENT_CREDENTIAL_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.credential.id' 2>/dev/null || true)"
+append_secret_with_derivatives "$GATE_AGENT_TOKEN" || {
+  echo "[openapi-rust] could not register agent credential secret" >&2
+  exit 1
+}
+[ -n "$GATE_AGENT_TOKEN" ] && canonical_uuid "$GATE_AGENT_CREDENTIAL_ID" || {
+  echo "[openapi-rust] credential response omitted a token or canonical id" >&2
+  exit 1
+}
+guard_jq '.tokenType == "Bearer"
+  and .credential.scopes == ["work:control","agent:port:connect"]
+  and .rotatedCredentialCount >= 1' \
+  "agent credential create returns the explicitly scoped successor"
+if [ "$(response_header Cache-Control)" != "no-store" ] || \
+  [ "$(response_header Pragma)" != "no-cache" ]; then
+  gate_fail agent-credential-create \
+    "missing one-time response cache headers" "$(redacted_headers)"
+fi
+record_sample agent-credential-create post \
+  "/v1/workspaces/{workspaceId}/agents/{agentId}/credentials" 201
+
+sample agent-credential-list get \
+  "/v1/workspaces/{workspaceId}/agents/{agentId}/credentials" \
+  "/v1/workspaces/$WS/agents/$GATE_AGENT_ID/credentials" 200 "" "$ACCESS"
+guard_jq --arg id "$GATE_AGENT_CREDENTIAL_ID" '
+  any(.credentials[]; (.id | ascii_downcase) == ($id | ascii_downcase))
+  and (tostring | contains("momo_agent_v1.") | not)
+  and (has("token") | not) and (has("tokenHash") | not)' \
+  "credential list is metadata-only and contains the issued row"
 
 # ---------------------------------------------------------------------------
 # hosted-agent Agent Port — 한 POST operation의 modern/legacy 양 시대 계약.
@@ -2013,7 +2090,10 @@ RESPONSE_STATUS="$(curl -sS -o "$RAW_RESPONSE_FILE" -w "%{http_code}" \
   -H 'MCP-Protocol-Version: 2026-07-28' \
   -H 'Mcp-Method: server/discover' \
   --data-binary "@$CURL_BODY_FILE")"
-RESPONSE_BODY="$(cat "$RAW_RESPONSE_FILE")"
+load_private_response_body || {
+  echo "[openapi-rust] invalid-accept response secret scan failed; response withheld" >&2
+  exit 1
+}
 if [ "$RESPONSE_STATUS" != "415" ]; then
   gate_fail agent-port-invalid-accept "expected HTTP 415, got $RESPONSE_STATUS" "$RESPONSE_BODY"
 fi
@@ -2438,6 +2518,22 @@ sample work-host-revoke delete \
   "/v1/workspaces/$WS/work-hosts/$RESUME_HOST_ID" 200 "" "$ACCESS"
 guard_jq '.workHost.online == false and (.workHost.revokedAtMs | type == "number")' \
   "a revoked host is durably offline"
+
+# Revoke only after Agent Port and work-control have consumed the credential.
+# Replay stays 200 and must not create a second revoke audit.
+sample agent-credential-revoke post \
+  "/v1/workspaces/{workspaceId}/agents/{agentId}/credentials/{credentialId}/revoke" \
+  "/v1/workspaces/$WS/agents/$GATE_AGENT_ID/credentials/$GATE_AGENT_CREDENTIAL_ID/revoke" \
+  200 '{"reason":"openapi rust gate complete"}' "$ACCESS"
+guard_jq '.revokedNow == true and .alreadyRevoked == false
+  and .credential.status == "revoked"
+  and (tostring | contains("momo_agent_v1.") | not)' \
+  "first credential revoke is metadata-only and records the transition"
+expect agent-credential-revoke-replay post \
+  "/v1/workspaces/$WS/agents/$GATE_AGENT_ID/credentials/$GATE_AGENT_CREDENTIAL_ID/revoke" \
+  200 '{"reason":"openapi rust gate complete"}' "$ACCESS"
+guard_jq '.revokedNow == false and .alreadyRevoked == true' \
+  "credential revoke replay is idempotent"
 
 # 로그아웃은 자기가 쓴 자격증명을 죽이므로 정말 마지막이다.
 sample logout post "/v1/auth/logout" "/v1/auth/logout" 200 \
