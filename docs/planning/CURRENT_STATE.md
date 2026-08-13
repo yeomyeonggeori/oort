@@ -1,5 +1,29 @@
 # oort 기획 현재 상태 (Planning Current State)
 
+> **2026-08-13 스냅샷 30 (GPT 5.6 sol · momo-main — #1364 네트워크 중단 안전 체크포인트).** 스냅샷 29를 supersede한다.
+>
+> **현재 구현:** #1364 dedicated hosted identity/pairing/activation의 29개 소유 파일 구현이 완료됐고 worker self-review는 C0/H0/M0이다. 신규 migration 069, static bearer pairing→detect→explicit confirm→proof+active+unpause, exact Agent Port audience, generic credential/REST deny, production delivery kill-switch, 실제 worker claim+A2A guard를 포함한다. 마지막 owned-byte aggregate는 `44cfd88d5e28834c0e769644d065691fc5abb540d78c94b1234916e7c153ddb3`였으며 이후 writer 변경 없이 동결됐다.
+>
+> **검증:** Rust fmt/clippy/workspace tests, fresh PG18 worker/A2A integration, generated types 111 paths, integrated Rust image/OpenAPI 65/65 samples+62 operations, cleanup/diff/leak0이 PASS했다. 독립 reviewer는 마지막 exact freeze의 holistic 검수를 시작했으나 사용자의 네트워크 중단 요청으로 즉시 interrupt되어 **최종 C/H/M 판정은 아직 미완료**다. 이전 freeze에서 나온 partial activation, orphan run, DM/archive approval, lock order, RLS/evidence/secret-verifier findings는 모두 최신 바이트에서 수리됐지만 재검수 전 승인으로 간주하지 않는다.
+>
+> **안전 보존:** 구현 29파일과 이 planning checkpoint는 로컬 branch에 별도 커밋으로 보존한다. 원격 push/PR은 하지 않는다. 공유 worktree의 13개 무관 rustfmt drift는 사용자/타 작업 소유로 보고 커밋에서 제외하며 되돌리지 않는다.
+>
+> **재개 첫 행동:** worktree `/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/1364-hap-e3-engine-add-hosted-agent-dedicated-identity-and-atomic-pairing-activation-lifecycle`에서 status와 두 로컬 commit SHA를 확인한다. 새 수정 없이 final reviewer를 재개해 exact committed 29-file tree를 C/H/M으로 검수하고, C/H/M=0일 때만 focused clean gates→push→PR→needs-review로 진행한다. #1365/#1366은 #1364 랜딩 전까지 blocked다.
+>
+> 이하 스냅샷 29의 시작점·불변식은 유효하지만 “구현 착수” 상태는 스냅샷 30이 대체한다.
+
+> **2026-08-13 스냅샷 29 (GPT 5.6 sol · momo-main — HAP-E1/E2 랜딩, HAP-E3 착수).** 스냅샷 28을 supersede한다.
+>
+> **랜딩 완료:** #1363 dual-era MCP Agent Port는 PR #1371 / `track/engine@1e5115fd`, #1358 Rust agent credential lifecycle은 PR #1372 / `track/engine@c5badf5f`로 랜딩했다. 두 PR 모두 실제 PG18·deploy-image/OpenAPI evidence, PR CI gate, exact-base policy integrity, 독립 security C0/H0/M0을 닫았고 Issue/Project는 Done이다. #1358은 외부 `DATABASE_URL` evidence 경로를 제거하고 isolated Docker only, secret-safe channel, RLS/FORCE/audit rollback, signal-safe immutable cleanup을 최종 계약으로 고정했다.
+>
+> **활성 goal #1364 HAP-E3:** dependency #1358/#1363이 닫혀 `status:ready`에서 claim했다. worktree/branch는 `feat/1364-hap-e3-engine-add-hosted-agent-dedicated-identity-and-atomic-pairing-activation-lifecycle`, base는 반드시 `origin/track/engine@c5badf5fe56486cb3bff5b8eb3f7d38d6bddac9c`다. claim helper가 처음 `origin/main`에서 만든 branch는 파일 변경 전에 즉시 engine base로 rebase·remote 동기화했다.
+>
+> **구현 범위·불변식:** 신규 migration으로 dedicated agent member+paused profile+hosted connection/pairing challenge를 RLS FORCE로 추가하고, first protocol-valid MCP foundation request에서 `pairing_pending→detected`, human confirm의 별도 active bearer, first safe active request의 proof+token binding+active+unpause를 각각 원자적으로 닫는다. first wave는 `static_bearer` only, hosted credential은 exact Agent Port audience only, production delivery는 #1366+#1367 전까지 hard-disabled다. schema_v0 수정·Grok 로그인·OAuth·inbox/data tools/UI는 범위 밖이다.
+>
+> **Fable 복구 행동:** 이 스냅샷과 #1364 Issue body가 새 시작점이다. 먼저 migration 번호/현행 member-agent-profile 생성 seam/MCP typed auth seam을 재대조하고, DDL+domain lifecycle→Axum/OpenAPI→mock MCP/PG18 negative race 순서로 구현한다. 중요한 설계 이탈·blocker·gate는 #1364 comment와 JOURNAL에 누적하고 PR handoff 전에 새 snapshot으로 supersede한다.
+>
+> 이하 스냅샷 28의 #1363 freeze/hash는 역사 증거로 유효하지만 “#1358 rebase가 다음” 상태는 스냅샷 29가 대체한다.
+
 > **2026-08-13 스냅샷 28 (GPT 5.6 sol · momo-main — HAP-E2 최종 보안 승인, PR 준비).** 스냅샷 27을 supersede한다.
 >
 > **#1363 HAP-E2 최종 고정본:** modern MCP `2026-07-28`와 exact legacy `2025-11-25`의 sessionless Agent Port foundation, static bearer 전용 auth, active workspace membership 재검증, side-effect-free resolve→atomic token/member limiter→allow-only usage finalize, closed transport/OpenAPI 계약을 구현했다. runtime verifier는 secret argv·mutable image·foreign resource·signal cleanup·Docker 판독 오류·response-header leak·SIGPIPE absence 오판을 fail-closed로 수리했다. 최종 diff/32-file manifest SHA-256은 `b38dea2073969c2ce24df979c653b3352abae8bedb42f36fea9f834f11fcb758` / `2356f0ff200071a7a20fb13e66c1fd1d391f38f749602ac97f2af61ef04877e9`이며 독립 security 판정은 C0/H0/M0이다.
