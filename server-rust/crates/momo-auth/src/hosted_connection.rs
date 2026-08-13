@@ -314,8 +314,8 @@ pub async fn detect_pairing_in_tx(
     // Provider metadata is display-only. Persist a closed, non-string
     // projection: arbitrary strings and secret-shaped keys are dropped rather
     // than trying to enumerate every credential syntax providers may invent.
-    let client_name = sanitize_observation_text(client_name, 200);
-    let client_version = sanitize_observation_text(client_version, 100);
+    let client_name = sanitize_client_name(client_name);
+    let client_version = sanitize_client_version(client_version);
     let capabilities = sanitize_capabilities(capabilities);
     let live_member: Option<Uuid> = sqlx::query_scalar(
         "SELECT agent_member_id FROM hosted_agent_connection \
@@ -416,17 +416,6 @@ pub async fn resolve_pairing_in_tx(
     }))
 }
 
-fn bounded_utf8(value: &str, max_bytes: usize) -> String {
-    if value.len() <= max_bytes {
-        return value.to_string();
-    }
-    let mut end = max_bytes;
-    while !value.is_char_boundary(end) {
-        end -= 1;
-    }
-    value[..end].to_string()
-}
-
 fn observation_is_sensitive(value: &str) -> bool {
     let folded: String = value
         .chars()
@@ -448,54 +437,122 @@ fn observation_is_sensitive(value: &str) -> bool {
     .any(|needle| folded.contains(needle))
 }
 
-fn sanitize_observation_text(value: Option<&str>, max_bytes: usize) -> Option<String> {
+fn contains_opaque_run(value: &str) -> bool {
     value
-        .filter(|value| !observation_is_sensitive(value))
-        .map(|value| bounded_utf8(value, max_bytes))
-        .filter(|value| !value.is_empty())
+        .split(|ch: char| !ch.is_ascii_alphanumeric())
+        .any(|run| {
+            if run.len() < 16 {
+                return false;
+            }
+            let has_lower = run.bytes().any(|byte| byte.is_ascii_lowercase());
+            let has_upper = run.bytes().any(|byte| byte.is_ascii_uppercase());
+            let has_digit = run.bytes().any(|byte| byte.is_ascii_digit());
+            let mut seen = [false; 128];
+            for byte in run.bytes().filter(|byte| byte.is_ascii()) {
+                seen[usize::from(byte)] = true;
+            }
+            let unique = seen.into_iter().filter(|present| *present).count();
+            (has_lower && has_upper && has_digit)
+                || (run.len() >= 20 && (has_lower || has_upper) && has_digit && unique >= 10)
+        })
 }
 
-fn project_capability(value: &Value, depth: usize, budget: &mut usize) -> Option<Value> {
-    if depth > 4 || *budget == 0 {
+fn has_credential_prefix(value: &str) -> bool {
+    let value = value.to_ascii_lowercase();
+    [
+        "sk-",
+        "pk-",
+        "rk-",
+        "ghp_",
+        "github_pat_",
+        "xoxb-",
+        "xoxp-",
+        "xoxa-",
+        "eyj",
+    ]
+    .iter()
+    .any(|prefix| value.starts_with(prefix))
+}
+
+fn sanitize_client_name(value: Option<&str>) -> Option<String> {
+    let value = value?.trim();
+    if value.is_empty()
+        || value.len() > 48
+        || observation_is_sensitive(value)
+        || has_credential_prefix(value)
+        || contains_opaque_run(value)
+        || !value.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric()
+                || matches!(byte, b' ' | b'.' | b'_' | b'-' | b'/' | b'(' | b')')
+        })
+        || !value.bytes().any(|byte| byte.is_ascii_alphabetic())
+    {
         return None;
     }
-    match value {
-        Value::Bool(value) => Some(Value::Bool(*value)),
-        Value::Null => Some(Value::Null),
-        Value::Object(values) => {
-            let mut projected = Map::new();
-            for (key, value) in values {
-                if *budget == 0 {
-                    break;
-                }
-                if key.is_empty()
-                    || key.len() > 64
-                    || observation_is_sensitive(key)
-                    || !key.bytes().all(|byte| {
-                        byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-' | b'/')
-                    })
-                {
-                    continue;
-                }
-                if let Some(value) = project_capability(value, depth + 1, budget) {
-                    *budget -= 1;
-                    projected.insert(key.clone(), value);
-                }
-            }
-            Some(Value::Object(projected))
-        }
-        // Strings, numbers and arrays are not capability-presence facts and
-        // can carry arbitrary provider secrets. They are intentionally absent.
-        Value::String(_) | Value::Number(_) | Value::Array(_) => None,
+    Some(value.to_string())
+}
+
+fn sanitize_client_version(value: Option<&str>) -> Option<String> {
+    let value = value?.trim();
+    if value.is_empty()
+        || value.len() > 24
+        || observation_is_sensitive(value)
+        || has_credential_prefix(value)
+        || contains_opaque_run(value)
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'+' | b'-'))
+        || !value.bytes().any(|byte| byte.is_ascii_digit())
+        || !value
+            .bytes()
+            .next()
+            .is_some_and(|byte| byte.is_ascii_digit() || matches!(byte, b'v' | b'V'))
+    {
+        return None;
+    }
+    Some(value.to_string())
+}
+
+fn insert_capability_bool(
+    source: &Value,
+    target: &mut Map<String, Value>,
+    parent: &str,
+    child: &str,
+) {
+    let Some(value) = source
+        .get(parent)
+        .and_then(Value::as_object)
+        .and_then(|object| object.get(child))
+        .and_then(Value::as_bool)
+    else {
+        return;
+    };
+    let nested = target
+        .entry(parent.to_string())
+        .or_insert_with(|| Value::Object(Map::new()));
+    if let Some(nested) = nested.as_object_mut() {
+        nested.insert(child.to_string(), Value::Bool(value));
     }
 }
 
 fn sanitize_capabilities(value: &Value) -> Value {
-    let mut budget = 64;
-    match project_capability(value, 0, &mut budget) {
-        Some(Value::Object(projected)) => Value::Object(projected),
-        _ => Value::Object(Map::new()),
+    // This is deliberately a closed vocabulary. Even harmless-looking unknown
+    // keys are not persisted because arbitrary provider-controlled names can
+    // themselves be credential material.
+    let mut projected = Map::new();
+    if let Some(value) = value.get("sampling").and_then(Value::as_bool) {
+        projected.insert("sampling".to_string(), Value::Bool(value));
     }
+    for (parent, child) in [
+        ("tools", "listChanged"),
+        ("resources", "subscribe"),
+        ("resources", "listChanged"),
+        ("prompts", "listChanged"),
+        ("roots", "listChanged"),
+    ] {
+        insert_capability_bool(value, &mut projected, parent, child);
+    }
+    Value::Object(projected)
 }
 
 async fn hosted_identity_is_live_in_tx(
@@ -846,17 +903,29 @@ mod tests {
     #[test]
     fn observation_projection_drops_secret_shaped_and_unbounded_values() {
         assert_eq!(
-            sanitize_observation_text(Some("momo_pair_v1.workspace.secret"), 200),
+            sanitize_client_name(Some("momo_pair_v1.workspace.secret")),
             None
         );
         assert_eq!(
-            sanitize_observation_text(Some("Cursor Bot"), 200).as_deref(),
+            sanitize_client_name(Some("Cursor Bot")).as_deref(),
             Some("Cursor Bot")
+        );
+        assert_eq!(sanitize_client_name(Some("sk-proj-examplevalue")), None);
+        assert_eq!(sanitize_client_name(Some("aZ8qW2nR7mP4xK9vT6cB3dF1")), None);
+        assert_eq!(
+            sanitize_client_version(Some("v1.2.3")).as_deref(),
+            Some("v1.2.3")
+        );
+        assert_eq!(
+            sanitize_client_version(Some("9aZ8qW2nR7mP4xK6vT3cB1d")),
+            None
         );
         let projected = sanitize_capabilities(&serde_json::json!({
             "tools": {"listChanged": true, "tokenEndpoint": true, "note": "momo_pair_v1.leak"},
             "authorization": {"enabled": true},
             "sampling": false,
+            "telemetry": true,
+            "experimental": {"safeLookingUnknown": true},
             "values": ["secret"],
             "count": 7
         }));

@@ -521,11 +521,12 @@ FAILURE_LOG="$TMP_DIR/failures.txt"
 FAILURE_COUNT=0
 
 gate_fail() {
-  local name="$1" detail="$2" body="${3:-}"
+  local name="$1" detail="$2" body="${3:-}" safe_line
   FAILURE_COUNT=$((FAILURE_COUNT + 1))
-  printf '%s\n' "[$FAILURE_COUNT] $name: $detail" >>"$FAILURE_LOG"
-  echo "[openapi-rust] FAIL $name: $detail" >&2
-  [ -n "$body" ] && printf '%s\n' "$body" | redact_private_envelopes >&2
+  safe_line="$(printf '%s' "[$FAILURE_COUNT] $name: $detail" | redact_registered_secrets)"
+  printf '%s\n' "$safe_line" >>"$FAILURE_LOG"
+  printf '%s\n' "[openapi-rust] FAIL ${safe_line#*] }" >&2
+  [ -n "$body" ] && printf '%s\n' "$body" | redact_registered_secrets >&2
   return 0
 }
 
@@ -533,7 +534,7 @@ print_failure_summary() {
   [ "$FAILURE_COUNT" -gt 0 ] || return 0
   echo "" >&2
   echo "[openapi-rust] ===== $FAILURE_COUNT failed assertion(s) =====" >&2
-  cat "$FAILURE_LOG" >&2
+  redact_registered_secrets <"$FAILURE_LOG" >&2
   echo "[openapi-rust] ============================================" >&2
 }
 
@@ -738,6 +739,30 @@ append_secret_with_derivatives() {
   fi
   digest="$(printf '%s' "$value" | "$OPENSSL_BIN" dgst -sha256 -binary | xxd -p -c 256)" || return 1
   append_secret_needle "$digest"
+}
+
+# Diagnostic text is untrusted too: candidates may reflect any already-known
+# credential (including a human JWT) in a body, header or error string. Read the
+# needle file by path—not argv—and replace longest values first before the
+# envelope-shaped fallback runs.
+redact_registered_secrets() {
+  if ! secret_needles_are_safe; then
+    # Consume potentially sensitive input but never echo it when the registry
+    # cannot itself be trusted.
+    cat >/dev/null
+    printf '%s' '[diagnostic withheld: secret registry unavailable]'
+    return
+  fi
+  "$PYTHON_BIN" -c '
+import pathlib, re, sys
+needles = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8").splitlines()
+text = sys.stdin.read()
+for needle in sorted({value for value in needles if value}, key=len, reverse=True):
+    text = text.replace(needle, "[REDACTED_REGISTERED_SECRET]")
+text = re.sub(r"momo_agent_v1\.[A-Za-z0-9._~-]+", "[REDACTED_AGENT_BEARER]", text)
+text = re.sub(r"momo_pair_v1\.[A-Za-z0-9._~-]+", "[REDACTED_PAIRING_CREDENTIAL]", text)
+sys.stdout.write(text)
+' "$SECRET_NEEDLES"
 }
 
 load_private_response_body() {
@@ -1873,6 +1898,34 @@ REFRESH="$(printf '%s' "$RESPONSE_BODY" | jq -er '.refreshToken')"
 append_secret_with_derivatives "$ACCESS"
 append_secret_with_derivatives "$REFRESH"
 
+# A malicious Agent Port may reflect the human bearer in an unexpected error
+# header and body. Exercise the exact gate_fail path and require zero registered
+# secret needles in both its persisted failure line and emitted diagnostics.
+REFLECTED_FAILURE_LOG="$TMP_DIR/reflected-access-failure.log"
+REFLECTED_OUTPUT="$TMP_DIR/reflected-access-output.log"
+(umask 077; : >"$REFLECTED_FAILURE_LOG"; : >"$REFLECTED_OUTPUT")
+register_secret_file "$REFLECTED_FAILURE_LOG"
+register_secret_file "$REFLECTED_OUTPUT"
+(
+  FAILURE_COUNT=0
+  FAILURE_LOG="$REFLECTED_FAILURE_LOG"
+  gate_fail agent-port-reflected-access \
+    "unexpected status 418; X-Debug: $ACCESS" \
+    "{\"error\":\"reflected bearer $ACCESS\"}"
+) >"$REFLECTED_OUTPUT" 2>&1
+needle_scan_state "$SECRET_NEEDLES" "$REFLECTED_FAILURE_LOG" || {
+  echo "[openapi-rust] reflected Agent Port access bearer reached failure storage" >&2
+  exit 1
+}
+needle_scan_state "$SECRET_NEEDLES" "$REFLECTED_OUTPUT" || {
+  echo "[openapi-rust] reflected Agent Port access bearer reached diagnostics" >&2
+  exit 1
+}
+grep -Fq '[REDACTED_REGISTERED_SECRET]' "$REFLECTED_OUTPUT" || {
+  echo "[openapi-rust] reflected Agent Port fixture did not exercise registered-secret redaction" >&2
+  exit 1
+}
+
 sample realtime-token post "/v1/auth/realtime-token" "/v1/auth/realtime-token" 200 \
   "" "$ACCESS"
 REALTIME_SECRET="$(printf '%s' "$RESPONSE_BODY" | jq -r '.token // empty')"
@@ -2124,19 +2177,20 @@ guard_jq '.connection.status == "pairing_pending"' \
 
 HOSTED_ADVERSARIAL_DISCOVER_BODY="$(printf '%s' "$MODERN_DISCOVER_BODY" | jq -c '
   .params._meta["io.modelcontextprotocol/clientInfo"] = {
-    name:"momo_pair_v1.00000000-0000-7000-8000-000000000001.clientLeak",
-    version:"Bearer secret-token"
+    name:"sk-opaque-fixture-000000000000",
+    version:"9aZ8qW2nR7mP4xK6vT3cB1d"
   }
   | .params._meta["io.modelcontextprotocol/clientCapabilities"] = {
       tools:{listChanged:true,tokenEndpoint:true,note:"momo_agent_v1.00000000-0000-7000-8000-000000000001.capLeak"},
-      authorization:{enabled:true},sampling:false,values:["secret"],count:7
+      authorization:{enabled:true},sampling:false,telemetry:true,
+      experimental:{safeLookingUnknown:true},values:["secret"],count:7
     }')"
 sample_agent_port hosted-agent-detect 200 "$HOSTED_ADVERSARIAL_DISCOVER_BODY" \
   "$HOSTED_PAIRING" "2026-07-28" "server/discover"
 run_sql -Atc "SELECT (detected_client_name IS NULL)::text || ':' || \
   (detected_client_version IS NULL)::text || ':' || \
   (detected_capabilities = '{\"sampling\": false, \"tools\": {\"listChanged\": true}}'::jsonb)::text || ':' || \
-  (detected_capabilities::text !~ 'momo_(agent|pair)_v1|token|secret|authorization')::text \
+  (detected_capabilities::text !~ 'momo_(agent|pair)_v1|token|secret|authorization|telemetry|experimental')::text \
   FROM hosted_agent_connection WHERE workspace_id='$WS' AND id='$HOSTED_CONNECTION_ID';" | \
   grep -qx 'true:true:true:true' || gate_fail hosted-observation-sanitizer "untrusted client metadata survived the closed projection" "database evidence withheld"
 api get "/v1/workspaces/$WS/hosted-agent-connections/$HOSTED_CONNECTION_ID" "" "$ACCESS"
@@ -2651,6 +2705,20 @@ SQL
   [ "$(run_sql -Atc "SELECT count(*) FROM pg_locks WHERE locktype='advisory' AND classid=1364 AND objid=$AUTHORITY_LOCK_KEY AND NOT granted;")" = 1 ] || gate_fail "hosted-authority-$authority_loss-mutation" "row-lock owner did not signal readiness" "database evidence withheld"
   (expect_agent_port "hosted-authority-$authority_loss-proof-denied" 401 "$MODERN_DISCOVER_BODY" \
     "$AUTHORITY_ACTIVE" "2026-07-28" "server/discover") & authority_proof_pid=$!
+  authority_proof_blocked=0
+  for _ in $(seq 1 500); do
+    kill -0 "$authority_proof_pid" 2>/dev/null || break
+    if [ "$(run_sql -Atc "SELECT count(*) FROM pg_stat_activity WHERE usename='momo_app' AND state='active' AND wait_event_type='Lock';")" -ge 1 ]; then
+      authority_proof_blocked=1
+      break
+    fi
+    sleep 0.02
+  done
+  if [ "$authority_proof_blocked" -ne 1 ] || ! kill -0 "$authority_proof_pid" 2>/dev/null; then
+    gate_fail "hosted-authority-$authority_loss-proof-barrier" \
+      "proof process was not observably blocked behind the authority row lock" \
+      "database evidence withheld"
+  fi
   printf '%s\n' "SELECT pg_advisory_unlock(1364, $AUTHORITY_LOCK_KEY);" '\q' >"$AUTHORITY_FIFO"
   wait "$authority_pid"
   wait "$authority_holder_pid"

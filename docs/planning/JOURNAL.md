@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-08-13 (GPT 5.6 sol) · #1364 strict-review H2/M2 후속
+- metadata를 low-entropy client display grammar+고정 capability bool paths로 닫고 opaque/sk-prefix/unknown key 저장을 금지했다.
+- failure 출력은 등록 secret/JWT 파생값까지 전역 치환하며 reflected ACCESS body/header output0 fixture를 추가했다. authority race는 proof DB-lock wait를 관측한 뒤 해제한다.
+- 이전 항목의 workspace fmt green 표현은 철회한다. 소유 Rust fmt만 PASS이고 exact commit의 whole-workspace fmt는 선재 비소유 13 drift로 inherited RED다.
+- Rust/clippy/tests/cleanup/leak0은 green. actual-image·PG 재실행은 Docker 내부 DB I/O로 기동 전 host-blocked이고 owned resource/scratch 잔존 0; 직전 product-image evidence는 보존한다. 후속만 별도 local commit, push/PR 금지다.
+
 ## 2026-08-13 (GPT 5.6 sol) · #1364 final-review A–H 수리·재동결
 - hosted bearer pre-scope 분류, rollback delta0, closed MCP metadata projection, 전역 agent/pair envelope 차단을 반영했다.
 - detected TTL·identity/membership 상실을 expired+paused+revoke로 닫고, proof profile 0건은 전체 rollback, race fixture는 advisory/row-lock barrier로 결정화했다.

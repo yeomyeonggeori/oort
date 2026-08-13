@@ -1,5 +1,13 @@
 # oort 기획 현재 상태 (Planning Current State)
 
+> **2026-08-13 스냅샷 32 (GPT 5.6 sol · #1364 strict-review 후속 수리).** 스냅샷 31을 supersede하며, 그 스냅샷의 “workspace cargo fmt PASS” 표현을 철회한다.
+>
+> **후속 수리:** provider metadata는 client name/version의 짧은 저엔트로피 display grammar와 고정 capability boolean path만 저장하며 `sk-`류 prefix·keyword 없는 opaque random·unknown boolean key도 버린다. OpenAPI verifier의 모든 failure 출력/저장 경로는 agent/pair envelope뿐 아니라 human JWT를 포함해 등록된 secret과 파생값 전체를 출력 전에 치환한다. reflected ACCESS body+header fixture는 출력·failure log에서 secret needle 0을 강제하고, authority race는 proof process가 실제 DB lock wait 중임을 확인한 뒤에만 lock을 푼다.
+>
+> **fmt 사실 교정:** 이번 goal이 소유한 변경 Rust 파일의 `rustfmt --check`는 PASS다. 그러나 commit tree만 놓고 돌리는 whole-workspace fmt는 선재 13개 비소유 rustfmt drift 때문에 **inherited RED**이며 이 goal이 green으로 주장하지 않는다. 공유 worktree에 이미 존재하던 해당 13파일의 formatted bytes는 계속 unstaged·비소유로 보존하고 커밋에 포함하거나 되돌리지 않는다.
+>
+> **검증/보존:** strict-review 후속은 기존 `f78cb249`→`694deee9`→`c9aaf7cf`를 수정하지 않는 별도 로컬 commit으로 고정하고 push/PR하지 않는다. owned fmt, momo-auth 61/61, workspace clippy/tests, daemon-free cleanup+reflected-secret fixture, gitleaks all-refs leak0은 PASS다. actual-image/새 PG18 재실행은 Docker Desktop의 containerd metadata·network DB write I/O 오류로 제품 기동 전에 3회/1회 중단됐고, 각 실패 invocation의 labeled container/network/volume/image와 secret scratch 잔존은 0이다. 따라서 직전 `c9aaf7cf` product bytes의 actual-image OpenAPI 65/65+62/62·PG18 2/2 증거는 보존하되 이번 verifier 후속 바이트의 Docker runtime은 **host-blocked/runtime-unverified**로 좁게 표기한다.
+
 > **2026-08-13 스냅샷 31 (GPT 5.6 sol · #1364 final-review 수리·재동결).** 스냅샷 30을 supersede한다.
 >
 > **최종 리뷰 수리:** hosted bearer를 generic scope dispatch 전에 SELECT-only로 분류해 exact Agent Port 밖을 side-effect 0의 동일 403으로 닫았다. create/confirm audit 실패는 전량 rollback, MCP client metadata는 string/number/array와 secret-shaped key/value를 저장하지 않는 closed projection, verifier는 본문·헤더·상태와 무관하게 `momo_agent_v1`/`momo_pair_v1`를 출력 전에 등록·차단한다. detected TTL 만료와 member/workspace membership/agent 상실은 connection expired+profile paused+token revoke로 귀결되어 복원만으로 재활성화되지 않으며, proof의 profile UPDATE 0건은 전체 tx rollback이다. 기존 시간 sleep race는 advisory-lock readiness+row-lock barrier로 교체했다.
