@@ -217,6 +217,15 @@ services:
       # webview is `tauri://localhost`, and without this it cannot reach the API
       # at all. Explicit allowlist; `*` is refused at boot.
       MOMO_CORS_ALLOWED_ORIGINS: ${MOMO_CORS_ALLOWED_ORIGINS:-}
+      # ADR-0162 Agent Port. A native/server MCP caller normally sends no
+      # Origin. When it does, only this operator-controlled exact HTTPS origin
+      # is accepted; Host/Forwarded headers are never authority. Empty keeps
+      # no-Origin clients working and rejects every present Origin.
+      MOMO_AGENT_PORT_EXTERNAL_ORIGIN: ${MOMO_AGENT_PORT_EXTERNAL_ORIGIN:-}
+      MOMO_AGENT_PORT_RATE_LIMIT_WINDOW_SECONDS: ${MOMO_AGENT_PORT_RATE_LIMIT_WINDOW_SECONDS:-60}
+      MOMO_AGENT_PORT_RATE_LIMIT_PER_TOKEN: ${MOMO_AGENT_PORT_RATE_LIMIT_PER_TOKEN:-240}
+      MOMO_AGENT_PORT_RATE_LIMIT_PER_AGENT: ${MOMO_AGENT_PORT_RATE_LIMIT_PER_AGENT:-480}
+      MOMO_AGENT_PORT_RATE_LIMIT_PER_IP: ${MOMO_AGENT_PORT_RATE_LIMIT_PER_IP:-1200}
       # ADR-0151 — the workspace Drive archive. All three defaults are EMPTY, and
       # empty means the attachment routes answer 503 "Drive archive is not
       # configured": the surface is mounted but closed, which is what an

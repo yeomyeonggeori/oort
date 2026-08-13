@@ -1,0 +1,14 @@
+[package]
+name = "momo-mcp"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+# ADR-0162's protocol core is deliberately transport- and persistence-free.
+# Axum, authentication, rate limiting, audit, and every product data port live
+# in the server adapter; this crate only validates and dispatches bounded wire
+# values.
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true

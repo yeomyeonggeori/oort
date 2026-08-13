@@ -1870,6 +1870,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/mcp/agent-port": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Call the sessionless hosted-agent MCP endpoint.
+         * @description Vendor-neutral Agent Port from ADR-0162. This is a POST-only, sessionless JSON-RPC endpoint and every request is authenticated again with an active agent bearer carrying the non-default `agent:port:connect` reachability scope. The credential is accepted only in `Authorization`; URL/query credentials, app JWTs, human principals are rejected. An incoming `Mcp-Session-Id` never creates authority and is never echoed. No OAuth protected resource metadata is advertised by this static-bearer wave.
+         *     Modern requests pin `2026-07-28`, include `params._meta[io.modelcontextprotocol/protocolVersion]` and `params._meta[io.modelcontextprotocol/clientCapabilities]`, and mirror their version and method in `MCP-Protocol-Version` and `Mcp-Method`. `Mcp-Name` is additionally mandatory for `tools/call` and must match the body tool name. The modern foundation exposes `server/discover`, an empty `tools/list`, and an unknown-tool `tools/call` error; it does not expose initialize, ping, protocol sessions, or a GET stream.
+         *     The narrow legacy adapter pins `2025-11-25`. Its first `initialize` may omit `MCP-Protocol-Version`; every later request must carry that exact version. It accepts `initialize`, `notifications/initialized`, `ping`, an empty `tools/list`, and an unknown-tool `tools/call` error, without issuing a session id. All calls send `Content-Type: application/json` and an `Accept` value that contains both `application/json` and `text/event-stream`. Recognized modern errors never silently downgrade to legacy. The two exact supported versions are the complete compatibility set.
+         */
+        post: operations["agentPort"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/workspaces/{workspaceId}/context-packets/{packetId}": {
         parameters: {
             query?: never;
@@ -4186,6 +4208,198 @@ export interface components {
         } & {
             [key: string]: unknown;
         };
+        AgentPortClientInfo: {
+            name: string;
+            title?: string;
+            version: string;
+        };
+        AgentPortRequestMeta: {
+            /** @enum {string} */
+            "io.modelcontextprotocol/protocolVersion": "2026-07-28";
+            /** @description Bounded client-declared capabilities; never an authorization source. */
+            "io.modelcontextprotocol/clientCapabilities": {
+                [key: string]: unknown;
+            };
+            "io.modelcontextprotocol/clientInfo"?: components["schemas"]["AgentPortClientInfo"];
+        };
+        AgentPortModernParams: {
+            _meta: components["schemas"]["AgentPortRequestMeta"];
+        };
+        AgentPortModernToolCallParams: {
+            _meta: components["schemas"]["AgentPortRequestMeta"];
+            name: string;
+            arguments?: {
+                [key: string]: unknown;
+            };
+        };
+        AgentPortLegacyInitializeParams: {
+            /** @enum {string} */
+            protocolVersion: "2025-11-25";
+            capabilities: {
+                [key: string]: unknown;
+            };
+            clientInfo: components["schemas"]["AgentPortClientInfo"];
+        };
+        AgentPortLegacyEmptyParams: Record<string, never>;
+        AgentPortLegacyToolCallParams: {
+            name: string;
+            arguments?: {
+                [key: string]: unknown;
+            };
+        };
+        /** @description JSON-RPC non-empty string or finite number request id. Omitted only by the legacy `notifications/initialized` notification. */
+        AgentPortJSONRPCRequestId: string | number;
+        /** @description Exact closed union of the supported modern and legacy request bodies. */
+        AgentPortJSONRPCRequest: components["schemas"]["AgentPortModernDiscoverRequest"] | components["schemas"]["AgentPortModernToolsListRequest"] | components["schemas"]["AgentPortModernToolsCallRequest"] | components["schemas"]["AgentPortLegacyInitializeRequest"] | components["schemas"]["AgentPortLegacyInitializedNotification"] | components["schemas"]["AgentPortLegacyPingRequest"] | components["schemas"]["AgentPortLegacyToolsListRequest"] | components["schemas"]["AgentPortLegacyToolsCallRequest"];
+        AgentPortModernDiscoverRequest: {
+            /** @enum {string} */
+            jsonrpc: "2.0";
+            id: components["schemas"]["AgentPortJSONRPCRequestId"];
+            /** @enum {string} */
+            method: "server/discover";
+            params: components["schemas"]["AgentPortModernParams"];
+        };
+        AgentPortModernToolsListRequest: {
+            /** @enum {string} */
+            jsonrpc: "2.0";
+            id: components["schemas"]["AgentPortJSONRPCRequestId"];
+            /** @enum {string} */
+            method: "tools/list";
+            params: components["schemas"]["AgentPortModernParams"];
+        };
+        AgentPortModernToolsCallRequest: {
+            /** @enum {string} */
+            jsonrpc: "2.0";
+            id: components["schemas"]["AgentPortJSONRPCRequestId"];
+            /** @enum {string} */
+            method: "tools/call";
+            params: components["schemas"]["AgentPortModernToolCallParams"];
+        };
+        AgentPortLegacyInitializeRequest: {
+            /** @enum {string} */
+            jsonrpc: "2.0";
+            id: components["schemas"]["AgentPortJSONRPCRequestId"];
+            /** @enum {string} */
+            method: "initialize";
+            params: components["schemas"]["AgentPortLegacyInitializeParams"];
+        };
+        AgentPortLegacyInitializedNotification: {
+            /** @enum {string} */
+            jsonrpc: "2.0";
+            /** @enum {string} */
+            method: "notifications/initialized";
+            params?: components["schemas"]["AgentPortLegacyEmptyParams"];
+        };
+        AgentPortLegacyPingRequest: {
+            /** @enum {string} */
+            jsonrpc: "2.0";
+            id: components["schemas"]["AgentPortJSONRPCRequestId"];
+            /** @enum {string} */
+            method: "ping";
+            params?: components["schemas"]["AgentPortLegacyEmptyParams"];
+        };
+        AgentPortLegacyToolsListRequest: {
+            /** @enum {string} */
+            jsonrpc: "2.0";
+            id: components["schemas"]["AgentPortJSONRPCRequestId"];
+            /** @enum {string} */
+            method: "tools/list";
+            params?: components["schemas"]["AgentPortLegacyEmptyParams"];
+        };
+        AgentPortLegacyToolsCallRequest: {
+            /** @enum {string} */
+            jsonrpc: "2.0";
+            id: components["schemas"]["AgentPortJSONRPCRequestId"];
+            /** @enum {string} */
+            method: "tools/call";
+            params: components["schemas"]["AgentPortLegacyToolCallParams"];
+        };
+        AgentPortServerToolCapability: {
+            /** @enum {boolean} */
+            listChanged: false;
+        };
+        AgentPortServerCapabilities: {
+            tools: components["schemas"]["AgentPortServerToolCapability"];
+        };
+        AgentPortServerInfo: {
+            /** @enum {string} */
+            name: "oort-agent-port";
+            /** @enum {string} */
+            title: "oort Agent Port";
+            version: string;
+        };
+        AgentPortCache: {
+            ttlSeconds: number;
+            /** @enum {string} */
+            scope: "private";
+        };
+        AgentPortModernDiscoverCache: {
+            /** @enum {integer} */
+            ttlSeconds: 300;
+            /** @enum {string} */
+            scope: "private";
+        };
+        AgentPortModernToolsListCache: {
+            /** @enum {integer} */
+            ttlSeconds: 0;
+            /** @enum {string} */
+            scope: "private";
+        };
+        /** @description Exact closed union of modern discovery/list and legacy initialize/list/ping results. */
+        AgentPortResult: components["schemas"]["AgentPortModernDiscoverResult"] | components["schemas"]["AgentPortModernToolsListResult"] | components["schemas"]["AgentPortLegacyInitializeResult"] | components["schemas"]["AgentPortLegacyToolsListResult"] | components["schemas"]["AgentPortPingResult"];
+        AgentPortModernDiscoverResult: {
+            /** @enum {string} */
+            protocolVersion: "2026-07-28";
+            capabilities: components["schemas"]["AgentPortServerCapabilities"];
+            serverInfo: components["schemas"]["AgentPortServerInfo"];
+            /** @enum {string} */
+            resultType: "server/discover";
+            cache: components["schemas"]["AgentPortModernDiscoverCache"];
+        };
+        AgentPortModernToolsListResult: {
+            /** @enum {string} */
+            resultType: "tools/list";
+            cache: components["schemas"]["AgentPortModernToolsListCache"];
+            tools: {
+                [key: string]: unknown;
+            }[];
+        };
+        AgentPortLegacyInitializeResult: {
+            /** @enum {string} */
+            protocolVersion: "2025-11-25";
+            capabilities: components["schemas"]["AgentPortServerCapabilities"];
+            serverInfo: components["schemas"]["AgentPortServerInfo"];
+        };
+        AgentPortLegacyToolsListResult: {
+            tools: {
+                [key: string]: unknown;
+            }[];
+        };
+        AgentPortPingResult: Record<string, never>;
+        AgentPortJSONRPCError: {
+            /** @enum {integer} */
+            code: -32700 | -32600 | -32601 | -32602 | -32020 | -32022 | -32029;
+            message: string;
+            data?: {
+                [key: string]: unknown;
+            };
+        };
+        /** @description Exactly one of result or error is emitted. Transport authentication failures are intentionally not encoded in this envelope. */
+        AgentPortJSONRPCResponse: components["schemas"]["AgentPortJSONRPCSuccessResponse"] | components["schemas"]["AgentPortJSONRPCErrorResponse"];
+        /** @description Echoed JSON-RPC string/number id, or null when unavailable. */
+        AgentPortJSONRPCResponseId: (string | number) | null;
+        AgentPortJSONRPCSuccessResponse: {
+            /** @enum {string} */
+            jsonrpc: "2.0";
+            id: components["schemas"]["AgentPortJSONRPCRequestId"];
+            result: components["schemas"]["AgentPortResult"];
+        };
+        AgentPortJSONRPCErrorResponse: {
+            /** @enum {string} */
+            jsonrpc: "2.0";
+            id: components["schemas"]["AgentPortJSONRPCResponseId"];
+            error: components["schemas"]["AgentPortJSONRPCError"];
+        };
         DriveMCPRequest: {
             /** @enum {string} */
             jsonrpc: "2.0";
@@ -4306,6 +4520,41 @@ export interface components {
                 "application/json": components["schemas"]["ErrorResponse"];
             };
         };
+        /** @description Agent bearer is missing, malformed, expired, revoked, inactive, or otherwise invalid. The response body is empty. A missing credential has no `error` parameter; a presented invalid credential uses `error="invalid_token"`. */
+        AgentPortUnauthorized: {
+            headers: {
+                /** @description Bearer challenge scoped to `agent:port:connect`. */
+                "WWW-Authenticate"?: string;
+                /** @description Agent Port responses are private and must never be stored. */
+                "Cache-Control"?: "private, no-store";
+                [name: string]: unknown;
+            };
+            content?: never;
+        };
+        /** @description A present Origin is not the configured canonical HTTPS origin, or the authenticated agent lacks `agent:port:connect`. The response body is empty. Scope denial includes `error="insufficient_scope"`; Origin denial occurs before authentication and carries no challenge. */
+        AgentPortForbidden: {
+            headers: {
+                /** @description Optional Bearer insufficient-scope challenge. */
+                "WWW-Authenticate"?: string;
+                /** @description Agent Port responses are private and must never be stored. */
+                "Cache-Control"?: "private, no-store";
+                [name: string]: unknown;
+            };
+            content?: never;
+        };
+        /** @description Dedicated per-token, per-agent, or per-IP Agent Port sliding-window limit exceeded. No raw token, token hash, body, or client metadata is returned or logged. */
+        AgentPortRateLimited: {
+            headers: {
+                /** @description Whole seconds to wait before retrying. */
+                "Retry-After"?: number;
+                /** @description Agent Port responses are private and must never be stored. */
+                "Cache-Control"?: "private, no-store";
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["AgentPortJSONRPCErrorResponse"];
+            };
+        };
     };
     parameters: {
         /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
@@ -4353,6 +4602,12 @@ export interface components {
         MomoDeliveryId: string;
         /** @description Lower/uppercase hexadecimal HMAC-SHA256, optionally prefixed with `v1=`. */
         MomoSignature: string;
+        /** @description Exact protocol version mirrored from the request body. Required and equal to `2026-07-28` on every modern call. A legacy `initialize` may omit it; all later legacy calls require exact `2025-11-25`. */
+        MCPProtocolVersion: "2026-07-28" | "2025-11-25";
+        /** @description Required on modern calls and byte-for-byte equal to the JSON-RPC method. Legacy clients may omit it; when present it must match. */
+        MCPMethod: "server/discover" | "initialize" | "notifications/initialized" | "ping" | "tools/list" | "tools/call";
+        /** @description Required only for modern `tools/call`; must exactly equal `params.name`. Forbidden on methods that do not call a tool. */
+        MCPName: string;
     };
     requestBodies: never;
     headers: never;
@@ -9760,6 +10015,93 @@ export interface operations {
                 };
             };
             429: components["responses"]["RateLimited"];
+        };
+    };
+    agentPort: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Exact protocol version mirrored from the request body. Required and equal to `2026-07-28` on every modern call. A legacy `initialize` may omit it; all later legacy calls require exact `2025-11-25`. */
+                "MCP-Protocol-Version"?: components["parameters"]["MCPProtocolVersion"];
+                /** @description Required on modern calls and byte-for-byte equal to the JSON-RPC method. Legacy clients may omit it; when present it must match. */
+                "Mcp-Method"?: components["parameters"]["MCPMethod"];
+                /** @description Required only for modern `tools/call`; must exactly equal `params.name`. Forbidden on methods that do not call a tool. */
+                "Mcp-Name"?: components["parameters"]["MCPName"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentPortJSONRPCRequest"];
+            };
+        };
+        responses: {
+            /** @description A modern discovery/tools result, a legacy initialize/tools result, or a pong. Success never carries `Mcp-Session-Id`. */
+            200: {
+                headers: {
+                    /** @description Agent Port responses are private and must never be stored. */
+                    "Cache-Control"?: "private, no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentPortJSONRPCSuccessResponse"];
+                };
+            };
+            /** @description Legacy `notifications/initialized` accepted; the response body is empty. */
+            202: {
+                headers: {
+                    /** @description Agent Port responses are private and must never be stored. */
+                    "Cache-Control"?: "private, no-store";
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Malformed JSON-RPC, metadata/header mismatch, unsupported version or method, a query/duplicate transport header, or another bounded protocol validation failure. Protocol errors use the Agent Port JSON-RPC envelope. */
+            400: {
+                headers: {
+                    /** @description Agent Port responses are private and must never be stored. */
+                    "Cache-Control"?: "private, no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentPortJSONRPCErrorResponse"];
+                };
+            };
+            401: components["responses"]["AgentPortUnauthorized"];
+            403: components["responses"]["AgentPortForbidden"];
+            /** @description Request body exceeds the Agent Port byte bound. */
+            413: {
+                headers: {
+                    /** @description Agent Port responses are private and must never be stored. */
+                    "Cache-Control"?: "private, no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentPortJSONRPCErrorResponse"];
+                };
+            };
+            /** @description `Content-Type` or `Accept` does not satisfy the Agent Port transport contract. */
+            415: {
+                headers: {
+                    /** @description Agent Port responses are private and must never be stored. */
+                    "Cache-Control"?: "private, no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentPortJSONRPCErrorResponse"];
+                };
+            };
+            429: components["responses"]["AgentPortRateLimited"];
+            /** @description Authentication, tenant transaction, or audit persistence failed. The body is deliberately empty and never exposes database details. */
+            500: {
+                headers: {
+                    /** @description Agent Port responses are private and must never be stored. */
+                    "Cache-Control"?: "private, no-store";
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
     getContextPacket: {

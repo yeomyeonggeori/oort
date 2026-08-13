@@ -16,7 +16,8 @@ openapi: 3.0.3
 # code that serves it today.
 #
 # Scope: web v0 (ADR-0119 D5-A) plus admin agent creation, the plugin
-# registry/grant, incoming webhook, hosted Drive MCP, and interactive Work
+# registry/grant, incoming webhook, hosted Drive MCP, hosted-agent Agent Port,
+# and interactive Work
 # Console control surfaces. Other routes (invite admin,
 # workspace identity, legacy agent credential/run surfaces, cost projection, platform admin,
 # centrifugo proxy, health) remain intentionally undocumented here.
@@ -47,10 +48,10 @@ info:
     workspace roster, channels (list/create), messages (send/history with
     seq-cursor pagination and `?after=` backfill), read-state (bulk read +
     cursor advance), direct messages (list/open), and approvals
-    (list/decision), plugin registry/grants, incoming webhooks, and the hosted
-    read-only Drive MCP endpoint, and ADR-0114 Work Console sessions and
-    controls, plus the fresh-database agent creation boundary. Mirrors
-    MomoServer field by field.
+    (list/decision), plugin registry/grants, incoming webhooks, the hosted
+    read-only Drive MCP endpoint, the sessionless hosted-agent Agent Port, and
+    ADR-0114 Work Console sessions and controls, plus the fresh-database agent
+    creation boundary. Mirrors MomoServer field by field.
 
 servers:
   - url: /
@@ -4606,6 +4607,133 @@ paths:
         "429":
           $ref: "#/components/responses/RateLimited"
 
+  /v1/mcp/agent-port:
+    post:
+      tags: [mcp]
+      operationId: agentPort
+      summary: Call the sessionless hosted-agent MCP endpoint.
+      description: >
+        Vendor-neutral Agent Port from ADR-0162. This is a POST-only,
+        sessionless JSON-RPC endpoint and every request is authenticated again
+        with an active agent bearer carrying the non-default
+        `agent:port:connect` reachability scope. The credential is accepted
+        only in `Authorization`; URL/query credentials, app JWTs, human
+        principals are rejected. An incoming `Mcp-Session-Id` never creates
+        authority and is never echoed. No OAuth protected resource metadata is
+        advertised by this static-bearer wave.
+
+        Modern requests pin `2026-07-28`, include
+        `params._meta[io.modelcontextprotocol/protocolVersion]` and
+        `params._meta[io.modelcontextprotocol/clientCapabilities]`, and mirror
+        their version and method in `MCP-Protocol-Version` and `Mcp-Method`.
+        `Mcp-Name` is additionally mandatory for `tools/call` and must match
+        the body tool name. The modern foundation exposes `server/discover`,
+        an empty `tools/list`, and an unknown-tool `tools/call` error; it does
+        not expose initialize, ping, protocol sessions, or a GET stream.
+
+        The narrow legacy adapter pins `2025-11-25`. Its first `initialize`
+        may omit `MCP-Protocol-Version`; every later request must carry that
+        exact version. It accepts `initialize`,
+        `notifications/initialized`, `ping`, an empty `tools/list`, and an
+        unknown-tool `tools/call` error, without issuing a session id. All
+        calls send `Content-Type: application/json` and an `Accept` value that
+        contains both `application/json` and `text/event-stream`. Recognized
+        modern errors never silently downgrade to legacy. The two exact
+        supported versions are the complete compatibility set.
+      security:
+        - agentPortBearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/MCPProtocolVersion"
+        - $ref: "#/components/parameters/MCPMethod"
+        - $ref: "#/components/parameters/MCPName"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentPortJSONRPCRequest"
+      responses:
+        "200":
+          description: >
+            A modern discovery/tools result, a legacy initialize/tools result,
+            or a pong. Success never carries `Mcp-Session-Id`.
+          headers:
+            Cache-Control:
+              description: Agent Port responses are private and must never be stored.
+              schema:
+                type: string
+                enum: ["private, no-store"]
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentPortJSONRPCSuccessResponse"
+        "202":
+          description: Legacy `notifications/initialized` accepted; the response body is empty.
+          headers:
+            Cache-Control:
+              description: Agent Port responses are private and must never be stored.
+              schema:
+                type: string
+                enum: ["private, no-store"]
+        "400":
+          description: >
+            Malformed JSON-RPC, metadata/header mismatch, unsupported version
+            or method, a query/duplicate transport header, or another bounded
+            protocol validation failure. Protocol errors use the Agent Port
+            JSON-RPC envelope.
+          headers:
+            Cache-Control:
+              description: Agent Port responses are private and must never be stored.
+              schema:
+                type: string
+                enum: ["private, no-store"]
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentPortJSONRPCErrorResponse"
+        "401":
+          $ref: "#/components/responses/AgentPortUnauthorized"
+        "403":
+          $ref: "#/components/responses/AgentPortForbidden"
+        "413":
+          description: Request body exceeds the Agent Port byte bound.
+          headers:
+            Cache-Control:
+              description: Agent Port responses are private and must never be stored.
+              schema:
+                type: string
+                enum: ["private, no-store"]
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentPortJSONRPCErrorResponse"
+        "415":
+          description: >
+            `Content-Type` or `Accept` does not satisfy the Agent Port
+            transport contract.
+          headers:
+            Cache-Control:
+              description: Agent Port responses are private and must never be stored.
+              schema:
+                type: string
+                enum: ["private, no-store"]
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentPortJSONRPCErrorResponse"
+        "429":
+          $ref: "#/components/responses/AgentPortRateLimited"
+        "500":
+          description: >
+            Authentication, tenant transaction, or audit persistence failed.
+            The body is deliberately empty and never exposes database details.
+          headers:
+            Cache-Control:
+              description: Agent Port responses are private and must never be stored.
+              schema:
+                type: string
+                enum: ["private, no-store"]
+
   /v1/workspaces/{workspaceId}/context-packets/{packetId}:
     get:
       tags: [agents]
@@ -5134,6 +5262,17 @@ components:
         App access token (15m TTL) from login/join/refresh, sent as
         `Authorization: Bearer <accessToken>`. Tokens are hash-persisted
         server-side and revocable (MOMO-300).
+    agentPortBearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: oort agent bearer
+      description: >
+        Static agent bearer presented only as
+        `Authorization: Bearer <agentCredential>`. The active agent principal
+        must carry the non-default `agent:port:connect` reachability scope and
+        match its workspace. This scheme is deliberately separate from the app
+        JWT scheme and is not OAuth or protected-resource discovery; Agent Port
+        credentials are never accepted from a URL or query parameter.
     workHostAuth:
       type: apiKey
       in: header
@@ -5339,6 +5478,45 @@ components:
       schema:
         type: string
 
+    MCPProtocolVersion:
+      name: MCP-Protocol-Version
+      in: header
+      required: false
+      description: >
+        Exact protocol version mirrored from the request body. Required and
+        equal to `2026-07-28` on every modern call. A legacy `initialize` may
+        omit it; all later legacy calls require exact `2025-11-25`.
+      schema:
+        type: string
+        enum: ["2026-07-28", "2025-11-25"]
+    MCPMethod:
+      name: Mcp-Method
+      in: header
+      required: false
+      description: >
+        Required on modern calls and byte-for-byte equal to the JSON-RPC
+        method. Legacy clients may omit it; when present it must match.
+      schema:
+        type: string
+        enum:
+          - server/discover
+          - initialize
+          - notifications/initialized
+          - ping
+          - tools/list
+          - tools/call
+    MCPName:
+      name: Mcp-Name
+      in: header
+      required: false
+      description: >
+        Required only for modern `tools/call`; must exactly equal
+        `params.name`. Forbidden on methods that do not call a tool.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+
   responses:
     Unauthorized:
       description: Missing, invalid, expired, or revoked access token.
@@ -5381,6 +5559,58 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/ErrorResponse"
+    AgentPortUnauthorized:
+      description: >
+        Agent bearer is missing, malformed, expired, revoked, inactive, or
+        otherwise invalid. The response body is empty. A missing credential
+        has no `error` parameter; a presented invalid credential uses
+        `error="invalid_token"`.
+      headers:
+        WWW-Authenticate:
+          description: Bearer challenge scoped to `agent:port:connect`.
+          schema:
+            type: string
+        Cache-Control:
+          description: Agent Port responses are private and must never be stored.
+          schema:
+            type: string
+            enum: ["private, no-store"]
+    AgentPortForbidden:
+      description: >
+        A present Origin is not the configured canonical HTTPS origin, or the
+        authenticated agent lacks `agent:port:connect`. The response body is
+        empty. Scope denial includes `error="insufficient_scope"`; Origin
+        denial occurs before authentication and carries no challenge.
+      headers:
+        WWW-Authenticate:
+          description: Optional Bearer insufficient-scope challenge.
+          schema:
+            type: string
+        Cache-Control:
+          description: Agent Port responses are private and must never be stored.
+          schema:
+            type: string
+            enum: ["private, no-store"]
+    AgentPortRateLimited:
+      description: >
+        Dedicated per-token, per-agent, or per-IP Agent Port sliding-window
+        limit exceeded. No raw token, token hash, body, or client metadata is
+        returned or logged.
+      headers:
+        Retry-After:
+          description: Whole seconds to wait before retrying.
+          schema:
+            type: integer
+            minimum: 1
+        Cache-Control:
+          description: Agent Port responses are private and must never be stored.
+          schema:
+            type: string
+            enum: ["private, no-store"]
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/AgentPortJSONRPCErrorResponse"
 
   schemas:
     # ---- Error envelope (Hummingbird HTTPError) ------------------------------
@@ -9153,6 +9383,372 @@ components:
             type: object
             additionalProperties: true
       additionalProperties: true
+
+    # ---- Hosted Agent Port MCP JSON-RPC (ADR-0162 / HAP-E2) ---------------
+    AgentPortClientInfo:
+      type: object
+      additionalProperties: false
+      required: [name, version]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 128
+        title:
+          type: string
+          minLength: 1
+          maxLength: 128
+        version:
+          type: string
+          minLength: 1
+          maxLength: 64
+
+    AgentPortRequestMeta:
+      type: object
+      additionalProperties: false
+      required:
+        - io.modelcontextprotocol/protocolVersion
+        - io.modelcontextprotocol/clientCapabilities
+      properties:
+        io.modelcontextprotocol/protocolVersion:
+          type: string
+          enum: ["2026-07-28"]
+        io.modelcontextprotocol/clientCapabilities:
+          type: object
+          description: Bounded client-declared capabilities; never an authorization source.
+          additionalProperties: true
+        io.modelcontextprotocol/clientInfo:
+          $ref: "#/components/schemas/AgentPortClientInfo"
+
+    AgentPortModernParams:
+      type: object
+      additionalProperties: false
+      required: [_meta]
+      properties:
+        _meta:
+          $ref: "#/components/schemas/AgentPortRequestMeta"
+
+    AgentPortModernToolCallParams:
+      type: object
+      additionalProperties: false
+      required: [_meta, name]
+      properties:
+        _meta:
+          $ref: "#/components/schemas/AgentPortRequestMeta"
+        name:
+          type: string
+          minLength: 1
+          maxLength: 128
+        arguments:
+          type: object
+          additionalProperties: true
+
+    AgentPortLegacyInitializeParams:
+      type: object
+      additionalProperties: false
+      required: [protocolVersion, capabilities, clientInfo]
+      properties:
+        protocolVersion:
+          type: string
+          enum: ["2025-11-25"]
+        capabilities:
+          type: object
+          additionalProperties: true
+        clientInfo:
+          $ref: "#/components/schemas/AgentPortClientInfo"
+
+    AgentPortLegacyEmptyParams:
+      type: object
+      additionalProperties: false
+
+    AgentPortLegacyToolCallParams:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 128
+        arguments:
+          type: object
+          additionalProperties: true
+
+    AgentPortJSONRPCRequestId:
+      description: >
+        JSON-RPC non-empty string or finite number request id. Omitted only by the legacy
+        `notifications/initialized` notification.
+      oneOf:
+        - type: string
+          minLength: 1
+          maxLength: 128
+        - type: number
+
+    AgentPortJSONRPCRequest:
+      description: Exact closed union of the supported modern and legacy request bodies.
+      oneOf:
+        - $ref: "#/components/schemas/AgentPortModernDiscoverRequest"
+        - $ref: "#/components/schemas/AgentPortModernToolsListRequest"
+        - $ref: "#/components/schemas/AgentPortModernToolsCallRequest"
+        - $ref: "#/components/schemas/AgentPortLegacyInitializeRequest"
+        - $ref: "#/components/schemas/AgentPortLegacyInitializedNotification"
+        - $ref: "#/components/schemas/AgentPortLegacyPingRequest"
+        - $ref: "#/components/schemas/AgentPortLegacyToolsListRequest"
+        - $ref: "#/components/schemas/AgentPortLegacyToolsCallRequest"
+
+    AgentPortModernDiscoverRequest:
+      type: object
+      additionalProperties: false
+      required: [jsonrpc, id, method, params]
+      properties:
+        jsonrpc: {type: string, enum: ["2.0"]}
+        id: {$ref: "#/components/schemas/AgentPortJSONRPCRequestId"}
+        method: {type: string, enum: [server/discover]}
+        params: {$ref: "#/components/schemas/AgentPortModernParams"}
+
+    AgentPortModernToolsListRequest:
+      type: object
+      additionalProperties: false
+      required: [jsonrpc, id, method, params]
+      properties:
+        jsonrpc: {type: string, enum: ["2.0"]}
+        id: {$ref: "#/components/schemas/AgentPortJSONRPCRequestId"}
+        method: {type: string, enum: [tools/list]}
+        params: {$ref: "#/components/schemas/AgentPortModernParams"}
+
+    AgentPortModernToolsCallRequest:
+      type: object
+      additionalProperties: false
+      required: [jsonrpc, id, method, params]
+      properties:
+        jsonrpc: {type: string, enum: ["2.0"]}
+        id: {$ref: "#/components/schemas/AgentPortJSONRPCRequestId"}
+        method: {type: string, enum: [tools/call]}
+        params: {$ref: "#/components/schemas/AgentPortModernToolCallParams"}
+
+    AgentPortLegacyInitializeRequest:
+      type: object
+      additionalProperties: false
+      required: [jsonrpc, id, method, params]
+      properties:
+        jsonrpc: {type: string, enum: ["2.0"]}
+        id: {$ref: "#/components/schemas/AgentPortJSONRPCRequestId"}
+        method: {type: string, enum: [initialize]}
+        params: {$ref: "#/components/schemas/AgentPortLegacyInitializeParams"}
+
+    AgentPortLegacyInitializedNotification:
+      type: object
+      additionalProperties: false
+      required: [jsonrpc, method]
+      properties:
+        jsonrpc: {type: string, enum: ["2.0"]}
+        method: {type: string, enum: [notifications/initialized]}
+        params: {$ref: "#/components/schemas/AgentPortLegacyEmptyParams"}
+
+    AgentPortLegacyPingRequest:
+      type: object
+      additionalProperties: false
+      required: [jsonrpc, id, method]
+      properties:
+        jsonrpc: {type: string, enum: ["2.0"]}
+        id: {$ref: "#/components/schemas/AgentPortJSONRPCRequestId"}
+        method: {type: string, enum: [ping]}
+        params: {$ref: "#/components/schemas/AgentPortLegacyEmptyParams"}
+
+    AgentPortLegacyToolsListRequest:
+      type: object
+      additionalProperties: false
+      required: [jsonrpc, id, method]
+      properties:
+        jsonrpc: {type: string, enum: ["2.0"]}
+        id: {$ref: "#/components/schemas/AgentPortJSONRPCRequestId"}
+        method: {type: string, enum: [tools/list]}
+        params: {$ref: "#/components/schemas/AgentPortLegacyEmptyParams"}
+
+    AgentPortLegacyToolsCallRequest:
+      type: object
+      additionalProperties: false
+      required: [jsonrpc, id, method, params]
+      properties:
+        jsonrpc: {type: string, enum: ["2.0"]}
+        id: {$ref: "#/components/schemas/AgentPortJSONRPCRequestId"}
+        method: {type: string, enum: [tools/call]}
+        params: {$ref: "#/components/schemas/AgentPortLegacyToolCallParams"}
+
+    AgentPortServerToolCapability:
+      type: object
+      additionalProperties: false
+      required: [listChanged]
+      properties:
+        listChanged:
+          type: boolean
+          enum: [false]
+
+    AgentPortServerCapabilities:
+      type: object
+      additionalProperties: false
+      required: [tools]
+      properties:
+        tools:
+          $ref: "#/components/schemas/AgentPortServerToolCapability"
+
+    AgentPortServerInfo:
+      type: object
+      additionalProperties: false
+      required: [name, title, version]
+      properties:
+        name:
+          type: string
+          enum: [oort-agent-port]
+        title:
+          type: string
+          enum: [oort Agent Port]
+        version:
+          type: string
+
+    AgentPortCache:
+      type: object
+      additionalProperties: false
+      required: [ttlSeconds, scope]
+      properties:
+        ttlSeconds:
+          type: integer
+          minimum: 0
+          maximum: 300
+        scope:
+          type: string
+          enum: [private]
+
+    AgentPortModernDiscoverCache:
+      type: object
+      additionalProperties: false
+      required: [ttlSeconds, scope]
+      properties:
+        ttlSeconds: {type: integer, enum: [300]}
+        scope: {type: string, enum: [private]}
+
+    AgentPortModernToolsListCache:
+      type: object
+      additionalProperties: false
+      required: [ttlSeconds, scope]
+      properties:
+        ttlSeconds: {type: integer, enum: [0]}
+        scope: {type: string, enum: [private]}
+
+    AgentPortResult:
+      description: >
+        Exact closed union of modern discovery/list and legacy initialize/list/ping results.
+      oneOf:
+        - $ref: "#/components/schemas/AgentPortModernDiscoverResult"
+        - $ref: "#/components/schemas/AgentPortModernToolsListResult"
+        - $ref: "#/components/schemas/AgentPortLegacyInitializeResult"
+        - $ref: "#/components/schemas/AgentPortLegacyToolsListResult"
+        - $ref: "#/components/schemas/AgentPortPingResult"
+
+    AgentPortModernDiscoverResult:
+      type: object
+      additionalProperties: false
+      required: [protocolVersion, capabilities, serverInfo, resultType, cache]
+      properties:
+        protocolVersion:
+          type: string
+          enum: ["2026-07-28"]
+        capabilities:
+          $ref: "#/components/schemas/AgentPortServerCapabilities"
+        serverInfo:
+          $ref: "#/components/schemas/AgentPortServerInfo"
+        resultType:
+          type: string
+          enum: [server/discover]
+        cache:
+          $ref: "#/components/schemas/AgentPortModernDiscoverCache"
+
+    AgentPortModernToolsListResult:
+      type: object
+      additionalProperties: false
+      required: [tools, resultType, cache]
+      properties:
+        resultType: {type: string, enum: [tools/list]}
+        cache:
+          $ref: "#/components/schemas/AgentPortModernToolsListCache"
+        tools:
+          type: array
+          maxItems: 0
+          items:
+            type: object
+            additionalProperties: true
+
+    AgentPortLegacyInitializeResult:
+      type: object
+      additionalProperties: false
+      required: [protocolVersion, capabilities, serverInfo]
+      properties:
+        protocolVersion: {type: string, enum: ["2025-11-25"]}
+        capabilities: {$ref: "#/components/schemas/AgentPortServerCapabilities"}
+        serverInfo: {$ref: "#/components/schemas/AgentPortServerInfo"}
+
+    AgentPortLegacyToolsListResult:
+      type: object
+      additionalProperties: false
+      required: [tools]
+      properties:
+        tools:
+          type: array
+          maxItems: 0
+          items: {type: object, additionalProperties: true}
+
+    AgentPortPingResult:
+      type: object
+      additionalProperties: false
+
+    AgentPortJSONRPCError:
+      type: object
+      additionalProperties: false
+      required: [code, message]
+      properties:
+        code:
+          type: integer
+          enum: [-32700, -32600, -32601, -32602, -32020, -32022, -32029]
+        message:
+          type: string
+        data:
+          type: object
+          additionalProperties: true
+
+    AgentPortJSONRPCResponse:
+      description: >
+        Exactly one of result or error is emitted. Transport authentication
+        failures are intentionally not encoded in this envelope.
+      oneOf:
+        - $ref: "#/components/schemas/AgentPortJSONRPCSuccessResponse"
+        - $ref: "#/components/schemas/AgentPortJSONRPCErrorResponse"
+
+    AgentPortJSONRPCResponseId:
+      description: Echoed JSON-RPC string/number id, or null when unavailable.
+      nullable: true
+      oneOf:
+        - type: string
+          minLength: 1
+          maxLength: 128
+        - type: number
+
+    AgentPortJSONRPCSuccessResponse:
+      type: object
+      additionalProperties: false
+      required: [jsonrpc, id, result]
+      properties:
+        jsonrpc: {type: string, enum: ["2.0"]}
+        id: {$ref: "#/components/schemas/AgentPortJSONRPCRequestId"}
+        result: {$ref: "#/components/schemas/AgentPortResult"}
+
+    AgentPortJSONRPCErrorResponse:
+      type: object
+      additionalProperties: false
+      required: [jsonrpc, id, error]
+      properties:
+        jsonrpc: {type: string, enum: ["2.0"]}
+        id: {$ref: "#/components/schemas/AgentPortJSONRPCResponseId"}
+        error: {$ref: "#/components/schemas/AgentPortJSONRPCError"}
 
     # ---- Hosted Drive MCP JSON-RPC -----------------------------------------
     DriveMCPRequest:

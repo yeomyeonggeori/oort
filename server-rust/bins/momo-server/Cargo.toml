@@ -20,6 +20,9 @@ path = "src/main.rs"
 # APIs only — it owns no SQL of its own (D1 §3).
 momo-db = { path = "../../crates/momo-db" }
 momo-auth = { path = "../../crates/momo-auth" }
+# ADR-0162 / HAP-E2: pure dual-era MCP wire validation and dispatch. This crate
+# owns no SQL or HTTP client; the Axum adapter remains in this binary.
+momo-mcp = { path = "../../crates/momo-mcp" }
 momo-messaging = { path = "../../crates/momo-messaging" }
 # ADR-0151: the workspace Drive archive. It owns the HTTP client so this manifest
 # does not, and its whole API is the five-method `DriveArchive` trait — so an

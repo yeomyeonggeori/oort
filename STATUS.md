@@ -1,5 +1,10 @@
 # oort 진행 현황
 
+## Hosted Agent Port dual-era foundation (#1363, 2026-08-13)
+
+- Rust에 sessionless `POST /v1/mcp/agent-port`를 추가해 modern `2026-07-28` discovery/empty tools와 exact legacy `2025-11-25` initialize/initialized/ping/empty tools를 분리했다. 첫 wave는 `agent:port:connect` static agent bearer만 허용하며 product tool·message/job/inbox 쓰기·OAuth metadata는 열지 않는다.
+- 실제 PostgreSQL 18 + `momo_app` NOBYPASSRLS router에서 active agent/workspace membership/scope를 매 요청 재검증하고, stable token/member UUID의 원자 limiter가 허용한 경우에만 `last_used_at`+used audit을 같은 tenant transaction으로 커밋한다. 반복·동시 429, 중간 revoke/membership 제거, human/inactive/cross-workspace, no product writes, deploy-image route를 전용 verifier에 고정했다. 공식 Grok private preset의 static bearer 소비와 실제 tool call은 후속 live E2E까지 `runtime-unverified`다.
+
 ## Grok Bot trial-first 실측 완료 — private MCP transport·Routine·cleanup (#1344, 2026-08-12)
 
 - 성재가 공식 앱 설치와 ADR-0162 기술 방향을 승인한 뒤 Cursor 배포본 `Grok Bot 0.16.0`(`com.anysphere.sand`, arm64)을 설치했다. DMG SHA-256과 `hdiutil` checksum을 확인했고, app strict code-sign verification과 Gatekeeper `accepted`/`Notarized Developer ID`(Anysphere Incorporated `DCNK4UB866`)가 통과했다. team account는 `trialEligible=true`였지만 강제 `NO_STORAGE` 정책에 막혔고, personal account는 별도 trial entitlement/start 문구나 결제·구독 UI 없이 Bot 1개와 기본 채팅까지 동작했다. 구매·유료 전환은 0건이다.

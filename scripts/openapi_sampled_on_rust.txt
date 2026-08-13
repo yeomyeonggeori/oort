@@ -132,6 +132,13 @@ POST /v1/auth/refresh
 POST /v1/auth/logout
 POST /v1/auth/realtime-token
 
+# ── hosted-agent Agent Port (ADR-0162 / HAP-E2) ────────────────────────────
+# 이 한 연산은 같은 POST에서 modern 2026-07-28 server/discover와 exact legacy
+# 2025-11-25 initialize/initialized를 모두 왕복한다. agent bearer는 SQL fixture가
+# `agent:port:connect`를 명시적으로 심으며 app JWT나 #1358 credential lifecycle에
+# 의존하지 않는다. GET/DELETE는 스펙 operation이 아니고 런타임에서 405를 단정한다.
+POST /v1/mcp/agent-port
+
 # ── 승인 계열 (#1042 최초 등재분) ───────────────────────────────────────────
 # 사람이 만나는 두 지점: 인박스와, 결정하는 탭.
 # (routes/approvals.rs — Swift ApprovalDecisionRoutes.swift 의 포팅본)

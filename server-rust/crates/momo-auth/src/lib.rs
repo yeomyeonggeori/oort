@@ -73,13 +73,13 @@ pub mod workhost;
 pub mod workspace_authorization;
 
 pub use agent_bearer::{
-    agent_bearer_workspace_id, authenticate_agent_bearer_in_tx, AgentBearerIdentity,
-    AgentBearerRejection, AgentBearerResolution, AGENT_BEARER_PREFIX, AUDIT_ACTION_SCOPE_DENIED,
-    AUDIT_ACTION_USED, AUDIT_DETAIL_SCHEMA,
+    agent_bearer_workspace_id, finalize_agent_bearer_use_in_tx, resolve_agent_bearer_in_tx,
+    AgentBearerIdentity, AgentBearerRejection, AgentBearerResolution, AGENT_BEARER_PREFIX,
+    AUDIT_ACTION_SCOPE_DENIED, AUDIT_ACTION_USED, AUDIT_DETAIL_SCHEMA,
 };
 pub use agent_scope::{
     is_gateway_callback_route, required_agent_scope, SCOPE_AGENT_JOBS_READ,
-    SCOPE_AGENT_RUNS_CALLBACK, SCOPE_MESSAGES_WRITE,
+    SCOPE_AGENT_PORT_CONNECT, SCOPE_AGENT_RUNS_CALLBACK, SCOPE_MESSAGES_WRITE,
 };
 pub use ephemeral_grant::{
     ephemeral_grant_key, sign_ephemeral_grant, verify_ephemeral_grant, EphemeralGrantClaims,
