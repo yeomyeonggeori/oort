@@ -1,5 +1,15 @@
 # oort 기획 현재 상태 (Planning Current State)
 
+> **2026-08-13 스냅샷 31 (GPT 5.6 sol · #1364 final-review 수리·재동결).** 스냅샷 30을 supersede한다.
+>
+> **최종 리뷰 수리:** hosted bearer를 generic scope dispatch 전에 SELECT-only로 분류해 exact Agent Port 밖을 side-effect 0의 동일 403으로 닫았다. create/confirm audit 실패는 전량 rollback, MCP client metadata는 string/number/array와 secret-shaped key/value를 저장하지 않는 closed projection, verifier는 본문·헤더·상태와 무관하게 `momo_agent_v1`/`momo_pair_v1`를 출력 전에 등록·차단한다. detected TTL 만료와 member/workspace membership/agent 상실은 connection expired+profile paused+token revoke로 귀결되어 복원만으로 재활성화되지 않으며, proof의 profile UPDATE 0건은 전체 tx rollback이다. 기존 시간 sleep race는 advisory-lock readiness+row-lock barrier로 교체했다.
+>
+> **재검증:** `cargo fmt --check --all`, workspace clippy `-D warnings`, workspace tests, momo-auth 61/61, momo-server auth 7/7, cleanup contract·shell syntax, 실제 PG18 Agent Port 2/2+source-checkout-free deploy image, actual-image OpenAPI 65/65 samples+62/62 operations가 PASS했다. 첫 OpenAPI 재검수에서 새 expired 의미와 어긋난 assertion 2개를 발견·교정한 뒤 동일 actual-image gate가 green이다.
+>
+> **보존/범위:** 부모 commit `f78cb249`(구현)+`694deee9`(중단 checkpoint)는 보존한다. final-review 수정은 별도 로컬 commit 하나로만 고정하고 push/PR하지 않는다. 공유 worktree의 13개 무관 rustfmt drift는 계속 비소유이며 stage/revert하지 않는다.
+>
+> **다음 행동:** final-review commit의 exact diff/secret gate와 독립 reviewer C/H/M=0을 확인한 뒤에만 momo-main이 push→PR→needs-review를 수행한다. #1365/#1366은 #1364 랜딩 전까지 blocked다.
+
 > **2026-08-13 스냅샷 30 (GPT 5.6 sol · momo-main — #1364 네트워크 중단 안전 체크포인트).** 스냅샷 29를 supersede한다.
 >
 > **현재 구현:** #1364 dedicated hosted identity/pairing/activation의 29개 소유 파일 구현이 완료됐고 worker self-review는 C0/H0/M0이다. 신규 migration 069, static bearer pairing→detect→explicit confirm→proof+active+unpause, exact Agent Port audience, generic credential/REST deny, production delivery kill-switch, 실제 worker claim+A2A guard를 포함한다. 마지막 owned-byte aggregate는 `44cfd88d5e28834c0e769644d065691fc5abb540d78c94b1234916e7c153ddb3`였으며 이후 writer 변경 없이 동결됐다.

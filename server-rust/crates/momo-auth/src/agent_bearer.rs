@@ -80,6 +80,57 @@ pub struct AgentBearerIdentity {
     pub audience: Option<String>,
 }
 
+/// SELECT-only credential classification used before generic route→scope
+/// dispatch.  It deliberately carries no row identifiers: callers only need to
+/// know whether the credential is connection-managed, and must not turn this
+/// preflight into an existence oracle or a second authentication path.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AgentBearerClass {
+    GenericOrUnknown,
+    HostedAgentPort,
+    InvalidHostedBinding,
+}
+
+pub async fn classify_agent_bearer_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    raw_token: &str,
+) -> Result<AgentBearerClass, sqlx::Error> {
+    let row = sqlx::query(
+        "SELECT t.credential_class, t.hosted_connection_id, t.audience, hc.audience AS connection_audience \
+           FROM token t \
+           LEFT JOIN hosted_agent_connection hc \
+             ON hc.workspace_id=t.workspace_id AND hc.id=t.hosted_connection_id \
+          WHERE t.workspace_id=$1 AND t.kind='agent_bearer' \
+            AND t.subject_member_id IS NULL \
+            AND t.token_hash=digest($2::text, 'sha256') \
+          LIMIT 1",
+    )
+    .bind(workspace_id)
+    .bind(raw_token)
+    .fetch_optional(&mut *conn)
+    .await?;
+    let Some(row) = row else {
+        return Ok(AgentBearerClass::GenericOrUnknown);
+    };
+    let credential_class: String = row.try_get("credential_class")?;
+    if credential_class == "generic" {
+        return Ok(AgentBearerClass::GenericOrUnknown);
+    }
+    let connection_id: Option<Uuid> = row.try_get("hosted_connection_id")?;
+    let audience: Option<String> = row.try_get("audience")?;
+    let connection_audience: Option<String> = row.try_get("connection_audience")?;
+    if credential_class == "hosted_active"
+        && connection_id.is_some()
+        && audience.as_deref() == Some("/v1/mcp/agent-port")
+        && connection_audience.as_deref() == Some("/v1/mcp/agent-port")
+    {
+        Ok(AgentBearerClass::HostedAgentPort)
+    } else {
+        Ok(AgentBearerClass::InvalidHostedBinding)
+    }
+}
+
 /// Outcome of looking an agent bearer up (Swift `AgentBearerResolution`).
 ///
 /// `Active { scope_granted: false }` is deliberately distinct from the three
@@ -194,20 +245,22 @@ pub async fn resolve_agent_bearer_in_tx(
     required_scope: &str,
 ) -> Result<AgentBearerResolution, sqlx::Error> {
     let row = sqlx::query(
-        "SELECT t.id, t.actor_member_id, t.scopes, t.hosted_connection_id, t.audience, \
+        "SELECT t.id, t.actor_member_id, t.scopes, t.credential_class, \
+                t.hosted_connection_id, t.audience, \
+                (m.id IS NOT NULL AND a.member_id IS NOT NULL AND wm.member_id IS NOT NULL) AS identity_live, \
                 t.revoked_at IS NOT NULL AS revoked, \
                 (t.expires_at IS NOT NULL AND t.expires_at <= now()) AS expired \
            FROM token t \
-           JOIN member m \
+           LEFT JOIN member m \
              ON m.id = t.actor_member_id \
             AND m.workspace_id = t.workspace_id \
             AND m.kind = 'agent' \
             AND m.status = 'active' \
             AND m.deleted_at IS NULL \
-           JOIN agent a \
+           LEFT JOIN agent a \
              ON a.member_id = m.id \
             AND a.workspace_id = m.workspace_id \
-           JOIN workspace_membership wm \
+           LEFT JOIN workspace_membership wm \
              ON wm.workspace_id = m.workspace_id \
             AND wm.member_id = m.id \
           WHERE t.workspace_id = $1 \
@@ -235,6 +288,11 @@ pub async fn resolve_agent_bearer_in_tx(
     }
     if row.try_get::<bool, _>("expired")? {
         return Ok(AgentBearerResolution::Expired);
+    }
+    if !row.try_get::<bool, _>("identity_live")?
+        && row.try_get::<String, _>("credential_class")? != "hosted_active"
+    {
+        return Ok(AgentBearerResolution::Unknown);
     }
 
     let token_id: Uuid = row.try_get("id")?;

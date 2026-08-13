@@ -64,10 +64,10 @@ use axum::http::request::Parts;
 use axum::middleware::Next;
 use axum::response::Response;
 use momo_auth::{
-    agent_bearer_workspace_id, finalize_agent_bearer_use_in_tx, is_gateway_callback_route,
-    required_agent_scope, resolve_agent_bearer_in_tx, token_state, verify_app_access,
-    AgentBearerIdentity, AgentBearerResolution, AuthError, Principal, PrincipalKind,
-    AUDIT_DETAIL_SCHEMA,
+    agent_bearer_workspace_id, classify_agent_bearer_in_tx, finalize_agent_bearer_use_in_tx,
+    is_gateway_callback_route, required_agent_scope, resolve_agent_bearer_in_tx, token_state,
+    verify_app_access, AgentBearerClass, AgentBearerIdentity, AgentBearerResolution, AuthError,
+    Principal, PrincipalKind, AUDIT_DETAIL_SCHEMA,
 };
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::{with_tenant_tx, DbError};
@@ -698,6 +698,35 @@ async fn authenticate_agent(
     method: &str,
     path: &str,
 ) -> Result<Principal, ApiError> {
+    // Classify the credential before the generic route→scope table is
+    // consulted.  This preflight is SELECT-only and its rejection is the same
+    // generic 403 used for every agent bearer on a closed route, so it neither
+    // touches last_used/audit nor exposes whether a presented secret exists.
+    let token = raw_token.to_string();
+    let class = with_tenant_tx(&state.pool, claimed_workspace, move |conn| {
+        Box::pin(async move {
+            classify_agent_bearer_in_tx(conn, claimed_workspace, &token)
+                .await
+                .map_err(DbError::from)
+        })
+    })
+    .await
+    .map_err(|error| ApiError::internal("auth.agent_bearer_class", error))?;
+    match class {
+        AgentBearerClass::HostedAgentPort
+            if method != "POST" || path != momo_auth::HOSTED_AGENT_PORT_AUDIENCE =>
+        {
+            return Err(ApiError::forbidden(
+                "agent bearer is not allowed for this route",
+            ));
+        }
+        AgentBearerClass::InvalidHostedBinding => {
+            return Err(ApiError::forbidden(
+                "agent bearer is not allowed for this route",
+            ));
+        }
+        AgentBearerClass::GenericOrUnknown | AgentBearerClass::HostedAgentPort => {}
+    }
     let Some(required_scope) = required_agent_scope(method, path) else {
         return Err(ApiError::forbidden(
             "agent bearer is not allowed for this route",

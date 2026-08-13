@@ -75,9 +75,10 @@ pub mod workhost;
 pub mod workspace_authorization;
 
 pub use agent_bearer::{
-    agent_bearer_workspace_id, finalize_agent_bearer_use_in_tx, resolve_agent_bearer_in_tx,
-    AgentBearerIdentity, AgentBearerRejection, AgentBearerResolution, AGENT_BEARER_PREFIX,
-    AUDIT_ACTION_SCOPE_DENIED, AUDIT_ACTION_USED, AUDIT_DETAIL_SCHEMA,
+    agent_bearer_workspace_id, classify_agent_bearer_in_tx, finalize_agent_bearer_use_in_tx,
+    resolve_agent_bearer_in_tx, AgentBearerClass, AgentBearerIdentity, AgentBearerRejection,
+    AgentBearerResolution, AGENT_BEARER_PREFIX, AUDIT_ACTION_SCOPE_DENIED, AUDIT_ACTION_USED,
+    AUDIT_DETAIL_SCHEMA,
 };
 pub use agent_credential::{
     active_agent_for_credential_list, agent_credential_mutation_policy_in_tx,

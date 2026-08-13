@@ -7,7 +7,7 @@
 
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine as _;
-use serde_json::Value;
+use serde_json::{Map, Value};
 use sqlx::{PgConnection, Row};
 use uuid::Uuid;
 
@@ -311,16 +311,27 @@ pub async fn detect_pairing_in_tx(
     client_version: Option<&str>,
     capabilities: &Value,
 ) -> Result<HostedMutation<AgentBearerIdentity>, sqlx::Error> {
-    // Provider metadata is display-only and must never gain authority over the
-    // pairing transition. Project it into the bounded storage envelope instead
-    // of rejecting an otherwise valid foundation request.
-    let client_name = client_name.map(|value| bounded_utf8(value, 200));
-    let client_version = client_version.map(|value| bounded_utf8(value, 100));
-    let capabilities = if capabilities.is_object() && capabilities.to_string().len() <= 4096 {
-        capabilities.clone()
-    } else {
-        serde_json::json!({})
-    };
+    // Provider metadata is display-only. Persist a closed, non-string
+    // projection: arbitrary strings and secret-shaped keys are dropped rather
+    // than trying to enumerate every credential syntax providers may invent.
+    let client_name = sanitize_observation_text(client_name, 200);
+    let client_version = sanitize_observation_text(client_version, 100);
+    let capabilities = sanitize_capabilities(capabilities);
+    let live_member: Option<Uuid> = sqlx::query_scalar(
+        "SELECT agent_member_id FROM hosted_agent_connection \
+          WHERE workspace_id=$1 AND status='pairing_pending' \
+            AND pairing_challenge_hash=digest($2::text, 'sha256') FOR UPDATE",
+    )
+    .bind(workspace_id)
+    .bind(raw)
+    .fetch_optional(&mut *conn)
+    .await?;
+    if let Some(agent_member_id) = live_member {
+        if !hosted_identity_is_live_in_tx(conn, workspace_id, agent_member_id).await? {
+            invalidate_hosted_lifecycle_in_tx(conn, workspace_id, agent_member_id).await?;
+            return Ok(HostedMutation::Expired);
+        }
+    }
     let row = sqlx::query(
         "WITH expired AS ( \
            UPDATE hosted_agent_connection SET status = 'expired', updated_at = now() \
@@ -375,14 +386,9 @@ pub async fn resolve_pairing_in_tx(
     raw: &str,
 ) -> Result<HostedMutation<AgentBearerIdentity>, sqlx::Error> {
     let row = sqlx::query(
-        "WITH expired AS ( \
-           UPDATE hosted_agent_connection SET status = 'expired', updated_at = now() \
-            WHERE workspace_id = $1 AND status = 'pairing_pending' \
-              AND pairing_expires_at <= now() \
-              AND pairing_challenge_hash = digest($2::text, 'sha256') \
-         ) SELECT id, agent_member_id FROM hosted_agent_connection \
+        "SELECT id, agent_member_id, pairing_expires_at <= now() AS expired \
+           FROM hosted_agent_connection \
           WHERE workspace_id = $1 AND status = 'pairing_pending' \
-            AND pairing_expires_at > now() \
             AND pairing_challenge_hash = digest($2::text, 'sha256') \
           FOR UPDATE",
     )
@@ -391,23 +397,18 @@ pub async fn resolve_pairing_in_tx(
     .fetch_optional(&mut *conn)
     .await?;
     let Some(row) = row else {
-        let expired: Option<i32> = sqlx::query_scalar(
-            "SELECT 1 FROM hosted_agent_connection WHERE workspace_id = $1 AND status = 'expired' \
-               AND pairing_challenge_hash = digest($2::text, 'sha256') LIMIT 1",
-        )
-        .bind(workspace_id)
-        .bind(raw)
-        .fetch_optional(&mut *conn)
-        .await?;
-        return Ok(if expired.is_some() {
-            HostedMutation::Expired
-        } else {
-            HostedMutation::NotFound
-        });
+        return Ok(HostedMutation::NotFound);
     };
+    let agent_member_id: Uuid = row.try_get("agent_member_id")?;
+    if row.try_get::<bool, _>("expired")?
+        || !hosted_identity_is_live_in_tx(conn, workspace_id, agent_member_id).await?
+    {
+        invalidate_hosted_lifecycle_in_tx(conn, workspace_id, agent_member_id).await?;
+        return Ok(HostedMutation::Expired);
+    }
     Ok(HostedMutation::Applied(AgentBearerIdentity {
         token_id: row.try_get("id")?,
-        member_id: row.try_get("agent_member_id")?,
+        member_id: agent_member_id,
         workspace_id,
         scopes: vec!["agent:port:connect".to_string()],
         hosted_connection_id: Some(row.try_get("id")?),
@@ -426,6 +427,152 @@ fn bounded_utf8(value: &str, max_bytes: usize) -> String {
     value[..end].to_string()
 }
 
+fn observation_is_sensitive(value: &str) -> bool {
+    let folded: String = value
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect();
+    [
+        "authorization",
+        "bearer",
+        "credential",
+        "password",
+        "secret",
+        "token",
+        "pair",
+        "momoagentv1",
+        "momopairv1",
+    ]
+    .iter()
+    .any(|needle| folded.contains(needle))
+}
+
+fn sanitize_observation_text(value: Option<&str>, max_bytes: usize) -> Option<String> {
+    value
+        .filter(|value| !observation_is_sensitive(value))
+        .map(|value| bounded_utf8(value, max_bytes))
+        .filter(|value| !value.is_empty())
+}
+
+fn project_capability(value: &Value, depth: usize, budget: &mut usize) -> Option<Value> {
+    if depth > 4 || *budget == 0 {
+        return None;
+    }
+    match value {
+        Value::Bool(value) => Some(Value::Bool(*value)),
+        Value::Null => Some(Value::Null),
+        Value::Object(values) => {
+            let mut projected = Map::new();
+            for (key, value) in values {
+                if *budget == 0 {
+                    break;
+                }
+                if key.is_empty()
+                    || key.len() > 64
+                    || observation_is_sensitive(key)
+                    || !key.bytes().all(|byte| {
+                        byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-' | b'/')
+                    })
+                {
+                    continue;
+                }
+                if let Some(value) = project_capability(value, depth + 1, budget) {
+                    *budget -= 1;
+                    projected.insert(key.clone(), value);
+                }
+            }
+            Some(Value::Object(projected))
+        }
+        // Strings, numbers and arrays are not capability-presence facts and
+        // can carry arbitrary provider secrets. They are intentionally absent.
+        Value::String(_) | Value::Number(_) | Value::Array(_) => None,
+    }
+}
+
+fn sanitize_capabilities(value: &Value) -> Value {
+    let mut budget = 64;
+    match project_capability(value, 0, &mut budget) {
+        Some(Value::Object(projected)) => Value::Object(projected),
+        _ => Value::Object(Map::new()),
+    }
+}
+
+async fn hosted_identity_is_live_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    agent_member_id: Uuid,
+) -> Result<bool, sqlx::Error> {
+    let live: Option<i32> = sqlx::query_scalar(
+        "SELECT 1 FROM member m \
+           JOIN workspace_membership wm ON wm.workspace_id=m.workspace_id AND wm.member_id=m.id \
+           JOIN agent a ON a.workspace_id=m.workspace_id AND a.member_id=m.id \
+          WHERE m.workspace_id=$1 AND m.id=$2 AND m.kind='agent' \
+            AND m.status='active' AND m.deleted_at IS NULL \
+          FOR UPDATE OF m, wm, a",
+    )
+    .bind(workspace_id)
+    .bind(agent_member_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    Ok(live.is_some())
+}
+
+async fn invalidate_hosted_lifecycle_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    agent_member_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE token SET revoked_at=COALESCE(revoked_at, now()) \
+          WHERE workspace_id=$1 AND actor_member_id=$2 \
+            AND credential_class='hosted_active' AND revoked_at IS NULL",
+    )
+    .bind(workspace_id)
+    .bind(agent_member_id)
+    .execute(&mut *conn)
+    .await?;
+    sqlx::query(
+        "UPDATE hosted_agent_connection SET status='expired', active_token_id=NULL, updated_at=now() \
+          WHERE workspace_id=$1 AND agent_member_id=$2 \
+            AND status IN ('pairing_pending','detected')",
+    )
+    .bind(workspace_id)
+    .bind(agent_member_id)
+    .execute(&mut *conn)
+    .await?;
+    sqlx::query(
+        "UPDATE agent_profile SET paused=true, version=version + CASE WHEN paused THEN 0 ELSE 1 END, \
+           updated_at=now() WHERE workspace_id=$1 AND agent_member_id=$2",
+    )
+    .bind(workspace_id)
+    .bind(agent_member_id)
+    .execute(&mut *conn)
+    .await?;
+    Ok(())
+}
+
+async fn expire_stale_detected_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    connection_id: Uuid,
+) -> Result<bool, sqlx::Error> {
+    let agent_member_id: Option<Uuid> = sqlx::query_scalar(
+        "SELECT agent_member_id FROM hosted_agent_connection \
+          WHERE workspace_id=$1 AND id=$2 AND status='detected' \
+            AND pairing_expires_at <= now() FOR UPDATE",
+    )
+    .bind(workspace_id)
+    .bind(connection_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    if let Some(agent_member_id) = agent_member_id {
+        invalidate_hosted_lifecycle_in_tx(conn, workspace_id, agent_member_id).await?;
+        return Ok(true);
+    }
+    Ok(false)
+}
+
 pub async fn confirm_hosted_connection_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -433,6 +580,23 @@ pub async fn confirm_hosted_connection_in_tx(
     actor_member_id: Uuid,
     approval: &HostedConnectionApproval,
 ) -> Result<HostedMutation<HostedActivationIssuance>, sqlx::Error> {
+    if expire_stale_detected_in_tx(conn, workspace_id, connection_id).await? {
+        return Ok(HostedMutation::Expired);
+    }
+    let detected_member: Option<Uuid> = sqlx::query_scalar(
+        "SELECT agent_member_id FROM hosted_agent_connection \
+          WHERE workspace_id=$1 AND id=$2 AND status='detected' FOR UPDATE",
+    )
+    .bind(workspace_id)
+    .bind(connection_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    if let Some(agent_member_id) = detected_member {
+        if !hosted_identity_is_live_in_tx(conn, workspace_id, agent_member_id).await? {
+            invalidate_hosted_lifecycle_in_tx(conn, workspace_id, agent_member_id).await?;
+            return Ok(HostedMutation::Expired);
+        }
+    }
     let raw = mint_agent_bearer(workspace_id)
         .map_err(|error| sqlx::Error::Protocol(error.to_string()))?;
     let sql = format!(
@@ -524,6 +688,9 @@ pub async fn prove_hosted_binding_in_tx(
     if identity.audience.as_deref() != Some(HOSTED_AGENT_PORT_AUDIENCE) {
         return Ok(HostedProof::Rejected);
     }
+    if expire_stale_detected_in_tx(conn, identity.workspace_id, connection_id).await? {
+        return Ok(HostedProof::Rejected);
+    }
     // Regenerate also locks connection then token. Keeping the same order here
     // prevents proof/regenerate from forming a connection↔token deadlock.
     let status: Option<String> = sqlx::query_scalar(
@@ -570,6 +737,7 @@ pub async fn prove_hosted_binding_in_tx(
     .fetch_optional(&mut *conn)
     .await?;
     if token_live.is_none() || member_live.is_none() || membership_live.is_none() {
+        invalidate_hosted_lifecycle_in_tx(conn, identity.workspace_id, identity.member_id).await?;
         return Ok(HostedProof::Rejected);
     }
     let activated: bool = sqlx::query_scalar(
@@ -599,11 +767,16 @@ pub async fn prove_hosted_binding_in_tx(
     .bind(&status)
     .fetch_one(&mut *conn)
     .await?;
-    Ok(if activated {
-        HostedProof::Activated
+    if activated {
+        Ok(HostedProof::Activated)
+    } else if status == "detected" {
+        // The detected→active transaction requires exactly one profile UPDATE.
+        // Returning an error makes the tenant transaction roll back the token
+        // touch as well as every lifecycle write when the row is absent.
+        Err(sqlx::Error::RowNotFound)
     } else {
-        HostedProof::Allowed
-    })
+        Ok(HostedProof::Allowed)
+    }
 }
 
 pub async fn is_hosted_agent_in_tx(
@@ -668,5 +841,30 @@ mod tests {
         assert!(
             validate_hosted_scopes(&["agent:port:connect".into(), "work:control".into()]).is_err()
         );
+    }
+
+    #[test]
+    fn observation_projection_drops_secret_shaped_and_unbounded_values() {
+        assert_eq!(
+            sanitize_observation_text(Some("momo_pair_v1.workspace.secret"), 200),
+            None
+        );
+        assert_eq!(
+            sanitize_observation_text(Some("Cursor Bot"), 200).as_deref(),
+            Some("Cursor Bot")
+        );
+        let projected = sanitize_capabilities(&serde_json::json!({
+            "tools": {"listChanged": true, "tokenEndpoint": true, "note": "momo_pair_v1.leak"},
+            "authorization": {"enabled": true},
+            "sampling": false,
+            "values": ["secret"],
+            "count": 7
+        }));
+        assert_eq!(
+            projected,
+            serde_json::json!({"tools":{"listChanged":true},"sampling":false})
+        );
+        assert!(!projected.to_string().contains("momo_pair_v1"));
+        assert!(!projected.to_string().contains("tokenEndpoint"));
     }
 }

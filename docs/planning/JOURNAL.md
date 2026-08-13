@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-08-13 (GPT 5.6 sol) · #1364 final-review A–H 수리·재동결
+- hosted bearer pre-scope 분류, rollback delta0, closed MCP metadata projection, 전역 agent/pair envelope 차단을 반영했다.
+- detected TTL·identity/membership 상실을 expired+paused+revoke로 닫고, proof profile 0건은 전체 rollback, race fixture는 advisory/row-lock barrier로 결정화했다.
+- fmt/clippy/workspace tests, focused unit, cleanup, 실제 PG18+deploy image, actual-image OpenAPI 65/65+62/62가 green이다.
+- 별도 로컬 final-review commit만 만들고 push/PR은 하지 않는다. 무관 rustfmt 13파일은 계속 제외하며 독립 reviewer C/H/M=0 뒤 handoff한다.
+
 ## 2026-08-13 (GPT 5.6 sol · momo-main) · #1364 네트워크 중단 안전 체크포인트
 - #1364 worker 구현은 29개 소유 파일에서 self-review C0/H0/M0, Rust/PG18/actual worker+A2A/OpenAPI 65/65+62/leak0까지 닫았다. owned aggregate는 `44cfd88…`다.
 - 사용자의 중단 요청으로 마지막 exact-freeze 독립 reviewer를 즉시 멈췄다. 최종 reviewer C/H/M은 미완료이므로 현재 바이트를 승인·PR-ready로 부르지 않는다.
