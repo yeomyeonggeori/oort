@@ -1,5 +1,6 @@
 //! HTTP routes. Each module owns one Swift route file's parity surface.
 
+pub mod agent_credentials;
 pub mod agent_gateway;
 pub mod agent_mentions;
 /// ADR-0162 / HAP-E2 — stateless dual-era MCP Agent Port.

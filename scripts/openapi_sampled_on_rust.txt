@@ -188,6 +188,9 @@ PUT /v1/workspaces/{workspaceId}/work-tier-policy/me
 # ── 에이전트 = 1급 멤버 ─────────────────────────────────────────────────────
 # 초대(=member 생성)·프로필·정지·모델 어휘, 그리고 ADR-0132 의 사람의 「멈춰라」.
 POST /v1/workspaces/{workspaceId}/agents
+POST /v1/workspaces/{workspaceId}/agents/{agentId}/credentials
+GET /v1/workspaces/{workspaceId}/agents/{agentId}/credentials
+POST /v1/workspaces/{workspaceId}/agents/{agentId}/credentials/{credentialId}/revoke
 GET /v1/workspaces/{workspaceId}/agents/{agentId}/profile
 PUT /v1/workspaces/{workspaceId}/agents/{agentId}/profile
 PUT /v1/workspaces/{workspaceId}/agents/{agentId}/pause

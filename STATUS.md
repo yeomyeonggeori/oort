@@ -5,6 +5,12 @@
 - Rust에 sessionless `POST /v1/mcp/agent-port`를 추가해 modern `2026-07-28` discovery/empty tools와 exact legacy `2025-11-25` initialize/initialized/ping/empty tools를 분리했다. 첫 wave는 `agent:port:connect` static agent bearer만 허용하며 product tool·message/job/inbox 쓰기·OAuth metadata는 열지 않는다.
 - 실제 PostgreSQL 18 + `momo_app` NOBYPASSRLS router에서 active agent/workspace membership/scope를 매 요청 재검증하고, stable token/member UUID의 원자 limiter가 허용한 경우에만 `last_used_at`+used audit을 같은 tenant transaction으로 커밋한다. 반복·동시 429, 중간 revoke/membership 제거, human/inactive/cross-workspace, no product writes, deploy-image route를 전용 verifier에 고정했다. 공식 Grok private preset의 static bearer 소비와 실제 tool call은 후속 live E2E까지 `runtime-unverified`다.
 
+## HAP-E1 generic agent bearer lifecycle Rust 이식 (#1358, 2026-08-12)
+
+- Accepted ADR-0162의 generic bearer 경계를 Rust/Axum에 이식했다. owner/admin human만 agent credential을 발급·목록·회전·폐기할 수 있고, 발급값은 응답 한 번에만 `no-store`/`no-cache`로 노출된다. DB·목록·audit에는 digest와 비밀이 아닌 메타데이터만 남으며 ordinary member, agent bearer, 교차 workspace와 foreign agent/credential 조합은 fail-closed한다.
+- scope는 닫힌 grantable 집합으로 정규화·중복 제거하고 unknown/empty를 거절한다. `provider:quota:write`는 instance operator만 추가할 수 있고, `agent:port:connect`·`agent:inbox:read`·`messages:read`는 발급 가능하지만 기본 scope에는 들어가지 않는다. expiry는 미래만 허용하고 expired/revoked bearer는 401, scope 부족은 403+감사로 남는다. 회전은 agent row lock과 한 tenant transaction으로 직렬화해 기존 만료를 연장하지 않으며 하나의 long-lived successor만 허용하고, revoke replay는 200이되 감사 행을 중복하지 않는다.
+- hosted dedicated agent mutation은 #1364가 연결할 typed `HostedConnectionManaged` seam에서 409로 닫힌다. Rust workspace test·clippy·생성 타입 정합, 전용 PG18 HTTP conformance, Rust 이미지 actual-route OpenAPI 60/60(57 operation)이 green이다. Docker-only runtime verifier는 128-bit invocation 라벨·exact name·불변 ID를 tri-state inspect/list로 재검증하고 정상 경로에서도 삭제와 부재를 증명한 뒤에만 PASS한다(signal·rm-lie·list-error·탈취 fixture 포함). PG18 suite는 momo_app NOBYPASSRLS, token/audit FORCE RLS, wrong-GUC 불가시와 audit 실패 시 issue/revoke zero-partial rollback까지 단정한다. DDL과 `schema_v0.sql`은 변경하지 않았다.
+
 ## Grok Bot trial-first 실측 완료 — private MCP transport·Routine·cleanup (#1344, 2026-08-12)
 
 - 성재가 공식 앱 설치와 ADR-0162 기술 방향을 승인한 뒤 Cursor 배포본 `Grok Bot 0.16.0`(`com.anysphere.sand`, arm64)을 설치했다. DMG SHA-256과 `hdiutil` checksum을 확인했고, app strict code-sign verification과 Gatekeeper `accepted`/`Notarized Developer ID`(Anysphere Incorporated `DCNK4UB866`)가 통과했다. team account는 `trialEligible=true`였지만 강제 `NO_STORAGE` 정책에 막혔고, personal account는 별도 trial entitlement/start 문구나 결제·구독 UI 없이 Bot 1개와 기본 채팅까지 동작했다. 구매·유료 전환은 0건이다.

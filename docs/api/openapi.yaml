@@ -663,6 +663,94 @@ paths:
         "429":
           $ref: "#/components/responses/RateLimited"
 
+  /v1/workspaces/{workspaceId}/agents/{agentId}/credentials:
+    post:
+      tags: [agents]
+      operationId: createAgentCredential
+      summary: Issue or rotate a generic per-agent bearer (workspace owner/admin only).
+      description: >
+        Returns the raw bearer exactly once while persisting only its SHA-256
+        digest. Every currently live predecessor is shortened to at most the
+        requested rotation grace; concurrent rotations serialize so only the
+        final successor keeps its requested lifetime. The response is always
+        `Cache-Control: no-store` and `Pragma: no-cache`. Agent Port reach/read
+        scopes and `messages:read` are grantable only when explicitly named,
+        never defaults. `provider:quota:write` additionally requires an
+        instance operator. HAP-E3 reserves 409 for a dedicated hosted agent
+        whose credentials are connection-managed.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - {name: agentId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/CreateAgentCredentialRequest"}
+      responses:
+        "201":
+          description: Credential issued; the bearer appears only in this response.
+          headers:
+            Cache-Control:
+              required: true
+              schema: {type: string, enum: [no-store]}
+            Pragma:
+              required: true
+              schema: {type: string, enum: [no-cache]}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CreateAgentCredentialResponse"}
+        "400": {description: Invalid scope, label, expiry, or rotation grace, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {description: Caller is not a human workspace owner/admin or lacks instance-operator authority, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "404": {description: Active target agent not found, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "409": {description: Dedicated hosted-agent credentials are connection-managed, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+    get:
+      tags: [agents]
+      operationId: listAgentCredentials
+      summary: List generic agent credential metadata (workspace owner/admin only).
+      description: >
+        Newest-first bounded metadata projection. Raw bearer material, token
+        hashes, and envelope prefixes are never projected.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - {name: agentId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200": {description: Credential metadata, content: {application/json: {schema: {$ref: "#/components/schemas/AgentCredentialListResponse"}}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {description: Caller is not a human workspace owner/admin, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "404": {description: Active target agent not found, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+
+  /v1/workspaces/{workspaceId}/agents/{agentId}/credentials/{credentialId}/revoke:
+    post:
+      tags: [agents]
+      operationId: revokeAgentCredential
+      summary: Idempotently revoke a generic per-agent bearer.
+      description: >
+        The first call writes the revocation and its audit row in one tenant
+        transaction. Replays return 200 with `alreadyRevoked=true` and do not
+        append another revoke audit. Foreign agent/credential pairs are not
+        distinguishable from a missing credential. HAP-E3 reserves 409 for a
+        dedicated hosted agent whose credentials are connection-managed.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - {name: agentId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: credentialId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/RevokeAgentCredentialRequest"}
+      responses:
+        "200": {description: Current credential state and whether this call revoked it, content: {application/json: {schema: {$ref: "#/components/schemas/RevokeAgentCredentialResponse"}}}}
+        "400": {description: Invalid id or reason metadata, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {description: Caller is not a human workspace owner/admin, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "404": {description: Agent credential not found, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "409": {description: Dedicated hosted-agent credentials are connection-managed, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+
   /v1/workspaces/{workspaceId}/agents/{agentId}/allowed-models:
     get:
       tags: [agents]
@@ -6572,8 +6660,22 @@ components:
       properties:
         registration: {$ref: "#/components/schemas/AgentCardRegistration"}
 
+    AgentCredentialScope:
+      type: string
+      enum:
+        - agent:jobs:read
+        - agent:runs:callback
+        - messages:read
+        - messages:write
+        - realtime:subscribe
+        - work:control
+        - provider:quota:write
+        - agent:port:connect
+        - agent:inbox:read
+
     AgentCredential:
       type: object
+      additionalProperties: false
       required: [id, agentMemberId, status, scopes, createdAtMs]
       properties:
         id: {type: string, format: uuid}
@@ -6581,12 +6683,82 @@ components:
         status: {type: string, enum: [active, expired, revoked]}
         scopes:
           type: array
-          items: {type: string}
-        label: {type: string}
+          minItems: 1
+          uniqueItems: true
+          items: {$ref: "#/components/schemas/AgentCredentialScope"}
+        label: {type: string, minLength: 1, maxLength: 120}
         lastUsedAtMs: {type: integer, format: int64}
         expiresAtMs: {type: integer, format: int64}
         revokedAtMs: {type: integer, format: int64}
         createdAtMs: {type: integer, format: int64}
+
+    CreateAgentCredentialRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        scopes:
+          type: array
+          minItems: 1
+          description: >
+            Closed explicit scope set. Duplicates are normalized away. If omitted, defaults to
+            agent:jobs:read, agent:runs:callback, messages:write,
+            realtime:subscribe, and work:control.
+          items: {$ref: "#/components/schemas/AgentCredentialScope"}
+        label:
+          type: string
+          minLength: 1
+          maxLength: 120
+          description: Defaults to `agent bearer` when omitted.
+        expiresAtMs:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Optional future epoch millisecond; past or current values are rejected.
+        rotationGraceSeconds:
+          type: integer
+          minimum: 0
+          maximum: 604800
+          description: Defaults to 86400 seconds when omitted.
+
+    CreateAgentCredentialResponse:
+      type: object
+      additionalProperties: false
+      required: [credential, token, tokenType, rotatedCredentialCount]
+      properties:
+        credential: {$ref: "#/components/schemas/AgentCredential"}
+        token:
+          type: string
+          readOnly: true
+          minLength: 1
+          description: One-time raw bearer. Only SHA-256(token) is persisted.
+        tokenType: {type: string, enum: [Bearer]}
+        rotatedCredentialCount: {type: integer, minimum: 0}
+        rotationGraceEndsAtMs: {type: integer, format: int64}
+
+    AgentCredentialListResponse:
+      type: object
+      additionalProperties: false
+      required: [credentials]
+      properties:
+        credentials:
+          type: array
+          maxItems: 100
+          items: {$ref: "#/components/schemas/AgentCredential"}
+
+    RevokeAgentCredentialRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        reason: {type: string, maxLength: 500}
+
+    RevokeAgentCredentialResponse:
+      type: object
+      additionalProperties: false
+      required: [credential, revokedNow, alreadyRevoked]
+      properties:
+        credential: {$ref: "#/components/schemas/AgentCredential"}
+        revokedNow: {type: boolean}
+        alreadyRevoked: {type: boolean}
 
     ConfirmAgentCardResponse:
       type: object

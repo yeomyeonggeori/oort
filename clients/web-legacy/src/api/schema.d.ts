@@ -338,6 +338,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/workspaces/{workspaceId}/agents/{agentId}/credentials": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List generic agent credential metadata (workspace owner/admin only).
+         * @description Newest-first bounded metadata projection. Raw bearer material, token hashes, and envelope prefixes are never projected.
+         */
+        get: operations["listAgentCredentials"];
+        put?: never;
+        /**
+         * Issue or rotate a generic per-agent bearer (workspace owner/admin only).
+         * @description Returns the raw bearer exactly once while persisting only its SHA-256 digest. Every currently live predecessor is shortened to at most the requested rotation grace; concurrent rotations serialize so only the final successor keeps its requested lifetime. The response is always `Cache-Control: no-store` and `Pragma: no-cache`. Agent Port reach/read scopes and `messages:read` are grantable only when explicitly named, never defaults. `provider:quota:write` additionally requires an instance operator. HAP-E3 reserves 409 for a dedicated hosted agent whose credentials are connection-managed.
+         */
+        post: operations["createAgentCredential"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{workspaceId}/agents/{agentId}/credentials/{credentialId}/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Idempotently revoke a generic per-agent bearer.
+         * @description The first call writes the revocation and its audit row in one tenant transaction. Replays return 200 with `alreadyRevoked=true` and do not append another revoke audit. Foreign agent/credential pairs are not distinguishable from a missing credential. HAP-E3 reserves 409 for a dedicated hosted agent whose credentials are connection-managed.
+         */
+        post: operations["revokeAgentCredential"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/workspaces/{workspaceId}/agents/{agentId}/allowed-models": {
         parameters: {
             query?: never;
@@ -2695,6 +2739,8 @@ export interface components {
         AgentCardRegistrationResponse: {
             registration: components["schemas"]["AgentCardRegistration"];
         };
+        /** @enum {string} */
+        AgentCredentialScope: "agent:jobs:read" | "agent:runs:callback" | "messages:read" | "messages:write" | "realtime:subscribe" | "work:control" | "provider:quota:write" | "agent:port:connect" | "agent:inbox:read";
         AgentCredential: {
             /** Format: uuid */
             id: string;
@@ -2702,7 +2748,7 @@ export interface components {
             agentMemberId: string;
             /** @enum {string} */
             status: "active" | "expired" | "revoked";
-            scopes: string[];
+            scopes: components["schemas"]["AgentCredentialScope"][];
             label?: string;
             /** Format: int64 */
             lastUsedAtMs?: number;
@@ -2712,6 +2758,40 @@ export interface components {
             revokedAtMs?: number;
             /** Format: int64 */
             createdAtMs: number;
+        };
+        CreateAgentCredentialRequest: {
+            /** @description Closed explicit scope set. Duplicates are normalized away. If omitted, defaults to agent:jobs:read, agent:runs:callback, messages:write, realtime:subscribe, and work:control. */
+            scopes?: components["schemas"]["AgentCredentialScope"][];
+            /** @description Defaults to `agent bearer` when omitted. */
+            label?: string;
+            /**
+             * Format: int64
+             * @description Optional future epoch millisecond; past or current values are rejected.
+             */
+            expiresAtMs?: number;
+            /** @description Defaults to 86400 seconds when omitted. */
+            rotationGraceSeconds?: number;
+        };
+        CreateAgentCredentialResponse: {
+            credential: components["schemas"]["AgentCredential"];
+            /** @description One-time raw bearer. Only SHA-256(token) is persisted. */
+            readonly token: string;
+            /** @enum {string} */
+            tokenType: "Bearer";
+            rotatedCredentialCount: number;
+            /** Format: int64 */
+            rotationGraceEndsAtMs?: number;
+        };
+        AgentCredentialListResponse: {
+            credentials: components["schemas"]["AgentCredential"][];
+        };
+        RevokeAgentCredentialRequest: {
+            reason?: string;
+        };
+        RevokeAgentCredentialResponse: {
+            credential: components["schemas"]["AgentCredential"];
+            revokedNow: boolean;
+            alreadyRevoked: boolean;
         };
         ConfirmAgentCardResponse: {
             /** Format: uuid */
@@ -5455,6 +5535,182 @@ export interface operations {
                 };
             };
             429: components["responses"]["RateLimited"];
+        };
+    };
+    listAgentCredentials: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+                agentId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Credential metadata */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentCredentialListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Caller is not a human workspace owner/admin */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Active target agent not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    createAgentCredential: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+                agentId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateAgentCredentialRequest"];
+            };
+        };
+        responses: {
+            /** @description Credential issued; the bearer appears only in this response. */
+            201: {
+                headers: {
+                    "Cache-Control": "no-store";
+                    Pragma: "no-cache";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreateAgentCredentialResponse"];
+                };
+            };
+            /** @description Invalid scope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Caller is not a human workspace owner/admin or lacks instance-operator authority */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Active target agent not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Dedicated hosted-agent credentials are connection-managed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    revokeAgentCredential: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+                agentId: string;
+                credentialId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["RevokeAgentCredentialRequest"];
+            };
+        };
+        responses: {
+            /** @description Current credential state and whether this call revoked it */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RevokeAgentCredentialResponse"];
+                };
+            };
+            /** @description Invalid id or reason metadata */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Caller is not a human workspace owner/admin */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Agent credential not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Dedicated hosted-agent credentials are connection-managed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     getAgentAllowedModels: {

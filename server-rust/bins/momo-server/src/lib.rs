@@ -724,6 +724,17 @@ pub fn build_app(state: AppState) -> Router {
         // beside the humans and makes it mentionable as soon as it is added to a
         // channel. The profile read is the minimum a hub UI consumes.
         .route("/v1/workspaces/{ws}/agents", post(routes::agents::create))
+        // HAP-E1 — human owner/admin lifecycle for generic per-agent bearer
+        // credentials. Hosted-connection credentials will be connection-managed
+        // by HAP-E3 through the typed policy seam in momo-auth.
+        .route(
+            "/v1/workspaces/{ws}/agents/{agent}/credentials",
+            post(routes::agent_credentials::create).get(routes::agent_credentials::list),
+        )
+        .route(
+            "/v1/workspaces/{ws}/agents/{agent}/credentials/{credential}/revoke",
+            post(routes::agent_credentials::revoke),
+        )
         // B5.3a completes the pair: B5.2 could read a profile and respect
         // `paused`, but nothing could write either — an agent's behaviour was
         // fixed at birth and the only way to stop one was to remove it from
