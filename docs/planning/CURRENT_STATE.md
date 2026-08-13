@@ -1,5 +1,13 @@
 # oort 기획 현재 상태 (Planning Current State)
 
+> **2026-08-14 스냅샷 34 (GPT 5.6 · momo-main — #1364 랜딩, #1365 HAP-E4 착수).** 스냅샷 33을 supersede한다.
+>
+> **랜딩:** #1364는 PR #1373을 `track/engine@23038585efc2c2740d2d6ddafa9765e455e62ab8`로 squash-merge했다. PR CI와 canonical `track/engine@c5badf5f`에서 실행한 exact-base Policy Integrity가 PASS했고 독립 final review는 C0/H0/M0이다. Issue/Project는 Done으로 닫았다. exact latest actual-image runtime은 Docker Desktop 내부 metadata/network DB I/O로 제품 boot 전에 막혀 `runtime-unverified`이며, `c9aaf7cf`의 OpenAPI 65/65+62/62·PG18 2/2는 별도 과거 provenance로만 유지한다.
+>
+> **활성 goal #1365:** native blocker #1364가 닫혀 HAP-E4를 `status:ready`→claim했다. worktree/branch는 `feat/1365-hap-e4-engine-add-connection-scoped-durable-hosted-agent-inbox-and-opaque-cursor`, base는 `track/engine@23038585`다. migration 070(counter+append-only source-reference ledger, FORCE RLS), AES-GCM opaque cursor, active/token/member/workspace/channel visibility를 재검사하는 idempotent message-reference append와 forward pagination을 1차 구현했다. 실제 message/job producer 및 MCP route는 #1366 소유라 아직 연결하지 않는다.
+>
+> **현재 증거/다음:** cursor unit 3개, `momo-messaging` check, PG conformance compile, focused clippy `-D warnings`, migration-number 70 PASS. PG18 runtime은 Docker daemon 무응답으로 아직 실행하지 못했다. 다음은 PG test에 concurrent same-source exactly-once, source+append rollback, cross-tenant RLS/FORCE, reconnect namespace와 cursor tamper/membership-revoke matrix를 보강하고 verifier/runtime profile·STATUS를 닫는 것이다. 이 체크포인트 전에는 PR/완료 주장을 하지 않는다.
+
 > **2026-08-13 스냅샷 33 (GPT 5.6 sol · #1364 raw clientInfo 제거·daemon-free redaction 증거).** 스냅샷 32를 supersede한다.
 >
 > **최종 축소:** `detected_client_name/version`에는 정상처럼 보이는 값도 포함해 provider raw string을 전혀 저장하지 않고 항상 NULL을 쓴다. capability는 서버가 정한 finite boolean path만 남는다. verifier cleanup mode는 Docker보다 먼저 shared gate-failure redactor를 실제 실행해 임의 JWT·24자 prefix·SHA-256 derivative가 detail/header/body에 반사돼도 raw 0이며, needle registry read error 시 전체 diagnostic을 fail-closed로 숨기는 것을 증명한다.

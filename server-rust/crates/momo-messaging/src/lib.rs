@@ -49,6 +49,7 @@ pub mod attachment;
 pub mod channel;
 pub mod dm;
 pub mod error;
+pub mod hosted_inbox;
 pub mod identity;
 pub mod interaction;
 pub mod message;
@@ -81,10 +82,10 @@ pub use dm::{
     DirectMessageTargetInvalid, OpenedDirectMessage, DM_LIST_LIMIT,
 };
 pub use error::{MessagingError, ProvenanceRejected};
-pub use workspace_avatar::{
-    create_pending_avatar_upload_in_tx, load_avatar_media_in_tx, read_current_avatar_media_in_tx,
-    settle_avatar_upload_in_tx, validate_avatar_mime, validate_avatar_name, AvatarMedia,
-    AvatarSpecInvalid, MAX_WORKSPACE_AVATAR_BYTES, WORKSPACE_AVATAR_TEXT_MAX_CHARS,
+pub use hosted_inbox::{
+    append_message_reference_in_tx, decode_hosted_inbox_cursor, encode_hosted_inbox_cursor,
+    list_hosted_inbox_in_tx, HostedInboxCursor, HostedInboxCursorError, HostedInboxEvent,
+    HostedInboxPage, HostedInboxReadError, HOSTED_INBOX_LIMIT_DEFAULT, HOSTED_INBOX_LIMIT_MAX,
 };
 pub use identity::{
     active_workspace_role, can_observe_agent, clamp_roster_limit, get_member, get_workspace,
@@ -104,10 +105,6 @@ pub use interaction::{
     CHANNEL_PIN_LIMIT, MESSAGE_REACTION_LIMIT, OPENING_STREAM_REV, REACTION_EMOJI_MAX_CHARS,
     STREAM_PROPS_KEY,
 };
-pub use presence::{
-    build_presence_payload, decode_optional_presence, presence_status_for,
-    set_presence_status_in_tx, PresenceStatus, PresenceUpdate, PRESENCE_BROADCAST_TYPE,
-};
 pub use message::{
     agent_auto_reply_streak_in_tx, agent_context_window_in_tx, build_broadcast_payload,
     build_thread_updated_payload, cent_channel, clamp_history_limit, clamp_replies_limit,
@@ -124,6 +121,10 @@ pub use message::{
 pub use notification_rule::{
     get_notification_rule_in_tx, set_notification_rule_in_tx, NotificationRule,
 };
+pub use presence::{
+    build_presence_payload, decode_optional_presence, presence_status_for,
+    set_presence_status_in_tx, PresenceStatus, PresenceUpdate, PRESENCE_BROADCAST_TYPE,
+};
 pub use read_state::{
     build_read_state_payload, contains_mention, effective_cursor, list_read_state,
     mention_id_token, read_state_channel, record_mentions_in_tx, unread_count,
@@ -139,4 +140,9 @@ pub use search::{
     clamp_search_limit, decode_search_cursor, encode_search_cursor, literal_like_pattern,
     normalize_query, search_messages, SearchCursor, SearchHit, SearchPage, SearchRequestInvalid,
     SEARCH_LIMIT_DEFAULT, SEARCH_LIMIT_MAX, SEARCH_QUERY_MIN_CHARS,
+};
+pub use workspace_avatar::{
+    create_pending_avatar_upload_in_tx, load_avatar_media_in_tx, read_current_avatar_media_in_tx,
+    settle_avatar_upload_in_tx, validate_avatar_mime, validate_avatar_name, AvatarMedia,
+    AvatarSpecInvalid, MAX_WORKSPACE_AVATAR_BYTES, WORKSPACE_AVATAR_TEXT_MAX_CHARS,
 };
