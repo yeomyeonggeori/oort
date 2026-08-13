@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-08-13 (GPT 5.6 sol) · #1364 raw clientInfo 제거·redaction selftest 정본화
+- 정상/opaque 여부를 추측하지 않고 clientInfo name/version raw persistence를 전면 제거했다. capability는 finite boolean paths만 저장한다.
+- cleanup mode가 shared gate-failure redactor로 arbitrary JWT+prefix+digest 반사 raw0와 registry read-error fail-closed를 Docker 전에 직접 검증한다.
+- `1e0f13b0` exact runtime은 host-blocked이고, 65/65+62/62·PG18 2/2는 `c9aaf7cf`의 별도 provenance임을 교정했다.
+- 기존 commit/비소유 dirty를 보존하고 이 축소만 새 local commit으로 동결한다. push/PR 없음.
+
 ## 2026-08-13 (GPT 5.6 sol) · #1364 strict-review H2/M2 후속
 - metadata를 low-entropy client display grammar+고정 capability bool paths로 닫고 opaque/sk-prefix/unknown key 저장을 금지했다.
 - failure 출력은 등록 secret/JWT 파생값까지 전역 치환하며 reflected ACCESS body/header output0 fixture를 추가했다. authority race는 proof DB-lock wait를 관측한 뒤 해제한다.

@@ -1,5 +1,13 @@
 # oort 기획 현재 상태 (Planning Current State)
 
+> **2026-08-13 스냅샷 33 (GPT 5.6 sol · #1364 raw clientInfo 제거·daemon-free redaction 증거).** 스냅샷 32를 supersede한다.
+>
+> **최종 축소:** `detected_client_name/version`에는 정상처럼 보이는 값도 포함해 provider raw string을 전혀 저장하지 않고 항상 NULL을 쓴다. capability는 서버가 정한 finite boolean path만 남는다. verifier cleanup mode는 Docker보다 먼저 shared gate-failure redactor를 실제 실행해 임의 JWT·24자 prefix·SHA-256 derivative가 detail/header/body에 반사돼도 raw 0이며, needle registry read error 시 전체 diagnostic을 fail-closed로 숨기는 것을 증명한다.
+>
+> **provenance 정정:** commit `1e0f13b0`의 product+verifier exact runtime은 Docker Desktop 내부 metadata/network DB write I/O 때문에 제품 기동 전 **host-blocked/runtime-unverified**였다. OpenAPI 65/65+62/62와 PG18 2/2 actual runtime은 그 직전 `c9aaf7cf` product/verifier bytes의 별도 증거이며 `1e0f13b0` 또는 이번 후속 commit의 runtime 증거로 승격하지 않는다. 이번 exact daemon-free selftest는 Docker 없이 PASS했다. 마지막 read-only `docker info`도 35초 무응답 후 중단했으므로 destructive restart/prune나 runtime 재시도 없이 host-blocked를 유지한다.
+>
+> **보존:** 기존 네 local commit과 비소유 13 rustfmt drift는 수정·stage·revert하지 않는다. 이 축소만 새 local commit으로 고정하고 push/PR은 하지 않는다.
+
 > **2026-08-13 스냅샷 32 (GPT 5.6 sol · #1364 strict-review 후속 수리).** 스냅샷 31을 supersede하며, 그 스냅샷의 “workspace cargo fmt PASS” 표현을 철회한다.
 >
 > **후속 수리:** provider metadata는 client name/version의 짧은 저엔트로피 display grammar와 고정 capability boolean path만 저장하며 `sk-`류 prefix·keyword 없는 opaque random·unknown boolean key도 버린다. OpenAPI verifier의 모든 failure 출력/저장 경로는 agent/pair envelope뿐 아니라 human JWT를 포함해 등록된 secret과 파생값 전체를 출력 전에 치환한다. reflected ACCESS body+header fixture는 출력·failure log에서 secret needle 0을 강제하고, authority race는 proof process가 실제 DB lock wait 중임을 확인한 뒤에만 lock을 푼다.

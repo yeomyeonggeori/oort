@@ -197,6 +197,33 @@ private_envelopes_in_file() {
   LC_ALL=C grep -Eo 'momo_(agent|pair)_v1\.[A-Za-z0-9._~-]+' -- "$1"
 }
 
+# Shared by daemon-free regression and the live gate. The secret itself travels
+# only over stdin/files; argv receives the private needle-file path alone.
+redact_with_needles_file() {
+  local needles_file="$1"
+  if [ ! -f "$needles_file" ] || [ ! -r "$needles_file" ] || [ -L "$needles_file" ]; then
+    cat >/dev/null
+    printf '%s' '[diagnostic withheld: secret registry unavailable]'
+    return
+  fi
+  python3 -c '
+import pathlib, re, sys
+needles = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8").splitlines()
+text = sys.stdin.read()
+for needle in sorted({value for value in needles if value}, key=len, reverse=True):
+    text = text.replace(needle, "[REDACTED_REGISTERED_SECRET]")
+text = re.sub(r"momo_agent_v1\.[A-Za-z0-9._~-]+", "[REDACTED_AGENT_BEARER]", text)
+text = re.sub(r"momo_pair_v1\.[A-Za-z0-9._~-]+", "[REDACTED_PAIRING_CREDENTIAL]", text)
+sys.stdout.write(text)
+' "$needles_file"
+}
+
+render_safe_failure() {
+  local needles_file="$1" count="$2" name="$3" detail="$4" body="${5:-}"
+  printf '[%s] %s: %s\n' "$count" "$name" "$detail" | redact_with_needles_file "$needles_file"
+  [ -z "$body" ] || printf '%s\n' "$body" | redact_with_needles_file "$needles_file"
+}
+
 private_envelope_valid() {
   local value="$1" prefix="$2"
   [ "${#value}" -le 8192 ] &&
@@ -324,6 +351,29 @@ if [ "${1:-}" = "--verify-cleanup-contract" ]; then
   [ "$(private_envelopes_in_file "$selftest_dir/headers-private")" = 'momo_pair_v1.00000000-0000-7000-8000-000000000001.headerSecret' ] || {
     echo "[openapi-rust] unknown-status response-header private envelope was not detected" >&2; exit 1;
   }
+  # Assemble at runtime so the committed verifier fixture is not itself a
+  # credential-shaped gitleaks finding.
+  arbitrary_jwt='eyJhbGciOiJIUzI1NiJ9.'
+  arbitrary_jwt+='eyJzdWIiOiJkYWVtb24tZnJlZSJ9.'
+  arbitrary_jwt+='arbitraryRegisteredJwtValue123'
+  arbitrary_prefix="${arbitrary_jwt:0:24}"
+  arbitrary_digest="$(printf '%s' "$arbitrary_jwt" | shasum -a 256 | awk '{print $1}')"
+  printf '%s\n%s\n%s\n' "$arbitrary_jwt" "$arbitrary_prefix" "$arbitrary_digest" >"$selftest_dir/registered-needles"
+  render_safe_failure "$selftest_dir/registered-needles" 1 reflected-jwt \
+    "detail=$arbitrary_jwt header=$arbitrary_prefix" \
+    "body=$arbitrary_jwt digest=$arbitrary_digest" >"$selftest_dir/redacted-output" 2>&1
+  ! grep -Fq -f "$selftest_dir/registered-needles" -- "$selftest_dir/redacted-output" || {
+    echo "[openapi-rust] registered JWT or derivative escaped daemon-free redaction" >&2; exit 1;
+  }
+  [ "$(grep -Fo '[REDACTED_REGISTERED_SECRET]' "$selftest_dir/redacted-output" | wc -l | tr -d ' ')" -ge 4 ] || {
+    echo "[openapi-rust] daemon-free reflected JWT fixture did not traverse the shared redactor" >&2; exit 1;
+  }
+  render_safe_failure "$selftest_dir/missing-needles" 2 read-error \
+    "detail=$arbitrary_jwt" "body=$arbitrary_jwt" >"$selftest_dir/read-error-output" 2>&1
+  ! grep -Fq "$arbitrary_jwt" "$selftest_dir/read-error-output" && \
+    grep -Fq '[diagnostic withheld: secret registry unavailable]' "$selftest_dir/read-error-output" || {
+      echo "[openapi-rust] redactor registry read error was not fail-closed" >&2; exit 1;
+    }
   signal_secret="$selftest_dir/signal-secret"
   set +e
   sh -c 'trap '\''rm -f -- "$1"; exit 143'\'' TERM
@@ -521,12 +571,14 @@ FAILURE_LOG="$TMP_DIR/failures.txt"
 FAILURE_COUNT=0
 
 gate_fail() {
-  local name="$1" detail="$2" body="${3:-}" safe_line
+  local name="$1" detail="$2" body="${3:-}" safe_render safe_line safe_body
   FAILURE_COUNT=$((FAILURE_COUNT + 1))
-  safe_line="$(printf '%s' "[$FAILURE_COUNT] $name: $detail" | redact_registered_secrets)"
+  safe_render="$(render_safe_failure "$SECRET_NEEDLES" "$FAILURE_COUNT" "$name" "$detail" "$body")"
+  safe_line="${safe_render%%$'\n'*}"
+  safe_body="${safe_render#"$safe_line"}"
   printf '%s\n' "$safe_line" >>"$FAILURE_LOG"
   printf '%s\n' "[openapi-rust] FAIL ${safe_line#*] }" >&2
-  [ -n "$body" ] && printf '%s\n' "$body" | redact_registered_secrets >&2
+  [ -z "$safe_body" ] || printf '%s\n' "${safe_body#$'\n'}" >&2
   return 0
 }
 
@@ -753,16 +805,7 @@ redact_registered_secrets() {
     printf '%s' '[diagnostic withheld: secret registry unavailable]'
     return
   fi
-  "$PYTHON_BIN" -c '
-import pathlib, re, sys
-needles = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8").splitlines()
-text = sys.stdin.read()
-for needle in sorted({value for value in needles if value}, key=len, reverse=True):
-    text = text.replace(needle, "[REDACTED_REGISTERED_SECRET]")
-text = re.sub(r"momo_agent_v1\.[A-Za-z0-9._~-]+", "[REDACTED_AGENT_BEARER]", text)
-text = re.sub(r"momo_pair_v1\.[A-Za-z0-9._~-]+", "[REDACTED_PAIRING_CREDENTIAL]", text)
-sys.stdout.write(text)
-' "$SECRET_NEEDLES"
+  redact_with_needles_file "$SECRET_NEEDLES"
 }
 
 load_private_response_body() {
@@ -2175,15 +2218,31 @@ api get "/v1/workspaces/$WS/hosted-agent-connections/$HOSTED_CONNECTION_ID" "" "
 guard_jq '.connection.status == "pairing_pending"' \
   "non-foundation request leaves pairing pending"
 
+# Even ordinary-looking provider clientInfo is raw third-party text and must be
+# absent from persistence; only server-owned finite booleans may survive.
+api post "/v1/workspaces/$WS/hosted-agent-connections" \
+  "$(jq -cn --arg h "hosted-clientinfo-${RUN_ID:0:8}" '{displayName:"Hosted ClientInfo",handle:$h,authMode:"static_bearer"}')" "$ACCESS"
+[ "$RESPONSE_STATUS" = "201" ] || gate_fail hosted-clientinfo-create "expected 201" "$(redacted_body)"
+CLIENTINFO_CONNECTION_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.connection.id')"
+CLIENTINFO_PAIRING="$(printf '%s' "$RESPONSE_BODY" | jq -er '.pairingCredential')"
+append_secret_with_derivatives "$CLIENTINFO_PAIRING"
+expect_agent_port hosted-clientinfo-normal-detect 200 "$MODERN_DISCOVER_BODY" \
+  "$CLIENTINFO_PAIRING" "2026-07-28" "server/discover"
+run_sql -Atc "SELECT (detected_client_name IS NULL)::text || ':' || \
+  (detected_client_version IS NULL)::text FROM hosted_agent_connection \
+  WHERE workspace_id='$WS' AND id='$CLIENTINFO_CONNECTION_ID';" | \
+  grep -qx 'true:true' || gate_fail hosted-clientinfo-raw-null "normal raw clientInfo was persisted" "database evidence withheld"
+
 HOSTED_ADVERSARIAL_DISCOVER_BODY="$(printf '%s' "$MODERN_DISCOVER_BODY" | jq -c '
   .params._meta["io.modelcontextprotocol/clientInfo"] = {
-    name:"sk-opaque-fixture-000000000000",
-    version:"9aZ8qW2nR7mP4xK6vT3cB1d"
+    name:"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1",
+    version:"v11111111111111111111111"
   }
   | .params._meta["io.modelcontextprotocol/clientCapabilities"] = {
       tools:{listChanged:true,tokenEndpoint:true,note:"momo_agent_v1.00000000-0000-7000-8000-000000000001.capLeak"},
       authorization:{enabled:true},sampling:false,telemetry:true,
-      experimental:{safeLookingUnknown:true},values:["secret"],count:7
+      experimental:{safeLookingUnknown:true,numericVersion:"123456789012345678901234"},
+      values:["secret"],count:7
     }')"
 sample_agent_port hosted-agent-detect 200 "$HOSTED_ADVERSARIAL_DISCOVER_BODY" \
   "$HOSTED_PAIRING" "2026-07-28" "server/discover"

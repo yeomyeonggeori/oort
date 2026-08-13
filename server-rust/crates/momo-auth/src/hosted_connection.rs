@@ -307,15 +307,16 @@ pub async fn detect_pairing_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     raw: &str,
-    client_name: Option<&str>,
-    client_version: Option<&str>,
+    _client_name: Option<&str>,
+    _client_version: Option<&str>,
     capabilities: &Value,
 ) -> Result<HostedMutation<AgentBearerIdentity>, sqlx::Error> {
-    // Provider metadata is display-only. Persist a closed, non-string
-    // projection: arbitrary strings and secret-shaped keys are dropped rather
-    // than trying to enumerate every credential syntax providers may invent.
-    let client_name = sanitize_client_name(client_name);
-    let client_version = sanitize_client_version(client_version);
+    // Raw clientInfo is never persisted. Even a plausible name/version is an
+    // untrusted string channel and cannot be proven non-secret. Protocol era
+    // and foundation method are already server-derived elsewhere; only the
+    // finite boolean capability projection below is retained.
+    let client_name: Option<String> = None;
+    let client_version: Option<String> = None;
     let capabilities = sanitize_capabilities(capabilities);
     let live_member: Option<Uuid> = sqlx::query_scalar(
         "SELECT agent_member_id FROM hosted_agent_connection \
@@ -414,103 +415,6 @@ pub async fn resolve_pairing_in_tx(
         hosted_connection_id: Some(row.try_get("id")?),
         audience: Some(HOSTED_AGENT_PORT_AUDIENCE.to_string()),
     }))
-}
-
-fn observation_is_sensitive(value: &str) -> bool {
-    let folded: String = value
-        .chars()
-        .filter(|ch| ch.is_ascii_alphanumeric())
-        .flat_map(char::to_lowercase)
-        .collect();
-    [
-        "authorization",
-        "bearer",
-        "credential",
-        "password",
-        "secret",
-        "token",
-        "pair",
-        "momoagentv1",
-        "momopairv1",
-    ]
-    .iter()
-    .any(|needle| folded.contains(needle))
-}
-
-fn contains_opaque_run(value: &str) -> bool {
-    value
-        .split(|ch: char| !ch.is_ascii_alphanumeric())
-        .any(|run| {
-            if run.len() < 16 {
-                return false;
-            }
-            let has_lower = run.bytes().any(|byte| byte.is_ascii_lowercase());
-            let has_upper = run.bytes().any(|byte| byte.is_ascii_uppercase());
-            let has_digit = run.bytes().any(|byte| byte.is_ascii_digit());
-            let mut seen = [false; 128];
-            for byte in run.bytes().filter(|byte| byte.is_ascii()) {
-                seen[usize::from(byte)] = true;
-            }
-            let unique = seen.into_iter().filter(|present| *present).count();
-            (has_lower && has_upper && has_digit)
-                || (run.len() >= 20 && (has_lower || has_upper) && has_digit && unique >= 10)
-        })
-}
-
-fn has_credential_prefix(value: &str) -> bool {
-    let value = value.to_ascii_lowercase();
-    [
-        "sk-",
-        "pk-",
-        "rk-",
-        "ghp_",
-        "github_pat_",
-        "xoxb-",
-        "xoxp-",
-        "xoxa-",
-        "eyj",
-    ]
-    .iter()
-    .any(|prefix| value.starts_with(prefix))
-}
-
-fn sanitize_client_name(value: Option<&str>) -> Option<String> {
-    let value = value?.trim();
-    if value.is_empty()
-        || value.len() > 48
-        || observation_is_sensitive(value)
-        || has_credential_prefix(value)
-        || contains_opaque_run(value)
-        || !value.bytes().all(|byte| {
-            byte.is_ascii_alphanumeric()
-                || matches!(byte, b' ' | b'.' | b'_' | b'-' | b'/' | b'(' | b')')
-        })
-        || !value.bytes().any(|byte| byte.is_ascii_alphabetic())
-    {
-        return None;
-    }
-    Some(value.to_string())
-}
-
-fn sanitize_client_version(value: Option<&str>) -> Option<String> {
-    let value = value?.trim();
-    if value.is_empty()
-        || value.len() > 24
-        || observation_is_sensitive(value)
-        || has_credential_prefix(value)
-        || contains_opaque_run(value)
-        || !value
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'+' | b'-'))
-        || !value.bytes().any(|byte| byte.is_ascii_digit())
-        || !value
-            .bytes()
-            .next()
-            .is_some_and(|byte| byte.is_ascii_digit() || matches!(byte, b'v' | b'V'))
-    {
-        return None;
-    }
-    Some(value.to_string())
 }
 
 fn insert_capability_bool(
@@ -901,25 +805,7 @@ mod tests {
     }
 
     #[test]
-    fn observation_projection_drops_secret_shaped_and_unbounded_values() {
-        assert_eq!(
-            sanitize_client_name(Some("momo_pair_v1.workspace.secret")),
-            None
-        );
-        assert_eq!(
-            sanitize_client_name(Some("Cursor Bot")).as_deref(),
-            Some("Cursor Bot")
-        );
-        assert_eq!(sanitize_client_name(Some("sk-proj-examplevalue")), None);
-        assert_eq!(sanitize_client_name(Some("aZ8qW2nR7mP4xK9vT6cB3dF1")), None);
-        assert_eq!(
-            sanitize_client_version(Some("v1.2.3")).as_deref(),
-            Some("v1.2.3")
-        );
-        assert_eq!(
-            sanitize_client_version(Some("9aZ8qW2nR7mP4xK6vT3cB1d")),
-            None
-        );
+    fn observation_projection_keeps_only_finite_capability_booleans() {
         let projected = sanitize_capabilities(&serde_json::json!({
             "tools": {"listChanged": true, "tokenEndpoint": true, "note": "momo_pair_v1.leak"},
             "authorization": {"enabled": true},
