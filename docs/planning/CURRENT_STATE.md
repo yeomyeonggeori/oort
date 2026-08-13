@@ -2,11 +2,13 @@
 
 > **2026-08-14 스냅샷 35 (GPT 5.6 · momo-main — #1365 durable inbox runtime closure).** 스냅샷 34를 supersede한다.
 >
-> **Fable 리뷰 반영:** `fbcd6afc` 초안의 C0/H2/M3을 기준으로 inbox scope, exact token↔connection↔actor↔audience, approved/current channel, active member/workspace membership, unpaused profile과 source message tuple을 결속했다. append/read authority rows는 같은 tenant transaction 동안 잠겨 revoke·pause·membership-loss와 직렬화되고, hidden row도 scan watermark를 전진시켜 membership 복원 후 과거 content가 재출현하지 않는다. connection FK는 history-preserving RESTRICT이며 job/run reference도 target agent/channel에 composite FK로 묶었다.
+> **Fable 리뷰 반영:** `fbcd6afc` 초안의 C0/H2/M3을 기준으로 inbox scope, exact token↔connection↔actor↔audience, approved/current channel, active member/workspace membership, unpaused profile과 source message tuple을 결속했다. append/read authority rows는 같은 tenant transaction 동안 잠겨 revoke·pause·membership-loss와 직렬화되고, hidden row도 scan watermark를 전진시켜 membership 복원 후 보유 cursor로는 과거 content가 재출현하지 않는다(cursor 없는 재조회는 재인가된 정상 열람). connection FK는 history-preserving RESTRICT이며 run reference는 (workspace, run, agent, channel) composite FK로 묶었다. job(outbox) reference는 agent까지만 결속되고 outbox.kind·job↔run 짝은 스키마가 강제하지 않는다 — 이 잔여는 Fable 최종 리뷰가 #1366 수용기준으로 이관했다.
 >
 > **실측:** Docker 재설치 후 전용 `scripts/verify_hosted_agent_inbox.sh`가 fresh pinned PG18에서 migration 001→070, momo_app/FORCE RLS, two-channel seq=1, concurrent idempotency, rollback, cursor/visibility/scope/profile/approval, append-only, disconnect history와 reconnect namespace를 PASS했다. verifier는 external DATABASE_URL을 거부하고 nonce label+immutable container ID를 검증한 뒤 teardown/absence proof 후에만 PASS한다.
 >
 > **남은 경계:** MCP `tools/list`/`oort_inbox_read` 노출과 실제 message/job/run producer append는 의도대로 #1366 소유다. #1365는 Rust hard gates·docs gate·독립 final C/H/M=0 뒤 commit/push/PR/needs-review로 넘기며, 그 전에는 완료로 부르지 않는다.
+>
+> **2026-08-14 Fable 최종 판정(성재 go):** `23043248` 기준 독립 리뷰 **C0/H0** — 잔여 Medium은 전부 이관(job↔run·kind 결속=#1366 수용기준 코멘트, prove 경로 lock-order=#1374, ledger 잠재 3종=#1375). verifier 독립 재실행 PASS(잔존 0). docs gate는 base-inherited 선재 결함 2종(#1376 — actionlint 1.7.12 스핀·시스템 ruby 2.6의 콜론 enum 파싱 실패, bare track/engine에서 동일 재현 증명)으로 이 머신에서 완주 불가 — PR CI를 관문으로 한다. 이 커밋으로 push→PR→needs-review 집행.
 
 > **2026-08-14 스냅샷 34 (GPT 5.6 · momo-main — #1364 랜딩, #1365 HAP-E4 착수).** 스냅샷 33을 supersede한다.
 >

@@ -3,7 +3,7 @@
 ## Hosted agent durable inbox foundation (#1365, 2026-08-14)
 
 - migration 070에 active hosted connection별 row counter와 append-only source-reference ledger를 추가했다. message body·credential은 복제하지 않고 원본 `(workspace,message,channel,message_seq)`를 FK로 결속하며, connection history 삭제는 RESTRICT, 두 테이블은 FORCE RLS다. `inbox_seq`는 connection-local `UPDATE ... RETURNING`으로 발급되고 source retry는 unique reference로 멱등이다.
-- Rust domain은 exact active token/connection/actor/audience, non-default `agent:inbox:read`, active member/workspace membership, unpaused profile, approved+current channel membership을 같은 tenant transaction에서 잠근다. AES-256-GCM cursor는 version/workspace/agent/connection/position에 결속되고 malformed·wrong binding·inactive authority를 동일 unavailable로 닫는다. visibility가 회수된 ledger row도 scan watermark는 전진해 복원 후 과거 content가 재생되지 않는다.
+- Rust domain은 exact active token/connection/actor/audience, non-default `agent:inbox:read`, active member/workspace membership, unpaused profile, approved+current channel membership을 같은 tenant transaction에서 잠근다. AES-256-GCM cursor는 version/workspace/agent/connection/position에 결속되고 malformed·wrong binding·inactive authority를 동일 unavailable로 닫는다. visibility가 회수된 ledger row도 scan watermark는 전진해, 보유 중인 cursor로는 복원 후 과거 content가 재생되지 않는다(cursor 없이 처음부터 재조회하는 것은 재인가된 정상 열람이며 이 보증의 대상이 아니다).
 - 전용 Docker-only verifier의 fresh pinned PG18에서 two-channel seq collision, concurrent retry, rollback, RLS/FORCE, append-only, scope/profile/channel revocation, disconnect history 보존과 reconnect cursor namespace가 PASS했다. MCP tool 노출 및 실제 message/job/run producer wiring은 #1366 범위라 아직 열지 않았다.
 
 ## Hosted agent dedicated pairing·activation lifecycle (#1364, 2026-08-13)
