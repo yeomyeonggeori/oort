@@ -9,6 +9,12 @@ ALTER TABLE hosted_agent_connection
   UNIQUE (workspace_id, id, agent_member_id);
 CREATE UNIQUE INDEX IF NOT EXISTS outbox_workspace_id_id_uniq
   ON outbox (workspace_id, id);
+CREATE UNIQUE INDEX IF NOT EXISTS outbox_workspace_id_id_partition_key_uniq
+  ON outbox (workspace_id, id, partition_key);
+CREATE UNIQUE INDEX IF NOT EXISTS message_workspace_id_id_channel_seq_uniq
+  ON message (workspace_id, id, channel_id, seq);
+CREATE UNIQUE INDEX IF NOT EXISTS agent_run_workspace_id_id_agent_channel_uniq
+  ON agent_run (workspace_id, id, agent_member_id, channel_id);
 
 CREATE TABLE hosted_agent_inbox_counter (
   workspace_id    uuid NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
@@ -29,28 +35,33 @@ CREATE TABLE hosted_agent_inbox_event (
   inbox_seq         bigint NOT NULL CHECK (inbox_seq > 0),
   event_kind        text NOT NULL CHECK (event_kind IN ('message','agent_job','agent_run')),
   source_message_id uuid,
+  source_channel_id uuid,
+  source_message_seq bigint,
   source_outbox_id  bigint,
   source_run_id     uuid,
   created_at        timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (workspace_id, connection_id, inbox_seq),
   CONSTRAINT hosted_agent_inbox_event_connection_fk
     FOREIGN KEY (workspace_id, connection_id, agent_member_id)
-    REFERENCES hosted_agent_connection(workspace_id, id, agent_member_id) ON DELETE CASCADE,
+    REFERENCES hosted_agent_connection(workspace_id, id, agent_member_id) ON DELETE RESTRICT,
   CONSTRAINT hosted_agent_inbox_event_message_fk
-    FOREIGN KEY (workspace_id, source_message_id)
-    REFERENCES message(workspace_id, id) ON DELETE RESTRICT,
+    FOREIGN KEY (workspace_id, source_message_id, source_channel_id, source_message_seq)
+    REFERENCES message(workspace_id, id, channel_id, seq) ON DELETE RESTRICT,
   CONSTRAINT hosted_agent_inbox_event_outbox_fk
-    FOREIGN KEY (workspace_id, source_outbox_id)
-    REFERENCES outbox(workspace_id, id) ON DELETE RESTRICT,
+    FOREIGN KEY (workspace_id, source_outbox_id, agent_member_id)
+    REFERENCES outbox(workspace_id, id, partition_key) ON DELETE RESTRICT,
   CONSTRAINT hosted_agent_inbox_event_run_fk
-    FOREIGN KEY (workspace_id, source_run_id)
-    REFERENCES agent_run(workspace_id, id) ON DELETE RESTRICT,
+    FOREIGN KEY (workspace_id, source_run_id, agent_member_id, source_channel_id)
+    REFERENCES agent_run(workspace_id, id, agent_member_id, channel_id) ON DELETE RESTRICT,
   CONSTRAINT hosted_agent_inbox_event_source_shape_ck CHECK (
     (event_kind = 'message' AND source_message_id IS NOT NULL
+      AND source_channel_id IS NOT NULL AND source_message_seq IS NOT NULL
       AND source_outbox_id IS NULL AND source_run_id IS NULL)
     OR (event_kind = 'agent_job' AND source_message_id IS NULL
+      AND source_channel_id IS NOT NULL AND source_message_seq IS NULL
       AND source_outbox_id IS NOT NULL AND source_run_id IS NOT NULL)
     OR (event_kind = 'agent_run' AND source_message_id IS NULL
+      AND source_channel_id IS NOT NULL AND source_message_seq IS NULL
       AND source_outbox_id IS NULL AND source_run_id IS NOT NULL)
   )
 );
@@ -71,6 +82,8 @@ COMMENT ON TABLE hosted_agent_inbox_counter IS
   'ADR-0162 connection-local monotonic cursor counter; never a workspace or channel sequence.';
 COMMENT ON TABLE hosted_agent_inbox_event IS
   'Append-only hosted inbox source references. Message/job bodies and secrets are forbidden.';
+COMMENT ON COLUMN hosted_agent_inbox_event.source_message_seq IS
+  'Original channel-local message ordering reference; never the hosted inbox cursor.';
 
 CREATE FUNCTION hosted_agent_inbox_event_append_only()
 RETURNS trigger LANGUAGE plpgsql

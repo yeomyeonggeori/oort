@@ -46,8 +46,6 @@ pub enum HostedInboxCursorError {
 pub enum HostedInboxReadError {
     #[error("hosted inbox is unavailable")]
     Unavailable,
-    #[error("invalid hosted inbox cursor")]
-    InvalidCursor,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -55,6 +53,8 @@ pub struct HostedInboxEvent {
     pub inbox_seq: i64,
     pub event_kind: String,
     pub source_message_id: Option<Uuid>,
+    pub source_channel_id: Option<Uuid>,
+    pub source_message_seq: Option<i64>,
     pub source_outbox_id: Option<i64>,
     pub source_run_id: Option<Uuid>,
     pub channel_id: Option<Uuid>,
@@ -169,16 +169,28 @@ pub fn decode_hosted_inbox_cursor(
     })
 }
 
-/// Append one message reference to every currently active hosted connection
-/// that can see its channel. Connections are processed in UUID order so two
-/// transactions touching the same audience acquire counter locks consistently.
-/// Replaying the same source is idempotent and consumes no new sequence.
+/// Append one message reference to one authenticated hosted connection.
+/// The explicit agent/connection target prevents a producer or future selector
+/// from accidentally fanning a private event out to every hosted member in a
+/// channel. Replaying the same source is idempotent and consumes no sequence.
 pub async fn append_message_reference_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
+    agent_member_id: Uuid,
+    connection_id: Uuid,
     channel_id: Uuid,
     message_id: Uuid,
 ) -> Result<Vec<(Uuid, i64)>, DbError> {
+    let source_message_seq: i64 = sqlx::query_scalar(
+        "SELECT seq FROM message \
+          WHERE workspace_id=$1 AND channel_id=$2 AND id=$3 FOR SHARE",
+    )
+    .bind(workspace_id)
+    .bind(channel_id)
+    .bind(message_id)
+    .fetch_one(&mut *conn)
+    .await?;
+
     let recipients: Vec<(Uuid, Uuid)> = sqlx::query_as(
         "SELECT hc.id, hc.agent_member_id \
            FROM hosted_agent_connection hc \
@@ -186,17 +198,28 @@ pub async fn append_message_reference_in_tx(
            JOIN member m ON m.workspace_id=hc.workspace_id AND m.id=hc.agent_member_id \
            JOIN workspace_membership wm \
              ON wm.workspace_id=hc.workspace_id AND wm.member_id=hc.agent_member_id \
+           JOIN agent_profile ap \
+             ON ap.workspace_id=hc.workspace_id AND ap.agent_member_id=hc.agent_member_id \
            JOIN membership cm \
              ON cm.workspace_id=hc.workspace_id AND cm.member_id=hc.agent_member_id \
             AND cm.channel_id=$2 AND cm.left_at IS NULL \
-          WHERE hc.workspace_id=$1 AND hc.status='active' AND hc.proved_at IS NOT NULL \
-            AND t.credential_class='hosted_active' AND t.revoked_at IS NULL \
+          WHERE hc.workspace_id=$1 AND hc.agent_member_id=$3 AND hc.id=$4 \
+            AND hc.status='active' AND hc.proved_at IS NOT NULL \
+            AND t.kind='agent_bearer' AND t.credential_class='hosted_active' AND t.revoked_at IS NULL \
             AND (t.expires_at IS NULL OR t.expires_at > now()) \
+            AND t.hosted_connection_id=hc.id AND t.actor_member_id=hc.agent_member_id \
+            AND t.audience='/v1/mcp/agent-port' \
+            AND 'agent:inbox:read'=ANY(t.scopes) \
+            AND 'agent:inbox:read'=ANY(hc.approved_scopes) \
+            AND $2=ANY(hc.approved_channel_ids) \
             AND m.kind='agent' AND m.status='active' AND m.deleted_at IS NULL \
-          ORDER BY hc.id FOR KEY SHARE OF hc,t,m,wm,cm",
+            AND ap.paused=false \
+          ORDER BY hc.id FOR SHARE OF hc,t,m,wm,ap,cm",
     )
     .bind(workspace_id)
     .bind(channel_id)
+    .bind(agent_member_id)
+    .bind(connection_id)
     .fetch_all(&mut *conn)
     .await?;
 
@@ -249,14 +272,17 @@ pub async fn append_message_reference_in_tx(
         .await?;
         sqlx::query(
             "INSERT INTO hosted_agent_inbox_event \
-               (workspace_id,agent_member_id,connection_id,inbox_seq,event_kind,source_message_id) \
-             VALUES ($1,$2,$3,$4,'message',$5)",
+               (workspace_id,agent_member_id,connection_id,inbox_seq,event_kind, \
+                source_message_id,source_channel_id,source_message_seq) \
+             VALUES ($1,$2,$3,$4,'message',$5,$6,$7)",
         )
         .bind(workspace_id)
         .bind(agent_member_id)
         .bind(connection_id)
         .bind(inbox_seq)
         .bind(message_id)
+        .bind(channel_id)
+        .bind(source_message_seq)
         .execute(&mut *conn)
         .await?;
         appended.push((connection_id, inbox_seq));
@@ -278,13 +304,13 @@ pub async fn list_hosted_inbox_in_tx(
         Some(raw) => {
             let decoded = match decode_hosted_inbox_cursor(raw, cursor_secret) {
                 Ok(decoded) => decoded,
-                Err(_) => return Ok(Err(HostedInboxReadError::InvalidCursor)),
+                Err(_) => return Ok(Err(HostedInboxReadError::Unavailable)),
             };
             if decoded.workspace_id != workspace_id
                 || decoded.agent_member_id != agent_member_id
                 || decoded.connection_id != connection_id
             {
-                return Ok(Err(HostedInboxReadError::InvalidCursor));
+                return Ok(Err(HostedInboxReadError::Unavailable));
             }
             decoded.position
         }
@@ -292,41 +318,68 @@ pub async fn list_hosted_inbox_in_tx(
     };
     let limit = limit.clamp(1, HOSTED_INBOX_LIMIT_MAX);
 
-    let available: Option<i32> = sqlx::query_scalar(
-        "SELECT 1 \
+    // Keep the authority rows share-locked until the caller-owned transaction
+    // completes. Lifecycle revoke/disconnect, membership removal, and pause
+    // updates must therefore serialize before or after this page read rather
+    // than between the authority check and the event query.
+    let approved_channels: Option<Vec<Uuid>> = sqlx::query_scalar(
+        "SELECT hc.approved_channel_ids \
            FROM hosted_agent_connection hc \
            JOIN token t ON t.workspace_id=hc.workspace_id AND t.id=hc.active_token_id \
            JOIN member m ON m.workspace_id=hc.workspace_id AND m.id=hc.agent_member_id \
            JOIN workspace_membership wm \
              ON wm.workspace_id=hc.workspace_id AND wm.member_id=hc.agent_member_id \
+           JOIN agent_profile ap \
+             ON ap.workspace_id=hc.workspace_id AND ap.agent_member_id=hc.agent_member_id \
           WHERE hc.workspace_id=$1 AND hc.id=$2 AND hc.agent_member_id=$3 \
             AND hc.status='active' AND hc.proved_at IS NOT NULL \
-            AND t.credential_class='hosted_active' AND t.revoked_at IS NULL \
+            AND t.kind='agent_bearer' AND t.credential_class='hosted_active' AND t.revoked_at IS NULL \
             AND (t.expires_at IS NULL OR t.expires_at > now()) \
-            AND m.kind='agent' AND m.status='active' AND m.deleted_at IS NULL",
+            AND t.hosted_connection_id=hc.id AND t.actor_member_id=hc.agent_member_id \
+            AND t.audience='/v1/mcp/agent-port' \
+            AND 'agent:inbox:read'=ANY(t.scopes) \
+            AND 'agent:inbox:read'=ANY(hc.approved_scopes) \
+            AND m.kind='agent' AND m.status='active' AND m.deleted_at IS NULL \
+            AND ap.paused=false \
+          FOR SHARE OF hc,t,m,wm,ap",
     )
     .bind(workspace_id)
     .bind(connection_id)
     .bind(agent_member_id)
     .fetch_optional(&mut *conn)
     .await?;
-    if available.is_none() {
+    let Some(approved_channels) = approved_channels else {
         return Ok(Err(HostedInboxReadError::Unavailable));
-    }
+    };
+
+    // Lock the currently approved live channel memberships as part of the
+    // same authority snapshot. A concurrent membership removal must finish
+    // before this page or wait until after it; it cannot commit between the
+    // visibility decision and event projection.
+    let _locked_channel_memberships: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT cm.channel_id FROM membership cm \
+          WHERE cm.workspace_id=$1 AND cm.member_id=$2 \
+            AND cm.channel_id=ANY($3) AND cm.left_at IS NULL \
+          ORDER BY cm.channel_id FOR SHARE",
+    )
+    .bind(workspace_id)
+    .bind(agent_member_id)
+    .bind(&approved_channels)
+    .fetch_all(&mut *conn)
+    .await?;
 
     let rows = sqlx::query(
-        "SELECT e.inbox_seq,e.event_kind,e.source_message_id,e.source_outbox_id, \
-                e.source_run_id,m.channel_id \
-           FROM hosted_agent_inbox_event e \
-           LEFT JOIN message m ON m.workspace_id=e.workspace_id AND m.id=e.source_message_id \
-          WHERE e.workspace_id=$1 AND e.connection_id=$2 AND e.agent_member_id=$3 \
-            AND e.inbox_seq > $4 \
-            AND (e.event_kind <> 'message' OR EXISTS ( \
+        "SELECT e.inbox_seq,e.event_kind,e.source_message_id,e.source_channel_id, \
+                e.source_message_seq,e.source_outbox_id,e.source_run_id, \
+                (e.source_channel_id=ANY($6) AND EXISTS ( \
                   SELECT 1 FROM membership visible \
                    WHERE visible.workspace_id=e.workspace_id \
-                     AND visible.channel_id=m.channel_id \
+                     AND visible.channel_id=e.source_channel_id \
                      AND visible.member_id=e.agent_member_id \
-                     AND visible.left_at IS NULL)) \
+                     AND visible.left_at IS NULL)) AS visible \
+           FROM hosted_agent_inbox_event e \
+          WHERE e.workspace_id=$1 AND e.connection_id=$2 AND e.agent_member_id=$3 \
+            AND e.inbox_seq > $4 \
           ORDER BY e.inbox_seq ASC LIMIT $5",
     )
     .bind(workspace_id)
@@ -334,23 +387,32 @@ pub async fn list_hosted_inbox_in_tx(
     .bind(agent_member_id)
     .bind(position)
     .bind(limit + 1)
+    .bind(approved_channels)
     .fetch_all(&mut *conn)
     .await?;
 
     let has_more = rows.len() > limit as usize;
-    let events: Vec<HostedInboxEvent> = rows
+    let scanned = rows.into_iter().take(limit as usize).collect::<Vec<_>>();
+    // Cursor position follows the scanned connection-local ledger, not the
+    // last currently visible item. A hidden-only tail is skipped exactly once
+    // and cannot reappear merely because membership is restored later.
+    let next_position = scanned
+        .last()
+        .map_or(position, |row| row.get::<i64, _>("inbox_seq"));
+    let events: Vec<HostedInboxEvent> = scanned
         .into_iter()
-        .take(limit as usize)
+        .filter(|row| row.get::<bool, _>("visible"))
         .map(|row| HostedInboxEvent {
             inbox_seq: row.get("inbox_seq"),
             event_kind: row.get("event_kind"),
             source_message_id: row.get("source_message_id"),
+            source_channel_id: row.get("source_channel_id"),
+            source_message_seq: row.get("source_message_seq"),
             source_outbox_id: row.get("source_outbox_id"),
             source_run_id: row.get("source_run_id"),
-            channel_id: row.get("channel_id"),
+            channel_id: row.get("source_channel_id"),
         })
         .collect();
-    let next_position = events.last().map_or(position, |event| event.inbox_seq);
     let next_cursor = encode_hosted_inbox_cursor(
         HostedInboxCursor {
             workspace_id,

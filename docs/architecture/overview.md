@@ -58,6 +58,8 @@ flowchart LR
 
   ADR-0162의 현행 Rust **Agent Port foundation**은 `POST /v1/mcp/agent-port` 하나다. MCP `2026-07-28` modern 요청은 매 호출 version/capability metadata와 `server/discover`를 사용한다. Grok 실측에서 관측된 legacy-era loader에 대비해 exact `2025-11-25` adapter가 `initialize`·`notifications/initialized`·`ping`·빈 `tools/list`와 빈 catalog의 unknown `tools/call` 오류만 별도 분기하지만, 이 exact version의 Grok live compatibility는 아직 `runtime-unverified`다. 두 분기 모두 protocol session·GET stream·`Mcp-Session-Id`가 없으며 매 POST를 다시 인증한다. 첫 wave는 비기본 `agent:port:connect`를 가진 static agent bearer만 받고 OAuth/resource metadata를 광고하지 않는다. foundation의 tool catalog는 비어 있고 message/job/inbox/대화 쓰기는 0이다. pairing·audience-bound credential과 product tool은 #1364~#1367이 각각 열기 전까지 사용할 수 없다.
 
+- **Hosted durable inbox:** channel-local `message.seq`를 여러 채널의 전달 cursor로 재사용하지 않는다. `hosted_agent_inbox_counter`가 active connection마다 별도 `inbox_seq`를 직렬 발급하고, `hosted_agent_inbox_event`는 기존 message/job/run SoT의 immutable reference만 보존한다. opaque AEAD cursor는 workspace·agent·connection·position에 결속된다. append/read는 active hosted credential의 exact actor/connection/audience와 inbox scope, member/workspace/profile/approved channel/current membership을 tenant transaction에서 다시 잠그며, visibility가 사라진 reference는 내용 없이 scan watermark만 전진한다. reconnect는 새 connection namespace를 쓰고 이전 ledger는 보존한다. MCP exposure와 producer 연결은 HAP-E5(#1366)가 소유한다.
+
 ### 클라이언트 roster와 realtime discovery
 
 ADR-0128부터 `workspace_membership`이 owner/admin/member/guest 워크스페이스 역할의

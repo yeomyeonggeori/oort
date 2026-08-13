@@ -2,6 +2,11 @@
 //! the canonical `momo_app` role; this binary never accepts a production DB as
 //! a migration target.
 
+use std::path::PathBuf;
+use std::process::Command;
+use std::sync::Mutex;
+
+use momo_db::migrate::{run_migrations, SeedMode};
 use momo_db::{with_tenant_tx, DbError, PgPool};
 use momo_messaging::{
     append_message_reference_in_tx, list_hosted_inbox_in_tx, HostedInboxReadError, NewMessage,
@@ -14,6 +19,7 @@ fn database_url() -> String {
 }
 
 async fn pools() -> (PgPool, PgPool) {
+    ensure_schema_and_roles();
     let url = database_url();
     let su = PgPoolOptions::new()
         .max_connections(8)
@@ -33,6 +39,59 @@ async fn pools() -> (PgPool, PgPool) {
         .await
         .expect("momo_app pool");
     (su, app)
+}
+
+fn resolve_psql() -> PathBuf {
+    if let Some(paths) = std::env::var_os("PATH") {
+        for dir in std::env::split_paths(&paths) {
+            let candidate = dir.join("psql");
+            if candidate.is_file() {
+                return candidate;
+            }
+        }
+    }
+    for candidate in [
+        "/opt/homebrew/opt/libpq/bin/psql",
+        "/usr/local/opt/libpq/bin/psql",
+    ] {
+        let path = PathBuf::from(candidate);
+        if path.is_file() {
+            return path;
+        }
+    }
+    panic!("psql client not found");
+}
+
+fn ensure_schema_and_roles() {
+    static READY: Mutex<bool> = Mutex::new(false);
+    let mut ready = READY.lock().expect("schema lock");
+    if *ready {
+        return;
+    }
+    let migrations = std::env::var_os("HOSTED_INBOX_MIGRATIONS_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            PathBuf::from(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../../server/Migrations"
+            ))
+        });
+    run_migrations(&database_url(), &migrations, SeedMode::None).expect("apply all migrations");
+    let roles = PathBuf::from(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../../infra/e2e/bootstrap_roles.sql"
+    ));
+    let status = Command::new(resolve_psql())
+        .args(["-v", "ON_ERROR_STOP=1"])
+        .arg("--no-psqlrc")
+        .arg("--quiet")
+        .arg("--single-transaction")
+        .arg("-f")
+        .arg(roles)
+        .status()
+        .expect("spawn psql for bootstrap_roles.sql");
+    assert!(status.success(), "bootstrap_roles.sql failed");
+    *ready = true;
 }
 
 struct Fixture {
@@ -175,6 +234,8 @@ async fn seed(su: &PgPool) -> Fixture {
 async fn send_and_append(app: &PgPool, f: &Fixture, channel: Uuid, body: &str) -> Uuid {
     let workspace = f.workspace;
     let author = f.author;
+    let agent = f.agent;
+    let connection = f.connection;
     let body = body.to_string();
     with_tenant_tx(app, workspace, move |conn| {
         Box::pin(async move {
@@ -184,8 +245,15 @@ async fn send_and_append(app: &PgPool, f: &Fixture, channel: Uuid, body: &str) -
                 NewMessage::text(channel, author, body),
             )
             .await?;
-            let appended =
-                append_message_reference_in_tx(conn, workspace, channel, sent.message.id).await?;
+            let appended = append_message_reference_in_tx(
+                conn,
+                workspace,
+                agent,
+                connection,
+                channel,
+                sent.message.id,
+            )
+            .await?;
             assert_eq!(appended.len(), 1);
             Ok(sent.message.id)
         })
@@ -236,6 +304,8 @@ async fn hosted_inbox_cursor_rls_idempotency_and_visibility() {
     assert_eq!(page1.events.len(), 1);
     assert_eq!(page1.events[0].inbox_seq, 1);
     assert_eq!(page1.events[0].source_message_id, Some(first));
+    assert_eq!(page1.events[0].source_channel_id, Some(f.channels[0]));
+    assert_eq!(page1.events[0].source_message_seq, Some(1));
     assert!(page1.has_more);
 
     let cursor = page1.next_cursor.clone();
@@ -258,13 +328,23 @@ async fn hosted_inbox_cursor_rls_idempotency_and_visibility() {
     .unwrap();
     assert_eq!(page2.events[0].inbox_seq, 2);
     assert_eq!(page2.events[0].source_message_id, Some(second));
+    assert_eq!(page2.events[0].source_channel_id, Some(f.channels[1]));
+    assert_eq!(page2.events[0].source_message_seq, Some(1));
     assert!(!page2.has_more);
 
     // Replaying the same source is exactly-once and consumes no counter value.
     let second_channel = f.channels[1];
     let replay = with_tenant_tx(&app, workspace, move |conn| {
         Box::pin(async move {
-            append_message_reference_in_tx(conn, workspace, second_channel, second).await
+            append_message_reference_in_tx(
+                conn,
+                workspace,
+                agent,
+                connection,
+                second_channel,
+                second,
+            )
+            .await
         })
     })
     .await
@@ -280,7 +360,15 @@ async fn hosted_inbox_cursor_rls_idempotency_and_visibility() {
     let left = tokio::spawn(async move {
         with_tenant_tx(&left_pool, workspace, move |conn| {
             Box::pin(async move {
-                append_message_reference_in_tx(conn, workspace, channel, concurrent_message).await
+                append_message_reference_in_tx(
+                    conn,
+                    workspace,
+                    agent,
+                    connection,
+                    channel,
+                    concurrent_message,
+                )
+                .await
             })
         })
         .await
@@ -289,7 +377,15 @@ async fn hosted_inbox_cursor_rls_idempotency_and_visibility() {
     let right = tokio::spawn(async move {
         with_tenant_tx(&right_pool, workspace, move |conn| {
             Box::pin(async move {
-                append_message_reference_in_tx(conn, workspace, channel, concurrent_message).await
+                append_message_reference_in_tx(
+                    conn,
+                    workspace,
+                    agent,
+                    connection,
+                    channel,
+                    concurrent_message,
+                )
+                .await
             })
         })
         .await
@@ -309,6 +405,18 @@ async fn hosted_inbox_cursor_rls_idempotency_and_visibility() {
     .unwrap();
     assert_eq!(duplicate_count, 1);
 
+    // A caller cannot select recipients from one channel while referencing a
+    // message from another channel. The mismatch fails the whole tenant tx.
+    let wrong_channel = f.channels[1];
+    let mismatched = with_tenant_tx(&app, workspace, move |conn| {
+        Box::pin(async move {
+            append_message_reference_in_tx(conn, workspace, agent, connection, wrong_channel, first)
+                .await
+        })
+    })
+    .await;
+    assert!(mismatched.is_err());
+
     // The source write and projection are one transaction: a later DB failure
     // rolls both back and leaves no consumed inbox sequence.
     let rollback_body = format!("rollback-{}", Uuid::new_v4());
@@ -322,7 +430,15 @@ async fn hosted_inbox_cursor_rls_idempotency_and_visibility() {
                 NewMessage::text(channel, author, rollback_body_for_tx),
             )
             .await?;
-            append_message_reference_in_tx(conn, workspace, channel, sent.message.id).await?;
+            append_message_reference_in_tx(
+                conn,
+                workspace,
+                agent,
+                connection,
+                channel,
+                sent.message.id,
+            )
+            .await?;
             sqlx::query("SELECT 1 / 0").execute(conn).await?;
             Ok(())
         })
@@ -364,6 +480,32 @@ async fn hosted_inbox_cursor_rls_idempotency_and_visibility() {
     .unwrap();
     assert_eq!(hidden.events.len(), 2);
     assert_eq!(hidden.events[0].source_message_id, Some(first));
+    assert_eq!(hidden.events[1].source_message_id, Some(concurrent_message));
+    sqlx::query("UPDATE membership SET left_at=NULL WHERE channel_id=$1 AND member_id=$2")
+        .bind(f.channels[1])
+        .bind(agent)
+        .execute(&su)
+        .await
+        .unwrap();
+    let hidden_cursor = hidden.next_cursor;
+    let not_replayed = with_tenant_tx(&app, workspace, move |conn| {
+        Box::pin(async move {
+            list_hosted_inbox_in_tx(
+                conn,
+                workspace,
+                agent,
+                connection,
+                Some(&hidden_cursor),
+                10,
+                "test-key",
+            )
+            .await
+        })
+    })
+    .await
+    .unwrap()
+    .unwrap();
+    assert!(not_replayed.events.is_empty());
 
     // FORCE RLS filters this tenant's rows when the runtime role carries a
     // different workspace GUC; both new tables are NOBYPASS-visible only.
@@ -390,9 +532,44 @@ async fn hosted_inbox_cursor_rls_idempotency_and_visibility() {
     .unwrap();
     assert_eq!(posture, (true, true, true, true));
 
+    // UPDATE and DELETE are both rejected by the append-only trigger.
+    let update_event = with_tenant_tx(&app, workspace, move |conn| {
+        Box::pin(async move {
+            sqlx::query(
+                "UPDATE hosted_agent_inbox_event SET created_at=now() \
+                  WHERE workspace_id=$1 AND connection_id=$2 AND inbox_seq=1",
+            )
+            .bind(workspace)
+            .bind(connection)
+            .execute(conn)
+            .await
+            .map(|_| ())
+            .map_err(DbError::from)
+        })
+    })
+    .await;
+    assert!(update_event.is_err());
+    let delete_event = with_tenant_tx(&app, workspace, move |conn| {
+        Box::pin(async move {
+            sqlx::query(
+                "DELETE FROM hosted_agent_inbox_event \
+                  WHERE workspace_id=$1 AND connection_id=$2 AND inbox_seq=1",
+            )
+            .bind(workspace)
+            .bind(connection)
+            .execute(conn)
+            .await
+            .map(|_| ())
+            .map_err(DbError::from)
+        })
+    })
+    .await;
+    assert!(delete_event.is_err());
+
     // A cursor is connection-bound and cannot be replayed under another identity.
+    let page2_cursor = page2.next_cursor.clone();
     let wrong = with_tenant_tx(&app, workspace, move |conn| {
-        let cursor = page2.next_cursor.clone();
+        let cursor = page2_cursor.clone();
         Box::pin(async move {
             list_hosted_inbox_in_tx(
                 conn,
@@ -408,7 +585,177 @@ async fn hosted_inbox_cursor_rls_idempotency_and_visibility() {
     })
     .await
     .unwrap();
-    assert_eq!(wrong, Err(HostedInboxReadError::InvalidCursor));
+    assert_eq!(wrong, Err(HostedInboxReadError::Unavailable));
+
+    // Removing the inbox scope immediately stops both append and read. It
+    // does not consume a sequence and restoring the exact scope resumes at
+    // the next committed value.
+    sqlx::query(
+        "UPDATE token SET scopes=ARRAY['agent:port:connect']::text[] \
+          WHERE workspace_id=$1 AND hosted_connection_id=$2 AND revoked_at IS NULL",
+    )
+    .bind(workspace)
+    .bind(connection)
+    .execute(&su)
+    .await
+    .unwrap();
+    let no_scope_message = send_without_append(&app, &f, f.channels[0], "no-scope").await;
+    let no_scope = with_tenant_tx(&app, workspace, move |conn| {
+        Box::pin(async move {
+            append_message_reference_in_tx(
+                conn,
+                workspace,
+                agent,
+                connection,
+                channel,
+                no_scope_message,
+            )
+            .await
+        })
+    })
+    .await
+    .unwrap();
+    assert!(no_scope.is_empty());
+    let no_scope_read = with_tenant_tx(&app, workspace, move |conn| {
+        Box::pin(async move {
+            list_hosted_inbox_in_tx(conn, workspace, agent, connection, None, 10, "test-key").await
+        })
+    })
+    .await
+    .unwrap();
+    assert_eq!(no_scope_read, Err(HostedInboxReadError::Unavailable));
+    sqlx::query(
+        "UPDATE token SET scopes=ARRAY['agent:port:connect','agent:inbox:read']::text[] \
+          WHERE workspace_id=$1 AND hosted_connection_id=$2 AND revoked_at IS NULL",
+    )
+    .bind(workspace)
+    .bind(connection)
+    .execute(&su)
+    .await
+    .unwrap();
+
+    sqlx::query(
+        "UPDATE hosted_agent_connection SET approved_scopes=ARRAY['agent:port:connect']::text[] \
+          WHERE workspace_id=$1 AND id=$2",
+    )
+    .bind(workspace)
+    .bind(connection)
+    .execute(&su)
+    .await
+    .unwrap();
+    let approval_scope_read = with_tenant_tx(&app, workspace, move |conn| {
+        Box::pin(async move {
+            list_hosted_inbox_in_tx(conn, workspace, agent, connection, None, 10, "test-key").await
+        })
+    })
+    .await
+    .unwrap();
+    assert_eq!(approval_scope_read, Err(HostedInboxReadError::Unavailable));
+    sqlx::query(
+        "UPDATE hosted_agent_connection SET approved_scopes= \
+           ARRAY['agent:port:connect','agent:inbox:read']::text[] \
+          WHERE workspace_id=$1 AND id=$2",
+    )
+    .bind(workspace)
+    .bind(connection)
+    .execute(&su)
+    .await
+    .unwrap();
+
+    // Human pause and the approved-channel boundary independently stop
+    // append/read without consuming a sequence.
+    sqlx::query(
+        "UPDATE agent_profile SET paused=true WHERE workspace_id=$1 AND agent_member_id=$2",
+    )
+    .bind(workspace)
+    .bind(agent)
+    .execute(&su)
+    .await
+    .unwrap();
+    let paused_read = with_tenant_tx(&app, workspace, move |conn| {
+        Box::pin(async move {
+            list_hosted_inbox_in_tx(conn, workspace, agent, connection, None, 10, "test-key").await
+        })
+    })
+    .await
+    .unwrap();
+    assert_eq!(paused_read, Err(HostedInboxReadError::Unavailable));
+    sqlx::query(
+        "UPDATE agent_profile SET paused=false WHERE workspace_id=$1 AND agent_member_id=$2",
+    )
+    .bind(workspace)
+    .bind(agent)
+    .execute(&su)
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE hosted_agent_connection SET approved_channel_ids=ARRAY[$3]::uuid[] \
+          WHERE workspace_id=$1 AND id=$2",
+    )
+    .bind(workspace)
+    .bind(connection)
+    .bind(f.channels[1])
+    .execute(&su)
+    .await
+    .unwrap();
+    let narrowed_read = with_tenant_tx(&app, workspace, move |conn| {
+        Box::pin(async move {
+            list_hosted_inbox_in_tx(conn, workspace, agent, connection, None, 10, "test-key").await
+        })
+    })
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(narrowed_read.events.len(), 1);
+    assert_eq!(narrowed_read.events[0].source_message_id, Some(second));
+    let not_approved_message = send_without_append(&app, &f, f.channels[0], "not-approved").await;
+    let not_approved = with_tenant_tx(&app, workspace, move |conn| {
+        Box::pin(async move {
+            append_message_reference_in_tx(
+                conn,
+                workspace,
+                agent,
+                connection,
+                channel,
+                not_approved_message,
+            )
+            .await
+        })
+    })
+    .await
+    .unwrap();
+    assert!(not_approved.is_empty());
+    sqlx::query(
+        "UPDATE hosted_agent_connection SET approved_channel_ids=$3 \
+          WHERE workspace_id=$1 AND id=$2",
+    )
+    .bind(workspace)
+    .bind(connection)
+    .bind(f.channels.to_vec())
+    .execute(&su)
+    .await
+    .unwrap();
+
+    sqlx::query("UPDATE member SET status='suspended' WHERE workspace_id=$1 AND id=$2")
+        .bind(workspace)
+        .bind(agent)
+        .execute(&su)
+        .await
+        .unwrap();
+    let suspended_read = with_tenant_tx(&app, workspace, move |conn| {
+        Box::pin(async move {
+            list_hosted_inbox_in_tx(conn, workspace, agent, connection, None, 10, "test-key").await
+        })
+    })
+    .await
+    .unwrap();
+    assert_eq!(suspended_read, Err(HostedInboxReadError::Unavailable));
+    sqlx::query("UPDATE member SET status='active' WHERE workspace_id=$1 AND id=$2")
+        .bind(workspace)
+        .bind(agent)
+        .execute(&su)
+        .await
+        .unwrap();
 
     // New references stop as soon as the connection is no longer active.
     sqlx::query(
@@ -420,7 +767,15 @@ async fn hosted_inbox_cursor_rls_idempotency_and_visibility() {
     .execute(&su)
     .await
     .unwrap();
-    let third = send_and_append(&app, &f, f.channels[0], "inactive").await;
+    let third = send_without_append(&app, &f, f.channels[0], "inactive").await;
+    let inactive_append = with_tenant_tx(&app, workspace, move |conn| {
+        Box::pin(async move {
+            append_message_reference_in_tx(conn, workspace, agent, connection, channel, third).await
+        })
+    })
+    .await
+    .unwrap();
+    assert!(inactive_append.is_empty());
     let count: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM hosted_agent_inbox_event WHERE workspace_id=$1 \
          AND source_message_id=$2",
@@ -431,4 +786,115 @@ async fn hosted_inbox_cursor_rls_idempotency_and_visibility() {
     .await
     .unwrap();
     assert_eq!(count, 0);
+
+    // Disconnect preserves the old ledger but a reconnect receives a fresh
+    // connection/cursor namespace whose first committed event is sequence 1.
+    sqlx::query(
+        "UPDATE token SET revoked_at=now() \
+          WHERE workspace_id=$1 AND hosted_connection_id=$2 AND revoked_at IS NULL",
+    )
+    .bind(workspace)
+    .bind(connection)
+    .execute(&su)
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE hosted_agent_connection SET status='disconnected',active_token_id=NULL \
+          WHERE workspace_id=$1 AND id=$2",
+    )
+    .bind(workspace)
+    .bind(connection)
+    .execute(&su)
+    .await
+    .unwrap();
+    let replacement = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO hosted_agent_connection( \
+           id,workspace_id,agent_member_id,status,pairing_consumed_at,detected_at,detected_by, \
+           confirmed_by,confirmed_at,approved_channel_ids,approved_scopes,created_by) \
+         VALUES($1,$2,$3,'detected',now(),now(),$4,$4,now(),$5, \
+           ARRAY['agent:port:connect','agent:inbox:read']::text[],$4)",
+    )
+    .bind(replacement)
+    .bind(workspace)
+    .bind(agent)
+    .bind(f.author)
+    .bind(f.channels.to_vec())
+    .execute(&su)
+    .await
+    .unwrap();
+    let replacement_token = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO token(id,workspace_id,kind,actor_member_id,token_hash,scopes,created_by, \
+                           credential_class,hosted_connection_id,audience) \
+         VALUES($1,$2,'agent_bearer',$3,$4, \
+           ARRAY['agent:port:connect','agent:inbox:read']::text[],$5, \
+           'hosted_active',$6,'/v1/mcp/agent-port')",
+    )
+    .bind(replacement_token)
+    .bind(workspace)
+    .bind(agent)
+    .bind(vec![9_u8; 32])
+    .bind(f.author)
+    .bind(replacement)
+    .execute(&su)
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE hosted_agent_connection SET status='active',active_token_id=$3, \
+           proved_at=now(),proved_by=$4 WHERE workspace_id=$1 AND id=$2",
+    )
+    .bind(workspace)
+    .bind(replacement)
+    .bind(replacement_token)
+    .bind(agent)
+    .execute(&su)
+    .await
+    .unwrap();
+
+    let after_reconnect = send_without_append(&app, &f, f.channels[0], "reconnected").await;
+    let reconnected_append = with_tenant_tx(&app, workspace, move |conn| {
+        Box::pin(async move {
+            append_message_reference_in_tx(
+                conn,
+                workspace,
+                agent,
+                replacement,
+                channel,
+                after_reconnect,
+            )
+            .await
+        })
+    })
+    .await
+    .unwrap();
+    assert_eq!(reconnected_append, vec![(replacement, 1)]);
+    let old_history: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM hosted_agent_inbox_event \
+          WHERE workspace_id=$1 AND connection_id=$2",
+    )
+    .bind(workspace)
+    .bind(connection)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(old_history, 3);
+    let old_cursor = page2.next_cursor;
+    let replay_old_cursor = with_tenant_tx(&app, workspace, move |conn| {
+        Box::pin(async move {
+            list_hosted_inbox_in_tx(
+                conn,
+                workspace,
+                agent,
+                replacement,
+                Some(&old_cursor),
+                10,
+                "test-key",
+            )
+            .await
+        })
+    })
+    .await
+    .unwrap();
+    assert_eq!(replay_old_cursor, Err(HostedInboxReadError::Unavailable));
 }

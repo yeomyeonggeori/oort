@@ -1,5 +1,13 @@
 # oort 기획 현재 상태 (Planning Current State)
 
+> **2026-08-14 스냅샷 35 (GPT 5.6 · momo-main — #1365 durable inbox runtime closure).** 스냅샷 34를 supersede한다.
+>
+> **Fable 리뷰 반영:** `fbcd6afc` 초안의 C0/H2/M3을 기준으로 inbox scope, exact token↔connection↔actor↔audience, approved/current channel, active member/workspace membership, unpaused profile과 source message tuple을 결속했다. append/read authority rows는 같은 tenant transaction 동안 잠겨 revoke·pause·membership-loss와 직렬화되고, hidden row도 scan watermark를 전진시켜 membership 복원 후 과거 content가 재출현하지 않는다. connection FK는 history-preserving RESTRICT이며 job/run reference도 target agent/channel에 composite FK로 묶었다.
+>
+> **실측:** Docker 재설치 후 전용 `scripts/verify_hosted_agent_inbox.sh`가 fresh pinned PG18에서 migration 001→070, momo_app/FORCE RLS, two-channel seq=1, concurrent idempotency, rollback, cursor/visibility/scope/profile/approval, append-only, disconnect history와 reconnect namespace를 PASS했다. verifier는 external DATABASE_URL을 거부하고 nonce label+immutable container ID를 검증한 뒤 teardown/absence proof 후에만 PASS한다.
+>
+> **남은 경계:** MCP `tools/list`/`oort_inbox_read` 노출과 실제 message/job/run producer append는 의도대로 #1366 소유다. #1365는 Rust hard gates·docs gate·독립 final C/H/M=0 뒤 commit/push/PR/needs-review로 넘기며, 그 전에는 완료로 부르지 않는다.
+
 > **2026-08-14 스냅샷 34 (GPT 5.6 · momo-main — #1364 랜딩, #1365 HAP-E4 착수).** 스냅샷 33을 supersede한다.
 >
 > **랜딩:** #1364는 PR #1373을 `track/engine@23038585efc2c2740d2d6ddafa9765e455e62ab8`로 squash-merge했다. PR CI와 canonical `track/engine@c5badf5f`에서 실행한 exact-base Policy Integrity가 PASS했고 독립 final review는 C0/H0/M0이다. Issue/Project는 Done으로 닫았다. exact latest actual-image runtime은 Docker Desktop 내부 metadata/network DB I/O로 제품 boot 전에 막혀 `runtime-unverified`이며, `c9aaf7cf`의 OpenAPI 65/65+62/62·PG18 2/2는 별도 과거 provenance로만 유지한다.
