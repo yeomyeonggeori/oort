@@ -1223,6 +1223,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "momo-mcp"
+version = "0.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "momo-messaging"
 version = "0.0.0"
 dependencies = [
@@ -1348,6 +1356,7 @@ dependencies = [
  "momo-db",
  "momo-drive",
  "momo-ephemeral",
+ "momo-mcp",
  "momo-messaging",
  "momo-outbox",
  "momo-push",

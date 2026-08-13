@@ -69,6 +69,10 @@ pub struct Config {
     /// route only. **On by default**, because the route it guards is the one
     /// unauthenticated write on the instance.
     pub rate_limit: RateLimitConfig,
+    /// ADR-0162 / HAP-E2 Agent Port transport and its dedicated abuse bounds.
+    /// These knobs are separate from the public join limiter so changing one
+    /// surface can never silently widen the other.
+    pub agent_port: AgentPortConfig,
     /// Mention→run routing knobs (B5.2). Always on; only the history window is
     /// configurable.
     pub mentions: MentionSettings,
@@ -196,6 +200,84 @@ impl RateLimitConfig {
             per_ip_limit: env("RATE_LIMIT_PER_IP")
                 .and_then(|value| value.trim().parse::<u32>().ok())
                 .unwrap_or(defaults.per_ip_limit),
+        }
+    }
+}
+
+/// Stateless Agent Port transport configuration (ADR-0162 D2/D4).
+///
+/// The first wave is static-bearer only. `external_origin` is therefore not an
+/// OAuth issuer or resource-metadata URL; it is solely the trusted comparison
+/// value for a present browser `Origin` header. Native/provider HTTP clients
+/// normally omit `Origin` and continue to work when it is unset.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentPortConfig {
+    /// Exact HTTPS origin from `MOMO_AGENT_PORT_EXTERNAL_ORIGIN`, normalized to
+    /// RFC 6454 serialization. `None` means every *present* Origin is refused.
+    pub external_origin: Option<String>,
+    /// Dedicated sliding-window width (default 60 seconds).
+    pub window_seconds: u64,
+    /// Requests per credential token id per window. 0 disables this axis.
+    pub per_token_limit: u32,
+    /// Requests per agent member id per window. 0 disables this axis.
+    pub per_agent_limit: u32,
+    /// Requests per socket peer per window. 0 disables this axis.
+    pub per_ip_limit: u32,
+}
+
+impl Default for AgentPortConfig {
+    fn default() -> Self {
+        AgentPortConfig {
+            external_origin: None,
+            window_seconds: 60,
+            per_token_limit: 240,
+            per_agent_limit: 480,
+            per_ip_limit: 1200,
+        }
+    }
+}
+
+impl AgentPortConfig {
+    pub fn from_env() -> Result<AgentPortConfig, ConfigError> {
+        let defaults = AgentPortConfig::default();
+        let external_origin = match env("MOMO_AGENT_PORT_EXTERNAL_ORIGIN") {
+            Some(value) => {
+                let origin =
+                    normalized_origin(&value).filter(|origin| origin.starts_with("https://"));
+                Some(origin.ok_or(ConfigError::InvalidSecurity(
+                    "MOMO_AGENT_PORT_EXTERNAL_ORIGIN must be one exact https origin",
+                ))?)
+            }
+            None => None,
+        };
+        Ok(AgentPortConfig {
+            external_origin,
+            window_seconds: env_number(
+                "MOMO_AGENT_PORT_RATE_LIMIT_WINDOW_SECONDS",
+                defaults.window_seconds,
+            )?
+            .max(1),
+            per_token_limit: env_number(
+                "MOMO_AGENT_PORT_RATE_LIMIT_PER_TOKEN",
+                defaults.per_token_limit,
+            )?,
+            per_agent_limit: env_number(
+                "MOMO_AGENT_PORT_RATE_LIMIT_PER_AGENT",
+                defaults.per_agent_limit,
+            )?,
+            per_ip_limit: env_number("MOMO_AGENT_PORT_RATE_LIMIT_PER_IP", defaults.per_ip_limit)?,
+        })
+    }
+
+    /// `Origin` is optional for native/server clients. Once present it must be
+    /// the single operator-controlled HTTPS origin; Host and forwarding headers
+    /// are intentionally not inputs.
+    pub fn origin_is_allowed(&self, presented: Option<&str>) -> bool {
+        match presented {
+            None => true,
+            Some(value) => normalized_origin(value)
+                .zip(self.external_origin.as_ref())
+                .is_some_and(|(presented, expected)| &presented == expected),
         }
     }
 }
@@ -1115,6 +1197,7 @@ impl Config {
             realtime,
             settings,
             rate_limit: RateLimitConfig::from_env(),
+            agent_port: AgentPortConfig::from_env()?,
             mentions: MentionSettings::from_env(),
             // ADR-0149: never fatal. An instance that was not given the
             // Centrifugo publish credential keeps 휘발 신호 off and answers 503
@@ -1309,6 +1392,28 @@ fn choose_log_filter(rust_log: Option<&str>, log_level: Option<&str>) -> String 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn agent_port_origin_is_optional_but_present_values_are_exact_https() {
+        let unset = AgentPortConfig::default();
+        assert!(unset.origin_is_allowed(None));
+        assert!(!unset.origin_is_allowed(Some("https://app.oor7.com")));
+
+        let configured = AgentPortConfig {
+            external_origin: Some("https://app.oor7.com".to_string()),
+            ..AgentPortConfig::default()
+        };
+        assert!(configured.origin_is_allowed(None));
+        assert!(configured.origin_is_allowed(Some("HTTPS://APP.OOR7.COM")));
+        for value in [
+            "http://app.oor7.com",
+            "https://app.oor7.com.evil.example",
+            "https://app.oor7.com/",
+            "null",
+        ] {
+            assert!(!configured.origin_is_allowed(Some(value)), "{value}");
+        }
+    }
 
     #[test]
     fn log_filter_prefers_rust_log_then_the_compose_log_level() {

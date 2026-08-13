@@ -44,8 +44,8 @@ use axum::Router;
 use momo_db::PgPool;
 
 use crate::config::{
-    AgentGatewaySettings, CorsConfig, EphemeralSettings, MentionSettings, RateLimitConfig,
-    RealtimeSettings, SettingsConfig, T3Settings, WebhookSettings,
+    AgentGatewaySettings, AgentPortConfig, CorsConfig, EphemeralSettings, MentionSettings,
+    RateLimitConfig, RealtimeSettings, SettingsConfig, T3Settings, WebhookSettings,
 };
 use crate::rate_limit::SlidingWindowRateLimiter;
 
@@ -55,6 +55,16 @@ use crate::rate_limit::SlidingWindowRateLimiter;
 #[derive(Debug, Default)]
 pub struct RateLimitState {
     pub config: RateLimitConfig,
+    pub limiter: SlidingWindowRateLimiter,
+}
+
+/// Agent Port's own bounded process-local limiter and trusted-origin config.
+/// A separate state object keeps its keys and knobs out of the unauthenticated
+/// join limiter, while one limiter map with `token:`/`agent:`/`ip:` prefixes
+/// bounds all three Agent Port axes.
+#[derive(Debug, Default)]
+pub struct AgentPortState {
+    pub config: AgentPortConfig,
     pub limiter: SlidingWindowRateLimiter,
 }
 
@@ -141,6 +151,9 @@ pub struct AppState {
     /// (`POST /v1/join`) is the one unauthenticated write on the instance, so
     /// "the operator configured nothing" has to mean *limited*, not *open*.
     pub rate_limit: Arc<RateLimitState>,
+    /// ADR-0162 Agent Port transport policy. It carries no session or product
+    /// data; only trusted origin input and process-local abuse counters.
+    pub agent_port: Arc<AgentPortState>,
     /// Mention→run routing knobs (B5.2). The default is the shipped one, not a
     /// disabled state: routing an `@mention` to its agent is the product, so an
     /// instance that configured nothing still does it.
@@ -197,6 +210,7 @@ impl AppState {
             realtime: Arc::new(RealtimeSettings::default()),
             settings: Arc::new(SettingsConfig::default()),
             rate_limit: Arc::new(RateLimitState::default()),
+            agent_port: Arc::new(AgentPortState::default()),
             mentions: Arc::new(MentionSettings::default()),
             cors: Arc::new(CorsConfig::default()),
             ephemeral: Arc::new(EphemeralState::default()),
@@ -263,6 +277,16 @@ impl AppState {
     /// replaces the counters it was measured against.
     pub fn with_rate_limit(mut self, config: RateLimitConfig) -> Self {
         self.rate_limit = Arc::new(RateLimitState {
+            config,
+            limiter: SlidingWindowRateLimiter::new(),
+        });
+        self
+    }
+
+    /// Attach Agent Port's dedicated transport knobs and start with empty
+    /// process-local buckets. This is intentionally independent of `/v1/join`.
+    pub fn with_agent_port(mut self, config: AgentPortConfig) -> Self {
+        self.agent_port = Arc::new(AgentPortState {
             config,
             limiter: SlidingWindowRateLimiter::new(),
         });
@@ -818,6 +842,10 @@ pub fn build_app(state: AppState) -> Router {
         .route("/v1/auth/login", post(routes::auth_routes::login))
         .route("/v1/auth/refresh", post(routes::auth_routes::refresh))
         .route("/v1/auth/logout", post(routes::auth_routes::logout))
+        // ADR-0162 / HAP-E2 — intentionally outside generic bearer middleware:
+        // this route accepts only agent bearers, emits MCP-specific challenges,
+        // and never falls through to human JWT authentication.
+        .route("/v1/mcp/agent-port", post(routes::agent_port::post))
         .route(
             "/v1/workspaces/{ws}/work-hosts/{host}/heartbeat",
             post(routes::work_hosts::heartbeat),

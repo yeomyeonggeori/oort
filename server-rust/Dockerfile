@@ -88,6 +88,7 @@ COPY server-rust/crates/momo-db/Cargo.toml crates/momo-db/
 COPY server-rust/crates/momo-drive/Cargo.toml crates/momo-drive/
 COPY server-rust/crates/momo-ephemeral/Cargo.toml crates/momo-ephemeral/
 COPY server-rust/crates/momo-messaging/Cargo.toml crates/momo-messaging/
+COPY server-rust/crates/momo-mcp/Cargo.toml crates/momo-mcp/
 COPY server-rust/crates/momo-outbox/Cargo.toml crates/momo-outbox/
 COPY server-rust/crates/momo-provider/Cargo.toml crates/momo-provider/
 COPY server-rust/crates/momo-push/Cargo.toml crates/momo-push/

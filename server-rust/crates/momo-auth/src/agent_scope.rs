@@ -43,6 +43,12 @@ pub const SCOPE_MESSAGES_WRITE: &str = "messages:write";
 /// agent's, and an agent that could acknowledge its own dispatch could close the
 /// loop on a spawn no host ever ran.
 pub const SCOPE_WORK_CONTROL: &str = "work:control";
+/// `POST /v1/mcp/agent-port` (ADR-0162 D2/D3, HAP-E2).
+///
+/// This scope opens only the protocol foundation. Product-data tools remain
+/// separately scope-gated when HAP-E5 lands, and this scope is intentionally
+/// absent from every default credential grant.
+pub const SCOPE_AGENT_PORT_CONNECT: &str = "agent:port:connect";
 
 /// The scope an agent bearer must carry to reach `method path`, or `None` when
 /// no agent credential may reach it at all.
@@ -53,6 +59,13 @@ pub const SCOPE_WORK_CONTROL: &str = "work:control";
 pub fn required_agent_scope(method: &str, path: &str) -> Option<&'static str> {
     let method = method.to_ascii_uppercase();
     let segments: Vec<&str> = path.split('/').filter(|part| !part.is_empty()).collect();
+
+    // POST /v1/mcp/agent-port — the only Agent Port transport surface.
+    // GET/SSE, DELETE and any sibling path stay absent so an agent bearer cannot
+    // widen the stateless HTTP contract merely by carrying this scope.
+    if method == "POST" && path == "/v1/mcp/agent-port" {
+        return Some(SCOPE_AGENT_PORT_CONNECT);
+    }
 
     // POST /v1/workspaces/{ws}/channels/{ch}/messages
     if method == "POST"
@@ -216,6 +229,29 @@ mod tests {
             required_agent_scope("POST", &format!("/v1/workspaces/{WS}/work-controls")),
             Some(SCOPE_WORK_CONTROL)
         );
+    }
+
+    #[test]
+    fn agent_port_is_one_post_only_scope() {
+        assert_eq!(
+            required_agent_scope("POST", "/v1/mcp/agent-port"),
+            Some(SCOPE_AGENT_PORT_CONNECT)
+        );
+        for method in ["GET", "DELETE", "PUT", "PATCH"] {
+            assert_eq!(
+                required_agent_scope(method, "/v1/mcp/agent-port"),
+                None,
+                "{method} must not open a second Agent Port transport"
+            );
+        }
+        for path in [
+            "/v1/mcp/agent-port/",
+            "/v1/mcp/agent-port/tools",
+            "/v1/mcp/drive",
+            "/v1/mcp/agent-port-evil",
+        ] {
+            assert_eq!(required_agent_scope("POST", path), None, "{path}");
+        }
     }
 
     /// **ADR-0158 증보 1 D7 — the slice door.**

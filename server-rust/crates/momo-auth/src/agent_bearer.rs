@@ -26,7 +26,7 @@
 //! `auth.agent_bearer.used` when the required scope is present,
 //! `auth.agent_bearer.scope_denied` when it is not (:165-184) — and writes
 //! nothing for an unknown/revoked/expired token, which never identifies anyone.
-//! [`authenticate_agent_bearer_in_tx`] returns that decision in
+//! [`resolve_agent_bearer_in_tx`] returns that decision in
 //! [`AgentBearerResolution::Active`] rather than writing the row itself, because
 //! `audit_log` belongs to `momo-db` and this crate deliberately holds no
 //! dependency on it (module docs of [`crate::token_store`]: "no DB-topology
@@ -167,18 +167,23 @@ impl AgentBearerRejection {
     }
 }
 
-/// Authenticate an agent bearer inside an already tenant-scoped transaction.
+/// Resolve an agent bearer inside an already tenant-scoped transaction.
 ///
 /// `conn` must carry the GUC for the workspace named in the envelope (open it
 /// with `momo_db::with_tenant_tx` keyed by [`agent_bearer_workspace_id`]), so a
 /// token minted for workspace A is `Unknown` when presented with a workspace B
 /// scope — the RLS backstop, not a code check.
 ///
-/// The joins are not decoration. Swift requires the actor to still be an
-/// **active, undeleted `member` of kind `agent` that has an `agent` row**
-/// (:130-139): deactivating an agent member must kill its credential, without
-/// anybody remembering to also revoke the token.
-pub async fn authenticate_agent_bearer_in_tx(
+/// The joins are not decoration. The actor must still be an **active, undeleted
+/// workspace member of kind `agent` that has an `agent` row**: deactivating or
+/// removing an agent must kill its credential without anybody remembering to
+/// also revoke the token.
+///
+/// This function is deliberately SELECT-only. Callers that admit the request
+/// must invoke [`finalize_agent_bearer_use_in_tx`] before committing. That split
+/// lets Agent Port apply its stable-id limiter between identity resolution and
+/// the `last_used_at`/audit effects, so a 429 flood cannot amplify DB writes.
+pub async fn resolve_agent_bearer_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     raw_token: &str,
@@ -198,6 +203,9 @@ pub async fn authenticate_agent_bearer_in_tx(
            JOIN agent a \
              ON a.member_id = m.id \
             AND a.workspace_id = m.workspace_id \
+           JOIN workspace_membership wm \
+             ON wm.workspace_id = m.workspace_id \
+            AND wm.member_id = m.id \
           WHERE t.workspace_id = $1 \
             AND t.kind = 'agent_bearer' \
             AND t.subject_member_id IS NULL \
@@ -224,16 +232,6 @@ pub async fn authenticate_agent_bearer_in_tx(
     let scopes: Vec<String> = row.try_get("scopes")?;
     let scope_granted = scopes.iter().any(|scope| scope == required_scope);
 
-    // Swift touches `last_used_at` only on the granted path (:158-163) — a denied
-    // attempt is not a use, and recording it as one would corrupt the "when was
-    // this credential last exercised" signal an operator rotates on.
-    if scope_granted {
-        sqlx::query("UPDATE token SET last_used_at = now() WHERE id = $1")
-            .bind(token_id)
-            .execute(&mut *conn)
-            .await?;
-    }
-
     Ok(AgentBearerResolution::Active {
         identity: AgentBearerIdentity {
             token_id,
@@ -243,6 +241,50 @@ pub async fn authenticate_agent_bearer_in_tx(
         },
         scope_granted,
     })
+}
+
+/// Commit the `last_used_at` half of one admitted bearer use.
+///
+/// The conditional UPDATE rechecks every credential predicate under the same
+/// tenant transaction. PostgreSQL READ COMMITTED gives this statement a fresh
+/// snapshot, so a concurrent revoke, expiry, scope removal, member suspension,
+/// agent deletion, or workspace-membership removal between resolution and
+/// admission fails closed with `false`. Callers write the matching used audit
+/// row only after this returns `true`.
+pub async fn finalize_agent_bearer_use_in_tx(
+    conn: &mut PgConnection,
+    identity: &AgentBearerIdentity,
+    required_scope: &str,
+) -> Result<bool, sqlx::Error> {
+    let updated = sqlx::query(
+        "UPDATE token t \
+            SET last_used_at = now() \
+           FROM member m, agent a, workspace_membership wm \
+          WHERE t.id = $1 \
+            AND t.workspace_id = $2 \
+            AND t.actor_member_id = $3 \
+            AND t.kind = 'agent_bearer' \
+            AND t.subject_member_id IS NULL \
+            AND t.revoked_at IS NULL \
+            AND (t.expires_at IS NULL OR t.expires_at > now()) \
+            AND $4 = ANY(t.scopes) \
+            AND m.id = t.actor_member_id \
+            AND m.workspace_id = t.workspace_id \
+            AND m.kind = 'agent' \
+            AND m.status = 'active' \
+            AND m.deleted_at IS NULL \
+            AND a.member_id = m.id \
+            AND a.workspace_id = m.workspace_id \
+            AND wm.workspace_id = m.workspace_id \
+            AND wm.member_id = m.id",
+    )
+    .bind(identity.token_id)
+    .bind(identity.workspace_id)
+    .bind(identity.member_id)
+    .bind(required_scope)
+    .execute(&mut *conn)
+    .await?;
+    Ok(updated.rows_affected() == 1)
 }
 
 #[cfg(test)]

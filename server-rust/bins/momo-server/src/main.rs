@@ -50,6 +50,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // B4.3: what guards the one unauthenticated write (`POST /v1/join`).
         rate_limit_per_ip = config.rate_limit.per_ip_limit,
         rate_limit_window_seconds = config.rate_limit.window_seconds,
+        agent_port_rate_limit_per_token = config.agent_port.per_token_limit,
+        agent_port_rate_limit_per_agent = config.agent_port.per_agent_limit,
+        agent_port_rate_limit_per_ip = config.agent_port.per_ip_limit,
+        agent_port_external_origin_configured = config.agent_port.external_origin.is_some(),
         // MOMO-605: how wide the cross-origin surface is. A count, not the list —
         // the origins themselves go in the warn below only when one was refused.
         cors_allowed_origins = config.cors.allowed_origins.len(),
@@ -148,6 +152,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // `RATE_LIMIT_PER_IP=0` is the only way to turn it off, and the boot warns
     // when someone does.
     .with_rate_limit(config.rate_limit)
+    // ADR-0162: the Agent Port has its own token/agent/IP bounds and an optional
+    // trusted Origin comparison. It never borrows the public join knobs.
+    .with_agent_port(config.agent_port)
     // B5.2: mention→run routing is always on (routing an `@mention` to its agent
     // is the product); the only knob is how much history rides the job.
     .with_mentions(config.mentions.clone())

@@ -54,7 +54,9 @@ flowchart LR
 
   이 호스트 커스터디 모델은 에이전트 호스트가 사용자가 직접 소유·통제하는 머신이라는 전제다. OAuth/PAT 등 MCP 자격증명은 그 호스트의 MCP 클라이언트에만 보관해야 하며 oort 서버나 Context Packet으로 전달하지 않는다. 다중 사용자 workspace에서도 한 에이전트 호스트를 사용자 사이에 공유하지 않고, 각 사용자의 호스트 세션과 토큰 저장소를 분리한다.
 
-  Drive 경로 C는 이 일반 remote 커스터디 모델의 좁은 서버 소유 예외다(ADR-0113 D3/D5). `com.momo.plugins.drive`의 상대 MCP endpoint는 catalog 응답에서 현재 서버의 public origin으로 절대화되고, `POST /v1/mcp/drive`는 agent bearer와 위임 사용자·채널 binding, 매 호출의 활성 `drive:read` grant를 재검증한다. 도구는 공유 드라이브 검색·메타데이터·bounded text export 3개뿐이며 전부 read-only다. 배포 운영자가 SA 키 파일과 공유 드라이브 ID를 환경으로 주입하고 키 바이트는 DB·응답·audit·로그에 들어가지 않는다. SA 생성·공유 드라이브 멤버십·수동 실호출 evidence는 [`docs/GWS_INTERNAL_CONSENT_RUNBOOK.md`](../GWS_INTERNAL_CONSENT_RUNBOOK.md)가 정본이다.
+  Drive 경로 C는 이 일반 remote 커스터디 모델의 좁은 서버 소유 **설계 선례**다(ADR-0113 D3/D5). `POST /v1/mcp/drive` 구현은 은퇴 중인 Swift 트리에만 있고 현행 Rust router에는 이식되지 않았다. 따라서 공유 드라이브 검색·메타데이터·bounded text export와 SA 운영 절차를 현행 Rust 기능으로 주장하지 않는다. 역사적 SA 생성·공유 드라이브 멤버십·수동 실호출 절차는 [`docs/GWS_INTERNAL_CONSENT_RUNBOOK.md`](../GWS_INTERNAL_CONSENT_RUNBOOK.md)에 남아 있다.
+
+  ADR-0162의 현행 Rust **Agent Port foundation**은 `POST /v1/mcp/agent-port` 하나다. MCP `2026-07-28` modern 요청은 매 호출 version/capability metadata와 `server/discover`를 사용한다. Grok 실측에서 관측된 legacy-era loader에 대비해 exact `2025-11-25` adapter가 `initialize`·`notifications/initialized`·`ping`·빈 `tools/list`와 빈 catalog의 unknown `tools/call` 오류만 별도 분기하지만, 이 exact version의 Grok live compatibility는 아직 `runtime-unverified`다. 두 분기 모두 protocol session·GET stream·`Mcp-Session-Id`가 없으며 매 POST를 다시 인증한다. 첫 wave는 비기본 `agent:port:connect`를 가진 static agent bearer만 받고 OAuth/resource metadata를 광고하지 않는다. foundation의 tool catalog는 비어 있고 message/job/inbox/대화 쓰기는 0이다. pairing·audience-bound credential과 product tool은 #1364~#1367이 각각 열기 전까지 사용할 수 없다.
 
 ### 클라이언트 roster와 realtime discovery
 
