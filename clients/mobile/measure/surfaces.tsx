@@ -1663,14 +1663,14 @@ export function Surface({name}: {name: string}): React.JSX.Element {
       saveDraft('measure:composer-offline', line);
       return (
         <Frame label="컴포저 — 보낼 수 있을 때 / 지금은 못 보낼 때 (감사 H-10)">
-          <Composer
+          <Composer recipient="place"
             channelLabel="배포"
             directory={DIRECTORY}
             draftKey="measure:composer-online"
             onSend={() => {}}
           />
           <View style={styles.gap} />
-          <Composer
+          <Composer recipient="place"
             channelLabel="배포"
             directory={DIRECTORY}
             draftKey="measure:composer-offline"
@@ -1724,7 +1724,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
                   live
                 />
                 <TypingBar segments={typingSegments(['박다연'])} />
-                <Composer
+                <Composer recipient="place"
                   channelLabel="배포"
                   directory={ADE_DIRECTORY}
                   draftKey="measure:ade-summary"
@@ -1763,7 +1763,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
               />
             }
             composer={
-              <Composer
+              <Composer recipient="place"
                 channelLabel="배포"
                 directory={ADE_DIRECTORY}
                 draftKey="measure:ade-summary-empty"

@@ -165,10 +165,12 @@ export function ThreadComposer({
             ref={ref}
             value={draft}
             disabled={sending}
-            // 채널 컴포저와 달리 `@` 를 광고하지 않는다 (#1384): 이 상자에는
-            // 멘션 자동완성이 없고(이 파일 머리말), 없는 어포던스를 광고하는
-            // 것이 못 하는 말보다 나쁘다. 문장은 폰의 스레드 패널과 한 벌이라
-            // 코어가 든다.
+            // 채널 컴포저와 달리 `@` 를 광고하지 않는다 (#1384). 이유는
+            // **이 상자**에 멘션 자동완성이 없어서다(이 파일 머리말) — 폰의
+            // 스레드는 채널 컴포저를 그대로 세우므로 거기서는 @ 가 목록을 연다.
+            // 그 비대칭은 동작이라 카피 티켓이 고치지 않고 코어가 기록한다
+            // (`composerCopy.ts` 의 THREAD_COMPOSER_PLACEHOLDER). 문장은 두
+            // 클라가 함께 쓰므로 **둘 다 하는 일**까지만 말한다.
             placeholder={THREAD_COMPOSER_PLACEHOLDER}
             aria-label={THREAD_COMPOSER_PLACEHOLDER}
             data-testid="thread-composer-input"

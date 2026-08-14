@@ -251,6 +251,10 @@ export function ThreadPanel({
               ) : null}
               <Composer
                 channelLabel="스레드"
+                // 스레드는 방이다. 이 호출은 플레이스홀더를 덮어써서 조사가
+                // 문장에 닿지도 않지만, 그래도 적는다 — 기본값이 없어야 다음
+                // 호출자가 모르는 채로 지나가지 못한다 (#1384).
+                recipient="place"
                 directory={directory}
                 // 채널과 **다른 이름 공간**이다(`drafts.ts`). 스레드에 쓰다 만
                 // 답글이 채널 입력창에서 되살아나면 그 글은 잘못된 방으로 간다.

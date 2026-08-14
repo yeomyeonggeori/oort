@@ -18,6 +18,7 @@ import { useSession } from "@/app/session";
 import { useIsMobileShell } from "@/app/shellNav";
 import type { Directory } from "@/features/workspace/useWorkspace";
 import { composerKeyIntent, isComposingEvent } from "@momo/core/features/chat/composerKeys";
+import type { RecipientKind } from "@momo/core/lib/koreanParticle";
 import {
   COMPOSER_KEYS_HINT,
   COMPOSER_OFFLINE_COPY,
@@ -331,6 +332,7 @@ export function Composer({
   channelId,
   directory,
   channelLabel,
+  recipient,
   dmAgent,
   quote,
   onCancelQuote,
@@ -342,6 +344,13 @@ export function Composer({
   channelId: string;
   directory: Directory;
   channelLabel: string;
+  /**
+   * 이 label 이 **방 이름인가 사람 이름인가** (#1384). DM 의 label 은 상대의
+   * displayName 이므로(`channelLabelParts`) 조사가 갈린다: 방은 에, 사람은
+   * 에게. 기본값을 두지 않는 것은 의도다 — 모르는 채로 그린 화면이 「hermes에
+   * 메시지 보내기」였고, 조사는 한국어 독자에게 렌더링 디테일이 아니다.
+   */
+  recipient: RecipientKind;
   /**
    * The agent this channel answers without an @mention
    * (`dmAutoReplyAgent`), or null. Present only to decide one sentence of
@@ -764,7 +773,7 @@ export function Composer({
             자리를 쓴다 — 이 자리는 배울 필요가 없는 자리다. */}
         <AttachButton onPick={onFiles} disabled={offline} />
         <label className="sr-only" htmlFor="composer-input">
-          {composerFieldLabel(channelLabel)}
+          {composerFieldLabel(channelLabel, recipient)}
         </label>
         <textarea
           id="composer-input"
@@ -817,7 +826,7 @@ export function Composer({
           // 빈 상자는 **어디로 가는지**와 **@가 무엇인지**를 함께 말한다
           // (#1384). 문장과 그 문장을 고른 이유(폭 산술 포함)는 코어가 든다 —
           // 이 자리는 렌더만 한다.
-          placeholder={composerPlaceholder(channelLabel)}
+          placeholder={composerPlaceholder(channelLabel, recipient)}
           aria-describedby={hasHint ? "composer-hint" : undefined}
           data-testid="composer-input"
           className="tap-target min-w-0 flex-1 resize-none rounded-md border border-line-strong bg-transparent px-3 py-2 text-body leading-relaxed placeholder:text-ink-muted focus-visible:focus-ring"

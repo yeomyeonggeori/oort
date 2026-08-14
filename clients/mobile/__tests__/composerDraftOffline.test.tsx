@@ -66,7 +66,7 @@ afterEach(() => {
 
 function composer(props: Partial<React.ComponentProps<typeof Composer>> = {}) {
   return render(
-    <Composer
+    <Composer recipient="place"
       channelLabel="배포"
       directory={EMPTY}
       onSend={() => {}}
@@ -128,7 +128,7 @@ describe('초안 — 화면이 사라져도 글은 남는다', () => {
     fireEvent.changeText(screen.getByTestId('composer-input'), '배포 얘기');
 
     view.rerender(
-      <Composer
+      <Composer recipient="place"
         channelLabel="잡담"
         directory={EMPTY}
         draftKey={other}
@@ -139,7 +139,7 @@ describe('초안 — 화면이 사라져도 글은 남는다', () => {
 
     fireEvent.changeText(screen.getByTestId('composer-input'), '점심 뭐 먹죠');
     view.rerender(
-      <Composer
+      <Composer recipient="place"
         channelLabel="배포"
         directory={EMPTY}
         draftKey={CH}
@@ -260,7 +260,7 @@ describe('오프라인 — 지금은 못 보낸다고 말하고, 실제로 막�
     const view = composer({offline: true, onSend});
     fireEvent.changeText(screen.getByTestId('composer-input'), '보낼 글');
     view.rerender(
-      <Composer
+      <Composer recipient="place"
         channelLabel="배포"
         directory={EMPTY}
         offline={false}
@@ -409,3 +409,81 @@ describe('로그아웃 — 이 기기에서 내 흔적을 지운다 (H-2)', () =
     expect(readDraft(threadDraftKey('root-2'))).toBe('이것도 남는다');
   });
 });
+
+// =============================================================================
+// #1384 CRUN-3 — 이 클라도 컴포저의 문장을 **다시 갖지 않는다**.
+//
+// 오프라인 문장은 이미 코어에 있었는데(위 스위트), 플레이스홀더는 두 클라가
+// 각자 짓고 있었다: 이 파일 옆의 `conversation/Composer.tsx` 와 웹
+// `chat/Composer.tsx` 가 `` `${channelLabel}에 메시지 보내기` `` 를 나란히
+// 들고 있었고, 스레드 컴포저 둘은 `'답글 쓰기'` 를 나란히 들고 있었다. 값이
+// 같아서 안 보였을 뿐, 한쪽을 고치는 날 갈라진다.
+//
+// 웹 쪽 짝은 `clients/web/src/features/chat/composerCopy.test.ts` 이고, 문장의
+// 모양은 `packages/momo-core/src/features/chat/composerCopy.test.ts` 가 잰다.
+// 여기서 재는 것은 **이 클라의 소스에 그 문장이 손으로 적혀 있지 않은가**이고,
+// 그래서 전수다 — 새 화면이 컴포저를 하나 더 지어도 걸린다.
+// =============================================================================
+
+describe('컴포저 카피가 한 벌이다 (#1384)', () => {
+  const withoutProse = (source: string): string =>
+    source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+
+  const phoneSources = (): string[] => {
+    const out: string[] = [];
+    const walk = (dir: string): void => {
+      for (const entry of fs.readdirSync(dir, {withFileTypes: true})) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) walk(full);
+        else if (/\.tsx?$/.test(entry.name)) out.push(full);
+      }
+    };
+    walk(path.resolve(__dirname, '../src'));
+    return out;
+  };
+
+  it('src 전수에 컴포저 문장을 손으로 적은 자리가 없다', () => {
+    const offenders: string[] = [];
+    for (const file of phoneSources()) {
+      const code = withoutProse(fs.readFileSync(file, 'utf8'));
+      for (const [index, text] of code.split('\n').entries()) {
+        const hit =
+          text.includes('에 메시지 보내기') ||
+          text.includes('에 보낼 메시지') ||
+          text.includes("'답글 쓰기'") ||
+          text.includes('"답글 쓰기"');
+        if (hit) {
+          offenders.push(
+            `${path.relative(path.resolve(__dirname, '../src'), file)}:${index + 1}`,
+          );
+        }
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it('컴포저가 코어의 이름을 든다', () => {
+    const code = withoutProse(
+      fs.readFileSync(
+        path.resolve(__dirname, '../src/features/conversation/Composer.tsx'),
+        'utf8',
+      ),
+    );
+    expect(code).toContain('composerPlaceholder(channelLabel, recipient)');
+    expect(code).toContain('composerFieldLabel(channelLabel, recipient)');
+  });
+
+  it('조사를 정하는 사실은 화면이 넘긴다 — 컴포저가 추측하지 않는다', () => {
+    // DM 의 title 은 방 이름이 아니라 상대의 displayName 이라, 앞 판은
+    // 「hermes에 메시지 보내기」라고 적고 있었다. `recipient` 에 기본값이 없는
+    // 것이 이 단정의 전제다: 화면이 안 넘기면 타입이 붉다.
+    const screen = withoutProse(
+      fs.readFileSync(
+        path.resolve(__dirname, '../src/screens/ConversationScreen.tsx'),
+        'utf8',
+      ),
+    );
+    expect(screen).toContain("recipient={peer ? 'person' : 'place'}");
+  });
+});
+

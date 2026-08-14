@@ -54,17 +54,17 @@ describe("컴포저 오프라인 문장", () => {
 // =============================================================================
 
 /**
- * 문자열이 차지할 폭의 어림(px), 본문 14px 기준.
+ * 문자열이 차지할 폭의 어림(px), 글자 크기는 호출자가 준다.
  *
  * 정밀한 자가 아니다 — 정밀한 자는 브라우저에만 있고 코어는 브라우저를 모른다
  * (`purity.mjs`). Chromium 실측과 대조하면 이 어림은 **10% 안쪽으로 크게** 나온다
- * (채택된 문장: 어림 219px · 실측 198px). 크게 나오는 쪽이라 이 자는 안전한
+ * (채택된 문장: 어림 205px · 실측 189.3px). 크게 나오는 쪽이라 이 자는 안전한
  * 방향으로 틀린다: 여기서 초록이면 화면에서도 들어간다.
  *
  * 지키는 것은 「이 문장이 정확히 몇 px인가」가 아니라 **「누군가 이 광고를 한
  * 마디 더 늘리면 상자를 넘는다」**이다.
  */
-function estimateWidthPx(text: string, fontPx = 14): number {
+function estimateWidthPx(text: string, fontPx: number): number {
   let em = 0;
   for (const char of text) {
     if (char === " ") em += 0.28;
@@ -75,55 +75,90 @@ function estimateWidthPx(text: string, fontPx = 14): number {
 }
 
 /**
- * 390px 뷰포트에서 입력 상자에 남는 폭. 컴포저 폼의 뺄셈이고, 산술은
- * `composerCopy.ts` 의 머리말에 그대로 적혀 있다.
+ * 이 문장이 들어가야 하는 상자 둘. **한 문장을 두 클라가 함께 쓰므로 예산도
+ * 둘이다** — 웹에만 맞추면 폰에서 잘린다(#1384 리뷰 M-2).
+ *
+ * 각 뺄셈은 `composerCopy.ts` 의 머리말에 산술 그대로 적혀 있다. 폰이 더 넓은데
+ * 더 빡빡한 이유는 글자가 두 단 크기 때문이다: 폰 본문 16pt 는 iOS 입력창이
+ * 줌을 멈추는 크기이고(`clients/mobile/src/design/tokens.ts`) 웹 본문은 14px 다.
  */
-const NARROW_INPUT_PX = 236;
+const BUDGETS = [
+  { surface: "웹", fontPx: 14, boxPx: 236 },
+  { surface: "폰", fontPx: 16, boxPx: 260 },
+] as const;
 
 describe("빈 컴포저의 광고 (#1384)", () => {
   it("어디로 가는지와 @가 무엇인지를 함께 말한다", () => {
-    const placeholder = composerPlaceholder("#일반");
+    const placeholder = composerPlaceholder("일반", "place");
     // 앞절 — 오배송을 막는 자리. 방 이름이 그대로 들어온다.
-    expect(placeholder.startsWith("#일반에 ")).toBe(true);
+    expect(placeholder.startsWith("일반에 ")).toBe(true);
     // 뒷절 — 이 앱의 발주 동사. 이것이 없던 것이 이 티켓의 진단이다.
     expect(placeholder).toContain(MENTION_AFFORDANCE);
     expect(MENTION_AFFORDANCE.startsWith("@")).toBe(true);
   });
 
-  it("한 줄짜리 입력 상자를 넘지 않는다 — 잘린 한국어는 결함이다", () => {
+  it("사람에게 보내는 방에서는 에가 아니라 에게다", () => {
+    // DM 의 label 은 방 이름이 아니라 상대의 displayName 이다
+    // (`workspace/directory.ts`). 앞 판은 그것을 모른 채 「에」를 붙였다.
+    expect(composerPlaceholder("hermes", "person")).toBe(
+      `hermes에게 메시지 보내기, ${MENTION_AFFORDANCE}`
+    );
+    expect(composerFieldLabel("hermes", "person")).toBe("hermes에게 보낼 메시지");
+    // 라틴 이름이든 한글 이름이든 같다 — 이 조사는 받침이 아니라 **누가 받는가**로
+    // 갈리고, 그래서 `lib/koreanParticle` 의 다른 짝들과 달리 낱말이 못 정한다.
+    expect(composerPlaceholder("김인턴", "person")).toContain("김인턴에게 ");
+    // 로스터가 아직 안 온 DM 은 label 이 사람 이름이 아니다. 그때는 에가 맞다.
+    expect(composerPlaceholder("다이렉트 메시지", "place")).toContain(
+      "다이렉트 메시지에 "
+    );
+  });
+
+  it("두 클라의 상자를 **둘 다** 넘지 않는다 — 한 문장이 두 화면에 선다", () => {
     // textarea 는 rows=1 이고 빈 값의 scrollHeight 는 플레이스홀더를 세지 않는다.
     // 즉 넘친 둘째 줄은 접히는 것이 아니라 **잘린다**(디자인 시스템 §5.3 7위:
-    // 의존형태소 절단, 기계가 안 잡는 축).
-    expect(estimateWidthPx(composerPlaceholder("#일반"))).toBeLessThan(
-      NARROW_INPUT_PX
-    );
-    // 그리고 이것이 왜 「@로 에이전트 부르기」가 아닌지의 근거다: 목적어를 실으면
-    // 같은 방 이름으로도 넘친다. 이 줄이 붉어지면 그때는 광고를 힌트 줄로 옮기는
-    // 결정이지, 플레이스홀더를 늘리는 결정이 아니다.
-    expect(
-      estimateWidthPx("#일반에 메시지 보내기, @로 에이전트 부르기")
-    ).toBeGreaterThan(NARROW_INPUT_PX);
+    // 의존형태소 절단, 기계가 안 잡는 축). 폰의 multiline TextInput 도 같다.
+    for (const { surface, fontPx, boxPx } of BUDGETS) {
+      const adopted = composerPlaceholder("일반", "place");
+      expect(
+        estimateWidthPx(adopted, fontPx),
+        `${surface}: 채택된 문장이 상자를 넘는다`
+      ).toBeLessThan(boxPx);
+      // 그리고 이것이 왜 「@로 에이전트 부르기」가 아닌지의 근거다: 목적어를
+      // 실으면 **두 화면 다** 넘친다(실측 웹 241.5 · 폰 275.0). 이 줄이 붉어지면
+      // 그때는 광고를 힌트 줄로 옮기는 결정이지, 플레이스홀더를 늘리는 결정이
+      // 아니다.
+      expect(
+        estimateWidthPx("일반에 메시지 보내기, @로 에이전트 부르기", fontPx),
+        `${surface}: 목적어를 실은 안이 이제 들어간다면 그 결정을 다시 해야 한다`
+      ).toBeGreaterThan(boxPx);
+    }
   });
 
   it("필드 이름은 사용법을 읽어 주지 않는다", () => {
-    const label = composerFieldLabel("#일반");
-    expect(label).toBe("#일반에 보낼 메시지");
+    const label = composerFieldLabel("일반", "place");
+    expect(label).toBe("일반에 보낼 메시지");
     // 이름은 「이 상자가 무엇인가」다. 여기에 @ 광고까지 넣으면 화면을 보지 않는
     // 사람에게 필드 이름이 문장 둘로 읽힌다.
     expect(label).not.toContain("@");
   });
 
-  it("스레드 컴포저는 없는 어포던스를 광고하지 않는다", () => {
-    // 스레드 입력창에는 멘션 자동완성이 없다(웹 `timeline/ThreadComposer.tsx` ·
-    // 폰 `conversation/ThreadPanel.tsx` 둘 다). 못 하는 말보다 나쁜 것이 안 되는
-    // 것을 된다고 하는 말이다.
+  it("스레드 문장은 두 클라가 **함께** 하는 일만 말한다", () => {
+    // 앞 판의 이 자리는 「스레드에는 멘션이 없다(두 클라 모두)」라고 적고 있었고
+    // 그것은 거짓이었다(#1384 리뷰 H-1): 폰 `conversation/ThreadPanel.tsx` 는
+    // 채널 컴포저를 그대로 세우고 `directory` 를 넘기므로 폰 스레드에서 @ 는
+    // 목록을 연다. 웹 `timeline/ThreadComposer.tsx` 에는 그 길이 없다.
+    //
+    // 그 비대칭은 동작이라 이 티켓이 고치지 않는다(패리티 goal 의 자리). 대신
+    // 공유 문장은 **웹도 하는 일**까지만 광고한다 — 절반의 화면에서 거짓이 되는
+    // 문장을 두 클라가 함께 렌더할 수는 없다.
     expect(THREAD_COMPOSER_PLACEHOLDER).not.toContain("@");
   });
 
   it("em-dash 를 쓰지 않는다", () => {
     for (const copy of [
-      composerPlaceholder("#일반"),
-      composerFieldLabel("#일반"),
+      composerPlaceholder("일반", "place"),
+      composerPlaceholder("hermes", "person"),
+      composerFieldLabel("일반", "place"),
       THREAD_COMPOSER_PLACEHOLDER,
       MENTION_AFFORDANCE,
     ]) {

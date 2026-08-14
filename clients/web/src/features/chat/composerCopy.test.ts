@@ -79,11 +79,12 @@ function codeOf(relativePath: string): string {
 
 describe("컴포저 카피가 한 벌이다 (#1384)", () => {
   it("플레이스홀더와 필드 이름을 손으로 짓지 않는다", () => {
-    // 앞 판: placeholder={`${channelLabel}에 메시지 보내기`}
+    // 앞 판: placeholder={`${channelLabel}에 메시지 보내기`} — 조사까지 손으로
+    // 적혀 있었고, 그래서 DM 에서 「hermes에 메시지 보내기」가 나갔다.
     expect(CODE_ONLY).not.toContain("에 메시지 보내기");
     expect(CODE_ONLY).not.toContain("에 보낼 메시지");
-    expect(CODE_ONLY).toContain("composerPlaceholder(channelLabel)");
-    expect(CODE_ONLY).toContain("composerFieldLabel(channelLabel)");
+    expect(CODE_ONLY).toContain("composerPlaceholder(channelLabel, recipient)");
+    expect(CODE_ONLY).toContain("composerFieldLabel(channelLabel, recipient)");
   });
 
   it("키 힌트의 문장도 이름으로만 든다", () => {
@@ -103,6 +104,13 @@ describe("컴포저 카피가 한 벌이다 (#1384)", () => {
     // 그리고 크기가 같은 한 단이다. 11px(`text-timestamp`)은 묘비의 크기다.
     expect(editor).toContain("wide-only text-meta text-ink-muted");
     expect(editor).not.toContain("text-timestamp");
+  });
+
+  it("조사를 정하는 사실은 셸이 넘긴다 — 컴포저가 추측하지 않는다", () => {
+    // `recipient` 에 기본값이 없는 것이 이 단정의 전제다: 셸이 안 넘기면
+    // 타입이 붉고, 넘기면 그 판정은 `peer` 하나에서 나온다.
+    const shell = codeOf("./ChatShell.tsx");
+    expect(shell).toContain('recipient={peer ? "person" : "place"}');
   });
 
   it("스레드 컴포저의 문장도 폰과 한 벌이다", () => {
