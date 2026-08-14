@@ -2774,6 +2774,59 @@ pub struct ConfirmHostedAgentConnectionResponse {
     pub token_type: &'static str,
 }
 
+/// ADR-0162 증보 1 / HAP-E7 — what the resource owner is asked to approve.
+///
+/// Every field is either server-derived or already validated against the
+/// registered client. `clientId` and `redirectUri` are shown because the human
+/// is being asked to trust them; neither is client-declared metadata, both come
+/// from the operator's allowlist.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HostedOauthConsentPreviewResponse {
+    pub client_id: String,
+    pub redirect_uri: String,
+    /// The canonical Agent Port resource this delegation is bound to.
+    pub resource: String,
+    pub issuer: String,
+    pub requested_scopes: Vec<String>,
+    pub expires_at_ms: i64,
+    /// The `pairing_pending` OAuth connections this request may be bound to.
+    pub candidates: Vec<HostedOauthCandidateDto>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HostedOauthCandidateDto {
+    pub connection_id: String,
+    pub agent_member_id: String,
+    pub agent_display_name: String,
+    pub created_at_ms: i64,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HostedOauthDecisionRequest {
+    /// The signed, server-minted authorization request envelope.
+    pub request: String,
+    pub connection_id: Uuid,
+    #[serde(default)]
+    pub approved_scopes: Vec<String>,
+    #[serde(default)]
+    pub approved_channel_ids: Vec<Uuid>,
+}
+
+/// The only thing a decision hands back is where the browser goes next.
+///
+/// It carries `code`/`state`/`iss` (approve) or `error`/`state`/`iss` (deny) and
+/// nothing else — no access token, no refresh token, no PKCE verifier, no
+/// connection secret.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HostedOauthDecisionResponse {
+    pub redirect_to: String,
+    pub connection_id: String,
+}
+
 /// Generic agent bearer metadata. There is deliberately no raw token, digest,
 /// or envelope prefix in this reusable projection.
 #[derive(Debug, Serialize)]

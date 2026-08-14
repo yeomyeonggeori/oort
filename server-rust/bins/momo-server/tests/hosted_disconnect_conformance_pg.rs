@@ -162,6 +162,7 @@ async fn start_server(pool: PgPool) -> String {
         // the default is still closed. A fixture that needs delivery opens it
         // by construction, exactly as an operator now opens it by env var.
         hosted_delivery_enabled: true,
+        oauth: Default::default(),
     });
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await

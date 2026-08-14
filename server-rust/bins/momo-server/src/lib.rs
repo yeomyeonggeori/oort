@@ -901,6 +901,23 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/event-subscriptions",
             get(routes::event_subscriptions::list).post(routes::event_subscriptions::create),
         )
+        // ADR-0162 증보 1 / HAP-E7 — the resource owner's half of an OAuth
+        // authorization request. Inside the bearer middleware because the only
+        // caller is a logged-in human owner/admin: the browser redirect that
+        // starts the flow is unauthenticated and lives on the public router
+        // below, and it writes nothing.
+        .route(
+            "/v1/workspaces/{ws}/oauth/authorization-requests/preview",
+            get(routes::agent_port_oauth::preview),
+        )
+        .route(
+            "/v1/workspaces/{ws}/oauth/authorization-requests/approve",
+            post(routes::agent_port_oauth::approve),
+        )
+        .route(
+            "/v1/workspaces/{ws}/oauth/authorization-requests/deny",
+            post(routes::agent_port_oauth::deny),
+        )
         .route(
             "/v1/workspaces/{ws}/event-subscriptions/{subscription}",
             put(routes::event_subscriptions::update).delete(routes::event_subscriptions::delete),
@@ -929,6 +946,34 @@ pub fn build_app(state: AppState) -> Router {
         // this route accepts only agent bearers, emits MCP-specific challenges,
         // and never falls through to human JWT authentication.
         .route("/v1/mcp/agent-port", post(routes::agent_port::post))
+        // ADR-0162 증보 1 / HAP-E7 — the OAuth 2.1 authorization server.
+        //
+        // Public for the same structural reason `/v1/join` is: the callers hold
+        // no oort credential. A browser arriving at `/authorize` has a provider
+        // redirect and nothing else, and a client at `/token` presents an
+        // authorization code or a refresh credential — neither is a bearer this
+        // middleware could resolve, and putting them behind it would make the
+        // flow permanently unstartable.
+        //
+        // Every one of these five answers 404 while
+        // `AgentPortOauthConfig::is_enabled` is false, which is the default and
+        // stays the default until #1369's consent surface lands. The routes are
+        // mounted unconditionally so the router shape does not itself leak the
+        // operator's configuration.
+        .route(
+            "/.well-known/oauth-protected-resource/v1/mcp/agent-port",
+            get(routes::agent_port_oauth::protected_resource),
+        )
+        .route(
+            "/.well-known/oauth-authorization-server",
+            get(routes::agent_port_oauth::authorization_server),
+        )
+        .route(
+            "/v1/oauth/authorize",
+            get(routes::agent_port_oauth::authorize),
+        )
+        .route("/v1/oauth/token", post(routes::agent_port_oauth::token))
+        .route("/v1/oauth/revoke", post(routes::agent_port_oauth::revoke))
         .route(
             "/v1/workspaces/{ws}/work-hosts/{host}/heartbeat",
             post(routes::work_hosts::heartbeat),

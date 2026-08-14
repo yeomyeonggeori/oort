@@ -247,6 +247,209 @@ pub struct AgentPortConfig {
     /// Enabling hosted delivery in production is now an operator's explicit act,
     /// backed by the disconnect lifecycle that makes it revocable.
     pub hosted_delivery_enabled: bool,
+    /// ADR-0162 증보 1 / HAP-E7 — the MCP OAuth 2.1 authorization server.
+    ///
+    /// **Disabled by default, and disabled is not "degraded".** With this off
+    /// the server publishes no RFC 9728 protected-resource metadata, no RFC
+    /// 8414 authorization-server metadata, and mounts no `/v1/oauth/*` route:
+    /// the well-knowns and the endpoints are 404, exactly as they were before
+    /// HAP-E7 existed. An OAuth access credential presented at the Agent Port
+    /// is refused with the same `invalid_token` challenge as any other
+    /// unrecognised string, so the flag cannot be probed.
+    ///
+    /// It stays off until #1369's consent surface lands and the runtime proof
+    /// closes, because advertising an authorization server whose resource owner
+    /// cannot actually see what they are approving is worse than advertising
+    /// none.
+    pub oauth: AgentPortOauthConfig,
+}
+
+/// One pre-registered public OAuth client.
+///
+/// First wave accepts **only** clients an operator wrote into the environment.
+/// There is no Dynamic Client Registration and no URL-form Client ID Metadata
+/// Document, so this server never fetches a URL a client named — the SSRF
+/// surface those two features open needs its own ADR and threat model first.
+///
+/// There is no secret here and there is no field for one: every registered
+/// client is public and proves possession with PKCE alone.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RegisteredOauthClient {
+    pub client_id: String,
+    /// Exact redirect URIs. Comparison is byte-exact at request time.
+    pub redirect_uris: Vec<String>,
+}
+
+/// The authorization server's identity and client allowlist.
+///
+/// `issuer` is operator configuration and nothing else. `Host`, `Forwarded` and
+/// `X-Forwarded-*` are never consulted, so a proxy or a caller cannot move the
+/// issuer or the resource — which is the whole point of RFC 9207 issuer
+/// identification and of RFC 9728's `authorization_servers` naming one exact
+/// value.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AgentPortOauthConfig {
+    enabled: bool,
+    issuer: Option<String>,
+    /// Absolute https URL of the resource owner's consent screen (#1369).
+    consent_url: Option<String>,
+    clients: Vec<RegisteredOauthClient>,
+}
+
+impl AgentPortOauthConfig {
+    /// The one predicate every OAuth surface asks. False means 404, not 503:
+    /// a disabled authorization server does not exist, it is not merely busy.
+    pub fn is_enabled(&self) -> bool {
+        self.enabled
+            && self.issuer.is_some()
+            && self.consent_url.is_some()
+            && !self.clients.is_empty()
+    }
+
+    pub fn issuer(&self) -> Option<&str> {
+        self.is_enabled()
+            .then_some(self.issuer.as_deref())
+            .flatten()
+    }
+
+    pub fn consent_url(&self) -> Option<&str> {
+        self.is_enabled()
+            .then_some(self.consent_url.as_deref())
+            .flatten()
+    }
+
+    /// The canonical Agent Port resource, derived from the issuer so the two can
+    /// never disagree and neither can be moved by a request header.
+    pub fn resource(&self) -> Option<String> {
+        self.issuer()
+            .map(|issuer| format!("{issuer}{}", momo_auth::HOSTED_AGENT_PORT_AUDIENCE))
+    }
+
+    pub fn endpoint(&self, path: &str) -> Option<String> {
+        self.issuer().map(|issuer| format!("{issuer}{path}"))
+    }
+
+    /// The registered client, or `None`. Unknown ids are indistinguishable from
+    /// a disabled server.
+    pub fn client(&self, client_id: &str) -> Option<&RegisteredOauthClient> {
+        self.is_enabled()
+            .then(|| {
+                self.clients
+                    .iter()
+                    .find(|client| client.client_id == client_id)
+            })
+            .flatten()
+    }
+
+    /// Construct directly (fixtures and verifiers), bypassing the environment.
+    pub fn for_tests(
+        issuer: &str,
+        consent_url: &str,
+        clients: Vec<RegisteredOauthClient>,
+    ) -> AgentPortOauthConfig {
+        AgentPortOauthConfig {
+            enabled: true,
+            issuer: Some(issuer.to_string()),
+            consent_url: Some(consent_url.to_string()),
+            clients,
+        }
+    }
+
+    fn from_env() -> Result<AgentPortOauthConfig, ConfigError> {
+        // Exactly one spelling opens it, the same discipline the hosted
+        // delivery gate uses: a capability a typo can enable is a capability
+        // nobody decided to enable.
+        let enabled =
+            env("MOMO_AGENT_PORT_OAUTH_ENABLED").is_some_and(|value| value.trim() == "true");
+        if !enabled {
+            return Ok(AgentPortOauthConfig::default());
+        }
+        let issuer = env("MOMO_AGENT_PORT_OAUTH_ISSUER")
+            .as_deref()
+            .and_then(normalized_origin)
+            .filter(|origin| origin.starts_with("https://"))
+            .ok_or(ConfigError::InvalidSecurity(
+                "MOMO_AGENT_PORT_OAUTH_ISSUER must be one exact https origin",
+            ))?;
+        let consent_url = env("MOMO_AGENT_PORT_OAUTH_CONSENT_URL")
+            .map(|value| value.trim().to_string())
+            .filter(|value| value.starts_with("https://") && !value.contains(['#', ' ']))
+            .ok_or(ConfigError::InvalidSecurity(
+                "MOMO_AGENT_PORT_OAUTH_CONSENT_URL must be one absolute https URL",
+            ))?;
+        let clients = parse_registered_oauth_clients(
+            env("MOMO_AGENT_PORT_OAUTH_CLIENTS")
+                .as_deref()
+                .unwrap_or(""),
+        )
+        .ok_or(ConfigError::InvalidSecurity(
+            "MOMO_AGENT_PORT_OAUTH_CLIENTS must be id=https://redirect[|https://redirect] entries",
+        ))?;
+        if clients.is_empty() {
+            return Err(ConfigError::InvalidSecurity(
+                "MOMO_AGENT_PORT_OAUTH_CLIENTS must register at least one public client",
+            ));
+        }
+        Ok(AgentPortOauthConfig {
+            enabled,
+            issuer: Some(issuer),
+            consent_url: Some(consent_url),
+            clients,
+        })
+    }
+}
+
+/// Parse `id=https://a/cb|https://b/cb;other=https://c/cb`.
+///
+/// Every rejection is total: one malformed entry refuses the whole variable
+/// rather than registering the entries that happened to parse, because a client
+/// allowlist that silently shrinks is an outage and one that silently keeps a
+/// half-parsed redirect is an open redirect.
+fn parse_registered_oauth_clients(raw: &str) -> Option<Vec<RegisteredOauthClient>> {
+    let mut clients: Vec<RegisteredOauthClient> = Vec::new();
+    for entry in raw
+        .split(';')
+        .map(str::trim)
+        .filter(|entry| !entry.is_empty())
+    {
+        let (client_id, redirects) = entry.split_once('=')?;
+        let client_id = client_id.trim();
+        if client_id.is_empty()
+            || client_id.len() > 200
+            || !client_id
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || b"-._~:".contains(&byte))
+            || clients.iter().any(|client| client.client_id == client_id)
+        {
+            return None;
+        }
+        let mut redirect_uris: Vec<String> = Vec::new();
+        for redirect in redirects.split('|').map(str::trim) {
+            // Loopback http is the one non-https redirect OAuth 2.1 keeps, for
+            // native clients that cannot hold a certificate. Everything else
+            // must be https, and no redirect may carry a fragment.
+            let loopback =
+                redirect.starts_with("http://127.0.0.1:") || redirect.starts_with("http://[::1]:");
+            if redirect.is_empty()
+                || redirect.len() > 2000
+                || !(redirect.starts_with("https://") || loopback)
+                || redirect.contains('#')
+                || redirect.chars().any(char::is_whitespace)
+                || redirect_uris.iter().any(|existing| existing == redirect)
+            {
+                return None;
+            }
+            redirect_uris.push(redirect.to_string());
+        }
+        if redirect_uris.is_empty() {
+            return None;
+        }
+        clients.push(RegisteredOauthClient {
+            client_id: client_id.to_string(),
+            redirect_uris,
+        });
+    }
+    Some(clients)
 }
 
 impl Default for AgentPortConfig {
@@ -258,6 +461,7 @@ impl Default for AgentPortConfig {
             per_agent_limit: 480,
             per_ip_limit: 1200,
             hosted_delivery_enabled: false,
+            oauth: AgentPortOauthConfig::default(),
         }
     }
 }
@@ -310,6 +514,7 @@ impl AgentPortConfig {
             )?,
             per_ip_limit: env_number("MOMO_AGENT_PORT_RATE_LIMIT_PER_IP", defaults.per_ip_limit)?,
             hosted_delivery_enabled: hosted_delivery_from_env(),
+            oauth: AgentPortOauthConfig::from_env()?,
         })
     }
 

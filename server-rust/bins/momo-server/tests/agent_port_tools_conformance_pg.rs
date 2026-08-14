@@ -152,6 +152,7 @@ async fn start_server_with_gateway(
         // The production gate is closed by default; the fixture is the only
         // thing allowed to open it before HAP-E6 (#1367).
         hosted_delivery_enabled,
+        oauth: Default::default(),
     });
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
