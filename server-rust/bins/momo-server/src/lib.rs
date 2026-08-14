@@ -790,6 +790,23 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/hosted-agent-connections/{connection}/confirm",
             post(routes::hosted_agent_connections::confirm),
         )
+        // HAP-E6 — the disconnect lifecycle. `disconnect` is the atomic start
+        // (revoke + pause + suppress + `cleanup_pending` + manifest seed);
+        // `disconnect/complete` is the terminal transition, refused while any
+        // required artifact is unresolved; the acknowledge route is the manual
+        // half of cleanup confirmation.
+        .route(
+            "/v1/workspaces/{ws}/hosted-agent-connections/{connection}/disconnect",
+            post(routes::hosted_agent_connections::disconnect),
+        )
+        .route(
+            "/v1/workspaces/{ws}/hosted-agent-connections/{connection}/disconnect/complete",
+            post(routes::hosted_agent_connections::complete_disconnect),
+        )
+        .route(
+            "/v1/workspaces/{ws}/hosted-agent-connections/{connection}/cleanup-artifacts/{artifact}/acknowledge",
+            post(routes::hosted_agent_connections::acknowledge_cleanup_artifact),
+        )
         // B5.3a completes the pair: B5.2 could read a profile and respect
         // `paused`, but nothing could write either — an agent's behaviour was
         // fixed at birth and the only way to stop one was to remove it from

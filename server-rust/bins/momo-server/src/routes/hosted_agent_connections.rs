@@ -10,9 +10,15 @@ use momo_agent::{
     create_agent_identity_in_tx, set_agent_paused_in_tx, AgentCreation, NewAgentMember,
 };
 use momo_auth::{
-    active_workspace_role, confirm_hosted_connection_in_tx, create_hosted_connection_in_tx,
-    get_hosted_connection_in_tx, list_hosted_connections_in_tx, regenerate_pairing_in_tx,
-    validate_channel_ids, validate_hosted_scopes, HostedConnection, HostedMutation, Principal,
+    acknowledge_hosted_artifact_in_tx, active_workspace_role, artifact_audit_detail,
+    complete_hosted_disconnect_in_tx, confirm_hosted_connection_in_tx,
+    count_unresolved_required_artifacts_in_tx, create_hosted_connection_in_tx,
+    get_hosted_connection_in_tx, list_hosted_artifacts_in_tx, list_hosted_connections_in_tx,
+    regenerate_pairing_in_tx, start_hosted_disconnect_in_tx, validate_artifact_evidence,
+    validate_artifact_seeds, validate_artifact_status, validate_channel_ids,
+    validate_hosted_scopes, HostedArtifact, HostedArtifactAck, HostedArtifactAcknowledgement,
+    HostedArtifactSeed, HostedConnection, HostedDisconnectCompletion, HostedDisconnectStart,
+    HostedMutation, Principal,
 };
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_settings::{
@@ -21,9 +27,12 @@ use momo_settings::{
 use serde_json::json;
 
 use crate::dto::{
-    ConfirmHostedAgentConnectionRequest, ConfirmHostedAgentConnectionResponse,
-    CreateHostedAgentConnectionRequest, CreateHostedAgentConnectionResponse,
-    HostedAgentConnectionDto, HostedAgentConnectionListResponse, HostedAgentConnectionResponse,
+    AcknowledgeHostedCleanupArtifactRequest, AcknowledgeHostedCleanupArtifactResponse,
+    CompleteHostedAgentDisconnectResponse, ConfirmHostedAgentConnectionRequest,
+    ConfirmHostedAgentConnectionResponse, CreateHostedAgentConnectionRequest,
+    CreateHostedAgentConnectionResponse, DisconnectHostedAgentConnectionRequest,
+    DisconnectHostedAgentConnectionResponse, HostedAgentConnectionDto,
+    HostedAgentConnectionListResponse, HostedAgentConnectionResponse, HostedCleanupArtifactDto,
 };
 use crate::error::ApiError;
 use crate::routes::shared::{
@@ -48,6 +57,28 @@ fn dto(connection: HostedConnection) -> HostedAgentConnectionDto {
         created_at_ms: connection.created_at_ms,
         updated_at_ms: connection.updated_at_ms,
     }
+}
+
+fn artifact_dto(artifact: HostedArtifact) -> HostedCleanupArtifactDto {
+    HostedCleanupArtifactDto {
+        id: artifact.id.to_string(),
+        kind: artifact.kind,
+        external_ref: artifact.external_ref,
+        expected_action: artifact.expected_action,
+        current_status: artifact.current_status,
+        disposition: artifact.disposition,
+        resolved: artifact.resolved,
+        required: artifact.required,
+        source: artifact.source,
+        acknowledged_by: artifact.acknowledged_by.map(|id| id.to_string()),
+        acknowledged_at_ms: artifact.acknowledged_at_ms,
+        evidence: artifact.evidence,
+        updated_at_ms: artifact.updated_at_ms,
+    }
+}
+
+fn artifact_dtos(artifacts: Vec<HostedArtifact>) -> Vec<HostedCleanupArtifactDto> {
+    artifacts.into_iter().map(artifact_dto).collect()
 }
 
 fn no_store<T: serde::Serialize>(status: StatusCode, body: T) -> Response {
@@ -205,7 +236,7 @@ pub async fn get(
     let workspace_id = workspace_scope(&workspace, &principal)?;
     let connection_id = path_uuid(&connection, "invalid hosted connection id")?;
     let actor = principal.member_id;
-    let row = settle_db(
+    let (row, artifacts) = settle_db(
         "hosted_agent_connections.get",
         agent_tenant_tx(&state.pool, workspace_id, move |conn| {
             Box::pin(async move {
@@ -217,13 +248,332 @@ pub async fn get(
                 else {
                     return Ok(Err(ApiError::not_found("hosted connection not found")));
                 };
-                Ok(Ok(row))
+                let artifacts =
+                    list_hosted_artifacts_in_tx(conn, workspace_id, connection_id).await?;
+                Ok(Ok((row, artifacts)))
             })
         })
         .await,
     )?;
     Ok(Json(HostedAgentConnectionResponse {
         connection: dto(row),
+        cleanup_artifacts: artifact_dtos(artifacts),
+    }))
+}
+
+/// `POST /v1/workspaces/{ws}/hosted-agent-connections/{connection}/disconnect`.
+///
+/// One transaction, five effects (ADR-0162 HAP-E6): the connection's live
+/// bearer is revoked, the connection becomes `cleanup_pending`, the dedicated
+/// agent is paused, every open gateway job of that agent is suppressed with its
+/// lease released, and the cleanup manifest is seeded. A failure anywhere rolls
+/// the whole set back, because a revoked credential beside a runnable agent —
+/// or a paused agent beside a live credential — is a worse state than either
+/// end of the transition.
+///
+/// A retry answers the same thing and writes nothing, including no second audit
+/// row.
+pub async fn disconnect(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path((workspace, connection)): Path<(String, String)>,
+    request: Option<Json<DisconnectHostedAgentConnectionRequest>>,
+) -> Result<Json<DisconnectHostedAgentConnectionResponse>, ApiError> {
+    require_human(&principal, "human workspace admin required")?;
+    let workspace_id = workspace_scope(&workspace, &principal)?;
+    let connection_id = path_uuid(&connection, "invalid hosted connection id")?;
+    let requested = request.map(|Json(body)| body).unwrap_or_default();
+    let seeds: Vec<HostedArtifactSeed> = requested
+        .artifacts
+        .into_iter()
+        .map(|item| HostedArtifactSeed {
+            kind: item.kind,
+            external_ref: item.external_ref,
+        })
+        .collect();
+    let seeds = validate_artifact_seeds(&seeds)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    let actor = principal.member_id;
+    let via_token_id = audit_via_token_id(&principal);
+
+    let (connection_row, artifacts, remaining, started_now) = settle_db(
+        "hosted_agent_connections.disconnect",
+        agent_tenant_tx(&state.pool, workspace_id, move |conn| {
+            Box::pin(async move {
+                if let Err(error) = require_admin(conn, workspace_id, actor).await? {
+                    return Ok(Err(error));
+                }
+                let started = match start_hosted_disconnect_in_tx(
+                    conn,
+                    workspace_id,
+                    connection_id,
+                    actor,
+                    &seeds,
+                )
+                .await?
+                {
+                    HostedDisconnectStart::Applied(started) => *started,
+                    HostedDisconnectStart::NotFound => {
+                        return Ok(Err(ApiError::not_found("hosted connection not found")))
+                    }
+                    HostedDisconnectStart::AlreadyTerminal(_) => {
+                        return Ok(Err(ApiError::new(
+                            StatusCode::CONFLICT,
+                            "hosted connection is already disconnected",
+                        )))
+                    }
+                    HostedDisconnectStart::WrongState => {
+                        return Ok(Err(ApiError::new(
+                            StatusCode::CONFLICT,
+                            "hosted connection cannot disconnect",
+                        )))
+                    }
+                };
+                if started.changed {
+                    // The same tenant transaction: work that was already handed
+                    // out stops here, not on the next poll.
+                    let suppression = momo_outbox::suppress_hosted_agent_jobs_in_tx(
+                        conn,
+                        workspace_id,
+                        started.connection.agent_member_id,
+                    )
+                    .await
+                    .map_err(momo_db::DbError::from)?;
+                    write_audit(
+                        conn,
+                        &AuditEntry::new(
+                            workspace_id,
+                            "hosted_agent.connection.disconnect_started",
+                        )
+                        .by(actor)
+                        .about(started.connection.agent_member_id)
+                        .target("hosted_agent_connection", connection_id)
+                        .via_token(via_token_id)
+                        .with_schema(
+                            "momo.hosted_agent.connection.disconnect_started.v1",
+                            json!({
+                                "status": "cleanup_pending",
+                                "revoked_credential_count": started.revoked_credential_count,
+                                "suppressed_job_count": suppression.suppressed_jobs,
+                                "released_lease_count": suppression.released_leases,
+                                "artifact_count": started.artifacts.len(),
+                                "trigger": "operator"
+                            }),
+                        ),
+                    )
+                    .await?;
+                }
+                let remaining =
+                    count_unresolved_required_artifacts_in_tx(conn, workspace_id, connection_id)
+                        .await?;
+                Ok(Ok((
+                    started.connection,
+                    started.artifacts,
+                    remaining,
+                    started.changed,
+                )))
+            })
+        })
+        .await,
+    )?;
+
+    Ok(Json(DisconnectHostedAgentConnectionResponse {
+        connection: dto(connection_row),
+        cleanup_artifacts: artifact_dtos(artifacts),
+        remaining_required: remaining,
+        started_now,
+    }))
+}
+
+/// `POST /v1/workspaces/{ws}/hosted-agent-connections/{connection}/cleanup-artifacts/{artifact}/acknowledge`.
+///
+/// The manual half of cleanup confirmation. `source` is never read from the
+/// request: this route writes `manual` and nothing else, so a client cannot
+/// promote its own claim to the `server_verified` provenance the disconnect
+/// reserved for the credential it revoked itself.
+pub async fn acknowledge_cleanup_artifact(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path((workspace, connection, artifact)): Path<(String, String, String)>,
+    Json(request): Json<AcknowledgeHostedCleanupArtifactRequest>,
+) -> Result<Json<AcknowledgeHostedCleanupArtifactResponse>, ApiError> {
+    require_human(&principal, "human workspace admin required")?;
+    let workspace_id = workspace_scope(&workspace, &principal)?;
+    let connection_id = path_uuid(&connection, "invalid hosted connection id")?;
+    let artifact_id = path_uuid(&artifact, "invalid cleanup artifact id")?;
+    validate_artifact_status(&request.current_status)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    // A decision needs evidence; a bare observation does not, because an
+    // observation resolves nothing.
+    let evidence = match request.disposition.as_deref() {
+        Some(_) => Some(
+            validate_artifact_evidence(request.evidence.as_deref())
+                .map_err(|error| ApiError::bad_request(error.to_string()))?,
+        ),
+        None => None,
+    };
+    let disposition = request.disposition;
+    let current_status = request.current_status;
+    let actor = principal.member_id;
+    let via_token_id = audit_via_token_id(&principal);
+
+    let acknowledged = settle_db(
+        "hosted_agent_connections.acknowledge_cleanup_artifact",
+        agent_tenant_tx(&state.pool, workspace_id, move |conn| {
+            Box::pin(async move {
+                if let Err(error) = require_admin(conn, workspace_id, actor).await? {
+                    return Ok(Err(error));
+                }
+                let acknowledged = match acknowledge_hosted_artifact_in_tx(
+                    conn,
+                    workspace_id,
+                    connection_id,
+                    HostedArtifactAcknowledgement {
+                        artifact_id,
+                        actor_member_id: actor,
+                        current_status: &current_status,
+                        disposition: disposition.as_deref(),
+                        evidence: evidence.as_deref(),
+                    },
+                )
+                .await?
+                {
+                    HostedArtifactAck::Applied(acknowledged) => *acknowledged,
+                    HostedArtifactAck::NotFound => {
+                        return Ok(Err(ApiError::not_found("cleanup artifact not found")))
+                    }
+                    HostedArtifactAck::WrongState => {
+                        return Ok(Err(ApiError::new(
+                            StatusCode::CONFLICT,
+                            "hosted connection is not awaiting cleanup",
+                        )))
+                    }
+                    HostedArtifactAck::AlreadyResolved => {
+                        return Ok(Err(ApiError::new(
+                            StatusCode::CONFLICT,
+                            "cleanup artifact is already resolved",
+                        )))
+                    }
+                    HostedArtifactAck::IllegalDisposition => {
+                        return Ok(Err(ApiError::bad_request(
+                            "disposition is not legal for this artifact kind",
+                        )))
+                    }
+                };
+                if acknowledged.changed {
+                    write_audit(
+                        conn,
+                        &AuditEntry::new(
+                            workspace_id,
+                            "hosted_agent.connection.cleanup_artifact_acknowledged",
+                        )
+                        .by(actor)
+                        .target("hosted_agent_connection", connection_id)
+                        .via_token(via_token_id)
+                        .with_schema(
+                            "momo.hosted_agent.connection.cleanup_artifact_acknowledged.v1",
+                            artifact_audit_detail(&acknowledged.artifact),
+                        ),
+                    )
+                    .await?;
+                }
+                Ok(Ok(acknowledged))
+            })
+        })
+        .await,
+    )?;
+
+    Ok(Json(AcknowledgeHostedCleanupArtifactResponse {
+        artifact: artifact_dto(acknowledged.artifact),
+        remaining_required: acknowledged.remaining_required,
+        changed: acknowledged.changed,
+    }))
+}
+
+/// `POST /v1/workspaces/{ws}/hosted-agent-connections/{connection}/disconnect/complete`.
+///
+/// The terminal transition, refused while anything required is unresolved and
+/// performed at most once. A replay answers 200 with `disconnectedNow: false`
+/// and writes no audit row.
+pub async fn complete_disconnect(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path((workspace, connection)): Path<(String, String)>,
+) -> Result<Json<CompleteHostedAgentDisconnectResponse>, ApiError> {
+    require_human(&principal, "human workspace admin required")?;
+    let workspace_id = workspace_scope(&workspace, &principal)?;
+    let connection_id = path_uuid(&connection, "invalid hosted connection id")?;
+    let actor = principal.member_id;
+    let via_token_id = audit_via_token_id(&principal);
+
+    let (connection_row, artifacts, disconnected_now) = settle_db(
+        "hosted_agent_connections.complete_disconnect",
+        agent_tenant_tx(&state.pool, workspace_id, move |conn| {
+            Box::pin(async move {
+                if let Err(error) = require_admin(conn, workspace_id, actor).await? {
+                    return Ok(Err(error));
+                }
+                let (row, changed) =
+                    match complete_hosted_disconnect_in_tx(conn, workspace_id, connection_id)
+                        .await?
+                    {
+                        HostedDisconnectCompletion::Applied(row) => (*row, true),
+                        HostedDisconnectCompletion::AlreadyTerminal(row) => (*row, false),
+                        HostedDisconnectCompletion::NotFound => {
+                            return Ok(Err(ApiError::not_found("hosted connection not found")))
+                        }
+                        HostedDisconnectCompletion::WrongState => {
+                            return Ok(Err(ApiError::new(
+                                StatusCode::CONFLICT,
+                                "hosted connection is not awaiting cleanup",
+                            )))
+                        }
+                        HostedDisconnectCompletion::Unresolved { .. }
+                        // One answer for both, because they are the same
+                        // refusal from a caller's side — the manifest does not
+                        // say this connection is clean — and separating them
+                        // would tell an unauthorized prober whether a
+                        // disconnect had ever started.
+                        | HostedDisconnectCompletion::ManifestMissing => {
+                            return Ok(Err(ApiError::new(
+                                StatusCode::CONFLICT,
+                                "hosted connection has unresolved cleanup artifacts",
+                            )))
+                        }
+                        HostedDisconnectCompletion::LocalRevokeIncomplete => {
+                            return Ok(Err(ApiError::new(
+                                StatusCode::CONFLICT,
+                                "hosted connection local revoke is not confirmed",
+                            )))
+                        }
+                    };
+                if changed {
+                    write_audit(
+                        conn,
+                        &AuditEntry::new(workspace_id, "hosted_agent.connection.disconnected")
+                            .by(actor)
+                            .about(row.agent_member_id)
+                            .target("hosted_agent_connection", connection_id)
+                            .via_token(via_token_id)
+                            .with_schema(
+                                "momo.hosted_agent.connection.disconnected.v1",
+                                json!({"status": "disconnected", "history_preserved": true}),
+                            ),
+                    )
+                    .await?;
+                }
+                let artifacts =
+                    list_hosted_artifacts_in_tx(conn, workspace_id, connection_id).await?;
+                Ok(Ok((row, artifacts, changed)))
+            })
+        })
+        .await,
+    )?;
+
+    Ok(Json(CompleteHostedAgentDisconnectResponse {
+        connection: dto(connection_row),
+        cleanup_artifacts: artifact_dtos(artifacts),
+        disconnected_now,
     }))
 }
 

@@ -223,22 +223,29 @@ pub struct AgentPortConfig {
     pub per_agent_limit: u32,
     /// Requests per socket peer per window. 0 disables this axis.
     pub per_ip_limit: u32,
-    /// ADR-0162 HAP-E5 — **the per-agent selector's gate, unreachable in a
-    /// release build.**
+    /// ADR-0162 HAP-E5/E6 — **the per-agent selector's gate: closed by default,
+    /// and now an operator decision rather than a compile-time impossibility.**
     ///
     /// It governs the selector only: whether a mention of an agent with a live
     /// hosted connection is routed to the hosted gateway at all. The tool
     /// surface itself is gated by pairing, human confirmation, proof and
     /// scopes, none of which an operator can skip.
     ///
-    /// Opening the selector before HAP-E6 (#1367) lands its disconnect
-    /// lifecycle would hand work to a connection nobody can take back, so the
-    /// issue restricts it to this goal's own fixtures. A `false` default would
-    /// have left that a convention an env var could break; instead
-    /// [`hosted_delivery_from_env`] only reads the variable under
-    /// `debug_assertions`, so a **release binary answers `false` whatever the
-    /// environment says**. Tests and verifiers build in debug and may also
-    /// construct [`AgentPortConfig`] directly. #1367 owns removing the `cfg`.
+    /// HAP-E5 landed this field with [`hosted_delivery_from_env`] compiled only
+    /// under `debug_assertions`, so a release binary answered `false` whatever
+    /// the environment held. The reason was named in the issue: opening the
+    /// selector before a disconnect lifecycle existed would hand work to a
+    /// connection nobody could take back. **HAP-E6 (#1367) is that lifecycle**
+    /// — an atomic revoke + pause + suppression start, a per-kind cleanup
+    /// manifest, and a `disconnected` terminal that cannot be claimed while any
+    /// required artifact is unresolved — so the `cfg` is gone and the variable
+    /// is read in every build.
+    ///
+    /// What did **not** change: the default is `false`, only an exact `true`
+    /// opens it, and constructing [`AgentPortConfig`] directly still overrides
+    /// the environment (which is how every fixture and verifier sets it).
+    /// Enabling hosted delivery in production is now an operator's explicit act,
+    /// backed by the disconnect lifecycle that makes it revocable.
     pub hosted_delivery_enabled: bool,
 }
 
@@ -255,27 +262,22 @@ impl Default for AgentPortConfig {
     }
 }
 
-/// Read the hosted-delivery gate, but only where a release build cannot.
+/// Read the hosted-delivery gate. One implementation, every build (HAP-E6).
 ///
-/// Any spelling other than an exact `true` leaves it closed — a typo must not
-/// open a delivery path.
-#[cfg(debug_assertions)]
+/// Exactly one spelling opens it: the lowercase word `true`, surrounding
+/// whitespace trimmed because an env-file line ends in a newline and that is
+/// not a typo. `True`, `TRUE`, `1`, `yes`, `on` and an empty value all leave it
+/// closed, and so does an unset variable. The asymmetry is deliberate: a
+/// delivery path that a misspelling could open is a delivery path nobody
+/// decided to open.
 fn hosted_delivery_from_env() -> bool {
-    env("MOMO_HOSTED_DELIVERY_ENABLED")
-        .is_some_and(|value| value.trim().eq_ignore_ascii_case("true"))
+    hosted_delivery_gate_open(env("MOMO_HOSTED_DELIVERY_ENABLED").as_deref())
 }
 
-/// The release build's answer: **always closed**, whatever the environment
-/// holds. An operator who set the variable is told it did nothing rather than
-/// being left to believe hosted delivery is on.
-#[cfg(not(debug_assertions))]
-fn hosted_delivery_from_env() -> bool {
-    if env("MOMO_HOSTED_DELIVERY_ENABLED").is_some() {
-        tracing::warn!(
-            "MOMO_HOSTED_DELIVERY_ENABLED is ignored in a release build; hosted delivery opens with HAP-E6 (#1367)"
-        );
-    }
-    false
+/// The parse, separated from the environment so the table above is a test
+/// rather than a sentence.
+fn hosted_delivery_gate_open(value: Option<&str>) -> bool {
+    value.is_some_and(|value| value.trim() == "true")
 }
 
 impl AgentPortConfig {
@@ -1455,6 +1457,49 @@ mod tests {
         ] {
             assert!(!configured.origin_is_allowed(Some(value)), "{value}");
         }
+    }
+
+    /// HAP-E6 opened this gate to release builds. The default and the parse are
+    /// the two things that must not have moved with it.
+    #[test]
+    fn hosted_delivery_is_closed_by_default_and_opens_only_on_an_exact_true() {
+        assert!(
+            !AgentPortConfig::default().hosted_delivery_enabled,
+            "the shipped default is closed in every build"
+        );
+        assert!(hosted_delivery_gate_open(Some("true")));
+        assert!(
+            hosted_delivery_gate_open(Some(" true\n")),
+            "an env-file line ends in a newline; that is not a typo"
+        );
+        for closed in [
+            None,
+            Some(""),
+            Some("   "),
+            Some("True"),
+            Some("TRUE"),
+            Some("tru e"),
+            Some("1"),
+            Some("yes"),
+            Some("on"),
+            Some("false"),
+            Some("truex"),
+        ] {
+            assert!(!hosted_delivery_gate_open(closed), "{closed:?}");
+        }
+    }
+
+    /// Direct construction still wins over the environment — the override every
+    /// fixture and verifier uses to open the selector without touching a
+    /// machine-wide variable.
+    #[test]
+    fn a_directly_constructed_config_still_overrides_the_environment() {
+        let opened = AgentPortConfig {
+            hosted_delivery_enabled: true,
+            ..AgentPortConfig::default()
+        };
+        assert!(opened.hosted_delivery_enabled);
+        assert!(!AgentPortConfig::default().hosted_delivery_enabled);
     }
 
     #[test]

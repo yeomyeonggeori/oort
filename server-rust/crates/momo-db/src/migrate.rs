@@ -343,24 +343,26 @@ mod tests {
     /// below is what forces it to be noticed at all, and it is what caught this
     /// one: presence was authored as 066 against a tree where 065 was the head.
     ///
-    /// 069/070/071 are the ADR-0162 hosted Agent Port wave: the pairing ledger
-    /// (HAP-E3), the connection-scoped inbox projection (HAP-E4), and — now that
-    /// HAP-E5 opens the producer — the kind-inclusive outbox reference plus the
-    /// job↔run binding trigger that make a hosted inbox reference impossible to
-    /// aim at the wrong outbox kind or at another piece of work.
+    /// 069/070/071/072 are the ADR-0162 hosted Agent Port wave: the pairing
+    /// ledger (HAP-E3), the connection-scoped inbox projection (HAP-E4), the
+    /// kind-inclusive outbox reference plus the job↔run binding trigger that
+    /// make a hosted inbox reference impossible to aim at the wrong outbox kind
+    /// or at another piece of work (HAP-E5), and — closing the wave — HAP-E6's
+    /// cleanup manifest, where the disconnect's per-artifact rows and the
+    /// terminal-state trigger live.
     #[test]
-    fn discovers_contiguous_migrations_001_to_071() {
+    fn discovers_contiguous_migrations_001_to_072() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
         assert_eq!(
             migrations.len(),
-            71,
-            "expected 71 migrations under {}",
+            72,
+            "expected 72 migrations under {}",
             dir.display()
         );
         assert_eq!(migrations.first().unwrap().version, 1);
-        assert_eq!(migrations.last().unwrap().version, 71);
+        assert_eq!(migrations.last().unwrap().version, 72);
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
 
         for (i, migration) in migrations.iter().enumerate() {

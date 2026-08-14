@@ -798,12 +798,56 @@ async fn hosted_inbox_cursor_rls_idempotency_and_visibility() {
     .execute(&su)
     .await
     .unwrap();
+    // HAP-E6's migration 072 refuses a terminal state the lifecycle has not
+    // actually reached: it must arrive from `cleanup_pending`, carry a seeded
+    // manifest with nothing required left unresolved, hold zero live
+    // credentials on the connection (revoked just above) and find the dedicated
+    // agent paused. The fixture walks exactly that, then restores the pause —
+    // what it is building is the *reconnect*, and a reconnected agent is not a
+    // paused one.
     sqlx::query(
-        "UPDATE hosted_agent_connection SET status='disconnected',active_token_id=NULL \
+        "UPDATE agent_profile SET paused=true WHERE workspace_id=$1 AND agent_member_id=$2",
+    )
+    .bind(workspace)
+    .bind(agent)
+    .execute(&su)
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE hosted_agent_connection SET status='cleanup_pending',active_token_id=NULL \
           WHERE workspace_id=$1 AND id=$2",
     )
     .bind(workspace)
     .bind(connection)
+    .execute(&su)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO hosted_agent_connection_artifact \
+           (workspace_id, connection_id, agent_member_id, kind, expected_action, \
+            current_status, disposition, source, acknowledged_at) \
+         VALUES ($1,$2,$3,'secret','revoke','absent','revoked','server_verified',now())",
+    )
+    .bind(workspace)
+    .bind(connection)
+    .bind(agent)
+    .execute(&su)
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE hosted_agent_connection SET status='disconnected' \
+          WHERE workspace_id=$1 AND id=$2",
+    )
+    .bind(workspace)
+    .bind(connection)
+    .execute(&su)
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE agent_profile SET paused=false WHERE workspace_id=$1 AND agent_member_id=$2",
+    )
+    .bind(workspace)
+    .bind(agent)
     .execute(&su)
     .await
     .unwrap();

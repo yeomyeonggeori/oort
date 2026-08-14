@@ -2656,13 +2656,102 @@ pub struct CreateHostedAgentConnectionResponse {
 }
 
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct HostedAgentConnectionResponse {
     pub connection: HostedAgentConnectionDto,
+    /// HAP-E6 cleanup manifest. Empty until a disconnect starts, so an
+    /// unstarted connection answers with the same shape rather than a
+    /// different one.
+    pub cleanup_artifacts: Vec<HostedCleanupArtifactDto>,
 }
 
 #[derive(Debug, Serialize)]
 pub struct HostedAgentConnectionListResponse {
     pub connections: Vec<HostedAgentConnectionDto>,
+}
+
+/// One provider artifact a disconnect must account for (ADR-0162 HAP-E6).
+///
+/// There is deliberately no provider credential, chat content or file path in
+/// this projection: `externalRef` is a bounded operator-chosen label and
+/// `evidence` is the operator's own sentence about what they did.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HostedCleanupArtifactDto {
+    pub id: String,
+    pub kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub external_ref: Option<String>,
+    pub expected_action: String,
+    pub current_status: String,
+    pub disposition: String,
+    pub resolved: bool,
+    pub required: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub acknowledged_by: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub acknowledged_at_ms: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub evidence: Option<String>,
+    pub updated_at_ms: i64,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct HostedCleanupArtifactSeedDto {
+    pub kind: String,
+    pub external_ref: String,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DisconnectHostedAgentConnectionRequest {
+    /// Extra named provider items to track beside the seeded per-kind rows.
+    #[serde(default)]
+    pub artifacts: Vec<HostedCleanupArtifactSeedDto>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DisconnectHostedAgentConnectionResponse {
+    pub connection: HostedAgentConnectionDto,
+    pub cleanup_artifacts: Vec<HostedCleanupArtifactDto>,
+    pub remaining_required: i64,
+    /// False when the disconnect had already started: the same answer, and
+    /// nothing written a second time.
+    pub started_now: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AcknowledgeHostedCleanupArtifactRequest {
+    /// `unknown` | `present` | `inactive` | `absent`. An `inactive` routine is
+    /// an observation and never a cleanup.
+    pub current_status: String,
+    /// `delete` | `preserve` | `revoke`. Omitted records only the observation.
+    #[serde(default)]
+    pub disposition: Option<String>,
+    #[serde(default)]
+    pub evidence: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AcknowledgeHostedCleanupArtifactResponse {
+    pub artifact: HostedCleanupArtifactDto,
+    pub remaining_required: i64,
+    pub changed: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CompleteHostedAgentDisconnectResponse {
+    pub connection: HostedAgentConnectionDto,
+    pub cleanup_artifacts: Vec<HostedCleanupArtifactDto>,
+    /// False for an idempotent replay of a transition that already happened.
+    pub disconnected_now: bool,
 }
 
 #[derive(Debug, Deserialize)]

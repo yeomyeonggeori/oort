@@ -407,6 +407,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/workspaces/{workspaceId}/hosted-agent-connections/{connectionId}/disconnect": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start an atomic hosted-agent disconnect and seed its cleanup manifest.
+         * @description One tenant transaction: the connection's live bearer is revoked, the connection becomes `cleanup_pending`, the dedicated agent is paused, every open gateway job of that agent is settled with its lease released, and the per-kind cleanup manifest is seeded. A failure anywhere rolls the whole set back. The revoke is scoped to this connection, so a sibling hosted connection of the same workspace is never collateral. Retrying answers the same body with `startedNow: false` and writes nothing — including no second audit row. History (message, chat, audit, inbox) is preserved; nothing cascades.
+         */
+        post: operations["disconnectHostedAgentConnection"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{workspaceId}/hosted-agent-connections/{connectionId}/disconnect/complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Transition a cleanup-confirmed connection to the terminal disconnected state.
+         * @description Refused while any required artifact is unresolved, and refused unless this server can read back the local half it performed: zero live credentials on the connection and a paused dedicated agent. The transition happens at most once; a replay answers 200 with `disconnectedNow: false` and writes no audit row. The same two facts are asserted by a database trigger, so a writer that bypasses this operation still cannot mint a terminal state.
+         */
+        post: operations["completeHostedAgentDisconnect"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{workspaceId}/hosted-agent-connections/{connectionId}/cleanup-artifacts/{artifactId}/acknowledge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Record one cleanup observation, and optionally one resolution.
+         * @description The manual half of cleanup confirmation. Provenance is server-derived — this operation writes `manual` and nothing else, so a client cannot promote its own claim to `server_verified`. Omitting `disposition` records only `currentStatus`, which is how an inactive routine stays unresolved. A resolution requires evidence and is not re-decidable.
+         */
+        post: operations["acknowledgeHostedCleanupArtifact"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/workspaces/{workspaceId}/agents/{agentId}/credentials": {
         parameters: {
             query?: never;
@@ -2854,6 +2914,83 @@ export interface components {
         };
         HostedAgentConnectionResponse: {
             connection: components["schemas"]["HostedAgentConnection"];
+            /** @description HAP-E6 cleanup manifest. Empty until a disconnect starts, so an unstarted connection answers with the same shape rather than a different one. */
+            cleanupArtifacts: components["schemas"]["HostedCleanupArtifact"][];
+        };
+        /** @description One provider artifact a disconnect must account for (ADR-0162 HAP-E6). Rows are per kind, plus one per named item, and one row never resolves another: acknowledging `connector` leaves `local_plugin_files` unresolved, which is the #1344 measurement made structural. `resolved` is derived from `disposition` alone, so `currentStatus: inactive` is an observation and never a cleanup. Nothing here carries a provider credential, chat content or file path. */
+        HostedCleanupArtifact: {
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            kind: "bot" | "routine" | "plugin" | "connector" | "local_plugin_files" | "secret";
+            /** @description Bounded non-secret operator label for one named item. */
+            externalRef?: string;
+            /**
+             * @description Fixed by kind. `bot` is `decide` because deleting one deletes its chat history; `secret` is `revoke`; everything else is `remove`.
+             * @enum {string}
+             */
+            expectedAction: "remove" | "revoke" | "decide";
+            /** @enum {string} */
+            currentStatus: "unknown" | "present" | "inactive" | "absent";
+            /**
+             * @description `preserved` is legal for `bot` only and is a terminal answer — oort never deletes provider chat history on someone's behalf.
+             * @enum {string}
+             */
+            disposition: "pending" | "removed" | "preserved" | "revoked";
+            resolved: boolean;
+            required: boolean;
+            /**
+             * @description `server_verified` is reserved for what this server removed itself (the hosted bearer it revoked) and is never readable from a request body. Provider-owned artifacts are `manual` and carry an actor plus evidence.
+             * @enum {string}
+             */
+            source?: "server_verified" | "manual";
+            /** Format: uuid */
+            acknowledgedBy?: string;
+            /** Format: int64 */
+            acknowledgedAtMs?: number;
+            evidence?: string;
+            /** Format: int64 */
+            updatedAtMs: number;
+        };
+        DisconnectHostedAgentConnectionRequest: {
+            /** @description Extra named provider items to track beside the seeded per-kind rows. */
+            artifacts?: {
+                /** @enum {string} */
+                kind: "bot" | "routine" | "plugin" | "connector" | "local_plugin_files" | "secret";
+                externalRef: string;
+            }[];
+        };
+        DisconnectHostedAgentConnectionResponse: {
+            connection: components["schemas"]["HostedAgentConnection"];
+            cleanupArtifacts: components["schemas"]["HostedCleanupArtifact"][];
+            /** Format: int64 */
+            remainingRequired: number;
+            /** @description False when the disconnect had already started; nothing was written a second time. */
+            startedNow: boolean;
+        };
+        AcknowledgeHostedCleanupArtifactRequest: {
+            /** @enum {string} */
+            currentStatus: "unknown" | "present" | "inactive" | "absent";
+            /**
+             * @description Omit to record an observation only. `preserve` is legal for `bot` alone; `revoke` for `secret` alone; `delete` for every other kind.
+             * @enum {string}
+             */
+            disposition?: "delete" | "preserve" | "revoke";
+            /** @description Required whenever a disposition is supplied. */
+            evidence?: string;
+        };
+        AcknowledgeHostedCleanupArtifactResponse: {
+            artifact: components["schemas"]["HostedCleanupArtifact"];
+            /** Format: int64 */
+            remainingRequired: number;
+            /** @description False for a byte-identical repeat */
+            changed: boolean;
+        };
+        CompleteHostedAgentDisconnectResponse: {
+            connection: components["schemas"]["HostedAgentConnection"];
+            cleanupArtifacts: components["schemas"]["HostedCleanupArtifact"][];
+            /** @description False for an idempotent replay of a transition that already happened. */
+            disconnectedNow: boolean;
         };
         HostedAgentConnectionListResponse: {
             connections: components["schemas"]["HostedAgentConnection"][];
@@ -5917,6 +6054,189 @@ export interface operations {
                 };
             };
             /** @description Connection has not been detected or was already confirmed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    disconnectHostedAgentConnection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+                connectionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["DisconnectHostedAgentConnectionRequest"];
+            };
+        };
+        responses: {
+            /** @description Disconnect started (or already pending) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DisconnectHostedAgentConnectionResponse"];
+                };
+            };
+            /** @description Invalid artifact kind or reference */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Human workspace owner/admin required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Hosted connection not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Connection is already disconnected or was never credentialed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    completeHostedAgentDisconnect: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+                connectionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Connection is disconnected */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CompleteHostedAgentDisconnectResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Human workspace owner/admin required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Hosted connection not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not awaiting cleanup */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    acknowledgeHostedCleanupArtifact: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+                connectionId: string;
+                artifactId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AcknowledgeHostedCleanupArtifactRequest"];
+            };
+        };
+        responses: {
+            /** @description Acknowledgement recorded */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AcknowledgeHostedCleanupArtifactResponse"];
+                };
+            };
+            /** @description Invalid status */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Human workspace owner/admin required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Cleanup artifact not found on this connection */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Connection is not awaiting cleanup */
             409: {
                 headers: {
                     [name: string]: unknown;

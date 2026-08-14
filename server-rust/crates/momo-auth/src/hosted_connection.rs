@@ -83,6 +83,13 @@ pub enum HostedProof {
     Rejected,
     Allowed,
     Activated,
+    /// Rejected **and** the connection was forced into `cleanup_pending` by this
+    /// call (HAP-E6): the credential this connection itself names is no longer
+    /// live, so the first domain guard to notice reconciles the split state
+    /// instead of leaving an `active` connection with a dead bearer. The caller
+    /// suppresses open work and writes the reconciliation audit; admission is
+    /// refused either way.
+    Reconciled,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -698,6 +705,30 @@ pub async fn prove_hosted_binding_in_tx(
     .fetch_optional(&mut *conn)
     .await?;
     if token_live.is_none() || member_live.is_none() || membership_live.is_none() {
+        // HAP-E6. An `active` connection whose OWN `active_token_id` has stopped
+        // being live — an expiry, an operator emergency revoke, a suspended
+        // member, a lost membership — is a split state, not merely a refused
+        // call: the connection still claims capability nobody can exercise, and
+        // the dedicated agent is still unpaused. Reconciling it into
+        // `cleanup_pending` here is fail-closed and happens in this same
+        // transaction.
+        //
+        // The trigger is deliberately narrow. Everything above already proved
+        // the presented credential IS `active_token_id`, so a holder of a
+        // *superseded* credential cannot reach this branch and cannot use a dead
+        // token to force a live connection down.
+        //
+        // `detected` keeps HAP-E3's `expired` invalidation: nothing was ever
+        // confirmed into service there, so there is no cleanup to confirm.
+        if status == "active" {
+            crate::hosted_disconnect::reconcile_hosted_connection_in_tx(
+                conn,
+                identity.workspace_id,
+                connection_id,
+            )
+            .await?;
+            return Ok(HostedProof::Reconciled);
+        }
         invalidate_hosted_lifecycle_in_tx(conn, identity.workspace_id, identity.member_id).await?;
         return Ok(HostedProof::Rejected);
     }

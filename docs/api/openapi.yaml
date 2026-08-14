@@ -756,6 +756,87 @@ paths:
         "404": {description: Hosted connection not found, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
         "409": {description: Connection has not been detected or was already confirmed, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
 
+  /v1/workspaces/{workspaceId}/hosted-agent-connections/{connectionId}/disconnect:
+    post:
+      tags: [agents]
+      operationId: disconnectHostedAgentConnection
+      summary: Start an atomic hosted-agent disconnect and seed its cleanup manifest.
+      description: >
+        One tenant transaction: the connection's live bearer is revoked, the
+        connection becomes `cleanup_pending`, the dedicated agent is paused,
+        every open gateway job of that agent is settled with its lease released,
+        and the per-kind cleanup manifest is seeded. A failure anywhere rolls the
+        whole set back. The revoke is scoped to this connection, so a sibling
+        hosted connection of the same workspace is never collateral. Retrying
+        answers the same body with `startedNow: false` and writes nothing —
+        including no second audit row. History (message, chat, audit, inbox) is
+        preserved; nothing cascades.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - {name: connectionId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: false
+        content: {application/json: {schema: {$ref: "#/components/schemas/DisconnectHostedAgentConnectionRequest"}}}
+      responses:
+        "200": {description: Disconnect started (or already pending), content: {application/json: {schema: {$ref: "#/components/schemas/DisconnectHostedAgentConnectionResponse"}}}}
+        "400": {description: Invalid artifact kind or reference, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {description: Human workspace owner/admin required, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "404": {description: Hosted connection not found, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "409": {description: Connection is already disconnected or was never credentialed, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+
+  /v1/workspaces/{workspaceId}/hosted-agent-connections/{connectionId}/disconnect/complete:
+    post:
+      tags: [agents]
+      operationId: completeHostedAgentDisconnect
+      summary: Transition a cleanup-confirmed connection to the terminal disconnected state.
+      description: >
+        Refused while any required artifact is unresolved, and refused unless
+        this server can read back the local half it performed: zero live
+        credentials on the connection and a paused dedicated agent. The
+        transition happens at most once; a replay answers 200 with
+        `disconnectedNow: false` and writes no audit row. The same two facts are
+        asserted by a database trigger, so a writer that bypasses this operation
+        still cannot mint a terminal state.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - {name: connectionId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200": {description: Connection is disconnected, content: {application/json: {schema: {$ref: "#/components/schemas/CompleteHostedAgentDisconnectResponse"}}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {description: Human workspace owner/admin required, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "404": {description: Hosted connection not found, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "409": {description: Not awaiting cleanup, unresolved artifacts, or unconfirmed local revoke, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+
+  /v1/workspaces/{workspaceId}/hosted-agent-connections/{connectionId}/cleanup-artifacts/{artifactId}/acknowledge:
+    post:
+      tags: [agents]
+      operationId: acknowledgeHostedCleanupArtifact
+      summary: Record one cleanup observation, and optionally one resolution.
+      description: >
+        The manual half of cleanup confirmation. Provenance is server-derived —
+        this operation writes `manual` and nothing else, so a client cannot
+        promote its own claim to `server_verified`. Omitting `disposition`
+        records only `currentStatus`, which is how an inactive routine stays
+        unresolved. A resolution requires evidence and is not re-decidable.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - {name: connectionId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: artifactId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: "#/components/schemas/AcknowledgeHostedCleanupArtifactRequest"}}}
+      responses:
+        "200": {description: Acknowledgement recorded, content: {application/json: {schema: {$ref: "#/components/schemas/AcknowledgeHostedCleanupArtifactResponse"}}}}
+        "400": {description: Invalid status, illegal disposition for the kind, or missing evidence, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {description: Human workspace owner/admin required, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "404": {description: Cleanup artifact not found on this connection, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "409": {description: Connection is not awaiting cleanup, or the artifact is already resolved, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+
   /v1/workspaces/{workspaceId}/agents/{agentId}/credentials:
     post:
       tags: [agents]
@@ -6840,9 +6921,119 @@ components:
     HostedAgentConnectionResponse:
       type: object
       additionalProperties: false
-      required: [connection]
+      required: [connection, cleanupArtifacts]
       properties:
         connection: {$ref: "#/components/schemas/HostedAgentConnection"}
+        cleanupArtifacts:
+          type: array
+          maxItems: 200
+          items: {$ref: "#/components/schemas/HostedCleanupArtifact"}
+          description: >
+            HAP-E6 cleanup manifest. Empty until a disconnect starts, so an
+            unstarted connection answers with the same shape rather than a
+            different one.
+
+    HostedCleanupArtifact:
+      type: object
+      additionalProperties: false
+      description: >
+        One provider artifact a disconnect must account for (ADR-0162 HAP-E6).
+        Rows are per kind, plus one per named item, and one row never resolves
+        another: acknowledging `connector` leaves `local_plugin_files`
+        unresolved, which is the #1344 measurement made structural. `resolved`
+        is derived from `disposition` alone, so `currentStatus: inactive` is an
+        observation and never a cleanup. Nothing here carries a provider
+        credential, chat content or file path.
+      required: [id, kind, expectedAction, currentStatus, disposition, resolved, required, updatedAtMs]
+      properties:
+        id: {type: string, format: uuid}
+        kind: {type: string, enum: [bot, routine, plugin, connector, local_plugin_files, secret]}
+        externalRef: {type: string, minLength: 1, maxLength: 200, description: Bounded non-secret operator label for one named item.}
+        expectedAction:
+          type: string
+          enum: [remove, revoke, decide]
+          description: >
+            Fixed by kind. `bot` is `decide` because deleting one deletes its
+            chat history; `secret` is `revoke`; everything else is `remove`.
+        currentStatus: {type: string, enum: [unknown, present, inactive, absent]}
+        disposition:
+          type: string
+          enum: [pending, removed, preserved, revoked]
+          description: >
+            `preserved` is legal for `bot` only and is a terminal answer — oort
+            never deletes provider chat history on someone's behalf.
+        resolved: {type: boolean}
+        required: {type: boolean}
+        source:
+          type: string
+          enum: [server_verified, manual]
+          description: >
+            `server_verified` is reserved for what this server removed itself
+            (the hosted bearer it revoked) and is never readable from a request
+            body. Provider-owned artifacts are `manual` and carry an actor plus
+            evidence.
+        acknowledgedBy: {type: string, format: uuid}
+        acknowledgedAtMs: {type: integer, format: int64}
+        evidence: {type: string, minLength: 1, maxLength: 2000}
+        updatedAtMs: {type: integer, format: int64}
+
+    DisconnectHostedAgentConnectionRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        artifacts:
+          type: array
+          maxItems: 50
+          description: Extra named provider items to track beside the seeded per-kind rows.
+          items:
+            type: object
+            additionalProperties: false
+            required: [kind, externalRef]
+            properties:
+              kind: {type: string, enum: [bot, routine, plugin, connector, local_plugin_files, secret]}
+              externalRef: {type: string, minLength: 1, maxLength: 200}
+
+    DisconnectHostedAgentConnectionResponse:
+      type: object
+      additionalProperties: false
+      required: [connection, cleanupArtifacts, remainingRequired, startedNow]
+      properties:
+        connection: {$ref: "#/components/schemas/HostedAgentConnection"}
+        cleanupArtifacts: {type: array, maxItems: 200, items: {$ref: "#/components/schemas/HostedCleanupArtifact"}}
+        remainingRequired: {type: integer, format: int64, minimum: 0}
+        startedNow: {type: boolean, description: False when the disconnect had already started; nothing was written a second time.}
+
+    AcknowledgeHostedCleanupArtifactRequest:
+      type: object
+      additionalProperties: false
+      required: [currentStatus]
+      properties:
+        currentStatus: {type: string, enum: [unknown, present, inactive, absent]}
+        disposition:
+          type: string
+          enum: [delete, preserve, revoke]
+          description: >
+            Omit to record an observation only. `preserve` is legal for `bot`
+            alone; `revoke` for `secret` alone; `delete` for every other kind.
+        evidence: {type: string, minLength: 1, maxLength: 2000, description: Required whenever a disposition is supplied.}
+
+    AcknowledgeHostedCleanupArtifactResponse:
+      type: object
+      additionalProperties: false
+      required: [artifact, remainingRequired, changed]
+      properties:
+        artifact: {$ref: "#/components/schemas/HostedCleanupArtifact"}
+        remainingRequired: {type: integer, format: int64, minimum: 0}
+        changed: {type: boolean, description: False for a byte-identical repeat, which writes no audit row.}
+
+    CompleteHostedAgentDisconnectResponse:
+      type: object
+      additionalProperties: false
+      required: [connection, cleanupArtifacts, disconnectedNow]
+      properties:
+        connection: {$ref: "#/components/schemas/HostedAgentConnection"}
+        cleanupArtifacts: {type: array, maxItems: 200, items: {$ref: "#/components/schemas/HostedCleanupArtifact"}}
+        disconnectedNow: {type: boolean, description: False for an idempotent replay of a transition that already happened.}
 
     HostedAgentConnectionListResponse:
       type: object
