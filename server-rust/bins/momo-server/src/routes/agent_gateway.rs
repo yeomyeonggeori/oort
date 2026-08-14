@@ -473,12 +473,9 @@ pub async fn complete(
     let via_token_id = principal.as_ref().and_then(|p| p.token_id);
     let actor_member_id = principal.as_ref().map(|p| p.member_id);
     let usage_detail = request.usage.as_ref().map(usage_detail_json);
-    let Some(lease) = lease_binding(request.job_id, request.lease_id) else {
-        return Err(lease_rejected());
-    };
     let input = GatewayCompleteInput {
         run_id,
-        lease,
+        lease: lease_binding(request.job_id, request.lease_id),
         succeeded,
         body: request.body.clone(),
         safe_error,
@@ -508,7 +505,15 @@ pub async fn complete(
 /// One already-validated completion, ready for the run ledger.
 pub(crate) struct GatewayCompleteInput {
     pub run_id: Uuid,
-    pub lease: GatewayLeaseBinding,
+    /// `None` when the caller presented an incomplete lease pair.
+    ///
+    /// Deliberately optional rather than validated by the caller: the shape
+    /// check has to happen **after** the run is locked and its approval hold is
+    /// answered, or a run parked on a human decision would answer
+    /// `lease is expired or not owned` to an adapter whose real problem is that
+    /// a person has not decided yet — the exact misdiagnosis the comment below
+    /// says this ordering exists to prevent.
+    pub lease: Option<GatewayLeaseBinding>,
     pub succeeded: bool,
     /// The gateway's raw body, echoed verbatim into `agent_run.output`.
     pub body: Option<String>,
@@ -569,6 +574,9 @@ pub(crate) async fn complete_gateway_run_in_tx(
         )));
     }
 
+    let Some(lease) = lease else {
+        return Ok(Err(lease_rejected()));
+    };
     let terminal = run.status.is_terminal();
     if !lease_is_authorized(conn, workspace_id, run_id, &run, lease, terminal).await? {
         return Ok(Err(lease_rejected()));
@@ -626,6 +634,29 @@ pub(crate) async fn complete_gateway_run_in_tx(
             hlc_ts: None,
             hlc_count: None,
         },
+    )
+    .await?;
+
+    // 1b. …and the hosted inbox projection for that answer (ADR-0162 / HAP-E5).
+    //
+    //     The answer is written through the RAW spine — `send_message_in_tx`,
+    //     not the product send — so it does not inherit the fan-out that
+    //     `send_message_with_mentions_in_tx` performs. Without this call a
+    //     hosted agent sharing a channel with another agent would never see
+    //     that agent's answers in its durable inbox, which is exactly the
+    //     mixed-workspace story the selector exists to serve.
+    //
+    //     The author is excluded inside the fan-out, so the completing agent
+    //     does not read its own answer back. On the terminal-replay branch
+    //     above no message is written and none is needed: the reference the
+    //     first completion appended is already there, and the append is
+    //     idempotent anyway.
+    momo_messaging::fan_out_message_reference_in_tx(
+        conn,
+        workspace_id,
+        run.channel_id,
+        message.message.id,
+        run.agent_member_id,
     )
     .await?;
 

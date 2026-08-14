@@ -59,6 +59,11 @@ use crate::routes::agent_gateway::{
 use crate::routes::agent_mentions::{route_agent_mentions_in_tx, MentionSend};
 use crate::AppState;
 
+/// The cursor argument ceiling, equal to `momo_mcp::tools`' published
+/// `maxLength`. HAP-E4 cursors are 135 characters, so this is headroom rather
+/// than a limit anyone reaches.
+const MAX_CURSOR_BYTES: usize = 256;
+
 /// What the transport proved before a tool ran.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct HostedCaller {
@@ -277,7 +282,10 @@ async fn inbox_read(
     arguments_value: &Value,
 ) -> Result<Value, ToolFailure> {
     let args = arguments(arguments_value)?;
-    let cursor = optional_str(args, "cursor", 512)?.map(str::to_string);
+    // The same ceiling the published input schema declares (`tools.rs`); a
+    // reader bound looser than the advertised one would accept an argument the
+    // client was told was invalid.
+    let cursor = optional_str(args, "cursor", MAX_CURSOR_BYTES)?.map(str::to_string);
     let limit = optional_i64(args, "limit")?.unwrap_or(HOSTED_INBOX_LIMIT_DEFAULT);
     let secret = state.agent_port.envelope_secret().to_string();
 
@@ -584,10 +592,10 @@ async fn jobs_claim(
 
             let mut jobs = Vec::with_capacity(claimed.len());
             for job in claimed {
-                // A job whose payload has no parseable run id cannot be acted
-                // on through this surface (every later verb is keyed by run),
-                // so it is left unreported rather than handed over as an
-                // unusable handle. Its lease expires on its own.
+                // Defence in depth: the hosted claim already refuses to lease a
+                // row whose `payload.run_id` is not uuid-shaped, so this branch
+                // is unreachable. It stays because the alternative to a skip
+                // here would be handing out a handle no later verb could use.
                 let Ok(run_id) = Uuid::parse_str(job.run_id_field()) else {
                     continue;
                 };
@@ -814,10 +822,12 @@ async fn run_complete(
                 caller.workspace_id,
                 GatewayCompleteInput {
                     run_id: handle.run_id,
-                    lease: GatewayLeaseBinding {
+                    // Always present here: a sealed handle cannot exist without
+                    // both halves of the binding it was minted from.
+                    lease: Some(GatewayLeaseBinding {
                         job_id: handle.job_id,
                         lease_id: handle.lease_id,
-                    },
+                    }),
                     succeeded,
                     body,
                     safe_error,

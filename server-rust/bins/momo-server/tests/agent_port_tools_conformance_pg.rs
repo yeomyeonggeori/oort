@@ -21,7 +21,7 @@ use momo_db::migrate::{default_migrations_dir, run_migrations, SeedMode};
 use momo_db::sqlx;
 use momo_db::sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use momo_db::PgPool;
-use momo_server::config::AgentPortConfig;
+use momo_server::config::{AgentGatewayMode, AgentGatewaySettings, AgentPortConfig};
 use momo_server::{build_app, AppState};
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -123,12 +123,27 @@ fn ensure_schema_and_roles() {
 }
 
 async fn start_server(pool: PgPool, hosted_delivery_enabled: bool) -> String {
-    let state = AppState::new(
+    start_server_with_gateway(pool, hosted_delivery_enabled, false).await
+}
+
+async fn start_server_with_gateway(
+    pool: PgPool,
+    hosted_delivery_enabled: bool,
+    gateway_mode: bool,
+) -> String {
+    let mut state = AppState::new(
         pool,
         TEST_JWT_SECRET.to_string(),
         "ws://127.0.0.1:8000/connection/websocket".to_string(),
-    )
-    .with_agent_port(AgentPortConfig {
+    );
+    if gateway_mode {
+        state = state.with_agent_gateway(AgentGatewaySettings {
+            mode: AgentGatewayMode::Gateway,
+            secret: "agent-port-tools-conformance-gateway-secret".to_string(),
+            allow_legacy_secret: false,
+        });
+    }
+    let state = state.with_agent_port(AgentPortConfig {
         external_origin: None,
         window_seconds: 60,
         per_token_limit: 0,
@@ -1377,4 +1392,187 @@ async fn hosted_handle(pool: &PgPool, member: Uuid) -> String {
         .fetch_one(pool)
         .await
         .expect("member handle")
+}
+
+// ---------------------------------------------------------------------------
+// (5) the managed REST gateway still works, and its answer reaches hosted
+//     inboxes
+//
+// Two findings meet in one scenario, because they are the same run:
+//
+//   * the uuid comparisons in the gateway lease statements are case-folded, and
+//     this is the proof on the **REST** surface the widening actually changed.
+//     `mention_job_payload` writes ids uppercase, so reverting either `lower()`
+//     turns the claim below into an empty list and every later verb into a 409.
+//   * `complete_gateway_run_in_tx` projects the answer it writes into hosted
+//     inboxes. The completing agent here is managed and a hosted agent shares
+//     the channel, so the hosted inbox must receive a `message` event for an
+//     answer nobody posted through the product send path.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_managed_mention_job_survives_the_whole_rest_gateway_round_trip() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server_with_gateway(app, true, true).await;
+    let client = reqwest::Client::new();
+
+    // One bearer carrying both callback scopes, bound to the managed agent.
+    let gateway_bearer = raw_credential(fixture.workspace);
+    sqlx::query(
+        "INSERT INTO token(workspace_id, kind, actor_member_id, token_hash, scopes, label) \
+         VALUES($1,'agent_bearer',$2,digest($3::text,'sha256'), \
+                ARRAY['agent:jobs:read','agent:runs:callback']::text[],'tools-rest-gateway')",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.managed_agent)
+    .bind(&gateway_bearer)
+    .execute(&su)
+    .await
+    .expect("seed managed gateway bearer");
+
+    let managed_handle = hosted_handle(&su, fixture.managed_agent).await;
+    let trigger: Value = client
+        .post(format!(
+            "{base}/v1/workspaces/{}/channels/{}/messages",
+            fixture.workspace, fixture.channel
+        ))
+        .bearer_auth(&fixture.human_jwt)
+        .json(&json!({
+            "clientMsgId": Uuid::new_v4(),
+            "body": format!("@{managed_handle} answer over REST")
+        }))
+        .send()
+        .await
+        .expect("mention send")
+        .json()
+        .await
+        .expect("mention body");
+    assert!(trigger["id"].is_string(), "{trigger}");
+
+    // The producer really did write the ids uppercase — without this the test
+    // could pass against a payload that never needed folding.
+    let raw_run_id: String = sqlx::query_scalar(
+        "SELECT payload->>'run_id' FROM outbox WHERE workspace_id=$1 AND kind='agent_job' \
+           AND partition_key=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.managed_agent)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(
+        raw_run_id,
+        raw_run_id.to_uppercase(),
+        "mention_job_payload writes uppercase ids; that is what the fold exists for"
+    );
+    assert_ne!(
+        raw_run_id,
+        raw_run_id.to_lowercase(),
+        "a uuid with no letters would make this test vacuous"
+    );
+
+    // ---- claim over REST ---------------------------------------------------
+    let pending: Value = client
+        .get(format!(
+            "{base}/v1/workspaces/{}/agents/{}/gateway/jobs/pending",
+            fixture.workspace, fixture.managed_agent
+        ))
+        .bearer_auth(&gateway_bearer)
+        .send()
+        .await
+        .expect("pending jobs responds")
+        .json()
+        .await
+        .expect("pending jobs body");
+    let jobs = pending["jobs"].as_array().expect("jobs array");
+    assert_eq!(
+        jobs.len(),
+        1,
+        "an uppercase-id mention job must be claimable over REST: {pending}"
+    );
+    let job_id = jobs[0]["id"].as_i64().expect("job id");
+    let lease_id = jobs[0]["leaseId"].as_str().expect("lease id").to_string();
+    let run_id = jobs[0]["runId"].as_str().expect("run id").to_string();
+
+    // ---- renew over REST ---------------------------------------------------
+    let renewed = client
+        .post(format!(
+            "{base}/v1/workspaces/{}/agents/{}/gateway/jobs/{job_id}/lease/renew",
+            fixture.workspace, fixture.managed_agent
+        ))
+        .bearer_auth(&gateway_bearer)
+        .json(&json!({"job_id": job_id, "lease_id": lease_id}))
+        .send()
+        .await
+        .expect("renew responds");
+    assert_eq!(renewed.status().as_u16(), 200, "renew must find the lease");
+
+    // ---- complete over REST ------------------------------------------------
+    let completed = client
+        .post(format!(
+            "{base}/v1/workspaces/{}/agent-runs/{run_id}/gateway/complete",
+            fixture.workspace
+        ))
+        .bearer_auth(&gateway_bearer)
+        .json(&json!({
+            "job_id": job_id,
+            "lease_id": lease_id,
+            "status": "succeeded",
+            "body": "the managed answer"
+        }))
+        .send()
+        .await
+        .expect("complete responds");
+    assert_eq!(completed.status().as_u16(), 200);
+    let completed: Value = completed.json().await.expect("complete body");
+    let answer_id = completed["messageId"]
+        .as_str()
+        .expect("answer id")
+        .to_string();
+
+    // …and the settle really landed, which is the third folded predicate.
+    let settled: String =
+        sqlx::query_scalar("SELECT status::text FROM outbox WHERE workspace_id=$1 AND id=$2")
+            .bind(fixture.workspace)
+            .bind(job_id)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+    assert_eq!(settled, "done", "settle_gateway_job_in_tx folds too");
+
+    // ---- the hosted co-agent receives that answer --------------------------
+    let (status, inbox) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_inbox_read",
+        json!({"limit": 50}),
+    )
+    .await;
+    assert_eq!(status, 200, "{inbox}");
+    let events = structured(&inbox)["events"].as_array().expect("events");
+    assert!(
+        events
+            .iter()
+            .any(|event| event["messageId"] == json!(answer_id)),
+        "a gateway-completed answer must reach a hosted co-agent's inbox: {events:?}"
+    );
+
+    // The completing agent is managed and holds no connection, so nothing was
+    // written for it; and the answer was authored by it, so the fan-out's
+    // author exclusion is what kept it out of its own inbox had it had one.
+    let managed_events: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM hosted_agent_inbox_event WHERE workspace_id=$1 \
+           AND agent_member_id=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.managed_agent)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(managed_events, 0);
 }

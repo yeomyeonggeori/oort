@@ -167,6 +167,17 @@ pub async fn claim_gateway_jobs_in_tx(
 
 /// The **hosted** half of the same claim (ADR-0162 / HAP-E5).
 ///
+/// One predicate the managed branch does not carry: the payload's `run_id` must
+/// be uuid-shaped. A hosted caller acts on work through a sealed handle that
+/// *contains* the run, so a row without a usable run id could be claimed and
+/// leased but never renewed, released or completed — and because a claim mints
+/// a fresh lease every cycle, it would be re-leased forever while being
+/// silently withheld. Refusing to claim it is what stops that loop; the row
+/// stays `pending` and visible to an operator rather than churning. The shape
+/// test is a case-insensitive regex rather than a `::uuid` cast for the reason
+/// the case-folding note above gives: a cast raises, and one malformed row must
+/// not fail the whole tenant's claim.
+///
 /// A hosted agent reaches its work through the Agent Port, never over the REST
 /// callback surface, so [`claim_gateway_jobs_in_tx`] deliberately excludes every
 /// agent that has a `hosted_agent_connection` row at all (HAP-E3's fail-closed
@@ -230,6 +241,11 @@ async fn claim_gateway_jobs(
                    AND m.kind = 'agent' \
                    AND m.status = 'active' \
                    AND m.deleted_at IS NULL \
+              ) \
+              AND ( \
+                $5::uuid IS NULL \
+                OR o.payload->>'run_id' ~* \
+                   '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' \
               ) \
               AND ( \
                 ($5::uuid IS NULL AND NOT EXISTS ( \

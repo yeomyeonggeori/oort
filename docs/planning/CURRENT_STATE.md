@@ -14,7 +14,9 @@
 >
 > **실측:** 신규 `scripts/verify_agent_port_tools.sh`(#1365 소유권 계약 동일: nonce label·janitor label·external DATABASE_URL 거부·trap cleanup·부재 증명·`--verify-cleanup-contract`)가 PG18에서 7 테스트 PASS. `scripts/verify_hosted_agent_inbox.sh` 무회귀 PASS. workspace clippy `-D warnings` 0, workspace test 0 실패, migration 번호 71 unique. Docker 잔존 0. 로컬 docs gate는 #1376 base-inherited 결함으로 이 머신에서 미실행 — PR CI가 관문이다.
 >
-> **다음 행동:** Fable 기획검수 → 수리 → sol 독립 freeze 리뷰(exact commit C/H/M=0) → push/PR(track/engine)/PR CI/머지. 워커는 로컬 commit 동결까지만 수행했다.
+> **독립 리뷰 1회차(C0/H1/M2/L5) 수리 완료:** H1(gateway completion의 hosted inbox fan-out 누락)은 `complete_gateway_run_in_tx`에 같은 tx 호출을 추가하고 REST 왕복 conformance로 고정했다. M1은 `lower()` 위드닝의 red proof를 **관리형 REST 표면**에 세웠고(배포 창 backlog 체크리스트는 STATUS에 명시), M2는 `MOMO_HOSTED_DELIVERY_ENABLED` 수용을 `#[cfg(debug_assertions)]`로 감싸 release 빌드에서 구조적으로 닫았다(#1367이 cfg 제거 소유). L1은 complete의 거절 순서를 base와 동일하게 복원(lease shape 검사를 approval-hold 뒤로 되돌림), L2는 cursor 상한을 스키마와 256으로 정렬, L3는 hosted claim이 uuid 형태가 아닌 `run_id` 행을 애초에 lease하지 않도록 SQL 술어를 추가해 무한 재-lease 루프를 제거했다.
+>
+> **다음 행동:** Fable 기획검수 → sol 독립 freeze 리뷰(exact commit C/H/M=0) → push/PR(track/engine)/PR CI/머지. 워커는 로컬 commit 동결까지만 수행했다.
 >
 > **2026-08-14 스냅샷 35 (GPT 5.6 · momo-main — #1365 durable inbox runtime closure).** 스냅샷 34를 supersede한다.
 >
