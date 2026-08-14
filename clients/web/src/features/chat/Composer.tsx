@@ -18,7 +18,13 @@ import { useSession } from "@/app/session";
 import { useIsMobileShell } from "@/app/shellNav";
 import type { Directory } from "@/features/workspace/useWorkspace";
 import { composerKeyIntent, isComposingEvent } from "@momo/core/features/chat/composerKeys";
-import { COMPOSER_OFFLINE_COPY } from "@momo/core/features/chat/composerCopy";
+import {
+  COMPOSER_KEYS_HINT,
+  COMPOSER_OFFLINE_COPY,
+  HINT_SEPARATOR,
+  composerFieldLabel,
+  composerPlaceholder,
+} from "@momo/core/features/chat/composerCopy";
 import {
   agentTurnsInChannel,
   elapsedLabel,
@@ -758,7 +764,7 @@ export function Composer({
             자리를 쓴다 — 이 자리는 배울 필요가 없는 자리다. */}
         <AttachButton onPick={onFiles} disabled={offline} />
         <label className="sr-only" htmlFor="composer-input">
-          {channelLabel}에 보낼 메시지
+          {composerFieldLabel(channelLabel)}
         </label>
         <textarea
           id="composer-input"
@@ -808,7 +814,10 @@ export function Composer({
           onBlur={() => {
             justComposedRef.current = false;
           }}
-          placeholder={`${channelLabel}에 메시지 보내기`}
+          // 빈 상자는 **어디로 가는지**와 **@가 무엇인지**를 함께 말한다
+          // (#1384). 문장과 그 문장을 고른 이유(폭 산술 포함)는 코어가 든다 —
+          // 이 자리는 렌더만 한다.
+          placeholder={composerPlaceholder(channelLabel)}
           aria-describedby={hasHint ? "composer-hint" : undefined}
           data-testid="composer-input"
           className="tap-target min-w-0 flex-1 resize-none rounded-md border border-line-strong bg-transparent px-3 py-2 text-body leading-relaxed placeholder:text-ink-muted focus-visible:focus-ring"
@@ -864,7 +873,13 @@ export function Composer({
           다르고, 한 번 배워서 끝나지 않는다. 그래서 이 줄은 조각 둘이 각자 사라질
           수 있고, 둘 다 없으면 <p> 자체가 서지 않는다: 빈 문단의 pb-2는 8px짜리
           죽은 공간이고, `aria-describedby`가 가리키는 빈 요소는 보조기술에 아무
-          말도 하지 않는 이름이다. */}
+          말도 하지 않는 이름이다.
+
+          #1384: 키 조각의 문장과 이음쇠는 코어가 든다(`composerCopy.ts`의
+          「키보드 힌트의 표기법」). 이 앱의 키 힌트는 세 자리에 서 있었고
+          (여기 · `timeline/MessageEditor.tsx` · `sidebar/Sidebar.tsx`) 크기도
+          이음쇠도 문법도 갈라져 있었다. 여기 있던 쉼표가 가운뎃점이 된 것이
+          그 통일이고, 그것을 코어의 테스트가 전수로 잰다. */}
       {hasHint && (
         <p
           id="composer-hint"
@@ -891,7 +906,8 @@ export function Composer({
           )}
           {keysHintNeeded && (
             <span className="wide-only" data-testid="composer-keys-hint">
-              {dmAgent ? " · " : ""}Enter로 보내기, Shift+Enter로 줄바꿈
+              {dmAgent ? HINT_SEPARATOR : ""}
+              {COMPOSER_KEYS_HINT}
             </span>
           )}
         </p>

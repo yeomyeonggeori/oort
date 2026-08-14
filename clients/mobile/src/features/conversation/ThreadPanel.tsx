@@ -1,4 +1,5 @@
 import {uuidEq, type Message} from '@momo/core/lib/api';
+import {THREAD_COMPOSER_PLACEHOLDER} from '@momo/core/features/chat/composerCopy';
 import type {Directory} from '@momo/core/features/workspace/directory';
 import React, {useCallback, useEffect, useMemo, useState} from 'react';
 import {StyleSheet, Text, View} from 'react-native';
@@ -255,7 +256,8 @@ export function ThreadPanel({
                 // 답글이 채널 입력창에서 되살아나면 그 글은 잘못된 방으로 간다.
                 draftKey={threadDraftKey(root.id)}
                 offline={!online}
-                placeholder="답글 쓰기"
+                // 웹 `timeline/ThreadComposer.tsx` 와 한 벌이다 (#1384).
+                placeholder={THREAD_COMPOSER_PLACEHOLDER}
                 sendLabel="답글 보내기"
                 onSend={onSend}
               />

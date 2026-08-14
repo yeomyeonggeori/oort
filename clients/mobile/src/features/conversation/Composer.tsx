@@ -1,5 +1,9 @@
 import type {RosterMember} from '@momo/core/lib/api';
-import {COMPOSER_OFFLINE_COPY} from '@momo/core/features/chat/composerCopy';
+import {
+  COMPOSER_OFFLINE_COPY,
+  composerFieldLabel,
+  composerPlaceholder,
+} from '@momo/core/features/chat/composerCopy';
 import {attachParticle} from '@momo/core/lib/koreanParticle';
 import type {Directory} from '@momo/core/features/workspace/directory';
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
@@ -147,7 +151,7 @@ export function Composer({
 }: {
   channelLabel: string;
   directory: Directory;
-  /** Overrides the derived "…에 메시지 보내기". A thread is not a channel. */
+  /** Overrides `composerPlaceholder`. A thread is not a channel. */
   placeholder?: string;
   /** Overrides 보내기. A reply says what it is. */
   sendLabel?: string;
@@ -422,9 +426,12 @@ export function Composer({
           value={text}
           onChangeText={onChangeText}
           onSelectionChange={onSelectionChange}
-          placeholder={placeholder ?? `${channelLabel}에 메시지 보내기`}
+          // 문장은 코어가 든다 (#1384). 이 두 줄은 웹 `chat/Composer.tsx` 와
+          // **같은 문자열을 각자 짓고** 있었다: 값이 같아서 안 보였을 뿐,
+          // 한쪽을 고치는 날 갈라진다. 오프라인 문장이 이미 걸어 둔 길이다.
+          placeholder={placeholder ?? composerPlaceholder(channelLabel)}
           placeholderTextColor={palette.textFaint}
-          accessibilityLabel={placeholder ?? `${channelLabel}에 보낼 메시지`}
+          accessibilityLabel={placeholder ?? composerFieldLabel(channelLabel)}
           multiline
           // Enter inserts a newline (see the header). `blurOnSubmit` false keeps
           // the keyboard up, because on a phone the return key is the only line
