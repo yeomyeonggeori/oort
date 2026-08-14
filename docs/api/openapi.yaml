@@ -4825,8 +4825,11 @@ paths:
         carries the channel its work came from, so the confirming human's exact
         channel grant is re-checked on every later verb. Arguments are validated
         against the tool's published `inputSchema` before execution, so
-        `additionalProperties: false` and the numeric/format bounds are
-        enforced rather than advertised. Tool
+        `additionalProperties: false`, the declared nullability (every optional
+        property is `["<type>", "null"]` and every required one is not), the
+        numeric bounds, `format: uuid` and `enum` are enforced rather than
+        advertised. String `minLength`/`maxLength` count **UTF-8 bytes**, which
+        each such field's description states. Tool
         failures use a closed set of JSON-RPC codes (-32602 invalid arguments,
         -32003 not authorized, -32004 unavailable, -32005 conflict, -32603
         internal) with fixed messages, so a refusal never distinguishes absent

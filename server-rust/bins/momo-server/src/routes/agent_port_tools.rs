@@ -760,10 +760,13 @@ async fn run_event(
 ) -> Result<Value, ToolFailure> {
     let args = arguments(arguments_value)?;
     let raw_handle = required_str(args, "leaseHandle", 512)?.to_string();
+    // The same byte ceilings the published schema declares — a reader looser
+    // than the advertised bound would accept an argument the client was told
+    // was invalid, which is the divergence this whole layer exists to remove.
     let (status, detail, text_delta) = validated_event_fields(
         optional_str(args, "status", 64)?,
-        optional_str(args, "detail", 4_096)?,
-        optional_str(args, "textDelta", 16_384)?,
+        optional_str(args, "detail", 2_048)?,
+        optional_str(args, "textDelta", 8_192)?,
     )
     .map_err(|error| failure_of(&error))?;
     let event_id = optional_uuid(args, "eventId")?.unwrap_or_else(Uuid::new_v4);

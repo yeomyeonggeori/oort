@@ -18,6 +18,8 @@
 >
 > **독립 리뷰 2회차(sol freeze — 1회차 수리 전건 확인, 신규 H1/M2) 수리 완료:** H(승인 밖 채널 hosted job 노출)는 claim SQL의 live `approved_channel_ids` 술어(권위) + selector의 `hosted_channel_unapproved` skip(조기 차단) + `leaseHandle`에 channel_id 봉인(이미 쥔 lease의 중도 회수)으로 3중 결속했고, claim 술어만 빼도 적대 테스트가 RED임을 확인했다. M(음수 토큰)은 스키마·기록 경계 양쪽에서 거절(ledger CHECK는 #1375 후보). M(닫힌 스키마 미집행)은 게시된 input schema를 `momo-mcp`가 그대로 집행하도록 바꿔 오타 필드·범위 밖 수치가 domain port에 도달하지 못하게 했고, 위반 응답은 adapter invalid-arguments와 byte 동일이다.
 >
+> **독립 리뷰 3회차(잔여 M — 스키마와 집행의 3개 간극) 수리 완료:** ①nullability 계약을 **(a)안**으로 확정했다 — optional 속성은 전부 `["<type>","null"]`로 선언하고 required는 아니다. adapter reader가 optional의 `null`을 이미 균일하게 "없음"으로 다루므로, `null`을 전면 거절하는 (b)안은 매우 흔한 클라이언트 직렬화 관례를 깨면서 스키마만 정직해졌을 뿐 동작은 더 나빠졌을 것이다. 대응은 `the_nullability_contract_holds_for_every_tool`이 8개 도구 전체(중첩 usage 포함)에서 기계 검사한다. ②`maxLength`/`minLength`를 validator에서 **UTF-8 바이트**로 세고 각 필드 description에 단위를 명시했으며 adapter reader 상한도 게시 숫자에 정렬해 두 층이 같은 경계에서 거절한다. ③토큰 4필드에 `maximum:2147483647`을 선언해 i32 좁힘과 스키마를 일치시켰다. 세 항목 모두 단일 InvalidArguments 응답을 유지한다.
+>
 > **다음 행동:** Fable 기획검수 → sol 독립 freeze 리뷰(exact commit C/H/M=0) → push/PR(track/engine)/PR CI/머지. 워커는 로컬 commit 동결까지만 수행했다.
 >
 > **2026-08-14 스냅샷 35 (GPT 5.6 · momo-main — #1365 durable inbox runtime closure).** 스냅샷 34를 supersede한다.

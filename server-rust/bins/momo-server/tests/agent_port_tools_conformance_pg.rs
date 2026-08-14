@@ -1863,4 +1863,105 @@ async fn the_advertised_argument_schema_is_what_execution_accepts() {
         .await
         .unwrap();
     assert_eq!(ledger, 0, "a refused usage block writes no ledger row");
+
+    // ---- the three ways the schema used to diverge from execution ---------
+
+    // (i) `null` on a required field is refused; `null` on an optional one is
+    //     the wire's way of omitting it and still posts.
+    let (status, refused) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_message_post",
+        json!({
+            "channelId": fixture.channel,
+            "clientMsgId": Uuid::new_v4(),
+            "body": Value::Null
+        }),
+    )
+    .await;
+    assert_eq!(status, 400, "{refused}");
+    assert_eq!(error_code(&refused), -32602);
+    let (status, posted) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_message_post",
+        json!({
+            "channelId": fixture.channel,
+            "clientMsgId": Uuid::new_v4(),
+            "body": "null rootId means absent",
+            "rootId": Value::Null
+        }),
+    )
+    .await;
+    assert_eq!(status, 200, "{posted}");
+
+    // (ii) A multibyte body over the BYTE ceiling is refused at the validator,
+    //      not discovered later by the adapter.
+    //
+    //      2,001 emoji: 2,001 characters (a quarter of the published 8,000) and
+    //      8,004 bytes (just over it). Deliberately just over rather than wildly
+    //      over, because `momo_mcp::MAX_STRING_BYTES` bounds any single wire
+    //      string at 8 KiB and would otherwise refuse it first with -32600 —
+    //      which is correct but would test the transport instead of the schema.
+    //
+    //      This asserts the **observable contract**: the caller gets one
+    //      invalid-arguments answer and nothing is written. It does not isolate
+    //      which layer refused, and it cannot, because the whole point of the
+    //      fix is that the validator and the adapter now refuse at the same
+    //      byte. `momo_mcp::tools::tests::string_bounds_are_counted_in_bytes`
+    //      is the isolating proof: it calls the validator directly and turns
+    //      RED the moment the count goes back to characters.
+    let before_emoji: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM message WHERE workspace_id=$1 AND channel_id=$2")
+            .bind(fixture.workspace)
+            .bind(fixture.channel)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+    let (status, oversize) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_message_post",
+        json!({
+            "channelId": fixture.channel,
+            "clientMsgId": Uuid::new_v4(),
+            "body": "\u{1F600}".repeat(2_001)
+        }),
+    )
+    .await;
+    assert_eq!(status, 400, "{oversize}");
+    assert_eq!(error_code(&oversize), -32602);
+    let after_emoji: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM message WHERE workspace_id=$1 AND channel_id=$2")
+            .bind(fixture.workspace)
+            .bind(fixture.channel)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+    assert_eq!(after_emoji, before_emoji, "an oversize body posts nothing");
+    // The same text measured the other way would have passed: this is the
+    // divergence, stated as an assertion rather than a comment.
+    let emoji = "\u{1F600}".repeat(2_001);
+    assert!(emoji.chars().count() < 8_000 && emoji.len() > 8_000);
+    assert!(emoji.len() <= momo_mcp::MAX_STRING_BYTES);
+
+    // (iii) A token count above the ledger column's ceiling is refused by the
+    //       declared maximum rather than by a narrowing nobody advertised.
+    let (status, overflow) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_run_complete",
+        json!({
+            "leaseHandle": "momo_lease_v1.AAAA",
+            "status": "succeeded",
+            "usage": {"promptTokens": 2_147_483_648_i64}
+        }),
+    )
+    .await;
+    assert_eq!(status, 400, "{overflow}");
+    assert_eq!(error_code(&overflow), -32602);
 }

@@ -87,8 +87,67 @@ pub const SCOPE_MESSAGES_WRITE: &str = "messages:write";
 pub const SCOPE_JOBS_READ: &str = "agent:jobs:read";
 pub const SCOPE_RUNS_CALLBACK: &str = "agent:runs:callback";
 
+/// The note every length-bounded string carries.
+///
+/// The bound is **bytes**, not characters, because the domain ceilings it
+/// mirrors are byte ceilings. Saying so in the schema is the difference between
+/// a client that can predict a refusal and one that discovers it: 3,000 emoji
+/// are 3,000 characters and 12,000 bytes.
+const BYTE_BOUND_NOTE: &str = "Length bounds count UTF-8 bytes, not characters.";
+
+/// The **nullability contract**, in one function.
+///
+/// Every optional property is declared `["<type>", "null"]` and every required
+/// one is not. That is not decoration: the adapter's readers treat a `null` as
+/// an omitted value for every optional field, uniformly, so the schema has to
+/// say that or it is describing a different program. A required field is never
+/// nullable, and `null` there is refused exactly like an absent key.
+///
+/// [`the_nullability_contract_holds_for_every_tool`] checks the correspondence
+/// mechanically, so a future property cannot be added on one side only.
+fn nullable(schema: Value) -> Value {
+    let mut schema = schema;
+    let declared = schema
+        .get("type")
+        .and_then(Value::as_str)
+        .expect("a nullable property starts from a single declared type")
+        .to_owned();
+    schema
+        .as_object_mut()
+        .expect("property schemas are objects")
+        .insert("type".into(), json!([declared, "null"]));
+    schema
+}
+
 fn uuid_property() -> Value {
     json!({"type": "string", "format": "uuid"})
+}
+
+/// A length-bounded string, with the byte semantics spelled out.
+fn text(max_bytes: u64) -> Value {
+    json!({"type": "string", "maxLength": max_bytes, "description": BYTE_BOUND_NOTE})
+}
+
+/// A non-empty length-bounded string.
+fn required_text(max_bytes: u64) -> Value {
+    json!({
+        "type": "string",
+        "minLength": 1,
+        "maxLength": max_bytes,
+        "description": BYTE_BOUND_NOTE
+    })
+}
+
+fn integer(minimum: i64, maximum: i64) -> Value {
+    json!({"type": "integer", "minimum": minimum, "maximum": maximum})
+}
+
+/// The ledger column a reported token count is narrowed to. Declaring it means
+/// the schema refuses exactly what the narrowing would have refused.
+const MAX_TOKEN_COUNT: i64 = i32::MAX as i64;
+
+fn token_count() -> Value {
+    nullable(integer(0, MAX_TOKEN_COUNT))
 }
 
 fn inbox_read_schema() -> Value {
@@ -96,8 +155,8 @@ fn inbox_read_schema() -> Value {
         "type": "object",
         "additionalProperties": false,
         "properties": {
-            "cursor": {"type": "string", "maxLength": 256},
-            "limit": {"type": "integer", "minimum": 1, "maximum": 100}
+            "cursor": nullable(text(256)),
+            "limit": nullable(integer(1, 100))
         }
     })
 }
@@ -109,9 +168,9 @@ fn conversation_read_schema() -> Value {
         "required": ["channelId"],
         "properties": {
             "channelId": uuid_property(),
-            "before": {"type": "integer", "minimum": 1},
-            "after": {"type": "integer", "minimum": 0},
-            "limit": {"type": "integer", "minimum": 1, "maximum": 200}
+            "before": nullable(integer(1, i64::MAX)),
+            "after": nullable(integer(0, i64::MAX)),
+            "limit": nullable(integer(1, 200))
         }
     })
 }
@@ -124,9 +183,9 @@ fn message_post_schema() -> Value {
         "properties": {
             "channelId": uuid_property(),
             "clientMsgId": uuid_property(),
-            "body": {"type": "string", "minLength": 1, "maxLength": 8000},
-            "rootId": uuid_property(),
-            "replyToId": uuid_property()
+            "body": required_text(8_000),
+            "rootId": nullable(uuid_property()),
+            "replyToId": nullable(uuid_property())
         }
     })
 }
@@ -136,7 +195,7 @@ fn jobs_claim_schema() -> Value {
         "type": "object",
         "additionalProperties": false,
         "properties": {
-            "limit": {"type": "integer", "minimum": 1, "maximum": 100}
+            "limit": nullable(integer(1, 100))
         }
     })
 }
@@ -147,7 +206,7 @@ fn lease_only_schema() -> Value {
         "additionalProperties": false,
         "required": ["leaseHandle"],
         "properties": {
-            "leaseHandle": {"type": "string", "minLength": 1, "maxLength": 512}
+            "leaseHandle": required_text(512)
         }
     })
 }
@@ -158,11 +217,14 @@ fn run_event_schema() -> Value {
         "additionalProperties": false,
         "required": ["leaseHandle"],
         "properties": {
-            "leaseHandle": {"type": "string", "minLength": 1, "maxLength": 512},
-            "status": {"type": "string", "enum": ["running", "thinking", "streaming", "cancelled"]},
-            "detail": {"type": "string", "maxLength": 2048},
-            "textDelta": {"type": "string", "maxLength": 8192},
-            "eventId": uuid_property()
+            "leaseHandle": required_text(512),
+            "status": nullable(json!({
+                "type": "string",
+                "enum": ["running", "thinking", "streaming", "cancelled"]
+            })),
+            "detail": nullable(text(2_048)),
+            "textDelta": nullable(text(8_192)),
+            "eventId": nullable(uuid_property())
         }
     })
 }
@@ -173,22 +235,22 @@ fn run_complete_schema() -> Value {
         "additionalProperties": false,
         "required": ["leaseHandle", "status"],
         "properties": {
-            "leaseHandle": {"type": "string", "minLength": 1, "maxLength": 512},
+            "leaseHandle": required_text(512),
             "status": {"type": "string", "enum": ["succeeded", "failed"]},
-            "body": {"type": "string", "maxLength": 8000},
-            "error": {"type": "string", "maxLength": 4000},
-            "usage": {
+            "body": nullable(text(8_000)),
+            "error": nullable(text(4_000)),
+            "usage": nullable(json!({
                 "type": "object",
                 "additionalProperties": false,
                 "properties": {
-                    "model": {"type": "string", "maxLength": 128},
-                    "effort": {"type": "string", "maxLength": 32},
-                    "promptTokens": {"type": "integer", "minimum": 0},
-                    "completionTokens": {"type": "integer", "minimum": 0},
-                    "cachedTokens": {"type": "integer", "minimum": 0},
-                    "reasoningTokens": {"type": "integer", "minimum": 0}
+                    "model": nullable(text(128)),
+                    "effort": nullable(text(32)),
+                    "promptTokens": token_count(),
+                    "completionTokens": token_count(),
+                    "cachedTokens": token_count(),
+                    "reasoningTokens": token_count()
                 }
-            }
+            }))
         }
     })
 }
@@ -372,9 +434,39 @@ pub fn validate_arguments(tool: &ToolDescriptor, arguments: &Value) -> Result<()
     validate_against(&tool.input_schema(), arguments)
 }
 
+/// The declared types of one property: `"string"` or `["string", "null"]`.
+///
+/// A missing or malformed `type` yields an empty set, which every value then
+/// fails — an unvalidatable schema must not become an unvalidated one.
+fn declared_types(schema: &Value) -> Vec<&str> {
+    match schema.get("type") {
+        Some(Value::String(single)) => vec![single.as_str()],
+        Some(Value::Array(many)) => many.iter().filter_map(Value::as_str).collect(),
+        _ => Vec::new(),
+    }
+}
+
 fn validate_against(schema: &Value, value: &Value) -> Result<(), ToolFailure> {
     let invalid = ToolFailure::InvalidArguments;
-    match schema.get("type").and_then(Value::as_str) {
+    let types = declared_types(schema);
+    // `null` is accepted only where the schema says so — which, by the
+    // nullability contract above, is exactly the optional properties whose
+    // readers treat it as absent.
+    if value.is_null() {
+        return if types.contains(&"null") {
+            Ok(())
+        } else {
+            Err(invalid)
+        };
+    }
+    // Exactly one non-null type per property in this catalog; pick it rather
+    // than trying every branch, so an unexpected union fails closed.
+    let concrete: Vec<&str> = types
+        .iter()
+        .copied()
+        .filter(|kind| *kind != "null")
+        .collect();
+    match concrete.first().filter(|_| concrete.len() == 1).copied() {
         Some("object") => {
             let object = value.as_object().ok_or(invalid)?;
             let properties = schema
@@ -399,24 +491,30 @@ fn validate_against(schema: &Value, value: &Value) -> Result<(), ToolFailure> {
                 }
             }
             for (key, property) in properties {
-                match object.get(key) {
-                    // An optional key may be omitted, and `null` is the wire's
-                    // way of omitting it.
-                    None | Some(Value::Null) => {}
-                    Some(present) => validate_against(property, present)?,
+                // An absent optional key is fine; a present one — including a
+                // present `null` — is validated against its own schema, which
+                // is where the nullability contract is actually applied.
+                if let Some(present) = object.get(key) {
+                    validate_against(property, present)?;
                 }
             }
             Ok(())
         }
         Some("string") => {
             let text = value.as_str().ok_or(invalid)?;
+            // **Bytes, not characters** — the ceilings these mirror are byte
+            // ceilings in the domain, so counting characters here would admit
+            // a 3,000-emoji body that the adapter then refuses at 12,000 bytes.
+            // Both layers now refuse at the same boundary. `BYTE_BOUND_NOTE`
+            // is what tells a client which unit it is being measured in.
+            let length = text.len() as u64;
             if let Some(min) = schema.get("minLength").and_then(Value::as_u64) {
-                if (text.chars().count() as u64) < min {
+                if length < min {
                     return Err(invalid);
                 }
             }
             if let Some(max) = schema.get("maxLength").and_then(Value::as_u64) {
-                if (text.chars().count() as u64) > max {
+                if length > max {
                     return Err(invalid);
                 }
             }
@@ -615,9 +713,187 @@ mod tests {
     #[test]
     fn every_schema_is_a_closed_object() {
         for tool in TOOL_CATALOG.iter() {
-            let schema = (tool.schema)();
+            let schema = tool.input_schema();
             assert_eq!(schema["type"], "object", "{}", tool.name);
             assert_eq!(schema["additionalProperties"], false, "{}", tool.name);
+        }
+    }
+
+    /// **The nullability contract, checked mechanically for all eight tools.**
+    ///
+    /// Optional property ⇔ declared nullable. The adapter's readers treat a
+    /// `null` as an omitted value for every optional field, so a schema that
+    /// disagreed on any one of them would be describing a different program —
+    /// and a future property added on one side only fails here rather than in
+    /// production.
+    #[test]
+    fn the_nullability_contract_holds_for_every_tool() {
+        fn walk(name: &str, schema: &Value) {
+            let required: Vec<&str> = schema
+                .get("required")
+                .and_then(Value::as_array)
+                .map(|values| values.iter().filter_map(Value::as_str).collect())
+                .unwrap_or_default();
+            let properties = schema["properties"]
+                .as_object()
+                .unwrap_or_else(|| panic!("{name} declares properties"));
+            for (key, property) in properties {
+                let nullable = declared_types(property).contains(&"null");
+                assert_eq!(
+                    nullable,
+                    !required.contains(&key.as_str()),
+                    "{name}.{key}: optional ⇔ nullable"
+                );
+                if declared_types(property).contains(&"object") {
+                    walk(&format!("{name}.{key}"), property);
+                }
+            }
+        }
+        for tool in TOOL_CATALOG.iter() {
+            walk(tool.name, &tool.input_schema());
+        }
+    }
+
+    /// Every length bound says which unit it counts, because the answer is not
+    /// the one a JSON Schema reader would assume.
+    #[test]
+    fn every_length_bound_declares_its_unit() {
+        fn walk(name: &str, schema: &Value) {
+            let Some(properties) = schema["properties"].as_object() else {
+                return;
+            };
+            for (key, property) in properties {
+                if property.get("maxLength").is_some() || property.get("minLength").is_some() {
+                    assert_eq!(
+                        property.get("description").and_then(Value::as_str),
+                        Some(BYTE_BOUND_NOTE),
+                        "{name}.{key} bounds a string without saying it counts bytes"
+                    );
+                }
+                if declared_types(property).contains(&"object") {
+                    walk(&format!("{name}.{key}"), property);
+                }
+            }
+        }
+        for tool in TOOL_CATALOG.iter() {
+            walk(tool.name, &tool.input_schema());
+        }
+    }
+
+    /// A `null` is accepted exactly where the schema declares it and nowhere
+    /// else — including inside the nested usage object.
+    #[test]
+    fn null_is_accepted_only_where_it_is_declared() {
+        let post = TOOL_CATALOG
+            .iter()
+            .find(|tool| tool.name == TOOL_MESSAGE_POST)
+            .expect("catalog");
+        let mut arguments = json!({
+            "channelId": "5b1f4a2e-0000-4000-8000-000000000001",
+            "clientMsgId": "5b1f4a2e-0000-4000-8000-000000000002",
+            "body": "hello"
+        });
+        arguments["rootId"] = Value::Null;
+        assert!(
+            validate_arguments(post, &arguments).is_ok(),
+            "an optional field is declared nullable, so null means absent"
+        );
+        arguments["body"] = Value::Null;
+        assert_eq!(
+            validate_arguments(post, &arguments),
+            Err(ToolFailure::InvalidArguments),
+            "a required field is not nullable"
+        );
+
+        let complete = TOOL_CATALOG
+            .iter()
+            .find(|tool| tool.name == TOOL_RUN_COMPLETE)
+            .expect("catalog");
+        assert!(validate_arguments(
+            complete,
+            &json!({"leaseHandle": "x", "status": "succeeded", "usage": Value::Null})
+        )
+        .is_ok());
+        assert!(validate_arguments(
+            complete,
+            &json!({"leaseHandle": "x", "status": "succeeded",
+                    "usage": {"promptTokens": Value::Null}})
+        )
+        .is_ok());
+        assert_eq!(
+            validate_arguments(
+                complete,
+                &json!({"leaseHandle": "x", "status": Value::Null})
+            ),
+            Err(ToolFailure::InvalidArguments)
+        );
+    }
+
+    /// **A string is measured in bytes at the validator, like the domain.**
+    ///
+    /// The regression: 3,000 emoji are 3,000 characters and 12,000 bytes, so a
+    /// character count let a body through the schema that the adapter then
+    /// refused — two layers disagreeing about the same published number.
+    #[test]
+    fn string_bounds_are_counted_in_bytes() {
+        let post = TOOL_CATALOG
+            .iter()
+            .find(|tool| tool.name == TOOL_MESSAGE_POST)
+            .expect("catalog");
+        let arguments = |body: String| {
+            json!({
+                "channelId": "5b1f4a2e-0000-4000-8000-000000000001",
+                "clientMsgId": "5b1f4a2e-0000-4000-8000-000000000002",
+                "body": body
+            })
+        };
+        // 3,000 emoji: well under the 8,000 *character* reading, well over the
+        // 8,000 *byte* one this schema means.
+        let emoji = "\u{1F600}".repeat(3_000);
+        assert_eq!(emoji.chars().count(), 3_000);
+        assert_eq!(emoji.len(), 12_000);
+        assert_eq!(
+            validate_arguments(post, &arguments(emoji)),
+            Err(ToolFailure::InvalidArguments)
+        );
+        // Exactly at the ceiling in bytes is still accepted.
+        assert!(validate_arguments(post, &arguments("a".repeat(8_000))).is_ok());
+        assert_eq!(
+            validate_arguments(post, &arguments("a".repeat(8_001))),
+            Err(ToolFailure::InvalidArguments)
+        );
+    }
+
+    /// The token ceiling the ledger's `i32` column implies is declared, so the
+    /// schema refuses exactly what the narrowing would have refused.
+    #[test]
+    fn token_counts_declare_the_ledger_column_ceiling() {
+        let complete = TOOL_CATALOG
+            .iter()
+            .find(|tool| tool.name == TOOL_RUN_COMPLETE)
+            .expect("catalog");
+        let usage = |value: i64| {
+            json!({"leaseHandle": "x", "status": "succeeded",
+                   "usage": {"promptTokens": value}})
+        };
+        assert!(validate_arguments(complete, &usage(MAX_TOKEN_COUNT)).is_ok());
+        for out_of_range in [MAX_TOKEN_COUNT + 1, -1] {
+            assert_eq!(
+                validate_arguments(complete, &usage(out_of_range)),
+                Err(ToolFailure::InvalidArguments),
+                "{out_of_range}"
+            );
+        }
+        for field in [
+            "promptTokens",
+            "completionTokens",
+            "cachedTokens",
+            "reasoningTokens",
+        ] {
+            let schema = complete.input_schema();
+            let property = &schema["properties"]["usage"]["properties"][field];
+            assert_eq!(property["minimum"], json!(0), "{field}");
+            assert_eq!(property["maximum"], json!(MAX_TOKEN_COUNT), "{field}");
         }
     }
 
