@@ -325,8 +325,12 @@ pub async fn detect_pairing_in_tx(
     let client_name: Option<String> = None;
     let client_version: Option<String> = None;
     let capabilities = sanitize_capabilities(capabilities);
-    let live_member: Option<Uuid> = sqlx::query_scalar(
-        "SELECT agent_member_id FROM hosted_agent_connection \
+    // The connection id travels with the member id because the invalidation
+    // below is connection-scoped (#1374) — and this `FOR UPDATE` is the lock
+    // that makes that scoping safe: the row the invalidation writes is already
+    // this transaction's.
+    let live: Option<(Uuid, Uuid)> = sqlx::query_as(
+        "SELECT id, agent_member_id FROM hosted_agent_connection \
           WHERE workspace_id=$1 AND status='pairing_pending' \
             AND pairing_challenge_hash=digest($2::text, 'sha256') FOR UPDATE",
     )
@@ -334,9 +338,10 @@ pub async fn detect_pairing_in_tx(
     .bind(raw)
     .fetch_optional(&mut *conn)
     .await?;
-    if let Some(agent_member_id) = live_member {
+    if let Some((connection_id, agent_member_id)) = live {
         if !hosted_identity_is_live_in_tx(conn, workspace_id, agent_member_id).await? {
-            invalidate_hosted_lifecycle_in_tx(conn, workspace_id, agent_member_id).await?;
+            invalidate_hosted_lifecycle_in_tx(conn, workspace_id, connection_id, agent_member_id)
+                .await?;
             return Ok(HostedMutation::Expired);
         }
     }
@@ -407,11 +412,13 @@ pub async fn resolve_pairing_in_tx(
     let Some(row) = row else {
         return Ok(HostedMutation::NotFound);
     };
+    let connection_id: Uuid = row.try_get("id")?;
     let agent_member_id: Uuid = row.try_get("agent_member_id")?;
     if row.try_get::<bool, _>("expired")?
         || !hosted_identity_is_live_in_tx(conn, workspace_id, agent_member_id).await?
     {
-        invalidate_hosted_lifecycle_in_tx(conn, workspace_id, agent_member_id).await?;
+        invalidate_hosted_lifecycle_in_tx(conn, workspace_id, connection_id, agent_member_id)
+            .await?;
         return Ok(HostedMutation::Expired);
     }
     Ok(HostedMutation::Applied(AgentBearerIdentity {
@@ -486,29 +493,85 @@ async fn hosted_identity_is_live_in_tx(
     Ok(live.is_some())
 }
 
+/// Retire ONE hosted connection: its credentials, its row, and the dedicated
+/// sentinel's pause.
+///
+/// ## Why this is connection-scoped rather than member-scoped (#1374)
+///
+/// Until this repair the first two statements were keyed by `actor_member_id`
+/// and swept **every** hosted connection and credential the agent owned. That
+/// is the wrong half of an AB-BA pair. The canonical hosted lock order is
+/// `connection → token → member → membership → profile` — the order
+/// [`resolve_hosted_tool_identity_in_tx`] takes, the order every inbox
+/// statement takes (`momo_messaging::hosted_inbox`, `FOR SHARE OF
+/// hc,t,m,wm,ap,cm`), and the order [`crate::hosted_disconnect`] takes. A
+/// member-scoped sweep runs the other way: [`prove_hosted_binding_in_tx`]
+/// reaches it holding `member`/`workspace_membership` `FOR UPDATE` and then
+/// asks for a *sibling* connection's token, while a concurrent inbox append
+/// holds that token `FOR SHARE` and waits for the same member row. 40P01.
+///
+/// The two available repairs were "scope the writes to the current connection"
+/// and "make prove take token before member". The second is not actually
+/// available: prove already probes token before member, and the inversion is
+/// created by this function reaching *back* for rows outside the connection the
+/// caller locked — reordering prove cannot fix a write set that widens after
+/// every probe. Taking every sibling token `FOR UPDATE` up front would fix the
+/// order at the price of serializing unrelated connections and blocking their
+/// inbox appends, which is a throughput regression bought with a lock the
+/// transaction does not need.
+///
+/// Scoping is therefore the repair, and it makes the safety argument local:
+/// **every caller already holds this connection's row `FOR UPDATE`** —
+/// [`detect_pairing_in_tx`], [`resolve_pairing_in_tx`],
+/// `expire_stale_detected_in_tx`, [`confirm_hosted_connection_in_tx`] and
+/// [`prove_hosted_binding_in_tx`] all take it before they get here — so after
+/// this change the function's whole write set is rows the caller owns plus the
+/// agent's single profile row. Nothing here reaches a row a concurrent reader
+/// could be holding, in any order, so no interleaving with the inbox/tool paths
+/// can close a cycle. It is also the shape [`regenerate_pairing_in_tx`] and
+/// `hosted_disconnect::revoke_and_pause_in_tx` already have — this was the last
+/// member-scoped write in the hosted lifecycle.
+///
+/// Nothing is lost by narrowing. The 069 partial unique index
+/// (`hosted_agent_connection_workspace_agent_live_uniq`) permits an agent at
+/// most one connection outside `expired`/`disconnected`, so "the agent's other
+/// live connection" is not a state that exists; and every path that retires a
+/// connection — this one, `regenerate_pairing_in_tx`, the disconnect and the
+/// reconcile — revokes that connection's credentials on the way out, so a
+/// terminal connection never keeps a live one for a later sweep to find. A
+/// credential that somehow survived on a retired connection is inert anyway:
+/// [`prove_hosted_binding_in_tx`] admits a bearer only while it still IS its
+/// connection's `active_token_id` and that connection is `detected`/`active`.
 async fn invalidate_hosted_lifecycle_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
+    connection_id: Uuid,
     agent_member_id: Uuid,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
         "UPDATE token SET revoked_at=COALESCE(revoked_at, now()) \
-          WHERE workspace_id=$1 AND actor_member_id=$2 \
+          WHERE workspace_id=$1 AND hosted_connection_id=$2 \
             AND credential_class='hosted_active' AND revoked_at IS NULL",
     )
     .bind(workspace_id)
-    .bind(agent_member_id)
+    .bind(connection_id)
     .execute(&mut *conn)
     .await?;
     sqlx::query(
         "UPDATE hosted_agent_connection SET status='expired', active_token_id=NULL, updated_at=now() \
-          WHERE workspace_id=$1 AND agent_member_id=$2 \
+          WHERE workspace_id=$1 AND id=$2 AND agent_member_id=$3 \
             AND status IN ('pairing_pending','detected')",
     )
     .bind(workspace_id)
+    .bind(connection_id)
     .bind(agent_member_id)
     .execute(&mut *conn)
     .await?;
+    // The dedicated sentinel has exactly one profile row, so this one is
+    // member-keyed by nature rather than by scope. It is last, after the member
+    // and membership rows the caller may hold — the canonical order's tail — so
+    // a reader that holds the profile already holds everything above it and
+    // cannot be waiting on this transaction.
     sqlx::query(
         "UPDATE agent_profile SET paused=true, version=version + CASE WHEN paused THEN 0 ELSE 1 END, \
            updated_at=now() WHERE workspace_id=$1 AND agent_member_id=$2",
@@ -535,7 +598,8 @@ async fn expire_stale_detected_in_tx(
     .fetch_optional(&mut *conn)
     .await?;
     if let Some(agent_member_id) = agent_member_id {
-        invalidate_hosted_lifecycle_in_tx(conn, workspace_id, agent_member_id).await?;
+        invalidate_hosted_lifecycle_in_tx(conn, workspace_id, connection_id, agent_member_id)
+            .await?;
         return Ok(true);
     }
     Ok(false)
@@ -561,7 +625,8 @@ pub async fn confirm_hosted_connection_in_tx(
     .await?;
     if let Some(agent_member_id) = detected_member {
         if !hosted_identity_is_live_in_tx(conn, workspace_id, agent_member_id).await? {
-            invalidate_hosted_lifecycle_in_tx(conn, workspace_id, agent_member_id).await?;
+            invalidate_hosted_lifecycle_in_tx(conn, workspace_id, connection_id, agent_member_id)
+                .await?;
             return Ok(HostedMutation::Expired);
         }
     }
@@ -659,8 +724,30 @@ pub async fn prove_hosted_binding_in_tx(
     if expire_stale_detected_in_tx(conn, identity.workspace_id, connection_id).await? {
         return Ok(HostedProof::Rejected);
     }
-    // Regenerate also locks connection then token. Keeping the same order here
-    // prevents proof/regenerate from forming a connection↔token deadlock.
+    // Lock order below is the hosted canon: `connection → token → member →
+    // workspace_membership → agent_profile → membership`. Everything that
+    // touches a hosted connection takes that prefix and nothing takes it
+    // backwards:
+    //
+    // * `regenerate_pairing_in_tx` — connection, then that connection's tokens,
+    //   which is why proof and regeneration cannot form a connection↔token
+    //   cycle;
+    // * `resolve_hosted_tool_identity_in_tx` (the Agent Port tool authority)
+    //   and every inbox statement — `momo_messaging::hosted_inbox`'s appends
+    //   (:217, :494), the fan-out recipient scan (:330) and the cursor read
+    //   (:645) — take the whole prefix in ONE statement as `FOR SHARE OF
+    //   hc,t,m,wm,ap,cm`, so an inbox transaction that holds this agent's token
+    //   necessarily already holds its connection, and it waits for the
+    //   `FOR UPDATE` below instead of racing it;
+    // * `hosted_disconnect`'s revoke/pause and reconcile take token → member →
+    //   membership → profile under the connection lock they already hold.
+    //
+    // The tail of this function must obey the same order, which is what
+    // `invalidate_hosted_lifecycle_in_tx` being connection-scoped buys (#1374):
+    // a member-scoped revocation would reach a sibling connection's token
+    // *after* the member/membership locks below, and an inbox append holding
+    // that token `FOR SHARE` while waiting for the same member row closes the
+    // AB-BA.
     let status: Option<String> = sqlx::query_scalar(
         "SELECT status::text FROM hosted_agent_connection WHERE workspace_id=$1 AND id=$2 \
           AND agent_member_id=$3 AND active_token_id=$4 AND confirmed_at IS NOT NULL \
@@ -729,7 +816,16 @@ pub async fn prove_hosted_binding_in_tx(
             .await?;
             return Ok(HostedProof::Reconciled);
         }
-        invalidate_hosted_lifecycle_in_tx(conn, identity.workspace_id, identity.member_id).await?;
+        // #1374: connection-scoped. This branch is the one that reaches the
+        // invalidation holding `member`/`workspace_membership` locks, so it is
+        // the branch a member-scoped revocation would have inverted.
+        invalidate_hosted_lifecycle_in_tx(
+            conn,
+            identity.workspace_id,
+            connection_id,
+            identity.member_id,
+        )
+        .await?;
         return Ok(HostedProof::Rejected);
     }
     let activated: bool = sqlx::query_scalar(
@@ -803,7 +899,7 @@ pub struct HostedToolIdentity {
 /// to a previous connection era cannot be replayed against the current one).
 ///
 /// Lock order is HAP-E4's: connection → token → member → membership → profile.
-/// Any other order here would form the AB-BA pair #1374 already tracks.
+/// Any other order here would reopen the AB-BA pair #1374 closed.
 pub async fn resolve_hosted_tool_identity_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,

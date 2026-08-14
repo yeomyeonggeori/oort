@@ -31,9 +31,10 @@
 //! Second — and this is the #1374 lesson made structural — the token revoke is
 //! scoped by `hosted_connection_id`, never by `actor_member_id`. Revoking "every
 //! hosted credential of this member" would reach a sibling connection's token
-//! while holding this connection's locks, which is the AB-BA pair #1374 tracks
-//! on the prove path. This module never widens past the connection it was
-//! handed, so there is nothing here for that repair to collide with.
+//! while holding this connection's locks, which was the AB-BA pair #1374 closed
+//! on the prove path (`hosted_connection::invalidate_hosted_lifecycle_in_tx` is
+//! connection-scoped for the same reason). This module never widened past the
+//! connection it was handed, so it needed no repair of its own.
 //!
 //! ## What resolution means, and what it deliberately does not
 //!
