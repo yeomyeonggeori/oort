@@ -732,13 +732,10 @@ async fn cancel_in_tx(conn: &mut PgConnection, input: CancelInput) -> DbRejectab
     //
     // It is a **run** reference rather than a job one on purpose: the job may
     // already be `done` and the thing that changed is the run's state.
-    if let Some(connection_id) = momo_auth::active_hosted_connection_in_tx(
-        conn,
-        workspace_id,
-        run.agent_member_id,
-    )
-    .await
-    .map_err(momo_db::DbError::from)?
+    if let Some(connection_id) =
+        momo_auth::active_hosted_connection_in_tx(conn, workspace_id, run.agent_member_id)
+            .await
+            .map_err(momo_db::DbError::from)?
     {
         momo_messaging::append_run_reference_in_tx(
             conn,
