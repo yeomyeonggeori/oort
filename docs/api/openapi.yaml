@@ -4808,14 +4808,29 @@ paths:
         `params._meta[io.modelcontextprotocol/clientCapabilities]`, and mirror
         their version and method in `MCP-Protocol-Version` and `Mcp-Method`.
         `Mcp-Name` is additionally mandatory for `tools/call` and must match
-        the body tool name. The modern foundation exposes `server/discover`,
-        an empty `tools/list`, and an unknown-tool `tools/call` error; it does
-        not expose initialize, ping, protocol sessions, or a GET stream.
+        the body tool name. The modern era exposes `server/discover`, a scoped
+        `tools/list` and `tools/call`; it does not expose initialize, ping,
+        protocol sessions, or a GET stream.
+
+        `tools/list` and `tools/call` are answered from one intersection of the
+        connection's approved scopes, the credential's current scopes and the
+        server capability, so the advertised catalog is exactly the callable
+        one. A credential carrying only `agent:port:connect` lists no tool and
+        may call none; a tool outside the caller's view answers byte-identically
+        to a tool that does not exist. The eight tools are `oort_inbox_read`,
+        `oort_conversation_read`, `oort_message_post`, `oort_jobs_claim`,
+        `oort_job_renew`, `oort_job_release`, `oort_run_event` and
+        `oort_run_complete`; each binds an existing domain rather than a second
+        one, and job authority travels only as an opaque `leaseHandle`. Tool
+        failures use a closed set of JSON-RPC codes (-32602 invalid arguments,
+        -32003 not authorized, -32004 unavailable, -32005 conflict, -32603
+        internal) with fixed messages, so a refusal never distinguishes absent
+        from invisible from forbidden.
 
         The narrow legacy adapter pins `2025-11-25`. Its first `initialize`
         may omit `MCP-Protocol-Version`; every later request must carry that
         exact version. It accepts `initialize`,
-        `notifications/initialized`, `ping`, an empty `tools/list`, and an
+        `notifications/initialized`, `ping`, a scoped `tools/list`, and an
         unknown-tool `tools/call` error, without issuing a session id. All
         calls send `Content-Type: application/json` and an `Accept` value that
         contains both `application/json` and `text/event-stream`. Recognized
@@ -6768,6 +6783,16 @@ components:
 
     HostedAgentScope:
       type: string
+      description: >
+        The closed hosted scope set. `agent:port:connect` is reachability only:
+        it opens `POST /v1/mcp/agent-port` and no product tool. Each of the
+        others opens exactly one Agent Port tool family and no REST route —
+        `agent:inbox:read` -> oort_inbox_read, `messages:read` ->
+        oort_conversation_read, `messages:write` -> oort_message_post,
+        `agent:jobs:read` -> oort_jobs_claim/oort_job_renew/oort_job_release,
+        `agent:runs:callback` -> oort_run_event/oort_run_complete. A tool is
+        listed and callable only when the connection approval, the credential's
+        current scopes and the server capability all carry its scope.
       enum: [agent:port:connect, agent:inbox:read, messages:read, messages:write, agent:jobs:read, agent:runs:callback]
 
     HostedAgentConnection:
