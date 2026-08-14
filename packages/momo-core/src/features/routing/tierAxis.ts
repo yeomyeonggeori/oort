@@ -144,6 +144,15 @@ const NO_HOST_REASON: Readonly<Record<ExecutionTierKey, string>> = {
   t3: "이 워크스페이스에 등록된 클라우드 호스트가 없습니다.",
 };
 
+// 정책이 관리형 클라우드(oort Cloud)에서 자동 재개하는데 등록기에 직접 올린
+// 클라우드 호스트가 하나도 없을 때 T3 줄이 다는 사유. 관리형 클라우드는 등록
+// 호스트가 아니므로(ADR-0163 번들 호스팅 · ADR-0164 관리형 크레딧 과금) 이 조합은
+// 정상이다. 그런데 그 줄이 그냥 「호스트 없음」으로 끝나면, 세 줄 위 상속 줄의
+// 「자동 재개: T3 · 클라우드」와 정면으로 어긋나 보인다(design-review M2). 그래서
+// 빈 등록기를 인정하되 정책이 겨냥한 관리형 클라우드를 그 자리에서 이어 준다.
+const RESERVED_CLOUD_T3_REASON =
+  "등록된 클라우드 호스트는 없지만, 정책이 관리형 oort Cloud에서 자동 재개합니다.";
+
 const ALL_OFFLINE_REASON: Readonly<Record<ExecutionTierKey, string>> = {
   t1: "등록된 데스크톱 앱 호스트가 모두 오프라인입니다.",
   t2: "등록된 셀프호스트 데몬이 모두 오프라인입니다.",
@@ -314,7 +323,8 @@ function resolveInheritance(input: ExecutionTierInput): ResolvedInheritance {
 
 function tierOption(
   key: ExecutionTierKey,
-  input: ExecutionTierInput
+  input: ExecutionTierInput,
+  resumesReservedCloud: boolean
 ): ExecutionTierOption {
   const label = workExecutionLocationLabel(key);
   if (input.hostsState === "pending") {
@@ -328,6 +338,12 @@ function tierOption(
       host.revokedAtMs === undefined && workExecutionLocationKey(host.type) === key
   );
   if (rows.length === 0) {
+    // 클라우드 티어만 특별하다: 등록기가 비어도 관리형 oort Cloud가 정책의 자동
+    // 재개 목적지면 상속 줄과 어긋나지 않게 그 사실을 인정한다(M2). 다른 티어와
+    // 다른 클라우드의 빈 상태는 그대로 「호스트 없음」이다.
+    if (key === "t3" && resumesReservedCloud) {
+      return { key, label, eligible: false, reason: RESERVED_CLOUD_T3_REASON };
+    }
     return { key, label, eligible: false, reason: NO_HOST_REASON[key] };
   }
   if (!rows.some((host) => host.online)) {
@@ -346,9 +362,15 @@ export function resolveExecutionTierAxis(
   input: ExecutionTierInput
 ): ExecutionTierAxis {
   const { inherited, summaryValue } = resolveInheritance(input);
+  // 정책이 예약된 관리형 클라우드에서 자동 재개하는가. 그렇다면 빈 클라우드 등록기는
+  // 모순이 아니라 정상이고, T3 줄이 그 사실을 직접 말해야 한다(M2).
+  const resumesReservedCloud =
+    input.policy?.mode === "auto" && input.policy?.autoTarget === CLOUD_TARGET;
   return {
     inherited,
-    options: EXECUTION_TIER_KEYS.map((key) => tierOption(key, input)),
+    options: EXECUTION_TIER_KEYS.map((key) =>
+      tierOption(key, input, resumesReservedCloud)
+    ),
     summary: `${EXECUTION_TIER_LABEL} ${summaryValue}`,
     overrideSupported: false,
     overrideReason: TIER_OVERRIDE_UNSUPPORTED_REASON,

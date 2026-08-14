@@ -43,7 +43,13 @@
 //                      상속 줄은 "확인하지 못함"이다 — 이 축의 empty/error 상태.
 //
 // 어느 형상에서도 이 상자는 잠겨 있다. 전선이 없기 때문이고(routing의 허용 키는
-// model·effort 둘뿐), 그 사실이 상자 아래 한 문장으로 함께 찍힌다.
+// model·effort 둘뿐), 그 사실이 상자 머리에 자물쇠와 함께 한 문장으로 찍힌다.
+//
+// 세 프레임이 축의 가장자리를 마저 담는다:
+//   narrow-900 여럿 접힘   좁은 폭에서 두 핸들 뒤 접힌 요약의 맨 끝 티어 조각이
+//                          살아남는가(design-review M3).
+//   tier-loading           등록기·정책을 아직 기다리는 pending 상태(nit). 두 티어
+//                          라우트를 붙잡아 축 하나만 잠근 채 찍는다.
 // =============================================================================
 
 import { spawn } from "node:child_process";
@@ -763,7 +769,78 @@ async function captureScheme(browser, scheme, support) {
   await narrow.getByTestId("composer-routing-model").waitFor({ state: "visible" });
   await narrow.waitForTimeout(300);
   await shoot(narrow, `${OUT_DIR}/narrow-900-composer-open-${tag}.png`, shots);
+
+  // 8b. 좁은 폭에서 **여럿을 부른 접힌 줄** (design-review M3). 이것이 이 줄의
+  //     최악의 경우다: 두 핸들이 붙은 라벨이 앞에 서고, 그 뒤 접힌 요약의 맨
+  //     끝에 실행 위치 조각이 붙는다. 앞판은 요약을 `truncate` 한 조각으로 그려
+  //     좁아지면 그 티어 조각부터 잘려 나갔다 — 이 티켓이 더한 「상속 티어 상시
+  //     표기(접힌 요약 포함)」가 정확히 거기서 사라졌다. 지금은 티어가 `shrink-0`
+  //     이라 모델·강도가 말줄임돼도 살아남고, 그 사실을 이 프레임이 두 스킴에서
+  //     증명한다. 멘션이 many로 바뀌면 접힘 상태로 새로 마운트되므로 따로 접지
+  //     않아도 접힌 줄이 잡힌다.
+  await narrow
+    .getByTestId("composer-input")
+    .fill("@hermes @kim-intern 두 분 같이 확인 부탁합니다");
+  await narrow
+    .locator('[data-testid="composer-routing"][data-called="2"]')
+    .waitFor({ state: "visible" });
+  await narrow.waitForTimeout(250);
+  await shoot(
+    narrow,
+    `${OUT_DIR}/narrow-900-composer-many-collapsed-${tag}.png`,
+    shots
+  );
   await narrowContext.close();
+
+  // 9. 로딩 상태 (design-review nit). 실행 위치 축이 등록기·정책 두 읽기를 아직
+  //    기다리는 프레임이다. 코어에 pending 판정과 문구가 있고 단위 테스트도 있지만
+  //    (「등록된 호스트를 확인하는 중입니다」 · 상속 「확인 중」), 이 상태를 찍은
+  //    스크린샷이 없었다. 두 티어 라우트를 스크린샷 뒤까지 붙잡아 축을 pending에
+  //    고정한다 — effort 표는 정상 응답하므로 잠긴 것은 티어 축 하나뿐이고, 그
+  //    격리가 곧 이 프레임의 논점이다. sendless 형상에서 스킴마다 한 번씩만 찍는다.
+  if (support === "sendless") {
+    const loadingContext = await browser.newContext({
+      viewport: VIEWPORT,
+      deviceScaleFactor: 2,
+      colorScheme: scheme,
+      reducedMotion: "reduce",
+    });
+    await installMocks(loadingContext, support, { count: 0, puts: [] });
+    // 두 티어 읽기를 붙잡는다. Playwright는 나중에 등록된 라우트를 먼저 보므로 이
+    // 오버라이드가 installMocks의 정상 응답을 이기고, 풀린 뒤 `fallback()`으로 그
+    // 정상 응답에 넘긴다.
+    let releaseTier = () => {};
+    const held = new Promise((resolve) => {
+      releaseTier = resolve;
+    });
+    for (const pattern of [
+      "**/v1/workspaces/*/work-hosts",
+      "**/v1/workspaces/*/work-tier-policy/me",
+    ]) {
+      await loadingContext.route(pattern, async (route) => {
+        await held;
+        return route.fallback();
+      });
+    }
+    const loading = await loadingContext.newPage();
+    await loading.goto(ORIGIN, { waitUntil: "networkidle" });
+    await signIn(loading);
+    await loading.getByTestId("composer-input").waitFor({ state: "visible" });
+    await loading
+      .getByTestId("composer-input")
+      .fill("@hermes 빌드 로그 요약만 부탁합니다");
+    await loading.getByTestId("composer-routing").waitFor({ state: "visible" });
+    await loading.getByTestId("composer-routing-toggle").click();
+    await loading.getByTestId("composer-routing-tier").waitFor({ state: "visible" });
+    await loading.waitForTimeout(300);
+    await shoot(
+      loading,
+      `${OUT_DIR}/composer-routing-tier-loading-${scheme}.png`,
+      shots
+    );
+    releaseTier();
+    await loadingContext.close();
+  }
 
   return shots;
 }

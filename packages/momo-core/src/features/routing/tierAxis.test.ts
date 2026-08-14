@@ -95,6 +95,27 @@ describe("eligibility is read from the registry and nowhere else", () => {
     );
   });
 
+  it("bridges the empty T3 row to the managed cloud the policy resumes on", () => {
+    // 정책이 관리형 클라우드에서 자동 재개하는데 등록기에는 직접 올린 클라우드
+    // 호스트가 없다. 관리형 클라우드는 등록 호스트가 아니므로 이 조합은 정상이고
+    // (ADR-0163/0164), 그때 T3 줄이 「호스트 없음」으로 끝나면 상속 줄의 「자동
+    // 재개: T3 · 클라우드」와 어긋나 보인다. 대신 그 관리형 경로를 이어 준다(M2).
+    const axis = resolveExecutionTierAxis(
+      input({ hosts: [host({ type: "app" })], policy: { mode: "auto", autoTarget: "cloud" } })
+    );
+    expect(axis.inherited.key).toBe("t3");
+    const t3 = optionFor(axis, "t3");
+    expect(t3.eligible).toBe(false);
+    expect(t3.reason).toBe(
+      "등록된 클라우드 호스트는 없지만, 정책이 관리형 oort Cloud에서 자동 재개합니다."
+    );
+    // 정책이 클라우드를 겨냥하지 않으면 같은 빈 등록기라도 평범한 「호스트 없음」이다.
+    const plain = resolveExecutionTierAxis(input({ hosts: [host({ type: "app" })] }));
+    expect(optionFor(plain, "t3").reason).toBe(
+      "이 워크스페이스에 등록된 클라우드 호스트가 없습니다."
+    );
+  });
+
   it("separates 'registered but all offline' from 'not registered'", () => {
     const axis = resolveExecutionTierAxis(
       input({ hosts: [host({ type: "app", online: false })] })

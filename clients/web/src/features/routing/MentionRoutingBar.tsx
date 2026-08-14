@@ -185,6 +185,35 @@ function ToggleAction({
   );
 }
 
+/**
+ * 접힌 줄의 요약. 모델·강도는 좁아지면 말줄임되지만 실행 위치 조각은 줄지 않는다
+ * (`shrink-0`): 이 티켓이 더한 「상속 티어 상시 표기(접힌 요약 포함)」가 접힌
+ * 요약에서 가장 먼저 잘려 나가면 안 된다 — 티어 조각이 줄 맨 끝에 붙어 있어
+ * `truncate` 한 조각이던 앞판에서는 좁은 폭에서 그것부터 사라졌다(design-review M3).
+ *
+ * 두 조각을 잇던 가운뎃점도 뺐다. 티어 라벨 「T3 · 클라우드」가 가운뎃점을 이미
+ * 품고 있어서, 축을 가르는 가운뎃점과 라벨 안의 가운뎃점이 한 줄에서 겹쳐 어느
+ * 것이 축 경계인지 읽히지 않았다(nit). 축은 이제 간격으로 가르고, 가운뎃점은
+ * 조각 **안**에만 남는다 — 정본 라벨은 건드리지 않는다.
+ */
+function SummaryLine({
+  modelEffort,
+  tier,
+}: {
+  modelEffort: string;
+  tier: string | null;
+}) {
+  return (
+    <span
+      className="flex min-w-0 flex-1 items-baseline gap-2 text-ink-muted"
+      data-testid="composer-routing-summary"
+    >
+      <span className="min-w-0 truncate">{modelEffort}</span>
+      {tier && <span className="shrink-0">{tier}</span>}
+    </span>
+  );
+}
+
 export function MentionRoutingBar({
   channelId,
   target,
@@ -289,13 +318,17 @@ function OneTargetRow({
     effortReady && sendTier.support === "ready" && !profileFailed && inheritance !== null;
 
   const inheritedModel = agent.agentModel ?? "";
-  const summary = profileFailed
+  // 티어는 별도 조각으로 넘긴다(SummaryLine): 모델·강도가 좁은 폭에서 말줄임돼도
+  // 상속 티어는 남는다. 실을 값이 아직 없는 갈래(실패·로딩)에서는 티어를 붙이지
+  // 않는다 — 그 줄은 이미 자기 상태를 말하고 있고, 티어까지 얹으면 소음이다.
+  const modelEffortSummary = profileFailed
     ? "상속값을 확인하지 못했습니다"
     : inheritance
       ? `모델 ${draft.model ?? inheritedModelLabel(inheritance)} · 강도 ${
           draft.effort ? effortLabel(draft.effort) : inheritedEffortLabel(inheritance)
-        } · ${tier.summary}`
+        }`
       : "상속값을 불러오는 중";
+  const showTier = !profileFailed && inheritance !== null;
 
   return (
     <div
@@ -310,12 +343,10 @@ function OneTargetRow({
         ) : (
           <span className="shrink-0 text-ink-muted">이번 메시지</span>
         )}
-        <span
-          className="min-w-0 flex-1 truncate text-ink-muted"
-          data-testid="composer-routing-summary"
-        >
-          {summary}
-        </span>
+        <SummaryLine
+          modelEffort={modelEffortSummary}
+          tier={showTier ? tier.summary : null}
+        />
         {profileFailed && (
           <RowAction onClick={profileHandle.refetch} testId="composer-routing-retry">
             다시 시도
@@ -505,15 +536,18 @@ function ManyTargetRow({
     ? `부른 ${count}명이 함께 쓸 수 있는 추론 강도가 없습니다. 강도는 각자 프로필 값이 그대로 적용됩니다.`
     : reason;
 
-  const summary = override
+  // 한 명일 때와 같이 티어는 SummaryLine에 별 조각으로 넘긴다: 좁은 폭에서 두
+  // 핸들이 붙은 이 줄이 가장 먼저 눌리는데, 그때도 상속 티어는 남아야 한다.
+  const modelEffortSummary = override
     ? `모델 ${draft.model ?? "각자 프로필 값"} · 강도 ${
         draft.effort ? effortLabel(draft.effort) : "각자 프로필 값"
-      } · ${tier.summary}`
+      }`
     : unreadable.length > 0
       ? "적용될 값을 확인하지 못했습니다"
       : called.isPending
         ? "적용될 값을 불러오는 중"
-        : `모델·강도 각자 프로필 값 · ${tier.summary}`;
+        : "모델·강도 각자 프로필 값";
+  const showTier = override || (unreadable.length === 0 && !called.isPending);
 
   return (
     <div
@@ -531,12 +565,10 @@ function ManyTargetRow({
         ) : (
           <span className="shrink-0 text-ink-muted">이번 메시지</span>
         )}
-        <span
-          className="min-w-0 flex-1 truncate text-ink-muted"
-          data-testid="composer-routing-summary"
-        >
-          {summary}
-        </span>
+        <SummaryLine
+          modelEffort={modelEffortSummary}
+          tier={showTier ? tier.summary : null}
+        />
         {unreadable.length > 0 && (
           <RowAction onClick={called.refetch} testId="composer-routing-retry">
             다시 시도

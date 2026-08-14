@@ -1,5 +1,5 @@
 import { useId } from "react";
-import { Cloud, Laptop, Server } from "lucide-react";
+import { Cloud, Laptop, Lock, Server } from "lucide-react";
 import { cn } from "@/design/lib/cn";
 import {
   EXECUTION_TIER_LABEL,
@@ -61,7 +61,6 @@ function TierRow({
   label,
   reason,
   checked,
-  eligible,
   icon,
   testId,
 }: {
@@ -70,13 +69,15 @@ function TierRow({
   label: string;
   reason: string | null;
   checked: boolean;
-  /** 여기서 돌 수 있는 곳인가. 지금 이 상자가 실제로 전하는 정보다. */
-  eligible: boolean;
   icon?: typeof Laptop;
   testId: string;
 }) {
   const inputId = `${groupId}-${value}`;
   const Icon = icon;
+  // 「여기서 돌 수 있는 곳인가」는 사유의 유무 하나로 정해진다(적격이면 사유가
+  // null이다 — `tierOption`의 계약). 색·data 훅·마커를 두 출처에서 따로 읽지
+  // 않고 이 한 값에서 읽는다.
+  const eligible = reason === null;
   return (
     <label
       htmlFor={inputId}
@@ -85,20 +86,36 @@ function TierRow({
       className="flex min-w-0 cursor-not-allowed items-center gap-2 border-b border-line px-2 py-1 last:border-b-0"
       data-testid={testId}
       data-checked={checked ? "" : undefined}
-      data-eligible={reason === null ? "" : undefined}
+      data-eligible={eligible ? "" : undefined}
     >
+      {/* 라디오는 의미(라디오그룹·선택·잠금)만 나른다: `sr-only`로 화면에서 빼고
+          찍힌 표시는 아래 마커가 진다. 다크 UA는 `disabled` 라디오의 선택 글리프를
+          회색 원반으로 칠해 점 대 고리의 기하를 지우는데, 이 상자에서 「어느 티어가
+          적용되는가」를 나르는 유일한 표시가 바로 그 선택 글리프다(design-review M1).
+          그래서 표시는 토큰으로 직접 그린다. `disabled`라서 React는 onChange 없는
+          `checked`를 경고하지 않는다. 전선이 오면 `sr-only`와 `disabled`만 걷으면
+          이 라디오가 그대로 컨트롤이 된다. */}
       <input
         type="radio"
         id={inputId}
         name={groupId}
         value={value}
         checked={checked}
-        // `disabled`가 붙어 있으므로 React는 onChange 없는 `checked`를 경고하지
-        // 않는다. 라디오에 `readOnly`를 다는 쪽은 스펙상 아무 뜻도 없는 속성이라
-        // 쓰지 않는다.
         disabled
-        className="accent-accent focus-visible:focus-ring disabled:cursor-not-allowed"
+        className="sr-only"
       />
+      {/* 찍힌 표시를 직접 그린다. 채운 accent 점(상속 = 지금 적용되는 티어) 대 빈
+          고리(나머지)는 두 스킴 모두에서 명확하다 — UA 기본 라디오와 달리 잠겨
+          있어도 색이 죽지 않는다. */}
+      <span
+        aria-hidden="true"
+        className={cn(
+          "grid size-3 shrink-0 place-items-center rounded-full border",
+          checked ? "border-accent" : "border-line-strong"
+        )}
+      >
+        {checked && <span className="size-1 rounded-full bg-accent" />}
+      </span>
       {/* 아이콘이 없는 줄(어느 티어인지 아직 모르는 상속)도 자리는 남긴다. 자리가
           없으면 그 줄만 왼쪽으로 4px 튀어나와 목록의 왼쪽 모서리가 들쭉날쭉해진다. */}
       {Icon ? (
@@ -157,6 +174,21 @@ export function ExecutionTierField({
       <legend className="pb-1 text-meta text-ink-muted">
         {EXECUTION_TIER_LABEL}
       </legend>
+      {/* 잠금은 어느 한 줄이 아니라 상자 전체의 성질이다. 그래서 상속 문장 밑에
+          같은 모양의 문단으로 한 번 더 쌓지 않고(그러면 둘 다 흐린 각주로 읽힌다),
+          자물쇠와 함께 상자 머리에 세워 상자를 여는 사람이 먼저 읽게 한다
+          (design-review M4). 아래 상속 문장은 상속 '값'이 이번 메시지에 무슨 일을
+          하는지를 말한다 — 이제 두 문장은 자리도, 말하는 대상도 다르다. */}
+      {axis.overrideReason && (
+        <p
+          id={reasonId}
+          className="flex items-start gap-2 pb-1 text-meta text-ink-muted"
+          data-testid={`${idPrefix}-tier-reason`}
+        >
+          <Lock aria-hidden="true" className="mt-px size-3 shrink-0" />
+          <span className="min-w-0">{axis.overrideReason}</span>
+        </p>
+      )}
       <div className="flex flex-col rounded-md border border-line">
         {/* 첫 줄은 언제나 상속이고 언제나 찍혀 있다. 이 줄의 기본 내용은
             오버라이드가 아니라 상속이라는 MentionRoutingBar의 결정 그대로다. */}
@@ -166,7 +198,6 @@ export function ExecutionTierField({
           label={axis.inherited.label}
           reason={null}
           checked
-          eligible
           icon={axis.inherited.key === null ? undefined : TIER_ICON[axis.inherited.key]}
           testId={`${idPrefix}-tier-inherit-row`}
         />
@@ -178,7 +209,6 @@ export function ExecutionTierField({
             label={option.label}
             reason={option.reason}
             checked={false}
-            eligible={option.eligible}
             icon={TIER_ICON[option.key]}
             testId={`${idPrefix}-tier-option-${option.key}`}
           />
@@ -193,15 +223,6 @@ export function ExecutionTierField({
       >
         {axis.inherited.sentence}
       </p>
-      {axis.overrideReason && (
-        <p
-          id={reasonId}
-          className="mt-2 text-meta text-ink-muted"
-          data-testid={`${idPrefix}-tier-reason`}
-        >
-          {axis.overrideReason}
-        </p>
-      )}
     </fieldset>
   );
 }
