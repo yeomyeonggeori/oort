@@ -98,9 +98,7 @@ pub async fn set_presence(
                     // Matched no live human member row — returned before any
                     // broadcast, so committing is indistinguishable from a
                     // rollback.
-                    None => Ok(Err(ApiError::forbidden(
-                        "not a live member of this workspace",
-                    ))),
+                    None => Ok(Err(ApiError::forbidden("not a live member of this workspace"))),
                 }
             })
         })

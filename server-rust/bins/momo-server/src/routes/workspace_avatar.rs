@@ -54,8 +54,8 @@ use crate::dto::{AvatarResponse, AvatarUploadResponse, CreateAvatarUploadRequest
 use crate::error::ApiError;
 use crate::routes::attachments::drive_error;
 use crate::routes::shared::{
-    agent_tenant_tx, audit_via_token_id, epoch_ms, path_uuid, require_workspace_operator,
-    settle_db, workspace_scope, DbRejectable,
+    agent_tenant_tx, audit_via_token_id, epoch_ms, path_uuid, require_workspace_operator, settle_db,
+    workspace_scope, DbRejectable,
 };
 use crate::AppState;
 
@@ -264,23 +264,22 @@ pub async fn avatar_content(
     let workspace_id = workspace_scope(&workspace, &principal)?;
     let member_id = principal.member_id;
 
-    let found: DbRejectable<AvatarMedia> =
-        agent_tenant_tx(&state.pool, workspace_id, move |conn| {
-            Box::pin(async move {
-                // Read scope = active workspace membership, not channel membership.
-                if active_workspace_role(conn, workspace_id, member_id)
-                    .await?
-                    .is_none()
-                {
-                    return Ok(Err(ApiError::forbidden("not a workspace member")));
-                }
-                match read_current_avatar_media_in_tx(conn, workspace_id).await? {
-                    Some(media) => Ok(Ok(media)),
-                    None => Ok(Err(ApiError::not_found("workspace has no avatar"))),
-                }
-            })
+    let found: DbRejectable<AvatarMedia> = agent_tenant_tx(&state.pool, workspace_id, move |conn| {
+        Box::pin(async move {
+            // Read scope = active workspace membership, not channel membership.
+            if active_workspace_role(conn, workspace_id, member_id)
+                .await?
+                .is_none()
+            {
+                return Ok(Err(ApiError::forbidden("not a workspace member")));
+            }
+            match read_current_avatar_media_in_tx(conn, workspace_id).await? {
+                Some(media) => Ok(Ok(media)),
+                None => Ok(Err(ApiError::not_found("workspace has no avatar"))),
+            }
         })
-        .await;
+    })
+    .await;
     let media = settle_db("workspace_avatar.content", found)?;
 
     let Some(drive_file_id) = media.drive_file_id.filter(|_| media.status == "complete") else {
@@ -302,10 +301,7 @@ pub async fn avatar_content(
         .header(header::CONTENT_TYPE, archived.mime)
         .header(header::CONTENT_LENGTH, archived.size_bytes.to_string())
         .header(header::X_CONTENT_TYPE_OPTIONS, "nosniff")
-        .header(
-            header::CACHE_CONTROL,
-            "private, max-age=31536000, immutable",
-        )
+        .header(header::CACHE_CONTROL, "private, max-age=31536000, immutable")
         .body(Body::from_stream(archived.body))
         .map_err(|error| ApiError::internal("workspace_avatar.content.response", error))
 }
