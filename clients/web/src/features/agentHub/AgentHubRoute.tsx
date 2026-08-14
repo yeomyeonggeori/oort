@@ -96,6 +96,8 @@ import {
   type AgentDraft,
 } from "./createModel";
 import { CreateAgentDialog } from "./CreateAgentDialog";
+import { HostedAgentWizard } from "@/features/hostedAgents/HostedAgentWizard";
+import { HOSTED_WIZARD_TITLE } from "@momo/core/features/hostedAgents/wizard";
 import {
   isSurfaceProvided,
   type SurfaceId,
@@ -118,6 +120,15 @@ const SECTIONS: { id: AgentHubSection; label: string; surface?: SurfaceId }[] = 
 const VISIBLE_SECTIONS = SECTIONS.filter(
   (item) => item.surface === undefined || isSurfaceProvided(item.surface)
 );
+
+/**
+ * 이 서버가 호스티드 연결 라우트를 싣고 있는가 (goal B12 의 이중 방어 (a)).
+ *
+ * 없는 서버에 붙었을 때 진입점을 세우면 사람은 다이얼로그를 열어 목록 404 를
+ * 마주하고, 그것은 "미제공"이 아니라 "고장"으로 읽힌다. 표가 틀린 경우는
+ * 마법사 안에서 `serverSaysAbsent` 로 접힌다.
+ */
+const hostedPairingProvided = isSurfaceProvided("hostedAgentPairing");
 
 const DATE_TIME = new Intl.DateTimeFormat("ko-KR", {
   dateStyle: "medium",
@@ -283,6 +294,12 @@ export function AgentHubRoute() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [section, setSection] = useState<AgentHubSection>("profile");
   const [creating, setCreating] = useState(false);
+  // 호스티드 연결은 「에이전트 만들기」와 **다른 물건**이라 다른 버튼이다: 하나는
+  // 이 워크스페이스가 실행할 에이전트를 만들고, 하나는 남이 실행 중인 에이전트를
+  // 들인다. 한 다이얼로그의 탭으로 합치면 만들기 폼 위에 pairing 상태가 얹히고,
+  // 되돌릴 수 없는 값(연결 값)이 되돌릴 수 있는 폼과 같은 Esc 를 나눠 갖는다.
+  const [pairing, setPairing] = useState(false);
+  const [pairingOpener, setPairingOpener] = useState<HTMLButtonElement | null>(null);
   const [agentDraft, setAgentDraft] = useState<AgentDraft>(EMPTY_AGENT_DRAFT);
   const allSignals = useAgentWorkingSignals();
   // 만들 수 없는 사람에게 [만들기]를 내주지 않는다: `routes::agents::create`는
@@ -336,6 +353,20 @@ export function AgentHubRoute() {
               <span className="text-meta text-ink-muted" data-numeric>
                 {agents.length}명
               </span>
+            )}
+            {mayCreate && hostedPairingProvided && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={(event) => {
+                  setPairingOpener(event.currentTarget);
+                  setPairing(true);
+                }}
+                data-testid="agent-hub-hosted-pairing"
+              >
+                {HOSTED_WIZARD_TITLE}
+              </Button>
             )}
             {mayCreate && (
               <Button
@@ -505,6 +536,12 @@ export function AgentHubRoute() {
           setSelectedId(normalizedId(created.id));
           setSection("profile");
         }}
+      />
+
+      <HostedAgentWizard
+        open={pairing}
+        onOpenChange={setPairing}
+        opener={pairingOpener}
       />
     </div>
   );
