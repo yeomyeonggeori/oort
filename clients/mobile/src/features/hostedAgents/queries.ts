@@ -6,7 +6,7 @@ import {parseHostedConnections} from '@momo/core/features/hostedAgents/model';
 import {
   parseHostedConnectionDetail,
   type HostedConnectionDetail,
-} from '@momo/core/features/hostedAgents/status';
+} from '@momo/core/features/hostedAgents/disconnect';
 import type {HostedAgentConnection} from '@momo/core/features/hostedAgents/model';
 import {useQuery} from '@tanstack/react-query';
 

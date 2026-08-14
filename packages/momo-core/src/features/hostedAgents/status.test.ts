@@ -1,14 +1,24 @@
 import { describe, expect, it } from "vitest";
 import { WireShapeError } from "../../lib/wire";
 import type { HostedAgentConnection } from "./model";
+// A/B 어휘의 정본은 #1362 의 ./cleanup·./disconnect 다(73ac11d4 랜딩). 이 테스트는
+// 그 정본을 **읽어서** UX3 의 관전 뷰(Section C)가 정직하게 조립하는지를 본다.
 import {
   cleanupEvidenceText,
-  cleanupProgress,
-  cleanupProgressSentence,
   cleanupRowDetail,
   cleanupRowState,
   cleanupRowStateLabel,
   cleanupRowTone,
+  toCleanupArtifact,
+  type HostedCleanupArtifact,
+} from "./cleanup";
+import {
+  cleanupProgress,
+  cleanupProgressSentence,
+  parseHostedConnectionDetail,
+  unresolvedRequired,
+} from "./disconnect";
+import {
   HOSTED_LIVENESS_NOTE,
   HOSTED_OFFLINE_NOTE,
   HOSTED_READONLY_NOTE,
@@ -17,10 +27,6 @@ import {
   hostedConnectionTimes,
   hostedDetailView,
   hostedListRow,
-  parseHostedConnectionDetail,
-  toCleanupArtifact,
-  unresolvedRequired,
-  type HostedCleanupArtifact,
 } from "./status";
 
 // =============================================================================

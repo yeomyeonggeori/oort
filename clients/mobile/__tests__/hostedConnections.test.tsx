@@ -1,8 +1,8 @@
 import {
   hostedDetailView,
   hostedListRow,
-  parseHostedConnectionDetail,
 } from '@momo/core/features/hostedAgents/status';
+import {parseHostedConnectionDetail} from '@momo/core/features/hostedAgents/disconnect';
 import {cleanup, render, screen} from '@testing-library/react-native';
 import React from 'react';
 
