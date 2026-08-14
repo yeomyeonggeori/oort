@@ -17,10 +17,11 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Mutex;
 
+use momo_auth::AgentBearerIdentity;
 use momo_db::migrate::{default_migrations_dir, run_migrations, SeedMode};
 use momo_db::sqlx;
 use momo_db::sqlx::postgres::{PgConnectOptions, PgPoolOptions};
-use momo_db::PgPool;
+use momo_db::{with_tenant_tx, PgPool};
 use momo_server::config::{AgentGatewayMode, AgentGatewaySettings, AgentPortConfig};
 use momo_server::{build_app, AppState};
 use serde_json::{json, Value};
@@ -2146,4 +2147,278 @@ async fn the_disconnect_surface_is_non_enumerable_off_its_own_workspace_and_prin
         connection_status(&su, foreign.workspace, foreign.hosted.connection).await,
         "active"
     );
+}
+
+// ---------------------------------------------------------------------------
+// (7) #1374 — the lifecycle invalidation never reaches past its own connection
+// ---------------------------------------------------------------------------
+
+/// A retired (`expired`) connection for `agent` whose hosted credential was
+/// never revoked.
+///
+/// This is the only row shape a member-scoped revocation could reach and a
+/// connection-scoped one cannot, so it is the row the adversary below holds. It
+/// is legal beside a live connection precisely because migration 069's partial
+/// unique index (`hosted_agent_connection_workspace_agent_live_uniq`) excludes
+/// `expired`/`disconnected` — which is also why "the agent's other **live**
+/// connection", the shape #1374 was first written against, is not a state this
+/// schema can hold.
+async fn seed_retired_connection(
+    pool: &PgPool,
+    workspace: Uuid,
+    human: Uuid,
+    agent: Uuid,
+) -> (Uuid, Uuid) {
+    let connection = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO hosted_agent_connection(id,workspace_id,agent_member_id,status,created_by) \
+         VALUES($1,$2,$3,'expired',$4)",
+    )
+    .bind(connection)
+    .bind(workspace)
+    .bind(agent)
+    .bind(human)
+    .execute(pool)
+    .await
+    .expect("seed retired connection");
+    let raw = raw_credential(workspace);
+    let token = insert_hosted_token(pool, workspace, agent, connection, &raw, human).await;
+    (connection, token)
+}
+
+/// The agent's ONE live connection, `detected` and confirmed, whose
+/// `active_token_id` has been revoked out from under it.
+///
+/// That is exactly the state whose prove takes the invalidation branch — the
+/// branch that runs while holding `member` and `workspace_membership`
+/// `FOR UPDATE`, and the reason #1374 is filed against the prove path rather
+/// than against detect/resolve/confirm/expire-stale (all of which reach the
+/// same invalidation holding nothing but their own connection row).
+async fn seed_detected_connection_with_dead_credential(
+    pool: &PgPool,
+    workspace: Uuid,
+    human: Uuid,
+    agent: Uuid,
+    channel: Uuid,
+) -> (Uuid, Uuid) {
+    let connection = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO hosted_agent_connection( \
+           id,workspace_id,agent_member_id,status,pairing_challenge_hash,pairing_expires_at, \
+           pairing_consumed_at,detected_at,detected_by,confirmed_by,confirmed_at, \
+           approved_channel_ids,approved_scopes,created_by) \
+         VALUES($1,$2,$3,'detected',digest($4::text,'sha256'),now() + interval '15 minutes', \
+                now(),now(),$5,$5,now(),$6, \
+                ARRAY['agent:port:connect','agent:inbox:read','messages:read','messages:write', \
+                      'agent:jobs:read','agent:runs:callback']::text[],$5)",
+    )
+    .bind(connection)
+    .bind(workspace)
+    .bind(agent)
+    .bind(raw_credential(workspace))
+    .bind(human)
+    .bind(vec![channel])
+    .execute(pool)
+    .await
+    .expect("seed detected connection");
+    let raw = raw_credential(workspace);
+    let token = insert_hosted_token(pool, workspace, agent, connection, &raw, human).await;
+    sqlx::query(
+        "UPDATE hosted_agent_connection SET active_token_id=$3 WHERE workspace_id=$1 AND id=$2",
+    )
+    .bind(workspace)
+    .bind(connection)
+    .bind(token)
+    .execute(pool)
+    .await
+    .expect("bind the connection's active credential");
+    sqlx::query("UPDATE token SET revoked_at=now() WHERE workspace_id=$1 AND id=$2")
+        .bind(workspace)
+        .bind(token)
+        .execute(pool)
+        .await
+        .expect("revoke the credential out from under the connection");
+    (connection, token)
+}
+
+/// Park until `pid` is actually waiting on a lock.
+///
+/// This is a condition poll on an observable server state, not a timing guess:
+/// nothing is asserted until PostgreSQL itself reports the adversary blocked,
+/// so the interleaving the test claims is the interleaving it gets. The bound
+/// exists only so a broken fixture fails loudly instead of hanging the suite.
+async fn await_lock_wait(su: &PgPool, pid: i32) {
+    for _ in 0..600 {
+        let waiting: bool = sqlx::query_scalar(
+            "SELECT EXISTS (SELECT 1 FROM pg_stat_activity \
+                             WHERE pid=$1 AND wait_event_type='Lock')",
+        )
+        .bind(pid)
+        .fetch_one(su)
+        .await
+        .expect("read pg_stat_activity");
+        if waiting {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+    panic!("the adversary never blocked on the member row");
+}
+
+/// The AB-BA #1374 tracks, driven from both ends at once.
+///
+/// T1 is a real `prove_hosted_binding_in_tx` that fails its credential probe and
+/// therefore invalidates, holding `member` and `workspace_membership`
+/// `FOR UPDATE` while it does. Its first two statements are pre-run here on the
+/// same connection so the interleaving is deterministic — they are prove's own
+/// (`hosted_connection.rs`, member then workspace_membership), so T1 enters the
+/// invalidation in exactly the lock state production reaches it in.
+///
+/// T2 holds the agent's OTHER hosted credential `FOR SHARE` and then asks for
+/// the member row — `token → member`, the order every inbox and tool statement
+/// takes as `FOR SHARE OF hc,t,m,wm,ap,cm`. It plays those two rowmarks rather
+/// than calling an inbox append, because an append reaches a credential only
+/// through an `active` connection while this agent's live connection is
+/// `detected` for as long as its prove is failing — the literal pair cannot be
+/// stood up at once, which is itself the reason the repair had to be the
+/// invalidation's *reach* rather than the probe order.
+///
+/// With a member-scoped revocation T1 asks for T2's token after T2 has asked for
+/// T1's member row and PostgreSQL breaks the cycle with 40P01. With the
+/// connection-scoped one, T1's write set never leaves its own connection, so the
+/// two transactions simply serialize.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_failing_prove_never_reaches_a_sibling_connections_credential() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let workspace = fixture.workspace;
+    let agent = fixture.spare_hosted_agent;
+
+    let (retired, retired_token) =
+        seed_retired_connection(&su, workspace, fixture.human, agent).await;
+    let (pending, pending_token) = seed_detected_connection_with_dead_credential(
+        &su,
+        workspace,
+        fixture.human,
+        agent,
+        fixture.channel,
+    )
+    .await;
+
+    let (pid_tx, pid_rx) = tokio::sync::oneshot::channel::<i32>();
+    let (held_tx, held_rx) = tokio::sync::oneshot::channel::<()>();
+
+    let adversary = tokio::spawn({
+        let app = app.clone();
+        async move {
+            held_rx.await.expect("T1 takes the member row first");
+            with_tenant_tx(&app, workspace, move |conn| {
+                Box::pin(async move {
+                    let pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+                        .fetch_one(&mut *conn)
+                        .await?;
+                    pid_tx.send(pid).expect("hand T1 the adversary's backend");
+                    let _token: Option<i32> = sqlx::query_scalar(
+                        "SELECT 1 FROM token WHERE workspace_id=$1 AND id=$2 FOR SHARE",
+                    )
+                    .bind(workspace)
+                    .bind(retired_token)
+                    .fetch_optional(&mut *conn)
+                    .await?;
+                    // Parks here, behind T1's FOR UPDATE, exactly where an inbox
+                    // append parks between its `t` and `m` rowmarks.
+                    let _member: Option<i32> = sqlx::query_scalar(
+                        "SELECT 1 FROM member WHERE workspace_id=$1 AND id=$2 FOR SHARE",
+                    )
+                    .bind(workspace)
+                    .bind(agent)
+                    .fetch_optional(&mut *conn)
+                    .await?;
+                    Ok(())
+                })
+            })
+            .await
+        }
+    });
+
+    let identity = AgentBearerIdentity {
+        token_id: pending_token,
+        member_id: agent,
+        workspace_id: workspace,
+        scopes: HOSTED_SCOPES
+            .iter()
+            .map(|scope| scope.to_string())
+            .collect(),
+        hosted_connection_id: Some(pending),
+        audience: Some(AUDIENCE.to_string()),
+    };
+    let watcher = su.clone();
+    let proof = with_tenant_tx(&app, workspace, move |conn| {
+        Box::pin(async move {
+            let _member: Option<i32> = sqlx::query_scalar(
+                "SELECT 1 FROM member WHERE workspace_id=$1 AND id=$2 AND kind='agent' \
+                   AND status='active' AND deleted_at IS NULL FOR UPDATE",
+            )
+            .bind(workspace)
+            .bind(agent)
+            .fetch_optional(&mut *conn)
+            .await?;
+            let _membership: Option<i32> = sqlx::query_scalar(
+                "SELECT 1 FROM workspace_membership WHERE workspace_id=$1 AND member_id=$2 \
+                 FOR UPDATE",
+            )
+            .bind(workspace)
+            .bind(agent)
+            .fetch_optional(&mut *conn)
+            .await?;
+            held_tx.send(()).expect("release the adversary");
+            let pid = pid_rx.await.expect("the adversary's backend");
+            await_lock_wait(&watcher, pid).await;
+            Ok(momo_auth::prove_hosted_binding_in_tx(conn, &identity, true).await?)
+        })
+    })
+    .await
+    .expect("the failing prove commits instead of deadlocking");
+    assert_eq!(proof, momo_auth::HostedProof::Rejected);
+    adversary
+        .await
+        .expect("adversary task")
+        .expect("the adversary commits instead of deadlocking");
+
+    // The connection this prove was for is fully retired…
+    assert_eq!(connection_status(&su, workspace, pending).await, "expired");
+    assert_eq!(live_credential_count(&su, workspace, pending).await, 0);
+    assert!(paused(&su, workspace, agent).await);
+
+    // …and the sibling connection's credential is untouched, which is the whole
+    // point: the write set stopped at the connection the caller had locked.
+    assert_eq!(live_credential_count(&su, workspace, retired).await, 1);
+    assert_eq!(connection_status(&su, workspace, retired).await, "expired");
+
+    // Untouched is not the same as usable. The surviving credential names a
+    // connection that is not `detected`/`active` and is not its
+    // `active_token_id`, so the prove guard refuses it — which is why narrowing
+    // the revocation costs no capability.
+    let sibling_identity = AgentBearerIdentity {
+        token_id: retired_token,
+        member_id: agent,
+        workspace_id: workspace,
+        scopes: HOSTED_SCOPES
+            .iter()
+            .map(|scope| scope.to_string())
+            .collect(),
+        hosted_connection_id: Some(retired),
+        audience: Some(AUDIENCE.to_string()),
+    };
+    let refused = with_tenant_tx(&app, workspace, move |conn| {
+        Box::pin(async move {
+            Ok(momo_auth::prove_hosted_binding_in_tx(conn, &sibling_identity, true).await?)
+        })
+    })
+    .await
+    .expect("prove the surviving credential");
+    assert_eq!(refused, momo_auth::HostedProof::Rejected);
 }
