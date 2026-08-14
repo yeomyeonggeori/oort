@@ -16,6 +16,8 @@
 >
 > **실측:** 신규 `scripts/verify_hosted_disconnect.sh`(#1366 소유권 계약 동일: nonce label·janitor label·external DATABASE_URL 거부·trap cleanup·3상태 부재 증명·`--verify-cleanup-contract`)가 PG18에서 8 시나리오 PASS. `verify_agent_port_tools.sh`(E5)·`verify_hosted_agent_inbox.sh`(E4)·`verify_agent_port.sh`(E2/E3) 최종 트리 재실행 PASS, Docker 잔존 0. E5/E4 fixture 중 `disconnected`를 직접 조작하던 2곳은 072 트리거가 거절하므로 로컬 절반을 실제 수행한 뒤 전이하도록 고쳤다 — 그 자체가 불변식의 증거다. 워크스페이스 clippy `-D warnings`·전체 테스트 GREEN, 로컬 docs gate는 base-inherited RED(#1376)라 미실행.
 >
+> **리뷰 수리(2026-08-14):** Fable 적대적 검수 C0/H0(M1+L4 이관: openapi 샘플링=#1385, hygiene 번들=#1386), sol freeze M1, 파일럿 지적 1건. ①sol M1 — openapi 3개 연산에 대한 `clients/web-legacy/src/api/schema.d.ts` 재생성 누락(PR CI contract lane RED 예정)을 재생성·커밋했고 2회 실행 byte-identical을 확인했다(3 path + 6 schema + 3 operation 추가). ②파일럿 지적(트리거 공허 참) 수리 — 072 terminal 가드에 `OLD.status='cleanup_pending'`과 **manifest 비어 있지 않음** 두 절을 추가했다. 기존 "required 미해결 없음" 절은 빈 manifest에서 공허하게 참이라 start를 건너뛴 repair-script 경로를 막지 못했고 어떤 테스트도 그 절의 실패 케이스를 지나간 적이 없었다(=dead code). Rust `complete_hosted_disconnect_in_tx`에 같은 관문(`ManifestMissing`)을 미러링했고, 신규 테스트가 네 절 각각을 거절 메시지로 단언한다. mutation 3건으로 red-proof 확인. INSERT-terminal 우회·terminal 이탈 가드·`acknowledged_by` FK·retry-seed 병합은 #1386으로 명시 이관(범위 확대 금지).
+>
 > **다음 행동:** Fable 기획검수 → sol 독립 freeze 리뷰(exact commit C/H/M=0) → push/PR(track/engine; `local_gate.sh` 접촉이므로 policy audit 코멘트+라벨 흐름) → PR CI → 머지. **E6 랜딩 = E1~E6 라이브 배포 창 개방 조건**(배포 시 pending job 백로그 점검 선행). 워커는 로컬 commit 동결까지만 수행했다.
 >
 > **2026-08-14 스냅샷 36 (Opus 5 단발 워커 · engine — #1366 HAP-E5 MCP tool surface + per-agent hosted delivery, 로컬 동결).** 스냅샷 35를 supersede한다.
