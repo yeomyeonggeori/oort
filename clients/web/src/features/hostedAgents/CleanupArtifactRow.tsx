@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/design/ui/button";
 import { InlineBanner } from "@/features/common/States";
 import {
@@ -108,6 +108,24 @@ export function CleanupArtifactRow({
   const actionable = cleanupRowActionable(artifact);
   const formId = `cleanup-form-${artifact.id}`;
 
+  // 초점 회수 (design-review H1). 이 표면의 핵심 상호작용은 폼을 여닫는 것인데,
+  // 그 두 전이가 초점을 쥔 노드를 통째로 없앤다: 「확인 기록」 트리거는 폼과 같은
+  // 자리(형제)에 서므로 폼이 열리면 사라지고, 취소·저장은 폼 자체를 언마운트한다.
+  // 남겨 두면 초점은 <body> 로 떨어지고 다음 Tab 은 셸 맨 위에서 다시 시작한다.
+  // ConfirmButton 이 「열 때 질문으로, 닫을 때 트리거로」 하는 것과 같은 규율이되,
+  // 여기선 트리거가 사라지므로 이 줄에서 사라지지 않는 유일한 지표인 **제목**이
+  // 그 자리를 대신한다(열 때 폼 안으로 들어가는 쪽은 폼이 자기 마운트에서 한다).
+  const headingRef = useRef<HTMLHeadingElement | null>(null);
+  const wasOpen = useRef(false);
+  useEffect(() => {
+    if (open) {
+      wasOpen.current = true;
+    } else if (wasOpen.current) {
+      wasOpen.current = false;
+      headingRef.current?.focus({ preventScroll: true });
+    }
+  }, [open]);
+
   return (
     <li
       className="flex min-w-0 flex-col gap-2 border-b border-line p-3 last:border-b-0"
@@ -118,7 +136,13 @@ export function CleanupArtifactRow({
       <div className="flex min-w-0 flex-wrap items-start justify-between gap-2">
         <div className="flex min-w-0 flex-1 flex-col gap-1">
           <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <h4 className="min-w-0 break-keep text-body font-semibold text-ink">
+            {/* tabIndex -1 + 링: 폼을 닫을 때 초점이 착지하는 안정 지표다 (H1).
+                Tab 순서에는 들지 않고 프로그램 초점만 받는다. */}
+            <h4
+              ref={headingRef}
+              tabIndex={-1}
+              className="min-w-0 break-keep text-body font-semibold text-ink outline-none focus-visible:focus-ring"
+            >
               {cleanupRowTitle(artifact)}
             </h4>
             <StatusChip tone={cleanupRowTone(state)}>
@@ -128,7 +152,10 @@ export function CleanupArtifactRow({
           <p className="break-keep text-meta text-ink-muted">
             {cleanupRowDetail(artifact)}
           </p>
-          {/* 함정은 언제나 여기 있다 (규율 1). */}
+          {/* 함정은 언제나 여기 있다 (규율 1). 줄이 닫힌 뒤에도 남긴다(follow-up #2):
+              secret 의 「따로 복사해 둔 사본은 직접 지우세요」처럼 함정 문장은 처분이
+              끝난 뒤에도 참이라, non-actionable 줄에서 지우면 마지막까지 읽혀야 할
+              경고가 확인을 적은 순간 사라진다. */}
           <p className="break-keep text-meta text-ink-muted">{copy.caution}</p>
         </div>
         {actionable && !open && (
@@ -200,8 +227,11 @@ function ResolvedFacts({
     rows.push({ key: "확인한 내용", value: evidence, prose: true });
   }
   if (rows.length === 0) return null;
+  // 상자 없이 들여쓴 dl (design-review M5). 이 줄은 이미 ul 의 헤어라인과 li 의
+  // 구분선 안에 있어, provenance 를 또 테두리로 감싸면 done 뷰에서 테두리가 여섯
+  // 겹까지 쌓인다. 들여쓰기만으로 이 문장들이 줄의 하위임을 보인다.
   return (
-    <div className="rounded-md border border-line p-2">
+    <div className="ps-2">
       <KeyValueRows rows={rows} />
     </div>
   );
@@ -248,6 +278,15 @@ function AcknowledgeForm({
   const issue = choice === null ? null : evidenceIssue(evidence);
   const ready = acknowledgeReady(artifact.kind, choice, evidence);
   const blockedId = `${id}-blocked`;
+  // 되돌릴 수 없는 쪽인가 (코어가 정한다, cleanup.ts). 이 폼은 열려 있는 동안에만
+  // 마운트되므로 이 effect 는 「열림」의 순간 정확히 한 번 돈다: 폼을 연 트리거가
+  // 방금 언마운트됐으니 초점을 폼 안 첫 컨트롤(첫 관측 라디오)로 들여온다 (H1).
+  const formRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    formRef.current
+      ?.querySelector<HTMLElement>('input[type="radio"]')
+      ?.focus();
+  }, []);
 
   const statusItems: ChoiceListItem[] = statuses.map((item) => ({
     id: item.id,
@@ -275,6 +314,7 @@ function AcknowledgeForm({
 
   return (
     <div
+      ref={formRef}
       id={id}
       className="flex min-w-0 flex-col gap-3 rounded-md border border-line-strong p-3"
       data-testid="cleanup-form"
@@ -398,6 +438,13 @@ function AcknowledgeForm({
             describedBy={ready ? undefined : blockedId}
             question={acknowledgeQuestion(artifact.kind, choice)}
             confirmLabel={CLEANUP_CONFIRM_LABEL}
+            // 확정 버튼의 색은 답이 정한다 (design-review M1). 「봇을 남깁니다」는
+            // 대화 기록을 지키는 답이라 red 가 아니다 — destructive 플래그는 코어가
+            // 이미 각 처분에 실어 두었다(cleanup.ts). 두 걸음 가드는 그대로다.
+            confirmDestructive={
+              dispositions.find((item) => item.id === choice)?.destructive ??
+              true
+            }
             disabled={disabled || saving || !ready}
             onConfirm={submit}
             testId="cleanup-save"

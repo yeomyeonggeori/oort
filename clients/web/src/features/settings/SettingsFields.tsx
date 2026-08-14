@@ -596,6 +596,7 @@ export function ConfirmButton({
   describedBy,
   question,
   confirmLabel,
+  confirmDestructive = true,
   onConfirm,
   onAskingChange,
   disabled,
@@ -635,6 +636,19 @@ export function ConfirmButton({
   describedBy?: string;
   question: string;
   confirmLabel: string;
+  /**
+   * Is the confirmed action the irreversible/destructive one? Drives ONLY the
+   * confirm button's color — the two-step guard is identical either way.
+   *
+   * Defaults to `true` because that is what every original caller meant: this
+   * control exists to guard a delete. But a two-step question is also the right
+   * shape for an irreversible NON-destructive commit (봇을 남깁니다 protects the
+   * chat history yet still can't be re-decided), and painting that answer the
+   * same red as delete tells the reader the wrong thing about what they chose.
+   * The caller passes the disposition's own `destructive` flag (MOMO cleanup
+   * ledger, design-review M1).
+   */
+  confirmDestructive?: boolean;
   onConfirm: () => void;
   /**
    * The confirmation opened or closed. For a caller that has to quiet OTHER
@@ -681,10 +695,16 @@ export function ConfirmButton({
         type="button"
         variant="outline"
         size="sm"
-        disabled={disabled}
+        // aria-disabled, not native `disabled`: a gated trigger that leaves the
+        // tab order takes its `describedBy` (the blocked reason) out of reach,
+        // and a person who cannot open the question also cannot hear why. Same
+        // rule as SaveButton — stays focusable, announces unavailable, no-ops.
+        aria-disabled={disabled || undefined}
         aria-label={triggerName}
         aria-describedby={disabled ? describedBy : undefined}
+        className={cn(disabled && "opacity-50")}
         onClick={() => {
+          if (disabled) return;
           setAsking(true);
           onAskingChange?.(true);
         }}
@@ -710,12 +730,14 @@ export function ConfirmButton({
       <span className="text-meta text-ink">{question}</span>
       <Button
         type="button"
-        variant="destructive"
+        variant={confirmDestructive ? "destructive" : "default"}
         size="sm"
-        disabled={disabled}
+        aria-disabled={disabled || undefined}
         aria-label={subject ? `${subject} ${confirmLabel}` : undefined}
         aria-describedby={disabled ? describedBy : undefined}
+        className={cn(disabled && "opacity-50")}
         onClick={() => {
+          if (disabled) return;
           close();
           onConfirm();
         }}

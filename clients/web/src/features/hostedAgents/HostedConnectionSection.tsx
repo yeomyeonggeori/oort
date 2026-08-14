@@ -587,6 +587,12 @@ function CleanupPanel({
         <p className="break-keep text-meta text-ink-muted">
           {CLEANUP_INDEPENDENCE_NOTE}
         </p>
+        {/* 두 분모가 다르다 (follow-up #6): 「resolved/total」은 필수·선택을 가리지
+            않는 전체이고, 문장의 「N개 남았습니다」는 미해결 **필수** 수다. 지금
+            픽스처는 전부 required:true 라 둘이 어긋나지 않지만, 선택 항목이 서면
+            (미해결 선택 줄은 total 에는 들지만 「남았습니다」에는 안 든다) 두 수가
+            벌어진다. 그때는 분모를 필수 수로 맞추거나 문장이 선택 줄을 따로 말해야
+            한다. */}
         <p
           className="break-keep text-meta text-ink"
           data-testid="hosted-cleanup-progress"

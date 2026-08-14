@@ -4436,8 +4436,17 @@ const CLEANUP_MIDWAY = [
     acknowledgedAtMs: ACK_AT_MS,
     evidence: "Grok 설정 > 커넥터에서 제거를 눌렀고 목록에서 사라진 것을 확인",
   }),
-  cleanupArtifact("local_plugin_files"),
-  cleanupArtifact("plugin"),
+  // 이름 붙은 두 줄은 일부러 길고 구분자가 섞여 있다(공백·/·:··(가운뎃점)·-·괄호):
+  // cleanupRowTitle 의 boundedLabel(80) 절단과, 900px 좁은 열에서 제목이 음절이
+  // 아니라 어절에서 감기는지를 done/manifest 프레임이 증거로 남긴다.
+  cleanupArtifact("local_plugin_files", {
+    externalRef:
+      "~/Library/Application Support/oort/plugins/grok-bridge/private/김인턴-intake-v2 · source: local-only (2026-08 개편본)",
+  }),
+  cleanupArtifact("plugin", {
+    externalRef:
+      "사내 비공개 플러그인 레지스트리 / grok-bridge:team-inbox-intake-pipeline · 김인턴 파이프라인 v2 (2026-08 개편)",
+  }),
   cleanupArtifact("routine", { currentStatus: "inactive" }),
   cleanupArtifact("bot"),
   cleanupArtifact("secret", {
@@ -4488,9 +4497,24 @@ function disconnectConnection(overrides = {}) {
 async function captureHostedDisconnectScenes(browser, scheme) {
   const shots = [];
 
-  async function shoot(name, install, settle = async () => {}, frames = []) {
+  // band 는 리뷰 루브릭 §11 phase 2 의 두 폭이다: 기본 1280, 그리고 사이드바가
+  // 아직 열(column)인 900 — 이 표면의 제목·문장이 전부 full length 인 채로 열이
+  // ~600px 로 좁아지는 지점. 좁은 밴드에서는 프레임마다 가로 오버플로를 재서
+  // 0 이 아니면 던진다(b8 레인과 같은 자).
+  const BANDS = {
+    wide: { viewport: VIEWPORT, tag: "" },
+    narrow: { viewport: { width: 900, height: 800 }, tag: "-900" },
+  };
+
+  async function shoot(
+    name,
+    install,
+    settle = async () => {},
+    frames = [],
+    band = BANDS.wide
+  ) {
     const context = await browser.newContext({
-      viewport: VIEWPORT,
+      viewport: band.viewport,
       deviceScaleFactor: 2,
       colorScheme: scheme,
       reducedMotion: "reduce",
@@ -4511,9 +4535,21 @@ async function captureHostedDisconnectScenes(browser, scheme) {
     await settle(page, context);
 
     const frame = async (suffix) => {
-      const path = `${OUT_DIR}/hosted-disconnect-${suffix}-${scheme}.png`;
+      const path = `${OUT_DIR}/hosted-disconnect-${suffix}${band.tag}-${scheme}.png`;
       await page.screenshot({ path });
       shots.push(path);
+      if (band.tag) {
+        const overflow = await page.evaluate(
+          () =>
+            document.documentElement.scrollWidth -
+            document.documentElement.clientWidth
+        );
+        if (overflow > 0) {
+          throw new Error(
+            `900px 가로 오버플로 ${overflow}px (${suffix}, ${scheme})`
+          );
+        }
+      }
     };
     await frame(name);
     for (const [suffix, act] of frames) {
@@ -4521,6 +4557,50 @@ async function captureHostedDisconnectScenes(browser, scheme) {
       await frame(suffix);
     }
     await context.close();
+  }
+
+  // H1 초점 회수 검증 (design-review). 이 클라이언트엔 React 렌더 테스트 하네스가
+  // 없어(testing-library 미설치, 웹 유닛 테스트는 전부 순수 로직) 초점 이동은 실제
+  // 브라우저에서 잰다: 폼을 열면 초점이 <body> 가 아니라 폼 안 첫 라디오로 들어가고,
+  // 닫으면 사라진 트리거가 아니라 줄 제목(h4, tabIndex -1)으로 돌아온다.
+  async function assertFocusInForm(page) {
+    await page
+      .waitForFunction(
+        () => {
+          const el = document.activeElement;
+          return (
+            !!el &&
+            el.tagName === "INPUT" &&
+            el.getAttribute("type") === "radio" &&
+            !!el.closest('[data-testid="cleanup-form"]')
+          );
+        },
+        undefined,
+        { timeout: 2000 }
+      )
+      .catch(() => {
+        throw new Error("H1: 폼을 열 때 초점이 폼 안 첫 라디오로 들어가지 않았습니다.");
+      });
+  }
+  async function assertFocusOnRowHeading(page, kind) {
+    await page
+      .waitForFunction(
+        (k) => {
+          const el = document.activeElement;
+          return (
+            !!el &&
+            el.tagName === "H4" &&
+            !!el.closest(
+              `[data-testid="cleanup-artifact"][data-artifact-kind="${k}"]`
+            )
+          );
+        },
+        kind,
+        { timeout: 2000 }
+      )
+      .catch(() => {
+        throw new Error("H1: 폼을 닫을 때 초점이 줄 제목(h4)으로 돌아오지 않았습니다.");
+      });
   }
 
   /**
@@ -4586,18 +4666,44 @@ async function captureHostedDisconnectScenes(browser, scheme) {
     ]
   );
 
-  // 봇의 두 종착. 삭제 줄이 대화 기록을 이름으로 말하는 자리다.
+  // 봇의 두 종착. 삭제 줄이 대화 기록을 이름으로 말하는 자리다. 여는 순간 초점이
+  // 폼 안으로 들어가고 취소가 초점을 줄 제목으로 되돌리는지도 여기서 잰다 (H1).
   await shoot(
     "bot-choice",
     ledger(disconnectConnection(), CLEANUP_MIDWAY),
     async (page) => {
       const bot = page.locator('[data-testid="cleanup-artifact"][data-artifact-kind="bot"]');
       await bot.getByTestId("cleanup-open-form").click();
+      await bot.getByTestId("cleanup-form").waitFor({ state: "visible" });
+      await assertFocusInForm(page);
+      await bot.getByTestId("cleanup-cancel").click();
+      await assertFocusOnRowHeading(page, "bot");
+      // 다시 열어 첫 종착(봇을 지웠습니다, 파괴)을 고른 폼을 남긴다.
+      await bot.getByTestId("cleanup-open-form").click();
       await bot.getByTestId("cleanup-disposition").waitFor({ state: "visible" });
       await bot.getByTestId("cleanup-disposition").getByRole("radio").first().check();
       await bot.getByTestId("cleanup-evidence").scrollIntoViewIfNeeded();
       await page.waitForTimeout(200);
-    }
+    },
+    [
+      // M1: 「봇을 남깁니다」는 대화 기록을 지키는 답이라 확정이 red 가 아니다.
+      // 확정 질문을 열어 non-destructive 확정 버튼(「이대로 기록」)을 증거로 남긴다.
+      [
+        "bot-preserve-confirm",
+        async (page) => {
+          const bot = page.locator(
+            '[data-testid="cleanup-artifact"][data-artifact-kind="bot"]'
+          );
+          await bot.getByTestId("cleanup-disposition").getByRole("radio").nth(1).check();
+          await bot
+            .getByTestId("cleanup-evidence")
+            .fill("팀에 대화 기록 위치를 알린 뒤 봇은 남겨 두기로 했습니다");
+          await bot.getByTestId("cleanup-save").click();
+          await bot.getByTestId("cleanup-save-confirm").waitFor({ state: "visible" });
+          await page.waitForTimeout(200);
+        },
+      ],
+    ]
   );
 
   // 필수 여섯 줄이 전부 닫힌 장부와, 확정 질문.
@@ -4670,6 +4776,39 @@ async function captureHostedDisconnectScenes(browser, scheme) {
       await page.getByTestId("hosted-cleanup-offline").waitFor({ state: "visible" });
       await page.waitForTimeout(200);
     }
+  );
+
+  // 900px 밴드 (리뷰 루브릭 §11 phase 2), 이 표면의 유일한 좁은 폭 증거다. 긴
+  // 제목(local_plugin_files·plugin 의 긴 externalRef)이 ~600px 열에서 어절 단위로
+  // 감기는 것과, done 뷰의 provenance 밀도(M5 이후)를 이 폭에서 남긴다. manifest 는
+  // terminal-blocked 서브프레임까지 한 컨텍스트에서 찍고, 프레임마다 가로 오버플로
+  // 0 을 확인한다.
+  await shoot(
+    "manifest",
+    ledger(disconnectConnection(), CLEANUP_MIDWAY),
+    async (page) => {
+      await page.getByTestId("hosted-cleanup-manifest").waitFor({ state: "visible" });
+    },
+    [
+      [
+        "terminal-blocked",
+        async (page) => {
+          await page.getByTestId("hosted-terminal-blocked").scrollIntoViewIfNeeded();
+          await page.waitForTimeout(200);
+        },
+      ],
+    ],
+    BANDS.narrow
+  );
+  await shoot(
+    "done",
+    ledger(disconnectConnection({ status: "disconnected" }), CLEANUP_DONE),
+    async (page) => {
+      await page.getByTestId("hosted-disconnect-terminal").scrollIntoViewIfNeeded();
+      await page.waitForTimeout(200);
+    },
+    [],
+    BANDS.narrow
   );
 
   return shots;
