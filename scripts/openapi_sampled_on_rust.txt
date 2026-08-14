@@ -202,6 +202,18 @@ GET /v1/workspaces/{workspaceId}/hosted-agent-connections/{connectionId}
 POST /v1/workspaces/{workspaceId}/hosted-agent-connections/{connectionId}/confirm
 POST /v1/workspaces/{workspaceId}/hosted-agent-connections/{connectionId}/pairing-challenge/regenerate
 
+# HAP-E6 해체 3연산 (ADR-0162 / #1367, 등재는 #1385). 위 다섯 줄과 같은 라우트
+# 패밀리라 같은 자리에 산다 — 붙이는 lifecycle 이 하나이기 때문이다:
+# pairing → confirm → proof(active) → disconnect → 아티팩트별 acknowledge →
+# complete. 이 셋만은 「불러 보니 200 이더라」로 등재할 수 없다. disconnect 는
+# 살아 있는 credential 을 회수하는 것이 존재 이유고 complete 는 매니페스트가
+# 전부 resolve 된 뒤에만 열리므로, 앞 다섯 줄이 만든 **active 한 연결** 위에서만
+# 왕복이 성립한다. 그래서 샘플러는 이 계열 전용 dedicated identity 를 하나 더
+# 세워 거기서만 해체를 돌린다 — 감사 매트릭스가 쓰는 주 연결은 살려 둔다.
+POST /v1/workspaces/{workspaceId}/hosted-agent-connections/{connectionId}/disconnect
+POST /v1/workspaces/{workspaceId}/hosted-agent-connections/{connectionId}/disconnect/complete
+POST /v1/workspaces/{workspaceId}/hosted-agent-connections/{connectionId}/cleanup-artifacts/{artifactId}/acknowledge
+
 # ── work host 레지스트리 + work session 원장 (ADR-0125 / ADR-0114) ──────────
 # heartbeat 는 bearer 가 아니라 Ed25519 서명 v1 으로 인증되는 PUBLIC 라우트다 —
 # 등재는 그 서명 경로가 Rust 에서 실제로 검증된다는 주장이다.

@@ -2916,29 +2916,11 @@ run_sql -Atc "SELECT hc.status::text || ':' || (hc.proved_at IS NOT NULL)::text 
   FROM hosted_agent_connection hc WHERE hc.workspace_id='$WS' AND hc.id='$PROOF_REG_CONNECTION_ID';" | \
   grep -qx "$expected_proof_reg" || gate_fail hosted-proof-reg-db "race state did not match serialized HTTP winner" "database evidence withheld"
 
-# The identity uniqueness contract is live-lifecycle scoped: a disconnected
-# ledger may reconnect, while a second simultaneous live ledger is rejected.
-api post "/v1/workspaces/$WS/hosted-agent-connections" \
-  "$(jq -cn --arg h "hosted-reconnect-${RUN_ID:0:8}" '{displayName:"Hosted Reconnect",handle:$h,authMode:"static_bearer"}')" "$ACCESS"
-[ "$RESPONSE_STATUS" = "201" ] || gate_fail hosted-reconnect-create "expected 201" "$(redacted_body)"
-RECONNECT_OLD_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.connection.id')"
-RECONNECT_AGENT_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.connection.agentMemberId')"
-RECONNECT_NEW_ID="$(lower_uuid)"
-RECONNECT_DUP_ID="$(lower_uuid)"
-run_sql -c "UPDATE hosted_agent_connection SET status='disconnected',updated_at=now() WHERE workspace_id='$WS' AND id='$RECONNECT_OLD_ID'; \
- INSERT INTO hosted_agent_connection(id,workspace_id,agent_member_id,status,pairing_challenge_hash,pairing_expires_at,created_by) \
- VALUES ('$RECONNECT_NEW_ID','$WS','$RECONNECT_AGENT_ID','pairing_pending',digest('reconnect-live','sha256'),now()+interval '1 hour','$GATE_MEMBER_ID');"
-set +e
-run_sql -c "INSERT INTO hosted_agent_connection(id,workspace_id,agent_member_id,status,pairing_challenge_hash,pairing_expires_at,created_by) \
- VALUES ('$RECONNECT_DUP_ID','$WS','$RECONNECT_AGENT_ID','pairing_pending',digest('duplicate-live','sha256'),now()+interval '1 hour','$GATE_MEMBER_ID');" >/dev/null 2>&1
-duplicate_live_rc=$?
-set -e
-[ "$duplicate_live_rc" -ne 0 ] || gate_fail hosted-live-unique "second live connection for one agent succeeded" "database evidence withheld"
-run_sql -Atc "SELECT \
- ((SELECT count(*) FROM hosted_agent_connection WHERE workspace_id='$WS' AND agent_member_id='$RECONNECT_AGENT_ID' AND status='disconnected')=1)::text || ':' || \
- ((SELECT count(*) FROM hosted_agent_connection WHERE workspace_id='$WS' AND agent_member_id='$RECONNECT_AGENT_ID' AND status NOT IN ('expired','disconnected'))=1)::text || ':' || \
- ((SELECT count(*) FROM hosted_agent_connection WHERE id='$RECONNECT_DUP_ID')=0)::text;" | \
- grep -qx 'true:true:true' || gate_fail hosted-live-unique "partial live uniqueness state mismatch" "database evidence withheld"
+# The live-lifecycle uniqueness contract used to be asserted here against a
+# terminal state planted by SQL. Migration 072 (#1367) refuses exactly that
+# bypass, so the assertion moved to the end of this section, where the HAP-E6
+# chain has produced a `disconnected` ledger through the product's own
+# transition — which is the state the contract was always about.
 
 # A caller whose JWT is pinned to this workspace receives the same bounded
 # denial for a real foreign workspace and a nonexistent one; no connection
@@ -3197,6 +3179,207 @@ agent_port_api DELETE "" "$GATE_AGENT_TOKEN"
 if [ "$RESPONSE_STATUS" != "405" ]; then
   gate_fail agent-port-delete "expected HTTP 405, got $RESPONSE_STATUS" "$RESPONSE_BODY"
 fi
+
+# ---------------------------------------------------------------------------
+# HAP-E6 해체 lifecycle (ADR-0162 / #1367, 등재 #1385)
+#
+# 세 연산이 한 체인으로만 성립한다: disconnect 는 **살아 있는** credential 을
+# 회수하는 것이 존재 이유고, acknowledge 는 `cleanup_pending` 에서만 열리며,
+# complete 는 required 아티팩트가 전부 resolve 된 뒤에만 열린다. 그래서 여기서
+# 전용 identity 를 하나 더 세워 pairing → confirm → proof(active) 까지 올린 다음
+# 그것만 해체한다 — 위의 감사/게이트웨이 매트릭스가 쓰는 주 연결을 죽이면 그
+# 표본들이 자기 부작용을 읽게 되기 때문이다.
+# ---------------------------------------------------------------------------
+E6_HANDLE="hosted-e6-${RUN_ID:0:8}"
+api post "/v1/workspaces/$WS/hosted-agent-connections" \
+  "$(jq -cn --arg handle "$E6_HANDLE" '{displayName:"Hosted Disconnect",handle:$handle,authMode:"static_bearer"}')" "$ACCESS"
+[ "$RESPONSE_STATUS" = "201" ] || gate_fail hosted-e6-create "expected 201" "$(redacted_body)"
+E6_CONNECTION_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.connection.id')"
+E6_AGENT_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.connection.agentMemberId')"
+E6_PAIRING="$(printf '%s' "$RESPONSE_BODY" | jq -er '.pairingCredential')"
+append_secret_with_derivatives "$E6_PAIRING"
+expect_agent_port hosted-e6-detect 200 "$MODERN_DISCOVER_BODY" \
+  "$E6_PAIRING" "2026-07-28" "server/discover"
+api post "/v1/workspaces/$WS/hosted-agent-connections/$E6_CONNECTION_ID/confirm" \
+  "$(jq -cn --arg agent "$E6_AGENT_ID" '{agentMemberId:$agent,audience:"/v1/mcp/agent-port",approvedChannelIds:[],approvedScopes:["agent:port:connect"],authMode:"static_bearer"}')" "$ACCESS"
+[ "$RESPONSE_STATUS" = "201" ] || gate_fail hosted-e6-confirm "expected 201" "$(redacted_body)"
+E6_ACTIVE="$(printf '%s' "$RESPONSE_BODY" | jq -er '.credential')"
+append_secret_with_derivatives "$E6_ACTIVE"
+expect_agent_port hosted-e6-proof 200 "$MODERN_DISCOVER_BODY" \
+  "$E6_ACTIVE" "2026-07-28" "server/discover"
+api get "/v1/workspaces/$WS/hosted-agent-connections/$E6_CONNECTION_ID" "" "$ACCESS"
+guard_jq '.connection.status == "active" and (.cleanupArtifacts | length) == 0' \
+  "an unstarted connection answers with an empty manifest, not a missing one"
+# The terminal state has exactly one predecessor. Reaching for it before a
+# disconnect ever started must be refused rather than answered vacuously.
+api post "/v1/workspaces/$WS/hosted-agent-connections/$E6_CONNECTION_ID/disconnect/complete" "" "$ACCESS"
+[ "$RESPONSE_STATUS" = "409" ] || \
+  gate_fail hosted-e6-complete-before-start "terminal transition was reachable without a disconnect" "$(redacted_body)"
+# Work already handed out is part of the same transaction, so give the identity
+# one leased gateway job to lose.
+E6_JOB_LEASE="$(lower_uuid)"
+E6_JOB_ID="$(run_sql -Atc "INSERT INTO outbox(workspace_id,kind,status,method,payload,partition_key,lease_owner,lease_acquired_at,lease_expires_at) \
+  VALUES ('$WS','agent_job','pending','gateway',jsonb_build_object('agent_member_id','$E6_AGENT_ID'),'$E6_AGENT_ID','$E6_JOB_LEASE',now(),now()+interval '5 minutes') RETURNING id;")"
+
+E6_ARTIFACT_REF="gate-connector-$RUN_EPOCH"
+sample hosted-agent-disconnect post \
+  "/v1/workspaces/{workspaceId}/hosted-agent-connections/{connectionId}/disconnect" \
+  "/v1/workspaces/$WS/hosted-agent-connections/$E6_CONNECTION_ID/disconnect" 200 \
+  "$(jq -cn --arg ref "$E6_ARTIFACT_REF" '{artifacts:[{kind:"connector",externalRef:$ref}]}')" "$ACCESS"
+# Six seeded per-kind rows plus the one named item; the only row this server may
+# close by itself is the credential it just revoked, and it closes exactly that.
+guard_jq --arg ref "$E6_ARTIFACT_REF" '
+  .startedNow == true
+  and .connection.status == "cleanup_pending"
+  and (.connection | has("activeCredentialId") | not)
+  and .remainingRequired == 6
+  and (.cleanupArtifacts | length) == 7
+  and any(.cleanupArtifacts[];
+        .kind == "secret" and (has("externalRef") | not)
+        and .source == "server_verified" and .resolved == true and .disposition == "revoked")
+  and any(.cleanupArtifacts[];
+        .kind == "connector" and .externalRef == $ref and .resolved == false)' \
+  "the disconnect seeds one row per kind plus the named item and closes only its own credential"
+E6_MANIFEST="$(printf '%s' "$RESPONSE_BODY" | jq -c '.cleanupArtifacts')"
+run_sql -Atc "SELECT (hc.status='cleanup_pending')::text || ':' || ap.paused::text || ':' || \
+  (NOT EXISTS(SELECT 1 FROM token t WHERE t.workspace_id=hc.workspace_id AND t.hosted_connection_id=hc.id AND t.revoked_at IS NULL))::text || ':' || \
+  (o.status='done' AND o.lease_owner IS NULL AND o.processed_at IS NOT NULL)::text || ':' || \
+  ((SELECT count(*) FROM audit_log a WHERE a.workspace_id=hc.workspace_id AND a.target_id=hc.id \
+     AND a.action='hosted_agent.connection.disconnect_started')=1)::text \
+  FROM hosted_agent_connection hc \
+  JOIN agent_profile ap ON ap.workspace_id=hc.workspace_id AND ap.agent_member_id=hc.agent_member_id \
+  JOIN outbox o ON o.workspace_id=hc.workspace_id AND o.id=$E6_JOB_ID \
+  WHERE hc.workspace_id='$WS' AND hc.id='$E6_CONNECTION_ID';" | \
+  grep -qx 'true:true:true:true:true' || \
+  gate_fail hosted-e6-disconnect-atomic "revoke/pause/suppression/audit did not land as one commit" "database evidence withheld"
+expect_agent_port hosted-e6-revoked-denied 401 "$MODERN_DISCOVER_BODY" \
+  "$E6_ACTIVE" "2026-07-28" "server/discover"
+# A retry answers the same thing and writes nothing — including no second audit.
+api post "/v1/workspaces/$WS/hosted-agent-connections/$E6_CONNECTION_ID/disconnect" '{}' "$ACCESS"
+[ "$RESPONSE_STATUS" = "200" ] || \
+  gate_fail hosted-e6-disconnect-retry "retried disconnect was not 200, got $RESPONSE_STATUS" "$(redacted_body)"
+guard_jq '.startedNow == false and .remainingRequired == 6 and (.cleanupArtifacts | length) == 7' \
+  "a retried disconnect repeats the answer instead of re-opening the manifest"
+run_sql -Atc "SELECT (count(*)=1)::text FROM audit_log WHERE workspace_id='$WS' \
+  AND target_id='$E6_CONNECTION_ID' AND action='hosted_agent.connection.disconnect_started';" | \
+  grep -qx 'true' || gate_fail hosted-e6-disconnect-retry "retried disconnect amplified the audit" "database evidence withheld"
+
+E6_ROUTINE_ARTIFACT="$(printf '%s' "$E6_MANIFEST" | jq -er 'map(select(.kind == "routine")) | .[0].id')"
+E6_PLUGIN_ARTIFACT="$(printf '%s' "$E6_MANIFEST" | jq -er 'map(select(.kind == "plugin")) | .[0].id')"
+# A decision needs evidence, and the kind decides which decisions are legal.
+api post "/v1/workspaces/$WS/hosted-agent-connections/$E6_CONNECTION_ID/cleanup-artifacts/$E6_ROUTINE_ARTIFACT/acknowledge" \
+  '{"currentStatus":"absent","disposition":"delete"}' "$ACCESS"
+[ "$RESPONSE_STATUS" = "400" ] || \
+  gate_fail hosted-e6-ack-evidence "a resolution without evidence was accepted" "$(redacted_body)"
+api post "/v1/workspaces/$WS/hosted-agent-connections/$E6_CONNECTION_ID/cleanup-artifacts/$E6_PLUGIN_ARTIFACT/acknowledge" \
+  '{"currentStatus":"absent","disposition":"preserve","evidence":"preserve is a bot answer"}' "$ACCESS"
+[ "$RESPONSE_STATUS" = "400" ] || \
+  gate_fail hosted-e6-ack-disposition "preserve was accepted for a non-bot kind" "$(redacted_body)"
+run_sql -Atc "SELECT (count(*)=0)::text FROM hosted_agent_connection_artifact \
+  WHERE workspace_id='$WS' AND connection_id='$E6_CONNECTION_ID' AND id IN ('$E6_ROUTINE_ARTIFACT','$E6_PLUGIN_ARTIFACT') \
+    AND (resolved OR source IS NOT NULL);" | grep -qx 'true' || \
+  gate_fail hosted-e6-ack-refusal-zero-partial "a refused acknowledgement still touched the row" "database evidence withheld"
+# #1344 made structural: an inactive routine is an observation. `currentStatus`
+# moves, `disposition` does not, and the row stays unresolved and unattributed.
+sample hosted-agent-cleanup-acknowledge post \
+  "/v1/workspaces/{workspaceId}/hosted-agent-connections/{connectionId}/cleanup-artifacts/{artifactId}/acknowledge" \
+  "/v1/workspaces/$WS/hosted-agent-connections/$E6_CONNECTION_ID/cleanup-artifacts/$E6_ROUTINE_ARTIFACT/acknowledge" 200 \
+  '{"currentStatus":"inactive"}' "$ACCESS"
+guard_jq '.changed == true and .remainingRequired == 6
+  and .artifact.currentStatus == "inactive" and .artifact.disposition == "pending"
+  and .artifact.resolved == false and (.artifact | has("source") | not)' \
+  "switching a routine off is an observation and resolves nothing"
+api post "/v1/workspaces/$WS/hosted-agent-connections/$E6_CONNECTION_ID/cleanup-artifacts/$E6_ROUTINE_ARTIFACT/acknowledge" \
+  '{"currentStatus":"inactive"}' "$ACCESS"
+[ "$RESPONSE_STATUS" = "200" ] || \
+  gate_fail hosted-e6-ack-repeat "repeated observation was not 200, got $RESPONSE_STATUS" "$(redacted_body)"
+guard_jq '.changed == false' "the same observation twice writes nothing"
+api post "/v1/workspaces/$WS/hosted-agent-connections/$E6_CONNECTION_ID/disconnect/complete" "" "$ACCESS"
+[ "$RESPONSE_STATUS" = "409" ] || \
+  gate_fail hosted-e6-complete-unresolved "terminal transition ran with an unresolved manifest" "$(redacted_body)"
+
+# Every remaining row is answered on its own: acknowledging `connector` never
+# reaches `local_plugin_files`, and the named item is a separate answer again.
+while IFS='|' read -r e6_artifact e6_kind; do
+  [ -n "$e6_artifact" ] || continue
+  case "$e6_kind" in
+    bot) e6_disposition="preserve"; e6_observed="present" ;;
+    secret) e6_disposition="revoke"; e6_observed="absent" ;;
+    *) e6_disposition="delete"; e6_observed="absent" ;;
+  esac
+  api post "/v1/workspaces/$WS/hosted-agent-connections/$E6_CONNECTION_ID/cleanup-artifacts/$e6_artifact/acknowledge" \
+    "$(jq -cn --arg observed "$e6_observed" --arg disposition "$e6_disposition" \
+        --arg evidence "handled in the provider UI during the openapi rust sample pass" \
+        '{currentStatus:$observed,disposition:$disposition,evidence:$evidence}')" "$ACCESS"
+  [ "$RESPONSE_STATUS" = "200" ] || \
+    gate_fail hosted-e6-ack "expected HTTP 200 for $e6_kind, got $RESPONSE_STATUS" "$(redacted_body)"
+  guard_jq '.artifact.resolved == true' "an acknowledged artifact carries its own resolution"
+  if [ "$e6_kind" = "secret" ]; then
+    # The one row this server closed itself: a manual replay of the same answer
+    # is accepted and changes nothing, least of all the provenance.
+    guard_jq '.changed == false and .artifact.source == "server_verified"' \
+      "a manual replay cannot promote itself over the server-verified row"
+  else
+    guard_jq '.changed == true and .artifact.source == "manual"' \
+      "a provider-owned artifact resolves as manual with an actor"
+  fi
+done < <(printf '%s' "$E6_MANIFEST" | jq -r '.[] | "\(.id)|\(.kind)"')
+api get "/v1/workspaces/$WS/hosted-agent-connections/$E6_CONNECTION_ID" "" "$ACCESS"
+guard_jq '(.cleanupArtifacts | length) == 7 and all(.cleanupArtifacts[]; .resolved == true)' \
+  "the manifest is fully resolved before the terminal transition is attempted"
+
+sample hosted-agent-disconnect-complete post \
+  "/v1/workspaces/{workspaceId}/hosted-agent-connections/{connectionId}/disconnect/complete" \
+  "/v1/workspaces/$WS/hosted-agent-connections/$E6_CONNECTION_ID/disconnect/complete" 200 "" "$ACCESS"
+guard_jq '.disconnectedNow == true and .connection.status == "disconnected"
+  and (.connection | has("activeCredentialId") | not)
+  and (.cleanupArtifacts | length) == 7' \
+  "the terminal transition carries the manifest it was gated on"
+api post "/v1/workspaces/$WS/hosted-agent-connections/$E6_CONNECTION_ID/disconnect/complete" "" "$ACCESS"
+[ "$RESPONSE_STATUS" = "200" ] || \
+  gate_fail hosted-e6-complete-replay "replayed completion was not 200, got $RESPONSE_STATUS" "$(redacted_body)"
+guard_jq '.disconnectedNow == false and .connection.status == "disconnected"' \
+  "a replayed completion answers the same thing and writes no audit row"
+# Terminal is terminal in both directions: nothing restarts and nothing reopens.
+api post "/v1/workspaces/$WS/hosted-agent-connections/$E6_CONNECTION_ID/disconnect" '{}' "$ACCESS"
+[ "$RESPONSE_STATUS" = "409" ] || \
+  gate_fail hosted-e6-disconnect-terminal "a disconnected connection restarted a disconnect" "$(redacted_body)"
+api post "/v1/workspaces/$WS/hosted-agent-connections/$E6_CONNECTION_ID/cleanup-artifacts/$E6_ROUTINE_ARTIFACT/acknowledge" \
+  '{"currentStatus":"present","evidence":"reopen attempt"}' "$ACCESS"
+[ "$RESPONSE_STATUS" = "409" ] || \
+  gate_fail hosted-e6-ack-terminal "a disconnected connection accepted a new acknowledgement" "$(redacted_body)"
+run_sql -Atc "SELECT (hc.status='disconnected')::text || ':' || ap.paused::text || ':' || \
+  (hc.active_token_id IS NULL)::text || ':' || \
+  ((SELECT count(*) FROM hosted_agent_connection_artifact x WHERE x.workspace_id=hc.workspace_id \
+     AND x.connection_id=hc.id AND x.required AND NOT x.resolved)=0)::text || ':' || \
+  ((SELECT count(*) FROM audit_log a WHERE a.workspace_id=hc.workspace_id AND a.target_id=hc.id \
+     AND a.action='hosted_agent.connection.disconnected')=1)::text \
+  FROM hosted_agent_connection hc \
+  JOIN agent_profile ap ON ap.workspace_id=hc.workspace_id AND ap.agent_member_id=hc.agent_member_id \
+  WHERE hc.workspace_id='$WS' AND hc.id='$E6_CONNECTION_ID';" | \
+  grep -qx 'true:true:true:true:true' || \
+  gate_fail hosted-e6-terminal-state "the terminal state or its audit cardinality is not what the transition claims" "database evidence withheld"
+
+# The identity uniqueness contract is live-lifecycle scoped: a disconnected
+# ledger may reconnect, while a second simultaneous live ledger is rejected.
+# The terminal ledger is the one the operation above actually produced — before
+# #1367 this fixture minted `disconnected` with a bare UPDATE, which migration
+# 072's guard now refuses precisely because a repair script must not be able to.
+RECONNECT_NEW_ID="$(lower_uuid)"
+RECONNECT_DUP_ID="$(lower_uuid)"
+run_sql -c "INSERT INTO hosted_agent_connection(id,workspace_id,agent_member_id,status,pairing_challenge_hash,pairing_expires_at,created_by) \
+ VALUES ('$RECONNECT_NEW_ID','$WS','$E6_AGENT_ID','pairing_pending',digest('reconnect-live','sha256'),now()+interval '1 hour','$GATE_MEMBER_ID');"
+set +e
+run_sql -c "INSERT INTO hosted_agent_connection(id,workspace_id,agent_member_id,status,pairing_challenge_hash,pairing_expires_at,created_by) \
+ VALUES ('$RECONNECT_DUP_ID','$WS','$E6_AGENT_ID','pairing_pending',digest('duplicate-live','sha256'),now()+interval '1 hour','$GATE_MEMBER_ID');" >/dev/null 2>&1
+duplicate_live_rc=$?
+set -e
+[ "$duplicate_live_rc" -ne 0 ] || gate_fail hosted-live-unique "second live connection for one agent succeeded" "database evidence withheld"
+run_sql -Atc "SELECT \
+ ((SELECT count(*) FROM hosted_agent_connection WHERE workspace_id='$WS' AND agent_member_id='$E6_AGENT_ID' AND status='disconnected')=1)::text || ':' || \
+ ((SELECT count(*) FROM hosted_agent_connection WHERE workspace_id='$WS' AND agent_member_id='$E6_AGENT_ID' AND status NOT IN ('expired','disconnected'))=1)::text || ':' || \
+ ((SELECT count(*) FROM hosted_agent_connection WHERE id='$RECONNECT_DUP_ID')=0)::text;" | \
+ grep -qx 'true:true:true' || gate_fail hosted-live-unique "partial live uniqueness state mismatch" "database evidence withheld"
 
 # ---------------------------------------------------------------------------
 # 승인 계열 (#1042 최초 등재분)
