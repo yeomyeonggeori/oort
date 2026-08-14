@@ -7,15 +7,20 @@ import type { HostedConfirmApproval } from "./approval";
 // =============================================================================
 // REST client for hosted agent connections (ADR-0162 HAP-E3, openapi `agents`).
 //
-// 다섯 동작만 있고 전부 이미 서버에 있다. 새로 지어낸 wire 는 없다:
+// 여덟 동작만 있고 전부 이미 서버에 있다. 새로 지어낸 wire 는 없다:
 //   POST /v1/workspaces/{ws}/hosted-agent-connections                       create
 //   GET  /v1/workspaces/{ws}/hosted-agent-connections                       list
 //   GET  /v1/workspaces/{ws}/hosted-agent-connections/{id}                  get
 //   POST …/{id}/pairing-challenge/regenerate                                regenerate
 //   POST …/{id}/confirm                                                     confirm
+//   POST …/{id}/disconnect                                                  disconnect
+//   POST …/{id}/cleanup-artifacts/{artifactId}/acknowledge                  acknowledge
+//   POST …/{id}/disconnect/complete                                         complete
 //
-// disconnect 세 경로는 **일부러 없다**. 그것은 UX2(#1362)의 것이고, 여기에 함수만
-// 미리 두면 다음 사람이 그 함수를 부르는 버튼을 이 화면에 단다.
+// 아래 셋은 HAP-UX2(#1362)가 열었다. 앞선 다섯과 한 파일에 사는 이유는 자격증명
+// 경계가 같기 때문이다 — 다만 방향이 반대다: 앞의 셋이 원문을 **받아** 오는 반면
+// 해제 셋은 아무 비밀값도 오가지 않는다. 그래서 `cache: "no-store"` 도 셋에는
+// 없다. 없는 이유를 적어 두지 않으면 다음 사람이 「일관성」으로 붙인다.
 //
 // ## 비밀값 경계 (features/webhooks/api.ts 와 같은 규율, 같은 이유)
 //
@@ -123,4 +128,70 @@ export function confirmHostedConnection(
     cache: "no-store",
     body: JSON.stringify(approval),
   });
+}
+
+// ---- 해제 (HAP-E6 / #1362) --------------------------------------------------
+
+/** 사람이 따로 이름 붙여 추적하려는 provider 항목 하나. 비밀값이 아니다. */
+export interface HostedCleanupSeed {
+  kind: string;
+  externalRef: string;
+}
+
+/**
+ * 200. 한 transaction 으로 자격증명 폐기 + `cleanup_pending` 전이 + 전용 멤버
+ * pause + 진행 중이던 작업 정리 + 6종 정리 목록 씨앗.
+ *
+ * 이미 `cleanup_pending` 인 연결에 다시 보내면 `startedNow: false` 로 답하고
+ * 아무것도 다시 쓰지 않는다. 다만 `artifacts` 로 새 항목을 주면 목록에 **병합**
+ * 한다. 그래서 이 함수 하나가 「해제 시작」과 「목록 복원」 둘 다의 경로다.
+ */
+export function disconnectHostedConnection(
+  workspaceId: string,
+  connectionId: string,
+  artifacts: readonly HostedCleanupSeed[] = []
+): Promise<unknown> {
+  return hostedRequest(`${connection(workspaceId, connectionId)}/disconnect`, {
+    method: "POST",
+    body: JSON.stringify(artifacts.length > 0 ? { artifacts } : {}),
+  });
+}
+
+/**
+ * 200. 정리 항목 하나에 관측을, 그리고 원한다면 처분 하나를 기록한다.
+ *
+ * 본문에 `source` 를 실을 칸이 **없다**. 서버는 이 경로로 들어온 모든 확인을
+ * `manual` 로 쓰고, `server_verified` 는 자기가 폐기한 자격증명에만 붙인다.
+ * 여기에 칸을 만드는 순간 클라이언트가 자기 주장을 서버의 사실로 승격시킬 수
+ * 있게 되고, 그 값은 이 흐름에서 유일하게 "oort 가 직접 확인했다"는 뜻이다.
+ */
+export function acknowledgeHostedCleanupArtifact(
+  workspaceId: string,
+  connectionId: string,
+  artifactId: string,
+  body: { currentStatus: string; disposition?: string; evidence?: string }
+): Promise<unknown> {
+  return hostedRequest(
+    `${connection(workspaceId, connectionId)}/cleanup-artifacts/${encodeURIComponent(
+      artifactId
+    )}/acknowledge`,
+    { method: "POST", body: JSON.stringify(body) }
+  );
+}
+
+/**
+ * 200. terminal `disconnected` 로의 전이. 필수 항목이 하나라도 미해결이면 409 이고,
+ * 서버가 자기 쪽 폐기(자격증명 0개·전용 멤버 pause)를 되읽지 못해도 409 다.
+ *
+ * 이미 끝난 전이를 다시 부르면 `disconnectedNow: false` 로 답하고 감사 기록을
+ * 남기지 않는다.
+ */
+export function completeHostedDisconnect(
+  workspaceId: string,
+  connectionId: string
+): Promise<unknown> {
+  return hostedRequest(
+    `${connection(workspaceId, connectionId)}/disconnect/complete`,
+    { method: "POST" }
+  );
 }
