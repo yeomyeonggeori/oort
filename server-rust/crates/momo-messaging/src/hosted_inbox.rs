@@ -741,10 +741,35 @@ mod tests {
             workspace_id: Uuid::new_v4(),
             agent_member_id: Uuid::new_v4(),
             connection_id: Uuid::new_v4(),
-            position: 42,
+            // Every byte distinct and non-zero, so the leak scan below is
+            // searching for a sequence that carries real information rather
+            // than for a run of padding zeros that any buffer might contain.
+            position: 0x1122_3344_5566_7788,
         }
     }
 
+    /// Whether `haystack` contains `needle` anywhere.
+    fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
+        needle.len() <= haystack.len()
+            && haystack
+                .windows(needle.len())
+                .any(|window| window == needle)
+    }
+
+    /// **The confidentiality canary, measured in the right units.**
+    ///
+    /// This assertion used to read `!encoded.contains("42")` — a two-character
+    /// substring searched for in the *base64 text* of random-nonce ciphertext.
+    /// That is a coin flip, not a check: roughly 3% of runs contain `"42"` by
+    /// chance, and CI duly hit one. The property it was reaching for is real,
+    /// so it is kept and stated over the bytes that actually carry the secret:
+    /// none of the four plaintext fields appears anywhere in the sealed
+    /// envelope, in either endianness.
+    ///
+    /// The false-positive probability is now negligible rather than 3%: a
+    /// specific 16-byte sequence appearing in an 89-byte envelope is about
+    /// 2^-121, and the 8-byte position about 2^-58. A failure here is a leak,
+    /// not luck.
     #[test]
     fn cursor_round_trips_without_exposing_plaintext_ids() {
         let cursor = sample();
@@ -753,8 +778,42 @@ mod tests {
             decode_hosted_inbox_cursor(&encoded, "cursor-secret"),
             Ok(cursor)
         );
+        // A 36-character uuid rendering is its own negligible-collision check.
         assert!(!encoded.contains(&cursor.workspace_id.to_string()));
-        assert!(!encoded.contains("42"));
+
+        let envelope = URL_SAFE_NO_PAD
+            .decode(
+                encoded
+                    .strip_prefix(CURSOR_PREFIX)
+                    .expect("the cursor carries its version prefix"),
+            )
+            .expect("the body is base64url");
+        assert_eq!(envelope.len(), CURSOR_ENVELOPE_BYTES);
+        for (field, plaintext) in [
+            ("workspace_id", cursor.workspace_id.as_bytes().to_vec()),
+            (
+                "agent_member_id",
+                cursor.agent_member_id.as_bytes().to_vec(),
+            ),
+            ("connection_id", cursor.connection_id.as_bytes().to_vec()),
+            ("position(be)", cursor.position.to_be_bytes().to_vec()),
+            ("position(le)", cursor.position.to_le_bytes().to_vec()),
+        ] {
+            assert!(
+                !contains_bytes(&envelope, &plaintext),
+                "{field} appears verbatim inside the sealed cursor"
+            );
+        }
+
+        // Nonce freshness: sealing the same cursor twice must not produce the
+        // same envelope, or the opaque token would become a stable fingerprint
+        // of the connection that holds it.
+        let again = encode_hosted_inbox_cursor(cursor, "cursor-secret").unwrap();
+        assert_ne!(encoded, again);
+        assert_eq!(
+            decode_hosted_inbox_cursor(&again, "cursor-secret"),
+            Ok(cursor)
+        );
     }
 
     #[test]
