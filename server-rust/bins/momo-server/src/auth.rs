@@ -261,9 +261,58 @@ pub(crate) async fn authenticate_and_admit_agent_port_credential(
                         identity,
                         scope_granted,
                     } => (identity, scope_granted, false),
-                    AgentBearerResolution::Revoked
-                    | AgentBearerResolution::Expired
-                    | AgentBearerResolution::Unknown => {
+                    // HAP-E6 — a dead credential is refused here, before the
+                    // proof step ever runs, so this rejection path is the FIRST
+                    // domain guard that can observe an expiry or an operator
+                    // emergency revoke. If the dead credential is still the one
+                    // its connection names, the connection is `active` with
+                    // nothing behind it and an unpaused agent: reconcile it into
+                    // `cleanup_pending`, suppress its open work and record the
+                    // reason, all in this transaction. `Unknown` is deliberately
+                    // outside the branch — an unrecognised bearer names no
+                    // connection and must not be able to point at one.
+                    AgentBearerResolution::Revoked | AgentBearerResolution::Expired => {
+                        if let Some((connection_id, agent_member_id)) =
+                            momo_auth::reconcile_dead_hosted_credential_in_tx(
+                                conn,
+                                claimed_workspace,
+                                &raw_token,
+                            )
+                            .await
+                            .map_err(DbError::from)?
+                        {
+                            let suppression = momo_outbox::suppress_hosted_agent_jobs_in_tx(
+                                conn,
+                                claimed_workspace,
+                                agent_member_id,
+                            )
+                            .await
+                            .map_err(DbError::from)?;
+                            write_audit(
+                                conn,
+                                &AuditEntry::new(
+                                    claimed_workspace,
+                                    "hosted_agent.connection.disconnect_started",
+                                )
+                                .about(agent_member_id)
+                                .target("hosted_agent_connection", connection_id)
+                                .with_schema(
+                                    "momo.hosted_agent.connection.disconnect_started.v1",
+                                    json!({
+                                        "status": "cleanup_pending",
+                                        "suppressed_job_count": suppression.suppressed_jobs,
+                                        "released_lease_count": suppression.released_leases,
+                                        "trigger": "credential_invalidated"
+                                    }),
+                                ),
+                            )
+                            .await?;
+                        }
+                        return Ok(AgentPortTransactionOutcome::Rejected(
+                            AgentPortAuthError::InvalidToken,
+                        ));
+                    }
+                    AgentBearerResolution::Unknown => {
                         return Ok(AgentPortTransactionOutcome::Rejected(
                             AgentPortAuthError::InvalidToken,
                         ));
@@ -407,6 +456,47 @@ pub(crate) async fn authenticate_and_admit_agent_port_credential(
                 let proof = momo_auth::prove_hosted_binding_in_tx(conn, &identity, protocol_valid)
                     .await
                     .map_err(DbError::from)?;
+                // HAP-E6 — the first domain guard found an `active` connection
+                // whose own credential is dead and reconciled it into
+                // `cleanup_pending`. Two things still have to happen in THIS
+                // transaction, or the reconciliation would be half a state:
+                // the agent's open gateway work is suppressed, and the reason
+                // is recorded once. Admission is refused either way, and the
+                // transaction commits so the fail-closed state is durable.
+                if proof == momo_auth::HostedProof::Reconciled {
+                    let connection_id = identity
+                        .hosted_connection_id
+                        .expect("a reconciled proof has a connection");
+                    let suppression = momo_outbox::suppress_hosted_agent_jobs_in_tx(
+                        conn,
+                        identity.workspace_id,
+                        identity.member_id,
+                    )
+                    .await
+                    .map_err(DbError::from)?;
+                    write_audit(
+                        conn,
+                        &AuditEntry::new(
+                            identity.workspace_id,
+                            "hosted_agent.connection.disconnect_started",
+                        )
+                        .about(identity.member_id)
+                        .target("hosted_agent_connection", connection_id)
+                        .with_schema(
+                            "momo.hosted_agent.connection.disconnect_started.v1",
+                            json!({
+                                "status": "cleanup_pending",
+                                "suppressed_job_count": suppression.suppressed_jobs,
+                                "released_lease_count": suppression.released_leases,
+                                "trigger": "credential_invalidated"
+                            }),
+                        ),
+                    )
+                    .await?;
+                    return Ok(AgentPortTransactionOutcome::Rejected(
+                        AgentPortAuthError::InvalidToken,
+                    ));
+                }
                 if proof == momo_auth::HostedProof::Rejected
                     || (identity.hosted_connection_id.is_none()
                         && !finalize_agent_bearer_use_in_tx(
