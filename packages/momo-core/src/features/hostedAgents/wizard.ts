@@ -1,3 +1,4 @@
+import { attachParticle } from "../../lib/koreanParticle";
 import {
   isHostedTerminal,
   type HostedAgentConnection,
@@ -293,6 +294,21 @@ export function hostedLiveMessage(
     case "closed":
       return "이 연결은 해제 절차에 들어갔습니다. 이 화면에서는 더 진행하지 않습니다.";
   }
+}
+
+/**
+ * 활성이 된 뒤 무엇을 해 보라고 말하는 문장.
+ *
+ * 조사를 손으로 적지 않는 이유는 이 문장의 목적어가 **핸들**이기 때문이다.
+ * 핸들은 라틴 문자로 끝나는 것이 기본이고("@kim-intern"), 받침이 있는 한글
+ * 핸들도 가능하다. 손으로 적은 「을」이 화면에 나갔던 것이 이 함수가 생긴 이유다.
+ */
+export function testMentionSentence(
+  channelLabel: string,
+  handle: string
+): string {
+  const called = attachParticle(`@${handle}`, "object");
+  return `${channelLabel}에서 ${called} 부르면 이 에이전트가 같은 자리에 답합니다. 답은 다른 팀메이트의 메시지와 같은 경로로 옵니다.`;
 }
 
 /** 마법사 전체가 무엇을 하는 물건인지. 진입점과 머리글이 같은 말을 쓴다. */
