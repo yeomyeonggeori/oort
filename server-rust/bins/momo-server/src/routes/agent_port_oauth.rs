@@ -831,21 +831,31 @@ async fn refresh(state: &AppState, client_id: &str, form: &TokenForm) -> Respons
                     .await?;
                     Ok(Ok(*issuance))
                 }
-                HostedOauthRefresh::Reused => {
+                HostedOauthRefresh::Reused {
+                    connection_id,
+                    agent_member_id,
+                } => {
                     // `rotate_…` already revoked the family under the lock. The
                     // audit is the other half and belongs to the same
                     // transaction, so a rolled-back revocation cannot leave a
-                    // record claiming it happened.
+                    // record claiming it happened. It names the same
+                    // subject/target the code-replay audit does — the dedicated
+                    // member and its connection — so the two replay rows are
+                    // queryable the same way, and neither carries a secret or a
+                    // digest.
                     write_audit(
                         conn,
-                        &AuditEntry::new(workspace_id, AUDIT_CREDENTIAL_REPLAYED).with_schema(
-                            REPLAY_SCHEMA,
-                            json!({
-                                "credential": "refresh_token",
-                                "client_id": client_id,
-                                "action": "family_revoked",
-                            }),
-                        ),
+                        &AuditEntry::new(workspace_id, AUDIT_CREDENTIAL_REPLAYED)
+                            .about(agent_member_id)
+                            .target("hosted_agent_connection", connection_id)
+                            .with_schema(
+                                REPLAY_SCHEMA,
+                                json!({
+                                    "credential": "refresh_token",
+                                    "client_id": client_id,
+                                    "action": "family_revoked",
+                                }),
+                            ),
                     )
                     .await?;
                     Ok(Err(OauthError::InvalidGrant))

@@ -373,7 +373,7 @@ async fn seed(pool: &PgPool) -> Fixture {
     }
 
     // The OAuth arm's starting point: `pairing_pending`, `auth_mode='oauth'`,
-    // and — per migration 073 — no pairing challenge at all.
+    // and — per migration 074 — no pairing challenge at all.
     let oauth_connection = Uuid::new_v4();
     sqlx::query(
         "INSERT INTO hosted_agent_connection( \
@@ -1877,6 +1877,37 @@ async fn refresh_rotates_and_reuse_retires_the_family() {
     .await
     .expect("count live credentials");
     assert_eq!(live, 0, "refresh reuse retires every live credential");
+    // The reuse replay audit names the same subject/target the code-replay
+    // audit does — the dedicated member and its connection — so both replay
+    // rows are queryable the same way (HAP-E7 L2). Still secret-free.
+    let (replay_member, replay_target, replay_target_type): (
+        Option<Uuid>,
+        Option<Uuid>,
+        Option<String>,
+    ) = sqlx::query_as(
+        "SELECT subject_member_id, target_id, target_type FROM audit_log \
+              WHERE workspace_id=$1 AND action='hosted_agent.oauth.credential_replayed' \
+                AND detail->>'credential'='refresh_token' \
+              ORDER BY id DESC LIMIT 1",
+    )
+    .bind(fixture.workspace)
+    .fetch_one(&super_pool)
+    .await
+    .expect("read the refresh reuse replay audit");
+    assert_eq!(
+        replay_member,
+        Some(fixture.oauth_agent),
+        "reuse audit names the member"
+    );
+    assert_eq!(
+        replay_target,
+        Some(fixture.oauth_connection),
+        "reuse audit targets the connection"
+    );
+    assert_eq!(
+        replay_target_type.as_deref(),
+        Some("hosted_agent_connection")
+    );
     let (status, _, _, _) = port_call(
         &client,
         &base,

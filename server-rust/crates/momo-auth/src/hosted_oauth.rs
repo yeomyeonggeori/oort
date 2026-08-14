@@ -27,7 +27,7 @@
 //! ## No downgrade
 //!
 //! Nothing in this module can produce a `hosted_active` (static) credential, and
-//! migration 073's `token_hosted_class_auth_mode_guard` refuses one on an
+//! migration 074's `token_hosted_class_auth_mode_guard` refuses one on an
 //! `oauth` connection anyway. An OAuth failure therefore has no static path to
 //! fall back to: the connection stays where it was and the caller sees an OAuth
 //! error.
@@ -726,8 +726,14 @@ async fn insert_oauth_credential(
 pub enum HostedOauthRefresh {
     Rotated(Box<HostedOauthIssuance>),
     /// The credential is real but already rotated away or revoked. Treated as a
-    /// compromise signal: the whole family is revoked before this returns.
-    Reused,
+    /// compromise signal: the whole family is revoked before this returns. The
+    /// connection and dedicated member travel with it so the caller's replay
+    /// audit can name the same subject/target the code-replay audit does —
+    /// neither is secret.
+    Reused {
+        connection_id: Uuid,
+        agent_member_id: Uuid,
+    },
     /// Past `expires_at`, or its connection is no longer active.
     Invalid,
     Unknown,
@@ -778,7 +784,10 @@ pub async fn rotate_hosted_oauth_refresh_in_tx(
     }
     if row.try_get::<bool, _>("revoked")? {
         revoke_hosted_oauth_family_in_tx(conn, workspace_id, connection_id).await?;
-        return Ok(HostedOauthRefresh::Reused);
+        return Ok(HostedOauthRefresh::Reused {
+            connection_id,
+            agent_member_id: row.try_get("actor_member_id")?,
+        });
     }
     if row.try_get::<bool, _>("expired")?
         || row.try_get::<String, _>("connection_status")? != "active"

@@ -102,6 +102,19 @@ COMMENT ON COLUMN token.oauth_rotated_from_token_id IS
 
 -- -----------------------------------------------------------------------------
 -- The no-downgrade invariant, in the database.
+--
+-- SOUNDNESS NOTE (HAP-E7 L1, by convention today): this trigger fires on token
+-- INSERT/UPDATE and reads the connection's `auth_mode` at that moment. It is
+-- sufficient *because no path sets `auth_mode` on an existing connection* — a
+-- connection's mode is chosen once at creation and never mutated, so a
+-- credential's class cannot be left disagreeing with a mode that changed under
+-- it. If a future goal adds an in-place mode-change path (revoke → re-pair into
+-- the other mode on the SAME connection row), this guard alone becomes
+-- insufficient: it would need a mirror trigger on `hosted_agent_connection`
+-- that refuses to change `auth_mode` while any live credential of the departing
+-- class exists. That trigger is intentionally NOT added here (there is nothing
+-- for it to guard yet); it is the mode-change goal's obligation. See ADR-0162
+-- 증보 1.
 -- -----------------------------------------------------------------------------
 CREATE FUNCTION token_hosted_class_matches_auth_mode()
 RETURNS trigger LANGUAGE plpgsql

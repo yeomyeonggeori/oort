@@ -16,7 +16,7 @@
 #     the static-bearer Agent Port path is BYTE-IDENTICAL with the flag on and
 #     off, challenge headers included, against two live servers;
 #   * a static credential cannot be presented as an OAuth one or the reverse,
-#     and migration 073's trigger refuses either class on the wrong connection;
+#     and migration 074's trigger refuses either class on the wrong connection;
 #   * metadata names the operator's issuer and resource under Host/Forwarded
 #     spoofing, and advertises no DCR, no CIMD, no client secret, no `plain`;
 #   * an unregistered client or redirect is refused without redirecting anywhere,

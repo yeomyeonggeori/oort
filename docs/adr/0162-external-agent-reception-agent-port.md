@@ -187,7 +187,7 @@ pairing_pending ──human owner/admin consent (authorization code 발급)─�
    expired                                     active ──disconnect──> cleanup_pending ──> disconnected
 ```
 
-- `oauth` connection은 static pairing challenge를 **갖지 않는다**. `pairing_pending`은 "authorization을 기다리는 중"이라는 뜻이며 `pairing_challenge_hash`는 NULL이다(migration 073이 auth_mode별로 shape를 분리 강제).
+- `oauth` connection은 static pairing challenge를 **갖지 않는다**. `pairing_pending`은 "authorization을 기다리는 중"이라는 뜻이며 `pairing_challenge_hash`는 NULL이다(migration 074가 auth_mode별로 shape를 분리 강제).
 - `detected`는 D6에서 Bot의 handshake가 만드는 상태였다. OAuth arm에서 그 자리를 차지하는 것은 **로그인한 human owner/admin의 exact consent**다. 같은 transaction이 `confirmed_by`/`confirmed_at`/`approved_scopes`/`approved_channel_ids`와 authorization code digest를 함께 쓴다. consent만으로는 capability가 0이고 dedicated member는 계속 `paused=true`다.
 - `detected → active`의 "별도 active proof"는 **client가 PKCE verifier를 쥐고 있다는 사실**이다. token exchange transaction이 code를 1회 소비하고, exact canonical resource/audience를 재확인하고, access/refresh credential을 발급하고, `active_token_id`를 걸고, dedicated member의 pause를 함께 해제한다. 하나라도 실패하면 전부 롤백한다.
 - disconnect·cleanup·terminal은 D7과 **완전히 동일**하다. OAuth arm에 별도 terminal 경로를 만들지 않는다.
@@ -209,7 +209,7 @@ pairing_pending ──human owner/admin consent (authorization code 발급)─�
 | refresh (`momo_oauth_rt_v1`) | 30일, 회전 | digest | 다음 access+refresh 쌍 **only** |
 
 - 저장 digest는 **envelope 전체**를 덮는다. 그래서 같은 secret bytes를 다른 prefix로 다시 라벨링하면 어떤 row와도 일치하지 않는다 — static bearer를 OAuth access로, refresh를 access로, code를 access로 제시하는 네 방향이 전부 산술적으로 막힌다.
-- credential class와 connection의 `auth_mode`는 **DB trigger로 일치를 강제**한다(migration 073). `oauth` connection에 static credential을, `static_bearer` connection에 OAuth credential을 만들 수 없다. 이것이 "OAuth 실패 뒤 static bearer로 자동 강등하지 않는다"를 관례가 아니라 스키마로 만드는 지점이다.
+- credential class와 connection의 `auth_mode`는 **DB trigger로 일치를 강제**한다(migration 074). `oauth` connection에 static credential을, `static_bearer` connection에 OAuth credential을 만들 수 없다. 이것이 "OAuth 실패 뒤 static bearer로 자동 강등하지 않는다"를 관례가 아니라 스키마로 만드는 지점이다.
 - code replay와 refresh reuse는 실수가 아니라 침해 신호로 취급한다: 거절과 **같은 transaction**에서 그 connection의 live OAuth credential 전부를 revoke하고 bounded audit 1행을 남긴다. 이후 첫 Agent Port 호출이 HAP-E6의 화해 경로로 `cleanup_pending`을 만든다.
 
 ### A4. authorization server의 정직성 상한
