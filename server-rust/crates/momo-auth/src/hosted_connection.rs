@@ -473,7 +473,7 @@ fn sanitize_capabilities(value: &Value) -> Value {
     Value::Object(projected)
 }
 
-async fn hosted_identity_is_live_in_tx(
+pub(crate) async fn hosted_identity_is_live_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     agent_member_id: Uuid,
@@ -551,7 +551,8 @@ async fn invalidate_hosted_lifecycle_in_tx(
     sqlx::query(
         "UPDATE token SET revoked_at=COALESCE(revoked_at, now()) \
           WHERE workspace_id=$1 AND hosted_connection_id=$2 \
-            AND credential_class='hosted_active' AND revoked_at IS NULL",
+            AND credential_class IN ('hosted_active','hosted_oauth_access','hosted_oauth_refresh') \
+            AND revoked_at IS NULL",
     )
     .bind(workspace_id)
     .bind(connection_id)
@@ -765,7 +766,8 @@ pub async fn prove_hosted_binding_in_tx(
     };
     let token_live: Option<i32> = sqlx::query_scalar(
         "SELECT 1 FROM token WHERE workspace_id=$1 AND id=$2 AND actor_member_id=$3 \
-          AND kind='agent_bearer' AND credential_class='hosted_active' \
+          AND kind='agent_bearer' \
+          AND credential_class IN ('hosted_active','hosted_oauth_access') \
           AND hosted_connection_id=$4 AND audience=$5 AND 'agent:port:connect'=ANY(scopes) \
           AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > now()) FOR UPDATE",
     )
@@ -907,7 +909,7 @@ pub async fn resolve_hosted_tool_identity_in_tx(
     token_id: Uuid,
 ) -> Result<Option<HostedToolIdentity>, sqlx::Error> {
     let row = sqlx::query(
-        "SELECT hc.id AS connection_id, hc.agent_member_id, t.id AS token_id,                 t.scopes AS token_scopes, hc.approved_scopes, hc.approved_channel_ids            FROM hosted_agent_connection hc            JOIN token t ON t.workspace_id=hc.workspace_id AND t.id=hc.active_token_id            JOIN member m ON m.workspace_id=hc.workspace_id AND m.id=hc.agent_member_id            JOIN workspace_membership wm              ON wm.workspace_id=hc.workspace_id AND wm.member_id=hc.agent_member_id            JOIN agent_profile ap              ON ap.workspace_id=hc.workspace_id AND ap.agent_member_id=hc.agent_member_id           WHERE hc.workspace_id=$1 AND hc.agent_member_id=$2 AND t.id=$3             AND hc.status='active' AND hc.proved_at IS NOT NULL             AND t.kind='agent_bearer' AND t.credential_class='hosted_active'             AND t.revoked_at IS NULL             AND (t.expires_at IS NULL OR t.expires_at > now())             AND t.hosted_connection_id=hc.id AND t.actor_member_id=hc.agent_member_id             AND t.audience=$4             AND 'agent:port:connect'=ANY(t.scopes)             AND 'agent:port:connect'=ANY(hc.approved_scopes)             AND m.kind='agent' AND m.status='active' AND m.deleted_at IS NULL             AND ap.paused=false           FOR SHARE OF hc,t,m,wm,ap",
+        "SELECT hc.id AS connection_id, hc.agent_member_id, t.id AS token_id,                 t.scopes AS token_scopes, hc.approved_scopes, hc.approved_channel_ids            FROM hosted_agent_connection hc            JOIN token t ON t.workspace_id=hc.workspace_id AND t.id=hc.active_token_id            JOIN member m ON m.workspace_id=hc.workspace_id AND m.id=hc.agent_member_id            JOIN workspace_membership wm              ON wm.workspace_id=hc.workspace_id AND wm.member_id=hc.agent_member_id            JOIN agent_profile ap              ON ap.workspace_id=hc.workspace_id AND ap.agent_member_id=hc.agent_member_id           WHERE hc.workspace_id=$1 AND hc.agent_member_id=$2 AND t.id=$3             AND hc.status='active' AND hc.proved_at IS NOT NULL             AND t.kind='agent_bearer'             AND t.credential_class IN ('hosted_active','hosted_oauth_access')             AND t.revoked_at IS NULL             AND (t.expires_at IS NULL OR t.expires_at > now())             AND t.hosted_connection_id=hc.id AND t.actor_member_id=hc.agent_member_id             AND t.audience=$4             AND 'agent:port:connect'=ANY(t.scopes)             AND 'agent:port:connect'=ANY(hc.approved_scopes)             AND m.kind='agent' AND m.status='active' AND m.deleted_at IS NULL             AND ap.paused=false           FOR SHARE OF hc,t,m,wm,ap",
     )
     .bind(workspace_id)
     .bind(agent_member_id)
@@ -942,7 +944,8 @@ pub async fn active_hosted_connection_in_tx(
            JOIN token t ON t.workspace_id=hc.workspace_id AND t.id=hc.active_token_id \
           WHERE hc.workspace_id=$1 AND hc.agent_member_id=$2 \
             AND hc.status='active' AND hc.proved_at IS NOT NULL \
-            AND t.kind='agent_bearer' AND t.credential_class='hosted_active' \
+            AND t.kind='agent_bearer' \
+            AND t.credential_class IN ('hosted_active','hosted_oauth_access') \
             AND t.revoked_at IS NULL \
             AND (t.expires_at IS NULL OR t.expires_at > now()) \
             AND t.hosted_connection_id=hc.id AND t.actor_member_id=hc.agent_member_id \

@@ -279,7 +279,7 @@ async fn claim_gateway_jobs(
                      AND hc.proved_at IS NOT NULL \
                      AND 'agent:jobs:read' = ANY(hc.approved_scopes) \
                      AND t.kind = 'agent_bearer' \
-                     AND t.credential_class = 'hosted_active' \
+                     AND t.credential_class IN ('hosted_active','hosted_oauth_access') \
                      AND t.revoked_at IS NULL \
                      AND (t.expires_at IS NULL OR t.expires_at > now()) \
                      AND t.hosted_connection_id = hc.id \

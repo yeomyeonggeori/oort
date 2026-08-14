@@ -162,7 +162,8 @@ pub async fn load_mention_candidates_in_tx(
                                 AND t.id = hc.active_token_id \
                   WHERE hc.workspace_id = m.workspace_id AND hc.agent_member_id = m.id \
                     AND hc.status = 'active' AND hc.proved_at IS NOT NULL \
-                    AND t.kind = 'agent_bearer' AND t.credential_class = 'hosted_active' \
+                    AND t.kind = 'agent_bearer' \
+                    AND t.credential_class IN ('hosted_active','hosted_oauth_access') \
                     AND t.revoked_at IS NULL \
                     AND (t.expires_at IS NULL OR t.expires_at > now()) \
                     AND t.hosted_connection_id = hc.id \
@@ -174,7 +175,8 @@ pub async fn load_mention_candidates_in_tx(
                                 AND t.id = hc.active_token_id \
                   WHERE hc.workspace_id = m.workspace_id AND hc.agent_member_id = m.id \
                     AND hc.status = 'active' AND hc.proved_at IS NOT NULL \
-                    AND t.kind = 'agent_bearer' AND t.credential_class = 'hosted_active' \
+                    AND t.kind = 'agent_bearer' \
+                    AND t.credential_class IN ('hosted_active','hosted_oauth_access') \
                     AND t.revoked_at IS NULL \
                     AND (t.expires_at IS NULL OR t.expires_at > now()) \
                     AND t.hosted_connection_id = hc.id \

@@ -12,9 +12,18 @@ use serde::Deserialize;
 use serde_json::Value;
 
 pub mod handle;
+pub mod oauth;
 pub mod tools;
 
 pub use handle::{decode_lease_handle, encode_lease_handle, LeaseHandle, LeaseHandleError};
+pub use oauth::{
+    authorization_redirect, authorization_server_metadata, parse_requested_scopes,
+    percent_encode_query_value, protected_resource_metadata, redirect_uri_is_registered,
+    validate_code_challenge, validate_resource, validate_state, verify_pkce_s256, OauthError,
+    AUTHORIZATION_SERVER_WELL_KNOWN, CODE_CHALLENGE_METHOD_S256, GRANT_TYPE_AUTHORIZATION_CODE,
+    GRANT_TYPE_REFRESH_TOKEN, MAX_CLIENT_ID_BYTES, MAX_REDIRECT_URI_BYTES, MAX_RESOURCE_BYTES,
+    MAX_STATE_BYTES, PROTECTED_RESOURCE_WELL_KNOWN_PREFIX, RESPONSE_TYPE_CODE, TOKEN_TYPE_BEARER,
+};
 pub use tools::{
     validate_arguments, ToolCapability, ToolDescriptor, ToolFailure, ToolView, TOOL_CATALOG,
     TOOL_CONVERSATION_READ, TOOL_INBOX_READ, TOOL_JOBS_CLAIM, TOOL_JOB_RELEASE, TOOL_JOB_RENEW,

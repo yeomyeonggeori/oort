@@ -66,6 +66,7 @@ pub mod agent_scope;
 pub mod ephemeral_grant;
 pub mod hosted_connection;
 pub mod hosted_disconnect;
+pub mod hosted_oauth;
 pub mod issue;
 pub mod jwt;
 pub mod realtime;
@@ -125,6 +126,19 @@ pub use hosted_disconnect::{
     HostedDisconnectStart, HostedDisconnectStarted, HOSTED_ARTIFACT_KINDS,
     HOSTED_DISCONNECTABLE_STATES, MAX_ARTIFACT_EVIDENCE_BYTES, MAX_ARTIFACT_ITEMS,
     MAX_ARTIFACT_REF_BYTES,
+};
+pub use hosted_oauth::{
+    approve_hosted_oauth_request_in_tx, consume_hosted_oauth_code_in_tx,
+    deny_hosted_oauth_request_in_tx, hosted_oauth_access_workspace_id,
+    hosted_oauth_code_workspace_id, hosted_oauth_refresh_workspace_id, hosted_oauth_request_key,
+    list_oauth_candidates_in_tx, lock_hosted_oauth_code_in_tx, resolve_hosted_oauth_access_in_tx,
+    resolve_hosted_oauth_revocation_target_in_tx, revoke_hosted_oauth_family_in_tx,
+    rotate_hosted_oauth_refresh_in_tx, sign_authorization_request, verify_authorization_request,
+    AuthorizationRequestSeed, HostedOauthApproval, HostedOauthCandidate, HostedOauthCodeLock,
+    HostedOauthIssuance, HostedOauthRefresh, HostedOauthRefusal, HostedOauthRequestClaims,
+    HOSTED_OAUTH_ACCESS_PREFIX, HOSTED_OAUTH_ACCESS_TTL_SECONDS, HOSTED_OAUTH_CODE_PREFIX,
+    HOSTED_OAUTH_CODE_TTL_SECONDS, HOSTED_OAUTH_REFRESH_PREFIX, HOSTED_OAUTH_REFRESH_TTL_SECONDS,
+    HOSTED_OAUTH_REQUEST_TTL_SECONDS, HOSTED_OAUTH_REQUEST_TYP,
 };
 pub use issue::{
     sign_access, sign_app_token, sign_refresh, IssuedToken, ACCESS_TTL_SECONDS, REFRESH_TTL_SECONDS,
