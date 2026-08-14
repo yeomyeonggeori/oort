@@ -2533,7 +2533,18 @@ async fn the_terminal_state_is_entered_by_one_transition_and_left_by_none() {
     // `OLD.status = 'disconnected'`, so the terminal was the one state it had
     // stopped watching — and a repair script could resurrect a revoked runtime
     // into `detected` with a single UPDATE.
-    for revival in ["detected", "active", "expired", "pairing_pending"] {
+    for revival in [
+        "detected",
+        "active",
+        "expired",
+        "pairing_pending",
+        // The escape a reader is likeliest to think is allowed: `cleanup_pending`
+        // is the terminal's own predecessor, so "step back one" reads as a
+        // repair rather than a resurrection. It is refused by the same
+        // `NEW.status <> 'disconnected'` clause as the rest, and it is in this
+        // loop so that a future exception carved out for it cannot pass silently.
+        "cleanup_pending",
+    ] {
         let error = sqlx::query(
             "UPDATE hosted_agent_connection SET status=$3 WHERE workspace_id=$1 AND id=$2",
         )
@@ -2578,11 +2589,29 @@ async fn the_terminal_state_is_entered_by_one_transition_and_left_by_none() {
     assert_eq!(code, 200, "{replay}");
     assert_eq!(replay["disconnectedNow"], json!(false));
 
-    // ---- (iii) the `acknowledged_by` seal --------------------------------
-    // #1386 F5 asked whether the actor FK creates a member-hard-delete wedge.
-    // It does not create one: the member is already pinned by schema_v0 for
-    // anyone who ever posted, so the FK adds no case. Both halves are measured
-    // rather than asserted, because "sealed" without evidence is just a wish.
+    // ---- (iii) the `acknowledged_by` seal, and the edge of what it proves --
+    //
+    // #1386 F5 asked whether 072's actor FK creates a member-hard-delete wedge.
+    // This probe answers a narrower question than the seal rests on, and the
+    // narrowness is the point of writing it down:
+    //
+    //   MEASURED here — this workspace's admin acknowledged artifacts AND owns
+    //   the agents, and the delete is refused by `agent_owner_human_id_fkey`
+    //   (schema_v0). So for an admin who did anything else in the workspace,
+    //   the actor FK is not the first pin and removing it would free nothing.
+    //
+    //   NOT MEASURED — an admin whose *only* trace is an acknowledgement: no
+    //   agent owned, no connection created, no message written. For that member
+    //   the 072 actor FK really could be the sole pin, and this fixture cannot
+    //   say otherwise because its admin is also the agents' owner.
+    //
+    // The seal survives the unmeasured case rather than depending on its
+    // absence: `ON DELETE SET NULL` is unavailable regardless of who else pins
+    // the row, because a `manual` resolution must carry an actor
+    // (`hosted_agent_connection_artifact_ack_shape_ck`), so nulling trades a
+    // foreign-key failure for a check failure and destroys the audit fact on
+    // the way. There is no version of relaxing this FK that leaves the record
+    // intact, which is why 073 seals it.
     let acknowledged: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM hosted_agent_connection_artifact \
           WHERE workspace_id=$1 AND connection_id=$2 AND acknowledged_by=$3",
@@ -2600,14 +2629,17 @@ async fn the_terminal_state_is_entered_by_one_transition_and_left_by_none() {
         .execute(&su)
         .await
         .expect_err("a member who acted is not hard-deletable");
-    assert_ne!(
+    // Asserted positively rather than as `assert_ne!`: naming the constraint
+    // that actually fires is what keeps this from quietly becoming a proof
+    // about some third pin if the fixture changes shape.
+    assert_eq!(
         pinned
             .as_database_error()
             .expect("a database error")
             .constraint(),
-        Some("hosted_agent_connection_artifact_actor_fk"),
-        "and the constraint that pins them is schema_v0's, not 072's — which is \
-         why 073 seals the actor FK instead of relaxing it"
+        Some("agent_owner_human_id_fkey"),
+        "this admin's first pin is schema_v0's agent ownership, not 072's actor \
+         FK — which bounds the claim to admins who did more than acknowledge"
     );
     // The teardown that the product does perform is unaffected: NO ACTION is
     // checked once the artifact rows have cascaded away with their workspace.

@@ -127,20 +127,30 @@
 -- ## B3. `acknowledged_by → member` — SEALED, with the reason
 --
 -- 072's actor FK is NO ACTION, so hard-deleting a human member who acknowledged
--- an artifact would fail. It is sealed rather than relaxed, on three findings:
+-- an artifact would fail. It is sealed rather than relaxed, and the reasons are
+-- ordered so that the weakest one is not the one doing the work:
 --
---   1. **The wedge is not this table's.** Measured, a human member hard delete
---      already fails on `message_author_member_id_fkey` (schema_v0) for anyone
---      who ever posted, and on `agent_run.agent_member_id` for any agent that
---      ever ran. `acknowledged_by` adds no case that is not already blocked.
+--   1. **`ON DELETE SET NULL` is not available**, and this is the load-bearing
+--      reason. A resolved artifact whose `source = 'manual'` must carry an
+--      actor (`hosted_agent_connection_artifact_ack_shape_ck`), so nulling the
+--      column trades a foreign-key failure for a check failure and destroys the
+--      audit fact on the way. No relaxation of this FK leaves the record
+--      intact, whoever else does or does not pin the member.
 --   2. **Members are soft-deleted.** `member.deleted_at` and `member.status`
 --      are the removal verbs the product actually uses; 069 makes the identical
 --      choice for `confirmed_by`, `created_by`, `detected_by` and `proved_by`.
---   3. **`ON DELETE SET NULL` is not available.** A resolved artifact whose
---      `source = 'manual'` must carry an actor
---      (`hosted_agent_connection_artifact_ack_shape_ck`), so nulling the column
---      trades a foreign-key failure for a check failure and destroys the audit
---      fact on the way. The wedge would not even be removed.
+--   3. **For an admin who did anything else, this FK is not the first pin.**
+--      Measured on the E6 fixture: deleting an admin who acknowledged artifacts
+--      is refused by `agent_owner_human_id_fkey` (schema_v0), because that
+--      admin also owns the workspace's agents.
+--
+-- What reason 3 does **not** cover, stated plainly rather than left to be
+-- discovered: an admin whose only trace is an acknowledgement — no agent owned,
+-- no connection created, no message written. For that member the 072 actor FK
+-- could genuinely be the sole hard-delete pin. The case is unmeasured, it is
+-- real, and it changes nothing, because reason 1 holds without it. (An earlier
+-- draft of this header named `message_author_member_id_fkey` as the measured
+-- pin. That is not the constraint that fires, and the claim was too broad.)
 --
 -- Workspace teardown is unaffected and measured green: NO ACTION is checked at
 -- end of statement, by which time the artifact rows have cascaded away.
@@ -327,7 +337,7 @@ COMMENT ON FUNCTION hosted_agent_connection_terminal_guard() IS
 -- ---------------------------------------------------------------------------
 COMMENT ON CONSTRAINT hosted_agent_connection_artifact_actor_fk
   ON hosted_agent_connection_artifact IS
-  'NO ACTION by decision (#1386 F5): members are soft-deleted, a human who ever posted is already pinned by message_author_member_id_fkey, and ON DELETE SET NULL would violate the acknowledgement shape CHECK rather than free the row. Workspace teardown is unaffected — NO ACTION is checked once the artifact rows have cascaded away.';
+  'NO ACTION by decision (#1386 F5): ON DELETE SET NULL would violate the acknowledgement shape CHECK rather than free the row, so no relaxation keeps the audit fact; members are soft-deleted anyway. An admin whose only trace is an acknowledgement may have this FK as their sole hard-delete pin — known, unmeasured, and not a reason to drop the actor. Workspace teardown is unaffected: NO ACTION is checked once the artifact rows have cascaded away.';
 
 DO $$
 BEGIN
