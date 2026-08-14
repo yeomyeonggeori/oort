@@ -684,9 +684,12 @@ async fn the_advertised_catalog_follows_the_connection_lifecycle_and_the_scopes(
     // `tools/list` at all and the credential answers 401.
     //
     // `disconnected` is the one that cannot be fabricated: HAP-E6's migration
-    // 072 asserts zero live credentials and a paused agent before it will let a
-    // row claim the terminal state, so the fixture performs the local half the
-    // lifecycle performs and then restores it below.
+    // 072 asserts that the row arrives from `cleanup_pending` (which the loop
+    // order already satisfies), that a manifest exists at all, that no required
+    // artifact is unresolved, that no credential is live and that the agent is
+    // paused. The fixture therefore performs the local half the lifecycle
+    // performs — including one seeded, already-resolved manifest row — and
+    // restores it below.
     for status in ["expired", "cleanup_pending", "disconnected"] {
         if status == "disconnected" {
             sqlx::query("UPDATE token SET revoked_at=now() WHERE workspace_id=$1 AND id=$2")
@@ -699,6 +702,18 @@ async fn the_advertised_catalog_follows_the_connection_lifecycle_and_the_scopes(
                 "UPDATE agent_profile SET paused=true WHERE workspace_id=$1 AND agent_member_id=$2",
             )
             .bind(fixture.workspace)
+            .bind(fixture.hosted_agent)
+            .execute(&su)
+            .await
+            .unwrap();
+            sqlx::query(
+                "INSERT INTO hosted_agent_connection_artifact \
+                   (workspace_id, connection_id, agent_member_id, kind, expected_action, \
+                    current_status, disposition, source, acknowledged_at) \
+                 VALUES ($1,$2,$3,'secret','revoke','absent','revoked','server_verified',now())",
+            )
+            .bind(fixture.workspace)
+            .bind(fixture.hosted_connection)
             .bind(fixture.hosted_agent)
             .execute(&su)
             .await
@@ -732,14 +747,23 @@ async fn the_advertised_catalog_follows_the_connection_lifecycle_and_the_scopes(
     .execute(&su)
     .await
     .unwrap();
-    // The revoke the terminal state required is undone with it — the fixture is
-    // restoring a *state*, and a live `active` connection has a live credential.
+    // The revoke and the seeded manifest row the terminal state required are
+    // undone with it — the fixture is restoring a *state*, and a live `active`
+    // connection has a live credential and no cleanup in flight.
     sqlx::query("UPDATE token SET revoked_at=NULL WHERE workspace_id=$1 AND id=$2")
         .bind(fixture.workspace)
         .bind(fixture.hosted_token)
         .execute(&su)
         .await
         .unwrap();
+    sqlx::query(
+        "DELETE FROM hosted_agent_connection_artifact WHERE workspace_id=$1 AND connection_id=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_connection)
+    .execute(&su)
+    .await
+    .unwrap();
     // A rejected proof also pauses the profile (HAP-E3's fail-closed
     // invalidation), so the fixture restores it before the next axis.
     sqlx::query(
@@ -1271,11 +1295,13 @@ async fn an_inactive_hosted_agent_fails_closed_and_never_falls_back_to_managed()
 
     // Take the hosted connection out of `active` while leaving the agent live.
     //
-    // HAP-E6's migration 072 refuses a fabricated `disconnected`: the terminal
-    // state asserts zero live credentials on the connection and a paused agent.
-    // So the fixture reaches it the way the lifecycle does — revoke, pause,
-    // transition — and then unpauses the agent again, which is what makes the
-    // selector's answer below about the CONNECTION rather than about the pause.
+    // HAP-E6's migration 072 refuses a fabricated `disconnected` on four
+    // counts: it must arrive from `cleanup_pending`, the manifest must exist,
+    // no required artifact may be unresolved, and the local half (zero live
+    // credentials, paused agent) must hold. So the fixture walks the lifecycle
+    // — revoke, pause, `cleanup_pending`, seed one resolved row, terminal — and
+    // then unpauses the agent again, which is what makes the selector's answer
+    // below about the CONNECTION rather than about the pause.
     sqlx::query("UPDATE token SET revoked_at=now() WHERE workspace_id=$1 AND id=$2")
         .bind(fixture.workspace)
         .bind(fixture.hosted_token)
@@ -1291,7 +1317,28 @@ async fn an_inactive_hosted_agent_fails_closed_and_never_falls_back_to_managed()
     .await
     .unwrap();
     sqlx::query(
-        "UPDATE hosted_agent_connection SET status='disconnected', active_token_id=NULL \
+        "UPDATE hosted_agent_connection SET status='cleanup_pending', active_token_id=NULL \
+         WHERE workspace_id=$1 AND id=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_connection)
+    .execute(&su)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO hosted_agent_connection_artifact \
+           (workspace_id, connection_id, agent_member_id, kind, expected_action, \
+            current_status, disposition, source, acknowledged_at) \
+         VALUES ($1,$2,$3,'secret','revoke','absent','revoked','server_verified',now())",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_connection)
+    .bind(fixture.hosted_agent)
+    .execute(&su)
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE hosted_agent_connection SET status='disconnected' \
          WHERE workspace_id=$1 AND id=$2",
     )
     .bind(fixture.workspace)

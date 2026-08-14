@@ -136,8 +136,33 @@ CREATE POLICY ws_isolation ON hosted_agent_connection_artifact
 -- The Rust transition already refuses an unresolved manifest, but the rule that
 -- matters most in this goal is exactly the kind that a later caller — a repair
 -- script, a future admin route, a migration backfill — reaches around. So the
--- database holds it too: `disconnected` requires every required artifact
--- resolved AND no live hosted credential left on the connection.
+-- database holds it too.
+--
+-- ## Why "no unresolved rows" is not, by itself, a guard
+--
+-- `NOT EXISTS (… AND required AND NOT resolved)` is **vacuously true on an
+-- empty manifest**. A caller that never ran the disconnect start — a repair
+-- script doing revoke, pause, `UPDATE … SET status='disconnected'` — has zero
+-- artifact rows, so the clause that was supposed to stop it never fires and the
+-- terminal state is minted with nothing confirmed. That shape is not
+-- hypothetical: it is exactly what the adapted E5/E4 fixtures do.
+--
+-- So the guard asserts what the real contract is, in four parts:
+--
+--   1. `OLD.status = 'cleanup_pending'` — the terminal is reachable from ONE
+--      state. A `pairing_pending` or `active` row cannot jump the queue, so the
+--      manifest and the local half were not merely *true* at transition time,
+--      they were established by a disconnect that actually started;
+--   2. the manifest is **non-empty**. The HTTP start always seeds all six
+--      kinds, so this refuses only paths that skipped the start entirely and
+--      never a legitimate one;
+--   3. no required artifact is unresolved. With (2) in force this clause has
+--      rows to judge and can actually fail;
+--   4. zero live credentials on the connection, and a paused dedicated agent.
+--
+-- Deliberately NOT here (tracked in #1386): an INSERT that arrives already
+-- terminal, a terminal-exit guard against `disconnected → detected`
+-- resurrection, the `acknowledged_by` FK wedge, and retry-seed merge semantics.
 -- ---------------------------------------------------------------------------
 CREATE FUNCTION hosted_agent_connection_terminal_guard()
 RETURNS trigger LANGUAGE plpgsql
@@ -146,6 +171,16 @@ AS $$
 BEGIN
   IF NEW.status <> 'disconnected' OR OLD.status = 'disconnected' THEN
     RETURN NEW;
+  END IF;
+  IF OLD.status <> 'cleanup_pending' THEN
+    RAISE EXCEPTION
+      'hosted connection cannot reach disconnected from %', OLD.status;
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM public.hosted_agent_connection_artifact a
+     WHERE a.workspace_id = NEW.workspace_id AND a.connection_id = NEW.id
+  ) THEN
+    RAISE EXCEPTION 'hosted connection has no cleanup artifact manifest';
   END IF;
   IF EXISTS (
     SELECT 1 FROM public.hosted_agent_connection_artifact a
@@ -176,7 +211,7 @@ BEFORE UPDATE OF status ON hosted_agent_connection
 FOR EACH ROW EXECUTE FUNCTION hosted_agent_connection_terminal_guard();
 
 COMMENT ON FUNCTION hosted_agent_connection_terminal_guard() IS
-  'ADR-0162 HAP-E6: disconnected requires every required artifact resolved, zero live hosted credentials, and a paused dedicated agent.';
+  'ADR-0162 HAP-E6: disconnected is reachable only from cleanup_pending, and only with a seeded manifest whose required artifacts are all resolved, zero live hosted credentials, and a paused dedicated agent.';
 
 DO $$
 BEGIN

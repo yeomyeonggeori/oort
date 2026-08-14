@@ -181,6 +181,12 @@ pub enum HostedDisconnectCompletion {
     Unresolved {
         remaining_required: i64,
     },
+    /// The connection is `cleanup_pending` with **no** manifest rows at all, so
+    /// there is nothing for the unresolved-artifact gate to judge. Only a
+    /// caller that reached `cleanup_pending` without running the disconnect
+    /// start can be in this state, and it is refused rather than waved through
+    /// on a vacuously-satisfied check.
+    ManifestMissing,
     /// The local half is not server-confirmed: a live credential or an unpaused
     /// agent. Refusing here is what keeps `disconnected` an honest claim.
     LocalRevokeIncomplete,
@@ -865,12 +871,22 @@ async fn load_artifact(
 
 /// The terminal transition, which happens at most once per connection.
 ///
-/// Three gates, in this order because each one is cheaper and more specific
-/// than the next: the connection must be `cleanup_pending`, every required
-/// artifact must be resolved, and the local half — zero live credentials on
-/// this connection, a paused dedicated agent — must be readable from this
-/// server's own tables. Migration 072's trigger asserts the same two facts, so
-/// a future writer that skips this function still cannot mint a false terminal.
+/// Four gates, in this order because each one is cheaper and more specific than
+/// the next:
+///
+///   1. the connection is `cleanup_pending` — the terminal has one predecessor;
+///   2. the manifest is **non-empty**. "No unresolved required rows" is
+///      vacuously true when there are no rows at all, so a connection that
+///      never ran a disconnect start would otherwise walk straight through the
+///      gate that exists to stop it. The start seeds all six kinds, so this
+///      refuses only a caller that skipped it;
+///   3. no required artifact is unresolved;
+///   4. the local half — zero live credentials on this connection, a paused
+///      dedicated agent — is readable from this server's own tables.
+///
+/// Migration 072's trigger asserts the same four facts. That is deliberate
+/// duplication, not belt-and-braces: this function is the contract a route
+/// obeys, and the trigger is the contract a repair script cannot get around.
 pub async fn complete_hosted_disconnect_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -897,6 +913,23 @@ pub async fn complete_hosted_disconnect_in_tx(
     }
     if status != "cleanup_pending" {
         return Ok(HostedDisconnectCompletion::WrongState);
+    }
+    // Gate 2, and it has to come before gate 3 rather than be folded into it:
+    // `remaining_required == 0` is TRUE on an empty manifest, so a connection
+    // whose rows were never seeded (or were deleted out of band) would read as
+    // fully resolved. The start seeds all six kinds in the same transaction as
+    // the `cleanup_pending` transition, so an empty manifest here means the
+    // lifecycle was not followed and there is nothing to confirm.
+    let manifest_rows: i64 = sqlx::query_scalar(
+        "SELECT count(*)::bigint FROM hosted_agent_connection_artifact \
+          WHERE workspace_id = $1 AND connection_id = $2",
+    )
+    .bind(workspace_id)
+    .bind(connection_id)
+    .fetch_one(&mut *conn)
+    .await?;
+    if manifest_rows == 0 {
+        return Ok(HostedDisconnectCompletion::ManifestMissing);
     }
     let remaining_required =
         count_unresolved_required_artifacts_in_tx(conn, workspace_id, connection_id).await?;

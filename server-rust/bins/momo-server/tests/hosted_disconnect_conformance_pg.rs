@@ -200,6 +200,9 @@ struct Fixture {
     /// A managed (non-hosted) agent in the same workspace.
     managed_agent: Uuid,
     managed_bearer: String,
+    /// A dedicated hosted sentinel with **no** connection yet — the identity a
+    /// test needs to build a connection in an arbitrary lifecycle state.
+    spare_hosted_agent: Uuid,
     channel: Uuid,
 }
 
@@ -406,6 +409,7 @@ async fn seed(pool: &PgPool) -> Fixture {
     let hosted_agent = seed_agent(pool, workspace, human, "hosted", true).await;
     let sibling_agent = seed_agent(pool, workspace, human, "sibling", true).await;
     let managed_agent = seed_agent(pool, workspace, human, "managed", false).await;
+    let spare_hosted_agent = seed_agent(pool, workspace, human, "spare", true).await;
 
     let channel = Uuid::new_v4();
     sqlx::query("INSERT INTO channel(id, workspace_id, kind, name) VALUES($1,$2,'public',$3)")
@@ -458,6 +462,7 @@ async fn seed(pool: &PgPool) -> Fixture {
         sibling,
         managed_agent,
         managed_bearer,
+        spare_hosted_agent,
         channel,
     }
 }
@@ -1385,6 +1390,223 @@ async fn the_terminal_transition_needs_every_artifact_and_then_happens_exactly_o
         forced.is_err(),
         "a direct UPDATE cannot mint a terminal state for an unstarted connection"
     );
+}
+
+// ---------------------------------------------------------------------------
+// (3b) the terminal guard's four clauses, each proved by the failure it causes
+//
+// The clause that matters most here is the artifact one, and it is the one that
+// was dead code until this test existed: `NOT EXISTS (… required AND NOT
+// resolved)` is vacuously true on an empty manifest, so a connection that never
+// ran a disconnect start walked straight through it. Each assertion below names
+// the clause it trips, by message, because "the UPDATE failed" would pass
+// against the wrong guard.
+// ---------------------------------------------------------------------------
+
+async fn terminal_refusal(pool: &PgPool, workspace: Uuid, connection: Uuid) -> String {
+    let error = sqlx::query(
+        "UPDATE hosted_agent_connection SET status='disconnected' \
+          WHERE workspace_id=$1 AND id=$2",
+    )
+    .bind(workspace)
+    .bind(connection)
+    .execute(pool)
+    .await
+    .expect_err("the terminal guard refuses this transition");
+    error
+        .as_database_error()
+        .expect("a database error")
+        .message()
+        .to_string()
+}
+
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn the_terminal_guard_names_the_clause_that_refused_the_transition() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app).await;
+    let client = reqwest::Client::new();
+
+    // (ii) the OLD.status gate — a `pairing_pending` connection cannot jump
+    // straight to the terminal, however clean its local half looks.
+    let jumper = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO hosted_agent_connection( \
+           id,workspace_id,agent_member_id,status,pairing_challenge_hash, \
+           pairing_expires_at,created_by) \
+         VALUES($1,$2,$3,'pairing_pending',digest($4::text,'sha256'), \
+           now() + interval '15 minutes',$5)",
+    )
+    .bind(jumper)
+    .bind(fixture.workspace)
+    .bind(fixture.spare_hosted_agent)
+    .bind(format!(
+        "momo_pair_v1.{}.{}",
+        fixture.workspace,
+        Uuid::new_v4().simple()
+    ))
+    .bind(fixture.human)
+    .execute(&su)
+    .await
+    .expect("seed a pairing_pending connection");
+    sqlx::query(
+        "UPDATE agent_profile SET paused=true WHERE workspace_id=$1 AND agent_member_id=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.spare_hosted_agent)
+    .execute(&su)
+    .await
+    .unwrap();
+    assert_eq!(
+        terminal_refusal(&su, fixture.workspace, jumper).await,
+        "hosted connection cannot reach disconnected from pairing_pending",
+        "the terminal has exactly one predecessor"
+    );
+
+    // (iii) the empty-manifest gate — `cleanup_pending` with zero rows is the
+    // repair-script shape, and the unresolved-artifact clause cannot catch it
+    // because there is nothing to be unresolved.
+    sqlx::query(
+        "UPDATE hosted_agent_connection \
+            SET status='detected', pairing_consumed_at=now(), detected_at=now(), detected_by=$3 \
+          WHERE workspace_id=$1 AND id=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(jumper)
+    .bind(fixture.spare_hosted_agent)
+    .execute(&su)
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE hosted_agent_connection SET status='cleanup_pending' \
+          WHERE workspace_id=$1 AND id=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(jumper)
+    .execute(&su)
+    .await
+    .unwrap();
+    assert_eq!(
+        terminal_refusal(&su, fixture.workspace, jumper).await,
+        "hosted connection has no cleanup artifact manifest",
+        "an empty manifest is refused rather than read as fully resolved"
+    );
+    // …and the HTTP route refuses the same row for the same reason, so Rust and
+    // the database state one contract rather than two.
+    let (code, refused) = post_json(
+        &client,
+        &base,
+        &fixture.human_jwt,
+        &complete_path(fixture.workspace, jumper),
+        json!({}),
+    )
+    .await;
+    assert_eq!(code, 409, "{refused}");
+    assert_eq!(
+        connection_status(&su, fixture.workspace, jumper).await,
+        "cleanup_pending"
+    );
+
+    // (i) the unresolved-artifact clause, on a connection that really did start
+    // a disconnect. This is the assertion that was impossible before the
+    // empty-manifest gate existed: with rows present, the clause has something
+    // to judge and names itself when it refuses.
+    let (_, started) = post_json(
+        &client,
+        &base,
+        &fixture.human_jwt,
+        &disconnect_path(fixture.workspace, fixture.hosted.connection),
+        json!({}),
+    )
+    .await;
+    let manifest = started["cleanupArtifacts"].clone();
+    for kind in ["bot", "routine", "plugin", "connector"] {
+        let id = artifact_id(&manifest, kind);
+        let (code, _) = post_json(
+            &client,
+            &base,
+            &fixture.human_jwt,
+            &acknowledge_path(fixture.workspace, fixture.hosted.connection, &id),
+            json!({"currentStatus": "absent", "disposition": "delete", "evidence": "handled"}),
+        )
+        .await;
+        assert_eq!(code, 200, "{kind}");
+    }
+    // Exactly one required row is left: `local_plugin_files`.
+    assert_eq!(
+        terminal_refusal(&su, fixture.workspace, fixture.hosted.connection).await,
+        "hosted connection has unresolved required cleanup artifacts",
+        "the artifact clause refuses, and it is the artifact clause that says so"
+    );
+
+    // Resolve it, and the same direct UPDATE now trips the credential clause
+    // instead only if the local half were undone — it is not, so the transition
+    // is permitted. Ordering the clauses this way proves each is reachable.
+    let files = artifact_id(&manifest, "local_plugin_files");
+    let (code, _) = post_json(
+        &client,
+        &base,
+        &fixture.human_jwt,
+        &acknowledge_path(fixture.workspace, fixture.hosted.connection, &files),
+        json!({"currentStatus": "absent", "disposition": "delete", "evidence": "removed by hand"}),
+    )
+    .await;
+    assert_eq!(code, 200);
+    sqlx::query("UPDATE token SET revoked_at=NULL WHERE workspace_id=$1 AND id=$2")
+        .bind(fixture.workspace)
+        .bind(fixture.hosted.token)
+        .execute(&su)
+        .await
+        .unwrap();
+    assert_eq!(
+        terminal_refusal(&su, fixture.workspace, fixture.hosted.connection).await,
+        "hosted connection still has a live credential",
+        "a resurrected credential refuses the terminal even with a clean manifest"
+    );
+    sqlx::query("UPDATE token SET revoked_at=now() WHERE workspace_id=$1 AND id=$2")
+        .bind(fixture.workspace)
+        .bind(fixture.hosted.token)
+        .execute(&su)
+        .await
+        .unwrap();
+    sqlx::query(
+        "UPDATE agent_profile SET paused=false WHERE workspace_id=$1 AND agent_member_id=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted.agent)
+    .execute(&su)
+    .await
+    .unwrap();
+    assert_eq!(
+        terminal_refusal(&su, fixture.workspace, fixture.hosted.connection).await,
+        "hosted connection agent is not paused",
+        "an unpaused agent refuses the terminal too"
+    );
+
+    // With every clause satisfied the route completes, which is what makes the
+    // four refusals above statements about the guard rather than about a
+    // connection that could never have finished anyway.
+    sqlx::query(
+        "UPDATE agent_profile SET paused=true WHERE workspace_id=$1 AND agent_member_id=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted.agent)
+    .execute(&su)
+    .await
+    .unwrap();
+    let (code, terminal) = post_json(
+        &client,
+        &base,
+        &fixture.human_jwt,
+        &complete_path(fixture.workspace, fixture.hosted.connection),
+        json!({}),
+    )
+    .await;
+    assert_eq!(code, 200, "{terminal}");
+    assert_eq!(terminal["connection"]["status"], json!("disconnected"));
 }
 
 // ---------------------------------------------------------------------------

@@ -528,7 +528,13 @@ pub async fn complete_disconnect(
                                 "hosted connection is not awaiting cleanup",
                             )))
                         }
-                        HostedDisconnectCompletion::Unresolved { .. } => {
+                        HostedDisconnectCompletion::Unresolved { .. }
+                        // One answer for both, because they are the same
+                        // refusal from a caller's side — the manifest does not
+                        // say this connection is clean — and separating them
+                        // would tell an unauthorized prober whether a
+                        // disconnect had ever started.
+                        | HostedDisconnectCompletion::ManifestMissing => {
                             return Ok(Err(ApiError::new(
                                 StatusCode::CONFLICT,
                                 "hosted connection has unresolved cleanup artifacts",
