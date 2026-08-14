@@ -49,7 +49,7 @@ function TypingTicks({value}: {value: number}): React.JSX.Element {
 
 function composer(props: Partial<React.ComponentProps<typeof Composer>> = {}) {
   return render(
-    <Composer
+    <Composer recipient="place"
       channelLabel="배포"
       directory={EMPTY}
       onSend={() => {}}
@@ -73,7 +73,7 @@ describe('작성 중 신호 — 값보다 늦게, 값을 건드리지 않고', (
       const [ticks, setTicks] = React.useState(0);
       return (
         <>
-          <Composer
+          <Composer recipient="place"
             channelLabel="배포"
             directory={EMPTY}
             onSend={() => {}}

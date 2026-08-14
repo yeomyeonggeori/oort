@@ -1,6 +1,10 @@
 import type {RosterMember} from '@momo/core/lib/api';
-import {COMPOSER_OFFLINE_COPY} from '@momo/core/features/chat/composerCopy';
-import {attachParticle} from '@momo/core/lib/koreanParticle';
+import {
+  COMPOSER_OFFLINE_COPY,
+  composerFieldLabel,
+  composerPlaceholder,
+} from '@momo/core/features/chat/composerCopy';
+import {attachParticle, type RecipientKind} from '@momo/core/lib/koreanParticle';
 import type {Directory} from '@momo/core/features/workspace/directory';
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
@@ -133,6 +137,7 @@ export {COMPOSER_OFFLINE_COPY};
 
 export function Composer({
   channelLabel,
+  recipient,
   directory,
   dmAgent,
   offline,
@@ -146,8 +151,15 @@ export function Composer({
   inputRef: externalInputRef,
 }: {
   channelLabel: string;
+  /**
+   * 이 label 이 **방 이름인가 사람 이름인가** (#1384). DM 의 label 은 상대의
+   * displayName 이므로(`channelLabelParts`) 조사가 갈린다: 방은 에, 사람은
+   * 에게. 기본값을 두지 않는 것은 의도다 — 모르는 채로 그린 화면이 「hermes에
+   * 메시지 보내기」였고, 조사는 한국어 독자에게 렌더링 디테일이 아니다.
+   */
+  recipient: RecipientKind;
   directory: Directory;
-  /** Overrides the derived "…에 메시지 보내기". A thread is not a channel. */
+  /** Overrides `composerPlaceholder`. A thread is not a channel. */
   placeholder?: string;
   /** Overrides 보내기. A reply says what it is. */
   sendLabel?: string;
@@ -422,9 +434,12 @@ export function Composer({
           value={text}
           onChangeText={onChangeText}
           onSelectionChange={onSelectionChange}
-          placeholder={placeholder ?? `${channelLabel}에 메시지 보내기`}
+          // 문장은 코어가 든다 (#1384). 이 두 줄은 웹 `chat/Composer.tsx` 와
+          // **같은 문자열을 각자 짓고** 있었다: 값이 같아서 안 보였을 뿐,
+          // 한쪽을 고치는 날 갈라진다. 오프라인 문장이 이미 걸어 둔 길이다.
+          placeholder={placeholder ?? composerPlaceholder(channelLabel, recipient)}
           placeholderTextColor={palette.textFaint}
-          accessibilityLabel={placeholder ?? `${channelLabel}에 보낼 메시지`}
+          accessibilityLabel={placeholder ?? composerFieldLabel(channelLabel, recipient)}
           multiline
           // Enter inserts a newline (see the header). `blurOnSubmit` false keeps
           // the keyboard up, because on a phone the return key is the only line

@@ -568,7 +568,7 @@ describe('M-3 — 승인 카드 세 문장의 격', () => {
       'offline',
     );
     const view = render(
-      <Composer
+      <Composer recipient="place"
         channelLabel="배포"
         directory={DIRECTORY}
         offline
