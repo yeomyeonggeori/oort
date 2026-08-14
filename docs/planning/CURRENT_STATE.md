@@ -1,5 +1,27 @@
 # oort 기획 현재 상태 (Planning Current State)
 
+> **2026-08-14 스냅샷 36 (Opus 5 단발 워커 · engine — #1366 HAP-E5 MCP tool surface + per-agent hosted delivery, 로컬 동결).** 스냅샷 35를 supersede한다.
+>
+> **활성 goal #1366:** native blocker #1364/#1365가 닫혀 HAP-E5를 claim했다. worktree/branch는 `feat/1366-hap-e5-engine-thin-bind-mcp-inbox-conversation-gateway-tools`, base는 `track/engine@aa40e4c63d5b5e96b7461881ef82a1372b2ae35b`(#1365 랜딩)다. Agent Port에 8개 thin-binding tool과 agent별 managed/hosted delivery selector를 열었고, 두 번째 message/job SoT는 만들지 않았다.
+>
+> **경계 요약:** `tools/list`와 `tools/call`이 하나의 `ToolView`(connection 승인 scope × 현재 token scope × server capability)를 공유하고, `agent:port:connect`는 어느 tool의 필요 scope도 아니다. 메시지는 REST send와 같은 `send_message_with_mentions_in_tx`, job/lease는 기존 gateway 동사(claim만 hosted 분기를 가진 단일 문), run event/complete는 REST handler에서 추출해 양쪽이 공유하는 in-tx 함수다. client에게는 AEAD 봉인 `leaseHandle`만 나가고 job id·lease owner·run id·inbox 순번·raw cursor는 나가지 않는다. selector는 전역 provider mode와 무관하며 inactive hosted agent는 managed로 fallback하지 않고 fail-closed다. 생산 gate `MOMO_HOSTED_DELIVERY_ENABLED`는 #1367까지 닫혀 있고 runtime fixture만 synthetic override로 연다.
+>
+> **M1 폐곡선(선택 근거):** migration 071이 (a) kind 포함 unique index + `source_outbox_kind` generated column으로 outbox FK에 kind를 결속(=DB 강제)하고, (b) job↔run 짝은 BEFORE INSERT trigger로 강제한다. FK를 못 쓴 이유는 job의 run 신원이 `outbox.payload` jsonb에 있어 stored generated column으로 hot table을 rewrite해야 하고 non-uuid run_id legacy row에서 즉시 실패하기 때문이다. 적대 테스트가 kind 혼동·job↔run 불일치·cross-channel·타 agent job·깨진 shape를 전부 DB 거절로 고정했다.
+>
+> **cursor secret 회전 계약(결정):** 봉투에 key-id를 넣지 않는다 — opaque token에 rotation-epoch oracle이 생기고 dual-secret 창이 필요해진다. 회전은 계약상 disconnect와 동치이며 hosted connection은 재-pairing해야 한다. 열리지 않는 cursor는 조용한 전량 재전송이 아니라 fail-closed 거절이고(verifier가 고정), 운영자-facing 강제 재-pairing은 #1367 소유다.
+>
+> **측정 결함 1건 동반 수정:** gateway lease 술어가 `payload->>'…'`를 원문 비교해 mention producer의 대문자 uuid와 어긋났고, 그 결과 **mention job은 gateway 경로로 claim/renew/release/settle이 불가능**했다. `lower()` 양변 적용은 `retire_pending_agent_jobs_for_run_in_tx`가 같은 이유로 이미 문서화한 최소 수정이다.
+>
+> **실측:** 신규 `scripts/verify_agent_port_tools.sh`(#1365 소유권 계약 동일: nonce label·janitor label·external DATABASE_URL 거부·trap cleanup·부재 증명·`--verify-cleanup-contract`)가 PG18에서 7 테스트 PASS. `scripts/verify_hosted_agent_inbox.sh` 무회귀 PASS. workspace clippy `-D warnings` 0, workspace test 0 실패, migration 번호 71 unique. Docker 잔존 0. 로컬 docs gate는 #1376 base-inherited 결함으로 이 머신에서 미실행 — PR CI가 관문이다.
+>
+> **독립 리뷰 1회차(C0/H1/M2/L5) 수리 완료:** H1(gateway completion의 hosted inbox fan-out 누락)은 `complete_gateway_run_in_tx`에 같은 tx 호출을 추가하고 REST 왕복 conformance로 고정했다. M1은 `lower()` 위드닝의 red proof를 **관리형 REST 표면**에 세웠고(배포 창 backlog 체크리스트는 STATUS에 명시), M2는 `MOMO_HOSTED_DELIVERY_ENABLED` 수용을 `#[cfg(debug_assertions)]`로 감싸 release 빌드에서 구조적으로 닫았다(#1367이 cfg 제거 소유). L1은 complete의 거절 순서를 base와 동일하게 복원(lease shape 검사를 approval-hold 뒤로 되돌림), L2는 cursor 상한을 스키마와 256으로 정렬, L3는 hosted claim이 uuid 형태가 아닌 `run_id` 행을 애초에 lease하지 않도록 SQL 술어를 추가해 무한 재-lease 루프를 제거했다.
+>
+> **독립 리뷰 2회차(sol freeze — 1회차 수리 전건 확인, 신규 H1/M2) 수리 완료:** H(승인 밖 채널 hosted job 노출)는 claim SQL의 live `approved_channel_ids` 술어(권위) + selector의 `hosted_channel_unapproved` skip(조기 차단) + `leaseHandle`에 channel_id 봉인(이미 쥔 lease의 중도 회수)으로 3중 결속했고, claim 술어만 빼도 적대 테스트가 RED임을 확인했다. M(음수 토큰)은 스키마·기록 경계 양쪽에서 거절(ledger CHECK는 #1375 후보). M(닫힌 스키마 미집행)은 게시된 input schema를 `momo-mcp`가 그대로 집행하도록 바꿔 오타 필드·범위 밖 수치가 domain port에 도달하지 못하게 했고, 위반 응답은 adapter invalid-arguments와 byte 동일이다.
+>
+> **독립 리뷰 3회차(잔여 M — 스키마와 집행의 3개 간극) 수리 완료:** ①nullability 계약을 **(a)안**으로 확정했다 — optional 속성은 전부 `["<type>","null"]`로 선언하고 required는 아니다. adapter reader가 optional의 `null`을 이미 균일하게 "없음"으로 다루므로, `null`을 전면 거절하는 (b)안은 매우 흔한 클라이언트 직렬화 관례를 깨면서 스키마만 정직해졌을 뿐 동작은 더 나빠졌을 것이다. 대응은 `the_nullability_contract_holds_for_every_tool`이 8개 도구 전체(중첩 usage 포함)에서 기계 검사한다. ②`maxLength`/`minLength`를 validator에서 **UTF-8 바이트**로 세고 각 필드 description에 단위를 명시했으며 adapter reader 상한도 게시 숫자에 정렬해 두 층이 같은 경계에서 거절한다. ③토큰 4필드에 `maximum:2147483647`을 선언해 i32 좁힘과 스키마를 일치시켰다. 세 항목 모두 단일 InvalidArguments 응답을 유지한다.
+>
+> **다음 행동:** Fable 기획검수 → sol 독립 freeze 리뷰(exact commit C/H/M=0) → push/PR(track/engine)/PR CI/머지. 워커는 로컬 commit 동결까지만 수행했다.
+>
 > **2026-08-14 스냅샷 35 (GPT 5.6 · momo-main — #1365 durable inbox runtime closure).** 스냅샷 34를 supersede한다.
 >
 > **Fable 리뷰 반영:** `fbcd6afc` 초안의 C0/H2/M3을 기준으로 inbox scope, exact token↔connection↔actor↔audience, approved/current channel, active member/workspace membership, unpaused profile과 source message tuple을 결속했다. append/read authority rows는 같은 tenant transaction 동안 잠겨 revoke·pause·membership-loss와 직렬화되고, hidden row도 scan watermark를 전진시켜 membership 복원 후 보유 cursor로는 과거 content가 재출현하지 않는다(cursor 없는 재조회는 재인가된 정상 열람). connection FK는 history-preserving RESTRICT이며 run reference는 (workspace, run, agent, channel) composite FK로 묶었다. job(outbox) reference는 agent까지만 결속되고 outbox.kind·job↔run 짝은 스키마가 강제하지 않는다 — 이 잔여는 Fable 최종 리뷰가 #1366 수용기준으로 이관했다.

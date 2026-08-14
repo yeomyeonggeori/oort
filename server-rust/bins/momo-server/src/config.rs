@@ -223,6 +223,23 @@ pub struct AgentPortConfig {
     pub per_agent_limit: u32,
     /// Requests per socket peer per window. 0 disables this axis.
     pub per_ip_limit: u32,
+    /// ADR-0162 HAP-E5 — **the per-agent selector's gate, unreachable in a
+    /// release build.**
+    ///
+    /// It governs the selector only: whether a mention of an agent with a live
+    /// hosted connection is routed to the hosted gateway at all. The tool
+    /// surface itself is gated by pairing, human confirmation, proof and
+    /// scopes, none of which an operator can skip.
+    ///
+    /// Opening the selector before HAP-E6 (#1367) lands its disconnect
+    /// lifecycle would hand work to a connection nobody can take back, so the
+    /// issue restricts it to this goal's own fixtures. A `false` default would
+    /// have left that a convention an env var could break; instead
+    /// [`hosted_delivery_from_env`] only reads the variable under
+    /// `debug_assertions`, so a **release binary answers `false` whatever the
+    /// environment says**. Tests and verifiers build in debug and may also
+    /// construct [`AgentPortConfig`] directly. #1367 owns removing the `cfg`.
+    pub hosted_delivery_enabled: bool,
 }
 
 impl Default for AgentPortConfig {
@@ -233,8 +250,32 @@ impl Default for AgentPortConfig {
             per_token_limit: 240,
             per_agent_limit: 480,
             per_ip_limit: 1200,
+            hosted_delivery_enabled: false,
         }
     }
+}
+
+/// Read the hosted-delivery gate, but only where a release build cannot.
+///
+/// Any spelling other than an exact `true` leaves it closed — a typo must not
+/// open a delivery path.
+#[cfg(debug_assertions)]
+fn hosted_delivery_from_env() -> bool {
+    env("MOMO_HOSTED_DELIVERY_ENABLED")
+        .is_some_and(|value| value.trim().eq_ignore_ascii_case("true"))
+}
+
+/// The release build's answer: **always closed**, whatever the environment
+/// holds. An operator who set the variable is told it did nothing rather than
+/// being left to believe hosted delivery is on.
+#[cfg(not(debug_assertions))]
+fn hosted_delivery_from_env() -> bool {
+    if env("MOMO_HOSTED_DELIVERY_ENABLED").is_some() {
+        tracing::warn!(
+            "MOMO_HOSTED_DELIVERY_ENABLED is ignored in a release build; hosted delivery opens with HAP-E6 (#1367)"
+        );
+    }
+    false
 }
 
 impl AgentPortConfig {
@@ -266,6 +307,7 @@ impl AgentPortConfig {
                 defaults.per_agent_limit,
             )?,
             per_ip_limit: env_number("MOMO_AGENT_PORT_RATE_LIMIT_PER_IP", defaults.per_ip_limit)?,
+            hosted_delivery_enabled: hosted_delivery_from_env(),
         })
     }
 

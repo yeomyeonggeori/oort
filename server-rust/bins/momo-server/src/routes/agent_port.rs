@@ -133,24 +133,19 @@ pub async fn post(State(state): State<AppState>, request: Request) -> Response {
     } else {
         None
     };
-    let protocol_response = if let Some(response) = body_limit_error {
-        response
+    // A transport rejection is decided here but **answered after**
+    // authentication, so a malformed request still cannot tell an
+    // unauthenticated caller anything an authenticated one would not learn.
+    let transport_rejection = if let Some(response) = body_limit_error {
+        Some(response)
     } else if query_error || duplicate_transport_header {
-        protocol_error(
+        Some(protocol_error(
             StatusCode::BAD_REQUEST,
             -32600,
             "invalid Agent Port transport headers",
-        )
+        ))
     } else {
-        let dispatched = momo_mcp::dispatch(momo_mcp::HttpRequest {
-            content_type: content_type.value(),
-            accept: accept.as_ref().ok().and_then(Option::as_deref),
-            protocol_version: protocol_version.value(),
-            mcp_method: method.value(),
-            mcp_name: name.value(),
-            body: &bytes,
-        });
-        dispatched_response(dispatched)
+        None
     };
     let (detected_client_name, detected_client_version, detected_capabilities) = foundation
         .and_then(|kind| foundation_metadata(&bytes, kind))
@@ -180,18 +175,74 @@ pub async fn post(State(state): State<AppState>, request: Request) -> Response {
             }
         }
     };
-    match admission {
-        AgentPortAdmission::Allowed(_principal) => {}
+    let principal = match admission {
+        AgentPortAdmission::Allowed(principal) => principal,
         AgentPortAdmission::RateLimited {
             retry_after_seconds,
         } => return rate_limited(retry_after_seconds),
-    }
+    };
 
     // Incoming session/resume headers are deliberately ignored as authority.
     // They do not alter the response and are never echoed.
     let _incoming_session = parts.headers.get(MCP_SESSION_ID);
     let _incoming_event = parts.headers.get(LAST_EVENT_ID);
-    protocol_response
+
+    if let Some(rejection) = transport_rejection {
+        return rejection;
+    }
+
+    // ADR-0162 HAP-E5 — the request's own tool view.
+    //
+    // Resolved only for the two methods that can consult it, so the foundation
+    // surface (discover/initialize/ping/notifications) still costs exactly the
+    // queries HAP-E2 measured. A caller with no live hosted connection resolves
+    // to the empty view, which is byte-identical to a connect-only credential:
+    // an empty catalog and an unknown-tool answer.
+    let caller = crate::routes::agent_port_tools::HostedCaller::from_principal(&principal);
+    let view = match (mentions_tools(&bytes), caller) {
+        (true, Some(caller)) => {
+            crate::routes::agent_port_tools::tool_view_for(&state, caller).await
+        }
+        _ => momo_mcp::ToolView::empty(),
+    };
+
+    let request = momo_mcp::HttpRequest {
+        content_type: content_type.value(),
+        accept: accept.as_ref().ok().and_then(Option::as_deref),
+        protocol_version: protocol_version.value(),
+        mcp_method: method.value(),
+        mcp_name: name.value(),
+        body: &bytes,
+    };
+    match momo_mcp::dispatch_with_tools(request, &view) {
+        momo_mcp::Outcome::Response(response) => dispatched_response(response),
+        momo_mcp::Outcome::Tool(call) => match caller {
+            Some(caller) => dispatched_response(
+                crate::routes::agent_port_tools::execute(&state, caller, call).await,
+            ),
+            // Unreachable: a non-empty view requires a hosted caller. Answering
+            // like an unknown tool keeps the impossible case fail-closed.
+            None => dispatched_response(momo_mcp::tool_failure(
+                &call,
+                momo_mcp::ToolFailure::NotAuthorized,
+            )),
+        },
+    }
+}
+
+/// Whether this body's JSON-RPC method is one the tool view can change.
+///
+/// Cheap and deliberately permissive: a body that does not parse, or names
+/// another method, answers `false` and the request pays no connection lookup.
+/// `momo_mcp` still owns every validation decision — this only decides whether
+/// resolving the view is worth a query.
+fn mentions_tools(body: &[u8]) -> bool {
+    serde_json::from_slice::<serde_json::Value>(body)
+        .ok()
+        .as_ref()
+        .and_then(|value| value.get("method"))
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|method| matches!(method, "tools/list" | "tools/call"))
 }
 
 fn foundation_metadata(

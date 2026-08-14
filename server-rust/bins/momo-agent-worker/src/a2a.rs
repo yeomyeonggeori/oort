@@ -681,6 +681,8 @@ mod tests {
             workspace_settings: serde_json::json!({}),
             paused: false,
             hosted_delivery_disabled: false,
+            hosted_active_connection_id: None,
+            hosted_channel_approved: false,
             is_channel_member: true,
         };
         let block = A2aBlock::Depth {

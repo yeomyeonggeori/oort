@@ -740,6 +740,95 @@ pub async fn prove_hosted_binding_in_tx(
     }
 }
 
+/// The live capability projection one authenticated Agent Port request has —
+/// the connection it is bound to, plus both halves of the scope intersection
+/// (ADR-0162 / HAP-E5).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HostedToolIdentity {
+    pub connection_id: Uuid,
+    pub agent_member_id: Uuid,
+    pub token_id: Uuid,
+    /// What the credential still carries.
+    pub token_scopes: Vec<String>,
+    /// What a human actually confirmed on this connection.
+    pub approved_scopes: Vec<String>,
+    pub approved_channel_ids: Vec<Uuid>,
+}
+
+/// Resolve the connection behind an already-authenticated Agent Port bearer, or
+/// `None` when there is no live one.
+///
+/// `None` is the fail-closed answer for **every** way this can go wrong, and it
+/// is what makes an inactive hosted agent see an empty tool catalog rather than
+/// a partially-open one: a revoked/expired token, a token that is no longer the
+/// connection's `active_token_id`, a token minted for another audience, a token
+/// whose actor is not the connection's agent, a suspended member, a lost
+/// workspace membership, or a paused profile all take this exit.
+///
+/// The three axes worth naming, because 070's SQL asserted them and nothing
+/// exercised them: `audience` (a generic bearer cannot address the Agent Port),
+/// `actor_member_id` (a token minted for another member cannot borrow this
+/// connection), and `hosted_connection_id`/`active_token_id` (a token belonging
+/// to a previous connection era cannot be replayed against the current one).
+///
+/// Lock order is HAP-E4's: connection → token → member → membership → profile.
+/// Any other order here would form the AB-BA pair #1374 already tracks.
+pub async fn resolve_hosted_tool_identity_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    agent_member_id: Uuid,
+    token_id: Uuid,
+) -> Result<Option<HostedToolIdentity>, sqlx::Error> {
+    let row = sqlx::query(
+        "SELECT hc.id AS connection_id, hc.agent_member_id, t.id AS token_id,                 t.scopes AS token_scopes, hc.approved_scopes, hc.approved_channel_ids            FROM hosted_agent_connection hc            JOIN token t ON t.workspace_id=hc.workspace_id AND t.id=hc.active_token_id            JOIN member m ON m.workspace_id=hc.workspace_id AND m.id=hc.agent_member_id            JOIN workspace_membership wm              ON wm.workspace_id=hc.workspace_id AND wm.member_id=hc.agent_member_id            JOIN agent_profile ap              ON ap.workspace_id=hc.workspace_id AND ap.agent_member_id=hc.agent_member_id           WHERE hc.workspace_id=$1 AND hc.agent_member_id=$2 AND t.id=$3             AND hc.status='active' AND hc.proved_at IS NOT NULL             AND t.kind='agent_bearer' AND t.credential_class='hosted_active'             AND t.revoked_at IS NULL             AND (t.expires_at IS NULL OR t.expires_at > now())             AND t.hosted_connection_id=hc.id AND t.actor_member_id=hc.agent_member_id             AND t.audience=$4             AND 'agent:port:connect'=ANY(t.scopes)             AND 'agent:port:connect'=ANY(hc.approved_scopes)             AND m.kind='agent' AND m.status='active' AND m.deleted_at IS NULL             AND ap.paused=false           FOR SHARE OF hc,t,m,wm,ap",
+    )
+    .bind(workspace_id)
+    .bind(agent_member_id)
+    .bind(token_id)
+    .bind(HOSTED_AGENT_PORT_AUDIENCE)
+    .fetch_optional(&mut *conn)
+    .await?;
+    let Some(row) = row else { return Ok(None) };
+    Ok(Some(HostedToolIdentity {
+        connection_id: row.try_get("connection_id")?,
+        agent_member_id: row.try_get("agent_member_id")?,
+        token_id: row.try_get("token_id")?,
+        token_scopes: row.try_get("token_scopes")?,
+        approved_scopes: row.try_get("approved_scopes")?,
+        approved_channel_ids: row.try_get("approved_channel_ids")?,
+    }))
+}
+
+/// The agent's live hosted connection id, if it has one.
+///
+/// A narrower answer than [`resolve_hosted_tool_identity_in_tx`] for producers
+/// that are acting on the agent's behalf rather than as it: there is no bearer
+/// in hand here, so the token half of the check is the connection's own
+/// `active_token_id` rather than a presented credential.
+pub async fn active_hosted_connection_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    agent_member_id: Uuid,
+) -> Result<Option<Uuid>, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT hc.id FROM hosted_agent_connection hc \
+           JOIN token t ON t.workspace_id=hc.workspace_id AND t.id=hc.active_token_id \
+          WHERE hc.workspace_id=$1 AND hc.agent_member_id=$2 \
+            AND hc.status='active' AND hc.proved_at IS NOT NULL \
+            AND t.kind='agent_bearer' AND t.credential_class='hosted_active' \
+            AND t.revoked_at IS NULL \
+            AND (t.expires_at IS NULL OR t.expires_at > now()) \
+            AND t.hosted_connection_id=hc.id AND t.actor_member_id=hc.agent_member_id \
+            AND t.audience=$3 \
+          ORDER BY hc.id LIMIT 1",
+    )
+    .bind(workspace_id)
+    .bind(agent_member_id)
+    .bind(HOSTED_AGENT_PORT_AUDIENCE)
+    .fetch_optional(&mut *conn)
+    .await
+}
+
 pub async fn is_hosted_agent_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,

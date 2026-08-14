@@ -62,10 +62,40 @@ pub struct RateLimitState {
 /// A separate state object keeps its keys and knobs out of the unauthenticated
 /// join limiter, while one limiter map with `token:`/`agent:`/`ip:` prefixes
 /// bounds all three Agent Port axes.
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct AgentPortState {
     pub config: AgentPortConfig,
     pub limiter: SlidingWindowRateLimiter,
+    /// The key behind the two opaque Agent Port envelopes — HAP-E4's inbox
+    /// cursor and HAP-E5's `leaseHandle`.
+    ///
+    /// It is a **secret**, so it is private and this struct's `Debug` redacts
+    /// it: an `AgentPortState` reaches a `tracing` field the moment someone adds
+    /// a diagnostic, and the derived formatter would have printed the key that
+    /// authenticates every cursor and lease on the instance.
+    ///
+    /// Empty on a default state, which makes both codecs refuse rather than
+    /// seal under a guessable key.
+    envelope_secret: String,
+}
+
+impl std::fmt::Debug for AgentPortState {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("AgentPortState")
+            .field("config", &self.config)
+            .field("limiter", &self.limiter)
+            .field("envelope_secret", &"<redacted>")
+            .finish()
+    }
+}
+
+impl AgentPortState {
+    /// The Agent Port envelope key. Callers hand it straight to a codec and
+    /// never log, echo or persist it.
+    pub fn envelope_secret(&self) -> &str {
+        &self.envelope_secret
+    }
 }
 
 /// 휘발 신호 state (ADR-0149): the operator's knobs plus the one object in this
@@ -286,9 +316,17 @@ impl AppState {
     /// Attach Agent Port's dedicated transport knobs and start with empty
     /// process-local buckets. This is intentionally independent of `/v1/join`.
     pub fn with_agent_port(mut self, config: AgentPortConfig) -> Self {
+        // The envelope key is derived from the app JWT secret rather than taken
+        // from a second env var, the way `OUTBOUND_WEBHOOK_MASTER_KEY` falls
+        // back to `JWT_HMAC`: an operator who configured nothing still gets a
+        // per-instance key instead of a default one, and the derivation is
+        // domain-separated inside each codec so a cursor and a lease handle
+        // never share a key.
+        let envelope_secret = format!("oort/agent-port/envelope/v1|{}", self.jwt_secret);
         self.agent_port = Arc::new(AgentPortState {
             config,
             limiter: SlidingWindowRateLimiter::new(),
+            envelope_secret,
         });
         self
     }

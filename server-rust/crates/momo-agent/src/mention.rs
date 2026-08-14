@@ -111,7 +111,23 @@ pub struct MentionCandidate {
     /// `workspace.settings`, needed raw for the ADR-0131 D2 allow-list.
     pub workspace_settings: Value,
     pub paused: bool,
+    /// The agent has a `hosted_agent_connection` row of any status — i.e. it is
+    /// a hosted agent, and neither the in-process worker nor the REST gateway
+    /// feed may ever drain its jobs.
     pub hosted_delivery_disabled: bool,
+    /// The **active, proved** hosted connection to deliver to, when there is
+    /// one. `None` on a hosted agent means pairing/detected/expired/cleanup/
+    /// disconnected — a state that must fail closed rather than fall back to a
+    /// managed provider, because falling back would run the turn twice (once
+    /// managed now, once hosted on reconnect) under an authorization nobody
+    /// granted.
+    pub hosted_active_connection_id: Option<Uuid>,
+    /// Whether the human's exact-channel grant on that live connection covers
+    /// **this** channel (HAP-E3 confirm). Separate from
+    /// [`Self::hosted_active_connection_id`] so the selector can tell "there is
+    /// nowhere to deliver" from "you did not approve this room" and audit the
+    /// difference; the claim re-checks it live regardless.
+    pub hosted_channel_approved: bool,
     /// Is the agent an active member of the channel the mention happened in?
     /// A mention of an agent that is not in the channel is a **no-op**, not an
     /// error (Swift :1464-1478) — fail closed, audited, no run.
@@ -141,6 +157,30 @@ pub async fn load_mention_candidates_in_tx(
                 EXISTS (SELECT 1 FROM hosted_agent_connection hc \
                          WHERE hc.workspace_id = m.workspace_id AND hc.agent_member_id = m.id) \
                   AS hosted_delivery_disabled, \
+                (SELECT hc.id FROM hosted_agent_connection hc \
+                   JOIN token t ON t.workspace_id = hc.workspace_id \
+                                AND t.id = hc.active_token_id \
+                  WHERE hc.workspace_id = m.workspace_id AND hc.agent_member_id = m.id \
+                    AND hc.status = 'active' AND hc.proved_at IS NOT NULL \
+                    AND t.kind = 'agent_bearer' AND t.credential_class = 'hosted_active' \
+                    AND t.revoked_at IS NULL \
+                    AND (t.expires_at IS NULL OR t.expires_at > now()) \
+                    AND t.hosted_connection_id = hc.id \
+                    AND t.actor_member_id = hc.agent_member_id \
+                    AND t.audience = '/v1/mcp/agent-port' \
+                  ORDER BY hc.id LIMIT 1) AS hosted_active_connection_id, \
+                EXISTS (SELECT 1 FROM hosted_agent_connection hc \
+                   JOIN token t ON t.workspace_id = hc.workspace_id \
+                                AND t.id = hc.active_token_id \
+                  WHERE hc.workspace_id = m.workspace_id AND hc.agent_member_id = m.id \
+                    AND hc.status = 'active' AND hc.proved_at IS NOT NULL \
+                    AND t.kind = 'agent_bearer' AND t.credential_class = 'hosted_active' \
+                    AND t.revoked_at IS NULL \
+                    AND (t.expires_at IS NULL OR t.expires_at > now()) \
+                    AND t.hosted_connection_id = hc.id \
+                    AND t.actor_member_id = hc.agent_member_id \
+                    AND t.audience = '/v1/mcp/agent-port' \
+                    AND $2 = ANY(hc.approved_channel_ids)) AS hosted_channel_approved, \
                 EXISTS ( \
                   SELECT 1 FROM membership ms \
                    WHERE ms.channel_id = $2 \
@@ -216,6 +256,12 @@ pub async fn load_mention_candidates_in_tx(
             paused: row.try_get("paused").map_err(DbError::from)?,
             hosted_delivery_disabled: row
                 .try_get("hosted_delivery_disabled")
+                .map_err(DbError::from)?,
+            hosted_active_connection_id: row
+                .try_get("hosted_active_connection_id")
+                .map_err(DbError::from)?,
+            hosted_channel_approved: row
+                .try_get("hosted_channel_approved")
                 .map_err(DbError::from)?,
             is_channel_member: row.try_get("is_channel_member").map_err(DbError::from)?,
         });
@@ -766,6 +812,8 @@ mod tests {
             workspace_settings: json!({}),
             paused: false,
             hosted_delivery_disabled: false,
+            hosted_active_connection_id: None,
+            hosted_channel_approved: false,
             is_channel_member: true,
         }
     }

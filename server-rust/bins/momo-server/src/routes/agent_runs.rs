@@ -722,6 +722,32 @@ async fn cancel_in_tx(conn: &mut PgConnection, input: CancelInput) -> DbRejectab
     retire_pending_agent_jobs_for_run_in_tx(conn, workspace_id, run_id).await?;
     cancel_pending_approvals_for_run_in_tx(conn, workspace_id, run_id, chrono::Utc::now()).await?;
 
+    // ADR-0162 HAP-E5 — the `agent_run` inbox reference, in this transaction.
+    //
+    // Retiring the job is what stops a *managed* runtime: it never claims the
+    // row. A hosted runtime may already hold the lease, and it learns about the
+    // world only by polling its own inbox — so the stop has to be an inbox
+    // event or the agent keeps working on a turn the human ended. Written where
+    // the cancel is written, so a rolled-back cancel takes the notice with it.
+    //
+    // It is a **run** reference rather than a job one on purpose: the job may
+    // already be `done` and the thing that changed is the run's state.
+    if let Some(connection_id) =
+        momo_auth::active_hosted_connection_in_tx(conn, workspace_id, run.agent_member_id)
+            .await
+            .map_err(momo_db::DbError::from)?
+    {
+        momo_messaging::append_run_reference_in_tx(
+            conn,
+            workspace_id,
+            run.agent_member_id,
+            connection_id,
+            run.channel_id,
+            run_id,
+        )
+        .await?;
+    }
+
     // The system line goes through the message spine, so it takes a real
     // `channel_seq` bump and its broadcast is emitted by the same
     // `emit_outbox` every other message uses. Swift hand-rolls the INSERT and

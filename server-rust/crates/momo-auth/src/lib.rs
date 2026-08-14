@@ -94,8 +94,8 @@ pub use agent_credential::{
     DEFAULT_ROTATION_GRACE_SECONDS, HOSTED_CONNECTION_MANAGED_CODE, MAXIMUM_ROTATION_GRACE_SECONDS,
 };
 pub use agent_scope::{
-    is_gateway_callback_route, required_agent_scope, SCOPE_AGENT_JOBS_READ,
-    SCOPE_AGENT_PORT_CONNECT, SCOPE_AGENT_RUNS_CALLBACK, SCOPE_MESSAGES_WRITE,
+    is_gateway_callback_route, required_agent_scope, SCOPE_AGENT_INBOX_READ, SCOPE_AGENT_JOBS_READ,
+    SCOPE_AGENT_PORT_CONNECT, SCOPE_AGENT_RUNS_CALLBACK, SCOPE_MESSAGES_READ, SCOPE_MESSAGES_WRITE,
 };
 pub use ephemeral_grant::{
     ephemeral_grant_key, sign_ephemeral_grant, verify_ephemeral_grant, EphemeralGrantClaims,
@@ -103,14 +103,15 @@ pub use ephemeral_grant::{
     EPHEMERAL_GRANT_TTL_SECONDS, EPHEMERAL_GRANT_TYP,
 };
 pub use hosted_connection::{
-    confirm_hosted_connection_in_tx, create_hosted_connection_in_tx, detect_pairing_in_tx,
-    get_hosted_connection_in_tx, is_hosted_agent_activated_in_tx, is_hosted_agent_in_tx,
-    list_hosted_connections_in_tx, pairing_workspace_id, prove_hosted_binding_in_tx,
-    regenerate_pairing_in_tx, resolve_pairing_in_tx, validate_channel_ids, validate_hosted_scopes,
-    HostedActivationIssuance, HostedConnection, HostedConnectionApproval, HostedInputError,
-    HostedMutation, HostedPairingIssuance, HostedProof, HOSTED_AGENT_INERT_BASE_URL,
-    HOSTED_AGENT_MODEL, HOSTED_AGENT_PORT_AUDIENCE, HOSTED_AGENT_SCOPES, HOSTED_PAIRING_PREFIX,
-    HOSTED_PAIRING_TTL_SECONDS,
+    active_hosted_connection_in_tx, confirm_hosted_connection_in_tx,
+    create_hosted_connection_in_tx, detect_pairing_in_tx, get_hosted_connection_in_tx,
+    is_hosted_agent_activated_in_tx, is_hosted_agent_in_tx, list_hosted_connections_in_tx,
+    pairing_workspace_id, prove_hosted_binding_in_tx, regenerate_pairing_in_tx,
+    resolve_hosted_tool_identity_in_tx, resolve_pairing_in_tx, validate_channel_ids,
+    validate_hosted_scopes, HostedActivationIssuance, HostedConnection, HostedConnectionApproval,
+    HostedInputError, HostedMutation, HostedPairingIssuance, HostedProof, HostedToolIdentity,
+    HOSTED_AGENT_INERT_BASE_URL, HOSTED_AGENT_MODEL, HOSTED_AGENT_PORT_AUDIENCE,
+    HOSTED_AGENT_SCOPES, HOSTED_PAIRING_PREFIX, HOSTED_PAIRING_TTL_SECONDS,
 };
 pub use issue::{
     sign_access, sign_app_token, sign_refresh, IssuedToken, ACCESS_TTL_SECONDS, REFRESH_TTL_SECONDS,
