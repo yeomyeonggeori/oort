@@ -330,6 +330,82 @@ async fn claim_gateway_jobs(
         .collect()
 }
 
+/// What a suppressed hosted job's `last_error` says, so an operator reading the
+/// row learns why it stopped without opening an audit log.
+pub const HOSTED_DISCONNECT_JOB_LAST_ERROR: &str = "hosted connection disconnected";
+
+/// How much open work a hosted disconnect closed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct HostedWorkSuppression {
+    /// Pending gateway jobs settled `done` — the canonical retire rule.
+    pub suppressed_jobs: u64,
+    /// Of those, how many still held a live lease when they were settled.
+    pub released_leases: u64,
+}
+
+/// Close every open gateway job of one hosted agent, in the disconnect's own
+/// transaction (ADR-0162 HAP-E6).
+///
+/// Two things happen to one row, and both are needed:
+///
+/// * **the job is retired** with the same `status='done', processed_at=now(),
+///   last_error=…` shape [`crate::retire_pending_agent_jobs_for_run_in_tx`]
+///   uses for a cancelled run. A hosted agent's queue has exactly one consumer,
+///   so leaving a row `pending` after its only consumer is gone means it waits
+///   forever;
+/// * **the lease columns are cleared**, which is what makes the revocation
+///   observable rather than implied. A handle minted before the disconnect can
+///   no longer renew, release or complete: `renew`/`release` require
+///   `status='pending'` and `lease_owner = $4`, and
+///   [`settle_gateway_job_in_tx`] requires the owner — all three now miss.
+///
+/// The predicate is the agent's `partition_key` plus the same case-folded
+/// `payload->>'agent_member_id'` every other statement in this module uses, so
+/// suppression covers precisely the rows the hosted claim could have handed out
+/// and nothing belonging to another agent.
+pub async fn suppress_hosted_agent_jobs_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    agent_member_id: Uuid,
+) -> Result<HostedWorkSuppression, sqlx::Error> {
+    let rows = sqlx::query(
+        "UPDATE outbox \
+            SET status = 'done', \
+                processed_at = now(), \
+                last_error = $3, \
+                lease_owner = NULL, \
+                lease_acquired_at = NULL, \
+                lease_expires_at = NULL \
+          WHERE workspace_id = $1 \
+            AND kind = 'agent_job' \
+            AND method = 'gateway' \
+            AND status = 'pending' \
+            AND partition_key = $2 \
+            AND lower(payload->>'agent_member_id') = lower($2::text) \
+        RETURNING (OLD.lease_owner IS NOT NULL) AS had_lease",
+    )
+    .bind(workspace_id)
+    .bind(agent_member_id)
+    .bind(HOSTED_DISCONNECT_JOB_LAST_ERROR)
+    .fetch_all(&mut *conn)
+    .await?;
+    // A bare `RETURNING lease_owner` would report the value this statement just
+    // nulled, so "did it hold a lease" would always answer false. PostgreSQL 18
+    // — the only server version this schema targets (`uuidv7()` in migration
+    // 069) — can name the pre-image directly, which keeps the count a fact read
+    // out of the write rather than a second statement racing it.
+    let mut suppression = HostedWorkSuppression {
+        suppressed_jobs: rows.len() as u64,
+        released_leases: 0,
+    };
+    for row in &rows {
+        if row.try_get::<bool, _>("had_lease")? {
+            suppression.released_leases += 1;
+        }
+    }
+    Ok(suppression)
+}
+
 /// Extend a live lease, returning the new expiry (Swift :160-175). `None` means
 /// the job is gone, settled, or owned by someone else — all of which the route
 /// answers with the same 409, so a loser cannot probe which.

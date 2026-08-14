@@ -65,6 +65,7 @@ pub mod agent_credential;
 pub mod agent_scope;
 pub mod ephemeral_grant;
 pub mod hosted_connection;
+pub mod hosted_disconnect;
 pub mod issue;
 pub mod jwt;
 pub mod realtime;
@@ -112,6 +113,18 @@ pub use hosted_connection::{
     HostedInputError, HostedMutation, HostedPairingIssuance, HostedProof, HostedToolIdentity,
     HOSTED_AGENT_INERT_BASE_URL, HOSTED_AGENT_MODEL, HOSTED_AGENT_PORT_AUDIENCE,
     HOSTED_AGENT_SCOPES, HOSTED_PAIRING_PREFIX, HOSTED_PAIRING_TTL_SECONDS,
+};
+pub use hosted_disconnect::{
+    acknowledge_hosted_artifact_in_tx, artifact_audit_detail, complete_hosted_disconnect_in_tx,
+    count_unresolved_required_artifacts_in_tx, expected_action_for_kind,
+    list_hosted_artifacts_in_tx, reconcile_dead_hosted_credential_in_tx,
+    reconcile_hosted_connection_in_tx, start_hosted_disconnect_in_tx, stored_disposition,
+    validate_artifact_evidence, validate_artifact_seeds, validate_artifact_status, HostedArtifact,
+    HostedArtifactAck, HostedArtifactAcknowledged, HostedArtifactAcknowledgement,
+    HostedArtifactInputError, HostedArtifactSeed, HostedDisconnectCompletion,
+    HostedDisconnectStart, HostedDisconnectStarted, HOSTED_ARTIFACT_KINDS,
+    HOSTED_DISCONNECTABLE_STATES, MAX_ARTIFACT_EVIDENCE_BYTES, MAX_ARTIFACT_ITEMS,
+    MAX_ARTIFACT_REF_BYTES,
 };
 pub use issue::{
     sign_access, sign_app_token, sign_refresh, IssuedToken, ACCESS_TTL_SECONDS, REFRESH_TTL_SECONDS,
