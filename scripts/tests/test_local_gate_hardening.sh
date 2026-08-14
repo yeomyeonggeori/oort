@@ -304,7 +304,25 @@ mkdir -p "$SPEC_SANDBOX/fakebin"
 
 # `aliases:` 를 쓰는 인자 조합만 거부하고 나머지는 실제 ruby 에 위임하는 shim.
 # psych 3(= /usr/bin/ruby 2.6) 의 ArgumentError 와 같은 거절이다.
-REAL_RUBY="$(command -v ruby 2>/dev/null || true)"
+#
+# #1376: 이 픽스처가 증명하는 것은 라이브러리의 **ruby 갈래 안에서의 강등**이므로
+# shim 의 밑감은 "`aliases:` 키워드만 없고 스펙 자체는 읽을 수 있는" ruby 여야
+# 한다. 밑감을 `command -v ruby` 로 잡으면, 게이트가 실제로 스텝을 실행하는
+# `bash -lc` 로그인 셸에서 macOS 시스템 ruby 2.6 이 잡히는데 그 psych 는 08-13 에
+# 들어온 콜론 스코프 HAP enum(docs/api/openapi.yaml)을 아예 파싱하지 못한다.
+# 그 밑감으로는 이 픽스처가 강등이 아니라 **밑감의 무능** 때문에 빨개져서 재는
+# 대상이 바뀐다(#1185 헤더의 "263332 바이트 동일" 실측도 그 enum 이 들어온 뒤로는
+# 2.6 에서 성립하지 않는다 — psych 3 갈래는 오늘의 스펙에서 죽은 갈래다).
+# 그래서 밑감도 자격 실측으로 고른다. 라이브러리가 인터프리터를 고르는 규율과
+# 같은 규율이고, 자격 있는 밑감이 없으면 조용히 넘기지 않고 이유를 대고 SKIP 한다.
+REAL_RUBY=""
+for spec_ruby_cand in "${MOMO_GATE_RUBY:-}" ${MOMO_GATE_RUBY_CANDIDATES:-ruby /opt/homebrew/opt/ruby/bin/ruby /usr/local/opt/ruby/bin/ruby /opt/homebrew/bin/ruby}; do
+  [ -n "$spec_ruby_cand" ] || continue
+  command -v "$spec_ruby_cand" >/dev/null 2>&1 || continue
+  "$spec_ruby_cand" -ryaml -e 'YAML.load_file(ARGV[0])' "$SPEC_SRC" >/dev/null 2>&1 || continue
+  REAL_RUBY="$(command -v "$spec_ruby_cand")"
+  break
+done
 if [ -n "$REAL_RUBY" ]; then
   {
     printf '#!/usr/bin/env bash\n'
@@ -354,7 +372,7 @@ if [ -n "$REAL_RUBY" ]; then
   fi
   echo "[local-gate-hardening-test] PASS spec->json psych3 강등 갈래 + 갈래 고지 (#1185)"
 else
-  echo "[local-gate-hardening-test] SKIP spec->json ruby 강등 픽스처 (ruby 없음)"
+  echo "[local-gate-hardening-test] SKIP spec->json ruby 강등 픽스처 (스펙을 읽을 수 있는 ruby 가 없다 — #1376: brew install ruby, 또는 MOMO_GATE_RUBY 로 지목)"
 fi
 
 # 리더가 하나도 없으면 조용히 넘어가지 않고 갈래별 이유를 대고 죽는다.
