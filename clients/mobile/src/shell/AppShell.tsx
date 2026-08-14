@@ -14,6 +14,7 @@ import {
   tabLabel,
   TABS,
   type OpenAgent,
+  type OpenHostedConnection,
   type Tab,
 } from '../nav/state';
 import PushProvider from '../push/PushProvider';
@@ -21,6 +22,8 @@ import {RealtimeProvider} from '../realtime/RealtimeProvider';
 import AgentDetailScreen from '../screens/AgentDetailScreen';
 import AgentsScreen from '../screens/AgentsScreen';
 import ConversationScreen from '../screens/ConversationScreen';
+import HostedConnectionDetailScreen from '../screens/HostedConnectionDetailScreen';
+import HostedConnectionsScreen from '../screens/HostedConnectionsScreen';
 import InboxScreen from '../screens/InboxScreen';
 import SearchScreen from '../screens/SearchScreen';
 import SidebarScreen from '../screens/SidebarScreen';
@@ -114,6 +117,15 @@ function Shell(): React.JSX.Element {
       dispatch({type: 'openWorkSession', workSession: {sessionId}}),
     [],
   );
+  const onOpenHostedList = useCallback(
+    () => dispatch({type: 'openHostedList'}),
+    [],
+  );
+  const onOpenHostedConnection = useCallback(
+    (connection: OpenHostedConnection) =>
+      dispatch({type: 'openHostedConnection', connection}),
+    [],
+  );
 
   // Which tabs have ever been the current one. A ref rather than state: it is
   // derived from `nav.tab` and is only ever read during the render that already
@@ -151,7 +163,10 @@ function Shell(): React.JSX.Element {
         </View>
         {visited.current.has('agents') ? (
           <View style={nav.tab === 'agents' ? styles.visible : styles.hidden}>
-            <AgentsScreen onOpenAgent={onOpenAgent} />
+            <AgentsScreen
+              onOpenAgent={onOpenAgent}
+              onOpenHostedList={onOpenHostedList}
+            />
           </View>
         ) : null}
         {visited.current.has('work') ? (
@@ -204,6 +219,36 @@ function Shell(): React.JSX.Element {
               sessionId={nav.workSession.sessionId}
             onBack={onBack}
             onOpenConversation={onOpenConversation}
+          />
+        </EdgeSwipeBack>
+      ) : null}
+
+      {/* 호스티드 연결 관전 (goal HAP-UX3). 목록은 에이전트 탭 위에 뜨고, 상세는
+          그 목록 위에 뜬다 — 작업 탭이 목록(탭)과 상세(층)로 나뉜 것과 같은 모양을,
+          탭이 없는 이 표면은 두 층으로 낸다. 목록은 상세가 열려 있는 동안에도 마운트
+          된 채 밑에 남아, 뒤로가기가 상세를 벗기면 리마운트 없이 드러난다. */}
+      {nav.hosted ? (
+        <EdgeSwipeBack
+          accessibilityViewIsModal={nav.hosted.kind === 'list'}
+          style={styles.overlay}
+          onBack={onBack}
+          testID="hosted-list-pane">
+          <HostedConnectionsScreen
+            onBack={onBack}
+            onOpenConnection={onOpenHostedConnection}
+          />
+        </EdgeSwipeBack>
+      ) : null}
+
+      {nav.hosted?.kind === 'detail' ? (
+        <EdgeSwipeBack
+          accessibilityViewIsModal
+          style={styles.overlay}
+          onBack={onBack}
+          testID="hosted-detail-pane">
+          <HostedConnectionDetailScreen
+            connection={nav.hosted.connection}
+            onBack={onBack}
           />
         </EdgeSwipeBack>
       ) : null}
