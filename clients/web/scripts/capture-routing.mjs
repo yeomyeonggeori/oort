@@ -30,6 +30,20 @@
 // 그 사실을 화면이 말하는지가 R2 M3의 물음이라 캡처 형상에도 그대로 둔다.
 //
 // 폭도 두 가지로 본다(SKILL §11 리뷰 루프: 1280과 900).
+//
+// **실행 위치 축(CRUN-1 / #1382)도 이 하네스가 찍는다.** 그 축이 읽는 것은 서버
+// 세대가 아니라 워크스페이스 상태(등록기 + 티어 정책)라 위 네 갈래와 축이 다르고,
+// 그래서 네 형상을 두 벌로 갈라 축의 두 얼굴을 모두 담는다:
+//
+//   ready · sendless   등록기에 T1 온라인 + T2 오프라인, 클라우드 0. 세 티어가
+//                      각자 다른 사유를 달고 나란히 선다. `ready`의 정책은
+//                      자동 재개 → cloud라 상속 줄이 T3 · 클라우드를 못박고,
+//                      `sendless`의 정책은 못박지 않아 정책 이름을 적는다.
+//   unknown · absent   등록기가 비었고 정책 읽기가 404. 세 티어 모두 부적격이고
+//                      상속 줄은 "확인하지 못함"이다 — 이 축의 empty/error 상태.
+//
+// 어느 형상에서도 이 상자는 잠겨 있다. 전선이 없기 때문이고(routing의 허용 키는
+// model·effort 둘뿐), 그 사실이 상자 아래 한 문장으로 함께 찍힌다.
 // =============================================================================
 
 import { spawn } from "node:child_process";
@@ -165,6 +179,41 @@ const ROSTER = [
   },
 ];
 
+// 실행 위치 축(CRUN-1 / #1382)이 읽는 두 행. 이 축은 서버 형상이 아니라
+// **워크스페이스 상태**를 읽으므로, 네 형상을 두 벌로 나눠 축의 두 얼굴을 모두
+// 찍는다.
+//
+//   ready · sendless   등록기에 T1 온라인 하나 + T2 오프라인 둘, 클라우드 0.
+//                      T1은 적격, T2는 "모두 오프라인", T3는 "등록된 호스트 없음".
+//   unknown · absent   등록기가 비었고 정책 읽기가 404. 세 티어 모두 부적격이고
+//                      상속 줄은 "확인하지 못함"이다(이 축의 error 상태).
+const WORK_HOSTS = [
+  {
+    id: "019f9b10-0000-7000-8000-0000000000a1",
+    workspaceId: WORKSPACE_ID,
+    scope: "member",
+    ownerMemberId: ME,
+    type: "app",
+    displayName: "성재 iMac, 집 작업실",
+    capabilities: { code: true },
+    lastSeenAtMs: Date.now() - 20_000,
+    createdAtMs: Date.now() - 86_400_000,
+    online: true,
+  },
+  {
+    id: "019f9b10-0000-7000-8000-0000000000a2",
+    workspaceId: WORKSPACE_ID,
+    scope: "workspace",
+    ownerMemberId: ME,
+    type: "workd",
+    displayName: "엔진 빌드 서버",
+    capabilities: { code: true },
+    lastSeenAtMs: Date.now() - 4 * 3_600_000,
+    createdAtMs: Date.now() - 30 * 86_400_000,
+    online: false,
+  },
+];
+
 const READ_STATES = [
   { channel_id: GENERAL_ID, last_read_seq: 1410, latest_seq: 1410, unread_count: 0, mention_count: 0 },
   { channel_id: CHANNELS[1].id, last_read_seq: 40, latest_seq: 40, unread_count: 0, mention_count: 0 },
@@ -269,6 +318,9 @@ function reportUnmocked() {
  */
 async function installMocks(context, support, probes = { count: 0, puts: [] }) {
   const hasEffortAxis = support !== "absent";
+  // 실행 위치 축(#1382)이 읽는 두 행을 이 형상이 주는가. 서버 세대와 무관한
+  // 워크스페이스 상태라 effort 축과 같은 갈래를 쓰지 않는다.
+  const hasRegistry = support === "ready" || support === "sendless";
   // 짝 없는 `/v1` 은 **여기서** 끝난다 (이슈 #1125). 반드시 맨 앞이다: Playwright 는
   // 나중에 등록된 라우트를 먼저 보므로, 이 줄이 뒤로 가면 아래 목을 전부 이긴다.
   await installUnmockedFallback(context);
@@ -371,8 +423,30 @@ async function installMocks(context, support, probes = { count: 0, puts: [] }) {
   await context.route("**/v1/workspaces/*/work-sessions", (route) =>
     json(route, { workSessions: [] })
   );
+  // 실행 위치 축의 두 출처 (#1382). 프로브가 아니라 워크스페이스 상태 읽기이므로
+  // 줄이 서 있는 동안 계속 필요하고, 여기서 형상마다 다른 사실을 준다.
   await context.route("**/v1/workspaces/*/work-hosts", (route) =>
-    json(route, { workHosts: [] })
+    json(route, { workHosts: hasRegistry ? WORK_HOSTS : [] })
+  );
+  await context.route("**/v1/workspaces/*/work-tier-policy/me", (route) =>
+    hasRegistry
+      ? json(route, {
+          workTierPolicy: {
+            workspaceId: WORKSPACE_ID,
+            memberId: ME,
+            // `ready`만 목적지를 못박는다: 자동 재개가 예약 선택자 "cloud"를
+            // 겨냥하면 상속 줄이 T3 · 클라우드를 그대로 적는다. `sendless`는
+            // 못박지 않는 정책(기본값)이라 상속 줄이 정책 이름을 적는다 — 티어
+            // 하나를 골라 적으면 서버가 하지 않은 판정을 화면이 말하게 된다.
+            // "cloud"는 `validatedAutoTarget`의 예약 선택자다(core `CLOUD_TARGET`).
+            ...(support === "ready"
+              ? { mode: "auto", autoTarget: "cloud" }
+              : { mode: "ask" }),
+            inherited: support !== "ready",
+            updatedAtMs: Date.now() - 3 * 86_400_000,
+          },
+        })
+      : json(route, { error: { message: "not found" } }, 404)
   );
   await context.route("**/v1/workspaces/*/channels", (route) =>
     json(route, { channels: CHANNELS })
@@ -590,6 +664,9 @@ async function captureScheme(browser, scheme, support) {
   //    (ready) 사유가 남는다(sendless: effort 표는 있지만 전송은 못 받는 서버).
   await chat.getByTestId("composer-routing-toggle").click();
   await chat.getByTestId("composer-routing-model").waitFor({ state: "visible" });
+  // 실행 위치 축(#1382)은 이 패널 안에 함께 선다. 상속 한 줄 + 세 티어가 사유와
+  // 함께 상시 노출되고, 지금은 전부 잠겨 있다(전선 없음).
+  await chat.getByTestId("composer-routing-tier").waitFor({ state: "visible" });
   await chat.waitForTimeout(300);
   await shoot(chat, `${OUT_DIR}/composer-routing-open-${tag}.png`, shots);
 
