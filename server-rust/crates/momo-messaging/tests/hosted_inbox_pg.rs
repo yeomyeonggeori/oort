@@ -102,6 +102,14 @@ struct Fixture {
     channels: [Uuid; 2],
 }
 
+/// A 32-byte stand-in for a real SHA-256, unique per token id. These fixtures
+/// never present the credential over the wire, so only its uniqueness matters.
+fn fake_token_hash(token: Uuid) -> Vec<u8> {
+    let mut hash = vec![7_u8; 32];
+    hash[..16].copy_from_slice(token.as_bytes());
+    hash
+}
+
 async fn seed(su: &PgPool) -> Fixture {
     let fixture = Fixture {
         workspace: Uuid::new_v4(),
@@ -211,7 +219,9 @@ async fn seed(su: &PgPool) -> Fixture {
     .bind(token)
     .bind(fixture.workspace)
     .bind(fixture.agent)
-    .bind(vec![7_u8; 32])
+    // Per-fixture rather than a constant: `token_hash` is globally unique, so a
+    // literal would let this helper be called exactly once per database.
+    .bind(fake_token_hash(token))
     .bind(fixture.author)
     .bind(fixture.connection)
     .execute(su)
@@ -941,4 +951,165 @@ async fn hosted_inbox_cursor_rls_idempotency_and_visibility() {
     .await
     .unwrap();
     assert_eq!(replay_old_cursor, Err(HostedInboxReadError::Unavailable));
+}
+
+// ---------------------------------------------------------------------------
+// #1375 — the ledger's delete surface
+//
+// 070 wrote two rules and got both slightly wrong, in opposite directions. The
+// `ON DELETE RESTRICT` on the connection FK was too strict: it refused the
+// agent teardown that owns the connection, and 070's own append-only trigger
+// then refused the operator's attempt to clear the ledger by hand, so the wedge
+// had no exit. The append-only trigger's `pg_trigger_depth() = 1` was too
+// loose: it was meant to name the workspace cascade and instead named "not top
+// level", which is every trigger in the database.
+//
+// Migration 073 replaces both with the same question — is this row's owner
+// already gone? — and this test is the four answers.
+// ---------------------------------------------------------------------------
+
+async fn ledger_rows(su: &PgPool, workspace: Uuid) -> i64 {
+    sqlx::query_scalar("SELECT count(*) FROM hosted_agent_inbox_event WHERE workspace_id=$1")
+        .bind(workspace)
+        .fetch_one(su)
+        .await
+        .unwrap()
+}
+
+fn database_message(error: &sqlx::Error) -> String {
+    error
+        .as_database_error()
+        .expect("a database error")
+        .message()
+        .to_string()
+}
+
+#[tokio::test]
+#[ignore = "needs verifier-owned disposable PG18 + migrated schema + momo_app role"]
+async fn the_inbox_ledger_is_deletable_only_by_the_teardown_that_owns_it() {
+    let (su, app) = pools().await;
+
+    // ---- (1) a live ledger refuses every direct removal --------------------
+    let f = seed(&su).await;
+    send_and_append(&app, &f, f.channels[0], "first").await;
+    assert_eq!(ledger_rows(&su, f.workspace).await, 1);
+
+    let top_level = sqlx::query("DELETE FROM hosted_agent_inbox_event WHERE workspace_id=$1")
+        .bind(f.workspace)
+        .execute(&su)
+        .await
+        .expect_err("append-only refuses a top-level DELETE");
+    assert_eq!(
+        database_message(&top_level),
+        "hosted agent inbox events are append-only"
+    );
+
+    // The #1375 finding itself: before 073 this deleted the whole ledger and
+    // committed, because a trigger body runs at depth 2 and 070 admitted any
+    // depth above 1. The probe is an ordinary trigger on an unrelated table —
+    // the point is precisely that it has nothing to do with the hosted inbox.
+    sqlx::query("CREATE TABLE hosted_inbox_depth_probe(id int primary key)")
+        .execute(&su)
+        .await
+        .unwrap();
+    // A trigger function takes no arguments, so the workspace is closed over as
+    // a literal. It is this test's own `Uuid::new_v4()`, never caller input.
+    sqlx::query(&format!(
+        "CREATE FUNCTION hosted_inbox_depth_probe_fn() RETURNS trigger \
+         LANGUAGE plpgsql AS $fn$ BEGIN \
+           DELETE FROM hosted_agent_inbox_event WHERE workspace_id = '{}'::uuid; \
+           RETURN NEW; END $fn$",
+        f.workspace
+    ))
+    .execute(&su)
+    .await
+    .unwrap();
+    sqlx::query(
+        "CREATE TRIGGER hosted_inbox_depth_probe_trg AFTER INSERT ON hosted_inbox_depth_probe \
+         FOR EACH ROW EXECUTE FUNCTION hosted_inbox_depth_probe_fn()",
+    )
+    .execute(&su)
+    .await
+    .unwrap();
+    let nested = sqlx::query("INSERT INTO hosted_inbox_depth_probe VALUES (1)")
+        .execute(&su)
+        .await
+        .expect_err("073 refuses a DELETE issued from an unrelated trigger");
+    assert_eq!(
+        database_message(&nested),
+        "hosted agent inbox events are append-only",
+        "trigger depth is not permission"
+    );
+    assert_eq!(
+        ledger_rows(&su, f.workspace).await,
+        1,
+        "nothing was removed"
+    );
+    sqlx::query("DROP TABLE hosted_inbox_depth_probe")
+        .execute(&su)
+        .await
+        .unwrap();
+    sqlx::query("DROP FUNCTION hosted_inbox_depth_probe_fn()")
+        .execute(&su)
+        .await
+        .unwrap();
+
+    // A bare connection delete is the case RESTRICT was worth having for, and
+    // 073 keeps refusing it — with a message that names the ledger rather than
+    // a constraint, because the operator's next question is what to do about it.
+    let bare = sqlx::query("DELETE FROM hosted_agent_connection WHERE workspace_id=$1 AND id=$2")
+        .bind(f.workspace)
+        .bind(f.connection)
+        .execute(&su)
+        .await
+        .expect_err("a connection carrying a ledger is not deletable on its own");
+    assert_eq!(
+        database_message(&bare),
+        "hosted connection with inbox ledger rows cannot be deleted directly"
+    );
+    assert_eq!(ledger_rows(&su, f.workspace).await, 1);
+
+    // ---- (2) the agent teardown, which used to wedge -----------------------
+    // Before 073 this was:
+    //   ERROR: update or delete on table "hosted_agent_connection" violates
+    //          RESTRICT setting of foreign key constraint
+    //          "hosted_agent_inbox_event_connection_fk"
+    // with no way out, because the append-only trigger also refused the manual
+    // cleanup the operator would have had to do first.
+    let torn = seed(&su).await;
+    send_and_append(&app, &torn, torn.channels[0], "doomed").await;
+    assert_eq!(ledger_rows(&su, torn.workspace).await, 1);
+    sqlx::query("DELETE FROM agent WHERE workspace_id=$1 AND member_id=$2")
+        .bind(torn.workspace)
+        .bind(torn.agent)
+        .execute(&su)
+        .await
+        .expect("the agent teardown carries its connection and ledger away");
+    assert_eq!(ledger_rows(&su, torn.workspace).await, 0);
+    let connections: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM hosted_agent_connection WHERE workspace_id=$1")
+            .bind(torn.workspace)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+    assert_eq!(connections, 0);
+
+    // ---- (3) the workspace teardown, which never wedged --------------------
+    // #1375 predicted this one would fail and it does not: PostgreSQL queues
+    // every FK action of the top-level DELETE before any action those cascades
+    // queue in turn, so the ledger's own workspace-CASCADE always runs before
+    // the connection cascade's referential check. Pinned here so a later
+    // migration cannot quietly take it away.
+    let razed = seed(&su).await;
+    send_and_append(&app, &razed, razed.channels[0], "also doomed").await;
+    assert_eq!(ledger_rows(&su, razed.workspace).await, 1);
+    sqlx::query("DELETE FROM workspace WHERE id=$1")
+        .bind(razed.workspace)
+        .execute(&su)
+        .await
+        .expect("a workspace hard delete succeeds with a ledger present");
+    assert_eq!(ledger_rows(&su, razed.workspace).await, 0);
+
+    // ---- (4) and the first workspace is still intact -----------------------
+    assert_eq!(ledger_rows(&su, f.workspace).await, 1);
 }

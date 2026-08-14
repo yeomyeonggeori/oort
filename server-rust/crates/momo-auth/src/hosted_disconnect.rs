@@ -141,9 +141,19 @@ pub struct HostedDisconnectStarted {
     pub connection: HostedConnection,
     pub artifacts: Vec<HostedArtifact>,
     pub revoked_credential_count: i64,
-    /// False when the connection was already `cleanup_pending`: the answer is
-    /// the same, and nothing was written — including no second audit row.
+    /// False when the connection was already `cleanup_pending`: the transition,
+    /// the revoke and the pause are not repeated, and the caller writes no
+    /// second `disconnect_started` audit row.
     pub changed: bool,
+    /// How many manifest rows this call **added** to a manifest that already
+    /// existed (issue #1386 F4).
+    ///
+    /// Non-zero only on a retry, and only when the caller named an artifact the
+    /// manifest did not already hold. It is reported separately from `changed`
+    /// because a manifest extension is not a second disconnect: the transition
+    /// happened once, and this is a later discovery being written into the
+    /// checklist that transition opened.
+    pub merged_artifact_count: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -383,27 +393,39 @@ async fn load_connection(
 }
 
 /// Seed the manifest: one required row per kind, plus one per caller-named item.
+/// Returns how many rows this call actually inserted.
 ///
 /// `ON CONFLICT DO NOTHING` is what makes a retried disconnect idempotent
-/// without re-opening an artifact a human already resolved.
+/// without re-opening an artifact a human already resolved — and, since the
+/// insert count is returned rather than discarded, it is also what lets the
+/// retry path tell "you named something new" from "you said it twice".
 ///
-/// The seeded `secret` row is the one artifact this server can close by itself:
-/// the hosted bearer it just revoked in this same transaction. `revoked_now`
-/// carries how many credentials that was, so the evidence is a fact read back
-/// from the write rather than a claim. A *named* secret item is a provider-side
-/// store entry oort cannot see, so it stays `pending` and manual.
+/// `revoked_now` is `Some(n)` only when **this** call performed the revoke. The
+/// seeded `secret` row is then the one artifact this server can close by itself
+/// — the hosted bearer it just revoked in this same transaction — and its
+/// evidence is a fact read back from that write rather than a claim.
+///
+/// `None` is the retry: the transition already happened, this call revoked
+/// nothing, and so the `secret` row (if it is somehow missing) seeds `pending`
+/// and manual like every other kind. Writing `server_verified` here would be
+/// the exact provenance lie migration 072 reserves that value against — the
+/// value means "this server observed it", not "this server assumes it".
+///
+/// A *named* secret item is a provider-side store entry oort cannot see, so it
+/// is always `pending` and manual.
 async fn seed_manifest_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     connection_id: Uuid,
     agent_member_id: Uuid,
-    revoked_credential_count: i64,
+    revoked_now: Option<i64>,
     seeds: &[HostedArtifactSeed],
-) -> Result<(), sqlx::Error> {
+) -> Result<i64, sqlx::Error> {
+    let mut inserted = 0_i64;
     for kind in HOSTED_ARTIFACT_KINDS {
         let expected = expected_action_for_kind(kind).unwrap_or("remove");
-        let server_verified = kind == "secret";
-        sqlx::query(
+        let server_verified = kind == "secret" && revoked_now.is_some();
+        let result = sqlx::query(
             "INSERT INTO hosted_agent_connection_artifact \
                (workspace_id, connection_id, agent_member_id, kind, external_ref, \
                 expected_action, current_status, disposition, source, acknowledged_at, evidence) \
@@ -422,14 +444,16 @@ async fn seed_manifest_in_tx(
         .bind(expected)
         .bind(server_verified)
         .bind(format!(
-            "oort revoked {revoked_credential_count} hosted credential(s) on this connection"
+            "oort revoked {} hosted credential(s) on this connection",
+            revoked_now.unwrap_or_default()
         ))
         .execute(&mut *conn)
         .await?;
+        inserted += result.rows_affected() as i64;
     }
     for seed in seeds {
         let expected = expected_action_for_kind(&seed.kind).unwrap_or("remove");
-        sqlx::query(
+        let result = sqlx::query(
             "INSERT INTO hosted_agent_connection_artifact \
                (workspace_id, connection_id, agent_member_id, kind, external_ref, \
                 expected_action, current_status) \
@@ -444,8 +468,9 @@ async fn seed_manifest_in_tx(
         .bind(expected)
         .execute(&mut *conn)
         .await?;
+        inserted += result.rows_affected() as i64;
     }
-    Ok(())
+    Ok(inserted)
 }
 
 /// Revoke every live credential of **this connection** and lock the identity
@@ -537,8 +562,43 @@ pub async fn start_hosted_disconnect_in_tx(
         return Ok(HostedDisconnectStart::AlreadyTerminal(Box::new(connection)));
     }
     if status == "cleanup_pending" {
-        // The idempotent answer. Nothing is written, so the caller writes no
-        // second audit row either: a retried disconnect must not amplify.
+        // The idempotent answer for the *transition*: it happened once, and
+        // nothing about it is repeated — no second revoke, no second pause, no
+        // second `disconnect_started` audit row. A retried disconnect must not
+        // amplify.
+        //
+        // The manifest is the one part that is not finished being written. A
+        // cleanup runs over hours; the artifact a person finds on the second
+        // pass through a provider's settings screen is exactly the artifact
+        // most likely to be missed, and before #1386 this branch dropped the
+        // caller's `artifacts` on the floor and answered 200 — the worst of the
+        // three possible answers, because the operator was told the item was
+        // tracked when nothing had recorded it.
+        //
+        // So the retry MERGES rather than 409s. A 409 would be honest but
+        // useless: there is no other route that adds a manifest row, so the
+        // operator would be told "conflict" with nowhere to go. Merging is
+        // idempotent by the same unique index the first seed relies on — naming
+        // the same item twice inserts nothing the second time — and it cannot
+        // undo a decision, because a row a human already resolved is not
+        // re-opened by a conflicting insert that does nothing.
+        //
+        // The per-kind rows are reseeded too, and that is not redundancy: a
+        // manifest that is empty here was never seeded by this lifecycle, and
+        // merging one named row into it would leave a manifest that satisfies
+        // migration 072's non-empty clause while confirming almost nothing.
+        // Reseeding restores the full six-kind checklist so the terminal
+        // transition still has the whole list to judge. `None` withholds the
+        // `server_verified` provenance: this call revoked no credential.
+        let merged_artifact_count = seed_manifest_in_tx(
+            conn,
+            workspace_id,
+            connection_id,
+            agent_member_id,
+            None,
+            seeds,
+        )
+        .await?;
         let Some(connection) = load_connection(conn, workspace_id, connection_id).await? else {
             return Ok(HostedDisconnectStart::NotFound);
         };
@@ -549,6 +609,7 @@ pub async fn start_hosted_disconnect_in_tx(
                 artifacts,
                 revoked_credential_count: 0,
                 changed: false,
+                merged_artifact_count,
             },
         )));
     }
@@ -595,7 +656,7 @@ pub async fn start_hosted_disconnect_in_tx(
         workspace_id,
         connection_id,
         agent_member_id,
-        revoked_credential_count,
+        Some(revoked_credential_count),
         seeds,
     )
     .await?;
@@ -606,6 +667,8 @@ pub async fn start_hosted_disconnect_in_tx(
             artifacts,
             revoked_credential_count,
             changed: true,
+            // The whole manifest belongs to this transition, not to a merge.
+            merged_artifact_count: 0,
         },
     )))
 }
@@ -657,7 +720,7 @@ pub async fn reconcile_hosted_connection_in_tx(
         workspace_id,
         connection_id,
         agent_member_id,
-        revoked_credential_count,
+        Some(revoked_credential_count),
         &[],
     )
     .await?;

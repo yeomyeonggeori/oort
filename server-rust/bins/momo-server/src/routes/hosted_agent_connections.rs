@@ -271,8 +271,11 @@ pub async fn get(
 /// or a paused agent beside a live credential — is a worse state than either
 /// end of the transition.
 ///
-/// A retry answers the same thing and writes nothing, including no second audit
-/// row.
+/// A retry repeats none of that: no second revoke, no second pause, no second
+/// `disconnect_started` audit row. It does still MERGE any artifacts the body
+/// names into the existing manifest (#1386 F4) — a cleanup runs for hours and
+/// the item found on the second pass is the one most likely to be missed — and
+/// audits that as `cleanup_manifest_extended`, which is what it is.
 pub async fn disconnect(
     State(state): State<AppState>,
     Extension(principal): Extension<Principal>,
@@ -356,6 +359,36 @@ pub async fn disconnect(
                                 "revoked_credential_count": started.revoked_credential_count,
                                 "suppressed_job_count": suppression.suppressed_jobs,
                                 "released_lease_count": suppression.released_leases,
+                                "artifact_count": started.artifacts.len(),
+                                "trigger": "operator"
+                            }),
+                        ),
+                    )
+                    .await?;
+                } else if started.merged_artifact_count > 0 {
+                    // A retry that named an artifact the manifest did not hold
+                    // (#1386 F4). It is audited under its own action rather
+                    // than as a second `disconnect_started`, because the
+                    // transition happened once and saying otherwise would make
+                    // the log claim a revoke and a pause that did not repeat.
+                    // No job suppression either: the disconnect already
+                    // suppressed, and the connection has held no credential
+                    // since.
+                    write_audit(
+                        conn,
+                        &AuditEntry::new(
+                            workspace_id,
+                            "hosted_agent.connection.cleanup_manifest_extended",
+                        )
+                        .by(actor)
+                        .about(started.connection.agent_member_id)
+                        .target("hosted_agent_connection", connection_id)
+                        .via_token(via_token_id)
+                        .with_schema(
+                            "momo.hosted_agent.connection.cleanup_manifest_extended.v1",
+                            json!({
+                                "status": "cleanup_pending",
+                                "added_artifact_count": started.merged_artifact_count,
                                 "artifact_count": started.artifacts.len(),
                                 "trigger": "operator"
                             }),

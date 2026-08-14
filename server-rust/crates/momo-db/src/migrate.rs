@@ -350,19 +350,23 @@ mod tests {
     /// or at another piece of work (HAP-E5), and — closing the wave — HAP-E6's
     /// cleanup manifest, where the disconnect's per-artifact rows and the
     /// terminal-state trigger live.
+    ///
+    /// 073 is that wave's hygiene follow-up (#1375, #1386): the ledger's delete
+    /// surface and the disconnect's two unguarded doors — an INSERT that
+    /// arrives already terminal, and leaving the terminal at all.
     #[test]
-    fn discovers_contiguous_migrations_001_to_072() {
+    fn discovers_contiguous_migrations_001_to_073() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
         assert_eq!(
             migrations.len(),
-            72,
-            "expected 72 migrations under {}",
+            73,
+            "expected 73 migrations under {}",
             dir.display()
         );
         assert_eq!(migrations.first().unwrap().version, 1);
-        assert_eq!(migrations.last().unwrap().version, 72);
+        assert_eq!(migrations.last().unwrap().version, 73);
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
 
         for (i, migration) in migrations.iter().enumerate() {
