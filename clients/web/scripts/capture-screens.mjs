@@ -4619,6 +4619,17 @@ async function captureHostedDisconnectScenes(browser, scheme) {
     ]
   );
 
+  // 확정이 끝난 뒤. 장부는 읽기 전용으로 남고 provenance 도 그대로 남는다 —
+  // 해제가 기록을 지우는 일이 아니라는 이 화면의 논지가 마지막 프레임이다.
+  await shoot(
+    "done",
+    ledger(disconnectConnection({ status: "disconnected" }), CLEANUP_DONE),
+    async (page) => {
+      await page.getByTestId("hosted-disconnect-terminal").scrollIntoViewIfNeeded();
+      await page.waitForTimeout(200);
+    }
+  );
+
   // 확인 저장이 거절당한 자리. 폼은 그대로 열려 있고 적어 둔 문장도 남는다.
   await shoot(
     "error",
