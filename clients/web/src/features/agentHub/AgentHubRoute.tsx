@@ -557,6 +557,7 @@ export function AgentHubRoute() {
                     key={normalizedId(selected.id)}
                     agentMemberId={normalizedId(selected.id)}
                     agentLabel={selected.displayName}
+                    offline={offline}
                   />
                 )}
               </div>

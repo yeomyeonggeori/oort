@@ -168,12 +168,26 @@ describe("RED PROOF ③ 컴포넌트는 얇고 조용하다", () => {
     expect(row).toContain("choice === null ? (");
   });
 
+  it("거절은 그것을 부른 컨트롤 옆에 선다", () => {
+    // 이 장부는 한 화면에 들어가지 않는다. 맨 위 배너 하나로 답하면 여섯 번째
+    // 줄에서 저장을 누른 사람에게 그 답이 화면 밖에서 뜬다.
+    expect(section).toContain('scope: "start"');
+    expect(section).toContain('scope: "complete"');
+    expect(section).toContain("scope: variables.artifact.id");
+    expect(section).toContain('failure?.scope === artifact.id');
+    expect(row).toContain("<InlineBanner");
+  });
+
   it("네 상태가 전부 있다", () => {
     expect(section).toContain("SkeletonRows");
     expect(section).toContain("EmptyInvite");
-    expect(section).toContain("InlineBanner");
-    expect(section).toContain("hosted-disconnect-offline");
-    expect(section).toContain("useOffline()");
+    expect(row).toContain("InlineBanner");
+    // 오프라인은 배너를 하나 더 세우지 않는다. 라우트가 이미 자기 배너를 들고
+    // 있으므로 이 화면이 더하는 것은 **잠긴 줄들이 가리키는 사유 문장** 하나다.
+    expect(section).toContain("hosted-cleanup-offline");
+    expect(section).toContain("OFFLINE_NOTE_ID");
+    expect(section).not.toMatch(/useOffline\(\)/);
+    expect(row).toContain("aria-describedby={disabled ? disabledReasonId");
   });
 
   // 토스트 금지는 여기서 재지 않는다. `scripts/design_preflight_web.sh` 의

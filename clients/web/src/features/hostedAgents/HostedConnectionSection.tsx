@@ -3,7 +3,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "@/app/session";
 import { Button } from "@/design/ui/button";
 import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/States";
-import { useOffline } from "@/features/common/useOffline";
 import {
   ConfirmButton,
   KeyValueRows,
@@ -41,6 +40,7 @@ import {
   CLEANUP_HEADLINE,
   CLEANUP_INDEPENDENCE_NOTE,
   CLEANUP_LEAD,
+  CLEANUP_OFFLINE_NOTE,
   DISCONNECT_HISTORY_NOTE,
   DISCONNECT_IMMEDIATE_HEADLINE,
   DISCONNECT_IMMEDIATE_ITEMS,
@@ -108,17 +108,31 @@ import {
 export function HostedConnectionSection({
   agentMemberId,
   agentLabel,
+  offline,
 }: {
   agentMemberId: string;
   agentLabel: string;
+  /**
+   * 화면이 서버에 닿지 못한다.
+   *
+   * 훅을 여기서 부르지 않고 라우트에서 받는 것이 이 화면의 형제들(프로필·이력)이
+   * 이미 하는 것이다. 라우트가 그 사실 하나로 자기 배너를 세우므로, 판단이 두
+   * 곳에서 따로 나면 배너와 잠금이 한 프레임 어긋난다.
+   */
+  offline: boolean;
 }) {
   const { workspaceId } = useSession();
   const client = useQueryClient();
-  const offline = useOffline();
   const { directory } = useDirectory(workspaceId);
 
   const [openArtifactId, setOpenArtifactId] = useState<string | null>(null);
-  const [failure, setFailure] = useState<string | null>(null);
+  // 실패 문구는 **어느 행동의 것인지**를 함께 든다. 이 화면은 한 화면에 다 들어가지
+  // 않는 장부라(여섯 줄 각자가 폼을 펼친다), 맨 위 배너 하나로 답하면 800px 아래에서
+  // 저장을 누른 사람에게 그 답이 화면 밖에서 뜬다. 인라인 배너의 「in context」는
+  // 토스트가 아니라는 뜻만이 아니라, **그 컨트롤 옆**이라는 뜻이다.
+  const [failure, setFailure] = useState<{ scope: string; message: string } | null>(
+    null
+  );
 
   const list = useQuery(hostedListQuery(workspaceId));
   const found =
@@ -153,7 +167,11 @@ export function HostedConnectionSection({
       setOpenArtifactId(null);
       writeDetail(started);
     },
-    onError: (error) => setFailure(hostedFailureMessage("disconnect", error)),
+    onError: (error) =>
+      setFailure({
+        scope: "start",
+        message: hostedFailureMessage("disconnect", error),
+      }),
   });
 
   const acknowledge = useMutation({
@@ -191,7 +209,11 @@ export function HostedConnectionSection({
         });
       }
     },
-    onError: (error) => setFailure(hostedFailureMessage("acknowledge", error)),
+    onError: (error, variables) =>
+      setFailure({
+        scope: variables.artifact.id,
+        message: hostedFailureMessage("acknowledge", error),
+      }),
   });
 
   const complete = useMutation({
@@ -209,7 +231,11 @@ export function HostedConnectionSection({
       // 그 전이를 알린다.
       writeDetail(completed);
     },
-    onError: (error) => setFailure(hostedFailureMessage("complete", error)),
+    onError: (error) =>
+      setFailure({
+        scope: "complete",
+        message: hostedFailureMessage("complete", error),
+      }),
   });
 
   const busy = start.isPending || acknowledge.isPending || complete.isPending;
@@ -231,24 +257,6 @@ export function HostedConnectionSection({
           {live}
         </p>
       </div>
-
-      {offline && (
-        <InlineBanner
-          tone="neutral"
-          separator={false}
-          message="연결이 끊겼습니다. 마지막으로 받은 정리 목록은 계속 볼 수 있고, 확인 기록과 해제는 다시 연결된 뒤에 저장됩니다."
-          testId="hosted-disconnect-offline"
-        />
-      )}
-      {failure && (
-        <InlineBanner
-          separator={false}
-          message={failure}
-          actionLabel="닫기"
-          onAction={() => setFailure(null)}
-          testId="hosted-disconnect-failure"
-        />
-      )}
 
       {list.isPending && (
         <div role="status">
@@ -299,6 +307,8 @@ export function HostedConnectionSection({
             connection.status !== "disconnected" && (
               <StartPanel
                 connection={connection}
+                failure={failure?.scope === "start" ? failure.message : null}
+                onDismissFailure={() => setFailure(null)}
                 offline={offline}
                 busy={busy}
                 starting={start.isPending}
@@ -321,6 +331,8 @@ export function HostedConnectionSection({
                 nameFor={(memberId) =>
                   memberFor(directory, memberId)?.displayName ?? null
                 }
+                failure={failure}
+                onDismissFailure={() => setFailure(null)}
                 offline={offline}
                 busy={busy}
                 saving={acknowledge.isPending}
@@ -337,6 +349,8 @@ export function HostedConnectionSection({
               <TerminalPanel
                 connection={connection}
                 artifacts={artifacts}
+                failure={failure?.scope === "complete" ? failure.message : null}
+                onDismissFailure={() => setFailure(null)}
                 offline={offline}
                 busy={busy}
                 completing={complete.isPending}
@@ -352,6 +366,9 @@ export function HostedConnectionSection({
     </section>
   );
 }
+
+/** 잠긴 줄들이 함께 가리키는 사유 문장의 id. 한 화면에 하나뿐이다. */
+const OFFLINE_NOTE_ID = "hosted-cleanup-offline-note";
 
 function chipTone(connection: HostedAgentConnection) {
   const tone = hostedStatusTone(connection.status);
@@ -404,12 +421,16 @@ function ListFailure({ error, onRetry }: { error: unknown; onRetry: () => void }
  */
 function StartPanel({
   connection,
+  failure,
+  onDismissFailure,
   offline,
   busy,
   starting,
   onStart,
 }: {
   connection: HostedAgentConnection;
+  failure: string | null;
+  onDismissFailure: () => void;
   offline: boolean;
   busy: boolean;
   starting: boolean;
@@ -447,6 +468,15 @@ function StartPanel({
         </div>
       </div>
       <p className="break-keep text-meta text-ink-muted">{DISCONNECT_HISTORY_NOTE}</p>
+      {failure !== null && (
+        <InlineBanner
+          separator={false}
+          message={failure}
+          actionLabel="닫기"
+          onAction={onDismissFailure}
+          testId="hosted-disconnect-failure"
+        />
+      )}
       {blocked && (
         <p id={blockedId} className="break-keep text-meta text-ink-muted">
           {gate.allowed
@@ -517,6 +547,8 @@ function CleanupPanel({
   openArtifactId,
   setOpenArtifactId,
   nameFor,
+  failure,
+  onDismissFailure,
   offline,
   busy,
   saving,
@@ -529,6 +561,8 @@ function CleanupPanel({
   openArtifactId: string | null;
   setOpenArtifactId: (id: string | null) => void;
   nameFor: (memberId: string) => string | null;
+  failure: { scope: string; message: string } | null;
+  onDismissFailure: () => void;
   offline: boolean;
   busy: boolean;
   saving: boolean;
@@ -562,6 +596,17 @@ function CleanupPanel({
           </span>{" "}
           {cleanupProgressSentence(progress)}
         </p>
+        {/* 잠긴 여섯 줄이 가리키는 한 문장. 줄마다 반복하면 같은 사실이 여섯 번
+            서고, 빼면 회색 버튼이 「당신은 이걸 못 한다」로 읽힌다. */}
+        {offline && (
+          <p
+            id={OFFLINE_NOTE_ID}
+            className="break-keep text-meta text-ink-muted"
+            data-testid="hosted-cleanup-offline"
+          >
+            {CLEANUP_OFFLINE_NOTE}
+          </p>
+        )}
       </div>
 
       {artifacts.length === 0 ? (
@@ -600,7 +645,12 @@ function CleanupPanel({
                   ? null
                   : (nameFor(artifact.acknowledgedBy) ?? "이름을 읽지 못한 멤버")
               }
+              failure={
+                failure?.scope === artifact.id ? failure.message : null
+              }
+              onDismissFailure={onDismissFailure}
               disabled={offline || busy}
+              disabledReasonId={offline ? OFFLINE_NOTE_ID : undefined}
               saving={saving && openArtifactId === artifact.id}
               onAcknowledge={(input) => onAcknowledge(artifact, input)}
             />
@@ -616,6 +666,8 @@ function CleanupPanel({
 function TerminalPanel({
   connection,
   artifacts,
+  failure,
+  onDismissFailure,
   offline,
   busy,
   completing,
@@ -623,6 +675,8 @@ function TerminalPanel({
 }: {
   connection: HostedAgentConnection;
   artifacts: readonly HostedCleanupArtifact[];
+  failure: string | null;
+  onDismissFailure: () => void;
   offline: boolean;
   busy: boolean;
   completing: boolean;
@@ -649,6 +703,15 @@ function TerminalPanel({
     >
       <h4 className="text-body font-semibold text-ink">{TERMINAL_HEADLINE}</h4>
       <p className="break-keep text-meta text-ink-muted">{TERMINAL_LEAD}</p>
+      {failure !== null && (
+        <InlineBanner
+          separator={false}
+          message={failure}
+          actionLabel="닫기"
+          onAction={onDismissFailure}
+          testId="hosted-disconnect-failure"
+        />
+      )}
       {/* 막힌 이유는 언제나 버튼 옆에 있다. 남은 수와 다음 항목이 그 문장이다. */}
       {blocked && (
         <p

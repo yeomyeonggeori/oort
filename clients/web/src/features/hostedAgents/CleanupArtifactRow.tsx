@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Button } from "@/design/ui/button";
+import { InlineBanner } from "@/features/common/States";
 import {
   ConfirmButton,
   KeyValueRows,
@@ -71,7 +72,10 @@ export function CleanupArtifactRow({
   open,
   onOpenChange,
   actorName,
+  failure,
+  onDismissFailure,
   disabled,
+  disabledReasonId,
   saving,
   onAcknowledge,
 }: {
@@ -80,8 +84,18 @@ export function CleanupArtifactRow({
   onOpenChange: (open: boolean) => void;
   /** 확인한 사람의 이름. 명부에서 못 읽으면 `null`. */
   actorName: string | null;
+  /** 이 줄의 저장이 거절당한 이유. 다른 줄의 실패는 여기 오지 않는다. */
+  failure: string | null;
+  onDismissFailure: () => void;
   /** 오프라인이거나 다른 저장이 진행 중이다. */
   disabled: boolean;
+  /**
+   * 잠긴 이유를 적어 둔 문장의 id.
+   *
+   * 여섯 줄이 **하나의** 이유로 잠기는 경우가 이 목록의 유일한 잠금이므로, 사유는
+   * 목록 머리에 한 번 적고 줄들은 그것을 가리킨다.
+   */
+  disabledReasonId?: string;
   saving: boolean;
   onAcknowledge: (input: {
     currentStatus: HostedCleanupStatus;
@@ -126,6 +140,7 @@ export function CleanupArtifactRow({
             aria-expanded={false}
             aria-controls={formId}
             aria-label={`${cleanupRowTitle(artifact)} ${CLEANUP_ACKNOWLEDGE_LABEL}`}
+            aria-describedby={disabled ? disabledReasonId : undefined}
             disabled={disabled}
             onClick={() => onOpenChange(true)}
             data-testid="cleanup-open-form"
@@ -141,6 +156,8 @@ export function CleanupArtifactRow({
         <AcknowledgeForm
           id={formId}
           artifact={artifact}
+          failure={failure}
+          onDismissFailure={onDismissFailure}
           disabled={disabled}
           saving={saving}
           onCancel={() => onOpenChange(false)}
@@ -193,6 +210,8 @@ function ResolvedFacts({
 function AcknowledgeForm({
   id,
   artifact,
+  failure,
+  onDismissFailure,
   disabled,
   saving,
   onCancel,
@@ -200,6 +219,8 @@ function AcknowledgeForm({
 }: {
   id: string;
   artifact: HostedCleanupArtifact;
+  failure: string | null;
+  onDismissFailure: () => void;
   disabled: boolean;
   saving: boolean;
   onCancel: () => void;
@@ -322,6 +343,17 @@ function AcknowledgeForm({
         )}
       </div>
 
+      {/* 거절은 그것을 부른 컨트롤 옆에 선다. 여섯 줄이 각자 폼을 펼치는 장부에서
+          맨 위 배너 하나는 「in context」가 아니다. */}
+      {failure !== null && (
+        <InlineBanner
+          separator={false}
+          message={failure}
+          actionLabel="닫기"
+          onAction={onDismissFailure}
+          testId="hosted-disconnect-failure"
+        />
+      )}
       {/* 저장이 막힌 이유는 버튼 옆에 상시 노출된다. 죽은 버튼만 있는 화면은
           사람에게 아무것이나 눌러 보게 만든다. */}
       {!ready && (
@@ -333,6 +365,9 @@ function AcknowledgeForm({
       )}
 
       <div className="flex flex-wrap items-center justify-end gap-2">
+        {/* 「닫기」가 아니다: 바로 위 거절 배너의 액션이 「닫기」이고, 두 낱말이
+            같으면 100px 안에 같은 말을 하는 두 버튼이 선다. 이 버튼이 버리는 것은
+            메시지가 아니라 **적던 확인**이다. */}
         <Button
           type="button"
           variant="ghost"
@@ -341,7 +376,7 @@ function AcknowledgeForm({
           onClick={onCancel}
           data-testid="cleanup-cancel"
         >
-          닫기
+          취소
         </Button>
         {choice === null ? (
           // 관측만 적는 저장에는 질문이 없다. 다시 적을 수 있는 기록이기 때문이다.

@@ -372,8 +372,16 @@ export function revokeFacts(
 
 export const DISCONNECT_SECTION_TITLE = "호스티드 연결";
 
+/**
+ * 탭 머리의 한 문단.
+ *
+ * 주어가 「이 에이전트」가 아니라 「호스티드 연결」인 것은 이 탭이 연결 없는
+ * 에이전트에도 서기 때문이다. 앞 판의 문장은 「이 에이전트는 다른 곳에서 돌고
+ * 있고」로 시작했고, 그것이 빈 상태에서 바로 아래 문장(「이 워크스페이스가 직접
+ * 실행하는 에이전트입니다」)과 정면으로 어긋났다.
+ */
 export const DISCONNECT_SECTION_LEAD =
-  "이 에이전트는 다른 곳에서 돌고 있고 oort에는 접속만 합니다. 해제는 oort 쪽 권한을 즉시 끊는 일과, provider에 남은 설정을 사람이 정리했는지 확인하는 일 두 걸음입니다.";
+  "호스티드 연결은 다른 곳에서 돌고 있는 에이전트를 이 워크스페이스에 들인 것입니다. 해제는 oort 쪽 권한을 즉시 끊는 일과, provider에 남은 설정을 사람이 정리했는지 확인하는 일 두 걸음입니다.";
 
 /** 해제를 시작하기 전 화면이 반드시 나눠 말해야 하는 두 문단 중 첫째. */
 export const DISCONNECT_IMMEDIATE_HEADLINE = "지금 바로 일어나는 일";
@@ -426,6 +434,18 @@ export const CLEANUP_LEAD =
 /** 한 줄을 확인해도 다른 줄이 닫히지 않는다는 사실. 목록 머리에 상시 노출된다. */
 export const CLEANUP_INDEPENDENCE_NOTE =
   "항목은 서로 대신하지 않습니다. 커넥터를 제거해도 로컬 파일 줄은 열린 채 남고, routine을 꺼 두는 것은 제거가 아닙니다.";
+
+/**
+ * 오프라인일 때 목록 머리에 한 번 서는 문장.
+ *
+ * 배너가 아니라 문장인 이유: 에이전트 화면은 이미 자기 오프라인 배너를 하나
+ * 들고 있고(`agent-hub-offline`), 그 아래 같은 말을 배너로 또 세우면 한 화면에
+ * 같은 사실이 셋이 된다(셸까지 세면 넷). 대신 이 문장은 **id 를 갖고**, 잠긴
+ * 여섯 줄의 버튼이 전부 이 한 문장을 가리킨다 — 같은 사유를 여섯 번 적는 대신
+ * 한 번 적고 여섯이 참조하는 규율은 `ConfirmButton.describedBy` 의 것이다.
+ */
+export const CLEANUP_OFFLINE_NOTE =
+  "연결이 끊겨 있어 지금은 확인을 저장할 수 없습니다. 마지막으로 받은 목록은 그대로 읽을 수 있습니다.";
 
 export const CLEANUP_ACKNOWLEDGE_LABEL = "확인 기록";
 
