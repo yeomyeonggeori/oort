@@ -94,8 +94,8 @@ pub use agent_credential::{
     DEFAULT_ROTATION_GRACE_SECONDS, HOSTED_CONNECTION_MANAGED_CODE, MAXIMUM_ROTATION_GRACE_SECONDS,
 };
 pub use agent_scope::{
-    is_gateway_callback_route, required_agent_scope, SCOPE_AGENT_JOBS_READ,
-    SCOPE_AGENT_PORT_CONNECT, SCOPE_AGENT_RUNS_CALLBACK, SCOPE_MESSAGES_WRITE,
+    is_gateway_callback_route, required_agent_scope, SCOPE_AGENT_INBOX_READ, SCOPE_AGENT_JOBS_READ,
+    SCOPE_AGENT_PORT_CONNECT, SCOPE_AGENT_RUNS_CALLBACK, SCOPE_MESSAGES_READ, SCOPE_MESSAGES_WRITE,
 };
 pub use ephemeral_grant::{
     ephemeral_grant_key, sign_ephemeral_grant, verify_ephemeral_grant, EphemeralGrantClaims,

@@ -776,3 +776,300 @@ fn the_protocol_crate_cannot_reach_transport_database_or_product_crates() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// HAP-E5 — the tool surface. The catalog is data (see `tools.rs`); what is
+// pinned here is that the *protocol* half of it cannot drift: one view answers
+// both questions, an invisible tool is indistinguishable from an absent one,
+// and the two eras shape the result envelope and nothing else.
+// ---------------------------------------------------------------------------
+
+use momo_mcp::{
+    dispatch_with_tools, tool_failure, tool_success, Outcome, ToolCapability, ToolEra, ToolFailure,
+    ToolView,
+};
+
+fn scopes(values: &[&str]) -> Vec<String> {
+    values.iter().map(|value| value.to_string()).collect()
+}
+
+fn full_view() -> ToolView {
+    let granted = scopes(&[
+        "agent:port:connect",
+        "agent:inbox:read",
+        "messages:read",
+        "messages:write",
+        "agent:jobs:read",
+        "agent:runs:callback",
+    ]);
+    ToolView::intersect(&granted, &granted, ToolCapability::FULL)
+}
+
+fn invoke_with(
+    body: &Value,
+    version: Option<&str>,
+    method: Option<&str>,
+    name: Option<&str>,
+    view: &ToolView,
+) -> Outcome {
+    let bytes = serde_json::to_vec(body).unwrap();
+    dispatch_with_tools(
+        HttpRequest {
+            content_type: Some(JSON_CONTENT_TYPE),
+            accept: Some(ACCEPT),
+            protocol_version: version,
+            mcp_method: method,
+            mcp_name: name,
+            body: &bytes,
+        },
+        view,
+    )
+}
+
+fn response_of(outcome: Outcome) -> HttpResponse {
+    match outcome {
+        Outcome::Response(response) => response,
+        Outcome::Tool(call) => panic!("expected a response, got a call to {}", call.tool.name),
+    }
+}
+
+#[test]
+fn both_eras_advertise_exactly_the_view_they_can_call() {
+    let view = full_view();
+    let modern_list = response_of(invoke_with(
+        &modern("tools/list", json!(1), json!({})),
+        Some(MODERN_PROTOCOL_VERSION),
+        Some("tools/list"),
+        None,
+        &view,
+    ));
+    let legacy_list = response_of(invoke_with(
+        &json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}}),
+        Some(LEGACY_PROTOCOL_VERSION),
+        Some("tools/list"),
+        None,
+        &view,
+    ));
+    let modern_names: Vec<String> = json_body(&modern_list)["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|tool| tool["name"].as_str().unwrap().to_string())
+        .collect();
+    let legacy_names: Vec<String> = json_body(&legacy_list)["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|tool| tool["name"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(modern_names, legacy_names);
+    assert_eq!(
+        modern_names,
+        vec![
+            "oort_inbox_read",
+            "oort_conversation_read",
+            "oort_message_post",
+            "oort_jobs_claim",
+            "oort_job_renew",
+            "oort_job_release",
+            "oort_run_event",
+            "oort_run_complete",
+        ]
+    );
+    // Every advertised tool is callable, in both eras.
+    for name in &modern_names {
+        assert!(view.callable(name).is_some(), "{name}");
+    }
+}
+
+#[test]
+fn a_connect_only_credential_lists_nothing_and_calls_nothing() {
+    let connect = scopes(&["agent:port:connect"]);
+    let view = ToolView::intersect(&connect, &connect, ToolCapability::FULL);
+    let listed = response_of(invoke_with(
+        &modern("tools/list", json!(1), json!({})),
+        Some(MODERN_PROTOCOL_VERSION),
+        Some("tools/list"),
+        None,
+        &view,
+    ));
+    assert_eq!(json_body(&listed)["result"]["tools"], json!([]));
+
+    let called = response_of(invoke_with(
+        &modern(
+            "tools/call",
+            json!(2),
+            json!({"name": "oort_message_post", "arguments": {}}),
+        ),
+        Some(MODERN_PROTOCOL_VERSION),
+        Some("tools/call"),
+        Some("oort_message_post"),
+        &view,
+    ));
+    assert_eq!(called.status, 400);
+    assert_eq!(error_code(&called), -32602);
+    // Byte-identical to a tool that has never existed: no enumeration.
+    let unknown = response_of(invoke_with(
+        &modern(
+            "tools/call",
+            json!(2),
+            json!({"name": "oort_not_a_tool", "arguments": {}}),
+        ),
+        Some(MODERN_PROTOCOL_VERSION),
+        Some("tools/call"),
+        Some("oort_not_a_tool"),
+        &view,
+    ));
+    assert_eq!(json_body(&called), json_body(&unknown));
+}
+
+#[test]
+fn an_admitted_call_carries_its_era_tool_and_bounded_arguments() {
+    let view = full_view();
+    let modern_call = invoke_with(
+        &modern(
+            "tools/call",
+            json!("call-1"),
+            json!({"name": "oort_inbox_read", "arguments": {"limit": 5}}),
+        ),
+        Some(MODERN_PROTOCOL_VERSION),
+        Some("tools/call"),
+        Some("oort_inbox_read"),
+        &view,
+    );
+    let Outcome::Tool(call) = modern_call else {
+        panic!("modern tools/call must be admitted");
+    };
+    assert_eq!(call.era, ToolEra::Modern);
+    assert_eq!(call.tool.name, "oort_inbox_read");
+    assert_eq!(call.tool.required_scope, "agent:inbox:read");
+    assert_eq!(call.arguments, json!({"limit": 5}));
+    assert_eq!(call.id, json!("call-1"));
+
+    let legacy_call = invoke_with(
+        &json!({
+            "jsonrpc": "2.0", "id": 7, "method": "tools/call",
+            "params": {"name": "oort_job_renew", "arguments": {"leaseHandle": "x"}}
+        }),
+        Some(LEGACY_PROTOCOL_VERSION),
+        Some("tools/call"),
+        Some("oort_job_renew"),
+        &view,
+    );
+    let Outcome::Tool(call) = legacy_call else {
+        panic!("legacy tools/call must be admitted");
+    };
+    assert_eq!(call.era, ToolEra::Legacy);
+    assert_eq!(call.tool.name, "oort_job_renew");
+    assert_eq!(call.arguments, json!({"leaseHandle": "x"}));
+}
+
+/// An omitted `arguments` is an empty object, never a missing key the adapter
+/// has to special-case — one shape reaches every domain port.
+#[test]
+fn an_omitted_arguments_object_is_admitted_as_empty() {
+    let view = full_view();
+    let outcome = invoke_with(
+        &modern("tools/call", json!(1), json!({"name": "oort_jobs_claim"})),
+        Some(MODERN_PROTOCOL_VERSION),
+        Some("tools/call"),
+        Some("oort_jobs_claim"),
+        &view,
+    );
+    let Outcome::Tool(call) = outcome else {
+        panic!("admitted");
+    };
+    assert_eq!(call.arguments, json!({}));
+}
+
+/// Protocol validation still runs first: a mirror mismatch is refused before
+/// the view is consulted, so a granted scope cannot buy a header shortcut.
+#[test]
+fn transport_mirrors_are_still_enforced_for_an_authorized_tool() {
+    let view = full_view();
+    let response = response_of(invoke_with(
+        &modern(
+            "tools/call",
+            json!(1),
+            json!({"name": "oort_message_post", "arguments": {}}),
+        ),
+        Some(MODERN_PROTOCOL_VERSION),
+        Some("tools/call"),
+        Some("oort_inbox_read"),
+        &view,
+    ));
+    assert_eq!(error_code(&response), ERR_VERSION_MISMATCH);
+}
+
+#[test]
+fn the_success_envelope_differs_only_by_era_metadata() {
+    let view = full_view();
+    let outcome = invoke_with(
+        &modern("tools/call", json!(3), json!({"name": "oort_jobs_claim"})),
+        Some(MODERN_PROTOCOL_VERSION),
+        Some("tools/call"),
+        Some("oort_jobs_claim"),
+        &view,
+    );
+    let Outcome::Tool(mut call) = outcome else {
+        panic!("admitted");
+    };
+    let modern_result = json_body(&tool_success(&call, json!({"jobs": []})));
+    assert_eq!(modern_result["id"], json!(3));
+    assert_eq!(modern_result["result"]["isError"], json!(false));
+    assert_eq!(
+        modern_result["result"]["structuredContent"],
+        json!({"jobs": []})
+    );
+    assert_eq!(
+        modern_result["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap(),
+        "{\"jobs\":[]}"
+    );
+    assert_eq!(modern_result["result"]["resultType"], json!("tools/call"));
+    assert_eq!(
+        modern_result["result"]["cache"],
+        json!({"ttlSeconds": 0, "scope": "private"})
+    );
+
+    call.era = ToolEra::Legacy;
+    let legacy_result = json_body(&tool_success(&call, json!({"jobs": []})));
+    assert!(legacy_result["result"].get("resultType").is_none());
+    assert!(legacy_result["result"].get("cache").is_none());
+    assert_eq!(
+        legacy_result["result"]["structuredContent"],
+        modern_result["result"]["structuredContent"]
+    );
+}
+
+/// Five failures, five fixed messages. A domain string here would answer
+/// questions the fail-closed reads refuse to answer.
+#[test]
+fn every_tool_failure_is_one_of_five_fixed_answers() {
+    let view = full_view();
+    let outcome = invoke_with(
+        &modern("tools/call", json!(9), json!({"name": "oort_jobs_claim"})),
+        Some(MODERN_PROTOCOL_VERSION),
+        Some("tools/call"),
+        Some("oort_jobs_claim"),
+        &view,
+    );
+    let Outcome::Tool(call) = outcome else {
+        panic!("admitted");
+    };
+    for (failure, status, code) in [
+        (ToolFailure::InvalidArguments, 400, -32602),
+        (ToolFailure::NotAuthorized, 403, -32003),
+        (ToolFailure::Unavailable, 409, -32004),
+        (ToolFailure::Conflict, 409, -32005),
+        (ToolFailure::Internal, 500, -32603),
+    ] {
+        let response = tool_failure(&call, failure);
+        assert_eq!(response.status, status);
+        let body = json_body(&response);
+        assert_eq!(body["error"]["code"], json!(code));
+        assert_eq!(body["id"], json!(9));
+        assert!(body["error"].get("data").is_none());
+    }
+}

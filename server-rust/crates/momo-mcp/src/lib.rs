@@ -11,6 +11,16 @@ use serde::de::{MapAccess, SeqAccess, Visitor};
 use serde::Deserialize;
 use serde_json::Value;
 
+pub mod handle;
+pub mod tools;
+
+pub use handle::{decode_lease_handle, encode_lease_handle, LeaseHandle, LeaseHandleError};
+pub use tools::{
+    ToolCapability, ToolDescriptor, ToolFailure, ToolView, TOOL_CATALOG, TOOL_CONVERSATION_READ,
+    TOOL_INBOX_READ, TOOL_JOBS_CLAIM, TOOL_JOB_RELEASE, TOOL_JOB_RENEW, TOOL_MESSAGE_POST,
+    TOOL_RUN_COMPLETE, TOOL_RUN_EVENT,
+};
+
 pub const MODERN_PROTOCOL_VERSION: &str = "2026-07-28";
 pub const LEGACY_PROTOCOL_VERSION: &str = "2025-11-25";
 pub const SUPPORTED_PROTOCOL_VERSIONS: [&str; 2] =
@@ -100,8 +110,71 @@ impl HttpResponse {
     }
 }
 
-/// Validate and dispatch one already-authenticated Agent Port POST.
+/// Which protocol era a validated tool call arrived on. The eras shape the
+/// success envelope and nothing else.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolEra {
+    Modern,
+    Legacy,
+}
+
+/// A `tools/call` that passed protocol validation **and** the caller's
+/// [`ToolView`]. Producing one is the adapter's cue to run a typed domain port;
+/// this crate reaches no product data itself and holds none.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolCall {
+    pub id: Value,
+    pub era: ToolEra,
+    pub tool: &'static ToolDescriptor,
+    /// The already-bounded `params.arguments` object, or `{}` when omitted.
+    pub arguments: Value,
+}
+
+/// The two things one validated POST can become.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Outcome {
+    /// A complete answer; the adapter writes it out unchanged.
+    Response(HttpResponse),
+    /// An authorized tool invocation the adapter must execute.
+    Tool(ToolCall),
+}
+
+/// Validate and dispatch one already-authenticated Agent Port POST **with the
+/// caller's own tool view**.
+///
+/// `view` is the only thing that makes a product tool visible or callable, and
+/// it feeds `tools/list` and `tools/call` through one code path — that shared
+/// input is the structural reason the advertised catalog and the callable
+/// catalog cannot disagree.
+pub fn dispatch_with_tools(request: HttpRequest<'_>, view: &ToolView) -> Outcome {
+    let mut call = None;
+    let response = dispatch_inner(request, view, &mut call);
+    match call {
+        Some(call) => Outcome::Tool(call),
+        None => Outcome::Response(response),
+    }
+}
+
+/// Validate and dispatch one already-authenticated Agent Port POST with **no**
+/// product capability: the foundation surface HAP-E2 shipped.
+///
+/// Equivalent to [`dispatch_with_tools`] under an empty [`ToolView`], which is
+/// also what a connect-only credential gets, so this stays the exact behaviour
+/// of the transport before any tool scope is granted.
 pub fn dispatch(request: HttpRequest<'_>) -> HttpResponse {
+    match dispatch_with_tools(request, &ToolView::empty()) {
+        Outcome::Response(response) => response,
+        // Unreachable: an empty view makes every tool name uncallable, so the
+        // tools/call arm below answers "unknown tool" instead of emitting one.
+        Outcome::Tool(call) => error(400, call.id, -32602, "unknown tool", None),
+    }
+}
+
+fn dispatch_inner(
+    request: HttpRequest<'_>,
+    view: &ToolView,
+    call: &mut Option<ToolCall>,
+) -> HttpResponse {
     if request.body.len() > MAX_BODY_BYTES {
         return error(
             413,
@@ -183,8 +256,8 @@ pub fn dispatch(request: HttpRequest<'_>) -> HttpResponse {
     }
 
     match select_era(request.protocol_version, object) {
-        Ok(Era::Modern) => dispatch_modern(request, object, method),
-        Ok(Era::Legacy) => dispatch_legacy(request, object, method),
+        Ok(Era::Modern) => dispatch_modern(request, object, method, view, call),
+        Ok(Era::Legacy) => dispatch_legacy(request, object, method, view, call),
         Err(response) => response,
     }
 }
@@ -236,6 +309,8 @@ fn dispatch_modern(
     request: HttpRequest<'_>,
     object: &serde_json::Map<String, Value>,
     method: &str,
+    view: &ToolView,
+    call: &mut Option<ToolCall>,
 ) -> HttpResponse {
     let id = request_id_from_object(object);
     if request.protocol_version != Some(MODERN_PROTOCOL_VERSION) {
@@ -356,21 +431,86 @@ fn dispatch_modern(
             success(
                 id,
                 serde_json::json!({
-                    "tools": [],
+                    "tools": view.listing(),
                     "resultType": "tools/list",
                     "cache": {"ttlSeconds": 0, "scope": "private"}
                 }),
             ),
         ),
-        "tools/call" => error(400, id, -32602, "unknown tool", None),
+        "tools/call" => admit_tool_call(id, ToolEra::Modern, params, body_name, view, call),
         _ => error(400, id, -32601, "method not found", None),
     }
+}
+
+/// The one place a validated `tools/call` becomes an invocation.
+///
+/// A name the view cannot call and a name that does not exist take the same
+/// exit, so `tools/call` never enumerates the catalog for a credential that was
+/// not granted it.
+fn admit_tool_call(
+    id: Value,
+    era: ToolEra,
+    params: &serde_json::Map<String, Value>,
+    body_name: Option<&str>,
+    view: &ToolView,
+    call: &mut Option<ToolCall>,
+) -> HttpResponse {
+    let Some(tool) = body_name.and_then(|name| view.callable(name)) else {
+        return error(400, id, -32602, "unknown tool", None);
+    };
+    let arguments = params
+        .get("arguments")
+        .cloned()
+        .unwrap_or_else(|| Value::Object(serde_json::Map::new()));
+    *call = Some(ToolCall {
+        id: id.clone(),
+        era,
+        tool,
+        arguments,
+    });
+    error(400, id, -32602, "unknown tool", None)
+}
+
+/// The MCP result envelope for a tool that ran.
+///
+/// `structuredContent` is the machine half and the `content` text is the same
+/// object rendered once — never a second, hand-written projection, so the two
+/// halves cannot describe different outcomes.
+pub fn tool_success(call: &ToolCall, structured: Value) -> HttpResponse {
+    let text = serde_json::to_string(&structured).unwrap_or_else(|_| "{}".to_string());
+    let mut result = serde_json::json!({
+        "content": [{"type": "text", "text": text}],
+        "structuredContent": structured,
+        "isError": false
+    });
+    if call.era == ToolEra::Modern {
+        if let Some(object) = result.as_object_mut() {
+            object.insert("resultType".to_owned(), Value::String("tools/call".into()));
+            object.insert(
+                "cache".to_owned(),
+                serde_json::json!({"ttlSeconds": 0, "scope": "private"}),
+            );
+        }
+    }
+    HttpResponse::json(200, success(call.id.clone(), result))
+}
+
+/// The JSON-RPC error envelope for a tool that refused.
+///
+/// Every failure is one of [`ToolFailure`]'s five, and each carries a fixed
+/// message: a domain string here would leak the very existence facts the
+/// fail-closed reads refuse to confirm.
+pub fn tool_failure(call: &ToolCall, failure: ToolFailure) -> HttpResponse {
+    let (status, code, message) = failure.wire();
+    error(status, call.id.clone(), code, message, None)
 }
 
 fn dispatch_legacy(
     request: HttpRequest<'_>,
     object: &serde_json::Map<String, Value>,
     method: &str,
+    view: &ToolView,
+    call: &mut Option<ToolCall>,
 ) -> HttpResponse {
     let id = request_id_from_object(object);
     if modern_meta_version(object).is_some() {
@@ -497,8 +637,21 @@ fn dispatch_legacy(
             }
         }
         "ping" => HttpResponse::json(200, success(id, serde_json::json!({}))),
-        "tools/list" => HttpResponse::json(200, success(id, serde_json::json!({"tools": []}))),
-        "tools/call" => error(400, id, -32602, "unknown tool", None),
+        "tools/list" => HttpResponse::json(
+            200,
+            success(id, serde_json::json!({"tools": view.listing()})),
+        ),
+        "tools/call" => match params.and_then(Value::as_object) {
+            Some(params) => admit_tool_call(
+                id,
+                ToolEra::Legacy,
+                params,
+                params.get("name").and_then(Value::as_str),
+                view,
+                call,
+            ),
+            None => error(400, id, -32602, "invalid tools/call params", None),
+        },
         _ => error(400, id, -32601, "method not found", None),
     }
 }
