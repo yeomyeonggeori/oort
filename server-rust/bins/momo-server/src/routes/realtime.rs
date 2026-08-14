@@ -216,7 +216,8 @@ pub fn parse_channel(name: &str) -> Option<ParsedChannel> {
                 // `typing` (ADR-0149) and `presence` (ADR-0160 ②) ride this arm
                 // on purpose: both ephemeral rails' subscribe rule IS the message
                 // rail's. See `ParsedChannel::Channel`.
-                "ch" | "dm"
+                "ch"
+                | "dm"
                 | momo_ephemeral::EPHEMERAL_NAMESPACE
                 | momo_ephemeral::PRESENCE_NAMESPACE
                     if segments.len() == 2 =>

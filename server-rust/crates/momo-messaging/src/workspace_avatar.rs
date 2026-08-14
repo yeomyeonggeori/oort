@@ -88,9 +88,13 @@ pub fn validate_avatar_mime(raw: &str) -> Result<String, AvatarSpecInvalid> {
         return Err(AvatarSpecInvalid::Mime);
     };
     let subtype_ok = !subtype.is_empty()
-        && subtype
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'!' | b'#' | b'$' | b'&' | b'^' | b'_' | b'.' | b'+' | b'-'));
+        && subtype.bytes().all(|b| {
+            b.is_ascii_alphanumeric()
+                || matches!(
+                    b,
+                    b'!' | b'#' | b'$' | b'&' | b'^' | b'_' | b'.' | b'+' | b'-'
+                )
+        });
     if !subtype_ok || value.chars().count() > WORKSPACE_AVATAR_TEXT_MAX_CHARS {
         return Err(AvatarSpecInvalid::Mime);
     }
@@ -301,9 +305,16 @@ mod tests {
 
     #[test]
     fn a_name_is_trimmed_and_path_separators_are_refused() {
-        assert_eq!(validate_avatar_name("  logo.png  ").expect("ok"), "logo.png");
+        assert_eq!(
+            validate_avatar_name("  logo.png  ").expect("ok"),
+            "logo.png"
+        );
         for bad in ["", "  ", "a/b.png", "a\\b.png", "a\0b"] {
-            assert_eq!(validate_avatar_name(bad), Err(AvatarSpecInvalid::Name), "{bad:?}");
+            assert_eq!(
+                validate_avatar_name(bad),
+                Err(AvatarSpecInvalid::Name),
+                "{bad:?}"
+            );
         }
         assert_eq!(
             validate_avatar_name(&"a".repeat(256)),
@@ -316,12 +327,22 @@ mod tests {
         for ok in ["image/png", "IMAGE/JPEG", " image/webp ", "image/svg+xml"] {
             assert!(validate_avatar_mime(ok).is_ok(), "{ok:?}");
         }
-        assert_eq!(validate_avatar_mime("image/png").expect("lower"), "image/png");
-        assert_eq!(validate_avatar_mime("IMAGE/JPEG").expect("lower"), "image/jpeg");
+        assert_eq!(
+            validate_avatar_mime("image/png").expect("lower"),
+            "image/png"
+        );
+        assert_eq!(
+            validate_avatar_mime("IMAGE/JPEG").expect("lower"),
+            "image/jpeg"
+        );
         // Not an image, or not a mime at all: the content proxy would stream
         // these into a rail <img>, so they are refused before Drive is touched.
         for bad in ["application/pdf", "text/html", "image/", "png", "image", ""] {
-            assert_eq!(validate_avatar_mime(bad), Err(AvatarSpecInvalid::Mime), "{bad:?}");
+            assert_eq!(
+                validate_avatar_mime(bad),
+                Err(AvatarSpecInvalid::Mime),
+                "{bad:?}"
+            );
         }
     }
 }
