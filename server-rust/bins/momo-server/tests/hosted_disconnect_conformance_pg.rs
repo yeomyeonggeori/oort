@@ -2422,3 +2422,389 @@ async fn a_failing_prove_never_reaches_a_sibling_connections_credential() {
     .expect("prove the surviving credential");
     assert_eq!(refused, momo_auth::HostedProof::Rejected);
 }
+
+// ---------------------------------------------------------------------------
+// (8) #1386 — the four doors migration 072 named and left open
+//
+// 072's own header lists them: an INSERT that arrives already terminal, a
+// terminal-exit guard, the `acknowledged_by` FK, and retry-seed semantics.
+// Migration 073 closes the first two in the database, decides the third, and
+// the fourth is closed in Rust because it is a product question — what should
+// happen to an artifact discovered on the second pass — rather than a
+// constraint one.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn the_terminal_state_is_entered_by_one_transition_and_left_by_none() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app).await;
+    let client = reqwest::Client::new();
+
+    // ---- (i) a row cannot be born terminal -------------------------------
+    // 072's guard is `BEFORE UPDATE OF status`, so every clause it enforces was
+    // reachable only by a caller that transitions. An INSERT satisfied 069's
+    // shape CHECKs and landed `disconnected` with no manifest, no revoke and no
+    // pause — a connection whose whole audited history is that it appeared.
+    for born in ["disconnected", "cleanup_pending"] {
+        let error = sqlx::query(
+            "INSERT INTO hosted_agent_connection(workspace_id,agent_member_id,status,created_by) \
+             VALUES($1,$2,$3,$4)",
+        )
+        .bind(fixture.workspace)
+        .bind(fixture.spare_hosted_agent)
+        .bind(born)
+        .bind(fixture.human)
+        .execute(&su)
+        .await
+        .expect_err("073 refuses a connection created in a lifecycle-only state");
+        assert_eq!(
+            error
+                .as_database_error()
+                .expect("a database error")
+                .message(),
+            format!("hosted connection cannot be created in {born}"),
+            "the refusal names the state it refused"
+        );
+    }
+    // The states a connection may legitimately be born in are untouched — this
+    // is what keeps the guard a statement about the lifecycle rather than about
+    // INSERTs.
+    let newborn = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO hosted_agent_connection( \
+           id,workspace_id,agent_member_id,status,pairing_challenge_hash, \
+           pairing_expires_at,created_by) \
+         VALUES($1,$2,$3,'pairing_pending',digest($4::text,'sha256'), \
+           now() + interval '15 minutes',$5)",
+    )
+    .bind(newborn)
+    .bind(fixture.workspace)
+    .bind(fixture.spare_hosted_agent)
+    .bind(format!(
+        "momo_pair_v1.{}.{}",
+        fixture.workspace,
+        Uuid::new_v4().simple()
+    ))
+    .bind(fixture.human)
+    .execute(&su)
+    .await
+    .expect("pairing_pending is still how a connection begins");
+
+    // ---- (ii) the terminal is never left ---------------------------------
+    // Walk the real lifecycle to `disconnected` through the routes, so what the
+    // exit guard is being asked about is a genuinely terminal row.
+    let (code, started) = post_json(
+        &client,
+        &base,
+        &fixture.human_jwt,
+        &disconnect_path(fixture.workspace, fixture.hosted.connection),
+        json!({}),
+    )
+    .await;
+    assert_eq!(code, 200, "{started}");
+    resolve_manifest(
+        &client,
+        &base,
+        &fixture,
+        fixture.hosted.connection,
+        &started["cleanupArtifacts"],
+        "delete",
+    )
+    .await;
+    let (code, terminal) = post_json(
+        &client,
+        &base,
+        &fixture.human_jwt,
+        &complete_path(fixture.workspace, fixture.hosted.connection),
+        json!({}),
+    )
+    .await;
+    assert_eq!(code, 200, "{terminal}");
+    assert_eq!(
+        connection_status(&su, fixture.workspace, fixture.hosted.connection).await,
+        "disconnected"
+    );
+
+    // Every escape, refused by name. Before 073 the guard returned early on
+    // `OLD.status = 'disconnected'`, so the terminal was the one state it had
+    // stopped watching — and a repair script could resurrect a revoked runtime
+    // into `detected` with a single UPDATE.
+    for revival in ["detected", "active", "expired", "pairing_pending"] {
+        let error = sqlx::query(
+            "UPDATE hosted_agent_connection SET status=$3 WHERE workspace_id=$1 AND id=$2",
+        )
+        .bind(fixture.workspace)
+        .bind(fixture.hosted.connection)
+        .bind(revival)
+        .execute(&su)
+        .await
+        .expect_err("073 refuses a resurrection");
+        assert_eq!(
+            error
+                .as_database_error()
+                .expect("a database error")
+                .message(),
+            format!("hosted connection cannot leave disconnected for {revival}"),
+        );
+    }
+    assert_eq!(
+        connection_status(&su, fixture.workspace, fixture.hosted.connection).await,
+        "disconnected",
+        "and the row is where the lifecycle left it"
+    );
+    // The idempotent replay of the terminal itself is still permitted, which is
+    // what `complete_hosted_disconnect_in_tx`'s AlreadyTerminal answer relies on.
+    sqlx::query(
+        "UPDATE hosted_agent_connection SET status='disconnected', updated_at=now() \
+          WHERE workspace_id=$1 AND id=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted.connection)
+    .execute(&su)
+    .await
+    .expect("disconnected -> disconnected is a no-op, not a resurrection");
+    let (code, replay) = post_json(
+        &client,
+        &base,
+        &fixture.human_jwt,
+        &complete_path(fixture.workspace, fixture.hosted.connection),
+        json!({}),
+    )
+    .await;
+    assert_eq!(code, 200, "{replay}");
+    assert_eq!(replay["disconnectedNow"], json!(false));
+
+    // ---- (iii) the `acknowledged_by` seal --------------------------------
+    // #1386 F5 asked whether the actor FK creates a member-hard-delete wedge.
+    // It does not create one: the member is already pinned by schema_v0 for
+    // anyone who ever posted, so the FK adds no case. Both halves are measured
+    // rather than asserted, because "sealed" without evidence is just a wish.
+    let acknowledged: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM hosted_agent_connection_artifact \
+          WHERE workspace_id=$1 AND connection_id=$2 AND acknowledged_by=$3",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted.connection)
+    .bind(fixture.human)
+    .fetch_one(&su)
+    .await
+    .expect("acknowledged rows");
+    assert!(acknowledged > 0, "the human resolved the manifest above");
+    let pinned = sqlx::query("DELETE FROM member WHERE workspace_id=$1 AND id=$2")
+        .bind(fixture.workspace)
+        .bind(fixture.human)
+        .execute(&su)
+        .await
+        .expect_err("a member who acted is not hard-deletable");
+    assert_ne!(
+        pinned
+            .as_database_error()
+            .expect("a database error")
+            .constraint(),
+        Some("hosted_agent_connection_artifact_actor_fk"),
+        "and the constraint that pins them is schema_v0's, not 072's — which is \
+         why 073 seals the actor FK instead of relaxing it"
+    );
+    // The teardown that the product does perform is unaffected: NO ACTION is
+    // checked once the artifact rows have cascaded away with their workspace.
+    let razed = seed(&su).await;
+    let (code, razed_start) = post_json(
+        &client,
+        &base,
+        &razed.human_jwt,
+        &disconnect_path(razed.workspace, razed.hosted.connection),
+        json!({}),
+    )
+    .await;
+    assert_eq!(code, 200, "{razed_start}");
+    resolve_manifest(
+        &client,
+        &base,
+        &razed,
+        razed.hosted.connection,
+        &razed_start["cleanupArtifacts"],
+        "delete",
+    )
+    .await;
+    sqlx::query("DELETE FROM workspace WHERE id=$1")
+        .bind(razed.workspace)
+        .execute(&su)
+        .await
+        .expect("workspace teardown clears acknowledged artifacts");
+    let leftovers: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM hosted_agent_connection_artifact WHERE workspace_id=$1",
+    )
+    .bind(razed.workspace)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(leftovers, 0);
+}
+
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_retried_disconnect_merges_newly_found_artifacts_without_restarting() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app).await;
+    let client = reqwest::Client::new();
+
+    // The first pass names one item. Six seeded kinds plus it.
+    let (code, first) = post_json(
+        &client,
+        &base,
+        &fixture.human_jwt,
+        &disconnect_path(fixture.workspace, fixture.hosted.connection),
+        json!({"artifacts": [{"kind": "routine", "externalRef": "Morning digest"}]}),
+    )
+    .await;
+    assert_eq!(code, 200, "{first}");
+    assert_eq!(first["startedNow"], json!(true));
+    assert_eq!(
+        first["cleanupArtifacts"]
+            .as_array()
+            .expect("manifest")
+            .len(),
+        7
+    );
+    let started_audits = audit_count(
+        &su,
+        fixture.workspace,
+        "hosted_agent.connection.disconnect_started",
+    )
+    .await;
+    assert_eq!(started_audits, 1);
+    let revoked = live_credential_count(&su, fixture.workspace, fixture.hosted.connection).await;
+    assert_eq!(revoked, 0);
+
+    // Resolve one row, so the merge below can be shown not to disturb it.
+    let digest_id = first["cleanupArtifacts"]
+        .as_array()
+        .expect("manifest")
+        .iter()
+        .find(|item| item["externalRef"] == json!("Morning digest"))
+        .expect("the named routine")["id"]
+        .as_str()
+        .expect("artifact id")
+        .to_string();
+    let (code, _) = post_json(
+        &client,
+        &base,
+        &fixture.human_jwt,
+        &acknowledge_path(fixture.workspace, fixture.hosted.connection, &digest_id),
+        json!({"currentStatus": "absent", "disposition": "delete", "evidence": "deleted in the provider UI"}),
+    )
+    .await;
+    assert_eq!(code, 200);
+
+    // ---- the second pass: one already-known item, one newly found ---------
+    // This is the #1386 F4 red. Before the fix the response was 200, the
+    // manifest came back unchanged, and the operator was told the plugin was
+    // tracked while nothing had recorded it — the worst of the three possible
+    // answers, and the reason this is a merge rather than a 409: no other route
+    // adds a manifest row, so a conflict would be honest and useless.
+    let (code, second) = post_json(
+        &client,
+        &base,
+        &fixture.human_jwt,
+        &disconnect_path(fixture.workspace, fixture.hosted.connection),
+        json!({"artifacts": [
+            {"kind": "routine", "externalRef": "Morning digest"},
+            {"kind": "plugin", "externalRef": "oort bridge"}
+        ]}),
+    )
+    .await;
+    assert_eq!(code, 200, "{second}");
+    let manifest = second["cleanupArtifacts"].as_array().expect("manifest");
+    assert_eq!(manifest.len(), 8, "exactly the newly named item was added");
+    let merged = manifest
+        .iter()
+        .find(|item| item["externalRef"] == json!("oort bridge"))
+        .expect("the newly found plugin is in the manifest now");
+    assert_eq!(merged["kind"], json!("plugin"));
+    assert_eq!(merged["expectedAction"], json!("remove"));
+    assert_eq!(merged["disposition"], json!("pending"));
+    assert_eq!(merged["resolved"], json!(false));
+
+    // The transition did not happen a second time, and neither did its effects.
+    assert_eq!(second["startedNow"], json!(false));
+    assert_eq!(
+        audit_count(
+            &su,
+            fixture.workspace,
+            "hosted_agent.connection.disconnect_started"
+        )
+        .await,
+        1,
+        "a retry never amplifies into a second disconnect"
+    );
+    assert_eq!(
+        audit_count(
+            &su,
+            fixture.workspace,
+            "hosted_agent.connection.cleanup_manifest_extended"
+        )
+        .await,
+        1,
+        "the extension is audited as what it is"
+    );
+    // The resolved row is untouched: a merge cannot re-open a decision.
+    let digest = manifest
+        .iter()
+        .find(|item| item["externalRef"] == json!("Morning digest"))
+        .expect("the routine is still there");
+    assert_eq!(digest["disposition"], json!("removed"));
+    assert_eq!(digest["resolved"], json!(true));
+
+    // And the newly found item really is required: the terminal transition is
+    // refused until someone answers for it, which is the whole point of being
+    // able to add it at all.
+    let (code, refused) = post_json(
+        &client,
+        &base,
+        &fixture.human_jwt,
+        &complete_path(fixture.workspace, fixture.hosted.connection),
+        json!({}),
+    )
+    .await;
+    assert_eq!(code, 409, "{refused}");
+    assert_eq!(
+        connection_status(&su, fixture.workspace, fixture.hosted.connection).await,
+        "cleanup_pending"
+    );
+
+    // ---- a byte-identical retry adds nothing, and audits nothing ----------
+    let (code, third) = post_json(
+        &client,
+        &base,
+        &fixture.human_jwt,
+        &disconnect_path(fixture.workspace, fixture.hosted.connection),
+        json!({"artifacts": [{"kind": "plugin", "externalRef": "oort bridge"}]}),
+    )
+    .await;
+    assert_eq!(code, 200, "{third}");
+    assert_eq!(
+        third["cleanupArtifacts"]
+            .as_array()
+            .expect("manifest")
+            .len(),
+        8
+    );
+    assert_eq!(
+        audit_count(
+            &su,
+            fixture.workspace,
+            "hosted_agent.connection.cleanup_manifest_extended"
+        )
+        .await,
+        1,
+        "saying the same thing twice is not a second extension"
+    );
+    assert_eq!(third["startedNow"], json!(false));
+}

@@ -173,6 +173,18 @@ pub fn decode_hosted_inbox_cursor(
 /// The explicit agent/connection target prevents a producer or future selector
 /// from accidentally fanning a private event out to every hosted member in a
 /// channel. Replaying the same source is idempotent and consumes no sequence.
+///
+/// ## Why the `seq` lookup carries no `deleted_at` filter (#1375, closed)
+///
+/// The #1365 review asked whether a soft-deleted message could enter the ledger
+/// through this read. It cannot, and the reason is placement rather than a
+/// predicate: HAP-E5 put the only call site inside the send transaction,
+/// immediately after the message row is written (`send_message_in_tx`, step 5
+/// of the product send spine). A message cannot be tombstoned before it is
+/// sent, so a `deleted_at IS NULL` clause here would be unreachable — it would
+/// read like a defended boundary while defending nothing. A future caller that
+/// appends for an *already-stored* message is the change that makes the filter
+/// meaningful, and it should arrive with that caller.
 pub async fn append_message_reference_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,

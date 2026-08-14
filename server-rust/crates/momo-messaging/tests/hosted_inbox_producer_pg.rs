@@ -722,3 +722,100 @@ async fn hosted_inbox_authority_checks_the_token_audience_actor_and_connection()
     );
     assert!(read(app.clone()).await.is_ok());
 }
+
+// ---------------------------------------------------------------------------
+// #1375 — the outbox retention contract
+//
+// `outbox` is documented as a queue whose rows are deleted after consumption,
+// and 071 bound the ledger's job reference to a real `outbox` row. Those two
+// facts pull against each other, and migration 073 decides which way: the
+// ledger is the retention floor for the job rows it names, because a hosted
+// agent fetches the job the reference resolves to, so a reference whose target
+// was pruned is not a preserved fact but a dangling one.
+//
+// A decision written only in a header is a decision the next pruner will not
+// read, so it is spelled here as the two shapes a pruner can take.
+// ---------------------------------------------------------------------------
+#[tokio::test]
+#[ignore = "needs verifier-owned disposable PG18 + migrated schema + momo_app role"]
+async fn a_referenced_job_row_is_pinned_and_an_anti_joining_pruner_still_drains() {
+    let (su, app) = pools().await;
+    let f = seed(&su).await;
+    let workspace = f.workspace;
+    let agent = f.agent;
+    let connection = f.connection;
+    let channel = f.channel;
+
+    let run = insert_run(&su, &f, f.agent, f.channel).await;
+    let referenced = insert_job(&su, &f, f.agent, run).await;
+    with_tenant_tx(&app, workspace, move |conn| {
+        Box::pin(async move {
+            append_job_reference_in_tx(conn, workspace, agent, connection, channel, referenced, run)
+                .await
+        })
+    })
+    .await
+    .expect("the reference lands");
+
+    // A second, unreferenced job of the same shape: the row a pruner is for.
+    let spare_run = insert_run(&su, &f, f.agent, f.channel).await;
+    let unreferenced = insert_job(&su, &f, f.agent, spare_run).await;
+    sqlx::query("UPDATE outbox SET status='done', processed_at=now() WHERE workspace_id=$1")
+        .bind(workspace)
+        .execute(&su)
+        .await
+        .unwrap();
+
+    // (1) The naive pruner — age alone — is refused, and named by the FK that
+    // refused it. This is the RESTRICT 073 keeps on purpose.
+    let naive =
+        sqlx::query("DELETE FROM outbox WHERE workspace_id=$1 AND processed_at IS NOT NULL")
+            .bind(workspace)
+            .execute(&su)
+            .await
+            .expect_err("a pruner that ignores the ledger is refused");
+    assert_eq!(
+        naive
+            .as_database_error()
+            .expect("a database error")
+            .constraint(),
+        Some("hosted_agent_inbox_event_outbox_fk"),
+        "the refusal names the reference, so a pruner knows what to exclude"
+    );
+
+    // (2) The contract-obeying pruner drains everything the ledger does not
+    // name, in one statement, and leaves the referenced row exactly where the
+    // hosted agent will look for it.
+    let pruned = sqlx::query(
+        "DELETE FROM outbox o WHERE o.workspace_id=$1 AND o.processed_at IS NOT NULL \
+           AND NOT EXISTS ( \
+             SELECT 1 FROM hosted_agent_inbox_event e \
+              WHERE e.workspace_id = o.workspace_id AND e.source_outbox_id = o.id \
+                AND e.event_kind = 'agent_job')",
+    )
+    .bind(workspace)
+    .execute(&su)
+    .await
+    .expect("an anti-joining pruner drains");
+    assert_eq!(pruned.rows_affected(), 1, "exactly the unreferenced row");
+
+    let survivors: Vec<i64> = sqlx::query_scalar("SELECT id FROM outbox WHERE workspace_id=$1")
+        .bind(workspace)
+        .fetch_all(&su)
+        .await
+        .unwrap();
+    assert_eq!(survivors, vec![referenced]);
+    assert!(!survivors.contains(&unreferenced));
+
+    // And the reference still resolves, which is the whole point of pinning it.
+    let resolves: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM hosted_agent_inbox_event e JOIN outbox o \
+           ON o.workspace_id = e.workspace_id AND o.id = e.source_outbox_id \
+          WHERE e.workspace_id=$1 AND e.event_kind='agent_job')",
+    )
+    .bind(workspace)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert!(resolves, "the ledger never names a pruned job");
+}
