@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Check } from "lucide-react";
 import {
@@ -12,11 +12,13 @@ import {
 import {
   declaredStatusLabel,
   presenceTriggerLabel,
+  PRESENCE_MENU_LABEL,
   PRESENCE_OPTIONS,
 } from "@momo/core/features/presence/model";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
@@ -98,6 +100,8 @@ export function PresenceControl({
   const client = useQueryClient();
   const [open, setOpen] = useState(false);
   const [failed, setFailed] = useState(false);
+  /** The menu title's id, so the radio group can name itself with it. */
+  const menuLabelId = useId();
 
   const declared = selfMember?.presenceStatus;
   const current: PresenceStatus = declared ?? "auto";
@@ -188,6 +192,18 @@ export function PresenceControl({
             testId="presence-error"
           />
         )}
+        {/* The menu's title (이슈 #1383). The trigger is an avatar, so nothing
+            in the open panel said what the three words are *about* — a person
+            arriving at 온라인 / 자리 비움 / 방해 금지 had to infer the question
+            from the answers. The title is the same name the trigger already
+            speaks (`PRESENCE_MENU_LABEL`), and it is a real name rather than
+            decoration: the radio group points back at it with
+            `aria-labelledby`, the idiom `HostPicker` and `SpawnHostChoice`
+            already use, so 「무엇을 고르는 중인가」 reaches the eye and the
+            screen reader from one string. */}
+        <DropdownMenuLabel id={menuLabelId}>
+          {PRESENCE_MENU_LABEL}
+        </DropdownMenuLabel>
         {/* A single choice among three, so the rows are `menuitemradio` and the
             group's `value` is what computes `aria-checked` (design-review M1).
             Before this, a screen-reader user heard three equal commands and had
@@ -196,7 +212,7 @@ export function PresenceControl({
             `onSelect` (not `onValueChange`) so a failed write can hold the menu
             open with its banner; the group's value is the a11y state, not a
             second event path. */}
-        <DropdownMenuRadioGroup value={current}>
+        <DropdownMenuRadioGroup value={current} aria-labelledby={menuLabelId}>
           {PRESENCE_OPTIONS.map((status) => {
             const isCurrent = status === current;
             return (

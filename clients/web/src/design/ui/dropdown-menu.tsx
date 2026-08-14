@@ -142,6 +142,66 @@ export const DropdownMenuRadioItem = React.forwardRef<
 ));
 DropdownMenuRadioItem.displayName = MenuPrimitive.RadioItem.displayName;
 
+/**
+ * A group's **title**: the line that names what the rows beneath it are, rather
+ * than being one of them.
+ *
+ * Radix renders it as a plain `div`, outside the item collection, and that is
+ * the property doing the work here: arrow-key roving walks past it, it takes no
+ * focus, typeahead never lands on it. Which is why a title is this primitive and
+ * not a `disabled` `Item` — a disabled item is still an item, and it announces
+ * as one that failed.
+ *
+ * **It carries no aria linkage of its own.** Radix gives it no `id` and wires
+ * nothing, so a title that only decorates leaves the group it heads unnamed to a
+ * screen reader. The house answer is already written twice — `HostPicker` and
+ * `SpawnHostChoice` both hand a visible label an `id` and have the group point
+ * back with `aria-labelledby` — and this primitive expects the same of its call
+ * sites (`PresenceControl` is the worked example). A label is a name, not an
+ * ornament.
+ *
+ * Measure: `text-meta font-medium text-ink-muted`, the three classes
+ * `SidebarSection`'s `<h2>` already wears. A group title inside a menu and a
+ * section title in the sidebar are the same rank of thing, so they get the same
+ * size, weight and ink rather than a fourth micro-label style. `py-1` keeps it
+ * visibly shorter than the 32px rows, so it reads as a header before it reads as
+ * a choice, and `px-2` sets it on the rows' own left edge.
+ *
+ * ## Submenus (`DropdownMenuSub*`) are deliberately NOT introduced — 이슈 #1383
+ *
+ * The obvious alternative to "a flat group with a title" is a submenu, and this
+ * file has none because a submenu does the one thing the house rule forbids:
+ * **an ineligible option stays visible, with its reason.** The server ships
+ * ineligible hosts instead of filtering them (이슈 #1132), and `SpawnHostChoice`
+ * is a radio list rather than a `<select>` precisely because a closed control
+ * turned 「낡은 맥 (오프라인)」 into a footnote you had to open something to read.
+ * A submenu repeats that one level up: it puts a whole group behind a hover or
+ * an arrow key, so the answer to "왜 저기서는 못 돌리지" sits one interaction
+ * away, which is to say the screen does not answer it. A title over visible rows
+ * buys the grouping without spending the rows.
+ *
+ * Adopting submenus therefore means re-arguing that rule, which is ADR work and
+ * not a component change.
+ *
+ * The same reasoning keeps the hover-consequence tooltip out: a consequence is a
+ * sentence, and a sentence belongs inline where it is read without a pointer —
+ * so `@radix-ui/react-tooltip` stays off this client's dependency list.
+ */
+export const DropdownMenuLabel = React.forwardRef<
+  React.ElementRef<typeof MenuPrimitive.Label>,
+  React.ComponentPropsWithoutRef<typeof MenuPrimitive.Label>
+>(({ className, ...props }, ref) => (
+  <MenuPrimitive.Label
+    ref={ref}
+    className={cn(
+      "select-none px-2 py-1 text-meta font-medium text-ink-muted",
+      className
+    )}
+    {...props}
+  />
+));
+DropdownMenuLabel.displayName = MenuPrimitive.Label.displayName;
+
 export const DropdownMenuSeparator = React.forwardRef<
   React.ElementRef<typeof MenuPrimitive.Separator>,
   React.ComponentPropsWithoutRef<typeof MenuPrimitive.Separator>
