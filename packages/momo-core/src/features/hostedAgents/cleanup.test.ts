@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  acknowledgeQuestion,
   acknowledgeReady,
   buildAcknowledgement,
+  cleanupEvidenceText,
   cleanupDispositionLabel,
   cleanupExpectedAction,
   cleanupKindCopy,
@@ -188,6 +190,18 @@ describe("RED PROOF ④ 서버가 확인한 줄은 사람 확인과 다르게 �
     expect(cleanupRowDetail(serverRow)).toContain("oort가 직접");
   });
 
+  it("서버가 영어로 쓴 운영자 문장은 화면에 닿지 않는다", () => {
+    expect(serverRow.evidence).toContain("hosted credential");
+    expect(cleanupEvidenceText(serverRow)).toBeNull();
+    // 사람이 적은 문장은 반대로 그대로 보인다.
+    expect(
+      cleanupEvidenceText(
+        artifact({ source: "manual", evidence: "커넥터 목록에서 사라진 것을 확인" })
+      )
+    ).toBe("커넥터 목록에서 사라진 것을 확인");
+    expect(cleanupEvidenceText(artifact())).toBeNull();
+  });
+
   it("사람이 확인한 줄은 같은 낱말을 쓰지 않는다", () => {
     const manual = artifact({
       kind: "connector",
@@ -251,6 +265,13 @@ describe("RED PROOF ⑤ 증거 없는 처분은 저장 대상이 아니다", () 
       disposition: "delete",
       evidence: "지웠습니다",
     });
+  });
+
+  it("처분을 기록하기 전에 되돌릴 수 없다는 사실을 묻는다", () => {
+    const question = acknowledgeQuestion("bot", "delete");
+    expect(question).toContain("대화 기록");
+    expect(question).toContain("다시 정할 수 없습니다");
+    expect(acknowledgeQuestion("bot", "preserve")).toContain("다시 정할 수 없습니다");
   });
 
   it("본문에 출처를 실을 칸이 없다", () => {

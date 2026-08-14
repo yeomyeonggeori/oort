@@ -602,6 +602,43 @@ export function cleanupRowActionable(artifact: HostedCleanupArtifact): boolean {
   return !artifact.resolved;
 }
 
+/**
+ * 화면에 그대로 그려도 되는 확인 내용.
+ *
+ * `server_verified` 줄의 `evidence` 는 **서버가 영어로 쓴 운영자 문장**이다
+ * (`oort revoked N hosted credential(s) …`). 그것을 그리는 것은 `./model` 규율 3 이
+ * 금지한 바로 그 습관이고, 이 표면에서는 한 번 더 나쁘다: 사람이 손으로 적은
+ * 확인들 사이에 영어 한 줄이 서면 그것도 누군가 적은 말처럼 읽힌다. 서버가
+ * 확인한 줄이 무엇을 뜻하는지는 `cleanupRowDetail` 이 한국어로 이미 말한다.
+ *
+ * manual 줄의 `evidence` 는 반대다 — 그 문장은 이 화면의 사람이 이 화면에서
+ * 적은 것이므로 그대로 보여 주는 것이 정확하다.
+ */
+export function cleanupEvidenceText(
+  artifact: HostedCleanupArtifact
+): string | null {
+  if (artifact.source === "server_verified") return null;
+  return artifact.evidence ?? null;
+}
+
+/**
+ * 확인을 저장하기 직전에 묻는 한 문장.
+ *
+ * 처분은 되돌릴 수 없다 — 서버는 이미 해결된 줄의 재결정을 409 로 거절한다. 그래서
+ * 관측만 적는 저장(언제든 다시 적을 수 있다)과 달리 이 저장에는 질문이 선다.
+ */
+export function acknowledgeQuestion(
+  kind: HostedCleanupKind,
+  choice: HostedCleanupChoice
+): string {
+  const detail =
+    dispositionChoices(kind).find((item) => item.id === choice)?.detail ?? "";
+  return `${detail} 이 답은 기록에 남고 다시 정할 수 없습니다.`;
+}
+
+/** 질문에 답하는 버튼의 낱말. 저장이 아니라 **기록**이다. */
+export const CLEANUP_CONFIRM_LABEL = "이대로 기록";
+
 // ---- 증거 -------------------------------------------------------------------
 
 /** 서버 `MAX_ARTIFACT_EVIDENCE_BYTES`. 화면이 자기 숫자를 지어내지 않는다. */
