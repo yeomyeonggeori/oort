@@ -320,7 +320,11 @@ export function hostedStatusTone(status: HostedConnectionStatus): HostedChipTone
 export function hostedStatusDetail(connection: HostedAgentConnection): string {
   switch (connection.status) {
     case "pairing_pending":
-      return "아직 이 에이전트가 다이얼인하지 않았습니다. 연결 값은 provider 설정에 붙이면 소비됩니다.";
+      // 소비되는 시점은 붙여 넣는 순간이 아니라 **감지되는 순간**이다. 노출 카드가
+      // 이미 그렇게 적고 있고(presets.ts `PAIRING_REVEAL_SCOPE_NOTE`), 두 문장이
+      // 어긋나면 사람은 값을 붙인 직후 그것이 죽었다고 읽어 아직 살아 있는 값을
+      // 다시 발급한다.
+      return "아직 이 에이전트가 다이얼인하지 않았습니다. 연결 값은 감지되는 순간 소비됩니다.";
     case "detected":
       return connection.activeCredentialId === undefined
         ? "다이얼인은 확인했지만 아직 아무 권한도 열리지 않았습니다. 사람이 채널과 권한을 확인해야 다음으로 갑니다."

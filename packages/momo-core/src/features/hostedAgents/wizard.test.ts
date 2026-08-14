@@ -3,9 +3,12 @@ import type { HostedAgentConnection } from "./model";
 import {
   awaitingProof,
   confirmStateGate,
+  hostedAwaitsRemoteEvent,
   hostedLiveMessage,
+  hostedStepPurpose,
   hostedStepSpec,
   hostedWizardStep,
+  HOSTED_ACTIVATION_DONE_PURPOSE,
   HOSTED_PAIRING_TTL_MS,
   HOSTED_WIZARD_STEPS,
   pairingExpiry,
@@ -183,6 +186,36 @@ describe("승인 상태 게이트", () => {
   });
 });
 
+describe("되묻기 구간", () => {
+  // 되묻기의 근거는 "연결을 하나 골랐는가"가 아니라 "지금 남의 프로세스를
+  // 기다리는가"다. 앞 판은 앞의 것으로 물어서, 활성 연결을 열어 둔 탭이 아무도
+  // 일으키지 않을 사건을 위해 5초마다 서버를 두드렸다.
+  it("기다리는 자리는 정확히 둘이다", () => {
+    expect(hostedAwaitsRemoteEvent(connection({ status: "pairing_pending" }))).toBe(
+      true
+    );
+    expect(
+      hostedAwaitsRemoteEvent(
+        connection({ status: "detected", activeCredentialId: CREDENTIAL })
+      )
+    ).toBe(true);
+  });
+
+  it("사람이 결정 중이거나 이미 도착한 자리에서는 되묻지 않는다", () => {
+    // 승인 화면. 다음 수를 두는 것은 화면 앞의 사람이다.
+    expect(hostedAwaitsRemoteEvent(connection({ status: "detected" }))).toBe(false);
+    expect(hostedAwaitsRemoteEvent(connection({ status: "active" }))).toBe(false);
+    expect(hostedAwaitsRemoteEvent(connection({ status: "expired" }))).toBe(false);
+    expect(hostedAwaitsRemoteEvent(connection({ status: "cleanup_pending" }))).toBe(
+      false
+    );
+    expect(hostedAwaitsRemoteEvent(connection({ status: "disconnected" }))).toBe(
+      false
+    );
+    expect(hostedAwaitsRemoteEvent(null)).toBe(false);
+  });
+});
+
 describe("만료 표시", () => {
   it("서버 TTL 을 화면이 다시 지어내지 않는다", () => {
     expect(HOSTED_PAIRING_TTL_MS).toBe(15 * 60 * 1000);
@@ -218,6 +251,28 @@ describe("RED PROOF ④ 진행 표시와 live region", () => {
     const done = hostedLiveMessage("activation", connection({ status: "active" }));
     expect(waiting).toContain("provider 설정의 값을 바꾸면");
     expect(done).toContain("연결이 활성입니다");
+  });
+
+  it("5단계 목적 문장도 활성 뒤에는 교체를 과거형으로 말한다", () => {
+    // 앞 판은 이 자리에 「provider 설정의 값을 그 값으로 바꿔야 활성이 됩니다」를
+    // 조건 없이 세워서, 이미 활성인 화면이 방금 끝난 교체를 다시 하라고 지시했다.
+    const waiting = hostedStepPurpose(
+      "activation",
+      connection({ status: "detected", activeCredentialId: CREDENTIAL })
+    );
+    expect(waiting).toBe(hostedStepSpec("activation").purpose);
+    expect(waiting).toContain("바꿔야 활성이 됩니다");
+
+    expect(hostedStepPurpose("activation", connection({ status: "active" }))).toBe(
+      HOSTED_ACTIVATION_DONE_PURPOSE
+    );
+
+    // 다른 단계는 갈리지 않는다: 각자 다음 단계가 열리면 화면을 떠난다.
+    for (const step of ["identity", "pairing", "detecting", "approval"] as const) {
+      expect(hostedStepPurpose(step, connection({ status: "active" }))).toBe(
+        hostedStepSpec(step).purpose
+      );
+    }
   });
 
   it("어느 단계의 문장에도 비밀값이 들어갈 자리가 없다", () => {

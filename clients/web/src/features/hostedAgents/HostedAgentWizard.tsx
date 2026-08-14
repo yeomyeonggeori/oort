@@ -61,6 +61,7 @@ import {
   awaitingProof,
   confirmStateGate,
   hostedLiveMessage,
+  hostedStepPurpose,
   hostedStepSpec,
   hostedWizardStep,
   HOSTED_CLOSED_NOTICE,
@@ -212,9 +213,10 @@ function HostedWizardBody({
     ...hostedConnectionQuery(
       workspaceId,
       connectionId,
-      // 남의 프로세스를 기다리는 두 구간에서만 되묻는다. 오프라인에서는 되물어야
-      // 할 상대가 없다.
-      !offline && selectedId !== null
+      // 오프라인에서는 되물어야 할 상대에게 닿지 못한다. **어느 구간에서 되묻는가**
+      // 는 이 자리가 정하지 않는다: 그 답은 방금 받은 서버 상태에 달려 있으므로
+      // 쿼리 자신이 자기 데이터를 보고 판단한다(hostedCredentialScope.ts).
+      !offline
     ),
     enabled: selectedId !== null,
   });
@@ -248,8 +250,10 @@ function HostedWizardBody({
   // 않으므로 Esc 한 번이 다시 만들 수 없는 값을 확인 없이 없앤다.
   const holdingSecret = pairing !== null || issued !== null;
 
-  // 1분에 한 번 시계를 돌린다. 만료 표시는 분 단위라 그보다 잦게 돌 이유가 없고,
-  // 초 단위로 뛰는 숫자는 읽는 사람을 재촉할 뿐이다.
+  // 30초에 한 번 시계를 돌린다. 만료 표시가 그리는 것은 분이므로(`pairingExpiry`)
+  // 초 단위로 뛰는 숫자는 읽는 사람을 재촉할 뿐이지만, 간격을 표시 단위와 같은
+  // 60초로 두면 그 둘의 위상이 어긋나 라벨이 최대 1분까지 묵는다. 절반 간격이 그
+  // 지연을 30초로 줄이는 동안 화면에 보이는 숫자는 여전히 분 단위로만 바뀐다.
   useEffect(() => {
     if (pairing === null) return;
     const timer = window.setInterval(() => setNowMs(Date.now()), 30_000);
@@ -387,7 +391,6 @@ function HostedWizardBody({
   return (
     <DialogContent
       opener={opener}
-      className="max-h-full"
       onEscapeKeyDown={(event) => {
         // 다시 만들 수 없는 값 앞에서 Esc 의 올바른 뜻은 무반응이다.
         if (holdingSecret || busy) event.preventDefault();
@@ -544,6 +547,15 @@ function HostedWizardBody({
         <WizardActions
           screen={screen}
           connection={connection}
+          // 몸통이 아직 아무 화면도 아닌 두 구간 (design-review M3-a). 고른
+          // 연결의 상태를 못 읽는 동안 `resolveScreen` 은 1단계를 답하고
+          // (연결이 `null` 이므로 `hostedWizardStep` 이 "identity" 다), 몸통은
+          // 그것을 스켈레톤/오류 배너로 덮는데 푸터만 덮이지 않아
+          // 「연결 만들기」가 스켈레톤 아래에 섰다. 이미 있는 연결을
+          // 이어서 열었을 뿐인데 새로 만들라고 권하는 것은 명부에 쌍둥이
+          // 전용 에이전트를 남기라는 말이고, 그것이 PickerScreen 이 애초에
+          // 존재하는 이유다.
+          unsettled={detailLoading || detailError !== null}
           holdingSecret={holdingSecret}
           offline={offline}
           busy={busy}
@@ -640,11 +652,28 @@ function StepRail({ current }: { current: number }) {
             <li key={step.id} className="shrink-0">
               <span
                 aria-current={state === "current" ? "step" : undefined}
+                // 세 상태를 가르는 것은 **바탕**이지 글자의 불투명도가 아니다
+                // (design-review H1). 아직 오지 않은 단계는 `opacity-50` 으로
+                // 흐렸고, 그것이 --ink-muted 를 --surface-raised 위에서 라이트
+                // 2.1:1 / 다크 2.5:1 로 합성했다 — 이 진행 표시는 컨트롤이 아니라
+                // **읽으라고 세운 문장**이라 WCAG 의 비활성 컨트롤 면제가 닿지
+                // 않는 자리이고, 그래서 이 클라이언트가 스스로 지키는 AA 아래로
+                // 내려간 유일한 글자가 하필 "앞으로 무엇을 하게 되는가"였다.
+                //
+                // PluginSection 의 결정 버튼이 같은 자리에서 이미 답을 냈다
+                // (MOMO-642 R1 H-1): 흐리게 하는 대신 **강조를 거둔다**. 여기서
+                // 거둘 강조는 바탕이므로, 지나온 단계는 조용한 중립 바탕에
+                // 앉히고 아직 오지 않은 단계는 바탕 없이 세운다. 글자는 세
+                // 상태 모두 토큰 그대로라 합성이 일어나지 않고, 세 쌍
+                // (--ink x --accent-soft · --ink-muted x --surface-hover ·
+                // --ink-muted x --surface-raised) 전부 tokens.contrast 가 이미
+                // 재고 있다 — 합성된 불투명도는 어떤 테스트도 볼 수 없지만 이
+                // 셋은 회귀하면 잡힌다.
                 className={cn(
                   "flex items-center gap-1 rounded-sm px-2 py-px text-timestamp",
                   state === "current" && "bg-accent-soft text-ink",
-                  state === "done" && "text-ink-muted",
-                  state === "todo" && "text-ink-muted opacity-50"
+                  state === "done" && "bg-surface-hover text-ink-muted",
+                  state === "todo" && "text-ink-muted"
                 )}
                 data-testid="hosted-step-chip"
                 data-step-state={state}
@@ -660,12 +689,25 @@ function StepRail({ current }: { current: number }) {
   );
 }
 
-function StepHeading({ step }: { step: HostedWizardStep }) {
+function StepHeading({
+  step,
+  connection = null,
+}: {
+  step: HostedWizardStep;
+  /**
+   * 5단계에서만 읽는다. 그 단계는 자기 자리에 머문 채 끝나므로, 활성이 된 뒤에도
+   * 「provider 설정의 값을 바꿔야 한다」가 그대로 서 있으면 이미 끝난 교체를 앞으로
+   * 할 일처럼 지시하게 된다.
+   */
+  connection?: HostedAgentConnection | null;
+}) {
   const spec = hostedStepSpec(step);
   return (
     <div className="flex min-w-0 flex-col gap-1">
       <h3 className="break-keep text-body font-semibold text-ink">{spec.title}</h3>
-      <p className="break-keep text-meta text-ink-muted">{spec.purpose}</p>
+      <p className="break-keep text-meta text-ink-muted">
+        {hostedStepPurpose(step, connection)}
+      </p>
     </div>
   );
 }
@@ -1164,7 +1206,7 @@ function ActivationStep({
 
   return (
     <div className="flex min-w-0 flex-col gap-6">
-      <StepHeading step="activation" />
+      <StepHeading step="activation" connection={connection} />
       {issued !== null ? (
         <OneTimeSecretCard
           headline={ACTIVE_REVEAL_HEADLINE}
@@ -1236,6 +1278,7 @@ function ActivationStep({
 function WizardActions({
   screen,
   connection,
+  unsettled,
   holdingSecret,
   offline,
   busy,
@@ -1250,6 +1293,8 @@ function WizardActions({
 }: {
   screen: WizardScreen;
   connection: HostedAgentConnection | null;
+  /** 몸통이 스켈레톤이거나 오류 배너다. 이 푸터는 그 위에 결정을 세우지 않는다. */
+  unsettled: boolean;
   holdingSecret: boolean;
   offline: boolean;
   busy: boolean;
@@ -1270,6 +1315,12 @@ function WizardActions({
         값을 옮긴 뒤 저장했습니다를 누르면 이어서 진행합니다.
       </p>
     );
+  }
+
+  // 몸통이 정착하기 전에는 나가는 길만 세운다 (design-review M3-a). 단계 액션은
+  // 전부 "지금 어느 단계인가"에 매여 있는데, 그 답이 아직 없기 때문이다.
+  if (unsettled) {
+    return <CloseAction busy={busy} onClose={onClose} />;
   }
 
   const regen = regenerateGate(connection);
@@ -1302,9 +1353,7 @@ function WizardActions({
             {regen.blockedCopy}
           </p>
         ))}
-      <Button type="button" variant="outline" size="sm" onClick={onClose} data-testid="hosted-close">
-        닫기
-      </Button>
+      <CloseAction busy={busy} onClose={onClose} />
       {screen === "identity" && (
         <Button
           type="button"
@@ -1336,5 +1385,40 @@ function WizardActions({
         </Button>
       )}
     </>
+  );
+}
+
+/**
+ * 나가는 길. **값을 만드는 요청이 떠 있는 동안은 잠긴다** (design-review M3-b).
+ *
+ * Esc 와 바깥 클릭은 `busy` 동안 이미 막혀 있었는데(`onEscapeKeyDown`), 같은 순간
+ * 이 버튼만 살아 있었다. 그 틈은 이 표면에서 가장 비싼 종류다: create 가 날아가는
+ * 중에 닫으면 다이얼로그가 언마운트되고, 한 박자 뒤에 도착하는 연결 값은 언마운트
+ * 정리(`purgeHostedCredentials`)가 아무도 보지 못한 채 버린다. 서버는 원문을
+ * 보관하지 않으므로 그 값은 되찾을 수 없고, 사람에게 남는 것은 화면에 한 번도
+ * 뜨지 않은 `pairing_pending` 연결 하나다.
+ *
+ * 그래서 세 출구(Esc · 바깥 클릭 · 이 버튼)가 같은 조건을 본다. 잠긴 이유는 바로
+ * 옆 주 버튼이 스피너와 「만드는 중」으로 이미 말하고 있으므로 문장을 더하지
+ * 않는다. 여기서 `opacity-50` 은 H1 이 지적한 자리와 다르다: 이것은 읽으라고 세운
+ * 문장이 아니라 지금 누를 수 없는 **컨트롤**이고, 이 푸터의 다른 세 컨트롤이 이미
+ * 같은 표시를 쓴다.
+ */
+function CloseAction({ busy, onClose }: { busy: boolean; onClose: () => void }) {
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      size="sm"
+      aria-disabled={busy || undefined}
+      className={cn(busy && "opacity-50")}
+      onClick={() => {
+        if (busy) return;
+        onClose();
+      }}
+      data-testid="hosted-close"
+    >
+      닫기
+    </Button>
   );
 }

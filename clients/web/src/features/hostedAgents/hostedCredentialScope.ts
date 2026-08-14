@@ -6,7 +6,9 @@ import {
 import {
   parseHostedConnection,
   parseHostedConnections,
+  type HostedAgentConnection,
 } from "@momo/core/features/hostedAgents/model";
+import { hostedAwaitsRemoteEvent } from "@momo/core/features/hostedAgents/wizard";
 import { fetchWorkspace } from "@momo/core/features/settings/api";
 
 // =============================================================================
@@ -72,19 +74,34 @@ export function hostedConnectionQueryKey(
 /**
  * 단건 쿼리 옵션. 같은 이유로 모듈 스코프에서 만든다.
  *
- * @param polling 지금 남의 프로세스를 기다리는 중인가. 기다리지 않을 때까지 계속
- *   되묻는 것은 서버에게도 사람에게도 소음이라, 대기 구간에서만 켠다.
+ * @param reachable 지금 서버에 닿을 수 있는가. 오프라인이면 되물을 상대가 없다.
+ *
+ * 되묻는 **구간**은 인자가 아니라 쿼리 자신이 정한다. 그 판단의 근거는 방금 받은
+ * 서버 상태이고, 그것을 호출부가 대신 계산하면 한 박자 묵은 답으로 다음 간격을
+ * 정하게 된다: 감지가 도착한 렌더에서도 화면은 아직 이전 상태를 들고 있으므로,
+ * 이미 끝난 대기를 위해 한 번 더 두드리거나 막 시작된 대기를 한 박자 놓친다.
+ * `refetchInterval` 을 함수로 두면 react-query 가 **매 간격마다** 최신 캐시를
+ * 들고 다시 물어본다.
+ *
+ * 이 클로저가 렌더 스코프를 붙잡지 않는다는 것이 이 파일의 규율이고, 여기서도
+ * 지켜진다: 이 함수는 모듈 스코프에 있고 클로저가 잡는 것은 자기 인자
+ * (`reachable`) 하나이며, 판단은 코어에서 import 한 순수 함수가 한다.
  */
 export function hostedConnectionQuery(
   workspaceId: string,
   connectionId: string,
-  polling: boolean
+  reachable: boolean
 ) {
   return {
     queryKey: hostedConnectionQueryKey(workspaceId, connectionId),
     queryFn: async () =>
       parseHostedConnection(await getHostedConnection(workspaceId, connectionId)),
-    refetchInterval: polling ? HOSTED_POLL_MS : (false as const),
+    refetchInterval: reachable
+      ? (query: { state: { data?: HostedAgentConnection } }) =>
+          hostedAwaitsRemoteEvent(query.state.data ?? null)
+            ? HOSTED_POLL_MS
+            : (false as const)
+      : (false as const),
     retry: false,
   };
 }

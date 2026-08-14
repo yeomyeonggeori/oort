@@ -98,6 +98,31 @@ export function hostedStepSpec(step: HostedWizardStep): HostedWizardStepSpec {
   return (found ?? HOSTED_WIZARD_STEPS[HOSTED_WIZARD_STEPS.length - 1]) as HostedWizardStepSpec;
 }
 
+/** 5단계가 이미 끝난 자리의 같은 한 문장. 교체는 과거형이고, 남은 것은 확인이다. */
+export const HOSTED_ACTIVATION_DONE_PURPOSE =
+  "자격증명 교체가 끝났고 첫 증명도 성공했습니다. 승인한 채널에서 한 번 불러 확인하세요.";
+
+/**
+ * 제목 아래에 서는 한 문장. 5단계에서만 서버 상태를 함께 본다.
+ *
+ * `HOSTED_WIZARD_STEPS` 의 문장은 **아직 하지 않은 일**을 말한다. 5단계는 이
+ * 마법사에서 유일하게 자기 자리에 머문 채 끝나는 단계라(`activation` 은 증명
+ * 대기와 활성 둘 다이다), 그 문장이 활성 화면에도 그대로 서면 이미 끝난 교체를
+ * 앞으로 할 일처럼 지시한다. 사람은 방금 바꾼 provider 설정을 한 번 더 바꾸러
+ * 간다.
+ *
+ * 나머지 단계에는 이 갈림이 없다: 각자 다음 단계가 열리면 화면을 떠난다.
+ */
+export function hostedStepPurpose(
+  step: HostedWizardStep,
+  connection: HostedAgentConnection | null
+): string {
+  if (step === "activation" && connection?.status === "active") {
+    return HOSTED_ACTIVATION_DONE_PURPOSE;
+  }
+  return hostedStepSpec(step).purpose;
+}
+
 /**
  * 지금 서 있는 단계.
  *
@@ -133,6 +158,29 @@ export function awaitingProof(connection: HostedAgentConnection | null): boolean
     connection.status === "detected" &&
     connection.activeCredentialId !== undefined
   );
+}
+
+/**
+ * 지금 이 연결이 **남의 프로세스가 일으킬 사건**을 기다리는가.
+ *
+ * 되묻기(폴링)의 유일한 근거다. 이 흐름에서 그런 자리는 정확히 둘이고, 머리말이
+ * 세는 그 둘과 같다:
+ *
+ *   1. `pairing_pending` — 상대 에이전트의 **다이얼인**을 기다린다
+ *   2. `detected` + 자격증명 발급됨 — 그 에이전트의 **증명**을 기다린다
+ *
+ * 나머지는 기다릴 상대가 없다. 승인 화면(`detected` 이고 자격증명 전)에서 다음
+ * 수를 두는 것은 화면 앞의 사람이고, `active` 는 도착한 상태이며, `expired` 와
+ * 해제 계열은 사람이 손을 대야 움직인다. 이 함수가 따로 있는 이유가 그것이다:
+ * "연결을 하나 골랐는가"로 되물으면 활성 연결을 열어 둔 탭이 아무도 기다리지
+ * 않는 사건을 위해 5초마다 서버를 두드린다.
+ */
+export function hostedAwaitsRemoteEvent(
+  connection: HostedAgentConnection | null
+): boolean {
+  if (connection === null) return false;
+  if (connection.status === "pairing_pending") return true;
+  return awaitingProof(connection);
 }
 
 // ---- 게이트 -----------------------------------------------------------------

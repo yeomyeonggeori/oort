@@ -108,10 +108,48 @@ describe("쿼리 옵션", () => {
     expect(hostedListQuery(WS).retry).toBe(false);
   });
 
-  it("기다리는 구간에서만 되묻는다", () => {
-    expect(hostedConnectionQuery(WS, CONNECTION, true).refetchInterval).toBe(
-      HOSTED_POLL_MS
-    );
+  // 되묻는 **구간**은 호출부가 아니라 쿼리 자신이 정한다: 근거가 방금 받은 서버
+  // 상태이기 때문이다. 그래서 `refetchInterval` 은 숫자가 아니라 캐시를 읽는
+  // 함수이고, 아래 셋이 그 함수가 무엇을 보는지 잰다 (design-review M4).
+  const intervalFor = (status: string, extra: object = {}) => {
+    const option = hostedConnectionQuery(WS, CONNECTION, true).refetchInterval;
+    if (typeof option !== "function") throw new Error("expected a predicate");
+    return option({
+      state: {
+        data: {
+          id: CONNECTION,
+          agentMemberId: "00000000-0000-7000-8000-0000000000a1",
+          status,
+          authMode: "static_bearer",
+          audience: "/v1/mcp/agent-port",
+          approvedChannelIds: [],
+          approvedScopes: [],
+          createdAtMs: 0,
+          updatedAtMs: 0,
+          ...extra,
+        },
+      },
+    } as never);
+  };
+
+  it("남의 프로세스를 기다리는 두 구간에서만 되묻는다", () => {
+    expect(intervalFor("pairing_pending")).toBe(HOSTED_POLL_MS);
+    expect(
+      intervalFor("detected", {
+        activeCredentialId: "00000000-0000-7000-8000-0000000000e1",
+      })
+    ).toBe(HOSTED_POLL_MS);
+  });
+
+  it("사람이 결정 중이거나 이미 도착한 자리에서는 조용하다", () => {
+    // 승인 화면(`detected` 이고 자격증명 전)과 활성. 앞 판은 "연결을 하나
+    // 골랐는가"로 물어서 이 둘에서도 5초마다 두드렸다.
+    expect(intervalFor("detected")).toBe(false);
+    expect(intervalFor("active")).toBe(false);
+    expect(intervalFor("expired")).toBe(false);
+  });
+
+  it("오프라인이면 구간과 무관하게 되묻지 않는다", () => {
     expect(hostedConnectionQuery(WS, CONNECTION, false).refetchInterval).toBe(false);
   });
 });

@@ -4139,7 +4139,15 @@ function hostedConnection(overrides = {}) {
 async function captureHostedPairingScenes(browser, scheme) {
   const shots = [];
 
-  async function shoot(name, install, settle) {
+  /**
+   * 한 상태를 세우고 프레임을 찍는다.
+   *
+   * `frames` 는 첫 프레임 **뒤에** 같은 페이지에서 이어 찍는 [이름, 동작] 쌍이다.
+   * 이 다이얼로그의 몸통은 자기 스크롤 상자라(`overflow-y-auto`), 한 장에 들어가지
+   * 않는 화면은 한 장으로 리뷰될 수 없다: 접힌 아래는 존재하지 않는 것처럼 보이고,
+   * 리뷰는 자기가 보지 못한 것을 지적하지 못한다.
+   */
+  async function shoot(name, install, settle, frames = []) {
     const context = await browser.newContext({
       viewport: VIEWPORT,
       deviceScaleFactor: 2,
@@ -4154,10 +4162,18 @@ async function captureHostedPairingScenes(browser, scheme) {
     await page.evaluate('location.hash = "/agents"');
     await page.getByTestId("agent-hub-hosted-pairing").click();
     await page.getByTestId("hosted-agent-wizard").waitFor({ state: "visible" });
-    await settle(page);
-    const path = `${OUT_DIR}/hosted-pairing-${name}-${scheme}.png`;
-    await page.screenshot({ path });
-    shots.push(path);
+    await settle(page, context);
+
+    const frame = async (suffix) => {
+      const path = `${OUT_DIR}/hosted-pairing-${suffix}-${scheme}.png`;
+      await page.screenshot({ path });
+      shots.push(path);
+    };
+    await frame(name);
+    for (const [suffix, act] of frames) {
+      await act(page, context);
+      await frame(suffix);
+    }
     await context.close();
   }
 
@@ -4205,7 +4221,14 @@ async function captureHostedPairingScenes(browser, scheme) {
     await page.getByTestId("hosted-detecting-empty").waitFor({ state: "visible" });
   });
 
-  // 4단계. 사람이 채널과 권한을 고르는 자리. 잠긴 줄과 결과 문장이 함께 보인다.
+  // 4단계. 사람이 채널과 권한을 고르는 자리 — 이 마법사에서 유일하게 되돌릴 수 없는
+  // 결정이고, 그래서 두 프레임을 갖는다 (design-review M2).
+  //
+  // 첫 프레임은 사실 표와 보안 문장, 채널 목록의 머리에서 끝난다. 사람이 「이 범위로
+  // 승인」을 누르기 전에 실제로 읽어야 하는 셋은 전부 그 아래에 있었다: 끌 수 없는
+  // 접속 권한 줄, 사유를 달고 선 1:1 대화 줄, 그리고 고른 것 전체가 무슨 뜻인지
+  // 말하는 결과 문장. 접힌 아래가 리뷰에 한 번도 오르지 않으면 이 화면의 규율 셋
+  // (approval.ts 머리말)은 코드에만 있고 증거에는 없다.
   await shoot(
     "approval",
     listWith(hostedConnection({ status: "detected" })),
@@ -4217,7 +4240,37 @@ async function captureHostedPairingScenes(browser, scheme) {
         .getByRole("checkbox")
         .first()
         .check();
-    }
+    },
+    [
+      // 두 장으로 나누는 것은 취향이 아니라 실측이다. 1280x800 에서 이 몸통의
+      // 스크롤 창은 ~506px 이고, 잠긴 접속 줄부터 결과 문장까지가 ~614px 다.
+      // 한 장에 담으려면 뷰포트를 리뷰 기준보다 키워야 하는데, 그렇게 찍은 그림은
+      // 아무도 쓰지 않는 창에서만 참인 배치를 보여준다. 겹치게 두 장을 찍으면
+      // 리뷰 기준 그대로이면서 접힌 아래가 빠짐없이 오른다.
+      [
+        // 자격 없는 줄이 **사유를 달고 서 있는가** (approval.ts 규율 2). 자격 없는
+        // 줄은 뒤로 모이므로(`channelApprovalChoices`) 그 첫 줄을 스크롤 창의 머리에
+        // 붙이면 1:1 대화 줄과 잠긴 접속 권한 줄이 한 화면에 함께 선다.
+        "approval-scopes",
+        async (page) => {
+          await page
+            .locator('[data-testid="hosted-channels-row"][data-choice-disabled]')
+            .first()
+            .evaluate((el) => el.scrollIntoView({ block: "start" }));
+          await page.getByTestId("hosted-scopes").waitFor({ state: "visible" });
+          await page.waitForTimeout(200);
+        },
+      ],
+      [
+        // 결과 문장은 몸통의 **마지막** 블록이라, 그것을 시야에 넣는 것이 곧 바닥까지
+        // 스크롤하는 것이다. 권한 목록의 꼬리와 「저장한 뒤」 주의가 함께 선다.
+        "approval-consequence",
+        async (page) => {
+          await page.getByTestId("hosted-consequence").scrollIntoViewIfNeeded();
+          await page.waitForTimeout(200);
+        },
+      ],
+    ]
   );
 
   // 5단계 앞면. 승인은 끝났고 증명이 아직 안 왔다.
@@ -4287,6 +4340,43 @@ async function captureHostedPairingScenes(browser, scheme) {
       ),
     (page) =>
       page.getByTestId("hosted-wizard-list-error").waitFor({ state: "visible" })
+  );
+
+  // 오프라인 (SKILL §5의 넷째 상태, design-review M2). 앞의 셋(빈·로딩·오류)은
+  // 이미 이 레인에 있었고 이것만 없었다.
+  //
+  // 이 표면에서 오프라인은 「아무것도 못 한다」가 아니라 **읽기와 쓰기가 갈리는**
+  // 자리라, 그림으로만 확인되는 것이 있다: 마지막으로 받은 상태(사실 표·잠긴 줄·
+  // 결과 문장)는 그대로 읽히는데 값 발급과 승인만 물러난다. 그 둘이 한 화면에
+  // 함께 서는지는 배너 한 줄로는 알 수 없다.
+  //
+  // 4단계를 고른 이유가 그것이다: 이 마법사에서 오프라인이 실제로 막는 결정이
+  // 사는 유일한 화면이고, 「이 범위로 승인」이 물러난 자리에 그 결정의 근거가
+  // 전부 남아 있어야 한다. 레일의 `disconnected`는 종단 절단에서만 오므로
+  // (useOffline), 채널 만들기 레인과 같이 브라우저 신호를 실제로 끊는다.
+  await shoot(
+    "offline",
+    listWith(hostedConnection({ status: "detected" })),
+    async (page, context) => {
+      await page.getByTestId("hosted-wizard-resume").click();
+      await page.getByTestId("hosted-consequence").waitFor({ state: "visible" });
+      await context.setOffline(true);
+      await page.getByTestId("hosted-wizard-offline").waitFor({ state: "visible" });
+      await page.waitForTimeout(200);
+    },
+    [
+      // 같은 이유로 여기도 접힌 아래를 본다. 오프라인에서 재야 하는 것이 정확히
+      // 이 대비이기 때문이다: 푸터의 「이 범위로 승인」은 물러났는데(푸터는 어느
+      // 프레임에서나 보인다) 그 버튼이 무엇을 저장하려던 것인지 말하는 결과
+      // 문장과 권한 목록은 흐려지지 않고 그대로 읽힌다.
+      [
+        "offline-consequence",
+        async (page) => {
+          await page.getByTestId("hosted-consequence").scrollIntoViewIfNeeded();
+          await page.waitForTimeout(200);
+        },
+      ],
+    ]
   );
 
   // 로딩. 목록 요청을 영영 붙잡아 스켈레톤이 화면에 남게 한다.

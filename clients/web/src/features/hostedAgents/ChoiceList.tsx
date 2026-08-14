@@ -132,8 +132,11 @@ export function ChoiceList({
           );
         })}
       </div>
+      {/* live region 이 아니다. 이 문장은 그룹을 설명하며 처음부터 거기 있고 바뀌지
+          않으므로, `role="status"` 는 알릴 것이 없는 자리에 폴라이트 announce 를
+          하나 더 만들 뿐이다. 읽히는 길은 이미 `aria-describedby` 다. */}
       {hint && (
-        <p id={hintId} role="status" className="break-keep text-meta text-ink-muted">
+        <p id={hintId} className="break-keep text-meta text-ink-muted">
           {hint}
         </p>
       )}
