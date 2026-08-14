@@ -1,5 +1,23 @@
 # oort 기획 현재 상태 (Planning Current State)
 
+> **2026-08-14 스냅샷 37 (Opus 5 단발 워커 · engine — #1367 HAP-E6 원자적 disconnect + cleanup-confirmed terminal, 로컬 동결).** 스냅샷 36을 supersede한다.
+>
+> **활성 goal #1367:** native blocker #1364/#1365(및 랜딩된 #1366)가 닫혀 HAP-E6를 claim했다. worktree/branch는 `feat/1367-hap-e6-engine-atomic-hosted-agent-disconnect-cleanup-confirmed-terminal`, base는 `track/engine@7a52c4c2`(#1366 squash 랜딩). 마이그레이션은 **072**(`check_migration_numbers.sh` 72 PASS).
+>
+> **경계 요약:** disconnect 시작은 `detected|active → cleanup_pending` **단일 tenant transaction**이다 — 이 커넥션 한정 bearer revoke + 전용 agent pause + 열린 gateway job 억제(lease 회수 포함) + 종류별 artifact manifest seed + audit 1행이 전부이거나 전부 롤백. terminal `disconnected`는 required artifact 전부 resolved **그리고** 로컬 절반(live credential 0 + paused)이 서버 판독으로 확인될 때 정확히 한 번. 재시도/재생은 멱등이며 audit을 증폭하지 않는다.
+>
+> **manifest 결정(#1344 실측이 스키마가 된 지점):** jsonb가 아니라 **행**이다 — 6종 seed 행 + 명명 항목별 행, 각각 expected action·current status·disposition·source·actor·acknowledged-at·evidence. `resolved`는 `disposition`만으로 계산되는 generated column이라 결정 없이 결론만 쓸 수 없다. connector 해제는 `local_plugin_files`를 자동 충족하지 않고, inactive routine은 `current_status`일 뿐 resolved가 아니며, `bot`만 `preserved`가 합법 terminal이다(chat history 자동 삭제 금지). `server_verified`는 seed된 `secret` 행 하나에만 CHECK로 허용되고(이 서버가 직접 revoke한 유일 artifact), 나머지는 actor+evidence를 요구하는 `manual`이며 라우트가 request body에서 `source`를 읽지 않는다.
+>
+> **잠금 순서(E4 계약 준수, #1374와 정합):** 신규 transaction도 `connection → token → member → membership → profile`. revoke는 `hosted_connection_id` 한정이라 형제 커넥션 토큰을 회수하지 않는다 — prove 경로의 `invalidate_hosted_lifecycle_in_tx`는 **건드리지 않았고**(#1374 소유), 대신 커넥션 한정 `reconcile_*` 두 함수를 새로 만들었다. tool/gateway/inbox는 이미 커넥션을 `FOR SHARE`로 잡으므로 disconnect의 `FOR UPDATE`가 대기·직렬화된다(race 시나리오 실측).
+>
+> **화해(만료·emergency revoke) 진입점 2개:** bearer resolution이 revoked/expired로 조기 거절하는 경로와, member 정지/membership 상실로 proof가 실패하는 경로 둘 다 같은 fail-closed tx로 `cleanup_pending`까지 맞춘다. 발동 조건은 제시된 자격증명이 커넥션의 **현재 active token**일 때뿐이라 폐기된 토큰으로 살아 있는 커넥션을 끌어내릴 수 없다.
+>
+> **게이트 개방(E5 이관분 종결):** `MOMO_HOSTED_DELIVERY_ENABLED`의 `#[cfg(debug_assertions)]`를 제거했다. release도 읽지만 기본값 closed·정확히 소문자 `true` 한 철자만 개방·직접 구성 override 유지. 프로덕션 활성화는 이제 이 수명주기를 근거로 한 운영자 결정이다.
+>
+> **실측:** 신규 `scripts/verify_hosted_disconnect.sh`(#1366 소유권 계약 동일: nonce label·janitor label·external DATABASE_URL 거부·trap cleanup·3상태 부재 증명·`--verify-cleanup-contract`)가 PG18에서 8 시나리오 PASS. `verify_agent_port_tools.sh`(E5)·`verify_hosted_agent_inbox.sh`(E4)·`verify_agent_port.sh`(E2/E3) 최종 트리 재실행 PASS, Docker 잔존 0. E5/E4 fixture 중 `disconnected`를 직접 조작하던 2곳은 072 트리거가 거절하므로 로컬 절반을 실제 수행한 뒤 전이하도록 고쳤다 — 그 자체가 불변식의 증거다. 워크스페이스 clippy `-D warnings`·전체 테스트 GREEN, 로컬 docs gate는 base-inherited RED(#1376)라 미실행.
+>
+> **다음 행동:** Fable 기획검수 → sol 독립 freeze 리뷰(exact commit C/H/M=0) → push/PR(track/engine; `local_gate.sh` 접촉이므로 policy audit 코멘트+라벨 흐름) → PR CI → 머지. **E6 랜딩 = E1~E6 라이브 배포 창 개방 조건**(배포 시 pending job 백로그 점검 선행). 워커는 로컬 commit 동결까지만 수행했다.
+>
 > **2026-08-14 스냅샷 36 (Opus 5 단발 워커 · engine — #1366 HAP-E5 MCP tool surface + per-agent hosted delivery, 로컬 동결).** 스냅샷 35를 supersede한다.
 >
 > **활성 goal #1366:** native blocker #1364/#1365가 닫혀 HAP-E5를 claim했다. worktree/branch는 `feat/1366-hap-e5-engine-thin-bind-mcp-inbox-conversation-gateway-tools`, base는 `track/engine@aa40e4c63d5b5e96b7461881ef82a1372b2ae35b`(#1365 랜딩)다. Agent Port에 8개 thin-binding tool과 agent별 managed/hosted delivery selector를 열었고, 두 번째 message/job SoT는 만들지 않았다.
