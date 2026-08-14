@@ -227,7 +227,11 @@ async fn dnd_is_durable_and_survives_a_reconnect() {
         set.expect("a live human member updated").status,
         PresenceStatus::Dnd
     );
-    assert_eq!(stored_presence(&su, human).await, "dnd", "the write is durable");
+    assert_eq!(
+        stored_presence(&su, human).await,
+        "dnd",
+        "the write is durable"
+    );
 
     // The reconnect: a brand-new tenant transaction re-reads the durable column
     // and still finds dnd. This is the whole of D2 — a reconnect must not clear
@@ -318,7 +322,11 @@ async fn a_status_change_broadcasts_only_to_the_members_channels() {
         !hit_channels.contains(&ch_outsider.id),
         "a channel the member is not in must never carry their presence (roster boundary)"
     );
-    assert_eq!(broadcasts.len(), 2, "no broadcast leaks past the two channels");
+    assert_eq!(
+        broadcasts.len(),
+        2,
+        "no broadcast leaks past the two channels"
+    );
 
     for (partition, channel_name, member_token, status) in &broadcasts {
         assert_eq!(channel_name, &cent_channel(workspace, *partition));
@@ -349,9 +357,9 @@ async fn the_roster_carries_human_presence_and_not_agent_presence() {
     .expect("set viewer dnd");
 
     let roster = with_tenant_tx(&app, workspace, move |conn| {
-        Box::pin(async move {
-            list_workspace_roster(conn, workspace, viewer, false, None, 200).await
-        })
+        Box::pin(
+            async move { list_workspace_roster(conn, workspace, viewer, false, None, 200).await },
+        )
     })
     .await
     .expect("roster");
