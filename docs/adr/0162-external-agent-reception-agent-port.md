@@ -1,6 +1,7 @@
 # ADR-0162: 외부 호스팅 에이전트 수용 — Agent Port와 pairing lifecycle
 
 - Status: **Accepted** (2026-08-12 · 성재가 제품 방향과 D1~D8의 벤더 중립 기술 경계를 승인)
+- 증보: **증보 1 — OAuth lifecycle (2026-08-15, HAP-E7 #1368) · Accepted (성재 승인 2026-08-15).** Accept는 D4/D6의 OAuth 경계를 승인한 것이지 flag 개방이 아니다 — 구현은 여전히 feature flag로 완전히 닫혀 있고(metadata 미광고·모든 route 404) static bearer 경로는 byte 동일하며, flag를 여는 것은 #1369 랜딩과 runtime proof 폐곡선 뒤의 별도 운영 결정이다.
 - 관련: ADR-0100(결정 거버넌스), ADR-0101(에이전트 신원·bearer), ADR-0102(worker/gateway 실행 경로), ADR-0130(외부 에이전트 fabric·ACP), ADR-0145(Rust/Axum), ADR-0150(대화 반출 경계)
 - 리서치: `docs/planning/research/2026-08-12-grok-bot-integration-feasibility.md`, `docs/planning/research/2026-08-12-grok-bot-reverse-teammate-direction.md`, `docs/planning/research/2026-08-12-external-agent-reception-audit.md`
 - 제품 문장: **Bring your hosted agent.** Grok Bot은 첫 setup preset이자 실증 클라이언트이며, 코어 계약은 벤더 중립이다.
@@ -169,6 +170,60 @@ Grok preset은 다음만 제공한다.
 - routine/MCP connector/local plugin source 제거 체크리스트
 
 #1344에서 private custom-MCP transport와 manual routine 실행은 실측했지만 auth/pairing/tool call/full E2E는 아직 닫히지 않았다. 그 폐곡선 전에는 “즉시”, “seamless”, 최소 응답 시간 같은 표현을 쓰지 않는다. 검증 뒤 런칭 카피는 **“Bring your hosted agent”**, 보조 문장은 **“Grok Bot도 몇 단계로 연결할 수 있습니다”**로 제한한다.
+
+## 증보 1 — OAuth lifecycle (Accepted · 성재 승인 2026-08-15 · HAP-E7 #1368)
+
+> D4는 connection별 `oauth | static_bearer` authority를 허용했지만 D6의 lifecycle은 static pairing만 상세 봉인했다. 이 증보는 `oauth` arm의 상태 전이, authorization request의 connection 결속, 그리고 세 credential의 상호 비승격을 봉인한다. 이 증보의 Accept는 그 경계를 승인한 것이지 flag 개방이 아니다: **구현은 #1369 consent UX 랜딩과 runtime proof 폐곡선 전까지 flag로 닫힌 채 랜딩한다** — metadata를 광고하지 않고 `/v1/oauth/*`는 404이며 static bearer 경로는 flag on/off에서 byte 동일하다(테스트로 고정).
+
+### A1. `oauth` connection의 canonical lifecycle
+
+```text
+pairing_pending ──human owner/admin consent (authorization code 발급)──> detected
+      │                                          │
+      │ (denial은 전이 없음)                      │ token exchange: code 1회 소비
+      │                                          │ + PKCE proof + exact audience 검증
+      │                                          │ + dedicated member unpause  (한 transaction)
+      v                                          v
+   expired                                     active ──disconnect──> cleanup_pending ──> disconnected
+```
+
+- `oauth` connection은 static pairing challenge를 **갖지 않는다**. `pairing_pending`은 "authorization을 기다리는 중"이라는 뜻이며 `pairing_challenge_hash`는 NULL이다(migration 073이 auth_mode별로 shape를 분리 강제).
+- `detected`는 D6에서 Bot의 handshake가 만드는 상태였다. OAuth arm에서 그 자리를 차지하는 것은 **로그인한 human owner/admin의 exact consent**다. 같은 transaction이 `confirmed_by`/`confirmed_at`/`approved_scopes`/`approved_channel_ids`와 authorization code digest를 함께 쓴다. consent만으로는 capability가 0이고 dedicated member는 계속 `paused=true`다.
+- `detected → active`의 "별도 active proof"는 **client가 PKCE verifier를 쥐고 있다는 사실**이다. token exchange transaction이 code를 1회 소비하고, exact canonical resource/audience를 재확인하고, access/refresh credential을 발급하고, `active_token_id`를 걸고, dedicated member의 pause를 함께 해제한다. 하나라도 실패하면 전부 롤백한다.
+- disconnect·cleanup·terminal은 D7과 **완전히 동일**하다. OAuth arm에 별도 terminal 경로를 만들지 않는다.
+
+### A2. authorization request는 server-minted id로 결속한다
+
+- `GET /v1/oauth/authorize`는 unauthenticated browser redirect다. 따라서 **아무 row도 쓰지 않는다**. 등록된 client·redirect URI·resource·PKCE·scope를 검증한 뒤 server가 서명한 단기 opaque envelope(nonce 포함)만 consent 화면에 넘긴다. unauthenticated endpoint가 ledger를 키우지 못하게 하는 것이 이 선택의 이유다.
+- workspace·connection·human은 envelope의 반대편, **인증된 tenant-scoped consent API**에서 결정된다. 결속 대상은 그 workspace의 `pairing_pending`·`auth_mode='oauth'` connection이며, 결속을 고르는 주체는 client가 아니라 승인하는 사람이다.
+- terminal decision은 envelope nonce에 대해 **정확히 하나**다(`(workspace_id, request_nonce)` unique). duplicate approve, 늦은 deny, reload, 늦은 callback은 전부 inert하다.
+- provider가 보내는 어떤 값도 workspace/connection/scope를 고르지 못한다. client_id·redirect_uri는 **운영자 allowlist**에서만 온다.
+
+### A3. 세 credential은 서로 승격되지 않는다
+
+| credential | 수명 | 저장 | 무엇을 살 수 있나 |
+|---|---|---|---|
+| pairing challenge (`momo_pair_v1`) | 짧음, 1회 | digest | static arm의 `detected` 전이 **only** |
+| authorization code (`momo_oauth_code_v1`) | 60초, 1회 | digest | 한 번의 access+refresh 쌍 **only** |
+| access (`momo_oauth_at_v1`) | 30분 | digest | canonical Agent Port 요청 **only** |
+| refresh (`momo_oauth_rt_v1`) | 30일, 회전 | digest | 다음 access+refresh 쌍 **only** |
+
+- 저장 digest는 **envelope 전체**를 덮는다. 그래서 같은 secret bytes를 다른 prefix로 다시 라벨링하면 어떤 row와도 일치하지 않는다 — static bearer를 OAuth access로, refresh를 access로, code를 access로 제시하는 네 방향이 전부 산술적으로 막힌다.
+- credential class와 connection의 `auth_mode`는 **DB trigger로 일치를 강제**한다(migration 073). `oauth` connection에 static credential을, `static_bearer` connection에 OAuth credential을 만들 수 없다. 이것이 "OAuth 실패 뒤 static bearer로 자동 강등하지 않는다"를 관례가 아니라 스키마로 만드는 지점이다.
+- code replay와 refresh reuse는 실수가 아니라 침해 신호로 취급한다: 거절과 **같은 transaction**에서 그 connection의 live OAuth credential 전부를 revoke하고 bounded audit 1행을 남긴다. 이후 첫 Agent Port 호출이 HAP-E6의 화해 경로로 `cleanup_pending`을 만든다.
+
+### A4. authorization server의 정직성 상한
+
+- issuer와 canonical resource는 **운영자 설정에서만** 온다. `Host`·`Forwarded`·`X-Forwarded-*`는 어느 경로에서도 읽지 않는다(RFC 9207/9728의 요점).
+- 광고하는 것은 구현한 것뿐이다: `authorization_code`+`refresh_token`, `code`, `S256`, `none` client auth, revocation endpoint, RFC 9207 `iss`. **Dynamic Client Registration과 URL-form Client ID Metadata Document는 구현하지도 fetch하지도 광고하지도 않는다** — 두 기능이 여는 SSRF 표면은 별도 ADR과 threat model을 먼저 요구한다. `client_secret`은 발급도 수용도 하지 않는다.
+- consent가 발급할 수 있는 scope 상한은 D3의 immutable `HOSTED_AGENT_PORT_GRANTABLE_SCOPES`이며 static confirm과 **같은 validator**를 쓴다. 상한 밖(`work:control`·`realtime:subscribe`·`provider:quota:write` 및 미래 generic scope)과 이 요청이 요구하지 않은 scope는 code 발급 **전에** 거절하고, secret·digest 없는 bounded denial audit를 남긴다.
+- redirect query에 실리는 것은 `code`/`state`/`iss`(또는 `error`/`state`/`iss`) 뿐이다. access·refresh token, client secret, PKCE verifier는 URL·query·log·audit·evidence 어디에도 들어가지 않는다.
+
+### A5. 이 증보가 열지 않는 것
+
+- flag는 기본 닫힘이고, 여는 것은 이 증보의 Accepted + #1369 consent UX 랜딩 + runtime proof 뒤의 **운영자 결정**이다. 그 전에는 API/UI가 `oauth`를 선택지로 광고하지 않는다.
+- Grok preset의 OAuth 지원 여부는 여전히 미검증이며, 이 증보는 어떤 preset의 `auth_mode`도 바꾸지 않는다.
+- DCR·CIMD·client secret·introspection·device flow·다중 authorization server는 명시적 비목표다.
 
 ## 명시적 비목표
 
