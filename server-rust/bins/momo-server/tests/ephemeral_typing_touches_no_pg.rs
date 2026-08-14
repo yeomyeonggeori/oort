@@ -303,7 +303,9 @@ async fn the_availability_path_answers_with_no_database_at_all() {
     let published = &publishes[0];
     assert_eq!(
         published.body["channel"],
-        json!(momo_ephemeral::ephemeral_presence_channel(workspace, channel)),
+        json!(momo_ephemeral::ephemeral_presence_channel(
+            workspace, channel
+        )),
         "availability rides the presence namespace, never ch:/typing:"
     );
     assert_eq!(
@@ -316,8 +318,16 @@ async fn the_availability_path_answers_with_no_database_at_all() {
         json!(member.to_string().to_uppercase())
     );
     // Nothing ordered, nothing durable: same absences as the typing frame.
-    assert!(published.body["data"].get("seq").is_none(), "{}", published.body);
-    assert!(published.body.get("version").is_none(), "{}", published.body);
+    assert!(
+        published.body["data"].get("seq").is_none(),
+        "{}",
+        published.body
+    );
+    assert!(
+        published.body.get("version").is_none(),
+        "{}",
+        published.body
+    );
     assert!(
         published.body.get("idempotency_key").is_none(),
         "{}",
@@ -670,7 +680,10 @@ fn the_presence_namespace_keeps_no_history_in_every_environment() {
     let mut configs = Vec::new();
     collect_centrifugo_configs(&infra, &mut configs);
     configs.sort();
-    assert!(configs.len() >= 2, "dev and prod configs expected: {configs:?}");
+    assert!(
+        configs.len() >= 2,
+        "dev and prod configs expected: {configs:?}"
+    );
 
     for path in &configs {
         let raw = std::fs::read_to_string(path).expect("read config");
@@ -695,7 +708,12 @@ fn the_presence_namespace_keeps_no_history_in_every_environment() {
             "{}: a replayed online on reconnect is a ghost",
             path.display()
         );
-        assert_ne!(presence["force_recovery"], json!(true), "{}", path.display());
+        assert_ne!(
+            presence["force_recovery"],
+            json!(true),
+            "{}",
+            path.display()
+        );
         assert_eq!(
             presence["subscribe_proxy_enabled"],
             json!(true),
