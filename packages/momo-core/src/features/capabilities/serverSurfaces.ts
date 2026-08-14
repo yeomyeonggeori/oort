@@ -232,7 +232,8 @@ const SURFACES: Record<SurfaceId, ServerSurface> = {
       "POST/GET …/hosted-agent-connections, GET …/{connection}, " +
       "POST …/{connection}/pairing-challenge/regenerate, POST …/{connection}/confirm. " +
       "해제 3경로(disconnect, disconnect/complete, cleanup-artifacts/…/acknowledge)도 " +
-      "같은 자리에 있지만 이 표면의 진입점은 그것을 열지 않는다(UX2 / #1362 소유).",
+      "같은 자리에 등록돼 있고, HAP-UX2(#1362)가 에이전트 화면의 연결 탭에서 그 셋을 연다. " +
+      "일곱 경로가 한 배포로 함께 오르므로 이 칸 하나가 둘 다를 판정한다.",
   },
 };
 

@@ -4393,6 +4393,427 @@ async function captureHostedPairingScenes(browser, scheme) {
   return shots;
 }
 
+// =============================================================================
+// 호스티드 연결 해제와 정리 확인 (goal HAP-UX2 / #1362).
+//
+// 마법사 레인과 나란히 서지만 다른 표면이다: 여기는 다이얼로그가 아니라 에이전트
+// 상세의 「연결」 탭이고, 사람이 며칠에 걸쳐 오가는 장부다. 그래서 찍는 것도 단계가
+// 아니라 **장부의 상태**다.
+//
+// 픽스처가 일부러 중간값인 이유: 다 비었거나 다 찬 목록은 이 화면의 논지를 보여
+// 주지 못한다. #1344 의 교훈이 눈에 보이는 조합은 하나뿐이다 — 커넥터는 닫혔는데
+// 로컬 파일은 열려 있고, routine 은 「꺼짐」인 채로 미해결이며, 자격증명 한 줄만
+// 서버가 스스로 닫아 둔 상태.
+// =============================================================================
+const DISCONNECT_AGENT_ID = "019f9a01-0000-7000-8000-000000000404";
+const DISCONNECT_CONNECTION_ID = "019f9a01-0000-7000-8000-0000000005c9";
+const ACK_AT_MS = 1_700_000_600_000;
+
+function cleanupArtifact(kind, overrides = {}) {
+  const expectedAction =
+    kind === "bot" ? "decide" : kind === "secret" ? "revoke" : "remove";
+  return {
+    id: `019f9a01-0000-7000-8000-0000000006${kind.length}${kind.slice(0, 1)}`,
+    kind,
+    expectedAction,
+    currentStatus: "unknown",
+    disposition: "pending",
+    resolved: false,
+    required: true,
+    updatedAtMs: 1_700_000_000_000,
+    ...overrides,
+  };
+}
+
+/** 절반쯤 온 장부. 여섯 줄이 서로 다른 네 상태를 하나씩 들고 있다. */
+const CLEANUP_MIDWAY = [
+  cleanupArtifact("connector", {
+    currentStatus: "absent",
+    disposition: "removed",
+    resolved: true,
+    source: "manual",
+    acknowledgedBy: ME,
+    acknowledgedAtMs: ACK_AT_MS,
+    evidence: "Grok 설정 > 커넥터에서 제거를 눌렀고 목록에서 사라진 것을 확인",
+  }),
+  // 이름 붙은 두 줄은 일부러 길고 구분자가 섞여 있다(공백·/·:··(가운뎃점)·-·괄호):
+  // cleanupRowTitle 의 boundedLabel(80) 절단과, 900px 좁은 열에서 제목이 음절이
+  // 아니라 어절에서 감기는지를 done/manifest 프레임이 증거로 남긴다.
+  cleanupArtifact("local_plugin_files", {
+    externalRef:
+      "~/Library/Application Support/oort/plugins/grok-bridge/private/김인턴-intake-v2 · source: local-only (2026-08 개편본)",
+  }),
+  cleanupArtifact("plugin", {
+    externalRef:
+      "사내 비공개 플러그인 레지스트리 / grok-bridge:team-inbox-intake-pipeline · 김인턴 파이프라인 v2 (2026-08 개편)",
+  }),
+  cleanupArtifact("routine", { currentStatus: "inactive" }),
+  cleanupArtifact("bot"),
+  cleanupArtifact("secret", {
+    currentStatus: "absent",
+    disposition: "revoked",
+    resolved: true,
+    source: "server_verified",
+    acknowledgedAtMs: 1_700_000_500_000,
+    evidence: "oort revoked 1 hosted credential(s) on this connection",
+  }),
+];
+
+/** 필수 여섯 줄이 전부 닫힌 장부. 봇은 「남김」이라는 정식 종착으로 닫혔다. */
+const CLEANUP_DONE = CLEANUP_MIDWAY.map((artifact) => {
+  if (artifact.resolved) return artifact;
+  const disposition = artifact.kind === "bot" ? "preserved" : "removed";
+  const evidence =
+    artifact.kind === "bot"
+      ? "팀에 알린 뒤 대화 기록을 지키려고 봇은 남겨 두기로 했습니다"
+      : "provider 설정과 로컬 폴더를 열어 항목이 없는 것을 확인";
+  return {
+    ...artifact,
+    currentStatus: artifact.kind === "bot" ? "present" : "absent",
+    disposition,
+    resolved: true,
+    source: "manual",
+    acknowledgedBy: ME,
+    acknowledgedAtMs: ACK_AT_MS,
+    evidence,
+  };
+});
+
+function disconnectConnection(overrides = {}) {
+  return {
+    id: DISCONNECT_CONNECTION_ID,
+    agentMemberId: DISCONNECT_AGENT_ID,
+    status: "cleanup_pending",
+    authMode: "static_bearer",
+    audience: "/v1/mcp/agent-port",
+    approvedChannelIds: [CHANNEL_IDS[0]],
+    approvedScopes: ["agent:port:connect", "agent:inbox:read", "messages:write"],
+    createdAtMs: 1_700_000_000_000,
+    updatedAtMs: 1_700_000_400_000,
+    ...overrides,
+  };
+}
+
+async function captureHostedDisconnectScenes(browser, scheme) {
+  const shots = [];
+
+  // band 는 리뷰 루브릭 §11 phase 2 의 두 폭이다: 기본 1280, 그리고 사이드바가
+  // 아직 열(column)인 900 — 이 표면의 제목·문장이 전부 full length 인 채로 열이
+  // ~600px 로 좁아지는 지점. 좁은 밴드에서는 프레임마다 가로 오버플로를 재서
+  // 0 이 아니면 던진다(b8 레인과 같은 자).
+  const BANDS = {
+    wide: { viewport: VIEWPORT, tag: "" },
+    narrow: { viewport: { width: 900, height: 800 }, tag: "-900" },
+  };
+
+  async function shoot(
+    name,
+    install,
+    settle = async () => {},
+    frames = [],
+    band = BANDS.wide
+  ) {
+    const context = await browser.newContext({
+      viewport: band.viewport,
+      deviceScaleFactor: 2,
+      colorScheme: scheme,
+      reducedMotion: "reduce",
+    });
+    await installMocks(context);
+    await install(context);
+    const page = await context.newPage();
+    await page.goto(ORIGIN, { waitUntil: "networkidle" });
+    await signIn(page);
+    await page.evaluate('location.hash = "/agents"');
+    // 해제는 연결을 만들 때가 아니라 **그 에이전트를 보다가** 하는 일이다. 그래서
+    // 진입도 로스터에서 그 에이전트를 고르는 것으로 시작한다.
+    await page
+      .locator(`[data-testid="agent-hub-agent-row"][data-agent-id="${DISCONNECT_AGENT_ID}"]`)
+      .click();
+    await page.getByTestId("agent-hub-tab-connection").click();
+    await page.getByTestId("hosted-connection-section").waitFor({ state: "visible" });
+    await settle(page, context);
+
+    const frame = async (suffix) => {
+      const path = `${OUT_DIR}/hosted-disconnect-${suffix}${band.tag}-${scheme}.png`;
+      await page.screenshot({ path });
+      shots.push(path);
+      if (band.tag) {
+        const overflow = await page.evaluate(
+          () =>
+            document.documentElement.scrollWidth -
+            document.documentElement.clientWidth
+        );
+        if (overflow > 0) {
+          throw new Error(
+            `900px 가로 오버플로 ${overflow}px (${suffix}, ${scheme})`
+          );
+        }
+      }
+    };
+    await frame(name);
+    for (const [suffix, act] of frames) {
+      await act(page, context);
+      await frame(suffix);
+    }
+    await context.close();
+  }
+
+  // H1 초점 회수 검증 (design-review). 이 클라이언트엔 React 렌더 테스트 하네스가
+  // 없어(testing-library 미설치, 웹 유닛 테스트는 전부 순수 로직) 초점 이동은 실제
+  // 브라우저에서 잰다: 폼을 열면 초점이 <body> 가 아니라 폼 안 첫 라디오로 들어가고,
+  // 닫으면 사라진 트리거가 아니라 줄 제목(h4, tabIndex -1)으로 돌아온다.
+  async function assertFocusInForm(page) {
+    await page
+      .waitForFunction(
+        () => {
+          const el = document.activeElement;
+          return (
+            !!el &&
+            el.tagName === "INPUT" &&
+            el.getAttribute("type") === "radio" &&
+            !!el.closest('[data-testid="cleanup-form"]')
+          );
+        },
+        undefined,
+        { timeout: 2000 }
+      )
+      .catch(() => {
+        throw new Error("H1: 폼을 열 때 초점이 폼 안 첫 라디오로 들어가지 않았습니다.");
+      });
+  }
+  async function assertFocusOnRowHeading(page, kind) {
+    await page
+      .waitForFunction(
+        (k) => {
+          const el = document.activeElement;
+          return (
+            !!el &&
+            el.tagName === "H4" &&
+            !!el.closest(
+              `[data-testid="cleanup-artifact"][data-artifact-kind="${k}"]`
+            )
+          );
+        },
+        kind,
+        { timeout: 2000 }
+      )
+      .catch(() => {
+        throw new Error("H1: 폼을 닫을 때 초점이 줄 제목(h4)으로 돌아오지 않았습니다.");
+      });
+  }
+
+  /**
+   * 목록 + 장부를 세운다.
+   *
+   * 나중에 등록한 라우트가 먼저 보이므로 순서가 이 세 줄의 전부다: 목록,
+   * 단건, 그리고 단건 글로브가 삼키지 못하는 하위 경로들.
+   */
+  function ledger(connection, cleanupArtifacts, extra) {
+    return async (context) => {
+      await context.route("**/v1/workspaces/*/hosted-agent-connections", (route) =>
+        json(route, { connections: [connection] })
+      );
+      await context.route("**/v1/workspaces/*/hosted-agent-connections/*", (route) =>
+        json(route, { connection, cleanupArtifacts })
+      );
+      if (extra) await extra(context);
+    };
+  }
+
+  // 이 에이전트가 호스티드 연결로 들어오지 않은 경우. 이 탭의 빈 상태다.
+  await shoot("empty", async (context) => {
+    await context.route("**/v1/workspaces/*/hosted-agent-connections", (route) =>
+      json(route, { connections: [] })
+    );
+  });
+
+  // 아직 살아 있는 연결. 두 문단이 같은 크기로 서는 것이 이 프레임의 전부다.
+  await shoot(
+    "start",
+    ledger(disconnectConnection({ status: "active" }), []),
+    async (page) => {
+      await page.getByTestId("hosted-disconnect-start").waitFor({ state: "visible" });
+    },
+    [
+      // 확인 질문. 폐기가 되돌릴 수 없다는 사실이 버튼이 아니라 질문에 있다.
+      [
+        "start-confirm",
+        async (page) => {
+          await page.getByTestId("hosted-disconnect-start").click();
+          await page.waitForTimeout(200);
+        },
+      ],
+    ]
+  );
+
+  // 절반쯤 온 장부. 커넥터는 닫혔고 로컬 파일은 열려 있으며 routine 은 꺼짐이다.
+  await shoot(
+    "manifest",
+    ledger(disconnectConnection(), CLEANUP_MIDWAY),
+    async (page) => {
+      await page.getByTestId("hosted-cleanup-manifest").waitFor({ state: "visible" });
+    },
+    [
+      // 확정이 막힌 이유. 남은 수와 다음 항목이 버튼 옆에 적혀 있다.
+      [
+        "terminal-blocked",
+        async (page) => {
+          await page.getByTestId("hosted-terminal-blocked").scrollIntoViewIfNeeded();
+          await page.waitForTimeout(200);
+        },
+      ],
+    ]
+  );
+
+  // 봇의 두 종착. 삭제 줄이 대화 기록을 이름으로 말하는 자리다. 여는 순간 초점이
+  // 폼 안으로 들어가고 취소가 초점을 줄 제목으로 되돌리는지도 여기서 잰다 (H1).
+  await shoot(
+    "bot-choice",
+    ledger(disconnectConnection(), CLEANUP_MIDWAY),
+    async (page) => {
+      const bot = page.locator('[data-testid="cleanup-artifact"][data-artifact-kind="bot"]');
+      await bot.getByTestId("cleanup-open-form").click();
+      await bot.getByTestId("cleanup-form").waitFor({ state: "visible" });
+      await assertFocusInForm(page);
+      await bot.getByTestId("cleanup-cancel").click();
+      await assertFocusOnRowHeading(page, "bot");
+      // 다시 열어 첫 종착(봇을 지웠습니다, 파괴)을 고른 폼을 남긴다.
+      await bot.getByTestId("cleanup-open-form").click();
+      await bot.getByTestId("cleanup-disposition").waitFor({ state: "visible" });
+      await bot.getByTestId("cleanup-disposition").getByRole("radio").first().check();
+      await bot.getByTestId("cleanup-evidence").scrollIntoViewIfNeeded();
+      await page.waitForTimeout(200);
+    },
+    [
+      // M1: 「봇을 남깁니다」는 대화 기록을 지키는 답이라 확정이 red 가 아니다.
+      // 확정 질문을 열어 non-destructive 확정 버튼(「이대로 기록」)을 증거로 남긴다.
+      [
+        "bot-preserve-confirm",
+        async (page) => {
+          const bot = page.locator(
+            '[data-testid="cleanup-artifact"][data-artifact-kind="bot"]'
+          );
+          await bot.getByTestId("cleanup-disposition").getByRole("radio").nth(1).check();
+          await bot
+            .getByTestId("cleanup-evidence")
+            .fill("팀에 대화 기록 위치를 알린 뒤 봇은 남겨 두기로 했습니다");
+          await bot.getByTestId("cleanup-save").click();
+          await bot.getByTestId("cleanup-save-confirm").waitFor({ state: "visible" });
+          await page.waitForTimeout(200);
+        },
+      ],
+    ]
+  );
+
+  // 필수 여섯 줄이 전부 닫힌 장부와, 확정 질문.
+  await shoot(
+    "terminal",
+    ledger(disconnectConnection(), CLEANUP_DONE),
+    async (page) => {
+      await page.getByTestId("hosted-disconnect-complete").scrollIntoViewIfNeeded();
+      await page.waitForTimeout(200);
+    },
+    [
+      [
+        "terminal-confirm",
+        async (page) => {
+          await page.getByTestId("hosted-disconnect-complete").click();
+          await page.waitForTimeout(200);
+        },
+      ],
+    ]
+  );
+
+  // 확정이 끝난 뒤. 장부는 읽기 전용으로 남고 provenance 도 그대로 남는다 —
+  // 해제가 기록을 지우는 일이 아니라는 이 화면의 논지가 마지막 프레임이다.
+  await shoot(
+    "done",
+    ledger(disconnectConnection({ status: "disconnected" }), CLEANUP_DONE),
+    async (page) => {
+      await page.getByTestId("hosted-disconnect-terminal").scrollIntoViewIfNeeded();
+      await page.waitForTimeout(200);
+    }
+  );
+
+  // 확인 저장이 거절당한 자리. 폼은 그대로 열려 있고 적어 둔 문장도 남는다.
+  await shoot(
+    "error",
+    ledger(disconnectConnection(), CLEANUP_MIDWAY, (context) =>
+      context.route("**/cleanup-artifacts/*/acknowledge", (route) =>
+        route.fulfill({
+          status: 409,
+          contentType: "application/json",
+          body: JSON.stringify({
+            error: { message: "cleanup artifact is already resolved" },
+          }),
+        })
+      )
+    ),
+    async (page) => {
+      const plugin = page.locator(
+        '[data-testid="cleanup-artifact"][data-artifact-kind="plugin"]'
+      );
+      await plugin.getByTestId("cleanup-open-form").click();
+      await plugin.getByTestId("cleanup-disposition").getByRole("radio").first().check();
+      await plugin
+        .getByTestId("cleanup-evidence")
+        .fill("플러그인 관리 화면에서 등록을 삭제했습니다");
+      await plugin.getByTestId("cleanup-save").click();
+      await plugin.getByTestId("cleanup-save-confirm").click();
+      await page.getByTestId("hosted-disconnect-failure").waitFor({ state: "visible" });
+      await page.waitForTimeout(200);
+    }
+  );
+
+  // 오프라인. 받아 둔 장부는 계속 읽히고, 저장하는 컨트롤만 잠긴다.
+  await shoot(
+    "offline",
+    ledger(disconnectConnection(), CLEANUP_MIDWAY),
+    async (page, context) => {
+      await page.getByTestId("hosted-cleanup-manifest").waitFor({ state: "visible" });
+      await context.setOffline(true);
+      await page.getByTestId("hosted-cleanup-offline").waitFor({ state: "visible" });
+      await page.waitForTimeout(200);
+    }
+  );
+
+  // 900px 밴드 (리뷰 루브릭 §11 phase 2), 이 표면의 유일한 좁은 폭 증거다. 긴
+  // 제목(local_plugin_files·plugin 의 긴 externalRef)이 ~600px 열에서 어절 단위로
+  // 감기는 것과, done 뷰의 provenance 밀도(M5 이후)를 이 폭에서 남긴다. manifest 는
+  // terminal-blocked 서브프레임까지 한 컨텍스트에서 찍고, 프레임마다 가로 오버플로
+  // 0 을 확인한다.
+  await shoot(
+    "manifest",
+    ledger(disconnectConnection(), CLEANUP_MIDWAY),
+    async (page) => {
+      await page.getByTestId("hosted-cleanup-manifest").waitFor({ state: "visible" });
+    },
+    [
+      [
+        "terminal-blocked",
+        async (page) => {
+          await page.getByTestId("hosted-terminal-blocked").scrollIntoViewIfNeeded();
+          await page.waitForTimeout(200);
+        },
+      ],
+    ],
+    BANDS.narrow
+  );
+  await shoot(
+    "done",
+    ledger(disconnectConnection({ status: "disconnected" }), CLEANUP_DONE),
+    async (page) => {
+      await page.getByTestId("hosted-disconnect-terminal").scrollIntoViewIfNeeded();
+      await page.waitForTimeout(200);
+    },
+    [],
+    BANDS.narrow
+  );
+
+  return shots;
+}
+
 async function main() {
   if (!existsSync(resolve(WEB_ROOT, "dist/index.html"))) {
     throw new Error("dist/ is missing. Run `npm run capture:design`.");
@@ -4421,6 +4842,7 @@ async function main() {
           all.push(...(await captureScheme(browser, scheme)));
           all.push(...(await captureAddMemberScenes(browser, scheme)));
           all.push(...(await captureHostedPairingScenes(browser, scheme)));
+      all.push(...(await captureHostedDisconnectScenes(browser, scheme)));
         }
       }
       // 폰 프로파일 (goal B6). 데스크탑 프레임 뒤에 붙는 이유는 회귀를 읽는

@@ -211,7 +211,13 @@ export function parseHostedConnections(wire: unknown): HostedAgentConnection[] {
     );
 }
 
-/** 단건 조회 응답. cleanup manifest 는 UX2(#1362)의 것이므로 읽지 않는다. */
+/**
+ * 단건 조회 응답 중 커넥션 한 줄.
+ *
+ * 같은 응답이 `cleanupArtifacts` 도 싣지만 이 파서는 읽지 않는다. 마법사는 그
+ * 목록을 쓰지 않으면서 5초마다 되묻기 때문이다. 목록까지 필요한 화면은
+ * `./disconnect` 의 `parseHostedConnectionDetail` 을 쓴다.
+ */
 export function parseHostedConnection(wire: unknown): HostedAgentConnection {
   const connection = toHostedConnection(record(wire)?.["connection"]);
   if (!connection) throw new WireShapeError();
@@ -407,7 +413,11 @@ export type HostedAction =
   | "get"
   | "create"
   | "regenerate"
-  | "confirm";
+  | "confirm"
+  /** 해제 흐름 셋 (HAP-UX2 / #1362). 같은 표에 사는 이유는 규율 3 이 같아서다. */
+  | "disconnect"
+  | "acknowledge"
+  | "complete";
 
 function actionPrefix(action: HostedAction): string {
   switch (action) {
@@ -421,6 +431,12 @@ function actionPrefix(action: HostedAction): string {
       return "연결 값을 다시 발급하지 못했습니다.";
     case "confirm":
       return "승인을 저장하지 못했습니다.";
+    case "disconnect":
+      return "연결 해제를 시작하지 못했습니다.";
+    case "acknowledge":
+      return "확인을 저장하지 못했습니다.";
+    case "complete":
+      return "해제를 끝내지 못했습니다.";
   }
 }
 
@@ -430,12 +446,25 @@ function statusAdvice(action: HostedAction, status: number): string {
       if (action === "confirm") {
         return "고른 채널이나 권한을 서버가 거절했습니다. 목록을 다시 불러온 뒤 다시 고르세요.";
       }
+      if (action === "acknowledge") {
+        // 서버는 셋을 같은 400 으로 답한다: 종류가 받지 않는 처분, 어휘 밖의
+        // 관측, 증거 없는 처분. 화면이 그 셋을 앞에서 이미 막고 있으므로 여기
+        // 닿았다는 것은 화면과 서버의 표가 갈렸다는 뜻이고, 그때 사람이 할 수
+        // 있는 일은 다시 읽어 오는 것뿐이다.
+        return "이 항목에 쓸 수 없는 확인입니다. 목록을 다시 불러온 뒤 다시 고르세요.";
+      }
+      if (action === "disconnect") {
+        return "정리 항목 이름을 서버가 거절했습니다. 이름을 확인하고 다시 시도하세요.";
+      }
       return "이름이나 핸들을 서버가 거절했습니다. 값을 확인하고 다시 시도하세요.";
     case 401:
       return "로그인 세션이 만료되었습니다. 다시 로그인한 뒤 시도하세요.";
     case 403:
       return "호스티드 에이전트 연결은 워크스페이스 오너나 관리자만 다룰 수 있습니다. 관리자에게 요청하세요.";
     case 404:
+      if (action === "acknowledge") {
+        return "이 정리 항목이 서버에 없습니다. 목록을 다시 불러오세요.";
+      }
       return "이 연결이 서버에 없습니다. 목록을 다시 불러오세요.";
     case 409:
       if (action === "create") {
@@ -443,6 +472,19 @@ function statusAdvice(action: HostedAction, status: number): string {
       }
       if (action === "regenerate") {
         return "이미 활성이거나 해제된 연결은 값을 다시 발급할 수 없습니다. 상태를 다시 불러오세요.";
+      }
+      if (action === "disconnect") {
+        return "이 연결은 지금 해제할 수 있는 상태가 아닙니다. 이미 해제됐거나 자격증명이 발급된 적이 없습니다. 상태를 다시 불러오세요.";
+      }
+      if (action === "acknowledge") {
+        return "이 항목은 이미 확인이 끝났거나, 이 연결이 정리 중이 아닙니다. 목록을 다시 불러오세요.";
+      }
+      if (action === "complete") {
+        // 서버는 미해결 항목과 「자기 쪽 폐기를 되읽지 못했다」를 같은 409 로
+        // 답한다(두 갈래를 나누면 권한 없는 탐침에게 해제 진행 여부를 알려 준다).
+        // 그래서 이 문장도 둘을 함께 말하되, 사람이 실제로 할 수 있는 행동을
+        // 먼저 적는다.
+        return "아직 확인하지 않은 항목이 남아 있거나, 서버가 자기 쪽 폐기를 다시 읽지 못했습니다. 목록을 다시 불러와 남은 항목을 확인하세요.";
       }
       return "이 연결은 지금 승인할 수 있는 상태가 아닙니다. 이미 승인됐거나 값이 만료됐습니다. 상태를 다시 불러오세요.";
     case 429:
