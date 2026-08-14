@@ -4,6 +4,7 @@ import {
   declaredStatusLabel,
   effectivePresenceLabel,
   presenceTriggerLabel,
+  PRESENCE_MENU_LABEL,
   PRESENCE_OPTIONS,
 } from "./model";
 
@@ -54,6 +55,15 @@ describe("presence copy", () => {
     expect(effectivePresenceLabel("online")).toBe("온라인");
     expect(presenceTriggerLabel("dnd")).toContain("방해 금지");
     expect(presenceTriggerLabel("dnd")).toContain("변경");
+  });
+
+  // The menu's visible title and the trigger's accessible name are the same
+  // name, so they are one string. Reword one of them by hand and this goes red
+  // instead of shipping a panel titled one thing and announced as another.
+  it("opens the trigger's name with the menu's own title", () => {
+    expect(presenceTriggerLabel("away").startsWith(PRESENCE_MENU_LABEL)).toBe(
+      true
+    );
   });
 });
 

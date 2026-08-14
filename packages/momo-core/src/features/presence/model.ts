@@ -65,10 +65,22 @@ export function effectivePresenceLabel(effective: EffectivePresence): string {
 }
 
 /**
+ * What the status menu is *about* — the visible title over its options, and the
+ * opening words of the trigger's accessible name.
+ *
+ * It is one constant used twice rather than one string written twice, for the
+ * reason `PRESENCE_OPTIONS` above states in its own words: two sources for one
+ * word drift, and the tests read the same stale source the screen does. The
+ * trigger already said 내 상태 before the menu had a title, so the title is not
+ * new copy — it is that name, made visible where the options are.
+ */
+export const PRESENCE_MENU_LABEL = "내 상태";
+
+/**
  * The accessible name for the status control's trigger: it states the current
  * effective status and that pressing changes it, so a screen-reader user is not
  * left with a color-only cue.
  */
 export function presenceTriggerLabel(effective: EffectivePresence): string {
-  return `내 상태: ${effectivePresenceLabel(effective)} (변경하려면 누르세요)`;
+  return `${PRESENCE_MENU_LABEL}: ${effectivePresenceLabel(effective)} (변경하려면 누르세요)`;
 }

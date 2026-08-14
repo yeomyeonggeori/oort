@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Check } from "lucide-react";
 import {
@@ -12,11 +12,13 @@ import {
 import {
   declaredStatusLabel,
   presenceTriggerLabel,
+  PRESENCE_MENU_LABEL,
   PRESENCE_OPTIONS,
 } from "@momo/core/features/presence/model";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
@@ -98,6 +100,8 @@ export function PresenceControl({
   const client = useQueryClient();
   const [open, setOpen] = useState(false);
   const [failed, setFailed] = useState(false);
+  /** The menu title's id, so the radio group can name itself with it. */
+  const menuLabelId = useId();
 
   const declared = selfMember?.presenceStatus;
   const current: PresenceStatus = declared ?? "auto";
@@ -182,6 +186,28 @@ export function PresenceControl({
         sideOffset={8}
         data-testid="presence-menu"
       >
+        {/* The menu's title (이슈 #1383). The trigger is an avatar, so nothing
+            in the open panel said what the three words are *about* — a person
+            arriving at 온라인 / 자리 비움 / 방해 금지 had to infer the question
+            from the answers. The title is the same name the trigger already
+            speaks (`PRESENCE_MENU_LABEL`), and it is a real name rather than
+            decoration: the radio group points back at it with
+            `aria-labelledby`, the idiom `HostPicker` already uses, so
+            「무엇을 고르는 중인가」 reaches the eye and the screen reader from
+            one string.
+
+            **It stands first, above the failure banner** (design-review M1).
+            The first cut put the banner on top, which meant the one state where
+            the panel is hardest to read — a write just failed, and it is still
+            open specifically so the sentence can be read — was also the one
+            state where the panel lost its name: 오류 → 제목 → 선택지. A title
+            that steps aside for an error answers 「무엇을 고르는 중인가」
+            everywhere except where the question is actually being asked. So the
+            name holds its place, and the banner sits where the interruption
+            happened: between the name and the options it interrupted. */}
+        <DropdownMenuLabel id={menuLabelId}>
+          {PRESENCE_MENU_LABEL}
+        </DropdownMenuLabel>
         {failed && (
           <InlineBanner
             message="상태를 바꾸지 못했습니다. 다시 시도하세요."
@@ -196,7 +222,7 @@ export function PresenceControl({
             `onSelect` (not `onValueChange`) so a failed write can hold the menu
             open with its banner; the group's value is the a11y state, not a
             second event path. */}
-        <DropdownMenuRadioGroup value={current}>
+        <DropdownMenuRadioGroup value={current} aria-labelledby={menuLabelId}>
           {PRESENCE_OPTIONS.map((status) => {
             const isCurrent = status === current;
             return (
