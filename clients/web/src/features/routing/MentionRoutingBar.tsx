@@ -7,6 +7,8 @@ import { useSession } from "@/app/session";
 import { useAgentProfile, useOpenAgentProfile } from "./useAgentProfile";
 import { useCalledAgentsRouting } from "./useMentionRouting";
 import { RoutingFields } from "./RoutingFields";
+import { ExecutionTierField } from "./ExecutionTierField";
+import { useExecutionTierAxis } from "./useExecutionTier";
 import {
   SEND_UNSUPPORTED_REASON,
   UNSUPPORTED_REASON,
@@ -91,6 +93,23 @@ import {
 // `sharedEfforts`). 한 명에게만 유효한 값을 실으면 서버는 그 한 명에서 400을
 // 답하고, 그 400은 전송 트랜잭션 전체를 되돌린다 — 두 명을 부른 메시지가 통째로
 // 안 나간다. 화면은 그 조합을 애초에 상자에 올리지 않는다.
+//
+// -----------------------------------------------------------------------------
+// 세 번째 축: 실행 위치 (CRUN-1 / #1382)
+//
+// Cursor의 「Run on」을 같은 문법으로 번역한 것이다. 저쪽 칩은 고른 값만 보여 주고
+// 아무것도 고르지 않은 상태에서는 무슨 일이 일어나는지 말하지 않는데, 이 줄은 위에
+// 적힌 그대로 **상속을 먼저** 보여 준다. 그래서 축이 하나 늘어난 자리도 같다:
+// 접힌 줄의 요약에 실행 위치가 모델·강도 옆에 붙고, 고르는 상자는 [이번만 바꾸기]
+// 패널 안에 선다.
+//
+// **다만 이 축은 지금 보낼 수 없다.** `routing` 블록의 허용 키는 두 세대 모두
+// model·effort 둘뿐이고(`ROUTING_KEYS`, openapi `RunRoutingInput`은
+// `additionalProperties: false`), `SendMessageRequest`에도 호스트를 받는 키가 없다.
+// 모르는 키를 조용히 버리는 모델·강도의 사정과도 다르다: 여기서 `routing.tier`를
+// 지어내 실으면 서버는 400으로 **전송 전체를 되돌린다.** 그래서 축은 끝까지 그리되
+// 값을 싣지 않고, 왜 못 싣는지를 상자 아래 한 문장으로 말한다
+// (`features/routing/tierAxis.ts`).
 // =============================================================================
 
 /** 이 줄이 접혀 있을 때의 고정 높이. 멘션이 붙었다 떨어질 때 컴포저가 튀지 않는다. */
@@ -224,6 +243,7 @@ function OneTargetRow({
   const openProfile = useOpenAgentProfile();
   const profileHandle = useAgentProfile(agent.id);
   const allowedModels = useAllowedAgentModels(agent.id);
+  const tier = useExecutionTierAxis();
 
   // 프로필을 못 읽었으면 상속값을 **주장하지 않는다**(R1 H2). 404는 실패가 아니라
   // "프로필이 없다"는 사실이고, 그때 상속의 상대는 에이전트 자신의 모델이다.
@@ -274,7 +294,7 @@ function OneTargetRow({
     : inheritance
       ? `모델 ${draft.model ?? inheritedModelLabel(inheritance)} · 강도 ${
           draft.effort ? effortLabel(draft.effort) : inheritedEffortLabel(inheritance)
-        }`
+        } · ${tier.summary}`
       : "상속값을 불러오는 중";
 
   return (
@@ -378,6 +398,7 @@ function OneTargetRow({
                 : null
             }
           />
+          <ExecutionTierField idPrefix="composer-routing" axis={tier} />
           <RowAction
             onClick={() => openProfile(agent.id)}
             testId="composer-routing-open-profile"
@@ -427,6 +448,7 @@ function ManyTargetRow({
   const sendTier = useSendRoutingCapability(channelId);
   const table = capability.table;
   const called = useCalledAgentsRouting(target, table);
+  const tier = useExecutionTierAxis();
 
   const override = isOverride(draft);
   const effortReady = capability.support === "ready" && table !== null;
@@ -486,12 +508,12 @@ function ManyTargetRow({
   const summary = override
     ? `모델 ${draft.model ?? "각자 프로필 값"} · 강도 ${
         draft.effort ? effortLabel(draft.effort) : "각자 프로필 값"
-      }`
+      } · ${tier.summary}`
     : unreadable.length > 0
       ? "적용될 값을 확인하지 못했습니다"
       : called.isPending
         ? "적용될 값을 불러오는 중"
-        : "모델·강도 각자 프로필 값";
+        : `모델·강도 각자 프로필 값 · ${tier.summary}`;
 
   return (
     <div
@@ -583,6 +605,10 @@ function ManyTargetRow({
             effortDisabledReason={effortReason}
             clearedNotice={cleared}
           />
+          {/* 실행 위치는 부른 수와 무관하다: 워크스페이스 정책 한 벌이 모두에게
+              같이 걸리고, 지금은 메시지 한 건으로 그것을 바꿀 전선도 없다. 그래서
+              한 명일 때와 **같은 상자 하나**가 선다. */}
+          <ExecutionTierField idPrefix="composer-routing" axis={tier} />
           <CalledAgentList agents={called.agents} draft={draft} pending={called.isPending} />
         </div>
       )}
