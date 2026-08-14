@@ -1,5 +1,25 @@
 # oort 기획 현재 상태 (Planning Current State)
 
+> **2026-08-15 스냅샷 38 (Opus 5 단발 워커 · uxui/web — #1360 HAP-UX1 "Bring your hosted agent" 페어링 마법사, 로컬 동결).** 스냅샷 37을 supersede한다.
+>
+> **활성 goal #1360:** blocker #1364(pairing lifecycle)·#1366(MCP tools/per-agent delivery)이 랜딩해 HAP-UX1을 claim했다. worktree/branch는 `feat/1360-hap-ux1-hosted-agent-pairing-wizard`, base는 `track/engine@6d2a7977`(#1377 rustfmt 정렬). 서버 wire는 한 줄도 만들지 않았다 — openapi `agents` 태그의 기존 5개 연산만 쓴다.
+>
+> **경계 요약:** 다섯 단계가 **서버 상태에서 도출된다.** 이 흐름의 절반은 다른 프로세스가 일으키는 사건이라(감지=상대 에이전트의 다이얼인, 활성=그 에이전트의 자격증명 증명) 로컬 진행도 카운터를 두면 새로고침·재접속·다른 탭이 각자 다른 진행도로 같은 커넥션을 설명한다. 지역 상태는 서버가 알 수 없는 하나뿐이다: 지금 비밀값이 화면에 떠 있는가. 판단·문장·상태기계는 전부 `packages/momo-core/src/features/hostedAgents/*`에 있고 웹은 렌더와 플랫폼 배선만 한다(폰 이식 시 두 번째 구현이 아니라 두 번째 호출자가 된다).
+>
+> **`detected`가 화면 둘인 이유(설계의 축):** HAP-E3의 `confirm`은 자격증명을 발급할 뿐 **상태를 바꾸지 않는다**(`status='detected'` 유지, `active_token_id`만 채움). 그래서 승인 전(4단계)과 증명 대기(5단계)를 `activeCredentialId` 유무로 가른다. 상태 이름만 보고 화면을 고르면 승인 직후 화면이 4단계로 되돌아가고, 사람은 방금 한 승인을 한 번 더 하려 든다. 같은 이유로 상태 문장도 그 상태에서만 둘이다.
+>
+> **비밀값 둘의 수명:** 연결 값과 active 자격증명은 서로 다른 비밀이다(ADR-0162 D6). 둘 다 컴포넌트 상태에서만 살고 캐시·저장소·URL·로그에 가지 않으며, ①「저장했습니다」 ②언마운트 ③만료/재발급 ④**서버가 소비를 말할 때** 넷 중 무엇이든 메모리 사본을 버린다. 값이 떠 있는 동안 Esc·바깥 클릭은 다이얼로그가 막는다(Radix는 층 스택에 들어오지 않으므로 `useEscapeGuard`가 아니라 `onEscapeKeyDown`이 그 자리다). 웹훅 R2가 힙에서 찾아낸 리테이너 경로(`queryFn` 클로저가 렌더 스코프를 붙잡는다)는 쿼리 옵션을 전부 모듈 스코프로 올려 막았고, 원문을 나르는 mutation 셋이 한 키·`gcTime: 0`·언마운트 purge 아래 있다.
+>
+> **정직 경계 3건:** ①Grok preset은 `verified: false`이고 "인증 헤더를 실제로 보내는지 아직 확인되지 않았다"를 preset 옆에 붙인다(#1344의 404가 auth challenge보다 먼저 끝났다 — ADR-0162 D8). ②OAuth는 목록에서 지우지 않고 비활성 + 사유로 세우며 날짜를 약속하지 않고 자동 downgrade 경로가 없다. ③테스트 멘션은 `status === 'active'` + 승인 채널이 있을 때만 열리고, 여는 것은 실제 채널이지 UI가 지어내는 성공이 아니다.
+>
+> **승인 화면(되돌릴 수 없는 유일한 판단):** 권한 여섯 줄이 각자 결과 문장을 상시 노출하고, 고른 것 전체의 결과가 저장 버튼 위에 한 문단으로 서서 **허락한 것과 닫히는 것을 함께** 말한다. 자격 없는 줄(1:1 대화·보관 채널)은 숨기지 않고 사유와 함께 서며 전송 본문에는 실리지 않는다(fail-closed, 서버 `valid_channels`와 같은 규칙). `agent:port:connect`는 잠긴 채 켜져 있다.
+>
+> **캡처 레인이 잡은 결함 2건:** 상태별 9장 × 2스킴을 `capture-screens.mjs`에 더했고, 그 레인이 ①목록 조회 실패가 1단계로 떨어져 "읽지 못한 목록"이 "연결 없음"처럼 보이던 것(오류 배너가 설 자리도 없었다) ②멘션 문장의 손으로 적은 조사(`@kim-intern 을`)를 잡았다. 둘 다 수리했고 두 번째는 코어 조사 판정으로 옮겨 테스트를 세웠다.
+>
+> **실측:** core 1261 / web 909 / 폰 1144 tests GREEN, typecheck·lint·purity GREEN, `design_preflight_web.sh` web 10/10 + core 3/3, `verify_merge_tree.sh --install`(base `track/engine`) 8레인 green. 신규 테스트 core 88 + web 13, RED PROOF 19개 명시. 폰 스위트에서 한 번 만난 RED는 `inboxApproval.test.tsx`의 선재 flake로 확인했다(base 리버트 상태에서도 재현).
+>
+> **다음 행동:** design-review 에이전트(fresh context, 캡처 18장 첨부) → Blocker 0 확인 → Fable 기획검수 → push/PR(track/engine) → PR CI → 머지. 워커는 로컬 commit 동결까지만 수행했다. **범위 밖으로 남긴 것:** 해제/cleanup UX(UX2 / #1362), 힙 스냅샷 게이트(웹훅에만 있다), Tauri 동일 번들 smoke, 모바일 이식(UX3), OAuth UI(#1368/#1369).
+>
 > **2026-08-14 스냅샷 37 (Opus 5 단발 워커 · engine — #1367 HAP-E6 원자적 disconnect + cleanup-confirmed terminal, 로컬 동결).** 스냅샷 36을 supersede한다.
 >
 > **활성 goal #1367:** native blocker #1364/#1365(및 랜딩된 #1366)가 닫혀 HAP-E6를 claim했다. worktree/branch는 `feat/1367-hap-e6-engine-atomic-hosted-agent-disconnect-cleanup-confirmed-terminal`, base는 `track/engine@7a52c4c2`(#1366 squash 랜딩). 마이그레이션은 **072**(`check_migration_numbers.sh` 72 PASS).
