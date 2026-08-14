@@ -342,19 +342,25 @@ mod tests {
     /// leaving a gap. That is the intended resolution — the contiguity assertion
     /// below is what forces it to be noticed at all, and it is what caught this
     /// one: presence was authored as 066 against a tree where 065 was the head.
+    ///
+    /// 069/070/071 are the ADR-0162 hosted Agent Port wave: the pairing ledger
+    /// (HAP-E3), the connection-scoped inbox projection (HAP-E4), and — now that
+    /// HAP-E5 opens the producer — the kind-inclusive outbox reference plus the
+    /// job↔run binding trigger that make a hosted inbox reference impossible to
+    /// aim at the wrong outbox kind or at another piece of work.
     #[test]
-    fn discovers_contiguous_migrations_001_to_070() {
+    fn discovers_contiguous_migrations_001_to_071() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
         assert_eq!(
             migrations.len(),
-            70,
-            "expected 70 migrations under {}",
+            71,
+            "expected 71 migrations under {}",
             dir.display()
         );
         assert_eq!(migrations.first().unwrap().version, 1);
-        assert_eq!(migrations.last().unwrap().version, 70);
+        assert_eq!(migrations.last().unwrap().version, 71);
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
 
         for (i, migration) in migrations.iter().enumerate() {

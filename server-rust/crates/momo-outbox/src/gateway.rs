@@ -148,6 +148,51 @@ pub async fn claim_gateway_jobs_in_tx(
     agent_member_id: Uuid,
     limit: i64,
 ) -> Result<Vec<ClaimedGatewayJob>, sqlx::Error> {
+    claim_gateway_jobs(conn, workspace_id, agent_member_id, limit, None).await
+}
+
+/// The **hosted** half of the same claim (ADR-0162 / HAP-E5).
+///
+/// A hosted agent reaches its work through the Agent Port, never over the REST
+/// callback surface, so [`claim_gateway_jobs_in_tx`] deliberately excludes every
+/// agent that has a `hosted_agent_connection` row at all (HAP-E3's fail-closed
+/// posture). This is the door that replaces it — and it is the *same statement*,
+/// not a second one: `claim_gateway_jobs` builds one CTE and only the hosted
+/// eligibility predicate differs, so the lease columns, `SKIP LOCKED`, takeover
+/// window and per-agent binding cannot drift between the two callers.
+///
+/// The extra predicate is the whole hosted authority: the connection named by
+/// the caller's credential must be **this** agent's, `active`, proved, and still
+/// carry a live `agent:jobs:read` bearer bound to the Agent Port audience. An
+/// expired, revoked or downgraded connection therefore claims nothing rather
+/// than falling back to the managed feed.
+pub async fn claim_hosted_gateway_jobs_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    agent_member_id: Uuid,
+    connection_id: Uuid,
+    limit: i64,
+) -> Result<Vec<ClaimedGatewayJob>, sqlx::Error> {
+    claim_gateway_jobs(
+        conn,
+        workspace_id,
+        agent_member_id,
+        limit,
+        Some(connection_id),
+    )
+    .await
+}
+
+async fn claim_gateway_jobs(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    agent_member_id: Uuid,
+    limit: i64,
+    hosted_connection_id: Option<Uuid>,
+) -> Result<Vec<ClaimedGatewayJob>, sqlx::Error> {
+    // `$5 IS NULL` selects the managed branch, so both callers execute one
+    // prepared statement whose only difference is which hosted predicate is
+    // live. Two SQL literals would be two things to keep in step.
     let rows = sqlx::query(
         "WITH candidate AS ( \
            SELECT o.id \
@@ -172,9 +217,28 @@ pub async fn claim_gateway_jobs_in_tx(
                    AND m.status = 'active' \
                    AND m.deleted_at IS NULL \
               ) \
-              AND NOT EXISTS ( \
-                SELECT 1 FROM hosted_agent_connection hc \
-                 WHERE hc.workspace_id = $1 AND hc.agent_member_id = $2 \
+              AND ( \
+                ($5::uuid IS NULL AND NOT EXISTS ( \
+                  SELECT 1 FROM hosted_agent_connection hc \
+                   WHERE hc.workspace_id = $1 AND hc.agent_member_id = $2 \
+                )) \
+                OR ($5::uuid IS NOT NULL AND EXISTS ( \
+                  SELECT 1 FROM hosted_agent_connection hc \
+                    JOIN token t ON t.workspace_id = hc.workspace_id \
+                                AND t.id = hc.active_token_id \
+                   WHERE hc.workspace_id = $1 AND hc.agent_member_id = $2 \
+                     AND hc.id = $5 AND hc.status = 'active' \
+                     AND hc.proved_at IS NOT NULL \
+                     AND 'agent:jobs:read' = ANY(hc.approved_scopes) \
+                     AND t.kind = 'agent_bearer' \
+                     AND t.credential_class = 'hosted_active' \
+                     AND t.revoked_at IS NULL \
+                     AND (t.expires_at IS NULL OR t.expires_at > now()) \
+                     AND t.hosted_connection_id = hc.id \
+                     AND t.actor_member_id = hc.agent_member_id \
+                     AND t.audience = '/v1/mcp/agent-port' \
+                     AND 'agent:jobs:read' = ANY(t.scopes) \
+                )) \
               ) \
             ORDER BY o.id ASC \
             FOR UPDATE OF o SKIP LOCKED \
@@ -196,6 +260,7 @@ pub async fn claim_gateway_jobs_in_tx(
     .bind(agent_member_id)
     .bind(limit)
     .bind(GATEWAY_LEASE_SECONDS as f64)
+    .bind(hosted_connection_id)
     .fetch_all(&mut *conn)
     .await?;
 
