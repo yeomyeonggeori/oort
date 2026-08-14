@@ -223,6 +223,16 @@ pub struct AgentPortConfig {
     pub per_agent_limit: u32,
     /// Requests per socket peer per window. 0 disables this axis.
     pub per_ip_limit: u32,
+    /// ADR-0162 HAP-E5 — **the production feature gate, closed by default.**
+    ///
+    /// It governs the per-agent *selector* only: whether a mention of an agent
+    /// with a live hosted connection is routed to the hosted gateway at all.
+    /// The tool surface itself is gated by pairing, human confirmation, proof
+    /// and scopes, none of which an operator can skip. Opening the selector
+    /// before HAP-E6 (#1367) lands its disconnect lifecycle would let work be
+    /// handed to a connection nobody can take back, so the switch stays here,
+    /// off, until that goal opens it; only a runtime fixture sets it today.
+    pub hosted_delivery_enabled: bool,
 }
 
 impl Default for AgentPortConfig {
@@ -233,6 +243,7 @@ impl Default for AgentPortConfig {
             per_token_limit: 240,
             per_agent_limit: 480,
             per_ip_limit: 1200,
+            hosted_delivery_enabled: false,
         }
     }
 }
@@ -266,6 +277,10 @@ impl AgentPortConfig {
                 defaults.per_agent_limit,
             )?,
             per_ip_limit: env_number("MOMO_AGENT_PORT_RATE_LIMIT_PER_IP", defaults.per_ip_limit)?,
+            // Any spelling other than an exact `true` leaves the gate closed —
+            // a typo must not open a delivery path.
+            hosted_delivery_enabled: env("MOMO_HOSTED_DELIVERY_ENABLED")
+                .is_some_and(|value| value.trim().eq_ignore_ascii_case("true")),
         })
     }
 

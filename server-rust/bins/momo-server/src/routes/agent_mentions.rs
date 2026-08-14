@@ -124,9 +124,15 @@ pub(crate) struct MentionSend<'a> {
     pub body: &'a str,
     pub hlc_ts: i64,
     pub via_token_id: Option<Uuid>,
-    /// `AgentGatewaySettings::enabled` — decides `outbox.method` and whether a
-    /// realtime wake-up accompanies the job.
+    /// `AgentGatewaySettings::enabled` — the **instance-global** provider mode.
+    /// It decides `outbox.method` and the realtime wake-up for managed/BYOA
+    /// agents, and it decides nothing at all for a hosted one.
     pub gateway_enabled: bool,
+    /// ADR-0162 HAP-E5's production feature gate
+    /// (`AgentPortConfig::hosted_delivery_enabled`), closed until #1367.
+    /// Closed means a hosted agent is skipped exactly as HAP-E3 skipped it —
+    /// never routed to a managed provider instead.
+    pub hosted_delivery_enabled: bool,
     pub context_max_messages: i64,
     /// ADR-0134 D1's per-request tier, already shape-validated by the route
     /// before the transaction opened. `None` = the caller chose nothing and the
@@ -233,21 +239,53 @@ pub(crate) async fn route_agent_mentions_in_tx(
             .await?;
             continue;
         }
-        // HAP-E3 provisions reachability and identity only. Until E5/E6 land,
-        // a hosted connection must not enter the legacy gateway/outbox path,
-        // even after proof atomically unpauses its profile.
-        if agent.hosted_delivery_disabled {
-            skip(
-                &mut *conn,
-                &send,
-                &trigger,
-                agent,
-                *addressing,
-                "hosted_delivery_not_enabled",
-            )
-            .await?;
-            continue;
-        }
+        // ---------------------------------------------------------------
+        // ADR-0162 HAP-E5 — the per-agent delivery selector.
+        //
+        // Delivery is a property of the AGENT, not of the instance: one
+        // workspace may hold managed, BYOA and hosted agents at once, and each
+        // must reach its own runtime. So this branch is taken on the agent's
+        // own hosted state and never consults `gateway_enabled`.
+        //
+        // The three outcomes, and why the middle one is not a fallback:
+        //   * feature gate closed   → skipped, exactly as HAP-E3 skipped it;
+        //   * no ACTIVE connection  → skipped as unavailable. Falling back to a
+        //     managed provider here would run the turn on a runtime the human
+        //     never approved, and would run it a *second* time when the hosted
+        //     connection came back and claimed the same work;
+        //   * active connection     → the hosted gateway, below.
+        // ---------------------------------------------------------------
+        let hosted_connection_id = if agent.hosted_delivery_disabled {
+            if !send.hosted_delivery_enabled {
+                skip(
+                    &mut *conn,
+                    &send,
+                    &trigger,
+                    agent,
+                    *addressing,
+                    "hosted_delivery_not_enabled",
+                )
+                .await?;
+                continue;
+            }
+            match agent.hosted_active_connection_id {
+                Some(connection_id) => Some(connection_id),
+                None => {
+                    skip(
+                        &mut *conn,
+                        &send,
+                        &trigger,
+                        agent,
+                        *addressing,
+                        "hosted_connection_unavailable",
+                    )
+                    .await?;
+                    continue;
+                }
+            }
+        } else {
+            None
+        };
         if agent.paused {
             paused(&mut *conn, &send, &trigger, agent, *addressing).await?;
             continue;
@@ -311,14 +349,18 @@ pub(crate) async fn route_agent_mentions_in_tx(
         }
         let window = context_window.as_deref().unwrap_or_default();
 
-        let delivery = if send.gateway_enabled {
+        // A hosted turn is a `gateway` job whatever the instance mode is: the
+        // Agent Port's claim is the gateway claim's hosted branch, and using a
+        // second method would need a second consumer.
+        let hosted = hosted_connection_id.is_some();
+        let delivery = if hosted || send.gateway_enabled {
             MENTION_JOB_METHOD_GATEWAY
         } else {
             "worker"
         };
         let payload =
             mention_job_payload(&trigger, agent, &routing, created.id, window, 0, delivery);
-        let method = if send.gateway_enabled {
+        let method = if hosted || send.gateway_enabled {
             MENTION_JOB_METHOD_GATEWAY
         } else {
             MENTION_JOB_METHOD_WORKER
@@ -335,7 +377,32 @@ pub(crate) async fn route_agent_mentions_in_tx(
         )
         .await?;
 
-        if send.gateway_enabled {
+        // The hosted inbox reference for this job — **in this transaction**, so
+        // a rolled-back mention takes the notification with it and a committed
+        // job can never be invisible to the runtime that must claim it.
+        //
+        // Migration 071 is what makes the pair below safe to write: the FK now
+        // binds `outbox.kind`, so the wake broadcast emitted a few lines down
+        // for the managed path can never be mistaken for this job row, and the
+        // job/run trigger requires `payload.run_id` to equal `created.id`.
+        if let Some(connection_id) = hosted_connection_id {
+            momo_messaging::append_job_reference_in_tx(
+                &mut *conn,
+                send.workspace_id,
+                agent.member_id,
+                connection_id,
+                send.channel_id,
+                job_outbox_id,
+                created.id,
+            )
+            .await?;
+        }
+
+        // The realtime wake-up is the managed gateway's doorbell. A hosted
+        // runtime is woken by its own inbox instead, and emitting a broadcast
+        // row on the agent's partition key for it would put exactly the
+        // kind-confusable row 071 now refuses next to every hosted job.
+        if !hosted && send.gateway_enabled {
             let wake = mention_job_broadcast_payload(
                 send.workspace_id,
                 agent.member_id,
@@ -601,6 +668,7 @@ mod tests {
             workspace_settings: serde_json::json!({}),
             paused: false,
             hosted_delivery_disabled: false,
+            hosted_active_connection_id: None,
             is_channel_member: true,
         }
     }

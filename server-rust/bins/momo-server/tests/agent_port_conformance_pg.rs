@@ -599,6 +599,7 @@ async fn dual_era_auth_audit_and_read_only_contract_use_the_real_router() {
             per_token_limit: 0,
             per_agent_limit: 0,
             per_ip_limit: 0,
+            hosted_delivery_enabled: false,
         },
     )
     .await;
@@ -1086,6 +1087,7 @@ async fn token_agent_and_socket_peer_rate_axes_are_independent() {
             per_token_limit: 1,
             per_agent_limit: 0,
             per_ip_limit: 0,
+            hosted_delivery_enabled: false,
         },
     )
     .await;
@@ -1151,6 +1153,7 @@ async fn token_agent_and_socket_peer_rate_axes_are_independent() {
             per_token_limit: 0,
             per_agent_limit: 1,
             per_ip_limit: 0,
+            hosted_delivery_enabled: false,
         },
     )
     .await;
@@ -1197,6 +1200,7 @@ async fn token_agent_and_socket_peer_rate_axes_are_independent() {
             per_token_limit: 1,
             per_agent_limit: 0,
             per_ip_limit: 0,
+            hosted_delivery_enabled: false,
         },
     )
     .await;
@@ -1263,6 +1267,7 @@ async fn token_agent_and_socket_peer_rate_axes_are_independent() {
             per_token_limit: 0,
             per_agent_limit: 0,
             per_ip_limit: 1,
+            hosted_delivery_enabled: false,
         },
     )
     .await;
@@ -1349,6 +1354,7 @@ async fn token_agent_and_socket_peer_rate_axes_are_independent() {
             per_token_limit: 1,
             per_agent_limit: 1,
             per_ip_limit: 0,
+            hosted_delivery_enabled: false,
         },
     )
     .await;

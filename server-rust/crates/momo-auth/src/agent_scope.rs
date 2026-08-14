@@ -441,11 +441,17 @@ mod tests {
     #[test]
     fn the_mcp_only_scopes_open_no_rest_route() {
         for (method, path) in [
-            ("GET", format!("/v1/workspaces/{WS}/channels/{RUN}/messages")),
+            (
+                "GET",
+                format!("/v1/workspaces/{WS}/channels/{RUN}/messages"),
+            ),
             ("POST", "/v1/mcp/agent-port".to_string()),
             ("GET", format!("/v1/workspaces/{WS}/agents/{AGENT}/inbox")),
         ] {
-            assert_ne!(required_agent_scope(method, &path), Some(SCOPE_MESSAGES_READ));
+            assert_ne!(
+                required_agent_scope(method, &path),
+                Some(SCOPE_MESSAGES_READ)
+            );
             assert_ne!(
                 required_agent_scope(method, &path),
                 Some(SCOPE_AGENT_INBOX_READ)

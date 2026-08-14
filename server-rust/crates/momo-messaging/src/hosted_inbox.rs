@@ -336,6 +336,52 @@ pub async fn hosted_inbox_recipients_in_tx(
     Ok(rows)
 }
 
+/// Project one just-written message onto every hosted connection allowed to see
+/// it — **the producer contract for the `message` event kind**.
+///
+/// Two properties this placement buys, and they are the reason it is a function
+/// rather than a call site:
+///
+/// * **Same transaction as the source write.** A reference can never name a
+///   message that failed to commit, and a message can never commit without its
+///   references. That is also what closes the tombstone question: a delete is a
+///   tombstone rather than a row removal, and the reference is created while the
+///   message is still live, so a `RESTRICT` foreign key has nothing to refuse.
+/// * **The author never receives its own message.** A hosted agent posting
+///   through the Agent Port would otherwise read its own utterance back out of
+///   its inbox and answer it.
+///
+/// Callers are the product send spine
+/// ([`crate::send_message_with_mentions_in_tx`]) and the gateway completion,
+/// which writes the agent's final answer through the raw spine.
+pub async fn fan_out_message_reference_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    channel_id: Uuid,
+    message_id: Uuid,
+    author_member_id: Uuid,
+) -> Result<Vec<(Uuid, i64)>, DbError> {
+    let recipients = hosted_inbox_recipients_in_tx(conn, workspace_id, channel_id).await?;
+    let mut appended = Vec::new();
+    for (agent_member_id, connection_id) in recipients {
+        if agent_member_id == author_member_id {
+            continue;
+        }
+        appended.extend(
+            append_message_reference_in_tx(
+                conn,
+                workspace_id,
+                agent_member_id,
+                connection_id,
+                channel_id,
+                message_id,
+            )
+            .await?,
+        );
+    }
+    Ok(appended)
+}
+
 /// Append one **job** reference for one authenticated hosted connection.
 ///
 /// `source_outbox_id` and `source_run_id` are the two halves of one piece of

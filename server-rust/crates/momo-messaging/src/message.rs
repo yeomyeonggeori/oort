@@ -863,6 +863,29 @@ pub async fn send_message_with_mentions_in_tx(
         AttachmentPolicy::Project,
     )
     .await?;
+
+    // 5. **the hosted inbox projection** (ADR-0162 / HAP-E5) — in this
+    //    transaction, after the broadcast, and on the product send spine rather
+    //    than on `finish_send_in_tx`.
+    //
+    //    On the spine it would also project every internal system line this
+    //    server writes through the raw path (a paused-agent notice, a gateway
+    //    answer) and would silently change what HAP-E4's own conformance suite
+    //    is asserting about `send_message_in_tx`. Here it covers exactly the two
+    //    doors a person or an adapter actually speaks through — REST send and
+    //    the Agent Port's `oort_message_post` — and the gateway completion adds
+    //    its own call for the answer it writes.
+    //
+    //    A deduped retry is a no-op twice over: the reference append is itself
+    //    idempotent on `(connection, message)` and consumes no sequence.
+    crate::hosted_inbox::fan_out_message_reference_in_tx(
+        conn,
+        workspace_id,
+        sent.message.channel_id,
+        sent.message.id,
+        sent.message.author_member_id,
+    )
+    .await?;
     Ok(Ok(sent))
 }
 

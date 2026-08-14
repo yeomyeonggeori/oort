@@ -608,6 +608,10 @@ pub async fn send(
     let author_is_agent = principal.kind == momo_auth::PrincipalKind::Agent;
     let via_token_id = audit_via_token_id(&principal);
     let gateway_enabled = state.agent_gateway.enabled();
+    // ADR-0162 HAP-E5: the per-agent hosted selector's production gate, read
+    // beside the instance-global provider mode precisely so the two stay
+    // visibly independent knobs rather than one.
+    let hosted_delivery_enabled = state.agent_port.config.hosted_delivery_enabled;
     let context_max_messages = state.mentions.context_max_messages;
     // ADR-0158 D2 — the refinement block becomes props here, *before* the
     // transaction, because it is a pure rewrite of an already-validated value.
@@ -756,6 +760,7 @@ pub async fn send(
                         hlc_ts: sent.message.hlc_ts,
                         via_token_id,
                         gateway_enabled,
+                        hosted_delivery_enabled,
                         context_max_messages,
                         routing: requested_routing.as_ref(),
                     },

@@ -84,9 +84,10 @@ pub use dm::{
 pub use error::{MessagingError, ProvenanceRejected};
 pub use hosted_inbox::{
     append_job_reference_in_tx, append_message_reference_in_tx, append_run_reference_in_tx,
-    decode_hosted_inbox_cursor, encode_hosted_inbox_cursor, hosted_inbox_recipients_in_tx,
-    list_hosted_inbox_in_tx, HostedInboxCursor, HostedInboxCursorError, HostedInboxEvent,
-    HostedInboxPage, HostedInboxReadError, HOSTED_INBOX_LIMIT_DEFAULT, HOSTED_INBOX_LIMIT_MAX,
+    decode_hosted_inbox_cursor, encode_hosted_inbox_cursor, fan_out_message_reference_in_tx,
+    hosted_inbox_recipients_in_tx, list_hosted_inbox_in_tx, HostedInboxCursor,
+    HostedInboxCursorError, HostedInboxEvent, HostedInboxPage, HostedInboxReadError,
+    HOSTED_INBOX_LIMIT_DEFAULT, HOSTED_INBOX_LIMIT_MAX,
 };
 pub use identity::{
     active_workspace_role, can_observe_agent, clamp_roster_limit, get_member, get_workspace,
