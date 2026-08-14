@@ -5,6 +5,18 @@
 
 ---
 
+## 2026-08-14 (GPT 5.6 · momo-main) · #1365 Fable 리뷰 수리·PG18 runtime
+- Fable의 초안 판정 C0/H2/M3을 받아 scope/identity/audience/channel/profile/source binding과 authority-loss 직렬화를 수리했다.
+- hidden event는 scan watermark를 전진해 복원 시 재생되지 않고, message/run/outbox reference와 connection history FK를 DB에서 봉인했다.
+- Docker 재설치 뒤 fresh pinned PG18에서 concurrency·rollback·RLS·append-only·reconnect matrix를 PASS했고 전용 verifier를 runtime-db/runtime-agent에 연결했다.
+- MCP/tool·실제 producer wiring은 #1366에 남긴다. Rust/docs gate와 새 exact freeze 독립 검수 뒤에만 PR handoff한다.
+
+## 2026-08-14 (GPT 5.6 · momo-main) · #1364 랜딩·#1365 durable inbox 착수
+- #1364 PR #1373을 `track/engine@23038585`로 랜딩하고 exact-base policy/CI/C0H0M0, Issue·Project Done을 닫았다. 최신 Docker runtime은 host-blocked로 유지한다.
+- #1365를 최신 engine base에서 claim해 migration 070 counter/event RLS ledger와 AES-GCM connection-bound cursor를 구현했다.
+- active token/member/workspace/channel membership을 재검사하는 idempotent append와 visible-only pagination을 추가했고 unit/check/clippy/migration/PG-compile가 green이다.
+- 다음은 concurrency·rollback·RLS·reconnect PG18 RED와 runtime verifier/profile/STATUS이며, producer/MCP binding은 #1366 범위로 남긴다.
+
 ## 2026-08-13 (GPT 5.6 sol) · #1364 raw clientInfo 제거·redaction selftest 정본화
 - 정상/opaque 여부를 추측하지 않고 clientInfo name/version raw persistence를 전면 제거했다. capability는 finite boolean paths만 저장한다.
 - cleanup mode가 shared gate-failure redactor로 arbitrary JWT+prefix+digest 반사 raw0와 registry read-error fail-closed를 Docker 전에 직접 검증한다.

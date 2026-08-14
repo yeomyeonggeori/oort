@@ -343,18 +343,18 @@ mod tests {
     /// below is what forces it to be noticed at all, and it is what caught this
     /// one: presence was authored as 066 against a tree where 065 was the head.
     #[test]
-    fn discovers_contiguous_migrations_001_to_069() {
+    fn discovers_contiguous_migrations_001_to_070() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
         assert_eq!(
             migrations.len(),
-            69,
-            "expected 69 migrations under {}",
+            70,
+            "expected 70 migrations under {}",
             dir.display()
         );
         assert_eq!(migrations.first().unwrap().version, 1);
-        assert_eq!(migrations.last().unwrap().version, 69);
+        assert_eq!(migrations.last().unwrap().version, 70);
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
 
         for (i, migration) in migrations.iter().enumerate() {
