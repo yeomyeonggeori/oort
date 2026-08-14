@@ -217,7 +217,9 @@ pub async fn append_message_reference_in_tx(
             AND cm.channel_id=$2 AND cm.left_at IS NULL \
           WHERE hc.workspace_id=$1 AND hc.agent_member_id=$3 AND hc.id=$4 \
             AND hc.status='active' AND hc.proved_at IS NOT NULL \
-            AND t.kind='agent_bearer' AND t.credential_class='hosted_active' AND t.revoked_at IS NULL \
+            AND t.kind='agent_bearer' \
+            AND t.credential_class IN ('hosted_active','hosted_oauth_access') \
+            AND t.revoked_at IS NULL \
             AND (t.expires_at IS NULL OR t.expires_at > now()) \
             AND t.hosted_connection_id=hc.id AND t.actor_member_id=hc.agent_member_id \
             AND t.audience='/v1/mcp/agent-port' \
@@ -330,7 +332,9 @@ pub async fn hosted_inbox_recipients_in_tx(
             AND cm.channel_id=$2 AND cm.left_at IS NULL \
           WHERE hc.workspace_id=$1 \
             AND hc.status='active' AND hc.proved_at IS NOT NULL \
-            AND t.kind='agent_bearer' AND t.credential_class='hosted_active' AND t.revoked_at IS NULL \
+            AND t.kind='agent_bearer' \
+            AND t.credential_class IN ('hosted_active','hosted_oauth_access') \
+            AND t.revoked_at IS NULL \
             AND (t.expires_at IS NULL OR t.expires_at > now()) \
             AND t.hosted_connection_id=hc.id AND t.actor_member_id=hc.agent_member_id \
             AND t.audience='/v1/mcp/agent-port' \
@@ -494,7 +498,9 @@ async fn append_reference_in_tx(
             AND cm.channel_id=$2 AND cm.left_at IS NULL \
           WHERE hc.workspace_id=$1 AND hc.agent_member_id=$3 AND hc.id=$4 \
             AND hc.status='active' AND hc.proved_at IS NOT NULL \
-            AND t.kind='agent_bearer' AND t.credential_class='hosted_active' AND t.revoked_at IS NULL \
+            AND t.kind='agent_bearer' \
+            AND t.credential_class IN ('hosted_active','hosted_oauth_access') \
+            AND t.revoked_at IS NULL \
             AND (t.expires_at IS NULL OR t.expires_at > now()) \
             AND t.hosted_connection_id=hc.id AND t.actor_member_id=hc.agent_member_id \
             AND t.audience='/v1/mcp/agent-port' \
@@ -646,7 +652,9 @@ pub async fn list_hosted_inbox_in_tx(
              ON ap.workspace_id=hc.workspace_id AND ap.agent_member_id=hc.agent_member_id \
           WHERE hc.workspace_id=$1 AND hc.id=$2 AND hc.agent_member_id=$3 \
             AND hc.status='active' AND hc.proved_at IS NOT NULL \
-            AND t.kind='agent_bearer' AND t.credential_class='hosted_active' AND t.revoked_at IS NULL \
+            AND t.kind='agent_bearer' \
+            AND t.credential_class IN ('hosted_active','hosted_oauth_access') \
+            AND t.revoked_at IS NULL \
             AND (t.expires_at IS NULL OR t.expires_at > now()) \
             AND t.hosted_connection_id=hc.id AND t.actor_member_id=hc.agent_member_id \
             AND t.audience='/v1/mcp/agent-port' \

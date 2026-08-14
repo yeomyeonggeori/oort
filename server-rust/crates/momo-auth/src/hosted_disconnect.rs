@@ -756,7 +756,7 @@ pub async fn reconcile_dead_hosted_credential_in_tx(
           WHERE hc.workspace_id = $1 \
             AND hc.status = 'active' \
             AND t.kind = 'agent_bearer' \
-            AND t.credential_class = 'hosted_active' \
+            AND t.credential_class IN ('hosted_active','hosted_oauth_access') \
             AND t.token_hash = digest($2::text, 'sha256') \
             AND ( \
               t.revoked_at IS NOT NULL \

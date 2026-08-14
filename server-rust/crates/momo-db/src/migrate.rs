@@ -354,19 +354,29 @@ mod tests {
     /// 073 is that wave's hygiene follow-up (#1375, #1386): the ledger's delete
     /// surface and the disconnect's two unguarded doors — an INSERT that
     /// arrives already terminal, and leaving the terminal at all.
+    ///
+    /// 074 is ADR-0162 증보 1's `hosted_agent_oauth` (HAP-E7): the OAuth 2.1
+    /// authorization-request ledger, the two OAuth hosted credential classes,
+    /// and the trigger that makes a credential class and its connection's
+    /// `auth_mode` agree — which is where the "no bearer downgrade" invariant
+    /// stops being a convention. It is the wave's second numbering collision
+    /// (see 066/067/068 above): the hygiene batch above and this one each
+    /// claimed 073 in parallel, so whichever landed second — this one —
+    /// renumbered to 074 on rebase rather than leaving a gap, and this
+    /// assertion is what forced that to be noticed.
     #[test]
-    fn discovers_contiguous_migrations_001_to_073() {
+    fn discovers_contiguous_migrations_001_to_074() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
         assert_eq!(
             migrations.len(),
-            73,
-            "expected 73 migrations under {}",
+            74,
+            "expected 74 migrations under {}",
             dir.display()
         );
         assert_eq!(migrations.first().unwrap().version, 1);
-        assert_eq!(migrations.last().unwrap().version, 73);
+        assert_eq!(migrations.last().unwrap().version, 74);
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
 
         for (i, migration) in migrations.iter().enumerate() {

@@ -218,7 +218,23 @@ pub(crate) async fn authenticate_and_admit_agent_port_credential(
         return Err(AgentPortAuthError::InvalidToken);
     };
     let pairing = momo_auth::pairing_workspace_id(raw_token);
-    let Some(claimed_workspace) = agent_bearer_workspace_id(raw_token).or(pairing) else {
+    // ADR-0162 증보 1 / HAP-E7. The third envelope, and the reason it IS a third
+    // envelope rather than a reused one: the stored digest covers the whole
+    // string, so the same secret bytes re-labelled as `momo_agent_v1` hash to
+    // something no row carries. A static bearer cannot be presented as an OAuth
+    // credential, an OAuth credential cannot be presented as a static bearer,
+    // and a refresh credential or an authorization code is neither.
+    //
+    // While the authorization server is disabled this branch is not taken at
+    // all, so an OAuth envelope is refused by exactly the `invalid_token`
+    // challenge every other unrecognised string gets. The flag is therefore not
+    // probeable from here, and — this is the part that matters — the static
+    // path below is byte-identical whether the flag is on or off.
+    let oauth_enabled = state.agent_port.config.oauth.is_enabled();
+    let oauth = oauth_enabled
+        .then(|| momo_auth::hosted_oauth_access_workspace_id(raw_token))
+        .flatten();
+    let Some(claimed_workspace) = agent_bearer_workspace_id(raw_token).or(pairing).or(oauth) else {
         return Err(AgentPortAuthError::InvalidToken);
     };
     if pairing.is_some() && !protocol_valid {
@@ -248,14 +264,29 @@ pub(crate) async fn authenticate_and_admit_agent_port_credential(
                     }
                 }
             } else {
-                let resolution = resolve_agent_bearer_in_tx(
-                    conn,
-                    claimed_workspace,
-                    &raw_token,
-                    momo_auth::SCOPE_AGENT_PORT_CONNECT,
-                )
-                .await
-                .map_err(DbError::from)?;
+                // One resolution shape for both credential classes, so the
+                // admission, reconciliation, proof and audit below are written
+                // once. What differs is only WHICH row may be found: the OAuth
+                // lookup matches `hosted_oauth_access` and nothing else.
+                let resolution = if oauth.is_some() {
+                    momo_auth::resolve_hosted_oauth_access_in_tx(
+                        conn,
+                        claimed_workspace,
+                        &raw_token,
+                        momo_auth::SCOPE_AGENT_PORT_CONNECT,
+                    )
+                    .await
+                    .map_err(DbError::from)?
+                } else {
+                    resolve_agent_bearer_in_tx(
+                        conn,
+                        claimed_workspace,
+                        &raw_token,
+                        momo_auth::SCOPE_AGENT_PORT_CONNECT,
+                    )
+                    .await
+                    .map_err(DbError::from)?
+                };
                 match resolution {
                     AgentBearerResolution::Active {
                         identity,

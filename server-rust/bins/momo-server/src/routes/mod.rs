@@ -5,6 +5,7 @@ pub mod agent_gateway;
 pub mod agent_mentions;
 /// ADR-0162 / HAP-E2 — stateless dual-era MCP Agent Port.
 pub mod agent_port;
+pub mod agent_port_oauth;
 pub mod agent_port_tools;
 pub mod agent_runs;
 pub mod agents;
