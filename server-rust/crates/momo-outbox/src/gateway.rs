@@ -167,8 +167,26 @@ pub async fn claim_gateway_jobs_in_tx(
 
 /// The **hosted** half of the same claim (ADR-0162 / HAP-E5).
 ///
-/// One predicate the managed branch does not carry: the payload's `run_id` must
-/// be uuid-shaped. A hosted caller acts on work through a sealed handle that
+/// **The human's exact-channel grant is re-checked here, at claim time.** A
+/// hosted connection is confirmed for a named set of channels (HAP-E3), and the
+/// job payload names the channel the work came from — so a job from a channel
+/// outside `approved_channel_ids` is simply not a candidate. Two properties
+/// follow, and both are the reason this lives in the claim rather than only in
+/// the producer:
+///
+/// * an unapproved-channel job is **never leased**. It stays `pending` and
+///   invisible instead of being handed over and withheld, so its prompt and
+///   recent messages never cross the wire;
+/// * the check reads the connection row **live, in the claiming transaction**,
+///   so narrowing the approval after a job was created stops the next claim —
+///   a producer-side check alone could only ever describe the past.
+///
+/// The comparison unnests the approved array and folds case rather than casting
+/// the payload text to `uuid`, for the same reason the other id comparisons do:
+/// a cast raises, and one malformed row must not fail the tenant's whole claim.
+///
+/// One further predicate the managed branch does not carry: the payload's
+/// `run_id` must be uuid-shaped. A hosted caller acts on work through a sealed handle that
 /// *contains* the run, so a row without a usable run id could be claimed and
 /// leased but never renewed, released or completed — and because a claim mints
 /// a fresh lease every cycle, it would be re-leased forever while being
@@ -268,6 +286,11 @@ async fn claim_gateway_jobs(
                      AND t.actor_member_id = hc.agent_member_id \
                      AND t.audience = '/v1/mcp/agent-port' \
                      AND 'agent:jobs:read' = ANY(t.scopes) \
+                     AND EXISTS ( \
+                       SELECT 1 FROM unnest(hc.approved_channel_ids) AS approved(channel_id) \
+                        WHERE lower(approved.channel_id::text) \
+                              = lower(o.payload->>'channel_id') \
+                     ) \
                 )) \
               ) \
             ORDER BY o.id ASC \

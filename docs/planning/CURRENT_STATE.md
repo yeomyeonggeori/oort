@@ -16,6 +16,8 @@
 >
 > **독립 리뷰 1회차(C0/H1/M2/L5) 수리 완료:** H1(gateway completion의 hosted inbox fan-out 누락)은 `complete_gateway_run_in_tx`에 같은 tx 호출을 추가하고 REST 왕복 conformance로 고정했다. M1은 `lower()` 위드닝의 red proof를 **관리형 REST 표면**에 세웠고(배포 창 backlog 체크리스트는 STATUS에 명시), M2는 `MOMO_HOSTED_DELIVERY_ENABLED` 수용을 `#[cfg(debug_assertions)]`로 감싸 release 빌드에서 구조적으로 닫았다(#1367이 cfg 제거 소유). L1은 complete의 거절 순서를 base와 동일하게 복원(lease shape 검사를 approval-hold 뒤로 되돌림), L2는 cursor 상한을 스키마와 256으로 정렬, L3는 hosted claim이 uuid 형태가 아닌 `run_id` 행을 애초에 lease하지 않도록 SQL 술어를 추가해 무한 재-lease 루프를 제거했다.
 >
+> **독립 리뷰 2회차(sol freeze — 1회차 수리 전건 확인, 신규 H1/M2) 수리 완료:** H(승인 밖 채널 hosted job 노출)는 claim SQL의 live `approved_channel_ids` 술어(권위) + selector의 `hosted_channel_unapproved` skip(조기 차단) + `leaseHandle`에 channel_id 봉인(이미 쥔 lease의 중도 회수)으로 3중 결속했고, claim 술어만 빼도 적대 테스트가 RED임을 확인했다. M(음수 토큰)은 스키마·기록 경계 양쪽에서 거절(ledger CHECK는 #1375 후보). M(닫힌 스키마 미집행)은 게시된 input schema를 `momo-mcp`가 그대로 집행하도록 바꿔 오타 필드·범위 밖 수치가 domain port에 도달하지 못하게 했고, 위반 응답은 adapter invalid-arguments와 byte 동일이다.
+>
 > **다음 행동:** Fable 기획검수 → sol 독립 freeze 리뷰(exact commit C/H/M=0) → push/PR(track/engine)/PR CI/머지. 워커는 로컬 commit 동결까지만 수행했다.
 >
 > **2026-08-14 스냅샷 35 (GPT 5.6 · momo-main — #1365 durable inbox runtime closure).** 스냅샷 34를 supersede한다.

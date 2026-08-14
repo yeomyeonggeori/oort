@@ -268,21 +268,38 @@ pub(crate) async fn route_agent_mentions_in_tx(
                 .await?;
                 continue;
             }
-            match agent.hosted_active_connection_id {
-                Some(connection_id) => Some(connection_id),
-                None => {
-                    skip(
-                        &mut *conn,
-                        &send,
-                        &trigger,
-                        agent,
-                        *addressing,
-                        "hosted_connection_unavailable",
-                    )
-                    .await?;
-                    continue;
-                }
+            let Some(connection_id) = agent.hosted_active_connection_id else {
+                skip(
+                    &mut *conn,
+                    &send,
+                    &trigger,
+                    agent,
+                    *addressing,
+                    "hosted_connection_unavailable",
+                )
+                .await?;
+                continue;
+            };
+            // The human confirmed this connection for a NAMED set of channels
+            // (HAP-E3). Channel membership is not that grant: an agent can be a
+            // member of a room the operator never approved for hosted delivery,
+            // and creating a job there would put that room's prompt and recent
+            // messages in front of a runtime nobody authorized for it. The
+            // claim re-checks this live and is the authority; skipping here
+            // means the job is never written at all.
+            if !agent.hosted_channel_approved {
+                skip(
+                    &mut *conn,
+                    &send,
+                    &trigger,
+                    agent,
+                    *addressing,
+                    "hosted_channel_unapproved",
+                )
+                .await?;
+                continue;
             }
+            Some(connection_id)
         } else {
             None
         };
@@ -669,6 +686,7 @@ mod tests {
             paused: false,
             hosted_delivery_disabled: false,
             hosted_active_connection_id: None,
+            hosted_channel_approved: false,
             is_channel_member: true,
         }
     }

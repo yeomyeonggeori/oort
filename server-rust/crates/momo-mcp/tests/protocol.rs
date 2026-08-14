@@ -1073,3 +1073,122 @@ fn every_tool_failure_is_one_of_five_fixed_answers() {
         assert!(body["error"].get("data").is_none());
     }
 }
+
+/// **The two layers that can refuse arguments answer identically.**
+///
+/// Schema enforcement lives in the protocol crate and domain refusals live in
+/// the adapter. If those produced different envelopes, a caller could tell
+/// "your field name is wrong" from "your value was rejected downstream" — a new
+/// enumeration oracle bolted onto a surface built to avoid them.
+#[test]
+fn a_schema_refusal_is_byte_identical_to_the_adapter_invalid_arguments() {
+    let view = full_view();
+    let admitted = invoke_with(
+        &modern("tools/call", json!(4), json!({"name": "oort_jobs_claim"})),
+        Some(MODERN_PROTOCOL_VERSION),
+        Some("tools/call"),
+        Some("oort_jobs_claim"),
+        &view,
+    );
+    let Outcome::Tool(call) = admitted else {
+        panic!("admitted");
+    };
+    let adapter_shape = tool_failure(&call, ToolFailure::InvalidArguments);
+
+    let schema_refusal = response_of(invoke_with(
+        &modern(
+            "tools/call",
+            json!(4),
+            json!({"name": "oort_jobs_claim", "arguments": {"limitt": 3}}),
+        ),
+        Some(MODERN_PROTOCOL_VERSION),
+        Some("tools/call"),
+        Some("oort_jobs_claim"),
+        &view,
+    ));
+    assert_eq!(schema_refusal.status, adapter_shape.status);
+    assert_eq!(json_body(&schema_refusal), json_body(&adapter_shape));
+}
+
+/// Every published constraint is enforced, and every violation is the same
+/// verdict. Table-driven so a new catalog keyword cannot be added without a
+/// case here.
+#[test]
+fn the_published_schema_is_enforced_field_by_field() {
+    use momo_mcp::validate_arguments;
+
+    let tool = |name: &str| {
+        momo_mcp::TOOL_CATALOG
+            .iter()
+            .find(|tool| tool.name == name)
+            .expect("catalog tool")
+    };
+    let post = tool("oort_message_post");
+    let good = json!({
+        "channelId": "5b1f4a2e-0000-4000-8000-000000000001",
+        "clientMsgId": "5b1f4a2e-0000-4000-8000-000000000002",
+        "body": "hello"
+    });
+    assert!(validate_arguments(post, &good).is_ok());
+    // `null` is how the wire omits an optional field.
+    let mut with_null = good.clone();
+    with_null["rootId"] = Value::Null;
+    assert!(validate_arguments(post, &with_null).is_ok());
+
+    for (tool_name, arguments, why) in [
+        ("oort_message_post", json!({}), "required fields missing"),
+        (
+            "oort_message_post",
+            json!({"channelId": "5b1f4a2e-0000-4000-8000-000000000001",
+                   "clientMsgId": "5b1f4a2e-0000-4000-8000-000000000002",
+                   "body": "hi", "rootID": "5b1f4a2e-0000-4000-8000-000000000003"}),
+            "unknown field",
+        ),
+        (
+            "oort_message_post",
+            json!({"channelId": "nope",
+                   "clientMsgId": "5b1f4a2e-0000-4000-8000-000000000002",
+                   "body": "hi"}),
+            "uuid format",
+        ),
+        (
+            "oort_message_post",
+            json!({"channelId": "5b1f4a2e-0000-4000-8000-000000000001",
+                   "clientMsgId": "5b1f4a2e-0000-4000-8000-000000000002",
+                   "body": ""}),
+            "minLength",
+        ),
+        ("oort_inbox_read", json!({"limit": 0}), "minimum"),
+        ("oort_inbox_read", json!({"limit": 101}), "maximum"),
+        ("oort_inbox_read", json!({"limit": 1.5}), "integer type"),
+        (
+            "oort_jobs_claim",
+            json!({"limit": "10"}),
+            "string for integer",
+        ),
+        (
+            "oort_run_event",
+            json!({"leaseHandle": "x", "status": "succeeded"}),
+            "enum",
+        ),
+        (
+            "oort_run_complete",
+            json!({"leaseHandle": "x", "status": "succeeded",
+                   "usage": {"promptTokens": -1}}),
+            "nested minimum",
+        ),
+        (
+            "oort_run_complete",
+            json!({"leaseHandle": "x", "status": "succeeded",
+                   "usage": {"prompt_tokens": 1}}),
+            "nested unknown field",
+        ),
+        ("oort_jobs_claim", json!([]), "arguments must be an object"),
+    ] {
+        assert_eq!(
+            validate_arguments(tool(tool_name), &arguments),
+            Err(ToolFailure::InvalidArguments),
+            "{tool_name}: {why}"
+        );
+    }
+}

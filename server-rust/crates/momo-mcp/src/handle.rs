@@ -34,8 +34,8 @@ const HANDLE_PREFIX: &str = "momo_lease_v1.";
 const HANDLE_DOMAIN: &[u8] = b"oort/agent-port/lease-handle/v1";
 const HANDLE_VERSION: u8 = 1;
 const NONCE_BYTES: usize = 12;
-/// version + workspace + agent + connection + run + job id.
-const PLAINTEXT_BYTES: usize = 1 + 16 + 16 + 16 + 16 + 8;
+/// version + workspace + agent + connection + channel + run + job id.
+const PLAINTEXT_BYTES: usize = 1 + 16 + 16 + 16 + 16 + 16 + 8;
 const ENVELOPE_BYTES: usize = NONCE_BYTES + PLAINTEXT_BYTES + 16;
 
 /// Everything the gateway domain needs, and nothing the client may learn.
@@ -44,6 +44,11 @@ pub struct LeaseHandle {
     pub workspace_id: Uuid,
     pub agent_member_id: Uuid,
     pub connection_id: Uuid,
+    /// The channel the work came from. Sealed in so a later verb can re-check
+    /// the human's exact-channel grant without trusting a client-supplied id —
+    /// an approval narrowed after the claim must stop renew/release/event/
+    /// complete too, not only the next claim.
+    pub channel_id: Uuid,
     pub run_id: Uuid,
     pub job_id: i64,
     pub lease_id: Uuid,
@@ -83,6 +88,7 @@ pub fn encode_lease_handle(handle: LeaseHandle, secret: &str) -> Result<String, 
     plaintext.extend_from_slice(handle.workspace_id.as_bytes());
     plaintext.extend_from_slice(handle.agent_member_id.as_bytes());
     plaintext.extend_from_slice(handle.connection_id.as_bytes());
+    plaintext.extend_from_slice(handle.channel_id.as_bytes());
     plaintext.extend_from_slice(handle.run_id.as_bytes());
     plaintext.extend_from_slice(&handle.job_id.to_be_bytes());
 
@@ -150,9 +156,10 @@ pub fn decode_lease_handle(encoded: &str, secret: &str) -> Result<LeaseHandle, L
         Uuid::from_slice(&plaintext[17..33]).map_err(|_| LeaseHandleError::Invalid)?;
     let connection_id =
         Uuid::from_slice(&plaintext[33..49]).map_err(|_| LeaseHandleError::Invalid)?;
-    let run_id = Uuid::from_slice(&plaintext[49..65]).map_err(|_| LeaseHandleError::Invalid)?;
+    let channel_id = Uuid::from_slice(&plaintext[49..65]).map_err(|_| LeaseHandleError::Invalid)?;
+    let run_id = Uuid::from_slice(&plaintext[65..81]).map_err(|_| LeaseHandleError::Invalid)?;
     let job_id = i64::from_be_bytes(
-        plaintext[65..73]
+        plaintext[81..89]
             .try_into()
             .map_err(|_| LeaseHandleError::Invalid)?,
     );
@@ -163,6 +170,7 @@ pub fn decode_lease_handle(encoded: &str, secret: &str) -> Result<LeaseHandle, L
         workspace_id,
         agent_member_id,
         connection_id,
+        channel_id,
         run_id,
         job_id,
         lease_id,
@@ -178,6 +186,7 @@ mod tests {
             workspace_id: Uuid::from_u128(1),
             agent_member_id: Uuid::from_u128(2),
             connection_id: Uuid::from_u128(3),
+            channel_id: Uuid::from_u128(7),
             run_id: Uuid::from_u128(4),
             job_id: 4242,
             lease_id: Uuid::from_u128(5),
@@ -192,6 +201,7 @@ mod tests {
         assert!(encoded.starts_with(HANDLE_PREFIX));
         assert!(!encoded.contains("4242"));
         assert!(!encoded.contains(&handle.run_id.to_string()));
+        assert!(!encoded.contains(&handle.channel_id.to_string()));
     }
 
     #[test]

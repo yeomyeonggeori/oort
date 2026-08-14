@@ -599,11 +599,26 @@ async fn jobs_claim(
                 let Ok(run_id) = Uuid::parse_str(job.run_id_field()) else {
                     continue;
                 };
+                // The channel the work came from, sealed into the handle so
+                // every later verb can re-check the human's exact-channel
+                // grant. Unreachable-but-defensive for the same reason the run
+                // id is: the claim already required this channel to be in the
+                // live approved set, and a handle without one could not carry
+                // the grant forward.
+                let Some(job_channel_id) = job
+                    .payload
+                    .get("channel_id")
+                    .and_then(Value::as_str)
+                    .and_then(|raw| Uuid::parse_str(raw).ok())
+                else {
+                    continue;
+                };
                 let handle = encode_lease_handle(
                     LeaseHandle {
                         workspace_id: caller.workspace_id,
                         agent_member_id: caller.agent_member_id,
                         connection_id: identity.connection_id,
+                        channel_id: job_channel_id,
                         run_id,
                         job_id: job.id,
                         lease_id: job.lease_id,
@@ -656,6 +671,11 @@ fn bound_handle(
     if handle.workspace_id != caller.workspace_id
         || handle.agent_member_id != caller.agent_member_id
         || handle.connection_id != identity.connection_id
+        // The human's exact-channel grant, re-read from the connection inside
+        // this transaction. A lease taken while a channel was approved stops
+        // authorizing the moment the approval is narrowed, so a revocation
+        // reaches work already in flight and not merely the next claim.
+        || !identity.approved_channel_ids.contains(&handle.channel_id)
     {
         return Err(ToolFailure::NotAuthorized);
     }
@@ -848,12 +868,22 @@ async fn run_complete(
     Ok(json!({"status": status, "messageId": message_id, "seq": seq}))
 }
 
-/// One reported token count. `i32` is the ledger's own width, so a value that
-/// does not fit is a bad argument here rather than a silent truncation in the
-/// row that gets billed.
+/// One reported token count.
+///
+/// Two bounds, both of them the ledger's: `i32` is its column width, so a value
+/// that does not fit is a bad argument here rather than a silent truncation in
+/// the row that gets billed; and a **negative** count is refused because
+/// `RunUsageReport::resolve` and `record_run_usage_in_tx` would carry it
+/// straight into a workspace's usage totals and subtract from them. The
+/// published schema already says `minimum: 0` — this is that same rule enforced
+/// a second time, at the boundary that writes.
+///
+/// The landed `usage_ledger` carries no CHECK of its own; adding one to a table
+/// this goal does not own belongs to #1375's hygiene pass.
 fn bounded_token_count(usage: &Map<String, Value>, key: &str) -> Result<Option<i32>, ToolFailure> {
     match optional_i64(usage, key)? {
         None => Ok(None),
+        Some(value) if value < 0 => Err(ToolFailure::InvalidArguments),
         Some(value) => i32::try_from(value)
             .map(Some)
             .map_err(|_| ToolFailure::InvalidArguments),
@@ -995,19 +1025,21 @@ mod tests {
             agent_member_id: Uuid::from_u128(2),
             token_id: Uuid::from_u128(3),
         };
+        let approved_channel = Uuid::from_u128(7);
         let identity = HostedToolIdentity {
             connection_id: Uuid::from_u128(4),
             agent_member_id: caller.agent_member_id,
             token_id: caller.token_id,
             token_scopes: Vec::new(),
             approved_scopes: Vec::new(),
-            approved_channel_ids: Vec::new(),
+            approved_channel_ids: vec![approved_channel],
         };
         let handle = encode_lease_handle(
             LeaseHandle {
                 workspace_id: caller.workspace_id,
                 agent_member_id: caller.agent_member_id,
                 connection_id: identity.connection_id,
+                channel_id: approved_channel,
                 run_id: Uuid::from_u128(5),
                 job_id: 11,
                 lease_id: Uuid::from_u128(6),
@@ -1016,6 +1048,17 @@ mod tests {
         )
         .unwrap();
         assert!(bound_handle(&identity, caller, &handle, "secret").is_ok());
+
+        // Narrowing the human's approval retires a lease already in hand.
+        let narrowed = HostedToolIdentity {
+            approved_channel_ids: Vec::new(),
+            ..identity.clone()
+        };
+        assert_eq!(
+            bound_handle(&narrowed, caller, &handle, "secret"),
+            Err(ToolFailure::NotAuthorized),
+            "a revoked channel approval must stop work already leased"
+        );
 
         let other_connection = HostedToolIdentity {
             connection_id: Uuid::from_u128(99),

@@ -54,6 +54,12 @@ impl PartialEq for ToolDescriptor {
 impl Eq for ToolDescriptor {}
 
 impl ToolDescriptor {
+    /// The tool's published input schema — the same object `tools/list`
+    /// advertises and the same object [`validate_arguments`] enforces.
+    pub fn input_schema(&self) -> Value {
+        (self.schema)()
+    }
+
     /// The MCP `tools/list` entry for this tool.
     pub fn listing(&self) -> Value {
         json!({
@@ -341,6 +347,127 @@ impl ToolView {
 
 fn has_scope(scopes: &[String], required: &str) -> bool {
     scopes.iter().any(|scope| scope == required)
+}
+
+/// Enforce a tool's **published** schema against the arguments it was called
+/// with, so what the catalog advertises and what execution accepts are one
+/// thing rather than two that agree today.
+///
+/// The motivating bug is quiet rather than loud: `oort_message_post` declares
+/// `rootId`, a client sends `rootID`, and a lenient reader posts an unthreaded
+/// message while the caller believes it opened a thread. `additionalProperties:
+/// false` was already published; this is what makes it true.
+///
+/// Deliberately a small subset of JSON Schema — exactly the keywords
+/// [`TOOL_CATALOG`] uses (`type`, `required`, `properties`,
+/// `additionalProperties: false`, `enum`, `minimum`/`maximum`,
+/// `minLength`/`maxLength`, `format: uuid`) — because a general validator would
+/// be a second implementation of a standard, and every keyword it supported but
+/// the catalog never used would be untested surface.
+///
+/// Every violation is the one [`ToolFailure::InvalidArguments`], never a
+/// per-cause code: which rule a call broke is not something an unauthorized
+/// caller should be able to enumerate.
+pub fn validate_arguments(tool: &ToolDescriptor, arguments: &Value) -> Result<(), ToolFailure> {
+    validate_against(&tool.input_schema(), arguments)
+}
+
+fn validate_against(schema: &Value, value: &Value) -> Result<(), ToolFailure> {
+    let invalid = ToolFailure::InvalidArguments;
+    match schema.get("type").and_then(Value::as_str) {
+        Some("object") => {
+            let object = value.as_object().ok_or(invalid)?;
+            let properties = schema
+                .get("properties")
+                .and_then(Value::as_object)
+                .ok_or(invalid)?;
+            if schema.get("additionalProperties") == Some(&Value::Bool(false)) {
+                for key in object.keys() {
+                    if !properties.contains_key(key) {
+                        return Err(invalid);
+                    }
+                }
+            }
+            if let Some(required) = schema.get("required").and_then(Value::as_array) {
+                for name in required {
+                    let name = name.as_str().ok_or(invalid)?;
+                    // A required key present as `null` is absent: the catalog
+                    // never declares a nullable required field.
+                    if !matches!(object.get(name), Some(present) if !present.is_null()) {
+                        return Err(invalid);
+                    }
+                }
+            }
+            for (key, property) in properties {
+                match object.get(key) {
+                    // An optional key may be omitted, and `null` is the wire's
+                    // way of omitting it.
+                    None | Some(Value::Null) => {}
+                    Some(present) => validate_against(property, present)?,
+                }
+            }
+            Ok(())
+        }
+        Some("string") => {
+            let text = value.as_str().ok_or(invalid)?;
+            if let Some(min) = schema.get("minLength").and_then(Value::as_u64) {
+                if (text.chars().count() as u64) < min {
+                    return Err(invalid);
+                }
+            }
+            if let Some(max) = schema.get("maxLength").and_then(Value::as_u64) {
+                if (text.chars().count() as u64) > max {
+                    return Err(invalid);
+                }
+            }
+            if schema.get("format").and_then(Value::as_str) == Some("uuid") && !is_uuid_shaped(text)
+            {
+                return Err(invalid);
+            }
+            if let Some(allowed) = schema.get("enum").and_then(Value::as_array) {
+                if !allowed.iter().any(|candidate| candidate == value) {
+                    return Err(invalid);
+                }
+            }
+            Ok(())
+        }
+        Some("integer") => {
+            // `as_i64` also rejects a fractional or float-shaped number, which
+            // `integer` forbids and a lenient reader would have truncated.
+            let number = value.as_i64().filter(|_| value.is_i64()).ok_or(invalid)?;
+            if let Some(min) = schema.get("minimum").and_then(Value::as_i64) {
+                if number < min {
+                    return Err(invalid);
+                }
+            }
+            if let Some(max) = schema.get("maximum").and_then(Value::as_i64) {
+                if number > max {
+                    return Err(invalid);
+                }
+            }
+            Ok(())
+        }
+        // No catalog schema uses another type; refusing rather than passing
+        // keeps an unvalidated shape from ever reaching a domain port.
+        _ => Err(invalid),
+    }
+}
+
+/// The canonical hyphenated uuid shape, case-insensitive. Purely lexical — the
+/// adapter still parses the value, and this only stops a wrong shape from
+/// reaching it.
+fn is_uuid_shaped(value: &str) -> bool {
+    let groups = [8, 4, 4, 4, 12];
+    let mut parts = value.split('-');
+    for expected in groups {
+        let Some(part) = parts.next() else {
+            return false;
+        };
+        if part.len() != expected || !part.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            return false;
+        }
+    }
+    parts.next().is_none()
 }
 
 /// The closed set of tool failures that may cross the wire.

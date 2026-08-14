@@ -16,9 +16,9 @@ pub mod tools;
 
 pub use handle::{decode_lease_handle, encode_lease_handle, LeaseHandle, LeaseHandleError};
 pub use tools::{
-    ToolCapability, ToolDescriptor, ToolFailure, ToolView, TOOL_CATALOG, TOOL_CONVERSATION_READ,
-    TOOL_INBOX_READ, TOOL_JOBS_CLAIM, TOOL_JOB_RELEASE, TOOL_JOB_RENEW, TOOL_MESSAGE_POST,
-    TOOL_RUN_COMPLETE, TOOL_RUN_EVENT,
+    validate_arguments, ToolCapability, ToolDescriptor, ToolFailure, ToolView, TOOL_CATALOG,
+    TOOL_CONVERSATION_READ, TOOL_INBOX_READ, TOOL_JOBS_CLAIM, TOOL_JOB_RELEASE, TOOL_JOB_RENEW,
+    TOOL_MESSAGE_POST, TOOL_RUN_COMPLETE, TOOL_RUN_EVENT,
 };
 
 pub const MODERN_PROTOCOL_VERSION: &str = "2026-07-28";
@@ -462,6 +462,15 @@ fn admit_tool_call(
         .get("arguments")
         .cloned()
         .unwrap_or_else(|| Value::Object(serde_json::Map::new()));
+    // The published schema is enforced HERE, before the call becomes an
+    // invocation — so an unknown field or an out-of-bounds number never reaches
+    // a domain port, and `additionalProperties: false` means what it says.
+    // The answer is byte-identical to the adapter's own invalid-arguments
+    // failure (pinned by a test), so a caller cannot tell which layer refused.
+    if let Err(failure) = tools::validate_arguments(tool, &arguments) {
+        let (status, code, message) = failure.wire();
+        return error(status, id, code, message, None);
+    }
     *call = Some(ToolCall {
         id: id.clone(),
         era,

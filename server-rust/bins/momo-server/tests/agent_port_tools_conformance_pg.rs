@@ -1576,3 +1576,291 @@ async fn a_managed_mention_job_survives_the_whole_rest_gateway_round_trip() {
     .unwrap();
     assert_eq!(managed_events, 0);
 }
+
+// ---------------------------------------------------------------------------
+// (6) the human's exact-channel grant reaches the JOB path
+//
+// HAP-E3 confirms a connection for a NAMED set of channels. Channel membership
+// is not that grant — an agent can be a member of a room the operator never
+// approved for hosted delivery. The E4 inbox already refused such a room; this
+// pins that the job path refuses it too, at both layers and independently.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn an_unapproved_channel_never_reaches_the_hosted_job_path() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let handle = hosted_handle(&su, fixture.hosted_agent).await;
+
+    // (a) The agent is a member of `private_channel` but the human approved
+    //     only `channel`. A mention there must produce nothing at all.
+    let sent: Value = client
+        .post(format!(
+            "{base}/v1/workspaces/{}/channels/{}/messages",
+            fixture.workspace, fixture.private_channel
+        ))
+        .bearer_auth(&fixture.human_jwt)
+        .json(&json!({"clientMsgId": Uuid::new_v4(), "body": format!("@{handle} secret room")}))
+        .send()
+        .await
+        .expect("mention send")
+        .json()
+        .await
+        .expect("mention body");
+    assert!(sent["id"].is_string(), "the human's message still lands");
+
+    let reason: String = sqlx::query_scalar(
+        "SELECT detail->>'reason' FROM audit_log WHERE workspace_id=$1 \
+           AND action='agent.mention.skipped' ORDER BY created_at DESC LIMIT 1",
+    )
+    .bind(fixture.workspace)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(reason, "hosted_channel_unapproved");
+
+    let (status, claimed) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_jobs_claim",
+        json!({}),
+    )
+    .await;
+    assert_eq!(status, 200, "{claimed}");
+    assert_eq!(
+        structured(&claimed)["jobs"],
+        json!([]),
+        "an unapproved room's prompt must never be claimable"
+    );
+    let unapproved_inbox: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM hosted_agent_inbox_event WHERE workspace_id=$1 \
+           AND connection_id=$2 AND source_channel_id=$3",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_connection)
+    .bind(fixture.private_channel)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(unapproved_inbox, 0, "and the inbox is untouched");
+
+    // (b) A job created while a channel WAS approved must stop being claimable
+    //     the moment the approval is narrowed — the claim re-reads the grant,
+    //     so this holds even though the selector already ran and said yes.
+    //     Proved by approving the private channel, producing a job there, and
+    //     narrowing back before the claim.
+    sqlx::query(
+        "UPDATE hosted_agent_connection SET approved_channel_ids=ARRAY[$3,$4]::uuid[] \
+         WHERE workspace_id=$1 AND id=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_connection)
+    .bind(fixture.channel)
+    .bind(fixture.private_channel)
+    .execute(&su)
+    .await
+    .unwrap();
+    client
+        .post(format!(
+            "{base}/v1/workspaces/{}/channels/{}/messages",
+            fixture.workspace, fixture.private_channel
+        ))
+        .bearer_auth(&fixture.human_jwt)
+        .json(&json!({"clientMsgId": Uuid::new_v4(), "body": format!("@{handle} now approved")}))
+        .send()
+        .await
+        .expect("mention send");
+    let created: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM outbox WHERE workspace_id=$1 AND kind='agent_job' \
+           AND partition_key=$2 AND lower(payload->>'channel_id')=lower($3::text)",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_agent)
+    .bind(fixture.private_channel.to_string())
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(created, 1, "the approved room really did produce a job");
+
+    sqlx::query(
+        "UPDATE hosted_agent_connection SET approved_channel_ids=ARRAY[$3]::uuid[] \
+         WHERE workspace_id=$1 AND id=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_connection)
+    .bind(fixture.channel)
+    .execute(&su)
+    .await
+    .unwrap();
+    let (status, after_narrowing) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_jobs_claim",
+        json!({}),
+    )
+    .await;
+    assert_eq!(status, 200);
+    assert_eq!(
+        structured(&after_narrowing)["jobs"],
+        json!([]),
+        "narrowing the approval must stop the claim, not merely the producer"
+    );
+    let leased: Option<Uuid> = sqlx::query_scalar(
+        "SELECT lease_owner FROM outbox WHERE workspace_id=$1 AND kind='agent_job' \
+           AND partition_key=$2 AND lower(payload->>'channel_id')=lower($3::text)",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_agent)
+    .bind(fixture.private_channel.to_string())
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(leased, None, "and it is left pending, never leased");
+
+    // (c) No over-narrowing: the approved channel still round-trips.
+    client
+        .post(format!(
+            "{base}/v1/workspaces/{}/channels/{}/messages",
+            fixture.workspace, fixture.channel
+        ))
+        .bearer_auth(&fixture.human_jwt)
+        .json(&json!({"clientMsgId": Uuid::new_v4(), "body": format!("@{handle} approved room")}))
+        .send()
+        .await
+        .expect("mention send");
+    let (status, approved) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_jobs_claim",
+        json!({}),
+    )
+    .await;
+    assert_eq!(status, 200, "{approved}");
+    let jobs = structured(&approved)["jobs"].as_array().expect("jobs");
+    assert_eq!(jobs.len(), 1, "the approved room is unaffected: {approved}");
+    let lease_handle = jobs[0]["leaseHandle"].as_str().expect("handle").to_string();
+    assert_eq!(
+        jobs[0]["work"]["channelId"],
+        json!(fixture.channel.to_string().to_uppercase()),
+        "and the work it hands over is the approved room's"
+    );
+
+    // …and a lease already in hand stops authorizing when its channel's
+    // approval is withdrawn mid-flight.
+    sqlx::query(
+        "UPDATE hosted_agent_connection SET approved_channel_ids=ARRAY[$3]::uuid[] \
+         WHERE workspace_id=$1 AND id=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_connection)
+    .bind(fixture.private_channel)
+    .execute(&su)
+    .await
+    .unwrap();
+    for tool in [
+        "oort_job_renew",
+        "oort_job_release",
+        "oort_run_event",
+        "oort_run_complete",
+    ] {
+        let mut arguments = json!({"leaseHandle": lease_handle});
+        if tool == "oort_run_complete" {
+            arguments["status"] = json!("succeeded");
+        }
+        let (status, refused) = call(&client, &base, &fixture.hosted_bearer, tool, arguments).await;
+        assert_eq!(status, 403, "{tool} must fail closed: {refused}");
+        assert_eq!(error_code(&refused), -32003, "{tool}");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// (7) the published schema is the enforced schema
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn the_advertised_argument_schema_is_what_execution_accepts() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+
+    // A misspelled optional field used to be dropped, posting an unthreaded
+    // message while the caller believed it had opened a thread.
+    let before: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM message WHERE workspace_id=$1 AND channel_id=$2")
+            .bind(fixture.workspace)
+            .bind(fixture.channel)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+    let (status, refused) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_message_post",
+        json!({
+            "channelId": fixture.channel,
+            "clientMsgId": Uuid::new_v4(),
+            "body": "typo'd thread",
+            "rootID": Uuid::new_v4()
+        }),
+    )
+    .await;
+    assert_eq!(status, 400, "{refused}");
+    assert_eq!(error_code(&refused), -32602);
+    let after: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM message WHERE workspace_id=$1 AND channel_id=$2")
+            .bind(fixture.workspace)
+            .bind(fixture.channel)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+    assert_eq!(after, before, "an unknown field must post nothing");
+
+    // One out-of-bounds numeric per tool family, plus the negative token count
+    // that would have subtracted from a workspace's usage totals.
+    for (tool, arguments) in [
+        ("oort_inbox_read", json!({"limit": 0})),
+        (
+            "oort_conversation_read",
+            json!({"channelId": fixture.channel, "limit": 5000}),
+        ),
+        ("oort_jobs_claim", json!({"limit": -1})),
+        (
+            "oort_run_complete",
+            json!({
+                "leaseHandle": "momo_lease_v1.AAAA",
+                "status": "succeeded",
+                "usage": {"promptTokens": -5}
+            }),
+        ),
+        // A wrong type and a malformed uuid are the same refusal.
+        ("oort_conversation_read", json!({"channelId": "not-a-uuid"})),
+        (
+            "oort_run_event",
+            json!({"leaseHandle": "momo_lease_v1.AAAA", "status": "succeeded"}),
+        ),
+    ] {
+        let (status, refused) = call(&client, &base, &fixture.hosted_bearer, tool, arguments).await;
+        assert_eq!(status, 400, "{tool} must refuse: {refused}");
+        assert_eq!(error_code(&refused), -32602, "{tool}");
+    }
+
+    let ledger: i64 = sqlx::query_scalar("SELECT count(*) FROM usage_ledger WHERE workspace_id=$1")
+        .bind(fixture.workspace)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    assert_eq!(ledger, 0, "a refused usage block writes no ledger row");
+}

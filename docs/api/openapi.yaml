@@ -4821,7 +4821,12 @@ paths:
         `oort_conversation_read`, `oort_message_post`, `oort_jobs_claim`,
         `oort_job_renew`, `oort_job_release`, `oort_run_event` and
         `oort_run_complete`; each binds an existing domain rather than a second
-        one, and job authority travels only as an opaque `leaseHandle`. Tool
+        one, and job authority travels only as an opaque `leaseHandle` that
+        carries the channel its work came from, so the confirming human's exact
+        channel grant is re-checked on every later verb. Arguments are validated
+        against the tool's published `inputSchema` before execution, so
+        `additionalProperties: false` and the numeric/format bounds are
+        enforced rather than advertised. Tool
         failures use a closed set of JSON-RPC codes (-32602 invalid arguments,
         -32003 not authorized, -32004 unavailable, -32005 conflict, -32603
         internal) with fixed messages, so a refusal never distinguishes absent
