@@ -798,12 +798,33 @@ async fn hosted_inbox_cursor_rls_idempotency_and_visibility() {
     .execute(&su)
     .await
     .unwrap();
+    // HAP-E6's migration 072 refuses a terminal state that the local half has
+    // not actually reached: zero live credentials on the connection (revoked
+    // just above) AND a paused dedicated agent. The pause is restored right
+    // after, because what this fixture is building is the *reconnect*, and a
+    // reconnected agent is not a paused one.
+    sqlx::query(
+        "UPDATE agent_profile SET paused=true WHERE workspace_id=$1 AND agent_member_id=$2",
+    )
+    .bind(workspace)
+    .bind(agent)
+    .execute(&su)
+    .await
+    .unwrap();
     sqlx::query(
         "UPDATE hosted_agent_connection SET status='disconnected',active_token_id=NULL \
           WHERE workspace_id=$1 AND id=$2",
     )
     .bind(workspace)
     .bind(connection)
+    .execute(&su)
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE agent_profile SET paused=false WHERE workspace_id=$1 AND agent_member_id=$2",
+    )
+    .bind(workspace)
+    .bind(agent)
     .execute(&su)
     .await
     .unwrap();
