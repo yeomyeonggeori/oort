@@ -22,6 +22,20 @@
 //! lease has an *expiry* (a crashed claimer's row returns to the pool), and
 //! every later callback must present the `lease_owner` it was handed.
 //!
+//! ## The uuid comparisons are case-folded
+//!
+//! `outbox.payload` carries ids as **text**, and this server's producers
+//! disagree about their case: `momo_agent::mention::mention_job_payload` writes
+//! them uppercase (Swift parity for the payload a gateway reads) while the
+//! work/resume producers write them lowercase. A raw `=` therefore matched a
+//! work job and silently missed every *mention* job — the most common kind —
+//! so a lease for one could never be claimed, renewed, released or settled.
+//! `lower()` on both sides is the same narrowest fix
+//! `retire_pending_agent_jobs_for_run_in_tx` already documents, and a `::uuid`
+//! cast is rejected for the same reason it is there: it raises on any row whose
+//! payload happens to hold a non-uuid id, turning one malformed job into a
+//! failed claim for the whole tenant.
+//!
 //! ## The lease is the callback's only authority
 //!
 //! [`gateway_lease_authorized`] is the pure decision behind every gateway
@@ -203,7 +217,7 @@ async fn claim_gateway_jobs(
               AND o.status = 'pending' \
               AND o.available_at <= now() \
               AND o.partition_key = $2 \
-              AND o.payload->>'agent_member_id' = $2::text \
+              AND lower(o.payload->>'agent_member_id') = lower($2::text) \
               AND (o.lease_expires_at IS NULL OR o.lease_expires_at <= now()) \
               AND EXISTS ( \
                 SELECT 1 \
@@ -295,7 +309,7 @@ pub async fn renew_gateway_lease_in_tx(
             AND method = 'gateway' \
             AND status = 'pending' \
             AND partition_key = $2 \
-            AND payload->>'agent_member_id' = $2::text \
+            AND lower(payload->>'agent_member_id') = lower($2::text) \
             AND lease_owner = $4 \
             AND lease_expires_at > now() \
         RETURNING lease_expires_at",
@@ -329,7 +343,7 @@ pub async fn release_gateway_lease_in_tx(
             AND method = 'gateway' \
             AND status = 'pending' \
             AND partition_key = $2 \
-            AND payload->>'agent_member_id' = $2::text \
+            AND lower(payload->>'agent_member_id') = lower($2::text) \
             AND lease_owner = $4 \
             AND lease_expires_at > now() \
         RETURNING id",
@@ -368,8 +382,8 @@ pub async fn lock_gateway_lease_in_tx(
             AND kind = 'agent_job' \
             AND method = 'gateway' \
             AND partition_key = $3 \
-            AND payload->>'agent_member_id' = $3::text \
-            AND payload->>'run_id' = $2::text \
+            AND lower(payload->>'agent_member_id') = lower($3::text) \
+            AND lower(payload->>'run_id') = lower($2::text) \
           FOR UPDATE",
     )
     .bind(workspace_id)
@@ -412,7 +426,7 @@ pub async fn settle_gateway_job_in_tx(
             AND kind = 'agent_job' \
             AND method = 'gateway' \
             AND lease_owner = $4 \
-            AND payload->>'run_id' = $2::text",
+            AND lower(payload->>'run_id') = lower($2::text)",
     )
     .bind(workspace_id)
     .bind(run_id)

@@ -799,6 +799,36 @@ pub async fn resolve_hosted_tool_identity_in_tx(
     }))
 }
 
+/// The agent's live hosted connection id, if it has one.
+///
+/// A narrower answer than [`resolve_hosted_tool_identity_in_tx`] for producers
+/// that are acting on the agent's behalf rather than as it: there is no bearer
+/// in hand here, so the token half of the check is the connection's own
+/// `active_token_id` rather than a presented credential.
+pub async fn active_hosted_connection_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    agent_member_id: Uuid,
+) -> Result<Option<Uuid>, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT hc.id FROM hosted_agent_connection hc \
+           JOIN token t ON t.workspace_id=hc.workspace_id AND t.id=hc.active_token_id \
+          WHERE hc.workspace_id=$1 AND hc.agent_member_id=$2 \
+            AND hc.status='active' AND hc.proved_at IS NOT NULL \
+            AND t.kind='agent_bearer' AND t.credential_class='hosted_active' \
+            AND t.revoked_at IS NULL \
+            AND (t.expires_at IS NULL OR t.expires_at > now()) \
+            AND t.hosted_connection_id=hc.id AND t.actor_member_id=hc.agent_member_id \
+            AND t.audience=$3 \
+          ORDER BY hc.id LIMIT 1",
+    )
+    .bind(workspace_id)
+    .bind(agent_member_id)
+    .bind(HOSTED_AGENT_PORT_AUDIENCE)
+    .fetch_optional(&mut *conn)
+    .await
+}
+
 pub async fn is_hosted_agent_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,

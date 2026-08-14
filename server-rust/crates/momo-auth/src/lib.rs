@@ -103,7 +103,7 @@ pub use ephemeral_grant::{
     EPHEMERAL_GRANT_TTL_SECONDS, EPHEMERAL_GRANT_TYP,
 };
 pub use hosted_connection::{
-    confirm_hosted_connection_in_tx, create_hosted_connection_in_tx, detect_pairing_in_tx,
+    active_hosted_connection_in_tx, confirm_hosted_connection_in_tx, create_hosted_connection_in_tx, detect_pairing_in_tx,
     get_hosted_connection_in_tx, is_hosted_agent_activated_in_tx, is_hosted_agent_in_tx,
     list_hosted_connections_in_tx, pairing_workspace_id, prove_hosted_binding_in_tx,
     regenerate_pairing_in_tx, resolve_hosted_tool_identity_in_tx, resolve_pairing_in_tx,
