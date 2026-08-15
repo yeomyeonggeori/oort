@@ -382,16 +382,27 @@ export const DISPLAY_FAILURE_COPY: Readonly<Record<DisplayFailure, string>> = {
  *
  * WHY A SECOND TABLE AND NOT A CONDITION IN THE FIRST. `DISPLAY_FAILURE_COPY`
  * is written for the reader a failure happens TO, and for two of its entries
- * that reader is not always a third party. Both sentences below are third
- * person about an action the owner just took one block up, on the same panel:
- * the 소유자만 보기 toggle lives in 터미널 관전, and the owner who presses it
- * gets this surface reporting their own click back to them as somebody else's
- * decision, with no next step (design-taste-web §5).
+ * that reader is not always a third party. The table was added because the
+ * 소유자만 보기 toggle lives in 터미널 관전, one block up on this same panel,
+ * and the owner who pressed it got this surface reporting their own click back
+ * to them as somebody else's decision, with no next step (design-taste-web §5).
  *
- *   - `observation_closed` fires on the ledger re-read while a stream is held.
- *   - `capability_denied` is the same fact one round trip earlier: the owner
- *     closed observation and clicked 화면 보기 before the ledger caught up, and
- *     the server answered 403 `session observation is owner-only`.
+ * WHICH OF THE TWO AN OWNER CAN ACTUALLY REACH, SINCE LIVE-3. They are no
+ * longer symmetric, and the asymmetry is what the two sentences below are
+ * written against.
+ *
+ *   - `capability_denied` is live for an owner. The display route still
+ *     refuses one who is not an active member of the session's channel
+ *     (`display_attach.rs` keeps that clause for every observer), and that 403
+ *     arrives here through `classifyDisplayGrantFailure`.
+ *   - `observation_closed` is NOT reachable by an owner on the current path.
+ *     It has exactly one producer on this surface — the ledger re-read in
+ *     `displayObservationStillPermits` — and that function returns null for the
+ *     owner. Neither `classifyClose` (which never emits this failure at all)
+ *     nor `classifyDisplayGrantFailure` (whose 403 is `capability_denied`) can
+ *     put an owner here. The owner sentence for it is therefore DEFENSIVE: it
+ *     is what this panel would say if a later path ever routed an owner to this
+ *     banner, so it has to stay true rather than be deleted as dead.
  *
  * WHAT THESE SAID BEFORE LIVE-3, AND WHY THEY CHANGED. Both sentences used to
  * tell the owner that closing observation closed the screen to them too —
@@ -402,8 +413,12 @@ export const DISPLAY_FAILURE_COPY: Readonly<Record<DisplayFailure, string>> = {
  * opposite of what it does.
  *
  * `observation_closed` therefore reports the consequence the owner actually
- * caused — the team can no longer watch — and says their own view survives, so
- * the 다시 연결 button beside it does not read as futile.
+ * caused (the team can no longer watch) and states that their own screen is
+ * still open. It names no control, and that is deliberate twice over: this
+ * failure is not in `RETRYABLE`, so the banner carries no 다시 연결 button for
+ * anybody to press, and pointing a sentence at a button that is not there is
+ * the failure mode §5 is about. The sentence is a fact, not an instruction,
+ * because on this path the owner has nothing to repair.
  *
  * `capability_denied` keeps an owner-specific sentence for a different reason
  * than it used to. Observation no longer refuses an owner, so the remaining
@@ -417,7 +432,7 @@ const DISPLAY_OWNER_FAILURE_COPY: Readonly<
   Partial<Record<DisplayFailure, string>>
 > = {
   observation_closed:
-    "관전을 소유자만 보기로 닫았습니다. 이제 팀원은 이 화면을 볼 수 없습니다. 내 화면은 다시 연결하면 그대로 열립니다.",
+    "관전을 소유자만 보기로 닫았습니다. 이제 팀원은 이 화면을 볼 수 없고, 내 화면 보기는 닫히지 않습니다.",
   capability_denied:
     "이 세션의 라이브 화면을 열지 못했습니다. 화면을 보려면 이 세션이 있는 채널의 멤버여야 합니다.",
 };
@@ -517,11 +532,23 @@ export interface DisplayGate {
  * surface from offering a control that cannot work, and states the reason
  * instead — the same rule the terminal block one section up follows.
  *
- * The `owner_only` branch now matches the terminal's, and that is LIVE-3's
- * doing. It used to close the screen to the owner as well, because display had
- * no controller grade and refusing was the fail-closed direction while the
+ * The `owner_only` branch lets the OWNER through, and that is LIVE-3's doing.
+ * It used to close the screen to them as well, because display had no
+ * controller grade and refusing was the fail-closed direction while the
  * permission question was open. ADR-0004 증보 3 answered it: `owner_only` means
- * 「소유자만 본다」. So the owner passes, exactly as they do on the terminal.
+ * 「소유자만 본다」.
+ *
+ * THIS IS WHERE THE DISPLAY GATE PARTS FROM `observeGate`, and the parting is a
+ * decision rather than a drift, so do not "fix" one to match the other.
+ * `observeGate` still refuses the owner on `owner_only` and hands them their
+ * own sentence saying so, because a terminal reaches its owner by a different
+ * GRADE: on PTY the owner attaches as controller, which is why the server
+ * scopes this exemption with `kind = 'display'` and left the PTY observer arm
+ * alone (`terminal_attach.rs`). This client ships no controller mode at all
+ * (`observerStream.ts` header keeps that absence deliberate), so the two
+ * surfaces differ in outcome here too: on the screen the owner watches without
+ * reopening anything, and on the terminal their only way back is still to allow
+ * 팀원 관전 again.
  *
  * The exemption matters more now than it would have then, and the reason is
  * worth keeping in view: taking control STOPS THE AGENT (증보 3 D3). Without an

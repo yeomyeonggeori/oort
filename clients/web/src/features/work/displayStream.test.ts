@@ -520,21 +520,43 @@ describe("who is told they cannot watch, and why", () => {
     }
   });
 
-  it("keeps the banner's owner sentence in the gate's family, and in its own tense", () => {
-    // Same family: the gate already had to answer "why can the owner not watch
-    // their own screen", and two different explanations of one rule on one panel
-    // is how a reader learns to trust neither.
-    // Since LIVE-3 the gate has no owner sentence to share with: the owner
-    // passes it. So what this pins now is that the banner still speaks to the
-    // owner about their own action, in their own tense, and reports the
-    // consequence that is actually true.
+  it("pins both owner sentences whole, the way the teammate ones are pinned", () => {
+    // Byte literals, not substrings. The teammate side is already held whole
+    // (`DISPLAY_FAILURE_COPY` in the tests above, and the gate reason below),
+    // while the substring pin that used to stand here let one clause of the
+    // owner sentence go on naming a 다시 연결 button this banner does not carry
+    // (design-review M1) — every keyword it checked was still present. A
+    // whole-sentence pin fails on the clause instead of on the survivor.
+    expect(displayFailureCopy("observation_closed", true)).toBe(
+      "관전을 소유자만 보기로 닫았습니다. 이제 팀원은 이 화면을 볼 수 없고, 내 화면 보기는 닫히지 않습니다."
+    );
+    expect(displayFailureCopy("capability_denied", true)).toBe(
+      "이 세션의 라이브 화면을 열지 못했습니다. 화면을 보려면 이 세션이 있는 채널의 멤버여야 합니다."
+    );
+    // Same family, and since LIVE-3 that is settled by subtraction: the gate has
+    // no owner sentence left to disagree with the banner, because the owner
+    // passes it. Two explanations of one rule on one panel is how a reader
+    // learns to trust neither.
     expect(displayGate(session({ observation: "owner_only" }), true).reason).toBeNull();
+    // The tense is what survives the pairing: the banner still speaks to the
+    // owner about their own action rather than about them.
     const banner = displayFailureCopy("observation_closed", true);
     expect(banner).toContain("닫았습니다");
     expect(banner).toContain("팀원");
-    // The way back is a control the owner actually holds (§5), and here it is
-    // their own view surviving rather than an instruction to reopen the session.
-    expect(banner).toContain("다시 연결하면");
+  });
+
+  it("never sends either reader to a control this banner does not carry", () => {
+    // `observation_closed` is not in RETRYABLE and is not the reload case, so
+    // this banner renders no action at all for anybody. A sentence that names
+    // one is an instruction pointing at nothing (design-taste-web §5), and that
+    // is exactly what the owner sentence used to do.
+    expect(displayOffersRetry("observation_closed", true)).toBe(false);
+    expect(displayOffersReload("observation_closed")).toBe(false);
+    for (const isOwner of [true, false]) {
+      const copy = displayFailureCopy("observation_closed", isOwner);
+      expect(copy, `isOwner=${isOwner}`).not.toContain("다시 연결");
+      expect(copy, `isOwner=${isOwner}`).not.toContain("새로고침");
+    }
   });
 
   it("holds the copy discipline on the owner's sentences too", () => {

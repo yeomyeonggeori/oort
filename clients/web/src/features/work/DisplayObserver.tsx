@@ -758,11 +758,14 @@ export function DisplayObserver({
                 ? "neutral"
                 : "error"
             }
-            // Owner-aware, because the 소유자만 보기 toggle that causes two of
-            // these failures is one block up on this same panel. The owner-blind
-            // table would report the reader's own click back to them in the
-            // third person, and would not say the thing only this surface has to
-            // say: a closed session has no screen for its owner either.
+            // Owner-aware, and since LIVE-3 for a narrower reason than "the
+            // 소유자만 보기 toggle is one block up". `owner_only` now means
+            // 「소유자만 본다」, so closing observation refuses an owner nothing
+            // and an owner does not reach the `observation_closed` banner at
+            // all. What the owner-blind table still gets wrong for them is
+            // `capability_denied`: its shared sentence offers two causes, and
+            // observation can no longer be theirs. `displayFailureCopy` names
+            // the one that can still be true, channel membership.
             message={displayFailureCopy(phase.failure, isOwner)}
             {...(displayOffersRetry(phase.failure, gate.available)
               ? { actionLabel: "다시 연결", onAction: () => void start() }
