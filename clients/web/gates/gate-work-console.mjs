@@ -22,10 +22,13 @@ const workspaceId = "00000000-0000-7000-8000-000000000001";
 const memberId = "00000000-0000-7000-8000-000000000101";
 const otherMemberId = "00000000-0000-7000-8000-000000000102";
 const channelId = "00000000-0000-7000-8000-000000000201";
-// The host the live-screen fixture "dials". Its socket is the one GateWebSocket
-// never opens, which is the only way to hold the surface in 연결 중 long enough
-// to leave it by a door the socket does not know about.
+// The hosts the two observation fixtures "dial". Their sockets are the ones
+// GateWebSocket never opens, which is the only way to hold a surface in 연결 중
+// long enough to leave it by a door the socket does not know about. They are
+// named apart so a failure says WHICH surface hung.
 const displaySignalHost = "display-gate.invalid";
+const terminalAttachHost = "terminal-gate.invalid";
+const holdHosts = [displaySignalHost, terminalAttachHost];
 
 const auth = {
   accessToken: "gate-only-not-a-credential",
@@ -159,7 +162,7 @@ function wait(ms) {
 }
 
 async function installRealtimeSocket(page) {
-  await page.addInitScript((holdHost) => {
+  await page.addInitScript((hangingHosts) => {
     // React Query decides staleness from Date.now(). Advancing this gate clock
     // lets the gate prove a cached refetch failure without sleeping for the
     // production 30s/60s stale windows.
@@ -199,10 +202,10 @@ async function installRealtimeSocket(page) {
       constructor(url) {
         this.url = String(url);
         this.readyState = GateWebSocket.CONNECTING;
-        // The live-screen fixture's signalling socket never settles: it does not
-        // open and it does not close itself. That is the whole point — it is the
-        // state in which the surface's own cleanup has nothing to run it.
-        if (this.url.includes(holdHost)) return;
+        // The observation fixtures' sockets never settle: they do not open and
+        // they do not close themselves. That is the whole point — it is the
+        // state in which a surface's own cleanup has nothing to run it.
+        if (hangingHosts.some((host) => this.url.includes(host))) return;
         queueMicrotask(() => {
           this.readyState = GateWebSocket.OPEN;
           this.onopen?.(new Event("open"));
@@ -250,7 +253,7 @@ async function installRealtimeSocket(page) {
       }
     }
     window.WebSocket = GateWebSocket;
-  }, displaySignalHost);
+  }, holdHosts);
 }
 
 async function installRoutes(context, state) {
@@ -303,6 +306,16 @@ async function installRoutes(context, state) {
       return state.failHosts
         ? json(route, { error: { message: "fixture host failure" } }, 500)
         : json(route, { workHosts: hosts });
+    }
+    if (path.endsWith("/terminal-attach")) {
+      // The observer grade and an endpoint the client's own grammar accepts
+      // (wss, no credentials, no query, a pty id that matches the server's).
+      // Nothing is dialled: the socket that would carry this is the gate's stub.
+      return json(route, {
+        attach_endpoint: `wss://${terminalAttachHost}/attach`,
+        capability_token: "gate-only-not-a-credential",
+        pty_id: "pty-gate-1",
+      });
     }
     if (path.endsWith("/display-attach")) {
       // The grade the client is allowed to render, and an endpoint its own
@@ -929,6 +942,83 @@ async function assertDisplayConnectCleanup(browser) {
   }
 }
 
+// The same leak floor on the PTY surface, which has the identical shape: 연결 중
+// hangs a `securitypolicyviolation` listener on the document — the CSP refusal
+// is the one way a dial can fail with no event on the socket at all — and
+// `closeSocket` deletes the socket's own handlers before it closes it. So the
+// terminal's non-socket exits (the handshake deadline giving up, 관전 중단, the
+// ledger revoking mid-handshake, a different session.id in the same mounted
+// panel) fire nothing on the socket and can only release that listener
+// themselves. A listener on the document outlives the component, the session and
+// the retry: it is invisible in the UI and it accumulates for the life of the
+// tab.
+//
+// Its own context: it navigates between sessions, which would push history
+// entries under the goBack assertions in assertConsole.
+async function assertObserverConnectCleanup(browser) {
+  const context = await browser.newContext({
+    viewport: { width: 1280, height: 800 },
+    reducedMotion: "reduce",
+  });
+  try {
+    await installRoutes(context, { mode: "normal" });
+    const page = await openConsole(context);
+    const rows = page.getByTestId("work-console-row");
+    await rows.first().waitFor();
+    await rows.filter({ hasText: "클라우드에서 빌드" }).click();
+    await page.getByTestId("work-observer").waitFor();
+
+    const cspCount = () =>
+      page.evaluate(() => window.__workConsoleGateCspListeners());
+    const baseline = await cspCount();
+    if (baseline !== 0) {
+      throw new Error(
+        `the console started with ${baseline} document CSP listeners already attached`
+      );
+    }
+
+    await page.getByTestId("work-observer-start").click();
+    // The fixture socket never opens, so the surface stays here.
+    await page
+      .locator('[data-testid="work-observer"][data-phase="connecting"]')
+      .waitFor({ timeout: 10_000 });
+    const attached = await cspCount();
+    if (attached !== 1) {
+      throw new Error(
+        `연결 중 did not attach the CSP listener this gate measures (count ${attached})`
+      );
+    }
+
+    // Leave by a door the socket does not know about: a different session in the
+    // same mounted panel. Nothing fires on the socket, so only the surface's own
+    // cleanup can release the listener.
+    await rows.filter({ hasText: "데스크톱 앱에서 UI 검수" }).click();
+    await page.getByTestId("work-detail").waitFor();
+    try {
+      await page.waitForFunction(
+        () => window.__workConsoleGateCspListeners() === 0,
+        null,
+        { timeout: 5_000 }
+      );
+    } catch {
+      throw new Error(
+        `leaving 연결 중 by a session switch left ${await cspCount()} document CSP listener(s) behind`
+      );
+    }
+    // ...and the abandoned attempt does not keep the new session's panel busy.
+    const phase = await page
+      .getByTestId("work-observer")
+      .getAttribute("data-phase");
+    if (phase !== "idle") {
+      throw new Error(
+        `the session switch left the terminal in ${phase} instead of idle`
+      );
+    }
+  } finally {
+    await context.close();
+  }
+}
+
 async function assertColdOffline(browser) {
   const context = await browser.newContext({
     viewport: { width: 1280, height: 800 },
@@ -1017,6 +1107,7 @@ async function main() {
         "담당자 정보를 새로 확인하지 못했습니다."
       );
       await assertDisplayConnectCleanup(browser);
+      await assertObserverConnectCleanup(browser);
       await assertColdOffline(browser);
     } finally {
       await browser.close();
@@ -1025,7 +1116,7 @@ async function main() {
     server.kill("SIGTERM");
   }
   console.log(
-    "PASS work console: delayed load, projection errors and cached stale fallback, unclipped T1/T2/T3/unknown hosts, cloud icon, observer-only terminal, h1/h2/h3 route outline, linkable selection, responsive keyboard focus, live-screen connect cleanup on a non-socket exit, cached/cold offline, empty/error"
+    "PASS work console: delayed load, projection errors and cached stale fallback, unclipped T1/T2/T3/unknown hosts, cloud icon, observer-only terminal, h1/h2/h3 route outline, linkable selection, responsive keyboard focus, live-screen and terminal connect cleanup on a non-socket exit, cached/cold offline, empty/error"
   );
 }
 
