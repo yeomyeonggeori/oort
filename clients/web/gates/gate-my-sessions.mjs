@@ -143,6 +143,7 @@ function workSession({
     observation: "open",
     observerGrantCount: 0,
     remoteAttachAvailable: true,
+    remoteDisplayAvailable: false,
     startedAtMs: 1_785_163_200_000,
     ...(exitCode === undefined ? {} : { exitCode }),
   };

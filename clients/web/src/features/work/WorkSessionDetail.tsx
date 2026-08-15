@@ -18,6 +18,7 @@ import { elapsedLabel } from "@/features/agents/agentWorkingSignal";
 import { CHIP_CLASS } from "@/features/common/chip";
 import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/States";
 import { useSessionWorkstream } from "@/features/workstreams/useWorkstreams";
+import { DisplayObserver } from "./DisplayObserver";
 import { ObserverTerminal } from "./ObserverTerminal";
 import { useSessionEvents } from "./useWorkSessions";
 import {
@@ -926,13 +927,35 @@ export function WorkSessionDetail({
             testId="work-host-offline"
           />
         ) : (
-          <ObserverTerminal
-            session={session}
-            hostName={hostName}
-            wide={wide}
-            onWideChange={onWideChange}
-            headingLevel={childHeadingLevel}
-          />
+          <>
+            <ObserverTerminal
+              session={session}
+              hostName={hostName}
+              wide={wide}
+              onWideChange={onWideChange}
+              headingLevel={childHeadingLevel}
+            />
+            {/* 라이브 화면 (LIVE-2 / ADR-0165), BESIDE the terminal and not
+                inside it. `remoteAttachAvailable` and `remoteDisplayAvailable`
+                are independent server facts — a session can offer a screen and
+                no terminal, or the reverse — so a session that has both shows
+                both, and neither one is behind a tab the reader has to find.
+
+                It is drawn only while the session can still HAVE a screen. A
+                closed or orphaned session already has the block above saying so
+                in exactly those words, and a second muted sentence repeating it
+                about a different surface is the "three muted lines for one
+                click" that block's own history warns about. Every state that
+                CAN still change — no screen published, 소유자만 보기, a host
+                that stopped advertising — is stated by the block itself. */}
+            {(session.status === "running" || session.status === "idle") && (
+              <DisplayObserver
+                session={session}
+                hostName={hostName}
+                headingLevel={childHeadingLevel}
+              />
+            )}
+          </>
         )}
 
         {/* Fail-closed (X-11 / MOMO-546): a remote host's event relay is not a

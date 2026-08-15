@@ -107,7 +107,13 @@ const hosts = [
   host(hostIds.unknown, "edge-preview", "실험 호스트"),
 ];
 
-function workSession(idSuffix, hostId, label, status = "running") {
+function workSession(
+  idSuffix,
+  hostId,
+  label,
+  status = "running",
+  remoteDisplayAvailable = false
+) {
   return {
     id: `00000000-0000-7000-8000-0000000004${idSuffix}`,
     workspaceId,
@@ -121,6 +127,7 @@ function workSession(idSuffix, hostId, label, status = "running") {
     observation: "open",
     observerGrantCount: 0,
     remoteAttachAvailable: true,
+    remoteDisplayAvailable,
     startedAtMs: now - Number(idSuffix) * 60_000,
   };
 }
@@ -128,7 +135,10 @@ function workSession(idSuffix, hostId, label, status = "running") {
 const sessions = [
   workSession("01", hostIds.app, "데스크톱 앱에서 UI 검수"),
   workSession("02", hostIds.workd, "셀프호스트에서 테스트"),
-  workSession("03", hostIds.cloud, "클라우드에서 빌드"),
+  // The one session with BOTH surfaces (LIVE-2 / ADR-0165). The two server
+  // facts are independent, so the console must draw both blocks side by side
+  // rather than making the reader choose between them.
+  workSession("03", hostIds.cloud, "클라우드에서 빌드", "running", true),
   workSession("04", hostIds.unknown, "알 수 없는 위치 확인", "idle"),
 ];
 
@@ -462,6 +472,7 @@ async function assertConsole(context, state) {
     { level: 1, text: "작업 콘솔" },
     { level: 2, text: "클라우드에서 빌드" },
     { level: 3, text: "터미널 관전" },
+    { level: 3, text: "라이브 화면" },
   ];
   if (JSON.stringify(headingOutline) !== JSON.stringify(expectedHeadingOutline)) {
     throw new Error(
@@ -488,6 +499,37 @@ async function assertConsole(context, state) {
   if ((await controllerInputs.count()) !== 0) {
     throw new Error("observer-only terminal exposed a controller/input control");
   }
+
+  // 라이브 화면 (LIVE-2 / ADR-0165), on the same session as the terminal and
+  // beside it. What the gate checks here is what a person would check: that the
+  // surface says it cannot be typed into, and that there is nothing on it that
+  // could type.
+  const display = page.getByTestId("work-display");
+  await display.waitFor();
+  const displayReadOnly = display.getByTestId("work-display-readonly");
+  if ((await displayReadOnly.textContent())?.trim() !== "보기 전용") {
+    throw new Error("display detail does not state that the screen is view-only");
+  }
+  const displayReadOnlyTitle = (await displayReadOnly.getAttribute("title")) ?? "";
+  for (const denied of ["키보드", "마우스", "저장"]) {
+    if (!displayReadOnlyTitle.includes(denied)) {
+      throw new Error(`view-only title does not deny ${denied}`);
+    }
+  }
+  // ADR-0004 증보 3 D1: control is not 인수, and the word must not appear.
+  if (((await display.textContent()) ?? "").includes("인수")) {
+    throw new Error("the display surface used the word 인수");
+  }
+  if (!(await display.getByTestId("work-display-start").isVisible())) {
+    throw new Error("a session with a published screen offered no way to open it");
+  }
+  const displayInputs = display.locator(
+    'input, textarea, [contenteditable="true"], video[controls], [data-testid*="controller"], [data-testid*="input"], [data-testid*="keyboard"]'
+  );
+  if ((await displayInputs.count()) !== 0) {
+    throw new Error("view-only display exposed a control that could send input");
+  }
+
   if (!page.url().includes(`session=${sessions[2].id}`)) {
     throw new Error(`selected session did not enter the URL: ${page.url()}`);
   }
@@ -658,6 +700,23 @@ async function assertConsole(context, state) {
   }
   if (await page.getByTestId("work-console-detail-wide").isVisible()) {
     throw new Error("narrow console exposed a focus action that cannot widen it further");
+  }
+
+  // This session has a terminal and no screen, which is a DIFFERENT sentence
+  // from an error (LIVE-2 AC-4). It is checked here rather than beside the
+  // cloud session's display block because switching rows up there would push
+  // two history entries under the goBack the focus assertions depend on.
+  const noScreen = (
+    await page.getByTestId("work-display-blocked").textContent()
+  )?.trim();
+  if (!noScreen?.includes("호스트 화면을 열어 두지 않았습니다")) {
+    throw new Error(`a session with no screen did not say so: ${noScreen}`);
+  }
+  if (await page.getByTestId("work-display-error").count()) {
+    throw new Error("a session with no screen drew an error instead of a state");
+  }
+  if (await page.getByTestId("work-display-start").count()) {
+    throw new Error("a session with no screen still offered to open one");
   }
   if (captureShots) {
     await page.emulateMedia({ colorScheme: "dark" });

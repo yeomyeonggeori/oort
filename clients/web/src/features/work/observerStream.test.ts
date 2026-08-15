@@ -47,6 +47,7 @@ function session(over: Partial<WorkSession> = {}): WorkSession {
     observation: "open",
     observerGrantCount: 0,
     remoteAttachAvailable: true,
+    remoteDisplayAvailable: false,
     startedAtMs: 1785007271329,
     ...over,
   };

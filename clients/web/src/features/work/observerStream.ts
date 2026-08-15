@@ -121,7 +121,15 @@ export function classifyHostFrame(text: string): HostFrame {
   return { kind: frame.type, byteOffset: frame.byte_offset };
 }
 
-/** Host-side id grammar, mirrored from `RemotePTYBinding.validated`. */
+/**
+ * Host-side id grammar, mirrored from `RemotePTYBinding.validated`.
+ *
+ * ONE grammar, not one per surface: migration 075 made the attach kind a column
+ * rather than a second id format, so `work_session_display_id_ck` is this exact
+ * regex and `displayStream.ts` re-exports this function rather than restating
+ * it. A second copy is how two surfaces on one box end up disagreeing about
+ * which ids a host is allowed to have.
+ */
 export function isValidPtyId(value: string): boolean {
   return /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value);
 }
@@ -536,14 +544,28 @@ export const OBSERVER_LINK_STATUS: Readonly<Record<ObserverLink, string>> = {
   unverified: "연결 확인 필요",
 };
 
+/**
+ * How long the silence has lasted, in one unit, or null while it is short
+ * enough not to be worth naming.
+ *
+ * Split out of `quietLabel` for `displayStream.ts` (LIVE-2), which needs the
+ * same measurement under a different noun: a screen that has stopped arriving
+ * is not "출력 없음". The two surfaces differ in what they are waiting for and
+ * not in how they round a duration, so the rounding lives once.
+ */
+export function quietSpan(quietMs: number): string | null {
+  if (quietMs < QUIET_AFTER_MS) return null;
+  const seconds = Math.floor(quietMs / 1000);
+  return seconds < 60 ? `${seconds}초` : `${Math.floor(seconds / 60)}분`;
+}
+
 /** How long since the last byte, or null while output is arriving normally. */
 export function quietLabel(
   quietMs: number,
   everReceived: boolean
 ): string | null {
-  if (quietMs < QUIET_AFTER_MS) return null;
-  const seconds = Math.floor(quietMs / 1000);
-  const span = seconds < 60 ? `${seconds}초` : `${Math.floor(seconds / 60)}분`;
+  const span = quietSpan(quietMs);
+  if (span === null) return null;
   return everReceived ? `마지막 출력 ${span} 전` : `${span}째 출력 없음`;
 }
 

@@ -153,6 +153,7 @@ const WORK_SESSIONS = [
     observation: 'open',
     observerGrantCount: 0,
     remoteAttachAvailable: false,
+    remoteDisplayAvailable: false,
     startedAtMs: 1_700_000_000_000,
   },
   {
@@ -169,6 +170,7 @@ const WORK_SESSIONS = [
     observation: 'open',
     observerGrantCount: 0,
     remoteAttachAvailable: false,
+    remoteDisplayAvailable: false,
     startedAtMs: 1_699_000_000_000,
   },
   {
@@ -186,6 +188,7 @@ const WORK_SESSIONS = [
     observation: 'open',
     observerGrantCount: 0,
     remoteAttachAvailable: false,
+    remoteDisplayAvailable: false,
     startedAtMs: 1_698_000_000_000,
     endedAtMs: 1_698_000_100_000,
   },
@@ -203,6 +206,7 @@ const WORK_SESSIONS = [
     observation: 'open',
     observerGrantCount: 0,
     remoteAttachAvailable: false,
+    remoteDisplayAvailable: false,
     startedAtMs: 1_700_000_000_000,
   },
 ];
