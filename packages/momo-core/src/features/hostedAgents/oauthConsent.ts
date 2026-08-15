@@ -432,6 +432,123 @@ export function oauthConsentFailureMessage(
   return `${prefix} 잠시 뒤에 다시 시도하세요.`;
 }
 
+// ---- 화면 선택 (순수) -------------------------------------------------------
+//
+// 사람의 승인을 가르는 분기 기계를 순수 함수로 떼어 둔다. 이 클라이언트의 웹
+// 테스트는 React 를 렌더하지 못하는 순수-로직 하네스라(clients/web 에
+// testing-library·jsdom 이 없다), 화면을 고르는 판단이 컴포넌트 JSX 안에만 있으면
+// 검증되지 못한 채 실린다. 그래서 "지금 어느 화면인가"와 "결정 실패를 어떻게
+// 접는가"와 "지금 결정을 누를 수 있는가"를 여기서 정하고, 컴포넌트는 그 결과를
+// 그리기만 한다.
+
+export type OauthConsentScreenKind =
+  | "loading"
+  | "returning"
+  | "unavailable"
+  | "retry"
+  | "expired"
+  | "no-candidate"
+  | "already-decided"
+  | "form";
+
+export type OauthConsentScreen =
+  | { kind: Exclude<OauthConsentScreenKind, "retry"> }
+  | { kind: "retry"; message: string };
+
+/** 결정 시점에 서버가 낸 종료 신호. preview 상태보다 우선한다. */
+export type OauthDecisionTerminal = "already-decided" | "unavailable";
+
+export interface OauthConsentScreenInput {
+  /** 결정(approve/deny)이 낸 종료. 있으면 preview 폼으로 되돌아가지 않는다. */
+  decisionTerminal: OauthDecisionTerminal | null;
+  /** 결정이 성공해 provider 로 돌아가는 중. */
+  returning: boolean;
+  previewPending: boolean;
+  /** preview 오류. 성공·대기면 null. */
+  previewError: unknown;
+  data: OauthConsentPreview | null;
+  nowMs: number;
+}
+
+/**
+ * 지금 그릴 화면.
+ *
+ * 우선순위가 곧 보안이다: 결정이 이미 종료를 냈으면 되돌아갈 폼이 없고, 401 은
+ * (라우트 효과가 로그인으로 되돌리므로) 로딩으로 덮여 재시도 배너를 그리지 않으며,
+ * 404/403 은 preview 든 결정이든 같은 non-enumerable 종료로 접힌다.
+ */
+export function oauthConsentScreen(
+  input: OauthConsentScreenInput
+): OauthConsentScreen {
+  if (input.decisionTerminal === "already-decided") return { kind: "already-decided" };
+  if (input.decisionTerminal === "unavailable") return { kind: "unavailable" };
+  if (input.returning) return { kind: "returning" };
+  if (input.previewPending) return { kind: "loading" };
+  if (input.previewError !== null && input.previewError !== undefined) {
+    if (isOauthSessionExpired(input.previewError)) return { kind: "loading" };
+    if (isOauthRequestUnavailable(input.previewError)) return { kind: "unavailable" };
+    return {
+      kind: "retry",
+      message: oauthConsentFailureMessage("preview", input.previewError),
+    };
+  }
+  if (input.data === null) return { kind: "loading" };
+  if (oauthRequestExpiry(input.data.expiresAtMs, input.nowMs).expired) {
+    return { kind: "expired" };
+  }
+  if (input.data.candidates.length === 0) return { kind: "no-candidate" };
+  return { kind: "form" };
+}
+
+export type OauthDecisionOutcome =
+  | { kind: "session-expired" }
+  | { kind: "terminal"; terminal: OauthDecisionTerminal }
+  | { kind: "failure"; message: string };
+
+/**
+ * 결정(approve/deny) 실패를 어떻게 접는가.
+ *
+ *   401 → 로그인으로 되돌린다.
+ *   409 → 이미 하나의 결정이 기록됨(단 하나의 terminal decision).
+ *   404/403 → 결정 도중 요청이 사라졌다. preview 시점과 **같은** non-enumerable
+ *     종료로 접는다(design-review M2): 사라진 요청에 재시도 배너로 다시 벽을
+ *     두드리게 하지 않는다.
+ *   그 외 → 배너로 사유를 말한다.
+ */
+export function classifyOauthDecisionError(
+  action: OauthConsentAction,
+  error: unknown
+): OauthDecisionOutcome {
+  if (isOauthSessionExpired(error)) return { kind: "session-expired" };
+  if (isOauthAlreadyDecided(error)) {
+    return { kind: "terminal", terminal: "already-decided" };
+  }
+  if (isOauthRequestUnavailable(error)) {
+    return { kind: "terminal", terminal: "unavailable" };
+  }
+  return { kind: "failure", message: oauthConsentFailureMessage(action, error) };
+}
+
+export interface OauthDecideEnablement {
+  /** 아직 전용 에이전트를 고르지 않았으면 null. 고르기 전엔 결정할 수 없다. */
+  connectionId: string | null;
+  offline: boolean;
+  /** approve/deny 요청이 떠 있다. */
+  busy: boolean;
+  /** 이미 하나의 결정을 냈다(중복 방지 ref). */
+  decided: boolean;
+}
+
+/** approve/deny 를 지금 누를 수 있는가. 넷 중 하나라도 막으면 불가. */
+export function oauthCanDecide(input: OauthDecideEnablement): boolean {
+  return (
+    input.connectionId !== null &&
+    !input.offline &&
+    !input.busy &&
+    !input.decided
+  );
+}
+
 // ---- 화면이 이름을 짓지 않는 사실들 -----------------------------------------
 
 /**

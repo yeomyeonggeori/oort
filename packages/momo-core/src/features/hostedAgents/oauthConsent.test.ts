@@ -6,17 +6,21 @@ import type { ApprovalChannelInput } from "./approval";
 import {
   buildOauthApprove,
   buildOauthDeny,
+  classifyOauthDecisionError,
   isOauthAlreadyDecided,
   isOauthRequestUnavailable,
   isOauthSessionExpired,
   normalizeOauthScopes,
+  oauthCanDecide,
   oauthConsentConsequence,
   oauthConsentFacts,
   oauthConsentFailureMessage,
+  oauthConsentScreen,
   oauthRequestExpiry,
   oauthScopeChoices,
   parseOauthConsentPreview,
   parseOauthDecision,
+  type OauthConsentScreenInput,
 } from "./oauthConsent";
 
 // =============================================================================
@@ -342,5 +346,138 @@ describe("만료와 사실 목록", () => {
     expect(facts.map((fact) => fact.value)).toContain("grok-bot");
     expect(facts.map((fact) => fact.value)).toContain("https://grok.example/callback");
     expect(facts.every((fact) => fact.token === true)).toBe(true);
+  });
+});
+
+// =============================================================================
+// 화면 분기 기계 — 사람의 승인을 가르는 판단. 이 클라이언트의 웹 하네스는 React 를
+// 렌더하지 못하므로(testing-library·jsdom 없음), 컴포넌트의 분기를 이 순수 함수로
+// 떼어 여기서 못으로 박는다(coordinator H1 증거).
+// =============================================================================
+
+function screenInput(
+  overrides: Partial<OauthConsentScreenInput> = {}
+): OauthConsentScreenInput {
+  return {
+    decisionTerminal: null,
+    returning: false,
+    previewPending: false,
+    previewError: null,
+    data: parseOauthConsentPreview(previewWire()),
+    nowMs: 0,
+    ...overrides,
+  };
+}
+
+describe("oauthConsentScreen — 어느 화면인가", () => {
+  it("preview 성공·candidate 있음 → 폼", () => {
+    expect(oauthConsentScreen(screenInput()).kind).toBe("form");
+  });
+
+  it("대기 중 → 로딩", () => {
+    expect(
+      oauthConsentScreen(screenInput({ previewPending: true, data: null })).kind
+    ).toBe("loading");
+  });
+
+  it("결정 종료가 preview 폼보다 우선한다", () => {
+    // 폼을 그릴 데이터가 다 있어도, 결정이 종료를 냈으면 그 종료가 이긴다.
+    expect(
+      oauthConsentScreen(screenInput({ decisionTerminal: "already-decided" })).kind
+    ).toBe("already-decided");
+    expect(
+      oauthConsentScreen(screenInput({ decisionTerminal: "unavailable" })).kind
+    ).toBe("unavailable");
+  });
+
+  it("returning 은 폼보다 우선한다", () => {
+    expect(oauthConsentScreen(screenInput({ returning: true })).kind).toBe("returning");
+  });
+
+  it("preview 404·403 → 같은 unavailable (non-enumerable)", () => {
+    expect(
+      oauthConsentScreen(screenInput({ previewError: new ApiError(404, ""), data: null }))
+        .kind
+    ).toBe("unavailable");
+    expect(
+      oauthConsentScreen(screenInput({ previewError: new ApiError(403, ""), data: null }))
+        .kind
+    ).toBe("unavailable");
+  });
+
+  it("preview 401 → 로딩 (라우트가 로그인으로 되돌린다)", () => {
+    expect(
+      oauthConsentScreen(screenInput({ previewError: new ApiError(401, ""), data: null }))
+        .kind
+    ).toBe("loading");
+  });
+
+  it("그 밖의 preview 오류 → 재시도 배너 + 사유", () => {
+    const screen = oauthConsentScreen(
+      screenInput({ previewError: new ApiError(500, ""), data: null })
+    );
+    expect(screen.kind).toBe("retry");
+    if (screen.kind === "retry") {
+      expect(screen.message).toContain("불러오지 못했습니다");
+      expect(screen.message).not.toMatch(/고정 bearer|static/i);
+    }
+  });
+
+  it("만료된 요청 → expired", () => {
+    const data = parseOauthConsentPreview(previewWire({ expiresAtMs: 1000 }));
+    expect(oauthConsentScreen(screenInput({ data, nowMs: 2000 })).kind).toBe("expired");
+  });
+
+  it("candidate 가 없으면 → no-candidate", () => {
+    const data = parseOauthConsentPreview(previewWire({ candidates: [] }));
+    expect(oauthConsentScreen(screenInput({ data })).kind).toBe("no-candidate");
+  });
+});
+
+describe("classifyOauthDecisionError — 결정 실패를 어떻게 접는가", () => {
+  it("401 → 로그인으로", () => {
+    expect(classifyOauthDecisionError("approve", new ApiError(401, "")).kind).toBe(
+      "session-expired"
+    );
+  });
+
+  it("409 → 이미 결정됨 종료", () => {
+    expect(classifyOauthDecisionError("deny", new ApiError(409, ""))).toEqual({
+      kind: "terminal",
+      terminal: "already-decided",
+    });
+  });
+
+  it("404·403 → preview 와 같은 unavailable 종료 (design-review M2)", () => {
+    for (const status of [404, 403]) {
+      expect(classifyOauthDecisionError("approve", new ApiError(status, ""))).toEqual({
+        kind: "terminal",
+        terminal: "unavailable",
+      });
+    }
+  });
+
+  it("그 밖 → 배너 사유, static 으로 내려가지 않는다", () => {
+    const outcome = classifyOauthDecisionError("approve", new ApiError(400, ""));
+    expect(outcome.kind).toBe("failure");
+    if (outcome.kind === "failure") {
+      expect(outcome.message).not.toMatch(/고정 bearer|static/i);
+    }
+  });
+});
+
+describe("oauthCanDecide — 지금 결정을 누를 수 있는가", () => {
+  const ready = { connectionId: "c1", offline: false, busy: false, decided: false };
+
+  it("에이전트를 고른 뒤에만 누를 수 있다", () => {
+    expect(oauthCanDecide(ready)).toBe(true);
+    expect(oauthCanDecide({ ...ready, connectionId: null })).toBe(false);
+  });
+
+  it("오프라인·요청 중·이미 결정됨이면 불가", () => {
+    expect(oauthCanDecide({ ...ready, offline: true })).toBe(false);
+    expect(oauthCanDecide({ ...ready, busy: true })).toBe(false);
+    // 결정이 떠 있는 동안 approve 는 불활성이다(decided-ref guard).
+    expect(oauthCanDecide({ ...ready, decided: true })).toBe(false);
   });
 });
