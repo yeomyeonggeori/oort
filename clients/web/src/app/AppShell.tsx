@@ -266,11 +266,15 @@ export function AppShell({
                  * 캐럿이 돌아갈 컨트롤이 사라져 있으면(관제 요약 줄은 작업이 0이
                  * 되면 DOM에서 빠진다) 그 층이 여기로 캐럿을 놓는다 — <body>로
                  * 떨어뜨리는 대신(shellNav `ROUTE_REGION_DOM_ID`). */}
+                {/* `route-region`은 `min-w-0`을 대신한다(tokens.css): 같은 축을
+                 * 두 곳에서 적으면 순서가 이기고, 이 상자에는 위쪽 상한(내용에
+                 * 밀리지 않는다)과 아래쪽 바닥(작업 패널이 컴포저를 바닥 아래로
+                 * 밀지 못한다, #1413)이 함께 필요하다. */}
                 <div
                   ref={routeRef}
                   id={ROUTE_REGION_DOM_ID}
                   tabIndex={-1}
-                  className="flex min-h-0 min-w-0 flex-1"
+                  className="route-region flex min-h-0 flex-1"
                 >
                   <RenderErrorBoundary
                     resetKey={routePath}
