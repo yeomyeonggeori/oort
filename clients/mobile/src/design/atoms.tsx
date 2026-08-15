@@ -387,6 +387,22 @@ export function NoticeBlock({
   );
 }
 
+/**
+ * 여러 줄로 접히는 **완성된 한국어 본문 문장**. iOS 기본 줄바꿈은 한글을 글자
+ * 단위로 끊어 마지막 한 음절이 둘째 줄에 홀로 남는 결함이 있다(위 `NoticeBlock`
+ * 주석의 실측). `NoticeBlock` 이 그 상자에 `hangul-word` 를 든 것과 같은 이유로,
+ * 상자 밖에서 그리는 본문 문장도 같은 규칙을 든다 — 규칙이 한 자리에 있지 않으면
+ * 같은 앱이 문장마다 다르게 끊긴다(리뷰 M2).
+ *
+ * 낱말·라벨·숫자 카운트에는 쓰지 않는다 — 어절 우선 줄바꿈은 문장에서만 뜻이 있다.
+ * `style`·`numberOfLines`·`testID` 등 `Text` 의 모든 props 를 그대로 받는다.
+ */
+export function Sentence(
+  props: React.ComponentProps<typeof Text>,
+): React.JSX.Element {
+  return <Text lineBreakStrategyIOS="hangul-word" {...props} />;
+}
+
 /** An inline failure attached to a form, rather than a whole-surface state. */
 export function FailureBanner({
   message,

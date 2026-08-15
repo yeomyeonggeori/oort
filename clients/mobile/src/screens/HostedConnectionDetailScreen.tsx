@@ -20,6 +20,7 @@ import {
   Screen,
   ScreenHeader,
   SectionLabel,
+  Sentence,
 } from '../design/atoms';
 import {font, line, radius, SAFE_GUTTER, space, type Palette} from '../design/tokens';
 import {useStyles} from '../design/theme';
@@ -182,9 +183,9 @@ function Ready({view}: {view: HostedDetailView}): React.JSX.Element {
           label={view.statusLabel}
           testID="hosted-detail-status-chip"
         />
-        <Text style={styles.sentence}>{view.statusDetail}</Text>
+        <Sentence style={styles.sentence}>{view.statusDetail}</Sentence>
       </View>
-      <Text style={styles.footnote}>{HOSTED_READONLY_NOTE}</Text>
+      <Sentence style={styles.footnote}>{HOSTED_READONLY_NOTE}</Sentence>
 
       {/* ---- 연결 ------------------------------------------------------- */}
       <SectionLabel label="연결" />
@@ -204,13 +205,13 @@ function Ready({view}: {view: HostedDetailView}): React.JSX.Element {
             value={explicitTimeLabel(time.atMs)}
           />
         ))}
-        <Text style={styles.meta}>{HOSTED_LIVENESS_NOTE}</Text>
+        <Sentence style={styles.meta}>{HOSTED_LIVENESS_NOTE}</Sentence>
       </View>
 
       {/* ---- 정리 목록 -------------------------------------------------- */}
       <SectionLabel label="정리 목록" />
       <View style={styles.progress} testID="hosted-detail-progress">
-        <Text style={styles.sentence}>{view.progressSentence}</Text>
+        <Sentence style={styles.sentence}>{view.progressSentence}</Sentence>
         {view.hasCleanup ? (
           <Text
             style={styles.meta}
@@ -224,7 +225,17 @@ function Ready({view}: {view: HostedDetailView}): React.JSX.Element {
           key={row.id}
           style={styles.artifactRow}
           accessible
-          accessibilityLabel={`${row.title}, ${row.stateLabel}. ${row.detail}`}
+          // The row is one a11y element, so its `accessible` collapses the
+          // children — the rendered `evidence` Text below is not separately
+          // focusable. For a manual/resolved row that evidence is the person's
+          // OWN acknowledgement sentence (core `cleanupEvidenceText`) and the
+          // only place their words appear, so it must ride in this label too or
+          // VoiceOver never reaches it (review H1).
+          accessibilityLabel={
+            row.evidence
+              ? `${row.title}, ${row.stateLabel}. ${row.detail}. ${row.evidence}`
+              : `${row.title}, ${row.stateLabel}. ${row.detail}`
+          }
           testID={`hosted-artifact-${row.id}`}>
           <View style={styles.artifactHead}>
             <Text
@@ -239,11 +250,13 @@ function Ready({view}: {view: HostedDetailView}): React.JSX.Element {
               testID={`hosted-artifact-chip-${row.id}`}
             />
           </View>
-          <Text style={styles.meta}>{row.detail}</Text>
+          <Sentence style={styles.meta}>{row.detail}</Sentence>
           {row.evidence ? (
-            <Text style={styles.evidence} testID={`hosted-artifact-evidence-${row.id}`}>
+            <Sentence
+              style={styles.evidence}
+              testID={`hosted-artifact-evidence-${row.id}`}>
               {row.evidence}
-            </Text>
+            </Sentence>
           ) : null}
         </View>
       ))}
@@ -313,10 +326,19 @@ const buildStyles = (color: Palette) =>
       fontWeight: '600',
       flex: 1,
     },
+    // The person's OWN acknowledgement quote, set apart from the system caution
+    // line (`meta`) directly above it. NOT by `fontStyle:'italic'` — README §5.3
+    // records italic as 0-pixel on 한글, so on Korean the two lines rendered
+    // identical (review M3). It differs instead by the app's canonical quote
+    // mark: a vertical ruling line in `textFaint` — the token whose own doc names
+    // it 「인용의 규정선」 and that `Quote.tsx`/`AdeControlPanel` already borrow for
+    // exactly this. Width 2 matches `Quote.tsx`'s rule; the inset is on-grid.
     evidence: {
       fontSize: font.meta,
       color: color.textMuted,
       lineHeight: line.meta,
-      fontStyle: 'italic',
+      borderLeftWidth: 2,
+      borderLeftColor: color.textFaint,
+      paddingLeft: space.sm,
     },
   });

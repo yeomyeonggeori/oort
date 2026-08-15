@@ -232,6 +232,11 @@ describe('detail — read-only status, honest time, cleanup progress', () => {
     expect(
       screen.getByTestId('hosted-artifact-evidence-connector-2'),
     ).toHaveTextContent('커넥터 목록에서 제거를 눌렀고 사라졌습니다');
+    // The row is one a11y element, so the evidence must ride in its label too —
+    // otherwise VoiceOver never reaches the person's own words (review H1).
+    expect(
+      screen.getByTestId('hosted-artifact-connector-2').props.accessibilityLabel,
+    ).toContain('커넥터 목록에서 제거를 눌렀고 사라졌습니다');
   });
 
   it('rebuilds by named fields, so an injected secret never reaches the tree', () => {

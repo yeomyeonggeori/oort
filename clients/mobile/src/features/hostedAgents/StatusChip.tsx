@@ -11,6 +11,11 @@ import {useStyles} from '../../design/theme';
 // 두 번째 신호이지 유일한 신호가 아니다** — 칩에는 언제나 낱말이 있고(웹 `StatusChip`
 // 이 outline·text-first 인 것과 같은 규율), 색맹인 사람에게도 낱말이 답한다.
 //
+// `accent` 는 이 기능에서 **닿지 않는 톤**이다: `cleanupRowTone` 은 ok·warn·muted
+// 만 내고(accent 를 내는 상태가 없다), 연결 상태에도 accent 가 없다. 그래서 이
+// 표면이 실제로 그리는 톤은 **다섯**(neutral·ok·warn·danger·muted)이지 여섯이
+// 아니다 — `accent` 케이스는 타입의 완결성을 위해 남겨 둔 죽은 가지다.
+//
 // 웹의 `neutral → muted` 대응을 그대로 든다: 이 앱의 팔레트에는 중성 표면(`surface`)
 // 위 흐린 글자(`textMuted`)가 그 자리다.
 // =============================================================================

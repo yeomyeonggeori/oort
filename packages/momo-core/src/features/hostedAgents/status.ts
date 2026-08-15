@@ -30,8 +30,11 @@ import {
 //
 // 폰이 처음으로 호스티드 연결을 보는 표면이고, 그 표면은 **관전**이다: pairing
 // confirm/regenerate·credential rotate·disconnect·cleanup acknowledge 어느 것도
-// 여기서 하지 않는다. 그래서 이 파일은 판단과 문구만 들고, 두 클라(web·RN)는
-// 그것을 얇게 그린다 — 「one core, two thin clients」.
+// 여기서 하지 않는다. **두 클라가 공유하는 것은 어휘 프리미티브**다 —
+// `hostedStatusLabel`/`Tone`/`Detail`·`connectionFacts`·`cleanupRow*`·
+// `cleanupEvidenceText`. 웹은 그 낱말들을 자기 컴포넌트(`HostedConnectionSection`)
+// 로 조립하고, 이 파일이 짜는 **관전 화면 한 벌**(`hostedListRow`·`hostedDetailView`)
+// 은 **폰 전용**이다 — 웹에는 그 조립을 부르는 importer 가 하나도 없다.
 //
 // ## 어휘의 출처 — cleanup·disconnect·model 이 정본이다
 //
@@ -199,7 +202,10 @@ export interface HostedDetailView {
 }
 
 /**
- * 상세 화면 한 벌의 읽기 전용 뷰모델. 두 클라가 이 하나를 그린다.
+ * 상세 화면 한 벌의 읽기 전용 뷰모델 — **폰 전용 조립이다.** 두 클라가 공유하는
+ * 것은 이 함수가 읽는 어휘 프리미티브(`connectionFacts`·`hostedStatus*`·
+ * `cleanupProgress*`)이지 이 조립 자체가 아니다: 웹은 같은 낱말로 자기
+ * `HostedConnectionSection` 을 짜고 이 `hostedDetailView` 는 부르지 않는다.
  *
  * `connectionFacts` 를 그대로 쓰는 것이 "provider preset/generic 표시"에 대한 이
  * 표면의 정직한 답이다: 읽기 모델에 preset 열이 없고(#1405), ADR-0162 는 provider 가

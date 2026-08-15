@@ -22,6 +22,7 @@ import {
   NoticeBlock,
   Screen,
   ScreenHeader,
+  Sentence,
   TapRow,
 } from '../design/atoms';
 import {useRefreshControl} from '../design/refresh';
@@ -193,8 +194,8 @@ export function HostedConnectionsView({
           keyExtractor={item => item.row.connectionId}
           ListHeaderComponent={
             <View style={styles.lead}>
-              <Text style={styles.leadText}>{HOSTED_LIST_LEAD}</Text>
-              <Text style={styles.readonlyText}>{HOSTED_READONLY_NOTE}</Text>
+              <Sentence style={styles.leadText}>{HOSTED_LIST_LEAD}</Sentence>
+              <Sentence style={styles.readonlyText}>{HOSTED_READONLY_NOTE}</Sentence>
             </View>
           }
           renderItem={({item}) => (
@@ -245,9 +246,9 @@ function Row({
             </Text>
           ) : null}
         </View>
-        <Text style={styles.rowDetail} numberOfLines={2}>
+        <Sentence style={styles.rowDetail} numberOfLines={2}>
           {row.statusDetail}
-        </Text>
+        </Sentence>
       </View>
       <StatusChip
         tone={row.statusTone}
