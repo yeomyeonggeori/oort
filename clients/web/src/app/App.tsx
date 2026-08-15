@@ -22,6 +22,8 @@ import { forgetQuota } from "@momo/core/features/settings/quotaModel";
 import { forgetUsage } from "@momo/core/features/settings/usageModel";
 import { resetAdeDrawer } from "@/features/ade/adeDrawerStore";
 import { WorkConsoleRoute } from "@/features/workConsole/WorkConsoleRoute";
+import { OAuthConsentRoute } from "@/features/hostedAgents/OAuthConsentRoute";
+import { isOauthConsentPath } from "@/features/hostedAgents/oauthConsentPath";
 
 // HashRouter, not BrowserRouter: the Tauri release build loads the bundle from
 // `tauri://localhost` with no server to rewrite deep paths, so the same routes
@@ -33,6 +35,17 @@ export function App() {
   // the connect screen is the reader most likely to need the build that fixes
   // why they are stuck. No-op in a browser tab.
   useEffect(() => startUpdateWatch(), []);
+
+  // OAuth resource-owner consent 는 HashRouter 밖의 실경로다(#1369). provider
+  // 리다이렉트가 `/oauth/consent?request=...` 로 떨어뜨리는데, 그 쿼리는 해시가
+  // 아니라 진짜 쿼리 문자열에 있어 `<Routes>` 가 잡지 못한다(oauthConsentPath.ts).
+  // 그래서 세션 게이트보다 먼저 여기서 갈라진다: 이 화면은 자기 로딩/로그인/본문을
+  // 직접 든다.
+  if (isOauthConsentPath(window.location.pathname)) {
+    return (
+      <OAuthConsentRoute status={status} session={session} onLoggedIn={signIn} />
+    );
+  }
 
   if (status === "restoring") {
     // Height-preserving bars, not a spinner or a splash: the shell that is

@@ -23,12 +23,17 @@ import {
 //
 // ## OAuth 는 고를 수 있는 자리에 서지 않는다
 //
-// 현행 서버에 MCP OAuth authorization server 가 없다(ADR-0162 D5). 없는 것을 고르게
-// 두면 그 선택은 반드시 실패하고, 실패한 뒤 static bearer 로 조용히 내려가는
+// MCP OAuth authorization server 는 이제 있다(HAP-E7 / #1368, flag-gated). 하지만
+// 이 마법사에서 OAuth 연결을 **직접 시작하는 길은 아직 없다**: create API 는
+// `authMode:oauth` 를 거절한다(E7 deviation 3). OAuth 방식은 provider 의 인가
+// 화면에서 사람이 승인해 연결되고(HAP-UX4 / #1369 의 consent 화면), 그 요청을 받는
+// `pairing_pending` OAuth 연결은 다른 경로로 만들어진다. 그러니 여기서 고르게 두면
+// 그 선택은 create 에서 반드시 실패하고, 실패한 뒤 static bearer 로 조용히 내려가는
 // 경로는 ADR 이 명시적으로 금지한 downgrade 다. 그렇다고 목록에서 지우면 "왜
-// OAuth 가 없지"라는 질문에 화면이 답하지 못한다. 그래서 **비활성 + 사유**로
+// OAuth 를 못 고르지"라는 질문에 화면이 답하지 못한다. 그래서 **비활성 + 사유**로
 // 세운다. 이 레포가 호스트 목록에서 이미 정한 규율과 같다
-// (features/timeline/spawnHostChoice.ts 규율 1).
+// (features/timeline/spawnHostChoice.ts 규율 1). create 가 oauth 를 받기 시작하면
+// 이 줄의 `disabled` 만 뒤집는다.
 // =============================================================================
 
 export type HostedPresetId = "generic" | "grok";
@@ -174,7 +179,7 @@ export const HOSTED_AUTH_MODE_CHOICES: readonly HostedAuthModeChoice[] = [
     id: "oauth",
     label: "OAuth",
     detail:
-      "이 서버에는 아직 OAuth 인가 서버가 없어 고를 수 없습니다. 준비되면 이 자리에서 열립니다.",
+      "OAuth 방식은 provider의 인가 화면에서 승인해 연결합니다. 이 마법사에서 직접 시작하는 길은 아직 열려 있지 않아 여기서는 고를 수 없습니다.",
     disabled: true,
   },
 ];

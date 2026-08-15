@@ -62,7 +62,9 @@ describe("RED PROOF ② OAuth 는 사유와 함께 서 있고 고를 수 없다"
   it("고를 수 없고 왜 그런지 그 자리에서 말한다", () => {
     const oauth = HOSTED_AUTH_MODE_CHOICES[1];
     expect(oauth?.disabled).toBe(true);
-    expect(oauth?.detail).toContain("아직 OAuth 인가 서버가 없어 고를 수 없습니다");
+    // create 가 oauth 를 거절하는 동안(E7 deviation 3) 이 마법사에서 직접 시작할 수
+    // 없다는 사실을 그 자리에서 말한다.
+    expect(oauth?.detail).toContain("직접 시작하는 길은 아직 열려 있지 않아");
   });
 
   it("우리가 모르는 날짜를 약속하지 않는다", () => {
