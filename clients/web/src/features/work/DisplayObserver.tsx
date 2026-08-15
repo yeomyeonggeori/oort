@@ -11,7 +11,6 @@ import {
   cspBlockedHost,
   classifyClose,
   HOST_CONNECT_TIMEOUT_MS,
-  observationStillPermits,
   observerLink,
 } from "./observerStream";
 import {
@@ -21,6 +20,7 @@ import {
   classifyProducerFrame,
   displayFailureCopy,
   displayGate,
+  displayObservationStillPermits,
   displayOffersReload,
   displayOffersRetry,
   displayQuietLabel,
@@ -572,7 +572,11 @@ export function DisplayObserver({
   // neither can reach a peer connection held between this browser and the VM.
   // The producer re-validates its own bearer for the other half of this; both
   // halves are needed, because the producer's clock is not this reader's.
-  const revoked = observationStillPermits(session);
+  //
+  // Owner-aware since LIVE-3: `owner_only` means 「소유자만 본다」, so an owner
+  // closing observation must not tear down their OWN screen one re-verify
+  // later while the server goes on validating the grant behind it.
+  const revoked = displayObservationStillPermits(session, isOwner);
   const holding =
     phase.kind === "watching" ||
     phase.kind === "connecting" ||

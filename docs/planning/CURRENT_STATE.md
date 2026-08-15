@@ -1,5 +1,23 @@
 # oort 기획 현재 상태 (Planning Current State)
 
+> **2026-08-16 스냅샷 41 (Opus 5 단발 워커 · engine — #1424 LIVE-3 control 개방 엔진 축: 창 원장·비관측 게이트·owner 예외, 로컬 동결).** 스냅샷 40(#1409)을 supersede한다.
+>
+> **활성 goal #1424:** worktree/branch는 `feat/live3-control-open`(`~/projects/momo-tracks/momo-worktrees/live3-control-open`), base는 `track/engine@f56c07f7`(#1418 랜딩 HEAD = `origin/track/engine`). **마이그레이션은 076**(`check_migration_numbers.sh` 76 PASS, 대비 테스트 `discovers_contiguous_migrations_001_to_076`). 계약 정본은 패킷 `docs/planning/handoffs/2026-08-15-live-3-control-open-packet.md` §4.
+>
+> **075가 예고한 실행 지점을 집행했다.** ADR-0004 증보 3이 2026-08-15 Accepted 되어, 076이 `terminal_attach_display_observer_ck`를 지우고 나머지 두 층(`AttachKind::permits_mode`·라우트 403)이 같은 커밋에서 함께 움직였다. 잠금이 사라진 자리에 들어온 것은 부재가 아니라 **원장**이다 — controller 발급은 한 트랜잭션에서 ①owner 한정(PTY controller 술어 재사용) ②`display_control_window` 개설(RLS FORCE, 세션당 열린 창 1개 = partial unique index) ③에이전트의 그 세션 접근 거부를 함께 한다.
+>
+> **§1-3의 탐사 결론(동결 조건 미발동):** 에이전트가 work session에 닿는 서버 경로는 **하나**다 — `POST …/work-controls`(agent bearer 전용, `read`=화면 읽기, `session_id`를 든 유일한 지점). attach 두 라우트는 `require_human`이고 MCP agent-port 8개 도구에 세션 표면이 없어 에이전트는 관전 capability 자체를 못 받는다. 따라서 게이트는 구조적으로 가능했고 **controller를 연 채 동결하는 상황은 발생하지 않았다.** 두 층으로 걸었다: **거부**(`work_controls::create` 409, 모든 쓰기 위 — 거부된 시도는 행도 audit도 안 남긴다) + **보류**(창 직전 dispatch분을 `pending_controls_for_host_in_tx`가 withhold, 실패가 아니라 보류라 창이 닫히면 다음 poll에 전달). **mutation 증명 2건 실행**: 각 층을 제거하면 `live3_2`가 RED, 복구 후 8/8 GREEN.
+>
+> **설계상 가장 조용한 함정 1건(해결):** 창의 수명을 capability `expires_at`(60초 dial 창)에 매면 `stream:true` 재검증이 만료 절만 완화하므로 **사람이 로그인하는 도중 60초에 에이전트가 재개된다** — 증보 3 D3이 막으려는 바로 그 실패다. 창에 자체 `lease_expires_at`(90초 = 재검증 3회)을 두고 **controller 재검증이 갱신**하도록 했다. 패킷 §1-2의 "capability 만료" 문구를 이 의미(= capability가 재검증·인가되기를 멈춤)로 읽었고, 60초 TTL의 문자적 해석은 채택하지 않았다 — 이탈 ①로 보고한다.
+>
+> **함께 확정:** `owner_only` = 「소유자만 본다」(발급·검증 조인 양쪽, 예외는 `kind='display'`로 좁힘 — PTY는 owner가 controller로 붙으므로 같은 문제가 없다) · `input_enabled`는 등급이 아니라 **창**을 따라가 반환을 실재하게 함 · 창 닫힘 3경로(반환/lease 만료/세션 종료) 전부 멱등 · VM은 `running` 유지(D6, ADR-0140 무변경).
+>
+> **이탈 3건(전부 보고, 추측 구현 없음):** ①**lease 해석**(위) — 문자적 60초는 D3 위반이라 채택 불가. ②**런 층 파킹은 하지 않았다.** `RunStatus::Paused`가 enum·`is_approval_held`·cancel 경로에 이미 배선돼 있고 **writer만 없다**(즉 gateway 콜백은 오늘도 paused run에 409를 준다). 이걸 쓰면 D6의 "토큰 소진 0"이 더 강하게 성립하지만, 첫 `running→paused` writer + resume 경로 + 만료 sweep(승인 sweep 동형)이 필요한 **런 상태기계 신규 기제**라 별도 결정 사안으로 보고 손대지 않았다. 패킷 §4-4는 「보류/거부」를 허용하고 거부는 구현했다. ③**라우트 밖 세션 종료 경로**(T3 sweep/`t3_terminate`)는 창을 명시적으로 닫지 않는다 — lease가 ≤90초 내 `expired`로 회수하는 것이 backstop이고, `terminate_in_tx`는 momo-t3라 outbox를 낼 수 없어(크레이트 규칙) 거기서 닫으면 경계 이벤트 없는 침묵 종료가 된다.
+>
+> **정직 라벨:** `runtime-unverified(input delivery)` — 서버 절반(발급·창·게이트·`input_enabled`·3경로 닫힘)은 실제 PG18 + 실제 Axum router conformance 8건으로 증명, 화면 절반은 미증명(datachannel을 열어 키를 넣거나 반환 시 닫아 본 producer 없음, **revoke 절반이 특히 선언일 뿐**). ICE 도달성·TURN도 여전히 미측정.
+>
+> **다음 행동:** Fable 기획검수(C/H/M) → 수리 → grok 리뷰어 C freeze → push/PR(base `track/engine`) → PR CI → 머지. 랜딩 시 **LIVE-4**(웹 직접 조작 UI·로그인 핸드오프 UX, design-review Blocker 0) 패킷 발급·발사(성재 결재 완료분). 워커는 로컬 commit 동결까지만 수행했다. **범위 밖:** 웹 controller 소비 UI 전부(LIVE-4), 증보 3 D5(egress grant — 패킷 §3·§4 미포함), 런 층 파킹(이탈 ②), TURN 이후 실 E2E.
+
 > **2026-08-15 스냅샷 40 (Opus 5 단발 워커 · engine — #1409 LIVE-1 T3 관전 라이브 화면 서버·기질 축, WebRTC display attach, 로컬 동결).** 스냅샷 39(#1368)을 supersede한다.
 >
 > **활성 goal #1409:** worktree/branch는 `feat/live1-display-spectate`(`~/projects/momo-tracks/momo-worktrees/live1-display-spectate`), base는 `track/engine@99d42244`(#1369 UX4 랜딩 HEAD). **마이그레이션은 075**(`check_migration_numbers.sh` 75 PASS, 대비 테스트 `discovers_contiguous_migrations_001_to_075`). 발주 전 그레펩 실측대로 그린필드였다 — display/VNC/WebRTC 스트림 축은 base에 0건이었다(`infra/livekit.yaml`은 huddle 오디오용 SFU이고 이 축과 무관하다).

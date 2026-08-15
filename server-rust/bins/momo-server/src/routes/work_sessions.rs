@@ -64,14 +64,14 @@ use momo_t3::work_control::{
     STATUS_DISPATCHED,
 };
 use momo_t3::{
-    acquire_slot_in_tx, allocate_uuid_v7, card_props, cloud_host_id_for_host,
-    cloud_host_id_for_host_in_tx, cloud_host_id_for_session_in_tx,
+    acquire_slot_in_tx, allocate_uuid_v7, card_props, close_control_window_in_tx,
+    cloud_host_id_for_host, cloud_host_id_for_host_in_tx, cloud_host_id_for_session_in_tx,
     create_resumed_work_session_in_tx, create_work_session_with_id_in_tx, end_work_session_in_tx,
     is_active_channel_member_in_tx, lifecycle_payload, list_work_session_details_in_tx,
     lock_work_session_detail_in_tx, mark_work_session_resumed_in_tx, resolve_cloud_host_id,
     start_usage_in_tx, terminate_in_tx, update_session_card_props_in_tx, work_session_scope_in_tx,
-    work_tool_is_enabled_in_tx, NewWorkSession, T3Error, T3LockLadder, TerminationReason,
-    WorkSessionDetail,
+    work_tool_is_enabled_in_tx, ControlWindowEndReason, NewWorkSession, T3Error, T3LockLadder,
+    TerminationReason, WorkSessionDetail,
 };
 use uuid::Uuid;
 
@@ -528,6 +528,36 @@ async fn end_in_tx(
             "work session state changed; retry",
         )));
     };
+
+    // The third close of ADR-0004 증보 3's control window (076): the session
+    // ended underneath somebody's keyboard. In the same transaction as the end
+    // itself, because a window left open on an ended session would keep the
+    // `work_controls` gate refusing forever on a session nobody can control —
+    // an agent blocked by a person who is no longer there.
+    //
+    // The boundary event still goes out. 「재개」 is not literally what happens
+    // when the session is over, but the fact an agent and a surface both need is
+    // that the window closed and why, and `end_reason: session_ended` is that.
+    if let Some(window) = close_control_window_in_tx(
+        conn,
+        workspace_id,
+        session_id,
+        ControlWindowEndReason::SessionEnded,
+    )
+    .await?
+    {
+        // No actor: ending the session is what closed it, and naming the person
+        // as having *returned* control would record an act they did not perform.
+        crate::routes::display_attach::emit_control_closed_in_tx(
+            conn,
+            workspace_id,
+            ended.channel_id,
+            None,
+            None,
+            &window,
+        )
+        .await?;
+    }
 
     let props = card_props(
         ended.id,

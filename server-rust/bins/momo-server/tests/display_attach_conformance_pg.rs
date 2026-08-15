@@ -15,22 +15,45 @@
 //! (NOBYPASSRLS, so the RLS policies actually apply), and the schema/roles step
 //! is re-runnable.
 //!
+//! Since LIVE-3 it also covers ADR-0004 증보 3: who may take control of a live
+//! screen, what that costs the agent while it lasts, and the three ways the
+//! window closes.
+//!
 //! ## What each test goes red on
 //!
 //! | test | revert that makes it red |
 //! |---|---|
 //! | `live1_1_a_screen_is_published_by_its_own_host_and_nobody_else` | drop the signer pin in `publish_binding_in_tx`, accept a human bearer, or let a second binding overwrite the first |
-//! | `live1_2_display_grants_are_observer_only_and_fail_closed` | serve `mode=controller`, mint for a host that never advertised `display_attach`, or let a display bearer validate on the PTY route |
+//! | `live1_2_display_grants_are_observer_only_and_fail_closed` | grant control to a non-owner, mint for a host that never advertised `display_attach`, let a display bearer validate on the PTY route, or drop `display_control_window_open_uniq` |
 //! | `live1_3_availability_and_the_observer_count_agree_everywhere` | forget `remote_display_available` in any one of the three projections, or split the observer count per kind |
-//! | `live1_4_revocation_reaches_a_live_stream` | cache the validation verdict, or stop re-joining `work_host`/`observation` on re-validation |
+//! | `live1_4_revocation_reaches_a_live_stream` | cache the validation verdict, stop re-joining `work_host`/`observation` on re-validation, or drop the owner exemption from the observer arm |
+//! | `live3_1_control_opens_only_for_the_owner_and_only_with_a_window` | issue control to a watcher, skip the host-advertisement clause for controller, open two windows on one session, or mint a controller grant without a window row |
+//! | `live3_2_the_agent_cannot_reach_a_session_under_human_control` | delete the window check in `work_controls::create_in_tx`, move it below the writes, drop the `NOT EXISTS` clause from `pending_controls_for_host_in_tx`, or start blocking spawns |
+//! | `live3_3_the_window_closes_three_ways_and_every_one_is_idempotent` | make a repeated return 4xx, stop sweeping lapsed leases, relabel a lapse `returned`, leave a window open on an ended session, or stop emitting the close envelope |
+//! | `live3_4_input_enabled_tracks_the_window_and_not_just_the_grade` | answer `input_enabled` from the grade alone, or stop renewing the lease on re-validation |
+//!
+//! ### The mutation proof (ADR-0004 증보 3's own acceptance criterion)
+//!
+//! 증보 3 asks for the non-observation gate to be proved by mutation rather than
+//! asserted. `live3_2` is built for that and its shape is the argument: the
+//! agent it uses is **fully entitled** — live run, approved lineage, running
+//! session, unrevoked host — and the test watches it succeed (201) before the
+//! window and be refused (409) after, with nothing else changed. An assertion
+//! that only ever saw the refusal would pass against a route that refuses
+//! everything; this one cannot. It then checks the ledger is unchanged by the
+//! refused attempts, so 「the agent observed nothing」 is a claim about what was
+//! written and not merely about what was delivered.
 //!
 //! ## What is deliberately NOT here
 //!
 //! No socket is opened by any test in this file, because no socket is opened by
 //! the server. The signalling handshake, the ICE exchange and the media are the
-//! sandbox's, and the closest this suite gets to them is asserting that the
-//! server tells the producer `input_enabled: false` (ADR-0165 D4). The
-//! peer-to-peer half is proved separately and honestly by
+//! sandbox's, and the closest this suite gets to them is asserting what the
+//! server *tells* the producer through `input_enabled` (ADR-0165 D4, ADR-0004
+//! 증보 3). Whether a producer honours that — opens a datachannel when told
+//! true, and closes it when told false — is unproved by anything in this
+//! repository and is labelled as such in the template spec's `unverified`
+//! block. The peer-to-peer half is proved separately and honestly by
 //! `scripts/display_signaling_probe.py`.
 
 use std::net::SocketAddr;
@@ -733,11 +756,17 @@ async fn live1_2_display_grants_are_observer_only_and_fail_closed() {
 
     publish_display(&http, &base, &host_seed, workspace, &host_id, session).await;
 
-    // ---- the boundary ADR-0004 증보 3 is holding ---------------------------
+    // ---- the boundary ADR-0004 증보 3 drew ---------------------------------
+    //
+    // LIVE-1 refused `controller` to everybody, including the owner, because the
+    // decision had not been made. It has been (2026-08-15), and the refusal that
+    // replaced the blanket one is narrower and permanent: control is the session
+    // OWNER's act on their own session (증보 3 D1). A teammate who may watch
+    // still may not type, and the sentence they get is the PTY path's, reused.
     let response = issue_display_capability(
         &http,
         &base,
-        &owner_token,
+        &watcher_token,
         workspace,
         session,
         Some(json!({ "mode": "controller" })),
@@ -746,12 +775,13 @@ async fn live1_2_display_grants_are_observer_only_and_fail_closed() {
     assert_eq!(
         response.status(),
         403,
-        "control is not this batch's to grant, and the owner is not an exception"
+        "control is the owner's act on their own session — watching does not \
+         earn a keyboard"
     );
     let body: Value = response.json().await.expect("error body");
     assert_eq!(
         body["error"]["message"],
-        "display attach is view-only; controller mode is not available"
+        "only the session owner can attach as controller"
     );
 
     // ---- who may watch ----------------------------------------------------
@@ -862,25 +892,70 @@ async fn live1_2_display_grants_are_observer_only_and_fail_closed() {
         ]
     );
 
-    // ---- 075's CHECK is the lock, not this route's politeness -------------
-    let forced = sqlx::query(
+    // ---- what 076 locks now that the observer lock is gone ----------------
+    //
+    // LIVE-1 asserted here that `terminal_attach_display_observer_ck` made a
+    // controllable screen unrepresentable. 076 dropped that CHECK by decision,
+    // so this asserts the constraint that replaced it — and it is a stronger
+    // one, because it guards a state that would be actively dangerous rather
+    // than merely undecided: **two open control windows on one session**, i.e.
+    // two people typing into one VM with each other's keystrokes interleaved.
+    //
+    // Written as a forced INSERT past the route for the same reason LIVE-1's
+    // was: a route can be rewritten by a batch that never read this file, and
+    // a unique index cannot be talked out of it.
+    // The digest is drawn fresh: `token_hash` is UNIQUE across the whole table,
+    // so a literal here would collide with the previous run against a reused
+    // database and this INSERT would fail for a reason that has nothing to do
+    // with what is being asserted.
+    let controller_grant = sqlx::query_scalar::<_, Uuid>(
         "INSERT INTO terminal_attach_capability \
            (workspace_id, work_session_id, host_id, owner_member_id, token_hash, \
             expires_at, mode, kind) \
          VALUES ($1, $2, (SELECT host_id FROM work_session WHERE id = $2), $3, \
-                 digest('forced', 'sha256'), clock_timestamp() + interval '60 seconds', \
-                 'controller', 'display')",
+                 digest($4::text, 'sha256'), clock_timestamp() + interval '60 seconds', \
+                 'controller', 'display') \
+         RETURNING id",
     )
     .bind(workspace)
     .bind(session)
     .bind(fixture.owner)
-    .execute(&su)
-    .await;
+    .bind(format!("forced-{}", Uuid::new_v4()))
+    .fetch_one(&su)
+    .await
+    .expect("a display controller row is representable since 076 — that is the decision");
+
+    let open_window = |capability: Uuid| {
+        let su = su.clone();
+        async move {
+            sqlx::query(
+                "INSERT INTO display_control_window \
+                   (workspace_id, work_session_id, grantee_member_id, capability_id, \
+                    lease_expires_at) \
+                 VALUES ($1, $2, $3, $4, clock_timestamp() + interval '90 seconds')",
+            )
+            .bind(workspace)
+            .bind(session)
+            .bind(fixture.owner)
+            .bind(capability)
+            .execute(&su)
+            .await
+        }
+    };
+    open_window(controller_grant)
+        .await
+        .expect("the first window opens");
     assert!(
-        forced.is_err(),
-        "terminal_attach_display_observer_ck makes a controllable screen \
-         unrepresentable — the boundary survives a route being rewritten"
+        open_window(controller_grant).await.is_err(),
+        "display_control_window_open_uniq makes two people holding one \
+         session's keyboard unrepresentable"
     );
+    // Left closed so it cannot leak into another assertion in this test.
+    sqlx::query("UPDATE display_control_window SET ended_at = clock_timestamp(), end_reason = 'returned' WHERE work_session_id = $1 AND ended_at IS NULL")
+        .bind(session)
+        .execute(&su)
+        .await
+        .expect("close the forced window");
 }
 
 // ---------------------------------------------------------------------------
@@ -1169,13 +1244,40 @@ async fn live1_4_revocation_reaches_a_live_stream() {
          a fresh join every time, never a cached one"
     );
 
-    // And the owner is refused too, because display has no controller grade.
-    // Named here rather than left to be discovered: on the PTY side the owner
-    // reaches an owner_only session as controller, and on this side that door
-    // does not exist yet (ADR-0004 증보 3).
+    // But the OWNER still gets in, and that is LIVE-3's other decision.
+    //
+    // LIVE-1 asserted a 403 here and flagged it: with no controller grade, an
+    // `owner_only` session had no screen for anybody, its owner included. 성재
+    // settled it — `owner_only` means 「소유자만 본다」, not 「아무도 못 본다」 —
+    // so the owner's observer grant is exempt from the observation clause while
+    // the teammate's is still cut above.
     let response =
         issue_display_capability(&http, &base, &owner_token, workspace, session, None).await;
-    assert_eq!(response.status(), 403);
+    assert_eq!(
+        response.status(),
+        200,
+        "owner_only closes the session to teammates, not to its owner"
+    );
+    let owner_grant: Value = response.json().await.expect("owner grant body");
+    let owner_capability = owner_grant["capability_token"].as_str().expect("token");
+    // And it survives re-validation, which is the half that matters: a grant
+    // that mints and is then cut on the next 30-second poll is a screen that
+    // goes black in front of the person who is allowed to see it.
+    let response = validate_display(
+        &http,
+        &base,
+        &host_seed,
+        workspace,
+        &host_id,
+        owner_capability,
+        true,
+    )
+    .await;
+    assert_eq!(
+        response.status(),
+        200,
+        "the exemption is in the authorization join too, not only at issuance"
+    );
 
     sqlx::query("UPDATE work_session SET observation = 'open' WHERE id = $1")
         .bind(session)
@@ -1275,4 +1377,948 @@ async fn live1_4_revocation_reaches_a_live_stream() {
     .await
     .expect("scan the audit log");
     assert_eq!(audit_leaks, 0, "only the digest is ever persisted");
+}
+
+// ---------------------------------------------------------------------------
+// LIVE-3 fixtures — an agent, a run, and a bearer that may drive a session
+//
+// The gate LIVE-3 adds is not about people, so the LIVE-1 fixtures cannot
+// exercise it: only an AGENT can create a work control (`work_controls::create`
+// refuses a human bearer by name), and only a control names a session an agent
+// wants to touch. These three helpers are the smallest thing that can be
+// refused, ported from `work_control_spawn_conformance_pg.rs`.
+// ---------------------------------------------------------------------------
+
+/// Seed an agent member that lives in the session's channel.
+async fn seed_agent(su: &PgPool, fixture: &Fixture, handle: &str) -> Uuid {
+    let agent = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO member (id, workspace_id, kind, display_name, handle) \
+         VALUES ($1, $2, 'agent', $3, $3)",
+    )
+    .bind(agent)
+    .bind(fixture.workspace)
+    .bind(handle)
+    .execute(su)
+    .await
+    .expect("seed agent member");
+    sqlx::query(
+        "INSERT INTO agent (member_id, workspace_id, model, base_url, \
+                            max_concurrent_runs, max_run_steps, owner_human_id) \
+         VALUES ($1, $2, 'claude-opus-4', 'https://gateway.invalid/v1', 4, 50, $3)",
+    )
+    .bind(agent)
+    .bind(fixture.workspace)
+    .bind(fixture.owner)
+    .execute(su)
+    .await
+    .expect("seed agent");
+    sqlx::query(
+        "INSERT INTO workspace_membership (workspace_id, member_id, role) \
+         VALUES ($1, $2, 'member')",
+    )
+    .bind(fixture.workspace)
+    .bind(agent)
+    .execute(su)
+    .await
+    .expect("seed agent workspace membership");
+    sqlx::query(
+        "INSERT INTO membership (workspace_id, channel_id, member_id, role) \
+         VALUES ($1, $2, $3, 'member') \
+         ON CONFLICT (channel_id, member_id) DO UPDATE SET left_at = NULL",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.channel)
+    .bind(agent)
+    .execute(su)
+    .await
+    .expect("seed agent channel membership");
+    agent
+}
+
+/// A live run for that agent — `control_run_binding_in_tx` requires one.
+async fn seed_run(su: &PgPool, fixture: &Fixture, agent: Uuid) -> Uuid {
+    let run = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO agent_run \
+           (id, workspace_id, agent_member_id, channel_id, status, input, idempotency_key) \
+         VALUES ($1, $2, $3, $4, 'running'::run_status, $5, $6)",
+    )
+    .bind(run)
+    .bind(fixture.workspace)
+    .bind(agent)
+    .bind(fixture.channel)
+    .bind(json!({"type": "work", "title": "live3", "brief": "live3"}))
+    .bind(format!("live3:{run}"))
+    .execute(su)
+    .await
+    .expect("seed agent run");
+    run
+}
+
+/// Mint an agent bearer carrying `work:control`.
+async fn agent_bearer(su: &PgPool, fixture: &Fixture, agent: Uuid) -> String {
+    let secret = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
+    let token = format!("momo_agent_v1.{}.{secret}", fixture.workspace);
+    sqlx::query(
+        "INSERT INTO token (workspace_id, kind, actor_member_id, subject_member_id, \
+                            token_hash, scopes, label) \
+         VALUES ($1, 'agent_bearer', $2, NULL, digest($3::text, 'sha256'), \
+                 ARRAY['work:control','messages:write'], 'live3-conformance')",
+    )
+    .bind(fixture.workspace)
+    .bind(agent)
+    .bind(&token)
+    .execute(su)
+    .await
+    .expect("seed agent bearer");
+    token
+}
+
+/// The acked `spawn` that makes a session part of this agent's lineage.
+///
+/// `session_control_lineage_status_in_tx` will not let an agent touch a session
+/// it did not spawn (ADR-0114 D5: `input`/`read`/`kill` live inside a lineage a
+/// human approved once). The LIVE-1 fixtures create sessions over the owner's
+/// REST path, which is nobody's lineage, so the agent tests seed the root
+/// control the real flow would have written.
+///
+/// Seeded rather than driven through spawn→ack because what LIVE-3 is testing
+/// is the refusal *after* entitlement, and an agent that got here by a different
+/// door is entitled by exactly the same predicate.
+async fn seed_spawn_lineage(
+    su: &PgPool,
+    fixture: &Fixture,
+    agent: Uuid,
+    host_id: &str,
+    session: Uuid,
+) {
+    sqlx::query(
+        "INSERT INTO work_control \
+           (workspace_id, channel_id, requester_member_id, target_host_id, session_id, \
+            kind, payload, status) \
+         VALUES ($1, $2, $3, $4, $5, 'spawn', $6, 'acked')",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.channel)
+    .bind(agent)
+    .bind(Uuid::parse_str(host_id).expect("host uuid"))
+    .bind(session)
+    .bind(json!({ "tool": "claude", "label": "live3 lineage root" }))
+    .execute(su)
+    .await
+    .expect("seed the acked spawn this session descends from");
+}
+
+/// The agent asking to do something to a session — its only server path there.
+#[allow(clippy::too_many_arguments)]
+async fn agent_work_control(
+    http: &reqwest::Client,
+    base: &str,
+    bearer: &str,
+    fixture: &Fixture,
+    run: Uuid,
+    host_id: &str,
+    session: Uuid,
+    kind: &str,
+) -> reqwest::Response {
+    let mut body = json!({
+        "channelId": fixture.channel.to_string(),
+        "runId": run.to_string(),
+        "targetHostId": host_id,
+        "sessionId": session.to_string(),
+        "kind": kind,
+        "payload": {},
+    });
+    // 020's per-kind payload CHECK is a closed world: `input` carries `text` and
+    // nothing else, `read` an optional `tail_lines`, `kill` an empty object.
+    if kind == "input" {
+        body["payload"] = json!({ "text": "whoami\n" });
+    }
+    http.post(format!(
+        "{base}/v1/workspaces/{}/work-controls",
+        fixture.workspace
+    ))
+    .bearer_auth(bearer)
+    .json(&body)
+    .send()
+    .await
+    .expect("agent work control")
+}
+
+/// Take control as the session owner, and return the raw response.
+async fn take_control(
+    http: &reqwest::Client,
+    base: &str,
+    token: &str,
+    workspace: Uuid,
+    session: Uuid,
+) -> reqwest::Response {
+    issue_display_capability(
+        http,
+        base,
+        token,
+        workspace,
+        session,
+        Some(json!({ "mode": "controller" })),
+    )
+    .await
+}
+
+async fn return_control(
+    http: &reqwest::Client,
+    base: &str,
+    token: &str,
+    workspace: Uuid,
+    session: Uuid,
+) -> reqwest::Response {
+    http.delete(format!(
+        "{base}/v1/workspaces/{workspace}/work-sessions/{session}/display-control"
+    ))
+    .bearer_auth(token)
+    .send()
+    .await
+    .expect("return display control")
+}
+
+/// Poll a host's queue the way its daemon does — a **signed GET**, which is the
+/// only way a daemon learns what to run (`pending_controls_for_host_in_tx`).
+///
+/// The "right now" in what this returns is the whole point of the assertions
+/// that use it: the same dispatched row is delivered or withheld depending on
+/// whether a person holds that session's keyboard.
+async fn poll_pending(
+    http: &reqwest::Client,
+    base: &str,
+    seed: &[u8; 32],
+    workspace: Uuid,
+    host_id: &str,
+) -> Vec<Value> {
+    let path = format!("/v1/workspaces/{workspace}/work-hosts/{host_id}/pending-controls");
+    let digest = momo_wire::signing::sha256_hex(&[]);
+    let request_id = Uuid::new_v4();
+    let sent_at_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock")
+        .as_millis() as i64;
+    let payload = momo_wire::signing::request_payload(
+        "GET",
+        &path,
+        workspace,
+        Uuid::parse_str(host_id).expect("host uuid"),
+        sent_at_ms,
+        &digest,
+        request_id,
+    );
+    let signature = momo_wire::signing::sign_base64(seed, &payload).expect("sign");
+    let response = http
+        .get(format!("{base}{path}"))
+        .header("Authorization", format!("MomoHost {host_id}"))
+        .header("X-Momo-Work-Host-Sent-At", sent_at_ms.to_string())
+        .header("X-Momo-Work-Host-Signature", signature)
+        .header("X-Momo-Work-Host-Request-ID", request_id.to_string())
+        .send()
+        .await
+        .expect("poll pending controls");
+    assert_eq!(response.status(), 200, "a host may poll its own queue");
+    let body: Value = response.json().await.expect("pending body");
+    body["workControls"]
+        .as_array()
+        .expect("workControls array")
+        .clone()
+}
+
+/// The open window on a session, if any, straight from the ledger.
+async fn open_window(su: &PgPool, session: Uuid) -> Option<(Uuid, Uuid)> {
+    sqlx::query_as(
+        "SELECT id, grantee_member_id FROM display_control_window \
+          WHERE work_session_id = $1 AND ended_at IS NULL",
+    )
+    .bind(session)
+    .fetch_optional(su)
+    .await
+    .expect("read the open control window")
+}
+
+/// Age a window until its lease has lapsed — what a producer that stopped
+/// re-validating looks like, without waiting 90 seconds for it.
+///
+/// **Both** timestamps move, and that is not a trick to dodge
+/// `display_control_window_lease_ck`: the constraint says a lease was valid when
+/// it was written, which is true of every real write (a lease is always
+/// `clock_timestamp() + 90s`). A window whose lease has lapsed is therefore
+/// always an OLD window, never a fresh one with a past lease, and the fixture
+/// has to produce the state the system can actually reach.
+async fn lapse_lease(su: &PgPool, session: Uuid) {
+    let aged = sqlx::query(
+        "UPDATE display_control_window \
+            SET started_at = clock_timestamp() - interval '10 minutes', \
+                lease_expires_at = clock_timestamp() - interval '8 minutes' \
+          WHERE work_session_id = $1 AND ended_at IS NULL",
+    )
+    .bind(session)
+    .execute(su)
+    .await
+    .expect("age the control window past its lease")
+    .rows_affected();
+    assert_eq!(aged, 1, "there was an open window to lapse");
+}
+
+// ---------------------------------------------------------------------------
+// live3-1 — control opens for the owner, for nobody else, and never without a
+//           window in the ledger
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn live3_1_control_opens_only_for_the_owner_and_only_with_a_window() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let fixture = seed(&su, &app_pool).await;
+    let base = start_server(app_pool).await;
+    let http = reqwest::Client::new();
+    let workspace = fixture.workspace;
+
+    let owner_token = login(&http, &base, workspace, &fixture.owner_email).await;
+    let watcher_token = login(&http, &base, workspace, &fixture.watcher_email).await;
+    let outsider_token = login(&http, &base, workspace, &fixture.outsider_email).await;
+
+    // ---- a host with no screen cannot be controlled either ------------------
+    // The fail-closed advertisement gate is a clause of issuance, not of the
+    // observer grade, so opening control must not have slipped past it. This is
+    // also how BYOC stays out (증보 3 D7) without policy naming a provider.
+    let (blind_host, _blind_seed) =
+        register_host(&http, &base, &owner_token, workspace, false).await;
+    let blind_session = create_session(
+        &http,
+        &base,
+        &owner_token,
+        workspace,
+        fixture.channel,
+        &blind_host,
+    )
+    .await;
+    sqlx::query("UPDATE work_session SET display_id = $2, display_endpoint = $3 WHERE id = $1")
+        .bind(blind_session)
+        .bind(DISPLAY_ID)
+        .bind(DISPLAY_ENDPOINT)
+        .execute(&su)
+        .await
+        .expect("force a binding the route would have refused");
+    let response = take_control(&http, &base, &owner_token, workspace, blind_session).await;
+    assert_eq!(
+        response.status(),
+        409,
+        "a box that never advertised a screen has no keyboard either — BYOC is \
+         excluded by this clause and not by a provider name"
+    );
+    assert!(
+        open_window(&su, blind_session).await.is_none(),
+        "a refused grant leaves no window"
+    );
+
+    // ---- the ordinary, advertised host --------------------------------------
+    let (host_id, host_seed) = register_host(&http, &base, &owner_token, workspace, true).await;
+    let session = create_session(
+        &http,
+        &base,
+        &owner_token,
+        workspace,
+        fixture.channel,
+        &host_id,
+    )
+    .await;
+    publish_display(&http, &base, &host_seed, workspace, &host_id, session).await;
+
+    // ---- who may not ---------------------------------------------------------
+    for (label, token) in [
+        ("a teammate who may watch", &watcher_token),
+        ("a workspace member outside the channel", &outsider_token),
+    ] {
+        let response = take_control(&http, &base, token, workspace, session).await;
+        assert_eq!(
+            response.status(),
+            403,
+            "{label} does not get the keyboard — control is the owner's act on \
+             their own session (ADR-0004 증보 3 D1)"
+        );
+        assert!(
+            open_window(&su, session).await.is_none(),
+            "{label} left no window behind"
+        );
+    }
+
+    // ---- the owner does, and the window is part of the same act -------------
+    let response = take_control(&http, &base, &owner_token, workspace, session).await;
+    assert_eq!(response.status(), 200);
+    let grant: Value = response.json().await.expect("grant body");
+    assert_eq!(grant["mode"], json!("controller"));
+    assert_eq!(grant["display_id"], json!(DISPLAY_ID));
+    let started_at = grant["control_started_at"]
+        .as_i64()
+        .expect("a controller grant reports when control began");
+
+    let (window_id, grantee) = open_window(&su, session)
+        .await
+        .expect("a controller grant that opened no window would be a keyboard nobody recorded");
+    assert_eq!(grantee, fixture.owner);
+
+    // ---- re-taking control is idempotent ------------------------------------
+    // A client retry must not mint a second window: 정지 시각 is a fact the
+    // agent is told, and two answers to it is not a fact.
+    let response = take_control(&http, &base, &owner_token, workspace, session).await;
+    assert_eq!(response.status(), 200);
+    let again: Value = response.json().await.expect("second grant body");
+    assert_eq!(
+        again["control_started_at"].as_i64(),
+        Some(started_at),
+        "re-taking control renews the window rather than starting a new one"
+    );
+    let (window_again, _) = open_window(&su, session).await.expect("still one window");
+    assert_eq!(window_again, window_id, "and it is the same row");
+
+    let windows: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM display_control_window WHERE work_session_id = $1",
+    )
+    .bind(session)
+    .fetch_one(&su)
+    .await
+    .expect("count windows");
+    assert_eq!(windows, 1, "one intervention, one row");
+
+    // ---- the audit says a boundary was crossed, and says nothing else -------
+    let detail: Value = sqlx::query_scalar(
+        "SELECT detail FROM audit_log \
+          WHERE workspace_id = $1 AND action = 'work.display_attach.issued' \
+            AND detail->>'mode' = 'controller' \
+          ORDER BY created_at DESC LIMIT 1",
+    )
+    .bind(workspace)
+    .fetch_one(&su)
+    .await
+    .expect("read the control audit row");
+    assert_eq!(detail["mode"], json!("controller"));
+    assert_eq!(detail["kind"], json!("display"));
+    assert_eq!(detail["control_window_opened"], json!(true));
+
+    // ---- the boundary event carries the boundary and nothing else ----------
+    let payload: Value = sqlx::query_scalar(
+        "SELECT payload->'data'->'payload' FROM outbox \
+          WHERE workspace_id = $1 \
+            AND payload->'data'->>'type' = 'work.session.control' \
+          ORDER BY id LIMIT 1",
+    )
+    .bind(workspace)
+    .fetch_one(&su)
+    .await
+    .expect("read the control envelope");
+    let mut keys: Vec<&str> = payload
+        .as_object()
+        .expect("payload")
+        .keys()
+        .map(String::as_str)
+        .collect();
+    keys.sort_unstable();
+    assert_eq!(
+        keys,
+        vec!["session_id", "started_at", "state"],
+        "ADR-0004 증보 3 D3: the agent learns 정지 시각 and that is the whole list \
+         — no grantee, no frame, no keystroke, no endpoint"
+    );
+    assert_eq!(payload["state"], json!("opened"));
+
+    // ---- and a second person cannot take it away ---------------------------
+    // Unreachable through the owner check above (only the owner gets this far),
+    // so it is forced at the ledger: two open windows is the state the unique
+    // index exists to refuse.
+    let stolen = sqlx::query(
+        "INSERT INTO display_control_window \
+           (workspace_id, work_session_id, grantee_member_id, capability_id, lease_expires_at) \
+         VALUES ($1, $2, $3, \
+                 (SELECT id FROM terminal_attach_capability \
+                   WHERE work_session_id = $2 AND mode = 'controller' LIMIT 1), \
+                 clock_timestamp() + interval '90 seconds')",
+    )
+    .bind(workspace)
+    .bind(session)
+    .bind(fixture.watcher)
+    .execute(&su)
+    .await;
+    assert!(
+        stolen.is_err(),
+        "one open window per session — two keyboards on one VM is unrepresentable"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// live3-2 — 비관측: the agent is refused while a person holds control
+//
+// This is ADR-0004 증보 3 D3's 기술적 차단 and the acceptance criterion that
+// asks for a mutation proof. The adversarial shape is deliberate: the agent
+// here is fully entitled — live run, approved lineage, running session, a host
+// that is not revoked — and is refused anyway, on the one axis that changed.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn live3_2_the_agent_cannot_reach_a_session_under_human_control() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let fixture = seed(&su, &app_pool).await;
+    let base = start_server(app_pool).await;
+    let http = reqwest::Client::new();
+    let workspace = fixture.workspace;
+
+    let owner_token = login(&http, &base, workspace, &fixture.owner_email).await;
+    let (host_id, host_seed) = register_host(&http, &base, &owner_token, workspace, true).await;
+    let session = create_session(
+        &http,
+        &base,
+        &owner_token,
+        workspace,
+        fixture.channel,
+        &host_id,
+    )
+    .await;
+    publish_display(&http, &base, &host_seed, workspace, &host_id, session).await;
+
+    let agent = seed_agent(&su, &fixture, "live3-intern").await;
+    let run = seed_run(&su, &fixture, agent).await;
+    let bearer = agent_bearer(&su, &fixture, agent).await;
+    seed_spawn_lineage(&su, &fixture, agent, &host_id, session).await;
+
+    // ---- the control plane works for this agent BEFORE the window ----------
+    // The mutation proof needs this: an assertion that only ever saw a refusal
+    // would pass just as well against a route that refuses everything.
+    for kind in ["read", "input"] {
+        let response = agent_work_control(
+            &http, &base, &bearer, &fixture, run, &host_id, session, kind,
+        )
+        .await;
+        let status = response.status();
+        assert_eq!(
+            status,
+            201,
+            "{kind} is exactly what this agent is entitled to do right now: {:?}",
+            response.text().await
+        );
+    }
+    let dispatched: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM work_control WHERE session_id = $1 AND status = 'dispatched'",
+    )
+    .bind(session)
+    .fetch_one(&su)
+    .await
+    .expect("count dispatched controls");
+    assert_eq!(dispatched, 2, "both landed and were dispatched to the host");
+
+    // Every row this session has, including the acked spawn it descends from.
+    // Counted here so the post-refusal count below compares like with like.
+    let controls_before: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM work_control WHERE session_id = $1")
+            .bind(session)
+            .fetch_one(&su)
+            .await
+            .expect("count controls");
+
+    // ---- the person takes control ------------------------------------------
+    let response = take_control(&http, &base, &owner_token, workspace, session).await;
+    assert_eq!(response.status(), 200);
+
+    // ---- and now the same agent, unchanged, is refused ---------------------
+    for kind in ["read", "input", "kill"] {
+        let response = agent_work_control(
+            &http, &base, &bearer, &fixture, run, &host_id, session, kind,
+        )
+        .await;
+        assert_eq!(
+            response.status(),
+            409,
+            "ADR-0004 증보 3 D3: while a person is typing, the agent's own path \
+             to this session is refused — `{kind}` included"
+        );
+        let body: Value = response.json().await.expect("error body");
+        assert_eq!(
+            body["error"]["message"], "work session is under human control",
+            "and it is told the boundary, not the pixels"
+        );
+    }
+
+    // The refusal happens above every write: an agent that tried to look leaves
+    // no control row, no dispatch and no audit trail of having looked. That is
+    // what makes 「the agent observed nothing」 a statement about the ledger.
+    let controls_after: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM work_control WHERE session_id = $1")
+            .bind(session)
+            .fetch_one(&su)
+            .await
+            .expect("count controls");
+    assert_eq!(
+        controls_after, controls_before,
+        "nothing was written by the three refused attempts — the gate sits above \
+         every write, so an agent that tried to look leaves no trace of having tried"
+    );
+
+    // ---- the work already dispatched is WITHHELD, not delivered ------------
+    // The race the create-side gate cannot reach: two controls were dispatched
+    // one moment before the window opened. If the daemon could still collect
+    // them it would read the screen the person is typing a password into.
+    let withheld = poll_pending(&http, &base, &host_seed, workspace, &host_id).await;
+    assert!(
+        withheld.is_empty(),
+        "a control dispatched before the window opened is withheld while it \
+         stands — the poll is the only way a daemon learns what to run, and \
+         handing these over would read the screen the person is typing into"
+    );
+
+    // ---- the agent's other work is untouched -------------------------------
+    // 증보 3 stops the agent's reach into THIS session, not the agent. A spawn
+    // names no session, so it is not the session anybody is typing into.
+    let response = http
+        .post(format!("{base}/v1/workspaces/{workspace}/work-controls"))
+        .bearer_auth(&bearer)
+        .json(&json!({
+            "channelId": fixture.channel.to_string(),
+            "runId": run.to_string(),
+            "targetHostId": host_id,
+            "kind": "spawn",
+            "payload": { "tool": "claude", "label": "elsewhere" },
+        }))
+        .send()
+        .await
+        .expect("spawn during a control window");
+    assert_ne!(
+        response.status(),
+        409,
+        "a spawn names no session; blocking it would stop the agent rather than \
+         its reach into one screen (증보 3 D6)"
+    );
+
+    // ---- the VM never moved (증보 3 D6) ------------------------------------
+    let status: String = sqlx::query_scalar("SELECT status FROM work_session WHERE id = $1")
+        .bind(session)
+        .fetch_one(&su)
+        .await
+        .expect("read session status");
+    assert_eq!(
+        status, "running",
+        "ADR-0140's state machine is untouched: the VM stays running and stays \
+         billable. What stops is the run layer's reach, not the machine."
+    );
+
+    // ---- return, and the agent resumes -------------------------------------
+    let response = return_control(&http, &base, &owner_token, workspace, session).await;
+    assert_eq!(response.status(), 200);
+    let returned: Value = response.json().await.expect("return body");
+    assert_eq!(returned["closed"], json!(true));
+
+    let response = agent_work_control(
+        &http, &base, &bearer, &fixture, run, &host_id, session, "read",
+    )
+    .await;
+    assert_eq!(
+        response.status(),
+        201,
+        "「사용자 개입 완료」 — the agent's reach comes back with the keyboard"
+    );
+
+    // And the withheld work is delivered now rather than lost.
+    let delivered = poll_pending(&http, &base, &host_seed, workspace, &host_id).await;
+    assert!(
+        delivered.len() >= 2,
+        "withholding paused the work; it did not throw it away — a withheld row \
+         is still `dispatched`, so the next poll after the window closes gets it"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// live3-3 — the window closes three ways, all idempotent, all fail-closed
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn live3_3_the_window_closes_three_ways_and_every_one_is_idempotent() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let fixture = seed(&su, &app_pool).await;
+    let base = start_server(app_pool).await;
+    let http = reqwest::Client::new();
+    let workspace = fixture.workspace;
+
+    let owner_token = login(&http, &base, workspace, &fixture.owner_email).await;
+    let watcher_token = login(&http, &base, workspace, &fixture.watcher_email).await;
+    let (host_id, host_seed) = register_host(&http, &base, &owner_token, workspace, true).await;
+
+    let fresh_session = |label: &'static str| {
+        let http = http.clone();
+        let base = base.clone();
+        let owner_token = owner_token.clone();
+        let host_id = host_id.clone();
+        let channel = fixture.channel;
+        async move {
+            let session =
+                create_session(&http, &base, &owner_token, workspace, channel, &host_id).await;
+            publish_display(&http, &base, &host_seed, workspace, &host_id, session).await;
+            let response = take_control(&http, &base, &owner_token, workspace, session).await;
+            assert_eq!(response.status(), 200, "{label}: control opens");
+            session
+        }
+    };
+
+    let end_reason = |session: Uuid| {
+        let su = su.clone();
+        async move {
+            sqlx::query_scalar::<_, Option<String>>(
+                "SELECT end_reason FROM display_control_window WHERE work_session_id = $1",
+            )
+            .bind(session)
+            .fetch_one(&su)
+            .await
+            .expect("read the end reason")
+        }
+    };
+
+    // ---- 1. the person hands it back ---------------------------------------
+    let returned_session = fresh_session("return").await;
+    let response = return_control(&http, &base, &owner_token, workspace, returned_session).await;
+    assert_eq!(response.status(), 200);
+    let body: Value = response.json().await.expect("return body");
+    assert_eq!(body["closed"], json!(true));
+    assert!(open_window(&su, returned_session).await.is_none());
+    assert_eq!(
+        end_reason(returned_session).await.as_deref(),
+        Some("returned")
+    );
+
+    // Idempotent: a retried return is success with `closed: false`, never a 4xx.
+    let response = return_control(&http, &base, &owner_token, workspace, returned_session).await;
+    assert_eq!(
+        response.status(),
+        200,
+        "a retried return is the state the caller asked for, not a failure"
+    );
+    let body: Value = response.json().await.expect("second return body");
+    assert_eq!(body["closed"], json!(false));
+
+    // And a teammate cannot end somebody else's intervention.
+    let taken_again = fresh_session("return/authz").await;
+    let response = return_control(&http, &base, &watcher_token, workspace, taken_again).await;
+    assert_eq!(
+        response.status(),
+        403,
+        "ending an intervention mid-password is the owner's call, like starting one"
+    );
+    assert!(open_window(&su, taken_again).await.is_some());
+
+    // ---- 2. the lease lapses ------------------------------------------------
+    // The producer stopped re-validating: the browser was closed, the tab
+    // crashed, the person walked away. Nobody performs this close, so the ledger
+    // has to perform it — otherwise the agent stays blocked forever by a window
+    // whose holder is gone.
+    let lapsed_session = fresh_session("lapse").await;
+    lapse_lease(&su, lapsed_session).await;
+
+    let agent = seed_agent(&su, &fixture, "live3-lapse-intern").await;
+    let run = seed_run(&su, &fixture, agent).await;
+    let bearer = agent_bearer(&su, &fixture, agent).await;
+    seed_spawn_lineage(&su, &fixture, agent, &host_id, lapsed_session).await;
+    let response = agent_work_control(
+        &http,
+        &base,
+        &bearer,
+        &fixture,
+        run,
+        &host_id,
+        lapsed_session,
+        "read",
+    )
+    .await;
+    assert_eq!(
+        response.status(),
+        201,
+        "a lapsed window stops blocking the agent — the fail-safe direction, \
+         because a person who left must not silence an agent permanently"
+    );
+    assert!(open_window(&su, lapsed_session).await.is_none());
+    assert_eq!(
+        end_reason(lapsed_session).await.as_deref(),
+        Some("expired"),
+        "and it is closed with the reason that is TRUE — a lapse relabelled \
+         'returned' would be a wrong story about what happened"
+    );
+
+    // ---- 3. the session ends underneath it ---------------------------------
+    let ended_session = fresh_session("session end").await;
+    let response = http
+        .patch(format!(
+            "{base}/v1/workspaces/{workspace}/work-sessions/{ended_session}"
+        ))
+        .bearer_auth(&owner_token)
+        .json(&json!({ "status": "ended" }))
+        .send()
+        .await
+        .expect("end the session");
+    assert_eq!(response.status(), 200);
+    assert!(
+        open_window(&su, ended_session).await.is_none(),
+        "a window left open on an ended session would block the agent forever \
+         on a session nobody can control"
+    );
+    assert_eq!(
+        end_reason(ended_session).await.as_deref(),
+        Some("session_ended")
+    );
+
+    // ---- every close announced itself --------------------------------------
+    // The 재개 half of 증보 3 D3. Three closes, three envelopes, each naming why.
+    let closed: Vec<Value> = sqlx::query_scalar(
+        "SELECT payload->'data'->'payload' FROM outbox \
+          WHERE workspace_id = $1 \
+            AND payload->'data'->>'type' = 'work.session.control' \
+            AND payload->'data'->'payload'->>'state' = 'closed'",
+    )
+    .bind(workspace)
+    .fetch_all(&su)
+    .await
+    .expect("read close envelopes");
+    let mut reasons: Vec<String> = closed
+        .iter()
+        .map(|payload| payload["end_reason"].as_str().unwrap_or("").to_string())
+        .collect();
+    reasons.sort();
+    assert_eq!(
+        reasons,
+        vec!["expired", "returned", "session_ended"],
+        "each close is a boundary event and each says which of the three it was"
+    );
+    for payload in &closed {
+        assert!(
+            payload["ended_at"].is_i64(),
+            "재개 시각 is the fact this event exists to carry"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// live3-4 — `input_enabled` is honest, and honesty is what makes 반환 real
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn live3_4_input_enabled_tracks_the_window_and_not_just_the_grade() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let fixture = seed(&su, &app_pool).await;
+    let base = start_server(app_pool).await;
+    let http = reqwest::Client::new();
+    let workspace = fixture.workspace;
+
+    let owner_token = login(&http, &base, workspace, &fixture.owner_email).await;
+    let watcher_token = login(&http, &base, workspace, &fixture.watcher_email).await;
+    let (host_id, host_seed) = register_host(&http, &base, &owner_token, workspace, true).await;
+    let session = create_session(
+        &http,
+        &base,
+        &owner_token,
+        workspace,
+        fixture.channel,
+        &host_id,
+    )
+    .await;
+    publish_display(&http, &base, &host_seed, workspace, &host_id, session).await;
+
+    let validated = |capability: String, stream: bool| {
+        let http = http.clone();
+        let base = base.clone();
+        let host_id = host_id.clone();
+        async move {
+            let response = validate_display(
+                &http,
+                &base,
+                &host_seed,
+                workspace,
+                &host_id,
+                &capability,
+                stream,
+            )
+            .await;
+            let status = response.status();
+            let body: Value = response
+                .json()
+                .await
+                .unwrap_or_else(|_| json!({ "error": "unparsed" }));
+            (status, body)
+        }
+    };
+
+    // ---- an observer is told no, exactly as before --------------------------
+    let response =
+        issue_display_capability(&http, &base, &watcher_token, workspace, session, None).await;
+    assert_eq!(response.status(), 200);
+    let watcher_capability = response.json::<Value>().await.expect("grant")["capability_token"]
+        .as_str()
+        .expect("token")
+        .to_string();
+    let (status, body) = validated(watcher_capability, false).await;
+    assert_eq!(status, 200);
+    assert_eq!(body["mode"], json!("observer"));
+    assert_eq!(
+        body["input_enabled"],
+        json!(false),
+        "ADR-0165 D4 is unchanged for view-only: the guarantee is a datachannel \
+         that is never opened"
+    );
+
+    // ---- a controller with a standing window is told yes -------------------
+    let response = take_control(&http, &base, &owner_token, workspace, session).await;
+    assert_eq!(response.status(), 200);
+    let control_capability = response.json::<Value>().await.expect("grant")["capability_token"]
+        .as_str()
+        .expect("token")
+        .to_string();
+
+    let (status, body) = validated(control_capability.clone(), false).await;
+    assert_eq!(status, 200);
+    assert_eq!(body["mode"], json!("controller"));
+    assert_eq!(
+        body["input_enabled"],
+        json!(true),
+        "the producer may open input only because the server said so — never \
+         because a viewer asked"
+    );
+
+    // A re-validation renews the lease, which is what keeps the window open for
+    // as long as the stream is up (076: the 60-second dial TTL does not bound a
+    // live WebRTC session, and keying the window to it would resume the agent
+    // mid-login).
+    let (status, body) = validated(control_capability.clone(), true).await;
+    assert_eq!(status, 200);
+    assert_eq!(body["input_enabled"], json!(true));
+    assert!(
+        open_window(&su, session).await.is_some(),
+        "re-validating is the producer saying the stream is up, and that is what \
+         holds the window open"
+    );
+
+    // ---- return, and the SAME bearer stops enabling input -------------------
+    // This is the assertion that makes 반환 mean something. Without it, handing
+    // control back would be a row in a table and a keyboard that still worked.
+    let response = return_control(&http, &base, &owner_token, workspace, session).await;
+    assert_eq!(response.status(), 200);
+
+    let (status, body) = validated(control_capability, true).await;
+    assert_eq!(
+        status, 200,
+        "the grant itself is still authorised — the owner may still watch"
+    );
+    assert_eq!(
+        body["input_enabled"],
+        json!(false),
+        "but the keyboard is gone within one re-validation period, because the \
+         window it depended on has closed"
+    );
 }

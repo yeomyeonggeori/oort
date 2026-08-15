@@ -52,6 +52,10 @@
 pub mod billing;
 pub mod cloud_host;
 pub mod convergence;
+/// ADR-0004 증보 3 — the control-window ledger: what must be true while a
+/// person is typing into a live screen, and the predicate the agent's run path
+/// is refused by.
+pub mod display_control;
 pub mod error;
 /// #1197 H1 — instance lease renewal, on a substrate that expires instances on
 /// a clock momo does not otherwise touch.
@@ -84,6 +88,12 @@ pub use cloud_host::{
 pub use convergence::{
     after_deadline, after_provider_call, provider_denies_its_own_absence,
     CloudLifecycleConvergence, CloudLifecyclePhase,
+};
+pub use display_control::{
+    active_control_window_in_tx, close_control_window_in_tx,
+    close_control_windows_for_sessions_in_tx, expire_lapsed_control_windows_in_tx,
+    open_control_window_in_tx, renew_control_window_lease_in_tx, ControlWindow,
+    ControlWindowEndReason, CONTROL_WINDOW_LEASE_SECONDS,
 };
 pub use error::T3Error;
 pub use lease::{renewable_lease_candidates, LeaseRenewalCandidate};

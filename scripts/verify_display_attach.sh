@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
-# LIVE-1 / ADR-0165 display-attach runtime verifier.
+# LIVE-1 + LIVE-3 / ADR-0165 + ADR-0004 증보 3 display-attach runtime verifier.
 #
 # Four phases, each proving something the others cannot:
 #
 #   1. capability plane  the ignored conformance suite against an isolated
 #                        PostgreSQL 18 and the real in-process Axum router:
-#                        who may publish a screen, who may watch it, and what
-#                        cuts a stream that is already open.
+#                        who may publish a screen, who may watch it, who may
+#                        CONTROL it, what that costs the agent while it lasts,
+#                        and what cuts a stream that is already open.
 #   2. signalling        two local peers over a real WebSocket
 #                        (scripts/display_signaling_probe.py), plus its own red
 #                        proof — a producer that negotiates a datachannel MUST
@@ -379,6 +380,23 @@ done
 # The ADR-0165 absences, asserted as absences.
 [ "$(spec_value '.producer.inputDatachannel')" = "false" ] ||
   fail "spec declares an input datachannel — ADR-0165 D4 says view-only is its absence"
+
+# LIVE-3 / ADR-0004 증보 3: control opened, and it opened on ONE trigger.
+#
+# The absence above still holds — an offer carries no input m-line — so what
+# changed is not that the guarantee weakened but that a second, server-decided
+# path exists beside it. These three assertions are what keep that path from
+# quietly becoming a client-decided one, which is the failure ADR-0165 D4 spent
+# its whole argument on.
+[ "$(spec_value '.producer.inputDatachannelOnDemand.trigger')" = "validate.input_enabled == true" ] ||
+  fail "spec does not gate input on the server's own validate answer — a viewer's request is not authorisation"
+[ "$(spec_value '.producer.inputDatachannelOnDemand.revokeOn')" = "validate.input_enabled == false" ] ||
+  fail "spec has no revoke trigger — a returned control window that leaves a working keyboard is not a return"
+[ "$(spec_value '.producer.inputDatachannelOnDemand.viewerRequestIsNotAuthorisation')" = "true" ] ||
+  fail "spec no longer states that a viewer asking for input does not authorise it"
+# The honest label for the half of LIVE-3 no microVM has ever run.
+spec_value '.unverified.inputDelivery' >/dev/null ||
+  fail "spec dropped the input-delivery honesty label — no producer has ever read input_enabled"
 [ "$(spec_value '.producer.recording')" = "false" ] ||
   fail "spec declares recording — ADR-0165 D5 forbids it"
 [ "$(spec_value '.ice.turn')" = "null" ] ||
@@ -478,9 +496,20 @@ fi
 
 perform_cleanup || fail "explicit normal teardown failed"
 trap - EXIT INT TERM
-note "PASS host-signed binding / observer-only issuance / fail-closed advertisement / revocation"
+note "PASS host-signed binding / fail-closed advertisement / revocation"
 note "PASS remoteDisplayAvailable across list, reattach and RETURNING"
 note "PASS two-peer view-only signalling contract (red proof included)"
+# LIVE-3 replaced LIVE-1's "observer-only issuance" line. It is stated as what
+# now holds rather than deleted, so that dropping the observer lock reads as the
+# decision it was (ADR-0004 증보 3) and not as a guarantee that went missing.
+note "PASS control opens ONLY for the session owner, and only with a window in the ledger"
+note "PASS the agent's run path is refused for a session under human control (비관측, mutation-proved)"
+note "PASS the window closes on return / lease lapse / session end — idempotently, all three"
+note "PASS input_enabled is true only for a controller grant whose window still stands"
+note "PASS owner_only means 소유자만 본다 — the owner's own observer grant survives it"
 note "runtime-unverified(cubesandbox webrtc producer): no microVM was built or booted;"
 note "  ICE reachability from a browser to a sandbox remains unmeasured —"
 note "  see infra/cubesandbox/display-template/README.md"
+note "runtime-unverified(input delivery): no producer has ever read input_enabled,"
+note "  opened an input datachannel, delivered a keystroke, or closed that channel"
+note "  on return. The server half of control is proved above; the screen half is not."
