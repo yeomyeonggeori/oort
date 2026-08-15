@@ -803,7 +803,12 @@ export function ChatShell() {
         where it stops being a column beside the channel and becomes a drawer
         over it (tokens.css `work-pane`). */}
     <div className="relative flex min-w-0 flex-1">
-      <div ref={coveredRef} className="flex min-w-0 flex-1 flex-col">
+      {/* `chat-region`은 `min-w-0`을 대신한다(tokens.css): 이 열은 위쪽 상한
+          (긴 코드 블록에 밀리지 않는다)과 아래쪽 바닥(옆에 선 pane이 컴포저를
+          바닥 아래로 밀지 못한다, #1418)이 함께 필요하고, 같은 축을 두 곳에서
+          적으면 순서가 이긴다. 라우트 상자의 `route-region`(#1413)과 같은
+          장치이고, 그쪽이 못 보던 판(pane이 이 상자 **안쪽**에 설 때)을 든다. */}
+      <div ref={coveredRef} className="chat-region flex flex-1 flex-col">
         {stressCount === 0 && channelId !== null ? (
           <HuddleHeaderState
             workspaceId={workspaceId}

@@ -851,7 +851,10 @@ export function WorkPanel({
         }
       }}
       data-wide={wide ? "" : undefined}
-      className="work-pane flex h-full shrink-0 flex-col border-l border-line bg-surface"
+      // `shrink-0`은 `work-pane`이 flex 기준선을 갖게 되면서 빠졌다 (#1418).
+      // 320px은 원하는 폭이고, 채널 열이 자기 바닥(`chat-region`)에 닿으면
+      // 모자란 폭은 이 pane이 낸다 — 근거는 tokens.css `--spacing-chat-min`.
+      className="work-pane flex h-full flex-col border-l border-line bg-surface"
     >
       <header className="flex flex-col gap-1 border-b border-line px-4 py-2">
         <div className="flex items-center justify-between gap-2">
