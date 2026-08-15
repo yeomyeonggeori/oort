@@ -317,6 +317,17 @@ describe("RED PROOF ⑤ 결과 문장은 닫히는 쪽을 말한다", () => {
     const sentence = oauthConsentConsequence("Grok 리서치", 0, ["agent:port:connect"]);
     expect(sentence).toContain("접속만 하고");
   });
+
+  it("주어를 두 번 표지하지 않는다 (design-review M1)", () => {
+    // 조사는 koreanParticle 이 정한다(라틴 종성 처리). 핵심은 앞에 별도 주어를
+    // 덧대 한 대상에 표지가 겹치지 않는 것이다.
+    const sentence = oauthConsentConsequence("Grok", 1, [
+      "agent:port:connect",
+      "messages:write",
+    ]);
+    expect(sentence).not.toContain("이 외부 에이전트가");
+    expect(sentence.startsWith("승인하면 Grok")).toBe(true);
+  });
 });
 
 describe("만료와 사실 목록", () => {

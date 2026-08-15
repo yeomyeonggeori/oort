@@ -214,9 +214,9 @@ export function normalizeOauthScopes(
 /**
  * 저장 버튼 바로 위에 서는 한 문단 — 무엇을 열고, 무엇이 닫히는가.
  *
- * approval.ts `approvalConsequence` 와 같은 규율을 따른다(닫히는 쪽을 말한다).
- * 다만 주어가 "이 provider 의 에이전트"라, 승인이 **외부**에 무엇을 여는지가 먼저
- * 읽혀야 한다.
+ * approval.ts `approvalConsequence` 와 같은 규율·같은 단일 주어 형태를 따른다
+ * (닫히는 쪽을 말한다). 외부 provider 라는 사실은 제목·머리글·보안 문구가 이미
+ * 세우므로, 이 문장은 주어를 두 번 표지하지 않는다(design-review M1).
  */
 export function oauthConsentConsequence(
   agentLabel: string,
@@ -232,7 +232,11 @@ export function oauthConsentConsequence(
     return `${name} ${channelCount}개 채널의 멤버가 되지만 읽기도 쓰기도 하지 못합니다. 접속 말고 아무 권한도 고르지 않았기 때문입니다.`;
   }
   const list = actions.join(", ");
-  return `승인하면 이 외부 에이전트가 ${name} ${channelCount}개 채널에서 ${list}를 할 수 있습니다. 승인하지 않은 채널에서는 이 에이전트를 멘션해도 작업이 만들어지지 않습니다.`;
+  // 주어는 하나다. 앞에 "이 외부 에이전트가"를 덧대면 조사가 붙은 이름(`Grok은`)과
+  // 겹쳐 한 대상에 주격·주제격 두 표지가 달린다(design-review M1). 외부라는 사실은
+  // 제목·머리글·보안 문구가 이미 말하므로, 이 문장은 wizard 의 `approvalConsequence`
+  // 와 같은 단일 주어 형태를 그대로 쓴다.
+  return `승인하면 ${name} ${channelCount}개 채널에서 ${list}를 할 수 있습니다. 승인하지 않은 채널에서는 이 에이전트를 멘션해도 작업이 만들어지지 않습니다.`;
 }
 
 // ---- 전송 본문 --------------------------------------------------------------
@@ -497,6 +501,18 @@ export const OAUTH_CONSENT_UNAVAILABLE_HEADLINE = "이 인가 요청을 열 수 
 export const OAUTH_CONSENT_UNAVAILABLE_DETAIL =
   "이 요청은 만료됐거나 이미 처리됐거나 이 워크스페이스에서 열 수 없는 요청입니다. 이 화면에서는 아무 권한도 열리지 않습니다. 필요하면 provider에서 연결을 다시 시작하세요.";
 
+/**
+ * 이미 하나의 terminal decision 이 기록된 자리(409).
+ *
+ * 중복 클릭·새로고침·뒤로-가서-다시·늦게 온 콜백이 여기 닿는다. 종료 화면이지
+ * dismissible 배너가 아니다: 배너는 approve/deny 버튼을 살려 둔 채 "더 진행하지
+ * 않습니다"라고 말해 자기모순을 그린다(design-review H1).
+ */
+export const OAUTH_CONSENT_ALREADY_DECIDED_HEADLINE = "이 요청은 이미 처리됐습니다.";
+
+export const OAUTH_CONSENT_ALREADY_DECIDED_DETAIL =
+  "결정은 하나만 기록되고 이 화면에서는 더 진행하지 않습니다. 필요하면 provider에서 연결을 다시 시작하세요.";
+
 /** 결정 뒤 provider 로 돌아가는 짧은 종료. */
 export const OAUTH_CONSENT_RETURNING = "결정을 저장했습니다. provider로 돌아가는 중입니다.";
 
@@ -506,6 +522,31 @@ export const OAUTH_CONSENT_SIGNIN_HEADLINE = "먼저 로그인하세요.";
 export const OAUTH_CONSENT_SIGNIN_DETAIL =
   "이 인가 요청을 확인하려면 이 워크스페이스에 로그인해야 합니다. 로그인하면 이 요청으로 돌아옵니다.";
 
-export const OAUTH_CONSENT_APPROVE_LABEL = "이 범위로 승인";
+/** 로딩 중 스크린리더가 읽을 한 문장. 비밀값은 담기지 않는다. */
+export const OAUTH_CONSENT_LOADING_SR = "인가 요청을 불러오는 중입니다.";
 
+/** 오프라인 배너. 승인·거부는 서버에 닿아야 하므로 다시 연결될 때까지 막힌다. */
+export const OAUTH_CONSENT_OFFLINE_NOTE =
+  "연결이 끊겼습니다. 승인과 거부는 다시 연결된 뒤에 할 수 있습니다.";
+
+// 화면이 세우는 구조적 라벨들. React 가 얇게 유지되도록 문구는 여기 산다
+// (design-taste-web §0, design-review N1). 값은 화면이 조립하되 낱말은 이 파일이 든다.
+export const OAUTH_CONSENT_WORKSPACE_KEY = "워크스페이스";
+export const OAUTH_CONSENT_WORKSPACE_FALLBACK = "이 워크스페이스";
+export const OAUTH_CONSENT_AGENT_KEY = "전용 에이전트";
+/** candidate 를 아직 못 고른 자리의 대체 이름. 결과 문장의 주어로도 쓰인다. */
+export const OAUTH_CONSENT_AGENT_FALLBACK = "전용 에이전트";
+export const OAUTH_CONSENT_CANDIDATE_LEGEND = "접속을 허용할 전용 에이전트";
+export const OAUTH_CONSENT_CANDIDATE_DETAIL =
+  "이 에이전트로 외부 provider의 접속을 허용합니다.";
+export const OAUTH_CONSENT_SCOPES_LEGEND = "요청된 권한";
+export const OAUTH_CONSENT_SCOPES_HINT =
+  "provider가 요청한 권한입니다. 좁힐 수는 있어도 넓힐 수는 없습니다.";
+export const OAUTH_CONSENT_CHANNELS_LEGEND = "닿을 채널";
+export const OAUTH_CONSENT_CHANNELS_HINT =
+  "고른 채널에서만 이 에이전트가 부름을 받습니다.";
+
+export const OAUTH_CONSENT_APPROVE_LABEL = "이 범위로 승인";
+export const OAUTH_CONSENT_APPROVE_BUSY = "승인 저장 중";
 export const OAUTH_CONSENT_DENY_LABEL = "거부";
+export const OAUTH_CONSENT_DENY_BUSY = "거부 저장 중";
