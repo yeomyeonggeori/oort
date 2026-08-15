@@ -247,6 +247,33 @@ const CREATED_CHANNEL_ID = "019f9b10-0000-7000-8000-000000000301";
 
 const CHANNEL_IDS = CHANNELS.map((c) => c.id);
 
+// #1369 HAP-UX4 — MCP OAuth resource-owner consent preview. One route serves
+// every consent frame; it branches on the `request` envelope value (design
+// discipline: vary a fixture by query flag, not by swapping routes, so a photo
+// can be traced back to its fixture). Fields are server/operator-derived
+// (clientId·redirectUri come from the operator allowlist, not provider metadata).
+const OAUTH_CONSENT_CONNECTION_ID = "019f9c00-0000-7000-8000-0000000000c1";
+const OAUTH_CONSENT_PREVIEW = {
+  clientId: "grok-bot",
+  redirectUri: "https://grok.com/connectors/oort/callback",
+  resource: "https://oort.dawn.example/v1/mcp/agent-port",
+  issuer: "https://oort.dawn.example",
+  requestedScopes: [
+    "agent:port:connect",
+    "agent:inbox:read",
+    "messages:read",
+    "messages:write",
+  ],
+  candidates: [
+    {
+      connectionId: OAUTH_CONSENT_CONNECTION_ID,
+      agentMemberId: HERMES,
+      agentDisplayName: "Grok 리서치",
+      createdAtMs: 1_736_900_000_000,
+    },
+  ],
+};
+
 // Roster and read-state are what turn the timeline from raw ids into the actual
 // design: the agent row is where --agent (predawn slate-blue) is visible at all,
 // and the unread/mention badges are the only place --accent lands in the
@@ -1450,6 +1477,35 @@ async function installMocks(context) {
   );
   await context.route("**/v1/workspaces/*/invites*", (route) =>
     json(route, { invites: SETTINGS_INVITES })
+  );
+  // #1369 OAuth consent preview. `preview-unavailable` is the non-enumerable 404
+  // (also the shape an OAuth-disabled server answers); the rest vary the body so
+  // the empty/expired terminals are shootable from one route. `expiresAtMs` is
+  // now-relative so the form frame is never accidentally past its own expiry.
+  await context.route(
+    "**/v1/workspaces/*/oauth/authorization-requests/preview*",
+    (route) => {
+      const request = new URL(route.request().url()).searchParams.get("request");
+      if (request === "preview-unavailable") {
+        return route.fulfill({
+          status: 404,
+          contentType: "application/json",
+          body: JSON.stringify({ error: { message: "not found" } }),
+        });
+      }
+      const now = Date.now();
+      if (request === "preview-empty") {
+        return json(route, {
+          ...OAUTH_CONSENT_PREVIEW,
+          expiresAtMs: now + 540_000,
+          candidates: [],
+        });
+      }
+      if (request === "preview-expired") {
+        return json(route, { ...OAUTH_CONSENT_PREVIEW, expiresAtMs: now - 1000 });
+      }
+      return json(route, { ...OAUTH_CONSENT_PREVIEW, expiresAtMs: now + 540_000 });
+    }
   );
   // 설정 > 웹훅 (#1202). 발급/회전은 **한 번만 돌아오는** 응답이라, 이 목이 없으면
   // 리뷰가 볼 수 없는 화면이 정확히 그 화면이다. 목록은 상태를 바꾸지 않는다:
@@ -4814,6 +4870,72 @@ async function captureHostedDisconnectScenes(browser, scheme) {
   return shots;
 }
 
+/**
+ * #1369 HAP-UX4 — the MCP OAuth resource-owner consent surface, in both schemes.
+ *
+ * This screen lives ABOVE HashRouter (App intercepts `window.location.pathname`),
+ * because the provider redirect lands on a real `/oauth/consent?request=` path
+ * whose query is not a hash. So each frame is a full navigation to that path, not
+ * a `location.hash` set. One preview route (installMocks) varies by the `request`
+ * flag, so the terminals are reachable without swapping routes.
+ *
+ * Its own context, so the logged-out sign-in frame is genuinely logged out (the
+ * shared-localStorage pages elsewhere would auto-restore a session).
+ *
+ * NOT yet shot here (interaction/timing, noted for a follow-up): approve-in-
+ * flight, deny redirect, offline banner. The static compositions below (form +
+ * four terminals + sign-in) cover the review's structural surface; the atoms
+ * (ChoiceList, KeyValueRows, InlineBanner, EmptyInvite, Button) are already shot
+ * elsewhere in both schemes.
+ */
+async function captureConsent(browser, scheme) {
+  const context = await browser.newContext({
+    viewport: VIEWPORT,
+    deviceScaleFactor: 2,
+    colorScheme: scheme,
+    reducedMotion: "reduce",
+  });
+  await installMocks(context);
+  const shots = [];
+
+  // logged-out → existing sign-in (fresh context, no persisted session).
+  const signin = await context.newPage();
+  await signin.goto(`${ORIGIN}/oauth/consent?request=preview-ok`, {
+    waitUntil: "networkidle",
+  });
+  await signin.getByTestId("oauth-consent-signin").waitFor({ state: "visible" });
+  const signinShot = `${OUT_DIR}/oauth-consent-signin-${scheme}.png`;
+  await signin.screenshot({ path: signinShot });
+  shots.push(signinShot);
+  await signin.close();
+
+  // signed-in: the consent form and the four terminals. sign in once (persists a
+  // session), then navigate to each request flag.
+  const page = await context.newPage();
+  await page.goto(ORIGIN, { waitUntil: "networkidle" });
+  await signIn(page);
+  for (const [request, testId, name] of [
+    ["preview-ok", "oauth-consent-form", "preview"],
+    ["preview-empty", "oauth-consent-no-candidate", "no-candidate"],
+    ["preview-expired", "oauth-consent-expired", "expired"],
+    // 404 == the OAuth-disabled answer too (non-enumerable).
+    ["preview-unavailable", "oauth-consent-unavailable", "unavailable"],
+  ]) {
+    await page.goto(`${ORIGIN}/oauth/consent?request=${request}`, {
+      waitUntil: "networkidle",
+    });
+    await page.getByTestId(testId).waitFor({ state: "visible" });
+    await assertNoHorizontalOverflow(page, `oauth-consent ${name} ${scheme}`);
+    const shot = `${OUT_DIR}/oauth-consent-${name}-${scheme}.png`;
+    await page.screenshot({ path: shot });
+    shots.push(shot);
+  }
+  await page.close();
+
+  await context.close();
+  return shots;
+}
+
 async function main() {
   if (!existsSync(resolve(WEB_ROOT, "dist/index.html"))) {
     throw new Error("dist/ is missing. Run `npm run capture:design`.");
@@ -4842,7 +4964,8 @@ async function main() {
           all.push(...(await captureScheme(browser, scheme)));
           all.push(...(await captureAddMemberScenes(browser, scheme)));
           all.push(...(await captureHostedPairingScenes(browser, scheme)));
-      all.push(...(await captureHostedDisconnectScenes(browser, scheme)));
+          all.push(...(await captureHostedDisconnectScenes(browser, scheme)));
+          all.push(...(await captureConsent(browser, scheme)));
         }
       }
       // 폰 프로파일 (goal B6). 데스크탑 프레임 뒤에 붙는 이유는 회귀를 읽는

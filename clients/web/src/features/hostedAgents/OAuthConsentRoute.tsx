@@ -7,7 +7,11 @@ import { cn } from "@/design/lib/cn";
 import { Button } from "@/design/ui/button";
 import { ConnectPage } from "@/features/auth/ConnectPage";
 import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/States";
-import { useOffline } from "@/features/common/useOffline";
+// useBrowserOffline, NOT useOffline: this route renders ABOVE AppShell, so there
+// is no SessionProvider (useOffline reads the realtime rail via useSession and
+// would crash) and no realtime rail to read. The browser's navigator.onLine is
+// the only offline signal this surface has, and the right one.
+import { useBrowserOffline } from "@/features/common/useOffline";
 import { KeyValueRows } from "@/features/settings/SettingsFields";
 import { useChannels } from "@/features/workspace/useWorkspace";
 import type { SessionRestoreStatus } from "@/app/session";
@@ -23,17 +27,18 @@ import {
 import {
   buildOauthApprove,
   buildOauthDeny,
-  isOauthAlreadyDecided,
-  isOauthRequestUnavailable,
+  classifyOauthDecisionError,
   isOauthSessionExpired,
   normalizeOauthScopes,
+  oauthCanDecide,
   oauthConsentConsequence,
   oauthConsentFacts,
-  oauthConsentFailureMessage,
+  oauthConsentScreen,
   oauthRequestExpiry,
   oauthScopeChoices,
   parseOauthConsentPreview,
   parseOauthDecision,
+  type OauthDecisionTerminal,
   OAUTH_CONSENT_AGENT_FALLBACK,
   OAUTH_CONSENT_AGENT_KEY,
   OAUTH_CONSENT_ALREADY_DECIDED_DETAIL,
@@ -226,7 +231,7 @@ function ConsentBody({
   onSessionExpired: () => void;
 }) {
   const workspaceId = session.member.workspaceId;
-  const offline = useOffline();
+  const offline = useBrowserOffline();
   const { groups } = useChannels(workspaceId);
   const workspace = useQuery(hostedWorkspaceQuery(workspaceId));
 
@@ -235,24 +240,26 @@ function ConsentBody({
   const [channelSelection, setChannelSelection] = useState<string[]>([]);
   const [failure, setFailure] = useState<string | null>(null);
   const [returning, setReturning] = useState(false);
-  // 이미 하나의 결정이 기록됨(409). 배너가 아니라 종료 화면이라, 버튼이 함께 서
-  // 자기모순을 그리지 않는다(design-review H1).
-  const [alreadyDecided, setAlreadyDecided] = useState(false);
+  // 결정 시점에 서버가 낸 종료(409 이미 결정됨 · 404/403 사라진 요청). 배너가 아니라
+  // 종료 화면이라, 버튼이 함께 서 자기모순을 그리지 않는다(design-review H1/M2).
+  const [decisionTerminal, setDecisionTerminal] =
+    useState<OauthDecisionTerminal | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
   const decided = useRef(false);
 
-  /** 결정 실패의 갈림: 401 은 로그인으로, 409 는 종료 화면으로, 나머지는 배너로. */
+  /** 결정 실패의 갈림은 코어가 정한다: 401 은 로그인, 409/404/403 은 종료, 나머지 배너. */
   function handleDecisionError(action: "approve" | "deny", error: unknown) {
-    if (isOauthSessionExpired(error)) {
+    const outcome = classifyOauthDecisionError(action, error);
+    if (outcome.kind === "session-expired") {
       onSessionExpired();
       return;
     }
-    if (isOauthAlreadyDecided(error)) {
+    if (outcome.kind === "terminal") {
       decided.current = true;
-      setAlreadyDecided(true);
+      setDecisionTerminal(outcome.terminal);
       return;
     }
-    setFailure(oauthConsentFailureMessage(action, error));
+    setFailure(outcome.message);
   }
 
   const preview = useQuery({
@@ -270,6 +277,12 @@ function ConsentBody({
   const data = preview.data ?? null;
 
   // preview 가 오면 요청된 상한을 기본 선택으로, candidate 가 하나면 그것을 고른다.
+  //
+  // M3-a (사람 승인, 의도된 자세): scope 기본값은 provider 가 **요청한** 집합이다.
+  // 이것은 "grant-all" pre-check 가 아니다 — 요청 밖 권한은 아예 목록에 없고(넓힐 수
+  // 없다), 각 권한은 개별 줄로 좁힐 수 있으며, 채널은 빈 선택으로 시작한다. OAuth
+  // consent 의 올바른 기본은 "요청된 것을 확인·축소"이지 최소권한으로 되묻는 것이
+  // 아니다. 접속(required)은 잠겨 있고, 결과 문장이 정확히 무엇을 여는지 말한다.
   useEffect(() => {
     if (data === null) return;
     setScopeSelection([...data.requestedScopes]);
@@ -355,32 +368,38 @@ function ConsentBody({
   const busy = approve.isPending || deny.isPending;
 
   // ---- 상태 갈림 ----
-  if (alreadyDecided) {
-    return (
-      <ConsentTerminal
-        headline={OAUTH_CONSENT_ALREADY_DECIDED_HEADLINE}
-        detail={OAUTH_CONSENT_ALREADY_DECIDED_DETAIL}
-        testId="oauth-consent-already-decided"
-      />
-    );
-  }
-  if (returning) {
-    return (
-      <p
-        role="status"
-        className="break-keep text-body text-ink"
-        data-testid="oauth-consent-returning"
-      >
-        {OAUTH_CONSENT_RETURNING}
-      </p>
-    );
-  }
-  if (preview.isPending) return <ConsentLoading />;
-  if (preview.isError) {
-    // 401 은 위 효과가 로그인 화면으로 되돌린다. 그 한 프레임 동안 재시도 배너를
-    // 그리지 않는다(로그인 없이 다시 눌러도 같은 401 이다).
-    if (isOauthSessionExpired(preview.error)) return <ConsentLoading />;
-    if (isOauthRequestUnavailable(preview.error)) {
+  // 어느 화면인가는 코어의 순수 selector 가 정한다(coordinator H1: 이 판단이
+  // 검증되도록). 컴포넌트는 그 결과를 그리기만 한다.
+  const screen = oauthConsentScreen({
+    decisionTerminal,
+    returning,
+    previewPending: preview.isPending,
+    previewError: preview.isError ? preview.error : null,
+    data,
+    nowMs,
+  });
+  switch (screen.kind) {
+    case "loading":
+      return <ConsentLoading />;
+    case "returning":
+      return (
+        <p
+          role="status"
+          className="break-keep text-body text-ink"
+          data-testid="oauth-consent-returning"
+        >
+          {OAUTH_CONSENT_RETURNING}
+        </p>
+      );
+    case "already-decided":
+      return (
+        <ConsentTerminal
+          headline={OAUTH_CONSENT_ALREADY_DECIDED_HEADLINE}
+          detail={OAUTH_CONSENT_ALREADY_DECIDED_DETAIL}
+          testId="oauth-consent-already-decided"
+        />
+      );
+    case "unavailable":
       return (
         <ConsentTerminal
           headline={OAUTH_CONSENT_UNAVAILABLE_HEADLINE}
@@ -388,38 +407,39 @@ function ConsentBody({
           testId="oauth-consent-unavailable"
         />
       );
-    }
-    return (
-      <InlineBanner
-        separator={false}
-        message={oauthConsentFailureMessage("preview", preview.error)}
-        actionLabel="다시 시도"
-        onAction={() => void preview.refetch()}
-        testId="oauth-consent-preview-error"
-      />
-    );
+    case "retry":
+      return (
+        <InlineBanner
+          separator={false}
+          message={screen.message}
+          actionLabel="다시 시도"
+          onAction={() => void preview.refetch()}
+          testId="oauth-consent-preview-error"
+        />
+      );
+    case "expired":
+      return (
+        <ConsentTerminal
+          headline={OAUTH_CONSENT_EXPIRED_HEADLINE}
+          detail={OAUTH_CONSENT_EXPIRED_DETAIL}
+          testId="oauth-consent-expired"
+        />
+      );
+    case "no-candidate":
+      return (
+        <ConsentTerminal
+          headline={OAUTH_CONSENT_NO_CANDIDATE_HEADLINE}
+          detail={OAUTH_CONSENT_NO_CANDIDATE_DETAIL}
+          testId="oauth-consent-no-candidate"
+        />
+      );
+    case "form":
+      break;
   }
+  // selector 가 "form" 을 낼 때만 여기 닿고, 그때 data 는 non-null·만료 전·candidate
+  // 있음이 보장된다. 아래는 타입 좁힘용 가드(도달 불가).
   if (data === null) return <ConsentLoading />;
-
   const expiry = oauthRequestExpiry(data.expiresAtMs, nowMs);
-  if (expiry.expired) {
-    return (
-      <ConsentTerminal
-        headline={OAUTH_CONSENT_EXPIRED_HEADLINE}
-        detail={OAUTH_CONSENT_EXPIRED_DETAIL}
-        testId="oauth-consent-expired"
-      />
-    );
-  }
-  if (data.candidates.length === 0) {
-    return (
-      <ConsentTerminal
-        headline={OAUTH_CONSENT_NO_CANDIDATE_HEADLINE}
-        detail={OAUTH_CONSENT_NO_CANDIDATE_DETAIL}
-        testId="oauth-consent-no-candidate"
-      />
-    );
-  }
 
   const selectedCandidate = data.candidates.find((candidate) =>
     uuidEq(candidate.connectionId, connectionId ?? "")
@@ -429,7 +449,14 @@ function ConsentBody({
   const approvedChannelCount = channelApprovalChoices(channelInputs).filter(
     (choice) => !choice.disabled && channelSelection.includes(choice.id)
   ).length;
-  const canDecide = connectionId !== null && !offline && !busy;
+  // 에이전트를 고른 뒤에만, 온라인이고, 다른 결정이 떠 있지 않고, 아직 결정을
+  // 내지 않았을 때만 누를 수 있다. 판정은 코어가 든다(oauthCanDecide 테스트가 못).
+  const canDecide = oauthCanDecide({
+    connectionId,
+    offline,
+    busy,
+    decided: decided.current,
+  });
 
   const scopeItems: ChoiceListItem[] = oauthScopeChoices(data.requestedScopes).map(
     (choice) => ({
@@ -560,6 +587,15 @@ function ConsentBody({
         </p>
       </div>
 
+      {/*
+        M3-b (의도된 자세): approve 는 주 버튼이고 AlertDialog 확인 단계를 두지
+        않는다. 이 표면 자체가 provider 리다이렉트로 도달한 **전용 consent 페이지**라
+        (앰비언트 UI 안의 버튼이 아니다), 위의 보안 문구·결과 문장·전체 검토가 §6 이
+        요구하는 숙고를 대신한다. 실제 OAuth consent 화면이 그렇고, 이 번들에는
+        AlertDialog primitive 도 없다. aria-disabled+opacity-50 은 wizard 의
+        CloseAction 선례와 같다(Nit: 이미 올바름) — disabled 로 포커스를 떨구지 않고
+        사유는 화면에 남긴다.
+      */}
       <div className="flex flex-wrap items-center justify-end gap-2">
         <Button
           type="button"
