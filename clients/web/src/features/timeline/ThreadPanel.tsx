@@ -61,10 +61,14 @@ export function ThreadPanel({
     // `thread-pane` (goal B6): 넓은 창에서는 그대로 320px 열이고, 폰에서는 채널
     // 표면 전체를 덮는 서랍이 된다 (tokens.css). 320px 패널이 390px 화면에서
     // 채널에 70px만 남기던 자리다.
+    //
+    // `shrink-0`은 `thread-pane`이 flex 기준선을 갖게 되면서 빠졌다 (#1418):
+    // 이 pane과 작업 세션 pane은 채널 열과 같은 행을 나눠 갖고, 그 행의 바닥은
+    // 채널 열이 든다(`chat-region`). 한쪽만 양보하지 못하면 바닥이 넘침이 된다.
     <aside
       aria-label="스레드"
       data-testid="thread-panel"
-      className="thread-pane flex h-full shrink-0 flex-col border-l border-line bg-surface"
+      className="thread-pane flex h-full flex-col border-l border-line bg-surface"
     >
       <header className="flex items-center justify-between gap-2 border-b border-line px-4 py-2">
         <h2 className="text-body font-semibold">스레드</h2>

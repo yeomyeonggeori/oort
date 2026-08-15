@@ -30,12 +30,18 @@
 //     expected failure: "the thread pane stayed beside the work panel"
 //   WORK_PANEL_GATE_PROVE_RED_LIVE=1 npm run gate:work-panel
 //     expected failure: "the 1Hz elapsed clock sits inside a live region"
+//   WORK_PANEL_GATE_PROVE_RED_PANE=1 npm run gate:work-panel
+//     expected failure: "the chat column was squeezed to 236px of composer"
+//   WORK_PANEL_GATE_PROVE_RED_PLACEHOLDER=1 npm run gate:work-panel
+//     expected failure: "the empty composer overflows its own box"
 //
 // red seam은 **목/드라이버의 행동만** 바꾼다. ORDER는 델타를 거꾸로 발행하고,
 // ARGS는 값 마커를 화면에 실제로 그려지는 자리(도구 이름)에 심어 "값은 절대
 // 화면에 없다" 단언이 DOM을 읽고 있음을 증명하고, FOLD는 검사 전에 디스클로저를
-// 먼저 펼치고, VOLATILE은 다시 연 패널에 지나간 문장을 되쏜다. 제품 소스 줄을
-// 지우거나 단언을 빼라고 요구하지 않으므로 증명은 반복 가능하다.
+// 먼저 펼치고, VOLATILE은 다시 연 패널에 지나간 문장을 되쏜다. PANE과
+// PLACEHOLDER는 스타일시트를 지우지 않고 **한 겹 덮어써서**(`--spacing-chat-min`
+// 을 0으로, 플레이스홀더 클램프를 해제) 수리 이전의 렌더를 그 자리에 되돌린다.
+// 제품 소스 줄을 지우거나 단언을 빼라고 요구하지 않으므로 증명은 반복 가능하다.
 
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
@@ -58,6 +64,9 @@ const proveRedFold = process.env.WORK_PANEL_GATE_PROVE_RED_FOLD === "1";
 const proveRedVolatile = process.env.WORK_PANEL_GATE_PROVE_RED_VOLATILE === "1";
 const proveRedCoOpen = process.env.WORK_PANEL_GATE_PROVE_RED_COOPEN === "1";
 const proveRedLive = process.env.WORK_PANEL_GATE_PROVE_RED_LIVE === "1";
+const proveRedPane = process.env.WORK_PANEL_GATE_PROVE_RED_PANE === "1";
+const proveRedPlaceholder =
+  process.env.WORK_PANEL_GATE_PROVE_RED_PLACEHOLDER === "1";
 
 const DELTAS = ["배포 로그를 ", "먼저 ", "읽었습니다."];
 const DELTA_SENTENCE = DELTAS.join("");
@@ -78,6 +87,23 @@ const REPLY_MESSAGE = "0199aaaa-0000-7000-8000-0000000000M2";
  * 열렸을 때도 컴포저는 그 실패 폭 위에 있어야 한다.
  */
 const MIN_COMPOSER_WIDTH = 240;
+
+/**
+ * 「작업 세션」 pane 의 두 측정값 (#1418).
+ *
+ * `PANE_MEASURE` 는 `--spacing-pane` 이고, **다른 게이트가 그 위에 단언을 세워
+ * 두었다**: `gate:my-sessions` 의 좁은 판 호스트 피커는 1280px 창에서 이 pane 이
+ * 320px 라는 전제 위에서만 무엇인가를 재고(재개 블록 288px), 그 전제가 깨지면
+ * "pane 이 320px 가 아니면 이 단정은 아무것도 재지 않는다" 로 스스로 붉는다.
+ * 그래서 이 게이트는 좁은 티어에서 pane 이 양보하는 것을 재는 동시에 **넓은
+ * 티어에서 320px 가 그대로 서는 것**도 함께 잰다. 둘은 같은 규칙의 양쪽 끝이고,
+ * 한 파일에서 함께 재야 다음 사람이 한쪽만 옮기지 않는다.
+ *
+ * `PANE_FLOOR` 는 `--spacing-pane-sm` 이다. 양보에도 바닥이 있다: 그 아래로는
+ * 목록이 목록으로 읽히지 않으므로, 채팅이 넓어지는 값이 아니라 둘 다 지는 값이다.
+ */
+const PANE_MEASURE = 320;
+const PANE_FLOOR = 192;
 
 const session = {
   accessToken: "gate-only-not-a-credential",
@@ -339,7 +365,13 @@ async function installRoutes(context, scenario) {
       return json(route, { messages: scenario.withThread ? [root] : [] });
     }
     if (path.endsWith("/huddles/active")) return json(route, { huddle: null });
-    if (path.endsWith("/work-sessions")) return json(route, { sessions: [] });
+    // 세션 원장과 호스트 명부. 키 이름은 계약이 정한 것을 그대로 쓴다 (#1418):
+    // `sessions` 로 답하던 앞 판은 `fetchWorkSessions` 가 읽는 `workSessions` 와
+    // 어긋나 pane 을 오류 배너로 세웠고, 이 게이트의 기존 시나리오는 그 pane 을
+    // 연 적이 없어 아무도 몰랐다. 폭을 재는 데는 상관없지만 리뷰 캡처는 상관있다:
+    // 잰 판과 찍은 판이 달라진다.
+    if (path.endsWith("/work-sessions")) return json(route, { workSessions: [] });
+    if (path.endsWith("/work-hosts")) return json(route, { workHosts: [] });
     return json(route, {});
   });
 }
@@ -720,6 +752,44 @@ async function captureShots(browser) {
 }
 
 /**
+ * 「작업 세션」 pane 의 리뷰용 스크린샷 (#1418). 판정하지 않는다.
+ *
+ * 문턱 전후를 함께 찍는다: 900px 은 pane 이 폭을 내는 구간이고 928px 부터는 내지
+ * 않으므로, 두 장이 나란히 있어야 「무엇이 얼마나 움직였나」를 사람이 볼 수 있다.
+ * 빈 컴포저를 프레임 안에 두는 것도 의도다 — 이 티켓이 고친 둘째 결함이 정확히
+ * 그 상자의 아래 테두리에서 보이던 것이라, 그 자리가 안 찍힌 캡처는 증거가 아니다.
+ */
+async function captureWorkPaneShots(browser) {
+  // 표면 이름으로 부른다(형제 레인 `artifacts/work-panel/`과 같은 관례). 티켓
+  // 번호를 단 증거 경로는 그 티켓이 닫히는 날 찾을 수 없는 경로가 된다.
+  const outDir = resolve(webRoot, "artifacts/work-pane");
+  mkdirSync(outDir, { recursive: true });
+  for (const width of [900, 1280]) {
+    for (const scheme of ["light", "dark"]) {
+      const context = await browser.newContext({
+        viewport: { width, height: 800 },
+        reducedMotion: "reduce",
+        colorScheme: scheme,
+      });
+      const page = await context.newPage();
+      await installRealtimeSocket(page);
+      await installRoutes(context, CO_OPEN_SCENARIO);
+      await login(page);
+      await page.getByTestId("open-work-panel").click();
+      await page.getByTestId("work-panel").waitFor();
+      // 목록이 자리를 잡은 뒤에 찍는다. 골격 막대가 서 있는 순간을 찍으면 두 번
+      // 돌릴 때마다 다른 판이 나오고, 전후 비교가 조명 비교가 된다.
+      await page.getByTestId("work-panel-empty").waitFor();
+      await page.screenshot({
+        path: resolve(outDir, `work-pane-${width}-${scheme}.png`),
+      });
+      await context.close();
+    }
+  }
+  console.log(`[shots] artifacts/work-pane/work-pane-{900,1280}-{light,dark}.png`);
+}
+
+/**
  * 스레드 패널과 작업 패널을 동시에 열고 채팅 표면이 남는 폭을 실렌더로 잰다.
  *
  * 셋은 서로 다른 상자에 산다: 사이드바는 셸 그리드, 스레드는 채팅 표면 안쪽,
@@ -780,6 +850,159 @@ async function exerciseCoOpen(browser) {
   await context.close();
 }
 
+/**
+ * 채팅 표면과 「작업 세션」 pane 이 나란히 선 판 (#1418).
+ *
+ * 위 `exerciseCoOpen` 이 재는 것과 **다른 상자**다. 저쪽 작업 패널은 라우트 상자의
+ * 형제이고(`work-panel-pane`), 이 pane 은 채팅 표면 **안쪽** 열이다. 그래서
+ * #1413 이 라우트 상자에 세운 바닥(`route-region`)이 이 판에는 닿지 않았고,
+ * 900px 창에서 라우트는 660px 그대로인데 그 안에서 다시 320px 이 빠져 컴포저가
+ * 236px 였다. 어느 게이트도 이 조합을 재지 않았다는 것이 결함이 남아 있던 이유다.
+ *
+ * 네 가지를 잰다:
+ *   1. 좁은 티어(900px)에서 컴포저가 바닥 위에 있다 — #1418 이 고친 것.
+ *   2. 그 양보에 바닥이 있다 — pane 이 `--spacing-pane-sm` 아래로 내려가지 않는다.
+ *   3. 넓은 티어(1280px)에서 pane 이 320px 그대로 선다 — `gate:my-sessions` 가
+ *      그 위에 세워 둔 좁은 판 호스트 피커 단언과의 정합.
+ *   4. 빈 컴포저가 자기 상자를 넘지 않는다 — 넘친 플레이스홀더 줄의 글리프가
+ *      아래 테두리 위로 반쯤 드러나던 자리(design-review #1413 Low).
+ *
+ * 4번은 픽셀이 아니라 넘침 자체를 잰다: `scrollHeight <= clientHeight` 면 패딩
+ * 상자 밖으로 내다볼 것이 없다. 이 단언이 무엇인가를 재고 있는지는 같은 폭에서
+ * 문장이 실제로 두 줄로 접히는지 먼저 확인해서 지킨다 — 안 접히는 폭에서는 이
+ * 단언이 언제나 참이고 아무것도 증명하지 않는다.
+ */
+async function exerciseWorkPaneCoOpen(browser, width) {
+  const scenario = CO_OPEN_SCENARIO;
+  const context = await browser.newContext({
+    viewport: { width, height: 800 },
+    reducedMotion: "reduce",
+  });
+  const page = await context.newPage();
+  await installRealtimeSocket(page);
+  await installRoutes(context, scenario);
+  await login(page);
+
+  // red seam: 스타일시트를 지우지 않고 한 겹 덮어써서 수리 이전의 렌더로 되돌린다.
+  if (proveRedPane) {
+    await page.addStyleTag({ content: ":root { --spacing-chat-min: 0px; }" });
+  }
+  if (proveRedPlaceholder) {
+    await page.addStyleTag({
+      content:
+        "#composer-input::placeholder { max-block-size: none; overflow: visible; }",
+    });
+  }
+
+  await page.getByTestId("open-work-panel").click();
+  await page.getByTestId("work-panel").waitFor();
+
+  const geometry = await page.evaluate(() => {
+    const round = (value) => Math.round(value);
+    const pane = document.querySelector('[data-testid="work-panel"]');
+    const input = document.getElementById("composer-input");
+    const paneBox = pane.getBoundingClientRect();
+    const inputBox = input.getBoundingClientRect();
+
+    // 이 폭에서 플레이스홀더 문장이 실제로 접히는가. 접히지 않는 폭이라면 아래
+    // 넘침 단언은 언제나 참이고 아무것도 증명하지 않으므로, 그 사실을 먼저 잰다.
+    // 상자를 건드리지 않으려고 같은 글자꼴·같은 콘텐츠 폭의 사본에 재 본다.
+    const styles = getComputedStyle(input);
+    const probe = document.createElement("div");
+    probe.textContent = input.getAttribute("placeholder") ?? "";
+    for (const property of [
+      "fontFamily",
+      "fontSize",
+      "fontWeight",
+      "letterSpacing",
+      "lineHeight",
+      "wordBreak",
+      "whiteSpace",
+      "wordSpacing",
+    ]) {
+      probe.style[property] = styles[property];
+    }
+    probe.style.position = "absolute";
+    probe.style.visibility = "hidden";
+    probe.style.inlineSize = `${input.clientWidth - Number.parseFloat(styles.paddingLeft) - Number.parseFloat(styles.paddingRight)}px`;
+    document.body.appendChild(probe);
+    const probeHeight = probe.getBoundingClientRect().height;
+    const line = Number.parseFloat(styles.lineHeight);
+    probe.remove();
+
+    return {
+      paneWidth: round(paneBox.width),
+      paneLeft: round(paneBox.left),
+      composerWidth: round(inputBox.width),
+      composerValue: input.value,
+      clientHeight: input.clientHeight,
+      scrollHeight: input.scrollHeight,
+      placeholderLines: Math.max(1, Math.round(probeHeight / line)),
+    };
+  });
+
+  console.log(
+    `[work-pane] ${width}px 창, 작업 세션 pane 개방 -> pane ${geometry.paneWidth}px · ` +
+      `컴포저 ${geometry.composerWidth}px · 플레이스홀더 ${geometry.placeholderLines}줄 ` +
+      `(빈 상자 ${geometry.scrollHeight}/${geometry.clientHeight}px)`
+  );
+
+  // 이 판이 정말 "나란히 선" 판인가. 문턱 아래에서 pane 은 흐름을 떠나 채팅
+  // 표면을 통째로 덮으므로(tokens.css work-pane), 그 판에서는 아래 폭 단언들이
+  // 재는 대상이 아예 다르다.
+  if (geometry.paneLeft <= 0 || geometry.paneWidth >= width) {
+    throw new Error(
+      `work-pane-${width}: the pane covered the chat surface instead of standing beside it (left ${geometry.paneLeft}, width ${geometry.paneWidth}); the width assertions below would measure nothing`
+    );
+  }
+
+  if (geometry.composerWidth < MIN_COMPOSER_WIDTH) {
+    throw new Error(
+      `work-pane-${width}: the chat column was squeezed to ${geometry.composerWidth}px of composer (floor ${MIN_COMPOSER_WIDTH}px). A pane INSIDE the chat surface must not push the composer out of usable width either (tokens.css chat-region / --spacing-chat-min).`
+    );
+  }
+
+  // 이 단언은 **오늘 어느 폭에서도 물지 않는다**, 그리고 그것을 적어 두는 것이
+  // 이 줄의 값이다: 900px 위에서 pane 이 받는 폭은 `창 - 240 - 368` 이라 언제나
+  // 292px 이상이고 192px 은 100px 밖이다. 그래서 형제들과 달리 red seam 이 없다 —
+  // 재는 단언이 아니라 **난간**이다. 위 두 측정값(사이드바 240 · 채널 바닥 368)
+  // 중 하나라도 커지는 날 이 줄이 먼저 붉어, 「양보」와 「둘 다 지는 것」의 경계가
+  // 어디였는지를 그때 말한다. 붉힐 수 없다고 지우면 그 경계가 말없이 사라진다.
+  if (geometry.paneWidth < PANE_FLOOR) {
+    throw new Error(
+      `work-pane-${width}: the pane yielded down to ${geometry.paneWidth}px (floor ${PANE_FLOOR}px, --spacing-pane-sm). Below that the session list stops reading as a list, so this is not a trade, it is both surfaces losing.`
+    );
+  }
+
+  // 넓은 티어에서는 양보할 이유가 없다. 이 단언이 `gate:my-sessions` 의 좁은 판
+  // 호스트 피커(1280px 창, 재개 블록 288px)가 서 있는 전제다.
+  if (width >= 928 && geometry.paneWidth !== PANE_MEASURE) {
+    throw new Error(
+      `work-pane-${width}: the pane stands at ${geometry.paneWidth}px where nothing forces it to yield (expected ${PANE_MEASURE}px, --spacing-pane). gate:my-sessions measures its host picker at that width and reports "pane이 320px가 아니면 이 단정은 아무것도 재지 않는다".`
+    );
+  }
+
+  if (geometry.composerValue !== "") {
+    throw new Error(
+      `work-pane-${width}: the composer was not empty, so the placeholder assertion below measures typed text instead`
+    );
+  }
+  // 이 단언이 실제로 무엇인가를 재고 있는가. 문장이 한 줄에 드는 폭에서는 넘칠
+  // 것이 없어 언제나 참이므로, 좁은 티어에서는 접힘 자체를 먼저 확인한다.
+  if (width < 928 && geometry.placeholderLines < 2) {
+    throw new Error(
+      `work-pane-${width}: the placeholder still fits on one line here (${geometry.placeholderLines}); the overflow assertion below proves nothing at this width`
+    );
+  }
+  if (geometry.scrollHeight > geometry.clientHeight) {
+    throw new Error(
+      `work-pane-${width}: the empty composer overflows its own box (${geometry.scrollHeight} > ${geometry.clientHeight}px). The wrapped placeholder line is not gone, it is peeking through the bottom padding as half-drawn glyphs; the approved trade-off (#1384) was losing the clause, not showing half of it (tokens.css composer-placeholder).`
+    );
+  }
+
+  await context.close();
+}
+
 async function main() {
   if (!existsSync(resolve(webRoot, "dist/index.html"))) {
     throw new Error("dist/ is missing. Run npm run build first.");
@@ -797,8 +1020,13 @@ async function main() {
         await exerciseScenario(browser, scenario);
       }
       await exerciseCoOpen(browser);
+      // 양보 구간과 그 밖 (#1418). 900px 은 pane 이 폭을 내는 유일한 구간의
+      // 왼쪽 끝이고, 1280px 은 gate:my-sessions 가 자기 단언을 세워 둔 폭이다.
+      await exerciseWorkPaneCoOpen(browser, 900);
+      await exerciseWorkPaneCoOpen(browser, 1280);
       if (process.env.WORK_PANEL_GATE_SHOTS === "1") {
         await captureShots(browser);
+        await captureWorkPaneShots(browser);
       }
     } finally {
       await browser.close();
@@ -817,6 +1045,15 @@ async function main() {
   );
   console.log(
     "           pane at a time kept the 900px chat surface usable."
+  );
+  console.log(
+    "           The 작업 세션 pane inside the chat surface yields the same way:"
+  );
+  console.log(
+    "           composer above its floor at 900px, pane still 320px at 1280px,"
+  );
+  console.log(
+    "           and the empty composer never overflows its own box."
   );
 }
 

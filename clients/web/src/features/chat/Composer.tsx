@@ -825,11 +825,13 @@ export function Composer({
           }}
           // 빈 상자는 **어디로 가는지**와 **@가 무엇인지**를 함께 말한다
           // (#1384). 문장과 그 문장을 고른 이유(폭 산술 포함)는 코어가 든다 —
-          // 이 자리는 렌더만 한다.
+          // 이 자리는 렌더만 한다. 그 문장이 한 줄에 안 드는 폭에서 넘친 뒷절을
+          // **감추는** 것은 이 상자의 몫이다(`composer-placeholder`, #1418):
+          // 승인된 트레이드오프는 절의 소실이지 글리프 반노출이 아니다.
           placeholder={composerPlaceholder(channelLabel, recipient)}
           aria-describedby={hasHint ? "composer-hint" : undefined}
           data-testid="composer-input"
-          className="tap-target min-w-0 flex-1 resize-none rounded-md border border-line-strong bg-transparent px-3 py-2 text-body leading-relaxed placeholder:text-ink-muted focus-visible:focus-ring"
+          className="tap-target composer-placeholder min-w-0 flex-1 resize-none rounded-md border border-line-strong bg-transparent px-3 py-2 text-body leading-relaxed placeholder:text-ink-muted focus-visible:focus-ring"
         />
         <Button
           type="submit"

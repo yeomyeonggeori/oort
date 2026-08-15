@@ -222,7 +222,12 @@
   /* Panes are a third dimension: a secondary column is wider than any rhythm
    * step, so it gets a NAME rather than an off-grid number. Keeping them here
    * means w-pane / max-h-pane exist and w-[320px] still never compiles. */
-  --spacing-pane-sm: 192px; /* section nav, mention/dropdown list */
+  /* section nav, mention/dropdown list — 그리고 **부차 패널이 양보할 때의 자기
+   * 바닥**이다(`work-panel-pane` #1413, `work-pane`·`thread-pane` #1418). 두 번째
+   * 뜻이 첫 번째와 같은 값을 쓰는 이유는 우연이 아니다: 320px 열이 줄어들 수 있는
+   * 한계는 「그 안의 내용이 아직 목록으로 읽히는 폭」이고, 그것이 이 레포에서
+   * 이미 목록 하나의 측정값으로 서 있는 숫자다. 이 아래로는 양보가 아니라 파괴다. */
+  --spacing-pane-sm: 192px;
   --spacing-pane: 320px; /* thread panel, command list */
   --spacing-pane-md: 512px; /* the overlay measure: dialog panel, ⌘K palette */
   --spacing-pane-lg: 640px; /* agent card measure: a card is not a banner */
@@ -254,7 +259,13 @@
    * 줄이 바뀌는 순간 예산이 다시 거짓이 되는데, 그때 움직여야 할 것은 이 값이
    * 아니라 컴포저다 — --spacing-action-sm 이 가장 긴 라벨에 14px 를 남긴 것과 같은
    * 규율이다. gate-work-panel 이 재는 컴포저 바닥 240px 은 이 값 아래 있으므로
-   * 함께 지켜진다(368 - 104 = 264). */
+   * 함께 지켜진다(368 - 104 = 264).
+   *
+   * 이 바닥을 드는 상자는 **둘**이다(#1418): 라우트 상자(`route-region`, 옆에
+   * 작업 패널이 설 때)와 채널 열(`chat-region`, 옆에 스레드 패널이나 작업 세션
+   * pane이 설 때). 두 상자는 포개져 있고 부차 표면은 서로 다른 층에서 들어오므로,
+   * 바깥쪽 하나만 바닥을 들면 안쪽에서 다시 320px이 빠지는 판을 아무도 재지
+   * 않는다 — #1413이 고친 뒤에도 #1418이 같은 236px로 남아 있던 이유다. */
   --spacing-chat-min: 368px;
 
   /* 워크스페이스 레일 (검수 #4b / ADR-0161). 32px 레일은 디스코드형 스위처가 서기엔
@@ -741,9 +752,25 @@
  * 않는다: 이 티켓이 고치는 것은 폰이다.
  *
  * 앵커는 work-pane과 같은 채팅 표면의 `relative` 상자다. 덮인 표면은 ChatShell이
- * `inert`로 탭 순서에서 함께 빼낸다. */
+ * `inert`로 탭 순서에서 함께 빼낸다.
+ *
+ * 폭이 flex 기준선인 것도 work-pane과 같은 이유다 (#1418). 이 두 pane은 같은 행을
+ * 채널 열과 나눠 갖고, 그 행의 바닥은 **900px 위에서** 채널 열이 든다
+ * (`chat-region` — 그 주석의 표가 어느 폭에서 참인지를 적어 둔다). 바닥을 한쪽에만
+ * 세우고 다른 쪽을 `shrink-0`으로 두면 900px 창에서 368 + 320 = 688이 라우트 660을
+ * 28px 넘어 **넘친다** — 컴포저가 좁아지는 대신 이 패널의 오른쪽 끝(닫기 컨트롤
+ * 포함)이 셸의 `overflow: clip` 밑으로 사라지는, 같은 규칙의 다른 증상이 된다.
+ * 바닥은 열의 것이지 한 pane의 것이 아니므로, 그 행에 서는 pane은 모두 양보할 수
+ * 있어야 한다.
+ *
+ * 이 문턱이 work-pane의 900px가 아니라 600px이라는 것은 그대로 남아 있고, 그래서
+ * **600~899px 구간에는 바닥이 없다** — 그 구간에서 스레드를 열면 컴포저는 235px
+ * (899px)에서 36px(700px)까지 내려간다. 여유가 양수라 shrink가 돌지 않는 구간이고
+ * #1418 이전과 같은 값이라 이 티켓은 그것을 움직이지 않았다. 문턱을 옮기는 것은
+ * 별도 결정이다 (design-review #1418 H1). */
 @utility thread-pane {
-  inline-size: var(--spacing-pane);
+  flex: 0 1 var(--spacing-pane);
+  min-inline-size: var(--spacing-pane-sm);
 
   @media (width < 600px) {
     position: absolute;
@@ -812,9 +839,32 @@
  * BELOW 900px already happened for free, which made the panel narrower the
  * wider the window got. The wide state is the same rule the media query
  * applies, available at any width, and it wins over the base declaration by
- * specificity (class + attribute), so the two never have to be ordered. */
+ * specificity (class + attribute), so the two never have to be ordered.
+ *
+ * 폭이 `inline-size`가 아니라 **flex 기준선**인 이유 (#1418). #1413이 라우트 상자
+ * 옆의 작업 패널(`work-panel-pane`)에서 고친 것과 **같은 결함이 이 pane에도 있었다**:
+ * 이쪽은 라우트 상자의 형제가 아니라 채팅 표면 **안쪽** 열이라 그 수리가 닿지
+ * 않았다. 문턱 바로 위(900px)에서 사이드바 240을 뺀 라우트 660을 이 pane이
+ * `shrink-0`으로 320 물면 채널 열에 340px가 남고, 컴포저는 자기 크롬 104px을 뺀
+ * 236px가 된다 — 위 주석이 900px 문턱을 고르며 「폰에서 컴포저가 136px로 접혔다」고
+ * 적어 둔 그 실패의 축소판이 문턱 **위**에 그대로 남아 있었던 것이다.
+ *
+ * 그래서 같은 답을 쓴다: 320px은 이 pane이 **원하는** 폭이지 무는 폭이 아니고,
+ * 주 표면(`chat-region`)이 `--spacing-chat-min`을 갖고 모자란 폭은 이 pane이 낸다.
+ * 자기 바닥은 `--spacing-pane-sm`이다.
+ *
+ * 실제로 무는 구간은 900~927px 뿐이다: 채널 바닥 368 + pane 320 = 688이 라우트에
+ * 들어가는 창이 928px부터이므로, 그 위에서 이 pane은 320px 그대로 선다. 그
+ * 320px 위에 `gate:my-sessions`가 단언을 세워 두었고(1280px 창의 좁은 판 호스트
+ * 피커 — 재개 블록 288px), 그 정합은 `gate-work-panel`의 `work-pane-900`
+ * 시나리오가 1280px에서 pane 320px를 함께 재서 지킨다. 여기서 기준선을 바꾸면
+ * 두 게이트가 같은 자리에서 함께 붉는다.
+ *
+ * `data-wide`와 문턱 아래는 `position: absolute`라 flex 배분에서 빠지므로 위
+ * 규칙과 충돌하지 않는다 (`work-panel-pane`와 같은 구조). */
 @utility work-pane {
-  inline-size: var(--spacing-pane);
+  flex: 0 1 var(--spacing-pane);
+  min-inline-size: var(--spacing-pane-sm);
 
   &[data-wide] {
     position: absolute;
@@ -929,6 +979,83 @@
 
   @media (width >= 900px) {
     min-inline-size: var(--spacing-chat-min);
+  }
+}
+
+/* 채널 열 (#1418). **`route-region`과 같은 규칙이고, 그 근거는 저쪽이 든다** —
+ * 여기서 다시 적지 않는다. 규칙 하나에 설명이 둘이면 둘 중 하나가 먼저 낡고,
+ * 다음 사람은 낡은 쪽을 읽는다.
+ *
+ * 이 상자가 따로 있는 이유만 적는다: **누가 옆에 서는가**가 다르다. 라우트 상자
+ * 옆에 서는 것은 작업 패널(`work-panel-pane`) 하나지만, 채팅 표면 안쪽에서 이 열
+ * 옆에 서는 것은 스레드 패널과 작업 세션 pane 둘이다. #1413이 바깥 판만 고친
+ * 뒤에도 900px 컴포저가 236px였던 이유가 이것이다: 작업 세션 pane을 열면 라우트
+ * 상자는 660px 그대로인데 그 안에서 다시 320px이 빠져, 바닥을 든 상자와 실제로
+ * 좁아지는 상자가 서로 달랐다.
+ *
+ * ## 이 바닥이 참인 폭 (design-review #1418 H1)
+ *
+ * 바닥은 **900px 이상에서만** 참이고, 그 아래는 두 pane의 사정이 다르다:
+ *
+ *   >= 900px   두 pane 모두 이 열과 행을 나눠 갖고, 바닥이 얹힌다.
+ *   600~899px  작업 세션 pane은 흐름을 떠나 이 열을 덮지만(`work-pane`),
+ *              **스레드 패널은 아직 320px 열이다**(`thread-pane`의 문턱은 600px).
+ *              이 구간에는 바닥이 없고, 스레드를 열면 컴포저는 899px에서 235px,
+ *              700px에서 36px가 된다(실측). #1418 이전과 **같은 값**이다 —
+ *              여유가 양수인 구간이라 shrink가 아예 돌지 않으므로 이 티켓은
+ *              그 구간을 움직이지 않았다. 선재 결함이고, 고치려면 스레드 패널의
+ *              문턱을 옮겨야 해서 별도 결정이다. **열려 있다.**
+ *   < 600px    두 pane 모두 이 열을 덮으므로 나눠 가질 상대가 없고, 폰에서
+ *              바닥은 가로 스크롤을 만드는 값이 된다(MOMO-610).
+ *
+ * 잰 자리에서만 무는 바닥이 규칙이므로 문턱은 900px 그대로 둔다. 위 표를 지우고
+ * 「아래에서는 아무도 이 열을 못 민다」로 줄이지 말 것 — 그 문장이 참인 구간은
+ * 600px 아래뿐이다.
+ *
+ * 모자란 폭은 그 행의 pane이 낸다(`thread-pane` · `work-pane`, 각자
+ * `--spacing-pane-sm`까지). */
+@utility chat-region {
+  min-inline-size: 0;
+
+  @media (width >= 900px) {
+    min-inline-size: var(--spacing-chat-min);
+  }
+}
+
+/* 컴포저 빈 상자의 넘침 처리 (#1418, design-review #1413 Low).
+ *
+ * 플레이스홀더가 한 줄에 안 들어가는 폭이 있다는 것은 이미 결정된 트레이드오프다
+ * (#1384: 문장은 폭으로 골랐고, 넘친 뒷절은 사라진다 — `--spacing-chat-min` 주석).
+ * 승인된 것은 **절의 소실**이지 지금 화면에 있던 것이 아니었다: 넘친 둘째 줄의
+ * 글리프 윗부분이 상자 아래 테두리 위로 8px 드러나 있었다(실측, 900px 라이트/다크
+ * 양쪽).
+ *
+ * 원인은 `overflow: hidden`이 **패딩 상자**에서 자르기 때문이다. 상자 높이는
+ * `useAutoGrow`가 잡아 둔 한 줄(line 22 + 프레임 18 = 40px)이고, 그 안에서 글은
+ * 콘텐츠 상자(y 8~30)에 그려지는데 잘리는 자리는 y 38이다. 그 사이 8px —
+ * `padding-block-end` — 이 둘째 줄을 내다보는 창이었다. 넓은 창에서 한 줄로 잡힌
+ * 높이는 pane이 열려 폭이 줄어도 다시 재지 않으므로(값이 안 바뀌면 효과가 안 돈다)
+ * 이 창은 정확히 #1418이 재는 그 판에서 열린다.
+ *
+ * 그래서 자르는 자리를 글에게 옮긴다: 플레이스홀더 자신을 한 줄로 묶는다.
+ * `1lh`는 임의 픽셀이 아니라 이 요소의 행간(`--text-body--line-height`, 폰에서는
+ * `--text-title--line-height`)이라 폰의 16px 규칙을 그대로 따라간다. `max-`인
+ * 이유는 짧은 플레이스홀더에게는 아무 일도 일어나지 않아야 하기 때문이다.
+ * 사람이 쓴 글은 건드리지 않는다 — 그쪽은 `useAutoGrow`가 재서 상자를 키운다.
+ *
+ * 게이트가 이것을 재는 방법은 픽셀이 아니라 넘침 자체다: 빈 상자에서
+ * `scrollHeight <= clientHeight`이면 내다볼 것이 없다(gate-work-panel
+ * `work-pane-900`).
+ *
+ * 이것이 **닫지 않는 것**도 적어 둔다 (design-review #1418 M1): 살아남은 한 줄이
+ * 읽히는 한국어인지는 아무도 재지 않는다. 지금 900px에서 접히는 자리는 코어가
+ * 이름 붙여 둔 절(`MENTION_AFFORDANCE`) 한가운데이고, 줄상자가 아니라 그 절
+ * 단위로 지우는 것이 옳은 답이다 — 그 결정은 코어 문장의 것이라 여기서 하지
+ * 않는다. */
+@utility composer-placeholder {
+  &::placeholder {
+    max-block-size: 1lh;
+    overflow: hidden;
   }
 }
 
