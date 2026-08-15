@@ -3,6 +3,7 @@ import { fetchWithDeadline } from "../../lib/http";
 import { responseRecord } from "../../lib/wire";
 import { apiBase, coreSession } from "../../runtime/host";
 import type { HostedConfirmApproval } from "./approval";
+import type { OauthApproveRequest, OauthDenyRequest } from "./oauthConsent";
 
 // =============================================================================
 // REST client for hosted agent connections (ADR-0162 HAP-E3, openapi `agents`).
@@ -194,4 +195,69 @@ export function completeHostedDisconnect(
     `${connection(workspaceId, connectionId)}/disconnect/complete`,
     { method: "POST" }
   );
+}
+
+// ---- OAuth resource-owner consent (HAP-E7 / #1368, HAP-UX4 / #1369) ---------
+//
+// 세 경로 전부 인가 결정을 다룬다. 그래서 셋 다 `cache: "no-store"` 로 보낸다 —
+// preview 는 candidate 를, decision 응답은 provider 로 갈 code 를 담은 redirectTo 를
+// 싣고, 어느 것도 두 번째 브라우저에 재생돼서는 안 된다(서버도 모든 OAuth 응답에
+// `no-store` 를 강제한다). 이 파일은 아무것도 로그하지 않는다는 규율이 여기서도
+// 그대로다: request 봉투와 redirectTo 는 devtools 버퍼로 새지 않는다.
+//
+// 화면에 닿는 유일한 상태 복원 열쇠는 서버가 서명한 opaque `request` 봉투 하나이고
+// (#1369 보안 척추), 그것은 URL 에서 읽혀 여기 본문/쿼리로만 흐른다.
+
+function oauthCollection(workspaceId: string): string {
+  return `/v1/workspaces/${encodeURIComponent(
+    workspaceId
+  )}/oauth/authorization-requests`;
+}
+
+/**
+ * consent 화면이 그릴 사실을 서버에서 되받는다. `request` 봉투를 제시하면 서버가
+ * client·redirect·resource·issuer·요청 scope·만료·묶을 수 있는 연결(candidate)을
+ * 돌려준다. 만료·위조·재생·타 워크스페이스·비관리자·OAuth 비활성은 전부 같은
+ * 404 다(non-enumerable).
+ */
+export function previewHostedOauthConsent(
+  workspaceId: string,
+  requestId: string
+): Promise<unknown> {
+  return hostedRequest(
+    `${oauthCollection(workspaceId)}/preview?request=${encodeURIComponent(
+      requestId
+    )}`,
+    { cache: "no-store" }
+  );
+}
+
+/**
+ * 사람의 승인을 기록하고, 서버가 provider 의 등록된 redirect 로 갈 곳(redirectTo)을
+ * 돌려준다. 중복·재요청은 서버가 409 로 답한다(단 하나의 terminal decision).
+ */
+export function approveHostedOauthConsent(
+  workspaceId: string,
+  body: OauthApproveRequest
+): Promise<unknown> {
+  return hostedRequest(`${oauthCollection(workspaceId)}/approve`, {
+    method: "POST",
+    cache: "no-store",
+    body: JSON.stringify(body),
+  });
+}
+
+/**
+ * 거부를 기록한다. 연결은 그대로 `pairing_pending` 에 남고 아무 권한도 열리지
+ * 않는다. 서버는 access_denied redirect 를 돌려준다.
+ */
+export function denyHostedOauthConsent(
+  workspaceId: string,
+  body: OauthDenyRequest
+): Promise<unknown> {
+  return hostedRequest(`${oauthCollection(workspaceId)}/deny`, {
+    method: "POST",
+    cache: "no-store",
+    body: JSON.stringify(body),
+  });
 }
