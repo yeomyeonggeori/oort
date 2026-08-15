@@ -148,6 +148,24 @@ export function DisplayObserver({
    * teardown that abandons it, and the failure that replaces it.
    */
   const negotiateTimerRef = useRef<number | null>(null);
+  /**
+   * The connecting leg's own cleanup — the handshake deadline and the document
+   * listener that catches a CSP refusal — held where `teardown` can reach it.
+   *
+   * It is a ref rather than a local because the two events that used to run it
+   * (`onopen`, `onclose`) are the two `teardown` deletes first, on purpose: a
+   * socket handler that fires during teardown would report a failure the reader
+   * has already left behind. So on every OTHER way out of `connecting` — the
+   * handshake deadline giving up, a different session arriving in the same
+   * mounted panel, the panel unmounting, the ledger revoking mid-handshake —
+   * nothing on the socket fires at all, and a cleanup that lives only in those
+   * handlers is a cleanup that never runs. The timer is harmless when it is
+   * missed (the generation counter makes it a no-op), but the `document`
+   * listener is not: it is attached to a node that outlives this component, so
+   * it survives for the life of the tab and a fresh one accumulates behind every
+   * retry and every session switch.
+   */
+  const connectCleanupRef = useRef<(() => void) | null>(null);
   /** Generation counter: an old attempt's callbacks must not touch new state. */
   const runRef = useRef(0);
 
@@ -160,6 +178,13 @@ export function DisplayObserver({
    * a case the producer has to survive anyway.
    */
   const teardown = useCallback((saidBye: boolean) => {
+    // First, because it is the one thing here that is NOT reachable from the
+    // socket: everything below either belongs to this component's own refs or
+    // dies with the socket, while the connecting leg hung a listener on the
+    // document. Running it here is what makes every exit path an exit path.
+    const connectCleanup = connectCleanupRef.current;
+    connectCleanupRef.current = null;
+    connectCleanup?.();
     if (negotiateTimerRef.current !== null) {
       window.clearTimeout(negotiateTimerRef.current);
       negotiateTimerRef.current = null;
@@ -294,14 +319,26 @@ export function DisplayObserver({
     const onViolation = (event: SecurityPolicyViolationEvent) => {
       if (runRef.current !== run || opened) return;
       if (!cspBlockedHost(event, url)) return;
-      window.clearTimeout(deadline);
+      // No clearTimeout here: `give` tears down, and teardown runs `done`. One
+      // place clears this attempt's deadline, so there is no second place to
+      // forget to add the next line to.
       give("host_blocked_by_policy");
     };
     document.addEventListener("securitypolicyviolation", onViolation);
+    /**
+     * End the connecting leg. Idempotent, because it is now reached from both
+     * directions: the socket settling, and any teardown that abandons the
+     * attempt before it settled. Removing a listener that is already gone and
+     * clearing a timer that already fired are both no-ops, and the ref is only
+     * cleared when it is still this attempt's — a newer attempt's cleanup must
+     * survive an older one's late `onclose`.
+     */
     const done = () => {
+      if (connectCleanupRef.current === done) connectCleanupRef.current = null;
       window.clearTimeout(deadline);
       document.removeEventListener("securitypolicyviolation", onViolation);
     };
+    connectCleanupRef.current = done;
 
     /**
      * Answer the producer's offer.

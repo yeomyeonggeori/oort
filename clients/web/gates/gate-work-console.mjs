@@ -22,6 +22,10 @@ const workspaceId = "00000000-0000-7000-8000-000000000001";
 const memberId = "00000000-0000-7000-8000-000000000101";
 const otherMemberId = "00000000-0000-7000-8000-000000000102";
 const channelId = "00000000-0000-7000-8000-000000000201";
+// The host the live-screen fixture "dials". Its socket is the one GateWebSocket
+// never opens, which is the only way to hold the surface in 연결 중 long enough
+// to leave it by a door the socket does not know about.
+const displaySignalHost = "display-gate.invalid";
 
 const auth = {
   accessToken: "gate-only-not-a-credential",
@@ -155,7 +159,7 @@ function wait(ms) {
 }
 
 async function installRealtimeSocket(page) {
-  await page.addInitScript(() => {
+  await page.addInitScript((holdHost) => {
     // React Query decides staleness from Date.now(). Advancing this gate clock
     // lets the gate prove a cached refetch failure without sleeping for the
     // production 30s/60s stale windows.
@@ -166,6 +170,26 @@ async function installRealtimeSocket(page) {
       clockOffsetMs += byMs;
     };
 
+    // A live count of the listeners the app has left on the DOCUMENT for the one
+    // event a WebSocket cannot raise about itself: the page's own CSP refusing
+    // the dial. `document` outlives every component, so a listener that misses
+    // its cleanup is not visible anywhere in the UI — it just accumulates, one
+    // per retry and per session switch, for as long as the tab is open. The Set
+    // counts identities rather than calls, so a cleanup that runs twice is not
+    // mistaken for a listener that was never there.
+    const cspListeners = new Set();
+    const addListener = document.addEventListener.bind(document);
+    const removeListener = document.removeEventListener.bind(document);
+    document.addEventListener = function (type, listener, options) {
+      if (type === "securitypolicyviolation") cspListeners.add(listener);
+      return addListener(type, listener, options);
+    };
+    document.removeEventListener = function (type, listener, options) {
+      if (type === "securitypolicyviolation") cspListeners.delete(listener);
+      return removeListener(type, listener, options);
+    };
+    window.__workConsoleGateCspListeners = () => cspListeners.size;
+
     class GateWebSocket {
       static CONNECTING = 0;
       static OPEN = 1;
@@ -173,8 +197,12 @@ async function installRealtimeSocket(page) {
       static CLOSED = 3;
 
       constructor(url) {
-        this.url = url;
+        this.url = String(url);
         this.readyState = GateWebSocket.CONNECTING;
+        // The live-screen fixture's signalling socket never settles: it does not
+        // open and it does not close itself. That is the whole point — it is the
+        // state in which the surface's own cleanup has nothing to run it.
+        if (this.url.includes(holdHost)) return;
         queueMicrotask(() => {
           this.readyState = GateWebSocket.OPEN;
           this.onopen?.(new Event("open"));
@@ -222,7 +250,7 @@ async function installRealtimeSocket(page) {
       }
     }
     window.WebSocket = GateWebSocket;
-  });
+  }, displaySignalHost);
 }
 
 async function installRoutes(context, state) {
@@ -275,6 +303,17 @@ async function installRoutes(context, state) {
       return state.failHosts
         ? json(route, { error: { message: "fixture host failure" } }, 500)
         : json(route, { workHosts: hosts });
+    }
+    if (path.endsWith("/display-attach")) {
+      // The grade the client is allowed to render, and an endpoint its own
+      // grammar accepts (wss, no credentials, no query). Nothing is dialled: the
+      // socket that would carry this is the gate's own stub.
+      return json(route, {
+        display_endpoint: `wss://${displaySignalHost}/signal`,
+        capability_token: "gate-only-not-a-credential",
+        display_id: "gate-display-1",
+        mode: "observer",
+      });
     }
     if (path.includes("/messages/") && path.endsWith("/replies")) {
       return json(route, { messages: [] });
@@ -817,6 +856,79 @@ async function assertMetadataFallback(
   }
 }
 
+// LIVE-2 leak floor. 연결 중 hangs a `securitypolicyviolation` listener on the
+// document — the CSP refusal is the one way a dial can fail with no event on the
+// socket at all — and the surface's teardown deletes the socket's own handlers
+// before it closes it. So every exit that is not the socket settling leaves that
+// listener behind unless teardown releases it itself, and a listener on the
+// document survives the component, the session and the retry: it is invisible in
+// the UI and it accumulates for the life of the tab.
+//
+// This runs in its own context because it navigates between sessions, which
+// would push history entries under the goBack assertions in assertConsole.
+async function assertDisplayConnectCleanup(browser) {
+  const context = await browser.newContext({
+    viewport: { width: 1280, height: 800 },
+    reducedMotion: "reduce",
+  });
+  try {
+    await installRoutes(context, { mode: "normal" });
+    const page = await openConsole(context);
+    const rows = page.getByTestId("work-console-row");
+    await rows.first().waitFor();
+    await rows.filter({ hasText: "클라우드에서 빌드" }).click();
+    await page.getByTestId("work-display").waitFor();
+
+    const baseline = await page.evaluate(() =>
+      window.__workConsoleGateCspListeners()
+    );
+    if (baseline !== 0) {
+      throw new Error(
+        `the console started with ${baseline} document CSP listeners already attached`
+      );
+    }
+
+    await page.getByTestId("work-display-start").click();
+    // The fixture socket never opens, so the surface stays here.
+    await page
+      .locator('[data-testid="work-display"][data-phase="connecting"]')
+      .waitFor({ timeout: 10_000 });
+    const attached = await page.evaluate(() =>
+      window.__workConsoleGateCspListeners()
+    );
+    if (attached !== 1) {
+      throw new Error(
+        `연결 중 did not attach the CSP listener this gate measures (count ${attached})`
+      );
+    }
+
+    // Leave by a door the socket does not know about: a different session in the
+    // same mounted panel. Nothing fires on the socket, so only the surface's own
+    // teardown can release the listener.
+    await rows.filter({ hasText: "데스크톱 앱에서 UI 검수" }).click();
+    await page.getByTestId("work-detail").waitFor();
+    try {
+      await page.waitForFunction(
+        () => window.__workConsoleGateCspListeners() === 0,
+        null,
+        { timeout: 5_000 }
+      );
+    } catch {
+      const leaked = await page.evaluate(() =>
+        window.__workConsoleGateCspListeners()
+      );
+      throw new Error(
+        `leaving 연결 중 by a session switch left ${leaked} document CSP listener(s) behind`
+      );
+    }
+    if ((await page.getByTestId("work-display-video").count()) !== 0) {
+      throw new Error("a torn-down attempt left its video frame on screen");
+    }
+  } finally {
+    await context.close();
+  }
+}
+
 async function assertColdOffline(browser) {
   const context = await browser.newContext({
     viewport: { width: 1280, height: 800 },
@@ -904,6 +1016,7 @@ async function main() {
         "#agent-runtime · 담당자 조회 실패 · codex",
         "담당자 정보를 새로 확인하지 못했습니다."
       );
+      await assertDisplayConnectCleanup(browser);
       await assertColdOffline(browser);
     } finally {
       await browser.close();
@@ -912,7 +1025,7 @@ async function main() {
     server.kill("SIGTERM");
   }
   console.log(
-    "PASS work console: delayed load, projection errors and cached stale fallback, unclipped T1/T2/T3/unknown hosts, cloud icon, observer-only terminal, h1/h2/h3 route outline, linkable selection, responsive keyboard focus, cached/cold offline, empty/error"
+    "PASS work console: delayed load, projection errors and cached stale fallback, unclipped T1/T2/T3/unknown hosts, cloud icon, observer-only terminal, h1/h2/h3 route outline, linkable selection, responsive keyboard focus, live-screen connect cleanup on a non-socket exit, cached/cold offline, empty/error"
   );
 }
 

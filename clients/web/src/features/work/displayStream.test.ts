@@ -723,6 +723,70 @@ describe("보는 중 is bound to frames this browser decoded", () => {
 });
 
 // -----------------------------------------------------------------------------
+// every way out of 연결 중 is a way out
+// -----------------------------------------------------------------------------
+
+/** The body of a `const NAME = useCallback(...)` in the component source. */
+function callbackBody(name: string): string {
+  const opening = `const ${name} = useCallback(`;
+  const start = DISPLAY_COMPONENT_CODE.indexOf(opening);
+  expect(start, name).toBeGreaterThan(-1);
+  const end = DISPLAY_COMPONENT_CODE.indexOf("\n  }, [", start);
+  expect(end, name).toBeGreaterThan(start);
+  return DISPLAY_COMPONENT_CODE.slice(start, end);
+}
+
+describe("the connecting leg is released on every exit, not just the socket's", () => {
+  // The measured hole this locks. `connecting` hangs a `securitypolicyviolation`
+  // listener on the DOCUMENT, which is a node that outlives this component, and
+  // `teardown` deletes `onopen`/`onclose` BEFORE it closes the socket so that a
+  // handler cannot report a failure the reader has already left behind. Every
+  // exit that is not the socket settling — the handshake deadline giving up, a
+  // different session.id arriving in the same mounted panel, the panel
+  // unmounting, the ledger revoking mid-handshake — therefore fires nothing on
+  // the socket at all. A cleanup reachable only from those two handlers is a
+  // cleanup all four of those exits skip, and the listener then survives for the
+  // life of the tab, one more per retry and per session switch.
+  //
+  // `gates/gate-work-console.mjs` counts the surviving listeners in a real
+  // browser on the real bundle; these assertions hold the shape that makes the
+  // count zero.
+  it("hangs exactly one document listener, for the one event a socket cannot raise", () => {
+    const added = DISPLAY_COMPONENT_CODE.match(/document\.addEventListener\(/g);
+    expect(added).toHaveLength(1);
+    expect(DISPLAY_COMPONENT_CODE).toMatch(
+      /document\.addEventListener\("securitypolicyviolation"/
+    );
+    expect(
+      DISPLAY_COMPONENT_CODE.match(/document\.removeEventListener\(/g)
+    ).toHaveLength(1);
+  });
+
+  it("hands that listener's removal to teardown rather than to the socket", () => {
+    // Registration and drain are the two halves. Without the second one the
+    // component still compiles, still passes every state assertion above, and
+    // still leaks.
+    expect(DISPLAY_COMPONENT_CODE).toMatch(/connectCleanupRef\.current = done/);
+    const teardown = callbackBody("teardown");
+    expect(teardown).toMatch(/connectCleanupRef\.current = null/);
+    expect(teardown).toMatch(/connectCleanup\?\.\(\)/);
+    // Released before the socket handlers are deleted: after that line there is
+    // nothing left that could have run it.
+    expect(teardown.indexOf("connectCleanup?.()")).toBeLessThan(
+      teardown.indexOf("socket.onopen = null")
+    );
+  });
+
+  it("clears the handshake deadline in exactly one place", () => {
+    // `give` tears down and teardown runs the cleanup, so the deadline has a
+    // single owner. Two owners is how the first one drifted out of date.
+    expect(
+      DISPLAY_COMPONENT_CODE.match(/window\.clearTimeout\(deadline\)/g)
+    ).toHaveLength(1);
+  });
+});
+
+// -----------------------------------------------------------------------------
 // the surface's own four states
 // -----------------------------------------------------------------------------
 
