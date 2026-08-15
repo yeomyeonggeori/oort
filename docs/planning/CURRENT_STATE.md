@@ -1,5 +1,27 @@
 # oort 기획 현재 상태 (Planning Current State)
 
+> **2026-08-15 스냅샷 40 (Opus 5 단발 워커 · engine — #1409 LIVE-1 T3 관전 라이브 화면 서버·기질 축, WebRTC display attach, 로컬 동결).** 스냅샷 39(#1368)을 supersede한다.
+>
+> **활성 goal #1409:** worktree/branch는 `feat/live1-display-spectate`(`~/projects/momo-tracks/momo-worktrees/live1-display-spectate`), base는 `track/engine@99d42244`(#1369 UX4 랜딩 HEAD). **마이그레이션은 075**(`check_migration_numbers.sh` 75 PASS, 대비 테스트 `discovers_contiguous_migrations_001_to_075`). 발주 전 그레펩 실측대로 그린필드였다 — display/VNC/WebRTC 스트림 축은 base에 0건이었다(`infra/livekit.yaml`은 huddle 오디오용 SFU이고 이 축과 무관하다).
+>
+> **경계 요약(ADR-0165 — Proposed, 전송 방향은 성재 결재 완료·문서 Accept가 머지 관문):** 관전의 두 번째 kind를 **기존 capability 기계의 파라미터**로 넣었다. 마이그 075가 `work_session.display_id/display_endpoint`(023 동형 제약)와 `terminal_attach_capability.kind`(`pty|display`, DEFAULT `pty`)를 더했고, 발급·검증·sweep·관전자 계수·RLS·revoke 조인은 각각 여전히 하나다. 새 표를 만들면 "host를 회수했으니 관전이 끊긴다"의 정의가 둘이 되고 그중 하나가 낡는 날 그 문장이 절반만 참이 된다.
+>
+> **view-only 3층 — 그리고 이 goal이 잠근 것:** ①075의 `terminal_attach_display_observer_ck`가 controller display 행을 **표현 불가**로 만든다(conformance가 superuser INSERT 실패를 요구 — 라우트를 다시 써도 경계가 남는다) ②라우트가 `mode=controller`를 **403**으로 거절(400이 아니다 — 어휘에 있고 철자도 맞은, 아무에게도 없는 등급) + `AttachKind::permits_mode`가 검증에서 재차 ③producer가 SDP에 `m=application`을 넣지 않는다(ADR-0165 D4 — 없는 채널로는 입력이 오지 않는다). 입력 개방은 **ADR-0004 증보 3 Accept 뒤 LIVE-3** 소관이고, 그날 세 층이 함께 움직인다.
+>
+> **새 host-signed write 1개:** `POST …/work-sessions/{s}/display-binding`이 이 서버가 서명 host에게서 받는 첫 work-session write다(Swift의 `PATCH …/work-sessions/{s}` 바인딩 arm은 여전히 미이식). 경로가 host가 아니라 session을 지시하므로 **서명자 핀은 핸들러가 원장을 읽어 건다**(= 세션의 `host_id` — `…/work-controls/{c}/ack` 선례). 재게시는 멱등 204, 다른 바인딩은 409, human bearer는 403, create/PATCH의 같은 이름 필드는 이름을 불러 400.
+>
+> **fail-closed:** `work_host.capabilities.display_attach`가 참일 때만 발급·검증·게시가 성립한다. BYOC는 **provider 이름 검사가 아니라** momo가 그 박스의 이미지를 굽지 않아 아무것도 광고되지 않는다는 사실로 빠진다(불변식 #7 유지). 광고는 매 검증마다 다시 읽는 조인 절이라, 플래그 없이 재등록하면 열려 있는 화면이 한 revalidation 주기에 끊긴다(런타임 확인).
+>
+> **투영 드리프트를 구조로 막았다:** `remote_display_available`을 세 곳에 손으로 적는 대신 술어 쌍을 한 정의(`WS_ATTACH_AVAILABILITY`)로 올리고 detail/RETURNING/reattach/list가 조립한다 — 빠뜨리는 것이 표현 불가다. 그 위에 조립된 네 문장에서 두 컬럼이 정확히 한 번씩 나오는지 보는 드리프트 테스트. 두 boolean은 독립이고(화면만 있고 터미널이 없는 세션이 정상) `ReattachVerdict`는 일부러 넓히지 않았다. 관전자 수는 kind를 구분하지 않는 하나이며 display 발급도 같은 count-only 봉투를 낸다.
+>
+> **실측:** 신규 `scripts/verify_display_attach.sh`(4 phase, 소유권 계약 자가검증 `--verify-cleanup-contract` 포함, Docker 잔존 0) PASS. PG18 + 실제 Axum router conformance 4건 PASS. 두 로컬 피어 실제 WebSocket 왕복 `scripts/display_signaling_probe.py` PASS + `--prove-red` PASS(datachannel을 여는 producer가 잡힌다 — 이 red proof가 probe 자신의 프레임 버퍼링 결함 1건을 잡아냈다). 무회귀: `verify_terminal_attach.sh`·`verify_observer_attach.sh`(Swift e2e — 075가 현행 서버와 호환임을 함께 증명)·`verify_agent_port.sh`(deploy 이미지 재빌드 포함)·`reattach_smoke_pg`·`t3_smoke_pg`·`work_control_spawn_conformance_pg`·`daemon_ack_resume_conformance_pg` 전부 PASS. 워크스페이스 clippy `-D warnings`·`cargo test --workspace`(101 스위트 ok)·소유 파일 fmt GREEN. 로컬 docs gate는 #1376에 따라 미실행.
+>
+> **정직 라벨 `runtime-unverified(cubesandbox webrtc producer)`:** microVM 템플릿을 빌드·기동한 바 없다. 템플릿 사양은 `infra/cubesandbox/display-template/`(`template.spec.json`이 기계 판독 정본이고 verifier가 서버 상수와 대조한다 + systemd unit + README).
+>
+> **이탈 3건(전부 동결·보고, 추측 없음):** ①**producer 선택**이 D1의 1순위(Selkies)에서 벗어나 `webrtcbin`이다 — 근거는 성능이 아니라 D4다(Selkies의 입력 datachannel은 그 제품 자체라 거기서 view-only는 되돌릴 수 있는 설정값이 된다). 구조적 논거이며 실측이 아니고, 되돌리기는 spec 한 필드다. ②**브라우저가 sandbox에 닿을 수 있는지 미실측·미결** — 어댑터 `create_body`에 포트 노출 표현이 없고 ADR-0157 증보 1의 eBPF `deny_out` 실측은 이 VM들이 닫힌 채 출하됨을 말한다. 세 후보(전용 호스트 리버스 프록시 / oort 운영 TURN=D3 증보 / per-sandbox 공개 포트)를 적고 고르지 않았다. 서버 축은 어느 쪽이든 완결이지만 **LIVE-2는 이 답 없이 렌더할 수 없다**. ③**`owner_only` 세션의 소유자도 자기 화면을 못 본다** — display에 controller가 없으므로 PTY에서 소유자가 쓰던 문이 없다. 소유자 예외를 만드는 것은 금지된 새 권한 모델이라 fail-closed(거절)로 구현하고 403을 테스트로 못박았다. `owner_only`의 의미를 확정하는 결정이 필요하다.
+>
+> **다음 행동:** Fable 기획검수(C/H/M) → 수리 → grok 리뷰어 C freeze(C0/H0/M0) → **ADR-0165 문서 Accept 확인** → push/PR(base `track/engine`) → PR CI → 머지. 랜딩 시 연속 편성 결재에 따라 LIVE-2 발사 — 단 위 이탈 ②가 LIVE-2의 선행 조건이다. 워커는 로컬 commit 동결까지만 수행했다. **범위 밖:** 웹 렌더 전부, control(LIVE-3)·로그인 핸드오프(LIVE-4), workd(Swift) 데몬 측 배선, `openapi_sampled_on_rust.txt` 등재(배포 이미지 왕복 미수행이라 줄을 더하지 않았다).
+>
 > **2026-08-15 스냅샷 39 (Opus 5 단발 워커 · engine — #1368 HAP-E7 MCP OAuth 2.1 authorization-server mode, bearer downgrade 없이, 로컬 동결).** 스냅샷 38(#1360)을 supersede한다.
 >
 > **활성 goal #1368:** worktree/branch는 `feat/1368-hap-e7-engine-mcp-oauth-authorization-server`, base는 현재 `track/engine@d7b390cf`(rebase 완료 — 엔진의 hygiene 073·#1360 wizard·#1384 composer 위). **마이그레이션은 074**(`check_migration_numbers.sh` 74 PASS, 대비 테스트 `discovers_contiguous_migrations_001_to_074`). 엔진이 자기 073(`hosted_lifecycle_hygiene`, #1375/#1386)을 먼저 랜딩했으므로 rebase에서 나의 073을 074로 재번호했다 — 066/067/068이 세운 그 선례이고 contiguity 테스트가 강제했다. rebase 충돌은 `migrate.rs`(073 docstring — 두 073 노트를 union), `STATUS.md`·`CURRENT_STATE.md`(둘 다 최상단 prepend) 세 곳뿐, 전부 union으로 해소.

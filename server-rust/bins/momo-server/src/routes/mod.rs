@@ -18,6 +18,8 @@ pub mod channels;
 pub mod cloud_hosts;
 pub mod credits;
 pub mod devices;
+/// ADR-0165 / LIVE-1 — 관전 라이브 화면: the display half of the attach plane.
+pub mod display_attach;
 pub mod dms;
 /// 휘발 신호 — the one route family with no Swift ancestor (ADR-0149).
 pub mod ephemeral;

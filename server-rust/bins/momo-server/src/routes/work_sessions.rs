@@ -145,6 +145,7 @@ fn session_dto(detail: WorkSessionDetail) -> WorkSessionDto {
         observation: detail.observation,
         observer_grant_count: detail.observer_grant_count,
         remote_attach_available: detail.remote_attach_available,
+        remote_display_available: detail.remote_display_available,
         started_at_ms: detail.started_at_ms,
         ended_at_ms: detail.ended_at_ms,
         exit_code: detail.exit_code,
@@ -171,6 +172,16 @@ fn reject_unsupported_create(request: &CreateWorkSessionRequest) -> Result<(), A
     if request.pty_id.is_some() || request.attach_endpoint.is_some() {
         return Err(ApiError::bad_request(
             "remote PTY binding requires work host signature",
+        ));
+    }
+    // LIVE-1's pair, refused the same way and for a stronger reason: unlike the
+    // PTY arm, this server *does* serve a display binding — on
+    // `POST …/work-sessions/{session}/display-binding`, work-host-signed. So the
+    // refusal here is not "unported", it is a boundary: a human bearer may not
+    // tell the ledger what is on a machine's screen.
+    if request.display_id.is_some() || request.display_endpoint.is_some() {
+        return Err(ApiError::bad_request(
+            "display binding requires work host signature",
         ));
     }
     Ok(())
@@ -372,6 +383,11 @@ pub async fn end(
     if request.pty_id.is_some() || request.attach_endpoint.is_some() {
         return Err(ApiError::bad_request(
             "remote PTY binding requires work host signature",
+        ));
+    }
+    if request.display_id.is_some() || request.display_endpoint.is_some() {
+        return Err(ApiError::bad_request(
+            "display binding requires work host signature",
         ));
     }
     if request.event.is_some() {
@@ -939,6 +955,7 @@ mod tests {
             observation: "open".into(),
             observer_grant_count: 0,
             remote_attach_available: false,
+            remote_display_available: false,
             started_at_ms: 1_700_000_000_000,
             ended_at_ms: None,
             exit_code: None,
@@ -1055,6 +1072,8 @@ mod tests {
             control_id: None,
             pty_id: None,
             attach_endpoint: None,
+            display_id: None,
+            display_endpoint: None,
         };
         assert!(reject_unsupported_create(&base()).is_ok());
         let mut with_control = base();
@@ -1068,5 +1087,22 @@ mod tests {
         let mut with_pty = base();
         with_pty.pty_id = Some("pty".into());
         assert!(reject_unsupported_create(&with_pty).is_err());
+
+        // LIVE-1: each half alone is refused, so a client cannot discover which
+        // one this server "really" reads by sending them one at a time.
+        let mutations: [fn(&mut CreateWorkSessionRequest); 2] = [
+            |request| request.display_id = Some("display".into()),
+            |request| request.display_endpoint = Some("wss://host.example/signal".into()),
+        ];
+        for mutate in mutations {
+            let mut with_display = base();
+            mutate(&mut with_display);
+            assert_eq!(
+                reject_unsupported_create(&with_display)
+                    .unwrap_err()
+                    .message,
+                "display binding requires work host signature"
+            );
+        }
     }
 }

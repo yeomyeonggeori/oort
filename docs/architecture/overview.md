@@ -369,6 +369,60 @@ MomoServer에는 terminal WebSocket, stdin/stdout, resize, publish, outbox route
 Centrifugo도 이 데이터 경로에 참여하지 않는다. 서버는 capability control plane만 담당하며
 터미널 raw 바이트는 client↔host 직결로만 흐른다.
 
+### 관전 라이브 화면 (display attach, ADR-0165)
+
+같은 capability 기계가 **두 번째 kind**를 갖는다. PTY가 터미널 바이트를 client↔host 직결로
+흘리듯, display는 **화면 프레임을 WebRTC로 browser↔sandbox 직결**로 흘린다(ADR-0165 D1/D2).
+서버는 여기서도 아무것도 나르지 않는다 — 미디어는 물론 **시그널링도 경유하지 않는다**.
+새 표를 만들지 않은 것이 설계의 요점이다: `terminal_attach_capability.kind`(마이그 075)가
+`pty | display`이고, 발급·검증·sweep·관전자 계수·RLS·revoke 조인이 각각 하나뿐이라 "host를
+회수했으니 관전이 끊긴다"가 절반만 참이 되는 상태가 존재할 수 없다.
+
+세 가지가 PTY 축과 다르고, 셋 다 의도적이다.
+
+1. **display는 observer 전용이다.** 입력(control) 경계는 ADR-0004 증보 3의 미결 결정이므로
+   `mode=controller` 요청은 403이고, 잠금장치는 라우트 한 줄이 아니라 스키마다 —
+   075의 `terminal_attach_display_observer_ck`가 controller display 행 자체를 표현 불가로
+   만든다. producer 층에서는 **입력 datachannel을 아예 개설하지 않는 것**이 view-only의
+   구현이다(D4). 클라이언트 플래그를 믿지 않는다.
+2. **바인딩을 host가 직접 게시한다.** workd는 `POST …/work-sessions/{s}/display-binding`
+   (work-host 서명)으로 `display_id` + credential-free 시그널링 WS URL을 한 번 등록한다.
+   human bearer는 이 경로에서도, 세션 create/PATCH의 같은 이름 필드에서도 거절된다. 경로가
+   host가 아니라 session을 지시하므로 서명자 핀(= 세션의 host와 동일해야 한다)은 핸들러가
+   원장을 읽어 건다 — `…/work-controls/{c}/ack`와 같은 형태다.
+3. **광고 없는 host에는 발급하지 않는다(fail-closed).** `work_host.capabilities.display_attach`
+   가 참일 때만 발급·검증이 성립한다. BYOC는 provider 이름을 검사해서가 아니라 **momo가
+   이미지를 굽지 않으므로 아무것도 광고하지 않기 때문에** 자동 배제된다(불변식 #7 — 정책
+   코드는 provider 신원을 알지 못한다).
+
+세션 read projection은 raw `display_endpoint` 없이 **`remoteDisplayAvailable`** 하나만
+제공하며(`remoteAttachAvailable`의 동형이자 독립 값 — 화면만 있고 터미널이 없는 세션이
+정상이다), 관전자 수는 kind를 구분하지 않는 하나의 숫자다. 프레임은 서버·원장·audit 어디에도
+들어가지 않고 녹화도 없다(D5). ICE는 직결/host-reflexive 1차이며 제3자 TURN은 금지다(D3).
+
+```mermaid
+sequenceDiagram
+    participant B as Browser (LIVE-2)
+    participant S as momo-server
+    participant P as PostgreSQL
+    participant V as Sandbox (workd + WebRTC producer)
+    V->>S: POST display-binding (host-signed, once)
+    S->>P: display_id + credential-free signalling URL
+    B->>S: POST display-attach (human, observer only)
+    S->>P: token digest + issued/expires/grantee/kind
+    S-->>B: signalling endpoint + raw capability + display_id
+    B->>V: direct WSS signalling (momo.display.v1, capability)
+    V->>S: signed capability validation (every 30s)
+    S->>P: expiry/session/revoke/observation/advertisement check
+    S-->>V: validated display_id + expires_at + input_enabled=false
+    V-->>B: WebRTC video, sendonly — no input datachannel exists
+```
+
+웹 소비(관전 UI)는 LIVE-2 소관이다. sandbox 템플릿 사양은
+`infra/cubesandbox/display-template/`에 있고, 그 producer는 아직
+**`runtime-unverified(cubesandbox webrtc producer)`** — microVM을 빌드·기동해본 바 없고,
+브라우저가 sandbox에 도달할 수 있는지(ingress·ICE)는 미실측 미결이다.
+
 ## 에이전트 1회 응답의 수명주기 (이중 경로)
 
 ```mermaid

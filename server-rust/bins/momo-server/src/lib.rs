@@ -721,6 +721,23 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/work-sessions/{session}/terminal-attach",
             post(routes::terminal_attach::issue),
         )
+        // display attach capability (ADR-0165 / LIVE-1). The issue half is a
+        // human asking to watch, so it sits behind the bearer middleware beside
+        // its PTY twin. The publish half is a **daemon** telling the ledger which
+        // screen it serves — protected like `…/pending-controls`, because
+        // `auth::require_principal` resolves a `MomoHost` authorization into a
+        // `WorkHost` principal and the route therefore needs no mounting of its
+        // own. It is the first work-session write this server accepts from a
+        // signed host, and it is deliberately narrow: two columns, one session,
+        // and a signer pinned to that session's host inside the handler.
+        .route(
+            "/v1/workspaces/{ws}/work-sessions/{session}/display-attach",
+            post(routes::display_attach::issue),
+        )
+        .route(
+            "/v1/workspaces/{ws}/work-sessions/{session}/display-binding",
+            post(routes::display_attach::publish_binding),
+        )
         // paid credit
         .route(
             "/v1/admin/workspaces/{ws}/credits/topups",
@@ -985,6 +1002,13 @@ pub fn build_app(state: AppState) -> Router {
         .route(
             "/v1/workspaces/{ws}/work-hosts/{host}/terminal-attach/validate",
             post(routes::terminal_attach::validate),
+        )
+        // LIVE-1's twin of the line above, public for the identical reason: the
+        // caller is the WebRTC producer inside the sandbox, and it holds a
+        // signing key rather than a bearer.
+        .route(
+            "/v1/workspaces/{ws}/work-hosts/{host}/display-attach/validate",
+            post(routes::display_attach::validate),
         )
         // B4 adds the fourth, and it is public for the same measured reason: the
         // caller is **Centrifugo**, which holds no bearer at all. It presents the

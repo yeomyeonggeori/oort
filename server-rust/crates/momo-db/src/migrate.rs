@@ -364,19 +364,26 @@ mod tests {
     /// claimed 073 in parallel, so whichever landed second — this one —
     /// renumbered to 074 on rebase rather than leaving a gap, and this
     /// assertion is what forced that to be noticed.
+    ///
+    /// 075 is ADR-0165's `display_attach` (LIVE-1): the session's display
+    /// binding beside its PTY one, and `terminal_attach_capability.kind`. Its
+    /// last CHECK is the one worth naming here —
+    /// `terminal_attach_display_observer_ck` makes a *controllable* display
+    /// capability unrepresentable, which is how the ADR-0004 증보 3 boundary is
+    /// held by the schema rather than by a route somebody could rewrite.
     #[test]
-    fn discovers_contiguous_migrations_001_to_074() {
+    fn discovers_contiguous_migrations_001_to_075() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
         assert_eq!(
             migrations.len(),
-            74,
-            "expected 74 migrations under {}",
+            75,
+            "expected 75 migrations under {}",
             dir.display()
         );
         assert_eq!(migrations.first().unwrap().version, 1);
-        assert_eq!(migrations.last().unwrap().version, 74);
+        assert_eq!(migrations.last().unwrap().version, 75);
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
 
         for (i, migration) in migrations.iter().enumerate() {

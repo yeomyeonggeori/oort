@@ -1,12 +1,31 @@
-//! Terminal-attach **capability control plane** (ADR-0125 D10 / ADR-0126 D1),
+//! Attach **capability control plane** (ADR-0125 D10 / ADR-0126 D1 / ADR-0165),
 //! ported from Swift `Routes/TerminalAttachRoutes.swift` (480 lines).
+//!
+//! ## Two kinds, one machine
+//!
+//! A session can expose two things a person may dial: its **PTY** (023) and,
+//! since LIVE-1, its **display** — the live screen, carried by WebRTC from a
+//! producer inside the sandbox (ADR-0165 D1). Both are the same act at this
+//! layer: momo mints a 60-second bearer for a host endpoint it does not own and
+//! answers whether that bearer is still good.
+//!
+//! So [`AttachKind`] is a parameter, not a second module. `issue`, `validate`,
+//! the sweep, the observer count, the RLS policy and the revoke joins are one
+//! implementation each. A parallel display machine would give this workspace two
+//! definitions of "the host was revoked, cut everyone off" — and the day one of
+//! them fell behind, 「관전을 끊었다」 would be half true.
+//!
+//! The one place the kinds diverge is what they may be: **display capabilities
+//! exist only as `observer`** (075's `terminal_attach_display_observer_ck`).
+//! Input — the control half — is ADR-0004 증보 3's boundary and is not open.
 //!
 //! ## What this module is, and the line it does not cross
 //!
-//! momo's servers never carry terminal bytes. The durable ledger
-//! (`023_terminal_attach.sql`) stores a remote PTY identifier, its direct
-//! endpoint, and SHA-256 capability digests — and nothing else. This module is
-//! the whole server-side story:
+//! momo's servers never carry terminal bytes, and never carry a video frame
+//! either (ADR-0165 D5). The durable ledger (`023_terminal_attach.sql`,
+//! `075_display_attach.sql`) stores a remote PTY identifier, a display
+//! identifier, their direct endpoints, and SHA-256 capability digests — and
+//! nothing else. This module is the whole server-side story:
 //!
 //! 1. an authorized human is minted an opaque, 60-second bearer;
 //! 2. the direct PTY host validates that bearer through its own signature
@@ -14,9 +33,10 @@
 //!    is open.
 //!
 //! Everything after that — the WebSocket, stdin, resize, kill, the ring-buffer
-//! replay of ADR-0139 D2 — is the host daemon's (`TerminalAttachServer.swift`,
-//! B5). There is deliberately no stream, socket or relay function in this crate,
-//! and `docs/security/README.ko.md`'s "실행 내용 미보관" stays literally true.
+//! replay of ADR-0139 D2; and on the display side the signalling handshake, the
+//! ICE candidates and the media itself — is the host's. There is deliberately no
+//! stream, socket, signalling or relay function in this crate, and
+//! `docs/security/README.ko.md`'s "실행 내용 미보관" stays literally true.
 //!
 //! ## Why validation is a JOIN and not a token lookup
 //!
@@ -60,9 +80,22 @@ pub const CAPABILITY_PREFIX: &str = "momo_terminal_attach_v1";
 /// can widen without changing what any client says.
 pub const OBSERVER_CAPABILITY_RETENTION: &str = "1 hour";
 
-/// `attach_endpoint` length ceiling (`work_session_attach_endpoint_ck`,
-/// 023:22-24 — and `RemotePTYBinding.validated`, :30).
+/// `attach_endpoint` / `display_endpoint` length ceiling
+/// (`work_session_attach_endpoint_ck` 023:22-24, `work_session_display_endpoint_ck`
+/// 075 — and `RemotePTYBinding.validated`, :30).
 const MAX_ATTACH_ENDPOINT_BYTES: usize = 2_048;
+
+/// The `work_host.capabilities` flag a host must advertise before this server
+/// will mint a display capability for one of its sessions (021:28-35 closes that
+/// jsonb to boolean values, so this key is a boolean or the row does not exist).
+///
+/// The gate is **fail-closed and provider-blind**: policy asks the host what it
+/// offers, never the adapter registry what vendor it is (invariant #7 /
+/// `provider::registry` module rule). BYOC is excluded as a *consequence* —
+/// momo neither creates nor images a BYOC box, so nothing there ever runs a
+/// producer or advertises this flag — rather than by a provider-name test that
+/// would teach policy code a vendor's identity.
+pub const HOST_DISPLAY_CAPABILITY_KEY: &str = "display_attach";
 
 /// The two capability grades (`terminal_attach_capability_mode_ck`, 024:17-18).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -90,11 +123,69 @@ impl AttachMode {
     }
 }
 
+/// Which surface of a session a capability addresses
+/// (`terminal_attach_capability_kind_ck`, 075).
+///
+/// Deliberately a parameter of the existing machine rather than a second table:
+/// see the module header. `Pty` is the DEFAULT the migration backfills, so every
+/// row written before LIVE-1 names itself correctly without a data migration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AttachKind {
+    /// The terminal (023). Both grades exist.
+    Pty,
+    /// The live screen (075, ADR-0165). **Observer only** — the CHECK says so.
+    Display,
+}
+
+impl AttachKind {
+    pub fn as_db_label(self) -> &'static str {
+        match self {
+            AttachKind::Pty => "pty",
+            AttachKind::Display => "display",
+        }
+    }
+
+    pub fn from_db_label(label: &str) -> Option<Self> {
+        match label {
+            "pty" => Some(AttachKind::Pty),
+            "display" => Some(AttachKind::Display),
+            _ => None,
+        }
+    }
+
+    /// The grades this kind may be minted at.
+    ///
+    /// This is the Rust half of `terminal_attach_display_observer_ck`. Both
+    /// halves exist on purpose: the CHECK is the one that cannot be forgotten,
+    /// and this one is the one that can answer a caller with a *sentence*
+    /// instead of a constraint-violation 500.
+    pub fn permits_mode(self, mode: AttachMode) -> bool {
+        match self {
+            AttachKind::Pty => true,
+            AttachKind::Display => mode == AttachMode::Observer,
+        }
+    }
+}
+
 /// The host-side binding a client dials (`RemotePTYBinding`, :6-49).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RemotePtyBinding {
     pub pty_id: String,
     pub attach_endpoint: String,
+}
+
+/// The host-side **display** binding a client dials (075, ADR-0165 D2).
+///
+/// `display_endpoint` is the VM's own WebRTC **signalling** WS URL. It is not a
+/// media address (media is negotiated peer-to-peer over ICE and never named
+/// here) and it is emphatically not a momo address: the server signs a
+/// capability and steps out, exactly as it does for a PTY. The grammar is 023's
+/// — credential-free `https`/`wss`, ≤ 2048 bytes — because this string is handed
+/// to a browser and to a log for the same reasons it was there.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemoteDisplayBinding {
+    pub display_id: String,
+    pub display_endpoint: String,
 }
 
 /// `RemotePTYBinding.validated` (:19-48) applied to the **stored** pair.
@@ -118,7 +209,7 @@ pub fn validated_binding(
         // half-set pair unrepresentable, so either both are present or neither.
         _ => return None,
     };
-    if !is_valid_pty_id(pty_id) || !is_credential_free_stream_url(attach_endpoint) {
+    if !is_valid_attach_target_id(pty_id) || !is_credential_free_stream_url(attach_endpoint) {
         return None;
     }
     Some(RemotePtyBinding {
@@ -127,8 +218,40 @@ pub fn validated_binding(
     })
 }
 
-/// `work_session_pty_id_ck` / Swift `:27` — `^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`.
-fn is_valid_pty_id(raw: &str) -> bool {
+/// [`validated_binding`]'s display twin, applied to the **stored** pair.
+///
+/// Same shape, same re-validate-on-read discipline, and deliberately the same
+/// two predicates: 075 copied 023's CHECKs byte for byte, so a display binding
+/// that would be illegal as a PTY binding is illegal here too. `None` means
+/// "this session has no display to attach to", which the route answers with the
+/// same 409 it uses for every other unavailability — never with a
+/// partially-trusted endpoint.
+pub fn validated_display_binding(
+    display_id: Option<&str>,
+    display_endpoint: Option<&str>,
+) -> Option<RemoteDisplayBinding> {
+    let (display_id, display_endpoint) = match (display_id, display_endpoint) {
+        (Some(display_id), Some(endpoint)) => (display_id, endpoint),
+        // `work_session_remote_display_pair_ck` (075) makes a half-set pair
+        // unrepresentable, so either both are present or neither.
+        _ => return None,
+    };
+    if !is_valid_attach_target_id(display_id) || !is_credential_free_stream_url(display_endpoint) {
+        return None;
+    }
+    Some(RemoteDisplayBinding {
+        display_id: display_id.to_string(),
+        display_endpoint: display_endpoint.to_string(),
+    })
+}
+
+/// `work_session_pty_id_ck` (023) and `work_session_display_id_ck` (075) — one
+/// grammar, `^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$` (Swift `:27`).
+///
+/// One function because the two CHECKs are one regex: a display id is a name a
+/// host chose for a stream, exactly as a pty id is a name it chose for a
+/// terminal, and both end up in a URL path and a log line.
+fn is_valid_attach_target_id(raw: &str) -> bool {
     let mut characters = raw.chars();
     let Some(first) = characters.next() else {
         return false;
@@ -180,6 +303,11 @@ pub struct AttachTarget {
     pub observation: String,
     pub host_revoked: bool,
     pub binding: Option<RemotePtyBinding>,
+    /// The display half of the same row (075). `None` = this session exposes no
+    /// screen, which is the state every pre-LIVE-1 session is in.
+    pub display_binding: Option<RemoteDisplayBinding>,
+    /// `work_host.capabilities.display_attach` — see [`HOST_DISPLAY_CAPABILITY_KEY`].
+    pub host_display_capable: bool,
 }
 
 impl AttachTarget {
@@ -187,9 +315,24 @@ impl AttachTarget {
     /// makes idle attachable, which is the whole point of the state), an
     /// unrevoked host, and a binding that still parses.
     pub fn is_attachable(&self) -> bool {
-        (self.status == "running" || self.status == "idle")
-            && !self.host_revoked
-            && self.binding.is_some()
+        self.is_live() && self.binding.is_some()
+    }
+
+    /// [`is_attachable`](Self::is_attachable) plus the one clause the display
+    /// side adds: **the host must have advertised a display**.
+    ///
+    /// It is a separate clause rather than an implication of the binding because
+    /// the two are written by different acts at different times — a host
+    /// advertises at registration, and publishes a binding per session. A box
+    /// that stopped offering screens (re-registered without the flag) must stop
+    /// being dialable even while a stale binding is still in its row, and this
+    /// is the clause that makes that true.
+    pub fn is_display_attachable(&self) -> bool {
+        self.is_live() && self.display_binding.is_some() && self.host_display_capable
+    }
+
+    fn is_live(&self) -> bool {
+        (self.status == "running" || self.status == "idle") && !self.host_revoked
     }
 }
 
@@ -206,8 +349,10 @@ pub async fn lock_attach_target_in_tx(
 ) -> Result<Option<AttachTarget>, T3Error> {
     let row = sqlx::query(
         "SELECT ws.member_id, ws.host_id, ws.channel_id, ws.pty_id, \
-                ws.attach_endpoint, ws.status, ws.observation, \
-                (h.revoked_at IS NOT NULL) AS host_revoked \
+                ws.attach_endpoint, ws.display_id, ws.display_endpoint, \
+                ws.status, ws.observation, \
+                (h.revoked_at IS NOT NULL) AS host_revoked, \
+                ((h.capabilities->>$3)::boolean IS TRUE) AS host_display_capable \
            FROM work_session ws \
            JOIN work_host h \
              ON h.id = ws.host_id \
@@ -217,11 +362,14 @@ pub async fn lock_attach_target_in_tx(
     )
     .bind(workspace_id)
     .bind(session_id)
+    .bind(HOST_DISPLAY_CAPABILITY_KEY)
     .fetch_optional(&mut *conn)
     .await?;
     let Some(row) = row else { return Ok(None) };
     let pty_id: Option<String> = row.try_get("pty_id")?;
     let attach_endpoint: Option<String> = row.try_get("attach_endpoint")?;
+    let display_id: Option<String> = row.try_get("display_id")?;
+    let display_endpoint: Option<String> = row.try_get("display_endpoint")?;
     Ok(Some(AttachTarget {
         owner_member_id: row.try_get("member_id")?,
         host_id: row.try_get("host_id")?,
@@ -230,6 +378,11 @@ pub async fn lock_attach_target_in_tx(
         observation: row.try_get("observation")?,
         host_revoked: row.try_get("host_revoked")?,
         binding: validated_binding(pty_id.as_deref(), attach_endpoint.as_deref()),
+        display_binding: validated_display_binding(
+            display_id.as_deref(),
+            display_endpoint.as_deref(),
+        ),
+        host_display_capable: row.try_get("host_display_capable")?,
     }))
 }
 
@@ -265,6 +418,10 @@ pub fn is_valid_capability_token(raw: &str) -> bool {
 
 /// Delete observer rows whose retention window has closed (`:218-221`). Runs
 /// before each issue, so the table is pruned by use rather than by a timer.
+///
+/// **Kind-agnostic on purpose.** A display grant is an observer grant that
+/// happens to point at a screen; retiring it on a different clock, or not at
+/// all, would leave one of the two kinds accumulating spent rows forever.
 pub async fn sweep_spent_observer_capabilities_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -302,6 +459,13 @@ pub struct IssuedCapability {
 /// by the application: `terminal_attach_expiry_ck` (023:37-40) validates the
 /// pair against the DB's own clock, and an app-computed timestamp from a skewed
 /// host would fail that CHECK for reasons no log would explain.
+///
+/// `kind` is the LIVE-1 axis. Passing [`AttachKind::Display`] with
+/// [`AttachMode::Controller`] is rejected by
+/// `terminal_attach_display_observer_ck` rather than silently downgraded — the
+/// route is expected to have refused it with a sentence long before, and this
+/// statement failing loudly is the backstop for the day it does not.
+#[allow(clippy::too_many_arguments)]
 pub async fn issue_attach_capability_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -310,13 +474,14 @@ pub async fn issue_attach_capability_in_tx(
     owner_member_id: Uuid,
     token: &str,
     mode: AttachMode,
+    kind: AttachKind,
 ) -> Result<IssuedCapability, T3Error> {
     let row = sqlx::query(
         "INSERT INTO terminal_attach_capability \
            (workspace_id, work_session_id, host_id, owner_member_id, \
-            token_hash, expires_at, mode) \
+            token_hash, expires_at, mode, kind) \
          VALUES ($1, $2, $3, $4, digest($5::text, 'sha256'), \
-                 clock_timestamp() + make_interval(secs => $6::double precision), $7) \
+                 clock_timestamp() + make_interval(secs => $6::double precision), $7, $8) \
          RETURNING id, \
                    floor(extract(epoch from issued_at) * 1000)::bigint AS issued_at_ms, \
                    floor(extract(epoch from expires_at) * 1000)::bigint AS expires_at_ms",
@@ -328,6 +493,7 @@ pub async fn issue_attach_capability_in_tx(
     .bind(token)
     .bind(CAPABILITY_TTL_SECONDS as f64)
     .bind(mode.as_db_label())
+    .bind(kind.as_db_label())
     .fetch_one(&mut *conn)
     .await?;
     Ok(IssuedCapability {
@@ -339,6 +505,13 @@ pub async fn issue_attach_capability_in_tx(
 
 /// Count the observer grants still inside their dial window (`:264-274`) — the
 /// number the `work.session.observer` broadcast carries.
+///
+/// **Kind-agnostic, and that is the whole point.** The number answers "how many
+/// people are watching this session", and someone watching the screen is
+/// watching. Splitting it per kind would invent a second observer model on a
+/// surface whose count is already published to every client and already
+/// rendered as one badge — LIVE-1 was told to keep the observer계수 as it is,
+/// not to fork it.
 pub async fn active_observer_capability_count_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -363,12 +536,16 @@ pub async fn active_observer_capability_count_in_tx(
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ValidatedAttach {
     pub work_session_id: Uuid,
-    pub pty_id: String,
+    /// `work_session.pty_id` for [`AttachKind::Pty`], `display_id` for
+    /// [`AttachKind::Display`] — the identifier the *asking host* uses to pick
+    /// which of its own streams this bearer opens.
+    pub target_id: String,
     /// ISO-8601 with fractional seconds, rendered by PostgreSQL so the wire
     /// format cannot drift from Swift's `ISO8601DateFormatter` output
     /// (`iso8601`, :464-468).
     pub expires_at: String,
     pub mode: AttachMode,
+    pub kind: AttachKind,
 }
 
 /// The whole authorization decision, in one join (`validate`, :322-365).
@@ -379,15 +556,29 @@ pub struct ValidatedAttach {
 /// unrevoked, grantee still an active human, controller is still the owner,
 /// observer's session still `open` and their channel membership still live — is
 /// evaluated exactly as on the first call.
+///
+/// `kind` pins which surface the asking host is serving, and it is a predicate
+/// rather than a projection: a PTY daemon presenting a display bearer, or the
+/// producer presenting a terminal one, gets the ordinary refusal. Two hosts do
+/// not share a socket just because they share a box.
+///
+/// The display arm carries one extra clause the PTY arm does not have — the
+/// host must **still** advertise `display_attach`. The join is the whole
+/// authorization decision (module header), so an operator who re-registers a
+/// box without the flag revokes every live display stream on it within one
+/// re-validation period, without touching a capability row.
 pub async fn validate_attach_capability_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     host_id: Uuid,
     token: &str,
     revalidating: bool,
+    kind: AttachKind,
 ) -> Result<Option<ValidatedAttach>, T3Error> {
     let row = sqlx::query(
-        "SELECT c.work_session_id, ws.pty_id, c.mode, \
+        "SELECT c.work_session_id, c.mode, c.kind, \
+                CASE WHEN c.kind = 'display' THEN ws.display_id ELSE ws.pty_id END \
+                  AS target_id, \
                 to_char(c.expires_at AT TIME ZONE 'UTC', \
                         'YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"') AS expires_at_iso \
            FROM terminal_attach_capability c \
@@ -408,10 +599,22 @@ pub async fn validate_attach_capability_in_tx(
             AND c.host_id = $2 \
             AND c.token_hash = digest($3::text, 'sha256') \
             AND ($4 OR c.expires_at > clock_timestamp()) \
+            AND c.kind = $5 \
             AND ws.status IN ('running', 'idle') \
-            AND ws.pty_id IS NOT NULL \
-            AND ws.attach_endpoint IS NOT NULL \
             AND h.revoked_at IS NULL \
+            AND ( \
+              ( \
+                c.kind = 'pty' \
+                AND ws.pty_id IS NOT NULL \
+                AND ws.attach_endpoint IS NOT NULL \
+              ) \
+              OR ( \
+                c.kind = 'display' \
+                AND ws.display_id IS NOT NULL \
+                AND ws.display_endpoint IS NOT NULL \
+                AND (h.capabilities->>$6)::boolean IS TRUE \
+              ) \
+            ) \
             AND ( \
               (c.mode = 'controller' AND c.owner_member_id = ws.member_id) \
               OR ( \
@@ -432,6 +635,8 @@ pub async fn validate_attach_capability_in_tx(
     .bind(host_id)
     .bind(token)
     .bind(revalidating)
+    .bind(kind.as_db_label())
+    .bind(HOST_DISPLAY_CAPABILITY_KEY)
     .fetch_optional(&mut *conn)
     .await?;
     let Some(row) = row else { return Ok(None) };
@@ -441,17 +646,274 @@ pub async fn validate_attach_capability_in_tx(
     let Some(mode) = AttachMode::from_db_label(&mode_label) else {
         return Ok(None);
     };
+    let kind_label: String = row.try_get("kind")?;
+    // Same reasoning one axis over: an unknown kind is a row that names a
+    // surface this build has never heard of, and guessing which one would hand a
+    // host the wrong stream's identifier.
+    let Some(kind) = AttachKind::from_db_label(&kind_label) else {
+        return Ok(None);
+    };
+    // Belt and braces for the boundary 075 exists to hold: a display row that
+    // somehow reached `controller` is refused here too, so the lock survives a
+    // CHECK being dropped by a future migration without this line being noticed.
+    if !kind.permits_mode(mode) {
+        return Ok(None);
+    }
     Ok(Some(ValidatedAttach {
         work_session_id: row.try_get("work_session_id")?,
-        pty_id: row.try_get("pty_id")?,
+        target_id: row.try_get("target_id")?,
         expires_at: row.try_get("expires_at_iso")?,
         mode,
+        kind,
     }))
+}
+
+// ---------------------------------------------------------------------------
+// display binding — the host-signed publish path (LIVE-1)
+// ---------------------------------------------------------------------------
+
+/// The session row a display-binding publish is judged against.
+///
+/// Ports the shape Swift reads before writing a PTY binding
+/// (`WorkSessionRoutes.swift:1583-1620`): the owning host, the status, and
+/// whatever binding is already there — because publishing is **once**, and the
+/// second call has to be able to tell "the same daemon said the same thing
+/// again" from "something else is claiming this session's screen".
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DisplayBindingTarget {
+    /// The host the session is bound to. The signer must BE this host.
+    pub host_id: Uuid,
+    pub status: String,
+    pub host_revoked: bool,
+    pub host_display_capable: bool,
+    /// The raw stored pair, **not** re-validated — a publish decision compares
+    /// what is stored against what is offered, and a stored value that no longer
+    /// parses must still block a different one rather than look absent.
+    pub existing: Option<(String, String)>,
+}
+
+/// Lock the session and its host for a display-binding publish.
+///
+/// `FOR UPDATE OF ws, h` for [`lock_attach_target_in_tx`]'s reason: the decision
+/// reads both rows, and a concurrent host revoke landing between the read and
+/// the UPDATE would publish a screen on a host that is already gone.
+pub async fn lock_display_binding_target_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    session_id: Uuid,
+) -> Result<Option<DisplayBindingTarget>, T3Error> {
+    let row = sqlx::query(
+        "SELECT ws.host_id, ws.status, ws.display_id, ws.display_endpoint, \
+                (h.revoked_at IS NOT NULL) AS host_revoked, \
+                ((h.capabilities->>$3)::boolean IS TRUE) AS host_display_capable \
+           FROM work_session ws \
+           JOIN work_host h \
+             ON h.id = ws.host_id \
+            AND h.workspace_id = ws.workspace_id \
+          WHERE ws.workspace_id = $1 AND ws.id = $2 \
+          FOR UPDATE OF ws, h",
+    )
+    .bind(workspace_id)
+    .bind(session_id)
+    .bind(HOST_DISPLAY_CAPABILITY_KEY)
+    .fetch_optional(&mut *conn)
+    .await?;
+    let Some(row) = row else { return Ok(None) };
+    let display_id: Option<String> = row.try_get("display_id")?;
+    let display_endpoint: Option<String> = row.try_get("display_endpoint")?;
+    Ok(Some(DisplayBindingTarget {
+        host_id: row.try_get("host_id")?,
+        status: row.try_get("status")?,
+        host_revoked: row.try_get("host_revoked")?,
+        host_display_capable: row.try_get("host_display_capable")?,
+        existing: match (display_id, display_endpoint) {
+            (Some(id), Some(endpoint)) => Some((id, endpoint)),
+            // `work_session_remote_display_pair_ck` makes a half-set pair
+            // unrepresentable; treating anything else as absent is safe.
+            _ => None,
+        },
+    }))
+}
+
+impl DisplayBindingTarget {
+    /// Whether the offered binding is byte-identical to the stored one — the
+    /// idempotent replay a daemon produces when it restarts and re-publishes.
+    pub fn already_bound_to(&self, binding: &RemoteDisplayBinding) -> bool {
+        self.existing.as_ref().is_some_and(|(id, endpoint)| {
+            id == &binding.display_id && endpoint == &binding.display_endpoint
+        })
+    }
+
+    /// Whether a *different* binding is already published. Publishing over it is
+    /// Swift's 409: two producers claiming one session's screen is a state the
+    /// ledger cannot describe, and picking a winner silently would point half
+    /// the observers at a stream that is not this session.
+    pub fn conflicts_with(&self, binding: &RemoteDisplayBinding) -> bool {
+        self.existing.is_some() && !self.already_bound_to(binding)
+    }
+}
+
+/// Write the display binding (075's two columns).
+///
+/// The `status` clause is repeated here even though the caller checked it under
+/// the same lock: this statement is the only writer of these columns, and a
+/// guard that lives only in the caller is a guard the next caller does not have.
+/// `Ok(false)` means the row moved out of `running|idle` and the caller answers
+/// Swift's 409 rather than reporting a write that did not happen.
+pub async fn write_display_binding_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    session_id: Uuid,
+    binding: &RemoteDisplayBinding,
+) -> Result<bool, T3Error> {
+    let updated = sqlx::query(
+        "UPDATE work_session \
+            SET display_id = $3, display_endpoint = $4 \
+          WHERE workspace_id = $1 \
+            AND id = $2 \
+            AND status IN ('running', 'idle')",
+    )
+    .bind(workspace_id)
+    .bind(session_id)
+    .bind(&binding.display_id)
+    .bind(&binding.display_endpoint)
+    .execute(&mut *conn)
+    .await?
+    .rows_affected();
+    Ok(updated == 1)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn display_binding(id: &str, endpoint: &str) -> RemoteDisplayBinding {
+        RemoteDisplayBinding {
+            display_id: id.into(),
+            display_endpoint: endpoint.into(),
+        }
+    }
+
+    #[test]
+    fn attach_kinds_match_the_check_constraint_vocabulary() {
+        for kind in [AttachKind::Pty, AttachKind::Display] {
+            assert_eq!(
+                AttachKind::from_db_label(kind.as_db_label()),
+                Some(kind),
+                "075 allows exactly these two"
+            );
+        }
+        assert!(AttachKind::from_db_label("vnc").is_none());
+        assert!(AttachKind::from_db_label("PTY").is_none());
+    }
+
+    /// The LIVE-1 boundary, stated as an assertion rather than a comment:
+    /// display may never be minted as a controller until ADR-0004 증보 3 opens
+    /// input. `terminal_attach_display_observer_ck` says the same thing in SQL.
+    #[test]
+    fn display_capabilities_are_observer_only() {
+        assert!(AttachKind::Display.permits_mode(AttachMode::Observer));
+        assert!(
+            !AttachKind::Display.permits_mode(AttachMode::Controller),
+            "input is ADR-0004 증보 3's boundary, not this batch's"
+        );
+        assert!(AttachKind::Pty.permits_mode(AttachMode::Controller));
+        assert!(AttachKind::Pty.permits_mode(AttachMode::Observer));
+    }
+
+    #[test]
+    fn display_binding_requires_both_halves_and_the_same_url_grammar() {
+        assert!(validated_display_binding(None, None).is_none());
+        assert!(validated_display_binding(Some("display-1"), None).is_none());
+        assert!(validated_display_binding(None, Some("wss://host/signal")).is_none());
+        assert_eq!(
+            validated_display_binding(Some("display-1"), Some("wss://host.example/signal")),
+            Some(display_binding("display-1", "wss://host.example/signal"))
+        );
+        // 075 copied 023's CHECKs, so every refusal the PTY pair makes is made
+        // here too — a credentialed signalling URL is exactly as unacceptable.
+        assert!(validated_display_binding(
+            Some("display-1"),
+            Some("wss://user:pw@host.example/signal")
+        )
+        .is_none());
+        assert!(
+            validated_display_binding(Some("display-1"), Some("wss://host.example/s?t=1"))
+                .is_none()
+        );
+        assert!(
+            validated_display_binding(Some("-bad"), Some("wss://host.example/signal")).is_none()
+        );
+        assert!(
+            validated_display_binding(Some("display-1"), Some("ws://host.example/signal"))
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn a_display_needs_a_binding_and_a_host_that_advertises_one() {
+        let target = |bound: bool, capable: bool, status: &str, revoked: bool| AttachTarget {
+            owner_member_id: Uuid::from_u128(1),
+            host_id: Uuid::from_u128(2),
+            channel_id: Uuid::from_u128(3),
+            status: status.to_string(),
+            observation: "open".to_string(),
+            host_revoked: revoked,
+            binding: None,
+            display_binding: bound.then(|| display_binding("display", "wss://host.example/signal")),
+            host_display_capable: capable,
+        };
+        assert!(target(true, true, "running", false).is_display_attachable());
+        assert!(target(true, true, "idle", false).is_display_attachable());
+        assert!(
+            !target(true, false, "running", false).is_display_attachable(),
+            "fail-closed: a host that never advertised a display has none — this \
+             is also what keeps BYOC out without policy naming a provider"
+        );
+        assert!(!target(false, true, "running", false).is_display_attachable());
+        assert!(!target(true, true, "running", true).is_display_attachable());
+        assert!(!target(true, true, "ended", false).is_display_attachable());
+        assert!(!target(true, true, "orphaned", false).is_display_attachable());
+        // The two kinds are independent: a screen does not imply a terminal.
+        assert!(!target(true, true, "running", false).is_attachable());
+    }
+
+    #[test]
+    fn republishing_the_same_display_binding_is_not_a_conflict() {
+        let offered = display_binding("display-1", "wss://host.example/signal");
+        let bound = |existing: Option<(&str, &str)>| DisplayBindingTarget {
+            host_id: Uuid::from_u128(2),
+            status: "running".into(),
+            host_revoked: false,
+            host_display_capable: true,
+            existing: existing.map(|(id, endpoint)| (id.to_string(), endpoint.to_string())),
+        };
+        let fresh = bound(None);
+        assert!(!fresh.already_bound_to(&offered));
+        assert!(
+            !fresh.conflicts_with(&offered),
+            "an empty slot is not a rival"
+        );
+
+        let same = bound(Some(("display-1", "wss://host.example/signal")));
+        assert!(same.already_bound_to(&offered));
+        assert!(
+            !same.conflicts_with(&offered),
+            "a restarted daemon republishing its own binding is idempotent"
+        );
+
+        for other in [
+            ("display-2", "wss://host.example/signal"),
+            ("display-1", "wss://other.example/signal"),
+        ] {
+            let rival = bound(Some(other));
+            assert!(!rival.already_bound_to(&offered));
+            assert!(
+                rival.conflicts_with(&offered),
+                "a second producer claiming this screen is a 409, not a silent overwrite"
+            );
+        }
+    }
 
     #[test]
     fn attach_modes_match_the_check_constraint_vocabulary() {
@@ -550,15 +1012,15 @@ mod tests {
     }
 
     #[test]
-    fn pty_id_matches_the_check_constraint() {
-        assert!(is_valid_pty_id("a"));
-        assert!(is_valid_pty_id("A0._:-"));
-        assert!(is_valid_pty_id(&format!("a{}", "b".repeat(127))));
-        assert!(!is_valid_pty_id(""));
-        assert!(!is_valid_pty_id("-leading"));
-        assert!(!is_valid_pty_id("has space"));
+    fn attach_target_id_matches_the_check_constraint() {
+        assert!(is_valid_attach_target_id("a"));
+        assert!(is_valid_attach_target_id("A0._:-"));
+        assert!(is_valid_attach_target_id(&format!("a{}", "b".repeat(127))));
+        assert!(!is_valid_attach_target_id(""));
+        assert!(!is_valid_attach_target_id("-leading"));
+        assert!(!is_valid_attach_target_id("has space"));
         assert!(
-            !is_valid_pty_id(&format!("a{}", "b".repeat(128))),
+            !is_valid_attach_target_id(&format!("a{}", "b".repeat(128))),
             "128 trailing characters exceeds the 0...127 quantifier"
         );
     }
@@ -576,6 +1038,8 @@ mod tests {
                 pty_id: "pty".into(),
                 attach_endpoint: "wss://host.example/x".into(),
             }),
+            display_binding: None,
+            host_display_capable: false,
         };
         assert!(live("running", false, true).is_attachable());
         assert!(
