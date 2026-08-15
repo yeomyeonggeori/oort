@@ -9,6 +9,13 @@
 //! chain's spend is summed over). Both are `SELECT`-only, both live in this same
 //! crate, and neither has a second copy of a statement that appears here.
 //!
+//! Three statements here **read** tables this crate does not own —
+//! [`linked_work_session_ids_in_tx`] and the control-window hold pair read
+//! `audit_log`/`work_control`, and the resume additionally reads
+//! `display_control_window` (076). The alternative is raw SQL in a route
+//! handler, which this server allows nowhere; none of them writes, and none has
+//! a second copy anywhere in the workspace.
+//!
 //! Measured against `001_init.sql:267-297` (the table), Swift
 //! `AgentRunRoutes.create` (:29-250, the work trigger) and
 //! `MessageRoutes.recordMentionRun` (:1988-2025, the mention trigger), plus
@@ -1425,6 +1432,183 @@ pub async fn linked_work_session_ids_in_tx(
     Ok(ids)
 }
 
+// ---------------------------------------------------------------------------
+// the control-window hold (ADR-0004 증보 3 D6 — 「사용자 개입 대기」)
+//
+// LIVE-3 (#1424) opened the boundary and wrote the ledger for it: while a person
+// holds a live session's keyboard, `display_control_window` stands and the two
+// gates in `momo_t3::work_control` refuse the agent that session. What LIVE-3
+// deliberately did **not** write is the other half of 증보 3 D6 — 「정지되는
+// 것은 에이전트 런 층 … 토큰 소진 0」. `RunStatus::Paused` was reachable in the
+// enum, counted by [`RunStatus::LIVE`], held by [`RunStatus::is_approval_held`]
+// and stoppable by [`RunStatus::is_cancellable`]; nothing anywhere wrote it.
+//
+// These two statements are that writer, and they are a **pair**: the same
+// relation decides who is parked and who is resumed, and both guards are exact
+// so either may be replayed. Everything they touch about `Paused` was already
+// true before this batch — that is the point. Parking a run does not teach the
+// gateway a new refusal, it walks the run into the refusal the gateway has
+// always had for a held run (`agent_gateway`:345, :567), which is what makes
+// 「토큰 소진 0」 a property of the ledger rather than a promise: a parked run
+// cannot record a progress event, cannot complete, and therefore cannot write a
+// `usage_ledger` row.
+//
+// ## What is NOT parked, and why each absence is deliberate
+//
+// * `awaiting_approval` — that hold belongs to a human decision and its resume
+//   is `requeue_run_from_approval_in_tx`, guarded on `awaiting_approval`.
+//   Parking it would move the run out from under that guard and a later
+//   approval would silently do nothing. 증보 3 does not get to break the
+//   approval contract to enforce its own.
+// * `queued` — a run that has not started is spending nothing, which is the
+//   subject of D6. It is also the status a resume restores *to* in the approval
+//   path, so parking it would need a column remembering which live status to
+//   put back, and `agent_run` has none. What protects the session from a queued
+//   run that starts mid-window is the pair of gates LIVE-3 landed, neither of
+//   which reads the run's status at all.
+// * anything terminal — there is nothing to hold.
+// ---------------------------------------------------------------------------
+
+/// The one relation that joins a run to the work sessions it drives.
+///
+/// It is [`linked_work_session_ids_in_tx`]'s join read the other way round —
+/// same tables, same predicate, one place — because "which sessions did this run
+/// touch" and "which runs touched this session" are one fact and must not become
+/// two statements that agree today. `audit_log.run_id` is written by
+/// `routes::work_controls::create` on every control an agent requests, so this
+/// is the ledger's own record of the reach 증보 3 D3 is about, not an inference
+/// from membership or ownership.
+///
+/// `$1` is the workspace. The caller appends its own session clause.
+const RUN_DRIVES_SESSION: &str = "\
+    SELECT DISTINCT al.run_id, wc.session_id \
+       FROM audit_log al \
+       JOIN work_control wc \
+         ON wc.workspace_id = al.workspace_id \
+        AND wc.id = al.target_id \
+      WHERE al.workspace_id = $1 \
+        AND al.target_type = 'work_control' \
+        AND al.run_id IS NOT NULL \
+        AND wc.session_id IS NOT NULL";
+
+/// A run this batch moved, in the shape a caller needs to announce it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ParkedRun {
+    pub run_id: Uuid,
+    pub channel_id: Uuid,
+    pub agent_member_id: Uuid,
+}
+
+fn decode_parked(row: &sqlx::postgres::PgRow) -> Result<ParkedRun, sqlx::Error> {
+    Ok(ParkedRun {
+        run_id: row.try_get("id")?,
+        channel_id: row.try_get("channel_id")?,
+        agent_member_id: row.try_get("agent_member_id")?,
+    })
+}
+
+/// `running` → `paused` for every run driving this session — the writer ADR-0004
+/// 증보 3 D6 asks for, called in the same transaction as the window that causes
+/// it.
+///
+/// Idempotent by its guard: a re-take that rebinds a standing window (the client
+/// retry `open_control_window_in_tx` is built for) finds the runs already
+/// `paused` and moves nothing, so 「정지 시각」 stays the one the window row
+/// carries.
+///
+/// `deadline_at` is deliberately **not** written, which is the one place this
+/// hold differs from the approval hold and the difference is the argument:
+/// `park_run_for_approval_in_tx` sets a deadline because an approval nobody
+/// answers would otherwise silence the agent forever. A control window cannot do
+/// that — it carries its own 90-second lease, renewed only while a producer
+/// keeps saying the stream is up, and the lapse of that lease is what resumes
+/// the run. A second clock here would either fight the lease or resume the agent
+/// mid-login, which is the failure 증보 3 D3 exists to prevent.
+pub async fn park_runs_for_control_window_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    session_id: Uuid,
+) -> Result<Vec<ParkedRun>, DbError> {
+    let rows = sqlx::query(&format!(
+        "WITH driver AS ({RUN_DRIVES_SESSION} AND wc.session_id = $2) \
+         UPDATE agent_run r \
+            SET status = 'paused'::run_status, \
+                updated_at = now() \
+           FROM driver d \
+          WHERE r.workspace_id = $1 \
+            AND r.id = d.run_id \
+            AND r.status = 'running' \
+        RETURNING r.id, r.channel_id, r.agent_member_id"
+    ))
+    .bind(workspace_id)
+    .bind(session_id)
+    .fetch_all(&mut *conn)
+    .await?;
+    rows.iter()
+        .map(decode_parked)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(DbError::from)
+}
+
+/// `paused` → `running` for every run this session's closing window was holding.
+///
+/// The inverse of [`park_runs_for_control_window_in_tx`], and `running` rather
+/// than `queued` because it is the exact status the park took away: the turn was
+/// in flight, its gateway was refused for the duration, and 「사용자 개입 완료」
+/// means it may speak again — not that it must be scheduled afresh. Resuming to
+/// `queued` would also be indistinguishable from a run that had never started,
+/// which is a different fact.
+///
+/// ## The second window clause, and the bug it exists to prevent
+///
+/// A run may drive more than one session. Closing one window while another still
+/// stands must not resume it — that would hand the agent back its reach into a
+/// screen somebody is still typing into, by the door of a session they finished
+/// with. So the resume asks the question the park never had to: is any window
+/// this run is held by still open? A run held by two windows is resumed by the
+/// second close, not the first.
+///
+/// Idempotent both ways. A replayed close finds the runs already `running` and
+/// changes nothing; a run that was cancelled while parked
+/// ([`RunStatus::is_cancellable`] admits `paused`, and `cancel_run_in_tx` names
+/// it) is left terminal, because `status = 'paused'` no longer matches. A close
+/// must never resurrect a run a human stopped.
+pub async fn resume_runs_from_control_window_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    session_id: Uuid,
+) -> Result<Vec<ParkedRun>, DbError> {
+    let rows = sqlx::query(&format!(
+        "WITH driver AS ({RUN_DRIVES_SESSION} AND wc.session_id = $2), \
+              held AS ( \
+                SELECT DISTINCT l.run_id \
+                  FROM ({RUN_DRIVES_SESSION}) l \
+                  JOIN display_control_window w \
+                    ON w.workspace_id = $1 \
+                   AND w.work_session_id = l.session_id \
+                   AND w.ended_at IS NULL \
+                   AND w.lease_expires_at > clock_timestamp() \
+              ) \
+         UPDATE agent_run r \
+            SET status = 'running'::run_status, \
+                updated_at = now() \
+           FROM driver d \
+          WHERE r.workspace_id = $1 \
+            AND r.id = d.run_id \
+            AND r.status = 'paused' \
+            AND NOT EXISTS (SELECT 1 FROM held h WHERE h.run_id = r.id) \
+        RETURNING r.id, r.channel_id, r.agent_member_id"
+    ))
+    .bind(workspace_id)
+    .bind(session_id)
+    .fetch_all(&mut *conn)
+    .await?;
+    rows.iter()
+        .map(decode_parked)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(DbError::from)
+}
+
 /// Why a gateway completion was refused, or the status it resolved to — Swift
 /// `normalizedCompletionStatus` (:1476-1495).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -1550,6 +1734,81 @@ mod tests {
             .iter()
             .copied()
             .all(RunStatus::is_cancellable));
+    }
+
+    /// #1425 gave `Paused` a writer. It gave it nothing else, and this is the
+    /// assertion that says so.
+    ///
+    /// Every predicate below was already true before the control-window hold
+    /// existed — `Paused` has been in the enum, in [`RunStatus::LIVE`], in
+    /// `is_approval_held` and in `is_cancellable` since the approval batch, and
+    /// the gateway's two doors (`agent_gateway`:345, :567) and the cancel route
+    /// have been reading them all along. Parking a run therefore does not teach
+    /// the system a new rule; it walks a run into rules that were waiting.
+    ///
+    /// That is exactly why this test is worth having. The tempting "cleanup"
+    /// after this batch is to give the control-window hold a status of its own,
+    /// or to drop `Paused` out of `is_approval_held` because "it is not an
+    /// approval" — and either one silently reopens the gateway to a run whose
+    /// screen a person is typing into, which is 「토큰 소진 0」 undone. The
+    /// consequences are named here, in one place, so that change cannot be made
+    /// by accident.
+    #[test]
+    fn the_control_window_hold_borrows_the_approval_holds_meaning_unchanged() {
+        // The gateway refuses a held run on BOTH doors — that pair is what makes
+        // 「토큰 소진 0」 a property of the ledger: no progress event, no
+        // completion, and therefore no `usage_ledger` row.
+        assert!(
+            RunStatus::Paused.is_approval_held(),
+            "the gateway's refusal is the enforcement; ADR-0004 증보 3 D6"
+        );
+        // A person may still stop a parked run. A hold that made 중지
+        // unreachable would trap the run behind a window nobody has to close.
+        assert!(RunStatus::Paused.is_cancellable());
+        // …and the concurrency slot stays occupied, because the run is not over.
+        assert!(RunStatus::LIVE.contains(&RunStatus::Paused));
+        // It is not terminal, which is what makes the resume representable at
+        // all: `resume_runs_from_control_window_in_tx` guards on `paused`.
+        assert!(!RunStatus::Paused.is_terminal());
+
+        // The park's guard and the resume's target are the same status, and it
+        // is the one status that means "a turn is in flight". `queued` is
+        // deliberately outside the pair (see the module comment above the two
+        // statements), so an assertion that it stays a *separate* live status is
+        // the guard against a future "tidy" that merges them.
+        assert!(!RunStatus::Running.is_approval_held());
+        assert!(!RunStatus::Queued.is_approval_held());
+        assert_ne!(RunStatus::Queued, RunStatus::Running);
+
+        // And the approval hold's own resume is still keyed to its own status,
+        // so a control window can never satisfy an approval nobody answered.
+        assert!(RunStatus::AwaitingApproval.is_approval_held());
+        assert_ne!(RunStatus::AwaitingApproval, RunStatus::Paused);
+    }
+
+    /// One relation, read in two directions, spelled once.
+    ///
+    /// The park/resume pair and [`linked_work_session_ids_in_tx`] answer the two
+    /// halves of the same question ("which sessions did this run touch" / "which
+    /// runs touched this session"), and the day those become two different joins
+    /// is the day a run is parked by a window that will never resume it. The
+    /// fragment is asserted rather than merely shared so that editing it into
+    /// something the other direction no longer matches is a red test.
+    #[test]
+    fn the_run_session_relation_is_the_audit_log_work_control_join() {
+        for needle in [
+            "audit_log",
+            "work_control",
+            "al.target_type = 'work_control'",
+            "wc.id = al.target_id",
+            "al.run_id IS NOT NULL",
+            "wc.session_id IS NOT NULL",
+        ] {
+            assert!(
+                RUN_DRIVES_SESSION.contains(needle),
+                "the run↔session relation lost `{needle}`"
+            );
+        }
     }
 
     /// The whole idempotency contract in one assertion: same trigger → same key

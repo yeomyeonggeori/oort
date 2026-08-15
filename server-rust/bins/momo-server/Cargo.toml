@@ -125,3 +125,12 @@ jsonwebtoken.workspace = true
 # neither links nor starts a worker, and the two processes still meet through
 # nothing but the `outbox` row.
 momo-agent-worker = { path = "../momo-agent-worker" }
+# #1425 conformance only, and for `momo-agent-worker`'s reason one boundary over:
+# the control window's FOURTH close is the lease lapse, whose only author is the
+# notifier's sweep, so `tests/display_attach_conformance_pg.rs` runs ONE real
+# sweep iteration in-process against a window this suite already knows how to
+# create. The alternative was a second copy of the whole LIVE-1/LIVE-3 fixture
+# set inside the notifier's own suite. Dev-only — the server binary neither
+# links nor starts a notifier, and the two processes still meet through nothing
+# but the ledger.
+momo-notifier = { path = "../momo-notifier" }
