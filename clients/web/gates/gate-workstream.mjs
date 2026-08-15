@@ -416,6 +416,7 @@ function asWorkSession(run) {
     observation: "open",
     observerGrantCount: 0,
     remoteAttachAvailable: false,
+    remoteDisplayAvailable: false,
     startedAtMs: run.startedAtMs,
     ...(run.endedAtMs === undefined ? {} : { endedAtMs: run.endedAtMs }),
     ...(run.resumedFromSessionId === undefined
@@ -608,6 +609,7 @@ async function installRoutes(context, state) {
         observation: "open",
         observerGrantCount: 0,
         remoteAttachAvailable: false,
+        remoteDisplayAvailable: false,
         startedAtMs: Date.now(),
         resumedFromSessionId: state.resumeSessionId,
       };

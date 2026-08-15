@@ -327,6 +327,28 @@ SPEC_SUBPROTOCOL="$(spec_value '.signalling.subprotocol')" ||
   fail "spec does not declare signalling.subprotocol"
 grep -Fq "SUBPROTOCOL = \"$SPEC_SUBPROTOCOL\"" scripts/display_signaling_probe.py ||
   fail "spec subprotocol '$SPEC_SUBPROTOCOL' is not the one the probe speaks"
+# ...and the one the BROWSER dials with (LIVE-2). The probe stands in for a
+# viewer; the web client IS one, and a template that agrees with the probe while
+# disagreeing with the shipped client fails in front of a person rather than
+# here.
+grep -Fq "DISPLAY_SUBPROTOCOL = \"$SPEC_SUBPROTOCOL\"" \
+  clients/web/src/features/work/displayStream.ts ||
+  fail "spec subprotocol '$SPEC_SUBPROTOCOL' is not the one the web client dials"
+
+# ADR-0165 D4 on the client side of the same absence. The producer not offering
+# a datachannel is the guarantee; a VIEWER that could ask for one, or open one,
+# would leave that guarantee resting entirely on the far side of the wire.
+#
+# The forms tested are the CODE forms, not the words: both files discuss
+# `open_input` and `createDataChannel` at length in their headers, and a check
+# that could not tell an explanation from an implementation would either fail on
+# the documentation or be deleted for doing so. `displayStream.test.ts` holds the
+# comment-stripped form of this over both files; these two are here so the
+# display verifier fails on its own without a node toolchain.
+! grep -Fq '"open_input"' clients/web/src/features/work/displayStream.ts ||
+  fail "the web client encodes open_input — ADR-0165 D4 makes view-only the absence of that encoder"
+! grep -Fq 'createDataChannel(' clients/web/src/features/work/DisplayObserver.tsx ||
+  fail "the web display surface opens a datachannel — ADR-0165 D4"
 
 # The capability grammar is the server's, not a second one.
 SPEC_PREFIX="$(spec_value '.signalling.capabilityPrefix')" ||

@@ -2312,6 +2312,20 @@ export interface WorkSession {
   observation: "open" | "owner_only";
   observerGrantCount: number;
   remoteAttachAvailable: boolean;
+  /**
+   * The host published a live screen for this session (LIVE-1, ADR-0165).
+   *
+   * INDEPENDENT of `remoteAttachAvailable`, and the server's own DTO says so in
+   * the same words: a session can offer a screen and no terminal, or the
+   * reverse. A client that folds the two into one boolean offers the wrong verb
+   * on one of them, so nothing here may derive one from the other.
+   *
+   * The signalling endpoint itself is deliberately NOT in this shape, exactly as
+   * `attach_endpoint` is not: a session read is a list a whole channel can
+   * fetch, and an endpoint is only ever handed out beside the capability that
+   * authorises dialling it (`DisplayAttachGrant`).
+   */
+  remoteDisplayAvailable: boolean;
   startedAtMs: number;
   endedAtMs?: number;
   exitCode?: number;
@@ -2420,6 +2434,67 @@ export async function issueObserverTerminalAttach(
     `/v1/workspaces/${encodeURIComponent(
       workspaceId
     )}/work-sessions/${encodeURIComponent(sessionId)}/terminal-attach`,
+    { method: "POST", body: JSON.stringify({ mode: "observer" }) }
+  );
+}
+
+// ---- Display attach capability (LIVE-1 / ADR-0165) --------------------------
+// POST /v1/workspaces/{ws}/work-sessions/{session}/display-attach
+//
+// The screen twin of the block above, and the same kind of call: a control
+// plane request that mints a 60 second bearer and hands back the HOST's own
+// address. What it hands back is the sandbox's WebRTC SIGNALLING socket, and
+// momo carries neither the signalling nor the media that follows: no SFU, no
+// TURN of ours, no recording (ADR-0165 D2/D3/D5). The server module holding the
+// other end says it plainly: "nothing here opens a socket".
+//
+// It is a separate function rather than a `kind` argument on the one above for
+// the reason the server split the routes: the two responses carry different
+// required fields (`pty_id` vs `display_id`), and one shape with both optional
+// would let a caller dial the wrong stream on a typo.
+//
+// snake_case for `TerminalAttachGrant`'s reason: it is the sibling of a body
+// two shipped clients already parse that way, and one attach response in each
+// case would be a trap for whoever writes the third.
+
+export interface DisplayAttachGrant {
+  /**
+   * The HOST's own WebRTC signalling endpoint, https/wss, credential free and
+   * query free (server-validated on the way in AND on the way out).
+   */
+  display_endpoint: string;
+  /** Opaque bearer, 60s TTL, validated by the producer against this server. */
+  capability_token: string;
+  display_id: string;
+  /**
+   * The grade, always `"observer"` in this build.
+   *
+   * It is read rather than assumed. A view-only stream that LOOKS identical to a
+   * controllable one is how a person ends up typing into a window that will
+   * never deliver a keystroke, so the client checks the word the server sent
+   * before it renders a screen, and refuses anything else instead of guessing.
+   */
+  mode: string;
+}
+
+/**
+ * Ask for a view-only display capability.
+ *
+ * `observer` is sent explicitly even though it is the only grade the route can
+ * produce. The alternative is an empty body that means observer by default,
+ * which is true today and is exactly the kind of default that stops being true
+ * quietly: a request that names the grade it wants keeps saying the same thing
+ * on the day `controller` becomes issuable (ADR-0004 증보 3), and this client
+ * still has no code that could use one.
+ */
+export async function issueDisplayAttach(
+  workspaceId: string,
+  sessionId: string
+): Promise<DisplayAttachGrant> {
+  return request<DisplayAttachGrant>(
+    `/v1/workspaces/${encodeURIComponent(
+      workspaceId
+    )}/work-sessions/${encodeURIComponent(sessionId)}/display-attach`,
     { method: "POST", body: JSON.stringify({ mode: "observer" }) }
   );
 }

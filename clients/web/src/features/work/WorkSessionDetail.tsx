@@ -18,6 +18,7 @@ import { elapsedLabel } from "@/features/agents/agentWorkingSignal";
 import { CHIP_CLASS } from "@/features/common/chip";
 import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/States";
 import { useSessionWorkstream } from "@/features/workstreams/useWorkstreams";
+import { DisplayObserver } from "./DisplayObserver";
 import { ObserverTerminal } from "./ObserverTerminal";
 import { useSessionEvents } from "./useWorkSessions";
 import {
@@ -920,19 +921,53 @@ export function WorkSessionDetail({
              그런 행에는 스레드 버튼이 없다 — 돌아가 봐야 그 이름이 없다.
              그리고 애초에 돌아갈 이유가 없다: 진행 내역은 이 배너 바로 아래에
              있고, 채널 대화는 위의 세션 스레드 줄이 연다. */
+          /* 그리고 이 배너는 자기가 **가린 것 전부**를 말한다 (LIVE-2 리뷰 M1).
+             이 자리는 터미널 관전과 라이브 화면 두 블록을 한꺼번에 대체하는데,
+             앞 판의 명사는 터미널 하나였다 — 화면을 띄운 세션에서는 라이브 화면
+             블록이 아무 설명 없이 사라지고, 방금까지 있던 자리에 그 이름이 어디에도
+             없었다. 명사를 두 표면으로 넓히되 `remoteDisplayAvailable`로 갈라
+             둔다: 화면이 없는 세션에 라이브 화면을 언급하면 이 세션이 한 번도
+             갖지 않았던 것을 잃은 것처럼 읽힌다. 갈림의 기준은 display 블록 자신이
+             쓰는 것과 같은 서버 사실이다. */
           <InlineBanner
             tone="neutral"
-            message="호스트 응답이 없어 터미널을 관전할 수 없습니다. 아래 진행 내역에서 이 세션에 기록된 단계를 계속 확인하세요."
+            message={
+              session.remoteDisplayAvailable
+                ? "호스트 응답이 없어 터미널 관전과 라이브 화면을 볼 수 없습니다. 아래 진행 내역에서 이 세션에 기록된 단계를 계속 확인하세요."
+                : "호스트 응답이 없어 터미널을 관전할 수 없습니다. 아래 진행 내역에서 이 세션에 기록된 단계를 계속 확인하세요."
+            }
             testId="work-host-offline"
           />
         ) : (
-          <ObserverTerminal
-            session={session}
-            hostName={hostName}
-            wide={wide}
-            onWideChange={onWideChange}
-            headingLevel={childHeadingLevel}
-          />
+          <>
+            <ObserverTerminal
+              session={session}
+              hostName={hostName}
+              wide={wide}
+              onWideChange={onWideChange}
+              headingLevel={childHeadingLevel}
+            />
+            {/* 라이브 화면 (LIVE-2 / ADR-0165), BESIDE the terminal and not
+                inside it. `remoteAttachAvailable` and `remoteDisplayAvailable`
+                are independent server facts — a session can offer a screen and
+                no terminal, or the reverse — so a session that has both shows
+                both, and neither one is behind a tab the reader has to find.
+
+                It is drawn only while the session can still HAVE a screen. A
+                closed or orphaned session already has the block above saying so
+                in exactly those words, and a second muted sentence repeating it
+                about a different surface is the "three muted lines for one
+                click" that block's own history warns about. Every state that
+                CAN still change — no screen published, 소유자만 보기, a host
+                that stopped advertising — is stated by the block itself. */}
+            {(session.status === "running" || session.status === "idle") && (
+              <DisplayObserver
+                session={session}
+                hostName={hostName}
+                headingLevel={childHeadingLevel}
+              />
+            )}
+          </>
         )}
 
         {/* Fail-closed (X-11 / MOMO-546): a remote host's event relay is not a

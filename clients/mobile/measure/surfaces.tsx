@@ -426,6 +426,7 @@ function adeSession(over: Record<string, unknown>) {
     observation: 'open',
     observerGrantCount: 0,
     remoteAttachAvailable: false,
+    remoteDisplayAvailable: false,
     startedAtMs: NOW - 900_000,
     ...over,
   };

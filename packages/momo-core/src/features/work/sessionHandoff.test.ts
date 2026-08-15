@@ -67,6 +67,7 @@ function session(overrides: Partial<WorkSession> = {}): WorkSession {
     observation: "open",
     observerGrantCount: 0,
     remoteAttachAvailable: true,
+    remoteDisplayAvailable: false,
     startedAtMs: 0,
     ...overrides,
   };
