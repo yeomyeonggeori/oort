@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
 import type { LoginResponse } from "@momo/core/lib/api";
@@ -23,7 +23,9 @@ import {
 import {
   buildOauthApprove,
   buildOauthDeny,
+  isOauthAlreadyDecided,
   isOauthRequestUnavailable,
+  isOauthSessionExpired,
   normalizeOauthScopes,
   oauthConsentConsequence,
   oauthConsentFacts,
@@ -32,23 +34,39 @@ import {
   oauthScopeChoices,
   parseOauthConsentPreview,
   parseOauthDecision,
+  OAUTH_CONSENT_AGENT_FALLBACK,
+  OAUTH_CONSENT_AGENT_KEY,
+  OAUTH_CONSENT_ALREADY_DECIDED_DETAIL,
+  OAUTH_CONSENT_ALREADY_DECIDED_HEADLINE,
+  OAUTH_CONSENT_APPROVE_BUSY,
   OAUTH_CONSENT_APPROVE_LABEL,
+  OAUTH_CONSENT_CANDIDATE_DETAIL,
+  OAUTH_CONSENT_CANDIDATE_LEGEND,
+  OAUTH_CONSENT_CHANNELS_HINT,
+  OAUTH_CONSENT_CHANNELS_LEGEND,
   OAUTH_CONSENT_CLIENT_NOTE,
+  OAUTH_CONSENT_DENY_BUSY,
   OAUTH_CONSENT_DENY_LABEL,
   OAUTH_CONSENT_EXPIRED_DETAIL,
   OAUTH_CONSENT_EXPIRED_HEADLINE,
   OAUTH_CONSENT_LEAD,
+  OAUTH_CONSENT_LOADING_SR,
   OAUTH_CONSENT_MISSING_DETAIL,
   OAUTH_CONSENT_MISSING_HEADLINE,
   OAUTH_CONSENT_NO_CANDIDATE_DETAIL,
   OAUTH_CONSENT_NO_CANDIDATE_HEADLINE,
+  OAUTH_CONSENT_OFFLINE_NOTE,
   OAUTH_CONSENT_PICK_AGENT_HINT,
   OAUTH_CONSENT_RETURNING,
+  OAUTH_CONSENT_SCOPES_HINT,
+  OAUTH_CONSENT_SCOPES_LEGEND,
   OAUTH_CONSENT_SECURITY_NOTE,
   OAUTH_CONSENT_SIGNIN_DETAIL,
   OAUTH_CONSENT_TITLE,
   OAUTH_CONSENT_UNAVAILABLE_DETAIL,
   OAUTH_CONSENT_UNAVAILABLE_HEADLINE,
+  OAUTH_CONSENT_WORKSPACE_FALLBACK,
+  OAUTH_CONSENT_WORKSPACE_KEY,
 } from "@momo/core/features/hostedAgents/oauthConsent";
 import { hostedWorkspaceQuery } from "./hostedCredentialScope";
 import { ChoiceList, type ChoiceListItem } from "./ChoiceList";
@@ -93,10 +111,23 @@ export function OAuthConsentRoute({
   // URL 에서 한 번만 읽고, 컴포넌트 수명 동안 붙든다. 어디에도 다시 쓰지 않는다.
   const [requestId] = useState(() => readOauthRequestId(window.location.search));
 
+  // 결정 중 401 로 세션이 끊긴 경우. 이 클라이언트의 hostedRequest 는 refresh
+  // 파이프라인을 타지 않아 세션 스토어의 authExpired 를 세우지 않으므로(그래서 상단
+  // 세션 게이트가 저절로 다시 열리지 않는다), 본문이 401 을 만나면 여기로 올려
+  // 로그인 화면을 다시 세운다(design-review H1). 로그인이 끝나면 이 표시를 내리고
+  // 상위 세션을 갱신해, 같은 request id 로 본문이 다시 마운트된다.
+  const [sessionLost, setSessionLost] = useState(false);
+  // 효과 의존성이라 정체성을 고정한다(불필요한 재실행 방지).
+  const onSessionExpired = useCallback(() => setSessionLost(true), []);
+
   // 로그아웃 사용자는 기존 로그인 화면으로 보낸 뒤 같은 요청으로 돌아온다. URL 은
   // 그대로라(로그인은 화면 이동이 아니다) 로그인 뒤 이 라우트가 같은 request id 로
   // 다시 그려진다.
-  if (requestId !== null && status !== "restoring" && session === null) {
+  if (
+    requestId !== null &&
+    status !== "restoring" &&
+    (session === null || sessionLost)
+  ) {
     return (
       <div className="mx-auto flex min-h-full w-full max-w-lg flex-col">
         <InlineBanner
@@ -104,7 +135,12 @@ export function OAuthConsentRoute({
           message={OAUTH_CONSENT_SIGNIN_DETAIL}
           testId="oauth-consent-signin"
         />
-        <ConnectPage onLoggedIn={onLoggedIn} />
+        <ConnectPage
+          onLoggedIn={(next) => {
+            setSessionLost(false);
+            onLoggedIn(next);
+          }}
+        />
       </div>
     );
   }
@@ -120,7 +156,11 @@ export function OAuthConsentRoute({
       ) : status === "restoring" || session === null ? (
         <ConsentLoading />
       ) : (
-        <ConsentBody session={session} requestId={requestId} />
+        <ConsentBody
+          session={session}
+          requestId={requestId}
+          onSessionExpired={onSessionExpired}
+        />
       )}
     </ConsentFrame>
   );
@@ -144,7 +184,7 @@ function ConsentFrame({ children }: { children: React.ReactNode }) {
 function ConsentLoading() {
   return (
     <div role="status" data-testid="oauth-consent-loading">
-      <span className="sr-only">인가 요청을 불러오는 중입니다.</span>
+      <span className="sr-only">{OAUTH_CONSENT_LOADING_SR}</span>
       <SkeletonRows rows={5} className="p-0" />
     </div>
   );
@@ -178,9 +218,12 @@ function ConsentTerminal({
 function ConsentBody({
   session,
   requestId,
+  onSessionExpired,
 }: {
   session: LoginResponse;
   requestId: string;
+  /** 401 을 만나면 라우트에 알려 로그인 화면을 다시 세운다(design-review H1). */
+  onSessionExpired: () => void;
 }) {
   const workspaceId = session.member.workspaceId;
   const offline = useOffline();
@@ -192,8 +235,25 @@ function ConsentBody({
   const [channelSelection, setChannelSelection] = useState<string[]>([]);
   const [failure, setFailure] = useState<string | null>(null);
   const [returning, setReturning] = useState(false);
+  // 이미 하나의 결정이 기록됨(409). 배너가 아니라 종료 화면이라, 버튼이 함께 서
+  // 자기모순을 그리지 않는다(design-review H1).
+  const [alreadyDecided, setAlreadyDecided] = useState(false);
   const [nowMs, setNowMs] = useState(() => Date.now());
   const decided = useRef(false);
+
+  /** 결정 실패의 갈림: 401 은 로그인으로, 409 는 종료 화면으로, 나머지는 배너로. */
+  function handleDecisionError(action: "approve" | "deny", error: unknown) {
+    if (isOauthSessionExpired(error)) {
+      onSessionExpired();
+      return;
+    }
+    if (isOauthAlreadyDecided(error)) {
+      decided.current = true;
+      setAlreadyDecided(true);
+      return;
+    }
+    setFailure(oauthConsentFailureMessage(action, error));
+  }
 
   const preview = useQuery({
     queryKey: ["oauth-consent", "preview", workspaceId, requestId],
@@ -225,6 +285,15 @@ function ConsentBody({
     const timer = window.setInterval(() => setNowMs(Date.now()), 30_000);
     return () => window.clearInterval(timer);
   }, [data]);
+
+  // preview 가 401 이면(세션 만료) 로그인 화면으로 되돌린다. render 중이 아니라
+  // 효과에서 올려 상태 갱신을 렌더 밖으로 뺀다.
+  const previewError = preview.isError ? preview.error : null;
+  useEffect(() => {
+    if (previewError !== null && isOauthSessionExpired(previewError)) {
+      onSessionExpired();
+    }
+  }, [previewError, onSessionExpired]);
 
   const channelInputs = useMemo<ApprovalChannelInput[]>(() => {
     const named = groups.channels.map((channel) => ({
@@ -265,7 +334,7 @@ function ConsentBody({
       );
     },
     onSuccess: (result) => finishDecision(result.redirectTo),
-    onError: (error) => setFailure(oauthConsentFailureMessage("approve", error)),
+    onError: (error) => handleDecisionError("approve", error),
   });
 
   const deny = useMutation({
@@ -280,12 +349,21 @@ function ConsentBody({
       );
     },
     onSuccess: (result) => finishDecision(result.redirectTo),
-    onError: (error) => setFailure(oauthConsentFailureMessage("deny", error)),
+    onError: (error) => handleDecisionError("deny", error),
   });
 
   const busy = approve.isPending || deny.isPending;
 
   // ---- 상태 갈림 ----
+  if (alreadyDecided) {
+    return (
+      <ConsentTerminal
+        headline={OAUTH_CONSENT_ALREADY_DECIDED_HEADLINE}
+        detail={OAUTH_CONSENT_ALREADY_DECIDED_DETAIL}
+        testId="oauth-consent-already-decided"
+      />
+    );
+  }
   if (returning) {
     return (
       <p
@@ -299,6 +377,9 @@ function ConsentBody({
   }
   if (preview.isPending) return <ConsentLoading />;
   if (preview.isError) {
+    // 401 은 위 효과가 로그인 화면으로 되돌린다. 그 한 프레임 동안 재시도 배너를
+    // 그리지 않는다(로그인 없이 다시 눌러도 같은 401 이다).
+    if (isOauthSessionExpired(preview.error)) return <ConsentLoading />;
     if (isOauthRequestUnavailable(preview.error)) {
       return (
         <ConsentTerminal
@@ -343,7 +424,7 @@ function ConsentBody({
   const selectedCandidate = data.candidates.find((candidate) =>
     uuidEq(candidate.connectionId, connectionId ?? "")
   );
-  const agentLabel = selectedCandidate?.agentDisplayName ?? "전용 에이전트";
+  const agentLabel = selectedCandidate?.agentDisplayName ?? OAUTH_CONSENT_AGENT_FALLBACK;
   const approvedScopes = normalizeOauthScopes(data.requestedScopes, scopeSelection);
   const approvedChannelCount = channelApprovalChoices(channelInputs).filter(
     (choice) => !choice.disabled && channelSelection.includes(choice.id)
@@ -374,7 +455,7 @@ function ConsentBody({
       {offline && (
         <InlineBanner
           tone="neutral"
-          message="연결이 끊겼습니다. 승인과 거부는 다시 연결된 뒤에 할 수 있습니다."
+          message={OAUTH_CONSENT_OFFLINE_NOTE}
           testId="oauth-consent-offline"
         />
       )}
@@ -395,14 +476,14 @@ function ConsentBody({
       <KeyValueRows
         rows={[
           {
-            key: "워크스페이스",
-            value: workspace.data?.name ?? "이 워크스페이스",
+            key: OAUTH_CONSENT_WORKSPACE_KEY,
+            value: workspace.data?.name ?? OAUTH_CONSENT_WORKSPACE_FALLBACK,
             prose: true,
           },
           ...(selectedCandidate
             ? [
                 {
-                  key: "전용 에이전트",
+                  key: OAUTH_CONSENT_AGENT_KEY,
                   value: selectedCandidate.agentDisplayName,
                   prose: true,
                 },
@@ -432,13 +513,13 @@ function ConsentBody({
       {data.candidates.length > 1 && (
         <ChoiceList
           name="oauth-candidate"
-          legend="접속을 허용할 전용 에이전트"
+          legend={OAUTH_CONSENT_CANDIDATE_LEGEND}
           hint={OAUTH_CONSENT_PICK_AGENT_HINT}
           multiple={false}
           items={data.candidates.map((candidate) => ({
             id: candidate.connectionId,
             label: candidate.agentDisplayName,
-            detail: "이 에이전트로 외부 provider의 접속을 허용합니다.",
+            detail: OAUTH_CONSENT_CANDIDATE_DETAIL,
           }))}
           selected={connectionId ? [connectionId] : []}
           onChange={(next) => setConnectionId(next[0] ?? null)}
@@ -449,8 +530,8 @@ function ConsentBody({
 
       <ChoiceList
         name="oauth-scopes"
-        legend="요청된 권한"
-        hint="provider가 요청한 권한입니다. 좁힐 수는 있어도 넓힐 수는 없습니다."
+        legend={OAUTH_CONSENT_SCOPES_LEGEND}
+        hint={OAUTH_CONSENT_SCOPES_HINT}
         multiple
         items={scopeItems}
         selected={approvedScopes}
@@ -462,8 +543,8 @@ function ConsentBody({
       {channelItems.length > 0 && (
         <ChoiceList
           name="oauth-channels"
-          legend="닿을 채널"
-          hint="고른 채널에서만 이 에이전트가 부름을 받습니다."
+          legend={OAUTH_CONSENT_CHANNELS_LEGEND}
+          hint={OAUTH_CONSENT_CHANNELS_HINT}
           multiple
           items={channelItems}
           selected={channelSelection}
@@ -494,7 +575,7 @@ function ConsentBody({
           data-testid="oauth-consent-deny"
         >
           {deny.isPending && <Loader2 aria-hidden="true" className="spinner-busy" />}
-          {OAUTH_CONSENT_DENY_LABEL}
+          {deny.isPending ? OAUTH_CONSENT_DENY_BUSY : OAUTH_CONSENT_DENY_LABEL}
         </Button>
         <Button
           type="button"
@@ -509,7 +590,7 @@ function ConsentBody({
           data-testid="oauth-consent-approve"
         >
           {approve.isPending && <Loader2 aria-hidden="true" className="spinner-busy" />}
-          {approve.isPending ? "승인 저장 중" : OAUTH_CONSENT_APPROVE_LABEL}
+          {approve.isPending ? OAUTH_CONSENT_APPROVE_BUSY : OAUTH_CONSENT_APPROVE_LABEL}
         </Button>
       </div>
     </div>
