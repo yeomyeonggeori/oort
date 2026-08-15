@@ -21,6 +21,17 @@
 //! `정지 시각·재개 시각` (증보 3 D3) are facts an agent is entitled to learn and
 //! a row that never says when it ended cannot tell anyone.
 //!
+//! `session_ended` is written by every route in `routes::work_sessions` that
+//! takes a session away from underneath a keyboard — the end, the idempotent
+//! 재종료 of a session something else already ended, and the resume that retires
+//! a source session — through one shared arm so that "the agent resumed" is one
+//! statement whichever of them caused it. The **bulk** lifecycle paths (the
+//! offline sweep and `t3_terminate`) deliberately do not close windows: they
+//! settle many sessions at once with no channel to announce into, and the lease
+//! is the backstop that closes their windows with `expired` within one interval.
+//! That is a ruled deviation and not an oversight, which is why there is no
+//! session-array closer here for them to call.
+//!
 //! ## What a window is FOR
 //!
 //! One predicate, read by one caller that matters:
@@ -208,6 +219,29 @@ pub async fn active_control_window_in_tx(
 /// Re-opening by the **same** grantee is idempotent — it renews and returns the
 /// standing window. That is the shape a client retry has, and minting a second
 /// row for it would make "정지 시각" ambiguous for the agent.
+///
+/// ## Why the re-open REBINDS the window instead of only renewing it
+///
+/// Every issue mints a **new** capability row (`issue_attach_capability_in_tx`
+/// inserts unconditionally), and the only renewal a live stream has is keyed by
+/// `capability_id` ([`renew_control_window_lease_in_tx`]). So a window left
+/// pointing at the *previous* grant is a window no producer can keep alive: the
+/// client that timed out and re-dialled now holds token B, the row still names
+/// token A, B's re-validation matches nothing, and the person is told
+/// `input_enabled: false` while the lease starves to death 90 seconds into the
+/// login they are still typing. That is the failure ADR-0004 증보 3 D3 exists to
+/// prevent, arriving by the one door a retry always opens.
+///
+/// Moving `capability_id` onto the new grant is therefore the fix and also the
+/// invariant: **the newest grant, and only the newest grant, holds the
+/// keyboard.** Token A's renewal now matches zero rows, which is the correct
+/// consequence and not a casualty — a bearer the client has already replaced
+/// must not be able to hold input open, and `input_enabled: false` for A is the
+/// same sentence the return path relies on.
+///
+/// The window's `id` and `started_at` do **not** move. It is the same window —
+/// the person never let go — so 정지 시각 keeps its value and no new boundary
+/// event is owed.
 pub async fn open_control_window_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -221,8 +255,9 @@ pub async fn open_control_window_in_tx(
         if existing.grantee_member_id != grantee_member_id {
             return Ok(Err(existing));
         }
-        let renewed = renew_control_window_in_tx(conn, workspace_id, existing.id).await?;
-        return Ok(Ok(renewed.unwrap_or(existing)));
+        let rebound =
+            rebind_control_window_in_tx(conn, workspace_id, existing.id, capability_id).await?;
+        return Ok(Ok(rebound.unwrap_or(existing)));
     }
 
     let row = sqlx::query(&format!(
@@ -242,16 +277,26 @@ pub async fn open_control_window_in_tx(
     Ok(Ok(window_from_row(&row)?))
 }
 
-/// Push a standing window's lease out by one full interval, by id.
-async fn renew_control_window_in_tx(
+/// Move a standing window onto the grant that was just minted for it, and push
+/// its lease out by one full interval.
+///
+/// Both halves are one statement because they are one fact: the producer that
+/// will keep this window alive from now on is the one holding the new bearer,
+/// and a rebind without a renewal would hand it a lease already most of the way
+/// spent. `ended_at IS NULL` keeps a closed window closed — a re-open racing a
+/// return must mint a fresh row through the INSERT arm rather than resurrect
+/// this one, or `end_reason` would be a lie about a window that never ended.
+async fn rebind_control_window_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     window_id: Uuid,
+    capability_id: Uuid,
 ) -> Result<Option<ControlWindow>, T3Error> {
     let row = sqlx::query(&format!(
         "UPDATE display_control_window \
-            SET lease_expires_at = clock_timestamp() \
-                + make_interval(secs => $3::double precision) \
+            SET capability_id = $3, \
+                lease_expires_at = clock_timestamp() \
+                + make_interval(secs => $4::double precision) \
           WHERE workspace_id = $1 \
             AND id = $2 \
             AND ended_at IS NULL \
@@ -259,6 +304,7 @@ async fn renew_control_window_in_tx(
     ))
     .bind(workspace_id)
     .bind(window_id)
+    .bind(capability_id)
     .bind(CONTROL_WINDOW_LEASE_SECONDS as f64)
     .fetch_optional(&mut *conn)
     .await?;
@@ -272,6 +318,13 @@ async fn renew_control_window_in_tx(
 /// else cannot hold the new window open. This is the only renewal path a live
 /// stream has, and it is what makes the lease mean "the producer still says this
 /// stream is up".
+///
+/// Because the key is the capability, a **superseded** bearer answers `None`
+/// here too: a re-open by the same person rebinds the window to the grant that
+/// re-open minted ([`open_control_window_in_tx`]), and the bearer the client
+/// replaced stops renewing from that moment. That is the intent — the newest
+/// grant holds the keyboard, and `input_enabled` goes false for the old one on
+/// its next re-validation, exactly as it does after a return.
 pub async fn renew_control_window_lease_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -320,35 +373,6 @@ pub async fn close_control_window_in_tx(
     .fetch_optional(&mut *conn)
     .await?;
     row.as_ref().map(window_from_row).transpose()
-}
-
-/// The session-end arm of the same close, addressed by session across every
-/// workspace-scoped caller that ends sessions in bulk.
-///
-/// Separate from [`close_control_window_in_tx`] only in that it answers a count
-/// rather than a row: the lifecycle paths that call it end many sessions at once
-/// and have no single window to report.
-pub async fn close_control_windows_for_sessions_in_tx(
-    conn: &mut PgConnection,
-    workspace_id: Uuid,
-    session_ids: &[Uuid],
-) -> Result<u64, T3Error> {
-    if session_ids.is_empty() {
-        return Ok(0);
-    }
-    let closed = sqlx::query(
-        "UPDATE display_control_window \
-            SET ended_at = clock_timestamp(), end_reason = 'session_ended' \
-          WHERE workspace_id = $1 \
-            AND work_session_id = ANY($2) \
-            AND ended_at IS NULL",
-    )
-    .bind(workspace_id)
-    .bind(session_ids)
-    .execute(&mut *conn)
-    .await?
-    .rows_affected();
-    Ok(closed)
 }
 
 #[cfg(test)]

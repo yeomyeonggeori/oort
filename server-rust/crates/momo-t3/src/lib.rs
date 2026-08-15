@@ -90,8 +90,7 @@ pub use convergence::{
     CloudLifecycleConvergence, CloudLifecyclePhase,
 };
 pub use display_control::{
-    active_control_window_in_tx, close_control_window_in_tx,
-    close_control_windows_for_sessions_in_tx, expire_lapsed_control_windows_in_tx,
+    active_control_window_in_tx, close_control_window_in_tx, expire_lapsed_control_windows_in_tx,
     open_control_window_in_tx, renew_control_window_lease_in_tx, ControlWindow,
     ControlWindowEndReason, CONTROL_WINDOW_LEASE_SECONDS,
 };

@@ -506,6 +506,8 @@ note "PASS control opens ONLY for the session owner, and only with a window in t
 note "PASS the agent's run path is refused for a session under human control (비관측, mutation-proved)"
 note "PASS the window closes on return / lease lapse / session end — idempotently, all three"
 note "PASS input_enabled is true only for a controller grant whose window still stands"
+note "PASS a re-take moves the window onto the grant it just minted — the retry keeps the keyboard"
+note "PASS a resume and an idempotent 재종료 both close the window the session left behind"
 note "PASS owner_only means 소유자만 본다 — the owner's own observer grant survives it"
 note "runtime-unverified(cubesandbox webrtc producer): no microVM was built or booted;"
 note "  ICE reachability from a browser to a sandbox remains unmeasured —"

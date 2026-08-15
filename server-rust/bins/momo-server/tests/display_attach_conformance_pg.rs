@@ -31,6 +31,8 @@
 //! | `live3_2_the_agent_cannot_reach_a_session_under_human_control` | delete the window check in `work_controls::create_in_tx`, move it below the writes, drop the `NOT EXISTS` clause from `pending_controls_for_host_in_tx`, or start blocking spawns |
 //! | `live3_3_the_window_closes_three_ways_and_every_one_is_idempotent` | make a repeated return 4xx, stop sweeping lapsed leases, relabel a lapse `returned`, leave a window open on an ended session, or stop emitting the close envelope |
 //! | `live3_4_input_enabled_tracks_the_window_and_not_just_the_grade` | answer `input_enabled` from the grade alone, or stop renewing the lease on re-validation |
+//! | `live3_5_a_retaken_grant_carries_the_keyboard_and_the_replaced_one_does_not` | leave the window bound to the grant it was opened by when the same owner re-takes control, or mint a second window for the retry |
+//! | `live3_6_a_session_that_leaves_underneath_a_window_closes_it` | stop closing the window on the source session of a resume, or let an idempotent 재종료 return early past a window still standing on an ended session |
 //!
 //! ### The mutation proof (ADR-0004 증보 3's own acceptance criterion)
 //!
@@ -1640,6 +1642,147 @@ async fn open_window(su: &PgPool, session: Uuid) -> Option<(Uuid, Uuid)> {
     .expect("read the open control window")
 }
 
+/// The open window as a full row: `(id, 정지 시각, lease)`.
+///
+/// Separate from [`open_window`] because the assertions about a **re-take** are
+/// about identity and time — the same window, still started when it started,
+/// with its lease pushed back out — and none of those are visible through a
+/// grantee id.
+async fn open_window_row(su: &PgPool, session: Uuid) -> (Uuid, i64, i64) {
+    sqlx::query_as(
+        "SELECT id, \
+                floor(extract(epoch from started_at) * 1000)::bigint, \
+                floor(extract(epoch from lease_expires_at) * 1000)::bigint \
+           FROM display_control_window \
+          WHERE work_session_id = $1 AND ended_at IS NULL",
+    )
+    .bind(session)
+    .fetch_one(su)
+    .await
+    .expect("the session has exactly one open control window")
+}
+
+/// How many rows this session's control history has, open or closed.
+async fn window_count(su: &PgPool, session: Uuid) -> i64 {
+    sqlx::query_scalar("SELECT count(*) FROM display_control_window WHERE work_session_id = $1")
+        .bind(session)
+        .fetch_one(su)
+        .await
+        .expect("count the windows")
+}
+
+/// The `end_reason` written on this session's single window row.
+async fn window_end_reason(su: &PgPool, session: Uuid) -> Option<String> {
+    sqlx::query_scalar("SELECT end_reason FROM display_control_window WHERE work_session_id = $1")
+        .bind(session)
+        .fetch_one(su)
+        .await
+        .expect("read the end reason")
+}
+
+/// PostgreSQL's own clock, in the milliseconds every assertion below compares
+/// against. Read from the database rather than the test process so a renewal
+/// computed by `clock_timestamp()` is judged on the clock that computed it.
+async fn db_now_ms(su: &PgPool) -> i64 {
+    sqlx::query_scalar("SELECT floor(extract(epoch from clock_timestamp()) * 1000)::bigint")
+        .fetch_one(su)
+        .await
+        .expect("read the database clock")
+}
+
+/// Bring a standing lease to within seconds of lapsing **without** lapsing it.
+///
+/// A renewal is otherwise unobservable in a suite that runs in milliseconds:
+/// every write sets `clock_timestamp() + 90s`, so "renewed" and "not renewed"
+/// differ by a round trip. Shrinking the lease first makes the difference a full
+/// interval, which is the only size an assertion can see.
+async fn shorten_lease(su: &PgPool, session: Uuid) {
+    let shortened = sqlx::query(
+        "UPDATE display_control_window \
+            SET lease_expires_at = clock_timestamp() + interval '5 seconds' \
+          WHERE work_session_id = $1 AND ended_at IS NULL",
+    )
+    .bind(session)
+    .execute(su)
+    .await
+    .expect("shorten the lease")
+    .rows_affected();
+    assert_eq!(shortened, 1, "there was an open window to shorten");
+}
+
+/// Re-validate the way a producer does every 30 seconds, and answer what the
+/// server told it about the keyboard.
+async fn revalidate(
+    http: &reqwest::Client,
+    base: &str,
+    seed: &[u8; 32],
+    workspace: Uuid,
+    host_id: &str,
+    token: &str,
+) -> (reqwest::StatusCode, Value) {
+    let response = validate_display(http, base, seed, workspace, host_id, token, true).await;
+    let status = response.status();
+    let body: Value = response
+        .json()
+        .await
+        .unwrap_or_else(|_| json!({ "error": "unparsed" }));
+    (status, body)
+}
+
+/// The `closed` boundary envelopes this session's window produced.
+async fn closed_control_envelopes(su: &PgPool, workspace: Uuid, session: Uuid) -> Vec<Value> {
+    sqlx::query_scalar(
+        "SELECT payload->'data'->'payload' FROM outbox \
+          WHERE workspace_id = $1 \
+            AND payload->'data'->>'type' = 'work.session.control' \
+            AND payload->'data'->'payload'->>'state' = 'closed' \
+            AND payload->'data'->'payload'->>'session_id' = $2::text",
+    )
+    .bind(workspace)
+    .bind(session.to_string())
+    .fetch_all(su)
+    .await
+    .expect("read this session's close envelopes")
+}
+
+/// The offline sweep's verdict, applied as a fixture: no HTTP path writes
+/// `orphaned` (ADR-0125 D11 — it is the sweep's word, which is why
+/// `daemon_ack_resume_conformance_pg` seeds it the same way).
+async fn orphan_session(su: &PgPool, session: Uuid) {
+    let orphaned = sqlx::query(
+        "UPDATE work_session SET status = 'orphaned', host_lost_at = clock_timestamp() \
+          WHERE id = $1",
+    )
+    .bind(session)
+    .execute(su)
+    .await
+    .expect("orphan the session")
+    .rows_affected();
+    assert_eq!(orphaned, 1);
+}
+
+/// A session that reached `ended` by a path that does **not** close control
+/// windows — the offline sweep and `t3_terminate`, which settle the billing
+/// ledger and leave the window to the lease backstop.
+///
+/// Written as SQL rather than driven through one of those paths because what is
+/// under test is the *reconciliation*: an ended session with an open window is a
+/// state this system can reach, and the idempotent 재종료 is where the ledger
+/// gets to be honest about it. Which door produced the state is irrelevant to
+/// the route that has to answer for it.
+async fn force_ended(su: &PgPool, session: Uuid) {
+    let ended = sqlx::query(
+        "UPDATE work_session SET status = 'ended', ended_at = clock_timestamp() \
+          WHERE id = $1",
+    )
+    .bind(session)
+    .execute(su)
+    .await
+    .expect("end the session behind the route's back")
+    .rows_affected();
+    assert_eq!(ended, 1);
+}
+
 /// Age a window until its lease has lapsed — what a producer that stopped
 /// re-validating looks like, without waiting 90 seconds for it.
 ///
@@ -2321,4 +2464,290 @@ async fn live3_4_input_enabled_tracks_the_window_and_not_just_the_grade() {
         "but the keyboard is gone within one re-validation period, because the \
          window it depended on has closed"
     );
+}
+
+// ---------------------------------------------------------------------------
+// live3-5 — a re-take moves the keyboard onto the grant that was just minted
+//
+// The failure this test exists for is a **retry**, which is the most ordinary
+// thing a client does. The response to the first `display-attach` is lost, or
+// the socket drops and the browser re-dials; the person presses 제어하기 again
+// and gets token B. Every issue mints a new capability row, and the only renewal
+// a live stream has is keyed by capability id — so a window still pointing at
+// token A is a window that B cannot keep alive. The person is told
+// `input_enabled: false`, nothing renews the lease, and ninety seconds into a
+// login they are still typing the window lapses and the agent resumes reading
+// the screen. That is exactly what ADR-0004 증보 3 D3 forbids, arriving through
+// the one door a retry always opens.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn live3_5_a_retaken_grant_carries_the_keyboard_and_the_replaced_one_does_not() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let fixture = seed(&su, &app_pool).await;
+    let base = start_server(app_pool).await;
+    let http = reqwest::Client::new();
+    let workspace = fixture.workspace;
+
+    let owner_token = login(&http, &base, workspace, &fixture.owner_email).await;
+    let (host_id, host_seed) = register_host(&http, &base, &owner_token, workspace, true).await;
+    let session = create_session(
+        &http,
+        &base,
+        &owner_token,
+        workspace,
+        fixture.channel,
+        &host_id,
+    )
+    .await;
+    publish_display(&http, &base, &host_seed, workspace, &host_id, session).await;
+
+    // ---- the first dial, and a producer live on it --------------------------
+    let response = take_control(&http, &base, &owner_token, workspace, session).await;
+    assert_eq!(response.status(), 200, "the owner takes control");
+    let token_a = response.json::<Value>().await.expect("first grant")["capability_token"]
+        .as_str()
+        .expect("token")
+        .to_string();
+    let (window_id, started_at_ms, _) = open_window_row(&su, session).await;
+
+    let (status, body) = revalidate(&http, &base, &host_seed, workspace, &host_id, &token_a).await;
+    assert_eq!(status, 200);
+    assert_eq!(
+        body["input_enabled"],
+        json!(true),
+        "the first bearer holds the keyboard, as live3-4 already proves"
+    );
+
+    // ---- the retry ----------------------------------------------------------
+    // The lease is shortened first so that "the re-take renewed it" is a claim
+    // an assertion can see rather than a claim about microseconds.
+    shorten_lease(&su, session).await;
+    let response = take_control(&http, &base, &owner_token, workspace, session).await;
+    assert_eq!(
+        response.status(),
+        200,
+        "re-taking control you already hold is a retry, not a conflict"
+    );
+    let token_b = response.json::<Value>().await.expect("second grant")["capability_token"]
+        .as_str()
+        .expect("token")
+        .to_string();
+    assert_ne!(token_a, token_b, "every issue mints a fresh bearer");
+
+    // Same window. The person never let go, so 정지 시각 keeps its value and the
+    // agent is owed no second boundary event.
+    let (retaken_id, retaken_started_at_ms, lease_ms) = open_window_row(&su, session).await;
+    assert_eq!(
+        retaken_id, window_id,
+        "a retry must not mint a second window — 정지 시각 would become ambiguous"
+    );
+    assert_eq!(
+        retaken_started_at_ms, started_at_ms,
+        "the window did not restart; it is the same intervention"
+    );
+    assert_eq!(
+        window_count(&su, session).await,
+        1,
+        "and there is exactly one row to be ambiguous about"
+    );
+    assert!(
+        lease_ms > db_now_ms(&su).await + 60_000,
+        "the re-take renewed the lease it rebound"
+    );
+
+    // ---- the new bearer is the one that works -------------------------------
+    // The assertion the whole test is for. Before the rebind this answered
+    // `false`: the window still named token A, so B's renewal matched no row.
+    let (status, body) = revalidate(&http, &base, &host_seed, workspace, &host_id, &token_b).await;
+    assert_eq!(status, 200);
+    assert_eq!(
+        body["input_enabled"],
+        json!(true),
+        "the grant the client is actually holding must carry the keyboard, or a \
+         dropped response silently takes control away from a person mid-login"
+    );
+
+    // And it can keep the window alive, which is the half a boolean cannot show.
+    // A bearer told `true` that renews nothing still starves the lease to death
+    // inside 90 seconds and resumes the agent mid-password.
+    shorten_lease(&su, session).await;
+    let (status, body) = revalidate(&http, &base, &host_seed, workspace, &host_id, &token_b).await;
+    assert_eq!(status, 200);
+    assert_eq!(body["input_enabled"], json!(true));
+    let (_, _, lease_ms) = open_window_row(&su, session).await;
+    assert!(
+        lease_ms > db_now_ms(&su).await + 60_000,
+        "the live producer's re-validation is what holds the window open, and it \
+         can only do that against the grant the window names"
+    );
+
+    // ---- the replaced bearer is not -----------------------------------------
+    // The correct consequence of a rebind, stated so it reads as the decision it
+    // is: the newest grant, and only the newest grant, holds the keyboard. A
+    // bearer the client has already replaced hearing `true` would mean two live
+    // producers could both open input on one screen.
+    let (status, body) = revalidate(&http, &base, &host_seed, workspace, &host_id, &token_a).await;
+    assert_eq!(
+        status, 200,
+        "the old grant is still authorised — the owner may still watch"
+    );
+    assert_eq!(
+        body["input_enabled"],
+        json!(false),
+        "but a superseded bearer no longer holds the keyboard, the same sentence \
+         a return produces"
+    );
+    assert!(
+        open_window(&su, session).await.is_some(),
+        "and being told no did not close the window the new bearer holds"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// live3-6 — a session that leaves underneath a window closes it
+//
+// live3-3 proves the ordinary `end`. Two other routes take a session away from
+// underneath a person's keyboard and neither of them ran that close:
+//
+//   * a **resume**, which retires the source session. This is not an exotic
+//     shape — a session is orphaned because its host went away, and the person
+//     watching that happen is precisely the person most likely to have been
+//     holding its screen.
+//   * an idempotent **재종료** of a session something else already ended. The
+//     offline sweep and `t3_terminate` settle the ledger and leave the window to
+//     the lease backstop, so `PATCH status=ended` on an already-ended session is
+//     where an ended session with an open window gets reconciled.
+//
+// In both cases the row left behind claims a person holds a keyboard on a screen
+// that no longer exists, and the agent's run path is refused on a session nobody
+// can control until the lease happens to lapse.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn live3_6_a_session_that_leaves_underneath_a_window_closes_it() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let fixture = seed(&su, &app_pool).await;
+    let base = start_server(app_pool).await;
+    let http = reqwest::Client::new();
+    let workspace = fixture.workspace;
+
+    let owner_token = login(&http, &base, workspace, &fixture.owner_email).await;
+    let (host_id, host_seed) = register_host(&http, &base, &owner_token, workspace, true).await;
+    let (target_host_id, _) = register_host(&http, &base, &owner_token, workspace, true).await;
+
+    let controlled_session = |label: &'static str| {
+        let http = http.clone();
+        let base = base.clone();
+        let owner_token = owner_token.clone();
+        let host_id = host_id.clone();
+        let channel = fixture.channel;
+        async move {
+            let session =
+                create_session(&http, &base, &owner_token, workspace, channel, &host_id).await;
+            publish_display(&http, &base, &host_seed, workspace, &host_id, session).await;
+            let response = take_control(&http, &base, &owner_token, workspace, session).await;
+            assert_eq!(response.status(), 200, "{label}: control opens");
+            session
+        }
+    };
+
+    // ---- 1. the source session of a takeover --------------------------------
+    let source = controlled_session("resume").await;
+    assert!(open_window(&su, source).await.is_some());
+    orphan_session(&su, source).await;
+
+    let response = http
+        .post(format!(
+            "{base}/v1/workspaces/{workspace}/work-sessions/{source}/resume"
+        ))
+        .bearer_auth(&owner_token)
+        .json(&json!({ "targetHostId": target_host_id }))
+        .send()
+        .await
+        .expect("resume the orphaned session");
+    assert_eq!(
+        response.status(),
+        201,
+        "the owner moves their work to another host"
+    );
+
+    assert!(
+        open_window(&su, source).await.is_none(),
+        "the source session is over, so the window on it is over — leaving it \
+         open would block the agent on a session that no longer exists"
+    );
+    assert_eq!(
+        window_end_reason(&su, source).await.as_deref(),
+        Some("session_ended"),
+        "and it closed for the reason that is true: the session left"
+    );
+    let envelopes = closed_control_envelopes(&su, workspace, source).await;
+    assert_eq!(
+        envelopes.len(),
+        1,
+        "one close, one boundary event — the 재개 half of 증보 3 D3 does not get \
+         skipped because the close was caused by a takeover"
+    );
+    assert_eq!(envelopes[0]["end_reason"], json!("session_ended"));
+    assert!(
+        envelopes[0]["ended_at"].is_i64(),
+        "재개 시각 is the fact the event exists to carry"
+    );
+
+    // The window belongs to the source and is not carried over: control is a
+    // person's act on one live screen (증보 3 D1), and the successor is a
+    // different host with a different screen and no binding published yet.
+    let successor: Uuid =
+        sqlx::query_scalar("SELECT id FROM work_session WHERE resumed_from_session_id = $1")
+            .bind(source)
+            .fetch_one(&su)
+            .await
+            .expect("the takeover created a successor session");
+    assert!(
+        open_window(&su, successor).await.is_none(),
+        "the successor starts with nobody at its keyboard"
+    );
+
+    // ---- 2. the idempotent re-end of a session something else ended ---------
+    let stale = controlled_session("idempotent re-end").await;
+    force_ended(&su, stale).await;
+    assert!(
+        open_window(&su, stale).await.is_some(),
+        "the fixture reproduces the state the sweep leaves: ended, still claimed"
+    );
+
+    let response = http
+        .patch(format!(
+            "{base}/v1/workspaces/{workspace}/work-sessions/{stale}"
+        ))
+        .bearer_auth(&owner_token)
+        .json(&json!({ "status": "ended" }))
+        .send()
+        .await
+        .expect("re-end the already-ended session");
+    assert_eq!(
+        response.status(),
+        200,
+        "ending an ended session is the state the caller asked for"
+    );
+
+    assert!(
+        open_window(&su, stale).await.is_none(),
+        "the early return must not carry a standing window past it — an honest \
+         ledger does not say a person holds a keyboard on a finished session"
+    );
+    assert_eq!(
+        window_end_reason(&su, stale).await.as_deref(),
+        Some("session_ended")
+    );
+    let envelopes = closed_control_envelopes(&su, workspace, stale).await;
+    assert_eq!(envelopes.len(), 1, "and it announced itself, once");
+    assert_eq!(envelopes[0]["end_reason"], json!("session_ended"));
 }

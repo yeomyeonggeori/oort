@@ -517,7 +517,23 @@ async fn end_in_tx(
         )));
     }
     // Already ended: idempotent 200 with the row as it stands (Swift :530-541).
+    //
+    // The window still gets closed on the way out, and that is not belt-and-
+    // braces. A session can reach `ended` by paths that do not run the block
+    // below — the offline sweep and `t3_terminate` settle the ledger and leave
+    // the control window to the lease backstop — and a window left open on a
+    // finished session is a row that says a person holds a keyboard on a screen
+    // that no longer exists. Idempotent 재종료 is where the ledger gets to be
+    // honest about that, at the cost of one UPDATE that almost always matches
+    // nothing.
     if existing.status == "ended" {
+        close_control_window_for_ended_session_in_tx(
+            conn,
+            workspace_id,
+            existing.channel_id,
+            session_id,
+        )
+        .await?;
         return Ok(Ok(existing));
     }
 
@@ -530,34 +546,9 @@ async fn end_in_tx(
     };
 
     // The third close of ADR-0004 증보 3's control window (076): the session
-    // ended underneath somebody's keyboard. In the same transaction as the end
-    // itself, because a window left open on an ended session would keep the
-    // `work_controls` gate refusing forever on a session nobody can control —
-    // an agent blocked by a person who is no longer there.
-    //
-    // The boundary event still goes out. 「재개」 is not literally what happens
-    // when the session is over, but the fact an agent and a surface both need is
-    // that the window closed and why, and `end_reason: session_ended` is that.
-    if let Some(window) = close_control_window_in_tx(
-        conn,
-        workspace_id,
-        session_id,
-        ControlWindowEndReason::SessionEnded,
-    )
-    .await?
-    {
-        // No actor: ending the session is what closed it, and naming the person
-        // as having *returned* control would record an act they did not perform.
-        crate::routes::display_attach::emit_control_closed_in_tx(
-            conn,
-            workspace_id,
-            ended.channel_id,
-            None,
-            None,
-            &window,
-        )
+    // ended underneath somebody's keyboard.
+    close_control_window_for_ended_session_in_tx(conn, workspace_id, ended.channel_id, session_id)
         .await?;
-    }
 
     let props = card_props(
         ended.id,
@@ -594,6 +585,53 @@ async fn end_in_tx(
     .map_err(|error| T3Error::from(momo_db::DbError::from(error)))?;
 
     Ok(Ok(ended))
+}
+
+/// Close the control window a session leaves behind, and announce it.
+///
+/// The `session_ended` arm of ADR-0004 증보 3's three closes, shared by every
+/// lifecycle path in this module that takes a session away from underneath a
+/// person's keyboard: the end, the idempotent 재종료 of a session something else
+/// already ended, and the resume that retires a source session.
+///
+/// It runs in the SAME transaction as the write that ended the session, because
+/// a window left open on a finished session keeps the `work_controls` gate
+/// refusing forever on a session nobody can control — an agent blocked by a
+/// person who is no longer there.
+///
+/// The boundary event still goes out. 「재개」 is not literally what happens when
+/// the session is over, but the fact an agent and a surface both need is that
+/// the window closed and why, and `end_reason: session_ended` is that. No actor
+/// is named: the session's own lifecycle closed it, and recording the person as
+/// having *returned* control would be an act they did not perform.
+///
+/// Idempotent, like the underlying close: on the overwhelmingly common path
+/// there was no window and this is one UPDATE that matches nothing.
+async fn close_control_window_for_ended_session_in_tx(
+    conn: &mut momo_db::PgConnection,
+    workspace_id: Uuid,
+    channel_id: Uuid,
+    session_id: Uuid,
+) -> Result<(), T3Error> {
+    let Some(window) = close_control_window_in_tx(
+        conn,
+        workspace_id,
+        session_id,
+        ControlWindowEndReason::SessionEnded,
+    )
+    .await?
+    else {
+        return Ok(());
+    };
+    crate::routes::display_attach::emit_control_closed_in_tx(
+        conn,
+        workspace_id,
+        channel_id,
+        None,
+        None,
+        &window,
+    )
+    .await
 }
 
 // ---------------------------------------------------------------------------
@@ -835,6 +873,28 @@ async fn resume_in_tx(
             "work session state changed; retry",
         )));
     };
+
+    // The source session just became `ended`, so whatever window stood on it
+    // closes here for the same reason it closes on the ordinary end path. This
+    // is not a hypothetical shape: a session is orphaned because its host went
+    // away, and the person watching that happen is precisely the person who was
+    // most likely holding its screen. Without this the takeover would leave an
+    // open window on a dead session forever — no producer can renew it (the host
+    // is gone) so it would eventually lapse, but until it did the agent's run
+    // path would be refused on a session that no longer exists, and the ledger
+    // would claim someone held a keyboard the whole time.
+    //
+    // The window belongs to the SOURCE. It is deliberately not carried over to
+    // the successor: control is a person's act on one live screen (증보 3 D1),
+    // the successor has a different host, a different screen and no display
+    // binding yet, and the person retakes control there by asking for it.
+    close_control_window_for_ended_session_in_tx(
+        conn,
+        workspace_id,
+        source.channel_id,
+        source_session_id,
+    )
+    .await?;
 
     // The instruction that makes 인수 mean something (#1138's fourth
     // measurement, Swift :1940-1959). Without this row the takeover produced a
