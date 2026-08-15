@@ -1056,11 +1056,10 @@ pub struct TerminalAttachValidationResponse {
 
 /// `POST …/work-sessions/{session}/display-attach` request.
 ///
-/// `mode` is decoded even though `observer` is the only value this route can
-/// serve, and that is the point (ADR-0134 D1): a client asking for `controller`
-/// is asking for **input**, and it must be told 403 by name rather than handed a
-/// view-only grant it believes is a control one. Absent/`{}` means `observer`,
-/// because there is nothing else it could mean here.
+/// `mode` selects the grade. Absent/`{}` still means `observer` — LIVE-3 opened
+/// `controller` but did not make it the default, because the default is what a
+/// client gets when it did not think about the question, and the answer to "did
+/// you mean to stop the agent and take the keyboard" is never "probably".
 #[derive(Debug, Default, Deserialize)]
 pub struct IssueDisplayAttachRequest {
     #[serde(default)]
@@ -1083,15 +1082,41 @@ pub struct DisplayAttachCapabilityResponse {
     /// The opaque 60-second bearer. Returned once; only its SHA-256 is stored.
     pub capability_token: String,
     pub display_id: String,
-    /// Always `"observer"` in this build, and serialised anyway.
+    /// `"observer"`, or `"controller"` since LIVE-3.
     ///
     /// A view-only stream that *looks* identical to a controllable one is how a
     /// person ends up typing into a window that will never deliver a keystroke.
-    /// The producer enforces this by not opening an input datachannel at all
-    /// (ADR-0165 D4); this field is what lets the UI say so before the socket is
-    /// even dialled, and it is the field that will change — not appear — when
-    /// ADR-0004 증보 3 opens control.
+    /// The producer enforces the view-only case by not opening an input
+    /// datachannel at all (ADR-0165 D4); this field is what lets the UI say so
+    /// before the socket is even dialled. ADR-0004 증보 3 was always going to
+    /// change this field rather than add one beside it.
     pub mode: &'static str,
+    /// When this grant opened a control window, the moment it opened (epoch ms).
+    /// Absent on an observer grant.
+    ///
+    /// The client's copy of the boundary event: the same 정지 시각 that the
+    /// `work.session.control` envelope carries, handed straight back to the
+    /// person who caused it so the surface can say when control began without
+    /// waiting for the relay to come round.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub control_started_at: Option<i64>,
+}
+
+/// `DELETE …/work-sessions/{session}/display-control` response — the return.
+///
+/// Answers a body rather than 204 because the two closes a caller can cause are
+/// worth telling apart: `closed: true` means this call ended a standing window,
+/// `false` means there was nothing open. A retry of a return is the second,
+/// which is success — the route is idempotent — but a UI that has just been
+/// told the agent is resuming should not say so twice.
+#[derive(Debug, Serialize)]
+pub struct DisplayControlReturnResponse {
+    pub closed: bool,
+    /// Epoch ms, present only when this call closed a window.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub control_started_at: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub control_ended_at: Option<i64>,
 }
 
 /// `POST …/work-hosts/{host}/display-attach/validate` request.
@@ -1114,15 +1139,21 @@ pub struct DisplayAttachValidationResponse {
     pub display_id: String,
     /// ISO-8601 with fractional seconds, rendered by PostgreSQL.
     pub expires_at: String,
-    /// Always `"observer"` — 075's CHECK makes anything else unrepresentable.
+    /// The grade of the bearer the producer presented.
     pub mode: &'static str,
-    /// `false` in this build, always.
+    /// Whether this producer may open an input datachannel **right now**.
     ///
-    /// The producer reads this and **does not create an input datachannel**
-    /// (ADR-0165 D4). It is a negative instruction on purpose: the view-only
-    /// guarantee lives in a channel that was never opened, not in a client flag
-    /// anyone could flip, and this field is how the server states that intent to
+    /// A negative instruction on purpose: the view-only guarantee lives in a
+    /// channel that was never opened, not in a client flag anyone could flip
+    /// (ADR-0165 D4), and this field is how the server states that intent to
     /// the only process that can honour it.
+    ///
+    /// It is the conjunction of three things and not just the grade — the
+    /// bearer must be `controller`, and the control window it opened must still
+    /// be standing. A controller grant whose window was returned, lapsed or
+    /// ended with the session answers `false` here at the next re-validation,
+    /// which is how a returned window actually takes the keyboard away rather
+    /// than merely recording that somebody asked for it back.
     pub input_enabled: bool,
 }
 

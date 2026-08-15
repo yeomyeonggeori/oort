@@ -16,9 +16,9 @@
     "The unmeasured items are listed under `unverified` — they are part of the",
     "spec, not a footnote to it."
   ],
-  "specVersion": 1,
-  "adr": "ADR-0165",
-  "goal": "LIVE-1",
+  "specVersion": 2,
+  "adr": ["ADR-0165", "ADR-0004 증보 3"],
+  "goal": "LIVE-3",
 
   "producer": {
     "implementation": "gstreamer-webrtcbin",
@@ -52,7 +52,34 @@
     },
     "direction": "sendonly",
     "inputDatachannel": false,
-    "$inputComment": "ADR-0165 D4. The producer MUST NOT add an application m-line to its offer. This is asserted by scripts/display_signaling_probe.py, which has a red proof (--prove-red) showing it catches a producer that does.",
+    "$inputComment": "ADR-0165 D4, and still false: the producer MUST NOT add an application m-line to its OFFER. View-only remains the default shape of the connection, asserted by scripts/display_signaling_probe.py, which has a red proof (--prove-red) showing it catches a producer that does.",
+    "inputDatachannelOnDemand": {
+      "$comment": [
+        "LIVE-3 / ADR-0004 증보 3. Control is now a grade the server can grant,",
+        "so the producer needs a way to open input — and exactly one way.",
+        "",
+        "The trigger is the SERVER's answer, never the viewer's word. A producer",
+        "may negotiate an input datachannel if and only if its own",
+        "display-attach/validate call returned `input_enabled: true`, which the",
+        "server answers only when the bearer is a `controller` grant AND the",
+        "control window that grant opened is still standing (076). The viewer",
+        "asking is not authorisation and never becomes it — that is the same",
+        "principle as ADR-0165 D4's refusal to trust a client flag, applied one",
+        "grade over.",
+        "",
+        "Because `input_enabled` is re-answered on every 30-second",
+        "re-validation, it is also the OFF switch: when the person hands control",
+        "back, the window closes and the next re-validation says false. The",
+        "producer MUST then close the datachannel rather than keep serving a",
+        "keyboard whose authorisation has lapsed. A returned window that leaves",
+        "a working keyboard is the failure this field exists to prevent.",
+        "",
+        "Still runtime-unverified: no microVM was built or booted."
+      ],
+      "trigger": "validate.input_enabled == true",
+      "revokeOn": "validate.input_enabled == false",
+      "viewerRequestIsNotAuthorisation": true
+    },
     "recording": false,
     "$recordingComment": "ADR-0165 D5. No frame is written to disk in the sandbox, and none reaches momo at all."
   },
@@ -70,7 +97,7 @@
     "messages": {
       "producerToViewer": ["ready", "offer", "ice", "error"],
       "viewerToProducer": ["answer", "ice", "open_input", "bye"],
-      "$comment": "`open_input` is in the viewer vocabulary and is always answered `{\"type\":\"error\",\"reason\":\"view_only\"}` without renegotiation. Accepting the word and refusing the act is deliberate: a client that cannot even name the request cannot be told why it will not happen."
+      "$comment": "`open_input` is in the viewer vocabulary and is refused with `{\"type\":\"error\",\"reason\":\"view_only\"}` unless this producer's own validate answered `input_enabled: true` (see producer.inputDatachannelOnDemand). Accepting the word and deciding the act server-side is deliberate: a client that cannot even name the request cannot be told why it will not happen, and a client that names it still does not get to authorise it."
     }
   },
 
@@ -117,6 +144,7 @@
     "$comment": "Named honestly rather than omitted (E5's lesson). Each entry is a claim this goal did NOT measure and must not be reported as working.",
     "producerSelection": "No CubeSandbox template was built or booted. `gstreamer-webrtcbin` is chosen on the ADR-0165 D4 structural argument above; whether it encodes acceptably inside a microVM with no GPU, and what the resulting latency is, is unmeasured.",
     "iceReachability": "Whether a browser can reach a producer inside a CubeSandbox microVM at all is UNMEASURED and structurally at risk. Two facts point at the risk: (1) nothing in the CubeSandbox adapter (server-rust/crates/momo-t3/src/provider/cubesandbox.rs) expresses inbound port exposure — `create_body` sends templateID, timeout, lifecycle, metadata and envVars, and no port map; (2) ADR-0157 증보 1 measured Cubelet's built-in eBPF `deny_out` blocking the sandbox's egress to every private range, which is a statement about the network posture these VMs ship with. If direct/host-reflexive ICE turns out not to work, ADR-0165 D3 says the answer is an oort-operated TURN and that is an ADR 증보, not a workaround this template may take.",
-    "templateBuild": "The rootfs build (`--with-cube-ca=false` per ADR-0157 증보 1, the X server, the producer unit) is declared by this spec and the accompanying unit file, and has never been executed."
+    "templateBuild": "The rootfs build (`--with-cube-ca=false` per ADR-0157 증보 1, the X server, the producer unit) is declared by this spec and the accompanying unit file, and has never been executed.",
+    "inputDelivery": "LIVE-3 opened control on the SERVER: issuance, the control window, the non-observation gate and `input_enabled` are all exercised against a real PostgreSQL by display_attach_conformance_pg.rs. What is NOT measured is any of it reaching a screen — no producer has ever read `input_enabled: true`, opened a datachannel, delivered a keystroke to an X server, or closed that channel when the window was returned. The revoke half is the one to be most careful about reporting: it is a declared producer obligation here and a server statement in `validate`, and nothing in this repository can prove a producer honours it."
   }
 }

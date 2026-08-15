@@ -372,18 +372,18 @@ mod tests {
     /// capability unrepresentable, which is how the ADR-0004 증보 3 boundary is
     /// held by the schema rather than by a route somebody could rewrite.
     #[test]
-    fn discovers_contiguous_migrations_001_to_075() {
+    fn discovers_contiguous_migrations_001_to_076() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
         assert_eq!(
             migrations.len(),
-            75,
-            "expected 75 migrations under {}",
+            76,
+            "expected 76 migrations under {}",
             dir.display()
         );
         assert_eq!(migrations.first().unwrap().version, 1);
-        assert_eq!(migrations.last().unwrap().version, 75);
+        assert_eq!(migrations.last().unwrap().version, 76);
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
 
         for (i, migration) in migrations.iter().enumerate() {

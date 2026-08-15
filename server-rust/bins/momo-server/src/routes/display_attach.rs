@@ -27,14 +27,39 @@
 //! let a client dial the wrong stream on a typo. Separate paths also put the
 //! kind in the URL, which is where an operator reading an access log can see it.
 //!
-//! ## The boundary this file is currently holding
+//! ## The boundary this file used to hold, and what replaced it
 //!
-//! Display capabilities are **observer-only**, and a `controller` request is a
-//! 403 with its reason named. That is not an implementation gap: input is
-//! ADR-0004 증보 3's decision and it has not been made. Three layers say so —
-//! this route, [`momo_t3::AttachKind::permits_mode`], and 075's
-//! `terminal_attach_display_observer_ck`. The day control opens, all three move
-//! together and none of them can be missed.
+//! Until LIVE-3 display capabilities were **observer-only** and a `controller`
+//! request was a 403, held by three layers at once: this route,
+//! [`momo_t3::AttachKind::permits_mode`], and 075's
+//! `terminal_attach_display_observer_ck`. ADR-0004 증보 3 was Accepted on
+//! 2026-08-15 and all three moved together in one commit, as 075's closing
+//! comment promised they would.
+//!
+//! What took their place is not an absence. A lock that simply came off would
+//! leave a build that can hand someone a keyboard into a live VM and has no
+//! opinion about what the agent driving that VM is doing meanwhile — and that
+//! opinion is the entire decision. So control here is three things at once:
+//!
+//! 1. **owner only.** The grant reuses the PTY controller predicate
+//!    (`c.owner_member_id = ws.member_id`) rather than inventing a permission
+//!    model: 증보 3 D1 says control is a person's act on their own session.
+//! 2. **a window, in the ledger.** Every grant opens a
+//!    `display_control_window` row (076) and every close writes a reason. That
+//!    row is the SoT for the boundary events an agent is allowed to learn —
+//!    정지 시각, 재개 시각 — and holds nothing else, because 증보 3 D2 puts the
+//!    person's password out of reach of transcript, audit and Memory Plane
+//!    alike.
+//! 3. **the agent stopped.** While the window stands,
+//!    [`crate::routes::work_controls::create`] refuses that session and the
+//!    daemon poll withholds anything already dispatched. That pair is 증보 3
+//!    D3's 기술적 차단, and it is enforcement rather than declaration: an agent
+//!    that cannot ask for the screen cannot capture it.
+//!
+//! The VM does not move (증보 3 D6): `work_session.status` is untouched here,
+//! ADR-0140's state machine is untouched, and running-time billing continues.
+//! What stops is the agent's reach into the session, which is the only thing
+//! that was ever supposed to stop.
 
 use axum::body::Bytes;
 use axum::extract::{Path, State};
@@ -42,25 +67,28 @@ use axum::http::{HeaderMap, Method, StatusCode, Uri};
 use axum::{Extension, Json};
 use momo_auth::{active_workspace_role, Principal, PrincipalKind};
 use momo_db::audit::{write_audit, AuditEntry};
+use momo_messaging::cent_channel;
 use momo_outbox::{emit_outbox, OutboxKind};
 use momo_t3::{
-    active_observer_capability_count_in_tx, is_active_channel_member_in_tx,
-    is_valid_capability_token, issue_attach_capability_in_tx, lock_attach_target_in_tx,
-    lock_display_binding_target_in_tx, mint_capability_token,
+    active_control_window_in_tx, active_observer_capability_count_in_tx,
+    close_control_window_in_tx, expire_lapsed_control_windows_in_tx,
+    is_active_channel_member_in_tx, is_valid_capability_token, issue_attach_capability_in_tx,
+    lock_attach_target_in_tx, lock_display_binding_target_in_tx, mint_capability_token,
+    open_control_window_in_tx, renew_control_window_lease_in_tx,
     sweep_spent_observer_capabilities_in_tx, validate_attach_capability_in_tx,
-    validated_display_binding, write_display_binding_in_tx, AttachKind, AttachMode,
-    RemoteDisplayBinding, T3Error,
+    validated_display_binding, write_display_binding_in_tx, AttachKind, AttachMode, ControlWindow,
+    ControlWindowEndReason, RemoteDisplayBinding, T3Error,
 };
 use momo_wire::{
     record_provenance, EntityRef, ProvenanceError, Signer,
     ENTITY_WORK_HOST_TERMINAL_ATTACH_VALIDATE,
 };
-use serde_json::json;
+use serde_json::{json, Value};
 use uuid::Uuid;
 
 use crate::dto::{
-    DisplayAttachCapabilityResponse, DisplayAttachValidationResponse, IssueDisplayAttachRequest,
-    PublishDisplayBindingRequest, ValidateDisplayAttachRequest,
+    DisplayAttachCapabilityResponse, DisplayAttachValidationResponse, DisplayControlReturnResponse,
+    IssueDisplayAttachRequest, PublishDisplayBindingRequest, ValidateDisplayAttachRequest,
 };
 use crate::error::ApiError;
 use crate::routes::shared::{
@@ -81,32 +109,80 @@ const AUDIT_SCHEMA_ISSUED: &str = "momo.work.display_attach.issued.v1";
 const AUDIT_ACTION_BOUND: &str = "work.display_binding.published";
 /// `detail.schema` for that row.
 const AUDIT_SCHEMA_BOUND: &str = "momo.work.display_binding.published.v1";
+/// `audit_log.action` for a control window closing (ADR-0004 증보 3).
+const AUDIT_ACTION_CONTROL_CLOSED: &str = "work.display_control.closed";
+/// `detail.schema` for that row.
+const AUDIT_SCHEMA_CONTROL_CLOSED: &str = "momo.work.display_control.closed.v1";
 
-/// The only grade this build mints. Named once so the response literal, the
-/// audit row and the refusal cannot drift apart.
-const DISPLAY_MODE: AttachMode = AttachMode::Observer;
+/// The grade a body that says nothing asks for.
+///
+/// Deliberately still `observer` after LIVE-3 opened control: a default is what
+/// a client gets when it did not consider the question, and taking the keyboard
+/// stops the agent (증보 3 D3). That is never the safe guess.
+const DEFAULT_DISPLAY_MODE: AttachMode = AttachMode::Observer;
 
-/// The refusal ADR-0004 증보 3 is holding.
-fn controller_display_forbidden() -> ApiError {
-    ApiError::forbidden("display attach is view-only; controller mode is not available")
-}
-
-/// `issueMode`'s display twin. An absent, empty or `{}` body means `observer` —
-/// the only grade this route can produce — and `controller` is refused **403,
-/// not 400**: it is a well-formed request for a capability that exists in the
-/// vocabulary and is not available to anyone, which is what 403 means. A 400
-/// would tell a client it had mistyped something.
+/// `issueMode`'s display twin. An absent, empty or `{}` body means `observer`;
+/// both grades are now spellable, and anything else is a 400 that names the
+/// closed vocabulary rather than surfacing a serde error.
 fn requested_display_mode(body: &[u8]) -> Result<AttachMode, ApiError> {
     if body.iter().all(u8::is_ascii_whitespace) {
-        return Ok(DISPLAY_MODE);
+        return Ok(DEFAULT_DISPLAY_MODE);
     }
-    let request: IssueDisplayAttachRequest =
-        serde_json::from_slice(body).map_err(|_| ApiError::bad_request("mode must be observer"))?;
+    let request: IssueDisplayAttachRequest = serde_json::from_slice(body)
+        .map_err(|_| ApiError::bad_request("mode must be controller or observer"))?;
     match request.mode.as_deref() {
-        None | Some("observer") => Ok(DISPLAY_MODE),
-        Some("controller") => Err(controller_display_forbidden()),
-        Some(_) => Err(ApiError::bad_request("mode must be observer")),
+        None | Some("observer") => Ok(AttachMode::Observer),
+        Some("controller") => Ok(AttachMode::Controller),
+        Some(_) => Err(ApiError::bad_request("mode must be controller or observer")),
     }
+}
+
+/// The `work.session.control` envelope — the **boundary event**, and the only
+/// thing about a control window that leaves this workspace.
+///
+/// ADR-0004 증보 3 D3 names exactly what an agent may learn while a person is
+/// typing: 정지 시각, 재개 시각, and that the intervention finished. This
+/// carries those three and nothing more. There is no frame here, no keystroke,
+/// no endpoint and no bearer — the same count-only discipline
+/// [`crate::routes::terminal_attach::observer_payload`] keeps for 관전자 수, one
+/// boundary over.
+///
+/// `grantee` is deliberately absent. Who is at the keyboard is a fact for the
+/// audit log, which is scoped to people who may read it; the broadcast goes to
+/// every member of the channel, and "someone has control" is all any of them —
+/// or the agent — needs in order to behave correctly.
+fn control_window_payload(
+    workspace_id: Uuid,
+    channel_id: Uuid,
+    window: &ControlWindow,
+    open: bool,
+) -> Value {
+    let channel = cent_channel(workspace_id, channel_id);
+    let state = if open { "opened" } else { "closed" };
+    let timestamp_ms = window.ended_at_ms.unwrap_or(window.started_at_ms);
+    let mut payload = json!({
+        "session_id": window.work_session_id.to_string(),
+        "state": state,
+        "started_at": window.started_at_ms,
+    });
+    if let Some(ended_at_ms) = window.ended_at_ms {
+        payload["ended_at"] = json!(ended_at_ms);
+    }
+    if let Some(reason) = window.end_reason {
+        payload["end_reason"] = json!(reason.as_db_label());
+    }
+    json!({
+        "channel": channel,
+        "data": {
+            "type": "work.session.control",
+            "v": 1,
+            "ts": timestamp_ms,
+            "payload": payload,
+        },
+        // Keyed by window AND state so the open and the close are two distinct
+        // events, and a retried close is one.
+        "idempotency_key": format!("{channel}:work.session.control:{}:{state}", window.id),
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -123,9 +199,9 @@ pub async fn issue(
     require_human(&principal, "display attach requires a human bearer")?;
     let workspace_id = workspace_scope(&workspace, &principal)?;
     let session_id = path_uuid(&session, "invalid work session id")?;
-    // Before the database, so a controller request costs no query and cannot be
+    // Before the database, so a malformed grade costs no query and cannot be
     // used to probe which sessions exist.
-    requested_display_mode(&body)?;
+    let mode = requested_display_mode(&body)?;
 
     // Minted outside the transaction for `terminal_attach::issue`'s reason: only
     // its digest is written, and a rolled-back transaction must not leave a live
@@ -135,7 +211,7 @@ pub async fn issue(
     let via_token_id = audit_via_token_id(&principal);
     let minted = token.clone();
 
-    let binding = settle(
+    let issued = settle(
         "display_attach.issue",
         tenant_tx(&state.pool, workspace_id, move |conn| {
             Box::pin(async move {
@@ -145,6 +221,7 @@ pub async fn issue(
                     member_id,
                     via_token_id,
                     session_id,
+                    mode,
                     &minted,
                 )
                 .await
@@ -154,21 +231,31 @@ pub async fn issue(
     )?;
 
     Ok(Json(DisplayAttachCapabilityResponse {
-        display_endpoint: binding.display_endpoint,
+        display_endpoint: issued.binding.display_endpoint,
         capability_token: token,
-        display_id: binding.display_id,
-        mode: DISPLAY_MODE.as_db_label(),
+        display_id: issued.binding.display_id,
+        mode: mode.as_db_label(),
+        control_started_at: issued.control_started_at,
     }))
 }
 
+/// What [`issue_in_tx`] hands back: the endpoint pair the client dials, plus the
+/// boundary timestamp when this grant opened a control window.
+struct IssuedDisplayGrant {
+    binding: RemoteDisplayBinding,
+    control_started_at: Option<i64>,
+}
+
+#[allow(clippy::too_many_arguments)]
 async fn issue_in_tx(
     conn: &mut momo_db::PgConnection,
     workspace_id: Uuid,
     member_id: Uuid,
     via_token_id: Option<Uuid>,
     session_id: Uuid,
+    mode: AttachMode,
     token: &str,
-) -> Rejectable<RemoteDisplayBinding> {
+) -> Rejectable<IssuedDisplayGrant> {
     // ---- rejections first (nothing is written above the sweep) -------------
     // Workspace membership gates existence disclosure: a stranger learns 403,
     // never whether this session id is real.
@@ -183,28 +270,57 @@ async fn issue_in_tx(
         return Ok(Err(ApiError::not_found("work session not found")));
     };
 
-    // The observer gate, **verbatim** from the PTY path — same two refusals, same
-    // order, same sentences. LIVE-1 was told to reuse the existing observation
-    // model rather than invent one for screens, and reuse means this and not a
-    // paraphrase.
-    //
-    // One consequence is worth naming rather than discovering: because display
-    // has no controller grade, an `owner_only` session has no display access
-    // **for anyone, including its owner**. On the PTY side the owner reaches
-    // their own session as controller; here that door does not exist yet. Whether
-    // `owner_only` should mean "only the owner watches" (an owner exemption) or
-    // "nobody watches" is a permission decision, and inventing the exemption here
-    // would be exactly the new권한 model this goal was told not to write. Refusing
-    // is the fail-closed direction, so refusing is what this does.
-    if target.observation != "open" {
-        return Ok(Err(ApiError::forbidden(
-            "session observation is owner-only",
-        )));
-    }
-    if !is_active_channel_member_in_tx(conn, workspace_id, target.channel_id, member_id).await? {
-        return Ok(Err(ApiError::forbidden(
-            "active channel membership required",
-        )));
+    // The grade gate. Both arms are the PTY path's, and the display side adds
+    // exactly one clause of its own (LIVE-3 / ADR-0004 증보 3).
+    match mode {
+        AttachMode::Controller => {
+            // 증보 3 D1: control is a person acting on their own session, so the
+            // predicate is the PTY controller's, reused rather than paraphrased
+            // — `terminal_attach::issue_in_tx` refuses non-owners with this same
+            // sentence, and the validate join shares the clause
+            // (`c.mode = 'controller' AND c.owner_member_id = ws.member_id`).
+            //
+            // No observation clause and no channel-membership clause, again for
+            // parity with PTY controller: `observation` governs who may WATCH,
+            // and the owner of a session is not watching it.
+            if target.owner_member_id != member_id {
+                return Ok(Err(ApiError::forbidden(
+                    "only the session owner can attach as controller",
+                )));
+            }
+        }
+        AttachMode::Observer => {
+            // LIVE-1 wrote this arm verbatim from the PTY path and left one
+            // consequence flagged for a decision: with no controller grade, an
+            // `owner_only` session had no screen for **anybody, including its
+            // owner**. 성재 settled it in the LIVE-3 wave — `owner_only` means
+            // 「소유자만 본다」, not 「아무도 못 본다」 — so the owner is exempt
+            // from the observation clause here.
+            //
+            // The exemption is scoped to `display` (the validate join scopes it
+            // the same way) because PTY never had the problem it fixes: there,
+            // an owner reaches their own `owner_only` session as controller.
+            // Widening it to PTY observers would change a shipped permission
+            // for no reason anybody asked for.
+            //
+            // It also matters more now than it did before this batch, and that
+            // is the strongest argument for it: taking control STOPS THE AGENT
+            // (증보 3 D3). Without an observer path an owner who only wants to
+            // look would have to halt their own agent to do it.
+            let is_owner = target.owner_member_id == member_id;
+            if target.observation != "open" && !is_owner {
+                return Ok(Err(ApiError::forbidden(
+                    "session observation is owner-only",
+                )));
+            }
+            if !is_active_channel_member_in_tx(conn, workspace_id, target.channel_id, member_id)
+                .await?
+            {
+                return Ok(Err(ApiError::forbidden(
+                    "active channel membership required",
+                )));
+            }
+        }
     }
 
     // Live session + unrevoked host + a display binding that still parses + a
@@ -227,6 +343,30 @@ async fn issue_in_tx(
         .clone()
         .expect("is_display_attachable() is false without a display binding");
 
+    // A control request is refused before any write if somebody else already
+    // holds the keyboard. 076's partial unique index would catch it anyway, but
+    // as a constraint violation rather than a sentence — and the caller is
+    // entitled to know the difference between "this session cannot be
+    // controlled" and "it is being controlled by someone else right now".
+    //
+    // Re-taking control while holding it is idempotent and handled inside
+    // `open_control_window_in_tx`: a client retry must not mint a second window
+    // and make 정지 시각 ambiguous for the agent.
+    if mode == AttachMode::Controller {
+        for lapsed in expire_lapsed_control_windows_in_tx(conn, workspace_id, session_id).await? {
+            emit_control_closed_in_tx(conn, workspace_id, target.channel_id, None, None, &lapsed)
+                .await?;
+        }
+        if let Some(existing) = active_control_window_in_tx(conn, workspace_id, session_id).await? {
+            if existing.grantee_member_id != member_id {
+                return Ok(Err(ApiError::new(
+                    StatusCode::CONFLICT,
+                    "work session is already under human control",
+                )));
+            }
+        }
+    }
+
     // ---- writes ------------------------------------------------------------
     sweep_spent_observer_capabilities_in_tx(conn, workspace_id, session_id).await?;
     let issued = issue_attach_capability_in_tx(
@@ -236,10 +376,34 @@ async fn issue_in_tx(
         target.host_id,
         member_id,
         token,
-        DISPLAY_MODE,
+        mode,
         AttachKind::Display,
     )
     .await?;
+
+    // The window opens in the SAME transaction as the grant it belongs to. A
+    // controller capability that exists without a window would be a keyboard
+    // into a live VM with the agent still reading the screen — the exact state
+    // ADR-0004 증보 3 D3 forbids — so the two cannot be allowed to come apart,
+    // not even across a failed second statement.
+    let control_window = if mode == AttachMode::Controller {
+        match open_control_window_in_tx(conn, workspace_id, session_id, member_id, issued.id)
+            .await?
+        {
+            Ok(window) => Some(window),
+            // Unreachable: the check above already refused a foreign holder
+            // under the session lock. Refusing rather than unwrapping keeps it
+            // unreachable if that check is ever moved.
+            Err(_) => {
+                return Ok(Err(ApiError::new(
+                    StatusCode::CONFLICT,
+                    "work session is already under human control",
+                )))
+            }
+        }
+    } else {
+        None
+    };
 
     // Same transaction as the grant, for `terminal_attach`'s reason: a
     // capability that exists without a record of who minted it is exactly what
@@ -255,43 +419,228 @@ async fn issue_in_tx(
                 AUDIT_SCHEMA_ISSUED,
                 json!({
                     "owner_member_id": target.owner_member_id.to_string(),
-                    "mode": DISPLAY_MODE.as_db_label(),
+                    "mode": mode.as_db_label(),
                     "kind": AttachKind::Display.as_db_label(),
                     "issued_at": issued.issued_at_ms,
                     "expires_at": issued.expires_at_ms,
+                    // The boundary fact, in the log that is entitled to names.
+                    // 증보 3 D2 keeps what the person TYPES out of this row;
+                    // that they took control, and when, is exactly what an
+                    // audit log is for.
+                    "control_window_opened": control_window.is_some(),
                 }),
             ),
     )
     .await
     .map_err(T3Error::from)?;
 
-    // The same count-only envelope the PTY observer path emits, and the same
-    // count: `active_observer_capability_count_in_tx` is kind-blind, so a
-    // teammate who opened the screen shows up in 관전자 수 like anyone else. A
-    // second envelope, or a second number, would be the new observer model this
-    // goal was told not to invent.
-    let observer_count =
-        active_observer_capability_count_in_tx(conn, workspace_id, session_id).await?;
-    let payload = observer_payload(
+    match control_window.as_ref() {
+        // The boundary event. It replaces the observer envelope rather than
+        // joining it, because a controller grant is not a 관전자: folding it into
+        // the count would make 관전자 수 tick up at the moment watching becomes
+        // impossible for the agent and irrelevant for the badge.
+        Some(window) => {
+            let payload = control_window_payload(workspace_id, target.channel_id, window, true);
+            emit_outbox(
+                &mut *conn,
+                workspace_id,
+                OutboxKind::Broadcast,
+                "publish",
+                &payload,
+                Some(target.channel_id),
+            )
+            .await
+            .map_err(|error| T3Error::from(momo_db::DbError::from(error)))?;
+        }
+        // The same count-only envelope the PTY observer path emits, and the same
+        // count: `active_observer_capability_count_in_tx` is kind-blind, so a
+        // teammate who opened the screen shows up in 관전자 수 like anyone else. A
+        // second envelope, or a second number, would be the new observer model this
+        // goal was told not to invent.
+        None => {
+            let observer_count =
+                active_observer_capability_count_in_tx(conn, workspace_id, session_id).await?;
+            let payload = observer_payload(
+                workspace_id,
+                target.channel_id,
+                session_id,
+                observer_count,
+                issued.id,
+                issued.issued_at_ms,
+            );
+            emit_outbox(
+                &mut *conn,
+                workspace_id,
+                OutboxKind::Broadcast,
+                "publish",
+                &payload,
+                Some(target.channel_id),
+            )
+            .await
+            .map_err(|error| T3Error::from(momo_db::DbError::from(error)))?;
+        }
+    }
+
+    Ok(Ok(IssuedDisplayGrant {
+        binding,
+        control_started_at: control_window.map(|window| window.started_at_ms),
+    }))
+}
+
+// ---------------------------------------------------------------------------
+// return (close the control window)
+// ---------------------------------------------------------------------------
+
+/// `DELETE /v1/workspaces/{ws}/work-sessions/{session}/display-control`.
+///
+/// The 반환 half of ADR-0004 증보 3: the person hands the keyboard back and the
+/// agent resumes. One of three closes, and the only one anybody performs on
+/// purpose — the other two (a lapsed lease, an ended session) are the world
+/// happening to a window nobody closed.
+///
+/// **Idempotent, and answers 200 either way.** A client that retries a return
+/// because the first response was lost must not be told it failed; a client that
+/// returns a window that already lapsed is describing the state it wanted. What
+/// distinguishes the two is `closed` in the body, not the status code.
+///
+/// Owner-only, matching who could have opened it. A teammate cannot end
+/// somebody else's intervention mid-password, which is the same reason the grant
+/// is owner-only in the first place.
+pub async fn return_control(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path((workspace, session)): Path<(String, String)>,
+) -> Result<Json<DisplayControlReturnResponse>, ApiError> {
+    require_human(&principal, "display control requires a human bearer")?;
+    let workspace_id = workspace_scope(&workspace, &principal)?;
+    let session_id = path_uuid(&session, "invalid work session id")?;
+    let member_id = principal.member_id;
+    let via_token_id = audit_via_token_id(&principal);
+
+    let closed = settle(
+        "display_attach.return_control",
+        tenant_tx(&state.pool, workspace_id, move |conn| {
+            Box::pin(async move {
+                return_control_in_tx(conn, workspace_id, member_id, via_token_id, session_id).await
+            })
+        })
+        .await,
+    )?;
+
+    Ok(Json(match closed {
+        Some(window) => DisplayControlReturnResponse {
+            closed: true,
+            control_started_at: Some(window.started_at_ms),
+            control_ended_at: window.ended_at_ms,
+        },
+        None => DisplayControlReturnResponse {
+            closed: false,
+            control_started_at: None,
+            control_ended_at: None,
+        },
+    }))
+}
+
+async fn return_control_in_tx(
+    conn: &mut momo_db::PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+    via_token_id: Option<Uuid>,
+    session_id: Uuid,
+) -> Rejectable<Option<ControlWindow>> {
+    if active_workspace_role(conn, workspace_id, member_id)
+        .await
+        .map_err(|error| T3Error::from(momo_db::DbError::from(error)))?
+        .is_none()
+    {
+        return Ok(Err(ApiError::forbidden("not an active workspace member")));
+    }
+    // The same lock the grant took, so a return cannot interleave with a
+    // re-take and leave the agent blocked by a window nobody holds.
+    let Some(target) = lock_attach_target_in_tx(conn, workspace_id, session_id).await? else {
+        return Ok(Err(ApiError::not_found("work session not found")));
+    };
+    if target.owner_member_id != member_id {
+        return Ok(Err(ApiError::forbidden(
+            "only the session owner can return display control",
+        )));
+    }
+
+    // Lapsed first, so a window whose producer already died closes with the
+    // reason that is true (`expired`) rather than being relabelled `returned` by
+    // whoever pressed the button afterwards. The ledger is the boundary event's
+    // SoT and a wrong reason there is a wrong story about what happened.
+    for lapsed in expire_lapsed_control_windows_in_tx(conn, workspace_id, session_id).await? {
+        emit_control_closed_in_tx(conn, workspace_id, target.channel_id, None, None, &lapsed)
+            .await?;
+    }
+    let Some(window) = close_control_window_in_tx(
+        conn,
+        workspace_id,
+        session_id,
+        ControlWindowEndReason::Returned,
+    )
+    .await?
+    else {
+        return Ok(Ok(None));
+    };
+
+    emit_control_closed_in_tx(
+        conn,
         workspace_id,
         target.channel_id,
-        session_id,
-        observer_count,
-        issued.id,
-        issued.issued_at_ms,
-    );
+        Some(member_id),
+        via_token_id,
+        &window,
+    )
+    .await?;
+    Ok(Ok(Some(window)))
+}
+
+/// Write the close audit row and broadcast the 재개 boundary event.
+///
+/// Shared by every close path so that "the agent resumed" is one statement with
+/// one shape, whoever caused it. `actor` is `None` when nobody did — a lapsed
+/// lease and an ended session are events, not acts, and naming a person in the
+/// audit row for them would record that somebody did something they did not
+/// (`routes::shared::audit_via_token_id`'s rule).
+pub(crate) async fn emit_control_closed_in_tx(
+    conn: &mut momo_db::PgConnection,
+    workspace_id: Uuid,
+    channel_id: Uuid,
+    actor: Option<Uuid>,
+    via_token_id: Option<Uuid>,
+    window: &ControlWindow,
+) -> Result<(), T3Error> {
+    let mut entry = AuditEntry::new(workspace_id, AUDIT_ACTION_CONTROL_CLOSED)
+        .target("work_session", window.work_session_id)
+        .via_token(via_token_id)
+        .with_schema(
+            AUDIT_SCHEMA_CONTROL_CLOSED,
+            json!({
+                "grantee_member_id": window.grantee_member_id.to_string(),
+                "started_at": window.started_at_ms,
+                "ended_at": window.ended_at_ms,
+                "end_reason": window.end_reason.map(|reason| reason.as_db_label()),
+            }),
+        );
+    if let Some(actor) = actor {
+        entry = entry.by(actor);
+    }
+    write_audit(conn, &entry).await.map_err(T3Error::from)?;
+
+    let payload = control_window_payload(workspace_id, channel_id, window, false);
     emit_outbox(
         &mut *conn,
         workspace_id,
         OutboxKind::Broadcast,
         "publish",
         &payload,
-        Some(target.channel_id),
+        Some(channel_id),
     )
     .await
     .map_err(|error| T3Error::from(momo_db::DbError::from(error)))?;
-
-    Ok(Ok(binding))
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -513,38 +862,58 @@ pub async fn validate(
                     AttachKind::Display,
                 )
                 .await?;
-                if let Some(validated) = validated.as_ref() {
-                    if let Err(rejection) = record_display_validation(
-                        conn,
-                        workspace_id,
-                        signing_host,
-                        validated.work_session_id,
-                        &host_signature,
-                    )
-                    .await?
-                    {
-                        return Ok(Err(rejection));
-                    }
+                let Some(validated) = validated else {
+                    return Ok(Ok(None));
+                };
+                if let Err(rejection) = record_display_validation(
+                    conn,
+                    workspace_id,
+                    signing_host,
+                    validated.work_session_id,
+                    &host_signature,
+                )
+                .await?
+                {
+                    return Ok(Err(rejection));
                 }
-                Ok(Ok(validated))
+
+                // The lease renewal, and the reason the window outlives the
+                // 60-second dial TTL its capability carries (076's header).
+                // This call IS the liveness signal: a producer re-validating
+                // every 30 seconds is a producer saying the stream is still up,
+                // and a producer that stops saying it lets the window lapse and
+                // the agent resume.
+                //
+                // Keyed by capability rather than session so a bearer for a
+                // window that has since closed cannot hold a newer one open.
+                let control_window = if validated.mode == AttachMode::Controller {
+                    renew_control_window_lease_in_tx(conn, workspace_id, validated.capability_id)
+                        .await?
+                } else {
+                    None
+                };
+                Ok(Ok(Some((validated, control_window))))
             })
         })
         .await,
     )?;
 
-    let validated = validated.ok_or_else(invalid_capability)?;
-    // Unreachable while 075's CHECK stands and the domain re-checks it; refusing
-    // rather than serving is what keeps it unreachable if either is ever lost.
-    if validated.mode != DISPLAY_MODE {
-        return Err(invalid_capability());
-    }
+    let (validated, control_window) = validated.ok_or_else(invalid_capability)?;
+    // ADR-0165 D4, stated to the only process that can honour it — and stated as
+    // a conjunction, not as the grade alone.
+    //
+    // A controller bearer whose window is gone gets `false`, which is what makes
+    // 반환 real: the person pressed 돌려주기, the window closed, and within one
+    // re-validation period the producer is told to stop accepting input. If this
+    // read `mode == Controller` on its own, returning control would be a row in
+    // a table and a keyboard that still worked.
+    let input_enabled = validated.mode == AttachMode::Controller && control_window.is_some();
     Ok(Json(DisplayAttachValidationResponse {
         work_session_id: validated.work_session_id.to_string(),
         display_id: validated.target_id,
         expires_at: validated.expires_at,
-        mode: DISPLAY_MODE.as_db_label(),
-        // ADR-0165 D4, stated to the only process that can honour it.
-        input_enabled: false,
+        mode: validated.mode.as_db_label(),
+        input_enabled,
     }))
 }
 
@@ -607,17 +976,34 @@ mod tests {
         );
     }
 
-    /// The LIVE-1 boundary at the wire. 403 and not 400: the grade exists, it is
-    /// spelled correctly, and it is not available to anybody.
+    /// LIVE-3: the grade is spellable now. Who may hold it is a question for
+    /// the transaction (owner only) and what it implies is a question for the
+    /// control window — neither of them this function's.
     #[test]
-    fn asking_for_control_is_forbidden_not_malformed() {
-        let error = requested_display_mode(br#"{"mode":"controller"}"#)
-            .expect_err("controller must be refused");
-        assert_eq!(error.status, StatusCode::FORBIDDEN);
+    fn control_is_a_grade_this_route_can_be_asked_for() {
         assert_eq!(
-            error.message,
-            "display attach is view-only; controller mode is not available"
+            requested_display_mode(br#"{"mode":"controller"}"#).unwrap(),
+            AttachMode::Controller
         );
+    }
+
+    /// The default did NOT move with the boundary. A body that says nothing
+    /// asks to watch, because taking control stops the agent (ADR-0004 증보 3
+    /// D3) and that is never what a client meant by silence.
+    #[test]
+    fn silence_still_means_observer() {
+        for quiet in [
+            &b""[..],
+            &b"   \n"[..],
+            &b"{}"[..],
+            &br#"{"mode":null}"#[..],
+        ] {
+            assert_eq!(
+                requested_display_mode(quiet).unwrap(),
+                AttachMode::Observer,
+                "the default is the grade that changes nothing"
+            );
+        }
     }
 
     #[test]
@@ -631,7 +1017,7 @@ mod tests {
         ] {
             let error = requested_display_mode(bad).expect_err("must be refused");
             assert_eq!(error.status, StatusCode::BAD_REQUEST);
-            assert_eq!(error.message, "mode must be observer");
+            assert_eq!(error.message, "mode must be controller or observer");
         }
     }
 

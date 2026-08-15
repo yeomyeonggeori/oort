@@ -11,7 +11,6 @@ import {
   cspBlockedHost,
   classifyClose,
   HOST_CONNECT_TIMEOUT_MS,
-  observationStillPermits,
   observerLink,
 } from "./observerStream";
 import {
@@ -21,6 +20,7 @@ import {
   classifyProducerFrame,
   displayFailureCopy,
   displayGate,
+  displayObservationStillPermits,
   displayOffersReload,
   displayOffersRetry,
   displayQuietLabel,
@@ -572,7 +572,11 @@ export function DisplayObserver({
   // neither can reach a peer connection held between this browser and the VM.
   // The producer re-validates its own bearer for the other half of this; both
   // halves are needed, because the producer's clock is not this reader's.
-  const revoked = observationStillPermits(session);
+  //
+  // Owner-aware since LIVE-3: `owner_only` means 「소유자만 본다」, so an owner
+  // closing observation must not tear down their OWN screen one re-verify
+  // later while the server goes on validating the grant behind it.
+  const revoked = displayObservationStillPermits(session, isOwner);
   const holding =
     phase.kind === "watching" ||
     phase.kind === "connecting" ||
@@ -754,11 +758,14 @@ export function DisplayObserver({
                 ? "neutral"
                 : "error"
             }
-            // Owner-aware, because the 소유자만 보기 toggle that causes two of
-            // these failures is one block up on this same panel. The owner-blind
-            // table would report the reader's own click back to them in the
-            // third person, and would not say the thing only this surface has to
-            // say: a closed session has no screen for its owner either.
+            // Owner-aware, and since LIVE-3 for a narrower reason than "the
+            // 소유자만 보기 toggle is one block up". `owner_only` now means
+            // 「소유자만 본다」, so closing observation refuses an owner nothing
+            // and an owner does not reach the `observation_closed` banner at
+            // all. What the owner-blind table still gets wrong for them is
+            // `capability_denied`: its shared sentence offers two causes, and
+            // observation can no longer be theirs. `displayFailureCopy` names
+            // the one that can still be true, channel membership.
             message={displayFailureCopy(phase.failure, isOwner)}
             {...(displayOffersRetry(phase.failure, gate.available)
               ? { actionLabel: "다시 연결", onAction: () => void start() }

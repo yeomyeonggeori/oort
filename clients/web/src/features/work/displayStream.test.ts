@@ -16,6 +16,7 @@ import {
   classifyProducerFrame,
   displayFailureCopy,
   displayGate,
+  displayObservationStillPermits,
   displayOffersReload,
   displayOffersRetry,
   displayQuietLabel,
@@ -456,18 +457,35 @@ describe("who is told they cannot watch, and why", () => {
     ).toBe(true);
   });
 
-  it("tells the OWNER of an owner-only session that they cannot watch either", () => {
-    // The difference from the terminal that is real rather than cosmetic:
-    // display has no controller grade, so `owner_only` closes the screen to
-    // everybody including its owner. Reusing the terminal's sentence here would
-    // be a half-truth, because there the owner can still watch.
+  it("lets the OWNER of an owner-only session watch, and nobody else", () => {
+    // LIVE-3 / ADR-0004 증보 3: `owner_only` means 「소유자만 본다」, not
+    // 「아무도 못 본다」. LIVE-1 refused the owner here because display had no
+    // controller grade and refusing was the fail-closed direction while the
+    // permission question was open; it has been answered.
     const gate = displayGate(session({ observation: "owner_only" }), true);
-    expect(gate.available).toBe(false);
-    expect(gate.reason).toContain("소유자도 볼 수 없습니다");
+    expect(gate.available).toBe(true);
+    expect(gate.reason).toBeNull();
 
     const teammate = displayGate(session({ observation: "owner_only" }), false);
     expect(teammate.available).toBe(false);
     expect(teammate.reason).toBe("세션 소유자가 관전을 닫아 두었습니다.");
+  });
+
+  it("does not tear down the owner's own screen when they close observation", () => {
+    // The client half of the same decision. Without the owner branch here, an
+    // owner pressing 소유자만 보기 would lose their own live screen one
+    // re-verify later while the server went on validating the grant behind it.
+    expect(
+      displayObservationStillPermits(session({ observation: "owner_only" }), true)
+    ).toBeNull();
+    expect(
+      displayObservationStillPermits(session({ observation: "owner_only" }), false)
+    ).toBe("observation_closed");
+    // Everything else still drops for both, owner included: the exemption is
+    // about WHO may watch, not about whether the session still exists.
+    expect(
+      displayObservationStillPermits(session({ status: "ended" }), true)
+    ).toBe("session_ended");
   });
 
   it("reports the owner's own close to the owner, not about them", () => {
@@ -481,14 +499,11 @@ describe("who is told they cannot watch, and why", () => {
       expect(teammate, failure).toBe(DISPLAY_FAILURE_COPY[failure]);
       expect(owner, failure).not.toBe(teammate);
       expect(owner, failure).not.toContain("세션 소유자가");
-      // The fact only this surface has to carry: display has no controller
-      // grade, so a closed session has no screen for its owner either
-      // (display_attach.rs refuses `observation != open` for everyone). An
-      // owner told only "관전을 닫았습니다" would expect the screen to still be
-      // theirs to open.
-      expect(owner, failure).toContain("소유자도 볼 수 없습니다");
-      // §5: and then the way back, which is a control the owner actually has.
-      expect(owner, failure).toContain("팀원 관전을 허용하면");
+      // And it must not tell them the OPPOSITE of what their control does.
+      // These sentences used to say 소유자도 볼 수 없습니다, which was true
+      // while display had no controller grade and is false since ADR-0004
+      // 증보 3 — the owner keeps their own screen and only the team loses it.
+      expect(owner, failure).not.toContain("소유자도 볼 수 없습니다");
     }
   });
 
@@ -505,23 +520,43 @@ describe("who is told they cannot watch, and why", () => {
     }
   });
 
-  it("keeps the banner's owner sentence in the gate's family, and in its own tense", () => {
-    // Same family: the gate already had to answer "why can the owner not watch
-    // their own screen", and two different explanations of one rule on one panel
-    // is how a reader learns to trust neither.
-    const gateReason = displayGate(session({ observation: "owner_only" }), true).reason;
+  it("pins both owner sentences whole, the way the teammate ones are pinned", () => {
+    // Byte literals, not substrings. The teammate side is already held whole
+    // (`DISPLAY_FAILURE_COPY` in the tests above, and the gate reason below),
+    // while the substring pin that used to stand here let one clause of the
+    // owner sentence go on naming a 다시 연결 button this banner does not carry
+    // (design-review M1) — every keyword it checked was still present. A
+    // whole-sentence pin fails on the clause instead of on the survivor.
+    expect(displayFailureCopy("observation_closed", true)).toBe(
+      "관전을 소유자만 보기로 닫았습니다. 이제 팀원은 이 화면을 볼 수 없고, 내 화면 보기는 닫히지 않습니다."
+    );
+    expect(displayFailureCopy("capability_denied", true)).toBe(
+      "이 세션의 라이브 화면을 열지 못했습니다. 화면을 보려면 이 세션이 있는 채널의 멤버여야 합니다."
+    );
+    // Same family, and since LIVE-3 that is settled by subtraction: the gate has
+    // no owner sentence left to disagree with the banner, because the owner
+    // passes it. Two explanations of one rule on one panel is how a reader
+    // learns to trust neither.
+    expect(displayGate(session({ observation: "owner_only" }), true).reason).toBeNull();
+    // The tense is what survives the pairing: the banner still speaks to the
+    // owner about their own action rather than about them.
     const banner = displayFailureCopy("observation_closed", true);
-    for (const shared of ["소유자도 볼 수 없습니다", "팀원 관전을 허용하면"]) {
-      expect(gateReason).toContain(shared);
-      expect(banner).toContain(shared);
-    }
-    // Different tense, because they describe different moments: the gate is the
-    // standing state of a session the reader arrived at, the banner is the
-    // action they just took. Same split the terminal makes between `observeGate`
-    // and `observerFailureCopy`.
-    expect(banner).not.toBe(gateReason);
-    expect(gateReason).toContain("닫아 두었습니다");
     expect(banner).toContain("닫았습니다");
+    expect(banner).toContain("팀원");
+  });
+
+  it("never sends either reader to a control this banner does not carry", () => {
+    // `observation_closed` is not in RETRYABLE and is not the reload case, so
+    // this banner renders no action at all for anybody. A sentence that names
+    // one is an instruction pointing at nothing (design-taste-web §5), and that
+    // is exactly what the owner sentence used to do.
+    expect(displayOffersRetry("observation_closed", true)).toBe(false);
+    expect(displayOffersReload("observation_closed")).toBe(false);
+    for (const isOwner of [true, false]) {
+      const copy = displayFailureCopy("observation_closed", isOwner);
+      expect(copy, `isOwner=${isOwner}`).not.toContain("다시 연결");
+      expect(copy, `isOwner=${isOwner}`).not.toContain("새로고침");
+    }
   });
 
   it("holds the copy discipline on the owner's sentences too", () => {
@@ -550,6 +585,17 @@ describe("who is told they cannot watch, and why", () => {
       DISPLAY_FAILURE_COPY.capability_denied,
     ]);
     expect(reasons.size).toBe(4);
+  });
+
+  it("names the cause an owner can still hit, not the one they cannot", () => {
+    // `capability_denied` keeps an owner sentence for a NEW reason. Observation
+    // no longer refuses an owner, so the only refusal the server has left for
+    // them is channel membership — which `display_attach.rs` still applies to
+    // every observer, owner included. Offering them the impossible cause would
+    // send them to press a toggle that changes nothing.
+    const owner = displayFailureCopy("capability_denied", true);
+    expect(owner).toContain("채널의 멤버");
+    expect(owner).not.toContain("소유자만 보기");
   });
 
   it("names an orphaned session as orphaned, never as closed", () => {

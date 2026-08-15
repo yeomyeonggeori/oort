@@ -15,9 +15,17 @@
 //! definitions of "the host was revoked, cut everyone off" — and the day one of
 //! them fell behind, 「관전을 끊었다」 would be half true.
 //!
-//! The one place the kinds diverge is what they may be: **display capabilities
-//! exist only as `observer`** (075's `terminal_attach_display_observer_ck`).
-//! Input — the control half — is ADR-0004 증보 3's boundary and is not open.
+//! The kinds used to diverge in what they may be — display capabilities existed
+//! only as `observer` (075's `terminal_attach_display_observer_ck`) while input
+//! waited on a decision. ADR-0004 증보 3 made that decision on 2026-08-15 and
+//! 076 dropped the CHECK, so both kinds now carry both grades.
+//!
+//! What a display controller grant additionally implies lives in
+//! [`crate::display_control`]: a grant opens a **control window**, and while
+//! that window stands the agent's own path to the session is refused. This
+//! module still mints and validates; it does not know about that, and the one
+//! seam between them is [`ValidatedAttach::capability_id`], which the display
+//! route uses to renew the window a live producer is keeping open.
 //!
 //! ## What this module is, and the line it does not cross
 //!
@@ -155,14 +163,20 @@ impl AttachKind {
 
     /// The grades this kind may be minted at.
     ///
-    /// This is the Rust half of `terminal_attach_display_observer_ck`. Both
-    /// halves exist on purpose: the CHECK is the one that cannot be forgotten,
-    /// and this one is the one that can answer a caller with a *sentence*
-    /// instead of a constraint-violation 500.
-    pub fn permits_mode(self, mode: AttachMode) -> bool {
+    /// Both kinds now permit both grades. Until LIVE-3 this function was the
+    /// Rust half of `terminal_attach_display_observer_ck` and answered `false`
+    /// for display+controller; 076 dropped that CHECK when ADR-0004 증보 3 was
+    /// Accepted, and the two halves moved together as 075's comment promised.
+    ///
+    /// It is kept rather than deleted because it is the shape of the question,
+    /// and the answer is a fact about a vocabulary rather than about a
+    /// permission: **who** may hold a display controller grant is the session
+    /// owner (`issue_in_tx`), and **what must be true while they hold it** is
+    /// [`crate::display_control`]. Neither of those belongs in an enum.
+    pub fn permits_mode(self, _mode: AttachMode) -> bool {
         match self {
             AttachKind::Pty => true,
-            AttachKind::Display => mode == AttachMode::Observer,
+            AttachKind::Display => true,
         }
     }
 }
@@ -535,6 +549,14 @@ pub async fn active_observer_capability_count_in_tx(
 /// What a host learns when a bearer checks out.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ValidatedAttach {
+    /// The capability row this bearer resolved to.
+    ///
+    /// Not part of the wire response — no client is told its grant's row id —
+    /// but the display path needs it to renew the control window this exact
+    /// grant opened ([`crate::display_control::renew_control_window_lease_in_tx`]).
+    /// Keying that renewal by capability rather than by session is what stops a
+    /// stale bearer from holding a newer window open.
+    pub capability_id: Uuid,
     pub work_session_id: Uuid,
     /// `work_session.pty_id` for [`AttachKind::Pty`], `display_id` for
     /// [`AttachKind::Display`] — the identifier the *asking host* uses to pick
@@ -557,6 +579,13 @@ pub struct ValidatedAttach {
 /// observer's session still `open` and their channel membership still live — is
 /// evaluated exactly as on the first call.
 ///
+/// The observer arm carries one exemption, added by LIVE-3: on a **display**
+/// capability the session's own owner is not cut by `owner_only`. 성재 settled
+/// `owner_only` as 「소유자만 본다」 rather than 「아무도 못 본다」, and the
+/// exemption is scoped to `kind = 'display'` because PTY never had the problem
+/// it fixes — there, an owner reaches their own closed session as controller.
+/// Widening it to PTY observers would silently change a shipped permission.
+///
 /// `kind` pins which surface the asking host is serving, and it is a predicate
 /// rather than a projection: a PTY daemon presenting a display bearer, or the
 /// producer presenting a terminal one, gets the ordinary refusal. Two hosts do
@@ -576,7 +605,7 @@ pub async fn validate_attach_capability_in_tx(
     kind: AttachKind,
 ) -> Result<Option<ValidatedAttach>, T3Error> {
     let row = sqlx::query(
-        "SELECT c.work_session_id, c.mode, c.kind, \
+        "SELECT c.id AS capability_id, c.work_session_id, c.mode, c.kind, \
                 CASE WHEN c.kind = 'display' THEN ws.display_id ELSE ws.pty_id END \
                   AS target_id, \
                 to_char(c.expires_at AT TIME ZONE 'UTC', \
@@ -619,7 +648,10 @@ pub async fn validate_attach_capability_in_tx(
               (c.mode = 'controller' AND c.owner_member_id = ws.member_id) \
               OR ( \
                 c.mode = 'observer' \
-                AND ws.observation = 'open' \
+                AND ( \
+                  ws.observation = 'open' \
+                  OR (c.kind = 'display' AND c.owner_member_id = ws.member_id) \
+                ) \
                 AND EXISTS ( \
                   SELECT 1 FROM membership ms \
                    WHERE ms.workspace_id = c.workspace_id \
@@ -660,6 +692,7 @@ pub async fn validate_attach_capability_in_tx(
         return Ok(None);
     }
     Ok(Some(ValidatedAttach {
+        capability_id: row.try_get("capability_id")?,
         work_session_id: row.try_get("work_session_id")?,
         target_id: row.try_get("target_id")?,
         expires_at: row.try_get("expires_at_iso")?,
@@ -807,18 +840,23 @@ mod tests {
         assert!(AttachKind::from_db_label("PTY").is_none());
     }
 
-    /// The LIVE-1 boundary, stated as an assertion rather than a comment:
-    /// display may never be minted as a controller until ADR-0004 증보 3 opens
-    /// input. `terminal_attach_display_observer_ck` says the same thing in SQL.
+    /// LIVE-3 replaced the LIVE-1 boundary rather than removing it. Both kinds
+    /// carry both grades now (076 dropped
+    /// `terminal_attach_display_observer_ck`), and what a display controller
+    /// grant costs — owner-only issuance, a control window, and the agent's
+    /// access to the session refused while it stands — lives in
+    /// `routes::display_attach` and [`crate::display_control`] where the
+    /// question can actually be answered.
     #[test]
-    fn display_capabilities_are_observer_only() {
-        assert!(AttachKind::Display.permits_mode(AttachMode::Observer));
-        assert!(
-            !AttachKind::Display.permits_mode(AttachMode::Controller),
-            "input is ADR-0004 증보 3's boundary, not this batch's"
-        );
-        assert!(AttachKind::Pty.permits_mode(AttachMode::Controller));
-        assert!(AttachKind::Pty.permits_mode(AttachMode::Observer));
+    fn both_kinds_carry_both_grades_since_live3() {
+        for kind in [AttachKind::Pty, AttachKind::Display] {
+            assert!(kind.permits_mode(AttachMode::Observer));
+            assert!(
+                kind.permits_mode(AttachMode::Controller),
+                "ADR-0004 증보 3 opened display control; 076 dropped the CHECK \
+                 that made it unrepresentable"
+            );
+        }
     }
 
     #[test]

@@ -738,6 +738,14 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/work-sessions/{session}/display-binding",
             post(routes::display_attach::publish_binding),
         )
+        // The 반환 half of ADR-0004 증보 3 (LIVE-3). DELETE because what is
+        // addressed is the open control window and the act is ending it — which
+        // also gives a return the retry semantics it needs, since deleting
+        // something already gone is success.
+        .route(
+            "/v1/workspaces/{ws}/work-sessions/{session}/display-control",
+            delete(routes::display_attach::return_control),
+        )
         // paid credit
         .route(
             "/v1/admin/workspaces/{ws}/credits/topups",

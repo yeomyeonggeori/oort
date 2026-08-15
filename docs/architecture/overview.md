@@ -380,11 +380,18 @@ Centrifugo도 이 데이터 경로에 참여하지 않는다. 서버는 capabili
 
 세 가지가 PTY 축과 다르고, 셋 다 의도적이다.
 
-1. **display는 observer 전용이다.** 입력(control) 경계는 ADR-0004 증보 3의 미결 결정이므로
-   `mode=controller` 요청은 403이고, 잠금장치는 라우트 한 줄이 아니라 스키마다 —
-   075의 `terminal_attach_display_observer_ck`가 controller display 행 자체를 표현 불가로
-   만든다. producer 층에서는 **입력 datachannel을 아예 개설하지 않는 것**이 view-only의
-   구현이다(D4). 클라이언트 플래그를 믿지 않는다.
+1. **display에는 observer와 controller가 있고, control은 창(window)을 연다.**
+   LIVE-1까지 display는 observer 전용이었다 — 입력 경계가 ADR-0004 증보 3의 미결 결정이었고,
+   잠금장치는 라우트가 아니라 스키마(075의 `terminal_attach_display_observer_ck`)였다.
+   2026-08-15 그 증보가 Accepted 되면서 마이그 076이 그 절을 지웠고, 세 층(스키마·
+   `AttachKind::permits_mode`·라우트)이 075 주석의 약속대로 함께 움직였다.
+   잠금이 사라진 자리에 들어온 것은 **부재가 아니라 원장**이다. controller 발급은
+   ① **세션 owner 한정**(증보 3 D1 — control은 자기 세션에 대한 사람의 행위이며, PTY
+   controller의 `c.owner_member_id = ws.member_id` 술어를 그대로 재사용한다),
+   ② **`display_control_window` 행 개설**(076 — 경계 이벤트의 SoT), ③ **그 창이 서 있는 동안
+   에이전트의 그 세션 접근 거부**(증보 3 D3의 비관측) 세 가지를 한 트랜잭션에서 한다.
+   view-only 쪽 계약은 그대로다: producer는 **입력 datachannel을 아예 개설하지 않으며**(D4),
+   개설 여부는 클라이언트 플래그가 아니라 서버의 `input_enabled` 응답이 정한다.
 2. **바인딩을 host가 직접 게시한다.** workd는 `POST …/work-sessions/{s}/display-binding`
    (work-host 서명)으로 `display_id` + credential-free 시그널링 WS URL을 한 번 등록한다.
    human bearer는 이 경로에서도, 세션 create/PATCH의 같은 이름 필드에서도 거절된다. 경로가
@@ -400,6 +407,39 @@ Centrifugo도 이 데이터 경로에 참여하지 않는다. 서버는 capabili
 정상이다), 관전자 수는 kind를 구분하지 않는 하나의 숫자다. 프레임은 서버·원장·audit 어디에도
 들어가지 않고 녹화도 없다(D5). ICE는 직결/host-reflexive 1차이며 제3자 TURN은 금지다(D3).
 
+`observation = owner_only`의 뜻도 이 파도에서 확정됐다: **「소유자만 본다」**(「아무도 못 본다」가
+아니다). LIVE-1은 display에 controller 등급이 없어 owner까지 막았고 그것을 미결로 명시해
+두었는데, 증보 3이 답을 주면서 display observer 발급·검증의 observation 절에 owner 예외가
+들어갔다. 예외는 `kind = 'display'`로 좁혀져 있다 — PTY는 owner가 controller로 자기 세션에
+붙으므로 애초에 같은 문제가 없었다. control이 에이전트를 정지시키는 지금은 이 예외가 더
+중요하다: 보기만 하려는 owner가 자기 에이전트를 세우지 않아도 되게 하는 유일한 경로다.
+
+### control 창과 비관측 (ADR-0004 증보 3)
+
+control 창이 서 있는 동안 지켜지는 것은 **에이전트가 그 세션을 관측할 수 없다**는 사실이며,
+이것은 선언이 아니라 **거부**다. 에이전트가 work session에 닿는 서버 경로는 하나뿐이므로
+(`POST /v1/workspaces/{ws}/work-controls` — agent bearer 전용이고 `read`가 화면 읽기,
+`input`이 키보드다. attach 두 라우트는 모두 `require_human`이라 에이전트는 관전 capability
+자체를 받을 수 없다) 그 한 곳을 막으면 관측 경로 전체가 막힌다. 두 층으로 건다:
+
+- **거부** — `work_controls::create`가 창 활성 세션에 대해 409. 모든 쓰기보다 위에서 거부하므로
+  거부된 시도는 `work_control` 행도 audit도 남기지 않는다(= "에이전트가 보지 않았다"가 원장에
+  대한 진술이 된다).
+- **보류** — 창이 열리기 직전 dispatch된 제어는 `pending_controls_for_host_in_tx`가 **withhold**
+  한다. 실패시키지 않고 보류하므로 창이 닫히면 다음 poll에서 그대로 전달된다(증보 3 D4의 재개).
+
+창은 세 경로로 닫히고 셋 다 멱등이다 — **반환**(owner의 명시 REST `DELETE …/display-control`,
+`end_reason=returned`) · **lease 만료**(producer가 재검증을 멈춤, `expired`) · **세션 종료**
+(`session_ended`). lease가 capability의 `expires_at`이 아닌 것이 중요하다: 60초 TTL은 **dial**
+창이고 `stream:true` 재검증은 만료 절만 완화하므로, 창을 그 타임스탬프에 매면 사람이 로그인하는
+도중 60초에 에이전트가 재개된다. lease는 그 재검증이 갱신하므로 **producer가 스트림이 살아
+있다고 말하는 동안** 창이 열려 있다.
+
+VM은 움직이지 않는다(증보 3 D6): `work_session.status`도 ADR-0140 상태기계도 무변경이고
+running-time 과금도 계속된다. 멈추는 것은 런 층의 도달 범위뿐이다. 사람이 입력한 자격증명은
+전사·audit·Memory Plane 어디에도 들어가지 않으며(D2), 원장은 누가·언제·왜 닫혔는지만 갖는다 —
+키 입력을 담을 칸이 없다.
+
 ```mermaid
 sequenceDiagram
     participant B as Browser (LIVE-2)
@@ -408,20 +448,48 @@ sequenceDiagram
     participant V as Sandbox (workd + WebRTC producer)
     V->>S: POST display-binding (host-signed, once)
     S->>P: display_id + credential-free signalling URL
-    B->>S: POST display-attach (human, observer only)
+    B->>S: POST display-attach (human; observer, or controller if owner)
     S->>P: token digest + issued/expires/grantee/kind
+    S->>P: controller only — open display_control_window (076)
     S-->>B: signalling endpoint + raw capability + display_id
     B->>V: direct WSS signalling (momo.display.v1, capability)
     V->>S: signed capability validation (every 30s)
     S->>P: expiry/session/revoke/observation/advertisement check
-    S-->>V: validated display_id + expires_at + input_enabled=false
-    V-->>B: WebRTC video, sendonly — no input datachannel exists
+    S->>P: controller only — renew the window lease
+    S-->>V: validated display_id + expires_at + input_enabled
+    V-->>B: WebRTC video, sendonly (input datachannel only if input_enabled)
 ```
 
-웹 소비(관전 UI)는 LIVE-2 소관이다. sandbox 템플릿 사양은
-`infra/cubesandbox/display-template/`에 있고, 그 producer는 아직
-**`runtime-unverified(cubesandbox webrtc producer)`** — microVM을 빌드·기동해본 바 없고,
-브라우저가 sandbox에 도달할 수 있는지(ingress·ICE)는 미실측 미결이다.
+```mermaid
+sequenceDiagram
+    participant H as 사람 (세션 owner)
+    participant S as momo-server
+    participant P as PostgreSQL
+    participant A as 에이전트 (run)
+    participant V as Sandbox VM
+    H->>S: POST display-attach {mode: controller}
+    S->>P: controller grant + display_control_window OPEN
+    S-->>H: control_started_at (경계 이벤트)
+    S-->>A: work.session.control {state: opened} — 정지 시각만
+    A->>S: POST work-controls {kind: read}
+    S-->>A: 409 work session is under human control
+    Note over A,V: 에이전트는 프레임도 키도 보지 못한다 (증보 3 D3)
+    Note over H,V: 사람 ↔ VM 직결. 비밀번호는 서버를 지나지 않는다 (D2)
+    Note over S,V: VM은 running 유지, 과금 계속 (D6)
+    H->>S: DELETE display-control (반환)
+    S->>P: window CLOSED (end_reason=returned)
+    S-->>A: work.session.control {state: closed} — 재개 시각
+    A->>S: POST work-controls {kind: read}
+    S-->>A: 201 — 보류됐던 제어도 다음 poll에서 전달
+```
+
+웹 소비(관전 UI)는 LIVE-2 소관이고, **직접 조작 UI는 LIVE-4 소관**이다 — LIVE-3은 서버 계약과
+원장과 게이트까지다. sandbox 템플릿 사양은 `infra/cubesandbox/display-template/`에 있고, 그
+producer는 아직 **`runtime-unverified(cubesandbox webrtc producer)`** — microVM을 빌드·기동해본
+바 없고, 브라우저가 sandbox에 도달할 수 있는지(ingress·ICE)는 미실측 미결이다. 입력 전달도
+마찬가지로 **`runtime-unverified(input delivery)`**: `input_enabled: true`를 읽고 datachannel을
+열어 키를 넣어 본 producer도, 반환 시 그 채널을 닫아 본 producer도 아직 없다. 서버 절반(발급·
+창·게이트·`input_enabled`)은 실제 PostgreSQL 대상 conformance로 증명돼 있고, 화면 절반은 아니다.
 
 ## 에이전트 1회 응답의 수명주기 (이중 경로)
 
