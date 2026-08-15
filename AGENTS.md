@@ -199,3 +199,47 @@ Closes #<issue>
 ## 8. 안전 / 한계
 - hermes 등 외부 의존이 남으면 설치/Mock 준비를 먼저 하고, 검증 못 한 범위만 좁게 `runtime-unverified`로 남긴다.
 - 막히면(의존 미충족·정보 부족) 임의 추측 금지 — 이슈에 블로커 코멘트 + 다음 티켓.
+
+## Cursor Cloud specific instructions
+
+> Durable, non-obvious notes for Cloud Agents. The startup script already refreshes
+> deps (root/`clients/web`/`clients/mobile` `npm ci` + `cargo fetch`). Standard build/test
+> commands live in §3, `Makefile`, and `docs/SELF_HOST.md` — don't duplicate them here.
+
+### Toolchains (already in the VM image)
+- **Rust:** the workspace needs `edition2024`, so the toolchain must be **≥ 1.85**. The
+  default toolchain is set to `stable` (matches CI, which uses the runner's pre-installed
+  stable — there is no `rust-toolchain.toml`). The MSRV note `rust-version = "1.80"` in
+  `server-rust/Cargo.toml` is stale relative to the locked deps; do not pin to 1.80/1.83 —
+  the workspace will not build.
+- **Node 22 / npm 10**, **Python 3.12**, **Docker + Compose v2**, `make` are present.
+
+### Running the product end-to-end (canonical path = `docs/SELF_HOST.md`)
+- **Docker daemon is NOT a systemd service here** — start it once per VM before any
+  compose/stack work: `sudo dockerd` (run it detached, e.g. in a tmux session). The
+  `ubuntu` user is in the `docker` group, so fresh shells reach the socket; a pre-existing
+  shell may still need `sg docker -c '<cmd>'` or `sudo chmod 666 /var/run/docker.sock`.
+- Bring up the full stack (postgres + centrifugo + api + relay + agent-worker + web edge)
+  with the two `scripts/self_host_env.sh` lines from `docs/SELF_HOST.md`
+  (`--local-build` then `--compose up -d --build --wait`). The first Rust image build is
+  the long pole; after that it is cached.
+- App is served same-origin at **http://localhost:8088**. Owner login is
+  `owner@oort.local` + the password in `infra/rust/local.secrets.env`
+  (`MOMO_INITIAL_OWNER_PASSWORD`, file is 0600, git-ignored). `self_host_env.sh` never
+  overwrites an existing `local.secrets.env`; to reset from scratch use
+  `scripts/self_host_env.sh --compose down -v` **and** `rm infra/rust/local.secrets.env`.
+- REST is workspace-scoped: `/v1/workspaces/{ws}/channels/.../messages`. The seeded
+  workspace id is `00000000-0000-7000-8000-000000000001`; `clientMsgId` must be a UUID.
+  "Did the relay fan out?" is answered by SQL, not logs (relay logs nothing on success):
+  `docker exec oort-postgres-1 psql -U momo -d momo -c "SELECT kind,status,count(*) FROM outbox GROUP BY 1,2;"` → `broadcast | done` means the write path completed.
+
+### Test/lint gotchas
+- **Web tests are timezone-sensitive:** run them with `TZ=Asia/Seoul` (KST). Under UTC,
+  ~9 `clients/web` `quotaModel` tests fail on a 9-hour offset; they are correct in KST.
+- `cargo test --workspace` is safe without a DB — the Postgres conformance tests are
+  `#[ignore]` and only run when `DATABASE_URL` points at a `pgvector/pg18` DB.
+- `cargo fmt` on the workspace needs `--all` (the root is a virtual manifest, so
+  `cargo fmt --check --manifest-path server-rust/Cargo.toml` alone reports "Failed to find
+  targets"). `cargo fmt --check` output is also rustfmt-patch-version sensitive and may
+  show cosmetic import/line-wrap churn on a newer rustfmt than the tree was formatted with;
+  treat `cargo build`/`clippy -D warnings`/`cargo test --workspace` as the reliable gates.
