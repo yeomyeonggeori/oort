@@ -326,6 +326,11 @@ export type DisplayFailure =
  * 끊겼습니다" under a black rectangle describes the wrong thing, and a reader
  * who cannot see a screen is not helped by being told about output. The
  * vocabulary is ADR-0004 증보 3 D1's: 라이브 화면 and 보기, never 인수.
+ *
+ * These are the sentences for the reader a failure HAPPENS TO. Two of them are
+ * third person about a decision the reader may have made themselves; read
+ * through `displayFailureCopy` rather than indexed directly, so the owner gets
+ * their own version.
  */
 export const DISPLAY_FAILURE_COPY: Readonly<Record<DisplayFailure, string>> = {
   capability_denied:
@@ -369,6 +374,58 @@ export const DISPLAY_FAILURE_COPY: Readonly<Record<DisplayFailure, string>> = {
   webrtc_unsupported:
     "이 브라우저에서는 라이브 화면을 열 수 없습니다. WebRTC를 지원하는 브라우저나 데스크톱 앱에서 열어 보세요.",
 };
+
+/**
+ * The owner's own view of a failure they caused, the display twin of
+ * `observerFailureCopy`.
+ *
+ * WHY A SECOND TABLE AND NOT A CONDITION IN THE FIRST. `DISPLAY_FAILURE_COPY`
+ * is written for the reader a failure happens TO, and for two of its entries
+ * that reader is not always a third party. Both sentences below are third
+ * person about an action the owner just took one block up, on the same panel:
+ * the 소유자만 보기 toggle lives in 터미널 관전, and the owner who presses it
+ * gets this surface reporting their own click back to them as somebody else's
+ * decision, with no next step (design-taste-web §5).
+ *
+ *   - `observation_closed` fires on the ledger re-read while a stream is held.
+ *   - `capability_denied` is the same fact one round trip earlier: the owner
+ *     closed observation and clicked 화면 보기 before the ledger caught up, and
+ *     the server answered 403 `session observation is owner-only`.
+ *
+ * WHAT THE OWNER'S SENTENCES SAY THAT THE TERMINAL'S DO NOT. `displayGate`'s
+ * owner branch already had to answer the question this surface raises and the
+ * terminal's does not: display has no controller grade, so an `owner_only`
+ * session has no screen for its OWNER either (display_attach.rs: refusing is
+ * the fail-closed direction, an owner exemption is a permission decision nobody
+ * has made). So these reuse that gate sentence's family rather than the
+ * terminal's — an owner told only "관전을 닫았습니다" would reasonably expect the
+ * screen to still be theirs to open, which is the half-truth the gate's own
+ * docstring refuses.
+ *
+ * The gate carries the standing state (닫아 두었습니다) and this carries the
+ * action just taken (닫았습니다), which is the same split the terminal makes
+ * between `observeGate` and `observerFailureCopy`. The banner needs its own
+ * because a banner is what the reader is looking at: the component drops the
+ * gate line while one of these failures is on screen, so if the owner sentence
+ * lived only in the gate it would be suppressed at exactly the moment it is
+ * true.
+ */
+const DISPLAY_OWNER_FAILURE_COPY: Readonly<
+  Partial<Record<DisplayFailure, string>>
+> = {
+  observation_closed:
+    "관전을 소유자만 보기로 닫았습니다. 라이브 화면은 보기 전용 권한만 있어서, 닫혀 있는 동안은 소유자도 볼 수 없습니다. 팀원 관전을 허용하면 이 자리에서 다시 열립니다.",
+  capability_denied:
+    "이 세션의 라이브 화면을 볼 권한이 없습니다. 라이브 화면은 보기 전용 권한만 있어서, 관전을 소유자만 보기로 닫아 두면 소유자도 볼 수 없습니다. 팀원 관전을 허용하면 이 자리에서 열립니다.",
+};
+
+export function displayFailureCopy(
+  failure: DisplayFailure,
+  isOwner: boolean
+): string {
+  if (!isOwner) return DISPLAY_FAILURE_COPY[failure];
+  return DISPLAY_OWNER_FAILURE_COPY[failure] ?? DISPLAY_FAILURE_COPY[failure];
+}
 
 /**
  * Failures a retry can plausibly fix.

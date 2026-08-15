@@ -14,6 +14,7 @@ import {
   byeFrame,
   classifyDisplayGrantFailure,
   classifyProducerFrame,
+  displayFailureCopy,
   displayGate,
   displayOffersReload,
   displayOffersRetry,
@@ -467,6 +468,78 @@ describe("who is told they cannot watch, and why", () => {
     const teammate = displayGate(session({ observation: "owner_only" }), false);
     expect(teammate.available).toBe(false);
     expect(teammate.reason).toBe("세션 소유자가 관전을 닫아 두었습니다.");
+  });
+
+  it("reports the owner's own close to the owner, not about them", () => {
+    // The 소유자만 보기 toggle is one block up on this same panel. Both of these
+    // failures are what the owner sees one click after pressing it, so the
+    // owner-blind table would narrate the reader's own decision back to them as
+    // a third party's ("세션 소유자가 …") and give them nothing to do about it.
+    for (const failure of ["observation_closed", "capability_denied"] as const) {
+      const teammate = displayFailureCopy(failure, false);
+      const owner = displayFailureCopy(failure, true);
+      expect(teammate, failure).toBe(DISPLAY_FAILURE_COPY[failure]);
+      expect(owner, failure).not.toBe(teammate);
+      expect(owner, failure).not.toContain("세션 소유자가");
+      // The fact only this surface has to carry: display has no controller
+      // grade, so a closed session has no screen for its owner either
+      // (display_attach.rs refuses `observation != open` for everyone). An
+      // owner told only "관전을 닫았습니다" would expect the screen to still be
+      // theirs to open.
+      expect(owner, failure).toContain("소유자도 볼 수 없습니다");
+      // §5: and then the way back, which is a control the owner actually has.
+      expect(owner, failure).toContain("팀원 관전을 허용하면");
+    }
+  });
+
+  it("says the same thing to both sides everywhere else", () => {
+    const owned = new Set<DisplayFailure>(["observation_closed", "capability_denied"]);
+    for (const failure of Object.keys(DISPLAY_FAILURE_COPY) as DisplayFailure[]) {
+      if (owned.has(failure)) continue;
+      expect(displayFailureCopy(failure, true), failure).toBe(
+        DISPLAY_FAILURE_COPY[failure]
+      );
+      expect(displayFailureCopy(failure, false), failure).toBe(
+        DISPLAY_FAILURE_COPY[failure]
+      );
+    }
+  });
+
+  it("keeps the banner's owner sentence in the gate's family, and in its own tense", () => {
+    // Same family: the gate already had to answer "why can the owner not watch
+    // their own screen", and two different explanations of one rule on one panel
+    // is how a reader learns to trust neither.
+    const gateReason = displayGate(session({ observation: "owner_only" }), true).reason;
+    const banner = displayFailureCopy("observation_closed", true);
+    for (const shared of ["소유자도 볼 수 없습니다", "팀원 관전을 허용하면"]) {
+      expect(gateReason).toContain(shared);
+      expect(banner).toContain(shared);
+    }
+    // Different tense, because they describe different moments: the gate is the
+    // standing state of a session the reader arrived at, the banner is the
+    // action they just took. Same split the terminal makes between `observeGate`
+    // and `observerFailureCopy`.
+    expect(banner).not.toBe(gateReason);
+    expect(gateReason).toContain("닫아 두었습니다");
+    expect(banner).toContain("닫았습니다");
+  });
+
+  it("holds the copy discipline on the owner's sentences too", () => {
+    for (const failure of ["observation_closed", "capability_denied"] as const) {
+      const owner = displayFailureCopy(failure, true);
+      expect(owner, failure).not.toMatch(/[—–]/);
+      expect(owner, failure).not.toMatch(/죄송|잠시 후 다시/);
+      // ADR-0004 증보 3 D1: this grade takes nothing over.
+      expect(owner, failure).not.toMatch(/인수/);
+    }
+  });
+
+  it("reads the banner through the owner-aware function, never the raw table", () => {
+    // The finding this pins: the component indexed `DISPLAY_FAILURE_COPY`
+    // directly, which is owner-blind by construction. An absence test, because
+    // the regression is a one-character edit back to a subscript.
+    expect(DISPLAY_COMPONENT_CODE).toMatch(/displayFailureCopy\(/);
+    expect(DISPLAY_COMPONENT_CODE).not.toMatch(/DISPLAY_FAILURE_COPY\s*\[/);
   });
 
   it("keeps the three unavailable reasons apart", () => {

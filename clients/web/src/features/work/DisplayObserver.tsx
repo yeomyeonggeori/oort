@@ -19,6 +19,7 @@ import {
   byeFrame,
   classifyDisplayGrantFailure,
   classifyProducerFrame,
+  displayFailureCopy,
   displayGate,
   displayOffersReload,
   displayOffersRetry,
@@ -29,7 +30,6 @@ import {
   readInboundVideoStats,
   sdpCarriesVideo,
   sdpNegotiatesInput,
-  DISPLAY_FAILURE_COPY,
   DISPLAY_ICE_SERVERS,
   DISPLAY_LINK_NOTE,
   DISPLAY_LINK_STATUS,
@@ -622,6 +622,12 @@ export function DisplayObserver({
   // A video element left holding its last frame would be the frozen picture
   // this whole file is written against.
   const showFrame = busy || watchingNow;
+  // One fact, one sentence. These two failures ARE the gate's own reason said
+  // over again, and the banner is the copy that wins because it is what the
+  // reader is looking at and the one carrying the tone. That only holds because
+  // the banner is owner-aware (`displayFailureCopy`): while it indexed the
+  // owner-blind table this line dropped the gate's owner sentence and put a
+  // third-person one in its place, which is the opposite of a de-duplication.
   const gateReasonInBanner =
     phase.kind === "failed" &&
     (phase.failure === "observation_closed" || phase.failure === "session_ended");
@@ -711,7 +717,12 @@ export function DisplayObserver({
                 ? "neutral"
                 : "error"
             }
-            message={DISPLAY_FAILURE_COPY[phase.failure]}
+            // Owner-aware, because the 소유자만 보기 toggle that causes two of
+            // these failures is one block up on this same panel. The owner-blind
+            // table would report the reader's own click back to them in the
+            // third person, and would not say the thing only this surface has to
+            // say: a closed session has no screen for its owner either.
+            message={displayFailureCopy(phase.failure, isOwner)}
             {...(displayOffersRetry(phase.failure, gate.available)
               ? { actionLabel: "다시 연결", onAction: () => void start() }
               : displayOffersReload(phase.failure)

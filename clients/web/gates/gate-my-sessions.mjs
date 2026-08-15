@@ -129,6 +129,7 @@ function workSession({
   label,
   status = "running",
   exitCode,
+  remoteDisplayAvailable = false,
 }) {
   return {
     id,
@@ -143,7 +144,7 @@ function workSession({
     observation: "open",
     observerGrantCount: 0,
     remoteAttachAvailable: true,
-    remoteDisplayAvailable: false,
+    remoteDisplayAvailable,
     startedAtMs: 1_785_163_200_000,
     ...(exitCode === undefined ? {} : { exitCode }),
   };
@@ -156,6 +157,10 @@ const sessions = [
     hostId: offlineHostId,
     rootMessageId: offlineRootId,
     label: "세션 연속성 표면 구현",
+    // 이 세션은 터미널과 화면을 **둘 다** 띄웠다. 호스트 오프라인 배너가
+    // 가리는 것이 두 블록이므로, 배너의 명사가 둘을 덮는지 확인할 수 있는
+    // 유일한 픽스처가 여기다 (LIVE-2 리뷰 M1).
+    remoteDisplayAvailable: true,
   }),
   workSession({
     id: onlineSessionId,
@@ -704,6 +709,17 @@ async function assertContinuity(context, state) {
   if (offlineBanner.includes("세션 스레드") || !offlineBanner.includes("아래")) {
     throw new Error(
       `오프라인 배너가 이 화면에 없는 동선을 지시한다 (${offlineBanner})`
+    );
+  }
+  // LIVE-2 리뷰 M1: 이 배너는 터미널 관전과 라이브 화면 **두 블록을** 대체한다.
+  // 화면을 띄운 세션(remoteDisplayAvailable)에서 명사가 터미널 하나뿐이면,
+  // 라이브 화면 블록은 아무 설명 없이 사라진 것이 된다.
+  if ((await page.getByTestId("work-display").count()) !== 0) {
+    throw new Error("오프라인 배너 아래에 라이브 화면 블록이 그대로 남았다");
+  }
+  if (!offlineBanner.includes("라이브 화면")) {
+    throw new Error(
+      `화면을 띄운 세션인데 오프라인 배너가 터미널만 설명한다 (${offlineBanner})`
     );
   }
   // 그리고 목록 행이 잃은 채널 스레드 동선은 여기서 다시 난다(H2 부수). 상세는
