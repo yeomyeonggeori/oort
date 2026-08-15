@@ -1338,8 +1338,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Issue an ephemeral view-only capability for the session's live screen.
-         * @description Human bearer only, and observer only. ADR-0165 carries the live screen over WebRTC directly between the browser and the sandbox; this endpoint mints the 60-second bearer for that peer-to-peer handshake and nothing else. mode defaults to observer and is the only grade this server can produce: a controller request is 403 by name, because input is ADR-0004 증보 3's boundary and it is not open. The database says the same thing (migration 075's terminal_attach_display_observer_ck makes a controllable display capability unrepresentable) and the producer says it a third time by never opening an input datachannel. Requires active workspace and session-channel membership while observation=open, a running or idle session carrying a MomoHost-signed display binding, an unrevoked work_host, AND that host advertising capabilities.display_attach. That last clause is fail-closed and is what excludes BYOC hosts without any policy naming a provider. display_endpoint is the HOST's own credential-free WebRTC signalling WebSocket; it contains no bearer, momo never proxies signalling or media, and no frame is stored anywhere.
+         * Issue an ephemeral capability for the session's live screen.
+         * @description Human bearer only. ADR-0165 carries the live screen over WebRTC directly between the browser and the sandbox; this endpoint mints the 60-second bearer for that peer-to-peer handshake and nothing else. mode is observer or, since LIVE-3, controller. It still DEFAULTS to observer: taking control stops the agent, which is never what a client meant by saying nothing. observer requires active workspace and session-channel membership. Since LIVE-3 the session OWNER is exempt from the observation clause — owner_only means 소유자만 본다 (ADR-0004 증보 3), not 아무도 못 본다 — while a teammate is still refused 403 on a closed session. controller is the session owner and nobody else (증보 3 D1: control is a person's act on their own session), and it does three things at once: it mints a controller grant, it OPENS A CONTROL WINDOW in the display_control_window ledger (migration 076), and for as long as that window stands the agent's own path to this session is refused (POST /work-controls answers 409, and anything already dispatched is withheld from the host's pending-controls poll). That is 증보 3 D3's 비관측 enforced rather than declared. The VM does not move: the session stays running and running-time billing continues (증보 3 D6). Both grades additionally require a running or idle session carrying a MomoHost-signed display binding, an unrevoked work_host, AND that host advertising capabilities.display_attach. That last clause is fail-closed and is what excludes BYOC hosts without any policy naming a provider. display_endpoint is the HOST's own credential-free WebRTC signalling WebSocket; it contains no bearer, momo never proxies signalling or media, and no frame is stored anywhere. Nothing the person types during a control window enters this API, the transcript, the audit log or the Memory Plane (증보 3 D2) — the ledger records who, when and why it ended, and has no column that could hold a keystroke.
          */
         post: operations["issueDisplayAttachCapability"];
         delete?: never;
@@ -1368,6 +1368,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/workspaces/{workspaceId}/work-sessions/{workSessionId}/display-control": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Hand the session's screen back to its agent.
+         * @description The 반환 half of ADR-0004 증보 3 (LIVE-3): the person closes their control window and the agent's reach into the session comes back. Session owner only, matching who could have opened it — a teammate must not be able to end somebody else's intervention mid-password. Closing writes an end_reason of returned, emits the work.session.control boundary event carrying 재개 시각, and makes the next producer re-validation answer input_enabled false. That last part is what makes the return real rather than bookkeeping: without it, handing control back would be a row in a table and a keyboard that still worked. IDEMPOTENT. Returning a window that has already closed — because this is a retry, because the lease lapsed, or because the session ended — is 200 with closed=false, never a 4xx. It is one of the window's three closes; the other two (a lapsed producer lease, and the session ending) need no caller and happen on their own.
+         */
+        delete: operations["returnDisplayControl"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/workspaces/{workspaceId}/work-hosts/{workHostId}/display-attach/validate": {
         parameters: {
             query?: never;
@@ -1379,7 +1399,7 @@ export interface paths {
         put?: never;
         /**
          * Validate a view-only display capability as its target host.
-         * @description MomoHost-signed control-plane check performed by the WebRTC producer immediately before it accepts a signalling connection, and then on a timer for every peer connection it already serves (`stream: true`). The opaque bearer is matched by SHA-256 digest; the raw token is never persisted or logged. Validation joins the running-or-idle work_session, the unrevoked work_host, the grantee, the session's observation and the host's display advertisement on every call, so ending the session, revoking the host, closing observation, the grantee leaving the channel, or withdrawing capabilities.display_attach all cut a stream that is already open. A terminal capability presented here, or a display capability presented to terminal-attach/validate, is the ordinary 401: two surfaces on one box do not lend each other authority. The response carries input_enabled, which is always false and instructs the producer not to create an input datachannel (ADR-0165 D4). Media and signalling never traverse MomoServer, OutboxRelay, or Centrifugo, and no frame is stored.
+         * @description MomoHost-signed control-plane check performed by the WebRTC producer immediately before it accepts a signalling connection, and then on a timer for every peer connection it already serves (`stream: true`). The opaque bearer is matched by SHA-256 digest; the raw token is never persisted or logged. Validation joins the running-or-idle work_session, the unrevoked work_host, the grantee, the session's observation and the host's display advertisement on every call, so ending the session, revoking the host, closing observation, the grantee leaving the channel, or withdrawing capabilities.display_attach all cut a stream that is already open. A terminal capability presented here, or a display capability presented to terminal-attach/validate, is the ordinary 401: two surfaces on one box do not lend each other authority. The response carries input_enabled, which instructs the producer whether it may negotiate an input datachannel. It is TRUE only when the bearer is a controller grant AND the control window that grant opened is still standing, and it is re-answered on every re-validation — so it is also the off switch: when the person returns control the window closes and the producer must close the channel. For an observer grant it is always false, and view-only remains the ABSENCE of a channel rather than a flag beside one (ADR-0165 D4). A controller re-validation also RENEWS the control window's lease. That is deliberate and is why the window is not keyed to the capability's 60-second expiry: a live WebRTC session outlives its dial window by design, and a window that expired with it would resume the agent sixty seconds into a login still in progress. Media and signalling never traverse MomoServer, OutboxRelay, or Centrifugo, and no frame is stored.
          */
         post: operations["validateDisplayAttachCapability"];
         delete?: never;
@@ -3748,11 +3768,11 @@ export interface components {
         };
         IssueDisplayAttachRequest: {
             /**
-             * @description Observer is the only grade this server mints for a display. The enum is deliberately one value rather than two-with-a-note: a client that sends controller is answered 403 by name, so the boundary ADR-0004 증보 3 is holding is visible in the schema rather than discoverable at runtime.
+             * @description observer watches; controller also takes the keyboard, opens a control window and stops the agent's reach into this session for as long as it stands (ADR-0004 증보 3, LIVE-3). Only the session owner may ask for controller. The default stays observer now that both are spellable, and that is a decision rather than a leftover: a default is what a client gets when it did not consider the question, and "did you mean to stop the agent and take the keyboard" is never answered by silence.
              * @default observer
              * @enum {string}
              */
-            mode: "observer";
+            mode: "observer" | "controller";
         };
         DisplayAttachCapabilityResponse: {
             /** @description The HOST's own credential-free WSS WebRTC signalling endpoint. Userinfo, query and fragment are forbidden. momo proxies neither the signalling nor the media that follows it. */
@@ -3761,10 +3781,29 @@ export interface components {
             capability_token: string;
             display_id: string;
             /**
-             * @description Always observer. Serialised anyway so a UI can say "view only" before the socket is dialled — a view-only stream that looks identical to a controllable one is how a person ends up typing into a window that will never deliver a keystroke.
+             * @description The grade actually minted, so a UI can say "view only" before the socket is dialled — a view-only stream that looks identical to a controllable one is how a person ends up typing into a window that will never deliver a keystroke.
              * @enum {string}
              */
-            mode: "observer";
+            mode: "observer" | "controller";
+            /**
+             * Format: int64
+             * @description Epoch milliseconds at which the control window opened. Present only on a controller grant. The caller's own copy of the boundary event the work.session.control envelope carries, so the surface can say when control began without waiting for the relay.
+             */
+            control_started_at?: number;
+        };
+        DisplayControlReturnResponse: {
+            /** @description Whether THIS call ended a standing control window. false means there was nothing open — a retried return, or a window that had already lapsed or ended with the session. Both are success; the status code is 200 either way and the flag is what tells them apart. */
+            closed: boolean;
+            /**
+             * Format: int64
+             * @description Epoch ms, present only when this call closed a window.
+             */
+            control_started_at?: number;
+            /**
+             * Format: int64
+             * @description Epoch ms, present only when this call closed a window.
+             */
+            control_ended_at?: number;
         };
         /** @description MomoHost-signed publication of the WebRTC display binding for a running or idle session the caller already owns. Writing a DIFFERENT binding onto a session that already has one is 409; re-sending the identical pair is idempotent. The server stores and authorizes the endpoint and never carries a frame. */
         PublishDisplayBindingRequest: {
@@ -3791,15 +3830,12 @@ export interface components {
              */
             expires_at: string;
             /**
-             * @description Always observer; migration 075's CHECK makes anything else unrepresentable.
+             * @description The grade of the bearer the producer presented. Migration 076 dropped 075's observer-only CHECK when ADR-0004 증보 3 was Accepted.
              * @enum {string}
              */
-            mode: "observer";
-            /**
-             * @description Always false, and a negative instruction rather than a status. The producer reads it and does NOT create an input datachannel, so the view-only guarantee lives in a channel that was never opened rather than in a client flag anyone could flip (ADR-0165 D4).
-             * @enum {boolean}
-             */
-            input_enabled: false;
+            mode: "observer" | "controller";
+            /** @description Whether this producer may negotiate an input datachannel RIGHT NOW. A negative instruction rather than a status: the view-only guarantee lives in a channel that was never opened rather than in a client flag anyone could flip (ADR-0165 D4). True only when the bearer is a controller grant AND its control window still stands, so a returned, lapsed or session-ended window answers false at the next re-validation — which is how handing control back actually takes the keyboard away instead of merely recording that somebody asked for it. */
+            input_enabled: boolean;
         };
         CreateWorkControlRequest: {
             /** Format: uuid */
@@ -8807,7 +8843,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description Controller mode was requested, or the caller is not an authorized active human/channel member, or observation is owner_only. */
+            /** @description controller was requested by someone who is not the session owner, or the caller is not an authorized active human/channel member, or observation is owner_only and the caller is not the owner. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -8825,7 +8861,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Session ended, lacks a display binding, its host is revoked, or that host does not advertise a display. One status for all four: which is false describes a host's internal state to a caller entitled only to know it is unavailable. */
+            /** @description Session ended, lacks a display binding, its host is revoked, or that host does not advertise a display. One status for all four: which is false describes a host's internal state to a caller entitled only to know it is unavailable. Also returned when controller was requested and somebody else already holds the control window — one open window per session is a unique index, not a race. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -8914,6 +8950,60 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+        };
+    };
+    returnDisplayControl: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+                /** @description UUIDv7 work session ledger id. */
+                workSessionId: components["parameters"]["WorkSessionId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The window is closed. closed says whether this call is what closed it. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DisplayControlReturnResponse"];
+                };
+            };
+            /** @description Invalid work session identifier. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Not an active workspace member, or not the session owner. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Session does not exist in this workspace. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
         };
     };
     validateDisplayAttachCapability: {
