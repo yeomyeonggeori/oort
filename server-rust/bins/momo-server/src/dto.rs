@@ -835,6 +835,13 @@ pub struct CreateWorkSessionRequest {
     pub pty_id: Option<String>,
     #[serde(default)]
     pub attach_endpoint: Option<String>,
+    /// LIVE-1's pair, decoded for the same ADR-0134 D1 reason and refused the
+    /// same way. A display binding is published by the host through its own
+    /// signed route (`…/display-binding`), never smuggled into a human's create.
+    #[serde(default)]
+    pub display_id: Option<String>,
+    #[serde(default)]
+    pub display_endpoint: Option<String>,
 }
 
 /// `PATCH …/work-sessions/{session}` request (Swift `UpdateWorkSessionRequest`,
@@ -856,6 +863,11 @@ pub struct UpdateWorkSessionRequest {
     pub pty_id: Option<String>,
     #[serde(default)]
     pub attach_endpoint: Option<String>,
+    /// LIVE-1's pair. See [`CreateWorkSessionRequest`].
+    #[serde(default)]
+    pub display_id: Option<String>,
+    #[serde(default)]
+    pub display_endpoint: Option<String>,
 }
 
 /// `POST …/work-sessions/{session}/resume` request (Swift, :53-55).
@@ -881,6 +893,14 @@ pub struct WorkSessionDto {
     pub observation: String,
     pub observer_grant_count: i64,
     pub remote_attach_available: bool,
+    /// LIVE-1 (ADR-0165): is there a live screen to watch?
+    ///
+    /// The **raw** `display_endpoint` deliberately does not appear anywhere in
+    /// this DTO, exactly as `attach_endpoint` does not: a session read is a list
+    /// a whole channel can fetch, and an endpoint is only ever handed out beside
+    /// the capability that authorises dialling it
+    /// ([`DisplayAttachCapabilityResponse`]).
+    pub remote_display_available: bool,
     pub started_at_ms: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ended_at_ms: Option<i64>,
@@ -1028,6 +1048,94 @@ pub struct TerminalAttachValidationResponse {
     pub expires_at: String,
     /// `"controller"` | `"observer"`.
     pub mode: &'static str,
+}
+
+// ---------------------------------------------------------------------------
+// display attach capability (LIVE-1 — ADR-0165)
+// ---------------------------------------------------------------------------
+
+/// `POST …/work-sessions/{session}/display-attach` request.
+///
+/// `mode` is decoded even though `observer` is the only value this route can
+/// serve, and that is the point (ADR-0134 D1): a client asking for `controller`
+/// is asking for **input**, and it must be told 403 by name rather than handed a
+/// view-only grant it believes is a control one. Absent/`{}` means `observer`,
+/// because there is nothing else it could mean here.
+#[derive(Debug, Default, Deserialize)]
+pub struct IssueDisplayAttachRequest {
+    #[serde(default)]
+    pub mode: Option<String>,
+}
+
+/// `POST …/display-attach` response.
+///
+/// snake_case for [`TerminalAttachCapabilityResponse`]'s reason: it is the
+/// sibling of a body two clients already parse that way, and one attach response
+/// in each case would be a trap for whoever writes the third.
+///
+/// `display_endpoint` is the HOST's WebRTC **signalling** WS URL (ADR-0165 D2).
+/// momo does not proxy it, does not appear in the ICE negotiation it starts, and
+/// never sees a frame that follows (D5).
+#[derive(Debug, Serialize)]
+pub struct DisplayAttachCapabilityResponse {
+    /// The HOST's own signalling endpoint. momo never proxies it.
+    pub display_endpoint: String,
+    /// The opaque 60-second bearer. Returned once; only its SHA-256 is stored.
+    pub capability_token: String,
+    pub display_id: String,
+    /// Always `"observer"` in this build, and serialised anyway.
+    ///
+    /// A view-only stream that *looks* identical to a controllable one is how a
+    /// person ends up typing into a window that will never deliver a keystroke.
+    /// The producer enforces this by not opening an input datachannel at all
+    /// (ADR-0165 D4); this field is what lets the UI say so before the socket is
+    /// even dialled, and it is the field that will change — not appear — when
+    /// ADR-0004 증보 3 opens control.
+    pub mode: &'static str,
+}
+
+/// `POST …/work-hosts/{host}/display-attach/validate` request.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ValidateDisplayAttachRequest {
+    pub capability_token: String,
+    /// `true` = the producer is re-checking a peer connection it already serves.
+    /// Relaxes the expiry clause and **only** the expiry clause (MOMO-674's rule,
+    /// which a media stream needs even more than a terminal: a WebRTC session
+    /// outlives its 60-second dial window by design).
+    #[serde(default)]
+    pub stream: Option<bool>,
+}
+
+/// `POST …/display-attach/validate` response.
+#[derive(Debug, Serialize)]
+pub struct DisplayAttachValidationResponse {
+    pub work_session_id: String,
+    pub display_id: String,
+    /// ISO-8601 with fractional seconds, rendered by PostgreSQL.
+    pub expires_at: String,
+    /// Always `"observer"` — 075's CHECK makes anything else unrepresentable.
+    pub mode: &'static str,
+    /// `false` in this build, always.
+    ///
+    /// The producer reads this and **does not create an input datachannel**
+    /// (ADR-0165 D4). It is a negative instruction on purpose: the view-only
+    /// guarantee lives in a channel that was never opened, not in a client flag
+    /// anyone could flip, and this field is how the server states that intent to
+    /// the only process that can honour it.
+    pub input_enabled: bool,
+}
+
+/// `POST …/work-sessions/{session}/display-binding` request — work-host-signed.
+///
+/// The daemon's own two values. camelCase like every other work-host body, and
+/// `deny_unknown_fields` so a daemon that thinks it is sending something this
+/// server acts on gets told otherwise.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PublishDisplayBindingRequest {
+    pub display_id: String,
+    pub display_endpoint: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -3547,6 +3655,7 @@ mod tests {
             observation: "open".into(),
             observer_grant_count: 0,
             remote_attach_available: false,
+            remote_display_available: true,
             started_at_ms: 5,
             ended_at_ms: None,
             exit_code: None,
@@ -3557,6 +3666,10 @@ mod tests {
         assert_eq!(json["rootMessageId"], "r");
         assert_eq!(json["observerGrantCount"], 0);
         assert_eq!(json["remoteAttachAvailable"], false);
+        // LIVE-1: a session can offer a screen and no terminal. The two booleans
+        // are set opposite here on purpose — a DTO that folded them would make
+        // this assertion pass while telling every client the wrong thing.
+        assert_eq!(json["remoteDisplayAvailable"], true);
         assert_eq!(json["startedAtMs"], 5);
         assert!(json.get("endedAtMs").is_none());
         assert!(json.get("exitCode").is_none());

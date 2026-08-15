@@ -1328,6 +1328,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/workspaces/{workspaceId}/work-sessions/{workSessionId}/display-attach": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Issue an ephemeral view-only capability for the session's live screen.
+         * @description Human bearer only, and observer only. ADR-0165 carries the live screen over WebRTC directly between the browser and the sandbox; this endpoint mints the 60-second bearer for that peer-to-peer handshake and nothing else. mode defaults to observer and is the only grade this server can produce: a controller request is 403 by name, because input is ADR-0004 증보 3's boundary and it is not open. The database says the same thing (migration 075's terminal_attach_display_observer_ck makes a controllable display capability unrepresentable) and the producer says it a third time by never opening an input datachannel. Requires active workspace and session-channel membership while observation=open, a running or idle session carrying a MomoHost-signed display binding, an unrevoked work_host, AND that host advertising capabilities.display_attach. That last clause is fail-closed and is what excludes BYOC hosts without any policy naming a provider. display_endpoint is the HOST's own credential-free WebRTC signalling WebSocket; it contains no bearer, momo never proxies signalling or media, and no frame is stored anywhere.
+         */
+        post: operations["issueDisplayAttachCapability"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{workspaceId}/work-sessions/{workSessionId}/display-binding": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Publish this session's WebRTC display binding as its own host.
+         * @description MomoHost-signed, exactly once per session. The daemon inside the sandbox declares displayId plus the credential-free WSS signalling endpoint a browser will dial. A human bearer is 403 here and the same field names are refused by name on session create and PATCH: publishing a binding is a claim about what is running on a machine, and only the machine makes it. Re-sending the identical pair is idempotent (204); a DIFFERENT binding is 409, because two producers claiming one session's screen is a state the ledger cannot describe. The signing host must be the session's own; the path names a session rather than a host, so that pin is enforced against the ledger inside the handler. The host must also already advertise capabilities.display_attach.
+         */
+        post: operations["publishWorkSessionDisplayBinding"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{workspaceId}/work-hosts/{workHostId}/display-attach/validate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Validate a view-only display capability as its target host.
+         * @description MomoHost-signed control-plane check performed by the WebRTC producer immediately before it accepts a signalling connection, and then on a timer for every peer connection it already serves (`stream: true`). The opaque bearer is matched by SHA-256 digest; the raw token is never persisted or logged. Validation joins the running-or-idle work_session, the unrevoked work_host, the grantee, the session's observation and the host's display advertisement on every call, so ending the session, revoking the host, closing observation, the grantee leaving the channel, or withdrawing capabilities.display_attach all cut a stream that is already open. A terminal capability presented here, or a display capability presented to terminal-attach/validate, is the ordinary 401: two surfaces on one box do not lend each other authority. The response carries input_enabled, which is always false and instructs the producer not to create an input datachannel (ADR-0165 D4). Media and signalling never traverse MomoServer, OutboxRelay, or Centrifugo, and no frame is stored.
+         */
+        post: operations["validateDisplayAttachCapability"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/workspaces/{workspaceId}/work-controls": {
         parameters: {
             query?: never;
@@ -3537,11 +3597,13 @@ export interface components {
             observation: "open" | "owner_only";
             /**
              * Format: int64
-             * @description Currently valid observer capabilities only; expired or invalid grants are excluded.
+             * @description Currently valid observer capabilities only; expired or invalid grants are excluded. Deliberately kind-blind since LIVE-1: a teammate watching the live screen is watching, and one 관전자 수 is what every surface publishes.
              */
             observerGrantCount: number;
             /** @description True only when the session has a complete remote PTY binding; endpoint and capability remain unprojected. */
             remoteAttachAvailable: boolean;
+            /** @description True only when the session has a complete WebRTC display binding (ADR-0165); the signalling endpoint and the capability remain unprojected, exactly as the PTY pair's do. Independent of remoteAttachAvailable: a session can offer a screen and no terminal, or the reverse, and a client that folds them offers the wrong verb. */
+            remoteDisplayAvailable: boolean;
             /** Format: int64 */
             startedAtMs: number;
             /**
@@ -3683,6 +3745,61 @@ export interface components {
              * @enum {string}
              */
             mode: "controller" | "observer";
+        };
+        IssueDisplayAttachRequest: {
+            /**
+             * @description Observer is the only grade this server mints for a display. The enum is deliberately one value rather than two-with-a-note: a client that sends controller is answered 403 by name, so the boundary ADR-0004 증보 3 is holding is visible in the schema rather than discoverable at runtime.
+             * @default observer
+             * @enum {string}
+             */
+            mode: "observer";
+        };
+        DisplayAttachCapabilityResponse: {
+            /** @description The HOST's own credential-free WSS WebRTC signalling endpoint. Userinfo, query and fragment are forbidden. momo proxies neither the signalling nor the media that follows it. */
+            display_endpoint: string;
+            /** @description Opaque 60-second bearer returned once. Only its SHA-256 digest is persisted; producer-side validation also requires a live host signature. Same grammar as a terminal capability — the kind is a ledger column, not a second token format. */
+            capability_token: string;
+            display_id: string;
+            /**
+             * @description Always observer. Serialised anyway so a UI can say "view only" before the socket is dialled — a view-only stream that looks identical to a controllable one is how a person ends up typing into a window that will never deliver a keystroke.
+             * @enum {string}
+             */
+            mode: "observer";
+        };
+        /** @description MomoHost-signed publication of the WebRTC display binding for a running or idle session the caller already owns. Writing a DIFFERENT binding onto a session that already has one is 409; re-sending the identical pair is idempotent. The server stores and authorizes the endpoint and never carries a frame. */
+        PublishDisplayBindingRequest: {
+            displayId: string;
+            /** @description Credential-free HTTPS or WSS WebRTC signalling endpoint. Userinfo, query, and fragment are forbidden. */
+            displayEndpoint: string;
+        };
+        ValidateDisplayAttachRequest: {
+            /** @description Opaque grant presented by the browser to the sandbox producer. */
+            capability_token: string;
+            /**
+             * @description True when the producer is re-checking a peer connection it already serves rather than admitting a new viewer. It relaxes exactly one clause, the capability expiry, because that TTL bounds the mint-to-dial window and the producer closed that window under a full validation. A media session outlives its 60-second dial window by design, so every other authorization clause still applies on every call: a live screen is cut within one revalidation period when the session ends, the host is revoked, observation closes, the grantee leaves the channel, the grantee is deactivated, or the host stops advertising a display.
+             * @default false
+             */
+            stream: boolean;
+        };
+        DisplayAttachValidationResponse: {
+            /** Format: uuid */
+            work_session_id: string;
+            display_id: string;
+            /**
+             * Format: date-time
+             * @description PostgreSQL timestamptz capability expiry.
+             */
+            expires_at: string;
+            /**
+             * @description Always observer; migration 075's CHECK makes anything else unrepresentable.
+             * @enum {string}
+             */
+            mode: "observer";
+            /**
+             * @description Always false, and a negative instruction rather than a status. The producer reads it and does NOT create an input datachannel, so the view-only guarantee lives in a channel that was never opened rather than in a client flag anyone could flip (ADR-0165 D4).
+             * @enum {boolean}
+             */
+            input_enabled: false;
         };
         CreateWorkControlRequest: {
             /** Format: uuid */
@@ -8651,6 +8768,206 @@ export interface operations {
                 };
             };
             429: components["responses"]["RateLimited"];
+        };
+    };
+    issueDisplayAttachCapability: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+                /** @description UUIDv7 work session ledger id. */
+                workSessionId: components["parameters"]["WorkSessionId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["IssueDisplayAttachRequest"];
+            };
+        };
+        responses: {
+            /** @description Exact four-field view-only display grant. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DisplayAttachCapabilityResponse"];
+                };
+            };
+            /** @description Invalid work session identifier, or a mode outside the vocabulary. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Controller mode was requested, or the caller is not an authorized active human/channel member, or observation is owner_only. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Session does not exist in this workspace. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Session ended, lacks a display binding, its host is revoked, or that host does not advertise a display. One status for all four: which is false describes a host's internal state to a caller entitled only to know it is unavailable. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    publishWorkSessionDisplayBinding: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Unix epoch milliseconds inside the five-minute clock-skew window. */
+                "X-Momo-Work-Host-Sent-At": components["parameters"]["WorkHostSentAt"];
+                /** @description Raw 64-byte Ed25519 signature in standard base64. */
+                "X-Momo-Work-Host-Signature": components["parameters"]["WorkHostSignature"];
+                /** @description Unique UUID bound into the v2 signature and atomically accepted once within its ten-minute replay-retention lifetime. */
+                "X-Momo-Work-Host-Request-ID": components["parameters"]["WorkHostRequestId"];
+            };
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+                /** @description UUIDv7 work session ledger id. */
+                workSessionId: components["parameters"]["WorkSessionId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PublishDisplayBindingRequest"];
+            };
+        };
+        responses: {
+            /** @description Binding stored, or already exactly this binding. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Invalid session identifier, or displayId/displayEndpoint outside the ledger's grammar. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Invalid or replayed host signature. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Human bearer, or a host binding a session that is not its own. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Session does not exist in this workspace. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Session is not running or idle, the host is revoked or does not advertise a display, or a different binding is already published. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    validateDisplayAttachCapability: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Unix epoch milliseconds inside the five-minute clock-skew window. */
+                "X-Momo-Work-Host-Sent-At": components["parameters"]["WorkHostSentAt"];
+                /** @description Raw 64-byte Ed25519 signature in standard base64. */
+                "X-Momo-Work-Host-Signature": components["parameters"]["WorkHostSignature"];
+                /** @description Unique UUID bound into the v2 signature and atomically accepted once within its ten-minute replay-retention lifetime. */
+                "X-Momo-Work-Host-Request-ID": components["parameters"]["WorkHostRequestId"];
+            };
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+                /** @description UUIDv7 registered execution host id. */
+                workHostId: components["parameters"]["WorkHostId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ValidateDisplayAttachRequest"];
+            };
+        };
+        responses: {
+            /** @description Capability is live and bound to this host and display. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DisplayAttachValidationResponse"];
+                };
+            };
+            /** @description Invalid path identifier or request body shape. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Invalid host signature, or an unknown, expired, wrong-kind, ended, revoked or no-longer-authorized capability. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     createWorkControl: {

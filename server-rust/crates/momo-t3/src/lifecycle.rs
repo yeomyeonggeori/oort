@@ -462,6 +462,12 @@ pub struct WorkSessionDetail {
     pub observation: String,
     pub observer_grant_count: i64,
     pub remote_attach_available: bool,
+    /// LIVE-1: the display half of the same question — is there a screen to
+    /// watch? `remote_attach_available`'s exact twin, and deliberately a
+    /// **separate** boolean: a session can have a PTY and no screen (every
+    /// pre-LIVE-1 session), and a client that folded the two would offer 관전
+    /// on a session with nothing to render.
+    pub remote_display_available: bool,
     pub started_at_ms: i64,
     pub ended_at_ms: Option<i64>,
     pub exit_code: Option<i32>,
@@ -469,27 +475,67 @@ pub struct WorkSessionDetail {
     pub resumed_from_session_id: Option<Uuid>,
 }
 
+/// The two availability predicates, aliased `ws`, written **once**.
+///
+/// They used to be spelled out in each of the three projections
+/// ([`detail_columns`], [`crate::reattach`]'s `REATTACH_COLUMNS`, and the
+/// session list). LIVE-1 had to add a second predicate beside the first in every
+/// one of them, which is exactly the shape that lands in two of three and is
+/// discovered later as "the list says 관전 가능, the detail says no". Hoisting
+/// them makes the drift unrepresentable, and
+/// `every_projection_publishes_both_availability_columns` still checks the
+/// composed statements in case a fourth reader is written by hand.
+pub(crate) const WS_ATTACH_AVAILABILITY: &str =
+    "(ws.pty_id IS NOT NULL AND ws.attach_endpoint IS NOT NULL) AS remote_attach_available, \
+     (ws.display_id IS NOT NULL AND ws.display_endpoint IS NOT NULL) AS remote_display_available";
+
+/// The same pair for a bare `RETURNING`, where no alias is in scope.
+const BARE_ATTACH_AVAILABILITY: &str =
+    "(pty_id IS NOT NULL AND attach_endpoint IS NOT NULL) AS remote_attach_available, \
+     (display_id IS NOT NULL AND display_endpoint IS NOT NULL) AS remote_display_available";
+
 /// The DTO projection without the observer-grant subquery — used by every
 /// single-row read and every `RETURNING`, exactly as Swift does
 /// (`0::bigint AS observer_grant_count`, :268/:493/:555).
-const DETAIL_COLUMNS: &str = "ws.id, ws.workspace_id, ws.channel_id, ws.member_id, ws.host_id, \
-     ws.root_message_id, ws.tool, ws.label, ws.status, ws.observation, \
-     0::bigint AS observer_grant_count, \
-     (ws.pty_id IS NOT NULL AND ws.attach_endpoint IS NOT NULL) AS remote_attach_available, \
-     floor(extract(epoch from ws.started_at) * 1000)::bigint AS started_at_ms, \
-     CASE WHEN ws.ended_at IS NULL THEN NULL \
-          ELSE floor(extract(epoch from ws.ended_at) * 1000)::bigint END AS ended_at_ms, \
-     ws.exit_code, ws.end_reason, ws.resumed_from_session_id";
+fn detail_columns() -> String {
+    format!(
+        "ws.id, ws.workspace_id, ws.channel_id, ws.member_id, ws.host_id, \
+         ws.root_message_id, ws.tool, ws.label, ws.status, ws.observation, \
+         0::bigint AS observer_grant_count, \
+         {WS_ATTACH_AVAILABILITY}, \
+         floor(extract(epoch from ws.started_at) * 1000)::bigint AS started_at_ms, \
+         CASE WHEN ws.ended_at IS NULL THEN NULL \
+              ELSE floor(extract(epoch from ws.ended_at) * 1000)::bigint END AS ended_at_ms, \
+         ws.exit_code, ws.end_reason, ws.resumed_from_session_id"
+    )
+}
 
 /// Same projection for a bare `RETURNING` (no `ws` alias available).
-const DETAIL_RETURNING: &str = "id, workspace_id, channel_id, member_id, host_id, \
-     root_message_id, tool, label, status, observation, \
-     0::bigint AS observer_grant_count, \
-     (pty_id IS NOT NULL AND attach_endpoint IS NOT NULL) AS remote_attach_available, \
-     floor(extract(epoch from started_at) * 1000)::bigint AS started_at_ms, \
-     CASE WHEN ended_at IS NULL THEN NULL \
-          ELSE floor(extract(epoch from ended_at) * 1000)::bigint END AS ended_at_ms, \
-     exit_code, end_reason, resumed_from_session_id";
+fn detail_returning() -> String {
+    format!(
+        "id, workspace_id, channel_id, member_id, host_id, \
+         root_message_id, tool, label, status, observation, \
+         0::bigint AS observer_grant_count, \
+         {BARE_ATTACH_AVAILABILITY}, \
+         floor(extract(epoch from started_at) * 1000)::bigint AS started_at_ms, \
+         CASE WHEN ended_at IS NULL THEN NULL \
+              ELSE floor(extract(epoch from ended_at) * 1000)::bigint END AS ended_at_ms, \
+         exit_code, end_reason, resumed_from_session_id"
+    )
+}
+
+/// Exposed so [`crate::reattach`]'s drift guard reads the composed statement
+/// this crate actually issues, rather than a copy of it written for the test.
+#[cfg(test)]
+pub(crate) fn detail_columns_for_test() -> String {
+    detail_columns()
+}
+
+/// See [`detail_columns_for_test`].
+#[cfg(test)]
+pub(crate) fn detail_returning_for_test() -> String {
+    detail_returning()
+}
 
 fn decode_detail(row: &sqlx::postgres::PgRow) -> Result<WorkSessionDetail, T3Error> {
     Ok(WorkSessionDetail {
@@ -505,6 +551,7 @@ fn decode_detail(row: &sqlx::postgres::PgRow) -> Result<WorkSessionDetail, T3Err
         observation: row.try_get("observation")?,
         observer_grant_count: row.try_get("observer_grant_count")?,
         remote_attach_available: row.try_get("remote_attach_available")?,
+        remote_display_available: row.try_get("remote_display_available")?,
         started_at_ms: row.try_get("started_at_ms")?,
         ended_at_ms: row.try_get("ended_at_ms")?,
         exit_code: row.try_get("exit_code")?,
@@ -524,8 +571,9 @@ pub async fn lock_work_session_detail_in_tx(
     workspace_id: Uuid,
     session_id: Uuid,
 ) -> Result<Option<(WorkSessionDetail, i64)>, T3Error> {
+    let columns = detail_columns();
     let sql = format!(
-        "SELECT {DETAIL_COLUMNS}, root.seq AS root_seq \
+        "SELECT {columns}, root.seq AS root_seq \
            FROM work_session ws \
            JOIN message root ON root.id = ws.root_message_id \
           WHERE ws.workspace_id = $1 AND ws.id = $2 \
@@ -582,6 +630,7 @@ pub async fn end_work_session_in_tx(
     session_id: Uuid,
     exit_code: Option<i32>,
 ) -> Result<Option<WorkSessionDetail>, T3Error> {
+    let returning = detail_returning();
     let sql = format!(
         "UPDATE work_session \
             SET status = 'ended', \
@@ -592,7 +641,7 @@ pub async fn end_work_session_in_tx(
           WHERE workspace_id = $1 \
             AND id = $2 \
             AND status IN ('running', 'idle') \
-        RETURNING {DETAIL_RETURNING}"
+        RETURNING {returning}"
     );
     let row = sqlx::query(&sql)
         .bind(workspace_id)
@@ -605,16 +654,19 @@ pub async fn end_work_session_in_tx(
 
 /// The channel-scoped session list (`WorkSessionRoutes.list` :2038-2087).
 ///
-/// The `membership` join is the authorization: a caller sees a session only in
-/// a channel they are still a member of, and the observer-grant count is
-/// computed under the same predicate rather than trusted from the caller.
-pub async fn list_work_session_details_in_tx(
-    conn: &mut PgConnection,
-    workspace_id: Uuid,
-    member_id: Uuid,
-    active_only: bool,
-) -> Result<Vec<WorkSessionDetail>, T3Error> {
-    let sql = "SELECT ws.id, ws.workspace_id, ws.channel_id, ws.member_id, ws.host_id, \
+/// A function rather than a `const` so
+/// [`WS_ATTACH_AVAILABILITY`] can be interpolated — the list is the third reader
+/// of the same two predicates, and the one most likely to be forgotten because
+/// it is the only one that spells its projection out inline.
+///
+/// The `observer_grant_count` subquery is deliberately **kind-blind**
+/// (`tac.mode = 'observer'` with no `kind` clause): a teammate watching the
+/// screen is a teammate watching. See
+/// [`crate::terminal_attach::active_observer_capability_count_in_tx`], which
+/// counts the same set, for why one number rather than two.
+pub(crate) fn list_columns() -> String {
+    format!(
+        "ws.id, ws.workspace_id, ws.channel_id, ws.member_id, ws.host_id, \
                       ws.root_message_id, ws.tool, ws.label, ws.status, ws.observation, \
                       CASE \
                         WHEN ws.status IN ('running', 'idle') \
@@ -639,13 +691,27 @@ pub async fn list_work_session_details_in_tx(
                              AND tac.expires_at > clock_timestamp()) \
                         ELSE 0 \
                       END AS observer_grant_count, \
-                      (ws.pty_id IS NOT NULL AND ws.attach_endpoint IS NOT NULL) \
-                        AS remote_attach_available, \
+                      {WS_ATTACH_AVAILABILITY}, \
                       floor(extract(epoch from ws.started_at) * 1000)::bigint AS started_at_ms, \
                       CASE WHEN ws.ended_at IS NULL THEN NULL \
                            ELSE floor(extract(epoch from ws.ended_at) * 1000)::bigint END \
                         AS ended_at_ms, \
-                      ws.exit_code, ws.end_reason, ws.resumed_from_session_id \
+                      ws.exit_code, ws.end_reason, ws.resumed_from_session_id"
+    )
+}
+
+/// The `membership` join is the authorization: a caller sees a session only in
+/// a channel they are still a member of, and the observer-grant count is
+/// computed under the same predicate rather than trusted from the caller.
+pub async fn list_work_session_details_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+    active_only: bool,
+) -> Result<Vec<WorkSessionDetail>, T3Error> {
+    let columns = list_columns();
+    let sql = format!(
+        "SELECT {columns} \
                  FROM work_session ws \
                  JOIN channel c ON c.id = ws.channel_id \
                  JOIN work_host h \
@@ -659,8 +725,9 @@ pub async fn list_work_session_details_in_tx(
                   AND c.archived_at IS NULL \
                   AND (NOT $3 OR ws.status IN ('running', 'idle')) \
                 ORDER BY ws.started_at DESC, ws.id DESC \
-                LIMIT 200";
-    let rows = sqlx::query(sql)
+                LIMIT 200"
+    );
+    let rows = sqlx::query(&sql)
         .bind(workspace_id)
         .bind(member_id)
         .bind(active_only)
@@ -749,12 +816,13 @@ pub async fn create_resumed_work_session_in_tx(
     member_id: Uuid,
     target_host_id: Uuid,
 ) -> Result<WorkSessionDetail, T3Error> {
+    let returning = detail_returning();
     let sql = format!(
         "INSERT INTO work_session \
            (id, workspace_id, channel_id, member_id, host_id, root_message_id, \
             tool, label, status, observation, resumed_from_session_id) \
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'running', $9, $10) \
-         RETURNING {DETAIL_RETURNING}"
+         RETURNING {returning}"
     );
     let row = sqlx::query(&sql)
         .bind(session_id)
@@ -779,6 +847,7 @@ pub async fn mark_work_session_resumed_in_tx(
     workspace_id: Uuid,
     session_id: Uuid,
 ) -> Result<Option<WorkSessionDetail>, T3Error> {
+    let returning = detail_returning();
     let sql = format!(
         "UPDATE work_session \
             SET status = 'ended', \
@@ -786,7 +855,7 @@ pub async fn mark_work_session_resumed_in_tx(
                 exit_code = NULL, \
                 end_reason = 'resumed' \
           WHERE workspace_id = $1 AND id = $2 AND status = 'orphaned' \
-        RETURNING {DETAIL_RETURNING}"
+        RETURNING {returning}"
     );
     let row = sqlx::query(&sql)
         .bind(workspace_id)

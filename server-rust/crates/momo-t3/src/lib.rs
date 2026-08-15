@@ -130,10 +130,12 @@ pub use sweep::{
 };
 pub use terminal_attach::{
     active_observer_capability_count_in_tx, is_valid_capability_token,
-    issue_attach_capability_in_tx, lock_attach_target_in_tx, mint_capability_token,
-    sweep_spent_observer_capabilities_in_tx, validate_attach_capability_in_tx, validated_binding,
-    AttachMode, AttachTarget, IssuedCapability, RemotePtyBinding, ValidatedAttach,
-    CAPABILITY_PREFIX, CAPABILITY_TTL_SECONDS, OBSERVER_CAPABILITY_RETENTION,
+    issue_attach_capability_in_tx, lock_attach_target_in_tx, lock_display_binding_target_in_tx,
+    mint_capability_token, sweep_spent_observer_capabilities_in_tx,
+    validate_attach_capability_in_tx, validated_binding, validated_display_binding,
+    write_display_binding_in_tx, AttachKind, AttachMode, AttachTarget, DisplayBindingTarget,
+    IssuedCapability, RemoteDisplayBinding, RemotePtyBinding, ValidatedAttach, CAPABILITY_PREFIX,
+    CAPABILITY_TTL_SECONDS, HOST_DISPLAY_CAPABILITY_KEY, OBSERVER_CAPABILITY_RETENTION,
 };
 pub use work_control::{
     active_host_owner_in_tx, agent_owner_human_in_tx, apply_spawn_approval_decision_in_tx,

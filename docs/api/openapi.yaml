@@ -2874,6 +2874,209 @@ paths:
         "429":
           $ref: "#/components/responses/RateLimited"
 
+  /v1/workspaces/{workspaceId}/work-sessions/{workSessionId}/display-attach:
+    post:
+      tags: [work-sessions]
+      operationId: issueDisplayAttachCapability
+      summary: Issue an ephemeral view-only capability for the session's live screen.
+      description: >
+        Human bearer only, and observer only. ADR-0165 carries the live screen
+        over WebRTC directly between the browser and the sandbox; this endpoint
+        mints the 60-second bearer for that peer-to-peer handshake and nothing
+        else. mode defaults to observer and is the only grade this server can
+        produce: a controller request is 403 by name, because input is
+        ADR-0004 증보 3's boundary and it is not open. The database says the
+        same thing (migration 075's terminal_attach_display_observer_ck makes a
+        controllable display capability unrepresentable) and the producer says
+        it a third time by never opening an input datachannel.
+        Requires active workspace and session-channel membership while
+        observation=open, a running or idle session carrying a MomoHost-signed
+        display binding, an unrevoked work_host, AND that host advertising
+        capabilities.display_attach. That last clause is fail-closed and is what
+        excludes BYOC hosts without any policy naming a provider.
+        display_endpoint is the HOST's own credential-free WebRTC signalling
+        WebSocket; it contains no bearer, momo never proxies signalling or
+        media, and no frame is stored anywhere.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/WorkSessionId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IssueDisplayAttachRequest"
+      responses:
+        "200":
+          description: Exact four-field view-only display grant.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DisplayAttachCapabilityResponse"
+        "400":
+          description: Invalid work session identifier, or a mode outside the vocabulary.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: >
+            Controller mode was requested, or the caller is not an authorized
+            active human/channel member, or observation is owner_only.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Session does not exist in this workspace.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: >
+            Session ended, lacks a display binding, its host is revoked, or that
+            host does not advertise a display. One status for all four: which is
+            false describes a host's internal state to a caller entitled only to
+            know it is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /v1/workspaces/{workspaceId}/work-sessions/{workSessionId}/display-binding:
+    post:
+      tags: [work-sessions, work-hosts]
+      operationId: publishWorkSessionDisplayBinding
+      summary: Publish this session's WebRTC display binding as its own host.
+      description: >
+        MomoHost-signed, exactly once per session. The daemon inside the sandbox
+        declares displayId plus the credential-free WSS signalling endpoint a
+        browser will dial. A human bearer is 403 here and the same field names
+        are refused by name on session create and PATCH: publishing a binding is
+        a claim about what is running on a machine, and only the machine makes
+        it. Re-sending the identical pair is idempotent (204); a DIFFERENT
+        binding is 409, because two producers claiming one session's screen is a
+        state the ledger cannot describe. The signing host must be the session's
+        own; the path names a session rather than a host, so that pin is
+        enforced against the ledger inside the handler. The host must also
+        already advertise capabilities.display_attach.
+      security:
+        - workHostAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/WorkSessionId"
+        - $ref: "#/components/parameters/WorkHostSentAt"
+        - $ref: "#/components/parameters/WorkHostSignature"
+        - $ref: "#/components/parameters/WorkHostRequestId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PublishDisplayBindingRequest"
+      responses:
+        "204":
+          description: Binding stored, or already exactly this binding.
+        "400":
+          description: >
+            Invalid session identifier, or displayId/displayEndpoint outside the
+            ledger's grammar.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Invalid or replayed host signature.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Human bearer, or a host binding a session that is not its own.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Session does not exist in this workspace.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: >
+            Session is not running or idle, the host is revoked or does not
+            advertise a display, or a different binding is already published.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /v1/workspaces/{workspaceId}/work-hosts/{workHostId}/display-attach/validate:
+    post:
+      tags: [work-hosts, work-sessions]
+      operationId: validateDisplayAttachCapability
+      summary: Validate a view-only display capability as its target host.
+      description: >
+        MomoHost-signed control-plane check performed by the WebRTC producer
+        immediately before it accepts a signalling connection, and then on a
+        timer for every peer connection it already serves (`stream: true`). The
+        opaque bearer is matched by SHA-256 digest; the raw token is never
+        persisted or logged. Validation joins the running-or-idle work_session,
+        the unrevoked work_host, the grantee, the session's observation and the
+        host's display advertisement on every call, so ending the session,
+        revoking the host, closing observation, the grantee leaving the channel,
+        or withdrawing capabilities.display_attach all cut a stream that is
+        already open. A terminal capability presented here, or a display
+        capability presented to terminal-attach/validate, is the ordinary 401:
+        two surfaces on one box do not lend each other authority. The response
+        carries input_enabled, which is always false and instructs the producer
+        not to create an input datachannel (ADR-0165 D4). Media and signalling
+        never traverse MomoServer, OutboxRelay, or Centrifugo, and no frame is
+        stored.
+      security:
+        - workHostAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/WorkHostId"
+        - $ref: "#/components/parameters/WorkHostSentAt"
+        - $ref: "#/components/parameters/WorkHostSignature"
+        - $ref: "#/components/parameters/WorkHostRequestId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ValidateDisplayAttachRequest"
+      responses:
+        "200":
+          description: Capability is live and bound to this host and display.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DisplayAttachValidationResponse"
+        "400":
+          description: Invalid path identifier or request body shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: >
+            Invalid host signature, or an unknown, expired, wrong-kind, ended,
+            revoked or no-longer-authorized capability.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /v1/workspaces/{workspaceId}/work-controls:
     post:
       tags: [work-controls]
@@ -8014,7 +8217,7 @@ components:
       required:
         [id, workspaceId, channelId, memberId, hostId, rootMessageId,
          tool, label, status, observation, observerGrantCount,
-         remoteAttachAvailable, startedAtMs]
+         remoteAttachAvailable, remoteDisplayAvailable, startedAtMs]
       properties:
         id:
           type: string
@@ -8051,10 +8254,22 @@ components:
           type: integer
           format: int64
           minimum: 0
-          description: Currently valid observer capabilities only; expired or invalid grants are excluded.
+          description: >
+            Currently valid observer capabilities only; expired or invalid
+            grants are excluded. Deliberately kind-blind since LIVE-1: a
+            teammate watching the live screen is watching, and one 관전자 수 is
+            what every surface publishes.
         remoteAttachAvailable:
           type: boolean
           description: True only when the session has a complete remote PTY binding; endpoint and capability remain unprojected.
+        remoteDisplayAvailable:
+          type: boolean
+          description: >
+            True only when the session has a complete WebRTC display binding
+            (ADR-0165); the signalling endpoint and the capability remain
+            unprojected, exactly as the PTY pair's do. Independent of
+            remoteAttachAvailable: a session can offer a screen and no terminal,
+            or the reverse, and a client that folds them offers the wrong verb.
         startedAtMs:
           type: integer
           format: int64
@@ -8275,6 +8490,124 @@ components:
           type: string
           enum: [controller, observer]
           description: Host authorization grade; observer forbids send_stdin, resize, and kill.
+
+    # ---- Display attach (LIVE-1 / ADR-0165) ---------------------------------
+    IssueDisplayAttachRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        mode:
+          type: string
+          enum: [observer]
+          default: observer
+          description: >
+            Observer is the only grade this server mints for a display. The
+            enum is deliberately one value rather than two-with-a-note: a
+            client that sends controller is answered 403 by name, so the
+            boundary ADR-0004 증보 3 is holding is visible in the schema rather
+            than discoverable at runtime.
+
+    DisplayAttachCapabilityResponse:
+      type: object
+      required: [display_endpoint, capability_token, display_id, mode]
+      properties:
+        display_endpoint:
+          type: string
+          maxLength: 2048
+          description: >
+            The HOST's own credential-free WSS WebRTC signalling endpoint.
+            Userinfo, query and fragment are forbidden. momo proxies neither the
+            signalling nor the media that follows it.
+        capability_token:
+          type: string
+          description: >
+            Opaque 60-second bearer returned once. Only its SHA-256 digest is
+            persisted; producer-side validation also requires a live host
+            signature. Same grammar as a terminal capability — the kind is a
+            ledger column, not a second token format.
+        display_id:
+          type: string
+          pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'
+        mode:
+          type: string
+          enum: [observer]
+          description: >
+            Always observer. Serialised anyway so a UI can say "view only"
+            before the socket is dialled — a view-only stream that looks
+            identical to a controllable one is how a person ends up typing into
+            a window that will never deliver a keystroke.
+
+    PublishDisplayBindingRequest:
+      type: object
+      required: [displayId, displayEndpoint]
+      additionalProperties: false
+      description: >
+        MomoHost-signed publication of the WebRTC display binding for a running
+        or idle session the caller already owns. Writing a DIFFERENT binding
+        onto a session that already has one is 409; re-sending the identical
+        pair is idempotent. The server stores and authorizes the endpoint and
+        never carries a frame.
+      properties:
+        displayId:
+          type: string
+          maxLength: 128
+          pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'
+        displayEndpoint:
+          type: string
+          maxLength: 2048
+          description: >
+            Credential-free HTTPS or WSS WebRTC signalling endpoint. Userinfo,
+            query, and fragment are forbidden.
+
+    ValidateDisplayAttachRequest:
+      type: object
+      required: [capability_token]
+      additionalProperties: false
+      properties:
+        capability_token:
+          type: string
+          description: Opaque grant presented by the browser to the sandbox producer.
+        stream:
+          type: boolean
+          default: false
+          description: >
+            True when the producer is re-checking a peer connection it already
+            serves rather than admitting a new viewer. It relaxes exactly one
+            clause, the capability expiry, because that TTL bounds the
+            mint-to-dial window and the producer closed that window under a full
+            validation. A media session outlives its 60-second dial window by
+            design, so every other authorization clause still applies on every
+            call: a live screen is cut within one revalidation period when the
+            session ends, the host is revoked, observation closes, the grantee
+            leaves the channel, the grantee is deactivated, or the host stops
+            advertising a display.
+
+    DisplayAttachValidationResponse:
+      type: object
+      required: [work_session_id, display_id, expires_at, mode, input_enabled]
+      properties:
+        work_session_id:
+          type: string
+          format: uuid
+        display_id:
+          type: string
+          pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'
+        expires_at:
+          type: string
+          format: date-time
+          description: PostgreSQL timestamptz capability expiry.
+        mode:
+          type: string
+          enum: [observer]
+          description: Always observer; migration 075's CHECK makes anything else unrepresentable.
+        input_enabled:
+          type: boolean
+          enum: [false]
+          description: >
+            Always false, and a negative instruction rather than a status. The
+            producer reads it and does NOT create an input datachannel, so the
+            view-only guarantee lives in a channel that was never opened rather
+            than in a client flag anyone could flip (ADR-0165 D4).
 
     # ---- Work controls ------------------------------------------------------
     CreateWorkControlRequest:

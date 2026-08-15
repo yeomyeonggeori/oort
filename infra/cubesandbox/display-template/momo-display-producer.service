@@ -1,0 +1,61 @@
+# LIVE-1 / ADR-0165 — the WebRTC display producer, inside a CubeSandbox microVM.
+#
+# A template asset, not a host asset: this unit is installed into the sandbox
+# rootfs at template build time and starts beside momo-workd. It is checked in
+# for `infra/workd/*.service`'s reason — the thing a template bakes should be
+# reviewable in the repository rather than described in a runbook.
+#
+# STATUS: runtime-unverified(cubesandbox webrtc producer). No template has been
+# built from this file. See ./README.md and ./template.spec.json `unverified`.
+#
+# Three properties of this unit are the ADR, not conveniences:
+#
+#   * it binds the SANDBOX's loopback-plus-tap address, never a momo address —
+#     the server is not in the media path and is not in the signalling path
+#     either (D2);
+#   * it is given no writable media directory and no recording flag (D5);
+#   * `MOMO_DISPLAY_INPUT=0` is passed and the producer has no code path that
+#     reads it as anything but false. The guarantee is the absent datachannel
+#     (D4); this variable exists so a future control build has one obvious place
+#     to become true, under ADR-0004 증보 3 and not before.
+
+[Unit]
+Description=oort live display producer (WebRTC, view-only)
+After=network-online.target momo-workd.service
+Wants=network-online.target
+# The producer is useless without a display to capture and a daemon to publish
+# its binding. Failing to start is the correct outcome when either is absent:
+# a session with no `display_endpoint` simply reports remoteDisplayAvailable
+# false, and nothing in the product breaks.
+Requires=momo-workd.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/momo-display-producer
+Restart=on-failure
+RestartSec=2
+
+Environment=MOMO_DISPLAY_X11=:0
+Environment=MOMO_DISPLAY_SIGNAL_PORT=8452
+Environment=MOMO_DISPLAY_MEDIA_UDP_RANGE=50000-50100
+Environment=MOMO_DISPLAY_CODEC=H264
+Environment=MOMO_DISPLAY_AUDIO=0
+Environment=MOMO_DISPLAY_INPUT=0
+Environment=MOMO_DISPLAY_SUBPROTOCOL=momo.display.v1
+Environment=MOMO_DISPLAY_REVALIDATE_SECONDS=30
+
+# The producer needs the server origin and the host identity to call
+# `…/display-attach/validate`, and it gets them the same way momo-workd does:
+# from the sandbox's own environment, written by the provisioner. No provider
+# credential is here and none may be (ADR-0004).
+EnvironmentFile=/etc/momo/workd.env
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+# No StateDirectory, no LogsDirectory, no ReadWritePaths: a producer that cannot
+# write anywhere cannot record anything, and D5 says it must not.
+
+[Install]
+WantedBy=multi-user.target
