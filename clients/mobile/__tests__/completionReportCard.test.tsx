@@ -4,6 +4,8 @@ import {agentCardModel} from '@momo/core/features/timeline/agentCardModel';
 import {
   COMPLETION_CHECK_TONE,
   COMPLETION_REPORT_KIND,
+  formatElapsed,
+  WORKED_ELAPSED_LABEL,
 } from '@momo/core/features/timeline/completionReportCard';
 import type {Message} from '@momo/core/lib/api';
 
@@ -101,6 +103,23 @@ describe('폰이 코어의 낱말과 색을 다시 짓지 않는다', () => {
     expect(MESSAGE_ROW_CODE).toContain('formatElapsed(card.elapsedMs)');
     expect(MESSAGE_ROW_CODE).toContain('COMPLETION_CHECK_OUTCOME_LABEL[');
     expect(MESSAGE_ROW_CODE).toContain('completionCheckCounts(');
+  });
+
+  it('경과를 이름 붙이는 낱말도 코어의 것이다 (#1468 — 웹 짝의 폰 사본)', () => {
+    // 웹은 `label={WORKED_ELAPSED_LABEL}` 로 두 칸을 세우고 폰은 한 줄로 잇는다 —
+    // 배치는 달라도 낱말은 한 곳에서만 산다. 리터럴로 들고 있으면 카드와 작업
+    // 세션 정보가 언젠가 다른 낱말로 같은 숫자를 부른다(그게 이 티켓의 유래).
+    expect(MESSAGE_ROW_CODE).toContain('`${WORKED_ELAPSED_LABEL} ${elapsed}`');
+    expect(MESSAGE_ROW_CODE).not.toContain(`\`${WORKED_ELAPSED_LABEL} `);
+  });
+
+  it('상수를 지나도 화면에 서는 문자열은 그대로다 (렌더 무변경이 계약)', () => {
+    // 이 티켓은 낱말을 바꾸지 않는다 — 출처만 옮긴다. 한 칸 띄어 잇는 폰의 배치가
+    // 코어 값과 만나 예전과 같은 줄을 만든다.
+    const card = agentCardModel(reportMessage());
+    if (card?.kind !== 'completion_report') throw new Error('완료 리포트가 아니다');
+    const elapsed = formatElapsed(card.elapsedMs ?? 0);
+    expect(`${WORKED_ELAPSED_LABEL} ${elapsed}`).toBe('작업 시간 24분 28초');
   });
 
   it('겹친 라벨의 칸 순서를 코어가 준다 — 실패가 통과 아래로 밀리지 않는다', () => {
