@@ -1,5 +1,15 @@
 # oort 진행 현황
 
+## toolchain: Rust 고정/선언 지점 전수 조사 + MSRV 정합 (#1442, 2026-08-17)
+
+- **외부 실측이 지목한 "고정 1.83"은 우리 레포에 없었다.** 커서 클라우드 에이전트 보고(리서치 2026-08-16 §5)의 "pinned 1.83"은 레포 핀이 아니라 **커서 환경의 기본 툴체인**이었다 — 기준 커밋 `track/engine@54f5d2dc`에 `rust-toolchain*` 파일은 **0개**다(`find` 실측). 실재하는 결함은 고정이 아니라 **거짓 선언**이었다.
+- **선언 MSRV 두 개가 다 거짓이었고, 실측으로 갈음했다.** `server-rust` = `1.80` → **`1.88.0`**(8 마이너 과소), `clients/desktop/src-tauri` = `1.77.2` → **`1.89.0`**(12 마이너 과소, tauri 2 스캐폴드 초기값이 그대로 남아 있었다). 근거는 선언 스캔이 아니라 **양쪽 브래킷 실행**이다: `cargo +1.87.0 check`(server) 거절 / `+1.88.0 --all-targets` green, `cargo +1.88.0 check`(desktop) 거절 / `+1.89.0` green. 이 값은 게이트가 아니라 **cargo가 강제**한다 — 낮은 툴체인은 컴파일 이전 resolve 단계에서 거절된다.
+- **edition은 여전히 2021이고 마이그레이션하지 않았다(스코프 밖).** 그래프 안의 edition2024 크레이트 15개(server)·16개(desktop, macOS 필터)는 전부 **서드파티**이며 rustc ≥1.85를 요구하지만 그것이 바닥이 아니다 — 실제 바닥은 `time 0.3.54` 계열(1.88.0)과 `notify-rust 4.18.0`(1.89.0)이다.
+- **`rust-toolchain.toml`은 신설하지 않았다.** 핀은 이 goal이 건드리지 말라고 지시받은 세 운영 표면(Docker 빌드 이미지·self-hosted macOS 러너·CI 툴체인 조달)을 동시에 바꾸고, 여기서 실측된 결함(거짓 `rust-version`)을 고치지도 않는다. 핀의 가장 강한 독립 논거인 **rustfmt 스큐는 이미 #1377이 들고 있다** — 근거와 함께 거기서 결정되어야 한다.
+- **부동 베이스 이미지는 보고만 한다(운영 결정, 성재 큐).** `server-rust/Dockerfile:51`의 `ARG RUST_IMAGE=rust:1-slim-bookworm`은 pull 시점 최신 1.x라 **고정이 아니다**. 오늘은 MSRV를 항상 만족하지만 재현 가능한 빌드는 아니며, 고정 전환은 이 goal에서 하지 않았다.
+- **정직 라벨 — MSRV는 어느 게이트도 재지 않는다.** pr-ci rust 레인은 러너 사전설치 **stable**로 돌므로 초록은 "러너 stable ≥ 선언값"만 뜻한다. 선언이 다시 틀려져도 CI는 침묵한다 — MSRV 검증 잡은 후속 제안이다.
+- **게이트:** `cargo test --workspace --locked` 1063 passed/0 failed/288 ignored · desktop `clippy -D warnings` clean · **server-rust `clippy -D warnings` green**(경고 0). MSRV 정직 상향이 켠 MSRV 게이트 린트는 1건이 아니라 **6건**이었고(clippy가 첫 크레이트에서 멈춰 있었다 — `manual_is_multiple_of` 1 + `unnecessary_map_or` 3 + `nonminimal_bool` 2, 그중 4곳이 보안 술어), 소스 비접촉 계약(#1454 비행 중)으로 1차 정지·이탈 보고 → 진리표 동치 증명과 함께 이슈 #1442 코멘트로 성재 결재 큐 이관 → **결재 집행(2026-08-17, 전권 위임)으로 6건 전부 적용**(git apply 바이트 정합·`afda586a`). 패치 1~4는 통과 단위 테스트가 직접 실행 커버, 5·6(토큰 리프레시 게이트·본문 검증)은 PG 통합 테스트로 별도 실증. `cargo fmt --all --check`는 기준 커밋에서 이미 RED이며 **#1377/#1472** 소관이다.
+
 ## T3 라이브 세션 control 개방 — 엔진 축 (창 원장·비관측 게이트·owner 예외) (#1424, 2026-08-16)
 
 - **075가 남긴 실행 지점을 집행했다.** 075 말미 주석은 "경계가 열리는 날 이 절을 지우는 것이 그 결정의 실행 지점"이라 적어 두었고, ADR-0004 증보 3이 2026-08-15 Accepted 됐다. 마이그 076이 `terminal_attach_display_observer_ck`를 지웠고, 나머지 두 층(`AttachKind::permits_mode`·라우트 403)이 같은 커밋에서 함께 움직였다 — 075가 약속한 "셋이 함께 움직이고 어느 것도 놓칠 수 없다"가 실제로 그렇게 됐다.

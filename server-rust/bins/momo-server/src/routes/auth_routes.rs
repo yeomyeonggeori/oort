@@ -325,7 +325,7 @@ pub async fn refresh(
             // RLS scopes this lookup to the token's workspace, so "active in
             // *this* workspace" is checked by construction (Swift :454-470).
             let member = get_member(conn, member_id).await?;
-            if !member.is_some_and(|member| member.status == "active") {
+            if member.is_none_or(|member| member.status != "active") {
                 return Ok(RefreshGate::MemberInactive);
             }
 
