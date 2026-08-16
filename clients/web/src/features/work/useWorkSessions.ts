@@ -15,6 +15,12 @@ import {
   workChannelsToWatch,
   type WorkSessionEvent,
 } from "@momo/core/features/work/workSessionModel";
+import {
+  latestSessionVerification,
+  sessionCompletionReport,
+  type SessionCompletionReport,
+  type SessionVerification,
+} from "@momo/core/features/work/sessionVerification";
 import type { WorkSessionControlFrame } from "@momo/core/lib/realtimeEvents";
 
 // =============================================================================
@@ -92,6 +98,14 @@ export interface SessionEventPage {
   events: WorkSessionEvent[];
   /** The thread is longer than the panel pulled; older rows are the ones held. */
   truncated: boolean;
+  /**
+   * 완료 리포트들이 이 스레드에 남긴 것 (UXC-C).
+   *
+   * 두 번째 읽기가 아니라 **같은 페이지의 두 번째 질문**이다: 세션 원장 스레드는
+   * 이미 여기서 통째로 읽히고, 지금까지는 ACP 이벤트만 건져내고 나머지를 버렸다.
+   * 검증 칩의 원천이 그 버려지던 쪽에 있다(코어 `sessionVerification` 머리말).
+   */
+  reports: SessionCompletionReport[];
 }
 
 async function fetchSessionEvents(
@@ -100,6 +114,7 @@ async function fetchSessionEvents(
   rootId: string
 ): Promise<SessionEventPage> {
   const events: WorkSessionEvent[] = [];
+  const reports: SessionCompletionReport[] = [];
   let cursor: number | undefined;
   for (let page = 0; page < EVENT_MAX_PAGES; page += 1) {
     const res = await fetchThreadReplies(
@@ -111,12 +126,19 @@ async function fetchSessionEvents(
     );
     for (const message of res.messages) {
       const event = parseWorkSessionEvent(message);
-      if (event) events.push(event);
+      if (event) {
+        events.push(event);
+        continue;
+      }
+      const report = sessionCompletionReport(message);
+      if (report) reports.push(report);
     }
-    if (res.nextCursor === undefined) return { events, truncated: false };
+    if (res.nextCursor === undefined) {
+      return { events, truncated: false, reports };
+    }
     cursor = res.nextCursor;
   }
-  return { events, truncated: true };
+  return { events, truncated: true, reports };
 }
 
 /**
@@ -151,7 +173,27 @@ export function useSessionEvents(
     [query.data, live]
   );
 
-  return { ...query, events, truncated: query.data?.truncated ?? false };
+  /**
+   * 이 세션의 검증 상태, 또는 없음 (UXC-C).
+   *
+   * 절단된 읽기에서는 판정하지 않는다. 이 스레드는 오래된 쪽부터 페이지되므로
+   * 절단이 잘라낸 것은 **가장 최근 리포트**이고, 그때 접힌 판정은 지난 이야기다
+   * (`foldSessionEvents` 가 절단에서 「지금 이것이 실행 중」 승격을 전부 끄는 것과
+   * 같은 규율). 실시간 레일은 이 자리에 아무것도 보태지 않는다 — 레일이 나르는
+   * 것은 ACP 프레임뿐이고, 리포트는 Postgres 가 정본이다.
+   */
+  const verification: SessionVerification | null = useMemo(() => {
+    const page = query.data;
+    if (page === undefined || page.truncated) return null;
+    return latestSessionVerification(page.reports);
+  }, [query.data]);
+
+  return {
+    ...query,
+    events,
+    truncated: query.data?.truncated ?? false,
+    verification,
+  };
 }
 
 export interface WorkSessionRail {
