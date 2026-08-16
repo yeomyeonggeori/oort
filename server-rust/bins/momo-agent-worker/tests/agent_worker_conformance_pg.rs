@@ -1486,6 +1486,14 @@ async fn hosted_identities_never_enter_worker_claim_or_a2a_delivery() {
         };
         let hosted_id = seed_second_agent(&su, &tenant).await;
         let connection_id = Uuid::new_v4();
+        // Every fixture secret below is derived from a per-run uuid, because
+        // `token_hash_uniq` is a *global* unique key (schema_v0.sql:350 — no
+        // workspace column in it). A literal `digest('hosted-active')` therefore
+        // passed only against a virgin database and raised 23505 on the second
+        // run against the same one, while the rest of this suite is re-runnable
+        // by construction (#1467). `pairing_challenge_hash` carries no unique
+        // index today, but it is the same class of value, so it is derived the
+        // same way rather than left as the next re-run trap.
         sqlx::query(
             "UPDATE agent SET model='hosted-agent', \
                base_url='https://hosted-agent.invalid/disabled', \
@@ -1514,7 +1522,7 @@ async fn hosted_identities_never_enter_worker_claim_or_a2a_delivery() {
         .bind(tenant.workspace_id)
         .bind(hosted_id)
         .bind(initial_status)
-        .bind(format!("hosted-{status}"))
+        .bind(format!("hosted-{status}-{connection_id}"))
         .bind(tenant.human_id)
         .execute(&su)
         .await
@@ -1524,7 +1532,7 @@ async fn hosted_identities_never_enter_worker_claim_or_a2a_delivery() {
             sqlx::query(
                 "WITH inserted AS (INSERT INTO token(id,workspace_id,actor_member_id,kind,token_hash,scopes,label, \
                   credential_class,hosted_connection_id,audience,created_by) \
-                 VALUES ($1,$2,$3,'agent_bearer',digest('hosted-active','sha256'), \
+                 VALUES ($1,$2,$3,'agent_bearer',digest($6,'sha256'), \
                   ARRAY['agent:port:connect'],'hosted test','hosted_active',$4, \
                   '/v1/mcp/agent-port',$5) RETURNING id), \
                  updated AS (UPDATE hosted_agent_connection SET status='active', \
@@ -1540,6 +1548,7 @@ async fn hosted_identities_never_enter_worker_claim_or_a2a_delivery() {
             .bind(hosted_id)
             .bind(connection_id)
             .bind(tenant.human_id)
+            .bind(format!("hosted-active-{token_id}"))
             .execute(&su)
             .await
             .expect("activate hosted fixture");
