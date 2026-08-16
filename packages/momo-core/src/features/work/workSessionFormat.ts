@@ -16,15 +16,26 @@ import type { WorkRowState, WorkSessionStatusKey } from "./workSessionModel";
 /**
  * Session ledger state. 호스트 연결 끊김 wears the accent because it is the one
  * state waiting on a PERSON (resume it, or let it go), the same way the timeline
- * card paints 승인 대기. Idle stays neutral, while a deliberately closed
- * session wears --ok because its lifecycle ended cleanly.
+ * card paints 승인 대기. Every other state stays neutral — including 종료됨.
+ *
+ * 종료됨 wore --ok until #1491, on the reasoning that a lifecycle which ended
+ * cleanly deserved the clean colour. Two things retired that. First, since
+ * #1441 a VERIFICATION chip stands on the same row, and its green is the one a
+ * gate table earned (「통과 12」): beside it a lifecycle green says only that the
+ * session stopped, which is the least informative thing the row reports, so the
+ * reader now has to work out which of two greens meant something. Second, this
+ * file already settled the same question one table down — 완료 steps are muted
+ * because a wall of green is not a reading aid — and a ledger that answers it
+ * differently from its own rows is two rules, not one. So the green that
+ * survives on this surface is the one that reports a measurement, and the
+ * lifecycle says what it is in words.
  */
 export const SESSION_STATUS_CLASS: Readonly<Record<WorkSessionStatusKey, string>> = {
   running: "bg-surface-hover text-warn",
   idle: "bg-surface-hover text-ink-muted",
   unavailable: "bg-surface-hover text-ink-muted",
   orphaned: "bg-accent-soft text-accent",
-  done: "bg-surface-hover text-ok",
+  done: "bg-surface-hover text-ink-muted",
   unknown: "bg-surface-hover text-ink-muted",
 };
 

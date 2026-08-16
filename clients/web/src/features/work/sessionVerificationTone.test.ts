@@ -5,6 +5,7 @@ import {
   COMPLETION_CHECK_TONE,
   type CompletionCheckOutcome,
 } from "@momo/core/features/timeline/completionReportCard";
+import { SESSION_STATUS_CLASS } from "@momo/core/features/work/workSessionFormat";
 import { COMPLETION_TONE_CLASS, COMPLETION_TONE_TOKEN } from "@/features/timeline/completionTone";
 
 // =============================================================================
@@ -34,6 +35,25 @@ const detail = readFileSync(
   new URL("./WorkSessionDetail.tsx", import.meta.url),
   "utf8"
 );
+/** 수명주기 칩을 세우는 네 자리 전부 (#1491). 위 두 곳 + 콘솔 + 워크스트림. */
+const STATUS_SURFACES = [
+  ["WorkPanel", panel],
+  ["WorkSessionDetail", detail],
+  [
+    "WorkConsoleRoute",
+    readFileSync(
+      new URL("../workConsole/WorkConsoleRoute.tsx", import.meta.url),
+      "utf8"
+    ),
+  ],
+  [
+    "WorkstreamDetailRoute",
+    readFileSync(
+      new URL("../workstreams/WorkstreamDetailRoute.tsx", import.meta.url),
+      "utf8"
+    ),
+  ],
+] as const;
 
 const OUTCOMES: readonly CompletionCheckOutcome[] = [
   "pass",
@@ -89,5 +109,66 @@ describe("세션 표면이 칩을 우회하지 않는다", () => {
     // 이 세션이 스스로 보고한 게이트 결과는 서로를 함의하지 않는다.
     expect(detail).toContain("SESSION_STATUS_CLASS[status.key]");
     expect(panel).toContain("SESSION_STATUS_CLASS[status.key]");
+  });
+});
+
+// -----------------------------------------------------------------------------
+// 그리고 나란히 선 두 칩 중 초록은 하나뿐이다 (#1491).
+//
+// 위 절이 「둘은 다른 사실이다」를 지켰더니 다음 물음이 왔다: 그러면 통과한 세션의
+// 행에서 왜 둘 다 초록인가. 검증 칩의 초록은 게이트 표가 번 것이고(「통과 12」),
+// 수명주기 칩의 초록은 「멈췄다」 위에 얹힌 것이었다 — 그 행에서 가장 정보가 없는
+// 사실. 그래서 코어 역할표가 종료됨을 muted 로 내렸고, 이 절은 그 결정이 **이
+// 팔레트의 실제 값에서** 성립하는지 잰다. 클래스 문자열만 재는 가드는 두 유틸리티가
+// 같은 색을 가리키도록 토큰이 바뀐 날에 조용하다.
+// -----------------------------------------------------------------------------
+
+/** 토큰 한 줄의 light-dark() 두 값을 [light, dark] 로 (`completionTone.test.ts` 의 잣대). */
+function tokenValues(name: string): [string, string] {
+  const match = css.match(
+    new RegExp(
+      `${name}:\\s*light-dark\\(\\s*(#[0-9a-f]{6})\\s*,\\s*(#[0-9a-f]{6})\\s*\\)`,
+      "i"
+    )
+  );
+  if (match === null) {
+    throw new Error(`${name} 이 tokens.css 에 light-dark() 한 쌍으로 없다`);
+  }
+  return [match[1].toLowerCase(), match[2].toLowerCase()];
+}
+
+const SCHEMES = ["라이트", "다크"] as const;
+
+describe("통과한 세션의 행에서 초록은 검증 칩 하나다 (#1491)", () => {
+  it("수명주기 칩의 잉크가 두 스킴 모두에서 --ok 값과 다르다", () => {
+    const doneInk = SESSION_STATUS_CLASS.done
+      .split(/\s+/)
+      .find((c) => c.startsWith("text-"));
+    expect(doneInk, "종료됨 칩에 잉크 유틸리티가 없다").toBeTruthy();
+    const ok = tokenValues("--ok");
+    const done = tokenValues(`--${doneInk!.slice("text-".length)}`);
+    for (const [index, scheme] of SCHEMES.entries()) {
+      expect(
+        done[index],
+        `${scheme}에서 종료됨의 잉크가 --ok 와 같은 값(${done[index]})이다`
+      ).not.toBe(ok[index]);
+    }
+  });
+
+  it("검증 칩은 초록을 그대로 진다 — 없앤 것이 아니라 옮긴 것이다", () => {
+    // 이 대조가 결정의 전부다. 검증 쪽이 초록을 잃으면 근거도 함께 사라진다.
+    expect(COMPLETION_TONE_CLASS[COMPLETION_CHECK_TONE.pass]).toBe("text-ok");
+    expect(() => tokenValues("--ok")).not.toThrow();
+  });
+
+  it("네 표면 어디도 상태 칩에 자기 초록을 따로 적지 않는다", () => {
+    // 역할표를 내려도 표면 하나가 상태 옆에 `text-ok` 를 직접 적으면 그 화면에서만
+    // 초록이 살아남고, 그 어긋남은 사람이 두 화면을 나란히 놓을 때만 보인다.
+    for (const [name, source] of STATUS_SURFACES) {
+      expect(source, `${name} 이 역할표를 안 쓴다`).toContain(
+        "SESSION_STATUS_CLASS[status.key]"
+      );
+      expect(source, name).not.toMatch(/status\.key[^\n]*text-ok/);
+    }
   });
 });
