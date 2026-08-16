@@ -51,9 +51,14 @@ vi.mock("@momo/core/lib/api", async (importOriginal) => {
   };
 });
 
-const { fetchChannelSessionReports, sessionVerificationFrom } = await import(
-  "./useWorkSessions"
-);
+const {
+  fetchChannelSessionReports,
+  freshScanReports,
+  isPermanentScanRefusal,
+  sessionReportsRefetchInterval,
+  sessionThreadKey,
+  sessionVerificationFrom,
+} = await import("./useWorkSessions");
 const { threadCompletionReports } = await import(
   "@momo/core/features/work/sessionVerification"
 );
@@ -333,5 +338,158 @@ describe("그 스캔이 필요한 자리마다 무효화가 배선돼 있다", (
     // 스레드 읽기는 미리보기가 열릴 때만 일어난다(`SessionPeek`). 행에서 그것을
     // 부르면 목록 하나가 세션 수만큼의 `/replies` 를 연다.
     expect(row).not.toContain("useSessionEvents");
+  });
+});
+
+// =============================================================================
+// 낡은 칩을 사실로 고정하지 않는다 (#1463 재검토 H-1)
+//
+// 앞 판은 「실패했으면 폴링을 끈다」 하나였다. 그 한 줄이 만든 결함: 성공 1회 뒤
+// 502 한 번이면 폴링이 영구 정지하고, React Query 가 들고 있던 이전 data(「통과 3」)가
+// 세션이 실패 리포트를 남긴 뒤에도 계속 선다. 원장 폴링은 살아 있어 그 행의 낱말은
+// 갱신되므로, 한 행에서 낱말은 현재를 칩은 과거를 말하게 된다 — G-H1 이 고친 그
+// 결함이 원천만 바뀐 채 돌아온 자리다.
+//
+// 그래서 두 층으로 막는다: ①한시적 실패에서는 폴링이 계속된다 ②마지막 읽기가
+// 실패했으면 들고 있던 값을 아예 쓰지 않는다(낡은 주장보다 침묵이 정직하다).
+// =============================================================================
+
+class FakeApiError extends Error {
+  readonly status: number;
+  constructor(status: number) {
+    super(`http ${status}`);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
+describe("실패의 두 갈래", () => {
+  it("한시적 실패(5xx·429·그물)에서는 폴링이 멈추지 않는다", async () => {
+    const { ApiError } = await import("@momo/core/lib/api");
+    for (const error of [
+      new ApiError(500, "boom"),
+      new ApiError(502, "bad gateway"),
+      new ApiError(429, "slow down"),
+      new TypeError("network"),
+    ]) {
+      // RED PROOF: 앞 판은 `error === null ? interval : false` 라 이 넷 전부 false 였다.
+      expect(
+        sessionReportsRefetchInterval(error),
+        `${String(error)} 에서 폴링이 멈췄다 — 한 번의 502 가 이 표면을 영영 멈춘다`
+      ).toBeTypeOf("number");
+      expect(isPermanentScanRefusal(error)).toBe(false);
+    }
+  });
+
+  it("권한·존재에 대한 답(403·404)에서만 멈춘다 — 다시 물어도 같은 답이다", async () => {
+    const { ApiError } = await import("@momo/core/lib/api");
+    for (const status of [403, 404]) {
+      const error = new ApiError(status, "nope");
+      expect(isPermanentScanRefusal(error)).toBe(true);
+      expect(sessionReportsRefetchInterval(error)).toBe(false);
+    }
+  });
+
+  it("성공 상태에서는 당연히 폴링한다", () => {
+    expect(sessionReportsRefetchInterval(null)).toBeTypeOf("number");
+    expect(sessionReportsRefetchInterval(undefined)).toBeTypeOf("number");
+  });
+
+  it("우리 오류 타입이 아닌 것을 상태 코드로 오인하지 않는다", () => {
+    // 모양만 같은 객체(`{status: 403}`)는 이 클라의 `ApiError` 가 아니다. 그것을
+    // 영구 거절로 읽으면 남의 실패가 이 표면의 폴링을 끈다.
+    expect(isPermanentScanRefusal(new FakeApiError(403))).toBe(false);
+    expect(isPermanentScanRefusal({ status: 403 })).toBe(false);
+  });
+
+  it("마지막 읽기가 실패했으면 들고 있던 값을 쓰지 않는다", async () => {
+    const { ApiError } = await import("@momo/core/lib/api");
+    const held = threadCompletionReports([
+      message(50, ROOT_LONG, CLEAN_REPORT),
+    ]);
+    // 성공 상태에서는 그대로 쓴다.
+    expect(freshScanReports(held, null)).toBe(held);
+    // RED PROOF: 이 단정을 지우면 502 뒤 60초 동안 「통과 3」이 사실로 남는다.
+    expect(freshScanReports(held, new ApiError(502, "bad gateway"))).toBeUndefined();
+    expect(
+      sessionVerificationFrom(
+        freshScanReports(held, new ApiError(502, "bad gateway")),
+        ROOT_LONG
+      ),
+      "실패한 읽기에서 칩이 섰다 — 부재가 아니라 낡은 주장이다"
+    ).toBeNull();
+  });
+});
+
+// =============================================================================
+// 한 화면에 반대 판정이 서지 않는다 (#1463 재검토 M-1)
+//
+// 목록은 스캔만, 미리보기·상세는 스캔+스레드를 보고 있었다. 원천이 갈리면 판정도
+// 갈린다: 스캔이 리포트 A(실패)까지만 닿고 스레드에 그 뒤의 B(통과)가 있으면, 같은
+// 세션에 대해 목록 행은 「실패 1」을 상세는 「통과 N」을 **동시에** 말한다.
+// =============================================================================
+
+describe("두 표면이 같은 후보 집합을 본다", () => {
+  const scanOnly = threadCompletionReports([
+    message(100, ROOT_LONG, FAILING_REPORT),
+  ]);
+  const wholeThread = {
+    events: [],
+    truncated: false,
+    reports: threadCompletionReports([
+      message(100, ROOT_LONG, FAILING_REPORT),
+      message(101, ROOT_LONG, CLEAN_REPORT),
+    ]),
+  };
+
+  it("스캔=A(실패)·스레드=A+B(통과) 픽스처에서 두 표면의 판정이 같다", () => {
+    // 상세가 보던 것.
+    const detail = sessionVerificationFrom(scanOnly, ROOT_LONG, wholeThread);
+    // 목록이 이제 보는 것 — 스레드 캐시를 구독하므로 같은 페이지를 받는다.
+    const row = sessionVerificationFrom(scanOnly, ROOT_LONG, wholeThread);
+    expect(detail?.lead).toBe("pass");
+    expect(row?.lead).toBe(detail?.lead);
+    // RED PROOF: 앞 판의 목록은 세 번째 인자가 없었고, 그러면 답이 갈린다.
+    expect(sessionVerificationFrom(scanOnly, ROOT_LONG)?.lead).toBe("fail");
+  });
+
+  it("두 표면이 **같은 키**로 그 스레드를 찾는다", () => {
+    // 키가 두 벌이면 구독이 빈 자리를 보고, 드리프트가 조용히 돌아온다.
+    const key = sessionThreadKey(WORKSPACE, CHANNEL, ROOT_LONG);
+    expect(key).toEqual(["work-session-events", WORKSPACE, CHANNEL, ROOT_LONG]);
+    const source = readFileSync(
+      new URL("./useWorkSessions.ts", import.meta.url),
+      "utf8"
+    );
+    // 스레드를 여는 쪽과 구독하는 쪽이 둘 다 이 함수를 지난다.
+    expect(source.split("sessionThreadKey(").length - 1).toBeGreaterThanOrEqual(3);
+    expect(source).not.toContain('queryKey: [\n      "work-session-events"');
+  });
+
+  it("목록 행은 그 구독으로도 스레드를 **열지 않는다**", () => {
+    const source = readFileSync(
+      new URL("./useWorkSessions.ts", import.meta.url),
+      "utf8"
+    );
+    const hook = source.slice(source.indexOf("export function useSessionVerification"));
+    // `skipToken` 은 「이 키를 스스로 조회하지 않는다」를 타입으로 못 박는다.
+    expect(hook).toContain("queryFn: skipToken");
+    expect(hook).not.toContain("fetchSessionEvents");
+    expect(hook).not.toContain("fetchThreadReplies");
+  });
+
+  it("구독한 페이지가 **실제로 판정에 들어간다** — 구독만 하고 버리면 드리프트는 그대로다", () => {
+    // 행동을 잴 DOM 이 없으므로 배선을 잰다(`sessionThreadInvalidation.test.ts` 와 같은
+    // 두 층 규율). 위 절이 후보 집합의 동등성을 잰다면 이 단정은 목록 행이 그 집합에
+    // 실제로 닿는가를 잰다 — `?? cachedThread.data` 한 조각이 빠지면 앞 판으로 돌아간다.
+    const source = readFileSync(
+      new URL("./useWorkSessions.ts", import.meta.url),
+      "utf8"
+    );
+    const hook = source.slice(source.indexOf("export function useSessionVerification"));
+    expect(hook).toContain("threadPage ?? cachedThread.data");
+    expect(hook).toContain("sessionVerificationFrom(scanned, rootMessageId, page)");
+    // 그리고 스캔 쪽은 실패한 읽기를 걸러 지난다.
+    expect(hook).toContain("freshScanReports(scan.data, scan.error)");
   });
 });

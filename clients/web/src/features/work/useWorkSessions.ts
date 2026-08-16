@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import {
+  skipToken,
+  useQuery,
+  useQueryClient,
+  type QueryClient,
+} from "@tanstack/react-query";
+import {
+  ApiError,
   fetchMessages,
   fetchThreadReplies,
   fetchWorkHosts,
@@ -155,18 +161,33 @@ async function fetchSessionEvents(
  * ONE subscription for every session it is watching, instead of one per open
  * detail view.
  */
+/**
+ * 한 세션의 스레드 읽기가 앉는 쿼리 키.
+ *
+ * 함수로 있는 이유는 **읽는 쪽이 둘**이기 때문이다 (#1463 재검토 M-1): 스레드를
+ * 실제로 여는 표면(미리보기·상세)과, 그 캐시를 구독만 하는 판정(`useSessionVerification`).
+ * 키가 두 벌이면 같은 세션의 같은 읽기를 두 표면이 서로 다른 자리에서 찾게 되고,
+ * 그것이 곧 한 화면에 반대 판정이 서는 방법이다.
+ */
+export function sessionThreadKey(
+  workspaceId: string,
+  channelId: string,
+  rootMessageId: string
+): readonly unknown[] {
+  return [...WORK_SESSION_EVENTS_KEY, workspaceId, channelId, rootMessageId];
+}
+
 export function useSessionEvents(
   workspaceId: string,
   session: WorkSession | null,
   live: readonly WorkSessionEvent[]
 ) {
   const query = useQuery({
-    queryKey: [
-      "work-session-events",
+    queryKey: sessionThreadKey(
       workspaceId,
       session?.channelId ?? "",
-      session?.rootMessageId ?? "",
-    ],
+      session?.rootMessageId ?? ""
+    ),
     queryFn: () =>
       fetchSessionEvents(
         workspaceId,
@@ -274,6 +295,47 @@ export function invalidateSessionReports(client: QueryClient): Promise<void> {
   return client.invalidateQueries({ queryKey: SESSION_REPORTS_KEY });
 }
 
+// ---- 실패를 어떻게 다루는가 (#1463 재검토 H-1) -------------------------------
+//
+// 앞 판은 「실패했으면 폴링을 끈다」였다. 의도는 비멤버(403)였는데 **모든** 실패가
+// 같은 대접을 받았고, 그 결함의 모양은 이랬다: 성공 1회 뒤 502 한 번이면 폴링이
+// 영구히 멈추고, React Query 가 들고 있던 **이전 data**(예: 「통과 3」)가 그대로
+// 화면에 남는다. 원장 폴링은 살아 있어 그 행의 낱말은 갱신되는데, 칩만 과거를
+// 사실이라고 말한다 — G-H1 이 고친 그 결함이 원천만 바뀐 채 돌아온 것이다.
+//
+// 그래서 실패를 두 갈래로 가른다.
+
+/**
+ * 이 실패의 답이 60초 뒤에도 **같은가**.
+ *
+ * 403(비멤버)·404(없는 채널)는 권한과 존재에 대한 답이라 다시 물어도 같다. 5xx·429·
+ * 그물 실패는 한시적이고, 다시 물으면 달라질 수 있다 — 그것들까지 영구 정지로
+ * 취급하면 한 번의 502 가 이 표면을 영영 멈춘다.
+ */
+export function isPermanentScanRefusal(error: unknown): boolean {
+  return error instanceof ApiError && (error.status === 403 || error.status === 404);
+}
+
+/** 실패 뒤 다음 조회까지. 영구 거절에서만 멈춘다. */
+export function sessionReportsRefetchInterval(error: unknown): number | false {
+  return isPermanentScanRefusal(error) ? false : LEDGER_POLL_MS;
+}
+
+/**
+ * 마지막 읽기가 실패했으면 **들고 있던 값을 쓰지 않는다**.
+ *
+ * 폴링을 살려 두는 것만으로는 위 결함이 반만 고쳐진다: 다음 틱까지의 60초 동안
+ * React Query 는 여전히 이전 `data` 를 들고 있고, 그 값은 「지금 그렇다」가 아니라
+ * 「그때 그랬다」다. 이 표면의 문서화된 규율은 이미 그 답을 갖고 있다 — 실패는 칩
+ * 부재로 끝난다. 낡은 주장보다 침묵이 정직하고, 부재는 「미검증」이 아니다.
+ */
+export function freshScanReports(
+  data: readonly ThreadCompletionReport[] | undefined,
+  error: unknown
+): readonly ThreadCompletionReport[] | undefined {
+  return error === null || error === undefined ? data : undefined;
+}
+
 /**
  * 채널 하나의 리포트 스캔. 같은 채널의 행이 몇 개든 요청은 하나다(키가 같다).
  *
@@ -292,11 +354,7 @@ function useChannelSessionReports(workspaceId: string, channelId: string) {
     enabled: channelId !== "",
     retry: false,
     staleTime: 30_000,
-    // 실패한 채널은 폴링에서도 뺀다. 여기 실패의 대표가 비멤버(403)이고, 그 답은
-    // 60초 뒤에도 같다 — 재시도를 끄고 폴링을 켜 두면 끈 재시도가 분당 한 번으로
-    // 돌아올 뿐이다.
-    refetchInterval: (query) =>
-      query.state.error === null ? LEDGER_POLL_MS : false,
+    refetchInterval: (query) => sessionReportsRefetchInterval(query.state.error),
   });
 }
 
@@ -331,10 +389,21 @@ export function sessionVerificationFrom(
 }
 
 /**
- * 위 판정을 이 세션의 채널 스캔에 붙인 훅.
+ * 위 판정을 이 세션의 원천들에 붙인 훅. **모든 표면이 같은 후보 집합을 본다.**
  *
- * @param threadPage 스레드를 이미 읽은 표면(미리보기·상세)이 그 페이지를 함께 낸다.
- *   목록 행은 넘기지 않으므로 추가 왕복이 0이다.
+ * #1463 재검토 M-1: 앞 판은 목록이 스캔만, 미리보기·상세가 스캔+스레드를 봤다.
+ * 원천이 갈리면 판정도 갈린다 — 스캔은 리포트 A(실패)만 닿고 스레드에는 그 뒤의
+ * B(통과)가 있는 세션에서, 목록 행은 「실패」를 상세는 「통과」를 **동시에** 말한다.
+ * 한 화면에 반대 판정 둘이 서면 사람은 어느 쪽도 믿을 수 없다.
+ *
+ * 그래서 이 훅이 스레드 캐시를 **구독한다**(`skipToken` — 구독만 하고 스스로는 절대
+ * 읽지 않는다). 목록 행이 `/replies` 를 여는 일은 여전히 없다: 캐시에 아무것도 없으면
+ * 후보도 없고, 있다면 그것은 미리보기나 상세가 이미 연 그 읽기다. 캐시를 지나므로
+ * 스캔이 다시 조회돼도 두 표면은 계속 같은 것을 본다 — 한쪽에 값을 밀어 넣는 방식은
+ * 그 다음 조회에서 지워져 드리프트가 되돌아온다.
+ *
+ * @param threadPage 스레드를 이미 읽은 표면이 자기 페이지를 직접 낸다. 캐시보다
+ *   먼저 쓰이지만 같은 자리를 가리키므로 값은 같다 — 렌더 한 틱을 아끼는 지름길이다.
  */
 export function useSessionVerification(
   workspaceId: string,
@@ -342,11 +411,22 @@ export function useSessionVerification(
   threadPage?: SessionEventPage | undefined
 ): SessionVerification | null {
   const scan = useChannelSessionReports(workspaceId, session.channelId);
-  const scanned = scan.data;
+  const scanned = freshScanReports(scan.data, scan.error);
+  // 구독 전용. `skipToken` 은 이 훅이 이 키를 **절대 스스로 조회하지 않음**을
+  // 타입으로 못 박는다(queryFn 이 없는 것과 다르다 — 없으면 실행시 던진다).
+  const cachedThread = useQuery<SessionEventPage>({
+    queryKey: sessionThreadKey(
+      workspaceId,
+      session.channelId,
+      session.rootMessageId
+    ),
+    queryFn: skipToken,
+  });
+  const page: SessionEventPage | undefined = threadPage ?? cachedThread.data;
   const rootMessageId = session.rootMessageId;
   return useMemo(
-    () => sessionVerificationFrom(scanned, rootMessageId, threadPage),
-    [scanned, rootMessageId, threadPage]
+    () => sessionVerificationFrom(scanned, rootMessageId, page),
+    [scanned, rootMessageId, page]
   );
 }
 
