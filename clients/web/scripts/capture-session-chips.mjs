@@ -1,0 +1,643 @@
+#!/usr/bin/env node
+// =============================================================================
+// CAPTURE: 세션 경과·검증 칩의 상태별 증거 (UXC-C / 커서 웹 ADE 벤치마크 §3-C).
+//
+// `capture-completion.mjs` 의 짝이다. 그 파일이 완료 리포트 **카드**에 대해 하는
+// 일을 이 파일이 그 문법을 물려받은 **세션 표면**에 대해 한다: 게이트가 아니라
+// 증거이고, 판정은 사진이 스스로 말하지 못하는 것만 한다.
+//
+// 목록의 네 행이 이 티켓의 분기 전부다:
+//   실행 중        살아 있는 시계("3m 12s"), 리포트가 아직 없으므로 **칩 없음**.
+//   끝남 · 통과    「24분 28초 동안 작업」 + 검증 칩 「통과 N」(ok).
+//   끝남 · 실패    같은 성과 서술 + 검증 칩 「실패 1」(danger). 통과 3개가 실패
+//                  하나를 덮지 않는다는 것이 이 사진의 전부다.
+//   끝남 · 무보고  성과 서술만. **칩이 없다** — 「미검증」이라고 쓰지 않는다.
+//
+//   npm run build && node scripts/capture-session-chips.mjs
+//   OUT_DIR=/tmp/shots node scripts/capture-session-chips.mjs
+// =============================================================================
+
+import { spawn } from "node:child_process";
+import { existsSync, mkdirSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { chromium } from "playwright";
+
+const WEB_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const PORT = Number(process.env.SESSION_CHIPS_CAPTURE_PORT || 5198);
+const ORIGIN = `http://127.0.0.1:${PORT}`;
+const OUT_DIR = process.env.OUT_DIR
+  ? resolve(process.env.OUT_DIR)
+  : resolve(WEB_ROOT, "artifacts/session-chips");
+const VIEWPORT = { width: 1280, height: 900 };
+
+const WORKSPACE_ID = "00000000-0000-7000-8000-000000000001";
+const CHANNEL_ID = "00000000-0000-7000-8000-000000000201";
+const ME = "019f94e3-7a10-79cd-9dee-208f47edd9a8";
+const HOST_ID = "019f9a01-0000-7000-8000-000000000501";
+
+const RUNNING_ID = "019f9b00-0000-7000-8000-000000000601";
+const CLEAN_ID = "019f9b00-0000-7000-8000-000000000602";
+const FAILING_ID = "019f9b00-0000-7000-8000-000000000603";
+const QUIET_ID = "019f9b00-0000-7000-8000-000000000604";
+const WIDEST_ID = "019f9b00-0000-7000-8000-000000000605";
+const ROOT_OF = {
+  [RUNNING_ID]: "019f9b00-0000-7000-8000-0000000006a1",
+  [CLEAN_ID]: "019f9b00-0000-7000-8000-0000000006a2",
+  [FAILING_ID]: "019f9b00-0000-7000-8000-0000000006a3",
+  [QUIET_ID]: "019f9b00-0000-7000-8000-0000000006a4",
+  [WIDEST_ID]: "019f9b00-0000-7000-8000-0000000006a5",
+};
+
+const SESSION = {
+  accessToken: "capture-only-not-a-credential",
+  refreshToken: "capture-only-not-a-credential",
+  member: {
+    id: ME,
+    workspaceId: WORKSPACE_ID,
+    kind: "human",
+    displayName: "곽성재",
+    handle: "seongjae",
+  },
+  realtimeWebSocketUrl: "ws://session-chips-capture.invalid/connection/websocket",
+};
+
+const CHANNELS = [
+  {
+    id: CHANNEL_ID,
+    workspaceId: WORKSPACE_ID,
+    kind: "public",
+    name: "배포",
+    muted: false,
+  },
+];
+
+const ROSTER = [
+  {
+    id: ME,
+    workspaceId: WORKSPACE_ID,
+    kind: "human",
+    status: "active",
+    role: "owner",
+    displayName: "곽성재",
+    handle: "seongjae",
+    channelCount: 1,
+    channelIds: [CHANNEL_ID],
+    capabilities: [],
+    createdAtMs: 0,
+    updatedAtMs: 0,
+  },
+];
+
+const HOSTS = [
+  {
+    id: HOST_ID,
+    workspaceId: WORKSPACE_ID,
+    scope: "workspace",
+    ownerMemberId: ME,
+    type: "app",
+    displayName: "개발실 Mac mini",
+    capabilities: { terminal: true },
+    createdAtMs: 1_785_163_000_000,
+    online: true,
+  },
+];
+
+const NOW = Date.now();
+
+function workSession(id, label, extra) {
+  return {
+    id,
+    workspaceId: WORKSPACE_ID,
+    channelId: CHANNEL_ID,
+    memberId: ME,
+    hostId: HOST_ID,
+    rootMessageId: ROOT_OF[id],
+    tool: "codex",
+    label,
+    status: "ended",
+    observation: "open",
+    observerGrantCount: 0,
+    remoteAttachAvailable: false,
+    remoteDisplayAvailable: false,
+    startedAtMs: NOW - 1_468_000,
+    endedAtMs: NOW,
+    ...extra,
+  };
+}
+
+/**
+ * 실행 중인 세션은 `endedAtMs` **키 자체가 없다**. `undefined` 를 실어 두면
+ * JSON 이 그 키를 지우므로 결과는 같지만, 서버 투영이 실제로 내는 모양은 키의
+ * 부재이고 픽스처는 그것을 그대로 흉내 내야 한다.
+ */
+function runningSession(id, label, startedAtMs) {
+  const session = workSession(id, label, { status: "running", startedAtMs });
+  delete session.endedAtMs;
+  return session;
+}
+
+/** 1시간 24분 — 시간 단위 경과. 「N시간 N분 동안 작업」이 가장 넓은 낱말이다. */
+const HOUR_SCALE_MS = 5_040_000;
+
+const SESSIONS = [
+  runningSession(RUNNING_ID, "타임라인 접기 회귀 추적", NOW - 192_000),
+  workSession(CLEAN_ID, "웹 세션 표면 게이트 정리"),
+  workSession(FAILING_ID, "결제 어댑터 회귀 점검"),
+  workSession(QUIET_ID, "로그 로테이션 스크립트 손보기"),
+  // 최악 조합 (design-review H-1 후속): 가장 넓은 경과 낱말 + 가장 넓은 칩 낱말
+  // (「미상 결과」, 4음절) + 긴 제목. 고정 폭만으로 320px 을 넘길 수 있는지가
+  // 코드 추론으로만 남아 있었으므로, 여기서 실측한다.
+  workSession(WIDEST_ID, "결제 정산 배치 재실행 파이프라인 점검", {
+    startedAtMs: NOW - HOUR_SCALE_MS,
+  }),
+];
+
+const CLEAN_REPORT = {
+  kind: "completion_report",
+  title: "웹 세션 표면 게이트 정리",
+  summary: "웹·코어 게이트를 전부 초록으로 맞췄습니다.",
+  elapsed_ms: 1_468_000,
+  gates: [
+    {
+      surface: "웹",
+      checks: [
+        { label: "테스트", outcome: "pass", detail: "1055 통과" },
+        { label: "린트", outcome: "pass", detail: "오류 0" },
+      ],
+    },
+    {
+      surface: "코어",
+      checks: [{ label: "테스트", outcome: "pass", detail: "1565 통과" }],
+    },
+  ],
+};
+
+const FAILING_REPORT = {
+  kind: "completion_report",
+  title: "결제 어댑터 회귀 점검",
+  summary: "환불 경로 테스트 하나가 아직 빨갛습니다.",
+  elapsed_ms: 1_468_000,
+  gates: [
+    {
+      surface: "웹",
+      checks: [
+        { label: "테스트", outcome: "pass", detail: "1055 통과" },
+        { label: "린트", outcome: "pass", detail: "오류 0" },
+      ],
+    },
+    {
+      surface: "엔진",
+      checks: [
+        { label: "빌드", outcome: "pass" },
+        { label: "테스트", outcome: "fail", detail: "1 실패" },
+        { label: "보안", outcome: "skip", detail: "이번 판에서 제외" },
+      ],
+    },
+  ],
+};
+
+/**
+ * 가장 넓은 칩 낱말을 내는 표: 실패가 없고 **읽지 못한 결과**가 대표가 된다
+ * (`unknown` → 「미상 결과 2」). 심각도 순위에서 unknown 이 fail 다음이므로 통과
+ * 옆에서 이 칸이 앞선다 — 추측으로 통과를 짓지 않는다는 코어 규율 그대로다.
+ */
+const UNKNOWN_REPORT = {
+  kind: "completion_report",
+  title: "결제 정산 배치 재실행 파이프라인 점검",
+  summary: "정산 배치 게이트 둘의 결과 문자열을 읽지 못했습니다.",
+  elapsed_ms: HOUR_SCALE_MS,
+  gates: [
+    {
+      surface: "정산",
+      checks: [
+        { label: "빌드", outcome: "pass" },
+        { label: "회귀", outcome: "quarantined", detail: "격리 큐로 이동" },
+        { label: "정합", outcome: "flaky", detail: "재시도 3회" },
+      ],
+    },
+  ],
+};
+
+const REPORT_OF = {
+  [CLEAN_ID]: CLEAN_REPORT,
+  [FAILING_ID]: FAILING_REPORT,
+  [WIDEST_ID]: UNKNOWN_REPORT,
+};
+
+/** 세션 스레드 한 통: ACP 이벤트 몇 줄, 그리고 있으면 완료 리포트 하나. */
+function repliesFor(sessionId) {
+  const rootId = ROOT_OF[sessionId];
+  const base = NOW - 1_400_000;
+  const steps = [
+    ["의존성 설치", "npm ci"],
+    ["게이트 실행", "run_gate"],
+    ["결과 정리", "write_report"],
+  ];
+  const messages = steps.map((step, index) => ({
+    id: `${rootId}-event-${index}`,
+    channelId: CHANNEL_ID,
+    rootId,
+    seq: 3000 + index,
+    hlcTs: base + index * 60_000,
+    hlcCount: 0,
+    authorMemberId: ME,
+    type: "system",
+    body: "ACP session update",
+    state: "sent",
+    createdAtMs: base + index * 60_000,
+    props: {
+      kind: "work_session_event",
+      schema: "momo.work_session.acp_event.v1",
+      event_type: "agent.status",
+      event_id: `${rootId}-event-${index}`,
+      event_ts: base + index * 60_000,
+      event: {
+        work_session_id: sessionId,
+        tool_call_name: step[1],
+        detail: step[0],
+      },
+    },
+  }));
+  const report = REPORT_OF[sessionId];
+  if (report) {
+    messages.push({
+      id: `${rootId}-report`,
+      channelId: CHANNEL_ID,
+      rootId,
+      seq: 3100,
+      hlcTs: base + 600_000,
+      hlcCount: 0,
+      authorMemberId: ME,
+      type: "text",
+      body: "작업을 마쳤습니다.",
+      state: "sent",
+      createdAtMs: base + 600_000,
+      props: report,
+    });
+  }
+  return messages;
+}
+
+function json(route, body, status = 200) {
+  return route.fulfill({
+    status,
+    contentType: "application/json",
+    body: JSON.stringify(body),
+  });
+}
+
+/**
+ * Centrifugo 대역의 최소 대역. 진짜 소켓이 없으면 `connStatus` 가 연결됨이 되지
+ * 않고, 그러면 패널이 오프라인 배너를 쓴 채로 찍힌다 — 이 티켓이 보여줘야 하는
+ * 것은 살아 있는 판의 위계다(오프라인 판은 별도 사진).
+ */
+async function installRealtimeSocket(page) {
+  await page.addInitScript(() => {
+    class CaptureWebSocket {
+      static CONNECTING = 0;
+      static OPEN = 1;
+      static CLOSING = 2;
+      static CLOSED = 3;
+
+      constructor(url) {
+        this.url = url;
+        this.readyState = CaptureWebSocket.CONNECTING;
+        queueMicrotask(() => {
+          this.readyState = CaptureWebSocket.OPEN;
+          this.onopen?.(new Event("open"));
+        });
+      }
+
+      send(data) {
+        const replies = String(data)
+          .trim()
+          .split("\n")
+          .map((line) => {
+            const command = JSON.parse(line);
+            if (command.connect) {
+              return {
+                id: command.id,
+                connect: { client: "session-chips-capture", version: "6" },
+              };
+            }
+            if (command.subscribe) {
+              return {
+                id: command.id,
+                subscribe: {
+                  recoverable: true,
+                  positioned: true,
+                  recovered: false,
+                  epoch: "session-chips-capture",
+                  offset: 0,
+                },
+              };
+            }
+            if (command.unsubscribe) return { id: command.id, unsubscribe: {} };
+            return { id: command.id };
+          });
+        queueMicrotask(() => {
+          this.onmessage?.(
+            new MessageEvent("message", {
+              data: replies.map((reply) => JSON.stringify(reply)).join("\n"),
+            })
+          );
+        });
+      }
+
+      close() {
+        this.readyState = CaptureWebSocket.CLOSED;
+        this.onclose?.(new CloseEvent("close", { code: 1000 }));
+      }
+    }
+    window.WebSocket = CaptureWebSocket;
+  });
+}
+
+async function installMocks(context) {
+  await context.route("**/v1/**", (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === "/v1/auth/login") return json(route, SESSION);
+    if (path === "/v1/auth/refresh") {
+      return json(route, {
+        accessToken: SESSION.accessToken,
+        refreshToken: SESSION.refreshToken,
+      });
+    }
+    if (path === "/v1/auth/realtime-token") {
+      return json(route, {
+        token: "capture-only-not-a-credential",
+        tokenType: "Bearer",
+        expiresAtMs: Date.now() + 60_000,
+        ttlSeconds: 60,
+        workspaceId: WORKSPACE_ID,
+        memberId: ME,
+      });
+    }
+    if (path.endsWith("/channels")) return json(route, { channels: CHANNELS });
+    if (path.endsWith("/roster")) return json(route, { members: ROSTER });
+    if (path.endsWith("/read-state")) return json(route, { read_states: [] });
+    if (path.endsWith("/huddles/active")) return json(route, { huddle: null });
+    if (path.endsWith("/work-hosts")) return json(route, { workHosts: HOSTS });
+    if (path.includes("/work-sessions")) {
+      return json(route, { workSessions: SESSIONS });
+    }
+    if (path.includes("/messages/") && path.endsWith("/replies")) {
+      const rootId = path.split("/messages/")[1].replace("/replies", "");
+      const sessionId = Object.keys(ROOT_OF).find(
+        (id) => ROOT_OF[id].toLowerCase() === rootId.toLowerCase()
+      );
+      return json(route, {
+        messages: sessionId ? repliesFor(sessionId) : [],
+      });
+    }
+    if (path.endsWith("/messages")) return json(route, { messages: [] });
+    return json(route, {
+      channels: [],
+      members: [],
+      read_states: [],
+      messages: [],
+      workSessions: [],
+      workHosts: [],
+    });
+  });
+}
+
+async function waitForServer(url, timeoutMs = 30_000) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    try {
+      const res = await fetch(url);
+      if (res.ok) return;
+    } catch {
+      /* not up yet */
+    }
+    if (Date.now() > deadline) {
+      throw new Error(`preview server never came up: ${url}`);
+    }
+    await new Promise((r) => setTimeout(r, 200));
+  }
+}
+
+async function openPanel(context) {
+  const page = await context.newPage();
+  await installRealtimeSocket(page);
+  await page.goto(ORIGIN, { waitUntil: "networkidle" });
+  await page.getByTestId("login-email").fill("seongjae@dawn.example");
+  await page.getByTestId("login-password").fill("capture-only-not-a-credential");
+  await page.getByTestId("login-submit").click();
+  await page.getByTestId("channel-list").waitFor({ state: "visible" });
+  await page
+    .locator(`[data-testid="channel-list"] a[href="#/c/${CHANNEL_ID}"]`)
+    .first()
+    .click();
+  await page.getByTestId("open-work-panel").click();
+  await page.getByTestId("work-panel").waitFor({ state: "visible" });
+  await page.getByTestId("work-scope-all").click();
+  await page.getByTestId("work-session-row").first().waitFor();
+  return page;
+}
+
+/**
+ * 사진이 스스로 말하지 못하는 것 셋. 나머지는 사람이 본다.
+ *
+ *   1. 실행 중 세션은 시계다(`data-kind="clock"`).
+ *   2. 끝난 세션은 성과 서술이다(`data-kind="worked"`).
+ *   3. 리포트가 없는 세션에는 칩이 **없다**. 이것이 「미검증」을 쓰지 않는다는
+ *      약속의 유일한 기계적 증거다 — 없는 노드는 사진에 찍히지 않는다.
+ */
+const ELAPSED_KINDS = `(() => {
+  const rows = [...document.querySelectorAll('[data-testid="work-session-row"]')];
+  return rows.map((row) => {
+    const elapsed = row.querySelector('[data-testid="work-session-elapsed"]');
+    return {
+      sessionId: row.getAttribute("data-session-id"),
+      kind: elapsed ? elapsed.getAttribute("data-kind") : null,
+      label: elapsed ? elapsed.textContent.trim() : null,
+    };
+  });
+})()`;
+
+/**
+ * 좁은 판에서 제목이 실제로 몇 픽셀을 남기는가 (design-review H-1).
+ *
+ * 기준은 비율이 아니라 **목록 행**이다. 리뷰어의 지적이 정확히 그 모양이었다:
+ * "목록 행조차 더 많이 남기는데, 세션 식별이 유일한 임무인 상세 머리가 목록보다
+ * 정보를 덜 준다." 그래서 같은 세션의 제목이 상세 머리에서 목록 행보다 좁아지면
+ * 그것이 회귀다 — 두 자리 다 이름 하나를 두고 같은 320px 을 나눠 쓰므로 비교가
+ * 성립한다.
+ */
+const ROW_TITLE_WIDTHS = `(() => {
+  const rows = [...document.querySelectorAll('[data-testid="work-session-row"]')];
+  const out = {};
+  for (const row of rows) {
+    const label = row.firstElementChild?.firstElementChild;
+    if (!label) continue;
+    out[String(row.getAttribute("data-session-id")).toLowerCase()] =
+      Math.round(label.getBoundingClientRect().width);
+  }
+  return out;
+})()`;
+
+const DETAIL_TITLE_WIDTH = `(() => {
+  const head = document.querySelector('[data-testid="work-detail-back"]').parentElement;
+  const title = head.querySelector("h2, h3");
+  return {
+    row: Math.round(head.getBoundingClientRect().width),
+    title: Math.round(title.getBoundingClientRect().width),
+    clipped: title.scrollWidth > title.clientWidth + 1,
+    text: title.textContent.trim(),
+  };
+})()`;
+
+async function peek(page, sessionId) {
+  await page
+    .locator(`[data-testid="work-session-row"][data-session-id="${sessionId}"]`)
+    .click();
+  await page
+    .locator(`[data-testid="work-session-peek"][data-session-id="${sessionId}"]`)
+    .waitFor();
+  await page.waitForTimeout(200);
+}
+
+async function captureScheme(browser, scheme) {
+  const shots = [];
+  const context = await browser.newContext({
+    viewport: VIEWPORT,
+    deviceScaleFactor: 2,
+    colorScheme: scheme,
+    reducedMotion: "reduce",
+  });
+  await installMocks(context);
+  const page = await openPanel(context);
+  const panel = page.getByTestId("work-panel");
+
+  const kinds = await page.evaluate(ELAPSED_KINDS);
+  const byId = Object.fromEntries(
+    kinds.map((row) => [String(row.sessionId).toLowerCase(), row])
+  );
+  const running = byId[RUNNING_ID];
+  const clean = byId[CLEAN_ID];
+  const widest = byId[WIDEST_ID];
+  if (running?.kind !== "clock") {
+    throw new Error(
+      `${scheme}: 실행 중 세션의 경과가 시계가 아니다 (${JSON.stringify(running)})`
+    );
+  }
+  if (clean?.kind !== "worked") {
+    throw new Error(
+      `${scheme}: 끝난 세션의 경과가 성과 서술이 아니다 (${JSON.stringify(clean)})`
+    );
+  }
+  console.log(
+    `  ${scheme}: running=${running.label} · ended=${clean.label} · widest=${widest?.label}`
+  );
+
+  // 상세 머리의 제목이 비교당할 기준. 목록을 떠나기 전에 재 둔다.
+  const rowTitleWidths = await page.evaluate(ROW_TITLE_WIDTHS);
+
+  const list = `${OUT_DIR}/session-list-${scheme}.png`;
+  await panel.screenshot({ path: list });
+  shots.push(list);
+
+  for (const [name, id] of [
+    ["clean", CLEAN_ID],
+    ["attention", FAILING_ID],
+    ["no-report", QUIET_ID],
+    ["widest", WIDEST_ID],
+  ]) {
+    await peek(page, id);
+    const chips = await page.getByTestId("work-peek-verification").count();
+    if (name === "no-report" && chips !== 0) {
+      throw new Error(
+        `${scheme}: 리포트가 없는 세션에 검증 칩이 ${chips}개 섰다`
+      );
+    }
+    if (name !== "no-report" && chips !== 1) {
+      throw new Error(`${scheme}: ${name} 세션의 검증 칩이 ${chips}개다`);
+    }
+    const shot = `${OUT_DIR}/session-peek-${name}-${scheme}.png`;
+    await panel.screenshot({ path: shot });
+    shots.push(shot);
+  }
+
+  for (const [name, id] of [
+    ["attention", FAILING_ID],
+    ["clean", CLEAN_ID],
+    ["widest", WIDEST_ID],
+  ]) {
+    await peek(page, id);
+    await page.getByTestId("work-session-open").click();
+    await page.getByTestId("work-detail").waitFor();
+    await page.getByTestId("work-detail-verification").waitFor();
+    await page.waitForTimeout(200);
+    // H-1 의 수치. 사진만으로는 다음 사람이 이 회귀를 다시 알아보지 못한다.
+    const head = await page.evaluate(DETAIL_TITLE_WIDTH);
+    const inRow = rowTitleWidths[id.toLowerCase()];
+    console.log(
+      `  ${scheme}/${name}: 제목 상세 ${head.title}px / 목록 ${inRow}px` +
+        `${head.clipped ? " (잘림)" : ""} 「${head.text}」`
+    );
+    if (head.title < inRow) {
+      throw new Error(
+        `${scheme}/${name}: 320px 상세 머리의 제목(${head.title}px)이 목록 행` +
+          `(${inRow}px)보다 좁다 — 세션 식별이 유일한 임무인 줄이 목록보다 적게` +
+          ` 말한다 (H-1 회귀, 「${head.text}」)`
+      );
+    }
+    const shot = `${OUT_DIR}/session-detail-${name}-${scheme}.png`;
+    await panel.screenshot({ path: shot });
+    shots.push(shot);
+    // 320px 은 이 행이 가장 빡빡한 판이고, 상세를 읽는 판은 넓은 쪽이다
+    // (MOMO-619 R1 H2). 두 폭을 함께 남겨야 리뷰가 「좁을 때 제목이 얼마나
+    // 밀리는가」와 「넓을 때 위계가 옳은가」를 따로 볼 수 있다.
+    await page.getByTestId("work-panel-wide").click();
+    await page.waitForTimeout(200);
+    const wide = `${OUT_DIR}/session-detail-${name}-wide-${scheme}.png`;
+    await panel.screenshot({ path: wide });
+    shots.push(wide);
+    await page.getByTestId("work-panel-wide").click();
+    await page.waitForTimeout(200);
+    await page.getByTestId("work-detail-back").click();
+    await page.getByTestId("work-session-list").waitFor();
+  }
+
+  await context.close();
+  return shots;
+}
+
+async function main() {
+  if (!existsSync(resolve(WEB_ROOT, "dist/index.html"))) {
+    throw new Error("dist/ is missing. Run `npm run build` first.");
+  }
+  mkdirSync(OUT_DIR, { recursive: true });
+
+  const server = spawn(
+    resolve(WEB_ROOT, "node_modules/.bin/vite"),
+    ["preview", "--port", String(PORT), "--strictPort", "--host", "127.0.0.1"],
+    { cwd: WEB_ROOT, stdio: "ignore" }
+  );
+  const shutdown = () => server.kill("SIGTERM");
+  process.on("exit", shutdown);
+
+  try {
+    await waitForServer(ORIGIN);
+    const browser = await chromium.launch();
+    try {
+      const all = [];
+      for (const scheme of ["light", "dark"]) {
+        all.push(...(await captureScheme(browser, scheme)));
+      }
+      for (const path of all) console.log(path);
+    } finally {
+      await browser.close();
+    }
+  } finally {
+    shutdown();
+  }
+}
+
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});

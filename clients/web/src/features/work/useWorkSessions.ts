@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import {
   fetchThreadReplies,
   fetchWorkHosts,
@@ -15,6 +15,12 @@ import {
   workChannelsToWatch,
   type WorkSessionEvent,
 } from "@momo/core/features/work/workSessionModel";
+import {
+  latestSessionVerification,
+  sessionCompletionReport,
+  type SessionCompletionReport,
+  type SessionVerification,
+} from "@momo/core/features/work/sessionVerification";
 import type { WorkSessionControlFrame } from "@momo/core/lib/realtimeEvents";
 
 // =============================================================================
@@ -92,6 +98,14 @@ export interface SessionEventPage {
   events: WorkSessionEvent[];
   /** The thread is longer than the panel pulled; older rows are the ones held. */
   truncated: boolean;
+  /**
+   * 완료 리포트들이 이 스레드에 남긴 것 (UXC-C).
+   *
+   * 두 번째 읽기가 아니라 **같은 페이지의 두 번째 질문**이다: 세션 원장 스레드는
+   * 이미 여기서 통째로 읽히고, 지금까지는 ACP 이벤트만 건져내고 나머지를 버렸다.
+   * 검증 칩의 원천이 그 버려지던 쪽에 있다(코어 `sessionVerification` 머리말).
+   */
+  reports: SessionCompletionReport[];
 }
 
 async function fetchSessionEvents(
@@ -100,6 +114,7 @@ async function fetchSessionEvents(
   rootId: string
 ): Promise<SessionEventPage> {
   const events: WorkSessionEvent[] = [];
+  const reports: SessionCompletionReport[] = [];
   let cursor: number | undefined;
   for (let page = 0; page < EVENT_MAX_PAGES; page += 1) {
     const res = await fetchThreadReplies(
@@ -111,12 +126,19 @@ async function fetchSessionEvents(
     );
     for (const message of res.messages) {
       const event = parseWorkSessionEvent(message);
-      if (event) events.push(event);
+      if (event) {
+        events.push(event);
+        continue;
+      }
+      const report = sessionCompletionReport(message);
+      if (report) reports.push(report);
     }
-    if (res.nextCursor === undefined) return { events, truncated: false };
+    if (res.nextCursor === undefined) {
+      return { events, truncated: false, reports };
+    }
     cursor = res.nextCursor;
   }
-  return { events, truncated: true };
+  return { events, truncated: true, reports };
 }
 
 /**
@@ -151,7 +173,48 @@ export function useSessionEvents(
     [query.data, live]
   );
 
-  return { ...query, events, truncated: query.data?.truncated ?? false };
+  /**
+   * 이 세션의 검증 상태, 또는 없음 (UXC-C).
+   *
+   * 절단된 읽기에서는 판정하지 않는다. 이 스레드는 오래된 쪽부터 페이지되므로
+   * 절단이 잘라낸 것은 **가장 최근 리포트**이고, 그때 접힌 판정은 지난 이야기다
+   * (`foldSessionEvents` 가 절단에서 「지금 이것이 실행 중」 승격을 전부 끄는 것과
+   * 같은 규율). 실시간 레일은 이 자리에 아무것도 보태지 않는다 — 레일이 나르는
+   * 것은 ACP 프레임뿐이고, 리포트는 Postgres 가 정본이다.
+   */
+  const verification: SessionVerification | null = useMemo(() => {
+    const page = query.data;
+    if (page === undefined || page.truncated) return null;
+    return latestSessionVerification(page.reports);
+  }, [query.data]);
+
+  return {
+    ...query,
+    events,
+    truncated: query.data?.truncated ?? false,
+    verification,
+  };
+}
+
+/**
+ * 세션 스레드 읽기의 쿼리 키 접두 (`useSessionEvents` 의 키가 이것으로 시작한다).
+ * 무효화는 이 접두 하나로 걸린다 — 화면에 열려 있는 스레드는 많아야 둘(미리보기와
+ * 상세)이고, 프레임이 나른 `session_id` 에서 그 세션의 `rootMessageId` 로 가려면
+ * 이 훅이 세션 목록의 **최신** 스냅샷을 콜백 안에서 들고 있어야 하는데, 그 배열은
+ * 매 refetch 마다 새로 만들어지므로 여기서 붙잡으면 낡은 사본이 된다.
+ */
+const WORK_SESSION_EVENTS_KEY = ["work-session-events"];
+
+/**
+ * 살아 있는 꼬리를 버린 자리에서 스레드를 **다시 읽는다** (리뷰어 C G-H1).
+ *
+ * 순수 함수로 빼 둔 이유는 이것이 회귀 테스트가 붙잡을 수 있는 유일한 손잡이이기
+ * 때문이다: 이 클라이언트에는 훅을 렌더할 DOM 이 없고, 「끝남 프레임이 스레드를
+ * 다시 읽게 하는가」는 문자열 대조가 아니라 실제 QueryClient 에 물어야 하는 질문이다
+ * (`sessionThreadInvalidation.test.ts`).
+ */
+export function invalidateSessionThreads(client: QueryClient): Promise<void> {
+  return client.invalidateQueries({ queryKey: WORK_SESSION_EVENTS_KEY });
 }
 
 export interface WorkSessionRail {
@@ -247,7 +310,7 @@ export function useWorkSessionRail(
     // 없다」 rather than as an assertion.
     setControlFrames((held) => (held.length > 0 ? [] : held));
     void queryClient.invalidateQueries({ queryKey: ["work-sessions", workspaceId] });
-    void queryClient.invalidateQueries({ queryKey: ["work-session-events"] });
+    void invalidateSessionThreads(queryClient);
   }, [publish, queryClient, workspaceId]);
 
   const refetchSessionsAfterTransition = useCallback(() => {
@@ -267,23 +330,38 @@ export function useWorkSessionRail(
       realtime.subscribeWorkSession(workspaceId, channelId, {
         onLifecycle: (frame) => {
           // A session that ended keeps nothing in the live tail: its whole
-          // stream is in the thread the invalidation below is about to re-read,
-          // and holding it would mean a long watch accumulates every finished
+          // stream is in the thread `invalidateSessionThreads` re-reads, and
+          // holding it would mean a long watch accumulates every finished
           // session's frames until the next resync.
+          //
+          // 그 re-read 가 **실제로 여기서 일어나야 한다**(리뷰어 C G-H1). 이
+          // 주석은 앞 판에서도 같은 말을 했지만 아래 호출은 세션 **목록**만
+          // 무효화했고, 스레드 무효화는 resync 콜백에만 있었다. 그 사이의 결함이
+          // 정확히 이 티켓의 자리다: 미리보기·상세를 연 채 세션이 끝나고
+          // 에이전트가 리포트를 스레드에 남기면, 목록 재읽기로 경과는 성과
+          // 서술이 되는데 검증 칩은 부재로 남는다 — 화면이 「보고 없음」을 그리는
+          // 동안 실패 리포트가 원장에 존재한다. 꼬리를 버리는 두 자리 모두에서
+          // 스레드를 다시 읽는다.
           if (frame.type === "work.session.ended") {
             const id = frame.payload.session_id;
             const kept = liveRef.current.filter((e) => !uuidEq(e.sessionId, id));
             if (kept.length !== liveRef.current.length) publish(kept);
+            void invalidateSessionThreads(queryClient);
           }
           refetchSessionsAfterTransition();
         },
         onToolTransition: (frame) => {
           // idle keeps the session alive but closes the current tool stream.
-          // Drop only that session's transient tail; REST remains the state SoT.
+          // Drop only that session's transient tail; REST remains the state SoT
+          // — and the same G-H1 rule applies, because this branch drops the tail
+          // for the same reason and the durable rows behind it are only in the
+          // thread. `idle` is also when a completion report lands most often
+          // (the run finished, the host kept the terminal open).
           if (frame.type === "work.session.idle") {
             const id = frame.payload.session_id;
             const kept = liveRef.current.filter((e) => !uuidEq(e.sessionId, id));
             if (kept.length !== liveRef.current.length) publish(kept);
+            void invalidateSessionThreads(queryClient);
           }
           refetchSessionsAfterTransition();
         },
