@@ -142,7 +142,7 @@ impl SlidingWindowRateLimiter {
                 .entry((*key).to_string())
                 .or_default()
                 .timestamps
-                .retain(|stamp| cutoff.map_or(true, |cutoff| *stamp > cutoff));
+                .retain(|stamp| cutoff.is_none_or(|cutoff| *stamp > cutoff));
         }
 
         let any_denied = checks.iter().any(|(key, limit)| {
@@ -244,7 +244,7 @@ impl SlidingWindowRateLimiter {
             Err(poisoned) => poisoned.into_inner(),
         };
         buckets.retain(|_, bucket| {
-            cutoff.map_or(true, |cutoff| {
+            cutoff.is_none_or(|cutoff| {
                 bucket.timestamps.iter().any(|stamp| *stamp > cutoff)
             })
         });

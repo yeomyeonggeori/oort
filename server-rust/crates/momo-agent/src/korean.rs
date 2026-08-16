@@ -113,7 +113,7 @@ pub fn has_final_consonant(word: &str) -> Option<bool> {
     if !(HANGUL_FIRST..=HANGUL_LAST).contains(&code) {
         return None;
     }
-    Some((code - HANGUL_FIRST) % JONGSEONG_SLOTS != 0)
+    Some(!(code - HANGUL_FIRST).is_multiple_of(JONGSEONG_SLOTS))
 }
 
 /// The particle alone: the decided form, or the hedge when undecidable.
