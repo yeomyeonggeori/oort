@@ -21,10 +21,7 @@ import {
   useDirectory,
   type Directory,
 } from "@/features/workspace/useWorkspace";
-import {
-  elapsedLabel,
-  useTickingNow,
-} from "@/features/agents/agentWorkingSignal";
+import { useTickingNow } from "@/features/agents/agentWorkingSignal";
 import { CHIP_CLASS } from "@/features/common/chip";
 import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/States";
 import {
@@ -56,8 +53,10 @@ import {
   freshnessLabel,
   ROW_STATE_CLASS,
   SESSION_STATUS_CLASS,
+  sessionElapsedReadout,
   silenceLabel,
 } from "@momo/core/features/work/workSessionFormat";
+import { SessionVerificationChip } from "./SessionVerificationChip";
 import {
   HANDOFF_COPY,
   handoffAdvisory,
@@ -173,7 +172,11 @@ function SessionRow({
   const status = workSessionContinuityStatus(session, hosts);
   const effectiveLive = live && hostOnline !== false;
   const slow = effectiveLive && isSlowStep(session, lastEventAtMs, nowMs);
-  const elapsed = elapsedLabel(session.startedAtMs, session.endedAtMs ?? nowMs);
+  // 도는 세션은 시계, 끝난 세션은 성과 서술, 시작이 관측되지 않았으면 아무것도
+  // (코어 `sessionElapsedReadout`). 판정이 코어에 있는 이유는 상세가 같은 답을
+  // 그려야 하기 때문이다 — 목록과 상세가 서로 다른 격으로 같은 세션을 말하면
+  // 안 된다.
+  const elapsed = sessionElapsedReadout(session, nowMs);
   return (
     <button
       ref={rowRef}
@@ -201,21 +204,27 @@ function SessionRow({
         >
           {status.label}
         </span>
-        <span
-          data-numeric
-          data-slow={slow ? "" : undefined}
-          data-testid="work-session-elapsed"
-          className={cn(
-            "shrink-0 font-mono text-timestamp",
-            !effectiveLive
-              ? "text-ink-muted"
-              : slow
-                ? "text-warn"
-                : "text-ink-muted"
-          )}
-        >
-          {elapsed}
-        </span>
+        {/* 시작 시각이 관측되지 않은 세션에는 이 자리가 아예 없다. 「0s」는
+            우리가 눈치챈 순간이지 세션이 시작한 순간이 아니다. */}
+        {elapsed !== null && (
+          <span
+            {...(elapsed.numeric ? { "data-numeric": true } : {})}
+            data-slow={slow ? "" : undefined}
+            data-testid="work-session-elapsed"
+            data-kind={elapsed.kind}
+            className={cn(
+              "shrink-0 text-timestamp",
+              elapsed.numeric && "font-mono",
+              !effectiveLive
+                ? "text-ink-muted"
+                : slow
+                  ? "text-warn"
+                  : "text-ink-muted"
+            )}
+          >
+            {elapsed.label}
+          </span>
+        )}
       </span>
       <span className="flex min-w-0 items-baseline gap-2">
         <span className="shrink-0 text-meta text-ink-muted">{channelName}</span>
@@ -500,6 +509,10 @@ function SessionPeek({
     [query.events, session, truncated]
   );
   const tail = peekRows(rows);
+  // 이 세션이 스스로 보고한 게이트 결과. 같은 읽기에서 나오므로 추가 왕복이 없고,
+  // 보고가 없는 세션에는 칩이 서지 않는다 — 「미검증」은 이 표면이 할 수 있는 말이
+  // 아니다(코어 `sessionVerification` 머리말).
+  const verification = query.verification;
   // 미리보기의 이 버튼은 **동사가 아니다** — 어느 판정이든 같은 상세로 간다.
   // 재개가 성립하는 세션에서만 「이어서」로 부르는 것은 그 말이 참인 자리에서만
   // 쓰기 위해서다(코어 `HANDOFF_COPY.resume.button`).
@@ -571,7 +584,18 @@ function SessionPeek({
           </ul>
         </>
       )}
-      <div className="flex justify-end pt-2">
+      <div
+        className={cn(
+          "flex items-center gap-2 pt-2",
+          verification !== null ? "justify-between" : "justify-end"
+        )}
+      >
+        {verification !== null && (
+          <SessionVerificationChip
+            verification={verification}
+            testId="work-peek-verification"
+          />
+        )}
         <Button
           type="button"
           variant="outline"
