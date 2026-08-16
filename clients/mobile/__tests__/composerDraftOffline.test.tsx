@@ -10,6 +10,7 @@ import {SessionProvider, useSession} from '../src/session/useSession';
 
 import {
   Composer,
+  composerColumnBudget,
   composerMaxHeight,
   COMPOSER_OFFLINE_COPY,
   withLatinWordBreaks,
@@ -366,7 +367,7 @@ describe('성장 정책 — 상한이 도출된 숫자다', () => {
 // 상한에 걸린다. 캡처는 `measure/captures/grow1443-composer-*`.
 //
 // 여기서 재는 것은 사진이 아니라 **식**이다: 줄 수는 기본 크기의 상한으로 남고,
-// 큰 글자에서는 창의 몫이 상한을 진다.
+// 큰 글자에서는 **대화 열의 몫**이 상한을 진다.
 describe('#1443 성장 상한 — 동적 타입 비례', () => {
   const inputMaxHeight = () => {
     composer();
@@ -380,9 +381,15 @@ describe('#1443 성장 상한 — 동적 타입 비례', () => {
   const AX_XXL = 3.143;
   const IPHONE_17_PRO_H = 874;
   const CHROME = 8 * 2 + 1 * 2;
+  /**
+   * 대화 열 위의 크롬 **실측**(iPhone 17 Pro / AX-XXL): 세이프 62.0 + 헤더 131.3.
+   * `measure/` 의 `composer-growth` 계측 줄이 매 캡처마다 다시 내는 숫자이고,
+   * 아래 단정이 모델을 이 값에 묶는다.
+   */
+  const MEASURED_CHROME = 193.3;
 
   it('식 자체 — 줄 상자에 배수가 곱해진다 (기본 크기는 그대로)', () => {
-    // 5줄이 아직 창의 몫보다 작은 구간: 상한 = 5 × (22 × 배수) + 크롬.
+    // 5줄이 아직 열의 몫보다 작은 구간: 상한 = 5 × (22 × 배수) + 크롬.
     expect(composerMaxHeight(1, IPHONE_17_PRO_H)).toBe(5 * 22 + CHROME);
     expect(composerMaxHeight(1.235, IPHONE_17_PRO_H)).toBeCloseTo(
       5 * 22 * 1.235 + CHROME,
@@ -390,16 +397,56 @@ describe('#1443 성장 상한 — 동적 타입 비례', () => {
     );
   });
 
-  it('창의 몫이 상한을 진다 — 큰 글자에서 5줄을 그대로 지키면 목록이 사라진다', () => {
+  it('열의 몫이 상한을 진다 — 큰 글자에서 5줄을 그대로 지키면 목록이 사라진다', () => {
     const byRows = 5 * 22 * AX_XXL + CHROME; // 363.7 — 창의 41.6%
     const cap = composerMaxHeight(AX_XXL, IPHONE_17_PRO_H);
     expect(byRows).toBeGreaterThan(cap);
-    // 키보드(창의 38%)를 뺀 열의 절반.
-    expect(cap).toBeCloseTo(IPHONE_17_PRO_H * 0.62 * 0.5, 5);
-    // 그리고 그것이 오늘보다 **더 많이** 보여 준다: 1.6줄 → 3.7줄.
+    // 키보드(38%)와 대화 열 위 크롬(23%)을 뺀 열의 절반.
+    expect(cap).toBeCloseTo(IPHONE_17_PRO_H * 0.39 * 0.5, 5);
+    // 그리고 그것이 옛 상한보다 **더 많이** 보여 준다: 1.6줄 → 2.2줄.
     const row = 22 * AX_XXL;
     expect((128 - CHROME) / row).toBeLessThan(2);
-    expect((cap - CHROME) / row).toBeGreaterThan(3.5);
+    expect((cap - CHROME) / row).toBeGreaterThan(2.2);
+  });
+
+  // ---------------------------------------------------------------------------
+  // 리뷰어 C M-1 — 몫이 갈리는 곳은 **창이 아니라 대화 열**이다.
+  //
+  // 첫 판은 `창 × (1 − 0.38) × 0.5` 로 갈랐고, 그래서 자기가 든 불변식(「목록이
+  // 입력창보다 작아지지 않는다」)이 자기 측정 지점에서 이미 거짓이었다: 창의
+  // 위쪽에는 목록이 한 줄도 못 쓰는 띠 둘(세이프 에리어 62.0 + 헤더 131.3)이
+  // 있는데 산수가 그것을 뺀 적이 없었다. 아래 셋이 그 자리를 잠근다.
+  it('불변식이 산수로 참이다 — 목록 몫 ≥ 입력창 몫', () => {
+    for (const fontScale of [1, 1.235, 2, 3.143, 3.571]) {
+      for (const height of [667, 812, 874, 956, 1366]) {
+        const budget = composerColumnBudget(fontScale, height);
+        expect(budget.column).toBeCloseTo(budget.list + budget.composer, 5);
+        if (budget.composer > 2 * 22 * fontScale + CHROME) {
+          // 바닥(두 줄)이 안 걸린 구간에서는 예외가 없다.
+          expect(budget.list).toBeGreaterThanOrEqual(budget.composer);
+        }
+      }
+    }
+  });
+
+  it('크롬 몫이 실측보다 작지 않다 — 틀리는 방향은 목록 쪽이어야 한다', () => {
+    const budget = composerColumnBudget(AX_XXL, IPHONE_17_PRO_H);
+    expect(budget.chrome).toBeGreaterThanOrEqual(MEASURED_CHROME);
+    // 그래서 화면에서 목록이 실제로 받는 것은 모델이 준 몫보다 **크다**:
+    // 874 − 키보드 336(하네스 실측 상수) − 크롬 193.3 − 입력창.
+    const onScreenList =
+      IPHONE_17_PRO_H - 336 - MEASURED_CHROME - budget.composer;
+    expect(onScreenList).toBeGreaterThanOrEqual(budget.composer);
+  });
+
+  it('첫 판의 식이었다면 그 자리에서 거짓이다 — 회귀 표식', () => {
+    // 크롬을 안 빼는 식. 이 줄이 다시 초록이 되면 M-1 이 되돌아온 것이다.
+    const firstDraft = IPHONE_17_PRO_H * (1 - 0.38) * 0.5; // 270.94
+    const onScreenList = IPHONE_17_PRO_H - 336 - MEASURED_CHROME - firstDraft;
+    expect(onScreenList).toBeLessThan(firstDraft);
+    // 목록에 남는 것이 73.8pt — 줄 상자 69.1pt 짜리 **한 줄**이고 두 줄이 안 된다.
+    expect(onScreenList).toBeLessThan(2 * 22 * AX_XXL);
+    expect(onScreenList).toBeLessThan(firstDraft / 3);
   });
 
   it('바닥은 두 줄 — 상한이 `minHeight` 아래로 못 내려간다', () => {
@@ -410,6 +457,23 @@ describe('#1443 성장 상한 — 동적 타입 비례', () => {
         expect(cap).toBeGreaterThanOrEqual(2 * 22 * fontScale + CHROME);
         expect(cap).toBeGreaterThan(44); // minHeight
       }
+    }
+  });
+
+  it('바닥이 불변식을 이기는 자리가 있다 — 가장 작은 창 · 가장 큰 글자', () => {
+    // SE(667pt) · AX-XXL 에서 열의 몫(130.1)이 두 줄(156.3)보다 작다. 그때는
+    // 바닥이 이긴다: 「목록이 크다」는 좋은 화면의 조건이고 「쓰고 있는 줄이
+    // 보인다」는 쓸 수 있는 화면의 조건이라, 부딪히면 뒤가 이긴다.
+    const floor = 2 * 22 * AX_XXL + CHROME;
+    expect(667 * 0.39 * 0.5).toBeLessThan(floor);
+    expect(composerMaxHeight(AX_XXL, 667)).toBeCloseTo(floor, 5);
+  });
+
+  it('기본 글자 크기에서는 오늘 배송되는 어느 창에서도 몫이 안 걸린다', () => {
+    // 걸리려면 창이 656pt 아래여야 하는데(128 ÷ 0.195) iOS 26 이 도는 가장 작은
+    // 아이폰이 667pt 다. 즉 이 배치는 기본 크기의 화면을 하나도 안 바꾼다.
+    for (const height of [667, 812, 844, 874, 896, 956, 1366]) {
+      expect(composerMaxHeight(1, height)).toBe(128);
     }
   });
 

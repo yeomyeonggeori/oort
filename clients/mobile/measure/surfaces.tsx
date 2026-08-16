@@ -13,12 +13,13 @@ import {
 } from 'react-native';
 import type {Member} from '@momo/core/lib/api';
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
-import {SafeAreaProvider} from 'react-native-safe-area-context';
+import {SafeAreaProvider, useSafeAreaInsets} from 'react-native-safe-area-context';
 import {SessionProvider} from '../src/session/useSession';
 import {quoteDraftFor, type QuoteBlock as QuoteBlockModel} from '@momo/core/features/timeline/quote';
 import {typingSegments} from '@momo/core/features/chat/typing';
 import {
   Composer,
+  composerColumnBudget,
   composerMaxHeight,
   withLatinWordBreaks,
 } from '../src/features/conversation/Composer';
@@ -707,11 +708,25 @@ const GROWTH_INPUT_REF: React.MutableRefObject<TextInput | null> = {
 };
 
 /**
- * 이 화면에서 상한이 **몇 pt 이고 몇 줄인가** (#1443).
+ * 이 화면에서 상한이 **몇 pt 이고 몇 줄인가**, 그리고 그때 **목록에 무엇이
+ * 남는가** (#1443 · 리뷰어 C M-1).
  *
- * 산수는 배송되는 그 함수(`composerMaxHeight`)를 부른다 — 계측이 자기 사본을
- * 들면 사본이 거짓말한다(디자인 시스템 §5.5). 실제 상자 높이는 `measure()` 로
- * 따로 읽어, 식이 화면에서 지켜지는지를 사진 안에서 대조한다.
+ * 산수는 배송되는 그 함수들(`composerMaxHeight` · `composerColumnBudget`)을
+ * 부른다 — 계측이 자기 사본을 들면 사본이 거짓말한다(디자인 시스템 §5.5). 실제
+ * 상자 높이는 `measure()` 로 따로 읽어, 식이 화면에서 지켜지는지를 사진 안에서
+ * 대조한다.
+ *
+ * ## 크롬은 **재고 나서** 적는다 (리뷰어 C M-1)
+ *
+ * 첫 판의 계측 줄은 상한만 적었고, 그래서 「목록에 267pt 가 남는다」는 주석의
+ * 주장을 사진이 반증할 수 없었다 — 그 267 에는 목록이 못 쓰는 띠 둘(세이프 에리어
+ * 위쪽·헤더)이 들어 있었다. 이제 그 둘을 **이 기기에서 실제로 재서** 적는다:
+ * 세이프 에리어는 `useSafeAreaInsets()` 로, 헤더는 **배송되는 `ScreenHeader` 를
+ * 세워** `onLayout` 으로. 모델(`CONVERSATION_CHROME_WINDOW_SHARE`)이 실측보다
+ * 작아지는 순간이 오면 이 줄이 사진에서 그것을 말한다.
+ *
+ * 헤더 표본은 절대 배치에 `opacity: 0` 이다. 재는 것이 목적이고 사진에 두 번째
+ * 헤더가 서면 이 표면의 세로 예산이 바뀌어 정작 재려던 상자가 화면 밖으로 나간다.
  *
  * 아래 줄 텍스트는 라틴 축의 계기다: 배송되는 변환(`withLatinWordBreaks`)을
  * 통과한 문장이 **어디서** 끊기는지를 `onTextLayout` 이 돌려주는 그대로 적는다.
@@ -724,12 +739,16 @@ function GrowthProbe({
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const {fontScale, height: windowHeight} = useWindowDimensions();
+  const insets = useSafeAreaInsets();
   const [boxHeight, setBoxHeight] = React.useState(0);
+  const [headerHeight, setHeaderHeight] = React.useState(0);
   const [slotWidth, setSlotWidth] = React.useState(0);
   const [broken, setBroken] = React.useState('…');
   const cap = composerMaxHeight(fontScale, windowHeight);
+  const budget = composerColumnBudget(fontScale, windowHeight);
   const row = lineBox.body * fontScale;
   const content = slotWidth === 0 ? 0 : slotWidth - space.md * 2 - 2;
+  const measuredChrome = insets.top + headerHeight;
 
   React.useEffect(() => {
     const timer = setTimeout(() => {
@@ -742,6 +761,12 @@ function GrowthProbe({
 
   return (
     <View style={styles.probe}>
+      <View
+        style={styles.probeHeaderSpecimen}
+        pointerEvents="none"
+        onLayout={event => setHeaderHeight(event.nativeEvent.layout.height)}>
+        <ScreenHeader title="배포" onBack={() => {}} titleTestID="measure-chrome-title" />
+      </View>
       <View style={styles.probeBar} pointerEvents="none">
         <View
           style={styles.probeSlot}
@@ -768,6 +793,12 @@ function GrowthProbe({
       ) : null}
       <Text allowFontScaling={false} style={styles.probeRead}>
         {`글자 배수 ${fontScale.toFixed(3)} · 창 ${Math.round(windowHeight)}pt · 줄 상자 ${row.toFixed(1)}pt`}
+      </Text>
+      <Text allowFontScaling={false} style={styles.probeRead}>
+        {`크롬 실측 ${measuredChrome.toFixed(1)}pt (세이프 ${insets.top.toFixed(1)} + 헤더 ${headerHeight.toFixed(1)}) = 창의 ${((measuredChrome / windowHeight) * 100).toFixed(1)}% · 식이 잡은 몫 ${budget.chrome.toFixed(1)}pt`}
+      </Text>
+      <Text allowFontScaling={false} style={styles.probeRead}>
+        {`대화 열 ${budget.column.toFixed(1)}pt = 목록 ${budget.list.toFixed(1)} + 입력창 ${budget.composer.toFixed(1)} — 목록 ≥ 입력창 ${budget.list >= budget.composer ? '참' : '거짓'}`}
       </Text>
       <Text allowFontScaling={false} style={styles.probeRead}>
         {`상한 ${cap.toFixed(1)}pt = ${((cap - space.sm * 2 - 2) / row).toFixed(1)}줄 · 5줄이면 ${(5 * row + space.sm * 2 + 2).toFixed(1)}pt · 실제 상자 ${boxHeight.toFixed(1)}pt`}
@@ -2430,6 +2461,12 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     probeSendLabel: {fontSize: font.label, fontWeight: '700'},
     /** 재기만 하는 상자. 화면에 그리면 사진이 계측기의 사진이 된다. */
     probeMeasure: {position: 'absolute', opacity: 0},
+    /**
+     * 헤더 표본. `probeBar` 와 같은 이유로 절대 배치 + `opacity: 0` 이고, 같은
+     * 이유로 좌우를 0 에 물린다 — 헤더 높이는 제목이 몇 줄로 감기느냐에 달렸고
+     * 그것은 폭의 함수다.
+     */
+    probeHeaderSpecimen: {position: 'absolute', left: 0, right: 0, opacity: 0},
     /** 입력창의 글자 스타일 그대로 — 그래야 재는 것이 같은 글이다. */
     probeText: {fontSize: font.body, lineHeight: lineBox.body},
     probeRead: {
