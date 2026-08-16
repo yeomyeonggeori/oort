@@ -173,6 +173,24 @@ describe('BL-2 — 메시지에서 텍스트가 나온다', () => {
     longPress();
     expect(screen.queryByTestId('sheet-copy')).toBeNull();
   });
+
+  it('공백만 있는 본문도 마찬가지다 (#1478)', () => {
+    // 공백을 클립보드에 넣는 것은 빈 문자열을 넣는 것과 같은 거짓말이다. 이 행이
+    // 본문 칸을 만들지 말지 정하는 판정(코어 `hasRenderableBody`)과 **같은 판정**을
+    // 쓴다 — 한 파일 안에서 같은 물음에 두 답을 두지 않는다.
+    render(
+      <MessageRow
+        message={message({body: '   \n  '})}
+        startsGroup
+        directory={DIRECTORY}
+        chips={[]}
+        nowMs={BASE_MS}
+        actions={actions({onOpenThread: () => {}})}
+      />,
+    );
+    longPress();
+    expect(screen.queryByTestId('sheet-copy')).toBeNull();
+  });
 });
 
 describe('H-9 — 코드 블록은 자기 복사를 갖는다', () => {

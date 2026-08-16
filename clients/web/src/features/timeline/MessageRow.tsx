@@ -12,7 +12,8 @@ import { AgentCard } from "./AgentCard";
 import { ArtifactCard } from "./ArtifactCard";
 import { AttachmentList } from "./AttachmentList";
 import { MessageBody } from "./MessageBody";
-import { hasRenderableBody } from "./bodySlot";
+// 살릴 본문이 있는지의 판정은 코어가 갖는다 — 폰이 같은 답을 소비한다 (#1478).
+import { hasRenderableBody } from "@momo/core/features/timeline/bodySlot";
 import { CascadeNotice } from "./CascadeNotice";
 import { turnRecordRunId } from "@momo/core/features/timeline/cascadeModel";
 import { rowPresentation } from "@momo/core/features/timeline/rowModel";
@@ -332,8 +333,9 @@ export function MessageRow({
   const owner = isAgent ? memberFor(directory, author?.ownerHumanId) : null;
   const deleted = message.state === "deleted";
   const failed = message.state === "failed";
-  // 살릴 본문이 실제로 있는가 (이슈 #1465). 자격(`keepsBody`)과 다른 물음이고, 왜
-  // `trim()`인지와 부재·빈 문자열·공백이 각각 몇 픽셀이었는지는 `bodySlot.ts`에.
+  // 살릴 본문이 실제로 있는가 (이슈 #1465 → #1478). 자격(`keepsBody`)과 다른
+  // 물음이고, 왜 `trim()`인지와 부재·빈 문자열·공백이 각각 몇 픽셀이었는지는
+  // 코어의 `features/timeline/bodySlot.ts`에. 폰이 같은 함수를 부른다.
   const hasBody = hasRenderableBody(message.body);
   // ADR-0151 — 서버가 완료된 것만 실어 준다. 없으면 빈 배열이고, 빈 배열은
   // `AttachmentList`가 아무것도 그리지 않는다.
@@ -622,10 +624,10 @@ export function MessageRow({
             // virtuoso는 그 사이에 이 행을 언마운트한다 (fold.ts).
             <MessageBody body={message.body ?? ""} foldKey={message.id} />
           ) : (
-            // 살릴 본문이 없으면 칸을 만들지 않는다 (이슈 #1465 · `bodySlot.ts`).
-            // `keepsBody`는 「본문을 살릴 자격」이지 「살릴 본문이 있다」가 아니다 —
-            // 요약 없는 완료 리포트가 그 둘이 갈라지는 유일한 자리이고, 거기서 웹은
-            // 글자 없는 문단을 하나 세우고 폰은 세우지 않았다.
+            // 살릴 본문이 없으면 칸을 만들지 않는다 (이슈 #1465 · 코어
+            // `bodySlot.ts`). `keepsBody`는 「본문을 살릴 자격」이지 「살릴 본문이
+            // 있다」가 아니다 — 요약 없는 완료 리포트가 그 둘이 갈라지는 유일한
+            // 자리이고, 거기서 웹은 글자 없는 문단을 하나 세우고 폰은 세우지 않았다.
             null
           ))}
         {/* 첨부는 본문 **바로 아래**다 (ADR-0151 D2). 카드·아티팩트보다 앞인

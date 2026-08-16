@@ -31,6 +31,10 @@ import {
   rowPresentation,
   type ArtifactState,
 } from '@momo/core/features/timeline/rowModel';
+// 살릴 본문이 실제로 있는가. 웹이 #1465 에서 세운 판정을 #1478 이 코어로 올렸다.
+// 이 행이 쓰던 `body !== ''` 는 그보다 한 칸 좁았다 — 공백만 있는 본문이 칸을 얻어
+// 빈 줄을 그렸다. 왜 `trim()` 인지는 그 파일 머리말에.
+import {hasRenderableBody} from '@momo/core/features/timeline/bodySlot';
 import {isTruncated, omittedFileCount} from '@momo/core/features/timeline/artifacts';
 import type {ArtifactPresentation} from '@momo/core/features/timeline/artifacts';
 import {deletedFoldLabel} from '@momo/core/features/timeline/deletedFold';
@@ -1472,6 +1476,10 @@ function MessageRowInner({
   const rollup =
     rollupOverride === undefined ? threadRollup(message) : rollupOverride;
   const body = message.body ?? '';
+  // 살릴 본문이 실제로 있는가 (#1465 → #1478). 자격(`presentation.keepsBody`)과
+  // 다른 물음이고, 웹의 같은 이름과 **같은 함수**다 — 이 행이 답을 세 곳에서 쓰기
+  // 때문에(본문 칸 · 「내용 없는 메시지」 · 시트의 복사) 이름을 한 번만 짓는다.
+  const hasBody = hasRenderableBody(body);
   // A reply, on a surface that marks them. The parent may still be unknown.
   const isMarkedReply =
     replyParent !== undefined && message.rootId !== undefined;
@@ -1915,7 +1923,7 @@ function MessageRowInner({
           </Text>
         ) : (
           <>
-            {presentation.keepsBody && body !== '' ? (
+            {presentation.keepsBody && hasBody ? (
               // 시각 칸의 여백은 여기 없다. 그릇(`rowTimeReserve`)이 진다 —
               // 본문에 걸어 두었더니 본문이 첫 자식이 아닌 행마다 구멍이었다
               // (design-review M-1).
@@ -1956,8 +1964,13 @@ function MessageRowInner({
               />
             ) : null}
 
+            {/* 위 갈래와 **같은 판정의 반대쪽**이다 (#1478). 여기만 `body === ''`
+                로 남겨 두면 공백만 있는 본문이 어느 쪽에도 안 걸려 행이 통째로
+                말이 없어진다 — 빈 본문에는 「내용 없는 메시지」라고 말해 놓고
+                공백 본문에는 아무 말도 안 하는 것은 같은 사실에 두 답을 주는
+                것이다. */}
             {presentation.keepsBody &&
-            body === '' &&
+            !hasBody &&
             !presentation.card &&
             !presentation.artifact ? (
               <Text style={styles.tombstone}>{appNote('내용 없는 메시지')}</Text>
@@ -2134,8 +2147,9 @@ function MessageRowInner({
           }}
           onCopy={
             // 묘비에는 꺼낼 내용이 없다. `body` 가 비었을 때도 마찬가지 —
-            // 빈 문자열을 클립보드에 넣는 것은 「복사했다」는 거짓말이다.
-            !deleted && body !== ''
+            // 빈 문자열을 클립보드에 넣는 것은 「복사했다」는 거짓말이다. 공백만
+            // 있는 본문도 같은 거짓말이라 같은 판정을 쓴다 (#1478).
+            !deleted && hasBody
               ? () => {
                   setSheetOpen(false);
                   setRowError(null);
