@@ -1,26 +1,28 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { agentCardModel, cardKeepsBody } from "@momo/core/features/timeline/agentCardModel";
+import { hasRenderableBody } from "@momo/core/features/timeline/bodySlot";
 import { rowPresentation } from "@momo/core/features/timeline/rowModel";
 import type { Message } from "@momo/core/lib/api";
-import { hasRenderableBody } from "./bodySlot";
 
 // =============================================================================
-// 살릴 본문이 없는 행은 본문 칸을 만들지 않는다 (이슈 #1465).
+// 살릴 본문이 없는 행은 본문 칸을 만들지 않는다 — 웹 배선 (이슈 #1465 → #1478).
 //
-// 이 클라에는 렌더 하네스가 없다(testing-library 미의존). 그래서 계약을 세 겹으로
-// 잰다 — `completionReportCard.test.ts` 가 쓰는 것과 같은 방식이다:
+// 판정 자체와 「자격과 내용은 다른 물음」이라는 계약은 이제 **코어**가 잰다
+// (`packages/momo-core/src/features/timeline/bodySlot.test.ts` — #1478 이 판정을
+// 거기로 올렸다). 여기 남는 것은 이 클라만 답할 수 있는 물음이다:
 //
-//   1. 판정 자체를 함수로 잰다 (`hasRenderableBody`).
-//   2. 코어의 `keepsBody` 가 이 판정과 **다른 물음**임을 잰다 — 요약 없는 완료
-//      리포트에서 자격은 true 인데 살릴 본문이 없다. 그 어긋남이 이 이슈다.
-//   3. `MessageRow.tsx` 소스를 읽어 판정이 실제로 배선돼 있는지 잰다. 옳은 함수를
-//      아무도 부르지 않는 것이 이 레포에서 가장 조용한 실패 방식이다.
+//   1. 이 행이 그 판정을 **실제로 부르는가.** 옳은 함수를 아무도 부르지 않는 것이
+//      이 레포에서 가장 조용한 실패 방식이다.
+//   2. 부르되 **코어의 것을** 부르는가 — 로컬 사본이 다시 서면 #1478 이 되돌아
+//      온다(같은 규칙이 두 곳에 적히고, 한 곳만 고쳐진다).
+//   3. 묘비와 편집기가 그 판정 **앞에** 남는가.
 //
-// 화면에서의 부재는 `scripts/capture-completion.mjs` 가 재고(`EMPTY_BODY_PARAGRAPHS`
-// — 리포트 행 안에 글자 없는 문단이 0개), 폰 쪽 짝은 폰 MessageRow 의 `body !== ''`
-// 갈래다.
+// 이 클라에는 렌더 하네스가 없다(testing-library 미의존). 그래서 셋 다
+// `MessageRow.tsx` 소스를 읽어 잰다 — `completionReportCard.test.ts` 가 쓰는 것과
+// 같은 방식이다. 화면에서의 부재는 `scripts/capture-completion.mjs` 가 재고
+// (`EMPTY_BODY_PARAGRAPHS` — 리포트 행 안에 글자 없는 문단이 0개), 폰 쪽 짝은
+// `clients/mobile/__tests__/conversationHygiene.test.tsx` 의 공백-본문 단정이다.
 // =============================================================================
 
 const ROW_SRC = readFileSync(
@@ -33,31 +35,6 @@ const ROW_CODE = ROW_SRC.replace(/\/\*[\s\S]*?\*\//g, "").replace(
   /^\s*\/\/.*$/gm,
   ""
 );
-
-describe("hasRenderableBody", () => {
-  it("사람이 읽을 글자가 없으면 false", () => {
-    // 서버가 보내는 모양은 **부재**다: `MessageDto.body` 가
-    // `skip_serializing_if = "Option::is_none"` 이라 빈 본문은 키째로 빠진다.
-    expect(hasRenderableBody(undefined)).toBe(false);
-    // 실시간 프레임은 `"body": null` 을 싣는다(`build_broadcast_payload`). 코어의
-    // `payloadToMessage` 가 부재로 바꿔 주지만, 화면 판정이 그 정규화 하나에
-    // 기대고 있지는 않다.
-    expect(hasRenderableBody(null)).toBe(false);
-    expect(hasRenderableBody("")).toBe(false);
-    // 공백만 있는 본문이 눈에 보이는 결함이었다: `whitespace-pre-wrap` 이 그것을
-    // 그대로 그려 카드 위에 빈 줄이 섰다(실측 46px, `bodySlot.ts` 표).
-    expect(hasRenderableBody(" ")).toBe(false);
-    expect(hasRenderableBody("   \n  ")).toBe(false);
-    expect(hasRenderableBody("\t\n")).toBe(false);
-  });
-
-  it("글자가 하나라도 있으면 true — 앞뒤 공백은 판정을 바꾸지 못한다", () => {
-    expect(hasRenderableBody("환경 셋업을 마쳤습니다.")).toBe(true);
-    expect(hasRenderableBody("  ok  ")).toBe(true);
-    // 마침표 하나도 저자가 친 것이다. 짧다는 이유로 지우지 않는다.
-    expect(hasRenderableBody(".")).toBe(true);
-  });
-});
 
 function report(props: Record<string, unknown>, body?: string): Message {
   return {
@@ -81,40 +58,21 @@ const GATES_ONLY = {
   gates: [{ surface: "웹", checks: [{ label: "테스트", outcome: "pass" }] }],
 };
 
-describe("자격과 내용은 다른 물음이다", () => {
-  it("요약 없는 완료 리포트는 자격은 true, 살릴 본문은 없다", () => {
-    const message = report(GATES_ONLY);
-    const card = agentCardModel(message);
-    expect(card?.kind).toBe("completion_report");
-    // 코어의 시맨틱은 그대로다: 요약이 없으면 본문이 곧 빠진 요약이므로 살릴
-    // **자격**이 있다. 이 이슈는 그 자격을 건드리지 않는다.
-    expect(card && cardKeepsBody(card)).toBe(true);
-    expect(rowPresentation(message).keepsBody).toBe(true);
-    // 그런데 살릴 본문이 없다. 웹은 이 어긋남에서 빈 문단을 하나 세웠다.
-    expect(hasRenderableBody(message.body)).toBe(false);
-  });
-
-  it("같은 리포트에 산문이 실리면 그 산문은 남는다 (M2 무회귀)", () => {
-    const message = report(GATES_ONLY, "환경 셋업을 마쳤습니다.");
-    expect(rowPresentation(message).keepsBody).toBe(true);
-    expect(hasRenderableBody(message.body)).toBe(true);
-  });
-
-  it("요약이 있는 리포트는 애초에 자격이 없다 (본문을 두 번 말하지 않는다)", () => {
-    const message = report(
-      { ...GATES_ONLY, summary: "게이트를 전부 초록으로 맞췄습니다." },
-      "환경 셋업을 마쳤습니다."
-    );
-    expect(rowPresentation(message).keepsBody).toBe(false);
-  });
-});
-
 describe("행이 그 판정을 실제로 쓴다", () => {
   it("본문 갈래가 `hasBody` 뒤에 선다", () => {
     expect(ROW_CODE).toContain("hasRenderableBody(message.body)");
     expect(ROW_CODE).toMatch(
       /\) : hasBody \? \(\s*<MessageBody body=\{message\.body \?\? ""\}/
     );
+  });
+
+  it("판정은 코어에서 온다 — 로컬 사본이 다시 서면 실패한다", () => {
+    // #1478 이 산 것이 이 한 줄이다. 웹이 자기 사본을 다시 들면 폰과 답이 갈라질
+    // 수 있고, 그 갈라짐은 화면을 보기 전까지 보이지 않는다.
+    expect(ROW_CODE).toContain(
+      'import { hasRenderableBody } from "@momo/core/features/timeline/bodySlot"'
+    );
+    expect(ROW_CODE).not.toMatch(/from "\.\/bodySlot"/);
   });
 
   it("묘비와 편집기는 그 판정 앞에 남는다", () => {
@@ -132,5 +90,24 @@ describe("행이 그 판정을 실제로 쓴다", () => {
     expect(branch.indexOf("<MessageEditor")).toBeLessThan(
       branch.indexOf(") : hasBody ? (")
     );
+  });
+});
+
+describe("이 클라가 마주치는 모양 (무회귀)", () => {
+  it("요약 없는 완료 리포트: 자격은 살아 있고 본문 칸만 사라진다", () => {
+    const message = report(GATES_ONLY);
+    // 자격(`keepsBody`)은 #1465 도 #1478 도 건드리지 않는다 — 카드는 그대로 선다.
+    expect(rowPresentation(message).keepsBody).toBe(true);
+    expect(hasRenderableBody(message.body)).toBe(false);
+  });
+
+  it("같은 리포트에 산문이 실리면 그 산문은 남는다 (M2)", () => {
+    const message = report(GATES_ONLY, "환경 셋업을 마쳤습니다.");
+    expect(rowPresentation(message).keepsBody).toBe(true);
+    expect(hasRenderableBody(message.body)).toBe(true);
+  });
+
+  it("공백만 있는 본문은 칸을 얻지 못한다 (실측 46px 의 그 모양)", () => {
+    expect(hasRenderableBody(report({}, "   \n  ").body)).toBe(false);
   });
 });
