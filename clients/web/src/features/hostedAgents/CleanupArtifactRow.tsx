@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { cn } from "@/design/lib/cn";
 import { Button } from "@/design/ui/button";
 import { InlineBanner } from "@/features/common/States";
 import {
@@ -159,17 +160,28 @@ export function CleanupArtifactRow({
           <p className="break-keep text-meta text-ink-muted">{copy.caution}</p>
         </div>
         {actionable && !open && (
+          // aria-disabled, native `disabled` 가 아니다 (#1403). 바로 윗줄이 잠긴
+          // 이유를 가리키는데, native `disabled` 인 버튼은 tab order 를 떠나므로
+          // 그 문장이 **닿을 수 없는 곳**에 놓인다: 키보드로 이 줄을 지나는 사람은
+          // 왜 못 하는지 듣지 못한 채 회색 버튼만 건너뛴다. 여섯 줄이 하나의
+          // 사유로 잠기는 이 목록에서 그것은 사유를 한 번 적은 설계 전체를
+          // 무의미하게 만든다. SaveButton·ConfirmButton 이 같은 이유로 이미
+          // aria-disabled 다 (SettingsFields). 초점은 남고, 눌러도 아무 일이
+          // 일어나지 않는다.
           <Button
             type="button"
             variant="outline"
             size="sm"
-            className="shrink-0"
+            className={cn("shrink-0", disabled && "opacity-50")}
             aria-expanded={false}
             aria-controls={formId}
             aria-label={`${cleanupRowTitle(artifact)} ${CLEANUP_ACKNOWLEDGE_LABEL}`}
             aria-describedby={disabled ? disabledReasonId : undefined}
-            disabled={disabled}
-            onClick={() => onOpenChange(true)}
+            aria-disabled={disabled || undefined}
+            onClick={() => {
+              if (disabled) return;
+              onOpenChange(true);
+            }}
             data-testid="cleanup-open-form"
           >
             {CLEANUP_ACKNOWLEDGE_LABEL}
@@ -407,26 +419,45 @@ function AcknowledgeForm({
       <div className="flex flex-wrap items-center justify-end gap-2">
         {/* 「닫기」가 아니다: 바로 위 거절 배너의 액션이 「닫기」이고, 두 낱말이
             같으면 100px 안에 같은 말을 하는 두 버튼이 선다. 이 버튼이 버리는 것은
-            메시지가 아니라 **적던 확인**이다. */}
+            메시지가 아니라 **적던 확인**이다.
+
+            저장이 날아가는 동안 잠기되 사라지지는 않는다 (#1403): 이 세 컨트롤은
+            한 줄에 서 있고, 그중 하나가 tab order 에서 빠지면 저장을 기다리는
+            사람의 손 밑에서 줄의 구성이 바뀐다. */}
         <Button
           type="button"
           variant="ghost"
           size="sm"
-          disabled={saving}
-          onClick={onCancel}
+          aria-disabled={saving || undefined}
+          className={cn(saving && "opacity-50")}
+          onClick={() => {
+            if (saving) return;
+            onCancel();
+          }}
           data-testid="cleanup-cancel"
         >
           취소
         </Button>
         {choice === null ? (
           // 관측만 적는 저장에는 질문이 없다. 다시 적을 수 있는 기록이기 때문이다.
+          //
+          // 진행 중인 컨트롤을 `disabled` 로 만들지 않는 것이 이 레포의 규율이고
+          // (States.tsx `actionBusy`, HostedConnectionSection 의 「해제하는 중」),
+          // 여기서는 그것이 초점 문제이기도 하다: 저장을 시작하는 것이 이 버튼
+          // 자신이라 native `disabled` 는 방금 Enter 를 누른 손에서 초점을 빼앗아
+          // <body> 로 떨군다. 옆 가지의 ConfirmButton 은 이미 aria-disabled 이므로
+          // 같은 자리의 두 갈래가 같은 문법을 쓴다.
           <Button
             type="button"
             variant="outline"
             size="sm"
-            disabled={disabled || saving}
+            aria-disabled={disabled || saving || undefined}
             aria-busy={saving || undefined}
-            onClick={submit}
+            className={cn((disabled || saving) && "opacity-50")}
+            onClick={() => {
+              if (disabled || saving) return;
+              submit();
+            }}
             data-testid="cleanup-save"
           >
             {saving ? "저장하는 중" : CLEANUP_SAVE_LABEL}

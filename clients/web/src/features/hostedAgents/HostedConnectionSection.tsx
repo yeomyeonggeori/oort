@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "@/app/session";
+import { cn } from "@/design/lib/cn";
 import { Button } from "@/design/ui/button";
 import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/States";
 import {
@@ -579,6 +580,7 @@ function CleanupPanel({
 }) {
   const progress = cleanupProgress(artifacts);
   const repair = manifestRepairGate(connection);
+  const repairBlocked = !repair.allowed || offline || busy;
   return (
     <div className="flex min-w-0 flex-col gap-3">
       <div className="flex min-w-0 flex-col gap-1">
@@ -621,13 +623,22 @@ function CleanupPanel({
           headline="정리 목록이 비어 있습니다."
           detail={MANIFEST_REPAIR_NOTE}
           actions={
+            // 잠긴 버튼은 tab order 를 떠나지 않는다 (#1403, 줄의 트리거와 같은
+            // 문법). 이 버튼은 자기가 시작한 복원 때문에 잠기므로 native
+            // `disabled` 면 방금 누른 손에서 초점이 <body> 로 떨어지고, 오프라인일
+            // 때는 바로 위 사유 문장이 키보드로 닿을 수 없는 곳에 놓인다.
             <Button
               type="button"
               variant="outline"
               size="sm"
-              disabled={!repair.allowed || offline || busy}
+              aria-disabled={repairBlocked || undefined}
               aria-busy={repairing || undefined}
-              onClick={onRepair}
+              aria-describedby={offline ? OFFLINE_NOTE_ID : undefined}
+              className={cn(repairBlocked && "opacity-50")}
+              onClick={() => {
+                if (repairBlocked) return;
+                onRepair();
+              }}
               data-testid="hosted-cleanup-repair"
             >
               {repairing ? "복원하는 중" : MANIFEST_REPAIR_LABEL}

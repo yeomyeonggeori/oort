@@ -190,6 +190,32 @@ describe("RED PROOF ③ 컴포넌트는 얇고 조용하다", () => {
     expect(row).toContain("aria-describedby={disabled ? disabledReasonId");
   });
 
+  it("잠긴 버튼은 tab order 를 떠나지 않는다", () => {
+    // #1403. 사유를 한 번만 적고 잠긴 줄들이 그것을 가리키는 바로 위 설계는,
+    // 버튼이 native `disabled` 인 순간 무너진다: 그 버튼은 tab order 에서 빠져
+    // aria-describedby 가 가리키는 문장이 키보드·AT 로 **닿을 수 없는 곳**에
+    // 놓이고, 초점을 쥔 채 잠기면 초점은 <body> 로 떨어진다. SettingsFields 의
+    // SaveButton·ConfirmButton 이 같은 이유로 이미 aria-disabled 를 쓴다.
+    //
+    // `disabled=` 가 남아도 되는 자리는 둘뿐이다. 하나는 잠금이 **편집까지**
+    // 막아야 하는 폼 필드(줄의 관측·처분 ChoiceList 와 evidence textarea, 셋),
+    // 다른 하나는 DOM 이 아니라 **컴포넌트 prop**(줄의 AcknowledgeForm 과
+    // ConfirmButton 둘, 섹션의 ConfirmButton 둘과 CleanupArtifactRow 하나) —
+    // 그 컴포넌트들이 자기 안에서 aria-disabled 로 옮긴다. 이 수가 늘어난다면
+    // 새 native `disabled` 가 버튼에 붙었다는 뜻이다.
+    expect(row.match(/^ *disabled=\{/gm)).toHaveLength(5);
+    expect(section.match(/^ *disabled=\{/gm)).toHaveLength(3);
+    expect(row).toContain("aria-disabled={disabled || undefined}");
+    expect(row).toContain("aria-disabled={saving || undefined}");
+    expect(row).toContain("aria-disabled={disabled || saving || undefined}");
+    expect(section).toContain("aria-disabled={repairBlocked || undefined}");
+    // 잠금이 그림만 바꾸면 죽지 않은 버튼이 된다. 세 트리거 모두 조기 반환한다.
+    expect(row).toContain("if (disabled) return;");
+    expect(row).toContain("if (saving) return;");
+    expect(row).toContain("if (disabled || saving) return;");
+    expect(section).toContain("if (repairBlocked) return;");
+  });
+
   // 토스트 금지는 여기서 재지 않는다. `scripts/design_preflight_web.sh` 의
   // `toast` 범주가 clients/web/src 전체를 이미 훑고, 그 범주는 줄 단위 grep 이라
   // 이 파일의 단정 문자열까지 위반으로 센다 — 규칙을 한 번 더 적으려던 줄이 그
