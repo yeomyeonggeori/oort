@@ -471,6 +471,22 @@ export const CLEANUP_SAVE_LABEL = "확인 저장";
 
 export const CLEANUP_EVIDENCE_LABEL = "무엇을 보고 확인했습니까";
 
+/**
+ * 확인 폼의 저장이 막혔을 때 버튼 옆에 서는 **유일한** 사유.
+ *
+ * 하나뿐인 이유는 `acknowledgeReady`(cleanup.ts)가 정한다: 처분을 고르지 않은
+ * 폼은 언제나 저장할 수 있으므로(관측만 기록된다), 저장이 막히는 상태는 「처분을
+ * 골랐는데 증거가 규칙을 어겼다」 하나밖에 없다. 여기에 「처분을 고르지
+ * 않았습니다」 같은 두 번째 갈래를 두면 그 문장은 영원히 그려지지 않고, 사유
+ * 자리에 「당신은 막히지 않았습니다」를 적어 두는 셈이 된다 (#1488).
+ *
+ * 텍스트 상자 아래 `evidenceIssueMessage` 와 다른 문장인 이유: 저것은 규칙을
+ * 어긴 칸에 붙는 진단이고(비었는가, 너무 긴가), 이것은 **버튼이 왜 안 눌리는가**를
+ * 상시 말하는 한 줄이다. 잠긴 컨트롤은 언제나 사유를 가리킨다.
+ */
+export const CLEANUP_EVIDENCE_REQUIRED_NOTE =
+  "확인한 내용을 적어야 이 답을 기록할 수 있습니다.";
+
 export const CLEANUP_STATUS_LEGEND = "지금 provider에서 본 상태";
 
 export const CLEANUP_DISPOSITION_LEGEND = "이 항목을 어떻게 했습니까";
