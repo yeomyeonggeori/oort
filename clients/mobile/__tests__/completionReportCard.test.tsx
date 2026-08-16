@@ -103,6 +103,11 @@ describe('폰이 코어의 낱말과 색을 다시 짓지 않는다', () => {
     expect(MESSAGE_ROW_CODE).toContain('completionCheckCounts(');
   });
 
+  it('겹친 라벨의 칸 순서를 코어가 준다 — 실패가 통과 아래로 밀리지 않는다', () => {
+    // 웹 셀이 겹친 칸을 최악 톤 먼저로 쌓는 것과 같은 순서를 폰도 코어에서 받는다.
+    expect(MESSAGE_ROW_CODE).toContain('completionRowChecks(row)');
+  });
+
   it('게이트 색은 코어의 톤 역할을 지난다 (divider/approvalNote 계약)', () => {
     expect(MESSAGE_ROW_CODE).toContain('COMPLETION_CHECK_TONE[');
     expect(MESSAGE_ROW_CODE).toContain('buildCompletionToneStyle');
@@ -110,6 +115,28 @@ describe('폰이 코어의 낱말과 색을 다시 짓지 않는다', () => {
     expect(COMPLETION_CHECK_TONE.fail).toBe('danger');
     expect(COMPLETION_CHECK_TONE.skip).not.toBe('danger');
     expect(COMPLETION_CHECK_TONE.pending).not.toBe('danger');
+  });
+
+  it('세부가 결과 낱말을 대신할 때 결과 낱말을 보조기술에 함께 읽힌다 (L3)', () => {
+    // 「896 통과」만 화면에 서면 소리로는 통과인지 실패인지 모른다 — 웹의 sr-only
+    // 짝이다. 세부가 있을 때 accessibilityLabel 로 결과 낱말을 붙인다.
+    const view = MESSAGE_ROW_CODE.slice(
+      MESSAGE_ROW_CODE.indexOf('function CompletionReportCardView('),
+      MESSAGE_ROW_CODE.indexOf('function AgentCard('),
+    );
+    expect(view).toContain('accessibilityLabel');
+    expect(view).toContain('COMPLETION_CHECK_OUTCOME_LABEL[check.outcome]');
+  });
+
+  it('상한에 걸려 안 그린 것을 「N개 더」로 정직 표기한다 (M3)', () => {
+    const view = MESSAGE_ROW_CODE.slice(
+      MESSAGE_ROW_CODE.indexOf('function CompletionReportCardView('),
+      MESSAGE_ROW_CODE.indexOf('function AgentCard('),
+    );
+    expect(view).toContain('card.omitted.actions');
+    expect(view).toContain('card.omitted.gates');
+    expect(view).toContain('card.omitted.checks');
+    expect(view).toContain('개 더');
   });
 
   it('네 역할이 각자 다른 팔레트 토큰을 들고, raw hex 가 아니다', () => {

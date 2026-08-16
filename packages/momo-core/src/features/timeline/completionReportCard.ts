@@ -55,18 +55,63 @@ export const COMPLETION_REPORT_KIND = "completion_report";
 // ---- 게이트 결과 어휘 --------------------------------------------------------
 
 /**
- * 게이트 한 칸의 결과. 넷이 따로 있는 이유는 색이 넷이어야 하기 때문이다
+ * 게이트 한 칸의 결과. 색이 서로 달라야 하기 때문에 따로 있다
  * (모듈 머리말 §정직 규율). 특히 `skip` 과 `pending` 을 `fail` 로 접으면 안 돌린
  * 것과 아직 안 끝난 것이 실패로 읽힌다.
+ *
+ * `unknown` 은 「카드가 못 읽은 칸」이다: 결과 문자열이 실렸으나 아는 어휘로도
+ * 동의어로도 접을 수 없을 때다(M1). 버리지 않고 이 격으로 표에 **남긴다** — 버리면
+ * 실패 동의어 하나가 조용히 사라져 표가 실제보다 깨끗해진다. 추측으로 통과/실패를
+ * 짓지 않으므로 색은 danger 가 아니라 warn(사람이 볼 자리)이다.
  */
-export type CompletionCheckOutcome = "pass" | "fail" | "skip" | "pending";
+export type CompletionCheckOutcome =
+  | "pass"
+  | "fail"
+  | "skip"
+  | "pending"
+  | "unknown";
 
-const CHECK_OUTCOMES: ReadonlySet<string> = new Set<CompletionCheckOutcome>([
-  "pass",
-  "fail",
-  "skip",
-  "pending",
-]);
+/**
+ * 와이어 결과 문자열 -> 아는 어휘. 대소문자를 접고 알려진 동의어를 정규화한다.
+ *
+ * 여기 없는 값은 `parseCompletionCheckOutcome` 이 `null` 을 내고, `parseCheck` 이
+ * 그것을 `unknown` 으로 표에 남긴다 — **추측으로 pass 를 짓지 않는다**(M1). 실패
+ * 동의어(`failed`/`error`/`FAIL`)를 통과 옆에서 버리던 것이 이 표가 막는 정직
+ * 결함이다. 오브젝트가 아니라 `Map` 인 이유는 `agentCardModel` 의 FAILURE_GUIDANCE
+ * 와 같다: 키가 와이어에서 오므로 `__proto__` 조회가 프로토타입 멤버를 돌려주면
+ * 안 된다.
+ */
+const CHECK_OUTCOME_SYNONYMS: ReadonlyMap<string, CompletionCheckOutcome> =
+  new Map([
+    ["pass", "pass"],
+    ["passed", "pass"],
+    ["passing", "pass"],
+    ["ok", "pass"],
+    ["green", "pass"],
+    ["success", "pass"],
+    ["successful", "pass"],
+    ["succeeded", "pass"],
+    ["fail", "fail"],
+    ["failed", "fail"],
+    ["failing", "fail"],
+    ["failure", "fail"],
+    ["error", "fail"],
+    ["errored", "fail"],
+    ["red", "fail"],
+    ["broken", "fail"],
+    ["skip", "skip"],
+    ["skipped", "skip"],
+    ["ignored", "skip"],
+    ["n/a", "skip"],
+    ["na", "skip"],
+    ["pending", "pending"],
+    ["running", "pending"],
+    ["in_progress", "pending"],
+    ["in-progress", "pending"],
+    ["inprogress", "pending"],
+    ["queued", "pending"],
+    ["waiting", "pending"],
+  ]);
 
 /** 결과의 이름. 칩·셀에 서는 한 낱말. */
 export const COMPLETION_CHECK_OUTCOME_LABEL: Readonly<
@@ -76,6 +121,7 @@ export const COMPLETION_CHECK_OUTCOME_LABEL: Readonly<
   fail: "실패",
   skip: "건너뜀",
   pending: "진행 중",
+  unknown: "미상 결과",
 };
 
 /**
@@ -96,15 +142,36 @@ export const COMPLETION_CHECK_TONE: Readonly<
   fail: "danger",
   skip: "muted",
   pending: "warn",
+  // 못 읽은 칸은 danger 가 아니다(실패라고 추측하지 않는다) — warn 으로 「여기를
+  // 보라」만 말한다. pending 과 색을 나눠 쓰는 것은 둘 다 「아직 정착 안 됨」이라
+  // 사람이 볼 자리라는 같은 뜻이기 때문이다.
+  unknown: "warn",
 };
 
-/** 와이어 문자열 -> 결과. 모르는 값은 `null`(추측 금지). */
+/**
+ * 한 (표면, 라벨) 셀에 여러 칸이 겹칠 때 **먼저 그릴 순서**. 낮을수록 앞이다.
+ * 실패가 맨 앞이라 절대 접히지 않는다(H1 — 매트릭스가 한 라벨의 첫 칸만 그려
+ * 실패를 숨기던 결함을 막는다). 웹 매트릭스가 이 순위로 한 셀의 겹친 칸을 정렬한다.
+ */
+export const COMPLETION_CHECK_SEVERITY: Readonly<
+  Record<CompletionCheckOutcome, number>
+> = {
+  fail: 0,
+  unknown: 1,
+  pending: 2,
+  pass: 3,
+  skip: 4,
+};
+
+/**
+ * 와이어 문자열 -> 아는 결과. 대소문자를 접고 동의어를 정규화한다. 어휘 밖 값은
+ * `null`(추측 금지) — 부르는 쪽(`parseCheck`)이 그것을 `unknown` 으로 표에 남긴다.
+ */
 export function parseCompletionCheckOutcome(
   value: unknown
 ): CompletionCheckOutcome | null {
-  return typeof value === "string" && CHECK_OUTCOMES.has(value)
-    ? (value as CompletionCheckOutcome)
-    : null;
+  if (typeof value !== "string") return null;
+  return CHECK_OUTCOME_SYNONYMS.get(value.trim().toLowerCase()) ?? null;
 }
 
 // ---- 카드 전체의 상태 --------------------------------------------------------
@@ -115,6 +182,10 @@ export function parseCompletionCheckOutcome(
  * `pending` 이 있어도 `attention` 이 아닌 이유: 아직 안 끝난 것은 사람을 부르는
  * 일이 아니다. 실패만이 「여기를 보라」이고, 그 실패 셀은 표 안에서 이미 붉게 서
  * 있다. 머리의 칩은 **그것이 하나라도 있는가**만 말한다.
+ *
+ * `unknown`(미상 결과)도 머리를 뒤집지 않는다: 못 읽은 칸을 실패로 추측하지 않기
+ * 때문이다(M1). 대신 그 칸은 표 안에서 warn 으로 서고 집계에 잡혀, 「완료」 칩
+ * 아래에서도 스스로 눈에 띈다.
  */
 export type CompletionOutcome = "clean" | "attention";
 
@@ -164,6 +235,20 @@ export interface CompletionAction {
   note?: string;
 }
 
+/**
+ * 상한 때문에 **그리지 않고 개수만 남긴** 것들 (M3). 적대·버그 에이전트가 불릿·표를
+ * 수천 개 실어 DOM 을 터뜨리는 것을 막되, 조용히 자르지 않는다 — 아티팩트의
+ * `omittedFileCount` 규율 동형: 화면은 「그 밖에 N개 더」로 잘렸음을 정직하게 말한다.
+ */
+export interface CompletionOmitted {
+  /** 상한을 넘겨 그리지 않은 「한 일」 불릿 수. */
+  actions: number;
+  /** 상한을 넘겨 그리지 않은 표면(줄) 수. */
+  gates: number;
+  /** 그린 줄들 안에서 상한을 넘겨 그리지 않은 게이트 칸 수(합). */
+  checks: number;
+}
+
 export interface CompletionReportCard {
   kind: "completion_report";
   title: string;
@@ -174,6 +259,8 @@ export interface CompletionReportCard {
   /** 경과 시간. "24분 28초" 같은 성과의 단위(벤치마크 차용 C). 없을 수 있다. */
   elapsedMs?: number;
   outcome: CompletionOutcome;
+  /** 상한에 걸려 그리지 않은 것들의 개수(M3). 전부 0이면 자른 것이 없다. */
+  omitted: CompletionOmitted;
   detail: PayloadDetail;
 }
 
@@ -181,11 +268,24 @@ export interface CompletionReportCard {
 
 export const COMPLETION_REPORT_TITLE = "작업 완료 리포트";
 
-/** 요약·불릿·표가 모두 비어 카드가 껍데기일 때 그 자리에 설 한 줄. */
-export const COMPLETION_REPORT_EMPTY_COPY = "리포트에 담긴 내용이 없습니다.";
-
 /** 게이트 표 위에 서는 열 제목(표면 열). */
 export const COMPLETION_GATE_SURFACE_LABEL = "표면";
+
+// ---- 상한 (M3) --------------------------------------------------------------
+//
+// 적대·버그 에이전트가 불릿·표를 수천 개 실으면 카드 하나가 채널의 DOM 을
+// 터뜨린다. 아티팩트의 `truncateForDisplay` 규율 동형으로, 파서에서 잘라 개수를
+// 남긴다(화면은 「그 밖에 N개 더」로 정직 표기). 상한은 진짜 리포트가 걸리지 않을
+// 만큼 넉넉하다 — 실제 셋업 리포트는 표면 서넛·게이트 여남은이다.
+
+/** 「한 일」 불릿의 상한. */
+export const MAX_COMPLETION_ACTIONS = 100;
+
+/** 표면(줄)의 상한. */
+export const MAX_COMPLETION_GATE_ROWS = 60;
+
+/** 한 줄(표면) 안 게이트 칸의 상한. */
+export const MAX_COMPLETION_CHECKS_PER_ROW = 40;
 
 // ---- 집계 -------------------------------------------------------------------
 
@@ -215,6 +315,7 @@ export function completionCheckCounts(
     fail: 0,
     skip: 0,
     pending: 0,
+    unknown: 0,
   };
   for (const row of gates) {
     for (const check of row.checks) {
@@ -222,6 +323,64 @@ export function completionCheckCounts(
     }
   }
   return counts;
+}
+
+/**
+ * 매트릭스의 열. **처음 본 순서**의 게이트 이름 합집합이다. 웹은 표면×게이트
+ * 매트릭스라 열이 하나 필요하고, 폰은 표면별 묶음이라 필요 없다 — 그래서 이
+ * 판정은 코어가 지고 웹이 소비한다(웹이 자기 안에서 다시 짜면 폰과 갈라진다).
+ */
+export function completionGateColumns(
+  gates: readonly CompletionGateRow[]
+): string[] {
+  const columns: string[] = [];
+  for (const row of gates) {
+    for (const check of row.checks) {
+      if (!columns.includes(check.label)) columns.push(check.label);
+    }
+  }
+  return columns;
+}
+
+/**
+ * 한 (표면 줄, 열 라벨) 셀에 그릴 칸들. **전부** 돌려주되 최악 톤이 앞이다
+ * (`COMPLETION_CHECK_SEVERITY`).
+ *
+ * H1 의 심장이다: 한 표면에 같은 라벨이 둘이면(통과 「896 통과」+실패 「1 실패」)
+ * 매트릭스가 `find` 로 첫 칸만 그려 초록만 남고 실패가 사라졌다. `filter` 로 전부
+ * 돌려주고 실패를 앞에 세워, 웹 표가 폰·집계와 **같은 칸 집합**을 그리게 한다.
+ * 정렬은 안정적이라 같은 톤끼리는 에이전트가 쓴 순서를 지킨다.
+ */
+export function completionCellChecks(
+  row: CompletionGateRow,
+  label: string
+): CompletionCheck[] {
+  return row.checks
+    .filter((check) => check.label === label)
+    .sort(
+      (a, b) =>
+        COMPLETION_CHECK_SEVERITY[a.outcome] -
+        COMPLETION_CHECK_SEVERITY[b.outcome]
+    );
+}
+
+/**
+ * 한 표면 줄의 칸들을 **읽는 순서대로** 편 것. 폰은 매트릭스 대신 표면별 묶음으로
+ * 그리므로(열이 없다) 이 평평한 목록을 쓴다.
+ *
+ * 서로 다른 라벨은 에이전트가 처음 쓴 순서를 지키고(웹의 열 순서와 같은 규율),
+ * 같은 라벨이 겹친 칸들만 그 안에서 최악 톤을 앞에 세운다 — 웹 셀이 겹친 칸을
+ * 쌓는 것과 같은 순서다(design-review Medium: 폰에서 실패가 통과 아래로 밀리지
+ * 않게). 겹치지 않는 흔한 경우에는 순서가 그대로다.
+ */
+export function completionRowChecks(row: CompletionGateRow): CompletionCheck[] {
+  const labelOrder: string[] = [];
+  for (const check of row.checks) {
+    if (!labelOrder.includes(check.label)) labelOrder.push(check.label);
+  }
+  const ordered: CompletionCheck[] = [];
+  for (const label of labelOrder) ordered.push(...completionCellChecks(row, label));
+  return ordered;
 }
 
 /**
@@ -287,20 +446,33 @@ export function parseCompletionActions(value: unknown): CompletionAction[] {
 }
 
 /**
- * 셀 하나를 읽는다. `label` 과 **아는 결과** 둘 다 있어야 셀이다: 모르는 결과
- * 문자열을 임의로 통과/실패로 접으면 그 순간 카드가 거짓을 말한다. 그래서 결과가
- * 어휘 밖이면 그 셀은 버린다.
+ * 셀 하나를 읽는다. `label` 은 반드시 있어야 하고, 결과는 세 갈래다:
+ *
+ *   1. 아는 어휘·동의어(대소문자 접음) → 그 결과로(`parseCompletionCheckOutcome`).
+ *   2. 결과 문자열이 실렸으나 접을 수 없음 → `unknown` 으로 **표에 남긴다**(M1).
+ *      버리면 `failed`/`error`/`FAIL` 같은 실패 동의어가 통과 옆에서 조용히 사라져
+ *      표가 실제보다 깨끗해진다. 추측으로 통과/실패를 짓지 않으므로 격을 따로 둔다.
+ *   3. 결과가 아예 없음(문자열 아님·빈 문자열) → 셀이 아니다(버린다).
  */
 function parseCheck(raw: unknown): CompletionCheck | null {
   if (!raw || typeof raw !== "object") return null;
   const entry = raw as Record<string, unknown>;
   const label = readString(entry, "label");
-  const outcome = parseCompletionCheckOutcome(entry["outcome"]);
-  if (label === undefined || outcome === null) return null;
-  const check: CompletionCheck = { label, outcome };
+  if (label === undefined) return null;
+  const rawOutcome = entry["outcome"];
+  const outcome = parseCompletionCheckOutcome(rawOutcome);
   const detail = readString(entry, "detail");
-  if (detail !== undefined) check.detail = detail;
-  return check;
+  if (outcome !== null) {
+    const check: CompletionCheck = { label, outcome };
+    if (detail !== undefined) check.detail = detail;
+    return check;
+  }
+  if (typeof rawOutcome === "string" && rawOutcome.trim() !== "") {
+    const check: CompletionCheck = { label, outcome: "unknown" };
+    if (detail !== undefined) check.detail = detail;
+    return check;
+  }
+  return null;
 }
 
 /**
@@ -338,18 +510,43 @@ export function parseCompletionGates(value: unknown): CompletionGateRow[] {
 export function completionReportCard(props: Props): CompletionReportCard | null {
   if (!props || props["kind"] !== COMPLETION_REPORT_KIND) return null;
   const summary = readString(props, "summary");
-  const actions = parseCompletionActions(props["actions"]);
-  const gates = parseCompletionGates(props["gates"]);
+  const allActions = parseCompletionActions(props["actions"]);
+  const allGates = parseCompletionGates(props["gates"]);
   // 내용이 하나도 없으면 카드가 아니다. `kind` 만 실린 봉투는 평범한 턴이 처리한다.
-  if (summary === undefined && actions.length === 0 && gates.length === 0) {
+  if (
+    summary === undefined &&
+    allActions.length === 0 &&
+    allGates.length === 0
+  ) {
     return null;
   }
+
+  // 상한 (M3). 자르되 개수를 남긴다. `outcome` 은 **자르기 전 전체**로 잰다 —
+  // 상한에 걸려 그리지 않은 꼬리에 실패가 있어도 머리 칩이 「완료」로 거짓말하지
+  // 않게 하기 위해서다.
+  const actions = allActions.slice(0, MAX_COMPLETION_ACTIONS);
+  let omittedChecks = 0;
+  const gates = allGates.slice(0, MAX_COMPLETION_GATE_ROWS).map((row) => {
+    if (row.checks.length <= MAX_COMPLETION_CHECKS_PER_ROW) return row;
+    omittedChecks += row.checks.length - MAX_COMPLETION_CHECKS_PER_ROW;
+    return {
+      ...row,
+      checks: row.checks.slice(0, MAX_COMPLETION_CHECKS_PER_ROW),
+    };
+  });
+  const omitted: CompletionOmitted = {
+    actions: allActions.length - actions.length,
+    gates: allGates.length - gates.length,
+    checks: omittedChecks,
+  };
+
   const card: CompletionReportCard = {
     kind: "completion_report",
     title: readString(props, "title") ?? COMPLETION_REPORT_TITLE,
     actions,
     gates,
-    outcome: completionOutcome(gates),
+    outcome: completionOutcome(allGates),
+    omitted,
     detail: payloadDetail(props),
   };
   if (summary !== undefined) card.summary = summary;

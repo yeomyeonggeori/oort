@@ -30,7 +30,7 @@ const CODE_ONLY = AGENT_CARD_SRC.replace(/\/\*[\s\S]*?\*\//g, "").replace(
 
 /** 완료 리포트 카드가 사는 블록 하나로(셀·표·본문). */
 const REPORT_BODY = CODE_ONLY.slice(
-  CODE_ONLY.indexOf("function GateCell("),
+  CODE_ONLY.indexOf("function GateCellValue("),
   CODE_ONLY.indexOf("function ToolBody(")
 );
 
@@ -73,6 +73,39 @@ describe("코어가 답하는 것을 웹이 다시 짓지 않는다", () => {
     expect(COMPLETION_CHECK_TONE.fail).toBe("danger");
     expect(COMPLETION_CHECK_TONE.skip).not.toBe("danger");
     expect(COMPLETION_CHECK_TONE.pending).not.toBe("danger");
+  });
+});
+
+describe("매트릭스가 중복 라벨의 실패를 접지 않는다 (H1)", () => {
+  it("셀 선택을 코어에 맡긴다 — 열·셀 판정을 웹이 다시 짜지 않는다", () => {
+    // 열 합집합·셀 칸 집합을 코어가 답하므로 웹 표가 폰·집계와 갈라지지 않는다.
+    expect(REPORT_BODY).toContain("completionGateColumns(card.gates)");
+    expect(REPORT_BODY).toContain("completionCellChecks(row, col)");
+  });
+
+  it("한 셀의 첫 칸만 그리는 `find` 접기가 사라졌다", () => {
+    // 예전 결함: `row.checks.find((c) => c.label === col)` 이 첫 칸만 그려 실패를
+    // 통과 뒤에 숨겼다. 그 문양이 있으면 안 된다.
+    expect(REPORT_BODY).not.toContain("row.checks.find(");
+    expect(REPORT_BODY).not.toContain(".find((c) => c.label");
+  });
+
+  it("행 key 가 표면 이름 하나가 아니라 index 를 함께 짠다 (이름 중복 충돌)", () => {
+    expect(REPORT_BODY).toContain("rowIndex");
+    expect(REPORT_BODY).not.toContain("key={row.surface}");
+  });
+});
+
+describe("코어 카피·상한을 웹이 소비한다 (L2·M3)", () => {
+  it("표면 열 제목을 코어 상수로 세운다 (인라인 「표면」 금지)", () => {
+    expect(REPORT_BODY).toContain("COMPLETION_GATE_SURFACE_LABEL");
+  });
+
+  it("상한에 걸려 안 그린 것을 「N개 더」로 정직 표기한다", () => {
+    expect(REPORT_BODY).toContain("card.omitted.actions");
+    expect(REPORT_BODY).toContain("card.omitted.gates");
+    expect(REPORT_BODY).toContain("card.omitted.checks");
+    expect(REPORT_BODY).toContain("개 더");
   });
 });
 

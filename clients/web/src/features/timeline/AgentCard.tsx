@@ -47,8 +47,12 @@ import {
 import {
   COMPLETION_CHECK_OUTCOME_LABEL,
   COMPLETION_CHECK_TONE,
+  COMPLETION_GATE_SURFACE_LABEL,
+  completionCellChecks,
   completionCheckCounts,
+  completionGateColumns,
   formatElapsed,
+  type CompletionCheck,
   type CompletionCheckOutcome,
   type CompletionReportCard,
 } from "@momo/core/features/timeline/completionReportCard";
@@ -612,44 +616,53 @@ function LoginHandoffBody({
 }
 
 /**
- * 한 셀의 결과. 세부(`896 통과`)가 있으면 그것이 셀의 글자이고, 없으면 결과
- * 낱말(`통과`)이 선다. 색은 결과가 지고, 세부가 낱말을 대신할 때는 보조기술을
- * 위해 결과 낱말을 숨은 글자로 함께 싣는다 — 「896 통과」만 읽어서는 통과인지
- * 실패인지 소리로 알 수 없기 때문이다.
+ * 한 칸의 결과. 세부(`896 통과`)가 있으면 그것이 글자이고, 없으면 결과 낱말(`통과`)
+ * 이 선다. 색은 결과가 지고, 세부가 낱말을 대신할 때는 보조기술을 위해 결과 낱말을
+ * 숨은 글자로 함께 싣는다 — 「896 통과」만 읽어서는 통과인지 실패인지 소리로 알 수
+ * 없기 때문이다.
+ *
+ * `<td>` 가 아니라 값(`<span>`) 하나다: 한 (표면,라벨) 셀에 겹친 칸이 여럿일 수
+ * 있어(중복 라벨), 그것들이 **한 칸 안에 쌓인다**(H1). `data-outcome` 은 각 값에
+ * 붙어 실패 칸이 초록에 접혀 사라지지 않는다.
  */
-function GateCell({ outcome, detail }: { outcome: CompletionCheckOutcome; detail?: string }) {
-  const toneClass = COMPLETION_TONE_CLASS[COMPLETION_CHECK_TONE[outcome]];
-  const label = COMPLETION_CHECK_OUTCOME_LABEL[outcome];
+function GateCellValue({ check }: { check: CompletionCheck }) {
+  const toneClass = COMPLETION_TONE_CLASS[COMPLETION_CHECK_TONE[check.outcome]];
+  const label = COMPLETION_CHECK_OUTCOME_LABEL[check.outcome];
   return (
-    <td className="px-3 py-1 align-baseline" data-outcome={outcome}>
-      <span className={cn("text-meta", toneClass)}>{detail ?? label}</span>
-      {detail !== undefined && <span className="sr-only"> {label}</span>}
-    </td>
+    <span className="block" data-outcome={check.outcome}>
+      <span className={cn("text-meta", toneClass)}>{check.detail ?? label}</span>
+      {check.detail !== undefined && <span className="sr-only"> {label}</span>}
+    </span>
   );
 }
 
 /**
  * 표면 × 게이트 표. 커서 벤치마크의 「Surface × Lint/Test/Build/Run」을 우리
- * 원장에 실린 표면별 게이트 목록에서 재구성한다. 열은 **처음 본 순서**의 게이트
- * 이름 합집합이고, 어떤 표면이 그 게이트를 안 돌렸으면 칸은 가운뎃점 하나로 비운다
- * (없는 결과를 통과로도 실패로도 짓지 않는다).
+ * 원장에 실린 표면별 게이트 목록에서 재구성한다. 열(`completionGateColumns`)은
+ * **처음 본 순서**의 게이트 이름 합집합이고, 어떤 표면이 그 게이트를 안 돌렸으면
+ * 칸은 가운뎃점 하나로 비운다(없는 결과를 통과로도 실패로도 짓지 않는다).
+ *
+ * 한 (표면,라벨)에 칸이 여럿이면(중복 라벨) `completionCellChecks` 가 **전부**
+ * 돌려주고 이 셀이 그것들을 쌓는다 — 최악 톤이 앞이라 실패가 절대 접히지 않는다
+ * (H1). 열·셀 판정을 코어가 지므로 웹 표가 폰·집계와 같은 칸 집합을 그린다.
  *
  * 넓어질 수 있는 표라 자기 컨테이너 안에서 가로로 스크롤한다 — 페이지 몸통은
  * 절대 가로로 밀리지 않는다(design-taste-web 반응형 규칙).
  */
 function CompletionGateTable({ card }: { card: CompletionReportCard }) {
-  const columns: string[] = [];
-  for (const row of card.gates) {
-    for (const check of row.checks) {
-      if (!columns.includes(check.label)) columns.push(check.label);
-    }
-  }
+  const columns = completionGateColumns(card.gates);
   const counts = completionCheckCounts(card.gates);
   const tally: Array<{ outcome: CompletionCheckOutcome; count: number }> = (
-    ["pass", "fail", "skip", "pending"] as CompletionCheckOutcome[]
+    ["pass", "fail", "skip", "pending", "unknown"] as CompletionCheckOutcome[]
   )
     .map((outcome) => ({ outcome, count: counts[outcome] }))
     .filter((entry) => entry.count > 0);
+  // 상한에 걸려 그리지 않은 것들(M3). 조용히 자르지 않고 개수를 말한다.
+  const omittedParts: string[] = [];
+  if (card.omitted.gates > 0)
+    omittedParts.push(`표면 ${formatCount(card.omitted.gates)}개 더`);
+  if (card.omitted.checks > 0)
+    omittedParts.push(`게이트 ${formatCount(card.omitted.checks)}개 더`);
 
   return (
     <div className="border-t border-line" data-testid="completion-gates">
@@ -661,7 +674,7 @@ function CompletionGateTable({ card }: { card: CompletionReportCard }) {
                 scope="col"
                 className="px-3 py-1 text-left text-meta font-medium text-ink-muted"
               >
-                표면
+                {COMPLETION_GATE_SURFACE_LABEL}
               </th>
               {columns.map((col) => (
                 <th
@@ -675,8 +688,12 @@ function CompletionGateTable({ card }: { card: CompletionReportCard }) {
             </tr>
           </thead>
           <tbody>
-            {card.gates.map((row) => (
-              <tr key={row.surface} data-testid="completion-gate-row">
+            {card.gates.map((row, rowIndex) => (
+              // 표면 이름이 겹쳐도 key 가 충돌하지 않게 index 를 함께 짠다(H1).
+              <tr
+                key={`${row.surface}::${rowIndex}`}
+                data-testid="completion-gate-row"
+              >
                 <th
                   scope="row"
                   className="px-3 py-1 text-left text-body font-medium text-ink"
@@ -684,8 +701,8 @@ function CompletionGateTable({ card }: { card: CompletionReportCard }) {
                   {row.surface}
                 </th>
                 {columns.map((col) => {
-                  const check = row.checks.find((c) => c.label === col);
-                  if (check === undefined) {
+                  const cellChecks = completionCellChecks(row, col);
+                  if (cellChecks.length === 0) {
                     return (
                       <td
                         key={col}
@@ -697,11 +714,19 @@ function CompletionGateTable({ card }: { card: CompletionReportCard }) {
                     );
                   }
                   return (
-                    <GateCell
-                      key={col}
-                      outcome={check.outcome}
-                      {...(check.detail !== undefined ? { detail: check.detail } : {})}
-                    />
+                    <td key={col} className="px-3 py-1 align-baseline">
+                      {/* 겹친 칸은 한 셀 안에서 한 줄씩 쌓인다. 틈은 닫힌 간격
+                          스케일의 1px 실선(`gap-px`)이다 — `gap-0.5`(2px)는 스케일
+                          밖이라 `--spacing: initial` 아래서 조용히 0px 로 죽는다. */}
+                      <span className="flex flex-col gap-px">
+                        {cellChecks.map((check, i) => (
+                          <GateCellValue
+                            key={`${row.surface}::${col}::${i}`}
+                            check={check}
+                          />
+                        ))}
+                      </span>
+                    </td>
                   );
                 })}
               </tr>
@@ -718,6 +743,14 @@ function CompletionGateTable({ card }: { card: CompletionReportCard }) {
               <span data-numeric>{formatCount(entry.count)}</span>
             </span>
           ))}
+        </p>
+      )}
+      {omittedParts.length > 0 && (
+        <p
+          className="px-3 pb-2 text-meta text-ink-muted"
+          data-testid="completion-omitted"
+        >
+          {omittedParts.join(" · ")}
         </p>
       )}
     </div>
@@ -776,6 +809,12 @@ function CompletionReportBody({ card }: { card: CompletionReportCard }) {
                 )}
               </li>
             ))}
+            {card.omitted.actions > 0 && (
+              // 상한에 걸려 그리지 않은 불릿(M3). 조용히 자르지 않는다.
+              <li className="text-ink-muted" data-testid="completion-actions-omitted">
+                그 밖에 {formatCount(card.omitted.actions)}개 더
+              </li>
+            )}
           </ul>
         </LabeledRow>
       )}

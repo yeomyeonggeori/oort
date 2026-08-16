@@ -27,6 +27,7 @@ import {
 
 const css = readFileSync(new URL("../../design/tokens.css", import.meta.url), "utf8");
 const agentCard = readFileSync(new URL("./AgentCard.tsx", import.meta.url), "utf8");
+const statusChip = readFileSync(new URL("./StatusChip.tsx", import.meta.url), "utf8");
 
 /** 토큰 한 줄의 light-dark() 두 값을 [light, dark] 로. */
 function tokenValues(name: string): [string, string] {
@@ -52,6 +53,7 @@ const OUTCOMES: readonly CompletionCheckOutcome[] = [
   "fail",
   "skip",
   "pending",
+  "unknown",
 ];
 
 describe("코어의 역할표를 이 팔레트가 전부 답한다", () => {
@@ -129,5 +131,16 @@ describe("카드가 다리를 우회하지 않는다", () => {
     // 무의미해진다(approvalNoteTone.test.ts 의 「카드가 표를 우회하지 않는다」).
     expect(agentCard).toContain('from "./completionTone"');
     expect(agentCard).toContain("COMPLETION_TONE_CLASS[COMPLETION_CHECK_TONE[");
+  });
+
+  it("머리 칩도 코어의 역할표를 지난다 — 인라인 색 리터럴이 아니다 (L1)", () => {
+    // 게이트 셀과 같은 다리로 칠한다: `attention: text-danger` 같은 한 글자 오타가
+    // 위 tokens 락에 걸리도록 칩 색도 COMPLETION_OUTCOME_TONE 를 경유한다.
+    expect(statusChip).toContain(
+      "COMPLETION_TONE_CLASS[COMPLETION_OUTCOME_TONE["
+    );
+    // 완료 칩만의 인라인 색 표(`COMPLETION_CHIP_CLASS`)가 사라졌다 — 다른 칩
+    // 어휘(TurnChip·ApprovalChip)의 리터럴은 저마다의 자리라 건드리지 않는다.
+    expect(statusChip).not.toContain("COMPLETION_CHIP_CLASS");
   });
 });

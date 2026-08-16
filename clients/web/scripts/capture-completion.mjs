@@ -11,6 +11,8 @@
 //   attention   게이트 하나가 실패 — 통과/실패/건너뜀/진행 중 네 톤이 한 표에.
 //               머리 칩은 「확인 필요」(warn), 붉은 셀은 실패 하나에만.
 //   summary     요약만 있는 최소 리포트 — 표가 없을 때 빈 띠를 그리지 않는다.
+//   edge        겹친 결과 — 한 표면의 같은 라벨 두 칸(통과+실패, 실패가 위)과
+//               읽지 못한 결과 낱말(미상). H1·M1 의 반례를 눈으로 보인다.
 //
 //   npm run build && node scripts/capture-completion.mjs
 //   OUT_DIR=/tmp/shots node scripts/capture-completion.mjs
@@ -180,6 +182,35 @@ const SUMMARY_ONLY_PROPS = {
   elapsed_ms: 84_000,
 };
 
+// 겹친 결과 상태 (H1·M1): 한 표면(웹)의 「빌드」가 두 번 돌아 통과 옆에 실패가
+// 서고(매트릭스가 첫 칸만 그려 실패를 접던 결함의 반례), 보안 스캐너의 결과
+// 낱말은 이 빌드가 못 읽어 「미상 결과」로 표에 남는다(추측으로 pass 를 짓지
+// 않는다). 사진은 한 셀에 쌓인 두 칸(실패가 위)과 warn 톤의 미상 칸을 보인다.
+const EDGE_PROPS = {
+  kind: "completion_report",
+  title: "게이트 로그 파싱 — 겹친 결과",
+  summary:
+    "빌드 게이트를 두 번 돌렸습니다. 캐시본은 통과했지만 클린 빌드에서 하나가 실패했고, 보안 스캐너가 보낸 결과 낱말은 이 빌드가 읽지 못했습니다.",
+  elapsed_ms: 205_000,
+  gates: [
+    {
+      surface: "웹",
+      checks: [
+        { label: "빌드", outcome: "pass", detail: "896 통과" },
+        { label: "빌드", outcome: "fail", detail: "1 실패" },
+        { label: "보안", outcome: "quarantined", detail: "검토 대기" },
+      ],
+    },
+    {
+      surface: "엔진",
+      checks: [
+        { label: "빌드", outcome: "pass" },
+        { label: "테스트", outcome: "pass", detail: "clippy 0" },
+      ],
+    },
+  ],
+};
+
 const MESSAGES = [
   {
     author: ME,
@@ -203,6 +234,12 @@ const MESSAGES = [
     body: "로그 정리를 마쳤습니다.",
     type: "text",
     props: SUMMARY_ONLY_PROPS,
+  },
+  {
+    author: HERMES,
+    body: "게이트 로그를 정리했습니다.",
+    type: "text",
+    props: EDGE_PROPS,
   },
 ];
 
@@ -362,9 +399,9 @@ async function captureScheme(browser, scheme) {
   await goToBottom(page, cards);
 
   const measured = await page.evaluate(CONTROLS_IN_REPORT_CARDS);
-  if (measured.cards !== 3) {
+  if (measured.cards !== 4) {
     throw new Error(
-      `${scheme}: expected three completion cards, found ${measured.cards}`
+      `${scheme}: expected four completion cards, found ${measured.cards}`
     );
   }
   if (measured.controls !== 0) {
@@ -379,7 +416,7 @@ async function captureScheme(browser, scheme) {
   await page.screenshot({ path: timeline });
   shots.push(timeline);
 
-  const names = ["clean", "attention", "summary-only"];
+  const names = ["clean", "attention", "summary-only", "edge"];
   for (let i = 0; i < names.length; i += 1) {
     shots.push(
       await shootCard(page, cards.nth(i), `${OUT_DIR}/completion-${names[i]}-${scheme}.png`)

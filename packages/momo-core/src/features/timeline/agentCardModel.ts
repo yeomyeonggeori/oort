@@ -667,10 +667,16 @@ export function agentCardModel(message: Message): AgentCardModel | null {
  * is the server's English one-liner (`approval_request_body`), and the sentence
  * a reader needs is the agent's Korean 사유, which the card draws from `summary`.
  *
- * The completion report (UXC-A) is in the second group too: its 한 문단 요약 IS
- * the sentence, drawn from `summary`, so the plain body above would be that same
- * paragraph a second time.
+ * The completion report (UXC-A) is the ONE conditional case. When it carries a
+ * summary, its 한 문단 요약 IS the sentence, so the plain body above would be that
+ * same paragraph a second time — body suppressed, like an approval. But a report
+ * with gates and NO summary has no sentence of its own on the card, and folding
+ * the body there makes the agent's one line ("환경 셋업을 마쳤습니다") vanish from
+ * web and phone alike (M2). So a summary-less report keeps its body: the body is
+ * the missing summary.
  */
 export function cardKeepsBody(card: AgentCardModel): boolean {
-  return card.kind === "turn";
+  if (card.kind === "turn") return true;
+  if (card.kind === "completion_report") return card.summary === undefined;
+  return false;
 }

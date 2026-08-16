@@ -99,6 +99,7 @@ import {
   COMPLETION_OUTCOME_LABEL,
   COMPLETION_OUTCOME_TONE,
   completionCheckCounts,
+  completionRowChecks,
   formatElapsed,
   type CompletionCheckOutcome,
   type CompletionReportCard,
@@ -808,10 +809,19 @@ function CompletionReportCardView({
   const elapsed =
     card.elapsedMs !== undefined ? formatElapsed(card.elapsedMs) : '';
   const counts = completionCheckCounts(card.gates);
-  const tally = (['pass', 'fail', 'skip', 'pending'] as CompletionCheckOutcome[])
+  const tally = (
+    ['pass', 'fail', 'skip', 'pending', 'unknown'] as CompletionCheckOutcome[]
+  )
     .filter(outcome => counts[outcome] > 0)
     .map(outcome => `${COMPLETION_CHECK_OUTCOME_LABEL[outcome]} ${counts[outcome]}`)
     .join(' · ');
+  // 상한에 걸려 그리지 않은 것들(M3). 조용히 자르지 않고 개수를 말한다 — 웹과 같은
+  // 「N개 더」.
+  const omittedParts: string[] = [];
+  if (card.omitted.gates > 0) omittedParts.push(`표면 ${card.omitted.gates}개 더`);
+  if (card.omitted.checks > 0)
+    omittedParts.push(`게이트 ${card.omitted.checks}개 더`);
+  const omitted = omittedParts.join(' · ');
   return (
     <View style={styles.card} testID="agent-card">
       <View style={styles.cardHead}>
@@ -843,25 +853,39 @@ function CompletionReportCardView({
               ) : null}
             </View>
           ))}
+          {card.omitted.actions > 0 ? (
+            // 상한에 걸려 그리지 않은 불릿(M3).
+            <Text style={styles.cardMeta}>{`그 밖에 ${card.omitted.actions}개 더`}</Text>
+          ) : null}
         </View>
       ) : null}
-      {card.gates.map(row => (
+      {card.gates.map((row, rowIndex) => (
+        // 표면 이름이 겹쳐도 key 가 충돌하지 않게 index 를 함께 짠다(H1 폰 패리티).
         <View
-          key={row.surface}
+          key={`${row.surface}::${rowIndex}`}
           style={styles.gateGroup}
           testID="completion-gate-row">
           <Text style={styles.gateSurface}>{row.surface}</Text>
           <View style={styles.detailRows}>
-            {row.checks.map((check, index) => (
+            {/* 겹친 라벨의 실패가 통과 아래로 밀리지 않게 코어가 순서를 준다 —
+                웹 셀이 겹친 칸을 최악 톤 먼저로 쌓는 것과 같다(폰 패리티). */}
+            {completionRowChecks(row).map((check, index) => (
               <View key={index} style={styles.detailRow}>
                 <Text style={styles.detailLabel}>{check.label}</Text>
-                {/* 세부가 있으면 그것이, 없으면 결과 낱말이 선다. 색은 결과가 진다. */}
+                {/* 세부가 있으면 그것이, 없으면 결과 낱말이 선다. 색은 결과가 진다.
+                    세부가 낱말을 대신할 때는 보조기술을 위해 결과 낱말을 함께 읽힌다
+                    (L3) — 「896 통과」만 소리로는 통과인지 실패인지 모른다. */}
                 <Text
                   style={[
                     styles.detailValue,
                     toneStyle[COMPLETION_CHECK_TONE[check.outcome]],
                   ]}
-                  numberOfLines={2}>
+                  numberOfLines={2}
+                  accessibilityLabel={
+                    check.detail !== undefined
+                      ? `${check.detail} ${COMPLETION_CHECK_OUTCOME_LABEL[check.outcome]}`
+                      : undefined
+                  }>
                   {check.detail ?? COMPLETION_CHECK_OUTCOME_LABEL[check.outcome]}
                 </Text>
               </View>
@@ -872,6 +896,12 @@ function CompletionReportCardView({
       {tally !== '' ? (
         <Text style={styles.cardMeta} testID="completion-tally">
           {tally}
+        </Text>
+      ) : null}
+      {omitted !== '' ? (
+        // 상한에 걸려 그리지 않은 표면·게이트(M3).
+        <Text style={styles.cardMeta} testID="completion-omitted">
+          {omitted}
         </Text>
       ) : null}
     </View>

@@ -14,8 +14,10 @@ import {
 } from "@momo/core/features/timeline/loginHandoffCard";
 import {
   COMPLETION_OUTCOME_LABEL,
+  COMPLETION_OUTCOME_TONE,
   type CompletionOutcome,
 } from "@momo/core/features/timeline/completionReportCard";
+import { COMPLETION_TONE_CLASS } from "./completionTone";
 
 // =============================================================================
 // The one status chip vocabulary for agent surfaces (R-1 §4).
@@ -126,18 +128,22 @@ export function LoginHandoffChip({ card }: { card: LoginHandoffCard }) {
  * 성공했고, 실패한 것은 표 안의 한 게이트다. 그 붉은색은 그 셀에만 있고, 머리 칩은
  * 「여기 볼 것이 있다」를 말한다. 「사람이 할 일이 남아 있다」의 색은 이 제품에서
  * 하나여야 한다(`--warn`).
+ *
+ * 색은 인라인 리터럴이 아니라 **코어의 역할표**(`COMPLETION_OUTCOME_TONE`)를 이
+ * 팔레트의 클래스(`COMPLETION_TONE_CLASS`)로 옮겨 칠한다 — 게이트 셀과 같은 다리다
+ * (L1). 그래야 `attention: text-danger` 같은 한 글자 오타가 `completionTone.test`
+ * 의 tokens 락에 걸린다.
  */
-const COMPLETION_CHIP_CLASS: Readonly<Record<CompletionOutcome, string>> = {
-  clean: "bg-surface-hover text-ok",
-  attention: "bg-surface-hover text-warn",
-};
-
 export function CompletionReportChip({ outcome }: { outcome: CompletionOutcome }) {
   return (
     <span
       data-testid="agent-status-chip"
       data-status={outcome}
-      className={cn(CHIP_CLASS, COMPLETION_CHIP_CLASS[outcome])}
+      className={cn(
+        CHIP_CLASS,
+        "bg-surface-hover",
+        COMPLETION_TONE_CLASS[COMPLETION_OUTCOME_TONE[outcome]]
+      )}
     >
       {COMPLETION_OUTCOME_LABEL[outcome]}
     </span>

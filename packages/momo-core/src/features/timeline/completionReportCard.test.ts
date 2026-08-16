@@ -9,14 +9,22 @@ import {
   COMPLETION_OUTCOME_TONE,
   COMPLETION_REPORT_KIND,
   COMPLETION_REPORT_TITLE,
+  MAX_COMPLETION_ACTIONS,
+  MAX_COMPLETION_CHECKS_PER_ROW,
+  MAX_COMPLETION_GATE_ROWS,
+  completionCellChecks,
   completionCheckCounts,
+  completionGateColumns,
   completionOutcome,
   completionReportCard,
+  completionRowChecks,
   formatElapsed,
   parseCompletionActions,
   parseCompletionCheckOutcome,
   parseCompletionGates,
+  type CompletionCheck,
   type CompletionCheckOutcome,
+  type CompletionGateRow,
   type CompletionReportCard,
 } from "./completionReportCard";
 
@@ -223,27 +231,41 @@ describe("parse helpers drop malformed entries without failing the card", () => 
     expect(parseCompletionActions(undefined)).toEqual([]);
   });
 
-  it("parseCompletionGates drops rows with no surface or no valid cell", () => {
+  it("parseCompletionGates drops rows with no surface or no cell it can place", () => {
     expect(
       parseCompletionGates([
         { surface: "웹", checks: [{ label: "테스트", outcome: "pass" }] },
-        // unknown outcome string -> that cell is dropped, leaving no cells -> row dropped
-        { surface: "엔진", checks: [{ label: "빌드", outcome: "green" }] },
         // no surface -> dropped
         { checks: [{ label: "린트", outcome: "pass" }] },
         // checks not an array -> dropped
         { surface: "compose", checks: "healthy" },
+        // a cell with no outcome at all (not a string) -> that cell is not a
+        // cell; the row's only cell is gone, so the row drops. This is the ONLY
+        // way a cell is dropped now — an unreadable outcome STRING is kept as
+        // 미상 (M1), never silently removed.
+        { surface: "빈", checks: [{ label: "x" }] },
       ])
     ).toEqual([{ surface: "웹", checks: [{ label: "테스트", outcome: "pass" }] }]);
   });
 
-  it("parseCompletionCheckOutcome refuses unknown strings (no guessing)", () => {
+  it("parseCompletionCheckOutcome normalizes synonyms and case, refuses the rest (M1)", () => {
     expect(parseCompletionCheckOutcome("pass")).toBe("pass");
     expect(parseCompletionCheckOutcome("fail")).toBe("fail");
     expect(parseCompletionCheckOutcome("skip")).toBe("skip");
     expect(parseCompletionCheckOutcome("pending")).toBe("pending");
-    expect(parseCompletionCheckOutcome("green")).toBeNull();
+    // failure synonyms must reach `fail`, not vanish next to the passes
+    expect(parseCompletionCheckOutcome("failed")).toBe("fail");
+    expect(parseCompletionCheckOutcome("error")).toBe("fail");
+    expect(parseCompletionCheckOutcome("FAIL")).toBe("fail");
+    expect(parseCompletionCheckOutcome("Failure")).toBe("fail");
+    // pass synonyms
+    expect(parseCompletionCheckOutcome("green")).toBe("pass");
+    expect(parseCompletionCheckOutcome("PASSED")).toBe("pass");
+    expect(parseCompletionCheckOutcome("ok")).toBe("pass");
+    // still no guessing for genuinely unknown vocabulary
+    expect(parseCompletionCheckOutcome("bananas")).toBeNull();
     expect(parseCompletionCheckOutcome(1)).toBeNull();
+    expect(parseCompletionCheckOutcome("")).toBeNull();
   });
 
   it("a negative elapsed is dropped rather than drawn (clock skew)", () => {
@@ -280,6 +302,7 @@ describe("completionCheckCounts", () => {
       fail: 1,
       skip: 1,
       pending: 1,
+      unknown: 0,
     });
     expect(completionOutcome(gates)).toBe("attention");
   });
@@ -302,7 +325,13 @@ describe("formatElapsed", () => {
 });
 
 describe("tone and label tables stay total", () => {
-  const outcomes: CompletionCheckOutcome[] = ["pass", "fail", "skip", "pending"];
+  const outcomes: CompletionCheckOutcome[] = [
+    "pass",
+    "fail",
+    "skip",
+    "pending",
+    "unknown",
+  ];
 
   it("every check outcome has a label and a tone role", () => {
     for (const outcome of outcomes) {
@@ -311,10 +340,12 @@ describe("tone and label tables stay total", () => {
     }
   });
 
-  it("only fail wears danger; skip and pending never do", () => {
+  it("only fail wears danger; skip, pending and unknown never do", () => {
     expect(COMPLETION_CHECK_TONE.fail).toBe("danger");
     expect(COMPLETION_CHECK_TONE.skip).not.toBe("danger");
     expect(COMPLETION_CHECK_TONE.pending).not.toBe("danger");
+    // an unread cell is not guessed to be a failure (M1) — warn calls a person
+    expect(COMPLETION_CHECK_TONE.unknown).not.toBe("danger");
     // the header calls a person (warn) rather than shouting failure (danger)
     expect(COMPLETION_OUTCOME_TONE.attention).toBe("warn");
     expect(COMPLETION_OUTCOME_TONE.clean).toBe("ok");
@@ -353,5 +384,221 @@ describe("agentCardModel dispatch — the reuse of the turn family", () => {
     expect(row.card?.kind).toBe("completion_report");
     expect(row.keepsBody).toBe(false);
     expect(row.artifact).toBeNull();
+  });
+});
+
+// =============================================================================
+// H1 — 매트릭스가 중복 라벨 칸을 접어 실패를 숨기지 않는다.
+//
+// 웹 표는 표면×라벨 매트릭스라, 한 표면에 같은 라벨 두 칸(통과 「896 통과」 +
+// 실패 「1 실패」)이 오면 예전 코드가 `find` 로 첫 칸만 그려 초록만 남고 실패가
+// 사라졌다. 판정을 코어로 올려(`completionGateColumns`/`completionCellChecks`) 웹
+// 표가 폰·집계와 **같은 칸 집합**을 그리는지를 여기서 순수하게 잰다 — 이 클라에는
+// 렌더 하네스가 없기 때문이다(웹/폰 소스 대조는 각 클라 테스트가 별도로 한다).
+// =============================================================================
+
+/** 한 줄을 매트릭스(열×셀)로 재구성해 평평하게 편 것. 웹 표가 그리는 칸 집합이다. */
+function reconstructAsMatrix(gates: readonly CompletionGateRow[]): CompletionCheck[] {
+  const columns = completionGateColumns(gates);
+  const out: CompletionCheck[] = [];
+  for (const row of gates) {
+    for (const col of columns) out.push(...completionCellChecks(row, col));
+  }
+  return out;
+}
+
+/** 순서 무관 다중집합 비교(정렬 후 JSON). */
+function sortedJson(checks: readonly CompletionCheck[]): string[] {
+  return checks.map((c) => JSON.stringify(c)).sort();
+}
+
+describe("H1 — 웹 매트릭스가 중복 라벨의 실패를 접지 않는다", () => {
+  const dupGates = parseCompletionGates([
+    {
+      surface: "웹",
+      checks: [
+        { label: "빌드", outcome: "pass", detail: "896 통과" },
+        { label: "빌드", outcome: "fail", detail: "1 실패" },
+      ],
+    },
+  ]);
+
+  it("파서는 중복 라벨 두 칸을 모두 살린다 (버리지 않는다)", () => {
+    expect(dupGates[0].checks).toHaveLength(2);
+  });
+
+  it("열은 라벨 합집합이라 중복 라벨을 한 번만 세운다", () => {
+    expect(completionGateColumns(dupGates)).toEqual(["빌드"]);
+  });
+
+  it("한 셀이 두 칸을 모두 돌려주고, 실패가 맨 앞이다 (초록에 접히지 않는다)", () => {
+    const cell = completionCellChecks(dupGates[0], "빌드");
+    expect(cell).toHaveLength(2);
+    // 최악 톤이 먼저 — 실패가 통과 앞에 서서 절대 사라지지 않는다.
+    expect(cell[0].outcome).toBe("fail");
+    // red proof: 웹 표가 그릴 칸들 안에 실패 칸이 실제로 존재한다.
+    expect(cell.some((c) => c.outcome === "fail")).toBe(true);
+  });
+
+  it("웹 매트릭스·폰 목록·집계가 같은 칸 집합을 그린다 (3표면 일치)", () => {
+    const flat = dupGates.flatMap((row) => row.checks); // 폰이 그리는 칸(표면별 목록)
+    const matrix = reconstructAsMatrix(dupGates); // 웹 표가 그리는 칸
+    // 다중집합이 같다 — 웹이 하나라도 접거나 중복시키지 않는다.
+    expect(sortedJson(matrix)).toEqual(sortedJson(flat));
+    // 집계(칩·표 밑 한 줄)도 같은 칸을 센다.
+    expect(completionCheckCounts(dupGates)).toMatchObject({ pass: 1, fail: 1 });
+    // 그리고 카드 머리는 실패가 있으므로 attention 이다.
+    expect(completionOutcome(dupGates)).toBe("attention");
+  });
+
+  it("폰의 평평한 목록도 겹친 라벨의 실패를 통과 앞에 세운다 (폰 패리티)", () => {
+    // completionRowChecks: 서로 다른 라벨은 처음 쓴 순서를 지키고, 겹친 라벨만
+    // 그 안에서 최악 톤 먼저. 웹 셀이 쌓는 순서와 같다.
+    const ordered = completionRowChecks(dupGates[0]);
+    expect(ordered.map((c) => c.outcome)).toEqual(["fail", "pass"]);
+  });
+
+  it("겹치지 않는 흔한 경우엔 폰 순서를 바꾸지 않는다", () => {
+    const row: CompletionGateRow = {
+      surface: "웹",
+      checks: [
+        { label: "테스트", outcome: "pass" },
+        { label: "린트", outcome: "pass" },
+        { label: "빌드", outcome: "fail" },
+      ],
+    };
+    // 라벨이 겹치지 않으면 에이전트가 쓴 순서 그대로다 — 실패를 위로 끌어올리지
+    // 않는다(웹 열 순서와 같은 규율).
+    expect(completionRowChecks(row).map((c) => c.label)).toEqual([
+      "테스트",
+      "린트",
+      "빌드",
+    ]);
+  });
+});
+
+describe("M1 — 실패 동의어·어휘 밖 결과가 표에서 사라지지 않는다", () => {
+  it("실패 동의어(대소문자 무관)가 통과 옆에서 버려지지 않고 attention 을 세운다", () => {
+    // 수리 전이라면 `passed`·`FAILED` 둘 다 어휘 밖이라 버려져 줄이 통째로
+    // 사라지고 카드가 clean(혹은 null)이었다. 이제 정규화되어 실패가 남는다.
+    const card = completionReportCard({
+      kind: COMPLETION_REPORT_KIND,
+      gates: [
+        {
+          surface: "웹",
+          checks: [
+            { label: "테스트", outcome: "passed", detail: "896 통과" },
+            { label: "린트", outcome: "FAILED", detail: "3 경고" },
+          ],
+        },
+      ],
+    }) as CompletionReportCard;
+    expect(card.gates[0].checks.map((c) => c.outcome)).toEqual(["pass", "fail"]);
+    expect(card.outcome).toBe("attention");
+  });
+
+  it("매핑 불가 결과는 버리지 않고 미상 결과로 표에 남는다 (추측으로 pass 금지)", () => {
+    const card = completionReportCard({
+      kind: COMPLETION_REPORT_KIND,
+      gates: [
+        {
+          surface: "웹",
+          checks: [{ label: "보안", outcome: "quarantined", detail: "검토 대기" }],
+        },
+      ],
+    }) as CompletionReportCard;
+    const check = card.gates[0].checks[0];
+    expect(check.outcome).toBe("unknown");
+    // 세부는 보존한다 — 카드가 못 읽은 것은 결과 낱말이지 세부가 아니다.
+    expect(check.detail).toBe("검토 대기");
+    // 미상은 실패가 아니므로 머리를 뒤집지 않지만, 집계에 잡혀 스스로 드러난다.
+    expect(card.outcome).toBe("clean");
+    expect(completionCheckCounts(card.gates).unknown).toBe(1);
+  });
+});
+
+describe("M2 — summary 없는 완료 리포트는 본문을 접지 않는다", () => {
+  it("게이트만 있고 summary 가 없으면 body 를 위에 남긴다", () => {
+    // message() 의 body 는 "환경 셋업을 마쳤습니다." — summary 가 없으면 이 문장이
+    // 카드의 유일한 문장이므로 접으면 웹·폰에서 사라진다.
+    const card = agentCardModel(
+      message({
+        kind: COMPLETION_REPORT_KIND,
+        title: "환경 셋업",
+        gates: [{ surface: "웹", checks: [{ label: "테스트", outcome: "pass" }] }],
+      })
+    ) as CompletionReportCard;
+    expect(card.summary).toBeUndefined();
+    expect(cardKeepsBody(card)).toBe(true);
+  });
+
+  it("summary 가 있으면 본문은 접힌다 (한 문장을 두 번 그리지 않는다)", () => {
+    const card = agentCardModel(
+      message({ kind: COMPLETION_REPORT_KIND, summary: "요약이 있음" })
+    ) as CompletionReportCard;
+    expect(cardKeepsBody(card)).toBe(false);
+  });
+});
+
+describe("M3 — 배열 상한이 DOM 폭발을 막되 개수를 정직 표기한다", () => {
+  it("불릿을 상한까지만 그리고 나머지 개수를 남긴다", () => {
+    const actions = Array.from({ length: MAX_COMPLETION_ACTIONS + 37 }, (_, i) => ({
+      text: `불릿 ${i}`,
+    }));
+    const card = completionReportCard({
+      kind: COMPLETION_REPORT_KIND,
+      actions,
+    }) as CompletionReportCard;
+    expect(card.actions).toHaveLength(MAX_COMPLETION_ACTIONS);
+    expect(card.omitted.actions).toBe(37);
+  });
+
+  it("표면(줄)을 상한까지만 그리고 나머지 개수를 남긴다", () => {
+    const gates = Array.from({ length: MAX_COMPLETION_GATE_ROWS + 5 }, (_, i) => ({
+      surface: `표면 ${i}`,
+      checks: [{ label: "테스트", outcome: "pass" }],
+    }));
+    const card = completionReportCard({
+      kind: COMPLETION_REPORT_KIND,
+      gates,
+    }) as CompletionReportCard;
+    expect(card.gates).toHaveLength(MAX_COMPLETION_GATE_ROWS);
+    expect(card.omitted.gates).toBe(5);
+  });
+
+  it("한 줄 안 칸을 상한까지만 그리고 나머지 개수를 남긴다", () => {
+    const checks: CompletionCheck[] = Array.from(
+      { length: MAX_COMPLETION_CHECKS_PER_ROW + 8 },
+      (_, i) => ({ label: `게이트 ${i}`, outcome: "pass" })
+    );
+    const card = completionReportCard({
+      kind: COMPLETION_REPORT_KIND,
+      gates: [{ surface: "웹", checks }],
+    }) as CompletionReportCard;
+    expect(card.gates[0].checks).toHaveLength(MAX_COMPLETION_CHECKS_PER_ROW);
+    expect(card.omitted.checks).toBe(8);
+  });
+
+  it("상한에 걸려 안 그린 꼬리의 실패도 머리 칩을 attention 으로 만든다", () => {
+    // outcome 은 자르기 전 전체로 잰다 — 안 그린 실패를 「완료」로 거짓말하지 않는다.
+    const gates = [
+      ...Array.from({ length: MAX_COMPLETION_GATE_ROWS }, (_, i) => ({
+        surface: `표면 ${i}`,
+        checks: [{ label: "테스트", outcome: "pass" }],
+      })),
+      { surface: "꼬리", checks: [{ label: "빌드", outcome: "fail" }] },
+    ];
+    const card = completionReportCard({
+      kind: COMPLETION_REPORT_KIND,
+      gates,
+    }) as CompletionReportCard;
+    expect(card.gates).toHaveLength(MAX_COMPLETION_GATE_ROWS);
+    expect(card.omitted.gates).toBe(1);
+    expect(card.outcome).toBe("attention");
+  });
+
+  it("진짜 리포트(표면 서넛)는 상한에 걸리지 않는다 — 전부 0", () => {
+    const card = completionReportCard(REPORT_PROPS) as CompletionReportCard;
+    expect(card.omitted).toEqual({ actions: 0, gates: 0, checks: 0 });
   });
 });
