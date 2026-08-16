@@ -26,6 +26,7 @@ import { CHIP_CLASS } from "@/features/common/chip";
 import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/States";
 import {
   useSessionEvents,
+  useSessionVerification,
   useWorkHosts,
   useWorkSessionRail,
   useWorkSessions,
@@ -168,6 +169,11 @@ function SessionRow({
   onPeek: () => void;
   rowRef: (element: HTMLButtonElement | null) => void;
 }) {
+  const { workspaceId } = useSession();
+  // 이 행의 검증 칩 (#1463). 스레드를 넘기지 않으므로 이 행은 `/replies` 를 열지
+  // 않는다 — 원천은 채널 히스토리 스캔이고, 같은 채널의 행이 몇 개든 요청은
+  // 하나다(`useWorkSessions` 머리말의 왕복 예산).
+  const verification = useSessionVerification(workspaceId, session);
   const hostOnline = workHostOnline(session, hosts);
   const status = workSessionContinuityStatus(session, hosts);
   const effectiveLive = live && hostOnline !== false;
@@ -227,7 +233,18 @@ function SessionRow({
         )}
       </span>
       <span className="flex min-w-0 items-baseline gap-2">
-        <span className="shrink-0 text-meta text-ink-muted">{channelName}</span>
+        {/* 방 이름은 **양보한다** (#1463 리뷰 B1).
+            앞 판에서 이 자리는 `shrink-0` 이었고, 그 줄에 물러서지 않는 항목이 셋
+            (방 이름·신호 없음·검증 칩)이 됐다. 방 이름 하나가 길면 요약이 0으로
+            줄어든 뒤 **칩이 패널 밖으로 밀려나** 320px 안에 가로 스크롤이 생겼다
+            (실측: line-2 scrollW 315 > clientW 287, 900px 판에서는 패널이 292px 라
+            한글 16자에서 넘친다). `channel.name` 에는 서버 길이 상한이 없다.
+
+            옳은 답은 같은 파일 아래 `MySessionRow` 가 이미 쓰고 있었다 — 거기서는
+            방 이름이 `min-w-0 truncate` 라 첫 번째 절단 대상이다. */}
+        <span className="min-w-0 truncate text-meta text-ink-muted">
+          {channelName}
+        </span>
         {/* The survival signal is a WORD, not a hue. It used to be a color
             change on the clock with the explanation in a `title`, which a
             keyboard or screen reader user never reaches and which leaves colour
@@ -248,9 +265,33 @@ function SessionRow({
             facts the ledger row itself carries. It is never "아직 단계가
             없습니다": this row has not read the session thread, and absence of
             evidence would be stated here as evidence of absence. */}
-        <span className="min-w-0 flex-1 truncate text-meta text-ink-muted">
+        {/* `grow`(flex 1 1 auto)이지 `flex-1`(flex 1 1 0%)이 아니다 (#1463 재검토
+            H-1). 기준 크기가 0인 항목은 **줄어들 몫도 0**이라, 자리가 모자랄 때 방
+            이름이 부족분을 혼자 떠안는 대신 이 요약이 0px 로 사라졌다 — 생략부호도
+            없이. 레일이 실제 headline 을 나른 행에서는 그 행이 존재하는 이유가 통째로
+            지워지는 것이다.
+
+            기준 크기를 내용으로 두면 둘이 자기 크기에 비례해 줄어든다: 긴 쪽이 더
+            많이 내주고, 짧은 방 이름 옆에서는 이 요약이 여전히 남은 자리를 다 가진다.
+            부족분을 나눠 지는 것이 한쪽이 사라지는 것보다 정직하다. */}
+        <span className="min-w-0 grow truncate text-meta text-ink-muted">
           {summary ?? `${session.tool} · 시작 ${clockLabel(session.startedAtMs)}`}
         </span>
+        {/* 검증 칩은 **아랫줄**에 선다 (#1463).
+            윗줄에는 이 행의 정체(제목)와 원장의 판정(상태 칩)과 시계가 이미 있고,
+            거기 shrink-0 을 하나 더 세우면 320px 에서 제목이 다시 좁아진다 — #1441
+            의 design-review H-1 이 정확히 그 결함이었고, 캡처 레인이 그 폭을
+            숫자로 지키고 있다. 아랫줄에서는 요약(min-w-0 flex-1 truncate)이 양보
+            하므로 제목 폭이 그대로다.
+
+            리포트가 없는 세션에는 이 노드가 아예 없다. 「미검증」은 이 표면이 할 수
+            있는 말이 아니다(코어 `sessionVerification` 머리말). */}
+        {verification !== null && (
+          <SessionVerificationChip
+            verification={verification}
+            testId="work-session-verification"
+          />
+        )}
       </span>
     </button>
   );
@@ -285,6 +326,10 @@ function MySessionRow({
   onResume: (hostId: string) => void;
   detailRef: (element: HTMLButtonElement | null) => void;
 }) {
+  const { workspaceId } = useSession();
+  // 같은 스캔, 같은 칩 (#1463). 「내 세션」도 목록이고, 두 목록이 같은 세션을 두고
+  // 서로 다른 것을 말하면 안 된다 — 요청도 나뉘지 않는다(키가 같다).
+  const verification = useSessionVerification(workspaceId, session);
   const status = workSessionContinuityStatus(session, hosts);
   const hostName = workHostName(session, hosts) ?? "알 수 없는 호스트";
   const hostOnline = workHostOnline(session, hosts);
@@ -362,6 +407,25 @@ function MySessionRow({
         <span data-numeric className="shrink-0 font-mono">
           {clockLabel(session.startedAtMs)}
         </span>
+        {/* 칩은 줄 **끝**으로 간다 (#1463 리뷰 H2·L1).
+            앞 판에서는 시계 바로 뒤에 4px 간격으로 붙어 있었고, 그러면 이 줄의
+            가운뎃점으로 이어진 문장(「#배포 · 시작 06:53」)의 **네 번째 항목**처럼
+            읽힌다 — 가운뎃점을 앞에 달지 않은 유일한 항목이라 더 그렇다. 이 칩은
+            그 문장의 항목이 아니라 세션이 자기 일에 대해 남긴 별개의 진술이다.
+
+            그리고 이 패널의 두 목록이 같은 세션을 두고 칩을 반대쪽에 세우고 있었다.
+            전체 목록에서는 요약(flex-1)이 밀어내 오른쪽 끝, 여기서는 왼쪽. 오른쪽
+            끝으로 맞추면 두 목록 모두에서 칩이 **경과 읽기 아래 같은 열**에 선다 —
+            윗줄 오른쪽 끝이 「이 세션이 얼마나 일했는가」이고 그 아래가 「그 일이
+            어떻게 검증됐는가」다. */}
+        {verification !== null && (
+          <span className="ml-auto flex shrink-0">
+            <SessionVerificationChip
+              verification={verification}
+              testId="my-work-session-verification"
+            />
+          </span>
+        )}
       </p>
       {/* 하트비트 침묵은 재개를 **막지 않는다** — 서버가 판정에서 뺀 그
           이유대로다. 다만 침묵하지도 않는다: 눌렀는데 터미널이 안 열리는 흔한
@@ -509,10 +573,11 @@ function SessionPeek({
     [query.events, session, truncated]
   );
   const tail = peekRows(rows);
-  // 이 세션이 스스로 보고한 게이트 결과. 같은 읽기에서 나오므로 추가 왕복이 없고,
-  // 보고가 없는 세션에는 칩이 서지 않는다 — 「미검증」은 이 표면이 할 수 있는 말이
-  // 아니다(코어 `sessionVerification` 머리말).
-  const verification = query.verification;
+  // 이 세션이 스스로 보고한 게이트 결과. 원천이 둘이고 판정은 하나다 (#1463):
+  // 채널 히스토리 스캔(행이 이미 쓰는 그 읽기 — 여기서도 추가 왕복 0)과, 절단되지
+  // 않았을 때의 이 스레드 페이지. 보고가 없는 세션에는 칩이 서지 않는다 —
+  // 「미검증」은 이 표면이 할 수 있는 말이 아니다(코어 `sessionVerification` 머리말).
+  const verification = useSessionVerification(workspaceId, session, query.data);
   // 미리보기의 이 버튼은 **동사가 아니다** — 어느 판정이든 같은 상세로 간다.
   // 재개가 성립하는 세션에서만 「이어서」로 부르는 것은 그 말이 참인 자리에서만
   // 쓰기 위해서다(코어 `HANDOFF_COPY.resume.button`).
@@ -584,12 +649,12 @@ function SessionPeek({
           </ul>
         </>
       )}
-      <div
-        className={cn(
-          "flex items-center gap-2 pt-2",
-          verification !== null ? "justify-between" : "justify-end"
-        )}
-      >
+      {/* 바닥 줄은 칩이 있든 없든 **같은 정렬**이다 (#1463 리뷰 M3).
+          앞 판은 칩이 있을 때만 `justify-between` 으로 바뀌었고, 그러면 320px 폭
+          전체를 사이에 두고 「실패 1」이 왼쪽 끝에 홀로 남는다 — 그 자리에 홀로 선
+          작은 알약은 판정이 아니라 컨트롤이나 필터처럼 읽힌다. 오른쪽에서 버튼과
+          짝지어 서면 「이 세션은 이렇게 검증됐고, 전체는 여기로」가 한 손짓이 된다. */}
+      <div className="flex items-center justify-end gap-2 pt-2">
         {verification !== null && (
           <SessionVerificationChip
             verification={verification}
