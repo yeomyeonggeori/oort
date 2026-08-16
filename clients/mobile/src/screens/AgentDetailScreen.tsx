@@ -441,8 +441,12 @@ function PauseControl({
  * 이 자리가 한 일은 「초록을 warn 으로 고치는 것」이 아니라 **두 번째 표를 지우는
  * 것**이다. 값을 맞추면 다음에 코어가 움직이는 날 다시 갈라지고, 컴포넌트를 지나면
  * 갈라질 표가 없다. 폰의 수명주기 색은 이제 `WorkStatusBadge` 한 곳에서만 나온다.
+ *
+ * `export` 는 측정 하네스(`measure/surfaces.tsx`)를 위한 것이다 — 사진이 배송되는
+ * 컴포넌트를 찍어야지 하네스가 다시 그린 닮은 것을 찍으면 증거가 아니다. 화면들이
+ * `SearchScreen` 의 `ResultRow`·`SearchBody` 에 이미 쓰는 방식 그대로다.
  */
-function SessionRow({
+export function SessionRow({
   session,
   hosts,
 }: {

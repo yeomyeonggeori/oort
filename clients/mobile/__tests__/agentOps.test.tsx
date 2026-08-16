@@ -766,9 +766,6 @@ describe('what the agent is doing, and whether you can turn things off', () => {
       const label = within(badge).getByText(/./);
       return String(StyleSheet.flatten(label.props.style).color);
     };
-    await waitFor(() =>
-      expect(screen.getByTestId('agent-session-status-SESSION-APP')).toBeTruthy(),
-    );
     expect({running: ink('SESSION-APP')}).toEqual({running: lightPalette.warn});
     expect({running: ink('SESSION-APP')}).not.toEqual({running: lightPalette.ok});
     // 끝난 세션은 낱말로만 말한다(#1491) — 그 결정이 이 화면에도 그대로 선다.
