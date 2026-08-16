@@ -842,21 +842,25 @@ impl AgentWorker {
             );
         }
         let (body, report) = match extraction {
-            completion_report::Extraction::None => (completion.text, None),
+            completion_report::Extraction::None => (Some(completion.text), None),
             completion_report::Extraction::Refused { body, reason } => {
                 tracing::info!(
                     run_id = %run_id,
                     reason = ?reason,
                     "completion report fence refused; committing an ordinary turn"
                 );
-                // A model that wrote nothing but a broken fence would otherwise
-                // commit an empty message, which the domain refuses outright.
-                // Keeping its raw text is the honest fallback: the server has
-                // nothing of its own to put there.
+                // No card was built, so nothing can stand in for the text. A
+                // model that wrote only a broken fence has that fence as its
+                // entire output, and a blank bubble would hide the one piece of
+                // evidence that says what went wrong. This is the opposite call
+                // from the arm below **because** the arm below has a card: when
+                // a card exists the card is the message and the envelope must
+                // never be shown as text; when there is no card, the model's
+                // literal words are all there is.
                 if body.trim().is_empty() {
-                    (completion.text, None)
+                    (Some(completion.text), None)
                 } else {
-                    (body, None)
+                    (Some(body), None)
                 }
             }
             completion_report::Extraction::Report(report) => {
@@ -865,24 +869,37 @@ impl AgentWorker {
                 // provider's do. Reuses `redact_secrets` rather than adding a
                 // second, weaker one.
                 redact_report_props(&mut props, &transport.endpoint.bearer);
-                // Nothing left to show once the fence is gone: the summary is the
-                // model's own sentence and the only text it wrote for a person.
-                let body = if report.body.trim().is_empty() {
-                    props
-                        .get("summary")
+                // What stands above the card, in the model's own words only
+                // (H-2). Prose first; then the summary, then the title — each is
+                // a sentence the model wrote for a person, and the fallback stops
+                // there because the next step down would be the server writing
+                // the message itself.
+                let mut body = report.body;
+                for key in ["summary", "title"] {
+                    if !body.trim().is_empty() {
+                        break;
+                    }
+                    body = props
+                        .get(key)
                         .and_then(Value::as_str)
                         .unwrap_or_default()
-                        .to_string()
-                } else {
-                    report.body
-                };
+                        .to_string();
+                }
                 if body.trim().is_empty() {
-                    // A report with no summary and no prose has no message to
-                    // ride on. Fall back to the raw turn rather than committing
-                    // an empty one.
-                    (completion.text, None)
+                    // No prose, no summary, no title — a gates/actions-only
+                    // report. **The card is the whole message**: it commits with
+                    // no body at all (`message.body` is nullable, and the core
+                    // reads a null body as absent — `realtimeEvents.ts:250`).
+                    //
+                    // The alternative this replaces was committing the raw turn
+                    // text, which put the ```oort:report envelope itself in the
+                    // channel as prose *and* dropped the card — the exact failure
+                    // this module exists to prevent. Between showing the envelope
+                    // and showing nothing above the card, only one of them is a
+                    // lie about what the agent said.
+                    (None, Some(props))
                 } else {
-                    (body, Some(props))
+                    (Some(body), Some(props))
                 }
             }
         };
@@ -1410,7 +1427,7 @@ impl AgentWorker {
                 job,
                 payload,
                 run_id,
-                body.to_string(),
+                Some(body.to_string()),
                 props,
                 usage,
                 TurnOutcome::Succeeded,
@@ -1445,7 +1462,11 @@ impl AgentWorker {
         job: &ClaimedAgentJob,
         payload: &AgentJobPayload,
         run_id: Uuid,
-        body: String,
+        // `None` is a message with **no text at all** — legal, and the shape a
+        // gates-only completion report takes (#1454 H-2): the card is the whole
+        // message. `message.body` is nullable and the core reads a null body as
+        // absent, so this is a shape both sides already have a word for.
+        body: Option<String>,
         props: Value,
         usage: Option<ChatUsage>,
         outcome: TurnOutcome,
@@ -1474,7 +1495,7 @@ impl AgentWorker {
         // B7.2: the same text the channel gets is the text the mention parser
         // reads. Cloned rather than re-derived, so "what the agent said" and
         // "who the agent addressed" can never be two different strings.
-        let mention_body = body.clone();
+        let mention_body = body.clone().unwrap_or_default();
         let delegates = outcome.succeeded();
         let a2a_limits = self.config.a2a;
         let gateway_enabled = self.config.gateway_enabled;
@@ -1519,6 +1540,13 @@ impl AgentWorker {
                 // (which `mark_run_started_in_tx` fills before the turn begins)
                 // ships no `elapsed_ms` at all — an unmeasured duration is a key
                 // the card simply does not draw.
+                //
+                // Both ends come from the **same clock** (L-1): `observed_at` is
+                // this transaction's `now()`, projected by the same statement
+                // that read `started_at`. Subtracting the worker host's wall
+                // clock from a Postgres timestamp would fold that host's skew
+                // into every duration the card prints, and nobody reading the
+                // card could tell.
                 let mut props = props;
                 let mut report = report;
                 if let Some(report) = report.as_mut() {
@@ -1526,7 +1554,7 @@ impl AgentWorker {
                         completion_report::with_elapsed_ms(
                             report,
                             started_at.timestamp_millis(),
-                            now_ms(),
+                            snapshot.observed_at.timestamp_millis(),
                         );
                     }
                     completion_report::merge_into(&mut props, report);
@@ -1551,7 +1579,7 @@ impl AgentWorker {
                         channel_id,
                         author_member_id: agent_member_id,
                         message_type: MessageType::Text,
-                        body: Some(body),
+                        body,
                         props,
                         // See the PR body: Swift answers inside the trigger's
                         // thread; momo-messaging exposes no reader for a
@@ -2011,7 +2039,7 @@ impl AgentWorker {
                 job,
                 payload,
                 run_id,
-                body.to_string(),
+                Some(body.to_string()),
                 props,
                 None,
                 TurnOutcome::Failed(code),

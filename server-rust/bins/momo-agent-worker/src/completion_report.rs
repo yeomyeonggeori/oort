@@ -66,7 +66,9 @@
 //!   2. **예시의 카드 승격.** 「리포트 카드 어떻게 쓰는 거야?」에 모델이 4-백틱 외곽
 //!      펜스로 예시를 보여주면 안쪽 줄이 여는 펜스로 잡히고 예시 JSON 이 파싱된다 —
 //!      예시 데이터로 진짜 카드가 서고 본문은 「예시:」에서 잘린다. 외곽 펜스의 닫는
-//!      줄이 꼬리에 남으므로 이 규칙이 그것을 거절한다.
+//!      줄이 꼬리에 남으므로 이 규칙이 그것을 거절한다. (외곽을 **안 닫고** 끝낸
+//!      답변은 꼬리가 비어 이 문을 통과하므로, `fence_start` 의 펜스 상태 추적이
+//!      두 번째 문이다 — M-2.)
 //!
 //! **스트리밍과의 정합:** 스트리밍 중에는 미래를 모르므로 절단은 지금 그대로다(펜스
 //! 이후를 숨긴다). 꼬리 산문이 뒤늦게 도착하면 커밋이 본문을 다시 써서 숨겼던 글이
@@ -126,18 +128,89 @@ pub struct CompletionReport {
     pub props: Map<String, Value>,
 }
 
-/// 펜스가 시작되는 바이트 위치. 없으면 `None`.
+/// 눈에 보이지 않으면서 Rust `trim` 이 공백으로 **보지 않는** 문자들 (M-3).
 ///
-/// 「줄 맨 앞의 ``` + 태그」만 펜스로 본다. 모델이 산문 안에서 태그를 언급해도(예:
-/// 「oort:report 블록을 붙일까요?」) 그 줄이 펜스가 되지 않는다.
-fn fence_start(text: &str) -> Option<usize> {
+/// `` ```oort:report<U+200B> `` 는 사람 눈에 정상 펜스이고 `str::trim` 에게는 태그가
+/// 다른 낱말이다. 그 한 글자가 붙으면 펜스가 열리지 않고, 열리지 않은 펜스의 JSON 은
+/// **원시 텍스트로 채널에 실린다** — 이 파일이 막으려는 바로 그 노출이다. 그래서
+/// 낱말 비교와 꼬리 검사는 전부 이것을 걷어낸 뒤에 한다.
+const ZERO_WIDTH: [char; 4] = ['\u{200B}', '\u{200C}', '\u{200D}', '\u{FEFF}'];
+
+/// 판정용 정규화 — 제로폭을 걷어내고 양끝 공백을 자른다.
+///
+/// **판정에만 쓴다.** 본문과 props 로 나가는 문자열은 모델이 쓴 그대로여야 하므로
+/// 여기를 통과시키지 않는다(서버가 모델의 글자를 고쳐 쓰지 않는다).
+fn normalized(text: &str) -> String {
+    text.chars()
+        .filter(|c| !ZERO_WIDTH.contains(c))
+        .collect::<String>()
+        .trim()
+        .to_string()
+}
+
+/// 여는 펜스가 선 자리와 그 백틱 개수.
+#[derive(Debug, Clone, Copy)]
+struct Fence {
+    /// 여는 펜스 줄이 시작하는 바이트 위치 — 보이는 본문이 끝나는 자리.
+    at: usize,
+    /// 백틱 개수. 닫개는 **이만큼 이상**이어야 한다(마크다운 규칙).
+    ticks: usize,
+}
+
+/// 이 줄이 코드펜스 줄이면 (백틱 개수, info string).
+///
+/// info 안에 백틱이 있으면 마크다운상 펜스가 아니다.
+fn fence_line(line: &str) -> Option<(usize, String)> {
+    let trimmed = line.trim_start();
+    let ticks = trimmed.chars().take_while(|c| *c == '`').count();
+    if ticks < 3 {
+        return None;
+    }
+    let info = normalized(&trimmed[ticks..]);
+    if info.contains('`') {
+        return None;
+    }
+    Some((ticks, info))
+}
+
+/// 리포트 펜스가 열리는 자리. 없으면 `None`.
+///
+/// 「줄 맨 앞의 ``` + 태그」만 펜스로 보므로, 모델이 산문 안에서 태그를 언급해도(예:
+/// 「oort:report 블록을 붙일까요?」) 그 줄은 펜스가 아니다.
+///
+/// ## 다른 코드블록 **안**에서는 열리지 않는다 (M-2)
+///
+/// 이 함수는 마크다운 펜스 상태를 따라간다. 「리포트 카드 어떻게 쓰는 거야?」에 모델이
+/// ` ```json ` 이나 4-백틱 블록으로 **규약을 보여주면**, 그 안의 `` ```oort:report ``
+/// 줄은 여는 펜스가 아니라 그냥 글자다 — 예시가 진짜 카드가 되면 화면에는 실제로
+/// 일어난 적 없는 일의 게이트 표가 선다.
+///
+/// 회전 1 의 「맨 끝」 규칙은 **닫힌** 외곽만 잡았다(닫는 줄이 꼬리에 남으므로). 외곽을
+/// 안 닫고 끝낸 답변은 꼬리가 비어 그 문을 통과했고, 이 상태 추적이 두 경우를 한
+/// 기계로 닫는다.
+fn fence_start(text: &str) -> Option<Fence> {
+    let mut open: Option<usize> = None;
     let mut offset = 0usize;
     for line in text.split_inclusive('\n') {
-        let trimmed = line.trim_start();
-        let indent = line.len() - trimmed.len();
-        if let Some(rest) = trimmed.strip_prefix("```") {
-            if rest.trim().eq_ignore_ascii_case(REPORT_FENCE_TAG) {
-                return Some(offset + indent);
+        if let Some((ticks, info)) = fence_line(line) {
+            match open {
+                // 열린 블록 안이다. 닫개(백틱이 같거나 더 길고 info 가 없는 줄)만
+                // 그것을 닫고, 그 밖의 모든 줄은 — 태그가 붙어 있어도 — 내용이다.
+                Some(open_ticks) => {
+                    if ticks >= open_ticks && info.is_empty() {
+                        open = None;
+                    }
+                }
+                None => {
+                    if info.eq_ignore_ascii_case(REPORT_FENCE_TAG) {
+                        let indent = line.len() - line.trim_start().len();
+                        return Some(Fence {
+                            at: offset + indent,
+                            ticks,
+                        });
+                    }
+                    open = Some(ticks);
+                }
             }
         }
         offset += line.len();
@@ -157,7 +230,7 @@ fn fence_start(text: &str) -> Option<usize> {
 /// 봉투의 본문이다.
 pub fn visible_prefix(text: &str) -> &str {
     match fence_start(text) {
-        Some(at) => text[..at].trim_end(),
+        Some(fence) => text[..fence.at].trim_end(),
         None => text,
     }
 }
@@ -183,11 +256,14 @@ pub fn streaming_prefix(text: &str) -> &str {
     let line_start = text.rfind('\n').map(|at| at + 1).unwrap_or(0);
     let tail = &text[line_start..];
     let trimmed = tail.trim_start();
-    if trimmed.is_empty() {
+    // 제로폭까지 걷어낸 뒤에 비교한다(M-3): `` ```oort:re<U+200B> `` 도 쓰여지는 중인
+    // 펜스이고, 그것을 못 알아보면 한 프레임 동안 글자가 보였다 사라진다.
+    let candidate = normalized(trimmed).to_ascii_lowercase();
+    if candidate.is_empty() {
         return visible;
     }
     let opener = format!("```{REPORT_FENCE_TAG}");
-    if opener.starts_with(&trimmed.to_ascii_lowercase()) {
+    if opener.starts_with(&candidate) {
         return text[..line_start + (tail.len() - trimmed.len())].trim_end();
     }
     visible
@@ -199,17 +275,20 @@ pub fn streaming_prefix(text: &str) -> &str {
 /// §펜스는 답변의 맨 끝이어야 한다). 닫는 펜스가 없으면(잘린 응답) 남은 전부가
 /// payload 이고 꼬리는 비어 있다 — 잘린 응답은 정의상 거기서 끝났으므로 「맨 끝」이
 /// 맞고, 파싱은 어차피 실패해 「리포트 없음」으로 정직하게 떨어진다.
-fn fence_payload(text: &str, at: usize) -> (&str, &str) {
-    let after_open = match text[at..].find('\n') {
-        Some(newline) => at + newline + 1,
+fn fence_payload(text: &str, fence: Fence) -> (&str, &str) {
+    let after_open = match text[fence.at..].find('\n') {
+        Some(newline) => fence.at + newline + 1,
         None => return ("", ""),
     };
     let rest = &text[after_open..];
     let mut offset = 0usize;
     for line in rest.split_inclusive('\n') {
-        let trimmed = line.trim();
-        if trimmed.len() >= 3 && trimmed.chars().all(|c| c == '`') {
-            return (&rest[..offset], &rest[offset + line.len()..]);
+        // 닫개는 여는 펜스만큼 길어야 한다(마크다운 규칙) — 4-백틱으로 연 블록을
+        // 3-백틱이 닫지 않는다.
+        if let Some((ticks, info)) = fence_line(line) {
+            if ticks >= fence.ticks && info.is_empty() {
+                return (&rest[..offset], &rest[offset + line.len()..]);
+            }
         }
         offset += line.len();
     }
@@ -299,15 +378,18 @@ pub enum Extraction {
 /// 불릿을 상한에서 잘랐으면 `usize` 로 몇 개를 잘랐는지 함께 준다(호출부가 로그에만
 /// 쓴다 — 본문에는 서버가 쓴 문장이 한 글자도 들어가지 않는다).
 pub fn extract(text: &str) -> (Extraction, usize) {
-    let Some(at) = fence_start(text) else {
+    let Some(fence) = fence_start(text) else {
         return (Extraction::None, 0);
     };
-    let (payload, tail) = fence_payload(text, at);
+    let (payload, tail) = fence_payload(text, fence);
 
     // 「맨 끝」 규칙 (M-1). 닫는 펜스 뒤에 공백 아닌 것이 있으면 이것은 리포트가
     // 아니다 — 턴 원문을 한 글자도 건드리지 않고 돌려준다. 모듈 머리말 §펜스는
     // 답변의 맨 끝이어야 한다에 이 문이 막는 두 갈래가 적혀 있다.
-    if !tail.trim().is_empty() {
+    //
+    // 제로폭까지 걷어내고 본다(M-3): 꼬리에 U+200B 하나가 남았다고 리포트가 거절되면,
+    // 보이지 않는 한 글자가 카드를 통째로 없앤다.
+    if !normalized(tail).is_empty() {
         return (Extraction::None, 0);
     }
 
@@ -714,6 +796,85 @@ mod tests {
         // 꼬리가 외곽 펜스 하나뿐이어도(뒤에 산문이 없어도) 마찬가지다.
         let closed = "이렇게 씁니다:\n````\n```oort:report\n{\"summary\":\"예시\"}\n```\n````";
         assert_eq!(extract(closed).0, Extraction::None);
+    }
+
+    /// **M-2 — 안 닫힌 외곽 펜스 안의 예시도 카드가 되지 않는다.**
+    ///
+    /// 회전 1 의 「맨 끝」 규칙은 외곽이 **닫혔을 때**만 잡는다(닫는 줄이 꼬리에
+    /// 남으므로). 모델이 ` ```json ` 을 열고 규약 예시를 보인 뒤 외곽을 안 닫고
+    /// 끝내면 꼬리가 비어 그 문을 통과했다 — 예시 데이터로 진짜 카드가 섰다.
+    /// `fence_start` 의 펜스 상태 추적이 그 두 번째 문이다.
+    #[test]
+    fn an_example_inside_an_unclosed_outer_fence_is_not_a_card() {
+        let text = "규약은 이렇습니다:\n\
+             ```json\n\
+             ```oort:report\n\
+             {\"summary\":\"예시 요약\",\"gates\":[{\"surface\":\"웹\",\
+               \"checks\":[{\"label\":\"테스트\",\"outcome\":\"pass\"}]}]}\n\
+             ```\n";
+        assert_eq!(
+            extract(text).0,
+            Extraction::None,
+            "the outer ```json never closed, so the tag line is content — not a fence"
+        );
+
+        // markdown 블록도 같다(문서를 보여주는 가장 흔한 모양).
+        let markdown = "이렇게 쓰세요:\n```markdown\n```oort:report\n{\"summary\":\"예시\"}\n```\n";
+        assert_eq!(extract(markdown).0, Extraction::None);
+    }
+
+    /// 상태 추적이 **진짜 리포트를 막지는 않는다**: 답변 안에 평범한 코드블록이
+    /// 있고(열고 닫고) 그 뒤 최상위에서 펜스가 열리면 그것은 리포트다.
+    #[test]
+    fn a_closed_code_block_earlier_in_the_answer_does_not_swallow_the_report() {
+        let text = "이 스크립트를 넣었습니다:\n\
+             ```sh\n\
+             cargo test\n\
+             ```\n\
+             그리고 게이트를 돌렸습니다.\n\
+             ```oort:report\n\
+             {\"summary\":\"전부 초록\"}\n\
+             ```";
+        let Extraction::Report(report) = extract(text).0 else {
+            panic!("a top-level fence after a closed block is a real report")
+        };
+        assert_eq!(report.props["summary"], json!("전부 초록"));
+        assert!(
+            report.body.starts_with("이 스크립트를 넣었습니다:")
+                && report.body.ends_with("그리고 게이트를 돌렸습니다."),
+            "the prose — code block and all — survives: {:?}",
+            report.body
+        );
+    }
+
+    /// **M-3 — 제로폭 문자가 태그 검출을 우회하지 못한다.**
+    ///
+    /// `` ```oort:report<U+200B> `` 는 사람 눈에 정상 펜스이고 `str::trim` 에게는
+    /// 다른 낱말이다. 못 알아보면 펜스가 안 열리고 **원시 JSON 이 채널 본문으로**
+    /// 나간다 — 이 파일이 막으려는 바로 그 노출이다. 꼬리의 제로폭도 마찬가지로,
+    /// 보이지 않는 한 글자가 카드를 통째로 없애면 안 된다.
+    #[test]
+    fn zero_width_characters_cannot_smuggle_the_envelope_into_the_body() {
+        for invisible in ["\u{200B}", "\u{200C}", "\u{200D}", "\u{FEFF}"] {
+            let text =
+                format!("끝났습니다.\n```oort:report{invisible}\n{{\"summary\":\"요약\"}}\n```");
+            let Extraction::Report(report) = extract(&text).0 else {
+                panic!("a zero-width char must not stop the fence from opening ({invisible:?})")
+            };
+            assert_eq!(report.body, "끝났습니다.");
+            assert!(
+                !report.body.contains("oort:report") && !report.body.contains("summary"),
+                "the envelope must never reach the channel as text"
+            );
+
+            // 꼬리에 붙은 제로폭은 「맨 끝」을 깨지 않는다.
+            let trailing =
+                format!("끝났습니다.\n```oort:report\n{{\"summary\":\"요약\"}}\n```\n{invisible}");
+            assert!(
+                matches!(extract(&trailing).0, Extraction::Report(_)),
+                "an invisible char in the tail must not delete the card ({invisible:?})"
+            );
+        }
     }
 
     /// 맨 끝 규칙은 **공백만**을 허용한다: 진짜 리포트가 개행 하나 때문에 거절되면

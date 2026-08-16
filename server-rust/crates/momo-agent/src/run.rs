@@ -1014,6 +1014,18 @@ pub struct GatewayRunSnapshot {
     /// `None` only for a run no writer has started yet, which a caller that just
     /// marked it started will not see.
     pub started_at: Option<DateTime<Utc>>,
+    /// The **database's** clock at the moment this row was read — Postgres
+    /// `now()`, the reading transaction's start.
+    ///
+    /// Projected beside [`GatewayRunSnapshot::started_at`] on purpose and in the
+    /// same statement, because the only honest way to subtract two instants is
+    /// to read them from **one clock** (#1454 L-1). `started_at` is written by
+    /// the database; measuring it against a worker process's own wall clock
+    /// makes every elapsed carry that host's skew against Postgres — inflating
+    /// every turn on a host that runs fast and, on one that runs slow, driving
+    /// short turns negative so the card silently drops its duration. Neither is
+    /// visible to anyone reading the card, which is what makes it worth a column.
+    pub observed_at: DateTime<Utc>,
 }
 
 /// Lock the run and read the gateway's view of it, or `None` when no such run is
@@ -1036,7 +1048,7 @@ pub async fn lock_gateway_run_in_tx(
 ) -> Result<Option<GatewayRunSnapshot>, DbError> {
     let row = sqlx::query(
         "SELECT r.agent_member_id, r.channel_id, r.status::text AS status_label, \
-                r.trigger_message_id, r.started_at, a.model, \
+                r.trigger_message_id, r.started_at, now() AS observed_at, a.model, \
                 r.input->'routing'->>'effort' AS requested_effort, \
                 ap.effort_pref AS profile_effort_pref \
            FROM agent_run r \
@@ -1080,6 +1092,7 @@ pub async fn lock_gateway_run_in_tx(
         requested_effort: row.try_get("requested_effort")?,
         profile_effort_pref: row.try_get("profile_effort_pref")?,
         started_at: row.try_get("started_at")?,
+        observed_at: row.try_get("observed_at")?,
     }))
 }
 

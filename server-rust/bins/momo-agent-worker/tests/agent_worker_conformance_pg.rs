@@ -43,6 +43,7 @@
 //! | `b51_4_the_operators_bearer_never_reaches_a_row_a_message_or_an_error` | remove `redact_secrets`, or start logging/persisting the resolved endpoint |
 //! | `uxc_a_1_a_completion_report_rides_the_ordinary_turn_message` | leave the report fence in the body, stop merging the card into the turn's props, take `elapsed_ms` from the model instead of `agent_run.started_at`, or give the card its own `message_type`/row instead of the turn's |
 //! | `uxc_a_2_a_streamed_report_lands_on_the_message_the_reader_watched` | drop the props patch a deduped commit needs, move it after the closing slice (the row moves with no frame to say so), or stop cutting the fence out of the streamed slices |
+//! | `uxc_a_3_a_report_without_prose_never_commits_its_own_envelope` | make the empty-body fallback reach for the raw turn text again (the envelope lands in the channel as prose), drop the card when there is no sentence to hang it under, or measure `elapsed_ms` against this host's wall clock instead of the database's |
 //!
 //! The DB-free half of the report's conformance — the producer against the core
 //! contract file it must match — is `completion_report_conformance.rs`, which
@@ -1885,5 +1886,110 @@ async fn uxc_a_2_a_streamed_report_lands_on_the_message_the_reader_watched() {
         &last["data"]["payload"]["props"],
         run_id,
         trigger_message_id,
+    );
+}
+
+/// **UXC-A 3 (H-2) — a report with no prose never shows its own envelope.**
+///
+/// The pathological but reachable shape: the model writes *only* the fence, and
+/// fills in neither `summary` nor `title` — just the gate table. Cutting the
+/// fence leaves nothing, and the code this test was written against fell back to
+/// committing `completion.text`, which is the raw ```oort:report JSON. The
+/// channel got the envelope as prose **and** no card: both halves wrong at once.
+///
+/// The card is the whole message here, so it commits with no body at all
+/// (`message.body` is nullable; the core reads a null body as absent). Goes red
+/// if the fallback ever reaches for the raw turn text again, or if the card is
+/// dropped when there is no sentence to hang it under.
+#[tokio::test]
+#[ignore = "requires DATABASE_URL to a throwaway pgvector/pg18 database"]
+async fn uxc_a_3_a_report_without_prose_never_commits_its_own_envelope() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    settle_residual_worker_jobs(&su).await;
+    let tenant = seed_tenant(&su).await;
+
+    let (run_id, trigger_message_id, _job_id) =
+        enqueue_mention_turn(&su, &tenant, tenant.agent_id, "@hermes 게이트만 돌려줘").await;
+
+    // No prose, no summary, no title — a gates-only envelope and nothing else.
+    let gates_only = "```oort:report\n\
+{\"gates\":[{\"surface\":\"엔진\",\"checks\":[{\"label\":\"빌드\",\"outcome\":\"pass\"},\
+                                             {\"label\":\"테스트\",\"outcome\":\"fail\",\"detail\":\"1 실패\"}]}]}\n```";
+    let provider = Arc::new(MockChatProvider::scripted([(
+        "게이트만 돌려줘",
+        gates_only,
+    )]));
+    let worker = build_worker(provider.clone(), base_config()).await;
+    let stats = worker.drain_once().await.expect("drain");
+    assert_eq!(stats.answered, 1);
+
+    let messages = agent_messages(&su, &tenant, tenant.agent_id).await;
+    assert_eq!(messages.len(), 1, "one turn, one message");
+    let (message_id, _seq, body, props) = messages.into_iter().next().unwrap();
+
+    // 1. The envelope is nowhere in the text. This is the whole point.
+    assert!(
+        !body.contains("oort:report") && !body.contains("\"gates\"") && !body.contains("outcome"),
+        "the report envelope was committed as the channel body: {body}"
+    );
+    // …and with no sentence of the model's to stand above the card, there is no
+    // body at all rather than one the server made up.
+    let stored_body: Option<String> = sqlx::query_scalar("SELECT body FROM message WHERE id = $1")
+        .bind(message_id)
+        .fetch_one(&su)
+        .await
+        .expect("read body");
+    assert_eq!(
+        stored_body, None,
+        "a gates-only report is a card with no prose — the server writes no sentence of its own"
+    );
+
+    // 2. The card is still there. Dropping it would trade one failure for another.
+    assert_eq!(props["kind"], json!("completion_report"));
+    assert_eq!(props["run_id"], json!(run_id));
+    assert_eq!(props["trigger_message_id"], json!(trigger_message_id));
+    assert_eq!(
+        props["gates"][0]["checks"][1]["outcome"],
+        json!("fail"),
+        "the failing gate survives verbatim — the card exists to carry exactly this"
+    );
+
+    // 3. The relay publishes the same thing, envelope-free.
+    let broadcast: Value = sqlx::query_scalar(
+        "SELECT payload FROM outbox \
+          WHERE workspace_id = $1 AND kind = 'broadcast' \
+            AND payload->'data'->'payload'->>'id' = $2::text \
+          ORDER BY id DESC LIMIT 1",
+    )
+    .bind(tenant.workspace_id)
+    .bind(message_id.to_string())
+    .fetch_one(&su)
+    .await
+    .expect("read broadcast");
+    let published = &broadcast["data"]["payload"];
+    assert!(
+        !published["body"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("oort:report"),
+        "the relay would have published the envelope as prose"
+    );
+    assert_eq!(published["props"]["kind"], json!("completion_report"));
+
+    // 4. The elapsed the card prints is measured on the DATABASE's clock (L-1),
+    //    not this host's, so it cannot carry worker↔Postgres skew.
+    let elapsed = props["elapsed_ms"].as_i64().expect("a measured elapsed");
+    let db_elapsed: i64 = sqlx::query_scalar(
+        "SELECT (EXTRACT(EPOCH FROM (now() - started_at)) * 1000)::bigint \
+           FROM agent_run WHERE id = $1",
+    )
+    .bind(run_id)
+    .fetch_one(&su)
+    .await
+    .expect("read the run's own elapsed");
+    assert!(
+        elapsed >= 0 && (db_elapsed - elapsed).abs() < 60_000,
+        "elapsed_ms ({elapsed}) must track the database's own clock ({db_elapsed})"
     );
 }
