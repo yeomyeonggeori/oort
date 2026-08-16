@@ -73,6 +73,7 @@
 //! deviation list with what it costs.
 
 pub mod a2a;
+pub mod completion_report;
 pub mod config;
 pub mod context;
 pub mod oauth;
@@ -106,8 +107,8 @@ use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::sqlx::postgres::PgListener;
 use momo_db::{with_tenant_tx, DbError, PgConnection, PgPool};
 use momo_messaging::{
-    send_message_in_tx, stream_message_body_in_tx, MessageType, NewMessage, StreamCloseOutcome,
-    StreamEdit, STREAM_PROPS_KEY,
+    patch_message_props_in_tx, send_message_in_tx, stream_message_body_in_tx, MessageType,
+    NewMessage, StreamCloseOutcome, StreamEdit, STREAM_PROPS_KEY,
 };
 use momo_outbox::{
     backoff_seconds, claim_agent_job_batch, mark_done, mark_failed, requeue, ClaimedAgentJob,
@@ -612,7 +613,14 @@ impl AgentWorker {
             payload.trigger_message_id,
             &payload.prompt,
             payload.system_prompt.as_deref(),
-            Some(now_context.as_str()),
+            context::SystemBlocks {
+                now: Some(now_context.as_str()),
+                // #1454 — the only thing that makes a completion report
+                // possible. A model that was never told the protocol never
+                // writes a fence, and this whole producer stays a path nothing
+                // walks.
+                report_protocol: Some(completion_report::REPORT_PROTOCOL_BLOCK),
+            },
             self.config.max_context_chars,
         );
         if assembled.dropped_count > 0 {
@@ -818,8 +826,66 @@ impl AgentWorker {
         }
 
         let usage = completion.usage;
-        let body = completion.text;
         let props = success_props(&payload, run_id);
+
+        // #1454 — the completion report, if the model wrote one. The fence is
+        // cut out of the answer whether or not it parsed, so the committed body
+        // is the same text the streaming slices already showed (the cut is
+        // `completion_report::visible_prefix` in both places).
+        let (extraction, dropped_actions) = completion_report::extract(&completion.text);
+        if dropped_actions > 0 {
+            // Counts only, never the bullets themselves (redaction, L4 §7).
+            tracing::warn!(
+                run_id = %run_id,
+                dropped_actions,
+                "completion report bullets clamped to the core limit"
+            );
+        }
+        let (body, report) = match extraction {
+            completion_report::Extraction::None => (completion.text, None),
+            completion_report::Extraction::Refused { body, reason } => {
+                tracing::info!(
+                    run_id = %run_id,
+                    reason = ?reason,
+                    "completion report fence refused; committing an ordinary turn"
+                );
+                // A model that wrote nothing but a broken fence would otherwise
+                // commit an empty message, which the domain refuses outright.
+                // Keeping its raw text is the honest fallback: the server has
+                // nothing of its own to put there.
+                if body.trim().is_empty() {
+                    (completion.text, None)
+                } else {
+                    (body, None)
+                }
+            }
+            completion_report::Extraction::Report(report) => {
+                let mut props = report.props;
+                // ADR-0004 — the model's own words go through the same filter the
+                // provider's do. Reuses `redact_secrets` rather than adding a
+                // second, weaker one.
+                redact_report_props(&mut props, &transport.endpoint.bearer);
+                // Nothing left to show once the fence is gone: the summary is the
+                // model's own sentence and the only text it wrote for a person.
+                let body = if report.body.trim().is_empty() {
+                    props
+                        .get("summary")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_string()
+                } else {
+                    report.body
+                };
+                if body.trim().is_empty() {
+                    // A report with no summary and no prose has no message to
+                    // ride on. Fall back to the raw turn rather than committing
+                    // an empty one.
+                    (completion.text, None)
+                } else {
+                    (body, Some(props))
+                }
+            }
+        };
 
         // The message, the run transition and the ledger row commit together or
         // not at all: a `succeeded` run whose answer rolled back would be a lie
@@ -835,6 +901,7 @@ impl AgentWorker {
                 usage,
                 TurnOutcome::Succeeded,
                 None,
+                report,
             )
             .await;
         match outcome {
@@ -1348,6 +1415,9 @@ impl AgentWorker {
                 usage,
                 TurnOutcome::Succeeded,
                 None,
+                // A tool turn's body is the tool's own output, not model prose,
+                // so there is no fence in it to read (#1454).
+                None,
             )
             .await
         {
@@ -1385,6 +1455,15 @@ impl AgentWorker {
         // channel gets one Korean sentence, the run record gets what the
         // provider actually said.
         failure_reason: Option<&str>,
+        // #1454 — the validated completion-report keys, `None` on every turn the
+        // model wrote no fence for (which is nearly all of them).
+        //
+        // Carried in here rather than merged by the caller because the one key
+        // the model may not author — `elapsed_ms` — is measured against
+        // `agent_run.started_at`, and that row is only locked inside this
+        // transaction. Measuring it outside would mean reading the run twice and
+        // reporting a number from the wrong one.
+        report: Option<serde_json::Map<String, Value>>,
     ) -> Result<TurnCommit, DbError> {
         let failure_reason = failure_reason.map(str::to_string);
         let workspace_id = job.workspace_id;
@@ -1429,6 +1508,28 @@ impl AgentWorker {
                     // that outside this transaction, because a marking that
                     // fails must not turn a settled cancel into a retried job.
                     return Ok(TurnCommit::Suppressed(SUPPRESSED_RUN_CANCELLED));
+                }
+
+                // #1454 — the one report key the model may not author. It is
+                // measured from `agent_run.started_at`, the database's own clock,
+                // rather than from anything this process watched: that column
+                // survives an approval pause, a lease takeover and a worker
+                // restart, so 「24분 28초」 is what the run took and not what the
+                // last claim happened to see. A run row without a `started_at`
+                // (which `mark_run_started_in_tx` fills before the turn begins)
+                // ships no `elapsed_ms` at all — an unmeasured duration is a key
+                // the card simply does not draw.
+                let mut props = props;
+                let mut report = report;
+                if let Some(report) = report.as_mut() {
+                    if let Some(started_at) = snapshot.started_at {
+                        completion_report::with_elapsed_ms(
+                            report,
+                            started_at.timestamp_millis(),
+                            now_ms(),
+                        );
+                    }
+                    completion_report::merge_into(&mut props, report);
                 }
 
                 // `client_msg_id = run_id` makes the reply exactly-once through
@@ -1486,6 +1587,36 @@ impl AgentWorker {
                     },
                 )
                 .await?;
+
+                // #1454 — how the card's keys reach a **streamed** answer.
+                //
+                // On a streaming turn the send above is a dedupe (stream rule 4):
+                // the opening slice wrote this turn's props minutes ago, before
+                // the model had written a word of the report, and a deduped send
+                // updates nothing. So the report lands as a shallow props patch —
+                // the same door an approval decision re-renders its card through.
+                //
+                // It is written **before** the closing slice on purpose: that
+                // slice re-projects the row and broadcasts the whole message
+                // (`build_message_edited_payload`), so the card's keys ride the
+                // frame every client already applies in place. Patching after it
+                // would move the row with no frame to say so, and the timeline
+                // would keep rendering the props it was handed until a reload.
+                //
+                // The guard makes a re-claimed job a no-op rather than a second
+                // write: a turn that already committed its report finds the keys
+                // on the row and leaves them alone.
+                if let Some(report) = report.as_ref() {
+                    if !completion_report::already_reported(&sent.message.props) {
+                        patch_message_props_in_tx(
+                            conn,
+                            workspace_id,
+                            sent.message.id,
+                            &Value::Object(report.clone()),
+                        )
+                        .await?;
+                    }
+                }
 
                 // ADR-0155 / #1161 — the closing slice, in the transaction that
                 // ends the run.
@@ -1887,6 +2018,9 @@ impl AgentWorker {
                 // The provider's own words, redacted, going to the run record
                 // rather than to the channel (goal B8 H2).
                 Some(reason),
+                // A failed turn reports no completion (#1454). The card is the
+                // record of finished work, and this turn did not finish.
+                None,
             )
             .await
         {
@@ -2441,6 +2575,31 @@ fn open_stream_rev(props: &Value) -> Option<i64> {
         return None;
     }
     stream.get("rev").and_then(Value::as_i64)
+}
+
+/// Run the completion report's every string leaf through the turn's existing
+/// secret filter (#1454 · ADR-0004).
+///
+/// The report is the model's own text, and the model's text has never been
+/// filtered on its way to the channel — the body is not, and this does not
+/// change that. What it does is refuse to open a *second*, unfiltered door: the
+/// report travels in `props`, which the relay ships to every subscriber and
+/// which support tooling reads back, and a summary that quoted the operator's
+/// bearer would put it in both places. `redact_secrets` is reused rather than
+/// re-implemented on purpose (the packet's rule: reuse the filtering contract,
+/// do not invent a second one).
+fn redact_report_props(props: &mut serde_json::Map<String, Value>, bearer: &str) {
+    fn walk(value: &mut Value, bearer: &str) {
+        match value {
+            Value::String(text) => *text = redact_secrets(text, bearer),
+            Value::Array(items) => items.iter_mut().for_each(|item| walk(item, bearer)),
+            Value::Object(object) => object.values_mut().for_each(|item| walk(item, bearer)),
+            _ => {}
+        }
+    }
+    for value in props.values_mut() {
+        walk(value, bearer);
+    }
 }
 
 fn success_props(payload: &AgentJobPayload, run_id: Uuid) -> Value {

@@ -41,6 +41,12 @@
 //! | `b51_2_a_provider_failure_is_visible_to_the_user_and_retried_only_when_worth_it` | post the failure notice on every attempt instead of the last, or widen `is_retryable` so a 4xx is retried |
 //! | `b51_3_one_agent_runs_one_job_at_a_time_and_two_agents_run_together` | drop the `NOT EXISTS` in-flight predicate or the `row_number() = 1` rank, or "fix" the claim into a global `LIMIT 1` |
 //! | `b51_4_the_operators_bearer_never_reaches_a_row_a_message_or_an_error` | remove `redact_secrets`, or start logging/persisting the resolved endpoint |
+//! | `uxc_a_1_a_completion_report_rides_the_ordinary_turn_message` | leave the report fence in the body, stop merging the card into the turn's props, take `elapsed_ms` from the model instead of `agent_run.started_at`, or give the card its own `message_type`/row instead of the turn's |
+//! | `uxc_a_2_a_streamed_report_lands_on_the_message_the_reader_watched` | drop the props patch a deduped commit needs, move it after the closing slice (the row moves with no frame to say so), or stop cutting the fence out of the streamed slices |
+//!
+//! The DB-free half of the report's conformance — the producer against the core
+//! contract file it must match — is `completion_report_conformance.rs`, which
+//! needs no database and therefore runs in every `cargo test`.
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -1641,4 +1647,243 @@ async fn hosted_identities_never_enter_worker_claim_or_a2a_delivery() {
             .await
             .expect("retire hosted fixture job");
     }
+}
+
+// ---------------------------------------------------------------------------
+// UXC-A (#1454) — the completion report producer, end to end
+// ---------------------------------------------------------------------------
+
+/// The model's turn: prose for the reader, then the report fence.
+const REPORTED_TURN: &str = "환경 셋업을 마쳤습니다.\n\n```oort:report\n\
+{\"title\":\"oort 환경 셋업 완료\",\
+ \"summary\":\"Rust 서버·TS 코어·웹/폰이 한 트리에 있고, 게이트를 전부 초록으로 맞췄습니다.\",\
+ \"elapsed_ms\":999,\
+ \"actions\":[{\"text\":\"Rust 툴체인을 1.83에서 1.97로 올림\",\"note\":\"edition2024 때문\"},\
+              {\"text\":\"compose 기동 후 헬스체크 확인\"}],\
+ \"gates\":[{\"surface\":\"웹\",\"checks\":[{\"label\":\"테스트\",\"outcome\":\"pass\",\"detail\":\"896 통과\"}]},\
+            {\"surface\":\"엔진\",\"checks\":[{\"label\":\"빌드\",\"outcome\":\"pass\"},\
+                                             {\"label\":\"소크\",\"outcome\":\"skip\"}]}]}\n```";
+
+/// Every assertion this pair makes about the card's own keys, in one place —
+/// so the streaming and non-streaming halves are held to the *same* envelope
+/// rather than to two lists that can drift apart.
+fn assert_card_envelope(props: &Value, run_id: Uuid, trigger_message_id: Uuid) {
+    // The turn still says everything it always said. The card is an addition to
+    // this envelope, not a replacement for it — a props object that lost
+    // `source` would take the attribution of every reply with it.
+    assert_eq!(props["run_id"], json!(run_id));
+    assert_eq!(props["source"], json!("agent_worker.final_text.v0"));
+    assert_eq!(props["trigger_message_id"], json!(trigger_message_id));
+
+    assert_eq!(
+        props["kind"],
+        json!("completion_report"),
+        "the one key that decides whether a card is drawn at all"
+    );
+    assert_eq!(props["title"], json!("oort 환경 셋업 완료"));
+    assert_eq!(
+        props["summary"],
+        json!("Rust 서버·TS 코어·웹/폰이 한 트리에 있고, 게이트를 전부 초록으로 맞췄습니다.")
+    );
+    assert_eq!(
+        props["actions"],
+        json!([
+            {"text": "Rust 툴체인을 1.83에서 1.97로 올림", "note": "edition2024 때문"},
+            {"text": "compose 기동 후 헬스체크 확인"}
+        ])
+    );
+    // `skip` reaches the card as `skip`. A producer that folded it into `fail`
+    // would paint an un-run gate red, which is exactly the false narrative
+    // ADR-0132 exists to stop.
+    assert_eq!(
+        props["gates"],
+        json!([
+            {"surface": "웹", "checks": [{"label": "테스트", "outcome": "pass", "detail": "896 통과"}]},
+            {"surface": "엔진", "checks": [
+                {"label": "빌드", "outcome": "pass"},
+                {"label": "소크", "outcome": "skip"}
+            ]}
+        ])
+    );
+
+    // The model claimed 999ms. What ships is the server's measurement against
+    // `agent_run.started_at`, which is a real duration and therefore not 999.
+    let elapsed = props["elapsed_ms"]
+        .as_i64()
+        .expect("a run that started has a measured elapsed");
+    assert!(
+        elapsed >= 0 && elapsed != 999,
+        "elapsed_ms must be the server's clock, not the model's claim (got {elapsed})"
+    );
+}
+
+/// **UXC-A 1 — a report is an ordinary turn message that happens to carry a card.**
+///
+/// No new `message_type`, no new ledger, no migration: the same single write path
+/// (`REST send → message + outbox → relay`) every other agent answer takes, with
+/// six more keys on the props it was already writing. This is the whole design,
+/// and it is what makes the card survive a reload, a new device, and a teammate
+/// scrolling back a week later.
+///
+/// Goes red if the producer stops cutting the fence out of the body (raw JSON in
+/// the channel), stops emitting the card, invents an `elapsed_ms` from the
+/// model's own claim, or routes the reply around the message spine so the
+/// broadcast no longer carries the props the relay must publish.
+#[tokio::test]
+#[ignore = "requires DATABASE_URL to a throwaway pgvector/pg18 database"]
+async fn uxc_a_1_a_completion_report_rides_the_ordinary_turn_message() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    settle_residual_worker_jobs(&su).await;
+    let tenant = seed_tenant(&su).await;
+
+    let (run_id, trigger_message_id, _job_id) =
+        enqueue_mention_turn(&su, &tenant, tenant.agent_id, "@hermes 환경 만들어줘").await;
+
+    let provider = Arc::new(MockChatProvider::scripted([(
+        "환경 만들어줘",
+        REPORTED_TURN,
+    )]));
+    let worker = build_worker(provider.clone(), base_config()).await;
+    let stats = worker.drain_once().await.expect("drain");
+    assert_eq!(stats.answered, 1, "the turn produced an answer");
+
+    let messages = agent_messages(&su, &tenant, tenant.agent_id).await;
+    assert_eq!(
+        messages.len(),
+        1,
+        "a report is one turn message — not a second card row beside the answer"
+    );
+    let (message_id, seq, body, props) = messages.into_iter().next().unwrap();
+    assert!(
+        seq > 0,
+        "it took a real channel_seq like every other message"
+    );
+
+    // 1. The fence is gone from the body. The reader gets prose; the card gets
+    //    the structure. Leaving the block in would put raw JSON in the channel.
+    assert_eq!(body, "환경 셋업을 마쳤습니다.");
+    assert!(
+        !body.contains("oort:report") && !body.contains("\"gates\""),
+        "the envelope must never be shown as text: {body}"
+    );
+
+    // 2. The card, key for key.
+    assert_card_envelope(&props, run_id, trigger_message_id);
+
+    // 3. schema_v0 is untouched: this is a plain `text` message, exactly as the
+    //    core's fixture says it must be. A new `message_type` would need a
+    //    migration, and this goal's contract is that there is none.
+    let message_type: String = sqlx::query_scalar("SELECT type::text FROM message WHERE id = $1")
+        .bind(message_id)
+        .fetch_one(&su)
+        .await
+        .expect("read message type");
+    assert_eq!(message_type, "text");
+
+    // 4. **REST ↔ outbox agree.** The relay publishes what is in the outbox row,
+    //    so a card that exists only in the `message` table is a card nobody sees
+    //    until they reload.
+    let broadcast: Value = sqlx::query_scalar(
+        "SELECT payload FROM outbox \
+          WHERE workspace_id = $1 AND kind = 'broadcast' \
+            AND payload->'data'->'payload'->>'id' = $2::text \
+          ORDER BY id DESC LIMIT 1",
+    )
+    .bind(tenant.workspace_id)
+    .bind(message_id.to_string())
+    .fetch_one(&su)
+    .await
+    .expect("read the broadcast the relay will publish");
+    let published = &broadcast["data"]["payload"];
+    assert_eq!(published["body"], json!("환경 셋업을 마쳤습니다."));
+    assert_card_envelope(&published["props"], run_id, trigger_message_id);
+}
+
+/// **UXC-A 2 — the same card on a turn the reader watched arrive.**
+///
+/// This is the half that could quietly not work. On a streamed turn the commit's
+/// `send` is a dedupe (stream rule 4): the opening slice wrote this turn's props
+/// long before the model had written a word of the report, and a deduped send
+/// updates nothing. So the card lands by props patch, written *before* the
+/// closing slice so that slice's `message.edited` frame carries it.
+///
+/// Goes red if the patch is dropped (card missing on every streamed answer — i.e.
+/// on every real one), if it is moved after the closing slice (the row moves with
+/// no frame to say so, and the timeline keeps rendering the props it was handed),
+/// or if the streaming cut stops matching the committed body (the reader watches
+/// raw JSON type itself out and then vanish).
+#[tokio::test]
+#[ignore = "requires DATABASE_URL to a throwaway pgvector/pg18 database"]
+async fn uxc_a_2_a_streamed_report_lands_on_the_message_the_reader_watched() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    settle_residual_worker_jobs(&su).await;
+    let tenant = seed_tenant(&su).await;
+
+    let (run_id, trigger_message_id, _job_id) =
+        enqueue_mention_turn(&su, &tenant, tenant.agent_id, "@hermes 환경 만들어줘").await;
+
+    let provider = Arc::new(
+        MockChatProvider::scripted([("환경 만들어줘", REPORTED_TURN)])
+            .streaming(6, Duration::from_millis(900)),
+    );
+    let worker = build_worker(provider.clone(), base_config()).await;
+    let stats = worker.drain_once().await.expect("drain");
+    assert_eq!(stats.answered, 1, "the streamed turn produced an answer");
+
+    let messages = agent_messages(&su, &tenant, tenant.agent_id).await;
+    assert_eq!(
+        messages.len(),
+        1,
+        "one turn is one message however many writes it took"
+    );
+    let (message_id, _seq, body, props) = messages.into_iter().next().unwrap();
+    assert_eq!(body, "환경 셋업을 마쳤습니다.");
+    assert_card_envelope(&props, run_id, trigger_message_id);
+
+    // The stream is closed under a terminal run (ADR-0155) — the card did not
+    // cost the turn its close.
+    assert_eq!(
+        props[momo_messaging::STREAM_PROPS_KEY]["streaming"],
+        json!(false),
+        "the closing slice still runs in the commit transaction"
+    );
+    assert_eq!(run_status(&su, run_id).await, "succeeded");
+
+    // Every durable slice this turn wrote — the whole of what a reader could
+    // have had on screen — and not one of them showed the envelope.
+    let published: Vec<Value> = sqlx::query_scalar(
+        "SELECT payload FROM outbox \
+          WHERE workspace_id = $1 AND kind = 'broadcast' \
+            AND payload->'data'->'payload'->>'id' = $2::text \
+          ORDER BY id",
+    )
+    .bind(tenant.workspace_id)
+    .bind(message_id.to_string())
+    .fetch_all(&su)
+    .await
+    .expect("read the frames the relay will publish");
+    assert!(
+        published.len() > 1,
+        "the premise of this test: the answer arrived in slices, not in one write"
+    );
+    for frame in &published {
+        let shown = frame["data"]["payload"]["body"]
+            .as_str()
+            .unwrap_or_default();
+        assert!(
+            !shown.contains("oort:report") && !shown.contains("\"gates\""),
+            "a frame typed the report envelope out to the reader: {shown}"
+        );
+    }
+
+    // The LAST frame — the closing slice — is the one every client applies in
+    // place, and it is where the card has to be.
+    let last = published.last().expect("at least one frame");
+    assert_card_envelope(
+        &last["data"]["payload"]["props"],
+        run_id,
+        trigger_message_id,
+    );
 }
