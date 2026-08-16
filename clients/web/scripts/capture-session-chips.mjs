@@ -12,6 +12,11 @@
 //   끝남 · 실패    같은 성과 서술 + 검증 칩 「실패 1」(danger). 통과 3개가 실패
 //                  하나를 덮지 않는다는 것이 이 사진의 전부다.
 //   끝남 · 무보고  성과 서술만. **칩이 없다** — 「미검증」이라고 쓰지 않는다.
+//   끝남 · 순식간  「1초 미만 작업」. 조사 「동안」이 떨어진 자리다(#1468).
+//
+// 그리고 접혀 있는 「세션 정보」를 펴서 라벨을 함께 잰다: 그 줄과 위 성과 서술은
+// **같은 함수 한 번**의 결과이므로, 라벨이 카드의 「작업 시간」과 다른 낱말이면
+// 한 화면의 한 숫자가 두 측정처럼 읽힌다(#1468 — 그 낱말이 「실행 시간」이었다).
 //
 //   npm run build && node scripts/capture-session-chips.mjs
 //   OUT_DIR=/tmp/shots node scripts/capture-session-chips.mjs
@@ -41,12 +46,14 @@ const CLEAN_ID = "019f9b00-0000-7000-8000-000000000602";
 const FAILING_ID = "019f9b00-0000-7000-8000-000000000603";
 const QUIET_ID = "019f9b00-0000-7000-8000-000000000604";
 const WIDEST_ID = "019f9b00-0000-7000-8000-000000000605";
+const BLINK_ID = "019f9b00-0000-7000-8000-000000000606";
 const ROOT_OF = {
   [RUNNING_ID]: "019f9b00-0000-7000-8000-0000000006a1",
   [CLEAN_ID]: "019f9b00-0000-7000-8000-0000000006a2",
   [FAILING_ID]: "019f9b00-0000-7000-8000-0000000006a3",
   [QUIET_ID]: "019f9b00-0000-7000-8000-0000000006a4",
   [WIDEST_ID]: "019f9b00-0000-7000-8000-0000000006a5",
+  [BLINK_ID]: "019f9b00-0000-7000-8000-0000000006a6",
 };
 
 const SESSION = {
@@ -140,6 +147,15 @@ function runningSession(id, label, startedAtMs) {
 /** 1시간 24분 — 시간 단위 경과. 「N시간 N분 동안 작업」이 가장 넓은 낱말이다. */
 const HOUR_SCALE_MS = 5_040_000;
 
+// 코어가 짓는 낱말들(`workSessionFormat` · `completionReportCard`). 값을 여기 그대로
+// 적는 이유는 둘이다: 이 노드 스크립트는 코어의 TS 소스를 import 하지 못하고, 그리고
+// **대조**가 이 파일의 일이다 — 기대값을 코어에서 끌어오면 화면과 코어가 함께 틀린
+// 날에도 이 게이트가 조용하다. 상수 쪽은 코어 스위트가 잰다.
+const SUB_SECOND = "1초 미만";
+const WORKED_SUFFIX = "동안 작업";
+const BARE_SUFFIX = "작업";
+const WORKED_LABEL = "작업 시간";
+
 const SESSIONS = [
   runningSession(RUNNING_ID, "타임라인 접기 회귀 추적", NOW - 192_000),
   workSession(CLEAN_ID, "웹 세션 표면 게이트 정리"),
@@ -151,6 +167,10 @@ const SESSIONS = [
   workSession(WIDEST_ID, "결제 정산 배치 재실행 파이프라인 점검", {
     startedAtMs: NOW - HOUR_SCALE_MS,
   }),
+  // 시작하자마자 끝난 세션 (#1468). 「1초 미만」은 기간 명사가 아니라 비교 표현이라
+  // 조사 「동안」을 받지 못한다 — 그 문장이 화면에 서 본 적이 없어서 어색함이
+  // 코드 추론으로만 남아 있었으므로, 여기서 실측한다.
+  workSession(BLINK_ID, "배포 전 설정 문법 검사", { startedAtMs: NOW - 400 }),
 ];
 
 const CLEAN_REPORT = {
@@ -445,6 +465,8 @@ async function openPanel(context) {
  *   2. 끝난 세션은 성과 서술이다(`data-kind="worked"`).
  *   3. 리포트가 없는 세션에는 칩이 **없다**. 이것이 「미검증」을 쓰지 않는다는
  *      약속의 유일한 기계적 증거다 — 없는 노드는 사진에 찍히지 않는다.
+ *   4. 1초에 못 미친 세션은 조사를 뗀다(「1초 미만 작업」, #1468). 사진은 그 문장이
+ *      어색한지 말해 주지 않고, 어색함이 바로 이 티켓이 온 이유다.
  */
 const ELAPSED_KINDS = `(() => {
   const rows = [...document.querySelectorAll('[data-testid="work-session-row"]')];
@@ -477,6 +499,26 @@ const ROW_TITLE_WIDTHS = `(() => {
       Math.round(label.getBoundingClientRect().width);
   }
   return out;
+})()`;
+
+/**
+ * 접힌 「세션 정보」의 경과 줄 (#1468). 라벨과 값을 함께 돌려준다 — 그 라벨이
+ * 카드의 「작업 시간」과 같은 낱말인가가 이 티켓의 질문이고, 값은 위 성과 서술과
+ * 같은 숫자여야 한다(격만 뺀 것).
+ */
+const META_ELAPSED = `(() => {
+  const meta = document.querySelector('[data-testid="work-detail-meta"]');
+  const value = meta?.querySelector('[data-testid="work-detail-elapsed-meta"]');
+  const row = value?.closest("div");
+  return {
+    label: row ? row.querySelector("dt")?.textContent.trim() ?? null : null,
+    value: value ? value.textContent.trim() : null,
+    kind: value ? value.getAttribute("data-kind") : null,
+    report:
+      document
+        .querySelector('[data-testid="work-detail-elapsed"][data-kind="worked"]')
+        ?.textContent.trim() ?? null,
+  };
 })()`;
 
 const DETAIL_TITLE_WIDTH = `(() => {
@@ -519,6 +561,7 @@ async function captureScheme(browser, scheme) {
   const running = byId[RUNNING_ID];
   const clean = byId[CLEAN_ID];
   const widest = byId[WIDEST_ID];
+  const blink = byId[BLINK_ID];
   if (running?.kind !== "clock") {
     throw new Error(
       `${scheme}: 실행 중 세션의 경과가 시계가 아니다 (${JSON.stringify(running)})`
@@ -529,8 +572,16 @@ async function captureScheme(browser, scheme) {
       `${scheme}: 끝난 세션의 경과가 성과 서술이 아니다 (${JSON.stringify(clean)})`
     );
   }
+  if (blink?.label !== `${SUB_SECOND} ${BARE_SUFFIX}`) {
+    throw new Error(
+      `${scheme}: 1초 미만 세션의 낱말이 「${SUB_SECOND} ${BARE_SUFFIX}」가 아니다` +
+        ` (${JSON.stringify(blink)}) — 「${SUB_SECOND} ${WORKED_SUFFIX}」는 조사가` +
+        ` 기간 명사가 아닌 값을 받은 문장이다 (#1468)`
+    );
+  }
   console.log(
-    `  ${scheme}: running=${running.label} · ended=${clean.label} · widest=${widest?.label}`
+    `  ${scheme}: running=${running.label} · ended=${clean.label} · widest=${widest?.label}` +
+      ` · blink=${blink.label}`
   );
 
   // 상세 머리의 제목이 비교당할 기준. 목록을 떠나기 전에 재 둔다.
@@ -588,6 +639,34 @@ async function captureScheme(browser, scheme) {
     const shot = `${OUT_DIR}/session-detail-${name}-${scheme}.png`;
     await panel.screenshot({ path: shot });
     shots.push(shot);
+    // 접힌 「세션 정보」를 펴서 같은 숫자의 두 번째 자리를 잰다 (#1468). 라벨이
+    // 「작업 시간」이 아니면 한 화면의 한 숫자가 두 어근으로 불린다.
+    const metaSummary = page.locator(
+      '[data-testid="work-detail-meta"] > summary'
+    );
+    await metaSummary.click();
+    await page.waitForTimeout(120);
+    const meta = await page.evaluate(META_ELAPSED);
+    if (meta.label !== WORKED_LABEL) {
+      throw new Error(
+        `${scheme}/${name}: 세션 정보의 경과 라벨이 「${WORKED_LABEL}」이 아니다` +
+          ` (${JSON.stringify(meta)}) — 카드와 같은 측정을 다른 어근으로 부른다 (#1468)`
+      );
+    }
+    if (meta.report !== `${meta.value} ${WORKED_SUFFIX}`) {
+      throw new Error(
+        `${scheme}/${name}: 두 자리의 숫자가 갈라졌다 (${JSON.stringify(meta)})`
+      );
+    }
+    console.log(
+      `  ${scheme}/${name}: 세션 정보 「${meta.label} ${meta.value}」 · 보고 줄 「${meta.report}」`
+    );
+    const metaShot = `${OUT_DIR}/session-detail-${name}-meta-${scheme}.png`;
+    await panel.screenshot({ path: metaShot });
+    shots.push(metaShot);
+    // 다시 접는다 — 아래 넓은 판 사진은 이 줄이 열리기 전과 같은 것을 물어야 한다.
+    await metaSummary.click();
+    await page.waitForTimeout(120);
     // 320px 은 이 행이 가장 빡빡한 판이고, 상세를 읽는 판은 넓은 쪽이다
     // (MOMO-619 R1 H2). 두 폭을 함께 남겨야 리뷰가 「좁을 때 제목이 얼마나
     // 밀리는가」와 「넓을 때 위계가 옳은가」를 따로 볼 수 있다.

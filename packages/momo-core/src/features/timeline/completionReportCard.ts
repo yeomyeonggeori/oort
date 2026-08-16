@@ -384,18 +384,42 @@ export function completionRowChecks(row: CompletionGateRow): CompletionCheck[] {
 }
 
 /**
+ * 1초에 못 미치는 경과가 쓰는 낱말. 지어낸 정밀도("0초") 대신 관측의 한계를 말한다.
+ *
+ * 상수로 서 있는 이유는 이것이 **기간 명사가 아니라 비교 표현**이기 때문이다.
+ * 「24분 28초」는 조사 「동안」을 받지만 이 값은 받지 못한다("1초 미만 동안 작업").
+ * 그 문법을 아는 자리(`workSessionFormat`)가 값을 다시 적지 않고 이 상수와 견줄 수
+ * 있어야 낱말이 한 곳에만 남는다.
+ */
+export const ELAPSED_SUB_SECOND = "1초 미만";
+
+/**
+ * 경과를 **라벨:값 쌍**으로 세우는 자리가 쓰는 낱말. 완료 리포트 카드의 그 줄과
+ * 작업 세션 정보의 그 줄이 같은 측정을 말하므로 낱말도 하나다(#1468).
+ *
+ * 「실행」이 아니라 「작업」인 이유: 이 숫자는 프로세스가 얼마나 돌았나가 아니라
+ * 맡긴 일이 얼마나 걸렸나이고, 세션 정보의 형제 항목 「마지막 실행 결과」가 정확히
+ * 그 반대편(프로세스가 반환한 값)을 지고 있다. 한 화면에서 같은 숫자를 두 어근으로
+ * 부르면 읽는 사람은 서로 다른 두 측정을 의심한다.
+ *
+ * 술어 자리(라벨 없이 홀로 서는 조각)는 이 낱말을 쓰지 않는다 —
+ * `workSessionFormat.SESSION_WORKED_SUFFIX` 가 그 자리의 형태를 진다.
+ */
+export const WORKED_ELAPSED_LABEL = "작업 시간";
+
+/**
  * 경과 시간을 사람의 낱말로. **가장 큰 두 단위까지만** — "24분 28초", "1시간 3분",
  * "12초". 세 단위를 늘어놓으면 성과의 단위가 아니라 스톱워치 눈금이 된다.
  *
- * 데이터에 없는 정밀도를 짓지 않는다: 0 은 "1초 미만"으로, 음수·비수는 빈 문자열로
- * (부르는 쪽이 그리지 않는다). 숫자와 한글 단위가 섞이므로 화면은 이 문자열에
- * 자릿폭 고정(`data-numeric`)을 걸지 않는다 — 걸면 음절 사이가 벌어진다
+ * 데이터에 없는 정밀도를 짓지 않는다: 0 은 `ELAPSED_SUB_SECOND` 로, 음수·비수는 빈
+ * 문자열로 (부르는 쪽이 그리지 않는다). 숫자와 한글 단위가 섞이므로 화면은 이
+ * 문자열에 자릿폭 고정(`data-numeric`)을 걸지 않는다 — 걸면 음절 사이가 벌어진다
  * (`divider.ts` 가 같은 이유로 날짜와 시각을 가른다).
  */
 export function formatElapsed(ms: number): string {
   if (!Number.isFinite(ms) || ms < 0) return "";
   const totalSeconds = Math.round(ms / 1000);
-  if (totalSeconds === 0) return "1초 미만";
+  if (totalSeconds === 0) return ELAPSED_SUB_SECOND;
   const hours = Math.floor(totalSeconds / 3600);
   const minutes = Math.floor((totalSeconds % 3600) / 60);
   const seconds = totalSeconds % 60;

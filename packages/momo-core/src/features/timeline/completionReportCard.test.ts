@@ -9,9 +9,11 @@ import {
   COMPLETION_OUTCOME_TONE,
   COMPLETION_REPORT_KIND,
   COMPLETION_REPORT_TITLE,
+  ELAPSED_SUB_SECOND,
   MAX_COMPLETION_ACTIONS,
   MAX_COMPLETION_CHECKS_PER_ROW,
   MAX_COMPLETION_GATE_ROWS,
+  WORKED_ELAPSED_LABEL,
   completionCellChecks,
   completionCheckCounts,
   completionGateColumns,
@@ -321,6 +323,22 @@ describe("formatElapsed", () => {
     expect(formatElapsed(400)).toBe("1초 미만");
     expect(formatElapsed(-1)).toBe("");
     expect(formatElapsed(Number.NaN)).toBe("");
+  });
+
+  it("그 낱말은 상수로 서 있다 — 조사를 아는 자리가 값을 다시 적지 않게 (#1468)", () => {
+    // 「1초 미만」은 기간 명사가 아니라 비교 표현이라 「동안」을 받지 못한다.
+    // `workSessionFormat` 이 그 경계를 이 상수와의 비교로 알아본다.
+    expect(ELAPSED_SUB_SECOND).toBe("1초 미만");
+    expect(formatElapsed(0)).toBe(ELAPSED_SUB_SECOND);
+  });
+});
+
+describe("경과를 이름 붙이는 낱말 (#1468)", () => {
+  it("라벨:값 쌍인 자리는 「작업 시간」 하나를 쓴다", () => {
+    // 카드의 이 줄과 작업 세션 정보의 그 줄이 같은 측정을 말한다. 세션 쪽이 쓰던
+    // 「실행 시간」은 형태가 아니라 어근이 달랐고, 한 화면의 한 숫자를 두 측정처럼
+    // 보이게 했다. 술어 자리(「N분 N초 동안 작업」)는 형태가 다르므로 그대로다.
+    expect(WORKED_ELAPSED_LABEL).toBe("작업 시간");
   });
 });
 
