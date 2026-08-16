@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "@/app/session";
+import { cn } from "@/design/lib/cn";
 import { Button } from "@/design/ui/button";
 import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/States";
 import {
@@ -37,6 +38,7 @@ import {
   parseDisconnectStart,
   revokeFacts,
   terminalGate,
+  CLEANUP_BUSY_NOTE,
   CLEANUP_HEADLINE,
   CLEANUP_INDEPENDENCE_NOTE,
   CLEANUP_LEAD,
@@ -367,8 +369,12 @@ export function HostedConnectionSection({
   );
 }
 
-/** 잠긴 줄들이 함께 가리키는 사유 문장의 id. 한 화면에 하나뿐이다. */
+/**
+ * 잠긴 줄들이 함께 가리키는 사유 문장의 id 둘. **한 번에 하나만** 화면에 선다
+ * (`lockReasonId` 가 고른다) — 한 잠금에 두 이유를 대면 어느 쪽도 답이 아니게 된다.
+ */
 const OFFLINE_NOTE_ID = "hosted-cleanup-offline-note";
+const BUSY_NOTE_ID = "hosted-cleanup-busy-note";
 
 function chipTone(connection: HostedAgentConnection) {
   const tone = hostedStatusTone(connection.status);
@@ -490,14 +496,12 @@ function StartPanel({
           // (States.tsx `actionBusy`): 회색이 되는 컨트롤은 「지금 일어나는 중」이
           // 아니라 「당신은 이걸 못 한다」로 읽힌다. 초점은 남고, 눌러도 아무 일이
           // 일어나지 않으며, 낱말과 aria-busy 가 상태를 말한다.
-          <Button
-            type="button"
-            variant="destructive"
-            size="sm"
-            aria-disabled
-            aria-busy
-            className="opacity-50"
-          >
+          //
+          // 그 규율을 적어 두고도 `aria-disabled` 와 흐림을 함께 얹고 있었다
+          // (#1403 리뷰 H-1): 둘을 얹으면 낭독은 「해제하는 중, 사용 안 함」이 되고
+          // 유일한 진행 낱말이 opacity-50 아래에서 죽는다. 인용한 규율이 금지한
+          // 바로 그 겹침이라 규율 쪽으로 맞춘다.
+          <Button type="button" variant="destructive" size="sm" aria-busy>
             해제하는 중
           </Button>
         ) : (
@@ -579,6 +583,24 @@ function CleanupPanel({
 }) {
   const progress = cleanupProgress(artifacts);
   const repair = manifestRepairGate(connection);
+
+  // 잠금 사유는 목록 머리에 한 번 서고 잠긴 컨트롤들이 그것을 가리킨다. 사유가
+  // **둘**인 것이 이 화면의 사실이다(오프라인, 그리고 이 화면이 보낸 앞선 쓰기).
+  // 둘째를 적지 않았던 동안, 그 이유로 잠긴 줄들은 사유 없이 회색이었다 — 잠긴
+  // 컨트롤이 tab order 에 남게 된 뒤로 그 침묵은 더 크게 들린다.
+  //
+  // 오프라인이 이기는 이유: 두 문장이 동시에 서면 한 잠금에 두 이유가 되고,
+  // 오프라인이면 앞선 쓰기도 어차피 도착하지 못한다.
+  const lockReasonId = offline
+    ? OFFLINE_NOTE_ID
+    : busy
+      ? BUSY_NOTE_ID
+      : undefined;
+
+  // 진행은 잠금이 아니다 (`States.tsx` 의 `actionBusy`: 진행 중은 `aria-busy` 와
+  // 바뀐 낱말로 말하고 잠기지도 흐려지지도 않는다). 복원은 자기가 켠 `busy` 로
+  // 자신을 잠그던 자리라, 「복원하는 중」이 회색 아래에서 죽고 있었다.
+  const repairLocked = !repair.allowed || offline || (busy && !repairing);
   return (
     <div className="flex min-w-0 flex-col gap-3">
       <div className="flex min-w-0 flex-col gap-1">
@@ -603,7 +625,8 @@ function CleanupPanel({
           {cleanupProgressSentence(progress)}
         </p>
         {/* 잠긴 여섯 줄이 가리키는 한 문장. 줄마다 반복하면 같은 사실이 여섯 번
-            서고, 빼면 회색 버튼이 「당신은 이걸 못 한다」로 읽힌다. */}
+            서고, 빼면 회색 버튼이 「당신은 이걸 못 한다」로 읽힌다. 잠그는 사실이
+            둘이므로 문장도 둘이고, 한 번에 하나만 선다(`lockReasonId`). */}
         {offline && (
           <p
             id={OFFLINE_NOTE_ID}
@@ -611,6 +634,15 @@ function CleanupPanel({
             data-testid="hosted-cleanup-offline"
           >
             {CLEANUP_OFFLINE_NOTE}
+          </p>
+        )}
+        {!offline && busy && (
+          <p
+            id={BUSY_NOTE_ID}
+            className="break-keep text-meta text-ink-muted"
+            data-testid="hosted-cleanup-busy"
+          >
+            {CLEANUP_BUSY_NOTE}
           </p>
         )}
       </div>
@@ -621,13 +653,23 @@ function CleanupPanel({
           headline="정리 목록이 비어 있습니다."
           detail={MANIFEST_REPAIR_NOTE}
           actions={
+            // 잠긴 버튼은 tab order 를 떠나지 않는다 (#1403, 줄의 트리거와 같은
+            // 문법): native `disabled` 면 방금 누른 손에서 초점이 <body> 로
+            // 떨어지고, 잠긴 사유 문장이 키보드로 닿을 수 없는 곳에 놓인다.
+            // 진행(`repairing`)은 그 잠금에 들지 않는다 — 낱말과 `aria-busy` 가
+            // 그것을 말한다.
             <Button
               type="button"
               variant="outline"
               size="sm"
-              disabled={!repair.allowed || offline || busy}
+              aria-disabled={repairLocked || undefined}
               aria-busy={repairing || undefined}
-              onClick={onRepair}
+              aria-describedby={repairLocked ? lockReasonId : undefined}
+              className={cn(repairLocked && "opacity-50")}
+              onClick={() => {
+                if (repairLocked || repairing) return;
+                onRepair();
+              }}
               data-testid="hosted-cleanup-repair"
             >
               {repairing ? "복원하는 중" : MANIFEST_REPAIR_LABEL}
@@ -656,7 +698,7 @@ function CleanupPanel({
               }
               onDismissFailure={onDismissFailure}
               disabled={offline || busy}
-              disabledReasonId={offline ? OFFLINE_NOTE_ID : undefined}
+              disabledReasonId={lockReasonId}
               saving={saving && openArtifactId === artifact.id}
               onAcknowledge={(input) => onAcknowledge(artifact, input)}
             />
@@ -732,14 +774,8 @@ function TerminalPanel({
       )}
       <div className="flex flex-wrap items-center justify-end gap-2">
         {completing ? (
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            aria-disabled
-            aria-busy
-            className="opacity-50"
-          >
+          // 위 「해제하는 중」과 같은 규율, 같은 수리 (#1403 리뷰 H-1).
+          <Button type="button" variant="secondary" size="sm" aria-busy>
             확정하는 중
           </Button>
         ) : (

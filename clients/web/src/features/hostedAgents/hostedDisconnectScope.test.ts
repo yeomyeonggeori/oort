@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { QueryClient } from "@tanstack/react-query";
 import { describe, expect, it } from "vitest";
@@ -49,6 +49,46 @@ function client(): QueryClient {
 
 function source(name: string): string {
   return readFileSync(fileURLToPath(new URL(`./${name}`, import.meta.url)), "utf8");
+}
+
+const HERE = fileURLToPath(new URL(".", import.meta.url));
+
+/**
+ * `disabled` 가 곧장 DOM `<button>` 의 native 속성이 되는 태그들. 여기에 붙는
+ * native `disabled` 가 이 검사가 잡는 것이다 (#1403).
+ *
+ * `ConfirmButton`·`SaveButton` 은 일부러 빠져 있다: 그 둘은 `disabled` 를 **받아서
+ * 자기 안에서 `aria-disabled` 로 옮기는** 컴포넌트라(SettingsFields), 호출부의
+ * `disabled={...}` 는 이미 이 규율을 지킨 모양이다. 그것까지 금지하면 규율을
+ * 지키는 유일한 방법을 금지하게 된다.
+ */
+const BUTTON_TAGS = new Set(["Button", "button"]);
+
+/**
+ * `disabled={...}` 를 든 JSX 여는 태그의 이름들.
+ *
+ * 정규식 하나로 여는 태그 전체를 잡을 수 없어서(속성 값에 `=>` 와 중첩 중괄호가
+ * 들어간다) 줄에서 거슬러 올라간다: 이 레포의 JSX 는 여는 태그를 자기 줄에 두므로
+ * `disabled={` 줄에서 위로 가장 가까운 `<Tag` 가 그 속성의 주인이다.
+ *
+ * 잰 것이 **수가 아니라 주인**이라 새 필드나 새 파일이 생겨도 깨지지 않고,
+ * 버튼에 native `disabled` 가 붙는 순간에만 깨진다.
+ */
+function nativeDisabledOwners(file: string): readonly string[] {
+  const lines = file.split("\n");
+  const owners: string[] = [];
+  lines.forEach((line, index) => {
+    if (!/^\s*disabled=\{/.test(line)) return;
+    for (let back = index; back >= 0; back -= 1) {
+      const open = /<([A-Za-z][\w.]*)/.exec(lines[back] ?? "");
+      if (open?.[1] !== undefined) {
+        owners.push(open[1]);
+        return;
+      }
+    }
+    owners.push("(주인을 못 찾음)");
+  });
+  return owners;
 }
 
 const MIGRATION = readFileSync(
@@ -188,6 +228,82 @@ describe("RED PROOF ③ 컴포넌트는 얇고 조용하다", () => {
     expect(section).toContain("OFFLINE_NOTE_ID");
     expect(section).not.toMatch(/useOffline\(\)/);
     expect(row).toContain("aria-describedby={disabled ? disabledReasonId");
+  });
+
+  it("이 파일군의 어떤 버튼도 native disabled 로 잠기지 않는다", () => {
+    // #1403. 사유를 한 번만 적고 잠긴 줄들이 그것을 가리키는 바로 위 설계는,
+    // 버튼이 native `disabled` 인 순간 무너진다: 그 버튼은 tab order 에서 빠져
+    // aria-describedby 가 가리키는 문장이 키보드·AT 로 **닿을 수 없는 곳**에
+    // 놓이고, 초점을 쥔 채 잠기면 초점은 <body> 로 떨어진다. SettingsFields 의
+    // SaveButton·ConfirmButton 이 같은 이유로 이미 aria-disabled 를 쓴다.
+    //
+    // 재는 방법이 「`disabled=` 가 N 개」가 아닌 이유(리뷰 M-2): 정확 일치 카운트는
+    // 필드를 하나 더하거나 가드를 함수로 빼는 **옳은 수리를 벌하고**, 두 파일만
+    // 세므로 이 폴더에 새로 생기는 파일의 native `disabled` 는 영원히 못 본다.
+    // 그래서 수가 아니라 **누가 그 속성을 들고 있는가**를 잰다: 폴더의 모든 .tsx
+    // 를 훑어 `disabled={...}` 를 든 여는 태그의 이름을 모으고, 그 안에 버튼이
+    // 있으면 실패다. 잠금이 편집까지 막아야 하는 폼 필드(input·textarea·
+    // ChoiceList)와, DOM 이 아니라 자기 안에서 aria-disabled 로 옮기는 컴포넌트
+    // prop 은 그대로 통과한다.
+    const offenders = new Map<string, readonly string[]>();
+    for (const file of readdirSync(HERE).filter((name) => name.endsWith(".tsx"))) {
+      const owners = nativeDisabledOwners(source(file)).filter((owner) =>
+        BUTTON_TAGS.has(owner)
+      );
+      if (owners.length > 0) offenders.set(file, owners);
+    }
+    expect(Object.fromEntries(offenders)).toEqual({});
+  });
+
+  it("잠긴 컨트롤은 사유를 들고, 잠금은 그림만이 아니다", () => {
+    // aria-disabled 는 클릭을 막지 않는다(그것이 요점이다 — 초점을 잃지 않는다).
+    // 그러므로 잠금은 항상 **가드와 짝**이어야 하고, 그러지 않으면 회색으로 칠한
+    // 살아 있는 버튼이 된다. 그리고 tab order 에 남은 잠긴 버튼은 왜 못 하는지
+    // 말할 수 있어야 한다 — 그것이 이 수리의 논지 전체다.
+    for (const control of [
+      { file: row, lock: "aria-disabled={disabled || undefined}", guard: "if (disabled) return;" },
+      { file: row, lock: "aria-disabled={saving || undefined}", guard: "if (saving) return;" },
+      { file: row, lock: "aria-disabled={locked || undefined}", guard: "if (locked || saving) return;" },
+      { file: section, lock: "aria-disabled={repairLocked || undefined}", guard: "if (repairLocked || repairing) return;" },
+    ]) {
+      expect(control.file).toContain(control.lock);
+      expect(control.file).toContain(control.guard);
+    }
+    // 사유가 닿는다: 줄의 네 컨트롤이 전부 목록 머리의 문장을 가리키고,
+    // 섹션이 그 id 를 두 사실(오프라인·앞선 쓰기) 중 하나로 고른다.
+    expect(row).toContain("aria-describedby={disabled ? disabledReasonId");
+    expect(row).toContain("aria-describedby={saving ? disabledReasonId");
+    expect(row).toContain("aria-describedby={locked ? disabledReasonId");
+    expect(row).toContain("locked ? disabledReasonId : undefined");
+    expect(section).toContain("aria-describedby={repairLocked ? lockReasonId");
+    expect(section).toContain("disabledReasonId={lockReasonId}");
+  });
+
+  it("진행 중은 잠금으로 그려지지 않는다", () => {
+    // States.tsx `actionBusy` 의 규율: 진행 중은 aria-busy 와 바뀐 낱말로 말하고,
+    // 잠기지도 흐려지지도 않는다. 회색이 된 컨트롤은 「지금 일어나는 중」이 아니라
+    // 「당신은 이걸 못 한다」로 읽히고, 그 둘을 겹치면 유일한 진행 낱말이
+    // opacity-50 아래에서 죽는다 (#1403 리뷰 H-1).
+    //
+    // 그래서 이 두 파일에서 `aria-busy` 를 든 줄 근처에 `aria-disabled` 가 함께
+    // 서면 안 된다. 진행을 지는 이름(saving·repairing·starting·completing)이
+    // 잠금 식(`aria-disabled=`)에 등장하지 않는 것으로 잰다.
+    for (const file of [row, section]) {
+      for (const busyName of ["saving", "repairing", "starting", "completing"]) {
+        const locks = file.match(/aria-disabled=\{[^}]*\}/g) ?? [];
+        const overlap = locks.filter((lock) =>
+          new RegExp(`\\b${busyName}\\b`).test(lock)
+        );
+        // 취소는 예외다: 그 버튼은 **진행 중인 것이 아니라** 진행 때문에 지금 할 수
+        // 없는 것이라(날고 있는 쓰기는 취소되지 않는다) 잠금이 맞는 문법이다.
+        expect(overlap.filter((lock) => lock !== "aria-disabled={saving || undefined}")).toEqual([]);
+      }
+    }
+    // 진행은 실제로 말해진다: 관측 갈래는 낱말로, 처분 갈래는 폼의 aria-busy 로
+    // (ConfirmButton 에는 busy 문법이 없다).
+    expect(row).toContain('{saving ? "저장하는 중" : CLEANUP_SAVE_LABEL}');
+    expect(row).toContain("aria-busy={saving || undefined}");
+    expect(section).toContain("aria-busy={repairing || undefined}");
   });
 
   // 토스트 금지는 여기서 재지 않는다. `scripts/design_preflight_web.sh` 의
