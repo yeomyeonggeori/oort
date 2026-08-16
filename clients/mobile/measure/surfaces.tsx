@@ -75,6 +75,14 @@ import {composerPlaceholder} from '@momo/core/features/chat/composerCopy';
 import {FixedScheme, useStyles, type ColorScheme} from '../src/design/theme';
 import WorkConsoleScreen from '../src/screens/WorkConsoleScreen';
 import WorkSessionDetailScreen from '../src/screens/WorkSessionDetailScreen';
+import {SessionRow} from '../src/screens/AgentDetailScreen';
+import {WorkStatusBadge} from '../src/features/work/WorkSessionParts';
+import {
+  workSessionContinuityStatus,
+  workSessionStatus,
+  type WorkSessionStatus,
+} from '@momo/core/features/work/workSessionModel';
+import type {WorkHost, WorkSession} from '@momo/core/lib/api';
 
 // =============================================================================
 // goal RN-C5 의 표면들을 사진 찍을 수 있게 세워 두는 하네스. **앱 코드가 아니다.**
@@ -2195,6 +2203,35 @@ export function Surface({name}: {name: string}): React.JSX.Element {
           <SearchResults />
         </Frame>
       );
+    // ---- #1503: 에이전트 상세의 세션 행과 수명주기 칩 한 벌 ------------------
+    //
+    // 이 장이 답해야 하는 물음은 색표가 아니라 **행이 읽히는가**다. 그 자리는
+    // #1503 이전에 오른쪽 끝의 작은 글자였고(실행 중만 초록), 이제 다른 두 표면과
+    // 같은 알약이다 — 제목이 한 줄을 채울 때 알약이 제목을 밀어내지 않는지, 그리고
+    // 「호스트 연결 끊김」처럼 긴 낱말이 390pt 에서 어떻게 서는지가 사진의 몫이다.
+    //
+    // 아래 칩 한 벌은 코어 역할표 여섯 칸을 나란히 세운다. 이 화면이 내는 상태는
+    // 다섯이고(`workSessionStatus` 는 `unavailable` 을 내지 않는다) 나머지 한 칸은
+    // 세션 목록 쪽에서만 서므로, 그 칸이 강조를 벗은 것을 보이려면 표를 통째로
+    // 세우는 수밖에 없다.
+    case 'agent-sessions':
+      return (
+        <Frame label="에이전트 상세 · 세션 행 (#1503)">
+          {AGENT_DETAIL_SESSIONS.map(session => (
+            <SessionRow
+              key={session.id}
+              session={session}
+              hosts={AGENT_DETAIL_HOSTS}
+            />
+          ))}
+          <Text style={styles.label}>수명주기 칩 여섯 — 코어 역할표 그대로</Text>
+          <View style={styles.statusStrip}>
+            {AGENT_DETAIL_STATUS.map(status => (
+              <WorkStatusBadge key={status.key} status={status} />
+            ))}
+          </View>
+        </Frame>
+      );
     default:
       return (
         <Frame label={`알 수 없는 표면: ${name}`}>
@@ -2203,7 +2240,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
             approval-card · approval-notes · avatar · composer-offline ·
             composer-placeholder · composer-growth ·
             group · dividers · ade-summary · ade-summary-empty · ade-panel ·
-            work-console · work-detail ·
+            work-console · work-detail · agent-sessions ·
             destructive-confirm · search-entry · search-idle ·
             search-searching · search-empty · search-error · search-results
           </Text>
@@ -2294,6 +2331,124 @@ const harnessClient = new QueryClient({
     },
   },
 });
+
+// ---- #1503: 에이전트 상세의 세션 행 ------------------------------------------
+//
+// 위 `WORK_CONSOLE_*` 씨앗을 재사용하지 않는 이유는 형태다: 저것들은
+// `setQueryData` 로 들어가는 값이라 타입이 없고(`Record<string, unknown>` 스프레드),
+// `SessionRow` 는 `WorkSession`/`WorkHost` 를 **타입으로** 받는다. 사진이 배송되는
+// 컴포넌트를 찍으려면 그 컴포넌트가 요구하는 모양을 그대로 주는 편이 낫다.
+//
+// 한 호스트는 데스크톱(T1)이고 하나는 클라우드(T3)다 — 행의 아래 두 줄(등급 문장과
+// 「지금 이거 꺼도 되나」)이 상태에 따라 갈리는 것을 같은 장에서 보기 위해서다.
+const AGENT_DETAIL_HOSTS: WorkHost[] = [
+  {
+    id: 'host-mac',
+    workspaceId: ADE_WS,
+    scope: 'member',
+    ownerMemberId: SELF,
+    type: 'app',
+    displayName: '성재 맥북',
+    capabilities: {},
+    createdAtMs: 0,
+    online: true,
+  },
+  {
+    id: 'host-cloud',
+    workspaceId: ADE_WS,
+    scope: 'workspace',
+    ownerMemberId: SELF,
+    type: 'cloud',
+    displayName: 'oort Cloud',
+    capabilities: {},
+    createdAtMs: 0,
+    online: true,
+  },
+];
+
+function agentDetailSession(over: Partial<WorkSession> & {id: string}): WorkSession {
+  return {
+    workspaceId: ADE_WS,
+    channelId: 'ch-deploy',
+    memberId: AGENT,
+    hostId: 'host-cloud',
+    rootMessageId: 'm-root',
+    tool: 'codex',
+    label: '작업',
+    status: 'running',
+    observation: 'open',
+    observerGrantCount: 0,
+    remoteAttachAvailable: false,
+    remoteDisplayAvailable: false,
+    startedAtMs: NOW - 900_000,
+    ...over,
+  };
+}
+
+/**
+ * 이 화면이 실제로 낼 수 있는 갈래들. 제목 하나는 알약을 밀어낼 만큼 길다.
+ *
+ * 둘째 행이 **도는 클라우드 세션**인 것은 리뷰가 지목한 자리다(M-1): 첫 행은 알약도
+ * 앰버(실행 중)고 아래 문장도 앰버(「그 컴퓨터를 끄거나…」 — `atRisk`)라 한 카드에
+ * 앰버가 둘이고, 둘째 행은 알약만 앰버이고 문장은 중립이다. 두 장이 나란히 서야
+ * 「어느 앰버가 무엇을 벌었는가」를 사람이 볼 수 있다.
+ */
+const AGENT_DETAIL_SESSIONS: WorkSession[] = [
+  agentDetailSession({
+    id: 'measure-agent-running',
+    hostId: 'host-mac',
+    tool: 'codex-app-server',
+    label: '릴레이 재시작과 장애 복구 절차를 배포 전에 끝까지 검증하는 작업',
+  }),
+  agentDetailSession({
+    id: 'measure-agent-running-cloud',
+    label: '야간 배치',
+    tool: 'claude',
+    startedAtMs: NOW - 1_200_000,
+  }),
+  agentDetailSession({
+    id: 'measure-agent-idle',
+    label: '셀프호스트 회귀 테스트',
+    tool: 'prime',
+    status: 'idle',
+    startedAtMs: NOW - 1_800_000,
+  }),
+  agentDetailSession({
+    id: 'measure-agent-orphaned',
+    hostId: 'host-mac',
+    label: '호스트가 사라진 마이그레이션',
+    tool: 'claude',
+    status: 'orphaned',
+    startedAtMs: NOW - 2_700_000,
+  }),
+  agentDetailSession({
+    id: 'measure-agent-ended',
+    label: '클라우드 배포 점검',
+    tool: 'hermes',
+    status: 'ended',
+    startedAtMs: NOW - 3_600_000,
+    endedAtMs: NOW - 3_000_000,
+  }),
+];
+
+/**
+ * 코어 역할표의 여섯 칸을 낱말과 함께. **낱말을 하나도 손으로 적지 않는다** — 여섯
+ * 칸 전부가 코어 함수의 반환값이다. `unavailable` 은 `workSessionStatus` 가 내지
+ * 않는 키라 원장이 그것을 만드는 조건(도는 세션 + 신호 없는 호스트)을 그대로 세워
+ * `workSessionContinuityStatus` 에게 묻는다. 사본을 두면 코어가 낱말을 고친 날
+ * 이 사진만 옛말을 하고, 그때 초록이 아니라 **캡션이** 거짓말을 한다.
+ */
+const AGENT_DETAIL_STATUS: WorkSessionStatus[] = [
+  workSessionStatus({status: 'running', exitCode: undefined}),
+  workSessionStatus({status: 'idle', exitCode: undefined}),
+  workSessionContinuityStatus(
+    agentDetailSession({id: 'measure-agent-silent', hostId: 'host-silent'}),
+    [{...AGENT_DETAIL_HOSTS[1], id: 'host-silent', online: false}],
+  ),
+  workSessionStatus({status: 'orphaned', exitCode: undefined}),
+  workSessionStatus({status: 'ended', exitCode: undefined}),
+  workSessionStatus({status: 'wat', exitCode: undefined}),
+];
 
 const WORK_CONSOLE_HOSTS = [
   ...ADE_HOSTS,
@@ -2427,6 +2582,14 @@ const buildStyles = (color: Palette) => StyleSheet.create({
       paddingHorizontal: 12,
     },
     noticeStack: {padding: 16, gap: 12},
+    /** #1503 — 수명주기 칩 여섯을 한 줄에 세운다(390pt 에서는 두 줄로 접힌다). */
+    statusStrip: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: space.sm,
+      paddingHorizontal: SAFE_GUTTER,
+      paddingTop: space.xs,
+    },
     pressPair: {paddingHorizontal: 16, paddingVertical: 8},
     // 화면이 누를 때 실제로 까는 값 — **같은 심볼**이다 (M-2).
     pressed: {backgroundColor: rowPressedBackground(color)},
