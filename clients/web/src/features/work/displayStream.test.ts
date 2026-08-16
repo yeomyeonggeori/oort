@@ -481,12 +481,19 @@ describe("the signalling round trip the probe proves, from the browser side", ()
     }
   });
 
-  it("carries no TURN and no STUN, exactly as the template declares", () => {
-    // ADR-0165 D3. An empty list is the decision, not a gap: a third-party relay
-    // in the media path is what the whole topology exists to avoid, and an
-    // oort-operated one is an ADR 증보 waiting on the reachability spike.
+  it("declares relay-forced TURN, exactly as template v3 measured it (#1438·증보 2)", () => {
+    // ADR-0165 D3 + 증보 1/2. The reachability spike (#1411) settled that the
+    // microVM's NAT is symmetric — relay is the only ICE path — and the live
+    // E2E (#1438) proved a browser renders the screen through an oort-operated
+    // TURN. So the template no longer declares an empty `turn`; it declares a
+    // required, relay-only, oort-operated one. The client's own `DISPLAY_ICE_SERVERS`
+    // stays [] because the TURN credential is minted per-session beside the
+    // capability, not baked into the bundle — that seam is LIVE-5.
     expect(DISPLAY_ICE_SERVERS).toEqual([]);
-    expect(TEMPLATE_SPEC.ice.turn).toBeNull();
+    expect(TEMPLATE_SPEC.ice.turn).not.toBeNull();
+    expect(TEMPLATE_SPEC.ice.turn?.required).toBe(true);
+    expect(TEMPLATE_SPEC.ice.policy).toBe("relay");
+    expect(TEMPLATE_SPEC.ice.turn?.operator).toContain("oort");
     expect(TEMPLATE_SPEC.ice.stun).toEqual([]);
   });
 });
@@ -1052,12 +1059,17 @@ describe("what this file does not prove", () => {
         ),
         "utf8"
       )
-    ) as { unverified: Record<string, string> };
-    // An honest label that can be deleted silently is not one. This client's
-    // claims inherit it: no CubeSandbox template has been built or booted, so
-    // every statement here is contract-level.
-    expect(spec.unverified.iceReachability).toBeTruthy();
-    expect(spec.unverified.producerSelection).toBeTruthy();
+    ) as { unverified?: Record<string, string>; runtimeVerified?: Record<string, string> };
+    // An honest label that can be deleted silently is not one — but a label that
+    // was earned by measurement is allowed to graduate. #1438 built and booted the
+    // template and a browser rendered the media through relay, so iceReachability,
+    // producerSelection and templateBuild moved from `unverified` to
+    // `runtimeVerified`. What stays unverified from this client is the one thing
+    // #1438 did not cover: input delivery (LIVE-5). The honesty invariant holds —
+    // the label set is non-empty and the graduation is recorded, not silent.
+    expect(spec.runtimeVerified?.browserRendersOverTurnRelay).toBeTruthy();
+    expect(spec.runtimeVerified?.producerEncodesInMicroVM).toBeTruthy();
+    expect(spec.unverified?.inputDelivery).toBeTruthy();
   });
 
   it("mints and dials nothing at test time", () => {
