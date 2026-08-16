@@ -1,5 +1,12 @@
 import { useState } from "react";
-import { Check, KeyRound, ShieldQuestion, Terminal, Zap } from "lucide-react";
+import {
+  Check,
+  ClipboardCheck,
+  KeyRound,
+  ShieldQuestion,
+  Terminal,
+  Zap,
+} from "lucide-react";
 import { Button } from "@/design/ui/button";
 import { cn } from "@/design/lib/cn";
 import { useOffline } from "@/features/common/useOffline";
@@ -37,8 +44,27 @@ import {
   type LoginHandoffCard,
   type LoginHandoffNote,
 } from "@momo/core/features/timeline/loginHandoffCard";
+import {
+  COMPLETION_CHECK_OUTCOME_LABEL,
+  COMPLETION_CHECK_TONE,
+  COMPLETION_GATE_SURFACE_LABEL,
+  completionCellChecks,
+  completionCheckCounts,
+  completionGateColumns,
+  formatElapsed,
+  type CompletionCheck,
+  type CompletionCheckOutcome,
+  type CompletionReportCard,
+} from "@momo/core/features/timeline/completionReportCard";
+import { COMPLETION_TONE_CLASS } from "./completionTone";
 import { spawnHostGate } from "@momo/core/features/timeline/spawnHostChoice";
-import { ApprovalChip, LoginHandoffChip, StreamCaret, TurnChip } from "./StatusChip";
+import {
+  ApprovalChip,
+  CompletionReportChip,
+  LoginHandoffChip,
+  StreamCaret,
+  TurnChip,
+} from "./StatusChip";
 import { ApprovalActions, type Armed } from "./ApprovalActions";
 import { APPROVAL_NOTE_TONE_CLASS } from "./approvalNoteTone";
 import { FoldedValue } from "./FoldToggle";
@@ -589,6 +615,213 @@ function LoginHandoffBody({
   );
 }
 
+/**
+ * 한 칸의 결과. 세부(`896 통과`)가 있으면 그것이 글자이고, 없으면 결과 낱말(`통과`)
+ * 이 선다. 색은 결과가 지고, 세부가 낱말을 대신할 때는 보조기술을 위해 결과 낱말을
+ * 숨은 글자로 함께 싣는다 — 「896 통과」만 읽어서는 통과인지 실패인지 소리로 알 수
+ * 없기 때문이다.
+ *
+ * `<td>` 가 아니라 값(`<span>`) 하나다: 한 (표면,라벨) 셀에 겹친 칸이 여럿일 수
+ * 있어(중복 라벨), 그것들이 **한 칸 안에 쌓인다**(H1). `data-outcome` 은 각 값에
+ * 붙어 실패 칸이 초록에 접혀 사라지지 않는다.
+ */
+function GateCellValue({ check }: { check: CompletionCheck }) {
+  const toneClass = COMPLETION_TONE_CLASS[COMPLETION_CHECK_TONE[check.outcome]];
+  const label = COMPLETION_CHECK_OUTCOME_LABEL[check.outcome];
+  return (
+    <span className="block" data-outcome={check.outcome}>
+      <span className={cn("text-meta", toneClass)}>{check.detail ?? label}</span>
+      {check.detail !== undefined && <span className="sr-only"> {label}</span>}
+    </span>
+  );
+}
+
+/**
+ * 표면 × 게이트 표. 커서 벤치마크의 「Surface × Lint/Test/Build/Run」을 우리
+ * 원장에 실린 표면별 게이트 목록에서 재구성한다. 열(`completionGateColumns`)은
+ * **처음 본 순서**의 게이트 이름 합집합이고, 어떤 표면이 그 게이트를 안 돌렸으면
+ * 칸은 가운뎃점 하나로 비운다(없는 결과를 통과로도 실패로도 짓지 않는다).
+ *
+ * 한 (표면,라벨)에 칸이 여럿이면(중복 라벨) `completionCellChecks` 가 **전부**
+ * 돌려주고 이 셀이 그것들을 쌓는다 — 최악 톤이 앞이라 실패가 절대 접히지 않는다
+ * (H1). 열·셀 판정을 코어가 지므로 웹 표가 폰·집계와 같은 칸 집합을 그린다.
+ *
+ * 넓어질 수 있는 표라 자기 컨테이너 안에서 가로로 스크롤한다 — 페이지 몸통은
+ * 절대 가로로 밀리지 않는다(design-taste-web 반응형 규칙).
+ */
+function CompletionGateTable({ card }: { card: CompletionReportCard }) {
+  const columns = completionGateColumns(card.gates);
+  const counts = completionCheckCounts(card.gates);
+  const tally: Array<{ outcome: CompletionCheckOutcome; count: number }> = (
+    ["pass", "fail", "skip", "pending", "unknown"] as CompletionCheckOutcome[]
+  )
+    .map((outcome) => ({ outcome, count: counts[outcome] }))
+    .filter((entry) => entry.count > 0);
+  // 상한에 걸려 그리지 않은 것들(M3). 조용히 자르지 않고 개수를 말한다.
+  const omittedParts: string[] = [];
+  if (card.omitted.gates > 0)
+    omittedParts.push(`표면 ${formatCount(card.omitted.gates)}개 더`);
+  if (card.omitted.checks > 0)
+    omittedParts.push(`게이트 ${formatCount(card.omitted.checks)}개 더`);
+
+  return (
+    <div className="border-t border-line" data-testid="completion-gates">
+      <div className="overflow-x-auto">
+        <table className="w-full border-collapse">
+          <thead>
+            <tr className="border-b border-line">
+              <th
+                scope="col"
+                className="px-3 py-1 text-left text-meta font-medium text-ink-muted"
+              >
+                {COMPLETION_GATE_SURFACE_LABEL}
+              </th>
+              {columns.map((col) => (
+                <th
+                  key={col}
+                  scope="col"
+                  className="px-3 py-1 text-left text-meta font-medium text-ink-muted"
+                >
+                  {col}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {card.gates.map((row, rowIndex) => (
+              // 표면 이름이 겹쳐도 key 가 충돌하지 않게 index 를 함께 짠다(H1).
+              <tr
+                key={`${row.surface}::${rowIndex}`}
+                data-testid="completion-gate-row"
+              >
+                <th
+                  scope="row"
+                  className="px-3 py-1 text-left text-body font-medium text-ink"
+                >
+                  {row.surface}
+                </th>
+                {columns.map((col) => {
+                  const cellChecks = completionCellChecks(row, col);
+                  if (cellChecks.length === 0) {
+                    return (
+                      <td
+                        key={col}
+                        className="px-3 py-1 text-meta text-ink-muted"
+                        aria-hidden="true"
+                      >
+                        ·
+                      </td>
+                    );
+                  }
+                  return (
+                    <td key={col} className="px-3 py-1 align-baseline">
+                      {/* 겹친 칸은 한 셀 안에서 한 줄씩 쌓인다. 틈은 닫힌 간격
+                          스케일의 1px 실선(`gap-px`)이다 — `gap-0.5`(2px)는 스케일
+                          밖이라 `--spacing: initial` 아래서 조용히 0px 로 죽는다. */}
+                      <span className="flex flex-col gap-px">
+                        {cellChecks.map((check, i) => (
+                          <GateCellValue
+                            key={`${row.surface}::${col}::${i}`}
+                            check={check}
+                          />
+                        ))}
+                      </span>
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {tally.length > 0 && (
+        <p className="px-3 py-2 text-meta text-ink-muted" data-testid="completion-tally">
+          {tally.map((entry, index) => (
+            <span key={entry.outcome}>
+              {index > 0 && " · "}
+              {COMPLETION_CHECK_OUTCOME_LABEL[entry.outcome]}{" "}
+              <span data-numeric>{formatCount(entry.count)}</span>
+            </span>
+          ))}
+        </p>
+      )}
+      {omittedParts.length > 0 && (
+        <p
+          className="px-3 pb-2 text-meta text-ink-muted"
+          data-testid="completion-omitted"
+        >
+          {omittedParts.join(" · ")}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * 작업 완료 리포트 카드 (UXC-A / 커서 웹 ADE 벤치마크 §3-A).
+ *
+ * 에이전트가 긴 작업을 끝내고 자기가 무엇을 했는지 설명하는 카드다. 승인 카드
+ * 가족의 `CardFrame` 을 그대로 쓰되 결정 컨트롤이 없다 — 끝난 일의 기록이라
+ * 승인·거부할 것이 없다. 그래서 키보드 y/n 도, footer 도 서지 않는다.
+ *
+ * 읽는 순서는 벤치마크 그대로다: ①한 문단 요약 ②경과 시간 ③무엇을 했는가(왜까지)
+ * ④표면×게이트 표. 판정은 전부 코어가 지고(요약/불릿/표는 파싱, 결과는 집계) 이
+ * 파일은 옷만 입힌다.
+ */
+function CompletionReportBody({ card }: { card: CompletionReportCard }) {
+  const elapsed = card.elapsedMs !== undefined ? formatElapsed(card.elapsedMs) : "";
+  return (
+    <CardFrame
+      icon={<ClipboardCheck className="size-4" aria-hidden="true" />}
+      title={card.title}
+      chip={<CompletionReportChip outcome={card.outcome} />}
+      status={card.outcome}
+      kind="completion_report"
+      detail={card.detail}
+      // 표는 <dl> 밖에 서야 유효한 HTML 이다(테이블은 dl 안에 들 수 없다). note
+      // 슬롯이 정확히 그 자리다 — dl(요약·시간·불릿) 다음, 숨김 개수 앞.
+      note={card.gates.length > 0 ? <CompletionGateTable card={card} /> : null}
+    >
+      {card.summary && (
+        <LabeledRow label="요약" testId="completion-summary">
+          {card.summary}
+        </LabeledRow>
+      )}
+      {elapsed !== "" && (
+        // 성과의 단위(벤치마크 차용 C). 숫자와 한글 단위가 섞이므로 자릿폭 고정을
+        // 걸지 않는다 — 걸면 음절 사이가 벌어진다(코어 `formatElapsed` 독스트링).
+        <LabeledRow label="작업 시간" testId="completion-elapsed">
+          {elapsed}
+        </LabeledRow>
+      )}
+      {card.actions.length > 0 && (
+        <LabeledRow label="한 일" testId="completion-actions">
+          <ul className="list-disc space-y-1 pl-4 marker:text-ink-muted">
+            {card.actions.map((action, index) => (
+              <li key={index}>
+                {action.text}
+                {action.note && (
+                  // 왜. 커서의 「pinned 1.83 couldn't build it」 자리다. 가장 조용한
+                  // 격으로 — 읽으면 좋고 안 읽어도 무엇을 했는지는 위 줄이 말한다.
+                  <span className="mt-px block text-meta text-ink-muted">
+                    {action.note}
+                  </span>
+                )}
+              </li>
+            ))}
+            {card.omitted.actions > 0 && (
+              // 상한에 걸려 그리지 않은 불릿(M3). 조용히 자르지 않는다.
+              <li className="text-ink-muted" data-testid="completion-actions-omitted">
+                그 밖에 {formatCount(card.omitted.actions)}개 더
+              </li>
+            )}
+          </ul>
+        </LabeledRow>
+      )}
+    </CardFrame>
+  );
+}
+
 function ToolBody({ card }: { card: AgentToolCard }) {
   const live = card.status === "thinking" || card.status === "streaming";
   return (
@@ -819,6 +1052,9 @@ export function AgentCard({
         {...(onOpenWorkSession !== undefined ? { onOpenWorkSession } : {})}
       />
     );
+  }
+  if (card.kind === "completion_report") {
+    return <CompletionReportBody card={card} />;
   }
   if (card.kind === "tool") return <ToolBody card={card} />;
   return <TurnBody card={card} />;

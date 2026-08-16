@@ -168,8 +168,15 @@ export function artifactNote(state: ArtifactState): ArtifactNote {
 
 function stateFor(card: AgentCardModel | null): ArtifactState | null {
   // 승인 카드와 로그인 핸드오프 카드에는 턴 상태가 없다. 둘 다 사람의 결정을
-  // 기다리는 카드이고, 그 기다림은 `AgentTurnStatus` 의 축이 아니다.
-  if (card === null || card.kind === "approval" || card.kind === "login_handoff") {
+  // 기다리는 카드이고, 그 기다림은 `AgentTurnStatus` 의 축이 아니다. 완료 리포트도
+  // 여기 든다: 끝난 일의 기록이라 자기 결과 어휘(`CompletionOutcome`)를 갖지,
+  // `AgentTurnStatus` 로 아티팩트 칩을 물들이지 않는다.
+  if (
+    card === null ||
+    card.kind === "approval" ||
+    card.kind === "login_handoff" ||
+    card.kind === "completion_report"
+  ) {
     return null;
   }
   const note = card.errorNote;
