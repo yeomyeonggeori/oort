@@ -275,6 +275,10 @@ export function invalidateSessionReports(client: QueryClient): Promise<void> {
  * `retry: false` 인 이유: 이 읽기가 실패하는 가장 흔한 방법은 채널 비멤버(403)이고,
  * 그 답은 재시도로 바뀌지 않는다. 실패는 칩 부재로 끝난다 — 이 표면은 읽지 못한 것을
  * 배너로 승격하지 않는다(목록의 사실 원장은 세션 목록 쪽이다).
+ *
+ * 느린 폴링은 원장 폴링과 같은 자리에 있다(`LEDGER_POLL_MS` 머리말): 무효화는 레일이
+ * 나른 전이에 걸리므로, 레일이 닿지 못한 채널에서 막 떨어진 리포트는 폴링이 없으면
+ * 영영 오지 않는다. 관찰자가 몇이든 간격은 하나이고(같은 키), 패널이 닫히면 멈춘다.
  */
 function useChannelSessionReports(workspaceId: string, channelId: string) {
   return useQuery({
