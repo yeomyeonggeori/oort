@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Message, QuotedMessage } from "../../lib/api";
 import { payloadToMessage } from "../../lib/realtimeEvents";
+import { hasRenderableBody } from "./bodySlot";
 import { hasAnyAction } from "./model";
 import {
   canQuoteMessage,
@@ -154,6 +155,113 @@ describe("quoteBlockFrom", () => {
     if (block.kind !== "ready") return;
     expect(block.edited).toBe(true);
     expect(block.lines).toEqual(["고친 뒤 본문"]);
+  });
+});
+
+// =============================================================================
+// #1498 — 본문이 없다는 사실이 전선에서 네 가지 모양으로 온다.
+//
+// 타입은 `body?: string`이라 말하지만 서버는 `"body": null`을 싣고
+// (`momo_messaging::build_broadcast_payload`), 그 `null`이 이 파일까지 오는 길에
+// 정규화가 한 줄도 없다: `payloadToMessage`의 `p.body ?? undefined`는 실시간 프레임
+// 경로뿐이고, REST 페이지는 `isMessage`가 본문을 **보지 않은 채** 통과시켜
+// (`lib/api.ts` — 검사 목록에 `body`가 없다) 와이어 객체가 그대로 행이 된다.
+// #1476이 같은 값으로 타임라인을 통째로 백지화했고, 이 파일에서는 던지는 대신
+// **조용히 틀렸다** — 그래서 재는 것이 크래시가 아니라 **모양**이다.
+//
+// 네 모양이 두 무리로 갈리는 것이 이 표의 요점이다:
+//
+//   부재·null   「본문이 없다」    → 묘비 (서버가 tombstone에서 본문을 뺀다)
+//   ''·공백뿐    「읽을 것이 없다」 → 살아 있는 인용, 발췌만 비어 있다
+//
+// 아래 무리를 묘비로 접으면 화면이 **지워지지 않은 메시지를 지워졌다고** 말한다.
+// 그 자리에 두 표면이 이미 다른 말을 세워 뒀다(「내용 없는 메시지」 — 웹
+// `QuoteBlock.tsx`, 폰 `Quote.tsx`, 코어 `PIN_EMPTY_BODY_TEXT`).
+// =============================================================================
+
+/** 본문 칸을 와이어가 말한 그대로 만든다. `undefined`는 **키 자체가 없는** 것이다. */
+function bodied<T extends object>(row: T, body: string | null | undefined): T {
+  const next = { ...row } as Record<string, unknown>;
+  if (body === undefined) {
+    delete next.body;
+  } else {
+    next.body = body;
+  }
+  return next as T;
+}
+
+const BODY_SHAPES = [
+  { name: "키 자체가 없다", body: undefined, kind: "deleted" },
+  { name: "런타임 null", body: null, kind: "deleted" },
+  { name: "빈 문자열", body: "", kind: "ready" },
+  { name: "공백뿐", body: "   \n\t ", kind: "ready" },
+] as const;
+
+describe("#1498 — 본문 없는 인용의 네 모양", () => {
+  it.each(BODY_SHAPES)("서버가 푼 인용: $name → $kind", ({ body, kind }) => {
+    const block = quoteBlockFrom(bodied(quoted(), body));
+    expect(block.kind).toBe(kind);
+    // 살아 있는 쪽은 발췌가 비어 있을 뿐이다. 표면이 그 빈 발췌를 보고
+    // 「내용 없는 메시지」라고 말한다 — 삭제라고 말하지 않는다.
+    if (block.kind === "ready") expect(block.lines).toEqual([]);
+  });
+
+  /**
+   * 같은 원본이 실시간으로 도착했을 때와 새로고침한 뒤에 다르게 읽히면 안 된다.
+   * `quoteBlockFromLocal`이 만드는 `QuotedMessage`는 서버가 주는 것과 **같은
+   * 모양**이어야 하고, 그 말은 로컬 행의 `null`도 부재로 접혀야 한다는 뜻이다.
+   */
+  it.each(BODY_SHAPES)(
+    "화면의 행에서 푼 인용도 같은 답을 낸다: $name → $kind",
+    ({ body, kind }) => {
+      const draft = quoteDraftFor(bodied(message(), body));
+      expect(draft).not.toBeNull();
+      expect(draft?.block.kind).toBe(kind);
+      // 블록에는 본문 칸 자체가 없다 — `null`이 스냅샷을 타고 표면까지 갈 길이
+      // 이 경로에는 없다는 뜻이다.
+      expect(JSON.stringify(draft?.block)).not.toContain("body");
+    }
+  );
+
+  it("null 본문을 실은 행을 인용해도 그 null은 블록 어디에도 없다", () => {
+    const block = quoteBlockFrom(bodied(quoted(), null));
+    expect(block.kind).toBe("deleted");
+    expect(JSON.stringify(block)).not.toContain("null");
+  });
+
+  it("종류 라벨이 있는 인용은 본문이 null이어도 묘비가 아니다", () => {
+    // 카드형 메시지는 본문이 없는 것이 정상이다(#1478의 `bodyless agent card`와
+    // 같은 사실). `null`이 그 판정을 뒤집으면 도구 실행 인용이 묘비로 선다.
+    const block = quoteBlockFrom(bodied(quoted({ type: "diff" }), null));
+    expect(block.kind).toBe("ready");
+    if (block.kind !== "ready") return;
+    expect(block.lines).toEqual([quotedKindLabel("diff")]);
+  });
+
+  /**
+   * 「발췌가 비었다」와 코어의 「읽을 글자가 없다」는 같은 답이어야 한다. 둘이
+   * 갈라지면 인용 블록만 다른 규칙으로 비고, 표면의 「내용 없는 메시지」가 본문 칸의
+   * 그것과 다른 뜻이 된다. `normalizeLines`가 줄마다 `trim`하므로 지금은 같다 —
+   * 이 단정이 그 일치를 못으로 박는다(`bodySlot.hasRenderableBody`, #1478).
+   */
+  it("발췌가 비는 자리는 `hasRenderableBody`와 같은 답이다", () => {
+    for (const body of ["", "   \n\t ", "  실제 본문  ", "한 줄\n두 줄"]) {
+      const block = quoteBlockFrom(quoted({ body }));
+      expect(block.kind).toBe("ready");
+      if (block.kind !== "ready") continue;
+      expect(block.lines.length === 0).toBe(!hasRenderableBody(body));
+    }
+  });
+
+  it("본문이 사라져도 삭제 신호는 여전히 삭제로 읽힌다", () => {
+    // 무회귀: 진짜 묘비는 `state`와 `deletedAtMs`로도 온다. 본문 판정은 그 둘이
+    // 못 온 경우의 마지막 벨트이지 그 둘의 대체가 아니다.
+    for (const shape of BODY_SHAPES) {
+      const block = quoteBlockFrom(
+        bodied(quoted({ state: "deleted", deletedAtMs: 1_785_238_500_000 }), shape.body)
+      );
+      expect(block.kind).toBe("deleted");
+    }
   });
 });
 

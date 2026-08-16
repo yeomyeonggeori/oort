@@ -167,17 +167,57 @@ export function quotedKindLabel(type: string): string | null {
   return KIND_LABELS[type] ?? null;
 }
 
-function isDeletedQuote(quoted: QuotedMessage): boolean {
+/**
+ * 이 인용이 실어 온 본문, **없으면 `undefined`** (이슈 #1498).
+ *
+ * 타입은 `body?: string`이라 말하지만 전선은 `"body": null`을 싣는다
+ * (`momo_messaging::build_broadcast_payload`). 그리고 그 `null`이 여기 오는 길에
+ * 정규화가 **한 줄도 없다**: `payloadToMessage`는 `p.body ?? undefined`로 접지만
+ * 그것은 실시간 프레임 경로뿐이고, REST 페이지는 `isMessage`가 본문을 **보지 않은
+ * 채** 통과시켜(`lib/api.ts`) 와이어 객체가 그대로 `Message`·`QuotedMessage`가 된다.
+ * 선언 타입은 런타임 `null`을 막지 못한다 — `artifacts.ts`가 같은 사실로 타임라인을
+ * 통째로 백지화했던 그 자리다(#1476).
+ *
+ * 이 파일에서 그 `null`은 던지지 않고 **조용히 틀렸다**. `=== undefined`로 묻던
+ * 자리가 둘이었고 둘 다 샜다: 묘비 판정은 본문 없는 text를 못 알아봐 인용이 빈
+ * 블록으로 서고, 로컬 행 → 인용 스냅샷은 `body: string | undefined`라고 선언된
+ * 자리에 `null`을 실어 날랐다.
+ *
+ * **`null`까지만 부재로 접는다.** `''`와 공백뿐인 본문은 「본문이 없다」가 아니라
+ * 「본문에 읽을 것이 없다」이고, 두 표면이 그 자리에 이미 다른 말을 세워 뒀다
+ * (「내용 없는 메시지」 — 웹 `QuoteBlock.tsx`, 폰 `Quote.tsx`, 그리고 코어의
+ * `PIN_EMPTY_BODY_TEXT`). 그 셋을 묘비로 접으면 화면이 **지워지지 않은 메시지를
+ * 지워졌다고** 말한다 — ADR-0148이 가장 경계한 거짓말이고, 공백뿐인 본문의 인용은
+ * 폰이 이미 「묘비가 아니므로 삭제라 말할 수 없다」로 못 박아 둔 경우다.
+ * 그래서 `bodySlot.hasRenderableBody`는 묘비 판정이 아니라 **발췌가 비는 자리**에서
+ * 지켜진다: `quoteExcerpt`의 `normalizeLines`가 줄마다 `trim`하고 빈 줄을 버리므로
+ * 「줄이 하나도 없다」와 「읽을 글자가 없다」는 같은 답이고, `quote.test.ts`가 그
+ * 일치를 못으로 박는다.
+ */
+function presentBody(body: string | null | undefined): string | undefined {
+  return body ?? undefined;
+}
+
+/**
+ * 이 인용이 묘비인가.
+ *
+ * `body`는 호출자가 [`presentBody`]로 이미 한 번 읽은 값이다 — 본문을 두 번 읽으면
+ * 두 물음이 갈라지고, 갈라진 둘 중 하나만 고쳐지는 것이 이 파일이 겪은 결함이다.
+ */
+function isDeletedQuote(quoted: QuotedMessage, body: string | undefined): boolean {
   if (quoted.state === "deleted") return true;
   if (quoted.deletedAtMs !== undefined) return true;
-  // 본문이 아예 없는 text는 tombstone이다 (서버가 `body`를 뺀다). 종류 라벨이
-  // 있는 메시지는 본문이 없어도 지워진 것이 아니다.
-  return quoted.type === "text" && quoted.body === undefined;
+  // 본문이 아예 없는 text는 tombstone이다 (서버가 `body`를 뺀다 — 키를 빼든 `null`을
+  // 싣든 「본문이 없다」는 같은 사실이다). 종류 라벨이 있는 메시지는 본문이 없어도
+  // 지워진 것이 아니다.
+  return quoted.type === "text" && body === undefined;
 }
 
 /** 서버가 풀어 준 인용 하나를 블록으로. */
 export function quoteBlockFrom(quoted: QuotedMessage): QuoteBlock {
-  if (isDeletedQuote(quoted)) {
+  // 본문은 여기서 **한 번만** 읽는다: 묘비 판정과 발췌가 같은 값을 본다.
+  const body = presentBody(quoted.body);
+  if (isDeletedQuote(quoted, body)) {
     return {
       kind: "deleted",
       targetId: quoted.id,
@@ -188,7 +228,7 @@ export function quoteBlockFrom(quoted: QuotedMessage): QuoteBlock {
   const label = quotedKindLabel(quoted.type);
   const excerpt =
     label === null
-      ? quoteExcerpt(quoted.body ?? "")
+      ? quoteExcerpt(body ?? "")
       : { lines: [label], truncated: false };
   return {
     kind: "ready",
@@ -202,14 +242,24 @@ export function quoteBlockFrom(quoted: QuotedMessage): QuoteBlock {
   };
 }
 
-/** 화면에 이미 있는 행 하나를 인용 블록으로 (실시간 프레임 경로). */
+/**
+ * 화면에 이미 있는 행 하나를 인용 블록으로 (실시간 프레임 경로).
+ *
+ * 여기서 만드는 `QuotedMessage`는 **서버가 준 것과 같은 모양이어야 한다** — 이
+ * 함수의 존재 이유가 「프레임에는 `reply_to`가 없다」이고, 두 경로가 다른 모양을
+ * 만들면 같은 원본이 실시간에 도착했을 때와 새로고침한 뒤에 다르게 읽힌다.
+ * 그래서 본문도 [`presentBody`]를 지나서만 실린다: 로컬 행의 런타임 `null`을 그대로
+ * 옮기면 `body: string | undefined`라고 선언된 자리에 `null`이 앉고, 그 `null`은
+ * 묘비 판정을 지나쳐 빈 인용 블록이 된다(#1498).
+ */
 function quoteBlockFromLocal(message: Message): QuoteBlock {
+  const body = presentBody(message.body);
   return quoteBlockFrom({
     id: message.id,
     seq: message.seq,
     authorMemberId: message.authorMemberId,
     type: message.type,
-    ...(message.body === undefined ? {} : { body: message.body }),
+    ...(body === undefined ? {} : { body }),
     state: message.state ?? "sent",
     ...(message.editedAtMs === undefined ? {} : { editedAtMs: message.editedAtMs }),
     ...(message.deletedAtMs === undefined
