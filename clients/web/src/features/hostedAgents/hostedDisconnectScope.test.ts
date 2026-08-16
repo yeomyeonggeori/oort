@@ -3,11 +3,14 @@ import { fileURLToPath } from "node:url";
 import { QueryClient } from "@tanstack/react-query";
 import { describe, expect, it } from "vitest";
 import {
+  acknowledgeReady,
   dispositionChoices,
+  evidenceIssue,
   storedDisposition,
   HOSTED_CLEANUP_KINDS,
   type HostedCleanupChoice,
 } from "@momo/core/features/hostedAgents/cleanup";
+import { CLEANUP_EVIDENCE_REQUIRED_NOTE } from "@momo/core/features/hostedAgents/disconnect";
 import {
   hostedConnectionQueryKey,
   hostedListQueryKey,
@@ -19,7 +22,7 @@ import {
 } from "./hostedDisconnectScope";
 
 // =============================================================================
-// #1362 HAP-UX2 — 해제 화면이 지켜야 하는 것 넷.
+// #1362 HAP-UX2 — 해제 화면이 지켜야 하는 것 다섯.
 //
 // 도는 곳은 DOM 없는 node 라 렌더를 볼 수 없다. 그래서 이 스위트가 재는 것은
 // 옆 파일(`hostedCredentialScope.test.ts`)과 같은 종류다: 캐시의 **모양**과,
@@ -28,7 +31,7 @@ import {
 // (purity 게이트가 `import.meta` 와 `process` 를 막는다) 파일을 읽을 수 있는 이쪽이
 // 그 대조를 맡는다.
 //
-// RED PROOF 넷:
+// RED PROOF 다섯:
 //
 //   ① 세 캐시가 함께 무효화된다. 하나만 빠지면 다른 탭이 폐기된 연결을 활성으로
 //      그린다.
@@ -36,6 +39,7 @@ import {
 //      사람은 자기가 적던 줄을 잃는다.
 //   ③ 컴포넌트가 쿼리 함수를 짓지 않고 아무것도 로그하지 않는다.
 //   ④ 처분 표 == migration 072 의 CHECK.
+//   ⑤ 저장이 막힌 사유는 하나뿐이고, 그 자리에 갈래가 없다 (#1488).
 // =============================================================================
 
 const WS = "00000000-0000-7000-8000-000000000001";
@@ -364,5 +368,75 @@ describe("RED PROOF ④ 처분 표는 migration 072 의 CHECK 와 같다", () =>
     expect(MIGRATION).toContain(
       "source IS DISTINCT FROM 'server_verified' OR kind = 'secret'"
     );
+  });
+});
+
+// =============================================================================
+// RED PROOF ⑤ 저장이 막힌 사유는 하나뿐이다 (#1488)
+//
+// #1403 워커가 실측한 죽은 카피의 뿌리는 카피가 아니라 **판정**이다:
+// `acknowledgeReady` 는 처분을 고르지 않은 폼을 언제나 통과시키므로(관측만 적는
+// 저장에는 막힐 것이 없다) `!ready` 인 순간 `choice` 는 절대 null 이 아니다.
+// 그러므로 `!ready` 아래에 `choice === null` 갈래를 두면 그 문장은 영원히 안
+// 보이고, 보였다면 「막힌 이유」 자리에서 「막히지 않았습니다」라고 말했을 것이다.
+//
+// 이 스위트가 판정과 소스를 한자리에서 재는 이유가 그것이다: 문장만 지우면
+// 다음 사람이 같은 갈래를 다시 적고, 판정만 재면 화면이 그 판정을 어겨도 모른다.
+// =============================================================================
+
+/** 컴포넌트 소스에서 `<p id={blockedId} …>` 의 본문만 떼어낸다. */
+function blockedCopySlot(row: string): string {
+  const open = row.indexOf("<p id={blockedId}");
+  expect(open).toBeGreaterThan(-1);
+  const close = row.indexOf("</p>", open);
+  expect(close).toBeGreaterThan(open);
+  return row.slice(open, close);
+}
+
+describe("RED PROOF ⑤ 저장이 막힌 사유는 하나뿐이고 갈래가 없다", () => {
+  const row = source("CleanupArtifactRow.tsx");
+
+  it("처분을 고르지 않은 폼은 어떤 종류에서도 저장을 막지 않는다", () => {
+    // 이것이 카피를 죽게 만든 사실이다. 여섯 종류 × 증거 네 모양 전부에서
+    // 참이어야 `!ready ⟹ choice !== null` 이 성립한다.
+    const evidences = ["", "  ", "목록에서 사라짐", "가".repeat(700)];
+    for (const kind of HOSTED_CLEANUP_KINDS) {
+      for (const evidence of evidences) {
+        expect(acknowledgeReady(kind, null, evidence)).toBe(true);
+      }
+    }
+  });
+
+  it("`!ready` 는 곧 「처분을 골랐는데 증거가 규칙을 어겼다」와 같은 말이다", () => {
+    // 화면이 내미는 처분은 전부 그 종류가 받는 것이므로(RED PROOF ④), 저장을
+    // 막는 사정은 증거 하나뿐이다. 사유 문장이 하나여도 되는 근거가 여기 있다.
+    const evidences = ["", "  ", "목록에서 사라짐", "가".repeat(700)];
+    for (const kind of HOSTED_CLEANUP_KINDS) {
+      for (const choice of dispositionChoices(kind)) {
+        for (const evidence of evidences) {
+          expect(acknowledgeReady(kind, choice.id, evidence)).toBe(
+            evidenceIssue(evidence) === null
+          );
+        }
+      }
+    }
+  });
+
+  it("사유 자리에 처분 갈래가 없다", () => {
+    // 처분으로 갈라지려면 이 슬롯이 `choice` 를 불러야 한다. 부르지 않는다면
+    // 갈래는 생길 수 없다. 삼항 자체도 함께 막는다 — 다른 이름으로 같은 갈래를
+    // 다시 세우는 길이기 때문이다.
+    const slot = blockedCopySlot(row);
+    expect(slot).not.toMatch(/\bchoice\b/);
+    expect(slot).not.toMatch(/\n\s*\?\s/);
+  });
+
+  it("사유 문장은 코어가 들고 있고 컴포넌트가 지어내지 않는다", () => {
+    expect(blockedCopySlot(row)).toContain("CLEANUP_EVIDENCE_REQUIRED_NOTE");
+    expect(CLEANUP_EVIDENCE_REQUIRED_NOTE).toBe(
+      "확인한 내용을 적어야 이 답을 기록할 수 있습니다."
+    );
+    // 지운 문장이 어디에도 되살아나지 않았다.
+    expect(row).not.toContain("처분을 고르지 않았습니다");
   });
 });

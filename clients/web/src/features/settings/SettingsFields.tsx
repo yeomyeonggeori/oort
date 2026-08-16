@@ -588,6 +588,13 @@ export function CopyButton({
  * mid-confirmation are N layers and each Esc takes the topmost one. Its handler
  * is `close`, which is the same exit 취소 uses: the reader is put back on the
  * trigger, not dropped on `document.body`.
+ *
+ * `busy` is the third state this control can be in, and it used not to exist.
+ * A form with two branches — 관측만 기록(직접 저장) / 처분 확정(이 질문) — showed
+ * the word 「저장하는 중」 on one branch and nothing at all on the other: the
+ * disposition branch had only the FORM's `aria-busy`, which is read aloud and
+ * seen by nobody. One form does not get two answers to "is it happening?", so
+ * the busy word `SaveButton` already carries is here too.
  */
 export function ConfirmButton({
   label,
@@ -597,6 +604,8 @@ export function ConfirmButton({
   question,
   confirmLabel,
   confirmDestructive = true,
+  busy,
+  busyLabel = "저장 중",
   onConfirm,
   onAskingChange,
   disabled,
@@ -649,6 +658,29 @@ export function ConfirmButton({
    * ledger, design-review M1).
    */
   confirmDestructive?: boolean;
+  /**
+   * The confirmed write is in flight.
+   *
+   * Deliberately NOT folded into `disabled`, which is what several callers do
+   * today (`disabled={offline || busy}`): the two say opposite things. `disabled`
+   * dims and means 「당신은 이걸 못 한다」; a write that is HAPPENING is not a
+   * refusal, and painting it grey kills the one progress word on the screen
+   * under `opacity-50` (#1403 리뷰 H-1, and the sibling save button in
+   * `CleanupArtifactRow` was fixed for exactly this). So `busy` swaps the word,
+   * sets `aria-busy`, and changes nothing about the paint.
+   *
+   * It still swallows the click. A second Enter during an in-flight write must
+   * not re-open the question or fire `onConfirm` again, and the guard is silent
+   * for the same reason the paint is unchanged — the house pattern is
+   * `aria-busy` + an early-return guard, never native `disabled` (which would
+   * drop focus from the very hand that just pressed Enter).
+   */
+  busy?: boolean;
+  /**
+   * The word shown while `busy`. Same default as `SaveButton`; pass the verb
+   * this button's own action deserves when 저장 is not what is happening.
+   */
+  busyLabel?: string;
   onConfirm: () => void;
   /**
    * The confirmation opened or closed. For a caller that has to quiet OTHER
@@ -686,7 +718,22 @@ export function ConfirmButton({
   // again on the very next press.
   useEscapeLayer(asking, close);
 
-  const triggerName = ariaLabel ?? (subject ? `${subject} ${label}` : undefined);
+  // The visible text carries the state, so the accessible name has to move with
+  // it — the same rule `CopyButton` follows when it becomes 복사됨. That is why
+  // the names below are BUILT FROM these two words rather than from `label` and
+  // `confirmLabel`: the row keeps its identity through the write and the verb is
+  // the only thing that changes, so a list mid-save still says WHICH row is
+  // saving without a second string having to be kept in step by hand.
+  const triggerText = busy ? busyLabel : label;
+  const confirmText = busy ? busyLabel : confirmLabel;
+  // `ariaLabel` is the one name that cannot follow: it is a whole sentence for
+  // the STOPPED action, written once by the caller. Leaving it up during the
+  // write would put "삭제" in the accessible name of a button reading 「저장 중」
+  // — the label-in-name failure (WCAG 2.5.3). It is set down for the duration
+  // and the button's own word becomes its name; a caller that needs the row to
+  // stay audible through a save passes `subject`, which does follow.
+  const rowName = subject ? `${subject} ${triggerText}` : undefined;
+  const triggerName = busy ? rowName : (ariaLabel ?? rowName);
 
   if (!asking) {
     return (
@@ -699,18 +746,24 @@ export function ConfirmButton({
         // tab order takes its `describedBy` (the blocked reason) out of reach,
         // and a person who cannot open the question also cannot hear why. Same
         // rule as SaveButton — stays focusable, announces unavailable, no-ops.
+        //
+        // Busy is NOT in that expression. It is the state this button is in
+        // right after the question closed on it (`close()` runs before
+        // `onConfirm`), so the trigger is where the reader is standing when the
+        // write goes out — and where the progress word has to appear.
         aria-disabled={disabled || undefined}
+        aria-busy={busy || undefined}
         aria-label={triggerName}
         aria-describedby={disabled ? describedBy : undefined}
         className={cn(disabled && "opacity-50")}
         onClick={() => {
-          if (disabled) return;
+          if (disabled || busy) return;
           setAsking(true);
           onAskingChange?.(true);
         }}
         data-testid={testId}
       >
-        {label}
+        {triggerText}
       </Button>
     );
   }
@@ -728,22 +781,29 @@ export function ConfirmButton({
       data-testid={testId ? `${testId}-question` : undefined}
     >
       <span className="text-meta text-ink">{question}</span>
+      {/* Confirming closes the question first, so this button is normally gone
+          by the time `busy` turns true — the trigger is what the reader is left
+          holding. It carries the same busy grammar anyway, because a caller
+          whose write is already in flight from somewhere else on the row can
+          have the question standing over it, and a confirm button that neither
+          says so nor refuses the second Enter is a duplicate write. */}
       <Button
         type="button"
         variant={confirmDestructive ? "destructive" : "default"}
         size="sm"
         aria-disabled={disabled || undefined}
-        aria-label={subject ? `${subject} ${confirmLabel}` : undefined}
+        aria-busy={busy || undefined}
+        aria-label={subject ? `${subject} ${confirmText}` : undefined}
         aria-describedby={disabled ? describedBy : undefined}
         className={cn(disabled && "opacity-50")}
         onClick={() => {
-          if (disabled) return;
+          if (disabled || busy) return;
           close();
           onConfirm();
         }}
         data-testid={testId ? `${testId}-confirm` : undefined}
       >
-        {confirmLabel}
+        {confirmText}
       </Button>
       <Button
         type="button"

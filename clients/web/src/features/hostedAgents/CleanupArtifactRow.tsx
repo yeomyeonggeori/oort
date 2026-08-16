@@ -35,6 +35,7 @@ import {
   CLEANUP_DISPOSITION_DEFER_LABEL,
   CLEANUP_DISPOSITION_LEGEND,
   CLEANUP_EVIDENCE_LABEL,
+  CLEANUP_EVIDENCE_REQUIRED_NOTE,
   CLEANUP_SAVE_LABEL,
   CLEANUP_STATUS_LEGEND,
 } from "@momo/core/features/hostedAgents/disconnect";
@@ -434,12 +435,19 @@ function AcknowledgeForm({
         />
       )}
       {/* 저장이 막힌 이유는 버튼 옆에 상시 노출된다. 죽은 버튼만 있는 화면은
-          사람에게 아무것이나 눌러 보게 만든다. */}
+          사람에게 아무것이나 눌러 보게 만든다.
+
+          사유가 하나뿐인 것은 코어가 정한 사실이다 (#1488): `acknowledgeReady` 는
+          `choice === null` 이면 **무조건 참**이므로(관측만 적는 저장에는 막힐 것이
+          없다) `!ready` 는 곧 「처분을 골랐는데 증거가 규칙을 어겼다」와 같은 말이다.
+          여기 있던 `choice === null` 갈래는 그래서 한 번도 그려진 적이 없었고,
+          그려졌다면 저장을 막는 사유 자리에서 「막히지 않았습니다」라고 말했을
+          것이다. 그 사실(관측만 기록된다)을 말하는 자리는 이미 둘 있다 — 지금
+          선택돼 있는 라디오 자신(`CLEANUP_DISPOSITION_DEFER_*`)과 증거 칸의 힌트.
+          문장은 코어가 들고 있다: 같은 거절이 화면마다 다른 말이 되지 않도록. */}
       {!ready && (
         <p id={blockedId} className="break-keep text-meta text-ink-muted">
-          {choice === null
-            ? "처분을 고르지 않았습니다. 지금 저장하면 본 것만 기록됩니다."
-            : "확인한 내용을 적어야 이 답을 기록할 수 있습니다."}
+          {CLEANUP_EVIDENCE_REQUIRED_NOTE}
         </p>
       )}
 
