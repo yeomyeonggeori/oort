@@ -445,6 +445,61 @@ mod tests {
         );
     }
 
+    /// #1466 — the operator's opt-out lands on that same pre-#1454 context,
+    /// **through the config** rather than by hand.
+    ///
+    /// The test above proves the assembler, and the assembler was never in
+    /// doubt. What is in doubt is the seam: that the flag reaches
+    /// [`SystemBlocks`] at all, and that `off` spends *no* bytes — not an empty
+    /// block, not a blank system turn — on a feature the operator switched off.
+    /// The on/off pair is asserted together so this cannot pass by the flag
+    /// being dead in both directions.
+    #[test]
+    fn the_config_opt_out_assembles_the_byte_identical_pre_protocol_context() {
+        let window = vec![
+            message(1, Some(5), Some("성재"), "@hermes 환경 만들어줘"),
+            message(2, Some(AGENT), Some("hermes"), "네, 시작할게요"),
+        ];
+        let assembled = |protocol: Option<&str>| {
+            assemble(
+                &window,
+                Uuid::from_u128(AGENT),
+                Some(Uuid::from_u128(1)),
+                "unused",
+                Some("you are hermes"),
+                SystemBlocks {
+                    now: Some("현재 시각: 2026-08-17"),
+                    report_protocol: protocol,
+                },
+                10_000,
+            )
+        };
+
+        let mut config = crate::config::WorkerConfig::for_target("postgres://x/y");
+        let on = assembled(config.report_protocol_block());
+        config.report_protocol_enabled = false;
+        let off = assembled(config.report_protocol_block());
+
+        // "Byte-identical to what it was" is spelled as the pre-#1454 call it
+        // has to match, not as a hand-copied literal.
+        let pre_1454 = assembled(None);
+        assert_eq!(
+            off.messages, pre_1454.messages,
+            "opting out must reproduce the pre-protocol context exactly"
+        );
+        assert_eq!(off.dropped_count, pre_1454.dropped_count);
+
+        assert_eq!(
+            on.messages.len(),
+            off.messages.len() + 1,
+            "the default must still cost exactly one extra system turn"
+        );
+        assert_eq!(
+            on.messages[2],
+            ChatMessage::system(crate::completion_report::REPORT_PROTOCOL_BLOCK)
+        );
+    }
+
     /// The agent's own past turns must come back as `assistant`; everyone else
     /// is a `user` line tagged with its speaker. Reverse either and the model
     /// reads its own answers as the user's words.

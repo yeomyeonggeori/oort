@@ -618,8 +618,11 @@ impl AgentWorker {
                 // #1454 — the only thing that makes a completion report
                 // possible. A model that was never told the protocol never
                 // writes a fence, and this whole producer stays a path nothing
-                // walks.
-                report_protocol: Some(completion_report::REPORT_PROTOCOL_BLOCK),
+                // walks. #1466 put that behind an operator switch
+                // (`AGENT_REPORT_PROTOCOL_ENABLED`, default on): opting out
+                // yields `None` here, which is the pre-#1454 context byte for
+                // byte rather than a turn carrying an emptied block.
+                report_protocol: self.config.report_protocol_block(),
             },
             self.config.max_context_chars,
         );

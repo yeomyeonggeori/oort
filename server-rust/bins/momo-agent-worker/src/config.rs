@@ -19,6 +19,10 @@
 //!   `WORKER_MAX_ATTEMPTS` (8), `AGENT_MODEL`, `AGENT_MAX_OUTPUT_TOKENS` (1024),
 //!   `AGENT_CONTEXT_MAX_CHARS` (24000), `PROVIDER_REQUEST_TIMEOUT_MS` (120000 —
 //!   Swift's `HermesTransport.requestTimeout` floor).
+//! * `AGENT_REPORT_PROTOCOL_ENABLED` (**1**) — the one key here that is
+//!   **default-on**, and therefore an opt-*out*: see
+//!   [`report_protocol_enabled`]. Rust-only (the Swift worker predates #1454),
+//!   so an env block shared with Swift simply ignores it.
 //!
 //! No `.env` reading and no baked-in credential: a missing DB URL is a boot
 //! error, not a silent dev default. The connection string, the bearer, and the
@@ -95,11 +99,45 @@ pub struct WorkerConfig {
     /// deployment elsewhere sets the key. Clamped to a real offset range so a
     /// fat-fingered value cannot move the agent's calendar by weeks.
     pub utc_offset_minutes: i32,
+    /// `AGENT_REPORT_PROTOCOL_ENABLED` — whether every agent turn is told the
+    /// completion-report protocol (#1454, #1466). **Default on.**
+    ///
+    /// The block is ~6 lines of system context on every turn of every agent, so
+    /// an operator running a fleet on a metered provider is entitled to weigh
+    /// that cost against a card they may not use. This is the switch; nothing
+    /// else about the feature moves. In particular the **reader** stays on: a
+    /// model that writes a fence unprompted still has it lifted out of the
+    /// visible body ([`crate::completion_report::extract`]), because the
+    /// alternative to parsing an unexpected fence is printing raw JSON into a
+    /// channel — worse than the card the operator declined.
+    pub report_protocol_enabled: bool,
 }
 
 /// Real UTC offsets run from -12:00 to +14:00.
 fn clamp_utc_offset(minutes: i32) -> i32 {
     minutes.clamp(-12 * 60, 14 * 60)
+}
+
+/// `AGENT_REPORT_PROTOCOL_ENABLED` — the #1454 protocol block's opt-out.
+///
+/// Parsed the opposite way round from [`gateway_enabled`], and for the same
+/// reason that one falls back to `worker`: **an unrecognised value must keep the
+/// shipped behaviour.** Here the shipped behaviour is on, so only an explicitly
+/// negative word turns it off. An operator who meant `0` and typed `o` would
+/// otherwise get a fleet that quietly stopped writing completion reports, and
+/// the symptom — cards simply never appear — reads as a model that ignored the
+/// protocol rather than as a config typo.
+///
+/// The negative vocabulary is the mirror of the positive one
+/// [`momo_settings::ProviderConfig::from_env`] already accepts for
+/// `AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK`, so one env block reads the same in
+/// both directions.
+fn report_protocol_enabled(raw: Option<&str>) -> bool {
+    !matches!(
+        raw.map(|value| value.trim().to_ascii_lowercase())
+            .as_deref(),
+        Some("0") | Some("false") | Some("no") | Some("off")
+    )
 }
 
 fn env(key: &str) -> Option<String> {
@@ -155,6 +193,9 @@ impl WorkerConfig {
                 "AGENT_CONTEXT_UTC_OFFSET_MINUTES",
                 540i32,
             )?),
+            report_protocol_enabled: report_protocol_enabled(
+                env("AGENT_REPORT_PROTOCOL_ENABLED").as_deref(),
+            ),
         })
     }
 
@@ -178,7 +219,22 @@ impl WorkerConfig {
             gateway_enabled: false,
             context_max_messages: momo_agent::mention::CONTEXT_WINDOW_DEFAULT,
             utc_offset_minutes: 540,
+            report_protocol_enabled: true,
         }
+    }
+
+    /// The protocol block this configuration puts in front of a turn — `None`
+    /// when the operator opted out.
+    ///
+    /// A method rather than an `if` at the call site because `None` is not
+    /// merely "the off case": it is the **pre-#1454 value**, the one
+    /// [`crate::context::assemble`] has always treated as absence, and the only
+    /// one whose output is byte-identical to the context this worker assembled
+    /// before the card existed. Spelling the off path as a value keeps that
+    /// property from depending on whoever next edits the call site.
+    pub fn report_protocol_block(&self) -> Option<&'static str> {
+        self.report_protocol_enabled
+            .then_some(crate::completion_report::REPORT_PROTOCOL_BLOCK)
     }
 }
 
@@ -275,6 +331,47 @@ mod tests {
         assert!(!gateway_enabled(Some("gatewey")));
         assert!(!gateway_enabled(Some("worker")));
         assert!(!gateway_enabled(None));
+    }
+
+    /// #1466 — the block ships **on**, and only an explicitly negative word
+    /// takes it away.
+    ///
+    /// The asymmetry with [`only_the_literal_gateway_mode_turns_the_gateway_feed_on`]
+    /// is the point: both fall back to the shipped behaviour on a typo, and the
+    /// shipped behaviour differs. Flip this parse to "only the literal `1`
+    /// keeps it" and every deployment that never heard of the key loses the
+    /// card at its next boot.
+    #[test]
+    fn the_report_protocol_ships_on_and_only_an_explicit_word_removes_it() {
+        assert!(report_protocol_enabled(None), "unset means on");
+        for off in ["0", "false", "no", "off", "  OFF  ", "False"] {
+            assert!(!report_protocol_enabled(Some(off)), "{off:?} must opt out");
+        }
+        for on in ["1", "true", "yes", "on", ""] {
+            assert!(report_protocol_enabled(Some(on)), "{on:?} must keep it on");
+        }
+        // A typo keeps the capability rather than silently removing it.
+        assert!(report_protocol_enabled(Some("offf")));
+        assert!(report_protocol_enabled(Some("disabled")));
+    }
+
+    /// Off must hand the assembler the **pre-#1454 `None`**, not a block that
+    /// happens to be empty: an empty `system` turn is still a turn, and the
+    /// acceptance criterion is byte-identical context.
+    ///
+    /// The context-level proof is
+    /// `context::tests::the_config_opt_out_assembles_the_byte_identical_pre_protocol_context`;
+    /// this is the config half of the same seam.
+    #[test]
+    fn opting_out_hands_the_assembler_the_pre_protocol_none() {
+        let mut config = WorkerConfig::for_target("postgres://x/y");
+        assert!(config.report_protocol_enabled, "the shipped default is on");
+        assert_eq!(
+            config.report_protocol_block(),
+            Some(crate::completion_report::REPORT_PROTOCOL_BLOCK)
+        );
+        config.report_protocol_enabled = false;
+        assert_eq!(config.report_protocol_block(), None);
     }
 
     /// The shipped default is the ticket's cap, already clamped to the schema's

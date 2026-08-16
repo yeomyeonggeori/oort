@@ -230,6 +230,7 @@ unlink는 provider 내부에서만 처리하고, oort app/API/DB/diagnostics/loc
 | `HOST` | 서버 | `0.0.0.0` | HTTP 바인드 호스트. |
 | `PORT` | 서버 | `8080` | HTTP 바인드 포트. **Centrifugo subscribe proxy가 `api:8080`을 콜백**하므로 변경 시 `centrifugo.json`도 맞춰야 함. |
 | `POSTGRES_HOST` | 서버/relay/worker | `localhost` | `DATABASE_URL` 미설정 시 폴백 호스트. |
+| `AGENT_REPORT_PROTOCOL_ENABLED` | worker | `1` | #1454 완료 리포트 프로토콜 블록(~6줄)을 매 턴 시스템 맥락에 싣는다. `0`이면 주입만 멈추며 파서는 그대로 — 모델이 자발적으로 쓴 펜스는 계속 본문에서 들어낸다. |
 | `LOG_LEVEL` | 서버 | (info) | 로그 레벨. |
 | `MOMO_DRIVE_BACKEND` | 서버 | (미설정) | `stub`은 verifier/local 명시 opt-in 전용이며 staging/prod/internal-host 부팅에서 거부된다. 실백엔드는 `google` 또는 `sa`. |
 | `MOMO_ARCHIVE_BACKEND` | 서버 | `drive` | ADR-0127 첨부 저장 선택. `drive`는 기존 Google/검증 stub 경로, `s3`는 S3 호환 presigned PUT/GET 경로다. 알 수 없는 값이나 불완전한 S3 자격은 `UnavailableDriveArchiveClient`로 fail-closed한다. |

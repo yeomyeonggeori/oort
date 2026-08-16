@@ -89,6 +89,7 @@ infra/prod/              Swift prod compose 계열(infra/prod/Dockerfile.web은 
 ## 2. 빌드 / 검증 명령 (copy-paste 그대로 실행)
 
 > 로컬 툴체인: **cargo(rustup) · Node 20+ · Docker Desktop + psql 있음**, hermes 없음. PG18+Centrifugo 런타임은 검증 가능하고, hermes 필요 경로는 실제 hermes 또는 mock OpenAI-compatible gateway를 준비한다.
+> **Rust 툴체인 — 레포에 `rust-toolchain.toml`은 없다**(#1442 판정: 신설하지 않음). 고정이 없으니 환경 기본 툴체인이 그대로 쓰이고, MSRV보다 낮으면 컴파일 이전 resolve 단계에서 거절된다. 카고 워크스페이스는 **둘**이고 MSRV가 다르다(#1442 실측): `server-rust` = **1.88.0**, `clients/desktop/src-tauri` = **1.89.0**. 둘 다 만지면 **stable ≥ 1.89.0**. edition은 양쪽 다 `2021`(마이그레이션 계획 없음).
 > npm 트리는 lockfile이 셋이다 — 루트(`packages/*`), `clients/web`, `clients/mobile`.
 
 ```bash
