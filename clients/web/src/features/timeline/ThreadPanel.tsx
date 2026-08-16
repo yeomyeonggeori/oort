@@ -1,3 +1,4 @@
+import { useCallback, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { X } from "lucide-react";
 import { fetchThreadReplies, type Message } from "@momo/core/lib/api";
@@ -49,6 +50,29 @@ export function ThreadPanel({
 
   const replies = query.data?.messages ?? [];
 
+  // 작업 세션 서랍과 동형인 키보드 탈출 (#1431 · WorkPanel.tsx openerRef/closePanel).
+  // 두 서랍은 같은 오버레이 문법인데 이 서랍만 Escape 닫기와 포커스 반환이 없어,
+  // 답글 컴포저에서 Escape가 무반응이었고 닫기 버튼을 누르면 포커스가 document.body로
+  // 떨어졌다.
+  //
+  // opener를 **첫 렌더에서** 잡는 이유: 900px 미만에서 이 패널이 채널 표면을 덮는
+  // 순간 그 표면(chat-region)이 inert가 되고, 그 안에 있던 opener(답글 앵커)가
+  // 포커스를 잃는다 — 잃기 전에 잡아야 닫을 때 되돌려 줄 수 있다.
+  const openerRef = useRef<HTMLElement | null>(null);
+  if (openerRef.current === null && typeof document !== "undefined") {
+    const active = document.activeElement;
+    openerRef.current = active instanceof HTMLElement ? active : null;
+  }
+
+  // 닫기의 유일한 경로. `onClose`가 패널을 언마운트하고(그 안에서 ChatShell이 덮개의
+  // inert를 opener.focus()보다 **먼저** 뗀다 — inert가 남아 있으면 포커스가 먹지
+  // 않는다), 그 다음 opener로 캐럿을 돌려준다. WorkPanel.closePanel과 같은 shape다.
+  const closePanel = useCallback(() => {
+    const opener = openerRef.current;
+    onClose();
+    if (opener?.isConnected) opener.focus();
+  }, [onClose]);
+
   /** Per-row actions, with this row's chips and pin state folded in. */
   const rowActions = (message: Message): MessageRowActions | undefined =>
     actions && {
@@ -70,13 +94,22 @@ export function ThreadPanel({
     <aside
       aria-label="스레드"
       data-testid="thread-panel"
+      onKeyDown={(event) => {
+        // 작업 서랍과 동형: Escape로 서랍을 닫는다 (#1431 · WorkPanel.tsx:839-852).
+        // 이 서랍은 작업 서랍의 상세/엿보기 같은 중간 단계가 없어 한 단계뿐이므로,
+        // stopPropagation 없이 곧장 닫는 WorkPanel의 마지막 분기(`closePanel()`)와
+        // 같다. 답글 컴포저는 Escape를 삼키지 않고(엔터만 가로챈다) 멘션 팝오버도
+        // 없으므로, 컴포저 안에서 누른 Escape가 여기로 올라온다.
+        if (event.key !== "Escape") return;
+        closePanel();
+      }}
       className="thread-pane flex h-full flex-col border-l border-line bg-surface"
     >
       <header className="flex items-center justify-between gap-2 border-b border-line px-4 py-2">
         <h2 className="text-body font-semibold">스레드</h2>
         <button
           type="button"
-          onClick={onClose}
+          onClick={closePanel}
           aria-label="스레드 닫기"
           data-testid="thread-close"
           className="tap-target flex size-6 items-center justify-center rounded-sm text-ink-muted hover:bg-surface-hover focus-visible:focus-ring"

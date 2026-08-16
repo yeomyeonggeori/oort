@@ -44,6 +44,10 @@
 //     expected failure: "the channel composer was squeezed to 26px"
 //   WORK_PANEL_GATE_PROVE_RED_THREAD_INERT=1 npm run gate:work-panel
 //     expected failure: "covered the channel but left it in the tab order"
+//   WORK_PANEL_GATE_PROVE_RED_THREAD_ESCAPE=1 npm run gate:work-panel
+//     expected failure: "Escape inside the reply composer did not close"
+//   WORK_PANEL_GATE_PROVE_RED_THREAD_FOCUS=1 npm run gate:work-panel
+//     expected failure: "left focus on ... instead of the control that opened it"
 //
 // red seam은 **목/드라이버의 행동만** 바꾼다. ORDER는 델타를 거꾸로 발행하고,
 // ARGS는 값 마커를 화면에 실제로 그려지는 자리(도구 이름)에 심어 "값은 절대
@@ -57,7 +61,11 @@
 // 「옛 문자열 + 옛 클램프」 둘 다여야 한다. THREAD도 같은 방식으로 스레드 패널의
 // 문턱을 600px로 되돌리고, THREAD_INERT는 드라이버가 `inert` 속성만 떼어 낸다.
 // RULER는 프로브의 글자 크기를 `!important`로 못 박아(작성자 선언이 인라인을
-// 이긴다) 「효과에서 한 번만 복사한 자」를 그 자리에 되돌린다.
+// 이긴다) 「효과에서 한 번만 복사한 자」를 그 자리에 되돌린다. THREAD_ESCAPE는
+// window 캡처 단계에서 Escape를 삼켜(핸들러 없던 때처럼) 서랍이 닫히지 않게 하고,
+// THREAD_FOCUS는 닫힌 뒤 활성 요소를 blur해(포커스 반환 없던 때처럼) 캐럿을
+// document.body로 떨어뜨린다 — 둘 다 제품이 아니라 드라이버가 #1431 수리 이전의
+// **행동**을 그 자리에 되돌린다.
 // 제품 소스 줄을 지우거나 단언을 빼라고 요구하지 않으므로 증명은 반복 가능하다.
 
 import { spawn } from "node:child_process";
@@ -87,6 +95,10 @@ const proveRedPlaceholder =
 const proveRedThread = process.env.WORK_PANEL_GATE_PROVE_RED_THREAD === "1";
 const proveRedThreadInert =
   process.env.WORK_PANEL_GATE_PROVE_RED_THREAD_INERT === "1";
+const proveRedThreadEscape =
+  process.env.WORK_PANEL_GATE_PROVE_RED_THREAD_ESCAPE === "1";
+const proveRedThreadFocus =
+  process.env.WORK_PANEL_GATE_PROVE_RED_THREAD_FOCUS === "1";
 const proveRedClause = process.env.WORK_PANEL_GATE_PROVE_RED_CLAUSE === "1";
 const proveRedKeepAll = process.env.WORK_PANEL_GATE_PROVE_RED_KEEPALL === "1";
 const proveRedRuler = process.env.WORK_PANEL_GATE_PROVE_RED_RULER === "1";
@@ -1356,6 +1368,64 @@ async function exerciseThreadPaneNarrow(browser, width) {
     );
   }
 
+  // 5. 키보드 탈출 패리티 (#1431). 두 서랍은 위에서 잰 바로 그 오버레이 문법을
+  //    공유하는데(같은 900px 문턱 · 같은 inert 덮개), 탈출에서만 갈라졌다: 작업
+  //    서랍은 Escape 닫기(WorkPanel onKeyDown)와 포커스 반환(closePanel + ChatShell
+  //    inert 제거)이 있고, 스레드 서랍은 둘 다 없어 답글 컴포저에서 Escape가
+  //    무반응이었고 닫기 버튼을 누르면 캐럿이 document.body로 떨어졌다. 이
+  //    구간(600~899px)이 #1421이 오버레이로 넓힌, 데스크톱 키보드 사용자가 실제로
+  //    사는 폭이라 그 갈라짐이 여기서 물린다.
+
+  // 5a. 답글 컴포저 안에서 누른 Escape가 서랍을 닫는다.
+  //     red seam: window 캡처 단계에서 Escape를 삼켜 aside 핸들러에 닿지 못하게 —
+  //     즉 핸들러가 없던 수리 이전으로 되돌린다. 짝 단언이 서랍이 열린 채 남는
+  //     것을 잡는다.
+  if (proveRedThreadEscape) {
+    await page.evaluate(() => {
+      window.addEventListener(
+        "keydown",
+        (event) => {
+          if (event.key === "Escape") event.stopImmediatePropagation();
+        },
+        true
+      );
+    });
+  }
+  await page.getByTestId("thread-composer-input").focus();
+  await page.keyboard.press("Escape");
+  try {
+    await page
+      .getByTestId("thread-panel")
+      .waitFor({ state: "detached", timeout: 3_000 });
+  } catch {
+    throw new Error(
+      `thread-pane-${width}: Escape inside the reply composer did not close the thread drawer. The 작업 세션 drawer closes on Escape (WorkPanel onKeyDown); this drawer shares the same overlay grammar and has to be its homolog, or a keyboard reader who stepped in to read a thread has no key that steps back out (#1431).`
+    );
+  }
+
+  // 5b. 닫기 버튼이 서랍을 연 컨트롤(답글 앵커)로 포커스를 되돌린다 — body가 아니라.
+  //     앵커는 덮개(chat-region)가 inert로 만든 표면 안에 살아, 서랍이 닫히며
+  //     ChatShell이 inert를 먼저 떼야 focus()가 먹는다.
+  //     red seam: 닫은 뒤 활성 요소를 blur해 포커스 반환이 없던 수리 이전으로
+  //     되돌린다 — 캐럿이 document.body로 떨어진다.
+  await page.getByTestId("thread-anchor").first().click();
+  await page.getByTestId("thread-panel").waitFor();
+  await page.getByTestId("thread-close").click();
+  await page.getByTestId("thread-panel").waitFor({ state: "detached" });
+  if (proveRedThreadFocus) {
+    await page.evaluate(() => document.activeElement?.blur());
+  }
+  const restored = await page.evaluate(
+    () => document.activeElement?.getAttribute?.("data-testid") ?? null
+  );
+  if (restored !== "thread-anchor") {
+    throw new Error(
+      `thread-pane-${width}: closing the thread drawer left focus on ${
+        restored ?? "document.body"
+      } instead of the control that opened it. The 작업 세션 drawer hands the caret back to its opener (WorkPanel closePanel + ChatShell inert removal); this drawer has to do the same, or the next Tab starts at the top of the document (#1431).`
+    );
+  }
+
   await context.close();
 }
 
@@ -1879,7 +1949,14 @@ async function main() {
   console.log(
     "           with it, and both composers stay above their floor at 600,"
   );
-  console.log("           700 and 899px.");
+  console.log("           700 and 899px. In that same band the thread drawer escapes");
+  console.log(
+    "           by keyboard like the 작업 세션 drawer: Escape inside the reply"
+  );
+  console.log(
+    "           composer closes it, and the close button hands the caret back to"
+  );
+  console.log("           the control that opened it rather than dropping it on body.");
 }
 
 main().catch((error) => {

@@ -74,6 +74,13 @@ import { cn } from "@/design/lib/cn";
 // that the existing not-found result is the honest answer this client has.
 const WORK_THREAD_ROOT_PAGE_LIMIT = 25;
 
+// 서랍이 채널 표면 **옆 열**에서 표면 **위 오버레이**로 바뀌는 문턱 (#1421). 이
+// 값은 tokens.css의 `work-pane`/`thread-pane`가 절대 배치로 넘어가는 폭과 **같아야**
+// 한다 — 스타일시트가 덮개로 만든 폭과 스크립트가 탭 순서에서 빼는(`inert`) 폭이
+// 어긋나면 화면에 없는 컨트롤로 Tab이 걸어 들어간다. 한 곳에만 적어 다음 사람이
+// 한쪽만 옮기지 못하게 한다 (#1421 N1).
+const DRAWER_OVERLAY_QUERY = "(width < 900px)";
+
 export function ChatShell() {
   const { session, workspaceId, realtime, connStatus } = useSession();
   const isOffline = useOffline();
@@ -556,11 +563,11 @@ export function ChatShell() {
     () =>
       typeof window !== "undefined" &&
       typeof window.matchMedia === "function" &&
-      window.matchMedia("(width < 900px)").matches
+      window.matchMedia(DRAWER_OVERLAY_QUERY).matches
   );
   useEffect(() => {
     if (typeof window === "undefined" || !window.matchMedia) return;
-    const query = window.matchMedia("(width < 900px)");
+    const query = window.matchMedia(DRAWER_OVERLAY_QUERY);
     const sync = () => setDrawerWidth(query.matches);
     sync();
     query.addEventListener("change", sync);
@@ -976,7 +983,15 @@ export function ChatShell() {
             onDeleteMessage: timeline.deleteMessage,
           }}
           onOpenWorkSession={openWorkSession}
-          onClose={() => setThread(null)}
+          onClose={() => {
+            // 작업 패널의 onClose와 같은 이유 (#1431 · 아래 993-1004 주석): 이 서랍이
+            // 덮어 `inert`로 만든 표면(chat-region) 안에 opener(답글 앵커)가 산다.
+            // ThreadPanel.closePanel은 onClose() 뒤에 opener.focus()를 부르는데,
+            // React는 언마운트 커밋 전까지 속성을 떼지 않으므로 그 focus()보다 먼저
+            // 여기서 뗀다. `covered` 효과가 다시 맞춘다(뗄 게 없으면 no-op).
+            coveredRef.current?.removeAttribute("inert");
+            setThread(null);
+          }}
         />
       )}
 
