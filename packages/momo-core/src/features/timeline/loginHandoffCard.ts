@@ -142,9 +142,21 @@ export const LOGIN_HANDOFF_TITLE = "로그인 핸드오프 요청";
 export const LOGIN_HANDOFF_DEPLOYMENT_COPY =
   "이 배포에서는 아직 화면 전송이 준비되지 않아, 채팅에서 화면을 여는 동선이 없습니다. 세션 화면을 연 뒤 개입을 마쳤다면 여기서 재개를 누르세요.";
 
-/** 지금 누군가 이 세션 화면을 잡고 있을 때. 사고가 아니라 때의 문제다. */
-export const LOGIN_HANDOFF_IN_CONTROL_COPY =
-  "지금 이 세션 화면을 직접 조작하는 사람이 있습니다. 조작이 끝나면 여기서 재개하거나 중단할 수 있습니다.";
+/**
+ * 지금 누군가 이 세션 화면을 잡고 있다는 **사실 한 문장**. 사고가 아니라 때의
+ * 문제다.
+ *
+ * 뒤따르는 문장(「여기서 재개하거나 중단할 수 있습니다」)과 갈라 두는 이유는
+ * 그 문장이 **결정 동선이 있는 표면에서만 참**이기 때문이다. 폰은 그 동선을
+ * 갖지 않기로 한 표면이고(안내 동선), 그래서 앞 판의 폰은 이 첫 문장을 손으로
+ * 다시 적어 두었다 — 같은 낱말을 두 곳에서 관리하면 둘 중 하나가 낡는다.
+ * 부분열을 손으로 베끼는 대신 **자를 곳을 코어가 정한다**.
+ */
+export const LOGIN_HANDOFF_IN_CONTROL_LEAD =
+  "지금 이 세션 화면을 직접 조작하는 사람이 있습니다.";
+
+/** 결정 동선이 있는 표면이 말할 것: 사실 한 문장 + 다음에 할 수 있는 일. */
+export const LOGIN_HANDOFF_IN_CONTROL_COPY = `${LOGIN_HANDOFF_IN_CONTROL_LEAD} 조작이 끝나면 여기서 재개하거나 중단할 수 있습니다.`;
 
 /** 폰처럼 결정 동선이 없는 표면이 말할 문장. */
 export const LOGIN_HANDOFF_ELSEWHERE_COPY =
@@ -190,6 +202,46 @@ export const LOGIN_HANDOFF_PHASE_LABEL: Readonly<
 /** 대기 중인 카드가 사람에게 무엇을 부탁하는지. */
 export const LOGIN_HANDOFF_WAITING_COPY =
   "에이전트가 멈춰서 사람을 기다립니다. 비밀번호는 에이전트에게 전달되지 않고, 사람이 세션 화면에 직접 넣습니다.";
+
+/**
+ * 사람이 run 을 멈췄을 때(`stopped`) 카드가 말하는 것. **두 문장이고, 둘째는
+ * 조건부다.**
+ *
+ *   * `cancelled` — 승인 원장이 답한 사실이라 언제나 참이다. 「대기 중이던」이
+ *     붙어 있는 이유는 `REJECT_CONFIRM` 에 붙어 있는 이유와 같다: 취소 UPDATE 가
+ *     `WHERE status='awaiting_approval'` 로 가드돼 있어, hold 를 이미 떠난 run 은
+ *     취소 대상이 아니다.
+ *   * `neverStarted` — **창이 열린 적이 없을 때만** 참이다.
+ *
+ * 둘을 한 리터럴로 붙이면 이 모듈이 명시적으로 허용한 갈래에서 거짓이 된다.
+ * `stopped` 은 승인 축의 낱말이고(`loginHandoffStateFor`: rejected|cancelled)
+ * 창 축과 독립이다 — 「창이 닫힌 뒤 run 을 멈춰도 멈춘 것이 이긴다」가 그
+ * 조합을 시험으로 고정해 두었다. 그 카드에는 정지 시각 행이 자기 윗줄에 서 있고,
+ * 아랫줄이 「개입은 시작되지 않았습니다」라고 말하면 한 카드가 자기 자신과
+ * 싸운다.
+ */
+export const LOGIN_HANDOFF_STOPPED_COPY = {
+  /** 승인 원장이 답한 사실. 창이 있었든 없었든 참이다. */
+  cancelled: "대기 중이던 실행이 취소됐습니다.",
+  /** 창이 열린 적이 없을 때만 참인 문장. */
+  neverStarted: "개입은 시작되지 않았습니다.",
+} as const;
+
+/**
+ * 멈춘 카드가 말할 문장. 판정이 코어에 있는 이유는 낱말이 코어에 있는 이유와
+ * 같다 — 조건을 두 클라가 각자 적으면 한쪽만 고쳐진다.
+ *
+ * 창이 있었으면 둘째 문장을 붙이지 않는다: 경계 행(정지 시각·재개 시각)이 이미
+ * 사실을 말하고 있고, 화면에 서 있는 사실을 바로 아래 문장이 부정하는 것보다
+ * 나쁜 카피는 없다.
+ */
+export function loginHandoffStoppedCopy(
+  card: Pick<LoginHandoffCard, "control">
+): string {
+  return card.control === null
+    ? `${LOGIN_HANDOFF_STOPPED_COPY.cancelled} ${LOGIN_HANDOFF_STOPPED_COPY.neverStarted}`
+    : LOGIN_HANDOFF_STOPPED_COPY.cancelled;
+}
 
 /**
  * 이 카드의 두 결정이 부르는 이름.

@@ -7,16 +7,19 @@ import {
   LOGIN_HANDOFF_DEPLOYMENT_COPY,
   LOGIN_HANDOFF_ELSEWHERE_COPY,
   LOGIN_HANDOFF_IN_CONTROL_COPY,
+  LOGIN_HANDOFF_IN_CONTROL_LEAD,
   LOGIN_HANDOFF_KIND,
   LOGIN_HANDOFF_OFFLINE_COPY,
   LOGIN_HANDOFF_OUTCOME_DETAIL,
   LOGIN_HANDOFF_OUTCOME_LABEL,
   LOGIN_HANDOFF_PHASE_LABEL,
+  LOGIN_HANDOFF_STOPPED_COPY,
   LOGIN_HANDOFF_TITLE,
   LOGIN_HANDOFF_WAITING_COPY,
   loginHandoffCard,
   loginHandoffNote,
   loginHandoffStateFor,
+  loginHandoffStoppedCopy,
   parseLoginHandoffControl,
   parseLoginHandoffOutcome,
   type LoginHandoffNoteInput,
@@ -370,18 +373,85 @@ describe("컨트롤 대신 서는 줄", () => {
   });
 });
 
+describe("멈춘 카드가 말하는 것", () => {
+  it("창이 열린 적이 없으면 개입이 시작되지 않았다고 말한다", () => {
+    expect(loginHandoffStoppedCopy({ control: null })).toBe(
+      `${LOGIN_HANDOFF_STOPPED_COPY.cancelled} ${LOGIN_HANDOFF_STOPPED_COPY.neverStarted}`
+    );
+  });
+
+  it("창이 있었으면 개입이 없었다고 말하지 않는다", () => {
+    // 이 모듈이 **명시적으로 허용한** 갈래다: 「창이 닫힌 뒤 run 을 멈춰도 멈춘
+    // 것이 이긴다」. 그 카드는 자기 화면 윗줄에 정지 시각 행을 세워 두고 있고,
+    // 아랫줄이 그것을 부정하면 한 카드가 자기 자신과 싸운다.
+    for (const control of [
+      { startedAtMs: 1_000, endedAtMs: null, endReason: null },
+      {
+        startedAtMs: 1_000,
+        endedAtMs: 2_000,
+        endReason: "returned" as LoginHandoffOutcome,
+      },
+    ]) {
+      const text = loginHandoffStoppedCopy({ control });
+      expect(text).toBe(LOGIN_HANDOFF_STOPPED_COPY.cancelled);
+      expect(text).not.toContain(LOGIN_HANDOFF_STOPPED_COPY.neverStarted);
+    }
+  });
+
+  it("코어가 세우는 stopped 카드와 실제로 짝을 이룬다", () => {
+    // 합성한 입력이 아니라 파서가 만든 카드로 잰다. 갈래가 도달 불가능하면
+    // 위의 두 시험은 아무것도 지키지 않는다.
+    const card = loginHandoffCard(
+      message({
+        approval_status: "rejected",
+        control_started_at_ms: 1_760_000_100_000,
+        control_ended_at_ms: 1_760_000_200_000,
+        control_end_reason: "returned",
+      }).props
+    );
+    expect(card?.phase).toBe("stopped");
+    expect(card?.control).not.toBeNull();
+    expect(loginHandoffStoppedCopy(card!)).toBe(
+      LOGIN_HANDOFF_STOPPED_COPY.cancelled
+    );
+  });
+
+  it("창 없이 멈춘 카드는 두 문장을 다 말한다", () => {
+    const card = loginHandoffCard(
+      message({ approval_status: "cancelled" }).props
+    );
+    expect(card?.phase).toBe("stopped");
+    expect(card?.control).toBeNull();
+    expect(loginHandoffStoppedCopy(card!)).toContain(
+      LOGIN_HANDOFF_STOPPED_COPY.neverStarted
+    );
+  });
+});
+
 describe("문구", () => {
   const ALL_COPY = [
     LOGIN_HANDOFF_DEPLOYMENT_COPY,
     LOGIN_HANDOFF_IN_CONTROL_COPY,
+    LOGIN_HANDOFF_IN_CONTROL_LEAD,
     LOGIN_HANDOFF_ELSEWHERE_COPY,
     LOGIN_HANDOFF_OFFLINE_COPY,
     LOGIN_HANDOFF_WAITING_COPY,
     LOGIN_HANDOFF_TITLE,
+    ...Object.values(LOGIN_HANDOFF_STOPPED_COPY),
     ...Object.values(LOGIN_HANDOFF_OUTCOME_LABEL),
     ...Object.values(LOGIN_HANDOFF_OUTCOME_DETAIL),
     ...Object.values(LOGIN_HANDOFF_PHASE_LABEL),
   ];
+
+  it("in-control 문장은 사실 한 문장 위에 결정 동선을 얹은 것이다", () => {
+    // 폰이 부분열을 손으로 베끼지 않으려면 자를 곳이 코어에 있어야 한다.
+    expect(LOGIN_HANDOFF_IN_CONTROL_COPY.startsWith(
+      LOGIN_HANDOFF_IN_CONTROL_LEAD
+    )).toBe(true);
+    // 사실 문장만은 결정 동선이 없는 표면에서도 참이어야 한다.
+    expect(LOGIN_HANDOFF_IN_CONTROL_LEAD).not.toMatch(/재개|중단/);
+    expect(LOGIN_HANDOFF_IN_CONTROL_COPY).toMatch(/재개하거나 중단할 수/);
+  });
 
   it("인수라고 말하지 않는다 (ADR-0004 증보 3 D1)", () => {
     for (const text of ALL_COPY) expect(text).not.toContain("인수");

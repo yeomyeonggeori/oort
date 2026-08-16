@@ -86,9 +86,11 @@ import {
 } from '@momo/core/features/timeline/approvalNote';
 import {
   LOGIN_HANDOFF_ELSEWHERE_COPY,
+  LOGIN_HANDOFF_IN_CONTROL_LEAD,
   LOGIN_HANDOFF_OUTCOME_DETAIL,
   LOGIN_HANDOFF_WAITING_COPY,
   loginHandoffStatusLabel,
+  loginHandoffStoppedCopy,
   type LoginHandoffCard,
 } from '@momo/core/features/timeline/loginHandoffCard';
 import {QuoteBlock, quoteAccessibilityPhrase} from './Quote';
@@ -700,10 +702,14 @@ function LoginHandoffCardView({
         </Text>
       ) : null}
       {underControl ? (
+        // 코어의 **사실 한 문장**만 든다. 전문의 둘째 문장(「여기서 재개하거나
+        // 중단할 수 있습니다」)은 결정 동선이 있는 표면에서만 참이라 이 화면에서
+        // 거짓이고, 그렇다고 손으로 베끼면 같은 낱말이 두 곳에서 늙는다 —
+        // 자를 곳을 코어가 정한다 (design-review M1).
         <Text
           style={[styles.cardNote, noteStyle.blocked]}
           testID="card-handoff-in-control">
-          지금 이 세션 화면을 직접 조작하는 사람이 있습니다.
+          {LOGIN_HANDOFF_IN_CONTROL_LEAD}
         </Text>
       ) : null}
       {card.outcome !== null ? (
@@ -712,8 +718,11 @@ function LoginHandoffCardView({
         </Text>
       ) : null}
       {card.phase === 'stopped' ? (
+        // 문장도 조건도 코어가 답한다 (design-review H2·M1). 창이 있었던
+        // stopped 카드에서 「개입은 시작되지 않았습니다」는 바로 윗줄의 경계 행
+        // (정지 시각)과 모순된다.
         <Text style={styles.cardNote} testID="card-handoff-stopped">
-          대기 중이던 실행이 취소됐습니다. 개입은 시작되지 않았습니다.
+          {loginHandoffStoppedCopy(card)}
         </Text>
       ) : null}
       {/* 안내는 **대기 중일 때만** 선다. 끝난 카드에 「데스크톱에서 하세요」를

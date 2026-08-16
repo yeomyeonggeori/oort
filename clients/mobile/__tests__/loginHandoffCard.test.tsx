@@ -5,9 +5,13 @@ import {
   LOGIN_HANDOFF_DECISION,
   LOGIN_HANDOFF_DEPLOYMENT_COPY,
   LOGIN_HANDOFF_ELSEWHERE_COPY,
+  LOGIN_HANDOFF_IN_CONTROL_COPY,
+  LOGIN_HANDOFF_IN_CONTROL_LEAD,
   LOGIN_HANDOFF_KIND,
   LOGIN_HANDOFF_OUTCOME_DETAIL,
+  LOGIN_HANDOFF_STOPPED_COPY,
   loginHandoffStatusLabel,
+  loginHandoffStoppedCopy,
 } from '@momo/core/features/timeline/loginHandoffCard';
 import type {Message} from '@momo/core/lib/api';
 
@@ -142,6 +146,37 @@ describe('폰은 그리되 결정하지 않는다', () => {
     // 폰이 그 세 값을 실제로 그리는 자리가 있다는 것까지.
     expect(MESSAGE_ROW_CODE).toContain('card-handoff-boundary');
     expect(MESSAGE_ROW_CODE).toContain('card-handoff-outcome');
+  });
+
+  it('in-control 한 줄을 부분열로 다시 쓰지 않는다', () => {
+    // 폰은 결정 동선이 없으므로 코어의 **전문**을 쓸 수 없다(「여기서 재개하거나
+    // 중단할 수 있습니다」가 이 화면에서 거짓이다). 그래서 앞 판은 첫 문장만
+    // 손으로 베껴 두었고, 그 순간 같은 낱말이 두 곳에서 늙기 시작했다. 자를
+    // 곳은 코어가 정한다(`LOGIN_HANDOFF_IN_CONTROL_LEAD`).
+    expect(MESSAGE_ROW_CODE).not.toContain(LOGIN_HANDOFF_IN_CONTROL_LEAD);
+    expect(MESSAGE_ROW_CODE).not.toContain(LOGIN_HANDOFF_IN_CONTROL_COPY);
+    expect(MESSAGE_ROW_CODE).toContain('LOGIN_HANDOFF_IN_CONTROL_LEAD');
+  });
+
+  it('멈춘 카드의 문장도 조건도 코어에서 온다', () => {
+    // 웹과 폰이 각자 적고 있던 두 문장이고, 그래서 코어가 명시적으로 허용한
+    // 갈래(`stopped` + 창 기록 있음)에서 **두 화면이 같은 거짓말을 두 번** 했다.
+    for (const sentence of Object.values(LOGIN_HANDOFF_STOPPED_COPY)) {
+      expect(MESSAGE_ROW_CODE).not.toContain(sentence);
+    }
+    expect(MESSAGE_ROW_CODE).toContain('loginHandoffStoppedCopy(card)');
+    // 그리고 그 조건이 실제로 이 카드에서 갈린다.
+    const card = agentCardModel(
+      handoffMessage({
+        approval_status: 'rejected',
+        control_started_at_ms: 1_760_000_100_000,
+      }),
+    );
+    if (card?.kind !== 'login_handoff') throw new Error('login handoff card');
+    expect(card.phase).toBe('stopped');
+    expect(loginHandoffStoppedCopy(card)).not.toContain(
+      LOGIN_HANDOFF_STOPPED_COPY.neverStarted,
+    );
   });
 
   it('세션 id 를 문자로 그리지 않는다', () => {

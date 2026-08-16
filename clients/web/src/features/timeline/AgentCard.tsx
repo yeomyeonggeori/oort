@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Check, KeyRound, ShieldQuestion, Terminal, Zap } from "lucide-react";
+import { Button } from "@/design/ui/button";
 import { cn } from "@/design/lib/cn";
 import { useOffline } from "@/features/common/useOffline";
 import { memberFor, type Directory } from "@/features/workspace/useWorkspace";
@@ -32,6 +33,7 @@ import {
   LOGIN_HANDOFF_OUTCOME_DETAIL,
   LOGIN_HANDOFF_WAITING_COPY,
   loginHandoffNote,
+  loginHandoffStoppedCopy,
   type LoginHandoffCard,
   type LoginHandoffNote,
 } from "@momo/core/features/timeline/loginHandoffCard";
@@ -414,6 +416,12 @@ function LoginHandoffBody({
   const decidedAtMs = local?.decidedAtMs ?? card.decidedAtMs;
   const decidedBy = decidedById ? memberFor(directory, decidedById) : null;
 
+  // note 슬롯에 설 수 있는 두 조각. 이름을 붙여 두는 이유는 래퍼가 이 둘의 합을
+  // 조건으로 져야 하기 때문이다 (아래 `note=`).
+  const showDeployment = !settled;
+  const showOpenSession =
+    card.sessionId !== null && onOpenWorkSession !== undefined;
+
   const note = loginHandoffNote({
     receiptNote: local?.note ?? null,
     hasTarget: card.approvalId !== null,
@@ -438,27 +446,38 @@ function LoginHandoffBody({
       onApprove={() => setArmed("approve")}
       onReject={() => setArmed("reject")}
       detail={card.detail}
+      // 슬롯 **자체가** 조건을 진다 (design-review L1). 안의 두 조각이 모두
+      // 조건부인데 래퍼만 무조건이면, 끝난 카드에 세션 딥링크까지 없을 때
+      // `border-t` 와 `py-2` 만 남아 아무것도 말하지 않는 띠가 선다 — 카드에
+      // 한 줄이 더 있다고 읽히는데 읽을 것이 없다.
       note={
-        <div className="border-t border-line px-3 py-2">
-          {!settled && (
-            <p
-              className="text-meta text-ink-muted"
-              data-testid="handoff-deployment"
-            >
-              {LOGIN_HANDOFF_DEPLOYMENT_COPY}
-            </p>
-          )}
-          {card.sessionId !== null && onOpenWorkSession !== undefined && (
-            <button
-              type="button"
-              data-testid="handoff-open-session"
-              className="mt-2 h-control-sm rounded-sm border border-line px-3 text-meta font-medium text-accent hover:bg-surface-hover focus-visible:focus-ring"
-              onClick={() => onOpenWorkSession(card.sessionId!)}
-            >
-              작업 세션 열기
-            </button>
-          )}
-        </div>
+        showDeployment || showOpenSession ? (
+          <div className="border-t border-line px-3 py-2">
+            {showDeployment && (
+              <p
+                className="text-meta text-ink-muted"
+                data-testid="handoff-deployment"
+              >
+                {LOGIN_HANDOFF_DEPLOYMENT_COPY}
+              </p>
+            )}
+            {showOpenSession && (
+              // 수제 컨트롤이었다 (design-review H1): 경계가 `--line` 이라
+              // surface 위 1.32/1.43:1 로 WCAG 1.4.11 의 3:1 에 못 미쳤다.
+              // `outline` 변형이 같은 모양으로 `--line-strong`(3.59/3.56:1)을
+              // 들고 있고, 프리미티브에 없어서 남긴 것은 위 여백 하나뿐이다.
+              <Button
+                variant="outline"
+                size="sm"
+                className="mt-2"
+                data-testid="handoff-open-session"
+                onClick={() => onOpenWorkSession?.(card.sessionId!)}
+              >
+                작업 세션 열기
+              </Button>
+            )}
+          </div>
+        ) : null
       }
       footer={
         note !== null ? (
@@ -530,8 +549,12 @@ function LoginHandoffBody({
       {card.phase === "stopped" && (
         <LabeledRow label="결과" testId="handoff-stopped">
           {/* 「실패」가 아니다. 사람이 멈춘 것은 사고가 아니므로 danger를 입지
-              않는다 (ADR-0132의 규칙, 침묵과 같은 계열). */}
-          대기 중이던 실행이 취소됐습니다. 개입은 시작되지 않았습니다.
+              않는다 (ADR-0132의 규칙, 침묵과 같은 계열).
+
+              문장도 조건도 코어가 답한다 (design-review H2·M1). 앞 판은 두
+              문장을 인라인으로 붙여 두었고, 그래서 창이 있었던 stopped 카드에서
+              바로 윗줄의 「정지」 행과 모순됐다. */}
+          {loginHandoffStoppedCopy(card)}
         </LabeledRow>
       )}
       {settled && (decidedBy || decidedAtMs !== undefined) && (

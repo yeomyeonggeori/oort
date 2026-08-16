@@ -15,15 +15,30 @@
 //   in-control     누군가 지금 그 화면을 잡고 있다 (컨트롤이 서지 않는다)
 //   resolved       개입이 끝났다 — `expired`, 즉 「완료 불확실」
 //   stopped        사람이 run 을 멈췄다
-// 그리고 다섯째로 무장 상태(재개 확정 문장)를 찍는다. 되돌릴 수 없는 액션의
-// 확인 문구는 사진으로 읽혀야 하는 것 중 하나다.
+// 그리고 무장 상태 **둘**을 찍는다: 재개 확정과 중단 확정. 되돌릴 수 없는
+// 액션의 확인 문구는 사진으로 읽혀야 하는 것 중 하나이고, 이 카드에서 실제로
+// 무언가를 취소하는 쪽은 중단이다 — 그 문장이 사진에 없으면 증거가 반쪽이다
+// (design-review M2).
+//
+// ## 칩이 사진을 먹던 자리 (design-review M2)
+//
+// 앞 판은 촬영 **전에 한 번** 「최신 메시지로 이동」 칩을 치우고, 그다음
+// 카드마다 `scrollIntoViewIfNeeded` 를 불렀다. 그 호출이 바로 그 칩을 다시
+// 부른다: 칩은 「바닥에 있지 않다」의 함수라(`Timeline.tsx` 의 `!atBottom`)
+// 위로 스크롤하는 순간 되살아나고, 아래로 최소 이동한 카드는 뷰포트 **바닥**에
+// 착지해 그 칩과 겹쳤다. 12장 중 6장에서 카드 글자가 가려졌고, 하필 in-control
+// 카드의 blocked 줄이 그중 하나였다.
+//
+// 그래서 두 가지를 바꿨다. 카드를 **뷰포트 위쪽**에 세우고(`block: "start"`),
+// 매 장 찍기 직전에 칩과 카드의 겹침 넓이를 재서 0 이 아니면 던진다. 사람이
+// 사진을 넘겨보며 알아채야 하는 일이 아니라 스크립트가 지는 단정이다.
 //
 //   npm run build && node scripts/capture-handoff.mjs
 //   OUT_DIR=/tmp/shots node scripts/capture-handoff.mjs
 // =============================================================================
 
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
@@ -307,6 +322,83 @@ const DISABLED_IN_HANDOFF_CARDS = `(() => {
   };
 })()`;
 
+/**
+ * 「최신 메시지로 이동」 칩이 이 카드를 몇 px² 가리고 있는가.
+ *
+ * 사진은 자기가 무엇에 가려졌는지 말하지 않는다. 그래서 여기서 잰다 — 카드
+ * 사진은 페이지의 그 사각형을 그대로 뜨므로, 겹친 칩은 그대로 사진에 들어간다.
+ */
+async function chipOverlap(page, card) {
+  const jump = page.getByTestId("jump-latest");
+  if (!(await jump.isVisible().catch(() => false))) return 0;
+  const [chip, box] = await Promise.all([jump.boundingBox(), card.boundingBox()]);
+  if (chip === null || box === null) return 0;
+  const w = Math.min(chip.x + chip.width, box.x + box.width) - Math.max(chip.x, box.x);
+  const h = Math.min(chip.y + chip.height, box.y + box.height) - Math.max(chip.y, box.y);
+  return w > 0 && h > 0 ? Math.round(w * h) : 0;
+}
+
+/**
+ * 카드 한 장. 뷰포트 **위쪽**에 세우고, 칩이 가리지 않는 것을 확인한 뒤 찍는다.
+ *
+ * `scrollIntoViewIfNeeded` 를 쓰지 않는 이유가 이 함수의 전부다: 그것은 최소
+ * 이동이라 아래에 있는 카드를 뷰포트 **바닥**에 붙이고, 바닥은 칩이 사는 자리다.
+ */
+async function shootCard(page, card, path) {
+  await card.evaluate((el) =>
+    el.scrollIntoView({ block: "start", behavior: "auto" })
+  );
+  await page.waitForTimeout(400);
+  const covered = await chipOverlap(page, card);
+  if (covered > 0) {
+    throw new Error(
+      `${path}: 「최신 메시지로 이동」 칩이 카드를 ${covered}px² 가린다 ` +
+        `(이 배치가 찍으려는 것은 카드다)`
+    );
+  }
+  await card.screenshot({ path });
+  return path;
+}
+
+/** 타임라인을 바닥으로. 칩은 바닥에서 스스로 사라진다(`!atBottom`). */
+async function goToBottom(page, cards) {
+  await cards.last().scrollIntoViewIfNeeded();
+  const jump = page.getByTestId("jump-latest");
+  if (await jump.isVisible().catch(() => false)) await jump.click();
+  await page.waitForTimeout(600);
+  if (await jump.isVisible().catch(() => false)) {
+    throw new Error("바닥에 내려갔는데도 「최신 메시지로 이동」 칩이 남아 있다");
+  }
+}
+
+/**
+ * 확정 문장이 **코어의 것 그대로**인지.
+ *
+ * 문장을 이 파일에 적어 두면, 문장이 고쳐지는 날 증거 스크립트가 그 수리를
+ * 막는다(`composerCopy.test.ts` 가 게이트에 대해 같은 말을 한다). 그래서 화면에서
+ * 읽은 문장이 코어 소스 안에 있는지만 본다.
+ */
+const CORE_HANDOFF_SRC = readFileSync(
+  resolve(WEB_ROOT, "../../packages/momo-core/src/features/timeline/loginHandoffCard.ts"),
+  "utf8"
+);
+
+async function armAndShoot(page, card, testId, path) {
+  await card.evaluate((el) =>
+    el.scrollIntoView({ block: "start", behavior: "auto" })
+  );
+  await page.getByTestId(testId).first().click();
+  const confirm = page.getByTestId("handoff-confirm").first();
+  await confirm.waitFor({ state: "visible" });
+  const sentence = (await confirm.locator("span").first().innerText()).trim();
+  if (!CORE_HANDOFF_SRC.includes(sentence)) {
+    throw new Error(
+      `${path}: 확정 문장이 코어의 것이 아니다 — 화면: ${JSON.stringify(sentence)}`
+    );
+  }
+  return shootCard(page, card, path);
+}
+
 async function captureScheme(browser, scheme) {
   const shots = [];
   const context = await browser.newContext({
@@ -324,14 +416,7 @@ async function captureScheme(browser, scheme) {
     .click();
   const cards = page.locator('[data-card-kind="login_handoff"]');
   await cards.first().waitFor({ state: "visible" });
-  // 타임라인을 바닥까지 내린다. 위에 머물러 있으면 「최신 메시지로 이동」 칩이
-  // 떠서 카드 위에 겹치고, 그 칩은 이 배치가 찍으려는 것이 아니다.
-  await cards.last().scrollIntoViewIfNeeded();
-  // 칩이 남아 있으면 눌러서 바닥으로 보낸다. 「최신 메시지로 이동」은 이 배치가
-  // 찍으려는 것이 아니고, 카드 위에 겹치면 리뷰가 카드 대신 그 칩을 본다.
-  const jump = page.getByTestId("jump-latest");
-  if (await jump.isVisible().catch(() => false)) await jump.click();
-  await page.waitForTimeout(600);
+  await goToBottom(page, cards);
 
   const measured = await page.evaluate(DISABLED_IN_HANDOFF_CARDS);
   if (measured.cards !== 4) {
@@ -347,27 +432,45 @@ async function captureScheme(browser, scheme) {
   }
   console.log(`  ${scheme}: cards=${measured.cards} disabled=${measured.disabled}`);
 
-  // 카드 넷을 각각. 전체 창을 찍으면 상태 사이의 차이가 스크롤 안에 묻힌다.
-  const names = ["waiting", "in-control", "resolved-expired", "stopped"];
-  for (let i = 0; i < names.length; i += 1) {
-    const path = `${OUT_DIR}/handoff-${names[i]}-${scheme}.png`;
-    await cards.nth(i).scrollIntoViewIfNeeded();
-    await cards.nth(i).screenshot({ path });
-    shots.push(path);
-  }
-
-  // 무장 상태. 되돌릴 수 없는 액션의 확인 문장은 사진으로 읽혀야 한다.
-  await cards.first().scrollIntoViewIfNeeded();
-  await page.getByTestId("handoff-approve").first().click();
-  await page.getByTestId("handoff-confirm").first().waitFor({ state: "visible" });
-  const armed = `${OUT_DIR}/handoff-armed-${scheme}.png`;
-  await cards.first().screenshot({ path: armed });
-  shots.push(armed);
-
-  // 전체 타임라인 한 장 — 네 카드가 한 대화 안에서 어떤 밀도로 서는지.
+  // 전체 타임라인 한 장 — 네 카드가 한 대화 안에서 어떤 밀도로 서는지. **바닥에서**
+  // 찍는다: 그것이 대화가 쉬고 있는 자세이고, 거기서는 칩이 아예 없다.
   const timeline = `${OUT_DIR}/handoff-timeline-${scheme}.png`;
   await page.screenshot({ path: timeline });
   shots.push(timeline);
+
+  // 카드 넷을 각각. 전체 창을 찍으면 상태 사이의 차이가 스크롤 안에 묻힌다.
+  const names = ["waiting", "in-control", "resolved-expired", "stopped"];
+  for (let i = 0; i < names.length; i += 1) {
+    shots.push(
+      await shootCard(
+        page,
+        cards.nth(i),
+        `${OUT_DIR}/handoff-${names[i]}-${scheme}.png`
+      )
+    );
+  }
+
+  // 무장 상태 둘. 되돌릴 수 없는 액션의 확인 문장은 사진으로 읽혀야 한다.
+  shots.push(
+    await armAndShoot(
+      page,
+      cards.first(),
+      "handoff-approve",
+      `${OUT_DIR}/handoff-armed-${scheme}.png`
+    )
+  );
+  // 무장을 풀고 반대편으로. 중단은 이 카드에서 **실제로 무언가를 취소하는** 쪽이라
+  // 그 확정 문장이야말로 사진에 있어야 하는 것이다.
+  await page.getByTestId("handoff-cancel").first().click();
+  await page.getByTestId("handoff-approve").first().waitFor({ state: "visible" });
+  shots.push(
+    await armAndShoot(
+      page,
+      cards.first(),
+      "handoff-reject",
+      `${OUT_DIR}/handoff-armed-stop-${scheme}.png`
+    )
+  );
 
   await context.close();
   return shots;
