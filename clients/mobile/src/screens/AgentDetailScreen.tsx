@@ -47,6 +47,7 @@ import {
   useWorkHosts,
   useWorkSessions,
 } from '../features/agents/queries';
+import {WorkStatusBadge} from '../features/work/WorkSessionParts';
 import {useChannels, useDirectory} from '../features/workspace/queries';
 import {useSession} from '../session/useSession';
 import {openDmFailureCopy} from './SidebarScreen';
@@ -426,6 +427,20 @@ function PauseControl({
  * computer off would stop it. The sentence now comes from `sessionSurvival`,
  * which reads the host AND the session's own state, and `atRisk` (not the tier)
  * decides the colour.
+ *
+ * ## 수명주기 상태는 이 화면이 색을 고르지 않는다 (#1503)
+ *
+ * 이 행은 원장 상태를 자기 글자 스타일로 칠했고, 그 표에서 **실행 중이 초록**
+ * (`color.ok`)이었다 — 코어 역할표(`SESSION_STATUS_CLASS`)와 폰의 다른 두 표면
+ * (`WorkConsoleScreen`·`WorkSessionDetailScreen`)이 쓰는 `WorkStatusBadge` 는 같은
+ * 상태를 warn 으로 부른다. 한 원장의 한 상태가 화면에 따라 다른 낱말을 썼다.
+ *
+ * 어느 쪽이 옳은가는 #1491 이 이미 답했다: **초록은 측정을 보고하는 칩이 진다**
+ * (게이트 결과, #1441). 「지금 돌고 있다」는 측정이 아니라 진행이고, 진행에 붙는
+ * 색은 warn 이다 — 그리고 그 결정의 정본은 웹/코어 표다(momo-main 위임). 그래서
+ * 이 자리가 한 일은 「초록을 warn 으로 고치는 것」이 아니라 **두 번째 표를 지우는
+ * 것**이다. 값을 맞추면 다음에 코어가 움직이는 날 다시 갈라지고, 컴포넌트를 지나면
+ * 갈라질 표가 없다. 폰의 수명주기 색은 이제 `WorkStatusBadge` 한 곳에서만 나온다.
  */
 function SessionRow({
   session,
@@ -451,13 +466,10 @@ function SessionRow({
         <Text style={styles.sessionLabel} numberOfLines={1} ellipsizeMode="tail">
           {session.label}
         </Text>
-        <Text
-          style={[
-            styles.sessionStatus,
-            status.key === 'running' && styles.sessionStatusRunning,
-          ]}>
-          {status.label}
-        </Text>
+        <WorkStatusBadge
+          status={status}
+          testID={`agent-session-status-${session.id}`}
+        />
       </View>
       <Text style={styles.meta}>{`${session.tool} · ${location.label}`}</Text>
       <Text
@@ -550,8 +562,6 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     gap: space.sm,
   },
   sessionLabel: {fontSize: font.label, color: color.text, fontWeight: '600', flex: 1},
-  sessionStatus: {fontSize: font.meta, color: color.textMuted},
-  sessionStatusRunning: {color: color.ok, fontWeight: '600'},
   survivalWarn: {color: color.warn},
   footnote: {
     marginHorizontal: SAFE_GUTTER,

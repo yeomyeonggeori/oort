@@ -6,12 +6,16 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from '@testing-library/react-native';
 import React from 'react';
+import {StyleSheet} from 'react-native';
 
 import '../src/boot/polyfills';
 import '../src/boot/coreHost';
 
+import {FixedScheme, type ColorScheme} from '../src/design/theme';
+import {lightPalette} from '../src/design/tokens';
 import AppShell from '../src/shell/AppShell';
 import {
   __resetSessionStore,
@@ -333,16 +337,22 @@ function installFetch(overrides: RouteOverrides = {}): jest.Mock {
 
 let queryClient: QueryClient | null = null;
 
-function renderShell() {
+/**
+ * 셸 하나. `scheme` 을 주면 그 스킴에 **못 박아** 그린다 — 색을 재는 테스트만
+ * 그것을 쓴다. 스킴을 안 주면 기기가 말하는 것을 따르고(앱과 같다), 색을 재지 않는
+ * 테스트에는 그쪽이 맞다.
+ */
+function renderShell(scheme?: ColorScheme) {
   queryClient = new QueryClient({
     defaultOptions: {
       queries: {retry: false, gcTime: 0},
       mutations: {retry: false, gcTime: 0},
     },
   });
+  const shell = <AppShell member={SELF} />;
   return render(
     <QueryClientProvider client={queryClient}>
-      <AppShell member={SELF} />
+      {scheme === undefined ? shell : <FixedScheme scheme={scheme}>{shell}</FixedScheme>}
     </QueryClientProvider>,
   );
 }
@@ -366,8 +376,8 @@ afterEach(() => {
   queryClient = null;
 });
 
-async function openAgentsTab() {
-  renderShell();
+async function openAgentsTab(scheme?: ColorScheme) {
+  renderShell(scheme);
   await waitFor(() => expect(screen.getByTestId('sidebar-list')).toBeTruthy());
   fireEvent.press(screen.getByTestId('tab-agents'));
   await waitFor(() => expect(screen.getByTestId('agents-list')).toBeTruthy());
@@ -668,8 +678,8 @@ describe('재우기 / 깨우기', () => {
 });
 
 describe('what the agent is doing, and whether you can turn things off', () => {
-  async function openKimWork() {
-    await openAgentsTab();
+  async function openKimWork(scheme?: ColorScheme) {
+    await openAgentsTab(scheme);
     fireEvent.press(screen.getByTestId(`agent-row-${KIM_AGENT}`));
     await waitFor(() => expect(screen.getByTestId('agent-work-list')).toBeTruthy());
   }
@@ -739,6 +749,30 @@ describe('what the agent is doing, and whether you can turn things off', () => {
     expect(screen.getByTestId('agent-session-SESSION-CLOUD')).toHaveTextContent(
       /T3 · 클라우드/,
     );
+  });
+
+  it('세션 상태는 공용 칩이 칠한다 — 실행 중은 warn 이고 초록이 아니다 (#1503)', async () => {
+    // 이 행은 자기 글자 스타일로 상태를 칠했고 실행 중이 `color.ok`(초록)였다 —
+    // 코어 역할표와 폰의 다른 두 표면(`WorkStatusBadge`)은 같은 상태를 warn 으로
+    // 부른다. #1500 이탈 1 이 그 어긋남을 적어 두고 남겼던 자리다.
+    //
+    // 여기서 재는 것은 「그 자리가 무슨 색인가」가 아니라 **어느 표를 지나는가**다:
+    // 값이 코어 역할과 맞는지는 `workStatusTone.test.tsx` 가 코어 문자열을 잣대로
+    // 여섯 칸 전부 재고, 이 단정은 이 화면이 그 칩에 실제로 도달했는지를 잰다.
+    installFetch();
+    await openKimWork('light');
+    const ink = (sessionId: string): string => {
+      const badge = screen.getByTestId(`agent-session-status-${sessionId}`);
+      const label = within(badge).getByText(/./);
+      return String(StyleSheet.flatten(label.props.style).color);
+    };
+    await waitFor(() =>
+      expect(screen.getByTestId('agent-session-status-SESSION-APP')).toBeTruthy(),
+    );
+    expect({running: ink('SESSION-APP')}).toEqual({running: lightPalette.warn});
+    expect({running: ink('SESSION-APP')}).not.toEqual({running: lightPalette.ok});
+    // 끝난 세션은 낱말로만 말한다(#1491) — 그 결정이 이 화면에도 그대로 선다.
+    expect({done: ink('SESSION-DONE')}).toEqual({done: lightPalette.textMuted});
   });
 
   it('refuses to answer it when the host registry is not readable', async () => {
