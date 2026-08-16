@@ -287,7 +287,11 @@ function useChannelSessionReports(workspaceId: string, channelId: string) {
     enabled: channelId !== "",
     retry: false,
     staleTime: 30_000,
-    refetchInterval: LEDGER_POLL_MS,
+    // 실패한 채널은 폴링에서도 뺀다. 여기 실패의 대표가 비멤버(403)이고, 그 답은
+    // 60초 뒤에도 같다 — 재시도를 끄고 폴링을 켜 두면 끈 재시도가 분당 한 번으로
+    // 돌아올 뿐이다.
+    refetchInterval: (query) =>
+      query.state.error === null ? LEDGER_POLL_MS : false,
   });
 }
 
