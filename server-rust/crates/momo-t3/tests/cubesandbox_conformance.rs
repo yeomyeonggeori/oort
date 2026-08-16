@@ -29,6 +29,13 @@
 //!    rather than extending it (#1197 H1).
 //! 7. **`metadata` comes back polluted** with the substrate's own keys
 //!    (#1197 H3).
+//! 8. **`envVars` is a network delivery, not an environment** (#1437).
+//!    Cubelet posts it to a listener inside the guest during the create call, so
+//!    a template with nothing listening fails the *whole* create — measured on
+//!    momo-cube-host 2026-08-16 against momo's own templates, which is how
+//!    INFRA-A (#1434) was blocked. The fake reproduces both halves, including
+//!    the one that matters most: the failed create leaves **no** sandbox behind.
+//!    See [`a_template_that_cannot_receive_the_bootstrap_delivery_fails_the_whole_create`].
 //!
 //! ## What #1197 changed here, and why the fake was the bug
 //!
@@ -250,6 +257,27 @@ fn already_missing(id: &str) -> Response {
         .into_response()
 }
 
+/// The body CubeMaster wraps a failed `envVars` delivery in, verbatim
+/// (#1437, momo-cube-host 2026-08-16).
+///
+/// The code is `130497` and the sentence blames a missing annotation, but the
+/// operative half is the tail: Cubelet could not hand the material to anything
+/// inside the guest. momo's answer is the receiver in
+/// `infra/cubesandbox/bootstrap-init/`, not a code this adapter parses.
+fn init_delivery_refused() -> Response {
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(json!({
+            "code": 500,
+            "message": "CubeMaster returned error code 130497: create_time_env_vars init failed \
+                        after bounded retry; template does not carry envd support annotation: \
+                        envd init request failed: Post \"http://192.168.0.17:49983/init\": \
+                        dial tcp 192.168.0.17:49983: connect: connection refused",
+        })),
+    )
+        .into_response()
+}
+
 #[derive(Debug, Default)]
 struct FakeState {
     sandboxes: Vec<Sandbox>,
@@ -272,6 +300,13 @@ struct FakeState {
     /// semantics — modelled as one switch, because the adapter's defence against
     /// all three is the same one.
     list_ignores_filters: bool,
+    /// **Whether the template can receive `envVars` at all** (#1437).
+    ///
+    /// CubeSandbox does not put `envVars` in the guest's environment; Cubelet
+    /// posts them to `http://<sandbox>:49983/init` and needs a 2xx. `false`
+    /// reproduces the measured INFRA-A blocker — the whole create fails and, as
+    /// on the real host, **no sandbox is left behind**.
+    template_carries_init_receiver: bool,
     /// The fake's virtual clock, in seconds. Only [`FakeCube::advance`] moves
     /// it, so a lease test needs no sleeping.
     now_seconds: i64,
@@ -285,6 +320,9 @@ impl FakeCube {
     fn new() -> Self {
         FakeCube(Arc::new(Mutex::new(FakeState {
             deliver_create_response: true,
+            // momo's own templates carry `infra/cubesandbox/bootstrap-init/`;
+            // the interesting case is the one that does not.
+            template_carries_init_receiver: true,
             ..FakeState::default()
         })))
     }
@@ -422,6 +460,19 @@ async fn create_sandbox(
         return status_only(401);
     }
     state.create_bodies.push(body.clone());
+
+    // `envVars` is a *delivery* (#1437). Cubelet posts it to the guest's
+    // `:49983/init` inside this call and needs a 2xx, so a template that cannot
+    // receive it fails the whole create — and the real host leaves nothing
+    // behind when it does, which is why this returns before any sandbox is
+    // recorded.
+    let carries_env = body
+        .get("envVars")
+        .and_then(Value::as_object)
+        .is_some_and(|envs| !envs.is_empty());
+    if carries_env && !state.template_carries_init_receiver {
+        return init_delivery_refused();
+    }
 
     // No idempotency key exists upstream, so this fake never looks for one: a
     // second identical POST makes a second billable sandbox, every time.
@@ -814,6 +865,78 @@ async fn create_sends_the_documented_shape_and_nothing_it_would_swallow() {
         body.get("secure").is_none() && body.get("autoPause").is_none(),
         "named regression: `NewSandbox` has no deny_unknown_fields, so a field CubeSandbox does \
          not read is swallowed in silence and momo believes in a policy never applied"
+    );
+}
+
+/// #1437 — **`envVars` is a delivery, and a template that cannot receive it
+/// fails the whole create.**
+///
+/// This is the INFRA-A blocker (#1434) in test form. CubeSandbox posts the
+/// bootstrap material to `http://<sandbox>:49983/init` inside the create call;
+/// momo's templates answer it with
+/// `infra/cubesandbox/bootstrap-init/momo-bootstrap-init`, and a template
+/// without a receiver takes the create down with it.
+///
+/// What the assertion is really protecting is the second half: **nothing is left
+/// behind**. Measured on momo-cube-host — after the 500, the provision key
+/// matches no sandbox. If that ever changed, the adapter's reconstruction would
+/// be adopting a half-provisioned instance whose workd never got an identity,
+/// and the ledger would bill it.
+#[tokio::test]
+async fn a_template_that_cannot_receive_the_bootstrap_delivery_fails_the_whole_create() {
+    let (adapter, fake) = adapter_against_fake().await;
+    fake.lock().template_carries_init_receiver = false;
+
+    let failed = adapter.create(&spec(), "prov-1").await;
+    assert!(
+        matches!(failed, Err(CloudProviderError::UpstreamStatus(500))),
+        "a refused bootstrap delivery must surface as an honest upstream failure, got {failed:?}"
+    );
+    assert_eq!(
+        fake.live_count(),
+        0,
+        "named regression: a create that could not hand the guest its bootstrap material must \
+         leave no instance behind — an adopted half-provision is a billed host whose workd can \
+         never register"
+    );
+
+    // And the recovery is a recovery: give the template its receiver and the
+    // same provision key converges on one instance rather than a second one.
+    fake.lock().template_carries_init_receiver = true;
+    let recovered = adapter.create(&spec(), "prov-1").await.expect("create");
+    assert_eq!(fake.live_count(), 1);
+    assert_eq!(recovered.instance_id, fake.only_id());
+}
+
+/// #1437 — **a `201` is a receipt that the material reached the guest.**
+///
+/// Nothing in the adapter can verify what happened inside the microVM, so the
+/// verification has to be structural: upstream refuses the create unless the
+/// in-guest receiver acknowledged the delivery, which makes "created" and
+/// "bootstrapped" the same event rather than two hopeful ones. This pins that
+/// the four names momo depends on are the four that travel.
+#[tokio::test]
+async fn a_successful_create_is_a_receipt_that_the_bootstrap_material_was_delivered() {
+    let (adapter, fake) = adapter_against_fake().await;
+    let instance = adapter.create(&spec(), "prov-1").await.expect("create");
+
+    let delivered = fake.env_vars_of(&instance.instance_id);
+    assert_eq!(
+        delivered.keys().cloned().collect::<Vec<_>>(),
+        vec![
+            "MOMO_WORKD_DISPLAY_NAME".to_string(),
+            "MOMO_WORKD_REGISTRATION_TOKEN".to_string(),
+            "MOMO_WORKD_SERVER_URL".to_string(),
+            "MOMO_WORKD_WORKSPACE_ID".to_string(),
+        ],
+        "the receiver in infra/cubesandbox/bootstrap-init/ lands exactly these; a fifth name \
+         added here without landing it there is a variable workd never sees"
+    );
+    assert_eq!(
+        delivered
+            .get("MOMO_WORKD_REGISTRATION_TOKEN")
+            .map(String::as_str),
+        Some("one-shot-workd-token")
     );
 }
 
@@ -1677,8 +1800,8 @@ async fn an_untuned_host_gets_the_conservative_defaults() {
 // the live host — the harness that found all of this (#1197)
 // ---------------------------------------------------------------------------
 
-/// Every repair in #1197, driven by the shipping adapter against a **real
-/// CubeSandbox host**.
+/// Every repair in #1197 and #1437, driven by the shipping adapter against a
+/// **real CubeSandbox host**.
 ///
 /// The fake above is written from the measurements this test makes, so running
 /// it is how the fake is kept honest. That loop is the entire point of the
@@ -1691,16 +1814,23 @@ async fn an_untuned_host_gets_the_conservative_defaults() {
 /// ```text
 /// ssh -N -L 13000:127.0.0.1:3000 root@<cube-host> &
 /// MOMO_T3_CUBESANDBOX_LIVE_BASE_URL=http://127.0.0.1:13000 \
-/// MOMO_T3_CUBESANDBOX_LIVE_TEMPLATE=<tpl-id> \
+/// MOMO_T3_CUBESANDBOX_LIVE_TEMPLATE=<tpl-id carrying momo-bootstrap-init> \
+/// MOMO_T3_CUBESANDBOX_LIVE_TEMPLATE_WITHOUT_INIT=<tpl-id without it> \
 ///   cargo test -p momo-t3 --test cubesandbox_conformance -- --ignored live_host
 /// ```
+///
+/// `…_TEMPLATE` must carry `infra/cubesandbox/bootstrap-init/`, because the
+/// adapter always sends `envVars` and the substrate refuses a create it cannot
+/// deliver them through (#1437). `…_TEMPLATE_WITHOUT_INIT` is optional and turns
+/// on the arm that proves the refusal is honest; the run is still meaningful
+/// without it.
 ///
 /// The loopback bind is the ADR-0157 D5 hardening, so a tunnel is the intended
 /// access path rather than a workaround. Every sandbox it makes is destroyed
 /// before it returns, including on the assertion paths that matter.
 #[tokio::test]
 #[ignore = "needs MOMO_T3_CUBESANDBOX_LIVE_BASE_URL pointed at a real CubeSandbox host"]
-async fn live_host_agrees_with_the_fake_on_all_five_repairs() {
+async fn live_host_agrees_with_the_fake_on_every_repair() {
     // Skipped rather than failed when no host is configured: `--ignored` is run
     // wholesale by the gate, and a test that needs a machine nobody has stood up
     // must not turn that into a red lane. It says so out loud, because a silent
@@ -1741,8 +1871,35 @@ async fn live_host_agrees_with_the_fake_on_all_five_repairs() {
     let adapter = CubeSandboxProviderAdapter::from_env(&env).expect("configured");
     let key = format!("prov-live-{}", Uuid::new_v4());
 
-    let instance = adapter.create(&spec(), &key).await.expect("live create");
+    // --- #1437: the bootstrap delivery, on both sides of the contract ------
+    //
+    // A create carrying `envVars` only succeeds if something inside the guest
+    // answered `POST :49983/init`. So this create *is* the assertion that
+    // `momo-bootstrap-init` received the material — there is no separate
+    // "did it arrive?" question to ask, and no way to be told yes falsely.
+    let instance = adapter.create(&spec(), &key).await.expect(
+        "named regression: the adapter always sends envVars, and CubeSandbox delivers them to \
+         :49983/init inside the create call. A 500 here means the configured template does not \
+         carry infra/cubesandbox/bootstrap-init/ — that is #1434's blocker, not a flake",
+    );
     println!("live: created {}", instance.instance_id);
+
+    if let Ok(bare_template) = std::env::var("MOMO_T3_CUBESANDBOX_LIVE_TEMPLATE_WITHOUT_INIT") {
+        let mut bare_env = env.clone();
+        bare_env.insert(
+            "MOMO_T3_PROVIDER_CUBESANDBOX_IMAGE_REF".to_string(),
+            bare_template,
+        );
+        let bare = CubeSandboxProviderAdapter::from_env(&bare_env).expect("configured");
+        let refused = bare
+            .create(&spec(), &format!("prov-live-bare-{}", Uuid::new_v4()))
+            .await;
+        assert!(
+            matches!(refused, Err(CloudProviderError::UpstreamStatus(500))),
+            "a template with no /init receiver must fail the whole create rather than boot a \
+             workd with no identity, got {refused:?}"
+        );
+    }
 
     // --- 멱등: the replay finds the same sandbox on the real filter ---------
     let replay = adapter.create(&spec(), &key).await.expect("live replay");

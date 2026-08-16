@@ -1,0 +1,329 @@
+#!/usr/bin/env python3
+"""momo-bootstrap-init — the guest half of the CubeSandbox `envVars` contract.
+
+The adapter (`server-rust/crates/momo-t3/src/provider/cubesandbox.rs`) puts the
+workd bootstrap material in `envVars` on `POST /sandboxes`. CubeSandbox does not
+put that material in the guest's process environment. It **delivers it over the
+network**: Cubelet, still inside the create call, sends
+
+    POST http://<SANDBOX_IP>:49983/init HTTP/1.1
+    Content-Type: application/json
+
+    {"envVars": {"MOMO_WORKD_SERVER_URL": "...", ...}}
+
+and requires a 2xx. Measured on momo-cube-host 2026-08-16 (#1437); the substrate
+calls this the "envd init endpoint", and a template that answers nothing there
+fails the **whole create** with
+
+    500 … 130497: create_time_env_vars init failed after bounded retry;
+    template does not carry envd support annotation
+
+So this program is what a momo template runs as PID 1. It answers that one
+request, lands the material on disk, and then becomes the real workload.
+
+## Why the guest is not simply handed an environment
+
+Every other channel was measured and is closed (#1437, momo-cube-host):
+
+* `metadata` on the create body never crosses into the guest — not in PID 1's
+  environ, not on the kernel cmdline, not in DMI, not on a config drive, and
+  there is no `169.254.169.254`. A guest cannot read its own metadata, which
+  also means it cannot read anybody else's.
+* Template-baked `--env` does reach PID 1, but it is baked per *template*, and a
+  registration token is per *provision*.
+* Upstream's own envd — the daemon that would receive this same POST — is not
+  shipped with CubeSandbox and would open an exec/filesystem plane into the
+  sandbox that ADR-0157 spent a decision closing.
+
+## What this program guarantees
+
+* **One shot.** The listener is closed after the first accepted delivery, and it
+  is never reopened — not on resume (measured: pause→connect does not re-deliver).
+  Anything arriving later is refused at the TCP layer.
+* **The token never enters a process environment.** It is written to its own
+  mode-0600 file and passed on as `MOMO_WORKD_REGISTRATION_TOKEN_FILE`, which is
+  the form `infra/workd/bootstrap.sh` already prefers and the form ADR-0144
+  asks for: `/proc/<pid>/environ` is readable by anything else in the sandbox,
+  a 0600 file consumed once is not.
+* **Names are re-validated here.** CubeAPI screens env names upstream; this
+  screens them again, because the value of a check performed only on the other
+  side of a trust boundary is zero.
+
+## Boundary note (ADR-0157)
+
+Port 49983 is reachable from the host only. Measured from inside a peer sandbox:
+`49983`, the peer's exposed port, the host's CubeAPI (3000) and the host's
+CubeProxy (80/443) are all `errno=111`. CubeProxy *does* route
+`/sandbox/<id>/49983/` unauthenticated, so the host's 80/443 must stay closed to
+the internet — that is an F1 firewalld invariant, not a nicety.
+"""
+
+from __future__ import annotations
+
+import argparse
+import http.server
+import json
+import os
+import re
+import sys
+import time
+
+DEFAULT_PORT = 49983
+DEFAULT_ENV_FILE = "/etc/momo/workd.env"
+DEFAULT_TOKEN_FILE = "/etc/momo/registration.token"
+DEFAULT_TIMEOUT_SECONDS = 300
+
+TOKEN_NAME = "MOMO_WORKD_REGISTRATION_TOKEN"
+TOKEN_FILE_NAME = "MOMO_WORKD_REGISTRATION_TOKEN_FILE"
+
+NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+MAX_NAME_LENGTH = 128
+MAX_VALUE_LENGTH = 32 * 1024
+
+# Names that change how a program resolves code or splits words. CubeAPI refuses
+# these upstream; refusing them again here costs one comparison and removes the
+# trust in that refusal.
+FORBIDDEN_NAMES = frozenset(
+    {
+        "LD_PRELOAD",
+        "LD_LIBRARY_PATH",
+        "LD_ORIGIN_PATH",
+        "DYLD_INSERT_LIBRARIES",
+        "DYLD_LIBRARY_PATH",
+        "GCONV_PATH",
+        "PYTHONPATH",
+        "NODE_PATH",
+        "JAVA_TOOL_OPTIONS",
+        "_JAVA_OPTIONS",
+        "RUBYOPT",
+        "RUBYLIB",
+        "PERLLIB",
+        "CLASSPATH",
+        "IFS",
+        "PATH",
+    }
+)
+
+
+class DeliveryRejected(Exception):
+    """The body is not a delivery this program is willing to land."""
+
+
+def log(message: str) -> None:
+    """Progress only. No value from the delivery is ever printed."""
+    sys.stderr.write("[momo-bootstrap-init] %s\n" % message)
+    sys.stderr.flush()
+
+
+def parse_delivery(raw: bytes) -> dict[str, str]:
+    try:
+        document = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError) as exc:
+        raise DeliveryRejected("body is not UTF-8 JSON") from exc
+    if not isinstance(document, dict):
+        raise DeliveryRejected("body is not a JSON object")
+    env_vars = document.get("envVars")
+    if env_vars is None:
+        raise DeliveryRejected("body carries no envVars")
+    if not isinstance(env_vars, dict):
+        raise DeliveryRejected("envVars is not a JSON object")
+
+    delivered: dict[str, str] = {}
+    for name, value in env_vars.items():
+        if not isinstance(name, str) or not NAME_PATTERN.match(name):
+            raise DeliveryRejected("env var name is not a shell identifier")
+        if len(name) > MAX_NAME_LENGTH:
+            raise DeliveryRejected("env var name is too long")
+        if name in FORBIDDEN_NAMES:
+            raise DeliveryRejected("env var name is not allowed: %s" % name)
+        if not isinstance(value, str):
+            raise DeliveryRejected("env var value for %s is not a string" % name)
+        if len(value) > MAX_VALUE_LENGTH:
+            raise DeliveryRejected("env var value for %s is too long" % name)
+        if any(character < " " or character == "\x7f" for character in value):
+            raise DeliveryRejected("env var value for %s carries a control character" % name)
+        delivered[name] = value
+    if not delivered:
+        raise DeliveryRejected("envVars is empty")
+    return delivered
+
+
+def shell_quote(value: str) -> str:
+    return "'%s'" % value.replace("'", "'\\''")
+
+
+def write_private(path: str, content: str) -> None:
+    """Create-or-replace `path` as mode 0600, never leaving it briefly readable."""
+    directory = os.path.dirname(path) or "."
+    os.makedirs(directory, mode=0o700, exist_ok=True)
+    temporary = "%s.tmp" % path
+    descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        with os.fdopen(descriptor, "w") as handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+    except BaseException:
+        os.unlink(temporary)
+        raise
+    os.replace(temporary, path)
+
+
+def land(delivered: dict[str, str], env_file: str, token_file: str) -> dict[str, str]:
+    """Write the delivery to disk and return the environment the workload gets.
+
+    The token is split out of both the env file and the returned environment: it
+    lives in its own 0600 file and is named by `MOMO_WORKD_REGISTRATION_TOKEN_FILE`.
+    """
+    child_env = dict(delivered)
+    token = child_env.pop(TOKEN_NAME, None)
+    if token is not None:
+        write_private(token_file, token if token.endswith("\n") else token + "\n")
+        child_env[TOKEN_FILE_NAME] = token_file
+
+    lines = [
+        "# Written by momo-bootstrap-init from the CubeSandbox /init delivery.\n",
+        "# Per-provision material. Mode 0600. Do not copy into a process environment.\n",
+    ]
+    for name in sorted(child_env):
+        lines.append("%s=%s\n" % (name, shell_quote(child_env[name])))
+    write_private(env_file, "".join(lines))
+    return child_env
+
+
+class InitHandler(http.server.BaseHTTPRequestHandler):
+    """`POST /init` and nothing else. Every other request is refused in kind."""
+
+    protocol_version = "HTTP/1.1"
+    server_version = "momo-bootstrap-init"
+    sys_version = ""
+
+    def do_POST(self) -> None:  # noqa: N802 — BaseHTTPRequestHandler's spelling
+        if self.path.rstrip("/") not in ("/init", ""):
+            self._respond(404, {"error": "not found"})
+            return
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            self._respond(400, {"error": "bad content length"})
+            return
+        if length <= 0 or length > MAX_VALUE_LENGTH * 8:
+            self._respond(400, {"error": "bad content length"})
+            return
+        raw = self.rfile.read(length)
+        try:
+            delivered = parse_delivery(raw)
+        except DeliveryRejected as exc:
+            # The reason names the *shape* that was wrong, never the value.
+            log("delivery rejected: %s" % exc)
+            self._respond(400, {"error": str(exc)})
+            return
+
+        try:
+            self.server.child_env = land(  # type: ignore[attr-defined]
+                delivered,
+                self.server.env_file,  # type: ignore[attr-defined]
+                self.server.token_file,  # type: ignore[attr-defined]
+            )
+        except OSError as exc:
+            # Answering 200 here would tell the substrate the material landed
+            # when it did not, and create would return 201 on a lie.
+            log("delivery could not be written: %s" % exc.strerror)
+            self._respond(500, {"error": "delivery could not be written"})
+            return
+
+        self.server.delivered_names = sorted(delivered)  # type: ignore[attr-defined]
+        self._respond(200, {})
+
+    def _respond(self, code: int, payload: dict) -> None:
+        body = json.dumps(payload).encode()
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Connection", "close")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *args) -> None:
+        """Silence the default access log: the request body is the credential."""
+
+
+class InitServer(http.server.HTTPServer):
+    allow_reuse_address = True
+
+    def __init__(self, address, env_file: str, token_file: str):
+        super().__init__(address, InitHandler)
+        self.env_file = env_file
+        self.token_file = token_file
+        self.child_env: dict[str, str] | None = None
+        self.delivered_names: list[str] = []
+
+
+def receive(port: int, env_file: str, token_file: str, timeout_seconds: int) -> dict[str, str]:
+    """Serve until one delivery lands, then close the listener for good."""
+    server = InitServer(("0.0.0.0", port), env_file, token_file)
+    # A short poll rather than a blocking accept, so the deadline below is real
+    # even when nothing ever connects.
+    server.timeout = 1
+    deadline = None if timeout_seconds <= 0 else time.monotonic() + timeout_seconds
+    try:
+        while server.child_env is None:
+            server.handle_request()
+            if deadline is not None and time.monotonic() >= deadline:
+                raise TimeoutError(
+                    "no /init delivery within %ss — the substrate always delivers "
+                    "before create returns, so this means the sandbox was not created "
+                    "with envVars" % timeout_seconds
+                )
+    finally:
+        # One shot: the socket is gone whether we succeeded or failed, so a
+        # second POST meets a closed port rather than a second chance.
+        server.server_close()
+    log("delivered: %s" % ", ".join(server.delivered_names))
+    return server.child_env
+
+
+def main(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(
+        prog="momo-bootstrap-init",
+        description="Receive one CubeSandbox /init delivery, then exec the workload.",
+    )
+    parser.add_argument("--port", type=int, default=DEFAULT_PORT)
+    parser.add_argument("--env-file", default=DEFAULT_ENV_FILE)
+    parser.add_argument("--token-file", default=DEFAULT_TOKEN_FILE)
+    parser.add_argument(
+        "--timeout",
+        type=int,
+        default=DEFAULT_TIMEOUT_SECONDS,
+        help="Seconds to wait for the delivery; 0 waits forever.",
+    )
+    parser.add_argument("command", nargs=argparse.REMAINDER)
+    args = parser.parse_args(argv)
+
+    os.umask(0o077)
+    log("waiting for the /init delivery on :%d" % args.port)
+    try:
+        child_env = receive(args.port, args.env_file, args.token_file, args.timeout)
+    except TimeoutError as exc:
+        log(str(exc))
+        return 3
+    except OSError as exc:
+        log("could not listen on :%d: %s" % (args.port, exc.strerror))
+        return 4
+
+    command = [argument for argument in args.command if argument != "--"]
+    if not command:
+        return 0
+
+    environment = dict(os.environ)
+    environment.update(child_env)
+    try:
+        os.execvpe(command[0], command, environment)
+    except OSError as exc:
+        log("could not exec %s: %s" % (command[0], exc.strerror))
+        return 5
+    return 0  # unreachable: execvpe replaces this process
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
