@@ -128,7 +128,14 @@ reports** rather than picking one.
 - The X server, the desktop the agent's tools draw into, and the producer unit
   are the display-specific additions. Everything else is the ordinary workd
   template.
-- `/etc/momo/workd.env` is already written by the provisioner (`workd_env_vars`
-  in the adapter) and the producer reads the same file — the server origin and
-  the host identity are the only two things it needs, and neither is a
-  credential of the provider's (ADR-0004).
+- `/etc/momo/workd.env` is what the producer reads — the server origin and the
+  host identity are the only two things it needs, and neither is a credential of
+  the provider's (ADR-0004). **What writes that file is not the provisioner**
+  (#1437): the adapter's `workd_env_vars` are *delivered* by Cubelet to
+  `:49983/init` inside the create call, and `momo-bootstrap-init`
+  ([`infra/cubesandbox/bootstrap-init/`](../bootstrap-init/README.md)) is what
+  lands them. So this template must carry that receiver as PID 1 — and must be
+  built **without `--probe`**, because the producer legitimately does not listen
+  until the delivery arrives and no delivery happens during a template build. A
+  display template without the receiver fails *every* create with
+  `500 … 130497`; it does not start unconfigured.

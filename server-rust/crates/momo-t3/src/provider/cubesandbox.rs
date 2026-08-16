@@ -353,6 +353,40 @@ pub fn momo_metadata(value: &Value) -> BTreeMap<String, String> {
 /// `autoResume: false` is not decoration. With it true, CubeProxy resumes a
 /// paused sandbox the moment a request arrives, producing a paused→running
 /// transition that never passed through momo's durable intent (ADR-0140 D4).
+///
+/// ## `envVars` is a delivery, not an environment (#1437)
+///
+/// The field name invites the wrong model. CubeSandbox does **not** place these
+/// in the guest's process environment. Cubelet takes them and, still inside this
+/// create call, posts them to a listener in the guest:
+///
+/// ```text
+/// POST http://<SANDBOX_IP>:49983/init   {"envVars": { … }}
+/// ```
+///
+/// Measured on momo-cube-host 2026-08-16, and three consequences follow that a
+/// reader of this function would otherwise have to discover in production:
+///
+/// * **A template that answers nothing there fails the whole create**, with
+///   `500 … 130497: create_time_env_vars init failed after bounded retry;
+///   template does not carry envd support annotation`. That is not a
+///   configuration edge — it is what INFRA-A (#1434) hit against momo's own
+///   templates, because upstream's envd is not shipped and
+///   `tpl create-from-image` cannot ask for it.
+/// * **So carrying a receiver is part of momo's template contract**, and the
+///   receiver lives in the repository where it can be reviewed:
+///   `infra/cubesandbox/bootstrap-init/`. Everything else in this adapter is
+///   provider-agnostic; this one obligation crosses into the image, which is
+///   exactly why it is written down rather than assumed.
+/// * **`201` is therefore a receipt.** The material reached the guest, or this
+///   call failed and left nothing behind (measured: a create that fails this way
+///   leaves no listed sandbox — there is no orphan to reconcile and no half
+///   provision to bill). A receiver that answered `200` without landing the
+///   material would turn that receipt into a lie, which is why the shipped one
+///   answers `500` when the write fails.
+///
+/// The adapter sends the same body either way and reads no upstream error code
+/// to tell these apart, for the reason [`refusal_needs_reprobe`] gives.
 pub fn create_body(
     template_id: &str,
     idle_timeout_seconds: i64,
@@ -392,6 +426,16 @@ pub fn create_body(
 /// sandbox is the same binary an operator installs by hand, so a second spelling
 /// here would be a second contract. Nothing provider-specific is injected, and
 /// no CubeSandbox credential is: ADR-0004 keeps the operator key in this process.
+///
+/// **What these names do *not* mean here: a process environment.** See
+/// [`create_body`] — CubeSandbox delivers them to a listener inside the guest,
+/// and the guest chooses what to do with them. The receiver momo ships
+/// (`infra/cubesandbox/bootstrap-init/`) keeps
+/// `MOMO_WORKD_REGISTRATION_TOKEN` out of every process environment by landing
+/// it in a mode-0600 file and passing on `MOMO_WORKD_REGISTRATION_TOKEN_FILE`
+/// instead — the spelling `bootstrap.sh` already prefers, for the ADR-0144
+/// reason that `/proc/<pid>/environ` is readable by everything else in the
+/// sandbox.
 fn workd_env_vars(spec: &CloudInstanceSpec) -> BTreeMap<String, String> {
     BTreeMap::from([
         ("MOMO_WORKD_SERVER_URL".to_string(), spec.server_url.clone()),
