@@ -87,8 +87,8 @@ export function approvalNoteRank(tone: ApprovalNoteTone): number {
 //   ────────────────────────────────────────────────────
 //   「사람이 할 일이 남아 있다」     `--accent`   `warn`
 //     멘션 · 미읽 경계 · 대기 승인 칩 · ADE 차단 개수
-//   「지금은 정상이 아니다」         `--warn`     (없다)
-//     만료 칩 · 신호 없음 · 컴포저 오프라인
+//   「안정 상태가 아니다」          `--warn`     (없다)
+//     저하·유동 모두: 만료 칩 · 신호 없음 · 컴포저 오프라인 · thinking/streaming 턴 칩
 //
 // 그 대응은 이 배치가 발명한 것이 아니라 이미 두 번 판정된 것이다. 안읽음 경계
 // (`divider.ts` D-2: 웹 `--accent` · 폰 `warn`)와 ADE 차단 개수(`AdeSummaryLine`:
