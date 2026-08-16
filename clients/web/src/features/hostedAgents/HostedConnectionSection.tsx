@@ -498,11 +498,15 @@ function StartPanel({
           // 일어나지 않으며, 낱말과 aria-busy 가 상태를 말한다.
           //
           // 그 규율을 적어 두고도 `aria-disabled` 와 흐림을 함께 얹고 있었다
-          // (#1403 리뷰 H-1): 둘을 얹으면 낭독은 「해제하는 중, 사용 안 함」이 되고
+          // (#1403 리뷰 H-1): 둘을 얹으면 낭독은 「해제 중, 사용 안 함」이 되고
           // 유일한 진행 낱말이 opacity-50 아래에서 죽는다. 인용한 규율이 금지한
           // 바로 그 겹침이라 규율 쪽으로 맞춘다.
+          //
+          // 낱말꼴은 「명사 + 중」이다 (#1501): 한자어 동작명사(해제)가 있는 자리에
+          // 「-하는 중」을 쓰면 같은 뜻을 두 글자 더 길게 말하는 것이고, 진행 낱말은
+          // 원래 라벨을 **제자리에서** 대체하므로 그 길이가 곧 줄이 흔들리는 폭이다.
           <Button type="button" variant="destructive" size="sm" aria-busy>
-            해제하는 중
+            해제 중
           </Button>
         ) : (
           <ConfirmButton
@@ -599,7 +603,7 @@ function CleanupPanel({
 
   // 진행은 잠금이 아니다 (`States.tsx` 의 `actionBusy`: 진행 중은 `aria-busy` 와
   // 바뀐 낱말로 말하고 잠기지도 흐려지지도 않는다). 복원은 자기가 켠 `busy` 로
-  // 자신을 잠그던 자리라, 「복원하는 중」이 회색 아래에서 죽고 있었다.
+  // 자신을 잠그던 자리라, 「복원 중」이 회색 아래에서 죽고 있었다.
   const repairLocked = !repair.allowed || offline || (busy && !repairing);
   return (
     <div className="flex min-w-0 flex-col gap-3">
@@ -672,7 +676,7 @@ function CleanupPanel({
               }}
               data-testid="hosted-cleanup-repair"
             >
-              {repairing ? "복원하는 중" : MANIFEST_REPAIR_LABEL}
+              {repairing ? "복원 중" : MANIFEST_REPAIR_LABEL}
             </Button>
           }
           testId="hosted-cleanup-empty"
@@ -774,9 +778,10 @@ function TerminalPanel({
       )}
       <div className="flex flex-wrap items-center justify-end gap-2">
         {completing ? (
-          // 위 「해제하는 중」과 같은 규율, 같은 수리 (#1403 리뷰 H-1).
+          // 위 「해제 중」과 같은 규율, 같은 수리 (#1403 리뷰 H-1), 같은 낱말꼴
+          // (#1501).
           <Button type="button" variant="secondary" size="sm" aria-busy>
-            확정하는 중
+            확정 중
           </Button>
         ) : (
           <ConfirmButton

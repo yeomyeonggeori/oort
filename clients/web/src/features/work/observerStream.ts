@@ -236,7 +236,7 @@ export type ObserverFailure =
  * 2026-07-26 against the production connect-src (`'self'` plus the realtime
  * domain, which does not cover a host endpoint): the console logged the
  * refusal, the constructor threw nothing, no error or close event ever arrived,
- * and the panel sat on "호스트에 연결하는 중" indefinitely. A busy state with no
+ * and the panel sat on "호스트에 연결 중" indefinitely. A busy state with no
  * end is the same lie as a false live state, so the deadline is not optional.
  *
  * The deadline is the FLOOR, not the answer. A blocked connection does raise a
