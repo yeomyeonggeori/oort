@@ -2,132 +2,153 @@
   "$comment": [
     "LIVE-1 / ADR-0165 — the CubeSandbox template contract for the live display.",
     "",
-    "This file is the machine-readable half of README.md and exists so the",
-    "template's promises can be CHECKED rather than read. scripts/",
-    "verify_display_attach.sh cross-reads it against the server's own constants",
-    "(subprotocol, capability prefix, endpoint grammar, host capability key), so",
-    "a template that drifts from the server it registers with fails a gate",
-    "instead of failing a person watching a black rectangle.",
+    "specVersion 3 (2026-08-16, #1438 실기동 E2E). specVersion 2 was a DECLARED",
+    "contract; this version records what was MEASURED end to end on momo-cube-host",
+    "(101.79.18.230) + momo-turn (223.130.142.109): a real microVM producer whose",
+    "H264 screen reached an external browser (a Mac on the public internet) over a",
+    "WebRTC media stream relayed through the oort TURN. The three items that",
+    "specVersion 2 listed under `unverified` as producerSelection / iceReachability",
+    "/ templateBuild are RESOLVED here; inputDelivery (LIVE-3 control reaching a",
+    "screen) is still unverified and stays named.",
     "",
-    "STATUS: runtime-unverified(cubesandbox webrtc producer). Nothing in this",
-    "repository can build or boot a CubeSandbox template, so every field below",
-    "is a DECLARED contract, proved at the contract level by",
-    "scripts/display_signaling_probe.py and not yet measured on a real microVM.",
-    "The unmeasured items are listed under `unverified` — they are part of the",
-    "spec, not a footnote to it."
+    "verify with scripts/verify_display_attach.sh (cross-reads server constants)."
   ],
-  "specVersion": 2,
-  "adr": ["ADR-0165", "ADR-0004 증보 3"],
+  "specVersion": 3,
+  "adr": ["ADR-0165", "ADR-0165 증보 2 (needed — see ice.requiresAdrAmendment)", "ADR-0004 증보 3"],
   "goal": "LIVE-3",
+  "runtimeVerified": {
+    "$comment": "#1438 measured 2026-08-16. Evidence: external Chromium rendered display-e2e-1438 at 1280x720, 56 frames decoded, media candidate pair relay<->relay; coturn logged ALLOCATE+CHANNEL_BIND success from BOTH the producer (101.79.18.230) and the browser (39.115.69.188), over TURN transport=udp AND transport=tcp.",
+    "producerEncodesInMicroVM": true,
+    "browserRendersOverTurnRelay": true,
+    "measuredResolution": "1280x720",
+    "measuredCodec": "H264 constrained-baseline"
+  },
+
+  "template": {
+    "$comment": [
+      "The template is built by `cubemastercli tpl create-from-image` from an OCI",
+      "image, NOT by systemd. PID 1 is the #1437 bootstrap receiver, which lands",
+      "the create-time envVars delivery and then execs the entrypoint.",
+      "",
+      "MUST be built WITHOUT `--probe`: the producer legitimately does not listen",
+      "on :8452 until after the create-time delivery arrives, and no delivery",
+      "happens during a template build. A display template built with --probe or",
+      "without the receiver fails EVERY envVars create with 500 (130497), which is",
+      "the exact state the real T3 adapter provisions in (#1437/#1434)."
+    ],
+    "pid1": "momo-bootstrap-init (infra/cubesandbox/bootstrap-init) — the #1437 envVars receiver",
+    "cmd": ["/usr/local/bin/momo-bootstrap-init", "--", "/usr/local/bin/entrypoint.sh"],
+    "ordering": "entrypoint.sh, not a systemd unit — adds the ICE base (see network.iceBase), starts Xvfb, waits on the X socket, then execs the producer",
+    "buildFlags": ["--with-cube-ca=false", "--expose-port 8452", "no --probe"],
+    "requiresIproute2": true,
+    "$requiresIproute2Comment": "iproute2 must be in the rootfs so entrypoint can add the routable ICE base; without it, relay gathering fails (see network.iceBase)."
+  },
 
   "producer": {
     "implementation": "gstreamer-webrtcbin",
     "$comment": [
-      "ADR-0165 D1 names Selkies-GStreamer as the first preference with",
-      "`webrtcbin` as the alternative. This template declares the alternative,",
-      "and the reason is D4 rather than performance:",
-      "",
-      "  * ADR-0165 D4 requires view-only to be the ABSENCE of an input",
-      "    datachannel, not a flag beside one. Selkies exists to deliver a",
-      "    controllable desktop — its input datachannel is the product, and",
-      "    view-only there is a configuration of a component built to provide",
-      "    the thing we are refusing. `webrtcbin` has no input path at all",
-      "    unless one is written, so the guarantee is the default rather than a",
-      "    setting somebody can flip back.",
-      "  * Selkies ships as a container image bundling an X session, a desktop",
-      "    environment and a Python signalling server aimed at container/K8s",
-      "    deployment; a CubeSandbox template is built from a rootfs.",
-      "",
-      "This is a DECLARED choice on a structural argument, not a measured one —",
-      "see `unverified.producerSelection`. Swapping it is a one-field change",
-      "here plus the unit file; nothing in server-rust names a producer."
+      "ADR-0165 D1 named Selkies-GStreamer first with `webrtcbin` as the",
+      "alternative; this template declares the alternative on the D4 structural",
+      "argument (view-only = ABSENCE of an input datachannel). #1438 RESOLVED the",
+      "producerSelection unknown: webrtcbin encodes H264 acceptably inside a",
+      "GPU-less microVM and an external browser decoded 56 frames at 1280x720.",
+      "Swapping the producer is still a one-field change here plus the unit file;",
+      "nothing in server-rust names a producer."
     ],
-    "capture": {
-      "source": "x11",
-      "$comment": "The sandbox's own X display; the producer captures it and encodes.",
-      "display": ":0",
-      "codec": "H264",
-      "audio": false,
-      "$audioComment": "No audio track. A screen is what LIVE-1 shows; a microphone in a sandbox is a different consent conversation entirely."
-    },
+    "capture": {"source": "x11", "display": ":0", "codec": "H264", "audio": false},
     "direction": "sendonly",
     "inputDatachannel": false,
-    "$inputComment": "ADR-0165 D4, and still false: the producer MUST NOT add an application m-line to its OFFER. View-only remains the default shape of the connection, asserted by scripts/display_signaling_probe.py, which has a red proof (--prove-red) showing it catches a producer that does.",
+    "$inputComment": "ADR-0165 D4. RUNTIME-VERIFIED (#1438): the producer OFFER carried m=video a=sendonly and NO m=application, measured against the real producer through the host proxy from an external browser.",
     "inputDatachannelOnDemand": {
-      "$comment": [
-        "LIVE-3 / ADR-0004 증보 3. Control is now a grade the server can grant,",
-        "so the producer needs a way to open input — and exactly one way.",
-        "",
-        "The trigger is the SERVER's answer, never the viewer's word. A producer",
-        "may negotiate an input datachannel if and only if its own",
-        "display-attach/validate call returned `input_enabled: true`, which the",
-        "server answers only when the bearer is a `controller` grant AND the",
-        "control window that grant opened is still standing (076). The viewer",
-        "asking is not authorisation and never becomes it — that is the same",
-        "principle as ADR-0165 D4's refusal to trust a client flag, applied one",
-        "grade over.",
-        "",
-        "Because `input_enabled` is re-answered on every 30-second",
-        "re-validation, it is also the OFF switch: when the person hands control",
-        "back, the window closes and the next re-validation says false. The",
-        "producer MUST then close the datachannel rather than keep serving a",
-        "keyboard whose authorisation has lapsed. A returned window that leaves",
-        "a working keyboard is the failure this field exists to prevent.",
-        "",
-        "Still runtime-unverified: no microVM was built or booted."
-      ],
       "trigger": "validate.input_enabled == true",
       "revokeOn": "validate.input_enabled == false",
-      "viewerRequestIsNotAuthorisation": true
+      "viewerRequestIsNotAuthorisation": true,
+      "$comment": "LIVE-3 / ADR-0004 증보 3. STILL runtime-unverified — see unverified.inputDelivery. #1438 measured view-only media only."
     },
-    "recording": false,
-    "$recordingComment": "ADR-0165 D5. No frame is written to disk in the sandbox, and none reaches momo at all."
+    "recording": false
   },
 
   "signalling": {
     "subprotocol": "momo.display.v1",
-    "$subprotocolComment": "The browser grammar: `Sec-WebSocket-Protocol: momo.display.v1, <capability>`, exactly as clients/web/src/features/work/observerStream.ts already dials a terminal with `momo.terminal.v1`. The producer echoes back the BARE subprotocol — echoing the capability would put a live bearer in every intermediary's response log.",
     "capabilityPrefix": "momo_terminal_attach_v1",
-    "$capabilityComment": "One capability grammar for both kinds: 075 made the kind a column, not a second token format. See momo_t3::terminal_attach::CAPABILITY_PREFIX.",
     "endpointSchemes": ["wss"],
-    "$endpointComment": "`work_session_display_endpoint_ck` (075) accepts https and wss and refuses userinfo, query and fragment. A template publishes wss.",
     "validateRoute": "/v1/workspaces/{workspace}/work-hosts/{host}/display-attach/validate",
     "revalidateSeconds": 30,
-    "$revalidateComment": "The producer re-validates on a timer for the life of the peer connection with `stream: true`, which relaxes expiry and ONLY expiry. That is what makes host revocation, observation=owner_only and a viewer leaving the channel cut a stream that is already open.",
+    "hostProxy": {
+      "$comment": "ADR-0165 증보 1 D2-1. RUNTIME-VERIFIED (#1438): external browser -> wss://<host-public>:8443/display/signal/<displayId> -> nginx (형상 A, client-IP preserving) -> microVM :8452. TLS is self-signed in the E2E; a real cert is a follow-up (runbook §9 item 2).",
+      "listen": "wss://<host-public>:8443/display/signal/<displayId>",
+      "upstream": "<SANDBOX_IP>:8452"
+    },
     "messages": {
       "producerToViewer": ["ready", "offer", "ice", "error"],
-      "viewerToProducer": ["answer", "ice", "open_input", "bye"],
-      "$comment": "`open_input` is in the viewer vocabulary and is refused with `{\"type\":\"error\",\"reason\":\"view_only\"}` unless this producer's own validate answered `input_enabled: true` (see producer.inputDatachannelOnDemand). Accepting the word and deciding the act server-side is deliberate: a client that cannot even name the request cannot be told why it will not happen, and a client that names it still does not get to authorise it."
+      "viewerToProducer": ["answer", "ice", "open_input", "bye"]
     }
   },
 
   "ice": {
-    "policy": "host-and-server-reflexive",
-    "turn": null,
-    "$turnComment": "ADR-0165 D3: no third-party TURN, ever. An oort-operated TURN is a separate decision that requires measuring whether direct connectivity works at all — see `unverified.iceReachability`. A `typ relay` candidate appearing in this path today means something is wrong, and the probe asserts its absence.",
+    "policy": "relay",
+    "$policyComment": [
+      "CHANGED from specVersion 2's 'host-and-server-reflexive'. ADR-0165 증보 1",
+      "(D3-1) established relay is the only viable path (symmetric NAT). #1438",
+      "measured a DEEPER reason the producer must force relay AND the template",
+      "must supply a routable ICE base: see network.iceBase."
+    ],
+    "turn": {
+      "required": true,
+      "operator": "oort (momo-turn 223.130.142.109) — never third-party (ADR-0165 D3)",
+      "transports": ["udp", "tcp"],
+      "credentialDelivery": "static long-term cred for E2E, delivered via envVars (#1437 receiver) as MOMO_DISPLAY_TURN_URI; LIVE-5 replaces with per-session ephemeral creds",
+      "$comment": "CHANGED from null. #1438 RESOLVED iceReachability: the producer allocates a relay on momo-turn and the browser connects relay<->relay. coturn logged ALLOCATE success from the microVM (via host egress 101.79.18.230) over both udp and tcp."
+    },
     "stun": [],
-    "$stunComment": "Empty until the dedicated-host measurement says what is needed. Declaring a public STUN server here would be a third-party dependency introduced by default."
+    "requiresAdrAmendment": "ADR-0165 증보 2 — turn is now REQUIRED (was 'introduce only if measured necessary'). #1438 is that measurement. The producer forces iceTransportPolicy=relay and the template supplies a routable ICE base."
   },
 
   "network": {
     "signallingPort": 8452,
-    "mediaUdpPortRange": [50000, 50100],
-    "$comment": [
-      "The ports the producer binds INSIDE the microVM. Whether and how they are",
-      "reachable from a browser on the internet is the open question of this",
-      "goal — see `unverified.iceReachability`. These numbers are declared so",
-      "that measurement has something concrete to test, not because the path is",
-      "known to work."
-    ]
+    "mediaUdpPortRange": {
+      "declared": [50000, 50100],
+      "enforced": false,
+      "$comment": [
+        "CHANGED to enforced:false. GStreamer 1.22 webrtcbin has NO port-range",
+        "property, and reading `ice-agent` to reach the underlying ICE object",
+        "DESTROYS it (over-unref → later negotiation dies on GST_IS_WEBRTC_ICE",
+        "assertion) — do not read it. The microVM media ports are therefore not",
+        "constrained here. In the relay topology it does not matter: media does",
+        "not ingress to the microVM on these ports — it egresses to the TURN and",
+        "is relayed, so the ports that face the internet are momo-turn's",
+        "49152-65535 range, not these."
+      ]
+    },
+    "iceBase": {
+      "$comment": [
+        "NEW in specVersion 3 — the #1438 root-cause finding. A CubeSandbox",
+        "microVM's guest eth0 carries ONLY link-local addresses (IPv4",
+        "169.254.68.6/30, IPv6 fe80::). libnice (webrtcbin's ICE stack) REGISTERS",
+        "the TURN but schedules NO STUN/TURN candidate discovery from a link-local",
+        "base — measured 'Candidate gathering FINISHED, no scheduled items' — so",
+        "the producer emits ZERO candidates and cannot allocate a relay, even",
+        "though the TURN works and the microVM can reach it (raw-socket STUN got a",
+        "reply). The fix, measured to work: entrypoint adds a routable RFC1918",
+        "address to eth0 (default 10.99.0.2/24) BEFORE the producer starts. libnice",
+        "then uses it as a base, allocates the relay, and the CubeNet gateway",
+        "MASQUERADEs the flow out the host's public IP and returns the reply.",
+        "The identical producer needed no such fix in a container (it already had",
+        "an RFC1918 172.17.x address) — this is specific to the microVM's",
+        "link-local-only posture."
+      ],
+      "required": true,
+      "address": "10.99.0.2/24",
+      "interface": "eth0",
+      "addedBy": "entrypoint (needs iproute2 + CAP_NET_ADMIN, which PID1 in a microVM has)"
+    }
   },
 
   "workdRegistration": {
-    "$comment": "How the sandbox's daemon tells momo it has a screen. Both calls are work-host-signed (Ed25519 v2 request signature); neither is reachable with a human bearer.",
     "advertise": {
       "route": "POST /v1/workspaces/{workspace}/work-hosts",
       "capabilityKey": "display_attach",
-      "value": true,
-      "$comment": "momo_t3::terminal_attach::HOST_DISPLAY_CAPABILITY_KEY. Issuance is fail-closed on this flag: a host that does not advertise has no screen, which is also how BYOC is excluded without policy naming a provider. 021's CHECK closes work_host.capabilities to booleans."
+      "value": true
     },
     "publishBinding": {
       "route": "POST /v1/workspaces/{workspace}/work-sessions/{session}/display-binding",
@@ -135,16 +156,14 @@
         "displayId": "<^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$>",
         "displayEndpoint": "wss://<host>/display/signal/<displayId>"
       },
-      "idempotent": true,
-      "$comment": "Publishing is once per session. Republishing the same pair is 204; a different pair is 409. The signer must be the session's own host — the path names a session, so that pin lives in the handler."
+      "idempotent": true
     }
   },
 
   "unverified": {
-    "$comment": "Named honestly rather than omitted (E5's lesson). Each entry is a claim this goal did NOT measure and must not be reported as working.",
-    "producerSelection": "No CubeSandbox template was built or booted. `gstreamer-webrtcbin` is chosen on the ADR-0165 D4 structural argument above; whether it encodes acceptably inside a microVM with no GPU, and what the resulting latency is, is unmeasured.",
-    "iceReachability": "Whether a browser can reach a producer inside a CubeSandbox microVM at all is UNMEASURED and structurally at risk. Two facts point at the risk: (1) nothing in the CubeSandbox adapter (server-rust/crates/momo-t3/src/provider/cubesandbox.rs) expresses inbound port exposure — `create_body` sends templateID, timeout, lifecycle, metadata and envVars, and no port map; (2) ADR-0157 증보 1 measured Cubelet's built-in eBPF `deny_out` blocking the sandbox's egress to every private range, which is a statement about the network posture these VMs ship with. If direct/host-reflexive ICE turns out not to work, ADR-0165 D3 says the answer is an oort-operated TURN and that is an ADR 증보, not a workaround this template may take.",
-    "templateBuild": "The rootfs build (`--with-cube-ca=false` per ADR-0157 증보 1, the X server, the producer unit) is declared by this spec and the accompanying unit file, and has never been executed.",
-    "inputDelivery": "LIVE-3 opened control on the SERVER: issuance, the control window, the non-observation gate and `input_enabled` are all exercised against a real PostgreSQL by display_attach_conformance_pg.rs. What is NOT measured is any of it reaching a screen — no producer has ever read `input_enabled: true`, opened a datachannel, delivered a keystroke to an X server, or closed that channel when the window was returned. The revoke half is the one to be most careful about reporting: it is a declared producer obligation here and a server statement in `validate`, and nothing in this repository can prove a producer honours it."
+    "$comment": "specVersion 2's producerSelection / iceReachability / templateBuild are RESOLVED (see runtimeVerified). Only inputDelivery remains.",
+    "inputDelivery": "LIVE-3 control reaching a screen is STILL unverified. #1438 measured view-only media end to end; no producer has read input_enabled:true, opened an input datachannel, delivered a keystroke, or closed the channel on window return. That is LIVE-5, out of #1438 scope.",
+    "realTlsCert": "The host proxy used a self-signed cert in the E2E (browser launched with ignore-cert-errors). A real cert/domain is a follow-up (runbook §9 item 2).",
+    "serverValidateWiring": "#1438 used MOMO_DISPLAY_STUB_VALIDATE=1 to isolate media reachability. The producer's real server-side capability validate (against a live LIVE-1..4 server) is exercised at the contract level by display_attach_conformance_pg.rs but was not wired into this live media run."
   }
 }

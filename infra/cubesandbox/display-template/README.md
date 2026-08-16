@@ -3,30 +3,37 @@
 The sandbox half of 관전 라이브 화면: what a CubeSandbox template must contain so
 that a teammate can **watch** an agent work, and cannot type into it.
 
-> **Status: `runtime-unverified(cubesandbox webrtc producer)`.**
-> Nothing in this repository can build or boot a CubeSandbox template. Everything
-> here is a *declared* contract, proved at the contract level by
-> `scripts/display_signaling_probe.py` (two local peers, real WebSocket, with a
-> red proof) and by `server-rust/bins/momo-server/tests/display_attach_conformance_pg.rs`
-> (real Axum router, real PostgreSQL 18, real Ed25519 signatures). No claim on
-> this page has been measured on a microVM. The three unmeasured items are named
-> in `template.spec.json` under `unverified`, and the third of them is a live
-> risk to the topology — see [Open: can a browser reach the sandbox at all?](#open-can-a-browser-reach-the-sandbox-at-all).
+> **Status: `runtime-verified(cubesandbox webrtc producer)` — media reachability
+> proven end to end on 2026-08-16 (#1438).** A real microVM producer's H264 screen
+> reached an external browser (a Mac on the public internet) over a WebRTC media
+> stream relayed through the oort TURN (`momo-turn`), relay↔relay, at 1280x720.
+> `template.spec.json` records the measurement under `runtimeVerified`, and
+> `scripts/verify_display_attach.sh` cross-reads the contract against the server's
+> own constants. What is **still** unverified is *input delivery* (LIVE-3 control
+> reaching a screen) — named in `template.spec.json` under `unverified`. The
+> earlier open risk, "can a browser reach the sandbox at all", is **resolved** —
+> see [How a browser reaches the sandbox](#how-a-browser-reaches-the-sandbox).
 
-## The three files
+## The files
+
+The template is built by `cubemastercli tpl create-from-image` from an OCI image
+(there is no systemd and no envd in this rootfs), so the pieces are a Dockerfile
+and the two programs it bakes, not a systemd unit.
 
 | file | what it is |
 |---|---|
-| `template.spec.json` | the machine-readable contract. `scripts/verify_display_attach.sh` cross-reads it against the server's own constants, so a template that drifts from the server it registers with fails a gate instead of failing a person watching a black rectangle. |
-| `momo-display-producer.service` | the unit the template bakes, beside `momo-workd`. |
+| `template.spec.json` | the machine-readable contract (specVersion 3 — what was MEASURED on the dedicated host, not merely declared). `scripts/verify_display_attach.sh` cross-reads it against the server's own constants, so a template that drifts from the server it registers with fails a gate instead of failing a person watching a black rectangle. |
+| `Dockerfile` | the OCI image `create-from-image` builds the template from. PID 1 is `momo-bootstrap-init` (the #1437 envVars receiver, from [`../bootstrap-init/`](../bootstrap-init/README.md)); it lands the create-time delivery and execs the entrypoint. `iproute2` is in the rootfs so the entrypoint can add the routable ICE base. |
+| `entrypoint.sh` | the ordering a systemd unit would have expressed: add the ICE base to `eth0`, start Xvfb, wait on the X socket, then exec the producer. |
+| `momo-display-producer` | the GStreamer `webrtcbin` producer. Captures X11, encodes H264, forces `ice-transport-policy=relay`, wires the oort TURN from `MOMO_DISPLAY_TURN_URI`, and never logs the credential. |
 | this file | why each of those says what it says. |
 
 ## The shape
 
 ```text
-browser ──── wss (signalling, momo.display.v1) ────► sandbox producer
-   │                                                       │
-   │◄────────── WebRTC media, sendonly video ──────────────┘
+browser ── wss (signalling, momo.display.v1) ──► host proxy ──► sandbox producer
+   │                                                                  │
+   │◄──── WebRTC media, sendonly video, relayed via oort TURN ────────┘
    │
    └─ POST …/work-sessions/{s}/display-attach ──► oort   (capability, 60s)
                                                    ▲
@@ -36,8 +43,10 @@ browser ──── wss (signalling, momo.display.v1) ────► sandbox p
 
 oort appears three times and carries nothing in any of them. It mints a bearer,
 it records which screen a host serves, and it answers "is this bearer still
-good". The signalling WebSocket is the sandbox's; the media never touches a momo
-process at all (ADR-0165 D2, D5).
+good". The signalling WebSocket is the sandbox's (reached through the host's
+reverse proxy); the media never touches a momo process at all (ADR-0165 D2, D5) —
+it is relayed through the **oort-operated** TURN, never a third party (ADR-0165
+D3 / 증보 1 / 증보 2).
 
 ## Why the producer is `webrtcbin` and not Selkies
 
@@ -57,10 +66,12 @@ performance**:
   Consequences already record that "Selkies는 컨테이너 중심" is the thin-precedent
   risk of this goal.
 
-This is a **structural** argument, not a measurement, and it is a declared
-deviation from the packet's stated first preference. Swapping back is a one-field
-change in `template.spec.json` plus the unit file: nothing in `server-rust` names
-a producer, and nothing in the wire contract depends on which one runs.
+This was a **structural** argument, and #1438 has now also **measured** the
+producerSelection question it flagged: `webrtcbin` encodes H264 acceptably inside
+a GPU-less microVM and an external browser decoded 56 frames at 1280x720.
+Swapping back is still a one-field change in `template.spec.json` plus the
+Dockerfile: nothing in `server-rust` names a producer, and nothing in the wire
+contract depends on which one runs.
 
 ## View-only, three times over
 
@@ -76,66 +87,66 @@ lose the property:
    the validation path.
 3. **The producer.** Its SDP offer contains no `m=application` section, so there
    is no datachannel to negotiate. A viewer that sends `open_input` gets
-   `{"type":"error","reason":"view_only"}` and the stream keeps running.
+   `{"type":"error","reason":"view_only"}` and the stream keeps running. #1438
+   measured this on the wire: the real producer's OFFER carried `m=video
+   a=sendonly` and **no** `m=application`.
 
-Layer 3 is the one that actually matters at runtime — layers 1 and 2 decide who
-may watch, layer 3 decides what watching *is* — and it is the only one this
-repository cannot execute. `scripts/display_signaling_probe.py` proves the
-contract with two local peers, and `--prove-red` demonstrates that it catches a
-producer which negotiates a datachannel anyway. That is a proof about the
-*contract*, and it is not a proof about Selkies, `webrtcbin`, or any binary that
-has actually encoded a frame.
+Layers 1 and 2 decide who may watch, layer 3 decides what watching *is*.
+`scripts/display_signaling_probe.py` proves the contract with two local peers,
+and `--prove-red` demonstrates that it catches a producer which negotiates a
+datachannel anyway.
 
-## Open: can a browser reach the sandbox at all?
+## How a browser reaches the sandbox
 
-**Unmeasured, and the largest open risk in this axis.** ADR-0165 D2 puts the
-browser in direct contact with the microVM, which requires an inbound path to a
-process inside it. Two measured facts sit against that:
+**Measured (#1438), no longer open.** ADR-0165 증보 1 established (SPIKE #1411)
+that a CubeSandbox microVM sits behind a symmetric NAT with no host/srflx path,
+so **relay is the only ICE path**, the TURN must be a **separate dedicated
+public host** (`momo-turn`, never co-located with the sandbox host), and the
+browser reaches the signalling WebSocket through the **host's reverse proxy**
+(형상 A — client-IP preserving). #1438 then drove that path end to end and found
+one more requirement that TURN alone did not satisfy:
 
-- **The adapter expresses no port exposure.** `create_body`
-  (`server-rust/crates/momo-t3/src/provider/cubesandbox.rs`) sends `templateID`,
-  `timeout`, `lifecycle`, `metadata` and `envVars`. There is no port map, no
-  published address, and nothing in the `CloudInstanceRef` a provision returns
-  that names a reachable host:port for the sandbox itself.
-- **These VMs ship closed.** ADR-0157 증보 1 measured Cubelet's built-in eBPF
-  `deny_out` refusing the sandbox's egress to every private range by default, and
-  D1/D2 of that ADR are that the sandbox's only door is the public REST API.
-  Nothing there contemplates an inbound door.
+- **A routable ICE base is mandatory.** The guest `eth0` carries **only**
+  link-local addresses (IPv4 `169.254.68.6/30`, IPv6 `fe80::`). libnice
+  (webrtcbin's ICE stack) *registers* the TURN but schedules **no** STUN/TURN
+  candidate discovery from a link-local base — measured `Candidate gathering
+  FINISHED, no scheduled items` — so the producer emits **zero** candidates and
+  cannot allocate a relay, even though the TURN works and the microVM can reach
+  it. The fix, measured to work: `entrypoint.sh` adds a routable RFC1918 address
+  (`10.99.0.2/24`, `MOMO_ICE_BASE`) to `eth0` **before** the producer starts.
+  libnice then uses it as a base, allocates the relay, and the CubeNet gateway
+  MASQUERADEs the flow out the host's public IP. This is the reason `iproute2`
+  is in the rootfs and the reason `network.iceBase` is a `required` field. It is
+  specific to the microVM's link-local-only posture — the identical producer
+  needed no such fix in a container that already had an RFC1918 address.
 
-So the `display_endpoint` a workd would publish today has no defined way to
-resolve to something a browser can dial. That is a **provisioning** question, not
-a capability-plane one — the server axis this goal built is complete and correct
-either way, because it hands out an endpoint the host chose — but LIVE-2 cannot
-render anything until it is answered.
-
-Three shapes it could take, none of them chosen here:
-
-1. the dedicated host reverse-proxies `wss://<host>/display/<sandbox>/signal`
-   into the microVM and media still goes peer-to-peer over ICE;
-2. the same, but media is relayed too — which is an oort-operated TURN and
-   therefore an ADR-0165 D3 증보;
-3. per-sandbox public port exposure, which is a CubeSandbox capability this
-   repository has not established exists.
-
-Per ADR-0165 D3 and the LIVE-1 packet's freeze rule, this goal **stops here and
-reports** rather than picking one.
+The evidence: coturn logged `ALLOCATE` + `CHANNEL_BIND` success from **both** the
+producer (via host egress `101.79.18.230`) and the browser (`39.115.69.188`),
+over TURN transport `udp` **and** `tcp`; the negotiated media candidate pair was
+relay↔relay. This is an **ADR-0165 증보 2** matter (`ice.requiresAdrAmendment`) —
+TURN moved from "introduce only if measured necessary" to REQUIRED, and the
+routable ICE base is a new template obligation. That 증보 is **Proposed —
+성재 결재 대기**.
 
 ## Template build notes
 
+- **PID 1 is the #1437 receiver, and the build carries no `--probe`.** The
+  adapter's `workd_env_vars` (server origin, host identity, and the TURN URI) are
+  *delivered* by Cubelet to `:49983/init` inside the create call, not injected as
+  process env; `momo-bootstrap-init` ([`../bootstrap-init/`](../bootstrap-init/README.md))
+  is what lands them and then execs `entrypoint.sh`. A display template without
+  the receiver — or built **with** `--probe` — fails *every* `envVars` create with
+  `500 … 130497`, because the producer legitimately does not listen on `:8452`
+  until the delivery arrives and no delivery happens during a template build
+  (ADR-0156 증보 4).
 - `--with-cube-ca=false`. ADR-0157 증보 1 measured that the template build bakes
   the CubeEgress MITM root CA into the rootfs by default; a trust anchor for a
   component we do not use has no business in a sandbox.
-- The X server, the desktop the agent's tools draw into, and the producer unit
-  are the display-specific additions. Everything else is the ordinary workd
-  template.
-- `/etc/momo/workd.env` is what the producer reads — the server origin and the
-  host identity are the only two things it needs, and neither is a credential of
-  the provider's (ADR-0004). **What writes that file is not the provisioner**
-  (#1437): the adapter's `workd_env_vars` are *delivered* by Cubelet to
-  `:49983/init` inside the create call, and `momo-bootstrap-init`
-  ([`infra/cubesandbox/bootstrap-init/`](../bootstrap-init/README.md)) is what
-  lands them. So this template must carry that receiver as PID 1 — and must be
-  built **without `--probe`**, because the producer legitimately does not listen
-  until the delivery arrives and no delivery happens during a template build. A
-  display template without the receiver fails *every* create with
-  `500 … 130497`; it does not start unconfigured.
+- The X server, the desktop the agent's tools draw into, `iproute2` (for the ICE
+  base), and the producer are the display-specific additions. Everything else is
+  the ordinary workd template.
+- The producer reads the server origin and the host identity from its delivered
+  environment — neither is a credential of the provider's (ADR-0004). The TURN
+  credential arrives the same way (`MOMO_DISPLAY_TURN_URI`) and is a static
+  long-term cred for the E2E; LIVE-5 replaces it with per-session ephemeral
+  creds. `turn://` URIs carry a credential, so the producer never logs them.
