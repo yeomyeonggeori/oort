@@ -87,10 +87,10 @@ import {
 import {
   LOGIN_HANDOFF_ELSEWHERE_COPY,
   LOGIN_HANDOFF_IN_CONTROL_LEAD,
-  LOGIN_HANDOFF_OUTCOME_DETAIL,
-  LOGIN_HANDOFF_WAITING_COPY,
+  loginHandoffOutcomeDetail,
   loginHandoffStatusLabel,
   loginHandoffStoppedCopy,
+  loginHandoffWaitingCopy,
   type LoginHandoffCard,
 } from '@momo/core/features/timeline/loginHandoffCard';
 import {QuoteBlock, quoteAccessibilityPhrase} from './Quote';
@@ -687,7 +687,10 @@ function LoginHandoffCardView({
         <Text style={styles.cardBody}>{card.reason}</Text>
       ) : null}
       {!settled ? (
-        <Text style={styles.cardBody}>{LOGIN_HANDOFF_WAITING_COPY}</Text>
+        // 창이 닫혔는데 아직 대기인 갈래에서 한 문장이 더 붙는다 (freeze M1).
+        // 폰은 결정 동선이 없으므로 이 줄이 이 화면에서 창의 상태를 말하는
+        // 유일한 자리다 — 조건도 문장도 코어가 답한다.
+        <Text style={styles.cardBody}>{loginHandoffWaitingCopy(card)}</Text>
       ) : null}
       {card.control !== null ? (
         <Text style={styles.cardMeta} testID="card-handoff-boundary">
@@ -713,8 +716,11 @@ function LoginHandoffCardView({
         </Text>
       ) : null}
       {card.outcome !== null ? (
+        // 표를 그대로 인덱싱하지 않는다 (freeze M2). 창 없이 `returned` 인
+        // 카드에서 「화면을 돌려주었습니다」는 실행기가 모델에게 하는 말과
+        // 어긋난다.
         <Text style={styles.cardNote} testID="card-handoff-outcome">
-          {LOGIN_HANDOFF_OUTCOME_DETAIL[card.outcome]}
+          {loginHandoffOutcomeDetail(card)}
         </Text>
       ) : null}
       {card.phase === 'stopped' ? (

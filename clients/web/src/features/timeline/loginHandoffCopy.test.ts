@@ -8,8 +8,10 @@ import {
   LOGIN_HANDOFF_IN_CONTROL_LEAD,
   LOGIN_HANDOFF_OFFLINE_COPY,
   LOGIN_HANDOFF_OUTCOME_DETAIL,
+  LOGIN_HANDOFF_RETURNED_WITHOUT_WINDOW_DETAIL,
   LOGIN_HANDOFF_STOPPED_COPY,
   LOGIN_HANDOFF_WAITING_COPY,
+  LOGIN_HANDOFF_WAITING_WINDOW_CLOSED,
 } from "@momo/core/features/timeline/loginHandoffCard";
 
 // =============================================================================
@@ -51,11 +53,23 @@ describe("웹이 핸드오프 문장을 다시 쓰지 않는다 (M1)", () => {
       LOGIN_HANDOFF_IN_CONTROL_LEAD,
       LOGIN_HANDOFF_OFFLINE_COPY,
       LOGIN_HANDOFF_WAITING_COPY,
+      LOGIN_HANDOFF_RETURNED_WITHOUT_WINDOW_DETAIL,
+      ...Object.values(LOGIN_HANDOFF_WAITING_WINDOW_CLOSED),
       ...Object.values(LOGIN_HANDOFF_STOPPED_COPY),
       ...Object.values(LOGIN_HANDOFF_OUTCOME_DETAIL),
     ]) {
       expect(CODE_ONLY).not.toContain(sentence);
     }
+  });
+
+  it("대기 줄과 결과 줄도 코어 헬퍼가 답한다 — 조건까지 (freeze M1·M2)", () => {
+    // 둘 다 **갈래가 있는** 문장이 됐다: 대기 카피는 창이 닫혔는지에 따라 한
+    // 문장이 붙고, 결과 문장은 창이 있었는지에 따라 갈린다. 조건이 이 파일에
+    // 있으면 폰이 그 조건을 다시 적어야 하고, 그때부터 둘은 각자 늙는다.
+    expect(CODE_ONLY).toContain("loginHandoffWaitingCopy(card)");
+    expect(CODE_ONLY).toContain("loginHandoffOutcomeDetail(card)");
+    // 그리고 표를 손으로 인덱싱하던 자리가 남아 있지 않다.
+    expect(CODE_ONLY).not.toContain("LOGIN_HANDOFF_OUTCOME_DETAIL[");
   });
 
   it("멈춘 카드의 문장은 코어 헬퍼가 답한다 — 조건도 함께", () => {

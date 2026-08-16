@@ -13,13 +13,17 @@ import {
   LOGIN_HANDOFF_OUTCOME_DETAIL,
   LOGIN_HANDOFF_OUTCOME_LABEL,
   LOGIN_HANDOFF_PHASE_LABEL,
+  LOGIN_HANDOFF_RETURNED_WITHOUT_WINDOW_DETAIL,
   LOGIN_HANDOFF_STOPPED_COPY,
   LOGIN_HANDOFF_TITLE,
   LOGIN_HANDOFF_WAITING_COPY,
+  LOGIN_HANDOFF_WAITING_WINDOW_CLOSED,
   loginHandoffCard,
   loginHandoffNote,
+  loginHandoffOutcomeDetail,
   loginHandoffStateFor,
   loginHandoffStoppedCopy,
+  loginHandoffWaitingCopy,
   parseLoginHandoffControl,
   parseLoginHandoffOutcome,
   type LoginHandoffNoteInput,
@@ -428,6 +432,123 @@ describe("멈춘 카드가 말하는 것", () => {
   });
 });
 
+describe("대기 중인데 창은 이미 닫혔을 때 (freeze M1)", () => {
+  it("국면은 여전히 대기다 — 원장이 답한 것을 화면이 뒤집지 않는다", () => {
+    // 두 축이 독립이라는 것의 나머지 절반. 승인 원장은 아직 아무 답도 받지
+    // 않았고(pending), 그것이 이 카드가 서 있는 이유다.
+    for (const reason of [
+      "returned",
+      "expired",
+      "session_ended",
+    ] as LoginHandoffOutcome[]) {
+      expect(
+        loginHandoffStateFor("pending", {
+          startedAtMs: 1_000,
+          endedAtMs: 2_000,
+          endReason: reason,
+        })
+      ).toEqual({ phase: "waiting", outcome: null });
+    }
+  });
+
+  it("대기 카피가 창이 닫힌 사실을 접합한다", () => {
+    // 앞 판은 대기 카피만 세웠다. 그래서 랩톱을 덮어 창이 lapse 로 닫힌 뒤에도
+    // 카드는 「지금 조작 중」과 구별되지 않았고, 화면이 모르는 것을 아는 척했다.
+    const lapsed = loginHandoffWaitingCopy({
+      control: { startedAtMs: 1_000, endedAtMs: 2_000, endReason: "expired" },
+    });
+    expect(lapsed.startsWith(LOGIN_HANDOFF_WAITING_COPY)).toBe(true);
+    expect(lapsed).toContain(LOGIN_HANDOFF_WAITING_WINDOW_CLOSED.expired);
+  });
+
+  it("창이 열려 있거나 없었으면 부탁 문장 그대로다", () => {
+    expect(loginHandoffWaitingCopy({ control: null })).toBe(
+      LOGIN_HANDOFF_WAITING_COPY
+    );
+    expect(
+      loginHandoffWaitingCopy({
+        control: { startedAtMs: 1_000, endedAtMs: null, endReason: null },
+      })
+    ).toBe(LOGIN_HANDOFF_WAITING_COPY);
+  });
+
+  it("사유마다 문장이 다르고, 끝난 세션에 다시 열라고 하지 않는다", () => {
+    expect(new Set(Object.values(LOGIN_HANDOFF_WAITING_WINDOW_CLOSED)).size).toBe(3);
+    expect(LOGIN_HANDOFF_WAITING_WINDOW_CLOSED.session_ended).not.toMatch(
+      /다시 열/
+    );
+    expect(LOGIN_HANDOFF_WAITING_WINDOW_CLOSED.expired).toContain("연결이 끊겨");
+  });
+
+  it("코어가 세우는 대기 카드와 실제로 짝을 이룬다", () => {
+    // 파서가 만든 카드로 잰다. 갈래가 도달 불가능하면 위의 시험들은 아무것도
+    // 지키지 않는다.
+    const card = loginHandoffCard(
+      message({
+        approval_status: "pending",
+        control_started_at_ms: 1_760_000_100_000,
+        control_ended_at_ms: 1_760_000_200_000,
+        control_end_reason: "expired",
+      }).props
+    );
+    expect(card?.phase).toBe("waiting");
+    expect(card?.outcome).toBeNull();
+    expect(loginHandoffWaitingCopy(card!)).toContain(
+      LOGIN_HANDOFF_WAITING_WINDOW_CLOSED.expired
+    );
+  });
+});
+
+describe("결과 문장은 창이 있었는지에 따라 갈린다 (freeze M2)", () => {
+  it("창 없이 재개를 누른 카드는 실행기와 같은 것을 말한다", () => {
+    // `tool_exec.rs` 의 `None` 갈래: 「No control window was opened in this
+    // deployment, so continue from the session's own screen state.」
+    // 표의 `returned` 문장(「화면을 돌려주었습니다」)은 잡은 적 없는 화면을
+    // 돌려주었다고 말한다.
+    const card = loginHandoffCard(message({ approval_status: "approved" }).props);
+    expect(card?.outcome).toBe("returned");
+    expect(card?.control).toBeNull();
+    expect(loginHandoffOutcomeDetail(card!)).toBe(
+      LOGIN_HANDOFF_RETURNED_WITHOUT_WINDOW_DETAIL
+    );
+    expect(loginHandoffOutcomeDetail(card!)).not.toBe(
+      LOGIN_HANDOFF_OUTCOME_DETAIL.returned
+    );
+  });
+
+  it("창이 있었으면 표의 문장 그대로다", () => {
+    for (const reason of [
+      "returned",
+      "expired",
+      "session_ended",
+    ] as LoginHandoffOutcome[]) {
+      expect(
+        loginHandoffOutcomeDetail({
+          outcome: reason,
+          control: { startedAtMs: 1_000, endedAtMs: 2_000, endReason: reason },
+        })
+      ).toBe(LOGIN_HANDOFF_OUTCOME_DETAIL[reason]);
+    }
+  });
+
+  it("결과가 없으면 줄이 서지 않는다", () => {
+    expect(
+      loginHandoffOutcomeDetail({ outcome: null, control: null })
+    ).toBeNull();
+  });
+
+  it("창 없는 returned 문장이 실행기의 서술과 어긋나지 않는다", () => {
+    // 두 문장이 같은 사실을 다르게 말하면, 나란히 본 사람은 어느 쪽이 참인지
+    // 물어야 한다. 실행기는 「세션 화면에서 상태를 확인한 뒤」 진행한다고 한다.
+    expect(LOGIN_HANDOFF_RETURNED_WITHOUT_WINDOW_DETAIL).toContain(
+      "세션 화면에서 상태를 확인한 뒤"
+    );
+    expect(LOGIN_HANDOFF_RETURNED_WITHOUT_WINDOW_DETAIL).not.toContain(
+      "화면을 돌려주었습니다"
+    );
+  });
+});
+
 describe("문구", () => {
   const ALL_COPY = [
     LOGIN_HANDOFF_DEPLOYMENT_COPY,
@@ -437,6 +558,8 @@ describe("문구", () => {
     LOGIN_HANDOFF_OFFLINE_COPY,
     LOGIN_HANDOFF_WAITING_COPY,
     LOGIN_HANDOFF_TITLE,
+    LOGIN_HANDOFF_RETURNED_WITHOUT_WINDOW_DETAIL,
+    ...Object.values(LOGIN_HANDOFF_WAITING_WINDOW_CLOSED),
     ...Object.values(LOGIN_HANDOFF_STOPPED_COPY),
     ...Object.values(LOGIN_HANDOFF_OUTCOME_LABEL),
     ...Object.values(LOGIN_HANDOFF_OUTCOME_DETAIL),

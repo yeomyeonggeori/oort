@@ -190,6 +190,43 @@ export const LOGIN_HANDOFF_OUTCOME_DETAIL: Readonly<
   session_ended: "작업 세션이 끝나면서 조작 창도 닫혔습니다.",
 };
 
+/**
+ * `returned` 인데 **창 기록이 없을 때** 카드가 말할 것.
+ *
+ * 이 갈래는 `loginHandoffStateFor` 가 명시적으로 만드는 것이다: 창 기록 없이
+ * 승인이 떨어지면 「사람이 재개를 눌렀다 = 개입을 마쳤다」로 읽는다(설계 정본
+ * §1-2). 그런데 표의 `returned` 문장은 「화면을 돌려주었습니다」로 시작한다 —
+ * 돌려줄 화면을 이 배포에서는 아무도 잡은 적이 없는데.
+ *
+ * 실행기는 같은 갈래를 이미 정확히 서술하고 있다(`tool_exec.rs` 의 `None`:
+ * 「No control window was opened in this deployment, so continue from the
+ * session's own screen state.」). 사람이 읽는 카드와 모델이 받는 문장이 같은
+ * 사실을 두 가지로 말하면, 나중에 둘을 나란히 본 사람은 어느 쪽이 참인지 물어야
+ * 한다. 그래서 문장을 실행기 쪽에 맞춘다.
+ */
+export const LOGIN_HANDOFF_RETURNED_WITHOUT_WINDOW_DETAIL =
+  "사람이 개입을 마쳤다고 알렸습니다. 이 배포에서는 조작 창이 열리지 않았으므로, 에이전트가 세션 화면에서 상태를 확인한 뒤 이어서 진행합니다.";
+
+/**
+ * 결과 줄이 말할 문장, 또는 `null`(결과가 없으면 줄이 서지 않는다).
+ *
+ * 표를 그대로 인덱싱하지 않고 헬퍼를 지나는 이유는 [`loginHandoffStoppedCopy`] 와
+ * 같다: 갈래가 하나 있고, 그 조건을 두 클라가 각자 적으면 한쪽만 고쳐진다.
+ *
+ * 세션 상세(`features/work/controlWindow.ts`)는 이 헬퍼를 쓰지 않고 표를 직접
+ * 읽는다. 그 표면의 표시는 **경계 봉투 하나**에서 만들어지므로 창이 없는 경우가
+ * 없기 때문이고, 없는 갈래를 위해 창 여부를 물으면 답이 언제나 같은 질문을 화면이
+ * 하게 된다.
+ */
+export function loginHandoffOutcomeDetail(
+  card: Pick<LoginHandoffCard, "outcome" | "control">
+): string | null {
+  if (card.outcome === null) return null;
+  return card.outcome === "returned" && card.control === null
+    ? LOGIN_HANDOFF_RETURNED_WITHOUT_WINDOW_DETAIL
+    : LOGIN_HANDOFF_OUTCOME_DETAIL[card.outcome];
+}
+
 /** 카드 국면의 이름. `stopped` 은 run 의 낱말을 그대로 쓴다. */
 export const LOGIN_HANDOFF_PHASE_LABEL: Readonly<
   Record<LoginHandoffPhase, string>
@@ -202,6 +239,47 @@ export const LOGIN_HANDOFF_PHASE_LABEL: Readonly<
 /** 대기 중인 카드가 사람에게 무엇을 부탁하는지. */
 export const LOGIN_HANDOFF_WAITING_COPY =
   "에이전트가 멈춰서 사람을 기다립니다. 비밀번호는 에이전트에게 전달되지 않고, 사람이 세션 화면에 직접 넣습니다.";
+
+/**
+ * 아직 대기인데 **조작 창은 이미 닫혔을 때** 덧붙는 한 문장.
+ *
+ * 두 축이 독립이라는 것의 나머지 절반이다. `phase` 는 승인 원장이 답하고
+ * (`loginHandoffStateFor`: pending → `waiting`), 창 축은 그와 무관하게 닫힐 수
+ * 있다 — 사람이 창만 열었다 반환하고 카드는 누르지 않은 경우, lease 가 끊긴 경우,
+ * 세션이 끝난 경우. 그때 카드는 여전히 「개입 대기」가 맞지만, 대기 카피만 서 있으면
+ * 화면이 **모르는 것을 아는 척**한다: 사람은 자기가 방금 조작하던 창이 아직 열려
+ * 있다고 읽고, 창은 이미 없다.
+ *
+ * 그래서 판정을 뒤집지 않고(국면 어휘는 원장의 것이다) 사실 한 줄을 접합한다.
+ * 사유마다 문장이 다른 이유는 결과 문장들이 다른 이유와 같다 — 「다시 열 수
+ * 있습니다」는 세션이 살아 있을 때만 참이고, 끝난 세션에 그렇게 말하면 없는 방으로
+ * 가는 문을 그리는 것이다.
+ */
+export const LOGIN_HANDOFF_WAITING_WINDOW_CLOSED: Readonly<
+  Record<LoginHandoffOutcome, string>
+> = {
+  returned: "직접 조작 창은 닫혔습니다. 필요하면 다시 열 수 있습니다.",
+  expired:
+    "직접 조작 창은 연결이 끊겨 닫혔습니다. 필요하면 다시 열 수 있습니다.",
+  session_ended: "작업 세션이 끝나면서 직접 조작 창도 닫혔습니다.",
+};
+
+/**
+ * 대기 중인 카드가 말할 문장. 판정이 코어에 있는 이유는
+ * [`loginHandoffStoppedCopy`] 와 같다.
+ *
+ * 창이 열려 있거나 열린 적이 없으면 부탁 문장 그대로다. 창이 닫힌 사실은
+ * **더해질 뿐** 대기를 뒤집지 않는다: 승인 원장은 여전히 아무 답도 받지 않았고,
+ * 그것이 이 카드가 아직 서 있는 이유다.
+ */
+export function loginHandoffWaitingCopy(
+  card: Pick<LoginHandoffCard, "control">
+): string {
+  const endReason = card.control?.endReason;
+  return endReason
+    ? `${LOGIN_HANDOFF_WAITING_COPY} ${LOGIN_HANDOFF_WAITING_WINDOW_CLOSED[endReason]}`
+    : LOGIN_HANDOFF_WAITING_COPY;
+}
 
 /**
  * 사람이 run 을 멈췄을 때(`stopped`) 카드가 말하는 것. **두 문장이고, 둘째는

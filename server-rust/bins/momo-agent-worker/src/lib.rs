@@ -90,7 +90,9 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use a2a::{route_a2a_mentions_in_tx, A2aSend};
 use momo_agent::approval::{
     approval_payload, approval_request_body, approval_request_props, attach_request_message_in_tx,
-    create_pending_approval_in_tx, default_expires_at, NewApproval,
+    create_pending_approval_in_tx, default_expires_at, login_handoff_session_id,
+    login_handoff_session_id_dropped_detail, HandoffSessionId, NewApproval,
+    AUDIT_LOGIN_HANDOFF_SESSION_ID_DROPPED, AUDIT_SCHEMA_LOGIN_HANDOFF_SESSION_ID_DROPPED,
 };
 use momo_agent::tools::{
     ApprovalReason, ToolCall, ACTION_TYPE_TOOL_CALL, TOOL_AUDIT_SCHEMA, WORK_SESSION_SPAWN,
@@ -1169,6 +1171,28 @@ impl AgentWorker {
                         .with_schema(TOOL_AUDIT_SCHEMA, approval_payload),
                 )
                 .await?;
+
+                // LIVE-4 freeze H2 — the card just went up without its deep
+                // link, because the model's `session_id` is not a UUID. The
+                // card cannot say so (a props key that explains its own absence
+                // is a sentence about plumbing, addressed to a person who was
+                // asked to go and log in), and nothing else would ever notice:
+                // the stamp simply matches no rows, silently, forever. So the
+                // absence is written where absences are answerable.
+                if matches!(login_handoff_session_id(&call), HandoffSessionId::Malformed) {
+                    write_audit(
+                        conn,
+                        &AuditEntry::new(workspace_id, AUDIT_LOGIN_HANDOFF_SESSION_ID_DROPPED)
+                            .by(agent_member_id)
+                            .target("approval", approval_id)
+                            .run(run_id)
+                            .with_schema(
+                                AUDIT_SCHEMA_LOGIN_HANDOFF_SESSION_ID_DROPPED,
+                                login_handoff_session_id_dropped_detail(&call),
+                            ),
+                    )
+                    .await?;
+                }
 
                 Ok(ToolDisposition::Parked { approval_id })
             })

@@ -749,16 +749,108 @@ pub fn approval_request_props(
 /// `LOGIN_HANDOFF_KIND` there is this string.
 pub const LOGIN_HANDOFF_PROPS_KIND: &str = "login_handoff";
 
+/// What the model wrote in `session_id`, after the only reading of it that the
+/// rest of the system can act on (LIVE-4 freeze H2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HandoffSessionId {
+    /// No `session_id` argument, or a blank one. Also the answer for every tool
+    /// that is not the login handoff — this is a question only that card asks.
+    Absent,
+    /// Present, and not a UUID. The card carries no `session_id` at all.
+    Malformed,
+    /// Parsed. The card carries `Uuid::to_string()`, which is lower-case and
+    /// hyphenated — the same spelling `uuid::text` renders in PostgreSQL.
+    Canonical(Uuid),
+}
+
+/// Read the handoff card's `session_id` argument, canonically.
+///
+/// ## Why parsing is not fussiness
+///
+/// Two readers act on this string and they disagree about spelling. The tool
+/// executor parses it (`Uuid::parse_str`, which accepts capitals, braces and the
+/// unhyphenated form alike), so the *model* is served whatever it wrote. The
+/// boundary stamp does not parse: it compares
+/// `message.props->>'session_id' = $2::text` against a `uuid` PostgreSQL
+/// renders lower-case and hyphenated
+/// (`momo_t3::stamp_control_window_on_cards_in_tx`), because a props key is text
+/// and a text join is what a jsonb predicate can index.
+///
+/// So a model that wrote `A1B2C3D4-…` used to get a card whose stamp matched
+/// **zero rows, forever**: 정지 시각 and 재개 시각 never landed, and the card
+/// stayed 「개입 대기」 through a window that had opened, closed and lapsed. The
+/// fix belongs at the write, not at the join — normalizing here makes one
+/// spelling true for every later reader, while a `lower()` on the join would
+/// still be wrong for the unhyphenated form and would cost the predicate its
+/// index.
+///
+/// Callers that need to *report* the malformed case (an audit row) get it from
+/// the same function that decides the props, so the two can never disagree about
+/// whether an id was dropped.
+pub fn login_handoff_session_id(call: &ToolCall) -> HandoffSessionId {
+    if crate::tools::normalize(&call.name)
+        != crate::tools::normalize(crate::tools::WORK_SESSION_LOGIN_HANDOFF)
+    {
+        return HandoffSessionId::Absent;
+    }
+    let Some(raw) = call
+        .arguments
+        .get("session_id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return HandoffSessionId::Absent;
+    };
+    match Uuid::parse_str(raw) {
+        Ok(session_id) => HandoffSessionId::Canonical(session_id),
+        Err(_) => HandoffSessionId::Malformed,
+    }
+}
+
+/// `audit_log.action` for a handoff card that lost its deep link (freeze H2).
+///
+/// Its own row rather than a field on the approval's, because it is a different
+/// claim with a different subject: the approval row says a human was asked to
+/// consent, and this one says the card that asked them carries no door and
+/// names why. Written only when it happened, so its presence is the signal.
+pub const AUDIT_LOGIN_HANDOFF_SESSION_ID_DROPPED: &str = "approval.login_handoff.session_id_dropped";
+/// `detail.schema` for that row.
+pub const AUDIT_SCHEMA_LOGIN_HANDOFF_SESSION_ID_DROPPED: &str =
+    "momo.approval.login_handoff.session_id_dropped.v1";
+
+/// The audit detail for a dropped handoff `session_id`.
+///
+/// Carries the raw text, which is new disclosure of nothing: the same string is
+/// already in `props.arguments` and in the approval payload this row sits beside
+/// (`TOOL_AUDIT_SCHEMA`). Without it the row says a link was dropped and leaves
+/// the operator no way to see what the model actually wrote, which is the one
+/// question the row exists to answer.
+pub fn login_handoff_session_id_dropped_detail(call: &ToolCall) -> Value {
+    json!({
+        "reason": "session_id is not a uuid",
+        "tool_name": call.name,
+        "call_id": call.call_id,
+        "session_id_raw": call
+            .arguments
+            .get("session_id")
+            .and_then(Value::as_str)
+            .unwrap_or_default(),
+    })
+}
+
 /// Turn a generic tool-approval card into the login handoff card.
 ///
 /// Three edits, each of which a client would otherwise get wrong:
 ///
 /// * **`kind`** is what makes it this card at all.
-/// * **`session_id`** is the deep link's only input. It is copied out of the
+/// * **`session_id`** is the deep link's only input. It is taken from the
 ///   model's arguments rather than resolved here, because the approval is
 ///   raised before anything validates the id; a card pointing at a session that
 ///   does not exist opens a detail screen that says so, which is a better
-///   failure than a card with no door.
+///   failure than a card with no door. It is **normalized** on the way in —
+///   see [`login_handoff_session_id`] for why a card whose id is merely
+///   *copied* is a card the boundary stamp can never find.
 /// * **`title` is REMOVED and `summary` is replaced.** The generic values are
 ///   English server strings ("Approve work.session.login_handoff", "Review the
 ///   proposed tool call…") written for a reviewer of a tool call, and this card
@@ -779,14 +871,18 @@ fn apply_login_handoff_props(props: &mut Value, call: &ToolCall) {
     };
     object.insert("kind".into(), json!(LOGIN_HANDOFF_PROPS_KIND));
     object.remove("title");
-    if let Some(session_id) = call
-        .arguments
-        .get("session_id")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    {
-        object.insert("session_id".into(), json!(session_id));
+    match login_handoff_session_id(call) {
+        // PostgreSQL's spelling, because PostgreSQL is what compares it.
+        HandoffSessionId::Canonical(session_id) => {
+            object.insert("session_id".into(), json!(session_id.to_string()));
+        }
+        // A door that opens onto nothing is worse than no door: the deep link
+        // would take a person to a session detail for an id that cannot exist,
+        // and the boundary stamp would never find this card either. Both
+        // failures are quieter than the absence, so the key goes.
+        HandoffSessionId::Malformed | HandoffSessionId::Absent => {
+            object.remove("session_id");
+        }
     }
     match call
         .arguments
@@ -1074,6 +1170,79 @@ mod tests {
         let blank = handoff_props(json!({ "session_id": "   ", "reason": "  " }));
         assert!(blank.get("summary").is_none());
         assert!(blank.get("session_id").is_none());
+    }
+
+    /// LIVE-4 freeze H2 — the id the card carries is the id PostgreSQL compares.
+    ///
+    /// Red before the fix: the write path only trimmed, so every spelling the
+    /// tool executor happily parses (`Uuid::parse_str` takes capitals, braces
+    /// and the unhyphenated form) landed in `props` verbatim, while the boundary
+    /// stamp joins on `props->>'session_id' = $2::text` against a `uuid`
+    /// PostgreSQL renders lower-case and hyphenated. A shouted UUID was a card
+    /// the stamp could never find: zero rows, no 정지 시각, no 재개 시각, and the
+    /// card stayed 「개입 대기」 through a whole window.
+    #[test]
+    fn the_card_carries_the_ledger_spelling_of_the_session_id() {
+        const CANONICAL: &str = "9a1b2c3d-4e5f-4a6b-8c7d-1e2f3a4b5c6d";
+        for written in [
+            // What a model actually writes when it echoes a UUID it read
+            // somewhere with a different house style.
+            "9A1B2C3D-4E5F-4A6B-8C7D-1E2F3A4B5C6D",
+            "9a1b2c3d4e5f4a6b8c7d1e2f3a4b5c6d",
+            "9A1B2C3D4E5F4A6B8C7D1E2F3A4B5C6D",
+            "{9a1b2c3d-4e5f-4a6b-8c7d-1e2f3a4b5c6d}",
+            "urn:uuid:9A1B2C3D-4E5F-4A6B-8C7D-1E2F3A4B5C6D",
+            "  9A1B2C3D-4E5F-4A6B-8C7D-1E2F3A4B5C6D  ",
+        ] {
+            let props = handoff_props(json!({ "session_id": written }));
+            assert_eq!(
+                props["session_id"],
+                json!(CANONICAL),
+                "「{written}」 must reach the card as the one spelling \
+                 `stamp_control_window_on_cards_in_tx` can join on"
+            );
+        }
+    }
+
+    /// …and an id that is not one at all takes no door with it.
+    ///
+    /// A deep link built from a string no session can have opens a detail screen
+    /// for nothing, and the stamp would miss the card anyway. The absence is the
+    /// honest render; the *reason* goes to the audit log, which is where a
+    /// question about a card that lost its link is answerable.
+    #[test]
+    fn a_session_id_that_is_not_one_leaves_no_false_door() {
+        let call = handoff_call(json!({ "session_id": "the deploy console session" }));
+        assert_eq!(login_handoff_session_id(&call), HandoffSessionId::Malformed);
+
+        let props = handoff_props(json!({ "session_id": "the deploy console session" }));
+        assert!(
+            props.get("session_id").is_none(),
+            "a card with a door onto nothing is worse than a card with no door"
+        );
+
+        // The audit row's detail names what was dropped and what the model
+        // wrote, because 「이 카드에 왜 링크가 없나」 has no other answer.
+        let detail = login_handoff_session_id_dropped_detail(&call);
+        assert_eq!(detail["session_id_raw"], json!("the deploy console session"));
+        assert_eq!(detail["call_id"], json!("call_1"));
+        assert!(detail["reason"].as_str().is_some_and(|r| r.contains("uuid")));
+    }
+
+    /// The question belongs to this card and no other.
+    #[test]
+    fn no_other_tool_is_asked_for_a_session_id_it_never_promised() {
+        let call = ToolCall {
+            call_id: "call_2".to_string(),
+            name: "chat.send".to_string(),
+            arguments: json!({ "session_id": "NOT-A-UUID" }),
+        };
+        assert_eq!(
+            login_handoff_session_id(&call),
+            HandoffSessionId::Absent,
+            "normalizing another tool's argument would rewrite props this \
+             function has no business reading"
+        );
     }
 
     #[test]

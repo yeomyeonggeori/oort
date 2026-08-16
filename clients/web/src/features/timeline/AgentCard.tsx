@@ -30,10 +30,10 @@ import {
 import {
   LOGIN_HANDOFF_DECISION,
   LOGIN_HANDOFF_DEPLOYMENT_COPY,
-  LOGIN_HANDOFF_OUTCOME_DETAIL,
-  LOGIN_HANDOFF_WAITING_COPY,
   loginHandoffNote,
+  loginHandoffOutcomeDetail,
   loginHandoffStoppedCopy,
+  loginHandoffWaitingCopy,
   type LoginHandoffCard,
   type LoginHandoffNote,
 } from "@momo/core/features/timeline/loginHandoffCard";
@@ -521,7 +521,11 @@ function LoginHandoffBody({
       {card.reason && <LabeledRow label="사유">{card.reason}</LabeledRow>}
       {!settled && (
         <LabeledRow label="상태" testId="handoff-waiting">
-          {LOGIN_HANDOFF_WAITING_COPY}
+          {/* 창이 이미 닫혔는데 아직 대기인 갈래에서 한 문장이 더 붙는다
+              (freeze M1). 국면은 승인 원장의 것이라 뒤집지 않고, 화면이
+              「지금도 조작 중」이라고 읽히는 것만 막는다. 문장도 조건도
+              코어가 답한다. */}
+          {loginHandoffWaitingCopy(card)}
         </LabeledRow>
       )}
       {/* 경계 사실. 증보 3 D3이 에이전트에게 허락한 것과 같은 것만 그린다 —
@@ -543,7 +547,10 @@ function LoginHandoffBody({
           사실을 두 번 말하면 읽는 사람은 두 가지가 일어났다고 읽는다. */}
       {card.outcome !== null && (
         <LabeledRow label="결과" testId="handoff-outcome">
-          {LOGIN_HANDOFF_OUTCOME_DETAIL[card.outcome]}
+          {/* 표를 그대로 인덱싱하지 않는다 (freeze M2): 창 없이 `returned` 인
+              카드는 「화면을 돌려주었습니다」라고 말할 수 없다 — 이 배포에서는
+              아무도 잡은 적이 없고, 실행기가 모델에게 하는 말도 그렇다. */}
+          {loginHandoffOutcomeDetail(card)}
         </LabeledRow>
       )}
       {card.phase === "stopped" && (

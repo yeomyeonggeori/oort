@@ -494,6 +494,47 @@ pub async fn latest_control_window_in_tx(
     Ok(row.as_ref().map(decode_window).transpose()?)
 }
 
+/// The login handoff cards one stamp rewrote — and an obligation.
+///
+/// A `message` row whose `props` moved without an envelope is a row only a
+/// reload can reveal (invariant #3: REST → PG → outbox → relay). The freeze
+/// found exactly that: the timeline card kept saying 「사람이 조작 중」 until
+/// somebody refreshed, and 재개 pressed on that stale card claimed 「개입 완료」
+/// about a window that had lapsed. So this type is `#[must_use]` and carries the
+/// ids rather than a count: the caller cannot write the stamp and quietly not
+/// announce it, because dropping this value is a compiler warning.
+///
+/// The announcement itself is **not** invented here. It is the `message.edited`
+/// envelope #1152 landed (`momo_messaging::emit_message_edited_in_tx`), which
+/// re-publishes the whole row — `props` included — at the message's own `seq`,
+/// and which both clients already apply in place. That crate owns the envelope
+/// for the same reason it owns the SQL behind it, which is why this crate hands
+/// back ids instead of growing a dependency on the message spine.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[must_use = "a stamped card must be re-published on its message.edited envelope \
+              in this same transaction, or the open timeline never hears the \
+              boundary — see StampedHandoffCards"]
+pub struct StampedHandoffCards(Vec<Uuid>);
+
+impl StampedHandoffCards {
+    /// The `message.id` of every card this stamp touched, in no particular
+    /// order. Almost always empty — most control windows have nothing to do
+    /// with a login handoff.
+    pub fn into_message_ids(self) -> Vec<Uuid> {
+        self.0
+    }
+
+    /// How many cards moved. For audit details and tests; announcing them is
+    /// [`Self::into_message_ids`]'s job.
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
 /// Stamp a window's boundary facts onto the login handoff cards still waiting on
 /// this session (LIVE-4).
 ///
@@ -506,6 +547,14 @@ pub async fn latest_control_window_in_tx(
 /// to be listening is a card that forgets. So the durable copy goes onto the row
 /// the reader is looking at, exactly as `update_session_card_props_in_tx` keeps
 /// the session card's props in step with the session.
+///
+/// ## …and why the card needs an envelope of its OWN
+///
+/// `work.session.control` is read by the **session** surface, which asks "who
+/// holds this screen". The card is a `message` row, and the only thing that
+/// moves a message row on an open timeline is a message frame. Returning the
+/// stamped ids is how this function makes the caller say so — see
+/// [`StampedHandoffCards`].
 ///
 /// ## Why the scope is this narrow
 ///
@@ -521,14 +570,20 @@ pub async fn latest_control_window_in_tx(
 /// to `momo_agent::approval`, and this crate has no business depending on the
 /// agent crate to write three numbers.
 ///
-/// Returns how many cards were stamped, which is almost always zero — most
-/// control windows have nothing to do with a login handoff.
+/// Returns the cards that moved, which is almost always none — most control
+/// windows have nothing to do with a login handoff.
+///
+/// The `session_id` comparison is the ledger's own spelling on both sides:
+/// PostgreSQL renders `uuid::text` lower-case and hyphenated, and the write path
+/// that puts the id into `props` parses it to the same canonical form
+/// (`momo_agent::approval::login_handoff_session_id`). A model that shouted its
+/// UUID in capitals used to be a card this join could never find.
 pub async fn stamp_control_window_on_cards_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     props_kind: &str,
     window: &ControlWindow,
-) -> Result<u64, DbError> {
+) -> Result<StampedHandoffCards, DbError> {
     let mut facts = json!({ "control_started_at_ms": window.started_at_ms });
     if let Some(ended_at_ms) = window.ended_at_ms {
         facts["control_ended_at_ms"] = json!(ended_at_ms);
@@ -536,7 +591,7 @@ pub async fn stamp_control_window_on_cards_in_tx(
     if let Some(reason) = window.end_reason {
         facts["control_end_reason"] = json!(reason.as_db_label());
     }
-    let updated = sqlx::query(
+    let ids: Vec<Uuid> = sqlx::query_scalar(
         "UPDATE message m \
             SET props = m.props || $4::jsonb \
           WHERE m.workspace_id = $1 \
@@ -547,15 +602,16 @@ pub async fn stamp_control_window_on_cards_in_tx(
                   SELECT 1 FROM approval a \
                    WHERE a.workspace_id = m.workspace_id \
                      AND a.request_message_id = m.id \
-                     AND a.status = 'pending')",
+                     AND a.status = 'pending') \
+        RETURNING m.id",
     )
     .bind(workspace_id)
     .bind(window.work_session_id)
     .bind(props_kind)
     .bind(&facts)
-    .execute(&mut *conn)
+    .fetch_all(&mut *conn)
     .await?;
-    Ok(updated.rows_affected())
+    Ok(StampedHandoffCards(ids))
 }
 
 /// A window this sweep closed, with the channel its boundary event goes to.

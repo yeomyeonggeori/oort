@@ -9,9 +9,13 @@ import {
   LOGIN_HANDOFF_IN_CONTROL_LEAD,
   LOGIN_HANDOFF_KIND,
   LOGIN_HANDOFF_OUTCOME_DETAIL,
+  LOGIN_HANDOFF_RETURNED_WITHOUT_WINDOW_DETAIL,
   LOGIN_HANDOFF_STOPPED_COPY,
+  LOGIN_HANDOFF_WAITING_WINDOW_CLOSED,
+  loginHandoffOutcomeDetail,
   loginHandoffStatusLabel,
   loginHandoffStoppedCopy,
+  loginHandoffWaitingCopy,
 } from '@momo/core/features/timeline/loginHandoffCard';
 import type {Message} from '@momo/core/lib/api';
 
@@ -120,10 +124,48 @@ describe('폰은 그리되 결정하지 않는다', () => {
   });
 
   it('세 결과의 문장을 폰이 다시 쓰지 않는다', () => {
-    expect(MESSAGE_ROW_CODE).toContain('LOGIN_HANDOFF_OUTCOME_DETAIL');
+    expect(MESSAGE_ROW_CODE).toContain('loginHandoffOutcomeDetail(card)');
     for (const sentence of Object.values(LOGIN_HANDOFF_OUTCOME_DETAIL)) {
       expect(MESSAGE_ROW_CODE).not.toContain(sentence);
     }
+    expect(MESSAGE_ROW_CODE).not.toContain(
+      LOGIN_HANDOFF_RETURNED_WITHOUT_WINDOW_DETAIL,
+    );
+    // 표를 손으로 인덱싱하면 창 없는 `returned` 에서 실행기와 어긋난다
+    // (freeze M2) — 조건은 코어의 것이다.
+    expect(MESSAGE_ROW_CODE).not.toContain('LOGIN_HANDOFF_OUTCOME_DETAIL[');
+  });
+
+  it('창이 닫힌 뒤에도 대기인 카드가 그 사실을 말한다 (freeze M1)', () => {
+    // 폰은 결정 동선이 없어 이 줄이 창의 상태를 말하는 유일한 자리다. 문장도
+    // 조건도 코어에서 온다.
+    expect(MESSAGE_ROW_CODE).toContain('loginHandoffWaitingCopy(card)');
+    for (const sentence of Object.values(LOGIN_HANDOFF_WAITING_WINDOW_CLOSED)) {
+      expect(MESSAGE_ROW_CODE).not.toContain(sentence);
+    }
+    const card = agentCardModel(
+      handoffMessage({
+        approval_status: 'pending',
+        control_started_at_ms: 1_760_000_100_000,
+        control_ended_at_ms: 1_760_000_200_000,
+        control_end_reason: 'expired',
+      }),
+    );
+    if (card?.kind !== 'login_handoff') throw new Error('login handoff card');
+    expect(card.phase).toBe('waiting');
+    expect(loginHandoffWaitingCopy(card)).toContain(
+      LOGIN_HANDOFF_WAITING_WINDOW_CLOSED.expired,
+    );
+  });
+
+  it('창 없이 재개된 카드는 실행기와 같은 문장을 말한다 (freeze M2)', () => {
+    const card = agentCardModel(handoffMessage({approval_status: 'approved'}));
+    if (card?.kind !== 'login_handoff') throw new Error('login handoff card');
+    expect(card.outcome).toBe('returned');
+    expect(card.control).toBeNull();
+    expect(loginHandoffOutcomeDetail(card)).toBe(
+      LOGIN_HANDOFF_RETURNED_WITHOUT_WINDOW_DETAIL,
+    );
   });
 
   it('진행 상황은 전부 그린다 — 결정할 수 없다는 것이 알 수 없다는 뜻은 아니다', () => {

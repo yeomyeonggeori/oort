@@ -76,7 +76,7 @@ use axum::{Extension, Json};
 use momo_agent::{park_runs_for_control_window_in_tx, resume_runs_from_control_window_in_tx};
 use momo_auth::{active_workspace_role, Principal, PrincipalKind};
 use momo_db::audit::{write_audit, AuditEntry};
-use momo_messaging::cent_channel;
+use momo_messaging::{cent_channel, emit_message_edited_in_tx};
 use momo_outbox::{emit_outbox, OutboxKind};
 use momo_t3::{
     active_control_window_in_tx, active_observer_capability_count_in_tx,
@@ -409,14 +409,7 @@ async fn issue_in_tx(
     // control window opened for any other purpose stamps nothing, and that is
     // what the `props.kind` clause is for.
     if let Some(window) = control_window.as_ref() {
-        stamp_control_window_on_cards_in_tx(
-            conn,
-            workspace_id,
-            momo_agent::approval::LOGIN_HANDOFF_PROPS_KIND,
-            window,
-        )
-        .await
-        .map_err(T3Error::from)?;
+        stamp_handoff_cards_in_tx(conn, workspace_id, window).await?;
     }
 
     // Same transaction as the grant, for `terminal_attach`'s reason: a
@@ -624,6 +617,46 @@ async fn return_control_in_tx(
     Ok(Ok(Some(window)))
 }
 
+/// Write the window's boundary facts onto the waiting login handoff cards **and
+/// publish the rows that moved** (LIVE-4 freeze H1).
+///
+/// The two halves are one statement because a durable copy nobody is told about
+/// is not a durable copy of anything a person can see: the timeline renders the
+/// `props` it was handed, so a card stamped without a frame keeps saying
+/// 「사람이 조작 중」 until a reload, and 재개 pressed on that stale card claims
+/// 「개입 완료」 about a window that already lapsed. (The agent is safe either
+/// way — the ledger refuses it — but a card that lies to a person is the failure
+/// this repo names first.)
+///
+/// The frame is the existing `message.edited` (#1152 / #1130 전제①), which
+/// carries the whole row including `props` at the message's own `seq` and which
+/// both clients already merge in place. Nothing new is minted here.
+///
+/// It lives in this route layer, not in `momo-t3`, for the reason that crate's
+/// manifest states: `momo-t3` owns no `outbox` SQL and no message spine
+/// dependency, so the composition is the caller's — inside the caller's
+/// transaction, exactly like the lifecycle broadcasts beside it.
+async fn stamp_handoff_cards_in_tx(
+    conn: &mut momo_db::PgConnection,
+    workspace_id: Uuid,
+    window: &ControlWindow,
+) -> Result<(), T3Error> {
+    let stamped = stamp_control_window_on_cards_in_tx(
+        conn,
+        workspace_id,
+        momo_agent::approval::LOGIN_HANDOFF_PROPS_KIND,
+        window,
+    )
+    .await
+    .map_err(T3Error::from)?;
+    for message_id in stamped.into_message_ids() {
+        emit_message_edited_in_tx(&mut *conn, workspace_id, message_id)
+            .await
+            .map_err(T3Error::from)?;
+    }
+    Ok(())
+}
+
 /// Resume the parked runs, write the close audit row, and broadcast the 재개
 /// boundary event.
 ///
@@ -669,14 +702,7 @@ pub(crate) async fn emit_control_closed_in_tx(
     // caller, for the same argument the resume above is written with — a close
     // path that forgets is a card that says 「사람이 조작 중」 forever. This
     // covers all four closes, including the lapse nobody performs.
-    stamp_control_window_on_cards_in_tx(
-        conn,
-        workspace_id,
-        momo_agent::approval::LOGIN_HANDOFF_PROPS_KIND,
-        window,
-    )
-    .await
-    .map_err(T3Error::from)?;
+    stamp_handoff_cards_in_tx(conn, workspace_id, window).await?;
 
     let mut entry = AuditEntry::new(workspace_id, AUDIT_ACTION_CONTROL_CLOSED)
         .target("work_session", window.work_session_id)

@@ -157,12 +157,14 @@ pub use approval::{
     cancel_pending_approvals_for_run_in_tx, create_pending_approval_in_tx, decided_props_patch,
     decision_broadcast_payload, decision_event_payload, decision_receipt, default_expires_at,
     existing_decision_in_tx, is_active_channel_member_in_tx, is_active_human_member_in_tx,
-    list_approvals_in_tx, lock_approval_in_tx, mark_approval_decided_in_tx,
+    list_approvals_in_tx, lock_approval_in_tx, login_handoff_session_id,
+    login_handoff_session_id_dropped_detail, mark_approval_decided_in_tx,
     mark_approval_expired_in_tx, normalized_reason, overdue_approvals_in_tx, record_decision_in_tx,
     resume_job_payload, tool_grants_from_payload, validated_limit, validated_status,
-    workspaces_with_overdue_approvals, ApprovalListRow, ExistingDecision, LockedApproval,
-    NewApproval, OverdueApproval, DEFAULT_TTL_SECONDS, LISTABLE_STATUSES, RESUME_MODEL,
-    RUN_CANCELLED_DECISION_REASON,
+    workspaces_with_overdue_approvals, ApprovalListRow, ExistingDecision, HandoffSessionId,
+    LockedApproval, NewApproval, OverdueApproval, AUDIT_LOGIN_HANDOFF_SESSION_ID_DROPPED,
+    AUDIT_SCHEMA_LOGIN_HANDOFF_SESSION_ID_DROPPED, DEFAULT_TTL_SECONDS, LISTABLE_STATUSES,
+    RESUME_MODEL, RUN_CANCELLED_DECISION_REASON,
 };
 pub use tools::{
     approval_reason, is_executable, requires_approval, ApprovalReason, ToolCall, ToolGrant,
