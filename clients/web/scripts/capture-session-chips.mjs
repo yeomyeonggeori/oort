@@ -772,11 +772,18 @@ async function captureScheme(browser, scheme) {
   // ---- 목록 행의 칩 (#1463) ------------------------------------------------
   // 스캔이 도착할 때까지 기다린다. 행은 세션 목록과 함께 먼저 그려지고 칩은 채널
   // 히스토리 읽기가 돌아온 뒤에 선다 — 그 사이에 재면 「칩이 없다」가 언제나 참이다.
-  await page
-    .locator(
-      `[data-testid="work-session-row"][data-session-id="${CLEAN_ID}"] [data-testid="work-session-verification"]`
-    )
-    .waitFor();
+  try {
+    await page
+      .locator(
+        `[data-testid="work-session-row"][data-session-id="${CLEAN_ID}"] [data-testid="work-session-verification"]`
+      )
+      .waitFor({ timeout: 10_000 });
+  } catch {
+    throw new Error(
+      `${scheme}: 목록 행에 검증 칩이 끝내 서지 않았다 — 행은 스레드를 읽지 않으므로,` +
+        ` 채널 히스토리 스캔이 닿지 않으면 이 목록은 영영 아무 말도 하지 않는다 (#1463)`
+    );
+  }
   const rowChips = await page.evaluate(ROW_VERIFICATIONS);
   for (const [name, id, expected] of [
     ["통과", CLEAN_ID, "pass"],
@@ -824,12 +831,19 @@ async function captureScheme(browser, scheme) {
   // 중」이라 부르고 세션 자신은 「통과 3」을 보고했다.
   await page.getByTestId("work-scope-mine").click();
   await page.getByTestId("my-work-session-list").waitFor();
-  await page
-    .locator(
-      `[data-testid="my-work-session-row"][data-session-id="${REPORTED_RUNNING_ID}"]` +
-        ` [data-testid="my-work-session-verification"]`
-    )
-    .waitFor();
+  try {
+    await page
+      .locator(
+        `[data-testid="my-work-session-row"][data-session-id="${REPORTED_RUNNING_ID}"]` +
+          ` [data-testid="my-work-session-verification"]`
+      )
+      .waitFor({ timeout: 10_000 });
+  } catch {
+    throw new Error(
+      `${scheme}: 「내 세션」 행에 검증 칩이 끝내 서지 않았다 — 도는 세션도 이미` +
+        ` 보고했을 수 있고, 두 목록이 한 세션을 두고 다른 것을 말하면 안 된다 (#1463)`
+    );
+  }
   const mineChips = await page
     .getByTestId("my-work-session-verification")
     .count();
