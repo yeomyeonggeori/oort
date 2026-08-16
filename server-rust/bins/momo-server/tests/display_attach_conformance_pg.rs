@@ -17,7 +17,9 @@
 //!
 //! Since LIVE-3 it also covers ADR-0004 증보 3: who may take control of a live
 //! screen, what that costs the agent while it lasts, and the three ways the
-//! window closes.
+//! window closes. #1425 added the fourth thing a window does — it stops the
+//! agent's **run layer** (D6, 「토큰 소진 0」) — and with it a fourth close, the
+//! lease lapse settled by `momo-notifier`'s sweep rather than by a route.
 //!
 //! ## What each test goes red on
 //!
@@ -33,6 +35,9 @@
 //! | `live3_4_input_enabled_tracks_the_window_and_not_just_the_grade` | answer `input_enabled` from the grade alone, or stop renewing the lease on re-validation |
 //! | `live3_5_a_retaken_grant_carries_the_keyboard_and_the_replaced_one_does_not` | leave the window bound to the grant it was opened by when the same owner re-takes control, or mint a second window for the retry |
 //! | `live3_6_a_session_that_leaves_underneath_a_window_closes_it` | stop closing the window on the source session of a resume, or let an idempotent 재종료 return early past a window still standing on an ended session |
+//! | `live3_7_a_control_window_parks_the_run_it_stops_and_four_doors_resume_it` | drop the park from `issue_in_tx`, drop the resume from `emit_control_closed_in_tx`, delete the notifier's lapse sweep, resume a run a second window still holds, park a run parked on an approval, or let a close resurrect a cancelled run |
+//! | `live3_8_a_window_opening_elsewhere_outlasts_a_return_that_races_it` | drop the run-row lock from either half of the park/resume pair, or narrow the park's lock to the rows it intends to update |
+//! | `live3_9_two_closes_at_once_still_leave_exactly_one_resume` | drop the run-row lock from the resume, or take it before the caller's own window close instead of after |
 //!
 //! ### The mutation proof (ADR-0004 증보 3's own acceptance criterion)
 //!
@@ -45,6 +50,20 @@
 //! everything; this one cannot. It then checks the ledger is unchanged by the
 //! refused attempts, so 「the agent observed nothing」 is a claim about what was
 //! written and not merely about what was delivered.
+//!
+//! Since #1425 that test carries a second axis for the same reason. A window
+//! now parks the runs driving its session, and a parked run is refused by
+//! `control_run_binding_in_tx` *above* the session gate — so measuring the
+//! session gate on a parked run would measure the wrong refusal. `live3_2`
+//! therefore keeps two runs: the one the window parks, and a bystander that
+//! drives a different session and stays `running`. The bystander is refused on
+//! the controlled session and served on its own **in the same breath**, which is
+//! a control no "refuse everything" implementation can produce.
+//!
+//! `live3_7` carries D6's own mutation proof, on the surface where the credit
+//! is actually spent: the gateway's completion door answers a *different
+//! sentence* before and after the window (a lease refusal, then an approval-hold
+//! refusal), and `usage_ledger` gains nothing meanwhile.
 //!
 //! ## What is deliberately NOT here
 //!
@@ -111,6 +130,31 @@ async fn momo_app_pool() -> PgPool {
         .connect_with(options)
         .await
         .expect("connect as momo_app (run bootstrap_roles.sql first)")
+}
+
+/// The role the control-window sweep really runs as (#1425).
+///
+/// `live3_7` drives one real iteration of `momo-notifier`'s sweep, and running
+/// it on the superuser pool would prove nothing about whether the notifier can
+/// perform it: the candidate query is **cross-tenant** by necessity (invariant
+/// #6 binds `app.workspace_id` per transaction, so there is no tenant to bind
+/// yet) and `display_control_window` carries RLS FORCE. On a NOBYPASSRLS role
+/// that read matches zero rows and the sweep silently does nothing forever.
+/// `bootstrap_roles.sql` grants `momo_notifier` BYPASSRLS and asserts it; this
+/// pool is what makes the test depend on that fact rather than on a superuser
+/// that would hide its absence.
+async fn momo_notifier_pool() -> PgPool {
+    let options: PgConnectOptions = database_url()
+        .parse()
+        .expect("DATABASE_URL parses as a postgres connect string");
+    let password = std::env::var("MOMO_NOTIFIER_PASSWORD")
+        .unwrap_or_else(|_| "momo_notifier_dev_pw".to_string());
+    let options = options.username("momo_notifier").password(&password);
+    PgPoolOptions::new()
+        .max_connections(4)
+        .connect_with(options)
+        .await
+        .expect("connect as momo_notifier (run bootstrap_roles.sql first)")
 }
 
 fn resolve_psql() -> PathBuf {
@@ -1458,6 +1502,15 @@ async fn seed_run(su: &PgPool, fixture: &Fixture, agent: Uuid) -> Uuid {
     run
 }
 
+/// `agent_run.status`, straight from the ledger — the fact #1425 writes.
+async fn run_status(su: &PgPool, run: Uuid) -> String {
+    sqlx::query_scalar("SELECT status::text FROM agent_run WHERE id = $1")
+        .bind(run)
+        .fetch_one(su)
+        .await
+        .expect("read the run status")
+}
+
 /// Mint an agent bearer carrying `work:control`.
 async fn agent_bearer(su: &PgPool, fixture: &Fixture, agent: Uuid) -> String {
     let secret = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
@@ -1678,6 +1731,29 @@ async fn window_end_reason(su: &PgPool, session: Uuid) -> Option<String> {
         .fetch_one(su)
         .await
         .expect("read the end reason")
+}
+
+/// The `end_reason` of the window on this session that closed **last**.
+///
+/// [`window_end_reason`]'s sibling, for the tests whose session is taken and
+/// returned more than once. A session with two windows in its history has two
+/// rows, and asking for "the" reason without an order is an ambiguous question —
+/// a bug in the assertion, not in the ledger.
+///
+/// Ordered by `ended_at` rather than `started_at` because [`lapse_lease`] ages
+/// a window's **start** ten minutes into the past (it has to: a lapsed lease is
+/// always an old window, never a fresh one with a past lease), so start order
+/// and close order genuinely disagree in exactly the test that needs this.
+async fn last_closed_window_end_reason(su: &PgPool, session: Uuid) -> Option<String> {
+    sqlx::query_scalar(
+        "SELECT end_reason FROM display_control_window \
+          WHERE work_session_id = $1 AND ended_at IS NOT NULL \
+          ORDER BY ended_at DESC, id DESC LIMIT 1",
+    )
+    .bind(session)
+    .fetch_one(su)
+    .await
+    .expect("read the last close reason")
 }
 
 /// PostgreSQL's own clock, in the milliseconds every assertion below compares
@@ -2032,6 +2108,35 @@ async fn live3_2_the_agent_cannot_reach_a_session_under_human_control() {
     let bearer = agent_bearer(&su, &fixture, agent).await;
     seed_spawn_lineage(&su, &fixture, agent, &host_id, session).await;
 
+    // A second session on the same host, and a second live run of the same
+    // agent that drives only that one.
+    //
+    // Since #1425 the session gate is not the only thing a window does: it also
+    // parks every run **driving the controlled session** (증보 3 D6), and a
+    // parked run is refused by `control_run_binding_in_tx` before the session
+    // gate is ever consulted. Measuring the session gate on a parked run would
+    // therefore measure the wrong refusal.
+    //
+    // So the two facts get one subject each. `run` drives `session` and carries
+    // the parking; `bystander` drives `elsewhere` and is what the session gate
+    // is measured on. It is entitled by exactly the same predicates —
+    // `session_control_lineage_status_in_tx` reads the *agent*'s lineage, not
+    // the run's — so nothing about the mutation proof was weakened by the split,
+    // and it gained a second axis: `elsewhere` stays reachable at the same
+    // instant `session` is refused, which no route that simply refuses
+    // everything could produce.
+    let elsewhere = create_session(
+        &http,
+        &base,
+        &owner_token,
+        workspace,
+        fixture.channel,
+        &host_id,
+    )
+    .await;
+    let bystander = seed_run(&su, &fixture, agent).await;
+    seed_spawn_lineage(&su, &fixture, agent, &host_id, elsewhere).await;
+
     // ---- the control plane works for this agent BEFORE the window ----------
     // The mutation proof needs this: an assertion that only ever saw a refusal
     // would pass just as well against a route that refuses everything.
@@ -2048,6 +2153,15 @@ async fn live3_2_the_agent_cannot_reach_a_session_under_human_control() {
             response.text().await
         );
     }
+    let response = agent_work_control(
+        &http, &base, &bearer, &fixture, bystander, &host_id, elsewhere, "read",
+    )
+    .await;
+    assert_eq!(
+        response.status(),
+        201,
+        "and so is the bystander run on its own session"
+    );
     let dispatched: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM work_control WHERE session_id = $1 AND status = 'dispatched'",
     )
@@ -2073,7 +2187,7 @@ async fn live3_2_the_agent_cannot_reach_a_session_under_human_control() {
     // ---- and now the same agent, unchanged, is refused ---------------------
     for kind in ["read", "input", "kill"] {
         let response = agent_work_control(
-            &http, &base, &bearer, &fixture, run, &host_id, session, kind,
+            &http, &base, &bearer, &fixture, bystander, &host_id, session, kind,
         )
         .await;
         assert_eq!(
@@ -2088,6 +2202,18 @@ async fn live3_2_the_agent_cannot_reach_a_session_under_human_control() {
             "and it is told the boundary, not the pixels"
         );
     }
+    // …while the session nobody is typing into is still reachable, in the same
+    // breath, by the same run. The gate is about a screen, not about an agent.
+    let response = agent_work_control(
+        &http, &base, &bearer, &fixture, bystander, &host_id, elsewhere, "read",
+    )
+    .await;
+    assert_eq!(
+        response.status(),
+        201,
+        "증보 3 stops the agent's reach into ONE screen; a second session on the \
+         same host, in the same channel, is untouched"
+    );
 
     // The refusal happens above every write: an agent that tried to look leaves
     // no control row, no dispatch and no audit trail of having looked. That is
@@ -2108,23 +2234,40 @@ async fn live3_2_the_agent_cannot_reach_a_session_under_human_control() {
     // The race the create-side gate cannot reach: two controls were dispatched
     // one moment before the window opened. If the daemon could still collect
     // them it would read the screen the person is typing a password into.
-    let withheld = poll_pending(&http, &base, &host_seed, workspace, &host_id).await;
-    assert!(
-        withheld.is_empty(),
+    let delivered = poll_pending(&http, &base, &host_seed, workspace, &host_id).await;
+    let for_session = |queue: &[Value], target: Uuid| -> usize {
+        queue
+            .iter()
+            .filter(|control| control["sessionId"].as_str() == Some(&target.to_string()))
+            .count()
+    };
+    assert_eq!(
+        for_session(&delivered, session),
+        0,
         "a control dispatched before the window opened is withheld while it \
          stands — the poll is the only way a daemon learns what to run, and \
          handing these over would read the screen the person is typing into"
     );
+    // The same poll, on the same host, still carries the other session's work.
+    // Withholding is a clause about a screen, not a stop-the-world for the
+    // daemon, and an assertion that only saw an empty queue could not tell the
+    // two apart.
+    assert!(
+        for_session(&delivered, elsewhere) >= 1,
+        "the host's other session is not under anybody's keyboard, so its \
+         dispatched work is delivered in the very same poll"
+    );
 
-    // ---- the agent's other work is untouched -------------------------------
+    // ---- the AGENT's other work is untouched -------------------------------
     // 증보 3 stops the agent's reach into THIS session, not the agent. A spawn
-    // names no session, so it is not the session anybody is typing into.
+    // names no session, so it is not the session anybody is typing into — and
+    // this run is not one the window parked, so nothing about it changed.
     let response = http
         .post(format!("{base}/v1/workspaces/{workspace}/work-controls"))
         .bearer_auth(&bearer)
         .json(&json!({
             "channelId": fixture.channel.to_string(),
-            "runId": run.to_string(),
+            "runId": bystander.to_string(),
             "targetHostId": host_id,
             "kind": "spawn",
             "payload": { "tool": "claude", "label": "elsewhere" },
@@ -2137,6 +2280,24 @@ async fn live3_2_the_agent_cannot_reach_a_session_under_human_control() {
         409,
         "a spawn names no session; blocking it would stop the agent rather than \
          its reach into one screen (증보 3 D6)"
+    );
+
+    // ---- the RUN that was driving this session is stopped (#1425) -----------
+    // The other half of D6, and the reason the two subjects above are two. This
+    // run is parked, so its refusal is its own and arrives before the session
+    // gate is consulted at all — which is exactly why the sweeper in
+    // `momo-notifier` has to exist. `live3_7` owns that story; here the only
+    // claim is that the window really did move the run.
+    assert_eq!(
+        run_status(&su, run).await,
+        "paused",
+        "ADR-0004 증보 3 D6: 정지되는 것은 에이전트 런 층"
+    );
+    assert_eq!(
+        run_status(&su, bystander).await,
+        "running",
+        "…and only the runs driving the controlled session — a window is not a \
+         pause button for the agent"
     );
 
     // ---- the VM never moved (증보 3 D6) ------------------------------------
@@ -2170,7 +2331,7 @@ async fn live3_2_the_agent_cannot_reach_a_session_under_human_control() {
     // And the withheld work is delivered now rather than lost.
     let delivered = poll_pending(&http, &base, &host_seed, workspace, &host_id).await;
     assert!(
-        delivered.len() >= 2,
+        for_session(&delivered, session) >= 2,
         "withholding paused the work; it did not throw it away — a withheld row \
          is still `dispatched`, so the next poll after the window closes gets it"
     );
@@ -2750,4 +2911,861 @@ async fn live3_6_a_session_that_leaves_underneath_a_window_closes_it() {
     let envelopes = closed_control_envelopes(&su, workspace, stale).await;
     assert_eq!(envelopes.len(), 1, "and it announced itself, once");
     assert_eq!(envelopes[0]["end_reason"], json!("session_ended"));
+}
+
+// ---------------------------------------------------------------------------
+// live3-7 — the run layer parks, and comes back by all four doors (#1425)
+//
+// ADR-0004 증보 3 D6 is two sentences and LIVE-3 shipped one of them:
+//
+//   * the VM does not move — `work_session.status` untouched, ADR-0140's state
+//     machine untouched, running-time billing (ADR-0164) continuing;
+//   * **the agent's RUN layer stops** — 「사용자 개입 대기」, 토큰 소진 0,
+//     크레딧이 토큰으로 새지 않음.
+//
+// The second one had every part except a writer: `RunStatus::Paused` was in the
+// enum, in `LIVE`, in `is_approval_held` and in `is_cancellable`, and the
+// gateway's two doors had been refusing held runs since the approval batch.
+// Nothing ever wrote it. This test is that writer's proof, and it is deliberately
+// built as a *round trip* rather than a snapshot: parking that could not be
+// undone would be a worse bug than parking that never happened.
+//
+// ## What each assertion goes red on
+//
+// | fact | revert that makes it red |
+// |---|---|
+// | 창 개설 → `paused` | drop `park_runs_for_control_window_in_tx` from `issue_in_tx`, or widen its `status = 'running'` guard so it parks nothing |
+// | 토큰 소진 0 | reorder the gateway's `is_approval_held` check below the lease judgement, or drop `Paused` from `is_approval_held` |
+// | 반환 → resume | drop the resume from `emit_control_closed_in_tx` |
+// | lapse → resume | delete the notifier sweep, or let it close windows whose lease still stands |
+// | 세션 종료 → resume | close the window on session end without settling the runs |
+// | 멱등 | drop either guard (`status = 'running'` / `status = 'paused'`) |
+// | 승인 hold 보존 | park an `awaiting_approval` run, or resume one to `running` |
+// ---------------------------------------------------------------------------
+
+/// The gateway callback surface, which every other test in this file leaves off.
+///
+/// `AgentGatewaySettings::default()` is `Worker` mode, so the two run-callback
+/// routes 403 before they reach the ledger. This test needs them reachable
+/// because they are where 「토큰 소진 0」 is actually enforced: a run that cannot
+/// complete cannot write a `usage_ledger` row, and that is the sentence D6 makes
+/// about credit.
+const GATEWAY_SECRET: &str = "live3-run-parking-gateway-2f8b41c6d0e7";
+
+async fn start_server_with_gateway(pool: PgPool) -> String {
+    let state = AppState::new(
+        pool,
+        TEST_JWT_SECRET.to_string(),
+        "ws://127.0.0.1:8000/connection/websocket".to_string(),
+    )
+    .with_agent_gateway(momo_server::config::AgentGatewaySettings {
+        mode: momo_server::config::AgentGatewayMode::Gateway,
+        secret: GATEWAY_SECRET.to_string(),
+        // The legacy shared secret is the only callback credential a test can
+        // mint without standing up per-agent bearer issuance
+        // (`gateway_mode_conformance_pg` says the same thing at more length).
+        allow_legacy_secret: true,
+    });
+    let app = build_app(state);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind momo-server");
+    let address: SocketAddr = listener.local_addr().expect("server address");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    format!("http://{address}")
+}
+
+/// Try to complete a run through the gateway, and report `(status, message)`.
+///
+/// Deliberately sent with **no** job/lease. The `complete` transaction answers
+/// an approval hold *before* it judges the lease, on purpose (`agent_gateway`
+/// :563-575: "a run parked on a human decision must say so even to a gateway
+/// whose lease expired"), so the message alone distinguishes the two refusals:
+///
+/// | run state | message |
+/// |---|---|
+/// | not held | `gateway job lease is expired or not owned` |
+/// | parked   | `agent run requires a human approval decision (paused)` |
+///
+/// That pair is the mutation proof for the hold: an assertion that only ever saw
+/// the second sentence would pass against a server that refused every
+/// completion, and this one cannot.
+async fn gateway_complete(
+    http: &reqwest::Client,
+    base: &str,
+    workspace: Uuid,
+    run: Uuid,
+) -> (reqwest::StatusCode, String) {
+    let response = http
+        .post(format!(
+            "{base}/v1/workspaces/{workspace}/agent-runs/{run}/gateway/complete"
+        ))
+        .header(momo_server::auth::GATEWAY_SECRET_HEADER, GATEWAY_SECRET)
+        .json(&json!({ "status": "succeeded", "output": { "text": "done" } }))
+        .send()
+        .await
+        .expect("gateway completion");
+    let status = response.status();
+    let body: Value = response
+        .json()
+        .await
+        .unwrap_or_else(|_| json!({ "error": { "message": "unparsed" } }));
+    let message = body["error"]["message"].as_str().unwrap_or("").to_string();
+    (status, message)
+}
+
+/// The `runs_parked` / `runs_resumed` lists the two audit rows carry.
+async fn audit_run_list(su: &PgPool, session: Uuid, action: &str, key: &str) -> Vec<String> {
+    let details: Vec<Value> = sqlx::query_scalar(
+        "SELECT detail FROM audit_log \
+          WHERE target_type = 'work_session' AND target_id = $1 AND action = $2 \
+          ORDER BY created_at DESC, id DESC LIMIT 1",
+    )
+    .bind(session)
+    .bind(action)
+    .fetch_all(su)
+    .await
+    .expect("read the audit detail");
+    details
+        .first()
+        .and_then(|detail| detail[key].as_array().cloned())
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|value| value.as_str().map(str::to_string))
+        .collect()
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn live3_7_a_control_window_parks_the_run_it_stops_and_four_doors_resume_it() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let fixture = seed(&su, &app_pool).await;
+    // The role the sweep really runs as, not a superuser that would hide a
+    // missing BYPASSRLS (see `momo_notifier_pool`).
+    let notifier_pool = momo_notifier_pool().await;
+    let base = start_server_with_gateway(app_pool).await;
+    let http = reqwest::Client::new();
+    let workspace = fixture.workspace;
+
+    let owner_token = login(&http, &base, workspace, &fixture.owner_email).await;
+    let (host_id, host_seed) = register_host(&http, &base, &owner_token, workspace, true).await;
+    let agent = seed_agent(&su, &fixture, "live3-parking-intern").await;
+    let bearer = agent_bearer(&su, &fixture, agent).await;
+
+    // A session this agent drives, carrying the `audit_log ⋈ work_control` link
+    // that is the ledger's own record of "this run is driving that screen" — the
+    // same relation `linked_work_session_ids_in_tx` reports on a cancel. Written
+    // by the real route rather than seeded, because that link IS what decides
+    // who gets parked.
+    let driven_session = |run: Uuid| {
+        let (http, base, su, fixture) = (&http, &base, &su, &fixture);
+        let (owner_token, bearer, host_id) = (&owner_token, &bearer, &host_id);
+        async move {
+            let session =
+                create_session(http, base, owner_token, workspace, fixture.channel, host_id).await;
+            publish_display(http, base, &host_seed, workspace, host_id, session).await;
+            seed_spawn_lineage(su, fixture, agent, host_id, session).await;
+            let response =
+                agent_work_control(http, base, bearer, fixture, run, host_id, session, "read")
+                    .await;
+            assert_eq!(
+                response.status(),
+                201,
+                "the run is entitled to this session before anybody takes control"
+            );
+            session
+        }
+    };
+
+    // ---- 1. 창 개설 → paused, and what that costs the gateway ---------------
+    let run = seed_run(&su, &fixture, agent).await;
+    let session = driven_session(run).await;
+    assert_eq!(run_status(&su, run).await, "running");
+
+    // The positive half of the gateway proof: before the window, the completion
+    // is refused for a reason that has nothing to do with a hold.
+    let (status, message) = gateway_complete(&http, &base, workspace, run).await;
+    assert_eq!(status, 409);
+    assert_eq!(
+        message, "gateway job lease is expired or not owned",
+        "before the window this run is not held — it is merely leaseless"
+    );
+
+    let response = take_control(&http, &base, &owner_token, workspace, session).await;
+    assert_eq!(response.status(), 200, "the owner takes the keyboard");
+
+    assert_eq!(
+        run_status(&su, run).await,
+        "paused",
+        "ADR-0004 증보 3 D6: 정지되는 것은 에이전트 런 층 — this is the writer \
+         LIVE-3 left out"
+    );
+    assert_eq!(
+        audit_run_list(&su, session, "work.display_attach.issued", "runs_parked").await,
+        vec![run.to_string()],
+        "and the audit log — the surface entitled to names — says which run it \
+         stopped, because 「why did 김인턴 go quiet」 has no other answer"
+    );
+
+    // 토큰 소진 0. Same request, same everything, one changed fact.
+    let (status, message) = gateway_complete(&http, &base, workspace, run).await;
+    assert_eq!(status, 409);
+    assert_eq!(
+        message, "agent run requires a human approval decision (paused)",
+        "the completion door is shut, and shut ABOVE the lease judgement — a \
+         run that cannot complete cannot bill"
+    );
+    let usage: i64 = sqlx::query_scalar("SELECT count(*) FROM usage_ledger WHERE run_id = $1")
+        .bind(run)
+        .fetch_one(&su)
+        .await
+        .expect("count usage rows");
+    assert_eq!(
+        usage, 0,
+        "「크레딧이 토큰으로 새지 않음」 — the ledger is where that sentence is \
+         either true or not"
+    );
+
+    // The VM did not move (the OTHER half of D6, asserted here beside the half
+    // that did, so a future edit cannot satisfy one by breaking the other).
+    let session_status: String =
+        sqlx::query_scalar("SELECT status FROM work_session WHERE id = $1")
+            .bind(session)
+            .fetch_one(&su)
+            .await
+            .expect("read session status");
+    assert_eq!(session_status, "running");
+
+    // Idempotent: re-taking control (the client retry `open_control_window_in_tx`
+    // is built for) parks nothing a second time and leaves the run where it is.
+    let response = take_control(&http, &base, &owner_token, workspace, session).await;
+    assert_eq!(response.status(), 200);
+    assert_eq!(run_status(&su, run).await, "paused");
+    assert_eq!(window_count(&su, session).await, 1, "still one window");
+
+    // ---- 2. door one: 반환 --------------------------------------------------
+    let response = return_control(&http, &base, &owner_token, workspace, session).await;
+    assert_eq!(response.status(), 200);
+    assert_eq!(
+        run_status(&su, run).await,
+        "running",
+        "「사용자 개입 완료」 — the run comes back to the status the park took"
+    );
+    assert_eq!(
+        audit_run_list(&su, session, "work.display_control.closed", "runs_resumed").await,
+        vec![run.to_string()]
+    );
+    let (_, message) = gateway_complete(&http, &base, workspace, run).await;
+    assert_eq!(
+        message, "gateway job lease is expired or not owned",
+        "and the gateway door is open again — the hold is gone, not merely hidden"
+    );
+
+    // Idempotent: a retried return resumes nothing and breaks nothing.
+    let response = return_control(&http, &base, &owner_token, workspace, session).await;
+    assert_eq!(response.status(), 200);
+    assert_eq!(run_status(&su, run).await, "running");
+
+    // ---- 3. door two: the lease lapses, and who is left to notice -----------
+    //
+    // This is the case that made the sweep necessary rather than merely tidy.
+    // `work_controls::create` judges the requesting run's eligibility ABOVE the
+    // window sweep, so the parked run cannot free itself by asking: it is
+    // refused by its own status and never reaches the statement that would have
+    // closed the window. Asserted first, because it is the *reason* the loop in
+    // `momo-notifier` exists and a reader who does not see it will delete that
+    // loop as redundant.
+    let response = take_control(&http, &base, &owner_token, workspace, session).await;
+    assert_eq!(response.status(), 200);
+    assert_eq!(run_status(&su, run).await, "paused");
+    lapse_lease(&su, session).await;
+
+    let response = agent_work_control(
+        &http, &base, &bearer, &fixture, run, &host_id, session, "read",
+    )
+    .await;
+    assert_eq!(
+        response.status(),
+        409,
+        "the parked run is refused by its own hold, above the window sweep"
+    );
+    let body: Value = response.json().await.expect("error body");
+    assert_eq!(
+        body["error"]["message"], "agent run is not eligible for work control",
+        "and the refusal is the RUN's, not the session's — which is exactly why \
+         asking cannot be what reconciles the lapse"
+    );
+    assert!(
+        open_window(&su, session).await.is_some(),
+        "so the lapsed window is still standing, and would stand forever"
+    );
+    assert_eq!(run_status(&su, run).await, "paused");
+
+    // The author of the lapse: one real sweep iteration, in process.
+    //
+    // The counts are `>=` rather than `==` because the sweep is deliberately
+    // cross-tenant (invariant #6: it asks which workspaces need visiting) and
+    // this suite shares one database with every other test in the file. What is
+    // exact is the state of THIS window and THIS run, asserted below — the
+    // counts only have to prove the loop did work at all.
+    let stats =
+        momo_notifier::control_window_sweep::sweep_lapsed_control_windows(&notifier_pool, 100)
+            .await
+            .expect("sweep lapsed control windows");
+    assert!(stats.closed >= 1, "a lapsed window, closed by the clock");
+    assert!(stats.resumed >= 1, "and the run it was holding, released");
+    assert!(
+        open_window(&su, session).await.is_none(),
+        "this session's window in particular"
+    );
+    assert_eq!(run_status(&su, run).await, "running");
+    assert_eq!(
+        last_closed_window_end_reason(&su, session).await.as_deref(),
+        Some("expired"),
+        "closed with the reason that is TRUE — a lapse is not a 반환"
+    );
+    let envelopes = closed_control_envelopes(&su, workspace, session).await;
+    assert!(
+        envelopes
+            .iter()
+            .any(|e| e["end_reason"] == json!("expired")),
+        "재개 시각 reaches the channel even when nobody performed the close"
+    );
+
+    // Idempotent: a second sweep finds nothing and moves nothing.
+    let stats =
+        momo_notifier::control_window_sweep::sweep_lapsed_control_windows(&notifier_pool, 100)
+            .await
+            .expect("second sweep");
+    assert_eq!(stats.closed, 0);
+    assert_eq!(stats.resumed, 0);
+    assert_eq!(run_status(&su, run).await, "running");
+
+    // …and the agent's reach really is back.
+    let response = agent_work_control(
+        &http, &base, &bearer, &fixture, run, &host_id, session, "read",
+    )
+    .await;
+    assert_eq!(response.status(), 201);
+
+    // ---- 4. door three: the session ends underneath the keyboard ------------
+    let ending_run = seed_run(&su, &fixture, agent).await;
+    let ending_session = driven_session(ending_run).await;
+    let response = take_control(&http, &base, &owner_token, workspace, ending_session).await;
+    assert_eq!(response.status(), 200);
+    assert_eq!(run_status(&su, ending_run).await, "paused");
+
+    let response = http
+        .patch(format!(
+            "{base}/v1/workspaces/{workspace}/work-sessions/{ending_session}"
+        ))
+        .bearer_auth(&owner_token)
+        .json(&json!({ "status": "ended" }))
+        .send()
+        .await
+        .expect("end the session");
+    assert_eq!(response.status(), 200);
+    assert!(open_window(&su, ending_session).await.is_none());
+    assert_eq!(
+        run_status(&su, ending_run).await,
+        "running",
+        "a session that ends must not leave its runs parked on a window nobody \
+         can ever close — that is a permanently silent agent"
+    );
+
+    // ---- 5. two windows, one run: the second close is the one that frees it --
+    //
+    // The clause that is easiest to leave out and hardest to notice. A run
+    // driving two screens, both taken over, must not be handed back its reach
+    // into the one still being typed into just because the other was returned.
+    let shared_run = seed_run(&su, &fixture, agent).await;
+    let first = driven_session(shared_run).await;
+    let second = driven_session(shared_run).await;
+    assert_eq!(
+        take_control(&http, &base, &owner_token, workspace, first)
+            .await
+            .status(),
+        200
+    );
+    assert_eq!(
+        take_control(&http, &base, &owner_token, workspace, second)
+            .await
+            .status(),
+        200
+    );
+    assert_eq!(run_status(&su, shared_run).await, "paused");
+
+    assert_eq!(
+        return_control(&http, &base, &owner_token, workspace, first)
+            .await
+            .status(),
+        200
+    );
+    assert_eq!(
+        run_status(&su, shared_run).await,
+        "paused",
+        "one keyboard was handed back; the other is still held, and the run is \
+         held with it"
+    );
+    assert_eq!(
+        return_control(&http, &base, &owner_token, workspace, second)
+            .await
+            .status(),
+        200
+    );
+    assert_eq!(
+        run_status(&su, shared_run).await,
+        "running",
+        "the LAST close is the one that resumes"
+    );
+
+    // ---- 6. the approval hold is not this hold, and neither eats the other ---
+    //
+    // 「승인 hold와의 상호작용은 재설계 금지」 — the two holds share a status
+    // predicate (`is_approval_held`) and nothing else, and this is the assertion
+    // that keeps it that way. A window must not park a run parked on a human
+    // decision, because the approval's own resume
+    // (`requeue_run_from_approval_in_tx`) is guarded on `awaiting_approval` and
+    // would silently do nothing to a run a window had moved.
+    let awaiting_run = seed_run(&su, &fixture, agent).await;
+    let awaiting_session = driven_session(awaiting_run).await;
+    let parked =
+        sqlx::query("UPDATE agent_run SET status = 'awaiting_approval'::run_status WHERE id = $1")
+            .bind(awaiting_run)
+            .execute(&su)
+            .await
+            .expect("park the run on an approval")
+            .rows_affected();
+    assert_eq!(parked, 1);
+
+    let response = take_control(&http, &base, &owner_token, workspace, awaiting_session).await;
+    assert_eq!(response.status(), 200);
+    assert_eq!(
+        run_status(&su, awaiting_run).await,
+        "awaiting_approval",
+        "a control window does not get to overwrite a hold that belongs to a \
+         human decision"
+    );
+    assert_eq!(
+        return_control(&http, &base, &owner_token, workspace, awaiting_session)
+            .await
+            .status(),
+        200
+    );
+    assert_eq!(
+        run_status(&su, awaiting_run).await,
+        "awaiting_approval",
+        "…and closing the window does not answer the approval either"
+    );
+
+    // ---- 7. a human stop still reaches a parked run -------------------------
+    //
+    // ADR-0132's 휴먼 정지권 (`is_cancellable` admits `paused`), and the resume's
+    // refusal to resurrect what it ended.
+    let stopped_run = seed_run(&su, &fixture, agent).await;
+    let stopped_session = driven_session(stopped_run).await;
+    assert_eq!(
+        take_control(&http, &base, &owner_token, workspace, stopped_session)
+            .await
+            .status(),
+        200
+    );
+    assert_eq!(run_status(&su, stopped_run).await, "paused");
+
+    let response = http
+        .post(format!(
+            "{base}/v1/workspaces/{workspace}/agent-runs/{stopped_run}/cancel"
+        ))
+        .bearer_auth(&owner_token)
+        .send()
+        .await
+        .expect("stop the parked run");
+    assert_eq!(
+        response.status(),
+        200,
+        "being in the room is the right to stop what is happening in it, and a \
+         parked run is still happening"
+    );
+    assert_eq!(run_status(&su, stopped_run).await, "cancelled");
+
+    assert_eq!(
+        return_control(&http, &base, &owner_token, workspace, stopped_session)
+            .await
+            .status(),
+        200
+    );
+    assert_eq!(
+        run_status(&su, stopped_run).await,
+        "cancelled",
+        "a close must never resurrect a run a human ended — the resume's \
+         `status = 'paused'` guard is what refuses"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// live3-8 / live3-9 — one run, two sessions, two transactions (#1425 H1)
+//
+// `live3_7` proves the park/resume pair is right when two windows are opened and
+// closed one after another. These two prove it is right when they are **not**,
+// which is a different question with a different answer, and the answer was
+// wrong.
+//
+// A run may drive more than one session. `lock_attach_target_in_tx` serializes
+// everything that happens to ONE session's window, and nothing serialized
+// session A's window work against session B's — while both statements in the
+// pair decide from a `display_control_window` read, and under READ COMMITTED
+// that read sees only COMMITTED windows. Two transactions on two sessions of one
+// run could therefore each decide against a world the other was halfway through
+// changing:
+//
+//   * `live3_8` — B's window opens (its park moves nothing: the run is already
+//     `paused` under A) while A's return resumes on a snapshot without B in it.
+//     The run goes `running` with a person's keyboard live on B — the gateway
+//     hold coming off mid-login, which is 증보 3 D6's 「토큰 소진 0」 broken by an
+//     interleaving rather than by a missing statement.
+//   * `live3_9` — A and B close at the same instant, each resume sees the other
+//     window still standing, and both skip. Both windows end and the run is
+//     `paused` with nothing left that could ever resume it: the sweep looks only
+//     at OPEN windows, and a replayed close closes nothing. The agent is silent
+//     until a human cancels the run.
+//
+// They are two tests rather than one for the reason every mutation table in this
+// file is written the way it is: each half is broken by a **different** missing
+// lock, and a single test would only ever report the first one.
+//
+// Both drive the domain functions on two real connections instead of asserting
+// that a `FOR UPDATE` appears somewhere, because what is under test is what two
+// UNCOMMITTED transactions can see of each other — and no request can show that.
+// An HTTP call is committed by the time it answers.
+//
+// | test | revert that makes it red |
+// |---|---|
+// | `live3_8` | drop the lock from `park_runs_for_control_window_in_tx` — the already-`paused` park is exactly the path that used to pass through unlocked — or from `resume_runs_from_control_window_in_tx` |
+// | `live3_9` | drop the lock from `resume_runs_from_control_window_in_tx`, or take it before the caller's own window close instead of after |
+// ---------------------------------------------------------------------------
+
+/// Open a tenant transaction the way `momo_db::with_tenant_tx` does, but leave
+/// the commit in the caller's hands.
+///
+/// On the `momo_app` role under the real GUC rather than on the superuser pool
+/// the fixtures in this file use, and the difference is load-bearing: RLS FORCE
+/// applies to `agent_run`, and a `FOR UPDATE` whose rows a policy filters away
+/// locks nothing at all.
+///
+/// `lock_timeout` is the hang guard. A lock these tests expect to be released in
+/// well under a second becomes a failure rather than a suite that never
+/// finishes.
+async fn open_tenant_tx(
+    pool: &PgPool,
+    workspace: Uuid,
+) -> sqlx::Transaction<'static, sqlx::Postgres> {
+    let mut tx = pool.begin().await.expect("begin a tenant transaction");
+    momo_db::rebind_tenant_guc(&mut tx, workspace)
+        .await
+        .expect("bind app.workspace_id");
+    sqlx::query("SET LOCAL lock_timeout = '30s'")
+        .execute(&mut *tx)
+        .await
+        .expect("arm the hang guard");
+    tx
+}
+
+/// `issue_in_tx`'s two control writes — mint the grant, open its window — in a
+/// transaction the caller decides when to commit.
+async fn open_control_window_uncommitted(
+    tx: &mut sqlx::Transaction<'static, sqlx::Postgres>,
+    workspace: Uuid,
+    host_id: &str,
+    owner: Uuid,
+    session: Uuid,
+) {
+    let capability = momo_t3::issue_attach_capability_in_tx(
+        tx,
+        workspace,
+        session,
+        Uuid::parse_str(host_id).expect("host uuid"),
+        owner,
+        &momo_t3::mint_capability_token(),
+        momo_t3::AttachMode::Controller,
+        momo_t3::AttachKind::Display,
+    )
+    .await
+    .expect("mint the controller grant");
+    momo_t3::open_control_window_in_tx(tx, workspace, session, owner, capability.id)
+        .await
+        .expect("open the control window")
+        .expect("nobody else holds this session's keyboard");
+}
+
+/// Close a window and settle its runs, the way every close path does: the window
+/// write **first**, the run lock after it.
+async fn close_and_resume_in_tx(
+    tx: &mut sqlx::Transaction<'static, sqlx::Postgres>,
+    workspace: Uuid,
+    session: Uuid,
+) -> Vec<Uuid> {
+    momo_t3::close_control_window_in_tx(
+        tx,
+        workspace,
+        session,
+        momo_t3::ControlWindowEndReason::Returned,
+    )
+    .await
+    .expect("close the window")
+    .expect("there was a window to return");
+    momo_agent::resume_runs_from_control_window_in_tx(tx, workspace, session)
+        .await
+        .expect("resume whatever this close frees")
+        .iter()
+        .map(|run| run.run_id)
+        .collect()
+}
+
+/// Long enough for the racing transaction to reach its lock and block on it.
+///
+/// A **red-proof** device, not a synchronisation one: the assertions are about
+/// the state both transactions leave behind, and the fixed build reaches that
+/// state whatever the timing. What the wait buys is that a build without the
+/// lock reliably reaches the interleaving it is broken by, instead of
+/// accidentally running in the safe order and passing.
+const INTERLEAVE_WAIT: std::time::Duration = std::time::Duration::from_millis(750);
+
+/// Join a raced transaction, failing rather than hanging if it never lands.
+async fn settle_race<T: Send + 'static>(handle: tokio::task::JoinHandle<T>) -> T {
+    tokio::time::timeout(std::time::Duration::from_secs(60), handle)
+        .await
+        .expect("the raced transaction finished — a timeout here is a lock nobody released")
+        .expect("the raced transaction did not panic")
+}
+
+/// The fixture both tests need: an agent whose runs really do drive real
+/// sessions, and the pool that can open a transaction beside the server's.
+struct CrossSessionRig {
+    su: PgPool,
+    app_pool: PgPool,
+    base: String,
+    http: reqwest::Client,
+    fixture: Fixture,
+    owner_token: String,
+    host_id: String,
+    host_seed: [u8; 32],
+    agent: Uuid,
+    bearer: String,
+}
+
+impl CrossSessionRig {
+    async fn new(handle: &str) -> Self {
+        ensure_schema_and_roles();
+        let su = superuser_pool().await;
+        let app_pool = momo_app_pool().await;
+        let fixture = seed(&su, &app_pool).await;
+        // Cloned rather than moved: these tests need a connection of their own
+        // beside the server's, on the same role the server uses.
+        let base = start_server(app_pool.clone()).await;
+        let http = reqwest::Client::new();
+        let owner_token = login(&http, &base, fixture.workspace, &fixture.owner_email).await;
+        let (host_id, host_seed) =
+            register_host(&http, &base, &owner_token, fixture.workspace, true).await;
+        let agent = seed_agent(&su, &fixture, handle).await;
+        let bearer = agent_bearer(&su, &fixture, agent).await;
+        Self {
+            su,
+            app_pool,
+            base,
+            http,
+            fixture,
+            owner_token,
+            host_id,
+            host_seed,
+            agent,
+            bearer,
+        }
+    }
+
+    fn workspace(&self) -> Uuid {
+        self.fixture.workspace
+    }
+
+    async fn run(&self) -> Uuid {
+        seed_run(&self.su, &self.fixture, self.agent).await
+    }
+
+    /// `live3_7`'s fixture: a session this run drives, carrying the
+    /// `audit_log ⋈ work_control` link that decides who gets parked. Written by
+    /// the real route, because that link IS the relation under test.
+    async fn driven_session(&self, run: Uuid) -> Uuid {
+        let session = create_session(
+            &self.http,
+            &self.base,
+            &self.owner_token,
+            self.workspace(),
+            self.fixture.channel,
+            &self.host_id,
+        )
+        .await;
+        publish_display(
+            &self.http,
+            &self.base,
+            &self.host_seed,
+            self.workspace(),
+            &self.host_id,
+            session,
+        )
+        .await;
+        seed_spawn_lineage(&self.su, &self.fixture, self.agent, &self.host_id, session).await;
+        let response = agent_work_control(
+            &self.http,
+            &self.base,
+            &self.bearer,
+            &self.fixture,
+            run,
+            &self.host_id,
+            session,
+            "read",
+        )
+        .await;
+        assert_eq!(response.status(), 201, "the run drives this session");
+        session
+    }
+
+    async fn take_control(&self, session: Uuid) {
+        let response = take_control(
+            &self.http,
+            &self.base,
+            &self.owner_token,
+            self.workspace(),
+            session,
+        )
+        .await;
+        assert_eq!(response.status(), 200, "the owner takes the keyboard");
+    }
+
+    async fn run_status(&self, run: Uuid) -> String {
+        run_status(&self.su, run).await
+    }
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn live3_8_a_window_opening_elsewhere_outlasts_a_return_that_races_it() {
+    let rig = CrossSessionRig::new("live3-crossing-intern").await;
+    let workspace = rig.workspace();
+
+    let run = rig.run().await;
+    let taken = rig.driven_session(run).await;
+    let opening = rig.driven_session(run).await;
+
+    rig.take_control(taken).await;
+    assert_eq!(rig.run_status(run).await, "paused");
+
+    // The opening transaction: the second window exists, uncommitted.
+    let mut opening_tx = open_tenant_tx(&rig.app_pool, workspace).await;
+    open_control_window_uncommitted(
+        &mut opening_tx,
+        workspace,
+        &rig.host_id,
+        rig.fixture.owner,
+        opening,
+    )
+    .await;
+    let parked =
+        momo_agent::park_runs_for_control_window_in_tx(&mut opening_tx, workspace, opening)
+            .await
+            .expect("park the runs this window stops");
+    assert!(
+        parked.is_empty(),
+        "the run is already paused under the first window, so this park moves \
+         NOTHING — and that is precisely the path that used to take no lock, and \
+         so let the return below decide without it"
+    );
+
+    // …and the return of the FIRST keyboard, on its own connection, deciding
+    // meanwhile.
+    let returning = {
+        let pool = rig.app_pool.clone();
+        tokio::spawn(async move {
+            let mut tx = open_tenant_tx(&pool, workspace).await;
+            let resumed = close_and_resume_in_tx(&mut tx, workspace, taken).await;
+            tx.commit().await.expect("commit the return");
+            resumed
+        })
+    };
+    tokio::time::sleep(INTERLEAVE_WAIT).await;
+    opening_tx.commit().await.expect("commit the second window");
+    let resumed = settle_race(returning).await;
+
+    assert!(
+        resumed.is_empty(),
+        "the return handed the run back as though nobody else held a keyboard — \
+         but the second window is standing, and a run resumed under it is an \
+         agent reading a screen somebody is typing a password into (증보 3 D3/D6)"
+    );
+    assert_eq!(
+        rig.run_status(run).await,
+        "paused",
+        "「사용자 개입 대기」 survives a return on another session of the same run"
+    );
+    assert!(
+        open_window(&rig.su, opening).await.is_some(),
+        "and the fixture is the one it claims to be: the second window really is \
+         still open at the moment that verdict is read"
+    );
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn live3_9_two_closes_at_once_still_leave_exactly_one_resume() {
+    let rig = CrossSessionRig::new("live3-double-close-intern").await;
+    let workspace = rig.workspace();
+
+    let shared = rig.run().await;
+    let first = rig.driven_session(shared).await;
+    let second = rig.driven_session(shared).await;
+    rig.take_control(first).await;
+    rig.take_control(second).await;
+    assert_eq!(rig.run_status(shared).await, "paused");
+
+    let mut first_tx = open_tenant_tx(&rig.app_pool, workspace).await;
+    let resumed_first = close_and_resume_in_tx(&mut first_tx, workspace, first).await;
+    assert!(
+        resumed_first.is_empty(),
+        "the first close defers to the second window — `live3_7`'s rule, and \
+         correct here"
+    );
+
+    let closing_second = {
+        let pool = rig.app_pool.clone();
+        tokio::spawn(async move {
+            let mut tx = open_tenant_tx(&pool, workspace).await;
+            let resumed = close_and_resume_in_tx(&mut tx, workspace, second).await;
+            tx.commit().await.expect("commit the second return");
+            resumed
+        })
+    };
+    tokio::time::sleep(INTERLEAVE_WAIT).await;
+    first_tx.commit().await.expect("commit the first return");
+    let resumed_second = settle_race(closing_second).await;
+
+    assert_eq!(
+        resumed_second,
+        vec![shared],
+        "「the LAST close is the one that resumes」 has to mean the last close to \
+         COMMIT — two closes that each defer to the window the other is closing \
+         leave nobody to do it, and nothing ever comes back for the run"
+    );
+    assert_eq!(
+        rig.run_status(shared).await,
+        "running",
+        "both keyboards are back, so the agent is back — a run parked by windows \
+         that have ALL ended has no other door: the sweep reads open windows \
+         only, and a replayed return closes nothing"
+    );
+    assert!(
+        open_window(&rig.su, first).await.is_none() && open_window(&rig.su, second).await.is_none(),
+        "and both windows really did close — the fixture is the state it claims"
+    );
 }

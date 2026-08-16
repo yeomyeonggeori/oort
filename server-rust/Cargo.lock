@@ -1368,6 +1368,7 @@ dependencies = [
  "momo-ephemeral",
  "momo-mcp",
  "momo-messaging",
+ "momo-notifier",
  "momo-outbox",
  "momo-push",
  "momo-settings",

@@ -59,7 +59,8 @@
 //! ([`renew_control_window_lease_in_tx`]), so control stays open exactly as long
 //! as a producer keeps saying the stream is.
 
-use momo_db::PgConnection;
+use momo_db::{DbError, PgConnection};
+use serde_json::{json, Value};
 use sqlx::Row;
 use uuid::Uuid;
 
@@ -132,7 +133,13 @@ const WINDOW_COLUMNS: &str = "id, work_session_id, grantee_member_id, \
      floor(extract(epoch from ended_at) * 1000)::bigint AS ended_at_ms, \
      end_reason";
 
-fn window_from_row(row: &sqlx::postgres::PgRow) -> Result<ControlWindow, T3Error> {
+/// Decode to the row shape, in the error type sqlx speaks.
+///
+/// Split from [`window_from_row`] so the sweep-facing readers below can answer
+/// in [`DbError`] without a `T3Error` → `DbError` conversion that does not exist
+/// and should not: a decode failure is not an ADR-0140 enforcement point, and
+/// [`crate::error::classify_pg`] would have nothing to say about it.
+fn decode_window(row: &sqlx::postgres::PgRow) -> Result<ControlWindow, sqlx::Error> {
     let reason: Option<String> = row.try_get("end_reason")?;
     Ok(ControlWindow {
         id: row.try_get("id")?,
@@ -145,6 +152,10 @@ fn window_from_row(row: &sqlx::postgres::PgRow) -> Result<ControlWindow, T3Error
             .as_deref()
             .and_then(ControlWindowEndReason::from_db_label),
     })
+}
+
+fn window_from_row(row: &sqlx::postgres::PgRow) -> Result<ControlWindow, T3Error> {
+    Ok(decode_window(row)?)
 }
 
 /// Close every window on this session whose lease has lapsed.
@@ -373,6 +384,170 @@ pub async fn close_control_window_in_tx(
     .fetch_optional(&mut *conn)
     .await?;
     row.as_ref().map(window_from_row).transpose()
+}
+
+// ---------------------------------------------------------------------------
+// the close, for the two callers that are not a route (#1425)
+//
+// A lapse is the one close nobody performs. LIVE-3 announced it from wherever it
+// happened to be detected — a route reading the ledger — which was enough while
+// the only consequence was a gate that reads `NOT EXISTS`. It stopped being
+// enough the moment a window started **parking runs**: a run parked by a window
+// whose producer then died is resumed by whoever next reads that session, and on
+// the agent's own path there is no such reader. `work_controls::create` judges
+// the run's eligibility *above* the window sweep, so a parked run is refused
+// before it can reach the statement that would have freed it.
+//
+// So the lapse needs an author that runs whether or not anybody looks — the same
+// argument, in the same shape, that `momo-notifier`'s approval sweep is built on
+// — and that author needs the two reads below plus the payload builder the
+// routes use, so that "the agent resumed" is one envelope with one shape
+// wherever it is written.
+// ---------------------------------------------------------------------------
+
+/// `audit_log.action` for a control window closing (ADR-0004 증보 3).
+pub const AUDIT_ACTION_CONTROL_CLOSED: &str = "work.display_control.closed";
+/// `detail.schema` for that row.
+pub const AUDIT_SCHEMA_CONTROL_CLOSED: &str = "momo.work.display_control.closed.v1";
+
+/// The `work.session.control` envelope — the **boundary event**, and the only
+/// thing about a control window that leaves this workspace.
+///
+/// ADR-0004 증보 3 D3 names exactly what an agent may learn while a person is
+/// typing: 정지 시각, 재개 시각, and that the intervention finished. This
+/// carries those three and nothing more. There is no frame here, no keystroke,
+/// no endpoint and no bearer — the same count-only discipline
+/// `routes::terminal_attach::observer_payload` keeps for 관전자 수, one boundary
+/// over.
+///
+/// `grantee` is deliberately absent. Who is at the keyboard is a fact for the
+/// audit log, which is scoped to people who may read it; the broadcast goes to
+/// every member of the channel, and "someone has control" is all any of them —
+/// or the agent — needs in order to behave correctly.
+///
+/// Takes the Centrifugo channel as a **string** rather than building it from
+/// ids, because `cent_channel` belongs to `momo-messaging` and this crate has no
+/// business growing a dependency on the message spine to render one field. Both
+/// callers already hold the channel for the `emit_outbox` beside this.
+pub fn control_window_payload(channel: &str, window: &ControlWindow, open: bool) -> Value {
+    let state = if open { "opened" } else { "closed" };
+    let timestamp_ms = window.ended_at_ms.unwrap_or(window.started_at_ms);
+    let mut payload = json!({
+        "session_id": window.work_session_id.to_string(),
+        "state": state,
+        "started_at": window.started_at_ms,
+    });
+    if let Some(ended_at_ms) = window.ended_at_ms {
+        payload["ended_at"] = json!(ended_at_ms);
+    }
+    if let Some(reason) = window.end_reason {
+        payload["end_reason"] = json!(reason.as_db_label());
+    }
+    json!({
+        "channel": channel,
+        "data": {
+            "type": "work.session.control",
+            "v": 1,
+            "ts": timestamp_ms,
+            "payload": payload,
+        },
+        // Keyed by window AND state so the open and the close are two distinct
+        // events, and a retried close is one.
+        "idempotency_key": format!("{channel}:work.session.control:{}:{state}", window.id),
+    })
+}
+
+/// A window this sweep closed, with the channel its boundary event goes to.
+///
+/// `channel_id` is not on `display_control_window` — it is the session's, joined
+/// here rather than looked up afterwards so a closed window and the channel that
+/// must hear about it cannot come apart across two statements.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LapsedControlWindow {
+    pub window: ControlWindow,
+    pub channel_id: Uuid,
+}
+
+/// Every workspace that currently has a control window past its lease.
+///
+/// The sweep needs this because `app.workspace_id` is bound **per transaction**
+/// (invariant #6): there is no cross-tenant scan, so the notifier asks which
+/// tenants need visiting and then opens one tenant transaction each. Run with
+/// the admin GUC, exactly like the T3 lifecycle sweep's candidate query and the
+/// approval sweep's.
+///
+/// The predicate matches `display_control_window_active_idx`'s partial
+/// condition, so this reads an index that contains only **open** windows — a set
+/// bounded by the number of people typing into a live screen right now, not by
+/// the table's history.
+pub async fn workspaces_with_lapsed_control_windows(
+    conn: &mut PgConnection,
+    limit: i64,
+) -> Result<Vec<Uuid>, DbError> {
+    let rows: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT DISTINCT workspace_id \
+           FROM display_control_window \
+          WHERE ended_at IS NULL \
+            AND lease_expires_at <= clock_timestamp() \
+          LIMIT $1",
+    )
+    .bind(limit)
+    .fetch_all(&mut *conn)
+    .await?;
+    Ok(rows)
+}
+
+/// Close every lapsed window in this workspace, whatever session it stands on.
+///
+/// [`expire_lapsed_control_windows_in_tx`]'s workspace-wide twin. The two are
+/// separate statements rather than one with an optional session clause because
+/// the session-scoped one is called on the hot path of a request that already
+/// knows which session it is about, and an `IS NULL OR =` predicate there would
+/// cost that path its index for a caller it does not have.
+///
+/// One statement, not a read followed by an update, so two sweeps racing settle
+/// on the row lock: whichever gets there second sees `ended_at IS NOT NULL` and
+/// returns nothing, and every consequence below is therefore written exactly
+/// once per window.
+pub async fn expire_lapsed_control_windows_for_workspace_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    limit: i64,
+) -> Result<Vec<LapsedControlWindow>, DbError> {
+    let rows = sqlx::query(&format!(
+        "WITH lapsed AS ( \
+           SELECT id FROM display_control_window \
+            WHERE workspace_id = $1 \
+              AND ended_at IS NULL \
+              AND lease_expires_at <= clock_timestamp() \
+            ORDER BY lease_expires_at \
+            LIMIT $2 \
+            FOR UPDATE SKIP LOCKED \
+         ), closed AS ( \
+           UPDATE display_control_window \
+              SET ended_at = clock_timestamp(), end_reason = 'expired' \
+            WHERE workspace_id = $1 \
+              AND ended_at IS NULL \
+              AND id IN (SELECT id FROM lapsed) \
+           RETURNING {WINDOW_COLUMNS} \
+         ) \
+         SELECT closed.*, ws.channel_id \
+           FROM closed \
+           JOIN work_session ws ON ws.id = closed.work_session_id"
+    ))
+    .bind(workspace_id)
+    .bind(limit)
+    .fetch_all(&mut *conn)
+    .await?;
+    rows.iter()
+        .map(|row| {
+            Ok(LapsedControlWindow {
+                window: decode_window(row)?,
+                channel_id: row.try_get("channel_id")?,
+            })
+        })
+        .collect::<Result<Vec<_>, sqlx::Error>>()
+        .map_err(DbError::from)
 }
 
 #[cfg(test)]

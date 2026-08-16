@@ -6,8 +6,12 @@
 #   1. capability plane  the ignored conformance suite against an isolated
 #                        PostgreSQL 18 and the real in-process Axum router:
 #                        who may publish a screen, who may watch it, who may
-#                        CONTROL it, what that costs the agent while it lasts,
-#                        and what cuts a stream that is already open.
+#                        CONTROL it, what that costs the agent while it lasts —
+#                        its reach into the session AND its run layer (#1425,
+#                        증보 3 D6) — and what cuts a stream that is already
+#                        open. Since #1425 it also runs one real iteration of
+#                        the notifier's control-window sweep, because the lease
+#                        lapse is the one close no route performs.
 #   2. signalling        two local peers over a real WebSocket
 #                        (scripts/display_signaling_probe.py), plus its own red
 #                        proof — a producer that negotiates a datachannel MUST
@@ -509,6 +513,21 @@ note "PASS input_enabled is true only for a controller grant whose window still 
 note "PASS a re-take moves the window onto the grant it just minted — the retry keeps the keyboard"
 note "PASS a resume and an idempotent 재종료 both close the window the session left behind"
 note "PASS owner_only means 소유자만 본다 — the owner's own observer grant survives it"
+# #1425 — 증보 3 D6's second sentence, which LIVE-3 shipped without a writer.
+note "PASS the runs driving a controlled session are parked (running→paused) while the window stands"
+note "PASS a parked run's gateway completion is refused above the lease — usage_ledger gains nothing (토큰 소진 0)"
+note "PASS all four closes resume it — 반환 / lease lapse (notifier sweep) / session end / the last of two windows"
+note "PASS the approval hold is untouched by it: a window neither parks nor answers an awaiting_approval run"
+note "PASS a human stop reaches a parked run, and no close resurrects what it ended (ADR-0132 / ADR-0155)"
+# The same pair judged when two windows are worked on AT ONCE rather than one
+# after the other: two sessions of one run were two different rows for every
+# lock this area had, so the answer used to depend on the interleaving.
+note "PASS two sessions of one run cannot cross — a window opening elsewhere outlasts a return racing it, and two simultaneous closes still leave exactly one resume"
+note "runtime-unverified(in-process worker turn): the ledger shuts the GATEWAY doors on a parked run."
+note "  A turn already claimed by the in-process momo-agent-worker is not interrupted mid-flight —"
+note "  it commits through finish_run_in_tx, which carries no status guard. What parking stops is the"
+note "  next turn and every work-control the run would have asked for; the tokens of one turn already"
+note "  in the provider's hands are not refundable by a row."
 note "runtime-unverified(cubesandbox webrtc producer): no microVM was built or booted;"
 note "  ICE reachability from a browser to a sandbox remains unmeasured —"
 note "  see infra/cubesandbox/display-template/README.md"

@@ -55,35 +55,45 @@
 //!    daemon poll withholds anything already dispatched. That pair is 증보 3
 //!    D3's 기술적 차단, and it is enforcement rather than declaration: an agent
 //!    that cannot ask for the screen cannot capture it.
+//! 4. **the run layer parks.** Every `agent_run` driving that session goes
+//!    `running` → `paused` in the window's own transaction
+//!    ([`momo_agent::park_runs_for_control_window_in_tx`]) and back on every
+//!    close. That is 증보 3 D6's other half — 「정지되는 것은 에이전트 런 층 …
+//!    토큰 소진 0」 — and it is enforcement for the same reason (3) is: a parked
+//!    run is `is_approval_held`, so the gateway refuses its progress events and
+//!    its completion, and a run that cannot complete cannot write a
+//!    `usage_ledger` row.
 //!
 //! The VM does not move (증보 3 D6): `work_session.status` is untouched here,
 //! ADR-0140's state machine is untouched, and running-time billing continues.
-//! What stops is the agent's reach into the session, which is the only thing
-//! that was ever supposed to stop.
+//! What stops is the agent's reach into the session and the agent's spend on it,
+//! which is the only thing that was ever supposed to stop.
 
 use axum::body::Bytes;
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, Method, StatusCode, Uri};
 use axum::{Extension, Json};
+use momo_agent::{park_runs_for_control_window_in_tx, resume_runs_from_control_window_in_tx};
 use momo_auth::{active_workspace_role, Principal, PrincipalKind};
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_messaging::cent_channel;
 use momo_outbox::{emit_outbox, OutboxKind};
 use momo_t3::{
     active_control_window_in_tx, active_observer_capability_count_in_tx,
-    close_control_window_in_tx, expire_lapsed_control_windows_in_tx,
+    close_control_window_in_tx, control_window_payload, expire_lapsed_control_windows_in_tx,
     is_active_channel_member_in_tx, is_valid_capability_token, issue_attach_capability_in_tx,
     lock_attach_target_in_tx, lock_display_binding_target_in_tx, mint_capability_token,
     open_control_window_in_tx, renew_control_window_lease_in_tx,
     sweep_spent_observer_capabilities_in_tx, validate_attach_capability_in_tx,
     validated_display_binding, write_display_binding_in_tx, AttachKind, AttachMode, ControlWindow,
-    ControlWindowEndReason, RemoteDisplayBinding, T3Error,
+    ControlWindowEndReason, RemoteDisplayBinding, T3Error, AUDIT_ACTION_CONTROL_CLOSED,
+    AUDIT_SCHEMA_CONTROL_CLOSED,
 };
 use momo_wire::{
     record_provenance, EntityRef, ProvenanceError, Signer,
     ENTITY_WORK_HOST_TERMINAL_ATTACH_VALIDATE,
 };
-use serde_json::{json, Value};
+use serde_json::json;
 use uuid::Uuid;
 
 use crate::dto::{
@@ -109,10 +119,12 @@ const AUDIT_SCHEMA_ISSUED: &str = "momo.work.display_attach.issued.v1";
 const AUDIT_ACTION_BOUND: &str = "work.display_binding.published";
 /// `detail.schema` for that row.
 const AUDIT_SCHEMA_BOUND: &str = "momo.work.display_binding.published.v1";
-/// `audit_log.action` for a control window closing (ADR-0004 증보 3).
-const AUDIT_ACTION_CONTROL_CLOSED: &str = "work.display_control.closed";
-/// `detail.schema` for that row.
-const AUDIT_SCHEMA_CONTROL_CLOSED: &str = "momo.work.display_control.closed.v1";
+// `AUDIT_ACTION_CONTROL_CLOSED` / `AUDIT_SCHEMA_CONTROL_CLOSED` are imported
+// from `momo_t3::display_control` rather than declared here beside their two
+// siblings, because since #1425 this route is not their only author: the
+// notifier's control-window sweep closes a window nobody performed a close on,
+// and the two must write the same action with the same schema or an operator
+// reading the boundary back finds one story told in two vocabularies.
 
 /// The grade a body that says nothing asks for.
 ///
@@ -135,54 +147,6 @@ fn requested_display_mode(body: &[u8]) -> Result<AttachMode, ApiError> {
         Some("controller") => Ok(AttachMode::Controller),
         Some(_) => Err(ApiError::bad_request("mode must be controller or observer")),
     }
-}
-
-/// The `work.session.control` envelope — the **boundary event**, and the only
-/// thing about a control window that leaves this workspace.
-///
-/// ADR-0004 증보 3 D3 names exactly what an agent may learn while a person is
-/// typing: 정지 시각, 재개 시각, and that the intervention finished. This
-/// carries those three and nothing more. There is no frame here, no keystroke,
-/// no endpoint and no bearer — the same count-only discipline
-/// [`crate::routes::terminal_attach::observer_payload`] keeps for 관전자 수, one
-/// boundary over.
-///
-/// `grantee` is deliberately absent. Who is at the keyboard is a fact for the
-/// audit log, which is scoped to people who may read it; the broadcast goes to
-/// every member of the channel, and "someone has control" is all any of them —
-/// or the agent — needs in order to behave correctly.
-fn control_window_payload(
-    workspace_id: Uuid,
-    channel_id: Uuid,
-    window: &ControlWindow,
-    open: bool,
-) -> Value {
-    let channel = cent_channel(workspace_id, channel_id);
-    let state = if open { "opened" } else { "closed" };
-    let timestamp_ms = window.ended_at_ms.unwrap_or(window.started_at_ms);
-    let mut payload = json!({
-        "session_id": window.work_session_id.to_string(),
-        "state": state,
-        "started_at": window.started_at_ms,
-    });
-    if let Some(ended_at_ms) = window.ended_at_ms {
-        payload["ended_at"] = json!(ended_at_ms);
-    }
-    if let Some(reason) = window.end_reason {
-        payload["end_reason"] = json!(reason.as_db_label());
-    }
-    json!({
-        "channel": channel,
-        "data": {
-            "type": "work.session.control",
-            "v": 1,
-            "ts": timestamp_ms,
-            "payload": payload,
-        },
-        // Keyed by window AND state so the open and the close are two distinct
-        // events, and a retried close is one.
-        "idempotency_key": format!("{channel}:work.session.control:{}:{state}", window.id),
-    })
 }
 
 // ---------------------------------------------------------------------------
@@ -405,6 +369,36 @@ async fn issue_in_tx(
         None
     };
 
+    // The run layer stops — ADR-0004 증보 3 D6, the half LIVE-3 left unwritten.
+    //
+    // Same transaction as the window, for the window's own reason: a standing
+    // window with its runs still `running` is an agent that keeps spending
+    // tokens on a screen it may not look at, and 증보 3 D6 says the spend is
+    // exactly what stops ("토큰 소진 0 — 크레딧이 토큰으로 새지 않음"). It is
+    // written **after** the window rather than before because the window is the
+    // fact and this is its consequence; a park that survived a failed window
+    // insert would be an agent stopped by nothing.
+    //
+    // What the VM does is unchanged and that is the other half of D6:
+    // `work_session.status` is not touched here, ADR-0140's state machine does
+    // not move, and running-time billing (ADR-0164) continues. The machine stays
+    // up because the person is using it.
+    //
+    // Lock order, and this call site's part of it: the session row is held from
+    // `lock_attach_target_in_tx` above, the window row was written a statement
+    // ago, and the park takes the run rows LAST
+    // (`momo_agent::run::lock_driver_runs_in_tx` states the contract and why the
+    // window must precede the lock). The one thing that must not move is the
+    // window write above this line: a run locked before its window exists gives
+    // a waiting transaction a snapshot without it, which is the whole hole.
+    let parked = if control_window.is_some() {
+        park_runs_for_control_window_in_tx(conn, workspace_id, session_id)
+            .await
+            .map_err(T3Error::from)?
+    } else {
+        Vec::new()
+    };
+
     // Same transaction as the grant, for `terminal_attach`'s reason: a
     // capability that exists without a record of who minted it is exactly what
     // an audit log is for. `display_id` is deliberately absent from the detail —
@@ -428,6 +422,15 @@ async fn issue_in_tx(
                     // that they took control, and when, is exactly what an
                     // audit log is for.
                     "control_window_opened": control_window.is_some(),
+                    // …and which runs it stopped. The broadcast cannot carry
+                    // this (D3 lets an agent learn 정지 시각, not who else was
+                    // stopped), but the audit log is scoped to people entitled
+                    // to names, and "why did 김인턴 go quiet at 14:03" is a
+                    // question this row is the only possible answer to.
+                    "runs_parked": parked
+                        .iter()
+                        .map(|run| run.run_id.to_string())
+                        .collect::<Vec<_>>(),
                 }),
             ),
     )
@@ -440,7 +443,11 @@ async fn issue_in_tx(
         // the count would make 관전자 수 tick up at the moment watching becomes
         // impossible for the agent and irrelevant for the badge.
         Some(window) => {
-            let payload = control_window_payload(workspace_id, target.channel_id, window, true);
+            let payload = control_window_payload(
+                &cent_channel(workspace_id, target.channel_id),
+                window,
+                true,
+            );
             emit_outbox(
                 &mut *conn,
                 workspace_id,
@@ -597,13 +604,35 @@ async fn return_control_in_tx(
     Ok(Ok(Some(window)))
 }
 
-/// Write the close audit row and broadcast the 재개 boundary event.
+/// Resume the parked runs, write the close audit row, and broadcast the 재개
+/// boundary event.
 ///
 /// Shared by every close path so that "the agent resumed" is one statement with
-/// one shape, whoever caused it. `actor` is `None` when nobody did — a lapsed
-/// lease and an ended session are events, not acts, and naming a person in the
-/// audit row for them would record that somebody did something they did not
-/// (`routes::shared::audit_via_token_id`'s rule).
+/// one shape, whoever caused it — the explicit 반환, the lapse detected by a
+/// route, and the session that ended underneath the keyboard. `actor` is `None`
+/// when nobody did — a lapsed lease and an ended session are events, not acts,
+/// and naming a person in the audit row for them would record that somebody did
+/// something they did not (`routes::shared::audit_via_token_id`'s rule).
+///
+/// The resume is **first**, and inside this function rather than at the three
+/// call sites, for the reason the sentence above gives: 「사용자 개입 완료」 is
+/// one fact, and a close path that forgot to resume would leave a run `paused`
+/// with no window anywhere to explain it and no second event ever coming. Doing
+/// it here means adding a fourth close path cannot forget.
+///
+/// The fourth author of this settlement is not a route at all — `momo-notifier`
+/// closes a window whose producer died and nobody asked about. It composes the
+/// same three steps from the same functions rather than calling this one,
+/// because a binary that reached into `momo-server` would be the layering
+/// inversion the approval sweep was careful not to make.
+///
+/// **Every caller must have closed its window before calling this.** All four
+/// do, and it is a correctness condition rather than a tidiness one: the resume
+/// judges "is another window still holding this run" against a snapshot taken
+/// *after* it acquires the run lock, so a transaction that waited here sees the
+/// winner's close only if the winner wrote it before taking the same lock. The
+/// contract, and the two failures it prevents, are stated once in
+/// `momo_agent::run::lock_driver_runs_in_tx`.
 pub(crate) async fn emit_control_closed_in_tx(
     conn: &mut momo_db::PgConnection,
     workspace_id: Uuid,
@@ -612,6 +641,10 @@ pub(crate) async fn emit_control_closed_in_tx(
     via_token_id: Option<Uuid>,
     window: &ControlWindow,
 ) -> Result<(), T3Error> {
+    let resumed = resume_runs_from_control_window_in_tx(conn, workspace_id, window.work_session_id)
+        .await
+        .map_err(T3Error::from)?;
+
     let mut entry = AuditEntry::new(workspace_id, AUDIT_ACTION_CONTROL_CLOSED)
         .target("work_session", window.work_session_id)
         .via_token(via_token_id)
@@ -622,6 +655,10 @@ pub(crate) async fn emit_control_closed_in_tx(
                 "started_at": window.started_at_ms,
                 "ended_at": window.ended_at_ms,
                 "end_reason": window.end_reason.map(|reason| reason.as_db_label()),
+                "runs_resumed": resumed
+                    .iter()
+                    .map(|run| run.run_id.to_string())
+                    .collect::<Vec<_>>(),
             }),
         );
     if let Some(actor) = actor {
@@ -629,7 +666,7 @@ pub(crate) async fn emit_control_closed_in_tx(
     }
     write_audit(conn, &entry).await.map_err(T3Error::from)?;
 
-    let payload = control_window_payload(workspace_id, channel_id, window, false);
+    let payload = control_window_payload(&cent_channel(workspace_id, channel_id), window, false);
     emit_outbox(
         &mut *conn,
         workspace_id,

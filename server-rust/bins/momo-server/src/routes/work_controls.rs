@@ -331,6 +331,13 @@ async fn create_in_tx(conn: &mut PgConnection, input: CreateInput) -> Rejectable
         // other author. Emitting from the detection point rather than from a
         // timer keeps the boundary events in the same transaction as the fact
         // they describe.
+        //
+        // This path holds no session lock, and does not need one: the window row
+        // is closed by the statement below before `emit_control_closed_in_tx`
+        // takes the run rows, which is the order
+        // `momo_agent::run::lock_driver_runs_in_tx` contracts for — the run lock
+        // is what serializes this resume against a window opening on another
+        // session of the same run.
         for window in
             expire_lapsed_control_windows_in_tx(conn, input.workspace_id, session_id).await?
         {
