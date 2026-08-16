@@ -634,6 +634,51 @@ export function asWorkSessionObserverFrame(
   return frame as WorkSessionObserverFrame;
 }
 
+/**
+ * The **boundary event** of a control window (ADR-0004 증보 3 D3 · LIVE-3/4).
+ *
+ * Built by `momo_t3::display_control::control_window_payload`, and it carries
+ * exactly what that ADR clause allows to leave the workspace: 정지 시각,
+ * 재개 시각, and why it ended. There is deliberately no `grantee` — who is at
+ * the keyboard is a fact for the audit log, which is scoped to people entitled
+ * to names, and this envelope goes to every member of the channel. The same
+ * count-only discipline `WorkSessionObserverFrame` keeps one boundary over.
+ *
+ * It is emitted for **every** window, including one opened straight against the
+ * REST route with no UI involved. A surface that only drew windows it opened
+ * itself would go quiet in exactly the case a reader most needs the truth: the
+ * agent is stopped and nothing on screen says why.
+ */
+export interface WorkSessionControlFrame {
+  type: "work.session.control";
+  v: number;
+  ts: number;
+  seq?: number;
+  payload: {
+    session_id: string;
+    state: "opened" | "closed";
+    started_at: number;
+    ended_at?: number;
+    end_reason?: string;
+  };
+}
+
+export function asWorkSessionControlFrame(
+  data: unknown
+): WorkSessionControlFrame | null {
+  if (typeof data !== "object" || data === null) return null;
+  const frame = data as Partial<WorkSessionControlFrame>;
+  if (frame.type !== "work.session.control") return null;
+  const payload = frame.payload as Record<string, unknown> | undefined;
+  if (!payload || typeof payload.session_id !== "string") return null;
+  if (payload.state !== "opened" && payload.state !== "closed") return null;
+  // 정지 시각 is the one field with no sensible default: a boundary event that
+  // cannot say when control began is not a weaker event, it is one this client
+  // has no contract with.
+  if (typeof payload.started_at !== "number") return null;
+  return frame as WorkSessionControlFrame;
+}
+
 const WORK_ACP_TYPES: ReadonlySet<string> = new Set<WorkSessionACPType>([
   "agent.status",
   "agent.partial",
@@ -886,6 +931,18 @@ export interface RealtimeHandle {
       onAcpEvent: (frame: WorkSessionACPFrame) => void;
       /** An observer capability was issued: re-read the count from Postgres. */
       onObserver: (frame: WorkSessionObserverFrame) => void;
+      /**
+       * A control window opened or closed (ADR-0004 증보 3 D3 · LIVE-4).
+       *
+       * Optional, like `onReaction` and `onPin` above and for the same reason:
+       * a surface that does not draw the boundary must not be forced to invent
+       * an empty handler. Unlike `onObserver` the frame's own numbers ARE the
+       * fact a reader wants — 정지 시각 and 재개 시각 are what the ADR entitles
+       * an agent (and here a person) to learn, and there is no projection on
+       * the session list that carries them, so re-reading Postgres would answer
+       * with the same silence the frame just broke.
+       */
+      onControl?: (frame: WorkSessionControlFrame) => void;
       /** A replayed or non-recovered (re)subscribe: heal from REST instead. */
       onResync: () => void;
     }

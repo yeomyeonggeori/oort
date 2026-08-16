@@ -735,7 +735,75 @@ pub fn approval_request_props(
     if let (Some(execution), Some(object)) = (execution, props.as_object_mut()) {
         object.insert("execution".into(), execution.clone());
     }
+    apply_login_handoff_props(&mut props, call);
     props
+}
+
+/// `props.kind` for the login handoff card (LIVE-4).
+///
+/// A **props** discriminator rather than a new `message_type`: `approval_request`
+/// already carries a `kind` split (`resume_offer`), the enum in `schema_v0.sql`
+/// is untouchable, and the login handoff really is an approval — same row, same
+/// decision REST, same hold. The card that renders it is
+/// `packages/momo-core/src/features/timeline/loginHandoffCard.ts`, and
+/// `LOGIN_HANDOFF_KIND` there is this string.
+pub const LOGIN_HANDOFF_PROPS_KIND: &str = "login_handoff";
+
+/// Turn a generic tool-approval card into the login handoff card.
+///
+/// Three edits, each of which a client would otherwise get wrong:
+///
+/// * **`kind`** is what makes it this card at all.
+/// * **`session_id`** is the deep link's only input. It is copied out of the
+///   model's arguments rather than resolved here, because the approval is
+///   raised before anything validates the id; a card pointing at a session that
+///   does not exist opens a detail screen that says so, which is a better
+///   failure than a card with no door.
+/// * **`title` is REMOVED and `summary` is replaced.** The generic values are
+///   English server strings ("Approve work.session.login_handoff", "Review the
+///   proposed tool call…") written for a reviewer of a tool call, and this card
+///   is read by somebody being asked to go and log in. The title now comes from
+///   the client's own copy module (one source per sentence), and the summary is
+///   the sentence the agent itself wrote.
+///
+/// `arguments` stays where it is, opaque as ever: the client's `PARSED_KEYS`
+/// allowlist has never rendered it and counts it as withheld instead.
+fn apply_login_handoff_props(props: &mut Value, call: &ToolCall) {
+    if crate::tools::normalize(&call.name)
+        != crate::tools::normalize(crate::tools::WORK_SESSION_LOGIN_HANDOFF)
+    {
+        return;
+    }
+    let Some(object) = props.as_object_mut() else {
+        return;
+    };
+    object.insert("kind".into(), json!(LOGIN_HANDOFF_PROPS_KIND));
+    object.remove("title");
+    if let Some(session_id) = call
+        .arguments
+        .get("session_id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        object.insert("session_id".into(), json!(session_id));
+    }
+    match call
+        .arguments
+        .get("reason")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        Some(reason) => {
+            object.insert("summary".into(), json!(reason));
+        }
+        // No sentence beats a sentence about the wrong thing. The card renders
+        // its own waiting copy when the agent supplied no 사유.
+        None => {
+            object.remove("summary");
+        }
+    }
 }
 
 /// The one-line body of an `approval_request` message (Swift :1618).
@@ -939,6 +1007,121 @@ pub fn tool_grants_from_payload(payload: &Value) -> Option<Vec<ToolGrant>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn handoff_call(arguments: Value) -> ToolCall {
+        ToolCall {
+            call_id: "call_1".to_string(),
+            name: crate::tools::WORK_SESSION_LOGIN_HANDOFF.to_string(),
+            arguments,
+        }
+    }
+
+    fn handoff_props(arguments: Value) -> Value {
+        approval_request_props(
+            Uuid::nil(),
+            Uuid::nil(),
+            Uuid::nil(),
+            crate::tools::ACTION_TYPE_TOOL_CALL,
+            &handoff_call(arguments),
+            "{}",
+            DateTime::<Utc>::from_timestamp(0, 0).expect("epoch"),
+            None,
+        )
+    }
+
+    // ---- LIVE-4 -------------------------------------------------------------
+
+    #[test]
+    fn a_login_handoff_card_is_an_approval_card_with_one_extra_word() {
+        let props = handoff_props(json!({
+            "session_id": "  9a1b2c3d-4e5f-4a6b-8c7d-1e2f3a4b5c6d  ",
+            "reason": "  배포 콘솔이 로그인 화면으로 돌아갔습니다.  ",
+        }));
+
+        // The discriminator, and the only thing that makes this card that card.
+        assert_eq!(props["kind"], json!(LOGIN_HANDOFF_PROPS_KIND));
+        // Everything the approval machinery needs is untouched: same row, same
+        // decision REST, same hold.
+        assert_eq!(props["status"], json!("pending"));
+        assert!(props.get("approval_id").is_some());
+        assert!(props.get("run_id").is_some());
+        assert!(props.get("expires_at_ms").is_some());
+
+        // The deep link's only input, trimmed.
+        assert_eq!(props["session_id"], json!("9a1b2c3d-4e5f-4a6b-8c7d-1e2f3a4b5c6d"));
+        // The agent's own sentence replaces the generic English summary.
+        assert_eq!(props["summary"], json!("배포 콘솔이 로그인 화면으로 돌아갔습니다."));
+        // And the generic English title is GONE: the card's title is the
+        // client's own copy, in one place (`loginHandoffCard.ts`).
+        assert!(
+            props.get("title").is_none(),
+            "「Approve work.session.login_handoff」 must never reach a reader"
+        );
+    }
+
+    #[test]
+    fn a_handoff_card_with_nothing_to_say_says_nothing() {
+        // A model that omitted both optional-looking arguments must not produce
+        // a card carrying the tool-review sentence written for a different
+        // reader. No sentence beats a sentence about the wrong thing.
+        let props = handoff_props(json!({}));
+        assert_eq!(props["kind"], json!(LOGIN_HANDOFF_PROPS_KIND));
+        assert!(props.get("summary").is_none());
+        assert!(props.get("title").is_none());
+        assert!(props.get("session_id").is_none());
+
+        // Whitespace is not a sentence and not an id.
+        let blank = handoff_props(json!({ "session_id": "   ", "reason": "  " }));
+        assert!(blank.get("summary").is_none());
+        assert!(blank.get("session_id").is_none());
+    }
+
+    #[test]
+    fn the_credential_argument_never_reaches_the_card_face() {
+        // `arguments` is carried for the model's own resume and has never been
+        // in the client's rendered allowlist. Whatever a misbehaving model put
+        // there stays out of the typed rows and is counted as withheld instead.
+        let props = handoff_props(json!({
+            "session_id": "9a1b2c3d-4e5f-4a6b-8c7d-1e2f3a4b5c6d",
+            "reason": "로그인이 필요합니다.",
+        }));
+        assert!(props.get("tool_grant").is_none());
+        let rendered = [
+            props.get("summary"),
+            props.get("session_id"),
+            props.get("kind"),
+        ];
+        for value in rendered.into_iter().flatten() {
+            assert!(!value.to_string().contains("password"));
+        }
+    }
+
+    #[test]
+    fn every_other_tool_is_untouched_by_the_handoff_overlay() {
+        let props = approval_request_props(
+            Uuid::nil(),
+            Uuid::nil(),
+            Uuid::nil(),
+            crate::tools::ACTION_TYPE_TOOL_CALL,
+            &ToolCall {
+                call_id: "call_2".to_string(),
+                name: crate::tools::WORK_SESSION_END.to_string(),
+                arguments: json!({ "session_id": "x", "reason": "y" }),
+            },
+            "{}",
+            DateTime::<Utc>::from_timestamp(0, 0).expect("epoch"),
+            None,
+        );
+        assert!(props.get("kind").is_none());
+        assert_eq!(props["title"], json!("Approve work.session.end"));
+        assert_eq!(
+            props["summary"],
+            json!("Review the proposed tool call before oort executes it.")
+        );
+        // The overlay reads `reason` and `session_id` out of the arguments, and
+        // it must not do that for a tool that happens to use the same words.
+        assert!(props.get("session_id").is_none());
+    }
 
     #[test]
     fn status_and_limit_follow_the_swift_validators() {

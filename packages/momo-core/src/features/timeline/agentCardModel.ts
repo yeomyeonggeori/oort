@@ -3,6 +3,7 @@ import {
   parseExecutionPlan,
   type SpawnExecutionPlan,
 } from "../../lib/executionPlan";
+import { loginHandoffCard, type LoginHandoffCard } from "./loginHandoffCard";
 
 // =============================================================================
 // Agent card model (R-1 §4). Pure: no DOM, no fetch, no React, so the status
@@ -212,6 +213,20 @@ const PARSED_KEYS: ReadonlySet<string> = new Set([
   // ADR-0125 D6-A의 호스트 후보(#1114). 카드가 실제로 그리는 것이라 withheld가
   // 아니다 — 위 주석 참고.
   "execution",
+  // LIVE-4 로그인 핸드오프 카드가 읽는 키 (`loginHandoffCard.ts`).
+  //
+  // `session_id` 는 **딥링크 하나를 위해서만** 읽고 문자로는 그리지 않는다 —
+  // `run_id`·`channel_id` 와 같은 격이다. 바로 위 `target_host_id` 가 부재로
+  // 남아 있는 것과 모순이 아니다: 그쪽은 사람이 그것을 보고 고르라고 실리는
+  // 값인데 이름이 없어 고를 수 없는 id 였고, 이쪽은 이미 이름 붙은 화면(작업
+  // 세션 상세)으로 가는 주소다.
+  //
+  // 나머지 셋은 카드가 **그리는** 경계 사실이므로 여기 없으면 카드가 「보여
+  // 주고 있는 것을 숨겼다」고 스스로 말하게 된다(withheld 의 뜻).
+  "session_id",
+  "control_started_at_ms",
+  "control_ended_at_ms",
+  "control_end_reason",
 ]);
 
 export interface PayloadRow {
@@ -499,7 +514,8 @@ export function failureGuidance(code: unknown): FailureGuidance | null {
 export type AgentCardModel =
   | AgentApprovalCard
   | AgentToolCard
-  | AgentTurnCard;
+  | AgentTurnCard
+  | LoginHandoffCard;
 
 function approvalCard(
   message: Message,
@@ -607,7 +623,15 @@ function turnCard(props: Props): AgentTurnCard | null {
 export function agentCardModel(message: Message): AgentCardModel | null {
   if (message.state === "deleted") return null;
   const props = message.props;
-  if (message.type === "approval_request") return approvalCard(message, props);
+  if (message.type === "approval_request") {
+    // 로그인 핸드오프는 승인 카드 가족의 신구성원이지, 새 메시지 타입이 아니다
+    // (LIVE-4 / `loginHandoffCard.ts` 머리말). `props.kind` 로 갈라지는 것은
+    // `resume_offer` 가 approvalCard 안에서 하는 것과 같은 일이고, 여기서
+    // 갈라 두는 이유는 이 카드가 승인 카드와 **다른 행들**을 그리기 때문이다.
+    const handoff = loginHandoffCard(props);
+    if (handoff !== null) return handoff;
+    return approvalCard(message, props);
+  }
   if (message.type === "tool_call" || message.type === "tool_result") {
     return toolCard(message, props);
   }
@@ -619,6 +643,10 @@ export function agentCardModel(message: Message): AgentCardModel | null {
  * record annotates the agent's own sentence, so the sentence stays; an approval
  * or a tool card already carries the server copy in its title and rows, so
  * repeating the body underneath would just be the same line twice.
+ *
+ * The login handoff card is in the second group for a sharper reason: its body
+ * is the server's English one-liner (`approval_request_body`), and the sentence
+ * a reader needs is the agent's Korean 사유, which the card draws from `summary`.
  */
 export function cardKeepsBody(card: AgentCardModel): boolean {
   return card.kind === "turn";

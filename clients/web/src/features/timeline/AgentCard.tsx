@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Check, ShieldQuestion, Terminal, Zap } from "lucide-react";
+import { Check, KeyRound, ShieldQuestion, Terminal, Zap } from "lucide-react";
 import { cn } from "@/design/lib/cn";
 import { useOffline } from "@/features/common/useOffline";
 import { memberFor, type Directory } from "@/features/workspace/useWorkspace";
@@ -26,8 +26,17 @@ import {
   type ApprovalStatus,
   type PayloadDetail,
 } from "@momo/core/features/timeline/agentCardModel";
+import {
+  LOGIN_HANDOFF_DECISION,
+  LOGIN_HANDOFF_DEPLOYMENT_COPY,
+  LOGIN_HANDOFF_OUTCOME_DETAIL,
+  LOGIN_HANDOFF_WAITING_COPY,
+  loginHandoffNote,
+  type LoginHandoffCard,
+  type LoginHandoffNote,
+} from "@momo/core/features/timeline/loginHandoffCard";
 import { spawnHostGate } from "@momo/core/features/timeline/spawnHostChoice";
-import { ApprovalChip, StreamCaret, TurnChip } from "./StatusChip";
+import { ApprovalChip, LoginHandoffChip, StreamCaret, TurnChip } from "./StatusChip";
 import { ApprovalActions, type Armed } from "./ApprovalActions";
 import { FoldedValue } from "./FoldToggle";
 import {
@@ -192,12 +201,23 @@ const RESUME_OFFER_COPY =
  * 하는 것은 그 줄 하나이고, 나머지 둘은 화면에 서 있는 조건이지 방금 일어난 일이
  * 아니다.
  */
-function ApprovalNoteLine({ note }: { note: ApprovalCardNote }) {
+function ApprovalNoteLine({
+  note,
+  testIdPrefix = "approval-note",
+}: {
+  note: ApprovalCardNote | LoginHandoffNote;
+  /**
+   * 로그인 핸드오프 카드가 같은 격 체계를 쓰되 자기 이름으로 지목되게 한다.
+   * 한 타임라인에 두 카드가 함께 서 있을 때 훅 하나가 두 요소에 답하면 안 된다
+   * (`ApprovalActions`의 `testIdPrefix`와 같은 이유).
+   */
+  testIdPrefix?: string;
+}) {
   const receipt = note.tone === "receipt";
   return (
     <p
       role={receipt ? "status" : undefined}
-      data-testid={`approval-note-${note.kind}`}
+      data-testid={`${testIdPrefix}-${note.kind}`}
       data-tone={note.tone}
       className={cn(
         "border-t border-line px-3 py-2",
@@ -341,6 +361,186 @@ function ApprovalBody({
               card.approvalId
                 ? `원장 #${ledgerHandle(card.approvalId)}`
                 : null,
+            ]
+              .filter((part): part is string => Boolean(part))
+              .join(" · ")}
+          </span>
+        </LabeledRow>
+      )}
+    </CardFrame>
+  );
+}
+
+/**
+ * 로그인 핸드오프 카드 (LIVE-4 / ADR-0004 증보 3).
+ *
+ * 승인 카드와 **같은 뼈대**를 쓴다: 같은 `CardFrame`, 같은 y/n 키 경로, 같은
+ * 결정 컨트롤(`ApprovalActions`, 낱말만 재개/중단). 판정은 전부 코어가 지고
+ * 이 파일은 옷만 입힌다.
+ *
+ * ## 어포던스 부재 원칙
+ *
+ * 이 빌드에는 채팅에서 화면을 여는 버튼이 없다. 그래서 그 자리에 **비활성
+ * 버튼을 세우지 않고** 문장 하나만 둔다(`LOGIN_HANDOFF_DEPLOYMENT_COPY`).
+ * 영원히 눌리지 않는 버튼은 사람에게 「내가 뭘 잘못했나」를 묻게 하고, 그것은
+ * 화면이 거짓을 말하는 가장 조용한 형태다. 대신 실제로 있는 문 하나 — 작업 세션
+ * 상세 — 는 진짜 버튼으로 서고, 그 세션 화면은 세션 상세가 그린다.
+ */
+function LoginHandoffBody({
+  card,
+  directory,
+  onOpenWorkSession,
+}: {
+  card: LoginHandoffCard;
+  directory: Directory;
+  onOpenWorkSession?: (sessionId: string) => void;
+}) {
+  const [local, setLocal] = useState<{
+    status: ApprovalStatus;
+    decidedAtMs?: number;
+    decidedByMemberId?: string;
+    note?: string;
+  } | null>(null);
+  const [armed, setArmed] = useState<Armed>(null);
+  const approvalsProvided = isSurfaceProvided("approvals");
+  const offline = useOffline();
+
+  // 로컬 영수증이 스냅샷보다 새로울 수 있는 것은 승인 카드와 같다. 다만 국면은
+  // 코어가 정했으므로, 여기서는 **아직 대기인가**만 로컬로 뒤집는다.
+  const settled = local !== null || card.phase !== "waiting";
+  const underControl =
+    card.control !== null && card.control.endedAtMs === null;
+  const decidedById = local?.decidedByMemberId ?? card.decidedByMemberId;
+  const decidedAtMs = local?.decidedAtMs ?? card.decidedAtMs;
+  const decidedBy = decidedById ? memberFor(directory, decidedById) : null;
+
+  const note = loginHandoffNote({
+    receiptNote: local?.note ?? null,
+    hasTarget: card.approvalId !== null,
+    settled,
+    underControl,
+    decidableHere: true,
+    offline,
+    approvalsProvided,
+    unsupportedText: `${serverSurface("approvals").absentReason} ${
+      serverSurface("approvals").fallback
+    }`,
+  });
+
+  return (
+    <CardFrame
+      icon={<KeyRound className="size-4" aria-hidden="true" />}
+      title={card.title}
+      chip={<LoginHandoffChip card={card} />}
+      status={card.outcome ?? card.phase}
+      kind="login_handoff"
+      keyboard={note === null && !settled}
+      onApprove={() => setArmed("approve")}
+      onReject={() => setArmed("reject")}
+      detail={card.detail}
+      note={
+        <div className="border-t border-line px-3 py-2">
+          {!settled && (
+            <p
+              className="text-meta text-ink-muted"
+              data-testid="handoff-deployment"
+            >
+              {LOGIN_HANDOFF_DEPLOYMENT_COPY}
+            </p>
+          )}
+          {card.sessionId !== null && onOpenWorkSession !== undefined && (
+            <button
+              type="button"
+              data-testid="handoff-open-session"
+              className="mt-2 h-control-sm rounded-sm border border-line px-3 text-meta font-medium text-accent hover:bg-surface-hover focus-visible:focus-ring"
+              onClick={() => onOpenWorkSession(card.sessionId!)}
+            >
+              작업 세션 열기
+            </button>
+          )}
+        </div>
+      }
+      footer={
+        note !== null ? (
+          <ApprovalNoteLine note={note} testIdPrefix="handoff-note" />
+        ) : card.approvalId !== null && !settled ? (
+          <ApprovalActions
+            approvalId={card.approvalId}
+            className="border-t border-line"
+            armed={armed}
+            setArmed={setArmed}
+            testIdPrefix="handoff"
+            lead={LOGIN_HANDOFF_DECISION.lead}
+            verbs={{
+              approve: LOGIN_HANDOFF_DECISION.resume,
+              reject: LOGIN_HANDOFF_DECISION.stop,
+              approveCommit: LOGIN_HANDOFF_DECISION.resumeCommit,
+              rejectCommit: LOGIN_HANDOFF_DECISION.stopCommit,
+              approveConfirm: LOGIN_HANDOFF_DECISION.resumeConfirm,
+              rejectConfirm: LOGIN_HANDOFF_DECISION.stopConfirm,
+            }}
+            onSettled={(outcome) => {
+              const next: {
+                status: ApprovalStatus;
+                decidedAtMs?: number;
+                decidedByMemberId?: string;
+                note?: string;
+              } = { status: outcome.status ?? "pending" };
+              if (outcome.decidedAtMs !== undefined) {
+                next.decidedAtMs = outcome.decidedAtMs;
+              }
+              if (outcome.decidedByMemberId !== undefined) {
+                next.decidedByMemberId = outcome.decidedByMemberId;
+              }
+              next.note = decisionNote(outcome).text;
+              setLocal(next);
+            }}
+          />
+        ) : null
+      }
+    >
+      {card.reason && <LabeledRow label="사유">{card.reason}</LabeledRow>}
+      {!settled && (
+        <LabeledRow label="상태" testId="handoff-waiting">
+          {LOGIN_HANDOFF_WAITING_COPY}
+        </LabeledRow>
+      )}
+      {/* 경계 사실. 증보 3 D3이 에이전트에게 허락한 것과 같은 것만 그린다 —
+          정지 시각, 재개 시각, 그리고 어떻게 끝났는지. 프레임도 키도 여기 없고,
+          담을 칸조차 없다는 것이 이 세 행의 뜻이다. */}
+      {card.control !== null && (
+        <LabeledRow label="정지" testId="handoff-control-started">
+          <span data-numeric>{timeLabel(card.control.startedAtMs)}</span>
+        </LabeledRow>
+      )}
+      {card.control?.endedAtMs != null && (
+        <LabeledRow label="재개" testId="handoff-control-ended">
+          <span data-numeric>{timeLabel(card.control.endedAtMs)}</span>
+        </LabeledRow>
+      )}
+      {/* 「지금 누가 잡고 있다」는 행이 여기 있었고, 지웠다.
+          컨트롤 자리에 서는 `in-control` 줄이 같은 사실을 이미 말하고,
+          거기에 **다음에 무엇을 하면 되는지**까지 붙는다. 한 카드가 같은
+          사실을 두 번 말하면 읽는 사람은 두 가지가 일어났다고 읽는다. */}
+      {card.outcome !== null && (
+        <LabeledRow label="결과" testId="handoff-outcome">
+          {LOGIN_HANDOFF_OUTCOME_DETAIL[card.outcome]}
+        </LabeledRow>
+      )}
+      {card.phase === "stopped" && (
+        <LabeledRow label="결과" testId="handoff-stopped">
+          {/* 「실패」가 아니다. 사람이 멈춘 것은 사고가 아니므로 danger를 입지
+              않는다 (ADR-0132의 규칙, 침묵과 같은 계열). */}
+          대기 중이던 실행이 취소됐습니다. 개입은 시작되지 않았습니다.
+        </LabeledRow>
+      )}
+      {settled && (decidedBy || decidedAtMs !== undefined) && (
+        <LabeledRow label="결정" testId="handoff-ledger">
+          <span data-numeric>
+            {[
+              decidedBy?.displayName,
+              decidedAtMs !== undefined ? timeLabel(decidedAtMs) : null,
+              card.approvalId ? `원장 #${ledgerHandle(card.approvalId)}` : null,
             ]
               .filter((part): part is string => Boolean(part))
               .join(" · ")}
@@ -560,12 +760,27 @@ function CardFrame({
 export function AgentCard({
   card,
   directory,
+  onOpenWorkSession,
 }: {
   card: AgentCardModel;
   directory: Directory;
+  /**
+   * 작업 세션 상세로 가는 문. 로그인 핸드오프 카드만 쓴다. 없으면 딥링크 자체가
+   * 그려지지 않는다 — 없는 방으로 가는 문을 그리지 않는다는 이 레포의 규율.
+   */
+  onOpenWorkSession?: (sessionId: string) => void;
 }) {
   if (card.kind === "approval") {
     return <ApprovalBody card={card} directory={directory} />;
+  }
+  if (card.kind === "login_handoff") {
+    return (
+      <LoginHandoffBody
+        card={card}
+        directory={directory}
+        {...(onOpenWorkSession !== undefined ? { onOpenWorkSession } : {})}
+      />
+    );
   }
   if (card.kind === "tool") return <ToolBody card={card} />;
   return <TurnBody card={card} />;

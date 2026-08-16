@@ -92,10 +92,10 @@ pub use convergence::{
 pub use display_control::{
     active_control_window_in_tx, close_control_window_in_tx, control_window_payload,
     expire_lapsed_control_windows_for_workspace_in_tx, expire_lapsed_control_windows_in_tx,
-    open_control_window_in_tx, renew_control_window_lease_in_tx,
-    workspaces_with_lapsed_control_windows, ControlWindow, ControlWindowEndReason,
-    LapsedControlWindow, AUDIT_ACTION_CONTROL_CLOSED, AUDIT_SCHEMA_CONTROL_CLOSED,
-    CONTROL_WINDOW_LEASE_SECONDS,
+    latest_control_window_in_tx, open_control_window_in_tx, renew_control_window_lease_in_tx,
+    stamp_control_window_on_cards_in_tx, workspaces_with_lapsed_control_windows, ControlWindow,
+    ControlWindowEndReason, LapsedControlWindow, AUDIT_ACTION_CONTROL_CLOSED,
+    AUDIT_SCHEMA_CONTROL_CLOSED, CONTROL_WINDOW_LEASE_SECONDS,
 };
 pub use error::T3Error;
 pub use lease::{renewable_lease_candidates, LeaseRenewalCandidate};

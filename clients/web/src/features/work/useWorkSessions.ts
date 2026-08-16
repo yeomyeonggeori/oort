@@ -15,6 +15,7 @@ import {
   workChannelsToWatch,
   type WorkSessionEvent,
 } from "@momo/core/features/work/workSessionModel";
+import type { WorkSessionControlFrame } from "@momo/core/lib/realtimeEvents";
 
 // =============================================================================
 // Reads behind the 작업 세션 panel (AX-3 / MOMO-618).
@@ -156,9 +157,26 @@ export function useSessionEvents(
 export interface WorkSessionRail {
   /** Live events for every watched channel, newest appended. */
   liveEvents: WorkSessionEvent[];
+  /**
+   * Control-window boundary events heard since this rail subscribed (LIVE-4).
+   *
+   * An empty array means **this client has heard nothing**, not that no window
+   * exists: these are transport, the ledger is the SoT, and the surface that
+   * draws them says which of the two it is holding.
+   */
+  controlFrames: WorkSessionControlFrame[];
   /** Channels with running sessions the subscription cap could not watch. */
   uncovered: string[];
 }
+
+/**
+ * How many boundary frames the rail keeps.
+ *
+ * Small on purpose: the fold reads the newest frame per session, and a window
+ * is a rare event (a person taking a keyboard), so anything larger would be
+ * memory held for a history nothing reads.
+ */
+const CONTROL_FRAME_CAP = 32;
 
 /**
  * Subscribe the channels worth watching and keep the ledger fresh.
@@ -177,6 +195,21 @@ export function useWorkSessionRail(
   const queryClient = useQueryClient();
   const [liveEvents, setLiveEvents] = useState<WorkSessionEvent[]>([]);
   const liveRef = useRef<WorkSessionEvent[]>([]);
+  /**
+   * Boundary events, kept **as frames** rather than folded into a per-session
+   * map here (LIVE-4).
+   *
+   * The fold is a judgement (`latestControlNotice`) and it lives in the core so
+   * both clients answer "which window is the current one" the same way. Folding
+   * here would put the second copy of that rule in a hook.
+   *
+   * Capped for the same reason the ACP buffer is: a long watch on a busy
+   * channel must not grow without bound. The cap is small because the fold only
+   * ever reads the newest frame per session.
+   */
+  const [controlFrames, setControlFrames] = useState<WorkSessionControlFrame[]>(
+    []
+  );
   /** Folded event ids currently in the buffer: O(1) dedupe, rebuilt on trim. */
   const seenRef = useRef<Set<string>>(new Set());
 
@@ -206,6 +239,13 @@ export function useWorkSessionRail(
     // the thread the refetch is about to read, and keeping them would double
     // every row that arrived before the drop.
     if (liveRef.current.length > 0) publish([]);
+    // Boundary events are dropped on resync as well, and for a sharper reason
+    // than the ACP tail: replayed frames are suppressed by the replay gate, so
+    // what this buffer holds after a reconnect is a window whose close this
+    // client may simply have missed. A stale 「조작 중」 is the one lie this
+    // surface must not tell, and an empty buffer renders as 「아직 들은 것이
+    // 없다」 rather than as an assertion.
+    setControlFrames((held) => (held.length > 0 ? [] : held));
     void queryClient.invalidateQueries({ queryKey: ["work-sessions", workspaceId] });
     void queryClient.invalidateQueries({ queryKey: ["work-session-events"] });
   }, [publish, queryClient, workspaceId]);
@@ -258,6 +298,23 @@ export function useWorkSessionRail(
             queryKey: ["work-sessions", workspaceId],
           });
         },
+        // LIVE-4 / 증보 3 D3. Unlike `onObserver` this frame is NOT a signal to
+        // re-read Postgres: 정지 시각 and 재개 시각 have no column on the
+        // session projection, so a refetch would answer with the same silence
+        // this frame just broke. The envelope's own numbers are the fact.
+        onControl: (frame) => {
+          setControlFrames((held) => {
+            const next = [...held, frame];
+            return next.length > CONTROL_FRAME_CAP
+              ? next.slice(next.length - CONTROL_FRAME_CAP)
+              : next;
+          });
+          // A window opening parks the runs driving the session, and a close
+          // resumes them. Neither moves `work_session.status` (증보 3 D6), but
+          // both move what the agent rail should be saying, so the list is
+          // re-read for the same reason a lifecycle frame re-reads it.
+          refetchSessionsAfterTransition();
+        },
         onAcpEvent: (frame) => {
           const event = eventFromFrame(frame);
           const folded = event.eventId.toLowerCase();
@@ -287,5 +344,5 @@ export function useWorkSessionRail(
     refetchSessionsAfterTransition,
   ]);
 
-  return { liveEvents, uncovered };
+  return { liveEvents, controlFrames, uncovered };
 }

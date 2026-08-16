@@ -981,6 +981,7 @@ export function WorkPanel({
           directory={directoryQuery.directory}
           channelName={nameOf(selected.channelId)}
           liveEvents={rail.liveEvents}
+          controlFrames={rail.controlFrames}
           live={live}
           nowMs={nowMs}
           wide={wide}

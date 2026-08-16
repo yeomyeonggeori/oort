@@ -84,7 +84,8 @@ use momo_t3::{
     is_active_channel_member_in_tx, is_valid_capability_token, issue_attach_capability_in_tx,
     lock_attach_target_in_tx, lock_display_binding_target_in_tx, mint_capability_token,
     open_control_window_in_tx, renew_control_window_lease_in_tx,
-    sweep_spent_observer_capabilities_in_tx, validate_attach_capability_in_tx,
+    stamp_control_window_on_cards_in_tx, sweep_spent_observer_capabilities_in_tx,
+    validate_attach_capability_in_tx,
     validated_display_binding, write_display_binding_in_tx, AttachKind, AttachMode, ControlWindow,
     ControlWindowEndReason, RemoteDisplayBinding, T3Error, AUDIT_ACTION_CONTROL_CLOSED,
     AUDIT_SCHEMA_CONTROL_CLOSED,
@@ -399,6 +400,25 @@ async fn issue_in_tx(
         Vec::new()
     };
 
+    // LIVE-4: 정지 시각 lands on the login handoff card that asked for this.
+    //
+    // In the same transaction as the window, and for the same reason the park
+    // is: the card is the surface a person is looking at while they decide, and
+    // a card whose 정지 시각 arrives one commit later is a card that was wrong
+    // for as long as anybody was reading it. Almost always zero rows — a
+    // control window opened for any other purpose stamps nothing, and that is
+    // what the `props.kind` clause is for.
+    if let Some(window) = control_window.as_ref() {
+        stamp_control_window_on_cards_in_tx(
+            conn,
+            workspace_id,
+            momo_agent::approval::LOGIN_HANDOFF_PROPS_KIND,
+            window,
+        )
+        .await
+        .map_err(T3Error::from)?;
+    }
+
     // Same transaction as the grant, for `terminal_attach`'s reason: a
     // capability that exists without a record of who minted it is exactly what
     // an audit log is for. `display_id` is deliberately absent from the detail —
@@ -644,6 +664,19 @@ pub(crate) async fn emit_control_closed_in_tx(
     let resumed = resume_runs_from_control_window_in_tx(conn, workspace_id, window.work_session_id)
         .await
         .map_err(T3Error::from)?;
+
+    // LIVE-4: 재개 시각 and the reason land on the card, here rather than at each
+    // caller, for the same argument the resume above is written with — a close
+    // path that forgets is a card that says 「사람이 조작 중」 forever. This
+    // covers all four closes, including the lapse nobody performs.
+    stamp_control_window_on_cards_in_tx(
+        conn,
+        workspace_id,
+        momo_agent::approval::LOGIN_HANDOFF_PROPS_KIND,
+        window,
+    )
+    .await
+    .map_err(T3Error::from)?;
 
     let mut entry = AuditEntry::new(workspace_id, AUDIT_ACTION_CONTROL_CLOSED)
         .target("work_session", window.work_session_id)

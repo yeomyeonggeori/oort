@@ -35,6 +35,12 @@ import {
   DISPLAY_SUBPROTOCOL,
   type DisplayFailure,
 } from "./displayStream";
+import {
+  LOGIN_HANDOFF_DEPLOYMENT_COPY,
+  LOGIN_HANDOFF_OFFLINE_COPY,
+  LOGIN_HANDOFF_OUTCOME_DETAIL,
+  loginHandoffCard,
+} from "@momo/core/features/timeline/loginHandoffCard";
 
 // =============================================================================
 // LIVE-2 / ADR-0165. Two kinds of test live here and they prove different
@@ -113,6 +119,29 @@ function session(over: Partial<WorkSession> = {}): WorkSession {
     ...over,
   };
 }
+
+/**
+ * The two web surfaces LIVE-4 added, read as source for the same reason the two
+ * above are.
+ *
+ * `AgentCard.tsx` is where the login handoff card lives, and it is the first
+ * surface in this client to be ABOUT control while still not performing any.
+ * That combination is exactly where an input path grows by accident.
+ */
+const AGENT_CARD_CODE = codeOnly(
+  readFileSync(
+    fileURLToPath(new URL("../timeline/AgentCard.tsx", import.meta.url)),
+    "utf8"
+  )
+);
+const CORE_API_CODE = codeOnly(
+  readFileSync(
+    fileURLToPath(
+      new URL("../../../../../packages/momo-core/src/lib/api.ts", import.meta.url)
+    ),
+    "utf8"
+  )
+);
 
 // -----------------------------------------------------------------------------
 // the viewer sends no input, and it is an absence rather than a check
@@ -196,6 +225,120 @@ describe("the viewer sends no input", () => {
       const present = new RegExp(`"${word}"`).test(DISPLAY_STREAM_CODE);
       expect(present, `viewer word ${word}`).toBe(word !== "open_input");
     }
+  });
+});
+
+// -----------------------------------------------------------------------------
+// the same absence, restated for the controller era (LIVE-4)
+// -----------------------------------------------------------------------------
+
+/**
+ * ## What changed under these tests, and why they had to be rewritten
+ *
+ * The block above was written when `controller` was not a grade display could be
+ * issued in AT ALL: 075's `terminal_attach_display_observer_ck` refused the pair
+ * in the database, so "this client sends no input" was a sentence about a thing
+ * that did not exist anywhere.
+ *
+ * ADR-0004 증보 3 was Accepted and LIVE-3 removed that CHECK. Control is now a
+ * real grade with a real ledger (076) and a real REST path. So the absence these
+ * tests hold is no longer "there is no such thing"; it is the much sharper
+ * **this build has no client path to it**, and the sharper claim needs its own
+ * assertions, because the old ones would stay green through the exact change
+ * that breaks it — a card that mints a controller grant would touch neither
+ * `displayStream.ts` nor `DisplayObserver.tsx`.
+ *
+ * That is the LIVE-4/LIVE-5 line, drawn here rather than remembered: LIVE-4
+ * ships the card that TALKS about control and nothing that PERFORMS it.
+ */
+describe("control exists in the ledger and has no door in this client", () => {
+  it("the only display grant this client can mint is an observer one", () => {
+    // The core's `issueDisplayAttach` hardcodes the grade rather than taking it
+    // as an argument. That is the whole boundary in one line: a caller cannot
+    // ask for `controller` because there is no parameter to ask with.
+    expect(CORE_API_CODE).toMatch(/mode:\s*["']observer["']/);
+    expect(CORE_API_CODE).not.toMatch(/["']controller["']/);
+  });
+
+  it("the login handoff card opens no window and dials no host", () => {
+    // The card names a session and a decision. It must not name a capability,
+    // an endpoint, a peer connection or the attach route — every one of those
+    // is LIVE-5, and each would arrive as a small diff in a file whose review
+    // is about copy and layout.
+    expect(AGENT_CARD_CODE).not.toMatch(
+      /issueDisplayAttach|DisplayAttachGrant|display-attach|display-control|RTCPeerConnection|createDataChannel|capability_token|attach_endpoint|display_endpoint|controller/
+    );
+  });
+
+  it("the card offers no affordance it cannot honour", () => {
+    // 정직 카피 2분법's second half, as a mechanical check. A deployment fact
+    // ("this build has no screen transport yet") must not be dressed as a
+    // control the reader could press: a permanently disabled button reads as
+    // "you did something wrong", and this file's whole discipline is that a
+    // surface must not tell that kind of quiet lie.
+    //
+    // The scan is scoped to the handoff body rather than the file: the approval
+    // card above it legitimately renders `aria-disabled` on a spawn it cannot
+    // approve, which is a different case — there the control CAN work once a
+    // host comes back.
+    const body = AGENT_CARD_CODE.slice(
+      AGENT_CARD_CODE.indexOf("function LoginHandoffBody"),
+      AGENT_CARD_CODE.indexOf("function ToolBody")
+    );
+    expect(body.length).toBeGreaterThan(0);
+    expect(body).not.toMatch(/\bdisabled\b|aria-disabled/);
+  });
+
+  it("says the deployment fact in the deployment register, and the session fact in the session register", () => {
+    // Two sentences, two authors, two remedies. Collapsing them is how a
+    // permanent operator-side gap starts reading as something the reader can
+    // fix by pressing the thing again.
+    expect(LOGIN_HANDOFF_DEPLOYMENT_COPY).toContain("이 배포에서는");
+    expect(LOGIN_HANDOFF_DEPLOYMENT_COPY).not.toMatch(/다시 시도|새로고침|재연결/);
+    expect(LOGIN_HANDOFF_OFFLINE_COPY).toContain("다시 연결되면");
+
+    // And the display banner's own version of the same split is unchanged: a
+    // session that cannot be watched right now still offers a retry, and the
+    // deployment sentence never does.
+    expect(DISPLAY_FAILURE_COPY.stream_dropped).toContain("다시 연결하세요");
+  });
+
+  it("never says 인수 on the card either", () => {
+    // ADR-0004 증보 3 D1, extended to the surface that most invites the word:
+    // this card is literally about a person taking over a keyboard, and 인수 is
+    // the term reserved for a lineage handoff that is a different act.
+    for (const text of [
+      LOGIN_HANDOFF_DEPLOYMENT_COPY,
+      LOGIN_HANDOFF_OFFLINE_COPY,
+      ...Object.values(LOGIN_HANDOFF_OUTCOME_DETAIL),
+    ]) {
+      expect(text).not.toContain("인수");
+      expect(text).not.toMatch(/[–—]/);
+    }
+  });
+
+  it("the boundary facts the card renders are the three an agent may learn, and no more", () => {
+    // 증보 3 D3 names exactly 정지 시각, 재개 시각 and how it ended. A card that
+    // grew a `grantee` row would be publishing to the whole channel a fact the
+    // boundary envelope deliberately withholds (`control_window_payload`).
+    const card = loginHandoffCard({
+      kind: "login_handoff",
+      approval_id: "5f0d2a1e-1c4b-4c9a-9f2a-0d3c8b7e6a11",
+      session_id: "9a1b2c3d-4e5f-4a6b-8c7d-1e2f3a4b5c6d",
+      approval_status: "approved",
+      control_started_at_ms: 1_785_180_100_000,
+      control_ended_at_ms: 1_785_180_200_000,
+      control_end_reason: "returned",
+      grantee_member_id: OWNER,
+    });
+    expect(card?.control).toEqual({
+      startedAtMs: 1_785_180_100_000,
+      endedAtMs: 1_785_180_200_000,
+      endReason: "returned",
+    });
+    // The grantee arrived in the props and is counted as withheld, never shown.
+    expect(card?.detail.withheld).toBe(1);
+    expect(JSON.stringify(card?.detail.rows)).not.toContain(OWNER);
   });
 });
 
