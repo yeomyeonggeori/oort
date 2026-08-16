@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { elapsedLabel } from "../agents/workingSignal";
-import { formatElapsed } from "../timeline/completionReportCard";
 import {
+  ELAPSED_SUB_SECOND,
+  WORKED_ELAPSED_LABEL,
+  formatElapsed,
+} from "../timeline/completionReportCard";
+import {
+  SESSION_ELAPSED_META_LABEL,
+  SESSION_WORKED_BARE_SUFFIX,
   SESSION_WORKED_SUFFIX,
   sessionElapsedReadout,
 } from "./workSessionFormat";
@@ -25,7 +31,7 @@ describe("끝난 세션: 경과가 시계가 아니라 성과의 단위다", () 
     expect(readout).not.toBeNull();
     expect(readout?.kind).toBe("worked");
     expect(readout?.label).toBe(`24분 28초 ${SESSION_WORKED_SUFFIX}`);
-    // 라벨이 이미 「실행 시간」인 자리(세션 정보)는 격 없이 숫자만 쓴다.
+    // 라벨이 이 값을 이미 이름 붙이는 자리(세션 정보)는 격 없이 숫자만 쓴다.
     expect(readout?.value).toBe("24분 28초");
   });
 
@@ -56,6 +62,63 @@ describe("끝난 세션: 경과가 시계가 아니라 성과의 단위다", () 
       );
       expect(readout?.value, `${ms}ms`).toBe(formatElapsed(ms));
     }
+  });
+});
+
+describe("1초에 못 미친 세션: 값이 아니라 조사가 문제였다 (#1468)", () => {
+  it("「1초 미만 동안 작업」이 아니라 「1초 미만 작업」으로 선다", () => {
+    // 「동안」은 기간 명사만 받는다. 「1초 미만」은 기간이 아니라 비교 표현이라
+    // 조사를 붙이면 문장이 되지 못한다 — 홀로 서는 조각에서만 나는 문제다.
+    const readout = sessionElapsedReadout(
+      { startedAtMs: START, endedAtMs: START + 400 },
+      START + 9_999
+    );
+    expect(readout?.value).toBe(ELAPSED_SUB_SECOND);
+    expect(readout?.label).toBe(
+      `${ELAPSED_SUB_SECOND} ${SESSION_WORKED_BARE_SUFFIX}`
+    );
+    expect(readout?.label).not.toContain(SESSION_WORKED_SUFFIX);
+  });
+
+  it("값은 그대로다 — 카드가 같은 문자열을 쓰므로 여기서 고치지 않는다", () => {
+    // 조사를 떨어뜨리는 것은 이 자리의 일이고, `formatElapsed` 는 카드의
+    // 「작업 시간 1초 미만」도 함께 짓는다. 값을 바꾸면 두 표면이 함께 흔들린다.
+    expect(formatElapsed(400)).toBe(ELAPSED_SUB_SECOND);
+    expect(sessionElapsedReadout({ startedAtMs: START, endedAtMs: START }, START)?.value)
+      .toBe(formatElapsed(0));
+  });
+
+  it("초 단위가 서는 경과에는 조사가 그대로 붙는다", () => {
+    // 경계가 값 하나에만 걸려 있다는 것. 「12초」는 기간 명사다.
+    const readout = sessionElapsedReadout(
+      { startedAtMs: START, endedAtMs: START + 12_000 },
+      START
+    );
+    expect(readout?.label).toBe(`12초 ${SESSION_WORKED_SUFFIX}`);
+  });
+});
+
+describe("라벨 자리의 낱말은 하나다 (#1468)", () => {
+  it("끝난 세션의 메타 라벨이 카드의 「작업 시간」과 같은 상수다", () => {
+    // 같은 측정을 「작업」과 「실행」 두 어근으로 부르면 한 화면의 한 숫자가 서로
+    // 다른 두 측정처럼 보인다. 라벨:값 쌍인 두 자리는 낱말을 공유한다.
+    expect(SESSION_ELAPSED_META_LABEL.worked).toBe(WORKED_ELAPSED_LABEL);
+    expect(WORKED_ELAPSED_LABEL).toBe("작업 시간");
+  });
+
+  it("도는 세션은 「경과」로 남는다 — 아직 총량이 아니다", () => {
+    expect(SESSION_ELAPSED_META_LABEL.clock).toBe("경과");
+  });
+
+  it("라벨은 화면의 삼항이 아니라 이 판정(`kind`)이 고른다", () => {
+    // `endedAtMs: null` 을 화면이 「끝났다」로 읽으면 시계 옆에 「작업 시간」이
+    // 붙는다. 라벨을 `kind` 로 키잉하면 그 갈래가 존재하지 않는다.
+    const clock = sessionElapsedReadout(
+      { startedAtMs: START, endedAtMs: null },
+      START + 42_000
+    );
+    expect(clock?.kind).toBe("clock");
+    expect(SESSION_ELAPSED_META_LABEL[clock?.kind ?? "worked"]).toBe("경과");
   });
 });
 

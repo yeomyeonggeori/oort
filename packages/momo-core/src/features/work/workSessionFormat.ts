@@ -1,5 +1,9 @@
 import { elapsedLabel } from "../agents/workingSignal";
-import { formatElapsed } from "../timeline/completionReportCard";
+import {
+  ELAPSED_SUB_SECOND,
+  WORKED_ELAPSED_LABEL,
+  formatElapsed,
+} from "../timeline/completionReportCard";
 import type { WorkRowState, WorkSessionStatusKey } from "./workSessionModel";
 
 // =============================================================================
@@ -92,13 +96,31 @@ export function silenceLabel(sinceMs: number, nowMs: number): string {
 export interface SessionElapsedReadout {
   /** 아직 도는 시계인가(`clock`), 끝난 일의 성과 서술인가(`worked`). */
   kind: "clock" | "worked";
-  /** 화면에 서는 낱말 전체. */
+  /** 라벨 없이 홀로 서는 자리에 설, 격까지 붙은 낱말 전체. */
   label: string;
-  /** 라벨이 이미 「실행 시간」인 자리(메타 목록)에 설, 단위만 뺀 시간. */
+  /** 라벨이 이 값을 이미 이름 붙인 자리(메타 목록)에 설, 격을 뺀 시간. */
   value: string;
   /** 자릿폭 고정(`data-numeric`/`font-mono`)을 걸어도 되는가. */
   numeric: boolean;
 }
+
+// ---- 같은 측정, 세 낱말 (#1468) ---------------------------------------------
+//
+// 한 화면에서 이 숫자가 세 번 선다: 상세 「스스로 보고한 것」 줄의 홀로 선 조각,
+// 세션 정보 dl 의 라벨:값 쌍, 그리고 완료 리포트 카드의 같은 모양 쌍. **형태는
+// 자리가 정하고 어근은 하나**라는 것이 결정이다.
+//
+//   · 라벨 없이 홀로 서는 조각은 자기가 무엇인지 스스로 말해야 하므로 술어다 —
+//     「24분 28초 동안 작업」. 이 형태를 라벨 자리로 옮기면 「작업 시간 24분 28초
+//     동안 작업」이 되므로 형태 통일은 오답이고, 유지가 답이다.
+//   · 라벨:값 쌍인 두 자리는 같은 측정을 말하므로 낱말도 하나다 —
+//     `WORKED_ELAPSED_LABEL`(「작업 시간」). 세션 정보가 쓰던 「실행 시간」은
+//     형태가 아니라 **어근**이 달랐고, 그 값은 위 조각과 이 함수 한 번의 결과
+//     (`.label`/`.value`)라 두 어근이 한 숫자를 두 측정처럼 보이게 했다.
+//
+// 도는 시계에는 「경과」가 남는다. 아직 총량이 아니기 때문이고, 그 갈림은 아래
+// `kind` 가 이미 지고 있다 — 화면이 자기 삼항으로 다시 판정하면 코어가 시계라고
+// 부르는 세션에 「작업 시간」 라벨이 붙는 날이 온다.
 
 /**
  * 끝난 세션의 경과에 붙는 격. 「24분 28초」가 눈금이 아니라 산출로 읽히게 하는
@@ -107,13 +129,36 @@ export interface SessionElapsedReadout {
 export const SESSION_WORKED_SUFFIX = "동안 작업";
 
 /**
+ * 같은 격, 조사 없이. 「동안」은 기간 명사만 받는데 `ELAPSED_SUB_SECOND` 는 기간이
+ * 아니라 비교 표현이라 「1초 미만 동안 작업」은 문장이 되지 못한다. 값을 바꾸는
+ * 대신(그 값은 카드도 함께 쓴다) 이 한 자리에서 조사를 떨어뜨린다 — 라벨 자리는
+ * 「작업 시간 1초 미만」으로 이미 문법이 서 있어 손댈 것이 없다.
+ *
+ * 조사를 화면 밖에서 정하는 것은 이 레포의 기존 판단이다(`lib/koreanParticle` —
+ * 「Hermes이(가)」는 번역이 아니라 기계가 읽는 사람 앞에서 결정을 미룬 것이다).
+ */
+export const SESSION_WORKED_BARE_SUFFIX = "작업";
+
+/**
+ * 라벨:값 쌍인 자리(세션 정보 dl)가 이 경과를 부르는 이름. 갈림의 근거는 화면의
+ * 삼항이 아니라 `SessionElapsedReadout.kind` 다 — 위에 선 조각이 시계인지 성과인지와
+ * **같은 판정**이 라벨을 고른다.
+ */
+export const SESSION_ELAPSED_META_LABEL: Readonly<
+  Record<SessionElapsedReadout["kind"], string>
+> = {
+  clock: "경과",
+  worked: WORKED_ELAPSED_LABEL,
+};
+
+/**
  * 이 세션의 경과를 무엇으로 말할 것인가 (UXC-C).
  *
  * 갈림의 기준은 세션 상태가 아니라 **끝난 시각이 관측됐는가**다. 상태로 가르면
  * 서버가 아직 `running` 이라 부르는 고아 세션이 끝난 격으로 서고, 반대로 끝났다고
  * 표시된 세션이 끝난 시각 없이 「몇 분 동안 작업」이라는 지어낸 숫자를 얻는다.
- * 원장이 끝을 적어 둔 세션만 성과로 말한다 — 세션 정보의 「경과/실행 시간」 라벨이
- * 이미 같은 기준으로 갈리고 있었다.
+ * 원장이 끝을 적어 둔 세션만 성과로 말한다 — 세션 정보의 「경과/작업 시간」 라벨도
+ * 이제 이 `kind` 하나로 갈린다(`SESSION_ELAPSED_META_LABEL`).
  */
 export function sessionElapsedReadout(
   session: { startedAtMs?: number | null; endedAtMs?: number | null },
@@ -127,9 +172,13 @@ export function sessionElapsedReadout(
   if (typeof endedAtMs === "number" && Number.isFinite(endedAtMs)) {
     const value = formatElapsed(endedAtMs - startedAtMs);
     if (value === "") return null;
+    const suffix =
+      value === ELAPSED_SUB_SECOND
+        ? SESSION_WORKED_BARE_SUFFIX
+        : SESSION_WORKED_SUFFIX;
     return {
       kind: "worked",
-      label: `${value} ${SESSION_WORKED_SUFFIX}`,
+      label: `${value} ${suffix}`,
       value,
       numeric: false,
     };

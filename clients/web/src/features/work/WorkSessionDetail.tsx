@@ -37,6 +37,7 @@ import {
 import {
   clockLabel,
   ROW_STATE_CLASS,
+  SESSION_ELAPSED_META_LABEL,
   SESSION_STATUS_CLASS,
   sessionElapsedReadout,
   silenceLabel,
@@ -966,13 +967,13 @@ export function WorkSessionDetail({
             <MetaRow label="시작한 사람">
               {owner?.displayName ?? "알 수 없는 멤버"}
             </MetaRow>
-            {/* 여기서는 라벨이 이미 「실행 시간」이라 격을 다시 붙이지 않는다 —
-                `value` 는 단위만 뺀 같은 숫자다(코어 `sessionElapsedReadout`).
-                한글이 섞인 값에는 자릿폭 고정을 걸지 않는다. */}
+            {/* 라벨이 이 값을 이미 이름 붙이는 자리라 격을 다시 붙이지 않는다 —
+                `value` 는 격만 뺀 같은 숫자다(코어 `sessionElapsedReadout`).
+                낱말은 코어가 준다: 카드의 「작업 시간」과 같은 상수이고(#1468),
+                갈림도 화면의 삼항이 아니라 위 조각과 **같은 판정**(`kind`)이
+                진다. 한글이 섞인 값에는 자릿폭 고정을 걸지 않는다. */}
             {elapsed !== null && (
-              <MetaRow
-                label={session.endedAtMs === undefined ? "경과" : "실행 시간"}
-              >
+              <MetaRow label={SESSION_ELAPSED_META_LABEL[elapsed.kind]}>
                 <span
                   {...(elapsed.numeric ? { "data-numeric": true } : {})}
                   className={cn(elapsed.numeric && "font-mono")}

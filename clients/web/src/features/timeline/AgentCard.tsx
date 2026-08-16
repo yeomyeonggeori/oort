@@ -52,6 +52,7 @@ import {
   completionCheckCounts,
   completionGateColumns,
   formatElapsed,
+  WORKED_ELAPSED_LABEL,
   type CompletionCheck,
   type CompletionCheckOutcome,
   type CompletionReportCard,
@@ -790,7 +791,8 @@ function CompletionReportBody({ card }: { card: CompletionReportCard }) {
       {elapsed !== "" && (
         // 성과의 단위(벤치마크 차용 C). 숫자와 한글 단위가 섞이므로 자릿폭 고정을
         // 걸지 않는다 — 걸면 음절 사이가 벌어진다(코어 `formatElapsed` 독스트링).
-        <LabeledRow label="작업 시간" testId="completion-elapsed">
+        // 낱말은 코어의 것이다: 작업 세션 정보의 같은 줄이 같은 상수를 쓴다(#1468).
+        <LabeledRow label={WORKED_ELAPSED_LABEL} testId="completion-elapsed">
           {elapsed}
         </LabeledRow>
       )}

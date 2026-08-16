@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   COMPLETION_CHECK_TONE,
   COMPLETION_OUTCOME_LABEL,
+  WORKED_ELAPSED_LABEL,
 } from "@momo/core/features/timeline/completionReportCard";
 
 // =============================================================================
@@ -57,6 +58,13 @@ describe("완료 리포트는 승인 카드 가족의 뼈대를 쓴다", () => {
 describe("코어가 답하는 것을 웹이 다시 짓지 않는다", () => {
   it("경과 시간의 서식은 코어 헬퍼가 답한다", () => {
     expect(REPORT_BODY).toContain("formatElapsed(card.elapsedMs)");
+  });
+
+  it("경과를 이름 붙이는 낱말도 코어의 것이다 (#1468)", () => {
+    // 「작업 시간」을 여기 적어 두면 작업 세션 정보의 같은 줄과 언젠가 갈라진다 —
+    // 갈라진 결과가 정확히 이 티켓이 온 이유(「실행 시간」)다.
+    expect(REPORT_BODY).toContain("label={WORKED_ELAPSED_LABEL}");
+    expect(CODE_ONLY).not.toContain(`label="${WORKED_ELAPSED_LABEL}"`);
   });
 
   it("결과 낱말과 집계는 코어의 것을 그대로 쓴다", () => {

@@ -1,6 +1,10 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { sessionElapsedReadout } from "@momo/core/features/work/workSessionFormat";
+import {
+  SESSION_ELAPSED_META_LABEL,
+  sessionElapsedReadout,
+} from "@momo/core/features/work/workSessionFormat";
+import { WORKED_ELAPSED_LABEL } from "@momo/core/features/timeline/completionReportCard";
 
 // =============================================================================
 // 세션 경과가 화면에서 세 갈래를 지키는가 (UXC-C).
@@ -87,6 +91,20 @@ describe("세 갈래가 화면까지 온다", () => {
       expect(source, name).toContain('elapsed.numeric ? { "data-numeric": true }');
       expect(source, name).toContain('elapsed.numeric && "font-mono"');
     }
+  });
+
+  it("세션 정보의 라벨은 코어가 준다 — 카드와 같은 낱말 (#1468)", () => {
+    // 그 자리는 라벨:값 쌍이라 위 조각과 형태가 다르지만 어근은 같아야 한다.
+    // 「실행 시간」이 이 파일에 남아 있으면 한 화면의 한 숫자가 두 어근으로 불린다.
+    expect(detail).toContain("SESSION_ELAPSED_META_LABEL[elapsed.kind]");
+    expect(detail).not.toContain("실행 시간");
+    expect(SESSION_ELAPSED_META_LABEL.worked).toBe(WORKED_ELAPSED_LABEL);
+  });
+
+  it("그 라벨의 갈림은 화면이 다시 판정하지 않는다 (#1468)", () => {
+    // `session.endedAtMs === undefined` 로 되돌아가면 코어가 시계라고 부르는
+    // 세션(`endedAtMs: null`)에 「작업 시간」 라벨이 붙는다. 판정은 한 곳이다.
+    expect(detail).not.toContain("session.endedAtMs === undefined");
   });
 
   it("경과 자리의 testid 는 그대로다 — 기존 게이트가 계속 이 자리를 짚는다", () => {
