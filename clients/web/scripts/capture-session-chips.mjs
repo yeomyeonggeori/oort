@@ -40,11 +40,13 @@ const RUNNING_ID = "019f9b00-0000-7000-8000-000000000601";
 const CLEAN_ID = "019f9b00-0000-7000-8000-000000000602";
 const FAILING_ID = "019f9b00-0000-7000-8000-000000000603";
 const QUIET_ID = "019f9b00-0000-7000-8000-000000000604";
+const WIDEST_ID = "019f9b00-0000-7000-8000-000000000605";
 const ROOT_OF = {
   [RUNNING_ID]: "019f9b00-0000-7000-8000-0000000006a1",
   [CLEAN_ID]: "019f9b00-0000-7000-8000-0000000006a2",
   [FAILING_ID]: "019f9b00-0000-7000-8000-0000000006a3",
   [QUIET_ID]: "019f9b00-0000-7000-8000-0000000006a4",
+  [WIDEST_ID]: "019f9b00-0000-7000-8000-0000000006a5",
 };
 
 const SESSION = {
@@ -135,11 +137,20 @@ function runningSession(id, label, startedAtMs) {
   return session;
 }
 
+/** 1시간 24분 — 시간 단위 경과. 「N시간 N분 동안 작업」이 가장 넓은 낱말이다. */
+const HOUR_SCALE_MS = 5_040_000;
+
 const SESSIONS = [
   runningSession(RUNNING_ID, "타임라인 접기 회귀 추적", NOW - 192_000),
   workSession(CLEAN_ID, "웹 세션 표면 게이트 정리"),
   workSession(FAILING_ID, "결제 어댑터 회귀 점검"),
   workSession(QUIET_ID, "로그 로테이션 스크립트 손보기"),
+  // 최악 조합 (design-review H-1 후속): 가장 넓은 경과 낱말 + 가장 넓은 칩 낱말
+  // (「미상 결과」, 4음절) + 긴 제목. 고정 폭만으로 320px 을 넘길 수 있는지가
+  // 코드 추론으로만 남아 있었으므로, 여기서 실측한다.
+  workSession(WIDEST_ID, "결제 정산 배치 재실행 파이프라인 점검", {
+    startedAtMs: NOW - HOUR_SCALE_MS,
+  }),
 ];
 
 const CLEAN_REPORT = {
@@ -186,9 +197,32 @@ const FAILING_REPORT = {
   ],
 };
 
+/**
+ * 가장 넓은 칩 낱말을 내는 표: 실패가 없고 **읽지 못한 결과**가 대표가 된다
+ * (`unknown` → 「미상 결과 2」). 심각도 순위에서 unknown 이 fail 다음이므로 통과
+ * 옆에서 이 칸이 앞선다 — 추측으로 통과를 짓지 않는다는 코어 규율 그대로다.
+ */
+const UNKNOWN_REPORT = {
+  kind: "completion_report",
+  title: "결제 정산 배치 재실행 파이프라인 점검",
+  summary: "정산 배치 게이트 둘의 결과 문자열을 읽지 못했습니다.",
+  elapsed_ms: HOUR_SCALE_MS,
+  gates: [
+    {
+      surface: "정산",
+      checks: [
+        { label: "빌드", outcome: "pass" },
+        { label: "회귀", outcome: "quarantined", detail: "격리 큐로 이동" },
+        { label: "정합", outcome: "flaky", detail: "재시도 3회" },
+      ],
+    },
+  ],
+};
+
 const REPORT_OF = {
   [CLEAN_ID]: CLEAN_REPORT,
   [FAILING_ID]: FAILING_REPORT,
+  [WIDEST_ID]: UNKNOWN_REPORT,
 };
 
 /** 세션 스레드 한 통: ACP 이벤트 몇 줄, 그리고 있으면 완료 리포트 하나. */
@@ -424,6 +458,38 @@ const ELAPSED_KINDS = `(() => {
   });
 })()`;
 
+/**
+ * 좁은 판에서 제목이 실제로 몇 픽셀을 남기는가 (design-review H-1).
+ *
+ * 기준은 비율이 아니라 **목록 행**이다. 리뷰어의 지적이 정확히 그 모양이었다:
+ * "목록 행조차 더 많이 남기는데, 세션 식별이 유일한 임무인 상세 머리가 목록보다
+ * 정보를 덜 준다." 그래서 같은 세션의 제목이 상세 머리에서 목록 행보다 좁아지면
+ * 그것이 회귀다 — 두 자리 다 이름 하나를 두고 같은 320px 을 나눠 쓰므로 비교가
+ * 성립한다.
+ */
+const ROW_TITLE_WIDTHS = `(() => {
+  const rows = [...document.querySelectorAll('[data-testid="work-session-row"]')];
+  const out = {};
+  for (const row of rows) {
+    const label = row.firstElementChild?.firstElementChild;
+    if (!label) continue;
+    out[String(row.getAttribute("data-session-id")).toLowerCase()] =
+      Math.round(label.getBoundingClientRect().width);
+  }
+  return out;
+})()`;
+
+const DETAIL_TITLE_WIDTH = `(() => {
+  const head = document.querySelector('[data-testid="work-detail-back"]').parentElement;
+  const title = head.querySelector("h2, h3");
+  return {
+    row: Math.round(head.getBoundingClientRect().width),
+    title: Math.round(title.getBoundingClientRect().width),
+    clipped: title.scrollWidth > title.clientWidth + 1,
+    text: title.textContent.trim(),
+  };
+})()`;
+
 async function peek(page, sessionId) {
   await page
     .locator(`[data-testid="work-session-row"][data-session-id="${sessionId}"]`)
@@ -452,6 +518,7 @@ async function captureScheme(browser, scheme) {
   );
   const running = byId[RUNNING_ID];
   const clean = byId[CLEAN_ID];
+  const widest = byId[WIDEST_ID];
   if (running?.kind !== "clock") {
     throw new Error(
       `${scheme}: 실행 중 세션의 경과가 시계가 아니다 (${JSON.stringify(running)})`
@@ -463,8 +530,11 @@ async function captureScheme(browser, scheme) {
     );
   }
   console.log(
-    `  ${scheme}: running=${running.label} · ended=${clean.label}`
+    `  ${scheme}: running=${running.label} · ended=${clean.label} · widest=${widest?.label}`
   );
+
+  // 상세 머리의 제목이 비교당할 기준. 목록을 떠나기 전에 재 둔다.
+  const rowTitleWidths = await page.evaluate(ROW_TITLE_WIDTHS);
 
   const list = `${OUT_DIR}/session-list-${scheme}.png`;
   await panel.screenshot({ path: list });
@@ -474,6 +544,7 @@ async function captureScheme(browser, scheme) {
     ["clean", CLEAN_ID],
     ["attention", FAILING_ID],
     ["no-report", QUIET_ID],
+    ["widest", WIDEST_ID],
   ]) {
     await peek(page, id);
     const chips = await page.getByTestId("work-peek-verification").count();
@@ -493,12 +564,27 @@ async function captureScheme(browser, scheme) {
   for (const [name, id] of [
     ["attention", FAILING_ID],
     ["clean", CLEAN_ID],
+    ["widest", WIDEST_ID],
   ]) {
     await peek(page, id);
     await page.getByTestId("work-session-open").click();
     await page.getByTestId("work-detail").waitFor();
     await page.getByTestId("work-detail-verification").waitFor();
     await page.waitForTimeout(200);
+    // H-1 의 수치. 사진만으로는 다음 사람이 이 회귀를 다시 알아보지 못한다.
+    const head = await page.evaluate(DETAIL_TITLE_WIDTH);
+    const inRow = rowTitleWidths[id.toLowerCase()];
+    console.log(
+      `  ${scheme}/${name}: 제목 상세 ${head.title}px / 목록 ${inRow}px` +
+        `${head.clipped ? " (잘림)" : ""} 「${head.text}」`
+    );
+    if (head.title < inRow) {
+      throw new Error(
+        `${scheme}/${name}: 320px 상세 머리의 제목(${head.title}px)이 목록 행` +
+          `(${inRow}px)보다 좁다 — 세션 식별이 유일한 임무인 줄이 목록보다 적게` +
+          ` 말한다 (H-1 회귀, 「${head.text}」)`
+      );
+    }
     const shot = `${OUT_DIR}/session-detail-${name}-${scheme}.png`;
     await panel.screenshot({ path: shot });
     shots.push(shot);

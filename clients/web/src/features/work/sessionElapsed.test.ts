@@ -40,8 +40,37 @@ describe("세 갈래가 화면까지 온다", () => {
   it("시작이 관측되지 않은 세션에는 그 자리가 아예 없다", () => {
     expect(sessionElapsedReadout({}, START)).toBeNull();
     for (const [name, source] of SURFACES) {
-      expect(source, name).toContain("{elapsed !== null && (");
+      expect(source, name).toContain("elapsed !== null &&");
     }
+  });
+
+  it("상세에서는 두 갈래가 **서로 다른 줄**에 산다 (design-review H-1)", () => {
+    // 시계는 sticky 머리에 남는다(계속 바뀌고 생존 신호가 칠한다). 성과 서술은
+    // 아래 「스스로 보고한 것」 줄로 내려간다 — 셋을 한 줄에 세우면 320px 판에서
+    // 제목이 목록 행보다 좁아졌고, 세션 식별이 유일한 임무인 줄이 목록보다 적게
+    // 말하게 됐다. 픽셀 비교는 `capture-session-chips.mjs` 가 매 실행마다 한다.
+    expect(detail).toContain('elapsed.kind === "clock"');
+    expect(detail).toContain('elapsed.kind === "worked"');
+    const headEnd = detail.indexOf('data-testid="work-detail-status"');
+    expect(headEnd).toBeGreaterThan(0);
+    expect(
+      detail.indexOf('elapsed.kind === "clock"'),
+      "시계가 sticky 머리 밖으로 나갔다"
+    ).toBeLessThan(headEnd);
+    expect(
+      detail.indexOf('elapsed.kind === "worked"'),
+      "성과 서술이 아직 sticky 머리 안에 있다"
+    ).toBeGreaterThan(headEnd);
+  });
+
+  it("검증 칩도 머리를 떠나 성과 서술과 같은 줄에 선다 (H-1)", () => {
+    // 경계는 「원장이 말하는 것」(상태 칩·시계)과 「세션이 스스로 보고한 것」이다.
+    const headEnd = detail.indexOf('data-testid="work-detail-status"');
+    expect(
+      detail.indexOf("<SessionVerificationChip"),
+      "검증 칩이 아직 sticky 머리 안에 있다"
+    ).toBeGreaterThan(headEnd);
+    expect(detail).toContain('data-testid="work-detail-report"');
   });
 
   it("자릿폭 고정은 시계에만 걸린다 — 한글 음절이 벌어지지 않게", () => {
