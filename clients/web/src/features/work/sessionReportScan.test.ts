@@ -118,8 +118,24 @@ function noise(seq: number, rootId: string): Message {
   });
 }
 
-/** 서버 히스토리 페이지: 최신부터(seq 내림차순). */
+/**
+ * 서버 히스토리 페이지: 최신부터(seq 내림차순) + `nextBefore`.
+ *
+ * `nextBefore` 는 **이 페이지의 가장 작은 seq** 다 — 마지막 페이지에도 값이 있으므로
+ * 「더 있는가」의 답이 아니다(routes::messages::history). 그 구분이 스캔의 종료
+ * 조건이라, 픽스처가 그 모양을 그대로 흉내 내야 한다.
+ */
 function historyPage(messages: Message[]) {
+  const sorted = [...messages].sort((a, b) => b.seq - a.seq);
+  const nextBefore = sorted[sorted.length - 1]?.seq;
+  return {
+    messages: sorted,
+    ...(nextBefore === undefined ? {} : { nextBefore }),
+  };
+}
+
+/** `nextBefore` 를 싣지 않는 서버(옛 판)를 흉내 낸 페이지. */
+function historyPageWithoutCursor(messages: Message[]) {
   return { messages: [...messages].sort((a, b) => b.seq - a.seq) };
 }
 
@@ -175,6 +191,18 @@ describe("스캔은 채널을 최신부터, 세션 수와 무관한 왕복으로
     expect(sessionVerificationFrom(found, ROOT_LONG)?.lead).toBe("fail");
     // 예산 밖의 세션은 칩이 서지 않는다 — 「미검증」이 아니라 부재.
     expect(sessionVerificationFrom(found, ROOT_OTHER)).toBeNull();
+  });
+
+  it("`nextBefore` 가 없는 응답에서도 커서를 잃지 않는다", () => {
+    // 그 키는 「더 있는가」의 답이 아니라 이 페이지의 최솟값이라, 없으면 페이지에서
+    // 직접 재야 한다. 위치가 아니라 최솟값인 것은 정렬을 계약으로 삼지 않기 위해서다.
+    const full = Array.from({ length: 200 }, (_, i) => noise(1_000 - i, ROOT_LONG));
+    wire.pages.push(historyPageWithoutCursor(full));
+    wire.pages.push(historyPage([message(700, ROOT_LONG, CLEAN_REPORT)]));
+    return fetchChannelSessionReports(WORKSPACE, CHANNEL).then((found) => {
+      expect(wire.calls[1]?.before).toBe(801);
+      expect(sessionVerificationFrom(found, ROOT_LONG)?.lead).toBe("pass");
+    });
   });
 
   it("먼저 만난(더 최신) 리포트가 뒤 페이지의 오래된 것에 덮이지 않는다", async () => {

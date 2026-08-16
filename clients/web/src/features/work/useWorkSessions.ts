@@ -251,9 +251,14 @@ export async function fetchChannelSessionReports(
       if (!found.has(report.rootId)) found.set(report.rootId, report);
     }
     if (res.messages.length < REPORT_PAGE_LIMIT) break;
-    const oldest = res.messages[res.messages.length - 1];
-    if (oldest === undefined) break;
-    before = oldest.seq;
+    // 다음 커서는 **이 페이지의 가장 작은 seq** 다. 서버가 이미 그 값을 계산해
+    // `nextBefore` 로 싣고 있으므로 그것을 쓴다(routes::messages::history). 마지막
+    // 행에서 읽는 것은 그 키가 없을 때의 대비이고, 정렬을 계약으로 삼지 않으려고
+    // 위치가 아니라 최솟값으로 잰다.
+    const oldest =
+      res.nextBefore ?? Math.min(...res.messages.map((row) => row.seq));
+    if (!Number.isFinite(oldest)) break;
+    before = oldest;
   }
   return [...found.values()];
 }
