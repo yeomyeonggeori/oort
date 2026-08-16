@@ -136,10 +136,23 @@ capture_surface WORK-DETAIL work-detail-dark.png
 capture_surface LIGHT-WORK-CONSOLE work-console-light.png
 capture_surface LIGHT-WORK-DETAIL work-detail-light.png
 
+# #1422 컴포저 플레이스홀더. 폰에는 웹의 `composer-placeholder` 대응물이 없고
+# 예산은 더 빡빡하다 — 이 두 장이 그 예산을 사진으로 든다: 배송되는 `Composer` 를
+# 세 이름으로 세우고, 위의 계측 줄이 같은 문장을 **이 기기의 입력창**과 **문서된
+# 390pt 예산 상자** 둘에서 재서 줄 수를 적는다.
+capture_surface COMPOSER-PLACEHOLDER composer-placeholder-dark.png
+capture_surface LIGHT-COMPOSER-PLACEHOLDER composer-placeholder-light.png
+
 ORIGINAL_CONTENT_SIZE="$(xcrun simctl ui booted content_size)"
 xcrun simctl ui booted content_size accessibility-extra-extra-large
 capture_surface WORK-CONSOLE work-console-accessibility-text.png
 capture_surface WORK-DETAIL work-detail-accessibility-text.png
+# #1422 design-review H2. 기본 크기에서 폰이 플레이스홀더를 **안 자른다**는 것이
+# 웹과 폰이 다른 처리를 하는 근거인데, 그 근거가 이 크기에서도 참인지는 아무도
+# 안 봤었다. 참이 아니다 — 실측은 `composerCopy.ts` 머리말에 적혀 있고, 이 두 줄이
+# 그 실측을 다음 배치에서도 다시 낸다.
+capture_surface COMPOSER-PLACEHOLDER composer-placeholder-accessibility-text.png
+capture_surface LIGHT-COMPOSER-PLACEHOLDER composer-placeholder-accessibility-text-light.png
 xcrun simctl ui booted content_size "$ORIGINAL_CONTENT_SIZE"
 ORIGINAL_CONTENT_SIZE=""
 

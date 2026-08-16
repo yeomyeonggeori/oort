@@ -441,6 +441,38 @@ export function Composer({
           placeholderTextColor={palette.textFaint}
           accessibilityLabel={placeholder ?? composerFieldLabel(channelLabel, recipient)}
           multiline
+          // 이 상자에서 한국어가 **낱말 가운데서** 끊기지 않는다 (#1422 폰 몫).
+          //
+          // 웹의 같은 문장은 한 줄 상자(`rows=1`)라 넘친 절이 사라지고, 그래서
+          // #1422 는 거기서 「절 단위로 버린다」를 계약으로 만들었다. 이 상자는
+          // 다르다 — RN 의 `multiline` 은 콘텐츠 높이로 자라므로 넘쳐도 잃는 것이
+          // 없고, 잃는 것이 없으면 버릴 이유도 없다. 폰 계측이 그것을 실측했다
+          // (`measure/surfaces.tsx` 의 `composer-placeholder`: 예산 260pt 상자에서
+          // 긴 방 이름은 두 줄, 그리고 **두 줄 다 보인다**).
+          //
+          // 그 「잃는 것이 없다」는 **기본 글자 크기까지**다. 같은 표면을
+          // `accessibility-extra-extra-large` 로 찍으면 글폭이 206pt 로 줄고
+          // 문장이 4~5줄이 되는데 상자는 한 줄만 보여 준다 — 원인은 위
+          // `MAX_HEIGHT` 가 고정 `line.body` 에서 나오는 것이고(글자만 커진다),
+          // 절을 하나 버려도 남는 머리 절이 여전히 안 든다. 그 띠는 이 배치가
+          // 고치지 않고 사진과 이름만 남겼다(#1422 design-review H2, 캡처
+          // `clause1422-composer-placeholder-a11y-*`, 레인은 `scripts/measure.sh`
+          // 의 접근성 글자 크기 블록). 사람이 친 글도 같은 상한에 걸리므로 그
+          // 수리는 성장 정책의 것이지 카피의 것이 아니다.
+          //
+          // 미룬 것의 주인: **`#1443 — 폰 동적 타입 컴포저 성장 상한 (#1422 이월)`**
+          // (`@momo/core` 의 `composerCopy.ts` 가 같은 표시로 묶여 있다). 번호는
+          // 워커가 이슈를 만들지 않아 아직 없다. 그 goal 의 범위는 상한 하나가
+          // 아니다 — 잘린 자리의 「release-2」는 라틴 낱말이 가운데서 끊긴 것이라
+          // 아래 `hangul-word` 가 손을 못 댄다.
+          //
+          // 같은 계측이 다른 것을 하나 잡았다: iOS 기본 줄바꿈이 「부르기」를
+          // 「부 / 르기」로 끊고 있었다. 이 레포는 그 결함에 이미 이름과 처방을
+          // 갖고 있다 — `design/atoms.tsx` 의 `Sentence`·`NoticeBlock` 이 완성된
+          // 한국어 문장에 `hangul-word` 를 든다. 그 규칙이 입력창만 비껴가면 같은
+          // 앱이 문장마다 다르게 끊긴다(디자인 시스템 §5.3: 한국어 텍스트 처리 ·
+          // 한 클라 안의 내부 불일치). 그래서 여기서도 어절이 단위다.
+          lineBreakStrategyIOS="hangul-word"
           // Enter inserts a newline (see the header). `blurOnSubmit` false keeps
           // the keyboard up, because on a phone the return key is the only line
           // break there is.

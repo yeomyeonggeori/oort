@@ -1076,16 +1076,83 @@
  * `scrollHeight <= clientHeight`이면 내다볼 것이 없다(gate-work-panel
  * `work-pane-900`).
  *
- * 이것이 **닫지 않는 것**도 적어 둔다 (design-review #1418 M1): 살아남은 한 줄이
- * 읽히는 한국어인지는 아무도 재지 않는다. 지금 900px에서 접히는 자리는 코어가
- * 이름 붙여 둔 절(`MENTION_AFFORDANCE`) 한가운데이고, 줄상자가 아니라 그 절
- * 단위로 지우는 것이 옳은 답이다 — 그 결정은 코어 문장의 것이라 여기서 하지
- * 않는다. */
+ * 여기서 하지 않기로 했던 결정은 이제 났다 (#1422, design-review #1418 M1이
+ * 남긴 자리). 「살아남은 한 줄이 읽히는 한국어인가」는 줄상자가 답할 수 없는
+ * 질문이었고 — 900px에서 접히던 자리가 코어가 이름 붙여 둔 절
+ * (`MENTION_AFFORDANCE`) 한가운데였다 — 그 답은 코어 문장의 계약이 됐다:
+ * `composerCopy.ts`의 `fitComposerPlaceholder`가 넘치는 절을 **통째로** 버리고,
+ * 이 클라의 자(`features/chat/placeholderFit.ts`)가 "이 상자에 드는가"에만
+ * 답한다.
+ *
+ * 그래서 이 클램프는 이제 **마지막 방어선**이다. 절 단위 생략이 손댈 수 없는
+ * 판이 하나 남아 있기 때문이다: 머리 절(「…에 메시지 보내기」) 하나도 안 드는 폭.
+ *
+ * ## 그 마지막 판에서 무엇이 보이는가 (#1422 design-review H1)
+ *
+ * 리뷰가 그 띠를 실측했다. 픽스처 이름보다 네 글자 긴 `release-2026-08-hotfix`면
+ * 머리 절이 246.4px라 236px 상자를 넘고, `max-block-size: 1lh`만으로는 남는 줄이
+ * 「…에 메시지 보내」였다 — `보내기`를 `보내`/`기`로 끊은 것. 폰에서 이 배치가
+ * `hangul-word`로 고친 그 결함(`부`/`르기`)과 **같은 모양**이고, 디자인 시스템
+ * §5.3이 7위로 세어 둔 축이다. 절 단위 생략은 여기에 손을 못 댄다: 더 버릴 절이
+ * 없고, 머리 절은 계약상 안 버린다.
+ *
+ * 그래서 이 판에서는 **접히는 자리**를 옮긴다. 처방은 이 레포에 이미 있다 —
+ * `word-break: keep-all`(Tailwind `break-keep`)을 서른 몇 자리가 쓰고,
+ * `features/settings/SettingsFields.tsx`가 그 이유를 적어 둔다. 그리고 이것이
+ * 폰이 같은 배치에서 든 `lineBreakStrategyIOS="hangul-word"`의 **웹 짝**이다:
+ * 두 표면이 이제 한국어를 어절에서 끊는다. `keep-all`이면 남는 줄이
+ * 「release-2026-08-hotfix에 메시지」— 동사를 잃은 구이되 낱말은 성한 한국어다.
+ *
+ * ## 말줄임표를 못 다는 이유 — 실측 (같은 리뷰)
+ *
+ * 「…보내」보다 「…보…」가 정직하니 `text-overflow: ellipsis`를 걸어 봤고,
+ * **`::placeholder`에서는 안 먹는다.** 실측 둘(Chromium, 게이트가 도는 그 판):
+ *
+ *   · `white-space: nowrap`을 이 의사 요소에 선언하면 계산된 값으로 **들어온다.**
+ *   · 그런데 `text-overflow`는 함께 선언해도 `clip`으로 남는다.
+ *   · 그리고 지금 선언에는 `nowrap`이 없으므로 이 자리의 계산값은 `pre-wrap`이다
+ *     (`gate-work-panel`의 `[head-clause]` 줄이 매번 찍는다). 줄이 **감기는** 이상
+ *     인라인으로 넘칠 것이 없고, 말줄임표는 넘칠 때만 그려진다.
+ *
+ * 즉 두 겹으로 막혀 있다. 요소 쪽(`textarea` 자신)에 걸면 `text-overflow`는 먹지만
+ * 그러려면 `white-space: nowrap`도 요소에 걸어야 하고, 그 순간 **사람이 친 글이
+ * 안 접힌다.** 안내 문구의 표식을 사는 값으로 본문의 줄바꿈을 팔 수는 없다.
+ *
+ * 그래서 이 띠의 답은 「표시 있는 절단」이 아니라 「낱말을 안 깨는 절단」이고,
+ * 게이트가 그 규칙이 실제로 이 요소에 닿았는지를 계산된 값으로 잰다
+ * (`exerciseHeadClauseBand`). 절 단위 생략이 먼저 도는 덕분에 이 줄은
+ * **평소에는 아무 일도 하지 않는다**: 드는 폭에서는 접힐 것이 없고, 안 드는
+ * 폭에서는 이미 절이 하나뿐이다. */
 @utility composer-placeholder {
   &::placeholder {
     max-block-size: 1lh;
     overflow: hidden;
+    word-break: keep-all;
   }
+}
+
+/* 글자 폭을 재는 프로브의 옷 (#1422, design-review M1).
+ *
+ * `features/chat/placeholderFit.ts`가 만드는 숨은 요소다. 그 파일이 **글자꼴**은
+ * 스크립트로 넣을 수밖에 없다 — `getComputedStyle`이 준 값을 그대로 옮기는 것이
+ * 프로브의 존재 이유라 스타일시트가 미리 알 수 없다. 하지만 자리·가시성·줄바꿈은
+ * 그 파일이 **지어낸 값**이고, 지어낸 값이 컴포넌트 안에 있으면 그것은 방언 §1이
+ * 금지하는 인라인 스타일이다. 그래서 그 다섯은 여기 이름을 갖는다.
+ *
+ * `fixed`인 이유는 오버플로다: `absolute`인 프로브는 초기 컨테이닝 블록의 스크롤
+ * 영역에 들어가므로, 방 이름이 긴 워크스페이스에서 문장이 뷰포트보다 넓어지면
+ * 문서에 가로 스크롤바가 생긴다(캡처 레인이 「가로 오버플로 0」으로 재는 그 축).
+ * 고정 위치 요소는 그 영역에 안 들어간다.
+ *
+ * `pre`는 재는 대상이 **한 줄일 때의 폭**이라서다. 감기면 폭이 아니라 높이가
+ * 답하게 되고, 그러면 프로브가 다른 질문에 대답한다. */
+@utility text-probe {
+  position: fixed;
+  inset-block-start: 0;
+  inset-inline-start: 0;
+  white-space: pre;
+  visibility: hidden;
+  pointer-events: none;
 }
 
 /* ADE 관제 서랍 기하 (ADR-0154 D2, #1135).
