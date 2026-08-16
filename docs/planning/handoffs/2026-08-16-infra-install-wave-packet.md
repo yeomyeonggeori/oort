@@ -29,3 +29,12 @@
 
 ## 리뷰 폐곡선
 인프라 goal이라 design-review 불요. 완주 보고 → Fable 검수(런북·증거) → 런북 PR(main — docs 전용) → grok freeze는 런북 텍스트에 불요(코드 0), 단 잘못된 절차가 위험하므로 Fable이 증거 교차 확인. E2E goal(LIVE-5 전 실기동 검증)은 두 goal 완료 후 편성.
+
+---
+
+## goal C (증보 2026-08-16) — cubesandbox 어댑터 envVars 주입 경로 재설계 (#1437)
+
+- **발단**: goal A 실측 [Blocker] — `create_body`가 `envVars`를 실으면 envd 미탑재(create-from-image) 템플릿에서 create 전체 500(`130497`). 현 어댑터로 우리 템플릿 프로비저닝 불가 — #1438 실기동 E2E의 선행 차단.
+- base = 발사 시점 track/engine HEAD. 코드 좌표: `server-rust/crates/momo-t3/src/provider/cubesandbox.rs:356-380 create_body`·`:329 momo_metadata`·`provision.rs:92 BootstrapDerivationSecret`(env 주입의 현 소비자 추적 필수 — 무엇이 envVars에 실리는지 전수 파악부터).
+- **경로 후보**(워커가 실측·판정, ADR 정합 1절 의무): ①기존 metadata 채널 이관+workd가 부팅 시 읽기(어댑터에 이미 momo_metadata 존재 — 최소 변경 후보) ②템플릿에 envd 탑재(호스트 실측 필요 — INFRA-A 런북의 템플릿 빌드 절차로 momo-cube-host에서 검증 가능, SSH 자격 `~/.ncp/` — 값 비유입) ③기타. 보안 경계 검토: 주입 값에 bootstrap 자격이 포함되므로 metadata의 가시 범위(다른 샌드박스/게스트에서 읽히는가)를 실측 — ADR-0157 D1/D2 정합.
+- 수용기준: 우리 템플릿에서 create 201+bootstrap 자격 workd 실도달(momo-cube-host 실측)+conformance 갱신+mock provider 정직성 유지+선택 경로 ADR 정합 1절(경계 변경이면 증보 초안 동봉). 실호스트 접촉 규율은 goal A와 동일(기존 서버 비접촉·시크릿 비유입).
