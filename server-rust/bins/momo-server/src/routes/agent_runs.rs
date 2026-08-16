@@ -992,7 +992,7 @@ fn work_job_payload(job: &WorkJob<'_>) -> Value {
         && job
             .tool_schema
             .as_array()
-            .map_or(true, |entries| !entries.is_empty())
+            .is_none_or(|entries| !entries.is_empty())
     {
         payload["tools"] = job.tool_schema.clone();
     }

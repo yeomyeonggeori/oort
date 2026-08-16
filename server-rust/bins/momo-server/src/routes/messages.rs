@@ -287,11 +287,11 @@ fn harness_refine(
     if message_type != MessageType::System {
         return Err(refuse(HarnessRefineInvalid::NotSystemMessage));
     }
-    if !request
+    if request
         .body
         .as_deref()
         .map(str::trim)
-        .is_some_and(|body| !body.is_empty())
+        .is_none_or(|body| body.is_empty())
     {
         return Err(refuse(HarnessRefineInvalid::MissingBody));
     }
