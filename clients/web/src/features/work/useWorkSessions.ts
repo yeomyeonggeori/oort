@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import {
+  skipToken,
+  useQuery,
+  useQueryClient,
+  type QueryClient,
+} from "@tanstack/react-query";
+import {
+  ApiError,
+  fetchMessages,
   fetchThreadReplies,
   fetchWorkHosts,
   fetchWorkSessions,
@@ -17,9 +24,12 @@ import {
 } from "@momo/core/features/work/workSessionModel";
 import {
   latestSessionVerification,
+  reportForRoot,
   sessionCompletionReport,
+  threadCompletionReports,
   type SessionCompletionReport,
   type SessionVerification,
+  type ThreadCompletionReport,
 } from "@momo/core/features/work/sessionVerification";
 import type { WorkSessionControlFrame } from "@momo/core/lib/realtimeEvents";
 
@@ -103,7 +113,11 @@ export interface SessionEventPage {
    *
    * 두 번째 읽기가 아니라 **같은 페이지의 두 번째 질문**이다: 세션 원장 스레드는
    * 이미 여기서 통째로 읽히고, 지금까지는 ACP 이벤트만 건져내고 나머지를 버렸다.
-   * 검증 칩의 원천이 그 버려지던 쪽에 있다(코어 `sessionVerification` 머리말).
+   *
+   * #1463 이후 이것은 검증 칩의 **두 번째** 원천이다. 첫째는 채널 히스토리를
+   * 최신부터 훑는 스캔이고(`useSessionVerification`), 이쪽은 `truncated` 가 아닐
+   * 때만 발언권을 갖는다 — 이 읽기는 오래된 쪽부터 페이지되므로 절단이 잘라내는
+   * 것이 정확히 가장 최근 리포트다.
    */
   reports: SessionCompletionReport[];
 }
@@ -147,18 +161,33 @@ async function fetchSessionEvents(
  * ONE subscription for every session it is watching, instead of one per open
  * detail view.
  */
+/**
+ * 한 세션의 스레드 읽기가 앉는 쿼리 키.
+ *
+ * 함수로 있는 이유는 **읽는 쪽이 둘**이기 때문이다 (#1463 재검토 M-1): 스레드를
+ * 실제로 여는 표면(미리보기·상세)과, 그 캐시를 구독만 하는 판정(`useSessionVerification`).
+ * 키가 두 벌이면 같은 세션의 같은 읽기를 두 표면이 서로 다른 자리에서 찾게 되고,
+ * 그것이 곧 한 화면에 반대 판정이 서는 방법이다.
+ */
+export function sessionThreadKey(
+  workspaceId: string,
+  channelId: string,
+  rootMessageId: string
+): readonly unknown[] {
+  return [...WORK_SESSION_EVENTS_KEY, workspaceId, channelId, rootMessageId];
+}
+
 export function useSessionEvents(
   workspaceId: string,
   session: WorkSession | null,
   live: readonly WorkSessionEvent[]
 ) {
   const query = useQuery({
-    queryKey: [
-      "work-session-events",
+    queryKey: sessionThreadKey(
       workspaceId,
       session?.channelId ?? "",
-      session?.rootMessageId ?? "",
-    ],
+      session?.rootMessageId ?? ""
+    ),
     queryFn: () =>
       fetchSessionEvents(
         workspaceId,
@@ -173,27 +202,232 @@ export function useSessionEvents(
     [query.data, live]
   );
 
-  /**
-   * 이 세션의 검증 상태, 또는 없음 (UXC-C).
-   *
-   * 절단된 읽기에서는 판정하지 않는다. 이 스레드는 오래된 쪽부터 페이지되므로
-   * 절단이 잘라낸 것은 **가장 최근 리포트**이고, 그때 접힌 판정은 지난 이야기다
-   * (`foldSessionEvents` 가 절단에서 「지금 이것이 실행 중」 승격을 전부 끄는 것과
-   * 같은 규율). 실시간 레일은 이 자리에 아무것도 보태지 않는다 — 레일이 나르는
-   * 것은 ACP 프레임뿐이고, 리포트는 Postgres 가 정본이다.
-   */
-  const verification: SessionVerification | null = useMemo(() => {
-    const page = query.data;
-    if (page === undefined || page.truncated) return null;
-    return latestSessionVerification(page.reports);
-  }, [query.data]);
-
   return {
     ...query,
     events,
     truncated: query.data?.truncated ?? false,
-    verification,
   };
+}
+
+// =============================================================================
+// 검증 칩의 read-model (#1463) — 세션 스레드가 아니라 **채널을 최신부터** 읽는다.
+//
+// 설계 근거 전문은 코어 `sessionVerification` 머리말 「그 스레드를 어느 방향으로
+// 읽는가」에 있다. 여기 있는 것은 그 결정의 왕복 예산이다:
+//
+//   원천    `GET …/channels/{ch}/messages` (기본 DESC). 스레드 답글은 채널
+//           메시지이고 서버가 히스토리에서 그것을 걸러내지 않으므로, 완료 리포트가
+//           이 페이지에 실려 오고 행의 `rootId` 가 소속을 증명한다.
+//   왕복    **채널당 최대 2페이지(×200)**, 세션 수와 무관. 목록에 세션이 40개여도
+//           채널이 하나면 읽기는 하나다 — React Query 가 키(워크스페이스·채널)로
+//           묶어 주므로 행마다 이 훅을 불러도 요청은 채널당 하나다.
+//   절단    최신부터 읽으므로 예산이 잘라내는 것은 **가장 오래된** 쪽이다. 어떤
+//           스레드에 대해 이 스캔이 찾은 리포트는 그 스레드의 최신 리포트이고,
+//           못 찾았으면 칩이 서지 않는다(「미검증」이 아니라 부재).
+//
+// 세션당 5×200 스레드 읽기(`fetchSessionEvents`)는 그대로 있고 이 판정과 분리돼
+// 있다. 그쪽은 진행 내역을 그리기 위한 읽기이고, 오래된 쪽부터 페이지되므로 검증에
+// 대해서는 절단되지 않았을 때만 발언권이 있다(`useSessionVerification`).
+// =============================================================================
+
+const REPORT_PAGE_LIMIT = 200;
+
+/**
+ * 한 채널에서 최신부터 훑을 페이지 수.
+ *
+ * 2인 이유는 이것이 **부재를 정직하게 낼 수 있는** 읽기이기 때문이다: 예산을 키우면
+ * 조용한 채널에서도 없는 리포트를 찾느라 왕복만 늘고(첫 페이지가 짧으면 어차피 거기서
+ * 멈춘다), 줄이면 세션 하나가 끝난 직후 다른 세션이 쏟아내는 ACP 이벤트에 리포트가
+ * 밀려난 채널에서 칩이 사라진다. 밀려나서 못 찾은 세션은 칩이 서지 않을 뿐이고,
+ * 그것은 이 표면이 이미 하고 있는 말(부재≠미검증)과 같은 말이다.
+ */
+const REPORT_MAX_PAGES = 2;
+
+/**
+ * 이 채널의 세션 스레드별 최신 완료 리포트.
+ *
+ * 페이지가 `limit` 보다 짧으면 채널의 처음까지 간 것이므로 더 읽지 않는다.
+ * `nextBefore` 로는 이 질문에 답할 수 없다 — 서버는 그것을 「이 페이지의 가장 작은
+ * seq」로 채우므로 마지막 페이지에도 값이 있다(routes::messages::history).
+ *
+ * 훅 밖으로 내보내 두는 이유는 `invalidateSessionThreads` 와 같다: 이 클라이언트에는
+ * 훅을 렌더할 DOM 이 없고, 「왕복이 정말 채널당 2회인가」·「두 번째 페이지가 정말 더
+ * 오래된 쪽인가」는 문자열 대조가 아니라 실제로 불러 봐야 하는 질문이다
+ * (`sessionReportScan.test.ts`).
+ */
+export async function fetchChannelSessionReports(
+  workspaceId: string,
+  channelId: string
+): Promise<ThreadCompletionReport[]> {
+  const found = new Map<string, ThreadCompletionReport>();
+  let before: number | undefined;
+  for (let page = 0; page < REPORT_MAX_PAGES; page += 1) {
+    const res = await fetchMessages(workspaceId, channelId, {
+      limit: REPORT_PAGE_LIMIT,
+      ...(before === undefined ? {} : { before }),
+    });
+    // 나중 페이지는 더 오래된 쪽이므로, 이미 담긴 스레드는 덮지 않는다. 접기 자체는
+    // 코어가 `seq` 로 다시 재므로 순서 사고가 나도 답이 뒤집히지 않는다.
+    for (const report of threadCompletionReports(res.messages)) {
+      if (!found.has(report.rootId)) found.set(report.rootId, report);
+    }
+    if (res.messages.length < REPORT_PAGE_LIMIT) break;
+    // 다음 커서는 **이 페이지의 가장 작은 seq** 다. 서버가 이미 그 값을 계산해
+    // `nextBefore` 로 싣고 있으므로 그것을 쓴다(routes::messages::history). 마지막
+    // 행에서 읽는 것은 그 키가 없을 때의 대비이고, 정렬을 계약으로 삼지 않으려고
+    // 위치가 아니라 최솟값으로 잰다.
+    const oldest =
+      res.nextBefore ?? Math.min(...res.messages.map((row) => row.seq));
+    if (!Number.isFinite(oldest)) break;
+    before = oldest;
+  }
+  return [...found.values()];
+}
+
+/**
+ * 이 스캔의 쿼리 키 접두. 세션이 끝나거나(리포트가 막 떨어진다) 살아 있는 꼬리를
+ * 버릴 때 스레드 읽기와 **함께** 무효화된다 — 두 읽기가 같은 순간의 원장을 말하지
+ * 않으면 한 화면에서 경과는 성과 서술인데 칩만 부재인 상태가 다시 생긴다.
+ */
+const SESSION_REPORTS_KEY = ["work-session-reports"];
+
+export function invalidateSessionReports(client: QueryClient): Promise<void> {
+  return client.invalidateQueries({ queryKey: SESSION_REPORTS_KEY });
+}
+
+// ---- 실패를 어떻게 다루는가 (#1463 재검토 H-1) -------------------------------
+//
+// 앞 판은 「실패했으면 폴링을 끈다」였다. 의도는 비멤버(403)였는데 **모든** 실패가
+// 같은 대접을 받았고, 그 결함의 모양은 이랬다: 성공 1회 뒤 502 한 번이면 폴링이
+// 영구히 멈추고, React Query 가 들고 있던 **이전 data**(예: 「통과 3」)가 그대로
+// 화면에 남는다. 원장 폴링은 살아 있어 그 행의 낱말은 갱신되는데, 칩만 과거를
+// 사실이라고 말한다 — G-H1 이 고친 그 결함이 원천만 바뀐 채 돌아온 것이다.
+//
+// 그래서 실패를 두 갈래로 가른다.
+
+/**
+ * 이 실패의 답이 60초 뒤에도 **같은가**.
+ *
+ * 403(비멤버)·404(없는 채널)는 권한과 존재에 대한 답이라 다시 물어도 같다. 5xx·429·
+ * 그물 실패는 한시적이고, 다시 물으면 달라질 수 있다 — 그것들까지 영구 정지로
+ * 취급하면 한 번의 502 가 이 표면을 영영 멈춘다.
+ */
+export function isPermanentScanRefusal(error: unknown): boolean {
+  return error instanceof ApiError && (error.status === 403 || error.status === 404);
+}
+
+/** 실패 뒤 다음 조회까지. 영구 거절에서만 멈춘다. */
+export function sessionReportsRefetchInterval(error: unknown): number | false {
+  return isPermanentScanRefusal(error) ? false : LEDGER_POLL_MS;
+}
+
+/**
+ * 마지막 읽기가 실패했으면 **들고 있던 값을 쓰지 않는다**.
+ *
+ * 폴링을 살려 두는 것만으로는 위 결함이 반만 고쳐진다: 다음 틱까지의 60초 동안
+ * React Query 는 여전히 이전 `data` 를 들고 있고, 그 값은 「지금 그렇다」가 아니라
+ * 「그때 그랬다」다. 이 표면의 문서화된 규율은 이미 그 답을 갖고 있다 — 실패는 칩
+ * 부재로 끝난다. 낡은 주장보다 침묵이 정직하고, 부재는 「미검증」이 아니다.
+ */
+export function freshScanReports(
+  data: readonly ThreadCompletionReport[] | undefined,
+  error: unknown
+): readonly ThreadCompletionReport[] | undefined {
+  return error === null || error === undefined ? data : undefined;
+}
+
+/**
+ * 채널 하나의 리포트 스캔. 같은 채널의 행이 몇 개든 요청은 하나다(키가 같다).
+ *
+ * `retry: false` 인 이유: 이 읽기가 실패하는 가장 흔한 방법은 채널 비멤버(403)이고,
+ * 그 답은 재시도로 바뀌지 않는다. 실패는 칩 부재로 끝난다 — 이 표면은 읽지 못한 것을
+ * 배너로 승격하지 않는다(목록의 사실 원장은 세션 목록 쪽이다).
+ *
+ * 느린 폴링은 원장 폴링과 같은 자리에 있다(`LEDGER_POLL_MS` 머리말): 무효화는 레일이
+ * 나른 전이에 걸리므로, 레일이 닿지 못한 채널에서 막 떨어진 리포트는 폴링이 없으면
+ * 영영 오지 않는다. 관찰자가 몇이든 간격은 하나이고(같은 키), 패널이 닫히면 멈춘다.
+ */
+function useChannelSessionReports(workspaceId: string, channelId: string) {
+  return useQuery({
+    queryKey: [...SESSION_REPORTS_KEY, workspaceId, channelId.toLowerCase()],
+    queryFn: () => fetchChannelSessionReports(workspaceId, channelId),
+    enabled: channelId !== "",
+    retry: false,
+    staleTime: 30_000,
+    refetchInterval: (query) => sessionReportsRefetchInterval(query.state.error),
+  });
+}
+
+/**
+ * 이 세션의 검증 상태, 또는 없음 (UXC-C · #1463).
+ *
+ * 두 원천을 합쳐 코어의 한 판정에 넣는다:
+ *
+ *   1. 채널 히스토리 스캔이 이 스레드에 대해 찾은 리포트 — 최신부터 읽으므로
+ *      찾았다면 그것이 최신이다. 목록 행이 가진 유일한 원천이기도 하다.
+ *   2. 이 표면이 스레드를 **절단 없이** 통째로 읽었다면 그 페이지의 리포트들.
+ *      절단된 페이지는 넣지 않는다 — 그때 없는 것이 정확히 가장 최근 리포트다.
+ *
+ * 실시간 레일은 이 자리에 아무것도 보태지 않는다: 레일이 나르는 것은 ACP 프레임뿐이고
+ * 리포트는 Postgres 가 정본이다.
+ *
+ * 순수 함수인 이유는 아래 훅의 그것과 같다 — 「절단된 스레드가 판정에 끼어들지
+ * 않는가」는 이 클라이언트에 DOM 이 없는 한 여기서만 물을 수 있다.
+ */
+export function sessionVerificationFrom(
+  scanned: readonly ThreadCompletionReport[] | undefined,
+  rootMessageId: string,
+  threadPage?: SessionEventPage | undefined
+): SessionVerification | null {
+  const candidates: SessionCompletionReport[] = [];
+  const hit = reportForRoot(scanned, rootMessageId);
+  if (hit !== null) candidates.push(hit);
+  if (threadPage !== undefined && !threadPage.truncated) {
+    candidates.push(...threadPage.reports);
+  }
+  return latestSessionVerification(candidates);
+}
+
+/**
+ * 위 판정을 이 세션의 원천들에 붙인 훅. **모든 표면이 같은 후보 집합을 본다.**
+ *
+ * #1463 재검토 M-1: 앞 판은 목록이 스캔만, 미리보기·상세가 스캔+스레드를 봤다.
+ * 원천이 갈리면 판정도 갈린다 — 스캔은 리포트 A(실패)만 닿고 스레드에는 그 뒤의
+ * B(통과)가 있는 세션에서, 목록 행은 「실패」를 상세는 「통과」를 **동시에** 말한다.
+ * 한 화면에 반대 판정 둘이 서면 사람은 어느 쪽도 믿을 수 없다.
+ *
+ * 그래서 이 훅이 스레드 캐시를 **구독한다**(`skipToken` — 구독만 하고 스스로는 절대
+ * 읽지 않는다). 목록 행이 `/replies` 를 여는 일은 여전히 없다: 캐시에 아무것도 없으면
+ * 후보도 없고, 있다면 그것은 미리보기나 상세가 이미 연 그 읽기다. 캐시를 지나므로
+ * 스캔이 다시 조회돼도 두 표면은 계속 같은 것을 본다 — 한쪽에 값을 밀어 넣는 방식은
+ * 그 다음 조회에서 지워져 드리프트가 되돌아온다.
+ *
+ * @param threadPage 스레드를 이미 읽은 표면이 자기 페이지를 직접 낸다. 캐시보다
+ *   먼저 쓰이지만 같은 자리를 가리키므로 값은 같다 — 렌더 한 틱을 아끼는 지름길이다.
+ */
+export function useSessionVerification(
+  workspaceId: string,
+  session: WorkSession,
+  threadPage?: SessionEventPage | undefined
+): SessionVerification | null {
+  const scan = useChannelSessionReports(workspaceId, session.channelId);
+  const scanned = freshScanReports(scan.data, scan.error);
+  // 구독 전용. `skipToken` 은 이 훅이 이 키를 **절대 스스로 조회하지 않음**을
+  // 타입으로 못 박는다(queryFn 이 없는 것과 다르다 — 없으면 실행시 던진다).
+  const cachedThread = useQuery<SessionEventPage>({
+    queryKey: sessionThreadKey(
+      workspaceId,
+      session.channelId,
+      session.rootMessageId
+    ),
+    queryFn: skipToken,
+  });
+  const page: SessionEventPage | undefined = threadPage ?? cachedThread.data;
+  const rootMessageId = session.rootMessageId;
+  return useMemo(
+    () => sessionVerificationFrom(scanned, rootMessageId, page),
+    [scanned, rootMessageId, page]
+  );
 }
 
 /**
@@ -311,6 +545,7 @@ export function useWorkSessionRail(
     setControlFrames((held) => (held.length > 0 ? [] : held));
     void queryClient.invalidateQueries({ queryKey: ["work-sessions", workspaceId] });
     void invalidateSessionThreads(queryClient);
+    void invalidateSessionReports(queryClient);
   }, [publish, queryClient, workspaceId]);
 
   const refetchSessionsAfterTransition = useCallback(() => {
@@ -347,6 +582,10 @@ export function useWorkSessionRail(
             const kept = liveRef.current.filter((e) => !uuidEq(e.sessionId, id));
             if (kept.length !== liveRef.current.length) publish(kept);
             void invalidateSessionThreads(queryClient);
+            // 리포트는 세션이 끝나는 바로 그때 떨어지고, 이제 그것을 나르는 읽기는
+            // 채널 히스토리 스캔이다(#1463). 스레드만 다시 읽으면 G-H1 이 고친 그
+            // 결함이 원천만 바뀐 채 그대로 돌아온다.
+            void invalidateSessionReports(queryClient);
           }
           refetchSessionsAfterTransition();
         },
@@ -362,6 +601,7 @@ export function useWorkSessionRail(
             const kept = liveRef.current.filter((e) => !uuidEq(e.sessionId, id));
             if (kept.length !== liveRef.current.length) publish(kept);
             void invalidateSessionThreads(queryClient);
+            void invalidateSessionReports(queryClient);
           }
           refetchSessionsAfterTransition();
         },

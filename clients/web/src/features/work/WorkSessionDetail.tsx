@@ -19,7 +19,7 @@ import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/State
 import { useSessionWorkstream } from "@/features/workstreams/useWorkstreams";
 import { DisplayObserver } from "./DisplayObserver";
 import { ObserverTerminal } from "./ObserverTerminal";
-import { useSessionEvents } from "./useWorkSessions";
+import { useSessionEvents, useSessionVerification } from "./useWorkSessions";
 import {
   composeExcerpt,
   emptyStepsDetail,
@@ -749,9 +749,13 @@ export function WorkSessionDetail({
   // 도는 세션은 시계, 끝난 세션은 성과 서술, 시작이 관측되지 않았으면 아무것도
   // (코어 `sessionElapsedReadout`). 목록 행이 부르는 것과 같은 함수다.
   const elapsed = sessionElapsedReadout(session, nowMs);
-  // 이 세션이 스스로 보고한 게이트 결과, 또는 없음. 절단된 읽기에서는 판정하지
-  // 않는다(`useSessionEvents`) — 그때 없는 것이 정확히 가장 최근 리포트다.
-  const verification = query.verification;
+  // 이 세션이 스스로 보고한 게이트 결과, 또는 없음 (#1463).
+  //
+  // 절단된 스레드 페이지는 이 판정에 들어가지 않는다 — 그때 없는 것이 정확히 가장
+  // 최근 리포트다. 그리고 바로 그 절단이 초장기 세션에서 칩을 영구히 지웠기 때문에
+  // (grok freeze H2), 이제 채널 히스토리를 최신부터 훑는 스캔이 함께 판정한다.
+  // 1,000행이 넘는 스레드에서도 최신 리포트에 닿는 것은 그쪽이다.
+  const verification = useSessionVerification(workspaceId, session, query.data);
   // The one condition under which a blinking caret is a true statement: the
   // rail is up, the relay is one we can vouch for, and something arrived within
   // the survival window. Drop any of the three and the caret goes; the pane
