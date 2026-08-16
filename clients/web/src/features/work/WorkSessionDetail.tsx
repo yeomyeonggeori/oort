@@ -14,7 +14,6 @@ import {
 } from "@momo/core/lib/api";
 import { useSession } from "@/app/session";
 import { memberFor, type Directory } from "@/features/workspace/useWorkspace";
-import { elapsedLabel } from "@/features/agents/agentWorkingSignal";
 import { CHIP_CLASS } from "@/features/common/chip";
 import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/States";
 import { useSessionWorkstream } from "@/features/workstreams/useWorkstreams";
@@ -39,8 +38,10 @@ import {
   clockLabel,
   ROW_STATE_CLASS,
   SESSION_STATUS_CLASS,
+  sessionElapsedReadout,
   silenceLabel,
 } from "@momo/core/features/work/workSessionFormat";
+import { SessionVerificationChip } from "./SessionVerificationChip";
 import {
   HANDOFF_COPY,
   handoffVerb,
@@ -744,10 +745,12 @@ export function WorkSessionDetail({
     hostOnline !== false &&
     trust === "local" &&
     isSlowStep(session, lastSignalAtMs, nowMs);
-  const elapsed = elapsedLabel(
-    session.startedAtMs,
-    session.endedAtMs ?? nowMs
-  );
+  // 도는 세션은 시계, 끝난 세션은 성과 서술, 시작이 관측되지 않았으면 아무것도
+  // (코어 `sessionElapsedReadout`). 목록 행이 부르는 것과 같은 함수다.
+  const elapsed = sessionElapsedReadout(session, nowMs);
+  // 이 세션이 스스로 보고한 게이트 결과, 또는 없음. 절단된 읽기에서는 판정하지
+  // 않는다(`useSessionEvents`) — 그때 없는 것이 정확히 가장 최근 리포트다.
+  const verification = query.verification;
   // The one condition under which a blinking caret is a true statement: the
   // rail is up, the relay is one we can vouch for, and something arrived within
   // the survival window. Drop any of the three and the caret goes; the pane
@@ -792,18 +795,41 @@ export function WorkSessionDetail({
             </Heading>
             {/* The clock rides with the title rather than living in the meta
                 list: it is the one number that keeps changing, and it is the
-                one the survival signal colours. */}
-            <span
-              data-numeric
-              data-slow={slow ? "" : undefined}
-              data-testid="work-detail-elapsed"
-              className={cn(
-                "shrink-0 font-mono text-timestamp",
-                !live ? "text-ink-muted" : slow ? "text-warn" : "text-ink-muted"
-              )}
-            >
-              {elapsed}
-            </span>
+                one the survival signal colours.
+
+                그 두 이유는 **시계에만** 해당한다(design-review H-1). 끝난
+                세션의 경과는 다시 자라지 않고 생존 신호가 칠하지도 않는다
+                (`isSlowStep` 은 `running` 이 아니면 언제나 false) — 그런데도
+                「24분 28초 동안 작업」이 이 줄에 `shrink-0` 으로 서면서 320px
+                판에서 제목을 두 음절로 눌렀다. 세션 식별이 유일한 임무인 줄이
+                목록 행보다 적게 말하게 된 것이다. 그래서 성과 서술은 이 sticky
+                줄을 떠나 아래 자기 줄로 내려갔고(같은 testid), 이 자리는 **도는
+                시계**만 진다. 시작이 관측되지 않은 세션에는 여전히 아무것도
+                서지 않는다. */}
+            {elapsed !== null && elapsed.kind === "clock" && (
+              <span
+                {...(elapsed.numeric ? { "data-numeric": true } : {})}
+                data-slow={slow ? "" : undefined}
+                data-testid="work-detail-elapsed"
+                data-kind={elapsed.kind}
+                className={cn(
+                  "shrink-0 text-timestamp",
+                  elapsed.numeric && "font-mono",
+                  !live
+                    ? "text-ink-muted"
+                    : slow
+                      ? "text-warn"
+                      : "text-ink-muted"
+                )}
+              >
+                {elapsed.label}
+              </span>
+            )}
+            {/* 검증 칩은 여기 서지 않는다 — 아래 「스스로 보고한 것」 줄이 진다
+                (design-review H-1). 이 sticky 줄이 지는 것은 **원장이 말하는
+                것**뿐이다: 돌아가는 길, 세션의 이름, 원장이 부르는 상태, 그리고
+                아직 돌고 있다면 그 시계. 세션이 스스로 보고한 것은 원장의
+                진술이 아니고, 그것까지 이 줄에 세우면 이름이 설 자리를 잃는다. */}
             <span
               className={cn(CHIP_CLASS, SESSION_STATUS_CLASS[status.key])}
               data-testid="work-detail-status"
@@ -828,6 +854,47 @@ export function WorkSessionDetail({
             </p>
           )}
         </div>
+
+        {/* 이 세션이 **스스로 보고한 것** (UXC-C · design-review H-1).
+
+            sticky 머리에서 내려온 두 조각이 여기 함께 선다: 끝난 세션의 성과
+            서술과 게이트 검증 칩. 둘은 같은 종류의 사실이다 — 원장이 이 세션을
+            무엇이라 부르는가(위의 상태 칩)가 아니라, 이 세션이 자기 일에 대해
+            남긴 진술이다. 격은 아래 목표 줄·세션 스레드 줄과 같고, 고정 크롬을
+            키우지 않는다(이 파일 머리말의 레이아웃 규칙).
+
+            내려온 이유는 측정된 것이다: 셋을 sticky 줄에 함께 세우면 320px 판에서
+            제목이 목록 행보다 좁아졌고(「결제 …」), 세션 식별이 유일한 임무인 줄이
+            목록보다 적게 말하게 됐다. `capture-session-chips.mjs` 가 그 비교를
+            매 실행마다 다시 잰다.
+
+            여기서는 자리가 넉넉하므로 `shrink-0` 이 아니고, 좁아지면 줄바꿈한다 —
+            「1시간 24분 동안 작업」+「미상 결과 2」가 가장 넓은 조합이다. */}
+        {(elapsed?.kind === "worked" || verification !== null) && (
+          <p
+            className="flex flex-wrap items-center gap-2 border-b border-line px-4 py-1 text-meta text-ink-muted"
+            data-testid="work-detail-report"
+          >
+            {elapsed !== null && elapsed.kind === "worked" && (
+              <span
+                {...(elapsed.numeric ? { "data-numeric": true } : {})}
+                data-testid="work-detail-elapsed"
+                data-kind={elapsed.kind}
+                className={cn(elapsed.numeric && "font-mono")}
+              >
+                {elapsed.label}
+              </span>
+            )}
+            {/* 보고가 없는 세션에는 이 칩이 아예 없다 — 「미검증」은 이 표면이 할
+                수 있는 말이 아니다(코어 `sessionVerification` 머리말). */}
+            {verification !== null && (
+              <SessionVerificationChip
+                verification={verification}
+                testId="work-detail-verification"
+              />
+            )}
+          </p>
+        )}
 
         {/* 이 세션이 무엇을 위한 실행인지, 그리고 그 목표로 돌아가는 길.
             원장에서 목표로 가는 링크가 하나도 없으면 작업 흐름 표면은
@@ -899,11 +966,23 @@ export function WorkSessionDetail({
             <MetaRow label="시작한 사람">
               {owner?.displayName ?? "알 수 없는 멤버"}
             </MetaRow>
-            <MetaRow label={session.endedAtMs === undefined ? "경과" : "실행 시간"}>
-              <span data-numeric className="font-mono">
-                {elapsed}
-              </span>
-            </MetaRow>
+            {/* 여기서는 라벨이 이미 「실행 시간」이라 격을 다시 붙이지 않는다 —
+                `value` 는 단위만 뺀 같은 숫자다(코어 `sessionElapsedReadout`).
+                한글이 섞인 값에는 자릿폭 고정을 걸지 않는다. */}
+            {elapsed !== null && (
+              <MetaRow
+                label={session.endedAtMs === undefined ? "경과" : "실행 시간"}
+              >
+                <span
+                  {...(elapsed.numeric ? { "data-numeric": true } : {})}
+                  className={cn(elapsed.numeric && "font-mono")}
+                  data-testid="work-detail-elapsed-meta"
+                  data-kind={elapsed.kind}
+                >
+                  {elapsed.value}
+                </span>
+              </MetaRow>
+            )}
             {hostName !== null && <MetaRow label="호스트">{hostName}</MetaRow>}
             {session.exitCode !== undefined && (
               <MetaRow label="마지막 실행 결과">
