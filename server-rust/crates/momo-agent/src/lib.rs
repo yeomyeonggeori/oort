@@ -119,6 +119,12 @@
 //! enum and unreachable in the database until these two; nothing about what
 //! `Paused` *means* moved with them.
 //!
+//! Both take the driver runs `FOR UPDATE` first
+//! (`run::lock_driver_runs_in_tx`, which is where the argument lives): a run
+//! that drives two sessions is worked on by two transactions that share no other
+//! lock, and a `display_control_window` read decides both statements — so
+//! without it the answer depended on which of the two committed first.
+//!
 //! Streaming/partial relay, the `tool_call` **work-control** branch (Swift routes
 //! `work.spawn` through `work_control`, which is not ported — see
 //! [`tools`]), memory-delivery receipts (`context_packet`), G4's SimHash

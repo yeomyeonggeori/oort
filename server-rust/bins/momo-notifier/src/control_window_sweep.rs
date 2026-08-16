@@ -171,6 +171,14 @@ async fn sweep_workspace_in_tx(
 /// a wrong story about what happened (`routes::shared::audit_via_token_id`'s
 /// rule, and the reason `end_reason` distinguishes `expired` from `returned` at
 /// all).
+///
+/// The order of those steps is also the lock order every close path keeps
+/// (`momo_agent::run::lock_driver_runs_in_tx`): the window row is already
+/// closed — by `expire_lapsed_control_windows_for_workspace_in_tx`, in this
+/// transaction — before the resume takes the run rows, so a route that waits
+/// behind this sweep reads a world in which this window has ended. The window
+/// claim is `FOR UPDATE SKIP LOCKED`, so this loop never waits on a window row
+/// while holding runs.
 async fn settle_lapsed_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,

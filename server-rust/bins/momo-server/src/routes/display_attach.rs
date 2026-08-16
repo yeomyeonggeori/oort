@@ -383,6 +383,14 @@ async fn issue_in_tx(
     // `work_session.status` is not touched here, ADR-0140's state machine does
     // not move, and running-time billing (ADR-0164) continues. The machine stays
     // up because the person is using it.
+    //
+    // Lock order, and this call site's part of it: the session row is held from
+    // `lock_attach_target_in_tx` above, the window row was written a statement
+    // ago, and the park takes the run rows LAST
+    // (`momo_agent::run::lock_driver_runs_in_tx` states the contract and why the
+    // window must precede the lock). The one thing that must not move is the
+    // window write above this line: a run locked before its window exists gives
+    // a waiting transaction a snapshot without it, which is the whole hole.
     let parked = if control_window.is_some() {
         park_runs_for_control_window_in_tx(conn, workspace_id, session_id)
             .await
@@ -617,6 +625,14 @@ async fn return_control_in_tx(
 /// same three steps from the same functions rather than calling this one,
 /// because a binary that reached into `momo-server` would be the layering
 /// inversion the approval sweep was careful not to make.
+///
+/// **Every caller must have closed its window before calling this.** All four
+/// do, and it is a correctness condition rather than a tidiness one: the resume
+/// judges "is another window still holding this run" against a snapshot taken
+/// *after* it acquires the run lock, so a transaction that waited here sees the
+/// winner's close only if the winner wrote it before taking the same lock. The
+/// contract, and the two failures it prevents, are stated once in
+/// `momo_agent::run::lock_driver_runs_in_tx`.
 pub(crate) async fn emit_control_closed_in_tx(
     conn: &mut momo_db::PgConnection,
     workspace_id: Uuid,

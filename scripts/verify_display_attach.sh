@@ -519,6 +519,10 @@ note "PASS a parked run's gateway completion is refused above the lease — usag
 note "PASS all four closes resume it — 반환 / lease lapse (notifier sweep) / session end / the last of two windows"
 note "PASS the approval hold is untouched by it: a window neither parks nor answers an awaiting_approval run"
 note "PASS a human stop reaches a parked run, and no close resurrects what it ended (ADR-0132 / ADR-0155)"
+# The same pair judged when two windows are worked on AT ONCE rather than one
+# after the other: two sessions of one run were two different rows for every
+# lock this area had, so the answer used to depend on the interleaving.
+note "PASS two sessions of one run cannot cross — a window opening elsewhere outlasts a return racing it, and two simultaneous closes still leave exactly one resume"
 note "runtime-unverified(in-process worker turn): the ledger shuts the GATEWAY doors on a parked run."
 note "  A turn already claimed by the in-process momo-agent-worker is not interrupted mid-flight —"
 note "  it commits through finish_run_in_tx, which carries no status guard. What parking stops is the"

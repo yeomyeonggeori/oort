@@ -607,6 +607,12 @@ async fn end_in_tx(
 ///
 /// Idempotent, like the underlying close: on the overwhelmingly common path
 /// there was no window and this is one UPDATE that matches nothing.
+///
+/// The close is written **before** `emit_control_closed_in_tx` resumes, which is
+/// this path's half of the lock order in
+/// `momo_agent::run::lock_driver_runs_in_tx`: the run rows are taken last, after
+/// the session row this caller already holds and after the window row on the
+/// line above.
 async fn close_control_window_for_ended_session_in_tx(
     conn: &mut momo_db::PgConnection,
     workspace_id: Uuid,

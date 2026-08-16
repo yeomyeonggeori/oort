@@ -1491,6 +1491,102 @@ const RUN_DRIVES_SESSION: &str = "\
         AND al.run_id IS NOT NULL \
         AND wc.session_id IS NOT NULL";
 
+/// Take `FOR UPDATE` on every run this session's control window can move, and
+/// hold it to the end of the caller's transaction.
+///
+/// ## The hole this closes
+///
+/// A run may drive more than one session (that is the whole reason the resume
+/// below asks its second question), and two sessions are two *different* rows
+/// for every lock this area already takes: `lock_attach_target_in_tx` serializes
+/// window work **within one session**, and nothing serialized window work on
+/// session A against window work on session B. The two statements below both
+/// decide from a `display_control_window` read, and under READ COMMITTED that
+/// read sees only *committed* windows — so two transactions on two sessions of
+/// one run could each decide against a world the other was in the middle of
+/// changing:
+///
+/// 1. **a live window with a running run.** B's `open` + park is in flight and
+///    uncommitted; the park moves nothing because the run is already `paused`
+///    under A's window, so before this lock it took no lock at all and simply
+///    passed through. A's return (or its lapse sweep) then resumes: its `held`
+///    subquery cannot see B's uncommitted window, so the run goes back to
+///    `running` while somebody is typing into B. That is the gateway hold
+///    coming off mid-keyboard — ADR-0004 증보 3 D6's 토큰 소진 0 broken by an
+///    interleaving, not by a missing statement.
+/// 2. **a permanently parked run.** A and B close at the same time; each
+///    resume sees the *other* window still open (the other close is
+///    uncommitted) and skips. Both windows end, the run stays `paused`, and
+///    there is no path back: the sweep only looks at open windows, and a
+///    replayed close finds nothing to close. The agent is silent forever.
+///
+/// The lock is what makes those two orderings impossible. Whichever transaction
+/// takes it first finishes its window write and its run write together; the
+/// second one waits, and the statement it runs *after* waiting takes a fresh
+/// snapshot that contains the first one's window. Both interleavings then land
+/// on the same answer they would have if the two had been run one after the
+/// other, which is the definition being asked for.
+///
+/// ## Why it is a separate statement, and status-blind
+///
+/// **Separate** because a `FOR UPDATE` inside the park/resume statement itself
+/// would share that statement's snapshot: the waiter would re-check the locked
+/// row and then judge `held` against the snapshot it took *before* blocking —
+/// exactly the stale read this is here to prevent. Only a lock taken in its own
+/// statement gives the next statement a snapshot from after the wait.
+///
+/// **Status-blind** because the lock set has to be a function of the ledger
+/// relation and not of a status that is itself racing. Case (1) above is a park
+/// that moves **no rows** — an already-`paused` run — so a lock narrowed to what
+/// the caller intends to update would lock nothing in precisely the case that
+/// needs it most.
+///
+/// ## Lock order (the contract every caller of the pair keeps)
+///
+/// > `work_session`/`work_host` → `display_control_window` → `agent_run`
+///
+/// * `issue_in_tx` — session lock, lapsed-window close, then park/resume.
+/// * `return_control_in_tx` — session lock, close, then resume.
+/// * `work_controls::create_in_tx` — lapsed-window close, then resume (it holds
+///   no session lock; it does not need one, because the run lock is what
+///   serializes the resume and the window close is its own row lock).
+/// * `work_sessions`' end/resume paths — session lock, close, then resume.
+/// * `momo-notifier`'s `settle_lapsed_in_tx` — window close (`FOR UPDATE SKIP
+///   LOCKED`, so it never waits on a window), then resume.
+///
+/// Every one of them closes or opens the window **before** it reaches this
+/// lock, which is what makes the waiter's fresh snapshot contain the fact it
+/// has to see. `ORDER BY r.id` orders the rows *within* one lock set, so two
+/// sessions whose driver runs overlap cannot deadlock against each other.
+///
+/// The one residual is the notifier sweep, which settles several windows —
+/// several lock sets — in one transaction and could in principle cross with
+/// another sweep replica taking two sets in the opposite order. PostgreSQL
+/// aborts one of them, `sweep_lapsed_control_windows` logs it per workspace and
+/// the next tick retries an unchanged state, so the cost is one late resume
+/// rather than a lost one.
+async fn lock_driver_runs_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    session_id: Uuid,
+) -> Result<(), DbError> {
+    sqlx::query(&format!(
+        "WITH driver AS ({RUN_DRIVES_SESSION} AND wc.session_id = $2) \
+         SELECT r.id \
+           FROM agent_run r \
+           JOIN driver d \
+             ON d.run_id = r.id \
+          WHERE r.workspace_id = $1 \
+          ORDER BY r.id \
+            FOR UPDATE OF r"
+    ))
+    .bind(workspace_id)
+    .bind(session_id)
+    .fetch_all(&mut *conn)
+    .await?;
+    Ok(())
+}
+
 /// A run this batch moved, in the shape a caller needs to announce it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ParkedRun {
@@ -1524,11 +1620,18 @@ fn decode_parked(row: &sqlx::postgres::PgRow) -> Result<ParkedRun, sqlx::Error> 
 /// keeps saying the stream is up, and the lapse of that lease is what resumes
 /// the run. A second clock here would either fight the lease or resume the agent
 /// mid-login, which is the failure 증보 3 D3 exists to prevent.
+///
+/// Takes `lock_driver_runs_in_tx` first, **including on the idempotent path
+/// where it will move nothing**: a re-take whose runs are already `paused` is
+/// case (1) in that function's docs, and a park that passed through unlocked is
+/// what let a concurrent resume on another session of the same run hand the
+/// agent back its reach into the screen this window stands on.
 pub async fn park_runs_for_control_window_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     session_id: Uuid,
 ) -> Result<Vec<ParkedRun>, DbError> {
+    lock_driver_runs_in_tx(conn, workspace_id, session_id).await?;
     let rows = sqlx::query(&format!(
         "WITH driver AS ({RUN_DRIVES_SESSION} AND wc.session_id = $2) \
          UPDATE agent_run r \
@@ -1573,11 +1676,20 @@ pub async fn park_runs_for_control_window_in_tx(
 /// ([`RunStatus::is_cancellable`] admits `paused`, and `cancel_run_in_tx` names
 /// it) is left terminal, because `status = 'paused'` no longer matches. A close
 /// must never resurrect a run a human stopped.
+///
+/// The second window clause is a **read of another transaction's writes**, which
+/// is why this takes `lock_driver_runs_in_tx` first: the clause is only as
+/// good as the snapshot it runs on, and every caller closes its own window
+/// before reaching this, so the waiter's post-lock snapshot carries the close
+/// the winner just committed. Without that, two closes racing each see the
+/// other's window standing and skip — the permanent `paused` in case (2) of
+/// that function's docs.
 pub async fn resume_runs_from_control_window_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     session_id: Uuid,
 ) -> Result<Vec<ParkedRun>, DbError> {
+    lock_driver_runs_in_tx(conn, workspace_id, session_id).await?;
     let rows = sqlx::query(&format!(
         "WITH driver AS ({RUN_DRIVES_SESSION} AND wc.session_id = $2), \
               held AS ( \
