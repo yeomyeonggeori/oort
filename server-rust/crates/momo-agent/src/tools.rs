@@ -1057,7 +1057,11 @@ mod tests {
         let mut sorted = labels.to_vec();
         sorted.sort_unstable();
         sorted.dedup();
-        assert_eq!(sorted.len(), labels.len(), "a reason that shares a label cannot be read back");
+        assert_eq!(
+            sorted.len(),
+            labels.len(),
+            "a reason that shares a label cannot be read back"
+        );
         assert!(ApprovalReason::HumanIsTheAction.requires_approval());
     }
 

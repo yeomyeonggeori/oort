@@ -3816,7 +3816,8 @@ async fn seed_login_handoff_card(
             "reason": "배포 콘솔이 2단계 인증을 요구합니다.",
         }),
     };
-    let expires_at = momo_agent::default_expires_at(chrono::Utc::now(), momo_agent::DEFAULT_TTL_SECONDS);
+    let expires_at =
+        momo_agent::default_expires_at(chrono::Utc::now(), momo_agent::DEFAULT_TTL_SECONDS);
     momo_db::with_tenant_tx(su, workspace, move |conn| {
         Box::pin(async move {
             let approval_id = momo_agent::create_pending_approval_in_tx(
@@ -3911,8 +3912,15 @@ async fn live4_1_the_handoff_card_hears_the_boundary_and_the_join_survives_a_sho
 
     let owner_token = login(&http, &base, workspace, &fixture.owner_email).await;
     let (host_id, host_seed) = register_host(&http, &base, &owner_token, workspace, true).await;
-    let session =
-        create_session(&http, &base, &owner_token, workspace, fixture.channel, &host_id).await;
+    let session = create_session(
+        &http,
+        &base,
+        &owner_token,
+        workspace,
+        fixture.channel,
+        &host_id,
+    )
+    .await;
     publish_display(&http, &base, &host_seed, workspace, &host_id, session).await;
 
     let agent = seed_agent(&su, &fixture, "live4-handoff-intern").await;
@@ -3984,9 +3992,10 @@ async fn live4_1_the_handoff_card_hears_the_boundary_and_the_join_survives_a_sho
     // 재개 on a card still showing 「사람이 조작 중」 says 「개입 완료」 about a
     // window that ended by walking away.
     lapse_lease(&su, session).await;
-    let stats = momo_notifier::control_window_sweep::sweep_lapsed_control_windows(&notifier_pool, 100)
-        .await
-        .expect("sweep lapsed control windows");
+    let stats =
+        momo_notifier::control_window_sweep::sweep_lapsed_control_windows(&notifier_pool, 100)
+            .await
+            .expect("sweep lapsed control windows");
     assert!(stats.closed >= 1);
 
     let props = card_props(&su, card).await;

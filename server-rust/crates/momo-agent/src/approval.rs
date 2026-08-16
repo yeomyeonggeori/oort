@@ -814,7 +814,8 @@ pub fn login_handoff_session_id(call: &ToolCall) -> HandoffSessionId {
 /// claim with a different subject: the approval row says a human was asked to
 /// consent, and this one says the card that asked them carries no door and
 /// names why. Written only when it happened, so its presence is the signal.
-pub const AUDIT_LOGIN_HANDOFF_SESSION_ID_DROPPED: &str = "approval.login_handoff.session_id_dropped";
+pub const AUDIT_LOGIN_HANDOFF_SESSION_ID_DROPPED: &str =
+    "approval.login_handoff.session_id_dropped";
 /// `detail.schema` for that row.
 pub const AUDIT_SCHEMA_LOGIN_HANDOFF_SESSION_ID_DROPPED: &str =
     "momo.approval.login_handoff.session_id_dropped.v1";
@@ -1144,9 +1145,15 @@ mod tests {
         assert!(props.get("expires_at_ms").is_some());
 
         // The deep link's only input, trimmed.
-        assert_eq!(props["session_id"], json!("9a1b2c3d-4e5f-4a6b-8c7d-1e2f3a4b5c6d"));
+        assert_eq!(
+            props["session_id"],
+            json!("9a1b2c3d-4e5f-4a6b-8c7d-1e2f3a4b5c6d")
+        );
         // The agent's own sentence replaces the generic English summary.
-        assert_eq!(props["summary"], json!("배포 콘솔이 로그인 화면으로 돌아갔습니다."));
+        assert_eq!(
+            props["summary"],
+            json!("배포 콘솔이 로그인 화면으로 돌아갔습니다.")
+        );
         // And the generic English title is GONE: the card's title is the
         // client's own copy, in one place (`loginHandoffCard.ts`).
         assert!(
@@ -1224,9 +1231,14 @@ mod tests {
         // The audit row's detail names what was dropped and what the model
         // wrote, because 「이 카드에 왜 링크가 없나」 has no other answer.
         let detail = login_handoff_session_id_dropped_detail(&call);
-        assert_eq!(detail["session_id_raw"], json!("the deploy console session"));
+        assert_eq!(
+            detail["session_id_raw"],
+            json!("the deploy console session")
+        );
         assert_eq!(detail["call_id"], json!("call_1"));
-        assert!(detail["reason"].as_str().is_some_and(|r| r.contains("uuid")));
+        assert!(detail["reason"]
+            .as_str()
+            .is_some_and(|r| r.contains("uuid")));
     }
 
     /// The question belongs to this card and no other.
