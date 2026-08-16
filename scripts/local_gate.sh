@@ -554,6 +554,40 @@ GATE_WORKFLOW_YAML_PARSE_CMD="$GATE_RUBY_SELECT_CMD"'; "$ruby_bin" -e "require %
 GATE_OPENAPI_YAML_PARSE_CMD="$GATE_RUBY_SELECT_CMD"'; "$ruby_bin" -e "require %q(yaml); YAML.load_file(%q(docs/api/openapi.yaml)); puts %q(docs/api/openapi.yaml)"'
 # --- end #1376 ambient-toolchain hardening ---------------------------------
 
+# --- #1472 rustfmt drift enforcement ---------------------------------------
+# The gate ran no cargo command at all, so `cargo fmt --all -- --check` was RED
+# on track/engine for days and three workers (#1454, #1442, #1467) each
+# rediscovered the same drift and each worked around it by hand-formatting only
+# the files they owned. #1377 had already cleaned 13 files under exactly that
+# shape; without an executor the drift came straight back — 9 files by
+# 2026-08-17. A cleanup with no gate is a treadmill, so the check goes in the
+# static block rather than a profile someone has to remember, on the #1236
+# secret-scan precedent. Measured cost: 0.58s (server-rust) + 0.04s (desktop).
+#
+# Two facts shape the command:
+#
+# 1) `--all` is load-bearing. Both manifests are virtual workspaces, so the form
+#    the docs carried until #1472 — `cargo fmt --check --manifest-path
+#    server-rust/Cargo.toml` — exits 1 with "Failed to find targets" and checks
+#    nothing. That broken command is the reason the hand-formatting workaround
+#    looked reasonable.
+#
+# 2) The baseline is a record, not a pin. #1442 declined rust-toolchain.toml and
+#    that judgement stands: asserting a rustfmt version would be that pin
+#    through the back door, and would turn `rustup update` into a forced re-fmt.
+#    It is also not what the evidence asks for — every drifting hunk in #1472
+#    was traced by blame to a landing that never ran fmt (19455d54/PR #1430,
+#    907e076c/PR #1459's hand-applied clippy patch, 442bc8d2), and every
+#    violation was plain max_width/chain_width, which no rustfmt 1.x disagrees
+#    about. #1377 recorded version skew as a guess; nothing has yet measured
+#    one. So the step prints the local rustfmt next to the baseline and says so
+#    out loud when they differ: if a future re-format ever churns files nobody
+#    edited, that line is the evidence that names the rustfmt which produced it,
+#    which is what turns the guess into a measurement.
+GATE_RUSTFMT_BASELINE="1.9.0-stable"
+GATE_CARGO_FMT_CMD='fmt_baseline="'"$GATE_RUSTFMT_BASELINE"'"; command -v cargo >/dev/null 2>&1 || { echo "cargo is not on PATH; the two cargo workspaces cannot be format-checked. Install Rust (rustup) — this step fails closed rather than skipping, because a skipped fmt check is the hole #1472 closed."; exit 1; }; fmt_ver="$(cargo fmt --version 2>/dev/null)" || fmt_ver=""; test -n "$fmt_ver" || { echo "the rustfmt component is missing for this toolchain: rustup component add rustfmt"; exit 1; }; echo "rustfmt: $fmt_ver / recorded baseline: $fmt_baseline"; case " $fmt_ver " in *" $fmt_baseline "*) ;; *) echo "NOTE: rustfmt differs from the baseline recorded in scripts/local_gate.sh (GATE_RUSTFMT_BASELINE). This is a record, not a pin — the repo has no rust-toolchain.toml (#1442). If this run reformats files you did not touch, that is the first measured rustfmt skew in this repo: say so in the PR, re-run cargo fmt --all, and move the baseline in the same commit." ;; esac; fmt_rc=0; for fmt_manifest in server-rust/Cargo.toml clients/desktop/src-tauri/Cargo.toml; do echo "--- $fmt_manifest"; cargo fmt --all --check --manifest-path "$fmt_manifest" || fmt_rc=1; done; if [ "$fmt_rc" != 0 ]; then echo; echo "cargo fmt --all --check is RED. Fix: cargo fmt --all --manifest-path <manifest above>. The --all is load-bearing — both manifests are virtual workspaces, so cargo fmt without it exits 1 with \"Failed to find targets\" and checks nothing (#1472)."; fi; exit "$fmt_rc"'
+# --- end #1472 rustfmt drift enforcement -----------------------------------
+
 add_static_commands() {
   add_cmd_once "branch skew preflight" 'scripts/check_branch_skew.sh'
   add_cmd_once "worktree clean" 'if [ "${LOCAL_GATE_ALLOW_DIRTY:-0}" = "1" ]; then echo "LOCAL_GATE_ALLOW_DIRTY=1; dirty state is recorded but not failed"; git status --short; else test -z "$(git status --porcelain)" || { echo "worktree has uncommitted changes"; git status --short; exit 1; }; fi'
@@ -564,6 +598,11 @@ add_static_commands() {
   add_secrets_commands
   add_cmd_once "migration number uniqueness" 'scripts/check_migration_numbers.sh server/Migrations'
   add_cmd_once "diff whitespace" 'base="${LOCAL_GATE_BASE_REF:-origin/main}"; if git rev-parse --verify "$base" >/dev/null 2>&1; then git diff --check "$base"...HEAD; else echo "base ref $base unavailable; falling back to working tree whitespace checks"; fi; git diff --cached --check; git diff --check'
+  # #1472: see the GATE_CARGO_FMT_CMD block above for why this is static and why
+  # the baseline records rather than pins.
+  add_cmd_once "cargo fmt --all --check (server-rust + clients/desktop/src-tauri)" "$GATE_CARGO_FMT_CMD"
+  add_note_once coverage "#1472 rustfmt drift: \`cargo fmt --all --check\` runs over both cargo workspaces (server-rust, clients/desktop/src-tauri) in every profile's static block, so a landing can no longer leave the tree unformatted for the next worker to rediscover — the shape that produced #1377 and then #1454/#1442/#1467. It checks the whole workspace, not just changed files, so inherited drift blocks the next rust PR by design: that is what stops it accumulating. The rustfmt version is printed next to GATE_RUSTFMT_BASELINE and a mismatch is announced but not failed — the repo pins no rust-toolchain.toml (#1442) and no version skew has ever been measured here (every #1472 hunk traced by blame to a landing that skipped fmt), so the line exists to identify a future skew rather than to enforce a toolchain."
+  add_note_once not_covered "#1472 covers formatting only. \`cargo clippy --workspace --all-targets -- -D warnings\` and \`cargo test --workspace\` are still run by hand (Makefile \`rust-build\`/\`rust-test\`) or by the pr-ci rust lane, not by this gate — adding them would put a multi-minute compile in every docs run, which fmt at 0.6s does not. MSRV is likewise unverified here: pr-ci uses runner stable, and the two \`rust-version\` declarations (#1442) are checked by nothing."
   add_cmd_once "workflow yaml parse" "$GATE_WORKFLOW_YAML_PARSE_CMD"
   add_cmd_once "workflow lint" "$GATE_WORKFLOW_LINT_CMD"
   add_cmd_once "e2e compose config" 'env_file="${ENV_FILE:-}"; if [ -z "$env_file" ]; then for f in .env.worktree .env infra/.env.example; do if [ -f "$f" ]; then env_file="$f"; break; fi; done; fi; test -n "$env_file" || { echo "no env file found for e2e compose config"; exit 1; }; docker compose --env-file "$env_file" -f infra/docker-compose.e2e.yml config >/tmp/momo-compose-e2e-config.yml; echo "wrote /tmp/momo-compose-e2e-config.yml using $env_file"'
