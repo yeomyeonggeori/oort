@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { cn } from "@/design/lib/cn";
 import { Button } from "@/design/ui/button";
 import { InlineBanner } from "@/features/common/States";
 import {
@@ -159,17 +160,33 @@ export function CleanupArtifactRow({
           <p className="break-keep text-meta text-ink-muted">{copy.caution}</p>
         </div>
         {actionable && !open && (
+          // aria-disabled, native `disabled` 가 아니다 (#1403). 바로 윗줄이 잠긴
+          // 이유를 가리키는데, native `disabled` 인 버튼은 tab order 를 떠나므로
+          // 그 문장이 **닿을 수 없는 곳**에 놓인다: 키보드로 이 줄을 지나는 사람은
+          // 왜 못 하는지 듣지 못한 채 회색 버튼만 건너뛴다. 여섯 줄이 하나의
+          // 사유로 잠기는 이 목록에서 그것은 사유를 한 번 적은 설계 전체를
+          // 무의미하게 만든다. SaveButton·ConfirmButton 이 같은 이유로 이미
+          // aria-disabled 다 (SettingsFields). 초점은 남고, 눌러도 아무 일이
+          // 일어나지 않는다.
+          //
+          // 이 트리거는 **폼이 닫힌 줄에만** 서므로 진행과 겹치지 않는다: 저장이
+          // 나는 동안 이 줄의 폼은 열려 있고 트리거는 그 자리에 없다. 그래서
+          // 여기서 `disabled` 는 순수한 잠금이고, 잠금과 진행을 가르는 일은
+          // 폼 안(`AcknowledgeForm`)에서만 필요하다.
           <Button
             type="button"
             variant="outline"
             size="sm"
-            className="shrink-0"
+            className={cn("shrink-0", disabled && "opacity-50")}
             aria-expanded={false}
             aria-controls={formId}
             aria-label={`${cleanupRowTitle(artifact)} ${CLEANUP_ACKNOWLEDGE_LABEL}`}
             aria-describedby={disabled ? disabledReasonId : undefined}
-            disabled={disabled}
-            onClick={() => onOpenChange(true)}
+            aria-disabled={disabled || undefined}
+            onClick={() => {
+              if (disabled) return;
+              onOpenChange(true);
+            }}
             data-testid="cleanup-open-form"
           >
             {CLEANUP_ACKNOWLEDGE_LABEL}
@@ -186,6 +203,7 @@ export function CleanupArtifactRow({
           failure={failure}
           onDismissFailure={onDismissFailure}
           disabled={disabled}
+          disabledReasonId={disabledReasonId}
           saving={saving}
           onCancel={() => onOpenChange(false)}
           onSubmit={onAcknowledge}
@@ -243,6 +261,7 @@ function AcknowledgeForm({
   failure,
   onDismissFailure,
   disabled,
+  disabledReasonId,
   saving,
   onCancel,
   onSubmit,
@@ -252,6 +271,8 @@ function AcknowledgeForm({
   failure: string | null;
   onDismissFailure: () => void;
   disabled: boolean;
+  /** 목록 머리에 한 번 선 잠금 사유의 id. 줄의 트리거와 같은 문장을 가리킨다. */
+  disabledReasonId?: string;
   saving: boolean;
   onCancel: () => void;
   onSubmit: (input: {
@@ -278,6 +299,20 @@ function AcknowledgeForm({
   const issue = choice === null ? null : evidenceIssue(evidence);
   const ready = acknowledgeReady(artifact.kind, choice, evidence);
   const blockedId = `${id}-blocked`;
+
+  // **잠금과 진행은 다른 문법이다** (`States.tsx` 의 `actionBusy` 가 이 레포에서
+  // 그것을 적어 둔 자리다: 진행 중은 `aria-busy` 와 바뀐 낱말로 말하고, 잠기지도
+  // 흐려지지도 않는다 — 회색이 된 컨트롤은 「지금 일어나는 중」이 아니라 「당신은
+  // 이걸 못 한다」로 읽힌다).
+  //
+  // 이 폼에서 두 사실이 겹치는 이유: 부모가 주는 `disabled` 는 화면의 어떤 쓰기든
+  // 날고 있으면 참인데, **이 줄 자신의 저장도 그 쓰기 중 하나다**. 그래서 저장을
+  // 누른 순간 이 폼은 「저장하는 중」이면서 동시에 「사용 불가」가 됐고, 유일한
+  // 진행 낱말이 opacity-50 아래에서 죽었다. 겹침을 푸는 자리가 여기다.
+  //
+  //   saving  = 이 줄이 지금 저장되는 중 → 진행. aria-busy + 바뀐 낱말.
+  //   locked  = 그 밖의 모든 잠금(오프라인, 다른 줄의 쓰기) → aria-disabled + 흐림.
+  const locked = disabled && !saving;
   // 되돌릴 수 없는 쪽인가 (코어가 정한다, cleanup.ts). 이 폼은 열려 있는 동안에만
   // 마운트되므로 이 effect 는 「열림」의 순간 정확히 한 번 돈다: 폼을 연 트리거가
   // 방금 언마운트됐으니 초점을 폼 안 첫 컨트롤(첫 관측 라디오)로 들여온다 (H1).
@@ -317,6 +352,10 @@ function AcknowledgeForm({
       ref={formRef}
       id={id}
       className="flex min-w-0 flex-col gap-3 rounded-md border border-line-strong p-3"
+      // 진행 중인 것은 어느 한 버튼이 아니라 **이 폼 전체**다: 저장이 나는 동안
+      // 라디오도 텍스트 상자도 함께 멈춘다. 처분 갈래의 확정 버튼(`ConfirmButton`)
+      // 에는 busy 문법이 없으므로, 그 갈래에서 진행을 말하는 것은 이 한 속성이다.
+      aria-busy={saving || undefined}
       data-testid="cleanup-form"
     >
       <ChoiceList
@@ -407,26 +446,52 @@ function AcknowledgeForm({
       <div className="flex flex-wrap items-center justify-end gap-2">
         {/* 「닫기」가 아니다: 바로 위 거절 배너의 액션이 「닫기」이고, 두 낱말이
             같으면 100px 안에 같은 말을 하는 두 버튼이 선다. 이 버튼이 버리는 것은
-            메시지가 아니라 **적던 확인**이다. */}
+            메시지가 아니라 **적던 확인**이다.
+
+            저장이 날아가는 동안 잠기되 사라지지는 않는다 (#1403): 이 세 컨트롤은
+            한 줄에 서 있고, 그중 하나가 tab order 에서 빠지면 저장을 기다리는
+            사람의 손 밑에서 줄의 구성이 바뀐다.
+
+            여기의 흐림은 옳다. 취소는 **진행 중인 것이 아니라** 진행 때문에 지금
+            할 수 없는 것이고(날고 있는 쓰기는 취소되지 않는다), 그래서 잠금 문법을
+            쓴다 — 옆의 저장 버튼이 진행 문법을 쓰는 것과 짝을 이룬다. */}
         <Button
           type="button"
           variant="ghost"
           size="sm"
-          disabled={saving}
-          onClick={onCancel}
+          aria-disabled={saving || undefined}
+          aria-describedby={saving ? disabledReasonId : undefined}
+          className={cn(saving && "opacity-50")}
+          onClick={() => {
+            if (saving) return;
+            onCancel();
+          }}
           data-testid="cleanup-cancel"
         >
           취소
         </Button>
         {choice === null ? (
           // 관측만 적는 저장에는 질문이 없다. 다시 적을 수 있는 기록이기 때문이다.
+          //
+          // 이 버튼이 진행과 잠금을 **동시에** 지고 있었다: 저장을 시작하는 것이
+          // 이 버튼 자신이라 그 순간 `disabled` 도 함께 참이 됐고, 그래서 화면에
+          // 하나뿐인 진행 낱말(「저장하는 중」)이 「사용 불가」로 읽히며 흐려졌다.
+          // 이제 `locked` 만 잠금을 지고, 진행은 `aria-busy` 와 낱말이 진다.
+          //
+          // 초점은 어느 쪽에서도 남는다. native `disabled` 였다면 저장을 누른
+          // 그 손에서 초점이 <body> 로 떨어졌을 것이다.
           <Button
             type="button"
             variant="outline"
             size="sm"
-            disabled={disabled || saving}
+            aria-disabled={locked || undefined}
             aria-busy={saving || undefined}
-            onClick={submit}
+            aria-describedby={locked ? disabledReasonId : undefined}
+            className={cn(locked && "opacity-50")}
+            onClick={() => {
+              if (locked || saving) return;
+              submit();
+            }}
             data-testid="cleanup-save"
           >
             {saving ? "저장하는 중" : CLEANUP_SAVE_LABEL}
@@ -435,7 +500,9 @@ function AcknowledgeForm({
           <ConfirmButton
             label={CLEANUP_SAVE_LABEL}
             subject={cleanupRowTitle(artifact)}
-            describedBy={ready ? undefined : blockedId}
+            // 못 하는 이유가 둘이면 가까운 것부터: 적을 것이 덜 적혔다는 이 폼
+            // 자신의 사정이 먼저고, 화면 전체가 잠긴 사정이 그다음이다.
+            describedBy={!ready ? blockedId : locked ? disabledReasonId : undefined}
             question={acknowledgeQuestion(artifact.kind, choice)}
             confirmLabel={CLEANUP_CONFIRM_LABEL}
             // 확정 버튼의 색은 답이 정한다 (design-review M1). 「봇을 남깁니다」는
@@ -445,7 +512,11 @@ function AcknowledgeForm({
               dispositions.find((item) => item.id === choice)?.destructive ??
               true
             }
-            disabled={disabled || saving || !ready}
+            // `saving` 이 빠졌다. `ConfirmButton` 은 `disabled` 를 「사용 불가」로만
+            // 그리므로(busy 문법이 없다) 여기에 진행을 실으면 저장이 나는 동안
+            // 「당신은 이걸 못 한다」가 된다. 진행은 폼의 `aria-busy` 가 말하고,
+            // 두 번 눌러도 `submit()` 의 가드가 두 번째를 삼킨다.
+            disabled={locked || !ready}
             onConfirm={submit}
             testId="cleanup-save"
           />
