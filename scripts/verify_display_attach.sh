@@ -403,13 +403,36 @@ spec_value '.unverified.inputDelivery' >/dev/null ||
   fail "spec dropped the input-delivery honesty label — no producer has ever read input_enabled"
 [ "$(spec_value '.producer.recording')" = "false" ] ||
   fail "spec declares recording — ADR-0165 D5 forbids it"
-[ "$(spec_value '.ice.turn')" = "null" ] ||
-  fail "spec names a TURN server — ADR-0165 D3 forbids a third-party one and makes an oort one an ADR 증보"
+# ADR-0165 D3 + 증보 1 (D3-1) + 증보 2 (#1438, specVersion 3): the invariant the
+# gate enforces flips from "no TURN named" to "the only TURN named is oort's,
+# relay is forced, and the spec cites the ADR 증보 that authorises it". A
+# third-party TURN is still forbidden; a bare TURN with no amendment reference is
+# still a drift; and the routable ICE base #1438 measured as mandatory (a
+# link-local-only microVM emits zero relay candidates without it) is required.
+[ "$(spec_value '.ice.policy')" = "relay" ] ||
+  fail "spec ice.policy is not relay — ADR-0165 증보 1 D3-1 measured relay is the only viable ICE path"
+[ "$(spec_value '.ice.turn.required')" = "true" ] ||
+  fail "spec does not require TURN — ADR-0165 증보 2 (#1438) measured relay is mandatory"
+case "$(spec_value '.ice.turn.operator')" in
+  *oort*) : ;;
+  *) fail "spec TURN operator is not oort — ADR-0165 D3 forbids a third-party TURN" ;;
+esac
+case "$(spec_value '.ice.requiresAdrAmendment')" in
+  *"증보 2"*) : ;;
+  *) fail "spec names a TURN without citing ADR-0165 증보 2 — an oort TURN is an ADR 증보, not a silent default" ;;
+esac
+[ "$(spec_value '.network.iceBase.required')" = "true" ] ||
+  fail "spec does not require a routable ICE base — #1438 measured a link-local-only microVM emits zero relay candidates without one (ADR-0165 증보 2)"
 [ "$(spec_value '.producer.direction')" = "sendonly" ] ||
   fail "spec does not declare a sendonly producer"
-# The honest label is part of the spec, not a footnote to it.
-spec_value '.unverified.iceReachability' >/dev/null ||
-  fail "spec dropped the named unmeasured items — an honest label that can be deleted silently is not one"
+# The honest label is part of the spec, not a footnote to it. specVersion 3
+# (#1438) GRADUATED iceReachability from an unverified label to a measured fact:
+# it may leave `unverified` ONLY because it now stands under `runtimeVerified`,
+# never by silent deletion. inputDelivery (asserted above) is still named.
+if ! spec_value '.unverified.iceReachability' >/dev/null 2>&1; then
+  [ "$(spec_value '.runtimeVerified.browserRendersOverTurnRelay')" = "true" ] ||
+    fail "spec dropped the iceReachability label without recording it as measured under runtimeVerified"
+fi
 note "PASS template spec agrees with the server it registers with"
 
 # ---------------------------------------------------------------------------
@@ -528,9 +551,10 @@ note "  A turn already claimed by the in-process momo-agent-worker is not interr
 note "  it commits through finish_run_in_tx, which carries no status guard. What parking stops is the"
 note "  next turn and every work-control the run would have asked for; the tokens of one turn already"
 note "  in the provider's hands are not refundable by a row."
-note "runtime-unverified(cubesandbox webrtc producer): no microVM was built or booted;"
-note "  ICE reachability from a browser to a sandbox remains unmeasured —"
-note "  see infra/cubesandbox/display-template/README.md"
+note "runtime-verified(cubesandbox webrtc producer, #1438 specVersion 3): a real microVM"
+note "  producer's H264 screen reached an external browser over a momo-turn relay (udp+tcp),"
+note "  relay<->relay, after entrypoint injected a routable ICE base onto the link-local guest —"
+note "  see infra/cubesandbox/display-template/README.md and ADR-0165 증보 2 (Proposed)"
 note "runtime-unverified(input delivery): no producer has ever read input_enabled,"
 note "  opened an input datachannel, delivered a keystroke, or closed that channel"
 note "  on return. The server half of control is proved above; the screen half is not."
