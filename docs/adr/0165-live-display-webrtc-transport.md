@@ -69,9 +69,9 @@ microVM↔호스트는 어느 방향으로도 UDP 경로가 없고(`deny_out`의
 
 ---
 
-## 증보 2 (초안 — 성재 결재 대기) — D3 강화: TURN 결선만으론 relay 후보 0 — microVM link-local 때문에 **라우팅 가능 ICE base 주입**이 추가 요건 (2026-08-16, #1438 실기동 E2E)
+## 증보 2 (Accepted 2026-08-17 — 성재 전권 위임·momo-main 권장 집행) — D3 강화: TURN 결선만으론 relay 후보 0 — microVM link-local 때문에 **라우팅 가능 ICE base 주입**이 추가 요건 (2026-08-16, #1438 실기동 E2E)
 
-> Status: **Proposed (성재 결재 대기)**. 본 증보는 Accepted 본문·증보 1을 무접촉으로 두고 D3-1/D3-2를 강화한다. 승인 전까지 ICE base 주입 의무는 *제안*이지 확정 계약이 아니다.
+> Status: **Accepted** (2026-08-17 — 성재 전권 위임 하 momo-main 권장 집행. 근거: #1438 실기동 E2E 성립·conformance 단정·가산적 성문화). 본 증보는 Accepted 본문·증보 1을 무접촉으로 두고 D3-1/D3-2를 강화하며, ICE base 주입 의무는 확정 계약이다.
 > 기안 2026-08-16. 실측 근거: **#1438 실기동 E2E**(정정본 아티팩트 = 본 랜딩) — momo-cube-host(101.79.18.230) + momo-turn(223.130.142.109)에서 **실제 microVM producer의 H264 화면이 공인 인터넷의 외부 브라우저에 도달**. 정본 교차: `infra/cubesandbox/display-template/template.spec.json` specVersion 3 `runtimeVerified` · `docs/runbooks/cubesandbox-host-install.md` §8-B.
 
 증보 1은 "relay가 유일한 ICE 경로 + TURN은 별도 공인 호스트"로 도달성 형상을 확정했다. #1438은 그 위에서 실화면 E2E를 완주하며 **relay 강제만으로는 부족하다**는 더 깊은 사실을 실측했다.
