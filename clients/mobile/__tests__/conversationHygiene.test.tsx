@@ -1064,3 +1064,63 @@ describe('#1422 — 여러 줄 입력창의 줄바꿈 규칙은 전수다', () =
     expect(atoms).toContain('lineBreakStrategyIOS="hangul-word"');
   });
 });
+
+// ---------------------------------------------------------------------------
+// #1478 — 공백만 있는 본문은 빈 줄을 그리지 않는다
+// ---------------------------------------------------------------------------
+
+/** 그려진 트리의 글자를 전부 편다. 소스 매칭이 아니라 **결과**를 센다. */
+function drawnText(node: unknown): string[] {
+  if (node === null || node === undefined) return [];
+  if (typeof node === 'string') return [node];
+  if (Array.isArray(node)) return node.flatMap(drawnText);
+  const children = (node as {children?: unknown}).children;
+  return drawnText(children);
+}
+
+describe('#1478 — 공백만 있는 본문 (웹 `hasRenderableBody` 의 폰 짝)', () => {
+  // 이 행은 `body !== ''` 로 물었다. 공백만 있는 본문은 그것을 통과해 본문 칸을
+  // 얻고, `<Text>` 가 그 공백을 그대로 그려 카드 위에 빈 줄이 섰다. 판정은 이제
+  // 코어에 하나 있고(`features/timeline/bodySlot`), 웹이 부르는 그 함수다.
+  const BLANK = '   \n  ';
+
+  function row(body: string | undefined) {
+    return render(
+      <MessageRow
+        message={message(body === undefined ? {body: undefined} : {body})}
+        startsGroup
+        directory={DIRECTORY}
+        chips={[]}
+        nowMs={BASE_MS}
+      />,
+    );
+  }
+
+  it('그 공백을 그리지 않는다', () => {
+    const texts = drawnText(row(BLANK).toJSON());
+    expect(texts).not.toContain(BLANK);
+    // 공백이 든 어떤 글자도 남지 않는다 — 「일부만 지웠다」로 통과하지 못하게.
+    expect(texts.filter(t => t !== '' && t.trim() === '')).toEqual([]);
+  });
+
+  // 반대쪽 갈래도 같은 판정을 쓴다. 그쪽만 `body === ''` 로 남겨 두면 공백 본문은
+  // 어느 쪽에도 안 걸려 행이 통째로 말이 없어진다 — 빈 본문에는 「내용 없는
+  // 메시지」라고 말해 놓고 공백 본문에는 아무 말도 안 하는 것은 같은 사실에 두
+  // 답을 주는 것이다. 셋이 **한 낱말**을 말한다.
+  it.each([
+    ['공백만', BLANK],
+    ['빈 문자열', ''],
+    ['키 자체가 없음', undefined],
+  ])('%s 인 본문은 「내용 없는 메시지」라고 말한다', (_name, body) => {
+    row(body);
+    expect(screen.getByText('※ 내용 없는 메시지')).toBeTruthy();
+  });
+
+  it('글자가 있으면 그대로 그린다 (무회귀)', () => {
+    // 앞뒤 공백은 판정을 바꾸지 못한다. 그리고 본문은 **자른 것이 아니라** 저자가
+    // 친 그대로 간다 — 이 판정은 그릴지 말지만 정하고 무엇을 그릴지는 안 정한다.
+    const texts = drawnText(row('  환경 셋업을 마쳤습니다.  ').toJSON());
+    expect(texts).toContain('  환경 셋업을 마쳤습니다.  ');
+    expect(screen.queryByText('※ 내용 없는 메시지')).toBeNull();
+  });
+});
