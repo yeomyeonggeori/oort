@@ -1,0 +1,463 @@
+#!/usr/bin/env python3
+"""oort live display producer — GStreamer webrtcbin, view-only (ADR-0165).
+
+Contract source: infra/cubesandbox/display-template/template.spec.json (specVersion 3)
+Wire assertions:  scripts/display_signaling_probe.py
+
+Three properties are the ADR, not conveniences:
+  * the offer carries a video m-line and NO m=application section (D4) — there is
+    no datachannel to carry a keystroke, so view-only is the ABSENCE of an input
+    path rather than a flag beside one;
+  * nothing is written to disk (D5);
+  * the capability is validated against the server, never trusted (D2).
+
+Stdlib WebSocket (RFC 6455 text-frame subset) for the probe's reason: a gate that
+needs `pip install` is a gate that gets skipped.
+"""
+
+from __future__ import annotations
+
+import base64
+import hashlib
+import json
+import os
+import socket
+import struct
+import sys
+import threading
+import time
+import urllib.request
+import urllib.error
+
+import gi
+
+gi.require_version("Gst", "1.0")
+gi.require_version("GstWebRTC", "1.0")
+gi.require_version("GstSdp", "1.0")
+from gi.repository import Gst, GstWebRTC, GstSdp, GLib  # noqa: E402
+
+WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+SUBPROTOCOL = os.environ.get("MOMO_DISPLAY_SUBPROTOCOL", "momo.display.v1")
+CAPABILITY_PREFIX = "momo_terminal_attach_v1"
+VIEW_ONLY_REFUSAL = "view_only"
+
+OPCODE_TEXT = 0x1
+OPCODE_CLOSE = 0x8
+
+X11 = os.environ.get("MOMO_DISPLAY_X11", ":0")
+SIGNAL_PORT = int(os.environ.get("MOMO_DISPLAY_SIGNAL_PORT", "8452"))
+UDP_RANGE = os.environ.get("MOMO_DISPLAY_MEDIA_UDP_RANGE", "50000-50100")
+CODEC = os.environ.get("MOMO_DISPLAY_CODEC", "H264")
+AUDIO = os.environ.get("MOMO_DISPLAY_AUDIO", "0") == "1"
+INPUT_ENABLED = False  # MOMO_DISPLAY_INPUT is read as false and only false (D4)
+REVALIDATE_SECONDS = int(os.environ.get("MOMO_DISPLAY_REVALIDATE_SECONDS", "30"))
+SERVER_ORIGIN = os.environ.get("MOMO_SERVER_ORIGIN", "").rstrip("/")
+WORKSPACE = os.environ.get("MOMO_WORKSPACE_ID", "")
+HOST_ID = os.environ.get("MOMO_WORK_HOST_ID", "")
+DISPLAY_ID = os.environ.get("MOMO_DISPLAY_ID", "display-local")
+# Install-goal escape hatch: with no momo server on the network there is nothing
+# to validate against. This is NOT a production posture and the runbook says so.
+ALLOW_STUB_VALIDATE = os.environ.get("MOMO_DISPLAY_STUB_VALIDATE", "0") == "1"
+
+
+def log(msg: str) -> None:
+    print(f"[producer] {msg}", flush=True)
+
+
+# ---------------------------------------------------------------------------
+# RFC 6455 — the subset a signalling channel uses
+# ---------------------------------------------------------------------------
+
+
+def _accept_key(client_key: str) -> str:
+    digest = hashlib.sha1((client_key + WS_GUID).encode("ascii")).digest()
+    return base64.b64encode(digest).decode("ascii")
+
+
+class Peer:
+    def __init__(self, sock: socket.socket, buffered: bytes = b"") -> None:
+        self.sock = sock
+        self.buffered = buffered
+        self.lock = threading.Lock()
+        self.closed = False
+
+    def close(self) -> None:
+        self.closed = True
+        try:
+            self.sock.close()
+        except OSError:
+            pass
+
+
+def _recv_exactly(peer: Peer, count: int) -> bytes:
+    out = b""
+    if peer.buffered:
+        take = peer.buffered[:count]
+        peer.buffered = peer.buffered[count:]
+        out += take
+    while len(out) < count:
+        chunk = peer.sock.recv(count - len(out))
+        if not chunk:
+            raise ConnectionError("peer closed")
+        out += chunk
+    return out
+
+
+def _send_frame(peer: Peer, payload: bytes, opcode: int = OPCODE_TEXT) -> None:
+    header = bytes([0x80 | opcode])
+    length = len(payload)
+    if length < 126:
+        header += bytes([length])
+    elif length < (1 << 16):
+        header += bytes([126]) + struct.pack(">H", length)
+    else:
+        header += bytes([127]) + struct.pack(">Q", length)
+    with peer.lock:
+        if not peer.closed:
+            peer.sock.sendall(header + payload)
+
+
+def _recv_frame(peer: Peer) -> tuple[int, bytes]:
+    first, second = _recv_exactly(peer, 2)
+    opcode = first & 0x0F
+    masked = bool(second & 0x80)
+    length = second & 0x7F
+    if length == 126:
+        length = struct.unpack(">H", _recv_exactly(peer, 2))[0]
+    elif length == 127:
+        length = struct.unpack(">Q", _recv_exactly(peer, 8))[0]
+    mask = _recv_exactly(peer, 4) if masked else b""
+    payload = _recv_exactly(peer, length)
+    if masked:
+        payload = bytes(b ^ mask[i % 4] for i, b in enumerate(payload))
+    return opcode, payload
+
+
+def send_json(peer: Peer, message: dict) -> None:
+    _send_frame(peer, json.dumps(message).encode("utf-8"))
+
+
+# ---------------------------------------------------------------------------
+# Capability validation — the producer does not trust what it is handed
+# ---------------------------------------------------------------------------
+
+
+def validate_capability(token: str, stream: bool = False) -> dict | None:
+    """Ask the server. `stream: true` relaxes expiry and ONLY expiry."""
+    if not token.startswith(CAPABILITY_PREFIX):
+        return None
+    if not SERVER_ORIGIN:
+        if ALLOW_STUB_VALIDATE:
+            log("validate: STUBBED (no MOMO_SERVER_ORIGIN) — install-goal only")
+            return {"display_id": DISPLAY_ID, "mode": "observer"}
+        return None
+    url = (
+        f"{SERVER_ORIGIN}/v1/workspaces/{WORKSPACE}/work-hosts/{HOST_ID}"
+        "/display-attach/validate"
+    )
+    body = json.dumps({"capability": token, "stream": stream}).encode("utf-8")
+    req = urllib.request.Request(url, data=body, method="POST")
+    req.add_header("Content-Type", "application/json")
+    try:
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            if resp.status != 200:
+                return None
+            return json.loads(resp.read().decode("utf-8"))
+    except (urllib.error.URLError, OSError, ValueError) as exc:
+        log(f"validate: refused ({exc})")
+        return None
+
+
+# ---------------------------------------------------------------------------
+# The GStreamer half
+# ---------------------------------------------------------------------------
+
+PIPELINE = (
+    f"ximagesrc display-name={X11} use-damage=0 show-pointer=false "
+    "! video/x-raw,framerate=15/1 "
+    "! videoconvert ! queue max-size-buffers=2 leaky=downstream "
+    "! x264enc tune=zerolatency speed-preset=ultrafast bitrate=1500 key-int-max=30 "
+    "! video/x-h264,profile=constrained-baseline "
+    "! h264parse config-interval=-1 "
+    "! rtph264pay pt=96 config-interval=-1 "
+    "! application/x-rtp,media=video,encoding-name=H264,payload=96 "
+    "! webrtcbin name=sendonly latency=50"
+)
+
+
+class Session:
+    """One viewer, one peer connection. Media is sendonly; there is no data path."""
+
+    def __init__(self, peer: Peer, display_id: str, mode: str) -> None:
+        self.peer = peer
+        self.display_id = display_id
+        self.mode = mode
+        self.pipe = None
+        self.webrtc = None
+        self.done = threading.Event()
+
+    def start(self) -> None:
+        self.pipe = Gst.parse_launch(PIPELINE)
+        self.webrtc = self.pipe.get_by_name("sendonly")
+
+        # E2E (#1438) — force relay-only ICE and wire the oort-operated TURN.
+        # ADR-0165 증보 1 (D3-1) measured that a CubeSandbox microVM sits behind a
+        # symmetric NAT: host/srflx candidates cannot connect from outside, so the
+        # only ICE path that works is `typ relay`. We therefore (a) wire the TURN
+        # server(s) delivered via envVars (#1437 receiver → this process's environ)
+        # and (b) set ice-transport-policy=relay so webrtcbin gathers ONLY relay
+        # candidates — collecting host/srflx that are known to fail only costs
+        # connection time (ADR-0165 증보 1 residual item 5). turn:// URIs carry a
+        # credential, so they are never logged.
+        turn_uri = os.environ.get("MOMO_DISPLAY_TURN_URI", "").strip()
+        turn_uri_tcp = os.environ.get("MOMO_DISPLAY_TURN_URI_TCP", "").strip()
+        if turn_uri:
+            self.webrtc.set_property("turn-server", turn_uri)
+            added_tcp = False
+            if turn_uri_tcp:
+                try:
+                    added_tcp = bool(self.webrtc.emit("add-turn-server", turn_uri_tcp))
+                except Exception as exc:  # noqa: BLE001
+                    log(f"ice: add-turn-server(tcp) failed ({exc})")
+            self.webrtc.set_property(
+                "ice-transport-policy",
+                GstWebRTC.WebRTCICETransportPolicy.RELAY,
+            )
+            log(
+                "ice: TURN wired (udp + tcp={}), ice-transport-policy=RELAY "
+                "(relay-only, credential not logged)".format(added_tcp)
+            )
+        else:
+            # No TURN delivered — leave webrtcbin at the spec defaults (stun=[],
+            # turn=null). This is the pre-#1438 posture (offer carries only
+            # link-local candidates and a browser cannot connect).
+            log("ice: no TURN delivered — defaults (relay unavailable)")
+
+        # NOTE (measured, do not "fix" by reading `ice-agent`): on GStreamer 1.22
+        # `webrtcbin.get_property("ice-agent")` through PyGObject over-unrefs the
+        # GstWebRTCNice object — the property returns an object, and the ICE agent
+        # is DESTROYED as a side effect of reading it. Every later negotiation then
+        # dies on `gst_webrtc_ice_add_stream: assertion 'GST_IS_WEBRTC_ICE (ice)'`.
+        # There is no port-range property on webrtcbin in 1.22 either, so
+        # template.spec.json's `mediaUdpPortRange` is NOT enforceable here.
+        log(f"ice: mediaUdpPortRange {UDP_RANGE} DECLARED BUT NOT ENFORCED (GStreamer 1.22)")
+
+        self.webrtc.connect("on-negotiation-needed", self._on_negotiation_needed)
+        self.webrtc.connect("on-ice-candidate", self._on_ice_candidate)
+
+        self.pipe.set_state(Gst.State.PLAYING)
+        log("pipeline PLAYING")
+
+        # sendonly: it sends pixels and accepts no media back.
+        try:
+            transceiver = self.webrtc.emit("get-transceiver", 0)
+            if transceiver is not None:
+                transceiver.set_property(
+                    "direction",
+                    GstWebRTC.WebRTCRTPTransceiverDirection.SENDONLY,
+                )
+                log("transceiver direction=SENDONLY")
+        except Exception as exc:  # noqa: BLE001
+            log(f"transceiver: {exc}")
+
+    def _on_negotiation_needed(self, element) -> None:
+        promise = Gst.Promise.new_with_change_func(self._on_offer_created, element, None)
+        element.emit("create-offer", None, promise)
+
+    def _on_offer_created(self, promise, element, _data) -> None:
+        promise.wait()
+        reply = promise.get_reply()
+        offer = reply.get_value("offer")
+        element.emit("set-local-description", offer, Gst.Promise.new())
+        sdp = offer.sdp.as_text()
+        # D4 belt-and-braces: never put an application m-line on the wire.
+        if "m=application" in sdp or "webrtc-datachannel" in sdp:
+            log("FATAL: offer contained a datachannel — refusing to send (D4)")
+            self.peer.close()
+            return
+        send_json(self.peer, {"type": "offer", "sdp": sdp})
+        log("offer sent (video sendonly, no m=application)")
+
+    def _on_ice_candidate(self, _element, mline_index, candidate) -> None:
+        if "typ relay" in candidate:
+            # #1438: with ice-transport-policy=relay this is the ONLY kind that
+            # should appear. Its address is the oort TURN public IP — proof that
+            # the microVM allocated a relay on the dedicated host (INFRA-B item 1).
+            log(f"ice: RELAY candidate (microVM→TURN allocation OK): {candidate}")
+        else:
+            log(f"ice: non-relay candidate emitted (unexpected under relay policy): {candidate}")
+        send_json(
+            self.peer,
+            {"type": "ice", "candidate": candidate, "sdpMLineIndex": mline_index},
+        )
+
+    def set_remote_answer(self, sdp_text: str) -> None:
+        ok, sdp = GstSdp.SDPMessage.new_from_text(sdp_text)
+        if ok != GstSdp.SDPResult.OK:
+            log("answer: unparseable SDP — signalling continues, media will not")
+            return
+        answer = GstWebRTC.WebRTCSessionDescription.new(
+            GstWebRTC.WebRTCSDPType.ANSWER, sdp
+        )
+        try:
+            self.webrtc.emit("set-remote-description", answer, Gst.Promise.new())
+            log("answer applied")
+        except Exception as exc:  # noqa: BLE001
+            log(f"answer: rejected by webrtcbin ({exc})")
+
+    def add_remote_ice(self, candidate: str, mline_index: int) -> None:
+        try:
+            self.webrtc.emit("add-ice-candidate", mline_index, candidate)
+        except Exception as exc:  # noqa: BLE001
+            log(f"ice: remote candidate rejected ({exc})")
+
+    def stop(self) -> None:
+        self.done.set()
+        if self.pipe is not None:
+            self.pipe.set_state(Gst.State.NULL)
+
+
+# ---------------------------------------------------------------------------
+# Signalling server
+# ---------------------------------------------------------------------------
+
+
+def handle_connection(conn: socket.socket, addr) -> None:
+    conn.settimeout(30)
+    peer = Peer(conn)
+    session = None
+    try:
+        request = b""
+        while b"\r\n\r\n" not in request:
+            chunk = conn.recv(4096)
+            if not chunk:
+                return
+            request += chunk
+        head, _, peer.buffered = request.partition(b"\r\n\r\n")
+        lines = head.decode("latin-1").split("\r\n")
+        request_line = lines[0] if lines else ""
+        headers = {}
+        for line in lines[1:]:
+            if ": " in line:
+                name, _, value = line.partition(": ")
+                headers[name.lower()] = value
+
+        # Readiness probe (cubemastercli --probe) and plain health checks.
+        if "upgrade" not in headers.get("connection", "").lower():
+            body = b'{"status":"ok"}'
+            conn.sendall(
+                b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                b"Content-Length: " + str(len(body)).encode() + b"\r\n\r\n" + body
+            )
+            return
+
+        offered = [p.strip() for p in headers.get("sec-websocket-protocol", "").split(",")]
+        if not offered or offered[0] != SUBPROTOCOL or len(offered) < 2:
+            conn.sendall(b"HTTP/1.1 400 Bad Request\r\n\r\n")
+            log("refused a handshake with no capability")
+            return
+        capability = offered[1]
+
+        verdict = validate_capability(capability)
+        if verdict is None:
+            conn.sendall(b"HTTP/1.1 401 Unauthorized\r\n\r\n")
+            log("server refused the capability")
+            return
+
+        accept = _accept_key(headers["sec-websocket-key"])
+        conn.sendall(
+            (
+                "HTTP/1.1 101 Switching Protocols\r\n"
+                "Upgrade: websocket\r\n"
+                "Connection: Upgrade\r\n"
+                f"Sec-WebSocket-Accept: {accept}\r\n"
+                # BARE subprotocol: echoing the capability would put a live
+                # bearer in every intermediary's response log.
+                f"Sec-WebSocket-Protocol: {SUBPROTOCOL}\r\n"
+                "\r\n"
+            ).encode("ascii")
+        )
+        log(f"viewer attached from {addr[0]} display_id={verdict['display_id']}")
+
+        send_json(
+            peer,
+            {
+                "type": "ready",
+                "display_id": verdict["display_id"],
+                "mode": verdict.get("mode", "observer"),
+                "input_enabled": INPUT_ENABLED,
+                "codec": CODEC,
+                "audio": AUDIO,
+            },
+        )
+
+        session = Session(peer, verdict["display_id"], verdict.get("mode", "observer"))
+        session.start()
+
+        deadline = time.monotonic() + REVALIDATE_SECONDS
+        while True:
+            try:
+                opcode, payload = _recv_frame(peer)
+            except (ConnectionError, OSError, socket.timeout):
+                break
+            if opcode == OPCODE_CLOSE:
+                break
+            if opcode != OPCODE_TEXT:
+                continue
+            try:
+                message = json.loads(payload.decode("utf-8"))
+            except ValueError:
+                continue
+            kind = message.get("type")
+            if kind == "answer":
+                session.set_remote_answer(message.get("sdp", ""))
+            elif kind == "ice":
+                session.add_remote_ice(
+                    message.get("candidate", ""), int(message.get("sdpMLineIndex", 0))
+                )
+            elif kind == "open_input":
+                # Accepting the word and refusing the act. No renegotiation, no
+                # second offer, no m=application. The stream keeps running.
+                send_json(peer, {"type": "error", "reason": VIEW_ONLY_REFUSAL})
+                log("open_input refused: view_only")
+            elif kind == "bye":
+                break
+
+            if time.monotonic() > deadline:
+                if validate_capability(capability, stream=True) is None:
+                    log("revalidation failed — cutting the stream")
+                    break
+                deadline = time.monotonic() + REVALIDATE_SECONDS
+    except Exception as exc:  # noqa: BLE001
+        log(f"session error: {exc}")
+    finally:
+        if session is not None:
+            session.stop()
+        peer.close()
+
+
+def main() -> int:
+    Gst.init(None)
+    if not Gst.ElementFactory.find("webrtcbin"):
+        log("FATAL: webrtcbin plugin missing")
+        return 1
+    if not Gst.ElementFactory.find("ximagesrc"):
+        log("FATAL: ximagesrc plugin missing")
+        return 1
+
+    loop = threading.Thread(target=lambda: GLib.MainLoop().run(), daemon=True)
+    loop.start()
+
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    listener.bind(("0.0.0.0", SIGNAL_PORT))
+    listener.listen(8)
+    log(f"signalling on :{SIGNAL_PORT} subprotocol={SUBPROTOCOL} input={INPUT_ENABLED}")
+
+    while True:
+        conn, addr = listener.accept()
+        threading.Thread(target=handle_connection, args=(conn, addr), daemon=True).start()
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

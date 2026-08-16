@@ -2,7 +2,8 @@
 
 > 2026-08-16 INFRA-A(#1434) 실집행분. 패킷 `docs/planning/handoffs/2026-08-16-infra-install-wave-packet.md` goal A.
 > 대상: **momo-cube-host** — 공인 101.79.18.230 / 사설 10.0.1.7 / Rocky 9.8 / 8vCPU·32GB / 단일 300GB XFS / nested KVM.
-> 근거 정본: `research/2026-08-09-cubesandbox-d42-spike.md` §1·§8.3 · `research/2026-08-15-reachability-spike-1411.md`(F1~F8·형상 A) · ADR-0156 · ADR-0157(+증보 1) · ADR-0165(+증보 1) · `infra/cubesandbox/display-template/template.spec.json`(v2 계약, 현재 `chore/1414-display-state-captures` 브랜치).
+> 근거 정본: `research/2026-08-09-cubesandbox-d42-spike.md` §1·§8.3 · `research/2026-08-15-reachability-spike-1411.md`(F1~F8·형상 A) · ADR-0156(+증보 4 초안) · ADR-0157(+증보 1, 증보 2 초안) · ADR-0165(+증보 1, **증보 2 초안**) · `infra/cubesandbox/display-template/template.spec.json`(**specVersion 3 — track/engine 랜딩**, #1438 실기동 E2E 반영).
+> **후속 실집행(#1438, 2026-08-16)**: 실화면 E2E 성립분은 §8-B/§9에 반영했다 — momo-turn relay 실증 + microVM 링크로컬 root-cause(ICE base 주입).
 > **이 문서에 시크릿은 없다.** 자격은 `~/.ncp/`(0600)에만 있고 값은 어디에도 인용하지 않는다.
 
 설치 실소요: 호스트 준비 ~4분 · one-click 설치 **2분 이내**(rc=0, 유닛 14/14 active) · 템플릿 빌드 **20~34초** · microVM create **200ms**.
@@ -149,7 +150,7 @@ ss -lnt | grep :5000        # ★ 0.0.0.0 이 없어야 한다(F1 "설치 부품
 
 ### 4.2 템플릿 빌드
 
-producer 자산(`Dockerfile` · `entrypoint.sh` · `momo-display-producer`)은 현재 **호스트 `/root/build/display/`에만** 있다 — 레포 반영은 §8-C의 후속 항목이다.
+producer 자산(`Dockerfile` · `entrypoint.sh` · `momo-display-producer` + PID1 수신기 `../bootstrap-init/momo-bootstrap-init`)은 **이제 레포에 있다** — `infra/cubesandbox/display-template/`(#1455 랜딩, track/engine). 호스트 빌드 컨텍스트(`/root/build/display/`)는 이 레포 자산을 복사해 구성한다(수신기는 `bootstrap-init/`에서 빌드 컨텍스트로 복사 — Dockerfile이 `COPY momo-bootstrap-init …`을 기대). §8-C의 "레포 미반영"은 해소됐다.
 
 ```sh
 docker build -t 127.0.0.1:5000/momo-display:v1 /root/build/display
@@ -370,16 +371,20 @@ envd init request failed: Post "http://192.168.0.7:49983/init": connection refus
 - **요구**: 증보 1의 근거 문장을 "헤어핀 불가(실측)"에서 **"TCP 헤어핀은 성립, UDP 헤어핀 미측정"**으로 정정하거나, ACG에 임시 UDP 규칙을 열고 재측정할 것. 근거가 틀린 채로 서 있는 Accepted 결정이다.
 - 부수 함정(F8 계열): 이 건은 `connect()` 성공만으로 판정했다면 **오판**이었다. 처음 TCP 핸드셰이크만으로는 nginx 로그에 아무것도 남지 않았고, **실제 HTTP 요청을 보내고 응답을 읽어서야** 도달이 확정됐다. 검증 스크립트는 핸드셰이크가 아니라 **응답**을 근거로 삼아야 한다.
 
-### C. 템플릿 계약(`template.spec.json` v2)과 실물의 차이
+**★ 해소(#1438, 2026-08-16 실기동 E2E) — relay 실증 + 링크로컬 root-cause.** 별도 공인 호스트 **momo-turn**(223.130.142.109)으로 실화면 E2E가 성립했다: coturn이 `ALLOCATE`+`CHANNEL_BIND` 성공을 **양측**에서 로깅 — producer(호스트 egress 101.79.18.230) + browser(39.115.69.188), transport **`udp`·`tcp` 양쪽**, 미디어 후보쌍 relay↔relay. 외부 브라우저가 1280x720 H264를 56프레임 디코드.
+- **증보 1 D3-2("TURN=별도 전용 호스트")는 실측 확정**되고, 위 "UDP 헤어핀 미측정"은 **momo-turn이 CubeSandbox 호스트와 별도라 배치상 무의미**해진다(헤어핀은 동거 가설의 잔여 질문 — 비임계, 롤백 트리거 아님). ACG UDP 재측정은 §9 item 6에서 **비임계로 강등**.
+- **더 깊은 발견(= ADR-0165 증보 2 초안 사안)**: TURN을 결선하고 microVM이 TURN에 도달 가능해도 producer가 **후보 0**을 방출했다. 원인 = guest `eth0`가 **링크로컬 전용**(169.254.68.6/30, fe80::) → libnice가 TURN을 등록하지만 링크로컬 base에서 후보 디스커버리를 스케줄하지 않는다(`Candidate gathering FINISHED, no scheduled items`). **처방(실측 성공)**: `entrypoint.sh`가 producer 기동 전 라우팅 가능 RFC1918(`10.99.0.2/24` = `MOMO_ICE_BASE`)를 `eth0`에 추가 → libnice가 base로 삼아 relay 할당, CubeNet gw가 호스트 공인 IP로 MASQUERADE. 그래서 rootfs에 `iproute2`가 필요하고 `template.spec.json` `network.iceBase.required=true`가 계약이 됐다. 컨테이너의 동일 producer엔 불필요(이미 172.17.x RFC1918) — microVM 링크로컬 posture 고유. **결재 대기**: ADR-0165 증보 2 초안.
 
-| 계약 필드 | 실물 |
-|---|---|
-| `network.mediaUdpPortRange: [50000, 50100]` | **강제 불가**. GStreamer 1.22 `webrtcbin`에 포트 레인지 속성이 없다. 게다가 `webrtcbin.get_property("ice-agent")`는 **PyGObject에서 ICE 객체를 파괴한다**(읽는 행위가 부작용 — 이후 모든 협상이 `GST_IS_WEBRTC_ICE` assertion으로 사망). **읽지 말 것.** 본 goal이 실제로 밟은 함정이다 |
-| `momo-display-producer.service`(systemd 유닛) | `create-from-image` 템플릿에는 **systemd도 envd도 없고 이미지 CMD가 PID1**이다. 유닛 파일은 이 기재에서 실행되지 않는다 — 순서(X→producer)를 entrypoint로 옮겨야 한다. **유닛 파일과 실물 기재가 어긋난다** |
-| `signalling.validateRoute` | 서버 부재로 **미검증**(stub 경로로만 왕복). 실서버 결선은 E2E goal의 몫 |
-| `ice.stun: []`, `ice.turn: null` | 실물 기본값과 일치. 결과적으로 후보가 **링크로컬뿐** → 브라우저 도달 불가 확정(§5.3) |
+### C. 템플릿 계약(`template.spec.json`) — v2 대비 실물 차이는 specVersion 3에서 해소
 
-또한 **producer 자산이 레포에 없다**. 현재 `/root/build/display/`에만 있고, 계약 문서(`infra/cubesandbox/display-template/`)는 아직 `chore/1414-display-state-captures` 브랜치에 있어 main에 없다. **템플릿이 굽는 것은 레포에서 리뷰 가능해야 한다**는 원칙(`infra/workd/*.service`의 이유)에 따라 후속 티켓으로 반영 필요.
+| 계약 필드 (v2) | 실물 | specVersion 3 반영 (#1438) |
+|---|---|---|
+| `network.mediaUdpPortRange: [50000, 50100]` | **강제 불가**. GStreamer 1.22 `webrtcbin`에 포트 레인지 속성이 없다. 게다가 `webrtcbin.get_property("ice-agent")`는 **PyGObject에서 ICE 객체를 파괴한다**(읽는 행위가 부작용 — 이후 모든 협상이 `GST_IS_WEBRTC_ICE` assertion으로 사망). **읽지 말 것.** | **해소** — `mediaUdpPortRange.enforced=false`로 명문화(+ relay 토폴로지에선 인터넷 대면 포트는 momo-turn의 49152–65535라 무의미). "`ice-agent` 읽지 말 것"은 producer 주석·스펙에 각인 |
+| `momo-display-producer.service`(systemd 유닛) | `create-from-image` 템플릿에는 **systemd도 envd도 없고 이미지 CMD가 PID1**이다. 유닛 파일은 이 기재에서 실행되지 않는다 — 순서(X→producer)를 entrypoint로 옮겨야 한다. | **해소** — `.service` **삭제**, 순서를 `entrypoint.sh`로 이관, `Dockerfile` CMD = `momo-bootstrap-init -- entrypoint.sh`(PID1 수신기). 레포 랜딩 완료 |
+| `signalling.validateRoute` | 서버 부재로 **미검증**(stub 경로로만 왕복) | **여전히 미검증** — #1438은 `MOMO_DISPLAY_STUB_VALIDATE=1`로 미디어 도달성만 격리. 실서버 `validate` 결선은 LIVE-1..4 서버 몫(§9, `unverified.serverValidateWiring`) |
+| `ice.stun: []`, `ice.turn: null` | 실물 기본값과 일치. 결과적으로 후보가 **링크로컬뿐** → 브라우저 도달 불가 확정(§5.3) | **해소** — `ice.policy=relay` + `ice.turn.required=true`(oort momo-turn) + `network.iceBase`(라우팅 가능 base 주입)로 링크로컬 문제 우회. ADR-0165 **증보 2 초안**(성재 결재 대기) |
+
+**producer 자산은 이제 레포에 있다**(#1455 랜딩, track/engine): `infra/cubesandbox/display-template/`의 `Dockerfile`·`entrypoint.sh`·`momo-display-producer`·`template.spec.json`(specVersion 3) + PID1 수신기 `../bootstrap-init/momo-bootstrap-init`. **템플릿이 굽는 것은 레포에서 리뷰 가능해야 한다**는 원칙(`infra/workd/*.service`의 이유)이 충족됐다. `chore/1414-display-state-captures` 참조는 폐기.
 
 ---
 
@@ -391,6 +396,6 @@ envd init request failed: Post "http://192.168.0.7:49983/init": connection refus
 | 2 | **실인증서(TLS)** | 자체서명 임시. 실인증서는 패킷에서 "후속 명시"로 유보됨 |
 | 3 | **프록시의 capability 토큰 검증** | 미구현 — 현재 nginx는 무검증 통과이고 검증은 producer가 한다. 스파이크 §6-2가 지목한 "형상 A의 이점(클라이언트 IP 보존 지점에서 검증)"은 아직 미실현 |
 | 4 | **per-sandbox 라우팅** | 수동 결선(§6). 컨트롤플레인이 맵을 써야 함 |
-| 5 | **producer 미디어 실도달** | **미검증** — 시그널링까지만. 후보가 링크로컬뿐이라 **TURN(momo-turn) 없이는 구조적으로 불가**. LIVE-2 실화면 E2E는 goal B 산출물과 결선해야 열린다 |
-| 6 | **UDP 헤어핀 재측정** | §8-B. ACG UDP 규칙이 필요해 본 워커 범위 밖 |
+| 5 | **producer 미디어 실도달** | **✅ 해소(#1438)** — momo-turn relay로 외부 브라우저 실화면 도달(1280x720 H264 56프레임, relay↔relay, udp+tcp). 도달 요건은 **relay 강제 + 라우팅 가능 ICE base 주입**(링크로컬 root-cause, §8-B). ADR-0165 증보 2 초안. **잔여**: 실서버 `validate` 결선(#1438은 `STUB_VALIDATE`) · input delivery(LIVE-5) |
+| 6 | **UDP 헤어핀 재측정** | **비임계로 강등(#1438)** — momo-turn이 CubeSandbox 호스트와 **별도 공인 호스트**라 헤어핀은 배치 토폴로지에 불필요(동거 가설의 잔여 질문일 뿐). ACG UDP 규칙 신설은 동거를 시도할 때만 필요 |
 | 7 | **재부팅 생존** | **미시험**(콘솔 복구 수단 부재로 의도적 회피). 대신 `firewall-cmd --reload`로 근사 검증했고, 모든 유닛의 `enabled` 상태·NM zone·레지스트리 `restart=always`를 정적으로 확인했다 |

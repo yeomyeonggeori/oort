@@ -66,3 +66,33 @@ microVM↔호스트는 어느 방향으로도 UDP 경로가 없고(`deny_out`의
 
 ### 정정 노트 (2026-08-16, INFRA-A #1434 실측 — 결론 불변·근거 문장 정정)
 - D3-2의 근거 중 "호스트 공인 주소로도 헤어핀이 안 된다"는 **TCP에서 반증**됐다(전용 호스트 실측: microVM→호스트 공인 IP TLS/HTTP 왕복 성공 — 스파이크는 ACG 미개방 포트로 시험한 것이 원인 추정). **TURN이 실제로 요구하는 UDP 헤어핀은 미측정**이며, D3-1(NAT symmetric → srflx·relay 후보 부재)은 전용 호스트에서도 재확인됐다(후보=링크로컬뿐). 따라서 **"TURN=별도 전용 호스트" 결론은 유지**되고, UDP 헤어핀 재측정은 실기동 E2E(#1438)에 편입 — 측정 결과 동거가 성립해도 이미 발주·설치된 momo-turn이 정본 배치다(비용 소폭·격리 이점).
+
+---
+
+## 증보 2 (초안 — 성재 결재 대기) — D3 강화: TURN 결선만으론 relay 후보 0 — microVM link-local 때문에 **라우팅 가능 ICE base 주입**이 추가 요건 (2026-08-16, #1438 실기동 E2E)
+
+> Status: **Proposed (성재 결재 대기)**. 본 증보는 Accepted 본문·증보 1을 무접촉으로 두고 D3-1/D3-2를 강화한다. 승인 전까지 ICE base 주입 의무는 *제안*이지 확정 계약이 아니다.
+> 기안 2026-08-16. 실측 근거: **#1438 실기동 E2E**(정정본 아티팩트 = 본 랜딩) — momo-cube-host(101.79.18.230) + momo-turn(223.130.142.109)에서 **실제 microVM producer의 H264 화면이 공인 인터넷의 외부 브라우저에 도달**. 정본 교차: `infra/cubesandbox/display-template/template.spec.json` specVersion 3 `runtimeVerified` · `docs/runbooks/cubesandbox-host-install.md` §8-B.
+
+증보 1은 "relay가 유일한 ICE 경로 + TURN은 별도 공인 호스트"로 도달성 형상을 확정했다. #1438은 그 위에서 실화면 E2E를 완주하며 **relay 강제만으로는 부족하다**는 더 깊은 사실을 실측했다.
+
+### D3-1 강화. relay 강제(producer)만으로는 후보가 0 — 링크로컬 base에서 libnice가 디스커버리를 스케줄하지 않는다
+CubeSandbox microVM의 guest `eth0`는 **링크로컬 주소만** 갖는다(IPv4 `169.254.68.6/30`, IPv6 `fe80::`). TURN을 결선하고 microVM이 TURN에 도달 가능함에도(raw-socket STUN 왕복 응답 수신), **producer는 후보를 0개 방출한다**: libnice가 TURN을 *등록*은 하지만 링크로컬 base에서 STUN/TURN 후보 디스커버리를 **스케줄하지 않는다**(실측 로그 `Candidate gathering FINISHED, no scheduled items`). ⇒ 증보 1 D3-1의 "relay 강제(`iceTransportPolicy: relay`)"는 **필요하지만 불충분**하다. producer 층의 의무는 이제 두 가지다: (a) relay 강제(실패 확정 후보 수집 차단 — 증보 1 유지), (b) **템플릿이 라우팅 가능한 ICE base를 공급**(신설, 아래).
+
+### D3-1-base (신설). 템플릿은 부팅 시 라우팅 가능 RFC1918 주소를 `eth0`에 주입한다
+`entrypoint.sh`가 producer 기동 **전에** 라우팅 가능한 RFC1918 주소를 `eth0`에 추가한다(기본 `10.99.0.2/24` = `MOMO_ICE_BASE`, `iproute2` + microVM PID1이 보유한 `CAP_NET_ADMIN` 필요). libnice가 이를 base로 삼아 relay를 할당하고, CubeNet 게이트웨이가 그 흐름을 호스트 공인 IP로 MASQUERADE한다(실측: coturn이 microVM의 `ALLOCATE`를 성공으로 로깅, `typ relay` 후보 제공). 이 주소는 그 자체로 쓰이지 않는다 — 링크로컬 전용 posture를 벗어나기 위한 **base 제공**이 유일한 목적이다. 컨테이너의 동일 producer에는 불필요했다(이미 `172.17.x` RFC1918 보유) — 이것은 microVM 링크로컬 전용 posture에 **고유한** 요건이다. 이로써 `template.spec.json`의 `network.iceBase.required = true`·`template.requiresIproute2 = true`가 계약이 된다.
+
+### D3-2 확인. TURN = 별도 공인 호스트(momo-turn) — 실측 확정, 정정 노트의 "UDP 헤어핀 미측정"은 배치상 무의미화
+#1438은 relay 경로 자체를 실측 확정했다: coturn이 `ALLOCATE`+`CHANNEL_BIND` 성공을 **양측**에서 로깅 — producer(호스트 egress `101.79.18.230`) + browser(`39.115.69.188`), transport **`udp`·`tcp` 양쪽**. 협상된 미디어 후보쌍은 relay↔relay. **momo-turn을 별도 공인 호스트로 두는 증보 1 D3-2 결론은 유지되고 실측으로 확정된다.** 정정 노트(2026-08-16)가 남긴 "게스트→호스트 UDP 헤어핀 미측정"은 **momo-turn이 CubeSandbox 호스트와 별도 호스트이므로 배치 토폴로지에선 무의미**하다(헤어핀은 동거 가설의 잔여 질문일 뿐 — 비임계). ⇒ 헤어핀 재측정은 롤백 트리거가 아니다.
+
+### D3-turn. `ice.turn`: `null` → **required**(oort 운영分만 — 제3자 금지 유지)
+증보 1이 예고한 "TURN 도입 여부는 실측 후 증보"의 그 측정이 #1438이다. `template.spec.json` `ice.turn`은 `null`에서 `{required: true, operator: oort(momo-turn), transports: [udp, tcp]}`로 확정된다. 본문 D3의 **"제3자 TURN 금지"는 유지**(operator=oort 강제 — conformance가 `verify_display_attach.sh`에서 단정). 자격 배달은 envVars(#1437 수신기 → producer environ)로 `MOMO_DISPLAY_TURN_URI` 정적 long-term cred이며, **LIVE-5에서 per-session ephemeral로 교체**(범위 밖). `turn://` URI는 자격을 실어 producer가 **비로그**로 마스킹한다 — ADR-0004 교차.
+
+### 인접 증보와의 정합(중복 없음)
+본 증보는 ICE 층만 얹는다. **수신기 PID1**(create-time envVars 배달)은 **ADR-0156 증보 4**, **`:49983` 경계 판정**은 **ADR-0157 증보 2**가 이미 track/engine에 초안(둘 다 성재 결재 대기)으로 소유하며 본 증보는 이를 재정의하지 않는다. 자격 비유입은 ADR-0004(+증보 3).
+
+### Consequences
+- (+) LIVE-2 실화면 E2E의 마지막 결선이 실측으로 성립 — 증보 1이 남긴 "개방 조건"이 relay 경로에서 닫혔다.
+- (−) **템플릿에 신규 의무 2건**: `iproute2` rootfs 포함 + 부팅 시 ICE base 주입(`CAP_NET_ADMIN` — microVM PID1 보유로 충족). 컨테이너 배포엔 불요라 microVM 전용 분기다.
+- (−) ICE base `10.99.0.2/24`는 CubeNet/워크로드 대역과 무충돌이어야 한다(현재 `192.168.0.0/18`과 무충돌 실측 — 대역 변경 시 재확인 필요).
+- 잔여(미측정): **input delivery**(LIVE-3 control이 화면에 도달 — LIVE-5) · 실TLS 인증서(E2E는 자체서명) · 실서버 `validate` 결선(#1438은 `MOMO_DISPLAY_STUB_VALIDATE=1`로 미디어 도달성만 격리). 전부 `template.spec.json` `unverified`에 이름으로 남는다.
