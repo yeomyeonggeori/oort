@@ -772,6 +772,43 @@ describe('what the agent is doing, and whether you can turn things off', () => {
     expect({done: ink('SESSION-DONE')}).toEqual({done: lightPalette.textMuted});
   });
 
+  it('원장이 아니라 연속성 상태를 부른다 — 신호 없는 호스트는 여기서도 「호스트 응답 없음」 (#1503)', async () => {
+    // 이 카드는 `workSessionStatus` 로 원장을 그대로 읽던 **유일한** 자리였고,
+    // 나머지 다섯 표면은 `workSessionContinuityStatus` 를 지난다. 그 차이는 색이
+    // 아니라 문장으로 드러난다: 같은 세션을 작업 콘솔은 「호스트 응답 없음」이라
+    // 부르는데 이 카드만 「실행 중」이라 부르고, 그 아래에 「그 컴퓨터를 끄거나
+    // 앱을 닫으면」을 얹는다 — 이미 사라졌을 수도 있는 기계에 대해.
+    installFetch({
+      workHosts: () =>
+        jsonResponse(200, {
+          workHosts: WORK_HOSTS.map(host =>
+            host.id === 'HOST-APP' ? {...host, online: false} : host,
+          ),
+        }),
+    });
+    await openKimWork('light');
+    // 세션 목록은 등록기보다 먼저 온다 — 상태가 뒤집히는 것은 등록기가 도착한
+    // 뒤다(그때까지는 원장 그대로이고, 그것도 정직한 중간 상태다).
+    await waitFor(() =>
+      expect(screen.getByTestId('agent-session-SESSION-APP')).toHaveTextContent(
+        /호스트 응답 없음/,
+      ),
+    );
+    const row = screen.getByTestId('agent-session-SESSION-APP');
+    expect(row).not.toHaveTextContent(/실행 중/);
+    // 그리고 그 낱말은 코어 표대로 중립을 입는다(강조는 고아 세션 하나뿐).
+    const label = within(
+      screen.getByTestId('agent-session-status-SESSION-APP'),
+    ).getByText(/./);
+    expect(String(StyleSheet.flatten(label.props.style).color)).toBe(
+      lightPalette.textMuted,
+    );
+    // 같은 등록기를 읽는 클라우드 행은 움직이지 않는다 — 호스트별 판정이다.
+    expect(screen.getByTestId('agent-session-SESSION-CLOUD')).toHaveTextContent(
+      /실행 중/,
+    );
+  });
+
   it('refuses to answer it when the host registry is not readable', async () => {
     // A session row carries only `hostId`. Without the registry there is no tier
     // to show, and guessing "계속 됩니다" is how someone shuts a laptop on a
@@ -785,6 +822,15 @@ describe('what the agent is doing, and whether you can turn things off', () => {
     );
     expect(screen.getByTestId('agent-session-SESSION-APP')).toHaveTextContent(
       /실행 위치 확인 필요/,
+    );
+    // 그리고 상태는 **원장 그대로**다. 「못 읽었다」와 「오프라인이다」는 다른
+    // 사실이고, 못 읽은 것을 응답 없음으로 부르면 이 화면이 등록기의 침묵을
+    // 호스트의 침묵으로 옮겨 적는다 (`workHostOnline` 이 그래서 `null` 을 답한다).
+    expect(screen.getByTestId('agent-session-SESSION-APP')).toHaveTextContent(
+      /실행 중/,
+    );
+    expect(screen.getByTestId('agent-session-SESSION-APP')).not.toHaveTextContent(
+      /호스트 응답 없음/,
     );
   });
 

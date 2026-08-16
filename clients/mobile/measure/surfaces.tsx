@@ -78,6 +78,7 @@ import WorkSessionDetailScreen from '../src/screens/WorkSessionDetailScreen';
 import {SessionRow} from '../src/screens/AgentDetailScreen';
 import {WorkStatusBadge} from '../src/features/work/WorkSessionParts';
 import {
+  workSessionContinuityStatus,
   workSessionStatus,
   type WorkSessionStatus,
 } from '@momo/core/features/work/workSessionModel';
@@ -2384,13 +2385,26 @@ function agentDetailSession(over: Partial<WorkSession> & {id: string}): WorkSess
   };
 }
 
-/** 이 화면이 실제로 낼 수 있는 네 갈래. 제목 하나는 알약을 밀어낼 만큼 길다. */
+/**
+ * 이 화면이 실제로 낼 수 있는 갈래들. 제목 하나는 알약을 밀어낼 만큼 길다.
+ *
+ * 둘째 행이 **도는 클라우드 세션**인 것은 리뷰가 지목한 자리다(M-1): 첫 행은 알약도
+ * 앰버(실행 중)고 아래 문장도 앰버(「그 컴퓨터를 끄거나…」 — `atRisk`)라 한 카드에
+ * 앰버가 둘이고, 둘째 행은 알약만 앰버이고 문장은 중립이다. 두 장이 나란히 서야
+ * 「어느 앰버가 무엇을 벌었는가」를 사람이 볼 수 있다.
+ */
 const AGENT_DETAIL_SESSIONS: WorkSession[] = [
   agentDetailSession({
     id: 'measure-agent-running',
     hostId: 'host-mac',
     tool: 'codex-app-server',
     label: '릴레이 재시작과 장애 복구 절차를 배포 전에 끝까지 검증하는 작업',
+  }),
+  agentDetailSession({
+    id: 'measure-agent-running-cloud',
+    label: '야간 배치',
+    tool: 'claude',
+    startedAtMs: NOW - 1_200_000,
   }),
   agentDetailSession({
     id: 'measure-agent-idle',
@@ -2418,14 +2432,19 @@ const AGENT_DETAIL_SESSIONS: WorkSession[] = [
 ];
 
 /**
- * 코어 역할표의 여섯 칸을 낱말과 함께. 낱말은 `workSessionStatus` 가 내는 것을
- * 그대로 쓰고, 이 함수가 내지 않는 `unavailable` 은 `workSessionContinuityStatus`
- * 의 낱말을 쓴다 — 사진이 카피를 새로 짓지 않는다.
+ * 코어 역할표의 여섯 칸을 낱말과 함께. **낱말을 하나도 손으로 적지 않는다** — 여섯
+ * 칸 전부가 코어 함수의 반환값이다. `unavailable` 은 `workSessionStatus` 가 내지
+ * 않는 키라 원장이 그것을 만드는 조건(도는 세션 + 신호 없는 호스트)을 그대로 세워
+ * `workSessionContinuityStatus` 에게 묻는다. 사본을 두면 코어가 낱말을 고친 날
+ * 이 사진만 옛말을 하고, 그때 초록이 아니라 **캡션이** 거짓말을 한다.
  */
 const AGENT_DETAIL_STATUS: WorkSessionStatus[] = [
   workSessionStatus({status: 'running', exitCode: undefined}),
   workSessionStatus({status: 'idle', exitCode: undefined}),
-  {key: 'unavailable', label: '호스트 응답 없음'},
+  workSessionContinuityStatus(
+    agentDetailSession({id: 'measure-agent-silent', hostId: 'host-silent'}),
+    [{...AGENT_DETAIL_HOSTS[1], id: 'host-silent', online: false}],
+  ),
   workSessionStatus({status: 'orphaned', exitCode: undefined}),
   workSessionStatus({status: 'ended', exitCode: undefined}),
   workSessionStatus({status: 'wat', exitCode: undefined}),

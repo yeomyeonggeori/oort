@@ -21,7 +21,10 @@ import {
 } from '@momo/core/features/agents/hubModel';
 import {channelPlacement} from '@momo/core/features/agents/channelPlacement';
 import {isSurfaceProvided} from '@momo/core/features/capabilities/serverSurfaces';
-import {sortSessions, workSessionStatus} from '@momo/core/features/work/workSessionModel';
+import {
+  sortSessions,
+  workSessionContinuityStatus,
+} from '@momo/core/features/work/workSessionModel';
 import {workExecutionLocation} from '@momo/core/features/work/workLocation';
 import {attachParticle} from '@momo/core/lib/koreanParticle';
 import {channelLabel} from '@momo/core/features/workspace/directory';
@@ -442,6 +445,26 @@ function PauseControl({
  * 것**이다. 값을 맞추면 다음에 코어가 움직이는 날 다시 갈라지고, 컴포넌트를 지나면
  * 갈라질 표가 없다. 폰의 수명주기 색은 이제 `WorkStatusBadge` 한 곳에서만 나온다.
  *
+ * 색과 함께 **상태를 뽑는 함수**도 같은 것으로 맞췄다(design-review High-1). 이 행은
+ * `workSessionStatus` 로 원장을 그대로 읽던 유일한 자리였고, 나머지 다섯(폰의
+ * `WorkConsoleScreen`·`WorkSessionDetailScreen`, 웹의 `WorkPanel`·`WorkSessionDetail`·
+ * `WorkConsoleRoute`)은 전부 `workSessionContinuityStatus` 를 지난다. 그 차이는 색이
+ * 아니라 **문장**으로 드러났다: 등록기가 최근 신호를 못 본 호스트의 running 세션을
+ * 작업 콘솔은 「호스트 응답 없음」이라 부르는데 이 카드만 「실행 중」이라 부르고,
+ * 게다가 그 아래에 「그 컴퓨터를 끄거나 앱을 닫으면 이 작업도 멈춥니다」를 얹었다 —
+ * 이미 사라졌을 수도 있는 기계에 대해. 등록기를 못 읽는 경우는 여전히 원장 그대로다
+ * (`workHostOnline` 이 그때 `null` 을 답하고 `=== false` 만 상태를 바꾼다): 「못
+ * 읽었다」와 「오프라인이다」는 다른 사실이다.
+ *
+ * 그리고 칩이 **어느 줄에 서는가**도 같은 물음의 일부였다(design-review High-2).
+ * 처음 판은 칩을 제목과 한 줄에(`sessionHead`) 뒀는데, 그 줄은 접히지 않고 칩은
+ * 줄어들지 않으므로(Yoga 기본 `flexShrink: 0`) 자라는 것은 언제나 칩이고 줄어드는
+ * 것은 언제나 `flex: 1` 인 제목이다. 큰 접근성 글자에서 「호스트 연결 끊김」이 세 배로
+ * 자라면 제목에 남는 것은 한두 글자다(AX-XXL 캡처에서 제목이 「릴레이 재…」로 줄었다).
+ * 두 자매 표면은 이미 답을 갖고 있었다 — 칩은 제목 **아래**의 접히는 줄
+ * (`badgeLine`)에 선다. 같은 컴포넌트가 세 표면에서 두 문법으로 서면 그건 공유가
+ * 아니라 복제다. 대가는 행 높이이고(칩 줄 하나), 그 대신 제목이 폭을 온전히 갖는다.
+ *
  * `export` 는 측정 하네스(`measure/surfaces.tsx`)를 위한 것이다 — 사진이 배송되는
  * 컴포넌트를 찍어야지 하네스가 다시 그린 닮은 것을 찍으면 증거가 아니다. 화면들이
  * `SearchScreen` 의 `ResultRow`·`SearchBody` 에 이미 쓰는 방식 그대로다.
@@ -454,7 +477,7 @@ export function SessionRow({
   hosts: Parameters<typeof sessionSurvival>[1];
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
-  const status = workSessionStatus(session);
+  const status = workSessionContinuityStatus(session, hosts);
   const survival = sessionSurvival(session, hosts);
   const location = workExecutionLocation(session, hosts);
   return (
@@ -466,10 +489,10 @@ export function SessionRow({
       accessible
       accessibilityLabel={`${session.label}, ${status.label}, ${location.label}. ${survival.sentence}`}
       testID={`agent-session-${session.id}`}>
-      <View style={styles.sessionHead}>
-        <Text style={styles.sessionLabel} numberOfLines={1} ellipsizeMode="tail">
-          {session.label}
-        </Text>
+      <Text style={styles.sessionLabel} numberOfLines={2} ellipsizeMode="tail">
+        {session.label}
+      </Text>
+      <View style={styles.badgeLine}>
         <WorkStatusBadge
           status={status}
           testID={`agent-session-status-${session.id}`}
@@ -559,13 +582,15 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     backgroundColor: color.surface,
     gap: space.xs,
   },
-  sessionHead: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: space.sm,
-  },
-  sessionLabel: {fontSize: font.label, color: color.text, fontWeight: '600', flex: 1},
+  /**
+   * 칩이 서는 줄. `WorkConsoleScreen`·`WorkSessionDetailScreen` 의 같은 이름 같은
+   * 값이다 — 한 컴포넌트가 세 표면에서 **한 문법**으로 서야 한다(design-review
+   * High-2). 접히는 줄인 것이 요점이다: 큰 접근성 글자에서 「호스트 연결 끊김」은
+   * 세 배로 자라는데, 제목과 한 줄에 두면 자라는 쪽이 제목을 먹는다(줄이지 않는
+   * 것이 Yoga 의 기본이고, 줄어드는 쪽은 언제나 `flex: 1` 인 제목이다).
+   */
+  badgeLine: {flexDirection: 'row', flexWrap: 'wrap', gap: space.xs},
+  sessionLabel: {fontSize: font.label, color: color.text, fontWeight: '600'},
   survivalWarn: {color: color.warn},
   footnote: {
     marginHorizontal: SAFE_GUTTER,

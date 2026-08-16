@@ -270,4 +270,29 @@ describe('세션 상태를 칠하는 표는 폰에 하나뿐이다 (#1503)', () 
     // (그리고 그 스타일의 색이 `color.ok` 였다).
     expect(AGENT_DETAIL).not.toMatch(/status\.key\s*===/);
   });
+
+  it('세 표면이 그 칩을 **같은 문법**으로 세운다 — 접히는 줄 (#1503 High-2)', () => {
+    // 같은 컴포넌트를 두 배치 문법으로 쓰면 그건 공유가 아니라 복제다. 접히는
+    // 줄인 것이 요점이고(칩은 줄지 않고 제목만 준다 — Yoga 기본 `flexShrink: 0`),
+    // 큰 접근성 글자에서 「호스트 연결 끊김」이 세 배가 되는 자리가 그 차이를
+    // 만든다. 값이 아니라 **셋이 같은가**를 재므로, 다음 사람이 문법을 바꾸면
+    // 세 곳을 함께 바꾸거나 여기서 걸린다.
+    const surfaces = [
+      'screens/AgentDetailScreen.tsx',
+      'screens/WorkConsoleScreen.tsx',
+      'screens/WorkSessionDetailScreen.tsx',
+    ].map(rel => ({
+      rel,
+      source: fs.readFileSync(path.join(__dirname, '../src', rel), 'utf8'),
+    }));
+    for (const {rel, source} of surfaces) {
+      expect({rel, badge: source.includes('<WorkStatusBadge')}).toEqual({
+        rel,
+        badge: true,
+      });
+      expect({rel, line: /badgeLine:\s*\{[^}]*flexWrap:\s*'wrap'/.test(source)}).toEqual(
+        {rel, line: true},
+      );
+    }
+  });
 });
