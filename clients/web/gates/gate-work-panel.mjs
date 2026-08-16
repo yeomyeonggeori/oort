@@ -38,6 +38,8 @@
 //     expected failure: "the mention affordance is still in the box"
 //   WORK_PANEL_GATE_PROVE_RED_KEEPALL=1 npm run gate:work-panel
 //     expected failure: "may break inside a word"
+//   WORK_PANEL_GATE_PROVE_RED_RULER=1 npm run gate:work-panel
+//     expected failure: "The probe measured with a STALE font"
 //   WORK_PANEL_GATE_PROVE_RED_THREAD=1 npm run gate:work-panel
 //     expected failure: "the channel composer was squeezed to 26px"
 //   WORK_PANEL_GATE_PROVE_RED_THREAD_INERT=1 npm run gate:work-panel
@@ -54,6 +56,8 @@
 // 수리 후 화면에 서는 짧은 문장은 클램프를 벗겨도 넘칠 것이 없어서, 옛 렌더는
 // 「옛 문자열 + 옛 클램프」 둘 다여야 한다. THREAD도 같은 방식으로 스레드 패널의
 // 문턱을 600px로 되돌리고, THREAD_INERT는 드라이버가 `inert` 속성만 떼어 낸다.
+// RULER는 프로브의 글자 크기를 `!important`로 못 박아(작성자 선언이 인라인을
+// 이긴다) 「효과에서 한 번만 복사한 자」를 그 자리에 되돌린다.
 // 제품 소스 줄을 지우거나 단언을 빼라고 요구하지 않으므로 증명은 반복 가능하다.
 
 import { spawn } from "node:child_process";
@@ -85,6 +89,7 @@ const proveRedThreadInert =
   process.env.WORK_PANEL_GATE_PROVE_RED_THREAD_INERT === "1";
 const proveRedClause = process.env.WORK_PANEL_GATE_PROVE_RED_CLAUSE === "1";
 const proveRedKeepAll = process.env.WORK_PANEL_GATE_PROVE_RED_KEEPALL === "1";
+const proveRedRuler = process.env.WORK_PANEL_GATE_PROVE_RED_RULER === "1";
 
 /**
  * 플레이스홀더의 뒷절 (#1422). **코어에서 읽는다.**
@@ -1143,6 +1148,26 @@ async function exerciseWorkPaneCoOpen(browser, width) {
       `work-pane-${width}: the whole sentence still fits on one line here (${geometry.wholeSentenceLines}); the clause and overflow assertions below prove nothing at this width`
     );
   }
+  // 이 줄이 #1422 체제에서도 **살아 있는** 단언인가 — 독립 리뷰가 죽었다고 봤고,
+  // 그래서 현 HEAD 에서 두 seam 을 따로 돌려 재 봤다(900px, 픽스처 `release-2026-08`):
+  //
+  //   green                     빈 상자 39/39px · 플레이스홀더 1줄
+  //   PROVE_RED_CLAUSE=1        빈 상자 39/39px · 플레이스홀더 2줄  <- 이 줄은 안 문다
+  //   PROVE_RED_PLACEHOLDER=1   빈 상자 **62/39px**                <- 이 줄이 문다
+  //
+  // 즉 두 seam 은 서로 다른 것을 재고 각자 자기 단언을 붉힌다. 「런타임 fit 이 절을
+  // 먼저 버리니 클램프를 지워도 넘칠 것이 없다」는 논증이 놓친 것은 위 1017 줄이다 —
+  // `PLACEHOLDER` 는 클램프만 벗기지 않고 `CLAUSE` 의 문자열 복원을 **함께** 한다.
+  // 옛 렌더는 「옛 문자열 + 옛 클램프」 둘 다이고, 62/39 는 #1418 이 수리 전 소스로
+  // 적어 둔 그 숫자 그대로다.
+  //
+  // 두 번째 논거였던 「빈 값의 scrollHeight 는 플레이스홀더를 세지 않는다」는
+  // **거짓**이다. 위 62/39 가 그것을 잰다: 클램프를 벗긴 2줄 플레이스홀더는 빈
+  // textarea 의 scrollHeight 를 한 줄만큼 늘린다(39 -> 62). 그 문장은 #1384 머리말이
+  // 가정으로 적었다가 #1413 Low(글리프 반노출)로 반증된 것이고, 오늘 그것이 참으로
+  // 보이는 이유는 성질이 아니라 **이 클램프가 서 있기 때문**이다. 그러니 이 단언은
+  // 클램프의 마지막 방어선을 지키는 자리이고, 지우면 그 방어선이 말없이 사라진다.
+  // (코어 머리말의 그 문장은 #1422 수리 회전에서 실측으로 고쳤다.)
   if (geometry.scrollHeight > geometry.clientHeight) {
     throw new Error(
       `work-pane-${width}: the empty composer overflows its own box (${geometry.scrollHeight} > ${geometry.clientHeight}px). The wrapped placeholder line is not gone, it is peeking through the bottom padding as half-drawn glyphs; the approved trade-off (#1384) was losing the clause, not showing half of it (tokens.css composer-placeholder).`
@@ -1498,6 +1523,175 @@ async function exerciseHeadClauseBand(browser, width) {
 }
 
 /**
+ * 자가 늙지 않는가 — 글자가 커진 뒤의 재판정 (#1422 수리 회전 M1).
+ *
+ * 위 두 함수는 **상자가 좁아질 때** 계약이 도는지를 잰다. 자를 움직이는 축은
+ * 그것 하나가 아니다: 같은 상자에서 **글자가 커져도** 같은 문장이 안 든다.
+ * 루트 `font-size`(rem)·브라우저 기본 글자 크기·늦게 푸는 글꼴 폴백이 그 축이고,
+ * 그 축은 `placeholderFit.ts` 의 효과 의존성(`ref`·`clauses`·`full`)에 **없다**.
+ *
+ * 앞 판은 프로브의 글자꼴을 효과 몸통에서 한 번만 복사했다. 그러면 폭이 아니라
+ * 글자가 움직인 판에서 `ResizeObserver` 는 (상자 높이가 함께 움직이므로) 콜백까지
+ * 오는데 자만 옛 글자로 남고, 틀리는 방향이 하필 낙관이다 — 안 드는 절을 "든다"고
+ * 답해 상자에 남긴다. 그것이 #1422 가 지운 바로 그 렌더이므로 이 레인이 있다.
+ *
+ * 넓게 열고 **좁히는** 순서인 이유는 실측이다: 글자만 커지는 사건은 이 컴포넌트를
+ * 깨우지 못한다. 입력창의 높이는 `useAutoGrow` 가 인라인 px 로 못 박고 그 훅은
+ * `value` 가 바뀔 때만 다시 도므로, 루트 글자를 키워도 상자의 두 변이 **하나도**
+ * 안 움직이고 `ResizeObserver` 는 30초를 기다려도 안 깬다(첫 판 실측: 높이 39px
+ * 불변, waitForFunction 타임아웃). 그러니 자가 늙는 것이 화면에 나오는 순간은
+ * 「글자가 커진 뒤에 폭이 움직일 때」이고 — 창을 줄이거나 pane 을 열 때 — 이
+ * 레인이 세우는 것이 정확히 그 순서다.
+ *
+ * (그래서 이 레인이 **안 닫는** 것도 적어 둔다: 글자만 바뀌고 폭이 안 바뀌는
+ * 판에서는 문장이 아예 다시 골라지지 않는다. 그것은 자의 결함이 아니라 계기의
+ * 결함이라 고칠 자리도 다르다 — 관찰 대상에 글자 축을 더하는 결정이고, 그 결정은
+ * 이 회전의 범위가 아니다.)
+ *
+ * 1280 -> 980 인 이유: 1280 은 base 에서 문장 전체가 넉넉히 드는 폭이고(그래서
+ * 「사라졌다」의 출발점이 광고가 선 화면이다), 980 은 키운 글자로 문장 전체가 안
+ * 드는 첫 띠이면서 머리 절은 아직 드는 폭이다. 900 은 base 에서 이미 안 드는 폭이라
+ * 이 축을 못 잰다.
+ *
+ * 넷을 잰다:
+ *   1. base 에서 광고가 서 있다 — 안 그러면 아래 「사라졌다」가 아무것도 안 잰다.
+ *   2. 키운 글자에서 이 폭이 정말 그 띠인가 — 문장 전체는 안 들고
+ *   3. 머리 절은 든다(안 그러면 여기는 `exerciseHeadClauseBand` 의 띠다).
+ *   4. 그 폭에서 광고가 통째로 사라졌다 — 자가 새 글자로 다시 쟀다는 뜻이다.
+ */
+async function exerciseProbeRuler(browser, wideWidth, width) {
+  const context = await browser.newContext({
+    viewport: { width: wideWidth, height: 800 },
+    reducedMotion: "reduce",
+  });
+  const page = await context.newPage();
+  await installRealtimeSocket(page);
+  await installRoutes(context, CO_OPEN_SCENARIO);
+  await login(page);
+  await page.getByTestId("open-work-panel").click();
+  await page.getByTestId("work-panel").waitFor();
+  await settlePlaceholder(page);
+
+  const before = await page.evaluate(() => {
+    const input = document.getElementById("composer-input");
+    return {
+      placeholderText: input.getAttribute("placeholder") ?? "",
+      fontSize: getComputedStyle(input).fontSize,
+      composerWidth: input.clientWidth,
+    };
+  });
+
+  // red seam: 제품 소스를 지우지 않고 **프로브의 글자만 옛 값에 못 박는다**.
+  // 작성자 스타일시트의 `!important` 는 인라인 선언을 이기므로, 이 한 줄이 곧
+  // 「효과에서 한 번만 복사한 자」다 — recompute 는 여전히 돌고, 답만 옛 글자로
+  // 나온다. 수리 이전의 코드가 내던 그 답이다.
+  if (proveRedRuler) {
+    await page.addStyleTag({
+      content: `.text-probe { font-size: ${before.fontSize} !important; }`,
+    });
+  }
+
+  // 글자를 한 단 키운다. 상자는 안 커진다 — 이 레포의 간격 토큰은 전부 px 이고
+  // 글자 토큰만 rem 이다(tokens.css). 그래서 이것이 「같은 상자, 큰 글자」다.
+  await page.addStyleTag({ content: ":root { font-size: 20px; }" });
+  // 그리고 **폭**을 움직인다. 이것이 위 머리말이 적은 그 순서다: 자를 늙게 한
+  // 사건과 자를 쓰게 하는 사건이 따로 온다.
+  await page.setViewportSize({ width, height: 800 });
+  // 자가 다시 잴 **기회**를 기다린다. 기다리는 것은 답이 아니라 상자다.
+  // 「짧아졌는가」를 기다리면 아래 단언이 자기가 기다린 것을 다시 확인할 뿐이다.
+  await page.waitForFunction(
+    (previous) => {
+      const input = document.getElementById("composer-input");
+      return input !== null && input.clientWidth !== previous;
+    },
+    before.composerWidth
+  );
+  await settlePlaceholder(page);
+
+  const geometry = await page.evaluate(
+    ([joiner, affordance]) => {
+      const input = document.getElementById("composer-input");
+      const styles = getComputedStyle(input);
+      const available =
+        input.clientWidth -
+        Number.parseFloat(styles.paddingLeft) -
+        Number.parseFloat(styles.paddingRight);
+      const rendered = input.getAttribute("placeholder") ?? "";
+
+      // 지금 글자로 잰 한 줄 폭. `text-probe` 를 **안 쓰는** 것이 중요하다 —
+      // red seam 이 못 박는 것이 그 클래스라, 이 프로브가 그것을 쓰면 심판이
+      // 피고와 같은 자를 든다.
+      const probe = document.createElement("span");
+      for (const property of [
+        "fontFamily",
+        "fontSize",
+        "fontStretch",
+        "fontStyle",
+        "fontVariant",
+        "fontWeight",
+        "letterSpacing",
+        "textTransform",
+        "wordSpacing",
+      ]) {
+        probe.style[property] = styles[property];
+      }
+      probe.style.whiteSpace = "pre";
+      probe.style.position = "fixed";
+      probe.style.visibility = "hidden";
+      document.body.appendChild(probe);
+      const widthOf = (text) => {
+        probe.textContent = text;
+        return probe.getBoundingClientRect().width;
+      };
+      const head = rendered.includes(affordance)
+        ? rendered.slice(0, rendered.indexOf(`${joiner}${affordance}`))
+        : rendered;
+      const headWidth = widthOf(head);
+      const wholeWidth = widthOf(`${head}${joiner}${affordance}`);
+      probe.remove();
+
+      return {
+        placeholderText: rendered,
+        fontSize: styles.fontSize,
+        available: Math.round(available),
+        headWidth: Math.round(headWidth),
+        wholeWidth: Math.round(wholeWidth),
+      };
+    },
+    [PLACEHOLDER_JOINER, MENTION_AFFORDANCE]
+  );
+
+  console.log(
+    `[probe-ruler] ${wideWidth} -> ${width}px 창, 글자 ${before.fontSize} -> ${geometry.fontSize} · ` +
+      `글 ${geometry.available}px · 머리 절 ${geometry.headWidth}px · ` +
+      `문장 전체 ${geometry.wholeWidth}px "${geometry.placeholderText}"`
+  );
+
+  if (!before.placeholderText.includes(MENTION_AFFORDANCE)) {
+    throw new Error(
+      `probe-ruler-${width}: the affordance was already gone at the base font size ("${before.placeholderText}"), so "it disappeared after the font grew" measures nothing here. Widen the window.`
+    );
+  }
+  if (geometry.wholeWidth <= geometry.available) {
+    throw new Error(
+      `probe-ruler-${width}: the whole sentence still fits after the font grew (${geometry.wholeWidth} <= ${geometry.available}px); this lane is not standing in the band it names. Raise the root font-size or narrow the window.`
+    );
+  }
+  if (geometry.headWidth > geometry.available) {
+    throw new Error(
+      `probe-ruler-${width}: even the head clause no longer fits (${geometry.headWidth} > ${geometry.available}px), so this is the head-clause band, not the clause-dropping band. Lower the root font-size or widen the window.`
+    );
+  }
+  if (geometry.placeholderText.includes(MENTION_AFFORDANCE)) {
+    throw new Error(
+      `probe-ruler-${width}: the affordance survived a box it no longer fits after the font grew ("${geometry.placeholderText}", ${geometry.wholeWidth} > ${geometry.available}px). The probe measured with a STALE font: placeholderFit.ts must re-copy PROBE_PROPERTIES on every recompute, not once per effect — the box moved the ruler, and rem/base-font changes are not in that effect's deps.`
+    );
+  }
+
+  await context.close();
+}
+
+/**
  * 절 단위 생략의 리뷰용 스크린샷 (#1422). 판정하지 않는다.
  *
  * 세 폭이 한 규칙의 세 얼굴이다: **390** 은 폰 폭이라 긴 방 이름에서 광고가
@@ -1617,6 +1811,10 @@ async function main() {
       // 절 단위 생략이 손을 뗀 띠 (#1422 design-review H1). 같은 900px 판에서
       // 방 이름만 넉 자 길다.
       await exerciseHeadClauseBand(browser, 900);
+      // 자를 움직이는 다른 축 — 같은 상자, 큰 글자 (#1422 수리 회전 M1). 1280 에서
+      // 글자를 키운 뒤 980 으로 좁힌다: 자를 늙게 하는 사건과 자를 쓰게 하는
+      // 사건이 따로 오는 그 순서가 이 결함이 화면에 나오는 순서다.
+      await exerciseProbeRuler(browser, 1280, 980);
       // 문턱 아래의 스레드 패널 (#1421). 600 과 899 는 구간의 양 끝이고, 700 은
       // 티켓이 인용한 실측(컴포저 36px)이 난 폭이다. 양 끝만 재면 그 사이에서
       // 무엇이 달라지는지 아무도 모르고, 가운데만 재면 경계가 어디였는지 모른다.
@@ -1665,6 +1863,13 @@ async function main() {
   console.log(
     "           line, while at 1280px the same box still carries it."
   );
+  console.log(
+    "           The ruler does not age either: with the root font a step larger"
+  );
+  console.log(
+    "           and the window then narrowed, the same box drops the clause it"
+  );
+  console.log("           no longer fits.");
   console.log(
     "           Below 900px the thread pane covers the channel instead of"
   );

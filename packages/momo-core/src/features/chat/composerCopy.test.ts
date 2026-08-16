@@ -117,9 +117,14 @@ describe("빈 컴포저의 광고 (#1384)", () => {
   });
 
   it("두 클라의 상자를 **둘 다** 넘지 않는다 — 한 문장이 두 화면에 선다", () => {
-    // textarea 는 rows=1 이고 빈 값의 scrollHeight 는 플레이스홀더를 세지 않는다.
-    // 즉 넘친 둘째 줄은 접히는 것이 아니라 **잘린다**(디자인 시스템 §5.3 7위:
-    // 의존형태소 절단, 기계가 안 잡는 축). 폰의 multiline TextInput 도 같다.
+    // 웹 textarea 는 rows=1 이고 상자 높이는 `value` 가 바뀔 때만 다시 잡히므로
+    // (`useAutoGrow`), 빈 컴포저에서 넘친 둘째 줄은 접히는 것이 아니라 상자 밖으로
+    // **잘린다**(디자인 시스템 §5.3 7위: 의존형태소 절단, 기계가 안 잡는 축).
+    // 폰의 multiline TextInput 은 **다르다** — 콘텐츠 높이로 자라 둘째 줄이 상자
+    // 안에 선다(`composerCopy.ts` 의 「폰은 왜 이 규칙을 안 부르나」). 그래도 폰
+    // 예산을 여기서 함께 재는 이유는 잘림이 아니라 **한 문장을 두 화면이 함께
+    // 쓴다**는 것이다: 이 광고가 한 마디 길어지면 폰에서는 잘리는 대신 상자가
+    // 커지고, 그것도 승인받지 않은 변화다.
     for (const { surface, fontPx, boxPx } of BUDGETS) {
       const adopted = composerPlaceholder("일반", "place");
       expect(
@@ -317,16 +322,29 @@ describe("플레이스홀더는 절 단위로 접힌다 (#1422)", () => {
   });
 
   it("#1418 의 판: 900px 창의 236px 상자에서 광고가 통째로 사라진다", () => {
-    // 게이트 픽스처의 방 이름으로, 두 예산 상자 그대로. 접히는 것이 아니라
+    // 게이트 픽스처의 방 이름으로, **웹 예산 상자** 그대로. 접히는 것이 아니라
     // **없어지는** 것이 승인된 트레이드오프였다.
-    for (const { surface, fontPx, boxPx } of BUDGETS) {
-      const clauses = composerPlaceholderClauses("release-2026-08", "place");
-      const fitted = fitComposerPlaceholder(clauses, fitsIn(boxPx, fontPx));
-      expect(fitted, `${surface}: 넘치는 판에서 뒷절이 안 사라졌다`).toBe(
-        "release-2026-08에 메시지 보내기"
-      );
-      expect(fitted).not.toContain(MENTION_AFFORDANCE);
-    }
+    //
+    // 왜 여기만 웹인가 (#1422 수리 회전 L1). 앞 판은 이 단정을 `BUDGETS` 로 돌려
+    // 폰 260 예산에서도 「뒷절을 버려야 한다」고 적고 있었다. 그것은 이 티켓이
+    // **기각한** 설계다: 폰은 이 규칙을 런타임에 안 부른다(`composerCopy.ts` 의
+    // 「폰은 왜 이 규칙을 안 부르나 — 재고 나서 안 붙였다」). RN 의 multiline
+    // TextInput 은 콘텐츠 높이로 자라 둘째 줄이 상자 안에 서므로, 거기서 절을
+    // 버리면 화면이 보여 줄 수 있는 것을 스스로 지운다. 테스트가 그 단정을 계속
+    // 들고 있으면 다음 사람이 「폰이 계약을 안 지킨다」로 읽고 기각된 설계를
+    // 되살린다 — 판정이 둘이 되는 자리다.
+    //
+    // 규칙 자체가 자를 안 가린다는 것(= 어떤 자를 대도 절 경계에서 끝난다)은
+    // 위 「어느 폭에서도 절 한가운데서 끊기지 않는다」가 두 예산의 글자 크기로
+    // 이미 전수로 잰다. 그래서 여기서 잃는 것도 없다.
+    const web = BUDGETS.find((budget) => budget.surface === "웹");
+    if (web === undefined) throw new Error("웹 예산이 BUDGETS 에서 사라졌다");
+    const clauses = composerPlaceholderClauses("release-2026-08", "place");
+    const fitted = fitComposerPlaceholder(clauses, fitsIn(web.boxPx, web.fontPx));
+    expect(fitted, "웹: 넘치는 판에서 뒷절이 안 사라졌다").toBe(
+      "release-2026-08에 메시지 보내기"
+    );
+    expect(fitted).not.toContain(MENTION_AFFORDANCE);
   });
 
   it("드는 폭에서는 광고를 지우지 않는다 — 이 규칙은 한쪽으로만 실수할 수 없다", () => {
