@@ -3,14 +3,25 @@ import {makeStressRoster} from '@momo/core/features/timeline/stress';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
 import type {SearchPhase} from '@momo/core/features/search/searchModel';
 import React from 'react';
-import {LogBox, StyleSheet, Text, View} from 'react-native';
+import {
+  LogBox,
+  StyleSheet,
+  Text,
+  TextInput,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 import type {Member} from '@momo/core/lib/api';
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
 import {SafeAreaProvider} from 'react-native-safe-area-context';
 import {SessionProvider} from '../src/session/useSession';
 import {quoteDraftFor, type QuoteBlock as QuoteBlockModel} from '@momo/core/features/timeline/quote';
 import {typingSegments} from '@momo/core/features/chat/typing';
-import {Composer} from '../src/features/conversation/Composer';
+import {
+  Composer,
+  composerMaxHeight,
+  withLatinWordBreaks,
+} from '../src/features/conversation/Composer';
 import {saveDraft} from '../src/features/conversation/drafts';
 import {MessageActionSheet} from '../src/features/conversation/MessageActionSheet';
 import {PinListPanel} from '../src/features/conversation/PinListPanel';
@@ -673,6 +684,97 @@ function PlaceholderProbe(): React.JSX.Element {
             ).join(' · ')}
         </Text>
       ))}
+    </View>
+  );
+}
+
+// ---- #1443 (#1422 이월): 상한이 글자 크기를 따라가는가 -----------------------
+
+/** 성장 계측이 쓰는 방 이름. 라틴 토큰이 든 이름이라 두 축을 한 장에 담는다. */
+const GROWTH_LABEL = 'release-2026-08';
+
+/** 다섯 줄짜리 **사람이 친 글**. 상한이 걸리는 자리를 사진이 보여 준다. */
+const GROWTH_DRAFT =
+  '금요일 배포 건입니다.\n릴레이를 먼저 재시작하고\n그다음 워커를 올립니다.\n로그는 이 방에 남기고\n확인되면 알려 주세요.';
+
+/**
+ * 계측이 실제 상자를 잴 수 있게 입력창을 건네받는 자리. 모듈 상수인 이유는
+ * 표면 함수가 렌더마다 다시 도는 평범한 함수라 여기서 `useRef` 를 못 부르기
+ * 때문이고, 이 표면은 한 번에 하나만 뜬다.
+ */
+const GROWTH_INPUT_REF: React.MutableRefObject<TextInput | null> = {
+  current: null,
+};
+
+/**
+ * 이 화면에서 상한이 **몇 pt 이고 몇 줄인가** (#1443).
+ *
+ * 산수는 배송되는 그 함수(`composerMaxHeight`)를 부른다 — 계측이 자기 사본을
+ * 들면 사본이 거짓말한다(디자인 시스템 §5.5). 실제 상자 높이는 `measure()` 로
+ * 따로 읽어, 식이 화면에서 지켜지는지를 사진 안에서 대조한다.
+ *
+ * 아래 줄 텍스트는 라틴 축의 계기다: 배송되는 변환(`withLatinWordBreaks`)을
+ * 통과한 문장이 **어디서** 끊기는지를 `onTextLayout` 이 돌려주는 그대로 적는다.
+ * 줄바꿈 기회를 뜻하는 U+200B 는 폭이 0 이라 사진에 안 보이므로 `·` 로 바꿔 적는다.
+ */
+function GrowthProbe({
+  inputRef,
+}: {
+  inputRef: React.MutableRefObject<TextInput | null>;
+}): React.JSX.Element {
+  const styles = useStyles(buildStyles);
+  const {fontScale, height: windowHeight} = useWindowDimensions();
+  const [boxHeight, setBoxHeight] = React.useState(0);
+  const [slotWidth, setSlotWidth] = React.useState(0);
+  const [broken, setBroken] = React.useState('…');
+  const cap = composerMaxHeight(fontScale, windowHeight);
+  const row = lineBox.body * fontScale;
+  const content = slotWidth === 0 ? 0 : slotWidth - space.md * 2 - 2;
+
+  React.useEffect(() => {
+    const timer = setTimeout(() => {
+      inputRef.current?.measure((_x, _y, _width, height) =>
+        setBoxHeight(height),
+      );
+    }, 1200);
+    return () => clearTimeout(timer);
+  }, [inputRef]);
+
+  return (
+    <View style={styles.probe}>
+      <View style={styles.probeBar} pointerEvents="none">
+        <View
+          style={styles.probeSlot}
+          onLayout={event => setSlotWidth(event.nativeEvent.layout.width)}
+        />
+        <View style={styles.probeSend}>
+          <Text style={styles.probeSendLabel}>보내기</Text>
+        </View>
+      </View>
+      {content > 0 ? (
+        <View style={[styles.probeMeasure, {width: content}]}>
+          <Text
+            style={styles.probeText}
+            lineBreakStrategyIOS="hangul-word"
+            onTextLayout={event => {
+              const lines = event.nativeEvent.lines
+                .map(item => item.text.replace(/​/g, '·'))
+                .join(' | ');
+              setBroken(previous => (previous === lines ? previous : lines));
+            }}>
+            {withLatinWordBreaks(composerPlaceholder(GROWTH_LABEL, 'place'))}
+          </Text>
+        </View>
+      ) : null}
+      <Text allowFontScaling={false} style={styles.probeRead}>
+        {`글자 배수 ${fontScale.toFixed(3)} · 창 ${Math.round(windowHeight)}pt · 줄 상자 ${row.toFixed(1)}pt`}
+      </Text>
+      <Text allowFontScaling={false} style={styles.probeRead}>
+        {`상한 ${cap.toFixed(1)}pt = ${((cap - space.sm * 2 - 2) / row).toFixed(1)}줄 · 5줄이면 ${(5 * row + space.sm * 2 + 2).toFixed(1)}pt · 실제 상자 ${boxHeight.toFixed(1)}pt`}
+      </Text>
+      <Text allowFontScaling={false} style={styles.probeRead}>
+        {`글폭 ${Math.round(content)}pt 에서 끊기는 자리 — ${broken}`}
+      </Text>
     </View>
   );
 }
@@ -1809,6 +1911,38 @@ export function Surface({name}: {name: string}): React.JSX.Element {
         </Frame>
       );
     }
+    // ---- #1443 (#1422 이월): 성장 상한이 글자 크기를 따라가는가 -------------
+    case 'composer-growth': {
+      // **두 상자를 나란히.** 위는 사람이 친 다섯 줄, 아래는 빈 상자다. 이 한
+      // 장이 답해야 하는 것이 그 둘이기 때문이다 — #1422 가 남긴 사진은 빈
+      // 상자뿐이라 「플레이스홀더가 긴 탓 아니냐」는 질문에 답하지 못했고, 정작
+      // 아픈 쪽은 사람이 친 글이다.
+      //
+      // 방 이름은 라틴 토큰이 든 것으로 고른다: 같은 사진이 라틴 낱말이 어디서
+      // 끊기는지도 함께 든다(#1422 가 「release-2」로 잘려 남긴 두 번째 축).
+      saveDraft('measure:composer-growth:typed', GROWTH_DRAFT);
+      return (
+        <Frame label="컴포저 성장 상한 — 동적 타입 (#1443)">
+          <GrowthProbe inputRef={GROWTH_INPUT_REF} />
+          <Composer
+            recipient="place"
+            channelLabel={GROWTH_LABEL}
+            directory={DIRECTORY}
+            draftKey="measure:composer-growth:typed"
+            inputRef={GROWTH_INPUT_REF}
+            onSend={() => {}}
+          />
+          <View style={styles.gap} />
+          <Composer
+            recipient="place"
+            channelLabel={GROWTH_LABEL}
+            directory={DIRECTORY}
+            draftKey="measure:composer-growth:empty"
+            onSend={() => {}}
+          />
+        </Frame>
+      );
+    }
     // ---- 이슈 1137 (ADE 3단계, 폰): 요약 한 줄 · 관제 목록 ------------------
     case 'ade-summary': {
       // **두 스택을 한 장에.** 이 배치가 고른 자리가 옳은지는 위(헤더 아래)와
@@ -2036,7 +2170,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
           <Text style={styles.label}>
             sheet · delete · editor · editor-error · row · row-lead ·
             approval-card · approval-notes · avatar · composer-offline ·
-            composer-placeholder ·
+            composer-placeholder · composer-growth ·
             group · dividers · ade-summary · ade-summary-empty · ade-panel ·
             work-console · work-detail ·
             destructive-confirm · search-entry · search-idle ·

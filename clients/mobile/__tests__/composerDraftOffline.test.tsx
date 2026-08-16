@@ -4,13 +4,15 @@ import {cleanup, fireEvent, render, screen} from '@testing-library/react-native'
 import fs from 'fs';
 import path from 'path';
 import React from 'react';
-import {StyleSheet} from 'react-native';
+import {Dimensions, StyleSheet} from 'react-native';
 
 import {SessionProvider, useSession} from '../src/session/useSession';
 
 import {
   Composer,
+  composerMaxHeight,
   COMPOSER_OFFLINE_COPY,
+  withLatinWordBreaks,
 } from '../src/features/conversation/Composer';
 import {
   channelDraftKey,
@@ -54,6 +56,23 @@ function memoryStore() {
 
 let store = memoryStore();
 
+/**
+ * 동적 타입과 창 크기를 이 케이스의 것으로 바꾼다 (#1443).
+ *
+ * `Dimensions.set` 은 네이티브가 부르는 그 문이고(`didUpdateDimensions`), RN 은
+ * 접근성 글자 크기가 바뀔 때 같은 문으로 새 `fontScale` 을 내보낸다. 즉 여기서
+ * 흉내 내는 것은 테스트용 뒷문이 아니라 **기기에서 실제로 일어나는 갱신**이다.
+ */
+const BASE_WINDOW = Dimensions.get('window');
+function setWindow(next: {fontScale?: number; height?: number}) {
+  const window = {
+    ...BASE_WINDOW,
+    ...(next.height === undefined ? {} : {height: next.height}),
+    ...(next.fontScale === undefined ? {} : {fontScale: next.fontScale}),
+  };
+  Dimensions.set({window, screen: window});
+}
+
 beforeEach(() => {
   store = memoryStore();
   __setNonSecretStore(store);
@@ -62,6 +81,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   __setNonSecretStore(null);
+  Dimensions.set({window: BASE_WINDOW, screen: BASE_WINDOW});
 });
 
 function composer(props: Partial<React.ComponentProps<typeof Composer>> = {}) {
@@ -302,8 +322,10 @@ describe('성장 정책 — 상한이 도출된 숫자다', () => {
     expect(inputStyle().lineHeight).toBe(22);
   });
 
-  it('상한 = 5줄 + 패딩 + 테두리 (128)', () => {
+  it('기본 글자 크기의 상한 = 5줄 + 패딩 + 테두리 (128)', () => {
     // 손으로 적은 120 이 아니라 도출된 값이다. 줄 상자가 바뀌면 같이 움직인다.
+    // #1443 이 이 값을 **안 바꾼다**는 것이 그 배치의 무회귀 주장이다.
+    setWindow({fontScale: 1});
     expect(inputStyle().maxHeight).toBe(5 * 22 + 8 * 2 + 1 * 2);
   });
 
@@ -332,6 +354,132 @@ describe('성장 정책 — 상한이 도출된 숫자다', () => {
     expect(
       StyleSheet.flatten(screen.getByTestId('composer-input').props.style),
     ).toEqual(style);
+  });
+});
+
+// -----------------------------------------------------------------------------
+// #1443 (#1422 이월) — 상한이 **글자 크기를 따라간다**.
+//
+// 실측이 이 블록의 근거다(iPhone 17 Pro / iOS 26.5,
+// `accessibility-extra-extra-large` = 글자 배수 3.143, 창 874pt): 옛 상한 128pt
+// 는 그 크기에서 1.6줄이었고 화면에는 한 줄만 섰다 — **사람이 친 글도** 같은
+// 상한에 걸린다. 캡처는 `measure/captures/grow1443-composer-*`.
+//
+// 여기서 재는 것은 사진이 아니라 **식**이다: 줄 수는 기본 크기의 상한으로 남고,
+// 큰 글자에서는 창의 몫이 상한을 진다.
+describe('#1443 성장 상한 — 동적 타입 비례', () => {
+  const inputMaxHeight = () => {
+    composer();
+    const style = StyleSheet.flatten(
+      screen.getByTestId('composer-input').props.style,
+    ) as {maxHeight?: number; minHeight?: number};
+    return style;
+  };
+
+  /** AX-XXL. RN 의 배수표(`RCTAccessibilityManager.mm`)가 든 값 그대로. */
+  const AX_XXL = 3.143;
+  const IPHONE_17_PRO_H = 874;
+  const CHROME = 8 * 2 + 1 * 2;
+
+  it('식 자체 — 줄 상자에 배수가 곱해진다 (기본 크기는 그대로)', () => {
+    // 5줄이 아직 창의 몫보다 작은 구간: 상한 = 5 × (22 × 배수) + 크롬.
+    expect(composerMaxHeight(1, IPHONE_17_PRO_H)).toBe(5 * 22 + CHROME);
+    expect(composerMaxHeight(1.235, IPHONE_17_PRO_H)).toBeCloseTo(
+      5 * 22 * 1.235 + CHROME,
+      5,
+    );
+  });
+
+  it('창의 몫이 상한을 진다 — 큰 글자에서 5줄을 그대로 지키면 목록이 사라진다', () => {
+    const byRows = 5 * 22 * AX_XXL + CHROME; // 363.7 — 창의 41.6%
+    const cap = composerMaxHeight(AX_XXL, IPHONE_17_PRO_H);
+    expect(byRows).toBeGreaterThan(cap);
+    // 키보드(창의 38%)를 뺀 열의 절반.
+    expect(cap).toBeCloseTo(IPHONE_17_PRO_H * 0.62 * 0.5, 5);
+    // 그리고 그것이 오늘보다 **더 많이** 보여 준다: 1.6줄 → 3.7줄.
+    const row = 22 * AX_XXL;
+    expect((128 - CHROME) / row).toBeLessThan(2);
+    expect((cap - CHROME) / row).toBeGreaterThan(3.5);
+  });
+
+  it('바닥은 두 줄 — 상한이 `minHeight` 아래로 못 내려간다', () => {
+    // 창이 아무리 낮고 글자가 아무리 커도 상자는 쓰고 있는 줄과 그 앞 줄을 든다.
+    for (const fontScale of [1, 2, 3.143, 3.571]) {
+      for (const height of [200, 667, 874, 1366]) {
+        const cap = composerMaxHeight(fontScale, height);
+        expect(cap).toBeGreaterThanOrEqual(2 * 22 * fontScale + CHROME);
+        expect(cap).toBeGreaterThan(44); // minHeight
+      }
+    }
+  });
+
+  it('상자가 그 식을 실제로 든다 — 렌더된 스타일에서', () => {
+    setWindow({fontScale: AX_XXL, height: IPHONE_17_PRO_H});
+    expect(inputMaxHeight().maxHeight).toBeCloseTo(
+      composerMaxHeight(AX_XXL, IPHONE_17_PRO_H),
+      5,
+    );
+    setWindow({fontScale: 1, height: IPHONE_17_PRO_H});
+    expect(inputMaxHeight().maxHeight).toBe(128);
+  });
+
+  it('사람이 친 글도 같은 상한을 받는다 — 플레이스홀더만의 수리가 아니다', () => {
+    setWindow({fontScale: AX_XXL, height: IPHONE_17_PRO_H});
+    composer({draftKey: CH});
+    const input = screen.getByTestId('composer-input');
+    fireEvent.changeText(
+      input,
+      '금요일 배포 건입니다.\n릴레이를 먼저 재시작하고\n그다음 워커를 올립니다.\n로그는 여기에\n남깁니다.',
+    );
+    const style = StyleSheet.flatten(
+      screen.getByTestId('composer-input').props.style,
+    ) as {maxHeight?: number; height?: number};
+    expect(style.maxHeight).toBeCloseTo(
+      composerMaxHeight(AX_XXL, IPHONE_17_PRO_H),
+      5,
+    );
+    // 그리고 높이는 여전히 OS 의 것이다 — 이 파일은 min/max 만 든다.
+    expect(style.height).toBeUndefined();
+  });
+});
+
+// -----------------------------------------------------------------------------
+// #1443 ② — `hangul-word` 가 손 못 대는 축: 라틴 낱말.
+describe('#1443 라틴 낱말 절단 — 토큰의 자기 경계에서 끊긴다', () => {
+  it('라틴/숫자 사이의 구분자 뒤에 줄바꿈 기회가 생긴다', () => {
+    expect(withLatinWordBreaks('release-2026-08에 메시지 보내기')).toBe(
+      'release-​2026-​08에 메시지 보내기',
+    );
+    expect(withLatinWordBreaks('api_v2/status.json')).toBe(
+      'api_​v2/​status.​json',
+    );
+  });
+
+  it('한글은 손대지 않는다 — 거기는 `hangul-word` 의 자리다', () => {
+    // 한글 사이에 기회를 심으면 그 전략이 막아 둔 어절 가운데 끊김을 되살린다.
+    expect(withLatinWordBreaks('프로덕트-디자인에 메시지 보내기, @로 부르기')).toBe(
+      '프로덕트-디자인에 메시지 보내기, @로 부르기',
+    );
+    expect(withLatinWordBreaks('일반에 메시지 보내기, @로 부르기')).toBe(
+      '일반에 메시지 보내기, @로 부르기',
+    );
+  });
+
+  it('낱말 끝에 붙은 구분자에는 안 심는다 — 이미 줄 끝이다', () => {
+    expect(withLatinWordBreaks('release- 다음')).toBe('release- 다음');
+  });
+
+  it('플레이스홀더에만 걸린다 — **사람이 친 글은 우리 것이 아니다**', () => {
+    composer({channelLabel: 'release-2026-08'});
+    const input = screen.getByTestId('composer-input');
+    expect(input.props.placeholder).toContain('release-​2026-​08');
+    // 같은 문자열을 이름으로 읽어 주는 자리에는 안 들어간다.
+    expect(input.props.accessibilityLabel).not.toContain('​');
+    // 그리고 값은 친 그대로다 — 이 파일의 첫 번째 규칙(머리말)이다.
+    fireEvent.changeText(input, 'release-2026-08 배포합니다');
+    expect(screen.getByTestId('composer-input').props.value).toBe(
+      'release-2026-08 배포합니다',
+    );
   });
 });
 
