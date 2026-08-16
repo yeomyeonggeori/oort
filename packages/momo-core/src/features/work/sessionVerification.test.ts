@@ -8,15 +8,18 @@ import {
 } from "../timeline/completionReportCard";
 import {
   latestSessionVerification,
+  reportForRoot,
   sessionCompletionReport,
+  threadCompletionReports,
 } from "./sessionVerification";
 
 // =============================================================================
-// 세션 검증 칩의 판정 (UXC-C).
+// 세션 검증 칩의 판정 (UXC-C · #1463).
 //
-// 재는 것은 셋이다: ①어느 메시지가 이 세션의 리포트인가 ②여러 리포트 중 어느 것이
-// 지금의 이야기인가 ③한 칸으로 접을 때 무엇이 살아남는가. 셋 다 「없는 것을
-// 이야기로 승격하지 않는다」는 같은 규율 아래 있다(ADR-0132).
+// 재는 것은 넷이다: ①어느 메시지가 이 세션의 리포트인가 ②여러 리포트 중 어느 것이
+// 지금의 이야기인가 ③한 칸으로 접을 때 무엇이 살아남는가 ④채널 히스토리 한 뭉치에서
+// 스레드별 최신 리포트를 어떻게 건져내는가. 넷 다 「없는 것을 이야기로 승격하지
+// 않는다」는 같은 규율 아래 있다(ADR-0132).
 // =============================================================================
 
 const CHANNEL = "0197c3aa-2f11-7a4e-9b30-8c1d2e3f4a5c";
@@ -224,5 +227,102 @@ describe("한 칸으로 접어도 실패는 사라지지 않는다", () => {
     expect(verdict?.lead).toBe("pending");
     expect(COMPLETION_CHECK_TONE[verdict!.lead]).not.toBe("danger");
     expect(verdict?.outcome).toBe("clean");
+  });
+});
+
+// =============================================================================
+// 채널 히스토리에서 스레드별 최신 리포트 건져내기 (#1463)
+//
+// 이 접기가 목록 행 칩과 장스레드 도달을 **동시에** 성립시킨다. 두 갈래가 같은 read
+// -model 결정이었던 이유가 여기 있다: 세션마다 스레드를 여는 대신 채널을 최신부터
+// 한 번 훑고, 최신부터 훑기 때문에 절단이 잘라내는 것이 가장 오래된 쪽이다.
+// =============================================================================
+
+const ROOT_A = "0197c3aa-2f11-7a4e-9b30-8c1d2e3f4a00";
+const ROOT_B = "0197c3aa-2f11-7a4e-9b30-8c1d2e3f4b00";
+
+describe("채널 히스토리에서 스레드별 최신 리포트", () => {
+  it("한 페이지에 섞여 온 두 세션의 리포트를 스레드별로 가른다", () => {
+    const found = threadCompletionReports([
+      reportMessage(101, CLEAN_PROPS, { rootId: ROOT_A }),
+      reportMessage(102, FAILING_PROPS, { rootId: ROOT_B }),
+    ]);
+    expect(found).toHaveLength(2);
+    expect(latestSessionVerification([reportForRoot(found, ROOT_A)!])?.lead).toBe(
+      "pass"
+    );
+    expect(latestSessionVerification([reportForRoot(found, ROOT_B)!])?.lead).toBe(
+      "fail"
+    );
+  });
+
+  it("한 스레드에 리포트가 여럿이면 seq 가 큰 쪽이 남는다 — 페이지 순서와 무관", () => {
+    // 부르는 쪽은 최신부터 읽지만 그 순서에 기대지 않는다. 페이지를 어떤 순서로
+    // 이어 붙여도(재시도·병합) 답이 같아야 한다.
+    const rows = [
+      reportMessage(200, FAILING_PROPS, { rootId: ROOT_A }),
+      reportMessage(300, CLEAN_PROPS, { rootId: ROOT_A }),
+    ];
+    for (const page of [rows, [...rows].reverse()]) {
+      const found = threadCompletionReports(page);
+      expect(found).toHaveLength(1);
+      expect(found[0]?.seq).toBe(300);
+      expect(latestSessionVerification([found[0]!])?.lead).toBe("pass");
+    }
+  });
+
+  it("`rootId` 없는 채널 본문 리포트는 어느 세션의 것도 아니다", () => {
+    // 세션에서 run 으로 가는 서버 경로가 없으므로(머리말) 본문에 저작된 리포트를
+    // 세션의 것이라 주장하지 않는다. 방향을 바꾼 것이지 소속 규칙을 넓힌 것이 아니다.
+    const bare = reportMessage(400, CLEAN_PROPS);
+    delete (bare as { rootId?: string }).rootId;
+    expect(threadCompletionReports([bare])).toEqual([]);
+  });
+
+  it("리포트가 아닌 행과 지워진 리포트는 통과시키지 않는다", () => {
+    const found = threadCompletionReports([
+      reportMessage(500, { kind: "work_session_event", schema: "x" }, {
+        rootId: ROOT_A,
+      }),
+      reportMessage(501, CLEAN_PROPS, { rootId: ROOT_A, state: "deleted" }),
+    ]);
+    expect(found).toEqual([]);
+  });
+
+  it("UUID 대소문자가 섞여도 같은 스레드다", () => {
+    // UUID 는 와이어를 섞인 대소문자로 건너온다(`lib/api` 머리말). 지도의 키가
+    // 대소문자에 걸리면 같은 스레드가 둘로 갈라져 칩이 두 번 서거나 사라진다.
+    const found = threadCompletionReports([
+      reportMessage(600, CLEAN_PROPS, { rootId: ROOT_A.toUpperCase() }),
+    ]);
+    expect(found).toHaveLength(1);
+    expect(reportForRoot(found, ROOT_A)).not.toBeNull();
+    expect(reportForRoot(found, ROOT_A.toUpperCase())).not.toBeNull();
+  });
+
+  it("스캔이 못 찾은 세션은 없음이지 미검증이 아니다", () => {
+    const found = threadCompletionReports([
+      reportMessage(700, CLEAN_PROPS, { rootId: ROOT_A }),
+    ]);
+    expect(reportForRoot(found, ROOT_B)).toBeNull();
+    expect(latestSessionVerification([])).toBeNull();
+    // 스캔 자체가 아직 없을 때도 같은 답이다(첫 읽기 전·403).
+    expect(reportForRoot(undefined, ROOT_A)).toBeNull();
+  });
+
+  it("최신부터 읽은 절단은 안전하다 — 잘린 쪽은 언제나 더 오래된 리포트다", () => {
+    // RED PROOF 의 짝: 1,000행이 넘는 스레드에서 오래된 쪽부터 읽으면 최신 리포트가
+    // 잘려 칩이 영구 부재였다(grok freeze H2). 최신부터 읽으면 예산이 잘라내는 것이
+    // 반대쪽이므로, **스캔이 본 첫 뭉치**만으로 최신 리포트에 닿는다.
+    const newestFirstWindow = [
+      reportMessage(9_999, CLEAN_PROPS, { rootId: ROOT_A }),
+    ];
+    const cutOff = [reportMessage(12, FAILING_PROPS, { rootId: ROOT_A })];
+    const scanned = threadCompletionReports(newestFirstWindow);
+    expect(scanned[0]?.seq).toBe(9_999);
+    // 잘려 나간 오래된 리포트를 나중에 합쳐도 답이 바뀌지 않는다.
+    const merged = threadCompletionReports([...newestFirstWindow, ...cutOff]);
+    expect(merged[0]?.seq).toBe(9_999);
+    expect(latestSessionVerification([merged[0]!])?.lead).toBe("pass");
   });
 });

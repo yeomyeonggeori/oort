@@ -13,6 +13,13 @@
 //                  하나를 덮지 않는다는 것이 이 사진의 전부다.
 //   끝남 · 무보고  성과 서술만. **칩이 없다** — 「미검증」이라고 쓰지 않는다.
 //   끝남 · 순식간  「1초 미만 작업」. 조사 「동안」이 떨어진 자리다(#1468).
+//   끝남 · 초장기  1,000행이 넘는 스레드. `/replies` 는 5×200 에서 절단되고 그 창
+//                  안에는 리포트가 없다 — 그런데도 칩이 선다(#1463 / grok H2).
+//
+// #1463 부터 칩은 **목록 행 자체**에도 선다(`work-session-verification`). 그 행은
+// 스레드를 읽지 않으므로, 이 파일이 채널 히스토리 대역을 함께 세워야 한다는 사실이
+// 곧 read-model 이 바뀌었다는 증거다: 리포트는 이제 채널을 최신부터 훑어 온다
+// (`useWorkSessions` 의 왕복 예산 · 코어 `sessionVerification` 머리말).
 //
 // 그리고 접혀 있는 「세션 정보」를 펴서 라벨을 함께 잰다: 그 줄과 위 성과 서술은
 // **같은 함수 한 번**의 결과이므로, 라벨이 카드의 「작업 시간」과 다른 낱말이면
@@ -51,6 +58,8 @@ const FAILING_ID = "019f9b00-0000-7000-8000-000000000603";
 const QUIET_ID = "019f9b00-0000-7000-8000-000000000604";
 const WIDEST_ID = "019f9b00-0000-7000-8000-000000000605";
 const BLINK_ID = "019f9b00-0000-7000-8000-000000000606";
+const LONG_ID = "019f9b00-0000-7000-8000-000000000607";
+const REPORTED_RUNNING_ID = "019f9b00-0000-7000-8000-000000000608";
 const ROOT_OF = {
   [RUNNING_ID]: "019f9b00-0000-7000-8000-0000000006a1",
   [CLEAN_ID]: "019f9b00-0000-7000-8000-0000000006a2",
@@ -58,6 +67,8 @@ const ROOT_OF = {
   [QUIET_ID]: "019f9b00-0000-7000-8000-0000000006a4",
   [WIDEST_ID]: "019f9b00-0000-7000-8000-0000000006a5",
   [BLINK_ID]: "019f9b00-0000-7000-8000-0000000006a6",
+  [LONG_ID]: "019f9b00-0000-7000-8000-0000000006a7",
+  [REPORTED_RUNNING_ID]: "019f9b00-0000-7000-8000-0000000006a8",
 };
 
 const SESSION = {
@@ -175,6 +186,17 @@ const SESSIONS = [
   // 조사 「동안」을 받지 못한다 — 그 문장이 화면에 서 본 적이 없어서 어색함이
   // 코드 추론으로만 남아 있었으므로, 여기서 실측한다.
   workSession(BLINK_ID, "배포 전 설정 문법 검사", { startedAtMs: NOW - 400 }),
+  // 초장기 세션 (#1463 / grok H2). 스레드가 1,000행을 넘어 `/replies` 5×200 창이
+  // 절단되고, 잘려 나가는 쪽이 정확히 **가장 최근 리포트**다. 앞 판에서 이 행은
+  // 영구히 칩이 없었다 — 리포트가 가장 필요한 세션이 정확히 이 세션인데.
+  workSession(LONG_ID, "야간 회귀 스위트 전량 재실행", {
+    startedAtMs: NOW - HOUR_SCALE_MS,
+  }),
+  // 아직 도는데 이미 보고한 세션. 「내 세션」범위는 끝난 세션을 빼므로 그 목록에서
+  // 칩이 설 수 있는 유일한 경우이고, 동시에 두 칩이 서로를 함의하지 않는다는
+  // `SessionVerificationChip` 머리말의 유일한 사진이다: 원장은 「실행 중」이라 부르고
+  // 세션 자신은 「통과 3」을 보고했다.
+  runningSession(REPORTED_RUNNING_ID, "인덱스 재구축 야간 배치", NOW - 512_000),
 ];
 
 const CLEAN_REPORT = {
@@ -243,64 +265,151 @@ const UNKNOWN_REPORT = {
   ],
 };
 
+/**
+ * 초장기 세션의 리포트 (#1463). 이 봉투는 **스레드 페이지에 실리지 않는다** — 그
+ * 스레드는 1,000행을 넘어 절단되고, 잘려 나가는 쪽이 정확히 이 리포트다. 화면이
+ * 이것을 말할 수 있는 유일한 길은 채널을 최신부터 훑는 스캔이다.
+ */
+const LONG_REPORT = {
+  kind: "completion_report",
+  title: "야간 회귀 스위트 전량 재실행",
+  summary: "격리 큐를 비우고 전량 재실행했습니다. 하나가 아직 빨갛습니다.",
+  elapsed_ms: HOUR_SCALE_MS,
+  gates: [
+    {
+      surface: "엔진",
+      checks: [
+        { label: "빌드", outcome: "pass" },
+        { label: "회귀", outcome: "fail", detail: "1 실패" },
+      ],
+    },
+  ],
+};
+
 const REPORT_OF = {
   [CLEAN_ID]: CLEAN_REPORT,
   [FAILING_ID]: FAILING_REPORT,
   [WIDEST_ID]: UNKNOWN_REPORT,
+  [LONG_ID]: LONG_REPORT,
+  [REPORTED_RUNNING_ID]: CLEAN_REPORT,
 };
 
-/** 세션 스레드 한 통: ACP 이벤트 몇 줄, 그리고 있으면 완료 리포트 하나. */
-function repliesFor(sessionId) {
+/**
+ * 스레드가 절단되는 세션. `/replies` 는 오래된 쪽부터만 페이지되므로(서버에
+ * 내림차순이 없다) 이 세션의 5×200 창에는 ACP 이벤트만 들어오고 리포트는 늘 그
+ * 바깥이다.
+ */
+const TRUNCATED = new Set([LONG_ID]);
+
+/** 리포트가 채널 원장에 앉은 자리. 초장기 세션의 것은 스레드 창 훨씬 뒤에 있다. */
+const REPORT_SEQ_OF = {
+  [CLEAN_ID]: 3100,
+  [FAILING_ID]: 3101,
+  [WIDEST_ID]: 3102,
+  [LONG_ID]: 41_000,
+  [REPORTED_RUNNING_ID]: 41_001,
+};
+
+const REPLY_BASE_MS = NOW - 1_400_000;
+
+/** 서버가 `/replies` 한 페이지에 담는 최대치. 클라도 이 값을 청한다. */
+const REPLY_PAGE_LIMIT = 200;
+
+function acpEvent(sessionId, index, seq) {
   const rootId = ROOT_OF[sessionId];
-  const base = NOW - 1_400_000;
   const steps = [
     ["의존성 설치", "npm ci"],
     ["게이트 실행", "run_gate"],
     ["결과 정리", "write_report"],
   ];
-  const messages = steps.map((step, index) => ({
+  const step = steps[index % steps.length];
+  const atMs = REPLY_BASE_MS + index * 1_000;
+  return {
     id: `${rootId}-event-${index}`,
     channelId: CHANNEL_ID,
     rootId,
-    seq: 3000 + index,
-    hlcTs: base + index * 60_000,
+    seq,
+    hlcTs: atMs,
     hlcCount: 0,
     authorMemberId: ME,
     type: "system",
     body: "ACP session update",
     state: "sent",
-    createdAtMs: base + index * 60_000,
+    createdAtMs: atMs,
     props: {
       kind: "work_session_event",
       schema: "momo.work_session.acp_event.v1",
       event_type: "agent.status",
       event_id: `${rootId}-event-${index}`,
-      event_ts: base + index * 60_000,
+      event_ts: atMs,
       event: {
         work_session_id: sessionId,
         tool_call_name: step[1],
         detail: step[0],
       },
     },
-  }));
-  const report = REPORT_OF[sessionId];
-  if (report) {
-    messages.push({
-      id: `${rootId}-report`,
-      channelId: CHANNEL_ID,
-      rootId,
-      seq: 3100,
-      hlcTs: base + 600_000,
-      hlcCount: 0,
-      authorMemberId: ME,
-      type: "text",
-      body: "작업을 마쳤습니다.",
-      state: "sent",
-      createdAtMs: base + 600_000,
-      props: report,
-    });
+  };
+}
+
+function reportMessage(sessionId) {
+  const rootId = ROOT_OF[sessionId];
+  const atMs = REPLY_BASE_MS + 600_000;
+  return {
+    id: `${rootId}-report`,
+    channelId: CHANNEL_ID,
+    rootId,
+    seq: REPORT_SEQ_OF[sessionId],
+    hlcTs: atMs,
+    hlcCount: 0,
+    authorMemberId: ME,
+    type: "text",
+    body: "작업을 마쳤습니다.",
+    state: "sent",
+    createdAtMs: atMs,
+    props: REPORT_OF[sessionId],
+  };
+}
+
+/**
+ * 세션 스레드 한 페이지 (오래된 쪽부터, seq 커서).
+ *
+ * 짧은 세션은 ACP 이벤트 몇 줄과 리포트 하나로 끝난다. 절단되는 세션은 어느
+ * 커서에서든 가득 찬 페이지와 `nextCursor` 를 돌려준다 — 그것이 클라가 실제로 겪는
+ * 초장기 스레드의 모양이고, 5×200 예산이 거기서 소진된다.
+ */
+function repliesFor(sessionId, cursor) {
+  if (TRUNCATED.has(sessionId)) {
+    const from = (cursor ?? 3_000) + 1;
+    const messages = Array.from({ length: REPLY_PAGE_LIMIT }, (_, i) =>
+      acpEvent(sessionId, i, from + i)
+    );
+    return { messages, nextCursor: from + REPLY_PAGE_LIMIT - 1 };
   }
-  return messages;
+  if (cursor !== undefined) return { messages: [] };
+  const messages = [0, 1, 2].map((index) =>
+    acpEvent(sessionId, index, 3000 + index)
+  );
+  if (REPORT_OF[sessionId]) messages.push(reportMessage(sessionId));
+  return { messages };
+}
+
+/**
+ * 채널 히스토리(최신부터) — #1463 의 read-model.
+ *
+ * 완료 리포트는 스레드 답글이고 서버는 히스토리에서 그것을 걸러내지 않는다
+ * (`list_channel_page` 에 `root_id IS NULL` 술어가 없다). 그래서 이 대역이 목록 행의
+ * 유일한 원천이자, 절단된 스레드가 못 닿는 최신 리포트의 유일한 길이다.
+ */
+const CHANNEL_HISTORY = Object.keys(REPORT_OF)
+  .map((sessionId) => reportMessage(sessionId))
+  .sort((a, b) => b.seq - a.seq);
+
+function historyPage(limit, before) {
+  const rows = CHANNEL_HISTORY.filter(
+    (row) => before === undefined || row.seq < before
+  ).slice(0, limit);
+  const nextBefore = rows.length > 0 ? rows[rows.length - 1].seq : undefined;
+  return { messages: rows, ...(nextBefore === undefined ? {} : { nextBefore }) };
 }
 
 function json(route, body, status = 200) {
@@ -407,15 +516,28 @@ async function installMocks(context) {
       return json(route, { workSessions: SESSIONS });
     }
     if (path.includes("/messages/") && path.endsWith("/replies")) {
+      const url = new URL(route.request().url());
       const rootId = path.split("/messages/")[1].replace("/replies", "");
       const sessionId = Object.keys(ROOT_OF).find(
         (id) => ROOT_OF[id].toLowerCase() === rootId.toLowerCase()
       );
-      return json(route, {
-        messages: sessionId ? repliesFor(sessionId) : [],
-      });
+      const raw = url.searchParams.get("cursor");
+      const cursor = raw === null ? undefined : Number(raw);
+      return json(
+        route,
+        sessionId ? repliesFor(sessionId, cursor) : { messages: [] }
+      );
     }
-    if (path.endsWith("/messages")) return json(route, { messages: [] });
+    if (path.endsWith("/messages")) {
+      // #1463 — 검증 칩의 원천. 목록 행은 스레드를 열지 않고 이 대역만 읽는다.
+      const url = new URL(route.request().url());
+      const limit = Number(url.searchParams.get("limit") ?? 50);
+      const rawBefore = url.searchParams.get("before");
+      return json(
+        route,
+        historyPage(limit, rawBefore === null ? undefined : Number(rawBefore))
+      );
+    }
     return json(route, {
       channels: [],
       members: [],
@@ -501,6 +623,25 @@ const ROW_TITLE_WIDTHS = `(() => {
     if (!label) continue;
     out[String(row.getAttribute("data-session-id")).toLowerCase()] =
       Math.round(label.getBoundingClientRect().width);
+  }
+  return out;
+})()`;
+
+/**
+ * 목록 행의 검증 칩 (#1463).
+ *
+ * 세 가지를 한 번에 답한다: 어느 행에 칩이 섰는가, 그 칩이 무엇이라 말하는가,
+ * 그리고 **어느 행에 없는가**. 마지막이 이 게이트의 핵심이다 — 없는 노드는 사진에
+ * 찍히지 않으므로, 「미검증」을 쓰지 않는다는 약속의 기계적 증거는 여기뿐이다.
+ */
+const ROW_VERIFICATIONS = `(() => {
+  const rows = [...document.querySelectorAll('[data-testid="work-session-row"]')];
+  const out = {};
+  for (const row of rows) {
+    const chip = row.querySelector('[data-testid="work-session-verification"]');
+    out[String(row.getAttribute("data-session-id")).toLowerCase()] = chip
+      ? { lead: chip.getAttribute("data-lead"), label: chip.textContent.trim() }
+      : null;
   }
   return out;
 })()`;
@@ -628,15 +769,88 @@ async function captureScheme(browser, scheme) {
   // 상세 머리의 제목이 비교당할 기준. 목록을 떠나기 전에 재 둔다.
   const rowTitleWidths = await page.evaluate(ROW_TITLE_WIDTHS);
 
+  // ---- 목록 행의 칩 (#1463) ------------------------------------------------
+  // 스캔이 도착할 때까지 기다린다. 행은 세션 목록과 함께 먼저 그려지고 칩은 채널
+  // 히스토리 읽기가 돌아온 뒤에 선다 — 그 사이에 재면 「칩이 없다」가 언제나 참이다.
+  await page
+    .locator(
+      `[data-testid="work-session-row"][data-session-id="${CLEAN_ID}"] [data-testid="work-session-verification"]`
+    )
+    .waitFor();
+  const rowChips = await page.evaluate(ROW_VERIFICATIONS);
+  for (const [name, id, expected] of [
+    ["통과", CLEAN_ID, "pass"],
+    ["실패", FAILING_ID, "fail"],
+    // 초장기 세션. 스레드는 절단됐고 그 창 안에 리포트가 없는데도 칩이 선다 —
+    // 이 한 줄이 grok H2 의 답이다(리포트가 가장 필요한 세션이 정확히 이 세션).
+    ["초장기", LONG_ID, "fail"],
+    ["미상", WIDEST_ID, "unknown"],
+  ]) {
+    const chip = rowChips[id.toLowerCase()];
+    if (chip?.lead !== expected) {
+      throw new Error(
+        `${scheme}: ${name} 세션의 목록 행 칩이 ${expected} 가 아니다` +
+          ` (${JSON.stringify(chip)}) — 행은 스레드를 읽지 않으므로 이 칩의 원천은` +
+          ` 채널 히스토리 스캔뿐이다 (#1463)`
+      );
+    }
+  }
+  for (const [name, id] of [
+    ["무보고", QUIET_ID],
+    ["실행 중", RUNNING_ID],
+  ]) {
+    if (rowChips[id.toLowerCase()] !== null) {
+      throw new Error(
+        `${scheme}: ${name} 세션의 목록 행에 칩이 섰다` +
+          ` (${JSON.stringify(rowChips[id.toLowerCase()])}) — 보고가 없는 것은` +
+          ` 검증에 실패한 것이 아니다 (ADR-0132)`
+      );
+    }
+  }
+  console.log(
+    `  ${scheme}: 목록 행 칩 ` +
+      Object.entries(rowChips)
+        .map(([id, chip]) => `${id.slice(-3)}=${chip ? chip.label : "없음"}`)
+        .join(" · ")
+  );
+
   const list = `${OUT_DIR}/session-list-${scheme}.png`;
   await panel.screenshot({ path: list });
   shots.push(list);
+
+  // ---- 「내 세션」 목록 (#1463) ---------------------------------------------
+  // 그 범위는 끝난 세션을 빼므로, 여기서 칩이 설 수 있는 세션은 **아직 도는데 이미
+  // 보고한** 세션뿐이다. 그 한 행이 두 칩의 독립을 사진으로 만든다: 원장은 「실행
+  // 중」이라 부르고 세션 자신은 「통과 3」을 보고했다.
+  await page.getByTestId("work-scope-mine").click();
+  await page.getByTestId("my-work-session-list").waitFor();
+  await page
+    .locator(
+      `[data-testid="my-work-session-row"][data-session-id="${REPORTED_RUNNING_ID}"]` +
+        ` [data-testid="my-work-session-verification"]`
+    )
+    .waitFor();
+  const mineChips = await page
+    .getByTestId("my-work-session-verification")
+    .count();
+  if (mineChips !== 1) {
+    throw new Error(
+      `${scheme}: 「내 세션」의 검증 칩이 ${mineChips}개다 — 보고한 세션 하나에만` +
+        ` 서야 하고, 아직 아무 말도 하지 않은 세션에는 서지 않아야 한다`
+    );
+  }
+  const mine = `${OUT_DIR}/session-list-mine-${scheme}.png`;
+  await panel.screenshot({ path: mine });
+  shots.push(mine);
+  await page.getByTestId("work-scope-all").click();
+  await page.getByTestId("work-session-list").waitFor();
 
   for (const [name, id] of [
     ["clean", CLEAN_ID],
     ["attention", FAILING_ID],
     ["no-report", QUIET_ID],
     ["widest", WIDEST_ID],
+    ["long-thread", LONG_ID],
   ]) {
     await peek(page, id);
     const chips = await page.getByTestId("work-peek-verification").count();
@@ -648,6 +862,18 @@ async function captureScheme(browser, scheme) {
     if (name !== "no-report" && chips !== 1) {
       throw new Error(`${scheme}: ${name} 세션의 검증 칩이 ${chips}개다`);
     }
+    if (name === "long-thread") {
+      // 이 미리보기는 두 문장을 **동시에** 말해야 한다: 진행 내역은 앞부분만
+      // 읽었다(절단 고지)는 것과, 그런데도 이 세션의 최신 보고는 이것이라는 것.
+      // 앞 판에서는 뒤쪽이 침묵이었고, 그 침묵이 정확히 grok H2 였다.
+      const notice = await page.getByTestId("work-peek-truncated").count();
+      if (notice !== 1) {
+        throw new Error(
+          `${scheme}: 초장기 세션의 미리보기에 절단 고지가 ${notice}개다 —` +
+            ` 픽스처가 더 이상 절단을 재현하지 못하면 이 사진은 아무것도 증명하지 않는다`
+        );
+      }
+    }
     const shot = `${OUT_DIR}/session-peek-${name}-${scheme}.png`;
     await panel.screenshot({ path: shot });
     shots.push(shot);
@@ -657,6 +883,9 @@ async function captureScheme(browser, scheme) {
     ["attention", FAILING_ID],
     ["clean", CLEAN_ID],
     ["widest", WIDEST_ID],
+    // 초장기 세션의 상세 (#1463). 사람이 이 보고를 실제로 읽는 자리가 여기이고,
+    // 앞 판에서 이 화면은 「보고 없음」이었다.
+    ["long-thread", LONG_ID],
   ]) {
     await peek(page, id);
     await page.getByTestId("work-session-open").click();

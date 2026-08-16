@@ -26,6 +26,7 @@ import { CHIP_CLASS } from "@/features/common/chip";
 import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/States";
 import {
   useSessionEvents,
+  useSessionVerification,
   useWorkHosts,
   useWorkSessionRail,
   useWorkSessions,
@@ -168,6 +169,11 @@ function SessionRow({
   onPeek: () => void;
   rowRef: (element: HTMLButtonElement | null) => void;
 }) {
+  const { workspaceId } = useSession();
+  // 이 행의 검증 칩 (#1463). 스레드를 넘기지 않으므로 이 행은 `/replies` 를 열지
+  // 않는다 — 원천은 채널 히스토리 스캔이고, 같은 채널의 행이 몇 개든 요청은
+  // 하나다(`useWorkSessions` 머리말의 왕복 예산).
+  const verification = useSessionVerification(workspaceId, session);
   const hostOnline = workHostOnline(session, hosts);
   const status = workSessionContinuityStatus(session, hosts);
   const effectiveLive = live && hostOnline !== false;
@@ -251,6 +257,21 @@ function SessionRow({
         <span className="min-w-0 flex-1 truncate text-meta text-ink-muted">
           {summary ?? `${session.tool} · 시작 ${clockLabel(session.startedAtMs)}`}
         </span>
+        {/* 검증 칩은 **아랫줄**에 선다 (#1463).
+            윗줄에는 이 행의 정체(제목)와 원장의 판정(상태 칩)과 시계가 이미 있고,
+            거기 shrink-0 을 하나 더 세우면 320px 에서 제목이 다시 좁아진다 — #1441
+            의 design-review H-1 이 정확히 그 결함이었고, 캡처 레인이 그 폭을
+            숫자로 지키고 있다. 아랫줄에서는 요약(min-w-0 flex-1 truncate)이 양보
+            하므로 제목 폭이 그대로다.
+
+            리포트가 없는 세션에는 이 노드가 아예 없다. 「미검증」은 이 표면이 할 수
+            있는 말이 아니다(코어 `sessionVerification` 머리말). */}
+        {verification !== null && (
+          <SessionVerificationChip
+            verification={verification}
+            testId="work-session-verification"
+          />
+        )}
       </span>
     </button>
   );
@@ -285,6 +306,10 @@ function MySessionRow({
   onResume: (hostId: string) => void;
   detailRef: (element: HTMLButtonElement | null) => void;
 }) {
+  const { workspaceId } = useSession();
+  // 같은 스캔, 같은 칩 (#1463). 「내 세션」도 목록이고, 두 목록이 같은 세션을 두고
+  // 서로 다른 것을 말하면 안 된다 — 요청도 나뉘지 않는다(키가 같다).
+  const verification = useSessionVerification(workspaceId, session);
   const status = workSessionContinuityStatus(session, hosts);
   const hostName = workHostName(session, hosts) ?? "알 수 없는 호스트";
   const hostOnline = workHostOnline(session, hosts);
@@ -362,6 +387,12 @@ function MySessionRow({
         <span data-numeric className="shrink-0 font-mono">
           {clockLabel(session.startedAtMs)}
         </span>
+        {verification !== null && (
+          <SessionVerificationChip
+            verification={verification}
+            testId="my-work-session-verification"
+          />
+        )}
       </p>
       {/* 하트비트 침묵은 재개를 **막지 않는다** — 서버가 판정에서 뺀 그
           이유대로다. 다만 침묵하지도 않는다: 눌렀는데 터미널이 안 열리는 흔한
@@ -509,10 +540,11 @@ function SessionPeek({
     [query.events, session, truncated]
   );
   const tail = peekRows(rows);
-  // 이 세션이 스스로 보고한 게이트 결과. 같은 읽기에서 나오므로 추가 왕복이 없고,
-  // 보고가 없는 세션에는 칩이 서지 않는다 — 「미검증」은 이 표면이 할 수 있는 말이
-  // 아니다(코어 `sessionVerification` 머리말).
-  const verification = query.verification;
+  // 이 세션이 스스로 보고한 게이트 결과. 원천이 둘이고 판정은 하나다 (#1463):
+  // 채널 히스토리 스캔(행이 이미 쓰는 그 읽기 — 여기서도 추가 왕복 0)과, 절단되지
+  // 않았을 때의 이 스레드 페이지. 보고가 없는 세션에는 칩이 서지 않는다 —
+  // 「미검증」은 이 표면이 할 수 있는 말이 아니다(코어 `sessionVerification` 머리말).
+  const verification = useSessionVerification(workspaceId, session, query.data);
   // 미리보기의 이 버튼은 **동사가 아니다** — 어느 판정이든 같은 상세로 간다.
   // 재개가 성립하는 세션에서만 「이어서」로 부르는 것은 그 말이 참인 자리에서만
   // 쓰기 위해서다(코어 `HANDOFF_COPY.resume.button`).
