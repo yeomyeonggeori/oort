@@ -7,7 +7,14 @@ description = "momo desktop shell — ADR-0133 (MOMO-595 spike, MOMO-603 native 
 # the #1225 license gate reports the first-party shell as unlicensed.
 license = "Apache-2.0"
 edition = "2021"
-rust-version = "1.77.2"
+# MSRV — 실측치(#1442). 이전 값 1.77.2 는 tauri 2 스캐폴드가 남긴 초기값이었고
+# 그래프 실상과 12 마이너 어긋나 있었다. 서버 워크스페이스(1.88.0)보다 한 칸 높다
+# — 데스크톱만 끌어오는 알림 스택이 더 높은 바닥을 요구하기 때문이다.
+#   실측(2026-08-17, track/engine@54f5d2dc, Cargo.lock 고정, aarch64-apple-darwin):
+#     `cargo +1.88.0 check --workspace --locked` → 거절
+#       notify-rust@4.18.0 이 rustc 1.89.0 요구
+#     `cargo +1.89.0 check --workspace --locked` → green
+rust-version = "1.89.0"
 
 [lib]
 name = "momo_desktop_lib"
