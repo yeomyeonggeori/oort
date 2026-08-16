@@ -618,6 +618,16 @@ add_static_commands() {
   # a producer which negotiates an input datachannel (ADR-0165 D4).
   add_cmd_once "Display signalling view-only contract" "python3 scripts/display_signaling_probe.py"
   add_cmd_once "Display signalling red proof" "python3 scripts/display_signaling_probe.py --prove-red"
+  # Same lane for the same reason: the CubeSandbox bootstrap receiver is a
+  # stdlib-only program whose invariants need nothing but a loopback socket, and
+  # it is the guest half of a contract whose host half (the `cubesandbox`
+  # adapter) is already under conformance. Both halves must be provable in one
+  # gate run or the two drift apart in silence (#1437).
+  add_cmd_once "CubeSandbox bootstrap receiver invariants" \
+    "python3 infra/cubesandbox/bootstrap-init/test_bootstrap_init.py"
+  add_cmd_once "CubeSandbox bootstrap receiver red proof" \
+    "python3 infra/cubesandbox/bootstrap-init/test_bootstrap_init.py --prove-red"
+  add_note_once coverage "#1437 CubeSandbox bootstrap receiver via infra/cubesandbox/bootstrap-init/test_bootstrap_init.py: the guest half of the envVars delivery contract is proved by running it — a real process, real HTTP on a loopback socket, and the files and exec'd environment it leaves behind. Covers the delivery landing as mode-0600 files with the workload handed MOMO_WORKD_REGISTRATION_TOKEN_FILE and never the raw token (ADR-0144), four malformed bodies refused 400 with nothing written and the one shot unspent (Cubelet retries), a non-/init path 404, a write failure answered 500 rather than turning create's 201 into a lie, the listener gone at TCP after the delivery lands (ADR-0157 — CubeProxy routes /sandbox/<id>/49983/ unauthenticated), a held-open connection failing closed at --timeout instead of parking PID 1, a second pipelined POST never re-running land(), and a template-baked MOMO_WORKD_REGISTRATION_TOKEN popped from the inherited environment. --prove-red runs four mutants (blocking accepted socket, keep-alive answer, keep-alive answer with the one-delivery guard removed, inherited token left in place) and requires the matching case to go red; each mutation asserts its anchor text was found, so a refactor that moves the repaired code fails loudly instead of proving nothing."
   add_cmd_once "Rust OpenAPI verifier foreign-resource contract" "scripts/verify_openapi_contract_rust.sh --verify-cleanup-contract"
   add_cmd_once "work session verifier shell syntax" "bash -n scripts/verify_work_session.sh"
   add_cmd_once "work session idle verifier shell syntax" "bash -n scripts/verify_work_session_idle.sh"

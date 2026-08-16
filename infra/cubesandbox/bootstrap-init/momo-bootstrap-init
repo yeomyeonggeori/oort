@@ -39,15 +39,26 @@ Every other channel was measured and is closed (#1437, momo-cube-host):
 
 * **One shot.** The listener is closed after the first accepted delivery, and it
   is never reopened — not on resume (measured: pause→connect does not re-deliver).
-  Anything arriving later is refused at the TCP layer.
+  Anything arriving later is refused at the TCP layer, and a second POST that
+  somehow reaches the handler is refused `409` rather than landing again.
+* **The wait is bounded whether or not anyone is connected.** `--timeout` is a
+  deadline, not an idle timer: an accepted socket gets its own read deadline,
+  clamped to what is left of the program's. A peer that opens a connection and
+  says nothing costs one bounded wait, not the boot.
 * **The token never enters a process environment.** It is written to its own
   mode-0600 file and passed on as `MOMO_WORKD_REGISTRATION_TOKEN_FILE`, which is
   the form `infra/workd/bootstrap.sh` already prefers and the form ADR-0144
   asks for: `/proc/<pid>/environ` is readable by anything else in the sandbox,
-  a 0600 file consumed once is not.
+  a 0600 file consumed once is not. That covers the *inherited* copy too — a
+  template baked with `--env MOMO_WORKD_REGISTRATION_TOKEN` would otherwise hand
+  the workload a stale token the delivery never touched.
 * **Names are re-validated here.** CubeAPI screens env names upstream; this
   screens them again, because the value of a check performed only on the other
   side of a trust boundary is zero.
+
+Every one of those is exercised by running this program, in
+`test_bootstrap_init.py` beside it — including the red proofs that each guarantee
+fails when its repair is removed.
 
 ## Boundary note (ADR-0157)
 
@@ -68,10 +79,17 @@ import re
 import sys
 import time
 
+DEFAULT_BIND = "0.0.0.0"
 DEFAULT_PORT = 49983
 DEFAULT_ENV_FILE = "/etc/momo/workd.env"
 DEFAULT_TOKEN_FILE = "/etc/momo/registration.token"
 DEFAULT_TIMEOUT_SECONDS = 300
+# How long one *accepted* connection may take to finish its request. Separate
+# from `--timeout`, which bounds the whole wait: see [`InitHandler.timeout`].
+# Deliberately short — the delivery is one small POST from a Go client one hop
+# away, and the listener is single-threaded, so a generous read deadline is time
+# a real delivery could spend queued behind a peer that is not sending anything.
+DEFAULT_READ_TIMEOUT_SECONDS = 5
 
 TOKEN_NAME = "MOMO_WORKD_REGISTRATION_TOKEN"
 TOKEN_FILE_NAME = "MOMO_WORKD_REGISTRATION_TOKEN_FILE"
@@ -175,6 +193,17 @@ def land(delivered: dict[str, str], env_file: str, token_file: str) -> dict[str,
     The token is split out of both the env file and the returned environment: it
     lives in its own 0600 file and is named by `MOMO_WORKD_REGISTRATION_TOKEN_FILE`.
     """
+    # The delivery is not the only way a raw token can reach a process
+    # environment. Template-baked `--env` *does* reach PID 1 (measured), so a
+    # template built with `MOMO_WORKD_REGISTRATION_TOKEN` in it hands this
+    # process an inherited copy that `delivered` knows nothing about — and
+    # `main()` builds the workload's environment from `os.environ`, so popping
+    # only the delivered copy would leave the inherited one to ride through into
+    # `/proc/<pid>/environ`. Unconditional, because a value baked into a template
+    # is per-template and a registration token is per-provision: an inherited one
+    # is stale by construction and there is no case where honouring it is right.
+    os.environ.pop(TOKEN_NAME, None)
+
     child_env = dict(delivered)
     token = child_env.pop(TOKEN_NAME, None)
     if token is not None:
@@ -198,7 +227,56 @@ class InitHandler(http.server.BaseHTTPRequestHandler):
     server_version = "momo-bootstrap-init"
     sys_version = ""
 
+    # The read deadline for one accepted connection. `HTTPServer.timeout` bounds
+    # only the wait *between* connections: once `accept()` returns, every read on
+    # `rfile` is blocking, so a peer that opens a socket and never finishes its
+    # request line parks PID 1 in `readline()` and `--timeout` is never consulted
+    # again — the receiver stops being time-fail-closed. `socketserver`'s
+    # `StreamRequestHandler.setup()` applies this to the accepted socket, and
+    # `BaseHTTPRequestHandler` already treats the resulting `TimeoutError` as
+    # "close this connection", so a stalled peer costs one bounded wait and the
+    # deadline below survives it.
+    timeout = DEFAULT_READ_TIMEOUT_SECONDS
+
+    def setup(self) -> None:
+        super().setup()
+        self._apply_read_deadline()
+
+    def _apply_read_deadline(self) -> None:
+        """Bound this connection by the read timeout *and* by `--timeout`.
+
+        Without the second half the deadline would only be enforced while idle:
+        a connection accepted one second before it expires could still hold the
+        program for the full read timeout. Clamping to whatever is left of the
+        deadline makes `--timeout` mean the same thing whether or not anybody is
+        connected.
+        """
+        limit = self.timeout
+        deadline = getattr(self.server, "deadline", None)
+        if deadline is not None:
+            limit = min(limit, max(0.05, deadline - time.monotonic()))
+        self.connection.settimeout(limit)
+
     def do_POST(self) -> None:  # noqa: N802 — BaseHTTPRequestHandler's spelling
+        # One delivery per boot, enforced here and not only at the socket.
+        #
+        # Normally unreachable: the listener is closed the moment a delivery
+        # lands, and every answer is `Connection: close`, so a second POST does
+        # not get read. That is exactly why the guard is cheap — what it removes
+        # is the *dependence* on those two facts. A later edit that answers
+        # keep-alive, or a client that pipelines a second request into the same
+        # segment, would otherwise reach `land()` again and rewrite the token
+        # file with material the substrate's receipt never covered.
+        #
+        # `409` rather than a soothing `200`: the second body may carry different
+        # values, and answering `200` would claim material landed that did not —
+        # the same lie the write-failure branch below refuses to tell. The create
+        # already has its receipt from the first `200`, so nothing upstream is
+        # waiting on this answer.
+        if getattr(self.server, "child_env", None) is not None:
+            log("second delivery refused: this receiver is one-shot")
+            self._respond(409, {"error": "already delivered"})
+            return
         if self.path.rstrip("/") not in ("/init", ""):
             self._respond(404, {"error": "not found"})
             return
@@ -236,6 +314,11 @@ class InitHandler(http.server.BaseHTTPRequestHandler):
         self._respond(200, {})
 
     def _respond(self, code: int, payload: dict) -> None:
+        # Stated rather than inferred. `send_header("Connection", "close")` below
+        # sets this flag itself, but the one-shot contract depends on the flag,
+        # not on the header, and a reader should not have to know that
+        # `BaseHTTPRequestHandler` parses its own headers to see why.
+        self.close_connection = True
         body = json.dumps(payload).encode()
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
@@ -257,15 +340,23 @@ class InitServer(http.server.HTTPServer):
         self.token_file = token_file
         self.child_env: dict[str, str] | None = None
         self.delivered_names: list[str] = []
+        # Set by [`receive`]; read by [`InitHandler._apply_read_deadline`] so a
+        # request in flight cannot outlive `--timeout`.
+        self.deadline: float | None = None
 
 
-def receive(port: int, env_file: str, token_file: str, timeout_seconds: int) -> dict[str, str]:
+def receive(
+    bind: str, port: int, env_file: str, token_file: str, timeout_seconds: int
+) -> dict[str, str]:
     """Serve until one delivery lands, then close the listener for good."""
-    server = InitServer(("0.0.0.0", port), env_file, token_file)
+    server = InitServer((bind, port), env_file, token_file)
     # A short poll rather than a blocking accept, so the deadline below is real
-    # even when nothing ever connects.
+    # even when nothing ever connects. The other half — a deadline that is real
+    # while a connection *is* open — is `InitHandler`'s read timeout, which reads
+    # `server.deadline`.
     server.timeout = 1
     deadline = None if timeout_seconds <= 0 else time.monotonic() + timeout_seconds
+    server.deadline = deadline
     try:
         while server.child_env is None:
             server.handle_request()
@@ -289,6 +380,13 @@ def main(argv: list[str]) -> int:
         description="Receive one CubeSandbox /init delivery, then exec the workload.",
     )
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
+    parser.add_argument(
+        "--bind",
+        default=DEFAULT_BIND,
+        help="Address to listen on. The default is what a microVM needs — the delivery arrives "
+        "on the sandbox's own IP, which the guest cannot learn. Tests pass a loopback address so "
+        "a gate run never opens a port to the LAN it is running on.",
+    )
     parser.add_argument("--env-file", default=DEFAULT_ENV_FILE)
     parser.add_argument("--token-file", default=DEFAULT_TOKEN_FILE)
     parser.add_argument(
@@ -303,7 +401,9 @@ def main(argv: list[str]) -> int:
     os.umask(0o077)
     log("waiting for the /init delivery on :%d" % args.port)
     try:
-        child_env = receive(args.port, args.env_file, args.token_file, args.timeout)
+        child_env = receive(
+            args.bind, args.port, args.env_file, args.token_file, args.timeout
+        )
     except TimeoutError as exc:
         log(str(exc))
         return 3

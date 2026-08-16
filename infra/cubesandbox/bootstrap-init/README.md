@@ -79,7 +79,20 @@ CMD ["/usr/local/bin/momo-bootstrap-init","--","/usr/local/bin/momo-workd-run"]
 
 - **One shot.** After the first accepted delivery the socket is closed and never
   reopened. Measured: a second `POST /init` gets `connection refused`, before and
-  after a pause/resume cycle.
+  after a pause/resume cycle. `do_POST` refuses a second delivery `409` as well,
+  which is normally unreachable — every answer is `Connection: close` — and
+  exists so the invariant does not *depend* on that: a keep-alive answer, or a
+  client that pipelines two requests into one segment, would otherwise re-run
+  `land()` and rewrite the token file with material the substrate's receipt never
+  covered.
+- **The wait is bounded, connected or not.** `--timeout` is enforced both between
+  connections and *during* one: an accepted socket gets a read deadline, clamped
+  to whatever is left of the program's own. Without it a peer that opens a
+  connection and never finishes its request line parks PID 1 in `readline()`
+  forever, since `HTTPServer.timeout` only bounds the wait for the next
+  `accept()`. The receiver has to fail closed on time for the same reason it
+  answers `500` on a write failure: a template that hangs is a template whose
+  create never resolves.
 - **The token never enters a process environment.**
   `MOMO_WORKD_REGISTRATION_TOKEN` is written to `/etc/momo/registration.token`
   (mode 0600) and replaced by `MOMO_WORKD_REGISTRATION_TOKEN_FILE` in both
@@ -87,7 +100,14 @@ CMD ["/usr/local/bin/momo-bootstrap-init","--","/usr/local/bin/momo-workd-run"]
   `infra/workd/bootstrap.sh` already prefers, for the reason ADR-0144 gives:
   `/proc/<pid>/environ` is readable by anything else in the sandbox and a 0600
   file consumed once is not. Verified in the guest: the workload's environ
-  carries the `_FILE` name and not the token.
+  carries the `_FILE` name and not the token. The *inherited* copy is popped too:
+  template-baked `--env` does reach PID 1, so a template built with
+  `MOMO_WORKD_REGISTRATION_TOKEN` in it would otherwise smuggle a stale token
+  into the workload that the delivery never touched. Measured on momo-cube-host
+  both ways — a template baked with that name, booted with a delivery
+  carrying a different token gave the workload
+  `MOMO_WORKD_REGISTRATION_TOKEN=<the baked one>` before the pop and nothing but
+  `…_TOKEN_FILE` after it, with `/proc/1/environ` agreeing in both runs.
 - **Names are re-validated.** CubeAPI screens env names upstream; this screens
   them again (shell-identifier shape, length bounds, no control characters, and a
   refusal list covering `LD_PRELOAD`, `PYTHONPATH`, `PATH` and friends). A check
@@ -95,6 +115,29 @@ CMD ["/usr/local/bin/momo-bootstrap-init","--","/usr/local/bin/momo-workd-run"]
 - **A write failure is answered `500`, not `200`.** Telling the substrate the
   material landed when it did not would turn `create 201` from a receipt into a
   lie.
+
+## How these claims stay true
+
+`test_bootstrap_init.py` (stdlib only, `scripts/local_gate.sh` static lane) runs
+the receiver as a real process, speaks HTTP to it over a loopback socket, and
+reads the files and the exec'd environment it leaves behind. Every bullet above
+has a case: the 0600 landing and the `_FILE` swap, four malformed bodies refused
+`400` with the one shot unspent, a write failure answered `500`, the port gone at
+TCP after the delivery, a held-open connection failing closed at `--timeout`, a
+pipelined second POST that never re-runs `land()`, and a template-baked token
+that does not survive into the workload.
+
+`--prove-red` re-runs four of them against deliberately broken copies (a blocking
+accepted socket, a keep-alive answer, a keep-alive answer with the one-delivery
+guard removed, an inherited token left in place) and requires each to fail. Each
+mutation asserts its anchor text was found, so a refactor that moves the code
+breaks the proof loudly rather than passing on nothing.
+
+The host half of the same contract is
+`server-rust/crates/momo-t3/tests/cubesandbox_conformance.rs`. It models this
+program's conversion (token → file, `…_TOKEN_FILE` in its place) so a name added
+to the adapter's delivery shows up there as a guest variable nobody taught this
+program to land — but it *models* it; the measuring is done here.
 
 ## Template build rules that follow
 
@@ -114,10 +157,18 @@ CMD ["/usr/local/bin/momo-bootstrap-init","--","/usr/local/bin/momo-workd-run"]
 
 ## Reproducing the reference template
 
-`momo-bootstrapd` on momo-cube-host is the minimal template this receiver was
-proven against, and the one the live half of
+`momo-bootstrapd2` (`tpl-dcbf0c5ccaaf4515afc3e3bd`) on momo-cube-host is the
+minimal template this receiver was proven against, and the one the live half of
 `server-rust/crates/momo-t3/tests/cubesandbox_conformance.rs` expects in
-`MOMO_T3_CUBESANDBOX_LIVE_TEMPLATE`. It is not a shipping template — it exists so
+`MOMO_T3_CUBESANDBOX_LIVE_TEMPLATE`.
+
+> **A template is a snapshot of this file, not a link to it.** `momo-bootstrapd`
+> — the alias without the `2` — still carries the pre-repair receiver, so it
+> proves the delivery contract and *not* the invariants added since. Change this
+> file and the live arm means nothing until the template is rebuilt; that is why
+> the alias moved rather than the image being quietly replaced underneath it.
+
+It is not a shipping template — it exists so
 the contract can be exercised without a real workd:
 
 ```dockerfile
@@ -129,9 +180,9 @@ CMD ["/usr/local/bin/momo-bootstrap-init","--","<the workload>"]
 ```
 
 ```sh
-docker build -t 127.0.0.1:5000/momo-bootstrapd:v1 . && docker push 127.0.0.1:5000/momo-bootstrapd:v1
+docker build -t 127.0.0.1:5000/momo-bootstrapd:v2 . && docker push 127.0.0.1:5000/momo-bootstrapd:v2
 cubemastercli tpl create-from-image \
-  --image 127.0.0.1:5000/momo-bootstrapd:v1 --alias momo-bootstrapd \
+  --image 127.0.0.1:5000/momo-bootstrapd:v2 --alias momo-bootstrapd2 \
   --writable-layer-size 2Gi --expose-port 9000 --memory 1024 --cpu 1000 \
   --with-cube-ca=false          # and deliberately no --probe
 ```
