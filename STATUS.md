@@ -8,7 +8,7 @@
 - **`rust-toolchain.toml`은 신설하지 않았다.** 핀은 이 goal이 건드리지 말라고 지시받은 세 운영 표면(Docker 빌드 이미지·self-hosted macOS 러너·CI 툴체인 조달)을 동시에 바꾸고, 여기서 실측된 결함(거짓 `rust-version`)을 고치지도 않는다. 핀의 가장 강한 독립 논거인 **rustfmt 스큐는 이미 #1377이 들고 있다** — 근거와 함께 거기서 결정되어야 한다.
 - **부동 베이스 이미지는 보고만 한다(운영 결정, 성재 큐).** `server-rust/Dockerfile:51`의 `ARG RUST_IMAGE=rust:1-slim-bookworm`은 pull 시점 최신 1.x라 **고정이 아니다**. 오늘은 MSRV를 항상 만족하지만 재현 가능한 빌드는 아니며, 고정 전환은 이 goal에서 하지 않았다.
 - **정직 라벨 — MSRV는 어느 게이트도 재지 않는다.** pr-ci rust 레인은 러너 사전설치 **stable**로 돌므로 초록은 "러너 stable ≥ 선언값"만 뜻한다. 선언이 다시 틀려져도 CI는 침묵한다 — MSRV 검증 잡은 후속 제안이다.
-- **게이트:** `cargo test --workspace --locked` 1063 passed/0 failed/288 ignored · desktop `clippy -D warnings` clean. **server-rust `clippy -D warnings`는 RED** — MSRV를 정직하게 올리자 MSRV 게이트 린트 `clippy::manual_is_multiple_of`가 켜졌고(`crates/momo-agent/src/korean.rs:116`, 1건), 소스 비접촉 계약(#1454 비행 중) 때문에 고치지 않고 정지·이탈 보고했다. clippy는 기준 커밋에서 green임을 대조 실행으로 확인했다(원인은 이 변경 하나뿐). `cargo fmt --all --check`는 기준 커밋에서 이미 RED이며 **#1377** 소관이다.
+- **게이트:** `cargo test --workspace --locked` 1063 passed/0 failed/288 ignored · desktop `clippy -D warnings` clean · **server-rust `clippy -D warnings` green**(경고 0). MSRV 정직 상향이 켠 MSRV 게이트 린트는 1건이 아니라 **6건**이었고(clippy가 첫 크레이트에서 멈춰 있었다 — `manual_is_multiple_of` 1 + `unnecessary_map_or` 3 + `nonminimal_bool` 2, 그중 4곳이 보안 술어), 소스 비접촉 계약(#1454 비행 중)으로 1차 정지·이탈 보고 → 진리표 동치 증명과 함께 이슈 #1442 코멘트로 성재 결재 큐 이관 → **결재 집행(2026-08-17, 전권 위임)으로 6건 전부 적용**(git apply 바이트 정합·`afda586a`). 패치 1~4는 통과 단위 테스트가 직접 실행 커버, 5·6(토큰 리프레시 게이트·본문 검증)은 PG 통합 테스트로 별도 실증. `cargo fmt --all --check`는 기준 커밋에서 이미 RED이며 **#1377/#1472** 소관이다.
 
 ## T3 라이브 세션 control 개방 — 엔진 축 (창 원장·비관측 게이트·owner 예외) (#1424, 2026-08-16)
 
