@@ -18,6 +18,10 @@
 // **같은 함수 한 번**의 결과이므로, 라벨이 카드의 「작업 시간」과 다른 낱말이면
 // 한 화면의 한 숫자가 두 측정처럼 읽힌다(#1468 — 그 낱말이 「실행 시간」이었다).
 //
+// 상세 화면에서는 **초록의 개수**도 픽셀 값으로 잰다(#1491): 검증 칩은 --ok 를 진
+// 채이고 수명주기 칩은 아니다. 사진은 두 초록을 나란히 보여줄 뿐 어느 쪽이 무엇을
+// 뜻하는지 말하지 못하고, 그 물음이 이 티켓이 온 이유였다.
+//
 //   npm run build && node scripts/capture-session-chips.mjs
 //   OUT_DIR=/tmp/shots node scripts/capture-session-chips.mjs
 // =============================================================================
@@ -521,6 +525,43 @@ const META_ELAPSED = `(() => {
   };
 })()`;
 
+/**
+ * 통과한 세션의 화면에서 초록이 **몇 개인가** (#1491).
+ *
+ * 사진은 두 초록을 나란히 보여줄 뿐 어느 쪽이 무엇을 뜻하는지 말하지 못하고,
+ * 정확히 그것이 이 티켓이 온 이유였다: 수명주기 칩의 초록은 「멈췄다」 위에 얹힌,
+ * 그 화면에서 가장 정보가 없는 초록이었다. 그래서 색을 **브라우저가 푼 픽셀 값**
+ * 으로 재고 두 사실을 함께 단정한다 — 검증 칩은 --ok 그대로이고(옮긴 것이지 없앤
+ * 것이 아니다), 수명주기 칩은 아니다.
+ *
+ * `--ok` 를 임시 노드에 얹어 읽는 이유는 그 토큰이 `light-dark()` 라 문자열로는
+ * 지금 스킴의 값을 말하지 않기 때문이다. 푼 값끼리 대조해야 라이트·다크 두 판에서
+ * 같은 질문이 성립한다.
+ */
+const CHIP_GREENS = `(() => {
+  const probe = document.createElement("span");
+  probe.style.color = "var(--ok)";
+  document.body.appendChild(probe);
+  const ok = getComputedStyle(probe).color;
+  probe.remove();
+  const inkOf = (id) => {
+    const node = document.querySelector('[data-testid="' + id + '"]');
+    return node ? getComputedStyle(node).color : null;
+  };
+  return {
+    ok,
+    status: inkOf("work-detail-status"),
+    statusLabel:
+      document.querySelector('[data-testid="work-detail-status"]')?.textContent.trim() ??
+      null,
+    verification: inkOf("work-detail-verification"),
+    verificationLabel:
+      document
+        .querySelector('[data-testid="work-detail-verification"]')
+        ?.textContent.trim() ?? null,
+  };
+})()`;
+
 const DETAIL_TITLE_WIDTH = `(() => {
   const head = document.querySelector('[data-testid="work-detail-back"]').parentElement;
   const title = head.querySelector("h2, h3");
@@ -636,6 +677,27 @@ async function captureScheme(browser, scheme) {
           ` 말한다 (H-1 회귀, 「${head.text}」)`
       );
     }
+    // 초록의 개수 (#1491). 통과한 세션이 이 질문의 자리다 — 거기서만 두 칩이
+    // 동시에 초록일 수 있었다.
+    const greens = await page.evaluate(CHIP_GREENS);
+    if (greens.status === greens.ok) {
+      throw new Error(
+        `${scheme}/${name}: 수명주기 칩 「${greens.statusLabel}」이 --ok(${greens.ok})` +
+          ` 를 입고 있다 — 「멈췄다」는 초록을 벌지 않는다 (#1491)`
+      );
+    }
+    if (name === "clean" && greens.verification !== greens.ok) {
+      throw new Error(
+        `${scheme}/${name}: 통과 세션의 검증 칩 「${greens.verificationLabel}」이` +
+          ` --ok(${greens.ok})가 아니다 (${greens.verification}) — 초록은 없앤 것이` +
+          ` 아니라 정보가 있는 자리로 옮긴 것이다 (#1491)`
+      );
+    }
+    console.log(
+      `  ${scheme}/${name}: 수명주기 「${greens.statusLabel}」 ${greens.status}` +
+        ` · 검증 「${greens.verificationLabel}」 ${greens.verification}` +
+        ` · --ok ${greens.ok}`
+    );
     const shot = `${OUT_DIR}/session-detail-${name}-${scheme}.png`;
     await panel.screenshot({ path: shot });
     shots.push(shot);
