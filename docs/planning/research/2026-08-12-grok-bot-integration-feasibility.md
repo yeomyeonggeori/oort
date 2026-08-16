@@ -1,70 +1,185 @@
-# Grok Bot 연동 가능성 리서치 (2026-08-12)
+# Grok Bot 연동 가능성 리서치 — trial-first 재검수 (2026-08-12)
 
-> 발제: 성재 — "Grok bot이 X로 바이럴 런칭됨. 셀프호스팅 목표에서 사용자가 Grok bot으로 만든 ~50개 호스팅 봇을 감지/연동해 oort 협업에 쓰는 구조가 가능한지 리서치."
-> 수행: Fable 오케스트레이션 · 웹 리서치 에이전트 3기(제품 실체 / API 연동면 / 정책·선례) 병렬 실측. 조사일 2026-08-12(출시 익일).
-> 판정 요약: **원안(봇 인바운드 반입)은 현재 불가능 — 공식 표면 전무 + 비공식 경로는 AUP 3중 저촉. 성립하는 경로는 역방향 2개(MCP 커넥터 수용 · 봇의 브라우저 로그인 공식 허용)와 모델 단위 1개(xAI API provider).**
+> 발제: 사용자가 Grok Bot에서 만든 호스팅 Bot을 oort의 팀메이트로 연결할 수 있는지, 유료 구독 없이 먼저 실증할 수 있는지 검토한다.
+>
+> 판정: **Bot을 oort가 자동 열거·호출·반입하는 경로는 문서화돼 있지 않다. 반대로 공식 MIT `Create Plugin`으로 만든 비공개 local plugin의 MCP loader가 oort 공개 URL까지 실제 다이얼인하고, Bot Routine이 수동 실행되는 것은 확인했다. 현재 첫 실패는 oort Rust route 부재의 HTTP 404이며 auth/pairing/tool call/full E2E는 아직 미검증이다.** 제품 방향은 “Grok 전용 연동”이 아니라 **Bring your hosted agent**, Grok Bot은 첫 preset이다.
 
-## 0. 전제 교정 — 브리핑과 실측의 차이 (중요)
+## 1. 결론부터
 
-| 브리핑 | 실측 |
-|---|---|
-| "X를 통해 런칭된 봇 플랫폼" | X는 **발표·바이럴 채널일 뿐**. 실체는 SpaceXAI(구 xAI, 2026-02 SpaceX 피인수·07 리브랜딩)+Cursor(2026-06 $60B 주식 인수 합의, 클로징 전)가 **2026-08-11 베타 출시한 독립 데스크톱(macOS/Windows)+iOS 앱**. X 계정/DM으로 봇이 노출되지 않음 |
-| "사용자당 ~50개 호스팅 봇" | 문서상 한도는 **"봇 1개당 루틴(routine) 50개"** ("A Bot can own up to 50 routines" — docs.x.ai/grok-bot/skills-routines-and-automations). **봇 개수 상한은 미공개**. "50"은 루틴 한도의 와전으로 판단 |
-| 소비자 대상 무료 바이럴 | **무료 티어 없음.** SuperGrok Heavy $300/월 · Cursor Ultra $200/월 · Cursor Teams Premium $120/석/월 번들. 현재 제한 베타(Musk: Grok 4.6과 함께 금주 후반 확대 예고) |
+1. **선결제는 이번 실증의 필수조건이 아니었다.** 공식 문서는 개인 사용자에게 one-time trial을 안내한다. #1344 personal account는 별도 trial entitlement/start 문구나 결제·구독 UI 없이 Bot 1개·기본 채팅·Plugin·Routine 실측까지 진행했고 구매는 0건이었다. 이 관측만으로 영구 무료 tier나 향후 entitlement를 약속하지 않는다. team account는 eligibility와 별개로 조직의 강제 `NO_STORAGE` 정책에 막혔다.
+2. **자동 Bot 감지는 v0에서 불가능한 문제를 풀려는 접근이다.** 공개 Bot roster/control API가 문서화돼 있지 않으므로 계정을 긁거나 Bot 목록을 가져오지 않는다. 사용자가 선택한 Bot이 one-time pairing 값으로 oort에 먼저 접속하게 해 감지한다.
+3. **연동 표면은 custom MCP + routine이다.** 비공개 local plugin의 `mcp.json`에 arbitrary HTTPS endpoint를 등록하고 loader의 `POST initialize`·`GET`이 실제 도달하는 것, Active-off monthly routine의 manual Test run이 성공하는 것은 검증했다. endpoint가 auth challenge 전에 404를 반환했으므로 인증 방식·MCP tool call·scheduled 실행은 `runtime-unverified`다.
+4. **연결 해제는 두 단계다.** oort credential은 즉시 revoke하고, 공개 routine/connector 삭제 API가 문서화돼 있지 않은 동안에는 provider UI에서 deterministic routine과 MCP connector를 제거한 뒤 사용자가 완료를 확인한다.
+5. **Cursor Cloud Agents는 별도 기회다.** 공개 API가 더 넓어도 Grok Bot roster/run을 대신 노출하는 우회 API는 아니다.
 
-## 1. 제품 실체 (확정 사실)
+## 2. 공식 사실과 실측 대기 항목
 
-- **Grok Bot** = 공식 제품명. "상시 가동 AI 팀메이트": 이름 있는 영속 에이전트에게 동료에게 말하듯 메시지로 업무 배정. Grok(어시스턴트)·Grok Build(CLI 코딩)와 별개의 3번째 제품.
-- 구성: 직무 서술 + 턴 간 유지되는 메모리·파일·브라우저 세션 + 스킬(재사용 지시문) + 루틴(스케줄/이벤트 트리거 — 이벤트는 Cursor 통합 Slack·GitHub 폐쇄 목록) + MCP 커넥터.
-- 실행 기질: **사용자 계정당 1대의 퍼시스턴트 클라우드 VM을 모든 봇이 공유**(브라우저·터미널·`/workspace`). "Isolation is per user, not per Bot". 봇이 API 없이 사용자의 실제 앱/웹사이트에 **UI 로그인해 직접 조작**하는 computer-use가 핵심 능력.
-- 인증·과금 인프라는 **Cursor 계정** 기반. 봇 간 그룹챗/작업 인계는 **제품 내부 기능**.
-- 바이럴 규모: 언론 보도 폭은 큼(Bloomberg·VentureBeat·9to5Mac 등, HN 212pt). 사용자·봇 수 정량치는 전무(출시 1일차).
+판정 표기:
 
-## 2. 연동 표면 실측 — 인바운드 전면 부재 (확정, 부재 근거 명기)
+- **검증됨:** 2026-08-12 공식 문서 또는 현행 oort 코드로 확인
+- **runtime-unverified:** 로그인 뒤 제품 UI 또는 실제 네트워크 왕복이 있어야 확인
+- **추정 금지:** 공개 문서에서 찾지 못했으므로 존재·부재를 절대 단정하지 않고 제품 계약으로 사용하지 않음
 
-docs.x.ai Grok Bot 전 문서(5편)와 api.x.ai REST 레퍼런스 전 카테고리를 직접 fetch해 확인:
+| 항목 | 판정 | 결과 |
+|---|---|---|
+| 계정 한도 | 검증됨 | 한 계정의 **Bot과 group chat 합계가 최대 50**이다. “Bot 50개” 또는 “50은 routine만”으로 단순화하면 틀린다. |
+| routine 한도 | 검증됨 | **Bot당 routine 최대 50**이다. 계정 한도와 별개의 수치다. |
+| 개인 trial | 문서 검증됨/entitlement 미판정 | 공식 문서는 개인 사용자를 위한 **one-time trial**을 안내한다. #1344 personal account는 별도 trial entitlement/start 문구 없이도 구매 0으로 Bot·채팅·Plugin·Routine 실측이 가능했다. 이것이 trial 자동 적용인지 다른 access 상태인지는 관측값만으로 단정하지 않는다. team account는 `trialEligible=true`였지만 team-enforced `NO_STORAGE` policy gate로 차단됐다. |
+| 영구 무료 tier | 추정 금지 | 공식 문서가 one-time trial을 안내한다는 사실만 쓴다. trial 이후 가격·결제는 live checkout 확인 없이 계약에 고정하지 않는다. |
+| Bot roster/run/control API | 추정 금지 | 2026-08-12 공개 문서에서 Bot ID, roster, group chat, run을 열거·호출하는 API를 찾지 못했다. “xAI API가 없다”는 뜻은 아니다. |
+| routine/connector delete API | 추정 금지/부분 실측 | 공개 control/delete API는 찾지 못했다. UI에서 routine Delete는 확인 없이 즉시 목록에서 제거됐고 connector Uninstall은 connector 목록만 제거한 채 local plugin source를 남겼다. 자동·완전 cleanup은 약속하지 않는다. |
+| custom MCP | transport 검증됨 | 공식 MIT `Create Plugin`으로 만든 비공개·미게시 local plugin의 `mcp.json`에 arbitrary public HTTPS endpoint를 등록했다. Yours UI가 수동 추가·HTTP·URL·`Tools 0`를 보였고 loader의 `POST initialize`와 `GET`이 실제 endpoint에 도달했다. route 404 때문에 auth/discovery/tool은 미검증이다. |
+| routine wake-up | manual 실행 검증됨 | Active off·monthly trigger routine을 저장하고 manual Test run을 실행해 약 1분 뒤 exact sentinel과 `Succeeded`를 확인했다. scheduled wake-up, 최소 cadence, event→MCP 폐곡선, 지연 SLA는 실측 대기다. |
+| 실행 격리 | 검증됨 | 한 사용자의 Bot들이 persistent computer의 파일·브라우저 session·cookie·CLI credential을 공유한다. Bot별 보안 격리 모델로 간주하면 안 된다. |
+| provider 선택 | 검증됨 | Grok Bot은 호스팅된 runtime/model bundle이다. oort가 Bot의 provider/model을 선택하는 경로가 아니다. |
 
-- **봇 열거 API 없음** · **봇 외부 호출 API 없음** — api.x.ai 카테고리는 Chat/Images/Videos/Voice/Models/Files/Batches뿐(모델 추론 표면). Agent Tools API는 "새 에이전트를 빌드"하는 용도로 기존 Grok Bot 접근과 무관.
-- **위임 OAuth 없음** — Grok Bot 인증은 Cursor 로그인 단일. 제3자 앱에 봇 접근을 위임하는 흐름 부재. (accounts.x.ai의 구독 OAuth PKCE는 존재하나 **모델 추론** 용도이며 xAI가 계정별 allowlist를 강제.)
-- **봇별 endpoint/webhook 없음** · **A2A 미지원** · **export 없음**(봇 정의 이식 개념 자체가 부재 — "Deleting a Bot does not remove shared-computer files").
-- **유일한 공식 접점 = MCP, 방향은 봇→외부**: 봇이 MCP를 "소비"만 한다. 사용자가 **커스텀 원격 MCP 서버 URL을 커넥터로 추가 가능**(공개 URL 필요).
-- 비공식 리버스 API: Grok Bot 대상은 아직 없음(출시 1일). 소비자 Grok 대상 리버스 생태계(grok-bypass·Grok3API 등)는 풍부 — 곧 나올 개연성 높으나 채택 불가(§3).
+공식 문서:
 
-## 3. 정책 제약 (약관 원문 실측 — Wayback 스냅샷)
+- [Introducing Grok Bot](https://x.ai/news/introducing-grok-bot)
+- [Grok Bot — Bots](https://docs.x.ai/grok-bot/bots)
+- [Get started](https://docs.x.ai/grok-bot/get-started)
+- [Skills, routines and automations](https://docs.x.ai/grok-bot/skills-routines-and-automations)
+- [Computer and apps](https://docs.x.ai/grok-bot/computer-and-apps)
+- [Approvals, security and privacy](https://docs.x.ai/grok-bot/approvals-security-and-privacy)
+- [Teams and enterprises](https://docs.x.ai/grok-bot/teams-and-enterprises)
+- [Grok connectors](https://docs.x.ai/grok/connectors)
+- [Custom MCP tunneling](https://docs.x.ai/grok/connectors/custom-mcp-tunneling)
 
-- **xAI AUP**(2026-06-26 발효): 자동화 접근 금지("Accessing the Services through automated or non-human means"), 리버스 엔지니어링 금지, 출력 재판매/증류 금지, 경쟁 AI 서비스 개발 금지. 위반 시 계정 정지.
-- **소비자 ToS**: 계정 자격증명 공유 금지 + **베타 기능은 개인·비상업 한정** → 사용자 계정 자동화로 봇을 oort에 재노출하는 구조는 **3중 저촉**이며, 정지 리스크가 **사용자 계정에 전가**된다.
-- **엔터프라이즈 ToS**: xAI **API 경유** 통합·재노출("Bundled Services")은 **명시 허용** — 단 이는 모델 통합이지 "사용자의 봇 개체" 접근이 아님.
-- 단속 전력: X의 2023 서드파티 클라이언트 즉시 차단 전례. xAI는 개방(모델 가중치 공개·Grok Build 오픈소스·OpenClaw OAuth 허용)과 폐쇄(전면 자동화 금지·사이트 봇 차단)의 양면.
-- 업계 패턴: **호스팅 봇 플랫폼은 봇 개체를 외부에 열지 않는다**(OpenAI GPTs "not a way to embed... use the API" · Character.ai · Meta AI Studio 동일). 여는 형태는 (a) 별도 API로 재구축 (b) 구독 OAuth를 서드파티 하네스에 허용(xAI→OpenClaw 2026-05 전례) 둘뿐.
+## 3. 무엇이 가능한가
 
-## 4. 판정
+### 3.1 채택: Bot이 oort로 다이얼인
 
-**"사용자의 Grok Bot들을 oort로 가져와(인바운드) 협업 멤버로 쓴다"는 원안은 현재 불가능하다.**
-① 기술적으로 표면이 없고(열거·호출·위임·export 전무) ② 우회(계정 자동화·리버스)는 AUP 정면 저촉 + 사용자 계정 정지 리스크 전가 + X 계열 단속 전력상 최고위험이라 채택 불가. ③ "감지" 역시 봇이 공개 신원 표면(X 계정 등)을 갖지 않아 자동 감지 대상이 존재하지 않는다.
+사용자가 Grok Bot에 oort의 원격 MCP endpoint를 connector로 등록하고, deterministic routine이 oort inbox를 확인하게 한다.
 
-단, **역방향으로는 지금 성립하는 경로가 둘 있다** — 그리고 이 역방향이 oort의 테제("에이전트=1급 멤버")와 오히려 정합적이다.
+```text
+Grok Bot routine wakes
+        │
+        v
+oort Agent Port (MCP 2026-07-28)
+        │
+        ├─ one-time pairing / active credential
+        ├─ durable inbox cursor
+        ├─ existing thread read + message send facade
+        └─ existing gateway pending/lease/events/complete binding
+        │
+        v
+Postgres SoT → transactional outbox → Centrifugo transport
+```
 
-## 5. 실행 가능 경로 (권고 순)
+이 경로는 xAI/Cursor credential을 oort에 전달하지 않는다. 사용자가 oort에서 발급한 connection-scoped credential을 자기 Bot connector에 설정한다. ADR-0162는 connection마다 `oauth | static_bearer` 하나를 activation 전에 명시하고 fallback/downgrade하지 않는 경계를 Accepted했다. #1344는 loader가 URL까지 도달하는 것만 확인했고 route 404가 auth challenge 전에 끝났으므로 Grok preset의 mode는 HAP-E2 route와 후속 E2E에서 봉인한다.
 
-- **경로 A — 봇의 브라우저 로그인 공식 허용 (연동 0줄로 성립)**: Grok Bot의 핵심 능력이 "API 없는 서비스에 UI 로그인해 작업"이다. oort가 **"자동화 에이전트 로그인을 공식 허용하는 메신저"를 선언**하고(약관+에이전트 계정 등록 UX), 사용자가 자기 봇에게 "oort 웹에 이 계정으로 로그인해 채널 X에서 일해라"라고 지시하면 끝. 감지는 자동이 아니라 **선언 기반**(사용자가 봇을 agent member로 등록)으로 치환. xAI 측 연동 불요, 정책 리스크는 우리 약관 문제일 뿐(우리가 허용). 언론 프레임도 "대상 서비스가 자동화 접근을 허용하는지 확인하라"는 쪽.
-- **경로 B — oort MCP 서버 노출**: 사용자가 자기 Grok Bot 커넥터에 oort MCP 서버 URL을 추가 → 봇이 채널 읽기/쓰기 도구를 획득. A보다 구조적(도구 호출)이지만 **트리거를 oort가 당길 수 없음**(이벤트 트리거는 Cursor 통합 폐쇄 목록) — 봇 참여는 스케줄 루틴/사용자 지시 기반이라 실시간성 한계. MCP 서버 표면 신설은 **경계 변경 → ADR 필수**(인증·권한·RLS 정합 설계 선행).
-- **경로 C — xAI API provider 추가 (봇 반입 아님)**: 명시 허용된 유일 경로. Grok 모델을 ADR-0147 `provider_link` 금고+agent-worker 구조에 provider로 추가해 "oort산 Grok 에이전트"를 제공. 기존 아키텍처(ADR-0004 경계) 그대로 수용 가능. 단 이것은 "네 봇을 가져와"가 아니라 "여기서 Grok 에이전트를 만들어"다.
-- **경로 D — 관찰(1~2주 + 분기 재실측)**: ①금주 Grok 4.6 동반 확대 롤아웃에서 API/파트너 프로그램 발표 여부 ②"Multi-Agent Beta API coming soon" 풍문(단일 소스, 추정) ③엔터프라이즈 버전 관리 API 포함 여부 ④OpenClaw형 구독 OAuth의 Grok Bot 확장 여부. 표면이 열리면 그때 인바운드 재검토.
+### 3.2 채택: 사용자 의도 기반 pairing
 
-## 6. 전략 노트
+v0 감지는 roster discovery가 아니라 handshake다.
 
-- **포지셔닝 정면 충돌**: "에이전트를 동료처럼 메시지로 부린다 + 봇 간 그룹챗 협업"은 oort 테제와 동일 좌표. 다만 저들은 $120+/월 폐쇄 SaaS·계정당 VM — HN 출시 스레드에서 **"이걸 직접 겨루는 오픈소스 대안 있나"는 질문이 이미 나왔다**. oort의 기회는 "연동"보다 **"모든 벤더의 에이전트가 협업하는 열린 셀프호스팅 자리"** 그 자체.
-- Grok Bot 흡수가 아니라 **수용 태세**가 정답: 경로 A(에이전트 로그인 허용 선언)+B(MCP 표면)는 Grok Bot 전용이 아니라 OpenClaw·Claude·任意 에이전트 하네스에 동일하게 열리는 일반 표면이다.
-- 리스크 관찰: X.com 챗+Grok Bot의 Slack 방향 진화 추측(HN) — 분기 재실측 항목.
+1. 사용자가 oort에서 “호스팅 에이전트 연결”을 시작하면 서버가 전용 agent member, paused profile, pairing connection을 원자 생성한다.
+2. Grok preset이 endpoint, one-time pairing 값, deterministic connector/routine 이름을 보여준다.
+3. Bot이 먼저 handshake하면 oort가 `detected`로 표시한다.
+4. 사람이 dedicated agent member, channel, permission을 확인한 뒤 pairing challenge와 별도인 active credential을 발급/교환한다. 그 credential proof와 member unpause가 같은 activation 경계에서 끝난 뒤에만 `active`가 된다.
 
-## 7. 미해결 질문
+이 방식은 공개 roster 권한이 없어도 사용자가 의도한 Bot만 연결하며, account scraping이나 reverse API가 필요 없다.
 
-1. 봇 개수 실상한 — 실구독 계정 앱 실사용으로만 확인 가능.
-2. Grok Bot 베타 전용 추가 약관(로그인 장벽 뒤) · Cursor 약관의 적용 범위.
-3. 스킬 온디스크 포맷(이식 가능성 재료) — 데스크톱 앱 분석 없이는 불명.
-4. 경로 A의 성립 조건 — oort 약관 "에이전트 로그인 허용" 명문화는 **별도 ADR 사안**.
+### 3.3 별도 lane: Cursor Cloud Agents
 
-## 출처 (전 항목 2026-08-12 확인)
+Cursor Cloud Agents API는 durable agent/follow-up run, no-repo agent, cloud/self-hosted machine, remote/stdio MCP, SSE/artifact/usage 등 별도 자동화 표면을 제공한다. 그러나 Grok Bot ID나 group chat을 노출하는 문서화된 proxy가 아니다.
 
-x.ai/news/introducing-grok-bot · x.ai/bot · docs.x.ai/grok-bot/{overview,get-started,skills-routines-and-automations,computer-and-apps,approvals-security-and-privacy} · docs.x.ai/developers/rest-api-reference · docs.x.ai/grok/connectors · x.ai/legal AUP·ToS·엔터프라이즈 ToS(Wayback 2026-07/08 스냅샷) · docs.x.com/developer-terms/agreement · docs.openclaw.ai/providers/xai · news.ycombinator.com/item?id=49261514 · Bloomberg/VentureBeat/9to5Mac/GIGAZINE/kingy.ai/usecarly/trendingtopics (2026-08-11~12) · Musk X post(x.com/elonmusk/status/2087233507370147920) · durovscode.com(Telegram 딜 무산) · help.openai.com(GPTs) · TechCrunch(2023 X 단속)
+따라서 Cursor Cloud Agents를 평가할 때는 **Grok Bot 우회 연동**이 아니라 별도 direct-API hosted agent 후보로 이슈를 분리한다.
+
+- [Cursor Cloud Agents API endpoints](https://cursor.com/docs/cloud-agent/api/endpoints)
+
+## 4. 무엇을 하지 않는가
+
+- xAI/Cursor 계정 cookie, session 또는 credential을 oort에 저장
+- 비공개 endpoint reverse engineering, browser scraping, credential replay
+- Bot/group chat roster를 자동 열거했다고 표시
+- Bot definition, memory, shared-computer file을 export/import했다고 표시
+- 공개 API 근거 없이 routine/MCP connector를 자동 생성·삭제
+- #1344에서 관측한 private plugin 경로를 모든 account/plan/version에 반드시 보인다고 일반화
+- routine을 실시간 webhook처럼 홍보하거나 응답 SLA를 약속
+
+공식 UI, custom MCP, routine, 공개 API 범위만 사용한다. 약관 해석과 상용 배포 판단은 법률 자문이 아니며 공개 런칭 전 별도 법무 검토가 필요하다.
+
+- [xAI Acceptable Use Policy](https://x.ai/legal/acceptable-use-policy)
+- [xAI Consumer Terms](https://x.ai/legal/terms-of-service)
+- [Cursor Terms](https://cursor.com/terms-of-service)
+
+## 5. oort 코드 감사가 바꾼 설계
+
+초안은 기존 자산을 과대평가하고 순서 계약을 잘못 사용했다.
+
+| 초안 전제 | 코드 감사 | 교정 |
+|---|---|---|
+| Rust `/v1/mcp/drive`가 기반으로 존재 | route는 은퇴 중인 Swift에 있고, Rust에는 MCP crate/router가 없다 | Rust MCP 2026-07-28 modern core와 2025-11-25 legacy compatibility foundation부터 만든다 |
+| 단일 `after_seq`로 inbox poll | `message.seq`는 channel-local | 별도 durable cross-channel `inbox_seq`를 둔다 |
+| MCP `task_claim/complete/release`를 새로 설계 | Rust gateway에 pending/lease/renew/release/events/complete가 이미 존재 | MCP는 gateway의 thin binding만 제공한다 |
+| MCP Tasks와 oort job이 같은 상태기계 | MCP Tasks는 long-running RPC result handle | job/run SoT는 현행 gateway에 유지한다 |
+| 정적 bearer 확정 | Grok connector의 실제 auth 지원 미실측 | ADR-0162는 명시적 `oauth | static_bearer` 이중 mode와 무강등 경계를 고정하고, Grok preset의 mode는 HAP-E2 route에서 auth challenge를 관측한 뒤 봉인한다 |
+
+MCP 기준은 [2026-07-28 specification](https://modelcontextprotocol.io/specification/2026-07-28), [changelog](https://modelcontextprotocol.io/specification/2026-07-28/changelog), [versioning](https://modelcontextprotocol.io/specification/2026-07-28/basic/versioning), [server/discover](https://modelcontextprotocol.io/specification/2026-07-28/server/discover)다. 최신 규격은 `initialize`·`ping`·protocol session을 제거했다. #1344의 Grok `POST initialize`·`GET`은 legacy client/fallback 관측이므로 [2025-11-25 lifecycle](https://modelcontextprotocol.io/specification/2025-11-25/basic/lifecycle) compatibility adapter로 격리하고, 은퇴한 Swift 구현의 2025-06-18 wire shape를 복사하지 않는다.
+
+## 6. trial-first 실증 계약
+
+### 6.1 선행조건
+
+- **완료:** 사용자가 Grok Bot 앱 설치를 명시적으로 승인하고 본인이 personal account 로그인/consent를 처리했다.
+- oort/Codex는 password, MFA, Cursor/Grok session cookie, 결제 정보를 받거나 기록하지 않는다.
+- **완료:** team account의 `NO_STORAGE` policy gate를 기록한 뒤 personal account에서 별도 trial start·결제 없이 Bot·채팅·Plugin·Routine 실측을 마쳤다. 향후 유료 전환이 요구되면 진행하지 않는다.
+- test workspace와 non-production data만 쓴다.
+
+### 6.2 최소 실측표
+
+| 단계 | 확인할 것 | 성공 기준 | 실패 시 처리 |
+|---|---|---|---|
+| Access | 무구매 진입 | 별도 trial start·결제 UI 없이 personal Bot 제품 표면 도달 — **완료** | 구매하지 않고 account/policy-gated evidence 기록 |
+| Bot | test Bot 1개 생성·실행 | 유료 전환 없이 non-production Bot 생성·기본 채팅 — **완료** | 구매하지 않고 노출된 제약을 기록 |
+| Connector | custom remote MCP 추가 | private plugin 등록과 loader HTTP 왕복 — **완료**; initialize 성공은 HAP-E2 후속 | 지원 plan/UI/auth 조합을 사실로 기록 |
+| Auth | header/OAuth/redirect/proxy 특성 | route 404가 auth challenge 전이라 **후속 이관** | HAP-E2에서 endpoint를 세운 뒤 ADR-0162 D4 preset parameter 봉인 |
+| Pairing | one-time handshake | `pairing_pending → detected`, replay 거부 | generic client 구현은 계속, Grok preset 보류 |
+| Routine | deterministic routine 실행 | Active-off monthly routine manual run sentinel 성공 — **실행 표면 완료**; inbox/tool은 후속 | 최소 주기/지연을 runtime-unverified로 유지 |
+| Cleanup | routine/connector 제거 | routine 목록 제거와 connector UI uninstall — **개별 UI 완료**; 공식 Bot-owned-routine cascade는 live 미실측, connector/local source 연쇄는 미문서·후속 | `cleanup_pending` 유지, 자동 삭제 주장 금지 |
+
+### 6.3 기록할 evidence
+
+- 앱/문서 version과 확인 시각
+- 계정별 access 결과와 무료/trial Bot 생성 진입 여부(가격·결제 정보 제외)
+- MCP protocol/auth capability와 redacted request metadata
+- routine trigger 종류·최소 주기·관측 지연
+- pairing replay/revoke/cleanup 결과
+- `runtime-unverified`로 남은 항목과 재현 절차
+
+실제 token, endpoint secret, cookie, 개인 workspace 내용은 screenshot·로그·이슈·문서에 남기지 않는다.
+
+## 7. 연결 해제와 기대 사용자 경험
+
+연결 해제 버튼은 “외부 Bot을 삭제”하지 않는다.
+
+1. oort credential을 즉시 revoke하고 connection 전용 agent member를 pause해 새 read/write/job 요청을 막는다.
+2. 상태를 `cleanup_pending`으로 바꾼다.
+3. connection manifest의 deterministic 이름으로 Grok routine과 MCP connector 제거 단계를 보여준다.
+4. setup이 local plugin source를 만들었다면 connector Uninstall과 별도로 source 정리를 안내한다. 개인 filesystem path는 서버에 저장하지 않는다.
+5. 공개 cleanup API가 없으면 사용자가 provider UI와 local source를 정리한 뒤 완료를 확인한다.
+6. 과거 member, message, task/run history는 보존한다.
+
+이 분리는 외부 artifact 정리가 늦어져도 oort 권한은 즉시 차단하면서, 정리되지 않은 routine이 계속 비용을 쓰거나 오류를 내는 상황을 사용자에게 숨기지 않는다.
+
+## 8. 제품·사업 판단
+
+Grok Bot 자체의 관심을 런칭에 활용하되 제품의 moat를 특정 vendor에 두지 않는다.
+
+- 상위 메시지: **Bring your hosted agent**
+- 검증 후 보조 메시지: **Grok Bot도 몇 단계로 연결할 수 있습니다**
+- 기대효과: agent 배포·운영 허들이 없는 사용자를 빠르게 oort 팀 협업에 유입
+- 방어선: 같은 Agent Port에 다른 MCP-capable hosted agent를 연결할 수 있어 vendor rollout 변화에 종속되지 않음
+- 정직한 한계: wake-up·비용·지연·routine 지속성은 provider가 소유하며 실시간성을 보장하지 않음
+
+## 9. 권장 실행 순서
+
+1. **사실·ADR 정합 — 완료:** 본 문서와 ADR-0162를 교정했고 성재 승인으로 ADR-0162가 Accepted됐다.
+2. **trial-first spike — 완료:** 앱 provenance와 team policy gate, personal Bot·채팅, private custom-MCP loader HTTP 왕복, Active-off routine manual success/delete, connector uninstall/local-source 잔류를 구매 없이 측정했다. auth/pairing/tool/full E2E는 HAP-E2/E3 뒤로 명시적으로 이관했다.
+3. **generic MCP foundation:** Grok과 무관한 test client로 discovery/auth/revoke/rate-limit을 닫는다.
+4. **pairing + durable inbox:** dedicated member/paused profile 원자 생성, bot-initiated 감지, 별도 active proof+unpause, cross-channel cursor를 구현한다.
+5. **gateway/conversation binding:** 기존 message/gateway 상태기계를 얇게 노출한다.
+6. **Grok preset과 disconnect UX:** deterministic routine, 상태 진행, cleanup checklist를 제공한다.
+7. **실계정 E2E 후 런칭 evidence:** 카피에 쓸 수 있는 범위만 검증값으로 승격한다.
+
+이 순서는 account rollout이 바뀌어도 vendor-neutral foundation을 버리지 않게 한다. #1344가 transport를 확인했어도 auth mode를 추정하지 않고, 실제 HAP-E2 endpoint에서 challenge를 관측한 뒤 preset을 봉인한다.
