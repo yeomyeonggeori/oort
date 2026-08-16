@@ -5,6 +5,163 @@
 
 ---
 
+## 2026-08-17 (Fable) · UXC 파도 완주 — #1441·#1454 랜딩, #1442 성재 큐 파킹
+- **UXC 파도 자율 완주**(패킷 3건 신규→Opus 워커 3기 병렬→폐곡선): **#1441**(세션 경과 성과 단위+검증 칩) `b9cfbf69` · **#1454**(완료 리포트 서버 프로듀서 — 모델 펜스 트리거·검증만·elapsed 서버 관측) `30186176` 랜딩. engine HEAD=`30186176`. 트랙 정렬 스큐는 sync PR #1461(`996896f6`)로 해소.
+- **폐곡선 적발 누계 10건 전부 수리**: #1454=Fable M-1(펜스 맨-끝)+grok 4(원시 봉투 노출·안닫힌 외곽·제로폭·시계 혼합)+재-freeze 2(물결 펜스·틱 앞 제로폭 — FenceMark로 CommonMark 완결, 뮤테이션 증명 8) / #1441=design-review High(320px 머리 붕괴→원장 진술만·폭 회귀 숫자 가드)+grok 2(ended/idle 스레드 캐시 미무효화·절단 표 접기 거짓). 재-freeze 양쪽 그린.
+- **#1442 성재 큐 파킹**: 실측 — 레포에 rust-toolchain 없음, 실결함=거짓 `rust-version`(실바닥 server 1.88/desktop 1.89 브래킷 확정). MSRV 상향이 보안 술어 4곳(auth/rate-limit) lint를 드러냈고 워커 편집 차단 → **패치+진리표를 이슈 #1442 blocker 코멘트로 성재 결재 대기**. PR #1459(문서/메타만)는 그 뒤 머지. ⚠CI rust 레인이 clippy 안 돎 — CI 초록≠머지 신호.
+- **후속 티켓 6건 발급**: #1463(검증 read-model — 목록 행+장스레드)·#1464(goal_claim 트랙 base)·#1465(웹 null-body 카드 빈 문단)·#1466(프로토콜 config 플래그)·#1467(PG 픽스처 재실행)·#1468(경과 낱말 3종). 성재 결정 추가 1건: 종료 상태 칩 ok→muted 여부(코어 역할표).
+- **통합 실측 잔여**: 프로듀서 리포트의 세션 스레드 안착(#1441 칩 결선) `runtime-unverified` — 실기동 시 확인. 이번 세션 이탈 판정 3건 전부 기록(#1441·#1454 accepted / #1442 pending).
+
+## 2026-08-17 (Fable) · ★ 실기동 E2E 성립 — 브라우저에서 microVM 실화면 도달
+- **#1438 E2E ACHIEVED**: 외부 브라우저(공인 39.115.69.188)가 TURN relay 경유 microVM producer H264 실화면 렌더 — 56프레임@1280×720·relay↔relay·라이브 xclock 시각 실증. **성재 발제 "채팅 내 VM 화면"이 실물 도달.** runtime-unverified 5→1(입력=LIVE-5). 캡처 성재 전달.
+- **핵심 신규 발견(=ADR-0165 증보 2)**: TURN 결선만으론 relay 후보 0 — microVM eth0이 link-local 전용이라 libnice가 TURN 디스커버리 미스케줄. **라우팅 가능 RFC1918 base 주입**으로 해결(실측 성공). 헤어핀은 TCP 반증됐으나 별도 TURN 호스트라 무의미화.
+- **#1455 정정본 랜딩**(PR #1456→`10c58951`): display 템플릿 v3(수신기 PID1·ICE relay·iceBase 주입·라벨 3해소)·producer.service 제거·런북 §8-B/§9·ADR-0165 증보 2 초안(가산·Proposed). #1437 증보와 중복 회피.
+- **보안**: E2E 진단 중 momo-turn 정적 자격이 NICE_DEBUG 로그 노출 → **로테이션 완료**(신 relay 성립·구 401 실측·구 백업 shred·값 비유입).
+- **#1440(UXC-A 완료 리포트 카드)**: 커서 벤치마크 차용 A — LIVE-4 카드 재사용·정직 톤 4색. grok freeze C0/H1/M3/L4(H1=중복 라벨 실패 숨김 정직 위반)→회전(판정 코어 이관·3표면 정합). 프로듀서 저작=#1454.
+- **LIVE-5 편성안 상신**(`handoffs/2026-08-17-live-5-direct-control-ux-plan.md`): 실화면 위 직접 조작 — 5a(엔진 잔여)/5b(웹 UI·입력 포워딩·비관측)/5c(실기동 E2E). 성재 결재 대기(발사·분해·TURN 단명 자격·진입점).
+- **사각지대 교훈(성문화)**: #1456이 template.spec를 v3로 바꾸며 **그 파일을 읽는 웹 테스트+타입(displayStream.test.ts)을 안 고침** — "실호스트 재검증 불요"만 보고 웹 스위트/tsc 미실행. track 잠복 red를 #1440 track 머지가 드러냄. **규율: 공유 계약 파일(template.spec·openapi·토큰 등) 변경 시 그걸 소비하는 테스트+타입까지 로컬 `typecheck`+해당 스위트로 확인.** 내가 정정 시 vitest만 보고 tsc 건너뛴 2차 사각도 동일 교훈. #1440에 파급 정정 동반 랜딩으로 해소.
+
+## 2026-08-16 (Fable) · 프로덕션 배포 완료 — a5193e5e→68fc52ff·마이그 069~076 라이브
+- **배포 성공(무중단 ~4분, 성재 위임 집행)**: 서버 이미지+웹 번들(index-DUwycTsq)+마이그 8건 전량(신규 테이블 6종 전부 RLS FORCE 실측·전 변경 가산적 — **이미지 롤백에 스키마 롤백 불요**). 백로그 점검 0/0/0(대소문자 잔재 0). 검증: 컨테이너 9 healthy·에러 로그 0·경계 verifier 전관문 PASS(최초 설치)·API→PG 실조회. HAP 전체+LIVE-1~4+run 파킹이 라이브 도달.
+- 롤백 좌표: `/opt/momo/backup/deploy-68fc52ff-20260816T131328Z/`(config 9종+manifest)+DB 덤프+구 이미지 보존. 부수 수리: **Caddyfile의 #1329 centrifugo 403 블록이 미배포 상태였음** — 이번 창에 닫힘(401→403 실측).
+- 특이: scp 분류기 비결정 차단 1회(단일 파일 재발행으로 완주·동결 0)·디스크 87%(이미지 6개 회수 후 — 다음 배포 전 재점검)·**사람 계정 실왕복 1건은 성재 몫**(시드 비번 잠김).
+
+## 2026-08-16 (Fable) · 인프라 실기동·#1437 규명·#1422 랜딩·리서치 2건·배포 발사
+- **INFRA-A/B 완주·런북 랜딩(PR #1436)**: cube=CubeSandbox 설치→display 템플릿 실빌드→**producer 실기동**→외부 wss 왕복(F1~F8 이행) / turn=coturn 외부 allocation·relay 실왕복·SELinux Enforcing. 정직 라벨 2건 해소.
+- **#1437 랜딩**(PR #1446→engine): **envVars=cubelet의 동기 배달 계약 규명**(대안 4종 실측 격추) — 어댑터 무변경+1회용 수신기(시간 fail-closed·불변식 테스트 8케이스·실호스트 E2E 그린). **신규 경계**: CubeProxy 무인증 /sandbox 라우팅(F1이 유일 통제). ADR-0156 증보 4·0157 증보 2 초안=**성재 결재 대기**. grok freeze C0/H0/M3/L2 전건 수리.
+- **#1422 랜딩**(PR #1448→`68fc52ff`): 절 단위 생략 코어 계약+웹 런타임 자+폰 hangul-word. grok H1을 **실측으로 반박**(레인 생존 62/39px 발화·인용된 scrollHeight 불변식이 #1384의 거짓 가정으로 판명 — 문장을 정정). 이월 #1443 스탬프.
+- **리서치 2정본**(PR #1439): 커서 ADE 벤치마크(차용 A~F — #1440/#1441/#1442 발급, B 환경 폐곡선=ADR 선행 백로그)·그록 생태계(Heavy→Cursor Ultra 연동 규명·#1344 관문 완전 해소·Remote MCP Tools·냉정 판정).
+- **운영 사고·교훈 3건 성문화**: ①머지·이슈종결 체인 분리(2회 재발 — 머지 MERGED 확인 후 별도 명령) ②**docs→main 머지는 engine 동기 PR을 즉시 짝으로**(스쿼시는 조상을 못 옮겨 정렬 게이트가 다음 engine PR을 막음 — #1444/#1447 2회 소요, main 플러시가 08-12 낡은 초안을 실은 오염도 #1445로 정정) ③reset --hard 전 porcelain 확인(미커밋 편집 유실 1회·재적용).
+- **배포 발사**(성재 위임): track/engine@68fc52ff — 서버+웹+마이그 069~076, 백로그 점검 선행·config 외과·롤백 보존 규율. #1429 병렬 비행.
+
+## 2026-08-16 (Fable) · 성재 대량 결재 집행 — 서버 2대 실발주·문서 플러시 머지·병렬 전환
+- **성재 결재(2026-08-16)**: ①서버 발주=Fable 직접 집행·트래킹 ②라이브 배포=Fable 집행 ③문서 커밋 ④Grok Bot 검증 진행(SuperGrok 구독·로그인 확인 — #1344/#1361 게이트 해제) ⑤**병렬 허용**("현재 작업이랑 병렬이나 이후 알아서").
+- **발주 집행 완료(NCP API 실생성·SSH 실증)**: **momo-cube-host** 101.79.18.230(s8-g3 8vCPU/32GB·Rocky 9.8·300GB XFS·**nested virt 실측 확정**·ACG 22[운영자IP]+8443) · **momo-turn** 223.130.142.109(s2-g3·ACG 3478+relay 레인지). 신규 로그인키 momo-oort-prod(`~/.ncp/` 보관). **월 고정 ≈₩477k**(cube 시간제 — 정지 운영 시 ₩38.6k)·**관전 1시간 트래픽 ≈₩45**(아웃바운드 ₩100/GB — ADR-0164 과금 실단가 입력). 기존 자원 무접촉 검증.
+- **프로덕션 서버 정체 확인**: 배포 대상 = momo-t3-smoke(101.79.11.189 — 런북 ncp-rust-deploy.md)이며 오늘 복구한 접근 그대로 유효 → 배포는 위생 꼬리 랜딩 후 최신 HEAD로 집행 예정.
+- **문서 플러시 머지**: PR #1433 → main@250f7507(보호 브랜치라 PR 경유 — 직push 불가 실측). **설치 파도 발사**: #1434(INFRA-A cube 설치+display 템플릿+프록시)·#1435(INFRA-B coturn) 병렬 2기, 패킷 `handoffs/2026-08-16-infra-install-wave-packet.md`. #1421 랜딩(`199d90eb`·design H1 주석 수리·M1=#1431). #1422 비행 중.
+
+## 2026-08-16 (Fable) · LIVE-4 랜딩 — 로그인 핸드오프 카드 축·폐곡선 5회전
+- **LIVE-4(#1428) 랜딩**: PR #1430 squash → `track/engine@19455d54`(커밋 4). **핵심 실증 2**: ①승인 hold 재사용 성립 — MessageType·마이그 발명 0, props.kind 분기+기존 park/requeue 폐곡선(인터뷰의 1순위 탐사 지시가 적중) ②경계 스탬프는 기존 message.edited 계약 재사용 — **클라 변경 0**(단일 쓰기경로 불변식의 존재 이유 실증). HumanIsTheAction=면제 분기 밖.
+- **폐곡선 5회전**: Fable → design-review FAIL(H2: 수제 버튼 1.3:1·stopped 자기모순)→회전(칩 가림 3914px² red 실측 포함) → grok freeze **C0/H2/M2**(타임라인 카드 경계 이벤트 난청=단일 쓰기경로 위반 겸·uuid 정규화·pending 창 축·returned 모순)→회전 → 재-freeze **M1**(재개봉 스탬프 잔존 키)→마이크로 수리(`jsonb - text` 의미론 문서화)→소진. **grok 실경계 적발 누계 5건**(이 파도).
+- 이탈 판정: stopped 4번째 상태·방출 도구 수용, 세션 표면 내구 투영=LIVE-5 이월, blocked 톤=#1429 발급. 다음: 위생 꼬리(#1421→#1422→#1429).
+
+## 2026-08-16 (Fable) · 우로보로스 인터뷰로 LIVE-4 편성·#1425 랜딩·LIVE-4 발사
+- **성재 지시 "다음 작업 인터뷰로 디벨롭→승인"** 집행: 인터뷰 4라운드(모호도 0.17 종결)+lateral 3렌즈. 산출 정본 `research/2026-08-16-live4-interview-and-plan.md` — 확정 6설계(카드 이원 표면·명시 반환 주동선·end_reason 3분기·**발제자 절단**(에이전트 발제형만 LIVE-4, 프레임 게이팅=안전 극장 기각)·관전자 매듭 해법 전환(신규 서버 조각 철회→observation 전환 재사용)·정직 카피 2분법). **성재 결재: LIVE-4 승인+발사·LIVE-5 예약 확정**(창 열기·observation 전환/복원·auto-return·입력·ICE·E2E — TURN 후).
+- **#1425(run 파킹) 랜딩**: PR #1427 squash → `track/engine@8ce5ad38`. 토큰 0=원장 성질(게이트웨이 hold 거부 재사용·usage_ledger 0행 실증)·notifier sweep 신설·mutation 7종. **grok freeze가 또 H1 적발**(교차-세션 run 잠금 부재 → 잘못된 resume/영구 paused) → 수리(별도 문장 status-blind 잠금·잠금 순서 계약 5호출처)·red proof 분리 실측·재-freeze C0/H0/M0/L0. grok 실경계 적발 누계 3건(LIVE-3 재바인딩·이번).
+- **LIVE-4(#1428) 발사**: 패킷 `handoffs/2026-08-16-live-4-login-handoff-packet.md`(base 8ce5ad38 — 카드 가족·승인 hold 재사용 1순위 탐사·경계 이벤트 표면·창 여는 코드 금지). 비행 중.
+
+## 2026-08-16 (Fable) · LIVE-3 랜딩 — control 개방·grok가 D3 실패를 적발한 폐곡선 4회전
+- **LIVE-3(#1424) 랜딩**: PR #1426 squash → `track/engine@460f142b`(+2,818 — 마이그 076·display_control_window(자체 lease 90초)·controller owner 한정·비관측 게이트(에이전트 유일 경로 work-controls 409·시도 무흔적)·owner_only="소유자만 본다"). §1-3 동결 조건 미발동(에이전트 세션 경로 단일 실측).
+- **폐곡선 4회전**: Fable → design-review PASS(M2 카피 회전) → **grok freeze C0/H1/M1/L0 — H1(0.92): 재시도 발급이 창 capability 재바인딩 안 해 로그인 도중 ≤90초 에이전트 재개(D3 실패). 코드 재판정 확정 — Fable·conformance 둘 다 놓친 것을 grok이 적발** → 수리(재바인딩 UPDATE·M1 창 닫힘 2경로 배선, red proof 3종) → 재-freeze C0/H0/M0/L0.
+- 운영 사고 1건 성문화: **머지·이슈종결을 한 체인에 묶지 말 것** — CI 빨강(schema.d.ts 재생성 누락)으로 머지 거부됐는데 종결이 선행(즉시 재개로 복구). 재생성(a64bfa00)은 머지 사이클 기계 작업으로 오케스트레이터 직접 처리. Xcode 유령 체크는 비필수(선례 #1378).
+- 이탈 3건 판정(DEVIATION_LOG): lease 교정 수용·**run 파킹=#1425 LIVE-4 선행(발사됨·비행 중)**·terminate backstop 수용.
+
+## 2026-08-16 (Fable) · #1418 랜딩·성재 결재 3건 집행 — LIVE-3 발사·TURN 패키지
+- **#1418 랜딩**(PR #1423→`f56c07f7`): work-pane/thread-pane 900px 바닥(chat-region — thread-pane 동반이 반사실로 필수 입증)+플레이스홀더 1lh 클램프. 3렌즈(design-review B0/H0 — 리뷰어 독립 재빌드·WebKit 재검증 · grok C0/H0/M0/L0). 이월 선재 → **#1421**(600~899 바닥 부재·문턱 경계 결정)·**#1422**(절 단위 생략+폰 예산).
+- **성재 결재 3건(구조화 질의)**: ①**ADR-0165 증보 1 Accept**(TURN 신규 운영 자원 확정) ②TURN=**발주 검토 패키지** → `research/2026-08-16-turn-dedicated-host-procurement-package.md` 작성(전용 호스트+TURN 2대 사양·F1~F8 런북 반영 의무·비용 산식·콘솔 체크리스트 — **발주 결정=성재**) ③**LIVE-3/4 지금 발사**.
+- **LIVE-3(#1424) 발사**: 패킷 `handoffs/2026-08-15-live-3-control-open-packet.md`(base f56c07f7 — 마이그 076 잠금 해제+control 창 원장+**비관측=run 진행 경로 서버 게이트(불가 판명 시 전체 동결)**+owner_only owner 예외). LIVE-4(웹 UX)는 LIVE-3 랜딩 후.
+
+## 2026-08-15 (Fable) · 위생 파도 종결(#1415→#1413→#1414) — 3연속 3렌즈 그린
+- **#1415**(PR #1417→`2f0b3984`): ObserverTerminal connecting 정리 누수 — connectCleanupRef 동형 이식(하중 분기: early return보다 앞서 cleanup)+게이트 실DOM 리스너 카운트 red proof. grok freeze C0/H0/M0/L0.
+- **#1413**(PR #1419→`268df1c8`): co-open-900 소유권 결함 — `--spacing-chat-min: 368px`(코어 236px 실측 역산+8px 리듬)·route-region 바닥·패널 `flex: 0 1` 양보(900~927px만). design-review PASS(B0/H0)+grok C0/H0/M0/L0. 동형 결함(세션 패널)+Low/Nit → **#1418** 발급.
+- **#1414**(PR #1420→`0ac1e08c`): busy/failed/watching 엘리먼트 캡처 6장+단언(red proof 4종·컴포넌트 변경 0·watching=실디코드+반증가능 레터박싱). Fable 시각 검수+grok C0/H0/M0/L0.
+- **grok 쿼터 해제 첫 적용**: 소형 diff 3건 전부 freeze 투입 — 3연속 유효 검산(무결 확인도 실가치). 다음: #1418 발사 → LIVE-3/4 편성(성재 질의: 증보 1 Accept·TURN 발주·발사 시점).
+
+## 2026-08-15 (Fable) · SPIKE #1411 완주 — P2P 폐기·TURN 확정 · 위생 파도 개시
+- **접근 복구**: d42 호스트(10.0.1.8)는 회수돼 없고 SSH 자격 전유실 → `~/Downloads/momo-t3-smoke.pem` 발견·`~/.ncp` 복원·getRootPassword API 재복호화로 momo-t3-smoke(=101.79.11.189, U1의 "점프 호스트") 접속 실증. NCP 서명 v2 조회 스크립트 스크래치 재작성(ncp-power.py 유실 대체).
+- **#1411 완주**(폐기 Rocky 9 VM 실설치·전량 회수 증명): 형상 A(호스트 WS 프록시) 성립(에코 6.3ms)·B 구조 불가·C는 SNAT 강제로 비채택. **최대 수확 = microVM NAT symmetric(2회 재현) → P2P/srflx 실존 안 함, 호스트↔VM UDP 무경로+헤어핀 불가 → TURN 동거 불가** ⇒ **전용 공인 TURN 호스트 1대 신규 운영 자원 확정**. 정본 `research/2026-08-15-reachability-spike-1411.md`(부수 발견 F1~F8 런북 후보 — 설치기 rc=0 신뢰 불가·사설 레지스트리 필요 등).
+- **ADR-0165 증보 1 Proposed**(D3-1 relay 유일·D3-2 TURN 전용 호스트·D2-1 시그널링=호스트 프록시 확정) — **Accept는 성재(TURN 발주 포함)**.
+- grok 쿼터 성재 해제("막 써봐") — 메모리·스킬 성문화, 병렬 1~2(토큰 로테이션)만 유지. **위생 파도 개시**: 패킷 `handoffs/2026-08-15-hygiene-wave-observer-packet.md`(#1415→#1413→#1414 순차), #1415 발사.
+
+## 2026-08-15 (Fable) · LIVE-2 랜딩 — 관전 "라이브 화면" 축 완성(서버+웹) · track/engine@fbe49826
+- **LIVE-2(#1412) 랜딩**: PR #1416 squash → `track/engine@fbe49826`(커밋 3: 구현 3d96221a→design 수리 2ea1295e→누수 수리 0af458b5). view-only=코드 부재(`sdpNegotiatesInput` 사전 거절·recvonly=producer offer의 귀결·소스 부재 테스트+verifier 교차)·4상태·소유자-인지 실패 카피(`displayFailureCopy`).
+- **폐곡선 3렌즈 완주**: Fable C0/H0/M0 → design-review **PASS**(H1 소유자 3인칭 카피·M1 오프라인 배너 → 회전 수리, M2 캡처=#1414) → grok freeze **C0/H0/M1/L0** → M1(connecting 정리 미회수 — document CSP 리스너 잔류) 코드 재판정 확정·회전 수리(게이트 실 DOM 리스너 카운트 red proof). **grok이 UI 층에서도 실가치 적발 — 리뷰어 C 3번째 실전 정착.**
+- 선재 발견 2건 티켓화: **#1413**(co-open-900 컴포저 236px — base 실측 동일 실패)·**#1415**(ObserverTerminal 동형 CSP 리스너 누수 — 수리 shape·측정기 기성품 명시). 이탈 5건 판정 accepted(DEVIATION_LOG — D1은 패킷 문구 교정).
+- **관전 축 현황**: 서버(LIVE-1)+웹(LIVE-2) 완결. 남은 것: **#1411 도달성 스파이크**(전용 호스트 실측 — 실 샌드박스 E2E·ADR-0165 D3 증보 개방 조건)·**LIVE-3/4**(control·로그인 핸드오프 — 증보 3 Accepted·owner_only 예외 포함, 편성=성재 신호)·#1414(캡처 증거).
+
+## 2026-08-15 (Fable) · LIVE-1 랜딩 — track/engine@7179f3e5 · ADR 2건 Accept · LIVE-2 발사
+- **LIVE-1(#1409) 랜딩**: 워커 완주(+5,019/26파일 — 마이그 075·kind 축·라우트 3본·conformance 4·verifier·webrtcbin 템플릿 계약) → Fable 기획검수 **C0/H0/M0/L1**(L=openapi sampled 매니페스트 미등재, 배포 창 실측 시 해소)+verifier 독립 재실행 PASS → grok 리뷰어 C freeze **C0/H0/M0/L0**(두 렌즈 일치) → PR #1410 → CI → squash **track/engine@7179f3e5**, #1409 수동 종결, 워크트리 회수.
+- **policy-integrity 실측 성문화**: 감사 코멘트에 `Policy-Integrity-Audit: <full head SHA>` 리터럴 마커 필수 + `policy-change-approved` 라벨 전이가 그 코멘트 **이후**여야 함(순서 검증 — 라벨 뗐다 재부착으로 해소, 3연속 빨강의 실체).
+- **성재 결재 4건(구조화 질의)**: ①**ADR-0165 Accept**(webrtcbin D1 반영형) ②도달성=**스파이크 선행**→#1411 발급 ③owner_only owner 예외=**LIVE-3와 묶기** ④**ADR-0004 증보 3 Accept**(control 경계 확정 — LIVE-3/4 편성 가능해짐). 이탈 3건 전부 판정 완료(DEVIATION_LOG).
+- **LIVE-2(#1412) 발사(연속 편성)**: 패킷 `handoffs/2026-08-15-live-2-web-display-observer-packet.md`(base 7179f3e5 — 웹 DisplayObserver·view-only=입력 부재·로컬 모의 producer 검증·design-review 관문). 비행 중.
+
+## 2026-08-15 (Fable) · 라이브 VM 관전·control 축 개설 — ADR-0165 기안·LIVE-1 패킷 ready
+- 성재 발제(Grok Bot 채팅 내 VM 화면+직접 조작) 리서치 정본 `research/2026-08-15-in-chat-interactive-vm-takeover.md` 랜딩(Fable fork) — 판정: 그린필드 아님, 관전 축 해상도 증분. noVNC 1차 권고(E2B 선례)·자격 핸드오프=ADR-0004 주어 확장.
+- 코드 실측(Explore): 서버=프록시 없는 호스트 직결 계약(dto.rs:1002)·`AttachMode(controller|observer)` 기존재 → takeover 새 동사 불요, **Controller의 display 적용="control"**로 명명(인수 어휘 충돌 회피). 범위 술어=`type='cloud'`+`provider='cubesandbox'`, BYOC fail-closed.
+- **성재 결재 3건(구조화 질의) 집행**: ①LIVE-1 발사+연속 편성 ②경계=**ADR-0004 증보 3 재기안**(Proposed — control-창 비관측·자격 비유입·"0140 pause 재사용" 정정=VM running 유지) ③전송=**처음부터 WebRTC** → ADR-0165 재용도(`0165-live-display-webrtc-transport.md` Proposed — 문서 Accept가 LIVE-1 머지 관문). planning ID **PLN-20260815-01** claim.
+- 집행: LIVE-1 패킷 WebRTC 개정(`handoffs/2026-08-15-live-1-display-spectate-packet.md`, base 99d42244·마이그 075) → **이슈 #1409 발급** → **Opus 단발 워커 발사(비행 중)**. LIVE-2(UXUI)=랜딩 시 자동, LIVE-3/4=증보 3 Accept 후. 성재 잔여: 0165 문서 Accept·증보 3 Accept·T1 확장.
+
+## 2026-08-15 (Fable) · HAP 축 전체 완결 — UX1~4 랜딩
+- **UX1(#1360 페어링 위저드 d7b390cf)·UX2(#1362 disconnect 원장 73ac11d4)·UX3(#1359 폰 읽기전용 4a093b30)·UX4(#1369 OAuth 동의 99d42244)** 전부 랜딩 → **HAP 축(엔진 E1~E7 + UX1~4) 완결**. 남은 HAP=#1361 GROK-E2E만 blocked(Grok Bot 티어).
+- 각 UX design-review PASS 후 폴리시 회전: UX1(H1 대비·M4)·UX2(H1 포커스·M3 — 보안 3분리 'excellent')·UX3(H1 SR 도달·한국어 line-break)·UX4(H1 증거 갭 — **캡처 픽스처가 실제 런타임 크래시 적발**·M2). 코어 다형 설계로 UX1→UX3 폰 포트가 dedup만으로 성립.
+- 프로세스 재시작·세션리밋으로 워커 트랜스크립트 수 회 유실 — 전부 워크트리 상태 기준 신규 폴리시 워커로 무손실 재개. 교훈: 동결 로컬 커밋이 세션 경계를 넘는 유일 진실.
+- 신규 적립: #1403(트리거 native disabled)·#1405(hosted DTO 확장)·#1396(스레드 패리티).
+
+## 2026-08-15 (Fable) · HAP 엔진 축 E1~E7 완전 종결 + CRUN 시리즈 완결
+- **E7(#1368) 랜딩 = HAP 엔진 축 종결**: PR #1402 → `track/engine@f07a458f`. OAuth 2.1 AS(무강등 4층·fail-closed·비승격). 마이그 074. **리뷰 2독립 렌즈 일치**: Fable 적대 C0/H0/M0/L2→수리 · **grok 리뷰어 C freeze C0/H0/M0/L0**. ADR-0162 증보 1 Accepted로 ADR-0100 해소.
+- **sol usage-limit(8/20까지) → grok 승격**: sol Codex가 리밋 소진, grok 리뷰어 C를 독립 freeze 리뷰어로 승격(오늘 구축한 grok-fleet 첫 실전 승격). 3사 체제가 한 축 막혀도 굴러가도록 설계된 대로 작동. **당분간 리뷰=Fable+grok 2사**(+UX는 design-review 관문).
+- **CRUN 시리즈(1·2·3) 완결**: CRUN-1(#1382=3ca57c96) 실행 티어 축 — 와이어 계약 발명 거부(display-only, 서버=#1399). design-review PASS 후 M1-4 수리(다크 라디오 토큰 마커·900px 티어 생존·관리형 클라우드 브릿지).
+- **#1369(UX4 OAuth 동의) ready 전환**. 신규 적립: #1400(auth_mode 불변 제약)·#1399(티어 override 와이어)·#1395/#1396(placeholder·스레드 패리티).
+- 배포 이미지 최신 재빌드 `momo-rust:d7b390cf`(위생6+UX1+CRUN, E7 미포함) — 성재 대행 대기. BuildKit frontend 네트워크 일시 장애는 pull 후 회복.
+
+## 2026-08-15 (Fable) · 재개 — 위생 완주·UX1/CRUN-2/3 랜딩·E7 완주·성재 결재 3건
+- 프로세스 재시작으로 끊긴 3기(CRUN-3·E7·UX1 폴리시) 트랜스크립트에서 전량 재가동 — 유실 0.
+- **랜딩(누계)**: 위생 6/6(#1374·1376·1377·1385 + #1375+1386=2dc1cd4f 마이그 073)·CRUN-2(#1383=49a4ba0e)·CRUN-3(#1384=04264770)·UX1(#1360=d7b390cf). 각 UX는 design-review PASS 후 폴리시 회전(CRUN-2 M1·CRUN-3 H1 정본거짓→#1396·UX1 H1/M4). track/engine HEAD 전진.
+- **E7(#1368) 완주·동결**(`7fa03f74`, 미푸시): OAuth 2.1 AS 모드 — 무강등 4층 증명(비교→동결 리터럴→산술 비대체→스키마 guard), 20시나리오 PG18, flag-off·전 라우트 404. **마이그 073 충돌→랜딩 시 074 재번호**(워커 정직 신고). Fable 적대 리뷰 가동 중.
+- **성재 결재 3건(2026-08-15)**: ①**ADR-0162 증보 1 Accept**(OAuth AS 경계 — 리뷰 통과 시 머지, 개방은 flag+#1369 대기) ②**배포=최신 engine 재빌드**(위생+UX 포함, 백로그 점검 선행) ③위생/UX 파도 계속. 신규 티켓: #1395(placeholder 방-인지)·#1396(스레드 멘션 패리티)·#1399(per-message 티어 override 와이어 — ADR 선행).
+- 3사 리뷰 체제 정착: grok 리뷰어 C가 위생(C0/H0/M0/L2)·E6(트리거 강화)에서 실가치, diff-only 오탐은 코드 판정 기각.
+
+## 2026-08-14 (Fable) · 위생 파도+CRUN-2 랜딩 — 성재 정지 지시(재개점=스냅샷 25)
+- **위생 4/6+CRUN-2 랜딩**: #1377 fmt(6d2a7977 — workspace fmt 그린 복원)·#1385 샘플링(252ffa60 — E6가 깨뜨린 선재 fixture 교차 수리)·#1376 게이트(dcbe7f35 — **docs 게이트 80/80 이 머신 최초 완주**, bash -lc PATH 근본 원인+psych-3 3번째 결함)·#1374 lock-order(c6ecf48b — pg_stat_activity 동기화 결정적 40P01 재현)·#1383 CRUN-2(49a4ba0e — design-review PASS+M1 수리). BEHIND 경합 교훈: 병렬 랜딩 중 머지 체인은 재시도 루프+탭 컬럼 정확 술어가 표준.
+- **grok 리뷰어 C 2번째 실전**(#1375+#1386 diff): C0/H0/M0/L2 — diff 밖 스키마·RLS 자가 대조로 E6 파일럿의 오탐 클래스 자가 교정. 3사 체제 정착 판정.
+- **성재 정지 지시**: 비행 3기(#1375+86 폴리시·UX1·CRUN-3)는 로컬 동결 자연 완료로 두고 신규 발사·머지 중단. 재개 절차·큐=CURRENT_STATE 스냅샷 25.
+
+## 2026-08-14 (Fable) · E6 랜딩 — HAP 서버 축 완성·grok 3사 리뷰 체제 첫 실전·배포 창 성립
+- **#1367 랜딩**: PR #1387 squash → `track/engine@07ca8828`(하루 2 goal 랜딩 — E5 aa40e4c6→7a52c4c2→E6 07ca8828). 원자 disconnect+manifest+4중 terminal 가드+게이트 release 개방. CI **첫 시도 완주**(E5 교훈: 생성 타입·policy audit 선처리).
+- **리뷰 4층이 각기 적발(2연속 재현)**: Fable(비차단 M1+L4→#1385/#1386) · sol 1차(생성 타입 M — PR CI 선방어) · **grok 4.6 파일럿**(072 트리거 진공 통과 정식화→채택·mutation으로 우회 실재 증명 후 봉쇄, 이중 audit 주장은 FOR UPDATE 직렬화로 기각) · sol 최종 C0/H0/M0. grok 오탐 1은 diff-only 한계 — 편입 시 워크트리 read-only(`--allow`) 접근으로 교정.
+- **Grok 4.6 실측 완결**(리서치 정본+실측): Grok Build 1.0.3·기존 auth 유효(로그인 불요)·`-p`/`--json-schema`/`--allow`/`--agents`/ACP 전부 실재·config 격리 필요(전역 MCP 자동 로드). 플러그인 부재는 비장애 — codex-companion 패턴 미러 grok-fleet 소형 빌드로 해결 가능.
+- **해제**: #1368(E7)·#1360/#1362/#1359(UX1~3) ready. **배포 창 조건 성립** — 실행은 성재 대행+백로그 점검 선행. 위생 큐(#1374~#1377·#1385·#1386)도 이제 발사 가능(엔진 파일 충돌 해소).
+- 성재 결정 대기: ①배포 창 실행 ②E7 발사 ③UX 시리즈 편성(HAP-UX1~3+CRUN — UXUI 트랙) ④grok-fleet 스킬 빌드 go ⑤ADR 3건 Accept(0164·0004 증보 2·0150 증보 1).
+
+## 2026-08-14 (Fable) · 성재 결재 4건 집행 — E6 발사·ADR 기안 2·병렬 5티켓·배포 창 확정
+- 성재 일괄 결재(구조화 질의 4건 전부 권고안 채택): E6 발사 / 과금 3-A 기안 / 병렬 3트랙 전부 / 배포 창=E6 후.
+- **E6(#1367) 가동**: 패킷 `handoffs/2026-08-14-hap-e6-atomic-disconnect-packet.md`(base 7a52c4c2·#1344 실측 negative path·E4 잠금 순서·#1374 함정 회피·E5 교훈 명문화) → Opus 단발 워커 발사. 랜딩 시 hosted delivery 게이트 개방+배포 창 조건 충족.
+- **ADR 기안 2건(Proposed — Accept는 성재)**: `0164-managed-cloud-credit-billing.md`(D1~D7: 원화 크레딧·list-cost 단일 미터·running만 과금·예산=pause·HAP 경계·공정사용 상한·롤오버는 법무 확인 후) + ADR-0004 **증보 2**(불변식 주어=사용자 명확화·bundled 키=서버 시크릿+계량 의무·BYO-key 명시적 비개방).
+- **티켓 5건 발급**: #1380(A4 egress capability 설계→ADR-0150 증보)·#1381(A1 pause 정책 — 0164 D3 결선)·#1382~#1384(CRUN 1~3 — 컴포저 실행 티어 축/메뉴 프리미티브/어포던스 카피, 착수는 UXUI 타이밍). **A4 스파이크 워커 가동**(docs 전용 — E6와 무충돌).
+- 위생 4티켓(#1374~#1377)은 E6 랜딩 후 순차 발사로 편성(파일 충돌 회피).
+- **A4 스파이크 완주(같은 날)**: `research/2026-08-14-t3-egress-capability-design.md`(위협 모델 4종 표·grant 좌표계·Anthropic 대조표·채택 경로 P1~P7+선행 실측 U-a~c) + **ADR-0150 증보 1 Proposed**(D1~D6 — 핵심: 자격 주입 게이트웨이=계량 지점 합배치·2상 네트워크 순서 불변식·임의 도메인 MITM 금지·저대역 채널 정직 조항). #1380 needs-review. 성재 미결 4건은 설계 문서 §6.
+
+## 2026-08-14 (Fable) · HAP-E5 완주 — 신체제 첫 폐곡선 + 클라우드 리서치 2정본 + UXUI 실사
+- **#1366 랜딩**: PR #1379 squash → **track/engine@7a52c4c2**. 8도구 thin-binding+per-agent selector+E4 producer 결선(M1 폐곡선: kind FK+job↔run 트리거) — Opus 워커 11커밋, +7.5k/-421. **신체제 첫 실전 성립**: Fable 적대 리뷰(C0/H1/M2→수리) → sol freeze 3회전(H 신규 적발 "승인 채널 job 경로 우회"→3중 방어 수리 → M 스키마 어긋남 3갈래→계약 명문화 → **C0/H0/M0 승인**). 전 수리 mutation-검증. 세 검증 층이 서로 다른 결함을 잡음(리뷰어=fan-out 부재 H, sol=채널 우회 H, CI=flaky 캔어리 2.65% 실측).
+- 부수 확정: 선재 버그 수리(gateway 대소문자 — mention job 영구 claim 불가) → **배포 창에서 깨어나는 pending 백로그 점검 필수**(STATUS 체크리스트). #1367(E6) ready 전환·워크트리 회수. flaky 캔어리 결정화 교훈: 확률적 텍스트 캔어리 금지, 바이트 스캔+실측 재현이 표준.
+- **클라우드 축 리서치 정본 2건**(성재 발제 "크레딧 기반 매니지드 클라우드"): `research/2026-08-14-agent-cloud-infra-benchmark.md`(Cursor=EC2+Firecracker+Anyrun·xAI=공유 VM 이단·**ADR-0156 좌표 검증**·채택 후보 A4→A1→A2→A3) · `research/2026-08-14-agent-cloud-credit-billing-models.md`(업계 수렴=티어 게이트+번들 선차감+인프라 흡수·**3-A 권고=원화 크레딧+list-cost 원장**·성재 결정 큐 7). UXUI 실사(Cursor "Run on" 대비): effort/모델은 기존재, **작성 시점 실행환경 선택이 공백** — CRUN 시리즈 티켓화 제안(성재 컨펌 대기).
+- 성재 결정 대기: ①크레딧 단위(3-A) ②ADR-0004 증보 ③인프라 A4/A1 착수 ④CRUN 티켓 발급 ⑤E6(#1367) 발사.
+
+## 2026-08-14 (Fable) · sol 인계 검수 완료 — #1365 최종 판정 C0/H0·자원 회수 파이프라인 신설
+- sol(GPT 5.6) HAP 축 전수 복원: E1(#1358)~E3(#1364) track/engine 랜딩 확인, E4(#1365) 로컬 동결 @2304324. **최종 리뷰 C0/H0** — M1(job↔run·kind 결속 공백, outbox FK가 kind 미결속·broadcast 행 실존으로 실재 확정)은 #1366 수용기준으로 이관(코멘트), lock-order AB-BA(prove 경로 invalidate)→#1374, ledger 잠재 3종→#1375. verifier 독립 재실행 PASS(마이그 001→070·잔존 0).
+- **docs gate 3분+ 정체의 실체 = Homebrew actionlint 1.7.12 shellcheck 연동 무한 스핀**(CPU 800%·25 CPU-분 실측, 이분 탐색 확정 — 워크플로 5개 중 `run:` 블록 조합 3개에서 발화) → `brew unlink actionlint` 완화(+게이트 폴백 설계가 흡수)+#1376(비대화형 셸의 시스템 ruby 2.6 false RED 병기). engine `cargo fmt --check` RED 13파일(sol "비소유 drift"의 실체, rustfmt 스큐)→#1377.
+- **자원 회수 파이프라인 신설**: `scripts/worktree_janitor.sh`(KEEP/RECLAIM/JUNK/HOLD 4분류·PR squash-merge 인식·goal OPEN 보호)+정본 런북 `docs/runbooks/local-resource-reclaim.md`(3층: verifier 소유권 계약→레포 janitor→머신 안전망+Docker Desktop 붕괴 플레이북). 랜딩 워크트리 5개 회수(1343·1344·1358·1363·qa1, ≈32GB). janitor 일괄 --cleanup과 1364 폐기(checkout --)는 분류기 차단 — 단건 `git worktree remove`는 허용.
+- **성재 결정 3건 집행 완료(같은 날)**: ①#1365 go — 문서 정정 커밋 `583526b4`→push→**PR #1378**(base track/engine)·이슈 needs-review 전환. policy-integrity가 local_gate.sh 접촉을 잡아 audit 코멘트+policy-change-approved 라벨(선례 #1372/#1373 동일 흐름)로 해소 — **CI 그린**(policy·cargo·alignment PASS, Xcode 유령 체크만 잔존). ②워크트리 전량 처분 — 1364 폐기(성재 대행)+HOLD 4개 제거(398·464·72·sol-review), sol 미랜딩 문서 8건은 `research/sol-20260811-checkpoint-a-drafts/`(번호 충돌 경고 README 동봉)+research 3건으로 회수, #464 close. ③sol=독립 리뷰어 유지(E5+ freeze 리뷰 담당, 구현=Opus 5·기획검수=Fable).
+- **#1365 랜딩 완료("작업 진행하자" 신호)**: PR #1378 squash → **`track/engine@aa40e4c6`** · 이슈 done 수동 종결 · 1365 워크트리 회수(**세션 누계 ≈57GB**, 잔존 워크트리 5=main·engine·uxui·deploy5·1330). **#1366(E5) ready 전환 + 패킷 발급** `handoffs/2026-08-14-hap-e5-mcp-inbox-tools-packet.md`(발주 전 랜딩분 대조 완료·M1 폐곡선 수용기준·잠금 순서 계약·환경 함정 #1376/#1377·리뷰 폐곡선 명시). **워커 발사=성재 신호 대기.**
+
+## 2026-08-12 (Fable) · 외부 에이전트 수용 축 개설 — ADR 초안 2건·이슈 3건·sol 핸드오프 준비 완료
+- 성재 지시("리서치→로드맵화→ADR 초안→sol 검수→실작업 체인 준비")로 축 전체를 패키징. planning ID **PLN-20260812-01**.
+- **ADR-0162 Proposed**(3분류 명명+Agent Port — MCP 도구 6종·스코프드 봇 토큰·REST 파사드·접속 허용 명문화) · **ADR-0163 Proposed**(agent_catalog·동봉 온보딩·개별 업데이트 v0=C→v1=A). 로드맵 정본 `2026-08-12-external-agent-reception-plan.md`(웨이브 R/0/A/1/2/3·DAG).
+- 이슈: #1343(sol 검수 미션)·#1344(Grok Bot 스파이크 — 구독 계정 성재 게이트)·#1345(0130 ACP 재랜딩 감사). 구현 티켓은 ADR Accepted 후 분해(체인 규율 준수).
+- sol 패킷 `handoffs/2026-08-12-sol-external-agent-reception-packet.md` — 검수 포인트 6개(자신 없는 순: 0163 업데이트 주체·0162 gateway 계약 중복 여부·인증 v0)+성재 복사용 프롬프트 부록. CURRENT_STATE 스냅샷 21 갱신.
+
+## 2026-08-12 (Fable) · Grok Bot 역방향 팀메이트 방향 리서치 — 조건부 성립, Agent Port 표면 제안
+- 성재 방향성("hermes형 — oort 일감을 봇이 감지·처리, 배포 허들 0 실마리")으로 2차 리서치 3기(감지 루프/Cursor 표면/프로토콜 선례). 정본 `research/2026-08-12-grok-bot-reverse-teammate-direction.md`.
+- 판정: **조건부 성립** — 커스텀 MCP 소비(Cursor 체계 공유 확정, 개인 계정 실증만 남음)+루틴 웨이크업(Slack 트리거 실동작 검증)으로 배치형 팀메이트 오늘 구성 가능. 분 단위 스케줄 미확인·웨이크업 주권=xAI/Cursor·고빈도 폴링 비경제가 한계. provider 선택 불가 확인(봇=번들, ADR-0004 정합).
+- 제안: 벤더 중립 "oort Agent Port"(원격 MCP 도구 6종, seq 커서, REST 파사드 — ADR-0130 체인+/v1/mcp/drive 선례 위) → Phase 2 Centrifugo 구독 겹. Slack 초인종은 신호만(내용 0) 옵션.
+- 성재 결정 대기: ①Wave 0 스파이크(구독 계정 $200~300/월 필요) ②Agent Port ADR 기안 ③Slack 브리지 스코프. 워커 발사 없음.
+
+## 2026-08-12 (Fable) · Grok Bot 연동 가능성 리서치 — 인바운드 불가 판정, 역방향 2경로 제안
+- 성재 발제("Grok bot 바이럴 런칭 — 사용자의 ~50개 호스팅 봇을 oort로 가져오는 구조 가능?")로 웹 리서치 3기 병렬 실측. 정본 `research/2026-08-12-grok-bot-integration-feasibility.md`.
+- 전제 교정: Grok Bot=SpaceXAI+Cursor의 2026-08-11 베타(독립 앱, X는 홍보 채널), "50"=봇 수가 아니라 봇당 루틴 한도, 무료 티어 없음($120~300/월).
+- 판정: 봇 인바운드 반입은 **현재 불가**(열거/호출/위임 OAuth/export 전무 실측 + 우회는 AUP 3중 저촉·사용자 계정 리스크 전가). 성립 경로=A 에이전트 로그인 공식 허용(선언 기반, 연동 0줄) · B oort MCP 서버 노출(ADR 사안) · C xAI API provider(ADR-0147 그릇 재사용) · D 금주 Grok 4.6 롤아웃 재실측.
+- 공용 정본·Issue 미변경. 다음: 성재 판단 — 경로 A/B의 ADR 기안 여부 + D 재실측 시점.
+
 ## 2026-07-28 (GPT 5.6 · momo-main) · Fable 산출물 통합 → 리소스 최적 정본 후보
 - #860/#875 완료를 재계획에서 제거하고, clean/pushed #876~#878 배치 하나만 active로 고정했다.
 - 3-Issue/1-PR가 운영 계약과 충돌함을 발견해 #876 umbrella+absorbed(권고) 또는 명시적 예외 승인 gate를 추가했다.
