@@ -1,276 +1,108 @@
 # oort 기획 현재 상태 (Planning Current State)
 
-> **2026-08-16 스냅샷 41 (Opus 5 단발 워커 · engine — #1424 LIVE-3 control 개방 엔진 축: 창 원장·비관측 게이트·owner 예외, 로컬 동결).** 스냅샷 40(#1409)을 supersede한다.
+> **2026-08-15 스냅샷 28 (Fable · momo-main — 라이브 VM 관전·control 축 개설. PLN-20260815-01).** 컴팩트 복원 진입점.
 >
-> **활성 goal #1424:** worktree/branch는 `feat/live3-control-open`(`~/projects/momo-tracks/momo-worktrees/live3-control-open`), base는 `track/engine@f56c07f7`(#1418 랜딩 HEAD = `origin/track/engine`). **마이그레이션은 076**(`check_migration_numbers.sh` 76 PASS, 대비 테스트 `discovers_contiguous_migrations_001_to_076`). 계약 정본은 패킷 `docs/planning/handoffs/2026-08-15-live-3-control-open-packet.md` §4.
+> **신규 축(성재 발제 — Grok Bot 채팅 내 VM+직접 조작)**: 리서치 정본 `research/2026-08-15-in-chat-interactive-vm-takeover.md`(그린필드 아님 — 관전 해상도 증분·attach 축의 kind 확장) 랜딩. 코드 실측: 서버=프록시 없는 호스트 직결 계약(dto.rs:1002)·AttachMode(controller|observer) 기존재 → 라이브 개입="control"로 명명(인수 어휘 충돌 회피)·범위 술어=cloud+cubesandbox·BYOC fail-closed.
 >
-> **075가 예고한 실행 지점을 집행했다.** ADR-0004 증보 3이 2026-08-15 Accepted 되어, 076이 `terminal_attach_display_observer_ck`를 지우고 나머지 두 층(`AttachKind::permits_mode`·라우트 403)이 같은 커밋에서 함께 움직였다. 잠금이 사라진 자리에 들어온 것은 부재가 아니라 **원장**이다 — controller 발급은 한 트랜잭션에서 ①owner 한정(PTY controller 술어 재사용) ②`display_control_window` 개설(RLS FORCE, 세션당 열린 창 1개 = partial unique index) ③에이전트의 그 세션 접근 거부를 함께 한다.
+> **LIVE-1(#1409) 랜딩 완료**: PR #1410 squash → **`track/engine@7179f3e5`**(마이그 075·attach kind 축·라우트 3본·webrtcbin 템플릿 계약·`runtime-unverified(cubesandbox webrtc producer)` 정직 라벨). 리뷰 폐곡선: Fable C0/H0/M0/L1+verifier 재실행 PASS → grok freeze C0/H0/M0/L0 → CI. **policy-integrity 실측**: `Policy-Integrity-Audit: <full head SHA>` 마커 코멘트 → 라벨 전이가 그 **이후**(순서 검증 — 재부착으로 해소).
 >
-> **§1-3의 탐사 결론(동결 조건 미발동):** 에이전트가 work session에 닿는 서버 경로는 **하나**다 — `POST …/work-controls`(agent bearer 전용, `read`=화면 읽기, `session_id`를 든 유일한 지점). attach 두 라우트는 `require_human`이고 MCP agent-port 8개 도구에 세션 표면이 없어 에이전트는 관전 capability 자체를 못 받는다. 따라서 게이트는 구조적으로 가능했고 **controller를 연 채 동결하는 상황은 발생하지 않았다.** 두 층으로 걸었다: **거부**(`work_controls::create` 409, 모든 쓰기 위 — 거부된 시도는 행도 audit도 안 남긴다) + **보류**(창 직전 dispatch분을 `pending_controls_for_host_in_tx`가 withhold, 실패가 아니라 보류라 창이 닫히면 다음 poll에 전달). **mutation 증명 2건 실행**: 각 층을 제거하면 `live3_2`가 RED, 복구 후 8/8 GREEN.
+> **성재 결재 누계(2026-08-15 구조화 질의 2회·7건)**: LIVE-1 발사+연속 편성 · 경계=0004 증보 3 · 전송=WebRTC 직행 · **ADR-0165 Accept**(webrtcbin D1) · 도달성=**스파이크 선행**(#1411 발급) · owner_only owner 예외=**LIVE-3와 묶기** · **ADR-0004 증보 3 Accept**. 이탈 3건 전부 판정(DEVIATION_LOG 2026-08-15).
 >
-> **설계상 가장 조용한 함정 1건(해결):** 창의 수명을 capability `expires_at`(60초 dial 창)에 매면 `stream:true` 재검증이 만료 절만 완화하므로 **사람이 로그인하는 도중 60초에 에이전트가 재개된다** — 증보 3 D3이 막으려는 바로 그 실패다. 창에 자체 `lease_expires_at`(90초 = 재검증 3회)을 두고 **controller 재검증이 갱신**하도록 했다. 패킷 §1-2의 "capability 만료" 문구를 이 의미(= capability가 재검증·인가되기를 멈춤)로 읽었고, 60초 TTL의 문자적 해석은 채택하지 않았다 — 이탈 ①로 보고한다.
+> **LIVE-2(#1412) 랜딩 완료**: PR #1416 squash → **`track/engine@fbe49826`**. 폐곡선 3렌즈(Fable C0/H0/M0 → design-review PASS+H1/M1 회전 → grok freeze C0/H0/M1/L0 → M1 누수 회전 수리 red proof). 이탈 5건 accepted. **관전 "라이브 화면" 축 = 서버(LIVE-1)+웹(LIVE-2) 완결** — 실화면 E2E만 #1411 대기(`runtime-unverified(live sandbox display)`).
 >
-> **함께 확정:** `owner_only` = 「소유자만 본다」(발급·검증 조인 양쪽, 예외는 `kind='display'`로 좁힘 — PTY는 owner가 controller로 붙으므로 같은 문제가 없다) · `input_enabled`는 등급이 아니라 **창**을 따라가 반환을 실재하게 함 · 창 닫힘 3경로(반환/lease 만료/세션 종료) 전부 멱등 · VM은 `running` 유지(D6, ADR-0140 무변경).
+> **#1411 스파이크 완주(2026-08-15)**: 폐기 VM 실측 — **microVM NAT symmetric → P2P/srflx 폐기, relay 유일·TURN은 CubeSandbox 호스트 동거 불가** ⇒ **전용 공인 TURN 호스트 1대 신규 운영 자원 확정**. 시그널링=호스트 WS 프록시(형상 A, 6.3ms). 정본 `research/2026-08-15-reachability-spike-1411.md`(E2E 개방 조건 7항·부수 F1~F8). **ADR-0165 증보 1 Proposed — 성재 Accept 대기(TURN 발주 결정 포함)**. 접근 복구: momo-t3-smoke pem 복원(`~/.ncp/`)·getRootPassword 절차 재실증.
 >
-> **이탈 3건(전부 보고, 추측 구현 없음):** ①**lease 해석**(위) — 문자적 60초는 D3 위반이라 채택 불가. ②**런 층 파킹은 하지 않았다.** `RunStatus::Paused`가 enum·`is_approval_held`·cancel 경로에 이미 배선돼 있고 **writer만 없다**(즉 gateway 콜백은 오늘도 paused run에 409를 준다). 이걸 쓰면 D6의 "토큰 소진 0"이 더 강하게 성립하지만, 첫 `running→paused` writer + resume 경로 + 만료 sweep(승인 sweep 동형)이 필요한 **런 상태기계 신규 기제**라 별도 결정 사안으로 보고 손대지 않았다. 패킷 §4-4는 「보류/거부」를 허용하고 거부는 구현했다. ③**라우트 밖 세션 종료 경로**(T3 sweep/`t3_terminate`)는 창을 명시적으로 닫지 않는다 — lease가 ≤90초 내 `expired`로 회수하는 것이 backstop이고, `terminate_in_tx`는 momo-t3라 outbox를 낼 수 없어(크레이트 규칙) 거기서 닫으면 경계 이벤트 없는 침묵 종료가 된다.
+> **위생 파도 종결(2026-08-15)**: #1415(`2f0b3984` 누수 동형 이식)→#1413(`268df1c8` 소유권 바닥 `--spacing-chat-min`)→#1414(`0ac1e08c` 상태 캡처 6장) — 전부 grok freeze C0/H0/M0/L0(쿼터 해제 첫 적용·3연속), #1413은 design-review PASS 추가. **track/engine HEAD=0ac1e08c**.
 >
-> **정직 라벨:** `runtime-unverified(input delivery)` — 서버 절반(발급·창·게이트·`input_enabled`·3경로 닫힘)은 실제 PG18 + 실제 Axum router conformance 8건으로 증명, 화면 절반은 미증명(datachannel을 열어 키를 넣거나 반환 시 닫아 본 producer 없음, **revoke 절반이 특히 선언일 뿐**). ICE 도달성·TURN도 여전히 미측정.
+> **#1418 랜딩**(`f56c07f7` — 안쪽 열 바닥+1lh 클램프, 3렌즈 그린). 이월 선재 티켓: #1421(600~899 바닥·문턱 경계 결정)·#1422(절 생략+폰 예산).
 >
-> **다음 행동:** Fable 기획검수(C/H/M) → 수리 → grok 리뷰어 C freeze → push/PR(base `track/engine`) → PR CI → 머지. 랜딩 시 **LIVE-4**(웹 직접 조작 UI·로그인 핸드오프 UX, design-review Blocker 0) 패킷 발급·발사(성재 결재 완료분). 워커는 로컬 commit 동결까지만 수행했다. **범위 밖:** 웹 controller 소비 UI 전부(LIVE-4), 증보 3 D5(egress grant — 패킷 §3·§4 미포함), 런 층 파킹(이탈 ②), TURN 이후 실 E2E.
+> **성재 결재 집행(2026-08-16)**: ADR-0165 증보 1 **Accepted** · TURN=발주 검토 패키지 `research/2026-08-16-turn-dedicated-host-procurement-package.md`(**발주 결정 대기 — 성재 콘솔 체크리스트 §4**) · **LIVE-3(#1424) 발사(비행 중)** — control 개방 엔진 축(마이그 076·controller owner 한정·비관측=run 게이트·owner_only 예외), 패킷 `handoffs/2026-08-15-live-3-control-open-packet.md`.
+>
+> **LIVE-3(`460f142b`)·#1425(`8ce5ad38`) 랜딩** — control 개방+run 파킹(토큰 0=원장 성질). grok freeze 실경계 적발 누계 3건(재바인딩·교차-세션 잠금 — 각각 수리·재-freeze 무결). **우로보로스 인터뷰로 LIVE-4 편성 확정**(성재 승인 2026-08-16): 발제자 절단 — LIVE-4=에이전트 발제형 로그인 핸드오프 카드 축만, 정본 `research/2026-08-16-live4-interview-and-plan.md`. **LIVE-5 예약 확정**(창 열기·observation 전환/복원·auto-return·입력·ICE·E2E — TURN 발주 후 패킷화).
+>
+> **LIVE-4(#1428) 랜딩**: PR #1430 → **`track/engine@19455d54`**. 실증 2(승인 hold 재사용=발명 0·message.edited 재사용=클라 변경 0). 폐곡선 5회전 — grok 실경계 적발 누계 5건(이 파도). 관전 축 현황: **LIVE-1~4 완결**, 잔여=LIVE-5(TURN 후 — 예약 스코프에 세션 표면 내구 투영 포함)·실기동 E2E.
+>
+> **성재 대량 결재(2026-08-16) 집행 중 — 병렬 전환**: 발주=집행 완료(**momo-cube-host** 101.79.18.230 s8-g3/32GB/nested virt 실증 · **momo-turn** 223.130.142.109 — 월 고정 ≈₩477k·관전 1h 트래픽 ≈₩45=ADR-0164 실단가) · 문서 플러시=main@250f7507 머지 · Grok Bot 게이트 해제(#1344/#1361 큐 편입) · 배포=Fable 집행 위임(대상=momo-t3-smoke 101.79.11.189, 접근 확보 — 위생 꼬리 랜딩 후 최신 HEAD로).
+>
+> **비행 중 3기**: #1422(절 생략+폰 예산) · **#1434 INFRA-A**(cube 설치+display 템플릿+형상 A 프록시) · **#1435 INFRA-B**(coturn+allocation 실증) — 패킷 `handoffs/2026-08-16-infra-install-wave-packet.md`. **잔여 큐**: #1429(blocked 톤)→#1431(스레드 서랍 키보드)→배포 집행→#1344 Grok Bot 스파이크→#1361 E2E→INFRA 완료 시 실기동 E2E+LIVE-5 편성. #1421 랜딩(`199d90eb`).
+>
+> 그 외 상태는 스냅샷 27 그대로(HAP 완결·배포 대행 대기·main 미커밋 누적 — 본 세션 산출물 4건 추가).
+>
+> 이하 스냅샷 27:
 
-> **2026-08-15 스냅샷 40 (Opus 5 단발 워커 · engine — #1409 LIVE-1 T3 관전 라이브 화면 서버·기질 축, WebRTC display attach, 로컬 동결).** 스냅샷 39(#1368)을 supersede한다.
+> **2026-08-15 스냅샷 27 (Fable · momo-main — HAP 축 전체 완결).** 컴팩트 복원 진입점.
 >
-> **활성 goal #1409:** worktree/branch는 `feat/live1-display-spectate`(`~/projects/momo-tracks/momo-worktrees/live1-display-spectate`), base는 `track/engine@99d42244`(#1369 UX4 랜딩 HEAD). **마이그레이션은 075**(`check_migration_numbers.sh` 75 PASS, 대비 테스트 `discovers_contiguous_migrations_001_to_075`). 발주 전 그레펩 실측대로 그린필드였다 — display/VNC/WebRTC 스트림 축은 base에 0건이었다(`infra/livekit.yaml`은 huddle 오디오용 SFU이고 이 축과 무관하다).
+> **HAP 축 완결**: 엔진 E1~E7(#1358·1363·1364·1365·1366·1367·1368) + UX1~4(#1360·1362·1359·1369) 전부 track/engine 랜딩. 남은 HAP=**#1361 GROK-E2E만 blocked**(Grok Bot 티어 게이팅 — 성재 구독 결정). track/engine HEAD=99d42244.
 >
-> **경계 요약(ADR-0165 — Proposed, 전송 방향은 성재 결재 완료·문서 Accept가 머지 관문):** 관전의 두 번째 kind를 **기존 capability 기계의 파라미터**로 넣었다. 마이그 075가 `work_session.display_id/display_endpoint`(023 동형 제약)와 `terminal_attach_capability.kind`(`pty|display`, DEFAULT `pty`)를 더했고, 발급·검증·sweep·관전자 계수·RLS·revoke 조인은 각각 여전히 하나다. 새 표를 만들면 "host를 회수했으니 관전이 끊긴다"의 정의가 둘이 되고 그중 하나가 낡는 날 그 문장이 절반만 참이 된다.
+> **오늘(8/15) 랜딩 18건**: E5·E6·E7·위생 6(#1374·1376·1377·1385·1375+1386)·CRUN 1/2/3·UX 1/2/3/4. 각 UX는 design-review PASS+폴리시 회전. E7·UX2/3/4는 대형이라 3사(Fable 검수·grok freeze·design-review) 다중 관문.
 >
-> **view-only 3층 — 그리고 이 goal이 잠근 것:** ①075의 `terminal_attach_display_observer_ck`가 controller display 행을 **표현 불가**로 만든다(conformance가 superuser INSERT 실패를 요구 — 라우트를 다시 써도 경계가 남는다) ②라우트가 `mode=controller`를 **403**으로 거절(400이 아니다 — 어휘에 있고 철자도 맞은, 아무에게도 없는 등급) + `AttachKind::permits_mode`가 검증에서 재차 ③producer가 SDP에 `m=application`을 넣지 않는다(ADR-0165 D4 — 없는 채널로는 입력이 오지 않는다). 입력 개방은 **ADR-0004 증보 3 Accept 뒤 LIVE-3** 소관이고, 그날 세 층이 함께 움직인다.
+> **리뷰 체제**: sol(Codex) usage-limit **8/20까지** → grok 리뷰어 C가 freeze 렌즈(E7에서 Fable과 판정 일치). 당분간 Fable+grok+design-review. grok-fleet 스킬 정본.
 >
-> **새 host-signed write 1개:** `POST …/work-sessions/{s}/display-binding`이 이 서버가 서명 host에게서 받는 첫 work-session write다(Swift의 `PATCH …/work-sessions/{s}` 바인딩 arm은 여전히 미이식). 경로가 host가 아니라 session을 지시하므로 **서명자 핀은 핸들러가 원장을 읽어 건다**(= 세션의 `host_id` — `…/work-controls/{c}/ack` 선례). 재게시는 멱등 204, 다른 바인딩은 409, human bearer는 403, create/PATCH의 같은 이름 필드는 이름을 불러 400.
+> **성재 대기(급하지 않음)**: ①**배포** `momo-rust:d7b390cf`(위생6+UX1+CRUN, E7/UX2~4 미포함 — 원하면 재빌드) 대행 패키지 전달됨·백로그 점검 선행 ②**E7 개방** flag+runtime E2E(#1361류) 뒤 운영 결정 ③제품 결정 티켓: #1395(placeholder 방-인지)·#1396(스레드 멘션 패리티)·#1399(티어 override 와이어·ADR 선행)·#1405(hosted DTO 확장)·#1400(auth_mode 제약)·#1392·#1403.
 >
-> **fail-closed:** `work_host.capabilities.display_attach`가 참일 때만 발급·검증·게시가 성립한다. BYOC는 **provider 이름 검사가 아니라** momo가 그 박스의 이미지를 굽지 않아 아무것도 광고되지 않는다는 사실로 빠진다(불변식 #7 유지). 광고는 매 검증마다 다시 읽는 조인 절이라, 플래그 없이 재등록하면 열려 있는 화면이 한 revalidation 주기에 끊긴다(런타임 확인).
+> **다음 축 후보**: 클라우드(ADR-0164/0004증2/0150증1 Accepted → 크레딧 구현·egress P1~P7 분해)·데스크탑 검수 인테이크·GROK-E2E(구독 결정 시).
 >
-> **투영 드리프트를 구조로 막았다:** `remote_display_available`을 세 곳에 손으로 적는 대신 술어 쌍을 한 정의(`WS_ATTACH_AVAILABILITY`)로 올리고 detail/RETURNING/reattach/list가 조립한다 — 빠뜨리는 것이 표현 불가다. 그 위에 조립된 네 문장에서 두 컬럼이 정확히 한 번씩 나오는지 보는 드리프트 테스트. 두 boolean은 독립이고(화면만 있고 터미널이 없는 세션이 정상) `ReattachVerdict`는 일부러 넓히지 않았다. 관전자 수는 kind를 구분하지 않는 하나이며 display 발급도 같은 count-only 봉투를 낸다.
+> ⚠ main 미커밋 누적 지속(플러시·ADR·리서치·런북·패킷) — 커밋 창 일괄.
 >
-> **실측:** 신규 `scripts/verify_display_attach.sh`(4 phase, 소유권 계약 자가검증 `--verify-cleanup-contract` 포함, Docker 잔존 0) PASS. PG18 + 실제 Axum router conformance 4건 PASS. 두 로컬 피어 실제 WebSocket 왕복 `scripts/display_signaling_probe.py` PASS + `--prove-red` PASS(datachannel을 여는 producer가 잡힌다 — 이 red proof가 probe 자신의 프레임 버퍼링 결함 1건을 잡아냈다). 무회귀: `verify_terminal_attach.sh`·`verify_observer_attach.sh`(Swift e2e — 075가 현행 서버와 호환임을 함께 증명)·`verify_agent_port.sh`(deploy 이미지 재빌드 포함)·`reattach_smoke_pg`·`t3_smoke_pg`·`work_control_spawn_conformance_pg`·`daemon_ack_resume_conformance_pg` 전부 PASS. 워크스페이스 clippy `-D warnings`·`cargo test --workspace`(101 스위트 ok)·소유 파일 fmt GREEN. 로컬 docs gate는 #1376에 따라 미실행.
->
-> **정직 라벨 `runtime-unverified(cubesandbox webrtc producer)`:** microVM 템플릿을 빌드·기동한 바 없다. 템플릿 사양은 `infra/cubesandbox/display-template/`(`template.spec.json`이 기계 판독 정본이고 verifier가 서버 상수와 대조한다 + systemd unit + README).
->
-> **이탈 3건(전부 동결·보고, 추측 없음):** ①**producer 선택**이 D1의 1순위(Selkies)에서 벗어나 `webrtcbin`이다 — 근거는 성능이 아니라 D4다(Selkies의 입력 datachannel은 그 제품 자체라 거기서 view-only는 되돌릴 수 있는 설정값이 된다). 구조적 논거이며 실측이 아니고, 되돌리기는 spec 한 필드다. ②**브라우저가 sandbox에 닿을 수 있는지 미실측·미결** — 어댑터 `create_body`에 포트 노출 표현이 없고 ADR-0157 증보 1의 eBPF `deny_out` 실측은 이 VM들이 닫힌 채 출하됨을 말한다. 세 후보(전용 호스트 리버스 프록시 / oort 운영 TURN=D3 증보 / per-sandbox 공개 포트)를 적고 고르지 않았다. 서버 축은 어느 쪽이든 완결이지만 **LIVE-2는 이 답 없이 렌더할 수 없다**. ③**`owner_only` 세션의 소유자도 자기 화면을 못 본다** — display에 controller가 없으므로 PTY에서 소유자가 쓰던 문이 없다. 소유자 예외를 만드는 것은 금지된 새 권한 모델이라 fail-closed(거절)로 구현하고 403을 테스트로 못박았다. `owner_only`의 의미를 확정하는 결정이 필요하다.
->
-> **다음 행동:** Fable 기획검수(C/H/M) → 수리 → grok 리뷰어 C freeze(C0/H0/M0) → **ADR-0165 문서 Accept 확인** → push/PR(base `track/engine`) → PR CI → 머지. 랜딩 시 연속 편성 결재에 따라 LIVE-2 발사 — 단 위 이탈 ②가 LIVE-2의 선행 조건이다. 워커는 로컬 commit 동결까지만 수행했다. **범위 밖:** 웹 렌더 전부, control(LIVE-3)·로그인 핸드오프(LIVE-4), workd(Swift) 데몬 측 배선, `openapi_sampled_on_rust.txt` 등재(배포 이미지 왕복 미수행이라 줄을 더하지 않았다).
->
-> **2026-08-15 스냅샷 39 (Opus 5 단발 워커 · engine — #1368 HAP-E7 MCP OAuth 2.1 authorization-server mode, bearer downgrade 없이, 로컬 동결).** 스냅샷 38(#1360)을 supersede한다.
->
-> **활성 goal #1368:** worktree/branch는 `feat/1368-hap-e7-engine-mcp-oauth-authorization-server`, base는 현재 `track/engine@d7b390cf`(rebase 완료 — 엔진의 hygiene 073·#1360 wizard·#1384 composer 위). **마이그레이션은 074**(`check_migration_numbers.sh` 74 PASS, 대비 테스트 `discovers_contiguous_migrations_001_to_074`). 엔진이 자기 073(`hosted_lifecycle_hygiene`, #1375/#1386)을 먼저 랜딩했으므로 rebase에서 나의 073을 074로 재번호했다 — 066/067/068이 세운 그 선례이고 contiguity 테스트가 강제했다. rebase 충돌은 `migrate.rs`(073 docstring — 두 073 노트를 union), `STATUS.md`·`CURRENT_STATE.md`(둘 다 최상단 prepend) 세 곳뿐, 전부 union으로 해소.
->
-> **경계 요약(ADR-0162 증보 1 — Accepted, 성재 승인 2026-08-15):** `oauth` connection의 lifecycle은 `pairing_pending ──로그인한 owner/admin의 exact consent(= authorization code 발급)──> detected ──token exchange: code 1회 소비 + PKCE proof + exact audience + 전용 member unpause를 한 transaction──> active`이고 disconnect/cleanup/terminal은 D7과 동일하다. `oauth` connection은 static pairing challenge를 갖지 않는다. `GET /v1/oauth/authorize`는 unauthenticated라 **row를 0건 쓰고** server-서명 단기 envelope(nonce)만 consent 화면에 넘기며, workspace·connection·human은 인증된 tenant-scoped consent API에서 결정된다(nonce당 terminal decision 정확히 1건).
->
-> **no-downgrade 척추(= 이 goal의 제목):** ①flag off면 metadata 미광고 + `/v1/oauth/*` 404(503 아님) + OAuth envelope도 평범한 `invalid_token`이라 flag가 probe 불가. ②flag만 다른 두 서버에 static bearer 사다리 4단을 보내 status·`WWW-Authenticate`·`Cache-Control`·**본문 바이트** 동일을 단언하고, challenge 문자열 2개를 frozen literal로 고정해 양쪽 동시 변경도 못 지나가게 했다. ③저장 digest가 envelope **전체**를 덮어 static↔oauth↔refresh↔code 재라벨링 4방향이 전부 401. ④credential class와 connection `auth_mode` 일치를 **migration 074의 trigger**가 강제 — "OAuth 실패 뒤 static 강등"이 스키마상 표현 불가능해졌다. **auth_mode 불변성은 현재 관례**(SET auth_mode 경로 부재)이며, 미래의 in-place mode 변경 경로가 생기면 connection-side trigger로 이 guard의 건전성을 지켜야 한다(별도 티켓 — Fable 발행).
->
-> **정직성 상한:** issuer·canonical resource는 운영자 설정에서만 오고 `Host`/`Forwarded`/`X-Forwarded-*`는 어디서도 안 읽는다(스푸핑 실측). 광고는 구현한 것뿐 — `authorization_code`+`refresh_token`, `code`, `S256`, `none`, revocation, RFC 9207 `iss`. **DCR과 URL-form Client ID Metadata Document는 구현·fetch·광고 모두 안 한다**(SSRF 표면은 별도 ADR+threat model 선행), `client_secret` 없음. scope 상한은 static confirm과 **같은 validator**의 `HOSTED_AGENT_PORT_GRANTABLE_SCOPES`이고 상한 밖·미요청 scope는 code 발급 전에 거절 + secret/digest 없는 bounded denial audit. code replay·refresh reuse는 거절과 같은 transaction에서 그 connection의 live OAuth credential 전부 revoke + audit 1행.
->
-> **실측:** 신규 `scripts/verify_agent_port_oauth.sh`(E5/E6와 동일 소유권 계약: nonce label·janitor label·external DATABASE_URL 거부·trap cleanup·3상태 부재 증명·`--verify-cleanup-contract`, local_gate static+runtime 양쪽 배선)가 PG18에서 **20 시나리오 PASS**. `verify_agent_port_tools.sh`(E5)·`verify_hosted_disconnect.sh`(E6)·`verify_hosted_agent_inbox.sh`(E4)·`verify_agent_credentials_rust.sh`(E1) 재실행 무회귀 PASS, Docker 잔존 0. 워크스페이스 fmt·clippy `-D warnings`·전체 cargo test GREEN. `docs/api/openapi.yaml`은 **의도적으로 미변경**이므로 `schema.d.ts` 재생성 대상이 아니다 — OAuth 6개 endpoint의 OpenAPI 등재는 consent 계약이 확정되고 웹 클라이언트가 실제로 소비하는 #1369와 함께 한 번에 랜딩하는 편이 재생성 위험을 한 번으로 줄인다.
->
-> **다음 행동:** Fable 적대검수 완료(11개 공격면 SOUND·C0/H0/M0/L2). ADR-0162 증보 1 **Accepted**(성재 2026-08-15). 랜딩 준비 4건(073→074 재번호·증보 Accepted·L2 refresh-reuse audit 보강·L1 auth_mode 불변성 티켓 노트) 완료. → push/PR(track/engine; `local_gate.sh` 접촉이므로 policy audit 코멘트+라벨 흐름) → PR CI → 머지. **flag 개방은 #1369 consent UX 랜딩 + runtime proof 폐곡선 뒤의 별도 운영 결정**이다(증보 Accept는 경계를 승인한 것이지 flag 개방이 아니다). 워커는 로컬 commit 동결까지만 수행했다.
->
-> **2026-08-15 스냅샷 38 (Opus 5 단발 워커 · uxui/web — #1360 HAP-UX1 "Bring your hosted agent" 페어링 마법사, 로컬 동결).** 스냅샷 37을 supersede한다.
->
-> **활성 goal #1360:** blocker #1364(pairing lifecycle)·#1366(MCP tools/per-agent delivery)이 랜딩해 HAP-UX1을 claim했다. worktree/branch는 `feat/1360-hap-ux1-hosted-agent-pairing-wizard`, base는 `track/engine@6d2a7977`(#1377 rustfmt 정렬). 서버 wire는 한 줄도 만들지 않았다 — openapi `agents` 태그의 기존 5개 연산만 쓴다.
->
-> **경계 요약:** 다섯 단계가 **서버 상태에서 도출된다.** 이 흐름의 절반은 다른 프로세스가 일으키는 사건이라(감지=상대 에이전트의 다이얼인, 활성=그 에이전트의 자격증명 증명) 로컬 진행도 카운터를 두면 새로고침·재접속·다른 탭이 각자 다른 진행도로 같은 커넥션을 설명한다. 지역 상태는 서버가 알 수 없는 하나뿐이다: 지금 비밀값이 화면에 떠 있는가. 판단·문장·상태기계는 전부 `packages/momo-core/src/features/hostedAgents/*`에 있고 웹은 렌더와 플랫폼 배선만 한다(폰 이식 시 두 번째 구현이 아니라 두 번째 호출자가 된다).
->
-> **`detected`가 화면 둘인 이유(설계의 축):** HAP-E3의 `confirm`은 자격증명을 발급할 뿐 **상태를 바꾸지 않는다**(`status='detected'` 유지, `active_token_id`만 채움). 그래서 승인 전(4단계)과 증명 대기(5단계)를 `activeCredentialId` 유무로 가른다. 상태 이름만 보고 화면을 고르면 승인 직후 화면이 4단계로 되돌아가고, 사람은 방금 한 승인을 한 번 더 하려 든다. 같은 이유로 상태 문장도 그 상태에서만 둘이다.
->
-> **비밀값 둘의 수명:** 연결 값과 active 자격증명은 서로 다른 비밀이다(ADR-0162 D6). 둘 다 컴포넌트 상태에서만 살고 캐시·저장소·URL·로그에 가지 않으며, ①「저장했습니다」 ②언마운트 ③만료/재발급 ④**서버가 소비를 말할 때** 넷 중 무엇이든 메모리 사본을 버린다. 값이 떠 있는 동안 Esc·바깥 클릭은 다이얼로그가 막는다(Radix는 층 스택에 들어오지 않으므로 `useEscapeGuard`가 아니라 `onEscapeKeyDown`이 그 자리다). 웹훅 R2가 힙에서 찾아낸 리테이너 경로(`queryFn` 클로저가 렌더 스코프를 붙잡는다)는 쿼리 옵션을 전부 모듈 스코프로 올려 막았고, 원문을 나르는 mutation 셋이 한 키·`gcTime: 0`·언마운트 purge 아래 있다.
->
-> **정직 경계 3건:** ①Grok preset은 `verified: false`이고 "인증 헤더를 실제로 보내는지 아직 확인되지 않았다"를 preset 옆에 붙인다(#1344의 404가 auth challenge보다 먼저 끝났다 — ADR-0162 D8). ②OAuth는 목록에서 지우지 않고 비활성 + 사유로 세우며 날짜를 약속하지 않고 자동 downgrade 경로가 없다. ③테스트 멘션은 `status === 'active'` + 승인 채널이 있을 때만 열리고, 여는 것은 실제 채널이지 UI가 지어내는 성공이 아니다.
->
-> **승인 화면(되돌릴 수 없는 유일한 판단):** 권한 여섯 줄이 각자 결과 문장을 상시 노출하고, 고른 것 전체의 결과가 저장 버튼 위에 한 문단으로 서서 **허락한 것과 닫히는 것을 함께** 말한다. 자격 없는 줄(1:1 대화·보관 채널)은 숨기지 않고 사유와 함께 서며 전송 본문에는 실리지 않는다(fail-closed, 서버 `valid_channels`와 같은 규칙). `agent:port:connect`는 잠긴 채 켜져 있다.
->
-> **캡처 레인이 잡은 결함 2건:** 상태별 9장 × 2스킴을 `capture-screens.mjs`에 더했고, 그 레인이 ①목록 조회 실패가 1단계로 떨어져 "읽지 못한 목록"이 "연결 없음"처럼 보이던 것(오류 배너가 설 자리도 없었다) ②멘션 문장의 손으로 적은 조사(`@kim-intern 을`)를 잡았다. 둘 다 수리했고 두 번째는 코어 조사 판정으로 옮겨 테스트를 세웠다.
->
-> **실측:** core 1261 / web 909 / 폰 1144 tests GREEN, typecheck·lint·purity GREEN, `design_preflight_web.sh` web 10/10 + core 3/3, `verify_merge_tree.sh --install`(base `track/engine`) 8레인 green. 신규 테스트 core 88 + web 13, RED PROOF 19개 명시. 폰 스위트에서 한 번 만난 RED는 `inboxApproval.test.tsx`의 선재 flake로 확인했다(base 리버트 상태에서도 재현).
->
-> **다음 행동:** design-review 에이전트(fresh context, 캡처 18장 첨부) → Blocker 0 확인 → Fable 기획검수 → push/PR(track/engine) → PR CI → 머지. 워커는 로컬 commit 동결까지만 수행했다. **범위 밖으로 남긴 것:** 해제/cleanup UX(UX2 / #1362), 힙 스냅샷 게이트(웹훅에만 있다), Tauri 동일 번들 smoke, 모바일 이식(UX3), OAuth UI(#1368/#1369).
->
-> **2026-08-14 스냅샷 37 (Opus 5 단발 워커 · engine — #1367 HAP-E6 원자적 disconnect + cleanup-confirmed terminal, 로컬 동결).** 스냅샷 36을 supersede한다.
->
-> **활성 goal #1367:** native blocker #1364/#1365(및 랜딩된 #1366)가 닫혀 HAP-E6를 claim했다. worktree/branch는 `feat/1367-hap-e6-engine-atomic-hosted-agent-disconnect-cleanup-confirmed-terminal`, base는 `track/engine@7a52c4c2`(#1366 squash 랜딩). 마이그레이션은 **072**(`check_migration_numbers.sh` 72 PASS).
->
-> **경계 요약:** disconnect 시작은 `detected|active → cleanup_pending` **단일 tenant transaction**이다 — 이 커넥션 한정 bearer revoke + 전용 agent pause + 열린 gateway job 억제(lease 회수 포함) + 종류별 artifact manifest seed + audit 1행이 전부이거나 전부 롤백. terminal `disconnected`는 required artifact 전부 resolved **그리고** 로컬 절반(live credential 0 + paused)이 서버 판독으로 확인될 때 정확히 한 번. 재시도/재생은 멱등이며 audit을 증폭하지 않는다.
->
-> **manifest 결정(#1344 실측이 스키마가 된 지점):** jsonb가 아니라 **행**이다 — 6종 seed 행 + 명명 항목별 행, 각각 expected action·current status·disposition·source·actor·acknowledged-at·evidence. `resolved`는 `disposition`만으로 계산되는 generated column이라 결정 없이 결론만 쓸 수 없다. connector 해제는 `local_plugin_files`를 자동 충족하지 않고, inactive routine은 `current_status`일 뿐 resolved가 아니며, `bot`만 `preserved`가 합법 terminal이다(chat history 자동 삭제 금지). `server_verified`는 seed된 `secret` 행 하나에만 CHECK로 허용되고(이 서버가 직접 revoke한 유일 artifact), 나머지는 actor+evidence를 요구하는 `manual`이며 라우트가 request body에서 `source`를 읽지 않는다.
->
-> **잠금 순서(E4 계약 준수, #1374와 정합):** 신규 transaction도 `connection → token → member → membership → profile`. revoke는 `hosted_connection_id` 한정이라 형제 커넥션 토큰을 회수하지 않는다 — prove 경로의 `invalidate_hosted_lifecycle_in_tx`는 **건드리지 않았고**(#1374 소유), 대신 커넥션 한정 `reconcile_*` 두 함수를 새로 만들었다. tool/gateway/inbox는 이미 커넥션을 `FOR SHARE`로 잡으므로 disconnect의 `FOR UPDATE`가 대기·직렬화된다(race 시나리오 실측).
->
-> **화해(만료·emergency revoke) 진입점 2개:** bearer resolution이 revoked/expired로 조기 거절하는 경로와, member 정지/membership 상실로 proof가 실패하는 경로 둘 다 같은 fail-closed tx로 `cleanup_pending`까지 맞춘다. 발동 조건은 제시된 자격증명이 커넥션의 **현재 active token**일 때뿐이라 폐기된 토큰으로 살아 있는 커넥션을 끌어내릴 수 없다.
->
-> **게이트 개방(E5 이관분 종결):** `MOMO_HOSTED_DELIVERY_ENABLED`의 `#[cfg(debug_assertions)]`를 제거했다. release도 읽지만 기본값 closed·정확히 소문자 `true` 한 철자만 개방·직접 구성 override 유지. 프로덕션 활성화는 이제 이 수명주기를 근거로 한 운영자 결정이다.
->
-> **실측:** 신규 `scripts/verify_hosted_disconnect.sh`(#1366 소유권 계약 동일: nonce label·janitor label·external DATABASE_URL 거부·trap cleanup·3상태 부재 증명·`--verify-cleanup-contract`)가 PG18에서 8 시나리오 PASS. `verify_agent_port_tools.sh`(E5)·`verify_hosted_agent_inbox.sh`(E4)·`verify_agent_port.sh`(E2/E3) 최종 트리 재실행 PASS, Docker 잔존 0. E5/E4 fixture 중 `disconnected`를 직접 조작하던 2곳은 072 트리거가 거절하므로 로컬 절반을 실제 수행한 뒤 전이하도록 고쳤다 — 그 자체가 불변식의 증거다. 워크스페이스 clippy `-D warnings`·전체 테스트 GREEN, 로컬 docs gate는 base-inherited RED(#1376)라 미실행.
->
-> **리뷰 수리(2026-08-14):** Fable 적대적 검수 C0/H0(M1+L4 이관: openapi 샘플링=#1385, hygiene 번들=#1386), sol freeze M1, 파일럿 지적 1건. ①sol M1 — openapi 3개 연산에 대한 `clients/web-legacy/src/api/schema.d.ts` 재생성 누락(PR CI contract lane RED 예정)을 재생성·커밋했고 2회 실행 byte-identical을 확인했다(3 path + 6 schema + 3 operation 추가). ②파일럿 지적(트리거 공허 참) 수리 — 072 terminal 가드에 `OLD.status='cleanup_pending'`과 **manifest 비어 있지 않음** 두 절을 추가했다. 기존 "required 미해결 없음" 절은 빈 manifest에서 공허하게 참이라 start를 건너뛴 repair-script 경로를 막지 못했고 어떤 테스트도 그 절의 실패 케이스를 지나간 적이 없었다(=dead code). Rust `complete_hosted_disconnect_in_tx`에 같은 관문(`ManifestMissing`)을 미러링했고, 신규 테스트가 네 절 각각을 거절 메시지로 단언한다. mutation 3건으로 red-proof 확인. INSERT-terminal 우회·terminal 이탈 가드·`acknowledged_by` FK·retry-seed 병합은 #1386으로 명시 이관(범위 확대 금지).
->
-> **다음 행동:** Fable 기획검수 → sol 독립 freeze 리뷰(exact commit C/H/M=0) → push/PR(track/engine; `local_gate.sh` 접촉이므로 policy audit 코멘트+라벨 흐름) → PR CI → 머지. **E6 랜딩 = E1~E6 라이브 배포 창 개방 조건**(배포 시 pending job 백로그 점검 선행). 워커는 로컬 commit 동결까지만 수행했다.
->
-> **2026-08-14 스냅샷 36 (Opus 5 단발 워커 · engine — #1366 HAP-E5 MCP tool surface + per-agent hosted delivery, 로컬 동결).** 스냅샷 35를 supersede한다.
->
-> **활성 goal #1366:** native blocker #1364/#1365가 닫혀 HAP-E5를 claim했다. worktree/branch는 `feat/1366-hap-e5-engine-thin-bind-mcp-inbox-conversation-gateway-tools`, base는 `track/engine@aa40e4c63d5b5e96b7461881ef82a1372b2ae35b`(#1365 랜딩)다. Agent Port에 8개 thin-binding tool과 agent별 managed/hosted delivery selector를 열었고, 두 번째 message/job SoT는 만들지 않았다.
->
-> **경계 요약:** `tools/list`와 `tools/call`이 하나의 `ToolView`(connection 승인 scope × 현재 token scope × server capability)를 공유하고, `agent:port:connect`는 어느 tool의 필요 scope도 아니다. 메시지는 REST send와 같은 `send_message_with_mentions_in_tx`, job/lease는 기존 gateway 동사(claim만 hosted 분기를 가진 단일 문), run event/complete는 REST handler에서 추출해 양쪽이 공유하는 in-tx 함수다. client에게는 AEAD 봉인 `leaseHandle`만 나가고 job id·lease owner·run id·inbox 순번·raw cursor는 나가지 않는다. selector는 전역 provider mode와 무관하며 inactive hosted agent는 managed로 fallback하지 않고 fail-closed다. 생산 gate `MOMO_HOSTED_DELIVERY_ENABLED`는 #1367까지 닫혀 있고 runtime fixture만 synthetic override로 연다.
->
-> **M1 폐곡선(선택 근거):** migration 071이 (a) kind 포함 unique index + `source_outbox_kind` generated column으로 outbox FK에 kind를 결속(=DB 강제)하고, (b) job↔run 짝은 BEFORE INSERT trigger로 강제한다. FK를 못 쓴 이유는 job의 run 신원이 `outbox.payload` jsonb에 있어 stored generated column으로 hot table을 rewrite해야 하고 non-uuid run_id legacy row에서 즉시 실패하기 때문이다. 적대 테스트가 kind 혼동·job↔run 불일치·cross-channel·타 agent job·깨진 shape를 전부 DB 거절로 고정했다.
->
-> **cursor secret 회전 계약(결정):** 봉투에 key-id를 넣지 않는다 — opaque token에 rotation-epoch oracle이 생기고 dual-secret 창이 필요해진다. 회전은 계약상 disconnect와 동치이며 hosted connection은 재-pairing해야 한다. 열리지 않는 cursor는 조용한 전량 재전송이 아니라 fail-closed 거절이고(verifier가 고정), 운영자-facing 강제 재-pairing은 #1367 소유다.
->
-> **측정 결함 1건 동반 수정:** gateway lease 술어가 `payload->>'…'`를 원문 비교해 mention producer의 대문자 uuid와 어긋났고, 그 결과 **mention job은 gateway 경로로 claim/renew/release/settle이 불가능**했다. `lower()` 양변 적용은 `retire_pending_agent_jobs_for_run_in_tx`가 같은 이유로 이미 문서화한 최소 수정이다.
->
-> **실측:** 신규 `scripts/verify_agent_port_tools.sh`(#1365 소유권 계약 동일: nonce label·janitor label·external DATABASE_URL 거부·trap cleanup·부재 증명·`--verify-cleanup-contract`)가 PG18에서 7 테스트 PASS. `scripts/verify_hosted_agent_inbox.sh` 무회귀 PASS. workspace clippy `-D warnings` 0, workspace test 0 실패, migration 번호 71 unique. Docker 잔존 0. 로컬 docs gate는 #1376 base-inherited 결함으로 이 머신에서 미실행 — PR CI가 관문이다.
->
-> **독립 리뷰 1회차(C0/H1/M2/L5) 수리 완료:** H1(gateway completion의 hosted inbox fan-out 누락)은 `complete_gateway_run_in_tx`에 같은 tx 호출을 추가하고 REST 왕복 conformance로 고정했다. M1은 `lower()` 위드닝의 red proof를 **관리형 REST 표면**에 세웠고(배포 창 backlog 체크리스트는 STATUS에 명시), M2는 `MOMO_HOSTED_DELIVERY_ENABLED` 수용을 `#[cfg(debug_assertions)]`로 감싸 release 빌드에서 구조적으로 닫았다(#1367이 cfg 제거 소유). L1은 complete의 거절 순서를 base와 동일하게 복원(lease shape 검사를 approval-hold 뒤로 되돌림), L2는 cursor 상한을 스키마와 256으로 정렬, L3는 hosted claim이 uuid 형태가 아닌 `run_id` 행을 애초에 lease하지 않도록 SQL 술어를 추가해 무한 재-lease 루프를 제거했다.
->
-> **독립 리뷰 2회차(sol freeze — 1회차 수리 전건 확인, 신규 H1/M2) 수리 완료:** H(승인 밖 채널 hosted job 노출)는 claim SQL의 live `approved_channel_ids` 술어(권위) + selector의 `hosted_channel_unapproved` skip(조기 차단) + `leaseHandle`에 channel_id 봉인(이미 쥔 lease의 중도 회수)으로 3중 결속했고, claim 술어만 빼도 적대 테스트가 RED임을 확인했다. M(음수 토큰)은 스키마·기록 경계 양쪽에서 거절(ledger CHECK는 #1375 후보). M(닫힌 스키마 미집행)은 게시된 input schema를 `momo-mcp`가 그대로 집행하도록 바꿔 오타 필드·범위 밖 수치가 domain port에 도달하지 못하게 했고, 위반 응답은 adapter invalid-arguments와 byte 동일이다.
->
-> **독립 리뷰 3회차(잔여 M — 스키마와 집행의 3개 간극) 수리 완료:** ①nullability 계약을 **(a)안**으로 확정했다 — optional 속성은 전부 `["<type>","null"]`로 선언하고 required는 아니다. adapter reader가 optional의 `null`을 이미 균일하게 "없음"으로 다루므로, `null`을 전면 거절하는 (b)안은 매우 흔한 클라이언트 직렬화 관례를 깨면서 스키마만 정직해졌을 뿐 동작은 더 나빠졌을 것이다. 대응은 `the_nullability_contract_holds_for_every_tool`이 8개 도구 전체(중첩 usage 포함)에서 기계 검사한다. ②`maxLength`/`minLength`를 validator에서 **UTF-8 바이트**로 세고 각 필드 description에 단위를 명시했으며 adapter reader 상한도 게시 숫자에 정렬해 두 층이 같은 경계에서 거절한다. ③토큰 4필드에 `maximum:2147483647`을 선언해 i32 좁힘과 스키마를 일치시켰다. 세 항목 모두 단일 InvalidArguments 응답을 유지한다.
->
-> **다음 행동:** Fable 기획검수 → sol 독립 freeze 리뷰(exact commit C/H/M=0) → push/PR(track/engine)/PR CI/머지. 워커는 로컬 commit 동결까지만 수행했다.
->
-> **2026-08-14 스냅샷 35 (GPT 5.6 · momo-main — #1365 durable inbox runtime closure).** 스냅샷 34를 supersede한다.
->
-> **Fable 리뷰 반영:** `fbcd6afc` 초안의 C0/H2/M3을 기준으로 inbox scope, exact token↔connection↔actor↔audience, approved/current channel, active member/workspace membership, unpaused profile과 source message tuple을 결속했다. append/read authority rows는 같은 tenant transaction 동안 잠겨 revoke·pause·membership-loss와 직렬화되고, hidden row도 scan watermark를 전진시켜 membership 복원 후 보유 cursor로는 과거 content가 재출현하지 않는다(cursor 없는 재조회는 재인가된 정상 열람). connection FK는 history-preserving RESTRICT이며 run reference는 (workspace, run, agent, channel) composite FK로 묶었다. job(outbox) reference는 agent까지만 결속되고 outbox.kind·job↔run 짝은 스키마가 강제하지 않는다 — 이 잔여는 Fable 최종 리뷰가 #1366 수용기준으로 이관했다.
->
-> **실측:** Docker 재설치 후 전용 `scripts/verify_hosted_agent_inbox.sh`가 fresh pinned PG18에서 migration 001→070, momo_app/FORCE RLS, two-channel seq=1, concurrent idempotency, rollback, cursor/visibility/scope/profile/approval, append-only, disconnect history와 reconnect namespace를 PASS했다. verifier는 external DATABASE_URL을 거부하고 nonce label+immutable container ID를 검증한 뒤 teardown/absence proof 후에만 PASS한다.
->
-> **남은 경계:** MCP `tools/list`/`oort_inbox_read` 노출과 실제 message/job/run producer append는 의도대로 #1366 소유다. #1365는 Rust hard gates·docs gate·독립 final C/H/M=0 뒤 commit/push/PR/needs-review로 넘기며, 그 전에는 완료로 부르지 않는다.
->
-> **2026-08-14 Fable 최종 판정(성재 go):** `23043248` 기준 독립 리뷰 **C0/H0** — 잔여 Medium은 전부 이관(job↔run·kind 결속=#1366 수용기준 코멘트, prove 경로 lock-order=#1374, ledger 잠재 3종=#1375). verifier 독립 재실행 PASS(잔존 0). docs gate는 base-inherited 선재 결함 2종(#1376 — actionlint 1.7.12 스핀·시스템 ruby 2.6의 콜론 enum 파싱 실패, bare track/engine에서 동일 재현 증명)으로 이 머신에서 완주 불가 — PR CI를 관문으로 한다. 이 커밋으로 push→PR→needs-review 집행.
+> 이하 스냅샷 26:
 
-> **2026-08-14 스냅샷 34 (GPT 5.6 · momo-main — #1364 랜딩, #1365 HAP-E4 착수).** 스냅샷 33을 supersede한다.
+> **2026-08-15 스냅샷 26 (Fable · momo-main — HAP 엔진 축 완결·UX 파도·grok freeze 승격).** 컴팩트 복원 진입점.
 >
-> **랜딩:** #1364는 PR #1373을 `track/engine@23038585efc2c2740d2d6ddafa9765e455e62ab8`로 squash-merge했다. PR CI와 canonical `track/engine@c5badf5f`에서 실행한 exact-base Policy Integrity가 PASS했고 독립 final review는 C0/H0/M0이다. Issue/Project는 Done으로 닫았다. exact latest actual-image runtime은 Docker Desktop 내부 metadata/network DB I/O로 제품 boot 전에 막혀 `runtime-unverified`이며, `c9aaf7cf`의 OpenAPI 65/65+62/62·PG18 2/2는 별도 과거 provenance로만 유지한다.
+> **오늘 랜딩 14건**: E5·**E6**·**E7(f07a458f — HAP 엔진 축 E1~E7 완전 종결)** · 위생 6(#1374·1376·1377·1385·1375+1386) · CRUN-1/2/3 · UX1(페어링 위저드) · UX2(disconnect 원장 73ac11d4). track/engine HEAD 전진 중.
 >
-> **활성 goal #1365:** native blocker #1364가 닫혀 HAP-E4를 `status:ready`→claim했다. worktree/branch는 `feat/1365-hap-e4-engine-add-connection-scoped-durable-hosted-agent-inbox-and-opaque-cursor`, base는 `track/engine@23038585`다. migration 070(counter+append-only source-reference ledger, FORCE RLS), AES-GCM opaque cursor, active/token/member/workspace/channel visibility를 재검사하는 idempotent message-reference append와 forward pagination을 1차 구현했다. 실제 message/job producer 및 MCP route는 #1366 소유라 아직 연결하지 않는다.
+> **리뷰 체제**: **sol(Codex) usage-limit 8/20까지** → grok 리뷰어 C를 독립 freeze 리뷰어로 승격(E7에서 Fable C0/H0/M0/L2와 grok C0/H0/M0/L0 두 렌즈 일치). 당분간 **Fable 검수 + grok freeze**(+UX는 design-review 관문). grok-fleet 스킬 정본.
 >
-> **현재 증거/다음:** cursor unit 3개, `momo-messaging` check, PG conformance compile, focused clippy `-D warnings`, migration-number 70 PASS. PG18 runtime은 Docker daemon 무응답으로 아직 실행하지 못했다. 다음은 PG test에 concurrent same-source exactly-once, source+append rollback, cross-tenant RLS/FORCE, reconnect namespace와 cursor tamper/membership-revoke matrix를 보강하고 verifier/runtime profile·STATUS를 닫는 것이다. 이 체크포인트 전에는 PR/완료 주장을 하지 않는다.
+> **HAP UX 축**: UX1·UX2 랜딩. **UX3(#1359) 폰+코어 — dedup 중**(웹은 UX2 HostedConnectionSection이 홈=옵션 A, UX3 웹 표면 없음). 남은: UX4(#1369 OAuth 동의, ready — E7 개방과 짝)·GROK-E2E(#1361 티어 게이팅).
+>
+> **성재 대기**: ①**배포** `momo-rust:d7b390cf`(위생6+UX1+CRUN, E7 미포함) 대행 패키지 전달됨·백로그 점검 선행 ②제품 결정 티켓 #1395(placeholder 방-인지)·#1396(스레드 멘션 패리티)·#1399(티어 override 와이어, ADR 선행)·#1405(hosted DTO 확장) ③E7 개방(flag+#1369+runtime proof).
+>
+> ⚠ main 미커밋 누적 지속(플러시·ADR Accept·리서치·런북·패킷) — 다음 커밋 창 일괄.
+>
+> 이하 스냅샷 25:
 
-> **2026-08-13 스냅샷 33 (GPT 5.6 sol · #1364 raw clientInfo 제거·daemon-free redaction 증거).** 스냅샷 32를 supersede한다.
+> **2026-08-14 스냅샷 25 (Fable · momo-main — 성재 정지 지시. 재개 진입점).** 컴팩트 복원 진입점.
 >
-> **최종 축소:** `detected_client_name/version`에는 정상처럼 보이는 값도 포함해 provider raw string을 전혀 저장하지 않고 항상 NULL을 쓴다. capability는 서버가 정한 finite boolean path만 남는다. verifier cleanup mode는 Docker보다 먼저 shared gate-failure redactor를 실제 실행해 임의 JWT·24자 prefix·SHA-256 derivative가 detail/header/body에 반사돼도 raw 0이며, needle registry read error 시 전체 diagnostic을 fail-closed로 숨기는 것을 증명한다.
+> **정지 시점 랜딩 누계(8/14 하루)**: E4(aa40e4c6 전신)→E5(7a52c4c2)→E6(07ca8828)→위생 4건(#1377 fmt=6d2a7977·#1385 샘플링=252ffa60·#1376 게이트=dcbe7f35·#1374 lock-order=c6ecf48b)→CRUN-2(#1383=49a4ba0e). **track/engine HEAD=49a4ba0e**. 이슈 종결 11건. ADR Accepted 3건(0164·0004 증보 2·0150 증보 1). grok-fleet 스킬 가동(리뷰어 C 2회 실전 — E6 파일럿·위생 C0/H0/M0/L2).
 >
-> **provenance 정정:** commit `1e0f13b0`의 product+verifier exact runtime은 Docker Desktop 내부 metadata/network DB write I/O 때문에 제품 기동 전 **host-blocked/runtime-unverified**였다. OpenAPI 65/65+62/62와 PG18 2/2 actual runtime은 그 직전 `c9aaf7cf` product/verifier bytes의 별도 증거이며 `1e0f13b0` 또는 이번 후속 commit의 runtime 증거로 승격하지 않는다. 이번 exact daemon-free selftest는 Docker 없이 PASS했다. 마지막 read-only `docker info`도 35초 무응답 후 중단했으므로 destructive restart/prune나 runtime 재시도 없이 host-blocked를 유지한다.
+> **비행 중 3기(로컬 동결로 자연 완료 — push 없음, 완료 후 그 자리가 재개점)**: ①**#1375+#1386 — 폴리시까지 완료·동결됨(HEAD `a06d75d2`, 2커밋, 미푸시)**: 리뷰어 C L2 수리 완료(부활 루프에 cleanup_pending 추가·B3 seal 주장을 실측 발견 — 실제 핀=agent_owner_human_id_fkey — 에 맞게 정정). 재개 시 rebase(1374와 conformance 테스트 파일 겹침 주의)→push→PR→머지만 남음. E6 verifier 11/11·workspace 테스트 그린 상태 동결. ②**UX1(#1360)** 페어링 위저드, 워크트리 `1360-ux1-wizard` — 완료 시 design-review 필수. ③**CRUN-3(#1384) — 완료·동결됨(HEAD `35e4f924`, 미푸시)**: 카피 전량 core 단일 소스화(웹+폰 패리티)·「@로 부르기」는 390px 실측 폭 예산으로 결정(오버플로=클리핑 함정 회피)·키 힌트 표기 1종 통일(`<키>로 <동사>`·chip 비도입 근거 명문화). 재개 시: ⓐ**design-review 필수 미실행** ⓑ**폰 게이트 미실행**(mobile node_modules 부재 — import-only 스왑이나 실행 필요) ⓒa11y 후속 후보(aria-describedby가 placeholder를 가림 — @ 광고를 힌트 라인으로) → 리뷰 PASS 후 rebase→push→PR→머지.
 >
-> **보존:** 기존 네 local commit과 비소유 13 rustfmt drift는 수정·stage·revert하지 않는다. 이 축소만 새 local commit으로 고정하고 push/PR은 하지 않는다.
+> **배포 창(성재 결재 '지금 열기' — 미집행)**: 이미지 `momo-rust:07ca8828` 빌드 완료(E1~E6 내용·유효). 대행 패키지=scratchpad `deploy-window-4-package.md`(성재에게 전달됨). 재개 시 선택: 그대로 배포 or 위생 포함 재빌드(engine@49a4ba0e+α — 마이그 073은 #1375 랜딩 후). **백로그 점검 선행 불변.**
+>
+> **재개 큐(우선순위)**: ①비행 3기 착지 처리(위 절차) ②배포 집행 ③UX2(#1362)→UX3(#1359) 순차(agentHub 인접 — UX1 랜딩 후) ④CRUN-1(#1382 — CRUN-2 랜딩됨, 착수 가능) ⑤E7(#1368 ready) ⑥크레딧 구현 분해(ADR-0164 Accepted) ⑦egress P1~P7 분해(ADR-0150 증보 1 Accepted) ⑧#1392 캡처 프레임. blocked 유지: #1361(Grok Bot 티어)·#1369(E7 대기).
+>
+> ⚠ main 미커밋 누적: CURRENT_STATE/JOURNAL(다일치 플러시)+ADR 3건 Accept 갱신+리서치 정본 5건+런북+janitor 스크립트+핸드오프 패킷 2건 — 다음 커밋 창에서 일괄.
+>
+> 이하 스냅샷 24:
 
-> **2026-08-13 스냅샷 32 (GPT 5.6 sol · #1364 strict-review 후속 수리).** 스냅샷 31을 supersede하며, 그 스냅샷의 “workspace cargo fmt PASS” 표현을 철회한다.
+> **2026-08-14 스냅샷 24 (Fable · momo-main — HAP 서버 축 완성·grok 3사 체제·배포 창 성립).** 컴팩트 복원 진입점.
 >
-> **후속 수리:** provider metadata는 client name/version의 짧은 저엔트로피 display grammar와 고정 capability boolean path만 저장하며 `sk-`류 prefix·keyword 없는 opaque random·unknown boolean key도 버린다. OpenAPI verifier의 모든 failure 출력/저장 경로는 agent/pair envelope뿐 아니라 human JWT를 포함해 등록된 secret과 파생값 전체를 출력 전에 치환한다. reflected ACCESS body+header fixture는 출력·failure log에서 secret needle 0을 강제하고, authority race는 proof process가 실제 DB lock wait 중임을 확인한 뒤에만 lock을 푼다.
+> **E6(#1367) 랜딩 = HAP 서버 축(E1~E6) 완성**: PR #1387 → `track/engine@07ca8828`. 원자 disconnect·artifact manifest·4중 terminal 가드(mutation 3종 실증)·hosted delivery 게이트 release 개방(기본 닫힘·운영자 결정). 리뷰 4층(Fable→sol→**grok 4.6 파일럿**→CI)이 각기 다른 결함 적발 — grok은 트리거 진공 통과를 정식화(채택·수리), 이중 audit 주장은 기각(FOR UPDATE 직렬화). CI 첫 시도 완주(E5 교훈 선처리). 해제: #1368(E7)·#1360/#1362/#1359(UX1~3) ready. 잔여 blocked: #1361(Grok Bot 티어 게이팅)·#1369(E7 대기).
 >
-> **fmt 사실 교정:** 이번 goal이 소유한 변경 Rust 파일의 `rustfmt --check`는 PASS다. 그러나 commit tree만 놓고 돌리는 whole-workspace fmt는 선재 13개 비소유 rustfmt drift 때문에 **inherited RED**이며 이 goal이 green으로 주장하지 않는다. 공유 worktree에 이미 존재하던 해당 13파일의 formatted bytes는 계속 unstaged·비소유로 보존하고 커밋에 포함하거나 되돌리지 않는다.
+> **⚠ 배포 창 조건 성립(성재 결재 ④)**: E1~E6+마이그 069~072 라이브 배포 가능 — 실행=성재 대행(런북 3단계), **선행=pending gateway job 백로그 점검**(대소문자 수리로 깨어남 — STATUS 체크리스트).
 >
-> **검증/보존:** strict-review 후속은 기존 `f78cb249`→`694deee9`→`c9aaf7cf`를 수정하지 않는 별도 로컬 commit으로 고정하고 push/PR하지 않는다. owned fmt, momo-auth 61/61, workspace clippy/tests, daemon-free cleanup+reflected-secret fixture, gitleaks all-refs leak0은 PASS다. actual-image/새 PG18 재실행은 Docker Desktop의 containerd metadata·network DB write I/O 오류로 제품 기동 전에 3회/1회 중단됐고, 각 실패 invocation의 labeled container/network/volume/image와 secret scratch 잔존은 0이다. 따라서 직전 `c9aaf7cf` product bytes의 actual-image OpenAPI 65/65+62/62·PG18 2/2 증거는 보존하되 이번 verifier 후속 바이트의 Docker runtime은 **host-blocked/runtime-unverified**로 좁게 표기한다.
+> **Grok 4.6 워커화(성재 발제) 실측 완결**: 정본 `research/2026-08-14-grok46-worker-integration.md`. Grok Build CLI 1.0.3 설치·기존 auth 유효·헤드리스 `-p`+`--json-schema` PASS·모델 id는 grok-4.6/4.5뿐(fast=서빙 티어)·`--allow`로 read-only 강제 가능·config 격리 필요(전역 MCP 자동 로드 실측). **파일럿 실증: E6 diff에서 실가치 1(트리거 강화 채택)+오탐 1(기각)** → 리뷰어 C 렌즈 편입 근거 확보. grok-fleet 스킬 빌드는 성재 결정 대기.
+>
+> 이하 스냅샷 23:
 
-> **2026-08-13 스냅샷 31 (GPT 5.6 sol · #1364 final-review 수리·재동결).** 스냅샷 30을 supersede한다.
+> **2026-08-14 스냅샷 23 (Fable · momo-main — HAP-E5 랜딩·신체제 검증·클라우드 축 개설).** 컴팩트 복원 진입점.
 >
-> **최종 리뷰 수리:** hosted bearer를 generic scope dispatch 전에 SELECT-only로 분류해 exact Agent Port 밖을 side-effect 0의 동일 403으로 닫았다. create/confirm audit 실패는 전량 rollback, MCP client metadata는 string/number/array와 secret-shaped key/value를 저장하지 않는 closed projection, verifier는 본문·헤더·상태와 무관하게 `momo_agent_v1`/`momo_pair_v1`를 출력 전에 등록·차단한다. detected TTL 만료와 member/workspace membership/agent 상실은 connection expired+profile paused+token revoke로 귀결되어 복원만으로 재활성화되지 않으며, proof의 profile UPDATE 0건은 전체 tx rollback이다. 기존 시간 sleep race는 advisory-lock readiness+row-lock barrier로 교체했다.
+> **E5(#1366) 랜딩 완료**: PR #1379 → track/engine@7a52c4c2. 8 MCP 도구·per-agent hosted delivery·E4 producer 결선. **신체제(구현=Opus 워커·기획검수=Fable·freeze=sol) 첫 폐곡선 성립** — sol 3회전 끝 C0/H0/M0. E6(#1367) ready·패킷 미작성. engine 계보 CURRENT_STATE는 스냅샷 36까지(E5 브랜치 포함 랜딩됨).
 >
-> **재검증:** `cargo fmt --check --all`, workspace clippy `-D warnings`, workspace tests, momo-auth 61/61, momo-server auth 7/7, cleanup contract·shell syntax, 실제 PG18 Agent Port 2/2+source-checkout-free deploy image, actual-image OpenAPI 65/65 samples+62/62 operations가 PASS했다. 첫 OpenAPI 재검수에서 새 expired 의미와 어긋난 assertion 2개를 발견·교정한 뒤 동일 actual-image gate가 green이다.
+> **클라우드 축(성재 발제 08-14)**: 리서치 정본 2건 랜딩 — 인프라(ADR-0156 좌표 업계 수렴 검증·채택 후보 A4 egress capability→A1 pause→A2 스냅샷 템플릿→A3 웜풀)·과금(3-A 권고=원화 크레딧+list-cost 원장·결정 큐 7건 §참조). UXUI 실사: "Run on"(작성 시점 실행환경 선택)이 공백 — CRUN 시리즈 제안.
 >
-> **보존/범위:** 부모 commit `f78cb249`(구현)+`694deee9`(중단 checkpoint)는 보존한다. final-review 수정은 별도 로컬 commit 하나로만 고정하고 push/PR하지 않는다. 공유 worktree의 13개 무관 rustfmt drift는 계속 비소유이며 stage/revert하지 않는다.
+> **성재 결재 4건 집행(08-14 오후)**: ①**E6(#1367) 발사** — 패킷 `handoffs/2026-08-14-hap-e6-atomic-disconnect-packet.md`, Opus 워커 가동 중(disconnect 원자 tx+artifact manifest+terminal 1회+게이트 개방). ②**ADR 기안 2건** — ADR-0164 Proposed(크레딧 과금 3-A: 원화 크레딧·list-cost 단일 원장·running만 과금·pause≠종료·HAP 경계·지출 상한)+ADR-0004 증보 2 Proposed(bundled 키=서버 시크릿·계량 의무·BYO-key 비개방) — **Accept는 성재 별도**. ③병렬 편성 — 인프라 #1380(A4)·#1381(A1)+CRUN #1382~#1384 발급, **A4 설계 스파이크 가동 중**(docs 전용, ADR-0150 증보 초안까지), 위생 4티켓(#1374~#1377)은 E6 랜딩 후 순차. ④**배포 창 = E6 랜딩 후 한 번에**(E1~E6+마이그 069~072, pending 백로그 점검 선행).
 >
-> **다음 행동:** final-review commit의 exact diff/secret gate와 독립 reviewer C/H/M=0을 확인한 뒤에만 momo-main이 push→PR→needs-review를 수행한다. #1365/#1366은 #1364 랜딩 전까지 blocked다.
+> 이하 스냅샷 22:
 
-> **2026-08-13 스냅샷 30 (GPT 5.6 sol · momo-main — #1364 네트워크 중단 안전 체크포인트).** 스냅샷 29를 supersede한다.
+> **2026-08-14 스냅샷 22 (Fable · momo-main — sol 인계 검수·#1365 최종 판정·자원 파이프라인).** 컴팩트 복원 진입점. ⚠ engine 계보 CURRENT_STATE는 sol이 스냅샷 35까지 별도 진행(#1365 브랜치 포함) — 번호 별계보, S10 engine→main 머지 시 정합 필요.
 >
-> **현재 구현:** #1364 dedicated hosted identity/pairing/activation의 29개 소유 파일 구현이 완료됐고 worker self-review는 C0/H0/M0이다. 신규 migration 069, static bearer pairing→detect→explicit confirm→proof+active+unpause, exact Agent Port audience, generic credential/REST deny, production delivery kill-switch, 실제 worker claim+A2A guard를 포함한다. 마지막 owned-byte aggregate는 `44cfd88d5e28834c0e769644d065691fc5abb540d78c94b1234916e7c153ddb3`였으며 이후 writer 변경 없이 동결됐다.
+> **HAP 축 현황**: sol이 ADR-0162/0163(Fable 08-12 기안, engine 랜딩됨)을 E1~E7+UX1~4+GROK-E2E 체인(#1358~#1369)으로 분해. E1~E3 랜딩(track/engine@23038585), **E4(#1365) 로컬 동결 @2304324 — Fable 최종 리뷰 C0/H0**(M1 job↔run·kind 결속 공백은 #1366 수용기준 이관, lock-order→#1374, ledger 잠재 3종→#1375). verifier 독립 재실행 PASS. E5(#1366)=MCP tool 노출+실 producer 결선이 다음 대형. sol 방법론(단일 goal 순차·독립 freeze C/H/M=0·로컬 커밋 체크포인트·runtime-unverified 정직 라벨)은 승인 — verifier 소유권 계약은 신규 표준으로 런북 승격.
 >
-> **검증:** Rust fmt/clippy/workspace tests, fresh PG18 worker/A2A integration, generated types 111 paths, integrated Rust image/OpenAPI 65/65 samples+62 operations, cleanup/diff/leak0이 PASS했다. 독립 reviewer는 마지막 exact freeze의 holistic 검수를 시작했으나 사용자의 네트워크 중단 요청으로 즉시 interrupt되어 **최종 C/H/M 판정은 아직 미완료**다. 이전 freeze에서 나온 partial activation, orphan run, DM/archive approval, lock order, RLS/evidence/secret-verifier findings는 모두 최신 바이트에서 수리됐지만 재검수 전 승인으로 간주하지 않는다.
+> **인계 구조(성재 3결정 확정·집행 완료)**: 주도권 복귀 = **Fable 기획검수+Opus 5 구현, sol=독립 freeze 리뷰어**. **#1365 랜딩 완료** — PR #1378 squash → `track/engine@aa40e4c6`(2026-08-14), 이슈 done 종결, 워크트리 회수(세션 누계 ≈57GB). **#1366(E5) status:ready** — 패킷 `handoffs/2026-08-14-hap-e5-mcp-inbox-tools-packet.md` 준비 완료(M1 이관분·리뷰 폐곡선·환경 함정 포함). **워커 발사만 성재 신호 대기.**
 >
-> **안전 보존:** 구현 29파일과 이 planning checkpoint는 로컬 branch에 별도 커밋으로 보존한다. 원격 push/PR은 하지 않는다. 공유 worktree의 13개 무관 rustfmt drift는 사용자/타 작업 소유로 보고 커밋에서 제외하며 되돌리지 않는다.
+> **자원 파이프라인(2026-08-14 신설)**: `scripts/worktree_janitor.sh`+`docs/runbooks/local-resource-reclaim.md`(3층+Docker Desktop 붕괴 플레이북). 랜딩 워크트리 5개 회수(≈32GB). actionlint 1.7.12 무한 스핀=brew unlink 완화(#1376)·engine fmt drift 13파일(#1377). 성재 대행 대기: 1364 폐기·HOLD 4개 판정(398·464·72·sol-review — sol ADR 초안 0162~0166 구번호 5건 회수).
 >
-> **재개 첫 행동:** worktree `/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/1364-hap-e3-engine-add-hosted-agent-dedicated-identity-and-atomic-pairing-activation-lifecycle`에서 status와 두 로컬 commit SHA를 확인한다. 새 수정 없이 final reviewer를 재개해 exact committed 29-file tree를 C/H/M으로 검수하고, C/H/M=0일 때만 focused clean gates→push→PR→needs-review로 진행한다. #1365/#1366은 #1364 랜딩 전까지 blocked다.
->
-> 이하 스냅샷 29의 시작점·불변식은 유효하지만 “구현 착수” 상태는 스냅샷 30이 대체한다.
-
-> **2026-08-13 스냅샷 29 (GPT 5.6 sol · momo-main — HAP-E1/E2 랜딩, HAP-E3 착수).** 스냅샷 28을 supersede한다.
->
-> **랜딩 완료:** #1363 dual-era MCP Agent Port는 PR #1371 / `track/engine@1e5115fd`, #1358 Rust agent credential lifecycle은 PR #1372 / `track/engine@c5badf5f`로 랜딩했다. 두 PR 모두 실제 PG18·deploy-image/OpenAPI evidence, PR CI gate, exact-base policy integrity, 독립 security C0/H0/M0을 닫았고 Issue/Project는 Done이다. #1358은 외부 `DATABASE_URL` evidence 경로를 제거하고 isolated Docker only, secret-safe channel, RLS/FORCE/audit rollback, signal-safe immutable cleanup을 최종 계약으로 고정했다.
->
-> **활성 goal #1364 HAP-E3:** dependency #1358/#1363이 닫혀 `status:ready`에서 claim했다. worktree/branch는 `feat/1364-hap-e3-engine-add-hosted-agent-dedicated-identity-and-atomic-pairing-activation-lifecycle`, base는 반드시 `origin/track/engine@c5badf5fe56486cb3bff5b8eb3f7d38d6bddac9c`다. claim helper가 처음 `origin/main`에서 만든 branch는 파일 변경 전에 즉시 engine base로 rebase·remote 동기화했다.
->
-> **구현 범위·불변식:** 신규 migration으로 dedicated agent member+paused profile+hosted connection/pairing challenge를 RLS FORCE로 추가하고, first protocol-valid MCP foundation request에서 `pairing_pending→detected`, human confirm의 별도 active bearer, first safe active request의 proof+token binding+active+unpause를 각각 원자적으로 닫는다. first wave는 `static_bearer` only, hosted credential은 exact Agent Port audience only, production delivery는 #1366+#1367 전까지 hard-disabled다. schema_v0 수정·Grok 로그인·OAuth·inbox/data tools/UI는 범위 밖이다.
->
-> **Fable 복구 행동:** 이 스냅샷과 #1364 Issue body가 새 시작점이다. 먼저 migration 번호/현행 member-agent-profile 생성 seam/MCP typed auth seam을 재대조하고, DDL+domain lifecycle→Axum/OpenAPI→mock MCP/PG18 negative race 순서로 구현한다. 중요한 설계 이탈·blocker·gate는 #1364 comment와 JOURNAL에 누적하고 PR handoff 전에 새 snapshot으로 supersede한다.
->
-> 이하 스냅샷 28의 #1363 freeze/hash는 역사 증거로 유효하지만 “#1358 rebase가 다음” 상태는 스냅샷 29가 대체한다.
-
-> **2026-08-13 스냅샷 28 (GPT 5.6 sol · momo-main — HAP-E2 최종 보안 승인, PR 준비).** 스냅샷 27을 supersede한다.
->
-> **#1363 HAP-E2 최종 고정본:** modern MCP `2026-07-28`와 exact legacy `2025-11-25`의 sessionless Agent Port foundation, static bearer 전용 auth, active workspace membership 재검증, side-effect-free resolve→atomic token/member limiter→allow-only usage finalize, closed transport/OpenAPI 계약을 구현했다. runtime verifier는 secret argv·mutable image·foreign resource·signal cleanup·Docker 판독 오류·response-header leak·SIGPIPE absence 오판을 fail-closed로 수리했다. 최종 diff/32-file manifest SHA-256은 `b38dea2073969c2ce24df979c653b3352abae8bedb42f36fea9f834f11fcb758` / `2356f0ff200071a7a20fb13e66c1fd1d391f38f749602ac97f2af61ef04877e9`이며 독립 security 판정은 C0/H0/M0이다.
->
-> **검증:** workspace clippy `-D warnings`와 tests, changed-Rust fmt, protocol 22/22, transport 5/5, limiter 9/9, 실제 PG18/RLS 2/2+deploy-image smoke, OpenAPI 57/57 samples+54/54 operations, daemon-free adversarial cleanup fixtures가 PASS했다. 두 실제 gate 모두 teardown/absence proof 뒤 PASS했고 exact/global Docker resource와 invocation lock 잔존은 0이다. process-local limiter의 restart/replica 배수, rotating-IP cardinality, 실제 Grok exact-version/tool-call은 명시적 nonblocking/runtime-unverified다.
->
-> **다음 복구 행동:** 이 체크포인트를 `track/engine`에 먼저 랜딩한 뒤 #1363을 최신 base에 rebase하고 PR/needs-review/policy-integrity 절차를 수행한다. #1363 랜딩 뒤에만 #1358 commit `79af361f`를 rebase해 공용 auth/OpenAPI/local-gate 충돌을 해소하고 재검증한다. #1364는 계속 blocked다.
->
-> 이하 스냅샷 27의 #1358 안전 커밋 정보는 유효하지만 #1363의 “수리 중/freeze 전” 상태는 스냅샷 28이 대체한다.
-
-> **2026-08-13 스냅샷 27 (GPT 5.6 sol · momo-main — HAP-E1 안전 커밋, E2 보안 수리 진행).** 스냅샷 26을 supersede한다.
->
-> **#1358 HAP-E1:** credential issue/list/rotate/revoke lifecycle과 Rust/PG18/OpenAPI/verifier 계약을 commit `79af361fe5fe44969d3b502b43b951900a9c9cc9`(tree `10342b1587a5149841a2af88f539dc8581ee5794`)로 branch에 push했다. branch는 upstream과 ahead/behind 0/0, worktree clean이다. focused PG18, workspace clippy/tests, Rust-image OpenAPI, generated/docs/cleanup mutation은 PASS했다. full runtime-db는 #1358 밖 기존 prod verifier의 required env drift(`PROVIDER_LINK_MASTER_KEY` 다음 `MOMO_WORKHOST_IMAGE` 누락)로 82단계 뒤 중단했고 반복 실행하지 않았다. PR은 #1363 선랜딩 후 rebase·재검증한 최종 바이트에서 연다.
->
-> **#1363 HAP-E2:** Agent Port auth를 SELECT-only bearer+active membership resolve → token/member atomic multi-axis limiter → allow-only conditional `last_used_at`+used audit으로 재구성했다. denied 축이 open 축 quota를 소비하지 않고 Retry-After는 ceil하며, 429 audit은 window당 bounded다. runtime/OpenAPI verifier의 raw secret argv·고정 Compose project/foreign cleanup·secret evidence retention과 transport header bounds를 함께 수리 중이다. 아직 freeze/PR 전이다.
->
-> **다음 복구 행동:** #1363 focused PG·runtime image·OpenAPI·Rust hard gates와 독립 security C/H/M=0을 닫고 먼저 PR handoff한다. 그 뒤 #1358을 최신 `track/engine`에 rebase해 공용 auth/OpenAPI/local-gate 충돌을 해소하고 전체 focused gate를 재실행한다. #1364는 계속 blocked다.
->
-> 이하 스냅샷 26의 중단 시점 SHA와 발견 blocker는 역사 증거로 유효하지만, #1358의 dirty-worktree 표기는 스냅샷 27이 대체한다.
-
-> **2026-08-13 스냅샷 26 (GPT 5.6 sol · momo-main — HAP-E1/E2 중단 복구·구현 재개).** 스냅샷 25를 supersede하는 구현 복구 지점이다.
->
-> **활성 goal:** 엔진 트랙에서 #1358(HAP-E1 credential lifecycle)과 #1363(HAP-E2 dual-era MCP Agent Port)이 `status:in-progress`, Project #44 `In Progress`다. 둘 다 `track/engine@6aee53e8d5d6fc80b83deee62e1c7bb2943b6663`에서 만든 독립 worktree에 있으며 root/main은 수정하지 않는다. #1358 중단 diff/manifest SHA-256은 각각 `2c438c891b5b03e5e75c820926c7ecae5928ad5b9b2d86191aee793c9587f773` / `bd1e7fd2615d3199bb4a29545597d7667f29ff8251685acd009f74d01ad973e6`, #1363은 `1cfb82beba34563f028314c87e4f04ecc09d620adebb6c151621a5ad3bfd4bc4` / `b56e9721ef9a8e22fc8848998e0c59e2bd99118dfa0647fd6362eb384a12f94d`로 보존을 확인했다. 같은 내용은 각 원격 Issue의 2026-08-13 재개 체크포인트에 있다.
->
-> **#1358 현재:** Rust issue/list/rotate/revoke, one-time raw response, hash-at-rest, scope/expiry/revoke/audit/RLS, OpenAPI/generated/PG verifier가 구현됐다. runtime verifier cleanup은 128-bit invocation label과 Docker immutable ID/name/label 결속으로 보강했고 foreign-resource mutation fixture와 실제 PG18 conformance가 PASS했다. workspace clippy/test, Rust-image OpenAPI도 PASS; docs/runtime-db 전체 gate와 final diff review가 남았다. 변경 밖 기준 브랜치의 선재 rustfmt drift는 별도 deviation/evidence로 기록하고 무관 파일은 수정하지 않는다.
->
-> **#1363 현재:** modern MCP `2026-07-28` + exact legacy `2025-11-25` pure dispatcher(20 tests), Agent Port route/auth/origin/rate/OpenAPI/docs/runtime skeleton까지 구현됐다. 보안 재검수에서 (1) token/agent 429 전에 `last_used_at`·used audit을 commit하는 DB-write flood, (2) 매 요청 `workspace_membership` 재검증 누락, (3) verifier secret의 argv 노출, (4) malformed/oversize transport header 경계를 발견했다. side-effect-free tenant resolver → stable-ID limiter → allow-only finalize, bounded first-denial audit 및 membership/revoke concurrency RED로 수정 중이다. Docker Desktop은 재시작 뒤 응답하며 비소유 자원 삭제는 금지한다.
->
-> **통합 순서·Fable 인계:** 구현 검증은 병렬로 끝내지만 공용 `momo-auth/src/lib.rs`, OpenAPI, `scripts/local_gate.sh` 충돌 때문에 momo-main은 **#1363 리뷰·랜딩 → #1358 최신 `track/engine` rebase·재검증·랜딩** 순서로 통합한다. 결정·blocker·gate는 Issue checkpoint + 각 PR의 `STATUS.md`/계획 이탈에 누적하고, 첫 랜딩과 각 PR handoff 때 이 스냅샷/JOURNAL을 다시 갱신한다. #1364는 두 dependency가 모두 닫히기 전까지 blocked다.
->
-> 이하 스냅샷 25는 **HAP-E1/E2 구현 착수 전의 제품 실측 완료 상태**다. 제품 증거는 여전히 유효하지만 활성 구현·blocker·머지 순서는 스냅샷 26이 대체한다.
-
-> **2026-08-12 스냅샷 25 (GPT 5.6 sol · momo-main — #1344 private MCP transport·Routine·cleanup 실측 완료).** 스냅샷 24를 supersede한다.
->
-> **custom MCP transport 검증:** 공식 MIT `Create Plugin`을 설치하고 비공개·미게시 local plugin `oort-integration-trial`을 `plugin.json`·`mcp.json` 두 파일로 만들었다. 공개 `https://app.oor7.com/v1/mcp/agent-port`를 등록하자 Grok/Cursor loader가 legacy-era `POST initialize`와 fallback `GET`을 보냈고, Caddy를 지난 두 요청 모두 아직 없는 route에서 HTTP/2 404 empty response로 끝났다. Yours UI는 수동 추가·HTTP·URL·`Tools 0`과 load failure를 표시했다. 이는 loader→oort transport를 검증하지만 auth challenge 이전 실패라 requested legacy version·auth mode·pairing·tool call을 증명하지 않는다. 공식 `Create Plugin` helper는 측정 뒤 uninstall했다.
->
-> **Routine 검증:** Active off·monthly trigger인 안전 routine을 저장하고 수동 Test run을 실행했다. 약 1분 뒤 exact sentinel `OORT_ROUTINE_TRIAL_OK`와 `Succeeded`가 확인됐다. Delete는 별도 확인 없이 즉시 routine을 목록에서 제거했다. 이 결과는 manual execution과 개별 삭제를 검증하며 schedule cadence·MCP tool invocation을 증명하지 않는다.
->
-> **cleanup 관측:** connector Uninstall 뒤 앱 connector 목록에서는 사라졌지만 local plugin directory와 두 파일은 남았다. 관측 뒤 test source만 recoverable Trash로 옮겼으며, 따라서 UX-2는 provider connector 목록 제거와 local source 제거를 같은 것으로 취급하지 않는다. Bot Delete는 agent/chat history 삭제를 고지했고 최종 삭제를 취소해 Bot을 보존했다. 공식 문서는 Bot-owned routine 제거를 약속하지만 live cascade는 미실측이며 connector/local source 연쇄는 미문서·미실측이다. account·Bot 표시명, local path, screenshot, secret은 기록하지 않았다.
->
-> **현재/다음:** #1344의 측정 goal은 완료 가능하며 문서 게이트·리뷰 뒤 종료한다. auth/pairing/tool call/full pair→work→disconnect E2E는 #1363/#1364와 #1361로 이관했다. HAP/UX #1358~#1369, M1, Project #44, native `blockedBy`, `BUILD_TICKETS.md` binding을 완료해 런칭 패킷은 `ready`다. #1363은 modern 2026-07-28과 exact 2025-11-25 legacy adapter를 분리하고 첫 wave는 static bearer만 지원한다. OAuth AS와 동의 UI는 #1368→#1369 후속이다. “Grok Bot 연결 검증됨” 카피는 #1361 전까지 금지한다.
->
-> 이하 스냅샷 24는 **private plugin 생성·실제 loader HTTP·persistent Routine 실행 전의 역사 기록**이다. 그 안의 custom URL 미발견, persistent routine 0건, #1344 in-progress 표기는 스냅샷 25가 대체한다.
->
-> **2026-08-12 스냅샷 24 (GPT 5.6 sol · momo-main — #1344 personal account 제품 표면 실측).** 스냅샷 23을 supersede한다.
->
-> **personal access 검증:** 성재가 personal account 로그인과 Grok Bot 앱 인증을 직접 완료했고, `0.16.0`에서 Bot 1개를 생성해 채팅 화면에 도달했다. 결제·구독 UI와 구매·유료 전환은 0건이다. account·Bot 표시명, screenshot, token은 기록하지 않았다. 1차 team account의 `NO_STORAGE` policy gate는 team 경로의 역사 증거이며 personal 경로를 막지 않았다.
->
-> **Plugin/Routine 표면:** Marketplace에 remote MCP 설명 plugin과 `Create Plugin`, Yours의 Installed/Private, Bot details의 Routines가 보였다. Routine draft에는 Active/Delete/Test run/Name/Instruction/Add trigger와 schedule·Slack·Git·Teams·Linear·Sentry·PagerDuty source가 있다. trigger 없는 안전 draft는 Back 뒤 목록에 남지 않아 persistent routine 생성·실행은 0건이다.
->
-> **남은 불확실성:** 현재 UI에서 임의 custom MCP URL 직접 등록/auth 표면을 찾지 못했으므로 부재를 단정하지 않고 `runtime-unverified`로 둔다. Bot Delete 경고는 agent와 chat history 삭제만 말하고 routine/plugin cleanup을 명시하지 않았으며 최종 삭제는 취소했다. custom MCP auth·pairing·routine 실행/삭제·Bot 연쇄 cleanup은 아직 검증되지 않았다.
->
-> **현재/다음:** #1344는 `status:in-progress` 유지. Create Plugin/private skill 경로의 custom remote MCP 가능성 → 비활성 routine 저장·Test run/provenance → routine/plugin 개별 cleanup → 마지막 Bot 삭제 연쇄 cleanup 순으로 측정한다. 이 폐곡선 전에는 “Grok Bot 연결 검증됨”을 주장하지 않는다. 정본 evidence는 `docs/planning/2026-08-12-grok-bot-trial-spike-report.md`다.
->
-> 이하 스냅샷 23은 **team policy gate 뒤 personal account 재시도 전의 역사 기록**이다. 그 안의 “personal account 재시도 대기”와 MCP 전면 미도달 표기는 스냅샷 24가 대체한다.
->
-> **2026-08-12 스냅샷 23 (GPT 5.6 sol · momo-main — #1344 Grok trial-first 1차 실측).** 스냅샷 22를 supersede하는 컴팩트 복원 진입점.
->
-> **정본 랜딩·승인:** #1343은 PR #1346으로 `track/engine@ee463206aeab4d0eaa53e3a2a46d5d9625b44e7c`에 랜딩했다. 성재는 공식 Grok Bot 앱 설치와 ADR-0162 기술 방향을 모두 명시 승인했다. 공개 API/schema 구현은 Accepted ADR만으로 즉시 착수하는 것이 아니라 BUILD_TICKETS 계약, ready handoff, 1 goal=1 Issue binding까지 갖춘 뒤 진행한다.
->
-> **#1344 1차 실측:** 공식 Cursor DMG의 SHA-256·container checksum과 설치 앱 `0.16.0`/`com.anysphere.sand`/arm64, strict code signature, Gatekeeper `accepted`·`Notarized Developer ID`를 확인했다. 계정 식별정보는 기록하지 않았다. 공급망·redaction 정본은 `docs/planning/2026-08-12-grok-bot-trial-spike-report.md`다.
->
-> **trial 판정 교정:** 현재 조직 관리 team account는 `trialEligible=true`였지만 team-enforced Privacy Mode `NO_STORAGE`가 `TEAM_PRIVACY_MODE`로 접근을 막아 앱 상태가 `PAYMENT_REQUIRED`에 머물렀다. UI는 `Request sent`와 personal account 사용을 권고했다. 따라서 이는 **trial 미노출 또는 유료구독 필요 판정이 아니며**, trial 시작·구매·유료 전환은 0건이다.
->
-> **현재 실행 상태:** #1344는 personal account 재시도 경로가 남아 있어 `status:in-progress`다. custom MCP/auth, routine, pairing, credential 갱신, cleanup은 아직 `runtime-unverified`다. 개인 계정 경로가 불가능하거나 성재가 재시도를 원하지 않는다고 확정될 때만 `team privacy policy / personal account required` 사유로 blocked 전환한다.
->
-> **다음:** personal account에서 결제 없이 trial 접근을 재확인한다. Grok 실증 결과와 무관하게 vendor-neutral HAP-E1~E6는 Accepted ADR + BUILD_TICKETS + ready packet + issue DAG를 갖춘 뒤 진행할 수 있지만, 실제 Grok E2E 전에는 “Grok Bot 연결 검증됨”을 주장하지 않는다. #1345 ACP 감사와 ADR-0163 managed/self-host catalog는 계속 별도 deferred 레인이다.
->
-> 이하 스냅샷 22는 **#1343 랜딩과 #1344 첫 실측 전의 역사 기록**이다. 그 안의 “ADR 승인 대기”, “앱 미설치”, “trial 전면 runtime-unverified”, “#1344 blocked” 표기는 현재 상태가 아니며 스냅샷 23이 대체한다.
->
-> **2026-08-12 스냅샷 22 (GPT 5.6 sol · momo-main — #1343 외부 에이전트 축 재검수·사실 교정).** 스냅샷 21을 supersede하는 컴팩트 복원 진입점.
->
-> **스냅샷 21 교정:** 당시 “산출물 전부 랜딩” 표기는 틀렸다. 리서치·ADR-0162/0163·계획·패킷은 루트의 untracked/dirty 초안이었고 canonical branch에서 읽을 수 없었다. 이 스냅샷 시점에는 #1343 전용 엔진 goal worktree에서 검수·정본화 중이며, PR 리뷰와 `track/engine` 랜딩 전이다. Proposed ADR을 Accepted 또는 구현 완료로 읽지 않는다.
->
-> **구독·실측 교정:** Grok Bot 공식 안내에는 개인용 **one-time trial**이 있으므로 $200~300 유료 구독을 Wave 0의 필수조건으로 두지 않는다. 다만 실제 계정에 trial과 커스텀 MCP·routine 표면이 노출되는지는 앱에서 아직 확인하지 못했다(`runtime-unverified`). 비밀번호·MFA·토큰을 전달받지 않고, 성재의 앱 설치·동의 승인 뒤 #1344에서 실측한다. trial 미노출 시 구매하지 않고 Grok 프리셋만 blocked로 남긴다.
->
-> **코드 사실 교정:** `work_tool_profile`은 부재하지 않는다 — `server/Migrations/029_work_tool_profile.sql`·`034_work_tool_profile_env_policy.sql`과 Rust `momo-t3` lifecycle/work-control 소비 경로가 있다. 반면 현행 Rust에는 외부 hosted agent가 접속할 MCP crate/router가 없고, `/v1/mcp/drive` 구현은 퇴역 중인 Swift 표면에만 남아 있다. 따라서 #1345는 “ACP 전부 좌초·원장 0” 복구가 아니라, 살아 있는 Rust 원장·gateway 위에서 stdio ACP/BYOA 포장과 현행 MCP 갭만 다시 산정하는 별도 감사다.
->
-> **성재 승인 방향:** 런칭 메시지는 **“Bring your hosted agent”**. Grok Bot은 벤더 종속 코어가 아니라 첫 설정 프리셋·실증 대상이다. v0 감지는 roster 스크래핑 대신 봇이 만료되는 proof를 들고 먼저 접속하는 1회 pairing(`pairing_pending → detected → active`)이고, 사람이 이름·채널·권한을 확인한 뒤 별도 active credential proof와 전용 member unpause까지 완료해 활성화한다. UI에는 `pairing_pending`을 “waiting for agent”로 표시한다. **1 Bot = 1 connection = 1 dedicated agent member = 1 deterministic routine**을 기본 단위로 한다.
->
-> **해제 계약:** 해제 요청 즉시 oort credential을 폐기하고 pause·신규 job/write 차단을 적용한다. 이후 `cleanup_pending`에서 Grok routine과 MCP connector 제거를 안내·확인하며, 공개 삭제 API가 없으면 사용자 확인으로만 `disconnected`에 들어간다. 멤버·메시지·작업 이력은 보존하고 외부 routine 자동 삭제를 약속하지 않는다.
->
-> **현재 실행 상태:** GitHub Project **oort roadmap #44**에 #1343~#1345를 편성했다. #1343은 M1·In Progress, #1344는 유료구독이 아니라 앱 설치/one-time trial 실측 대기로 blocked, #1345는 현재 런칭 축과 분리된 ACP 감사로 blocked다. ROADMAP에는 이 축을 관전·승인·대화 v0 임계경로를 대체하지 않는 **병렬 런칭 보조축**으로만 둔다. 경계 변경 구현은 ADR-0162 Accepted + BUILD_TICKETS + ready handoff + 구현 이슈가 갖춰진 뒤 시작한다.
->
-> **다음:** #1343 문서 PR·리뷰 → 성재 ADR-0162 기술계약 승인 → 동시에 #1344 trial 실측(설치 승인 시) → 범용 credential/MCP/pairing → durable inbox/gateway → 웹·Tauri pairing·disconnect, 모바일 read-only → Grok 1-bot E2E. ACP live-chain은 #1345 판정 뒤, managed/self-host catalog는 ADR-0163 별도 승인 뒤 각각 편성한다.
->
-> 이하 스냅샷 21은 **당시 기록을 원문 보존한 역사 자료**다. 그 안의 `API 전무`, `유료구독 필수`, `work_tool_profile rust 부재`, `전부 랜딩` 판정은 현재 사실이 아니며 스냅샷 22가 명시적으로 대체한다. 구현·승인·계정 판단에는 아래 문장을 인용하지 않는다.
+> 이하 스냅샷 21:
 
 > **2026-08-12 스냅샷 21 (Fable · momo-main — 외부 에이전트 수용 축 개설·sol 2차 핸드오프. PLN-20260812-01).** 컴팩트 복원 진입점.
 >
