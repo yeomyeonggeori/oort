@@ -20,10 +20,16 @@ import {pendingApprovalsKey} from '../src/features/conversation/usePendingApprov
 import {APPROVAL_OFFLINE_COPY} from '../src/features/inbox/useOnline';
 import {
   approvalNoteRank,
+  APPROVAL_NOTE_BLOCKED_TWIN,
   APPROVAL_NOTE_TONE_ORDER,
+  APPROVAL_NOTE_TONE_SPEC,
+  type ApprovalNoteTone,
 } from '@momo/core/features/timeline/approvalNote';
 import {color} from '../src/design/tokens';
-import {MessageRow} from '../src/features/conversation/MessageRow';
+import {
+  MessageRow,
+  UnreadDivider,
+} from '../src/features/conversation/MessageRow';
 import {SessionProvider} from '../src/session/useSession';
 
 // =============================================================================
@@ -545,17 +551,111 @@ describe('M-3 — 승인 카드 세 문장의 격', () => {
     expect(brightness(color.text)).toBeGreaterThan(brightness(color.textMuted));
   });
 
-  it('색상은 새로 들이지 않았다 — 앰버는 이미 경계의 뜻이다 (D-2)', () => {
-    // 「일시적 차단」에 `warn` 을 주면 같은 배치가 앰버에 세 번째 뜻을 준다.
-    for (const kind of ['receipt', 'offline', 'elsewhere'] as const) {
-      const props =
-        kind === 'receipt'
-          ? {gates: new Map([['ap-1', GATE]]), receipts: RECEIPT}
-          : kind === 'offline'
-            ? {gates: new Map([['ap-1', GATE]]), offline: true}
-            : {gates: new Map()};
-      expect(noteFace(props, kind).color).not.toBe(color.warn);
+  /** 톤 이름 → 그 톤이 실제로 서는 픽스처. 세 자리를 한 번만 적는다. */
+  const PROPS_FOR: Record<ApprovalNoteTone, [Parameters<typeof renderCard>[0], string]> = {
+    receipt: [{gates: new Map([['ap-1', GATE]]), receipts: RECEIPT}, 'receipt'],
+    blocked: [{gates: new Map([['ap-1', GATE]]), offline: true}, 'offline'],
+    guidance: [{gates: new Map()}, 'elsewhere'],
+  };
+
+  /**
+   * 「사람이 할 일이 남아 있다 · 여기를 보라」를 이 팔레트에서 지는 색.
+   *
+   * 이름으로 적지 않고 **그려진 미읽 경계에서 읽는다**. 그 자리가 이 역할의 정본
+   * 이기 때문이다(코어 `divider.ts` D-2: `boundary` 는 안읽음 하나뿐이고, 이
+   * 팔레트에서 그것이 앰버다). 토큰 이름을 적으면 팔레트가 그 역할을 다른 토큰에
+   * 옮기는 날 이 단정만 조용히 초록으로 남는다.
+   */
+  function attentionColor(): string {
+    const view = render(<UnreadDivider count={3} />);
+    const label = within(view.getByTestId('unread-divider')).getByText(
+      /새 메시지/,
+    );
+    const found = (flatten(label.props.style) as {color?: string}).color;
+    view.unmount();
+    if (found === undefined) {
+      throw new Error(
+        '미읽 경계의 색을 읽지 못했다. 구분선의 라벨을 옮겼다면 이 자리도 함께 ' +
+          '옮길 것 — 이 함수가 답을 못 내면 아래 단정들이 재는 것이 없어진다',
+      );
     }
+    return found;
+  }
+
+  it('차단 줄은 부름도 사고도 아니다 (#1429 — 코어 명세를 이 팔레트에 대고)', () => {
+    // 명세가 든 이름을 이 팔레트가 전부 답하는지부터 잰다. 답하지 못하는 이름이
+    // 들어오면 그 조건은 **재지 않은 채** 지나간다(D-2 의 규율).
+    const role: Record<string, string> = {
+      attention: attentionColor(),
+      danger: color.danger,
+    };
+    const unanswered = APPROVAL_NOTE_TONE_ORDER.flatMap(tone =>
+      APPROVAL_NOTE_TONE_SPEC[tone].mustDifferFrom
+        .filter(name => !(name in PROPS_FOR) && !(name in role))
+        .map(name => `${tone}:${name}`),
+    );
+    expect(unanswered).toEqual([]);
+
+    // 그리고 실제로 다른가. 형제 톤은 **잉크와 무게 둘 다** 같을 때만 위반이고
+    // (영수증과 차단은 잉크가 같고 무게가 갈린다), 팔레트 역할은 잉크만 잰다.
+    const clashes: string[] = [];
+    for (const tone of APPROVAL_NOTE_TONE_ORDER) {
+      const mine = noteFace(...PROPS_FOR[tone]);
+      for (const name of APPROVAL_NOTE_TONE_SPEC[tone].mustDifferFrom) {
+        if (name in role) {
+          if (mine.color === role[name]) clashes.push(`${tone}=${name}`);
+          continue;
+        }
+        const other = noteFace(...PROPS_FOR[name as ApprovalNoteTone]);
+        if (mine.color === other.color && mine.weight === other.weight) {
+          clashes.push(`${tone}=${name}`);
+        }
+      }
+    }
+    expect(clashes).toEqual([]);
+  });
+
+  /**
+   * #1429 의 판정을 **웹 파일에 대고** 고정한다.
+   *
+   * 두 클라가 차단 줄에 반대되는 옷을 입힌 것은 취향 갈림이 아니라 팔레트의 역할
+   * 배정이다: 「사람이 할 일이 남아 있다」를 웹은 `--accent` 로, 이 앱은 `warn` 으로
+   * 진다(같은 대응을 미읽 경계와 ADE 차단 개수가 이미 쓴다). 그래서 웹에는
+   * `--warn` 이 「안정 상태가 아니다」(저하·유동 포함)로 비어 있고 이 앱에는 비어 있는 앰버가 없다.
+   *
+   * 이 단정이 지키는 것은 「두 색이 같다」가 **아니라 그 이유**다. 어느 날 한쪽을
+   * 다른 쪽에 맞추려는 사람은 여기서 붉은 줄과 함께 그 이유를 읽는다 — 그 압력이
+   * 실제로 왔던 것이 #1429 이고, 그때 이 파일에는 폰 절반만 있었다.
+   */
+  it('웹은 같은 톤을 자기 팔레트의 답으로 그린다 (#1429 대조 고정)', () => {
+    const bridge = fs.readFileSync(
+      path.join(
+        __dirname,
+        '../../web/src/features/timeline/approvalNoteTone.ts',
+      ),
+      'utf8',
+    );
+    const tokenFor = (key: string): string => {
+      const found = new RegExp(`\\b${key}:\\s*"(--[a-z-]+)"`).exec(bridge);
+      if (found === null) {
+        throw new Error(
+          `웹 다리(approvalNoteTone.ts)에서 ${key} 토큰을 찾지 못했다. 표를 ` +
+            '옮겼다면 이 대조도 함께 옮길 것 — 못 찾은 채 초록이면 이 단정은 없는 것과 같다',
+        );
+      }
+      return found[1];
+    };
+
+    // 웹의 답: 부름은 accent, 차단은 warn. 둘이 갈라져 있는 것이 웹의 정합이다.
+    expect(tokenFor('attention')).toBe('--accent');
+    expect(tokenFor('blocked')).toBe('--warn');
+
+    // 이 앱의 답: 부름이 앰버라서 차단은 앰버가 아니다. 두 클라가 같은 규칙
+    // (차단 != 부름)을 서로 다른 토큰으로 만족한다.
+    const blocked = noteFace(...PROPS_FOR.blocked);
+    expect(attentionColor()).toBe(color.warn);
+    expect(blocked.color).toBe(color.text);
+    expect(blocked.color).not.toBe(attentionColor());
   });
 
   it('컴포저의 「지금은 못 보낸다」도 같은 잉크다 (U4-6 리뷰 M-2)', () => {
@@ -575,13 +675,16 @@ describe('M-3 — 승인 카드 세 문장의 격', () => {
         onSend={() => {}}
       />,
     );
+    // 자리 이름은 코어가 든다 (#1429). 웹의 계약 테스트가 같은 상수로 자기
+    // 컴포저를 지목하므로, 이름이 갈라지면 두 가드 중 하나가 조용히 빈다.
     const composerLine = StyleSheet.flatten(
-      view.getByTestId('composer-offline').props.style,
+      view.getByTestId(APPROVAL_NOTE_BLOCKED_TWIN).props.style,
     ) as {color?: string};
     view.unmount();
 
     expect(composerLine.color).toBe(blocked.color);
-    // 그리고 그 잉크가 앰버가 아니다 — D-2 의 기각을 컴포저에서 되살리지 않는다.
+    // 그리고 그 잉크가 앰버가 아니다 — 이 팔레트의 앰버는 「사람이 할 일이 남아
+    // 있다」이고(미읽 경계·대기 승인 칩), 차단은 그 반대말이다.
     expect(composerLine.color).not.toBe(color.warn);
   });
 

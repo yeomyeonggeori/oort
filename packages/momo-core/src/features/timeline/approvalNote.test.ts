@@ -4,7 +4,9 @@ import {
   approvalCardNote,
   approvalNoteRank,
   APPROVAL_ELSEWHERE_COPY,
+  APPROVAL_NOTE_BLOCKED_TWIN,
   APPROVAL_NOTE_TONE_ORDER,
+  APPROVAL_NOTE_TONE_SPEC,
   APPROVAL_OFFLINE_COPY,
   type ApprovalCardNoteInput,
 } from "./approvalNote";
@@ -23,6 +25,60 @@ function input(over: Partial<ApprovalCardNoteInput> = {}): ApprovalCardNoteInput
     ...over,
   };
 }
+
+describe("색 계약 — 값이 아니라 역할이다 (#1429)", () => {
+  it("세 톤이 전부 명세를 갖는다", () => {
+    for (const tone of APPROVAL_NOTE_TONE_ORDER) {
+      expect(APPROVAL_NOTE_TONE_SPEC[tone].meaning.length).toBeGreaterThan(0);
+      expect(
+        APPROVAL_NOTE_TONE_SPEC[tone].mustDifferFrom.length
+      ).toBeGreaterThan(0);
+    }
+  });
+
+  /**
+   * 명세에 들 수 있는 이름은 둘뿐이다: 형제 톤이거나, 클라가 답할 수 있는 팔레트
+   * 역할이거나. 셋째 종류가 들어오면 두 클라의 계약 테스트가 그것을 답하지 못한 채
+   * 초록으로 지나간다 — D-2가 같은 자리에 같은 가드를 둔 이유다.
+   */
+  it("명세의 이름은 형제 톤이거나 팔레트 역할이다", () => {
+    const roles = ["attention", "danger"];
+    for (const tone of APPROVAL_NOTE_TONE_ORDER) {
+      for (const name of APPROVAL_NOTE_TONE_SPEC[tone].mustDifferFrom) {
+        const known =
+          (APPROVAL_NOTE_TONE_ORDER as readonly string[]).includes(name) ||
+          roles.includes(name);
+        expect(known, `명세의 "${name}"`).toBe(true);
+        expect(name, `${tone}이 자기 자신과 다르라고 한다`).not.toBe(tone);
+      }
+    }
+  });
+
+  /**
+   * 차단만 팔레트 역할 둘을 함께 든다. 그 둘이 이 톤이 실수로 빌려 쓸 수 있는
+   * 유일한 이웃이기 때문이다: 부름(웹 `--accent` · 폰 `warn`)과 사고(`danger`).
+   * 영수증과 안내는 회색 축에 살아서 그 이웃이 없다.
+   */
+  it("차단만 부름과 사고를 함께 금지한다", () => {
+    expect([...APPROVAL_NOTE_TONE_SPEC.blocked.mustDifferFrom].sort()).toEqual([
+      "attention",
+      "danger",
+      "guidance",
+      "receipt",
+    ]);
+    for (const tone of ["receipt", "guidance"] as const) {
+      expect(APPROVAL_NOTE_TONE_SPEC[tone].mustDifferFrom).not.toContain(
+        "attention"
+      );
+    }
+  });
+
+  it("차단의 쌍둥이 자리를 코어가 이름 짓는다 (U4-6 M-2)", () => {
+    // 두 클라의 계약 테스트가 같은 상수로 자기 컴포저를 지목한다. 이름이 갈라지면
+    // 둘 중 하나가 아무것도 없는 자리를 재게 된다.
+    expect(APPROVAL_NOTE_BLOCKED_TWIN).toBe("composer-offline");
+  });
+});
 
 describe("격의 순서", () => {
   it("영수증이 가장 앞이다 — 카드에서 가장 값어치 있는 문장", () => {
