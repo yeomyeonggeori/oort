@@ -1,51 +1,85 @@
-# ADR-0163: 관리형 에이전트 카탈로그 — 동봉 호스팅·버전 원장·개별 업데이트
+# ADR-0163: 관리형 에이전트 카탈로그 — 셀프호스트 동봉·버전 원장·개별 업데이트
 
-- Status: **Proposed** (기안 Fable 2026-08-12 — sol 검수 → 성재 승인 대기. 경계 변경: Accepted 전 구현 착수 금지, ADR-0100)
-- 관련: ADR-0102(worker=managed 경로), ADR-0130 D3(work_tool_profile 원장 — Rust 재랜딩과의 관계는 D4), ADR-0135(provider 체인 — 카탈로그 항목의 provider 요구사항 연결), ADR-0004(자격증명 비유입 — 유지), 셀프호스팅 계획 `docs/planning/2026-08-10-opensource-selfhost-plan.md`(#1227~#1229 — 본 ADR은 그 확장)
-- 발단: 성재 2026-08-12 — "셀프호스팅에서 에이전트를 선택해 담아 초기 세팅부터 호스팅하는 구조도 살리고, 새 에이전트가 나올 때마다 우리가 업데이트해서 호스팅 레벨·호스팅 후 개별 에이전트 업데이트 버튼을 지원하면 매력적."
-- 리서치: `docs/planning/research/2026-08-12-grok-bot-reverse-teammate-direction.md` §8(설계 감사 — 동봉·업데이트가 실재 갭임을 확인)
+- Status: **Proposed · deferred** (2026-08-12 #1343 검수 교정 — 현재 `Bring your hosted agent` 런칭 게이트에서 제외)
+- Decision owner: 성재
+- 관련: ADR-0100(결정 거버넌스), ADR-0102(worker=managed / gateway=BYOA), ADR-0121(셀프호스팅), ADR-0130(ACP·`work_tool_profile`), ADR-0135(provider chain), `docs/planning/2026-08-10-opensource-selfhost-plan.md`
+- 구현 조건: 본 ADR의 별도 승인과 셀프호스트 기반선 재검증 전에는 카탈로그·동봉·업데이트 구현을 발급하지 않는다.
 
-## Context
+## 검수 결론
 
-1. 셀프호스팅 계획(#1227~#1229)은 최초 소유자 부트스트랩·compose 레포화·웹 굽기까지만 다룬다 — **에이전트 동봉 개념이 없다.** 지금 셀프호스터가 관리형 에이전트를 얻는 길은 "adapters/ 소스를 읽고 직접 구동"뿐이다.
-2. 재료는 이미 있다: `adapters/`(hermes·prime·codex-workbench)가 어댑터 실체, provider 체인(ADR-0135)이 두뇌 연결, agent 멤버·프로필이 신원. 없는 것은 **묶음(카탈로그)·버전·업데이트 라이프사이클**이다.
-3. ADR-0130 D3의 work_tool_profile 원장(연동형 도구 등록부)은 Swift 시대 랜딩 후 **server-rust 재랜딩이 안 된 상태**(2026-08-12 감사) — 본 ADR의 원장 설계와 재랜딩 시점이 겹치므로 관계 정리가 필요하다.
-4. 경쟁 지형: Grok Bot 등 호스팅 SaaS는 "설치 0"이 강점. 셀프호스팅이 맞설 무기는 "**우리가 큐레이션·갱신해주는 에이전트 카탈로그**" — 새 에이전트/새 버전이 나오면 카탈로그 갱신으로 전 셀프호스터가 따라온다. 유지보수 가치 제안이자 오픈소스 배포판의 차별점.
+이 제안은 제품 가치가 있지만, 사용자가 이미 다른 서비스에서 호스팅하는 에이전트를 oort에 연결하는 `Bring your hosted agent`와는 수명주기·신뢰 경계·운영 주체가 다르다. 따라서 현재 런칭 축의 선행조건으로 묶지 않는다.
 
-## Decisions
+- **현재 런칭 축:** 외부 hosted agent가 oort에 일회성 페어링하고, 자기 런타임에서 oort inbox와 기존 agent gateway 계약을 소비한다. oort는 외부 런타임을 설치·업데이트하지 않는다.
+- **본 ADR의 별도 축:** oort 셀프호스트 배포판이 큐레이션한 adapter/runtime를 운영자 호스트에 설치하고 버전 수명을 관리한다.
+- **ACP 축:** 로컬/호스트 코딩 에이전트 세션 전송 규격이다. 카탈로그와 같은 테이블이나 같은 구현 티켓으로 합치지 않는다.
 
-### D1. agent_catalog — 레포 정본 카탈로그
-- 정본은 **레포 파일**(예: `catalog/agents/*.toml` — 오픈소스 배포판에 포함): `catalog_key`, 표시명/설명, `adapter_image`(태그 명시), 기본 에이전트 프로필(모델·시스템 카피), provider 요구사항(체인 kind·필요 env), 최소 서버 버전, 마이그레이션 노트 링크.
-- 서버는 카탈로그를 **투영으로 소비**(파일→서버 원장 sync). 원격 페치 없음 — 카탈로그 갱신은 레포 릴리스에 실려 온다(공급망 단순·감사 가능).
+## Context — 2026-08-12 코드 대조로 교정된 사실
 
-### D2. 온보딩 동봉 — "에이전트 고르기" 단계
-- 셀프호스트 초기 세팅(#1227의 최초 소유자 부트스트랩 직후)에 카탈로그에서 에이전트를 선택 설치하는 단계 추가. 실체는 **compose profile 단위**(선택=해당 어댑터 컨테이너 활성화+에이전트 멤버·프로필 시드). 미선택(에이전트 0 시작)도 1급 경로.
-- provider 자격증명은 이 단계에서 받지 않는다 — 설치 후 기존 provider link 화면으로 안내(ADR-0004/0147 경계 그대로).
+1. 셀프호스트 계획의 #1227~#1229 범위는 최초 소유자 부트스트랩·compose/단일 이미지·time-to-hello다. 관리형 에이전트 카탈로그와 개별 adapter 업데이트 수명주기는 그 계획에 명시돼 있지 않다.
+2. `server/Migrations/029_work_tool_profile.sql`과 Rust `momo-t3`에는 **`work_tool_profile` 원장과 fail-closed 조회가 이미 존재한다.** “server-rust에 원장이 없다”는 종전 초안의 진술은 틀렸다.
+3. `workers/WorkHostDaemon/Sources/MomoACPHost`에는 ACP client/adapter 구현과 테스트가 존재한다. 다만 이 코드는 은퇴 예정 Swift 트리이며, **현행 Rust-native work-host 구현이 완결됐다는 뜻은 아니다.** Rust 서버에는 work session/control과 서명된 ACP event ingestion 일부가 살아 있으므로, 실제 이식 잔여는 #1345에서 코드·런타임 기준으로 다시 잰다.
+4. `work_tool_profile`은 “어떤 host-local 도구를 어떤 portable launch template로 실행할 수 있는가”를 정한다. 관리형 설치본의 이미지·catalog revision·업데이트 결과를 기록하는 원장이 아니므로 카탈로그와 의미가 다르다.
+5. `adapters/`, provider chain, agent member/profile은 카탈로그의 재료지만, 설치·health·버전 비교·롤백 계약은 아직 별도 제품 경계다.
 
-### D3. 버전 원장·개별 업데이트 표면
-- 서버가 설치본 버전(이미지 태그·설치 시각·카탈로그 rev)을 원장으로 보유. 관리자 설정 화면에서 에이전트별 [설치본 vs 카탈로그 최신] 비교 + **개별 "업데이트" 버튼**.
-- **업데이트 실행 주체 — 옵션 (sol 검수 최우선 포인트)**:
-  - **A (권고 v1)** — 호스트 헬퍼: 서버는 "업데이트 의향"만 원장에 기록하고, 호스트 측 헬퍼 스크립트(janitor류·systemd timer 또는 수동 1커맨드)가 의향을 읽어 pull&restart 수행 후 결과를 회신. 서버는 Docker 소켓 비접촉.
-  - **B** — 서버가 Docker API 직접 조작(소켓 마운트): UX 최상이나 서버 탈취=호스트 장악. **기각 권고**(RLS·최소권한 기조와 충돌).
-  - **C (권고 v0)** — 안내만: 버튼이 실행하지 않고 검증된 업데이트 명령(1줄)+마이그레이션 노트를 카드로 제시, 완료 감지는 어댑터 버전 heartbeat로. 구현 최소·보안 표면 0.
-  - 권고: **v0=C → v1=A** 단계 승격. B는 채택하지 않는다.
-- 롤백: 이전 태그를 원장에 보존, 실패 시 복귀 명령 제시(v0) 또는 헬퍼 자동 복귀(v1).
+## 제안하는 결정 (아직 미승인)
 
-### D4. work_tool_profile(ADR-0130 D3)과의 관계
-- 별도 원장 유지: work_tool_profile=**연동형 도구 등록부**(work host에서 뭘 스폰할 수 있나), agent_catalog=**관리형 동봉 목록**(서버 곁에 뭘 담아 호스팅하나). 카탈로그 항목이 도구도 제공하면 `catalog_key` 참조로 연결. Rust 재랜딩 시 두 원장을 한 마이그레이션 계열로 묶는 것은 허용(스키마는 분리).
+### D1. 레포 동봉 카탈로그를 공급망 정본으로 둔다
 
-### D5. 비목표
-- 서드파티 마켓플레이스·원격 카탈로그 페치·자동 업데이트(무버튼) — v0/v1 범위 밖. 카탈로그는 우리(레포)가 큐레이션한다.
-- 다이얼인형(ADR-0162)은 카탈로그 대상이 아니다 — 동봉할 실체가 없다(저쪽이 호스팅).
+권고안은 레포에 검토 가능한 manifest를 두고 릴리스에 함께 싣는 방식이다. 최소 항목은 다음과 같다.
+
+- 안정된 `catalog_key`, 표시명과 설명
+- digest로 고정한 adapter/runtime artifact와 permissive license 근거
+- 지원하는 서버 버전 범위와 schema/config revision
+- 필요한 provider 종류와 설정 키의 **이름만**; credential 값은 금지
+- 기본 agent profile과 health probe 계약
+- upgrade/rollback note 링크
+
+서버가 임의 원격 카탈로그를 실행 중에 받아 실행하지 않는다. 원격 marketplace와 서드파티 자동 설치는 별도 보안 결정이다.
+
+### D2. 초기 설정에서는 선택 설치를 제공하되, 에이전트 0개 시작을 1급 경로로 둔다
+
+셀프호스트 운영자는 소유자 부트스트랩 뒤 카탈로그 항목을 고를 수 있다. 선택은 adapter 컨테이너/profile과 agent identity를 함께 준비하되 provider credential은 oort 서버에 넣지 않고 기존 provider-link 경계를 따른다. 설치하지 않고 메신저만 시작하는 경로도 동일하게 지원한다.
+
+### D3. 설치본 원장은 `work_tool_profile`과 분리한다
+
+설치본에는 최소 `catalog_key`, artifact digest, installed catalog revision, health 상태, 마지막 성공/실패 update, rollback target을 기록한다. `work_tool_profile`은 도구 실행 정책으로 유지하고, 한 관리형 에이전트가 host tool을 제공할 때만 stable key로 참조한다.
+
+한 테이블로 합치면 “disabled tool”과 “중지된/낡은 adapter 설치본”이 같은 상태처럼 보이고 권한 경계가 흐려지므로 금지한다.
+
+### D4. 업데이트 실행 주체는 `v0=안내`, `v1=최소권한 host helper`를 우선 검토한다
+
+- **v0 권고:** 관리 화면은 현재/목표 digest, 검증된 명령, migration note, rollback 명령을 보여준다. 실행은 운영자가 호스트에서 한다. 실제 health/version 보고가 돌아오기 전에는 성공으로 표시하지 않는다.
+- **v1 후보:** 별도 host helper가 서명된 update intent를 읽어 pull/restart/health/rollback을 수행하고 결과만 회신한다. helper의 명령 allowlist와 artifact digest 검증은 별도 ADR/위협모델 대상이다.
+- **기각 권고:** 제품 서버에 Docker socket을 마운트해 임의 pull/restart 권한을 주는 방식. 서버 침해가 곧 호스트 장악이 된다.
+
+### D5. 외부 hosted-agent 연결과 결합하지 않는다
+
+Grok Bot 같은 외부 hosted agent는 oort가 artifact·버전·업데이트를 소유하지 않는다. 해당 연결은 ADR-0162의 pairing/credential/cleanup lifecycle만 따른다. 카탈로그에 Grok Bot 설치 항목을 만들지 않는다.
+
+## 승인 전 열려 있는 질문
+
+1. 셀프호스트 기반선(#1227~#1229)의 실제 랜딩 상태와 compose ownership을 어느 시점 기준으로 삼을지
+2. artifact signing·SBOM·license attestation을 어느 릴리스 파이프라인이 발급할지
+3. adapter가 보고하는 version/health를 어떤 서명 identity에 묶을지
+4. v1 host helper의 명령 allowlist·권한·업데이트 실패 복구 계약
+5. 카탈로그를 first-party 항목만 허용할지, 검토된 third-party 항목까지 열지
 
 ## Consequences
 
-- (+) "clone → 에이전트 고르기 → 팀메이트 있는 메신저"가 초기 세팅 경험이 된다. 새 에이전트 지원=카탈로그 PR 1건 — 우리 갱신이 전 셀프호스터의 업데이트 버튼에 도달.
-- (+) 업데이트 주체 분리(v0=C)로 신규 보안 표면 없이 시작 가능.
-- (−) 카탈로그 큐레이션은 지속 유지보수 부채(어댑터 이미지 빌드·태깅 파이프라인 필요 — CI 결정과 연동).
-- (−) compose profile 확장은 #1228(단일 이미지·compose 레포화)과 파일 충돌 가능 — 랜딩 순서 조율 필요(#1228 선행 권고).
+- (+) 셀프호스트 운영자가 “clone → 에이전트 선택 → 검증된 업데이트”를 한 제품 흐름으로 이해할 수 있다.
+- (+) `work_tool_profile`, ACP, 외부 hosted-agent pairing의 서로 다른 경계를 보존한다.
+- (+) v0에서 서버 Docker socket 없이도 버전 가시성과 안전한 수동 update loop를 먼저 검증할 수 있다.
+- (−) 이미지 빌드·서명·호환성·롤백을 지속 관리해야 하는 공급망 운영 비용이 생긴다.
+- (−) 실제 설치 자동화와 개별 업데이트 버튼은 셀프호스트 기반선과 host helper 결정 없이는 닫히지 않는다.
 
-## 검증 방향 (수용기준 초안)
+## 별도 축의 승인·검증 조건
 
-- 새 기계 e2e: 문서대로 "에이전트 1종 선택 설치 → provider link → 채널에서 멘션 응답"이 임기응변 0회로 성립(#1229 방식 재실측).
-- 업데이트 폐곡선: 카탈로그 태그 올림 → 관리자 화면 비교 표시 → (v0) 명령 카드 실행 → 어댑터 heartbeat로 신버전 감지·원장 갱신. red proof: 버전 불일치 시 원장이 "낡음"을 정직 표기(조용한 최신 위장 금지).
+본 ADR을 다시 편성할 때 다음 증거가 먼저 필요하다.
+
+1. 현재 셀프호스트 배포판을 새 기계에서 문서대로 기동한 clean-room evidence
+2. first-party adapter 한 종의 digest 고정 설치→health→수동 update→rollback 실증
+3. server compromise가 host control로 번지지 않는 threat model
+4. permissive license/SBOM/NOTICE gate
+5. 실패나 version mismatch를 “최신”으로 위장하지 않는 red proof
+
+이 조건은 현재 hosted-agent launch의 완료 조건이 아니며, #1343에서 구현 이슈를 발급하지 않는다.
