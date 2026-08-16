@@ -84,7 +84,11 @@ const TEMPLATE_SPEC = JSON.parse(
     messages: { producerToViewer: string[]; viewerToProducer: string[] };
   };
   producer: { direction: string; inputDatachannel: boolean; recording: boolean };
-  ice: { turn: null | string; stun: string[] };
+  ice: {
+    turn: null | { required: boolean; operator: string; transports?: string[] };
+    stun: string[];
+    policy?: string;
+  };
 };
 
 /** Comments in this repository quote counter-examples verbatim; strip them. */
