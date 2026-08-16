@@ -233,7 +233,18 @@ function SessionRow({
         )}
       </span>
       <span className="flex min-w-0 items-baseline gap-2">
-        <span className="shrink-0 text-meta text-ink-muted">{channelName}</span>
+        {/* 방 이름은 **양보한다** (#1463 리뷰 B1).
+            앞 판에서 이 자리는 `shrink-0` 이었고, 그 줄에 물러서지 않는 항목이 셋
+            (방 이름·신호 없음·검증 칩)이 됐다. 방 이름 하나가 길면 요약이 0으로
+            줄어든 뒤 **칩이 패널 밖으로 밀려나** 320px 안에 가로 스크롤이 생겼다
+            (실측: line-2 scrollW 315 > clientW 287, 900px 판에서는 패널이 292px 라
+            한글 16자에서 넘친다). `channel.name` 에는 서버 길이 상한이 없다.
+
+            옳은 답은 같은 파일 아래 `MySessionRow` 가 이미 쓰고 있었다 — 거기서는
+            방 이름이 `min-w-0 truncate` 라 첫 번째 절단 대상이다. */}
+        <span className="min-w-0 truncate text-meta text-ink-muted">
+          {channelName}
+        </span>
         {/* The survival signal is a WORD, not a hue. It used to be a color
             change on the clock with the explanation in a `title`, which a
             keyboard or screen reader user never reaches and which leaves colour
@@ -387,11 +398,24 @@ function MySessionRow({
         <span data-numeric className="shrink-0 font-mono">
           {clockLabel(session.startedAtMs)}
         </span>
+        {/* 칩은 줄 **끝**으로 간다 (#1463 리뷰 H2·L1).
+            앞 판에서는 시계 바로 뒤에 4px 간격으로 붙어 있었고, 그러면 이 줄의
+            가운뎃점으로 이어진 문장(「#배포 · 시작 06:53」)의 **네 번째 항목**처럼
+            읽힌다 — 가운뎃점을 앞에 달지 않은 유일한 항목이라 더 그렇다. 이 칩은
+            그 문장의 항목이 아니라 세션이 자기 일에 대해 남긴 별개의 진술이다.
+
+            그리고 이 패널의 두 목록이 같은 세션을 두고 칩을 반대쪽에 세우고 있었다.
+            전체 목록에서는 요약(flex-1)이 밀어내 오른쪽 끝, 여기서는 왼쪽. 오른쪽
+            끝으로 맞추면 두 목록 모두에서 칩이 **경과 읽기 아래 같은 열**에 선다 —
+            윗줄 오른쪽 끝이 「이 세션이 얼마나 일했는가」이고 그 아래가 「그 일이
+            어떻게 검증됐는가」다. */}
         {verification !== null && (
-          <SessionVerificationChip
-            verification={verification}
-            testId="my-work-session-verification"
-          />
+          <span className="ml-auto flex shrink-0">
+            <SessionVerificationChip
+              verification={verification}
+              testId="my-work-session-verification"
+            />
+          </span>
         )}
       </p>
       {/* 하트비트 침묵은 재개를 **막지 않는다** — 서버가 판정에서 뺀 그
@@ -616,12 +640,12 @@ function SessionPeek({
           </ul>
         </>
       )}
-      <div
-        className={cn(
-          "flex items-center gap-2 pt-2",
-          verification !== null ? "justify-between" : "justify-end"
-        )}
-      >
+      {/* 바닥 줄은 칩이 있든 없든 **같은 정렬**이다 (#1463 리뷰 M3).
+          앞 판은 칩이 있을 때만 `justify-between` 으로 바뀌었고, 그러면 320px 폭
+          전체를 사이에 두고 「실패 1」이 왼쪽 끝에 홀로 남는다 — 그 자리에 홀로 선
+          작은 알약은 판정이 아니라 컨트롤이나 필터처럼 읽힌다. 오른쪽에서 버튼과
+          짝지어 서면 「이 세션은 이렇게 검증됐고, 전체는 여기로」가 한 손짓이 된다. */}
+      <div className="flex items-center justify-end gap-2 pt-2">
         {verification !== null && (
           <SessionVerificationChip
             verification={verification}

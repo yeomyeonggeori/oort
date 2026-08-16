@@ -49,6 +49,15 @@ const VIEWPORT = { width: 1280, height: 900 };
 
 const WORKSPACE_ID = "00000000-0000-7000-8000-000000000001";
 const CHANNEL_ID = "00000000-0000-7000-8000-000000000201";
+/**
+ * 이름이 긴 방 (#1463 리뷰 B1).
+ *
+ * 앞 판의 픽스처에는 방이 하나(「배포」)뿐이었고, 「최악 조합」도 제목·경과 낱말·칩
+ * 낱말만 바꿨다. 그래서 **방 이름 축**이 통째로 빠져 있었다 — `channel.name` 은
+ * 서버에 길이 상한이 없는 `text` 인데(`schema_v0.sql`), 목록 행의 아랫줄은 그
+ * 이름과 요약과 칩이 한 줄을 나눠 쓴다. 이 방이 그 축이다.
+ */
+const LONG_CHANNEL_ID = "00000000-0000-7000-8000-000000000202";
 const ME = "019f94e3-7a10-79cd-9dee-208f47edd9a8";
 const HOST_ID = "019f9a01-0000-7000-8000-000000000501";
 
@@ -92,6 +101,13 @@ const CHANNELS = [
     name: "배포",
     muted: false,
   },
+  {
+    id: LONG_CHANNEL_ID,
+    workspaceId: WORKSPACE_ID,
+    kind: "public",
+    name: "결제-정산-플랫폼-마이그레이션-2026-상반기",
+    muted: false,
+  },
 ];
 
 const ROSTER = [
@@ -127,11 +143,14 @@ const HOSTS = [
 
 const NOW = Date.now();
 
+/** 어느 세션이 이름 긴 방에 사는가 (#1463 리뷰 B1). */
+const CHANNEL_OF = {};
+
 function workSession(id, label, extra) {
   return {
     id,
     workspaceId: WORKSPACE_ID,
-    channelId: CHANNEL_ID,
+    channelId: CHANNEL_OF[id] ?? CHANNEL_ID,
     memberId: ME,
     hostId: HOST_ID,
     rootMessageId: ROOT_OF[id],
@@ -162,6 +181,12 @@ function runningSession(id, label, startedAtMs) {
 /** 1시간 24분 — 시간 단위 경과. 「N시간 N분 동안 작업」이 가장 넓은 낱말이다. */
 const HOUR_SCALE_MS = 5_040_000;
 
+// 최악 조합 둘은 이름 긴 방에 산다: 가장 넓은 칩 낱말(「미상 결과 2」)과 초장기
+// 세션이 그 방의 이름과 한 줄을 나눠 쓴다. 앞 판은 이 조합에서 칩이 패널 밖으로
+// 밀려나고 320px 안에 가로 스크롤이 생겼다 (#1463 리뷰 B1).
+CHANNEL_OF[WIDEST_ID] = LONG_CHANNEL_ID;
+CHANNEL_OF[LONG_ID] = LONG_CHANNEL_ID;
+
 // 코어가 짓는 낱말들(`workSessionFormat` · `completionReportCard`). 값을 여기 그대로
 // 적는 이유는 둘이다: 이 노드 스크립트는 코어의 TS 소스를 import 하지 못하고, 그리고
 // **대조**가 이 파일의 일이다 — 기대값을 코어에서 끌어오면 화면과 코어가 함께 틀린
@@ -179,7 +204,14 @@ const SESSIONS = [
   // 최악 조합 (design-review H-1 후속): 가장 넓은 경과 낱말 + 가장 넓은 칩 낱말
   // (「미상 결과」, 4음절) + 긴 제목. 고정 폭만으로 320px 을 넘길 수 있는지가
   // 코드 추론으로만 남아 있었으므로, 여기서 실측한다.
+  // `tool` 이 긴 이유는 이 행의 아랫줄 **요약**을 실제로 절단시키기 위해서다
+  // (#1463 리뷰 M4). 목록의 요약은 레일이 나른 마지막 줄이고, 이 캡처의 소켓은
+  // ACP 프레임을 하나도 밀지 않으므로 모든 행이 짧은 대체 문구(`tool · 시작 …`)로
+  // 떨어진다 — 그러면 칩 옆이 늘 비어 있어 「요약이 양보한다」는 주장이 사진에서
+  // 한 번도 시험되지 않는다. 도구 이름을 길게 두면 그 대체 문구가 길어져, 방 이름
+  // (긴 방)·요약·칩이 한 줄을 두고 실제로 다툰다.
   workSession(WIDEST_ID, "결제 정산 배치 재실행 파이프라인 점검", {
+    tool: "codex-cloud-batch-runner",
     startedAtMs: NOW - HOUR_SCALE_MS,
   }),
   // 시작하자마자 끝난 세션 (#1468). 「1초 미만」은 기간 명사가 아니라 비교 표현이라
@@ -291,7 +323,11 @@ const REPORT_OF = {
   [FAILING_ID]: FAILING_REPORT,
   [WIDEST_ID]: UNKNOWN_REPORT,
   [LONG_ID]: LONG_REPORT,
-  [REPORTED_RUNNING_ID]: CLEAN_REPORT,
+  // 두 칩이 **같은 톤**을 입는 유일한 조합 (#1463 리뷰 M2): 수명주기 「실행 중」은
+  // warn 이고 게이트 대표가 「미상 결과」여도 warn 이다. 앞 판에서는 두 칩의 그릇이
+  // 같아서 그 조합이 한 행에 뜻이 다른 호박색 알약 둘로 보였다. 그릇을 가른 뒤
+  // (채움 = 원장, 테두리 = 자기 보고) 이 픽스처가 그 구분을 사진과 숫자로 남긴다.
+  [REPORTED_RUNNING_ID]: UNKNOWN_REPORT,
 };
 
 /**
@@ -326,7 +362,7 @@ function acpEvent(sessionId, index, seq) {
   const atMs = REPLY_BASE_MS + index * 1_000;
   return {
     id: `${rootId}-event-${index}`,
-    channelId: CHANNEL_ID,
+    channelId: CHANNEL_OF[sessionId] ?? CHANNEL_ID,
     rootId,
     seq,
     hlcTs: atMs,
@@ -356,7 +392,7 @@ function reportMessage(sessionId) {
   const atMs = REPLY_BASE_MS + 600_000;
   return {
     id: `${rootId}-report`,
-    channelId: CHANNEL_ID,
+    channelId: CHANNEL_OF[sessionId] ?? CHANNEL_ID,
     rootId,
     seq: REPORT_SEQ_OF[sessionId],
     hlcTs: atMs,
@@ -404,9 +440,12 @@ const CHANNEL_HISTORY = Object.keys(REPORT_OF)
   .map((sessionId) => reportMessage(sessionId))
   .sort((a, b) => b.seq - a.seq);
 
-function historyPage(limit, before) {
+/** 스캔은 채널 단위다. 방이 둘이므로 대역도 방마다 갈라야 한다. */
+function historyPage(channelId, limit, before) {
   const rows = CHANNEL_HISTORY.filter(
-    (row) => before === undefined || row.seq < before
+    (row) =>
+      row.channelId.toLowerCase() === channelId.toLowerCase() &&
+      (before === undefined || row.seq < before)
   ).slice(0, limit);
   const nextBefore = rows.length > 0 ? rows[rows.length - 1].seq : undefined;
   return { messages: rows, ...(nextBefore === undefined ? {} : { nextBefore }) };
@@ -533,9 +572,14 @@ async function installMocks(context) {
       const url = new URL(route.request().url());
       const limit = Number(url.searchParams.get("limit") ?? 50);
       const rawBefore = url.searchParams.get("before");
+      const channelId = path.split("/channels/")[1]?.split("/")[0] ?? "";
       return json(
         route,
-        historyPage(limit, rawBefore === null ? undefined : Number(rawBefore))
+        historyPage(
+          channelId,
+          limit,
+          rawBefore === null ? undefined : Number(rawBefore)
+        )
       );
     }
     return json(route, {
@@ -639,9 +683,61 @@ const ROW_VERIFICATIONS = `(() => {
   const out = {};
   for (const row of rows) {
     const chip = row.querySelector('[data-testid="work-session-verification"]');
-    out[String(row.getAttribute("data-session-id")).toLowerCase()] = chip
-      ? { lead: chip.getAttribute("data-lead"), label: chip.textContent.trim() }
-      : null;
+    // 윗줄의 두 번째 칸이 수명주기 칩이다(제목 · 상태 칩 · 경과).
+    const status = row.firstElementChild?.children[1] ?? null;
+    if (!chip) {
+      out[String(row.getAttribute("data-session-id")).toLowerCase()] = null;
+      continue;
+    }
+    const chipStyle = getComputedStyle(chip);
+    const statusStyle = status ? getComputedStyle(status) : null;
+    out[String(row.getAttribute("data-session-id")).toLowerCase()] = {
+      lead: chip.getAttribute("data-lead"),
+      label: chip.textContent.trim(),
+      ink: chipStyle.color,
+      ground: chipStyle.backgroundColor,
+      border: parseFloat(chipStyle.borderTopWidth) || 0,
+      rowGround: getComputedStyle(row).backgroundColor,
+      statusLabel: status ? status.textContent.trim() : null,
+      statusInk: statusStyle ? statusStyle.color : null,
+      statusGround: statusStyle ? statusStyle.backgroundColor : null,
+      statusBorder: statusStyle
+        ? parseFloat(statusStyle.borderTopWidth) || 0
+        : null,
+    };
+  }
+  return out;
+})()`;
+
+/**
+ * 목록이 자기 폭 안에 있는가 (#1463 리뷰 B1).
+ *
+ * 사진은 이것을 말해 주지 못한다 — 밀려난 칩은 **패널 밖에** 있으므로 패널
+ * 스크린샷에 아예 찍히지 않고, 사라진 것과 구분되지 않는다. 그래서 숫자로 잰다:
+ *
+ *   pane   패널의 스크롤 기둥이 가로로 넘치는가. 320px 옆 패널 안에 가로 스크롤이
+ *          생기면 그 자체가 결함이다.
+ *   rows   각 행의 아랫줄이 자기 폭 안에 있는가. 앞 판에서는 방 이름이 `shrink-0`
+ *          이라 요약이 0으로 줄어든 뒤 칩이 줄 밖으로 나갔다(scrollW 315 > 287).
+ *   chip   칩의 오른쪽 끝이 행의 오른쪽 끝 안에 있는가. 위 둘이 통과해도 칩이
+ *          `px-4` 안쪽 여백을 침범하면 그것은 다른 결함이다.
+ */
+const LIST_OVERFLOW = `(() => {
+  const pane = document.querySelector('[data-testid="work-panel"] .overflow-y-auto')
+    ?? document.querySelector('[data-testid="work-panel"]');
+  const rows = [...document.querySelectorAll('[data-testid="work-session-row"]')];
+  const out = { pane: null, rows: [] };
+  if (pane) out.pane = { client: pane.clientWidth, scroll: pane.scrollWidth };
+  for (const row of rows) {
+    const line = row.lastElementChild;
+    const chip = row.querySelector('[data-testid="work-session-verification"]');
+    out.rows.push({
+      sessionId: String(row.getAttribute("data-session-id")).toLowerCase(),
+      client: line ? line.clientWidth : 0,
+      scroll: line ? line.scrollWidth : 0,
+      chipRight: chip ? Math.round(chip.getBoundingClientRect().right) : null,
+      rowRight: Math.round(row.getBoundingClientRect().right),
+    });
   }
   return out;
 })()`;
@@ -772,17 +868,22 @@ async function captureScheme(browser, scheme) {
   // ---- 목록 행의 칩 (#1463) ------------------------------------------------
   // 스캔이 도착할 때까지 기다린다. 행은 세션 목록과 함께 먼저 그려지고 칩은 채널
   // 히스토리 읽기가 돌아온 뒤에 선다 — 그 사이에 재면 「칩이 없다」가 언제나 참이다.
-  try {
-    await page
-      .locator(
-        `[data-testid="work-session-row"][data-session-id="${CLEAN_ID}"] [data-testid="work-session-verification"]`
-      )
-      .waitFor({ timeout: 10_000 });
-  } catch {
-    throw new Error(
-      `${scheme}: 목록 행에 검증 칩이 끝내 서지 않았다 — 행은 스레드를 읽지 않으므로,` +
-        ` 채널 히스토리 스캔이 닿지 않으면 이 목록은 영영 아무 말도 하지 않는다 (#1463)`
-    );
+  // 스캔은 **채널당** 하나라, 방이 둘이면 도착도 둘이다. 한쪽만 기다리고 재면
+  // 다른 방의 행은 아직 비어 있을 뿐인데 「칩이 없다」로 읽힌다.
+  for (const id of [CLEAN_ID, LONG_ID]) {
+    try {
+      await page
+        .locator(
+          `[data-testid="work-session-row"][data-session-id="${id}"] [data-testid="work-session-verification"]`
+        )
+        .waitFor({ timeout: 10_000 });
+    } catch {
+      throw new Error(
+        `${scheme}: 목록 행(${id.slice(-3)})에 검증 칩이 끝내 서지 않았다 — 행은` +
+          ` 스레드를 읽지 않으므로, 채널 히스토리 스캔이 닿지 않으면 이 목록은 영영` +
+          ` 아무 말도 하지 않는다 (#1463)`
+      );
+    }
   }
   const rowChips = await page.evaluate(ROW_VERIFICATIONS);
   for (const [name, id, expected] of [
@@ -814,12 +915,93 @@ async function captureScheme(browser, scheme) {
       );
     }
   }
+  // ---- 그릇이 살아남는가 (#1463 리뷰 H1) ------------------------------------
+  // 앞 판의 칩 바탕은 행의 hover·선택 바탕과 **같은 토큰**이었다. 그래서 사람이
+  // 가리키고 있는 행에서 알약이 통째로 사라졌다(대비 1.00). 사진은 「없어졌다」와
+  // 「원래 없다」를 구분해 주지 않으므로, 여기서 푼 픽셀 값으로 직접 잰다.
+  for (const [id, chip] of Object.entries(rowChips)) {
+    if (chip === null) continue;
+    if (chip.ground === chip.rowGround && chip.border === 0) {
+      throw new Error(
+        `${scheme}: 행 ${id.slice(-3)} 의 검증 칩이 행 바탕과 같은 색인데 테두리도` +
+          ` 없다 (${chip.ground}) — 그릇이 사라진 알약은 배지가 아니라 여백의 조각이다`
+      );
+    }
+  }
+  // ---- 톤이 겹치는 한 쌍을 그릇이 가르는가 (#1463 리뷰 M2) -------------------
+  const pair = rowChips[REPORTED_RUNNING_ID.toLowerCase()];
+  if (pair === null || pair === undefined) {
+    throw new Error(`${scheme}: 실행 중 + 보고 세션의 행을 찾지 못했다`);
+  }
+  if (pair.statusInk !== pair.ink) {
+    throw new Error(
+      `${scheme}: 픽스처가 더 이상 같은 톤 한 쌍을 만들지 않는다` +
+        ` (수명주기 ${pair.statusInk} vs 검증 ${pair.ink}) — 이 단정이 지키려는 것은` +
+        ` 「두 칩이 같은 색일 수 있다」는 사실 자체다`
+    );
+  }
+  if (pair.statusGround === pair.ground && pair.statusBorder === pair.border) {
+    throw new Error(
+      `${scheme}: 「${pair.statusLabel}」과 「${pair.label}」이 같은 잉크에 같은 그릇` +
+        `이다 — 원장의 판정과 세션의 자기 보고를 구분할 방법이 색뿐인데 그 색이 같다`
+    );
+  }
   console.log(
     `  ${scheme}: 목록 행 칩 ` +
       Object.entries(rowChips)
         .map(([id, chip]) => `${id.slice(-3)}=${chip ? chip.label : "없음"}`)
         .join(" · ")
   );
+  console.log(
+    `  ${scheme}: 같은 톤 한 쌍 「${pair.statusLabel}」/「${pair.label}」 ink ${pair.ink}` +
+      ` · 그릇 ${pair.statusGround}(테두리 ${pair.statusBorder}) vs ${pair.ground}` +
+      `(테두리 ${pair.border})`
+  );
+
+  // ---- 목록이 자기 폭 안에 있는가 (#1463 리뷰 B1) ---------------------------
+  // 두 폭에서 잰다. 1280px 은 패널이 320px 인 판이고, 900px 은 패널이 292px 로
+  // 줄어드는 판이다(tokens.css `work-panel-pane`) — 넘치기 시작하는 쪽은 후자다.
+  for (const width of [1280, 900]) {
+    if (width !== VIEWPORT.width) {
+      await page.setViewportSize({ width, height: VIEWPORT.height });
+      await page.waitForTimeout(200);
+    }
+    const overflow = await page.evaluate(LIST_OVERFLOW);
+    if (overflow.pane && overflow.pane.scroll > overflow.pane.client + 1) {
+      throw new Error(
+        `${scheme}/${width}px: 목록 기둥에 가로 스크롤이 생겼다` +
+          ` (client ${overflow.pane.client} < scroll ${overflow.pane.scroll}) —` +
+          ` 320px 옆 패널 안에서 가로로 밀려난 것은 화면 밖에 있는 것이다 (#1463 B1)`
+      );
+    }
+    for (const row of overflow.rows) {
+      if (row.scroll > row.client + 1) {
+        throw new Error(
+          `${scheme}/${width}px: 행 ${row.sessionId.slice(-3)} 의 아랫줄이 넘쳤다` +
+            ` (client ${row.client} < scroll ${row.scroll}) — 방 이름·요약·칩이 한 줄을` +
+            ` 나눠 쓰는데 물러서지 않는 항목이 늘어난 것이다 (#1463 B1)`
+        );
+      }
+      if (row.chipRight !== null && row.chipRight > row.rowRight) {
+        throw new Error(
+          `${scheme}/${width}px: 행 ${row.sessionId.slice(-3)} 의 칩이 행 밖으로` +
+            ` 나갔다 (chip ${row.chipRight} > row ${row.rowRight})`
+        );
+      }
+    }
+    console.log(
+      `  ${scheme}/${width}px: 기둥 ${overflow.pane.client}/${overflow.pane.scroll}` +
+        ` · 아랫줄 최대 scrollW ${Math.max(...overflow.rows.map((r) => r.scroll))}` +
+        ` (client ${overflow.rows[0]?.client})`
+    );
+    if (width !== 1280) {
+      const narrow = `${OUT_DIR}/session-list-${width}-${scheme}.png`;
+      await panel.screenshot({ path: narrow });
+      shots.push(narrow);
+    }
+  }
+  await page.setViewportSize(VIEWPORT);
+  await page.waitForTimeout(200);
 
   const list = `${OUT_DIR}/session-list-${scheme}.png`;
   await panel.screenshot({ path: list });
@@ -875,6 +1057,22 @@ async function captureScheme(browser, scheme) {
     }
     if (name !== "no-report" && chips !== 1) {
       throw new Error(`${scheme}: ${name} 세션의 검증 칩이 ${chips}개다`);
+    }
+    // 선택된 행은 `--surface-hover` 를 입는다 — 앞 판의 칩 바탕과 **같은 토큰**이다
+    // (#1463 리뷰 H1). 알약이 살아남는지는 정확히 여기서만 물을 수 있다.
+    const peeked = (await page.evaluate(ROW_VERIFICATIONS))[id.toLowerCase()];
+    if (peeked !== null && peeked !== undefined) {
+      if (peeked.ground === peeked.rowGround && peeked.border === 0) {
+        throw new Error(
+          `${scheme}/${name}: 선택된 행에서 검증 칩의 그릇이 사라졌다` +
+            ` (칩 ${peeked.ground} = 행 ${peeked.rowGround}, 테두리 없음) — 가리키고` +
+            ` 있는 행에서 배지가 여백의 조각이 된다 (#1463 H1)`
+        );
+      }
+      console.log(
+        `  ${scheme}/${name}: 선택된 행 칩 ${peeked.ground} vs 행 ${peeked.rowGround}` +
+          ` (테두리 ${peeked.border}px)`
+      );
     }
     if (name === "long-thread") {
       // 이 미리보기는 두 문장을 **동시에** 말해야 한다: 진행 내역은 앞부분만
