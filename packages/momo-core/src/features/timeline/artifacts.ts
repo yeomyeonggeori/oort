@@ -1,4 +1,5 @@
 import type { Message } from "../../lib/api";
+import { hasRenderableBody } from "./bodySlot";
 
 // =============================================================================
 // Artifact presentation model (ADR-0126 D2 / MOMO-620, the web half of the mac
@@ -553,6 +554,28 @@ function linkArtifact(kind: "commit" | "pr", message: Message): LinkArtifact {
  *
  * A deleted row never becomes a card: the tombstone is the whole story, the
  * same rule `agentCardModel` already applies.
+ *
+ * ## Why the body is read through `hasRenderableBody` (#1476)
+ *
+ * This function used to ask `message.body === undefined`, and that question is
+ * one runtime value too narrow. The declared type is `body?: string`, but a
+ * realtime frame carries `"body": null` (`momo_messaging::
+ * build_broadcast_payload`) and the only thing turning that `null` into absence
+ * is one line of `payloadToMessage`. A `null` that reaches here passed the
+ * `=== undefined` guard and hit `looksLikeUnifiedDiff(null)` → `raw.trim()` →
+ * TypeError — and this is not a card that fails to draw: `rowPresentation`
+ * calls it inside `MessageRow`'s render on BOTH clients, so the throw takes the
+ * whole timeline down to a blank screen (#1465 worker measurement: `cards=0`,
+ * `Cannot read properties of null (reading 'trim')`).
+ *
+ * So the body is read ONCE, through the core judgment that already answers this
+ * exact question for the body slot (`bodySlot.hasRenderableBody`), rather than
+ * through a second null test invented here. It also lines the body up with the
+ * `patch` prop beside it: `propString` has always dropped a whitespace-only
+ * patch as absent, and a whitespace-only body was the one source that still
+ * got through. Nothing reachable changes shape — `looksLikeUnifiedDiff` trims
+ * before it matches, and `parseDiff` finds no file in whitespace — the guard
+ * just stops depending on a normalization that lives in another file.
  */
 export function resolveArtifact(message: Message): ArtifactPresentation | null {
   if (message.state === "deleted") return null;
@@ -561,16 +584,17 @@ export function resolveArtifact(message: Message): ArtifactPresentation | null {
   if (explicit === "commit" || explicit === "pr") {
     return linkArtifact(explicit, message);
   }
+  const body = hasRenderableBody(message.body) ? message.body : undefined;
   const title =
     propString(message.props, "title") ?? toolActionTitle(message.props);
   if (explicit === "diff") {
-    const source = propString(message.props, "patch") ?? message.body;
+    const source = propString(message.props, "patch") ?? body;
     return source === undefined ? null : diffArtifact(source, title);
   }
-  if (message.body === undefined || !looksLikeUnifiedDiff(message.body)) {
+  if (body === undefined || !looksLikeUnifiedDiff(body)) {
     return null;
   }
-  return diffArtifact(message.body, title);
+  return diffArtifact(body, title);
 }
 
 /**
