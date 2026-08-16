@@ -642,7 +642,15 @@ export function MessageRow({
             storageKey={message.id}
           />
         ) : (
-          card && <AgentCard card={card} directory={directory} />
+          card && (
+            <AgentCard
+              card={card}
+              directory={directory}
+              {...(onOpenWorkSession !== undefined
+                ? { onOpenWorkSession }
+                : {})}
+            />
+          )
         )}
         {/* Provider cascade (ADR-0135 D1). Outside the card/artifact branch on
             purpose: whichever of the two took the slot, a turn served by the

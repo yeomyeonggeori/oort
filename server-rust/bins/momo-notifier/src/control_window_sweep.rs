@@ -67,12 +67,12 @@
 use momo_agent::resume_runs_from_control_window_in_tx;
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::{with_tenant_tx, DbError, PgConnection, PgPool};
-use momo_messaging::cent_channel;
+use momo_messaging::{cent_channel, emit_message_edited_in_tx};
 use momo_outbox::{emit_outbox, OutboxKind};
 use momo_t3::{
     control_window_payload, expire_lapsed_control_windows_for_workspace_in_tx,
-    workspaces_with_lapsed_control_windows, LapsedControlWindow, AUDIT_ACTION_CONTROL_CLOSED,
-    AUDIT_SCHEMA_CONTROL_CLOSED,
+    stamp_control_window_on_cards_in_tx, workspaces_with_lapsed_control_windows,
+    LapsedControlWindow, AUDIT_ACTION_CONTROL_CLOSED, AUDIT_SCHEMA_CONTROL_CLOSED,
 };
 use serde_json::json;
 use uuid::Uuid;
@@ -187,6 +187,29 @@ async fn settle_lapsed_in_tx(
     let window = &entry.window;
     let resumed =
         resume_runs_from_control_window_in_tx(conn, workspace_id, window.work_session_id).await?;
+
+    // LIVE-4: the same stamp the route-side close writes
+    // (`display_attach::emit_control_closed_in_tx`). This sweep composes the
+    // three steps itself for layering reasons rather than calling that
+    // function, so the fourth step has to be repeated here — and it is the
+    // close that most needs it: a lapse is the one nobody performed, so a card
+    // left saying 「사람이 조작 중」 has no other author to correct it.
+    //
+    // And the stamp is announced on the card's own frame (freeze H1). The
+    // `work.session.control` envelope below is the SESSION surface's; a message
+    // row that moved is heard by an open timeline only as a message frame, and
+    // the one that already carries a whole row's `props` is #1152's
+    // `message.edited`. Same transaction, no new envelope type.
+    let stamped = stamp_control_window_on_cards_in_tx(
+        conn,
+        workspace_id,
+        momo_agent::approval::LOGIN_HANDOFF_PROPS_KIND,
+        window,
+    )
+    .await?;
+    for message_id in stamped.into_message_ids() {
+        emit_message_edited_in_tx(&mut *conn, workspace_id, message_id).await?;
+    }
 
     write_audit(
         conn,

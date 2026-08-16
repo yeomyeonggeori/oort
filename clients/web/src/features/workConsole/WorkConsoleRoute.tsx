@@ -473,6 +473,7 @@ export function WorkConsoleRoute() {
                 directory={directoryQuery.directory}
                 channelName={channelNameOf(selected.channelId)}
                 liveEvents={rail.liveEvents}
+                controlFrames={rail.controlFrames}
                 live={live}
                 nowMs={nowMs}
                 headingLevel={2}

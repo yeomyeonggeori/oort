@@ -47,6 +47,7 @@
     "capture:usage": "node scripts/capture-usage.mjs",
     "capture:eventsub": "npm run build && node scripts/capture-eventsub.mjs",
     "capture:honesty": "npm run build && node scripts/capture-honesty.mjs",
+    "capture:handoff": "npm run build && node scripts/capture-handoff.mjs",
     "capture:routing": "npm run build && node scripts/capture-routing.mjs",
     "capture:standalone": "npm run build && node scripts/capture-standalone.mjs",
     "capture:w4b": "npm run build && node scripts/capture-w4b.mjs",

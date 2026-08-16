@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowLeft, Loader2 } from "lucide-react";
+import { ArrowLeft, KeyRound, Loader2 } from "lucide-react";
 import { cn } from "@/design/lib/cn";
 import { Button } from "@/design/ui/button";
 import {
@@ -51,6 +51,11 @@ import {
   takeoverTargets,
 } from "@momo/core/features/work/sessionHandoff";
 import { TakeoverBlock } from "./TakeoverBlock";
+import {
+  controlWindowLabel,
+  latestControlNotice,
+} from "@momo/core/features/work/controlWindow";
+import type { WorkSessionControlFrame } from "@momo/core/lib/realtimeEvents";
 
 // =============================================================================
 // 세션 상세 (AX-3 / MOMO-618): what one work session did, in the order it did
@@ -616,6 +621,7 @@ export function WorkSessionDetail({
   directory,
   channelName,
   liveEvents,
+  controlFrames,
   live,
   nowMs,
   wide,
@@ -635,6 +641,13 @@ export function WorkSessionDetail({
   directory: Directory;
   channelName: string;
   liveEvents: readonly WorkSessionEvent[];
+  /**
+   * 이 세션에 대해 **이 화면이 들은** control 창 경계 이벤트 (LIVE-4).
+   *
+   * 비어 있다는 것은 창이 없다는 뜻이 아니라 들은 것이 없다는 뜻이고, 아래
+   * 표시가 그 구분을 직접 진다 — 경계 이벤트는 전송이고 원장이 아니다.
+   */
+  controlFrames: readonly WorkSessionControlFrame[];
   /** The realtime rail is connected, so what is on screen is confirmed. */
   live: boolean;
   nowMs: number;
@@ -675,6 +688,13 @@ export function WorkSessionDetail({
     [liveEvents, session.id]
   );
   const query = useSessionEvents(workspaceId, session, mine);
+  // 이 세션의 가장 최근 창. 판정(어느 것이 최신인가·닫힘이 이긴다)은 코어가 지고
+  // 이 화면은 그 답을 그리기만 한다 — 폰이 언젠가 같은 표시를 그릴 때 두 번째
+  // 구현이 생기지 않게.
+  const controlNotice = useMemo(
+    () => latestControlNotice(controlFrames, session.id),
+    [controlFrames, session.id]
+  );
   // 이 실행이 어느 목표에 속하는지 (MOMO-679). 반대 방향 — 목표에서 실행으로 —
   // 은 작업 흐름 상세의 이력 행이 이미 걸어주지만, 돌아오는 길이 없어서 이 표면은
   // 사이드바로만 도달 가능했다(PR 918 R1 M5).
@@ -968,6 +988,66 @@ export function WorkSessionDetail({
               />
             )}
           </>
+        )}
+
+        {/* 직접 조작 경계 (LIVE-4 / ADR-0004 증보 3 D3).
+
+            **관전 블록 바로 아래**다. 위가 「무엇을 볼 수 있는가」이고 여기가
+            「지금 누가 잡고 있는가」라서, 두 사실은 같은 화면에 대한 이야기다.
+            아래 진행 내역보다 위인 이유는 이것이 그 내역이 **왜 멈춰 있는지**를
+            설명하기 때문이다 — 답을 원인보다 먼저 읽게 두면 사람은 원인을 찾아
+            스크롤한다.
+
+            서버가 이 봉투를 **누가 열었든** 보낸다는 것이 이 블록의 값이다:
+            REST를 직접 호출해 창을 연 경우에도 여기 뜬다. 화면이 자기가 연
+            창만 그리면, 사람이 가장 답을 원하는 경우(에이전트가 멈췄는데 이
+            화면은 아무 말도 안 한다)에 정확히 침묵한다.
+
+            들은 것이 없으면 아무것도 그리지 않는다. 「조작 중인 사람 없음」은
+            이 표면이 할 수 있는 말이 아니다 — 경계 이벤트는 전송이고, 새로고침
+            직후에는 언제나 들은 것이 없다. 모르는 것을 아는 척하지 않는 자리가
+            여기다. */}
+        {controlNotice !== null && (
+          <section
+            data-testid="work-control-window"
+            data-state={controlNotice.state}
+            className="mt-4 rounded-md border border-line bg-surface-raised"
+          >
+            <div className="flex items-center gap-2 border-b border-line px-3 py-2">
+              <KeyRound className="size-4 shrink-0 text-ink-muted" aria-hidden="true" />
+              <Heading className="min-w-0 flex-1 text-body font-medium text-ink">
+                {controlNotice.headline}
+              </Heading>
+              <span
+                data-testid="work-control-chip"
+                className={cn(
+                  CHIP_CLASS,
+                  controlNotice.state === "open"
+                    ? "bg-accent-soft text-accent"
+                    : controlNotice.outcome === "returned"
+                      ? "bg-surface-hover text-ok"
+                      : controlNotice.outcome === "expired"
+                        ? "bg-surface-hover text-warn"
+                        : "bg-surface-hover text-ink-muted"
+                )}
+              >
+                {controlWindowLabel(controlNotice)}
+              </span>
+            </div>
+            <dl className="py-1">
+              <MetaRow label="정지">
+                <span data-numeric>{clockLabel(controlNotice.startedAtMs)}</span>
+              </MetaRow>
+              {controlNotice.endedAtMs !== null && (
+                <MetaRow label="재개">
+                  <span data-numeric>{clockLabel(controlNotice.endedAtMs)}</span>
+                </MetaRow>
+              )}
+            </dl>
+            <p className="border-t border-line px-3 py-2 text-meta text-ink-muted">
+              {controlNotice.detail}
+            </p>
+          </section>
         )}
 
         {/* Fail-closed (X-11 / MOMO-546): a remote host's event relay is not a

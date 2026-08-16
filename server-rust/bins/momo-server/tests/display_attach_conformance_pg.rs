@@ -38,6 +38,7 @@
 //! | `live3_7_a_control_window_parks_the_run_it_stops_and_four_doors_resume_it` | drop the park from `issue_in_tx`, drop the resume from `emit_control_closed_in_tx`, delete the notifier's lapse sweep, resume a run a second window still holds, park a run parked on an approval, or let a close resurrect a cancelled run |
 //! | `live3_8_a_window_opening_elsewhere_outlasts_a_return_that_races_it` | drop the run-row lock from either half of the park/resume pair, or narrow the park's lock to the rows it intends to update |
 //! | `live3_9_two_closes_at_once_still_leave_exactly_one_resume` | drop the run-row lock from the resume, or take it before the caller's own window close instead of after |
+//! | `live4_1_the_handoff_card_hears_the_boundary_and_the_join_survives_a_shouted_uuid` | drop the `message.edited` publish that follows the card stamp (in the route or in the notifier's sweep), put the model's raw `session_id` into `props` instead of the canonical one, let the open stamp merge over the previous lapse's end keys instead of deleting them, or let a settled handoff be rewritten by a later window |
 //!
 //! ### The mutation proof (ADR-0004 증보 3's own acceptance criterion)
 //!
@@ -3767,5 +3768,346 @@ async fn live3_9_two_closes_at_once_still_leave_exactly_one_resume() {
     assert!(
         open_window(&rig.su, first).await.is_none() && open_window(&rig.su, second).await.is_none(),
         "and both windows really did close — the fixture is the state it claims"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// LIVE-4 — the login handoff card, and the three ways it used to go stale
+//          (freeze, and the re-freeze that followed it)
+//
+// | test | revert that makes it red |
+// |---|---|
+// | `live4_1_the_handoff_card_hears_the_boundary_and_the_join_survives_a_shouted_uuid` | drop the `message.edited` publish from `stamp_handoff_cards_in_tx` (or from the notifier's sweep), put the model's raw `session_id` back into `props` instead of the canonical one, or drop the end-key delete from the open stamp's merge |
+//
+// Both halves are about the same card and both were silent failures. The stamp
+// wrote `props` with no envelope, so an OPEN timeline never heard it: the card
+// kept saying 「사람이 조작 중」 until a reload, and 재개 pressed on that stale
+// card claimed 「개입 완료」 about a window that had already lapsed. And the join
+// that stamp runs on is text — `props->>'session_id'` against `uuid::text` — so
+// a model that wrote its UUID in capitals produced a card the stamp could never
+// find at all, which made the first failure permanent rather than merely
+// temporary.
+//
+// The third is the same card told to hold two windows. `props || facts` adds and
+// never removes, so a pending handoff that lapsed and was taken up again wore
+// the new 정지 시각 over the old 재개 시각 — a live window rendered closed, with
+// its return dated before its stop.
+// ---------------------------------------------------------------------------
+
+/// A real login handoff card: the approval row, the `approval_request` message
+/// built by the **producer's own** props function, and the link between them.
+///
+/// `session_id_as_written` is what the model put in its tool arguments, not what
+/// the card ends up carrying — the difference is the point of the test.
+async fn seed_login_handoff_card(
+    su: &PgPool,
+    fixture: &Fixture,
+    agent: Uuid,
+    run: Uuid,
+    session_id_as_written: &str,
+) -> Uuid {
+    let workspace = fixture.workspace;
+    let channel = fixture.channel;
+    let call = momo_agent::tools::ToolCall {
+        call_id: format!("call_{}", Uuid::new_v4().simple()),
+        name: momo_agent::tools::WORK_SESSION_LOGIN_HANDOFF.to_string(),
+        arguments: json!({
+            "session_id": session_id_as_written,
+            "reason": "배포 콘솔이 2단계 인증을 요구합니다.",
+        }),
+    };
+    let expires_at = momo_agent::default_expires_at(chrono::Utc::now(), momo_agent::DEFAULT_TTL_SECONDS);
+    momo_db::with_tenant_tx(su, workspace, move |conn| {
+        Box::pin(async move {
+            let approval_id = momo_agent::create_pending_approval_in_tx(
+                conn,
+                workspace,
+                momo_agent::NewApproval {
+                    run_id: run,
+                    channel_id: channel,
+                    requested_by: agent,
+                    action_type: momo_agent::tools::ACTION_TYPE_TOOL_CALL.to_string(),
+                    payload: json!({ "tool": call.name }),
+                    expires_at,
+                },
+            )
+            .await?;
+            let card = momo_messaging::send_message_in_tx(
+                conn,
+                workspace,
+                momo_messaging::NewMessage {
+                    channel_id: channel,
+                    author_member_id: agent,
+                    message_type: momo_messaging::MessageType::ApprovalRequest,
+                    body: Some(momo_agent::approval_request_body(&call.name)),
+                    props: momo_agent::approval_request_props(
+                        approval_id,
+                        run,
+                        channel,
+                        momo_agent::tools::ACTION_TYPE_TOOL_CALL,
+                        &call,
+                        "{}",
+                        expires_at,
+                        None,
+                    ),
+                    root_id: None,
+                    reply_to_id: None,
+                    client_msg_id: Some(approval_id),
+                    run_id: Some(run),
+                    hlc_ts: None,
+                    hlc_count: None,
+                },
+            )
+            .await?;
+            momo_agent::attach_request_message_in_tx(conn, workspace, approval_id, card.message.id)
+                .await?;
+            Ok(card.message.id)
+        })
+    })
+    .await
+    .expect("seed the login handoff card")
+}
+
+/// The card's `props`, straight from the row the timeline renders.
+async fn card_props(su: &PgPool, message_id: Uuid) -> Value {
+    sqlx::query_scalar("SELECT props FROM message WHERE id = $1")
+        .bind(message_id)
+        .fetch_one(su)
+        .await
+        .expect("read the card props")
+}
+
+/// Every `message.edited` frame published for one message, oldest first.
+///
+/// Reads the outbox rather than a socket for the reason the whole suite does:
+/// the row IS the publication (invariant #3, REST → PG → outbox → relay), and a
+/// stamp that wrote no row is a stamp no connected client can ever learn about.
+async fn edited_frames(su: &PgPool, workspace: Uuid, message_id: Uuid) -> Vec<Value> {
+    sqlx::query_scalar(
+        "SELECT payload->'data'->'payload' FROM outbox \
+          WHERE workspace_id = $1 \
+            AND payload->'data'->>'type' = 'message.edited' \
+            AND payload->'data'->'payload'->>'id' = $2::text \
+          ORDER BY id",
+    )
+    .bind(workspace)
+    .bind(message_id.to_string())
+    .fetch_all(su)
+    .await
+    .expect("read this card's edited frames")
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn live4_1_the_handoff_card_hears_the_boundary_and_the_join_survives_a_shouted_uuid() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let fixture = seed(&su, &app_pool).await;
+    let notifier_pool = momo_notifier_pool().await;
+    let base = start_server(app_pool).await;
+    let http = reqwest::Client::new();
+    let workspace = fixture.workspace;
+
+    let owner_token = login(&http, &base, workspace, &fixture.owner_email).await;
+    let (host_id, host_seed) = register_host(&http, &base, &owner_token, workspace, true).await;
+    let session =
+        create_session(&http, &base, &owner_token, workspace, fixture.channel, &host_id).await;
+    publish_display(&http, &base, &host_seed, workspace, &host_id, session).await;
+
+    let agent = seed_agent(&su, &fixture, "live4-handoff-intern").await;
+    let run = seed_run(&su, &fixture, agent).await;
+
+    // The model shouted its UUID. Every id-shaped spelling reaches the tool
+    // executor intact (`Uuid::parse_str` takes capitals), so nothing upstream
+    // refuses this card — which is exactly why the card has to normalize.
+    let card = seed_login_handoff_card(
+        &su,
+        &fixture,
+        agent,
+        run,
+        &session.to_string().to_uppercase(),
+    )
+    .await;
+    assert_eq!(
+        card_props(&su, card).await["session_id"],
+        json!(session.to_string()),
+        "the card carries the spelling PostgreSQL renders — the stamp's join is \
+         `props->>'session_id' = uuid::text`, and a capitalized copy matches \
+         nothing forever"
+    );
+
+    // ---- 1. the window opens: 정지 시각, and a frame that says so ------------
+    let response = take_control(&http, &base, &owner_token, workspace, session).await;
+    assert_eq!(response.status(), 200, "the owner takes the keyboard");
+
+    let props = card_props(&su, card).await;
+    let started_at = props["control_started_at_ms"]
+        .as_i64()
+        .expect("정지 시각 landed on the card");
+    assert!(
+        props.get("control_ended_at_ms").is_none(),
+        "the window is still open, and a card must not date a return that has \
+         not happened"
+    );
+
+    let frames = edited_frames(&su, workspace, card).await;
+    assert_eq!(
+        frames.len(),
+        1,
+        "the stamp is a WRITE to a message row, and the only thing an open \
+         timeline hears about a message row is a message frame — #1152's \
+         `message.edited`, reused, not reinvented"
+    );
+    assert_eq!(
+        frames[0]["props"]["control_started_at_ms"],
+        json!(started_at),
+        "and the frame carries the whole props, which is why no client needed a \
+         new consumer"
+    );
+    assert_eq!(
+        frames[0]["props"]["kind"],
+        json!(momo_agent::approval::LOGIN_HANDOFF_PROPS_KIND),
+        "the card is still the card — `||` adds keys and rewrites nothing"
+    );
+    assert!(
+        frames[0].get("edited_at_ms").is_none_or(Value::is_null),
+        "「수정됨」 is a claim that a person revised what they said, and a server \
+         stamping a boundary fact did not (stream_message_body_in_tx's rule)"
+    );
+
+    // ---- 2. the lease lapses: 재개 시각, and a second frame ------------------
+    //
+    // The lapse, deliberately, because it is the close nobody performs: its only
+    // author is the notifier, and a card left uncorrected by it has no other
+    // door. This is also the branch that made the stale card actively lie —
+    // 재개 on a card still showing 「사람이 조작 중」 says 「개입 완료」 about a
+    // window that ended by walking away.
+    lapse_lease(&su, session).await;
+    let stats = momo_notifier::control_window_sweep::sweep_lapsed_control_windows(&notifier_pool, 100)
+        .await
+        .expect("sweep lapsed control windows");
+    assert!(stats.closed >= 1);
+
+    let props = card_props(&su, card).await;
+    // The fixture ages `started_at` to produce a lapse the system can actually
+    // reach (`lapse_lease`), so the stamp re-states the window's CURRENT 정지
+    // 시각 rather than the one the open wrote. What must hold is the shape a
+    // reader depends on: both halves present, and the return after the stop.
+    let stopped_at = props["control_started_at_ms"]
+        .as_i64()
+        .expect("정지 시각 survived the close");
+    let resumed_at = props["control_ended_at_ms"]
+        .as_i64()
+        .expect("재개 시각 landed on the card");
+    assert!(
+        resumed_at > stopped_at,
+        "a card that dates the return before the stop is a card that cannot be \
+         read"
+    );
+    assert_eq!(
+        props["control_end_reason"],
+        json!("expired"),
+        "the reason that is TRUE — a lapse is not a 반환, and the card must not \
+         let a reader assume the sign-in finished"
+    );
+
+    let frames = edited_frames(&su, workspace, card).await;
+    assert_eq!(
+        frames.len(),
+        2,
+        "the sweep composes the three close steps itself, so it has to publish \
+         the card's frame itself too"
+    );
+    assert_eq!(frames[1]["props"]["control_end_reason"], json!("expired"));
+    assert_eq!(
+        frames[1]["seq"], frames[0]["seq"],
+        "a growing card is not new unread messages — the frame reuses the \
+         message's own seq, exactly as every interaction frame does"
+    );
+
+    // ---- 3. the same pending card is taken up AGAIN -------------------------
+    //
+    // A lapse is not an answer: the handoff is still pending, the person comes
+    // back, and the second window is the SAME card's second stop. What the card
+    // must not do is wear both windows at once. `||` alone left the previous
+    // lapse's 재개 시각 and its 사유 sitting under the new 정지 시각, and a card
+    // carrying both is read as closed — 「개입 완료」 about a keyboard somebody is
+    // holding right now, dated before the stop it is paired with.
+    let response = take_control(&http, &base, &owner_token, workspace, session).await;
+    assert_eq!(response.status(), 200, "the owner takes the keyboard again");
+
+    let props = card_props(&su, card).await;
+    let retaken_at = props["control_started_at_ms"]
+        .as_i64()
+        .expect("the second 정지 시각 landed on the card");
+    assert!(
+        retaken_at >= resumed_at,
+        "the card dates the new stop after the return that preceded it"
+    );
+    assert!(
+        props.get("control_ended_at_ms").is_none(),
+        "the window is open again, and the previous lapse's 재개 시각 must not \
+         survive under it — a present control_ended_at_ms IS how every client \
+         decides the window has closed (parseLoginHandoffControl)"
+    );
+    assert!(
+        props.get("control_end_reason").is_none(),
+        "…and neither may its 사유: 「자리 비움으로 종료」 printed over a live \
+         window is the copy of a card that has stopped tracking reality"
+    );
+
+    let frames = edited_frames(&su, workspace, card).await;
+    assert_eq!(
+        frames.len(),
+        3,
+        "the re-open moved the card, so it announced it"
+    );
+    assert!(
+        frames[2]["props"].get("control_ended_at_ms").is_none()
+            && frames[2]["props"].get("control_end_reason").is_none(),
+        "and the frame carries the same card the row does — both clients merge \
+         this props in place, so a stale key here is a stale card there"
+    );
+
+    // Closed again, so the settled-card check below judges the state it always
+    // judged: a card that has told its whole story, stop and return both.
+    lapse_lease(&su, session).await;
+    let stats =
+        momo_notifier::control_window_sweep::sweep_lapsed_control_windows(&notifier_pool, 100)
+            .await
+            .expect("sweep the second lapse");
+    assert!(stats.closed >= 1);
+    assert_eq!(
+        card_props(&su, card).await["control_end_reason"],
+        json!("expired"),
+        "the close writes the end keys back — the delete above is the OPEN \
+         stamp's, not a key this ledger stopped keeping"
+    );
+
+    // ---- 4. a settled card is not rewritten by a later window ---------------
+    sqlx::query(
+        "UPDATE approval \
+            SET status = 'approved', decided_by = $2, decided_at = clock_timestamp() \
+          WHERE request_message_id = $1",
+    )
+    .bind(card)
+    .bind(fixture.owner)
+    .execute(&su)
+    .await
+    .expect("settle the approval");
+    let before = edited_frames(&su, workspace, card).await.len();
+    let response = take_control(&http, &base, &owner_token, workspace, session).await;
+    assert_eq!(response.status(), 200);
+    assert_eq!(
+        card_props(&su, card).await["control_end_reason"],
+        json!("expired"),
+        "a settled handoff has told its story; a second window on the same \
+         session must not rewrite it"
+    );
+    assert_eq!(
+        edited_frames(&su, workspace, card).await.len(),
+        before,
+        "and a card that did not move is a card with nothing to announce"
     );
 }

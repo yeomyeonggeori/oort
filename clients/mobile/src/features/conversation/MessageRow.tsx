@@ -84,6 +84,15 @@ import {
   approvalCardNote,
   type ApprovalNoteTone,
 } from '@momo/core/features/timeline/approvalNote';
+import {
+  LOGIN_HANDOFF_ELSEWHERE_COPY,
+  LOGIN_HANDOFF_IN_CONTROL_LEAD,
+  loginHandoffOutcomeDetail,
+  loginHandoffStatusLabel,
+  loginHandoffStoppedCopy,
+  loginHandoffWaitingCopy,
+  type LoginHandoffCard,
+} from '@momo/core/features/timeline/loginHandoffCard';
 import {QuoteBlock, quoteAccessibilityPhrase} from './Quote';
 import {useLongPress} from './useLongPress';
 
@@ -616,6 +625,126 @@ const buildApprovalNoteStyle = (
   guidance: {color: color.textMuted, fontWeight: '400'},
 });
 
+/** 시각 한 자리. 폰의 다른 시각 표기와 같은 24시간 두 자리다. */
+function handoffClock(atMs: number): string {
+  const at = new Date(atMs);
+  return `${String(at.getHours()).padStart(2, '0')}:${String(
+    at.getMinutes(),
+  ).padStart(2, '0')}`;
+}
+
+/**
+ * 로그인 핸드오프 카드 — **폰 판** (LIVE-4).
+ *
+ * 웹과 같은 카드를 그리되 결정 컨트롤이 없다. 이유는 이 배치의 계약이고
+ * (핸드오프 패킷 §1-1: 폰은 카드 표시 + 안내), 그 계약의 근거는 이 카드가
+ * 사람에게 시키는 일이 **화면을 직접 조작하는 것**이라는 데 있다. 폰에는 그
+ * 화면이 없고, 앞으로도 여기서 열지 않는다 — attach 내부(capability·endpoint·
+ * RTCPeerConnection)는 폰에 들이지 않는다는 가드가 이미 서 있고
+ * (`__tests__/workConsole.test.tsx`), 그 가드가 지키는 것이 정확히 이 자리다.
+ *
+ * 그래서 여기 없는 것이 셋이다: 재개·중단 버튼, 화면 여는 문, 그리고 그 셋을
+ * 흉내 내는 비활성 컨트롤. 대신 **어디서 할 수 있는지 한 문장**이 선다. 이
+ * 레포의 규율 그대로다 — 없는 방으로 가는 문은 버튼이 아니라 문장이다.
+ *
+ * 진행 상황은 전부 그린다. 폰에서 결정할 수 없다는 것이 폰에서 **알 수 없다**는
+ * 뜻은 아니고, 알림을 받고 잠금화면에서 열어 본 사람이 가장 먼저 묻는 것이
+ * 「지금 무슨 상태인가」이기 때문이다.
+ */
+function LoginHandoffCardView({
+  card,
+  styles,
+  noteStyle,
+}: {
+  card: LoginHandoffCard;
+  styles: ReturnType<typeof buildStyles>;
+  noteStyle: ReturnType<typeof buildApprovalNoteStyle>;
+}): React.JSX.Element {
+  const settled = card.phase !== 'waiting';
+  const underControl = card.control !== null && card.control.endedAtMs === null;
+  return (
+    <View style={styles.card} testID="agent-card">
+      <View style={styles.cardHead}>
+        <Text style={styles.cardTitle} numberOfLines={2}>
+          {card.title}
+        </Text>
+        {/* 칩 색이 국면이 아니라 결과를 따르는 것은 웹과 같다. 폰의 팔레트에는
+            `ok`·`warn`·`muted` 셋뿐이라 그 셋으로 옮긴다: 개입 완료는 `ok`,
+            완료 불확실은 `warn`(사고가 아니라 불확실이므로 danger 가 아니다),
+            세션 종료와 중단은 조용한 종결이라 `muted`. */}
+        <StatusChip
+          label={loginHandoffStatusLabel(card)}
+          tone={
+            card.outcome === 'returned'
+              ? 'ok'
+              : card.outcome === 'expired' || card.phase === 'waiting'
+                ? 'warn'
+                : 'muted'
+          }
+        />
+      </View>
+      {card.reason ? (
+        <Text style={styles.cardBody}>{card.reason}</Text>
+      ) : null}
+      {!settled ? (
+        // 창이 닫혔는데 아직 대기인 갈래에서 한 문장이 더 붙는다 (freeze M1).
+        // 폰은 결정 동선이 없으므로 이 줄이 이 화면에서 창의 상태를 말하는
+        // 유일한 자리다 — 조건도 문장도 코어가 답한다.
+        <Text style={styles.cardBody}>{loginHandoffWaitingCopy(card)}</Text>
+      ) : null}
+      {card.control !== null ? (
+        <Text style={styles.cardMeta} testID="card-handoff-boundary">
+          {[
+            `정지 ${handoffClock(card.control.startedAtMs)}`,
+            card.control.endedAtMs !== null
+              ? `재개 ${handoffClock(card.control.endedAtMs)}`
+              : null,
+          ]
+            .filter(Boolean)
+            .join(' · ')}
+        </Text>
+      ) : null}
+      {underControl ? (
+        // 코어의 **사실 한 문장**만 든다. 전문의 둘째 문장(「여기서 재개하거나
+        // 중단할 수 있습니다」)은 결정 동선이 있는 표면에서만 참이라 이 화면에서
+        // 거짓이고, 그렇다고 손으로 베끼면 같은 낱말이 두 곳에서 늙는다 —
+        // 자를 곳을 코어가 정한다 (design-review M1).
+        <Text
+          style={[styles.cardNote, noteStyle.blocked]}
+          testID="card-handoff-in-control">
+          {LOGIN_HANDOFF_IN_CONTROL_LEAD}
+        </Text>
+      ) : null}
+      {card.outcome !== null ? (
+        // 표를 그대로 인덱싱하지 않는다 (freeze M2). 창 없이 `returned` 인
+        // 카드에서 「화면을 돌려주었습니다」는 실행기가 모델에게 하는 말과
+        // 어긋난다.
+        <Text style={styles.cardNote} testID="card-handoff-outcome">
+          {loginHandoffOutcomeDetail(card)}
+        </Text>
+      ) : null}
+      {card.phase === 'stopped' ? (
+        // 문장도 조건도 코어가 답한다 (design-review H2·M1). 창이 있었던
+        // stopped 카드에서 「개입은 시작되지 않았습니다」는 바로 윗줄의 경계 행
+        // (정지 시각)과 모순된다.
+        <Text style={styles.cardNote} testID="card-handoff-stopped">
+          {loginHandoffStoppedCopy(card)}
+        </Text>
+      ) : null}
+      {/* 안내는 **대기 중일 때만** 선다. 끝난 카드에 「데스크톱에서 하세요」를
+          붙이면 할 일이 없는데 가라고 하는 셈이고, 그것이 `approvalNote` 가
+          settled 를 먼저 거르는 이유와 정확히 같은 거짓말이다. */}
+      {!settled ? (
+        <Text
+          style={[styles.cardNote, noteStyle.guidance]}
+          testID="card-handoff-elsewhere">
+          {LOGIN_HANDOFF_ELSEWHERE_COPY}
+        </Text>
+      ) : null}
+    </View>
+  );
+}
+
 function AgentCard({
   card,
   approvalGates,
@@ -751,6 +880,16 @@ function AgentCard({
           />
         ) : null}
       </View>
+    );
+  }
+
+  if (card.kind === 'login_handoff') {
+    return (
+      <LoginHandoffCardView
+        card={card}
+        styles={styles}
+        noteStyle={approvalNoteStyle}
+      />
     );
   }
 

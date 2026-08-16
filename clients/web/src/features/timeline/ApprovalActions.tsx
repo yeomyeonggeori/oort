@@ -112,6 +112,36 @@ export function spawnApproveConfirmCopy(
  */
 export const REJECT_CONFIRM = "거부하면 대기 중인 실행이 취소됩니다.";
 
+/**
+ * 결정이 스스로를 부르는 이름 (LIVE-4).
+ *
+ * 이 파일 머리말이 세운 규칙 — *"the only thing that varies is the sentence in
+ * front of the buttons"* — 을 낱말까지 넓힌 것이다. 로그인 핸드오프 카드는 같은
+ * 승인 원장에 같은 REST 로 결정하면서 「재개/중단」이라고 부른다. 그것을 위해
+ * 두 번째 결정 컨트롤을 짓는 것이야말로 이 파일이 존재하는 이유에 반한다:
+ * 멱등 정책이 둘, 확인 규칙이 둘, 409 문장이 둘이 되고, 보지 않는 쪽이 낡는다.
+ *
+ * 그래서 갈라지는 것은 여섯 낱말뿐이고, **판정은 하나도 갈라지지 않는다**.
+ */
+export interface DecisionVerbs {
+  approve: string;
+  reject: string;
+  approveCommit: string;
+  rejectCommit: string;
+  /** `null`이면 기존 승인 문장(가역성·호스트 조건절)을 그대로 쓴다. */
+  approveConfirm: string | null;
+  rejectConfirm: string;
+}
+
+const APPROVAL_VERBS: DecisionVerbs = {
+  approve: "승인",
+  reject: "거부",
+  approveCommit: "승인 확정",
+  rejectCommit: "거부 확정",
+  approveConfirm: null,
+  rejectConfirm: REJECT_CONFIRM,
+};
+
 export function ApprovalActions({
   approvalId,
   armed,
@@ -122,6 +152,7 @@ export function ApprovalActions({
   testIdPrefix = "approval",
   reversible = true,
   execution = null,
+  verbs = APPROVAL_VERBS,
 }: {
   approvalId: string;
   armed: Armed;
@@ -154,6 +185,11 @@ export function ApprovalActions({
    * 세 번째 표면(폰)이 같은 계약을 다시 지어야 하는 것도 그때부터다.
    */
   execution?: SpawnExecutionPlan | null;
+  /**
+   * 이 결정을 무엇이라 부르는가. 기본은 승인/거부이고, 로그인 핸드오프 카드만
+   * 재개/중단으로 바꿔 든다 — 낱말만이고 계약은 그대로다(`DecisionVerbs`).
+   */
+  verbs?: DecisionVerbs;
 }) {
   // workspaceId comes from session context rather than a prop chain: both
   // callers sit several components below the shell.
@@ -332,7 +368,7 @@ export function ApprovalActions({
               data-testid={`${testIdPrefix}-reject`}
               onClick={() => arm("reject")}
             >
-              거부
+              {verbs.reject}
             </Button>
             {/* ## 막힌 승인은 **모양을 바꾸지 투명해지지 않는다** (design-review H1)
                 
@@ -362,7 +398,7 @@ export function ApprovalActions({
               data-testid={`${testIdPrefix}-approve`}
               onClick={() => arm("approve")}
             >
-              승인
+              {verbs.approve}
             </Button>
           </span>
         </div>
@@ -373,10 +409,11 @@ export function ApprovalActions({
         >
           <span className="text-meta text-ink">
             {armed === "approve"
-              ? execution === null
-                ? approveConfirmCopy(reversible)
-                : spawnApproveConfirmCopy(chosenHostName, reversible)
-              : REJECT_CONFIRM}
+              ? (verbs.approveConfirm ??
+                (execution === null
+                  ? approveConfirmCopy(reversible)
+                  : spawnApproveConfirmCopy(chosenHostName, reversible)))
+              : verbs.rejectConfirm}
           </span>
           <span className="flex shrink-0 items-center gap-2">
             <Button
@@ -406,8 +443,8 @@ export function ApprovalActions({
               {busy
                 ? "보내는 중"
                 : armed === "approve"
-                  ? "승인 확정"
-                  : "거부 확정"}
+                  ? verbs.approveCommit
+                  : verbs.rejectCommit}
             </Button>
           </span>
         </div>

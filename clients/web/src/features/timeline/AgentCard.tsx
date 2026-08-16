@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Check, ShieldQuestion, Terminal, Zap } from "lucide-react";
+import { Check, KeyRound, ShieldQuestion, Terminal, Zap } from "lucide-react";
+import { Button } from "@/design/ui/button";
 import { cn } from "@/design/lib/cn";
 import { useOffline } from "@/features/common/useOffline";
 import { memberFor, type Directory } from "@/features/workspace/useWorkspace";
@@ -26,8 +27,18 @@ import {
   type ApprovalStatus,
   type PayloadDetail,
 } from "@momo/core/features/timeline/agentCardModel";
+import {
+  LOGIN_HANDOFF_DECISION,
+  LOGIN_HANDOFF_DEPLOYMENT_COPY,
+  loginHandoffNote,
+  loginHandoffOutcomeDetail,
+  loginHandoffStoppedCopy,
+  loginHandoffWaitingCopy,
+  type LoginHandoffCard,
+  type LoginHandoffNote,
+} from "@momo/core/features/timeline/loginHandoffCard";
 import { spawnHostGate } from "@momo/core/features/timeline/spawnHostChoice";
-import { ApprovalChip, StreamCaret, TurnChip } from "./StatusChip";
+import { ApprovalChip, LoginHandoffChip, StreamCaret, TurnChip } from "./StatusChip";
 import { ApprovalActions, type Armed } from "./ApprovalActions";
 import { FoldedValue } from "./FoldToggle";
 import {
@@ -192,12 +203,23 @@ const RESUME_OFFER_COPY =
  * 하는 것은 그 줄 하나이고, 나머지 둘은 화면에 서 있는 조건이지 방금 일어난 일이
  * 아니다.
  */
-function ApprovalNoteLine({ note }: { note: ApprovalCardNote }) {
+function ApprovalNoteLine({
+  note,
+  testIdPrefix = "approval-note",
+}: {
+  note: ApprovalCardNote | LoginHandoffNote;
+  /**
+   * 로그인 핸드오프 카드가 같은 격 체계를 쓰되 자기 이름으로 지목되게 한다.
+   * 한 타임라인에 두 카드가 함께 서 있을 때 훅 하나가 두 요소에 답하면 안 된다
+   * (`ApprovalActions`의 `testIdPrefix`와 같은 이유).
+   */
+  testIdPrefix?: string;
+}) {
   const receipt = note.tone === "receipt";
   return (
     <p
       role={receipt ? "status" : undefined}
-      data-testid={`approval-note-${note.kind}`}
+      data-testid={`${testIdPrefix}-${note.kind}`}
       data-tone={note.tone}
       className={cn(
         "border-t border-line px-3 py-2",
@@ -341,6 +363,214 @@ function ApprovalBody({
               card.approvalId
                 ? `원장 #${ledgerHandle(card.approvalId)}`
                 : null,
+            ]
+              .filter((part): part is string => Boolean(part))
+              .join(" · ")}
+          </span>
+        </LabeledRow>
+      )}
+    </CardFrame>
+  );
+}
+
+/**
+ * 로그인 핸드오프 카드 (LIVE-4 / ADR-0004 증보 3).
+ *
+ * 승인 카드와 **같은 뼈대**를 쓴다: 같은 `CardFrame`, 같은 y/n 키 경로, 같은
+ * 결정 컨트롤(`ApprovalActions`, 낱말만 재개/중단). 판정은 전부 코어가 지고
+ * 이 파일은 옷만 입힌다.
+ *
+ * ## 어포던스 부재 원칙
+ *
+ * 이 빌드에는 채팅에서 화면을 여는 버튼이 없다. 그래서 그 자리에 **비활성
+ * 버튼을 세우지 않고** 문장 하나만 둔다(`LOGIN_HANDOFF_DEPLOYMENT_COPY`).
+ * 영원히 눌리지 않는 버튼은 사람에게 「내가 뭘 잘못했나」를 묻게 하고, 그것은
+ * 화면이 거짓을 말하는 가장 조용한 형태다. 대신 실제로 있는 문 하나 — 작업 세션
+ * 상세 — 는 진짜 버튼으로 서고, 그 세션 화면은 세션 상세가 그린다.
+ */
+function LoginHandoffBody({
+  card,
+  directory,
+  onOpenWorkSession,
+}: {
+  card: LoginHandoffCard;
+  directory: Directory;
+  onOpenWorkSession?: (sessionId: string) => void;
+}) {
+  const [local, setLocal] = useState<{
+    status: ApprovalStatus;
+    decidedAtMs?: number;
+    decidedByMemberId?: string;
+    note?: string;
+  } | null>(null);
+  const [armed, setArmed] = useState<Armed>(null);
+  const approvalsProvided = isSurfaceProvided("approvals");
+  const offline = useOffline();
+
+  // 로컬 영수증이 스냅샷보다 새로울 수 있는 것은 승인 카드와 같다. 다만 국면은
+  // 코어가 정했으므로, 여기서는 **아직 대기인가**만 로컬로 뒤집는다.
+  const settled = local !== null || card.phase !== "waiting";
+  const underControl =
+    card.control !== null && card.control.endedAtMs === null;
+  const decidedById = local?.decidedByMemberId ?? card.decidedByMemberId;
+  const decidedAtMs = local?.decidedAtMs ?? card.decidedAtMs;
+  const decidedBy = decidedById ? memberFor(directory, decidedById) : null;
+
+  // note 슬롯에 설 수 있는 두 조각. 이름을 붙여 두는 이유는 래퍼가 이 둘의 합을
+  // 조건으로 져야 하기 때문이다 (아래 `note=`).
+  const showDeployment = !settled;
+  const showOpenSession =
+    card.sessionId !== null && onOpenWorkSession !== undefined;
+
+  const note = loginHandoffNote({
+    receiptNote: local?.note ?? null,
+    hasTarget: card.approvalId !== null,
+    settled,
+    underControl,
+    decidableHere: true,
+    offline,
+    approvalsProvided,
+    unsupportedText: `${serverSurface("approvals").absentReason} ${
+      serverSurface("approvals").fallback
+    }`,
+  });
+
+  return (
+    <CardFrame
+      icon={<KeyRound className="size-4" aria-hidden="true" />}
+      title={card.title}
+      chip={<LoginHandoffChip card={card} />}
+      status={card.outcome ?? card.phase}
+      kind="login_handoff"
+      keyboard={note === null && !settled}
+      onApprove={() => setArmed("approve")}
+      onReject={() => setArmed("reject")}
+      detail={card.detail}
+      // 슬롯 **자체가** 조건을 진다 (design-review L1). 안의 두 조각이 모두
+      // 조건부인데 래퍼만 무조건이면, 끝난 카드에 세션 딥링크까지 없을 때
+      // `border-t` 와 `py-2` 만 남아 아무것도 말하지 않는 띠가 선다 — 카드에
+      // 한 줄이 더 있다고 읽히는데 읽을 것이 없다.
+      note={
+        showDeployment || showOpenSession ? (
+          <div className="border-t border-line px-3 py-2">
+            {showDeployment && (
+              <p
+                className="text-meta text-ink-muted"
+                data-testid="handoff-deployment"
+              >
+                {LOGIN_HANDOFF_DEPLOYMENT_COPY}
+              </p>
+            )}
+            {showOpenSession && (
+              // 수제 컨트롤이었다 (design-review H1): 경계가 `--line` 이라
+              // surface 위 1.32/1.43:1 로 WCAG 1.4.11 의 3:1 에 못 미쳤다.
+              // `outline` 변형이 같은 모양으로 `--line-strong`(3.59/3.56:1)을
+              // 들고 있고, 프리미티브에 없어서 남긴 것은 위 여백 하나뿐이다.
+              <Button
+                variant="outline"
+                size="sm"
+                className="mt-2"
+                data-testid="handoff-open-session"
+                onClick={() => onOpenWorkSession?.(card.sessionId!)}
+              >
+                작업 세션 열기
+              </Button>
+            )}
+          </div>
+        ) : null
+      }
+      footer={
+        note !== null ? (
+          <ApprovalNoteLine note={note} testIdPrefix="handoff-note" />
+        ) : card.approvalId !== null && !settled ? (
+          <ApprovalActions
+            approvalId={card.approvalId}
+            className="border-t border-line"
+            armed={armed}
+            setArmed={setArmed}
+            testIdPrefix="handoff"
+            lead={LOGIN_HANDOFF_DECISION.lead}
+            verbs={{
+              approve: LOGIN_HANDOFF_DECISION.resume,
+              reject: LOGIN_HANDOFF_DECISION.stop,
+              approveCommit: LOGIN_HANDOFF_DECISION.resumeCommit,
+              rejectCommit: LOGIN_HANDOFF_DECISION.stopCommit,
+              approveConfirm: LOGIN_HANDOFF_DECISION.resumeConfirm,
+              rejectConfirm: LOGIN_HANDOFF_DECISION.stopConfirm,
+            }}
+            onSettled={(outcome) => {
+              const next: {
+                status: ApprovalStatus;
+                decidedAtMs?: number;
+                decidedByMemberId?: string;
+                note?: string;
+              } = { status: outcome.status ?? "pending" };
+              if (outcome.decidedAtMs !== undefined) {
+                next.decidedAtMs = outcome.decidedAtMs;
+              }
+              if (outcome.decidedByMemberId !== undefined) {
+                next.decidedByMemberId = outcome.decidedByMemberId;
+              }
+              next.note = decisionNote(outcome).text;
+              setLocal(next);
+            }}
+          />
+        ) : null
+      }
+    >
+      {card.reason && <LabeledRow label="사유">{card.reason}</LabeledRow>}
+      {!settled && (
+        <LabeledRow label="상태" testId="handoff-waiting">
+          {/* 창이 이미 닫혔는데 아직 대기인 갈래에서 한 문장이 더 붙는다
+              (freeze M1). 국면은 승인 원장의 것이라 뒤집지 않고, 화면이
+              「지금도 조작 중」이라고 읽히는 것만 막는다. 문장도 조건도
+              코어가 답한다. */}
+          {loginHandoffWaitingCopy(card)}
+        </LabeledRow>
+      )}
+      {/* 경계 사실. 증보 3 D3이 에이전트에게 허락한 것과 같은 것만 그린다 —
+          정지 시각, 재개 시각, 그리고 어떻게 끝났는지. 프레임도 키도 여기 없고,
+          담을 칸조차 없다는 것이 이 세 행의 뜻이다. */}
+      {card.control !== null && (
+        <LabeledRow label="정지" testId="handoff-control-started">
+          <span data-numeric>{timeLabel(card.control.startedAtMs)}</span>
+        </LabeledRow>
+      )}
+      {card.control?.endedAtMs != null && (
+        <LabeledRow label="재개" testId="handoff-control-ended">
+          <span data-numeric>{timeLabel(card.control.endedAtMs)}</span>
+        </LabeledRow>
+      )}
+      {/* 「지금 누가 잡고 있다」는 행이 여기 있었고, 지웠다.
+          컨트롤 자리에 서는 `in-control` 줄이 같은 사실을 이미 말하고,
+          거기에 **다음에 무엇을 하면 되는지**까지 붙는다. 한 카드가 같은
+          사실을 두 번 말하면 읽는 사람은 두 가지가 일어났다고 읽는다. */}
+      {card.outcome !== null && (
+        <LabeledRow label="결과" testId="handoff-outcome">
+          {/* 표를 그대로 인덱싱하지 않는다 (freeze M2): 창 없이 `returned` 인
+              카드는 「화면을 돌려주었습니다」라고 말할 수 없다 — 이 배포에서는
+              아무도 잡은 적이 없고, 실행기가 모델에게 하는 말도 그렇다. */}
+          {loginHandoffOutcomeDetail(card)}
+        </LabeledRow>
+      )}
+      {card.phase === "stopped" && (
+        <LabeledRow label="결과" testId="handoff-stopped">
+          {/* 「실패」가 아니다. 사람이 멈춘 것은 사고가 아니므로 danger를 입지
+              않는다 (ADR-0132의 규칙, 침묵과 같은 계열).
+
+              문장도 조건도 코어가 답한다 (design-review H2·M1). 앞 판은 두
+              문장을 인라인으로 붙여 두었고, 그래서 창이 있었던 stopped 카드에서
+              바로 윗줄의 「정지」 행과 모순됐다. */}
+          {loginHandoffStoppedCopy(card)}
+        </LabeledRow>
+      )}
+      {settled && (decidedBy || decidedAtMs !== undefined) && (
+        <LabeledRow label="결정" testId="handoff-ledger">
+          <span data-numeric>
+            {[
+              decidedBy?.displayName,
+              decidedAtMs !== undefined ? timeLabel(decidedAtMs) : null,
+              card.approvalId ? `원장 #${ledgerHandle(card.approvalId)}` : null,
             ]
               .filter((part): part is string => Boolean(part))
               .join(" · ")}
@@ -560,12 +790,27 @@ function CardFrame({
 export function AgentCard({
   card,
   directory,
+  onOpenWorkSession,
 }: {
   card: AgentCardModel;
   directory: Directory;
+  /**
+   * 작업 세션 상세로 가는 문. 로그인 핸드오프 카드만 쓴다. 없으면 딥링크 자체가
+   * 그려지지 않는다 — 없는 방으로 가는 문을 그리지 않는다는 이 레포의 규율.
+   */
+  onOpenWorkSession?: (sessionId: string) => void;
 }) {
   if (card.kind === "approval") {
     return <ApprovalBody card={card} directory={directory} />;
+  }
+  if (card.kind === "login_handoff") {
+    return (
+      <LoginHandoffBody
+        card={card}
+        directory={directory}
+        {...(onOpenWorkSession !== undefined ? { onOpenWorkSession } : {})}
+      />
+    );
   }
   if (card.kind === "tool") return <ToolBody card={card} />;
   return <TurnBody card={card} />;
