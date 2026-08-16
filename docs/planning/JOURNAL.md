@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-08-16 (Fable) · 성재 대량 결재 집행 — 서버 2대 실발주·문서 플러시 머지·병렬 전환
+- **성재 결재(2026-08-16)**: ①서버 발주=Fable 직접 집행·트래킹 ②라이브 배포=Fable 집행 ③문서 커밋 ④Grok Bot 검증 진행(SuperGrok 구독·로그인 확인 — #1344/#1361 게이트 해제) ⑤**병렬 허용**("현재 작업이랑 병렬이나 이후 알아서").
+- **발주 집행 완료(NCP API 실생성·SSH 실증)**: **momo-cube-host** 101.79.18.230(s8-g3 8vCPU/32GB·Rocky 9.8·300GB XFS·**nested virt 실측 확정**·ACG 22[운영자IP]+8443) · **momo-turn** 223.130.142.109(s2-g3·ACG 3478+relay 레인지). 신규 로그인키 momo-oort-prod(`~/.ncp/` 보관). **월 고정 ≈₩477k**(cube 시간제 — 정지 운영 시 ₩38.6k)·**관전 1시간 트래픽 ≈₩45**(아웃바운드 ₩100/GB — ADR-0164 과금 실단가 입력). 기존 자원 무접촉 검증.
+- **프로덕션 서버 정체 확인**: 배포 대상 = momo-t3-smoke(101.79.11.189 — 런북 ncp-rust-deploy.md)이며 오늘 복구한 접근 그대로 유효 → 배포는 위생 꼬리 랜딩 후 최신 HEAD로 집행 예정.
+- **문서 플러시 머지**: PR #1433 → main@250f7507(보호 브랜치라 PR 경유 — 직push 불가 실측). **설치 파도 발사**: #1434(INFRA-A cube 설치+display 템플릿+프록시)·#1435(INFRA-B coturn) 병렬 2기, 패킷 `handoffs/2026-08-16-infra-install-wave-packet.md`. #1421 랜딩(`199d90eb`·design H1 주석 수리·M1=#1431). #1422 비행 중.
+
 ## 2026-08-16 (Fable) · LIVE-4 랜딩 — 로그인 핸드오프 카드 축·폐곡선 5회전
 - **LIVE-4(#1428) 랜딩**: PR #1430 squash → `track/engine@19455d54`(커밋 4). **핵심 실증 2**: ①승인 hold 재사용 성립 — MessageType·마이그 발명 0, props.kind 분기+기존 park/requeue 폐곡선(인터뷰의 1순위 탐사 지시가 적중) ②경계 스탬프는 기존 message.edited 계약 재사용 — **클라 변경 0**(단일 쓰기경로 불변식의 존재 이유 실증). HumanIsTheAction=면제 분기 밖.
 - **폐곡선 5회전**: Fable → design-review FAIL(H2: 수제 버튼 1.3:1·stopped 자기모순)→회전(칩 가림 3914px² red 실측 포함) → grok freeze **C0/H2/M2**(타임라인 카드 경계 이벤트 난청=단일 쓰기경로 위반 겸·uuid 정규화·pending 창 축·returned 모순)→회전 → 재-freeze **M1**(재개봉 스탬프 잔존 키)→마이크로 수리(`jsonb - text` 의미론 문서화)→소진. **grok 실경계 적발 누계 5건**(이 파도).
