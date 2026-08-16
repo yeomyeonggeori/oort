@@ -38,7 +38,7 @@
 //! | `live3_7_a_control_window_parks_the_run_it_stops_and_four_doors_resume_it` | drop the park from `issue_in_tx`, drop the resume from `emit_control_closed_in_tx`, delete the notifier's lapse sweep, resume a run a second window still holds, park a run parked on an approval, or let a close resurrect a cancelled run |
 //! | `live3_8_a_window_opening_elsewhere_outlasts_a_return_that_races_it` | drop the run-row lock from either half of the park/resume pair, or narrow the park's lock to the rows it intends to update |
 //! | `live3_9_two_closes_at_once_still_leave_exactly_one_resume` | drop the run-row lock from the resume, or take it before the caller's own window close instead of after |
-//! | `live4_1_the_handoff_card_hears_the_boundary_and_the_join_survives_a_shouted_uuid` | drop the `message.edited` publish that follows the card stamp (in the route or in the notifier's sweep), put the model's raw `session_id` into `props` instead of the canonical one, or let a settled handoff be rewritten by a later window |
+//! | `live4_1_the_handoff_card_hears_the_boundary_and_the_join_survives_a_shouted_uuid` | drop the `message.edited` publish that follows the card stamp (in the route or in the notifier's sweep), put the model's raw `session_id` into `props` instead of the canonical one, let the open stamp merge over the previous lapse's end keys instead of deleting them, or let a settled handoff be rewritten by a later window |
 //!
 //! ### The mutation proof (ADR-0004 증보 3's own acceptance criterion)
 //!
@@ -3772,11 +3772,12 @@ async fn live3_9_two_closes_at_once_still_leave_exactly_one_resume() {
 }
 
 // ---------------------------------------------------------------------------
-// LIVE-4 — the login handoff card, and the two ways it used to go stale (freeze)
+// LIVE-4 — the login handoff card, and the three ways it used to go stale
+//          (freeze, and the re-freeze that followed it)
 //
 // | test | revert that makes it red |
 // |---|---|
-// | `live4_1_the_handoff_card_hears_the_boundary_and_the_join_survives_a_shouted_uuid` | drop the `message.edited` publish from `stamp_handoff_cards_in_tx` (or from the notifier's sweep), or put the model's raw `session_id` back into `props` instead of the canonical one |
+// | `live4_1_the_handoff_card_hears_the_boundary_and_the_join_survives_a_shouted_uuid` | drop the `message.edited` publish from `stamp_handoff_cards_in_tx` (or from the notifier's sweep), put the model's raw `session_id` back into `props` instead of the canonical one, or drop the end-key delete from the open stamp's merge |
 //
 // Both halves are about the same card and both were silent failures. The stamp
 // wrote `props` with no envelope, so an OPEN timeline never heard it: the card
@@ -3786,6 +3787,11 @@ async fn live3_9_two_closes_at_once_still_leave_exactly_one_resume() {
 // a model that wrote its UUID in capitals produced a card the stamp could never
 // find at all, which made the first failure permanent rather than merely
 // temporary.
+//
+// The third is the same card told to hold two windows. `props || facts` adds and
+// never removes, so a pending handoff that lapsed and was taken up again wore
+// the new 정지 시각 over the old 재개 시각 — a live window rendered closed, with
+// its return dated before its stop.
 // ---------------------------------------------------------------------------
 
 /// A real login handoff card: the approval row, the `approval_request` message
@@ -4020,7 +4026,66 @@ async fn live4_1_the_handoff_card_hears_the_boundary_and_the_join_survives_a_sho
          message's own seq, exactly as every interaction frame does"
     );
 
-    // ---- 3. a settled card is not rewritten by a later window ---------------
+    // ---- 3. the same pending card is taken up AGAIN -------------------------
+    //
+    // A lapse is not an answer: the handoff is still pending, the person comes
+    // back, and the second window is the SAME card's second stop. What the card
+    // must not do is wear both windows at once. `||` alone left the previous
+    // lapse's 재개 시각 and its 사유 sitting under the new 정지 시각, and a card
+    // carrying both is read as closed — 「개입 완료」 about a keyboard somebody is
+    // holding right now, dated before the stop it is paired with.
+    let response = take_control(&http, &base, &owner_token, workspace, session).await;
+    assert_eq!(response.status(), 200, "the owner takes the keyboard again");
+
+    let props = card_props(&su, card).await;
+    let retaken_at = props["control_started_at_ms"]
+        .as_i64()
+        .expect("the second 정지 시각 landed on the card");
+    assert!(
+        retaken_at >= resumed_at,
+        "the card dates the new stop after the return that preceded it"
+    );
+    assert!(
+        props.get("control_ended_at_ms").is_none(),
+        "the window is open again, and the previous lapse's 재개 시각 must not \
+         survive under it — a present control_ended_at_ms IS how every client \
+         decides the window has closed (parseLoginHandoffControl)"
+    );
+    assert!(
+        props.get("control_end_reason").is_none(),
+        "…and neither may its 사유: 「자리 비움으로 종료」 printed over a live \
+         window is the copy of a card that has stopped tracking reality"
+    );
+
+    let frames = edited_frames(&su, workspace, card).await;
+    assert_eq!(
+        frames.len(),
+        3,
+        "the re-open moved the card, so it announced it"
+    );
+    assert!(
+        frames[2]["props"].get("control_ended_at_ms").is_none()
+            && frames[2]["props"].get("control_end_reason").is_none(),
+        "and the frame carries the same card the row does — both clients merge \
+         this props in place, so a stale key here is a stale card there"
+    );
+
+    // Closed again, so the settled-card check below judges the state it always
+    // judged: a card that has told its whole story, stop and return both.
+    lapse_lease(&su, session).await;
+    let stats =
+        momo_notifier::control_window_sweep::sweep_lapsed_control_windows(&notifier_pool, 100)
+            .await
+            .expect("sweep the second lapse");
+    assert!(stats.closed >= 1);
+    assert_eq!(
+        card_props(&su, card).await["control_end_reason"],
+        json!("expired"),
+        "the close writes the end keys back — the delete above is the OPEN \
+         stamp's, not a key this ledger stopped keeping"
+    );
+
+    // ---- 4. a settled card is not rewritten by a later window ---------------
     sqlx::query(
         "UPDATE approval \
             SET status = 'approved', decided_by = $2, decided_at = clock_timestamp() \

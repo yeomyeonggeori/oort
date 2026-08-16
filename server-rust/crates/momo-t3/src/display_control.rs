@@ -562,8 +562,31 @@ impl StampedHandoffCards {
 /// only rows whose `props.kind` is the caller's discriminator, and only rows
 /// whose approval is **still pending** — a settled handoff has already told its
 /// story and must not be rewritten by a later window on the same session. The
-/// `props ||` merge adds keys and touches nothing else; body, seq, author and
-/// every other prop are untouched.
+/// `props` merge touches the `control_*` keys and nothing else; body, seq,
+/// author and every other prop are untouched.
+///
+/// ## Why the merge deletes before it adds
+///
+/// The `control_*` keys describe **one** window — the one being stamped — so the
+/// card must end up saying exactly that window and nothing else. A pending
+/// handoff can be lapsed and then taken up again, and a plain `||` from that
+/// re-open would lay a fresh `control_started_at_ms` over the previous lapse's
+/// `control_ended_at_ms`/`control_end_reason`: an open window drawn as a closed
+/// one, 「개입 완료」 about a keyboard somebody is still holding, dating the return
+/// *before* the stop it is paired with. The reader is not lenient about this and
+/// should not be — `parseLoginHandoffControl` takes a present
+/// `control_ended_at_ms` as the window having ended.
+///
+/// The removal is `jsonb - text`, which deletes the key **and** its value.
+/// Merging a JSON `null` would not do: `{"k": null}` is a key that is *present*,
+/// `?` answers true for it, and a reader that distinguishes absence from null
+/// still sees it. A window that has not ended has no end, so absence is what
+/// gets written.
+///
+/// Unconditional, because it costs the closing stamp nothing: a closed window
+/// carries both keys in `facts` (076's `..._end_pair_ck` makes `ended_at` and
+/// `end_reason` inseparable, and `..._end_reason_ck` keeps the label decodable),
+/// and `||` re-adds them in the same expression. Only the open stamp moves.
 ///
 /// Takes the props kind as a `&str` for the same reason
 /// [`control_window_payload`] takes the channel as one: the vocabulary belongs
@@ -593,7 +616,8 @@ pub async fn stamp_control_window_on_cards_in_tx(
     }
     let ids: Vec<Uuid> = sqlx::query_scalar(
         "UPDATE message m \
-            SET props = m.props || $4::jsonb \
+            SET props = (m.props - 'control_ended_at_ms' - 'control_end_reason') \
+                        || $4::jsonb \
           WHERE m.workspace_id = $1 \
             AND m.type = 'approval_request' \
             AND m.props->>'kind' = $3 \
