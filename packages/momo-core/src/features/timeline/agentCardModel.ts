@@ -4,6 +4,10 @@ import {
   type SpawnExecutionPlan,
 } from "../../lib/executionPlan";
 import { loginHandoffCard, type LoginHandoffCard } from "./loginHandoffCard";
+import {
+  completionReportCard,
+  type CompletionReportCard,
+} from "./completionReportCard";
 
 // =============================================================================
 // Agent card model (R-1 §4). Pure: no DOM, no fetch, no React, so the status
@@ -227,6 +231,13 @@ const PARSED_KEYS: ReadonlySet<string> = new Set([
   "control_started_at_ms",
   "control_ended_at_ms",
   "control_end_reason",
+  // 작업 완료 리포트(UXC-A)가 카드 표면에 직접 그리는 것들 (`completionReportCard.ts`).
+  // `completionReportCard` 가 이 셋을 읽어 요약·불릿·표로 세우므로, 여기 없으면
+  // 정직 카운트가 자기가 그린 필드를 「숨김」으로 세는 모순이 난다(위 핸드오프
+  // 경계 사실과 같은 이유).
+  "actions",
+  "gates",
+  "elapsed_ms",
 ]);
 
 export interface PayloadRow {
@@ -515,7 +526,8 @@ export type AgentCardModel =
   | AgentApprovalCard
   | AgentToolCard
   | AgentTurnCard
-  | LoginHandoffCard;
+  | LoginHandoffCard
+  | CompletionReportCard;
 
 function approvalCard(
   message: Message,
@@ -635,6 +647,13 @@ export function agentCardModel(message: Message): AgentCardModel | null {
   if (message.type === "tool_call" || message.type === "tool_result") {
     return toolCard(message, props);
   }
+  // 작업 완료 리포트(UXC-A)는 평범한 턴 메시지 안에서 `props.kind` 로 갈라진다 —
+  // 로그인 핸드오프가 승인 메시지 안에서 갈라지는 것과 같은 재사용이다. 새 메시지
+  // 타입도 마이그레이션도 없다. `turnCard` 보다 **먼저** 물어보는 이유는, 내용이
+  // 있는 리포트라면 그것이 그 턴이 남긴 진짜 산출이기 때문이다. `kind` 만 실렸고
+  // 내용이 비면 `completionReportCard` 가 `null` 을 내고 평범한 턴으로 떨어진다.
+  const completion = completionReportCard(props);
+  if (completion !== null) return completion;
   return turnCard(props);
 }
 
@@ -647,6 +666,10 @@ export function agentCardModel(message: Message): AgentCardModel | null {
  * The login handoff card is in the second group for a sharper reason: its body
  * is the server's English one-liner (`approval_request_body`), and the sentence
  * a reader needs is the agent's Korean 사유, which the card draws from `summary`.
+ *
+ * The completion report (UXC-A) is in the second group too: its 한 문단 요약 IS
+ * the sentence, drawn from `summary`, so the plain body above would be that same
+ * paragraph a second time.
  */
 export function cardKeepsBody(card: AgentCardModel): boolean {
   return card.kind === "turn";

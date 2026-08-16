@@ -93,6 +93,17 @@ import {
   loginHandoffWaitingCopy,
   type LoginHandoffCard,
 } from '@momo/core/features/timeline/loginHandoffCard';
+import {
+  COMPLETION_CHECK_OUTCOME_LABEL,
+  COMPLETION_CHECK_TONE,
+  COMPLETION_OUTCOME_LABEL,
+  COMPLETION_OUTCOME_TONE,
+  completionCheckCounts,
+  formatElapsed,
+  type CompletionCheckOutcome,
+  type CompletionReportCard,
+  type CompletionTone,
+} from '@momo/core/features/timeline/completionReportCard';
 import {QuoteBlock, quoteAccessibilityPhrase} from './Quote';
 import {useLongPress} from './useLongPress';
 
@@ -638,6 +649,22 @@ const buildApprovalNoteStyle = (
   guidance: {color: color.textMuted, fontWeight: '400'},
 });
 
+/**
+ * 완료 리포트 게이트 셀이 입는 색 (UXC-A). 역할은 코어가 정하고
+ * (`COMPLETION_CHECK_TONE`) 이 표가 폰 팔레트로 옮긴다 — 웹의
+ * `COMPLETION_TONE_CLASS` 와 짝이고, `buildApprovalNoteStyle` 이 승인 노트에 대해
+ * 하는 것과 같은 계약이다. `fail` 만 `danger` 이고 `skip`·`pending` 은 아니다:
+ * 안 돌린 게이트를 붉게 칠하면 침묵이 실패로 승격된다(ADR-0132).
+ */
+const buildCompletionToneStyle = (
+  color: Palette,
+): Record<CompletionTone, {color: string}> => ({
+  ok: {color: color.ok},
+  danger: {color: color.danger},
+  warn: {color: color.warn},
+  muted: {color: color.textMuted},
+});
+
 /** 시각 한 자리. 폰의 다른 시각 표기와 같은 24시간 두 자리다. */
 function handoffClock(atMs: number): string {
   const at = new Date(atMs);
@@ -758,6 +785,99 @@ function LoginHandoffCardView({
   );
 }
 
+/**
+ * 작업 완료 리포트 카드 — **폰 판** (UXC-A / 커서 웹 ADE 벤치마크 §3-A).
+ *
+ * 웹과 같은 리포트를 그린다. 이 카드는 결정 컨트롤이 애초에 없으므로(끝난 일의
+ * 기록) 웹과 폰이 하는 일이 같다 — 로그인 핸드오프처럼 「폰은 안내만」의 비대칭이
+ * 없다. 읽는 순서도 같다: 요약 → 작업 시간 → 한 일 → 표면별 게이트.
+ *
+ * 표는 폰에서 매트릭스 대신 **표면별 묶음**으로 그린다. 좁은 화면에서 표면×게이트
+ * 매트릭스는 가로로 넘치고, 넘친 표는 아무도 읽지 않는다. 대신 각 표면 아래에 그
+ * 게이트들을 이 클라가 이미 쓰는 라벨·값 문법(`detailRow`)으로 세운다.
+ */
+function CompletionReportCardView({
+  card,
+  styles,
+  toneStyle,
+}: {
+  card: CompletionReportCard;
+  styles: ReturnType<typeof buildStyles>;
+  toneStyle: ReturnType<typeof buildCompletionToneStyle>;
+}): React.JSX.Element {
+  const elapsed =
+    card.elapsedMs !== undefined ? formatElapsed(card.elapsedMs) : '';
+  const counts = completionCheckCounts(card.gates);
+  const tally = (['pass', 'fail', 'skip', 'pending'] as CompletionCheckOutcome[])
+    .filter(outcome => counts[outcome] > 0)
+    .map(outcome => `${COMPLETION_CHECK_OUTCOME_LABEL[outcome]} ${counts[outcome]}`)
+    .join(' · ');
+  return (
+    <View style={styles.card} testID="agent-card">
+      <View style={styles.cardHead}>
+        <Text style={styles.cardTitle} numberOfLines={2}>
+          {card.title}
+        </Text>
+        {/* 국면이 아니라 결과가 색을 정한다 — 실패가 있으면 `warn`(사람을 부르는
+            색), 없으면 `ok`. 웹과 같은 규칙, 폰 팔레트로. */}
+        <StatusChip
+          label={COMPLETION_OUTCOME_LABEL[card.outcome]}
+          tone={COMPLETION_OUTCOME_TONE[card.outcome]}
+        />
+      </View>
+      {card.summary ? <Text style={styles.cardBody}>{card.summary}</Text> : null}
+      {elapsed !== '' ? (
+        // 성과의 단위(벤치마크 차용 C). "24분 28초 작업."
+        <Text style={styles.cardMeta} testID="completion-elapsed">
+          {`작업 시간 ${elapsed}`}
+        </Text>
+      ) : null}
+      {card.actions.length > 0 ? (
+        <View style={styles.detailRows} testID="completion-actions">
+          {card.actions.map((action, index) => (
+            <View key={index}>
+              <Text style={styles.cardBody}>{`· ${action.text}`}</Text>
+              {action.note ? (
+                // 왜. 커서의 「pinned 1.83 couldn't build it」 자리 — 가장 조용한 격.
+                <Text style={styles.cardMeta}>{action.note}</Text>
+              ) : null}
+            </View>
+          ))}
+        </View>
+      ) : null}
+      {card.gates.map(row => (
+        <View
+          key={row.surface}
+          style={styles.gateGroup}
+          testID="completion-gate-row">
+          <Text style={styles.gateSurface}>{row.surface}</Text>
+          <View style={styles.detailRows}>
+            {row.checks.map((check, index) => (
+              <View key={index} style={styles.detailRow}>
+                <Text style={styles.detailLabel}>{check.label}</Text>
+                {/* 세부가 있으면 그것이, 없으면 결과 낱말이 선다. 색은 결과가 진다. */}
+                <Text
+                  style={[
+                    styles.detailValue,
+                    toneStyle[COMPLETION_CHECK_TONE[check.outcome]],
+                  ]}
+                  numberOfLines={2}>
+                  {check.detail ?? COMPLETION_CHECK_OUTCOME_LABEL[check.outcome]}
+                </Text>
+              </View>
+            ))}
+          </View>
+        </View>
+      ))}
+      {tally !== '' ? (
+        <Text style={styles.cardMeta} testID="completion-tally">
+          {tally}
+        </Text>
+      ) : null}
+    </View>
+  );
+}
+
 function AgentCard({
   card,
   approvalGates,
@@ -778,6 +898,7 @@ function AgentCard({
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const approvalNoteStyle = useStyles(buildApprovalNoteStyle);
+  const completionToneStyle = useStyles(buildCompletionToneStyle);
   if (card.kind === 'approval') {
     // 카드가 이미 파싱돼 있으므로 여기서 맞춰 본다 — 목록 쪽에서 하려면 이
     // 파싱을 한 번 더 해야 하고, 그것은 코어 규칙의 두 번째 구현이 된다.
@@ -902,6 +1023,16 @@ function AgentCard({
         card={card}
         styles={styles}
         noteStyle={approvalNoteStyle}
+      />
+    );
+  }
+
+  if (card.kind === 'completion_report') {
+    return (
+      <CompletionReportCardView
+        card={card}
+        styles={styles}
+        toneStyle={completionToneStyle}
       />
     );
   }
@@ -2869,6 +3000,8 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   detailRow: {flexDirection: 'row', gap: space.sm},
   detailLabel: {fontSize: font.meta, color: color.textFaint, minWidth: 72},
   detailValue: {flex: 1, fontSize: font.meta, color: color.textMuted},
+  gateGroup: {marginTop: space.xs},
+  gateSurface: {fontSize: font.label, fontWeight: '600', color: color.text},
   fileRow: {flexDirection: 'row', alignItems: 'center', gap: space.sm},
   filePath: {flex: 1, fontSize: font.meta, color: color.textMuted},
   fileCounts: {fontSize: font.meta, color: color.textFaint},
