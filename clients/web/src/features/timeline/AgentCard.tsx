@@ -40,6 +40,7 @@ import {
 import { spawnHostGate } from "@momo/core/features/timeline/spawnHostChoice";
 import { ApprovalChip, LoginHandoffChip, StreamCaret, TurnChip } from "./StatusChip";
 import { ApprovalActions, type Armed } from "./ApprovalActions";
+import { APPROVAL_NOTE_TONE_CLASS } from "./approvalNoteTone";
 import { FoldedValue } from "./FoldToggle";
 import {
   isSurfaceProvided,
@@ -188,7 +189,10 @@ const RESUME_OFFER_COPY =
  * 영수증이 가장 조용한 차림으로 나온다."* 웹도 같았다 — 영수증·재개 안내·원장
  * 없음 고지가 전부 `text-meta text-ink-muted` 한 벌이었다.
  *
- * 격은 코어가 정하고(`APPROVAL_NOTE_TONE_ORDER`) 이 함수가 옷을 입힌다:
+ * 격은 코어가 정하고(`APPROVAL_NOTE_TONE_ORDER`) 이 함수가 옷을 입힌다. **어느
+ * 옷인지는 이 파일이 아니라 `approvalNoteTone.ts`가 답한다** (#1429): 그 표가
+ * 코어의 역할(`APPROVAL_NOTE_TONE_SPEC`)을 이 팔레트의 토큰으로 옮기고,
+ * `approvalNoteTone.test.ts`가 `tokens.css`를 파싱해 그 옮김이 옳은지 잰다.
  *
  *   * `receipt` — 본문 크기의 `text-ink`. 카드 안에서 크기로 올라오는 유일한
  *     문장이고, 그 이유는 이것이 **방금 내가 한 되돌릴 수 없는 행동의 기록**이기
@@ -196,6 +200,11 @@ const RESUME_OFFER_COPY =
  *   * `blocked` — `text-warn`. 위험이 아니라 **때**의 문제이므로 danger가 아니고,
  *     조용한 안내에 묻히면 사람이 버튼을 계속 누르므로 muted도 아니다. 컴포저의
  *     오프라인 줄과 같은 톤이라 한 화면에서 두 자리가 같은 사실을 같은 색으로 말한다.
+ *
+ *     이 클라 **안에서만** 성립하는 논거다. 폰은 같은 톤을 본문 잉크로 그리고 그것도
+ *     옳다 — 이 팔레트에서 「사람이 할 일이 남아 있다」를 지는 것은 `--accent`라
+ *     `--warn`이 「지금은 정상이 아니다」로 비어 있는 반면, 폰에서는 그 두 역할이
+ *     `warn` 한 토큰에 겹친다. 판정과 근거는 코어 `approvalNote.ts` §색 계약.
  *   * `guidance` — 앞과 같은 `text-ink-muted`. 이 톤은 바뀌지 않았다: 길 안내는
  *     원래 이 격이 맞았고, 문제는 나머지 둘이 여기까지 내려와 있던 것이었다.
  *
@@ -223,9 +232,7 @@ function ApprovalNoteLine({
       data-tone={note.tone}
       className={cn(
         "border-t border-line px-3 py-2",
-        receipt && "text-body text-ink",
-        note.tone === "blocked" && "text-meta text-warn",
-        note.tone === "guidance" && "text-meta text-ink-muted"
+        APPROVAL_NOTE_TONE_CLASS[note.tone]
       )}
     >
       {/* 인라인이고 `align-text-bottom`이다: flex로 세우면 두 줄로 접히는 문장에서
