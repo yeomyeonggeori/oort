@@ -68,7 +68,7 @@
 //!      예시 데이터로 진짜 카드가 서고 본문은 「예시:」에서 잘린다. 외곽 펜스의 닫는
 //!      줄이 꼬리에 남으므로 이 규칙이 그것을 거절한다. (외곽을 **안 닫고** 끝낸
 //!      답변은 꼬리가 비어 이 문을 통과하므로, `fence_start` 의 펜스 상태 추적이
-//!      두 번째 문이다 — M-2.)
+//!      두 번째 문이다 — M-2·M-4.)
 //!
 //! **스트리밍과의 정합:** 스트리밍 중에는 미래를 모르므로 절단은 지금 그대로다(펜스
 //! 이후를 숨긴다). 꼬리 산문이 뒤늦게 도착하면 커밋이 본문을 다시 써서 숨겼던 글이
@@ -136,41 +136,78 @@ pub struct CompletionReport {
 /// 낱말 비교와 꼬리 검사는 전부 이것을 걷어낸 뒤에 한다.
 const ZERO_WIDTH: [char; 4] = ['\u{200B}', '\u{200C}', '\u{200D}', '\u{FEFF}'];
 
+/// 제로폭을 걷어낸 사본. 판정 **전용**.
+fn without_zero_width(text: &str) -> String {
+    text.chars().filter(|c| !ZERO_WIDTH.contains(c)).collect()
+}
+
 /// 판정용 정규화 — 제로폭을 걷어내고 양끝 공백을 자른다.
 ///
 /// **판정에만 쓴다.** 본문과 props 로 나가는 문자열은 모델이 쓴 그대로여야 하므로
 /// 여기를 통과시키지 않는다(서버가 모델의 글자를 고쳐 쓰지 않는다).
 fn normalized(text: &str) -> String {
-    text.chars()
-        .filter(|c| !ZERO_WIDTH.contains(c))
-        .collect::<String>()
-        .trim()
-        .to_string()
+    without_zero_width(text).trim().to_string()
 }
 
-/// 여는 펜스가 선 자리와 그 백틱 개수.
+/// 한 코드펜스의 문법 — 어떤 글자로 몇 개 열렸는가.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct FenceMark {
+    /// CommonMark 의 펜스 글자: 백틱(`` ` ``) 또는 물결(`~`). 닫개는 **같은 글자**여야
+    /// 한다 — `~~~` 로 연 블록을 ``` ``` ``` 이 닫지 않는다.
+    marker: char,
+    /// 그 글자가 연달아 몇 개인가. 닫개는 **이만큼 이상**이어야 한다.
+    run: usize,
+}
+
+/// 여는 펜스가 선 자리와 그 펜스의 문법.
 #[derive(Debug, Clone, Copy)]
 struct Fence {
     /// 여는 펜스 줄이 시작하는 바이트 위치 — 보이는 본문이 끝나는 자리.
     at: usize,
-    /// 백틱 개수. 닫개는 **이만큼 이상**이어야 한다(마크다운 규칙).
-    ticks: usize,
+    mark: FenceMark,
 }
 
-/// 이 줄이 코드펜스 줄이면 (백틱 개수, info string).
+/// 이 줄이 코드펜스 줄이면 그 문법과 info string.
 ///
-/// info 안에 백틱이 있으면 마크다운상 펜스가 아니다.
-fn fence_line(line: &str) -> Option<(usize, String)> {
-    let trimmed = line.trim_start();
-    let ticks = trimmed.chars().take_while(|c| *c == '`').count();
-    if ticks < 3 {
+/// ## 백틱만이 아니라 물결도 센다 (M-4)
+///
+/// CommonMark 의 코드펜스 글자는 **둘**이다: `` ``` `` 과 `~~~`. 물결을 안 세면 물결로
+/// 연 블록이 [`fence_start`] 의 상태 기계에 잡히지 않고, 그 안의 예시 `` ```oort:report ``
+/// 줄이 최상위 펜스로 승격된다 — 규약을 설명하는 답변이 자기 예시 데이터로 진짜 카드를
+/// 세운다. CommonMark 에 제3의 펜스 문법은 없으므로 이 둘로 이 가족이 완결된다.
+///
+/// ## 틱을 세기 **전에** 제로폭을 걷어낸다 (M-5)
+///
+/// 여는 줄이 `` <U+200B>```oort:report `` 이면 첫 글자가 백틱이 아니라 런이 0 이고, 그
+/// 줄은 펜스가 아니게 된다 — 그리고 열리지 않은 펜스의 JSON 은 원시 텍스트로 채널에
+/// 실린다. 회전 2 는 **태그**만 제로폭에서 지켰고 런 자체는 지키지 않았다. 정규화는
+/// 여전히 판정 전용이며, 본문·props 로 나가는 문자열은 원문 그대로다.
+///
+/// 백틱 펜스의 info 에 백틱이 있으면 CommonMark 상 펜스가 아니다(물결 펜스에는 그
+/// 제약이 없다).
+fn fence_line(line: &str) -> Option<(FenceMark, String)> {
+    let cleaned = without_zero_width(line);
+    let trimmed = cleaned.trim_start();
+    let marker = match trimmed.chars().next() {
+        Some(c @ ('`' | '~')) => c,
+        _ => return None,
+    };
+    let run = trimmed.chars().take_while(|c| *c == marker).count();
+    if run < 3 {
         return None;
     }
-    let info = normalized(&trimmed[ticks..]);
-    if info.contains('`') {
+    let info = trimmed[run..].trim().to_string();
+    if marker == '`' && info.contains('`') {
         return None;
     }
-    Some((ticks, info))
+    Some((FenceMark { marker, run }, info))
+}
+
+impl FenceMark {
+    /// 이 펜스를 닫는 줄인가 — 같은 글자, 같거나 더 긴 런, info 없음(CommonMark).
+    fn closes(self, other: FenceMark, info: &str) -> bool {
+        other.marker == self.marker && other.run >= self.run && info.is_empty()
+    }
 }
 
 /// 리포트 펜스가 열리는 자리. 없으면 `None`.
@@ -189,15 +226,15 @@ fn fence_line(line: &str) -> Option<(usize, String)> {
 /// 안 닫고 끝낸 답변은 꼬리가 비어 그 문을 통과했고, 이 상태 추적이 두 경우를 한
 /// 기계로 닫는다.
 fn fence_start(text: &str) -> Option<Fence> {
-    let mut open: Option<usize> = None;
+    let mut open: Option<FenceMark> = None;
     let mut offset = 0usize;
     for line in text.split_inclusive('\n') {
-        if let Some((ticks, info)) = fence_line(line) {
+        if let Some((mark, info)) = fence_line(line) {
             match open {
-                // 열린 블록 안이다. 닫개(백틱이 같거나 더 길고 info 가 없는 줄)만
-                // 그것을 닫고, 그 밖의 모든 줄은 — 태그가 붙어 있어도 — 내용이다.
-                Some(open_ticks) => {
-                    if ticks >= open_ticks && info.is_empty() {
+                // 열린 블록 안이다. 닫개(같은 글자·같거나 더 긴 런·info 없음)만 그것을
+                // 닫고, 그 밖의 모든 줄은 — 태그가 붙어 있어도 — 내용이다.
+                Some(open_mark) => {
+                    if open_mark.closes(mark, &info) {
                         open = None;
                     }
                 }
@@ -206,10 +243,10 @@ fn fence_start(text: &str) -> Option<Fence> {
                         let indent = line.len() - line.trim_start().len();
                         return Some(Fence {
                             at: offset + indent,
-                            ticks,
+                            mark,
                         });
                     }
-                    open = Some(ticks);
+                    open = Some(mark);
                 }
             }
         }
@@ -262,8 +299,12 @@ pub fn streaming_prefix(text: &str) -> &str {
     if candidate.is_empty() {
         return visible;
     }
-    let opener = format!("```{REPORT_FENCE_TAG}");
-    if opener.starts_with(&candidate) {
+    // 두 펜스 글자 모두 (M-4). 판정은 제로폭을 걷어낸 사본으로 하되 잘라내는 위치는
+    // 원문 기준이라, `` <U+200B>```oo `` 같은 줄도 통째로 접힌다 (M-5).
+    let opens_a_report = ['`', '~']
+        .iter()
+        .any(|marker| format!("{0}{0}{0}{REPORT_FENCE_TAG}", marker).starts_with(&candidate));
+    if opens_a_report {
         return text[..line_start + (tail.len() - trimmed.len())].trim_end();
     }
     visible
@@ -283,10 +324,10 @@ fn fence_payload(text: &str, fence: Fence) -> (&str, &str) {
     let rest = &text[after_open..];
     let mut offset = 0usize;
     for line in rest.split_inclusive('\n') {
-        // 닫개는 여는 펜스만큼 길어야 한다(마크다운 규칙) — 4-백틱으로 연 블록을
-        // 3-백틱이 닫지 않는다.
-        if let Some((ticks, info)) = fence_line(line) {
-            if ticks >= fence.ticks && info.is_empty() {
+        // 닫개는 같은 글자에 여는 펜스만큼 길어야 한다(CommonMark) — 4-백틱으로 연
+        // 블록을 3-백틱이 닫지 않고, 물결로 연 블록을 백틱이 닫지 않는다.
+        if let Some((mark, info)) = fence_line(line) {
+            if fence.mark.closes(mark, &info) {
                 return (&rest[..offset], &rest[offset + line.len()..]);
             }
         }
@@ -845,6 +886,86 @@ mod tests {
             "the prose — code block and all — survives: {:?}",
             report.body
         );
+    }
+
+    /// **M-4 — 물결 펜스도 상태 기계 안이다.**
+    ///
+    /// CommonMark 의 펜스 글자는 둘(`` ``` `` · `~~~`)인데 상태 기계가 백틱만 셌다.
+    /// 물결로 감싼 예시를 **안 닫고** 끝내면 안쪽 `` ```oort:report `` 가 최상위로
+    /// 승격되고, 예시의 ``` 닫개 뒤 꼬리가 비어 「맨 끝」 규칙도 통과했다 — 규약을
+    /// 설명하는 답변이 자기 예시 데이터로 진짜 카드를 세운다.
+    #[test]
+    fn an_example_inside_an_unclosed_tilde_fence_is_not_a_card() {
+        let text = "규약은 이렇습니다:\n\
+             ~~~\n\
+             ```oort:report\n\
+             {\"summary\":\"예시 요약\",\"gates\":[{\"surface\":\"웹\",\
+               \"checks\":[{\"label\":\"테스트\",\"outcome\":\"pass\"}]}]}\n\
+             ```\n";
+        assert_eq!(
+            extract(text).0,
+            Extraction::None,
+            "the tilde block never closed, so the tag line is content — not a fence"
+        );
+
+        // 물결에 info 를 단 형태도 같다(`~~~markdown`).
+        let labelled = "예시:\n~~~markdown\n```oort:report\n{\"summary\":\"예시\"}\n```\n";
+        assert_eq!(extract(labelled).0, Extraction::None);
+    }
+
+    /// 물결 블록을 **닫은 뒤**의 진짜 리포트는 통과한다 — 닫개는 같은 글자여야 하므로
+    /// (CommonMark), 백틱이 물결 블록을 닫아 버리거나 그 반대가 되면 안 된다.
+    #[test]
+    fn a_closed_tilde_block_does_not_swallow_the_report_that_follows() {
+        let text = "설정 파일입니다:\n\
+             ~~~yaml\n\
+             key: value\n\
+             ~~~\n\
+             적용했습니다.\n\
+             ```oort:report\n\
+             {\"summary\":\"적용 완료\"}\n\
+             ```";
+        let Extraction::Report(report) = extract(text).0 else {
+            panic!("a top-level fence after a closed tilde block is a real report")
+        };
+        assert_eq!(report.props["summary"], json!("적용 완료"));
+        assert!(report.body.ends_with("적용했습니다."), "{:?}", report.body);
+
+        // 백틱은 물결 블록을 닫지 못한다: 아래에서 ``` 는 여전히 블록 안의 글자이고,
+        // 그래서 그 뒤의 태그 줄도 최상위가 아니다.
+        let mismatched = "예시:\n~~~\n```\n```oort:report\n{\"summary\":\"예시\"}\n```\n";
+        assert_eq!(extract(mismatched).0, Extraction::None);
+    }
+
+    /// **M-5 — 틱 런 앞의 제로폭이 펜스 인식 자체를 무산시키지 못한다.**
+    ///
+    /// 회전 2 는 **태그**를 제로폭에서 지켰지만 런 자체는 지키지 않았다: 여는 줄이
+    /// `` <U+200B>```oort:report `` 이면 첫 글자가 백틱이 아니라 런이 0 이고, 그 줄은
+    /// 펜스가 아니게 되어 원시 JSON 이 본문으로 커밋된다.
+    #[test]
+    fn zero_width_before_the_tick_run_cannot_hide_the_fence() {
+        for invisible in ["\u{200B}", "\u{200C}", "\u{200D}", "\u{FEFF}"] {
+            // 런 앞, 그리고 런 **안**.
+            for line in [
+                format!("{invisible}```oort:report"),
+                format!("``{invisible}`oort:report"),
+            ] {
+                let text = format!("끝났습니다.\n{line}\n{{\"summary\":\"요약\"}}\n```");
+                let Extraction::Report(report) = extract(&text).0 else {
+                    panic!("a zero-width char must not un-make the fence ({line:?})")
+                };
+                assert_eq!(report.body, "끝났습니다.");
+                assert!(
+                    !report.body.contains("oort:report") && !report.body.contains("summary"),
+                    "the envelope reached the channel as text ({line:?})"
+                );
+                // 스트리밍도 같은 줄을 접는다 — 커밋과 갈라지면 글자가 깜빡인다.
+                assert_eq!(
+                    streaming_prefix(&format!("끝났습니다.\n{line}")),
+                    "끝났습니다."
+                );
+            }
+        }
     }
 
     /// **M-3 — 제로폭 문자가 태그 검출을 우회하지 못한다.**
