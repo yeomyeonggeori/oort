@@ -3,6 +3,8 @@ import type { Message } from "../../lib/api";
 import {
   COMPLETION_CHECK_TONE,
   COMPLETION_REPORT_KIND,
+  MAX_COMPLETION_CHECKS_PER_ROW,
+  MAX_COMPLETION_GATE_ROWS,
 } from "../timeline/completionReportCard";
 import {
   latestSessionVerification,
@@ -162,6 +164,51 @@ describe("한 칸으로 접어도 실패는 사라지지 않는다", () => {
       const verdict = latestSessionVerification([report!]);
       expect(verdict?.lead, wire).toBe(expected);
     }
+  });
+
+  it("상한에 잘린 표는 접지 않는다 — 잘린 꼬리의 실패가 통과로 둔갑하지 않게 (G-M1)", () => {
+    // 리뷰어 C 가 실측한 병리 봉투: 한 표면에 통과 40 + 실패 1. 코어 파서는
+    // 41번째 칸을 잘라 `gates` 에 담고(`omitted.checks = 1`) 카드 머리의 판정은
+    // **자르기 전 전체**로 재므로 카드는 여전히 「확인 필요」다. 그 표를 한 칸으로
+    // 접으면 실패가 사라지고 「통과 40」(ok)만 남는다 — 카드가 막아 둔 거짓말이
+    // 접기에서 다시 열리는 자리.
+    const checks = [
+      ...Array.from({ length: MAX_COMPLETION_CHECKS_PER_ROW }, (_, i) => [
+        `게이트 ${i}`,
+        "pass",
+      ]),
+      ["환불 회귀", "failed"],
+    ] as Array<[string, string]>;
+    const report = sessionCompletionReport(
+      reportMessage(70, {
+        kind: COMPLETION_REPORT_KIND,
+        gates: gates(["엔진", checks]),
+      })
+    );
+    expect(report).not.toBeNull();
+    // 카드 자신은 정직하다: 머리는 확인 필요, 잘린 개수는 표에 남는다.
+    expect(report?.card.outcome).toBe("attention");
+    expect(report?.card.omitted.checks).toBe(1);
+    // RED PROOF: 이 단정을 지우면 칩이 「통과 40」(ok) 으로 선다.
+    expect(latestSessionVerification([report!])).toBeNull();
+  });
+
+  it("표면(줄)이 상한에 잘렸을 때도 접지 않는다 (G-M1)", () => {
+    const rows = Array.from(
+      { length: MAX_COMPLETION_GATE_ROWS + 1 },
+      (_, i) => [`표면 ${i}`, [["테스트", "pass"]]] as [string, Array<[string, string]>]
+    );
+    const report = sessionCompletionReport(
+      reportMessage(71, { kind: COMPLETION_REPORT_KIND, gates: gates(...rows) })
+    );
+    expect(report?.card.omitted.gates).toBe(1);
+    expect(latestSessionVerification([report!])).toBeNull();
+  });
+
+  it("자르지 않은 표는 그대로 접는다 — 상한 방어가 정상 리포트를 침묵시키지 않는다", () => {
+    const report = sessionCompletionReport(reportMessage(72, FAILING_PROPS));
+    expect(report?.card.omitted).toEqual({ actions: 0, gates: 0, checks: 0 });
+    expect(latestSessionVerification([report!])?.lead).toBe("fail");
   });
 
   it("침묵(건너뜀)과 대기(진행 중)는 실패색을 쓰지 않는다", () => {

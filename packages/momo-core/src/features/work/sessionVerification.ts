@@ -27,7 +27,7 @@ import {
 //
 // ## 없는 것을 이야기로 승격하지 않는다 (ADR-0132)
 //
-// 세 자리에서 **판정이 없다**(`null`)를 낸다. 「미검증」이라는 낱말은 어디에도
+// 네 자리에서 **판정이 없다**(`null`)를 낸다. 「미검증」이라는 낱말은 어디에도
 // 만들지 않는다 — 리포트가 없는 것은 검증에 실패한 것이 아니라 이 세션이 아직
 // 아무 말도 하지 않은 것이다:
 //
@@ -37,6 +37,9 @@ import {
 //      통과라고 말한다.
 //   3. 부르는 쪽이 스레드를 **다 읽지 못했다**(절단). 그때 없는 것은 정확히 가장
 //      최근 리포트라, 접힌 판정은 지난 이야기다.
+//   4. 리포트의 **게이트 표 자체가 상한에 잘렸다**(`card.omitted`). 아래
+//      `latestSessionVerification` 머리말이 왜인지 적는다 — 3번과 같은 규율이
+//      한 층 안쪽에서 한 번 더 필요하다.
 // =============================================================================
 
 /** 세션 스레드에서 발견된 완료 리포트 하나. */
@@ -98,6 +101,16 @@ const COMPLETION_CHECK_ORDER: readonly CompletionCheckOutcome[] = [
  * 그린다(`COMPLETION_CHECK_SEVERITY` — 웹 표의 겹친 셀이 실패를 앞에 세우는 그
  * 순위 그대로). 실패는 어떤 접기로도 사라지지 않는다는 것이 그 순위의 계약이고,
  * 한 칸으로 접을 때야말로 그 계약이 필요하다.
+ *
+ * **잘린 표에서는 접지 않는다**(리뷰어 C G-M1). 코어 파서는 상한(M3)에 걸린
+ * 게이트를 잘라 `gates` 에 담고 개수만 `omitted` 에 남기는데, 카드 머리의 판정은
+ * **자르기 전 전체**로 재기 때문에 그 둘은 서로 다른 표를 본다. 그것이 카드에서는
+ * 안전하다 — 표가 「그 밖에 N개 더」라고 말하고 머리 칩은 여전히 「확인 필요」다.
+ * 그런데 그 표를 한 칸으로 접으면 잘린 꼬리의 실패가 화면에서 사라진다: 한 표면에
+ * 통과 40 + 실패 1이면 41번째 칸이 잘려 나가고, 칩은 「통과 40」(ok)이 된다.
+ * 카드가 막아 둔 거짓말을 접기가 다시 여는 것이다. 접을 수 없는 표에서는 침묵이
+ * 옳다 — 스레드를 다 읽지 못했을 때 판정하지 않는 것과 같은 규율이 한 층 안쪽에서
+ * 한 번 더 필요할 뿐이다.
  */
 export function latestSessionVerification(
   reports: readonly SessionCompletionReport[]
@@ -113,6 +126,10 @@ export function latestSessionVerification(
     }
   }
   if (newest === null) return null;
+  const omitted = newest.card.omitted;
+  // 잘린 표는 접지 않는다 (G-M1). `actions` 는 「한 일」 불릿이라 게이트 표와
+  // 무관하므로 보지 않는다.
+  if (omitted.gates > 0 || omitted.checks > 0) return null;
   const counts = completionCheckCounts(newest.card.gates);
   let lead: CompletionCheckOutcome | null = null;
   for (const outcome of COMPLETION_CHECK_ORDER) {
