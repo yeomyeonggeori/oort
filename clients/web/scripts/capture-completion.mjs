@@ -2,10 +2,11 @@
 // =============================================================================
 // CAPTURE: 작업 완료 리포트 카드의 상태별 증거 (UXC-A / 커서 웹 ADE 벤치마크 §3-A).
 //
-// 게이트가 아니라 **증거**다. 판정은 둘만 하고(카드가 실제로 그려졌는가, 결정
-// 컨트롤이 하나도 없는가 — 완료 리포트는 읽기뿐이다) 나머지는 사진이다.
+// 게이트가 아니라 **증거**다. 판정은 셋만 하고(카드가 실제로 그려졌는가, 결정
+// 컨트롤이 하나도 없는가 — 완료 리포트는 읽기뿐이다, 카드 위에 글자 없는 본문 문단이
+// 서지 않는가 — 이슈 #1465) 나머지는 사진이다.
 //
-// 찍는 상태 셋은 카드가 가지는 모양 전부다:
+// 찍는 상태들은 카드가 가지는 모양 전부다:
 //   clean       모든 게이트 통과 — 요약·작업 시간·한 일·표면×게이트 표 전부.
 //               머리 칩은 「완료」(ok).
 //   attention   게이트 하나가 실패 — 통과/실패/건너뜀/진행 중 네 톤이 한 표에.
@@ -13,6 +14,9 @@
 //   summary     요약만 있는 최소 리포트 — 표가 없을 때 빈 띠를 그리지 않는다.
 //   edge        겹친 결과 — 한 표면의 같은 라벨 두 칸(통과+실패, 실패가 위)과
 //               읽지 못한 결과 낱말(미상). H1·M1 의 반례를 눈으로 보인다.
+//   gates-only  게이트만 — 산문도 요약도 제목도 없이 서버가 커밋한 리포트(#1454
+//               H-2 가 만드는 모양). 카드 **위**로 한 장 더 찍는다: 이 행이
+//               본문 칸을 만들지 않는다는 것이 #1465 가 고친 것이다.
 //
 //   npm run build && node scripts/capture-completion.mjs
 //   OUT_DIR=/tmp/shots node scripts/capture-completion.mjs
@@ -211,6 +215,34 @@ const EDGE_PROPS = {
   ],
 };
 
+// 게이트만 실린 리포트 — 산문도 요약도 제목도 없다 (이슈 #1465 · #1454 H-2가 만드는
+// 모양). 아래 `MESSAGES` 에서 이 행만 `body` 키가 **아예 없고**, 그것이 서버가 실제로
+// 보내는 모양이다: `MessageDto.body` 는 `skip_serializing_if = "Option::is_none"` 이라
+// 본문 없는 행이 `null` 이 아니라 부재로 나가고, 실시간 프레임이 싣는 `null` 은 코어의
+// `payloadToMessage` 가 같은 부재로 정규화한다.
+//
+// 요약이 없으므로 코어의 `cardKeepsBody` 는 true 를 낸다 — 「본문을 살릴 자격은 있는데
+// 살릴 본문이 없다」는 유일한 조합이고, 그 자리에서 웹은 카드 위에 글자 없는 문단을 한
+// 줄 그리고 있었다(폰은 같은 자리에서 칸을 아예 만들지 않는다). 사진이 그 줄의 부재를
+// 보이고, `EMPTY_BODY_PARAGRAPHS` 가 같은 것을 잰다.
+const GATES_ONLY_PROPS = {
+  kind: "completion_report",
+  elapsed_ms: 96_000,
+  gates: [
+    {
+      surface: "웹",
+      checks: [
+        { label: "테스트", outcome: "pass", detail: "912 통과" },
+        { label: "린트", outcome: "pass" },
+      ],
+    },
+    {
+      surface: "엔진",
+      checks: [{ label: "테스트", outcome: "pass", detail: "clippy 0" }],
+    },
+  ],
+};
+
 const MESSAGES = [
   {
     author: ME,
@@ -241,6 +273,8 @@ const MESSAGES = [
     type: "text",
     props: EDGE_PROPS,
   },
+  // 서버가 실제로 이렇게 커밋한다: 카드가 할 말을 다 하고 본문 키는 없다.
+  { author: HERMES, type: "text", props: GATES_ONLY_PROPS },
 ];
 
 function messages() {
@@ -363,6 +397,33 @@ const CONTROLS_IN_REPORT_CARDS = `(() => {
   };
 })()`;
 
+/**
+ * 완료 리포트 행에 **글자 없는 본문 문단**이 하나도 없어야 한다 (이슈 #1465).
+ *
+ * 사진이 「여기 빈 줄이 없다」를 스스로 말하지 못하는 것은 컨트롤 부재와 같다 —
+ * 없는 것은 찍히지 않는다. 그래서 잰다: 리포트 카드를 품은 행의 본문 상자 안에서
+ * 카드 바깥에 있는 문단 중 글자가 없는 것의 수. `body=null` 리포트가 카드 위에
+ * `<p>` 를 하나 세우던 것이 이 숫자로 1이었고, 고친 뒤 0이다.
+ */
+const EMPTY_BODY_PARAGRAPHS = `(() => {
+  const rows = [
+    ...document.querySelectorAll('[data-card-kind="completion_report"]'),
+  ].map((card) => card.closest('[data-testid="timeline-message"]'));
+  let count = 0;
+  let px = 0;
+  for (const row of rows) {
+    const box = row?.querySelector("[data-row-body]");
+    if (!box) continue;
+    for (const p of box.querySelectorAll("p")) {
+      if (p.closest('[data-card-kind]')) continue;
+      if (p.textContent.trim() !== "") continue;
+      count += 1;
+      px += Math.round(p.getBoundingClientRect().height);
+    }
+  }
+  return { count, px };
+})()`;
+
 async function shootCard(page, card, path) {
   await card.evaluate((el) =>
     el.scrollIntoView({ block: "start", behavior: "auto" })
@@ -399,9 +460,9 @@ async function captureScheme(browser, scheme) {
   await goToBottom(page, cards);
 
   const measured = await page.evaluate(CONTROLS_IN_REPORT_CARDS);
-  if (measured.cards !== 4) {
+  if (measured.cards !== 5) {
     throw new Error(
-      `${scheme}: expected four completion cards, found ${measured.cards}`
+      `${scheme}: expected five completion cards, found ${measured.cards}`
     );
   }
   if (measured.controls !== 0) {
@@ -410,18 +471,38 @@ async function captureScheme(browser, scheme) {
         `(이 카드는 읽기뿐이다)`
     );
   }
-  console.log(`  ${scheme}: cards=${measured.cards} controls=${measured.controls}`);
+  const blank = await page.evaluate(EMPTY_BODY_PARAGRAPHS);
+  console.log(
+    `  ${scheme}: cards=${measured.cards} controls=${measured.controls} ` +
+      `emptyBodyParagraphs=${blank.count} (${blank.px}px)`
+  );
+  if (blank.count !== 0) {
+    throw new Error(
+      `${scheme}: 완료 리포트 행에 글자 없는 본문 문단이 ${blank.count}개 ` +
+        `(${blank.px}px) 있다 — 살릴 본문이 없으면 칸을 만들지 않는다 (#1465)`
+    );
+  }
 
   const timeline = `${OUT_DIR}/completion-timeline-${scheme}.png`;
   await page.screenshot({ path: timeline });
   shots.push(timeline);
 
-  const names = ["clean", "attention", "summary-only", "edge"];
+  const names = ["clean", "attention", "summary-only", "edge", "gates-only"];
   for (let i = 0; i < names.length; i += 1) {
     shots.push(
       await shootCard(page, cards.nth(i), `${OUT_DIR}/completion-${names[i]}-${scheme}.png`)
     );
   }
+
+  // 게이트만 실린 리포트는 **행**으로 한 장 더 찍는다: #1465 가 고치는 빈 줄은 카드
+  // 위에 서므로 카드만 잘라 낸 사진에는 애초에 들어오지 않는다.
+  shots.push(
+    await shootCard(
+      page,
+      cards.nth(4).locator('xpath=ancestor::*[@data-testid="timeline-message"]'),
+      `${OUT_DIR}/completion-gates-only-row-${scheme}.png`
+    )
+  );
 
   await context.close();
   return shots;
