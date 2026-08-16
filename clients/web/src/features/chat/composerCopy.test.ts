@@ -83,8 +83,31 @@ describe("컴포저 카피가 한 벌이다 (#1384)", () => {
     // 적혀 있었고, 그래서 DM 에서 「hermes에 메시지 보내기」가 나갔다.
     expect(CODE_ONLY).not.toContain("에 메시지 보내기");
     expect(CODE_ONLY).not.toContain("에 보낼 메시지");
-    expect(CODE_ONLY).toContain("composerPlaceholder(channelLabel, recipient)");
+    // #1422 이후 플레이스홀더는 **재고 나서** 정해지므로 이 파일이 문장을 부르는
+    // 자리가 훅으로 바뀌었다. 바뀌지 않은 것은 규칙이다: 이 클라는 그 문장을
+    // 짓지 않는다.
+    expect(CODE_ONLY).toMatch(
+      /useFittedComposerPlaceholder\(\s*inputRef,\s*channelLabel,\s*recipient\s*\)/
+    );
     expect(CODE_ONLY).toContain("composerFieldLabel(channelLabel, recipient)");
+  });
+
+  it("절도 손으로 짓지 않는다 — 자만 이 클라의 것이다 (#1422)", () => {
+    // 이 훅이 하는 일은 「이 상자에 이 글자가 드는가」 하나다. 절의 목록도,
+    // 절을 잇는 이음쇠도, 버리는 순서도 코어의 값이라 여기 사본이 있으면
+    // 안 된다 — 코어가 문장을 세 절로 늘리는 날 그 사본만 두 절로 남는다.
+    const fit = codeOf("./placeholderFit.ts");
+    expect(fit).toContain("composerPlaceholderClauses(channelLabel, recipient)");
+    expect(fit).toContain("fitComposerPlaceholder(");
+    expect(fit).toContain('from "@momo/core/features/chat/composerCopy"');
+    // 뒷절의 값도, 이음쇠도 이 파일에 없다.
+    expect(fit).not.toContain("@로");
+    expect(fit).not.toContain("메시지 보내기");
+    expect(fit).not.toContain('join(", ")');
+    expect(fit).not.toContain("COMPOSER_PLACEHOLDER_JOINER");
+    // 그리고 컴포저 자신도 절을 안 만진다.
+    expect(CODE_ONLY).not.toContain("composerPlaceholderClauses");
+    expect(CODE_ONLY).not.toContain("fitComposerPlaceholder");
   });
 
   it("키 힌트의 문장도 이름으로만 든다", () => {

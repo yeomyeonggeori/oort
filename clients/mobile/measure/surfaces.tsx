@@ -48,7 +48,18 @@ import {
   SearchFallthrough,
 } from '../src/screens/SidebarScreen';
 import type {MessageSearch} from '../src/features/search/useMessageSearch';
-import type {Palette} from '../src/design/tokens';
+import {
+  font,
+  // `line` 이라는 이름은 이 파일에서 이미 「초안 한 줄」로 쓰이고 있다
+  // (`composer-offline`). 토큰 쪽에 다른 이름을 주는 것이 그 자리를 건드리는 것
+  // 보다 싸다.
+  line as lineBox,
+  SAFE_GUTTER,
+  space,
+  TOUCH_TARGET,
+  type Palette,
+} from '../src/design/tokens';
+import {composerPlaceholder} from '@momo/core/features/chat/composerCopy';
 import {FixedScheme, useStyles, type ColorScheme} from '../src/design/theme';
 import WorkConsoleScreen from '../src/screens/WorkConsoleScreen';
 import WorkSessionDetailScreen from '../src/screens/WorkSessionDetailScreen';
@@ -577,6 +588,94 @@ function seedAdeControl(): void {
   }
 }
 
+
+/**
+ * 폰 계측이 훑는 방 이름 셋 (#1422). 코어 스위트(`composerCopy.test.ts`)의
+ * `LABELS` 와 같은 이름들이라 두 자가 같은 문장을 잰다.
+ */
+const PLACEHOLDER_LABELS = ['일반', 'release-2026-08', '프로덕트-디자인'];
+
+/**
+ * 이 레포가 문서로 든 폰 예산(`composerCopy.ts` 머리말의 산술): 390pt 화면에서
+ * 입력창에 남는 **글의 폭 260pt**.
+ *
+ * 시뮬레이터를 그 폭으로 만들 수는 없다 — 부팅되는 기기의 논리 폭은 기기가
+ * 정한다. 그래서 두 번 잰다: **이 기기의 실제 입력창**과 **문서된 예산 상자**.
+ * 앞의 것은 지금 이 화면의 진실이고, 뒤의 것은 우리가 지키기로 한 가장 좁은
+ * 화면의 진실이다. 하나만 재면 넓은 기기에서 나온 초록이 예산을 잰 척한다.
+ */
+const PLACEHOLDER_BUDGET_PT = 260;
+
+/**
+ * 이 화면에서 플레이스홀더가 **몇 줄인가** (#1422).
+ *
+ * 폭은 추정하지 않고 잰다: 컴포저의 `bar` 를 같은 토큰으로 한 번 더 세우고,
+ * 입력창이 받는 칸에 `onLayout` 을 걸어 실제 폭을 읽는다. 전송 버튼의 폭도
+ * 실제로 「보내기」를 그려서 나온다 — `minWidth` 와 글자 폭 중 어느 쪽이 이기는지
+ * 를 손으로 정하면 그 순간 이 계측은 산수의 사본이 된다.
+ *
+ * 줄 수는 `onTextLayout` 이 답한다. RN 의 `TextInput` 은 플레이스홀더의 줄 수를
+ * 알려 주지 않으므로, 같은 글자 스타일(`font.body` · `line.body`)과 같은 콘텐츠
+ * 폭을 가진 `<Text>` 에 같은 문장을 넣어 읽는다. 이 replica 가 정직한 이유는
+ * 스타일이 **`Composer` 가 쓰는 그 토큰들**이기 때문이고, 정직하지 **않은** 자리
+ * 도 적어 둔다: 이것은 입력창이 아니라 텍스트라, 「두 줄이면 화면에서 어떻게
+ * 보이는가」는 이 줄이 아니라 아래 사진이 답한다.
+ */
+function PlaceholderProbe(): React.JSX.Element {
+  const styles = useStyles(buildStyles);
+  const [slotWidth, setSlotWidth] = React.useState(0);
+  const [lines, setLines] = React.useState<Record<string, number>>({});
+  // 입력창의 콘텐츠 폭 = 상자 - 좌우 안쪽 여백 - 좌우 테두리.
+  const content = slotWidth === 0 ? 0 : slotWidth - space.md * 2 - 2;
+  const boxes = [
+    {key: '이 기기', width: content},
+    {key: '예산 390pt', width: PLACEHOLDER_BUDGET_PT},
+  ];
+  const read = (box: string, label: string) => lines[`${box}/${label}`] ?? '…';
+  return (
+    <View style={styles.probe}>
+      <View style={styles.probeBar} pointerEvents="none">
+        <View
+          style={styles.probeSlot}
+          onLayout={event => setSlotWidth(event.nativeEvent.layout.width)}
+        />
+        <View style={styles.probeSend}>
+          <Text style={styles.probeSendLabel}>보내기</Text>
+        </View>
+      </View>
+      {boxes
+        .filter(box => box.width > 0)
+        .flatMap(box =>
+          PLACEHOLDER_LABELS.map(label => (
+            <View
+              key={`${box.key}/${label}`}
+              style={[styles.probeMeasure, {width: box.width}]}>
+              <Text
+                style={styles.probeText}
+                onTextLayout={event => {
+                  const count = event.nativeEvent.lines.length;
+                  setLines(previous =>
+                    previous[`${box.key}/${label}`] === count
+                      ? previous
+                      : {...previous, [`${box.key}/${label}`]: count},
+                  );
+                }}>
+                {composerPlaceholder(label, 'place')}
+              </Text>
+            </View>
+          )),
+        )}
+      {boxes.map(box => (
+        <Text key={box.key} style={styles.probeRead}>
+          {`${box.key} 글폭 ${Math.round(box.width)}pt · ` +
+            PLACEHOLDER_LABELS.map(
+              label => `${label} ${read(box.key, label)}줄`,
+            ).join(' · ')}
+        </Text>
+      ))}
+    </View>
+  );
+}
 
 function Frame({label, children}: {label: string; children: React.ReactNode}) {
   const styles = useStyles(buildStyles);
@@ -1681,6 +1780,35 @@ export function Surface({name}: {name: string}): React.JSX.Element {
         </Frame>
       );
     }
+    // ---- #1422 (폰 계측): 빈 컴포저의 문장이 이 화면에서 몇 줄인가 -----------
+    case 'composer-placeholder': {
+      // 웹은 이 질문에 이미 답이 있다(`gate-work-panel.mjs` 가 실렌더로 잰다).
+      // 폰에는 대응물이 없었고, 예산은 웹보다 빡빡하다 — 상자는 260pt 로 더 넓은데
+      // 글자가 16pt 라 두 단 크다(`composerCopy.ts` 의 산술).
+      //
+      // 그래서 **배송되는 `Composer` 를 그대로** 세 번 세운다. 이름은 코어 스위트가
+      // 훑는 그 셋이다: 예산 안에 드는 이름 · 게이트 픽스처의 이름 · 이 레포가
+      // 「이미 넘친다」고 적어 둔 이름. 위에 붙은 계측 줄이 같은 문장을 입력창의
+      // 폭에서 재서 줄 수를 적는다 — 사진과 숫자가 같은 화면에 있어야 사진이
+      // 「몇 줄인지 보인다」는 주장을 대신 해 주지 않는다.
+      return (
+        <Frame label="컴포저 플레이스홀더 — 절 단위 생략의 폰 예산 (#1422)">
+          <PlaceholderProbe />
+          {PLACEHOLDER_LABELS.map(label => (
+            <View key={label}>
+              <Composer
+                recipient="place"
+                channelLabel={label}
+                directory={DIRECTORY}
+                draftKey={`measure:composer-placeholder:${label}`}
+                onSend={() => {}}
+              />
+              <View style={styles.gap} />
+            </View>
+          ))}
+        </Frame>
+      );
+    }
     // ---- 이슈 1137 (ADE 3단계, 폰): 요약 한 줄 · 관제 목록 ------------------
     case 'ade-summary': {
       // **두 스택을 한 장에.** 이 배치가 고른 자리가 옳은지는 위(헤더 아래)와
@@ -1908,6 +2036,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
           <Text style={styles.label}>
             sheet · delete · editor · editor-error · row · row-lead ·
             approval-card · approval-notes · avatar · composer-offline ·
+            composer-placeholder ·
             group · dividers · ade-summary · ade-summary-empty · ade-panel ·
             work-console · work-detail ·
             destructive-confirm · search-entry · search-idle ·
@@ -2138,6 +2267,43 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     pressed: {backgroundColor: rowPressedBackground(color)},
     /** 두 컴포저 사이. 붙여 두면 위아래 테두리가 한 줄로 읽힌다. */
     gap: {height: 24},
+    // ---- #1422 폰 계측 ----------------------------------------------------
+    // 아래 넷은 `features/conversation/Composer.tsx` 의 `bar`·`input`·`send`·
+    // `sendLabel` 과 **같은 토큰**이다. 값을 손으로 적으면 계측이 화면이 아니라
+    // 이 파일을 재게 된다.
+    probe: {paddingBottom: 8},
+    probeBar: {
+      // 화면에서 빼되 **폭은 진짜로** 받는다: 절대 배치 + 좌우 0 이면 이 행은
+      // 컴포저와 같은 폭에서 같은 flex 산수를 돈다.
+      position: 'absolute',
+      left: 0,
+      right: 0,
+      opacity: 0,
+      flexDirection: 'row',
+      alignItems: 'flex-end',
+      gap: space.sm,
+      paddingHorizontal: SAFE_GUTTER,
+      paddingVertical: space.sm,
+    },
+    probeSlot: {flex: 1, minHeight: TOUCH_TARGET},
+    probeSend: {
+      minHeight: TOUCH_TARGET,
+      minWidth: 64,
+      paddingHorizontal: space.md,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    probeSendLabel: {fontSize: font.label, fontWeight: '700'},
+    /** 재기만 하는 상자. 화면에 그리면 사진이 계측기의 사진이 된다. */
+    probeMeasure: {position: 'absolute', opacity: 0},
+    /** 입력창의 글자 스타일 그대로 — 그래야 재는 것이 같은 글이다. */
+    probeText: {fontSize: font.body, lineHeight: lineBox.body},
+    probeRead: {
+      fontSize: font.meta,
+      color: color.textMuted,
+      paddingHorizontal: 12,
+      paddingBottom: 4,
+    },
   });
 
 // 위 독스트링의 이유로 렌더 밖에서 한 번. **파일 맨 아래**인 것은 `harnessClient`

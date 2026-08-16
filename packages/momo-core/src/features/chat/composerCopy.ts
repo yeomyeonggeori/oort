@@ -130,23 +130,200 @@ export const COMPOSER_OFFLINE_COPY =
  */
 export const MENTION_AFFORDANCE = "@로 부르기";
 
+// =============================================================================
+// 넘칠 때 **무엇이** 사라지는가 — 절 단위 생략 (#1422, #1418 이월).
+//
+// ## 남아 있던 것
+//
+// #1384 은 이 문장이 두 예산(웹 236 · 폰 260)에 든다는 것까지 재고 끝났다. 그
+// 예산은 방 이름이 「일반」일 때의 것이고, 이름은 방마다 다르다 — 위 머리말이 이미
+// 적어 둔 대로 390 폭에서 이름이 다 서는 한도는 네댓 자다. 그 위의 이름에서는
+// 문장이 두 줄이 되고, `rows=1` 인 상자는 둘째 줄을 자른다.
+//
+// #1418 이 닫은 것은 그 잘린 줄이 **패딩 사이로 반쯤 보이던 것**이다(웹
+// `tokens.css` 의 `composer-placeholder`: `::placeholder` 를 `1lh` 로 묶는다).
+// 닫히지 **않은** 것은 어디서 접히는가였다. 게이트 픽스처의 방 이름
+// (`release-2026-08`)으로 900px 창에서 작업 세션 pane 을 열면 236px 상자에 남는
+// 첫 줄이 이렇다:
+//
+//   release-2026-08에 메시지 보내기, @로      <- 살아남은 줄
+//                                     부르기   <- 잘린 줄
+//
+// 「@로」는 낱말이 아니다. 목적어를 잃은 조사 하나가 줄 끝에 남은 것이고, 디자인
+// 시스템 §5.3 이 7위로 세어 둔 **의존형태소 절단**이다 — 기계가 안 잡는 축.
+// 그리고 그것은 #1384 가 승인한 트레이드오프가 아니었다: 승인된 것은 「긴 이름의
+// 방에서 광고가 사라진다」이지 「광고가 반만 남는다」가 아니다. 위 머리말의
+// 그 문장("사라지는 것은 광고이지 「어디로 가는가」가 아니다")은 접힘이 절
+// 경계에서 일어난다고 **가정**하고 적혀 있었고, 줄상자는 그 가정을 모른다.
+//
+// ## 그래서 계약이 절을 단위로 갖는다
+//
+// 이 문장은 이미 절이 둘이고 코어가 둘 다 이름을 갖고 있었다 — 뒷절이
+// `MENTION_AFFORDANCE` 라는 이름을 따로 든 이유가 바로 그것이다. 없던 것은
+// **접힘이 그 경계에서만 일어난다**는 규칙뿐이었다. `composerPlaceholderClauses`
+// 가 경계를 값으로 내고, `fitComposerPlaceholder` 가 규칙을 든다: 뒤에서부터 절을
+// 통째로 버리고, 절 안에서는 자르지 않는다.
+//
+// ## 폭은 누가 재는가 — 규칙은 코어의 것, 자는 클라의 것
+//
+// 코어는 브라우저도 화면도 모른다(`packages/momo-core/scripts/purity.mjs`).
+// 그러니 선택지는 둘이었다:
+//
+//   (A) 코어가 예산표(`BUDGETS`)와 어림자(`estimateWidthPx`)를 들고 스스로
+//       판정한다.
+//   (B) **규칙만 코어가 들고 자는 클라가 넘긴다** — 순수성 게이트가 자기 실패
+//       메시지에 적어 둔 그 문법("Pass the fact in as a parameter").
+//
+// (A) 를 기각한 이유는 어림자의 성질이다. 그 자는 **일부러 크게** 틀린다(채택된
+// 문장: 어림 205px · Chromium 실측 189.3px). 테스트에서는 그것이 안전한 방향이지만
+// (여기서 초록이면 화면에서도 든다) 런타임에서는 정반대다 — 실제로 드는 상자에서
+// 광고를 미리 지운다. 그래서 어림자와 예산표는 있던 자리(`composerCopy.test.ts`)에
+// 그대로 두고 「누가 이 광고를 한 마디 더 늘리면 좁은 상자에서 잃는가」를 계속
+// 재게 하고, **런타임 판정은 진짜 자를 가진 쪽**이 한다 — 지금은 웹 하나다:
+// `clients/web/src/features/chat/placeholderFit.ts` 가 textarea 의 계산된
+// 글자꼴을 복사한 프로브로 재고 `ResizeObserver` 로 다시 잰다(게이트가 쓰는 그 자).
+//
+// ## 폰은 왜 이 규칙을 안 부르나 — 재고 나서 안 붙였다
+//
+// 폰 계측 레인에 같은 문장을 세워 실측했다(`clients/mobile/measure/surfaces.tsx`
+// 의 `composer-placeholder`, iPhone 17 Pro / iOS 26.5). 문서된 예산 상자(390pt
+// 화면의 글폭 260pt)에서:
+//
+//   일반에 메시지 보내기, @로 부르기                   1줄
+//   release-2026-08에 메시지 보내기, @로 부르기         2줄
+//   프로덕트-디자인에 메시지 보내기, @로 부르기          2줄
+//
+// 즉 폰에서도 긴 방 이름은 넘친다. 그런데 **잘리지 않는다** — 아래 「어디까지
+// 참인가」 절을 먼저 읽어라: 이 문장은 **기본 글자 크기에서만** 참이고, 그 조건이
+// 곧 두 클라가 다른 처리를 하는 근거다. RN 의 `multiline`
+// `TextInput` 은 콘텐츠 높이로 자라므로 둘째 줄이 상자 안에 그대로 서고, 읽는
+// 사람은 문장을 다 본다(사진이 그 증거다). 웹에서 절을 버리는 이유는 그 줄이
+// **사라지기** 때문이고, 사라지지 않는 상자에서 같은 규칙을 부르면 화면이 보여
+// 줄 수 있는 것을 스스로 지운다. 그래서 여기서는 안 부른다 — 두 클라가 같은
+// 규칙을 부르는 것이 대칭이 아니라, 같은 문장이 **어느 화면에서도 반쪽이 되지
+// 않는 것**이 대칭이다.
+//
+// 그 계측이 대신 잡은 것은 줄바꿈의 **자리**였다(「부르기」가 「부 / 르기」로
+// 끊겼다). 처방은 이 파일이 아니라 그 클라의 것이고, 이미 이름이 있었다 —
+// `clients/mobile/src/design/atoms.tsx` 의 `Sentence` 가 드는 `hangul-word`.
+//
+// ## 그 「안 잘린다」가 **어디까지** 참인가 (design-review #1422 H2)
+//
+// 리뷰가 물었다: 그 사진은 기본 글자 크기 하나뿐인데, 상한(`MAX_HEIGHT`)은
+// 안 커지는 값에서 나오지 않는가. 재 봤고, **아니었다.** 같은 표면을
+// `accessibility-extra-extra-large` 에서 찍으면
+// (`captures/clause1422-composer-placeholder-a11y-{dark,light}.png`):
+//
+//   · 「보내기」 버튼이 글자를 따라 커지면서 입력창 글폭이 272 → **206pt** 로 준다.
+//   · 같은 문장이 4~5줄이 된다(예산 260pt 상자에서도 3~4줄).
+//   · 그리고 상자는 그만큼 못 자란다 — 화면에 서는 것은 **한 줄뿐**이고
+//     (「일반에」·「release-2」) 나머지는 잘린다.
+//
+// 원인은 절 계약이 아니라 **성장 상한**이다: `MAX_HEIGHT = MAX_ROWS · line.body
+// + …` 인데 `line.body` 는 고정 22pt 토큰이고 글자만 커진다. 그러니 여기서 절을
+// 하나 버려도 남는 머리 절이 여전히 3줄이라 잘림은 그대로다 — 절 단위 생략은 이
+// 띠를 구하지 못한다(웹의 머리 절 띠와 같은 성질이다).
+//
+// **그래서 이 배치는 그 띠를 고치지 않고 이름과 사진을 남긴다.** 고치는 것은
+// 폰 컴포저의 성장 정책(동적 타입에서 상한이 같이 커져야 한다)이고, 그것은
+// 플레이스홀더 카피가 아니라 그 클라의 레이아웃 결정이다 — 사람이 친 글도 같은
+// 상한에 걸리므로 범위가 이 티켓보다 넓다.
+//
+// 미룬 것의 **주인**: `#1422 이월 — 폰 동적 타입 컴포저 성장 상한`. 이 표시로
+// 두 자리가 묶여 있다(여기와 `clients/mobile/src/features/conversation/
+// Composer.tsx`). 번호가 아직 없는 이유는 이 배치를 돌린 워커가 이슈를 만들지
+// 않기 때문이고, 발행되면 그 번호가 이 두 줄에 들어온다.
+//
+// 그 goal 이 가져갈 것 **둘**(design-review #1422 후속 라운드): ① 상한이 동적
+// 타입을 따라 커진다. ② 잘린 자리의 「release-2」는 **라틴 낱말**이 가운데서
+// 끊긴 것이라 `hangul-word` 가 손을 못 댄다 — 상자만 키우는 범위로 잡으면 방
+// 이름이 잘리는 쪽은 그대로 남는다.
+// =============================================================================
+
 /**
- * 빈 컴포저가 하는 말: **어디로 가는가**, 그리고 **여기서 무엇을 더 할 수
- * 있는가.**
+ * 절과 절을 잇는 것. 가운뎃점(`HINT_SEPARATOR`)이 아니라 쉼표인 이유는 이것이
+ * 힌트 줄이 아니라 **문장**이라서다 — 위 「키보드 힌트의 표기법」이 정한 규칙
+ * 그대로("쉼표는 문장 안에서만 쓴다").
+ */
+export const COMPOSER_PLACEHOLDER_JOINER = ", ";
+
+/** 플레이스홀더를 이루는 절 하나. */
+export interface ComposerPlaceholderClause {
+  /**
+   * 이 절이 무엇인가. 화면에 안 나가는 이름이고, 있는 이유는 버려진 절을
+   * **가리킬 수 있어야** 하기 때문이다 — 게이트와 테스트가 "뒷절이 사라졌다"를
+   * 순서(index 1)가 아니라 이름으로 적는다.
+   */
+  readonly id: "destination" | "mention-affordance";
+  /** 화면에 나가는 글자. */
+  readonly text: string;
+}
+
+/**
+ * 빈 컴포저가 하는 말을 **절로** 내놓는다: **어디로 가는가**, 그리고 **여기서
+ * 무엇을 더 할 수 있는가.**
  *
  * 앞절은 오배송을 막는 자리라 방마다 다르고(방 이름이 그대로 들어온다), 뒷절은
- * 이 앱의 성질이라 어느 방에서나 같다.
+ * 이 앱의 성질이라 어느 방에서나 같다. 순서가 곧 **버리는 순서의 역순**이다:
+ * 좁아질 때 먼저 사라지는 것은 언제나 뒤다.
  *
  * `recipient` 가 조사를 정한다. DM 의 `channelLabel` 은 방 이름이 아니라 **상대
  * 이름**이라(`workspace/directory.ts` 의 `channelLabelParts`: DM 은 peer 의
  * displayName 을 label 로 쓴다) 앞 판은 「hermes에 메시지 보내기」라고 적고
  * 있었다. 사람은 에가 아니라 에게 받는다 — 규칙은 `lib/koreanParticle` 에 있다.
  */
+export function composerPlaceholderClauses(
+  channelLabel: string,
+  recipient: RecipientKind
+): readonly ComposerPlaceholderClause[] {
+  return [
+    {
+      id: "destination",
+      text: `${attachRecipient(channelLabel, recipient)} 메시지 보내기`,
+    },
+    { id: "mention-affordance", text: MENTION_AFFORDANCE },
+  ];
+}
+
+/**
+ * 상자에 드는 만큼만 남긴 플레이스홀더. **절 단위로만 버린다.**
+ *
+ * `fits` 는 클라가 넘기는 자다: 후보 문자열 하나를 받아 그것이 이 상자에서 한
+ * 줄에 드는지 답한다. 코어가 자를 갖지 않는 이유는 위 머리말에 있다.
+ *
+ * 머리 절은 **버리지 않는다.** 그것이 「어디로 가는가」이고, 그것까지 버린 빈
+ * 상자는 자기가 무엇인지 말하지 않는 상자다. 머리 절 하나도 안 드는 폭에서는
+ * 이 함수가 할 일이 없고, 거기서부터는 각 클라의 마지막 방어선이 받는다(웹은
+ * `composer-placeholder` 의 `1lh` 클램프 — 반노출 없이 한 줄로 묶는다).
+ *
+ * 앞에서부터 이어 붙이며 **처음 안 드는 자리에서 멈춘다**: 절 하나가 안 들면
+ * 그 뒤를 붙인 것은 더 안 들기 때문이다.
+ */
+export function fitComposerPlaceholder(
+  clauses: readonly ComposerPlaceholderClause[],
+  fits: (candidate: string) => boolean
+): string {
+  if (clauses.length === 0) return "";
+  let kept = clauses[0].text;
+  for (let i = 1; i < clauses.length; i += 1) {
+    const candidate = `${kept}${COMPOSER_PLACEHOLDER_JOINER}${clauses[i].text}`;
+    if (!fits(candidate)) return kept;
+    kept = candidate;
+  }
+  return kept;
+}
+
+/**
+ * 절을 다 실은 문장. 상자가 넉넉한 곳(넓은 창·데스크톱 셸의 기본 폭)에서 화면에
+ * 서는 그대로이고, 좁은 상자를 아직 안 재 본 자리의 출발값이기도 하다.
+ */
 export function composerPlaceholder(
   channelLabel: string,
   recipient: RecipientKind
 ): string {
-  return `${attachRecipient(channelLabel, recipient)} 메시지 보내기, ${MENTION_AFFORDANCE}`;
+  return composerPlaceholderClauses(channelLabel, recipient)
+    .map((clause) => clause.text)
+    .join(COMPOSER_PLACEHOLDER_JOINER);
 }
 
 /**

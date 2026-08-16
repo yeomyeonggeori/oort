@@ -870,3 +870,43 @@ describe('#1076 — 인용 점프가 도착했다고 말한다', () => {
     expect(code).not.toMatch(/setTimeout\([^)]*setLandedId/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// #1422 — 여러 줄 입력창은 전부 어절에서 끊는다 (design-review M2)
+// ---------------------------------------------------------------------------
+
+describe('#1422 — 여러 줄 입력창의 줄바꿈 규칙은 전수다', () => {
+  it('`multiline` 인 TextInput 은 하나도 빠짐없이 `hangul-word` 를 든다', () => {
+    // 이 배치의 첫 판은 **허용목록**이었다: 컴포저 하나를 지목해 규칙을 재는
+    // 단정. 그 모양의 문제는 §5.5 ② 가 이미 적어 뒀다 — 목록 밖은 측정되지
+    // 않고, 목록 밖이 늘어난 것을 아무도 모른다. 실제로 리뷰가 하나를 더 찾았고
+    // (`MessageEditorSheet`), 그것이 이 스윕이 있는 이유다.
+    //
+    // 잔량이 아니라 **0** 인 이유: 지금 이 클라의 여러 줄 입력창은 둘뿐이고
+    // 둘 다 한국어 문장을 받는다. 기준선을 세우면 그 파일이 다음 사람에게
+    // "여기까지는 괜찮다"고 거짓말한다.
+    const offenders: string[] = [];
+    for (const file of sourceFiles(SRC_DIR)) {
+      const source = fs.readFileSync(file, 'utf8');
+      // `<TextInput … />` 한 덩어리씩. 여는 태그의 끝(`/>` 또는 `>`)까지만 본다.
+      for (const match of source.matchAll(/<TextInput\b[\s\S]*?\/?>/g)) {
+        const tag = match[0];
+        if (!/\bmultiline\b/.test(tag)) continue;
+        if (/lineBreakStrategyIOS=["']hangul-word["']/.test(tag)) continue;
+        const line = source.slice(0, match.index ?? 0).split('\n').length;
+        offenders.push(`${path.relative(SRC_DIR, file)}:${line}`);
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it('그 값의 정본은 `Sentence` 다 — 스윕이 문자열을 지어내지 않았는지 확인한다', () => {
+    // 위 스윕은 정규식이라 값을 손으로 들 수밖에 없다. 그 손이 정본과 갈라지지
+    // 않는지는 여기서 잰다: `atoms.tsx` 가 같은 값을 들고 있는가.
+    const atoms = fs.readFileSync(
+      path.resolve(SRC_DIR, 'design/atoms.tsx'),
+      'utf8',
+    );
+    expect(atoms).toContain('lineBreakStrategyIOS="hangul-word"');
+  });
+});

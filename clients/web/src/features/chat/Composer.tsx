@@ -24,8 +24,8 @@ import {
   COMPOSER_OFFLINE_COPY,
   HINT_SEPARATOR,
   composerFieldLabel,
-  composerPlaceholder,
 } from "@momo/core/features/chat/composerCopy";
+import { useFittedComposerPlaceholder } from "@/features/chat/placeholderFit";
 import {
   agentTurnsInChannel,
   elapsedLabel,
@@ -477,6 +477,16 @@ export function Composer({
   // 쓰고 있었고, 여기만 자기 산수를 갖고 있었다.
   useAutoGrow(inputRef, text, { minRows: MIN_ROWS, maxRows: MAX_ROWS });
 
+  // 사람이 친 글은 상자가 자라서 받고(위), 빈 상자의 문장은 **줄어들어서** 받는다
+  // (#1422). 상자가 좁으면 코어가 이름 붙인 절을 통째로 버린다 — 어느 절을 언제
+  // 버리는지는 코어의 규칙이고, 여기 있는 것은 이 상자에서 무엇이 드는지를 답할
+  // 수 있는 자뿐이다(`placeholderFit.ts`).
+  const placeholder = useFittedComposerPlaceholder(
+    inputRef,
+    channelLabel,
+    recipient
+  );
+
   // 1회 오버라이드는 지금 이 글이 부르는 에이전트에 붙는다(ADR-0134 D1). 대상은
   // 확정된 멘션이 아니라 **텍스트에 남아 있는 멘션**에서 다시 계산한다: 사람이
   // 고른 뒤 그 핸들을 지웠다면 붙일 요청 자체가 없어졌기 때문이다.
@@ -825,10 +835,11 @@ export function Composer({
           }}
           // 빈 상자는 **어디로 가는지**와 **@가 무엇인지**를 함께 말한다
           // (#1384). 문장과 그 문장을 고른 이유(폭 산술 포함)는 코어가 든다 —
-          // 이 자리는 렌더만 한다. 그 문장이 한 줄에 안 드는 폭에서 넘친 뒷절을
-          // **감추는** 것은 이 상자의 몫이다(`composer-placeholder`, #1418):
-          // 승인된 트레이드오프는 절의 소실이지 글리프 반노출이 아니다.
-          placeholder={composerPlaceholder(channelLabel, recipient)}
+          // 이 자리는 렌더만 한다. 좁은 상자에서 **무엇이 사라지는지**도 코어의
+          // 규칙이다(#1422): 절을 통째로 버리고 절 안에서는 자르지 않는다.
+          // `composer-placeholder` 의 `1lh`(#1418)는 그 뒤에 남는 마지막
+          // 방어선이다 — 머리 절 하나도 안 드는 폭에서 글리프 반노출을 막는다.
+          placeholder={placeholder}
           aria-describedby={hasHint ? "composer-hint" : undefined}
           data-testid="composer-input"
           className="tap-target composer-placeholder min-w-0 flex-1 resize-none rounded-md border border-line-strong bg-transparent px-3 py-2 text-body leading-relaxed placeholder:text-ink-muted focus-visible:focus-ring"
