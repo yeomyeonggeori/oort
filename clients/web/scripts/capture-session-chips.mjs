@@ -731,12 +731,21 @@ const LIST_OVERFLOW = `(() => {
   for (const row of rows) {
     const line = row.lastElementChild;
     const chip = row.querySelector('[data-testid="work-session-verification"]');
+    // 아랫줄의 **유연한** 두 칸: 방 이름과 요약. 둘 중 하나가 0px 이면 그 사실은
+    // 화면에 아무 흔적도 남기지 않는다 — 생략부호조차 없다(#1463 재검토 H-1).
+    const flexible = [...(line ? line.children : [])].filter(
+      (node) => node !== chip && node.getAttribute("data-testid") === null
+    );
     out.rows.push({
       sessionId: String(row.getAttribute("data-session-id")).toLowerCase(),
       client: line ? line.clientWidth : 0,
       scroll: line ? line.scrollWidth : 0,
       chipRight: chip ? Math.round(chip.getBoundingClientRect().right) : null,
       rowRight: Math.round(row.getBoundingClientRect().right),
+      flexible: flexible.map((node) => ({
+        text: node.textContent.trim().slice(0, 12),
+        width: Math.round(node.getBoundingClientRect().width),
+      })),
     });
   }
   return out;
@@ -987,6 +996,19 @@ async function captureScheme(browser, scheme) {
           `${scheme}/${width}px: 행 ${row.sessionId.slice(-3)} 의 칩이 행 밖으로` +
             ` 나갔다 (chip ${row.chipRight} > row ${row.rowRight})`
         );
+      }
+      // 넘치지 않는 것만으로는 모자란다 (#1463 재검토 H-1): 한 칸이 0px 로
+      // 사라져도 줄은 자기 폭 안에 있다. 사라진 칸은 생략부호도 남기지 않으므로
+      // 「잘렸다」와 구분되지 않고, 레일이 headline 을 나른 행에서는 그 행이 존재하는
+      // 이유가 통째로 지워진다.
+      for (const cell of row.flexible) {
+        if (cell.width === 0) {
+          throw new Error(
+            `${scheme}/${width}px: 행 ${row.sessionId.slice(-3)} 의 아랫줄에서` +
+              ` 「${cell.text}」 칸이 0px 로 사라졌다 — 부족분은 나눠 져야지 한쪽이` +
+              ` 통째로 지워지면 안 된다 (#1463 재검토 H-1)`
+          );
+        }
       }
     }
     console.log(

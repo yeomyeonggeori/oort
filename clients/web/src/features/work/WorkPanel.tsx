@@ -265,7 +265,16 @@ function SessionRow({
             facts the ledger row itself carries. It is never "아직 단계가
             없습니다": this row has not read the session thread, and absence of
             evidence would be stated here as evidence of absence. */}
-        <span className="min-w-0 flex-1 truncate text-meta text-ink-muted">
+        {/* `grow`(flex 1 1 auto)이지 `flex-1`(flex 1 1 0%)이 아니다 (#1463 재검토
+            H-1). 기준 크기가 0인 항목은 **줄어들 몫도 0**이라, 자리가 모자랄 때 방
+            이름이 부족분을 혼자 떠안는 대신 이 요약이 0px 로 사라졌다 — 생략부호도
+            없이. 레일이 실제 headline 을 나른 행에서는 그 행이 존재하는 이유가 통째로
+            지워지는 것이다.
+
+            기준 크기를 내용으로 두면 둘이 자기 크기에 비례해 줄어든다: 긴 쪽이 더
+            많이 내주고, 짧은 방 이름 옆에서는 이 요약이 여전히 남은 자리를 다 가진다.
+            부족분을 나눠 지는 것이 한쪽이 사라지는 것보다 정직하다. */}
+        <span className="min-w-0 grow truncate text-meta text-ink-muted">
           {summary ?? `${session.tool} · 시작 ${clockLabel(session.startedAtMs)}`}
         </span>
         {/* 검증 칩은 **아랫줄**에 선다 (#1463).
