@@ -105,6 +105,7 @@ import {
   completionCheckCounts,
   completionRowChecks,
   formatElapsed,
+  WORKED_ELAPSED_LABEL,
   type CompletionCheckOutcome,
   type CompletionReportCard,
   type CompletionTone,
@@ -841,9 +842,13 @@ function CompletionReportCardView({
       </View>
       {card.summary ? <Text style={styles.cardBody}>{card.summary}</Text> : null}
       {elapsed !== '' ? (
-        // 성과의 단위(벤치마크 차용 C). "24분 28초 작업."
+        // 성과의 단위(벤치마크 차용 C). "작업 시간 24분 28초" — 라벨:값 쌍이므로
+        // 낱말은 코어가 준다(`WORKED_ELAPSED_LABEL`, #1468). 폰이 리터럴을 들고
+        // 있으면 웹 카드·작업 세션 정보와 언젠가 갈라진다 — 갈라진 결과가 정확히
+        // 그 티켓이 온 이유(「실행 시간」)다. 여기서 낱말과 값을 잇는 것은 폰의
+        // 배치일 뿐이다: 웹은 `LabeledRow` 두 칸으로, 폰은 한 줄로 세운다.
         <Text style={styles.cardMeta} testID="completion-elapsed">
-          {`작업 시간 ${elapsed}`}
+          {`${WORKED_ELAPSED_LABEL} ${elapsed}`}
         </Text>
       ) : null}
       {card.actions.length > 0 ? (
