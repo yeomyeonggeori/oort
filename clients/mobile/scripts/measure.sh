@@ -8,6 +8,7 @@
 #   3. the gap between the composer's bottom edge and the keyboard's top edge
 #   4. the `Origin` header React Native's WebSocket sends
 #   5. Work Console/detail in both schemes and an accessibility text size
+#   6. the composer's growth cap under Dynamic Type (#1443)
 #
 # Simulator, deliberately. Spike #837 established that this is the one property
 # where the simulator does NOT lie: the reversed-list numbers came out the same
@@ -143,6 +144,11 @@ capture_surface LIGHT-WORK-DETAIL work-detail-light.png
 capture_surface COMPOSER-PLACEHOLDER composer-placeholder-dark.png
 capture_surface LIGHT-COMPOSER-PLACEHOLDER composer-placeholder-light.png
 
+# #1443 성장 상한. 기본 크기에서 이 장이 하는 일은 「안 변했다」를 보이는 것이다 —
+# 상한 128pt 는 그대로이고, 다섯 줄짜리 글이 그 안에 그대로 든다. 이 장이 값을
+# 내는 크기는 아래 접근성 블록의 같은 줄이다.
+capture_surface COMPOSER-GROWTH composer-growth-dark.png
+
 ORIGINAL_CONTENT_SIZE="$(xcrun simctl ui booted content_size)"
 xcrun simctl ui booted content_size accessibility-extra-extra-large
 capture_surface WORK-CONSOLE work-console-accessibility-text.png
@@ -153,6 +159,11 @@ capture_surface WORK-DETAIL work-detail-accessibility-text.png
 # 그 실측을 다음 배치에서도 다시 낸다.
 capture_surface COMPOSER-PLACEHOLDER composer-placeholder-accessibility-text.png
 capture_surface LIGHT-COMPOSER-PLACEHOLDER composer-placeholder-accessibility-text-light.png
+# #1443. 위 두 줄이 남긴 실측(이 크기에서 상자가 한 줄만 보여 준다)의 수리를 재는
+# 자리다. 사진 위의 계측 줄이 글자 배수·창 높이·상한·**실제 상자 높이**를 적으므로,
+# 「상한이 커졌다」가 산수가 아니라 화면에서 확인된다.
+capture_surface COMPOSER-GROWTH composer-growth-accessibility-text.png
+capture_surface LIGHT-COMPOSER-GROWTH composer-growth-accessibility-text-light.png
 xcrun simctl ui booted content_size "$ORIGINAL_CONTENT_SIZE"
 ORIGINAL_CONTENT_SIZE=""
 
