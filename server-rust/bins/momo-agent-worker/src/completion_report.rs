@@ -52,6 +52,27 @@
 //! 답변만 보고 그 뒤에 카드가 선다 — 채널에 원시 JSON 이 타이핑되는 순간이 없다.
 //! 절단은 JSON 파싱 성공 여부와 무관하다: 성공했을 때만 자르면 깨진 펜스가 스트리밍
 //! 중에는 숨었다가 커밋에서 되살아난다.
+//!
+//! ## 펜스는 답변의 맨 끝이어야 한다 (M-1)
+//!
+//! 닫는 펜스 뒤에 공백 아닌 것이 하나라도 있으면 그 펜스는 **리포트가 아니다** —
+//! [`extract`] 가 [`Extraction::None`] 을 내고 턴 원문이 한 글자도 손상되지 않은 채
+//! 나간다. 프로토콜 블록 자신이 「답변 맨 끝에」라고 말하므로 규약과 같은 규칙이고,
+//! 한 문장으로 두 갈래의 실결함을 닫는다:
+//!
+//!   1. **꼬리 산문의 조용한 삭제.** 본문은 펜스 **앞**까지이므로, 모델이 닫는 펜스
+//!      뒤에 「추가로, 내일 회의 잡아뒀습니다」를 쓰면 그 문장이 채널에서 사라진다.
+//!      이 모듈이 스스로 금지한 「모델이 실제로 쓴 글자를 서버가 지우는 것」이다.
+//!   2. **예시의 카드 승격.** 「리포트 카드 어떻게 쓰는 거야?」에 모델이 4-백틱 외곽
+//!      펜스로 예시를 보여주면 안쪽 줄이 여는 펜스로 잡히고 예시 JSON 이 파싱된다 —
+//!      예시 데이터로 진짜 카드가 서고 본문은 「예시:」에서 잘린다. 외곽 펜스의 닫는
+//!      줄이 꼬리에 남으므로 이 규칙이 그것을 거절한다.
+//!
+//! **스트리밍과의 정합:** 스트리밍 중에는 미래를 모르므로 절단은 지금 그대로다(펜스
+//! 이후를 숨긴다). 꼬리 산문이 뒤늦게 도착하면 커밋이 본문을 다시 써서 숨겼던 글이
+//! **되돌아온다**. 이 재출현은 이 파일이 막으려는 깜빡임과 방향이 반대라 원칙과
+//! 충돌하지 않는다: 막는 것은 「보여준 글자를 서버가 가져가는 것」이고, 여기서 일어나는
+//! 일은 아직 안 보여준 글자가 제자리를 찾는 것이다. 잃는 것은 없다.
 
 use serde_json::{Map, Value};
 
@@ -124,10 +145,16 @@ fn fence_start(text: &str) -> Option<usize> {
     None
 }
 
-/// 펜스 앞까지의 본문 — **완성된** 답변에서 화면에 남을 글.
+/// 펜스 앞까지의 본문.
 ///
 /// 여는 펜스가 통째로 도착한 경우에만 자른다. 끝이 ``` 로 끝나는 답변(닫히지 않은
 /// 코드 블록)을 펜스로 오인해 잘라내면, 모델이 실제로 쓴 글자를 서버가 지우는 것이 된다.
+///
+/// **이것만으로는 커밋 본문이 아니다.** 펜스가 답변의 맨 끝인지는 여기서 알 수 없고
+/// (닫는 펜스 뒤를 보지 않는다), 그 판정은 [`extract`] 가 진다 — 맨 끝이 아니면
+/// 리포트 자체가 없던 일이 되고 본문은 원문 그대로다(모듈 머리말 §맨 끝). 그래서 이
+/// 함수는 ①스트리밍 절단의 바탕([`streaming_prefix`])이고 ②맨 끝 규칙을 이미 통과한
+/// 봉투의 본문이다.
 pub fn visible_prefix(text: &str) -> &str {
     match fence_start(text) {
         Some(at) => text[..at].trim_end(),
@@ -166,23 +193,27 @@ pub fn streaming_prefix(text: &str) -> &str {
     visible
 }
 
-/// 펜스 안쪽 JSON 문자열. 닫는 펜스가 없으면(잘린 응답) 남은 전부를 준다 —
-/// 파싱은 어차피 실패할 것이고, 실패는 「리포트 없음」으로 정직하게 떨어진다.
-fn fence_payload(text: &str, at: usize) -> &str {
+/// 펜스 안쪽 JSON 문자열과 **닫는 펜스 뒤에 남은 것**.
+///
+/// 꼬리를 함께 돌려주는 것이 [`extract`] 의 「맨 끝」 규칙이 서는 자리다(모듈 머리말
+/// §펜스는 답변의 맨 끝이어야 한다). 닫는 펜스가 없으면(잘린 응답) 남은 전부가
+/// payload 이고 꼬리는 비어 있다 — 잘린 응답은 정의상 거기서 끝났으므로 「맨 끝」이
+/// 맞고, 파싱은 어차피 실패해 「리포트 없음」으로 정직하게 떨어진다.
+fn fence_payload(text: &str, at: usize) -> (&str, &str) {
     let after_open = match text[at..].find('\n') {
         Some(newline) => at + newline + 1,
-        None => return "",
+        None => return ("", ""),
     };
     let rest = &text[after_open..];
     let mut offset = 0usize;
     for line in rest.split_inclusive('\n') {
         let trimmed = line.trim();
         if trimmed.len() >= 3 && trimmed.chars().all(|c| c == '`') {
-            return &rest[..offset];
+            return (&rest[..offset], &rest[offset + line.len()..]);
         }
         offset += line.len();
     }
-    rest
+    (rest, "")
 }
 
 fn read_string(entry: &Map<String, Value>, key: &str) -> Option<String> {
@@ -271,8 +302,16 @@ pub fn extract(text: &str) -> (Extraction, usize) {
     let Some(at) = fence_start(text) else {
         return (Extraction::None, 0);
     };
+    let (payload, tail) = fence_payload(text, at);
+
+    // 「맨 끝」 규칙 (M-1). 닫는 펜스 뒤에 공백 아닌 것이 있으면 이것은 리포트가
+    // 아니다 — 턴 원문을 한 글자도 건드리지 않고 돌려준다. 모듈 머리말 §펜스는
+    // 답변의 맨 끝이어야 한다에 이 문이 막는 두 갈래가 적혀 있다.
+    if !tail.trim().is_empty() {
+        return (Extraction::None, 0);
+    }
+
     let body = visible_prefix(text).to_string();
-    let payload = fence_payload(text, at);
 
     let parsed: Value = match serde_json::from_str(payload.trim()) {
         Ok(value) => value,
@@ -619,6 +658,76 @@ mod tests {
         }
         assert_eq!(visible_prefix(full), "산문 답변.");
         assert_eq!(report_of(full).body, "산문 답변.");
+    }
+
+    /// **M-1 갈래 1 — 꼬리 산문은 삭제되지 않는다.**
+    ///
+    /// 본문은 펜스 **앞**까지이므로, 닫는 펜스 뒤의 문장을 되붙이는 코드는 없다.
+    /// 맨 끝 규칙이 없으면 「추가로, 내일 회의 잡아뒀습니다」가 채널에서 조용히
+    /// 사라진다 — 이 모듈이 스스로 금지한 「모델이 쓴 글자를 서버가 지우는 것」이다.
+    /// 규칙을 되돌리면 이 단정이 카드를 받고 빨개진다.
+    #[test]
+    fn prose_after_the_closing_fence_keeps_the_whole_answer() {
+        let text = "환경 셋업을 마쳤습니다.\n\n\
+             ```oort:report\n\
+             {\"summary\":\"요약\",\"gates\":[{\"surface\":\"웹\",\
+               \"checks\":[{\"label\":\"테스트\",\"outcome\":\"pass\"}]}]}\n\
+             ```\n\
+             추가로, 내일 회의 잡아뒀습니다.";
+        let (extraction, dropped) = extract(text);
+        assert_eq!(
+            extraction,
+            Extraction::None,
+            "a fence that is not the last thing in the answer is not a report"
+        );
+        assert_eq!(dropped, 0);
+        assert!(
+            matches!(extraction, Extraction::None),
+            "and the turn goes out byte for byte — the caller keeps `completion.text`"
+        );
+        assert!(
+            text.ends_with("추가로, 내일 회의 잡아뒀습니다."),
+            "the sentence the old code deleted is still the end of the turn"
+        );
+    }
+
+    /// **M-1 갈래 2 — 외곽 코드블록 안의 예시는 카드가 되지 않는다.**
+    ///
+    /// 「리포트 카드 어떻게 쓰는 거야?」에 모델이 4-백틱 외곽 펜스로 규약을 보여주면,
+    /// 안쪽 줄이 여는 펜스로 잡히고 안쪽 ``` 이 닫는 펜스로 잡혀 **예시 데이터로
+    /// 진짜 카드가 선다**. 외곽 펜스의 닫는 줄이 꼬리에 남는 것이 그것을 막는다.
+    #[test]
+    fn an_example_inside_an_outer_code_block_is_not_a_card() {
+        let text = "이렇게 씁니다:\n\
+             ````\n\
+             ```oort:report\n\
+             {\"summary\":\"예시 요약\",\"actions\":[{\"text\":\"예시\"}]}\n\
+             ```\n\
+             ````\n\
+             질문 더 있으면 말씀하세요.";
+        assert_eq!(
+            extract(text).0,
+            Extraction::None,
+            "an example is documentation, not a report of work that happened"
+        );
+
+        // 꼬리가 외곽 펜스 하나뿐이어도(뒤에 산문이 없어도) 마찬가지다.
+        let closed = "이렇게 씁니다:\n````\n```oort:report\n{\"summary\":\"예시\"}\n```\n````";
+        assert_eq!(extract(closed).0, Extraction::None);
+    }
+
+    /// 맨 끝 규칙은 **공백만**을 허용한다: 진짜 리포트가 개행 하나 때문에 거절되면
+    /// 안 되고, 문장 하나 때문에는 거절되어야 한다.
+    #[test]
+    fn only_whitespace_may_follow_the_closing_fence() {
+        let with_trailing_blanks = "끝.\n```oort:report\n{\"summary\":\"요약\"}\n```\n\n   \n";
+        assert!(matches!(
+            extract(with_trailing_blanks).0,
+            Extraction::Report(_)
+        ));
+
+        let with_a_period = "끝.\n```oort:report\n{\"summary\":\"요약\"}\n```\n.";
+        assert_eq!(extract(with_a_period).0, Extraction::None);
     }
 
     /// 다른 코드 펜스는 한 프레임 뒤 곧바로 다시 보인다 — 세 번째 글자에서 갈라지므로.
