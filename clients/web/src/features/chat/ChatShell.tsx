@@ -10,7 +10,6 @@ import {
 } from "@momo/core/lib/api";
 import { useSession } from "@/app/session";
 import { SidebarDrawerToggle } from "@/app/SidebarDrawerToggle";
-import { useIsMobileShell } from "@/app/shellNav";
 import {
   channelLabel,
   channelLabelParts,
@@ -538,8 +537,9 @@ export function ChatShell() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [anchorReady, urlAnchor, channelId]);
 
-  // Under 900px the 작업 세션 pane stops being a column beside the channel and
-  // becomes a drawer over it (tokens.css `work-pane`: position absolute, inset
+  // Under 900px the two panes that share this row — the 작업 세션 pane and the
+  // 스레드 패널 — stop being a column beside the channel and become a drawer over
+  // it (tokens.css `work-pane` / `thread-pane`: position absolute, inset
   // 0, z-index 20). A surface that is covered has to leave the tab order with
   // it. Without that, Tab walked straight through the drawer into controls that
   // were not on screen: from the sidebar it took three stops to reach
@@ -549,7 +549,15 @@ export function ChatShell() {
   // AND hides the subtree from assistive tech), so it is what this uses, driven
   // from the same 900px breakpoint the stylesheet uses so the two cannot drift.
   const coveredRef = useRef<HTMLDivElement>(null);
-  const [drawerWidth, setDrawerWidth] = useState(false);
+  // 첫 렌더에서 이미 답을 알고 시작한다 (`useIsMobileShell`과 같은 이유): `false`로
+  // 시작해 효과에서 고치면 서랍이 이미 표면을 덮은 한 프레임 동안 덮인 컨트롤이
+  // 탭 순서에 남는다. 그 한 프레임이 바로 이 장치가 막으려는 것이다.
+  const [drawerWidth, setDrawerWidth] = useState(
+    () =>
+      typeof window !== "undefined" &&
+      typeof window.matchMedia === "function" &&
+      window.matchMedia("(width < 900px)").matches
+  );
   useEffect(() => {
     if (typeof window === "undefined" || !window.matchMedia) return;
     const query = window.matchMedia("(width < 900px)");
@@ -558,10 +566,6 @@ export function ChatShell() {
     query.addEventListener("change", sync);
     return () => query.removeEventListener("change", sync);
   }, []);
-  // 폰에서는 스레드 패널도 같은 성질이 된다 (goal B6): 320px 열이 390px 화면에서
-  // 채널에 70px만 남기므로, 그 폭에서는 스레드가 채널 표면 전체를 받는다
-  // (tokens.css `thread-pane`). 덮은 표면은 위와 같은 이유로 탭 순서에서 빠진다.
-  const isMobile = useIsMobileShell();
   // 「작업 패널」(goal WEB-WP1)은 이 표면 **바깥**, 셸의 라우트 상자 옆에 산다.
   // 그래서 이 파일이 이미 지키던 "부차 표면은 한 번에 하나" 규칙의 사각지대에
   // 있었다: 사이드바 240 + 스레드 320 + 작업 패널 320 = 880이라, 900px 창에서
@@ -573,10 +577,21 @@ export function ChatShell() {
   // 작업 패널이 열려 있는 동안은 이 표면의 부차 패널이 물러난다. 상태는 그대로
   // 남아 있으므로 작업 패널을 닫으면 읽던 스레드가 그 자리에 돌아온다.
   const workPanelOpen = useWorkPanelTarget() !== null;
+  // 스레드 패널도 같은 문턱에서 같은 성질이 된다 (#1421). 앞 판은 이 절만 폰
+  // 문턱(`useIsMobileShell`, 600px)을 읽었고, 그래서 600~899px에서 스레드는 채널
+  // 옆에 320px 열로 서서 컴포저를 36px(700px 창)까지 밀었다. tokens.css
+  // `thread-pane`이 그 문턱을 work-pane과 같은 900px로 옮겼으므로 여기도 같은 값을
+  // 읽는다 — 스타일시트가 덮개로 만든 폭과 스크립트가 탭 순서에서 빼는 폭이
+  // 어긋나면, 화면에 없는 컨트롤로 Tab이 걸어 들어간다.
+  //
+  // `drawerWidth`가 두 절 **밖**에 있는 것이 그 사실의 모양이다: 무엇이 덮느냐는
+  // 절마다 다르지만 덮는 폭은 하나다. 절 안에 두 번 적으면 다음 사람이 한쪽만
+  // 옮길 수 있고, 그것이 이 티켓이 고친 결함이다.
   const covered =
     !workPanelOpen &&
-    ((workOpen && !thread && stressCount === 0 && drawerWidth) ||
-      (thread !== null && channelId !== null && isMobile));
+    drawerWidth &&
+    ((workOpen && !thread && stressCount === 0) ||
+      (thread !== null && channelId !== null));
   useEffect(() => {
     const node = coveredRef.current;
     if (!node) return;

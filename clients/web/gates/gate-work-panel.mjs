@@ -34,6 +34,10 @@
 //     expected failure: "the chat column was squeezed to 236px of composer"
 //   WORK_PANEL_GATE_PROVE_RED_PLACEHOLDER=1 npm run gate:work-panel
 //     expected failure: "the empty composer overflows its own box"
+//   WORK_PANEL_GATE_PROVE_RED_THREAD=1 npm run gate:work-panel
+//     expected failure: "the channel composer was squeezed to 26px"
+//   WORK_PANEL_GATE_PROVE_RED_THREAD_INERT=1 npm run gate:work-panel
+//     expected failure: "covered the channel but left it in the tab order"
 //
 // red seam은 **목/드라이버의 행동만** 바꾼다. ORDER는 델타를 거꾸로 발행하고,
 // ARGS는 값 마커를 화면에 실제로 그려지는 자리(도구 이름)에 심어 "값은 절대
@@ -41,7 +45,9 @@
 // 먼저 펼치고, VOLATILE은 다시 연 패널에 지나간 문장을 되쏜다. PANE과
 // PLACEHOLDER는 스타일시트를 지우지 않고 **한 겹 덮어써서**(`--spacing-chat-min`
 // 을 0으로, 플레이스홀더 클램프를 해제) 수리 이전의 렌더를 그 자리에 되돌린다.
-// 제품 소스 줄을 지우거나 단언을 빼라고 요구하지 않으므로 증명은 반복 가능하다.
+// THREAD도 같은 방식으로 스레드 패널의 문턱을 600px로 되돌리고,
+// THREAD_INERT는 드라이버가 `inert` 속성만 떼어 낸다. 제품 소스 줄을 지우거나
+// 단언을 빼라고 요구하지 않으므로 증명은 반복 가능하다.
 
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
@@ -67,6 +73,9 @@ const proveRedLive = process.env.WORK_PANEL_GATE_PROVE_RED_LIVE === "1";
 const proveRedPane = process.env.WORK_PANEL_GATE_PROVE_RED_PANE === "1";
 const proveRedPlaceholder =
   process.env.WORK_PANEL_GATE_PROVE_RED_PLACEHOLDER === "1";
+const proveRedThread = process.env.WORK_PANEL_GATE_PROVE_RED_THREAD === "1";
+const proveRedThreadInert =
+  process.env.WORK_PANEL_GATE_PROVE_RED_THREAD_INERT === "1";
 
 const DELTAS = ["배포 로그를 ", "먼저 ", "읽었습니다."];
 const DELTA_SENTENCE = DELTAS.join("");
@@ -1003,6 +1012,186 @@ async function exerciseWorkPaneCoOpen(browser, width) {
   await context.close();
 }
 
+/**
+ * 600~899px 구간의 스레드 패널 (#1421).
+ *
+ * `exerciseWorkPaneCoOpen` 이 재는 것과 **같은 상자, 다른 pane** 이다. 두 pane 은
+ * 채팅 표면 안쪽에서 채널 열과 같은 행을 나눠 갖는데 문턱만 서로 달랐다: 작업
+ * 세션 pane 은 900px, 스레드 패널은 600px. 그래서 그 사이 구간에는 아무 바닥도
+ * 없었고, 스레드를 열면 채널 열이 라우트에서 320px 을 뺀 나머지를 받아 컴포저가
+ * 899px 에서 235px, 700px 에서 36px, 600px 에서 26px 가 됐다(#1418 워커 실측).
+ * `chat-region` 의 바닥은 900px 위에서만 얹히므로 이 구간을 잡지 못했고, 여유가
+ * 양수라 shrink 도 돌지 않았다 — 어느 게이트도 이 조합을 재지 않았다.
+ *
+ * 수리는 바닥이 아니라 문턱을 옮겼다(tokens.css `thread-pane` 이 그 근거와
+ * 대안의 실측을 든다). 그래서 이 시나리오가 재는 것은 "덮었는가" 하나가 아니라
+ * 셋이다:
+ *
+ *   1. 이 구간에서 **사람이 읽고 쓰는 두 컴포저가 모두 바닥 위**에 있다.
+ *      덮은 표면의 채널 컴포저도 함께 재는 이유는, 문턱이 다시 내려가는 날
+ *      먼저 좁아지는 것이 그쪽이기 때문이다.
+ *   2. 덮음과 탭 순서는 한 사실의 두 얼굴이다 — 스타일시트가 덮은 표면을
+ *      스크립트가 `inert` 로 함께 빼낸다(ChatShell). 둘이 어긋나면 화면에 없는
+ *      컨트롤로 Tab 이 걸어 들어간다.
+ *   3. 덮는 것은 **표면 전체**이지 한쪽 끝의 320px 띠가 아니다.
+ */
+async function exerciseThreadPaneNarrow(browser, width) {
+  const scenario = CO_OPEN_SCENARIO;
+  const context = await browser.newContext({
+    viewport: { width, height: 800 },
+    reducedMotion: "reduce",
+  });
+  const page = await context.newPage();
+  await installRealtimeSocket(page);
+  await installRoutes(context, scenario);
+  await login(page);
+
+  // red seam: 스타일시트를 지우지 않고 한 겹 덮어써서 문턱을 600px 로 되돌린다.
+  // 이 구간에서 절대 배치를 풀면 패널은 다시 `flex: 0 1 320px` 인 열이 되고,
+  // 수리 이전의 렌더가 그 자리에 그대로 돌아온다.
+  if (proveRedThread) {
+    await page.addStyleTag({
+      content:
+        "@media (600px <= width < 900px) { .thread-pane { position: static; inset: auto; inline-size: auto; z-index: auto; } }",
+    });
+  }
+
+  await page.getByTestId("thread-anchor").first().click();
+  await page.getByTestId("thread-panel").waitFor();
+
+  // red seam: 제품 소스가 아니라 드라이버가 속성 하나를 떼어 낸다. 효과는
+  // `covered` 가 바뀔 때만 다시 도므로 다시 붙지 않는다 — 아래 짝 단언이 DOM 을
+  // 읽고 있다는 증명이다.
+  if (proveRedThreadInert) {
+    await page.evaluate(() =>
+      document.querySelector(".chat-region")?.removeAttribute("inert")
+    );
+  }
+
+  const geometry = await page.evaluate(() => {
+    const round = (value) => Math.round(value);
+    const panel = document.querySelector('[data-testid="thread-panel"]');
+    const surface = panel.parentElement;
+    const region = document.querySelector(".chat-region");
+    const channelInput = document.getElementById("composer-input");
+    const threadInput = document.querySelector(
+      '[data-testid="thread-composer-input"]'
+    );
+    const close = document.querySelector('[data-testid="thread-close"]');
+    const panelBox = panel.getBoundingClientRect();
+    const surfaceBox = surface.getBoundingClientRect();
+    const closeBox = close.getBoundingClientRect();
+    return {
+      panelLeft: round(panelBox.left),
+      panelWidth: round(panelBox.width),
+      surfaceLeft: round(surfaceBox.left),
+      surfaceWidth: round(surfaceBox.width),
+      covering: getComputedStyle(panel).position === "absolute",
+      inert: region.hasAttribute("inert"),
+      channelComposerWidth: round(channelInput.getBoundingClientRect().width),
+      threadComposerWidth: round(threadInput.getBoundingClientRect().width),
+      closeRight: round(closeBox.right),
+      viewportWidth: window.innerWidth,
+    };
+  });
+
+  console.log(
+    `[thread-pane] ${width}px 창, 스레드 개방 -> 패널 ${geometry.panelWidth}px ` +
+      `(덮음 ${geometry.covering} · inert ${geometry.inert}) · 채널 컴포저 ` +
+      `${geometry.channelComposerWidth}px · 답글 컴포저 ${geometry.threadComposerWidth}px`
+  );
+
+  // 1. 두 컴포저 모두 바닥 위. 이 구간에서 실제로 쓰는 것은 답글 컴포저지만,
+  //    채널 컴포저가 먼저 좁아지므로 둘을 함께 잰다.
+  const squeezed =
+    geometry.channelComposerWidth < MIN_COMPOSER_WIDTH
+      ? ["channel", geometry.channelComposerWidth]
+      : geometry.threadComposerWidth < MIN_COMPOSER_WIDTH
+        ? ["thread", geometry.threadComposerWidth]
+        : null;
+  if (squeezed) {
+    throw new Error(
+      `thread-pane-${width}: the ${squeezed[0]} composer was squeezed to ${squeezed[1]}px (floor ${MIN_COMPOSER_WIDTH}px). Between 600 and 899px the thread pane covers the channel instead of standing beside it as a 320px column, because standing beside it left the channel ${width - 240 - PANE_MEASURE}px (tokens.css thread-pane / chat-region).`
+    );
+  }
+
+  // 2. 덮음과 탭 순서는 한 사실의 두 얼굴이다.
+  if (geometry.covering !== geometry.inert) {
+    throw new Error(
+      `thread-pane-${width}: the stylesheet and the script disagree about this width (covering ${geometry.covering}, inert ${geometry.inert}). A pane that covered the channel but left it in the tab order sends Tab into controls that are not on screen (tokens.css thread-pane 문턱 · ChatShell matchMedia).`
+    );
+  }
+
+  // 3. 덮는다면 표면 전체를 덮는다. 한쪽 끝의 띠는 컴포저의 전송 컨트롤을 반쯤
+  //    가리고, 반쯤 보이는 컨트롤은 아예 없는 것보다 나쁘다(work-pane 주석).
+  if (
+    geometry.panelLeft !== geometry.surfaceLeft ||
+    geometry.panelWidth !== geometry.surfaceWidth
+  ) {
+    throw new Error(
+      `thread-pane-${width}: the pane covered only part of the chat surface (pane ${geometry.panelLeft}+${geometry.panelWidth}, surface ${geometry.surfaceLeft}+${geometry.surfaceWidth}). A strip over one edge half-hides the composer it is standing on.`
+    );
+  }
+
+  // 4. 난간(red seam 없음). 사람이 연 것을 닫을 수 있는가 — 닫기 컨트롤이 창
+  //    안에 있는가. 오늘 어느 폭에서도 물지 않지만, 이 줄이 이 티켓에서 **다른
+  //    수리안을 떨어뜨린 측정**이다: 바닥(`--spacing-chat-min` 368)을 이 구간까지
+  //    내리면 셋이 서는 데 240 + 368 + 192 = 800px 이 필요해서, 600px 창에서
+  //    패널이 x 608..800 에 놓이고 닫기 컨트롤을 포함한 전체가 셸의
+  //    `overflow: clip` 밑으로 사라졌다(실측). 붉힐 수 없다고 지우면 그때 무엇을
+  //    쟀는지가 함께 사라진다.
+  if (geometry.closeRight > geometry.viewportWidth) {
+    throw new Error(
+      `thread-pane-${width}: the pane's close control sits at x ${geometry.closeRight} in a ${geometry.viewportWidth}px window, i.e. outside the shell's clip. A surface the reader can open and cannot close is worse than one that never opened.`
+    );
+  }
+
+  await context.close();
+}
+
+/**
+ * 좁은 구간 스레드 패널의 리뷰용 스크린샷 (#1421). 판정하지 않는다.
+ *
+ * 700px 은 이 티켓이 고친 판의 한가운데이고(고치기 전 채널 열 140px · 컴포저
+ * 36px), 900px 은 문턱 바로 위라 **아무것도 바뀌지 않아야 하는** 폭이다. 무회귀는
+ * 말이 아니라 그 두 장이 나란히 있을 때 보인다.
+ */
+async function captureThreadPaneShots(browser) {
+  const outDir = resolve(webRoot, "artifacts/thread-pane");
+  mkdirSync(outDir, { recursive: true });
+  for (const width of [700, 900]) {
+    for (const scheme of ["light", "dark"]) {
+      const context = await browser.newContext({
+        viewport: { width, height: 800 },
+        reducedMotion: "reduce",
+        colorScheme: scheme,
+      });
+      const page = await context.newPage();
+      await installRealtimeSocket(page);
+      await installRoutes(context, CO_OPEN_SCENARIO);
+      await login(page);
+      await page.getByTestId("thread-anchor").first().click();
+      await page.getByTestId("thread-panel").waitFor();
+      // 답글이 자리를 잡은 뒤에 찍는다(work-pane 캡처와 같은 이유): 골격 막대가
+      // 서 있는 순간을 찍으면 전후 비교가 조명 비교가 된다. 컴포저가 아니라
+      // **답글 본문**을 기다리는 이유가 그것이다 — 컴포저는 목록이 아직 골격일
+      // 때 이미 서 있다.
+      await page.getByTestId("thread-composer-input").waitFor();
+      await page
+        .locator('[data-testid="thread-panel"]')
+        .getByText(reply.body)
+        .waitFor();
+      await page.screenshot({
+        path: resolve(outDir, `thread-pane-${width}-${scheme}.png`),
+      });
+      await context.close();
+    }
+  }
+  console.log(
+    `[shots] artifacts/thread-pane/thread-pane-{700,900}-{light,dark}.png`
+  );
+}
+
 async function main() {
   if (!existsSync(resolve(webRoot, "dist/index.html"))) {
     throw new Error("dist/ is missing. Run npm run build first.");
@@ -1024,9 +1213,16 @@ async function main() {
       // 왼쪽 끝이고, 1280px 은 gate:my-sessions 가 자기 단언을 세워 둔 폭이다.
       await exerciseWorkPaneCoOpen(browser, 900);
       await exerciseWorkPaneCoOpen(browser, 1280);
+      // 문턱 아래의 스레드 패널 (#1421). 600 과 899 는 구간의 양 끝이고, 700 은
+      // 티켓이 인용한 실측(컴포저 36px)이 난 폭이다. 양 끝만 재면 그 사이에서
+      // 무엇이 달라지는지 아무도 모르고, 가운데만 재면 경계가 어디였는지 모른다.
+      for (const width of [600, 700, 899]) {
+        await exerciseThreadPaneNarrow(browser, width);
+      }
       if (process.env.WORK_PANEL_GATE_SHOTS === "1") {
         await captureShots(browser);
         await captureWorkPaneShots(browser);
+        await captureThreadPaneShots(browser);
       }
     } finally {
       await browser.close();
@@ -1055,6 +1251,16 @@ async function main() {
   console.log(
     "           and the empty composer never overflows its own box."
   );
+  console.log(
+    "           Below 900px the thread pane covers the channel instead of"
+  );
+  console.log(
+    "           standing beside it, the covered column leaves the tab order"
+  );
+  console.log(
+    "           with it, and both composers stay above their floor at 600,"
+  );
+  console.log("           700 and 899px.");
 }
 
 main().catch((error) => {
