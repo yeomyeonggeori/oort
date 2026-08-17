@@ -85,10 +85,9 @@ use momo_t3::{
     lock_attach_target_in_tx, lock_display_binding_target_in_tx, mint_capability_token,
     open_control_window_in_tx, renew_control_window_lease_in_tx,
     stamp_control_window_on_cards_in_tx, sweep_spent_observer_capabilities_in_tx,
-    validate_attach_capability_in_tx,
-    validated_display_binding, write_display_binding_in_tx, AttachKind, AttachMode, ControlWindow,
-    ControlWindowEndReason, RemoteDisplayBinding, T3Error, AUDIT_ACTION_CONTROL_CLOSED,
-    AUDIT_SCHEMA_CONTROL_CLOSED,
+    validate_attach_capability_in_tx, validated_display_binding, write_display_binding_in_tx,
+    AttachKind, AttachMode, ControlWindow, ControlWindowEndReason, RemoteDisplayBinding, T3Error,
+    AUDIT_ACTION_CONTROL_CLOSED, AUDIT_SCHEMA_CONTROL_CLOSED,
 };
 use momo_wire::{
     record_provenance, EntityRef, ProvenanceError, Signer,

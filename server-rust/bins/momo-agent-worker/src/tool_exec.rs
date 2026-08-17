@@ -49,10 +49,9 @@ use momo_t3::{
     cloud_host_id_for_host_in_tx, cloud_host_id_for_session_in_tx,
     create_work_session_with_id_in_tx, end_work_session_in_tx, is_active_channel_member_in_tx,
     latest_control_window_in_tx, lifecycle_payload, lock_work_session_detail_in_tx,
-    resolve_cloud_host_id, start_usage_in_tx,
-    terminate_in_tx, update_session_card_props_in_tx, with_t3_lifecycle_tx,
-    work_session_scope_in_tx, work_tool_is_enabled_in_tx, ControlWindowEndReason, NewWorkSession,
-    T3Error, T3LockLadder, TerminationReason,
+    resolve_cloud_host_id, start_usage_in_tx, terminate_in_tx, update_session_card_props_in_tx,
+    with_t3_lifecycle_tx, work_session_scope_in_tx, work_tool_is_enabled_in_tx,
+    ControlWindowEndReason, NewWorkSession, T3Error, T3LockLadder, TerminationReason,
 };
 use uuid::Uuid;
 
@@ -175,9 +174,7 @@ async fn login_handoff(
 
     let workspace_id = context.workspace_id;
     let window = momo_db::with_tenant_tx(pool, workspace_id, move |conn| {
-        Box::pin(async move {
-            latest_control_window_in_tx(conn, workspace_id, session_id).await
-        })
+        Box::pin(async move { latest_control_window_in_tx(conn, workspace_id, session_id).await })
     })
     .await;
 

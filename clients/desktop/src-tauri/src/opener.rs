@@ -47,9 +47,8 @@ fn is_openable(url: &str) -> bool {
     if url.len() > MAX_URL_LEN || !url.starts_with("https://") {
         return false;
     }
-    !url.chars().any(|c| {
-        c.is_whitespace() || c.is_control() || SHELL_METACHARACTERS.contains(&c)
-    })
+    !url.chars()
+        .any(|c| c.is_whitespace() || c.is_control() || SHELL_METACHARACTERS.contains(&c))
 }
 
 /// Hand one https URL to the platform browser.
@@ -152,7 +151,9 @@ mod tests {
         assert!(is_openable(
             "https://github.com/Dawn-kim-official/momo/tree/feat%2F803-artifact-cards"
         ));
-        assert!(is_openable("https://example.com/search?q=momo%20diff%20card"));
+        assert!(is_openable(
+            "https://example.com/search?q=momo%20diff%20card"
+        ));
     }
 
     #[test]

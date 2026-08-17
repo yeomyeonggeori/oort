@@ -244,9 +244,7 @@ impl SlidingWindowRateLimiter {
             Err(poisoned) => poisoned.into_inner(),
         };
         buckets.retain(|_, bucket| {
-            cutoff.is_none_or(|cutoff| {
-                bucket.timestamps.iter().any(|stamp| *stamp > cutoff)
-            })
+            cutoff.is_none_or(|cutoff| bucket.timestamps.iter().any(|stamp| *stamp > cutoff))
         });
     }
 }
