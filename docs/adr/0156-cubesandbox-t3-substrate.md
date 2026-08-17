@@ -49,7 +49,7 @@ U1 판정(scratchpad `u1-verdict.md`·JOURNAL 2026-08-09): PVM 호스트 커널�
 
 **발주 사양은 유지, 근거 정정**: 기저 메모리는 3.1GB(1st-party 7.2GB 주장의 43% — "8GB 불가"는 과했다). 다만 세션당 실사용이 지배(워킹셋 800MB 시 834MB/개)해 32GB=동시 ~14개가 여전히 최소선. 시스템 50GB는 `/var/lib/containerd` 2.1GB로 실물 근거.
 
-## 증보 4 (초안 — 성재 결재 대기) — `envVars`는 환경이 아니라 **배달**이고, 그래서 템플릿에 의무가 생긴다 (2026-08-16, #1437)
+## 증보 4 (Accepted — 성재 승인 2026-08-17 "0156-4·0157-2 승인") — `envVars`는 환경이 아니라 **배달**이고, 그래서 템플릿에 의무가 생긴다 (2026-08-16, #1437)
 
 > 기안 2026-08-16, INFRA-A(#1434) 실측 [Blocker]의 처방. 실측 정본: momo-cube-host(CubeSandbox v0.6.0) · `infra/cubesandbox/bootstrap-init/README.md`.
 
