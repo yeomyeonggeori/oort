@@ -66,6 +66,17 @@ export function WorkLocationBadge({
  * 내렸다: 「멈췄다」는 이 행에서 가장 정보가 없는 사실인데 가장 눈에 띄는 색을
  * 지고 있었고, 게이트 결과가 이 표면에 서게 되면 벌어서 든 초록과 나란히 놓인다.
  * 폰과 웹이 같은 상태를 다른 색으로 부르면 한 원장에 두 어휘가 생긴다.
+ *
+ * 호스트 응답 없음(`unavailable`)은 #1503 까지 호스트 연결 끊김과 **한 분기**로
+ * 묶여 강조를 들고 있었다(#1500 이탈 2 — 「근거 없이 색을 옮기지 않는다」로 그때는
+ * 남겼다). 코어 표는 그 칸을 muted 로 두고, 강조를 드는 상태를 `orphaned` 하나로
+ * 못 박는다. 근거는 두 상태가 사람에게 **다른 것**을 요구한다는 데 있다: 고아 세션은
+ * 원장이 호스트를 잃었다고 확정한 상태라 지금 사람이 할 일이 있고(다른 호스트로
+ * 이어받기 — `workSessionResumeTargets` 가 그 자리에만 후보를 낸다), 응답 없음은
+ * 원장이 아직 실행 중이라 부르는 세션에 대해 **레지스트리가 최근 신호를 못 봤다**는
+ * 관측일 뿐이라 사람이 누를 것이 없다. 그 자리에 warn 을 주면 「지금 무언가가
+ * 벌어지고 있다」는 거짓이 되고, 강조를 주면 할 일이 없는 행이 할 일 있는 행과
+ * 같은 색으로 선다. 역할 정본은 웹/코어 표이고, 폰은 그 표를 따른다.
  */
 export function WorkStatusBadge({
   status,
@@ -78,13 +89,13 @@ export function WorkStatusBadge({
   const tone =
     status.key === 'running'
       ? styles.statusRunning
-      : status.key === 'orphaned' || status.key === 'unavailable'
+      : status.key === 'orphaned'
         ? styles.statusAttention
         : styles.statusNeutral;
   const textTone =
     status.key === 'running'
       ? styles.statusTextRunning
-      : status.key === 'orphaned' || status.key === 'unavailable'
+      : status.key === 'orphaned'
         ? styles.statusTextAttention
         : styles.statusTextNeutral;
   return (
