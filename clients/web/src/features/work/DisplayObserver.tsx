@@ -93,7 +93,10 @@ const PHASE_BUSY_COPY: Readonly<
   Record<"issuing" | "connecting" | "negotiating", string>
 > = {
   issuing: "화면 보기 권한을 받는 중",
-  connecting: "호스트에 연결하는 중",
+  // 「연결하는 중」이 아니다 (#1501): 한자어 동작명사가 있으면 「명사 + 중」이고,
+  // 없을 때만 고유어 동사가 「-는 중」을 쓴다. 위아래 두 줄(받다·맞추다)이 그
+  // 고유어 갈래라, 이 표 하나가 규칙의 두 쪽을 나란히 들고 있다.
+  connecting: "호스트에 연결 중",
   negotiating: "화면 연결을 맞추는 중",
 };
 

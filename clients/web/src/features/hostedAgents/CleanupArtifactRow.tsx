@@ -308,7 +308,7 @@ function AcknowledgeForm({
   //
   // 이 폼에서 두 사실이 겹치는 이유: 부모가 주는 `disabled` 는 화면의 어떤 쓰기든
   // 날고 있으면 참인데, **이 줄 자신의 저장도 그 쓰기 중 하나다**. 그래서 저장을
-  // 누른 순간 이 폼은 「저장하는 중」이면서 동시에 「사용 불가」가 됐고, 유일한
+  // 누른 순간 이 폼은 「저장 중」이면서 동시에 「사용 불가」가 됐고, 유일한
   // 진행 낱말이 opacity-50 아래에서 죽었다. 겹침을 푸는 자리가 여기다.
   //
   //   saving  = 이 줄이 지금 저장되는 중 → 진행. aria-busy + 바뀐 낱말.
@@ -354,8 +354,9 @@ function AcknowledgeForm({
       id={id}
       className="flex min-w-0 flex-col gap-3 rounded-md border border-line-strong p-3"
       // 진행 중인 것은 어느 한 버튼이 아니라 **이 폼 전체**다: 저장이 나는 동안
-      // 라디오도 텍스트 상자도 함께 멈춘다. 처분 갈래의 확정 버튼(`ConfirmButton`)
-      // 에는 busy 문법이 없으므로, 그 갈래에서 진행을 말하는 것은 이 한 속성이다.
+      // 라디오도 텍스트 상자도 함께 멈춘다. 그 사실을 지는 것이 이 속성이고,
+      // 이제 두 갈래 모두 그 위에 **보이는** 낱말을 하나씩 얹는다 — 관측 갈래는
+      // 자기 버튼의 글자로, 처분 갈래는 `ConfirmButton` 의 `busy` 로.
       aria-busy={saving || undefined}
       data-testid="cleanup-form"
     >
@@ -483,7 +484,7 @@ function AcknowledgeForm({
           //
           // 이 버튼이 진행과 잠금을 **동시에** 지고 있었다: 저장을 시작하는 것이
           // 이 버튼 자신이라 그 순간 `disabled` 도 함께 참이 됐고, 그래서 화면에
-          // 하나뿐인 진행 낱말(「저장하는 중」)이 「사용 불가」로 읽히며 흐려졌다.
+          // 하나뿐인 진행 낱말(「저장 중」)이 「사용 불가」로 읽히며 흐려졌다.
           // 이제 `locked` 만 잠금을 지고, 진행은 `aria-busy` 와 낱말이 진다.
           //
           // 초점은 어느 쪽에서도 남는다. native `disabled` 였다면 저장을 누른
@@ -502,7 +503,7 @@ function AcknowledgeForm({
             }}
             data-testid="cleanup-save"
           >
-            {saving ? "저장하는 중" : CLEANUP_SAVE_LABEL}
+            {saving ? "저장 중" : CLEANUP_SAVE_LABEL}
           </Button>
         ) : (
           <ConfirmButton
@@ -520,10 +521,20 @@ function AcknowledgeForm({
               dispositions.find((item) => item.id === choice)?.destructive ??
               true
             }
-            // `saving` 이 빠졌다. `ConfirmButton` 은 `disabled` 를 「사용 불가」로만
-            // 그리므로(busy 문법이 없다) 여기에 진행을 실으면 저장이 나는 동안
-            // 「당신은 이걸 못 한다」가 된다. 진행은 폼의 `aria-busy` 가 말하고,
-            // 두 번 눌러도 `submit()` 의 가드가 두 번째를 삼킨다.
+            // `saving` 은 `disabled` 가 아니라 `busy` 로 들어간다 (#1490 이 실은
+            // 문법, #1501 이 여기에 잇는다). 같은 이름을 `disabled` 에 실으면
+            // 저장이 나는 동안 「당신은 이걸 못 한다」가 되고, 화면에 하나뿐인
+            // 진행 낱말이 opacity-50 아래에서 죽는다 — 옆 관측 갈래가 #1403 리뷰
+            // H-1 에서 겪은 그 일이다. `busy` 는 낱말을 갈아 끼우고 `aria-busy`
+            // 를 세울 뿐 칠에는 아무것도 하지 않는다.
+            //
+            // `busyLabel` 을 넘기지 않는다: 기본값이 「저장 중」이고, 그것이 바로
+            // 옆 관측 갈래의 버튼이 내는 낱말이다. 한 폼의 두 갈래가 같은 저장을
+            // 두 낱말로 말하지 않게 하는 일을 기본값이 이미 하고 있다.
+            //
+            // 두 번째 Enter 는 두 겹으로 삼켜진다 — `ConfirmButton` 자신의 조기
+            // 반환과 `submit()` 의 가드.
+            busy={saving}
             disabled={locked || !ready}
             onConfirm={submit}
             testId="cleanup-save"

@@ -138,7 +138,10 @@ type Phase =
 
 const PHASE_BUSY_COPY: Readonly<Record<"issuing" | "connecting", string>> = {
   issuing: "관전 권한을 받는 중",
-  connecting: "호스트에 연결하는 중",
+  // 「명사 + 중」 (#1501). `DisplayObserver` 의 같은 표와 글자까지 같아야 한다:
+  // 두 관전 패널은 같은 호스트에 같은 걸음으로 붙고, 낱말이 갈리면 같은 사실이
+  // 화면마다 다른 말이 된다.
+  connecting: "호스트에 연결 중",
 };
 
 export function ObserverTerminal({

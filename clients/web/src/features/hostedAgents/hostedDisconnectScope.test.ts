@@ -55,6 +55,21 @@ function source(name: string): string {
   return readFileSync(fileURLToPath(new URL(`./${name}`, import.meta.url)), "utf8");
 }
 
+/**
+ * `<ConfirmButton …/>` 한 호출의 props 만 떼어낸다.
+ *
+ * 진행/잠금 규율은 **쓰기를 낸 그 컨트롤**에 대한 것이라 잣대가 파일 전체이면
+ * 안 된다: 같은 폼의 라디오와 증거 칸은 저장이 나는 동안 정말로 잠기므로
+ * (`disabled={disabled || saving}`) 파일 단위 검사는 옳은 코드를 위반으로 센다.
+ */
+function confirmButtonProps(file: string): string {
+  const open = file.indexOf("<ConfirmButton");
+  expect(open, "ConfirmButton 호출이 없다").toBeGreaterThan(-1);
+  const close = file.indexOf("/>", open);
+  expect(close).toBeGreaterThan(open);
+  return file.slice(open, close);
+}
+
 const HERE = fileURLToPath(new URL(".", import.meta.url));
 
 /**
@@ -303,11 +318,60 @@ describe("RED PROOF ③ 컴포넌트는 얇고 조용하다", () => {
         expect(overlap.filter((lock) => lock !== "aria-disabled={saving || undefined}")).toEqual([]);
       }
     }
-    // 진행은 실제로 말해진다: 관측 갈래는 낱말로, 처분 갈래는 폼의 aria-busy 로
-    // (ConfirmButton 에는 busy 문법이 없다).
-    expect(row).toContain('{saving ? "저장하는 중" : CLEANUP_SAVE_LABEL}');
+    // 진행은 실제로 말해진다 — **두 갈래 모두 보이는 낱말로**. 폼의 aria-busy 는
+    // 여전히 서 있지만, 그것 하나만으로 진행을 지던 갈래는 이제 없다 (#1501).
+    expect(row).toContain('{saving ? "저장 중" : CLEANUP_SAVE_LABEL}');
     expect(row).toContain("aria-busy={saving || undefined}");
     expect(section).toContain("aria-busy={repairing || undefined}");
+  });
+
+  it("처분 갈래도 보이는 진행 낱말을 든다 — ConfirmButton 의 busy 로", () => {
+    // #1490 이 `ConfirmButton` 에 busy/busyLabel 을 실었고 소비처를 비워 두었다.
+    // 그 한 줄이 없으면 처분을 고른 사람은 자기 클릭이 갔는지 알 방법이 화면에
+    // 없다 — 낭독 전용 aria-busy 뿐이고, 그것은 눈에는 아무것도 아니다.
+    const confirm = confirmButtonProps(row);
+    expect(confirm).toContain("busy={saving}");
+    // 잠금에 접히지 않는다. 이 goal 이 고친 것이 정확히 그 겹침이므로, 같은
+    // 이름이 이 버튼의 `disabled` 로 되돌아오는 길을 막는다.
+    //
+    // 폼의 다른 컨트롤들(라디오·증거 칸)이 `disabled={disabled || saving}` 인
+    // 것은 옳다 — 저장이 나는 동안 **정말로** 못 고치는 값들이다. 규율이 말하는
+    // 것은 쓰기를 낸 그 버튼 자신을 회색으로 칠하지 말라는 것이라, 잣대는
+    // 파일 전체가 아니라 이 호출 하나여야 한다.
+    expect(confirm).toContain("disabled={locked || !ready}");
+    expect(confirm).not.toMatch(/\bdisabled=\{[^}]*\bsaving\b/);
+  });
+
+  it("한 폼의 두 갈래가 같은 저장을 한 낱말로 말한다", () => {
+    // 관측 갈래는 낱말을 직접 쓰고, 처분 갈래는 `ConfirmButton` 의 기본
+    // `busyLabel` 을 받는다. 둘이 갈리면 같은 폼 같은 저장이 두 낱말이 되므로,
+    // 이 줄은 **호출자가 busyLabel 을 넘기지 않는다**는 사실과 그 기본값이
+    // 관측 갈래의 낱말과 같다는 사실을 함께 잰다.
+    const settings = source("../settings/SettingsFields.tsx");
+    const fallback = settings.match(/busyLabel = "([^"]+)"/)?.[1];
+    expect(fallback).toBe("저장 중");
+    expect(row).toContain(`{saving ? "${fallback}" : CLEANUP_SAVE_LABEL}`);
+    expect(confirmButtonProps(row)).not.toContain("busyLabel=");
+  });
+
+  it("진행 낱말은 「명사 + 중」이다", () => {
+    // 한자어 동작명사가 있으면 「명사 + 중」, 없을 때만 고유어 동사가 「-는 중」을
+    // 쓴다 (#1490 전수 조사 → #1501 정본화). 「저장하는 중」은 같은 뜻을 두 글자
+    // 더 길게 말하는 것이고, 진행 낱말은 원래 라벨을 **제자리에서** 대체하므로
+    // 그 두 글자가 그대로 줄이 흔들리는 폭이 된다.
+    //
+    // `-하는 중` 을 통째로 금지하지는 않는다: 「받는 중」처럼 한자어 명사가 없는
+    // 자리는 그 꼴이 맞다. 이 두 파일에 실제로 서 있던 넷만 못 박는다.
+    for (const [file, name] of [
+      [row, "CleanupArtifactRow.tsx"],
+      [section, "HostedConnectionSection.tsx"],
+    ] as const) {
+      const hits = file.match(/[가-힣]+하는 중/g) ?? [];
+      expect(hits, `${name} 에 「-하는 중」이 남았다`).toEqual([]);
+    }
+    expect(section).toContain("해제 중");
+    expect(section).toContain("확정 중");
+    expect(section).toContain('{repairing ? "복원 중" : MANIFEST_REPAIR_LABEL}');
   });
 
   // 토스트 금지는 여기서 재지 않는다. `scripts/design_preflight_web.sh` 의
