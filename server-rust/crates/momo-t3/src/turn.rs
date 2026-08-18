@@ -80,15 +80,28 @@
 //! flagged in the producer's own source). So the re-validation is where a fresh
 //! credential becomes **available**, not where a live pipeline is refreshed.
 //!
-//! The consequence, and it is a real one: for a single continuous peer
-//! connection the TTL is a **ceiling**, not a sliding window. Past it, that
-//! connection can no longer allocate or refresh a relay, and the screen goes
-//! black with nothing user-visible to explain it. A *new* viewer is unaffected
-//! (new connection, new pipeline, new credential). Whether the answer is
-//! renegotiation or accepting the TTL as a session ceiling is a live-fire
-//! question, and it is carried as a LIVE-5c acceptance criterion rather than
-//! guessed at here — [`DEFAULT_TURN_CREDENTIAL_TTL_SECONDS`] is sized on the
-//! assumption that it is a ceiling.
+//! The consequence is narrower than an earlier revision of this header
+//! reasoned. That revision called the TTL a **ceiling on one continuous
+//! stream** — past it, the argument went, the connection loses its relay and
+//! the screen goes black. LIVE-5c measured it (PR #1570) and the measurement
+//! said no: coturn checks the REST username's expiry **only when an
+//! allocation is created**, never on an existing allocation's REFRESH, so a
+//! 60-second credential carried a relay-only stream through a 200-second soak
+//! with 10/10 typed beats delivered (the last at t+180s). The TTL bounds *when
+//! a new allocation can be opened*, not how long a live stream may run — which
+//! is why no remint machinery (ICE renegotiation) exists here: option (b) of
+//! the LIVE-5c follow-up was adopted, and what was wrong was the narrative,
+//! not the code.
+//!
+//! The case that remains, recorded so it is not rediscovered: a **mid-session
+//! re-ALLOCATE** — which in practice means an **ICE restart** — authenticates
+//! like any fresh ALLOCATE and therefore needs a credential valid *at that
+//! moment*. Nothing in this codebase performs an ICE restart yet; the day
+//! something does, that is the point where a remint hook must be added (mint
+//! on restart, not on a timer — the fresh credential every 30-second
+//! re-validation already serves is exactly what such a hook would install). A
+//! *new* viewer needs no such hook (new connection, new pipeline, new
+//! credential minted on attach).
 //!
 //! Both copies carry the **same subject**, so the two ends of one media path
 //! appear in coturn's log under one username — which is the whole point of
@@ -116,12 +129,14 @@ use uuid::Uuid;
 /// The default lifetime of a minted credential.
 ///
 /// Bounded from **below** by the thing that would break: coturn checks the
-/// expiry when an allocation is created *and* when it is refreshed, and neither
-/// end refreshes the credential on a live pipeline (module header), so this
-/// number is how long one continuous viewing session can last before the media
-/// stops with no user-visible cause. One hour covers a login handoff and a
-/// debugging sit-in, which are the two things anyone actually does on a live
-/// screen.
+/// expiry **only when an allocation is created** — an existing allocation's
+/// REFRESH does not re-check it (LIVE-5c, PR #1570) — so this number is the
+/// window in which a handed-out credential can still open a *new* allocation:
+/// the attach-to-connect gap, plus any future mid-session re-ALLOCATE (ICE
+/// restart — module header). It is **not** how long a continuous viewing
+/// session can last; a stream that allocated inside the window keeps running
+/// past the expiry. One hour covers the slowest plausible attach-to-connect
+/// gap with room to spare.
 ///
 /// Bounded from **above** by what a leaked username+password is worth: an hour
 /// of relay on one instance, scoped to a session id an operator can grep. The

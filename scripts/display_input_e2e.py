@@ -502,13 +502,17 @@ def watch_revoke(viewer: "Viewer", peer: Peer, args) -> int:
 def soak(viewer: "Viewer", args) -> int:
     """Hold one control session open and keep asking whether it still delivers.
 
-    THE MEASUREMENT LIVE-5c OWES (`unverified.credentialCeiling`). The server
-    re-mints the relay credential on every re-validate; the producer installs one
-    at pipeline construction and throws the rest away, because GStreamer cannot
-    swap a TURN server on a running ICE agent. That makes the credential's TTL a
-    ceiling on the PEER CONNECTION rather than a sliding window — and the failure
-    it produces is silent, so the only honest way to describe it is to watch one
-    session cross the line.
+    THE MEASUREMENT LIVE-5c OWED (`credentialCeiling` — resolved by this soak,
+    PR #1570). The server re-mints the relay credential on every re-validate;
+    the producer installs one at pipeline construction and throws the rest
+    away, because GStreamer cannot swap a TURN server on a running ICE agent.
+    The hypothesis was that this makes the credential's TTL a ceiling on the
+    PEER CONNECTION — and the measurement REFUTED it: coturn checks the REST
+    username's expiry only at ALLOCATE, never on an existing allocation's
+    REFRESH, so a 60s-TTL session held a 200s soak with 10/10 beats delivered
+    (relay-only, last beat t+180s). The soak stays runnable as the regression
+    instrument for that claim: if a relay ever starts enforcing expiry on
+    REFRESH (config drift, a coturn upgrade), this is what notices.
 
     A beat is a typed line, not a ping: what is being measured is whether a
     PERSON's keystroke still arrives, which is the thing that stops working.
