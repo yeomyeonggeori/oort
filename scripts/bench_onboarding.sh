@@ -13,9 +13,31 @@
 #   M2  first-login    POST /v1/auth/login 이 accessToken을 준다
 #   M3  first-message  메시지가 커밋되고 **outbox가 비워진다**(레일까지 갔다는 증거)
 #   M4  first-agent    에이전트 member 생성 + 채널 합류 + 베어러 발급
+#   M5  first-reply    그 에이전트를 멘션해서 **에이전트가 쓴 메시지가 채널에 뜬다**
 #
 # 왜 outbox까지 보나: relay는 성공 publish를 로그하지 않는다(SELF_HOST.md §막히면).
 # "화면에 떴다"의 서버측 증거는 로그가 아니라 `outbox` 질의뿐이다.
+#
+# 왜 M5가 M4와 따로인가 (#1534)
+# ------------------------------
+# M4는 **신원**이다 — 에이전트라는 member가 생기고 채널에 들어가고 베어러를 받는다.
+# dsh의 "키 입력 후 첫 태스크"에 대응하는 지점은 거기가 아니라 **그 에이전트가
+# 실제로 한 마디 하는 순간**이고, #1526 실측에서 4회전 모두 "도달 불가"였던 것도
+# 이 마일스톤이다(PUT /v1/provider/link 403 → 키를 저장할 방법이 없었다).
+#
+# M5의 성립 조건은 **에이전트가 author인 메시지가 채널에 나타나는 것**이다. 그
+# 메시지가 답변인지 실패 고지인지는 시간과 별개의 사실이라 판정으로 따로 적는다:
+#
+#   ANSWERED  프로바이더가 실제로 답했다 (--provider-base-url/--provider-bearer)
+#   NOTICE    루프는 끝까지 돌았고 워커가 실패를 채널에 고지했다 — 키 없는 기본
+#             측정에서 나오는 정직한 값이다. 재시도 소진(기본 8회, 누적 backoff
+#             1+2+4+8+16+32+60+60초)을 포함하므로 답변 지연이 아니라 **상한**이다
+#   BLOCKED   아무 메시지도 나타나지 않았다 — 에이전트가 깨어나지 못했다
+#
+# 자격증명 없이 ANSWERED를 만드는 방법은 오늘 없다: 셀프호스트 env는
+# MOMO_ENV=staging 이고 그 환경에서 프로바이더 baseUrl은 외부 https만 허용된다
+# (루프백 허용은 미결정 — 실측 보고서 F2). 그래서 기본 측정은 NOTICE를 재고,
+# ANSWERED는 실제 엔드포인트를 넘겼을 때만 나온다. 둘을 같은 칸에 적지 않는다.
 #
 # 왜 1회로 끝내지 않나
 # --------------------
@@ -62,6 +84,14 @@ PROJECT_PREFIX="oort-bench"
 STACK_TIMEOUT="${BENCH_STACK_TIMEOUT:-3600}"
 HTTP_TIMEOUT="${BENCH_HTTP_TIMEOUT:-30}"
 RAIL_TIMEOUT="${BENCH_RAIL_TIMEOUT:-60}"
+# M5는 재시도 소진까지 기다릴 수 있어야 한다: 워커 기본 8회전의 누적 backoff가
+# 183초다. 그보다 짧은 상한은 "아직 안 왔다"를 "안 온다"로 바꿔 적는다.
+REPLY_TIMEOUT="${BENCH_REPLY_TIMEOUT:-300}"
+# 기본 엔드포인트는 **닿지 않는 주소**다(.invalid는 예약 TLD라 NXDOMAIN이 확정).
+# 키가 저장되는지와 루프가 끝까지 도는지를 재는 것이 기본 측정의 목적이고,
+# 실제 답변을 재려면 아래 두 옵션으로 진짜 엔드포인트를 넘긴다.
+PROVIDER_BASE_URL="${BENCH_PROVIDER_BASE_URL:-https://provider.invalid/v1}"
+PROVIDER_BEARER="${BENCH_PROVIDER_BEARER:-sk-bench-0000000000000000abcd}"
 
 usage() {
   cat <<'EOF'
@@ -80,14 +110,21 @@ Options:
                           받는 "정말 처음 받는 사람"의 시간. 네트워크에 지배된다.
   --keep                  마지막 회전의 스택을 내리지 않는다(손으로 이어보기용).
   --published-image REF   digest pull 모드로 잰다 (ghcr.io/yeomyeonggeori/oort@sha256:...).
-  --skip-agent            M4(첫 에이전트)와 A1(provider key) 감사를 건너뛴다.
+  --skip-agent            M4·M5와 A1(provider key) 감사를 건너뛴다.
+  --provider-base-url URL 에이전트/AI 연결이 쓸 OpenAI 호환 엔드포인트. 기본은
+                          닿지 않는 https://provider.invalid/v1 — 실제 답변(M5
+                          ANSWERED)을 재려면 진짜 주소를 넘긴다.
+  --provider-bearer KEY   위 엔드포인트의 키. argv에 남으므로 공유 호스트에서는
+                          BENCH_PROVIDER_BEARER 환경변수를 쓴다.
+  --reply-timeout SEC     M5 상한 (기본 300 — 워커 재시도 소진이 183초다).
   --evidence-root DIR     증거 루트 (기본 ${TMPDIR:-/tmp}/oort-onboarding-bench).
   --stack-timeout SEC     스택 기동 상한 (기본 3600).
   -h, --help
 
 Environment:
   BENCH_ONBOARDING_EVIDENCE_ROOT, BENCH_STACK_TIMEOUT, BENCH_HTTP_TIMEOUT,
-  BENCH_RAIL_TIMEOUT
+  BENCH_RAIL_TIMEOUT, BENCH_REPLY_TIMEOUT, BENCH_PROVIDER_BASE_URL,
+  BENCH_PROVIDER_BEARER
 EOF
 }
 
@@ -106,6 +143,9 @@ while [ $# -gt 0 ]; do
     --keep) KEEP=1; shift ;;
     --skip-agent) SKIP_AGENT=1; shift ;;
     --published-image) IMAGE_MODE="published-digest"; PUBLISHED_IMAGE="$2"; shift 2 ;;
+    --provider-base-url) PROVIDER_BASE_URL="$2"; shift 2 ;;
+    --provider-bearer) PROVIDER_BEARER="$2"; shift 2 ;;
+    --reply-timeout) REPLY_TIMEOUT="$2"; shift 2 ;;
     --evidence-root) EVIDENCE_ROOT="$2"; shift 2 ;;
     --stack-timeout) STACK_TIMEOUT="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
@@ -117,6 +157,16 @@ case "$REPEAT" in
   ''|*[!0-9]*) echo "[bench] --repeat 는 양의 정수여야 한다." >&2; exit 2 ;;
 esac
 [ "$REPEAT" -ge 1 ] || { echo "[bench] --repeat 는 1 이상이어야 한다." >&2; exit 2; }
+case "$REPLY_TIMEOUT" in
+  ''|*[!0-9]*) echo "[bench] --reply-timeout 는 양의 정수여야 한다." >&2; exit 2 ;;
+esac
+[ "$REPLY_TIMEOUT" -ge 1 ] || { echo "[bench] --reply-timeout 는 1 이상이어야 한다." >&2; exit 2; }
+case "$PROVIDER_BASE_URL" in
+  https://*) ;;
+  # 셀프호스트 env는 MOMO_ENV=staging 이고 그 환경의 write gate는 외부 https만
+  # 받는다. 여기서 먼저 거절하지 않으면 스택을 다 띄운 뒤 P6에서 400을 만난다.
+  *) echo "[bench] --provider-base-url 은 https:// 로 시작해야 한다(staging write gate)." >&2; exit 2 ;;
+esac
 
 log() { printf '[bench] %s\n' "$*"; }
 fail() { printf '[bench] ERROR: %s\n' "$*" >&2; exit 1; }
@@ -200,13 +250,20 @@ print_plan() {
   P4 workspace    GET /v1/workspaces/{ws} · GET .../channels
   P5 message      POST .../messages → outbox가 'broadcast|done' 으로 비워질 때까지
   P6 agent        POST .../agents → POST .../channels/{ch}/members → POST .../credentials
+  P7 reply        PUT /v1/provider/link(=A1) → '@handle' 멘션 → 에이전트가 author인
+                  메시지가 채널에 나타날 때까지 (상한 ${REPLY_TIMEOUT}s)
 
 마일스톤 (t0 = P1 시작)
 
   M1 first-screen   = P1+P2
   M2 first-login    = M1+P3
   M3 first-message  = M2+P4+P5
-  M4 first-agent    = M3+P6
+  M4 first-agent    = M3+P6      (신원 — 에이전트 member·합류·베어러)
+  M5 first-reply    = M4+P7      (발화 — 에이전트가 쓴 메시지가 채널에)
+
+프로바이더
+
+  엔드포인트    $PROVIDER_BASE_URL$([ "$PROVIDER_BASE_URL" = "https://provider.invalid/v1" ] && echo "  (기본 — 닿지 않는다. M5는 NOTICE 상한을 잰다)" || echo "  (실제 엔드포인트 — M5는 ANSWERED를 잰다)")
 
 기본값 감사
 
@@ -217,6 +274,7 @@ print_plan() {
   A5 로그인 워크스페이스 칸  빈 칸 / 쓰레기 값 / 정확한 UUID 세 경우의 서버 응답
   A6 에이전트 엔드포인트 게이트  루프백 http baseUrl 이 받아들여지나(노트북의 로컬 모델)
   A7 시드 계정          공개 기본 비밀번호가 잠겼나
+  A8 첫 에이전트 응답    멘션한 에이전트가 채널에서 말을 하나 (ANSWERED/NOTICE/BLOCKED)
 
 정리
 
@@ -561,6 +619,7 @@ PY
 
   if [ "$SKIP_AGENT" -eq 1 ]; then
     emit_audit "$cycle" A1 SKIP "--skip-agent"
+    emit_audit "$cycle" A8 SKIP "--skip-agent"
     emit_audit "$cycle" A3 INFO "왕복 수: M2=1 · M3=+3 (workspace·channels·message) · M4=미측정"
     finish_cycle "$cycle" "$cdir"
     return 0
@@ -581,7 +640,7 @@ PY
   local loopback_body https_body loopback_code
   loopback_body="$(jq -cn --arg h "$handle" --arg d "onboarding bench agent" \
     '{displayName:$d,handle:$h,model:"hermes-agent",baseUrl:"http://127.0.0.1:11434/v1"}')"
-  https_body="$(printf '%s' "$loopback_body" | jq -c '.baseUrl="https://provider.invalid/v1"')"
+  https_body="$(printf '%s' "$loopback_body" | jq -c --arg u "$PROVIDER_BASE_URL" '.baseUrl=$u')"
   loopback_code="$(curl -sS -o "$cdir/p6-loopback.json" -w '%{http_code}' --max-time "$HTTP_TIMEOUT" \
     -X POST "$base/v1/workspaces/$ws/agents" -H "Authorization: Bearer $access" \
     -H 'Content-Type: application/json' -d "$loopback_body" || echo 000)"
@@ -599,6 +658,7 @@ PY
     emit_timing "$cycle" P6 agent "$(( t1 - t0 ))" "createAgent 실패 — 본문 p6-agent.json"
     emit_audit "$cycle" A3 INFO "왕복 수: M2=1 · M3=+3 · M4=createAgent에서 막힘"
     emit_audit "$cycle" A1 SKIP "에이전트 생성 실패로 provider 감사 미수행"
+    emit_audit "$cycle" A8 BLOCKED "createAgent에서 막혀 멘션할 상대가 없다 — M5 미도달"
     log "P6 agent      실패 — 증거: $cdir/p6-agent.json"
     finish_cycle "$cycle" "$cdir"
     return 0
@@ -623,13 +683,16 @@ PY
   # ---- A1 키 반영 무재시작 -------------------------------------------------
   # ADR-0004: provider 자격증명은 유입되지 않는다. 그래서 이 감사가 묻는 것은
   # "키가 어디에 사나"이다 — 프로세스 env면 재시작이 필요하고, 행이면 아니다.
+  #
+  # P7이 이 뒤에 오는 것은 순서가 아니라 인과다: 키가 저장되기 전에 멘션하면
+  # 워커는 자격증명 없음으로 끝나고, 그때 잰 M5는 "키를 넣은 사람의 시간"이 아니다.
   local put_code get_before get_after tail_after api_started_after
   get_before="$(curl -sS -o "$cdir/a1-get-before.json" -w '%{http_code}' --max-time "$HTTP_TIMEOUT" \
     -H "Authorization: Bearer $access" "$base/v1/provider/link" || echo 000)"
   put_code="$(curl -sS -o "$cdir/a1-put.json" -w '%{http_code}' --max-time "$HTTP_TIMEOUT" \
     -X PUT "$base/v1/provider/link" -H "Authorization: Bearer $access" \
     -H 'Content-Type: application/json' \
-    -d "$(jq -cn '{baseUrl:"https://provider.invalid/v1",bearer:"sk-bench-0000000000000000abcd"}')" || echo 000)"
+    -d "$(jq -cn --arg u "$PROVIDER_BASE_URL" --arg b "$PROVIDER_BEARER" '{baseUrl:$u,bearer:$b}')" || echo 000)"
   get_after="$(curl -sS -o "$cdir/a1-get.json" -w '%{http_code}' --max-time "$HTTP_TIMEOUT" \
     -H "Authorization: Bearer $access" "$base/v1/provider/link" || echo 000)"
   tail_after="$(jq -r '.bearerLast4 // .link.bearerLast4 // empty' "$cdir/a1-get.json" 2>/dev/null || true)"
@@ -638,8 +701,70 @@ PY
     emit_audit "$cycle" A1 PASS "PUT $put_code · GET $get_after · bearerLast4=$tail_after · api StartedAt 불변 → 재시작 불요"
   elif [ "$put_code" = "403" ] || [ "$put_code" = "401" ]; then
     emit_audit "$cycle" A1 BLOCKED "GET $get_before · PUT /v1/provider/link → $put_code (MOMO-583 인스턴스 오퍼레이터 게이트). 셀프호스트 첫 owner는 AI 연결을 저장할 수 없다."
+  elif [ "$put_code" = "503" ]; then
+    emit_audit "$cycle" A1 BLOCKED "GET $get_before · PUT /v1/provider/link → 503 — api가 PROVIDER_LINK_MASTER_KEY 없이 떴다(정본 compose의 api가 그 키를 읽지 않으면 게이트를 열어도 저장할 곳이 없다)."
   else
     emit_audit "$cycle" A1 FAIL "PUT $put_code · GET $get_after · bearerLast4='$tail_after' · api StartedAt $api_started_before → $api_started_after"
+  fi
+
+  # ---- P7 첫 에이전트 응답 (M5) --------------------------------------------
+  # M4까지는 신원이다. 사람이 기다리는 것은 그 신원이 **말을 하는 순간**이고,
+  # 그 성립 조건은 하나뿐이다: 에이전트가 author인 메시지가 채널에 나타난다.
+  # 답변인지 실패 고지인지는 시간과 별개의 사실이라 판정으로 분리한다.
+  t0="$(now_ms)"
+  local mention_json mention_id reply_deadline reply_json reply_entry reply_body reply_code_prop
+  local reply_found=0 reply_verdict="BLOCKED"
+  mention_json="$(auth_post "/v1/workspaces/$ws/channels/$channel_id/messages" \
+    "$(jq -cn --arg c "$(uuidgen | tr '[:upper:]' '[:lower:]')" --arg h "$handle" \
+      '{clientMsgId:$c,body:("@" + $h + " onboarding bench: 한 문장으로 대답해줘.")}')")" \
+    || mention_json='{}'
+  mention_id="$(printf '%s' "$mention_json" | jq -r '.id // .message.id // empty')"
+  printf '%s' "$mention_json" > "$cdir/p7-mention.json"
+  if [ -z "$mention_id" ]; then
+    t1="$(now_ms)"
+    emit_timing "$cycle" P7 reply "$(( t1 - t0 ))" "멘션 전송 실패 — 본문 p7-mention.json"
+    emit_audit "$cycle" A8 BLOCKED "멘션 메시지를 보내지 못했다 — 증거: p7-mention.json"
+    log "P7 reply      멘션 전송 실패"
+    finish_cycle "$cycle" "$cdir"
+    return 0
+  fi
+
+  reply_deadline=$(( $(date -u +%s) + REPLY_TIMEOUT ))
+  while [ "$(date -u +%s)" -le "$reply_deadline" ]; do
+    reply_json="$(auth_get "/v1/workspaces/$ws/channels/$channel_id/messages" 2>/dev/null || echo '{}')"
+    # 에이전트가 author인 첫 메시지를 **한 스냅샷에서** 통째로 집는다. 본문과
+    # error_code를 각각 다시 질의하면 스트리밍 중인 행을 서로 다른 시점에서 보게
+    # 되고, 그러면 "답변인데 실패로 적힌" 판정이 나올 수 있다.
+    reply_entry="$(printf '%s' "$reply_json" | jq -c --arg a "$agent_id" '
+      [ (if type=="array" then .[] else (.messages // [])[] end)
+        | select((.authorMemberId // "") == $a) ] | first // empty
+    ' 2>/dev/null || echo "")"
+    if [ -n "$reply_entry" ]; then reply_found=1; break; fi
+    sleep 2
+  done
+  t1="$(now_ms)"
+  local p7=$(( t1 - t0 ))
+  emit_timing "$cycle" P7 reply "$p7" "'@$handle' 멘션 → 에이전트 메시지"
+  if [ "$reply_found" -eq 1 ]; then
+    reply_body="$(printf '%s' "$reply_entry" | jq -r '.body // ""' 2>/dev/null || echo "")"
+    reply_code_prop="$(printf '%s' "$reply_entry" | jq -r '.props.error_code // ""' 2>/dev/null || echo "")"
+    printf '%s' "$reply_entry" > "$cdir/p7-reply.json"
+    local m5=$(( m4 + p7 ))
+    emit_timing "$cycle" M5 first-reply "$m5" "에이전트가 쓴 첫 메시지"
+    if [ -n "$reply_code_prop" ]; then
+      reply_verdict="NOTICE"
+      emit_audit "$cycle" A8 NOTICE "$(fmt_ms "$m5") — 루프는 끝까지 돌았고 워커가 실패를 고지했다(error_code=$reply_code_prop, endpoint=$PROVIDER_BASE_URL). 재시도 소진을 포함한 상한이다."
+    else
+      reply_verdict="ANSWERED"
+      emit_audit "$cycle" A8 ANSWERED "$(fmt_ms "$m5") — 프로바이더가 답했다($PROVIDER_BASE_URL). 본문 앞 40자: $(printf '%s' "$reply_body" | cut -c1-40)"
+    fi
+    log "P7 reply      $(fmt_ms "$p7")   → M5 첫 에이전트 응답 $(fmt_ms "$m5") [$reply_verdict]"
+  else
+    compose exec -T postgres psql -U momo -d momo -c \
+      "SELECT kind, status, attempts, left(coalesce(last_error,''), 160) AS last_error FROM outbox WHERE kind = 'agent_job' ORDER BY id DESC LIMIT 5;" \
+      > "$cdir/p7-agent-job.txt" 2>&1 || true
+    emit_audit "$cycle" A8 BLOCKED "${REPLY_TIMEOUT}초 안에 에이전트가 쓴 메시지가 없다 — agent_job 상태는 p7-agent-job.txt"
+    log "P7 reply      $(fmt_ms "$p7")   → M5 도달 불가"
   fi
 
   # ---- A7 시드 계정 ---------------------------------------------------------
