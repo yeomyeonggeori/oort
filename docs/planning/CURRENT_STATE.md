@@ -1,5 +1,18 @@
 # oort 기획 현재 상태 (Planning Current State)
 
+> **2026-08-18 스냅샷 36 (Fable · momo-main — 파도 6 완주·★LIVE-5a 랜딩. PLN-20260815-01).** 컴팩트 복원 진입점.
+>
+> **★ LIVE-5a 랜딩**: ephemeral TURN(use-auth-secret HMAC·capability 동봉·TTL 24h clamp)·control 내구 투영(원장 SoT+4투영 lease 절·마이그 077 가산)·observation 전환 원자성+owner_only owner 예외 — **engine=`c9a390d9`**. grok 보안 freeze 경계 전부 닫힘. 잔여 2: ①릴레이 use-auth-secret 켜기=**#1545(성재 손 — 런북 §6 복붙 절차·SSH 22가 운영자 IP 한정)** ②producer remint 실측=5c AC.
+> **파도 6 완주(5/5)**: +#1525(docs 명령 게이트)·#1526(온보딩 실측 — F1 뿌리=#1534)·#1527(컨텍스트 규율 정본)·#1502(in-flight 6사이트).
+>
+> **다음 작업=LIVE-5b 편성**(웹 직접 조작 UI: LIVE-4 딥링크 진입·입력 포워딩 datachannel·자격 비관측 클라 보증·실패 auto-return·오버레이 설계·design-review). 5c(실기동 E2E — remint 실측 포함)는 5b 후. 편성 정본=`handoffs/2026-08-17-live-5-direct-control-ux-plan.md`.
+>
+> **구조 정비 항목(위임 검토)**: engine→main 코드 승격 81+커밋 미실행 — base 사고들의 뿌리(main 동기화 위임은 memory `momo-opus-implementation-pipeline` — 게이트 그린·랜딩 단위). 승격 시 #1464·#1525 게이트가 main에도 도달.
+>
+> **자율 큐**: #1534(T1 온보딩 선행)·#1535·#1536·#1541~#1543(busy/사유/착지)·#1510·#1511·#1515·#1516·#1449·#1396·#1392·#1405·#1400·#1381·#1450·#1452. **성재 손(비차단)**: #1545(릴레이)·#1361(pairing)·배포 검증 1왕복.
+>
+> 이하 스냅샷 35:
+
 > **2026-08-18 스냅샷 35 (Fable · momo-main — ★발사 준비 완료(armed)·정지 중. PLN-20260815-01).** 컴팩트 복원 진입점.
 >
 > **★ 정지 중·발사 준비 완료**: 재개=성재 자유 발화. 재개 즉시 실행 순서 — ①**#1524 LIVE-5a 발사**(패킷 `handoffs/2026-08-18-live-5a-engine-packet.md` — ephemeral TURN(use-auth-secret 권장)·control 내구 투영(원장 SoT+조인 권고)·observation 원자성+owner 예외. ADR 전부 Accepted·이슈 binding 완료) ②병렬 위생 파도 후보: #1525(dsh-A 드리프트 게이트)·#1526(dsh-B 온보딩 실측)·#1527(dsh-H 반면교사)+기존 #1502·#1510·#1511 등. 5a→5b(웹 조작 UI·오버레이 설계)→5c(실기동 E2E) 순차.
