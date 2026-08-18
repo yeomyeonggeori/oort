@@ -161,9 +161,13 @@ services:
 
   # prod :142. Env names are the prod names; the values differ only in that the
   # keys this server does not read are not injected at all:
-  #   * HERMES_*/AGENT_*/S3/webhook+provider master keys — no route consumes
-  #     them yet, and an unread secret in the environment is pure exposure.
+  #   * HERMES_*/AGENT_*/S3/webhook master keys — no route consumes them yet,
+  #     and an unread secret in the environment is pure exposure.
   # They come back with the batch that implements the feature.
+  #
+  # #1534 removed `provider` from that list: `routes/provider_link.rs` does
+  # consume PROVIDER_LINK_MASTER_KEY, so withholding it was not minimalism but a
+  # 503 nobody had measured. See the block beside the two keys below.
   #
   # B4 adds the two Centrifugo keys the api reads for *authorization*:
   # CENT_TOKEN_HMAC signs connection tokens and CENT_PROXY_SECRET authenticates
@@ -211,6 +215,38 @@ services:
       # (503), which is why neither line uses the `:?` required form.
       CENT_API_URL: http://centrifugo:8000/api
       CENT_API_KEY: ${CENT_API_KEY:-}
+      # #1534 — the two keys the 설정 › AI 연결 family needs on the *api*, both
+      # absent here until now. The header above says the provider master key is
+      # withheld because "no route consumes them yet"; that sentence stopped
+      # being true when `routes/provider_link.rs` landed, and the gap is what
+      # made the self-host path unable to reach a first agent answer at all
+      # (#1526 실측 F1/F1a: `PUT /v1/provider/link` 403, and after the gate opens,
+      # 503).
+      #
+      #   PROVIDER_LINK_MASTER_KEY — encrypts the stored operator bearer at rest
+      #     (ADR-0004 증보 1). Absent ⇒ the six AI-연결 routes answer 503, because
+      #     a 200 would have to invent a bearer state (provider_link.rs:85). The
+      #     agent-worker below already gets it from the same variable, so api and
+      #     worker cannot disagree about which key opened the row.
+      #   PLATFORM_ADMIN_EMAILS — the MOMO-583 instance-operator allow-list,
+      #     comma-separated and compared lowercased against a *verified* address
+      #     (`routes/shared.rs::require_instance_operator`). Empty grants the
+      #     instance-global surfaces (AI 연결 · `POST /v1/workspaces`) to nobody,
+      #     and a self-hosted stack can never mint the `platform:read` token that
+      #     is the only other way in — so an empty list is a permanent 403 for the
+      #     very operator who installed the instance. `scripts/self_host_env.sh`
+      #     now writes this line with the first owner's address.
+      #
+      # Both use the optional `:-` form: an un-updated deployment that sets
+      # neither keeps exactly its current behaviour (503 / 403), and the deploy
+      # overlay `t3.override.yml` still restates PLATFORM_ADMIN_EMAILS as
+      # required for the platform surfaces it opens.
+      #
+      # Changing the allow-list needs an api **restart** — it is process env, not
+      # a row. The provider key itself does not: it lives in the database and the
+      # worker re-reads it within its 2 s cache window (docs/SELF_HOST.md §5).
+      PROVIDER_LINK_MASTER_KEY: ${PROVIDER_LINK_MASTER_KEY:-}
+      PLATFORM_ADMIN_EMAILS: ${PLATFORM_ADMIN_EMAILS:-}
       # MOMO-605 / DESK-1. Empty (the default) means the CORS layer is not
       # mounted at all, which is exactly the web deployment's same-origin case.
       # A value is required only for non-browser origins — the Tauri desktop
