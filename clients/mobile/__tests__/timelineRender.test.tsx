@@ -162,9 +162,13 @@ describe('네 가지 상태', () => {
   });
 
   it('빈 채널은 코어의 문구로 다음 할 일을 말한다', () => {
+    // 문구의 정본은 코어다 (#1536 — 첫 행동을 초대에서 첫 메시지로 옮겼다). 이
+    // 화면은 아직 액션 버튼을 그리지 않는다: `EmptyState` 아톰에 액션 자리가
+    // 없어서 빈 DM 도 버튼이 없다. 그래서 폰에서 바뀌는 것은 문장뿐이고, 그 문장이
+    // 가리키는 컴포저는 이 화면 바로 아래에 이미 서 있다.
     renderTimeline({messages: [], status: 'ready', channelKind: 'public'});
     expect(screen.getByTestId('timeline-empty')).toBeTruthy();
-    expect(screen.getByText('이 채널을 함께 시작하세요.')).toBeTruthy();
+    expect(screen.getByText('이 채널을 첫 메시지로 시작하세요.')).toBeTruthy();
   });
 
   it('빈 DM 은 채널과 다른 말을 한다 — 참여자를 더할 수 없으므로', () => {
