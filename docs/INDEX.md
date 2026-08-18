@@ -100,6 +100,7 @@
 | [`docs/adr/0101-agent-identity-credentials.md`](adr/0101-agent-identity-credentials.md) | **에이전트 신원 ADR(Accepted — Option A)**: 공유 시크릿 → per-agent `agent_bearer` + Phase 2 delegation. 구현: MOMO-337~339 | M1/보안 |
 | [`docs/adr/0102-agent-execution-path.md`](adr/0102-agent-execution-path.md) | **에이전트 실행 경로 ADR(Accepted — Option C)**: gateway=BYOA / worker=managed 이중 경로 + 서버 소유 보장 매트릭스 + SD-5 소급 승인 | M1/에이전트 |
 | [`docs/architecture/overview.md`](architecture/overview.md) | **아키텍처 정본**: 불변식 6개 + 시스템/수명주기/엔티티 mermaid 다이어그램 + 판정 요약 + ADR 결정 큐. 어긋나는 코드 변경은 같은 PR에서 갱신 | 전반 |
+| [`docs/architecture/agent-context-discipline.md`](architecture/agent-context-discipline.md) | **에이전트 컨텍스트 규율 정본**: 서버가 매 턴 싣는 시스템 블록의 실측표(현행 8줄/627자) + 규율 R1~R6(열거·상한·opt-out·**바이트 동일** 증명·소비자 계약 결속·트림 밖 항구비용) + dsh 반면교사 매핑. 시스템 블록을 바꾸는 PR은 §1 표를 같은 PR에서 갱신 | 전반/에이전트 |
 | [`docs/architecture/bible/README.md`](architecture/bible/README.md) | **메신저 아키텍처 바이블(학습용 파생 문서, 정본 아님)**: 문제 지도 M1~M11 + oort 뼈대 해설 + Slack/Discord/셀프호스팅 계열 비교 + 결정 큐 대조 — 정본과 어긋나면 정본 우선 | 전반 |
 | [`docs/ux-bible/README.md`](ux-bible/README.md) | **UX 바이블 정본**: Slack 코퍼스 36선 기반 원칙 P1~P15 — UI/UX 티켓 수용기준이 원칙 번호를 인용 | M3+ |
 | [`docs/design-system/README.md`](design-system/README.md) | **디자인 시스템 정본 「오르트 구름」(ADR-0159)**: 토큰 층(웹 정본 → 폰 번역)·위계 규칙(파괴>주>보조)·상태 규칙 4종·**강제 기제 지도(무엇을 무엇이 재고 무엇이 무검사인가)**·스케일 변경 절차 | M3+ |
