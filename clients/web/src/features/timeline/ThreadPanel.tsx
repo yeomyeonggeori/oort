@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { X } from "lucide-react";
 import { fetchThreadReplies, type Message } from "@momo/core/lib/api";
 import type { Directory } from "@/features/workspace/useWorkspace";
+import type { OpenWorkSession } from "@/features/work/openWorkSession";
 import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/States";
 import { startsAuthorGroup } from "@momo/core/features/timeline/model";
 import { MessageRow, type MessageRowActions } from "./MessageRow";
@@ -40,7 +41,7 @@ export function ThreadPanel({
   reactions?: ReactionMap;
   /** 이슈 #1112 — a reply is pinned from where it is read, like every other action. */
   pins?: PinMap;
-  onOpenWorkSession?: (sessionId: string) => void;
+  onOpenWorkSession?: OpenWorkSession;
   onClose: () => void;
 }) {
   const query = useQuery({

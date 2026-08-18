@@ -14,6 +14,7 @@ import {
   type RosterMember,
 } from "@momo/core/lib/api";
 import type { Directory } from "@/features/workspace/useWorkspace";
+import type { OpenWorkSession } from "@/features/work/openWorkSession";
 import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/States";
 import { Button } from "@/design/ui/button";
 import {
@@ -221,7 +222,7 @@ export function Timeline({
    * 것을 목록에게 묻는다 — 무엇이 로드돼 있고 그중 무엇이 지금 창 밖인지.
    */
   jumpHandleRef?: MutableRefObject<TimelineJump | null>;
-  onOpenWorkSession?: (sessionId: string) => void;
+  onOpenWorkSession?: OpenWorkSession;
   onResend?: (message: Message) => Promise<void> | void;
   onResendPending?: (clientMsgId: string) => Promise<void> | void;
   onInviteMember?: () => void;

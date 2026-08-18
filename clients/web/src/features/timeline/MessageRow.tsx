@@ -86,6 +86,7 @@ import {
 import { useLongPress } from "./useLongPress";
 import { rememberLongPressLearned } from "./LongPressHint";
 import { WorkSessionIdleCard } from "@/features/work/WorkSessionIdleCard";
+import type { OpenWorkSession } from "@/features/work/openWorkSession";
 import { workSessionIdleNotice } from "@momo/core/features/work/workSessionModel";
 
 // =============================================================================
@@ -290,7 +291,7 @@ export function MessageRow({
    * 네트워크를 다시 때리지 않는다.
    */
   quoteLookup?: (messageId: string) => Message | undefined;
-  onOpenWorkSession?: (sessionId: string) => void;
+  onOpenWorkSession?: OpenWorkSession;
   /** Re-send a row the server marked `failed` (the composer's send path). */
   onResend?: (message: Message) => Promise<void> | void;
   /**

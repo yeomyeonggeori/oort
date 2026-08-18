@@ -113,11 +113,27 @@ export function DisplayObserver({
   session,
   hostName,
   headingLevel = 4,
+  controlInvite = null,
 }: {
   session: WorkSession;
   hostName: string | null;
   /** Follows the WorkSessionDetail heading in its route or panel context. */
   headingLevel?: 3 | 4;
+  /**
+   * The way into 직접 조작, rendered as an opaque node (LIVE-5b).
+   *
+   * A SLOT AND NOT A CALLBACK, deliberately. Every absence this file's header
+   * claims — no input handler, no datachannel, no encoder for the viewer word
+   * that carries input — is held by `displayStream.test.ts` reading this source,
+   * and the claims stay mechanically checkable only while nothing about control
+   * is spelled here. A node arrives already built by `DisplayController.tsx`,
+   * which is where the reviewer for control is meant to be looking.
+   *
+   * Null when there is nobody to offer it to. That is the caller's judgement
+   * (`controlAffordance`), and it is a judgement about a person rather than
+   * about this stream, which is the other reason it is not decided here.
+   */
+  controlInvite?: React.ReactNode;
 }) {
   const { session: auth, workspaceId } = useSession();
   const queryClient = useQueryClient();
@@ -878,6 +894,17 @@ export function DisplayObserver({
           )}
         </div>
       )}
+
+      {/* 직접 조작으로 가는 문 (LIVE-5b). 마지막에 서는 이유는 위의 전부가
+          「지금 무엇을 볼 수 있는가」이고 이것만 「무엇을 할 수 있는가」이기
+          때문이다. 볼 수 없는 세션에도 설 수 있다: 조작이 왜 안 되는지는 화면이
+          왜 안 보이는지와 같은 사실이 아니고, 어느 쪽도 상대를 대신 설명하지
+          않는다.
+
+          래퍼가 없다. 노드가 스스로 여백까지 들고 오거나 아무것도 아니거나
+          둘 중 하나여야, 아무에게도 보일 것이 없는 세션에서 빈 띠 하나가
+          남지 않는다 (승인 카드의 note 슬롯이 배운 것과 같다). */}
+      {controlInvite}
     </section>
   );
 }
