@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Message, QuotedMessage } from "../../lib/api";
 import { payloadToMessage } from "../../lib/realtimeEvents";
 import { hasRenderableBody } from "./bodySlot";
+import { COMPLETION_REPORT_TITLE } from "./completionReportCard";
 import { hasAnyAction } from "./model";
 import {
   canQuoteMessage,
@@ -11,6 +12,7 @@ import {
   quoteExcerpt,
   quotedKindLabel,
   resolveQuote,
+  QUOTE_CARD_TEXT,
   QUOTE_DELETED_TEXT,
   QUOTE_EXCERPT_MAX_CHARS,
   QUOTE_EXCERPT_MAX_LINES,
@@ -261,6 +263,149 @@ describe("#1498 — 본문 없는 인용의 네 모양", () => {
         bodied(quoted({ state: "deleted", deletedAtMs: 1_785_238_500_000 }), shape.body)
       );
       expect(block.kind).toBe("deleted");
+    }
+  });
+});
+
+// =============================================================================
+// #1510 — 본문 없는 카드는 지워진 메시지가 아니다.
+//
+// #1454가 완료 리포트를 **평범한 턴 메시지**로 커밋한다: `type: "text"`, 본문 없음,
+// 카드는 `props` 안(`kind = "completion_report"`). 그 순간부터 위 표의 첫 줄
+// (「본문이 없다 → 묘비」)은 두 가지 서로 다른 행에 똑같이 걸린다 — 지워진 글과
+// 카드가 인용 객체의 어느 칸으로도 구별되지 않았기 때문이다.
+//
+// 그래서 고칠 자리는 판정이 아니라 **계약**이었다. 클라가 아무리 잘 물어도 답을 줄
+// 재료가 전선에 없었고, 그 재료가 `propsKind` 다(서버 투영이 `props.kind` 한 칸만
+// 싣는다 — 카드의 내용은 여전히 원본의 것이다).
+// =============================================================================
+
+/** 카드 하나, 두 경로가 각자 보는 모양으로. */
+const CARD_PROPS = { kind: "completion_report", title: "작업 완료 리포트" };
+
+describe("#1510 — 카드 인용", () => {
+  /**
+   * **red proof.** `propsKind`를 지우면 이 단정이 「삭제된 메시지」로 빨개진다 —
+   * 그것이 성재가 본 화면이었다.
+   */
+  it("서버가 푼 인용: 본문 없는 카드는 묘비가 아니라 카드 이름이다", () => {
+    const block = quoteBlockFrom(
+      bodied(quoted({ propsKind: "completion_report" }), undefined)
+    );
+    expect(block.kind).toBe("ready");
+    if (block.kind !== "ready") return;
+    expect(block.lines).toEqual([COMPLETION_REPORT_TITLE]);
+    expect(JSON.stringify(block)).not.toContain(QUOTE_DELETED_TEXT);
+  });
+
+  /**
+   * 실시간 프레임에는 `reply_to`가 없어 클라가 화면의 행에서 푼다. 그 경로가 카드
+   * 신호를 못 옮기면 **같은 원본이 실시간에만 묘비**로 서고 새로고침하면 낫는다.
+   */
+  it("화면의 행에서 푼 인용도 같은 답을 낸다", () => {
+    const card = bodied(message({ props: CARD_PROPS }), undefined);
+    const live = payloadToMessage({
+      id: "0199aaaa-0000-7000-8000-00000000m003",
+      channel_id: card.channelId,
+      seq: 43,
+      type: "text",
+      body: null,
+      author_member_id: "00000000-0000-7000-8000-000000000102",
+      hlc_ts: 1_785_238_440_000,
+      hlc_count: 0,
+      reply_to_id: card.id,
+    });
+    expect(live.replyTo).toBeUndefined();
+
+    const local = resolveQuote(live, (id) => (id === card.id ? card : undefined));
+    expect(local?.kind).toBe("ready");
+    if (local?.kind !== "ready") return;
+    expect(local.lines).toEqual([COMPLETION_REPORT_TITLE]);
+
+    // 두 경로가 **같은 블록**을 만든다. 하나만 고쳐 두면 새로고침이 화면을 바꾼다.
+    const served = quoteBlockFrom(
+      bodied(
+        quoted({ id: card.id, seq: card.seq, propsKind: "completion_report" }),
+        undefined
+      )
+    );
+    expect(served).toEqual(local);
+  });
+
+  it("컴포저에 건 카드 초안도 같은 규칙을 탄다", () => {
+    const draft = quoteDraftFor(bodied(message({ props: CARD_PROPS }), null));
+    expect(draft?.block.kind).toBe("ready");
+    if (draft?.block.kind !== "ready") return;
+    expect(draft.block.lines).toEqual([COMPLETION_REPORT_TITLE]);
+  });
+
+  it("정말 지워진 카드는 여전히 묘비다", () => {
+    // 무회귀 — 삭제는 `state`/`deletedAtMs`가 나른다. 카드 신호가 그 둘을 이기면
+    // 지워진 리포트의 이름이 채널에 남는다. 서버도 묘비에는 `propsKind`를 싣지
+    // 않지만(투영이 접는다), 판정은 그 약속에 기대지 않는다.
+    for (const gone of [
+      quoted({ propsKind: "completion_report", state: "deleted" }),
+      quoted({ propsKind: "completion_report", deletedAtMs: 1_785_238_500_000 }),
+    ]) {
+      expect(quoteBlockFrom(bodied(gone, undefined)).kind).toBe("deleted");
+    }
+  });
+
+  it("모르는 종류는 아는 만큼만 말한다", () => {
+    // 어댑터가 새 `kind`를 쓸 수 있다. 코어가 그 낱말을 몰라도 「내용 없는 메시지」로
+    // 떨어뜨리지 않는다 — 카드는 내용을 `props`에 들고 있다.
+    const block = quoteBlockFrom(
+      bodied(quoted({ propsKind: "some_future_card" }), undefined)
+    );
+    expect(block.kind).toBe("ready");
+    if (block.kind !== "ready") return;
+    expect(block.lines).toEqual([QUOTE_CARD_TEXT]);
+  });
+
+  it("본문을 쓴 카드는 그 본문을 인용한다", () => {
+    // 요약을 쓴 완료 리포트는 사람이 읽을 문장을 갖고 있다. 카드 이름으로 덮으면
+    // 인용이 원본의 말 대신 분류명을 가리킨다.
+    const block = quoteBlockFrom(
+      quoted({ propsKind: "completion_report", body: "환경 셋업을 마쳤습니다." })
+    );
+    expect(block.kind).toBe("ready");
+    if (block.kind !== "ready") return;
+    expect(block.lines).toEqual(["환경 셋업을 마쳤습니다."]);
+  });
+
+  it("카드의 내용은 인용 블록에 오지 않는다", () => {
+    // 계약이 `props.kind` **한 칸**인 이유. 요약·불릿·게이트 표는 원본의 것이고,
+    // 인용은 두 줄을 그린 뒤 원본으로 보내는 표지판이다(미결 2와 같은 답).
+    const card = bodied(
+      message({
+        props: {
+          kind: "completion_report",
+          summary: "게이트 12종 전부 통과했습니다.",
+          gates: [{ name: "cargo test", outcome: "pass" }],
+        },
+      }),
+      undefined
+    );
+    const draft = quoteDraftFor(card);
+    expect(JSON.stringify(draft?.block)).not.toContain("게이트 12종");
+    expect(JSON.stringify(draft?.block)).not.toContain("cargo test");
+  });
+
+  it("낱말이 아닌 kind는 없는 것으로 접는다", () => {
+    // 반대 방향 거짓말 방지: `props`는 `Record<string, unknown>`이라 무엇이든 올 수
+    // 있고, 아무 값이나 카드로 읽으면 진짜 묘비가 판정을 빠져나간다.
+    for (const junk of [12, true, null, {}, ""]) {
+      const draft = quoteDraftFor(
+        bodied(message({ props: { kind: junk } }), undefined)
+      );
+      expect(draft?.block.kind).toBe("deleted");
+    }
+  });
+
+  it("카드가 아닌 행의 네 모양은 #1508 그대로다", () => {
+    // 무회귀 — 이 이슈는 `props.kind`를 든 행에만 손댄다. 든 것이 없으면 표가 그대로.
+    for (const shape of BODY_SHAPES) {
+      expect(quoteBlockFrom(bodied(quoted(), shape.body)).kind).toBe(shape.kind);
     }
   });
 });

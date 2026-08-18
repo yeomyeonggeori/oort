@@ -1238,6 +1238,23 @@ pub struct QuotedMessage {
     /// staircase per hop, so the id is deliberately not projected here. A client
     /// draws "↳ 인용" and stops.
     pub quotes_another: bool,
+    /// The quoted row's `props.kind`, and **nothing else from its props**
+    /// (#1510).
+    ///
+    /// A card message rides an ordinary row: `type = 'text'`, `body IS NULL`,
+    /// and the card itself in `props` (`props.kind = 'completion_report'`, the
+    /// shape #1454 commits). The quote block's tombstone belt reads "a text with
+    /// no body is deleted" — true for every row until that commit landed, and a
+    /// lie about every card since. The signal that separates them has to cross
+    /// the wire, because no client can tell a card from a tombstone out of the
+    /// four fields above.
+    ///
+    /// One key, not the props object: the props of a card hold its whole payload
+    /// (summary, bullets, gate rows), and shipping that beside a two-line quote
+    /// would be both the snapshot 규칙 3 refuses and the "펼치지 않는다" 미결 2
+    /// answers. `NULL` for a tombstone as well — a deleted row keeps its props,
+    /// and the deletion is allowed to leave nothing behind but the fact of it.
+    pub props_kind: Option<String>,
 }
 
 /// The history/replies column list with the rollup join attached. Column names
@@ -1252,7 +1269,10 @@ const PAGED_COLS: &str = "m.id, m.workspace_id, m.channel_id, m.seq, m.hlc_ts, m
      q.id AS quote_id, q.seq AS quote_seq, q.author_member_id AS quote_author_member_id, \
      q.type::text AS quote_message_type, q.state::text AS quote_state, q.body AS quote_body, \
      q.edited_at AS quote_edited_at, q.deleted_at AS quote_deleted_at, \
-     (q.reply_to_id IS NOT NULL) AS quote_quotes_another";
+     (q.reply_to_id IS NOT NULL) AS quote_quotes_another, \
+     CASE WHEN q.state::text = 'deleted' THEN NULL \
+          ELSE q.props->>'kind' \
+     END AS quote_props_kind";
 
 /// [`PAGED_COLS`] plus the attachment aggregate. A second constant rather than
 /// an extension of the first because `interaction.rs` builds its own column list
@@ -1307,6 +1327,7 @@ fn decode_quoted(row: &sqlx::postgres::PgRow) -> Result<Option<QuotedMessage>, s
         edited_at: row.try_get("quote_edited_at")?,
         deleted_at: row.try_get("quote_deleted_at")?,
         quotes_another: row.try_get("quote_quotes_another")?,
+        props_kind: row.try_get("quote_props_kind")?,
     }))
 }
 
@@ -2340,6 +2361,23 @@ mod tests {
                 !sql.contains("q.reply_to_id AS"),
                 "projecting the inner target's id invites the staircase 규칙 4 \
                  forbids: {sql}"
+            );
+            // #1510 — the card signal is ONE key out of the quoted row's props.
+            assert!(
+                sql.contains("q.props->>'kind'"),
+                "a quote must carry the card signal that separates a bodyless \
+                 card from a tombstone: {sql}"
+            );
+            assert!(
+                !sql.contains("q.props AS") && !sql.contains("q.props,"),
+                "only the kind crosses the wire — the quoted row's payload here \
+                 would be the snapshot 규칙 3 refuses: {sql}"
+            );
+            // A tombstone keeps its props in the row; it must not keep them on
+            // the wire. 규칙 3 leaves the fact of a deletion and nothing else.
+            assert!(
+                sql.contains("CASE WHEN q.state::text = 'deleted' THEN NULL"),
+                "a deleted original must project no card kind either: {sql}"
             );
         }
     }

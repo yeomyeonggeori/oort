@@ -293,6 +293,19 @@ pub struct QuotedMessageDto {
     /// staircase out of it. Omitted when false.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub quotes_another: bool,
+    /// The quoted row's `props.kind` — the whole of what its props contribute
+    /// here (#1510).
+    ///
+    /// A card message is an ordinary `text` row with no body and its card in
+    /// `props` (#1454's completion report). Without this key the client's
+    /// tombstone belt — "a text with no body was deleted" — calls every such
+    /// card 「삭제된 메시지」, and it cannot do better, because nothing else on
+    /// this object separates the two. Omitted when the quoted row carries no
+    /// kind, and omitted on a tombstone: a deleted row still holds its props,
+    /// and projecting them would let the deletion leave a description of itself
+    /// behind.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub props_kind: Option<String>,
 }
 
 /// A message on the wire (Swift `MessageDTO` / openapi `Message`).
