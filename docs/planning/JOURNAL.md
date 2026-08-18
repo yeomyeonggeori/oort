@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-08-18 (Fable) · 발사 준비 상태(armed) 구축 — LIVE-5a 패킷·dsh 티켓·로드맵 반영
+- **LIVE-5a 완전 준비**: 패킷 `handoffs/2026-08-18-live-5a-engine-packet.md`(ephemeral TURN=use-auth-secret 권장·내구 투영=원장 SoT+조인 권고·owner 예외 편입, ADR 근거 전부 Accepted)+goal **#1524** 발급·binding. 편성안 §4를 인터뷰 확정분으로 갱신. **재개 발화 즉시 발사 가능.**
+- **dsh 즉시분 티켓**: #1525(A docs 드리프트 게이트)·#1526(B 온보딩 실측)·#1527(H 반면교사) — LIVE-5a와 파일군 분리라 병렬 파도 가능.
+- **ROADMAP §1.7 dsh overlay 신설**(전권 위임 반영): A~H를 축별 시점에 배치, LIVE-5·환경 폐곡선 비침해 원칙 명문화.
+- 정지 유지 — 재개 시 1커맨드: #1524 발사+위생 파도(#1525~#1527+#1502 등) 병렬.
+
 ## 2026-08-18 (Fable) · 중간 점검 + dsh(DeepSeek Harness) 벤치마크 정본 랜딩
 - **중간 점검 보고**(성재 요청): 아크 결산=파도 5개·랜딩 23건·결재 큐 소진, 잔여=LIVE-5(재개 후 최우선)+위생 큐 ~14건, 로드맵=3축 전부 실물 도달 후 심화 단계·다음 대형 축 후보=환경 폐곡선(커서 B).
 - **dsh 벤치마크 정본**: `research/2026-08-18-deepseek-harness-dsh-benchmark.md` — 딥리서치 실측(deepseek-ai 공식·MIT·5일 153k★·"Everything is a plugin. Every run is traceable.") 기반 갭 맵+차용 후보 A~H. 핵심 판정: ①추적성은 성문화 갭(우리 실물은 강함) ②in-process 플러그인은 반면교사(우리 fail-closed 경계의 외부 실증) ③토큰 규율은 우리 우위 ④Trajectory·Code Mode는 LIVE/T3 자산과 상보.
