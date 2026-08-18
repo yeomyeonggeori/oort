@@ -4068,6 +4068,55 @@ function reportUnmocked() {
   for (const path of [...unmockedPaths].sort()) console.log(`  ${path}`);
 }
 
+// 빈 대화의 첫 행동 (#1536, 온보딩 실측 F5). 이 표면은 첫 실행에서 사람이 **반드시**
+// 보는 화면인데 리뷰에 프레임이 없었다 — 아래 add-member 레인은 이 화면을 거쳐
+// 가면서도 자기 다이얼로그만 찍고 지나간다.
+//
+// 두 장을 찍는 이유는 두 분기가 다른 말을 하기 때문이다: 채널은 액션 둘(첫 메시지
+// 쓰기 · 멤버 초대하기)을 위계를 세워 내놓고, DM은 참여자가 dmKey로 고정되어 있어
+// 첫 메시지 하나뿐이다. 한 장만 찍으면 리뷰가 보는 것은 둘 중 하나의 옷차림이다.
+async function captureEmptyConversationScenes(browser, scheme) {
+  const shots = [];
+  const EMPTY_CHANNEL_ID = CHANNELS[1].id; // 엔진
+
+  async function shoot(name, channelId) {
+    const context = await browser.newContext({
+      viewport: VIEWPORT,
+      deviceScaleFactor: 2,
+      colorScheme: scheme,
+      reducedMotion: "reduce",
+    });
+    await installMocks(context);
+    // 이 대화만 비운다. 나머지는 원래 목으로 되돌아가므로(fallback) 사이드바는
+    // 첫 실행이 아니라 **이 방만 빈** 진짜 화면으로 남는다.
+    await context.route("**/v1/workspaces/*/channels/*/messages*", (route) =>
+      new URL(route.request().url()).pathname.includes(channelId)
+        ? json(route, { messages: [] })
+        : route.fallback()
+    );
+    const page = await context.newPage();
+    await page.goto(ORIGIN, { waitUntil: "networkidle" });
+    await signIn(page);
+    await page.evaluate((id) => {
+      window.location.hash = `#/c/${id}`;
+    }, channelId);
+    const empty = page.getByTestId("timeline-empty");
+    await empty.waitFor({ state: "visible" });
+    // 액션이 실제로 그려진 뒤에 찍는다: 카피만 있고 버튼이 아직 없는 프레임은
+    // 이 goal 이 고친 것을 정확히 못 보이게 한다.
+    await empty.getByTestId("timeline-empty-primary").waitFor({ state: "visible" });
+    await page.waitForTimeout(200);
+    const path = `${OUT_DIR}/empty-${name}-${scheme}.png`;
+    await page.screenshot({ path });
+    shots.push(path);
+    await context.close();
+  }
+
+  await shoot("channel", EMPTY_CHANNEL_ID);
+  await shoot("dm", DM_ID);
+  return shots;
+}
+
 // 채널에 멤버 추가 다이얼로그 (검수 #2 / design-review F-4). This dialog had no
 // scene, so its four states went to review unseen. Each state is shot in its
 // own context because the roster is a react-query cache: to make the SAME
@@ -4081,6 +4130,10 @@ function reportUnmocked() {
 // 빈 채널 "멤버 초대하기" button — the exact control this batch rewired — is on
 // screen to click. release-notes is a good target because HERMES is in every
 // channel (renders the "멤버" already-in row) while the rest are addable.
+//
+// #1536 이후 그 버튼은 빈 채널의 **보조** 액션이다(첫 행동은 「첫 메시지 쓰기」).
+// 이 레인이 이름으로 집는 것은 그대로이고, 덕분에 이 레인은 강등된 문이 여전히
+// 열린다는 것까지 매 캡처마다 실제로 눌러 확인하는 자리가 됐다.
 async function captureAddMemberScenes(browser, scheme) {
   const shots = [];
   const RELEASE_NOTES_ID = CHANNELS[3].id;
@@ -4962,6 +5015,7 @@ async function main() {
       if (profile !== "mobile") {
         for (const scheme of ["light", "dark"]) {
           all.push(...(await captureScheme(browser, scheme)));
+          all.push(...(await captureEmptyConversationScenes(browser, scheme)));
           all.push(...(await captureAddMemberScenes(browser, scheme)));
           all.push(...(await captureHostedPairingScenes(browser, scheme)));
           all.push(...(await captureHostedDisconnectScenes(browser, scheme)));

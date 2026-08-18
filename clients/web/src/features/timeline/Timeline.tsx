@@ -20,6 +20,7 @@ import { Button } from "@/design/ui/button";
 import {
   buildTimelineItems,
   emptyChannelCopy,
+  type EmptyChannelAction,
   type PendingMessage,
   type RecoveryMarker,
   type TimelineItem,
@@ -225,8 +226,12 @@ export function Timeline({
   onOpenWorkSession?: OpenWorkSession;
   onResend?: (message: Message) => Promise<void> | void;
   onResendPending?: (clientMsgId: string) => Promise<void> | void;
+  /** 이 채널에 워크스페이스 멤버를 넣는다. 빈 채널의 보조 행동 (#1536). */
   onInviteMember?: () => void;
-  /** Put the caret in the composer: the only next step an empty DM has. */
+  /**
+   * Put the caret in the composer. 빈 채널·빈 DM 양쪽의 **첫** 행동이다 —
+   * 두 표면이 다른 이유로 비어 있어도 다음에 하는 일은 같다 (#1536).
+   */
   onStartWriting?: () => void;
 }) {
   const ref = useRef<VirtuosoHandle>(null);
@@ -417,26 +422,53 @@ export function Timeline({
 
   if (status === "ready" && empty) {
     const copy = emptyChannelCopy(channelKind, peer ?? null);
+    const secondary = copy.secondary;
+    const run = (action: EmptyChannelAction) =>
+      action.kind === "write" ? onStartWriting?.() : onInviteMember?.();
     return (
       <EmptyInvite
         headline={copy.headline}
         detail={copy.detail}
         actions={
-          // One action, because there is one act. Adding an agent is not a
-          // second, lesser door beside adding a person (R-1 §3): they are the
-          // same invite, so two buttons on one handler said nothing twice.
-          copy.invitable ? (
-            <Button size="sm" variant="outline" onClick={onInviteMember}>
-              멤버 초대하기
+          // 두 버튼은 **동급이 아니다** (#1536). 첫 행동은 쓰기이고 초대는 그
+          // 다음이며, 위계는 §3 채움 순서가 그대로 진다: 주 액션은 --accent 채움,
+          // 보조는 --line-strong 윤곽.
+          //
+          // 주 액션이 채움인 근거는 바로 옆 형제다. 같은 창의 「아직 채널이
+          // 없습니다」가 자기 첫 행동(`채널 만들기`)에 이미 이 옷을 입힌다
+          // (`ChatShell.tsx`) — 한 창의 두 빈 상태가 같은 자리에서 다른 옷을
+          // 입으면 읽는 사람이 그 둘을 대조해야 한다.
+          //
+          // 초대는 옷을 그대로 둔다. 바뀐 것은 초대가 아니라 그 앞에 선 것이므로,
+          // 초대가 자기 모양까지 바꾸면 이 화면을 이미 아는 사람에게는 없어진 것
+          // 처럼 읽힌다. 이 버튼은 이 클라에서 「채널에 멤버 추가」로 가는 유일한
+          // 문이기도 하다(코어 `emptyChannelCopy` 머리말).
+          //
+          // 순서는 DOM 순서다: 탭이 첫 행동에 먼저 닿는다.
+          <>
+            <Button
+              size="sm"
+              onClick={() => run(copy.primary)}
+              data-testid="timeline-empty-primary"
+              data-action-kind={copy.primary.kind}
+            >
+              {copy.primary.label}
             </Button>
-          ) : (
-            <Button size="sm" variant="outline" onClick={onStartWriting}>
-              첫 메시지 쓰기
-            </Button>
-          )
+            {secondary && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => run(secondary)}
+                data-testid="timeline-empty-secondary"
+                data-action-kind={secondary.kind}
+              >
+                {secondary.label}
+              </Button>
+            )}
+          </>
         }
         testId="timeline-empty"
-        dataAttrs={{ "data-empty-kind": copy.invitable ? "channel" : "dm" }}
+        dataAttrs={{ "data-empty-kind": copy.surface }}
       />
     );
   }
