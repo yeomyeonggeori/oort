@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/design/ui/button";
 import { Input } from "@/design/ui/input";
+import { cn } from "@/design/lib/cn";
 import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/States";
 import {
   deleteProviderLink,
@@ -237,6 +238,16 @@ export function AiLinkSection({ offline }: { offline: boolean }) {
   // 자기가 켠 busy 로 자신을 잠근다 — 진행 낱말이 흐림 아래에서 죽고 낭독은
   // 「해제 중, 사용 안 함」이 된다. 잠금으로 남는 것은 다른 두 쓰기다.
   const unlinking = unlink.isPending;
+  // 같은 갈라내기가 이 패널의 나머지 두 쓰기에도 필요하다 (#1541). 그 둘은
+  // `ConfirmButton` 이 아니라 raw 트리거라 #1502 의 좌표 밖에 있었고, 그래서 한
+  // 줄 안에서 옆의 「연결 해제」와 다른 문법을 쓰고 있었다 — 낱말은 바꾸면서
+  // (「저장 중」·「확인 중」) 그 낱말을 자기가 켠 `busy` 로 함께 흐렸다. 정확히
+  // #1403 리뷰 H-1 의 모양이고, 여기서는 native `disabled` 라 방금 Enter 를 누른
+  // 손에서 초점까지 <body> 로 떨어졌다.
+  const saving = save.isPending;
+  const checking = check.isPending;
+  const saveLocked = offline || (busy && !saving);
+  const checkLocked = offline || (busy && !checking);
 
   function closeForm() {
     setEditing(false);
@@ -352,6 +363,11 @@ export function AiLinkSection({ offline }: { offline: boolean }) {
 
   function submit(event: React.FormEvent) {
     event.preventDefault();
+    // 잠금이 `aria-disabled` 라 클릭도 Enter 도 막지 않는다 — 그것이 요점이다
+    // (초점을 잃지 않는다). 그러므로 막는 일은 언제나 핸들러가 지고, 여기서
+    // 지는 것이 버튼의 `onClick` 이 아니라 폼의 `onSubmit` 인 이유는 주소 칸에서
+    // 누른 Enter(암묵적 제출)도 같은 쓰기를 내기 때문이다.
+    if (saveLocked || saving) return;
     if (method === "oauth") submitOAuth();
     else submitKey();
   }
@@ -708,8 +724,20 @@ export function AiLinkSection({ offline }: { offline: boolean }) {
           )}
 
           <div className="flex flex-wrap items-center gap-2">
-            <Button type="submit" size="sm" disabled={offline || busy}>
-              {save.isPending
+            {/* 진행은 `aria-busy` 와 바뀐 낱말이 지고 흐리지 않는다. 잠금은
+                `aria-disabled` + 흐림 + 가드가 지고 tab order 를 떠나지 않는다
+                (#1486 회전 · #1541). 잠금으로 남는 것은 오프라인과 **이 패널의
+                다른 두 쓰기**다 — 저장이 나는 동안 저장을 또 낼 수는 없지만,
+                그 사실을 말하는 것은 흐림이 아니라 낱말이다. */}
+            <Button
+              type="submit"
+              size="sm"
+              aria-disabled={saveLocked || undefined}
+              aria-busy={saving || undefined}
+              className={cn(saveLocked && "opacity-50")}
+              data-testid="ai-link-save"
+            >
+              {saving
                 ? "저장 중"
                 : link.configured
                   ? "연결 교체 저장"
@@ -727,14 +755,22 @@ export function AiLinkSection({ offline }: { offline: boolean }) {
               연결 수정
             </Button>
           )}
+          {/* 위 저장과 같은 문법이고, 옆에 선 「연결 해제」와도 같다 (#1541).
+              낱말꼴은 「명사 + 중」 — 확인은 한자어 동작명사다 (#1501). */}
           <Button
             type="button"
             variant="outline"
             size="sm"
-            disabled={offline || busy}
-            onClick={() => check.mutate()}
+            aria-disabled={checkLocked || undefined}
+            aria-busy={checking || undefined}
+            className={cn(checkLocked && "opacity-50")}
+            onClick={() => {
+              if (checkLocked || checking) return;
+              check.mutate();
+            }}
+            data-testid="ai-link-check"
           >
-            {check.isPending ? "확인 중" : "연결 확인"}
+            {checking ? "확인 중" : "연결 확인"}
           </Button>
           {link.configured && (
             <ConfirmButton

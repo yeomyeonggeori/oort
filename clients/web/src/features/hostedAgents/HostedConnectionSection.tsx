@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "@/app/session";
 import { cn } from "@/design/lib/cn";
@@ -150,6 +150,34 @@ export function HostedConnectionSection({
   const connection: HostedAgentConnection | null = detail.data?.connection ?? found;
   const artifacts: readonly HostedCleanupArtifact[] = detail.data?.artifacts ?? [];
 
+  /**
+   * 완주 지점의 착지 (#1543).
+   *
+   * `ConfirmButton` 은 확정 뒤 초점을 트리거에 남긴다 — 쓰기가 나가는 동안 사람이
+   * 서 있는 자리가 거기이기 때문이다(#1502). 그런데 이 화면의 두 확정은 성공하는
+   * 순간 **그 트리거가 선 패널을 통째로 없앤다**: 해제 시작은 `cleanup_pending`
+   * 으로 넘어가며 `StartPanel` 을, 해제 확정은 `disconnected` 로 넘어가며
+   * `TerminalPanel` 의 버튼 자리를 「이 연결은 해제됐습니다」 상자로 바꾼다.
+   * 그래서 초점은 `<body>` 로 떨어지고 다음 Tab 은 셸 맨 위에서 다시 시작한다.
+   * in-flight 초점 유지(#1502)가 살린 뒤에야 보이게 된 잔여다.
+   *
+   * 어디로 내릴지는 이 컴포넌트만 안다 — 사라진 패널이 **무엇으로 바뀌는지** 아는
+   * 것은 상태를 쥔 이쪽이다. 그래서 착지는 쓰기가 착지하는 자리에서 적히고, 서버
+   * 상태가 실제로 바뀐 뒤에 적용된다. 형제 표면(`EventSubscriptionSection` 의
+   * `landing`)과 같은 식이고, 줄 안쪽의 같은 문제(폼을 닫으면 사라지는 트리거)는
+   * `CleanupArtifactRow` 가 자기 제목으로 이미 답하고 있다.
+   */
+  const sectionRef = useRef<HTMLElement | null>(null);
+  const landing = useRef<string | null>(null);
+  useEffect(() => {
+    const target = landing.current;
+    if (target === null) return;
+    landing.current = null;
+    sectionRef.current
+      ?.querySelector<HTMLElement>(`[data-landing="${target}"]`)
+      ?.focus({ preventScroll: true });
+  }, [detail.data]);
+
   function writeDetail(next: HostedConnectionDetail) {
     client.setQueryData(
       hostedConnectionDetailQueryKey(workspaceId, normalizedId(next.connection.id)),
@@ -167,6 +195,11 @@ export function HostedConnectionSection({
     onSuccess: (started) => {
       setFailure(null);
       setOpenArtifactId(null);
+      // 이 패널은 성공과 함께 사라진다. 사람이 이어서 하는 일은 정리 목록이므로
+      // 착지는 그 목록의 제목이다 — 언제나 마운트되는 지표이고(위 「oort 쪽에서
+      // 끊긴 것」은 정리할 것이 없는 연결에서 비어 사라진다), 낭독은 다음에 할
+      // 일의 이름이 된다. 방금 일어난 일 자체는 이 섹션의 live region 이 말한다.
+      landing.current = "cleanup";
       writeDetail(started);
     },
     onError: (error) =>
@@ -231,6 +264,10 @@ export function HostedConnectionSection({
       // 문장을 배너로 한 번 더 세우면 한 화면에 같은 말이 둘이고, 둘 중 어느
       // 것이 지금의 사실인지 읽는 사람이 판단해야 한다. 소리로는 live region 이
       // 그 전이를 알린다.
+      //
+      // 그 「화면 자체」가 확정 버튼이 서 있던 노드를 대신하므로, 초점도 거기로
+      // 간다 (#1543): 바뀐 상자의 제목이 곧 이 쓰기의 답이다.
+      landing.current = "terminal";
       writeDetail(completed);
     },
     onError: (error) =>
@@ -245,6 +282,7 @@ export function HostedConnectionSection({
 
   return (
     <section
+      ref={sectionRef}
       className="flex min-w-0 flex-col gap-4 p-4"
       aria-label={`${agentLabel} 호스티드 연결`}
       data-testid="hosted-connection-section"
@@ -452,6 +490,17 @@ function StartPanel({
   // 넷째가 붙는 날 이 자리가 조용히 「해제 중을 회색으로 칠하는」 코드로
   // 되돌아가기 때문이다.
   const locked = blocked || (busy && !starting);
+  // 사유를 고르는 이름과 자리를 아래 `TerminalPanel` 과 맞춘다 (#1542, #1540
+  // design-review Nitpick ①). 잠금은 `locked` 가 판단하는데 사유는 `blocked` 만
+  // 보고 있었고, 한 파일의 같은 자리가 다른 모양이면 다음 사람은 그 차이가
+  // 의도인지 빠뜨린 것인지 알 수 없다.
+  //
+  // 둘째 문장이 없는 것이 이 패널의 사실이다. 위 주석이 적어 둔 대로 `busy &&
+  // !starting` 은 이 패널이 서 있는 동안 참이 되지 않고, 그 문장을 들고 있는 정리
+  // 패널은 이 패널과 **함께 마운트되지 않는다**(status 가 둘을 갈라 놓는다) —
+  // 화면에 없는 id 를 가리키는 `aria-describedby` 는 사유가 아니라 침묵이다.
+  // 그래서 없는 갈래를 지어내는 대신 이름으로 그 사실을 적는다.
+  const lockReasonId = blocked ? blockedId : undefined;
   return (
     <div className="flex min-w-0 flex-col gap-3 rounded-md border border-line p-3">
       <div className="grid gap-3 md:grid-cols-2">
@@ -522,7 +571,7 @@ function StartPanel({
           label={DISCONNECT_START_LABEL}
           question={DISCONNECT_START_QUESTION}
           confirmLabel={DISCONNECT_START_CONFIRM_LABEL}
-          describedBy={blocked ? blockedId : undefined}
+          describedBy={lockReasonId}
           disabled={locked}
           busy={starting}
           busyLabel="해제 중"
@@ -618,7 +667,16 @@ function CleanupPanel({
   return (
     <div className="flex min-w-0 flex-col gap-3">
       <div className="flex min-w-0 flex-col gap-1">
-        <h4 className="text-body font-semibold text-ink">{CLEANUP_HEADLINE}</h4>
+        {/* 해제 시작이 완주하면 초점이 여기 내린다 (#1543). tabIndex -1 + 링:
+            Tab 순서에는 들지 않고 프로그램 초점만 받는다 — 줄의 제목이 폼을 닫을
+            때 하는 것과 같은 모양이다(`CleanupArtifactRow`). */}
+        <h4
+          data-landing="cleanup"
+          tabIndex={-1}
+          className="text-body font-semibold text-ink outline-none focus-visible:focus-ring"
+        >
+          {CLEANUP_HEADLINE}
+        </h4>
         <p className="break-keep text-meta text-ink-muted">{CLEANUP_LEAD}</p>
         <p className="break-keep text-meta text-ink-muted">
           {CLEANUP_INDEPENDENCE_NOTE}
@@ -750,7 +808,15 @@ function TerminalPanel({
         className="flex min-w-0 flex-col gap-1 rounded-md border border-line p-3"
         data-testid="hosted-disconnect-terminal"
       >
-        <h4 className="text-body font-semibold text-ink">{TERMINAL_DONE_HEADLINE}</h4>
+        {/* 해제 확정이 완주하면 초점이 여기 내린다 (#1543). 이 상자가 확정 버튼이
+            서 있던 자리를 대신하므로, 그 제목이 곧 방금 누른 것의 답이다. */}
+        <h4
+          data-landing="terminal"
+          tabIndex={-1}
+          className="text-body font-semibold text-ink outline-none focus-visible:focus-ring"
+        >
+          {TERMINAL_DONE_HEADLINE}
+        </h4>
         <p className="break-keep text-meta text-ink-muted">{TERMINAL_DONE_DETAIL}</p>
       </div>
     );
