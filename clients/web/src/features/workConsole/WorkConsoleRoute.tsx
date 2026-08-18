@@ -175,6 +175,32 @@ export function WorkConsoleRoute() {
   const offline = useOffline();
   const [params, setParams] = useSearchParams();
   const selectedParam = params.get("session")?.trim() || null;
+  // 직접 조작 동선을 달고 온 주소인가 (LIVE-5b). 채팅 표면의 `?work=&control=1`
+  // 과 같은 부사이고, 여기서도 같은 일만 한다: 도착지에서 확인 단계를 무장할 뿐
+  // 창을 열지 않는다. 두 목적지가 같은 주소 낱말에 다르게 반응하면, 링크를
+  // 복사해 붙여넣은 사람은 어느 쪽에 떨어지느냐로 결과가 갈린다.
+  //
+  // **읽고 나면 주소에서 지운다** (#1193 규칙 · design-review M3). `?session=`
+  // 은 자리를 가리키므로 남지만 `?control=` 은 **한 번의 의도**이고, 남겨 두면
+  // 사람이 확인을 취소한 뒤에도 주소는 여전히 조작하러 왔다고 말한다 — 그리고
+  // 새로고침 한 번에 취소한 확인이 다시 선다. 세션 id 에 매어 두는 이유는
+  // 채팅 표면과 같다: 다른 행으로 옮겨 가면 그 의도는 따라가지 않아야 한다.
+  const [controlIntentSessionId, setControlIntentSessionId] = useState<
+    string | null
+  >(null);
+  const controlParam = params.get("control");
+  useEffect(() => {
+    if (controlParam !== "1") return;
+    setControlIntentSessionId(selectedParam);
+    setParams(
+      (current) => {
+        const next = new URLSearchParams(current);
+        next.delete("control");
+        return next;
+      },
+      { replace: true }
+    );
+  }, [controlParam, selectedParam, setParams]);
 
   const sessionsQuery = useWorkSessions(workspaceId);
   const hostsQuery = useWorkHosts(workspaceId);
@@ -483,6 +509,11 @@ export function WorkConsoleRoute() {
                 }
                 onBack={clearSelection}
                 openingThread={false}
+                controlIntent={uuidEq(
+                  controlIntentSessionId ?? undefined,
+                  selected.id
+                )}
+                onControlIntentConsumed={() => setControlIntentSessionId(null)}
                 onOpenThread={() =>
                   navigate(
                     messageAnchorPath(

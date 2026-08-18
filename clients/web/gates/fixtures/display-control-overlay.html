@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <title>오버레이 진입점 목업 (LIVE-5b §1.4 — 설계만)</title>
+    <!--
+      이 파일은 제품이 아니다. LIVE-5b §1.4 가 「설계만」으로 잘라 둔 오버레이
+      진입점의 목업이고, 게이트(`gate-display-control.mjs`)가 light/dark 로 한
+      장씩 찍어 리뷰에 붙인다. 구현 여부는 리뷰 판정이다.
+
+      낱말은 여기서 짓지 않는다. `__CONTROL_START_LABEL__` 과
+      `__CONTROL_INVITE_COPY__` 는 게이트가 `controlStream.ts` 에서 읽어 끼워
+      넣는다 (`CONTROL_OVERLAY_MOCKUP`). 스스로 카피를 지어낸 목업은 제품이 결코
+      보여 주지 않을 화면을 리뷰하게 만든다.
+
+      토큰도 제품의 것을 손으로 옮겨 적었다. 이 파일은 번들 밖이라 `tokens.css`
+      를 import 할 수 없고, 리뷰가 봐야 하는 것은 「이 팔레트 안에서 이 컨트롤이
+      화면을 얼마나 가리는가」이므로 값이 같아야 한다. 값이 갈리면 목업이 리뷰를
+      속인다.
+    -->
+    <style>
+      :root {
+        color-scheme: light dark;
+        --surface: light-dark(#f7f6f3, #17161a);
+        --surface-raised: light-dark(#fffefb, #201f24);
+        --line: light-dark(#dcd8d0, #34323b);
+        --line-strong: light-dark(#84817d, #6f6e73);
+        --ink: light-dark(#24211c, #ececf1);
+        --ink-muted: light-dark(#6a655f, #9b98a3);
+        --accent: light-dark(#a54c08, #f0a850);
+        --accent-soft: light-dark(#f4e7d6, #33261a);
+      }
+      body {
+        margin: 0;
+        padding: 20px;
+        background: var(--surface);
+        color: var(--ink);
+        font:
+          13px/1.5 -apple-system,
+          BlinkMacSystemFont,
+          "Apple SD Gothic Neo",
+          system-ui,
+          sans-serif;
+      }
+      .caption {
+        color: var(--ink-muted);
+        font-size: 12px;
+        padding-bottom: 8px;
+      }
+      .frame {
+        position: relative;
+        aspect-ratio: 16 / 9;
+        border: 1px solid var(--line);
+        border-radius: 4px;
+        overflow: hidden;
+        background: #111c2e;
+      }
+      .desk {
+        position: absolute;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        color: #8fa6c4;
+        font-family: ui-monospace, SFMono-Regular, monospace;
+        font-size: 15px;
+      }
+      /* 우하단. 프레임 안이되 화면을 가리지 않는 크기 — 관전이 끊기지 않는 것이
+         이 자리 선택의 전부다. */
+      .overlay {
+        position: absolute;
+        right: 10px;
+        bottom: 10px;
+        display: flex;
+        gap: 8px;
+        align-items: center;
+      }
+      .control {
+        border: 1px solid var(--line-strong);
+        background: var(--surface-raised);
+        color: var(--ink);
+        border-radius: 4px;
+        padding: 4px 10px;
+        font-size: 12px;
+      }
+      /* 키보드 포커스가 닿으면 **언제나** 보인다. hover 로만 나타나는 컨트롤은
+         키보드 사용자에게 존재하지 않는 컨트롤이다. */
+      .control:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+      }
+      .confirm {
+        margin-top: 10px;
+        border: 1px solid var(--line);
+        border-radius: 4px;
+        background: var(--surface-raised);
+        padding: 10px 12px;
+        max-width: 520px;
+      }
+      .confirm p {
+        margin: 0 0 8px;
+        color: var(--ink-muted);
+        font-size: 12px;
+      }
+      .row {
+        display: flex;
+        gap: 8px;
+      }
+      .primary {
+        border: 1px solid var(--line-strong);
+        background: var(--accent-soft);
+        color: var(--accent);
+        border-radius: 4px;
+        padding: 4px 10px;
+        font-size: 12px;
+      }
+      .ghost {
+        border: 1px solid transparent;
+        background: transparent;
+        color: var(--ink-muted);
+        border-radius: 4px;
+        padding: 4px 10px;
+        font-size: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <p class="caption">
+      목업 · 구현되지 않음 (LIVE-5b §1.4). 관전 프레임 우하단의 진입점과, 그것을
+      누른 뒤 서는 확인 단계.
+    </p>
+    <div class="frame">
+      <div class="desk">호스트 화면 (관전 중)</div>
+      <div class="overlay">
+        <button class="control" type="button">__CONTROL_START_LABEL__</button>
+      </div>
+    </div>
+    <div class="confirm">
+      <p>__CONTROL_INVITE_COPY__</p>
+      <div class="row">
+        <button class="primary" type="button">__CONTROL_START_LABEL__</button>
+        <button class="ghost" type="button">그만두기</button>
+      </div>
+    </div>
+  </body>
+</html>

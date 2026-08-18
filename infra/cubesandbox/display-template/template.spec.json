@@ -82,6 +82,54 @@
     "messages": {
       "producerToViewer": ["ready", "offer", "ice", "error"],
       "viewerToProducer": ["answer", "ice", "open_input", "bye"]
+    },
+    "inputChannel": {
+      "$comment": [
+        "LIVE-5b. The datachannel contract for a CONTROLLER grant, DECLARED and",
+        "not yet run by any producer — see unverified.inputDelivery and",
+        "unverified.inputChannelProtocol. It is written down here rather than in",
+        "one client because this is the one file both halves read: the web client",
+        "(clients/web/src/features/work/controlStream.ts) cross-reads this block",
+        "in controlStream.test.ts, and the producer half is LIVE-5c.",
+        "",
+        "OPENED BY THE PRODUCER, NEVER BY THE VIEWER. The trigger is the",
+        "producer's own validate answer (producer.inputDatachannelOnDemand), so a",
+        "viewer that opened its own channel would be routing around the server's",
+        "grant. The web client therefore has no createDataChannel and does not",
+        "encode open_input; it listens on ondatachannel.",
+        "",
+        "The key frame carries `code` (the PHYSICAL key) and modifiers, never the",
+        "character the browser produced from them. A remote keyboard is physical",
+        "keys plus the far side's layout, and it means the character of a",
+        "password never forms as a value this browser client owns (ADR-0004 증보 3",
+        "D2)."
+      ],
+      "label": "momo.input.v1",
+      "openedBy": "producer",
+      "viewerOpensChannel": false,
+      "viewerToProducer": ["key", "pointer", "wheel"],
+      "keyFrame": ["type", "action", "code", "ctrl", "shift", "alt", "meta", "repeat"],
+      "pointerFrame": {
+        "$comment": [
+          "DECLARED PER ACTION, not as one flat field list. A flat list reads as",
+          "'these fields are always present', and a producer built from that",
+          "reading requires `button` on every pointer frame — so a MOVE, which",
+          "carries none, is dropped, clicks keep working and the cursor never",
+          "travels. That failure is invisible in a paper contract and obvious on",
+          "a screen, so the shape is split here where both halves read it.",
+          "",
+          "`button` is ABSENT on a move rather than sent as 0: a move with button",
+          "0 and a left-button drag are different events, and a sentinel makes",
+          "them the same one."
+        ],
+        "always": ["type", "action", "x", "y"],
+        "move": [],
+        "down": ["button"],
+        "up": ["button"]
+      },
+      "wheelFrame": ["type", "action", "dx", "dy"],
+      "pointerCoordinates": "normalised 0..1 over the video box, so the VM's resolution stays the VM's",
+      "carriesCharacter": false
     }
   },
 
@@ -194,6 +242,7 @@
 
   "unverified": {
     "$comment": "specVersion 2's producerSelection / iceReachability / templateBuild are RESOLVED (see runtimeVerified). Only inputDelivery remains.",
+    "inputChannelProtocol": "signalling.inputChannel is DECLARED ONLY (LIVE-5b, web half). The web client encodes key/pointer/wheel frames and listens on ondatachannel; no producer reads them, because momo-display-producer still refuses open_input and never opens a channel. The frames have therefore never been parsed by anything, and the field names may be wrong in ways only a real producer can reveal. LIVE-5c AC: implement the producer half against this block and correct BOTH sides in one change rather than letting the client's guess become the contract by default.",
     "inputDelivery": "LIVE-3 control reaching a screen is STILL unverified. #1438 measured view-only media end to end; no producer has read input_enabled:true, opened an input datachannel, delivered a keystroke, or closed the channel on window return. That is LIVE-5, out of #1438 scope.",
     "realTlsCert": "The host proxy used a self-signed cert in the E2E (browser launched with ignore-cert-errors). A real cert/domain is a follow-up (runbook §9 item 2).",
     "serverValidateWiring": "#1438 used MOMO_DISPLAY_STUB_VALIDATE=1 to isolate media reachability. The producer's real server-side capability validate (against a live LIVE-1..4 server) is exercised at the contract level by display_attach_conformance_pg.rs but was not wired into this live media run. LIVE-5a corrected the request field it would have failed on (`capability_token`, not `capability` — the DTO is deny_unknown_fields, so every real call was a 400) and now reads `ice_servers` out of that answer; the producer still holds no work-host signing key, so the call remains unmade by any running producer. That is LIVE-5c.",

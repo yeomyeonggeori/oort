@@ -254,14 +254,50 @@ describe("the viewer sends no input", () => {
  *
  * That is the LIVE-4/LIVE-5 line, drawn here rather than remembered: LIVE-4
  * ships the card that TALKS about control and nothing that PERFORMS it.
+ *
+ * ## AND WHAT CHANGED AGAIN AT LIVE-5b
+ *
+ * LIVE-5b crossed that line on purpose: this client now HAS a door to control.
+ * One test below said so in a form that could only stay true while the door did
+ * not exist ("the string `controller` appears nowhere in the core"), and it has
+ * been rewritten rather than deleted — the guarantee it was really holding is
+ * still worth holding, and is sharper than the string it was checking.
+ *
+ * The guarantee: THE VIEWER SURFACE CANNOT BECOME A CONTROLLER ONE BY ACCIDENT.
+ * `issueDisplayAttach` still hardcodes `observer` and still takes no grade
+ * argument, so no typo and no forwarded variable can turn a watch into a
+ * takeover; the call that stops an agent has its own name and its own review
+ * (`controlStream.test.ts`). What is no longer claimed is that nobody can make
+ * that call, because somebody now can, and a test asserting otherwise would be
+ * a green light describing last month's client.
  */
-describe("control exists in the ledger and has no door in this client", () => {
-  it("the only display grant this client can mint is an observer one", () => {
-    // The core's `issueDisplayAttach` hardcodes the grade rather than taking it
-    // as an argument. That is the whole boundary in one line: a caller cannot
-    // ask for `controller` because there is no parameter to ask with.
+describe("control exists in the ledger and this client's door to it is named", () => {
+  it("the grant the VIEWER path can mint is still an observer one, and takes no grade", () => {
+    // The whole boundary in one line: `issueDisplayAttach` has no `mode`
+    // parameter, so a caller of the viewer path cannot ask for `controller` —
+    // there is nothing to ask with. That is what makes the LIVE-5b addition
+    // safe: the takeover has to be spelled out by name.
     expect(CORE_API_CODE).toMatch(/mode:\s*["']observer["']/);
-    expect(CORE_API_CODE).not.toMatch(/["']controller["']/);
+    expect(CORE_API_CODE).toMatch(
+      /export async function issueDisplayAttach\(\s*workspaceId: string,\s*sessionId: string\s*\): Promise<DisplayAttachGrant>/
+    );
+    // Exactly one function mints a controller grant, and it is not this one.
+    const controllerMints = CORE_API_CODE.match(/mode:\s*["']controller["']/g) ?? [];
+    expect(controllerMints).toHaveLength(1);
+    expect(CORE_API_CODE).toMatch(
+      /export async function issueControllerDisplayAttach\(/
+    );
+  });
+
+  it("the viewer module and its component still have no way in", () => {
+    // LIVE-5b moved control into `controlStream.ts` + `DisplayController.tsx`
+    // precisely so THESE two files could keep the absences above whole. If a
+    // datachannel, an input handler or a controller grade ever appears here,
+    // the guarantee stopped being structural and became a convention.
+    for (const source of [DISPLAY_STREAM_CODE, DISPLAY_COMPONENT_CODE]) {
+      expect(source).not.toMatch(/createDataChannel|ondatachannel|RTCDataChannel/);
+      expect(source).not.toMatch(/issueControllerDisplayAttach|["']controller["']/);
+    }
   });
 
   it("the login handoff card opens no window and dials no host", () => {

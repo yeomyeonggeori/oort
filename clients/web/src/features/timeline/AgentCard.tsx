@@ -11,6 +11,7 @@ import { Button } from "@/design/ui/button";
 import { cn } from "@/design/lib/cn";
 import { useOffline } from "@/features/common/useOffline";
 import { memberFor, type Directory } from "@/features/workspace/useWorkspace";
+import type { OpenWorkSession } from "@/features/work/openWorkSession";
 import {
   approvalCardNote,
   type ApprovalCardNote,
@@ -39,6 +40,7 @@ import {
   LOGIN_HANDOFF_DEPLOYMENT_COPY,
   loginHandoffNote,
   loginHandoffOutcomeDetail,
+  loginHandoffSeeksControl,
   loginHandoffStoppedCopy,
   loginHandoffWaitingCopy,
   type LoginHandoffCard,
@@ -430,7 +432,7 @@ function LoginHandoffBody({
 }: {
   card: LoginHandoffCard;
   directory: Directory;
-  onOpenWorkSession?: (sessionId: string) => void;
+  onOpenWorkSession?: OpenWorkSession;
 }) {
   const [local, setLocal] = useState<{
     status: ApprovalStatus;
@@ -501,12 +503,28 @@ function LoginHandoffBody({
               // surface 위 1.32/1.43:1 로 WCAG 1.4.11 의 3:1 에 못 미쳤다.
               // `outline` 변형이 같은 모양으로 `--line-strong`(3.59/3.56:1)을
               // 들고 있고, 프리미티브에 없어서 남긴 것은 위 여백 하나뿐이다.
+              //
+              // 낱말은 LIVE-5 에서도 바뀌지 않는다 (LIVE-5b). 이 버튼은 이제
+              // 직접 조작 동선을 함께 실어 보내지만, 그 동선이 도착지에 **설지
+              // 말지는 여기서 알 수 없다**: 조작은 세션 소유자만 할 수 있고
+              // (증보 3 D1), 이 카드의 props 에는 소유자가 없다. 「직접 조작으로
+              // 이동」이라고 적어 두고 도착지에 조작 어포던스가 없으면 그것은
+              // 비활성 버튼보다 나쁜 거짓말이다 — 눌리기까지 한다. 그래서
+              // 낱말은 언제나 참인 것(이 버튼은 세션을 연다)에 머물고, 조작
+              // 어포던스는 소유자를 아는 쪽이 세운다.
               <Button
                 variant="outline"
                 size="sm"
                 className="mt-2"
                 data-testid="handoff-open-session"
-                onClick={() => onOpenWorkSession?.(card.sessionId!)}
+                data-seeks-control={
+                  loginHandoffSeeksControl(card) ? "" : undefined
+                }
+                onClick={() =>
+                  onOpenWorkSession?.(card.sessionId!, {
+                    control: loginHandoffSeeksControl(card),
+                  })
+                }
               >
                 작업 세션 열기
               </Button>
@@ -1041,7 +1059,7 @@ export function AgentCard({
    * 작업 세션 상세로 가는 문. 로그인 핸드오프 카드만 쓴다. 없으면 딥링크 자체가
    * 그려지지 않는다 — 없는 방으로 가는 문을 그리지 않는다는 이 레포의 규율.
    */
-  onOpenWorkSession?: (sessionId: string) => void;
+  onOpenWorkSession?: OpenWorkSession;
 }) {
   if (card.kind === "approval") {
     return <ApprovalBody card={card} directory={directory} />;
