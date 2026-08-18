@@ -12,6 +12,7 @@ import {
   controlObservationRestoredNote,
   controlOffersRetry,
   controlSwallowsKey,
+  createKeyPresses,
   dispositionForKey,
   forwardKey,
   forwardPointer,
@@ -35,6 +36,7 @@ import {
   CONTROL_START_LABEL,
   DISPLAY_CONTROLLER_MODE,
   type ControlInputSink,
+  type ControlKeyDisposition,
   type ControlKeyEvent,
   type ControlLifecycleEvent,
   type ControlReturnReason,
@@ -339,11 +341,17 @@ describe("the input frames, against the contract that declares them", () => {
       repeat: false,
       ...over,
     });
-    expect(dispositionForKey(esc())).toEqual({ kind: "release" });
+    expect(dispositionForKey(esc(), "down", createKeyPresses())).toEqual({
+      kind: "release",
+    });
 
     // Shift+Escape is the send-Escape gesture, and the modifier is the gesture
     // rather than part of the keystroke, so it does not travel.
-    const sent = dispositionForKey(esc({ shiftKey: true }));
+    const sent = dispositionForKey(
+      esc({ shiftKey: true }),
+      "down",
+      createKeyPresses()
+    );
     expect(sent.kind).toBe("forward");
     if (sent.kind !== "forward") throw new Error("unreachable");
     expect(sent.event.code).toBe("Escape");
@@ -352,7 +360,9 @@ describe("the input frames, against the contract that declares them", () => {
 
     // A chord this surface has no rule for is forwarded whole rather than
     // guessed at.
-    expect(dispositionForKey(esc({ ctrlKey: true }))).toEqual({
+    expect(
+      dispositionForKey(esc({ ctrlKey: true }), "down", createKeyPresses())
+    ).toEqual({
       kind: "forward",
       event: esc({ ctrlKey: true }),
       preventDefault: false,
@@ -366,14 +376,18 @@ describe("the input frames, against the contract that declares them", () => {
   });
 
   it("routes every other key through the same forward path it always did", () => {
-    const key = dispositionForKey({
-      code: "Tab",
-      ctrlKey: false,
-      shiftKey: false,
-      altKey: false,
-      metaKey: false,
-      repeat: false,
-    });
+    const key = dispositionForKey(
+      {
+        code: "Tab",
+        ctrlKey: false,
+        shiftKey: false,
+        altKey: false,
+        metaKey: false,
+        repeat: false,
+      },
+      "down",
+      createKeyPresses()
+    );
     expect(key.kind).toBe("forward");
     if (key.kind !== "forward") throw new Error("unreachable");
     // Still swallowed at the page level — a VM's forms need Tab, and that is
@@ -412,6 +426,220 @@ describe("the input frames, against the contract that declares them", () => {
     expect(controlSwallowsKey(key("Tab", { metaKey: true }))).toBe(false);
     expect(controlSwallowsKey(key("Backspace", { ctrlKey: true }))).toBe(false);
     expect(CONTROL_CAPTURE_LIMIT_COPY).toContain("전달되지 않습니다");
+  });
+});
+
+// -----------------------------------------------------------------------------
+// THE STUCK KEY: a press is judged once, and its keyup obeys that judgement
+// -----------------------------------------------------------------------------
+
+/**
+ * A KEYBOARD, PLAYED IN ORDER, and a host that remembers what it is holding.
+ *
+ * These tests are written as ORDERS rather than as calls because the defect
+ * (#1563, #1560 재확인 ②) is not visible in any single event: every event here
+ * was judged "correctly" on its own, and the person was still left with a key
+ * the host would hold forever. What makes it visible is playing the down and
+ * the up of one press with a modifier moving in between, and then asking the
+ * host the only question that matters — is anything still down?
+ */
+class Keyboard {
+  readonly presses = createKeyPresses();
+  /** Physical keys the HOST believes are held, from the frames it received. */
+  readonly held = new Set<string>();
+  /** Every disposition, in order, for the assertions that read one. */
+  readonly dispositions: ControlKeyDisposition[] = [];
+  private modifiers = { ctrl: false, shift: false, alt: false, meta: false };
+
+  private event(code: string, repeat = false): ControlKeyEvent {
+    return {
+      code,
+      ctrlKey: this.modifiers.ctrl,
+      shiftKey: this.modifiers.shift,
+      altKey: this.modifiers.alt,
+      metaKey: this.modifiers.meta,
+      repeat,
+    };
+  }
+
+  private feed(code: string, action: "down" | "up", repeat = false) {
+    const disposition = dispositionForKey(
+      this.event(code, repeat),
+      action,
+      this.presses
+    );
+    this.dispositions.push(disposition);
+    if (disposition.kind === "forward") {
+      // The host reads the FRAME, so the ledger is kept from the frame and not
+      // from the disposition — the same bytes `forwardKey` would send.
+      const frame = JSON.parse(keyInputFrame(disposition.event, action));
+      if (frame.action === "down") this.held.add(String(frame.code));
+      else this.held.delete(String(frame.code));
+    }
+    return disposition;
+  }
+
+  down(code: string, repeat = false) {
+    if (code.startsWith("Shift")) this.modifiers.shift = true;
+    if (code.startsWith("Control")) this.modifiers.ctrl = true;
+    if (code.startsWith("Alt")) this.modifiers.alt = true;
+    if (code.startsWith("Meta")) this.modifiers.meta = true;
+    return this.feed(code, "down", repeat);
+  }
+
+  up(code: string) {
+    const disposition = this.feed(code, "up");
+    if (code.startsWith("Shift")) this.modifiers.shift = false;
+    if (code.startsWith("Control")) this.modifiers.ctrl = false;
+    if (code.startsWith("Alt")) this.modifiers.alt = false;
+    if (code.startsWith("Meta")) this.modifiers.meta = false;
+    return disposition;
+  }
+
+  /** The whole point, in one sentence a reader can check. */
+  get stuck(): string[] {
+    return [...this.held].sort();
+  }
+}
+
+describe("a press is judged once, and nothing is left held on the host", () => {
+  it("sends the keyup of Shift+Escape when Shift was released first", () => {
+    // THE BUG. Shift+Escape is the gesture for "send Escape to the host", and
+    // the ordinary way a hand leaves a chord is to lift the modifier first.
+    // Judged per event, that keyup arrives with `shiftKey: false`, matches the
+    // plain-Escape rule and is swallowed as the release gesture — so the host
+    // is left holding Escape with nobody pressing it.
+    const keyboard = new Keyboard();
+    keyboard.down("ShiftLeft");
+    const escDown = keyboard.down("Escape");
+    keyboard.up("ShiftLeft");
+    const escUp = keyboard.up("Escape");
+
+    expect(escDown.kind).toBe("forward");
+    expect(escUp.kind).toBe("forward");
+    if (escUp.kind !== "forward") throw new Error("unreachable");
+    // The modifier is the gesture, not the keystroke — on BOTH edges, so the
+    // up the host receives matches the down it received.
+    expect(escUp.event.code).toBe("Escape");
+    expect(escUp.event.shiftKey).toBe(false);
+    expect(JSON.parse(keyInputFrame(escUp.event, "up")).shift).toBe(false);
+    expect(keyboard.stuck).toEqual([]);
+  });
+
+  it("leaves nothing held whichever order the hand lets go in", () => {
+    // Both orders, and the auto-repeat that a held Escape produces. A press
+    // that changes its mind halfway is the whole defect class, so the property
+    // is asserted over the orders rather than over one of them.
+    for (const shiftFirst of [true, false]) {
+      const keyboard = new Keyboard();
+      keyboard.down("ShiftLeft");
+      keyboard.down("Escape");
+      keyboard.down("Escape", true);
+      if (shiftFirst) {
+        keyboard.up("ShiftLeft");
+        keyboard.up("Escape");
+      } else {
+        keyboard.up("Escape");
+        keyboard.up("ShiftLeft");
+      }
+      expect(keyboard.stuck, `shiftFirst=${shiftFirst}`).toEqual([]);
+    }
+  });
+
+  it("keeps the caret still while a held Escape auto-repeats under a lifted Shift", () => {
+    // The same fault on the other edge: a repeat re-judged as the release
+    // gesture would throw the caret onto 화면 돌려주기 while the person is
+    // still holding a key, mid-word, having moved nothing.
+    const keyboard = new Keyboard();
+    keyboard.down("ShiftLeft");
+    keyboard.down("Escape");
+    keyboard.up("ShiftLeft");
+    const repeat = keyboard.down("Escape", true);
+    expect(repeat.kind).toBe("forward");
+    keyboard.up("Escape");
+    expect(keyboard.stuck).toEqual([]);
+  });
+
+  it("never sends a plain Escape, even if Shift arrives before the release", () => {
+    // The mirror. Plain Escape is the release gesture and the host never hears
+    // it go down; a keyup judged fresh WOULD forward it, handing the VM the
+    // release of a key it was never told about.
+    const keyboard = new Keyboard();
+    expect(keyboard.down("Escape").kind).toBe("release");
+    keyboard.down("ShiftLeft");
+    expect(keyboard.up("Escape").kind).toBe("release");
+    keyboard.up("ShiftLeft");
+    expect(keyboard.stuck).toEqual([]);
+    expect(
+      keyboard.dispositions.every(
+        (disposition) =>
+          disposition.kind !== "forward" ||
+          disposition.event.code.startsWith("Shift")
+      )
+    ).toBe(true);
+  });
+
+  it("ignores an Escape keyup whose press this surface never saw", () => {
+    // Pressed before the caret arrived, or taken by the browser on the way in.
+    // Nothing was sent for it, so nothing is sent now — and it is not the
+    // release gesture either, which is why `ignore` is its own word.
+    const keyboard = new Keyboard();
+    expect(keyboard.up("Escape").kind).toBe("ignore");
+    expect(keyboard.stuck).toEqual([]);
+  });
+
+  it("keeps the chord it has no rule for whole on both edges", () => {
+    // Ctrl+Escape is forwarded as pressed. Releasing Ctrl first must still let
+    // the Escape up through, or the chord this surface refused to interpret
+    // becomes the one it breaks.
+    const keyboard = new Keyboard();
+    keyboard.down("ControlLeft");
+    keyboard.down("Escape");
+    keyboard.up("ControlLeft");
+    expect(keyboard.up("Escape").kind).toBe("forward");
+    expect(keyboard.stuck).toEqual([]);
+  });
+
+  it("does not remember the ordinary keys, and does not need to", () => {
+    // One slot, not a ledger of what is under the fingers (module header §2).
+    // Every other key forwards on both edges whatever the modifiers do, so a
+    // typed passphrase leaves the press memory exactly as empty as it found it.
+    const keyboard = new Keyboard();
+    for (const code of ["KeyH", "KeyU", "Digit9", "Minus"]) {
+      keyboard.down(code);
+      keyboard.up(code);
+    }
+    keyboard.down("ShiftLeft");
+    keyboard.down("KeyA");
+    keyboard.up("ShiftLeft");
+    keyboard.up("KeyA");
+    expect(keyboard.stuck).toEqual([]);
+    expect(keyboard.presses.escape).toBeNull();
+  });
+
+  it("starts every window with nothing held", () => {
+    // A press left outstanding by a caret that walked away mid-chord must not
+    // decide the next window's first key. The window owns the memory, so a new
+    // one begins empty.
+    const stale = createKeyPresses();
+    stale.escape = { kind: "forward", stripShift: true, preventDefault: true };
+    const fresh = createKeyPresses();
+    expect(fresh.escape).toBeNull();
+    // And even on the stale one, a real press re-decides rather than inheriting.
+    expect(
+      dispositionForKey(
+        {
+          code: "Escape",
+          ctrlKey: false,
+          shiftKey: false,
+          altKey: false,
+          metaKey: false,
+          repeat: false,
+        },
+        "down",
+        stale
+      ).kind
+    ).toBe("release");
   });
 });
 

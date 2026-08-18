@@ -13,6 +13,9 @@
 //                    을 듣고, 채널이 열리기 전에는 「조작 중」이라고 말하지 않는다.
 //   4. 비관측        친 키가 datachannel 프레임에는 있고, DOM·콘솔·React 파이버
 //                    (=devtools 가 읽는 그것)·속성 어디에도 없다. (ADR-0004 증보 3 D2)
+//   4-1. 놓은 키     내려간 키는 **전부** 올라온다. Shift+Esc 를 누르고 Shift 를
+//                    먼저 떼는 순서(#1563)로도 keyup 이 호스트에 닿는다 — 판정은
+//                    이벤트가 아니라 **press** 단위다.
 //   5. auto-return   세 경로 — 협상 마감 · producer 소실 · 사람이 누른 반환 — 이
 //                    전부 반환 REST 를 부른다. 반환이 실패하면 화면이 lease 90초를
 //                    정직하게 말한다.
@@ -24,13 +27,18 @@
 //     expected failure: "a keystroke reached a surface this machine keeps"
 //   DISPLAY_CONTROL_GATE_PROVE_RED_NORETURN=1 npm run gate:display-control
 //     expected failure: "the control window was never returned"
+//   DISPLAY_CONTROL_GATE_PROVE_RED_STUCKKEY=1 npm run gate:display-control
+//     expected failure: "a key went down on the host and never came up"
 //
 // red seam 은 **드라이버/목의 행동만** 바꾼다. OBSERVED 는 사람이 친 키를 화면이
 // 실제로 그리는 자리(속성)와 콘솔에 드라이버가 심어, 「어디에도 없다」 단언이
 // 정말 그 네 자리를 읽고 있음을 증명한다. NORETURN 은 반환 REST 를 응답하지 않게
 // 만들어(창이 서버에 남은 상태), 「모든 경로가 창을 닫았다」 단언이 화면 문구가
-// 아니라 **실제 호출**을 세고 있음을 증명한다. 제품 소스 줄을 지우거나 단언을
-// 빼라고 요구하지 않으므로 증명은 반복 가능하다.
+// 아니라 **실제 호출**을 세고 있음을 증명한다. STUCKKEY 는 목 producer 가 조합키의
+// keyup 하나를 못 받은 것처럼 굴어 — press 판정을 잃은 클라가 내보내지 않았을 바로
+// 그 종류의 프레임 — 「내려간 키는 전부 올라왔다」 단언이 화면이 아니라 **와이어**를
+// 세고 있음을 증명한다. 제품 소스 줄을 지우거나 단언을 빼라고 요구하지 않으므로
+// 증명은 반복 가능하다.
 //
 // 캡처: DISPLAY_CONTROL_GATE_SHOTS=1 로 네 상태를 light/dark 로 찍는다
 //   artifacts/display-control/{connecting,controlling,returning,failed}-{light,dark}.png
@@ -67,6 +75,8 @@ const proveRedNoReturn =
   process.env.DISPLAY_CONTROL_GATE_PROVE_RED_NORETURN === "1";
 const proveRedLateWindow =
   process.env.DISPLAY_CONTROL_GATE_PROVE_RED_LATEWINDOW === "1";
+const proveRedStuckKey =
+  process.env.DISPLAY_CONTROL_GATE_PROVE_RED_STUCKKEY === "1";
 const wantShots = process.env.DISPLAY_CONTROL_GATE_SHOTS === "1";
 
 /**
@@ -217,7 +227,7 @@ function wait(ms) {
  */
 async function installProducer(page, options) {
   await page.addInitScript(
-    ({ host, script, plantKeystroke, passphraseMarker }) => {
+    ({ host, script, plantKeystroke, passphraseMarker, dropModifierKeyup }) => {
       const gate = {
         script,
         /** producer 가 datachannel 로 받은 프레임 전부. 유일하게 허용된 자리. */
@@ -370,6 +380,27 @@ async function installProducer(page, options) {
           this.onclose = null;
         }
         send(frame) {
+          // RED SEAM (#1563). 이 producer 가 **조합키의 keyup 하나만 못 받은
+          // 것처럼** 군다 — 판정을 잃은 클라가 내보내지 않았을 바로 그 종류의
+          // 프레임이다. 제품은 한 줄도 바뀌지 않고, 「내려간 키는 전부
+          // 올라왔다」 단언이 화면 문구가 아니라 **실제 와이어**를 세고 있음이
+          // 증명된다. Escape 가 아니라 Shift 를 지우는 이유: Escape 였다면 그
+          // 앞의 시나리오 전용 단언이 먼저 붉어져, 이 균형 단언이 정말 도는지는
+          // 아무도 보지 못한다.
+          if (dropModifierKeyup) {
+            try {
+              const parsed = JSON.parse(frame);
+              if (
+                parsed.type === "key" &&
+                parsed.action === "up" &&
+                String(parsed.code).startsWith("Shift")
+              ) {
+                return;
+              }
+            } catch {
+              /* 프레임이 아니면 그대로 기록한다 */
+            }
+          }
           gate.wire.push(frame);
           if (plantKeystroke) {
             // RED SEAM. 드라이버가 「기억하는 표면」을 **네 자리 모두**에 만든다:
@@ -472,6 +503,7 @@ async function installProducer(page, options) {
       script: options.script,
       plantKeystroke: options.plantKeystroke === true,
       passphraseMarker: MARKER,
+      dropModifierKeyup: options.dropModifierKeyup === true,
     }
   );
 }
@@ -693,6 +725,7 @@ async function openContext(browser, state, options = {}) {
   await installProducer(page, {
     script: options.script ?? "grant",
     plantKeystroke: options.plantKeystroke === true,
+    dropModifierKeyup: options.dropModifierKeyup === true,
   });
   await installRoutes(context, state);
   return { context, page };
@@ -728,6 +761,7 @@ async function exerciseHappyPath(browser) {
   const state = { session: workSession(), grantModes: [], returns: [] };
   const { context, page } = await openContext(browser, state, {
     plantKeystroke: proveRedObserved,
+    dropModifierKeyup: proveRedStuckKey,
   });
   try {
     await openDetailViaCard(page);
@@ -922,6 +956,80 @@ async function exerciseHappyPath(browser) {
     );
     if (escOnWire) fail("the release key was forwarded to the host");
 
+    // ---- #1563: 누른 순서와 뗀 순서가 다를 때 -----------------------------
+    //
+    // Shift+Esc 는 「Esc 를 호스트로」 라는 몸짓이고, 손이 코드에서 빠지는
+    // 보통의 순서는 **조합키를 먼저** 떼는 것이다. 판정이 이벤트 단위였을 때
+    // 그 keyup 은 `shiftKey: false` 로 도착해 평범한 Esc 규칙에 걸렸고 —
+    // release 로 분류되어 전달되지 않았다. 호스트는 keydown 만 받은 채 그 키를
+    // 영영 누르고 있게 된다(논리적 stuck key). 그래서 이 순서를 실제로 친다.
+    await page.getByTestId("work-control-surface").focus();
+    await page.keyboard.down("Shift");
+    await page.keyboard.down("Escape");
+    await page.keyboard.up("Shift"); // ← 먼저 뗀다. 이 한 줄이 결함의 모양이다.
+    await page.keyboard.up("Escape");
+    await page.waitForTimeout(100);
+
+    const keyFrames = await page.evaluate(() =>
+      (window.__controlGate.wire ?? [])
+        .map((frame) => {
+          try {
+            return JSON.parse(frame);
+          } catch {
+            return null;
+          }
+        })
+        .filter((frame) => frame !== null && frame.type === "key")
+    );
+    const escapeFrames = keyFrames.filter((frame) => frame.code === "Escape");
+    if (!escapeFrames.some((frame) => frame.action === "up")) {
+      fail(
+        "the keyup of Shift+Esc never reached the host after Shift was released first — the host is holding a key nobody is pressing"
+      );
+    }
+    if (escapeFrames.length !== 2) {
+      fail(
+        `Shift+Esc must put exactly its down and its up on the wire, saw ${escapeFrames.length} Escape frames`
+      );
+    }
+    // 조합키는 몸짓이지 키가 아니다 — 양쪽 모서리 다.
+    if (escapeFrames.some((frame) => frame.shift !== false)) {
+      fail("Shift travelled with the Escape it was only the gesture for");
+    }
+    // 그리고 이것은 반환 몸짓이 아니다: 캐럿은 그대로 화면에 있다.
+    const stillCapturing = await page.evaluate(() => {
+      const active = document.activeElement;
+      return (
+        active instanceof HTMLElement &&
+        active.dataset.testid === "work-control-surface"
+      );
+    });
+    if (!stillCapturing) {
+      fail("Shift+Esc moved the caret — it is the send gesture, not the release one");
+    }
+
+    // 이 창에서 내려간 키는 **전부** 올라왔는가. 시나리오 하나가 아니라 지금까지
+    // 친 모든 키에 대해 묻는다: stuck key 는 한 순서에만 사는 결함이 아니다.
+    const held = [];
+    for (const frame of keyFrames) {
+      if (frame.action === "down") {
+        if (!held.includes(frame.code)) held.push(frame.code);
+      } else {
+        const at = held.indexOf(frame.code);
+        if (at >= 0) held.splice(at, 1);
+      }
+    }
+    if (held.length > 0) {
+      fail(
+        `a key went down on the host and never came up: ${held.join(", ")} — the person let go and the VM did not`
+      );
+    }
+
+    // 다시 캐럿을 반환 버튼으로. 위 시나리오가 캐럿을 화면에 두고 끝났으므로,
+    // 키보드만으로 반환하는 아래 단계는 릴리스 키를 한 번 더 지난다.
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(100);
+
     // 명시 반환 — Enter 로.
     const before = state.returns.length;
     await page.keyboard.press("Enter");
@@ -948,7 +1056,7 @@ async function exerciseHappyPath(browser) {
     await context.close();
   }
   console.log(
-    "  ok  deep link -> confirm -> controller -> input -> Esc -> 반환 (keyboard only from control)"
+    "  ok  deep link -> confirm -> controller -> input -> Esc -> Shift+Esc(순서 뒤집힌 해제) -> 반환 (keyboard only from control)"
   );
 }
 
@@ -1370,8 +1478,24 @@ async function main() {
     ["preview", "--port", String(port), "--strictPort", "--host", "127.0.0.1"],
     { cwd: webRoot, stdio: "ignore" }
   );
+  // 이 포트가 **우리 것인가**. 측정으로 들어온 규율이다 (#1563 작업 중):
+  // 다른 워크트리에 남아 있던 `vite preview` 가 5193 을 잡고 있으면
+  // `--strictPort` 는 우리 서버를 즉시 죽이는데, `stdio: "ignore"` 라 그 실패는
+  // 어디에도 뜨지 않고 `waitForServer()` 는 **남의 빌드**를 보고 성공한다. 그러면
+  // 이 게이트는 자기 워크트리를 한 줄도 재지 않은 채 초록이 될 수 있다.
+  let serverDied = false;
+  server.on("exit", () => {
+    serverDied = true;
+  });
   try {
     await waitForServer();
+    // 스폰한 프로세스가 죽었다면 지금 응답하는 것은 우리 dist/ 가 아니다.
+    await wait(300);
+    if (serverDied) {
+      throw new Error(
+        `GATE FAIL: port ${port} is already served by another process, so this run would have measured somebody else's build. Free it (lsof -nP -iTCP:${port}) or set DISPLAY_CONTROL_GATE_PORT.`
+      );
+    }
     const browser = await chromium.launch();
     try {
       await exerciseHappyPath(browser);
