@@ -13,6 +13,20 @@ fail() {
   exit 1
 }
 
+# The skew fixtures below measure what check_branch_skew.sh and the pre-push
+# hook do *by default*, so this harness must not inherit the caller's overrides.
+# A worker whose branch integrates into origin/track/engine has to pass
+# MOMO_GATE_SKEW_REF (or MOMO_GATE_SKIP_SKEW) to get a clean gate run at all,
+# and local_gate.sh exports it straight into here — where it silently replaced
+# the measurement with the override: MOMO_GATE_SKEW_REF made the negative
+# fixture fail on a ref the throwaway repo has never heard of, and
+# MOMO_GATE_SKIP_SKEW turned two must-be-red fixtures green. A harness that
+# reports the caller's environment instead of the code is worse than no harness.
+# The one fixture that *does* exercise the reviewed exception sets the variable
+# inline on its own command line, so it is unaffected. (#1525, found while
+# producing that ticket's gate evidence on a track-based branch.)
+unset MOMO_GATE_SKEW_REF MOMO_GATE_SKIP_SKEW
+
 # The canonical alignment preflight must be an unconditional consumer, not a
 # helper reachable only from selected profiles. Keep exactly one top-level call
 # before the profile switch; deleting or moving it turns this fixture red.
@@ -37,6 +51,18 @@ init_repo() {
   git -C "$repo" branch -M main
 }
 
+# The skew fixtures below assert what check_branch_skew.sh does *by default*,
+# so they must not inherit the caller's overrides. A worker whose branch
+# integrates into origin/track/engine has to pass MOMO_GATE_SKEW_REF (or
+# MOMO_GATE_SKIP_SKEW) to get a clean gate run at all, and local_gate.sh exports
+# that straight into this harness — which then measured the override instead of
+# the behaviour, turning both the negative and the positive fixture into false
+# results. Strip them at the call site rather than at the top of the file: the
+# one call on line ~71 that *does* set MOMO_GATE_SKIP_SKEW is exercising the
+# reviewed-exception path on purpose. (#1525 — found while producing this
+# ticket's own gate evidence on a track-based branch.)
+skew_default() { env -u MOMO_GATE_SKEW_REF -u MOMO_GATE_SKIP_SKEW "$@"; }
+
 # Negative skew fixture: upstream and feature touch disjoint files.
 NEGATIVE_REPO="$SANDBOX/skew-negative"
 init_repo "$NEGATIVE_REPO"
@@ -50,7 +76,7 @@ git -C "$NEGATIVE_REPO" add upstream.txt
 git -C "$NEGATIVE_REPO" commit -qm upstream
 git -C "$NEGATIVE_REPO" update-ref refs/remotes/origin/main HEAD
 git -C "$NEGATIVE_REPO" checkout -q feature
-(cd "$NEGATIVE_REPO" && "$REPO_ROOT/scripts/check_branch_skew.sh") >/dev/null \
+(cd "$NEGATIVE_REPO" && skew_default "$REPO_ROOT/scripts/check_branch_skew.sh") >/dev/null \
   || fail "disjoint upstream/feature changes were rejected"
 
 # Positive skew fixture: both sides modify the same path after merge-base.
@@ -64,11 +90,11 @@ printf 'upstream edit\n' >"$POSITIVE_REPO/shared.txt"
 git -C "$POSITIVE_REPO" commit -qam upstream
 git -C "$POSITIVE_REPO" update-ref refs/remotes/origin/main HEAD
 git -C "$POSITIVE_REPO" checkout -q feature
-if (cd "$POSITIVE_REPO" && "$REPO_ROOT/scripts/check_branch_skew.sh") >"$SANDBOX/skew.out" 2>&1; then
+if (cd "$POSITIVE_REPO" && skew_default "$REPO_ROOT/scripts/check_branch_skew.sh") >"$SANDBOX/skew.out" 2>&1; then
   fail "overlapping upstream/feature change did not fail"
 fi
 grep -Fq 'shared.txt' "$SANDBOX/skew.out" || fail "skew failure omitted overlapping path"
-(cd "$POSITIVE_REPO" && MOMO_GATE_SKIP_SKEW='fixture reviewed exception' "$REPO_ROOT/scripts/check_branch_skew.sh") >/dev/null \
+(cd "$POSITIVE_REPO" && skew_default env MOMO_GATE_SKIP_SKEW='fixture reviewed exception' "$REPO_ROOT/scripts/check_branch_skew.sh") >/dev/null \
   || fail "reasoned skew override was rejected"
 
 # Exercise the optional hook as a final consumer, with a local bare remote so
@@ -87,7 +113,7 @@ cp "$REPO_ROOT/scripts/check_track_alignment.sh" "$POSITIVE_REPO/scripts/"
 cp "$REPO_ROOT/scripts/hooks/pre-push" "$POSITIVE_REPO/scripts/hooks/"
 feature_sha="$(git -C "$POSITIVE_REPO" rev-parse feature)"
 if printf 'refs/heads/feature %s refs/heads/feature %040d\n' "$feature_sha" 0 | \
-  (cd "$POSITIVE_REPO" && scripts/hooks/pre-push) >"$SANDBOX/pre-push.out" 2>&1; then
+  (cd "$POSITIVE_REPO" && skew_default scripts/hooks/pre-push) >"$SANDBOX/pre-push.out" 2>&1; then
   fail "pre-push final consumer did not reject overlapping changes"
 fi
 grep -Fq 'shared.txt' "$SANDBOX/pre-push.out" || fail "pre-push failure omitted overlapping path"
