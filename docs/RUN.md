@@ -145,11 +145,11 @@ Desktop 기본값은 `host.docker.internal`이며, 필요하면 `--api-proxy-hos
 	`centrifugo.local-alpha.json`의 `agentwork` namespace에 `subscribe_proxy_enabled`와
 	workspace-qualified `channel_regex`가 들어 있는지 확인한다.
 
-runner는 기본 검증 경로에서 headless `MomoMacSmoke`를 실행한다. 사용자가 실제 앱 창을 열 때는
-기본 고정 포트 flow인 `scripts/momo start`를 쓰거나, runner가 생성한 `summary.md`의
-`MOMO_SERVER_BASE_URL`/`MOMO_CENTRIFUGO_WS_URL`/`MOMO_LOGIN_*` 환경변수 예시로
-`scripts/macos_dev_run.sh --launch --verify`를 실행한다. 현재 `MomoMacDevApp`은 개발용
-SwiftPM-staged `.app`이며, 서명/공증/배포용 패키징은 M4 범위다.
+runner는 기본 검증 경로에서 headless `MomoMacSmoke`를 실행한다. 사용자가 스택을 직접 띄울 때는
+기본 고정 포트 flow인 `scripts/momo start`를 쓴다. runner가 생성한 `summary.md`의
+`MOMO_SERVER_BASE_URL`/`MOMO_CENTRIFUGO_WS_URL`/`MOMO_LOGIN_*` 환경변수 예시로 macOS 앱 창을
+열던 경로는 **삭제됐다**(W-S1 / #1215 — 6장). 창을 봐야 하면 웹 표면
+(`npm --prefix clients/web run dev`)이 그 자리를 대신한다.
 
 ---
 
@@ -1352,51 +1352,34 @@ swift test --disable-sandbox --package-path workers/WorkHostDaemon \
 
 ---
 
-## 6. macOS 클라이언트 (데모 surface: D / B / C) — 🚧 **은퇴 중**
+## 6. macOS 클라이언트 (데모 surface: D / B / C) — ⛔ **삭제됨**
 
-> `clients/macOS`는 삭제 대기다. 현행 제품 표면은 `clients/web`(React/Vite) · `clients/desktop`(Tauri 2, 같은 웹 번들) · `clients/mobile`(React Native)이며,
-> 개발 실행은 `npm --prefix clients/web ci && npm --prefix clients/web run dev`다. 아래는 삭제 전까지의 참고 절차다.
+> **이 장의 트리는 삭제 대기가 아니라 이미 삭제됐다** — `clients/macOS`·`clients/iOS`·`clients/Core`는
+> W-S1(#1215)에서 사라졌고, 그것들을 띄우던 `scripts/macos_dev_run.sh`와 게이트 레인 <!-- docs-cmd-ignore: 삭제된 실행체를 "삭제됐다"고 말하기 위해 이름을 부르는 문장 -->
+> `local_gate.sh --profile macos-ui`도 함께 사라졌다. 아래에서 그 명령들을 지운 이유가 그것이다: <!-- docs-cmd-ignore: 삭제된 게이트 레인을 "사라졌다"고 말하기 위해 이름을 부르는 문장 -->
+> 존재하지 않는 실행체를 코드블록에 남겨두면 다음 사람이 그대로 붙여넣고 `command not found`를 만난다
+> (#1525 — 게이트 `scripts/check_docs_commands.py`가 이제 이 문서를 그 기준으로 검사한다).
+> 현행 제품 표면은 `clients/web`(React/Vite) · `clients/desktop`(Tauri 2, 같은 웹 번들) · `clients/mobile`(React Native)이며,
+> 개발 실행은 `npm --prefix clients/web ci && npm --prefix clients/web run dev`다.
+> 삭제된 절차의 원본이 필요하면 `git log --diff-filter=D -- clients/macOS scripts/macos_dev_run.sh`가 가리킨다. <!-- docs-cmd-ignore: 삭제된 경로를 인자로 받는 것이 목적인 git log — 경로가 없어야 정상이다 -->
 
 macOS 패키지(`clients/macOS`)는 v0에서 **SwiftUI 라이브러리 + 빌드검증 smoke 실행파일 +
-SwiftPM 개발용 window 앱 + 릴리스용 Xcode thin host app**으로 구성된다. 데모 경험
+SwiftPM 개발용 window 앱 + 릴리스용 Xcode thin host app**으로 구성됐다. 데모 경험
 **D(Live Tool-Call) / B(비용 호흡) / C(승인 인박스)**는 `MomoMacDevApp`과 Xcode host
-`MomoMac.app` 모두에서 같은 `MomoMacRootView`로 확인할 수 있다.
+`MomoMac.app` 모두에서 같은 `MomoMacRootView`로 확인할 수 있었다. 아래 설명은 그 시절의
+구조 기록이고, **오늘 실행 가능한 명령은 이 블록이 전부다:**
 
 ```sh
-# 로컬 dogfood 한 줄 실행: 서버가 없으면 mock Hermes 스택을 올리고 앱까지 연다.
+# 로컬 dogfood 한 줄 실행: 서버가 없으면 mock Hermes 스택을 올린다.
+# (macOS 앱이 삭제된 뒤로 이 명령이 여는 것은 스택까지다.)
 scripts/momo start
 
 # 상태 확인 / 종료
 scripts/momo status
 scripts/momo stop
 
-# 라이브러리 + smoke 컴파일 검증
-swift build --package-path clients/macOS
-
-# 헤드리스 smoke 실행(모델/인메모리 백엔드 라운드트립 — DB/Centrifugo/hermes 불필요)
-swift run --package-path clients/macOS MomoMacSmoke
-
-# SwiftUI 개발용 macOS window 실행(인메모리 demo seed — DB/Centrifugo/hermes 불필요)
-scripts/macos_dev_run.sh
-
-# SwiftUI 개발용 macOS window 실행(MomoServer REST history/send 사용)
-make up
-make migrate
-swift run --package-path server MomoServer
-MOMO_SERVER_BASE_URL=http://127.0.0.1:8080 scripts/macos_dev_run.sh
-MOMO_SERVER_BASE_URL=http://127.0.0.1:8080 \
-MOMO_CENTRIFUGO_WS_URL=ws://127.0.0.1:8000/connection/websocket \
-scripts/macos_dev_run.sh
-
-# PR evidence용 GUI opt-in: launch → process/window smoke → logs → terminate
-LOCAL_GATE_LAUNCH_UI=1 scripts/local_gate.sh --profile macos-ui
-
 # M3 D/B/C combined exit evidence: D tool-call + B cost + C approval + REST/UI data path
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile m3-dbc
-
-# M4 릴리스용 Xcode thin host app 무서명 build — 🚧 은퇴 중(clients/macOS 삭제 대기)
-( cd clients/macOS && \
-  xcodebuild build -scheme MomoMac -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO )
 ```
 
 - `MomoMac`(library): `MomoCore`의 `ChatBackend`/`AgentTransport` 계약 위에 SwiftUI 뷰 + `LiveChatBackend` 스텁 + `MomoServerRESTChatBackend` 개발용 REST transport.
@@ -1432,23 +1415,18 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh -
 - REST dev mode 검증 범위: message history fetch와 send는 실제 MomoServer REST/DB 경로를 탄다.
   서버가 `realtimeWebSocketUrl`을 광고하면 별도 앱 env 없이 WebSocket/Centrifugo live
   subscription도 실제 SwiftCentrifuge adapter를 탄다. production reconnect UX polish는 후속 범위다.
-- `scripts/macos_dev_run.sh`(🚧 은퇴 중): build-macos-apps SwiftPM GUI workflow에 맞춘 dev-only run loop다.
-  `swift build --package-path clients/macOS --product MomoMacDevApp` 후 `dist/MomoMacDevApp.app`을
-  생성하고 `/usr/bin/open -n`으로 띄운다. `--verify`는 process/window smoke, `--logs`는 unified
-  log capture, `--telemetry`는 bundle subsystem log capture, `--terminate`는 evidence 수집 후 종료,
-  `--terminate-only`는 실행 중인 dev app 정리에 사용한다. 이 bundle은 개발용 staging 산출물이며
-  Xcode release host와 별개다.
-- `MOMO_*` 환경변수를 앱 프로세스에 확실히 전달하려면
-  `MACOS_DEV_RUN_DIRECT_EXEC=1 scripts/macos_dev_run.sh --verify --logs`를 사용한다. 내부 alpha의
-  real-server launch 예시는 [`docs/INTERNAL_ALPHA.md`](INTERNAL_ALPHA.md) §5에 있다.
+- ⛔ **dev run loop는 삭제됐다.** W-S1(#1215) 전까지는 SwiftPM GUI workflow에 맞춘 dev-only
+  run loop 스크립트가 `dist/MomoMacDevApp.app`을 만들어 `/usr/bin/open -n`으로 띄우고,
+  process/window smoke·unified log·bundle subsystem log·evidence 수집 종료를 플래그로 갈랐다.
+  그 스크립트도 그것이 빌드하던 `clients/macOS`도 지금 이 트리에 없다 — 원본은 git 이력에 있다. <!-- docs-cmd-ignore: 삭제된 dev run loop의 형상 기록. 실행체가 없으므로 명령 형태로 적지 않는다 -->
 - `clients/macOS/MomoMac.xcodeproj`: M4 릴리스 패키징 진입용 thin host app이다. shared scheme
   `MomoMac`은 `MomoMac.app`을 만들며 Bundle ID는 `com.dawnkim.momo`다. 이 target은 local SwiftPM
   package products `MomoMac`/`MomoCore`를 링크하고, 기존 `MomoMacRootView` + `MomoMacDemo` bootstrap을
   사용한다. Debug/Release에는 hardened runtime build setting과 `XcodeHost/MomoMac.entitlements`
   file이 반영되어 있다. `CODE_SIGNING_ALLOWED=NO` local build에서는 Xcode가 hardened runtime signing
   step을 수행하지 않으므로, Developer ID signing, notarytool/stapler, DMG, Sparkle real update install은 후속 M4 범위다.
-- Codex app Run action은 `.codex/environments/environment.toml`에서 `./scripts/macos_dev_run.sh`로
-  연결된다.
+- Codex app Run action(`.codex/environments/environment.toml`)이 가리키던 dev run loop도 같은
+  W-S1(#1215) 삭제에 포함됐다 — 그 파일의 주석이 이미 그렇게 적고 있다.
 
 ---
 
@@ -1711,8 +1689,8 @@ M1 staging 완료로 표시하지 않는다.
 | `make down` | `docker compose -f infra/docker-compose.yml down` | runtime-verifiable |
 
 - 서비스 실행(`MomoServer`/`OutboxRelay`/`AgentWorker`)은 Makefile 타깃이 아니라
-  **5장의 `swift run … <Executable>`로 직접** 띄운다. macOS GUI 개발 앱은 6장의
-  `scripts/macos_dev_run.sh`를 사용해 dev-only `.app` bundle로 띄운다.
+  **5장의 `swift run … <Executable>`로 직접** 띄운다. macOS GUI 개발 앱을 띄우는 타깃은
+  없다 — 그 트리와 실행 스크립트는 W-S1(#1215)에서 삭제됐다(6장).
 - `make swift-build`/`make swift-test`는 **`Package.swift`가 실제로 존재하는 패키지만** 순회하므로,
   일부 패키지가 없어도 안전하게 동작한다.
 
@@ -1747,9 +1725,10 @@ make swift-build                 # 🚧 은퇴 중 트리를 확인해야 할 �
 python3 -m py_compile adapters/hermes/momo_adapter.py
 jq empty infra/prod/centrifugo.prod.json
 
-# --- 선택적 수동 UI 확인: macOS window를 열고, 창을 닫으면 종료 ---
-scripts/macos_dev_run.sh --verify --logs
-scripts/macos_dev_run.sh --terminate-only
+# --- 선택적 수동 UI 확인 ---
+# macOS window 경로는 삭제됐다(W-S1 / #1215 — 6장). 웹 표면은:
+npm --prefix clients/web ci
+npm --prefix clients/web run dev
 
 # --- 전체 런타임 기동 (PG18 + Centrifugo v6 환경) ---
 cp infra/.env.example .env       # 값 채움 (openssl rand -hex 32)
