@@ -901,6 +901,22 @@ pub struct WorkSessionDto {
     /// the capability that authorises dialling it
     /// ([`DisplayAttachCapabilityResponse`]).
     pub remote_display_available: bool,
+    /// LIVE-5a (ADR-0004 증보 3): when somebody currently holds this session's
+    /// keyboard, the moment they took it. Absent when nobody does.
+    ///
+    /// This is the field that survives a reload. The `work.session.control`
+    /// envelope says the same thing over the wire, but Centrifugo is transport
+    /// (하드 불변식) and a surface that only heard it forgets on refresh; the
+    /// value here is read from `display_control_window`, which is the SoT —
+    /// `momo_t3::WorkSessionDetail::control_started_at_ms` carries the argument.
+    ///
+    /// **Who** holds it is deliberately absent, matching the broadcast: the
+    /// grantee is an audit-log fact, and control is owner-only anyway, so
+    /// 「누군가 조작 중」 is everything a reader — or an agent — needs to behave
+    /// correctly. Nothing typed during the window is reachable from this DTO or
+    /// from anything it links to (증보 3 D2).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub control_started_at: Option<i64>,
     pub started_at_ms: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ended_at_ms: Option<i64>,
@@ -1073,8 +1089,15 @@ pub struct IssueDisplayAttachRequest {
 /// in each case would be a trap for whoever writes the third.
 ///
 /// `display_endpoint` is the HOST's WebRTC **signalling** WS URL (ADR-0165 D2).
-/// momo does not proxy it, does not appear in the ICE negotiation it starts, and
-/// never sees a frame that follows (D5).
+/// momo does not proxy it and never sees a frame that follows (D5).
+///
+/// Since LIVE-5a it also carries `ice_servers`, and that is the one place momo
+/// touches the ICE negotiation at all: it hands out a **short-lived credential**
+/// for the oort-operated relay (ADR-0165 D3 — never a third party's). It still
+/// carries no media, sees no candidate, and terminates nothing. Handing out the
+/// credential is what lets it be per-session and expiring instead of one shared
+/// password baked into every client, which is what the install runbook shipped
+/// and called temporary in writing.
 #[derive(Debug, Serialize)]
 pub struct DisplayAttachCapabilityResponse {
     /// The HOST's own signalling endpoint. momo never proxies it.
@@ -1100,6 +1123,48 @@ pub struct DisplayAttachCapabilityResponse {
     /// waiting for the relay to come round.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub control_started_at: Option<i64>,
+    /// The relay this grant may allocate through, with a credential minted for
+    /// this session and expiring on its own (LIVE-5a).
+    ///
+    /// Handed straight to `new RTCPeerConnection({ iceServers })`, which is why
+    /// the field names are the W3C ones. **Empty** on an instance that was given
+    /// no relay policy, and a client must treat empty as "use what you were
+    /// configured with" rather than as an error: during the retirement window
+    /// that is the static credential the producer template still carries, and
+    /// the whole point of the overlap is that the old path keeps working while
+    /// the new one is proved.
+    ///
+    /// Always serialised, even when empty, so a client can tell an instance that
+    /// has no relay policy from one too old to have the field.
+    pub ice_servers: Vec<IceServerDto>,
+}
+
+/// One entry of `RTCConfiguration.iceServers`, in the browser's own spelling.
+///
+/// snake_case like the response that carries it (`TerminalAttachCapabilityResponse`'s
+/// reason), but the *field names* are W3C's `urls`/`username`/`credential`
+/// because the client passes this array through unchanged. A momo-flavoured name
+/// here would buy nothing and cost a mapping step in every client.
+///
+/// `credential` is a secret with a lifetime measured in the hour, scoped to one
+/// work session. It is not stored anywhere in momo — it is derived on the way
+/// out ([`momo_t3::TurnCredentialPolicy`]) — so there is no row to leak and
+/// nothing to rotate but the relay's own `static-auth-secret`.
+#[derive(Debug, Serialize)]
+pub struct IceServerDto {
+    pub urls: Vec<String>,
+    pub username: String,
+    pub credential: String,
+}
+
+impl From<momo_t3::IceServer> for IceServerDto {
+    fn from(server: momo_t3::IceServer) -> Self {
+        IceServerDto {
+            urls: server.urls,
+            username: server.username,
+            credential: server.credential,
+        }
+    }
 }
 
 /// `DELETE …/work-sessions/{session}/display-control` response — the return.
@@ -1155,6 +1220,31 @@ pub struct DisplayAttachValidationResponse {
     /// which is how a returned window actually takes the keyboard away rather
     /// than merely recording that somebody asked for it back.
     pub input_enabled: bool,
+    /// The producer's own copy of the relay credential (LIVE-5a).
+    ///
+    /// The same policy the browser is served by [`DisplayAttachCapabilityResponse`],
+    /// and the same session subject, so the two ends of one media path allocate
+    /// on the relay under one username and a coturn log line can be joined back
+    /// to a work session.
+    ///
+    /// **A fresh one is minted on every validate, and the shipped producer only
+    /// installs the first.** Re-minting is a pure function of the request, so it
+    /// costs nothing and keeps the field correct for any client that *can* use
+    /// it; what it does not do is renew a live stream. `webrtcbin` offers no way
+    /// to swap a TURN server underneath a running ICE agent, so the credential a
+    /// peer connection was built with is the one it dies with, and the TTL is
+    /// that connection's **ceiling** rather than a sliding window
+    /// (`momo_t3::turn`'s header carries the argument; closing it —
+    /// renegotiation, or accepting the ceiling — is a LIVE-5c acceptance
+    /// criterion). A *new* viewer is unaffected: new connection, new pipeline,
+    /// credential minted at the moment they attached.
+    ///
+    /// Empty when the instance has no relay policy, which is the retirement
+    /// overlap: the producer then keeps `MOMO_DISPLAY_TURN_URI`, the static
+    /// credential delivered at create time. A producer that receives a non-empty
+    /// array must prefer it — that preference is what makes the static one
+    /// removable later without a second deploy.
+    pub ice_servers: Vec<IceServerDto>,
 }
 
 /// `POST …/work-sessions/{session}/display-binding` request — work-host-signed.
@@ -3687,6 +3777,7 @@ mod tests {
             observer_grant_count: 0,
             remote_attach_available: false,
             remote_display_available: true,
+            control_started_at: None,
             started_at_ms: 5,
             ended_at_ms: None,
             exit_code: None,

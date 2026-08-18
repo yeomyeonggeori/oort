@@ -89,6 +89,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
              REST still serves."
         );
     }
+    // LIVE-5a: silence here would read as "the TTL you asked for is what you
+    // got". It is not, and the direction matters — a credential configured to
+    // outlive a day is the static shared password this goal exists to retire,
+    // wearing the word "ephemeral".
+    if let Some(requested) = config.turn_ttl_clamped_from {
+        tracing::warn!(
+            requested_seconds = requested,
+            applied_seconds = momo_t3::MAX_TURN_CREDENTIAL_TTL_SECONDS,
+            "MOMO_TURN_CREDENTIAL_TTL_SECONDS exceeds the ceiling and was CLAMPED. \
+             A relay credential that lives longer than a day is not scoped by \
+             anything an operator can reason about; if you need one, rotate \
+             MOMO_TURN_STATIC_AUTH_SECRET on a schedule instead — that bounds every \
+             credential at once."
+        );
+    }
     if config.agent_gateway.legacy_secret_enabled() {
         tracing::warn!(
             "MOMO_ALLOW_LEGACY_GATEWAY_SECRET is on; rotate gateway callers to \
@@ -180,6 +195,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // substrate here" stays distinguishable from "one that cannot be reached".
     let state = match t3_provisioner {
         Some(provisioner) => state.with_t3_provisioner(provisioner),
+        None => state,
+    };
+    // LIVE-5a / ADR-0165 증보 1 D3-2: per-session ephemeral TURN credentials,
+    // attached only when the operator gave this process a relay AND its
+    // `static-auth-secret`. Without both, the display routes hand back an empty
+    // `ice_servers` and the producer keeps the static credential the install
+    // runbook shipped — the overlap that makes 「신규 실증 → 정적 제거」 possible
+    // on a relay that is already carrying production traffic.
+    let state = match config.turn.clone() {
+        Some(policy) => state.with_turn(policy),
         None => state,
     };
     let app = build_app(state);

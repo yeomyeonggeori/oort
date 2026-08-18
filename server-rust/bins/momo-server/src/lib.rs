@@ -225,6 +225,18 @@ pub struct AppState {
     /// reason. Never logged — [`AppState`]'s hand-written `Debug` covers it by
     /// listing nothing.
     pub ephemeral_grant_key: Arc<String>,
+    /// LIVE-5a — the oort TURN relay's ephemeral-credential policy
+    /// (ADR-0165 증보 1 D3-2). `None` unless [`AppState::with_turn`] says
+    /// otherwise, and `None` means the two display routes answer with an
+    /// **empty** `ice_servers` rather than a credential nothing can verify.
+    ///
+    /// Fail-closed like the rest, with one difference worth naming: an empty
+    /// array is not a closed surface. The producer template still carries the
+    /// static credential the install runbook shipped, so an instance without
+    /// this policy streams exactly as it does today. That overlap **is** the
+    /// retirement order — 신규 단명 자격 실증 먼저, 정적 제거는 그다음 — and it
+    /// lives in the default rather than in a runbook step somebody remembers.
+    pub turn: Option<Arc<momo_t3::TurnCredentialPolicy>>,
 }
 
 impl AppState {
@@ -247,7 +259,19 @@ impl AppState {
             webhook: Arc::new(WebhookSettings::default()),
             drive: Arc::new(momo_drive::UnavailableDriveArchive),
             ephemeral_grant_key: Arc::new(ephemeral_grant_key),
+            turn: None,
         }
+    }
+
+    /// Attach the oort TURN relay's ephemeral-credential policy (LIVE-5a).
+    ///
+    /// A builder like every other, and the default it leaves alone is the one
+    /// that matters: without it the display routes mint no credential and the
+    /// producer keeps the static one, which is how the new path is proved beside
+    /// the old rather than instead of it.
+    pub fn with_turn(mut self, policy: momo_t3::TurnCredentialPolicy) -> Self {
+        self.turn = Some(Arc::new(policy));
+        self
     }
 
     /// Attach the operator's Drive archive (ADR-0151), same rationale as every

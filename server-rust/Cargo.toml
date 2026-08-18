@@ -58,6 +58,13 @@ hex = "0.4"
 # Both webhook families are HMAC-SHA256 over a domain-separated string, which is
 # exactly what lets Postgres store a random *reference* instead of a secret.
 hmac = "0.12"
+# LIVE-5a: the coturn REST-API credential (`use-auth-secret`) is HMAC-**SHA1**,
+# and that is a constraint rather than a preference. The temporary password a
+# browser presents is checked through STUN MESSAGE-INTEGRITY, which WebRTC fixes
+# at HMAC-SHA1 (RFC 5389 §15.4), and coturn derives the password with the same
+# `shatype`. Raising it to SHA-256 to match the rest of this block would make
+# every browser fail to authenticate against the TURN. See `momo_t3::turn`.
+sha1 = "0.10"
 
 # auth
 jsonwebtoken = "9"

@@ -39,6 +39,11 @@
 //! | `live3_8_a_window_opening_elsewhere_outlasts_a_return_that_races_it` | drop the run-row lock from either half of the park/resume pair, or narrow the park's lock to the rows it intends to update |
 //! | `live3_9_two_closes_at_once_still_leave_exactly_one_resume` | drop the run-row lock from the resume, or take it before the caller's own window close instead of after |
 //! | `live4_1_the_handoff_card_hears_the_boundary_and_the_join_survives_a_shouted_uuid` | drop the `message.edited` publish that follows the card stamp (in the route or in the notifier's sweep), put the model's raw `session_id` into `props` instead of the canonical one, let the open stamp merge over the previous lapse's end keys instead of deleting them, or let a settled handoff be rewritten by a later window |
+//! | `live5a_1_a_grant_carries_its_own_expiring_relay_credential` | mint one shared credential instead of a per-session one, replay the grant's credential on validate instead of minting against that call's clock, drop the expiry from the username, serve a relay the operator did not name, or turn "no relay configured" into an error or an absent field |
+//! | `live5a_2_control_closes_observation_and_all_three_closes_restore_it` | leave `observation` open while somebody types a password, restore a default instead of the value the window displaced, forget the restore on any one of the four closes (including the notifier sweep nobody performs), or "restore" `open` onto a session the owner had already closed |
+//! | `live5a_3_a_teammates_live_stream_ends_when_control_opens` | close observation only for new grants and not for a stream already running, drop the owner exemption from the arm control just closed, leave the session `owner_only` after the return, or stop projecting the standing window into the session read model |
+//! | `live5a_4_a_half_written_control_window_exposes_no_screen` | write the observation flip in a transaction of its own, or let a failed window insert leave the session `owner_only` with no window anywhere to close |
+//! | `live5a_5_the_session_surface_reconstructs_all_three_window_states` | drop the control projection from the session list, answer it off `ended_at IS NULL` without the lease clause, or return 0 rather than absence when nobody holds the keyboard |
 //!
 //! ### The mutation proof (ADR-0004 증보 3's own acceptance criterion)
 //!
@@ -65,6 +70,15 @@
 //! is actually spent: the gateway's completion door answers a *different
 //! sentence* before and after the window (a lease refusal, then an approval-hold
 //! refusal), and `usage_ledger` gains nothing meanwhile.
+//!
+//! `live5a_3` carries the same shape for the **person** D2 protects rather than
+//! the agent D3 does. The teammate it uses is fully entitled — active member,
+//! still in the channel, session `observation = 'open'` — and the test watches
+//! their live stream validate **200 before** control opens and **401 after**,
+//! with nothing revoked and nothing else changed. That 401 is the measurement
+//! the whole clause rests on: closing observation only for *new* grants would
+//! leave the password on a screen somebody is already watching, and an assertion
+//! that only ever saw the refusal could not tell the two builds apart.
 //!
 //! ## What is deliberately NOT here
 //!
@@ -210,11 +224,49 @@ fn ensure_schema_and_roles() {
 }
 
 async fn start_server(pool: PgPool) -> String {
+    start_server_with_turn(pool, None).await
+}
+
+/// The relay this instance is configured with, spelled the way the install
+/// runbook spells the real one (LIVE-5a).
+///
+/// A **documentation-range** address on purpose: no test in this file opens a
+/// socket, and a fixture carrying the production relay's address would look
+/// like one that might.
+const TEST_TURN_URLS: [&str; 2] = [
+    "turn:198.51.100.7:3478?transport=udp",
+    "turn:198.51.100.7:3478?transport=tcp",
+];
+const TEST_TURN_SECRET: &str = "live5a-static-auth-secret";
+const TEST_TURN_TTL_SECONDS: i64 = 3600;
+
+fn test_turn_policy() -> momo_t3::TurnCredentialPolicy {
+    momo_t3::TurnCredentialPolicy::new(
+        TEST_TURN_URLS.iter().map(|url| url.to_string()).collect(),
+        TEST_TURN_SECRET.to_string(),
+        TEST_TURN_TTL_SECONDS,
+    )
+    .expect("a complete relay policy")
+}
+
+/// Start a server with — or deliberately without — a TURN credential policy.
+///
+/// The `None` arm is not a convenience: it is the state **every deployment is in
+/// today**, and `live5a_1` asserts what it answers, so shipping this change to
+/// an un-updated instance is a proved outcome rather than a hope.
+async fn start_server_with_turn(
+    pool: PgPool,
+    turn: Option<momo_t3::TurnCredentialPolicy>,
+) -> String {
     let state = AppState::new(
         pool,
         TEST_JWT_SECRET.to_string(),
         "ws://127.0.0.1:8000/connection/websocket".to_string(),
     );
+    let state = match turn {
+        Some(policy) => state.with_turn(policy),
+        None => state,
+    };
     let app = build_app(state);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
@@ -4118,5 +4170,795 @@ async fn live4_1_the_handoff_card_hears_the_boundary_and_the_join_survives_a_sho
         edited_frames(&su, workspace, card).await.len(),
         before,
         "and a card that did not move is a card with nothing to announce"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// live5a-1 — every grant carries a relay credential of its own, and an instance
+//            that was given no relay carries none
+// ---------------------------------------------------------------------------
+
+/// Split the coturn REST username back into its two halves.
+///
+/// The format is coturn's, not ours (`<unix expiry>:<subject>`), so parsing it
+/// here rather than trusting a struct is the point: this is what the relay will
+/// do with the string, and a username the relay cannot split is a credential it
+/// will answer 401 to.
+fn split_turn_username(username: &str) -> (i64, String) {
+    let (expiry, subject) = username
+        .split_once(':')
+        .unwrap_or_else(|| panic!("coturn parses `<expiry>:<subject>`, got {username:?}"));
+    (
+        expiry
+            .parse::<i64>()
+            .unwrap_or_else(|_| panic!("the expiry half must be unix seconds, got {expiry:?}")),
+        subject.to_string(),
+    )
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn live5a_1_a_grant_carries_its_own_expiring_relay_credential() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let fixture = seed(&su, &app_pool).await;
+    let base = start_server_with_turn(app_pool, Some(test_turn_policy())).await;
+    let http = reqwest::Client::new();
+    let workspace = fixture.workspace;
+
+    let owner_token = login(&http, &base, workspace, &fixture.owner_email).await;
+    let (host_id, host_seed) = register_host(&http, &base, &owner_token, workspace, true).await;
+    let session = create_session(
+        &http,
+        &base,
+        &owner_token,
+        workspace,
+        fixture.channel,
+        &host_id,
+    )
+    .await;
+    publish_display(&http, &base, &host_seed, workspace, &host_id, session).await;
+
+    // ---- the browser's copy -------------------------------------------------
+    let response =
+        issue_display_capability(&http, &base, &owner_token, workspace, session, None).await;
+    assert_eq!(response.status(), 200);
+    let grant: Value = response.json().await.expect("grant body");
+    let servers = grant["ice_servers"]
+        .as_array()
+        .expect("ice_servers is always present, even when empty");
+    assert_eq!(
+        servers.len(),
+        1,
+        "one relay carrying both transports — two entries would look like two \
+         relays to fail over between"
+    );
+    let urls: Vec<&str> = servers[0]["urls"]
+        .as_array()
+        .expect("urls")
+        .iter()
+        .map(|url| url.as_str().expect("url string"))
+        .collect();
+    assert_eq!(
+        urls, TEST_TURN_URLS,
+        "ADR-0165 D3: the relay is the one the operator named and nobody else's"
+    );
+
+    let browser_username = servers[0]["username"].as_str().expect("username");
+    let (expiry, subject) = split_turn_username(browser_username);
+    assert_eq!(
+        subject,
+        session.to_string(),
+        "the subject is the work session, so a coturn log line answers 「어느 \
+         세션이 relay를 썼나」 — the static credential this replaces answered it \
+         for every session at once, i.e. not at all"
+    );
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("a clock after 1970")
+        .as_secs() as i64;
+    assert!(
+        expiry > now && expiry <= now + TEST_TURN_TTL_SECONDS + 5,
+        "the credential expires on its own — that IS the ephemerality. \
+         expiry={expiry} now={now}"
+    );
+
+    // The wiring, proved against the policy rather than against a second copy of
+    // the HMAC: re-minting at the instant this username was minted must produce
+    // this exact credential. The derivation itself is pinned in `momo_t3::turn`'s
+    // unit tests against an independently computed literal.
+    let reminted = test_turn_policy().ice_servers_at(session, expiry - TEST_TURN_TTL_SECONDS);
+    assert_eq!(
+        servers[0]["credential"].as_str().expect("credential"),
+        reminted[0].credential,
+        "the route mints from the configured policy, this session, and this TTL"
+    );
+
+    // ---- the producer's copy ------------------------------------------------
+    let capability = grant["capability_token"].as_str().expect("token");
+    let response = validate_display(
+        &http, &base, &host_seed, workspace, &host_id, capability, false,
+    )
+    .await;
+    assert_eq!(response.status(), 200);
+    let validated: Value = response.json().await.expect("validation body");
+    let producer_servers = validated["ice_servers"]
+        .as_array()
+        .expect("the producer is served the same field");
+    let (_, producer_subject) =
+        split_turn_username(producer_servers[0]["username"].as_str().expect("username"));
+    assert_eq!(
+        producer_subject, subject,
+        "both ends of one media path allocate under one subject — relay<->relay \
+         is the only ICE path we have (증보 1 D3-1), so the two halves must be \
+         joinable in the relay's own log"
+    );
+
+    // Re-validation mints a FRESH credential rather than replaying the grant's.
+    //
+    // This is a claim about the SERVER and nothing else, and the distinction is
+    // load-bearing enough to say twice: the shipped producer installs a
+    // credential once per peer connection and discards these later mints, since
+    // `webrtcbin` cannot swap a TURN server on a running ICE agent. So what is
+    // proved here is that a client which CAN take a fresh credential — the next
+    // viewer's pipeline, or a future renegotiating producer — is handed one with
+    // its full TTL ahead of it, rather than a replay of the grant's already-aged
+    // copy. Whether a live stream can use it is LIVE-5c's measurement
+    // (`template.spec.json` → `unverified.credentialCeiling`).
+    tokio::time::sleep(std::time::Duration::from_millis(1_100)).await;
+    let response = validate_display(
+        &http, &base, &host_seed, workspace, &host_id, capability, true,
+    )
+    .await;
+    assert_eq!(response.status(), 200);
+    let revalidated: Value = response.json().await.expect("re-validation body");
+    let (renewed_expiry, _) = split_turn_username(
+        revalidated["ice_servers"][0]["username"]
+            .as_str()
+            .expect("username"),
+    );
+    assert!(
+        renewed_expiry > expiry,
+        "every validate mints against the clock of that call; replaying the \
+         grant's credential would hand the next viewer one already partly \
+         spent. renewed={renewed_expiry} first={expiry}"
+    );
+
+    // ---- and an instance that was given no relay ---------------------------
+    // The state EVERY deployment is in on the day this lands. It must not be an
+    // error and must not be an absent field: the producer template still carries
+    // the static credential the install runbook shipped, and that overlap is the
+    // whole retirement order — 신규 단명 자격 실증 먼저, 정적 제거는 그다음.
+    let bare_pool = momo_app_pool().await;
+    let bare_base = start_server_with_turn(bare_pool, None).await;
+    let bare_token = login(&http, &bare_base, workspace, &fixture.owner_email).await;
+    let response =
+        issue_display_capability(&http, &bare_base, &bare_token, workspace, session, None).await;
+    assert_eq!(
+        response.status(),
+        200,
+        "no relay policy is not a closed surface"
+    );
+    let bare_grant: Value = response.json().await.expect("grant body");
+    assert_eq!(
+        bare_grant["ice_servers"],
+        json!([]),
+        "empty, not absent: a client must be able to tell an instance with no \
+         relay from one too old to have the field"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// live5a-2 — taking control closes the session to teammates, and every one of
+//            the three closes puts back exactly what the owner had chosen
+// ---------------------------------------------------------------------------
+
+async fn observation_of(su: &PgPool, session: Uuid) -> String {
+    sqlx::query_scalar("SELECT observation FROM work_session WHERE id = $1")
+        .bind(session)
+        .fetch_one(su)
+        .await
+        .expect("read the session's observation")
+}
+
+async fn prior_observation_of(su: &PgPool, session: Uuid) -> Option<String> {
+    sqlx::query_scalar(
+        "SELECT prior_observation FROM display_control_window \
+          WHERE work_session_id = $1 ORDER BY started_at DESC LIMIT 1",
+    )
+    .bind(session)
+    .fetch_one(su)
+    .await
+    .expect("read the window's displaced observation")
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn live5a_2_control_closes_observation_and_all_three_closes_restore_it() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let fixture = seed(&su, &app_pool).await;
+    let base = start_server(app_pool).await;
+    let http = reqwest::Client::new();
+    let workspace = fixture.workspace;
+
+    let owner_token = login(&http, &base, workspace, &fixture.owner_email).await;
+    let (host_id, host_seed) = register_host(&http, &base, &owner_token, workspace, true).await;
+
+    let fresh_session = |label: &'static str| {
+        let http = http.clone();
+        let base = base.clone();
+        let owner_token = owner_token.clone();
+        let host_id = host_id.clone();
+        let channel = fixture.channel;
+        async move {
+            let session =
+                create_session(&http, &base, &owner_token, workspace, channel, &host_id).await;
+            publish_display(&http, &base, &host_seed, workspace, &host_id, session).await;
+            let response = take_control(&http, &base, &owner_token, workspace, session).await;
+            assert_eq!(response.status(), 200, "{label}: control opens");
+            session
+        }
+    };
+
+    // ---- 1. the person hands it back ---------------------------------------
+    let returned = fresh_session("return").await;
+    assert_eq!(
+        observation_of(&su, returned).await,
+        "owner_only",
+        "a control window exists so somebody can type a password; a teammate \
+         watching that happen is exactly what 증보 3 D2 forbids"
+    );
+    assert_eq!(
+        prior_observation_of(&su, returned).await.as_deref(),
+        Some("open"),
+        "the window carries what it displaced, so the close can put back the \
+         owner's own setting rather than a default"
+    );
+    let response = return_control(&http, &base, &owner_token, workspace, returned).await;
+    assert_eq!(response.status(), 200);
+    assert_eq!(
+        observation_of(&su, returned).await,
+        "open",
+        "returned: the setting comes back with the keyboard"
+    );
+
+    // ---- 2. the lease lapses, and nobody performs the close -----------------
+    // The restore rides inside the close statement precisely for this path:
+    // there is no actor here to remember it.
+    let lapsed = fresh_session("lapse").await;
+    assert_eq!(observation_of(&su, lapsed).await, "owner_only");
+    lapse_lease(&su, lapsed).await;
+    let response = return_control(&http, &base, &owner_token, workspace, lapsed).await;
+    assert_eq!(response.status(), 200);
+    let body: Value = response.json().await.expect("return body");
+    assert_eq!(
+        body["closed"],
+        json!(false),
+        "the lapse closed it first — this call found nothing standing"
+    );
+    assert_eq!(
+        observation_of(&su, lapsed).await,
+        "open",
+        "expired: a window nobody closed still restores the setting, or a person \
+         who walked away leaves their session closed to the team forever"
+    );
+
+    // ---- 3. the session ends underneath it ---------------------------------
+    let ended = fresh_session("session end").await;
+    assert_eq!(observation_of(&su, ended).await, "owner_only");
+    let response = http
+        .patch(format!(
+            "{base}/v1/workspaces/{workspace}/work-sessions/{ended}"
+        ))
+        .bearer_auth(&owner_token)
+        .json(&json!({ "status": "ended" }))
+        .send()
+        .await
+        .expect("end the session");
+    assert_eq!(response.status(), 200);
+    assert_eq!(
+        observation_of(&su, ended).await,
+        "open",
+        "session_ended: the third close is the third restore"
+    );
+
+    // ---- 4. the close nobody performs AND no route detects -----------------
+    // `momo-notifier`'s sweep is the fourth author 076's header did not have and
+    // #1425 added, and it is the one that matters most here: on the agent's own
+    // path there is no reader to notice a lapse, so a session whose watcher shut
+    // their laptop would otherwise sit `owner_only` until somebody happened to
+    // look at it. The restore rides inside the sweep's own statement for exactly
+    // that reason — there is nobody here to remember it.
+    let swept = fresh_session("notifier sweep").await;
+    assert_eq!(observation_of(&su, swept).await, "owner_only");
+    lapse_lease(&su, swept).await;
+    let notifier_pool = momo_notifier_pool().await;
+    momo_notifier::control_window_sweep::sweep_lapsed_control_windows(&notifier_pool, 100)
+        .await
+        .expect("one sweep iteration");
+    assert!(
+        open_window(&su, swept).await.is_none(),
+        "the sweep closed it"
+    );
+    assert_eq!(
+        observation_of(&su, swept).await,
+        "open",
+        "…and put the owner's setting back, with no route and no person involved"
+    );
+
+    // ---- a session the owner had ALREADY closed is left alone --------------
+    // The failure this guards is the opposite one: a window that "restored"
+    // `open` onto a session its owner deliberately closed would widen a setting
+    // nobody asked to widen, using a default as the excuse.
+    let already_closed = create_session(
+        &http,
+        &base,
+        &owner_token,
+        workspace,
+        fixture.channel,
+        &host_id,
+    )
+    .await;
+    publish_display(
+        &http,
+        &base,
+        &host_seed,
+        workspace,
+        &host_id,
+        already_closed,
+    )
+    .await;
+    sqlx::query("UPDATE work_session SET observation = 'owner_only' WHERE id = $1")
+        .bind(already_closed)
+        .execute(&su)
+        .await
+        .expect("close observation first");
+    let response = take_control(&http, &base, &owner_token, workspace, already_closed).await;
+    assert_eq!(response.status(), 200);
+    assert_eq!(
+        prior_observation_of(&su, already_closed).await,
+        None,
+        "this window displaced nothing, and NULL is how it says so"
+    );
+    let response = return_control(&http, &base, &owner_token, workspace, already_closed).await;
+    assert_eq!(response.status(), 200);
+    assert_eq!(
+        observation_of(&su, already_closed).await,
+        "owner_only",
+        "restoring a value that was never displaced would be a setting changed \
+         by a system the person never asked about it"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// live5a-3 — the mutation proof: a teammate's LIVE stream ends when control
+//            opens, and comes back when it closes
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn live5a_3_a_teammates_live_stream_ends_when_control_opens() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let fixture = seed(&su, &app_pool).await;
+    let base = start_server(app_pool).await;
+    let http = reqwest::Client::new();
+    let workspace = fixture.workspace;
+
+    let owner_token = login(&http, &base, workspace, &fixture.owner_email).await;
+    let watcher_token = login(&http, &base, workspace, &fixture.watcher_email).await;
+    let (host_id, host_seed) = register_host(&http, &base, &owner_token, workspace, true).await;
+    let session = create_session(
+        &http,
+        &base,
+        &owner_token,
+        workspace,
+        fixture.channel,
+        &host_id,
+    )
+    .await;
+    publish_display(&http, &base, &host_seed, workspace, &host_id, session).await;
+
+    // A teammate is already watching — the state that makes this dangerous.
+    let response =
+        issue_display_capability(&http, &base, &watcher_token, workspace, session, None).await;
+    assert_eq!(response.status(), 200);
+    let watcher_grant: Value = response.json().await.expect("watcher grant");
+    let watcher_capability = watcher_grant["capability_token"]
+        .as_str()
+        .expect("token")
+        .to_string();
+
+    // The control, in the sense `live3_2`'s header means: the watcher is FULLY
+    // entitled and the test watches the stream succeed before it is cut. An
+    // assertion that only ever saw the refusal would pass against a build that
+    // refuses everything.
+    let live = |capability: String| {
+        let http = http.clone();
+        let base = base.clone();
+        let host_id = host_id.clone();
+        async move {
+            validate_display(
+                &http,
+                &base,
+                &host_seed,
+                workspace,
+                &host_id,
+                &capability,
+                true,
+            )
+            .await
+            .status()
+        }
+    };
+    assert_eq!(
+        live(watcher_capability.clone()).await,
+        200,
+        "the teammate's stream is live before anybody takes the keyboard"
+    );
+
+    // ---- the owner takes control -------------------------------------------
+    let response = take_control(&http, &base, &owner_token, workspace, session).await;
+    assert_eq!(response.status(), 200);
+
+    assert_eq!(
+        live(watcher_capability.clone()).await,
+        401,
+        "the teammate's ALREADY-OPEN stream stops validating within one \
+         re-validation period. Nothing revoked the capability: the validate join \
+         re-reads `observation` every time (LIVE-2's reach), and control closed \
+         it. A build that only closed observation for NEW grants would leave the \
+         password on the screen somebody is already watching."
+    );
+
+    // A fresh 관전 request is refused at the door too, with the sentence that
+    // says why rather than a generic 401.
+    let response =
+        issue_display_capability(&http, &base, &watcher_token, workspace, session, None).await;
+    assert_eq!(response.status(), 403);
+    let error: Value = response.json().await.expect("error body");
+    assert_eq!(
+        error["error"]["message"],
+        json!("session observation is owner-only")
+    );
+
+    // …and the owner is exempt, which is the LIVE-3 decision this goal inherits:
+    // `owner_only` means 「소유자만 본다」, not 「아무도 못 본다」. Without it the
+    // person typing could not watch their own screen while doing it.
+    let response =
+        issue_display_capability(&http, &base, &owner_token, workspace, session, None).await;
+    assert_eq!(
+        response.status(),
+        200,
+        "the owner exemption holds in the arm control just closed"
+    );
+    let owner_grant: Value = response.json().await.expect("owner grant");
+    assert_eq!(
+        live(
+            owner_grant["capability_token"]
+                .as_str()
+                .expect("token")
+                .to_string()
+        )
+        .await,
+        200,
+        "and in the validate join, not only at issuance"
+    );
+
+    // ---- the keyboard goes back --------------------------------------------
+    let response = return_control(&http, &base, &owner_token, workspace, session).await;
+    assert_eq!(response.status(), 200);
+    let response =
+        issue_display_capability(&http, &base, &watcher_token, workspace, session, None).await;
+    assert_eq!(
+        response.status(),
+        200,
+        "관전 comes back with the setting; a session left `owner_only` after an \
+         intervention is a team quietly locked out of every session anyone has \
+         ever taken control of"
+    );
+
+    // ---- and the durable projection tells the same story --------------------
+    // The reload half (LIVE-5a piece 2). Centrifugo carried the boundary while
+    // the window stood, but transport is not the SoT: a surface that reloads
+    // reads `display_control_window` through the session projection.
+    let taken = take_control(&http, &base, &owner_token, workspace, session).await;
+    assert_eq!(taken.status(), 200);
+    let started_at = taken.json::<Value>().await.expect("grant body")["control_started_at"]
+        .as_i64()
+        .expect("a controller grant reports when control began");
+
+    let listed: Value = http
+        .get(format!("{base}/v1/workspaces/{workspace}/work-sessions"))
+        .bearer_auth(&owner_token)
+        .send()
+        .await
+        .expect("list sessions")
+        .json()
+        .await
+        .expect("session list body");
+    let row = listed["workSessions"]
+        .as_array()
+        .expect("sessions")
+        .iter()
+        .find(|row| row["id"] == json!(session.to_string()))
+        .expect("the controlled session is in the list");
+    assert_eq!(
+        row["controlStartedAt"],
+        json!(started_at),
+        "a reload reconstructs 「사람이 조작 중」 from the ledger, at the same \
+         정지 시각 the grant reported"
+    );
+
+    let reattached: Value = http
+        .get(format!(
+            "{base}/v1/workspaces/{workspace}/work-sessions/{session}/reattach"
+        ))
+        .bearer_auth(&owner_token)
+        .send()
+        .await
+        .expect("reattach")
+        .json()
+        .await
+        .expect("reattach body");
+    assert_eq!(
+        reattached["workSession"]["controlStartedAt"],
+        json!(started_at),
+        "reattach is the reload path a client actually takes, and it must not \
+         disagree with the list about who holds the keyboard"
+    );
+
+    let response = return_control(&http, &base, &owner_token, workspace, session).await;
+    assert_eq!(response.status(), 200);
+    let listed: Value = http
+        .get(format!("{base}/v1/workspaces/{workspace}/work-sessions"))
+        .bearer_auth(&owner_token)
+        .send()
+        .await
+        .expect("list sessions")
+        .json()
+        .await
+        .expect("session list body");
+    let row = listed["workSessions"]
+        .as_array()
+        .expect("sessions")
+        .iter()
+        .find(|row| row["id"] == json!(session.to_string()))
+        .expect("the session is still in the list");
+    assert!(
+        row.get("controlStartedAt").is_none(),
+        "the field is absent, not zero: 「아무도 조작하고 있지 않다」 is an \
+         absence, and a 0 would render as 1970"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// live5a-4 — a control window that fails to be written exposes no screen
+// ---------------------------------------------------------------------------
+
+/// The standing window as the SESSION SURFACE reports it, over REST.
+///
+/// Deliberately read through the list projection rather than out of the ledger:
+/// the claim under test is that a reload reconstructs the boundary, and reading
+/// the table the projection is built from would prove only that the table has a
+/// row in it.
+async fn projected_control_started_at(
+    http: &reqwest::Client,
+    base: &str,
+    token: &str,
+    workspace: Uuid,
+    session: Uuid,
+) -> Option<i64> {
+    let listed: Value = http
+        .get(format!("{base}/v1/workspaces/{workspace}/work-sessions"))
+        .bearer_auth(token)
+        .send()
+        .await
+        .expect("list sessions")
+        .json()
+        .await
+        .expect("session list body");
+    listed["workSessions"]
+        .as_array()
+        .expect("sessions")
+        .iter()
+        .find(|row| row["id"] == json!(session.to_string()))
+        .expect("the session is in the list")
+        .get("controlStartedAt")
+        .and_then(Value::as_i64)
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn live5a_4_a_half_written_control_window_exposes_no_screen() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let fixture = seed(&su, &app_pool).await;
+    let base = start_server(app_pool).await;
+    let http = reqwest::Client::new();
+    let workspace = fixture.workspace;
+
+    let owner_token = login(&http, &base, workspace, &fixture.owner_email).await;
+    let watcher_token = login(&http, &base, workspace, &fixture.watcher_email).await;
+    let (host_id, host_seed) = register_host(&http, &base, &owner_token, workspace, true).await;
+    let session = create_session(
+        &http,
+        &base,
+        &owner_token,
+        workspace,
+        fixture.channel,
+        &host_id,
+    )
+    .await;
+    publish_display(&http, &base, &host_seed, workspace, &host_id, session).await;
+
+    // The failure this injects is the one the packet names: the observation flip
+    // lands and the window it belongs to does not. If those two were separate
+    // transactions, the session would sit `owner_only` with nobody holding the
+    // keyboard — the team locked out of a session under nobody's control, and no
+    // close path anywhere to put it back, because there is no window to close.
+    //
+    // A BEFORE INSERT trigger is the injection because it fails at exactly the
+    // statement in question, deterministically, without a test-only branch
+    // existing anywhere in the server.
+    sqlx::query(
+        "CREATE OR REPLACE FUNCTION live5a_refuse_control_window() RETURNS trigger AS $$ \
+         BEGIN RAISE EXCEPTION 'live5a injected control-window failure'; END; \
+         $$ LANGUAGE plpgsql",
+    )
+    .execute(&su)
+    .await
+    .expect("create the injection function");
+    sqlx::query(
+        "CREATE TRIGGER live5a_refuse_control_window_trg \
+         BEFORE INSERT ON display_control_window \
+         FOR EACH ROW EXECUTE FUNCTION live5a_refuse_control_window()",
+    )
+    .execute(&su)
+    .await
+    .expect("install the injection trigger");
+
+    let status = take_control(&http, &base, &owner_token, workspace, session)
+        .await
+        .status();
+
+    // Removed before any assertion that could panic, so a red run does not leave
+    // the injection installed for whatever the harness does next.
+    sqlx::query("DROP TRIGGER live5a_refuse_control_window_trg ON display_control_window")
+        .execute(&su)
+        .await
+        .expect("remove the injection trigger");
+    sqlx::query("DROP FUNCTION live5a_refuse_control_window()")
+        .execute(&su)
+        .await
+        .expect("remove the injection function");
+
+    assert!(
+        status.is_server_error(),
+        "the window could not be written, so the grant must fail — got {status}"
+    );
+    assert_eq!(
+        observation_of(&su, session).await,
+        "open",
+        "the flip rolled back with the window it belongs to. A session left \
+         `owner_only` by a control window that never existed is a team locked \
+         out with no close path anywhere to let them back in."
+    );
+    assert!(
+        open_window(&su, session).await.is_none(),
+        "and nothing half-written stayed behind"
+    );
+
+    // The other direction of the same atomicity, and the one the packet asks for
+    // by name: there is no window — not even a momentary one — in which a
+    // teammate can see a screen while control is being taken. Either the whole
+    // grant happened or none of it did.
+    let response =
+        issue_display_capability(&http, &base, &watcher_token, workspace, session, None).await;
+    assert_eq!(
+        response.status(),
+        200,
+        "a failed take leaves 관전 exactly as it was — neither opened nor closed"
+    );
+
+    // …and the real path still works, so this test cannot pass by refusing
+    // everything.
+    let response = take_control(&http, &base, &owner_token, workspace, session).await;
+    assert_eq!(response.status(), 200);
+    assert_eq!(observation_of(&su, session).await, "owner_only");
+}
+
+// ---------------------------------------------------------------------------
+// live5a-5 — the durable projection tells the truth in all three window states
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn live5a_5_the_session_surface_reconstructs_all_three_window_states() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let fixture = seed(&su, &app_pool).await;
+    let base = start_server(app_pool).await;
+    let http = reqwest::Client::new();
+    let workspace = fixture.workspace;
+
+    let owner_token = login(&http, &base, workspace, &fixture.owner_email).await;
+    let (host_id, host_seed) = register_host(&http, &base, &owner_token, workspace, true).await;
+    let session = create_session(
+        &http,
+        &base,
+        &owner_token,
+        workspace,
+        fixture.channel,
+        &host_id,
+    )
+    .await;
+    publish_display(&http, &base, &host_seed, workspace, &host_id, session).await;
+
+    // ---- state 0: nobody has ever held it ----------------------------------
+    assert_eq!(
+        projected_control_started_at(&http, &base, &owner_token, workspace, session).await,
+        None,
+        "absent, not zero — a 0 renders as 1970"
+    );
+
+    // ---- state 1: the window stands ----------------------------------------
+    let taken: Value = take_control(&http, &base, &owner_token, workspace, session)
+        .await
+        .json()
+        .await
+        .expect("grant body");
+    let started_at = taken["control_started_at"]
+        .as_i64()
+        .expect("a controller grant reports 정지 시각");
+    assert_eq!(
+        projected_control_started_at(&http, &base, &owner_token, workspace, session).await,
+        Some(started_at),
+        "a reload reads the ledger and lands on the SAME 정지 시각 the grant \
+         reported — two numbers here would be two stories about one keyboard"
+    );
+
+    // ---- state 2: returned --------------------------------------------------
+    let response = return_control(&http, &base, &owner_token, workspace, session).await;
+    assert_eq!(response.status(), 200);
+    assert_eq!(
+        projected_control_started_at(&http, &base, &owner_token, workspace, session).await,
+        None,
+        "a closed window is not a standing one; the surface must stop saying \
+         「사람이 조작 중」 the moment the keyboard goes back"
+    );
+
+    // ---- state 3: expired --------------------------------------------------
+    // The state that separates a ledger read from a status flag. Nobody performs
+    // this close: the producer stopped re-validating and the lease simply ran
+    // out. The projection carries the lease clause itself, so it answers
+    // correctly BEFORE any sweep has run — which matters, because on the agent's
+    // own path there is no reader to run one.
+    let response = take_control(&http, &base, &owner_token, workspace, session).await;
+    assert_eq!(response.status(), 200);
+    assert!(
+        projected_control_started_at(&http, &base, &owner_token, workspace, session)
+            .await
+            .is_some(),
+        "…standing again"
+    );
+    lapse_lease(&su, session).await;
+    assert!(
+        open_window(&su, session).await.is_some(),
+        "the row is still open — no close path has run, and that is the point"
+    );
+    assert_eq!(
+        projected_control_started_at(&http, &base, &owner_token, workspace, session).await,
+        None,
+        "a lapsed lease reads as nobody holding the keyboard, from the same \
+         `lease_expires_at > clock_timestamp()` clause the agent's refusal uses. \
+         A projection that answered off `ended_at IS NULL` alone would tell a \
+         person somebody is typing into a screen whose producer died."
     );
 }

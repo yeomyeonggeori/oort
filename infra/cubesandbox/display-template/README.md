@@ -147,6 +147,28 @@ routable ICE base is a new template obligation. That 증보 is **Proposed —
   the ordinary workd template.
 - The producer reads the server origin and the host identity from its delivered
   environment — neither is a credential of the provider's (ADR-0004). The TURN
-  credential arrives the same way (`MOMO_DISPLAY_TURN_URI`) and is a static
-  long-term cred for the E2E; LIVE-5 replaces it with per-session ephemeral
-  creds. `turn://` URIs carry a credential, so the producer never logs them.
+  credential no longer arrives that way by default: since **LIVE-5a** the
+  producer takes it off its own `display-attach/validate` answer
+  (`ice_servers`), which momo mints **per work session** and which **expires on
+  its own** (coturn `use-auth-secret`). `MOMO_DISPLAY_TURN_URI` stays as the
+  fallback for exactly as long as the retirement takes: an instance whose
+  momo-server was given no `MOMO_TURN_STATIC_AUTH_SECRET` answers
+  `ice_servers: []` and the static path carries the stream unchanged. The
+  server's copy wins whenever it is present, which is what lets the relay's
+  static `user=` line be removed later without redeploying this template
+  (`docs/runbooks/turn-host-install.md` §6 — **not yet performed**: measured
+  2026-08-18, momo-turn still refuses an ephemeral credential 401 while the
+  static one allocates over udp and tcp). `turn://` URIs carry a credential
+  either way, so the producer never logs one — only which source it used.
+- **The credential is per peer connection, not per re-validation.** The server
+  mints a fresh one on every 30-second re-validation, and the producer installs
+  only the first: GStreamer cannot swap a TURN server on a running ICE agent, and
+  the property that looks like a way in (`webrtcbin.ice-agent`) *destroys* the
+  agent when read (#1438). So `MOMO_TURN_CREDENTIAL_TTL_SECONDS` is a **ceiling
+  on one continuous stream**, not a sliding window — past it that connection
+  cannot allocate or refresh a relay and the screen goes black with nothing
+  user-visible to explain it. A new viewer is unaffected (new pipeline,
+  credential minted when they attached). Nothing has yet watched a stream past a
+  TTL, so this is reasoned from the constraint rather than observed; measuring it
+  and choosing between renegotiation and accepting the ceiling is a **LIVE-5c**
+  acceptance criterion (`template.spec.json` → `unverified.credentialCeiling`).

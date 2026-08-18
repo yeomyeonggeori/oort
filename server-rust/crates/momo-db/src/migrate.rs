@@ -371,19 +371,27 @@ mod tests {
     /// `terminal_attach_display_observer_ck` makes a *controllable* display
     /// capability unrepresentable, which is how the ADR-0004 증보 3 boundary is
     /// held by the schema rather than by a route somebody could rewrite.
+    ///
+    /// 076 is LIVE-3's `display_control_window` — that same CHECK removed by the
+    /// decision it was waiting for, and the ledger that took its place.
+    ///
+    /// 077 is LIVE-5a's `prior_observation` on that ledger: opening control
+    /// closes the session to teammates, and the window carries the value it
+    /// displaced so the close can put back what the owner had chosen rather than
+    /// guessing at a default.
     #[test]
-    fn discovers_contiguous_migrations_001_to_076() {
+    fn discovers_contiguous_migrations_001_to_077() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
         assert_eq!(
             migrations.len(),
-            76,
-            "expected 76 migrations under {}",
+            77,
+            "expected 77 migrations under {}",
             dir.display()
         );
         assert_eq!(migrations.first().unwrap().version, 1);
-        assert_eq!(migrations.last().unwrap().version, 76);
+        assert_eq!(migrations.last().unwrap().version, 77);
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
 
         for (i, migration) in migrations.iter().enumerate() {
