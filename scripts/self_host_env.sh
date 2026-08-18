@@ -25,6 +25,13 @@
 # 스택에 쓸 수 있는 자격증명이 하나도 없다** — 2026-08-10 진단에서 time-to-hello를
 # 가장 크게 늘린 단일 원인이 이것이었다.
 #
+# 같은 이유로 `PLATFORM_ADMIN_EMAILS`도 그 오너 주소로 채운다(#1534). 그 줄이
+# 없으면 인스턴스-전역 표면(설정 › AI 연결 · 워크스페이스 생성)은 **아무에게도**
+# 열리지 않고 — 셀프호스트 스택은 대안인 `platform:read` 토큰을 발급할 수 없다 —
+# 그 상태에서 사람이 겪는 일은 「에이전트를 만들었는데 영영 대답이 없다」이다
+# (#1526 실측 F1). MOMO-583 정책은 그대로이고, 바뀌는 것은 **이 인스턴스의 첫
+# owner는 이 인스턴스의 운영자**라는 선언이 셀프호스트 경로에 존재하느냐뿐이다.
+#
 # ## 규율
 #
 # * 이미 파일이 있으면 **절대 덮어쓰지 않는다.** 볼륨이 살아 있는 상태에서 시크릿을
@@ -261,6 +268,39 @@ validate_compose_command_args() {
   done
 }
 
+# #1534 — the operator allow-list, for env files written before it existed.
+#
+# The "never rewrite an existing file" rule guards *secrets*: regenerating one
+# desynchronises it from the role password already inside a migrated database.
+# This key is not a secret and is not generated — it is a copy of an address the
+# file already carries, so appending it can desynchronise nothing. Refusing to
+# touch the file here would mean the fix reaches only brand-new installs, while
+# every instance that followed the document before today keeps a permanently 403
+# AI-연결 surface and no line in any document telling them which key to add.
+#
+# Only ever ADDS, and only when the key is absent: a value somebody typed on
+# purpose (including a deliberately empty one) is left exactly as it is.
+ensure_operator_allowlist() {
+  local owner_email="$1" count
+  count="$(env_key_count PLATFORM_ADMIN_EMAILS)"
+  [ "$count" -le 1 ] ||
+    fail "${ENV_FILE}의 PLATFORM_ADMIN_EMAILS 항목은 최대 한 번만 있어야 한다."
+  [ "$count" -eq 0 ] || return 0
+  validate_owner_email "$owner_email"
+  {
+    printf '\n# --- 인스턴스 운영자 (#1534, 기존 env에 추가) -----------------------------\n'
+    printf '# 이 줄이 없으면 설정 › AI 연결과 워크스페이스 생성이 설치한 본인에게도 403이다.\n'
+    printf '# 반영에는 api 재시작이 필요하다(프로세스 env). 시크릿은 하나도 바뀌지 않았다.\n'
+    printf 'PLATFORM_ADMIN_EMAILS=%s\n' "$owner_email"
+  } >>"$ENV_FILE"
+  # stderr: this function also runs on the `--compose` path, whose stdout is a
+  # machine surface (`config --format json`, `config --images`). A diagnostic
+  # that lands in the middle of rendered Compose JSON is worse than no notice.
+  printf '[self-host] %s 에 PLATFORM_ADMIN_EMAILS=%s 를 추가했다 (시크릿은 그대로).\n' \
+    "$ENV_FILE" "$owner_email" >&2
+  printf '[self-host] 이미 떠 있는 스택이라면 api를 재시작해야 반영된다: --compose up -d\n' >&2
+}
+
 run_self_host_compose() {
   local mode="$1"
   shift
@@ -363,6 +403,8 @@ print_next_steps() {
   password $ENV_FILE 의 MOMO_INITIAL_OWNER_PASSWORD 값
 
 [self-host] 비밀번호는 stdout에 쓰지 않는다. $ENV_FILE 에서 직접 확인하라(파일 권한 600).
+[self-host] 이 계정이 이 인스턴스의 운영자다(PLATFORM_ADMIN_EMAILS) — 설정 › AI 연결에서
+[self-host] 프로바이더 키를 넣을 수 있다. 절차: docs/SELF_HOST.md §5.
 EOF
 }
 
@@ -386,6 +428,7 @@ if [ -e "$ENV_FILE" ]; then
   validate_owner_email "$existing_email"
   validate_owner_password "$existing_password"
   existing_web_port="$(normalize_port MOMO_WEB_PORT "$existing_web_port")"
+  ensure_operator_allowlist "$existing_email"
 
   # #1229로 이미 만든 로컬 파일은 mode marker가 없다. 이미지만 보고
   # 가역적으로 승격하되, digest가 없는 ref를 published로 추정하지 않는다.
@@ -537,6 +580,19 @@ MIGRATE_IDEMPOTENCY_CHECK=1
 # 이 값으로 로그인을 만든다(멱등 — 이후 재부팅은 아무것도 덮어쓰지 않는다).
 MOMO_INITIAL_OWNER_EMAIL=$OWNER_EMAIL
 MOMO_INITIAL_OWNER_PASSWORD=$OWNER_PASSWORD
+
+# --- 인스턴스 운영자 (#1534) ------------------------------------------------
+# 이 한 줄이 「이 인스턴스의 첫 owner는 이 인스턴스의 운영자다」라는 선언이다.
+# MOMO-583 정책은 그대로다: 인스턴스-전역 표면(설정 › AI 연결 · 워크스페이스 생성)은
+# platform:read 토큰 **또는** 여기 등재된 검증 이메일의 owner/admin에게만 열린다.
+# 그런데 셀프호스트 스택은 platform:read 토큰을 발급할 방법이 없으므로, 이 줄이
+# 비어 있으면 그 표면은 **아무에게도** 열리지 않는다 — 설치한 사람 본인에게도.
+# 그 상태의 증상은 「에이전트를 만들었는데 영영 대답하지 않는다」이고, 화면은
+# 이유를 말해 주지 않는다(#1526 실측 F1).
+#
+# 값은 쉼표로 나눠 여러 명을 적을 수 있다. 바꾼 뒤에는 **api를 재시작**해야 한다
+# (프로세스 env다). provider 키 자체는 DB 행이라 재시작이 필요 없다.
+PLATFORM_ADMIN_EMAILS=$OWNER_EMAIL
 EOF
 chmod 600 "$ENV_FILE"
 

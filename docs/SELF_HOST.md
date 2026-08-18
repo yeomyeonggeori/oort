@@ -7,8 +7,9 @@
 > 같은 Rust 스택을 띄우며 스크립트가 두 경로를 섞지 못하게 막는다.
 >
 > 시간은 약속하지 않는다. 로컬 모드는 이미지를 처음부터 굽고,
-> digest 모드는 레지스트리에서 받는다. 약속하는 것은 **결과**다: 저
-> 넷을 마치면 화면이 있다.
+> digest 모드는 레지스트리에서 받는다. 약속하는 것은 **결과**다: 1~4를
+> 마치면 화면이 있고, [5](#5-에이전트가-대답하게-하기-ai-연결)를 마치면
+> 에이전트가 대답한다.
 >
 > 근거: 2026-08-10 재실측(#1229). 깨끗한 클론에서 이 문서를 그대로 밟아
 > 브라우저 왕복까지 갔고, **문서에 없는 임기응변은 0회**였다. 그 전 측정(같은 날,
@@ -160,6 +161,65 @@ api·relay·agent-worker·웹 엣지 기동.
 채널 목록(`#general` · `#agent-lab`)이 있는 화면이 뜬다. 아무 채널이나 골라
 메시지를 보내면 그 자리에 나타난다. **You're in.**
 
+## 5. 에이전트가 대답하게 하기 (AI 연결)
+
+4단계까지는 **사람들끼리의 메신저**다. 에이전트를 만들어 멘션해도 대답이 없다면
+그건 고장이 아니라 **아직 키를 주지 않아서**다. 이 절이 그 한 걸음이다.
+
+### 당신이 이 인스턴스의 운영자다
+
+2단계가 만든 env에는 이 줄이 들어 있다:
+
+```
+PLATFORM_ADMIN_EMAILS=owner@oort.local     # = MOMO_INITIAL_OWNER_EMAIL
+```
+
+「이 인스턴스의 첫 owner는 이 인스턴스의 운영자다」라는 선언이고, **설정 › AI 연결**과
+워크스페이스 생성이 열리는 근거다. 인가 규칙 자체는 그대로다(MOMO-583: 인스턴스-전역
+표면은 `platform:read` 토큰 **또는** 여기 등재된 검증 이메일의 owner/admin에게만).
+셀프호스트 스택은 `platform:read` 토큰을 발급할 방법이 없으므로, 이 줄이 없으면 그
+표면은 **아무에게도** 열리지 않는다 — 설치한 본인에게도. 그때 화면에 보이는 것은
+403 하나뿐이고, 에이전트는 조용히 대답하지 않는다.
+
+운영자를 더 두려면 쉼표로 잇는다(`a@example.com,b@example.com`). 그 주소는 이 인스턴스에
+실재하는 owner/admin이어야 하고 이메일이 **검증**돼 있어야 한다.
+
+### 키 넣기
+
+브라우저에서 **설정 › AI 연결**을 열고 OpenAI 호환 엔드포인트 주소와 키를 넣는다.
+같은 일을 REST로도 할 수 있다(`<port>`는 2단계가 알려 준 값):
+
+```sh
+TOKEN=$(curl -sS -X POST http://localhost:8088/v1/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"owner@oort.local","password":"<MOMO_INITIAL_OWNER_PASSWORD>"}' \
+  | sed -n 's/.*"accessToken":"\([^"]*\)".*/\1/p')
+
+curl -sS -X PUT http://localhost:8088/v1/provider/link \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"baseUrl":"https://api.example.com/v1","bearer":"<키>"}'
+```
+
+키는 이 서버의 DB에 **암호화되어** 저장되고(`PROVIDER_LINK_MASTER_KEY`), 응답과 화면에는
+끝 네 자리만 돌아온다. 엔드포인트는 오늘 **외부 `https://`** 주소여야 한다 — 노트북에
+띄운 로컬 모델(`http://127.0.0.1:...`)을 붙이는 경로는 아직 열려 있지 않다.
+
+그다음 에이전트를 만들고(에이전트 명부 → 새 에이전트) 채널에 초대한 뒤 `@핸들`로
+부른다. 대답이 오면 거기까지가 이 문서가 약속한 전부다.
+
+### 무엇이 즉시 반영되고 무엇이 재시작을 요구하나
+
+한 줄로 갈린다. **키는 행이고 허용목록은 프로세스 env다.**
+
+| 바꾼 것 | 반영 | 왜 |
+|---|---|---|
+| provider 키(위 PUT / GUI) | **즉시** — 다음 작업부터, 늦어도 2초 | DB 행이고 worker가 2초 캐시로 다시 읽는다. **재시작하면 안 되는 게 아니라 필요가 없다** |
+| `PLATFORM_ADMIN_EMAILS` | **api 재시작**(`oort up -d`) | 부팅 때 프로세스 env에서 읽는다 |
+
+2단계 이전에 만든 env에는 그 줄이 없다. 그런 파일에는 `scripts/self_host_env.sh`가
+다음 실행 때 **그 줄만 덧붙인다** — 시크릿은 하나도 다시 만들지 않는다(다시 만들면
+이미 마이그레이션된 DB와 어긋난다). 덧붙인 뒤 `oort up -d`로 api를 재시작한다.
+
 ---
 
 ## 방금 무엇이 떴나
@@ -218,6 +278,9 @@ oort down -v
 | 3단계가 `port is already allocated` 로 실패 | 2단계 이후에 그 포트를 누가 잡았다. `down` 후 `local.secrets.env` 의 `MOMO_WEB_PORT` 를 바꾸고 다시 `up`. |
 | 로그인이 `invalid credentials` | 2단계가 알려 준 값을 쓴다(`grep MOMO_INITIAL_OWNER infra/rust/local.secrets.env`). 비밀번호를 바꾸려면 아래 회전 명령. |
 | 화면은 뜨는데 메시지가 실시간으로 안 온다 | outbox가 빠졌는지 먼저 본다(아래 질의). `broadcast \| done` 이면 서버 쪽은 끝난 것이고 브라우저 쪽을 본다(`oort logs api`). `pending`/`failed` 면 relay다(`oort logs relay`). |
+| 설정 › AI 연결이 **403** | 이 인스턴스에 등재된 운영자가 없다. `grep PLATFORM_ADMIN_EMAILS infra/rust/local.secrets.env` — 줄이 없으면 `scripts/self_host_env.sh --local-build`(또는 자신이 고른 모드)를 다시 실행하면 그 줄만 덧붙는다. 그 뒤 `oort up -d`로 api 재시작. [§5](#5-에이전트가-대답하게-하기-ai-연결). |
+| 설정 › AI 연결이 **503** | api가 `PROVIDER_LINK_MASTER_KEY` 없이 떴다. 2단계가 만든 env에는 있다 — 손으로 만든 env를 쓰고 있다면 그 줄을 채우고 `oort up -d`. |
+| 에이전트를 만들었는데 대답이 없다 | 키를 아직 안 넣었거나(§5), 넣은 엔드포인트가 응답하지 않는 것이다. 채널에 「응답하지 못했습니다」류 메시지가 뜨면 후자다(`oort logs agent-worker`). |
 | 처음부터 다시 하고 싶다 | `down -v` + `rm infra/rust/local.secrets.env` + 2단계부터. |
 
 메시지가 실제로 레일까지 갔는지 보는 질의(`broadcast | done` 이 정상):

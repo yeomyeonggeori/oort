@@ -105,6 +105,12 @@ run_generator "$local_fixture" "$local_output" 49100 --local-build
 grep -Fxq 'MOMO_SELF_HOST_MODE=local-build' "$local_fixture/infra/rust/local.secrets.env"
 grep -Fxq 'MOMO_RUST_IMAGE=oort:local' "$local_fixture/infra/rust/local.secrets.env"
 test "$(file_mode "$local_fixture/infra/rust/local.secrets.env")" = "600"
+# #1534 — the instance-operator declaration. An env that names a first owner but
+# no operator produces a stack whose AI-연결 surface is 403 for that very owner,
+# which is what made "설치 → 첫 에이전트 응답" unreachable (#1526 F1).
+grep -Fxq 'PLATFORM_ADMIN_EMAILS=owner@oort.local' "$local_fixture/infra/rust/local.secrets.env"
+test "$(sed -n 's/^PLATFORM_ADMIN_EMAILS=//p' "$local_fixture/infra/rust/local.secrets.env")" \
+   = "$(sed -n 's/^MOMO_INITIAL_OWNER_EMAIL=//p' "$local_fixture/infra/rust/local.secrets.env")"
 grep -Fq 'scripts/self_host_env.sh --compose' "$local_output"
 grep -Fq -- 'up -d --build --wait' "$local_output"
 if grep -Fq -- '--pull missing' "$local_output"; then
@@ -175,16 +181,31 @@ ambient_marker="review-ambient-secret-marker"
 expected_jwt="$(sed -n 's/^JWT_HMAC=//p' "$published_fixture/infra/rust/local.secrets.env")"
 expected_db_url="$(sed -n 's/^MOMO_APP_DATABASE_URL=//p' "$published_fixture/infra/rust/local.secrets.env")"
 expected_ws_url="$(sed -n 's/^MOMO_CENTRIFUGO_WS_URL=//p' "$published_fixture/infra/rust/local.secrets.env")"
+# #1534 — the two keys whose absence from the api service made the self-host
+# path unable to reach a first agent answer: without the master key the AI-연결
+# routes answer 503, and without the allow-list they answer 403 to the operator
+# who installed the instance. Reading them off `docker compose config` (rather
+# than off the env file) is the point: F1a was precisely "the value is in the
+# env file and never reaches the container".
+expected_operator="$(sed -n 's/^PLATFORM_ADMIN_EMAILS=//p' "$published_fixture/infra/rust/local.secrets.env")"
+expected_master_key="$(sed -n 's/^PROVIDER_LINK_MASTER_KEY=//p' "$published_fixture/infra/rust/local.secrets.env")"
+test -n "$expected_operator"
+test -n "$expected_master_key"
 jq -e \
   --arg image "$GOOD_DIGEST" \
   --arg jwt "$expected_jwt" \
   --arg db "$expected_db_url" \
-  --arg ws "$expected_ws_url" '
+  --arg ws "$expected_ws_url" \
+  --arg operator "$expected_operator" \
+  --arg master "$expected_master_key" '
     .name == "oort" and
     .services.api.image == $image and
     .services.api.environment.JWT_HMAC == $jwt and
     .services.api.environment.DATABASE_URL == $db and
     .services.api.environment.MOMO_CENTRIFUGO_WS_URL == $ws and
+    .services.api.environment.PLATFORM_ADMIN_EMAILS == $operator and
+    .services.api.environment.PROVIDER_LINK_MASTER_KEY == $master and
+    .services["agent-worker"].environment.PROVIDER_LINK_MASTER_KEY == $master and
     .services.web.image == "caddy:2-alpine" and
     .services.web.ports[0].published == "49200" and
     .services.api.ports[0].published == "49201" and
@@ -403,6 +424,60 @@ fi
 test ! -e "$port_marker"
 test ! -e "$port_fixture/infra/rust/local.secrets.env"
 grep -Fq 'ASCII 10진수' "$port_fixture/output"
+
+# #1534 — an env written before the operator line existed. The generator adds
+# that one line on the next run and rotates NOTHING: a regenerated secret would
+# desynchronise from the role password already inside a migrated database, which
+# is the whole reason this file is never rewritten.
+repair_fixture="$(make_fixture operator-allowlist-repair)"
+run_generator "$repair_fixture" "$repair_fixture/first-output" 49460 --local-build
+repair_env="$repair_fixture/infra/rust/local.secrets.env"
+grep -Fxq 'PLATFORM_ADMIN_EMAILS=owner@oort.local' "$repair_env"
+grep -v '^PLATFORM_ADMIN_EMAILS=' "$repair_env" >"$repair_fixture/stripped.env"
+mv "$repair_fixture/stripped.env" "$repair_env"
+if grep -q '^PLATFORM_ADMIN_EMAILS=' "$repair_env"; then
+  echo "fixture setup failed: allow-list line still present" >&2
+  exit 1
+fi
+repair_secrets_before="$(grep -E '^(JWT_HMAC|PROVIDER_LINK_MASTER_KEY|MOMO_APP_POSTGRES_PASSWORD|MOMO_INITIAL_OWNER_PASSWORD)=' "$repair_env")"
+run_generator "$repair_fixture" "$repair_fixture/repair-output" 49460 --local-build
+grep -Fxq 'PLATFORM_ADMIN_EMAILS=owner@oort.local' "$repair_env"
+test "$repair_secrets_before" = "$(grep -E '^(JWT_HMAC|PROVIDER_LINK_MASTER_KEY|MOMO_APP_POSTGRES_PASSWORD|MOMO_INITIAL_OWNER_PASSWORD)=' "$repair_env")"
+grep -Fq 'PLATFORM_ADMIN_EMAILS' "$repair_fixture/repair-output"
+# Idempotent: a second run neither duplicates the key nor trips the
+# duplicate-key guard the next invocation runs first.
+run_generator "$repair_fixture" "$repair_fixture/repair-output-2" 49460 --local-build
+test "$(grep -c '^PLATFORM_ADMIN_EMAILS=' "$repair_env")" = "1"
+
+# The repair also fires on the `--compose` path, and that path's stdout is a
+# machine surface the generator itself parses (`config --images`). A notice
+# printed there would be read as a rendered image line.
+grep -v '^PLATFORM_ADMIN_EMAILS=' "$repair_env" >"$repair_fixture/stripped-again.env"
+mv "$repair_fixture/stripped-again.env" "$repair_env"
+(
+  cd "$repair_fixture"
+  PATH="$repair_fixture/fake-bin:/usr/bin:/bin" \
+    bash scripts/self_host_env.sh --compose config --images
+) >"$repair_fixture/images.stdout" 2>"$repair_fixture/images.stderr"
+grep -Fxq 'PLATFORM_ADMIN_EMAILS=owner@oort.local' "$repair_env"
+if grep -Fq 'PLATFORM_ADMIN_EMAILS' "$repair_fixture/images.stdout"; then
+  echo "allow-list repair notice reached the machine-parsed --compose stdout" >&2
+  exit 1
+fi
+grep -Fq 'PLATFORM_ADMIN_EMAILS' "$repair_fixture/images.stderr"
+test "$(sort -u "$repair_fixture/images.stdout")" = "oort:local"
+
+# A value somebody chose is never overwritten — including a deliberately empty
+# one, which is the only way to say "close these surfaces on this instance".
+custom_fixture="$(make_fixture operator-allowlist-custom)"
+run_generator "$custom_fixture" "$custom_fixture/first-output" 49470 --local-build
+custom_env="$custom_fixture/infra/rust/local.secrets.env"
+awk '/^PLATFORM_ADMIN_EMAILS=/ { print "PLATFORM_ADMIN_EMAILS=a@example.com,b@example.com"; next } { print }' \
+  "$custom_env" >"$custom_fixture/custom.env"
+mv "$custom_fixture/custom.env" "$custom_env"
+run_generator "$custom_fixture" "$custom_fixture/custom-output" 49470 --local-build
+grep -Fxq 'PLATFORM_ADMIN_EMAILS=a@example.com,b@example.com' "$custom_env"
+test "$(grep -c '^PLATFORM_ADMIN_EMAILS=' "$custom_env")" = "1"
 
 # The historical no-argument command remains a local-build alias.
 legacy_fixture="$(make_fixture legacy)"
