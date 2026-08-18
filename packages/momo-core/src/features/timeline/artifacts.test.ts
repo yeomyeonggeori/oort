@@ -9,6 +9,7 @@ import {
   type LinkArtifact,
   type OversizedArtifact,
 } from "./artifacts";
+import { rowPresentation } from "./rowModel";
 
 // =============================================================================
 // The web half of the ADR-0126 D2 artifact contract (MOMO-620). Every case here
@@ -542,5 +543,79 @@ describe("body retention", () => {
       props: { artifact_kind: "pr", title: "웹 diff 카드" },
     });
     expect(artifactKeepsBody(message, asLink(message))).toBe(true);
+  });
+});
+
+// =============================================================================
+// #1476 — the body that arrives as a runtime `null`.
+//
+// `Message.body` is declared `string | undefined`, so TypeScript never asked
+// this file about `null`. The WIRE asks: a realtime frame carries
+// `"body": null` and the single line normalizing it away lives in
+// `payloadToMessage`, one module over. Every case below is a row that the type
+// system says cannot exist and the transport says can.
+//
+// The stake is not a missing card. `resolveArtifact` runs inside
+// `rowPresentation`, which runs inside `MessageRow`'s render on web AND phone,
+// so a throw here is not a row that fails to draw — it is the whole timeline
+// going blank (#1465 worker: `cards=0`, `Cannot read properties of null
+// (reading 'trim')`).
+// =============================================================================
+
+/** A row exactly as a realtime frame can deliver it: `"body": null`. */
+function nullBodyMsg(overrides: Partial<Message> = {}): Message {
+  return { ...msg(overrides), body: null } as unknown as Message;
+}
+
+/** The three ways this function is asked about a body, in detection order. */
+const BODY_READING_PATHS: ReadonlyArray<[string, Partial<Message>]> = [
+  [
+    "explicit artifact_kind=diff, no patch prop",
+    { props: { artifact_kind: "diff" } },
+  ],
+  ["type=diff", { type: "diff" }],
+  ["the unmarked body sniff", {}],
+];
+
+describe("#1476 a runtime null body", () => {
+  for (const [name, path] of BODY_READING_PATHS) {
+    it(`declines instead of throwing: ${name}`, () => {
+      expect(() => resolveArtifact(nullBodyMsg(path))).not.toThrow();
+      expect(resolveArtifact(nullBodyMsg(path))).toBeNull();
+    });
+
+    it(`answers the same for null, undefined and '': ${name}`, () => {
+      // The three states the acceptance names, plus the whitespace-only body
+      // that `propString` has always treated as an absent patch prop.
+      expect(resolveArtifact(nullBodyMsg(path))).toBeNull();
+      expect(resolveArtifact(msg(path))).toBeNull();
+      expect(resolveArtifact(msg({ ...path, body: "" }))).toBeNull();
+      expect(resolveArtifact(msg({ ...path, body: "   \n\t " }))).toBeNull();
+    });
+  }
+
+  it("keeps the timeline standing: the throw blanked the screen from rowPresentation", () => {
+    expect(() => rowPresentation(nullBodyMsg())).not.toThrow();
+    const row = rowPresentation(nullBodyMsg());
+    expect(row.artifact).toBeNull();
+  });
+
+  it("still reads the patch prop when the body beside it is null", () => {
+    const message = nullBodyMsg({
+      props: { artifact_kind: "diff", patch: PATCH },
+    });
+    expect(asDiff(message).files).toHaveLength(1);
+  });
+
+  it("still names a commit or PR card, a path that never read the body", () => {
+    const message = nullBodyMsg({
+      props: { artifact_kind: "pr", title: "웹 diff 카드" },
+    });
+    expect(asLink(message).title).toBe("웹 diff 카드");
+  });
+
+  it("still promotes a real diff body: the guard reads the body, it does not drop it", () => {
+    expect(asDiff(msg({ body: PATCH })).files).toHaveLength(1);
+    expect(asDiff(msg({ type: "diff", body: PATCH })).files).toHaveLength(1);
   });
 });

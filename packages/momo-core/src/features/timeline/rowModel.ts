@@ -167,7 +167,18 @@ export function artifactNote(state: ArtifactState): ArtifactNote {
 }
 
 function stateFor(card: AgentCardModel | null): ArtifactState | null {
-  if (card === null || card.kind === "approval") return null;
+  // 승인 카드와 로그인 핸드오프 카드에는 턴 상태가 없다. 둘 다 사람의 결정을
+  // 기다리는 카드이고, 그 기다림은 `AgentTurnStatus` 의 축이 아니다. 완료 리포트도
+  // 여기 든다: 끝난 일의 기록이라 자기 결과 어휘(`CompletionOutcome`)를 갖지,
+  // `AgentTurnStatus` 로 아티팩트 칩을 물들이지 않는다.
+  if (
+    card === null ||
+    card.kind === "approval" ||
+    card.kind === "login_handoff" ||
+    card.kind === "completion_report"
+  ) {
+    return null;
+  }
   const note = card.errorNote;
   // A finished run with nothing to report needs no chip: silence is the calm
   // default, and a chip that is always there stops being information.
@@ -179,7 +190,10 @@ function stateFor(card: AgentCardModel | null): ArtifactState | null {
 export function rowPresentation(message: Message): RowPresentation {
   const card = agentCardModel(message);
 
-  if (card?.kind === "approval") {
+  // 사람의 결정을 기다리는 카드는 아티팩트보다 앞선다. 로그인 핸드오프가 승인과
+  // 같은 자리에 서는 이유도 같다: 이 행이 요구하는 것은 읽기가 아니라 결정이고,
+  // 그 결정을 diff 뷰어가 덮으면 요구가 사라진다.
+  if (card?.kind === "approval" || card?.kind === "login_handoff") {
     return {
       card,
       artifact: null,

@@ -14,6 +14,9 @@ Drift policy (stricter than plain OpenAPI semantics, by design):
     is CLOSED — undeclared response keys are contract drift;
   * `additionalProperties: true` / `{}` (empty schema) opt out for
     arbitrary-shape fields (Message.props, ApprovalProjection.payload);
+  * `oneOf` is evaluated strictly: exactly one branch must validate. This keeps
+    closed protocol result/envelope unions exact instead of widening them into
+    optional supersets;
   * a **single-branch** `allOf` is unwrapped to its one branch. OpenAPI 3.0
     cannot hang a `description` on a `$ref`, so `allOf: [ {$ref: …} ]` is the
     idiom the spec uses for exactly that (PinDelta.pinned, Message.replyTo) —
@@ -120,7 +123,46 @@ def validate(spec, schema, value, path, errors):
         if not isinstance(schema, dict):
             raise SpecError(f"schema at {path} is not an object")
 
-    for combinator in ("oneOf", "anyOf", "allOf", "not"):
+    # OpenAPI 3.0 expresses a nullable union by putting `nullable: true` beside
+    # `oneOf`. Handle null before branch selection; a non-null value must still
+    # match exactly one concrete branch.
+    if value is None and schema.get("nullable") is True:
+        return
+
+    if "oneOf" in schema:
+        if set(schema) - {"oneOf", "nullable"} - ANNOTATION_KEYS:
+            raise SpecError(
+                f"schema at {path} combines `oneOf` with sibling constraints; "
+                "the drift gate requires branches to carry those constraints"
+            )
+        branches = schema["oneOf"]
+        if not isinstance(branches, list) or not branches:
+            raise SpecError(f"schema at {path} has an empty/non-list `oneOf`")
+        matching = []
+        branch_failures = []
+        for index, branch in enumerate(branches):
+            branch_errors = []
+            validate(spec, branch, value, path, branch_errors)
+            if branch_errors:
+                branch_failures.append((index, branch_errors))
+            else:
+                matching.append(index)
+        if len(matching) == 1:
+            return
+        if not matching:
+            summaries = "; ".join(
+                f"branch {index}: {branch_errors[0]}"
+                for index, branch_errors in branch_failures
+            )
+            errors.append(f"{path}: matched no `oneOf` branch ({summaries})")
+        else:
+            errors.append(
+                f"{path}: matched multiple `oneOf` branches {matching}; "
+                "the schema is ambiguous"
+            )
+        return
+
+    for combinator in ("anyOf", "allOf", "not"):
         if combinator in schema:
             raise SpecError(
                 f"schema at {path} uses `{combinator}`; the drift gate "
@@ -142,7 +184,7 @@ def validate(spec, schema, value, path, errors):
     if schema_type is None:
         # typeless but constrained (e.g. only enum) — check what exists.
         if "enum" in schema and value not in schema["enum"]:
-            errors.append(f"{path}: {value!r} not in enum {schema['enum']}")
+            errors.append(f"{path}: value is not in enum {schema['enum']}")
         if "properties" in schema or "required" in schema:
             schema_type = "object"
         else:
@@ -151,17 +193,17 @@ def validate(spec, schema, value, path, errors):
     if not type_ok(schema_type, value):
         errors.append(
             f"{path}: expected {schema_type}, got "
-            f"{type(value).__name__} ({json.dumps(value, ensure_ascii=False)[:120]})"
+            f"{type(value).__name__} (value withheld: sampled responses may contain credentials)"
         )
         return
 
     if "enum" in schema and value not in schema["enum"]:
-        errors.append(f"{path}: {value!r} not in enum {schema['enum']}")
+        errors.append(f"{path}: value is not in enum {schema['enum']}")
         return
 
     if schema_type == "string":
         if schema.get("format") == "uuid" and not UUID_RE.match(value):
-            errors.append(f"{path}: {value!r} is not a UUID")
+            errors.append(f"{path}: value is not a UUID")
         return
 
     if schema_type == "array":

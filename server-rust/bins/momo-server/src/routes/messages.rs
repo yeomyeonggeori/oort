@@ -161,6 +161,10 @@ fn quoted_dto(quoted: &QuotedMessage) -> QuotedMessageDto {
         edited_at_ms: quoted.edited_at.map(|at| at.timestamp_millis()),
         deleted_at_ms: quoted.deleted_at.map(|at| at.timestamp_millis()),
         quotes_another: quoted.quotes_another,
+        // #1510 — one key, carried straight through. The projection already said
+        // what a tombstone contributes here (nothing), so this function does not
+        // grow a second policy that could disagree with it.
+        props_kind: quoted.props_kind.clone(),
     }
 }
 
@@ -287,11 +291,11 @@ fn harness_refine(
     if message_type != MessageType::System {
         return Err(refuse(HarnessRefineInvalid::NotSystemMessage));
     }
-    if !request
+    if request
         .body
         .as_deref()
         .map(str::trim)
-        .is_some_and(|body| !body.is_empty())
+        .is_none_or(|body| body.is_empty())
     {
         return Err(refuse(HarnessRefineInvalid::MissingBody));
     }
@@ -608,6 +612,10 @@ pub async fn send(
     let author_is_agent = principal.kind == momo_auth::PrincipalKind::Agent;
     let via_token_id = audit_via_token_id(&principal);
     let gateway_enabled = state.agent_gateway.enabled();
+    // ADR-0162 HAP-E5: the per-agent hosted selector's production gate, read
+    // beside the instance-global provider mode precisely so the two stay
+    // visibly independent knobs rather than one.
+    let hosted_delivery_enabled = state.agent_port.config.hosted_delivery_enabled;
     let context_max_messages = state.mentions.context_max_messages;
     // ADR-0158 D2 — the refinement block becomes props here, *before* the
     // transaction, because it is a pure rewrite of an already-validated value.
@@ -756,6 +764,7 @@ pub async fn send(
                         hlc_ts: sent.message.hlc_ts,
                         via_token_id,
                         gateway_enabled,
+                        hosted_delivery_enabled,
                         context_max_messages,
                         routing: requested_routing.as_ref(),
                     },
@@ -2306,7 +2315,61 @@ mod tests {
                 chrono::DateTime::from_timestamp_millis(1_700_000_009_000).expect("timestamp")
             }),
             quotes_another,
+            props_kind: None,
         }
+    }
+
+    /// **A card message quoted is not a deleted message** (#1510).
+    ///
+    /// #1454 commits a completion report as an ordinary `text` row with **no
+    /// body** — the card is the whole message and it lives in `props`. Every
+    /// field a quote block reads then matches a tombstone exactly, so the client
+    /// belt ("a text with no body was deleted") turned that card into
+    /// 「삭제된 메시지」. `propsKind` is the one bit that tells them apart, and it
+    /// has to be on this object because the client has nothing else to read.
+    #[test]
+    fn a_bodyless_card_quote_carries_its_kind_and_not_its_payload() {
+        let mut message = stored_message();
+        message.reply_to_id = Some(Uuid::from_u128(0x11));
+        let mut card = quoted(None, false, false);
+        card.props_kind = Some("completion_report".into());
+        let json = serde_json::to_value(message_dto(
+            &message,
+            None,
+            true,
+            None,
+            Some(&card),
+            &[],
+            false,
+        ))
+        .expect("serialize");
+
+        assert_eq!(
+            json["replyTo"]["propsKind"],
+            serde_json::json!("completion_report")
+        );
+        // The row it points at is alive: no deletion signal may ride along, or
+        // the client is right back to drawing a tombstone.
+        assert_eq!(json["replyTo"]["state"], serde_json::json!("sent"));
+        assert!(json["replyTo"].get("deletedAtMs").is_none(), "{json}");
+        assert!(json["replyTo"].get("body").is_none(), "{json}");
+        // The card's payload stays where it is. A quote block draws two lines;
+        // the summary, the bullets and the gate table are the original's.
+        assert!(json["replyTo"].get("props").is_none(), "{json}");
+
+        // An ordinary text quote carries no such key, so its presence is the
+        // whole signal — the same shape 규칙 4's marker uses.
+        let plain = serde_json::to_value(message_dto(
+            &message,
+            None,
+            true,
+            None,
+            Some(&quoted(Some("원문"), false, false)),
+            &[],
+            false,
+        ))
+        .expect("serialize");
+        assert!(plain["replyTo"].get("propsKind").is_none(), "{plain}");
     }
 
     /// **The two halves of the quote contract, on the wire** (ADR-0148 §3-2).

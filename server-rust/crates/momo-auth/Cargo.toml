@@ -26,3 +26,7 @@ thiserror.workspace = true
 # `momo-wire` already links both.
 ed25519-dalek.workspace = true
 base64.workspace = true
+# Per-agent bearer issuance needs exactly 32 bytes from the operating-system
+# CSPRNG. This crate is already present in the workspace dependency graph; using
+# it directly keeps credential generation seedless and narrowly scoped.
+getrandom = "0.2"

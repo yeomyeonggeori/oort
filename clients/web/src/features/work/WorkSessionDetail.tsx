@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowLeft, Loader2 } from "lucide-react";
+import { ArrowLeft, KeyRound, Loader2 } from "lucide-react";
 import { cn } from "@/design/lib/cn";
 import { Button } from "@/design/ui/button";
 import {
@@ -14,12 +14,13 @@ import {
 } from "@momo/core/lib/api";
 import { useSession } from "@/app/session";
 import { memberFor, type Directory } from "@/features/workspace/useWorkspace";
-import { elapsedLabel } from "@/features/agents/agentWorkingSignal";
 import { CHIP_CLASS } from "@/features/common/chip";
 import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/States";
 import { useSessionWorkstream } from "@/features/workstreams/useWorkstreams";
+import { DisplayObserver } from "./DisplayObserver";
+import { ControlInvite, DisplayController } from "./DisplayController";
 import { ObserverTerminal } from "./ObserverTerminal";
-import { useSessionEvents } from "./useWorkSessions";
+import { useSessionEvents, useSessionVerification } from "./useWorkSessions";
 import {
   composeExcerpt,
   emptyStepsDetail,
@@ -37,9 +38,12 @@ import {
 import {
   clockLabel,
   ROW_STATE_CLASS,
+  SESSION_ELAPSED_META_LABEL,
   SESSION_STATUS_CLASS,
+  sessionElapsedReadout,
   silenceLabel,
 } from "@momo/core/features/work/workSessionFormat";
+import { SessionVerificationChip } from "./SessionVerificationChip";
 import {
   HANDOFF_COPY,
   handoffVerb,
@@ -50,6 +54,11 @@ import {
   takeoverTargets,
 } from "@momo/core/features/work/sessionHandoff";
 import { TakeoverBlock } from "./TakeoverBlock";
+import {
+  controlWindowLabel,
+  latestControlNotice,
+} from "@momo/core/features/work/controlWindow";
+import type { WorkSessionControlFrame } from "@momo/core/lib/realtimeEvents";
 
 // =============================================================================
 // 세션 상세 (AX-3 / MOMO-618): what one work session did, in the order it did
@@ -615,6 +624,7 @@ export function WorkSessionDetail({
   directory,
   channelName,
   liveEvents,
+  controlFrames,
   live,
   nowMs,
   wide,
@@ -628,12 +638,21 @@ export function WorkSessionDetail({
     busy: "세션 스레드 여는 중",
   },
   onResumed,
+  controlIntent = false,
+  onControlIntentConsumed,
 }: {
   session: WorkSession;
   hosts: WorkHost[] | undefined;
   directory: Directory;
   channelName: string;
   liveEvents: readonly WorkSessionEvent[];
+  /**
+   * 이 세션에 대해 **이 화면이 들은** control 창 경계 이벤트 (LIVE-4).
+   *
+   * 비어 있다는 것은 창이 없다는 뜻이 아니라 들은 것이 없다는 뜻이고, 아래
+   * 표시가 그 구분을 직접 진다 — 경계 이벤트는 전송이고 원장이 아니다.
+   */
+  controlFrames: readonly WorkSessionControlFrame[];
   /** The realtime rail is connected, so what is on screen is confirmed. */
   live: boolean;
   nowMs: number;
@@ -667,13 +686,44 @@ export function WorkSessionDetail({
    * 여기서 바꾸면 목록과 상세가 서로 다른 세션을 가리킨다.
    */
   onResumed: (sessionId: string) => void;
+  /**
+   * A link brought this reader here to take the keyboard (LIVE-5b).
+   *
+   * It ARMS the confirmation and never starts a window. A link that stopped
+   * somebody's agent by being clicked would be the worst affordance in this
+   * client: the reader who followed it wanted to get to the screen, and the
+   * decision to halt a run has to be made on the surface where its consequences
+   * are written down (`CONTROL_INVITE_COPY`), not in a chat message.
+   *
+   * It is also only an intent. Whether a control affordance exists at all is
+   * still `controlAffordance`'s answer, which the card that sent this could not
+   * have known: the card names a session, and who owns that session is a fact
+   * only this surface has.
+   */
+  controlIntent?: boolean;
+  /**
+   * 그 의도를 **다 썼다** (리뷰 nitpick 3).
+   *
+   * 주소에서 `?control=` 을 지우는 것과 같은 규칙이고(#1193), 같은 이유다: 의도는
+   * 한 번이다. 이 신호가 없으면 사람이 확인을 그만두고 목록으로 나갔다 돌아올 때
+   * 확인 단계가 되살아난다 — 방금 「그만두기」를 누른 사람에게 화면이 같은 질문을
+   * 다시 하는 것이고, 그 질문의 대가는 남의 에이전트가 멈추는 것이다.
+   */
+  onControlIntentConsumed?: () => void;
 }) {
-  const { workspaceId } = useSession();
+  const { workspaceId, session: auth } = useSession();
   const mine = useMemo(
     () => eventsForSession(liveEvents, session.id),
     [liveEvents, session.id]
   );
   const query = useSessionEvents(workspaceId, session, mine);
+  // 이 세션의 가장 최근 창. 판정(어느 것이 최신인가·닫힘이 이긴다)은 코어가 지고
+  // 이 화면은 그 답을 그리기만 한다 — 폰이 언젠가 같은 표시를 그릴 때 두 번째
+  // 구현이 생기지 않게.
+  const controlNotice = useMemo(
+    () => latestControlNotice(controlFrames, session.id),
+    [controlFrames, session.id]
+  );
   // 이 실행이 어느 목표에 속하는지 (MOMO-679). 반대 방향 — 목표에서 실행으로 —
   // 은 작업 흐름 상세의 이력 행이 이미 걸어주지만, 돌아오는 길이 없어서 이 표면은
   // 사이드바로만 도달 가능했다(PR 918 R1 M5).
@@ -692,6 +742,23 @@ export function WorkSessionDetail({
     setExcerptOpen(false);
     setShared(false);
   }, [session.id]);
+
+  // 직접 조작 (LIVE-5b). Two booleans and not one: 무장 is「이 사람이 물어봤다」,
+  // 개시는「이 사람이 답했다」. 링크는 앞의 것까지만 할 수 있다.
+  const isSessionOwner = uuidEq(session.memberId, auth.member.id);
+  const [controlArmed, setControlArmed] = useState(controlIntent);
+  const [controlling, setControlling] = useState(false);
+  useEffect(() => {
+    // 다른 세션이 같은 패널에 들어오면 조작 상태는 그 세션의 것이 아니다.
+    // 언마운트되는 `DisplayController` 가 자기 창을 반환하고 나간다.
+    setControlArmed(false);
+    setControlling(false);
+  }, [session.id]);
+  useEffect(() => {
+    if (!controlIntent) return;
+    setControlArmed(true);
+    onControlIntentConsumed?.();
+  }, [controlIntent, onControlIntentConsumed]);
 
   // Entering the detail takes the caret with it. Without this the pane swapped
   // its contents and left focus on a button that no longer exists, so the
@@ -723,10 +790,16 @@ export function WorkSessionDetail({
     hostOnline !== false &&
     trust === "local" &&
     isSlowStep(session, lastSignalAtMs, nowMs);
-  const elapsed = elapsedLabel(
-    session.startedAtMs,
-    session.endedAtMs ?? nowMs
-  );
+  // 도는 세션은 시계, 끝난 세션은 성과 서술, 시작이 관측되지 않았으면 아무것도
+  // (코어 `sessionElapsedReadout`). 목록 행이 부르는 것과 같은 함수다.
+  const elapsed = sessionElapsedReadout(session, nowMs);
+  // 이 세션이 스스로 보고한 게이트 결과, 또는 없음 (#1463).
+  //
+  // 절단된 스레드 페이지는 이 판정에 들어가지 않는다 — 그때 없는 것이 정확히 가장
+  // 최근 리포트다. 그리고 바로 그 절단이 초장기 세션에서 칩을 영구히 지웠기 때문에
+  // (grok freeze H2), 이제 채널 히스토리를 최신부터 훑는 스캔이 함께 판정한다.
+  // 1,000행이 넘는 스레드에서도 최신 리포트에 닿는 것은 그쪽이다.
+  const verification = useSessionVerification(workspaceId, session, query.data);
   // The one condition under which a blinking caret is a true statement: the
   // rail is up, the relay is one we can vouch for, and something arrived within
   // the survival window. Drop any of the three and the caret goes; the pane
@@ -771,18 +844,41 @@ export function WorkSessionDetail({
             </Heading>
             {/* The clock rides with the title rather than living in the meta
                 list: it is the one number that keeps changing, and it is the
-                one the survival signal colours. */}
-            <span
-              data-numeric
-              data-slow={slow ? "" : undefined}
-              data-testid="work-detail-elapsed"
-              className={cn(
-                "shrink-0 font-mono text-timestamp",
-                !live ? "text-ink-muted" : slow ? "text-warn" : "text-ink-muted"
-              )}
-            >
-              {elapsed}
-            </span>
+                one the survival signal colours.
+
+                그 두 이유는 **시계에만** 해당한다(design-review H-1). 끝난
+                세션의 경과는 다시 자라지 않고 생존 신호가 칠하지도 않는다
+                (`isSlowStep` 은 `running` 이 아니면 언제나 false) — 그런데도
+                「24분 28초 동안 작업」이 이 줄에 `shrink-0` 으로 서면서 320px
+                판에서 제목을 두 음절로 눌렀다. 세션 식별이 유일한 임무인 줄이
+                목록 행보다 적게 말하게 된 것이다. 그래서 성과 서술은 이 sticky
+                줄을 떠나 아래 자기 줄로 내려갔고(같은 testid), 이 자리는 **도는
+                시계**만 진다. 시작이 관측되지 않은 세션에는 여전히 아무것도
+                서지 않는다. */}
+            {elapsed !== null && elapsed.kind === "clock" && (
+              <span
+                {...(elapsed.numeric ? { "data-numeric": true } : {})}
+                data-slow={slow ? "" : undefined}
+                data-testid="work-detail-elapsed"
+                data-kind={elapsed.kind}
+                className={cn(
+                  "shrink-0 text-timestamp",
+                  elapsed.numeric && "font-mono",
+                  !live
+                    ? "text-ink-muted"
+                    : slow
+                      ? "text-warn"
+                      : "text-ink-muted"
+                )}
+              >
+                {elapsed.label}
+              </span>
+            )}
+            {/* 검증 칩은 여기 서지 않는다 — 아래 「스스로 보고한 것」 줄이 진다
+                (design-review H-1). 이 sticky 줄이 지는 것은 **원장이 말하는
+                것**뿐이다: 돌아가는 길, 세션의 이름, 원장이 부르는 상태, 그리고
+                아직 돌고 있다면 그 시계. 세션이 스스로 보고한 것은 원장의
+                진술이 아니고, 그것까지 이 줄에 세우면 이름이 설 자리를 잃는다. */}
             <span
               className={cn(CHIP_CLASS, SESSION_STATUS_CLASS[status.key])}
               data-testid="work-detail-status"
@@ -807,6 +903,47 @@ export function WorkSessionDetail({
             </p>
           )}
         </div>
+
+        {/* 이 세션이 **스스로 보고한 것** (UXC-C · design-review H-1).
+
+            sticky 머리에서 내려온 두 조각이 여기 함께 선다: 끝난 세션의 성과
+            서술과 게이트 검증 칩. 둘은 같은 종류의 사실이다 — 원장이 이 세션을
+            무엇이라 부르는가(위의 상태 칩)가 아니라, 이 세션이 자기 일에 대해
+            남긴 진술이다. 격은 아래 목표 줄·세션 스레드 줄과 같고, 고정 크롬을
+            키우지 않는다(이 파일 머리말의 레이아웃 규칙).
+
+            내려온 이유는 측정된 것이다: 셋을 sticky 줄에 함께 세우면 320px 판에서
+            제목이 목록 행보다 좁아졌고(「결제 …」), 세션 식별이 유일한 임무인 줄이
+            목록보다 적게 말하게 됐다. `capture-session-chips.mjs` 가 그 비교를
+            매 실행마다 다시 잰다.
+
+            여기서는 자리가 넉넉하므로 `shrink-0` 이 아니고, 좁아지면 줄바꿈한다 —
+            「1시간 24분 동안 작업」+「미상 결과 2」가 가장 넓은 조합이다. */}
+        {(elapsed?.kind === "worked" || verification !== null) && (
+          <p
+            className="flex flex-wrap items-center gap-2 border-b border-line px-4 py-1 text-meta text-ink-muted"
+            data-testid="work-detail-report"
+          >
+            {elapsed !== null && elapsed.kind === "worked" && (
+              <span
+                {...(elapsed.numeric ? { "data-numeric": true } : {})}
+                data-testid="work-detail-elapsed"
+                data-kind={elapsed.kind}
+                className={cn(elapsed.numeric && "font-mono")}
+              >
+                {elapsed.label}
+              </span>
+            )}
+            {/* 보고가 없는 세션에는 이 칩이 아예 없다 — 「미검증」은 이 표면이 할
+                수 있는 말이 아니다(코어 `sessionVerification` 머리말). */}
+            {verification !== null && (
+              <SessionVerificationChip
+                verification={verification}
+                testId="work-detail-verification"
+              />
+            )}
+          </p>
+        )}
 
         {/* 이 세션이 무엇을 위한 실행인지, 그리고 그 목표로 돌아가는 길.
             원장에서 목표로 가는 링크가 하나도 없으면 작업 흐름 표면은
@@ -878,11 +1015,23 @@ export function WorkSessionDetail({
             <MetaRow label="시작한 사람">
               {owner?.displayName ?? "알 수 없는 멤버"}
             </MetaRow>
-            <MetaRow label={session.endedAtMs === undefined ? "경과" : "실행 시간"}>
-              <span data-numeric className="font-mono">
-                {elapsed}
-              </span>
-            </MetaRow>
+            {/* 라벨이 이 값을 이미 이름 붙이는 자리라 격을 다시 붙이지 않는다 —
+                `value` 는 격만 뺀 같은 숫자다(코어 `sessionElapsedReadout`).
+                낱말은 코어가 준다: 카드의 「작업 시간」과 같은 상수이고(#1468),
+                갈림도 화면의 삼항이 아니라 위 조각과 **같은 판정**(`kind`)이
+                진다. 한글이 섞인 값에는 자릿폭 고정을 걸지 않는다. */}
+            {elapsed !== null && (
+              <MetaRow label={SESSION_ELAPSED_META_LABEL[elapsed.kind]}>
+                <span
+                  {...(elapsed.numeric ? { "data-numeric": true } : {})}
+                  className={cn(elapsed.numeric && "font-mono")}
+                  data-testid="work-detail-elapsed-meta"
+                  data-kind={elapsed.kind}
+                >
+                  {elapsed.value}
+                </span>
+              </MetaRow>
+            )}
             {hostName !== null && <MetaRow label="호스트">{hostName}</MetaRow>}
             {session.exitCode !== undefined && (
               <MetaRow label="마지막 실행 결과">
@@ -920,19 +1069,136 @@ export function WorkSessionDetail({
              그런 행에는 스레드 버튼이 없다 — 돌아가 봐야 그 이름이 없다.
              그리고 애초에 돌아갈 이유가 없다: 진행 내역은 이 배너 바로 아래에
              있고, 채널 대화는 위의 세션 스레드 줄이 연다. */
+          /* 그리고 이 배너는 자기가 **가린 것 전부**를 말한다 (LIVE-2 리뷰 M1).
+             이 자리는 터미널 관전과 라이브 화면 두 블록을 한꺼번에 대체하는데,
+             앞 판의 명사는 터미널 하나였다 — 화면을 띄운 세션에서는 라이브 화면
+             블록이 아무 설명 없이 사라지고, 방금까지 있던 자리에 그 이름이 어디에도
+             없었다. 명사를 두 표면으로 넓히되 `remoteDisplayAvailable`로 갈라
+             둔다: 화면이 없는 세션에 라이브 화면을 언급하면 이 세션이 한 번도
+             갖지 않았던 것을 잃은 것처럼 읽힌다. 갈림의 기준은 display 블록 자신이
+             쓰는 것과 같은 서버 사실이다. */
           <InlineBanner
             tone="neutral"
-            message="호스트 응답이 없어 터미널을 관전할 수 없습니다. 아래 진행 내역에서 이 세션에 기록된 단계를 계속 확인하세요."
+            message={
+              session.remoteDisplayAvailable
+                ? "호스트 응답이 없어 터미널 관전과 라이브 화면을 볼 수 없습니다. 아래 진행 내역에서 이 세션에 기록된 단계를 계속 확인하세요."
+                : "호스트 응답이 없어 터미널을 관전할 수 없습니다. 아래 진행 내역에서 이 세션에 기록된 단계를 계속 확인하세요."
+            }
             testId="work-host-offline"
           />
         ) : (
-          <ObserverTerminal
-            session={session}
-            hostName={hostName}
-            wide={wide}
-            onWideChange={onWideChange}
-            headingLevel={childHeadingLevel}
-          />
+          <>
+            <ObserverTerminal
+              session={session}
+              hostName={hostName}
+              wide={wide}
+              onWideChange={onWideChange}
+              headingLevel={childHeadingLevel}
+            />
+            {/* 라이브 화면 (LIVE-2 / ADR-0165), BESIDE the terminal and not
+                inside it. `remoteAttachAvailable` and `remoteDisplayAvailable`
+                are independent server facts — a session can offer a screen and
+                no terminal, or the reverse — so a session that has both shows
+                both, and neither one is behind a tab the reader has to find.
+
+                It is drawn only while the session can still HAVE a screen. A
+                closed or orphaned session already has the block above saying so
+                in exactly those words, and a second muted sentence repeating it
+                about a different surface is the "three muted lines for one
+                click" that block's own history warns about. Every state that
+                CAN still change — no screen published, 소유자만 보기, a host
+                that stopped advertising — is stated by the block itself. */}
+            {(session.status === "running" || session.status === "idle") &&
+              (controlling ? (
+                /* 조작 중에는 관전 스트림이 서지 않는다. 같은 화면을 두 번
+                   협상하면 같은 데스크톱이 두 프레임에 서고, 사람은 어느 쪽에
+                   타이핑하는지 알 수 없다. 조작 표면 자신이 화면을 그린다. */
+                <DisplayController
+                  session={session}
+                  hostName={hostName}
+                  headingLevel={childHeadingLevel}
+                  onDone={() => {
+                    setControlling(false);
+                    setControlArmed(false);
+                  }}
+                />
+              ) : (
+                <DisplayObserver
+                  session={session}
+                  hostName={hostName}
+                  headingLevel={childHeadingLevel}
+                  controlInvite={
+                    <ControlInvite
+                      session={session}
+                      isOwner={isSessionOwner}
+                      armed={controlArmed}
+                      onArm={setControlArmed}
+                      onStart={() => setControlling(true)}
+                    />
+                  }
+                />
+              ))}
+          </>
+        )}
+
+        {/* 직접 조작 경계 (LIVE-4 / ADR-0004 증보 3 D3).
+
+            **관전 블록 바로 아래**다. 위가 「무엇을 볼 수 있는가」이고 여기가
+            「지금 누가 잡고 있는가」라서, 두 사실은 같은 화면에 대한 이야기다.
+            아래 진행 내역보다 위인 이유는 이것이 그 내역이 **왜 멈춰 있는지**를
+            설명하기 때문이다 — 답을 원인보다 먼저 읽게 두면 사람은 원인을 찾아
+            스크롤한다.
+
+            서버가 이 봉투를 **누가 열었든** 보낸다는 것이 이 블록의 값이다:
+            REST를 직접 호출해 창을 연 경우에도 여기 뜬다. 화면이 자기가 연
+            창만 그리면, 사람이 가장 답을 원하는 경우(에이전트가 멈췄는데 이
+            화면은 아무 말도 안 한다)에 정확히 침묵한다.
+
+            들은 것이 없으면 아무것도 그리지 않는다. 「조작 중인 사람 없음」은
+            이 표면이 할 수 있는 말이 아니다 — 경계 이벤트는 전송이고, 새로고침
+            직후에는 언제나 들은 것이 없다. 모르는 것을 아는 척하지 않는 자리가
+            여기다. */}
+        {controlNotice !== null && (
+          <section
+            data-testid="work-control-window"
+            data-state={controlNotice.state}
+            className="mt-4 rounded-md border border-line bg-surface-raised"
+          >
+            <div className="flex items-center gap-2 border-b border-line px-3 py-2">
+              <KeyRound className="size-4 shrink-0 text-ink-muted" aria-hidden="true" />
+              <Heading className="min-w-0 flex-1 text-body font-medium text-ink">
+                {controlNotice.headline}
+              </Heading>
+              <span
+                data-testid="work-control-chip"
+                className={cn(
+                  CHIP_CLASS,
+                  controlNotice.state === "open"
+                    ? "bg-accent-soft text-accent"
+                    : controlNotice.outcome === "returned"
+                      ? "bg-surface-hover text-ok"
+                      : controlNotice.outcome === "expired"
+                        ? "bg-surface-hover text-warn"
+                        : "bg-surface-hover text-ink-muted"
+                )}
+              >
+                {controlWindowLabel(controlNotice)}
+              </span>
+            </div>
+            <dl className="py-1">
+              <MetaRow label="정지">
+                <span data-numeric>{clockLabel(controlNotice.startedAtMs)}</span>
+              </MetaRow>
+              {controlNotice.endedAtMs !== null && (
+                <MetaRow label="재개">
+                  <span data-numeric>{clockLabel(controlNotice.endedAtMs)}</span>
+                </MetaRow>
+              )}
+            </dl>
+            <p className="border-t border-line px-3 py-2 text-meta text-ink-muted">
+              {controlNotice.detail}
+            </p>
+          </section>
         )}
 
         {/* Fail-closed (X-11 / MOMO-546): a remote host's event relay is not a

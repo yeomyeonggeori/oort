@@ -3,14 +3,26 @@ import {makeStressRoster} from '@momo/core/features/timeline/stress';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
 import type {SearchPhase} from '@momo/core/features/search/searchModel';
 import React from 'react';
-import {LogBox, StyleSheet, Text, View} from 'react-native';
+import {
+  LogBox,
+  StyleSheet,
+  Text,
+  TextInput,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 import type {Member} from '@momo/core/lib/api';
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
-import {SafeAreaProvider} from 'react-native-safe-area-context';
+import {SafeAreaProvider, useSafeAreaInsets} from 'react-native-safe-area-context';
 import {SessionProvider} from '../src/session/useSession';
 import {quoteDraftFor, type QuoteBlock as QuoteBlockModel} from '@momo/core/features/timeline/quote';
 import {typingSegments} from '@momo/core/features/chat/typing';
-import {Composer} from '../src/features/conversation/Composer';
+import {
+  Composer,
+  composerColumnBudget,
+  composerMaxHeight,
+  withLatinWordBreaks,
+} from '../src/features/conversation/Composer';
 import {saveDraft} from '../src/features/conversation/drafts';
 import {MessageActionSheet} from '../src/features/conversation/MessageActionSheet';
 import {PinListPanel} from '../src/features/conversation/PinListPanel';
@@ -48,10 +60,29 @@ import {
   SearchFallthrough,
 } from '../src/screens/SidebarScreen';
 import type {MessageSearch} from '../src/features/search/useMessageSearch';
-import type {Palette} from '../src/design/tokens';
+import {
+  font,
+  // `line` 이라는 이름은 이 파일에서 이미 「초안 한 줄」로 쓰이고 있다
+  // (`composer-offline`). 토큰 쪽에 다른 이름을 주는 것이 그 자리를 건드리는 것
+  // 보다 싸다.
+  line as lineBox,
+  SAFE_GUTTER,
+  space,
+  TOUCH_TARGET,
+  type Palette,
+} from '../src/design/tokens';
+import {composerPlaceholder} from '@momo/core/features/chat/composerCopy';
 import {FixedScheme, useStyles, type ColorScheme} from '../src/design/theme';
 import WorkConsoleScreen from '../src/screens/WorkConsoleScreen';
 import WorkSessionDetailScreen from '../src/screens/WorkSessionDetailScreen';
+import {SessionRow} from '../src/screens/AgentDetailScreen';
+import {WorkStatusBadge} from '../src/features/work/WorkSessionParts';
+import {
+  workSessionContinuityStatus,
+  workSessionStatus,
+  type WorkSessionStatus,
+} from '@momo/core/features/work/workSessionModel';
+import type {WorkHost, WorkSession} from '@momo/core/lib/api';
 
 // =============================================================================
 // goal RN-C5 의 표면들을 사진 찍을 수 있게 세워 두는 하네스. **앱 코드가 아니다.**
@@ -426,6 +457,7 @@ function adeSession(over: Record<string, unknown>) {
     observation: 'open',
     observerGrantCount: 0,
     remoteAttachAvailable: false,
+    remoteDisplayAvailable: false,
     startedAtMs: NOW - 900_000,
     ...over,
   };
@@ -576,6 +608,215 @@ function seedAdeControl(): void {
   }
 }
 
+
+/**
+ * 폰 계측이 훑는 방 이름 셋 (#1422). 코어 스위트(`composerCopy.test.ts`)의
+ * `LABELS` 와 같은 이름들이라 두 자가 같은 문장을 잰다.
+ */
+const PLACEHOLDER_LABELS = ['일반', 'release-2026-08', '프로덕트-디자인'];
+
+/**
+ * 이 레포가 문서로 든 폰 예산(`composerCopy.ts` 머리말의 산술): 390pt 화면에서
+ * 입력창에 남는 **글의 폭 260pt**.
+ *
+ * 시뮬레이터를 그 폭으로 만들 수는 없다 — 부팅되는 기기의 논리 폭은 기기가
+ * 정한다. 그래서 두 번 잰다: **이 기기의 실제 입력창**과 **문서된 예산 상자**.
+ * 앞의 것은 지금 이 화면의 진실이고, 뒤의 것은 우리가 지키기로 한 가장 좁은
+ * 화면의 진실이다. 하나만 재면 넓은 기기에서 나온 초록이 예산을 잰 척한다.
+ */
+const PLACEHOLDER_BUDGET_PT = 260;
+
+/**
+ * 이 화면에서 플레이스홀더가 **몇 줄인가** (#1422).
+ *
+ * 폭은 추정하지 않고 잰다: 컴포저의 `bar` 를 같은 토큰으로 한 번 더 세우고,
+ * 입력창이 받는 칸에 `onLayout` 을 걸어 실제 폭을 읽는다. 전송 버튼의 폭도
+ * 실제로 「보내기」를 그려서 나온다 — `minWidth` 와 글자 폭 중 어느 쪽이 이기는지
+ * 를 손으로 정하면 그 순간 이 계측은 산수의 사본이 된다.
+ *
+ * 줄 수는 `onTextLayout` 이 답한다. RN 의 `TextInput` 은 플레이스홀더의 줄 수를
+ * 알려 주지 않으므로, 같은 글자 스타일(`font.body` · `line.body`)과 같은 콘텐츠
+ * 폭을 가진 `<Text>` 에 같은 문장을 넣어 읽는다. 이 replica 가 정직한 이유는
+ * 스타일이 **`Composer` 가 쓰는 그 토큰들**이기 때문이고, 정직하지 **않은** 자리
+ * 도 적어 둔다: 이것은 입력창이 아니라 텍스트라, 「두 줄이면 화면에서 어떻게
+ * 보이는가」는 이 줄이 아니라 아래 사진이 답한다.
+ */
+function PlaceholderProbe(): React.JSX.Element {
+  const styles = useStyles(buildStyles);
+  const [slotWidth, setSlotWidth] = React.useState(0);
+  const [lines, setLines] = React.useState<Record<string, number>>({});
+  // 입력창의 콘텐츠 폭 = 상자 - 좌우 안쪽 여백 - 좌우 테두리.
+  const content = slotWidth === 0 ? 0 : slotWidth - space.md * 2 - 2;
+  const boxes = [
+    {key: '이 기기', width: content},
+    {key: '예산 390pt', width: PLACEHOLDER_BUDGET_PT},
+  ];
+  const read = (box: string, label: string) => lines[`${box}/${label}`] ?? '…';
+  return (
+    <View style={styles.probe}>
+      <View style={styles.probeBar} pointerEvents="none">
+        <View
+          style={styles.probeSlot}
+          onLayout={event => setSlotWidth(event.nativeEvent.layout.width)}
+        />
+        <View style={styles.probeSend}>
+          <Text style={styles.probeSendLabel}>보내기</Text>
+        </View>
+      </View>
+      {boxes
+        .filter(box => box.width > 0)
+        .flatMap(box =>
+          PLACEHOLDER_LABELS.map(label => (
+            <View
+              key={`${box.key}/${label}`}
+              style={[styles.probeMeasure, {width: box.width}]}>
+              <Text
+                style={styles.probeText}
+                onTextLayout={event => {
+                  const count = event.nativeEvent.lines.length;
+                  setLines(previous =>
+                    previous[`${box.key}/${label}`] === count
+                      ? previous
+                      : {...previous, [`${box.key}/${label}`]: count},
+                  );
+                }}>
+                {composerPlaceholder(label, 'place')}
+              </Text>
+            </View>
+          )),
+        )}
+      {boxes.map(box => (
+        <Text key={box.key} style={styles.probeRead}>
+          {`${box.key} 글폭 ${Math.round(box.width)}pt · ` +
+            PLACEHOLDER_LABELS.map(
+              label => `${label} ${read(box.key, label)}줄`,
+            ).join(' · ')}
+        </Text>
+      ))}
+    </View>
+  );
+}
+
+// ---- #1443 (#1422 이월): 상한이 글자 크기를 따라가는가 -----------------------
+
+/** 성장 계측이 쓰는 방 이름. 라틴 토큰이 든 이름이라 두 축을 한 장에 담는다. */
+const GROWTH_LABEL = 'release-2026-08';
+
+/** 다섯 줄짜리 **사람이 친 글**. 상한이 걸리는 자리를 사진이 보여 준다. */
+const GROWTH_DRAFT =
+  '금요일 배포 건입니다.\n릴레이를 먼저 재시작하고\n그다음 워커를 올립니다.\n로그는 이 방에 남기고\n확인되면 알려 주세요.';
+
+/**
+ * 계측이 실제 상자를 잴 수 있게 입력창을 건네받는 자리. 모듈 상수인 이유는
+ * 표면 함수가 렌더마다 다시 도는 평범한 함수라 여기서 `useRef` 를 못 부르기
+ * 때문이고, 이 표면은 한 번에 하나만 뜬다.
+ */
+const GROWTH_INPUT_REF: React.MutableRefObject<TextInput | null> = {
+  current: null,
+};
+
+/**
+ * 이 화면에서 상한이 **몇 pt 이고 몇 줄인가**, 그리고 그때 **목록에 무엇이
+ * 남는가** (#1443 · 리뷰어 C M-1).
+ *
+ * 산수는 배송되는 그 함수들(`composerMaxHeight` · `composerColumnBudget`)을
+ * 부른다 — 계측이 자기 사본을 들면 사본이 거짓말한다(디자인 시스템 §5.5). 실제
+ * 상자 높이는 `measure()` 로 따로 읽어, 식이 화면에서 지켜지는지를 사진 안에서
+ * 대조한다.
+ *
+ * ## 크롬은 **재고 나서** 적는다 (리뷰어 C M-1)
+ *
+ * 첫 판의 계측 줄은 상한만 적었고, 그래서 「목록에 267pt 가 남는다」는 주석의
+ * 주장을 사진이 반증할 수 없었다 — 그 267 에는 목록이 못 쓰는 띠 둘(세이프 에리어
+ * 위쪽·헤더)이 들어 있었다. 이제 그 둘을 **이 기기에서 실제로 재서** 적는다:
+ * 세이프 에리어는 `useSafeAreaInsets()` 로, 헤더는 **배송되는 `ScreenHeader` 를
+ * 세워** `onLayout` 으로. 모델(`CONVERSATION_CHROME_WINDOW_SHARE`)이 실측보다
+ * 작아지는 순간이 오면 이 줄이 사진에서 그것을 말한다.
+ *
+ * 헤더 표본은 절대 배치에 `opacity: 0` 이다. 재는 것이 목적이고 사진에 두 번째
+ * 헤더가 서면 이 표면의 세로 예산이 바뀌어 정작 재려던 상자가 화면 밖으로 나간다.
+ *
+ * 아래 줄 텍스트는 라틴 축의 계기다: 배송되는 변환(`withLatinWordBreaks`)을
+ * 통과한 문장이 **어디서** 끊기는지를 `onTextLayout` 이 돌려주는 그대로 적는다.
+ * 줄바꿈 기회를 뜻하는 U+200B 는 폭이 0 이라 사진에 안 보이므로 `·` 로 바꿔 적는다.
+ */
+function GrowthProbe({
+  inputRef,
+}: {
+  inputRef: React.MutableRefObject<TextInput | null>;
+}): React.JSX.Element {
+  const styles = useStyles(buildStyles);
+  const {fontScale, height: windowHeight} = useWindowDimensions();
+  const insets = useSafeAreaInsets();
+  const [boxHeight, setBoxHeight] = React.useState(0);
+  const [headerHeight, setHeaderHeight] = React.useState(0);
+  const [slotWidth, setSlotWidth] = React.useState(0);
+  const [broken, setBroken] = React.useState('…');
+  const cap = composerMaxHeight(fontScale, windowHeight);
+  const budget = composerColumnBudget(fontScale, windowHeight);
+  const row = lineBox.body * fontScale;
+  const content = slotWidth === 0 ? 0 : slotWidth - space.md * 2 - 2;
+  const measuredChrome = insets.top + headerHeight;
+
+  React.useEffect(() => {
+    const timer = setTimeout(() => {
+      inputRef.current?.measure((_x, _y, _width, height) =>
+        setBoxHeight(height),
+      );
+    }, 1200);
+    return () => clearTimeout(timer);
+  }, [inputRef]);
+
+  return (
+    <View style={styles.probe}>
+      <View
+        style={styles.probeHeaderSpecimen}
+        pointerEvents="none"
+        onLayout={event => setHeaderHeight(event.nativeEvent.layout.height)}>
+        <ScreenHeader title="배포" onBack={() => {}} titleTestID="measure-chrome-title" />
+      </View>
+      <View style={styles.probeBar} pointerEvents="none">
+        <View
+          style={styles.probeSlot}
+          onLayout={event => setSlotWidth(event.nativeEvent.layout.width)}
+        />
+        <View style={styles.probeSend}>
+          <Text style={styles.probeSendLabel}>보내기</Text>
+        </View>
+      </View>
+      {content > 0 ? (
+        <View style={[styles.probeMeasure, {width: content}]}>
+          <Text
+            style={styles.probeText}
+            lineBreakStrategyIOS="hangul-word"
+            onTextLayout={event => {
+              const lines = event.nativeEvent.lines
+                .map(item => item.text.replace(/​/g, '·'))
+                .join(' | ');
+              setBroken(previous => (previous === lines ? previous : lines));
+            }}>
+            {withLatinWordBreaks(composerPlaceholder(GROWTH_LABEL, 'place'))}
+          </Text>
+        </View>
+      ) : null}
+      <Text allowFontScaling={false} style={styles.probeRead}>
+        {`글자 배수 ${fontScale.toFixed(3)} · 창 ${Math.round(windowHeight)}pt · 줄 상자 ${row.toFixed(1)}pt`}
+      </Text>
+      <Text allowFontScaling={false} style={styles.probeRead}>
+        {`크롬 실측 ${measuredChrome.toFixed(1)}pt (세이프 ${insets.top.toFixed(1)} + 헤더 ${headerHeight.toFixed(1)}) = 창의 ${((measuredChrome / windowHeight) * 100).toFixed(1)}% · 식이 잡은 몫 ${budget.chrome.toFixed(1)}pt`}
+      </Text>
+      <Text allowFontScaling={false} style={styles.probeRead}>
+        {`대화 열 ${budget.column.toFixed(1)}pt = 목록 ${budget.list.toFixed(1)} + 입력창 ${budget.composer.toFixed(1)} — 목록 ≥ 입력창 ${budget.list >= budget.composer ? '참' : '거짓'}`}
+      </Text>
+      <Text allowFontScaling={false} style={styles.probeRead}>
+        {`상한 ${cap.toFixed(1)}pt = ${((cap - space.sm * 2 - 2) / row).toFixed(1)}줄 · 5줄이면 ${(5 * row + space.sm * 2 + 2).toFixed(1)}pt · 실제 상자 ${boxHeight.toFixed(1)}pt`}
+      </Text>
+      <Text allowFontScaling={false} style={styles.probeRead}>
+        {`글폭 ${Math.round(content)}pt 에서 끊기는 자리 — ${broken}`}
+      </Text>
+    </View>
+  );
+}
 
 function Frame({label, children}: {label: string; children: React.ReactNode}) {
   const styles = useStyles(buildStyles);
@@ -1663,18 +1904,79 @@ export function Surface({name}: {name: string}): React.JSX.Element {
       saveDraft('measure:composer-offline', line);
       return (
         <Frame label="컴포저 — 보낼 수 있을 때 / 지금은 못 보낼 때 (감사 H-10)">
-          <Composer
+          <Composer recipient="place"
             channelLabel="배포"
             directory={DIRECTORY}
             draftKey="measure:composer-online"
             onSend={() => {}}
           />
           <View style={styles.gap} />
-          <Composer
+          <Composer recipient="place"
             channelLabel="배포"
             directory={DIRECTORY}
             draftKey="measure:composer-offline"
             offline
+            onSend={() => {}}
+          />
+        </Frame>
+      );
+    }
+    // ---- #1422 (폰 계측): 빈 컴포저의 문장이 이 화면에서 몇 줄인가 -----------
+    case 'composer-placeholder': {
+      // 웹은 이 질문에 이미 답이 있다(`gate-work-panel.mjs` 가 실렌더로 잰다).
+      // 폰에는 대응물이 없었고, 예산은 웹보다 빡빡하다 — 상자는 260pt 로 더 넓은데
+      // 글자가 16pt 라 두 단 크다(`composerCopy.ts` 의 산술).
+      //
+      // 그래서 **배송되는 `Composer` 를 그대로** 세 번 세운다. 이름은 코어 스위트가
+      // 훑는 그 셋이다: 예산 안에 드는 이름 · 게이트 픽스처의 이름 · 이 레포가
+      // 「이미 넘친다」고 적어 둔 이름. 위에 붙은 계측 줄이 같은 문장을 입력창의
+      // 폭에서 재서 줄 수를 적는다 — 사진과 숫자가 같은 화면에 있어야 사진이
+      // 「몇 줄인지 보인다」는 주장을 대신 해 주지 않는다.
+      return (
+        <Frame label="컴포저 플레이스홀더 — 절 단위 생략의 폰 예산 (#1422)">
+          <PlaceholderProbe />
+          {PLACEHOLDER_LABELS.map(label => (
+            <View key={label}>
+              <Composer
+                recipient="place"
+                channelLabel={label}
+                directory={DIRECTORY}
+                draftKey={`measure:composer-placeholder:${label}`}
+                onSend={() => {}}
+              />
+              <View style={styles.gap} />
+            </View>
+          ))}
+        </Frame>
+      );
+    }
+    // ---- #1443 (#1422 이월): 성장 상한이 글자 크기를 따라가는가 -------------
+    case 'composer-growth': {
+      // **두 상자를 나란히.** 위는 사람이 친 다섯 줄, 아래는 빈 상자다. 이 한
+      // 장이 답해야 하는 것이 그 둘이기 때문이다 — #1422 가 남긴 사진은 빈
+      // 상자뿐이라 「플레이스홀더가 긴 탓 아니냐」는 질문에 답하지 못했고, 정작
+      // 아픈 쪽은 사람이 친 글이다.
+      //
+      // 방 이름은 라틴 토큰이 든 것으로 고른다: 같은 사진이 라틴 낱말이 어디서
+      // 끊기는지도 함께 든다(#1422 가 「release-2」로 잘려 남긴 두 번째 축).
+      saveDraft('measure:composer-growth:typed', GROWTH_DRAFT);
+      return (
+        <Frame label="컴포저 성장 상한 — 동적 타입 (#1443)">
+          <GrowthProbe inputRef={GROWTH_INPUT_REF} />
+          <Composer
+            recipient="place"
+            channelLabel={GROWTH_LABEL}
+            directory={DIRECTORY}
+            draftKey="measure:composer-growth:typed"
+            inputRef={GROWTH_INPUT_REF}
+            onSend={() => {}}
+          />
+          <View style={styles.gap} />
+          <Composer
+            recipient="place"
+            channelLabel={GROWTH_LABEL}
+            directory={DIRECTORY}
+            draftKey="measure:composer-growth:empty"
             onSend={() => {}}
           />
         </Frame>
@@ -1724,7 +2026,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
                   live
                 />
                 <TypingBar segments={typingSegments(['박다연'])} />
-                <Composer
+                <Composer recipient="place"
                   channelLabel="배포"
                   directory={ADE_DIRECTORY}
                   draftKey="measure:ade-summary"
@@ -1763,7 +2065,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
               />
             }
             composer={
-              <Composer
+              <Composer recipient="place"
                 channelLabel="배포"
                 directory={ADE_DIRECTORY}
                 draftKey="measure:ade-summary-empty"
@@ -1901,14 +2203,44 @@ export function Surface({name}: {name: string}): React.JSX.Element {
           <SearchResults />
         </Frame>
       );
+    // ---- #1503: 에이전트 상세의 세션 행과 수명주기 칩 한 벌 ------------------
+    //
+    // 이 장이 답해야 하는 물음은 색표가 아니라 **행이 읽히는가**다. 그 자리는
+    // #1503 이전에 오른쪽 끝의 작은 글자였고(실행 중만 초록), 이제 다른 두 표면과
+    // 같은 알약이다 — 제목이 한 줄을 채울 때 알약이 제목을 밀어내지 않는지, 그리고
+    // 「호스트 연결 끊김」처럼 긴 낱말이 390pt 에서 어떻게 서는지가 사진의 몫이다.
+    //
+    // 아래 칩 한 벌은 코어 역할표 여섯 칸을 나란히 세운다. 이 화면이 내는 상태는
+    // 다섯이고(`workSessionStatus` 는 `unavailable` 을 내지 않는다) 나머지 한 칸은
+    // 세션 목록 쪽에서만 서므로, 그 칸이 강조를 벗은 것을 보이려면 표를 통째로
+    // 세우는 수밖에 없다.
+    case 'agent-sessions':
+      return (
+        <Frame label="에이전트 상세 · 세션 행 (#1503)">
+          {AGENT_DETAIL_SESSIONS.map(session => (
+            <SessionRow
+              key={session.id}
+              session={session}
+              hosts={AGENT_DETAIL_HOSTS}
+            />
+          ))}
+          <Text style={styles.label}>수명주기 칩 여섯 — 코어 역할표 그대로</Text>
+          <View style={styles.statusStrip}>
+            {AGENT_DETAIL_STATUS.map(status => (
+              <WorkStatusBadge key={status.key} status={status} />
+            ))}
+          </View>
+        </Frame>
+      );
     default:
       return (
         <Frame label={`알 수 없는 표면: ${name}`}>
           <Text style={styles.label}>
             sheet · delete · editor · editor-error · row · row-lead ·
             approval-card · approval-notes · avatar · composer-offline ·
+            composer-placeholder · composer-growth ·
             group · dividers · ade-summary · ade-summary-empty · ade-panel ·
-            work-console · work-detail ·
+            work-console · work-detail · agent-sessions ·
             destructive-confirm · search-entry · search-idle ·
             search-searching · search-empty · search-error · search-results
           </Text>
@@ -1999,6 +2331,124 @@ const harnessClient = new QueryClient({
     },
   },
 });
+
+// ---- #1503: 에이전트 상세의 세션 행 ------------------------------------------
+//
+// 위 `WORK_CONSOLE_*` 씨앗을 재사용하지 않는 이유는 형태다: 저것들은
+// `setQueryData` 로 들어가는 값이라 타입이 없고(`Record<string, unknown>` 스프레드),
+// `SessionRow` 는 `WorkSession`/`WorkHost` 를 **타입으로** 받는다. 사진이 배송되는
+// 컴포넌트를 찍으려면 그 컴포넌트가 요구하는 모양을 그대로 주는 편이 낫다.
+//
+// 한 호스트는 데스크톱(T1)이고 하나는 클라우드(T3)다 — 행의 아래 두 줄(등급 문장과
+// 「지금 이거 꺼도 되나」)이 상태에 따라 갈리는 것을 같은 장에서 보기 위해서다.
+const AGENT_DETAIL_HOSTS: WorkHost[] = [
+  {
+    id: 'host-mac',
+    workspaceId: ADE_WS,
+    scope: 'member',
+    ownerMemberId: SELF,
+    type: 'app',
+    displayName: '성재 맥북',
+    capabilities: {},
+    createdAtMs: 0,
+    online: true,
+  },
+  {
+    id: 'host-cloud',
+    workspaceId: ADE_WS,
+    scope: 'workspace',
+    ownerMemberId: SELF,
+    type: 'cloud',
+    displayName: 'oort Cloud',
+    capabilities: {},
+    createdAtMs: 0,
+    online: true,
+  },
+];
+
+function agentDetailSession(over: Partial<WorkSession> & {id: string}): WorkSession {
+  return {
+    workspaceId: ADE_WS,
+    channelId: 'ch-deploy',
+    memberId: AGENT,
+    hostId: 'host-cloud',
+    rootMessageId: 'm-root',
+    tool: 'codex',
+    label: '작업',
+    status: 'running',
+    observation: 'open',
+    observerGrantCount: 0,
+    remoteAttachAvailable: false,
+    remoteDisplayAvailable: false,
+    startedAtMs: NOW - 900_000,
+    ...over,
+  };
+}
+
+/**
+ * 이 화면이 실제로 낼 수 있는 갈래들. 제목 하나는 알약을 밀어낼 만큼 길다.
+ *
+ * 둘째 행이 **도는 클라우드 세션**인 것은 리뷰가 지목한 자리다(M-1): 첫 행은 알약도
+ * 앰버(실행 중)고 아래 문장도 앰버(「그 컴퓨터를 끄거나…」 — `atRisk`)라 한 카드에
+ * 앰버가 둘이고, 둘째 행은 알약만 앰버이고 문장은 중립이다. 두 장이 나란히 서야
+ * 「어느 앰버가 무엇을 벌었는가」를 사람이 볼 수 있다.
+ */
+const AGENT_DETAIL_SESSIONS: WorkSession[] = [
+  agentDetailSession({
+    id: 'measure-agent-running',
+    hostId: 'host-mac',
+    tool: 'codex-app-server',
+    label: '릴레이 재시작과 장애 복구 절차를 배포 전에 끝까지 검증하는 작업',
+  }),
+  agentDetailSession({
+    id: 'measure-agent-running-cloud',
+    label: '야간 배치',
+    tool: 'claude',
+    startedAtMs: NOW - 1_200_000,
+  }),
+  agentDetailSession({
+    id: 'measure-agent-idle',
+    label: '셀프호스트 회귀 테스트',
+    tool: 'prime',
+    status: 'idle',
+    startedAtMs: NOW - 1_800_000,
+  }),
+  agentDetailSession({
+    id: 'measure-agent-orphaned',
+    hostId: 'host-mac',
+    label: '호스트가 사라진 마이그레이션',
+    tool: 'claude',
+    status: 'orphaned',
+    startedAtMs: NOW - 2_700_000,
+  }),
+  agentDetailSession({
+    id: 'measure-agent-ended',
+    label: '클라우드 배포 점검',
+    tool: 'hermes',
+    status: 'ended',
+    startedAtMs: NOW - 3_600_000,
+    endedAtMs: NOW - 3_000_000,
+  }),
+];
+
+/**
+ * 코어 역할표의 여섯 칸을 낱말과 함께. **낱말을 하나도 손으로 적지 않는다** — 여섯
+ * 칸 전부가 코어 함수의 반환값이다. `unavailable` 은 `workSessionStatus` 가 내지
+ * 않는 키라 원장이 그것을 만드는 조건(도는 세션 + 신호 없는 호스트)을 그대로 세워
+ * `workSessionContinuityStatus` 에게 묻는다. 사본을 두면 코어가 낱말을 고친 날
+ * 이 사진만 옛말을 하고, 그때 초록이 아니라 **캡션이** 거짓말을 한다.
+ */
+const AGENT_DETAIL_STATUS: WorkSessionStatus[] = [
+  workSessionStatus({status: 'running', exitCode: undefined}),
+  workSessionStatus({status: 'idle', exitCode: undefined}),
+  workSessionContinuityStatus(
+    agentDetailSession({id: 'measure-agent-silent', hostId: 'host-silent'}),
+    [{...AGENT_DETAIL_HOSTS[1], id: 'host-silent', online: false}],
+  ),
+  workSessionStatus({status: 'orphaned', exitCode: undefined}),
+  workSessionStatus({status: 'ended', exitCode: undefined}),
+  workSessionStatus({status: 'wat', exitCode: undefined}),
+];
 
 const WORK_CONSOLE_HOSTS = [
   ...ADE_HOSTS,
@@ -2132,11 +2582,62 @@ const buildStyles = (color: Palette) => StyleSheet.create({
       paddingHorizontal: 12,
     },
     noticeStack: {padding: 16, gap: 12},
+    /** #1503 — 수명주기 칩 여섯을 한 줄에 세운다(390pt 에서는 두 줄로 접힌다). */
+    statusStrip: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: space.sm,
+      paddingHorizontal: SAFE_GUTTER,
+      paddingTop: space.xs,
+    },
     pressPair: {paddingHorizontal: 16, paddingVertical: 8},
     // 화면이 누를 때 실제로 까는 값 — **같은 심볼**이다 (M-2).
     pressed: {backgroundColor: rowPressedBackground(color)},
     /** 두 컴포저 사이. 붙여 두면 위아래 테두리가 한 줄로 읽힌다. */
     gap: {height: 24},
+    // ---- #1422 폰 계측 ----------------------------------------------------
+    // 아래 넷은 `features/conversation/Composer.tsx` 의 `bar`·`input`·`send`·
+    // `sendLabel` 과 **같은 토큰**이다. 값을 손으로 적으면 계측이 화면이 아니라
+    // 이 파일을 재게 된다.
+    probe: {paddingBottom: 8},
+    probeBar: {
+      // 화면에서 빼되 **폭은 진짜로** 받는다: 절대 배치 + 좌우 0 이면 이 행은
+      // 컴포저와 같은 폭에서 같은 flex 산수를 돈다.
+      position: 'absolute',
+      left: 0,
+      right: 0,
+      opacity: 0,
+      flexDirection: 'row',
+      alignItems: 'flex-end',
+      gap: space.sm,
+      paddingHorizontal: SAFE_GUTTER,
+      paddingVertical: space.sm,
+    },
+    probeSlot: {flex: 1, minHeight: TOUCH_TARGET},
+    probeSend: {
+      minHeight: TOUCH_TARGET,
+      minWidth: 64,
+      paddingHorizontal: space.md,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    probeSendLabel: {fontSize: font.label, fontWeight: '700'},
+    /** 재기만 하는 상자. 화면에 그리면 사진이 계측기의 사진이 된다. */
+    probeMeasure: {position: 'absolute', opacity: 0},
+    /**
+     * 헤더 표본. `probeBar` 와 같은 이유로 절대 배치 + `opacity: 0` 이고, 같은
+     * 이유로 좌우를 0 에 물린다 — 헤더 높이는 제목이 몇 줄로 감기느냐에 달렸고
+     * 그것은 폭의 함수다.
+     */
+    probeHeaderSpecimen: {position: 'absolute', left: 0, right: 0, opacity: 0},
+    /** 입력창의 글자 스타일 그대로 — 그래야 재는 것이 같은 글이다. */
+    probeText: {fontSize: font.body, lineHeight: lineBox.body},
+    probeRead: {
+      fontSize: font.meta,
+      color: color.textMuted,
+      paddingHorizontal: 12,
+      paddingBottom: 4,
+    },
   });
 
 // 위 독스트링의 이유로 렌더 밖에서 한 번. **파일 맨 아래**인 것은 `harnessClient`

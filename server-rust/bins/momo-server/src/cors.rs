@@ -64,7 +64,8 @@ use crate::config::CorsConfig;
 /// `x-centrifugo-proxy-secret`) belong to daemons and the broker, which are not
 /// browsers and never preflight — listing them here would widen the browser
 /// surface for callers that cannot use it.
-pub const ALLOWED_REQUEST_HEADERS: &str = "accept, authorization, content-type, origin";
+pub const ALLOWED_REQUEST_HEADERS: &str =
+    "accept, authorization, content-type, origin, mcp-protocol-version, mcp-method, mcp-name";
 
 /// Methods the momo REST surface actually routes (`build_app`), plus `OPTIONS`.
 pub const ALLOWED_METHODS: &str = "GET, POST, PUT, PATCH, DELETE, OPTIONS";

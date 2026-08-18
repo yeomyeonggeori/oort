@@ -58,6 +58,7 @@ function session(
     observation: "open",
     observerGrantCount: 0,
     remoteAttachAvailable: false,
+    remoteDisplayAvailable: false,
     startedAtMs: 1_700_000_000_000,
     ...overrides,
   };

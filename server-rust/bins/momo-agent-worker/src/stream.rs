@@ -166,6 +166,24 @@ impl MessageStream {
         &self.body
     }
 
+    /// The part of the accumulator that is **for a reader** — everything before
+    /// the completion-report fence (#1454).
+    ///
+    /// The report is structured props, not prose, and a channel that typed out
+    /// its raw JSON for two seconds before the card replaced it would be showing
+    /// the reader the envelope instead of the letter. Cutting here rather than
+    /// only at commit time is what keeps the two agreeing: the commit writes
+    /// `completion_report::visible_prefix` of the same text, so nothing that
+    /// appeared on screen is ever taken back.
+    ///
+    /// The cut does not care whether the fence parses. A cut conditional on
+    /// valid JSON would hide a truncated block mid-stream and then resurrect it
+    /// in the final body — text appearing, vanishing and reappearing, which is
+    /// worse than either outcome alone.
+    fn visible(&self) -> &str {
+        crate::completion_report::streaming_prefix(&self.body)
+    }
+
     /// Take one delta and publish the answer so far.
     ///
     /// The first call with non-blank text opens the message; every call after it
@@ -175,7 +193,11 @@ impl MessageStream {
     /// put an empty bubble in the channel.
     pub async fn push(&mut self, delta: &str, is_final: bool) -> Result<(), StreamError> {
         self.body.push_str(delta);
-        if self.body.trim().is_empty() {
+        // The emptiness test is on the **visible** text: a turn whose first
+        // tokens are the report fence has said nothing to a reader yet, and
+        // opening a blank message to hold its place would put an empty bubble in
+        // the channel (#1454 rides the rule this line already had).
+        if self.visible().trim().is_empty() {
             return Ok(());
         }
         match self.message_id {
@@ -191,7 +213,7 @@ impl MessageStream {
     /// channel is worse than the silence it would be standing in for, and the
     /// run's own terminal frame already reports that the turn ended.
     pub async fn finish(&mut self) -> Result<Option<Uuid>, StreamError> {
-        if self.body.trim().is_empty() {
+        if self.visible().trim().is_empty() {
             return Ok(None);
         }
         self.push("", true).await?;
@@ -205,7 +227,7 @@ impl MessageStream {
         let author_member_id = self.author_member_id;
         let run_id = self.run_id;
         let reply_to_id = self.reply_to_id;
-        let body = self.body.clone();
+        let body = self.visible().to_string();
         let props = self.props.clone();
 
         let sent = with_tenant_tx(&self.pool, workspace_id, move |conn| {
@@ -263,7 +285,7 @@ impl MessageStream {
     async fn grow(&mut self, message_id: Uuid, is_final: bool) -> Result<(), StreamError> {
         let workspace_id = self.workspace_id;
         let author_member_id = self.author_member_id;
-        let body = self.body.clone();
+        let body = self.visible().to_string();
         let edit = StreamEdit {
             rev: self.rev + 1,
             is_final,

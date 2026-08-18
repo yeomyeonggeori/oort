@@ -282,9 +282,16 @@ jobs:
           persist-credentials: false
 
       - name: 툴체인 확인(러너 사전설치 stable)
-        # rustup 툴체인 액션을 쓰지 않는다. 레포에 rust-toolchain.toml이 없어
-        # 고정할 버전이 없고, ubuntu-latest 이미지에 stable이 이미 들어 있다.
-        # MSRV는 server-rust/Cargo.toml의 rust-version = "1.80".
+        # rustup 툴체인 액션을 쓰지 않는다. 레포에 rust-toolchain.toml이 없고
+        # (#1442에서 신설하지 않기로 판정 — 판정문은 그 PR 본문), ubuntu-latest
+        # 이미지에 stable이 이미 들어 있다. 이 레인은 stable을 쓰지 MSRV를 쓰지
+        # 않는다 — 즉 **MSRV는 여기서 검증되지 않는다**(#1442 후속 제안).
+        #
+        # MSRV는 두 카고 워크스페이스가 각각 선언하며 둘 다 #1442 실측치다:
+        #   server-rust/Cargo.toml            rust-version = "1.88.0"  (time 0.3.54 계열)
+        #   clients/desktop/src-tauri/…       rust-version = "1.89.0"  (notify-rust 4.18.0)
+        # 이 잡이 초록인 것은 러너 stable이 그 둘보다 높다는 뜻일 뿐이다. 아래
+        # 출력이 그 사실의 유일한 증거이므로 지우지 말 것.
         run: |
           rustc --version
           cargo --version

@@ -304,7 +304,10 @@ pub async fn revoke_member_tokens_in_tx(
     .bind(member_id)
     .fetch_all(&mut *conn)
     .await?;
-    let agent_bearers = kinds.iter().filter(|k| k.as_str() == "agent_bearer").count() as i64;
+    let agent_bearers = kinds
+        .iter()
+        .filter(|k| k.as_str() == "agent_bearer")
+        .count() as i64;
     Ok(RevokedTokens {
         total: kinds.len() as i64,
         agent_bearers,

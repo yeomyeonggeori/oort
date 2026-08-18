@@ -52,7 +52,7 @@ function member(over: Partial<RosterMember> & {id: string}): RosterMember {
 
 function mountComposer(agent: RosterMember) {
   return render(
-    <Composer
+    <Composer recipient="place"
       directory={makeDirectory([
         member({id: SELF, displayName: '곽성재', handle: 'seongjae'}),
         agent,

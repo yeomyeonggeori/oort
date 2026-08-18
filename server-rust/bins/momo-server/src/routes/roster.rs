@@ -266,7 +266,8 @@ mod tests {
     /// field without a second request.
     #[test]
     fn only_a_human_row_reports_presence_status() {
-        let human = serde_json::to_value(roster_dto(&member(MemberKind::Human))).expect("serialize");
+        let human =
+            serde_json::to_value(roster_dto(&member(MemberKind::Human))).expect("serialize");
         assert_eq!(
             human["presenceStatus"],
             serde_json::json!("auto"),
@@ -278,7 +279,8 @@ mod tests {
         let away = serde_json::to_value(roster_dto(&away)).expect("serialize");
         assert_eq!(away["presenceStatus"], serde_json::json!("away"));
 
-        let agent = serde_json::to_value(roster_dto(&member(MemberKind::Agent))).expect("serialize");
+        let agent =
+            serde_json::to_value(roster_dto(&member(MemberKind::Agent))).expect("serialize");
         assert!(
             agent.get("presenceStatus").is_none(),
             "an agent has no declared presence, its liveness is agent_run: {agent}"

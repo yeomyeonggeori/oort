@@ -143,7 +143,9 @@ impl DiscoveryState {
     /// state is a daemon slot and a counter, not an invariant that can be
     /// half-broken, so recovering beats poisoning discovery for the session.
     fn lock(&self) -> std::sync::MutexGuard<'_, Browse> {
-        self.browse.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+        self.browse
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 }
 
@@ -163,7 +165,8 @@ pub fn discovery_start<R: Runtime>(
     state: State<'_, DiscoveryState>,
     timeout_ms: Option<u64>,
 ) -> Result<(), String> {
-    let timeout = Duration::from_millis(timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS).min(MAX_TIMEOUT_MS));
+    let timeout =
+        Duration::from_millis(timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS).min(MAX_TIMEOUT_MS));
 
     let daemon = match ServiceDaemon::new() {
         Ok(daemon) => daemon,
@@ -261,10 +264,8 @@ fn txt<'a>(resolved: &'a mdns_sd::ResolvedService, key: &str) -> Option<&'a str>
 }
 
 fn to_server(resolved: &mdns_sd::ResolvedService) -> Option<DiscoveredServer> {
-    let (base_url, display_host) = offered(
-        txt(resolved, TXT_BASE_KEY),
-        txt(resolved, TXT_IPV4_KEY),
-    )?;
+    let (base_url, display_host) =
+        offered(txt(resolved, TXT_BASE_KEY), txt(resolved, TXT_IPV4_KEY))?;
     Some(DiscoveredServer {
         base_url,
         display_host,
@@ -325,7 +326,9 @@ fn display_host(raw: &str, url: &Url) -> String {
         .split(['/', '?', '#'])
         .next()
         .unwrap_or_default();
-    let host_port = authority.rsplit_once('@').map_or(authority, |(_, rest)| rest);
+    let host_port = authority
+        .rsplit_once('@')
+        .map_or(authority, |(_, rest)| rest);
     if host_port.is_empty() {
         // Unreachable for a validated URL, but a blank label is never useful.
         return url.host_str().unwrap_or_default().to_string();
@@ -395,7 +398,10 @@ mod tests {
             ))
         );
         assert_eq!(
-            offered(Some("http://macbook.local:28000"), Some("192.168.0.9:28000")),
+            offered(
+                Some("http://macbook.local:28000"),
+                Some("192.168.0.9:28000")
+            ),
             Some((
                 "http://macbook.local:28000".to_string(),
                 "macbook.local:28000".to_string()

@@ -1,0 +1,1265 @@
+#!/usr/bin/env python3
+"""oort live display producer — GStreamer webrtcbin (ADR-0165).
+
+Contract source: infra/cubesandbox/display-template/template.spec.json (specVersion 4)
+Wire assertions:  scripts/display_signaling_probe.py
+
+Three properties are the ADR, not conveniences:
+  * the input datachannel exists ONLY while the SERVER says this viewer holds an
+    open control window (D4 as amended by LIVE-3 / ADR-0004 증보 3
+    `producer.inputDatachannelOnDemand`). An observer's offer still carries a
+    video m-line and NO m=application section — for an observer, view-only
+    remains the ABSENCE of an input path rather than a flag beside one, and it
+    survives a client that lies about its own flags. The channel is opened BY
+    THE PRODUCER off the validate answer, never by the viewer's request, so a
+    viewer cannot route around the server's grant by asking;
+  * nothing is written to disk (D5);
+  * the capability is validated against the server, never trusted (D2), and the
+    producer signs that call with a work-host key it holds — the server answers
+    an identified host, not anyone who can reach the route (LIVE-5c).
+
+Stdlib WebSocket (RFC 6455 text-frame subset) for the probe's reason: a gate that
+needs `pip install` is a gate that gets skipped. The two non-stdlib imports the
+input half needs (`cryptography` for Ed25519, `Xlib` for XTEST) are DEBIAN
+packages baked into the template, not pip installs, and each is imported lazily
+so an observer-only instance still runs when neither is present.
+"""
+
+from __future__ import annotations
+
+import base64
+import hashlib
+import json
+import os
+import select
+import socket
+import struct
+import sys
+import threading
+import time
+import urllib.parse
+import urllib.request
+import urllib.error
+import uuid
+
+import gi
+
+gi.require_version("Gst", "1.0")
+gi.require_version("GstWebRTC", "1.0")
+gi.require_version("GstSdp", "1.0")
+from gi.repository import Gst, GstWebRTC, GstSdp, GLib  # noqa: E402
+
+WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+SUBPROTOCOL = os.environ.get("MOMO_DISPLAY_SUBPROTOCOL", "momo.display.v1")
+CAPABILITY_PREFIX = "momo_terminal_attach_v1"
+VIEW_ONLY_REFUSAL = "view_only"
+
+OPCODE_TEXT = 0x1
+OPCODE_CLOSE = 0x8
+OPCODE_PING = 0x9
+OPCODE_PONG = 0xA
+
+X11 = os.environ.get("MOMO_DISPLAY_X11", ":0")
+SIGNAL_PORT = int(os.environ.get("MOMO_DISPLAY_SIGNAL_PORT", "8452"))
+UDP_RANGE = os.environ.get("MOMO_DISPLAY_MEDIA_UDP_RANGE", "50000-50100")
+CODEC = os.environ.get("MOMO_DISPLAY_CODEC", "H264")
+AUDIO = os.environ.get("MOMO_DISPLAY_AUDIO", "0") == "1"
+# There is deliberately no `MOMO_DISPLAY_INPUT=1`. Input is not a deployment
+# setting: it is a per-viewer grant the server makes and withdraws
+# (`validate.input_enabled`), and an env var that could turn it on for everybody
+# would be a second, weaker authority standing beside the ledger. The one env
+# var that exists moves it the other way — `MOMO_DISPLAY_INPUT_DISABLED=1`
+# refuses input no matter what the server answers, for an operator who needs a
+# screen to be unconditionally unreachable.
+INPUT_KILL_SWITCH = os.environ.get("MOMO_DISPLAY_INPUT_DISABLED", "0") == "1"
+INPUT_CHANNEL_LABEL = os.environ.get("MOMO_DISPLAY_INPUT_LABEL", "momo.input.v1")
+REVALIDATE_SECONDS = int(os.environ.get("MOMO_DISPLAY_REVALIDATE_SECONDS", "30"))
+# How often the session loop wakes when the signalling socket is silent. It is
+# the loop's TICK, not a deadline: see the comment on the loop in
+# `handle_connection` for what treating it as a deadline cost.
+REVALIDATE_TICK_SECONDS = 5
+# The Ed25519 seed this producer signs `validate` with, as the work host named
+# by MOMO_WORK_HOST_ID (LIVE-5c). Delivered by the #1437 create-time receiver:
+# the seed lands in a 0600 FILE, never in the process table and never in a log
+# line. A path, not the value, is what this process is told.
+WORK_HOST_KEY_PATH = os.environ.get("MOMO_WORK_HOST_KEY_PATH", "")
+# A self-signed proxy certificate is what the install runbook shipped (§9 item
+# 2). Verifying against it is not the same as not verifying: this names one
+# certificate, and anything else still fails.
+SERVER_CA_BUNDLE = os.environ.get("MOMO_DISPLAY_SERVER_CA_BUNDLE", "")
+SERVER_ORIGIN = os.environ.get("MOMO_SERVER_ORIGIN", "").rstrip("/")
+WORKSPACE = os.environ.get("MOMO_WORKSPACE_ID", "")
+HOST_ID = os.environ.get("MOMO_WORK_HOST_ID", "")
+DISPLAY_ID = os.environ.get("MOMO_DISPLAY_ID", "display-local")
+# Install-goal escape hatch: with no momo server on the network there is nothing
+# to validate against. This is NOT a production posture and the runbook says so.
+ALLOW_STUB_VALIDATE = os.environ.get("MOMO_DISPLAY_STUB_VALIDATE", "0") == "1"
+
+
+def log(msg: str) -> None:
+    print(f"[producer] {msg}", flush=True)
+
+
+# ---------------------------------------------------------------------------
+# RFC 6455 — the subset a signalling channel uses
+# ---------------------------------------------------------------------------
+
+
+def _accept_key(client_key: str) -> str:
+    digest = hashlib.sha1((client_key + WS_GUID).encode("ascii")).digest()
+    return base64.b64encode(digest).decode("ascii")
+
+
+class Peer:
+    def __init__(self, sock: socket.socket, buffered: bytes = b"") -> None:
+        self.sock = sock
+        self.buffered = buffered
+        self.lock = threading.Lock()
+        self.closed = False
+
+    def close(self) -> None:
+        self.closed = True
+        try:
+            self.sock.close()
+        except OSError:
+            pass
+
+
+def _recv_exactly(peer: Peer, count: int) -> bytes:
+    out = b""
+    if peer.buffered:
+        take = peer.buffered[:count]
+        peer.buffered = peer.buffered[count:]
+        out += take
+    while len(out) < count:
+        chunk = peer.sock.recv(count - len(out))
+        if not chunk:
+            raise ConnectionError("peer closed")
+        out += chunk
+    return out
+
+
+def _send_frame(peer: Peer, payload: bytes, opcode: int = OPCODE_TEXT) -> None:
+    header = bytes([0x80 | opcode])
+    length = len(payload)
+    if length < 126:
+        header += bytes([length])
+    elif length < (1 << 16):
+        header += bytes([126]) + struct.pack(">H", length)
+    else:
+        header += bytes([127]) + struct.pack(">Q", length)
+    with peer.lock:
+        if not peer.closed:
+            peer.sock.sendall(header + payload)
+
+
+def _recv_frame(peer: Peer) -> tuple[int, bytes]:
+    first, second = _recv_exactly(peer, 2)
+    opcode = first & 0x0F
+    masked = bool(second & 0x80)
+    length = second & 0x7F
+    if length == 126:
+        length = struct.unpack(">H", _recv_exactly(peer, 2))[0]
+    elif length == 127:
+        length = struct.unpack(">Q", _recv_exactly(peer, 8))[0]
+    mask = _recv_exactly(peer, 4) if masked else b""
+    payload = _recv_exactly(peer, length)
+    if masked:
+        payload = bytes(b ^ mask[i % 4] for i, b in enumerate(payload))
+    return opcode, payload
+
+
+def send_json(peer: Peer, message: dict) -> None:
+    _send_frame(peer, json.dumps(message).encode("utf-8"))
+
+
+# ---------------------------------------------------------------------------
+# Capability validation — the producer does not trust what it is handed
+# ---------------------------------------------------------------------------
+
+
+class WorkHostSigner:
+    """Signs a request as this work host (`momo.work_host.request.v2`).
+
+    The server mounts `display-attach/validate` OUTSIDE the bearer middleware —
+    a producer inside a sandbox holds no bearer and must not, because a bearer
+    that reached the sandbox would be a bearer the sandbox could spend. What it
+    holds instead is an Ed25519 signing key, and the server verifies it against
+    the public half registered for the host (`work_host_auth.rs`).
+
+    The payload is byte-for-byte the server's `momo_wire::signing::request_payload`:
+
+        momo.work_host.request.v2\\n{METHOD}\\n{path}\\n{workspace}\\n{host}
+        \\n{sentAtMs}\\n{sha256hex(body)}\\n{requestId}
+
+    `path` is the RAW request path. Rebuilding it from parts on either side is
+    how a signature silently stops verifying, so it is formatted once, by the
+    caller, and the same string is what goes on the wire.
+
+    `requestId` is fresh per call and the server consumes it exactly once — the
+    replay barrier. A retry therefore needs a NEW id, which is why this returns
+    headers per request rather than a cached set.
+    """
+
+    SCHEMA = "momo.work_host.request.v2"
+
+    def __init__(self, host_id: str, key_path: str) -> None:
+        self.host_id = host_id
+        self._key = None
+        if not host_id or not key_path:
+            log("signer: no work-host identity configured — validate will be unsigned")
+            return
+        try:
+            # Debian `python3-cryptography`, not pip. Imported here rather than
+            # at module scope so an observer-only instance built without the
+            # package still starts and still streams.
+            from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+                Ed25519PrivateKey,
+            )
+        except ImportError as exc:
+            log(f"signer: cryptography missing ({exc}) — validate cannot be signed")
+            return
+        try:
+            with open(key_path, "rb") as handle:
+                raw = handle.read().strip()
+        except OSError as exc:
+            log(f"signer: key unreadable ({exc})")
+            return
+        # The delivered form is base64 of the 32-byte seed — CryptoKit's
+        # `rawRepresentation`, the same shape the Swift host daemon carries.
+        try:
+            seed = base64.b64decode(raw, validate=True)
+        except (ValueError, TypeError):
+            seed = b""
+        if len(seed) != 32:
+            log(f"signer: not a 32-byte Ed25519 seed (got {len(seed)}) — refusing")
+            return
+        self._key = Ed25519PrivateKey.from_private_bytes(seed)
+        log(f"signer: work-host {host_id} key loaded (Ed25519)")
+
+    @property
+    def ready(self) -> bool:
+        return self._key is not None
+
+    def headers(self, method: str, path: str, workspace: str, body: bytes) -> dict:
+        if self._key is None:
+            return {}
+        sent_at_ms = int(time.time() * 1000)
+        request_id = str(uuid.uuid4())
+        body_digest = hashlib.sha256(body).hexdigest()
+        payload = (
+            f"{self.SCHEMA}\n{method.upper()}\n{path}\n{workspace}\n{self.host_id}"
+            f"\n{sent_at_ms}\n{body_digest}\n{request_id}"
+        ).encode("utf-8")
+        signature = base64.b64encode(self._key.sign(payload)).decode("ascii")
+        return {
+            # `MomoHost <hostId>` is the scheme the server's authenticator
+            # parses, and the id must equal the one in the path: a host may only
+            # ever act as itself.
+            "Authorization": f"MomoHost {self.host_id}",
+            "X-Momo-Work-Host-Sent-At": str(sent_at_ms),
+            "X-Momo-Work-Host-Signature": signature,
+            "X-Momo-Work-Host-Request-Id": request_id,
+        }
+
+
+SIGNER: "WorkHostSigner | None" = None
+
+
+def _server_ssl_context():
+    """Verify the proxy's certificate, naming it rather than trusting anything.
+
+    The install runbook's proxy carries a self-signed certificate (runbook §9
+    item 2). A self-signed leaf verifies against ITSELF, so pointing
+    `load_verify_locations` at that one file is real verification against
+    exactly one certificate — not `CERT_NONE`, which would accept whatever any
+    hijacker presented on the way to the route that decides who may type.
+    """
+    if not SERVER_ORIGIN.startswith("https://"):
+        return None
+    import ssl
+
+    context = ssl.create_default_context()
+    if SERVER_CA_BUNDLE:
+        # An IP SAN is checked by hostname verification like any other name, so
+        # the runbook's IP-issued certificate needs no relaxation here.
+        context.load_verify_locations(cafile=SERVER_CA_BUNDLE)
+    return context
+
+
+def validate_capability(token: str, stream: bool = False) -> dict | None:
+    """Ask the server. `stream: true` relaxes expiry and ONLY expiry."""
+    if not token.startswith(CAPABILITY_PREFIX):
+        return None
+    if not SERVER_ORIGIN:
+        if ALLOW_STUB_VALIDATE:
+            log("validate: STUBBED (no MOMO_SERVER_ORIGIN) — install-goal only")
+            return {"display_id": DISPLAY_ID, "mode": "observer"}
+        return None
+    # Formatted ONCE and used for both the request line and the signature — the
+    # server verifies over the raw path, so a second spelling here would be a
+    # signature that silently stops matching.
+    path = f"/v1/workspaces/{WORKSPACE}/work-hosts/{HOST_ID}/display-attach/validate"
+    url = f"{SERVER_ORIGIN}{path}"
+    # `capability_token`, not `capability`. The request DTO is
+    # `deny_unknown_fields`, so the old spelling was a 400 on every call — never
+    # noticed because #1438 ran with `MOMO_DISPLAY_STUB_VALIDATE=1` and no
+    # producer has yet made a real validate (template.spec.json
+    # `unverified.serverValidateWiring`). LIVE-5a reads `ice_servers` out of this
+    # answer, so the spelling stops being cosmetic.
+    body = json.dumps({"capability_token": token, "stream": stream}).encode("utf-8")
+    req = urllib.request.Request(url, data=body, method="POST")
+    req.add_header("Content-Type", "application/json")
+    if SIGNER is not None:
+        for name, value in SIGNER.headers("POST", path, WORKSPACE, body).items():
+            req.add_header(name, value)
+    try:
+        with urllib.request.urlopen(req, timeout=5, context=_server_ssl_context()) as resp:
+            if resp.status != 200:
+                return None
+            return json.loads(resp.read().decode("utf-8"))
+    except (urllib.error.URLError, OSError, ValueError) as exc:
+        log(f"validate: refused ({exc})")
+        return None
+
+
+def turn_uris_from_ice_servers(ice_servers) -> tuple[str, str]:
+    """Render the server's `ice_servers` into webrtcbin's `turn://` spelling.
+
+    LIVE-5a. The validate answer now carries a **per-session, expiring**
+    credential (coturn `use-auth-secret`), replacing the one static password the
+    install runbook shipped and called temporary in writing. The two sides speak
+    different shapes and neither should learn the other's: the server speaks W3C
+    (`{urls, username, credential}` — what a browser hands `RTCPeerConnection`),
+    and webrtcbin wants the credential inside the URI. This is that translation
+    and nothing else.
+
+    Returns `(udp_uri, tcp_uri)`, either of which may be empty. Both carry a
+    credential and are therefore **never logged** — the caller logs only whether
+    it got them.
+
+    Percent-encoding is not optional here: the username is
+    `<expiry>:<session-uuid>` and the credential is base64, so `:`, `/`, `+` and
+    `=` all occur and all mean something inside a URI's userinfo.
+    """
+    udp = ""
+    tcp = ""
+    for server in ice_servers or []:
+        username = urllib.parse.quote(str(server.get("username", "")), safe="")
+        credential = urllib.parse.quote(str(server.get("credential", "")), safe="")
+        if not username or not credential:
+            continue
+        for url in server.get("urls") or []:
+            url = str(url).strip()
+            # `turn:host:port?transport=udp` — the scheme is replaced, the rest
+            # (host, port, query) is kept verbatim. `turns:` passes through as
+            # `turns://` so a certificate on the relay later needs no change here.
+            if url.startswith("turn:"):
+                scheme, rest = "turn", url[len("turn:") :]
+            elif url.startswith("turns:"):
+                scheme, rest = "turns", url[len("turns:") :]
+            else:
+                continue
+            uri = f"{scheme}://{username}:{credential}@{rest}"
+            if "transport=tcp" in rest:
+                tcp = tcp or uri
+            else:
+                udp = udp or uri
+    return udp, tcp
+
+
+# ---------------------------------------------------------------------------
+# The input half — a frame becomes a real X event, or it becomes nothing
+# ---------------------------------------------------------------------------
+
+# W3C `KeyboardEvent.code` (a PHYSICAL key) -> X keysym name.
+#
+# The contract carries the physical key and never the character the browser
+# produced from it (template.spec.json `inputChannel.carriesCharacter: false`,
+# ADR-0004 증보 3 D2), so this table is the whole translation and there is no
+# text path to fall back on. What the key PRODUCES is then the far side's
+# layout — a `KeyA` lands as whatever the VM's own keymap says `a` is, which is
+# the point: the character of a password never forms as a value the browser
+# client owns.
+#
+# Unlisted codes are dropped rather than guessed at. A guess here would be a
+# keystroke the person did not press arriving in a shell.
+KEYSYM_BY_CODE = {
+    **{f"Key{c}": c.lower() for c in "ABCDEFGHIJKLMNOPQRSTUVWXYZ"},
+    **{f"Digit{d}": d for d in "0123456789"},
+    **{f"F{n}": f"F{n}" for n in range(1, 25)},
+    "Enter": "Return",
+    "NumpadEnter": "KP_Enter",
+    "Space": "space",
+    "Backspace": "BackSpace",
+    "Tab": "Tab",
+    "Escape": "Escape",
+    "Minus": "minus",
+    "Equal": "equal",
+    "BracketLeft": "bracketleft",
+    "BracketRight": "bracketright",
+    "Backslash": "backslash",
+    "Semicolon": "semicolon",
+    "Quote": "apostrophe",
+    "Backquote": "grave",
+    "Comma": "comma",
+    "Period": "period",
+    "Slash": "slash",
+    "IntlBackslash": "less",
+    "CapsLock": "Caps_Lock",
+    "ShiftLeft": "Shift_L",
+    "ShiftRight": "Shift_R",
+    "ControlLeft": "Control_L",
+    "ControlRight": "Control_R",
+    "AltLeft": "Alt_L",
+    "AltRight": "Alt_R",
+    "MetaLeft": "Super_L",
+    "MetaRight": "Super_R",
+    "ContextMenu": "Menu",
+    "ArrowLeft": "Left",
+    "ArrowRight": "Right",
+    "ArrowUp": "Up",
+    "ArrowDown": "Down",
+    "Home": "Home",
+    "End": "End",
+    "PageUp": "Prior",
+    "PageDown": "Next",
+    "Insert": "Insert",
+    "Delete": "Delete",
+    "NumLock": "Num_Lock",
+    "ScrollLock": "Scroll_Lock",
+    "Pause": "Pause",
+    "PrintScreen": "Print",
+    **{f"Numpad{d}": f"KP_{d}" for d in "0123456789"},
+    "NumpadDecimal": "KP_Decimal",
+    "NumpadAdd": "KP_Add",
+    "NumpadSubtract": "KP_Subtract",
+    "NumpadMultiply": "KP_Multiply",
+    "NumpadDivide": "KP_Divide",
+}
+
+# Wheel direction -> X button. X has no scroll axis; it has four buttons, and
+# every X client already reads them as scrolling.
+WHEEL_BUTTON_UP = 4
+WHEEL_BUTTON_DOWN = 5
+WHEEL_BUTTON_LEFT = 6
+WHEEL_BUTTON_RIGHT = 7
+
+# A browser wheel `deltaY` is device-dependent (pixels, lines or pages); what
+# survives translation is the SIGN and a bounded count. Unbounded would let one
+# frame hold the far side's scroll for a minute.
+MAX_WHEEL_CLICKS = 10
+WHEEL_PIXELS_PER_CLICK = 53.0
+
+
+class InputRefused(Exception):
+    """A frame that will not be injected, and the reason a log line can carry."""
+
+
+class X11InputSink:
+    """Turns validated input frames into XTEST events on the local X server.
+
+    XTEST rather than writing to a device node: the events enter the same X
+    server the capture pipeline is reading, so what the person sees confirmed on
+    their screen is the event that was actually delivered — there is no second
+    input path that could succeed while the picture disagrees.
+
+    Every method here assumes the frame is ALREADY validated. Parsing lives in
+    `input_frame_action` so that a malformed frame is refused before anything
+    touches the display, and so the parse can be tested without an X server.
+    """
+
+    def __init__(self, display_name: str) -> None:
+        # Debian `python3-xlib`, not pip; imported here so an observer-only
+        # instance without the package still starts and still streams.
+        from Xlib import X, XK, display as xlib_display
+        from Xlib.ext import xtest
+
+        self._X = X
+        self._XK = XK
+        self._xtest = xtest
+        self._display = xlib_display.Display(display_name)
+        if not self._display.has_extension("XTEST"):
+            raise RuntimeError("X server has no XTEST extension")
+        screen = self._display.screen()
+        self.width = screen.width_in_pixels
+        self.height = screen.height_in_pixels
+        # Xlib's display object is not thread-safe and the datachannel delivers
+        # from GLib's loop thread while the revalidation loop runs in another.
+        self._lock = threading.Lock()
+        self._keycodes: dict[str, int] = {}
+        log(f"input: XTEST ready on {display_name} ({self.width}x{self.height})")
+
+    def keycode_for(self, code: str) -> int:
+        """Resolve a W3C code to an X keycode on THIS server's keymap."""
+        cached = self._keycodes.get(code)
+        if cached is not None:
+            return cached
+        keysym_name = KEYSYM_BY_CODE.get(code)
+        if keysym_name is None:
+            raise InputRefused(f"unmapped key code {code!r}")
+        keysym = self._XK.string_to_keysym(keysym_name)
+        if not keysym:
+            raise InputRefused(f"no keysym for {keysym_name!r}")
+        keycode = self._display.keysym_to_keycode(keysym)
+        if not keycode:
+            raise InputRefused(f"keysym {keysym_name!r} is not on this keymap")
+        self._keycodes[code] = keycode
+        return keycode
+
+    def key(self, action: str, code: str) -> None:
+        keycode = self.keycode_for(code)
+        event = self._X.KeyPress if action == "down" else self._X.KeyRelease
+        with self._lock:
+            self._xtest.fake_input(self._display, event, keycode)
+            self._display.sync()
+
+    def pointer_move(self, x: float, y: float) -> None:
+        # Normalised 0..1 over the video box, so the VM's resolution stays the
+        # VM's — the client never learns it and never has to.
+        px = max(0, min(self.width - 1, int(round(x * (self.width - 1)))))
+        py = max(0, min(self.height - 1, int(round(y * (self.height - 1)))))
+        with self._lock:
+            self._xtest.fake_input(self._display, self._X.MotionNotify, x=px, y=py)
+            self._display.sync()
+
+    def pointer_button(self, action: str, x: float, y: float, button: int) -> None:
+        # Move first: a click carries its own position, and a button press at a
+        # stale pointer would land somewhere the person was not pointing.
+        self.pointer_move(x, y)
+        event = self._X.ButtonPress if action == "down" else self._X.ButtonRelease
+        with self._lock:
+            self._xtest.fake_input(self._display, event, button)
+            self._display.sync()
+
+    def wheel(self, dx: float, dy: float) -> None:
+        with self._lock:
+            for delta, negative, positive in (
+                (dy, WHEEL_BUTTON_UP, WHEEL_BUTTON_DOWN),
+                (dx, WHEEL_BUTTON_LEFT, WHEEL_BUTTON_RIGHT),
+            ):
+                if not delta:
+                    continue
+                button = positive if delta > 0 else negative
+                clicks = min(
+                    MAX_WHEEL_CLICKS,
+                    max(1, int(round(abs(delta) / WHEEL_PIXELS_PER_CLICK))),
+                )
+                for _ in range(clicks):
+                    self._xtest.fake_input(self._display, self._X.ButtonPress, button)
+                    self._xtest.fake_input(self._display, self._X.ButtonRelease, button)
+            self._display.sync()
+
+    def close(self) -> None:
+        try:
+            self._display.close()
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def input_frame_action(message) -> tuple:
+    """Validate one input frame against the declared contract.
+
+    Returns a `(kind, *args)` tuple the sink can apply, or raises
+    [`InputRefused`]. Split out from the sink so the CONTRACT can be exercised
+    without an X server, and so a frame is refused before it can move anything.
+
+    The shape it enforces is `template.spec.json`'s `signalling.inputChannel`,
+    including the part that reads like a detail and is not: `button` is absent
+    on a MOVE rather than sent as zero. A producer that required `button` on
+    every pointer frame would drop every move — clicks would keep working and
+    the cursor would never travel, which looks like a network problem and is
+    not.
+    """
+    if not isinstance(message, dict):
+        raise InputRefused("frame is not an object")
+    kind = message.get("type")
+    action = message.get("action")
+    if not isinstance(action, str):
+        raise InputRefused("frame has no action")
+
+    if kind == "key":
+        if action not in ("down", "up"):
+            raise InputRefused(f"key action {action!r}")
+        code = message.get("code")
+        if not isinstance(code, str) or not code:
+            raise InputRefused("key frame has no code")
+        # `carriesCharacter: false` is enforced, not assumed. A client that sent
+        # the produced character would be handing this producer a value the
+        # contract says never forms on that side — refusing it keeps the one
+        # rule that makes a remote password a physical-key sequence.
+        if "key" in message or "char" in message or "text" in message:
+            raise InputRefused("key frame carried a character")
+        return ("key", action, code)
+
+    if kind == "pointer":
+        if action not in ("move", "down", "up"):
+            raise InputRefused(f"pointer action {action!r}")
+        x, y = message.get("x"), message.get("y")
+        if not isinstance(x, (int, float)) or not isinstance(y, (int, float)):
+            raise InputRefused("pointer frame has no position")
+        if not (0.0 <= float(x) <= 1.0 and 0.0 <= float(y) <= 1.0):
+            raise InputRefused("pointer position is not normalised 0..1")
+        if action == "move":
+            if "button" in message:
+                raise InputRefused("move carried a button")
+            return ("pointer_move", float(x), float(y))
+        button = message.get("button")
+        if not isinstance(button, int) or isinstance(button, bool):
+            raise InputRefused("pointer down/up has no button")
+        # Browser button numbering (0 left, 1 middle, 2 right) -> X (1, 2, 3).
+        x_button = {0: 1, 1: 2, 2: 3}.get(button)
+        if x_button is None:
+            raise InputRefused(f"unsupported button {button!r}")
+        return ("pointer_button", action, float(x), float(y), x_button)
+
+    if kind == "wheel":
+        if action != "scroll":
+            raise InputRefused(f"wheel action {action!r}")
+        dx, dy = message.get("dx"), message.get("dy")
+        if not isinstance(dx, (int, float)) or not isinstance(dy, (int, float)):
+            raise InputRefused("wheel frame has no delta")
+        return ("wheel", float(dx), float(dy))
+
+    raise InputRefused(f"unknown frame type {kind!r}")
+
+
+# ---------------------------------------------------------------------------
+# The GStreamer half
+# ---------------------------------------------------------------------------
+
+PIPELINE = (
+    f"ximagesrc display-name={X11} use-damage=0 show-pointer=false "
+    "! video/x-raw,framerate=15/1 "
+    "! videoconvert ! queue max-size-buffers=2 leaky=downstream "
+    "! x264enc tune=zerolatency speed-preset=ultrafast bitrate=1500 key-int-max=30 "
+    "! video/x-h264,profile=constrained-baseline "
+    "! h264parse config-interval=-1 "
+    "! rtph264pay pt=96 config-interval=-1 "
+    "! application/x-rtp,media=video,encoding-name=H264,payload=96 "
+    "! webrtcbin name=sendonly latency=50"
+)
+
+
+class Session:
+    """One viewer, one peer connection. Media is sendonly; there is no data path."""
+
+    def __init__(
+        self,
+        peer: Peer,
+        display_id: str,
+        mode: str,
+        ice_servers=None,
+        input_enabled: bool = False,
+    ) -> None:
+        self.peer = peer
+        self.display_id = display_id
+        self.mode = mode
+        # THE SERVER'S ANSWER, not a setting and not the viewer's request. It is
+        # `mode == controller AND the control window is still open`, computed in
+        # display_attach.rs as one conjunction, so a controller whose window was
+        # returned arrives here as False at the next re-validation and the
+        # channel closes under them. See `revoke_input`.
+        self.input_enabled = bool(input_enabled) and not INPUT_KILL_SWITCH
+        if input_enabled and INPUT_KILL_SWITCH:
+            log("input: server granted control but MOMO_DISPLAY_INPUT_DISABLED=1 refuses it")
+        self.input_channel = None
+        self.input_sink = None
+        self._input_lock = threading.Lock()
+        self._frames_applied = 0
+        self._frames_refused = 0
+        # LIVE-5a: the relay credential the SERVER minted for this session, if
+        # this instance was configured with a relay. Empty on an instance that
+        # was not, and the static `MOMO_DISPLAY_TURN_URI` then stands — see
+        # `start`.
+        #
+        # This is installed into webrtcbin ONCE, in `prepare`, and the 30-second
+        # re-validation loop mints a fresh credential that this process THROWS
+        # AWAY. GStreamer has no way to swap a TURN server on a running ICE agent
+        # — and the one property that looks like a way in (`webrtcbin.ice-agent`)
+        # destroys the agent when read, measured in #1438 and warned about a few
+        # lines down.
+        #
+        # That USED to be written here as a ceiling: past the TTL the connection
+        # could no longer hold a relay and the screen would go black with nothing
+        # to explain it. LIVE-5c MEASURED it and that is not what happens — a
+        # stream held for 200s on a 60s credential lost nothing (10/10 typed
+        # beats delivered, relay-only). coturn checks the REST username's expiry
+        # when an ALLOCATE creates an allocation and does not re-check it to
+        # REFRESH one that already exists.
+        #
+        # So the TTL bounds when a NEW allocation can be created, not how long a
+        # running one lives, and the discarded re-mints are genuinely surplus
+        # here. The narrow case that remains is a connection forced to allocate
+        # AGAIN mid-session (an ICE restart), which wants a fresh credential at
+        # that moment rather than a periodic swap. See template.spec.json
+        # `ice.turn.$credentialRefreshComment`.
+        self.ice_servers = ice_servers or []
+        # Whether ICE was restricted to relay candidates. Read by the candidate
+        # log so it can tell a missing relay from an expected host candidate.
+        self.relay_only = False
+        self.pipe = None
+        self.webrtc = None
+        self.done = threading.Event()
+
+    def prepare(self) -> None:
+        """Build everything, decide the grant's fate, and stop before negotiating.
+
+        Split from [`begin`] so the caller can send `ready` knowing whether input
+        ACTUALLY works. When these were one method, `ready` went out first with
+        the server's answer, and a channel that then failed to open downgraded
+        `self.input_enabled` in silence — so the viewer was told it had control,
+        waited on `ondatachannel` forever, and the person typed into nothing.
+        That is the same failure `_on_offer_created`'s guard exists to prevent,
+        just moved one message earlier, where the guard could not see it.
+        """
+        self.pipe = Gst.parse_launch(PIPELINE)
+        self.webrtc = self.pipe.get_by_name("sendonly")
+
+        # BUNDLE, before anything negotiates.
+        #
+        # webrtcbin's default bundle policy is `none`, which gives every m-line
+        # its own ICE component and its own DTLS transport. That was invisible
+        # while the offer had exactly one m-line (#1438 measured video only). The
+        # moment the input channel adds `m=application`, `none` asks the viewer
+        # for a SECOND transport, and the measured result is ICE reaching
+        # `completed` and the connection then going `failed` in DTLS — a screen
+        # that connects and a keyboard that never arrives, with no error naming
+        # the cause.
+        #
+        # Browsers negotiate max-bundle and the web client is a browser, so this
+        # is also the only policy the real viewer was ever going to accept.
+        self.webrtc.set_property(
+            "bundle-policy", GstWebRTC.WebRTCBundlePolicy.MAX_BUNDLE
+        )
+
+        # E2E (#1438) — force relay-only ICE and wire the oort-operated TURN.
+        # ADR-0165 증보 1 (D3-1) measured that a CubeSandbox microVM sits behind a
+        # symmetric NAT: host/srflx candidates cannot connect from outside, so the
+        # only ICE path that works is `typ relay`. We therefore (a) wire the TURN
+        # server(s) delivered via envVars (#1437 receiver → this process's environ)
+        # and (b) set ice-transport-policy=relay so webrtcbin gathers ONLY relay
+        # candidates — collecting host/srflx that are known to fail only costs
+        # connection time (ADR-0165 증보 1 residual item 5). turn:// URIs carry a
+        # credential, so they are never logged.
+        #
+        # LIVE-5a — the credential is now the SERVER's, minted per session and
+        # expiring on its own (`validate.ice_servers`). The static envVars pair
+        # below is the pre-LIVE-5a delivery and stays as the fallback for exactly
+        # as long as the retirement takes: an instance whose operator has not yet
+        # given momo-server the relay's `static-auth-secret` answers with an
+        # empty `ice_servers`, and this producer must keep streaming through it.
+        # The server's copy WINS when present — that preference is what makes the
+        # static `user=` line removable from coturn later without a second deploy
+        # of this template.
+        turn_uri, turn_uri_tcp = turn_uris_from_ice_servers(self.ice_servers)
+        credential_source = "server (per-session, expiring)"
+        if not turn_uri:
+            turn_uri = os.environ.get("MOMO_DISPLAY_TURN_URI", "").strip()
+            turn_uri_tcp = os.environ.get("MOMO_DISPLAY_TURN_URI_TCP", "").strip()
+            credential_source = "envVars static (pre-LIVE-5a)"
+        if turn_uri:
+            self.webrtc.set_property("turn-server", turn_uri)
+            added_tcp = False
+            if turn_uri_tcp:
+                try:
+                    added_tcp = bool(self.webrtc.emit("add-turn-server", turn_uri_tcp))
+                except Exception as exc:  # noqa: BLE001
+                    log(f"ice: add-turn-server(tcp) failed ({exc})")
+            self.webrtc.set_property(
+                "ice-transport-policy",
+                GstWebRTC.WebRTCICETransportPolicy.RELAY,
+            )
+            self.relay_only = True
+            log(
+                "ice: TURN wired from {} (udp + tcp={}), "
+                "ice-transport-policy=RELAY (relay-only, credential not logged)".format(
+                    credential_source, added_tcp
+                )
+            )
+        else:
+            # No TURN delivered — leave webrtcbin at the spec defaults (stun=[],
+            # turn=null). This is the pre-#1438 posture (offer carries only
+            # link-local candidates and a browser cannot connect).
+            log("ice: no TURN delivered — defaults (relay unavailable)")
+
+        # NOTE (measured, do not "fix" by reading `ice-agent`): on GStreamer 1.22
+        # `webrtcbin.get_property("ice-agent")` through PyGObject over-unrefs the
+        # GstWebRTCNice object — the property returns an object, and the ICE agent
+        # is DESTROYED as a side effect of reading it. Every later negotiation then
+        # dies on `gst_webrtc_ice_add_stream: assertion 'GST_IS_WEBRTC_ICE (ice)'`.
+        # There is no port-range property on webrtcbin in 1.22 either, so
+        # template.spec.json's `mediaUdpPortRange` is NOT enforceable here.
+        log(f"ice: mediaUdpPortRange {UDP_RANGE} DECLARED BUT NOT ENFORCED (GStreamer 1.22)")
+
+        self.webrtc.connect("on-negotiation-needed", self._on_negotiation_needed)
+        self.webrtc.connect("on-ice-candidate", self._on_ice_candidate)
+
+        # The input channel is created between READY and PLAYING, and the order
+        # is not a style choice — it is the only window that works:
+        #
+        #   * before READY, `create-data-channel` fails the assertion
+        #     `webrtc->priv->is_closed != TRUE` and returns NULL (measured), so a
+        #     grant would be silently dropped;
+        #   * after PLAYING, `on-negotiation-needed` has already fired and the
+        #     offer is on its way WITHOUT an `m=application` section, so the
+        #     channel would need a second offer for something known all along.
+        #
+        # In READY the element is alive and negotiation has not started, so the
+        # channel lands in the FIRST offer.
+        self.pipe.set_state(Gst.State.READY)
+        if self.input_enabled:
+            self._open_input_channel()
+
+    def begin(self) -> None:
+        """Start negotiating. Everything the offer must carry already exists."""
+        self.pipe.set_state(Gst.State.PLAYING)
+        log("pipeline PLAYING")
+
+        # sendonly: it sends pixels and accepts no media back.
+        try:
+            transceiver = self.webrtc.emit("get-transceiver", 0)
+            if transceiver is not None:
+                transceiver.set_property(
+                    "direction",
+                    GstWebRTC.WebRTCRTPTransceiverDirection.SENDONLY,
+                )
+                log("transceiver direction=SENDONLY")
+        except Exception as exc:  # noqa: BLE001
+            log(f"transceiver: {exc}")
+
+    # -- the input datachannel ------------------------------------------------
+
+    def _open_input_channel(self) -> None:
+        """Open the channel the SERVER authorised, and only then.
+
+        Opened by the producer, never by the viewer: the trigger is this
+        producer's own validate answer, so a viewer that opened its own channel
+        would be routing around the grant rather than holding one. The web
+        client therefore has no `createDataChannel` at all — it listens on
+        `ondatachannel` (DisplayController.tsx) — and this is the other half of
+        that arrangement.
+        """
+        try:
+            self.input_sink = X11InputSink(X11)
+        except Exception as exc:  # noqa: BLE001
+            # A grant we cannot honour must not be reported as honoured. The
+            # stream continues; the keyboard does not.
+            log(f"input: sink unavailable ({exc}) — control granted but NOT delivered")
+            self.input_enabled = False
+            self.input_sink = None
+            return
+        try:
+            channel = self.webrtc.emit(
+                "create-data-channel", INPUT_CHANNEL_LABEL, None
+            )
+        except Exception as exc:  # noqa: BLE001
+            log(f"input: create-data-channel failed ({exc})")
+            channel = None
+        if channel is None:
+            log("input: webrtcbin refused the channel — control NOT delivered")
+            self.input_enabled = False
+            self.input_sink.close()
+            self.input_sink = None
+            return
+        channel.connect("on-open", self._on_input_open)
+        channel.connect("on-close", self._on_input_close)
+        channel.connect("on-message-string", self._on_input_message)
+        self.input_channel = channel
+        log(f"input: channel {INPUT_CHANNEL_LABEL!r} created (server granted control)")
+
+    def _on_input_open(self, _channel) -> None:
+        log("input: channel OPEN — keystrokes now reach this screen")
+
+    def _on_input_close(self, _channel) -> None:
+        log(
+            "input: channel CLOSED "
+            f"(applied={self._frames_applied} refused={self._frames_refused})"
+        )
+
+    def _on_input_message(self, _channel, raw: str) -> None:
+        """One frame in, one X event out — or nothing, loudly.
+
+        Never logs the frame. A key frame names the physical key, and a log line
+        holding a sequence of them is a keylogger written by accident.
+        """
+        if not self.input_enabled or self.input_sink is None:
+            self._frames_refused += 1
+            return
+        try:
+            message = json.loads(raw)
+        except ValueError:
+            self._frames_refused += 1
+            log("input: refused a frame (not JSON)")
+            return
+        try:
+            action = input_frame_action(message)
+        except InputRefused as exc:
+            self._frames_refused += 1
+            # The REASON, never the frame.
+            log(f"input: refused a frame ({exc})")
+            return
+        try:
+            with self._input_lock:
+                if self.input_sink is None:
+                    return
+                kind, args = action[0], action[1:]
+                getattr(self.input_sink, kind)(*args)
+        except InputRefused as exc:
+            self._frames_refused += 1
+            log(f"input: refused a frame ({exc})")
+            return
+        except Exception as exc:  # noqa: BLE001
+            self._frames_refused += 1
+            log(f"input: injection failed ({exc})")
+            return
+        self._frames_applied += 1
+        # One line per burst rather than per frame: the count is the evidence,
+        # the sequence would be the leak.
+        if self._frames_applied in (1, 10, 100) or self._frames_applied % 500 == 0:
+            log(f"input: {self._frames_applied} frames applied")
+
+    def revoke_input(self, reason: str = "server withdrew the control window") -> None:
+        """Take the keyboard back.
+
+        With the default reason this is what makes 반환 remove control rather
+        than merely record that somebody asked: the stream is NOT cut — the
+        person keeps watching, they just stop typing — which is the difference
+        between a returned window and a revoked capability.
+
+        `reason` exists because teardown calls this too, and a teardown that
+        logged "the server withdrew the window" sent a reader looking for a
+        ledger change that never happened (measured while soaking LIVE-5c).
+        """
+        with self._input_lock:
+            if not self.input_enabled and self.input_channel is None:
+                return
+            self.input_enabled = False
+            sink, self.input_sink = self.input_sink, None
+            channel, self.input_channel = self.input_channel, None
+        if sink is not None:
+            sink.close()
+        if channel is not None:
+            try:
+                channel.emit("close")
+            except Exception as exc:  # noqa: BLE001
+                log(f"input: channel close failed ({exc})")
+        log(f"input: REVOKED ({reason})")
+
+    def _on_negotiation_needed(self, element) -> None:
+        promise = Gst.Promise.new_with_change_func(self._on_offer_created, element, None)
+        element.emit("create-offer", None, promise)
+
+    def _on_offer_created(self, promise, element, _data) -> None:
+        promise.wait()
+        reply = promise.get_reply()
+        offer = reply.get_value("offer")
+        element.emit("set-local-description", offer, Gst.Promise.new())
+        sdp = offer.sdp.as_text()
+        # D4, as amended by `producer.inputDatachannelOnDemand`. The absence of
+        # an application m-line is STILL the guarantee for an observer, and it is
+        # still checked on the way out rather than assumed from a flag: if this
+        # session was not granted input, a datachannel in the offer is a bug in
+        # this file and the honest response is to send nothing.
+        has_datachannel = "m=application" in sdp or "webrtc-datachannel" in sdp
+        if has_datachannel and not self.input_enabled:
+            log("FATAL: offer contained a datachannel without a grant — refusing to send (D4)")
+            self.peer.close()
+            return
+        if self.input_enabled and not has_datachannel:
+            # The grant was made and the channel is not on the wire, so the
+            # viewer would be told it has control and then type into nothing.
+            log("FATAL: control granted but the offer carries no input channel — refusing")
+            self.peer.close()
+            return
+        send_json(self.peer, {"type": "offer", "sdp": sdp})
+        log(
+            "offer sent (video sendonly, m=application {})".format(
+                "present — control granted" if has_datachannel else "absent — view-only"
+            )
+        )
+
+    def _on_ice_candidate(self, _element, mline_index, candidate) -> None:
+        if "typ relay" in candidate:
+            # #1438: with ice-transport-policy=relay this is the ONLY kind that
+            # should appear. Its address is the oort TURN public IP — proof that
+            # the microVM allocated a relay on the dedicated host (INFRA-B item 1).
+            log(f"ice: RELAY candidate (microVM→TURN allocation OK): {candidate}")
+        elif self.relay_only:
+            log(f"ice: non-relay candidate emitted (unexpected under relay policy): {candidate}")
+        else:
+            # No relay configured, so host/srflx candidates are the expected
+            # shape rather than a surprise. Saying "unexpected" here sent a
+            # reader hunting for a TURN fault in a run that had no TURN.
+            log(f"ice: host candidate (no relay configured): {candidate}")
+        send_json(
+            self.peer,
+            {"type": "ice", "candidate": candidate, "sdpMLineIndex": mline_index},
+        )
+
+    def set_remote_answer(self, sdp_text: str) -> None:
+        ok, sdp = GstSdp.SDPMessage.new_from_text(sdp_text)
+        if ok != GstSdp.SDPResult.OK:
+            log("answer: unparseable SDP — signalling continues, media will not")
+            return
+        answer = GstWebRTC.WebRTCSessionDescription.new(
+            GstWebRTC.WebRTCSDPType.ANSWER, sdp
+        )
+        try:
+            self.webrtc.emit("set-remote-description", answer, Gst.Promise.new())
+            log("answer applied")
+        except Exception as exc:  # noqa: BLE001
+            log(f"answer: rejected by webrtcbin ({exc})")
+
+    def add_remote_ice(self, candidate: str, mline_index: int) -> None:
+        try:
+            self.webrtc.emit("add-ice-candidate", mline_index, candidate)
+        except Exception as exc:  # noqa: BLE001
+            log(f"ice: remote candidate rejected ({exc})")
+
+    def stop(self) -> None:
+        self.done.set()
+        # The keyboard goes before the picture: a half-torn-down pipeline that
+        # still injected would be typing into a screen nobody is watching.
+        self.revoke_input("session ending")
+        if self.pipe is not None:
+            self.pipe.set_state(Gst.State.NULL)
+
+
+# ---------------------------------------------------------------------------
+# Signalling server
+# ---------------------------------------------------------------------------
+
+
+def handle_connection(conn: socket.socket, addr) -> None:
+    conn.settimeout(30)
+    peer = Peer(conn)
+    session = None
+    try:
+        request = b""
+        while b"\r\n\r\n" not in request:
+            chunk = conn.recv(4096)
+            if not chunk:
+                return
+            request += chunk
+        head, _, peer.buffered = request.partition(b"\r\n\r\n")
+        lines = head.decode("latin-1").split("\r\n")
+        request_line = lines[0] if lines else ""
+        headers = {}
+        for line in lines[1:]:
+            if ": " in line:
+                name, _, value = line.partition(": ")
+                headers[name.lower()] = value
+
+        # Readiness probe (cubemastercli --probe) and plain health checks.
+        if "upgrade" not in headers.get("connection", "").lower():
+            body = b'{"status":"ok"}'
+            conn.sendall(
+                b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                b"Content-Length: " + str(len(body)).encode() + b"\r\n\r\n" + body
+            )
+            return
+
+        offered = [p.strip() for p in headers.get("sec-websocket-protocol", "").split(",")]
+        if not offered or offered[0] != SUBPROTOCOL or len(offered) < 2:
+            conn.sendall(b"HTTP/1.1 400 Bad Request\r\n\r\n")
+            log("refused a handshake with no capability")
+            return
+        capability = offered[1]
+
+        verdict = validate_capability(capability)
+        if verdict is None:
+            conn.sendall(b"HTTP/1.1 401 Unauthorized\r\n\r\n")
+            log("server refused the capability")
+            return
+
+        accept = _accept_key(headers["sec-websocket-key"])
+        conn.sendall(
+            (
+                "HTTP/1.1 101 Switching Protocols\r\n"
+                "Upgrade: websocket\r\n"
+                "Connection: Upgrade\r\n"
+                f"Sec-WebSocket-Accept: {accept}\r\n"
+                # BARE subprotocol: echoing the capability would put a live
+                # bearer in every intermediary's response log.
+                f"Sec-WebSocket-Protocol: {SUBPROTOCOL}\r\n"
+                "\r\n"
+            ).encode("ascii")
+        )
+        log(f"viewer attached from {addr[0]} display_id={verdict['display_id']}")
+
+        # The server's word, not this process's setting. `MOMO_DISPLAY_INPUT` is
+        # still read as false and only false; the one env var that can move this
+        # moves it DOWN (`MOMO_DISPLAY_INPUT_DISABLED`).
+        granted_input = bool(verdict.get("input_enabled")) and not INPUT_KILL_SWITCH
+
+        session = Session(
+            peer,
+            verdict["display_id"],
+            verdict.get("mode", "observer"),
+            # LIVE-5a: the relay credential the server minted for THIS session,
+            # taken from THIS viewer's own validate, so the full TTL is ahead of
+            # the pipeline about to be built rather than partly spent. It reaches
+            # webrtcbin exactly once — see the limit noted on `Session.__init__`.
+            verdict.get("ice_servers"),
+            granted_input,
+        )
+        # Build first, ANNOUNCE second. `prepare` is where a grant either becomes
+        # a real channel or stops being a grant, so `session.input_enabled` after
+        # it is the truth — whereas `granted_input` is only what the server said.
+        # Announcing the server's word and then failing to honour it is how a
+        # person ends up typing into nothing.
+        session.prepare()
+        if granted_input and not session.input_enabled:
+            log("input: grant could NOT be honoured — telling the viewer view-only")
+
+        send_json(
+            peer,
+            {
+                "type": "ready",
+                "display_id": verdict["display_id"],
+                "mode": verdict.get("mode", "observer"),
+                "input_enabled": session.input_enabled,
+                "codec": CODEC,
+                "audio": AUDIO,
+            },
+        )
+
+        session.begin()
+
+        # The signalling socket goes QUIET once negotiation finishes — a viewer
+        # that is watching and typing sends nothing here, because input rides the
+        # datachannel and media rides ICE. So the loop is driven by a CLOCK, and
+        # a read timeout is a tick rather than an ending.
+        #
+        # Measured (LIVE-5c soak): with the timeout treated as an ending, every
+        # session died ~30s after the last ICE candidate — the re-validation
+        # below never ran even once, the control window's lease was never
+        # renewed, and the person's keyboard stopped roughly half a minute in.
+        # Nothing before LIVE-5c held a session open long enough to see it.
+        # `select` rather than a socket timeout, because a timeout that fired
+        # midway through a frame would leave the next read starting inside the
+        # previous frame's body and desync the channel for good. Waiting for
+        # readability first means every `_recv_frame` call runs on a frame that
+        # has begun to arrive, and the timeout belongs to the WAIT.
+        conn.settimeout(REVALIDATE_SECONDS)
+        deadline = time.monotonic() + REVALIDATE_SECONDS
+        while True:
+            # THE RE-VALIDATION RUNS FIRST, ON EVERY PASS, BEFORE ANY `continue`
+            # CAN JUMP OVER IT.
+            #
+            # It used to sit at the BOTTOM of this loop, after the message
+            # handlers — which meant the two `continue`s below (a non-text frame,
+            # a text frame that is not JSON) skipped it. A viewer that streams
+            # junk faster than the tick therefore starves the only clock that can
+            # take the keyboard away: `revoke_input` is never reached, and XTEST
+            # injection stays live for a controller whose window the server has
+            # already closed. Before this PR that only delayed a lease renewal;
+            # with an input path it is the difference between a returned window
+            # and a keyboard that keeps typing, so the check belongs where
+            # nothing can route around it.
+            if time.monotonic() > deadline:
+                revalidated = validate_capability(capability, stream=True)
+                if revalidated is None:
+                    log("revalidation failed — cutting the stream")
+                    break
+                # 반환 lands HERE. The window closing does not cut the stream and
+                # must not: the person keeps watching the screen they no longer
+                # drive. `input_enabled` is the server's conjunction of
+                # controller-mode AND an open window, so this is the same answer
+                # the browser is being told, arriving at the half that can act on
+                # it.
+                if session.input_enabled and not revalidated.get("input_enabled"):
+                    session.revoke_input()
+                deadline = time.monotonic() + REVALIDATE_SECONDS
+
+            message = None
+            if peer.buffered:
+                readable = True
+            else:
+                try:
+                    readable = bool(
+                        select.select([conn], [], [], REVALIDATE_TICK_SECONDS)[0]
+                    )
+                except (OSError, ValueError):
+                    break
+            if readable:
+                try:
+                    opcode, payload = _recv_frame(peer)
+                except (ConnectionError, OSError):
+                    break
+                if opcode == OPCODE_CLOSE:
+                    break
+                if opcode == OPCODE_PING:
+                    # Answer it and consume it. An unanswered ping is a viewer
+                    # that eventually gives up on a session that was fine.
+                    _send_frame(peer, payload, OPCODE_PONG)
+                    continue
+                if opcode != OPCODE_TEXT:
+                    continue
+                try:
+                    message = json.loads(payload.decode("utf-8"))
+                except ValueError:
+                    continue
+            kind = message.get("type") if message is not None else None
+            if kind == "answer":
+                session.set_remote_answer(message.get("sdp", ""))
+            elif kind == "ice":
+                session.add_remote_ice(
+                    message.get("candidate", ""), int(message.get("sdpMLineIndex", 0))
+                )
+            elif kind == "open_input":
+                # STILL refused, and the refusal is now the load-bearing half of
+                # the grant rather than a leftover: a viewer's request is not an
+                # authorisation (`viewerRequestIsNotAuthorisation`). If this
+                # viewer holds control it already HAS a channel, opened by the
+                # producer off the server's answer before the offer went out. If
+                # it does not, asking is exactly the move that must not work.
+                send_json(peer, {"type": "error", "reason": VIEW_ONLY_REFUSAL})
+                log("open_input refused: a viewer request is not a grant")
+            elif kind == "bye":
+                break
+    except Exception as exc:  # noqa: BLE001
+        log(f"session error: {exc}")
+    finally:
+        if session is not None:
+            session.stop()
+        peer.close()
+
+
+def main() -> int:
+    global SIGNER
+
+    Gst.init(None)
+    if not Gst.ElementFactory.find("webrtcbin"):
+        log("FATAL: webrtcbin plugin missing")
+        return 1
+    if not Gst.ElementFactory.find("ximagesrc"):
+        log("FATAL: ximagesrc plugin missing")
+        return 1
+
+    # Built once, at startup, so a missing or malformed key is one line in the
+    # boot log rather than a puzzle at the first attach.
+    SIGNER = WorkHostSigner(HOST_ID, WORK_HOST_KEY_PATH)
+    if SERVER_ORIGIN and not SIGNER.ready:
+        log("WARNING: a real server is configured but validate will be UNSIGNED (401s ahead)")
+
+    loop = threading.Thread(target=lambda: GLib.MainLoop().run(), daemon=True)
+    loop.start()
+
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    listener.bind(("0.0.0.0", SIGNAL_PORT))
+    listener.listen(8)
+    log(
+        f"signalling on :{SIGNAL_PORT} subprotocol={SUBPROTOCOL} "
+        f"input=per-grant (kill switch={'ON' if INPUT_KILL_SWITCH else 'off'})"
+    )
+
+    while True:
+        conn, addr = listener.accept()
+        threading.Thread(target=handle_connection, args=(conn, addr), daemon=True).start()
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

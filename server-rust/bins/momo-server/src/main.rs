@@ -50,6 +50,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // B4.3: what guards the one unauthenticated write (`POST /v1/join`).
         rate_limit_per_ip = config.rate_limit.per_ip_limit,
         rate_limit_window_seconds = config.rate_limit.window_seconds,
+        agent_port_rate_limit_per_token = config.agent_port.per_token_limit,
+        agent_port_rate_limit_per_agent = config.agent_port.per_agent_limit,
+        agent_port_rate_limit_per_ip = config.agent_port.per_ip_limit,
+        agent_port_external_origin_configured = config.agent_port.external_origin.is_some(),
         // MOMO-605: how wide the cross-origin surface is. A count, not the list —
         // the origins themselves go in the warn below only when one was refused.
         cors_allowed_origins = config.cors.allowed_origins.len(),
@@ -83,6 +87,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "CENT_TOKEN_HMAC / CENT_PROXY_SECRET not both set; the realtime rail is \
              fail-closed (no connection tokens, every subscribe callback 401). \
              REST still serves."
+        );
+    }
+    // LIVE-5a: silence here would read as "the TTL you asked for is what you
+    // got". It is not, and the direction matters — a credential configured to
+    // outlive a day is the static shared password this goal exists to retire,
+    // wearing the word "ephemeral".
+    if let Some(requested) = config.turn_ttl_clamped_from {
+        tracing::warn!(
+            requested_seconds = requested,
+            applied_seconds = momo_t3::MAX_TURN_CREDENTIAL_TTL_SECONDS,
+            "MOMO_TURN_CREDENTIAL_TTL_SECONDS exceeds the ceiling and was CLAMPED. \
+             A relay credential that lives longer than a day is not scoped by \
+             anything an operator can reason about; if you need one, rotate \
+             MOMO_TURN_STATIC_AUTH_SECRET on a schedule instead — that bounds every \
+             credential at once."
         );
     }
     if config.agent_gateway.legacy_secret_enabled() {
@@ -148,6 +167,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // `RATE_LIMIT_PER_IP=0` is the only way to turn it off, and the boot warns
     // when someone does.
     .with_rate_limit(config.rate_limit)
+    // ADR-0162: the Agent Port has its own token/agent/IP bounds and an optional
+    // trusted Origin comparison. It never borrows the public join knobs.
+    .with_agent_port(config.agent_port)
     // B5.2: mention→run routing is always on (routing an `@mention` to its agent
     // is the product); the only knob is how much history rides the job.
     .with_mentions(config.mentions.clone())
@@ -173,6 +195,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // substrate here" stays distinguishable from "one that cannot be reached".
     let state = match t3_provisioner {
         Some(provisioner) => state.with_t3_provisioner(provisioner),
+        None => state,
+    };
+    // LIVE-5a / ADR-0165 증보 1 D3-2: per-session ephemeral TURN credentials,
+    // attached only when the operator gave this process a relay AND its
+    // `static-auth-secret`. Without both, the display routes hand back an empty
+    // `ice_servers` and the producer keeps the static credential the install
+    // runbook shipped — the overlap that makes 「신규 실증 → 정적 제거」 possible
+    // on a relay that is already carrying production traffic.
+    let state = match config.turn.clone() {
+        Some(policy) => state.with_turn(policy),
         None => state,
     };
     let app = build_app(state);

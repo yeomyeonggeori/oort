@@ -37,20 +37,61 @@ export function emptyTimeline(): TimelineState {
 
 // ---- empty surface copy (R-1 §3 빈 상태) ------------------------------------
 //
-// A channel and a DM are empty for different reasons and have different next
-// steps, so they cannot share one line of copy. A channel can gain members, so
-// its empty state invites you to bring them. A 1:1 DM cannot: the server fixes
-// the participant pair by dmKey (openapi `openDm`), so offering "사람 추가"
-// there would be an action the product does not have. What is left in a DM is
-// the thing the composer below already does, so the empty state names the
-// person and hands focus to the composer instead of inventing a second door.
+// A channel and a DM are empty for different reasons, so they cannot share one
+// line of copy. What they DO share is the first act, and that is what this
+// section got wrong until #1536.
+//
+// 온보딩 실측 F5 (`docs/planning/research/2026-08-18-onboarding-first-success-benchmark.md`):
+// 첫 로그인 직후 채널 2개 · 메시지 0 · 에이전트 0인 화면에서 채널 분기가 내놓는
+// 유일한 행동이 `멤버 초대하기`였다. 첫 성공 경로의 마지막 마디에서 사람을 첫
+// 메시지가 아니라 초대 다이얼로그로 보낸 것이다. `첫 메시지 쓰기`는 DM 분기에만
+// 있었는데, 정작 **두 표면의 첫 행동은 같은 act**다: 아래 컴포저에 쓰는 것.
+//
+// 그래서 첫 행동은 이제 양쪽 다 쓰기이고, 초대는 지워지지 않고 **뒤로 물러난다.**
+// 지우지 않는 이유는 취향이 아니라 이 클라의 사정이다: 빈 채널이 「채널에 멤버
+// 추가」로 가는 **유일한 문**이다(`clients/web/src/app/AppShell.tsx`: "빈 채널의
+// 초대 진입점이 이 하나를 열고, 헤더 메뉴가 생기면 그것도 같은 하나를 연다" —
+// 그 헤더 메뉴는 아직 없다). 유일한 문을 지우는 것은 마찰 하나를 없애자고 기능
+// 하나를 없애는 일이다.
+//
+// A 1:1 DM still gets exactly one action: the server fixes the participant pair
+// by dmKey (openapi `openDm`), so offering 사람 추가 there would be an action the
+// product does not have.
+//
+// 라벨이 여기 사는 이유: 같은 문장을 두 클라가 그리고, 게이트가 그 문장을 이
+// 파일에서 읽어 자기 판정에 쓴다(`clients/web/gates/gate-composer.mjs` 11절 —
+// 게이트가 문장을 손으로 베끼면 화면이 고쳐질 때 게이트가 그것을 막는 쪽이 된다).
+
+/** 빈 대화가 내놓는 첫 행동의 이름. 정본은 이 두 상수다. */
+export const EMPTY_WRITE_ACTION_LABEL = "첫 메시지 쓰기";
+export const EMPTY_INVITE_ACTION_LABEL = "멤버 초대하기";
+
+export interface EmptyChannelAction {
+  /** 무엇을 하는 손잡이인가. 표면은 이 값으로 자기 핸들러를 고른다. */
+  kind: "write" | "invite";
+  label: string;
+}
 
 export interface EmptyChannelCopy {
+  /** 무엇의 빈 상태인가. 웹의 `data-empty-kind`가 그대로 이 값이다. */
+  surface: "channel" | "dm";
   headline: string;
   detail: string;
-  /** Members can still be added here, so the invite action is offered. */
-  invitable: boolean;
+  /** 첫 행동. 채널이든 DM이든 같은 act다 — 아래 컴포저에 쓰는 것. */
+  primary: EmptyChannelAction;
+  /** 그다음 행동. 멤버를 더 받을 수 있는 표면(=채널)만 갖는다. */
+  secondary: EmptyChannelAction | null;
 }
+
+const WRITE_ACTION: EmptyChannelAction = {
+  kind: "write",
+  label: EMPTY_WRITE_ACTION_LABEL,
+};
+
+const INVITE_ACTION: EmptyChannelAction = {
+  kind: "invite",
+  label: EMPTY_INVITE_ACTION_LABEL,
+};
 
 const DM_DETAIL = "여기 쓴 메시지는 둘만 봅니다. 참여자는 이 둘로 고정됩니다.";
 
@@ -62,29 +103,42 @@ export function emptyChannelCopy(
     // R-1 §3 asked for [사람 추가] and [에이전트 추가] as equal buttons, to say
     // that adding an agent is not the lesser path. Two buttons on one handler
     // said it twice and did it once, and this client has no agent-creation
-    // surface to send the second one to, so the equality moved into the copy
-    // and the surface offers the single action it can actually perform.
+    // surface to send the second one to, so the equality stayed in the copy.
+    //
+    // 그 문장이 이제 detail의 절반을 진다. 나머지 절반은 혼자 있는 사람이 실제로
+    // 망설이는 지점에 답한다: **나 혼자인데 지금 써도 되나.** 답은 된다이고, 그
+    // 근거는 서버에 있다 — 채널 히스토리 질의에 가입 시각 절이 없어서
+    // (`server-rust/crates/momo-messaging/src/message.rs` `list_messages` /
+    // `list_channel_page`: `WHERE channel_id = $1 AND deleted_at IS NULL`)
+    // 나중에 들어온 멤버도 오늘 쓴 줄을 그대로 읽는다.
     return {
-      headline: "이 채널을 함께 시작하세요.",
-      detail: "멤버를 초대하면 사람과 에이전트가 같은 자격으로 함께 일합니다.",
-      invitable: true,
+      surface: "channel",
+      headline: "이 채널을 첫 메시지로 시작하세요.",
+      detail:
+        "지금 쓴 메시지는 나중에 초대할 사람과 에이전트도 같은 자격으로 읽습니다.",
+      primary: WRITE_ACTION,
+      secondary: INVITE_ACTION,
     };
   }
   if (!peer) {
     // Roster not loaded yet: name nothing rather than name the wrong thing.
     return {
+      surface: "dm",
       headline: "다이렉트 메시지를 시작하세요.",
       detail: DM_DETAIL,
-      invitable: false,
+      primary: WRITE_ACTION,
+      secondary: null,
     };
   }
   return {
+    surface: "dm",
     headline:
       peer.kind === "agent"
         ? `${peer.displayName}님에게 첫 일을 맡겨보세요.`
         : `${peer.displayName}님과의 대화를 시작하세요.`,
     detail: DM_DETAIL,
-    invitable: false,
+    primary: WRITE_ACTION,
+    secondary: null,
   };
 }
 

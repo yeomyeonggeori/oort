@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   attachDirection,
   attachParticle,
+  attachRecipient,
   directionParticle,
   hasFinalConsonant,
   particleFor,
@@ -78,5 +79,36 @@ describe("directionParticle (로 / 으로)", () => {
     expect(directionParticle("gateway.dawn.internal")).toBe("로");
     expect(directionParticle("")).toBe("로");
     expect(directionParticle("(503)")).toBe("으로");
+  });
+});
+
+// =============================================================================
+// 에 / 에게 — 이 파일에서 **낱말이 못 정하는** 첫 짝 (#1384).
+//
+// 위의 모든 짝은 음운이다: 마지막으로 소리 나는 음절을 읽으면 답이 나온다.
+// 이것은 유정성이다. 「하늘」은 채널 이름일 수도 사람 이름일 수도 있고, 글자는
+// 어느 쪽인지 말해 주지 않는다. 그래서 사실은 호출자가 준다.
+// =============================================================================
+
+describe("koreanParticle: 에 / 에게", () => {
+  it("방은 에, 사람은 에게", () => {
+    expect(attachRecipient("일반", "place")).toBe("일반에");
+    expect(attachRecipient("hermes", "person")).toBe("hermes에게");
+  });
+
+  it("받침이 답을 바꾸지 않는다 — 이 짝은 음운이 아니다", () => {
+    // 받침 있는 이름과 없는 이름이 같은 종류에서 같은 조사를 받는다. 이 단정이
+    // 붉어지는 유일한 경우는 누군가 이 짝을 위의 PAIRS 표에 밀어 넣었을 때다.
+    expect(attachRecipient("김인턴", "person")).toBe("김인턴에게"); // 받침 ㄴ
+    expect(attachRecipient("소라", "person")).toBe("소라에게"); // 받침 없음
+    expect(attachRecipient("공지", "place")).toBe("공지에"); // 받침 없음
+    expect(attachRecipient("일반", "place")).toBe("일반에"); // 받침 ㄴ
+  });
+
+  it("같은 이름이 두 답을 갖는다 — 사실이 낱말 밖에 있다는 증거", () => {
+    // 한 워크스페이스가 같은 날 「하늘」이라는 채널과 「하늘」이라는 멤버를 가질
+    // 수 있다. 낱말만 보고 정하는 구현은 둘 중 하나에서 반드시 틀린다.
+    expect(attachRecipient("하늘", "place")).toBe("하늘에");
+    expect(attachRecipient("하늘", "person")).toBe("하늘에게");
   });
 });

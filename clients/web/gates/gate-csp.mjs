@@ -86,6 +86,7 @@ const workSession = {
   observation: "open",
   observerGrantCount: 0,
   remoteAttachAvailable: true,
+  remoteDisplayAvailable: false,
   startedAtMs: Date.now() - 10_000,
 };
 

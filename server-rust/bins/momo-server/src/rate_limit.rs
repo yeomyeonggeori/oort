@@ -33,6 +33,7 @@
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -59,12 +60,17 @@ pub struct Verdict {
     /// True for the first rejection of this key in the current burst, so a flood
     /// produces one log line rather than one per request.
     pub should_log: bool,
+    /// Reservation that owns the first-denial log marker. Database-backed
+    /// callers release it when their audit transaction fails, allowing a later
+    /// denial to retry the bounded audit without opening a duplicate-write
+    /// flood. Immediate log callers leave the reservation committed.
+    pub(crate) log_reservation: Option<u64>,
 }
 
 #[derive(Debug, Default)]
 struct Bucket {
     timestamps: Vec<Instant>,
-    logged: bool,
+    log_reservation: Option<u64>,
 }
 
 /// A sliding-window log keyed by an arbitrary string.
@@ -78,6 +84,7 @@ struct Bucket {
 pub struct SlidingWindowRateLimiter {
     buckets: Mutex<HashMap<String, Bucket>>,
     calls_since_sweep: Mutex<u32>,
+    next_log_reservation: AtomicU64,
 }
 
 impl SlidingWindowRateLimiter {
@@ -94,12 +101,28 @@ impl SlidingWindowRateLimiter {
     /// [`check`](Self::check) with an injected clock, so the window logic is
     /// testable without sleeping.
     pub fn check_at(&self, key: &str, limit: u32, window: Duration, now: Instant) -> Verdict {
-        if limit == 0 {
-            return Verdict {
-                allowed: true,
-                retry_after_seconds: 0,
-                should_log: false,
-            };
+        self.check_many_at(&[(key, limit)], window, now)[0]
+    }
+
+    /// Atomically admit a request against several independent keys.
+    ///
+    /// If any enabled key is full, none of the otherwise-open keys consume a
+    /// timestamp. That makes the maximum denied-axis `Retry-After` truthful:
+    /// retrying after it expires cannot discover that the rejected request
+    /// silently filled another axis. The result order matches `checks`.
+    pub fn check_many(&self, checks: &[(&str, u32)], window: Duration) -> Vec<Verdict> {
+        self.check_many_at(checks, window, Instant::now())
+    }
+
+    /// [`check_many`](Self::check_many) with an injected clock.
+    pub fn check_many_at(
+        &self,
+        checks: &[(&str, u32)],
+        window: Duration,
+        now: Instant,
+    ) -> Vec<Verdict> {
+        if checks.is_empty() {
+            return Vec::new();
         }
         self.sweep_if_needed(window, now);
 
@@ -110,31 +133,91 @@ impl SlidingWindowRateLimiter {
             // cannot decide must not take the route down with it.
             Err(poisoned) => poisoned.into_inner(),
         };
-        let bucket = buckets.entry(key.to_string()).or_default();
-        let cutoff = now.checked_sub(window).unwrap_or(now);
-        bucket.timestamps.retain(|stamp| *stamp > cutoff);
-
-        if bucket.timestamps.len() >= limit as usize {
-            let oldest = bucket.timestamps.first().copied().unwrap_or(now);
-            // How long until `oldest` falls out of the window.
-            let retry = window
-                .checked_sub(now.saturating_duration_since(oldest))
-                .unwrap_or_default();
-            let should_log = !bucket.logged;
-            bucket.logged = true;
-            return Verdict {
-                allowed: false,
-                retry_after_seconds: retry.as_secs().max(1),
-                should_log,
-            };
+        let cutoff = now.checked_sub(window);
+        for (key, limit) in checks {
+            if *limit == 0 {
+                continue;
+            }
+            buckets
+                .entry((*key).to_string())
+                .or_default()
+                .timestamps
+                .retain(|stamp| cutoff.is_none_or(|cutoff| *stamp > cutoff));
         }
 
-        bucket.timestamps.push(now);
-        bucket.logged = false;
-        Verdict {
-            allowed: true,
-            retry_after_seconds: 0,
-            should_log: false,
+        let any_denied = checks.iter().any(|(key, limit)| {
+            *limit > 0
+                && buckets
+                    .get(*key)
+                    .is_some_and(|bucket| bucket.timestamps.len() >= *limit as usize)
+        });
+
+        checks
+            .iter()
+            .map(|(key, limit)| {
+                if *limit == 0 {
+                    return Verdict {
+                        allowed: true,
+                        retry_after_seconds: 0,
+                        should_log: false,
+                        log_reservation: None,
+                    };
+                }
+                let bucket = buckets
+                    .get_mut(*key)
+                    .expect("enabled bucket was inserted before admission");
+                if bucket.timestamps.len() >= *limit as usize {
+                    let oldest = bucket.timestamps.first().copied().unwrap_or(now);
+                    let retry = window
+                        .checked_sub(now.saturating_duration_since(oldest))
+                        .unwrap_or_default();
+                    let retry_seconds = retry
+                        .as_secs()
+                        .saturating_add(u64::from(retry.subsec_nanos() != 0));
+                    let log_reservation = if bucket.log_reservation.is_none() {
+                        let reservation = self
+                            .next_log_reservation
+                            .fetch_add(1, Ordering::Relaxed)
+                            .wrapping_add(1);
+                        bucket.log_reservation = Some(reservation);
+                        Some(reservation)
+                    } else {
+                        None
+                    };
+                    Verdict {
+                        allowed: false,
+                        retry_after_seconds: retry_seconds.max(1),
+                        should_log: log_reservation.is_some(),
+                        log_reservation,
+                    }
+                } else {
+                    if !any_denied {
+                        bucket.timestamps.push(now);
+                        bucket.log_reservation = None;
+                    }
+                    Verdict {
+                        allowed: true,
+                        retry_after_seconds: 0,
+                        should_log: false,
+                        log_reservation: None,
+                    }
+                }
+            })
+            .collect()
+    }
+
+    /// Release an uncommitted first-denial marker iff this caller still owns
+    /// it. The reservation comparison prevents a late failing transaction from
+    /// clearing a newer window's marker after the bucket was reused.
+    pub(crate) fn release_log_reservation(&self, key: &str, reservation: u64) {
+        let mut buckets = match self.buckets.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        if let Some(bucket) = buckets.get_mut(key) {
+            if bucket.log_reservation == Some(reservation) {
+                bucket.log_reservation = None;
+            }
         }
     }
 
@@ -155,12 +238,14 @@ impl SlidingWindowRateLimiter {
         if !due {
             return;
         }
-        let cutoff = now.checked_sub(window).unwrap_or(now);
+        let cutoff = now.checked_sub(window);
         let mut buckets = match self.buckets.lock() {
             Ok(guard) => guard,
             Err(poisoned) => poisoned.into_inner(),
         };
-        buckets.retain(|_, bucket| bucket.timestamps.iter().any(|stamp| *stamp > cutoff));
+        buckets.retain(|_, bucket| {
+            cutoff.is_none_or(|cutoff| bucket.timestamps.iter().any(|stamp| *stamp > cutoff))
+        });
     }
 }
 
@@ -309,6 +394,46 @@ mod tests {
             1,
             "the floor is one second, not zero"
         );
+        assert_eq!(
+            limiter
+                .check_at("k", 1, window, start + Duration::from_millis(500))
+                .retry_after_seconds,
+            60,
+            "fractional remaining time is rounded up so Retry-After is sufficient"
+        );
+        assert!(
+            limiter
+                .check_at("k", 1, window, start + Duration::from_millis(60_500))
+                .allowed,
+            "waiting the advertised whole seconds must admit the retry"
+        );
+    }
+
+    #[test]
+    fn multi_axis_denial_does_not_consume_an_open_axis() {
+        let limiter = SlidingWindowRateLimiter::new();
+        let window = Duration::from_secs(60);
+        let start = Instant::now();
+        assert!(limiter.check_at("agent", 1, window, start).allowed);
+
+        let denied = limiter.check_many_at(
+            &[("new-token", 1), ("agent", 1)],
+            window,
+            start + Duration::from_secs(59),
+        );
+        assert!(denied[0].allowed);
+        assert!(!denied[1].allowed);
+        assert_eq!(denied[1].retry_after_seconds, 1);
+
+        let retry = limiter.check_many_at(
+            &[("new-token", 1), ("agent", 1)],
+            window,
+            start + Duration::from_secs(60),
+        );
+        assert!(
+            retry.iter().all(|verdict| verdict.allowed),
+            "the rejected request must not silently fill the token bucket"
+        );
     }
 
     #[test]
@@ -332,6 +457,44 @@ mod tests {
         for _ in 0..100 {
             assert!(limiter.check_at("k", 0, window, start).allowed);
         }
+    }
+
+    #[test]
+    fn an_unrepresentably_large_window_fails_closed() {
+        let limiter = SlidingWindowRateLimiter::new();
+        let start = Instant::now();
+        assert!(limiter.check_at("k", 1, Duration::MAX, start).allowed);
+        assert!(
+            !limiter.check_at("k", 1, Duration::MAX, start).allowed,
+            "checked_sub underflow must retain rather than erase the bucket"
+        );
+    }
+
+    #[test]
+    fn a_failed_audit_can_release_only_its_own_log_reservation() {
+        let limiter = SlidingWindowRateLimiter::new();
+        let start = Instant::now();
+        let window = Duration::from_secs(60);
+        assert!(limiter.check_at("token", 1, window, start).allowed);
+
+        let first_denial = limiter.check_at("token", 1, window, start);
+        let reservation = first_denial
+            .log_reservation
+            .expect("first denial owns the audit reservation");
+        assert!(first_denial.should_log);
+        assert!(!limiter.check_at("token", 1, window, start).should_log);
+
+        limiter.release_log_reservation("token", reservation.wrapping_add(1));
+        assert!(
+            !limiter.check_at("token", 1, window, start).should_log,
+            "a stale or foreign reservation cannot reopen the audit marker"
+        );
+
+        limiter.release_log_reservation("token", reservation);
+        assert!(
+            limiter.check_at("token", 1, window, start).should_log,
+            "a rolled-back audit lets one later denial retry"
+        );
     }
 
     #[test]

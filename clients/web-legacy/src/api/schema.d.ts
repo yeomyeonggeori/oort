@@ -338,6 +338,179 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/workspaces/{workspaceId}/hosted-agent-connections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List bounded secret-free hosted connection metadata. */
+        get: operations["listHostedAgentConnections"];
+        put?: never;
+        /** Create a dedicated paused hosted-agent identity and one-time pairing challenge. */
+        post: operations["createHostedAgentConnection"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{workspaceId}/hosted-agent-connections/{connectionId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get secret-free hosted connection metadata. */
+        get: operations["getHostedAgentConnection"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{workspaceId}/hosted-agent-connections/{connectionId}/pairing-challenge/regenerate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Invalidate prior material and return one replacement pairing challenge. */
+        post: operations["regenerateHostedAgentPairingChallenge"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{workspaceId}/hosted-agent-connections/{connectionId}/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Approve exact channels/scopes and issue the one-time active Agent Port credential. */
+        post: operations["confirmHostedAgentConnection"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{workspaceId}/hosted-agent-connections/{connectionId}/disconnect": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start an atomic hosted-agent disconnect and seed its cleanup manifest.
+         * @description One tenant transaction: the connection's live bearer is revoked, the connection becomes `cleanup_pending`, the dedicated agent is paused, every open gateway job of that agent is settled with its lease released, and the per-kind cleanup manifest is seeded. A failure anywhere rolls the whole set back. The revoke is scoped to this connection, so a sibling hosted connection of the same workspace is never collateral. Retrying answers the same body with `startedNow: false` and writes nothing — including no second audit row. History (message, chat, audit, inbox) is preserved; nothing cascades.
+         */
+        post: operations["disconnectHostedAgentConnection"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{workspaceId}/hosted-agent-connections/{connectionId}/disconnect/complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Transition a cleanup-confirmed connection to the terminal disconnected state.
+         * @description Refused while any required artifact is unresolved, and refused unless this server can read back the local half it performed: zero live credentials on the connection and a paused dedicated agent. The transition happens at most once; a replay answers 200 with `disconnectedNow: false` and writes no audit row. The same two facts are asserted by a database trigger, so a writer that bypasses this operation still cannot mint a terminal state.
+         */
+        post: operations["completeHostedAgentDisconnect"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{workspaceId}/hosted-agent-connections/{connectionId}/cleanup-artifacts/{artifactId}/acknowledge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Record one cleanup observation, and optionally one resolution.
+         * @description The manual half of cleanup confirmation. Provenance is server-derived — this operation writes `manual` and nothing else, so a client cannot promote its own claim to `server_verified`. Omitting `disposition` records only `currentStatus`, which is how an inactive routine stays unresolved. A resolution requires evidence and is not re-decidable.
+         */
+        post: operations["acknowledgeHostedCleanupArtifact"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{workspaceId}/agents/{agentId}/credentials": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List generic agent credential metadata (workspace owner/admin only).
+         * @description Newest-first bounded metadata projection. Raw bearer material, token hashes, and envelope prefixes are never projected.
+         */
+        get: operations["listAgentCredentials"];
+        put?: never;
+        /**
+         * Issue or rotate a generic per-agent bearer (workspace owner/admin only).
+         * @description Returns the raw bearer exactly once while persisting only its SHA-256 digest. Every currently live predecessor is shortened to at most the requested rotation grace; concurrent rotations serialize so only the final successor keeps its requested lifetime. The response is always `Cache-Control: no-store` and `Pragma: no-cache`. Agent Port reach/read scopes and `messages:read` are grantable only when explicitly named, never defaults. `provider:quota:write` additionally requires an instance operator. HAP-E3 reserves 409 for a dedicated hosted agent whose credentials are connection-managed.
+         */
+        post: operations["createAgentCredential"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{workspaceId}/agents/{agentId}/credentials/{credentialId}/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Idempotently revoke a generic per-agent bearer.
+         * @description The first call writes the revocation and its audit row in one tenant transaction. Replays return 200 with `alreadyRevoked=true` and do not append another revoke audit. Foreign agent/credential pairs are not distinguishable from a missing credential. HAP-E3 reserves 409 for a dedicated hosted agent whose credentials are connection-managed.
+         */
+        post: operations["revokeAgentCredential"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/workspaces/{workspaceId}/agents/{agentId}/allowed-models": {
         parameters: {
             query?: never;
@@ -1155,6 +1328,86 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/workspaces/{workspaceId}/work-sessions/{workSessionId}/display-attach": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Issue an ephemeral capability for the session's live screen.
+         * @description Human bearer only. ADR-0165 carries the live screen over WebRTC directly between the browser and the sandbox; this endpoint mints the 60-second bearer for that peer-to-peer handshake and nothing else. mode is observer or, since LIVE-3, controller. It still DEFAULTS to observer: taking control stops the agent, which is never what a client meant by saying nothing. observer requires active workspace and session-channel membership. Since LIVE-3 the session OWNER is exempt from the observation clause — owner_only means 소유자만 본다 (ADR-0004 증보 3), not 아무도 못 본다 — while a teammate is still refused 403 on a closed session. controller is the session owner and nobody else (증보 3 D1: control is a person's act on their own session), and it does three things at once: it mints a controller grant, it OPENS A CONTROL WINDOW in the display_control_window ledger (migration 076), and for as long as that window stands the agent's own path to this session is refused (POST /work-controls answers 409, and anything already dispatched is withheld from the host's pending-controls poll). That is 증보 3 D3's 비관측 enforced rather than declared. The VM does not move: the session stays running and running-time billing continues (증보 3 D6). Both grades additionally require a running or idle session carrying a MomoHost-signed display binding, an unrevoked work_host, AND that host advertising capabilities.display_attach. That last clause is fail-closed and is what excludes BYOC hosts without any policy naming a provider. Since LIVE-5a a controller grant also FORCES observation to owner_only for as long as the window stands, and restores the owner's own setting when it closes — by return, by lease lapse, or with the session. A teammate's already-open stream stops validating within one re-validation period, because the validate join re-reads observation every time. The reason is the whole point of the window: a person is about to type a password, and 증보 3 D2 keeps that out of the transcript and the audit log while a teammate watching it frame by frame would undo all of it. display_endpoint is the HOST's own credential-free WebRTC signalling WebSocket; it contains no bearer, momo never proxies signalling or media, and no frame is stored anywhere. ice_servers is the one place momo touches the ICE negotiation: it mints a SHORT-LIVED credential for the oort-operated relay (ADR-0165 D3 — never a third party's), scoped to this work session, replacing the single shared password the relay shipped with. It is empty on an instance that was given no relay, which a client must treat as "use what you already have" rather than as an error. Nothing the person types during a control window enters this API, the transcript, the audit log or the Memory Plane (증보 3 D2) — the ledger records who, when and why it ended, and has no column that could hold a keystroke.
+         */
+        post: operations["issueDisplayAttachCapability"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{workspaceId}/work-sessions/{workSessionId}/display-binding": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Publish this session's WebRTC display binding as its own host.
+         * @description MomoHost-signed, exactly once per session. The daemon inside the sandbox declares displayId plus the credential-free WSS signalling endpoint a browser will dial. A human bearer is 403 here and the same field names are refused by name on session create and PATCH: publishing a binding is a claim about what is running on a machine, and only the machine makes it. Re-sending the identical pair is idempotent (204); a DIFFERENT binding is 409, because two producers claiming one session's screen is a state the ledger cannot describe. The signing host must be the session's own; the path names a session rather than a host, so that pin is enforced against the ledger inside the handler. The host must also already advertise capabilities.display_attach.
+         */
+        post: operations["publishWorkSessionDisplayBinding"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{workspaceId}/work-sessions/{workSessionId}/display-control": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Hand the session's screen back to its agent.
+         * @description The 반환 half of ADR-0004 증보 3 (LIVE-3): the person closes their control window and the agent's reach into the session comes back. Session owner only, matching who could have opened it — a teammate must not be able to end somebody else's intervention mid-password. Closing writes an end_reason of returned, emits the work.session.control boundary event carrying 재개 시각, and makes the next producer re-validation answer input_enabled false. That last part is what makes the return real rather than bookkeeping: without it, handing control back would be a row in a table and a keyboard that still worked. IDEMPOTENT. Returning a window that has already closed — because this is a retry, because the lease lapsed, or because the session ended — is 200 with closed=false, never a 4xx. It is one of the window's three closes; the other two (a lapsed producer lease, and the session ending) need no caller and happen on their own.
+         */
+        delete: operations["returnDisplayControl"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{workspaceId}/work-hosts/{workHostId}/display-attach/validate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Validate a view-only display capability as its target host.
+         * @description MomoHost-signed control-plane check performed by the WebRTC producer immediately before it accepts a signalling connection, and then on a timer for every peer connection it already serves (`stream: true`). The opaque bearer is matched by SHA-256 digest; the raw token is never persisted or logged. Validation joins the running-or-idle work_session, the unrevoked work_host, the grantee, the session's observation and the host's display advertisement on every call, so ending the session, revoking the host, closing observation, the grantee leaving the channel, or withdrawing capabilities.display_attach all cut a stream that is already open. A terminal capability presented here, or a display capability presented to terminal-attach/validate, is the ordinary 401: two surfaces on one box do not lend each other authority. The response carries input_enabled, which instructs the producer whether it may negotiate an input datachannel. It is TRUE only when the bearer is a controller grant AND the control window that grant opened is still standing, and it is re-answered on every re-validation — so it is also the off switch: when the person returns control the window closes and the producer must close the channel. For an observer grant it is always false, and view-only remains the ABSENCE of a channel rather than a flag beside one (ADR-0165 D4). A controller re-validation also RENEWS the control window's lease. That is deliberate and is why the window is not keyed to the capability's 60-second expiry: a live WebRTC session outlives its dial window by design, and a window that expired with it would resume the agent sixty seconds into a login still in progress. Media and signalling never traverse MomoServer, OutboxRelay, or Centrifugo, and no frame is stored.
+         */
+        post: operations["validateDisplayAttachCapability"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/workspaces/{workspaceId}/work-controls": {
         parameters: {
             query?: never;
@@ -1864,6 +2117,29 @@ export interface paths {
          * @description Agent bearer only. delegatedMemberId and channelId are mandatory and bind every call to a shared channel. `initialize`, `tools/list`, and `tools/call` are supported. JSON-RPC failures use HTTP 200 with codes -32700, -32600, -32601, -32602, or -32003; -32003 means the delegated human lacks an active drive:read grant. No Google credential is exposed.
          */
         post: operations["driveMcp"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/mcp/agent-port": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Call the sessionless hosted-agent MCP endpoint.
+         * @description Vendor-neutral Agent Port from ADR-0162. This is a POST-only, sessionless JSON-RPC endpoint and every request is authenticated again with an active agent bearer carrying the non-default `agent:port:connect` reachability scope. The credential is accepted only in `Authorization`; URL/query credentials, app JWTs, human principals are rejected. An incoming `Mcp-Session-Id` never creates authority and is never echoed. No OAuth protected resource metadata is advertised by this static-bearer wave.
+         *     Modern requests pin `2026-07-28`, include `params._meta[io.modelcontextprotocol/protocolVersion]` and `params._meta[io.modelcontextprotocol/clientCapabilities]`, and mirror their version and method in `MCP-Protocol-Version` and `Mcp-Method`. `Mcp-Name` is additionally mandatory for `tools/call` and must match the body tool name. The modern era exposes `server/discover`, a scoped `tools/list` and `tools/call`; it does not expose initialize, ping, protocol sessions, or a GET stream.
+         *     `tools/list` and `tools/call` are answered from one intersection of the connection's approved scopes, the credential's current scopes and the server capability, so the advertised catalog is exactly the callable one. A credential carrying only `agent:port:connect` lists no tool and may call none; a tool outside the caller's view answers byte-identically to a tool that does not exist. The eight tools are `oort_inbox_read`, `oort_conversation_read`, `oort_message_post`, `oort_jobs_claim`, `oort_job_renew`, `oort_job_release`, `oort_run_event` and `oort_run_complete`; each binds an existing domain rather than a second one, and job authority travels only as an opaque `leaseHandle` that carries the channel its work came from, so the confirming human's exact channel grant is re-checked on every later verb. Arguments are validated against the tool's published `inputSchema` before execution, so `additionalProperties: false`, the declared nullability (every optional property is `["<type>", "null"]` and every required one is not), the numeric bounds, `format: uuid` and `enum` are enforced rather than advertised. String `minLength`/`maxLength` count **UTF-8 bytes**, which each such field's description states. Tool failures use a closed set of JSON-RPC codes (-32602 invalid arguments, -32003 not authorized, -32004 unavailable, -32005 conflict, -32603 internal) with fixed messages, so a refusal never distinguishes absent from invisible from forbidden.
+         *     The narrow legacy adapter pins `2025-11-25`. Its first `initialize` may omit `MCP-Protocol-Version`; every later request must carry that exact version. It accepts `initialize`, `notifications/initialized`, `ping`, a scoped `tools/list`, and an unknown-tool `tools/call` error, without issuing a session id. All calls send `Content-Type: application/json` and an `Accept` value that contains both `application/json` and `text/event-stream`. Recognized modern errors never silently downgrade to legacy. The two exact supported versions are the complete compatibility set.
+         */
+        post: operations["agentPort"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2673,6 +2949,151 @@ export interface components {
         AgentCardRegistrationResponse: {
             registration: components["schemas"]["AgentCardRegistration"];
         };
+        /** @enum {string} */
+        AgentCredentialScope: "agent:jobs:read" | "agent:runs:callback" | "messages:read" | "messages:write" | "realtime:subscribe" | "work:control" | "provider:quota:write" | "agent:port:connect" | "agent:inbox:read";
+        /**
+         * @description The closed hosted scope set. `agent:port:connect` is reachability only: it opens `POST /v1/mcp/agent-port` and no product tool. Each of the others opens exactly one Agent Port tool family and no REST route — `agent:inbox:read` -> oort_inbox_read, `messages:read` -> oort_conversation_read, `messages:write` -> oort_message_post, `agent:jobs:read` -> oort_jobs_claim/oort_job_renew/oort_job_release, `agent:runs:callback` -> oort_run_event/oort_run_complete. A tool is listed and callable only when the connection approval, the credential's current scopes and the server capability all carry its scope.
+         * @enum {string}
+         */
+        HostedAgentScope: "agent:port:connect" | "agent:inbox:read" | "messages:read" | "messages:write" | "agent:jobs:read" | "agent:runs:callback";
+        HostedAgentConnection: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            agentMemberId: string;
+            /** @enum {string} */
+            status: "pairing_pending" | "detected" | "active" | "expired" | "cleanup_pending" | "disconnected";
+            /** @enum {string} */
+            authMode: "static_bearer";
+            /** @enum {string} */
+            audience: "/v1/mcp/agent-port";
+            approvedChannelIds: string[];
+            approvedScopes: components["schemas"]["HostedAgentScope"][];
+            /** Format: uuid */
+            activeCredentialId?: string;
+            /** Format: int64 */
+            createdAtMs: number;
+            /** Format: int64 */
+            updatedAtMs: number;
+        };
+        CreateHostedAgentConnectionRequest: {
+            displayName: string;
+            handle: string;
+            /**
+             * @default static_bearer
+             * @enum {string}
+             */
+            authMode: "static_bearer";
+        };
+        CreateHostedAgentConnectionResponse: {
+            connection: components["schemas"]["HostedAgentConnection"];
+            /** @description One-time pairing bearer; only SHA-256 is persisted. */
+            readonly pairingCredential: string;
+            /** Format: int64 */
+            pairingExpiresAtMs: number;
+        };
+        HostedAgentConnectionResponse: {
+            connection: components["schemas"]["HostedAgentConnection"];
+            /** @description HAP-E6 cleanup manifest. Empty until a disconnect starts, so an unstarted connection answers with the same shape rather than a different one. */
+            cleanupArtifacts: components["schemas"]["HostedCleanupArtifact"][];
+        };
+        /** @description One provider artifact a disconnect must account for (ADR-0162 HAP-E6). Rows are per kind, plus one per named item, and one row never resolves another: acknowledging `connector` leaves `local_plugin_files` unresolved, which is the #1344 measurement made structural. `resolved` is derived from `disposition` alone, so `currentStatus: inactive` is an observation and never a cleanup. Nothing here carries a provider credential, chat content or file path. */
+        HostedCleanupArtifact: {
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            kind: "bot" | "routine" | "plugin" | "connector" | "local_plugin_files" | "secret";
+            /** @description Bounded non-secret operator label for one named item. */
+            externalRef?: string;
+            /**
+             * @description Fixed by kind. `bot` is `decide` because deleting one deletes its chat history; `secret` is `revoke`; everything else is `remove`.
+             * @enum {string}
+             */
+            expectedAction: "remove" | "revoke" | "decide";
+            /** @enum {string} */
+            currentStatus: "unknown" | "present" | "inactive" | "absent";
+            /**
+             * @description `preserved` is legal for `bot` only and is a terminal answer — oort never deletes provider chat history on someone's behalf.
+             * @enum {string}
+             */
+            disposition: "pending" | "removed" | "preserved" | "revoked";
+            resolved: boolean;
+            required: boolean;
+            /**
+             * @description `server_verified` is reserved for what this server removed itself (the hosted bearer it revoked) and is never readable from a request body. Provider-owned artifacts are `manual` and carry an actor plus evidence.
+             * @enum {string}
+             */
+            source?: "server_verified" | "manual";
+            /** Format: uuid */
+            acknowledgedBy?: string;
+            /** Format: int64 */
+            acknowledgedAtMs?: number;
+            evidence?: string;
+            /** Format: int64 */
+            updatedAtMs: number;
+        };
+        DisconnectHostedAgentConnectionRequest: {
+            /** @description Extra named provider items to track beside the seeded per-kind rows. */
+            artifacts?: {
+                /** @enum {string} */
+                kind: "bot" | "routine" | "plugin" | "connector" | "local_plugin_files" | "secret";
+                externalRef: string;
+            }[];
+        };
+        DisconnectHostedAgentConnectionResponse: {
+            connection: components["schemas"]["HostedAgentConnection"];
+            cleanupArtifacts: components["schemas"]["HostedCleanupArtifact"][];
+            /** Format: int64 */
+            remainingRequired: number;
+            /** @description False when the disconnect had already started; nothing was written a second time. */
+            startedNow: boolean;
+        };
+        AcknowledgeHostedCleanupArtifactRequest: {
+            /** @enum {string} */
+            currentStatus: "unknown" | "present" | "inactive" | "absent";
+            /**
+             * @description Omit to record an observation only. `preserve` is legal for `bot` alone; `revoke` for `secret` alone; `delete` for every other kind.
+             * @enum {string}
+             */
+            disposition?: "delete" | "preserve" | "revoke";
+            /** @description Required whenever a disposition is supplied. */
+            evidence?: string;
+        };
+        AcknowledgeHostedCleanupArtifactResponse: {
+            artifact: components["schemas"]["HostedCleanupArtifact"];
+            /** Format: int64 */
+            remainingRequired: number;
+            /** @description False for a byte-identical repeat */
+            changed: boolean;
+        };
+        CompleteHostedAgentDisconnectResponse: {
+            connection: components["schemas"]["HostedAgentConnection"];
+            cleanupArtifacts: components["schemas"]["HostedCleanupArtifact"][];
+            /** @description False for an idempotent replay of a transition that already happened. */
+            disconnectedNow: boolean;
+        };
+        HostedAgentConnectionListResponse: {
+            connections: components["schemas"]["HostedAgentConnection"][];
+        };
+        ConfirmHostedAgentConnectionRequest: {
+            /** Format: uuid */
+            agentMemberId: string;
+            /** @enum {string} */
+            audience: "/v1/mcp/agent-port";
+            approvedChannelIds: string[];
+            approvedScopes: components["schemas"]["HostedAgentScope"][];
+            /** @enum {string} */
+            authMode: "static_bearer";
+        };
+        ConfirmHostedAgentConnectionResponse: {
+            connection: components["schemas"]["HostedAgentConnection"];
+            /** Format: uuid */
+            credentialId: string;
+            /** @description One-time Agent Port bearer; only SHA-256 is persisted. */
+            readonly credential: string;
+            /** @enum {string} */
+            tokenType: "Bearer";
+        };
         AgentCredential: {
             /** Format: uuid */
             id: string;
@@ -2680,7 +3101,7 @@ export interface components {
             agentMemberId: string;
             /** @enum {string} */
             status: "active" | "expired" | "revoked";
-            scopes: string[];
+            scopes: components["schemas"]["AgentCredentialScope"][];
             label?: string;
             /** Format: int64 */
             lastUsedAtMs?: number;
@@ -2690,6 +3111,40 @@ export interface components {
             revokedAtMs?: number;
             /** Format: int64 */
             createdAtMs: number;
+        };
+        CreateAgentCredentialRequest: {
+            /** @description Closed explicit scope set. Duplicates are normalized away. If omitted, defaults to agent:jobs:read, agent:runs:callback, messages:write, realtime:subscribe, and work:control. */
+            scopes?: components["schemas"]["AgentCredentialScope"][];
+            /** @description Defaults to `agent bearer` when omitted. */
+            label?: string;
+            /**
+             * Format: int64
+             * @description Optional future epoch millisecond; past or current values are rejected.
+             */
+            expiresAtMs?: number;
+            /** @description Defaults to 86400 seconds when omitted. */
+            rotationGraceSeconds?: number;
+        };
+        CreateAgentCredentialResponse: {
+            credential: components["schemas"]["AgentCredential"];
+            /** @description One-time raw bearer. Only SHA-256(token) is persisted. */
+            readonly token: string;
+            /** @enum {string} */
+            tokenType: "Bearer";
+            rotatedCredentialCount: number;
+            /** Format: int64 */
+            rotationGraceEndsAtMs?: number;
+        };
+        AgentCredentialListResponse: {
+            credentials: components["schemas"]["AgentCredential"][];
+        };
+        RevokeAgentCredentialRequest: {
+            reason?: string;
+        };
+        RevokeAgentCredentialResponse: {
+            credential: components["schemas"]["AgentCredential"];
+            revokedNow: boolean;
+            alreadyRevoked: boolean;
         };
         ConfirmAgentCardResponse: {
             /** Format: uuid */
@@ -3162,11 +3617,18 @@ export interface components {
             observation: "open" | "owner_only";
             /**
              * Format: int64
-             * @description Currently valid observer capabilities only; expired or invalid grants are excluded.
+             * @description Currently valid observer capabilities only; expired or invalid grants are excluded. Deliberately kind-blind since LIVE-1: a teammate watching the live screen is watching, and one 관전자 수 is what every surface publishes.
              */
             observerGrantCount: number;
             /** @description True only when the session has a complete remote PTY binding; endpoint and capability remain unprojected. */
             remoteAttachAvailable: boolean;
+            /** @description True only when the session has a complete WebRTC display binding (ADR-0165); the signalling endpoint and the capability remain unprojected, exactly as the PTY pair's do. Independent of remoteAttachAvailable: a session can offer a screen and no terminal, or the reverse, and a client that folds them offers the wrong verb. */
+            remoteDisplayAvailable: boolean;
+            /**
+             * Format: int64
+             * @description Epoch milliseconds at which somebody took this session's keyboard, present only while they still hold it (LIVE-5a). ABSENT means nobody does — a 0 would render as 1970. This is the field a reload reads. The work.session.control envelope says the same thing over the wire, but Centrifugo is transport and a surface that only heard it forgets on refresh; the value here comes from the display_control_window ledger, which is the source of truth for the boundary. The login-handoff card's control_* props are a second, narrower projection of that same ledger and are not it. WHO holds the keyboard is deliberately absent, matching the broadcast: control is owner-only, so "somebody has control" is all a reader or an agent needs to behave correctly, and nothing the person types is reachable from here or from anything this links to (ADR-0004 증보 3 D2). While it is present the session is forced to observation=owner_only, and the owner's own setting is restored when the window closes by any of its three routes.
+             */
+            controlStartedAt?: number;
             /** Format: int64 */
             startedAtMs: number;
             /**
@@ -3308,6 +3770,88 @@ export interface components {
              * @enum {string}
              */
             mode: "controller" | "observer";
+        };
+        IssueDisplayAttachRequest: {
+            /**
+             * @description observer watches; controller also takes the keyboard, opens a control window and stops the agent's reach into this session for as long as it stands (ADR-0004 증보 3, LIVE-3). Only the session owner may ask for controller. The default stays observer now that both are spellable, and that is a decision rather than a leftover: a default is what a client gets when it did not consider the question, and "did you mean to stop the agent and take the keyboard" is never answered by silence.
+             * @default observer
+             * @enum {string}
+             */
+            mode: "observer" | "controller";
+        };
+        /** @description One entry of the browser's RTCConfiguration.iceServers, in the W3C's own spelling because a client hands the array to RTCPeerConnection unchanged. The credential is minted per work session and expires on its own (coturn use-auth-secret): username is "<unix expiry>:<work session id>" and the password is derived rather than stored, so there is no row to leak and nothing to rotate but the relay's own shared secret. The relay is oort-operated and never a third party's (ADR-0165 D3) — momo hands out the credential and still carries no media, sees no candidate and terminates nothing. */
+        IceServer: {
+            /** @description One relay, listed once per transport (udp and tcp). */
+            urls: string[];
+            username: string;
+            credential: string;
+        };
+        DisplayAttachCapabilityResponse: {
+            /** @description The HOST's own credential-free WSS WebRTC signalling endpoint. Userinfo, query and fragment are forbidden. momo proxies neither the signalling nor the media that follows it. */
+            display_endpoint: string;
+            /** @description Opaque 60-second bearer returned once. Only its SHA-256 digest is persisted; producer-side validation also requires a live host signature. Same grammar as a terminal capability — the kind is a ledger column, not a second token format. */
+            capability_token: string;
+            display_id: string;
+            /**
+             * @description The grade actually minted, so a UI can say "view only" before the socket is dialled — a view-only stream that looks identical to a controllable one is how a person ends up typing into a window that will never deliver a keystroke.
+             * @enum {string}
+             */
+            mode: "observer" | "controller";
+            /**
+             * Format: int64
+             * @description Epoch milliseconds at which the control window opened. Present only on a controller grant. The caller's own copy of the boundary event the work.session.control envelope carries, so the surface can say when control began without waiting for the relay.
+             */
+            control_started_at?: number;
+            /** @description The oort relay this grant may allocate through, with a credential minted for this session. ALWAYS PRESENT, and EMPTY on an instance that was given no relay policy — a client must read empty as "use what you were already configured with", never as an error. During the credential retirement that configuration is the static long-term credential the producer template still carries, and the overlap is deliberate: the ephemeral path is proved beside the static one before the static one is removed from a relay carrying production traffic. */
+            ice_servers: components["schemas"]["IceServer"][];
+        };
+        DisplayControlReturnResponse: {
+            /** @description Whether THIS call ended a standing control window. false means there was nothing open — a retried return, or a window that had already lapsed or ended with the session. Both are success; the status code is 200 either way and the flag is what tells them apart. */
+            closed: boolean;
+            /**
+             * Format: int64
+             * @description Epoch ms, present only when this call closed a window.
+             */
+            control_started_at?: number;
+            /**
+             * Format: int64
+             * @description Epoch ms, present only when this call closed a window.
+             */
+            control_ended_at?: number;
+        };
+        /** @description MomoHost-signed publication of the WebRTC display binding for a running or idle session the caller already owns. Writing a DIFFERENT binding onto a session that already has one is 409; re-sending the identical pair is idempotent. The server stores and authorizes the endpoint and never carries a frame. */
+        PublishDisplayBindingRequest: {
+            displayId: string;
+            /** @description Credential-free HTTPS or WSS WebRTC signalling endpoint. Userinfo, query, and fragment are forbidden. */
+            displayEndpoint: string;
+        };
+        ValidateDisplayAttachRequest: {
+            /** @description Opaque grant presented by the browser to the sandbox producer. */
+            capability_token: string;
+            /**
+             * @description True when the producer is re-checking a peer connection it already serves rather than admitting a new viewer. It relaxes exactly one clause, the capability expiry, because that TTL bounds the mint-to-dial window and the producer closed that window under a full validation. A media session outlives its 60-second dial window by design, so every other authorization clause still applies on every call: a live screen is cut within one revalidation period when the session ends, the host is revoked, observation closes, the grantee leaves the channel, the grantee is deactivated, or the host stops advertising a display.
+             * @default false
+             */
+            stream: boolean;
+        };
+        DisplayAttachValidationResponse: {
+            /** Format: uuid */
+            work_session_id: string;
+            display_id: string;
+            /**
+             * Format: date-time
+             * @description PostgreSQL timestamptz capability expiry.
+             */
+            expires_at: string;
+            /**
+             * @description The grade of the bearer the producer presented. Migration 076 dropped 075's observer-only CHECK when ADR-0004 증보 3 was Accepted.
+             * @enum {string}
+             */
+            mode: "observer" | "controller";
+            /** @description Whether this producer may negotiate an input datachannel RIGHT NOW. A negative instruction rather than a status: the view-only guarantee lives in a channel that was never opened rather than in a client flag anyone could flip (ADR-0165 D4). True only when the bearer is a controller grant AND its control window still stands, so a returned, lapsed or session-ended window answers false at the next re-validation — which is how handing control back actually takes the keyboard away instead of merely recording that somebody asked for it. */
+            input_enabled: boolean;
+            /** @description The producer's copy of the same relay credential the browser is served, under the same session subject, so both ends of one media path appear in coturn's log under one username. Re-minted on EVERY validate, and the shipped producer installs only the first: webrtcbin cannot swap a TURN server underneath a running ICE agent, so the credential a peer connection was built with is the one it dies with. The TTL is therefore that connection's CEILING and not a sliding window — past it the stream can no longer allocate or refresh a relay, and the screen goes black with nothing user-visible to explain it. A new viewer is unaffected: new connection, new pipeline, credential minted at the moment they attached. Whether the answer is renegotiation or accepting the ceiling is a LIVE-5c acceptance criterion, measured on a real host rather than decided here. Empty on an instance with no relay policy, in which case the producer keeps the static credential delivered to it at create time. */
+            ice_servers: components["schemas"]["IceServer"][];
         };
         CreateWorkControlRequest: {
             /** Format: uuid */
@@ -3854,6 +4398,8 @@ export interface components {
             deletedAtMs?: number;
             /** @description The quoted message itself quotes something. A marker only — the inner target's id is deliberately absent, because quoting is drawn one layer deep and a second id is all anyone needs to build a staircase. Omitted when false. */
             quotesAnother?: boolean;
+            /** @description The quoted message's `props.kind`, and the only thing its props contribute here. A card message rides an ordinary row — `type` is `text`, `body` is absent, and the card itself lives in `props` — which leaves it identical to a tombstone in every other field of this object, so a client reading "a text with no body was deleted" calls that card a deleted message. This key is what separates them. Omitted when the quoted message carries no kind, and omitted on a tombstone: a deleted row keeps its props in the database, but the deletion leaves nothing on the wire beyond the fact of it. The card's own payload never appears here — a quote draws two lines and sends the reader to the original. */
+            propsKind?: string;
         };
         MessageAttachment: {
             /** Format: uuid */
@@ -4186,6 +4732,198 @@ export interface components {
         } & {
             [key: string]: unknown;
         };
+        AgentPortClientInfo: {
+            name: string;
+            title?: string;
+            version: string;
+        };
+        AgentPortRequestMeta: {
+            /** @enum {string} */
+            "io.modelcontextprotocol/protocolVersion": "2026-07-28";
+            /** @description Bounded client-declared capabilities; never an authorization source. */
+            "io.modelcontextprotocol/clientCapabilities": {
+                [key: string]: unknown;
+            };
+            "io.modelcontextprotocol/clientInfo"?: components["schemas"]["AgentPortClientInfo"];
+        };
+        AgentPortModernParams: {
+            _meta: components["schemas"]["AgentPortRequestMeta"];
+        };
+        AgentPortModernToolCallParams: {
+            _meta: components["schemas"]["AgentPortRequestMeta"];
+            name: string;
+            arguments?: {
+                [key: string]: unknown;
+            };
+        };
+        AgentPortLegacyInitializeParams: {
+            /** @enum {string} */
+            protocolVersion: "2025-11-25";
+            capabilities: {
+                [key: string]: unknown;
+            };
+            clientInfo: components["schemas"]["AgentPortClientInfo"];
+        };
+        AgentPortLegacyEmptyParams: Record<string, never>;
+        AgentPortLegacyToolCallParams: {
+            name: string;
+            arguments?: {
+                [key: string]: unknown;
+            };
+        };
+        /** @description JSON-RPC non-empty string or finite number request id. Omitted only by the legacy `notifications/initialized` notification. */
+        AgentPortJSONRPCRequestId: string | number;
+        /** @description Exact closed union of the supported modern and legacy request bodies. */
+        AgentPortJSONRPCRequest: components["schemas"]["AgentPortModernDiscoverRequest"] | components["schemas"]["AgentPortModernToolsListRequest"] | components["schemas"]["AgentPortModernToolsCallRequest"] | components["schemas"]["AgentPortLegacyInitializeRequest"] | components["schemas"]["AgentPortLegacyInitializedNotification"] | components["schemas"]["AgentPortLegacyPingRequest"] | components["schemas"]["AgentPortLegacyToolsListRequest"] | components["schemas"]["AgentPortLegacyToolsCallRequest"];
+        AgentPortModernDiscoverRequest: {
+            /** @enum {string} */
+            jsonrpc: "2.0";
+            id: components["schemas"]["AgentPortJSONRPCRequestId"];
+            /** @enum {string} */
+            method: "server/discover";
+            params: components["schemas"]["AgentPortModernParams"];
+        };
+        AgentPortModernToolsListRequest: {
+            /** @enum {string} */
+            jsonrpc: "2.0";
+            id: components["schemas"]["AgentPortJSONRPCRequestId"];
+            /** @enum {string} */
+            method: "tools/list";
+            params: components["schemas"]["AgentPortModernParams"];
+        };
+        AgentPortModernToolsCallRequest: {
+            /** @enum {string} */
+            jsonrpc: "2.0";
+            id: components["schemas"]["AgentPortJSONRPCRequestId"];
+            /** @enum {string} */
+            method: "tools/call";
+            params: components["schemas"]["AgentPortModernToolCallParams"];
+        };
+        AgentPortLegacyInitializeRequest: {
+            /** @enum {string} */
+            jsonrpc: "2.0";
+            id: components["schemas"]["AgentPortJSONRPCRequestId"];
+            /** @enum {string} */
+            method: "initialize";
+            params: components["schemas"]["AgentPortLegacyInitializeParams"];
+        };
+        AgentPortLegacyInitializedNotification: {
+            /** @enum {string} */
+            jsonrpc: "2.0";
+            /** @enum {string} */
+            method: "notifications/initialized";
+            params?: components["schemas"]["AgentPortLegacyEmptyParams"];
+        };
+        AgentPortLegacyPingRequest: {
+            /** @enum {string} */
+            jsonrpc: "2.0";
+            id: components["schemas"]["AgentPortJSONRPCRequestId"];
+            /** @enum {string} */
+            method: "ping";
+            params?: components["schemas"]["AgentPortLegacyEmptyParams"];
+        };
+        AgentPortLegacyToolsListRequest: {
+            /** @enum {string} */
+            jsonrpc: "2.0";
+            id: components["schemas"]["AgentPortJSONRPCRequestId"];
+            /** @enum {string} */
+            method: "tools/list";
+            params?: components["schemas"]["AgentPortLegacyEmptyParams"];
+        };
+        AgentPortLegacyToolsCallRequest: {
+            /** @enum {string} */
+            jsonrpc: "2.0";
+            id: components["schemas"]["AgentPortJSONRPCRequestId"];
+            /** @enum {string} */
+            method: "tools/call";
+            params: components["schemas"]["AgentPortLegacyToolCallParams"];
+        };
+        AgentPortServerToolCapability: {
+            /** @enum {boolean} */
+            listChanged: false;
+        };
+        AgentPortServerCapabilities: {
+            tools: components["schemas"]["AgentPortServerToolCapability"];
+        };
+        AgentPortServerInfo: {
+            /** @enum {string} */
+            name: "oort-agent-port";
+            /** @enum {string} */
+            title: "oort Agent Port";
+            version: string;
+        };
+        AgentPortCache: {
+            ttlSeconds: number;
+            /** @enum {string} */
+            scope: "private";
+        };
+        AgentPortModernDiscoverCache: {
+            /** @enum {integer} */
+            ttlSeconds: 300;
+            /** @enum {string} */
+            scope: "private";
+        };
+        AgentPortModernToolsListCache: {
+            /** @enum {integer} */
+            ttlSeconds: 0;
+            /** @enum {string} */
+            scope: "private";
+        };
+        /** @description Exact closed union of modern discovery/list and legacy initialize/list/ping results. */
+        AgentPortResult: components["schemas"]["AgentPortModernDiscoverResult"] | components["schemas"]["AgentPortModernToolsListResult"] | components["schemas"]["AgentPortLegacyInitializeResult"] | components["schemas"]["AgentPortLegacyToolsListResult"] | components["schemas"]["AgentPortPingResult"];
+        AgentPortModernDiscoverResult: {
+            /** @enum {string} */
+            protocolVersion: "2026-07-28";
+            capabilities: components["schemas"]["AgentPortServerCapabilities"];
+            serverInfo: components["schemas"]["AgentPortServerInfo"];
+            /** @enum {string} */
+            resultType: "server/discover";
+            cache: components["schemas"]["AgentPortModernDiscoverCache"];
+        };
+        AgentPortModernToolsListResult: {
+            /** @enum {string} */
+            resultType: "tools/list";
+            cache: components["schemas"]["AgentPortModernToolsListCache"];
+            tools: {
+                [key: string]: unknown;
+            }[];
+        };
+        AgentPortLegacyInitializeResult: {
+            /** @enum {string} */
+            protocolVersion: "2025-11-25";
+            capabilities: components["schemas"]["AgentPortServerCapabilities"];
+            serverInfo: components["schemas"]["AgentPortServerInfo"];
+        };
+        AgentPortLegacyToolsListResult: {
+            tools: {
+                [key: string]: unknown;
+            }[];
+        };
+        AgentPortPingResult: Record<string, never>;
+        AgentPortJSONRPCError: {
+            /** @enum {integer} */
+            code: -32700 | -32600 | -32601 | -32602 | -32020 | -32022 | -32029;
+            message: string;
+            data?: {
+                [key: string]: unknown;
+            };
+        };
+        /** @description Exactly one of result or error is emitted. Transport authentication failures are intentionally not encoded in this envelope. */
+        AgentPortJSONRPCResponse: components["schemas"]["AgentPortJSONRPCSuccessResponse"] | components["schemas"]["AgentPortJSONRPCErrorResponse"];
+        /** @description Echoed JSON-RPC string/number id, or null when unavailable. */
+        AgentPortJSONRPCResponseId: (string | number) | null;
+        AgentPortJSONRPCSuccessResponse: {
+            /** @enum {string} */
+            jsonrpc: "2.0";
+            id: components["schemas"]["AgentPortJSONRPCRequestId"];
+            result: components["schemas"]["AgentPortResult"];
+        };
+        AgentPortJSONRPCErrorResponse: {
+            /** @enum {string} */
+            jsonrpc: "2.0";
+            id: components["schemas"]["AgentPortJSONRPCResponseId"];
+            error: components["schemas"]["AgentPortJSONRPCError"];
+        };
         DriveMCPRequest: {
             /** @enum {string} */
             jsonrpc: "2.0";
@@ -4306,6 +5044,41 @@ export interface components {
                 "application/json": components["schemas"]["ErrorResponse"];
             };
         };
+        /** @description Agent bearer is missing, malformed, expired, revoked, inactive, or otherwise invalid. The response body is empty. A missing credential has no `error` parameter; a presented invalid credential uses `error="invalid_token"`. */
+        AgentPortUnauthorized: {
+            headers: {
+                /** @description Bearer challenge scoped to `agent:port:connect`. */
+                "WWW-Authenticate"?: string;
+                /** @description Agent Port responses are private and must never be stored. */
+                "Cache-Control"?: "private, no-store";
+                [name: string]: unknown;
+            };
+            content?: never;
+        };
+        /** @description A present Origin is not the configured canonical HTTPS origin, or the authenticated agent lacks `agent:port:connect`. The response body is empty. Scope denial includes `error="insufficient_scope"`; Origin denial occurs before authentication and carries no challenge. */
+        AgentPortForbidden: {
+            headers: {
+                /** @description Optional Bearer insufficient-scope challenge. */
+                "WWW-Authenticate"?: string;
+                /** @description Agent Port responses are private and must never be stored. */
+                "Cache-Control"?: "private, no-store";
+                [name: string]: unknown;
+            };
+            content?: never;
+        };
+        /** @description Dedicated per-token, per-agent, or per-IP Agent Port sliding-window limit exceeded. No raw token, token hash, body, or client metadata is returned or logged. */
+        AgentPortRateLimited: {
+            headers: {
+                /** @description Whole seconds to wait before retrying. */
+                "Retry-After"?: number;
+                /** @description Agent Port responses are private and must never be stored. */
+                "Cache-Control"?: "private, no-store";
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["AgentPortJSONRPCErrorResponse"];
+            };
+        };
     };
     parameters: {
         /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
@@ -4353,6 +5126,12 @@ export interface components {
         MomoDeliveryId: string;
         /** @description Lower/uppercase hexadecimal HMAC-SHA256, optionally prefixed with `v1=`. */
         MomoSignature: string;
+        /** @description Exact protocol version mirrored from the request body. Required and equal to `2026-07-28` on every modern call. A legacy `initialize` may omit it; all later legacy calls require exact `2025-11-25`. */
+        MCPProtocolVersion: "2026-07-28" | "2025-11-25";
+        /** @description Required on modern calls and byte-for-byte equal to the JSON-RPC method. Legacy clients may omit it; when present it must match. */
+        MCPMethod: "server/discover" | "initialize" | "notifications/initialized" | "ping" | "tools/list" | "tools/call";
+        /** @description Required only for modern `tools/call`; must exactly equal `params.name`. Forbidden on methods that do not call a tool. */
+        MCPName: string;
     };
     requestBodies: never;
     headers: never;
@@ -5200,6 +5979,619 @@ export interface operations {
                 };
             };
             429: components["responses"]["RateLimited"];
+        };
+    };
+    listHostedAgentConnections: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Hosted connections */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HostedAgentConnectionListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Human workspace owner/admin required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    createHostedAgentConnection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateHostedAgentConnectionRequest"];
+            };
+        };
+        responses: {
+            /** @description Dedicated identity and pairing challenge created atomically. */
+            201: {
+                headers: {
+                    "Cache-Control": "no-store";
+                    Pragma: "no-cache";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreateHostedAgentConnectionResponse"];
+                };
+            };
+            /** @description Invalid closed input */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Human workspace owner/admin required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Handle already exists */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    getHostedAgentConnection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+                connectionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Hosted connection */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HostedAgentConnectionResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Human workspace owner/admin required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Hosted connection not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    regenerateHostedAgentPairingChallenge: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+                connectionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Pairing challenge regenerated. */
+            200: {
+                headers: {
+                    "Cache-Control": "no-store";
+                    Pragma: "no-cache";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreateHostedAgentConnectionResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Human workspace owner/admin required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Hosted connection not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Active connection cannot regenerate */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    confirmHostedAgentConnection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+                connectionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConfirmHostedAgentConnectionRequest"];
+            };
+        };
+        responses: {
+            /** @description Credential issued once; first valid foundation call proves binding and unpauses. */
+            201: {
+                headers: {
+                    "Cache-Control": "no-store";
+                    Pragma: "no-cache";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfirmHostedAgentConnectionResponse"];
+                };
+            };
+            /** @description Invalid closed scopes/channels/auth mode */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Human workspace owner/admin required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Hosted connection not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Connection has not been detected or was already confirmed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    disconnectHostedAgentConnection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+                connectionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["DisconnectHostedAgentConnectionRequest"];
+            };
+        };
+        responses: {
+            /** @description Disconnect started (or already pending) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DisconnectHostedAgentConnectionResponse"];
+                };
+            };
+            /** @description Invalid artifact kind or reference */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Human workspace owner/admin required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Hosted connection not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Connection is already disconnected or was never credentialed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    completeHostedAgentDisconnect: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+                connectionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Connection is disconnected */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CompleteHostedAgentDisconnectResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Human workspace owner/admin required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Hosted connection not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not awaiting cleanup */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    acknowledgeHostedCleanupArtifact: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+                connectionId: string;
+                artifactId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AcknowledgeHostedCleanupArtifactRequest"];
+            };
+        };
+        responses: {
+            /** @description Acknowledgement recorded */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AcknowledgeHostedCleanupArtifactResponse"];
+                };
+            };
+            /** @description Invalid status */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Human workspace owner/admin required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Cleanup artifact not found on this connection */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Connection is not awaiting cleanup */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    listAgentCredentials: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+                agentId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Credential metadata */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentCredentialListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Caller is not a human workspace owner/admin */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Active target agent not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    createAgentCredential: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+                agentId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateAgentCredentialRequest"];
+            };
+        };
+        responses: {
+            /** @description Credential issued; the bearer appears only in this response. */
+            201: {
+                headers: {
+                    "Cache-Control": "no-store";
+                    Pragma: "no-cache";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreateAgentCredentialResponse"];
+                };
+            };
+            /** @description Invalid scope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Caller is not a human workspace owner/admin or lacks instance-operator authority */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Active target agent not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Dedicated hosted-agent credentials are connection-managed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    revokeAgentCredential: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+                agentId: string;
+                credentialId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["RevokeAgentCredentialRequest"];
+            };
+        };
+        responses: {
+            /** @description Current credential state and whether this call revoked it */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RevokeAgentCredentialResponse"];
+                };
+            };
+            /** @description Invalid id or reason metadata */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Caller is not a human workspace owner/admin */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Agent credential not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Dedicated hosted-agent credentials are connection-managed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     getAgentAllowedModels: {
@@ -7430,6 +8822,260 @@ export interface operations {
                 };
             };
             429: components["responses"]["RateLimited"];
+        };
+    };
+    issueDisplayAttachCapability: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+                /** @description UUIDv7 work session ledger id. */
+                workSessionId: components["parameters"]["WorkSessionId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["IssueDisplayAttachRequest"];
+            };
+        };
+        responses: {
+            /** @description Exact four-field view-only display grant. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DisplayAttachCapabilityResponse"];
+                };
+            };
+            /** @description Invalid work session identifier, or a mode outside the vocabulary. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description controller was requested by someone who is not the session owner, or the caller is not an authorized active human/channel member, or observation is owner_only and the caller is not the owner. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Session does not exist in this workspace. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Session ended, lacks a display binding, its host is revoked, or that host does not advertise a display. One status for all four: which is false describes a host's internal state to a caller entitled only to know it is unavailable. Also returned when controller was requested and somebody else already holds the control window — one open window per session is a unique index, not a race. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    publishWorkSessionDisplayBinding: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Unix epoch milliseconds inside the five-minute clock-skew window. */
+                "X-Momo-Work-Host-Sent-At": components["parameters"]["WorkHostSentAt"];
+                /** @description Raw 64-byte Ed25519 signature in standard base64. */
+                "X-Momo-Work-Host-Signature": components["parameters"]["WorkHostSignature"];
+                /** @description Unique UUID bound into the v2 signature and atomically accepted once within its ten-minute replay-retention lifetime. */
+                "X-Momo-Work-Host-Request-ID": components["parameters"]["WorkHostRequestId"];
+            };
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+                /** @description UUIDv7 work session ledger id. */
+                workSessionId: components["parameters"]["WorkSessionId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PublishDisplayBindingRequest"];
+            };
+        };
+        responses: {
+            /** @description Binding stored, or already exactly this binding. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Invalid session identifier, or displayId/displayEndpoint outside the ledger's grammar. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Invalid or replayed host signature. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Human bearer, or a host binding a session that is not its own. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Session does not exist in this workspace. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Session is not running or idle, the host is revoked or does not advertise a display, or a different binding is already published. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    returnDisplayControl: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+                /** @description UUIDv7 work session ledger id. */
+                workSessionId: components["parameters"]["WorkSessionId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The window is closed. closed says whether this call is what closed it. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DisplayControlReturnResponse"];
+                };
+            };
+            /** @description Invalid work session identifier. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Not an active workspace member, or not the session owner. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Session does not exist in this workspace. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    validateDisplayAttachCapability: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Unix epoch milliseconds inside the five-minute clock-skew window. */
+                "X-Momo-Work-Host-Sent-At": components["parameters"]["WorkHostSentAt"];
+                /** @description Raw 64-byte Ed25519 signature in standard base64. */
+                "X-Momo-Work-Host-Signature": components["parameters"]["WorkHostSignature"];
+                /** @description Unique UUID bound into the v2 signature and atomically accepted once within its ten-minute replay-retention lifetime. */
+                "X-Momo-Work-Host-Request-ID": components["parameters"]["WorkHostRequestId"];
+            };
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+                /** @description UUIDv7 registered execution host id. */
+                workHostId: components["parameters"]["WorkHostId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ValidateDisplayAttachRequest"];
+            };
+        };
+        responses: {
+            /** @description Capability is live and bound to this host and display. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DisplayAttachValidationResponse"];
+                };
+            };
+            /** @description Invalid path identifier or request body shape. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Invalid host signature, or an unknown, expired, wrong-kind, ended, revoked or no-longer-authorized capability. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     createWorkControl: {
@@ -9760,6 +11406,93 @@ export interface operations {
                 };
             };
             429: components["responses"]["RateLimited"];
+        };
+    };
+    agentPort: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Exact protocol version mirrored from the request body. Required and equal to `2026-07-28` on every modern call. A legacy `initialize` may omit it; all later legacy calls require exact `2025-11-25`. */
+                "MCP-Protocol-Version"?: components["parameters"]["MCPProtocolVersion"];
+                /** @description Required on modern calls and byte-for-byte equal to the JSON-RPC method. Legacy clients may omit it; when present it must match. */
+                "Mcp-Method"?: components["parameters"]["MCPMethod"];
+                /** @description Required only for modern `tools/call`; must exactly equal `params.name`. Forbidden on methods that do not call a tool. */
+                "Mcp-Name"?: components["parameters"]["MCPName"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentPortJSONRPCRequest"];
+            };
+        };
+        responses: {
+            /** @description A modern discovery/tools result, a legacy initialize/tools result, or a pong. Success never carries `Mcp-Session-Id`. */
+            200: {
+                headers: {
+                    /** @description Agent Port responses are private and must never be stored. */
+                    "Cache-Control"?: "private, no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentPortJSONRPCSuccessResponse"];
+                };
+            };
+            /** @description Legacy `notifications/initialized` accepted; the response body is empty. */
+            202: {
+                headers: {
+                    /** @description Agent Port responses are private and must never be stored. */
+                    "Cache-Control"?: "private, no-store";
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Malformed JSON-RPC, metadata/header mismatch, unsupported version or method, a query/duplicate transport header, or another bounded protocol validation failure. Protocol errors use the Agent Port JSON-RPC envelope. */
+            400: {
+                headers: {
+                    /** @description Agent Port responses are private and must never be stored. */
+                    "Cache-Control"?: "private, no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentPortJSONRPCErrorResponse"];
+                };
+            };
+            401: components["responses"]["AgentPortUnauthorized"];
+            403: components["responses"]["AgentPortForbidden"];
+            /** @description Request body exceeds the Agent Port byte bound. */
+            413: {
+                headers: {
+                    /** @description Agent Port responses are private and must never be stored. */
+                    "Cache-Control"?: "private, no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentPortJSONRPCErrorResponse"];
+                };
+            };
+            /** @description `Content-Type` or `Accept` does not satisfy the Agent Port transport contract. */
+            415: {
+                headers: {
+                    /** @description Agent Port responses are private and must never be stored. */
+                    "Cache-Control"?: "private, no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentPortJSONRPCErrorResponse"];
+                };
+            };
+            429: components["responses"]["AgentPortRateLimited"];
+            /** @description Authentication, tenant transaction, or audit persistence failed. The body is deliberately empty and never exposes database details. */
+            500: {
+                headers: {
+                    /** @description Agent Port responses are private and must never be stored. */
+                    "Cache-Control"?: "private, no-store";
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
     getContextPacket: {

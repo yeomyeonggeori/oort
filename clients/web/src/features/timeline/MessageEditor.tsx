@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { MESSAGE_EDITOR_KEYS_HINT } from "@momo/core/features/chat/composerCopy";
 import { Button } from "@/design/ui/button";
 import { InlineBanner } from "@/features/common/States";
 import { useAutoGrow } from "./useAutoGrow";
@@ -113,8 +114,13 @@ export function MessageEditor({
         >
           취소
         </Button>
-        <span className="wide-only text-timestamp text-ink-muted">
-          Enter 저장 · Shift+Enter 줄바꿈 · Esc 취소
+        {/* 키 힌트의 표기는 이 앱에 한 벌뿐이다 (#1384, 코어
+            `composerCopy.ts` 의 「키보드 힌트의 표기법」). 이 줄이 고친 둘:
+            문법이 「Enter 저장」이라 키와 동사가 조사 없이 나란히 서 있었고,
+            크기가 `text-timestamp`(11px)라 같은 종류의 안내인 컴포저 힌트·
+            사이드바 ⌘K(둘 다 12px)보다 한 단 작았다. 11px은 묘비의 크기다. */}
+        <span className="wide-only text-meta text-ink-muted">
+          {MESSAGE_EDITOR_KEYS_HINT}
         </span>
       </div>
     </div>

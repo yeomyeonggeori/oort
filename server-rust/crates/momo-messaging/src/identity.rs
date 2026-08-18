@@ -532,7 +532,8 @@ fn decode_roster_member(row: &sqlx::postgres::PgRow) -> Result<RosterMember, sql
         max_run_steps: row.try_get("max_run_steps")?,
         paused: row.try_get("paused")?,
         presence_status: decode_optional_presence(
-            row.try_get::<Option<String>, _>("presence_status")?.as_deref(),
+            row.try_get::<Option<String>, _>("presence_status")?
+                .as_deref(),
         ),
         created_at_ms: row.try_get("created_at_ms")?,
         updated_at_ms: row.try_get("updated_at_ms")?,

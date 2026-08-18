@@ -194,7 +194,10 @@ async fn login(http: &reqwest::Client, base: &str, workspace: Uuid, person: &Per
         .expect("login");
     assert_eq!(response.status(), 200, "seeded credentials log in");
     let body: Value = response.json().await.expect("login body");
-    body["accessToken"].as_str().expect("accessToken").to_string()
+    body["accessToken"]
+        .as_str()
+        .expect("accessToken")
+        .to_string()
 }
 
 fn uploads_url(base: &str, workspace: Uuid) -> String {
@@ -224,7 +227,10 @@ async fn upload_avatar(
     assert_eq!(created.status(), 201, "a created session answers 201");
     let created: Value = created.json().await.expect("upload body");
     let id = created["id"].as_str().expect("id").to_string();
-    let upload_url = created["uploadUrl"].as_str().expect("uploadUrl").to_string();
+    let upload_url = created["uploadUrl"]
+        .as_str()
+        .expect("uploadUrl")
+        .to_string();
 
     let uploaded = http
         .put(&upload_url)
@@ -233,10 +239,16 @@ async fn upload_avatar(
         .send()
         .await
         .expect("stub upload");
-    assert_eq!(uploaded.status(), 200, "the bytes go straight to the archive");
+    assert_eq!(
+        uploaded.status(),
+        200,
+        "the bytes go straight to the archive"
+    );
 
     let completed = http
-        .post(format!("{base}/v1/workspaces/{workspace}/avatar/{id}/complete"))
+        .post(format!(
+            "{base}/v1/workspaces/{workspace}/avatar/{id}/complete"
+        ))
         .bearer_auth(token)
         .send()
         .await

@@ -293,6 +293,7 @@ const BASE_SESSIONS = [
     observation: "open",
     observerGrantCount: 0,
     remoteAttachAvailable: true,
+    remoteDisplayAvailable: false,
     startedAtMs: Date.now() - 240_000,
   },
   {
@@ -308,6 +309,7 @@ const BASE_SESSIONS = [
     observation: "open",
     observerGrantCount: 0,
     remoteAttachAvailable: false,
+    remoteDisplayAvailable: false,
     startedAtMs: Date.now() - 120_000,
   },
   {
@@ -323,6 +325,7 @@ const BASE_SESSIONS = [
     observation: "open",
     observerGrantCount: 0,
     remoteAttachAvailable: false,
+    remoteDisplayAvailable: false,
     startedAtMs: Date.now() - 600_000,
   },
   {
@@ -338,6 +341,7 @@ const BASE_SESSIONS = [
     observation: "open",
     observerGrantCount: 0,
     remoteAttachAvailable: false,
+    remoteDisplayAvailable: false,
     startedAtMs: Date.now() - 900_000,
   },
   {
@@ -353,6 +357,7 @@ const BASE_SESSIONS = [
     observation: "open",
     observerGrantCount: 0,
     remoteAttachAvailable: false,
+    remoteDisplayAvailable: false,
     startedAtMs: Date.now() - 1_800_000,
     endedAtMs: Date.now() - 1_500_000,
     exitCode: 0,

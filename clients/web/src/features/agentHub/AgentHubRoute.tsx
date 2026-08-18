@@ -96,6 +96,9 @@ import {
   type AgentDraft,
 } from "./createModel";
 import { CreateAgentDialog } from "./CreateAgentDialog";
+import { HostedAgentWizard } from "@/features/hostedAgents/HostedAgentWizard";
+import { HostedConnectionSection } from "@/features/hostedAgents/HostedConnectionSection";
+import { HOSTED_WIZARD_TITLE } from "@momo/core/features/hostedAgents/wizard";
 import {
   isSurfaceProvided,
   type SurfaceId,
@@ -108,16 +111,44 @@ import {
  * 여부는 이미 자기 프로브가 판정한다(features/routing/capability.ts ④).
  * 메모리와 이력은 이 서버에 경로가 없어서 열면 언제나 오류였다.
  */
-const SECTIONS: { id: AgentHubSection; label: string; surface?: SurfaceId }[] = [
+const SECTIONS: {
+  id: AgentHubSection;
+  label: string;
+  surface?: SurfaceId;
+  /** 오너·관리자에게만 서는 탭인가. */
+  operatorOnly?: boolean;
+}[] = [
   { id: "profile", label: "프로필" },
   { id: "memory", label: "메모리", surface: "agentMemory" },
   { id: "history", label: "이력", surface: "agentRunHistory" },
+  // 연결 탭은 호스티드 연결의 **수명**이 사는 자리다: 해제와 정리 확인
+  // (HAP-UX2 / #1362). 그 세 경로는 전부 human owner/admin 을 요구하므로 그 밖의
+  // 멤버에게 세우면 열자마자 403 이고, 그것은 "미제공"이 아니라 "고장"으로 읽힌다.
+  //
+  // 호스티드 연결이 없는 에이전트에게도 탭이 서는 것은 의도다. 로스터를 넘길
+  // 때마다 탭이 생겼다 사라지면 그 자리가 무엇인지 배울 수 없고, 열었을 때의 빈
+  // 상태가 "이 에이전트는 이 워크스페이스가 직접 실행한다"는 답을 준다.
+  {
+    id: "connection",
+    label: "연결",
+    surface: "hostedAgentPairing",
+    operatorOnly: true,
+  },
 ];
 
 /** 이 서버에서 실제로 답이 오는 탭만. */
 const VISIBLE_SECTIONS = SECTIONS.filter(
   (item) => item.surface === undefined || isSurfaceProvided(item.surface)
 );
+
+/**
+ * 이 서버가 호스티드 연결 라우트를 싣고 있는가 (goal B12 의 이중 방어 (a)).
+ *
+ * 없는 서버에 붙었을 때 진입점을 세우면 사람은 다이얼로그를 열어 목록 404 를
+ * 마주하고, 그것은 "미제공"이 아니라 "고장"으로 읽힌다. 표가 틀린 경우는
+ * 마법사 안에서 `serverSaysAbsent` 로 접힌다.
+ */
+const hostedPairingProvided = isSurfaceProvided("hostedAgentPairing");
 
 const DATE_TIME = new Intl.DateTimeFormat("ko-KR", {
   dateStyle: "medium",
@@ -283,6 +314,12 @@ export function AgentHubRoute() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [section, setSection] = useState<AgentHubSection>("profile");
   const [creating, setCreating] = useState(false);
+  // 호스티드 연결은 「에이전트 만들기」와 **다른 물건**이라 다른 버튼이다: 하나는
+  // 이 워크스페이스가 실행할 에이전트를 만들고, 하나는 남이 실행 중인 에이전트를
+  // 들인다. 한 다이얼로그의 탭으로 합치면 만들기 폼 위에 pairing 상태가 얹히고,
+  // 되돌릴 수 없는 값(연결 값)이 되돌릴 수 있는 폼과 같은 Esc 를 나눠 갖는다.
+  const [pairing, setPairing] = useState(false);
+  const [pairingOpener, setPairingOpener] = useState<HTMLButtonElement | null>(null);
   const [agentDraft, setAgentDraft] = useState<AgentDraft>(EMPTY_AGENT_DRAFT);
   const allSignals = useAgentWorkingSignals();
   // 만들 수 없는 사람에게 [만들기]를 내주지 않는다: `routes::agents::create`는
@@ -298,6 +335,17 @@ export function AgentHubRoute() {
   // This clock expires remembered signals even while the rail is down. Color
   // certainty is handled separately by AgentTurnBadge's `live` input.
   const nowMs = useTickingNow(allSignals.size > 0);
+
+  // 운영자 전용 탭은 `mayCreate` 와 같은 판정을 쓴다: 세 해제 경로도 만들기와
+  // 같은 human owner/admin 관문 뒤에 있다. 명부가 오기 전에는 서지 않고
+  // (위 주석의 같은 이유), 서지 않는 탭이 골라져 있으면 프로필로 되돌린다 —
+  // 그러지 않으면 몸통이 비어 있는 상세가 남는다.
+  const sections = VISIBLE_SECTIONS.filter(
+    (item) => item.operatorOnly !== true || mayCreate
+  );
+  const activeSection = sections.some((item) => item.id === section)
+    ? section
+    : "profile";
 
   useEffect(() => {
     setSelectedId((current) => {
@@ -336,6 +384,20 @@ export function AgentHubRoute() {
               <span className="text-meta text-ink-muted" data-numeric>
                 {agents.length}명
               </span>
+            )}
+            {mayCreate && hostedPairingProvided && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={(event) => {
+                  setPairingOpener(event.currentTarget);
+                  setPairing(true);
+                }}
+                data-testid="agent-hub-hosted-pairing"
+              >
+                {HOSTED_WIZARD_TITLE}
+              </Button>
             )}
             {mayCreate && (
               <Button
@@ -439,15 +501,17 @@ export function AgentHubRoute() {
                     aria-label={`${selected.displayName} 상세`}
                   >
                     <ul className="flex gap-1 whitespace-nowrap">
-                      {VISIBLE_SECTIONS.map((item) => (
+                      {sections.map((item) => (
                         <li key={item.id} className="shrink-0">
                           <button
                             type="button"
                             onClick={() => setSection(item.id)}
-                            aria-current={section === item.id ? "page" : undefined}
+                            aria-current={
+                              activeSection === item.id ? "page" : undefined
+                            }
                             className={cn(
                               "rounded-sm px-3 py-1 text-body focus-visible:focus-ring",
-                              section === item.id
+                              activeSection === item.id
                                 ? "bg-accent-soft text-ink"
                                 : "text-ink-muted hover:bg-surface-hover"
                             )}
@@ -462,7 +526,7 @@ export function AgentHubRoute() {
                 </div>
               </div>
               <div className="min-h-0 flex-1 overflow-y-auto">
-                {section === "profile" && (
+                {activeSection === "profile" && (
                   <AgentProfileSection
                     key={normalizedId(selected.id)}
                     agent={selected}
@@ -472,7 +536,7 @@ export function AgentHubRoute() {
                     live={railLive}
                   />
                 )}
-                {section === "memory" && (
+                {activeSection === "memory" && (
                   <AgentMemorySection
                     key={normalizedId(selected.id)}
                     agent={selected}
@@ -481,11 +545,19 @@ export function AgentHubRoute() {
                     onOpenProfile={() => setSection("profile")}
                   />
                 )}
-                {section === "history" && (
+                {activeSection === "history" && (
                   <AgentHistorySection
                     key={normalizedId(selected.id)}
                     agent={selected}
                     onOpenProfile={() => setSection("profile")}
+                  />
+                )}
+                {activeSection === "connection" && (
+                  <HostedConnectionSection
+                    key={normalizedId(selected.id)}
+                    agentMemberId={normalizedId(selected.id)}
+                    agentLabel={selected.displayName}
+                    offline={offline}
                   />
                 )}
               </div>
@@ -505,6 +577,12 @@ export function AgentHubRoute() {
           setSelectedId(normalizedId(created.id));
           setSection("profile");
         }}
+      />
+
+      <HostedAgentWizard
+        open={pairing}
+        onOpenChange={setPairing}
+        opener={pairingOpener}
       />
     </div>
   );

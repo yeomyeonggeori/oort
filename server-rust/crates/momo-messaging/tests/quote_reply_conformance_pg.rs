@@ -45,7 +45,7 @@ use momo_messaging::{
     ChannelKind, HistoryCursor, NewChannel, NewMessage, PagedMessage, QuoteTargetInvalid,
     SendExtras, SentMessage,
 };
-use serde_json::Value;
+use serde_json::{json, Value};
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use uuid::Uuid;
 
@@ -836,4 +836,149 @@ async fn srv_t3_7_a_full_page_of_quotes_resolves_and_stops_at_one_layer() {
             }
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// SRV-T3 #9 (#1510) — a bodyless card is not a tombstone, and only a real
+// string kind says so
+// ---------------------------------------------------------------------------
+
+/// **The card signal, round-tripped through the database it comes from.**
+///
+/// #1454 commits a completion report as an ordinary `text` row with **no body**:
+/// the card is the whole message and it lives in `props`. Every other field the
+/// quote block reads then matches a tombstone exactly, so the client's last belt
+/// ("a text with no body was deleted") called the card 「삭제된 메시지」. The one
+/// thing that separates them is `props.kind`, and it has to cross the wire.
+///
+/// The four junk shapes are the point of the second half. `props` is free-form
+/// `jsonb` and only the REST send path narrows it to strings, so a worker can
+/// write `"kind": 12`, `true`, `{}` or `""` — and `q.props->>'kind'` alone would
+/// hand the first three to the client as `"12"` / `"true"` / `"{}"` and the
+/// fourth as an empty string. The client's own predicate
+/// (`quote.ts::presentPropsKind`) accepts a **non-empty string only**, so a bare
+/// `->>` would make the same original read as a card when the page resolves it
+/// and as a tombstone when it is resolved from a row already on screen. This
+/// test is the server twin of `quote.test.ts`'s 「낱말이 아닌 kind는 없는 것으로
+/// 접는다」, and it goes red if the projection ever drops the type/emptiness
+/// predicate.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_app role"]
+async fn srv_t3_9_a_bodyless_card_quote_projects_a_string_kind_and_nothing_else() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+
+    let ws = Uuid::new_v4();
+    let alice = Uuid::new_v4();
+    let bob = Uuid::new_v4();
+    seed_workspace(&su, ws).await;
+    seed_member(&su, ws, alice, "alice").await;
+    seed_member(&su, ws, bob, "bob").await;
+    let channel = new_channel(&app, ws, "cards", alice).await;
+    seed_membership(&su, ws, channel, bob).await;
+
+    // A card message, exactly as `momo-agent-worker` commits one: an ordinary
+    // text row, no body at all, the whole card in props.
+    async fn card(app: &PgPool, ws: Uuid, channel: Uuid, author: Uuid, props: Value) -> Uuid {
+        let mut input = NewMessage::text(channel, author, String::new());
+        input.body = None;
+        input.props = props;
+        send(app, ws, input).await.message.id
+    }
+
+    async fn quote_of(app: &PgPool, ws: Uuid, channel: Uuid, author: Uuid, target: Uuid) -> Uuid {
+        let mut input = NewMessage::text(channel, author, "그 리포트 말인데");
+        input.reply_to_id = Some(target);
+        send(app, ws, input).await.message.id
+    }
+
+    let report = card(
+        &app,
+        ws,
+        channel,
+        alice,
+        json!({
+            "kind": "completion_report",
+            "summary": "게이트 12종 전부 통과했습니다.",
+            "gates": [{ "name": "cargo test", "outcome": "pass" }],
+        }),
+    )
+    .await;
+    let quoting = quote_of(&app, ws, channel, bob, report).await;
+
+    let page = history(&app, ws, channel).await;
+    let quote = row_for(&page, quoting)
+        .reply_to
+        .as_ref()
+        .expect("the quote resolves");
+    assert_eq!(
+        quote.props_kind.as_deref(),
+        Some("completion_report"),
+        "a bodyless card must arrive as a card, not as a row indistinguishable \
+         from a tombstone"
+    );
+    // It is a live row: nothing here may read as a deletion, or the client is
+    // right back to drawing 「삭제된 메시지」.
+    assert_eq!(quote.body, None, "the card has no body — that is normal");
+    assert_eq!(quote.state, "sent");
+    assert!(quote.deleted_at.is_none());
+
+    // Only the kind crosses. The summary and the gate table are the original's;
+    // a quote draws two lines and sends the reader there (규칙 3 / 미결 2).
+    let projected = format!("{quote:?}");
+    assert!(
+        !projected.contains("게이트 12종") && !projected.contains("cargo test"),
+        "the card's payload must not ride along with its kind: {projected}"
+    );
+
+    // ---- the four shapes a bare `->>` would mangle ------------------------
+    for junk in [json!(12), json!(true), json!({}), json!("")] {
+        let row = card(&app, ws, channel, alice, json!({ "kind": junk })).await;
+        let quoting = quote_of(&app, ws, channel, bob, row).await;
+        let page = history(&app, ws, channel).await;
+        let quote = row_for(&page, quoting)
+            .reply_to
+            .as_ref()
+            .expect("the quote resolves");
+        assert_eq!(
+            quote.props_kind, None,
+            "kind {junk} is not a name: the projection must fold it away exactly \
+             as the client's presentPropsKind does, or the same original reads \
+             as a card on refetch and as a tombstone from the loaded rows"
+        );
+    }
+
+    // ---- and a real deletion still leaves only the fact of itself ----------
+    let deleted_card = card(
+        &app,
+        ws,
+        channel,
+        alice,
+        json!({ "kind": "completion_report", "summary": "지워질 리포트" }),
+    )
+    .await;
+    let quoting = quote_of(&app, ws, channel, bob, deleted_card).await;
+    with_tenant_tx(&app, ws, move |conn| {
+        Box::pin(async move {
+            delete_message_in_tx(conn, ws, deleted_card, alice)
+                .await?
+                .expect("the author deletes their own card");
+            Ok::<_, DbError>(())
+        })
+    })
+    .await
+    .expect("delete");
+
+    let page = history(&app, ws, channel).await;
+    let quote = row_for(&page, quoting)
+        .reply_to
+        .as_ref()
+        .expect("the reference survives the deletion");
+    assert_eq!(quote.state, "deleted");
+    assert_eq!(
+        quote.props_kind, None,
+        "a deleted row keeps its props in the database, but the deletion leaves \
+         nothing on the wire beyond the fact of it (규칙 3)"
+    );
 }

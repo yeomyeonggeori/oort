@@ -22,6 +22,40 @@
 
 ---
 
+## 2026-08 런칭 보조축 — Bring your hosted agent
+
+> 정본 결정: ADR-0162 Accepted(2026-08-12) · 실행 패킷: `docs/planning/handoffs/2026-08-12-hosted-agent-pairing-launch-packet.md` · Milestone: M1 · Project: `oort roadmap` #44.
+>
+> #1344는 공식 Grok Bot의 무구매 접근, Bot/chat, custom HTTP MCP loader dial-in, routine Test run과 cleanup UI를 측정했다. generic 구현은 provider 로그인·결제에 의존하지 않는다. #1358/#1363은 ADR이 `track/engine`에 랜딩할 때까지 `status:blocked`이며, 랜딩 뒤 두 goal만 `status:ready`로 전환한다. 나머지는 native `blockedBy`가 닫힐 때까지 blocked다.
+
+| order | logical ID · Issue | 트랙 | 한줄 | 수용기준 등급 | native 의존 |
+|---|---|---|---|---|---|
+| 1 | `HAP-E1` · `#1358` | 엔진 | Rust agent bearer issue/list/rotate/revoke lifecycle | rust/runtime-db/docs | #1344(ADR landing gate) |
+| 2 | `HAP-E2` · `#1363` | 엔진 | MCP 2026-07-28 modern core + 2025-11-25 legacy compatibility Agent Port | rust/runtime-db/docs | #1344(ADR landing gate) |
+| 3 | `HAP-E3` · `#1364` | 엔진 | dedicated paused member + atomic pairing/activation + Agent-Port-only credential guard | rust/sql/runtime-db | #1358, #1363 |
+| 4 | `HAP-E4` · `#1365` | 엔진 | connection-scoped durable inbox + opaque cursor | rust/sql/runtime-db | #1364 |
+| 5 | `HAP-E5` · `#1366` | 엔진 | MCP inbox/message/gateway thin binding + per-agent delivery | rust/runtime-agent | #1364, #1365 |
+| 6 | `HAP-E6` · `#1367` | 엔진 | atomic revoke/pause + invalid-token reconciliation + direct REST audience guard + artifact-level cleanup terminal state | rust/sql/runtime-agent | #1364, #1366 |
+| 6a | `HAP-E7` · `#1368` | 엔진(후속) | ADR-0162 OAuth lifecycle 증보 + Agent-Port-only MCP OAuth 2.1 authorization-server mode | rust/sql/runtime/docs | #1364; v0 static pairing 비차단 |
+| 7 | `HAP-UX1` · `#1360` | UXUI web/core | web/Tauri “Bring your hosted agent” pairing wizard | web/design/merge-tree | #1364, #1366 |
+| 7a | `HAP-UX4` · `#1369` | UXUI web/core(후속) | OAuth resource-owner 로그인·동의 + pairing wizard 복귀 | web/design/merge-tree | #1368, #1360; v0 static pairing 비차단 |
+| 8 | `HAP-UX2` · `#1362` | UXUI web/core | disconnect + cleanup acknowledgement | web/design/merge-tree | #1367 |
+| 9 | `HAP-UX3` · `#1359` | UXUI mobile/core | hosted connection/cleanup status read-only | mobile/merge-tree | #1364 |
+| 10 | `HAP-GROK-E2E` · `#1361` | runtime/manual | real Grok pair→reply→disconnect, active credential/automation/config residual 0 | runtime-agent/manual/docs | #1344, #1358, #1363~#1367, #1360, #1362 |
+
+```text
+#1358 || #1363 -> #1364 -> #1365 -> #1366 -> #1360
+                                 #1366 -> #1367 -> #1362
+                          #1364 -------------> #1359
+#1364 -> #1368 OAuth AS ----> #1369 OAuth consent/wizard UX (후속)
+                   #1360 ----/
+#1344 + #1358 + #1363..#1367 + #1360/#1362 -> #1361
+```
+
+`#1361` 전까지 “Grok Bot 연결 검증됨”을 제품 카피로 쓰지 않는다. Grok가 OAuth를 요구하면 #1361에 #1368과 #1369를 추가로 결속하고 static bearer로 묵시 fallback하지 않는다. connector UI uninstall과 local plugin files 제거, routine 비활성화와 제거, Bot 보존과 삭제는 서로 다른 cleanup artifact다.
+
+---
+
 ## STEPS — 실행 순서 (의존순 표)
 
 > 표는 **실행 순서(order)** 대로. `의존`은 이 티켓이 깨면 안 되는/필요로 하는 선행 티켓 id.

@@ -9,6 +9,7 @@ import {
   asTypingFrame,
   asWorkSessionACPFrame,
   asWorkSessionLifecycleFrame,
+  asWorkSessionControlFrame,
   asWorkSessionObserverFrame,
   asWorkSessionToolTransitionFrame,
   centrifugoAgentChannelName,
@@ -28,6 +29,7 @@ import {
   type TypingFrame,
   type WorkSessionACPFrame,
   type WorkSessionLifecycleFrame,
+  type WorkSessionControlFrame,
   type WorkSessionObserverFrame,
   type WorkSessionToolTransitionFrame,
 } from "@momo/core/lib/realtimeEvents";
@@ -354,6 +356,7 @@ export function createRealtime(
       onToolTransition: (frame: WorkSessionToolTransitionFrame) => void;
       onAcpEvent: (frame: WorkSessionACPFrame) => void;
       onObserver: (frame: WorkSessionObserverFrame) => void;
+      onControl?: (frame: WorkSessionControlFrame) => void;
       onResync: () => void;
     }
   ): () => void {
@@ -393,6 +396,15 @@ export function createRealtime(
           const observer = asWorkSessionObserverFrame(ctx.data);
           if (observer) {
             handlers.onObserver(observer);
+            return;
+          }
+          // Classified before the ACP arm for the same reason the two above
+          // are: this envelope is a boundary fact, not a session event, and
+          // the ACP parser would reject it anyway. Ordering it here keeps the
+          // cheap discriminated checks together.
+          const control = asWorkSessionControlFrame(ctx.data);
+          if (control) {
+            handlers.onControl?.(control);
             return;
           }
           const acp = asWorkSessionACPFrame(ctx.data);

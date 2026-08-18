@@ -268,6 +268,8 @@ Rust 바이너리는 prod compose가 쓰는 **이름 그대로** 읽는다.
 | `MOMO_EVENT_SUBSCRIPTION_ALLOW_HTTP` | ✅ `webhook` (#1222, 선택) | `MOMO_ENV=local` **이면서** 이 값이 `1` 일 때만 `http://` 목적지를 받는다. 두 조건을 다 요구하므로 staging/prod 에서는 이 플래그가 효력을 가질 수 없다 |
 | `PROVIDER_LINK_MASTER_KEY`·`AGENT_*`·`HERMES_*`·`MEMORY_*`·`MOMO_ARCHIVE_BACKEND`·`MOMO_S3_*`·`MOMO_METRICS_*` | ❌ 미소비 | 해당 기능 배치에서 복귀. **부팅을 막지 않는다** |
 | `MOMO_CORS_ALLOWED_ORIGINS` | ✅ `cors` (DESK-1) | MOMO-605 계약 그대로 포팅. 빈값·미설정=미들웨어 미장착=완전 무변경. 이 줄이 "미소비"였던 동안 패키징된 데스크톱은 로그인이 아예 안 됐다 |
+| `MOMO_AGENT_PORT_EXTERNAL_ORIGIN` | ✅ `agent_port` (#1363) | 선택 exact HTTPS origin. no-Origin native/server MCP 호출은 허용하고, Origin이 present하면 이 값과 exact match만 허용한다. Host/Forwarded 계열은 권위가 아니다 |
+| `MOMO_AGENT_PORT_RATE_LIMIT_WINDOW_SECONDS`·`_PER_TOKEN`·`_PER_AGENT`·`_PER_IP` | ✅ `agent_port` (#1363) | join limiter와 분리된 process-local sliding window. 기본 60s / 240 / 480 / 1200, 0=해당 축 비활성. token+agent 두 축은 한 프로세스 안에서 묶음으로 원자 admission하지만 quota-grade 공유 원장은 아니다. 프로세스 재시작은 counter를 초기화하고 replica끼리 상태를 공유하지 않아 N replicas의 실효 상한은 약 N배다. 첫 denial audit도 denied axis별 replica/window당 최대 1행이며 재시작 뒤 다시 기록될 수 있다. IP 축은 위조 가능한 전달 헤더를 신뢰하지 않고 socket peer만 쓰므로 현 Caddy 단일 프록시 배치에서는 방어용 proxy-global bucket이며 사용자별 quota가 아니다. limiter map은 window 내 서로 다른 key 수에 대한 global cap이 없으므로 API 직접 노출·source-IP rotation 환경의 메모리 DoS 방벽이 아니며, 그런 배치는 Caddy/edge의 connection·source cardinality 제한 또는 공유 limiter를 추가해야 한다 |
 
 | prod relay env | Rust momo-relay |
 |---|---|

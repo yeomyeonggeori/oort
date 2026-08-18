@@ -236,6 +236,21 @@ export interface QuotedMessage {
   deletedAtMs?: number;
   /** 규칙 4 — 이 원본이 또 무언가를 인용했다. **표시뿐**이고 대상 id는 없다. */
   quotesAnother?: boolean;
+  /**
+   * 원본의 `props.kind` 하나. 원본의 props에서 **이것 말고는 오지 않는다**(#1510).
+   *
+   * 카드 메시지는 평범한 행을 탄다 — `type: "text"`, 본문 없음, 카드는 `props`
+   * 안(#1454 완료 리포트). 그래서 위의 어느 칸으로도 묘비와 구별되지 않고,
+   * 「본문 없는 text는 지워진 것」이라는 판정이 그 카드를 「삭제된 메시지」로
+   * 세운다. 그 둘을 가르는 유일한 신호가 이 필드이고, 서버가 실어 주지 않으면
+   * 클라가 단독으로 알아낼 방법이 없다.
+   *
+   * 카드의 **내용**은 오지 않는다: 요약·불릿·게이트 표는 원본의 것이고, 인용은
+   * 두 줄을 그린 뒤 원본으로 보내는 표지판이다(미결 2와 같은 답). 묘비에도 없다 —
+   * 지워진 행은 props를 그대로 갖고 있지만, 삭제가 남기는 것은 삭제됐다는 사실
+   * 하나뿐이어야 한다(규칙 3).
+   */
+  propsKind?: string;
 }
 
 export interface Message {
@@ -2312,6 +2327,40 @@ export interface WorkSession {
   observation: "open" | "owner_only";
   observerGrantCount: number;
   remoteAttachAvailable: boolean;
+  /**
+   * The host published a live screen for this session (LIVE-1, ADR-0165).
+   *
+   * INDEPENDENT of `remoteAttachAvailable`, and the server's own DTO says so in
+   * the same words: a session can offer a screen and no terminal, or the
+   * reverse. A client that folds the two into one boolean offers the wrong verb
+   * on one of them, so nothing here may derive one from the other.
+   *
+   * The signalling endpoint itself is deliberately NOT in this shape, exactly as
+   * `attach_endpoint` is not: a session read is a list a whole channel can
+   * fetch, and an endpoint is only ever handed out beside the capability that
+   * authorises dialling it (`DisplayAttachGrant`).
+   */
+  remoteDisplayAvailable: boolean;
+  /**
+   * Somebody holds this session's keyboard, since that epoch millisecond
+   * (LIVE-5a projection).
+   *
+   * ABSENT means nobody does. It is optional rather than `0` for the reason the
+   * server's own DTO gives: a zero renders as 1970, and a surface that draws a
+   * date is drawing a fact.
+   *
+   * THIS IS THE FIELD A RELOAD READS. `work.session.control` says the same thing
+   * over Centrifugo, but that is transport: a surface that only heard the
+   * envelope forgets it on refresh, and then reports "nobody is holding this"
+   * about a window it simply did not hear open. The value here comes from the
+   * `display_control_window` ledger, which is the boundary's source of truth.
+   *
+   * WHO holds it is deliberately absent, matching the broadcast. Control is
+   * owner-only, so "somebody has control" is everything a reader or an agent
+   * needs, and nothing typed during the window is reachable from here or from
+   * anything this links to (ADR-0004 증보 3 D2).
+   */
+  controlStartedAt?: number;
   startedAtMs: number;
   endedAtMs?: number;
   exitCode?: number;
@@ -2421,6 +2470,164 @@ export async function issueObserverTerminalAttach(
       workspaceId
     )}/work-sessions/${encodeURIComponent(sessionId)}/terminal-attach`,
     { method: "POST", body: JSON.stringify({ mode: "observer" }) }
+  );
+}
+
+// ---- Display attach capability (LIVE-1 / ADR-0165) --------------------------
+// POST /v1/workspaces/{ws}/work-sessions/{session}/display-attach
+//
+// The screen twin of the block above, and the same kind of call: a control
+// plane request that mints a 60 second bearer and hands back the HOST's own
+// address. What it hands back is the sandbox's WebRTC SIGNALLING socket, and
+// momo carries neither the signalling nor the media that follows: no SFU, no
+// TURN of ours, no recording (ADR-0165 D2/D3/D5). The server module holding the
+// other end says it plainly: "nothing here opens a socket".
+//
+// It is a separate function rather than a `kind` argument on the one above for
+// the reason the server split the routes: the two responses carry different
+// required fields (`pty_id` vs `display_id`), and one shape with both optional
+// would let a caller dial the wrong stream on a typo.
+//
+// snake_case for `TerminalAttachGrant`'s reason: it is the sibling of a body
+// two shipped clients already parse that way, and one attach response in each
+// case would be a trap for whoever writes the third.
+
+/**
+ * One entry of `RTCConfiguration.iceServers`, in the W3C's own spelling because
+ * the array is handed to `RTCPeerConnection` unchanged.
+ *
+ * The credential is minted per work session and expires on its own; momo hands
+ * it out and still carries no media (ADR-0165 D3 — the relay is oort-operated
+ * and never a third party's).
+ */
+export interface IceServerConfig {
+  urls: string[];
+  username: string;
+  credential: string;
+}
+
+export interface DisplayAttachGrant {
+  /**
+   * The HOST's own WebRTC signalling endpoint, https/wss, credential free and
+   * query free (server-validated on the way in AND on the way out).
+   */
+  display_endpoint: string;
+  /** Opaque bearer, 60s TTL, validated by the producer against this server. */
+  capability_token: string;
+  display_id: string;
+  /**
+   * The grade the server actually minted: `"observer"` or, for the session
+   * owner asking for it by name, `"controller"`.
+   *
+   * It is read rather than assumed. A view-only stream that LOOKS identical to a
+   * controllable one is how a person ends up typing into a window that will
+   * never deliver a keystroke, so the client checks the word the server sent
+   * before it renders a screen, and refuses anything else instead of guessing.
+   */
+  mode: string;
+  /**
+   * When the control window opened, in epoch milliseconds. Present only on a
+   * controller grant.
+   *
+   * The caller's own copy of the boundary event `work.session.control` carries,
+   * so the surface that just took the keyboard can say when it took it without
+   * waiting for the relay to tell it what it already did.
+   */
+  control_started_at?: number;
+  /**
+   * The relay this grant may allocate through, with a credential minted for
+   * this session.
+   *
+   * ALWAYS PRESENT and EMPTY on an instance that was given no relay policy. A
+   * client must read empty as **use what you were already configured with**,
+   * never as an error: the openapi description says so in those words, and a
+   * client that draws an error there would break every self-hosted instance
+   * that never had a relay to be given.
+   */
+  ice_servers: IceServerConfig[];
+}
+
+/**
+ * Ask for a view-only display capability.
+ *
+ * `observer` is sent explicitly rather than left to the route's default, and it
+ * is HARDCODED rather than taken as an argument. That is the whole boundary in
+ * one line: a caller of this function cannot ask for `controller`, because
+ * there is no parameter to ask with, so no typo and no forwarded variable can
+ * turn a watch into a takeover.
+ *
+ * The grade that CAN stop an agent lives in its own function below, with its
+ * own name, so that "who can mint a controller grant" is answerable by grepping
+ * for one identifier.
+ */
+export async function issueDisplayAttach(
+  workspaceId: string,
+  sessionId: string
+): Promise<DisplayAttachGrant> {
+  return request<DisplayAttachGrant>(
+    `/v1/workspaces/${encodeURIComponent(
+      workspaceId
+    )}/work-sessions/${encodeURIComponent(sessionId)}/display-attach`,
+    { method: "POST", body: JSON.stringify({ mode: "observer" }) }
+  );
+}
+
+/**
+ * Take this session's keyboard (ADR-0004 증보 3 / LIVE-5).
+ *
+ * A SEPARATE FUNCTION, not a `mode` argument on the one above, and the reason
+ * is what this call does rather than what it returns. It opens a control window
+ * in the ledger, and while that window stands the agent's own path into this
+ * session is refused and observation is forced to 소유자만 보기. That is not a
+ * variation of watching; it is the act of stopping a running agent, and the
+ * call that performs it should be impossible to reach by passing a variable to
+ * the call that does not.
+ *
+ * Owner only, and the server is the one that enforces it (403 for anybody
+ * else). A surface must still not OFFER it to a non-owner: a control that
+ * exists only to answer 403 is an affordance that lies.
+ */
+export async function issueControllerDisplayAttach(
+  workspaceId: string,
+  sessionId: string
+): Promise<DisplayAttachGrant> {
+  return request<DisplayAttachGrant>(
+    `/v1/workspaces/${encodeURIComponent(
+      workspaceId
+    )}/work-sessions/${encodeURIComponent(sessionId)}/display-attach`,
+    { method: "POST", body: JSON.stringify({ mode: "controller" }) }
+  );
+}
+
+/** What the server says about the window this return just closed, or did not. */
+export interface DisplayControlReturn {
+  /**
+   * Whether THIS call is what closed a standing window. `false` is a success:
+   * a retried return, a lease that had already lapsed, or a session that ended
+   * underneath it. All three mean the same thing to a reader — nobody holds the
+   * keyboard now — and none of them is an error to report.
+   */
+  closed: boolean;
+}
+
+/**
+ * Hand the screen back to the agent.
+ *
+ * IDEMPOTENT by the server's contract, which is what makes it safe to call from
+ * an automatic path: the three ways a window closes (this call, a lapsed lease,
+ * the session ending) can race, and a client that treated "already closed" as a
+ * failure would put an error banner in front of a person whose control had in
+ * fact been returned.
+ */
+export async function returnDisplayControl(
+  workspaceId: string,
+  sessionId: string
+): Promise<DisplayControlReturn> {
+  return request<DisplayControlReturn>(
+    `/v1/workspaces/${encodeURIComponent(
+      workspaceId
+    )}/work-sessions/${encodeURIComponent(sessionId)}/display-control`,
+    { method: "DELETE" }
   );
 }
 

@@ -22,6 +22,20 @@
 //! lease has an *expiry* (a crashed claimer's row returns to the pool), and
 //! every later callback must present the `lease_owner` it was handed.
 //!
+//! ## The uuid comparisons are case-folded
+//!
+//! `outbox.payload` carries ids as **text**, and this server's producers
+//! disagree about their case: `momo_agent::mention::mention_job_payload` writes
+//! them uppercase (Swift parity for the payload a gateway reads) while the
+//! work/resume producers write them lowercase. A raw `=` therefore matched a
+//! work job and silently missed every *mention* job — the most common kind —
+//! so a lease for one could never be claimed, renewed, released or settled.
+//! `lower()` on both sides is the same narrowest fix
+//! `retire_pending_agent_jobs_for_run_in_tx` already documents, and a `::uuid`
+//! cast is rejected for the same reason it is there: it raises on any row whose
+//! payload happens to hold a non-uuid id, turning one malformed job into a
+//! failed claim for the whole tenant.
+//!
 //! ## The lease is the callback's only authority
 //!
 //! [`gateway_lease_authorized`] is the pure decision behind every gateway
@@ -148,6 +162,80 @@ pub async fn claim_gateway_jobs_in_tx(
     agent_member_id: Uuid,
     limit: i64,
 ) -> Result<Vec<ClaimedGatewayJob>, sqlx::Error> {
+    claim_gateway_jobs(conn, workspace_id, agent_member_id, limit, None).await
+}
+
+/// The **hosted** half of the same claim (ADR-0162 / HAP-E5).
+///
+/// **The human's exact-channel grant is re-checked here, at claim time.** A
+/// hosted connection is confirmed for a named set of channels (HAP-E3), and the
+/// job payload names the channel the work came from — so a job from a channel
+/// outside `approved_channel_ids` is simply not a candidate. Two properties
+/// follow, and both are the reason this lives in the claim rather than only in
+/// the producer:
+///
+/// * an unapproved-channel job is **never leased**. It stays `pending` and
+///   invisible instead of being handed over and withheld, so its prompt and
+///   recent messages never cross the wire;
+/// * the check reads the connection row **live, in the claiming transaction**,
+///   so narrowing the approval after a job was created stops the next claim —
+///   a producer-side check alone could only ever describe the past.
+///
+/// The comparison unnests the approved array and folds case rather than casting
+/// the payload text to `uuid`, for the same reason the other id comparisons do:
+/// a cast raises, and one malformed row must not fail the tenant's whole claim.
+///
+/// One further predicate the managed branch does not carry: the payload's
+/// `run_id` must be uuid-shaped. A hosted caller acts on work through a sealed handle that
+/// *contains* the run, so a row without a usable run id could be claimed and
+/// leased but never renewed, released or completed — and because a claim mints
+/// a fresh lease every cycle, it would be re-leased forever while being
+/// silently withheld. Refusing to claim it is what stops that loop; the row
+/// stays `pending` and visible to an operator rather than churning. The shape
+/// test is a case-insensitive regex rather than a `::uuid` cast for the reason
+/// the case-folding note above gives: a cast raises, and one malformed row must
+/// not fail the whole tenant's claim.
+///
+/// A hosted agent reaches its work through the Agent Port, never over the REST
+/// callback surface, so [`claim_gateway_jobs_in_tx`] deliberately excludes every
+/// agent that has a `hosted_agent_connection` row at all (HAP-E3's fail-closed
+/// posture). This is the door that replaces it — and it is the *same statement*,
+/// not a second one: `claim_gateway_jobs` builds one CTE and only the hosted
+/// eligibility predicate differs, so the lease columns, `SKIP LOCKED`, takeover
+/// window and per-agent binding cannot drift between the two callers.
+///
+/// The extra predicate is the whole hosted authority: the connection named by
+/// the caller's credential must be **this** agent's, `active`, proved, and still
+/// carry a live `agent:jobs:read` bearer bound to the Agent Port audience. An
+/// expired, revoked or downgraded connection therefore claims nothing rather
+/// than falling back to the managed feed.
+pub async fn claim_hosted_gateway_jobs_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    agent_member_id: Uuid,
+    connection_id: Uuid,
+    limit: i64,
+) -> Result<Vec<ClaimedGatewayJob>, sqlx::Error> {
+    claim_gateway_jobs(
+        conn,
+        workspace_id,
+        agent_member_id,
+        limit,
+        Some(connection_id),
+    )
+    .await
+}
+
+async fn claim_gateway_jobs(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    agent_member_id: Uuid,
+    limit: i64,
+    hosted_connection_id: Option<Uuid>,
+) -> Result<Vec<ClaimedGatewayJob>, sqlx::Error> {
+    // `$5 IS NULL` selects the managed branch, so both callers execute one
+    // prepared statement whose only difference is which hosted predicate is
+    // live. Two SQL literals would be two things to keep in step.
     let rows = sqlx::query(
         "WITH candidate AS ( \
            SELECT o.id \
@@ -158,7 +246,7 @@ pub async fn claim_gateway_jobs_in_tx(
               AND o.status = 'pending' \
               AND o.available_at <= now() \
               AND o.partition_key = $2 \
-              AND o.payload->>'agent_member_id' = $2::text \
+              AND lower(o.payload->>'agent_member_id') = lower($2::text) \
               AND (o.lease_expires_at IS NULL OR o.lease_expires_at <= now()) \
               AND EXISTS ( \
                 SELECT 1 \
@@ -171,6 +259,39 @@ pub async fn claim_gateway_jobs_in_tx(
                    AND m.kind = 'agent' \
                    AND m.status = 'active' \
                    AND m.deleted_at IS NULL \
+              ) \
+              AND ( \
+                $5::uuid IS NULL \
+                OR o.payload->>'run_id' ~* \
+                   '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' \
+              ) \
+              AND ( \
+                ($5::uuid IS NULL AND NOT EXISTS ( \
+                  SELECT 1 FROM hosted_agent_connection hc \
+                   WHERE hc.workspace_id = $1 AND hc.agent_member_id = $2 \
+                )) \
+                OR ($5::uuid IS NOT NULL AND EXISTS ( \
+                  SELECT 1 FROM hosted_agent_connection hc \
+                    JOIN token t ON t.workspace_id = hc.workspace_id \
+                                AND t.id = hc.active_token_id \
+                   WHERE hc.workspace_id = $1 AND hc.agent_member_id = $2 \
+                     AND hc.id = $5 AND hc.status = 'active' \
+                     AND hc.proved_at IS NOT NULL \
+                     AND 'agent:jobs:read' = ANY(hc.approved_scopes) \
+                     AND t.kind = 'agent_bearer' \
+                     AND t.credential_class IN ('hosted_active','hosted_oauth_access') \
+                     AND t.revoked_at IS NULL \
+                     AND (t.expires_at IS NULL OR t.expires_at > now()) \
+                     AND t.hosted_connection_id = hc.id \
+                     AND t.actor_member_id = hc.agent_member_id \
+                     AND t.audience = '/v1/mcp/agent-port' \
+                     AND 'agent:jobs:read' = ANY(t.scopes) \
+                     AND EXISTS ( \
+                       SELECT 1 FROM unnest(hc.approved_channel_ids) AS approved(channel_id) \
+                        WHERE lower(approved.channel_id::text) \
+                              = lower(o.payload->>'channel_id') \
+                     ) \
+                )) \
               ) \
             ORDER BY o.id ASC \
             FOR UPDATE OF o SKIP LOCKED \
@@ -192,6 +313,7 @@ pub async fn claim_gateway_jobs_in_tx(
     .bind(agent_member_id)
     .bind(limit)
     .bind(GATEWAY_LEASE_SECONDS as f64)
+    .bind(hosted_connection_id)
     .fetch_all(&mut *conn)
     .await?;
 
@@ -206,6 +328,82 @@ pub async fn claim_gateway_jobs_in_tx(
             })
         })
         .collect()
+}
+
+/// What a suppressed hosted job's `last_error` says, so an operator reading the
+/// row learns why it stopped without opening an audit log.
+pub const HOSTED_DISCONNECT_JOB_LAST_ERROR: &str = "hosted connection disconnected";
+
+/// How much open work a hosted disconnect closed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct HostedWorkSuppression {
+    /// Pending gateway jobs settled `done` — the canonical retire rule.
+    pub suppressed_jobs: u64,
+    /// Of those, how many still held a live lease when they were settled.
+    pub released_leases: u64,
+}
+
+/// Close every open gateway job of one hosted agent, in the disconnect's own
+/// transaction (ADR-0162 HAP-E6).
+///
+/// Two things happen to one row, and both are needed:
+///
+/// * **the job is retired** with the same `status='done', processed_at=now(),
+///   last_error=…` shape [`crate::retire_pending_agent_jobs_for_run_in_tx`]
+///   uses for a cancelled run. A hosted agent's queue has exactly one consumer,
+///   so leaving a row `pending` after its only consumer is gone means it waits
+///   forever;
+/// * **the lease columns are cleared**, which is what makes the revocation
+///   observable rather than implied. A handle minted before the disconnect can
+///   no longer renew, release or complete: `renew`/`release` require
+///   `status='pending'` and `lease_owner = $4`, and
+///   [`settle_gateway_job_in_tx`] requires the owner — all three now miss.
+///
+/// The predicate is the agent's `partition_key` plus the same case-folded
+/// `payload->>'agent_member_id'` every other statement in this module uses, so
+/// suppression covers precisely the rows the hosted claim could have handed out
+/// and nothing belonging to another agent.
+pub async fn suppress_hosted_agent_jobs_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    agent_member_id: Uuid,
+) -> Result<HostedWorkSuppression, sqlx::Error> {
+    let rows = sqlx::query(
+        "UPDATE outbox \
+            SET status = 'done', \
+                processed_at = now(), \
+                last_error = $3, \
+                lease_owner = NULL, \
+                lease_acquired_at = NULL, \
+                lease_expires_at = NULL \
+          WHERE workspace_id = $1 \
+            AND kind = 'agent_job' \
+            AND method = 'gateway' \
+            AND status = 'pending' \
+            AND partition_key = $2 \
+            AND lower(payload->>'agent_member_id') = lower($2::text) \
+        RETURNING (OLD.lease_owner IS NOT NULL) AS had_lease",
+    )
+    .bind(workspace_id)
+    .bind(agent_member_id)
+    .bind(HOSTED_DISCONNECT_JOB_LAST_ERROR)
+    .fetch_all(&mut *conn)
+    .await?;
+    // A bare `RETURNING lease_owner` would report the value this statement just
+    // nulled, so "did it hold a lease" would always answer false. PostgreSQL 18
+    // — the only server version this schema targets (`uuidv7()` in migration
+    // 069) — can name the pre-image directly, which keeps the count a fact read
+    // out of the write rather than a second statement racing it.
+    let mut suppression = HostedWorkSuppression {
+        suppressed_jobs: rows.len() as u64,
+        released_leases: 0,
+    };
+    for row in &rows {
+        if row.try_get::<bool, _>("had_lease")? {
+            suppression.released_leases += 1;
+        }
+    }
+    Ok(suppression)
 }
 
 /// Extend a live lease, returning the new expiry (Swift :160-175). `None` means
@@ -226,7 +424,7 @@ pub async fn renew_gateway_lease_in_tx(
             AND method = 'gateway' \
             AND status = 'pending' \
             AND partition_key = $2 \
-            AND payload->>'agent_member_id' = $2::text \
+            AND lower(payload->>'agent_member_id') = lower($2::text) \
             AND lease_owner = $4 \
             AND lease_expires_at > now() \
         RETURNING lease_expires_at",
@@ -260,7 +458,7 @@ pub async fn release_gateway_lease_in_tx(
             AND method = 'gateway' \
             AND status = 'pending' \
             AND partition_key = $2 \
-            AND payload->>'agent_member_id' = $2::text \
+            AND lower(payload->>'agent_member_id') = lower($2::text) \
             AND lease_owner = $4 \
             AND lease_expires_at > now() \
         RETURNING id",
@@ -299,8 +497,8 @@ pub async fn lock_gateway_lease_in_tx(
             AND kind = 'agent_job' \
             AND method = 'gateway' \
             AND partition_key = $3 \
-            AND payload->>'agent_member_id' = $3::text \
-            AND payload->>'run_id' = $2::text \
+            AND lower(payload->>'agent_member_id') = lower($3::text) \
+            AND lower(payload->>'run_id') = lower($2::text) \
           FOR UPDATE",
     )
     .bind(workspace_id)
@@ -343,7 +541,7 @@ pub async fn settle_gateway_job_in_tx(
             AND kind = 'agent_job' \
             AND method = 'gateway' \
             AND lease_owner = $4 \
-            AND payload->>'run_id' = $2::text",
+            AND lower(payload->>'run_id') = lower($2::text)",
     )
     .bind(workspace_id)
     .bind(run_id)

@@ -32,10 +32,13 @@
 //! * **no idempotency key** — every `POST /sandboxes` mints a new billable
 //!   sandbox, so nothing but momo's own reconstruction stands between a retry
 //!   and a second instance;
-//! * **`envVars` are baked at create time** — a sandbox cannot be told a new
-//!   bootstrap token later, which is exactly why ADR-0136 D2 requires the token
-//!   to be *derived* rather than minted. The registration below uses the token
-//!   the substrate actually holds, never the one the test wishes it held.
+//! * **`envVars` are delivered once, at create time** — CubeSandbox hands them
+//!   to a listener inside the guest during the create call and never again
+//!   (#1437), so a sandbox cannot be told a new bootstrap token later. That is
+//!   exactly why ADR-0136 D2 requires the token to be *derived* rather than
+//!   minted: a retry has to re-derive what the first attempt already delivered.
+//!   The registration below uses the token the substrate actually holds, never
+//!   the one the test wishes it held.
 //!
 //! ## The two red proofs this suite carries
 //!

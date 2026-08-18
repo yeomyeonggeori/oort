@@ -155,7 +155,10 @@ export function AgentWorkPanel() {
       // onKeyDown은 스택이 서기 전의 잔재이고, 이제는 도달하지도 않는다: 층
       // 리스너가 캡처 단계에서 전파를 끊으므로 React의 루트 리스너까지 오지
       // 않는다. 같은 키를 두 곳에서 받는 코드는 한쪽만 고쳐지는 날이 온다.
-      className="work-panel-pane flex h-full shrink-0 flex-col border-l border-line bg-surface"
+      // `shrink-0`은 `work-panel-pane`이 flex 기준선을 갖게 되면서 빠졌다
+      // (#1413). 320px은 원하는 폭이고, 라우트 상자가 자기 바닥에 닿으면 모자란
+      // 폭은 이 패널이 낸다 — 근거는 tokens.css `--spacing-chat-min`.
+      className="work-panel-pane flex h-full flex-col border-l border-line bg-surface"
     >
       <PanelHeader
         name={name}

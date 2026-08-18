@@ -20,6 +20,9 @@ path = "src/main.rs"
 # APIs only — it owns no SQL of its own (D1 §3).
 momo-db = { path = "../../crates/momo-db" }
 momo-auth = { path = "../../crates/momo-auth" }
+# ADR-0162 / HAP-E2: pure dual-era MCP wire validation and dispatch. This crate
+# owns no SQL or HTTP client; the Axum adapter remains in this binary.
+momo-mcp = { path = "../../crates/momo-mcp" }
 momo-messaging = { path = "../../crates/momo-messaging" }
 # ADR-0151: the workspace Drive archive. It owns the HTTP client so this manifest
 # does not, and its whole API is the five-method `DriveArchive` trait — so an
@@ -108,6 +111,10 @@ uuid = { workspace = true }
 momo-wire = { path = "../../crates/momo-wire" }
 ed25519-dalek.workspace = true
 base64.workspace = true
+# HAP-E7 conformance only: `tests/agent_port_oauth_conformance_pg.rs` recomputes
+# the RFC 7636 code challenge from its fixed verifier, so the PKCE canary is a
+# byte-level derivation rather than a copied literal that could drift.
+sha2.workspace = true
 # B4 client-rewire smoke only: the test plays the part of CENTRIFUGO, so it
 # verifies the connection token with the broker's HMAC key exactly as the broker
 # would. Already in the tree via momo-auth; never linked for a server-side use.
@@ -118,3 +125,12 @@ jsonwebtoken.workspace = true
 # neither links nor starts a worker, and the two processes still meet through
 # nothing but the `outbox` row.
 momo-agent-worker = { path = "../momo-agent-worker" }
+# #1425 conformance only, and for `momo-agent-worker`'s reason one boundary over:
+# the control window's FOURTH close is the lease lapse, whose only author is the
+# notifier's sweep, so `tests/display_attach_conformance_pg.rs` runs ONE real
+# sweep iteration in-process against a window this suite already knows how to
+# create. The alternative was a second copy of the whole LIVE-1/LIVE-3 fixture
+# set inside the notifier's own suite. Dev-only — the server binary neither
+# links nor starts a notifier, and the two processes still meet through nothing
+# but the ledger.
+momo-notifier = { path = "../momo-notifier" }

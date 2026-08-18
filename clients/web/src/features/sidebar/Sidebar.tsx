@@ -397,7 +397,13 @@ export function Sidebar({
               검색과 이동
             </span>
             {/* 폰에는 ⌘ 키가 없다 (goal B6). 누를 수 없는 단축키를 컨트롤에
-                적어 두면 그만큼의 폭을 쓰면서 아무것도 알려주지 않는다. */}
+                적어 두면 그만큼의 폭을 쓰면서 아무것도 알려주지 않는다.
+
+                #1384: 이 앱의 키 힌트 표기는 한 벌이고(코어 `composerCopy.ts`
+                의 「키보드 힌트의 표기법」) 이 자리가 이미 그 표기다 —
+                `wide-only` · `text-meta` · `text-ink-muted` · 테두리 없는 산문.
+                동사가 없는 이유는 이 조각을 담은 버튼의 이름이 곧 동사라서다
+                ("검색과 이동"). 힌트 줄에서는 `<키>로 <동사>`로 적는다. */}
             <span className="wide-only text-meta text-ink-muted">⌘K</span>
           </Button>
           {/* 폰에서만 서는 닫기 (goal B6). 넓은 창에서 사이드바는 닫히는 것이

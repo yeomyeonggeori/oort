@@ -88,7 +88,10 @@ use momo_t3::work_control::{
     APPROVAL_SOURCE_WORK_CONTROL, KIND_INPUT, KIND_KILL, KIND_READ, KIND_SPAWN, STATUS_APPROVED,
     STATUS_DISPATCHED, STATUS_PENDING_APPROVAL,
 };
-use momo_t3::{work_tool_is_enabled_in_tx, T3Error};
+use momo_t3::{
+    active_control_window_in_tx, expire_lapsed_control_windows_in_tx, work_tool_is_enabled_in_tx,
+    T3Error,
+};
 use serde_json::{json, Value};
 use uuid::Uuid;
 
@@ -290,6 +293,71 @@ async fn create_in_tx(conn: &mut PgConnection, input: CreateInput) -> Rejectable
             return Ok(Err(ApiError::new(
                 StatusCode::CONFLICT,
                 "input and kill require a running work session",
+            )));
+        }
+
+        // ADR-0004 증보 3 D3 — 비관측, enforced rather than declared.
+        //
+        // While a person holds control of this session's screen, the agent's
+        // access to the session is refused. This is the only server path an
+        // agent has to a work session — `read` is its screen, `input` is its
+        // keyboard, `kill` is its off switch, and both attach routes are
+        // `require_human`, so an agent cannot mint a capability to watch either
+        // surface directly. Refusing here is therefore not *a* block on
+        // observation; it is the whole of it.
+        //
+        // It is deliberately the FIRST thing checked about the window and the
+        // LAST rejection before any write: nothing above this line has written
+        // anything, so an agent that asks during a window leaves no
+        // `work_control` row, no dispatch and no audit trail of having tried to
+        // look — which is what makes "the agent observed nothing" a statement
+        // about the ledger and not just about delivery.
+        //
+        // 409 rather than 403: this is a state the session is temporarily in,
+        // not a permission the agent lacks, and the difference is what tells a
+        // runtime to wait rather than to give up. The refusal says only that
+        // much. The timestamps an agent is entitled to — 정지 시각, 재개 시각,
+        // 「사용자 개입 완료」 — arrive on the `work.session.control` envelope
+        // that opening and closing a window emit, which is the surface a
+        // runtime already watches; putting them in an error body instead would
+        // deliver them only to whoever happened to lose a race.
+        //
+        // The lapsed-window sweep runs first so a window whose producer died is
+        // not still blocking the agent on the strength of a stale row.
+        //
+        // A lapse is the one close nobody performs, so this is where it gets
+        // announced: the person shut their laptop, the producer stopped
+        // re-validating, and the 재개 event an agent is owed (증보 3 D3) has no
+        // other author. Emitting from the detection point rather than from a
+        // timer keeps the boundary events in the same transaction as the fact
+        // they describe.
+        //
+        // This path holds no session lock, and does not need one: the window row
+        // is closed by the statement below before `emit_control_closed_in_tx`
+        // takes the run rows, which is the order
+        // `momo_agent::run::lock_driver_runs_in_tx` contracts for — the run lock
+        // is what serializes this resume against a window opening on another
+        // session of the same run.
+        for window in
+            expire_lapsed_control_windows_in_tx(conn, input.workspace_id, session_id).await?
+        {
+            crate::routes::display_attach::emit_control_closed_in_tx(
+                conn,
+                input.workspace_id,
+                input.channel_id,
+                None,
+                None,
+                &window,
+            )
+            .await?;
+        }
+        if active_control_window_in_tx(conn, input.workspace_id, session_id)
+            .await?
+            .is_some()
+        {
+            return Ok(Err(ApiError::new(
+                StatusCode::CONFLICT,
+                "work session is under human control",
             )));
         }
     }
