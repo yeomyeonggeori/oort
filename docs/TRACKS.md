@@ -22,24 +22,6 @@
 - **양 트랙이 함께 만지는 트리가 실재한다(실측).** `clients/web`·`packages/momo-core`는 UXUI 표면이지만 엔진 트랙도 디자인 시스템·보안 헤더·계약 변경으로 랜딩해 왔다. 지금 규율은 "소유가 아니라 통보" — **최소 diff + 상대 트랙에 로그**(ENGINE_HANDOFF 또는 이슈 코멘트) + 병합 트리 게이트. 이 겹침을 배타적 소유로 가를지 여부는 **성재 결정 대기**이며, 결정 전까지 이 문서가 임의로 선을 긋지 않는다.
 - goal 단위 세부 워크트리(worker 격리)는 지금처럼 만들어도 된다. 단 **PR/머지 대상은 main이 아니라 자기 트랙 브랜치다.**
 
-### 1.1 goal 워크트리의 base 결정 (#1464)
-
-`scripts/goal_claim.sh`는 goal 워크트리의 base를 아래 순서로 결정하고, **어느 소스가 정했는지 `base:` 줄에 찍는다**. 첫 히트가 이긴다.
-
-| 순위 | 소스 | 신호 |
-|---|---|---|
-| 1 | `flag` | `--base <branch>` |
-| 2 | `env` | `BASE_BRANCH=<branch>` |
-| 3 | `label` | 이슈 라벨 `track:<name>` → `track/<name>` |
-| 4 | `issue-body` | 이슈 본문의 한 줄 `Base: <main\|track/...>` |
-| 5 | `title-tag` | 이슈 제목의 `[engine]`·`[uxui]` 태그(실재하는 `track/<name>`만) |
-| 6 | `worktree` | 지금 체크아웃이 이미 `track/*` 브랜치 |
-| 7 | `default` | `main` |
-
-- **위 표의 소스는 전부 사람이 명시한 선언이다.** §1 표의 파일군 소유는 base를 정하지 **않고** 힌트로만 출력된다 — 엔진 파도가 `clients/web`·`clients/mobile` 수리를 track/engine에 랜딩하는 일이 실제로 있어서(§1 셋째 불릿) 파일 소유는 통합 브랜치를 함의하지 않는다.
-- 신호가 하나도 없으면 예전처럼 main에서 분기하되 **"track 신호 없음"을 stderr에 고지**한다. 조용한 오분기가 아니라 보이는 기본값이다.
-- `track:<name>` 라벨은 아직 레포에 없다 — 통합자가 `gh label create track:engine`·`track:uxui`로 만들면 3순위가 바로 살아난다.
-
 ## 2. 빌드·확인 규칙 — 성재가 보는 것은 항상 트랙 워크트리 빌드
 
 - 성재에게 보여주는 앱은 **반드시 자기 트랙 워크트리에서** 빌드·실행한다(웹 `npm --prefix clients/web run dev`, 데스크톱 Tauri 셸, 폰 `clients/mobile`의 `build:sim`/`lane:phone`. 은퇴 중인 macOS 앱은 `scripts/macos_dev_run.sh`).
@@ -62,6 +44,12 @@
 - 상태 확인은 `scripts/check_track_alignment.sh --remote --local-existing`. 모든 local canonical branch까지 요구하는 메인테이너 감사는 `--all`. checker는 fetch나 ref 이동을 하지 않으므로 먼저 `git fetch origin --prune`한다.
 - `scripts/local_gate.sh`·선택적 pre-push hook·`scripts/verify_merge_tree.sh`가 같은 checker를 소비한다. GitHub에서는 `track-alignment.yml`이 세 canonical branch push, 일일 schedule, 수동 실행에서 remote topology를 감시한다.
 - main 통합 직후 track이 behind/diverged면 다음 goal을 시작하지 말고 main을 각 track에 합류시킨다. 이미 PR-only 보호가 켜졌다면 main→track PR로 수리한다. force-push, branch 삭제, 자동 충돌 해결, 승인되지 않은 track→main 통합은 금지다.
+
+### 3.1.1 기획 문서 플러시의 랜딩 경로 (#1561 · 성재 확정 2026-08-18)
+
+- **기획 산출물(docs/planning·docs/adr·ROADMAP 등) 플러시는 main 직행이 아니라 `track/engine`에 랜딩한다.** main은 track→main 승격(위임 범위 — 게이트 그린·랜딩 단위) 때만 전진한다. 근거: 플러시의 main 직행이 이 레포에서 main이 track을 앞서는 **유일한** 순간이었고, 그 순간마다 열린 track PR 전부가 alignment fail을 발송했다(실측: 최근 실패 15건 중 ~10건이 이 클래스). 플러시를 track에 두면 이 클래스가 구조적으로 소멸한다 — main은 항상 조상으로 남는다.
+- **push·update-branch 전 정렬 프리플라이트(#1561 D-2)**: 오케스트레이터는 원격에 쓰기 전에 `git fetch origin --prune && scripts/check_track_alignment.sh --remote --local-existing`(~0.5초)을 먼저 돌리고, 어긋나 있으면 sync부터 한다. 코드 검증은 기존 로컬 게이트가 담당하므로 이 프리플라이트는 "보내는 순간의 장부 상태"만 본다.
+- 이 규칙 이전의 관행(플러시 main 직행+즉시 sync 짝)은 창을 좁힐 뿐 소멸시키지 못해 은퇴했다.
 
 ### 3.2 GitHub 보호 적용 순서
 
