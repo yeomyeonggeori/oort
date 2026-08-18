@@ -182,11 +182,14 @@ routable ICE base is a new template obligation. That 증보 is **Proposed —
   mints a fresh one on every 30-second re-validation, and the producer installs
   only the first: GStreamer cannot swap a TURN server on a running ICE agent, and
   the property that looks like a way in (`webrtcbin.ice-agent`) *destroys* the
-  agent when read (#1438). So `MOMO_TURN_CREDENTIAL_TTL_SECONDS` is a **ceiling
-  on one continuous stream**, not a sliding window — past it that connection
-  cannot allocate or refresh a relay and the screen goes black with nothing
-  user-visible to explain it. A new viewer is unaffected (new pipeline,
-  credential minted when they attached). Nothing has yet watched a stream past a
-  TTL, so this is reasoned from the constraint rather than observed; measuring it
-  and choosing between renegotiation and accepting the ceiling is a **LIVE-5c**
-  acceptance criterion (`template.spec.json` → `unverified.credentialCeiling`).
+  agent when read (#1438). An earlier revision reasoned from that constraint
+  that `MOMO_TURN_CREDENTIAL_TTL_SECONDS` must be a ceiling on one continuous
+  stream; **LIVE-5c measured it (PR #1570) and it is not**: coturn checks the
+  REST username's expiry only at ALLOCATE, never on an existing allocation's
+  REFRESH, so a 60-second credential carried a relay-only stream through a
+  200-second soak with 10/10 typed beats delivered. The TTL bounds when a *new*
+  allocation can be opened — which is also the one case that remains: a
+  mid-session re-ALLOCATE (an ICE restart) needs a credential valid at that
+  moment, so the day this producer performs ICE restarts it must remint then
+  (not on a timer). A new viewer is unaffected either way (new pipeline,
+  credential minted when they attached).
