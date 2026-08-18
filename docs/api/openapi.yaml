@@ -7184,7 +7184,7 @@ components:
         `agent:runs:callback` -> oort_run_event/oort_run_complete. A tool is
         listed and callable only when the connection approval, the credential's
         current scopes and the server capability all carry its scope.
-      enum: [agent:port:connect, agent:inbox:read, messages:read, messages:write, agent:jobs:read, agent:runs:callback]
+      enum: ["agent:port:connect", "agent:inbox:read", "messages:read", "messages:write", "agent:jobs:read", "agent:runs:callback"]
 
     HostedAgentConnection:
       type: object

@@ -554,8 +554,10 @@ PY
                   -H "Authorization: Bearer $access" "$base$1"; }
 
   # ---- A5 로그인 워크스페이스 칸 -------------------------------------------
-  # SELF_HOST.md는 "워크스페이스 칸은 비워 둔다"고 한다. 비워 두는 것이 정말
-  # 되는지, 그리고 사람이 뭔가 잘못 적었을 때 무슨 일이 벌어지는지 함께 잰다.
+  # SELF_HOST.md §4는 워크스페이스 칸이 「다른 워크스페이스로 로그인」 뒤에
+  # 접혀 있고, 펼치지 않는 것과 펼쳐서 비워 두는 것의 결과가 같다고 한다.
+  # 그 말이 정말인지(빈 칸 로그인 성립), 그리고 사람이 뭔가 잘못 적었을 때
+  # 무슨 일이 벌어지는지 함께 잰다.
   local junk_code exact_code
   junk_code="$(curl -sS -o "$cdir/a5-junk.json" -w '%{http_code}' --max-time "$HTTP_TIMEOUT" \
     -X POST "$base/v1/auth/login" -H 'Content-Type: application/json' \
