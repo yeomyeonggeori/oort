@@ -3,6 +3,7 @@ import { Loader2 } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/design/ui/button";
 import { Input } from "@/design/ui/input";
+import { cn } from "@/design/lib/cn";
 import { InlineBanner, SkeletonRows } from "@/features/common/States";
 import { putAttachmentBytes } from "@/features/attachments/uploadTransport";
 import { useWorkspaceAvatar } from "@/features/sidebar/useWorkspaceAvatar";
@@ -115,6 +116,7 @@ function WorkspaceAvatarField({
     upload.isError && !isOperatorDenied(upload.error)
       ? errorMessage(upload.error)
       : null;
+  const uploading = upload.isPending;
 
   return (
     <div className="flex flex-col gap-2">
@@ -139,19 +141,30 @@ function WorkspaceAvatarField({
         {/* items-start: 열의 기본 stretch 는 버튼을 아래 설명 문장만큼(실측 316px)
             늘여 액션이 막대가 된다 (3R M-1). 버튼은 자기 라벨만 하다. */}
         <div className="flex flex-col items-start gap-1">
+          {/* 진행은 잠금이 아니다 (#1486 문법 · #1541). 이 버튼은 `aria-busy` 와
+              바뀐 낱말로 진행을 이미 말하면서, 같은 사실을 native `disabled` 로도
+              말하고 있었다 — 그 겹침이 하나뿐인 진행 낱말을 opacity-50 아래에서
+              죽이고(「올리는 중, 사용 안 함」), 파일 창을 연 손에서 초점을 <body>
+              로 떨궜다. 잠그는 사실로 남는 것은 오프라인 하나다.
+              (같은 파일 아래쪽 「워크스페이스 나가기」가 #1502 에서 받은 수리와
+              같은 갈라내기다.) */}
           <Button
             type="button"
             variant="outline"
             size="sm"
-            disabled={offline || upload.isPending}
-            aria-busy={upload.isPending || undefined}
-            onClick={() => inputRef.current?.click()}
+            aria-disabled={offline || undefined}
+            aria-busy={uploading || undefined}
+            className={cn(offline && "opacity-50")}
+            onClick={() => {
+              if (offline || uploading) return;
+              inputRef.current?.click();
+            }}
             data-testid="workspace-avatar-change"
           >
-            {upload.isPending && (
+            {uploading && (
               <Loader2 aria-hidden="true" className="spinner-busy" />
             )}
-            {upload.isPending ? "올리는 중" : "이미지 변경"}
+            {uploading ? "올리는 중" : "이미지 변경"}
           </Button>
           <p className="text-meta text-ink-muted">
             PNG, JPG, WebP. 5MB까지. 오너와 관리자가 바꿀 수 있습니다.
@@ -313,8 +326,14 @@ export function WorkspaceSection({
     },
   });
 
+  const creating = create.isPending;
+
   function submit(event: React.FormEvent) {
     event.preventDefault();
+    // 잠금이 `aria-disabled` 라 클릭도 Enter 도 막지 않는다 (그것이 요점이다 —
+    // 초점을 잃지 않는다). 막는 일은 핸들러가 지고, 버튼이 아니라 폼이 지는
+    // 이유는 슬러그 칸에서 누른 Enter 도 같은 쓰기를 내기 때문이다 (#1541).
+    if (offline || creating) return;
     const errors = {
       slug: slugError(slug) ?? undefined,
       name: workspaceNameError(name) ?? undefined,
@@ -422,13 +441,20 @@ export function WorkspaceSection({
           )}
 
           <div className="flex flex-wrap items-center gap-2">
+            {/* 낱말을 갈면서 그 낱말을 native `disabled` 로 함께 흐리고 있었다
+                (#1541) — 만들기를 누른 사람 앞에서 「만드는 중」이 opacity-50
+                아래로 들어가고, 방금 Enter 를 누른 손에서 초점이 <body> 로
+                떨어졌다. 진행은 `aria-busy` 와 낱말이, 잠금은 오프라인 하나가
+                진다. 위 「워크스페이스 나가기」와 같은 문법이다. */}
             <Button
               type="submit"
               size="sm"
-              disabled={offline || create.isPending}
+              aria-disabled={offline || undefined}
+              aria-busy={creating || undefined}
+              className={cn(offline && "opacity-50")}
               data-testid="workspace-create"
             >
-              {create.isPending ? "만드는 중" : "워크스페이스 만들기"}
+              {creating ? "만드는 중" : "워크스페이스 만들기"}
             </Button>
           </div>
         </form>

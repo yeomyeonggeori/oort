@@ -77,6 +77,14 @@ import {
 const CHAIN_KEY = ["settings", "provider-chain"];
 
 /**
+ * 추가가 잠긴 이유를 말하는 한 문장의 id (#1541).
+ *
+ * 블록에 하나뿐인 인스턴스라 `useId` 가 아니라 상수다 — 형제 화면
+ * (`HostedConnectionSection` 의 `OFFLINE_NOTE_ID`)이 같은 이유로 같은 모양이다.
+ */
+const CHAIN_FULL_NOTE_ID = "chain-full-note";
+
+/**
  * Every read and write goes through the parser, so nothing downstream ever
  * holds an object the server did not actually shape. An unreadable 200 becomes
  * a plain Error and lands on the same inline banner a network failure does.
@@ -506,6 +514,16 @@ export function AiLinkChain({
   // that entry, and its stored key with it.
   const unreadable = chainUnreadableCopy(chain);
   const readOnly = unreadable !== null;
+  // 이 줄의 세 버튼이 세 문법을 쓰고 있었다 (#1541): 저장은 `aria-disabled`,
+  // 전부 지우기도 `aria-disabled`, 그런데 추가만 native `disabled` 였다. 잠긴
+  // 버튼이 tab order 를 떠나면 **왜 못 하는지**가 키보드로 닿지 않고(그 문장이
+  // 바로 아래 서 있다), 초점을 쥔 채 잠기면 초점이 <body> 로 떨어진다
+  // (#1403 / #1486).
+  //
+  // 이 버튼에는 진행이 없다 — 초안에 줄 하나를 더할 뿐 쓰기를 내지 않는다. 그래서
+  // `busy` 는 여기서 **진짜 잠금**이다(날고 있는 PUT 밑에서 그 초안을 고치는 일은
+  // 막아야 한다). 갈라낼 것이 없고, 문법만 옮긴다.
+  const addLocked = full || busy || readOnly;
   const canSave = dirty && errors.size === 0 && !offline && !readOnly;
   const blocked = draftBlockedHint(draft, errors);
 
@@ -557,8 +575,18 @@ export function AiLinkChain({
           type="button"
           variant="outline"
           size="sm"
-          disabled={full || busy || readOnly}
-          onClick={() => setDraft((rows) => addDraftRow(rows))}
+          aria-disabled={addLocked || undefined}
+          // 잠긴 컨트롤은 사유를 든다. 이 버튼이 잠기는 사실 셋 중 문장을 가진
+          // 것은 「꽉 찼다」 하나이고(바로 아래 `chain-full`), 그것이 이 버튼이
+          // 실제로 가장 자주 잠기는 이유다. 나머지 둘의 문장은 이 블록의 배너와
+          // 저장 쪽 힌트가 이미 들고 있으나 id 를 갖는 노드가 아니라 여기서
+          // 가리킬 수 없다 — 그 배선은 이 goal 의 좌표가 아니므로 PR 에 남긴다.
+          aria-describedby={full ? CHAIN_FULL_NOTE_ID : undefined}
+          className={cn(addLocked && "opacity-50")}
+          onClick={() => {
+            if (addLocked) return;
+            setDraft((rows) => addDraftRow(rows));
+          }}
           data-testid="chain-add"
         >
           예비 provider 추가
@@ -607,7 +635,11 @@ export function AiLinkChain({
       </p>
 
       {full && (
-        <p className="text-meta text-ink-muted" data-testid="chain-full">
+        <p
+          id={CHAIN_FULL_NOTE_ID}
+          className="text-meta text-ink-muted"
+          data-testid="chain-full"
+        >
           예비 provider는 {MAX_FALLBACK_HOPS}개까지 둘 수 있습니다. 하나를 뺀 뒤
           추가하세요.
         </p>
