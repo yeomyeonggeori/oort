@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-08-18 (Fable) · 파도 8 완주(4/4) — ★LIVE-5 전 축 종결·5c 실기동 E2E·#1561 검증 close
+- **LIVE-5c(#1565/PR #1570)**: 실 입력 왕복(XTEST 1006프레임·실 xterm 도달)·비관측 mutation red proof 양쪽·remint 천장 **반증**(coturn은 ALLOCATE 시만 만료 검사 — 택일 (b), #1574)·validate v2 실호출 200. producer 실결함 3건 실기동 적발·수리. freeze 회전 1(C1: continue가 재검증 deadline을 굶김 — 루프 선두 이동+--jam red proof). **engine=`d987ff58`**.
+- 병렬 3건 랜딩: #1535(SELF_HOST §4 화면 실물 재작성, #1567)·#1563(Shift+Esc press-단위 판정 1슬롯, #1569 — grok PASS)·#1536(빈 채널 첫 행동, #1568 — design-review PASS B0/H0).
+- #1561 close: 파도 8 실측 alignment fail 0(워커 PR 전건 PASS·플러시 track 직행·sync PR 0). 후속 발급: #1571(게이트 포트-스쿼트 가드 일반화)·#1572(base 위생 마이크로 2건)·#1573(「멤버 초대하기」 이중 의미)·#1574(remint 반영).
+- 잔여: microVM 내부 왕복 미측(`unverified.inputDeliveryInMicroVM` — 권한 경계, momo-cube-host가 닿는 momo-server 배치=성재 손)·#1545·engine→main 승격(81+커밋) 정비.
+
 ## 2026-08-18 (Fable) · 파도 7 완주(4/4) — ★LIVE-5b 랜딩·CI 소음 구조 해소 확정·첫 track-랜딩 플러시
 - **LIVE-5b 랜딩**(`#1560→bc819ecc`): 딥링크 전환 UI·datachannel 입력 포워딩(4표면 비관측 red proof)·auto-return(창 자체를 세는 LATEWINDOW 증명)·오버레이 설계만. 폐곡선 2회전(grok 경쟁/계약+design-review B1 Esc 도달→해제 규칙·focus=상태) 후 재확인 PASS. **LIVE-5 전 축 코드 랜딩 — 잔여=5c 실기동 E2E+릴레이 #1545(성재 손)**.
 - **동반**: #1534(오퍼레이터 부트스트랩 — 키 둘 발견·M5 최초 측정)·#1510(propsKind — 거짓 묘비 해소)·#1541묶음(busy 소탕+SaveButton 정본 결함 발견→#1558).
