@@ -36,6 +36,7 @@ import { CascadeProvider } from "@/features/timeline/cascadeRail";
 import { ThreadPanel } from "@/features/timeline/ThreadPanel";
 import { LongPressHint } from "@/features/timeline/LongPressHint";
 import { WorkPanel } from "@/features/work/WorkPanel";
+import type { OpenWorkSession } from "@/features/work/openWorkSession";
 import { useWorkPanelTarget } from "@/features/agents/workLogStore";
 import type { WorkScope } from "@momo/core/features/work/workSessionModel";
 import { useTimeline } from "@/features/timeline/useTimeline";
@@ -245,12 +246,27 @@ export function ChatShell() {
   } | null>(null);
   const workThreadRequestRef = useRef(0);
 
-  const openWorkSession = useCallback((sessionId: string) => {
-    setThread(null);
-    setWorkScope("channel");
-    setWorkSessionId(sessionId);
-    setWorkOpen(true);
-  }, []);
+  /**
+   * 직접 조작 동선을 달고 온 딥링크인가 (LIVE-5b).
+   *
+   * 세션 id 와 함께 들고 다니는 이유는 이것이 **그 세션에 대한** 의도이기
+   * 때문이다. 사람이 패널 안에서 다른 세션으로 옮겨 가면 이 의도는 따라가지
+   * 않아야 하고, 세션 id 옆에 붙어 있으면 그 규칙을 따로 적을 필요가 없다.
+   */
+  const [workControlIntent, setWorkControlIntent] = useState<string | null>(
+    null
+  );
+
+  const openWorkSession = useCallback<OpenWorkSession>(
+    (sessionId, intent) => {
+      setThread(null);
+      setWorkScope("channel");
+      setWorkSessionId(sessionId);
+      setWorkControlIntent(intent?.control === true ? sessionId : null);
+      setWorkOpen(true);
+    },
+    []
+  );
 
   // A scope chip means "show me that list". The panel keeps its selected
   // session across close/reopen (returning to where you were), so while a
@@ -259,6 +275,7 @@ export function ChatShell() {
   // makes the chip's promise and the screen agree.
   const changeWorkScope = useCallback((scope: WorkScope) => {
     setWorkSessionId(null);
+    setWorkControlIntent(null);
     setWorkScope(scope);
   }, []);
 
@@ -369,20 +386,29 @@ export function ChatShell() {
   const anchorMsg = searchParams.get("msg");
   const anchorSeq = searchParams.get("seq");
 
+  // `?control=1`은 `?work=`의 부사다 — 혼자서는 아무 데도 가리키지 않는다
+  // (LIVE-5b). 도착지에서 확인 단계를 무장할 뿐 창을 열지 않으므로, 주소를
+  // 복사해 붙여넣은 사람이 그 한 번으로 남의 에이전트를 멈추는 일은 없다.
+  const anchorControl = searchParams.get("control");
+
   useEffect(() => {
     if (anchorWork === null) return;
-    openWorkSession(anchorWork);
+    openWorkSession(
+      anchorWork,
+      anchorControl === "1" ? { control: true } : undefined
+    );
     // 읽고 나면 주소에서 지운다. 패널의 열림/닫힘은 이 컴포넌트의 상태이므로,
     // 파라미터가 남으면 사람이 패널을 닫은 뒤에도 주소는 열려 있다고 말한다.
     setSearchParams(
       (current) => {
         const next = new URLSearchParams(current);
         next.delete("work");
+        next.delete("control");
         return next;
       },
       { replace: true }
     );
-  }, [anchorWork, openWorkSession, setSearchParams]);
+  }, [anchorControl, anchorWork, openWorkSession, setSearchParams]);
 
   /**
    * 주소가 가리킨 자리를 **읽고 나면 지운다** (리뷰 B2, #1193).
@@ -1002,6 +1028,7 @@ export function ChatShell() {
           onScopeChange={changeWorkScope}
           selectedId={workSessionId}
           onSelectedIdChange={setWorkSessionId}
+          controlIntentSessionId={workControlIntent}
           openingThreadId={openingWorkThreadId}
           threadOpenError={workThreadOpenError}
           onOpenThread={(workSession) => void openWorkSessionThread(workSession)}

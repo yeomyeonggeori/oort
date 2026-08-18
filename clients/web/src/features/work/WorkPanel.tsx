@@ -681,6 +681,7 @@ export function WorkPanel({
   onScopeChange,
   selectedId,
   onSelectedIdChange,
+  controlIntentSessionId = null,
   openingThreadId,
   threadOpenError,
   onOpenThread,
@@ -698,6 +699,14 @@ export function WorkPanel({
   onScopeChange: (scope: WorkScope) => void;
   selectedId: string | null;
   onSelectedIdChange: (sessionId: string | null) => void;
+  /**
+   * 딥링크가 **이 세션에 대해** 직접 조작 의도를 달고 왔다 (LIVE-5b).
+   *
+   * boolean 이 아니라 세션 id 인 이유: 사람이 패널 안에서 다른 행을 고르면 그
+   * 의도는 따라가면 안 된다. 「어느 세션의 의도인가」를 값 자체가 들고 있으면
+   * 그 규칙을 지우는 효과를 따로 쓸 필요가 없다.
+   */
+  controlIntentSessionId?: string | null;
   openingThreadId: string | null;
   threadOpenError: string | null;
   onOpenThread: (session: WorkSession) => void;
@@ -1077,6 +1086,10 @@ export function WorkPanel({
           onWideChange={setWide}
           onBack={closeDetail}
           openingThread={uuidEq(openingThreadId ?? undefined, selected.id)}
+          controlIntent={uuidEq(
+            controlIntentSessionId ?? undefined,
+            selected.id
+          )}
           onOpenThread={() => onOpenThread(selected)}
           onResumed={(resumedId) => {
             void sessionsQuery.refetch();

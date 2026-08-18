@@ -18,6 +18,7 @@ import { CHIP_CLASS } from "@/features/common/chip";
 import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/States";
 import { useSessionWorkstream } from "@/features/workstreams/useWorkstreams";
 import { DisplayObserver } from "./DisplayObserver";
+import { ControlInvite, DisplayController } from "./DisplayController";
 import { ObserverTerminal } from "./ObserverTerminal";
 import { useSessionEvents, useSessionVerification } from "./useWorkSessions";
 import {
@@ -637,6 +638,7 @@ export function WorkSessionDetail({
     busy: "세션 스레드 여는 중",
   },
   onResumed,
+  controlIntent = false,
 }: {
   session: WorkSession;
   hosts: WorkHost[] | undefined;
@@ -683,8 +685,23 @@ export function WorkSessionDetail({
    * 여기서 바꾸면 목록과 상세가 서로 다른 세션을 가리킨다.
    */
   onResumed: (sessionId: string) => void;
+  /**
+   * A link brought this reader here to take the keyboard (LIVE-5b).
+   *
+   * It ARMS the confirmation and never starts a window. A link that stopped
+   * somebody's agent by being clicked would be the worst affordance in this
+   * client: the reader who followed it wanted to get to the screen, and the
+   * decision to halt a run has to be made on the surface where its consequences
+   * are written down (`CONTROL_INVITE_COPY`), not in a chat message.
+   *
+   * It is also only an intent. Whether a control affordance exists at all is
+   * still `controlAffordance`'s answer, which the card that sent this could not
+   * have known: the card names a session, and who owns that session is a fact
+   * only this surface has.
+   */
+  controlIntent?: boolean;
 }) {
-  const { workspaceId } = useSession();
+  const { workspaceId, session: auth } = useSession();
   const mine = useMemo(
     () => eventsForSession(liveEvents, session.id),
     [liveEvents, session.id]
@@ -715,6 +732,21 @@ export function WorkSessionDetail({
     setExcerptOpen(false);
     setShared(false);
   }, [session.id]);
+
+  // 직접 조작 (LIVE-5b). Two booleans and not one: 무장 is「이 사람이 물어봤다」,
+  // 개시는「이 사람이 답했다」. 링크는 앞의 것까지만 할 수 있다.
+  const isSessionOwner = uuidEq(session.memberId, auth.member.id);
+  const [controlArmed, setControlArmed] = useState(controlIntent);
+  const [controlling, setControlling] = useState(false);
+  useEffect(() => {
+    // 다른 세션이 같은 패널에 들어오면 조작 상태는 그 세션의 것이 아니다.
+    // 언마운트되는 `DisplayController` 가 자기 창을 반환하고 나간다.
+    setControlArmed(false);
+    setControlling(false);
+  }, [session.id]);
+  useEffect(() => {
+    if (controlIntent) setControlArmed(true);
+  }, [controlIntent]);
 
   // Entering the detail takes the caret with it. Without this the pane swapped
   // its contents and left focus on a button that no longer exists, so the
@@ -1064,13 +1096,36 @@ export function WorkSessionDetail({
                 click" that block's own history warns about. Every state that
                 CAN still change — no screen published, 소유자만 보기, a host
                 that stopped advertising — is stated by the block itself. */}
-            {(session.status === "running" || session.status === "idle") && (
-              <DisplayObserver
-                session={session}
-                hostName={hostName}
-                headingLevel={childHeadingLevel}
-              />
-            )}
+            {(session.status === "running" || session.status === "idle") &&
+              (controlling ? (
+                /* 조작 중에는 관전 스트림이 서지 않는다. 같은 화면을 두 번
+                   협상하면 같은 데스크톱이 두 프레임에 서고, 사람은 어느 쪽에
+                   타이핑하는지 알 수 없다. 조작 표면 자신이 화면을 그린다. */
+                <DisplayController
+                  session={session}
+                  hostName={hostName}
+                  headingLevel={childHeadingLevel}
+                  onDone={() => {
+                    setControlling(false);
+                    setControlArmed(false);
+                  }}
+                />
+              ) : (
+                <DisplayObserver
+                  session={session}
+                  hostName={hostName}
+                  headingLevel={childHeadingLevel}
+                  controlInvite={
+                    <ControlInvite
+                      session={session}
+                      isOwner={isSessionOwner}
+                      armed={controlArmed}
+                      onArm={setControlArmed}
+                      onStart={() => setControlling(true)}
+                    />
+                  }
+                />
+              ))}
           </>
         )}
 

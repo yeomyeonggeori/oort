@@ -175,6 +175,11 @@ export function WorkConsoleRoute() {
   const offline = useOffline();
   const [params, setParams] = useSearchParams();
   const selectedParam = params.get("session")?.trim() || null;
+  // 직접 조작 동선을 달고 온 주소인가 (LIVE-5b). 채팅 표면의 `?work=&control=1`
+  // 과 같은 부사이고, 여기서도 같은 일만 한다: 도착지에서 확인 단계를 무장할 뿐
+  // 창을 열지 않는다. 두 목적지가 같은 주소 낱말에 다르게 반응하면, 링크를
+  // 복사해 붙여넣은 사람은 어느 쪽에 떨어지느냐로 결과가 갈린다.
+  const controlIntent = params.get("control") === "1";
 
   const sessionsQuery = useWorkSessions(workspaceId);
   const hostsQuery = useWorkHosts(workspaceId);
@@ -483,6 +488,7 @@ export function WorkConsoleRoute() {
                 }
                 onBack={clearSelection}
                 openingThread={false}
+                controlIntent={controlIntent}
                 onOpenThread={() =>
                   navigate(
                     messageAnchorPath(
