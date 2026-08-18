@@ -4302,10 +4302,13 @@ async fn live5a_1_a_grant_carries_its_own_expiring_relay_credential() {
     // credential once per peer connection and discards these later mints, since
     // `webrtcbin` cannot swap a TURN server on a running ICE agent. So what is
     // proved here is that a client which CAN take a fresh credential — the next
-    // viewer's pipeline, or a future renegotiating producer — is handed one with
-    // its full TTL ahead of it, rather than a replay of the grant's already-aged
-    // copy. Whether a live stream can use it is LIVE-5c's measurement
-    // (`template.spec.json` → `unverified.credentialCeiling`).
+    // viewer's pipeline, or a future ICE-restarting producer — is handed one
+    // with its full TTL ahead of it, rather than a replay of the grant's
+    // already-aged copy. Whether a live stream NEEDS one was LIVE-5c's
+    // measurement (PR #1570): it does not — coturn re-checks expiry only at
+    // ALLOCATE, so a stream outlives its credential. The fresh mint matters to
+    // the next viewer and to a future mid-session re-ALLOCATE (ICE restart),
+    // which must remint at that moment (`momo_t3::turn` module header).
     tokio::time::sleep(std::time::Duration::from_millis(1_100)).await;
     let response = validate_display(
         &http, &base, &host_seed, workspace, &host_id, capability, true,
