@@ -1,5 +1,17 @@
 # oort 기획 현재 상태 (Planning Current State)
 
+> **2026-08-19 스냅샷 39 (Fable · momo-main — ★engine→main 승격 완료·파도 9 비행. PLN-20260815-01).** 컴팩트 복원 진입점.
+>
+> **★ 승격 완료**: main=`e322ccf3`(107커밋 — LIVE-5 전 축·파도 5~8·CI 구조 해소). sync 짝 #1577/#1578로 topology 복원(main=조상·alignment PASS). 세 브랜치 전부 PR-only 보호 실측 확인(직접 push 거부) — 이후 모든 track 합류도 PR 경유.
+>
+> **파도 9 비행 중(4기)**: #1571(게이트 포트-스쿼트 가드 일반화+검출 창)·#1572(base 위생 마이크로 2 — openapi YAML 1.1·bench 주석)·#1573(「멤버 초대하기」 이중 의미 — 방향은 워커 택일 상신)·#1574(remint (b) 반영 — 서술 정정만). 패킷=`handoffs/2026-08-19-wave9-packet.md`. 완료 시 표준 폐곡선(#1573=design-review·#1571=Fable+grok).
+>
+> **성재 손(비차단·2026-08-19 위임 확장 후 재정리)**: SSH 집행류는 오케스트레이터 권한 거부로 성재 직접 — ①#1545(momo-turn use-auth-secret, 런북 §6) ②**microVM 내부 왕복용 momo-server 배치**(momo-cube-host 도달 가능 인스턴스 — 5c 잔여 라벨 해소 조건) ③C-1(Xcode 콘솔) ④#1361(pairing) ⑤배포 검증 1왕복.
+>
+> **자율 큐(파도 9 이후)**: #1511(낱말+게이트)·#1515/#1516(디자인 토큰)·#1558(SaveButton)·#1559(busy 잔여)·#1479/#1480(폰 AX)·폰 EmptyState 액션 자리(#1568 이탈 4). dsh C/D 착수 검토(LIVE-5 종결로 조건 성립).
+>
+> 이하 스냅샷 38:
+
 > **2026-08-18 스냅샷 38 (Fable · momo-main — 파도 8 완주·★LIVE-5 전 축 종결. PLN-20260815-01).** 컴팩트 복원 진입점.
 >
 > **★ LIVE-5 종결**: 5a+5b에 이어 **5c 실기동 E2E 완주(#1565/PR #1570)** — 실 입력 왕복(datachannel→producer→XTEST→실 xterm, 1006프레임)·비관측 mutation red proof 양쪽·**remint 천장 반증**(coturn은 ALLOCATE 시만 만료 검사 — 택일 (b) 채택, 반영=#1574)·validate v2 실호출 개통. producer 실결함 3건(bundle-policy·30s 침묵 오판·오귀책 로그) 실기동 적발·수리 + freeze 회전 1(C1 재검증 굶주림 — 루프 선두 이동·--jam red proof). **engine=`d987ff58`**. 라벨 승격: `runtimeVerified.keystrokeReachesAnApplication` 등 — 잔여 1=`unverified.inputDeliveryInMicroVM`(권한 경계).

@@ -5,6 +5,11 @@
 
 ---
 
+## 2026-08-19 (Fable) · ★engine→main 승격 집행(107커밋)·파도 9 편성 — 성재 전권 위임 확장("내 손 작업도 알아서")
+- **승격**: PR #1576(merge, main=`e322ccf3`) — 정책 마커+라벨 절차, 충돌 0·역방향 0. topology 복원=sync #1577(engine `88477fcc`)·#1578(uxui `a13c2d01`), alignment 전부 PASS. 로컬 3체크아웃 ff 정렬(낡은 TRACKS 수기 편집·패킷 사본은 랜딩본 확인 후 폐기).
+- **파도 9 발사**: #1571(게이트 가드 일반화)·#1572(base 위생 마이크로)·#1573(라벨 이중 의미)·#1574(remint 반영) — 패킷 `handoffs/2026-08-19-wave9-packet.md`.
+- **성재 손 항목 집행 시도**: SSH 원격 집행(momo-turn #1545·cube-host momo-server 배치)은 **권한 시스템 거부** — 성재 직접 실행 필요(보고 예정). C-1(Apple 콘솔)·#1361(개인 인증)은 본질적 성재 항목.
+
 ## 2026-08-18 (Fable) · 파도 8 완주(4/4) — ★LIVE-5 전 축 종결·5c 실기동 E2E·#1561 검증 close
 - **LIVE-5c(#1565/PR #1570)**: 실 입력 왕복(XTEST 1006프레임·실 xterm 도달)·비관측 mutation red proof 양쪽·remint 천장 **반증**(coturn은 ALLOCATE 시만 만료 검사 — 택일 (b), #1574)·validate v2 실호출 200. producer 실결함 3건 실기동 적발·수리. freeze 회전 1(C1: continue가 재검증 deadline을 굶김 — 루프 선두 이동+--jam red proof). **engine=`d987ff58`**.
 - 병렬 3건 랜딩: #1535(SELF_HOST §4 화면 실물 재작성, #1567)·#1563(Shift+Esc press-단위 판정 1슬롯, #1569 — grok PASS)·#1536(빈 채널 첫 행동, #1568 — design-review PASS B0/H0).
