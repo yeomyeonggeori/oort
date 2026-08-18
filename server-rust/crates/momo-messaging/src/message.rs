@@ -1238,6 +1238,33 @@ pub struct QuotedMessage {
     /// staircase per hop, so the id is deliberately not projected here. A client
     /// draws "↳ 인용" and stops.
     pub quotes_another: bool,
+    /// The quoted row's `props.kind`, and **nothing else from its props**
+    /// (#1510).
+    ///
+    /// A card message rides an ordinary row: `type = 'text'`, `body IS NULL`,
+    /// and the card itself in `props` (`props.kind = 'completion_report'`, the
+    /// shape #1454 commits). The quote block's tombstone belt reads "a text with
+    /// no body is deleted" — true for every row until that commit landed, and a
+    /// lie about every card since. The signal that separates them has to cross
+    /// the wire, because no client can tell a card from a tombstone out of the
+    /// four fields above.
+    ///
+    /// One key, not the props object: the props of a card hold its whole payload
+    /// (summary, bullets, gate rows), and shipping that beside a two-line quote
+    /// would be both the snapshot 규칙 3 refuses and the "펼치지 않는다" 미결 2
+    /// answers. `NULL` for a tombstone as well — a deleted row keeps its props,
+    /// and the deletion is allowed to leave nothing behind but the fact of it.
+    ///
+    /// **A non-empty JSON string, or nothing.** `props` is free-form `jsonb` and
+    /// only the REST send path narrows it to strings (`props_value`); workers and
+    /// `momo-t3` write `serde_json::Value` straight in, so `"kind": 12` is
+    /// reachable. `->>` would stringify that to `"12"` and `""` would ride as a
+    /// present-but-empty kind — either one is a row the client would call a card
+    /// on the refetch path while its own `presentPropsKind` (string, non-empty)
+    /// calls it a tombstone locally, so the same original would read two ways
+    /// depending on which path resolved it. The projection therefore states the
+    /// client's predicate in SQL rather than trusting the writers.
+    pub props_kind: Option<String>,
 }
 
 /// The history/replies column list with the rollup join attached. Column names
@@ -1252,11 +1279,19 @@ const PAGED_COLS: &str = "m.id, m.workspace_id, m.channel_id, m.seq, m.hlc_ts, m
      q.id AS quote_id, q.seq AS quote_seq, q.author_member_id AS quote_author_member_id, \
      q.type::text AS quote_message_type, q.state::text AS quote_state, q.body AS quote_body, \
      q.edited_at AS quote_edited_at, q.deleted_at AS quote_deleted_at, \
-     (q.reply_to_id IS NOT NULL) AS quote_quotes_another";
+     (q.reply_to_id IS NOT NULL) AS quote_quotes_another, \
+     CASE WHEN q.state::text <> 'deleted' \
+           AND jsonb_typeof(q.props->'kind') = 'string' \
+           AND (q.props->>'kind') <> '' \
+          THEN q.props->>'kind' \
+     END AS quote_props_kind";
 
 /// [`PAGED_COLS`] plus the attachment aggregate. A second constant rather than
-/// an extension of the first because `interaction.rs` builds its own column list
-/// on top of [`PAGED_COLS`] and does not carry the lateral join.
+/// an extension of the first because `interaction.rs` keeps its own column list
+/// (`INTERACTION_COLS`) and does not carry either join. That list is a **sibling,
+/// not a derivative**: it selects no `q.*` at all and its rows are decoded by
+/// [`decode_stored_row`], never by [`decode_quoted`] — so the quote columns added
+/// here cannot be missing from a statement that tries to read them (#1510 review).
 fn paged_cols_with_attachments() -> String {
     format!("{PAGED_COLS}, {PAGED_ATTACHMENT_COL}")
 }
@@ -1307,6 +1342,7 @@ fn decode_quoted(row: &sqlx::postgres::PgRow) -> Result<Option<QuotedMessage>, s
         edited_at: row.try_get("quote_edited_at")?,
         deleted_at: row.try_get("quote_deleted_at")?,
         quotes_another: row.try_get("quote_quotes_another")?,
+        props_kind: row.try_get("quote_props_kind")?,
     }))
 }
 
@@ -2340,6 +2376,36 @@ mod tests {
                 !sql.contains("q.reply_to_id AS"),
                 "projecting the inner target's id invites the staircase 규칙 4 \
                  forbids: {sql}"
+            );
+            // #1510 — the card signal is ONE key out of the quoted row's props.
+            assert!(
+                sql.contains("q.props->>'kind'"),
+                "a quote must carry the card signal that separates a bodyless \
+                 card from a tombstone: {sql}"
+            );
+            assert!(
+                !sql.contains("q.props AS") && !sql.contains("q.props,"),
+                "only the kind crosses the wire — the quoted row's payload here \
+                 would be the snapshot 규칙 3 refuses: {sql}"
+            );
+            // A tombstone keeps its props in the row; it must not keep them on
+            // the wire. 규칙 3 leaves the fact of a deletion and nothing else.
+            assert!(
+                sql.contains("q.state::text <> 'deleted'"),
+                "a deleted original must project no card kind either: {sql}"
+            );
+            // The predicate is the CLIENT's, restated in SQL (#1510 review M-1).
+            // `props` is free-form jsonb and only the REST path narrows it to
+            // strings, so `"kind": 12` / `true` / `{}` / `""` are all reachable
+            // rows. `->>` alone would stringify the first three and pass the
+            // fourth, and the client's `presentPropsKind` accepts neither — the
+            // same original would then read as a card after a refetch and as a
+            // tombstone when resolved from a row already on screen.
+            assert!(
+                sql.contains("jsonb_typeof(q.props->'kind') = 'string'")
+                    && sql.contains("(q.props->>'kind') <> ''"),
+                "the projected kind must be a non-empty JSON string, exactly as \
+                 the client asks it: {sql}"
             );
         }
     }

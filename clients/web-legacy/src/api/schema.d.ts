@@ -4398,6 +4398,8 @@ export interface components {
             deletedAtMs?: number;
             /** @description The quoted message itself quotes something. A marker only — the inner target's id is deliberately absent, because quoting is drawn one layer deep and a second id is all anyone needs to build a staircase. Omitted when false. */
             quotesAnother?: boolean;
+            /** @description The quoted message's `props.kind`, and the only thing its props contribute here. A card message rides an ordinary row — `type` is `text`, `body` is absent, and the card itself lives in `props` — which leaves it identical to a tombstone in every other field of this object, so a client reading "a text with no body was deleted" calls that card a deleted message. This key is what separates them. Omitted when the quoted message carries no kind, and omitted on a tombstone: a deleted row keeps its props in the database, but the deletion leaves nothing on the wire beyond the fact of it. The card's own payload never appears here — a quote draws two lines and sends the reader to the original. */
+            propsKind?: string;
         };
         MessageAttachment: {
             /** Format: uuid */
