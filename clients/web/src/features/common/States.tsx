@@ -156,8 +156,14 @@ export function InlineBanner({
 }
 
 /**
- * Empty state: one line of copy plus at most two equal actions. Left-aligned
- * and quiet, never a centered illustration poster.
+ * Empty state: one line of copy plus at most two actions. Left-aligned and
+ * quiet, never a centered illustration poster.
+ *
+ * 둘일 때 그 둘은 **동급이 아니다** (#1536). 이 상자는 위계를 강제하지 않고
+ * (`actions`가 노드를 그대로 받는다) 호출자가 디자인 시스템 §3 채움 순서로 그것을
+ * 말한다 — 빈 채널이 `첫 메시지 쓰기`(채움)와 `멤버 초대하기`(윤곽)를 그 순서로
+ * 넘긴다. 같은 자리에 같은 옷 두 벌을 세우면 그 화면은 「둘 중 아무거나」라고 말하게
+ * 되고, 그것은 첫 행동을 묻는 사람에게 답이 아니다.
  *
  * Same `break-keep` as the banner above, for the same reason and by the same
  * rule: these two are the file's Korean prose surfaces, so the rule applies to
