@@ -29,6 +29,12 @@ thiserror.workspace = true
 #                unchanged; the domain must not re-shape a client contract.
 base64.workspace = true
 serde_json.workspace = true
+# LIVE-5a (`src/turn.rs`) — the per-session TURN credential is
+# `base64(HMAC-SHA1(static-auth-secret, "<expiry>:<session>"))`, coturn's own
+# `use-auth-secret` derivation. SHA-1 is fixed by WebRTC's STUN
+# MESSAGE-INTEGRITY rather than chosen; the module header says why at length.
+hmac.workspace = true
+sha1.workspace = true
 # ADR-0156 D4-③ — the `cubesandbox` adapter is this crate's first (and only)
 # outbound HTTP client. It is confined here rather than in `momo-server` for the
 # same reason `momo-ephemeral`'s is: `momo-server`'s manifest still carries no

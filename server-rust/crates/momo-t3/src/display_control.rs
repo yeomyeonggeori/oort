@@ -40,6 +40,18 @@
 //! all. That is 증보 3 D3's "기술적으로 차단" — not a policy sentence but a
 //! refusal on the only server path an agent has to a work session.
 //!
+//! ## What a window also does, since LIVE-5a
+//!
+//! It **closes the session to everyone but its owner** while it stands (077),
+//! and puts the owner's setting back when it ends. The argument is one sentence:
+//! the whole point of a control window is a person typing a password, and a
+//! teammate who pressed 관전 a minute earlier is watching that happen. The flip
+//! and the restore live inside [`open_control_window_in_tx`] and inside the
+//! close statements themselves rather than beside them — 076 already has three
+//! close paths and #1425 added a fourth author that is not a route, and a
+//! restore a fifth author forgets is a session left `owner_only` forever with
+//! nothing anywhere saying why.
+//!
 //! ## What a window deliberately cannot hold
 //!
 //! Keystrokes, frames, screenshots, a password, a 2FA code. 076 has no column
@@ -123,6 +135,13 @@ pub struct ControlWindow {
     /// `None` while the window stands.
     pub ended_at_ms: Option<i64>,
     pub end_reason: Option<ControlWindowEndReason>,
+    /// The `work_session.observation` this window displaced (077), or `None`
+    /// when it displaced nothing because the session was already `owner_only`.
+    ///
+    /// Read back by callers only to say so in the audit row. The **restore** is
+    /// not a caller's job — it travels inside each close statement, for the
+    /// reason [`close_control_window_in_tx`] gives.
+    pub prior_observation: Option<String>,
 }
 
 /// The column list every read below shares, so one row shape cannot drift into
@@ -131,7 +150,38 @@ const WINDOW_COLUMNS: &str = "id, work_session_id, grantee_member_id, \
      floor(extract(epoch from started_at) * 1000)::bigint AS started_at_ms, \
      floor(extract(epoch from lease_expires_at) * 1000)::bigint AS lease_expires_at_ms, \
      floor(extract(epoch from ended_at) * 1000)::bigint AS ended_at_ms, \
-     end_reason";
+     end_reason, prior_observation";
+
+/// The `work_session.observation` a control window forces while it stands
+/// (077): a teammate must not be watching the screen a person is logging in on.
+const OBSERVATION_UNDER_CONTROL: &str = "owner_only";
+
+/// Restore the displaced `observation` for whatever this statement just closed.
+///
+/// A `WITH` fragment rather than a second statement, and that is the whole
+/// design: 076's header lists three close paths and #1425 added a fourth author
+/// that is not a route at all, so a restore written *beside* a close is a
+/// restore some future fifth author forgets — and forgetting it leaves a session
+/// silently `owner_only` forever, a setting the owner never chose and no error
+/// ever mentions. Inside the close statement it cannot be forgotten and it
+/// cannot half-happen.
+///
+/// `prior_observation IS NOT NULL` is what makes it a no-op for a window that
+/// displaced nothing. The `ws.observation <> c.prior_observation` clause spares
+/// the row lock when the value is already right — which is every close on a
+/// session that was `owner_only` to begin with.
+///
+/// The `$1` it binds is the workspace id, which every caller already binds
+/// first. Written against `closed`, so a caller must name its close CTE that.
+const RESTORE_OBSERVATION_CTE: &str = ", restored AS ( \
+       UPDATE work_session ws \
+          SET observation = c.prior_observation \
+         FROM closed c \
+        WHERE ws.workspace_id = $1 \
+          AND ws.id = c.work_session_id \
+          AND c.prior_observation IS NOT NULL \
+          AND ws.observation <> c.prior_observation \
+     )";
 
 /// Decode to the row shape, in the error type sqlx speaks.
 ///
@@ -151,6 +201,7 @@ fn decode_window(row: &sqlx::postgres::PgRow) -> Result<ControlWindow, sqlx::Err
         end_reason: reason
             .as_deref()
             .and_then(ControlWindowEndReason::from_db_label),
+        prior_observation: row.try_get("prior_observation")?,
     })
 }
 
@@ -173,13 +224,16 @@ pub async fn expire_lapsed_control_windows_in_tx(
     session_id: Uuid,
 ) -> Result<Vec<ControlWindow>, T3Error> {
     let rows = sqlx::query(&format!(
-        "UPDATE display_control_window \
-            SET ended_at = clock_timestamp(), end_reason = 'expired' \
-          WHERE workspace_id = $1 \
-            AND work_session_id = $2 \
-            AND ended_at IS NULL \
-            AND lease_expires_at <= clock_timestamp() \
-        RETURNING {WINDOW_COLUMNS}"
+        "WITH closed AS ( \
+           UPDATE display_control_window \
+              SET ended_at = clock_timestamp(), end_reason = 'expired' \
+            WHERE workspace_id = $1 \
+              AND work_session_id = $2 \
+              AND ended_at IS NULL \
+              AND lease_expires_at <= clock_timestamp() \
+           RETURNING {WINDOW_COLUMNS} \
+         ){RESTORE_OBSERVATION_CTE} \
+         SELECT * FROM closed"
     ))
     .bind(workspace_id)
     .bind(session_id)
@@ -266,16 +320,29 @@ pub async fn open_control_window_in_tx(
         if existing.grantee_member_id != grantee_member_id {
             return Ok(Err(existing));
         }
+        // Deliberately **before** the observation flip below, so a re-open by
+        // the person already holding the keyboard does not overwrite
+        // `prior_observation` with the `owner_only` this window itself wrote.
+        // The standing row already carries the value the owner chose; a retry
+        // that "recorded" the current value would make the close restore the
+        // window's own doing and lose the setting for good.
         let rebound =
             rebind_control_window_in_tx(conn, workspace_id, existing.id, capability_id).await?;
         return Ok(Ok(rebound.unwrap_or(existing)));
     }
 
+    // 077 — the teammates stop watching, in this transaction, before the window
+    // exists. See [`close_observation_for_control_in_tx`] for why the order is
+    // that way round and why the displaced value travels on the row.
+    let prior_observation =
+        close_observation_for_control_in_tx(conn, workspace_id, session_id).await?;
+
     let row = sqlx::query(&format!(
         "INSERT INTO display_control_window \
-           (workspace_id, work_session_id, grantee_member_id, capability_id, lease_expires_at) \
+           (workspace_id, work_session_id, grantee_member_id, capability_id, lease_expires_at, \
+            prior_observation) \
          VALUES ($1, $2, $3, $4, \
-                 clock_timestamp() + make_interval(secs => $5::double precision)) \
+                 clock_timestamp() + make_interval(secs => $5::double precision), $6) \
          RETURNING {WINDOW_COLUMNS}"
     ))
     .bind(workspace_id)
@@ -283,9 +350,80 @@ pub async fn open_control_window_in_tx(
     .bind(grantee_member_id)
     .bind(capability_id)
     .bind(CONTROL_WINDOW_LEASE_SECONDS as f64)
+    .bind(prior_observation.as_deref())
     .fetch_one(&mut *conn)
     .await?;
     Ok(Ok(window_from_row(&row)?))
+}
+
+/// Force `observation = 'owner_only'` for the window about to open, and hand
+/// back the value that was displaced (`None` if nothing was).
+///
+/// ## Why control closes observation at all
+///
+/// The window exists so a person can do the one thing on that VM the agent must
+/// not see: log in. ADR-0004 증보 3 D2 keeps the password out of the transcript,
+/// the audit log and the Memory Plane; D3 keeps it out of the agent's reach.
+/// None of which helps if a teammate pressed 관전 thirty seconds earlier and is
+/// still watching, frame by frame, while it is typed. `observation = 'open'` is
+/// a reasonable setting for an agent's work session and a catastrophic one for a
+/// login, and nobody remembers to flip it first — so the window flips it.
+///
+/// ## Why the teammate's *live* stream stops too
+///
+/// Nothing here revokes a capability, and nothing needs to. LIVE-2 already built
+/// the reach: the producer re-validates every 30 seconds and
+/// [`crate::terminal_attach::validate_attach_capability_in_tx`] re-reads
+/// `observation` on every one of those calls, so a grant that was legal when it
+/// was minted stops validating within one re-validation period. That is the same
+/// mechanism `live1_4_revocation_reaches_a_live_stream` pins, reused rather than
+/// paraphrased.
+///
+/// ## Why it is a separate statement rather than a CTE on the INSERT
+///
+/// Because the restore needs the value this displaced, and PostgreSQL's
+/// `RETURNING` on an `UPDATE` yields the **new** row. Reading first and writing
+/// second is exact, and it is safe against a race for the reason
+/// [`open_control_window_in_tx`]'s header gives: the caller holds `FOR UPDATE`
+/// on the session row (`lock_attach_target_in_tx`), so nothing can move
+/// `observation` between these two statements. It is also inside this function
+/// rather than at the call site so that "opening control closes the session" is
+/// one fact with one author, exactly as parking the runs is.
+///
+/// The owner's own setting is never *lost*: nothing else in this server writes
+/// `work_session.observation` — `routes::work_sessions::patch` refuses the field
+/// by name — so the value read here is the one the owner chose, and the close
+/// path writes exactly it back.
+async fn close_observation_for_control_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    session_id: Uuid,
+) -> Result<Option<String>, T3Error> {
+    let current: Option<String> = sqlx::query_scalar(
+        "SELECT observation FROM work_session WHERE workspace_id = $1 AND id = $2",
+    )
+    .bind(workspace_id)
+    .bind(session_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    // An absent session is unreachable — the caller located it under a lock —
+    // and refusing to invent a prior value keeps it that way.
+    let Some(current) = current else {
+        return Ok(None);
+    };
+    if current == OBSERVATION_UNDER_CONTROL {
+        // Already closed. Recording `owner_only` as the "prior" value would be
+        // true but useless, and it would make the close path write a value it
+        // did not displace — so `None` means 「이 창은 아무것도 바꾸지 않았다」.
+        return Ok(None);
+    }
+    sqlx::query("UPDATE work_session SET observation = $3 WHERE workspace_id = $1 AND id = $2")
+        .bind(workspace_id)
+        .bind(session_id)
+        .bind(OBSERVATION_UNDER_CONTROL)
+        .execute(&mut *conn)
+        .await?;
+    Ok(Some(current))
 }
 
 /// Move a standing window onto the grant that was just minted for it, and push
@@ -371,12 +509,15 @@ pub async fn close_control_window_in_tx(
     reason: ControlWindowEndReason,
 ) -> Result<Option<ControlWindow>, T3Error> {
     let row = sqlx::query(&format!(
-        "UPDATE display_control_window \
-            SET ended_at = clock_timestamp(), end_reason = $3 \
-          WHERE workspace_id = $1 \
-            AND work_session_id = $2 \
-            AND ended_at IS NULL \
-        RETURNING {WINDOW_COLUMNS}"
+        "WITH closed AS ( \
+           UPDATE display_control_window \
+              SET ended_at = clock_timestamp(), end_reason = $3 \
+            WHERE workspace_id = $1 \
+              AND work_session_id = $2 \
+              AND ended_at IS NULL \
+           RETURNING {WINDOW_COLUMNS} \
+         ){RESTORE_OBSERVATION_CTE} \
+         SELECT * FROM closed"
     ))
     .bind(workspace_id)
     .bind(session_id)
@@ -711,7 +852,7 @@ pub async fn expire_lapsed_control_windows_for_workspace_in_tx(
               AND ended_at IS NULL \
               AND id IN (SELECT id FROM lapsed) \
            RETURNING {WINDOW_COLUMNS} \
-         ) \
+         ){RESTORE_OBSERVATION_CTE} \
          SELECT closed.*, ws.channel_id \
            FROM closed \
            JOIN work_session ws ON ws.id = closed.work_session_id"

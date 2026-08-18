@@ -2903,12 +2903,27 @@ paths:
         MomoHost-signed display binding, an unrevoked work_host, AND that host
         advertising capabilities.display_attach. That last clause is fail-closed
         and is what excludes BYOC hosts without any policy naming a provider.
+        Since LIVE-5a a controller grant also FORCES observation to owner_only
+        for as long as the window stands, and restores the owner's own setting
+        when it closes — by return, by lease lapse, or with the session. A
+        teammate's already-open stream stops validating within one
+        re-validation period, because the validate join re-reads observation
+        every time. The reason is the whole point of the window: a person is
+        about to type a password, and 증보 3 D2 keeps that out of the
+        transcript and the audit log while a teammate watching it frame by
+        frame would undo all of it.
         display_endpoint is the HOST's own credential-free WebRTC signalling
         WebSocket; it contains no bearer, momo never proxies signalling or
-        media, and no frame is stored anywhere. Nothing the person types during
-        a control window enters this API, the transcript, the audit log or the
-        Memory Plane (증보 3 D2) — the ledger records who, when and why it
-        ended, and has no column that could hold a keystroke.
+        media, and no frame is stored anywhere. ice_servers is the one place
+        momo touches the ICE negotiation: it mints a SHORT-LIVED credential for
+        the oort-operated relay (ADR-0165 D3 — never a third party's), scoped to
+        this work session, replacing the single shared password the relay
+        shipped with. It is empty on an instance that was given no relay, which
+        a client must treat as "use what you already have" rather than as an
+        error. Nothing the person types during a control window enters this API,
+        the transcript, the audit log or the Memory Plane (증보 3 D2) — the
+        ledger records who, when and why it ended, and has no column that could
+        hold a keystroke.
       security:
         - bearerAuth: []
       parameters:
@@ -8354,6 +8369,27 @@ components:
             unprojected, exactly as the PTY pair's do. Independent of
             remoteAttachAvailable: a session can offer a screen and no terminal,
             or the reverse, and a client that folds them offers the wrong verb.
+        controlStartedAt:
+          type: integer
+          format: int64
+          description: >
+            Epoch milliseconds at which somebody took this session's keyboard,
+            present only while they still hold it (LIVE-5a). ABSENT means nobody
+            does — a 0 would render as 1970.
+            This is the field a reload reads. The work.session.control envelope
+            says the same thing over the wire, but Centrifugo is transport and a
+            surface that only heard it forgets on refresh; the value here comes
+            from the display_control_window ledger, which is the source of truth
+            for the boundary. The login-handoff card's control_* props are a
+            second, narrower projection of that same ledger and are not it.
+            WHO holds the keyboard is deliberately absent, matching the
+            broadcast: control is owner-only, so "somebody has control" is all a
+            reader or an agent needs to behave correctly, and nothing the person
+            types is reachable from here or from anything this links to
+            (ADR-0004 증보 3 D2).
+            While it is present the session is forced to observation=owner_only,
+            and the owner's own setting is restored when the window closes by
+            any of its three routes.
         startedAtMs:
           type: integer
           format: int64
@@ -8594,9 +8630,35 @@ components:
             when it did not consider the question, and "did you mean to stop the
             agent and take the keyboard" is never answered by silence.
 
+    IceServer:
+      type: object
+      required: [urls, username, credential]
+      description: >
+        One entry of the browser's RTCConfiguration.iceServers, in the W3C's own
+        spelling because a client hands the array to RTCPeerConnection
+        unchanged. The credential is minted per work session and expires on its
+        own (coturn use-auth-secret): username is "<unix expiry>:<work session
+        id>" and the password is derived rather than stored, so there is no row
+        to leak and nothing to rotate but the relay's own shared secret. The
+        relay is oort-operated and never a third party's (ADR-0165 D3) — momo
+        hands out the credential and still carries no media, sees no candidate
+        and terminates nothing.
+      properties:
+        urls:
+          type: array
+          items:
+            type: string
+            maxLength: 2048
+          description: One relay, listed once per transport (udp and tcp).
+        username:
+          type: string
+        credential:
+          type: string
+
     DisplayAttachCapabilityResponse:
       type: object
-      required: [display_endpoint, capability_token, display_id, mode]
+      required:
+        [display_endpoint, capability_token, display_id, mode, ice_servers]
       properties:
         display_endpoint:
           type: string
@@ -8631,6 +8693,20 @@ components:
             on a controller grant. The caller's own copy of the boundary event
             the work.session.control envelope carries, so the surface can say
             when control began without waiting for the relay.
+        ice_servers:
+          type: array
+          items:
+            $ref: "#/components/schemas/IceServer"
+          description: >
+            The oort relay this grant may allocate through, with a credential
+            minted for this session. ALWAYS PRESENT, and EMPTY on an instance
+            that was given no relay policy — a client must read empty as "use
+            what you were already configured with", never as an error. During
+            the credential retirement that configuration is the static
+            long-term credential the producer template still carries, and the
+            overlap is deliberate: the ephemeral path is proved beside the
+            static one before the static one is removed from a relay carrying
+            production traffic.
 
     DisplayControlReturnResponse:
       type: object
@@ -8699,7 +8775,15 @@ components:
 
     DisplayAttachValidationResponse:
       type: object
-      required: [work_session_id, display_id, expires_at, mode, input_enabled]
+      required:
+        [
+          work_session_id,
+          display_id,
+          expires_at,
+          mode,
+          input_enabled,
+          ice_servers,
+        ]
       properties:
         work_session_id:
           type: string
@@ -8729,6 +8813,20 @@ components:
             answers false at the next re-validation — which is how handing
             control back actually takes the keyboard away instead of merely
             recording that somebody asked for it.
+        ice_servers:
+          type: array
+          items:
+            $ref: "#/components/schemas/IceServer"
+          description: >
+            The producer's copy of the same relay credential the browser is
+            served, under the same session subject, so both ends of one media
+            path appear in coturn's log under one username. Re-minted on EVERY
+            validate — a producer re-validates every 30 seconds, so its
+            credential is renewed far faster than any TTL could expire it, and
+            a media session outliving its credential dies on the next ALLOCATE
+            refresh with nothing user-visible to explain it. Empty on an
+            instance with no relay policy, in which case the producer keeps the
+            static credential delivered to it at create time.
 
     # ---- Work controls ------------------------------------------------------
     CreateWorkControlRequest:

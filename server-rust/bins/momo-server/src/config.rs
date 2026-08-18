@@ -93,6 +93,17 @@ pub struct Config {
     /// attachment routes answer 503 rather than 404. Same fail-closed posture as
     /// every other subsystem above.
     pub drive: DriveSettings,
+    /// LIVE-5a / ADR-0165 증보 1 D3-2 — the oort-operated TURN relay's ephemeral
+    /// credential policy. `None` on any instance that named no relay or no
+    /// secret, and `None` means the display routes hand back an **empty**
+    /// `ice_servers`, which is byte-for-byte what every deployment gets today.
+    ///
+    /// That emptiness is not a degraded mode, it is the retirement order: the
+    /// producer template still carries the static credential the install runbook
+    /// shipped, so an instance that has not been given the secret keeps working
+    /// exactly as it did while the new path is proved beside it. Removing the
+    /// static credential is a separate, later act — on the relay, not here.
+    pub turn: Option<momo_t3::TurnCredentialPolicy>,
 }
 
 /// The workspace Drive archive's environment block (Swift
@@ -1368,6 +1379,39 @@ impl WebhookSettings {
     }
 }
 
+/// The oort TURN relay's ephemeral-credential policy, or `None` when this
+/// instance was not given one (LIVE-5a).
+///
+/// Three names, and all three must be present for anything to be minted:
+///
+/// | env | meaning |
+/// |---|---|
+/// | `MOMO_TURN_URLS` | comma-separated `turn:` URLs — the same relay over udp and tcp |
+/// | `MOMO_TURN_STATIC_AUTH_SECRET` | coturn's `static-auth-secret`. Never logged, never echoed |
+/// | `MOMO_TURN_CREDENTIAL_TTL_SECONDS` | optional, default [`momo_t3::DEFAULT_TURN_CREDENTIAL_TTL_SECONDS`] |
+///
+/// Half a configuration mints nothing, which is [`momo_t3::TurnCredentialPolicy::new`]'s
+/// rule and not this function's — stated there so a second caller cannot get a
+/// different answer.
+///
+/// **`MOMO_TURN_URLS` is not validated against a host allow-list here**, and
+/// that absence is deliberate rather than forgotten: ADR-0165 D3 says the relay
+/// is oort's own, and the thing that enforces it is the operator's environment
+/// plus `scripts/verify_display_attach.sh`'s conformance read — not a hostname
+/// this process would have to be taught and re-taught.
+fn turn_policy_from_env() -> Option<momo_t3::TurnCredentialPolicy> {
+    let urls: Vec<String> = env("MOMO_TURN_URLS")?
+        .split(',')
+        .map(|url| url.trim().to_string())
+        .filter(|url| !url.is_empty())
+        .collect();
+    let secret = env("MOMO_TURN_STATIC_AUTH_SECRET")?;
+    let ttl = env("MOMO_TURN_CREDENTIAL_TTL_SECONDS")
+        .and_then(|value| value.trim().parse::<i64>().ok())
+        .unwrap_or(momo_t3::DEFAULT_TURN_CREDENTIAL_TTL_SECONDS);
+    momo_t3::TurnCredentialPolicy::new(urls, secret, ttl)
+}
+
 fn env(key: &str) -> Option<String> {
     match std::env::var(key) {
         Ok(value) if !value.trim().is_empty() => Some(value),
@@ -1465,6 +1509,12 @@ impl Config {
             // the whole instance down for a desktop-only concern.
             cors: CorsConfig::from_env(),
             drive,
+            // LIVE-5a: never fatal, and never closing. An instance that names no
+            // relay hands back an empty `ice_servers`, and the producer keeps
+            // the static credential the template already carries — which is the
+            // retirement order the install runbook demands (prove the new path,
+            // then remove the old one), expressed as a default.
+            turn: turn_policy_from_env(),
         })
     }
 }

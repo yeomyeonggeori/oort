@@ -200,7 +200,40 @@ pub async fn issue(
         display_id: issued.binding.display_id,
         mode: mode.as_db_label(),
         control_started_at: issued.control_started_at,
+        // Minted **after** the transaction committed, and deliberately so: the
+        // credential is derived, never stored, so there is nothing for a
+        // rollback to leave behind — and minting it inside the transaction would
+        // put an HMAC on the hot path of a statement holding a session row lock
+        // for no gain. Same reasoning the capability bearer above is minted
+        // outside for, arrived at from the other direction.
+        ice_servers: ice_servers_for(&state, session_id),
     }))
+}
+
+/// The relay credential this instance hands out for one work session, or an
+/// empty list when it was never given a relay (LIVE-5a).
+///
+/// A free function rather than a method on `AppState` because it is the *policy*
+/// that knows how to mint and `AppState` only knows whether one exists — and
+/// because both routes that need it are in this file, which is the whole
+/// surface momo has that touches TURN at all.
+///
+/// Empty is not an error and must not be rendered as one. An instance without a
+/// policy is every instance today; the producer and the browser both still hold
+/// the static credential the install runbook shipped, and that overlap is what
+/// makes the static one removable later rather than in the same breath.
+fn ice_servers_for(state: &AppState, session_id: Uuid) -> Vec<crate::dto::IceServerDto> {
+    state
+        .turn
+        .as_ref()
+        .map(|policy| {
+            policy
+                .ice_servers_for_session(session_id)
+                .into_iter()
+                .map(Into::into)
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// What [`issue_in_tx`] hands back: the endpoint pair the client dials, plus the
@@ -443,6 +476,14 @@ async fn issue_in_tx(
                         .iter()
                         .map(|run| run.run_id.to_string())
                         .collect::<Vec<_>>(),
+                    // …and the setting it displaced (077). `null` means the
+                    // session was already `owner_only`, so this window closed
+                    // nothing. An operator asked 「내 세션이 왜 팀원에게 안
+                    // 보이지」 has one row to read, and the paired
+                    // `observation_restored` on the close says it came back.
+                    "observation_closed_from": control_window
+                        .as_ref()
+                        .and_then(|window| window.prior_observation.clone()),
                 }),
             ),
     )
@@ -717,6 +758,11 @@ pub(crate) async fn emit_control_closed_in_tx(
                     .iter()
                     .map(|run| run.run_id.to_string())
                     .collect::<Vec<_>>(),
+                // The other half of `observation_closed_from` (077). The write
+                // itself already happened — it rides inside the close statement
+                // so no close path can forget it — and this records that the
+                // owner's setting is back and what it was.
+                "observation_restored": window.prior_observation.clone(),
             }),
         );
     if let Some(actor) = actor {
@@ -1009,6 +1055,18 @@ pub async fn validate(
         expires_at: validated.expires_at,
         mode: validated.mode.as_db_label(),
         input_enabled,
+        // The producer's copy, minted on the SAME policy and the SAME session
+        // subject the browser was served. Both ends of one media path therefore
+        // allocate under one relay username, which is what makes a coturn log
+        // line answer 「어느 세션이었나」 — the static credential this replaces
+        // answered it for every session at once, i.e. not at all.
+        //
+        // Re-minted on every re-validation rather than pinned to the grant: the
+        // producer calls this every 30 seconds, so its credential is renewed
+        // faster than any TTL can expire it, and a media session outliving its
+        // credential is a stream that dies on ALLOCATE refresh with no
+        // user-visible cause.
+        ice_servers: ice_servers_for(&state, validated.work_session_id),
     }))
 }
 

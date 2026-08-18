@@ -26,6 +26,7 @@ import struct
 import sys
 import threading
 import time
+import urllib.parse
 import urllib.request
 import urllib.error
 
@@ -155,7 +156,13 @@ def validate_capability(token: str, stream: bool = False) -> dict | None:
         f"{SERVER_ORIGIN}/v1/workspaces/{WORKSPACE}/work-hosts/{HOST_ID}"
         "/display-attach/validate"
     )
-    body = json.dumps({"capability": token, "stream": stream}).encode("utf-8")
+    # `capability_token`, not `capability`. The request DTO is
+    # `deny_unknown_fields`, so the old spelling was a 400 on every call — never
+    # noticed because #1438 ran with `MOMO_DISPLAY_STUB_VALIDATE=1` and no
+    # producer has yet made a real validate (template.spec.json
+    # `unverified.serverValidateWiring`). LIVE-5a reads `ice_servers` out of this
+    # answer, so the spelling stops being cosmetic.
+    body = json.dumps({"capability_token": token, "stream": stream}).encode("utf-8")
     req = urllib.request.Request(url, data=body, method="POST")
     req.add_header("Content-Type", "application/json")
     try:
@@ -166,6 +173,51 @@ def validate_capability(token: str, stream: bool = False) -> dict | None:
     except (urllib.error.URLError, OSError, ValueError) as exc:
         log(f"validate: refused ({exc})")
         return None
+
+
+def turn_uris_from_ice_servers(ice_servers) -> tuple[str, str]:
+    """Render the server's `ice_servers` into webrtcbin's `turn://` spelling.
+
+    LIVE-5a. The validate answer now carries a **per-session, expiring**
+    credential (coturn `use-auth-secret`), replacing the one static password the
+    install runbook shipped and called temporary in writing. The two sides speak
+    different shapes and neither should learn the other's: the server speaks W3C
+    (`{urls, username, credential}` — what a browser hands `RTCPeerConnection`),
+    and webrtcbin wants the credential inside the URI. This is that translation
+    and nothing else.
+
+    Returns `(udp_uri, tcp_uri)`, either of which may be empty. Both carry a
+    credential and are therefore **never logged** — the caller logs only whether
+    it got them.
+
+    Percent-encoding is not optional here: the username is
+    `<expiry>:<session-uuid>` and the credential is base64, so `:`, `/`, `+` and
+    `=` all occur and all mean something inside a URI's userinfo.
+    """
+    udp = ""
+    tcp = ""
+    for server in ice_servers or []:
+        username = urllib.parse.quote(str(server.get("username", "")), safe="")
+        credential = urllib.parse.quote(str(server.get("credential", "")), safe="")
+        if not username or not credential:
+            continue
+        for url in server.get("urls") or []:
+            url = str(url).strip()
+            # `turn:host:port?transport=udp` — the scheme is replaced, the rest
+            # (host, port, query) is kept verbatim. `turns:` passes through as
+            # `turns://` so a certificate on the relay later needs no change here.
+            if url.startswith("turn:"):
+                scheme, rest = "turn", url[len("turn:") :]
+            elif url.startswith("turns:"):
+                scheme, rest = "turns", url[len("turns:") :]
+            else:
+                continue
+            uri = f"{scheme}://{username}:{credential}@{rest}"
+            if "transport=tcp" in rest:
+                tcp = tcp or uri
+            else:
+                udp = udp or uri
+    return udp, tcp
 
 
 # ---------------------------------------------------------------------------
@@ -188,10 +240,17 @@ PIPELINE = (
 class Session:
     """One viewer, one peer connection. Media is sendonly; there is no data path."""
 
-    def __init__(self, peer: Peer, display_id: str, mode: str) -> None:
+    def __init__(
+        self, peer: Peer, display_id: str, mode: str, ice_servers=None
+    ) -> None:
         self.peer = peer
         self.display_id = display_id
         self.mode = mode
+        # LIVE-5a: the relay credential the SERVER minted for this session, if
+        # this instance was configured with a relay. Empty on an instance that
+        # was not, and the static `MOMO_DISPLAY_TURN_URI` then stands — see
+        # `start`.
+        self.ice_servers = ice_servers or []
         self.pipe = None
         self.webrtc = None
         self.done = threading.Event()
@@ -209,8 +268,22 @@ class Session:
         # candidates — collecting host/srflx that are known to fail only costs
         # connection time (ADR-0165 증보 1 residual item 5). turn:// URIs carry a
         # credential, so they are never logged.
-        turn_uri = os.environ.get("MOMO_DISPLAY_TURN_URI", "").strip()
-        turn_uri_tcp = os.environ.get("MOMO_DISPLAY_TURN_URI_TCP", "").strip()
+        #
+        # LIVE-5a — the credential is now the SERVER's, minted per session and
+        # expiring on its own (`validate.ice_servers`). The static envVars pair
+        # below is the pre-LIVE-5a delivery and stays as the fallback for exactly
+        # as long as the retirement takes: an instance whose operator has not yet
+        # given momo-server the relay's `static-auth-secret` answers with an
+        # empty `ice_servers`, and this producer must keep streaming through it.
+        # The server's copy WINS when present — that preference is what makes the
+        # static `user=` line removable from coturn later without a second deploy
+        # of this template.
+        turn_uri, turn_uri_tcp = turn_uris_from_ice_servers(self.ice_servers)
+        credential_source = "server (per-session, expiring)"
+        if not turn_uri:
+            turn_uri = os.environ.get("MOMO_DISPLAY_TURN_URI", "").strip()
+            turn_uri_tcp = os.environ.get("MOMO_DISPLAY_TURN_URI_TCP", "").strip()
+            credential_source = "envVars static (pre-LIVE-5a)"
         if turn_uri:
             self.webrtc.set_property("turn-server", turn_uri)
             added_tcp = False
@@ -224,8 +297,10 @@ class Session:
                 GstWebRTC.WebRTCICETransportPolicy.RELAY,
             )
             log(
-                "ice: TURN wired (udp + tcp={}), ice-transport-policy=RELAY "
-                "(relay-only, credential not logged)".format(added_tcp)
+                "ice: TURN wired from {} (udp + tcp={}), "
+                "ice-transport-policy=RELAY (relay-only, credential not logged)".format(
+                    credential_source, added_tcp
+                )
             )
         else:
             # No TURN delivered — leave webrtcbin at the spec defaults (stun=[],
@@ -391,7 +466,16 @@ def handle_connection(conn: socket.socket, addr) -> None:
             },
         )
 
-        session = Session(peer, verdict["display_id"], verdict.get("mode", "observer"))
+        session = Session(
+            peer,
+            verdict["display_id"],
+            verdict.get("mode", "observer"),
+            # LIVE-5a: the relay credential the server minted for THIS session.
+            # It reaches webrtcbin exactly once, at pipeline construction —
+            # webrtcbin has no way to swap a TURN server on a live agent, and
+            # the credential outlives any one peer connection by an hour.
+            verdict.get("ice_servers"),
+        )
         session.start()
 
         deadline = time.monotonic() + REVALIDATE_SECONDS

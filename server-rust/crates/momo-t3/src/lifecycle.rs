@@ -468,6 +468,46 @@ pub struct WorkSessionDetail {
     /// pre-LIVE-1 session), and a client that folded the two would offer 관전
     /// on a session with nothing to render.
     pub remote_display_available: bool,
+    /// LIVE-5a: when a person currently holds this session's keyboard, the
+    /// moment they took it (epoch ms). `None` means nobody does.
+    ///
+    /// ## The SoT decision LIVE-4 deferred to here
+    ///
+    /// Three surfaces describe a control window, and LIVE-4 froze the question
+    /// of which one a reload should believe:
+    ///
+    /// 1. the `work.session.control` envelope — **transport**, and the hard
+    ///    invariant says Centrifugo is transport only. A client that learned
+    ///    정지 시각 by listening forgets it on refresh.
+    /// 2. the login-handoff card's `control_*` props — a **derived copy**, and
+    ///    deliberately a narrow one: it is stamped onto pending handoff cards
+    ///    only, so a control window opened for any other reason stamps nothing
+    ///    and the session surface would show nothing.
+    /// 3. `display_control_window` — the ledger, written in the same
+    ///    transaction as the grant, one open row per session by unique index.
+    ///
+    /// **(3) is the source of truth and the other two are projections of it.**
+    /// So the session surface reads the ledger rather than either copy, and it
+    /// reads it *here* — inside the same projection that already answers every
+    /// other question about a session — rather than as a second query at the
+    /// route, because a second query is a second snapshot and that is how a
+    /// session renders 「사람이 조작 중」 next to a resumed agent.
+    ///
+    /// ## …and why it is in the bare `RETURNING` too
+    ///
+    /// The other half of the freeze. A `RETURNING` projection describes the row
+    /// a write just produced, and a control window is a different row — so the
+    /// cheap answer was to leave the constant `NULL` there, the way
+    /// `observer_grant_count` leaves a constant `0`. That answer is wrong for
+    /// this field and right for that one, and the difference is what the value
+    /// is used for: nobody acts on an observer count, while `ended` arriving
+    /// from `end_work_session_in_tx` with `control_started_at_ms: NULL` would be
+    /// a client told the keyboard was free by the very write that closed the
+    /// window — a race it cannot detect and cannot re-read its way out of. The
+    /// lease clock lives in the subquery, so every projection is answering the
+    /// same question at the same instant, and the drift guard in
+    /// `crate::reattach` makes a fifth reader that forgets impossible to merge.
+    pub control_started_at_ms: Option<i64>,
     pub started_at_ms: i64,
     pub ended_at_ms: Option<i64>,
     pub exit_code: Option<i32>,
@@ -494,6 +534,44 @@ const BARE_ATTACH_AVAILABILITY: &str =
     "(pty_id IS NOT NULL AND attach_endpoint IS NOT NULL) AS remote_attach_available, \
      (display_id IS NOT NULL AND display_endpoint IS NOT NULL) AS remote_display_available";
 
+/// The standing control window's 정지 시각, aliased `ws` — LIVE-5a's durable
+/// projection ([`WorkSessionDetail::control_started_at_ms`] carries the SoT
+/// argument).
+///
+/// The predicate is `display_control_window_active_idx`'s partial condition
+/// verbatim, so this reads an index containing only **open** windows — a set
+/// bounded by the number of people typing into a live screen right now, not by
+/// the table's history. `LIMIT 1` is belt and braces over
+/// `display_control_window_open_uniq`, which already makes a second row
+/// unrepresentable.
+///
+/// The lease clause is what makes this answer 「지금」 rather than 「언젠가」: a
+/// window whose producer died reads as absent here for the same
+/// `lease_expires_at > clock_timestamp()` reason
+/// [`crate::display_control::active_control_window_in_tx`] does, so the session
+/// surface and the agent's refusal never disagree about who holds the keyboard.
+/// It is a pure read — reconciling the lapse is a write, and a projection that
+/// wrote would put a second author on rows the close paths own.
+pub(crate) const WS_CONTROL_PROJECTION: &str =
+    "(SELECT floor(extract(epoch from dcw.started_at) * 1000)::bigint \
+        FROM display_control_window dcw \
+       WHERE dcw.workspace_id = ws.workspace_id \
+         AND dcw.work_session_id = ws.id \
+         AND dcw.ended_at IS NULL \
+         AND dcw.lease_expires_at > clock_timestamp() \
+       LIMIT 1) AS control_started_at_ms";
+
+/// [`WS_CONTROL_PROJECTION`] for a bare `RETURNING`, where the table name is the
+/// only qualifier in scope.
+const BARE_CONTROL_PROJECTION: &str =
+    "(SELECT floor(extract(epoch from dcw.started_at) * 1000)::bigint \
+        FROM display_control_window dcw \
+       WHERE dcw.workspace_id = work_session.workspace_id \
+         AND dcw.work_session_id = work_session.id \
+         AND dcw.ended_at IS NULL \
+         AND dcw.lease_expires_at > clock_timestamp() \
+       LIMIT 1) AS control_started_at_ms";
+
 /// The DTO projection without the observer-grant subquery — used by every
 /// single-row read and every `RETURNING`, exactly as Swift does
 /// (`0::bigint AS observer_grant_count`, :268/:493/:555).
@@ -503,6 +581,7 @@ fn detail_columns() -> String {
          ws.root_message_id, ws.tool, ws.label, ws.status, ws.observation, \
          0::bigint AS observer_grant_count, \
          {WS_ATTACH_AVAILABILITY}, \
+         {WS_CONTROL_PROJECTION}, \
          floor(extract(epoch from ws.started_at) * 1000)::bigint AS started_at_ms, \
          CASE WHEN ws.ended_at IS NULL THEN NULL \
               ELSE floor(extract(epoch from ws.ended_at) * 1000)::bigint END AS ended_at_ms, \
@@ -517,6 +596,7 @@ fn detail_returning() -> String {
          root_message_id, tool, label, status, observation, \
          0::bigint AS observer_grant_count, \
          {BARE_ATTACH_AVAILABILITY}, \
+         {BARE_CONTROL_PROJECTION}, \
          floor(extract(epoch from started_at) * 1000)::bigint AS started_at_ms, \
          CASE WHEN ended_at IS NULL THEN NULL \
               ELSE floor(extract(epoch from ended_at) * 1000)::bigint END AS ended_at_ms, \
@@ -552,6 +632,7 @@ fn decode_detail(row: &sqlx::postgres::PgRow) -> Result<WorkSessionDetail, T3Err
         observer_grant_count: row.try_get("observer_grant_count")?,
         remote_attach_available: row.try_get("remote_attach_available")?,
         remote_display_available: row.try_get("remote_display_available")?,
+        control_started_at_ms: row.try_get("control_started_at_ms")?,
         started_at_ms: row.try_get("started_at_ms")?,
         ended_at_ms: row.try_get("ended_at_ms")?,
         exit_code: row.try_get("exit_code")?,
@@ -692,6 +773,7 @@ pub(crate) fn list_columns() -> String {
                         ELSE 0 \
                       END AS observer_grant_count, \
                       {WS_ATTACH_AVAILABILITY}, \
+                      {WS_CONTROL_PROJECTION}, \
                       floor(extract(epoch from ws.started_at) * 1000)::bigint AS started_at_ms, \
                       CASE WHEN ws.ended_at IS NULL THEN NULL \
                            ELSE floor(extract(epoch from ws.ended_at) * 1000)::bigint END \

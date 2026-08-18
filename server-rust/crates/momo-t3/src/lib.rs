@@ -68,6 +68,10 @@ pub mod reattach;
 pub mod reconcile;
 pub mod sweep;
 pub mod terminal_attach;
+/// LIVE-5a / ADR-0165 증보 1 D3-2 — the per-session ephemeral credential for the
+/// oort-operated TURN, replacing the one static password the install runbook
+/// shipped as explicitly temporary.
+pub mod turn;
 /// ADR-0114 D4/D5 + ADR-0125 D6-A — the host-control ledger and the spawn
 /// approval card's host candidates.
 pub mod work_control;
@@ -149,6 +153,7 @@ pub use terminal_attach::{
     IssuedCapability, RemoteDisplayBinding, RemotePtyBinding, ValidatedAttach, CAPABILITY_PREFIX,
     CAPABILITY_TTL_SECONDS, HOST_DISPLAY_CAPABILITY_KEY, OBSERVER_CAPABILITY_RETENTION,
 };
+pub use turn::{IceServer, TurnCredentialPolicy, DEFAULT_TURN_CREDENTIAL_TTL_SECONDS};
 pub use work_control::{
     active_host_owner_in_tx, agent_owner_human_in_tx, apply_spawn_approval_decision_in_tx,
     bind_control_approval_message_in_tx, bind_control_session_in_tx, control_event_payload,

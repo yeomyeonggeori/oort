@@ -182,6 +182,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Some(provisioner) => state.with_t3_provisioner(provisioner),
         None => state,
     };
+    // LIVE-5a / ADR-0165 증보 1 D3-2: per-session ephemeral TURN credentials,
+    // attached only when the operator gave this process a relay AND its
+    // `static-auth-secret`. Without both, the display routes hand back an empty
+    // `ice_servers` and the producer keeps the static credential the install
+    // runbook shipped — the overlap that makes 「신규 실증 → 정적 제거」 possible
+    // on a relay that is already carrying production traffic.
+    let state = match config.turn.clone() {
+        Some(policy) => state.with_turn(policy),
+        None => state,
+    };
     let app = build_app(state);
 
     let address: SocketAddr = format!("{}:{}", config.host, config.port).parse()?;

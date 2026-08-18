@@ -147,6 +147,16 @@ routable ICE base is a new template obligation. That 증보 is **Proposed —
   the ordinary workd template.
 - The producer reads the server origin and the host identity from its delivered
   environment — neither is a credential of the provider's (ADR-0004). The TURN
-  credential arrives the same way (`MOMO_DISPLAY_TURN_URI`) and is a static
-  long-term cred for the E2E; LIVE-5 replaces it with per-session ephemeral
-  creds. `turn://` URIs carry a credential, so the producer never logs them.
+  credential no longer arrives that way by default: since **LIVE-5a** the
+  producer takes it off its own `display-attach/validate` answer
+  (`ice_servers`), which momo mints **per work session** and which **expires on
+  its own** (coturn `use-auth-secret`). `MOMO_DISPLAY_TURN_URI` stays as the
+  fallback for exactly as long as the retirement takes: an instance whose
+  momo-server was given no `MOMO_TURN_STATIC_AUTH_SECRET` answers
+  `ice_servers: []` and the static path carries the stream unchanged. The
+  server's copy wins whenever it is present, which is what lets the relay's
+  static `user=` line be removed later without redeploying this template
+  (`docs/runbooks/turn-host-install.md` §6 — **not yet performed**: measured
+  2026-08-18, momo-turn still refuses an ephemeral credential 401 while the
+  static one allocates over udp and tcp). `turn://` URIs carry a credential
+  either way, so the producer never logs one — only which source it used.
