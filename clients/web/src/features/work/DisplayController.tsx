@@ -29,6 +29,8 @@ import {
   DISPLAY_ICE_SERVERS,
   DISPLAY_REVERIFY_MS,
 } from "./displayStream";
+import { cn } from "@/design/lib/cn";
+import { CHIP_CLASS } from "@/features/common/chip";
 import {
   autoReturnFor,
   classifyControlGrantFailure,
@@ -36,7 +38,7 @@ import {
   controlFailureCopy,
   controlObservationRestoredNote,
   controlOffersRetry,
-  controlSwallowsKey,
+  dispositionForKey,
   forwardKey,
   forwardPointer,
   forwardWheel,
@@ -45,6 +47,8 @@ import {
   CONTROL_CAPTURE_LIMIT_COPY,
   CONTROL_INPUT_CHANNEL_LABEL,
   CONTROL_INVITE_COPY,
+  CONTROL_KEYBOARD_LOST_COPY,
+  CONTROL_KEYBOARD_LOST_LABEL,
   CONTROL_NEGOTIATE_TIMEOUT_MS,
   CONTROL_PHASE_COPY,
   CONTROL_RETURN_COPY,
@@ -151,6 +155,8 @@ export function DisplayController({
    * `controlStream.test.ts` scans for a leak.
    */
   const channelRef = useRef<ControlInputSink | null>(null);
+  /** The producer's video, held until there is an element to put it in. */
+  const streamRef = useRef<MediaStream | null>(null);
   const negotiateTimerRef = useRef<number | null>(null);
   const connectCleanupRef = useRef<(() => void) | null>(null);
   const runRef = useRef(0);
@@ -175,6 +181,22 @@ export function DisplayController({
    * nothing to close.
    */
   const returnedRef = useRef(false);
+
+  /**
+   * Put the held stream in the video element, if both exist yet.
+   *
+   * Idempotent and cheap, so it can be called from both sides of the race it
+   * exists to settle: the track arriving, and the element appearing.
+   */
+  const attachStream = useCallback(() => {
+    const video = videoRef.current;
+    const stream = streamRef.current;
+    if (!video || !stream || video.srcObject === stream) return;
+    video.srcObject = stream;
+    // Autoplay can still be refused (a policy, a background tab). Swallowed
+    // rather than reported: the frame arriving is what the surface reads.
+    void video.play().catch(() => {});
+  }, []);
 
   const teardown = useCallback((saidBye: boolean) => {
     const connectCleanup = connectCleanupRef.current;
@@ -210,6 +232,7 @@ export function DisplayController({
       peer.ondatachannel = null;
       peer.close();
     }
+    streamRef.current = null;
     const video = videoRef.current;
     if (video) video.srcObject = null;
   }, []);
@@ -259,6 +282,43 @@ export function DisplayController({
     [queryClient, session.id, teardown, workspaceId]
   );
 
+  /**
+   * Close a window this surface opened and is NOT holding, from outside the
+   * component's lifecycle.
+   *
+   * DELIBERATELY UNGUARDED by `returnedRef`, which is the whole point of it
+   * existing (grok freeze H-1). `returnedRef` protects a person's settled
+   * sentence from being overwritten by a second attempt; it does not protect
+   * the LEDGER, and the failure it let through was not a double return but a
+   * single one that went **too early**:
+   *
+   *   1. the person confirms, and the mint goes out;
+   *   2. they navigate away before it answers. The unmount effect returns
+   *      control, and the server truthfully answers `closed: false` — there is
+   *      nothing open yet;
+   *   3. the mint lands. A window opens, the agent parks, and nobody is left
+   *      holding either. It stands until the 90 second lease, and a retry in
+   *      that gap is answered 409.
+   *
+   * So the late success closes the window itself, right where it learns the
+   * window exists. It sets no state and reads no phase, because by then this
+   * component may not be mounted.
+   *
+   * WHY THE MINT IS NOT ABORTED INSTEAD. An `AbortController` on the capability
+   * call looks like the tidier fix and is strictly worse here: aborting makes
+   * the promise reject, so the client never learns whether the server committed
+   * the mint, and the only cleanup left is a blind DELETE racing the very
+   * transaction it is trying to undo. Letting the request finish costs one
+   * detached fetch and buys certainty — after it resolves, the window provably
+   * exists and this call provably lands after it.
+   */
+  const abandonWindow = useCallback(() => {
+    void returnDisplayControl(workspaceId, session.id).catch(() => {
+      // Nothing left to tell: this path has no surface. The 90 second lease is
+      // the backstop, and it is the server's own.
+    });
+  }, [session.id, workspaceId]);
+
   const start = useCallback(async () => {
     const run = runRef.current + 1;
     runRef.current = run;
@@ -279,14 +339,25 @@ export function DisplayController({
     try {
       grant = await issueControllerDisplayAttach(workspaceId, session.id);
     } catch (error) {
+      const failure = classifyControlGrantFailure(error);
+      // A refusal the server SPELLED (403/409/404) opened nothing, so there is
+      // nothing to close. `server_unreachable` is the one that cannot be ruled
+      // out: a request that never came back may still have committed, and a
+      // window nobody knows about is exactly what H-1 is about. The return is
+      // idempotent, so the cost of being wrong here is one 200 saying
+      // `closed: false`.
+      if (failure === "server_unreachable") abandonWindow();
       if (runRef.current !== run) return;
-      setPhase({ kind: "failed", failure: classifyControlGrantFailure(error) });
+      setPhase({ kind: "failed", failure });
       return;
     }
-    if (runRef.current !== run) return;
     // The window is OPEN from here on: the server minted the grant and stopped
-    // the agent in the same call. Every exit below therefore has to close it,
-    // which is why `returnedRef` is armed and not merely available.
+    // the agent in the same call. Every exit below therefore has to close it —
+    // INCLUDING the exit where this attempt is no longer the current one.
+    if (runRef.current !== run) {
+      abandonWindow();
+      return;
+    }
     if (grant.mode !== DISPLAY_CONTROLLER_MODE) {
       // The server answered with a grade this surface did not ask for. Nothing
       // was stopped, so there is nothing to return.
@@ -386,10 +457,18 @@ export function DisplayController({
       peerRef.current = peer;
       peer.ontrack = (event: RTCTrackEvent) => {
         if (runRef.current !== run) return;
-        const video = videoRef.current;
-        if (!video) return;
-        video.srcObject = event.streams[0] ?? new MediaStream([event.track]);
-        void video.play().catch(() => {});
+        // The stream is KEPT, not just attached (measured in the gate).
+        //
+        // `ontrack` can arrive before React has committed the render that
+        // creates the `<video>`: the phase moves to `negotiating` in a socket
+        // handler and the offer answer runs through several microtasks after
+        // it, so on a fast producer the element is still one commit away. The
+        // first version dropped the track in that window and never got another
+        // one — the surface then said 조작 중 over a permanently black frame,
+        // with the keyboard working. Holding the stream lets the effect below
+        // attach it the moment the element exists.
+        streamRef.current = event.streams[0] ?? new MediaStream([event.track]);
+        attachStream();
         setReceived(true);
       };
       // THE INPUT CHANNEL ARRIVES; IT IS NOT REQUESTED. See the header.
@@ -523,7 +602,7 @@ export function DisplayController({
       });
     };
     socket.onerror = () => {};
-  }, [endControl, session.id, teardown, workspaceId]);
+  }, [abandonWindow, attachStream, endControl, session.id, teardown, workspaceId]);
 
   // Taking control is what this component is FOR. It is mounted by a deliberate
   // act on the surface above (never by a link, never by a render), so starting
@@ -577,7 +656,30 @@ export function DisplayController({
   );
 
   const controlling = phase.kind === "controlling";
+  // The other side of the ontrack race: the element appearing after the track
+  // did. `attachStream` is a no-op when there is nothing held or nothing to
+  // hold it, so this runs on every phase change and costs nothing.
+  useEffect(() => {
+    attachStream();
+  }, [attachStream, phase.kind]);
   const surfaceRef = useRef<HTMLDivElement>(null);
+  /**
+   * The control that ends the window, held so the release key can reach it.
+   *
+   * Escape moves the caret HERE rather than merely blurring the capture box
+   * (design-review B-1). Blurring alone would drop focus on `<body>`, and the
+   * reader who pressed Escape to get out would then have to tab from the top of
+   * the document to find the way back — which is the same trap one step later.
+   */
+  const returnButtonRef = useRef<HTMLButtonElement>(null);
+  /**
+   * The capture surface actually holds the caret.
+   *
+   * STATE, not a ref, because the screen changes with it: a window that is open
+   * while the keyboard is somewhere else is a true state that used to be drawn
+   * as 조작 중 (design-review H-2).
+   */
+  const [capturing, setCapturing] = useState(false);
   // The keyboard has to land somewhere, and a person who just pressed 직접 조작
   // should not have to hunt for the box that receives it.
   useEffect(() => {
@@ -611,16 +713,38 @@ export function DisplayController({
   // carry a keystroke anyway (`ControlSendOutcome` is three words).
 
   const onKey = (event: React.KeyboardEvent, action: "down" | "up") => {
-    const descriptor = {
+    // EVERY key this surface sees stops here (design-review B-1, measured).
+    //
+    // The work panel's own `<aside>` answers Escape by stepping back out of the
+    // session detail, and it is an ancestor of this box — so the first draft of
+    // the release key closed the whole detail instead, dropping the caret on a
+    // session row and unmounting the control surface mid-window. Any ancestor
+    // shortcut is the same bug in a different costume: while the keyboard is
+    // captured, these presses are the VM's, and an app that also acted on them
+    // would be typing into two machines at once.
+    //
+    // It is scoped by focus rather than by a flag: this handler only runs while
+    // the caret is inside the capture box, so Escape goes back to closing the
+    // detail the moment the keyboard leaves.
+    event.stopPropagation();
+    const disposition = dispositionForKey({
       code: event.code,
       ctrlKey: event.ctrlKey,
       shiftKey: event.shiftKey,
       altKey: event.altKey,
       metaKey: event.metaKey,
       repeat: event.repeat,
-    };
-    if (controlSwallowsKey(descriptor)) event.preventDefault();
-    void forwardKey(channelRef.current, descriptor, action);
+    });
+    if (disposition.kind === "release") {
+      // The one key that is not a keystroke here. It is answered on keydown
+      // only — moving the caret on keyup as well would fire twice for one press
+      // and fight whatever the first move landed on.
+      event.preventDefault();
+      if (action === "down") returnButtonRef.current?.focus();
+      return;
+    }
+    if (disposition.preventDefault) event.preventDefault();
+    void forwardKey(channelRef.current, disposition.event, action);
   };
 
   const pointFor = (event: React.MouseEvent) => {
@@ -640,11 +764,27 @@ export function DisplayController({
           직접 조작
         </Heading>
         {controlling && (
+          /* 기하는 CHIP_CLASS 다 (design-review M1). 손으로 적은 앞 판은
+             `font-medium` 하나가 빠져 옆 블록의 칩들보다 가늘었다 — 한 화면에서
+             같은 격의 칩이 두 굵기로 서면, 다른 것을 뜻한다고 읽힌다.
+
+             낱말은 **캐럿이 어디 있는지**를 따라간다 (design-review H-2). 창이
+             열려 있는 것과 키보드가 여기 있는 것은 다른 사실이고, 앞 판은 둘을
+             한 낱말로 그려서 프레임 밖을 누른 사람에게 계속 「조작 중」이라고
+             말했다. */
           <span
-            className="shrink-0 rounded-sm bg-accent-soft px-2 py-px text-timestamp text-accent"
+            className={cn(
+              CHIP_CLASS,
+              capturing
+                ? "bg-accent-soft text-accent"
+                : "bg-surface-hover text-warn"
+            )}
             data-testid="work-control-grade"
+            data-capturing={capturing ? "" : undefined}
           >
-            {CONTROL_PHASE_COPY.controlling}
+            {capturing
+              ? CONTROL_PHASE_COPY.controlling
+              : CONTROL_KEYBOARD_LOST_LABEL}
           </span>
         )}
       </div>
@@ -652,7 +792,7 @@ export function DisplayController({
       {busyCopy !== null && (
         <p
           role="status"
-          className="flex items-center gap-2 pt-1 text-meta text-ink-muted"
+          className="flex items-center gap-2 break-keep pt-1 text-meta text-ink-muted"
           data-testid="work-control-busy"
         >
           <Loader2 aria-hidden="true" className="spinner-busy size-4" />
@@ -716,7 +856,10 @@ export function DisplayController({
 
       {phase.kind === "returned" && (
         <div className="flex flex-col items-start gap-2 pt-1">
-          <p className="text-meta text-ink-muted" data-testid="work-control-returned">
+          <p
+            className="break-keep text-meta text-ink-muted"
+            data-testid="work-control-returned"
+          >
             {CONTROL_RETURN_COPY[phase.reason]}
             {phase.observationNote !== null && ` ${phase.observationNote}`}
           </p>
@@ -746,7 +889,18 @@ export function DisplayController({
             role="application"
             aria-label="세션 호스트 화면, 직접 조작"
             data-testid="work-control-surface"
-            className="aspect-video overflow-hidden rounded-sm border border-line bg-surface-raised focus-visible:focus-ring"
+            data-capturing={capturing ? "" : undefined}
+            /* 링이 `focus-visible` 전용이었다 (design-review H-2): 마우스로 잡은
+               캐럿은 아무 표시도 남기지 않아, 키보드를 가진 상자와 안 가진 상자가
+               똑같이 생겼다. 이 표면에서 캐럿의 위치는 장식이 아니라 **키가 어디로
+               가는가**이므로, 어떻게 잡았든 보여야 한다. `focus-visible` 규율을
+               어기는 것이 아니라 그것이 답하는 질문이 다르다. */
+            className={cn(
+              "aspect-video overflow-hidden rounded-sm border bg-surface-raised focus:focus-ring",
+              capturing ? "border-accent" : "border-line"
+            )}
+            onFocus={() => setCapturing(true)}
+            onBlur={() => setCapturing(false)}
             onKeyDown={(event) => onKey(event, "down")}
             onKeyUp={(event) => onKey(event, "up")}
             onMouseMove={(event) => {
@@ -802,7 +956,7 @@ export function DisplayController({
           {controlling && !received && (
             <p
               role="status"
-              className="pt-1 text-meta text-warn"
+              className="break-keep pt-1 text-meta text-warn"
               data-testid="work-control-state"
             >
               키보드는 연결됐지만 아직 화면이 도착하지 않았습니다.
@@ -810,7 +964,7 @@ export function DisplayController({
           )}
           {controlling && (
             <p
-              className="pt-1 text-meta text-ink-muted"
+              className="break-keep pt-1 text-meta text-ink-muted"
               data-testid="work-control-capture-limit"
             >
               {CONTROL_CAPTURE_LIMIT_COPY}
@@ -819,6 +973,7 @@ export function DisplayController({
 
           <div className="flex flex-wrap items-center gap-2 pt-1">
             <Button
+              ref={returnButtonRef}
               type="button"
               variant="outline"
               size="sm"
@@ -833,6 +988,22 @@ export function DisplayController({
               <span className="text-meta text-ink-muted">{hostName}</span>
             )}
           </div>
+
+          {/* 컨트롤 **아래**에 선다, 위가 아니라 (실측). 위에 두었더니 캐럿이
+              화면을 떠나는 순간 이 줄이 생기면서 바로 아래의 화면 돌려주기가
+              내려갔다 — 그리고 캐럿이 떠나는 가장 흔한 이유가 그 버튼을 누르는
+              것이다. 누르려는 컨트롤이 누르는 순간 손 밑에서 움직이는 것은
+              게이트가 클릭을 놓친 이유이기도 했고, 사람에게는 그냥 안 눌리는
+              버튼이다. 안내는 컨트롤을 밀지 않는다. */}
+          {controlling && !capturing && (
+            <p
+              role="status"
+              className="break-keep pt-1 text-meta text-warn"
+              data-testid="work-control-keyboard-lost"
+            >
+              {CONTROL_KEYBOARD_LOST_COPY}
+            </p>
+          )}
         </div>
       )}
 
@@ -840,7 +1011,7 @@ export function DisplayController({
           여전히 멈춰 있고, 사람이 가장 먼저 묻는 것이 그것이다. */}
       {showActiveDetail && (
         <p
-          className="pt-1 text-meta text-ink-muted"
+          className="break-keep pt-1 text-meta text-ink-muted"
           data-testid="work-control-active-detail"
         >
           {CONTROL_ACTIVE_DETAIL}
@@ -880,7 +1051,10 @@ export function ControlInvite({
   const affordance = controlAffordance(session, isOwner);
   if (!affordance.offered) {
     return affordance.note === null ? null : (
-      <p className="pt-2 text-meta text-ink-muted" data-testid="work-control-blocked">
+      <p
+        className="break-keep pt-2 text-meta text-ink-muted"
+        data-testid="work-control-blocked"
+      >
         {affordance.note}
       </p>
     );
@@ -905,7 +1079,7 @@ export function ControlInvite({
       className="flex flex-col items-start gap-2 pt-2"
       data-testid="work-control-confirm"
     >
-      <p className="text-meta text-ink-muted">{CONTROL_INVITE_COPY}</p>
+      <p className="break-keep text-meta text-ink-muted">{CONTROL_INVITE_COPY}</p>
       <div className="flex flex-wrap items-center gap-2">
         <Button
           type="button"

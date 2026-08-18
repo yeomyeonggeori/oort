@@ -109,7 +109,24 @@
       "viewerOpensChannel": false,
       "viewerToProducer": ["key", "pointer", "wheel"],
       "keyFrame": ["type", "action", "code", "ctrl", "shift", "alt", "meta", "repeat"],
-      "pointerFrame": ["type", "action", "x", "y", "button"],
+      "pointerFrame": {
+        "$comment": [
+          "DECLARED PER ACTION, not as one flat field list. A flat list reads as",
+          "'these fields are always present', and a producer built from that",
+          "reading requires `button` on every pointer frame — so a MOVE, which",
+          "carries none, is dropped, clicks keep working and the cursor never",
+          "travels. That failure is invisible in a paper contract and obvious on",
+          "a screen, so the shape is split here where both halves read it.",
+          "",
+          "`button` is ABSENT on a move rather than sent as 0: a move with button",
+          "0 and a left-button drag are different events, and a sentinel makes",
+          "them the same one."
+        ],
+        "always": ["type", "action", "x", "y"],
+        "move": [],
+        "down": ["button"],
+        "up": ["button"]
+      },
       "wheelFrame": ["type", "action", "dx", "dy"],
       "pointerCoordinates": "normalised 0..1 over the video box, so the VM's resolution stays the VM's",
       "carriesCharacter": false

@@ -639,6 +639,7 @@ export function WorkSessionDetail({
   },
   onResumed,
   controlIntent = false,
+  onControlIntentConsumed,
 }: {
   session: WorkSession;
   hosts: WorkHost[] | undefined;
@@ -700,6 +701,15 @@ export function WorkSessionDetail({
    * only this surface has.
    */
   controlIntent?: boolean;
+  /**
+   * 그 의도를 **다 썼다** (리뷰 nitpick 3).
+   *
+   * 주소에서 `?control=` 을 지우는 것과 같은 규칙이고(#1193), 같은 이유다: 의도는
+   * 한 번이다. 이 신호가 없으면 사람이 확인을 그만두고 목록으로 나갔다 돌아올 때
+   * 확인 단계가 되살아난다 — 방금 「그만두기」를 누른 사람에게 화면이 같은 질문을
+   * 다시 하는 것이고, 그 질문의 대가는 남의 에이전트가 멈추는 것이다.
+   */
+  onControlIntentConsumed?: () => void;
 }) {
   const { workspaceId, session: auth } = useSession();
   const mine = useMemo(
@@ -745,8 +755,10 @@ export function WorkSessionDetail({
     setControlling(false);
   }, [session.id]);
   useEffect(() => {
-    if (controlIntent) setControlArmed(true);
-  }, [controlIntent]);
+    if (!controlIntent) return;
+    setControlArmed(true);
+    onControlIntentConsumed?.();
+  }, [controlIntent, onControlIntentConsumed]);
 
   // Entering the detail takes the caret with it. Without this the pane swapped
   // its contents and left focus on a button that no longer exists, so the

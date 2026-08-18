@@ -65,6 +65,8 @@ const proveRedObserved =
   process.env.DISPLAY_CONTROL_GATE_PROVE_RED_OBSERVED === "1";
 const proveRedNoReturn =
   process.env.DISPLAY_CONTROL_GATE_PROVE_RED_NORETURN === "1";
+const proveRedLateWindow =
+  process.env.DISPLAY_CONTROL_GATE_PROVE_RED_LATEWINDOW === "1";
 const wantShots = process.env.DISPLAY_CONTROL_GATE_SHOTS === "1";
 
 /**
@@ -240,13 +242,20 @@ async function installProducer(page, options) {
         };
       }
 
-      // 드라이버의 시간 압축. 제품 상수는 그대로이고, 페이지 안의 긴 setTimeout
-      // 만 100분의 1로 줄어든다 — 30초 협상 마감을 30초 기다리지 않기 위해서다.
+      // 드라이버의 시간 압축. 제품 상수는 그대로이고, 페이지 안의 **아주 긴**
+      // setTimeout 만 100분의 1로 줄어든다 — 30초 협상 마감을 30초 기다리지
+      // 않기 위해서다.
+      //
+      // 문턱이 20초인 것은 측정으로 정해졌다. 10초였을 때 이 압축은 REST 요청
+      // 자체의 마감(`REQUEST_TIMEOUT_MS` 15초)까지 150ms 로 줄여, grant 가
+      // 도착하기도 전에 클라가 포기하게 만들었다 — 그러면 「늦게 도착한 grant」
+      // 시나리오는 늦은 grant 를 한 번도 보지 못한 채 통과하거나 실패한다. 압축은
+      // 재려는 시계 하나만 건드려야 하고, 그 시계는 30초짜리 하나다.
       const realSetTimeout = window.setTimeout.bind(window);
       window.setTimeout = (fn, ms, ...rest) =>
         realSetTimeout(
           fn,
-          typeof ms === "number" && ms >= 10_000 ? Math.round(ms / 100) : ms,
+          typeof ms === "number" && ms >= 20_000 ? Math.round(ms / 100) : ms,
           ...rest
         );
 
@@ -580,6 +589,11 @@ async function installRoutes(context, state) {
           state.grantStatus
         );
       }
+      // 원장의 창을 목이 **실제로 연다**. 이 게이트가 세는 것은 DELETE 호출 수가
+      // 아니라 **창이 남았는가**이고, 그 둘은 grok H-1 에서 갈라졌다: 너무 이른
+      // DELETE 하나는 세어지지만 아무것도 닫지 않는다.
+      state.windowOpen = true;
+      state.windowOpenedAt = Date.now();
       return json(route, {
         display_endpoint: `wss://${signalHost}/display/signal/gate-display-1`,
         capability_token: "gate-only-not-a-credential",
@@ -596,9 +610,20 @@ async function installRoutes(context, state) {
       if (state.hangReturn) return new Promise(() => {});
       if (state.returnHoldMs) await wait(state.returnHoldMs);
       if (state.failReturn) {
+        // 서버가 500 을 냈다 = 창은 닫히지 않았다. 화면이 lease 를 말해야 하는
+        // 판이고, 원장도 그대로 열려 있어야 그 문장이 참이 된다.
         return json(route, { error: { message: "fixture return failure" } }, 500);
       }
-      return json(route, { closed: true });
+      // RED SEAM(H-1): grant 뒤에 온 DELETE 를 목이 삼킨다 — 수리 이전의 서버 쪽
+      // 결과를 그 자리에 되돌린다(이른 DELETE 하나만 유효했던 판). 제품은 한 줄도
+      // 바뀌지 않고, 단언이 **호출 수가 아니라 창**을 보고 있음을 증명한다.
+      const swallow =
+        state.swallowLateReturn === true &&
+        state.windowOpenedAt !== undefined &&
+        Date.now() >= state.windowOpenedAt;
+      const closed = state.windowOpen === true && !swallow;
+      if (closed) state.windowOpen = false;
+      return json(route, { closed });
     }
     if (path.includes("/messages/") && path.endsWith("/replies")) {
       return json(route, { messages: [] });
@@ -636,6 +661,24 @@ async function login(page) {
 
 function fail(message) {
   throw new Error(`GATE FAIL: ${message}`);
+}
+
+/**
+ * 원장에 창이 남지 않았는가. **모든 시나리오의 마지막 질문**이다.
+ *
+ * 화면 문구가 아니라 목이 들고 있는 창 상태를 본다(grok freeze H-1): 「반환
+ * 문장이 떴다」와 「창이 닫혔다」는 다른 사실이고, 그 둘이 갈라지는 것이 이
+ * 결함의 모양이었다.
+ */
+async function assertWindowClosed(state, label, timeoutMs = 6_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (state.windowOpen !== true) return;
+    await wait(100);
+  }
+  fail(
+    `the control window was left open in the ledger after ${label} — an agent parked with nobody holding the keyboard`
+  );
 }
 
 async function openContext(browser, state, options = {}) {
@@ -694,6 +737,12 @@ async function exerciseHappyPath(browser) {
     if (state.grantModes.some((mode) => mode === "controller")) {
       fail("following a link minted a controller grant before anybody confirmed");
     }
+
+    // 그만두면 확인이 접히고 초대만 남는다. 그 뒤 다시 눌러 들어간다.
+    await page.getByTestId("work-control-confirm-cancel").click();
+    await page.getByTestId("work-control-start").waitFor({ timeout: 10_000 });
+    await page.getByTestId("work-control-start").click();
+    await page.getByTestId("work-control-confirm").waitFor({ timeout: 10_000 });
 
     await page.getByTestId("work-control-confirm-start").click();
     await page
@@ -831,9 +880,51 @@ async function exerciseHappyPath(browser) {
       );
     }
 
-    // 명시 반환.
+    // 포커스를 잃으면 화면이 그렇게 말한다 (design-review H-2). 창은 여전히
+    // 열려 있고, 달라진 것은 키가 어디로 가는가뿐이다.
+    await page.evaluate(() => {
+      const surface = document.querySelector(
+        '[data-testid="work-control-surface"]'
+      );
+      if (surface instanceof HTMLElement) surface.blur();
+    });
+    await page.getByTestId("work-control-keyboard-lost").waitFor({ timeout: 5_000 });
+    const lostChip = await page.getByTestId("work-control-grade").textContent();
+    if (lostChip?.includes("조작 중")) {
+      fail("the chip still claimed 조작 중 with the keyboard somewhere else");
+    }
+    if (state.returns.length > 0) {
+      fail("losing the keyboard ended the control window — it must only move the caret");
+    }
+
+    // 키보드만으로 반환까지 (design-review B-1). 여기서부터 마우스는 쓰지 않는다.
+    await page.getByTestId("work-control-surface").focus();
+    await page.getByTestId("work-control-grade").waitFor();
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(100);
+    const onReturn = await page.evaluate(() => {
+      const active = document.activeElement;
+      return (
+        active instanceof HTMLElement &&
+        active.dataset.testid === "work-control-return"
+      );
+    });
+    if (!onReturn) {
+      fail(
+        "Escape did not hand the caret to 화면 돌려주기 — a keyboard user cannot give the keyboard back"
+      );
+    }
+    // Esc 는 호스트로 가지 않는다.
+    const escOnWire = await page.evaluate(() =>
+      (window.__controlGate.wire ?? []).some((frame) =>
+        String(frame).includes('"code":"Escape"')
+      )
+    );
+    if (escOnWire) fail("the release key was forwarded to the host");
+
+    // 명시 반환 — Enter 로.
     const before = state.returns.length;
-    await page.getByTestId("work-control-return").click();
+    await page.keyboard.press("Enter");
     await page.getByTestId("work-control-returned").waitFor({ timeout: 20_000 });
     if (state.returns.length <= before) {
       fail("the control window was never returned on an explicit 반환");
@@ -849,12 +940,16 @@ async function exerciseHappyPath(browser) {
       fail("an owner whose observation was open was not told it reopened");
     }
 
+    await assertWindowClosed(state, "an explicit 반환");
+
     await page.getByTestId("work-control-dismiss").click();
     await page.getByTestId("work-display").waitFor({ timeout: 10_000 });
   } finally {
     await context.close();
   }
-  console.log("  ok  deep link -> confirm -> controller -> input -> 반환");
+  console.log(
+    "  ok  deep link -> confirm -> controller -> input -> Esc -> 반환 (keyboard only from control)"
+  );
 }
 
 /** auto-return 경로 하나. 각본대로 망가뜨리고, 창이 닫혔는지 본다. */
@@ -886,10 +981,96 @@ async function exerciseAutoReturn(browser, { script, label, expectCopy }) {
     if (!text?.includes(expectCopy)) {
       fail(`${label}: the surface did not say why control ended (${text})`);
     }
+    await assertWindowClosed(state, label);
   } finally {
     await context.close();
   }
   console.log(`  ok  auto-return: ${label}`);
+}
+
+/**
+ * grant 가 오는 중에 사람이 화면을 떠난다 (grok freeze H-1).
+ *
+ * 앞 판의 구멍은 이중 반환이 아니라 **너무 이른 한 번의 반환**이었다: 언마운트
+ * cleanup 의 DELETE 가 「닫을 창 없음」으로 먼저 끝나고, 그 뒤에 mint 가 성공해
+ * 창이 열린다. 아무도 잡고 있지 않은 창이 lease 90초까지 서 있고, 그 사이의
+ * 재시도는 409 다.
+ *
+ * 그래서 이 시나리오는 화면을 보지 않는다. 목의 원장에 **창이 남았는지**만 본다.
+ */
+async function exerciseUnmountDuringGrant(browser) {
+  const state = {
+    session: workSession(),
+    grantModes: [],
+    returns: [],
+    // mint 가 늦게 도착하도록: 사람이 떠날 시간을 만든다.
+    grantHoldMs: 1_500,
+  };
+  if (proveRedLateWindow) state.swallowLateReturn = true;
+  const { context, page } = await openContext(browser, state);
+  try {
+    await openDetailViaCard(page);
+    await page.getByTestId("work-control-confirm-start").click();
+    await page.getByTestId("work-control-busy").waitFor({ timeout: 10_000 });
+    // 떠난다. 상세가 언마운트되고, 조작 표면도 함께 내려간다.
+    await page.getByTestId("work-detail-back").click();
+    await page.waitForTimeout(200);
+    if ((await page.getByTestId("work-control").count()) > 0) {
+      fail("the control surface survived leaving the session detail");
+    }
+    // mint 가 도착할 시간을 준다.
+    await page.waitForTimeout(2_500);
+    if (!state.grantModes.includes("controller")) {
+      fail("the fixture never minted the late grant this scenario is about");
+    }
+    await assertWindowClosed(state, "leaving while the grant was in flight");
+  } finally {
+    await context.close();
+  }
+  console.log("  ok  a grant that lands after the reader left closes its own window");
+}
+
+/**
+ * 콘솔 주소가 조작 의도를 실어 왔을 때 (design-review M3 · nitpick 3).
+ *
+ * 두 가지를 함께 잰다. `?control=1` 은 **읽고 나면 주소에서 지워지고**(#1193
+ * 규칙), 그 의도는 **한 번만** 쓰인다: 확인을 그만둔 사람이 목록에 나갔다
+ * 돌아왔을 때 같은 질문이 다시 서면, 그 질문의 대가가 남의 에이전트를 멈추는
+ * 것일 때, 화면이 물어본 적 없는 동의를 받아내는 모양이 된다.
+ */
+async function exerciseConsoleIntent(browser) {
+  const state = { session: workSession(), grantModes: [], returns: [] };
+  const { context, page } = await openContext(browser, state);
+  try {
+    await login(page);
+    await page.goto(`${origin}/#/work?session=${sessionId}&control=1`);
+    await page.getByTestId("work-console-route").waitFor({ timeout: 30_000 });
+    await page.getByTestId("work-control-confirm").waitFor({ timeout: 20_000 });
+
+    // 주소는 자리를 계속 가리키되, 부사는 지워졌다.
+    const url = page.url();
+    if (!url.includes("session=")) fail("the console dropped the place it was pointing at");
+    if (url.includes("control=")) {
+      fail("the one-shot control intent stayed in the address bar");
+    }
+
+    // 그만두고 나갔다 돌아온다. 새 의도가 없으므로 확인은 서지 않아야 한다.
+    await page.getByTestId("work-control-confirm-cancel").click();
+    await page.getByTestId("work-control-start").waitFor({ timeout: 10_000 });
+    await page.goto(`${origin}/#/work`);
+    await page.getByTestId("work-console-route").waitFor({ timeout: 20_000 });
+    await page.goto(`${origin}/#/work?session=${sessionId}`);
+    await page.getByTestId("work-control-start").waitFor({ timeout: 20_000 });
+    if ((await page.getByTestId("work-control-confirm").count()) > 0) {
+      fail("a confirmation the reader cancelled came back without a new intent");
+    }
+    if (state.grantModes.length > 0) {
+      fail("the console intent minted a grant with nobody confirming");
+    }
+  } finally {
+    await context.close();
+  }
+  console.log("  ok  console ?control=1 is consumed once and leaves the address bar");
 }
 
 /** 반환이 실패한 판. 화면은 서버의 lease 를 정직하게 말해야 한다. */
@@ -1016,8 +1197,27 @@ async function captureStates(browser, colorScheme) {
       await page
         .locator('[data-testid="work-control"][data-phase="controlling"]')
         .waitFor({ timeout: 20_000 });
+      // 그림이 도착한 뒤에 찍는다. 「아직 화면이 도착하지 않았습니다」도 참인
+      // 상태이지만 그것은 **연결 중**의 꼬리이고, 이 사진이 리뷰에 답해야 하는
+      // 것은 「조작 중인 화면이 어떻게 보이는가」다.
+      await page
+        .getByTestId("work-control-state")
+        .waitFor({ state: "detached", timeout: 10_000 })
+        .catch(() => {});
       await page.waitForTimeout(400);
       await shoot(page, `controlling-${colorScheme}`);
+
+      // 키보드가 이 화면을 떠난 판 (design-review H-2). 창은 그대로 열려 있고
+      // 낱말만 달라진다 — 그 구분이 사진으로 읽히는지가 이 장의 질문이다.
+      await page.evaluate(() => {
+        const surface = document.querySelector(
+          '[data-testid="work-control-surface"]'
+        );
+        if (surface instanceof HTMLElement) surface.blur();
+      });
+      await page.getByTestId("work-control-keyboard-lost").waitFor({ timeout: 5_000 });
+      await shoot(page, `keyboard-lost-${colorScheme}`);
+      await page.getByTestId("work-control-surface").focus();
 
       // 반환 중: DELETE 를 붙들어 그 상태를 사진에 남긴다.
       state.returnHoldMs = 6_000;
@@ -1026,6 +1226,57 @@ async function captureStates(browser, colorScheme) {
         .locator('[data-testid="work-control"][data-phase="returning"]')
         .waitFor({ timeout: 10_000 });
       await shoot(page, `returning-${colorScheme}`);
+    } finally {
+      await context.close();
+    }
+  }
+  // 초대와 확인 (design-review M2). 사람이 이 화면에서 **가장 먼저** 보는 두
+  // 장이고, 앞 판의 캡처는 조작이 이미 시작된 뒤부터였다 — 그래서 「무엇을
+  // 감수하는지」를 말하는 문단이 리뷰에 한 번도 오르지 않았다.
+  {
+    const state = { session: workSession(), grantModes: [], returns: [] };
+    const { context, page } = await openContext(browser, state, { colorScheme });
+    try {
+      await login(page);
+      await page.getByTestId("channel-item").first().click();
+      // 딥링크를 타지 않고 들어와, 무장되지 않은 초대 그대로를 찍는다.
+      await page.evaluate(
+        (id) => window.history.pushState({}, "", `?work=${id}`),
+        sessionId
+      );
+      await page.getByTestId("channel-item").first().click();
+      await page.getByTestId("handoff-open-session").click();
+      await page.getByTestId("work-detail").waitFor({ timeout: 30_000 });
+      await page.getByTestId("work-control-confirm").waitFor({ timeout: 10_000 });
+      await shoot(page, `invite-confirm-${colorScheme}`);
+      await page.getByTestId("work-control-confirm-cancel").click();
+      await page.getByTestId("work-control-start").waitFor({ timeout: 10_000 });
+      await shoot(page, `invite-${colorScheme}`);
+    } finally {
+      await context.close();
+    }
+  }
+  // 반환이 실패한 판 (design-review M2). 이 화면이 유일하게 lease 를 말하는
+  // 자리이고, 그 문장이 어떤 격으로 서는지는 사진으로만 확인된다.
+  {
+    const state = {
+      session: workSession(),
+      grantModes: [],
+      returns: [],
+      failReturn: true,
+    };
+    const { context, page } = await openContext(browser, state, { colorScheme });
+    try {
+      await openDetailViaCard(page);
+      await page.getByTestId("work-control-confirm-start").click();
+      await page
+        .locator('[data-testid="work-control"][data-phase="controlling"]')
+        .waitFor({ timeout: 20_000 });
+      await page.getByTestId("work-control-return").click();
+      await page
+        .getByTestId("work-control-return-failed")
+        .waitFor({ timeout: 20_000 });
+      await shoot(page, `return-failed-${colorScheme}`);
     } finally {
       await context.close();
     }
@@ -1070,6 +1321,21 @@ async function captureOverlayMockup(browser, colorScheme) {
   const html = readFileSync(fixture, "utf8");
   if (!html.includes("__CONTROL_START_LABEL__") || !html.includes("__CONTROL_INVITE_COPY__")) {
     fail("the overlay mockup stopped reading its copy from the product");
+  }
+  // 토큰도 제품의 것이어야 한다 (리뷰 nitpick 3). 목업은 번들 밖이라 tokens.css 를
+  // import 할 수 없고 값을 손으로 옮겨 적는데, 그 값이 낡으면 목업은 제품이 아닌
+  // 팔레트를 리뷰에 보여 준다 — 그리고 리뷰가 판단하려는 것이 정확히 「이 팔레트
+  // 안에서 이 컨트롤이 화면을 얼마나 가리는가」다. 그래서 사본을 대조한다.
+  const tokens = readFileSync(
+    resolve(webRoot, "src/design/tokens.css"),
+    "utf8"
+  );
+  const copied = [...html.matchAll(/light-dark\((#[0-9a-f]{6}),\s*(#[0-9a-f]{6})\)/g)];
+  if (copied.length === 0) fail("the overlay mockup carries no tokens to check");
+  for (const [pair] of copied) {
+    if (!tokens.includes(pair)) {
+      fail(`the overlay mockup's palette drifted from tokens.css: ${pair}`);
+    }
   }
   const context = await browser.newContext({
     viewport: { width: 720, height: 620 },
@@ -1125,6 +1391,8 @@ async function main() {
         label: "등급과 배선 불일치 (no input channel offered)",
         expectCopy: "입력 채널을 열지 않아",
       });
+      await exerciseUnmountDuringGrant(browser);
+      await exerciseConsoleIntent(browser);
       await exerciseReturnFailure(browser);
       await exerciseAffordanceAbsence(browser);
       if (wantShots) {
@@ -1133,7 +1401,7 @@ async function main() {
           await captureOverlayMockup(browser, scheme);
         }
         console.log(
-          "[shots] artifacts/display-control/{connecting,controlling,returning,failed}-{light,dark}.png"
+          "[shots] artifacts/display-control/{invite,invite-confirm,connecting,controlling,keyboard-lost,returning,return-failed,failed}-{light,dark}.png"
         );
         console.log(
           "[shots] artifacts/display-control/overlay-mockup-{light,dark}.png"

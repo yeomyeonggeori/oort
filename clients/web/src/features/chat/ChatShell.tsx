@@ -1029,6 +1029,7 @@ export function ChatShell() {
           selectedId={workSessionId}
           onSelectedIdChange={setWorkSessionId}
           controlIntentSessionId={workControlIntent}
+          onControlIntentConsumed={() => setWorkControlIntent(null)}
           openingThreadId={openingWorkThreadId}
           threadOpenError={workThreadOpenError}
           onOpenThread={(workSession) => void openWorkSessionThread(workSession)}

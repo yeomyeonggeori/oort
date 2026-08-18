@@ -362,31 +362,118 @@ export function normalisedPoint(
 // ---- the keys this browser keeps for itself ---------------------------------
 
 /**
- * Keystrokes the browser will not let a page have, stated rather than
- * intercepted.
+ * Keystrokes the browser will not let a page have, plus the two this surface
+ * reserves for itself — stated rather than hidden.
  *
- * `preventDefault` cannot reach these: a window manager or the browser chrome
- * takes them before the page is asked, and on some of them the page is never
- * told they happened. Pretending otherwise is the honest failure this list
- * exists against — a person holding what looks like a full keyboard, pressing
- * Cmd-Tab, and watching their own desktop switch instead of the VM's.
+ * THE FIRST SENTENCE is the boundary nobody can move: a window manager or the
+ * browser chrome takes some keys before the page is asked, and on several of
+ * them the page is never told they happened. `preventDefault` cannot reach
+ * those. Pretending otherwise is the failure this sentence exists against — a
+ * person holding what looks like a full keyboard, pressing Cmd-Tab, and
+ * watching their own desktop switch instead of the VM's.
  *
- * So the surface SAYS the boundary instead of hiding it. The sentence is short
- * and specific because a vague one ("some shortcuts may not work") is the same
- * as no sentence.
+ * THE REST is the release path, and it is here rather than in a tooltip because
+ * a reserved key nobody announced is a key that appears to be broken. See
+ * [`dispositionForKey`] for why Escape is the one reserved.
  */
 export const CONTROL_CAPTURE_LIMIT_COPY =
-  "브라우저와 운영체제가 먼저 가져가는 단축키는 전달되지 않습니다. 새 탭 열기, 창 전환, 전체 화면 종료 같은 키는 이 브라우저에서 처리됩니다.";
+  "브라우저와 운영체제가 먼저 가져가는 단축키는 전달되지 않습니다. 새 탭 열기, 창 전환, 전체 화면 종료 같은 키는 이 브라우저에서 처리됩니다. Esc 는 호스트로 가지 않고, 키보드를 이 화면에서 풀어 화면 돌려주기 버튼으로 옮깁니다. 호스트에 Esc 를 보내려면 Shift+Esc 를 누르세요.";
 
 /**
- * Keys this surface swallows rather than letting the page act on them, because
- * the page's own action would be worse than the VM missing the key.
+ * What this surface does with one key press.
  *
- * Only browser-level navigation that a `keydown` handler can actually stop:
- * Backspace and the arrows scroll or go back on the HOST page while somebody
- * believes they are typing into a terminal in a VM. Tab is here because moving
- * focus out of the capture surface silently ends the capture, which reads as
- * "the keyboard stopped working".
+ * ## Why a release key exists at all (design-review B-1)
+ *
+ * Taking control puts the keyboard inside a box that swallows Tab, and the
+ * first version of this surface then had NO WAY OUT for somebody not using a
+ * mouse. Tab was captured (correctly — a VM's own forms need it), the caret was
+ * planted on the capture box the moment control began, and 화면 돌려주기 sat
+ * one un-reachable Tab away. A person could take a keyboard and be unable to
+ * give it back, which turns the whole auto-return design into something only a
+ * mouse user can trigger and leaves everyone else waiting out the 90 second
+ * lease.
+ *
+ * ## Why Escape, and what it costs
+ *
+ * Escape is the key a reader already tries when something has them trapped, and
+ * it is the one this client can reserve without taking something the VM needs
+ * more: the alternatives were Tab (which forms inside the VM need constantly)
+ * and a chord nobody would guess.
+ *
+ * It is not forwarded, and it does NOT end control either — pressing Escape
+ * must never stop somebody's agent, so it moves the caret and nothing else.
+ * From there the ordinary keyboard works: 화면 돌려주기 is the next thing in
+ * the tab order, and Tab is no longer captured because the caret is no longer
+ * inside the box.
+ *
+ * The cost is real: plain Escape cannot reach the VM, and a remote desktop
+ * without Escape is missing something (every dialog in there closes with it).
+ * So Shift+Escape sends it, and the modifier is STRIPPED on the way out — the
+ * person means "Escape", not "Shift+Escape", and a VM told the literal chord
+ * would hand it to whatever has that chord bound. That is a deliberate
+ * translation and the only one this module makes.
+ */
+export type ControlKeyDisposition =
+  /**
+   * Not forwarded. The caret leaves the capture surface for the control that
+   * ends the window; nothing is sent and nothing is stopped.
+   */
+  | { kind: "release" }
+  /**
+   * Forwarded. `event` is what goes on the wire, which is not always what was
+   * pressed (Shift+Escape leaves as Escape), and `preventDefault` says whether
+   * the page must be stopped from acting on it as well.
+   */
+  | { kind: "forward"; event: ControlKeyEvent; preventDefault: boolean };
+
+export function dispositionForKey(
+  event: ControlKeyEvent
+): ControlKeyDisposition {
+  if (event.code === "Escape") {
+    if (event.ctrlKey || event.altKey || event.metaKey) {
+      // A chord this surface has no rule for. Forward it whole rather than
+      // guessing which half the person meant.
+      return { kind: "forward", event, preventDefault: false };
+    }
+    if (event.shiftKey) {
+      return {
+        kind: "forward",
+        event: { ...event, shiftKey: false },
+        preventDefault: true,
+      };
+    }
+    return { kind: "release" };
+  }
+  return { kind: "forward", event, preventDefault: controlSwallowsKey(event) };
+}
+
+/**
+ * The keyboard is not in the capture surface, so keys are going somewhere else.
+ *
+ * THE SILENCE THIS REPLACES (design-review H-2): the chip said 조작 중 whether
+ * or not the surface held the caret, so a person who clicked outside the frame
+ * went on typing into a page that forwarded nothing, with nothing on screen
+ * disagreeing with them. The window really is still open — control has not
+ * ended — so the honest split is per-INPUT rather than per-window: the keyboard
+ * left, the pointer still works over the picture, and the way back is one press
+ * or one Tab.
+ */
+export const CONTROL_KEYBOARD_LOST_COPY =
+  "키보드가 이 화면에서 벗어나, 지금 누르는 키는 호스트로 가지 않습니다. 화면을 한 번 누르거나 Tab 으로 이 화면에 오면 다시 이어집니다. 조작 창은 그대로 열려 있습니다.";
+
+/** The chip word while the window stands but the caret is elsewhere. */
+export const CONTROL_KEYBOARD_LOST_LABEL = "키보드 놓침";
+
+/**
+ * Keys this surface stops the PAGE from acting on, because the page's own
+ * action would be worse than the VM missing the key.
+ *
+ * Only browser-level navigation a `keydown` handler can actually stop:
+ * Backspace and the arrows scroll or navigate the HOST page while somebody
+ * believes they are typing into a VM. Tab is here because a VM's own forms are
+ * full of it — and it can be here honestly only because Escape now exists as a
+ * release path (see [`dispositionForKey`]). Before that, capturing Tab was how
+ * a keyboard user got stuck.
  */
 export function controlSwallowsKey(event: ControlKeyEvent): boolean {
   if (event.metaKey || event.ctrlKey) return false;

@@ -12,6 +12,7 @@ import {
   controlObservationRestoredNote,
   controlOffersRetry,
   controlSwallowsKey,
+  dispositionForKey,
   forwardKey,
   forwardPointer,
   forwardWheel,
@@ -23,6 +24,8 @@ import {
   CONTROL_CAPTURE_LIMIT_COPY,
   CONTROL_INPUT_CHANNEL_LABEL,
   CONTROL_INVITE_COPY,
+  CONTROL_KEYBOARD_LOST_COPY,
+  CONTROL_KEYBOARD_LOST_LABEL,
   CONTROL_LEASE_MS,
   CONTROL_NEGOTIATE_TIMEOUT_MS,
   CONTROL_OVERLAY_MOCKUP,
@@ -32,6 +35,7 @@ import {
   CONTROL_START_LABEL,
   DISPLAY_CONTROLLER_MODE,
   type ControlInputSink,
+  type ControlKeyEvent,
   type ControlLifecycleEvent,
   type ControlReturnReason,
 } from "./controlStream";
@@ -87,7 +91,12 @@ const TEMPLATE_SPEC = JSON.parse(
       viewerOpensChannel: boolean;
       viewerToProducer: string[];
       keyFrame: string[];
-      pointerFrame: string[];
+      pointerFrame: {
+        always: string[];
+        move: string[];
+        down: string[];
+        up: string[];
+      };
       wheelFrame: string[];
       carriesCharacter: boolean;
     };
@@ -266,15 +275,38 @@ describe("the input frames, against the contract that declares them", () => {
     expect(normalisedPoint(9_999, 9_999, box)).toEqual({ x: 1, y: 1 });
     // A box with no area is a video that has not been laid out yet.
     expect(normalisedPoint(1, 1, { left: 0, top: 0, width: 0, height: 0 })).toBeNull();
-    const frame = JSON.parse(pointerInputFrame({ x: 0.25, y: 0.75, button: 2 }, "down"));
-    expect(Object.keys(frame).sort()).toEqual(
-      [...TEMPLATE_SPEC.signalling.inputChannel.pointerFrame].sort()
+  });
+
+  it("declares the pointer frame PER ACTION, and sends what it declares", () => {
+    // grok freeze M-1. The spec used to be one flat field list including
+    // `button`, which reads as "always present" — and a producer built from
+    // that reading drops every MOVE, so clicks work and the cursor never
+    // travels. That failure is invisible on paper and obvious on a screen, so
+    // the two shapes are declared and measured apart.
+    const declared = TEMPLATE_SPEC.signalling.inputChannel.pointerFrame;
+    expect(declared.move).toEqual([]);
+    expect(declared.down).toEqual(["button"]);
+    expect(declared.up).toEqual(["button"]);
+
+    const shapeOf = (frame: string) => Object.keys(JSON.parse(frame)).sort();
+    expect(shapeOf(pointerInputFrame({ x: 0.1, y: 0.1 }, "move"))).toEqual(
+      [...declared.always, ...declared.move].sort()
     );
-    // `button` is absent on a move rather than sent as a sentinel: a move with
-    // button 0 and a left-button drag are different events.
-    expect(JSON.parse(pointerInputFrame({ x: 0.1, y: 0.1 }, "move"))).not.toHaveProperty(
-      "button"
-    );
+    expect(
+      shapeOf(pointerInputFrame({ x: 0.25, y: 0.75, button: 2 }, "down"))
+    ).toEqual([...declared.always, ...declared.down].sort());
+    expect(
+      shapeOf(pointerInputFrame({ x: 0.25, y: 0.75, button: 0 }, "up"))
+    ).toEqual([...declared.always, ...declared.up].sort());
+
+    // Button 0 is a real button, not a missing one: a left-button drag and a
+    // move must not encode identically.
+    expect(
+      JSON.parse(pointerInputFrame({ x: 0.5, y: 0.5, button: 0 }, "down")).button
+    ).toBe(0);
+    expect(
+      JSON.parse(pointerInputFrame({ x: 0.5, y: 0.5 }, "move"))
+    ).not.toHaveProperty("button");
   });
 
   it("keeps the wheel frame the shape the template declares", () => {
@@ -291,6 +323,72 @@ describe("the input frames, against the contract that declares them", () => {
     // is exactly what LIVE-5c has to be free to correct.
     expect(TEMPLATE_SPEC.unverified.inputChannelProtocol).toContain("DECLARED ONLY");
     expect(TEMPLATE_SPEC.unverified.inputDelivery).toBeTruthy();
+  });
+
+  it("has a release key, and it is not swallowed and not forwarded", () => {
+    // design-review B-1. Taking control puts the keyboard in a box that
+    // captures Tab; without a release path a keyboard user could take a
+    // keyboard and be unable to give it back, and 화면 돌려주기 would be
+    // reachable only with a mouse.
+    const esc = (over: Partial<ControlKeyEvent> = {}): ControlKeyEvent => ({
+      code: "Escape",
+      ctrlKey: false,
+      shiftKey: false,
+      altKey: false,
+      metaKey: false,
+      repeat: false,
+      ...over,
+    });
+    expect(dispositionForKey(esc())).toEqual({ kind: "release" });
+
+    // Shift+Escape is the send-Escape gesture, and the modifier is the gesture
+    // rather than part of the keystroke, so it does not travel.
+    const sent = dispositionForKey(esc({ shiftKey: true }));
+    expect(sent.kind).toBe("forward");
+    if (sent.kind !== "forward") throw new Error("unreachable");
+    expect(sent.event.code).toBe("Escape");
+    expect(sent.event.shiftKey).toBe(false);
+    expect(JSON.parse(keyInputFrame(sent.event, "down")).shift).toBe(false);
+
+    // A chord this surface has no rule for is forwarded whole rather than
+    // guessed at.
+    expect(dispositionForKey(esc({ ctrlKey: true }))).toEqual({
+      kind: "forward",
+      event: esc({ ctrlKey: true }),
+      preventDefault: false,
+    });
+
+    // The release is announced. A reserved key nobody told the reader about is
+    // a key that looks broken.
+    expect(CONTROL_CAPTURE_LIMIT_COPY).toContain("Esc");
+    expect(CONTROL_CAPTURE_LIMIT_COPY).toContain("Shift+Esc");
+    expect(CONTROL_CAPTURE_LIMIT_COPY).toContain("화면 돌려주기");
+  });
+
+  it("routes every other key through the same forward path it always did", () => {
+    const key = dispositionForKey({
+      code: "Tab",
+      ctrlKey: false,
+      shiftKey: false,
+      altKey: false,
+      metaKey: false,
+      repeat: false,
+    });
+    expect(key.kind).toBe("forward");
+    if (key.kind !== "forward") throw new Error("unreachable");
+    // Still swallowed at the page level — a VM's forms need Tab, and that is
+    // honest only because Escape now exists as the way out.
+    expect(key.preventDefault).toBe(true);
+    expect(key.event.code).toBe("Tab");
+  });
+
+  it("says the keyboard left without claiming control ended", () => {
+    // design-review H-2. The window is still open; only the caret moved. The
+    // sentence has to carry both, plus the way back.
+    expect(CONTROL_KEYBOARD_LOST_COPY).toContain("호스트로 가지 않습니다");
+    expect(CONTROL_KEYBOARD_LOST_COPY).toContain("Tab");
+    expect(CONTROL_KEYBOARD_LOST_COPY).toContain("조작 창은 그대로 열려 있습니다");
+    expect(CONTROL_KEYBOARD_LOST_LABEL).not.toContain("인수");
   });
 
   it("swallows only the keys whose page-level default would be worse", () => {
@@ -582,14 +680,37 @@ describe("auto-return: every way this client can lose a keyboard", () => {
     // than the lease would be reporting a failure about a window the server had
     // already closed by itself.
     expect(CONTROL_NEGOTIATE_TIMEOUT_MS).toBeLessThan(CONTROL_LEASE_MS);
-    expect(CONTROL_LEASE_MS).toBe(90_000);
+  });
+
+  it("mirrors the lease from the ledger that owns it, not from memory", () => {
+    // design-review M4. `CONTROL_LEASE_MS` is a COPY of a server constant, and
+    // the whole reason it exists is to put a number in front of a person
+    // ("최대 90초 뒤에 저절로 닫히고"). A copy checked against a literal in its
+    // own test is a copy that can go stale in lockstep with the assertion that
+    // was supposed to catch it, so the expected value is read from the source
+    // of truth: `display_control.rs`'s own declaration.
+    const rust = readFileSync(
+      fileURLToPath(
+        new URL(
+          "../../../../../server-rust/crates/momo-t3/src/display_control.rs",
+          import.meta.url
+        )
+      ),
+      "utf8"
+    );
+    const declared = rust.match(
+      /pub const CONTROL_WINDOW_LEASE_SECONDS:\s*i64\s*=\s*(\d+)\s*;/
+    );
+    expect(declared, "the ledger no longer declares a lease by that name").not.toBeNull();
+    expect(CONTROL_LEASE_MS).toBe(Number(declared![1]) * 1000);
+    // And the sentence a reader sees carries that same number.
+    expect(CONTROL_RETURN_FAILED_COPY).toContain(`${declared![1]}초`);
   });
 
   it("names the lease as the backstop when the return itself failed", () => {
     // The one path where the client has already failed. Claiming success would
     // be false, and an error with no next step would leave a person unsure
     // whether their agent is stopped forever.
-    expect(CONTROL_RETURN_FAILED_COPY).toContain("90초");
     expect(CONTROL_RETURN_FAILED_COPY).toContain("저절로 닫히고");
     // It names no control, because pressing one again is exactly what just
     // failed.

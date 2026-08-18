@@ -682,6 +682,7 @@ export function WorkPanel({
   selectedId,
   onSelectedIdChange,
   controlIntentSessionId = null,
+  onControlIntentConsumed,
   openingThreadId,
   threadOpenError,
   onOpenThread,
@@ -707,6 +708,8 @@ export function WorkPanel({
    * 그 규칙을 지우는 효과를 따로 쓸 필요가 없다.
    */
   controlIntentSessionId?: string | null;
+  /** 그 의도를 상세가 다 썼다. 소유자가 지운다. */
+  onControlIntentConsumed?: () => void;
   openingThreadId: string | null;
   threadOpenError: string | null;
   onOpenThread: (session: WorkSession) => void;
@@ -1090,6 +1093,9 @@ export function WorkPanel({
             controlIntentSessionId ?? undefined,
             selected.id
           )}
+          {...(onControlIntentConsumed !== undefined
+            ? { onControlIntentConsumed }
+            : {})}
           onOpenThread={() => onOpenThread(selected)}
           onResumed={(resumedId) => {
             void sessionsQuery.refetch();
