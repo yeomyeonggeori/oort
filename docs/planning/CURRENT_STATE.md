@@ -1,5 +1,17 @@
 # oort 기획 현재 상태 (Planning Current State)
 
+> **2026-08-18 스냅샷 35 (Fable · momo-main — ★발사 준비 완료(armed)·정지 중. PLN-20260815-01).** 컴팩트 복원 진입점.
+>
+> **★ 정지 중·발사 준비 완료**: 재개=성재 자유 발화. 재개 즉시 실행 순서 — ①**#1524 LIVE-5a 발사**(패킷 `handoffs/2026-08-18-live-5a-engine-packet.md` — ephemeral TURN(use-auth-secret 권장)·control 내구 투영(원장 SoT+조인 권고)·observation 원자성+owner 예외. ADR 전부 Accepted·이슈 binding 완료) ②병렬 위생 파도 후보: #1525(dsh-A 드리프트 게이트)·#1526(dsh-B 온보딩 실측)·#1527(dsh-H 반면교사)+기존 #1502·#1510·#1511 등. 5a→5b(웹 조작 UI·오버레이 설계)→5c(실기동 E2E) 순차.
+>
+> **dsh 벤치마크 반영 완료**: 정본 `research/2026-08-18-deepseek-harness-dsh-benchmark.md`·ROADMAP §1.7 overlay(A~H 축별 배치·비침해 원칙). C/D=LIVE-5 후, E(Trajectory)=세션 표면 심화(replay 먼저 권장 — fork 야심은 성재 미결), F=환경 폐곡선 합석, G=플랫폼 확장 시.
+>
+> **직전 완결(스냅샷 34)**: 파도 5개·랜딩 23건·결재 큐 소진(LIVE-5 4결정·ADR 3건 Accept·#1442 집행)·GitHub major 장애 통과. engine=`5e598773`·uxui=`b97f5d55`·main=`6dcc74a8`+ (전 트랙 정렬).
+>
+> **성재 손 필요(비차단)**: #1361 Grok pairing·배포 검증 1왕복. 성재 미결 1: Trajectory fork 야심 수준(기본=replay 먼저 진행).
+>
+> 이하 스냅샷 34:
+
 > **2026-08-18 스냅샷 34 (Fable · momo-main — 파도 5 완주·결재 큐 소진·★정지 상태. PLN-20260815-01).** 컴팩트 복원 진입점.
 >
 > **★ 정지 상태(성재 지시 2026-08-17)**: 위생 파도 5 완주 후 일시 정지. **재개=성재 명시 발화(자유 형태·채팅 충분), 자동 조건 진행 불가.** 정지 중 질문 응대·상태 보고 정상. 재개 후 첫 작업=**LIVE-5a 패킷화·발사**.
