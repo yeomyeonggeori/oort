@@ -1225,9 +1225,19 @@ pub struct DisplayAttachValidationResponse {
     /// The same policy the browser is served by [`DisplayAttachCapabilityResponse`],
     /// and the same session subject, so the two ends of one media path allocate
     /// on the relay under one username and a coturn log line can be joined back
-    /// to a work session. It is minted **fresh on every validate**, which the
-    /// producer makes every 30 seconds — so the producer side of the credential
-    /// is continuously renewed and cannot age out mid-stream.
+    /// to a work session.
+    ///
+    /// **A fresh one is minted on every validate, and the shipped producer only
+    /// installs the first.** Re-minting is a pure function of the request, so it
+    /// costs nothing and keeps the field correct for any client that *can* use
+    /// it; what it does not do is renew a live stream. `webrtcbin` offers no way
+    /// to swap a TURN server underneath a running ICE agent, so the credential a
+    /// peer connection was built with is the one it dies with, and the TTL is
+    /// that connection's **ceiling** rather than a sliding window
+    /// (`momo_t3::turn`'s header carries the argument; closing it —
+    /// renegotiation, or accepting the ceiling — is a LIVE-5c acceptance
+    /// criterion). A *new* viewer is unaffected: new connection, new pipeline,
+    /// credential minted at the moment they attached.
     ///
     /// Empty when the instance has no relay policy, which is the retirement
     /// overlap: the producer then keeps `MOMO_DISPLAY_TURN_URI`, the static

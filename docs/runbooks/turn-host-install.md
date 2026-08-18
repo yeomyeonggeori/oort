@@ -341,8 +341,19 @@ turnutils_uclient -y -u oort-live -w "$TURN_PASS" -e 10.0.1.8 -n 3 -m 1 10.0.1.8
 ```sh
 MOMO_TURN_URLS='turn:223.130.142.109:3478?transport=udp,turn:223.130.142.109:3478?transport=tcp'
 MOMO_TURN_STATIC_AUTH_SECRET='<NEW_SECRET>'
-MOMO_TURN_CREDENTIAL_TTL_SECONDS=3600      # 선택. 기본 3600
+MOMO_TURN_CREDENTIAL_TTL_SECONDS=3600      # 선택. 기본 3600, 상한 86400(24h)
 ```
+
+**TTL은 「한 스트림이 검어지기까지의 시간」이지 슬라이딩 창이 아니다.** producer는 자격을
+파이프라인 구성 때 **한 번** 넣고, 이후 30초 재검증이 받아오는 새 자격은 버린다 — GStreamer가
+살아 있는 ICE 에이전트의 TURN 서버를 교체하지 못하기 때문이다(그럴 수 있어 보이는
+`webrtcbin.ice-agent`는 읽는 순간 에이전트를 파괴한다 — #1438 실측). 새 관전자는 영향이 없다
+(새 연결·새 파이프라인·붙는 순간 발급). 이 한계의 실측과 해법 선택은 **LIVE-5c** 수용기준이다.
+
+24h를 넘겨 넣으면 서버가 **상한으로 clamp하고 부팅 로그에 고지**한다 — 하루를 넘는 릴레이 자격은
+이 goal이 은퇴시키려는 정적 공유 비밀번호와 같은 것(같은 폭발 반경·같은 폐기 불가)이기 때문이다.
+더 긴 수명이 필요하다면 TTL이 아니라 `MOMO_TURN_STATIC_AUTH_SECRET`을 주기적으로 회전시켜라 —
+그쪽이 모든 자격을 한 번에 묶는 통제다.
 
 셋 중 하나라도 없으면 서버는 `ice_servers: []`를 답하고 **정적 경로가 계속 스트림을 나른다** — 이것이
 이 절차를 되돌릴 수 있게 만드는 성질이다(코드: `momo_t3::TurnCredentialPolicy::new` 는 반쪽 설정을 거부한다).

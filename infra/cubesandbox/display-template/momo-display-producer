@@ -250,6 +250,20 @@ class Session:
         # this instance was configured with a relay. Empty on an instance that
         # was not, and the static `MOMO_DISPLAY_TURN_URI` then stands — see
         # `start`.
+        #
+        # KNOWN LIMIT, stated here rather than discovered in production: this is
+        # installed into webrtcbin ONCE, in `start`, and the 30-second
+        # re-validation loop below mints a fresh credential that this process
+        # THROWS AWAY. GStreamer has no way to swap a TURN server on a running
+        # ICE agent — and the one property that looks like a way in
+        # (`webrtcbin.ice-agent`) destroys the agent when read, measured in #1438
+        # and warned about a few lines down. So the credential's TTL is this peer
+        # connection's ceiling: past it the connection can no longer allocate or
+        # refresh a relay and the viewer's screen goes black with nothing to
+        # explain it. A NEW viewer is unaffected (new Session, new pipeline,
+        # credential minted when they attached). Renegotiating versus accepting
+        # the ceiling is a LIVE-5c question and is measured there, not guessed at
+        # here.
         self.ice_servers = ice_servers or []
         self.pipe = None
         self.webrtc = None
@@ -470,10 +484,10 @@ def handle_connection(conn: socket.socket, addr) -> None:
             peer,
             verdict["display_id"],
             verdict.get("mode", "observer"),
-            # LIVE-5a: the relay credential the server minted for THIS session.
-            # It reaches webrtcbin exactly once, at pipeline construction —
-            # webrtcbin has no way to swap a TURN server on a live agent, and
-            # the credential outlives any one peer connection by an hour.
+            # LIVE-5a: the relay credential the server minted for THIS session,
+            # taken from THIS viewer's own validate, so the full TTL is ahead of
+            # the pipeline about to be built rather than partly spent. It reaches
+            # webrtcbin exactly once — see the limit noted on `Session.__init__`.
             verdict.get("ice_servers"),
         )
         session.start()

@@ -97,8 +97,22 @@
       "required": true,
       "operator": "oort (momo-turn 223.130.142.109) — never third-party (ADR-0165 D3)",
       "transports": ["udp", "tcp"],
-      "credentialDelivery": "per-session ephemeral (LIVE-5a): the producer reads `ice_servers` off its own display-attach/validate answer — re-minted on every 30s re-validation — and renders it into webrtcbin's `turn://` spelling. The pre-LIVE-5a static long-term cred delivered via envVars (#1437 receiver) as MOMO_DISPLAY_TURN_URI is now the FALLBACK: an instance whose momo-server was given no MOMO_TURN_STATIC_AUTH_SECRET answers `ice_servers: []` and the static path carries it unchanged.",
+      "credentialDelivery": "per-session ephemeral (LIVE-5a): the producer reads `ice_servers` off its own display-attach/validate answer and renders it into webrtcbin's `turn://` spelling at pipeline construction. The pre-LIVE-5a static long-term cred delivered via envVars (#1437 receiver) as MOMO_DISPLAY_TURN_URI is now the FALLBACK: an instance whose momo-server was given no MOMO_TURN_STATIC_AUTH_SECRET answers `ice_servers: []` and the static path carries it unchanged.",
       "credentialPreference": "server-minted wins over the envVars static whenever `ice_servers` is non-empty",
+      "credentialRefreshIsPerConnection": true,
+      "$credentialRefreshComment": [
+        "The server re-mints on every 30s re-validation; the producer installs a",
+        "credential ONCE, at pipeline construction, and discards every later mint.",
+        "GStreamer cannot swap a TURN server on a running ICE agent, and the one",
+        "property that looks like a way in (webrtcbin.ice-agent) DESTROYS the agent",
+        "when read — measured in #1438, see network.mediaUdpPortRange.",
+        "",
+        "So the TTL is a PER-PEER-CONNECTION CEILING, not a sliding window: past it",
+        "that connection can no longer allocate or refresh a relay and the viewer's",
+        "screen goes black with nothing user-visible to explain it. A NEW viewer is",
+        "unaffected (new Session, new pipeline, credential minted at attach).",
+        "See unverified.credentialCeiling."
+      ],
       "$credentialComment": [
         "The server mint is coturn's `use-auth-secret` derivation:",
         "  username   = <unix expiry>:<work session uuid>",
@@ -183,6 +197,7 @@
     "inputDelivery": "LIVE-3 control reaching a screen is STILL unverified. #1438 measured view-only media end to end; no producer has read input_enabled:true, opened an input datachannel, delivered a keystroke, or closed the channel on window return. That is LIVE-5, out of #1438 scope.",
     "realTlsCert": "The host proxy used a self-signed cert in the E2E (browser launched with ignore-cert-errors). A real cert/domain is a follow-up (runbook §9 item 2).",
     "serverValidateWiring": "#1438 used MOMO_DISPLAY_STUB_VALIDATE=1 to isolate media reachability. The producer's real server-side capability validate (against a live LIVE-1..4 server) is exercised at the contract level by display_attach_conformance_pg.rs but was not wired into this live media run. LIVE-5a corrected the request field it would have failed on (`capability_token`, not `capability` — the DTO is deny_unknown_fields, so every real call was a 400) and now reads `ice_servers` out of that answer; the producer still holds no work-host signing key, so the call remains unmade by any running producer. That is LIVE-5c.",
-    "relayCredentialRetirement": "The ephemeral credential path is landed on BOTH sides (server mints, producer prefers) and proved in conformance, but momo-turn itself still runs `lt-cred-mech` + a static `user=` line — measured 2026-08-18: static ALLOCATE succeeds, ephemeral ALLOCATE is 401. Enabling `use-auth-secret` on the relay, measuring both credentials side by side, and only then deleting the `user=` line is docs/runbooks/turn-host-install.md §6 and has NOT been performed."
+    "relayCredentialRetirement": "The ephemeral credential path is landed on BOTH sides (server mints, producer prefers) and proved in conformance, but momo-turn itself still runs `lt-cred-mech` + a static `user=` line — measured 2026-08-18: static ALLOCATE succeeds, ephemeral ALLOCATE is 401. Enabling `use-auth-secret` on the relay, measuring both credentials side by side, and only then deleting the `user=` line is docs/runbooks/turn-host-install.md §6 and has NOT been performed.",
+    "credentialCeiling": "UNMEASURED and structural: the producer installs a TURN credential once per peer connection and discards the re-validation's later mints (see ice.turn.$credentialRefreshComment), so a continuous stream that outlives MOMO_TURN_CREDENTIAL_TTL_SECONDS loses its relay with no user-visible cause. Nothing has watched a stream past a TTL, so the failure mode is reasoned from the GStreamer constraint rather than observed. LIVE-5c AC: run one stream past the TTL on momo-cube-host and decide between (a) ICE renegotiation on a fresh credential and (b) accepting the TTL as a session ceiling with the surface saying so. Do NOT attempt the renegotiation implementation before that measurement — LIVE-5a deliberately did not."
   }
 }

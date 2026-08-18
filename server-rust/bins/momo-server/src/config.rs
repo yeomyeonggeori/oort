@@ -104,6 +104,15 @@ pub struct Config {
     /// exactly as it did while the new path is proved beside it. Removing the
     /// static credential is a separate, later act — on the relay, not here.
     pub turn: Option<momo_t3::TurnCredentialPolicy>,
+    /// The `MOMO_TURN_CREDENTIAL_TTL_SECONDS` the operator asked for, when it was
+    /// **above the ceiling** and was clamped (LIVE-5a). `None` when they asked
+    /// for something inside the bound, or for nothing at all.
+    ///
+    /// Carried as a fact rather than warned about where it is discovered,
+    /// matching `CorsConfig::rejected_entries`: this file reads the environment
+    /// and `main` owns the boot log, so a warning written here would be a second
+    /// place deciding what an operator hears at startup.
+    pub turn_ttl_clamped_from: Option<i64>,
 }
 
 /// The workspace Drive archive's environment block (Swift
@@ -1399,17 +1408,35 @@ impl WebhookSettings {
 /// is oort's own, and the thing that enforces it is the operator's environment
 /// plus `scripts/verify_display_attach.sh`'s conformance read — not a hostname
 /// this process would have to be taught and re-taught.
-fn turn_policy_from_env() -> Option<momo_t3::TurnCredentialPolicy> {
-    let urls: Vec<String> = env("MOMO_TURN_URLS")?
+///
+/// Returns the policy plus **the TTL the operator asked for when it exceeded the
+/// ceiling**, so `main` can say so in the boot log. The clamp itself is
+/// [`momo_t3::TurnCredentialPolicy::new`]'s, not this function's: putting it in
+/// the constructor is what stops a second caller from reaching a different
+/// ceiling, and this function only re-derives whether it fired.
+fn turn_policy_from_env() -> (Option<momo_t3::TurnCredentialPolicy>, Option<i64>) {
+    let Some(raw_urls) = env("MOMO_TURN_URLS") else {
+        return (None, None);
+    };
+    let urls: Vec<String> = raw_urls
         .split(',')
         .map(|url| url.trim().to_string())
         .filter(|url| !url.is_empty())
         .collect();
-    let secret = env("MOMO_TURN_STATIC_AUTH_SECRET")?;
-    let ttl = env("MOMO_TURN_CREDENTIAL_TTL_SECONDS")
+    let Some(secret) = env("MOMO_TURN_STATIC_AUTH_SECRET") else {
+        return (None, None);
+    };
+    // A value this cannot parse falls back to the default rather than to zero:
+    // zero is refused by the constructor, which would close the relay surface
+    // over a typo in a knob that has a perfectly good default.
+    let requested = env("MOMO_TURN_CREDENTIAL_TTL_SECONDS")
         .and_then(|value| value.trim().parse::<i64>().ok())
         .unwrap_or(momo_t3::DEFAULT_TURN_CREDENTIAL_TTL_SECONDS);
-    momo_t3::TurnCredentialPolicy::new(urls, secret, ttl)
+    let clamped_from = (requested > momo_t3::MAX_TURN_CREDENTIAL_TTL_SECONDS).then_some(requested);
+    (
+        momo_t3::TurnCredentialPolicy::new(urls, secret, requested),
+        clamped_from,
+    )
 }
 
 fn env(key: &str) -> Option<String> {
@@ -1478,6 +1505,8 @@ impl Config {
             return Err(ConfigError::InvalidSecurity(message));
         }
 
+        let (turn, turn_ttl_clamped_from) = turn_policy_from_env();
+
         Ok(Config {
             host: env_or("HOST", "0.0.0.0"),
             port: env_number("PORT", 8080u16)?,
@@ -1514,7 +1543,8 @@ impl Config {
             // the static credential the template already carries — which is the
             // retirement order the install runbook demands (prove the new path,
             // then remove the old one), expressed as a default.
-            turn: turn_policy_from_env(),
+            turn,
+            turn_ttl_clamped_from,
         })
     }
 }

@@ -39,7 +39,7 @@
 //! | `live3_8_a_window_opening_elsewhere_outlasts_a_return_that_races_it` | drop the run-row lock from either half of the park/resume pair, or narrow the park's lock to the rows it intends to update |
 //! | `live3_9_two_closes_at_once_still_leave_exactly_one_resume` | drop the run-row lock from the resume, or take it before the caller's own window close instead of after |
 //! | `live4_1_the_handoff_card_hears_the_boundary_and_the_join_survives_a_shouted_uuid` | drop the `message.edited` publish that follows the card stamp (in the route or in the notifier's sweep), put the model's raw `session_id` into `props` instead of the canonical one, let the open stamp merge over the previous lapse's end keys instead of deleting them, or let a settled handoff be rewritten by a later window |
-//! | `live5a_1_a_grant_carries_its_own_expiring_relay_credential` | mint one shared credential instead of a per-session one, pin the producer's copy to the grant instead of re-minting on every validate, drop the expiry from the username, serve a relay the operator did not name, or turn "no relay configured" into an error or an absent field |
+//! | `live5a_1_a_grant_carries_its_own_expiring_relay_credential` | mint one shared credential instead of a per-session one, replay the grant's credential on validate instead of minting against that call's clock, drop the expiry from the username, serve a relay the operator did not name, or turn "no relay configured" into an error or an absent field |
 //! | `live5a_2_control_closes_observation_and_all_three_closes_restore_it` | leave `observation` open while somebody types a password, restore a default instead of the value the window displaced, forget the restore on any one of the four closes (including the notifier sweep nobody performs), or "restore" `open` onto a session the owner had already closed |
 //! | `live5a_3_a_teammates_live_stream_ends_when_control_opens` | close observation only for new grants and not for a stream already running, drop the owner exemption from the arm control just closed, leave the session `owner_only` after the return, or stop projecting the standing window into the session read model |
 //! | `live5a_4_a_half_written_control_window_exposes_no_screen` | write the observation flip in a transaction of its own, or let a failed window insert leave the session `owner_only` with no window anywhere to close |
@@ -4296,9 +4296,16 @@ async fn live5a_1_a_grant_carries_its_own_expiring_relay_credential() {
     );
 
     // Re-validation mints a FRESH credential rather than replaying the grant's.
-    // The producer calls this every 30 seconds, and that is what keeps a stream
-    // alive past any TTL: a media session that outlives its credential dies on
-    // the next ALLOCATE refresh with nothing user-visible to explain it.
+    //
+    // This is a claim about the SERVER and nothing else, and the distinction is
+    // load-bearing enough to say twice: the shipped producer installs a
+    // credential once per peer connection and discards these later mints, since
+    // `webrtcbin` cannot swap a TURN server on a running ICE agent. So what is
+    // proved here is that a client which CAN take a fresh credential — the next
+    // viewer's pipeline, or a future renegotiating producer — is handed one with
+    // its full TTL ahead of it, rather than a replay of the grant's already-aged
+    // copy. Whether a live stream can use it is LIVE-5c's measurement
+    // (`template.spec.json` → `unverified.credentialCeiling`).
     tokio::time::sleep(std::time::Duration::from_millis(1_100)).await;
     let response = validate_display(
         &http, &base, &host_seed, workspace, &host_id, capability, true,
@@ -4313,8 +4320,9 @@ async fn live5a_1_a_grant_carries_its_own_expiring_relay_credential() {
     );
     assert!(
         renewed_expiry > expiry,
-        "every re-validation pushes the expiry out; a pinned credential would \
-         age out under a long watch. renewed={renewed_expiry} first={expiry}"
+        "every validate mints against the clock of that call; replaying the \
+         grant's credential would hand the next viewer one already partly \
+         spent. renewed={renewed_expiry} first={expiry}"
     );
 
     // ---- and an instance that was given no relay ---------------------------

@@ -1061,11 +1061,15 @@ pub async fn validate(
         // line answer 「어느 세션이었나」 — the static credential this replaces
         // answered it for every session at once, i.e. not at all.
         //
-        // Re-minted on every re-validation rather than pinned to the grant: the
-        // producer calls this every 30 seconds, so its credential is renewed
-        // faster than any TTL can expire it, and a media session outliving its
-        // credential is a stream that dies on ALLOCATE refresh with no
-        // user-visible cause.
+        // Re-minted on every call rather than pinned to the grant, because it is
+        // a pure function of the request and a stale copy would be wrong for the
+        // *next* peer connection. It does NOT renew a live one: the shipped
+        // producer installs the credential at pipeline construction and discards
+        // every later mint, because `webrtcbin` cannot swap a TURN server under a
+        // running ICE agent. The TTL is therefore a per-connection ceiling —
+        // stated where a reader meets it (`DisplayAttachValidationResponse`,
+        // `momo_t3::turn`) and carried as a LIVE-5c acceptance criterion rather
+        // than papered over here.
         ice_servers: ice_servers_for(&state, validated.work_session_id),
     }))
 }

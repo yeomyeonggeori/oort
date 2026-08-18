@@ -53,25 +53,42 @@
 //! Two processes need a relay credential for one stream, and they need it for
 //! different spans:
 //!
-//! | holder | how it gets one | how long it must last |
+//! | holder | how it gets one | how long the one it HOLDS lasts |
 //! |---|---|---|
-//! | the **viewer's browser** | once, on the `display-attach` grant | as long as it watches |
-//! | the **producer** in the microVM | on every `display-attach/validate` | as long as the session streams |
+//! | the **viewer's browser** | once, on the `display-attach` grant | one TTL |
+//! | the **producer** in the microVM | at each peer connection's pipeline construction, from that connection's `display-attach/validate` | one TTL |
+//!
+//! Both are **one TTL**, and the second row is the one to read carefully: the
+//! producer is *served* a fresh credential on every 30-second re-validation, but
+//! it only ever installs the first.
 //!
 //! The trap this design exists to avoid is the producer's. Its original
-//! delivery was `envVars` (#1437), which arrives **once at create time** — so a
-//! credential with any expiry at all would eventually die inside a live session
-//! and the next ICE renegotiation would simply fail, with nothing user-visible
-//! to explain a screen that stopped. The obvious fix, "give the producer a
-//! session-lifetime credential", only moves the cliff: a session has no upper
-//! bound either.
+//! delivery was `envVars` (#1437), which arrives **once at create time**, so a
+//! credential delivered that way is minted before the session even has viewers
+//! and is already ageing when the first one arrives. Moving the producer's copy
+//! onto the validate answer means each peer connection is built with a
+//! credential minted **at the moment that viewer attached** — the full TTL is
+//! ahead of it rather than partly spent.
 //!
-//! So the producer's copy does not ride the delivery at all — it rides the
-//! **re-validation**, which the producer already performs every 30 seconds to
-//! hold its control-window lease open. A credential re-minted every 30 seconds
-//! is renewed far faster than any TTL can retire it, and the expiry stops being
-//! a lifetime question. The browser's copy is the one that genuinely expires,
-//! and [`DEFAULT_TURN_CREDENTIAL_TTL_SECONDS`] is sized for it.
+//! **What this does NOT do, stated plainly because an earlier draft of this
+//! header claimed otherwise.** The producer re-validates every 30 seconds (to
+//! hold its control-window lease open) and the server mints a fresh credential
+//! on every one of those calls — but the producer **discards** the later ones.
+//! It hands the credential to `webrtcbin` once, at pipeline construction, and
+//! GStreamer offers no way to swap a TURN server underneath a running ICE agent
+//! (reading `ice-agent` to reach one *destroys* it — measured in #1438 and
+//! flagged in the producer's own source). So the re-validation is where a fresh
+//! credential becomes **available**, not where a live pipeline is refreshed.
+//!
+//! The consequence, and it is a real one: for a single continuous peer
+//! connection the TTL is a **ceiling**, not a sliding window. Past it, that
+//! connection can no longer allocate or refresh a relay, and the screen goes
+//! black with nothing user-visible to explain it. A *new* viewer is unaffected
+//! (new connection, new pipeline, new credential). Whether the answer is
+//! renegotiation or accepting the TTL as a session ceiling is a live-fire
+//! question, and it is carried as a LIVE-5c acceptance criterion rather than
+//! guessed at here — [`DEFAULT_TURN_CREDENTIAL_TTL_SECONDS`] is sized on the
+//! assumption that it is a ceiling.
 //!
 //! Both copies carry the **same subject**, so the two ends of one media path
 //! appear in coturn's log under one username — which is the whole point of
@@ -99,18 +116,53 @@ use uuid::Uuid;
 /// The default lifetime of a minted credential.
 ///
 /// Bounded from **below** by the thing that would break: coturn checks the
-/// expiry when an allocation is created *and* when it is refreshed, so a
-/// credential shorter than a realistic viewing session drops the media mid-watch
-/// (the browser gets a 401 on ALLOCATE refresh with no user-visible cause). One
-/// hour is long enough for a login handoff and a debugging sit-in — the two
-/// things anyone does on a live screen — and the producer re-validates every 30
-/// seconds, so its own credential is continuously refreshed and effectively
-/// never ages out.
+/// expiry when an allocation is created *and* when it is refreshed, and neither
+/// end refreshes the credential on a live pipeline (module header), so this
+/// number is how long one continuous viewing session can last before the media
+/// stops with no user-visible cause. One hour covers a login handoff and a
+/// debugging sit-in, which are the two things anyone actually does on a live
+/// screen.
 ///
 /// Bounded from **above** by what a leaked username+password is worth: an hour
 /// of relay on one instance, scoped to a session id an operator can grep. The
 /// static credential this replaces had no upper bound at all.
 pub const DEFAULT_TURN_CREDENTIAL_TTL_SECONDS: i64 = 3600;
+
+/// The longest lifetime an operator may configure, whatever they typed.
+///
+/// ## Why there is a ceiling at all
+///
+/// [`TurnCredentialPolicy::new`] used to refuse only `ttl_seconds <= 0`, which
+/// left the interesting direction open: `MOMO_TURN_CREDENTIAL_TTL_SECONDS` is a
+/// number in an operator's environment, and a fat-fingered one (milliseconds
+/// pasted into a seconds field, a year written out) turns the whole point of
+/// this module inside out. A credential that lives for a year **is** the static
+/// shared password it was built to retire — same blast radius, same
+/// unrevocability, now wearing the word "ephemeral". A bound that only exists
+/// in a runbook is a bound that is not there.
+///
+/// ## Why 24 hours, and why it is a clamp rather than a refusal
+///
+/// The credential names one work session and exists so a person can watch that
+/// session's screen. Past a day, two things are true at once: no one is still
+/// watching the same continuous stream, and the value has stopped being scoped
+/// by anything an operator can reason about. Twenty-four hours is also where the
+/// industry's own REST-credential ceilings sit (Twilio caps its TURN tokens
+/// there), so it is a number an operator has probably already met.
+///
+/// An operator who genuinely wants a longer-lived relay credential is asking for
+/// a different thing — rotate `static-auth-secret` on a schedule instead, which
+/// bounds *every* credential at once and is the control that actually matches
+/// the intent.
+///
+/// It **clamps** rather than refuses because of which failure each produces.
+/// Refusing turns the policy into `None`, which is the "no relay configured"
+/// state — so a typo in one number would silently drop every instance back to
+/// the static credential this goal exists to retire, and nothing in the response
+/// would say why. Clamping keeps the relay working and shortens a credential,
+/// which is the harmless direction; the operator is told in the boot log
+/// (`momo_server::config::turn_policy_from_env`).
+pub const MAX_TURN_CREDENTIAL_TTL_SECONDS: i64 = 86_400;
 
 /// coturn's `rest_api_separator`, whose default this deployment keeps.
 const REST_API_SEPARATOR: char = ':';
@@ -169,6 +221,12 @@ impl TurnCredentialPolicy {
     /// before, which during the retirement window is the static credential the
     /// template already carries — that overlap is the retirement order the
     /// runbook demands (prove the new one, *then* remove the old one).
+    ///
+    /// `ttl_seconds` is **clamped** to [`MAX_TURN_CREDENTIAL_TTL_SECONDS`], and
+    /// the clamp lives here rather than at the one caller for the reason the
+    /// half-configuration rule does: this is the single door, so a second caller
+    /// cannot arrive at a different ceiling. [`Self::ttl_seconds`] reports the
+    /// clamped value, which is how the caller learns it happened.
     pub fn new(urls: Vec<String>, static_auth_secret: String, ttl_seconds: i64) -> Option<Self> {
         let urls: Vec<String> = urls
             .into_iter()
@@ -182,7 +240,7 @@ impl TurnCredentialPolicy {
         Some(TurnCredentialPolicy {
             urls,
             static_auth_secret: secret,
-            ttl_seconds,
+            ttl_seconds: ttl_seconds.min(MAX_TURN_CREDENTIAL_TTL_SECONDS),
         })
     }
 
@@ -354,6 +412,79 @@ mod tests {
         );
         assert!(TurnCredentialPolicy::new(vec!["turn:host:3478".into()], "s".into(), 0).is_none());
         assert!(TurnCredentialPolicy::new(vec!["  ".into()], "s".into(), 3600).is_none());
+    }
+
+    /// The direction the original `ttl_seconds <= 0` guard left open, and the
+    /// one that actually matters: a credential configured to outlive a day is
+    /// the static shared password this module exists to retire — same blast
+    /// radius, same unrevocability, now called "ephemeral".
+    #[test]
+    fn an_operator_cannot_configure_a_credential_that_outlives_the_ceiling() {
+        for asked in [
+            MAX_TURN_CREDENTIAL_TTL_SECONDS + 1,
+            // Milliseconds pasted into a seconds field — the shape of the typo
+            // this guards, not a hypothetical.
+            3_600_000,
+            365 * 24 * 3600,
+            i64::MAX,
+        ] {
+            let policy =
+                TurnCredentialPolicy::new(vec!["turn:host:3478".into()], "s".into(), asked)
+                    .expect("an over-long TTL must clamp, never close the relay");
+            assert_eq!(
+                policy.ttl_seconds(),
+                MAX_TURN_CREDENTIAL_TTL_SECONDS,
+                "asked for {asked}s"
+            );
+        }
+    }
+
+    /// …and the clamp does not quietly shorten a value that was already legal.
+    /// A ceiling that also moved the ordinary case would make every deployment's
+    /// credential a different length than its operator configured.
+    #[test]
+    fn a_ttl_inside_the_ceiling_is_used_verbatim() {
+        for asked in [
+            1,
+            DEFAULT_TURN_CREDENTIAL_TTL_SECONDS,
+            MAX_TURN_CREDENTIAL_TTL_SECONDS,
+        ] {
+            let policy =
+                TurnCredentialPolicy::new(vec!["turn:host:3478".into()], "s".into(), asked)
+                    .expect("a complete configuration");
+            assert_eq!(policy.ttl_seconds(), asked);
+        }
+    }
+
+    /// The clamp is not decorative: it has to reach the credential a client is
+    /// actually handed, which is the username's expiry field.
+    #[test]
+    fn the_ceiling_reaches_the_minted_username() {
+        let policy =
+            TurnCredentialPolicy::new(vec!["turn:host:3478".into()], "s3cr3t".into(), i64::MAX / 2)
+                .expect("clamped, not refused");
+        let servers = policy.ice_servers_at(SESSION, 1_700_000_000);
+        let (expiry, _) = servers[0]
+            .username
+            .split_once(':')
+            .expect("coturn parses `<expiry>:<subject>`");
+        assert_eq!(
+            expiry.parse::<i64>().expect("unix seconds"),
+            1_700_000_000 + MAX_TURN_CREDENTIAL_TTL_SECONDS,
+            "an unclamped TTL would also have overflowed the `saturating_add` \
+             into a nonsense expiry"
+        );
+    }
+
+    /// The two constants must stay in the relation their prose claims, checked
+    /// at COMPILE time — a default raised above the ceiling would be silently
+    /// clamped on every boot, which is a default that does not mean what it says.
+    #[test]
+    fn the_default_lives_inside_the_ceiling() {
+        const {
+            assert!(DEFAULT_TURN_CREDENTIAL_TTL_SECONDS > 0);
+            assert!(DEFAULT_TURN_CREDENTIAL_TTL_SECONDS <= MAX_TURN_CREDENTIAL_TTL_SECONDS);
+        }
     }
 
     /// The secret is not in `Debug`, because `tracing` renders `Debug`.
