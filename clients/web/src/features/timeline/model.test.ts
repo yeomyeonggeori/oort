@@ -8,7 +8,7 @@ import {
   foldPausedNotices,
   emptyChannelCopy,
   emptyTimeline,
-  EMPTY_INVITE_ACTION_LABEL,
+  EMPTY_ADD_MEMBER_ACTION_LABEL,
   EMPTY_WRITE_ACTION_LABEL,
   failPending,
   isStrictlyOrdered,
@@ -530,8 +530,8 @@ describe("empty surface copy", () => {
         label: EMPTY_WRITE_ACTION_LABEL,
       });
       expect(copy.secondary).toEqual({
-        kind: "invite",
-        label: EMPTY_INVITE_ACTION_LABEL,
+        kind: "add-member",
+        label: EMPTY_ADD_MEMBER_ACTION_LABEL,
       });
     }
   });
@@ -543,7 +543,18 @@ describe("empty surface copy", () => {
       emptyChannelCopy("dm", null).primary.label
     );
     expect(EMPTY_WRITE_ACTION_LABEL).toBe("첫 메시지 쓰기");
-    expect(EMPTY_INVITE_ACTION_LABEL).toBe("멤버 초대하기");
+    expect(EMPTY_ADD_MEMBER_ACTION_LABEL).toBe("멤버 추가하기");
+  });
+
+  it("keeps 초대 out of the channel-scope action's name (#1573)", () => {
+    // 한 동사=한 행위. 이 버튼이 여는 방은 「멤버 추가」 다이얼로그이고, 「초대」는
+    // 워크스페이스에 새 사람을 부르는 행위의 낱말이다(다이얼로그의 빈-워크스페이스
+    // 상태와 DirectoryRoute의 「멤버 초대하기」 — 둘 다 /settings로 간다). 이
+    // 라벨이 초대 계열로 돌아가면, 혼자 있는 첫 사용자가 빈 채널에서 이 버튼을
+    // 누르고 "다른 멤버가 없습니다" 화면에서 같은 이름의 다른 버튼을 만나는
+    // 이중 의미가 재발한다(PR #1568 design-review Medium 2).
+    expect(EMPTY_ADD_MEMBER_ACTION_LABEL).not.toContain("초대");
+    expect(EMPTY_ADD_MEMBER_ACTION_LABEL).not.toBe("멤버 초대하기");
   });
 
   it("names the person and offers no invite in a DM", () => {
@@ -580,7 +591,7 @@ describe("empty surface copy", () => {
     // 오늘 쓴 줄을 그대로 읽는다. 그 문장이 사라지면 남는 것은 「그냥 쓰라」는
     // 지시뿐이다.
     const copy = emptyChannelCopy("public", null);
-    expect(copy.detail).toContain("나중에 초대할");
+    expect(copy.detail).toContain("나중에 들어올");
     expect(copy.detail).toContain("같은 자격");
   });
 

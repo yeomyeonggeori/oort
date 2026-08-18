@@ -29,7 +29,7 @@
 //  10. 아바타가 얼굴이다 32px, 사람과 에이전트가 모양으로도 갈리고, 명부에 없는
 //                        작성자는 uuid 첫 글자를 이니셜인 척 그리지 않는다.
 //  11. 빈 채널의 첫 문이  메시지 0인 채널에서 맨 앞에 서는 액션이 「첫 메시지
-//      이 컴포저다        쓰기」이고, 누르면 캐럿이 이 컴포저에 온다. 초대는
+//      이 컴포저다        쓰기」이고, 누르면 캐럿이 이 컴포저에 온다. 멤버 추가는
 //      (#1536)            지워지지 않고 뒤에 서며, 위계는 채움 순서로 잰다.
 //
 // 이름 붙은 red proof (전부 CSS/DOM/저장소만 건드린다 — 제품 소스는 그대로다):
@@ -41,7 +41,7 @@
 //   COMPOSER_GATE_PROVE_RED_TAP=1       "a finger cannot reliably hit the fold toggle"
 //   COMPOSER_GATE_PROVE_RED_FIRST_ACTION=1
 //     "an empty channel offers no door to the first message" — 실측 F5 당시의
-//     화면 그대로다: 첫 행동 버튼을 DOM에서 걷어내면 초대 하나만 남는다.
+//     화면 그대로다: 첫 행동 버튼을 DOM에서 걷어내면 멤버 추가 하나만 남는다.
 //
 // 값의 정본은 소스를 읽는다(`--touch-target`, `AVATAR_SIZE`). 여기 베껴 적으면
 // 두 벌이 조용히 갈라지고, 이 레포는 U4-4R W-2에서 그 값을 이미 치렀다.
@@ -118,7 +118,7 @@ function emptyActionLabels() {
   };
   return {
     write: read("EMPTY_WRITE_ACTION_LABEL"),
-    invite: read("EMPTY_INVITE_ACTION_LABEL"),
+    addMember: read("EMPTY_ADD_MEMBER_ACTION_LABEL"),
   };
 }
 
@@ -1151,7 +1151,7 @@ async function exerciseEmptyFirstAction(browser) {
   }
 
   if (proveRedFirstAction) {
-    // red seam: 첫 행동 버튼만 DOM에서 걷어낸다 = F5 당시의 화면(초대 하나뿐).
+    // red seam: 첫 행동 버튼만 DOM에서 걷어낸다 = F5 당시의 화면(멤버 추가 하나뿐).
     await page.evaluate(() => {
       document.querySelector('[data-testid="timeline-empty-primary"]')?.remove();
     });
@@ -1188,16 +1188,16 @@ async function exerciseEmptyFirstAction(browser) {
         `「${EMPTY_ACTIONS.write}」`
     );
   }
-  if (second === undefined || second.kind !== "invite") {
+  if (second === undefined || second.kind !== "add-member") {
     throw new Error(
-      "빈 채널의 초대가 사라졌다: 이 클라에서 「채널에 멤버 추가」로 가는 문은 " +
+      "빈 채널의 멤버 추가가 사라졌다: 이 클라에서 「채널에 멤버 추가」로 가는 문은 " +
         "여기 하나뿐이라(AppShell), 강등이 아니라 삭제가 되면 기능 하나가 없어진다"
     );
   }
-  if (second.label !== EMPTY_ACTIONS.invite) {
+  if (second.label !== EMPTY_ACTIONS.addMember) {
     throw new Error(
-      `초대의 이름이 코어와 다르다: 화면 「${second.label}」 vs 코어 ` +
-        `「${EMPTY_ACTIONS.invite}」`
+      `멤버 추가의 이름이 코어와 다르다: 화면 「${second.label}」 vs 코어 ` +
+        `「${EMPTY_ACTIONS.addMember}」`
     );
   }
   if (actions.length !== 2) {
@@ -1315,7 +1315,7 @@ async function main() {
   console.log("           묘비 넷이 한 줄로 접히고도 그 줄이 몇 개를 대신하는지");
   console.log("           말했으며 그 줄이 인용의 착지점이 되었고, 손가락 타깃과");
   console.log("           아바타가 각자의 바닥선을 넘었으며, 빈 채널의 맨 앞에 선");
-  console.log("           문이 첫 메시지로 열렸다(초대는 뒤에 그대로 서 있다).");
+  console.log("           문이 첫 메시지로 열렸다(멤버 추가는 뒤에 그대로 서 있다).");
 }
 
 await main();
