@@ -1,7 +1,12 @@
 //! HTTP routes. Each module owns one Swift route file's parity surface.
 
+pub mod agent_credentials;
 pub mod agent_gateway;
 pub mod agent_mentions;
+/// ADR-0162 / HAP-E2 — stateless dual-era MCP Agent Port.
+pub mod agent_port;
+pub mod agent_port_oauth;
+pub mod agent_port_tools;
 pub mod agent_runs;
 pub mod agents;
 pub mod approvals;
@@ -13,12 +18,15 @@ pub mod channels;
 pub mod cloud_hosts;
 pub mod credits;
 pub mod devices;
+/// ADR-0165 / LIVE-1 — 관전 라이브 화면: the display half of the attach plane.
+pub mod display_attach;
 pub mod dms;
 /// 휘발 신호 — the one route family with no Swift ancestor (ADR-0149).
 pub mod ephemeral;
 /// #1222 — 이벤트 구독: what leaves the workspace, and who said it could.
 pub mod event_subscriptions;
 pub mod health;
+pub mod hosted_agent_connections;
 pub mod invites;
 pub mod join;
 pub mod messages;

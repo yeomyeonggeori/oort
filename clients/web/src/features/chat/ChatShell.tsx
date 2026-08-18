@@ -10,7 +10,6 @@ import {
 } from "@momo/core/lib/api";
 import { useSession } from "@/app/session";
 import { SidebarDrawerToggle } from "@/app/SidebarDrawerToggle";
-import { useIsMobileShell } from "@/app/shellNav";
 import {
   channelLabel,
   channelLabelParts,
@@ -37,6 +36,7 @@ import { CascadeProvider } from "@/features/timeline/cascadeRail";
 import { ThreadPanel } from "@/features/timeline/ThreadPanel";
 import { LongPressHint } from "@/features/timeline/LongPressHint";
 import { WorkPanel } from "@/features/work/WorkPanel";
+import type { OpenWorkSession } from "@/features/work/openWorkSession";
 import { useWorkPanelTarget } from "@/features/agents/workLogStore";
 import type { WorkScope } from "@momo/core/features/work/workSessionModel";
 import { useTimeline } from "@/features/timeline/useTimeline";
@@ -74,6 +74,13 @@ import { cn } from "@/design/lib/cn";
 // channel history. Twenty-five full pages still cover 5,000 messages; after
 // that the existing not-found result is the honest answer this client has.
 const WORK_THREAD_ROOT_PAGE_LIMIT = 25;
+
+// 서랍이 채널 표면 **옆 열**에서 표면 **위 오버레이**로 바뀌는 문턱 (#1421). 이
+// 값은 tokens.css의 `work-pane`/`thread-pane`가 절대 배치로 넘어가는 폭과 **같아야**
+// 한다 — 스타일시트가 덮개로 만든 폭과 스크립트가 탭 순서에서 빼는(`inert`) 폭이
+// 어긋나면 화면에 없는 컨트롤로 Tab이 걸어 들어간다. 한 곳에만 적어 다음 사람이
+// 한쪽만 옮기지 못하게 한다 (#1421 N1).
+const DRAWER_OVERLAY_QUERY = "(width < 900px)";
 
 export function ChatShell() {
   const { session, workspaceId, realtime, connStatus } = useSession();
@@ -239,12 +246,27 @@ export function ChatShell() {
   } | null>(null);
   const workThreadRequestRef = useRef(0);
 
-  const openWorkSession = useCallback((sessionId: string) => {
-    setThread(null);
-    setWorkScope("channel");
-    setWorkSessionId(sessionId);
-    setWorkOpen(true);
-  }, []);
+  /**
+   * 직접 조작 동선을 달고 온 딥링크인가 (LIVE-5b).
+   *
+   * 세션 id 와 함께 들고 다니는 이유는 이것이 **그 세션에 대한** 의도이기
+   * 때문이다. 사람이 패널 안에서 다른 세션으로 옮겨 가면 이 의도는 따라가지
+   * 않아야 하고, 세션 id 옆에 붙어 있으면 그 규칙을 따로 적을 필요가 없다.
+   */
+  const [workControlIntent, setWorkControlIntent] = useState<string | null>(
+    null
+  );
+
+  const openWorkSession = useCallback<OpenWorkSession>(
+    (sessionId, intent) => {
+      setThread(null);
+      setWorkScope("channel");
+      setWorkSessionId(sessionId);
+      setWorkControlIntent(intent?.control === true ? sessionId : null);
+      setWorkOpen(true);
+    },
+    []
+  );
 
   // A scope chip means "show me that list". The panel keeps its selected
   // session across close/reopen (returning to where you were), so while a
@@ -253,6 +275,7 @@ export function ChatShell() {
   // makes the chip's promise and the screen agree.
   const changeWorkScope = useCallback((scope: WorkScope) => {
     setWorkSessionId(null);
+    setWorkControlIntent(null);
     setWorkScope(scope);
   }, []);
 
@@ -363,20 +386,29 @@ export function ChatShell() {
   const anchorMsg = searchParams.get("msg");
   const anchorSeq = searchParams.get("seq");
 
+  // `?control=1`은 `?work=`의 부사다 — 혼자서는 아무 데도 가리키지 않는다
+  // (LIVE-5b). 도착지에서 확인 단계를 무장할 뿐 창을 열지 않으므로, 주소를
+  // 복사해 붙여넣은 사람이 그 한 번으로 남의 에이전트를 멈추는 일은 없다.
+  const anchorControl = searchParams.get("control");
+
   useEffect(() => {
     if (anchorWork === null) return;
-    openWorkSession(anchorWork);
+    openWorkSession(
+      anchorWork,
+      anchorControl === "1" ? { control: true } : undefined
+    );
     // 읽고 나면 주소에서 지운다. 패널의 열림/닫힘은 이 컴포넌트의 상태이므로,
     // 파라미터가 남으면 사람이 패널을 닫은 뒤에도 주소는 열려 있다고 말한다.
     setSearchParams(
       (current) => {
         const next = new URLSearchParams(current);
         next.delete("work");
+        next.delete("control");
         return next;
       },
       { replace: true }
     );
-  }, [anchorWork, openWorkSession, setSearchParams]);
+  }, [anchorControl, anchorWork, openWorkSession, setSearchParams]);
 
   /**
    * 주소가 가리킨 자리를 **읽고 나면 지운다** (리뷰 B2, #1193).
@@ -538,8 +570,9 @@ export function ChatShell() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [anchorReady, urlAnchor, channelId]);
 
-  // Under 900px the 작업 세션 pane stops being a column beside the channel and
-  // becomes a drawer over it (tokens.css `work-pane`: position absolute, inset
+  // Under 900px the two panes that share this row — the 작업 세션 pane and the
+  // 스레드 패널 — stop being a column beside the channel and become a drawer over
+  // it (tokens.css `work-pane` / `thread-pane`: position absolute, inset
   // 0, z-index 20). A surface that is covered has to leave the tab order with
   // it. Without that, Tab walked straight through the drawer into controls that
   // were not on screen: from the sidebar it took three stops to reach
@@ -549,19 +582,23 @@ export function ChatShell() {
   // AND hides the subtree from assistive tech), so it is what this uses, driven
   // from the same 900px breakpoint the stylesheet uses so the two cannot drift.
   const coveredRef = useRef<HTMLDivElement>(null);
-  const [drawerWidth, setDrawerWidth] = useState(false);
+  // 첫 렌더에서 이미 답을 알고 시작한다 (`useIsMobileShell`과 같은 이유): `false`로
+  // 시작해 효과에서 고치면 서랍이 이미 표면을 덮은 한 프레임 동안 덮인 컨트롤이
+  // 탭 순서에 남는다. 그 한 프레임이 바로 이 장치가 막으려는 것이다.
+  const [drawerWidth, setDrawerWidth] = useState(
+    () =>
+      typeof window !== "undefined" &&
+      typeof window.matchMedia === "function" &&
+      window.matchMedia(DRAWER_OVERLAY_QUERY).matches
+  );
   useEffect(() => {
     if (typeof window === "undefined" || !window.matchMedia) return;
-    const query = window.matchMedia("(width < 900px)");
+    const query = window.matchMedia(DRAWER_OVERLAY_QUERY);
     const sync = () => setDrawerWidth(query.matches);
     sync();
     query.addEventListener("change", sync);
     return () => query.removeEventListener("change", sync);
   }, []);
-  // 폰에서는 스레드 패널도 같은 성질이 된다 (goal B6): 320px 열이 390px 화면에서
-  // 채널에 70px만 남기므로, 그 폭에서는 스레드가 채널 표면 전체를 받는다
-  // (tokens.css `thread-pane`). 덮은 표면은 위와 같은 이유로 탭 순서에서 빠진다.
-  const isMobile = useIsMobileShell();
   // 「작업 패널」(goal WEB-WP1)은 이 표면 **바깥**, 셸의 라우트 상자 옆에 산다.
   // 그래서 이 파일이 이미 지키던 "부차 표면은 한 번에 하나" 규칙의 사각지대에
   // 있었다: 사이드바 240 + 스레드 320 + 작업 패널 320 = 880이라, 900px 창에서
@@ -573,10 +610,21 @@ export function ChatShell() {
   // 작업 패널이 열려 있는 동안은 이 표면의 부차 패널이 물러난다. 상태는 그대로
   // 남아 있으므로 작업 패널을 닫으면 읽던 스레드가 그 자리에 돌아온다.
   const workPanelOpen = useWorkPanelTarget() !== null;
+  // 스레드 패널도 같은 문턱에서 같은 성질이 된다 (#1421). 앞 판은 이 절만 폰
+  // 문턱(`useIsMobileShell`, 600px)을 읽었고, 그래서 600~899px에서 스레드는 채널
+  // 옆에 320px 열로 서서 컴포저를 36px(700px 창)까지 밀었다. tokens.css
+  // `thread-pane`이 그 문턱을 work-pane과 같은 900px로 옮겼으므로 여기도 같은 값을
+  // 읽는다 — 스타일시트가 덮개로 만든 폭과 스크립트가 탭 순서에서 빼는 폭이
+  // 어긋나면, 화면에 없는 컨트롤로 Tab이 걸어 들어간다.
+  //
+  // `drawerWidth`가 두 절 **밖**에 있는 것이 그 사실의 모양이다: 무엇이 덮느냐는
+  // 절마다 다르지만 덮는 폭은 하나다. 절 안에 두 번 적으면 다음 사람이 한쪽만
+  // 옮길 수 있고, 그것이 이 티켓이 고친 결함이다.
   const covered =
     !workPanelOpen &&
-    ((workOpen && !thread && stressCount === 0 && drawerWidth) ||
-      (thread !== null && channelId !== null && isMobile));
+    drawerWidth &&
+    ((workOpen && !thread && stressCount === 0) ||
+      (thread !== null && channelId !== null));
   useEffect(() => {
     const node = coveredRef.current;
     if (!node) return;
@@ -803,7 +851,12 @@ export function ChatShell() {
         where it stops being a column beside the channel and becomes a drawer
         over it (tokens.css `work-pane`). */}
     <div className="relative flex min-w-0 flex-1">
-      <div ref={coveredRef} className="flex min-w-0 flex-1 flex-col">
+      {/* `chat-region`은 `min-w-0`을 대신한다(tokens.css): 이 열은 위쪽 상한
+          (긴 코드 블록에 밀리지 않는다)과 아래쪽 바닥(옆에 선 pane이 컴포저를
+          바닥 아래로 밀지 못한다, #1418)이 함께 필요하고, 같은 축을 두 곳에서
+          적으면 순서가 이긴다. 라우트 상자의 `route-region`(#1413)과 같은
+          장치이고, 그쪽이 못 보던 판(pane이 이 상자 **안쪽**에 설 때)을 든다. */}
+      <div ref={coveredRef} className="chat-region flex flex-1 flex-col">
         {stressCount === 0 && channelId !== null ? (
           <HuddleHeaderState
             workspaceId={workspaceId}
@@ -927,6 +980,11 @@ export function ChatShell() {
             channelId={channelId}
             directory={directory}
             channelLabel={label}
+            // 조사를 정하는 사실 (#1384): DM 의 label 은 방 이름이 아니라 상대
+            // 이름이라 「hermes에」가 아니라 「hermes에게」여야 한다. `peer` 로
+            // 묻는 이유는 로스터가 아직 안 온 DM 의 label 이 사람 이름이 아니라
+            // "다이렉트 메시지"이고(`channelLabelParts`), 그때는 에가 맞아서다.
+            recipient={peer ? "person" : "place"}
             dmAgent={dmAgent}
             quote={quote}
             onCancelQuote={() => setQuote(null)}
@@ -951,7 +1009,15 @@ export function ChatShell() {
             onDeleteMessage: timeline.deleteMessage,
           }}
           onOpenWorkSession={openWorkSession}
-          onClose={() => setThread(null)}
+          onClose={() => {
+            // 작업 패널의 onClose와 같은 이유 (#1431 · 아래 993-1004 주석): 이 서랍이
+            // 덮어 `inert`로 만든 표면(chat-region) 안에 opener(답글 앵커)가 산다.
+            // ThreadPanel.closePanel은 onClose() 뒤에 opener.focus()를 부르는데,
+            // React는 언마운트 커밋 전까지 속성을 떼지 않으므로 그 focus()보다 먼저
+            // 여기서 뗀다. `covered` 효과가 다시 맞춘다(뗄 게 없으면 no-op).
+            coveredRef.current?.removeAttribute("inert");
+            setThread(null);
+          }}
         />
       )}
 
@@ -962,6 +1028,8 @@ export function ChatShell() {
           onScopeChange={changeWorkScope}
           selectedId={workSessionId}
           onSelectedIdChange={setWorkSessionId}
+          controlIntentSessionId={workControlIntent}
+          onControlIntentConsumed={() => setWorkControlIntent(null)}
           openingThreadId={openingWorkThreadId}
           threadOpenError={workThreadOpenError}
           onOpenThread={(workSession) => void openWorkSessionThread(workSession)}

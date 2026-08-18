@@ -31,6 +31,17 @@ import {
   type ObserverFailure,
 } from "./observerStream";
 
+/** Comments in this repository quote counter-examples verbatim; strip them. */
+function codeOnly(source: string): string {
+  return source
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/(?<!:)\/\/.*$/gm, "");
+}
+
+const OBSERVER_COMPONENT_CODE = codeOnly(
+  readFileSync(new URL("./ObserverTerminal.tsx", import.meta.url), "utf8")
+);
+
 const OWNER = "00000000-0000-7000-8000-000000000101";
 
 function session(over: Partial<WorkSession> = {}): WorkSession {
@@ -47,6 +58,7 @@ function session(over: Partial<WorkSession> = {}): WorkSession {
     observation: "open",
     observerGrantCount: 0,
     remoteAttachAvailable: true,
+    remoteDisplayAvailable: false,
     startedAtMs: 1785007271329,
     ...over,
   };
@@ -520,5 +532,84 @@ describe("host frames", () => {
     );
     expect(source).toContain("classifyHostFrame(data)");
     expect(source).toMatch(/if \(frame\.kind !== "output"\) return;/);
+  });
+});
+
+// -----------------------------------------------------------------------------
+// every way out of 연결 중 is a way out
+// -----------------------------------------------------------------------------
+
+/** The body of a `const NAME = useCallback(...)` in the component source. */
+function callbackBody(name: string): string {
+  const opening = `const ${name} = useCallback(`;
+  const start = OBSERVER_COMPONENT_CODE.indexOf(opening);
+  expect(start, name).toBeGreaterThan(-1);
+  const end = OBSERVER_COMPONENT_CODE.indexOf("\n  }, [", start);
+  expect(end, name).toBeGreaterThan(start);
+  return OBSERVER_COMPONENT_CODE.slice(start, end);
+}
+
+describe("the connecting leg is released on every exit, not just the socket's", () => {
+  // The measured hole this locks, and the twin of the one DisplayObserver
+  // already closed (LIVE-2 M1). `connecting` hangs a `securitypolicyviolation`
+  // listener on the DOCUMENT, which is a node that outlives this component, and
+  // `closeSocket` deletes `onopen`/`onclose` BEFORE it closes the socket so that
+  // a handler cannot report a failure the reader has already left behind. Every
+  // exit that is not the socket settling — the handshake deadline giving up,
+  // 관전 중단, the ledger revoking mid-handshake, a different session.id arriving
+  // in the same mounted panel, a retry that closes the previous attempt —
+  // therefore fires nothing on the socket at all. A cleanup reachable only from
+  // those two handlers is a cleanup all of those exits skip, and the listener
+  // then survives for the life of the tab, one more per retry and per session
+  // switch.
+  //
+  // `gates/gate-work-console.mjs` counts the surviving listeners in a real
+  // browser on the real bundle; these assertions hold the shape that makes the
+  // count zero.
+  it("hangs exactly one document listener, for the one event a socket cannot raise", () => {
+    expect(
+      OBSERVER_COMPONENT_CODE.match(/document\.addEventListener\(/g)
+    ).toHaveLength(1);
+    expect(OBSERVER_COMPONENT_CODE).toMatch(
+      /document\.addEventListener\("securitypolicyviolation"/
+    );
+    expect(
+      OBSERVER_COMPONENT_CODE.match(/document\.removeEventListener\(/g)
+    ).toHaveLength(1);
+  });
+
+  it("hands that listener's removal to closeSocket rather than to the socket", () => {
+    // Registration and drain are the two halves. Without the second one the
+    // component still compiles, still passes every state assertion above, and
+    // still leaks.
+    expect(OBSERVER_COMPONENT_CODE).toMatch(/connectCleanupRef\.current = done/);
+    const closeSocket = callbackBody("closeSocket");
+    expect(closeSocket).toMatch(/connectCleanupRef\.current = null/);
+    expect(closeSocket).toMatch(/connectCleanup\?\.\(\)/);
+    // Released before the early return that a null socket takes: an attempt
+    // whose socket is already gone still has a listener on the document.
+    expect(closeSocket.indexOf("connectCleanup?.()")).toBeLessThan(
+      closeSocket.indexOf("if (!socket) return;")
+    );
+    // ...and before the socket handlers are deleted: after that line there is
+    // nothing left that could have run it.
+    expect(closeSocket.indexOf("connectCleanup?.()")).toBeLessThan(
+      closeSocket.indexOf("socket.onopen = null")
+    );
+  });
+
+  it("leaves no exit that closes the socket around closeSocket", () => {
+    // The unmount cleanup used to close the socket by hand, which made it the
+    // one exit whose listener release depended on `onclose` arriving after the
+    // component was already gone. Every door now goes through the same one.
+    expect(OBSERVER_COMPONENT_CODE).not.toMatch(/socket\?\.close\(\)/);
+  });
+
+  it("clears the handshake deadline in exactly one place", () => {
+    // `give` closes the socket and closeSocket runs the cleanup, so the deadline
+    // has a single owner. Two owners is how the first one drifted out of date.
+    expect(
+      OBSERVER_COMPONENT_CODE.match(/window\.clearTimeout\(deadline\)/g)
+    ).toHaveLength(1);
   });
 });

@@ -44,7 +44,7 @@ use momo_t3::{
     active_observer_capability_count_in_tx, is_active_channel_member_in_tx,
     is_valid_capability_token, issue_attach_capability_in_tx, lock_attach_target_in_tx,
     mint_capability_token, sweep_spent_observer_capabilities_in_tx,
-    validate_attach_capability_in_tx, AttachMode, T3Error,
+    validate_attach_capability_in_tx, AttachKind, AttachMode, T3Error,
 };
 use momo_wire::{
     record_provenance, EntityRef, ProvenanceError, Signer,
@@ -94,7 +94,12 @@ fn requested_mode(body: &[u8]) -> Result<AttachMode, ApiError> {
 /// the channel's own would make it stale-skip a real `message.new` (the defect
 /// batch 2 recorded). Ids are lowercase here, matching every other Rust-emitted
 /// payload in this workspace; the clients fold UUID case (`api.ts:1216-1219`).
-fn observer_payload(
+///
+/// `pub(crate)` since LIVE-1: [`crate::routes::display_attach`] emits the SAME
+/// envelope carrying the same kind-blind count. Sharing the builder is the
+/// point — two builders for one 관전자 수 badge is how a client ends up
+/// rendering a number no surface agrees with.
+pub(crate) fn observer_payload(
     workspace_id: Uuid,
     channel_id: Uuid,
     session_id: Uuid,
@@ -242,6 +247,9 @@ async fn issue_in_tx(
         member_id,
         token,
         mode,
+        // LIVE-1 made the kind explicit. This route is the PTY one and says so
+        // rather than leaning on the column DEFAULT.
+        AttachKind::Pty,
     )
     .await?;
 
@@ -362,6 +370,10 @@ pub async fn validate(
                     signing_host,
                     &token,
                     revalidating,
+                    // A PTY daemon presenting a display bearer gets the ordinary
+                    // 401: two surfaces on one box do not lend each other
+                    // authority.
+                    AttachKind::Pty,
                 )
                 .await?;
                 // ADR-0146: record the host's v2 signature against the session
@@ -390,7 +402,7 @@ pub async fn validate(
     let validated = validated.ok_or_else(invalid_capability)?;
     Ok(Json(TerminalAttachValidationResponse {
         work_session_id: validated.work_session_id.to_string(),
-        pty_id: validated.pty_id,
+        pty_id: validated.target_id,
         expires_at: validated.expires_at,
         mode: validated.mode.as_db_label(),
     }))

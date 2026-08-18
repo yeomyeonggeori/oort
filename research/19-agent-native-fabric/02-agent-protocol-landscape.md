@@ -6,7 +6,7 @@
 
 | 프로토콜 | 목적(레이어) | 거버넌스 | 채택도 | 2026-07 상태 |
 |---|---|---|---|---|
-| **MCP** | 모델↔툴/데이터 | **AAIF**(LF 산하, 2025-12 Anthropic 기증) | 사실상 표준(OpenAI Apps SDK도 MCP 위) | 현행 2025-11-25. **2026-07-28 대개정 확정 예정**(stateless core·Tasks/Apps 확장) |
+| **MCP** | 모델↔툴/데이터 | **AAIF**(LF 산하, 2025-12 Anthropic 기증) | 사실상 표준(OpenAI Apps SDK도 MCP 위) | **2026-07-28 final**(stateless modern core·Tasks/Apps 확장); 2025-11-25 이하는 legacy |
 | **A2A** | 원격 에이전트↔에이전트 | Linux Foundation(2025-06 Google 기증) | 150+ 조직, MS Foundry | **v1.0.0(2026-03-12)** — 3중 바인딩, IBM ACP 흡수 완료 |
 | **AG-UI** | 에이전트 백엔드↔사용자 앱 프론트 | CopilotKit(스타트업, MIT, 재단 미소속) | MS AF·Google ADK·AWS Strands 1st-party 커넥터 | 활발. $27M 유치(2026-05) |
 | **ACP (Zed Agent Client Protocol)** | **코딩 에이전트↔클라이언트 호스팅** | Zed 단독 주도(재단 미소속) | **에이전트 40+, JetBrains·Neovim·Emacs·marimo 클라이언트** | 급성장. Registry 가동(2026-01-28). **oort와 가장 근접** |
@@ -16,8 +16,8 @@
 | Microsoft (Agent Framework/Teams SDK/NLWeb) | 프레임워크+허브 | MS | AF 1.0 GA(2026-04-02) | MCP·A2A 지지 선회, NLWeb 정체 |
 | Matrix/XMPP | 오픈 연합 메신저 | 재단 | 에이전트 **프로토콜 수준 표준화 없음** | 커뮤니티 실험만(MindRoom, OpenClaw 어댑터) |
 
-### 1.1 MCP — 대개정 직전
-- [확인] 2026-07-28 릴리스 후보: **stateless core**(initialize/Mcp-Session-Id 제거, 매 요청 `_meta`), **Tasks 코어→공식 확장**(tasks/get 폴링+update+cancel), **MCP Apps 확장**(샌드박스 iframe UI — SEP-1865, Anthropic+OpenAI+MCP-UI 공동), **Multi Round-Trip Requests(SEP-2322)**(서버발 sampling/elicitation 대체). Roots·Sampling·Logging deprecation 진입.
+### 1.1 MCP — 2026-07-28 modern core 공개
+- [확인·2026-08-12 재검증] 2026-07-28은 릴리스 후보가 아니라 공개된 **final**이다. modern core는 `initialize`·`notifications/initialized`·`ping`·protocol session·`Mcp-Session-Id`·GET stream을 제거하고, 매 요청 `params._meta`의 protocol version/capabilities와 mandatory `server/discover`를 사용한다. 2025-11-25 이하의 initialize lifecycle은 legacy이며 같은 endpoint에서 제공하려면 modern과 명시적으로 분리해야 한다. **Tasks 코어→공식 확장**(tasks/get 폴링+update+cancel), **MCP Apps 확장**(샌드박스 iframe UI — SEP-1865, Anthropic+OpenAI+MCP-UI 공동), **Multi Round-Trip Requests(SEP-2322)**(서버발 sampling/elicitation 대체). Roots·Sampling·Logging deprecation 진입.
 - [확인] 거버넌스: AAIF(Anthropic·OpenAI·Block 공동 창립, 150+ 회원). 창립 프로젝트=MCP·goose·AGENTS.md.
 - [추측·oort 관점] MCP의 진화 방향(stateless·요청 단위·서버=수동 툴 제공자)은 "상주 멤버"와 반대 방향 — oort에서는 **툴 레이어로 쓰는 게 맞고 멤버십 레이어 기반으로는 부적합**.
 
@@ -84,9 +84,9 @@
 
 **한 줄 평가**: "에이전트가 팀 채팅의 1급 멤버"를 다루는 공개 규격은 2026-07 현재 존재하지 않는다. **ACP 클라이언트 채택으로 즉시 호환성 확보 + oort 구현에서 추출한 멤버십/승인/보고 얇은 스펙 제안의 이중 전략**이 성공 확률 최고.
 
-## §출처 (전부 2026-07-21 확인)
+## §출처 (기본 2026-07-21 확인, MCP 2026-07-28 final 계약은 2026-08-12 재검증)
 
-**MCP**: blog.modelcontextprotocol.io — 2026-mcp-roadmap · 2026-07-28-release-candidate · 2025-12-09-mcp-joins-agentic-ai-foundation · 2025-11-21-mcp-apps · tasks.extensions.modelcontextprotocol.io · linuxfoundation.org(AAIF 보도자료)
+**MCP**: modelcontextprotocol.io/specification/2026-07-28/{changelog,basic/versioning,basic/transports/streamable-http,server/discover} · blog.modelcontextprotocol.io/posts/2026-07-28 · 2026-mcp-roadmap · 2025-12-09-mcp-joins-agentic-ai-foundation · 2025-11-21-mcp-apps · tasks.extensions.modelcontextprotocol.io · linuxfoundation.org(AAIF 보도자료)
 **A2A**: a2a-protocol.org/latest/specification · whats-new-v1 · lfaidata.foundation(2025-08-29 ACP 합류) · github.com/orgs/i-am-bee/discussions/5 · github.com/aaif/project-proposals/issues/37
 **AG-UI**: github.com/ag-ui-protocol/ag-ui · copilotkit.ai/ag-ui · techcrunch.com(2026-05-05 $27M) · marktechpost.com(2026-05-21)
 **ACP(Zed)**: agentclientprotocol.com(overview·agents) · zed.dev/blog/acp-registry(2026-01-28) · acp-progress-report(2025-10-02) · agent-extensions(2025-11-06) · github.com/zed-industries/claude-agent-acp · blog.jetbrains.com(2025-10 파트너십) · morphllm.com/agent-client-protocol

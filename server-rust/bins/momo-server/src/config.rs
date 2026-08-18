@@ -69,6 +69,10 @@ pub struct Config {
     /// route only. **On by default**, because the route it guards is the one
     /// unauthenticated write on the instance.
     pub rate_limit: RateLimitConfig,
+    /// ADR-0162 / HAP-E2 Agent Port transport and its dedicated abuse bounds.
+    /// These knobs are separate from the public join limiter so changing one
+    /// surface can never silently widen the other.
+    pub agent_port: AgentPortConfig,
     /// Mention→run routing knobs (B5.2). Always on; only the history window is
     /// configurable.
     pub mentions: MentionSettings,
@@ -89,6 +93,26 @@ pub struct Config {
     /// attachment routes answer 503 rather than 404. Same fail-closed posture as
     /// every other subsystem above.
     pub drive: DriveSettings,
+    /// LIVE-5a / ADR-0165 증보 1 D3-2 — the oort-operated TURN relay's ephemeral
+    /// credential policy. `None` on any instance that named no relay or no
+    /// secret, and `None` means the display routes hand back an **empty**
+    /// `ice_servers`, which is byte-for-byte what every deployment gets today.
+    ///
+    /// That emptiness is not a degraded mode, it is the retirement order: the
+    /// producer template still carries the static credential the install runbook
+    /// shipped, so an instance that has not been given the secret keeps working
+    /// exactly as it did while the new path is proved beside it. Removing the
+    /// static credential is a separate, later act — on the relay, not here.
+    pub turn: Option<momo_t3::TurnCredentialPolicy>,
+    /// The `MOMO_TURN_CREDENTIAL_TTL_SECONDS` the operator asked for, when it was
+    /// **above the ceiling** and was clamped (LIVE-5a). `None` when they asked
+    /// for something inside the bound, or for nothing at all.
+    ///
+    /// Carried as a fact rather than warned about where it is discovered,
+    /// matching `CorsConfig::rejected_entries`: this file reads the environment
+    /// and `main` owns the boot log, so a warning written here would be a second
+    /// place deciding what an operator hears at startup.
+    pub turn_ttl_clamped_from: Option<i64>,
 }
 
 /// The workspace Drive archive's environment block (Swift
@@ -196,6 +220,333 @@ impl RateLimitConfig {
             per_ip_limit: env("RATE_LIMIT_PER_IP")
                 .and_then(|value| value.trim().parse::<u32>().ok())
                 .unwrap_or(defaults.per_ip_limit),
+        }
+    }
+}
+
+/// Stateless Agent Port transport configuration (ADR-0162 D2/D4).
+///
+/// The first wave is static-bearer only. `external_origin` is therefore not an
+/// OAuth issuer or resource-metadata URL; it is solely the trusted comparison
+/// value for a present browser `Origin` header. Native/provider HTTP clients
+/// normally omit `Origin` and continue to work when it is unset.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentPortConfig {
+    /// Exact HTTPS origin from `MOMO_AGENT_PORT_EXTERNAL_ORIGIN`, normalized to
+    /// RFC 6454 serialization. `None` means every *present* Origin is refused.
+    pub external_origin: Option<String>,
+    /// Dedicated sliding-window width (default 60 seconds).
+    pub window_seconds: u64,
+    /// Requests per credential token id per window. 0 disables this axis.
+    pub per_token_limit: u32,
+    /// Requests per agent member id per window. 0 disables this axis.
+    pub per_agent_limit: u32,
+    /// Requests per socket peer per window. 0 disables this axis.
+    pub per_ip_limit: u32,
+    /// ADR-0162 HAP-E5/E6 — **the per-agent selector's gate: closed by default,
+    /// and now an operator decision rather than a compile-time impossibility.**
+    ///
+    /// It governs the selector only: whether a mention of an agent with a live
+    /// hosted connection is routed to the hosted gateway at all. The tool
+    /// surface itself is gated by pairing, human confirmation, proof and
+    /// scopes, none of which an operator can skip.
+    ///
+    /// HAP-E5 landed this field with [`hosted_delivery_from_env`] compiled only
+    /// under `debug_assertions`, so a release binary answered `false` whatever
+    /// the environment held. The reason was named in the issue: opening the
+    /// selector before a disconnect lifecycle existed would hand work to a
+    /// connection nobody could take back. **HAP-E6 (#1367) is that lifecycle**
+    /// — an atomic revoke + pause + suppression start, a per-kind cleanup
+    /// manifest, and a `disconnected` terminal that cannot be claimed while any
+    /// required artifact is unresolved — so the `cfg` is gone and the variable
+    /// is read in every build.
+    ///
+    /// What did **not** change: the default is `false`, only an exact `true`
+    /// opens it, and constructing [`AgentPortConfig`] directly still overrides
+    /// the environment (which is how every fixture and verifier sets it).
+    /// Enabling hosted delivery in production is now an operator's explicit act,
+    /// backed by the disconnect lifecycle that makes it revocable.
+    pub hosted_delivery_enabled: bool,
+    /// ADR-0162 증보 1 / HAP-E7 — the MCP OAuth 2.1 authorization server.
+    ///
+    /// **Disabled by default, and disabled is not "degraded".** With this off
+    /// the server publishes no RFC 9728 protected-resource metadata, no RFC
+    /// 8414 authorization-server metadata, and mounts no `/v1/oauth/*` route:
+    /// the well-knowns and the endpoints are 404, exactly as they were before
+    /// HAP-E7 existed. An OAuth access credential presented at the Agent Port
+    /// is refused with the same `invalid_token` challenge as any other
+    /// unrecognised string, so the flag cannot be probed.
+    ///
+    /// It stays off until #1369's consent surface lands and the runtime proof
+    /// closes, because advertising an authorization server whose resource owner
+    /// cannot actually see what they are approving is worse than advertising
+    /// none.
+    pub oauth: AgentPortOauthConfig,
+}
+
+/// One pre-registered public OAuth client.
+///
+/// First wave accepts **only** clients an operator wrote into the environment.
+/// There is no Dynamic Client Registration and no URL-form Client ID Metadata
+/// Document, so this server never fetches a URL a client named — the SSRF
+/// surface those two features open needs its own ADR and threat model first.
+///
+/// There is no secret here and there is no field for one: every registered
+/// client is public and proves possession with PKCE alone.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RegisteredOauthClient {
+    pub client_id: String,
+    /// Exact redirect URIs. Comparison is byte-exact at request time.
+    pub redirect_uris: Vec<String>,
+}
+
+/// The authorization server's identity and client allowlist.
+///
+/// `issuer` is operator configuration and nothing else. `Host`, `Forwarded` and
+/// `X-Forwarded-*` are never consulted, so a proxy or a caller cannot move the
+/// issuer or the resource — which is the whole point of RFC 9207 issuer
+/// identification and of RFC 9728's `authorization_servers` naming one exact
+/// value.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AgentPortOauthConfig {
+    enabled: bool,
+    issuer: Option<String>,
+    /// Absolute https URL of the resource owner's consent screen (#1369).
+    consent_url: Option<String>,
+    clients: Vec<RegisteredOauthClient>,
+}
+
+impl AgentPortOauthConfig {
+    /// The one predicate every OAuth surface asks. False means 404, not 503:
+    /// a disabled authorization server does not exist, it is not merely busy.
+    pub fn is_enabled(&self) -> bool {
+        self.enabled
+            && self.issuer.is_some()
+            && self.consent_url.is_some()
+            && !self.clients.is_empty()
+    }
+
+    pub fn issuer(&self) -> Option<&str> {
+        self.is_enabled()
+            .then_some(self.issuer.as_deref())
+            .flatten()
+    }
+
+    pub fn consent_url(&self) -> Option<&str> {
+        self.is_enabled()
+            .then_some(self.consent_url.as_deref())
+            .flatten()
+    }
+
+    /// The canonical Agent Port resource, derived from the issuer so the two can
+    /// never disagree and neither can be moved by a request header.
+    pub fn resource(&self) -> Option<String> {
+        self.issuer()
+            .map(|issuer| format!("{issuer}{}", momo_auth::HOSTED_AGENT_PORT_AUDIENCE))
+    }
+
+    pub fn endpoint(&self, path: &str) -> Option<String> {
+        self.issuer().map(|issuer| format!("{issuer}{path}"))
+    }
+
+    /// The registered client, or `None`. Unknown ids are indistinguishable from
+    /// a disabled server.
+    pub fn client(&self, client_id: &str) -> Option<&RegisteredOauthClient> {
+        self.is_enabled()
+            .then(|| {
+                self.clients
+                    .iter()
+                    .find(|client| client.client_id == client_id)
+            })
+            .flatten()
+    }
+
+    /// Construct directly (fixtures and verifiers), bypassing the environment.
+    pub fn for_tests(
+        issuer: &str,
+        consent_url: &str,
+        clients: Vec<RegisteredOauthClient>,
+    ) -> AgentPortOauthConfig {
+        AgentPortOauthConfig {
+            enabled: true,
+            issuer: Some(issuer.to_string()),
+            consent_url: Some(consent_url.to_string()),
+            clients,
+        }
+    }
+
+    fn from_env() -> Result<AgentPortOauthConfig, ConfigError> {
+        // Exactly one spelling opens it, the same discipline the hosted
+        // delivery gate uses: a capability a typo can enable is a capability
+        // nobody decided to enable.
+        let enabled =
+            env("MOMO_AGENT_PORT_OAUTH_ENABLED").is_some_and(|value| value.trim() == "true");
+        if !enabled {
+            return Ok(AgentPortOauthConfig::default());
+        }
+        let issuer = env("MOMO_AGENT_PORT_OAUTH_ISSUER")
+            .as_deref()
+            .and_then(normalized_origin)
+            .filter(|origin| origin.starts_with("https://"))
+            .ok_or(ConfigError::InvalidSecurity(
+                "MOMO_AGENT_PORT_OAUTH_ISSUER must be one exact https origin",
+            ))?;
+        let consent_url = env("MOMO_AGENT_PORT_OAUTH_CONSENT_URL")
+            .map(|value| value.trim().to_string())
+            .filter(|value| value.starts_with("https://") && !value.contains(['#', ' ']))
+            .ok_or(ConfigError::InvalidSecurity(
+                "MOMO_AGENT_PORT_OAUTH_CONSENT_URL must be one absolute https URL",
+            ))?;
+        let clients = parse_registered_oauth_clients(
+            env("MOMO_AGENT_PORT_OAUTH_CLIENTS")
+                .as_deref()
+                .unwrap_or(""),
+        )
+        .ok_or(ConfigError::InvalidSecurity(
+            "MOMO_AGENT_PORT_OAUTH_CLIENTS must be id=https://redirect[|https://redirect] entries",
+        ))?;
+        if clients.is_empty() {
+            return Err(ConfigError::InvalidSecurity(
+                "MOMO_AGENT_PORT_OAUTH_CLIENTS must register at least one public client",
+            ));
+        }
+        Ok(AgentPortOauthConfig {
+            enabled,
+            issuer: Some(issuer),
+            consent_url: Some(consent_url),
+            clients,
+        })
+    }
+}
+
+/// Parse `id=https://a/cb|https://b/cb;other=https://c/cb`.
+///
+/// Every rejection is total: one malformed entry refuses the whole variable
+/// rather than registering the entries that happened to parse, because a client
+/// allowlist that silently shrinks is an outage and one that silently keeps a
+/// half-parsed redirect is an open redirect.
+fn parse_registered_oauth_clients(raw: &str) -> Option<Vec<RegisteredOauthClient>> {
+    let mut clients: Vec<RegisteredOauthClient> = Vec::new();
+    for entry in raw
+        .split(';')
+        .map(str::trim)
+        .filter(|entry| !entry.is_empty())
+    {
+        let (client_id, redirects) = entry.split_once('=')?;
+        let client_id = client_id.trim();
+        if client_id.is_empty()
+            || client_id.len() > 200
+            || !client_id
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || b"-._~:".contains(&byte))
+            || clients.iter().any(|client| client.client_id == client_id)
+        {
+            return None;
+        }
+        let mut redirect_uris: Vec<String> = Vec::new();
+        for redirect in redirects.split('|').map(str::trim) {
+            // Loopback http is the one non-https redirect OAuth 2.1 keeps, for
+            // native clients that cannot hold a certificate. Everything else
+            // must be https, and no redirect may carry a fragment.
+            let loopback =
+                redirect.starts_with("http://127.0.0.1:") || redirect.starts_with("http://[::1]:");
+            if redirect.is_empty()
+                || redirect.len() > 2000
+                || !(redirect.starts_with("https://") || loopback)
+                || redirect.contains('#')
+                || redirect.chars().any(char::is_whitespace)
+                || redirect_uris.iter().any(|existing| existing == redirect)
+            {
+                return None;
+            }
+            redirect_uris.push(redirect.to_string());
+        }
+        if redirect_uris.is_empty() {
+            return None;
+        }
+        clients.push(RegisteredOauthClient {
+            client_id: client_id.to_string(),
+            redirect_uris,
+        });
+    }
+    Some(clients)
+}
+
+impl Default for AgentPortConfig {
+    fn default() -> Self {
+        AgentPortConfig {
+            external_origin: None,
+            window_seconds: 60,
+            per_token_limit: 240,
+            per_agent_limit: 480,
+            per_ip_limit: 1200,
+            hosted_delivery_enabled: false,
+            oauth: AgentPortOauthConfig::default(),
+        }
+    }
+}
+
+/// Read the hosted-delivery gate. One implementation, every build (HAP-E6).
+///
+/// Exactly one spelling opens it: the lowercase word `true`, surrounding
+/// whitespace trimmed because an env-file line ends in a newline and that is
+/// not a typo. `True`, `TRUE`, `1`, `yes`, `on` and an empty value all leave it
+/// closed, and so does an unset variable. The asymmetry is deliberate: a
+/// delivery path that a misspelling could open is a delivery path nobody
+/// decided to open.
+fn hosted_delivery_from_env() -> bool {
+    hosted_delivery_gate_open(env("MOMO_HOSTED_DELIVERY_ENABLED").as_deref())
+}
+
+/// The parse, separated from the environment so the table above is a test
+/// rather than a sentence.
+fn hosted_delivery_gate_open(value: Option<&str>) -> bool {
+    value.is_some_and(|value| value.trim() == "true")
+}
+
+impl AgentPortConfig {
+    pub fn from_env() -> Result<AgentPortConfig, ConfigError> {
+        let defaults = AgentPortConfig::default();
+        let external_origin = match env("MOMO_AGENT_PORT_EXTERNAL_ORIGIN") {
+            Some(value) => {
+                let origin =
+                    normalized_origin(&value).filter(|origin| origin.starts_with("https://"));
+                Some(origin.ok_or(ConfigError::InvalidSecurity(
+                    "MOMO_AGENT_PORT_EXTERNAL_ORIGIN must be one exact https origin",
+                ))?)
+            }
+            None => None,
+        };
+        Ok(AgentPortConfig {
+            external_origin,
+            window_seconds: env_number(
+                "MOMO_AGENT_PORT_RATE_LIMIT_WINDOW_SECONDS",
+                defaults.window_seconds,
+            )?
+            .max(1),
+            per_token_limit: env_number(
+                "MOMO_AGENT_PORT_RATE_LIMIT_PER_TOKEN",
+                defaults.per_token_limit,
+            )?,
+            per_agent_limit: env_number(
+                "MOMO_AGENT_PORT_RATE_LIMIT_PER_AGENT",
+                defaults.per_agent_limit,
+            )?,
+            per_ip_limit: env_number("MOMO_AGENT_PORT_RATE_LIMIT_PER_IP", defaults.per_ip_limit)?,
+            hosted_delivery_enabled: hosted_delivery_from_env(),
+            oauth: AgentPortOauthConfig::from_env()?,
+        })
+    }
+
+    /// `Origin` is optional for native/server clients. Once present it must be
+    /// the single operator-controlled HTTPS origin; Host and forwarding headers
+    /// are intentionally not inputs.
+    pub fn origin_is_allowed(&self, presented: Option<&str>) -> bool {
+        match presented {
+            None => true,
+            Some(value) => normalized_origin(value)
+                .zip(self.external_origin.as_ref())
+                .is_some_and(|(presented, expected)| &presented == expected),
         }
     }
 }
@@ -1037,6 +1388,57 @@ impl WebhookSettings {
     }
 }
 
+/// The oort TURN relay's ephemeral-credential policy, or `None` when this
+/// instance was not given one (LIVE-5a).
+///
+/// Three names, and all three must be present for anything to be minted:
+///
+/// | env | meaning |
+/// |---|---|
+/// | `MOMO_TURN_URLS` | comma-separated `turn:` URLs — the same relay over udp and tcp |
+/// | `MOMO_TURN_STATIC_AUTH_SECRET` | coturn's `static-auth-secret`. Never logged, never echoed |
+/// | `MOMO_TURN_CREDENTIAL_TTL_SECONDS` | optional, default [`momo_t3::DEFAULT_TURN_CREDENTIAL_TTL_SECONDS`] |
+///
+/// Half a configuration mints nothing, which is [`momo_t3::TurnCredentialPolicy::new`]'s
+/// rule and not this function's — stated there so a second caller cannot get a
+/// different answer.
+///
+/// **`MOMO_TURN_URLS` is not validated against a host allow-list here**, and
+/// that absence is deliberate rather than forgotten: ADR-0165 D3 says the relay
+/// is oort's own, and the thing that enforces it is the operator's environment
+/// plus `scripts/verify_display_attach.sh`'s conformance read — not a hostname
+/// this process would have to be taught and re-taught.
+///
+/// Returns the policy plus **the TTL the operator asked for when it exceeded the
+/// ceiling**, so `main` can say so in the boot log. The clamp itself is
+/// [`momo_t3::TurnCredentialPolicy::new`]'s, not this function's: putting it in
+/// the constructor is what stops a second caller from reaching a different
+/// ceiling, and this function only re-derives whether it fired.
+fn turn_policy_from_env() -> (Option<momo_t3::TurnCredentialPolicy>, Option<i64>) {
+    let Some(raw_urls) = env("MOMO_TURN_URLS") else {
+        return (None, None);
+    };
+    let urls: Vec<String> = raw_urls
+        .split(',')
+        .map(|url| url.trim().to_string())
+        .filter(|url| !url.is_empty())
+        .collect();
+    let Some(secret) = env("MOMO_TURN_STATIC_AUTH_SECRET") else {
+        return (None, None);
+    };
+    // A value this cannot parse falls back to the default rather than to zero:
+    // zero is refused by the constructor, which would close the relay surface
+    // over a typo in a knob that has a perfectly good default.
+    let requested = env("MOMO_TURN_CREDENTIAL_TTL_SECONDS")
+        .and_then(|value| value.trim().parse::<i64>().ok())
+        .unwrap_or(momo_t3::DEFAULT_TURN_CREDENTIAL_TTL_SECONDS);
+    let clamped_from = (requested > momo_t3::MAX_TURN_CREDENTIAL_TTL_SECONDS).then_some(requested);
+    (
+        momo_t3::TurnCredentialPolicy::new(urls, secret, requested),
+        clamped_from,
+    )
+}
+
 fn env(key: &str) -> Option<String> {
     match std::env::var(key) {
         Ok(value) if !value.trim().is_empty() => Some(value),
@@ -1103,6 +1505,8 @@ impl Config {
             return Err(ConfigError::InvalidSecurity(message));
         }
 
+        let (turn, turn_ttl_clamped_from) = turn_policy_from_env();
+
         Ok(Config {
             host: env_or("HOST", "0.0.0.0"),
             port: env_number("PORT", 8080u16)?,
@@ -1115,6 +1519,7 @@ impl Config {
             realtime,
             settings,
             rate_limit: RateLimitConfig::from_env(),
+            agent_port: AgentPortConfig::from_env()?,
             mentions: MentionSettings::from_env(),
             // ADR-0149: never fatal. An instance that was not given the
             // Centrifugo publish credential keeps 휘발 신호 off and answers 503
@@ -1133,6 +1538,13 @@ impl Config {
             // the whole instance down for a desktop-only concern.
             cors: CorsConfig::from_env(),
             drive,
+            // LIVE-5a: never fatal, and never closing. An instance that names no
+            // relay hands back an empty `ice_servers`, and the producer keeps
+            // the static credential the template already carries — which is the
+            // retirement order the install runbook demands (prove the new path,
+            // then remove the old one), expressed as a default.
+            turn,
+            turn_ttl_clamped_from,
         })
     }
 }
@@ -1309,6 +1721,71 @@ fn choose_log_filter(rust_log: Option<&str>, log_level: Option<&str>) -> String 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn agent_port_origin_is_optional_but_present_values_are_exact_https() {
+        let unset = AgentPortConfig::default();
+        assert!(unset.origin_is_allowed(None));
+        assert!(!unset.origin_is_allowed(Some("https://app.oor7.com")));
+
+        let configured = AgentPortConfig {
+            external_origin: Some("https://app.oor7.com".to_string()),
+            ..AgentPortConfig::default()
+        };
+        assert!(configured.origin_is_allowed(None));
+        assert!(configured.origin_is_allowed(Some("HTTPS://APP.OOR7.COM")));
+        for value in [
+            "http://app.oor7.com",
+            "https://app.oor7.com.evil.example",
+            "https://app.oor7.com/",
+            "null",
+        ] {
+            assert!(!configured.origin_is_allowed(Some(value)), "{value}");
+        }
+    }
+
+    /// HAP-E6 opened this gate to release builds. The default and the parse are
+    /// the two things that must not have moved with it.
+    #[test]
+    fn hosted_delivery_is_closed_by_default_and_opens_only_on_an_exact_true() {
+        assert!(
+            !AgentPortConfig::default().hosted_delivery_enabled,
+            "the shipped default is closed in every build"
+        );
+        assert!(hosted_delivery_gate_open(Some("true")));
+        assert!(
+            hosted_delivery_gate_open(Some(" true\n")),
+            "an env-file line ends in a newline; that is not a typo"
+        );
+        for closed in [
+            None,
+            Some(""),
+            Some("   "),
+            Some("True"),
+            Some("TRUE"),
+            Some("tru e"),
+            Some("1"),
+            Some("yes"),
+            Some("on"),
+            Some("false"),
+            Some("truex"),
+        ] {
+            assert!(!hosted_delivery_gate_open(closed), "{closed:?}");
+        }
+    }
+
+    /// Direct construction still wins over the environment — the override every
+    /// fixture and verifier uses to open the selector without touching a
+    /// machine-wide variable.
+    #[test]
+    fn a_directly_constructed_config_still_overrides_the_environment() {
+        let opened = AgentPortConfig {
+            hosted_delivery_enabled: true,
+            ..AgentPortConfig::default()
+        };
+        assert!(opened.hosted_delivery_enabled);
+        assert!(!AgentPortConfig::default().hosted_delivery_enabled);
+    }
 
     #[test]
     fn log_filter_prefers_rust_log_then_the_compose_log_level() {

@@ -225,17 +225,54 @@ pub async fn event(
     let Some(lease) = lease_binding(request.job_id, request.lease_id) else {
         return Err(lease_rejected());
     };
-    let status = normalized_event_status(request.status.as_deref())?;
-    let detail = bounded(request.detail.as_deref(), "detail", MAX_DETAIL_BYTES)?;
-    let text_delta = bounded(
+    let (status, detail, text_delta) = validated_event_fields(
+        request.status.as_deref(),
+        request.detail.as_deref(),
         request.text_delta.as_deref(),
-        "text_delta",
-        MAX_TEXT_DELTA_BYTES,
     )?;
-    // `text_delta` belongs to `streaming` and nowhere else (Swift :1898-1904).
-    // The delta is validated and then deliberately dropped: B2.6 relays no
-    // stream, and silently accepting it on the wrong status would let an adapter
-    // believe momo had delivered something.
+    let event_id = request.event_id.unwrap_or_else(Uuid::new_v4);
+    let via_token_id = principal.as_ref().and_then(|p| p.token_id);
+    let actor_member_id = principal.as_ref().map(|p| p.member_id);
+    let input = GatewayEventInput {
+        run_id,
+        lease,
+        status,
+        detail,
+        text_delta,
+        event_id,
+        actor_member_id,
+        via_token_id,
+    };
+
+    settle_db(
+        "agent_gateway.event",
+        agent_tenant_tx(&state.pool, workspace_id, move |conn| {
+            Box::pin(async move { record_gateway_event_in_tx(conn, workspace_id, input).await })
+        })
+        .await,
+    )?;
+
+    Ok(Json(AgentGatewayEventResponse {
+        status: "accepted",
+        run_id: run_id.to_string(),
+    }))
+}
+
+/// `status`/`detail`/`text_delta` validation, shared by the REST callback and
+/// the Agent Port's `oort_run_event` tool.
+///
+/// `text_delta` belongs to `streaming` and nowhere else (Swift :1898-1904). The
+/// delta is validated and then deliberately dropped: B2.6 relays no stream, and
+/// silently accepting it on the wrong status would let an adapter believe momo
+/// had delivered something.
+pub(crate) fn validated_event_fields(
+    status: Option<&str>,
+    detail: Option<&str>,
+    text_delta: Option<&str>,
+) -> Result<(&'static str, Option<String>, Option<String>), ApiError> {
+    let status = normalized_event_status(status)?;
+    let detail = bounded(detail, "detail", MAX_DETAIL_BYTES)?;
+    let text_delta = bounded(text_delta, "text_delta", MAX_TEXT_DELTA_BYTES)?;
     if status == "streaming" {
         if text_delta.as_deref().unwrap_or_default().is_empty() {
             return Err(ApiError::bad_request("streaming event requires text_delta"));
@@ -245,144 +282,165 @@ pub async fn event(
             "text_delta is only valid for streaming events",
         ));
     }
-    let event_id = request.event_id.unwrap_or_else(Uuid::new_v4);
-    let via_token_id = principal.as_ref().and_then(|p| p.token_id);
-    let actor_member_id = principal.as_ref().map(|p| p.member_id);
+    Ok((status, detail, text_delta))
+}
 
-    settle_db(
-        "agent_gateway.event",
-        agent_tenant_tx(&state.pool, workspace_id, move |conn| {
-            Box::pin(async move {
-                let Some(run) = lock_gateway_run_in_tx(conn, workspace_id, run_id).await? else {
-                    return Ok(Err(ApiError::not_found("agent run not found")));
-                };
-                if let Err(rejection) = actor_binding(actor_member_id, run.agent_member_id) {
-                    return Ok(Err(rejection));
-                }
-                // A cancellation acknowledgement is the one event a run in a
-                // settled state may still carry, so the lease check widens only
-                // for that exact pair (Swift :341).
-                let allow_settled =
-                    status == "cancelled" && run.status == momo_agent::RunStatus::Cancelled;
-                if !lease_is_authorized(conn, workspace_id, run_id, &run, lease, allow_settled)
-                    .await?
-                {
-                    return Ok(Err(lease_rejected()));
-                }
+/// One already-validated progress event, ready for the run ledger.
+///
+/// A struct rather than eight parameters because two callers now share this
+/// transaction — the REST callback and the Agent Port tool — and a positional
+/// list is exactly how the two would eventually pass different things.
+pub(crate) struct GatewayEventInput {
+    pub run_id: Uuid,
+    pub lease: GatewayLeaseBinding,
+    pub status: &'static str,
+    pub detail: Option<String>,
+    pub text_delta: Option<String>,
+    pub event_id: Uuid,
+    /// `None` only for the deprecated process secret, which names no member.
+    pub actor_member_id: Option<Uuid>,
+    pub via_token_id: Option<Uuid>,
+}
 
-                if run_event_recorded(conn, workspace_id, run_id, EVENT_AUDIT_ACTION, event_id)
-                    .await?
-                {
-                    return Ok(Ok(()));
-                }
-                if run.status.is_approval_held() {
-                    return Ok(Err(ApiError::new(
-                        StatusCode::CONFLICT,
-                        "agent run is awaiting a human approval decision",
-                    )));
-                }
-                if run.status.is_terminal() && status != "cancelled" {
-                    return Ok(Err(ApiError::new(
-                        StatusCode::CONFLICT,
-                        "agent run is already terminal",
-                    )));
-                }
-                if status == "cancelled" && run.status != momo_agent::RunStatus::Cancelled {
-                    return Ok(Err(ApiError::new(
-                        StatusCode::CONFLICT,
-                        "gateway cancellation acknowledgement has no rejected run",
-                    )));
-                }
+/// **The** gateway progress transaction. Both doors reach the run ledger
+/// through this function, so the lease check, the idempotency key, the terminal
+/// rules and the rail frames are one implementation rather than two that agree
+/// today.
+///
+/// The gateway *mode* gate is deliberately absent: it is a property of the REST
+/// callback surface, not of the run ledger, and a per-agent hosted connection is
+/// authorized by its own connection rather than by the instance's provider mode.
+pub(crate) async fn record_gateway_event_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    input: GatewayEventInput,
+) -> Result<Result<(), ApiError>, momo_db::DbError> {
+    let GatewayEventInput {
+        run_id,
+        lease,
+        status,
+        detail,
+        text_delta,
+        event_id,
+        actor_member_id,
+        via_token_id,
+    } = input;
+    let Some(run) = lock_gateway_run_in_tx(conn, workspace_id, run_id).await? else {
+        return Ok(Err(ApiError::not_found("agent run not found")));
+    };
+    if let Err(rejection) = actor_binding(actor_member_id, run.agent_member_id) {
+        return Ok(Err(rejection));
+    }
+    // A cancellation acknowledgement is the one event a run in a
+    // settled state may still carry, so the lease check widens only
+    // for that exact pair (Swift :341).
+    let allow_settled = status == "cancelled" && run.status == momo_agent::RunStatus::Cancelled;
+    if !lease_is_authorized(conn, workspace_id, run_id, &run, lease, allow_settled).await? {
+        return Ok(Err(lease_rejected()));
+    }
 
-                if matches!(status, "running" | "thinking" | "streaming") {
-                    mark_run_started_in_tx(conn, run_id).await?;
+    if run_event_recorded(conn, workspace_id, run_id, EVENT_AUDIT_ACTION, event_id).await? {
+        return Ok(Ok(()));
+    }
+    if run.status.is_approval_held() {
+        return Ok(Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "agent run is awaiting a human approval decision",
+        )));
+    }
+    if run.status.is_terminal() && status != "cancelled" {
+        return Ok(Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "agent run is already terminal",
+        )));
+    }
+    if status == "cancelled" && run.status != momo_agent::RunStatus::Cancelled {
+        return Ok(Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "gateway cancellation acknowledgement has no rejected run",
+        )));
+    }
 
-                    // …and the rail is told what the gateway is doing (goal
-                    // SRV-B3d). This is the projection Swift gets wrong: it
-                    // folds everything that is not `streaming`/`cancelled` into
-                    // `("thinking","running")`, which is why its *terminal*
-                    // events vanish. Here the fold is total on purpose — these
-                    // three statuses really are all "the turn is running" — and
-                    // the terminal case never reaches this branch at all,
-                    // because `complete` owns it (goal SRV-B3c).
-                    let address = momo_agent::AgentRunAddress {
-                        workspace_id,
-                        channel_id: run.channel_id,
-                        agent_member_id: run.agent_member_id,
-                        run_id,
-                    };
-                    let phase = event_progress_phase(status);
-                    // Keyed on the gateway's own event id, which is what makes
-                    // a retried callback one frame instead of two: the whole
-                    // event is already idempotent on it (`run_event_recorded`
-                    // above returns early), and the frame follows the same key
-                    // so a retry that raced that check still collapses in
-                    // Centrifugo's cache.
-                    emit_rail_frame(
-                        conn,
-                        workspace_id,
-                        run.channel_id,
-                        &momo_agent::progress_agent_status_payload(
-                            address,
-                            phase,
-                            epoch_ms(chrono::Utc::now()),
-                            &format!("gateway:{event_id}"),
-                        ),
-                    )
-                    .await?;
+    if matches!(status, "running" | "thinking" | "streaming") {
+        mark_run_started_in_tx(conn, run_id).await?;
 
-                    // The delta this route has validated and thrown away since
-                    // B2.6 ("the delta is validated and then deliberately
-                    // dropped: B2.6 relays no stream"). It is a relay, not an
-                    // accumulator — momo never held the partial answer and does
-                    // not start now; the client appends.
-                    if let Some(delta) = text_delta.as_deref().filter(|d| !d.is_empty()) {
-                        emit_rail_frame(
-                            conn,
-                            workspace_id,
-                            run.channel_id,
-                            &momo_agent::agent_partial_payload(
-                                address,
-                                delta,
-                                epoch_ms(chrono::Utc::now()),
-                                &format!("gateway:{event_id}"),
-                            ),
-                        )
-                        .await?;
-                    }
-                }
+        // …and the rail is told what the gateway is doing (goal
+        // SRV-B3d). This is the projection Swift gets wrong: it
+        // folds everything that is not `streaming`/`cancelled` into
+        // `("thinking","running")`, which is why its *terminal*
+        // events vanish. Here the fold is total on purpose — these
+        // three statuses really are all "the turn is running" — and
+        // the terminal case never reaches this branch at all,
+        // because `complete` owns it (goal SRV-B3c).
+        let address = momo_agent::AgentRunAddress {
+            workspace_id,
+            channel_id: run.channel_id,
+            agent_member_id: run.agent_member_id,
+            run_id,
+        };
+        let phase = event_progress_phase(status);
+        // Keyed on the gateway's own event id, which is what makes
+        // a retried callback one frame instead of two: the whole
+        // event is already idempotent on it (`run_event_recorded`
+        // above returns early), and the frame follows the same key
+        // so a retry that raced that check still collapses in
+        // Centrifugo's cache.
+        emit_rail_frame(
+            conn,
+            workspace_id,
+            run.channel_id,
+            &momo_agent::progress_agent_status_payload(
+                address,
+                phase,
+                epoch_ms(chrono::Utc::now()),
+                &format!("gateway:{event_id}"),
+            ),
+        )
+        .await?;
 
-                write_audit(
-                    conn,
-                    &AuditEntry::new(workspace_id, EVENT_AUDIT_ACTION)
-                        .by(run.agent_member_id)
-                        .target("agent_run", run_id)
-                        .via_token(via_token_id)
-                        .run(run_id)
-                        .with_schema(
-                            "momo.agent_gateway.event.v0",
-                            json!({
-                                "status": status,
-                                "detail": detail,
-                                "event_id": event_id.to_string(),
-                                "text_delta_bytes": text_delta.as_ref().map(|value| value.len()),
-                                "run_id": run_id.to_string(),
-                                "agent_member_id": run.agent_member_id.to_string(),
-                                "source": "hermes_gateway",
-                            }),
-                        ),
-                )
-                .await?;
-                Ok(Ok(()))
-            })
-        })
-        .await,
-    )?;
+        // The delta this route has validated and thrown away since
+        // B2.6 ("the delta is validated and then deliberately
+        // dropped: B2.6 relays no stream"). It is a relay, not an
+        // accumulator — momo never held the partial answer and does
+        // not start now; the client appends.
+        if let Some(delta) = text_delta.as_deref().filter(|d| !d.is_empty()) {
+            emit_rail_frame(
+                conn,
+                workspace_id,
+                run.channel_id,
+                &momo_agent::agent_partial_payload(
+                    address,
+                    delta,
+                    epoch_ms(chrono::Utc::now()),
+                    &format!("gateway:{event_id}"),
+                ),
+            )
+            .await?;
+        }
+    }
 
-    Ok(Json(AgentGatewayEventResponse {
-        status: "accepted",
-        run_id: run_id.to_string(),
-    }))
+    write_audit(
+        conn,
+        &AuditEntry::new(workspace_id, EVENT_AUDIT_ACTION)
+            .by(run.agent_member_id)
+            .target("agent_run", run_id)
+            .via_token(via_token_id)
+            .run(run_id)
+            .with_schema(
+                "momo.agent_gateway.event.v0",
+                json!({
+                    "status": status,
+                    "detail": detail,
+                    "event_id": event_id.to_string(),
+                    "text_delta_bytes": text_delta.as_ref().map(|value| value.len()),
+                    "run_id": run_id.to_string(),
+                    "agent_member_id": run.agent_member_id.to_string(),
+                    "source": "hermes_gateway",
+                }),
+            ),
+    )
+    .await?;
+    Ok(Ok(()))
 }
 
 /// `POST …/agent-runs/{run}/gateway/complete` — the run's last word, and the
@@ -412,206 +470,25 @@ pub async fn complete(
         })?;
     let safe_error = sanitized_gateway_error(request.error.as_deref(), &state.agent_gateway.secret);
     let usage = request.usage.as_ref().map(usage_report);
-    let body_text = timeline_body(request.body.as_deref(), succeeded, safe_error.as_deref());
     let via_token_id = principal.as_ref().and_then(|p| p.token_id);
     let actor_member_id = principal.as_ref().map(|p| p.member_id);
     let usage_detail = request.usage.as_ref().map(usage_detail_json);
+    let input = GatewayCompleteInput {
+        run_id,
+        lease: lease_binding(request.job_id, request.lease_id),
+        succeeded,
+        body: request.body.clone(),
+        safe_error,
+        usage,
+        usage_detail,
+        actor_member_id,
+        via_token_id,
+    };
 
     let outcome = settle_db(
         "agent_gateway.complete",
         agent_tenant_tx(&state.pool, workspace_id, move |conn| {
-            Box::pin(async move {
-                let Some(run) = lock_gateway_run_in_tx(conn, workspace_id, run_id).await? else {
-                    return Ok(Err(ApiError::not_found("agent run not found")));
-                };
-                if let Err(rejection) = actor_binding(actor_member_id, run.agent_member_id) {
-                    return Ok(Err(rejection));
-                }
-
-                // An approval hold is answered BEFORE the lease is judged: a run
-                // parked on a human decision must say so even to a gateway whose
-                // lease expired, or the adapter retries forever against the wrong
-                // diagnosis (Swift :825-827).
-                if run.status.is_approval_held() {
-                    return Ok(Err(ApiError::new(
-                        StatusCode::CONFLICT,
-                        format!(
-                            "agent run requires a human approval decision ({})",
-                            run.status.as_db_label()
-                        ),
-                    )));
-                }
-
-                let Some(lease) = lease_binding(request.job_id, request.lease_id) else {
-                    return Ok(Err(lease_rejected()));
-                };
-                let terminal = run.status.is_terminal();
-                if !lease_is_authorized(conn, workspace_id, run_id, &run, lease, terminal).await? {
-                    return Ok(Err(lease_rejected()));
-                }
-
-                // A terminal run either replays the message it already produced,
-                // or refuses. Looking the message up FIRST is what keeps a
-                // cancelled run from acquiring a "final response" it never had.
-                if terminal {
-                    let existing = find_client_message_in_tx(
-                        conn,
-                        run.channel_id,
-                        run.agent_member_id,
-                        run_id,
-                    )
-                    .await?;
-                    return Ok(match existing {
-                        Some(message) => Ok((message.id, message.seq, run.status.as_db_label())),
-                        None => Err(ApiError::new(
-                            StatusCode::CONFLICT,
-                            format!(
-                                "agent run is already terminal ({})",
-                                run.status.as_db_label()
-                            ),
-                        )),
-                    });
-                }
-
-                // 1. the final message — the messenger's own write path, keyed by
-                //    the run id so a replay can never produce a second one.
-                let message = send_message_in_tx(
-                    conn,
-                    workspace_id,
-                    NewMessage {
-                        channel_id: run.channel_id,
-                        author_member_id: run.agent_member_id,
-                        message_type: if succeeded {
-                            MessageType::Text
-                        } else {
-                            MessageType::System
-                        },
-                        body: Some(body_text.clone()),
-                        props: timeline_props(
-                            &run,
-                            run_id,
-                            succeeded,
-                            usage_detail.clone(),
-                            safe_error.as_deref(),
-                        ),
-                        root_id: None,
-                        // ADR-0148 규칙 6 — the same answer the worker gives,
-                        // arriving by a different door, so it points at the same
-                        // message. Both read `agent_run.trigger_message_id` off
-                        // the locked run row rather than off a job payload,
-                        // which is what keeps "an agent quotes what it answers"
-                        // one rule instead of two implementations of it.
-                        reply_to_id: run.trigger_message_id,
-                        client_msg_id: Some(run_id),
-                        run_id: Some(run_id),
-                        hlc_ts: None,
-                        hlc_count: None,
-                    },
-                )
-                .await?;
-
-                // 2. the bill.
-                let resolved = RunUsageReport::resolve(
-                    usage.as_ref(),
-                    &run.model,
-                    run.requested_effort.as_deref(),
-                    run.profile_effort_pref.as_deref(),
-                );
-                record_run_usage_in_tx(
-                    conn,
-                    workspace_id,
-                    run_id,
-                    run.agent_member_id,
-                    run.channel_id,
-                    &resolved,
-                )
-                .await?;
-
-                // 3. the terminal status.
-                let output = json!({
-                    "schema": "momo.agent_gateway.output.v0",
-                    "status": if succeeded { "succeeded" } else { "failed" },
-                    "body": request.body,
-                    "message_id": message.message.id.to_string(),
-                    "usage": usage_detail,
-                });
-                let error_json = (!succeeded).then(|| {
-                    json!({
-                        "code": "hermes_gateway_failed",
-                        "message": safe_error
-                            .clone()
-                            .unwrap_or_else(|| "gateway reported failure".to_string()),
-                        "source": "hermes_gateway",
-                    })
-                });
-                finish_run_in_tx(conn, run_id, succeeded, &output, error_json.as_ref()).await?;
-
-                // 3b. …and the rail is told the turn is over (goal SRV-B3c).
-                //
-                // Measured gap this closes: `agent:ws<WS>.<CH>.<AGENT>` had a
-                // subscriber (realtime.rs authorizes it, every client folds it)
-                // and NO producer anywhere in this workspace — so a run that
-                // succeeded simply went quiet and each client waited out its own
-                // idle TTL instead of being told. The frame is emitted in THIS
-                // transaction and after the final message's own broadcast, so a
-                // client can never learn the turn ended before it sees what the
-                // turn said.
-                emit_terminal_agent_status(
-                    conn,
-                    workspace_id,
-                    run.channel_id,
-                    run.agent_member_id,
-                    run_id,
-                    if succeeded {
-                        momo_agent::RunStatus::Succeeded
-                    } else {
-                        momo_agent::RunStatus::Failed
-                    },
-                )
-                .await?;
-
-                // 4. the job is done; `last_error` is NULL on success so an
-                //    operator reading the outbox sees why a job stopped.
-                settle_gateway_job_in_tx(
-                    conn,
-                    workspace_id,
-                    run_id,
-                    lease,
-                    if succeeded {
-                        None
-                    } else {
-                        Some(safe_error.as_deref().unwrap_or("gateway reported failure"))
-                    },
-                )
-                .await
-                .map_err(momo_db::DbError::from)?;
-
-                write_audit(
-                    conn,
-                    &AuditEntry::new(workspace_id, "agent.gateway.completed")
-                        .by(run.agent_member_id)
-                        .target("agent_run", run_id)
-                        .via_token(via_token_id)
-                        .run(run_id)
-                        .with_schema(
-                            "momo.agent_gateway.completed.v0",
-                            json!({
-                                "status": if succeeded { "succeeded" } else { "failed" },
-                                "run_id": run_id.to_string(),
-                                "message_id": message.message.id.to_string(),
-                                "usage": usage_detail,
-                                "source": "hermes_gateway",
-                            }),
-                        ),
-                )
-                .await?;
-
-                Ok(Ok((
-                    message.message.id,
-                    message.message.seq,
-                    if succeeded { "succeeded" } else { "failed" },
-                )))
-            })
+            Box::pin(async move { complete_gateway_run_in_tx(conn, workspace_id, input).await })
         })
         .await,
     )?;
@@ -623,6 +500,267 @@ pub async fn complete(
         message_id: message_id.to_string(),
         seq,
     }))
+}
+
+/// One already-validated completion, ready for the run ledger.
+pub(crate) struct GatewayCompleteInput {
+    pub run_id: Uuid,
+    /// `None` when the caller presented an incomplete lease pair.
+    ///
+    /// Deliberately optional rather than validated by the caller: the shape
+    /// check has to happen **after** the run is locked and its approval hold is
+    /// answered, or a run parked on a human decision would answer
+    /// `lease is expired or not owned` to an adapter whose real problem is that
+    /// a person has not decided yet — the exact misdiagnosis the comment below
+    /// says this ordering exists to prevent.
+    pub lease: Option<GatewayLeaseBinding>,
+    pub succeeded: bool,
+    /// The gateway's raw body, echoed verbatim into `agent_run.output`.
+    pub body: Option<String>,
+    /// Already redacted by [`sanitized_gateway_error`] — this function never
+    /// sees the raw provider error, because the text reaches `message.body` and
+    /// is broadcast to the whole channel.
+    pub safe_error: Option<String>,
+    pub usage: Option<RunUsageReport>,
+    pub usage_detail: Option<Value>,
+    pub actor_member_id: Option<Uuid>,
+    pub via_token_id: Option<Uuid>,
+}
+
+/// **The** gateway completion transaction — four writes, one transaction, two
+/// callers (the REST callback and the Agent Port's `oort_run_complete`).
+///
+/// Extracted rather than reimplemented for the Agent Port because a second
+/// completion path is a second way to bill a run, a second way to answer in a
+/// channel, and a second set of terminal rules to keep in step. Like
+/// [`record_gateway_event_in_tx`] it carries no gateway-mode gate: the mode is a
+/// property of the REST surface, and a hosted connection carries its own
+/// authorization.
+pub(crate) async fn complete_gateway_run_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    input: GatewayCompleteInput,
+) -> Result<Result<(Uuid, i64, &'static str), ApiError>, momo_db::DbError> {
+    let GatewayCompleteInput {
+        run_id,
+        lease,
+        succeeded,
+        body,
+        safe_error,
+        usage,
+        usage_detail,
+        actor_member_id,
+        via_token_id,
+    } = input;
+    let body_text = timeline_body(body.as_deref(), succeeded, safe_error.as_deref());
+    let Some(run) = lock_gateway_run_in_tx(conn, workspace_id, run_id).await? else {
+        return Ok(Err(ApiError::not_found("agent run not found")));
+    };
+    if let Err(rejection) = actor_binding(actor_member_id, run.agent_member_id) {
+        return Ok(Err(rejection));
+    }
+
+    // An approval hold is answered BEFORE the lease is judged: a run
+    // parked on a human decision must say so even to a gateway whose
+    // lease expired, or the adapter retries forever against the wrong
+    // diagnosis (Swift :825-827).
+    if run.status.is_approval_held() {
+        return Ok(Err(ApiError::new(
+            StatusCode::CONFLICT,
+            format!(
+                "agent run requires a human approval decision ({})",
+                run.status.as_db_label()
+            ),
+        )));
+    }
+
+    let Some(lease) = lease else {
+        return Ok(Err(lease_rejected()));
+    };
+    let terminal = run.status.is_terminal();
+    if !lease_is_authorized(conn, workspace_id, run_id, &run, lease, terminal).await? {
+        return Ok(Err(lease_rejected()));
+    }
+
+    // A terminal run either replays the message it already produced,
+    // or refuses. Looking the message up FIRST is what keeps a
+    // cancelled run from acquiring a "final response" it never had.
+    if terminal {
+        let existing =
+            find_client_message_in_tx(conn, run.channel_id, run.agent_member_id, run_id).await?;
+        return Ok(match existing {
+            Some(message) => Ok((message.id, message.seq, run.status.as_db_label())),
+            None => Err(ApiError::new(
+                StatusCode::CONFLICT,
+                format!(
+                    "agent run is already terminal ({})",
+                    run.status.as_db_label()
+                ),
+            )),
+        });
+    }
+
+    // 1. the final message — the messenger's own write path, keyed by
+    //    the run id so a replay can never produce a second one.
+    let message = send_message_in_tx(
+        conn,
+        workspace_id,
+        NewMessage {
+            channel_id: run.channel_id,
+            author_member_id: run.agent_member_id,
+            message_type: if succeeded {
+                MessageType::Text
+            } else {
+                MessageType::System
+            },
+            body: Some(body_text.clone()),
+            props: timeline_props(
+                &run,
+                run_id,
+                succeeded,
+                usage_detail.clone(),
+                safe_error.as_deref(),
+            ),
+            root_id: None,
+            // ADR-0148 규칙 6 — the same answer the worker gives,
+            // arriving by a different door, so it points at the same
+            // message. Both read `agent_run.trigger_message_id` off
+            // the locked run row rather than off a job payload,
+            // which is what keeps "an agent quotes what it answers"
+            // one rule instead of two implementations of it.
+            reply_to_id: run.trigger_message_id,
+            client_msg_id: Some(run_id),
+            run_id: Some(run_id),
+            hlc_ts: None,
+            hlc_count: None,
+        },
+    )
+    .await?;
+
+    // 1b. …and the hosted inbox projection for that answer (ADR-0162 / HAP-E5).
+    //
+    //     The answer is written through the RAW spine — `send_message_in_tx`,
+    //     not the product send — so it does not inherit the fan-out that
+    //     `send_message_with_mentions_in_tx` performs. Without this call a
+    //     hosted agent sharing a channel with another agent would never see
+    //     that agent's answers in its durable inbox, which is exactly the
+    //     mixed-workspace story the selector exists to serve.
+    //
+    //     The author is excluded inside the fan-out, so the completing agent
+    //     does not read its own answer back. On the terminal-replay branch
+    //     above no message is written and none is needed: the reference the
+    //     first completion appended is already there, and the append is
+    //     idempotent anyway.
+    momo_messaging::fan_out_message_reference_in_tx(
+        conn,
+        workspace_id,
+        run.channel_id,
+        message.message.id,
+        run.agent_member_id,
+    )
+    .await?;
+
+    // 2. the bill.
+    let resolved = RunUsageReport::resolve(
+        usage.as_ref(),
+        &run.model,
+        run.requested_effort.as_deref(),
+        run.profile_effort_pref.as_deref(),
+    );
+    record_run_usage_in_tx(
+        conn,
+        workspace_id,
+        run_id,
+        run.agent_member_id,
+        run.channel_id,
+        &resolved,
+    )
+    .await?;
+
+    // 3. the terminal status.
+    let output = json!({
+        "schema": "momo.agent_gateway.output.v0",
+        "status": if succeeded { "succeeded" } else { "failed" },
+        "body": body,
+        "message_id": message.message.id.to_string(),
+        "usage": usage_detail,
+    });
+    let error_json = (!succeeded).then(|| {
+        json!({
+            "code": "hermes_gateway_failed",
+            "message": safe_error
+                .clone()
+                .unwrap_or_else(|| "gateway reported failure".to_string()),
+            "source": "hermes_gateway",
+        })
+    });
+    finish_run_in_tx(conn, run_id, succeeded, &output, error_json.as_ref()).await?;
+
+    // 3b. …and the rail is told the turn is over (goal SRV-B3c).
+    //
+    // Measured gap this closes: `agent:ws<WS>.<CH>.<AGENT>` had a
+    // subscriber (realtime.rs authorizes it, every client folds it)
+    // and NO producer anywhere in this workspace — so a run that
+    // succeeded simply went quiet and each client waited out its own
+    // idle TTL instead of being told. The frame is emitted in THIS
+    // transaction and after the final message's own broadcast, so a
+    // client can never learn the turn ended before it sees what the
+    // turn said.
+    emit_terminal_agent_status(
+        conn,
+        workspace_id,
+        run.channel_id,
+        run.agent_member_id,
+        run_id,
+        if succeeded {
+            momo_agent::RunStatus::Succeeded
+        } else {
+            momo_agent::RunStatus::Failed
+        },
+    )
+    .await?;
+
+    // 4. the job is done; `last_error` is NULL on success so an
+    //    operator reading the outbox sees why a job stopped.
+    settle_gateway_job_in_tx(
+        conn,
+        workspace_id,
+        run_id,
+        lease,
+        if succeeded {
+            None
+        } else {
+            Some(safe_error.as_deref().unwrap_or("gateway reported failure"))
+        },
+    )
+    .await
+    .map_err(momo_db::DbError::from)?;
+
+    write_audit(
+        conn,
+        &AuditEntry::new(workspace_id, "agent.gateway.completed")
+            .by(run.agent_member_id)
+            .target("agent_run", run_id)
+            .via_token(via_token_id)
+            .run(run_id)
+            .with_schema(
+                "momo.agent_gateway.completed.v0",
+                json!({
+                    "status": if succeeded { "succeeded" } else { "failed" },
+                    "run_id": run_id.to_string(),
+                    "message_id": message.message.id.to_string(),
+                    "usage": usage_detail,
+                    "source": "hermes_gateway",
+                }),
+            ),
+    )
+    .await?;
+
+    Ok(Ok((
+        message.message.id,
+        message.message.seq,
+        if succeeded { "succeeded" } else { "failed" },
+    )))
 }
 
 // ---------------------------------------------------------------------------
@@ -860,7 +998,7 @@ fn timeline_props(
 /// because a value that short was never a credential. This function is called
 /// with the configured secret whether or not the legacy path is enabled, so the
 /// guard has to live here rather than upstream.
-fn sanitized_gateway_error(raw: Option<&str>, gateway_secret: &str) -> Option<String> {
+pub(crate) fn sanitized_gateway_error(raw: Option<&str>, gateway_secret: &str) -> Option<String> {
     let value = raw?.trim();
     if value.is_empty() {
         return None;

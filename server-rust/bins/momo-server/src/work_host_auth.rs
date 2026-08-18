@@ -42,7 +42,7 @@
 //! Every failure is the same 401 with the same sentence, so the response tells
 //! an attacker nothing about which check failed.
 //!
-//! ## The one path whose `{…}` segment is not a host
+//! ## The paths whose `{…}` segment is not a host
 //!
 //! `POST …/work-controls/{control}/ack` addresses a *control*, so step 2 has
 //! nothing in the path to pin the signer against — and Swift's `scopedHostID`
@@ -52,6 +52,11 @@
 //! control's own `target_host_id`. Answering "authenticated, therefore
 //! authorised" here would let any registered host in the workspace acknowledge
 //! any other host's control.
+//!
+//! LIVE-1 added the second: `POST …/work-sessions/{session}/display-binding`
+//! addresses a *session*, and its handler pins the signer to that session's
+//! `host_id` for the same reason — otherwise any host could point every future
+//! observer of someone else's session at a screen of its choosing.
 //!
 //! ## Provenance (ADR-0146, B2.5)
 //!
@@ -181,6 +186,33 @@ pub(crate) fn is_allowed_signed_path(method: &Method, path: &str) -> bool {
         && segments.len() == 6
         && segments[3] == "work-controls"
         && segments[5] == "ack"
+    {
+        return true;
+    }
+    // `POST …/work-hosts/{host}/display-attach/validate` (LIVE-1) — the WebRTC
+    // producer asking whether a view-only capability is still good.
+    if method == Method::POST
+        && segments.len() == 7
+        && segments[3] == "work-hosts"
+        && segments[5] == "display-attach"
+        && segments[6] == "validate"
+    {
+        return true;
+    }
+    // `POST …/work-sessions/{session}/display-binding` (LIVE-1) — the daemon
+    // publishing which screen this session serves.
+    //
+    // **Second path whose `{…}` is not a host**, after `…/work-controls/{c}/ack`
+    // and for the same reason: it addresses a session. `scoped_host_id_from_path`
+    // therefore returns `None` here, and the pin that matters lives in the
+    // handler where the ledger can be read — the signing host must be the
+    // session's own `host_id`. Answering "authenticated, therefore authorised"
+    // at this layer would let any registered host in the workspace publish a
+    // screen onto any other host's session.
+    if method == Method::POST
+        && segments.len() == 6
+        && segments[3] == "work-sessions"
+        && segments[5] == "display-binding"
     {
         return true;
     }

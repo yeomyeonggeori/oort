@@ -8,6 +8,7 @@
 #   3. the gap between the composer's bottom edge and the keyboard's top edge
 #   4. the `Origin` header React Native's WebSocket sends
 #   5. Work Console/detail in both schemes and an accessibility text size
+#   6. the composer's growth cap under Dynamic Type (#1443)
 #
 # Simulator, deliberately. Spike #837 established that this is the one property
 # where the simulator does NOT lie: the reversed-list numbers came out the same
@@ -136,10 +137,33 @@ capture_surface WORK-DETAIL work-detail-dark.png
 capture_surface LIGHT-WORK-CONSOLE work-console-light.png
 capture_surface LIGHT-WORK-DETAIL work-detail-light.png
 
+# #1422 컴포저 플레이스홀더. 폰에는 웹의 `composer-placeholder` 대응물이 없고
+# 예산은 더 빡빡하다 — 이 두 장이 그 예산을 사진으로 든다: 배송되는 `Composer` 를
+# 세 이름으로 세우고, 위의 계측 줄이 같은 문장을 **이 기기의 입력창**과 **문서된
+# 390pt 예산 상자** 둘에서 재서 줄 수를 적는다.
+capture_surface COMPOSER-PLACEHOLDER composer-placeholder-dark.png
+capture_surface LIGHT-COMPOSER-PLACEHOLDER composer-placeholder-light.png
+
+# #1443 성장 상한. 기본 크기에서 이 장이 하는 일은 「안 변했다」를 보이는 것이다 —
+# 상한 128pt 는 그대로이고, 다섯 줄짜리 글이 그 안에 그대로 든다. 이 장이 값을
+# 내는 크기는 아래 접근성 블록의 같은 줄이다.
+capture_surface COMPOSER-GROWTH composer-growth-dark.png
+
 ORIGINAL_CONTENT_SIZE="$(xcrun simctl ui booted content_size)"
 xcrun simctl ui booted content_size accessibility-extra-extra-large
 capture_surface WORK-CONSOLE work-console-accessibility-text.png
 capture_surface WORK-DETAIL work-detail-accessibility-text.png
+# #1422 design-review H2. 기본 크기에서 폰이 플레이스홀더를 **안 자른다**는 것이
+# 웹과 폰이 다른 처리를 하는 근거인데, 그 근거가 이 크기에서도 참인지는 아무도
+# 안 봤었다. 참이 아니다 — 실측은 `composerCopy.ts` 머리말에 적혀 있고, 이 두 줄이
+# 그 실측을 다음 배치에서도 다시 낸다.
+capture_surface COMPOSER-PLACEHOLDER composer-placeholder-accessibility-text.png
+capture_surface LIGHT-COMPOSER-PLACEHOLDER composer-placeholder-accessibility-text-light.png
+# #1443. 위 두 줄이 남긴 실측(이 크기에서 상자가 한 줄만 보여 준다)의 수리를 재는
+# 자리다. 사진 위의 계측 줄이 글자 배수·창 높이·상한·**실제 상자 높이**를 적으므로,
+# 「상한이 커졌다」가 산수가 아니라 화면에서 확인된다.
+capture_surface COMPOSER-GROWTH composer-growth-accessibility-text.png
+capture_surface LIGHT-COMPOSER-GROWTH composer-growth-accessibility-text-light.png
 xcrun simctl ui booted content_size "$ORIGINAL_CONTENT_SIZE"
 ORIGINAL_CONTENT_SIZE=""
 

@@ -90,6 +90,12 @@ export function EventSubscriptionSection({
   const [rowIssue, setRowIssue] = useState<RowIssue | null>(null);
   const [removed, setRemoved] = useState("");
   const offlineReasonId = useId();
+  // 이 목록이 잠기는 사실은 **둘**이다: 연결이 끊긴 것과, 이 목록이 방금 보낸
+  // 앞선 쓰기. 둘째에는 문장이 없어서 그 이유로 잠긴 이웃 줄들은 사유 없이
+  // 회색이었다 (#1542 · #1540 design-review M①). `HostedConnectionSection` 이
+  // `CLEANUP_BUSY_NOTE` 로 세운 것과 같은 모양이다 — 문장은 한 번 서고, 그것
+  // 때문에 잠긴 컨트롤들이 전부 그 하나를 가리키며, 한 번에 하나만 선다.
+  const busyReasonId = useId();
 
   // The one-time secret can render below the fold on a short window, and it is
   // the only chance anyone gets to read it. Same landing as the invite code.
@@ -195,6 +201,24 @@ export function EventSubscriptionSection({
 
   const rows = subscriptions.data ?? [];
   const busy = toggle.isPending || remove.isPending;
+  // 진행은 잠금이 아니다 (#1403 리뷰 H-1 / #1486 문법). `busy` 는 목록 전체의
+  // 사실이라 그것을 줄의 지우기 버튼에 그대로 넘기면, 지우기를 누른 그 줄이
+  // **자기가 켠 busy 로 자신을 잠근다** — 유일한 진행 낱말이 흐림 아래에서 죽고
+  // 낭독은 「지우는 중, 사용 안 함」이 된다.
+  //
+  // 그래서 진행은 목록이 아니라 **줄**의 사실로 좁힌다: 지금 날고 있는 삭제가
+  // 어느 줄의 것인지는 mutation 이 들고 있는 variables 가 안다. 나머지 줄에게는
+  // 그 쓰기가 여전히 잠금이고, 그것이 옳다 — 그 줄들은 진행 중이 아니라 앞선
+  // 쓰기 때문에 지금 못 하는 것이다.
+  const removingId = remove.isPending ? (remove.variables?.id ?? null) : null;
+  // 켜고 끄기도 같은 사실이다 (#1541). `ConfirmButton` 이 아니라 raw 트리거라
+  // #1502 의 좌표 밖에 있었고, 그래서 **한 줄 안에서 옆 버튼과 다른 문법**을 쓰고
+  // 있었다: 옆의 지우기는 진행을 낱말로 말하는데 이쪽은 자기가 켠 `busy` 를
+  // native `disabled` 로 되받아, 멈추기를 누른 줄이 멈춘 라벨을 든 채 흐려지고
+  // tab order 에서 빠지며 방금 누른 손에서 초점이 <body> 로 떨어졌다.
+  const togglingId = toggle.isPending
+    ? (toggle.variables?.subscription.id ?? null)
+    : null;
 
   // Every branch below is the LIST's answer, and only the list's. The form
   // outlives all of them (design review #1203 M5): a 503 on the read says
@@ -231,11 +255,17 @@ export function EventSubscriptionSection({
               subscription={subscription}
               offline={offline}
               busy={busy}
+              removing={removingId === subscription.id}
+              toggling={togglingId === subscription.id}
               // The reason a row's controls are grey is one fact, so it is
               // written once and pointed at from all of them (R2 N-R4). Three
               // rows made it three sentences; twenty would make it twenty.
+              //
+              // 사실이 둘이므로 문장도 둘이고(오프라인 · 앞선 쓰기), 한 줄이 둘
+              // 다 쓴다 — 한 번에 하나만 서므로 화면에 문장은 언제나 하나다.
               offlineReasonId={offlineReasonId}
-              writesOfflineReason={index === 0}
+              busyReasonId={busyReasonId}
+              writesLockReason={index === 0}
               issue={rowIssue?.id === subscription.id ? rowIssue.message : null}
               onToggle={(enabled) => toggle.mutate({ subscription, enabled })}
               onDelete={() => remove.mutate(subscription)}
@@ -290,6 +320,22 @@ export function EventSubscriptionSection({
 const OFFLINE_ROW_REASON = "연결이 끊겨 지금은 멈추거나 지울 수 없습니다.";
 
 /**
+ * 형제 쓰기로 잠긴 줄들이 가리키는 두 번째 사유 (#1542).
+ *
+ * 위 문장과 **같은 자리**에 서고 한 번에 하나만 선다. 잠기는 사실이 둘인데 문장이
+ * 하나뿐이던 동안, 이웃 줄의 회색은 아무 말도 하지 않았다 — 잠긴 컨트롤이
+ * `aria-disabled` 로 tab order 에 남게 된 뒤로 그 침묵은 더 크게 들린다: 초점은
+ * 닿는데 왜 못 하는지는 화면 어디에도 없다.
+ *
+ * 낱말이 「지우기」나 「멈추기」가 아니라 「누른 것」인 이유는
+ * `CLEANUP_BUSY_NOTE` 가 적어 둔 것과 같다: 이 잠금을 켜는 쓰기는 둘이고(켜고
+ * 끄기, 지우기) 그중 무엇이 날고 있는지 이 문장은 알지 못한다. 뒷문장은 위
+ * 오프라인 문장의 동사를 그대로 받는다 — 같은 목록의 같은 두 행동이다.
+ */
+const BUSY_ROW_REASON =
+  "앞서 누른 것이 아직 끝나지 않았습니다. 그것이 끝나면 이어서 멈추거나 지울 수 있습니다.";
+
+/**
  * What tells two rows apart, and therefore what every per-row control has to
  * carry in its accessible name.
  *
@@ -306,8 +352,11 @@ function SubscriptionRow({
   subscription,
   offline,
   busy,
+  removing,
+  toggling,
   offlineReasonId,
-  writesOfflineReason,
+  busyReasonId,
+  writesLockReason,
   issue,
   onToggle,
   onDelete,
@@ -315,10 +364,22 @@ function SubscriptionRow({
   subscription: EventSubscription;
   offline: boolean;
   busy: boolean;
+  /**
+   * 지금 날고 있는 삭제가 **이 줄의 것**인가.
+   *
+   * `busy` 와 갈라져 있는 이유가 이 goal 이다 (#1502): 목록의 사실(`busy`)로
+   * 줄의 버튼을 잠그면 지우기를 누른 줄이 자기가 켠 진행으로 자신을 잠근다.
+   * 진행은 낱말과 `aria-busy` 가 지고, 잠금은 나머지 줄들의 몫이다.
+   */
+  removing: boolean;
+  /** 지금 날고 있는 켜고 끄기가 **이 줄의 것**인가. 같은 갈라내기 (#1541). */
+  toggling: boolean;
   /** Id of the one offline sentence this list writes. */
   offlineReasonId: string;
-  /** This row is the one that renders it. */
-  writesOfflineReason: boolean;
+  /** Id of the one 「앞선 쓰기」 sentence this list writes (#1542). */
+  busyReasonId: string;
+  /** This row is the one that renders both of them. */
+  writesLockReason: boolean;
   issue: string | null;
   onToggle: (enabled: boolean) => void;
   onDelete: () => void;
@@ -331,7 +392,41 @@ function SubscriptionRow({
   // A destructive question is being asked about THIS row; nothing else on the
   // row stands beside it while it is open (design review #1203 N4).
   const [confirming, setConfirming] = useState(false);
-  const offlineReason = offline ? offlineReasonId : undefined;
+
+  /**
+   * 잠긴 컨트롤이 가리키는 문장 하나 (#1542).
+   *
+   * 잠그는 사실이 둘이라 문장도 둘이고, **한 번에 하나만** 선다 — 한 잠금에 두
+   * 이유를 대면 어느 쪽도 답이 아니게 된다. 오프라인이 이기는 이유는 정리 장부의
+   * `lockReasonId` 와 같다: 오프라인이면 앞선 쓰기도 어차피 도착하지 못한다.
+   *
+   * `mine` 은 이 컨트롤 자신의 쓰기가 날고 있는가다. 참이면 이 컨트롤은 잠긴 것이
+   * 아니라 **진행 중**이고, 진행 중에 「왜 못 하는지」를 읽어 주면 하지 못하는
+   * 중이라는 뜻이 된다.
+   *
+   * 질문이 열려 있어 잠긴 경우(`confirming`)에 아무것도 고르지 않는 것은 그
+   * 잠금의 사유가 **바로 옆에 서 있기 때문**이다: 질문 자체가 자기 이름을 가진
+   * 노드로 그 자리에 있고, 그것을 문장으로 한 번 더 적으면 같은 말이 둘이 된다.
+   */
+  function lockReason(mine: boolean): string | undefined {
+    if (offline) return offlineReasonId;
+    return busy && !mine ? busyReasonId : undefined;
+  }
+
+  // 진행은 잠금이 아니다 (#1486 회전이 세운 문법 · #1541). 갈라내는 식은 이
+  // 레포가 이미 쓰던 `locked = 잠금들 || (busy && !내_진행)` 이다.
+  const toggleLocked = offline || confirming || (busy && !toggling);
+  // 보이는 낱말이 상태를 지므로 낭독되는 이름도 그것을 따라 움직인다 —
+  // `ConfirmButton` 이 `triggerText` 로 하는 것과 같은 규칙이다(WCAG 2.5.3:
+  // 「전송 멈추기」가 이름인 채로 글자만 「멈추는 중」이 되면 label-in-name 이
+  // 깨진다). 낱말꼴은 #1501 정본 — 멈추다·보내다는 고유어라 「-는 중」이다.
+  const toggleText = toggling
+    ? subscription.enabled
+      ? "멈추는 중"
+      : "보내는 중"
+    : subscription.enabled
+      ? "전송 멈추기"
+      : "다시 보내기";
 
   return (
     <li
@@ -396,29 +491,42 @@ function SubscriptionRow({
       )}
 
       <div className="flex min-w-0 flex-wrap items-center gap-2">
+        {/* 진행은 낱말과 `aria-busy` 가 지고, 잠금은 `aria-disabled` + 흐림 +
+            사유 + 가드가 진다 (#1486 회전 · #1541). native `disabled` 가 아닌
+            이유는 둘이다: ①잠긴 버튼이 tab order 를 떠나면 바로 아래 사유 문장이
+            키보드·AT 로 닿을 수 없는 곳에 놓이고, ②초점을 쥔 채 잠기면 방금 누른
+            손에서 초점이 <body> 로 떨어진다. 옆의 지우기(`ConfirmButton`)가 이미
+            그 문법이라, 이 버튼만 native `disabled` 인 동안 한 줄 안에 두 문법이
+            서 있었다. 클릭을 막는 일은 가드가 진다. */}
         <Button
           type="button"
           variant="outline"
           size="sm"
-          disabled={offline || busy || confirming}
-          aria-label={
-            subscription.enabled
-              ? `${subject} 전송 멈추기`
-              : `${subject} 다시 보내기`
-          }
-          aria-describedby={offlineReason}
-          onClick={() => onToggle(!subscription.enabled)}
+          aria-disabled={toggleLocked || undefined}
+          aria-busy={toggling || undefined}
+          aria-label={`${subject} ${toggleText}`}
+          aria-describedby={lockReason(toggling)}
+          className={cn(toggleLocked && "opacity-50")}
+          onClick={() => {
+            if (toggleLocked || toggling) return;
+            onToggle(!subscription.enabled);
+          }}
           data-testid="event-subscription-toggle"
         >
-          {subscription.enabled ? "전송 멈추기" : "다시 보내기"}
+          {toggleText}
         </Button>
         <ConfirmButton
           label="구독 지우기"
           subject={subject}
-          describedBy={offlineReason}
+          describedBy={lockReason(removing)}
           question="지우면 전송이 즉시 끊기고 되돌릴 수 없습니다."
           confirmLabel="지우기"
-          disabled={offline || busy}
+          disabled={offline || (busy && !removing)}
+          busy={removing}
+          // 한자어 동작명사가 없는 자리라 고유어 동사가 「-는 중」을 쓴다 (#1501).
+          // `subject` 가 함께 서 있으므로 목록 한복판에서도 낭독은 「…구독 지우는
+          // 중」 — 어느 줄이 지워지는 중인지가 남는다.
+          busyLabel="지우는 중"
           onConfirm={onDelete}
           onAskingChange={setConfirming}
           testId="event-subscription-delete"
@@ -435,14 +543,28 @@ function SubscriptionRow({
             control that needs it most is the one whose reader is standing on
             it — which `aria-describedby` reaches wherever the row sits. Also
             shown while a question is open, because the 지우기 in that question
-            greys along with everything else (R2 N-R3). */}
-        {offline && writesOfflineReason && (
+            greys along with everything else (R2 N-R3).
+
+            두 문장이 같은 자리에 서고 한 번에 하나만 그려진다 (#1542): 오프라인이
+            아닐 때에만 「앞선 쓰기」 문장이 설 수 있으므로, 두 사실이 동시에 참인
+            프레임에서도 화면의 사유는 하나다. 형제 정리 장부가 목록 머리에서 같은
+            일을 한다(`OFFLINE_NOTE_ID` / `BUSY_NOTE_ID`). */}
+        {offline && writesLockReason && (
           <span
             id={offlineReasonId}
             className="break-keep text-meta text-ink-muted"
             data-testid="event-subscription-row-offline"
           >
             {OFFLINE_ROW_REASON}
+          </span>
+        )}
+        {!offline && busy && writesLockReason && (
+          <span
+            id={busyReasonId}
+            className="break-keep text-meta text-ink-muted"
+            data-testid="event-subscription-row-busy"
+          >
+            {BUSY_ROW_REASON}
           </span>
         )}
       </div>

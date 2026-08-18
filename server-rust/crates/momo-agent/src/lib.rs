@@ -108,6 +108,23 @@
 //! for why it lives in this crate anyway, and for what its (currently always
 //! empty) answer means while `work_control` has no writer on this server.
 //!
+//! **LIVE-4 선행 (#1425) adds the control-window hold**
+//! ([`run::park_runs_for_control_window_in_tx`],
+//! [`run::resume_runs_from_control_window_in_tx`]) — ADR-0004 증보 3 D6's
+//! 「정지되는 것은 에이전트 런 층」, written where every other `agent_run`
+//! transition is. They read that same `audit_log ⋈ work_control` relation in the
+//! opposite direction (one join, one place) and the resume additionally reads
+//! `display_control_window` so a run held by two windows is resumed by the
+//! second close rather than the first. `RunStatus::Paused` was reachable in the
+//! enum and unreachable in the database until these two; nothing about what
+//! `Paused` *means* moved with them.
+//!
+//! Both take the driver runs `FOR UPDATE` first
+//! (`run::lock_driver_runs_in_tx`, which is where the argument lives): a run
+//! that drives two sessions is worked on by two transactions that share no other
+//! lock, and a `display_control_window` read decides both statements — so
+//! without it the answer depended on which of the two committed first.
+//!
 //! Streaming/partial relay, the `tool_call` **work-control** branch (Swift routes
 //! `work.spawn` through `work_control`, which is not ported — see
 //! [`tools`]), memory-delivery receipts (`context_packet`), G4's SimHash
@@ -140,12 +157,14 @@ pub use approval::{
     cancel_pending_approvals_for_run_in_tx, create_pending_approval_in_tx, decided_props_patch,
     decision_broadcast_payload, decision_event_payload, decision_receipt, default_expires_at,
     existing_decision_in_tx, is_active_channel_member_in_tx, is_active_human_member_in_tx,
-    list_approvals_in_tx, lock_approval_in_tx, mark_approval_decided_in_tx,
+    list_approvals_in_tx, lock_approval_in_tx, login_handoff_session_id,
+    login_handoff_session_id_dropped_detail, mark_approval_decided_in_tx,
     mark_approval_expired_in_tx, normalized_reason, overdue_approvals_in_tx, record_decision_in_tx,
     resume_job_payload, tool_grants_from_payload, validated_limit, validated_status,
-    workspaces_with_overdue_approvals, ApprovalListRow, ExistingDecision, LockedApproval,
-    NewApproval, OverdueApproval, DEFAULT_TTL_SECONDS, LISTABLE_STATUSES, RESUME_MODEL,
-    RUN_CANCELLED_DECISION_REASON,
+    workspaces_with_overdue_approvals, ApprovalListRow, ExistingDecision, HandoffSessionId,
+    LockedApproval, NewApproval, OverdueApproval, AUDIT_LOGIN_HANDOFF_SESSION_ID_DROPPED,
+    AUDIT_SCHEMA_LOGIN_HANDOFF_SESSION_ID_DROPPED, DEFAULT_TTL_SECONDS, LISTABLE_STATUSES,
+    RESUME_MODEL, RUN_CANCELLED_DECISION_REASON,
 };
 pub use tools::{
     approval_reason, is_executable, requires_approval, ApprovalReason, ToolCall, ToolGrant,
@@ -197,10 +216,11 @@ pub use run::{
     list_agent_run_summaries_in_tx, list_channel_work_runs_in_tx, live_run_count_in_tx,
     load_agent_run_in_tx, load_agent_run_with_visibility_in_tx, load_eligible_agent_in_tx,
     lock_gateway_run_in_tx, lock_run_for_cancel_in_tx, mark_run_started_in_tx,
-    park_run_for_approval_in_tx, requeue_run_from_approval_in_tx, terminal_run_ids_in_tx,
+    park_run_for_approval_in_tx, park_runs_for_control_window_in_tx,
+    requeue_run_from_approval_in_tx, resume_runs_from_control_window_in_tx, terminal_run_ids_in_tx,
     trigger_summary, validated_run_limit, AgentRunRow, AgentRunSummaryPage, AgentRunSummaryRow,
     CancellableRun, CompletionStatusError, CreatedRun, EligibleAgent, GatewayRunSnapshot,
-    NewAgentRun, RunBindingRejected, RunStatus, RunTrigger, TRIGGER_SUMMARY_LIMIT,
+    NewAgentRun, ParkedRun, RunBindingRejected, RunStatus, RunTrigger, TRIGGER_SUMMARY_LIMIT,
 };
 pub use status::{
     agent_partial_payload, agent_partial_tool_call_payload, agent_status_channel,

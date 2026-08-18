@@ -493,7 +493,7 @@ describe('래퍼를 씌워도 셋은 그대로다', () => {
     const at = {current: null as number | null};
     render(
       <EdgeSwipeBack onBack={onBack} progressRef={at}>
-        <Composer
+        <Composer recipient="place"
           channelLabel="일반"
           directory={DIRECTORY}
           onSend={onSend}

@@ -48,3 +48,29 @@ U1 판정(scratchpad `u1-verdict.md`·JOURNAL 2026-08-09): PVM 호스트 커널�
 **#1179 이탈 1 해소**: idle 시계는 조회성 GET·목록·SDK exec·인-샌드박스 CPU·아웃바운드 다섯 자극 어느 것도 리셋하지 않는다(리컨실러 probe는 안전) — 리셋은 `/refreshes`·`/timeout`뿐.
 
 **발주 사양은 유지, 근거 정정**: 기저 메모리는 3.1GB(1st-party 7.2GB 주장의 43% — "8GB 불가"는 과했다). 다만 세션당 실사용이 지배(워킹셋 800MB 시 834MB/개)해 32GB=동시 ~14개가 여전히 최소선. 시스템 50GB는 `/var/lib/containerd` 2.1GB로 실물 근거.
+
+## 증보 4 (Accepted — 성재 승인 2026-08-17 "0156-4·0157-2 승인") — `envVars`는 환경이 아니라 **배달**이고, 그래서 템플릿에 의무가 생긴다 (2026-08-16, #1437)
+
+> 기안 2026-08-16, INFRA-A(#1434) 실측 [Blocker]의 처방. 실측 정본: momo-cube-host(CubeSandbox v0.6.0) · `infra/cubesandbox/bootstrap-init/README.md`.
+
+D4-② 스파이크는 "`envVars` 주입 동작함"으로 기록했지만 그것은 **envd를 품은 e2b 계열 이미지**에서의 관찰이었다. 우리 이미지에서는 `envVars`를 실은 create가 **통째로 500**(`130497`)으로 실패한다 — display·smoke·probe 3종 재현. 원인은 이름이 만든 오해다: **CubeSandbox는 `envVars`를 게스트 프로세스 환경에 넣지 않는다.** Cubelet이 create 호출 안에서 게스트에 HTTP로 **배달**하고 2xx를 요구한다.
+
+```
+POST http://<SANDBOX_IP>:49983/init      {"envVars": { … }}
+```
+
+**대안 채널은 전부 실측으로 닫혔다.** ①create의 `metadata`는 게스트에 **어떤 형태로도 도달하지 않는다**(PID1 environ·`/proc/cmdline`·DMI·mounts·`/dev`·config drive·`169.254.169.254` 전수 확인 — 게스트는 자기 sandboxID조차 알 수 없다. hostname은 *템플릿* id 접두사이고 모든 샌드박스가 같은 `169.254.68.6/30`을 본다) ②템플릿 `--env`는 PID1에 도달하지만 템플릿 단위라 provision별 토큰을 실을 수 없다 ③상류 envd는 **배포물에 없다**(호스트 전체에 바이너리 0건, `tpl create-from-image`에 요청 플래그 없음) ④`volumeMounts`는 실재하나 볼륨에 **내용을 쓰는 API가 없다**.
+
+**결정(D7 초안)**: 어댑터의 create 바디는 **그대로 둔다**(`envVars` 유지 — 와이어 변경 0). 대신 **momo 템플릿은 `/init` 수신기를 탑재한다** — `infra/cubesandbox/bootstrap-init/momo-bootstrap-init`, 레포에서 리뷰 가능한 산출물로(`infra/workd/*.service`와 같은 이유). 어댑터가 provider 비종속인 원칙은 유지되고, 이미지로 넘어가는 의무는 이 한 줄뿐이라 **명시**한다.
+
+이 선택이 사는 이유는 편의가 아니라 **정직성**이다:
+
+- **`201`이 영수증이 된다.** 수신기가 200을 주지 않으면 create 자체가 실패하므로 "생성됨"과 "부트스트랩됨"이 두 개의 희망이 아니라 하나의 사건이다. 실측: 수신기가 500을 주면 create 500 + **뒤에 남는 샌드박스 0건**(과금될 반쪽 프로비전이 존재할 수 없다).
+- **자격이 프로세스 환경에 눌러앉지 않는다.** 수신기가 `MOMO_WORKD_REGISTRATION_TOKEN`을 0600 파일로 내리고 `…_TOKEN_FILE`로 바꿔 넘긴다 — `infra/workd/bootstrap.sh`가 이미 선호하는 형태이자 ADR-0144의 요구(`/proc/<pid>/environ`은 샌드박스 안 아무나 읽는다).
+- **resume이 재배달하지 않는다**(실측) — 수신기는 1회용이어도 임대 수명 내내 안전하다.
+
+**D5 재정정**: 증보 3이 "부속은 설치물의 일부"로 완화한 문장에 한 항목을 더한다 — **Cubelet의 이 배달 경로는 우리가 소비하는 표면이다**. 수명주기 API만 소비한다는 원문은 이 한 건에서 더 이상 참이 아니다.
+
+**부수 의무(템플릿 빌드)**: 수신기를 탑재한 템플릿은 `--probe`를 **주지 않는다**. 워크로드는 배달 전까지 정당하게 듣지 않고 템플릿 빌드에는 배달이 없어서, readiness probe가 빌드를 떨어뜨린다(양쪽 실측).
+
+**d42 미해소 N2/M1 해소**: "envVars가 PID1에 없다"는 관찰의 기제가 이것이었다 — 주입이 아니라 배달이므로 PID1의 environ에 있을 이유가 없었다.

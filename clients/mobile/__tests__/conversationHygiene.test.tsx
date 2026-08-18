@@ -870,3 +870,257 @@ describe('#1076 — 인용 점프가 도착했다고 말한다', () => {
     expect(code).not.toMatch(/setTimeout\([^)]*setLandedId/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// #1422 — 여러 줄 입력창은 전부 어절에서 끊는다 (design-review M2)
+// ---------------------------------------------------------------------------
+
+/**
+ * 이 스윕이 **처음 쓰던 자**. 지워지지 않고 남아 있는 이유는 아래 red proof 다 —
+ * 이 정규식이 무엇을 놓쳤는지가 값으로 남아 있어야 다음 사람이 「한 줄이면 되는데」
+ * 하고 되돌리지 않는다.
+ *
+ * 게으른 `[\s\S]*?` 는 **첫 `>`** 에서 멈춘다. JSX 의 속성값은 화살표 함수를 흔히
+ * 들고(`onChangeText={(t) => …}`), 그 `=>` 의 `>` 가 태그의 끝으로 읽힌다.
+ */
+const NAIVE_TAG = /<TextInput\b[\s\S]*?\/?>/g;
+
+/**
+ * `<Name …>` 여는 태그를 **통째로** 집는다.
+ *
+ * 태그의 끝은 「첫 `>`」가 아니라 **중괄호 밖·따옴표 밖·주석 밖의 `>`** 다. JSX 는
+ * 모든 식을 `{}` 안에 넣으므로 깊이만 세면 화살표 함수(`=>`)도, 비교식도, 문자열
+ * 안의 `>` 도 태그를 안 끊는다. 주석을 함께 건너뛰는 이유는 이 레포의 JSX 태그가
+ * 속성 사이에 긴 한국어 주석을 들기 때문이다(폰 `Composer.tsx` 의 그 태그가
+ * 스무 줄이다).
+ *
+ * 안 닫힌 태그는 **버린다**. 소스가 깨졌다는 뜻이고, 그때 스윕이 파일 끝까지를
+ * 태그로 치면 없는 속성을 봤다고 말하게 된다.
+ *
+ * 안 보는 것 하나: `<TextInput<Props> …>` 같은 제네릭 인자. 이 클라에 그 모양은
+ * 없고, 생기면 그때 각도 괄호 깊이가 이 함수에 들어온다.
+ */
+function openingTags(
+  source: string,
+  name: string,
+): {tag: string; index: number}[] {
+  const found: {tag: string; index: number}[] = [];
+  for (const match of source.matchAll(new RegExp(`<${name}\\b`, 'g'))) {
+    const from = match.index ?? 0;
+    let i = from + match[0].length;
+    let depth = 0;
+    let quote: string | null = null;
+    let end = -1;
+    while (i < source.length) {
+      const c = source[i];
+      if (quote !== null) {
+        if (c === '\\') {
+          i += 2;
+          continue;
+        }
+        if (c === quote) quote = null;
+        i += 1;
+        continue;
+      }
+      if (c === '/' && source[i + 1] === '/') {
+        const nl = source.indexOf('\n', i);
+        i = nl === -1 ? source.length : nl + 1;
+        continue;
+      }
+      if (c === '/' && source[i + 1] === '*') {
+        const close = source.indexOf('*/', i + 2);
+        i = close === -1 ? source.length : close + 2;
+        continue;
+      }
+      if (c === '"' || c === "'" || c === '`') {
+        quote = c;
+        i += 1;
+        continue;
+      }
+      if (c === '{') depth += 1;
+      else if (c === '}') depth -= 1;
+      else if (c === '>' && depth === 0) {
+        end = i + 1;
+        break;
+      }
+      i += 1;
+    }
+    if (end !== -1) found.push({tag: source.slice(from, end), index: from});
+  }
+  return found;
+}
+
+describe('#1422 — 여러 줄 입력창의 줄바꿈 규칙은 전수다', () => {
+  it('`multiline` 인 TextInput 은 하나도 빠짐없이 `hangul-word` 를 든다', () => {
+    // 이 배치의 첫 판은 **허용목록**이었다: 컴포저 하나를 지목해 규칙을 재는
+    // 단정. 그 모양의 문제는 §5.5 ② 가 이미 적어 뒀다 — 목록 밖은 측정되지
+    // 않고, 목록 밖이 늘어난 것을 아무도 모른다. 실제로 리뷰가 하나를 더 찾았고
+    // (`MessageEditorSheet`), 그것이 이 스윕이 있는 이유다.
+    //
+    // 잔량이 아니라 **0** 인 이유: 지금 이 클라의 여러 줄 입력창은 둘뿐이고
+    // 둘 다 한국어 문장을 받는다. 기준선을 세우면 그 파일이 다음 사람에게
+    // "여기까지는 괜찮다"고 거짓말한다.
+    const offenders: string[] = [];
+    for (const file of sourceFiles(SRC_DIR)) {
+      const source = fs.readFileSync(file, 'utf8');
+      // `<TextInput … />` 한 덩어리씩. 여는 태그의 끝까지만 본다 — 그 「끝」을
+      // 정규식이 아니라 `openingTags` 가 찾는 이유는 아래 red proof 에 있다.
+      for (const {tag, index} of openingTags(source, 'TextInput')) {
+        if (!/\bmultiline\b/.test(tag)) continue;
+        if (/lineBreakStrategyIOS=["']hangul-word["']/.test(tag)) continue;
+        const line = source.slice(0, index).split('\n').length;
+        offenders.push(`${path.relative(SRC_DIR, file)}:${line}`);
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it('스윕의 구멍 — 화살표 함수의 `>` 가 태그를 조기 종료하던 자리', () => {
+    // 이 단정이 red proof 다. 픽스처 둘은 이 클라에 오늘 없는 모양이지만
+    // **한 줄만 더 쓰면 생기는** 모양이고(`onChangeText={(t) => …}` 는 RN 의 기본
+    // 어법이다), 옛 자로 재면 구멍이 두 방향으로 열린다:
+    //
+    //   ① 놓친다 — `multiline` 이 화살표 뒤에 있으면 태그가 `=>` 에서 끝나
+    //      「여러 줄 입력창이 아니다」가 되고, 규칙 없는 상자가 조용히 통과한다.
+    //      스윕이 0 을 내는데 0 이 아닌 판이라 **fail-unsafe** 쪽이다.
+    //   ② 헛짚는다 — `hangul-word` 가 화살표 뒤에 있으면 규칙을 든 상자가
+    //      위반으로 잡힌다. 이쪽은 시끄러울 뿐이지만 같은 원인이다.
+    const missed = [
+      '<TextInput',
+      '  ref={inputRef}',
+      '  onChangeText={(next: string) => setText(next)}',
+      '  multiline',
+      '/>',
+    ].join('\n');
+    const misjudged = [
+      '<TextInput',
+      '  multiline',
+      '  onChangeText={(t) => set(t)}',
+      '  lineBreakStrategyIOS="hangul-word"',
+      '/>',
+    ].join('\n');
+
+    // 옛 자의 실측. 두 태그 다 `=>` 에서 잘린다.
+    const naive = (source: string) =>
+      Array.from(source.matchAll(NAIVE_TAG), m => m[0]);
+    expect(naive(missed)[0]).toBe(
+      '<TextInput\n  ref={inputRef}\n  onChangeText={(next: string) =>',
+    );
+    expect(/\bmultiline\b/.test(naive(missed)[0])).toBe(false);
+    expect(
+      /lineBreakStrategyIOS=["']hangul-word["']/.test(naive(misjudged)[0]),
+    ).toBe(false);
+
+    // 지금 자. 여는 태그가 통째로 잡히고, 두 판정이 다 뒤집힌다.
+    const tagsOf = (source: string) =>
+      openingTags(source, 'TextInput').map(t => t.tag);
+    expect(tagsOf(missed)).toEqual([missed]);
+    expect(tagsOf(misjudged)).toEqual([misjudged]);
+    expect(/\bmultiline\b/.test(tagsOf(missed)[0])).toBe(true);
+    expect(
+      /lineBreakStrategyIOS=["']hangul-word["']/.test(tagsOf(misjudged)[0]),
+    ).toBe(true);
+  });
+
+  it('태그 끝을 가리는 나머지 셋 — 문자열·주석·안 닫힌 태그', () => {
+    // 화살표만 막으면 같은 구멍이 다른 이름으로 돌아온다. 셋 다 이 레포에 이미
+    // 있는 모양이다: 속성값의 `>`(한국어 안내 문구가 화살표를 쓴다), 속성 사이의
+    // 긴 주석(폰 `Composer.tsx` 의 그 태그가 스무 줄이다), 그리고 깨진 소스.
+    const inString = '<TextInput placeholder="a > b" multiline />';
+    expect(openingTags(inString, 'TextInput').map(t => t.tag)).toEqual([
+      inString,
+    ]);
+
+    const inComment = [
+      '<TextInput',
+      '  // 다음 판에서 -> 로 바꾼다',
+      '  multiline',
+      '/>',
+    ].join('\n');
+    expect(openingTags(inComment, 'TextInput').map(t => t.tag)).toEqual([
+      inComment,
+    ]);
+
+    // 안 닫힌 태그는 지어내지 않는다 — 파일 끝까지를 태그로 치면 그 뒤에 있는
+    // 남의 속성을 이 태그의 것으로 읽는다.
+    expect(openingTags('<TextInput multiline', 'TextInput')).toEqual([]);
+
+    // 타입 자리의 `<TextInput …>` 은 태그가 아니지만 잡혀도 해가 없다: 속성이
+    // 없으니 `multiline` 도 없다. 그 사실을 값으로 적어 둔다.
+    const typePosition = 'const r = useRef<TextInput | null>(null);';
+    expect(openingTags(typePosition, 'TextInput').map(t => t.tag)).toEqual([
+      '<TextInput | null>',
+    ]);
+    expect(/\bmultiline\b/.test('<TextInput | null>')).toBe(false);
+  });
+
+  it('그 값의 정본은 `Sentence` 다 — 스윕이 문자열을 지어내지 않았는지 확인한다', () => {
+    // 위 스윕은 정규식이라 값을 손으로 들 수밖에 없다. 그 손이 정본과 갈라지지
+    // 않는지는 여기서 잰다: `atoms.tsx` 가 같은 값을 들고 있는가.
+    const atoms = fs.readFileSync(
+      path.resolve(SRC_DIR, 'design/atoms.tsx'),
+      'utf8',
+    );
+    expect(atoms).toContain('lineBreakStrategyIOS="hangul-word"');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #1478 — 공백만 있는 본문은 빈 줄을 그리지 않는다
+// ---------------------------------------------------------------------------
+
+/** 그려진 트리의 글자를 전부 편다. 소스 매칭이 아니라 **결과**를 센다. */
+function drawnText(node: unknown): string[] {
+  if (node === null || node === undefined) return [];
+  if (typeof node === 'string') return [node];
+  if (Array.isArray(node)) return node.flatMap(drawnText);
+  const children = (node as {children?: unknown}).children;
+  return drawnText(children);
+}
+
+describe('#1478 — 공백만 있는 본문 (웹 `hasRenderableBody` 의 폰 짝)', () => {
+  // 이 행은 `body !== ''` 로 물었다. 공백만 있는 본문은 그것을 통과해 본문 칸을
+  // 얻고, `<Text>` 가 그 공백을 그대로 그려 카드 위에 빈 줄이 섰다. 판정은 이제
+  // 코어에 하나 있고(`features/timeline/bodySlot`), 웹이 부르는 그 함수다.
+  const BLANK = '   \n  ';
+
+  function row(body: string | undefined) {
+    return render(
+      <MessageRow
+        message={message(body === undefined ? {body: undefined} : {body})}
+        startsGroup
+        directory={DIRECTORY}
+        chips={[]}
+        nowMs={BASE_MS}
+      />,
+    );
+  }
+
+  it('그 공백을 그리지 않는다', () => {
+    const texts = drawnText(row(BLANK).toJSON());
+    expect(texts).not.toContain(BLANK);
+    // 공백이 든 어떤 글자도 남지 않는다 — 「일부만 지웠다」로 통과하지 못하게.
+    expect(texts.filter(t => t !== '' && t.trim() === '')).toEqual([]);
+  });
+
+  // 반대쪽 갈래도 같은 판정을 쓴다. 그쪽만 `body === ''` 로 남겨 두면 공백 본문은
+  // 어느 쪽에도 안 걸려 행이 통째로 말이 없어진다 — 빈 본문에는 「내용 없는
+  // 메시지」라고 말해 놓고 공백 본문에는 아무 말도 안 하는 것은 같은 사실에 두
+  // 답을 주는 것이다. 셋이 **한 낱말**을 말한다.
+  it.each([
+    ['공백만', BLANK],
+    ['빈 문자열', ''],
+    ['키 자체가 없음', undefined],
+  ])('%s 인 본문은 「내용 없는 메시지」라고 말한다', (_name, body) => {
+    row(body);
+    expect(screen.getByText('※ 내용 없는 메시지')).toBeTruthy();
+  });
+
+  it('글자가 있으면 그대로 그린다 (무회귀)', () => {
+    // 앞뒤 공백은 판정을 바꾸지 못한다. 그리고 본문은 **자른 것이 아니라** 저자가
+    // 친 그대로 간다 — 이 판정은 그릴지 말지만 정하고 무엇을 그릴지는 안 정한다.
+    const texts = drawnText(row('  환경 셋업을 마쳤습니다.  ').toJSON());
+    expect(texts).toContain('  환경 셋업을 마쳤습니다.  ');
+    expect(screen.queryByText('※ 내용 없는 메시지')).toBeNull();
+  });
+});

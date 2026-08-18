@@ -68,8 +68,8 @@ use momo_auth::{
 };
 use momo_ephemeral::{
     ephemeral_channel, now_epoch_ms, EphemeralPublishOutcome, EphemeralSignal, PresenceSignal,
-    TypingSignal, PRESENCE_REPUBLISH_INTERVAL_MS, PRESENCE_SIGNAL_TTL_MS, TYPING_AGGREGATE_THRESHOLD,
-    TYPING_REPUBLISH_INTERVAL_MS, TYPING_SIGNAL_TTL_MS,
+    TypingSignal, PRESENCE_REPUBLISH_INTERVAL_MS, PRESENCE_SIGNAL_TTL_MS,
+    TYPING_AGGREGATE_THRESHOLD, TYPING_REPUBLISH_INTERVAL_MS, TYPING_SIGNAL_TTL_MS,
 };
 use momo_messaging::is_channel_member;
 
@@ -528,8 +528,6 @@ mod tests {
             .expect_err("403");
         assert_eq!(error.status, StatusCode::FORBIDDEN);
         assert!(error.message.contains("agent_run"), "{}", error.message);
-        assert!(
-            require_human(&principal(PrincipalKind::Human), AGENTS_HAVE_NO_PRESENCE).is_ok()
-        );
+        assert!(require_human(&principal(PrincipalKind::Human), AGENTS_HAVE_NO_PRESENCE).is_ok());
     }
 }

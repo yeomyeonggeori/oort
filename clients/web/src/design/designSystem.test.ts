@@ -45,6 +45,17 @@ function tsxFiles(dir: string): string[] {
   return out;
 }
 
+/** `.ts` 까지 — 프리플라이트가 `.tsx` 만 훑는 자리를 이 파일이 받는다. */
+function sourceFiles(dir: string): string[] {
+  const out: string[] = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = `${dir}/${entry.name}`;
+    if (entry.isDirectory()) out.push(...sourceFiles(full));
+    else if (/\.tsx?$/.test(entry.name)) out.push(full);
+  }
+  return out;
+}
+
 // -----------------------------------------------------------------------------
 // 1. 축이 닫혀 있다 — 「격자 밖은 아예 컴파일되지 않는다」의 전제
 // -----------------------------------------------------------------------------
@@ -331,5 +342,70 @@ describe("그림자 축", () => {
       }
     }
     expect([...used].sort()).toEqual([...ALLOWED_ELEVATIONS].sort());
+  });
+});
+
+// -----------------------------------------------------------------------------
+// 런타임에 스타일을 쓰는 자리 — **잔량** (#1422 design-review M1)
+// -----------------------------------------------------------------------------
+
+describe("컴포넌트는 스타일을 짓지 않는다 — 런타임 몫", () => {
+  /**
+   * `element.style.x = …` 로 스타일을 쓰는 파일. **0 이 아니라 잔량이다.**
+   *
+   * 둘 다 「스타일시트가 미리 알 수 없는 값」을 쓴다:
+   *
+   *   `useAutoGrow`      내용에서 잰 높이. 값이 사람이 친 글에서 나온다.
+   *   `placeholderFit`   계산된 글자꼴의 사본. 값이 `getComputedStyle` 에서 나온다.
+   *
+   * 지어낸 값(자리·가시성·줄바꿈)은 둘 다 스타일시트에 있다 — `placeholderFit`
+   * 의 것은 `tokens.css` 의 `text-probe` 다. 그래서 이 목록은 「인라인 스타일이
+   * 허용된 곳」이 아니라 **「아직 안 닫힌 곳의 수」**이고, 줄어드는 것은 통과하고
+   * 늘어나면 빨갛다.
+   *
+   * 이 단정이 여기 있는 이유: `scripts/design_preflight_web.sh` 의 `inline_style`
+   * 은 `style={` / `style="` 를 `.tsx` 에서만 찾는다. `.style.x =` 도, `.ts` 파일
+   * 도 그 그렙 밖이라, 이 축은 **아무도 안 보고 있었다**(§5.3 이 세는 그 종류의
+   * 구멍). 셸 프리플라이트의 계약을 바꾸는 것은 §6 절차라 여기서 하지 않고,
+   * 대신 이 스위트가 전수로 센다 — 병합 트리 게이트가 돌리는 레인이다.
+   */
+  const REMAINING_RUNTIME_STYLE_WRITERS = [
+    "features/timeline/useAutoGrow.ts",
+    "features/chat/placeholderFit.ts",
+  ];
+
+  it("런타임 스타일 작성자가 잔량 목록보다 늘지 않는다", () => {
+    const writers = new Set<string>();
+    for (const file of sourceFiles(SRC_DIR)) {
+      const code = codeOnly(readFileSync(file, "utf8"));
+      // 점과 대괄호 **둘 다**. 계산된 값을 옮기는 쪽은 반드시 대괄호를 쓰므로
+      // (`probe.style[property]`), 점만 찾는 정규식은 정확히 이 축에서 가장
+      // 위험한 모양을 놓친다.
+      if (/\.style(\.[A-Za-z]+|\[[^\]]+\])\s*=[^=]/.test(code)) {
+        writers.add(file.slice(SRC_DIR.length + 1));
+      }
+    }
+    for (const writer of writers) {
+      expect(
+        REMAINING_RUNTIME_STYLE_WRITERS,
+        `${writer} 가 런타임에 스타일을 쓴다. 지어낸 값이면 tokens.css 의 이름 있는 유틸리티로, 잴 수밖에 없는 값이면 이 목록에 근거와 함께 올린다.`
+      ).toContain(writer);
+    }
+    // 그리고 이 스윕이 **정말 무엇인가를 찾고 있는가**. 위 반복문은 아무것도 못
+    // 찾아도 초록이라, 정규식이 조용히 죽으면 이 축은 다시 무검사가 된다.
+    expect(writers).toContain("features/chat/placeholderFit.ts");
+  });
+
+  it("지어낸 값은 이미 스타일시트에 있다 — 프로브의 옷", () => {
+    // 목록에 오른 파일이 「잴 수밖에 없는 값만」 쓰는지를 한 자리에서 확인한다.
+    // `placeholderFit` 의 자리·가시성·줄바꿈은 `text-probe` 가 든다.
+    expect(CSS).toContain("@utility text-probe");
+    const fit = codeOnly(
+      readFileSync(`${SRC_DIR}/features/chat/placeholderFit.ts`, "utf8")
+    );
+    expect(fit).toContain('probe.className = "text-probe"');
+    for (const authored of ["position", "visibility", "whiteSpace", "pointerEvents"]) {
+      expect(fit).not.toContain(`probe.style.${authored}`);
+    }
   });
 });

@@ -6,6 +6,7 @@ import {Text} from 'react-native';
 import {quoteDraftFor, type QuoteDraft} from '@momo/core/features/timeline/quote';
 
 import {Composer} from '../src/features/conversation/Composer';
+import {Sentence} from '../src/design/atoms';
 
 // =============================================================================
 // 컴포저가 새로 낸 두 개의 이음매 — 그리고 **한글이 아직 조합되는가**.
@@ -49,7 +50,7 @@ function TypingTicks({value}: {value: number}): React.JSX.Element {
 
 function composer(props: Partial<React.ComponentProps<typeof Composer>> = {}) {
   return render(
-    <Composer
+    <Composer recipient="place"
       channelLabel="배포"
       directory={EMPTY}
       onSend={() => {}}
@@ -73,7 +74,7 @@ describe('작성 중 신호 — 값보다 늦게, 값을 건드리지 않고', (
       const [ticks, setTicks] = React.useState(0);
       return (
         <>
-          <Composer
+          <Composer recipient="place"
             channelLabel="배포"
             directory={EMPTY}
             onSend={() => {}}
@@ -183,5 +184,41 @@ describe('인용 초안 — 나가는 길이 없으면 들어오는 길도 없�
     fireEvent.changeText(screen.getByTestId('composer-input'), '확인했습니다');
     fireEvent.press(screen.getByTestId('composer-send'));
     expect(onSend).toHaveBeenCalledWith('확인했습니다');
+  });
+});
+
+// =============================================================================
+// #1422 — 이 상자의 한국어는 낱말 가운데서 끊기지 않는다.
+//
+// 웹 몫은 절 단위 생략이었다(한 줄 상자라 넘친 절이 **사라진다**). 이 상자는
+// 자라므로 사라지는 것이 없고, 폰 계측이 대신 실측한 것은 줄바꿈의 **자리**였다:
+// 예산 260pt 상자에서 「부르기」가 「부 / 르기」로 끊겼다(`measure/surfaces.tsx`
+// 의 `composer-placeholder`).
+//
+// 이 레포는 그 결함에 이미 처방을 갖고 있었다 — `design/atoms.tsx` 의 `Sentence`
+// 와 `NoticeBlock` 이 완성된 한국어 문장에 `hangul-word` 를 든다. 규칙이 입력창만
+// 비껴가면 같은 앱이 문장마다 다르게 끊긴다(디자인 시스템 §5.3: 한국어 텍스트
+// 처리 · 한 클라 안의 내부 불일치). 재지 않으면 다음 배치가 조용히 되돌린다.
+// =============================================================================
+
+describe('#1422 — 어절이 줄바꿈의 단위다', () => {
+  it('입력창이 어절 우선 줄바꿈을 든다', () => {
+    composer();
+    expect(
+      screen.getByTestId('composer-input').props.lineBreakStrategyIOS,
+    ).toBe('hangul-word');
+  });
+
+  it('본문 문장의 규칙과 **같은 값**이다 — 두 자리에 두 규칙이 아니다', () => {
+    // `Sentence` 가 정본이다. 이 단정이 그 파일을 렌더해서 답하는 이유: 값을
+    // 손으로 적어 두면 정본이 바뀌는 날 이 줄만 옛 값으로 남는다.
+    const sentence = render(<Sentence testID="sentence-rule">문장</Sentence>);
+    const sentenceRule =
+      sentence.getByTestId('sentence-rule').props.lineBreakStrategyIOS;
+    sentence.unmount();
+    composer();
+    expect(
+      screen.getByTestId('composer-input').props.lineBreakStrategyIOS,
+    ).toBe(sentenceRule);
   });
 });

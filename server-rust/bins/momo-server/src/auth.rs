@@ -64,13 +64,15 @@ use axum::http::request::Parts;
 use axum::middleware::Next;
 use axum::response::Response;
 use momo_auth::{
-    agent_bearer_workspace_id, authenticate_agent_bearer_in_tx, is_gateway_callback_route,
-    required_agent_scope, token_state, verify_app_access, AgentBearerResolution, AuthError,
+    agent_bearer_workspace_id, classify_agent_bearer_in_tx, finalize_agent_bearer_use_in_tx,
+    is_gateway_callback_route, required_agent_scope, resolve_agent_bearer_in_tx, token_state,
+    verify_app_access, AgentBearerClass, AgentBearerIdentity, AgentBearerResolution, AuthError,
     Principal, PrincipalKind, AUDIT_DETAIL_SCHEMA,
 };
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::{with_tenant_tx, DbError};
 use serde_json::json;
+use std::sync::{Arc, Mutex};
 
 use crate::config::constant_time_eq;
 use crate::error::ApiError;
@@ -98,6 +100,37 @@ pub struct LegacyGatewaySecret;
 /// middleware deliberately allowed it.
 #[derive(Debug, Clone)]
 pub struct GatewayCaller(pub Option<Principal>);
+
+/// Authentication outcome for the dedicated Agent Port adapter.
+///
+/// It deliberately does not reuse [`ApiError`]: the MCP transport needs
+/// standards-shaped `WWW-Authenticate` challenges and must never fall through
+/// to App JWT authentication. Database/internal failures are already logged by
+/// the shared resolver and become an opaque 500 at the adapter boundary.
+#[derive(Debug, Clone)]
+pub(crate) enum AgentPortAuthError {
+    MissingCredential,
+    InvalidToken,
+    InsufficientScope,
+    Internal,
+}
+
+/// Successful identity admission or a process-local abuse-control denial.
+///
+/// The rate-limited variant is reachable only after a SELECT-only credential
+/// resolution. It therefore carries no raw bearer and exposes only the bounded
+/// Retry-After value the HTTP adapter needs.
+#[derive(Debug, Clone)]
+pub(crate) enum AgentPortAdmission {
+    Allowed(Principal),
+    RateLimited { retry_after_seconds: u64 },
+}
+
+#[derive(Debug)]
+enum AgentPortTransactionOutcome {
+    Admission(AgentPortAdmission),
+    Rejected(AgentPortAuthError),
+}
 
 impl<S> FromRequestParts<S> for GatewayCaller
 where
@@ -157,6 +190,431 @@ pub(crate) fn bearer_token(header: &str) -> Option<&str> {
         None
     } else {
         Some(token)
+    }
+}
+
+/// Authenticate and rate-admit the Agent Port's one allowed credential class.
+///
+/// Only an active `momo_agent_v1` envelope carrying
+/// `agent:port:connect` succeeds. A human App JWT, a work-host signature, a
+/// legacy gateway secret, or a malformed bearer is never tried as a second
+/// credential class. Resolution is SELECT-only; the limiter keys solely on the
+/// resolved token/member UUIDs. An admitted request then conditionally touches
+/// `last_used_at` and writes its used audit in this same tenant transaction. A
+/// 429 performs neither effect, and only the first denial for each stable-id
+/// bucket in the current window receives one bounded rate audit.
+pub(crate) async fn authenticate_and_admit_agent_port_credential(
+    state: &AppState,
+    authorization: Option<&str>,
+    protocol_valid: bool,
+    detected_client_name: Option<&str>,
+    detected_client_version: Option<&str>,
+    detected_capabilities: &serde_json::Value,
+) -> Result<AgentPortAdmission, AgentPortAuthError> {
+    let Some(authorization) = authorization else {
+        return Err(AgentPortAuthError::MissingCredential);
+    };
+    let Some(raw_token) = bearer_token(authorization) else {
+        return Err(AgentPortAuthError::InvalidToken);
+    };
+    let pairing = momo_auth::pairing_workspace_id(raw_token);
+    // ADR-0162 증보 1 / HAP-E7. The third envelope, and the reason it IS a third
+    // envelope rather than a reused one: the stored digest covers the whole
+    // string, so the same secret bytes re-labelled as `momo_agent_v1` hash to
+    // something no row carries. A static bearer cannot be presented as an OAuth
+    // credential, an OAuth credential cannot be presented as a static bearer,
+    // and a refresh credential or an authorization code is neither.
+    //
+    // While the authorization server is disabled this branch is not taken at
+    // all, so an OAuth envelope is refused by exactly the `invalid_token`
+    // challenge every other unrecognised string gets. The flag is therefore not
+    // probeable from here, and — this is the part that matters — the static
+    // path below is byte-identical whether the flag is on or off.
+    let oauth_enabled = state.agent_port.config.oauth.is_enabled();
+    let oauth = oauth_enabled
+        .then(|| momo_auth::hosted_oauth_access_workspace_id(raw_token))
+        .flatten();
+    let Some(claimed_workspace) = agent_bearer_workspace_id(raw_token).or(pairing).or(oauth) else {
+        return Err(AgentPortAuthError::InvalidToken);
+    };
+    if pairing.is_some() && !protocol_valid {
+        return Err(AgentPortAuthError::InvalidToken);
+    }
+
+    let raw_token = raw_token.to_string();
+    let detected_client_name = detected_client_name.map(str::to_string);
+    let detected_client_version = detected_client_version.map(str::to_string);
+    let detected_capabilities = detected_capabilities.clone();
+    let agent_port = state.agent_port.clone();
+    let limiter_after_tx = agent_port.clone();
+    let reserved_rate_logs = Arc::new(Mutex::new(Vec::<(String, u64)>::new()));
+    let reserved_rate_logs_in_tx = reserved_rate_logs.clone();
+    let outcome = with_tenant_tx(&state.pool, claimed_workspace, move |conn| {
+        Box::pin(async move {
+            let (identity, scope_granted, pairing_detection) = if pairing.is_some() {
+                match momo_auth::resolve_pairing_in_tx(conn, claimed_workspace, &raw_token)
+                    .await
+                    .map_err(DbError::from)?
+                {
+                    momo_auth::HostedMutation::Applied(identity) => (identity, true, true),
+                    _ => {
+                        return Ok(AgentPortTransactionOutcome::Rejected(
+                            AgentPortAuthError::InvalidToken,
+                        ))
+                    }
+                }
+            } else {
+                // One resolution shape for both credential classes, so the
+                // admission, reconciliation, proof and audit below are written
+                // once. What differs is only WHICH row may be found: the OAuth
+                // lookup matches `hosted_oauth_access` and nothing else.
+                let resolution = if oauth.is_some() {
+                    momo_auth::resolve_hosted_oauth_access_in_tx(
+                        conn,
+                        claimed_workspace,
+                        &raw_token,
+                        momo_auth::SCOPE_AGENT_PORT_CONNECT,
+                    )
+                    .await
+                    .map_err(DbError::from)?
+                } else {
+                    resolve_agent_bearer_in_tx(
+                        conn,
+                        claimed_workspace,
+                        &raw_token,
+                        momo_auth::SCOPE_AGENT_PORT_CONNECT,
+                    )
+                    .await
+                    .map_err(DbError::from)?
+                };
+                match resolution {
+                    AgentBearerResolution::Active {
+                        identity,
+                        scope_granted,
+                    } => (identity, scope_granted, false),
+                    // HAP-E6 — a dead credential is refused here, before the
+                    // proof step ever runs, so this rejection path is the FIRST
+                    // domain guard that can observe an expiry or an operator
+                    // emergency revoke. If the dead credential is still the one
+                    // its connection names, the connection is `active` with
+                    // nothing behind it and an unpaused agent: reconcile it into
+                    // `cleanup_pending`, suppress its open work and record the
+                    // reason, all in this transaction. `Unknown` is deliberately
+                    // outside the branch — an unrecognised bearer names no
+                    // connection and must not be able to point at one.
+                    AgentBearerResolution::Revoked | AgentBearerResolution::Expired => {
+                        if let Some((connection_id, agent_member_id)) =
+                            momo_auth::reconcile_dead_hosted_credential_in_tx(
+                                conn,
+                                claimed_workspace,
+                                &raw_token,
+                            )
+                            .await
+                            .map_err(DbError::from)?
+                        {
+                            let suppression = momo_outbox::suppress_hosted_agent_jobs_in_tx(
+                                conn,
+                                claimed_workspace,
+                                agent_member_id,
+                            )
+                            .await
+                            .map_err(DbError::from)?;
+                            write_audit(
+                                conn,
+                                &AuditEntry::new(
+                                    claimed_workspace,
+                                    "hosted_agent.connection.disconnect_started",
+                                )
+                                .about(agent_member_id)
+                                .target("hosted_agent_connection", connection_id)
+                                .with_schema(
+                                    "momo.hosted_agent.connection.disconnect_started.v1",
+                                    json!({
+                                        "status": "cleanup_pending",
+                                        "suppressed_job_count": suppression.suppressed_jobs,
+                                        "released_lease_count": suppression.released_leases,
+                                        "trigger": "credential_invalidated"
+                                    }),
+                                ),
+                            )
+                            .await?;
+                        }
+                        return Ok(AgentPortTransactionOutcome::Rejected(
+                            AgentPortAuthError::InvalidToken,
+                        ));
+                    }
+                    AgentBearerResolution::Unknown => {
+                        return Ok(AgentPortTransactionOutcome::Rejected(
+                            AgentPortAuthError::InvalidToken,
+                        ));
+                    }
+                }
+            };
+
+            let window = std::time::Duration::from_secs(agent_port.config.window_seconds);
+            let token_key = format!("agent-port:token:{}", identity.token_id);
+            let agent_key = format!("agent-port:agent:{}", identity.member_id);
+            let checks = [
+                (
+                    token_key.as_str(),
+                    agent_port.config.per_token_limit,
+                    "token",
+                ),
+                (
+                    agent_key.as_str(),
+                    agent_port.config.per_agent_limit,
+                    "agent",
+                ),
+            ];
+            let verdicts = agent_port.limiter.check_many(
+                &checks
+                    .iter()
+                    .map(|(key, limit, _)| (*key, *limit))
+                    .collect::<Vec<_>>(),
+                window,
+            );
+            let mut retry_after_seconds = 0;
+            let mut denial_audits = Vec::new();
+            for ((key, limit, axis), verdict) in checks.iter().zip(&verdicts) {
+                if verdict.allowed {
+                    continue;
+                }
+                retry_after_seconds = retry_after_seconds.max(verdict.retry_after_seconds);
+                if verdict.should_log {
+                    if let Some(reservation) = verdict.log_reservation {
+                        match reserved_rate_logs_in_tx.lock() {
+                            Ok(mut reservations) => {
+                                reservations.push((key.to_string(), reservation));
+                            }
+                            Err(poisoned) => {
+                                poisoned.into_inner().push((key.to_string(), reservation));
+                            }
+                        }
+                    }
+                    denial_audits.push((*axis, *limit));
+                }
+            }
+
+            // Record every reservation before the first fallible audit write.
+            // If either INSERT or the final COMMIT fails, the outer error path
+            // can therefore release every axis rather than permanently
+            // suppressing an audit whose sibling failed first.
+            for (axis, limit) in denial_audits {
+                tracing::warn!(
+                    axis,
+                    limit,
+                    window_seconds = agent_port.config.window_seconds,
+                    "Agent Port rate limit exceeded"
+                );
+                let mut entry =
+                    AuditEntry::new(identity.workspace_id, "agent_port.rate_limit.denied")
+                        .by(identity.member_id)
+                        .via_token((!pairing_detection).then_some(identity.token_id))
+                        .with_schema(
+                            "oort.agent_port.rate_limit.v1",
+                            json!({
+                                "axis": axis,
+                                "limit": limit,
+                                "window_seconds": agent_port.config.window_seconds,
+                            }),
+                        );
+                entry.target_type = Some("route".to_string());
+                write_audit(conn, &entry).await?;
+            }
+            if retry_after_seconds > 0 {
+                return Ok(AgentPortTransactionOutcome::Admission(
+                    AgentPortAdmission::RateLimited {
+                        retry_after_seconds,
+                    },
+                ));
+            }
+
+            // A live bearer without the connect scope is still a resolved,
+            // stable identity. Apply the same token/agent admission before its
+            // denial audit so repeated 403 traffic cannot bypass abuse control
+            // and amplify one INSERT per request.
+            if !scope_granted {
+                write_agent_bearer_audit(
+                    conn,
+                    &identity,
+                    momo_auth::AUDIT_ACTION_SCOPE_DENIED,
+                    momo_auth::SCOPE_AGENT_PORT_CONNECT,
+                    "POST",
+                    "/v1/mcp/agent-port",
+                    false,
+                )
+                .await?;
+                return Ok(AgentPortTransactionOutcome::Rejected(
+                    AgentPortAuthError::InsufficientScope,
+                ));
+            }
+
+            if pairing_detection {
+                if !matches!(
+                    momo_auth::detect_pairing_in_tx(
+                        conn,
+                        claimed_workspace,
+                        &raw_token,
+                        detected_client_name.as_deref(),
+                        detected_client_version.as_deref(),
+                        &detected_capabilities,
+                    )
+                    .await
+                    .map_err(DbError::from)?,
+                    momo_auth::HostedMutation::Applied(_)
+                ) {
+                    return Ok(AgentPortTransactionOutcome::Rejected(
+                        AgentPortAuthError::InvalidToken,
+                    ));
+                }
+                write_audit(
+                    conn,
+                    &AuditEntry::new(identity.workspace_id, "hosted_agent.connection.detected")
+                        .by(identity.member_id)
+                        .about(identity.member_id)
+                        .target("hosted_agent_connection", identity.token_id)
+                        .with_schema(
+                            "momo.hosted_agent.connection.detected.v1",
+                            json!({
+                                "audience": "/v1/mcp/agent-port",
+                                "client_name_present": detected_client_name.is_some(),
+                                "client_version_present": detected_client_version.is_some()
+                            }),
+                        ),
+                )
+                .await?;
+            } else {
+                let proof = momo_auth::prove_hosted_binding_in_tx(conn, &identity, protocol_valid)
+                    .await
+                    .map_err(DbError::from)?;
+                // HAP-E6 — the first domain guard found an `active` connection
+                // whose own credential is dead and reconciled it into
+                // `cleanup_pending`. Two things still have to happen in THIS
+                // transaction, or the reconciliation would be half a state:
+                // the agent's open gateway work is suppressed, and the reason
+                // is recorded once. Admission is refused either way, and the
+                // transaction commits so the fail-closed state is durable.
+                if proof == momo_auth::HostedProof::Reconciled {
+                    let connection_id = identity
+                        .hosted_connection_id
+                        .expect("a reconciled proof has a connection");
+                    let suppression = momo_outbox::suppress_hosted_agent_jobs_in_tx(
+                        conn,
+                        identity.workspace_id,
+                        identity.member_id,
+                    )
+                    .await
+                    .map_err(DbError::from)?;
+                    write_audit(
+                        conn,
+                        &AuditEntry::new(
+                            identity.workspace_id,
+                            "hosted_agent.connection.disconnect_started",
+                        )
+                        .about(identity.member_id)
+                        .target("hosted_agent_connection", connection_id)
+                        .with_schema(
+                            "momo.hosted_agent.connection.disconnect_started.v1",
+                            json!({
+                                "status": "cleanup_pending",
+                                "suppressed_job_count": suppression.suppressed_jobs,
+                                "released_lease_count": suppression.released_leases,
+                                "trigger": "credential_invalidated"
+                            }),
+                        ),
+                    )
+                    .await?;
+                    return Ok(AgentPortTransactionOutcome::Rejected(
+                        AgentPortAuthError::InvalidToken,
+                    ));
+                }
+                if proof == momo_auth::HostedProof::Rejected
+                    || (identity.hosted_connection_id.is_none()
+                        && !finalize_agent_bearer_use_in_tx(
+                            conn,
+                            &identity,
+                            momo_auth::SCOPE_AGENT_PORT_CONNECT,
+                        )
+                        .await
+                        .map_err(DbError::from)?)
+                {
+                    return Ok(AgentPortTransactionOutcome::Rejected(
+                        AgentPortAuthError::InvalidToken,
+                    ));
+                }
+                if proof == momo_auth::HostedProof::Activated {
+                    write_audit(
+                        conn,
+                        &AuditEntry::new(
+                            identity.workspace_id,
+                            "hosted_agent.connection.activated",
+                        )
+                        .by(identity.member_id)
+                        .about(identity.member_id)
+                        .target(
+                            "hosted_agent_connection",
+                            identity
+                                .hosted_connection_id
+                                .expect("hosted proof has connection"),
+                        )
+                        .via_token(Some(identity.token_id))
+                        .with_schema(
+                            "momo.hosted_agent.connection.activated.v1",
+                            json!({"audience":"/v1/mcp/agent-port"}),
+                        ),
+                    )
+                    .await?;
+                }
+                write_agent_bearer_audit(
+                    conn,
+                    &identity,
+                    momo_auth::AUDIT_ACTION_USED,
+                    momo_auth::SCOPE_AGENT_PORT_CONNECT,
+                    "POST",
+                    "/v1/mcp/agent-port",
+                    true,
+                )
+                .await?;
+            }
+            Ok(AgentPortTransactionOutcome::Admission(
+                AgentPortAdmission::Allowed(principal_from_agent_identity(identity)),
+            ))
+        })
+    })
+    .await;
+
+    let outcome = match outcome {
+        Ok(outcome) => outcome,
+        Err(error) => {
+            // A first-denial marker is only durable when its matching audit
+            // transaction commits. Release exact reservations after rollback
+            // so a later denial can retry the bounded audit; exact reservation
+            // matching prevents a late failure from clearing a newer marker.
+            let reservations = match reserved_rate_logs.lock() {
+                Ok(mut reservations) => std::mem::take(&mut *reservations),
+                Err(poisoned) => std::mem::take(&mut *poisoned.into_inner()),
+            };
+            for (key, reservation) in reservations {
+                limiter_after_tx
+                    .limiter
+                    .release_log_reservation(&key, reservation);
+            }
+
+            // Never include the raw bearer or SQL bind values. This fixed
+            // route context plus the typed DB error distinguishes transaction
+            // and audit failures while the HTTP boundary remains opaque.
+            tracing::error!(
+                error = %error,
+                route = "/v1/mcp/agent-port",
+                "Agent Port authentication transaction failed"
+            );
+            return Err(AgentPortAuthError::Internal);
+        }
+    };
+
+    match outcome {
+        AgentPortTransactionOutcome::Admission(admission) => Ok(admission),
+        AgentPortTransactionOutcome::Rejected(error) => Err(error),
     }
 }
 
@@ -361,57 +819,50 @@ async fn authenticate_agent(
     method: &str,
     path: &str,
 ) -> Result<Principal, ApiError> {
+    // Classify the credential before the generic route→scope table is
+    // consulted.  This preflight is SELECT-only and its rejection is the same
+    // generic 403 used for every agent bearer on a closed route, so it neither
+    // touches last_used/audit nor exposes whether a presented secret exists.
+    let token = raw_token.to_string();
+    let class = with_tenant_tx(&state.pool, claimed_workspace, move |conn| {
+        Box::pin(async move {
+            classify_agent_bearer_in_tx(conn, claimed_workspace, &token)
+                .await
+                .map_err(DbError::from)
+        })
+    })
+    .await
+    .map_err(|error| ApiError::internal("auth.agent_bearer_class", error))?;
+    match class {
+        AgentBearerClass::HostedAgentPort
+            if method != "POST" || path != momo_auth::HOSTED_AGENT_PORT_AUDIENCE =>
+        {
+            return Err(ApiError::forbidden(
+                "agent bearer is not allowed for this route",
+            ));
+        }
+        AgentBearerClass::InvalidHostedBinding => {
+            return Err(ApiError::forbidden(
+                "agent bearer is not allowed for this route",
+            ));
+        }
+        AgentBearerClass::GenericOrUnknown | AgentBearerClass::HostedAgentPort => {}
+    }
     let Some(required_scope) = required_agent_scope(method, path) else {
         return Err(ApiError::forbidden(
             "agent bearer is not allowed for this route",
         ));
     };
 
-    let token = raw_token.to_string();
-    let audited_method = method.to_string();
-    let audited_path = path.to_string();
-    let resolution: AgentBearerResolution = with_tenant_tx(&state.pool, claimed_workspace, {
-        move |conn| {
-            Box::pin(async move {
-                let resolution = authenticate_agent_bearer_in_tx(
-                    conn,
-                    claimed_workspace,
-                    &token,
-                    required_scope,
-                )
-                .await
-                .map_err(DbError::from)?;
-
-                // Swift records the use AND the denial, in this transaction, so
-                // the audit trail cannot survive a rolled-back touch (or vice
-                // versa). `momo-auth` returns the decision instead of writing it
-                // because `audit_log` is `momo-db`'s.
-                if let Some(action) = resolution.audit_action() {
-                    if let AgentBearerResolution::Active { identity, .. } = &resolution {
-                        let mut entry = AuditEntry::new(claimed_workspace, action)
-                            .by(identity.member_id)
-                            .via_token(Some(identity.token_id))
-                            .with_schema(
-                                AUDIT_DETAIL_SCHEMA,
-                                json!({
-                                    "method": audited_method,
-                                    "path": audited_path,
-                                    "required_scope": required_scope,
-                                    "granted": resolution.audit_action()
-                                        == Some(momo_auth::AUDIT_ACTION_USED),
-                                }),
-                            );
-                        // Swift writes `target_type = 'route'` with no target id.
-                        entry.target_type = Some("route".to_string());
-                        write_audit(conn, &entry).await?;
-                    }
-                }
-                Ok(resolution)
-            })
-        }
-    })
-    .await
-    .map_err(|error| ApiError::internal("auth.agent_bearer", error))?;
+    let resolution = resolve_agent_bearer_for_scope(
+        state,
+        raw_token,
+        claimed_workspace,
+        required_scope,
+        method,
+        path,
+    )
+    .await?;
 
     let identity = resolution
         .require_scoped(required_scope)
@@ -423,13 +874,119 @@ async fn authenticate_agent(
             }
         })?;
 
-    Ok(Principal {
+    Ok(principal_from_agent_identity(identity))
+}
+
+fn principal_from_agent_identity(identity: AgentBearerIdentity) -> Principal {
+    Principal {
         member_id: identity.member_id,
         workspace_id: identity.workspace_id,
         token_id: Some(identity.token_id),
         scopes: identity.scopes,
         kind: PrincipalKind::Agent,
+    }
+}
+
+async fn write_agent_bearer_audit(
+    conn: &mut momo_db::sqlx::PgConnection,
+    identity: &AgentBearerIdentity,
+    action: &str,
+    required_scope: &str,
+    method: &str,
+    path: &str,
+    granted: bool,
+) -> Result<(), DbError> {
+    let mut entry = AuditEntry::new(identity.workspace_id, action)
+        .by(identity.member_id)
+        .via_token(Some(identity.token_id))
+        .with_schema(
+            AUDIT_DETAIL_SCHEMA,
+            json!({
+                "method": method,
+                "path": path,
+                "required_scope": required_scope,
+                "granted": granted,
+            }),
+        );
+    entry.target_type = Some("route".to_string());
+    write_audit(conn, &entry).await?;
+    Ok(())
+}
+
+/// Resolve one agent bearer for a caller-supplied closed scope while preserving
+/// the existing tenant transaction, conditional last-used touch, and audit
+/// semantics.
+///
+/// The REST middleware chooses the scope through [`required_agent_scope`]. The
+/// Agent Port adapter supplies its single compile-time scope and maps the
+/// resulting resolution to MCP-specific `WWW-Authenticate` challenges. Keeping
+/// the protocol mapping outside this function prevents a second token query or
+/// a second revocation contract.
+pub(crate) async fn resolve_agent_bearer_for_scope(
+    state: &AppState,
+    raw_token: &str,
+    claimed_workspace: uuid::Uuid,
+    required_scope: &'static str,
+    method: &str,
+    path: &str,
+) -> Result<AgentBearerResolution, ApiError> {
+    let token = raw_token.to_string();
+    let audited_method = method.to_string();
+    let audited_path = path.to_string();
+    with_tenant_tx(&state.pool, claimed_workspace, {
+        move |conn| {
+            Box::pin(async move {
+                let resolution =
+                    resolve_agent_bearer_in_tx(conn, claimed_workspace, &token, required_scope)
+                        .await
+                        .map_err(DbError::from)?;
+
+                if let AgentBearerResolution::Active { identity, .. } = &resolution {
+                    if identity.hosted_connection_id.is_some()
+                        && identity.audience.as_deref() != Some(audited_path.as_str())
+                    {
+                        return Ok(AgentBearerResolution::Unknown);
+                    }
+                }
+
+                // A granted use is finalized conditionally so a concurrent
+                // revoke/membership removal between SELECT and UPDATE fails
+                // closed without a false used audit.
+                if let AgentBearerResolution::Active {
+                    identity,
+                    scope_granted: true,
+                } = &resolution
+                {
+                    if !finalize_agent_bearer_use_in_tx(conn, identity, required_scope)
+                        .await
+                        .map_err(DbError::from)?
+                    {
+                        return Ok(AgentBearerResolution::Unknown);
+                    }
+                }
+
+                // Used and scope-denied audit rows remain in this transaction,
+                // so neither can survive a rolled-back credential decision.
+                if let Some(action) = resolution.audit_action() {
+                    if let AgentBearerResolution::Active { identity, .. } = &resolution {
+                        write_agent_bearer_audit(
+                            conn,
+                            identity,
+                            action,
+                            required_scope,
+                            &audited_method,
+                            &audited_path,
+                            action == momo_auth::AUDIT_ACTION_USED,
+                        )
+                        .await?;
+                    }
+                }
+                Ok(resolution)
+            })
+        }
     })
+    .await
+    .map_err(|error| ApiError::internal("auth.agent_bearer", error))
 }
 
 #[cfg(test)]

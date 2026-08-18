@@ -5,6 +5,18 @@
 
 ---
 
+## 2026-08-18 (Fable) · 파도 8 완주(4/4) — ★LIVE-5 전 축 종결·5c 실기동 E2E·#1561 검증 close
+- **LIVE-5c(#1565/PR #1570)**: 실 입력 왕복(XTEST 1006프레임·실 xterm 도달)·비관측 mutation red proof 양쪽·remint 천장 **반증**(coturn은 ALLOCATE 시만 만료 검사 — 택일 (b), #1574)·validate v2 실호출 200. producer 실결함 3건 실기동 적발·수리. freeze 회전 1(C1: continue가 재검증 deadline을 굶김 — 루프 선두 이동+--jam red proof). **engine=`d987ff58`**.
+- 병렬 3건 랜딩: #1535(SELF_HOST §4 화면 실물 재작성, #1567)·#1563(Shift+Esc press-단위 판정 1슬롯, #1569 — grok PASS)·#1536(빈 채널 첫 행동, #1568 — design-review PASS B0/H0).
+- #1561 close: 파도 8 실측 alignment fail 0(워커 PR 전건 PASS·플러시 track 직행·sync PR 0). 후속 발급: #1571(게이트 포트-스쿼트 가드 일반화)·#1572(base 위생 마이크로 2건)·#1573(「멤버 초대하기」 이중 의미)·#1574(remint 반영).
+- 잔여: microVM 내부 왕복 미측(`unverified.inputDeliveryInMicroVM` — 권한 경계, momo-cube-host가 닿는 momo-server 배치=성재 손)·#1545·engine→main 승격(81+커밋) 정비.
+
+## 2026-08-18 (Fable) · 파도 7 완주(4/4) — ★LIVE-5b 랜딩·CI 소음 구조 해소 확정·첫 track-랜딩 플러시
+- **LIVE-5b 랜딩**(`#1560→bc819ecc`): 딥링크 전환 UI·datachannel 입력 포워딩(4표면 비관측 red proof)·auto-return(창 자체를 세는 LATEWINDOW 증명)·오버레이 설계만. 폐곡선 2회전(grok 경쟁/계약+design-review B1 Esc 도달→해제 규칙·focus=상태) 후 재확인 PASS. **LIVE-5 전 축 코드 랜딩 — 잔여=5c 실기동 E2E+릴레이 #1545(성재 손)**.
+- **동반**: #1534(오퍼레이터 부트스트랩 — 키 둘 발견·M5 최초 측정)·#1510(propsKind — 거짓 묘비 해소)·#1541묶음(busy 소탕+SaveButton 정본 결함 발견→#1558).
+- **CI 소음 구조 해소**: 성재 인터뷰 3확정(A-1·C-1·D-2)→TRACKS §3.1.1 성문화(#1562). **본 저널 항목이 track-랜딩 플러시의 첫 실행**(main 비접촉 — alignment 창 0 검증 중). C-1은 성재 콘솔(클릭 경로=#1561 코멘트).
+- **다음**: LIVE-5c 편성(실기동 E2E — 입력 왕복·비관측 mutation·remint 실측·ephemeral 릴레이 병행 실증은 #1545 완료 후). 자율 큐: #1511·#1515·#1516·#1535·#1536·#1558·#1559·#1563·#1479·#1480.
+
 ## 2026-08-18 (Fable) · 파도 6 완주(5/5) — ★LIVE-5a 랜딩·dsh 즉시분 3건·in-flight 소탕
 - **LIVE-5a 랜딩**(`#1544→c9a390d9` 계열): ephemeral TURN(use-auth-secret HMAC·TTL 24h clamp)·control 내구 투영(원장 SoT·마이그 077)·observation 원자성+owner 예외. grok 보안 freeze 경계 전부 닫힘(C0/H0/M0/L2→회전 폐쇄). 실경계 발견 1(validate 필드명 — 실호출 전부 400이었을 결함) 동반 수리. 잔여=릴레이 켜기(#1545 성재 손·런북 §6 복붙 가능)·remint 실측(5c AC).
 - **dsh 즉시분**: #1525(docs 명령 드리프트 게이트 — 위반 17 정리)·#1526(온보딩 실측 — 헤드라인: 스택 80초인데 첫 에이전트 응답 도달 불가 F1→#1534 선행 티켓)·#1527(컨텍스트 규율 정본 신설·ADR-0113 D6 정정). **#1502**(in-flight 6사이트+초점 결함).

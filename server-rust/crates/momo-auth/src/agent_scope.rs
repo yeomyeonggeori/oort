@@ -43,6 +43,26 @@ pub const SCOPE_MESSAGES_WRITE: &str = "messages:write";
 /// agent's, and an agent that could acknowledge its own dispatch could close the
 /// loop on a spawn no host ever ran.
 pub const SCOPE_WORK_CONTROL: &str = "work:control";
+/// `POST /v1/mcp/agent-port` (ADR-0162 D2/D3, HAP-E2).
+///
+/// This scope opens only the protocol foundation. Product-data tools remain
+/// separately scope-gated when HAP-E5 lands, and this scope is intentionally
+/// absent from every default credential grant.
+pub const SCOPE_AGENT_PORT_CONNECT: &str = "agent:port:connect";
+/// `oort_inbox_read` on the Agent Port (ADR-0162 D3/D6, HAP-E5).
+///
+/// **Deliberately absent from [`required_agent_scope`]** — it names no REST
+/// route, and that absence is the property: a hosted credential that carries it
+/// gains one MCP tool and no HTTP surface at all, so an adapter cannot reuse the
+/// grant to reach a generic endpoint. Non-default in every credential grant.
+pub const SCOPE_AGENT_INBOX_READ: &str = "agent:inbox:read";
+/// `oort_conversation_read` on the Agent Port (ADR-0162 D3/D6, HAP-E5).
+///
+/// The read counterpart to [`SCOPE_MESSAGES_WRITE`], and — like
+/// [`SCOPE_AGENT_INBOX_READ`] — mapped to no REST route. Reading a channel's
+/// history over HTTP remains unreachable with an agent bearer, which is the
+/// answer `an_unlisted_route_is_unreachable_with_an_agent_bearer` pins.
+pub const SCOPE_MESSAGES_READ: &str = "messages:read";
 
 /// The scope an agent bearer must carry to reach `method path`, or `None` when
 /// no agent credential may reach it at all.
@@ -53,6 +73,13 @@ pub const SCOPE_WORK_CONTROL: &str = "work:control";
 pub fn required_agent_scope(method: &str, path: &str) -> Option<&'static str> {
     let method = method.to_ascii_uppercase();
     let segments: Vec<&str> = path.split('/').filter(|part| !part.is_empty()).collect();
+
+    // POST /v1/mcp/agent-port — the only Agent Port transport surface.
+    // GET/SSE, DELETE and any sibling path stay absent so an agent bearer cannot
+    // widen the stateless HTTP contract merely by carrying this scope.
+    if method == "POST" && path == "/v1/mcp/agent-port" {
+        return Some(SCOPE_AGENT_PORT_CONNECT);
+    }
 
     // POST /v1/workspaces/{ws}/channels/{ch}/messages
     if method == "POST"
@@ -218,6 +245,29 @@ mod tests {
         );
     }
 
+    #[test]
+    fn agent_port_is_one_post_only_scope() {
+        assert_eq!(
+            required_agent_scope("POST", "/v1/mcp/agent-port"),
+            Some(SCOPE_AGENT_PORT_CONNECT)
+        );
+        for method in ["GET", "DELETE", "PUT", "PATCH"] {
+            assert_eq!(
+                required_agent_scope(method, "/v1/mcp/agent-port"),
+                None,
+                "{method} must not open a second Agent Port transport"
+            );
+        }
+        for path in [
+            "/v1/mcp/agent-port/",
+            "/v1/mcp/agent-port/tools",
+            "/v1/mcp/drive",
+            "/v1/mcp/agent-port-evil",
+        ] {
+            assert_eq!(required_agent_scope("POST", path), None, "{path}");
+        }
+    }
+
     /// **ADR-0158 증보 1 D7 — the slice door.**
     ///
     /// One turn is one message that grows (#1152), so the write that opens a
@@ -380,6 +430,38 @@ mod tests {
             "GET",
             &format!("/v1/workspaces/{WS}/usage/summary")
         ));
+    }
+
+    /// **The two HAP-E5 scopes buy no HTTP surface at all.**
+    ///
+    /// `agent:inbox:read` and `messages:read` exist only inside the Agent Port
+    /// tool catalog. If either ever appeared in the table above, a hosted
+    /// credential minted for one MCP tool would silently gain a REST route —
+    /// which is exactly the "recreate a generic principal" move ADR-0162 refuses.
+    #[test]
+    fn the_mcp_only_scopes_open_no_rest_route() {
+        for (method, path) in [
+            (
+                "GET",
+                format!("/v1/workspaces/{WS}/channels/{RUN}/messages"),
+            ),
+            ("POST", "/v1/mcp/agent-port".to_string()),
+            ("GET", format!("/v1/workspaces/{WS}/agents/{AGENT}/inbox")),
+        ] {
+            assert_ne!(
+                required_agent_scope(method, &path),
+                Some(SCOPE_MESSAGES_READ)
+            );
+            assert_ne!(
+                required_agent_scope(method, &path),
+                Some(SCOPE_AGENT_INBOX_READ)
+            );
+        }
+        // …and they are distinct names, not aliases of the write/connect scopes.
+        for scope in [SCOPE_MESSAGES_READ, SCOPE_AGENT_INBOX_READ] {
+            assert_ne!(scope, SCOPE_MESSAGES_WRITE);
+            assert_ne!(scope, SCOPE_AGENT_PORT_CONNECT);
+        }
     }
 
     #[test]

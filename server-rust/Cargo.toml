@@ -9,7 +9,18 @@ members = ["crates/*", "bins/*"]
 edition = "2021"
 version = "0.0.0"
 license = "Apache-2.0"
-rust-version = "1.80"
+# MSRV — 선언이 아니라 실측치다(#1442). 이 워크스페이스의 해결된 의존 그래프가
+# 실제로 요구하는 최솟값이며, 게이트가 아니라 `cargo`가 강제한다: 더 낮은
+# 툴체인은 컴파일 이전 resolve 단계에서 거절된다.
+#   실측(2026-08-17, track/engine@54f5d2dc, Cargo.lock 고정):
+#     `cargo +1.87.0 check --workspace --locked` → 거절
+#       home@0.5.12 / time@0.3.54 / time-core@0.1.9 / time-macros@0.2.32 이 rustc 1.88 요구
+#     `cargo +1.88.0 check --workspace --all-targets --locked` → green(경고 0)
+#   그래프에 edition2024 서드파티 크레이트가 15개 있으나(rustc ≥1.85 요구) 그것이
+#   상한이 아니다 — 실제 바닥은 time 계열의 1.88.0이다. 이 워크스페이스 자체의
+#   edition은 위 "2021"이고 마이그레이션 계획은 없다(#1442 Out of scope).
+# 올릴 때: 값만 고치지 말고 위 두 명령을 다시 재서 근거 줄을 같이 갱신할 것.
+rust-version = "1.88.0"
 
 [workspace.dependencies]
 # async runtime
@@ -47,6 +58,13 @@ hex = "0.4"
 # Both webhook families are HMAC-SHA256 over a domain-separated string, which is
 # exactly what lets Postgres store a random *reference* instead of a secret.
 hmac = "0.12"
+# LIVE-5a: the coturn REST-API credential (`use-auth-secret`) is HMAC-**SHA1**,
+# and that is a constraint rather than a preference. The temporary password a
+# browser presents is checked through STUN MESSAGE-INTEGRITY, which WebRTC fixes
+# at HMAC-SHA1 (RFC 5389 §15.4), and coturn derives the password with the same
+# `shatype`. Raising it to SHA-256 to match the rest of this block would make
+# every browser fail to authenticate against the TURN. See `momo_t3::turn`.
+sha1 = "0.10"
 
 # auth
 jsonwebtoken = "9"

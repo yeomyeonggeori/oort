@@ -75,7 +75,8 @@ export type SurfaceId =
   | "agentRunHistory"
   | "plugins"
   | "agentMemory"
-  | "messageSearch";
+  | "messageSearch"
+  | "hostedAgentPairing";
 
 export interface ServerSurface {
   id: SurfaceId;
@@ -212,6 +213,27 @@ const SURFACES: Record<SurfaceId, ServerSurface> = {
     fallback: "채널을 열어 직접 찾아보세요.",
     measured:
       "GET …/search/messages: 라우터에 있음(routes::search::messages).",
+  },
+  hostedAgentPairing: {
+    id: "hostedAgentPairing",
+    label: "호스티드 에이전트 연결",
+    // 2026-08-14, 이 표에서 처음부터 참으로 들어오는 첫 줄이다. 앞선 셋(승인·작업
+    // 기록·메시지 검색)은 거짓에서 뒤집힌 것이고, 이 줄은 HAP-E3(#1364)가 라우트를
+    // 올린 뒤에 표에 들어왔다. 그래도 문구를 함께 적는다: 이 칸은 **이 코드베이스의
+    // 서버**가 그 경로를 싣고 있는가를 말하지, 지금 이야기하는 서버가 그것을
+    // 답하는가를 말하지 않는다. 배포가 늦은 서버에 붙으면 404 가 오고, 그때 이
+    // 문구를 쓰는 것은 정적 판정이 아니라 `serverSaysAbsent` 폴딩이다.
+    provided: true,
+    absentReason: "이 서버는 아직 외부 호스팅 에이전트 연결을 받지 않습니다.",
+    fallback:
+      "지금은 이 워크스페이스가 직접 실행하는 에이전트를 만들어 채널에 넣을 수 있습니다.",
+    measured:
+      "2026-08-14 실측: server-rust/bins/momo-server/src/lib.rs:777-790 에 넷이 등록됨. " +
+      "POST/GET …/hosted-agent-connections, GET …/{connection}, " +
+      "POST …/{connection}/pairing-challenge/regenerate, POST …/{connection}/confirm. " +
+      "해제 3경로(disconnect, disconnect/complete, cleanup-artifacts/…/acknowledge)도 " +
+      "같은 자리에 등록돼 있고, HAP-UX2(#1362)가 에이전트 화면의 연결 탭에서 그 셋을 연다. " +
+      "일곱 경로가 한 배포로 함께 오르므로 이 칸 하나가 둘 다를 판정한다.",
   },
 };
 

@@ -16,7 +16,8 @@ openapi: 3.0.3
 # code that serves it today.
 #
 # Scope: web v0 (ADR-0119 D5-A) plus admin agent creation, the plugin
-# registry/grant, incoming webhook, hosted Drive MCP, and interactive Work
+# registry/grant, incoming webhook, hosted Drive MCP, hosted-agent Agent Port,
+# and interactive Work
 # Console control surfaces. Other routes (invite admin,
 # workspace identity, legacy agent credential/run surfaces, cost projection, platform admin,
 # centrifugo proxy, health) remain intentionally undocumented here.
@@ -47,10 +48,10 @@ info:
     workspace roster, channels (list/create), messages (send/history with
     seq-cursor pagination and `?after=` backfill), read-state (bulk read +
     cursor advance), direct messages (list/open), and approvals
-    (list/decision), plugin registry/grants, incoming webhooks, and the hosted
-    read-only Drive MCP endpoint, and ADR-0114 Work Console sessions and
-    controls, plus the fresh-database agent creation boundary. Mirrors
-    MomoServer field by field.
+    (list/decision), plugin registry/grants, incoming webhooks, the hosted
+    read-only Drive MCP endpoint, the sessionless hosted-agent Agent Port, and
+    ADR-0114 Work Console sessions and controls, plus the fresh-database agent
+    creation boundary. Mirrors MomoServer field by field.
 
 servers:
   - url: /
@@ -661,6 +662,268 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "429":
           $ref: "#/components/responses/RateLimited"
+
+  /v1/workspaces/{workspaceId}/hosted-agent-connections:
+    post:
+      tags: [agents]
+      operationId: createHostedAgentConnection
+      summary: Create a dedicated paused hosted-agent identity and one-time pairing challenge.
+      security: [{bearerAuth: []}]
+      parameters: [{$ref: "#/components/parameters/WorkspaceId"}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: "#/components/schemas/CreateHostedAgentConnectionRequest"}}}
+      responses:
+        "201":
+          description: Dedicated identity and pairing challenge created atomically.
+          headers:
+            Cache-Control: {required: true, schema: {type: string, enum: [no-store]}}
+            Pragma: {required: true, schema: {type: string, enum: [no-cache]}}
+          content: {application/json: {schema: {$ref: "#/components/schemas/CreateHostedAgentConnectionResponse"}}}
+        "400": {description: Invalid closed input, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {description: Human workspace owner/admin required, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "409": {description: Handle already exists, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+    get:
+      tags: [agents]
+      operationId: listHostedAgentConnections
+      summary: List bounded secret-free hosted connection metadata.
+      security: [{bearerAuth: []}]
+      parameters: [{$ref: "#/components/parameters/WorkspaceId"}]
+      responses:
+        "200": {description: Hosted connections, content: {application/json: {schema: {$ref: "#/components/schemas/HostedAgentConnectionListResponse"}}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {description: Human workspace owner/admin required, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+
+  /v1/workspaces/{workspaceId}/hosted-agent-connections/{connectionId}:
+    get:
+      tags: [agents]
+      operationId: getHostedAgentConnection
+      summary: Get secret-free hosted connection metadata.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - {name: connectionId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200": {description: Hosted connection, content: {application/json: {schema: {$ref: "#/components/schemas/HostedAgentConnectionResponse"}}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {description: Human workspace owner/admin required, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "404": {description: Hosted connection not found, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+
+  /v1/workspaces/{workspaceId}/hosted-agent-connections/{connectionId}/pairing-challenge/regenerate:
+    post:
+      tags: [agents]
+      operationId: regenerateHostedAgentPairingChallenge
+      summary: Invalidate prior material and return one replacement pairing challenge.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - {name: connectionId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: Pairing challenge regenerated.
+          headers:
+            Cache-Control: {required: true, schema: {type: string, enum: [no-store]}}
+            Pragma: {required: true, schema: {type: string, enum: [no-cache]}}
+          content: {application/json: {schema: {$ref: "#/components/schemas/CreateHostedAgentConnectionResponse"}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {description: Human workspace owner/admin required, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "404": {description: Hosted connection not found, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "409": {description: Active connection cannot regenerate, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+
+  /v1/workspaces/{workspaceId}/hosted-agent-connections/{connectionId}/confirm:
+    post:
+      tags: [agents]
+      operationId: confirmHostedAgentConnection
+      summary: Approve exact channels/scopes and issue the one-time active Agent Port credential.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - {name: connectionId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: "#/components/schemas/ConfirmHostedAgentConnectionRequest"}}}
+      responses:
+        "201":
+          description: Credential issued once; first valid foundation call proves binding and unpauses.
+          headers:
+            Cache-Control: {required: true, schema: {type: string, enum: [no-store]}}
+            Pragma: {required: true, schema: {type: string, enum: [no-cache]}}
+          content: {application/json: {schema: {$ref: "#/components/schemas/ConfirmHostedAgentConnectionResponse"}}}
+        "400": {description: Invalid closed scopes/channels/auth mode, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {description: Human workspace owner/admin required, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "404": {description: Hosted connection not found, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "409": {description: Connection has not been detected or was already confirmed, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+
+  /v1/workspaces/{workspaceId}/hosted-agent-connections/{connectionId}/disconnect:
+    post:
+      tags: [agents]
+      operationId: disconnectHostedAgentConnection
+      summary: Start an atomic hosted-agent disconnect and seed its cleanup manifest.
+      description: >
+        One tenant transaction: the connection's live bearer is revoked, the
+        connection becomes `cleanup_pending`, the dedicated agent is paused,
+        every open gateway job of that agent is settled with its lease released,
+        and the per-kind cleanup manifest is seeded. A failure anywhere rolls the
+        whole set back. The revoke is scoped to this connection, so a sibling
+        hosted connection of the same workspace is never collateral. Retrying
+        answers the same body with `startedNow: false` and writes nothing —
+        including no second audit row. History (message, chat, audit, inbox) is
+        preserved; nothing cascades.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - {name: connectionId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: false
+        content: {application/json: {schema: {$ref: "#/components/schemas/DisconnectHostedAgentConnectionRequest"}}}
+      responses:
+        "200": {description: Disconnect started (or already pending), content: {application/json: {schema: {$ref: "#/components/schemas/DisconnectHostedAgentConnectionResponse"}}}}
+        "400": {description: Invalid artifact kind or reference, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {description: Human workspace owner/admin required, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "404": {description: Hosted connection not found, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "409": {description: Connection is already disconnected or was never credentialed, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+
+  /v1/workspaces/{workspaceId}/hosted-agent-connections/{connectionId}/disconnect/complete:
+    post:
+      tags: [agents]
+      operationId: completeHostedAgentDisconnect
+      summary: Transition a cleanup-confirmed connection to the terminal disconnected state.
+      description: >
+        Refused while any required artifact is unresolved, and refused unless
+        this server can read back the local half it performed: zero live
+        credentials on the connection and a paused dedicated agent. The
+        transition happens at most once; a replay answers 200 with
+        `disconnectedNow: false` and writes no audit row. The same two facts are
+        asserted by a database trigger, so a writer that bypasses this operation
+        still cannot mint a terminal state.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - {name: connectionId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200": {description: Connection is disconnected, content: {application/json: {schema: {$ref: "#/components/schemas/CompleteHostedAgentDisconnectResponse"}}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {description: Human workspace owner/admin required, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "404": {description: Hosted connection not found, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "409": {description: Not awaiting cleanup, unresolved artifacts, or unconfirmed local revoke, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+
+  /v1/workspaces/{workspaceId}/hosted-agent-connections/{connectionId}/cleanup-artifacts/{artifactId}/acknowledge:
+    post:
+      tags: [agents]
+      operationId: acknowledgeHostedCleanupArtifact
+      summary: Record one cleanup observation, and optionally one resolution.
+      description: >
+        The manual half of cleanup confirmation. Provenance is server-derived —
+        this operation writes `manual` and nothing else, so a client cannot
+        promote its own claim to `server_verified`. Omitting `disposition`
+        records only `currentStatus`, which is how an inactive routine stays
+        unresolved. A resolution requires evidence and is not re-decidable.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - {name: connectionId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: artifactId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: "#/components/schemas/AcknowledgeHostedCleanupArtifactRequest"}}}
+      responses:
+        "200": {description: Acknowledgement recorded, content: {application/json: {schema: {$ref: "#/components/schemas/AcknowledgeHostedCleanupArtifactResponse"}}}}
+        "400": {description: Invalid status, illegal disposition for the kind, or missing evidence, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {description: Human workspace owner/admin required, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "404": {description: Cleanup artifact not found on this connection, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "409": {description: Connection is not awaiting cleanup, or the artifact is already resolved, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+
+  /v1/workspaces/{workspaceId}/agents/{agentId}/credentials:
+    post:
+      tags: [agents]
+      operationId: createAgentCredential
+      summary: Issue or rotate a generic per-agent bearer (workspace owner/admin only).
+      description: >
+        Returns the raw bearer exactly once while persisting only its SHA-256
+        digest. Every currently live predecessor is shortened to at most the
+        requested rotation grace; concurrent rotations serialize so only the
+        final successor keeps its requested lifetime. The response is always
+        `Cache-Control: no-store` and `Pragma: no-cache`. Agent Port reach/read
+        scopes and `messages:read` are grantable only when explicitly named,
+        never defaults. `provider:quota:write` additionally requires an
+        instance operator. HAP-E3 reserves 409 for a dedicated hosted agent
+        whose credentials are connection-managed.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - {name: agentId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/CreateAgentCredentialRequest"}
+      responses:
+        "201":
+          description: Credential issued; the bearer appears only in this response.
+          headers:
+            Cache-Control:
+              required: true
+              schema: {type: string, enum: [no-store]}
+            Pragma:
+              required: true
+              schema: {type: string, enum: [no-cache]}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CreateAgentCredentialResponse"}
+        "400": {description: Invalid scope, label, expiry, or rotation grace, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {description: Caller is not a human workspace owner/admin or lacks instance-operator authority, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "404": {description: Active target agent not found, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "409": {description: Dedicated hosted-agent credentials are connection-managed, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+    get:
+      tags: [agents]
+      operationId: listAgentCredentials
+      summary: List generic agent credential metadata (workspace owner/admin only).
+      description: >
+        Newest-first bounded metadata projection. Raw bearer material, token
+        hashes, and envelope prefixes are never projected.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - {name: agentId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200": {description: Credential metadata, content: {application/json: {schema: {$ref: "#/components/schemas/AgentCredentialListResponse"}}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {description: Caller is not a human workspace owner/admin, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "404": {description: Active target agent not found, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+
+  /v1/workspaces/{workspaceId}/agents/{agentId}/credentials/{credentialId}/revoke:
+    post:
+      tags: [agents]
+      operationId: revokeAgentCredential
+      summary: Idempotently revoke a generic per-agent bearer.
+      description: >
+        The first call writes the revocation and its audit row in one tenant
+        transaction. Replays return 200 with `alreadyRevoked=true` and do not
+        append another revoke audit. Foreign agent/credential pairs are not
+        distinguishable from a missing credential. HAP-E3 reserves 409 for a
+        dedicated hosted agent whose credentials are connection-managed.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - {name: agentId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: credentialId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/RevokeAgentCredentialRequest"}
+      responses:
+        "200": {description: Current credential state and whether this call revoked it, content: {application/json: {schema: {$ref: "#/components/schemas/RevokeAgentCredentialResponse"}}}}
+        "400": {description: Invalid id or reason metadata, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {description: Caller is not a human workspace owner/admin, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "404": {description: Agent credential not found, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "409": {description: Dedicated hosted-agent credentials are connection-managed, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
 
   /v1/workspaces/{workspaceId}/agents/{agentId}/allowed-models:
     get:
@@ -2610,6 +2873,308 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "429":
           $ref: "#/components/responses/RateLimited"
+
+  /v1/workspaces/{workspaceId}/work-sessions/{workSessionId}/display-attach:
+    post:
+      tags: [work-sessions]
+      operationId: issueDisplayAttachCapability
+      summary: Issue an ephemeral capability for the session's live screen.
+      description: >
+        Human bearer only. ADR-0165 carries the live screen over WebRTC directly
+        between the browser and the sandbox; this endpoint mints the 60-second
+        bearer for that peer-to-peer handshake and nothing else.
+        mode is observer or, since LIVE-3, controller. It still DEFAULTS to
+        observer: taking control stops the agent, which is never what a client
+        meant by saying nothing.
+        observer requires active workspace and session-channel membership. Since
+        LIVE-3 the session OWNER is exempt from the observation clause —
+        owner_only means 소유자만 본다 (ADR-0004 증보 3), not 아무도 못 본다 —
+        while a teammate is still refused 403 on a closed session.
+        controller is the session owner and nobody else (증보 3 D1: control is a
+        person's act on their own session), and it does three things at once:
+        it mints a controller grant, it OPENS A CONTROL WINDOW in the
+        display_control_window ledger (migration 076), and for as long as that
+        window stands the agent's own path to this session is refused
+        (POST /work-controls answers 409, and anything already dispatched is
+        withheld from the host's pending-controls poll). That is 증보 3 D3's
+        비관측 enforced rather than declared. The VM does not move: the session
+        stays running and running-time billing continues (증보 3 D6).
+        Both grades additionally require a running or idle session carrying a
+        MomoHost-signed display binding, an unrevoked work_host, AND that host
+        advertising capabilities.display_attach. That last clause is fail-closed
+        and is what excludes BYOC hosts without any policy naming a provider.
+        Since LIVE-5a a controller grant also FORCES observation to owner_only
+        for as long as the window stands, and restores the owner's own setting
+        when it closes — by return, by lease lapse, or with the session. A
+        teammate's already-open stream stops validating within one
+        re-validation period, because the validate join re-reads observation
+        every time. The reason is the whole point of the window: a person is
+        about to type a password, and 증보 3 D2 keeps that out of the
+        transcript and the audit log while a teammate watching it frame by
+        frame would undo all of it.
+        display_endpoint is the HOST's own credential-free WebRTC signalling
+        WebSocket; it contains no bearer, momo never proxies signalling or
+        media, and no frame is stored anywhere. ice_servers is the one place
+        momo touches the ICE negotiation: it mints a SHORT-LIVED credential for
+        the oort-operated relay (ADR-0165 D3 — never a third party's), scoped to
+        this work session, replacing the single shared password the relay
+        shipped with. It is empty on an instance that was given no relay, which
+        a client must treat as "use what you already have" rather than as an
+        error. Nothing the person types during a control window enters this API,
+        the transcript, the audit log or the Memory Plane (증보 3 D2) — the
+        ledger records who, when and why it ended, and has no column that could
+        hold a keystroke.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/WorkSessionId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IssueDisplayAttachRequest"
+      responses:
+        "200":
+          description: Exact four-field view-only display grant.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DisplayAttachCapabilityResponse"
+        "400":
+          description: Invalid work session identifier, or a mode outside the vocabulary.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: >
+            controller was requested by someone who is not the session owner, or
+            the caller is not an authorized active human/channel member, or
+            observation is owner_only and the caller is not the owner.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Session does not exist in this workspace.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: >
+            Session ended, lacks a display binding, its host is revoked, or that
+            host does not advertise a display. One status for all four: which is
+            false describes a host's internal state to a caller entitled only to
+            know it is unavailable. Also returned when controller was requested
+            and somebody else already holds the control window — one open window
+            per session is a unique index, not a race.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /v1/workspaces/{workspaceId}/work-sessions/{workSessionId}/display-binding:
+    post:
+      tags: [work-sessions, work-hosts]
+      operationId: publishWorkSessionDisplayBinding
+      summary: Publish this session's WebRTC display binding as its own host.
+      description: >
+        MomoHost-signed, exactly once per session. The daemon inside the sandbox
+        declares displayId plus the credential-free WSS signalling endpoint a
+        browser will dial. A human bearer is 403 here and the same field names
+        are refused by name on session create and PATCH: publishing a binding is
+        a claim about what is running on a machine, and only the machine makes
+        it. Re-sending the identical pair is idempotent (204); a DIFFERENT
+        binding is 409, because two producers claiming one session's screen is a
+        state the ledger cannot describe. The signing host must be the session's
+        own; the path names a session rather than a host, so that pin is
+        enforced against the ledger inside the handler. The host must also
+        already advertise capabilities.display_attach.
+      security:
+        - workHostAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/WorkSessionId"
+        - $ref: "#/components/parameters/WorkHostSentAt"
+        - $ref: "#/components/parameters/WorkHostSignature"
+        - $ref: "#/components/parameters/WorkHostRequestId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PublishDisplayBindingRequest"
+      responses:
+        "204":
+          description: Binding stored, or already exactly this binding.
+        "400":
+          description: >
+            Invalid session identifier, or displayId/displayEndpoint outside the
+            ledger's grammar.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Invalid or replayed host signature.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Human bearer, or a host binding a session that is not its own.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Session does not exist in this workspace.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: >
+            Session is not running or idle, the host is revoked or does not
+            advertise a display, or a different binding is already published.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /v1/workspaces/{workspaceId}/work-sessions/{workSessionId}/display-control:
+    delete:
+      tags: [work-sessions]
+      operationId: returnDisplayControl
+      summary: Hand the session's screen back to its agent.
+      description: >
+        The 반환 half of ADR-0004 증보 3 (LIVE-3): the person closes their
+        control window and the agent's reach into the session comes back.
+        Session owner only, matching who could have opened it — a teammate must
+        not be able to end somebody else's intervention mid-password.
+        Closing writes an end_reason of returned, emits the work.session.control
+        boundary event carrying 재개 시각, and makes the next producer
+        re-validation answer input_enabled false. That last part is what makes
+        the return real rather than bookkeeping: without it, handing control
+        back would be a row in a table and a keyboard that still worked.
+        IDEMPOTENT. Returning a window that has already closed — because this is
+        a retry, because the lease lapsed, or because the session ended — is 200
+        with closed=false, never a 4xx. It is one of the window's three closes;
+        the other two (a lapsed producer lease, and the session ending) need no
+        caller and happen on their own.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/WorkSessionId"
+      responses:
+        "200":
+          description: >
+            The window is closed. closed says whether this call is what closed
+            it.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DisplayControlReturnResponse"
+        "400":
+          description: Invalid work session identifier.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: >
+            Not an active workspace member, or not the session owner.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Session does not exist in this workspace.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /v1/workspaces/{workspaceId}/work-hosts/{workHostId}/display-attach/validate:
+    post:
+      tags: [work-hosts, work-sessions]
+      operationId: validateDisplayAttachCapability
+      summary: Validate a view-only display capability as its target host.
+      description: >
+        MomoHost-signed control-plane check performed by the WebRTC producer
+        immediately before it accepts a signalling connection, and then on a
+        timer for every peer connection it already serves (`stream: true`). The
+        opaque bearer is matched by SHA-256 digest; the raw token is never
+        persisted or logged. Validation joins the running-or-idle work_session,
+        the unrevoked work_host, the grantee, the session's observation and the
+        host's display advertisement on every call, so ending the session,
+        revoking the host, closing observation, the grantee leaving the channel,
+        or withdrawing capabilities.display_attach all cut a stream that is
+        already open. A terminal capability presented here, or a display
+        capability presented to terminal-attach/validate, is the ordinary 401:
+        two surfaces on one box do not lend each other authority. The response
+        carries input_enabled, which instructs the producer whether it may
+        negotiate an input datachannel. It is TRUE only when the bearer is a
+        controller grant AND the control window that grant opened is still
+        standing, and it is re-answered on every re-validation — so it is also
+        the off switch: when the person returns control the window closes and
+        the producer must close the channel. For an observer grant it is always
+        false, and view-only remains the ABSENCE of a channel rather than a flag
+        beside one (ADR-0165 D4).
+        A controller re-validation also RENEWS the control window's lease. That
+        is deliberate and is why the window is not keyed to the capability's
+        60-second expiry: a live WebRTC session outlives its dial window by
+        design, and a window that expired with it would resume the agent sixty
+        seconds into a login still in progress.
+        Media and signalling never traverse MomoServer, OutboxRelay, or
+        Centrifugo, and no frame is stored.
+      security:
+        - workHostAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/WorkHostId"
+        - $ref: "#/components/parameters/WorkHostSentAt"
+        - $ref: "#/components/parameters/WorkHostSignature"
+        - $ref: "#/components/parameters/WorkHostRequestId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ValidateDisplayAttachRequest"
+      responses:
+        "200":
+          description: Capability is live and bound to this host and display.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DisplayAttachValidationResponse"
+        "400":
+          description: Invalid path identifier or request body shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: >
+            Invalid host signature, or an unknown, expired, wrong-kind, ended,
+            revoked or no-longer-authorized capability.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /v1/workspaces/{workspaceId}/work-controls:
     post:
@@ -4606,6 +5171,156 @@ paths:
         "429":
           $ref: "#/components/responses/RateLimited"
 
+  /v1/mcp/agent-port:
+    post:
+      tags: [mcp]
+      operationId: agentPort
+      summary: Call the sessionless hosted-agent MCP endpoint.
+      description: >
+        Vendor-neutral Agent Port from ADR-0162. This is a POST-only,
+        sessionless JSON-RPC endpoint and every request is authenticated again
+        with an active agent bearer carrying the non-default
+        `agent:port:connect` reachability scope. The credential is accepted
+        only in `Authorization`; URL/query credentials, app JWTs, human
+        principals are rejected. An incoming `Mcp-Session-Id` never creates
+        authority and is never echoed. No OAuth protected resource metadata is
+        advertised by this static-bearer wave.
+
+        Modern requests pin `2026-07-28`, include
+        `params._meta[io.modelcontextprotocol/protocolVersion]` and
+        `params._meta[io.modelcontextprotocol/clientCapabilities]`, and mirror
+        their version and method in `MCP-Protocol-Version` and `Mcp-Method`.
+        `Mcp-Name` is additionally mandatory for `tools/call` and must match
+        the body tool name. The modern era exposes `server/discover`, a scoped
+        `tools/list` and `tools/call`; it does not expose initialize, ping,
+        protocol sessions, or a GET stream.
+
+        `tools/list` and `tools/call` are answered from one intersection of the
+        connection's approved scopes, the credential's current scopes and the
+        server capability, so the advertised catalog is exactly the callable
+        one. A credential carrying only `agent:port:connect` lists no tool and
+        may call none; a tool outside the caller's view answers byte-identically
+        to a tool that does not exist. The eight tools are `oort_inbox_read`,
+        `oort_conversation_read`, `oort_message_post`, `oort_jobs_claim`,
+        `oort_job_renew`, `oort_job_release`, `oort_run_event` and
+        `oort_run_complete`; each binds an existing domain rather than a second
+        one, and job authority travels only as an opaque `leaseHandle` that
+        carries the channel its work came from, so the confirming human's exact
+        channel grant is re-checked on every later verb. Arguments are validated
+        against the tool's published `inputSchema` before execution, so
+        `additionalProperties: false`, the declared nullability (every optional
+        property is `["<type>", "null"]` and every required one is not), the
+        numeric bounds, `format: uuid` and `enum` are enforced rather than
+        advertised. String `minLength`/`maxLength` count **UTF-8 bytes**, which
+        each such field's description states. Tool
+        failures use a closed set of JSON-RPC codes (-32602 invalid arguments,
+        -32003 not authorized, -32004 unavailable, -32005 conflict, -32603
+        internal) with fixed messages, so a refusal never distinguishes absent
+        from invisible from forbidden.
+
+        The narrow legacy adapter pins `2025-11-25`. Its first `initialize`
+        may omit `MCP-Protocol-Version`; every later request must carry that
+        exact version. It accepts `initialize`,
+        `notifications/initialized`, `ping`, a scoped `tools/list`, and an
+        unknown-tool `tools/call` error, without issuing a session id. All
+        calls send `Content-Type: application/json` and an `Accept` value that
+        contains both `application/json` and `text/event-stream`. Recognized
+        modern errors never silently downgrade to legacy. The two exact
+        supported versions are the complete compatibility set.
+      security:
+        - agentPortBearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/MCPProtocolVersion"
+        - $ref: "#/components/parameters/MCPMethod"
+        - $ref: "#/components/parameters/MCPName"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentPortJSONRPCRequest"
+      responses:
+        "200":
+          description: >
+            A modern discovery/tools result, a legacy initialize/tools result,
+            or a pong. Success never carries `Mcp-Session-Id`.
+          headers:
+            Cache-Control:
+              description: Agent Port responses are private and must never be stored.
+              schema:
+                type: string
+                enum: ["private, no-store"]
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentPortJSONRPCSuccessResponse"
+        "202":
+          description: Legacy `notifications/initialized` accepted; the response body is empty.
+          headers:
+            Cache-Control:
+              description: Agent Port responses are private and must never be stored.
+              schema:
+                type: string
+                enum: ["private, no-store"]
+        "400":
+          description: >
+            Malformed JSON-RPC, metadata/header mismatch, unsupported version
+            or method, a query/duplicate transport header, or another bounded
+            protocol validation failure. Protocol errors use the Agent Port
+            JSON-RPC envelope.
+          headers:
+            Cache-Control:
+              description: Agent Port responses are private and must never be stored.
+              schema:
+                type: string
+                enum: ["private, no-store"]
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentPortJSONRPCErrorResponse"
+        "401":
+          $ref: "#/components/responses/AgentPortUnauthorized"
+        "403":
+          $ref: "#/components/responses/AgentPortForbidden"
+        "413":
+          description: Request body exceeds the Agent Port byte bound.
+          headers:
+            Cache-Control:
+              description: Agent Port responses are private and must never be stored.
+              schema:
+                type: string
+                enum: ["private, no-store"]
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentPortJSONRPCErrorResponse"
+        "415":
+          description: >
+            `Content-Type` or `Accept` does not satisfy the Agent Port
+            transport contract.
+          headers:
+            Cache-Control:
+              description: Agent Port responses are private and must never be stored.
+              schema:
+                type: string
+                enum: ["private, no-store"]
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentPortJSONRPCErrorResponse"
+        "429":
+          $ref: "#/components/responses/AgentPortRateLimited"
+        "500":
+          description: >
+            Authentication, tenant transaction, or audit persistence failed.
+            The body is deliberately empty and never exposes database details.
+          headers:
+            Cache-Control:
+              description: Agent Port responses are private and must never be stored.
+              schema:
+                type: string
+                enum: ["private, no-store"]
+
   /v1/workspaces/{workspaceId}/context-packets/{packetId}:
     get:
       tags: [agents]
@@ -5134,6 +5849,17 @@ components:
         App access token (15m TTL) from login/join/refresh, sent as
         `Authorization: Bearer <accessToken>`. Tokens are hash-persisted
         server-side and revocable (MOMO-300).
+    agentPortBearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: oort agent bearer
+      description: >
+        Static agent bearer presented only as
+        `Authorization: Bearer <agentCredential>`. The active agent principal
+        must carry the non-default `agent:port:connect` reachability scope and
+        match its workspace. This scheme is deliberately separate from the app
+        JWT scheme and is not OAuth or protected-resource discovery; Agent Port
+        credentials are never accepted from a URL or query parameter.
     workHostAuth:
       type: apiKey
       in: header
@@ -5339,6 +6065,45 @@ components:
       schema:
         type: string
 
+    MCPProtocolVersion:
+      name: MCP-Protocol-Version
+      in: header
+      required: false
+      description: >
+        Exact protocol version mirrored from the request body. Required and
+        equal to `2026-07-28` on every modern call. A legacy `initialize` may
+        omit it; all later legacy calls require exact `2025-11-25`.
+      schema:
+        type: string
+        enum: ["2026-07-28", "2025-11-25"]
+    MCPMethod:
+      name: Mcp-Method
+      in: header
+      required: false
+      description: >
+        Required on modern calls and byte-for-byte equal to the JSON-RPC
+        method. Legacy clients may omit it; when present it must match.
+      schema:
+        type: string
+        enum:
+          - server/discover
+          - initialize
+          - notifications/initialized
+          - ping
+          - tools/list
+          - tools/call
+    MCPName:
+      name: Mcp-Name
+      in: header
+      required: false
+      description: >
+        Required only for modern `tools/call`; must exactly equal
+        `params.name`. Forbidden on methods that do not call a tool.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+
   responses:
     Unauthorized:
       description: Missing, invalid, expired, or revoked access token.
@@ -5381,6 +6146,58 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/ErrorResponse"
+    AgentPortUnauthorized:
+      description: >
+        Agent bearer is missing, malformed, expired, revoked, inactive, or
+        otherwise invalid. The response body is empty. A missing credential
+        has no `error` parameter; a presented invalid credential uses
+        `error="invalid_token"`.
+      headers:
+        WWW-Authenticate:
+          description: Bearer challenge scoped to `agent:port:connect`.
+          schema:
+            type: string
+        Cache-Control:
+          description: Agent Port responses are private and must never be stored.
+          schema:
+            type: string
+            enum: ["private, no-store"]
+    AgentPortForbidden:
+      description: >
+        A present Origin is not the configured canonical HTTPS origin, or the
+        authenticated agent lacks `agent:port:connect`. The response body is
+        empty. Scope denial includes `error="insufficient_scope"`; Origin
+        denial occurs before authentication and carries no challenge.
+      headers:
+        WWW-Authenticate:
+          description: Optional Bearer insufficient-scope challenge.
+          schema:
+            type: string
+        Cache-Control:
+          description: Agent Port responses are private and must never be stored.
+          schema:
+            type: string
+            enum: ["private, no-store"]
+    AgentPortRateLimited:
+      description: >
+        Dedicated per-token, per-agent, or per-IP Agent Port sliding-window
+        limit exceeded. No raw token, token hash, body, or client metadata is
+        returned or logged.
+      headers:
+        Retry-After:
+          description: Whole seconds to wait before retrying.
+          schema:
+            type: integer
+            minimum: 1
+        Cache-Control:
+          description: Agent Port responses are private and must never be stored.
+          schema:
+            type: string
+            enum: ["private, no-store"]
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/AgentPortJSONRPCErrorResponse"
 
   schemas:
     # ---- Error envelope (Hummingbird HTTPError) ------------------------------
@@ -6342,8 +7159,215 @@ components:
       properties:
         registration: {$ref: "#/components/schemas/AgentCardRegistration"}
 
+    AgentCredentialScope:
+      type: string
+      enum:
+        - agent:jobs:read
+        - agent:runs:callback
+        - messages:read
+        - messages:write
+        - realtime:subscribe
+        - work:control
+        - provider:quota:write
+        - agent:port:connect
+        - agent:inbox:read
+
+    HostedAgentScope:
+      type: string
+      description: >
+        The closed hosted scope set. `agent:port:connect` is reachability only:
+        it opens `POST /v1/mcp/agent-port` and no product tool. Each of the
+        others opens exactly one Agent Port tool family and no REST route —
+        `agent:inbox:read` -> oort_inbox_read, `messages:read` ->
+        oort_conversation_read, `messages:write` -> oort_message_post,
+        `agent:jobs:read` -> oort_jobs_claim/oort_job_renew/oort_job_release,
+        `agent:runs:callback` -> oort_run_event/oort_run_complete. A tool is
+        listed and callable only when the connection approval, the credential's
+        current scopes and the server capability all carry its scope.
+      enum: [agent:port:connect, agent:inbox:read, messages:read, messages:write, agent:jobs:read, agent:runs:callback]
+
+    HostedAgentConnection:
+      type: object
+      additionalProperties: false
+      required: [id, agentMemberId, status, authMode, audience, approvedChannelIds, approvedScopes, createdAtMs, updatedAtMs]
+      properties:
+        id: {type: string, format: uuid}
+        agentMemberId: {type: string, format: uuid}
+        status: {type: string, enum: [pairing_pending, detected, active, expired, cleanup_pending, disconnected]}
+        authMode: {type: string, enum: [static_bearer]}
+        audience: {type: string, enum: [/v1/mcp/agent-port]}
+        approvedChannelIds: {type: array, uniqueItems: true, items: {type: string, format: uuid}}
+        approvedScopes: {type: array, uniqueItems: true, items: {$ref: "#/components/schemas/HostedAgentScope"}}
+        activeCredentialId: {type: string, format: uuid}
+        createdAtMs: {type: integer, format: int64}
+        updatedAtMs: {type: integer, format: int64}
+
+    CreateHostedAgentConnectionRequest:
+      type: object
+      additionalProperties: false
+      required: [displayName, handle]
+      properties:
+        displayName: {type: string, minLength: 1}
+        handle: {type: string, minLength: 1}
+        authMode: {type: string, enum: [static_bearer], default: static_bearer}
+
+    CreateHostedAgentConnectionResponse:
+      type: object
+      additionalProperties: false
+      required: [connection, pairingCredential, pairingExpiresAtMs]
+      properties:
+        connection: {$ref: "#/components/schemas/HostedAgentConnection"}
+        pairingCredential: {type: string, readOnly: true, minLength: 1, description: One-time pairing bearer; only SHA-256 is persisted.}
+        pairingExpiresAtMs: {type: integer, format: int64}
+
+    HostedAgentConnectionResponse:
+      type: object
+      additionalProperties: false
+      required: [connection, cleanupArtifacts]
+      properties:
+        connection: {$ref: "#/components/schemas/HostedAgentConnection"}
+        cleanupArtifacts:
+          type: array
+          maxItems: 200
+          items: {$ref: "#/components/schemas/HostedCleanupArtifact"}
+          description: >
+            HAP-E6 cleanup manifest. Empty until a disconnect starts, so an
+            unstarted connection answers with the same shape rather than a
+            different one.
+
+    HostedCleanupArtifact:
+      type: object
+      additionalProperties: false
+      description: >
+        One provider artifact a disconnect must account for (ADR-0162 HAP-E6).
+        Rows are per kind, plus one per named item, and one row never resolves
+        another: acknowledging `connector` leaves `local_plugin_files`
+        unresolved, which is the #1344 measurement made structural. `resolved`
+        is derived from `disposition` alone, so `currentStatus: inactive` is an
+        observation and never a cleanup. Nothing here carries a provider
+        credential, chat content or file path.
+      required: [id, kind, expectedAction, currentStatus, disposition, resolved, required, updatedAtMs]
+      properties:
+        id: {type: string, format: uuid}
+        kind: {type: string, enum: [bot, routine, plugin, connector, local_plugin_files, secret]}
+        externalRef: {type: string, minLength: 1, maxLength: 200, description: Bounded non-secret operator label for one named item.}
+        expectedAction:
+          type: string
+          enum: [remove, revoke, decide]
+          description: >
+            Fixed by kind. `bot` is `decide` because deleting one deletes its
+            chat history; `secret` is `revoke`; everything else is `remove`.
+        currentStatus: {type: string, enum: [unknown, present, inactive, absent]}
+        disposition:
+          type: string
+          enum: [pending, removed, preserved, revoked]
+          description: >
+            `preserved` is legal for `bot` only and is a terminal answer — oort
+            never deletes provider chat history on someone's behalf.
+        resolved: {type: boolean}
+        required: {type: boolean}
+        source:
+          type: string
+          enum: [server_verified, manual]
+          description: >
+            `server_verified` is reserved for what this server removed itself
+            (the hosted bearer it revoked) and is never readable from a request
+            body. Provider-owned artifacts are `manual` and carry an actor plus
+            evidence.
+        acknowledgedBy: {type: string, format: uuid}
+        acknowledgedAtMs: {type: integer, format: int64}
+        evidence: {type: string, minLength: 1, maxLength: 2000}
+        updatedAtMs: {type: integer, format: int64}
+
+    DisconnectHostedAgentConnectionRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        artifacts:
+          type: array
+          maxItems: 50
+          description: Extra named provider items to track beside the seeded per-kind rows.
+          items:
+            type: object
+            additionalProperties: false
+            required: [kind, externalRef]
+            properties:
+              kind: {type: string, enum: [bot, routine, plugin, connector, local_plugin_files, secret]}
+              externalRef: {type: string, minLength: 1, maxLength: 200}
+
+    DisconnectHostedAgentConnectionResponse:
+      type: object
+      additionalProperties: false
+      required: [connection, cleanupArtifacts, remainingRequired, startedNow]
+      properties:
+        connection: {$ref: "#/components/schemas/HostedAgentConnection"}
+        cleanupArtifacts: {type: array, maxItems: 200, items: {$ref: "#/components/schemas/HostedCleanupArtifact"}}
+        remainingRequired: {type: integer, format: int64, minimum: 0}
+        startedNow: {type: boolean, description: False when the disconnect had already started; nothing was written a second time.}
+
+    AcknowledgeHostedCleanupArtifactRequest:
+      type: object
+      additionalProperties: false
+      required: [currentStatus]
+      properties:
+        currentStatus: {type: string, enum: [unknown, present, inactive, absent]}
+        disposition:
+          type: string
+          enum: [delete, preserve, revoke]
+          description: >
+            Omit to record an observation only. `preserve` is legal for `bot`
+            alone; `revoke` for `secret` alone; `delete` for every other kind.
+        evidence: {type: string, minLength: 1, maxLength: 2000, description: Required whenever a disposition is supplied.}
+
+    AcknowledgeHostedCleanupArtifactResponse:
+      type: object
+      additionalProperties: false
+      required: [artifact, remainingRequired, changed]
+      properties:
+        artifact: {$ref: "#/components/schemas/HostedCleanupArtifact"}
+        remainingRequired: {type: integer, format: int64, minimum: 0}
+        changed: {type: boolean, description: False for a byte-identical repeat, which writes no audit row.}
+
+    CompleteHostedAgentDisconnectResponse:
+      type: object
+      additionalProperties: false
+      required: [connection, cleanupArtifacts, disconnectedNow]
+      properties:
+        connection: {$ref: "#/components/schemas/HostedAgentConnection"}
+        cleanupArtifacts: {type: array, maxItems: 200, items: {$ref: "#/components/schemas/HostedCleanupArtifact"}}
+        disconnectedNow: {type: boolean, description: False for an idempotent replay of a transition that already happened.}
+
+    HostedAgentConnectionListResponse:
+      type: object
+      additionalProperties: false
+      required: [connections]
+      properties:
+        connections: {type: array, maxItems: 100, items: {$ref: "#/components/schemas/HostedAgentConnection"}}
+
+    ConfirmHostedAgentConnectionRequest:
+      type: object
+      additionalProperties: false
+      required: [agentMemberId, audience, approvedChannelIds, approvedScopes, authMode]
+      properties:
+        agentMemberId: {type: string, format: uuid}
+        audience: {type: string, enum: [/v1/mcp/agent-port]}
+        approvedChannelIds: {type: array, uniqueItems: true, items: {type: string, format: uuid}}
+        approvedScopes: {type: array, minItems: 1, uniqueItems: true, items: {$ref: "#/components/schemas/HostedAgentScope"}}
+        authMode: {type: string, enum: [static_bearer]}
+
+    ConfirmHostedAgentConnectionResponse:
+      type: object
+      additionalProperties: false
+      required: [connection, credentialId, credential, tokenType]
+      properties:
+        connection: {$ref: "#/components/schemas/HostedAgentConnection"}
+        credentialId: {type: string, format: uuid}
+        credential: {type: string, readOnly: true, minLength: 1, description: One-time Agent Port bearer; only SHA-256 is persisted.}
+        tokenType: {type: string, enum: [Bearer]}
+
     AgentCredential:
       type: object
+      additionalProperties: false
       required: [id, agentMemberId, status, scopes, createdAtMs]
       properties:
         id: {type: string, format: uuid}
@@ -6351,12 +7375,82 @@ components:
         status: {type: string, enum: [active, expired, revoked]}
         scopes:
           type: array
-          items: {type: string}
-        label: {type: string}
+          minItems: 1
+          uniqueItems: true
+          items: {$ref: "#/components/schemas/AgentCredentialScope"}
+        label: {type: string, minLength: 1, maxLength: 120}
         lastUsedAtMs: {type: integer, format: int64}
         expiresAtMs: {type: integer, format: int64}
         revokedAtMs: {type: integer, format: int64}
         createdAtMs: {type: integer, format: int64}
+
+    CreateAgentCredentialRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        scopes:
+          type: array
+          minItems: 1
+          description: >
+            Closed explicit scope set. Duplicates are normalized away. If omitted, defaults to
+            agent:jobs:read, agent:runs:callback, messages:write,
+            realtime:subscribe, and work:control.
+          items: {$ref: "#/components/schemas/AgentCredentialScope"}
+        label:
+          type: string
+          minLength: 1
+          maxLength: 120
+          description: Defaults to `agent bearer` when omitted.
+        expiresAtMs:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Optional future epoch millisecond; past or current values are rejected.
+        rotationGraceSeconds:
+          type: integer
+          minimum: 0
+          maximum: 604800
+          description: Defaults to 86400 seconds when omitted.
+
+    CreateAgentCredentialResponse:
+      type: object
+      additionalProperties: false
+      required: [credential, token, tokenType, rotatedCredentialCount]
+      properties:
+        credential: {$ref: "#/components/schemas/AgentCredential"}
+        token:
+          type: string
+          readOnly: true
+          minLength: 1
+          description: One-time raw bearer. Only SHA-256(token) is persisted.
+        tokenType: {type: string, enum: [Bearer]}
+        rotatedCredentialCount: {type: integer, minimum: 0}
+        rotationGraceEndsAtMs: {type: integer, format: int64}
+
+    AgentCredentialListResponse:
+      type: object
+      additionalProperties: false
+      required: [credentials]
+      properties:
+        credentials:
+          type: array
+          maxItems: 100
+          items: {$ref: "#/components/schemas/AgentCredential"}
+
+    RevokeAgentCredentialRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        reason: {type: string, maxLength: 500}
+
+    RevokeAgentCredentialResponse:
+      type: object
+      additionalProperties: false
+      required: [credential, revokedNow, alreadyRevoked]
+      properties:
+        credential: {$ref: "#/components/schemas/AgentCredential"}
+        revokedNow: {type: boolean}
+        alreadyRevoked: {type: boolean}
 
     ConfirmAgentCardResponse:
       type: object
@@ -7222,7 +8316,7 @@ components:
       required:
         [id, workspaceId, channelId, memberId, hostId, rootMessageId,
          tool, label, status, observation, observerGrantCount,
-         remoteAttachAvailable, startedAtMs]
+         remoteAttachAvailable, remoteDisplayAvailable, startedAtMs]
       properties:
         id:
           type: string
@@ -7259,10 +8353,43 @@ components:
           type: integer
           format: int64
           minimum: 0
-          description: Currently valid observer capabilities only; expired or invalid grants are excluded.
+          description: >
+            Currently valid observer capabilities only; expired or invalid
+            grants are excluded. Deliberately kind-blind since LIVE-1: a
+            teammate watching the live screen is watching, and one 관전자 수 is
+            what every surface publishes.
         remoteAttachAvailable:
           type: boolean
           description: True only when the session has a complete remote PTY binding; endpoint and capability remain unprojected.
+        remoteDisplayAvailable:
+          type: boolean
+          description: >
+            True only when the session has a complete WebRTC display binding
+            (ADR-0165); the signalling endpoint and the capability remain
+            unprojected, exactly as the PTY pair's do. Independent of
+            remoteAttachAvailable: a session can offer a screen and no terminal,
+            or the reverse, and a client that folds them offers the wrong verb.
+        controlStartedAt:
+          type: integer
+          format: int64
+          description: >
+            Epoch milliseconds at which somebody took this session's keyboard,
+            present only while they still hold it (LIVE-5a). ABSENT means nobody
+            does — a 0 would render as 1970.
+            This is the field a reload reads. The work.session.control envelope
+            says the same thing over the wire, but Centrifugo is transport and a
+            surface that only heard it forgets on refresh; the value here comes
+            from the display_control_window ledger, which is the source of truth
+            for the boundary. The login-handoff card's control_* props are a
+            second, narrower projection of that same ledger and are not it.
+            WHO holds the keyboard is deliberately absent, matching the
+            broadcast: control is owner-only, so "somebody has control" is all a
+            reader or an agent needs to behave correctly, and nothing the person
+            types is reachable from here or from anything this links to
+            (ADR-0004 증보 3 D2).
+            While it is present the session is forced to observation=owner_only,
+            and the owner's own setting is restored when the window closes by
+            any of its three routes.
         startedAtMs:
           type: integer
           format: int64
@@ -7483,6 +8610,229 @@ components:
           type: string
           enum: [controller, observer]
           description: Host authorization grade; observer forbids send_stdin, resize, and kill.
+
+    # ---- Display attach (LIVE-1 / ADR-0165) ---------------------------------
+    IssueDisplayAttachRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        mode:
+          type: string
+          enum: [observer, controller]
+          default: observer
+          description: >
+            observer watches; controller also takes the keyboard, opens a
+            control window and stops the agent's reach into this session for as
+            long as it stands (ADR-0004 증보 3, LIVE-3). Only the session owner
+            may ask for controller.
+            The default stays observer now that both are spellable, and that is
+            a decision rather than a leftover: a default is what a client gets
+            when it did not consider the question, and "did you mean to stop the
+            agent and take the keyboard" is never answered by silence.
+
+    IceServer:
+      type: object
+      required: [urls, username, credential]
+      description: >
+        One entry of the browser's RTCConfiguration.iceServers, in the W3C's own
+        spelling because a client hands the array to RTCPeerConnection
+        unchanged. The credential is minted per work session and expires on its
+        own (coturn use-auth-secret): username is "<unix expiry>:<work session
+        id>" and the password is derived rather than stored, so there is no row
+        to leak and nothing to rotate but the relay's own shared secret. The
+        relay is oort-operated and never a third party's (ADR-0165 D3) — momo
+        hands out the credential and still carries no media, sees no candidate
+        and terminates nothing.
+      properties:
+        urls:
+          type: array
+          items:
+            type: string
+            maxLength: 2048
+          description: One relay, listed once per transport (udp and tcp).
+        username:
+          type: string
+        credential:
+          type: string
+
+    DisplayAttachCapabilityResponse:
+      type: object
+      required:
+        [display_endpoint, capability_token, display_id, mode, ice_servers]
+      properties:
+        display_endpoint:
+          type: string
+          maxLength: 2048
+          description: >
+            The HOST's own credential-free WSS WebRTC signalling endpoint.
+            Userinfo, query and fragment are forbidden. momo proxies neither the
+            signalling nor the media that follows it.
+        capability_token:
+          type: string
+          description: >
+            Opaque 60-second bearer returned once. Only its SHA-256 digest is
+            persisted; producer-side validation also requires a live host
+            signature. Same grammar as a terminal capability — the kind is a
+            ledger column, not a second token format.
+        display_id:
+          type: string
+          pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'
+        mode:
+          type: string
+          enum: [observer, controller]
+          description: >
+            The grade actually minted, so a UI can say "view only" before the
+            socket is dialled — a view-only stream that looks identical to a
+            controllable one is how a person ends up typing into a window that
+            will never deliver a keystroke.
+        control_started_at:
+          type: integer
+          format: int64
+          description: >
+            Epoch milliseconds at which the control window opened. Present only
+            on a controller grant. The caller's own copy of the boundary event
+            the work.session.control envelope carries, so the surface can say
+            when control began without waiting for the relay.
+        ice_servers:
+          type: array
+          items:
+            $ref: "#/components/schemas/IceServer"
+          description: >
+            The oort relay this grant may allocate through, with a credential
+            minted for this session. ALWAYS PRESENT, and EMPTY on an instance
+            that was given no relay policy — a client must read empty as "use
+            what you were already configured with", never as an error. During
+            the credential retirement that configuration is the static
+            long-term credential the producer template still carries, and the
+            overlap is deliberate: the ephemeral path is proved beside the
+            static one before the static one is removed from a relay carrying
+            production traffic.
+
+    DisplayControlReturnResponse:
+      type: object
+      required: [closed]
+      properties:
+        closed:
+          type: boolean
+          description: >
+            Whether THIS call ended a standing control window. false means there
+            was nothing open — a retried return, or a window that had already
+            lapsed or ended with the session. Both are success; the status code
+            is 200 either way and the flag is what tells them apart.
+        control_started_at:
+          type: integer
+          format: int64
+          description: Epoch ms, present only when this call closed a window.
+        control_ended_at:
+          type: integer
+          format: int64
+          description: Epoch ms, present only when this call closed a window.
+
+    PublishDisplayBindingRequest:
+      type: object
+      required: [displayId, displayEndpoint]
+      additionalProperties: false
+      description: >
+        MomoHost-signed publication of the WebRTC display binding for a running
+        or idle session the caller already owns. Writing a DIFFERENT binding
+        onto a session that already has one is 409; re-sending the identical
+        pair is idempotent. The server stores and authorizes the endpoint and
+        never carries a frame.
+      properties:
+        displayId:
+          type: string
+          maxLength: 128
+          pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'
+        displayEndpoint:
+          type: string
+          maxLength: 2048
+          description: >
+            Credential-free HTTPS or WSS WebRTC signalling endpoint. Userinfo,
+            query, and fragment are forbidden.
+
+    ValidateDisplayAttachRequest:
+      type: object
+      required: [capability_token]
+      additionalProperties: false
+      properties:
+        capability_token:
+          type: string
+          description: Opaque grant presented by the browser to the sandbox producer.
+        stream:
+          type: boolean
+          default: false
+          description: >
+            True when the producer is re-checking a peer connection it already
+            serves rather than admitting a new viewer. It relaxes exactly one
+            clause, the capability expiry, because that TTL bounds the
+            mint-to-dial window and the producer closed that window under a full
+            validation. A media session outlives its 60-second dial window by
+            design, so every other authorization clause still applies on every
+            call: a live screen is cut within one revalidation period when the
+            session ends, the host is revoked, observation closes, the grantee
+            leaves the channel, the grantee is deactivated, or the host stops
+            advertising a display.
+
+    DisplayAttachValidationResponse:
+      type: object
+      required:
+        [
+          work_session_id,
+          display_id,
+          expires_at,
+          mode,
+          input_enabled,
+          ice_servers,
+        ]
+      properties:
+        work_session_id:
+          type: string
+          format: uuid
+        display_id:
+          type: string
+          pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'
+        expires_at:
+          type: string
+          format: date-time
+          description: PostgreSQL timestamptz capability expiry.
+        mode:
+          type: string
+          enum: [observer, controller]
+          description: >
+            The grade of the bearer the producer presented. Migration 076
+            dropped 075's observer-only CHECK when ADR-0004 증보 3 was Accepted.
+        input_enabled:
+          type: boolean
+          description: >
+            Whether this producer may negotiate an input datachannel RIGHT NOW.
+            A negative instruction rather than a status: the view-only guarantee
+            lives in a channel that was never opened rather than in a client
+            flag anyone could flip (ADR-0165 D4).
+            True only when the bearer is a controller grant AND its control
+            window still stands, so a returned, lapsed or session-ended window
+            answers false at the next re-validation — which is how handing
+            control back actually takes the keyboard away instead of merely
+            recording that somebody asked for it.
+        ice_servers:
+          type: array
+          items:
+            $ref: "#/components/schemas/IceServer"
+          description: >
+            The producer's copy of the same relay credential the browser is
+            served, under the same session subject, so both ends of one media
+            path appear in coturn's log under one username.
+            Re-minted on EVERY validate, and the shipped producer installs only
+            the first: webrtcbin cannot swap a TURN server underneath a running
+            ICE agent, so the credential a peer connection was built with is the
+            one it dies with. The TTL is therefore that connection's CEILING and
+            not a sliding window — past it the stream can no longer allocate or
+            refresh a relay, and the screen goes black with nothing user-visible
+            to explain it. A new viewer is unaffected: new connection, new
+            pipeline, credential minted at the moment they attached. Whether the
+            answer is renegotiation or accepting the ceiling is a LIVE-5c
+            acceptance criterion, measured on a real host rather than decided
+            here. Empty on an instance with no relay policy, in which case the
+            producer keeps the static credential delivered to it at create time.
 
     # ---- Work controls ------------------------------------------------------
     CreateWorkControlRequest:
@@ -8545,6 +9895,20 @@ components:
             inner target's id is deliberately absent, because quoting is drawn
             one layer deep and a second id is all anyone needs to build a
             staircase. Omitted when false.
+        propsKind:
+          type: string
+          description: >
+            The quoted message's `props.kind`, and the only thing its props
+            contribute here. A card message rides an ordinary row — `type` is
+            `text`, `body` is absent, and the card itself lives in `props` —
+            which leaves it identical to a tombstone in every other field of this
+            object, so a client reading "a text with no body was deleted" calls
+            that card a deleted message. This key is what separates them.
+            Omitted when the quoted message carries no kind, and omitted on a
+            tombstone: a deleted row keeps its props in the database, but the
+            deletion leaves nothing on the wire beyond the fact of it. The card's
+            own payload never appears here — a quote draws two lines and sends
+            the reader to the original.
 
     MessageAttachment:
       type: object
@@ -9153,6 +10517,372 @@ components:
             type: object
             additionalProperties: true
       additionalProperties: true
+
+    # ---- Hosted Agent Port MCP JSON-RPC (ADR-0162 / HAP-E2) ---------------
+    AgentPortClientInfo:
+      type: object
+      additionalProperties: false
+      required: [name, version]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 128
+        title:
+          type: string
+          minLength: 1
+          maxLength: 128
+        version:
+          type: string
+          minLength: 1
+          maxLength: 64
+
+    AgentPortRequestMeta:
+      type: object
+      additionalProperties: false
+      required:
+        - io.modelcontextprotocol/protocolVersion
+        - io.modelcontextprotocol/clientCapabilities
+      properties:
+        io.modelcontextprotocol/protocolVersion:
+          type: string
+          enum: ["2026-07-28"]
+        io.modelcontextprotocol/clientCapabilities:
+          type: object
+          description: Bounded client-declared capabilities; never an authorization source.
+          additionalProperties: true
+        io.modelcontextprotocol/clientInfo:
+          $ref: "#/components/schemas/AgentPortClientInfo"
+
+    AgentPortModernParams:
+      type: object
+      additionalProperties: false
+      required: [_meta]
+      properties:
+        _meta:
+          $ref: "#/components/schemas/AgentPortRequestMeta"
+
+    AgentPortModernToolCallParams:
+      type: object
+      additionalProperties: false
+      required: [_meta, name]
+      properties:
+        _meta:
+          $ref: "#/components/schemas/AgentPortRequestMeta"
+        name:
+          type: string
+          minLength: 1
+          maxLength: 128
+        arguments:
+          type: object
+          additionalProperties: true
+
+    AgentPortLegacyInitializeParams:
+      type: object
+      additionalProperties: false
+      required: [protocolVersion, capabilities, clientInfo]
+      properties:
+        protocolVersion:
+          type: string
+          enum: ["2025-11-25"]
+        capabilities:
+          type: object
+          additionalProperties: true
+        clientInfo:
+          $ref: "#/components/schemas/AgentPortClientInfo"
+
+    AgentPortLegacyEmptyParams:
+      type: object
+      additionalProperties: false
+
+    AgentPortLegacyToolCallParams:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 128
+        arguments:
+          type: object
+          additionalProperties: true
+
+    AgentPortJSONRPCRequestId:
+      description: >
+        JSON-RPC non-empty string or finite number request id. Omitted only by the legacy
+        `notifications/initialized` notification.
+      oneOf:
+        - type: string
+          minLength: 1
+          maxLength: 128
+        - type: number
+
+    AgentPortJSONRPCRequest:
+      description: Exact closed union of the supported modern and legacy request bodies.
+      oneOf:
+        - $ref: "#/components/schemas/AgentPortModernDiscoverRequest"
+        - $ref: "#/components/schemas/AgentPortModernToolsListRequest"
+        - $ref: "#/components/schemas/AgentPortModernToolsCallRequest"
+        - $ref: "#/components/schemas/AgentPortLegacyInitializeRequest"
+        - $ref: "#/components/schemas/AgentPortLegacyInitializedNotification"
+        - $ref: "#/components/schemas/AgentPortLegacyPingRequest"
+        - $ref: "#/components/schemas/AgentPortLegacyToolsListRequest"
+        - $ref: "#/components/schemas/AgentPortLegacyToolsCallRequest"
+
+    AgentPortModernDiscoverRequest:
+      type: object
+      additionalProperties: false
+      required: [jsonrpc, id, method, params]
+      properties:
+        jsonrpc: {type: string, enum: ["2.0"]}
+        id: {$ref: "#/components/schemas/AgentPortJSONRPCRequestId"}
+        method: {type: string, enum: [server/discover]}
+        params: {$ref: "#/components/schemas/AgentPortModernParams"}
+
+    AgentPortModernToolsListRequest:
+      type: object
+      additionalProperties: false
+      required: [jsonrpc, id, method, params]
+      properties:
+        jsonrpc: {type: string, enum: ["2.0"]}
+        id: {$ref: "#/components/schemas/AgentPortJSONRPCRequestId"}
+        method: {type: string, enum: [tools/list]}
+        params: {$ref: "#/components/schemas/AgentPortModernParams"}
+
+    AgentPortModernToolsCallRequest:
+      type: object
+      additionalProperties: false
+      required: [jsonrpc, id, method, params]
+      properties:
+        jsonrpc: {type: string, enum: ["2.0"]}
+        id: {$ref: "#/components/schemas/AgentPortJSONRPCRequestId"}
+        method: {type: string, enum: [tools/call]}
+        params: {$ref: "#/components/schemas/AgentPortModernToolCallParams"}
+
+    AgentPortLegacyInitializeRequest:
+      type: object
+      additionalProperties: false
+      required: [jsonrpc, id, method, params]
+      properties:
+        jsonrpc: {type: string, enum: ["2.0"]}
+        id: {$ref: "#/components/schemas/AgentPortJSONRPCRequestId"}
+        method: {type: string, enum: [initialize]}
+        params: {$ref: "#/components/schemas/AgentPortLegacyInitializeParams"}
+
+    AgentPortLegacyInitializedNotification:
+      type: object
+      additionalProperties: false
+      required: [jsonrpc, method]
+      properties:
+        jsonrpc: {type: string, enum: ["2.0"]}
+        method: {type: string, enum: [notifications/initialized]}
+        params: {$ref: "#/components/schemas/AgentPortLegacyEmptyParams"}
+
+    AgentPortLegacyPingRequest:
+      type: object
+      additionalProperties: false
+      required: [jsonrpc, id, method]
+      properties:
+        jsonrpc: {type: string, enum: ["2.0"]}
+        id: {$ref: "#/components/schemas/AgentPortJSONRPCRequestId"}
+        method: {type: string, enum: [ping]}
+        params: {$ref: "#/components/schemas/AgentPortLegacyEmptyParams"}
+
+    AgentPortLegacyToolsListRequest:
+      type: object
+      additionalProperties: false
+      required: [jsonrpc, id, method]
+      properties:
+        jsonrpc: {type: string, enum: ["2.0"]}
+        id: {$ref: "#/components/schemas/AgentPortJSONRPCRequestId"}
+        method: {type: string, enum: [tools/list]}
+        params: {$ref: "#/components/schemas/AgentPortLegacyEmptyParams"}
+
+    AgentPortLegacyToolsCallRequest:
+      type: object
+      additionalProperties: false
+      required: [jsonrpc, id, method, params]
+      properties:
+        jsonrpc: {type: string, enum: ["2.0"]}
+        id: {$ref: "#/components/schemas/AgentPortJSONRPCRequestId"}
+        method: {type: string, enum: [tools/call]}
+        params: {$ref: "#/components/schemas/AgentPortLegacyToolCallParams"}
+
+    AgentPortServerToolCapability:
+      type: object
+      additionalProperties: false
+      required: [listChanged]
+      properties:
+        listChanged:
+          type: boolean
+          enum: [false]
+
+    AgentPortServerCapabilities:
+      type: object
+      additionalProperties: false
+      required: [tools]
+      properties:
+        tools:
+          $ref: "#/components/schemas/AgentPortServerToolCapability"
+
+    AgentPortServerInfo:
+      type: object
+      additionalProperties: false
+      required: [name, title, version]
+      properties:
+        name:
+          type: string
+          enum: [oort-agent-port]
+        title:
+          type: string
+          enum: [oort Agent Port]
+        version:
+          type: string
+
+    AgentPortCache:
+      type: object
+      additionalProperties: false
+      required: [ttlSeconds, scope]
+      properties:
+        ttlSeconds:
+          type: integer
+          minimum: 0
+          maximum: 300
+        scope:
+          type: string
+          enum: [private]
+
+    AgentPortModernDiscoverCache:
+      type: object
+      additionalProperties: false
+      required: [ttlSeconds, scope]
+      properties:
+        ttlSeconds: {type: integer, enum: [300]}
+        scope: {type: string, enum: [private]}
+
+    AgentPortModernToolsListCache:
+      type: object
+      additionalProperties: false
+      required: [ttlSeconds, scope]
+      properties:
+        ttlSeconds: {type: integer, enum: [0]}
+        scope: {type: string, enum: [private]}
+
+    AgentPortResult:
+      description: >
+        Exact closed union of modern discovery/list and legacy initialize/list/ping results.
+      oneOf:
+        - $ref: "#/components/schemas/AgentPortModernDiscoverResult"
+        - $ref: "#/components/schemas/AgentPortModernToolsListResult"
+        - $ref: "#/components/schemas/AgentPortLegacyInitializeResult"
+        - $ref: "#/components/schemas/AgentPortLegacyToolsListResult"
+        - $ref: "#/components/schemas/AgentPortPingResult"
+
+    AgentPortModernDiscoverResult:
+      type: object
+      additionalProperties: false
+      required: [protocolVersion, capabilities, serverInfo, resultType, cache]
+      properties:
+        protocolVersion:
+          type: string
+          enum: ["2026-07-28"]
+        capabilities:
+          $ref: "#/components/schemas/AgentPortServerCapabilities"
+        serverInfo:
+          $ref: "#/components/schemas/AgentPortServerInfo"
+        resultType:
+          type: string
+          enum: [server/discover]
+        cache:
+          $ref: "#/components/schemas/AgentPortModernDiscoverCache"
+
+    AgentPortModernToolsListResult:
+      type: object
+      additionalProperties: false
+      required: [tools, resultType, cache]
+      properties:
+        resultType: {type: string, enum: [tools/list]}
+        cache:
+          $ref: "#/components/schemas/AgentPortModernToolsListCache"
+        tools:
+          type: array
+          maxItems: 0
+          items:
+            type: object
+            additionalProperties: true
+
+    AgentPortLegacyInitializeResult:
+      type: object
+      additionalProperties: false
+      required: [protocolVersion, capabilities, serverInfo]
+      properties:
+        protocolVersion: {type: string, enum: ["2025-11-25"]}
+        capabilities: {$ref: "#/components/schemas/AgentPortServerCapabilities"}
+        serverInfo: {$ref: "#/components/schemas/AgentPortServerInfo"}
+
+    AgentPortLegacyToolsListResult:
+      type: object
+      additionalProperties: false
+      required: [tools]
+      properties:
+        tools:
+          type: array
+          maxItems: 0
+          items: {type: object, additionalProperties: true}
+
+    AgentPortPingResult:
+      type: object
+      additionalProperties: false
+
+    AgentPortJSONRPCError:
+      type: object
+      additionalProperties: false
+      required: [code, message]
+      properties:
+        code:
+          type: integer
+          enum: [-32700, -32600, -32601, -32602, -32020, -32022, -32029]
+        message:
+          type: string
+        data:
+          type: object
+          additionalProperties: true
+
+    AgentPortJSONRPCResponse:
+      description: >
+        Exactly one of result or error is emitted. Transport authentication
+        failures are intentionally not encoded in this envelope.
+      oneOf:
+        - $ref: "#/components/schemas/AgentPortJSONRPCSuccessResponse"
+        - $ref: "#/components/schemas/AgentPortJSONRPCErrorResponse"
+
+    AgentPortJSONRPCResponseId:
+      description: Echoed JSON-RPC string/number id, or null when unavailable.
+      nullable: true
+      oneOf:
+        - type: string
+          minLength: 1
+          maxLength: 128
+        - type: number
+
+    AgentPortJSONRPCSuccessResponse:
+      type: object
+      additionalProperties: false
+      required: [jsonrpc, id, result]
+      properties:
+        jsonrpc: {type: string, enum: ["2.0"]}
+        id: {$ref: "#/components/schemas/AgentPortJSONRPCRequestId"}
+        result: {$ref: "#/components/schemas/AgentPortResult"}
+
+    AgentPortJSONRPCErrorResponse:
+      type: object
+      additionalProperties: false
+      required: [jsonrpc, id, error]
+      properties:
+        jsonrpc: {type: string, enum: ["2.0"]}
+        id: {$ref: "#/components/schemas/AgentPortJSONRPCResponseId"}
+        error: {$ref: "#/components/schemas/AgentPortJSONRPCError"}
 
     # ---- Hosted Drive MCP JSON-RPC -----------------------------------------
     DriveMCPRequest:

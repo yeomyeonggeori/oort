@@ -18,7 +18,14 @@ import { useSession } from "@/app/session";
 import { useIsMobileShell } from "@/app/shellNav";
 import type { Directory } from "@/features/workspace/useWorkspace";
 import { composerKeyIntent, isComposingEvent } from "@momo/core/features/chat/composerKeys";
-import { COMPOSER_OFFLINE_COPY } from "@momo/core/features/chat/composerCopy";
+import type { RecipientKind } from "@momo/core/lib/koreanParticle";
+import {
+  COMPOSER_KEYS_HINT,
+  COMPOSER_OFFLINE_COPY,
+  HINT_SEPARATOR,
+  composerFieldLabel,
+} from "@momo/core/features/chat/composerCopy";
+import { useFittedComposerPlaceholder } from "@/features/chat/placeholderFit";
 import {
   agentTurnsInChannel,
   elapsedLabel,
@@ -325,6 +332,7 @@ export function Composer({
   channelId,
   directory,
   channelLabel,
+  recipient,
   dmAgent,
   quote,
   onCancelQuote,
@@ -336,6 +344,13 @@ export function Composer({
   channelId: string;
   directory: Directory;
   channelLabel: string;
+  /**
+   * 이 label 이 **방 이름인가 사람 이름인가** (#1384). DM 의 label 은 상대의
+   * displayName 이므로(`channelLabelParts`) 조사가 갈린다: 방은 에, 사람은
+   * 에게. 기본값을 두지 않는 것은 의도다 — 모르는 채로 그린 화면이 「hermes에
+   * 메시지 보내기」였고, 조사는 한국어 독자에게 렌더링 디테일이 아니다.
+   */
+  recipient: RecipientKind;
   /**
    * The agent this channel answers without an @mention
    * (`dmAutoReplyAgent`), or null. Present only to decide one sentence of
@@ -461,6 +476,16 @@ export function Composer({
   // 세 줄로 접히는 쪽이 흔하다. 같은 함수를 스레드 컴포저와 수정 입력창이 이미
   // 쓰고 있었고, 여기만 자기 산수를 갖고 있었다.
   useAutoGrow(inputRef, text, { minRows: MIN_ROWS, maxRows: MAX_ROWS });
+
+  // 사람이 친 글은 상자가 자라서 받고(위), 빈 상자의 문장은 **줄어들어서** 받는다
+  // (#1422). 상자가 좁으면 코어가 이름 붙인 절을 통째로 버린다 — 어느 절을 언제
+  // 버리는지는 코어의 규칙이고, 여기 있는 것은 이 상자에서 무엇이 드는지를 답할
+  // 수 있는 자뿐이다(`placeholderFit.ts`).
+  const placeholder = useFittedComposerPlaceholder(
+    inputRef,
+    channelLabel,
+    recipient
+  );
 
   // 1회 오버라이드는 지금 이 글이 부르는 에이전트에 붙는다(ADR-0134 D1). 대상은
   // 확정된 멘션이 아니라 **텍스트에 남아 있는 멘션**에서 다시 계산한다: 사람이
@@ -758,7 +783,7 @@ export function Composer({
             자리를 쓴다 — 이 자리는 배울 필요가 없는 자리다. */}
         <AttachButton onPick={onFiles} disabled={offline} />
         <label className="sr-only" htmlFor="composer-input">
-          {channelLabel}에 보낼 메시지
+          {composerFieldLabel(channelLabel, recipient)}
         </label>
         <textarea
           id="composer-input"
@@ -808,10 +833,16 @@ export function Composer({
           onBlur={() => {
             justComposedRef.current = false;
           }}
-          placeholder={`${channelLabel}에 메시지 보내기`}
+          // 빈 상자는 **어디로 가는지**와 **@가 무엇인지**를 함께 말한다
+          // (#1384). 문장과 그 문장을 고른 이유(폭 산술 포함)는 코어가 든다 —
+          // 이 자리는 렌더만 한다. 좁은 상자에서 **무엇이 사라지는지**도 코어의
+          // 규칙이다(#1422): 절을 통째로 버리고 절 안에서는 자르지 않는다.
+          // `composer-placeholder` 의 `1lh`(#1418)는 그 뒤에 남는 마지막
+          // 방어선이다 — 머리 절 하나도 안 드는 폭에서 글리프 반노출을 막는다.
+          placeholder={placeholder}
           aria-describedby={hasHint ? "composer-hint" : undefined}
           data-testid="composer-input"
-          className="tap-target min-w-0 flex-1 resize-none rounded-md border border-line-strong bg-transparent px-3 py-2 text-body leading-relaxed placeholder:text-ink-muted focus-visible:focus-ring"
+          className="tap-target composer-placeholder min-w-0 flex-1 resize-none rounded-md border border-line-strong bg-transparent px-3 py-2 text-body leading-relaxed placeholder:text-ink-muted focus-visible:focus-ring"
         />
         <Button
           type="submit"
@@ -864,7 +895,13 @@ export function Composer({
           다르고, 한 번 배워서 끝나지 않는다. 그래서 이 줄은 조각 둘이 각자 사라질
           수 있고, 둘 다 없으면 <p> 자체가 서지 않는다: 빈 문단의 pb-2는 8px짜리
           죽은 공간이고, `aria-describedby`가 가리키는 빈 요소는 보조기술에 아무
-          말도 하지 않는 이름이다. */}
+          말도 하지 않는 이름이다.
+
+          #1384: 키 조각의 문장과 이음쇠는 코어가 든다(`composerCopy.ts`의
+          「키보드 힌트의 표기법」). 이 앱의 키 힌트는 세 자리에 서 있었고
+          (여기 · `timeline/MessageEditor.tsx` · `sidebar/Sidebar.tsx`) 크기도
+          이음쇠도 문법도 갈라져 있었다. 여기 있던 쉼표가 가운뎃점이 된 것이
+          그 통일이고, 그것을 코어의 테스트가 전수로 잰다. */}
       {hasHint && (
         <p
           id="composer-hint"
@@ -891,7 +928,8 @@ export function Composer({
           )}
           {keysHintNeeded && (
             <span className="wide-only" data-testid="composer-keys-hint">
-              {dmAgent ? " · " : ""}Enter로 보내기, Shift+Enter로 줄바꿈
+              {dmAgent ? HINT_SEPARATOR : ""}
+              {COMPOSER_KEYS_HINT}
             </span>
           )}
         </p>

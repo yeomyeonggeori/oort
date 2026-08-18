@@ -1620,7 +1620,7 @@ function Harness(): React.JSX.Element {
                     첫 답글을 남겨 이 대화를 이어가세요.
                   </Text>
                 ) : null}
-                <Composer
+                <Composer recipient="place"
                   channelLabel="스레드"
                   directory={DIRECTORY}
                   placeholder="답글 쓰기"
@@ -1649,7 +1649,7 @@ function Harness(): React.JSX.Element {
           }
           composer={
             <View ref={dockRef} collapsable={false}>
-              <Composer
+              <Composer recipient="place"
                 channelLabel="측정"
                 directory={DIRECTORY}
                 inputRef={inputRef}

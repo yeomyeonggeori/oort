@@ -61,8 +61,12 @@
 //! makes the 휘발 publish path provably Postgres-free (ADR-0149 guard 3).
 
 pub mod agent_bearer;
+pub mod agent_credential;
 pub mod agent_scope;
 pub mod ephemeral_grant;
+pub mod hosted_connection;
+pub mod hosted_disconnect;
+pub mod hosted_oauth;
 pub mod issue;
 pub mod jwt;
 pub mod realtime;
@@ -73,18 +77,68 @@ pub mod workhost;
 pub mod workspace_authorization;
 
 pub use agent_bearer::{
-    agent_bearer_workspace_id, authenticate_agent_bearer_in_tx, AgentBearerIdentity,
-    AgentBearerRejection, AgentBearerResolution, AGENT_BEARER_PREFIX, AUDIT_ACTION_SCOPE_DENIED,
-    AUDIT_ACTION_USED, AUDIT_DETAIL_SCHEMA,
+    agent_bearer_workspace_id, classify_agent_bearer_in_tx, finalize_agent_bearer_use_in_tx,
+    resolve_agent_bearer_in_tx, AgentBearerClass, AgentBearerIdentity, AgentBearerRejection,
+    AgentBearerResolution, AGENT_BEARER_PREFIX, AUDIT_ACTION_SCOPE_DENIED, AUDIT_ACTION_USED,
+    AUDIT_DETAIL_SCHEMA,
+};
+pub use agent_credential::{
+    active_agent_for_credential_list, agent_credential_mutation_policy_in_tx,
+    agent_credential_requires_instance_operator, issue_agent_credential_in_tx,
+    list_agent_credentials_in_tx, mint_agent_bearer, normalized_agent_credential_label,
+    normalized_agent_credential_reason, normalized_agent_credential_scopes,
+    revoke_agent_credential_in_tx, validated_agent_credential_expiry,
+    validated_rotation_grace_seconds, AgentCredentialInputError, AgentCredentialIssuance,
+    AgentCredentialIssueError, AgentCredentialMutation, AgentCredentialMutationPolicy,
+    AgentCredentialRecord, AgentCredentialRevocation, AgentCredentialStatus, AUDIT_ACTION_ISSUED,
+    AUDIT_ACTION_REVOKED, AUDIT_SCHEMA_ISSUED, AUDIT_SCHEMA_REVOKED,
+    DEFAULT_AGENT_CREDENTIAL_LABEL, DEFAULT_AGENT_CREDENTIAL_SCOPES,
+    DEFAULT_ROTATION_GRACE_SECONDS, HOSTED_CONNECTION_MANAGED_CODE, MAXIMUM_ROTATION_GRACE_SECONDS,
 };
 pub use agent_scope::{
-    is_gateway_callback_route, required_agent_scope, SCOPE_AGENT_JOBS_READ,
-    SCOPE_AGENT_RUNS_CALLBACK, SCOPE_MESSAGES_WRITE,
+    is_gateway_callback_route, required_agent_scope, SCOPE_AGENT_INBOX_READ, SCOPE_AGENT_JOBS_READ,
+    SCOPE_AGENT_PORT_CONNECT, SCOPE_AGENT_RUNS_CALLBACK, SCOPE_MESSAGES_READ, SCOPE_MESSAGES_WRITE,
 };
 pub use ephemeral_grant::{
     ephemeral_grant_key, sign_ephemeral_grant, verify_ephemeral_grant, EphemeralGrantClaims,
     EphemeralGrantRejection, EphemeralGrantScope, IssuedEphemeralGrant,
     EPHEMERAL_GRANT_TTL_SECONDS, EPHEMERAL_GRANT_TYP,
+};
+pub use hosted_connection::{
+    active_hosted_connection_in_tx, confirm_hosted_connection_in_tx,
+    create_hosted_connection_in_tx, detect_pairing_in_tx, get_hosted_connection_in_tx,
+    is_hosted_agent_activated_in_tx, is_hosted_agent_in_tx, list_hosted_connections_in_tx,
+    pairing_workspace_id, prove_hosted_binding_in_tx, regenerate_pairing_in_tx,
+    resolve_hosted_tool_identity_in_tx, resolve_pairing_in_tx, validate_channel_ids,
+    validate_hosted_scopes, HostedActivationIssuance, HostedConnection, HostedConnectionApproval,
+    HostedInputError, HostedMutation, HostedPairingIssuance, HostedProof, HostedToolIdentity,
+    HOSTED_AGENT_INERT_BASE_URL, HOSTED_AGENT_MODEL, HOSTED_AGENT_PORT_AUDIENCE,
+    HOSTED_AGENT_SCOPES, HOSTED_PAIRING_PREFIX, HOSTED_PAIRING_TTL_SECONDS,
+};
+pub use hosted_disconnect::{
+    acknowledge_hosted_artifact_in_tx, artifact_audit_detail, complete_hosted_disconnect_in_tx,
+    count_unresolved_required_artifacts_in_tx, expected_action_for_kind,
+    list_hosted_artifacts_in_tx, reconcile_dead_hosted_credential_in_tx,
+    reconcile_hosted_connection_in_tx, start_hosted_disconnect_in_tx, stored_disposition,
+    validate_artifact_evidence, validate_artifact_seeds, validate_artifact_status, HostedArtifact,
+    HostedArtifactAck, HostedArtifactAcknowledged, HostedArtifactAcknowledgement,
+    HostedArtifactInputError, HostedArtifactSeed, HostedDisconnectCompletion,
+    HostedDisconnectStart, HostedDisconnectStarted, HOSTED_ARTIFACT_KINDS,
+    HOSTED_DISCONNECTABLE_STATES, MAX_ARTIFACT_EVIDENCE_BYTES, MAX_ARTIFACT_ITEMS,
+    MAX_ARTIFACT_REF_BYTES,
+};
+pub use hosted_oauth::{
+    approve_hosted_oauth_request_in_tx, consume_hosted_oauth_code_in_tx,
+    deny_hosted_oauth_request_in_tx, hosted_oauth_access_workspace_id,
+    hosted_oauth_code_workspace_id, hosted_oauth_refresh_workspace_id, hosted_oauth_request_key,
+    list_oauth_candidates_in_tx, lock_hosted_oauth_code_in_tx, resolve_hosted_oauth_access_in_tx,
+    resolve_hosted_oauth_revocation_target_in_tx, revoke_hosted_oauth_family_in_tx,
+    rotate_hosted_oauth_refresh_in_tx, sign_authorization_request, verify_authorization_request,
+    AuthorizationRequestSeed, HostedOauthApproval, HostedOauthCandidate, HostedOauthCodeLock,
+    HostedOauthIssuance, HostedOauthRefresh, HostedOauthRefusal, HostedOauthRequestClaims,
+    HOSTED_OAUTH_ACCESS_PREFIX, HOSTED_OAUTH_ACCESS_TTL_SECONDS, HOSTED_OAUTH_CODE_PREFIX,
+    HOSTED_OAUTH_CODE_TTL_SECONDS, HOSTED_OAUTH_REFRESH_PREFIX, HOSTED_OAUTH_REFRESH_TTL_SECONDS,
+    HOSTED_OAUTH_REQUEST_TTL_SECONDS, HOSTED_OAUTH_REQUEST_TYP,
 };
 pub use issue::{
     sign_access, sign_app_token, sign_refresh, IssuedToken, ACCESS_TTL_SECONDS, REFRESH_TTL_SECONDS,

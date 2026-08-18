@@ -150,7 +150,7 @@ function typeAndTrack(sequence: string[]): {
 describe('컴포저 value 는 동기다 (스파이크 게이트 1 실측 재현)', () => {
   it('표준 키보드 조합이 최종값과 정확히 일치한다', () => {
     render(
-      <Composer channelLabel="general" directory={EMPTY} onSend={() => {}} />,
+      <Composer recipient="place" channelLabel="general" directory={EMPTY} onSend={() => {}} />,
     );
     const result = typeAndTrack(STANDARD);
     // 주 판정.
@@ -161,7 +161,7 @@ describe('컴포저 value 는 동기다 (스파이크 게이트 1 실측 재현)
 
   it('10키 다글자 조합 꼬리도 최종값과 일치한다', () => {
     render(
-      <Composer channelLabel="general" directory={EMPTY} onSend={() => {}} />,
+      <Composer recipient="place" channelLabel="general" directory={EMPTY} onSend={() => {}} />,
     );
     const result = typeAndTrack(TEN_KEY);
     expect(result.final).toBe(TARGET);
@@ -173,7 +173,7 @@ describe('컴포저 value 는 동기다 (스파이크 게이트 1 실측 재현)
     // value was synchronous. The list is opened with an `@` first so the
     // candidate filter really does run on every following keystroke.
     render(
-      <Composer channelLabel="general" directory={CROWD} onSend={() => {}} />,
+      <Composer recipient="place" channelLabel="general" directory={CROWD} onSend={() => {}} />,
     );
     const input = screen.getByTestId('composer-input');
     fireEvent.changeText(input, '@');
@@ -194,7 +194,7 @@ describe('컴포저 value 는 동기다 (스파이크 게이트 1 실측 재현)
 
   it('조합이 백스페이스로 풀려도 앞이 되돌아가지 않는다', () => {
     render(
-      <Composer channelLabel="general" directory={EMPTY} onSend={() => {}} />,
+      <Composer recipient="place" channelLabel="general" directory={EMPTY} onSend={() => {}} />,
     );
     const result = typeAndTrack(['한', '하', 'ㅎ', '']);
     expect(result.final).toBe('');
@@ -206,7 +206,7 @@ describe('보내기', () => {
   it('보낸 뒤 입력창을 즉시 비운다', () => {
     const sent: string[] = [];
     render(
-      <Composer
+      <Composer recipient="place"
         channelLabel="general"
         directory={EMPTY}
         onSend={body => sent.push(body)}
@@ -223,7 +223,7 @@ describe('보내기', () => {
   it('공백만 있는 입력은 보내지 않는다', () => {
     const sent: string[] = [];
     render(
-      <Composer
+      <Composer recipient="place"
         channelLabel="general"
         directory={EMPTY}
         onSend={body => sent.push(body)}
@@ -236,7 +236,7 @@ describe('보내기', () => {
 
   it('멘션을 고르면 핸들이 동기로 들어간다', () => {
     render(
-      <Composer channelLabel="general" directory={CROWD} onSend={() => {}} />,
+      <Composer recipient="place" channelLabel="general" directory={CROWD} onSend={() => {}} />,
     );
     const input = screen.getByTestId('composer-input');
     fireEvent.changeText(input, '@mate1');

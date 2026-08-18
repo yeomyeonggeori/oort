@@ -137,6 +137,8 @@ fn session_dto(detail: momo_t3::WorkSessionDetail) -> WorkSessionDto {
         observation: detail.observation,
         observer_grant_count: detail.observer_grant_count,
         remote_attach_available: detail.remote_attach_available,
+        remote_display_available: detail.remote_display_available,
+        control_started_at: detail.control_started_at_ms,
         started_at_ms: detail.started_at_ms,
         ended_at_ms: detail.ended_at_ms,
         exit_code: detail.exit_code,

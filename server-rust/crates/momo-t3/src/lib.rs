@@ -52,6 +52,10 @@
 pub mod billing;
 pub mod cloud_host;
 pub mod convergence;
+/// ADR-0004 증보 3 — the control-window ledger: what must be true while a
+/// person is typing into a live screen, and the predicate the agent's run path
+/// is refused by.
+pub mod display_control;
 pub mod error;
 /// #1197 H1 — instance lease renewal, on a substrate that expires instances on
 /// a clock momo does not otherwise touch.
@@ -64,6 +68,10 @@ pub mod reattach;
 pub mod reconcile;
 pub mod sweep;
 pub mod terminal_attach;
+/// LIVE-5a / ADR-0165 증보 1 D3-2 — the per-session ephemeral credential for the
+/// oort-operated TURN, replacing the one static password the install runbook
+/// shipped as explicitly temporary.
+pub mod turn;
 /// ADR-0114 D4/D5 + ADR-0125 D6-A — the host-control ledger and the spawn
 /// approval card's host candidates.
 pub mod work_control;
@@ -84,6 +92,14 @@ pub use cloud_host::{
 pub use convergence::{
     after_deadline, after_provider_call, provider_denies_its_own_absence,
     CloudLifecycleConvergence, CloudLifecyclePhase,
+};
+pub use display_control::{
+    active_control_window_in_tx, close_control_window_in_tx, control_window_payload,
+    expire_lapsed_control_windows_for_workspace_in_tx, expire_lapsed_control_windows_in_tx,
+    latest_control_window_in_tx, open_control_window_in_tx, renew_control_window_lease_in_tx,
+    stamp_control_window_on_cards_in_tx, workspaces_with_lapsed_control_windows, ControlWindow,
+    ControlWindowEndReason, LapsedControlWindow, StampedHandoffCards, AUDIT_ACTION_CONTROL_CLOSED,
+    AUDIT_SCHEMA_CONTROL_CLOSED, CONTROL_WINDOW_LEASE_SECONDS,
 };
 pub use error::T3Error;
 pub use lease::{renewable_lease_candidates, LeaseRenewalCandidate};
@@ -130,10 +146,16 @@ pub use sweep::{
 };
 pub use terminal_attach::{
     active_observer_capability_count_in_tx, is_valid_capability_token,
-    issue_attach_capability_in_tx, lock_attach_target_in_tx, mint_capability_token,
-    sweep_spent_observer_capabilities_in_tx, validate_attach_capability_in_tx, validated_binding,
-    AttachMode, AttachTarget, IssuedCapability, RemotePtyBinding, ValidatedAttach,
-    CAPABILITY_PREFIX, CAPABILITY_TTL_SECONDS, OBSERVER_CAPABILITY_RETENTION,
+    issue_attach_capability_in_tx, lock_attach_target_in_tx, lock_display_binding_target_in_tx,
+    mint_capability_token, sweep_spent_observer_capabilities_in_tx,
+    validate_attach_capability_in_tx, validated_binding, validated_display_binding,
+    write_display_binding_in_tx, AttachKind, AttachMode, AttachTarget, DisplayBindingTarget,
+    IssuedCapability, RemoteDisplayBinding, RemotePtyBinding, ValidatedAttach, CAPABILITY_PREFIX,
+    CAPABILITY_TTL_SECONDS, HOST_DISPLAY_CAPABILITY_KEY, OBSERVER_CAPABILITY_RETENTION,
+};
+pub use turn::{
+    IceServer, TurnCredentialPolicy, DEFAULT_TURN_CREDENTIAL_TTL_SECONDS,
+    MAX_TURN_CREDENTIAL_TTL_SECONDS,
 };
 pub use work_control::{
     active_host_owner_in_tx, agent_owner_human_in_tx, apply_spawn_approval_decision_in_tx,

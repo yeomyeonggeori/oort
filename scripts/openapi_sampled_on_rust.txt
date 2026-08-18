@@ -132,6 +132,13 @@ POST /v1/auth/refresh
 POST /v1/auth/logout
 POST /v1/auth/realtime-token
 
+# ── hosted-agent Agent Port (ADR-0162 / HAP-E2) ────────────────────────────
+# 이 한 연산은 같은 POST에서 modern 2026-07-28 server/discover와 exact legacy
+# 2025-11-25 initialize/initialized를 모두 왕복한다. agent bearer는 SQL fixture가
+# `agent:port:connect`를 명시적으로 심으며 app JWT나 #1358 credential lifecycle에
+# 의존하지 않는다. GET/DELETE는 스펙 operation이 아니고 런타임에서 405를 단정한다.
+POST /v1/mcp/agent-port
+
 # ── 승인 계열 (#1042 최초 등재분) ───────────────────────────────────────────
 # 사람이 만나는 두 지점: 인박스와, 결정하는 탭.
 # (routes/approvals.rs — Swift ApprovalDecisionRoutes.swift 의 포팅본)
@@ -181,11 +188,31 @@ PUT /v1/workspaces/{workspaceId}/work-tier-policy/me
 # ── 에이전트 = 1급 멤버 ─────────────────────────────────────────────────────
 # 초대(=member 생성)·프로필·정지·모델 어휘, 그리고 ADR-0132 의 사람의 「멈춰라」.
 POST /v1/workspaces/{workspaceId}/agents
+POST /v1/workspaces/{workspaceId}/agents/{agentId}/credentials
+GET /v1/workspaces/{workspaceId}/agents/{agentId}/credentials
+POST /v1/workspaces/{workspaceId}/agents/{agentId}/credentials/{credentialId}/revoke
 GET /v1/workspaces/{workspaceId}/agents/{agentId}/profile
 PUT /v1/workspaces/{workspaceId}/agents/{agentId}/profile
 PUT /v1/workspaces/{workspaceId}/agents/{agentId}/pause
 GET /v1/workspaces/{workspaceId}/agents/{agentId}/allowed-models
 POST /v1/workspaces/{workspaceId}/agent-runs/{runId}/cancel
+POST /v1/workspaces/{workspaceId}/hosted-agent-connections
+GET /v1/workspaces/{workspaceId}/hosted-agent-connections
+GET /v1/workspaces/{workspaceId}/hosted-agent-connections/{connectionId}
+POST /v1/workspaces/{workspaceId}/hosted-agent-connections/{connectionId}/confirm
+POST /v1/workspaces/{workspaceId}/hosted-agent-connections/{connectionId}/pairing-challenge/regenerate
+
+# HAP-E6 해체 3연산 (ADR-0162 / #1367, 등재는 #1385). 위 다섯 줄과 같은 라우트
+# 패밀리라 같은 자리에 산다 — 붙이는 lifecycle 이 하나이기 때문이다:
+# pairing → confirm → proof(active) → disconnect → 아티팩트별 acknowledge →
+# complete. 이 셋만은 「불러 보니 200 이더라」로 등재할 수 없다. disconnect 는
+# 살아 있는 credential 을 회수하는 것이 존재 이유고 complete 는 매니페스트가
+# 전부 resolve 된 뒤에만 열리므로, 앞 다섯 줄이 만든 **active 한 연결** 위에서만
+# 왕복이 성립한다. 그래서 샘플러는 이 계열 전용 dedicated identity 를 하나 더
+# 세워 거기서만 해체를 돌린다 — 감사 매트릭스가 쓰는 주 연결은 살려 둔다.
+POST /v1/workspaces/{workspaceId}/hosted-agent-connections/{connectionId}/disconnect
+POST /v1/workspaces/{workspaceId}/hosted-agent-connections/{connectionId}/disconnect/complete
+POST /v1/workspaces/{workspaceId}/hosted-agent-connections/{connectionId}/cleanup-artifacts/{artifactId}/acknowledge
 
 # ── work host 레지스트리 + work session 원장 (ADR-0125 / ADR-0114) ──────────
 # heartbeat 는 bearer 가 아니라 Ed25519 서명 v1 으로 인증되는 PUBLIC 라우트다 —
