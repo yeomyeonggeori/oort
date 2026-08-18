@@ -308,6 +308,20 @@ MOMO-180은 Paca/OpenHands/Linear/Rovo/GitHub Copilot/Slack/MCP/A2A 흐름을 �
 - **셀프호스팅 배포판 (ADR-0121):** install/upgrade 스크립트(ADR-0002 승계)+"5분 설치" 문서+단일노드 상한 명시, universal link 초대(웹 랜딩 우선, 검증은 셀프호스트 서버), BM=Zulip 모델(전 기능 무료, 수익은 호스팅/relay/지원), 기본 공개 서버 비내장. S 배치는 웹 배치 랜딩 후 순차.
 - **리전:** 멀티 리전은 비채택이 업계 표준(Slack 코어도 단일 리전) — 단일 노드+확장 레버(`docs/DEPLOY.md` §11) 유지가 결정이다.
 
+### 1.7 dsh 벤치마크 overlay (2026-08-18 · 전권 위임 편성 — 정본 `docs/planning/research/2026-08-18-deepseek-harness-dsh-benchmark.md`)
+
+DeepSeek Harness(MIT·5일 153k★) 종합 분석의 차용 후보 A~H를 기존 축에 **상보 편입**(LIVE-5·환경 폐곡선 비침해가 원칙).
+
+| 시점 | 후보 | 티켓 |
+|---|---|---|
+| 다음 위생 파도(즉시 가능) | A docs-코드 드리프트 게이트 · B 온보딩 첫 성공 N분 실측 · H 반면교사 렛슨 | #1525 · #1526 · #1527 |
+| LIVE-5 완주 후 | C 추적성 계약 성문화("모델이 본 것=로그", ADR 증보) · D 훅 택소노미 명명 | 미발급(C가 D 선행) |
+| 세션 표면 심화 | E Trajectory 표면(replay 1단계 권장→fork는 별도 결정) — LIVE-5b 세션 표면과 연접 | 미발급(ADR 선행) |
+| 환경 폐곡선(커서 B) 합석 | F Code Mode×T3(코드로 툴 배칭 — 실행=CubeSandbox 재사용) | 미발급(ADR 선행) |
+| 플랫폼 확장 overlay 개장 시 | G 플러그인 생태 청사진(catalog CI·poison-guard 동형+권한 매니페스트=trust gap 교정판) | 청사진=정본 문서 §3-G |
+
+반면교사 4건(컨텍스트 비대·이중 주입·플러그인 피로·벤치마크 불투명)은 §4 — 우리 규율의 외부 실증으로 유지.
+
 ### 비용 / 기간 (정확 수치 · Apple 1차 출처, 2026 기준)
 
 | 항목 | 비용 | 비고 |
