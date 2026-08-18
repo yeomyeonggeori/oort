@@ -35,11 +35,11 @@
 //   MY_SESSIONS_GATE_PROVE_RED_IDLE=1 npm run gate:my-sessions
 //   MY_SESSIONS_GATE_PROVE_RED_TRANSITION=1 npm run gate:my-sessions
 
-import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
+import { startGuardedPreview } from "./preview-guard.mjs";
 
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const port = Number(process.env.MY_SESSIONS_GATE_PORT || 5184);
@@ -437,19 +437,6 @@ async function installRoutes(context, state) {
     }
     return json(route, {});
   });
-}
-
-async function waitForServer() {
-  const deadline = Date.now() + 30_000;
-  while (Date.now() < deadline) {
-    try {
-      if ((await fetch(origin)).ok) return;
-    } catch {
-      // Preview is still starting.
-    }
-    await new Promise((resolveDelay) => setTimeout(resolveDelay, 200));
-  }
-  throw new Error("preview server never came up");
 }
 
 async function loginAndOpenPanel(context) {
@@ -1007,13 +994,12 @@ async function main() {
   if (!existsSync(resolve(webRoot, "dist/index.html"))) {
     throw new Error("dist/ is missing. Run npm run build first.");
   }
-  const server = spawn(
-    resolve(webRoot, "node_modules/.bin/vite"),
-    ["preview", "--port", String(port), "--strictPort", "--host", "127.0.0.1"],
-    { cwd: webRoot, stdio: "ignore" }
-  );
+  const server = await startGuardedPreview({
+    webRoot,
+    port,
+    portEnvVar: "MY_SESSIONS_GATE_PORT",
+  });
   try {
-    await waitForServer();
     const browser = await chromium.launch();
     try {
       const context = await browser.newContext({
@@ -1037,7 +1023,7 @@ async function main() {
       await browser.close();
     }
   } finally {
-    server.kill("SIGTERM");
+    await server.stop();
   }
   console.log(
     "PASS my sessions: idle card, reattach/resume copy split, transition timing, shared host wait, owner filter, terminal states, and a host picker that holds one select plus one filled button at the 262px pane measure"

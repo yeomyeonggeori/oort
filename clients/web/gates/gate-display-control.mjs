@@ -49,11 +49,11 @@
 // 30초를 기다리지 않고 **드라이버가 큰 setTimeout 을 100분의 1로 압축한다** —
 // 제품의 상수도 코드도 바뀌지 않고, 압축은 페이지 안 타이머에만 걸린다.
 
-import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
+import { startGuardedPreview } from "./preview-guard.mjs";
 
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const port = Number(process.env.DISPLAY_CONTROL_GATE_PORT || 5193);
@@ -666,19 +666,6 @@ async function installRoutes(context, state) {
     if (path.includes("/workstreams")) return json(route, { workstreams: [] });
     return json(route, {});
   });
-}
-
-async function waitForServer() {
-  const deadline = Date.now() + 30_000;
-  while (Date.now() < deadline) {
-    try {
-      if ((await fetch(origin)).ok) return;
-    } catch {
-      /* preview 가 아직 뜨는 중 */
-    }
-    await wait(200);
-  }
-  throw new Error("display-control preview server never came up");
 }
 
 async function login(page) {
@@ -1473,29 +1460,15 @@ async function main() {
   if (!existsSync(resolve(webRoot, "dist/index.html"))) {
     throw new Error("dist/ is missing. Run npm run build first.");
   }
-  const server = spawn(
-    resolve(webRoot, "node_modules/.bin/vite"),
-    ["preview", "--port", String(port), "--strictPort", "--host", "127.0.0.1"],
-    { cwd: webRoot, stdio: "ignore" }
-  );
-  // 이 포트가 **우리 것인가**. 측정으로 들어온 규율이다 (#1563 작업 중):
-  // 다른 워크트리에 남아 있던 `vite preview` 가 5193 을 잡고 있으면
-  // `--strictPort` 는 우리 서버를 즉시 죽이는데, `stdio: "ignore"` 라 그 실패는
-  // 어디에도 뜨지 않고 `waitForServer()` 는 **남의 빌드**를 보고 성공한다. 그러면
-  // 이 게이트는 자기 워크트리를 한 줄도 재지 않은 채 초록이 될 수 있다.
-  let serverDied = false;
-  server.on("exit", () => {
-    serverDied = true;
+  // 이 포트가 **우리 것인가**. 측정으로 들어온 규율이고(#1563), 처음 이 자리에
+  // 있던 300ms 고정 창 가드(PR #1569)는 preview-guard.mjs 의 결정적 신호
+  // 판정으로 일반화됐다(#1571) — 전 레인이 같은 판을 쓴다.
+  const server = await startGuardedPreview({
+    webRoot,
+    port,
+    portEnvVar: "DISPLAY_CONTROL_GATE_PORT",
   });
   try {
-    await waitForServer();
-    // 스폰한 프로세스가 죽었다면 지금 응답하는 것은 우리 dist/ 가 아니다.
-    await wait(300);
-    if (serverDied) {
-      throw new Error(
-        `GATE FAIL: port ${port} is already served by another process, so this run would have measured somebody else's build. Free it (lsof -nP -iTCP:${port}) or set DISPLAY_CONTROL_GATE_PORT.`
-      );
-    }
     const browser = await chromium.launch();
     try {
       await exerciseHappyPath(browser);
@@ -1535,7 +1508,7 @@ async function main() {
       await browser.close();
     }
   } finally {
-    server.kill("SIGTERM");
+    await server.stop();
   }
   console.log("GATE PASS: deep-link intent (arms, never opens), controller-only");
   console.log("           grade, producer-opened input channel, keystrokes on the");

@@ -46,11 +46,11 @@
 // 값의 정본은 소스를 읽는다(`--touch-target`, `AVATAR_SIZE`). 여기 베껴 적으면
 // 두 벌이 조용히 갈라지고, 이 레포는 U4-4R W-2에서 그 값을 이미 치렀다.
 
-import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
+import { startGuardedPreview } from "./preview-guard.mjs";
 
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -574,19 +574,6 @@ async function installRoutes(context) {
 
     return json(route, {});
   });
-}
-
-async function waitForServer() {
-  const deadline = Date.now() + 30_000;
-  while (Date.now() < deadline) {
-    try {
-      if ((await fetch(origin)).ok) return;
-    } catch {
-      /* preview 서버가 아직 뜨는 중 */
-    }
-    await wait(200);
-  }
-  throw new Error("composer gate preview server never came up");
 }
 
 function rowLocator(page, messageId) {
@@ -1287,13 +1274,12 @@ async function main() {
   if (!existsSync(resolve(webRoot, "dist/index.html"))) {
     throw new Error("dist/ is missing. Run npm run build first.");
   }
-  const server = spawn(
-    resolve(webRoot, "node_modules/.bin/vite"),
-    ["preview", "--port", String(port), "--strictPort", "--host", "127.0.0.1"],
-    { cwd: webRoot, stdio: "ignore" }
-  );
+  const server = await startGuardedPreview({
+    webRoot,
+    port,
+    portEnvVar: "COMPOSER_GATE_PORT",
+  });
   try {
-    await waitForServer();
     const browser = await chromium.launch();
     try {
       await exerciseComposer(browser);
@@ -1305,7 +1291,7 @@ async function main() {
       await browser.close();
     }
   } finally {
-    server.kill("SIGTERM");
+    await server.stop();
   }
   console.log("GATE PASS: 쓰던 글은 채널 전환과 새로고침을 넘겼고, 끊긴 동안에는");
   console.log("           막고 이유를 말했고, 감긴 한 문단이 상자를 키웠고, ↵를");

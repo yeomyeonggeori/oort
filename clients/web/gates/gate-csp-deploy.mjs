@@ -73,11 +73,11 @@
 // 「Caddy가 그 헤더를 실제로 내려보내는가」는 scripts/verify_web_serving.sh 몫이다.
 // =============================================================================
 
-import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
+import { startGuardedPreview } from "./preview-guard.mjs";
 
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const repoRoot = resolve(webRoot, "../..");
@@ -485,30 +485,17 @@ async function runTarget(target, policy) {
   if (proveRedHeader) delete env.MOMO_CSP_GATE_HEADER;
   else env.MOMO_CSP_GATE_HEADER = served;
 
-  const server = spawn(
-    resolve(webRoot, "node_modules/.bin/vite"),
-    ["preview", "--port", String(port), "--strictPort", "--host", "127.0.0.1"],
-    { cwd: webRoot, env, stdio: "ignore" }
-  );
+  const server = await startGuardedPreview({
+    webRoot,
+    port,
+    portEnvVar: "CSP_DEPLOY_GATE_PORT",
+    env,
+  });
 
   const seen = { uploadAttempts: 0, bearerLeaked: false };
 
   try {
-    const deadline = Date.now() + 30_000;
-    let probe = null;
-    while (Date.now() < deadline) {
-      try {
-        const response = await fetch(origin);
-        if (response.ok) {
-          probe = response;
-          break;
-        }
-      } catch {
-        /* preview 서버가 아직 뜨는 중 */
-      }
-      await wait(200);
-    }
-    if (probe === null) throw new Error("preview server never came up");
+    const probe = server.probe;
 
     const header = probe.headers.get("content-security-policy");
     expect(
@@ -625,18 +612,9 @@ async function runTarget(target, policy) {
       await browser.close();
     }
   } finally {
-    server.kill("SIGTERM");
-    // 다음 대상이 같은 포트를 `--strictPort`로 잡는다. 죽었다고 통보받는 것과
-    // 포트가 놓이는 것은 같은 순간이 아니므로, 실제로 안 열릴 때까지 기다린다.
-    const closed = Date.now() + 5_000;
-    while (Date.now() < closed) {
-      try {
-        await fetch(origin);
-      } catch {
-        break;
-      }
-      await wait(100);
-    }
+    // 다음 대상이 같은 포트를 `--strictPort`로 잡는다. stop() 은 자식이
+    // **실제로 죽을 때까지** 기다린다 — 리스너는 프로세스와 함께 닫힌다.
+    await server.stop();
   }
 
   console.log(
