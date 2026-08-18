@@ -1,5 +1,16 @@
 # oort 진행 현황
 
+## gate: docs-코드 드리프트 — 운영 문서의 실행 명령을 트리에 대고 해소 (#1525, 2026-08-18)
+
+- **#1472는 명령 하나를 고쳤고, 이건 그 문장이 다시 틀려지는 것을 막는다.** `AGENTS.md` §3은 스스로 "copy-paste, 그대로 실행"이라 적어 놓고 몇 주 동안 `cargo fmt --check --manifest-path server-rust/Cargo.toml`을 실었다 — 두 매니페스트 다 virtual workspace라 그 형태는 "Failed to find targets"로 끝나고 **아무것도 검사하지 않는다**. 워커 3기(#1454·#1442·#1467)가 그 초록을 믿었고 그 아래 rustfmt 드리프트를 각자 다시 발견했다. #1472가 실행형을 게이트에 넣었고, 이 goal은 **문서형**을 넣는다.
+- **범위는 명령을 그대로 실행하는 문서 4종.** `AGENTS.md`·`CODEX.md`(전자가 스스로 "핵심 내용 동일"이라 선언한 쌍둥이 — 한쪽만 게이트하면 드리프트가 게이트 없는 쪽으로 돌아온다)·`docs/RUN.md`·`docs/runbooks/*.md`(글롭이라 새 런북은 만들어지는 순간 커버된다). 판정하는 명령 클래스는 7가지: 실행체 존재·실행권한·구문(`bash -n`/`py_compile`) · `make` 타깃 · `local_gate.sh --profile` 이름(목록은 local_gate.sh 자기 파서에서 읽는다 — 재기술하면 그것부터 드리프트한다) · npm 스크립트 · 우리 스크립트에 넘기는 long flag · compose `-f`/`--env-file`·`--package-path`/`--manifest-path` 경로 · `cargo fmt --check`의 `--all`(#1472 규칙 자체).
+- **명령을 실행하지는 않는다 — 실행할 수 없어서다.** 이 문서들의 명령은 워크트리를 만들고 브랜치를 push하고 Docker 스택을 올리고 GitHub 상태를 바꾼다. 그래서 "돌려 보기"는 선택지가 아니고, 대신 **해소**한다. 결과적으로 못 잡는 것은 정직하게 적었다: 해소는 되는데 엉뚱한 일을 하는 명령은 여전히 안 보인다.
+- **기존 위반 17건 발견, 전부 같은 PR에서 정리.** 14건은 `docs/RUN.md`에 남은 **W-S1(#1215) 삭제 잔여**였다 — `scripts/macos_dev_run.sh` 9곳(스크립트는 그때 삭제됐다), `--profile macos-ui` 1곳(레인이 macOS 트리와 함께 사라졌다), `--package-path clients/macOS` 3곳(트리 삭제됨). W-S1 커밋 제목은 "Swift 클라 3트리 참조 0 만들기"였고, RUN.md §6은 그 0에 들지 않았다. 3건은 `docs/runbooks/ncp-rust-deploy.md` — `npm run gate:csp-deploy` 2곳이 루트에서 호출돼 "Missing script"가 되고(`--prefix clients/web` 누락), 1곳은 **폐지된 절차**를 실행 가능한 형태로 적고 있었다.
+- **red proof 26 케이스.** #1472 명령 원형 재주입 · 삭제된 실행체 · `bash -n` 실패 · 실행권한 없음 · 없는 make 타깃 · 없는 게이트 프로파일 · 없는 npm 스크립트 · 잘못된 prefix · 모르는 long flag · 없는 compose 파일 · 삭제된 `--package-path` · 새 런북 자동 커버 · 표에 든 문서 소멸. 그리고 **오탐이 쉬운 자리에서 초록**임을 함께 증명한다 — `<issue-number>` 같은 placeholder, 글롭, 산문 속 파일 참조, ```` ```text ```` 블록의 예시 출력, 서브커맨드 뒤의 플래그(디스패처가 `"$@"`를 남에게 넘기므로 그 플래그는 그 스크립트 것이 아니다). 오탐 절반이 없으면 이 게이트는 결함을 놓쳐서가 아니라 짜증나서 꺼진다.
+- **탈출구는 이유를 요구한다.** `<!-- docs-cmd-ignore: 이유 -->`는 딱 그 줄만 면제하고, **이유가 비면 마커가 아니다**(#1250 `NON_COMPOSE_ENV_TEMPLATES` 선례). RUN.md §6이 "삭제됐다"고 말하려고 삭제된 명령의 이름을 부르는 자리에서 3번 쓰였다.
+- **게이트:** `scripts/local_gate.sh --profile docs` green(신규 2단계 포함 — 가드 0.21s, 회귀 하네스 1.1s 실측). `check_docs_commands.py` = 392 fact 판정 / 위반 0. 하네스 26/26. `test_local_gate_drift_guard.sh`·`test_local_gate_hardening.sh` 무회귀.
+- **정직 라벨 — 게이트 밖에 같은 병이 더 있다(실측).** 사라진 `--profile macos-ui`는 게이트 대상 밖 문서 10곳에 **42회** 더 살아 있다(`BUILD_TICKETS.md` 27 · `docs/INTERNAL_ALPHA.md` 3 · `docs/LOCAL_SOLO_ALPHA_ROADMAP.md` 3 · `docs/LOCAL_3_DAY_ALPHA_TEST_PACK.md` 2 · `ROADMAP.md` 2 · `docs/{BACKLOG,GITHUB_OPS,INTERNAL_ALPHA_FEEDBACK,MACOS_ALPHA_UPDATE_CHANNEL}.md`·`docs/adr/0003` 각 1). **고치지 않았다** — 그 문서들 대부분은 은퇴한 M3~M7 전제 위의 계획·티켓 기록이고, 표를 거기까지 넓히는 것은 문서 자체가 아직 유효한지부터 판정하는 일이라 이 goal의 out-of-scope("문서 내용 개편")에 정면으로 닿는다. 후속 goal 후보로 남긴다: **①표 확장 대상 판정(어느 문서가 아직 실행되는 문서인가) ②`BUILD_TICKETS.md`/`ROADMAP.md`의 은퇴 전제 명령 일괄 정리.**
+
 ## toolchain: Rust 고정/선언 지점 전수 조사 + MSRV 정합 (#1442, 2026-08-17)
 
 - **외부 실측이 지목한 "고정 1.83"은 우리 레포에 없었다.** 커서 클라우드 에이전트 보고(리서치 2026-08-16 §5)의 "pinned 1.83"은 레포 핀이 아니라 **커서 환경의 기본 툴체인**이었다 — 기준 커밋 `track/engine@54f5d2dc`에 `rust-toolchain*` 파일은 **0개**다(`find` 실측). 실재하는 결함은 고정이 아니라 **거짓 선언**이었다.

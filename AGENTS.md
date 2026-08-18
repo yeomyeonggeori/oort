@@ -87,6 +87,13 @@ infra/prod/              Swift prod compose 계열
 > **Rust 툴체인 — 레포에 `rust-toolchain.toml`은 없다**(#1442 판정: 신설하지 않음). 고정이 없으니 네 환경의 기본 툴체인이 그대로 쓰이고, 그것이 아래 MSRV보다 낮으면 컴파일 이전 resolve 단계에서 거절된다(`rustc X is not supported by the following packages`). 카고 워크스페이스는 **둘**이고 MSRV가 서로 다르다(둘 다 #1442 실측): `server-rust` = **1.88.0**(time 0.3.54 계열), `clients/desktop/src-tauri` = **1.89.0**(notify-rust 4.18.0). 둘 다 만지면 **stable ≥ 1.89.0**을 써라. edition은 양쪽 다 `2021`이고 마이그레이션 계획 없음 — 그래프 안의 edition2024 크레이트는 서드파티이지 우리 코드가 아니다.
 > npm 트리는 lockfile이 셋이다 — 루트(`packages/*`), `clients/web`, `clients/mobile`. 셋 다 설치돼야 `make ts-check`가 돈다.
 
+> **이 블록 자체가 게이트를 받는다(#1525).** 여기·`CODEX.md`·`docs/RUN.md`·`docs/runbooks/*.md`의
+> 명령은 `scripts/check_docs_commands.py`가 매 프로파일에서 트리에 대고 해소한다 — 실행체 존재/구문,
+> `make` 타깃, `--profile` 이름, npm 스크립트, 우리 스크립트에 넘기는 long flag, compose·`--package-path`
+> 경로, 그리고 위의 `cargo fmt --all` 규칙. **명령을 고칠 때 문서도 같은 커밋에서 고쳐라** — 안 고치면
+> docs 게이트가 빨개진다. 폐지된 명령을 "폐지됐다"고 말하려고 이름을 불러야 하면 그 줄 끝에
+> `<!-- docs-cmd-ignore: 이유 -->`를 붙인다(이유 없는 마커는 마커가 아니다).
+
 ```bash
 # 서버 (Rust/Axum) — 이 셋이 서버 변경의 하드 게이트
 # `--all` 생략 금지. 두 매니페스트 다 virtual workspace라 `--all` 없는 cargo fmt는
