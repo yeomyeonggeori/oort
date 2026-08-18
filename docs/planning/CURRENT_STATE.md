@@ -1,5 +1,17 @@
 # oort 기획 현재 상태 (Planning Current State)
 
+> **2026-08-18 스냅샷 37 (Fable · momo-main — 파도 7 완주·★LIVE-5b 랜딩·CI 구조 해소. PLN-20260815-01).** 컴팩트 복원 진입점.
+>
+> **★ LIVE-5 전 축 코드 랜딩**: 5a(엔진 — ephemeral TURN·내구 투영·observation 원자성)+**5b(웹 — 딥링크 전환·입력 포워딩 비관측 red proof·auto-return LATEWINDOW 증명·오버레이 설계만)** 완결. **engine=`9c2e16eb`** 계열. 잔여: **5c(실기동 E2E — momo-cube-host 실 입력 왕복·비관측 mutation·remint 실측)**+릴레이 use-auth-secret 켜기(#1545 — 성재 손·런북 §6 복붙).
+>
+> **CI 소음 구조 해소 확정(성재 인터뷰 2026-08-18)**: A-1(기획 플러시=track 랜딩·main=승격 시만 — TRACKS §3.1.1 성문화 #1562)+D-2(push 전 정렬 프리플라이트 상시)+C-1(Xcode Cloud 트리거 제한 — 성재 콘솔·경로=#1561 코멘트). **이 스냅샷 플러시가 track-랜딩 첫 실행** — 다음 파도에서 alignment fail 0 실측 검증.
+>
+> **파도 7 완주(4/4)**: #1534(오퍼레이터 부트스트랩 — 키 둘·M5=3:58 NOTICE)·#1510(propsKind 거짓 묘비 해소)·#1541묶음(busy 소탕)·#1549(5b). 파도 6까지 누계는 스냅샷 36.
+>
+> **다음=LIVE-5c 편성**. 자율 큐: #1511(낱말+게이트 — 편입 2건)·#1515/#1516(디자인 토큰)·#1535/#1536(온보딩 T3/T4)·#1558(SaveButton 정본 결함)·#1559(busy 잔여 반)·#1563(stuck key)·#1479/#1480(폰 AX). **성재 손(비차단)**: #1545(릴레이)·C-1(Xcode 콘솔)·#1361(pairing)·배포 검증 1왕복. engine→main 승격(81+커밋)은 5c 후 정비 항목.
+>
+> 이하 스냅샷 36:
+
 > **2026-08-18 스냅샷 36 (Fable · momo-main — 파도 6 완주·★LIVE-5a 랜딩. PLN-20260815-01).** 컴팩트 복원 진입점.
 >
 > **★ LIVE-5a 랜딩**: ephemeral TURN(use-auth-secret HMAC·capability 동봉·TTL 24h clamp)·control 내구 투영(원장 SoT+4투영 lease 절·마이그 077 가산)·observation 전환 원자성+owner_only owner 예외 — **engine=`c9a390d9`**. grok 보안 freeze 경계 전부 닫힘. 잔여 2: ①릴레이 use-auth-secret 켜기=**#1545(성재 손 — 런북 §6 복붙 절차·SSH 22가 운영자 IP 한정)** ②producer remint 실측=5c AC.
