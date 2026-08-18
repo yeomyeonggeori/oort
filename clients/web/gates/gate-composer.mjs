@@ -1132,11 +1132,14 @@ async function exerciseEmptyFirstAction(browser) {
   const page = await context.newPage();
   await installRealtimeSocket(page);
   await installRoutes(context);
-  await context.route("**/v1/**/messages*", (route) =>
-    route.request().url().includes(channelB)
+  // GET 만 가로챈다. 전송(POST)까지 이 빈 배열로 답하면 「빈 채널에서 첫 줄을
+  // 보내면 무엇이 보이나」를 다음에 재려는 사람이 조용히 틀린 판 위에 선다.
+  await context.route("**/v1/**/messages*", (route) => {
+    const request = route.request();
+    return request.method() === "GET" && request.url().includes(channelB)
       ? json(route, { messages: [] })
-      : route.fallback()
-  );
+      : route.fallback();
+  });
   await login(page);
   await openChannel(page, channelB);
 
