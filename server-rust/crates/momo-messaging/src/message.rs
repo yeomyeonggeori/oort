@@ -1254,6 +1254,16 @@ pub struct QuotedMessage {
     /// would be both the snapshot 규칙 3 refuses and the "펼치지 않는다" 미결 2
     /// answers. `NULL` for a tombstone as well — a deleted row keeps its props,
     /// and the deletion is allowed to leave nothing behind but the fact of it.
+    ///
+    /// **A non-empty JSON string, or nothing.** `props` is free-form `jsonb` and
+    /// only the REST send path narrows it to strings (`props_value`); workers and
+    /// `momo-t3` write `serde_json::Value` straight in, so `"kind": 12` is
+    /// reachable. `->>` would stringify that to `"12"` and `""` would ride as a
+    /// present-but-empty kind — either one is a row the client would call a card
+    /// on the refetch path while its own `presentPropsKind` (string, non-empty)
+    /// calls it a tombstone locally, so the same original would read two ways
+    /// depending on which path resolved it. The projection therefore states the
+    /// client's predicate in SQL rather than trusting the writers.
     pub props_kind: Option<String>,
 }
 
@@ -1270,13 +1280,18 @@ const PAGED_COLS: &str = "m.id, m.workspace_id, m.channel_id, m.seq, m.hlc_ts, m
      q.type::text AS quote_message_type, q.state::text AS quote_state, q.body AS quote_body, \
      q.edited_at AS quote_edited_at, q.deleted_at AS quote_deleted_at, \
      (q.reply_to_id IS NOT NULL) AS quote_quotes_another, \
-     CASE WHEN q.state::text = 'deleted' THEN NULL \
-          ELSE q.props->>'kind' \
+     CASE WHEN q.state::text <> 'deleted' \
+           AND jsonb_typeof(q.props->'kind') = 'string' \
+           AND (q.props->>'kind') <> '' \
+          THEN q.props->>'kind' \
      END AS quote_props_kind";
 
 /// [`PAGED_COLS`] plus the attachment aggregate. A second constant rather than
-/// an extension of the first because `interaction.rs` builds its own column list
-/// on top of [`PAGED_COLS`] and does not carry the lateral join.
+/// an extension of the first because `interaction.rs` keeps its own column list
+/// (`INTERACTION_COLS`) and does not carry either join. That list is a **sibling,
+/// not a derivative**: it selects no `q.*` at all and its rows are decoded by
+/// [`decode_stored_row`], never by [`decode_quoted`] — so the quote columns added
+/// here cannot be missing from a statement that tries to read them (#1510 review).
 fn paged_cols_with_attachments() -> String {
     format!("{PAGED_COLS}, {PAGED_ATTACHMENT_COL}")
 }
@@ -2376,8 +2391,21 @@ mod tests {
             // A tombstone keeps its props in the row; it must not keep them on
             // the wire. 규칙 3 leaves the fact of a deletion and nothing else.
             assert!(
-                sql.contains("CASE WHEN q.state::text = 'deleted' THEN NULL"),
+                sql.contains("q.state::text <> 'deleted'"),
                 "a deleted original must project no card kind either: {sql}"
+            );
+            // The predicate is the CLIENT's, restated in SQL (#1510 review M-1).
+            // `props` is free-form jsonb and only the REST path narrows it to
+            // strings, so `"kind": 12` / `true` / `{}` / `""` are all reachable
+            // rows. `->>` alone would stringify the first three and pass the
+            // fourth, and the client's `presentPropsKind` accepts neither — the
+            // same original would then read as a card after a refetch and as a
+            // tombstone when resolved from a row already on screen.
+            assert!(
+                sql.contains("jsonb_typeof(q.props->'kind') = 'string'")
+                    && sql.contains("(q.props->>'kind') <> ''"),
+                "the projected kind must be a non-empty JSON string, exactly as \
+                 the client asks it: {sql}"
             );
         }
     }

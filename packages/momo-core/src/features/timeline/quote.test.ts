@@ -283,6 +283,15 @@ describe("#1498 — 본문 없는 인용의 네 모양", () => {
 /** 카드 하나, 두 경로가 각자 보는 모양으로. */
 const CARD_PROPS = { kind: "completion_report", title: "작업 완료 리포트" };
 
+/**
+ * 낱말이 아닌 `kind` 네 모양 + `null`.
+ *
+ * `props`는 자유 형식이고 REST 전송 경로만 값을 문자열로 좁힌다 — 워커와
+ * `momo-t3`는 `serde_json::Value`를 그대로 쓰므로 이 값들이 실제로 도달 가능하다.
+ * 서버 투영과 클라 판정이 **같은 술어**로 이것들을 접는지가 리뷰 M-1의 물음이다.
+ */
+const JUNK_KINDS: readonly unknown[] = [12, true, null, {}, ""];
+
 describe("#1510 — 카드 인용", () => {
   /**
    * **red proof.** `propsKind`를 지우면 이 단정이 「삭제된 메시지」로 빨개진다 —
@@ -394,11 +403,35 @@ describe("#1510 — 카드 인용", () => {
   it("낱말이 아닌 kind는 없는 것으로 접는다", () => {
     // 반대 방향 거짓말 방지: `props`는 `Record<string, unknown>`이라 무엇이든 올 수
     // 있고, 아무 값이나 카드로 읽으면 진짜 묘비가 판정을 빠져나간다.
-    for (const junk of [12, true, null, {}, ""]) {
+    for (const junk of JUNK_KINDS) {
       const draft = quoteDraftFor(
         bodied(message({ props: { kind: junk } }), undefined)
       );
       expect(draft?.block.kind).toBe("deleted");
+    }
+  });
+
+  /**
+   * 위 단정의 **서버 경로 짝** (리뷰 M-1).
+   *
+   * 두 경로가 같은 술어를 쓰지 않으면 같은 원본이 재조회에서는 카드로, 화면의
+   * 행에서는 묘비로 읽힌다 — 이 파일이 #1498부터 막아 온 그 갈림이다. 서버 투영도
+   * SQL 안에서 같은 술어를 말하지만(`jsonb_typeof(q.props->'kind')='string' AND
+   * <> ''`), 그 약속을 판정이 다시 확인한다: 계약은 어긋날 수 있고, 어긋났을 때
+   * 화면이 지어내지 않는 것이 이 파일의 일이다.
+   */
+  it("서버가 실어 준 kind도 낱말이 아니면 접고, 두 경로가 같은 답을 낸다", () => {
+    for (const junk of JUNK_KINDS) {
+      const served = quoteBlockFrom(
+        bodied(quoted({ propsKind: junk as string }), undefined)
+      );
+      const local = quoteDraftFor(
+        bodied(message({ props: { kind: junk } }), undefined)
+      );
+      expect(served.kind).toBe("deleted");
+      // 로컬 경로는 묘비를 인용 대상으로 내주지 않는다(`canQuoteMessage`) —
+      // 「지워졌다」에 도달했다는 같은 사실의 이쪽 표현이다.
+      expect(local?.block.kind ?? "deleted").toBe("deleted");
     }
   });
 
