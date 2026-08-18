@@ -68,11 +68,11 @@
 // **행동**을 그 자리에 되돌린다.
 // 제품 소스 줄을 지우거나 단언을 빼라고 요구하지 않으므로 증명은 반복 가능하다.
 
-import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
+import { startGuardedPreview } from "./preview-guard.mjs";
 
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const port = Number(process.env.WORK_PANEL_GATE_PORT || 5189);
@@ -466,19 +466,6 @@ async function installRoutes(context, scenario) {
     if (path.endsWith("/work-hosts")) return json(route, { workHosts: [] });
     return json(route, {});
   });
-}
-
-async function waitForServer() {
-  const deadline = Date.now() + 30_000;
-  while (Date.now() < deadline) {
-    try {
-      if ((await fetch(origin)).ok) return;
-    } catch {
-      // preview 서버가 아직 뜨는 중.
-    }
-    await wait(200);
-  }
-  throw new Error("work panel preview server never came up");
 }
 
 function statusFrame(phase, runStatus, extra = {}) {
@@ -1861,13 +1848,12 @@ async function main() {
   if (!existsSync(resolve(webRoot, "dist/index.html"))) {
     throw new Error("dist/ is missing. Run npm run build first.");
   }
-  const server = spawn(
-    resolve(webRoot, "node_modules/.bin/vite"),
-    ["preview", "--port", String(port), "--strictPort", "--host", "127.0.0.1"],
-    { cwd: webRoot, stdio: "ignore" }
-  );
+  const server = await startGuardedPreview({
+    webRoot,
+    port,
+    portEnvVar: "WORK_PANEL_GATE_PORT",
+  });
   try {
-    await waitForServer();
     const browser = await chromium.launch();
     try {
       for (const scenario of scenarios) {
@@ -1901,7 +1887,7 @@ async function main() {
       await browser.close();
     }
   } finally {
-    server.kill("SIGTERM");
+    await server.stop();
   }
   console.log(
     "GATE PASS: delta arrival order, phase transitions, 승인 대기 vocabulary,"

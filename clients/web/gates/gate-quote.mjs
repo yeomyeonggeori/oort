@@ -41,11 +41,11 @@
 // 앰버로 칠한다. 제품 소스 줄을
 // 지우거나 단언을 빼라고 요구하지 않으므로 증명은 반복 가능하다.
 
-import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
+import { startGuardedPreview } from "./preview-guard.mjs";
 
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -458,19 +458,6 @@ async function installRoutes(context, traffic) {
 
     return json(route, {});
   });
-}
-
-async function waitForServer() {
-  const deadline = Date.now() + 30_000;
-  while (Date.now() < deadline) {
-    try {
-      if ((await fetch(origin)).ok) return;
-    } catch {
-      /* preview 서버가 아직 뜨는 중 */
-    }
-    await wait(200);
-  }
-  throw new Error("quote gate preview server never came up");
 }
 
 async function login(page) {
@@ -1002,13 +989,12 @@ async function main() {
   if (!existsSync(resolve(webRoot, "dist/index.html"))) {
     throw new Error("dist/ is missing. Run npm run build first.");
   }
-  const server = spawn(
-    resolve(webRoot, "node_modules/.bin/vite"),
-    ["preview", "--port", String(port), "--strictPort", "--host", "127.0.0.1"],
-    { cwd: webRoot, stdio: "ignore" }
-  );
+  const server = await startGuardedPreview({
+    webRoot,
+    port,
+    portEnvVar: "QUOTE_GATE_PORT",
+  });
   try {
-    await waitForServer();
     const browser = await chromium.launch();
     try {
       await exercise(browser);
@@ -1017,7 +1003,7 @@ async function main() {
       await browser.close();
     }
   } finally {
-    server.kill("SIGTERM");
+    await server.stop();
   }
   console.log("GATE PASS: 인용은 페이지가 준 값으로만 그려졌고(요청 0건 추가),");
   console.log("           삭제된 원본은 사본을 남기지 않았고, 라이브 프레임은");

@@ -29,11 +29,11 @@
 // the sign-in button.
 // =============================================================================
 
-import { spawn } from "node:child_process";
 import { mkdirSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
+import { startGuardedPreview } from "./preview-guard.mjs";
 import {
   buildExactSourceBeforePreview,
   matchesInsetFocusRing,
@@ -1606,34 +1606,19 @@ async function measureConnect(browser) {
   await context.close();
 }
 
-async function waitForServer(url, timeoutMs = 30_000) {
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
-    try {
-      const res = await fetch(url);
-      if (res.ok) return;
-    } catch {
-      /* not up yet */
-    }
-    if (Date.now() > deadline) throw new Error(`preview server never came up: ${url}`);
-    await new Promise((r) => setTimeout(r, 200));
-  }
-}
-
 async function main() {
   await buildExactSourceBeforePreview({ webRoot: WEB_ROOT });
   mkdirSync(OUT_DIR, { recursive: true });
 
-  const server = spawn(
-    resolve(WEB_ROOT, "node_modules/.bin/vite"),
-    ["preview", "--port", String(PORT), "--strictPort", "--host", "127.0.0.1"],
-    { cwd: WEB_ROOT, stdio: "ignore" }
-  );
-  const shutdown = () => server.kill("SIGTERM");
+  const server = await startGuardedPreview({
+    webRoot: WEB_ROOT,
+    port: PORT,
+    portEnvVar: "SHELL_GATE_PORT",
+  });
+  const shutdown = () => server.child.kill("SIGTERM");
   process.on("exit", shutdown);
 
   try {
-    await waitForServer(ORIGIN);
     const browser = await chromium.launch();
     try {
       for (const size of SIZES) await measureSize(browser, size);
@@ -1646,7 +1631,7 @@ async function main() {
       await browser.close();
     }
   } finally {
-    shutdown();
+    await server.stop();
   }
 
   console.log(`\nscreenshots: ${OUT_DIR}`);

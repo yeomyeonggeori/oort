@@ -22,11 +22,11 @@
 //   HUDDLE_GATE_PROVE_RED_503=1 npm run gate:huddle
 //   HUDDLE_GATE_PROVE_RED_ENDED=1 npm run gate:huddle
 
-import { spawn } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
+import { startGuardedPreview } from "./preview-guard.mjs";
 
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const port = Number(process.env.HUDDLE_GATE_PORT || 5183);
@@ -273,19 +273,6 @@ async function installRoutes(context, state) {
   });
 }
 
-async function waitForServer() {
-  const end = Date.now() + 30_000;
-  while (Date.now() < end) {
-    try {
-      if ((await fetch(origin)).ok) return;
-    } catch {
-      // Preview is still starting.
-    }
-    await new Promise((resolveDelay) => setTimeout(resolveDelay, 200));
-  }
-  throw new Error("preview server never came up");
-}
-
 async function openSignedIn(context) {
   const page = await context.newPage();
   await installRealtimeSocket(page);
@@ -302,13 +289,12 @@ async function main() {
     throw new Error("dist/ is missing. Run npm run build first.");
   }
   mkdirSync(outDir, { recursive: true });
-  const server = spawn(
-    resolve(webRoot, "node_modules/.bin/vite"),
-    ["preview", "--port", String(port), "--strictPort", "--host", "127.0.0.1"],
-    { cwd: webRoot, stdio: "ignore" }
-  );
+  const server = await startGuardedPreview({
+    webRoot,
+    port,
+    portEnvVar: "HUDDLE_GATE_PORT",
+  });
   try {
-    await waitForServer();
     const browser = await chromium.launch();
     try {
       for (const mode of ["unconfigured", "unimplemented", "idle", "error"]) {
@@ -489,7 +475,7 @@ async function main() {
       await browser.close();
     }
   } finally {
-    server.kill("SIGTERM");
+    await server.stop();
   }
   console.log(
     "GATE PASS: configuration, joined width/exit controls, projection failure isolation, and huddle_ended ordering hold."

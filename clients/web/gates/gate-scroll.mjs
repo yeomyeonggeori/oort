@@ -24,11 +24,11 @@
 //
 //   npm run build && npm run gate:scroll
 // =============================================================================
-import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
+import { startGuardedPreview } from "./preview-guard.mjs";
 
 const WEB_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const PORT = Number(process.env.SCROLL_GATE_PORT || 5185);
@@ -101,31 +101,17 @@ async function installStubs(context) {
   );
 }
 
-async function waitForServer(url, timeoutMs = 30_000) {
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
-    try {
-      if ((await fetch(url)).ok) return;
-    } catch {
-      /* not up yet */
-    }
-    if (Date.now() > deadline) throw new Error(`preview server never came up: ${url}`);
-    await new Promise((r) => setTimeout(r, 200));
-  }
-}
-
 let server = null;
 if (!EXTERNAL_BASE) {
   if (!existsSync(resolve(WEB_ROOT, "dist/index.html"))) {
     throw new Error("dist/ is missing. Run `npm run build` first.");
   }
-  server = spawn(
-    resolve(WEB_ROOT, "node_modules/.bin/vite"),
-    ["preview", "--port", String(PORT), "--strictPort", "--host", "127.0.0.1"],
-    { cwd: WEB_ROOT, stdio: "ignore" }
-  );
-  process.on("exit", () => server?.kill("SIGTERM"));
-  await waitForServer(BASE);
+  server = await startGuardedPreview({
+    webRoot: WEB_ROOT,
+    port: PORT,
+    portEnvVar: "SCROLL_GATE_PORT",
+  });
+  process.on("exit", () => server?.child.kill("SIGTERM"));
 }
 
 const browser = await chromium.launch({ headless: true });
@@ -233,7 +219,7 @@ console.log(
   )
 );
 await browser.close();
-server?.kill("SIGTERM");
+await server?.stop();
 // 1000행이 실제로 마운트된 판에서만 프레임 수치가 의미를 갖는다. 가상화가
 // 무너져 행이 안 들어왔는데 "빠르다"고 통과하는 초록을 막는다.
 const virtualized =

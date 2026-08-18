@@ -134,11 +134,11 @@
 // 스크린샷은 이 게이트가 만든다(게이트 재생성 규율): artifacts/ade/*.png,
 // light/dark 두 벌. 판정하지 않는다 — design-review 는 별도 레인이다.
 
-import { spawn } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
+import { startGuardedPreview } from "./preview-guard.mjs";
 
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const port = Number(process.env.ADE_GATE_PORT || 5191);
@@ -731,19 +731,6 @@ async function installRoutes(context, options = {}) {
     if (path.endsWith("/huddles/active")) return json(route, { huddle: null });
     return json(route, {});
   });
-}
-
-async function waitForServer() {
-  const deadline = Date.now() + 30_000;
-  while (Date.now() < deadline) {
-    try {
-      if ((await fetch(origin)).ok) return;
-    } catch {
-      // preview 서버가 아직 뜨는 중.
-    }
-    await wait(200);
-  }
-  throw new Error("ade preview server never came up");
 }
 
 function statusFrame(agentMemberId, channelId, phase, runStatus) {
@@ -1680,13 +1667,12 @@ async function main() {
   if (!existsSync(resolve(webRoot, "dist/index.html"))) {
     throw new Error("dist/ is missing. Run npm run build first.");
   }
-  const server = spawn(
-    resolve(webRoot, "node_modules/.bin/vite"),
-    ["preview", "--port", String(port), "--strictPort", "--host", "127.0.0.1"],
-    { cwd: webRoot, stdio: "ignore" }
-  );
+  const server = await startGuardedPreview({
+    webRoot,
+    port,
+    portEnvVar: "ADE_GATE_PORT",
+  });
   try {
-    await waitForServer();
     const browser = await chromium.launch();
     try {
       await exerciseControl(browser);
@@ -1697,7 +1683,7 @@ async function main() {
       await browser.close();
     }
   } finally {
-    server.kill("SIGTERM");
+    await server.stop();
   }
   console.log("GATE PASS: 집계가 원장과 일치하고(종료 제외·유휴는 줄을 켜지 않음),");
   console.log("           대기가 잉크와 순서 양쪽에서 강조되며, 서랍은 라우트를");

@@ -6,11 +6,11 @@
 // not a screenshot: React must retain a root child and the sidebar navigation
 // must remain usable while the affected panel reports its own empty/error state.
 
-import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
+import { startGuardedPreview } from "./preview-guard.mjs";
 
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const githubManifest = JSON.parse(readFileSync(
@@ -77,15 +77,6 @@ async function installFaults(context) {
     return json(route, {});
   });
   return { setPluginFault: (next) => { pluginFault = next; } };
-}
-
-async function waitForServer() {
-  const end = Date.now() + 30_000;
-  while (Date.now() < end) {
-    try { if ((await fetch(origin)).ok) return; } catch { /* starting */ }
-    await new Promise((resolve) => setTimeout(resolve, 200));
-  }
-  throw new Error("preview server never came up");
 }
 
 async function assertShell(page, surface) {
@@ -193,9 +184,8 @@ async function assertPluginSurfaceSpeaks(page, surface) {
 
 async function main() {
   if (!existsSync(resolve(webRoot, "dist/index.html"))) throw new Error("dist/ is missing. Run npm run build first.");
-  const server = spawn(resolve(webRoot, "node_modules/.bin/vite"), ["preview", "--port", String(port), "--strictPort", "--host", "127.0.0.1"], { cwd: webRoot, stdio: "ignore" });
+  const server = await startGuardedPreview({ webRoot, port, portEnvVar: "WIRE_GATE_PORT" });
   try {
-    await waitForServer();
     const browser = await chromium.launch();
     try {
       const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, reducedMotion: "reduce" });
@@ -232,7 +222,7 @@ async function main() {
       await assertNavigationKeepsRouteState(context);
       await context.close();
     } finally { await browser.close(); }
-  } finally { server.kill("SIGTERM"); }
+  } finally { await server.stop(); }
   console.log("GATE PASS: malformed wire responses kept the shell and navigation alive,");
   console.log("           and navigation did not discard route state.");
 }
