@@ -92,6 +92,8 @@ RECEIVER = os.path.join(HERE, "momo-bootstrap-init")
 
 TOKEN_NAME = "MOMO_WORKD_REGISTRATION_TOKEN"
 TOKEN_FILE_NAME = "MOMO_WORKD_REGISTRATION_TOKEN_FILE"
+SIGNING_KEY_NAME = "MOMO_WORK_HOST_SIGNING_KEY"
+SIGNING_KEY_FILE_NAME = "MOMO_WORK_HOST_KEY_PATH"
 
 # What the adapter actually sends (`workd_env_vars` in
 # server-rust/crates/momo-t3/src/provider/cubesandbox.rs). Kept whole rather than
@@ -136,6 +138,7 @@ class Workspace:
         self.private_dir = os.path.join(root, "etc", "momo")
         self.env_file = os.path.join(self.private_dir, "workd.env")
         self.token_file = os.path.join(self.private_dir, "registration.token")
+        self.signing_key_file = os.path.join(self.private_dir, "work-host-signing.key")
         self.out_file = os.path.join(root, "workload-environ.json")
         self.workload = os.path.join(root, "workload.py")
         self.port = _free_port()
@@ -198,6 +201,8 @@ def _start(
         env_file or workspace.env_file,
         "--token-file",
         workspace.token_file,
+        "--signing-key-file",
+        workspace.signing_key_file,
         "--timeout",
         str(timeout),
         "--",
@@ -582,8 +587,55 @@ def case_keepalive_guard(receiver: str) -> None:
             raise CheckFailed("the refused second delivery must not have rewritten the env file")
 
 
+def case_signing_key(receiver: str) -> None:
+    """LIVE-5c: the work-host signing key takes the token's road, not the environ's.
+
+    The producer signs `display-attach/validate` as its work host, so the seed is
+    a longer-lived secret than the registration token — which makes
+    `/proc/<pid>/environ` a worse place for it, not a better one. This asserts it
+    lands in its own 0600 file and that the workload is handed the PATH.
+    """
+    delivery = dict(DELIVERY)
+    delivery[SIGNING_KEY_NAME] = "c2VlZC10aGF0LWlzLW5vdC1hLXJlYWwtb25lLXBhZGRpbmc="
+    with _workspace() as workspace:
+        proc = _start(receiver, workspace)
+        try:
+            _wait_for_listener(proc, workspace.port)
+            if _deliver(workspace.port, {"envVars": delivery}) != [200]:
+                raise CheckFailed("a well-formed delivery must be answered 200")
+            if _wait_exit(proc, 10, "signing_key") != 0:
+                raise CheckFailed("the workload must run and exit 0")
+        finally:
+            _reap(proc)
+
+        if _mode(workspace.signing_key_file) != 0o600:
+            raise CheckFailed(
+                f"{workspace.signing_key_file} is mode {_mode(workspace.signing_key_file):04o}, "
+                "not 0600 — a signing key is not less private than a token"
+            )
+        with open(workspace.signing_key_file) as handle:
+            if handle.read() != delivery[SIGNING_KEY_NAME] + "\n":
+                raise CheckFailed("the key file must hold exactly the delivered seed")
+
+        landed = workspace.landed()
+        if SIGNING_KEY_NAME in landed:
+            raise CheckFailed("the raw signing key must not be written into the env file")
+        if landed.get(SIGNING_KEY_FILE_NAME) != workspace.signing_key_file:
+            raise CheckFailed(f"the env file must name the key file, got {landed!r}")
+
+        environ = workspace.workload_environ()
+        if SIGNING_KEY_NAME in environ:
+            raise CheckFailed(
+                "the raw signing key reached the workload's environment — "
+                "/proc/<pid>/environ is readable by anything else in the sandbox"
+            )
+        if environ.get(SIGNING_KEY_FILE_NAME) != workspace.signing_key_file:
+            raise CheckFailed("the workload must be handed the key file path")
+
+
 CASES = {
     "happy": case_happy,
+    "signing_key": case_signing_key,
     "rejections": case_rejections,
     "write_failure": case_write_failure,
     "one_shot": case_one_shot,
@@ -623,7 +675,23 @@ MUTATIONS: dict[str, tuple[str, list[tuple[str, str]]]] = {
     ),
     "inherited_token": (
         "inherited_token",
-        [("os.environ.pop(TOKEN_NAME, None)", "pass  # mutant: the inherited copy survives")],
+        # The pop moved into the PRIVATE_FILE_MATERIAL loop when LIVE-5c added
+        # the signing key beside the token, so the anchor is the loop's line.
+        # Removing it lets an inherited copy of EITHER secret ride through into
+        # the workload's environ.
+        [("os.environ.pop(value_name, None)", "pass  # mutant: the inherited copy survives")],
+    ),
+    "signing_key": (
+        "signing_key",
+        # Landing the seed as a plain env var instead of a 0600 file: the value
+        # would reach `/proc/<pid>/environ`, which is what the file exists to
+        # avoid.
+        [
+            (
+                "        secret = child_env.pop(value_name, None)",
+                "        secret = child_env.get(value_name)  # mutant: the value also stays in env",
+            )
+        ],
     ),
 }
 
