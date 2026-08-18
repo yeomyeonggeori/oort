@@ -232,6 +232,11 @@ export function AiLinkSection({ offline }: { offline: boolean }) {
   });
 
   const busy = save.isPending || unlink.isPending || check.isPending;
+  // 진행은 잠금이 아니다 (#1403 리뷰 H-1 / #1486 문법). `busy` 는 이 패널의 세
+  // 쓰기를 묶은 이름이라 「연결 해제」에 그대로 넘기면 해제를 누른 그 버튼이
+  // 자기가 켠 busy 로 자신을 잠근다 — 진행 낱말이 흐림 아래에서 죽고 낭독은
+  // 「해제 중, 사용 안 함」이 된다. 잠금으로 남는 것은 다른 두 쓰기다.
+  const unlinking = unlink.isPending;
 
   function closeForm() {
     setEditing(false);
@@ -736,7 +741,10 @@ export function AiLinkSection({ offline }: { offline: boolean }) {
               label="연결 해제"
               question="저장된 주소와 자격증명을 지웁니다."
               confirmLabel="해제"
-              disabled={offline || busy}
+              disabled={offline || (busy && !unlinking)}
+              busy={unlinking}
+              // 한자어 동작명사(해제)가 있는 자리라 「명사 + 중」이다 (#1501).
+              busyLabel="해제 중"
               onConfirm={() => unlink.mutate()}
               testId="ai-link-unlink"
             />

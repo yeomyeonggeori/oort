@@ -494,6 +494,12 @@ export function AiLinkChain({
   }
 
   const busy = save.isPending || clear.isPending;
+  // 진행은 잠금이 아니다 (#1403 리뷰 H-1 / #1486 회전이 세운 문법). `busy` 는 이
+  // 블록의 두 쓰기를 묶은 이름이라, 「전부 지우기」에 그대로 넘기면 그 버튼이
+  // **자기가 켠 busy 로 자신을 잠근다** — 화면에 하나뿐인 진행 낱말이 opacity-50
+  // 아래에서 죽고, 낭독은 「지우는 중, 사용 안 함」이 된다. 잠금으로 남는 것은
+  // 저 쪽 쓰기(연결 순서 저장)뿐이다.
+  const clearing = clear.isPending;
   const full = draft.length >= MAX_FALLBACK_HOPS;
   // The one condition that makes this block READ-ONLY rather than merely
   // unsaved: a PUT built from a draft that is missing an entry would delete
@@ -569,7 +575,11 @@ export function AiLinkChain({
             label="예비 provider 전부 지우기"
             question="저장된 예비 provider를 모두 지웁니다."
             confirmLabel="지우기"
-            disabled={offline || busy}
+            disabled={offline || (busy && !clearing)}
+            busy={clearing}
+            // 「지우기」에는 한자어 동작명사가 없으므로 고유어 동사가 「-는 중」을
+            // 쓴다 (#1501 정본: 명사가 있으면 「명사 + 중」, 없을 때만 이 꼴).
+            busyLabel="지우는 중"
             onConfirm={() => clear.mutate()}
             testId="chain-clear"
           />

@@ -445,6 +445,13 @@ function StartPanel({
   const gate = disconnectStartGate(connection);
   const blockedId = "hosted-disconnect-start-blocked";
   const blocked = !gate.allowed || offline;
+  // 진행은 잠금이 아니다 — 아래 정리 패널의 `repairLocked` 와 같은 식이다. 이
+  // 패널이 서 있는 동안 이 화면이 낼 수 있는 쓰기는 해제 시작 하나뿐이므로
+  // (정리·확정 패널은 `cleanup_pending` 이후에야 마운트된다) 남는 항은 오늘
+  // 참이 되지 않는다. 그래도 적어 두는 것은, `busy` 가 세 쓰기를 묶은 이름이라
+  // 넷째가 붙는 날 이 자리가 조용히 「해제 중을 회색으로 칠하는」 코드로
+  // 되돌아가기 때문이다.
+  const locked = blocked || (busy && !starting);
   return (
     <div className="flex min-w-0 flex-col gap-3 rounded-md border border-line p-3">
       <div className="grid gap-3 md:grid-cols-2">
@@ -491,34 +498,37 @@ function StartPanel({
         </p>
       )}
       <div className="flex flex-wrap items-center justify-end gap-2">
-        {starting ? (
-          // 진행 중인 컨트롤을 `disabled` 로 만들지 않는 것이 이 레포의 규율이다
-          // (States.tsx `actionBusy`): 회색이 되는 컨트롤은 「지금 일어나는 중」이
-          // 아니라 「당신은 이걸 못 한다」로 읽힌다. 초점은 남고, 눌러도 아무 일이
-          // 일어나지 않으며, 낱말과 aria-busy 가 상태를 말한다.
-          //
-          // 그 규율을 적어 두고도 `aria-disabled` 와 흐림을 함께 얹고 있었다
-          // (#1403 리뷰 H-1): 둘을 얹으면 낭독은 「해제 중, 사용 안 함」이 되고
-          // 유일한 진행 낱말이 opacity-50 아래에서 죽는다. 인용한 규율이 금지한
-          // 바로 그 겹침이라 규율 쪽으로 맞춘다.
-          //
-          // 낱말꼴은 「명사 + 중」이다 (#1501): 한자어 동작명사(해제)가 있는 자리에
-          // 「-하는 중」을 쓰면 같은 뜻을 두 글자 더 길게 말하는 것이고, 진행 낱말은
-          // 원래 라벨을 **제자리에서** 대체하므로 그 길이가 곧 줄이 흔들리는 폭이다.
-          <Button type="button" variant="destructive" size="sm" aria-busy>
-            해제 중
-          </Button>
-        ) : (
-          <ConfirmButton
-            label={DISCONNECT_START_LABEL}
-            question={DISCONNECT_START_QUESTION}
-            confirmLabel={DISCONNECT_START_CONFIRM_LABEL}
-            describedBy={blocked ? blockedId : undefined}
-            disabled={blocked || busy}
-            onConfirm={onStart}
-            testId="hosted-disconnect-start"
-          />
-        )}
+        {/* 진행 중인 컨트롤을 `disabled` 로 만들지 않는 것이 이 레포의 규율이다
+            (States.tsx `actionBusy`): 회색이 되는 컨트롤은 「지금 일어나는 중」이
+            아니라 「당신은 이걸 못 한다」로 읽힌다. 초점은 남고, 눌러도 아무 일이
+            일어나지 않으며, 낱말과 aria-busy 가 상태를 말한다.
+
+            진행을 **다른 버튼으로 갈아 끼우고** 있었다. 그림은 규율을 지켰지만
+            초점은 지키지 못했다: 확정을 누른 그 순간 `ConfirmButton` 이 통째로
+            언마운트되고 자리에 새 노드가 서므로, 방금 Enter 를 누른 손에서 초점이
+            <body> 로 떨어진다 — native `disabled` 를 피해 얻으려던 바로 그것을
+            교체가 도로 잃었다. #1490 이 `ConfirmButton` 에 `busy` 를 실은 뒤로는
+            같은 노드가 낱말만 바꿔 달 수 있으므로, 트리거는 서 있던 자리에 남고
+            초점도 거기 남는다.
+
+            칠도 함께 고정된다. 교체본은 `variant="destructive"` 라 진행 한 박자
+            동안만 빨개졌다가 돌아왔는데, 진행은 상태의 격상이 아니다 (#1490:
+            busy 는 낱말과 aria-busy 만 바꾸고 칠에는 아무것도 하지 않는다).
+
+            낱말꼴은 「명사 + 중」이다 (#1501): 한자어 동작명사(해제)가 있는 자리에
+            「-하는 중」을 쓰면 같은 뜻을 두 글자 더 길게 말하는 것이고, 진행 낱말은
+            원래 라벨을 **제자리에서** 대체하므로 그 길이가 곧 줄이 흔들리는 폭이다. */}
+        <ConfirmButton
+          label={DISCONNECT_START_LABEL}
+          question={DISCONNECT_START_QUESTION}
+          confirmLabel={DISCONNECT_START_CONFIRM_LABEL}
+          describedBy={blocked ? blockedId : undefined}
+          disabled={locked}
+          busy={starting}
+          busyLabel="해제 중"
+          onConfirm={onStart}
+          testId="hosted-disconnect-start"
+        />
       </div>
     </div>
   );
@@ -748,6 +758,16 @@ function TerminalPanel({
   const gate = terminalGate(connection, artifacts);
   const blockedId = "hosted-disconnect-terminal-blocked";
   const blocked = !gate.allowed || offline;
+  // 위 `StartPanel` 과 같은 식이지만 이쪽은 남는 항이 실제로 참이 된다: 이 패널은
+  // 정리 패널과 나란히 서 있으므로, 어느 줄의 확인 저장이나 목록 복원이 날고 있는
+  // 동안 확정은 정말로 지금 할 수 없는 일이다. 그것은 잠금이 맞다.
+  const locked = blocked || (busy && !completing);
+  // 잠긴 컨트롤은 사유를 든다. 게이트와 오프라인은 이 상자가 자기 문장을 갖고
+  // 있고(`blockedId`), 「앞서 누른 것이 아직 끝나지 않았다」는 바로 위 정리 패널이
+  // 이미 한 번 적어 둔 문장이다(`BUSY_NOTE_ID`) — 같은 사실을 두 상자가 각자
+  // 적으면 한 화면에 같은 말이 둘이 선다. 두 패널은 언제나 함께 마운트되므로 그
+  // id 는 이 버튼이 잠기는 순간 화면에 있다.
+  const lockReasonId = blocked ? blockedId : locked ? BUSY_NOTE_ID : undefined;
   return (
     <div
       className="flex min-w-0 flex-col gap-2 rounded-md border border-line p-3"
@@ -777,23 +797,19 @@ function TerminalPanel({
         </p>
       )}
       <div className="flex flex-wrap items-center justify-end gap-2">
-        {completing ? (
-          // 위 「해제 중」과 같은 규율, 같은 수리 (#1403 리뷰 H-1), 같은 낱말꼴
-          // (#1501).
-          <Button type="button" variant="secondary" size="sm" aria-busy>
-            확정 중
-          </Button>
-        ) : (
-          <ConfirmButton
-            label={TERMINAL_LABEL}
-            question={TERMINAL_QUESTION}
-            confirmLabel={TERMINAL_CONFIRM_LABEL}
-            describedBy={blocked ? blockedId : undefined}
-            disabled={blocked || busy}
-            onConfirm={onComplete}
-            testId="hosted-disconnect-complete"
-          />
-        )}
+        {/* 위 「해제 중」과 같은 규율, 같은 수리 (#1403 리뷰 H-1 · #1490 busy),
+            같은 낱말꼴 (#1501). 교체가 초점을 떨어뜨리던 것도 같다. */}
+        <ConfirmButton
+          label={TERMINAL_LABEL}
+          question={TERMINAL_QUESTION}
+          confirmLabel={TERMINAL_CONFIRM_LABEL}
+          describedBy={lockReasonId}
+          disabled={locked}
+          busy={completing}
+          busyLabel="확정 중"
+          onConfirm={onComplete}
+          testId="hosted-disconnect-complete"
+        />
       </div>
     </div>
   );
