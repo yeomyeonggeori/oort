@@ -13,8 +13,13 @@ that a teammate can **watch** an agent work, and cannot type into it.
 > work-host-signed `validate` answered `input_enabled: true`, the producer opened
 > `momo.input.v1`, parsed the declared frames, and a typed command *ran in a
 > terminal on the captured display* — the proof is the file it wrote, not the
-> frames sent (`scripts/display_input_e2e.py`). An observer capability still gets
-> `input_enabled: false` and an offer with no `m=application`. What is **still**
+> frames sent (`scripts/display_input_e2e.py`). Closing the window server-side
+> then closed the channel while the **stream stayed up**, and a command typed
+> afterwards did not run — measured while the signalling socket was being flooded
+> with frames the message loop discards, because that is exactly where a
+> re-validation in the wrong place starves and a returned keyboard survives. An
+> observer capability still gets `input_enabled: false` and an offer with no
+> `m=application`. What is **still**
 > unverified is that same input round trip *inside a CubeSandbox microVM over a
 > relay candidate* — named in `template.spec.json` as
 > `unverified.inputDeliveryInMicroVM`. The earlier open risk, "can a browser

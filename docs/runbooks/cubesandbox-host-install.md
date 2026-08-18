@@ -388,13 +388,15 @@ envd init request failed: Post "http://192.168.0.7:49983/init": connection refus
 
 ### D. LIVE-5c(#1565) — 입력 절반이 붙었다. 실측 3건은 **문서가 아니라 코드를 고쳤다**
 
-specVersion **4**. producer가 이제 ①서버가 승인한 동안에만 datachannel을 열고 ②프레임을 파싱해 XTEST로 주입하며 ③`validate`를 work-host 키로 **서명**한다. 아래 3건은 전부 "돌려 보기 전에는 알 수 없었던" 것들이다.
+specVersion **4**. producer가 이제 ①서버가 승인한 동안에만 datachannel을 열고 ②프레임을 파싱해 XTEST로 주입하며 ③`validate`를 work-host 키로 **서명**하고 ④창이 닫히면 채널을 닫되 **스트림은 유지**한다. 아래 5건은 전부 "돌려 보기 전에는(또는 적대적 입력을 가정해 보기 전에는) 알 수 없었던" 것들이다.
 
 | # | 실측 | 원인과 처방 |
 |---|---|---|
 | **D-1** | **`bundle-policy=none`이면 키보드가 영영 안 온다** | webrtcbin 기본값은 m-line마다 별도 ICE/DTLS 전송을 요구한다. m-line이 **하나뿐이던 #1438에선 보이지 않았다**. `m=application`이 붙는 순간 ICE는 `completed`까지 가고 연결은 DTLS에서 `failed` — **화면은 붙고 키보드만 안 오는데 어떤 로그도 이유를 말하지 않는다**. 처방: producer가 협상 전에 `bundle-policy=max-bundle`을 세운다(브라우저가 협상하는 값이기도 하다) |
 | **D-2** | **시그널링 침묵 30초면 세션이 죽었다** | 협상이 끝나면 시그널링 소켓은 **조용해진다**(입력은 datachannel, 미디어는 ICE). 그런데 세션 루프가 `recv` 타임아웃을 **종료**로 취급해, 마지막 ICE 후보 ~30초 뒤 모든 세션이 죽었다 → **재검증이 단 한 번도 실행되지 않았고**, control window 리스는 갱신되지 않았으며, 사람의 키보드는 30초쯤에 멈췄다. LIVE-5c 이전엔 세션을 그만큼 길게 붙잡아 본 것이 없어서 드러나지 않았다. 처방: 루프를 **시계**로 돌린다 — `select` 대기(틱 5초), 타임아웃은 재검증 틱이지 종료가 아니다. `select`인 이유는 프레임 중간 타임아웃이 채널을 desync하기 때문 |
-| **D-3** | **자격 TTL은 실행 중 스트림을 끊지 않는다** (§9-7 참조) | coturn은 REST username의 만료를 **ALLOCATE에서** 검증하고, 이미 존재하는 allocation의 **REFRESH에선 다시 보지 않는다**. TTL 60초로 200초 소크 — 타이핑 비트 10/10 전달(마지막 t+180s), relay-only. `unverified.credentialCeiling`이 예측한 "TTL 넘으면 화면이 까매진다"는 **성립하지 않는다** |
+| **D-3** | **자격 TTL은 실행 중 스트림을 끊지 않는다** (§9-9 참조) | coturn은 REST username의 만료를 **ALLOCATE에서** 검증하고, 이미 존재하는 allocation의 **REFRESH에선 다시 보지 않는다**. TTL 60초로 200초 소크 — 타이핑 비트 10/10 전달(마지막 t+180s), relay-only. `unverified.credentialCeiling`이 예측한 "TTL 넘으면 화면이 까매진다"는 **성립하지 않는다** |
+| **D-4** | **버려지는 프레임이 재검증을 굶길 수 있었다**(freeze 리뷰 C1) | 세션 루프의 재검증 검사가 **하단**에 있어, non-text·비JSON 프레임의 `continue`가 그것을 건너뛰었다. 반환된(또는 적대적) controller가 tick보다 빠르게 쓰레기 프레임을 흘리면 **재검증이 영영 굶고 `revoke_input()`이 불리지 않는다** — 서버가 이미 닫은 창의 키보드가 살아남는다. 입력 축이 생긴 이 파도에서 처음 무기화된다. **처방**: 검사를 루프 **선두**로(어떤 `continue`도 건너뛸 수 없는 자리). ping(0x9)은 pong으로 소비한다. **red proof**: `display_input_e2e.py --jam --watch-revoke` — 하단 배치 시 창을 닫고 **75초 뒤에도 채널이 열려 있고 주입이 살아 있었다**; 선두 배치 시 재검증 1주기 안에 채널이 닫히고 스트림은 유지됐다 |
+| **D-5** | **`ready`를 먼저 보내고 채널을 나중에 만들면 거짓말이 된다**(freeze 리뷰 M1) | 채널 생성 실패 시 조용히 view-only로 강등되는데, viewer는 이미 `input_enabled: true`를 받은 뒤라 `ondatachannel`을 영원히 기다리며 **허공에 타이핑한다**. **처방**: `Session.prepare()`(빌드·채널 생성)와 `begin()`(협상 시작)을 분리하고, `ready`는 그 사이에서 **실제 결과**(`session.input_enabled`)로 보낸다 |
 
 **서명 자격 배달**: work-host Ed25519 seed는 등록 토큰과 **같은 길**로 간다 — `envVars`의 `MOMO_WORK_HOST_SIGNING_KEY` → `momo-bootstrap-init`이 0600 파일로 랜딩 → 워크로드엔 `MOMO_WORK_HOST_KEY_PATH`(값이 아니라 **경로**)만 준다. `/proc/<pid>/environ`은 샌드박스 안 아무나 읽지만 0600 파일은 아니다. 프록시 인증서는 `MOMO_DISPLAY_SERVER_CA_PEM_B64`(공개 인증서, base64 — envVars 검증기가 제어문자를 거부하므로)로 실어 entrypoint가 파일로 쓴다. **검증을 끄지 않는다**: 자체서명 leaf는 자기 자신으로 검증되므로 그 한 장을 지목하는 것이지 아무거나 받는 것이 아니다.
 

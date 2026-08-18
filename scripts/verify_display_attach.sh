@@ -412,6 +412,15 @@ if ! spec_value '.unverified.inputDelivery' >/dev/null 2>&1; then
     fail "spec claims a keystroke landed without recording that a producer parsed the frames"
   spec_value '.unverified.inputDeliveryInMicroVM' >/dev/null ||
     fail "spec graduated input delivery without naming the microVM leg that is still unmeasured"
+  # Delivery without revocation is half a claim, and it is the dangerous half: a
+  # keyboard that arrives and never leaves is worse than one that never arrived.
+  # Graduating the first without the second is therefore refused by name.
+  [ "$(spec_value '.runtimeVerified.inputRevokedWhenWindowCloses')" = "true" ] ||
+    fail "spec graduated input DELIVERY without graduating REVOCATION — a keyboard that cannot be taken back is not a control window"
+  [ "$(spec_value '.runtimeVerified.streamSurvivesRevocation')" = "true" ] ||
+    fail "spec records revocation without recording that the STREAM survived it — a return is not a revoked capability"
+  [ "$(spec_value '.runtimeVerified.revalidationSurvivesSignallingFlood')" = "true" ] ||
+    fail "spec records revocation without recording that it holds under a signalling flood — that is the case where the re-validation starves"
 fi
 [ "$(spec_value '.producer.recording')" = "false" ] ||
   fail "spec declares recording — ADR-0165 D5 forbids it"
@@ -571,7 +580,10 @@ note "runtime-verified(input delivery, LIVE-5c specVersion 4): a real producer r
 note "  input_enabled off a work-host-SIGNED validate, opened momo.input.v1, parsed the"
 note "  declared frames, and a typed command RAN in a terminal on the captured display"
 note "  (the proof is the file it wrote). An observer got input_enabled=false and an"
-note "  offer with no m=application. Measured by scripts/display_input_e2e.py."
+note "  offer with no m=application. Closing the window closed the channel while the"
+note "  stream stayed up, and keys typed after it reached nothing — measured while the"
+note "  signalling socket was flooded with frames the loop discards, which is where a"
+note "  re-validation in the wrong place starves. Measured by scripts/display_input_e2e.py."
 note "runtime-unverified(input delivery INSIDE a microVM): the above ran against the"
 note "  template IMAGE, not a CubeSandbox microVM on momo-cube-host, so input over a"
 note "  'typ relay' candidate end to end is still unmeasured — see"

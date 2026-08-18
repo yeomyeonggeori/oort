@@ -56,6 +56,8 @@ VIEW_ONLY_REFUSAL = "view_only"
 
 OPCODE_TEXT = 0x1
 OPCODE_CLOSE = 0x8
+OPCODE_PING = 0x9
+OPCODE_PONG = 0xA
 
 X11 = os.environ.get("MOMO_DISPLAY_X11", ":0")
 SIGNAL_PORT = int(os.environ.get("MOMO_DISPLAY_SIGNAL_PORT", "8452"))
@@ -671,19 +673,27 @@ class Session:
         # was not, and the static `MOMO_DISPLAY_TURN_URI` then stands — see
         # `start`.
         #
-        # KNOWN LIMIT, stated here rather than discovered in production: this is
-        # installed into webrtcbin ONCE, in `start`, and the 30-second
-        # re-validation loop below mints a fresh credential that this process
-        # THROWS AWAY. GStreamer has no way to swap a TURN server on a running
-        # ICE agent — and the one property that looks like a way in
-        # (`webrtcbin.ice-agent`) destroys the agent when read, measured in #1438
-        # and warned about a few lines down. So the credential's TTL is this peer
-        # connection's ceiling: past it the connection can no longer allocate or
-        # refresh a relay and the viewer's screen goes black with nothing to
-        # explain it. A NEW viewer is unaffected (new Session, new pipeline,
-        # credential minted when they attached). Renegotiating versus accepting
-        # the ceiling is a LIVE-5c question and is measured there, not guessed at
-        # here.
+        # This is installed into webrtcbin ONCE, in `prepare`, and the 30-second
+        # re-validation loop mints a fresh credential that this process THROWS
+        # AWAY. GStreamer has no way to swap a TURN server on a running ICE agent
+        # — and the one property that looks like a way in (`webrtcbin.ice-agent`)
+        # destroys the agent when read, measured in #1438 and warned about a few
+        # lines down.
+        #
+        # That USED to be written here as a ceiling: past the TTL the connection
+        # could no longer hold a relay and the screen would go black with nothing
+        # to explain it. LIVE-5c MEASURED it and that is not what happens — a
+        # stream held for 200s on a 60s credential lost nothing (10/10 typed
+        # beats delivered, relay-only). coturn checks the REST username's expiry
+        # when an ALLOCATE creates an allocation and does not re-check it to
+        # REFRESH one that already exists.
+        #
+        # So the TTL bounds when a NEW allocation can be created, not how long a
+        # running one lives, and the discarded re-mints are genuinely surplus
+        # here. The narrow case that remains is a connection forced to allocate
+        # AGAIN mid-session (an ICE restart), which wants a fresh credential at
+        # that moment rather than a periodic swap. See template.spec.json
+        # `ice.turn.$credentialRefreshComment`.
         self.ice_servers = ice_servers or []
         # Whether ICE was restricted to relay candidates. Read by the candidate
         # log so it can tell a missing relay from an expected host candidate.
@@ -692,7 +702,17 @@ class Session:
         self.webrtc = None
         self.done = threading.Event()
 
-    def start(self) -> None:
+    def prepare(self) -> None:
+        """Build everything, decide the grant's fate, and stop before negotiating.
+
+        Split from [`begin`] so the caller can send `ready` knowing whether input
+        ACTUALLY works. When these were one method, `ready` went out first with
+        the server's answer, and a channel that then failed to open downgraded
+        `self.input_enabled` in silence — so the viewer was told it had control,
+        waited on `ondatachannel` forever, and the person typed into nothing.
+        That is the same failure `_on_offer_created`'s guard exists to prevent,
+        just moved one message earlier, where the guard could not see it.
+        """
         self.pipe = Gst.parse_launch(PIPELINE)
         self.webrtc = self.pipe.get_by_name("sendonly")
 
@@ -791,6 +811,8 @@ class Session:
         if self.input_enabled:
             self._open_input_channel()
 
+    def begin(self) -> None:
+        """Start negotiating. Everything the offer must carry already exists."""
         self.pipe.set_state(Gst.State.PLAYING)
         log("pipeline PLAYING")
 
@@ -1071,18 +1093,6 @@ def handle_connection(conn: socket.socket, addr) -> None:
         # moves it DOWN (`MOMO_DISPLAY_INPUT_DISABLED`).
         granted_input = bool(verdict.get("input_enabled")) and not INPUT_KILL_SWITCH
 
-        send_json(
-            peer,
-            {
-                "type": "ready",
-                "display_id": verdict["display_id"],
-                "mode": verdict.get("mode", "observer"),
-                "input_enabled": granted_input,
-                "codec": CODEC,
-                "audio": AUDIO,
-            },
-        )
-
         session = Session(
             peer,
             verdict["display_id"],
@@ -1094,7 +1104,28 @@ def handle_connection(conn: socket.socket, addr) -> None:
             verdict.get("ice_servers"),
             granted_input,
         )
-        session.start()
+        # Build first, ANNOUNCE second. `prepare` is where a grant either becomes
+        # a real channel or stops being a grant, so `session.input_enabled` after
+        # it is the truth — whereas `granted_input` is only what the server said.
+        # Announcing the server's word and then failing to honour it is how a
+        # person ends up typing into nothing.
+        session.prepare()
+        if granted_input and not session.input_enabled:
+            log("input: grant could NOT be honoured — telling the viewer view-only")
+
+        send_json(
+            peer,
+            {
+                "type": "ready",
+                "display_id": verdict["display_id"],
+                "mode": verdict.get("mode", "observer"),
+                "input_enabled": session.input_enabled,
+                "codec": CODEC,
+                "audio": AUDIO,
+            },
+        )
+
+        session.begin()
 
         # The signalling socket goes QUIET once negotiation finishes — a viewer
         # that is watching and typing sends nothing here, because input rides the
@@ -1114,6 +1145,34 @@ def handle_connection(conn: socket.socket, addr) -> None:
         conn.settimeout(REVALIDATE_SECONDS)
         deadline = time.monotonic() + REVALIDATE_SECONDS
         while True:
+            # THE RE-VALIDATION RUNS FIRST, ON EVERY PASS, BEFORE ANY `continue`
+            # CAN JUMP OVER IT.
+            #
+            # It used to sit at the BOTTOM of this loop, after the message
+            # handlers — which meant the two `continue`s below (a non-text frame,
+            # a text frame that is not JSON) skipped it. A viewer that streams
+            # junk faster than the tick therefore starves the only clock that can
+            # take the keyboard away: `revoke_input` is never reached, and XTEST
+            # injection stays live for a controller whose window the server has
+            # already closed. Before this PR that only delayed a lease renewal;
+            # with an input path it is the difference between a returned window
+            # and a keyboard that keeps typing, so the check belongs where
+            # nothing can route around it.
+            if time.monotonic() > deadline:
+                revalidated = validate_capability(capability, stream=True)
+                if revalidated is None:
+                    log("revalidation failed — cutting the stream")
+                    break
+                # 반환 lands HERE. The window closing does not cut the stream and
+                # must not: the person keeps watching the screen they no longer
+                # drive. `input_enabled` is the server's conjunction of
+                # controller-mode AND an open window, so this is the same answer
+                # the browser is being told, arriving at the half that can act on
+                # it.
+                if session.input_enabled and not revalidated.get("input_enabled"):
+                    session.revoke_input()
+                deadline = time.monotonic() + REVALIDATE_SECONDS
+
             message = None
             if peer.buffered:
                 readable = True
@@ -1131,6 +1190,11 @@ def handle_connection(conn: socket.socket, addr) -> None:
                     break
                 if opcode == OPCODE_CLOSE:
                     break
+                if opcode == OPCODE_PING:
+                    # Answer it and consume it. An unanswered ping is a viewer
+                    # that eventually gives up on a session that was fine.
+                    _send_frame(peer, payload, OPCODE_PONG)
+                    continue
                 if opcode != OPCODE_TEXT:
                     continue
                 try:
@@ -1155,21 +1219,6 @@ def handle_connection(conn: socket.socket, addr) -> None:
                 log("open_input refused: a viewer request is not a grant")
             elif kind == "bye":
                 break
-
-            if time.monotonic() > deadline:
-                revalidated = validate_capability(capability, stream=True)
-                if revalidated is None:
-                    log("revalidation failed — cutting the stream")
-                    break
-                # 반환 lands HERE. The window closing does not cut the stream and
-                # must not: the person keeps watching the screen they no longer
-                # drive. `input_enabled` is the server's conjunction of
-                # controller-mode AND an open window, so this is the same answer
-                # the browser is being told, arriving at the half that can act on
-                # it.
-                if session.input_enabled and not revalidated.get("input_enabled"):
-                    session.revoke_input()
-                deadline = time.monotonic() + REVALIDATE_SECONDS
     except Exception as exc:  # noqa: BLE001
         log(f"session error: {exc}")
     finally:

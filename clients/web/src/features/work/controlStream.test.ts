@@ -90,6 +90,7 @@ const TEMPLATE_SPEC = JSON.parse(
 ) as {
   signalling: {
     inputChannel: {
+      modifiersAreAdvisory: boolean;
       label: string;
       openedBy: string;
       viewerOpensChannel: boolean;
@@ -332,7 +333,24 @@ describe("the input frames, against the contract that declares them", () => {
     // CubeSandbox microVM, which is the half still owed.
     expect(TEMPLATE_SPEC.runtimeVerified.producerParsesInputFrames).toBe(true);
     expect(TEMPLATE_SPEC.runtimeVerified.keystrokeReachesAnApplication).toBe(true);
+    // Delivery and revocation graduate together or not at all: this client's
+    // auto-return machinery below is only worth anything if the far side
+    // actually stops typing, and a keyboard that arrives and never leaves is the
+    // worse half of the pair.
+    expect(TEMPLATE_SPEC.runtimeVerified.inputRevokedWhenWindowCloses).toBe(true);
+    expect(TEMPLATE_SPEC.runtimeVerified.streamSurvivesRevocation).toBe(true);
     expect(TEMPLATE_SPEC.unverified.inputDeliveryInMicroVM).toBeTruthy();
+  });
+
+  it("declares the modifier fields it sends as advisory, not as instructions", () => {
+    // This client forwards a modifier press as its OWN key frame, so the far
+    // side holds real modifier state from real key events. If the producer ALSO
+    // synthesised modifiers from these booleans they would apply twice. The
+    // spec says so out loud, because the two halves cannot both decide.
+    expect(TEMPLATE_SPEC.signalling.inputChannel.modifiersAreAdvisory).toBe(true);
+    for (const modifier of ["ctrl", "shift", "alt", "meta"]) {
+      expect(TEMPLATE_SPEC.signalling.inputChannel.keyFrame).toContain(modifier);
+    }
   });
 
   it("has a release key, and it is not swallowed and not forwarded", () => {

@@ -2,16 +2,22 @@
   "$comment": [
     "LIVE-1 / ADR-0165 — the CubeSandbox template contract for the live display.",
     "",
-    "specVersion 3 (2026-08-16, #1438 실기동 E2E). specVersion 2 was a DECLARED",
-    "contract; this version records what was MEASURED end to end on momo-cube-host",
-    "(101.79.18.230) + momo-turn (223.130.142.109): a real microVM producer whose",
-    "H264 screen reached an external browser (a Mac on the public internet) over a",
-    "WebRTC media stream relayed through the oort TURN. The three items that",
-    "specVersion 2 listed under `unverified` as producerSelection / iceReachability",
-    "/ templateBuild are RESOLVED here; inputDelivery (LIVE-3 control reaching a",
-    "screen) is still unverified and stays named.",
+    "specVersion 4 (2026-08-18, LIVE-5c). specVersion 2 was a DECLARED contract;",
+    "specVersion 3 (#1438) recorded the MEDIA half as measured end to end on",
+    "momo-cube-host (101.79.18.230) + momo-turn (223.130.142.109) — a real microVM",
+    "producer whose H264 screen reached an external browser over a TURN-relayed",
+    "WebRTC stream. specVersion 4 records the INPUT half: a work-host-signed",
+    "validate, a datachannel the producer opens only while the server grants it,",
+    "declared frames parsed and injected with XTEST, and the channel closing when",
+    "the window closes while the stream stays up.",
     "",
-    "verify with scripts/verify_display_attach.sh (cross-reads server constants)."
+    "What is still unverified is ONE thing, and it is named rather than implied:",
+    "the input round trip INSIDE a CubeSandbox microVM, over a relay candidate",
+    "(`unverified.inputDeliveryInMicroVM`). The media half already ran there; the",
+    "input half so far has run against the same producer image elsewhere.",
+    "",
+    "verify with scripts/verify_display_attach.sh (cross-reads server constants)",
+    "and scripts/display_input_e2e.py (the input half, inside the template image)."
   ],
   "specVersion": 4,
   "adr": [
@@ -21,7 +27,7 @@
   ],
   "goal": "LIVE-3",
   "runtimeVerified": {
-    "$comment": "#1438 measured 2026-08-16 (display). LIVE-5c measured 2026-08-18 (input). #1438 evidence: external Chromium rendered display-e2e-1438 at 1280x720, 56 frames decoded, media candidate pair relay<->relay; coturn logged ALLOCATE+CHANNEL_BIND success from BOTH the producer (101.79.18.230) and the browser (39.115.69.188), over TURN transport=udp AND transport=tcp. LIVE-5c evidence: scripts/display_input_e2e.py against THIS producer image — a server-signed validate answered input_enabled=true, the producer opened momo.input.v1, key frames encoded to signalling.inputChannel were parsed and injected with XTEST, and the typed command RAN in a real terminal on the captured X display (the proof is the file it wrote, not the frames sent). The same harness with an observer capability got input_enabled=false and an offer with NO m=application. Measured on the template image, NOT inside a CubeSandbox microVM — see unverified.inputDeliveryInMicroVM.",
+    "$comment": "#1438 measured 2026-08-16 (media). LIVE-5c measured 2026-08-18 (input). #1438 evidence: external Chromium rendered display-e2e-1438 at 1280x720, 56 frames decoded, media candidate pair relay<->relay; coturn logged ALLOCATE+CHANNEL_BIND success from BOTH the producer (101.79.18.230) and the browser (39.115.69.188), over TURN transport=udp AND transport=tcp. LIVE-5c evidence, all from scripts/display_input_e2e.py against THIS producer image: (a) a work-host-SIGNED validate answered input_enabled=true and the offer carried m=application; (b) key frames encoded to signalling.inputChannel were parsed and injected with XTEST, and the typed command RAN in a real terminal on the captured X display — the proof is the file it wrote, not the frames sent; (c) the same harness with an OBSERVER capability got input_enabled=false and an offer with NO m=application; (d) when the control window was closed server-side, the channel closed, the peer connection and signalling socket STAYED UP, and a command typed afterwards did not run — measured while the signalling socket was being flooded with frames the message loop discards, because that is the case where a re-validation in the wrong place starves. Measured on the template image, NOT inside a CubeSandbox microVM — see unverified.inputDeliveryInMicroVM.",
     "producerEncodesInMicroVM": true,
     "browserRendersOverTurnRelay": true,
     "measuredResolution": "1280x720",
@@ -30,7 +36,11 @@
     "producerOpensChannelOnGrant": true,
     "keystrokeReachesAnApplication": true,
     "observerGetsNoDatachannel": true,
-    "producerSignsValidate": true
+    "producerSignsValidate": true,
+    "inputRevokedWhenWindowCloses": true,
+    "streamSurvivesRevocation": true,
+    "injectionStopsAfterRevocation": true,
+    "revalidationSurvivesSignallingFlood": true
   },
   "template": {
     "$comment": [
@@ -83,7 +93,7 @@
       "trigger": "validate.input_enabled == true",
       "revokeOn": "validate.input_enabled == false",
       "viewerRequestIsNotAuthorisation": true,
-      "$comment": "LIVE-3 / ADR-0004 증보 3. RUNTIME-VERIFIED (LIVE-5c): the producer reads input_enabled off its OWN validate answer, opens the channel between READY and PLAYING so it lands in the first offer, and closes it at the re-validation that first answers false. A viewer's `open_input` is still refused by name — asking is not authorisation.",
+      "$comment": "LIVE-3 / ADR-0004 증보 3. RUNTIME-VERIFIED (LIVE-5c): the producer reads input_enabled off its OWN validate answer, opens the channel between READY and PLAYING so it lands in the first offer, and closes it at the re-validation that first answers false — measured by closing the window server-side and watching the channel close while the stream stayed up. A viewer's `open_input` is still refused by name: asking is not authorisation. The re-validation runs at the TOP of the producer's message loop, where no discarded frame can skip it; a viewer that could starve it would keep a keyboard the server had already taken away.",
       "closedOn": "the first re-validation answering input_enabled == false"
     },
     "recording": false,
@@ -198,7 +208,24 @@
       "carriesCharacter": false,
       "transport": "JSON text frames (RTCDataChannel send-string)",
       "frameRefusalIsSilentToTheViewer": true,
-      "$refusalComment": "A frame the producer will not inject is counted and logged BY REASON, never echoed and never logged as a frame: a log holding a sequence of key frames is a keylogger written by accident."
+      "$refusalComment": "A frame the producer will not inject is counted and logged BY REASON, never echoed and never logged as a frame: a log holding a sequence of key frames is a keylogger written by accident.",
+      "$keyFrameComment": [
+        "The producer injects the PHYSICAL KEY EVENT and nothing else: `code` becomes",
+        "one XTEST key press or release, and `ctrl`/`shift`/`alt`/`meta`/`repeat` are",
+        "read by NO ONE on the producer side.",
+        "",
+        "That is deliberate, and it is why the modifiers stay declared. The web client",
+        "forwards a modifier press as its OWN key frame (`ShiftLeft` down arrives",
+        "before the character it shifts, and its up arrives after), so the far side",
+        "holds real modifier state from real key events. Synthesising modifiers from",
+        "these booleans AS WELL would apply them twice — a shifted character typed",
+        "with the shift already physically down.",
+        "",
+        "So they are carried as CONTEXT, for a viewer or a log to reason about intent,",
+        "never as an instruction. A producer that started honouring them would need",
+        "the client to stop sending modifier keys in the same change."
+      ],
+      "modifiersAreAdvisory": true
     }
   },
   "ice": {

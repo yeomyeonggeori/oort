@@ -28,7 +28,35 @@ proves the INPUT half against the **real** producer — the one the template bak
   4. `revocation`  when the server stops granting (`input_enabled: false` at the
                    next re-validation), the channel closes and later frames land
                    nowhere. The STREAM stays up: a returned window is not a
-                   revoked capability, and the person keeps watching.
+                   revoked capability, and the person keeps watching. Run this
+                   with `--watch-revoke`, and close the window from the server
+                   side while it waits.
+  5. `jamming`     `--jam` floods the SIGNALLING socket with frames the message
+                   loop discards (non-text, and text that is not JSON) while the
+                   revocation is pending. The re-validation is the only clock
+                   that can take the keyboard away, so a loop that lets discarded
+                   frames skip it lets a returned controller keep typing.
+
+THE RED PROOF FOR (5), AND HOW TO RE-RUN IT
+===========================================
+
+The producer's re-validation must sit at the TOP of its message loop, where no
+`continue` can jump over it. To prove that is load-bearing rather than tidy,
+move the `if time.monotonic() > deadline:` block in `handle_connection` back
+below the message handlers, rebuild the image, and run:
+
+    display_input_e2e.py --capability <controller> --jam --watch-revoke 75
+
+...then close the control window from the server side. MEASURED 2026-08-18:
+
+  * check at the BOTTOM — the window closed and 75s later the input channel was
+    still open and XTEST injection still live. The producer never re-validated
+    once, because the jamming frames hit `continue` every pass.
+  * check at the TOP — revoked within one re-validation period: channel closed,
+    stream up, keys typed afterwards reached nothing.
+
+A returned window that keeps typing is worse than a stream that never started,
+so this is the ordering that has to be defended by a test rather than a comment.
 
 It does **not** prove the CubeSandbox/TURN leg — that a microVM on
 momo-cube-host relays this same exchange over a `typ relay` candidate. That is
@@ -391,6 +419,84 @@ def wait_for(predicate, timeout: float, stage: str, detail: str):
 
 
 BEAT_PATH = "/tmp/momo-input-beats.txt"
+REVOKE_PATH = "/tmp/momo-input-after-revoke.txt"
+OPCODE_BINARY = 0x2
+
+
+def jam(peer: Peer, stop: threading.Event, interval: float) -> None:
+    """Flood the signalling socket with frames the producer's loop discards.
+
+    Not a stress test — a starvation test. Both of these are dropped by the
+    message loop, and if the loop's re-validation sits after the drop, a viewer
+    sending them faster than the tick keeps the producer from ever asking the
+    server whether this person still holds the window. The keyboard then outlives
+    the grant, which is the one thing the control window exists to bound.
+    """
+    while not stop.is_set():
+        try:
+            # A binary frame: discarded for its opcode.
+            _send_frame(peer, b"\x00\x01\x02\x03", OPCODE_BINARY)
+            # A text frame that is not JSON: discarded at the parse.
+            _send_frame(peer, b"{not json at all")
+        except (OSError, E2EFailure):
+            return
+        time.sleep(interval)
+
+
+def watch_revoke(viewer: "Viewer", peer: Peer, args) -> int:
+    """Prove the keyboard goes away when the server stops granting it.
+
+    Three assertions, because "the channel closed" alone would also be true of a
+    dead connection, and a dead connection is the WRONG outcome: returning a
+    window must leave the person watching the screen they no longer drive.
+    """
+    log(f"revoke: waiting up to {args.watch_revoke}s for the server to close the window")
+    if not viewer.channel_closed.wait(args.watch_revoke):
+        raise E2EFailure(
+            "revoke",
+            "the input channel was still open after the control window closed — "
+            "the producer never re-validated (see the jamming note in this file's "
+            "header) or never acted on the answer",
+        )
+    log("revoke: input channel CLOSED")
+
+    # The stream must NOT have been cut with it.
+    try:
+        send_json(peer, {"type": "ping-not-a-frame-type"})
+    except OSError as exc:
+        raise E2EFailure(
+            "revoke", f"the signalling socket died with the window ({exc}) — "
+            "a returned window must leave the stream up"
+        )
+    if viewer.webrtc.get_property("connection-state").value_nick in ("failed", "closed"):
+        raise E2EFailure(
+            "revoke",
+            "the peer connection ended with the control window — the person "
+            "should still be watching",
+        )
+    log("revoke: stream still up (peer connection alive, signalling alive)")
+
+    # And input really is gone: a typed command after the close must not run.
+    marker = "AFTER-REVOKE"
+    try:
+        for frame in frames_for_text(f"echo {marker} > {REVOKE_PATH}"):
+            viewer.send_input(frame)
+            time.sleep(0.004)
+        viewer.send_input(key_frame("down", "Enter"))
+        viewer.send_input(key_frame("up", "Enter"))
+    except Exception:  # noqa: BLE001
+        # Sending on a closed channel raising is itself a pass for this half.
+        pass
+    time.sleep(3)
+    if os.path.exists(REVOKE_PATH):
+        raise E2EFailure(
+            "revoke",
+            f"a command typed AFTER the window closed still ran ({REVOKE_PATH} "
+            "exists) — the channel closed but injection did not stop",
+        )
+    log("revoke: keys typed after the close reached nothing")
+    print("[input-e2e] PASS revocation (channel closed, stream up, injection stopped)")
+    return 0
 
 
 def soak(viewer: "Viewer", args) -> int:
@@ -491,6 +597,20 @@ def main() -> int:
         help="hold the session this long, typing periodically (credential ceiling)",
     )
     parser.add_argument("--soak-interval", type=float, default=15.0)
+    parser.add_argument(
+        "--watch-revoke",
+        type=float,
+        default=0.0,
+        help="after delivery, wait this long for the server to close the window "
+        "and assert the channel closes, the stream survives, and injection stops",
+    )
+    parser.add_argument(
+        "--jam",
+        action="store_true",
+        help="flood the signalling socket with discarded frames while waiting "
+        "(red proof: a re-validation that a `continue` can skip never fires)",
+    )
+    parser.add_argument("--jam-interval", type=float, default=0.05)
     args = parser.parse_args()
 
     import gi
@@ -508,8 +628,9 @@ def main() -> int:
     loop = GLib.MainLoop()
     threading.Thread(target=loop.run, daemon=True).start()
 
-    if os.path.exists(args.proof_path):
-        os.unlink(args.proof_path)
+    for stale in (args.proof_path, REVOKE_PATH):
+        if os.path.exists(stale):
+            os.unlink(stale)
 
     peer = dial(args.host, args.port, args.capability)
     log("attached")
@@ -572,6 +693,15 @@ def main() -> int:
             "keys were sent but nothing reached the screen",
         )
         log(f"DELIVERED: the typed command wrote {args.proof_path}")
+
+        if args.jam:
+            log("jamming the signalling socket with frames the loop discards")
+            threading.Thread(
+                target=jam, args=(peer, stop, args.jam_interval), daemon=True
+            ).start()
+
+        if args.watch_revoke > 0:
+            return watch_revoke(viewer, peer, args)
 
         if args.soak_seconds > 0:
             return soak(viewer, args)
