@@ -203,9 +203,11 @@ function WorkspaceAvatarField({
  * Esc, the question is its own named node), which is why four other settings
  * sections already use it.
  *
- * The pending signal rides a SIBLING status line rather than a new axis on the
- * shared component — the same shape `AiLinkSection` uses for 연결 확인, and it
- * keeps the other four call sites untouched.
+ * The pending signal USED TO ride a sibling status line, because the shared
+ * component had no axis for it and adding one would have touched four other call
+ * sites. #1490 added the axis (`busy` + `busyLabel`), so the word now rides the
+ * trigger itself — which is both where the focus is when the write goes out and
+ * the only node whose grey the reader was reading as a refusal (#1502).
  *
  * The last owner is refused by the server (409) and told to transfer ownership
  * first; on success the local session is cleared, since with a single session
@@ -250,26 +252,26 @@ function LeaveWorkspace({
         </p>
       )}
       <div className="flex flex-wrap items-center gap-2">
+        {/* 진행은 잠금이 아니다 (#1403 리뷰 H-1 · #1486 문법). 이 버튼은 자기가
+            낸 쓰기로 자신을 잠그고 있었고, 그래서 나가기를 누른 사람 앞의 트리거가
+            회색이 됐다 — 「당신은 이걸 못 한다」로 읽히는 칠이다. 진행을 말하는
+            일은 그 옆의 형제 상태 줄 하나가 대신 지고 있었다.
+
+            #1490 이 `ConfirmButton` 에 `busy` 를 실은 뒤로는 그 줄이 있을 이유가
+            없다. 낱말은 트리거 자신이 진다 — 확정이 질문을 먼저 닫으므로 쓰기가
+            나가는 순간 초점이 서 있는 자리가 거기다. 잠그는 사실로 남는 것은
+            오프라인 하나다. 형제 줄을 함께 두면 100px 안에 같은 낱말이 둘 서고,
+            그중 하나는 회색 버튼 옆에서 자기가 무엇의 진행인지 말하지 못한다. */}
         <ConfirmButton
           label="워크스페이스 나가기"
           question="나가면 멤버십이 끝나고, 확인하면 바로 로그아웃됩니다. 다시 들어오려면 초대가 필요합니다."
           confirmLabel="나가기"
-          disabled={offline || leave.isPending}
+          disabled={offline}
+          busy={leave.isPending}
+          busyLabel="나가는 중"
           onConfirm={() => leave.mutate()}
           testId="workspace-leave"
         />
-        {/* 요청이 나가 있는 동안의 유일한 신호. 성공하면 셸 자체가 사라지므로
-            (로그아웃) 이 줄은 실패했을 때만 오래 산다. */}
-        {leave.isPending && (
-          <span
-            className="flex items-center gap-1 text-meta text-ink-muted"
-            role="status"
-            data-testid="workspace-leave-pending"
-          >
-            <Loader2 aria-hidden="true" className="spinner-busy" />
-            나가는 중
-          </span>
-        )}
       </div>
     </div>
   );

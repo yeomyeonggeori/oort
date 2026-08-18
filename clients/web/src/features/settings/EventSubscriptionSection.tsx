@@ -195,6 +195,16 @@ export function EventSubscriptionSection({
 
   const rows = subscriptions.data ?? [];
   const busy = toggle.isPending || remove.isPending;
+  // 진행은 잠금이 아니다 (#1403 리뷰 H-1 / #1486 문법). `busy` 는 목록 전체의
+  // 사실이라 그것을 줄의 지우기 버튼에 그대로 넘기면, 지우기를 누른 그 줄이
+  // **자기가 켠 busy 로 자신을 잠근다** — 유일한 진행 낱말이 흐림 아래에서 죽고
+  // 낭독은 「지우는 중, 사용 안 함」이 된다.
+  //
+  // 그래서 진행은 목록이 아니라 **줄**의 사실로 좁힌다: 지금 날고 있는 삭제가
+  // 어느 줄의 것인지는 mutation 이 들고 있는 variables 가 안다. 나머지 줄에게는
+  // 그 쓰기가 여전히 잠금이고, 그것이 옳다 — 그 줄들은 진행 중이 아니라 앞선
+  // 쓰기 때문에 지금 못 하는 것이다.
+  const removingId = remove.isPending ? (remove.variables?.id ?? null) : null;
 
   // Every branch below is the LIST's answer, and only the list's. The form
   // outlives all of them (design review #1203 M5): a 503 on the read says
@@ -231,6 +241,7 @@ export function EventSubscriptionSection({
               subscription={subscription}
               offline={offline}
               busy={busy}
+              removing={removingId === subscription.id}
               // The reason a row's controls are grey is one fact, so it is
               // written once and pointed at from all of them (R2 N-R4). Three
               // rows made it three sentences; twenty would make it twenty.
@@ -306,6 +317,7 @@ function SubscriptionRow({
   subscription,
   offline,
   busy,
+  removing,
   offlineReasonId,
   writesOfflineReason,
   issue,
@@ -315,6 +327,14 @@ function SubscriptionRow({
   subscription: EventSubscription;
   offline: boolean;
   busy: boolean;
+  /**
+   * 지금 날고 있는 삭제가 **이 줄의 것**인가.
+   *
+   * `busy` 와 갈라져 있는 이유가 이 goal 이다 (#1502): 목록의 사실(`busy`)로
+   * 줄의 버튼을 잠그면 지우기를 누른 줄이 자기가 켠 진행으로 자신을 잠근다.
+   * 진행은 낱말과 `aria-busy` 가 지고, 잠금은 나머지 줄들의 몫이다.
+   */
+  removing: boolean;
   /** Id of the one offline sentence this list writes. */
   offlineReasonId: string;
   /** This row is the one that renders it. */
@@ -418,7 +438,12 @@ function SubscriptionRow({
           describedBy={offlineReason}
           question="지우면 전송이 즉시 끊기고 되돌릴 수 없습니다."
           confirmLabel="지우기"
-          disabled={offline || busy}
+          disabled={offline || (busy && !removing)}
+          busy={removing}
+          // 한자어 동작명사가 없는 자리라 고유어 동사가 「-는 중」을 쓴다 (#1501).
+          // `subject` 가 함께 서 있으므로 목록 한복판에서도 낭독은 「…구독 지우는
+          // 중」 — 어느 줄이 지워지는 중인지가 남는다.
+          busyLabel="지우는 중"
           onConfirm={onDelete}
           onAskingChange={setConfirming}
           testId="event-subscription-delete"
