@@ -47,11 +47,13 @@ import { loginHandoffSeeksControl } from "@momo/core/features/timeline/loginHand
 // LIVE-5b / ADR-0004 증보 3. Three kinds of test, proving three different things:
 //
 //   * the CONTRACT tests read `template.spec.json`'s `signalling.inputChannel`
-//     and assert this client encodes exactly what it declares. That block is
-//     DECLARED ONLY — no producer has ever parsed one of these frames
-//     (`unverified.inputChannelProtocol`) — so what this proves is that the two
-//     halves of the contract cannot drift while nobody is looking, never that
-//     the wire works.
+//     and assert this client encodes exactly what it declares. Since LIVE-5c a
+//     real producer PARSES these frames and a typed command reaches a terminal
+//     on the captured display (`runtimeVerified.keystrokeReachesAnApplication`),
+//     so the block is no longer one side's guess — but what these tests still
+//     prove is only that the two halves cannot drift while nobody is looking.
+//     That the wire works is measured by `scripts/display_input_e2e.py`, and
+//     inside a microVM it is still owed (`unverified.inputDeliveryInMicroVM`).
 //   * the auto-return tests hold the mapping from "what this client observed"
 //     to "why the window closed". It is total by construction, which is the
 //     property that makes "a control window never outlives its holder" testable
@@ -88,6 +90,7 @@ const TEMPLATE_SPEC = JSON.parse(
 ) as {
   signalling: {
     inputChannel: {
+      modifiersAreAdvisory: boolean;
       label: string;
       openedBy: string;
       viewerOpensChannel: boolean;
@@ -104,6 +107,7 @@ const TEMPLATE_SPEC = JSON.parse(
     };
   };
   producer: { inputDatachannelOnDemand: { trigger: string; revokeOn: string } };
+  runtimeVerified: Record<string, string | boolean>;
   unverified: Record<string, string>;
 };
 
@@ -319,12 +323,34 @@ describe("the input frames, against the contract that declares them", () => {
     expect(frame).toEqual({ type: "wheel", action: "scroll", dx: -12, dy: 120 });
   });
 
-  it("is labelled as declared-only, because no producer has ever read one", () => {
-    // The honesty label is part of the contract, not a footnote to it. Deleting
-    // it would turn this client's guess into "the protocol" by default, which
-    // is exactly what LIVE-5c has to be free to correct.
-    expect(TEMPLATE_SPEC.unverified.inputChannelProtocol).toContain("DECLARED ONLY");
-    expect(TEMPLATE_SPEC.unverified.inputDelivery).toBeTruthy();
+  it("is a protocol a producer has now read, and says where that was measured", () => {
+    // The honesty label is part of the contract, not a footnote to it. It used
+    // to read DECLARED ONLY, because nothing had ever parsed one of these
+    // frames; LIVE-5c implemented the producer half against this same block and
+    // measured it, and the field names needed no correction. What replaces the
+    // old label is not silence — an unqualified "verified" would hide that the
+    // measurement was made against the template IMAGE and not yet inside a
+    // CubeSandbox microVM, which is the half still owed.
+    expect(TEMPLATE_SPEC.runtimeVerified.producerParsesInputFrames).toBe(true);
+    expect(TEMPLATE_SPEC.runtimeVerified.keystrokeReachesAnApplication).toBe(true);
+    // Delivery and revocation graduate together or not at all: this client's
+    // auto-return machinery below is only worth anything if the far side
+    // actually stops typing, and a keyboard that arrives and never leaves is the
+    // worse half of the pair.
+    expect(TEMPLATE_SPEC.runtimeVerified.inputRevokedWhenWindowCloses).toBe(true);
+    expect(TEMPLATE_SPEC.runtimeVerified.streamSurvivesRevocation).toBe(true);
+    expect(TEMPLATE_SPEC.unverified.inputDeliveryInMicroVM).toBeTruthy();
+  });
+
+  it("declares the modifier fields it sends as advisory, not as instructions", () => {
+    // This client forwards a modifier press as its OWN key frame, so the far
+    // side holds real modifier state from real key events. If the producer ALSO
+    // synthesised modifiers from these booleans they would apply twice. The
+    // spec says so out loud, because the two halves cannot both decide.
+    expect(TEMPLATE_SPEC.signalling.inputChannel.modifiersAreAdvisory).toBe(true);
+    for (const modifier of ["ctrl", "shift", "alt", "meta"]) {
+      expect(TEMPLATE_SPEC.signalling.inputChannel.keyFrame).toContain(modifier);
+    }
   });
 
   it("has a release key, and it is not swallowed and not forwarded", () => {

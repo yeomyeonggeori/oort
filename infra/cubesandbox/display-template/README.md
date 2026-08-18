@@ -9,9 +9,21 @@ that a teammate can **watch** an agent work, and cannot type into it.
 > stream relayed through the oort TURN (`momo-turn`), relay↔relay, at 1280x720.
 > `template.spec.json` records the measurement under `runtimeVerified`, and
 > `scripts/verify_display_attach.sh` cross-reads the contract against the server's
-> own constants. What is **still** unverified is *input delivery* (LIVE-3 control
-> reaching a screen) — named in `template.spec.json` under `unverified`. The
-> earlier open risk, "can a browser reach the sandbox at all", is **resolved** —
+> own constants. **LIVE-5c (2026-08-18) added the input half and measured it**: a
+> work-host-signed `validate` answered `input_enabled: true`, the producer opened
+> `momo.input.v1`, parsed the declared frames, and a typed command *ran in a
+> terminal on the captured display* — the proof is the file it wrote, not the
+> frames sent (`scripts/display_input_e2e.py`). Closing the window server-side
+> then closed the channel while the **stream stayed up**, and a command typed
+> afterwards did not run — measured while the signalling socket was being flooded
+> with frames the message loop discards, because that is exactly where a
+> re-validation in the wrong place starves and a returned keyboard survives. An
+> observer capability still gets `input_enabled: false` and an offer with no
+> `m=application`. What is **still**
+> unverified is that same input round trip *inside a CubeSandbox microVM over a
+> relay candidate* — named in `template.spec.json` as
+> `unverified.inputDeliveryInMicroVM`. The earlier open risk, "can a browser
+> reach the sandbox at all", is **resolved** —
 > see [How a browser reaches the sandbox](#how-a-browser-reaches-the-sandbox).
 
 ## The files
@@ -85,11 +97,17 @@ lose the property:
 2. **The server.** `POST …/display-attach` answers a `controller` request with
    403 by name, and `momo_t3::AttachKind::permits_mode` refuses it again inside
    the validation path.
-3. **The producer.** Its SDP offer contains no `m=application` section, so there
-   is no datachannel to negotiate. A viewer that sends `open_input` gets
-   `{"type":"error","reason":"view_only"}` and the stream keeps running. #1438
-   measured this on the wire: the real producer's OFFER carried `m=video
-   a=sendonly` and **no** `m=application`.
+3. **The producer.** For an observer its SDP offer contains no `m=application`
+   section, so there is no datachannel to negotiate. A viewer that sends
+   `open_input` gets `{"type":"error","reason":"view_only"}` and the stream keeps
+   running — and since LIVE-5c that refusal is the load-bearing half rather than
+   a leftover: a viewer's *request* is never an authorisation, so a controller
+   that holds a grant already **has** a channel (the producer opened it off the
+   validate answer) and one that does not is making exactly the move that must
+   not work. #1438 measured the observer shape on the wire (`m=video a=sendonly`,
+   **no** `m=application`); LIVE-5c measured both shapes against one producer,
+   including the channel closing at the first re-validation that answers
+   `input_enabled: false` while the stream stays up.
 
 Layers 1 and 2 decide who may watch, layer 3 decides what watching *is*.
 `scripts/display_signaling_probe.py` proves the contract with two local peers,

@@ -381,10 +381,35 @@ envd init request failed: Post "http://192.168.0.7:49983/init": connection refus
 |---|---|---|
 | `network.mediaUdpPortRange: [50000, 50100]` | **강제 불가**. GStreamer 1.22 `webrtcbin`에 포트 레인지 속성이 없다. 게다가 `webrtcbin.get_property("ice-agent")`는 **PyGObject에서 ICE 객체를 파괴한다**(읽는 행위가 부작용 — 이후 모든 협상이 `GST_IS_WEBRTC_ICE` assertion으로 사망). **읽지 말 것.** | **해소** — `mediaUdpPortRange.enforced=false`로 명문화(+ relay 토폴로지에선 인터넷 대면 포트는 momo-turn의 49152–65535라 무의미). "`ice-agent` 읽지 말 것"은 producer 주석·스펙에 각인 |
 | `momo-display-producer.service`(systemd 유닛) | `create-from-image` 템플릿에는 **systemd도 envd도 없고 이미지 CMD가 PID1**이다. 유닛 파일은 이 기재에서 실행되지 않는다 — 순서(X→producer)를 entrypoint로 옮겨야 한다. | **해소** — `.service` **삭제**, 순서를 `entrypoint.sh`로 이관, `Dockerfile` CMD = `momo-bootstrap-init -- entrypoint.sh`(PID1 수신기). 레포 랜딩 완료 |
-| `signalling.validateRoute` | 서버 부재로 **미검증**(stub 경로로만 왕복) | **여전히 미검증** — #1438은 `MOMO_DISPLAY_STUB_VALIDATE=1`로 미디어 도달성만 격리. 실서버 `validate` 결선은 LIVE-1..4 서버 몫(§9, `unverified.serverValidateWiring`) |
+| `signalling.validateRoute` | 서버 부재로 **미검증**(stub 경로로만 왕복) | **LIVE-5c에서 해소(§8-D)** — producer가 `momo.work_host.request.v2` Ed25519 서명을 붙여 실서버 `validate`를 호출하고 200 + `input_enabled`를 받는다. #1438의 `MOMO_DISPLAY_STUB_VALIDATE=1`은 서버 없는 설치 goal 전용 탈출구로만 남는다 |
 | `ice.stun: []`, `ice.turn: null` | 실물 기본값과 일치. 결과적으로 후보가 **링크로컬뿐** → 브라우저 도달 불가 확정(§5.3) | **해소** — `ice.policy=relay` + `ice.turn.required=true`(oort momo-turn) + `network.iceBase`(라우팅 가능 base 주입)로 링크로컬 문제 우회. ADR-0165 **증보 2 초안**(성재 결재 대기) |
 
 **producer 자산은 이제 레포에 있다**(#1455 랜딩, track/engine): `infra/cubesandbox/display-template/`의 `Dockerfile`·`entrypoint.sh`·`momo-display-producer`·`template.spec.json`(specVersion 3) + PID1 수신기 `../bootstrap-init/momo-bootstrap-init`. **템플릿이 굽는 것은 레포에서 리뷰 가능해야 한다**는 원칙(`infra/workd/*.service`의 이유)이 충족됐다. `chore/1414-display-state-captures` 참조는 폐기.
+
+### D. LIVE-5c(#1565) — 입력 절반이 붙었다. 실측 3건은 **문서가 아니라 코드를 고쳤다**
+
+specVersion **4**. producer가 이제 ①서버가 승인한 동안에만 datachannel을 열고 ②프레임을 파싱해 XTEST로 주입하며 ③`validate`를 work-host 키로 **서명**하고 ④창이 닫히면 채널을 닫되 **스트림은 유지**한다. 아래 5건은 전부 "돌려 보기 전에는(또는 적대적 입력을 가정해 보기 전에는) 알 수 없었던" 것들이다.
+
+| # | 실측 | 원인과 처방 |
+|---|---|---|
+| **D-1** | **`bundle-policy=none`이면 키보드가 영영 안 온다** | webrtcbin 기본값은 m-line마다 별도 ICE/DTLS 전송을 요구한다. m-line이 **하나뿐이던 #1438에선 보이지 않았다**. `m=application`이 붙는 순간 ICE는 `completed`까지 가고 연결은 DTLS에서 `failed` — **화면은 붙고 키보드만 안 오는데 어떤 로그도 이유를 말하지 않는다**. 처방: producer가 협상 전에 `bundle-policy=max-bundle`을 세운다(브라우저가 협상하는 값이기도 하다) |
+| **D-2** | **시그널링 침묵 30초면 세션이 죽었다** | 협상이 끝나면 시그널링 소켓은 **조용해진다**(입력은 datachannel, 미디어는 ICE). 그런데 세션 루프가 `recv` 타임아웃을 **종료**로 취급해, 마지막 ICE 후보 ~30초 뒤 모든 세션이 죽었다 → **재검증이 단 한 번도 실행되지 않았고**, control window 리스는 갱신되지 않았으며, 사람의 키보드는 30초쯤에 멈췄다. LIVE-5c 이전엔 세션을 그만큼 길게 붙잡아 본 것이 없어서 드러나지 않았다. 처방: 루프를 **시계**로 돌린다 — `select` 대기(틱 5초), 타임아웃은 재검증 틱이지 종료가 아니다. `select`인 이유는 프레임 중간 타임아웃이 채널을 desync하기 때문 |
+| **D-3** | **자격 TTL은 실행 중 스트림을 끊지 않는다** (§9-9 참조) | coturn은 REST username의 만료를 **ALLOCATE에서** 검증하고, 이미 존재하는 allocation의 **REFRESH에선 다시 보지 않는다**. TTL 60초로 200초 소크 — 타이핑 비트 10/10 전달(마지막 t+180s), relay-only. `unverified.credentialCeiling`이 예측한 "TTL 넘으면 화면이 까매진다"는 **성립하지 않는다** |
+| **D-4** | **버려지는 프레임이 재검증을 굶길 수 있었다**(freeze 리뷰 C1) | 세션 루프의 재검증 검사가 **하단**에 있어, non-text·비JSON 프레임의 `continue`가 그것을 건너뛰었다. 반환된(또는 적대적) controller가 tick보다 빠르게 쓰레기 프레임을 흘리면 **재검증이 영영 굶고 `revoke_input()`이 불리지 않는다** — 서버가 이미 닫은 창의 키보드가 살아남는다. 입력 축이 생긴 이 파도에서 처음 무기화된다. **처방**: 검사를 루프 **선두**로(어떤 `continue`도 건너뛸 수 없는 자리). ping(0x9)은 pong으로 소비한다. **red proof**: `display_input_e2e.py --jam --watch-revoke` — 하단 배치 시 창을 닫고 **75초 뒤에도 채널이 열려 있고 주입이 살아 있었다**; 선두 배치 시 재검증 1주기 안에 채널이 닫히고 스트림은 유지됐다 |
+| **D-5** | **`ready`를 먼저 보내고 채널을 나중에 만들면 거짓말이 된다**(freeze 리뷰 M1) | 채널 생성 실패 시 조용히 view-only로 강등되는데, viewer는 이미 `input_enabled: true`를 받은 뒤라 `ondatachannel`을 영원히 기다리며 **허공에 타이핑한다**. **처방**: `Session.prepare()`(빌드·채널 생성)와 `begin()`(협상 시작)을 분리하고, `ready`는 그 사이에서 **실제 결과**(`session.input_enabled`)로 보낸다 |
+
+**서명 자격 배달**: work-host Ed25519 seed는 등록 토큰과 **같은 길**로 간다 — `envVars`의 `MOMO_WORK_HOST_SIGNING_KEY` → `momo-bootstrap-init`이 0600 파일로 랜딩 → 워크로드엔 `MOMO_WORK_HOST_KEY_PATH`(값이 아니라 **경로**)만 준다. `/proc/<pid>/environ`은 샌드박스 안 아무나 읽지만 0600 파일은 아니다. 프록시 인증서는 `MOMO_DISPLAY_SERVER_CA_PEM_B64`(공개 인증서, base64 — envVars 검증기가 제어문자를 거부하므로)로 실어 entrypoint가 파일로 쓴다. **검증을 끄지 않는다**: 자체서명 leaf는 자기 자신으로 검증되므로 그 한 장을 지목하는 것이지 아무거나 받는 것이 아니다.
+
+**호스트 실측(2026-08-18)**: 템플릿 **`momo-display4`**(tpl-a265734126184a2e8aedede0) READY. 이 템플릿으로 microVM을 **실제로 띄웠고**(sandbox `70050f4f…`, `envVars` 실은 create가 **201** — #1437 수신기가 새 코드에서도 산다), `/health` 200, 형상 A 프록시 업스트림 재결선 후 **view-only 계약이 그대로였다**:
+
+```
+ready: {'display_id': 'display-live5c-host', 'mode': 'observer', 'input_enabled': False, 'codec': 'H264'}
+PASS view-only intact on the real microVM: no m=application, a=sendonly
+```
+
+즉 **입력 절반을 넣은 producer가 관전자에겐 여전히 아무 입력 경로도 열지 않는다**는 것이 실기재에서 확인됐다(D4 무회귀).
+
+**아직 못 한 것은 microVM 안에서의 controller 왕복 하나**다. producer의 `validate`가 **microVM에서 닿는 momo-server**를 요구하는데, 로컬 서버를 호스트로 터널링하는 것도 호스트에 서버를 세우는 것도 이 goal의 권한 밖이었다(§9-8). 입력 왕복 자체는 **같은 producer 이미지**를 상대로 측정했다(`scripts/display_input_e2e.py`).
 
 ---
 
@@ -399,3 +424,5 @@ envd init request failed: Post "http://192.168.0.7:49983/init": connection refus
 | 5 | **producer 미디어 실도달** | **✅ 해소(#1438)** — momo-turn relay로 외부 브라우저 실화면 도달(1280x720 H264 56프레임, relay↔relay, udp+tcp). 도달 요건은 **relay 강제 + 라우팅 가능 ICE base 주입**(링크로컬 root-cause, §8-B). ADR-0165 증보 2 초안. **잔여**: 실서버 `validate` 결선(#1438은 `STUB_VALIDATE`) · input delivery(LIVE-5) |
 | 6 | **UDP 헤어핀 재측정** | **비임계로 강등(#1438)** — momo-turn이 CubeSandbox 호스트와 **별도 공인 호스트**라 헤어핀은 배치 토폴로지에 불필요(동거 가설의 잔여 질문일 뿐). ACG UDP 규칙 신설은 동거를 시도할 때만 필요 |
 | 7 | **재부팅 생존** | **미시험**(콘솔 복구 수단 부재로 의도적 회피). 대신 `firewall-cmd --reload`로 근사 검증했고, 모든 유닛의 `enabled` 상태·NM zone·레지스트리 `restart=always`를 정적으로 확인했다 |
+| 8 | **microVM 안에서의 input delivery** | **미측정(LIVE-5c 잔여)** — 템플릿 `momo-display4`는 READY로 올라가 있고 입력 절반은 **같은 producer 이미지**에서 실측됐다(§8-D). 남은 것은 microVM + relay 경로에서의 동일 왕복이며, 막힌 지점은 하나다: producer의 `validate`가 **microVM에서 닿는 momo-server**를 요구한다. 로컬 서버를 호스트로 터널링하는 것도, 호스트에 서버를 세우는 것도 이 goal의 권한 밖이었다. **선행 조건**: momo-cube-host가 도달할 수 있는 momo-server 인스턴스(공인 배포 또는 §4.4 nginx에 `/v1/` 업스트림 추가) |
+| 9 | **자격 TTL 천장(remint)** | **측정 완료 → 구현 불요(§8-D-3)**. coturn은 ALLOCATE에서만 REST username 만료를 보고 기존 allocation의 REFRESH에선 보지 않는다 → 실행 중 스트림은 TTL을 넘겨도 끊기지 않는다(60s TTL / 200s 소크 / 비트 10-10 전달). **택일: (b) TTL을 세션 상한으로 두되 "천장"이라는 서술 자체를 정정** — ICE 재협상(a)은 만들지 않는다. 잔여 좁은 케이스: 세션 중 **재-ALLOCATE**(ICE restart)는 새 자격이 필요하며, 그 시점에 mint 하면 된다(주기적 교체가 아니라) |

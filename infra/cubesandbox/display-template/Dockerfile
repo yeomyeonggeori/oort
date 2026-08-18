@@ -10,6 +10,23 @@
 #    network.iceBase) or webrtcbin cannot allocate a TURN relay.
 #  * The producer (momo-display-producer) forces ice-transport-policy=relay and
 #    wires the oort TURN from MOMO_DISPLAY_TURN_URI (delivered via envVars).
+#
+# LIVE-5c adds the input half, and three packages with it. Two are DEBIAN
+# packages rather than pip installs, because the producer stays stdlib-plus-
+# distro so that a gate never needs `pip install`:
+#   * python3-xlib          XTEST injection. A frame becomes a real X event on
+#                           the SAME server the capture pipeline reads, so the
+#                           picture the person is watching is what confirms the
+#                           delivery — there is no second input path that could
+#                           succeed while the screen disagreed.
+#   * python3-cryptography  Ed25519, to sign `display-attach/validate` as this
+#                           work host. That route is mounted outside the bearer
+#                           middleware on purpose: a bearer that reached the
+#                           sandbox would be a bearer the sandbox could spend.
+#   * xterm                 somewhere for a typed key to LAND. Without a focused
+#                           text surface an input E2E proves only that an event
+#                           was injected, not that it arrived; the evidence for
+#                           LIVE-5c is a character on a screen.
 FROM debian:bookworm-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -22,6 +39,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         x11-apps \
         python3 \
         python3-gi \
+        python3-xlib \
+        python3-cryptography \
+        xterm \
         gir1.2-glib-2.0 \
         gir1.2-gstreamer-1.0 \
         gir1.2-gst-plugins-base-1.0 \

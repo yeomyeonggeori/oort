@@ -1099,17 +1099,24 @@ describe("what this file does not prove", () => {
         ),
         "utf8"
       )
-    ) as { unverified?: Record<string, string>; runtimeVerified?: Record<string, string> };
+    ) as {
+      unverified?: Record<string, string>;
+      runtimeVerified?: Record<string, string | boolean>;
+    };
     // An honest label that can be deleted silently is not one — but a label that
     // was earned by measurement is allowed to graduate. #1438 built and booted the
     // template and a browser rendered the media through relay, so iceReachability,
     // producerSelection and templateBuild moved from `unverified` to
-    // `runtimeVerified`. What stays unverified from this client is the one thing
-    // #1438 did not cover: input delivery (LIVE-5). The honesty invariant holds —
-    // the label set is non-empty and the graduation is recorded, not silent.
+    // `runtimeVerified`. LIVE-5c then graduated input delivery the same way: a
+    // real producer parsed the declared frames and a typed command reached a
+    // terminal on the captured display. The honesty invariant is what this
+    // asserts, and it is unchanged — a graduation must be RECORDED under
+    // `runtimeVerified`, and the part that is still unmeasured (the same round
+    // trip inside a CubeSandbox microVM) must keep a label of its own.
     expect(spec.runtimeVerified?.browserRendersOverTurnRelay).toBeTruthy();
     expect(spec.runtimeVerified?.producerEncodesInMicroVM).toBeTruthy();
-    expect(spec.unverified?.inputDelivery).toBeTruthy();
+    expect(spec.runtimeVerified?.keystrokeReachesAnApplication).toBeTruthy();
+    expect(spec.unverified?.inputDeliveryInMicroVM).toBeTruthy();
   });
 
   it("mints and dials nothing at test time", () => {

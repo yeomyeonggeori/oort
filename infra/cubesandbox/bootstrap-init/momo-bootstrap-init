@@ -94,6 +94,24 @@ DEFAULT_READ_TIMEOUT_SECONDS = 5
 TOKEN_NAME = "MOMO_WORKD_REGISTRATION_TOKEN"
 TOKEN_FILE_NAME = "MOMO_WORKD_REGISTRATION_TOKEN_FILE"
 
+# LIVE-5c — the display producer's work-host SIGNING KEY travels the same road
+# as the registration token and for the same reason: `/proc/<pid>/environ` is
+# readable by anything else in the sandbox, and a 0600 file is not. It is a
+# longer-lived secret than the token, which makes the environ question worse
+# rather than better.
+#
+# Kept as a TABLE rather than a second special case, so the next per-provision
+# secret is a row here instead of another branch in `land`.
+SIGNING_KEY_NAME = "MOMO_WORK_HOST_SIGNING_KEY"
+SIGNING_KEY_FILE_NAME = "MOMO_WORK_HOST_KEY_PATH"
+DEFAULT_SIGNING_KEY_FILE = "/etc/momo/work-host-signing.key"
+
+# (delivered value name, name the workload is given instead, default path)
+PRIVATE_FILE_MATERIAL = (
+    (TOKEN_NAME, TOKEN_FILE_NAME, DEFAULT_TOKEN_FILE),
+    (SIGNING_KEY_NAME, SIGNING_KEY_FILE_NAME, DEFAULT_SIGNING_KEY_FILE),
+)
+
 NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 MAX_NAME_LENGTH = 128
 MAX_VALUE_LENGTH = 32 * 1024
@@ -187,28 +205,38 @@ def write_private(path: str, content: str) -> None:
     os.replace(temporary, path)
 
 
-def land(delivered: dict[str, str], env_file: str, token_file: str) -> dict[str, str]:
+def land(
+    delivered: dict[str, str],
+    env_file: str,
+    token_file: str,
+    signing_key_file: str = DEFAULT_SIGNING_KEY_FILE,
+) -> dict[str, str]:
     """Write the delivery to disk and return the environment the workload gets.
 
-    The token is split out of both the env file and the returned environment: it
-    lives in its own 0600 file and is named by `MOMO_WORKD_REGISTRATION_TOKEN_FILE`.
+    Every secret in [`PRIVATE_FILE_MATERIAL`] is split out of both the env file
+    and the returned environment: it lives in its own 0600 file, and the workload
+    is handed the PATH instead of the value.
     """
-    # The delivery is not the only way a raw token can reach a process
+    paths = {TOKEN_NAME: token_file, SIGNING_KEY_NAME: signing_key_file}
+
+    # The delivery is not the only way a raw secret can reach a process
     # environment. Template-baked `--env` *does* reach PID 1 (measured), so a
     # template built with `MOMO_WORKD_REGISTRATION_TOKEN` in it hands this
     # process an inherited copy that `delivered` knows nothing about — and
     # `main()` builds the workload's environment from `os.environ`, so popping
     # only the delivered copy would leave the inherited one to ride through into
     # `/proc/<pid>/environ`. Unconditional, because a value baked into a template
-    # is per-template and a registration token is per-provision: an inherited one
-    # is stale by construction and there is no case where honouring it is right.
-    os.environ.pop(TOKEN_NAME, None)
-
+    # is per-template and this material is per-provision: an inherited one is
+    # stale by construction and there is no case where honouring it is right.
     child_env = dict(delivered)
-    token = child_env.pop(TOKEN_NAME, None)
-    if token is not None:
-        write_private(token_file, token if token.endswith("\n") else token + "\n")
-        child_env[TOKEN_FILE_NAME] = token_file
+    for value_name, path_name, default_path in PRIVATE_FILE_MATERIAL:
+        os.environ.pop(value_name, None)
+        secret = child_env.pop(value_name, None)
+        if secret is None:
+            continue
+        path = paths.get(value_name, default_path)
+        write_private(path, secret if secret.endswith("\n") else secret + "\n")
+        child_env[path_name] = path
 
     lines = [
         "# Written by momo-bootstrap-init from the CubeSandbox /init delivery.\n",
@@ -302,6 +330,7 @@ class InitHandler(http.server.BaseHTTPRequestHandler):
                 delivered,
                 self.server.env_file,  # type: ignore[attr-defined]
                 self.server.token_file,  # type: ignore[attr-defined]
+                self.server.signing_key_file,  # type: ignore[attr-defined]
             )
         except OSError as exc:
             # Answering 200 here would tell the substrate the material landed
@@ -334,10 +363,14 @@ class InitHandler(http.server.BaseHTTPRequestHandler):
 class InitServer(http.server.HTTPServer):
     allow_reuse_address = True
 
-    def __init__(self, address, env_file: str, token_file: str):
+    def __init__(
+        self, address, env_file: str, token_file: str,
+        signing_key_file: str = DEFAULT_SIGNING_KEY_FILE,
+    ):
         super().__init__(address, InitHandler)
         self.env_file = env_file
         self.token_file = token_file
+        self.signing_key_file = signing_key_file
         self.child_env: dict[str, str] | None = None
         self.delivered_names: list[str] = []
         # Set by [`receive`]; read by [`InitHandler._apply_read_deadline`] so a
@@ -346,10 +379,15 @@ class InitServer(http.server.HTTPServer):
 
 
 def receive(
-    bind: str, port: int, env_file: str, token_file: str, timeout_seconds: int
+    bind: str,
+    port: int,
+    env_file: str,
+    token_file: str,
+    timeout_seconds: int,
+    signing_key_file: str = DEFAULT_SIGNING_KEY_FILE,
 ) -> dict[str, str]:
     """Serve until one delivery lands, then close the listener for good."""
-    server = InitServer((bind, port), env_file, token_file)
+    server = InitServer((bind, port), env_file, token_file, signing_key_file)
     # A short poll rather than a blocking accept, so the deadline below is real
     # even when nothing ever connects. The other half — a deadline that is real
     # while a connection *is* open — is `InitHandler`'s read timeout, which reads
@@ -389,6 +427,7 @@ def main(argv: list[str]) -> int:
     )
     parser.add_argument("--env-file", default=DEFAULT_ENV_FILE)
     parser.add_argument("--token-file", default=DEFAULT_TOKEN_FILE)
+    parser.add_argument("--signing-key-file", default=DEFAULT_SIGNING_KEY_FILE)
     parser.add_argument(
         "--timeout",
         type=int,
@@ -402,7 +441,12 @@ def main(argv: list[str]) -> int:
     log("waiting for the /init delivery on :%d" % args.port)
     try:
         child_env = receive(
-            args.bind, args.port, args.env_file, args.token_file, args.timeout
+            args.bind,
+            args.port,
+            args.env_file,
+            args.token_file,
+            args.timeout,
+            args.signing_key_file,
         )
     except TimeoutError as exc:
         log(str(exc))
