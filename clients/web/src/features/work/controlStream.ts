@@ -37,6 +37,14 @@ import type { DisplayFailure } from "./displayStream";
 //      `controlStream.test.ts` proves that by planting a marker in each of
 //      those four places and failing.
 //
+//      THE ONE THING THAT IS KEPT, stated here rather than discovered later:
+//      [`ControlKeyPresses`] remembers what the RESERVED key's keydown decided,
+//      for exactly as long as that one key is physically held (#1563). It is a
+//      single slot holding one of three decisions about Escape — never a code
+//      the person chose, never a sequence, never anything that outlives the
+//      finger on the key. Why it has to exist at all, and why one slot is
+//      enough for every key on the keyboard, is argued at [`dispositionForKey`].
+//
 //   3. THE WINDOW ALWAYS CLOSES. A control window that outlives the person
 //      holding it is an agent left stopped, so a failed return is a state this
 //      surface has to be able to describe. Three paths close it here
@@ -424,27 +432,140 @@ export type ControlKeyDisposition =
    * pressed (Shift+Escape leaves as Escape), and `preventDefault` says whether
    * the page must be stopped from acting on it as well.
    */
-  | { kind: "forward"; event: ControlKeyEvent; preventDefault: boolean };
+  | { kind: "forward"; event: ControlKeyEvent; preventDefault: boolean }
+  /**
+   * Nothing happens: not forwarded, and not the release gesture either.
+   *
+   * The `keyup` of a key this surface never saw go down — pressed before the
+   * caret arrived, or taken by the browser on the way in. The host is not
+   * holding that key, so sending it a release would be inventing a keystroke
+   * this person never made. It is a separate word from `release` because a
+   * caller that treated it as one would move the caret on somebody else's
+   * stray key.
+   */
+  | { kind: "ignore" };
 
-export function dispositionForKey(
+/**
+ * What the reserved key's keydown decided, kept until that key comes back up.
+ *
+ * It carries the DECISION and not the event, because the keyup has to be
+ * encoded from the keyup — its own modifiers, its own `repeat` — with only the
+ * press's judgement laid over it. Storing the keydown and re-sending it would
+ * put a second copy of the down on the wire.
+ */
+type ControlReleaseKeyPress =
+  | { kind: "release" }
+  | { kind: "forward"; stripShift: boolean; preventDefault: boolean };
+
+/**
+ * The press this surface has to remember, and the only one.
+ *
+ * ONE SLOT, NOT A MAP OF HELD KEYS, and the difference is the module's second
+ * guarantee. A ledger keyed by physical code would be a live record of what is
+ * under the person's fingers — small and short-lived, but a record of the
+ * keystroke itself, in the one file that promises not to keep one. It is not
+ * needed: read [`dispositionForKey`] and the only key whose MEANING can change
+ * between its down and its up is Escape. Every other key is forwarded on both
+ * edges no matter what the modifiers do mid-press, so its up needs no memory
+ * of its down.
+ *
+ * Created per control window and carried by the component. Module-level state
+ * would let one window's held key decide the next window's first press.
+ */
+export interface ControlKeyPresses {
+  /** The outstanding Escape press, or `null` when Escape is not held. */
+  escape: ControlReleaseKeyPress | null;
+}
+
+/** A window's press memory, empty. */
+export function createKeyPresses(): ControlKeyPresses {
+  return { escape: null };
+}
+
+/** What one Escape keydown means, decided from the modifiers held with it. */
+function escapePressFor(event: ControlKeyEvent): ControlReleaseKeyPress {
+  if (event.ctrlKey || event.altKey || event.metaKey) {
+    // A chord this surface has no rule for. Forward it whole rather than
+    // guessing which half the person meant.
+    return { kind: "forward", stripShift: false, preventDefault: false };
+  }
+  if (event.shiftKey) {
+    return { kind: "forward", stripShift: true, preventDefault: true };
+  }
+  return { kind: "release" };
+}
+
+/** The press's judgement, laid over the event actually in hand. */
+function dispositionFromPress(
+  press: ControlReleaseKeyPress,
   event: ControlKeyEvent
 ): ControlKeyDisposition {
-  if (event.code === "Escape") {
-    if (event.ctrlKey || event.altKey || event.metaKey) {
-      // A chord this surface has no rule for. Forward it whole rather than
-      // guessing which half the person meant.
-      return { kind: "forward", event, preventDefault: false };
-    }
-    if (event.shiftKey) {
-      return {
-        kind: "forward",
-        event: { ...event, shiftKey: false },
-        preventDefault: true,
-      };
-    }
-    return { kind: "release" };
+  if (press.kind === "release") return { kind: "release" };
+  return {
+    kind: "forward",
+    event: press.stripShift ? { ...event, shiftKey: false } : event,
+    preventDefault: press.preventDefault,
+  };
+}
+
+/**
+ * What this surface does with one key EVENT, judged by the PRESS it belongs to.
+ *
+ * ## The stuck key this shape exists against (#1563, #1560 재확인 ②)
+ *
+ * The first version of this function was pure in the wrong variable: it read
+ * the modifiers on the event in front of it, so the same physical press could
+ * be judged one way going down and another coming up. A person presses
+ * Shift+Escape — forwarded, the host sees Escape go down — and then lifts
+ * SHIFT FIRST, which is the ordinary way a hand leaves a chord. The keyup that
+ * follows carries `shiftKey: false`, matches the plain-Escape rule, and is
+ * classified as the release gesture: not sent. The host is left holding a key
+ * nobody is pressing, forever, and the only cure is another Shift+Escape that
+ * the person has no reason to guess at.
+ *
+ * So the unit of judgement is the PRESS, not the event. `action` and the
+ * window's [`ControlKeyPresses`] are parameters for that reason and no other:
+ * the keydown decides, and every event of that press — the auto-repeats and
+ * the keyup — follows the decision, whatever the modifiers have done since.
+ *
+ * ## Why one slot covers a whole keyboard
+ *
+ * Only Escape can change its mind. Everything else forwards on both edges
+ * regardless of modifiers, so its keyup can be judged fresh and still agree
+ * with its keydown; `preventDefault` is asked again for those because it is a
+ * question about the PAGE's default for the event in hand, not about the press.
+ *
+ * ## The two ends that have no press behind them
+ *
+ * A non-repeat keydown always re-decides and overwrites the slot: a press left
+ * outstanding by a caret that walked away mid-chord can never make the next
+ * real press mean something the person did not do. And an Escape keyup with no
+ * press behind it is `ignore` — this client emitted nothing for that key, so
+ * emitting its release now would hand the host a keystroke that never happened.
+ */
+export function dispositionForKey(
+  event: ControlKeyEvent,
+  action: "down" | "up",
+  presses: ControlKeyPresses
+): ControlKeyDisposition {
+  if (event.code !== "Escape") {
+    return { kind: "forward", event, preventDefault: controlSwallowsKey(event) };
   }
-  return { kind: "forward", event, preventDefault: controlSwallowsKey(event) };
+  if (action === "up") {
+    const press = presses.escape;
+    presses.escape = null;
+    if (press === null) return { kind: "ignore" };
+    return dispositionFromPress(press, event);
+  }
+  // Auto-repeat is the same press continuing, so it keeps the same judgement:
+  // releasing Shift while Escape is held must not turn the repeats into a
+  // caret jump under a hand that has not moved.
+  if (event.repeat && presses.escape !== null) {
+    return dispositionFromPress(presses.escape, event);
+  }
+  const press = escapePressFor(event);
+  presses.escape = press;
+  return dispositionFromPress(press, event);
 }
 
 /**

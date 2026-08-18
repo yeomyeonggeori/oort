@@ -38,6 +38,7 @@ import {
   controlFailureCopy,
   controlObservationRestoredNote,
   controlOffersRetry,
+  createKeyPresses,
   dispositionForKey,
   forwardKey,
   forwardPointer,
@@ -155,6 +156,13 @@ export function DisplayController({
    * `controlStream.test.ts` scans for a leak.
    */
   const channelRef = useRef<ControlInputSink | null>(null);
+  /**
+   * What the reserved key's keydown decided, until that key comes back up
+   * (#1563). A REF for the same two reasons the channel is one — the handlers
+   * must read the live value, and nothing about a key belongs in the fiber
+   * tree the leak scan reads.
+   */
+  const keyPressesRef = useRef(createKeyPresses());
   /** The producer's video, held until there is an element to put it in. */
   const streamRef = useRef<MediaStream | null>(null);
   const negotiateTimerRef = useRef<number | null>(null);
@@ -207,6 +215,9 @@ export function DisplayController({
       negotiateTimerRef.current = null;
     }
     channelRef.current = null;
+    // A window that is over holds nothing. The next one starts with no press
+    // outstanding rather than with whatever this one's last chord left behind.
+    keyPressesRef.current = createKeyPresses();
     const socket = socketRef.current;
     socketRef.current = null;
     if (socket) {
@@ -727,14 +738,27 @@ export function DisplayController({
     // the caret is inside the capture box, so Escape goes back to closing the
     // detail the moment the keyboard leaves.
     event.stopPropagation();
-    const disposition = dispositionForKey({
-      code: event.code,
-      ctrlKey: event.ctrlKey,
-      shiftKey: event.shiftKey,
-      altKey: event.altKey,
-      metaKey: event.metaKey,
-      repeat: event.repeat,
-    });
+    // Judged per PRESS, not per event (#1563): the keydown decides, and this
+    // event's keyup follows that decision even if the modifiers have changed
+    // under it. Handing a bare event to this function was how a Shift+Escape
+    // whose Shift was lifted first left the host holding Escape forever.
+    const disposition = dispositionForKey(
+      {
+        code: event.code,
+        ctrlKey: event.ctrlKey,
+        shiftKey: event.shiftKey,
+        altKey: event.altKey,
+        metaKey: event.metaKey,
+        repeat: event.repeat,
+      },
+      action,
+      keyPressesRef.current
+    );
+    if (disposition.kind === "ignore") {
+      // A key whose press this surface never saw. Nothing was sent for it, so
+      // nothing is sent now and the page's own default stands.
+      return;
+    }
     if (disposition.kind === "release") {
       // The one key that is not a keystroke here. It is answered on keydown
       // only — moving the caret on keyup as well would fire twice for one press
