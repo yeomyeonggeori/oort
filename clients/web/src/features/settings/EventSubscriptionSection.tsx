@@ -811,6 +811,17 @@ function CreateForm({
             만들면 서명 비밀이 한 번만 표시됩니다.
           </span>
         )}
+        {/* 「다시 연결되면 그대로 보내집니다」였다 — 지키지 못하는 약속이다
+            (#1559 회전 1 · design-review #1595 H4). 이 클라이언트에 오프라인 큐는
+            존재하지 않고(`networkMode` 도 `onlineManager` 도 없다), 위 `submit` 은
+            `create.mutate()` 앞에서 하드 리턴하므로 오프라인에서 누른 것은
+            어디에도 쌓이지 않는다. 다시 연결된 뒤 이 사람이 한 번 더 눌러야 한다.
+
+            이 goal 이 이 span 에 id 를 달고 버튼의 `aria-describedby` 를 물리면서
+            그 문장은 화면의 캡션에서 **AT 사용자가 듣는 권위 있는 사유**로
+            올라갔다 — 거짓말을 승격시키는 배선이었다. 올바른 문장은 같은 커밋의
+            형제 파일이 이미 갖고 있었다(`InviteSection.OFFLINE_CREATE_REASON` 의
+            독스트링이 같은 판정을 적는다). */}
         <span
           id={offlineReasonId}
           className="break-keep text-meta text-ink-muted"
@@ -818,7 +829,7 @@ function CreateForm({
           data-testid="event-subscription-create-offline"
         >
           {offline
-            ? "서버와 연결이 끊겨 지금은 만들 수 없습니다. 다시 연결되면 그대로 보내집니다."
+            ? "서버와 연결이 끊겨 지금은 만들 수 없습니다. 다시 연결되면 이어서 만들 수 있습니다."
             : ""}
         </span>
       </div>

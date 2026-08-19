@@ -1,4 +1,5 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
@@ -40,6 +41,17 @@ import { describe, expect, it } from "vitest";
 
 function source(relative: string): string {
   return readFileSync(fileURLToPath(new URL(relative, import.meta.url)), "utf8");
+}
+
+/**
+ * 주석을 걷어낸 소스.
+ *
+ * 부재를 재는 단정은 **화면에 서는 것**만 봐야 한다. 왜 그것이 없는지를 적는
+ * 주석이 자기 스캔에 걸리면 다음 사람은 이유를 적지 않게 되고, 그러면 남는 것은
+ * 통과하는 코드와 사라진 판정뿐이다.
+ */
+function copyOnly(text: string): string {
+  return text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
 }
 
 const FILES = {
@@ -407,6 +419,7 @@ const REMAINDER = [
     lock: "offline",
     busy: "create.isPending",
     words: ["만드는 중"],
+    rendersVia: null,
     guard: "if (offline || create.isPending) return;",
   },
   {
@@ -416,7 +429,22 @@ const REMAINDER = [
     lock: "offline",
     busy: "create.isPending",
     words: ["만드는 중"],
+    rendersVia: null,
     guard: "if (offline || create.isPending) return;",
+  },
+  {
+    // 회전 1 이 데려온 여섯째 자리 (design-review #1595 H1). 초판은 이 자리를
+    // 놓쳤다: 접힘이 `disabled={…}` 속성이 아니라 별칭(`submitBlocked`) 뒤에
+    // 숨어 `aria-disabled` 와 `opacity-50` 을 몰고 있었고, 아래 스캔은 native
+    // 속성만 봤다. 그 사각지대는 이제 「별칭 스캔」이 함께 막는다.
+    name: "webhook-create",
+    file: "WebhookSection.tsx",
+    marker: 'data-testid="webhook-create"',
+    lock: "createLocked",
+    busy: "creating",
+    words: ["만드는 중"],
+    rendersVia: null,
+    guard: "if (createLocked || creating) return;",
   },
   {
     name: "webhook-rotate",
@@ -426,6 +454,9 @@ const REMAINDER = [
     busy: "rotating",
     // 「회전」은 한자어 동작명사 → 「명사 + 중」 (#1501).
     words: ["회전 중"],
+    // 낱말이 본문이 아니라 위에서 지어진다: 낭독되는 이름이 그 낱말을 따라
+    // 움직여야 하므로(아래 label-in-name 절) 글자와 이름이 한 곳에서 나온다.
+    rendersVia: "{rotateText}",
     guard: "if (rotateLocked || rotating) return;",
   },
   {
@@ -435,6 +466,7 @@ const REMAINDER = [
     lock: "revokeLocked",
     busy: "revoking",
     words: ["폐기 중"],
+    rendersVia: "{revokeText}",
     guard: "if (revokeLocked || revoking) return;",
   },
   {
@@ -447,6 +479,7 @@ const REMAINDER = [
     // 중」이라고 말하게 된다.
     busy: null,
     words: [],
+    rendersVia: null,
     guard: "if (confirmLocked) return;",
   },
 ] as const satisfies readonly {
@@ -456,6 +489,7 @@ const REMAINDER = [
   lock: string;
   busy: string | null;
   words: readonly string[];
+  rendersVia: string | null;
   guard: string;
 }[];
 
@@ -467,7 +501,10 @@ describe("#1559 RED PROOF ① 다섯 자리 어디에도 native disabled 가 없
         false
       );
       expect(tag).toContain(`aria-disabled={${site.lock} || undefined}`);
-      expect(tag).toContain(`className={cn(${site.lock} && "opacity-50")}`);
+      // `cn(…)` 의 전문이 아니라 흐림 항만 잰다: 같은 `cn` 이 폭 예약
+      // (`min-w-action-sm`)도 나르므로(회전 1 Low), 전문 등치는 잠금과 무관한
+      // 클래스가 하나 붙을 때마다 깨진다. 잰다고 말한 것은 흐림의 출처다.
+      expect(tag).toContain(`${site.lock} && "opacity-50"`);
     });
   }
 });
@@ -481,7 +518,14 @@ describe("#1559 RED PROOF ② 진행은 낱말과 aria-busy 로만 말해진다"
         return;
       }
       expect(tag).toContain(`aria-busy={${site.busy} || undefined}`);
-      for (const word of site.words) expect(body).toContain(word);
+      if (site.rendersVia === null) {
+        for (const word of site.words) expect(body).toContain(word);
+        return;
+      }
+      expect(body).toContain(site.rendersVia);
+      for (const word of site.words) {
+        expect(FILES[site.file]).toContain(`"${word}"`);
+      }
     });
   }
 
@@ -516,12 +560,16 @@ describe("#1559 RED PROOF ③ 잠금은 가드를 함께 진다", () => {
     });
   }
 
-  it("두 폼의 가드는 onClick 이 아니라 submit 이 진다", () => {
-    // 주소·사용 횟수 칸에서 누른 Enter(암묵적 제출)도 같은 쓰기를 내므로,
+  it("세 폼의 가드는 onClick 이 아니라 submit 이 진다", () => {
+    // 주소·사용 횟수·이름 칸에서 누른 Enter(암묵적 제출)도 같은 쓰기를 내므로,
     // `onClick` 에 두면 그 길이 열린 채 남는다.
-    for (const file of ["EventSubscriptionSection.tsx", "InviteSection.tsx"] as const) {
-      const submit = region(file, "submit");
-      expect(submit).toContain("if (offline || create.isPending) return;");
+    const guards: [FileName, string][] = [
+      ["EventSubscriptionSection.tsx", "if (offline || create.isPending) return;"],
+      ["InviteSection.tsx", "if (offline || create.isPending) return;"],
+      ["WebhookSection.tsx", "if (createLocked || creating) return;"],
+    ];
+    for (const [file, guard] of guards) {
+      expect(region(file, "submit")).toContain(guard);
     }
   });
 
@@ -565,10 +613,10 @@ describe("#1559 RED PROOF ④ 잠긴 컨트롤이 사유를 든다", () => {
     expect(file).toContain("const OFFLINE_NOTE_ID =");
     expect(file).toContain("id={OFFLINE_NOTE_ID}");
     // 큐에 쌓이지 않는 발급이므로 「그대로 보내집니다」라고 약속하지 않는다.
+    // 그 금지는 이제 이 파일만의 것이 아니다 — 아래 「회전 1」의 전 파일 스캔.
     expect(file).toContain(
       "연결이 끊겨 지금은 초대 링크를 만들 수 없습니다. 다시 연결되면 이어서 만들 수 있습니다."
     );
-    expect(file).not.toContain("그대로 보내집니다");
   });
 
   it("웹훅 목록 — 두 문장이 같은 자리에 서고 한 번에 하나만 그려진다", () => {
@@ -645,11 +693,12 @@ describe("#1559 RED PROOF ④ 잠긴 컨트롤이 사유를 든다", () => {
   });
 });
 
+const IN_FLIGHT =
+  /\b(isPending|busy|rotating|revoking|saving|checking|uploading|creating|toggling|removing|clearing|unlinking|sending|loading)\b/;
+
 describe("#1559 스캔 — 설정 표면의 버튼에 in-flight native disabled 가 남지 않았다", () => {
   // 이 스위트가 자리를 하나씩 세는 동안 **빠뜨린 자리**를 잡는 그물이다. 새
   // 컨트롤이 `disabled={…isPending…}` 으로 들어오면 목록에 없어도 여기서 붉다.
-  const IN_FLIGHT = /\b(isPending|busy|rotating|revoking|saving|checking|uploading|creating|toggling|removing|clearing|unlinking)\b/;
-
   for (const [name, file] of Object.entries(FILES)) {
     it(name, () => {
       const offenders: string[] = [];
@@ -657,6 +706,315 @@ describe("#1559 스캔 — 설정 표면의 버튼에 in-flight native disabled 
         const tag = openingTag(chunk);
         const native = tag.match(/(?:^|\s)disabled=\{([^}]*)\}/);
         if (native && IN_FLIGHT.test(native[1])) offenders.push(native[0].trim());
+      }
+      expect(offenders).toEqual([]);
+    });
+  }
+});
+
+// =============================================================================
+// #1559 회전 1 — design-review #1595.
+//
+// 위 스캔이 `webhook-create` 를 통과시켰다. 그 자리는 #1558 이 정본에서 걷어낸
+// 것과 **같은 결함**을 들고 있었는데(`submitBlocked = offline || busy || …`,
+// `busy` 가 자기 `create.isPending` 을 포함), 접힘이 native `disabled` 속성이
+// 아니라 **별칭 뒤**에 있어 속성만 보는 그물에 걸리지 않았다. #1558 의 red proof
+// 주석이 경고한 그것이다: "결함은 `busy` 라는 글자가 아니라 접힘 변수 뒤에 숨어
+// 있었다".
+//
+// 그래서 스캔을 한 겹 더 판다. 재는 규칙은 이렇다 — **진행을 낭독하는 버튼
+// (`aria-busy`)의 잠금 식에는 그 진행의 부정이 서 있어야 한다.** 잠금 식을 별칭이
+// 다 풀릴 때까지 펴고, 그 안에 in-flight 어휘가 남으면 `!<자기 진행>` 을 요구한다.
+// 없는 진행에 대해서는(확인 그룹의 확정처럼 `aria-busy` 가 없는 자리) 아무것도
+// 묻지 않는다 — 접을 진행이 없으므로 접힘도 없다.
+// =============================================================================
+
+/**
+ * `const NAME = <한 줄 식>;` 의 우변. 중괄호가 든 우변(`useMutation({…})`)은
+ * 값이 아니라 호출이므로 펴지 않는다.
+ */
+function aliasBody(file: string, name: string): string | null {
+  const match = file.match(
+    new RegExp(`\\bconst\\s+${name}\\s*=\\s*([^;\\n{}]+);`)
+  );
+  return match ? match[1] : null;
+}
+
+/** 별칭이 다 풀릴 때까지 편다. `submitBlocked` -> `offline || busy || …` -> …. */
+function expandAliases(file: string, expr: string, depth = 4): string {
+  if (depth === 0) return expr;
+  let out = expr;
+  for (const id of new Set(expr.match(/\b[A-Za-z_$][\w$]*\b/g) ?? [])) {
+    const body = aliasBody(file, id);
+    if (body === null) continue;
+    out = out.replace(
+      new RegExp(`\\b${id}\\b`, "g"),
+      `(${expandAliases(file, body, depth - 1)})`
+    );
+  }
+  return out;
+}
+
+/** 공백과 괄호를 걷어낸 꼴. `!(create.isPending)` 과 `!create.isPending` 은 같다. */
+function flat(expr: string): string {
+  return expr.replace(/[\s()]/g, "");
+}
+
+/** `attr={…}` 한 속성의 안쪽. `|| undefined` 꼬리는 잠금 사실이 아니다. */
+function attrExpr(tag: string, attr: string): string | null {
+  const at = tag.indexOf(`${attr}={`);
+  if (at === -1) return null;
+  const from = at + attr.length + 2;
+  let depth = 0;
+  for (let i = from; i < tag.length; i += 1) {
+    if (tag[i] === "{") depth += 1;
+    else if (tag[i] === "}") {
+      if (depth === 0) return tag.slice(from, i).replace("|| undefined", "");
+      depth -= 1;
+    }
+  }
+  return null;
+}
+
+describe("#1559 회전 1 · 별칭 스캔 — 접힘은 이름 뒤에도 숨지 못한다", () => {
+  for (const [name, file] of Object.entries(FILES)) {
+    it(name, () => {
+      const offenders: string[] = [];
+      for (const chunk of file.split("<Button").slice(1)) {
+        const tag = openingTag(chunk);
+        const busy = attrExpr(tag, "aria-busy");
+        // 진행을 낭독하지 않는 버튼은 접을 진행이 없다.
+        if (busy === null) continue;
+        const locks = [
+          attrExpr(tag, "aria-disabled"),
+          // 흐림도 잠금이다. `cn(x && "opacity-50")` 의 x 가 그 식이다.
+          tag.match(/className=\{cn\(([\s\S]*?)"opacity-50"\)\}/)?.[1] ?? null,
+        ].filter((lock): lock is string => lock !== null);
+
+        for (const lock of locks) {
+          const opened = expandAliases(file, lock);
+          if (!IN_FLIGHT.test(opened)) continue;
+          // in-flight 가 잠금에 남아 있다면, 그것을 가르는 부정이 함께 있어야
+          // 한다. `busy && !rotating` 은 통과하고 `offline || busy` 는 붉다.
+          const negated = `!${flat(expandAliases(file, busy))}`;
+          if (!flat(opened).includes(negated)) {
+            offenders.push(`${tag.slice(0, 60).trim()}… lock=${lock.trim()}`);
+          }
+        }
+      }
+      expect(offenders).toEqual([]);
+    });
+  }
+
+  it("그물이 실제로 그 결함을 잡는다 — 초판 webhook-create 로 재현", () => {
+    // 그물이 아무것도 안 잡는 그물일 수 있으므로, 회전 1 이 고친 그 식을 그대로
+    // 되돌린 소스에 대고 한 번 돌린다.
+    const broken = FILES["WebhookSection.tsx"]
+      .replace(
+        "const createLocked = offline || noChannels || (busy && !creating);",
+        "const submitBlocked = offline || busy || channelChoices.length === 0;"
+      )
+      .replace("aria-disabled={createLocked || undefined}", "aria-disabled={submitBlocked || undefined}")
+      .replace('className={cn(createLocked && "opacity-50")}', 'className={cn(submitBlocked && "opacity-50")}');
+    const tag = openingTag(
+      broken.split("<Button").find((c) => c.includes('data-testid="webhook-create"')) ?? ""
+    );
+    const lock = attrExpr(tag, "aria-disabled") ?? "";
+    const busy = attrExpr(tag, "aria-busy") ?? "";
+    expect(IN_FLIGHT.test(expandAliases(broken, lock))).toBe(true);
+    expect(
+      flat(expandAliases(broken, lock)).includes(
+        `!${flat(expandAliases(broken, busy))}`
+      )
+    ).toBe(false);
+  });
+});
+
+describe("#1559 회전 1 · 웹훅 만들기가 사유를 든다 (#1595 H2)", () => {
+  const file = FILES["WebhookSection.tsx"];
+
+  it("잠그는 사실 셋이 각자의 문장을 갖는다", () => {
+    expect(file).toContain("const OFFLINE_CREATE_REASON =");
+    expect(file).toContain("const NO_CHANNEL_CREATE_REASON =");
+    expect(file).toContain("const BUSY_CREATE_REASON =");
+    expect(
+      controlByMarker("WebhookSection.tsx", 'data-testid="webhook-create"').tag
+    ).toContain("aria-describedby={createLockReason()}");
+    expect(file).toContain("if (offline) return createOfflineReasonId;");
+    expect(file).toContain("if (noChannels) return createNoChannelReasonId;");
+    expect(file).toContain(
+      "return busy && !creating ? createBusyReasonId : undefined;"
+    );
+  });
+
+  it("가리키는 곳에 문장이 있다 — 서는 조건이 고르는 조건과 같다", () => {
+    expect(file).toContain("{offline && (");
+    expect(file).toContain("{!offline && noChannels && (");
+    expect(file).toContain("{!offline && !noChannels && busy && !creating && (");
+  });
+
+  it("빈 상태에서도 사유가 선다 — rows.length 게이트 밖이다", () => {
+    // 목록의 두 문장은 `rows.length > 0` 에서만 서므로 웹훅이 하나도 없는
+    // 프레임에서는 화면에 없다. 그 프레임이 정확히 빈 상태이고, 빈 상태의 주
+    // CTA 가 이 버튼이다 — 거기서 무사유 회색이던 것이 이 절의 결함이다.
+    const bare = copyOnly(file);
+    const from = bare.indexOf('data-testid="webhook-create-form"');
+    expect(from).toBeGreaterThan(-1);
+    const form = bare.slice(from, bare.indexOf("</form>", from));
+    for (const testId of [
+      "webhook-create-offline",
+      "webhook-create-no-channel",
+      "webhook-create-busy",
+    ]) {
+      expect(form, `${testId} 가 폼 안에 없다`).toContain(testId);
+    }
+    expect(form).not.toContain("rows.length");
+  });
+});
+
+describe("#1559 회전 1 · 거짓 약속 (#1595 H4)", () => {
+  it("어느 표면도 오프라인 큐를 약속하지 않는다", () => {
+    // 이 클라이언트에 오프라인 큐는 없다. 아래 단정이 그 사실 자체를 잰다.
+    for (const [name, file] of Object.entries(FILES)) {
+      expect(copyOnly(file), name).not.toContain("그대로 보내집니다");
+    }
+  });
+
+  it("없는 것이 정말 없다 — networkMode·onlineManager 부재", () => {
+    // 문장이 거짓인 근거는 이것이다. 큐가 생기는 날 이 단정이 먼저 붉어지고,
+    // 그때 문장을 되돌리는 것이 옳은 순서다.
+    for (const [name, file] of Object.entries(FILES)) {
+      expect(copyOnly(file), name).not.toMatch(
+        /\bnetworkMode\b|\bonlineManager\b/
+      );
+    }
+  });
+
+  it("두 표면이 같은 잠금에 같은 사실을 말한다", () => {
+    expect(FILES["EventSubscriptionSection.tsx"]).toContain(
+      "서버와 연결이 끊겨 지금은 만들 수 없습니다. 다시 연결되면 이어서 만들 수 있습니다."
+    );
+    expect(FILES["InviteSection.tsx"]).toContain("다시 연결되면 이어서 만들 수 있습니다.");
+    expect(FILES["WebhookSection.tsx"]).toContain("다시 연결되면 이어서 만들 수 있습니다.");
+  });
+});
+
+describe("#1559 회전 1 · in-flight 는 fieldset 을 끄지 않는다 (#1595 H3)", () => {
+  // `<fieldset disabled>` 는 초점을 쥔 라디오를 끄고 초점을 <body> 로 떨어뜨린다.
+  // `ChoiceRadios.busy` 가 정확히 그 용도로 있고 독스트링이 그 실패를 적어 두었다.
+  // 자리 목록이 아니라 features/ 전수인 이유는 #1558 의 canSave 스캔과 같다: 새
+  // 소비처도 자동으로 이 규율 아래 선다.
+  const FEATURES_DIR = fileURLToPath(new URL("..", import.meta.url));
+
+  function tsxFiles(dir: string): string[] {
+    return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) return tsxFiles(path);
+      return entry.name.endsWith(".tsx") ? [path] : [];
+    });
+  }
+
+  it("모든 ChoiceRadios 소비처의 disabled 식에 진행 어휘가 없다", () => {
+    let seen = 0;
+    for (const path of tsxFiles(FEATURES_DIR)) {
+      const text = readFileSync(path, "utf8");
+      for (const chunk of text.split("<ChoiceRadios").slice(1)) {
+        const end = chunk.indexOf("/>");
+        const call = chunk.slice(0, end === -1 ? undefined : end);
+        seen += 1;
+        const disabled = call.match(/\sdisabled=\{([^}]*)\}/)?.[1];
+        if (disabled === undefined) continue;
+        expect(
+          IN_FLIGHT.test(disabled),
+          `${path}: disabled={${disabled}} 가 in-flight 로 fieldset 을 끈다`
+        ).toBe(false);
+      }
+    }
+    // 하나도 안 잡히면 이 단정은 공허하게 초록이다. 오늘의 실측은 여섯이다.
+    expect(seen).toBeGreaterThanOrEqual(6);
+  });
+});
+
+describe("#1559 회전 1 · 되돌리기가 사유 없이 침묵하지 않는다 (#1595 M5)", () => {
+  const file = source("./WorkHostSection.tsx");
+
+  it("두 자리 다 잠금을 그리고 낭독한다", () => {
+    for (const testId of ["work-host-revert", "work-tier-revert-${scope}"]) {
+      const marker = testId.includes("$")
+        ? `data-testid={\`${testId}\`}`
+        : `data-testid="${testId}"`;
+      const chunk = file
+        .split("<Button")
+        .find((part) => part.includes(marker));
+      expect(chunk, `${testId} 가 없다`).toBeTruthy();
+      const tag = openingTag(chunk ?? "");
+      expect(tag).toContain("aria-disabled={save.isPending || undefined}");
+      expect(tag).toContain('className={cn(save.isPending && "opacity-50")}');
+      expect(tag).toContain("aria-describedby={");
+      expect(tag).toContain("choiceRadiosHintId(");
+    }
+  });
+
+  it("사유는 새로 쓰이지 않고 그룹이 이미 세운 문장을 가리킨다", () => {
+    // 잠금 하나에 문장 하나. 여기 한 번 더 쓰면 같은 사실이 한 화면에 두 번 선다.
+    // 규약의 주인은 하나다. 컴포넌트 파일 밖에 사는 이유는 그 모듈 머리말에.
+    expect(source("./fieldIds.ts")).toContain(
+      "export function choiceRadiosHintId("
+    );
+    expect(source("./SettingsFields.tsx")).toContain(
+      "const hintId = hint ? choiceRadiosHintId(name) : undefined;"
+    );
+    expect(file).toContain('const engineRadiosName = "work-host-engine";');
+    expect(file).toContain("const modeRadiosName = `work-tier-mode-${scope}`;");
+    expect(file).toContain("엔진을 저장하는 중입니다.");
+    expect(file).toContain("정책을 저장하는 중입니다.");
+  });
+});
+
+describe("#1559 회전 1 · 줄의 이름과 폭 (#1595 Low 둘)", () => {
+  const file = FILES["WebhookSection.tsx"];
+
+  it("이름이 줄을 지고 낱말을 따라 움직인다 — label-in-name", () => {
+    // 2.5.3 은 보이는 글자를 **포함**할 것만 요구한다. 스무 줄이 같은 이름의 탭
+    // 스톱 스무 개가 되는 문제는 같은 줄의 `CopyButton` 이 `subject` 로 이미 푼다.
+    expect(file).toContain('const rotateText = rotating ? "회전 중" : "비밀값 회전";');
+    expect(file).toContain('const revokeText = revoking ? "폐기 중" : "폐기";');
+    for (const [marker, text] of [
+      ["data-testid={`webhook-rotate-${installation.id}`}", "rotateText"],
+      ["data-testid={`webhook-revoke-${installation.id}`}", "revokeText"],
+    ] as const) {
+      const tag = controlByMarker("WebhookSection.tsx", marker).tag;
+      expect(tag).toContain(`aria-label={\`\${installation.label} \${${text}}\`}`);
+    }
+  });
+
+  it("낱말이 바뀌어도 폭은 움직이지 않는다 — 파괴적 형제가 밀리지 않는다", () => {
+    // tokens.css §4 의 `--spacing-action-sm` 이 있는 이유가 이 실패다(MOMO-676
+    // M-3). 「비밀값 회전」 -> 「회전 중」은 그 오른쪽의 [폐기]를 포인터 아래에서
+    // 움직인다.
+    for (const marker of [
+      "data-testid={`webhook-rotate-${installation.id}`}",
+      "data-testid={`webhook-revoke-${installation.id}`}",
+    ]) {
+      expect(controlByMarker("WebhookSection.tsx", marker).tag).toContain(
+        'className={cn("min-w-action-sm"'
+      );
+    }
+  });
+});
+
+describe("#1559 회전 1 · 사유 문장은 한글 규칙으로 접힌다 (#1595 M6)", () => {
+  // 사유는 두세 어절 문장이라 좁은 칸에서 어절 중간이 끊긴다. 이 diff 가 세운
+  // 사유 노드 전부가 `break-keep` 을 갖는다 — 하나만 빠지면 그 하나만 다르게
+  // 접힌다.
+  for (const [name, file] of Object.entries(FILES)) {
+    it(name, () => {
+      const offenders: string[] = [];
+      for (const tagMatch of file.matchAll(/<(?:p|span)\s[\s\S]*?>/g)) {
+        const tag = tagMatch[0];
+        const id = tag.match(/\bid=\{([^}]*)\}/)?.[1] ?? "";
+        if (!/reason|note/i.test(id)) continue;
+        if (!tag.includes("break-keep")) offenders.push(id);
       }
       expect(offenders).toEqual([]);
     });

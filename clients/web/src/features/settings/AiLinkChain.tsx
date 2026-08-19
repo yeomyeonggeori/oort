@@ -674,7 +674,7 @@ export function AiLinkChain({
       {full && (
         <p
           id={CHAIN_FULL_NOTE_ID}
-          className="text-meta text-ink-muted"
+          className="break-keep text-meta text-ink-muted"
           data-testid="chain-full"
         >
           예비 provider는 {MAX_FALLBACK_HOPS}개까지 둘 수 있습니다. 하나를 뺀 뒤
@@ -688,7 +688,7 @@ export function AiLinkChain({
       {busy && !full && !readOnly && (
         <p
           id={CHAIN_BUSY_NOTE_ID}
-          className="text-meta text-ink-muted"
+          className="break-keep text-meta text-ink-muted"
           data-testid="chain-busy"
         >
           {CHAIN_BUSY_NOTE}

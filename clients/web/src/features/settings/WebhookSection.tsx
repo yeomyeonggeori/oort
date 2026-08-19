@@ -281,7 +281,18 @@ export function WebhookSection({
   });
 
   const busy = create.isPending || rotate.isPending || revoke.isPending;
-  const submitBlocked = offline || busy || channelChoices.length === 0;
+  // 진행과 잠금은 다른 축이다 (#1486 회전 · #1541 · #1558 · #1559 회전 1).
+  //
+  // 이 폼은 `submitBlocked = offline || busy || 채널 없음` 한 식으로 그 둘을
+  // 접고 있었다. `busy` 가 자기 `create.isPending` 을 포함하므로, **자기 발급이
+  // 날고 있는 동안** 이 버튼은 「만드는 중」과 `aria-busy` 를 들면서 동시에
+  // `aria-disabled` 와 `opacity-50` 을 걸었다 — #1558 이 정본 `SaveButton` 에서
+  // 걷어낸 바로 그 프레임이, 그 파도가 지나간 자리 옆에서 별칭(`submitBlocked`)
+  // 뒤에 숨어 살아남았다. 아래 `rotateLocked`/`revokeLocked` 와 같은 모양으로
+  // 가른다: 잠그는 것은 오프라인·받을 채널 없음·**남의** 쓰기뿐이다.
+  const creating = create.isPending;
+  const noChannels = channelChoices.length === 0;
+  const createLocked = offline || noChannels || (busy && !creating);
   // 지금 날고 있는 쓰기가 **어느 줄의 것**인가 (#1559). `busy` 는 섹션 전체의
   // 사실이라 그대로 줄에 넘기면 스무 줄이 함께 진행 낱말을 든다. 좁히는 열쇠는
   // 뮤테이션이 들고 있는 인자다 — #1502 가 삭제에, #1541 이 켜고 끄기에 쓴 것과
@@ -290,12 +301,36 @@ export function WebhookSection({
   const revokingId = revoke.isPending ? revoke.variables?.id : undefined;
   const offlineReasonId = useId();
   const busyReasonId = useId();
+  // 만들기의 사유 셋. 목록의 두 문장과 **다른 노드**인 이유는 문장이 다르기
+  // 때문이다: 목록의 것은 「이어서 회전하거나 폐기할 수 있습니다」라고 끝나고,
+  // 이 폼이 못 하는 일은 만들기다. 그리고 목록의 두 문장은 `rows.length > 0`
+  // 에서만 서므로, 웹훅이 하나도 없는 빈 상태에서 그것을 가리키면 화면에 없는
+  // id 를 가리키게 된다 — 이 표면의 주 CTA 가 무사유 회색으로 서 있던 자리가
+  // 정확히 그 프레임이다 (design-review #1595 H2 · design-system §4).
+  const createOfflineReasonId = useId();
+  const createNoChannelReasonId = useId();
+  const createBusyReasonId = useId();
+
+  /**
+   * 한 잠금에 한 문장 (#1542 규율). 오프라인이 먼저인 것은 이 파일의
+   * `WebhookRow.lockReason` 이 이미 그렇게 정한 것과 같은 이유다 — 오프라인이면
+   * 채널을 만드는 일도 앞선 쓰기도 어차피 도착하지 못하고, 한 파일의 같은 자리가
+   * 다른 순서를 쓰면 다음 사람은 그 차이가 의도인지 알 수 없다. 자기 발급이 날고
+   * 있는 동안에는 사유를 들지 않는다: 진행 중에 「왜 못 하는지」를 읽어 주면 지금
+   * 그것을 하지 못한다는 뜻이 된다.
+   */
+  function createLockReason(): string | undefined {
+    if (offline) return createOfflineReasonId;
+    if (noChannels) return createNoChannelReasonId;
+    return busy && !creating ? createBusyReasonId : undefined;
+  }
 
   function submit(event: React.FormEvent) {
     event.preventDefault();
-    // aria-disabled 는 클릭을 막지 않는다(그것이 요점이다 - 포커스를 잃지 않는다).
-    // 그래서 거절은 여기서 한다.
-    if (submitBlocked) return;
+    // aria-disabled 는 클릭도 Enter 도 막지 않는다(그것이 요점이다 - 포커스를
+    // 잃지 않는다). 그래서 거절은 여기서 한다. 이름 칸에서 누른 Enter(암묵적
+    // 제출)도 같은 발급을 내므로 가드는 `onClick` 이 아니라 폼이 진다.
+    if (createLocked || creating) return;
     const issue = webhookLabelIssue(label);
     if (issue) {
       setLabelError(webhookLabelIssueMessage(issue));
@@ -506,17 +541,51 @@ export function WebhookSection({
                 </p>
               )}
 
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
+                {/* 잠금은 오프라인·받을 채널 없음·**남의** 쓰기 셋이고, 셋 다
+                    가리킬 문장을 갖는다. 자기 발급은 잠금이 아니라 진행이므로
+                    낱말과 `aria-busy` 만 든다. */}
                 <Button
                   type="submit"
                   size="sm"
-                  aria-disabled={submitBlocked || undefined}
-                  aria-busy={create.isPending || undefined}
-                  className={cn(submitBlocked && "opacity-50")}
+                  aria-disabled={createLocked || undefined}
+                  aria-busy={creating || undefined}
+                  aria-describedby={createLockReason()}
+                  className={cn(createLocked && "opacity-50")}
                   data-testid="webhook-create"
                 >
-                  {create.isPending ? "만드는 중" : "웹훅 만들기"}
+                  {creating ? "만드는 중" : "웹훅 만들기"}
                 </Button>
+                {/* 한 번에 하나만 그려진다. 서는 조건은 `createLockReason` 이 그
+                    id 를 고르는 조건과 같은 것이어야 하고, 그래야 가리키는 곳에
+                    문장이 있다. */}
+                {offline && (
+                  <span
+                    id={createOfflineReasonId}
+                    className="break-keep text-meta text-ink-muted"
+                    data-testid="webhook-create-offline"
+                  >
+                    {OFFLINE_CREATE_REASON}
+                  </span>
+                )}
+                {!offline && noChannels && (
+                  <span
+                    id={createNoChannelReasonId}
+                    className="break-keep text-meta text-ink-muted"
+                    data-testid="webhook-create-no-channel"
+                  >
+                    {NO_CHANNEL_CREATE_REASON}
+                  </span>
+                )}
+                {!offline && !noChannels && busy && !creating && (
+                  <span
+                    id={createBusyReasonId}
+                    className="break-keep text-meta text-ink-muted"
+                    data-testid="webhook-create-busy"
+                  >
+                    {BUSY_CREATE_REASON}
+                  </span>
+                )}
               </div>
             </div>
           </Subsection>
@@ -543,6 +612,35 @@ const OFFLINE_ROW_REASON =
  */
 const BUSY_ROW_REASON =
   "앞서 누른 것이 아직 끝나지 않았습니다. 그것이 끝나면 이어서 회전하거나 폐기할 수 있습니다.";
+
+// --- 만들기의 세 사유 (#1559 회전 1 · design-review #1595 H2) ------------------
+//
+// 목록의 두 문장을 재사용하지 않는 이유 둘. (1) 뒷절의 동사가 다르다 — 목록은
+// 회전과 폐기를, 이 폼은 만들기를 못 한다. (2) 목록의 두 문장은 `rows.length > 0`
+// 에서만 서므로, 웹훅이 하나도 없는 프레임에서 가리키면 화면에 없는 id 가 된다.
+// 그 프레임이 정확히 빈 상태이고, 빈 상태의 주 CTA 가 이 버튼이다.
+
+/**
+ * 발급은 큐에 쌓이지 않는다 — 이 클라이언트에 오프라인 큐(`networkMode` ·
+ * `onlineManager`)는 존재하지 않고, 위 `submit` 은 `create.mutate()` 앞에서 하드
+ * 리턴한다. 그러므로 「다시 연결되면 그대로 보내집니다」라고 약속하지 않는다:
+ * 다시 연결된 뒤 이 사람이 한 번 더 눌러야 하고, 문장은 그 사실을 말한다
+ * (`InviteSection.OFFLINE_CREATE_REASON` 이 같은 판정을 적는다).
+ */
+const OFFLINE_CREATE_REASON =
+  "연결이 끊겨 지금은 웹훅을 만들 수 없습니다. 다시 연결되면 이어서 만들 수 있습니다.";
+
+/**
+ * 받을 채널이 없다는 사실은 위 `SelectField` 의 유일한 선택지가 이미 말하지만,
+ * 그것은 고르는 목록의 빈 자리일 뿐 **버튼이 왜 회색인지**는 아니다. 그래서
+ * 뒷문장이 다음 행동을 든다 — 사유는 막다른 길이 아니라 다음 한 걸음이다.
+ */
+const NO_CHANNEL_CREATE_REASON =
+  "받을 수 있는 채널이 없어 아직 만들 수 없습니다. 채널을 하나 만든 뒤 여기로 돌아오세요.";
+
+/** 낱말이 「누른 것」인 이유는 위 `BUSY_ROW_REASON` 과 같다. */
+const BUSY_CREATE_REASON =
+  "앞서 누른 것이 아직 끝나지 않았습니다. 그것이 끝나면 이어서 만들 수 있습니다.";
 
 /**
  * 한 줄 = 한 웹훅. 행마다 상자를 두르지 않는다: 카드는 묶음을 뜻하고 여기서
@@ -649,6 +747,13 @@ function WebhookRow({
     asking === "revoke"
       ? revokeConfirmQuestion(installation.label)
       : rotateConfirmQuestion(installation.label);
+
+  // 낱말은 한 곳에서 지어진다. 낭독되는 이름이 그 낱말을 따라 움직여야 하므로
+  // (label-in-name, WCAG 2.5.3) 글자와 이름이 같은 값을 읽는다 — 형제 표면의
+  // `toggleText` 와 같은 모양이다. 「회전」·「폐기」는 한자어 동작명사라 「명사 +
+  // 중」이다 (#1501 정본).
+  const rotateText = rotating ? "회전 중" : "비밀값 회전";
+  const revokeText = revoking ? "폐기 중" : "폐기";
 
   // 잠금은 오프라인과 **남의 쓰기**뿐이다. 자기 쓰기가 날고 있는 컨트롤은 잠긴
   // 것이 아니라 진행 중이고, 그 사실은 낱말과 `aria-busy` 가 말한다 (#1486 회전 ·
@@ -772,10 +877,21 @@ function WebhookRow({
                 없었으므로. 이제 잠금은 오프라인과 남의 쓰기뿐이고, 자기 쓰기는
                 낱말로 말한다.
 
-                낭독되는 이름이 낱말을 따라 움직이는 이유는 label-in-name(WCAG
-                2.5.3)이다: 이름을 `aria-label` 로 고정하면 글자가 「회전 중」이 된
-                뒤에도 이름은 「비밀값 회전」으로 남는다. 줄을 지는 것은 이름이
-                아니라 `installation.label` 이 이미 지고 있는 행 제목이다. */}
+                이름은 **줄을 지고 낱말을 따라 움직인다** (#1559 회전 1). 처음에는
+                `aria-label` 을 아예 달지 않았다 — 이름을 고정하면 글자가 「회전
+                중」이 된 뒤에도 이름이 「비밀값 회전」으로 남아 label-in-name(WCAG
+                2.5.3)을 깨기 때문이고, 줄은 행 제목이 이미 진다고 보았다. 그
+                제목은 그러나 이 버튼에 **연결되어 있지 않다**: 같은 줄의
+                `CopyButton` 이 `subject` 로 푸는 문제가 여기서만 안 풀린 채,
+                스무 줄이 「비밀값 회전」이라는 같은 이름의 탭 스톱 스무 개가 된다.
+                2.5.3 이 요구하는 것은 보이는 글자를 **포함**하는 것뿐이므로,
+                `${label} ${낱말}` 은 둘을 함께 만족한다 — 형제 `toggleText` 와 같이
+                낱말이 한 곳에서 지어져 글자와 이름이 같은 값을 읽는다.
+
+                폭도 상태를 따라 움직이지 않는다: 「비밀값 회전」 -> 「회전 중」은
+                파괴적 형제(폐기)를 포인터 아래에서 밀어낸다. `--spacing-action-sm`
+                이 tokens.css §4 에 있는 이유가 그 실패이고(MOMO-676 M-3), 96px 는
+                이 짝의 가장 긴 낱말을 담는다. */}
             <Button
               type="button"
               size="sm"
@@ -783,15 +899,15 @@ function WebhookRow({
               aria-disabled={rotateLocked || undefined}
               aria-busy={rotating || undefined}
               aria-describedby={lockReason(rotating)}
-              className={cn(rotateLocked && "opacity-50")}
+              aria-label={`${installation.label} ${rotateText}`}
+              className={cn("min-w-action-sm", rotateLocked && "opacity-50")}
               onClick={() => {
                 if (rotateLocked || rotating) return;
                 setAsking("rotate");
               }}
               data-testid={`webhook-rotate-${installation.id}`}
             >
-              {/* 「회전」은 한자어 동작명사라 「명사 + 중」이다 (#1501 정본). */}
-              {rotating ? "회전 중" : "비밀값 회전"}
+              {rotateText}
             </Button>
             <Button
               type="button"
@@ -800,14 +916,15 @@ function WebhookRow({
               aria-disabled={revokeLocked || undefined}
               aria-busy={revoking || undefined}
               aria-describedby={lockReason(revoking)}
-              className={cn(revokeLocked && "opacity-50")}
+              aria-label={`${installation.label} ${revokeText}`}
+              className={cn("min-w-action-sm", revokeLocked && "opacity-50")}
               onClick={() => {
                 if (revokeLocked || revoking) return;
                 setAsking("revoke");
               }}
               data-testid={`webhook-revoke-${installation.id}`}
             >
-              {revoking ? "폐기 중" : "폐기"}
+              {revokeText}
             </Button>
           </div>
         ))}

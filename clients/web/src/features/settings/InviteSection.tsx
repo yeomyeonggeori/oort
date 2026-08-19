@@ -54,9 +54,14 @@ const DAY_MS = 86_400_000;
  * `useId` 가 벌어 주는 유일성이 살 자리가 없고, 상수는 계약 테스트가 배선을
  * 문자열로 확인할 수 있게 한다.
  *
- * 뒷문장이 형제 표면(이벤트 구독 만들기)의 것을 그대로 베끼지 않는 이유: 그쪽
- * 문장은 다시 연결되면 누른 것이 알아서 나간다고 약속하는데, 이 발급은 큐에 쌓이지
- * 않는다. 다시 연결된 뒤 이 사람이 한 번 더 눌러야 하고, 문장은 그 사실을 말한다.
+ * 뒷문장이 「다시 연결되면 그대로 보내집니다」가 **아닌** 이유: 이 클라이언트에
+ * 오프라인 큐는 존재하지 않는다(`clients/web/src` 어디에도 `networkMode` 도
+ * `onlineManager` 도 없고, 위 `submit` 은 `create.mutate()` 앞에서 하드 리턴한다).
+ * 다시 연결된 뒤 이 사람이 한 번 더 눌러야 하고, 문장은 그 사실을 말한다.
+ *
+ * 형제 표면(이벤트 구독 만들기)은 그 거짓 약속을 들고 있었고, 이 goal 이 그 문장을
+ * 이 문장과 같은 뜻으로 고쳤다 (#1559 회전 1 · design-review #1595 H4). 두 표면은
+ * 이제 같은 잠금에 같은 사실을 말한다 — 스캔이 그 금지를 전 파일에 건다.
  */
 const OFFLINE_NOTE_ID = "invite-create-offline-note";
 const OFFLINE_CREATE_REASON =
@@ -216,13 +221,19 @@ export function InviteSection({
         onSubmit={submit}
         data-testid="invite-create-form"
       >
+        {/* 날고 있는 발급은 `busy` 로 말한다 — `disabled` 가 아니다 (#1559 회전 1).
+            `ChoiceRadios.busy` 의 독스트링이 그 용도로 그 prop 이 있는 이유를 적어
+            두었다: `disabled` 는 `<fieldset disabled>` 가 되고, 초점을 쥔 라디오가
+            그렇게 꺼지면 초점이 <body> 로 떨어져 발급 한 번에 패널 꼭대기로
+            튕긴다. 형제 셋(`WebhookSection` 의 수신 방식, `WorkHostSection` 의
+            엔진·티어)이 이미 그렇게 한다. */}
         <ChoiceRadios
           name="invite-role"
           legend="역할"
           choices={INVITE_ROLES}
           value={role}
           onChange={setRole}
-          disabled={create.isPending}
+          busy={create.isPending}
         />
 
         <Field
@@ -256,7 +267,7 @@ export function InviteSection({
           }))}
           value={days}
           onChange={setDays}
-          disabled={create.isPending}
+          busy={create.isPending}
         />
 
         {formError && (
@@ -290,8 +301,8 @@ export function InviteSection({
           </Button>
           {/* 잠긴 컨트롤은 사유를 든다 (#1542 · design-review #1557 M). 회색이
               혼자 서면 「당신에게는 권한이 없다」로 읽히는데, 이 사람은 발급할 수
-              있고 지금 rail 이 내려가 있을 뿐이다. 형제 표면(이벤트 구독 만들기)이
-              같은 사실에 대해 쓰는 문장을 그대로 쓴다 — 같은 잠금, 같은 문장. */}
+              있고 지금 rail 이 내려가 있을 뿐이다. 문장이 무엇을 약속하고 무엇을
+              약속하지 않는지는 위 `OFFLINE_CREATE_REASON` 독스트링이 진다. */}
           {offline && (
             <span
               id={OFFLINE_NOTE_ID}
