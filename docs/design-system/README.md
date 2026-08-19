@@ -237,7 +237,7 @@
 
 | 층 | 어디 | 무엇 |
 |---|---|---|
-| **셸 그렙 프리플라이트** | `scripts/design_preflight_web.sh` | 웹 10분류 + 코어 3분류, **하드 제로** |
+| **셸 그렙 프리플라이트** | `scripts/design_preflight_web.sh` | 웹 12분류 + 코어 5분류, **하드 제로** |
 | **단위 스위트 단정** | `clients/web/src/**/*.test.ts` · `clients/mobile/__tests__/*` | 토큰 산술 · 소스 전수 스윕 · 렌더 트리 실측 |
 | **Playwright 게이트** | `clients/web/gates/gate-*.mjs` (24개) | 티켓별 기하·상태·회귀. 셋만 렌더 대비를 계산한다 |
 | **캡처 레인** | `clients/web/scripts/capture-screens.mjs` · `clients/mobile/measure/*` | 사진 + 단정(가로 오버플로 0 · 탭 타깃 · 상단 여백 · 컴포저 가시성) |
@@ -256,7 +256,7 @@
 | **터치 44** | `capture-screens.mjs`의 `assertTapTargets`(**손으로 유지되는 12개 목록**) | `conversationHygiene.test.tsx:148` (렌더 트리 실측) + `conversationA11y.test.tsx:330` + `designSystem.test.ts`(손으로 적은 슬롭 잔량 5, 늘면 빨강) | `designSystem.test.ts` — `TOUCH_TARGET` ↔ `--tap-target` ✅ (#1211) |
 | **컨트롤 경계 3:1** | `tokens.contrast.test.ts`(토큰) + `designSystem.test.ts`(프리미티브 층) | `paletteContrast.test.ts`(토큰) | — |
 | **위계** | §3.3 표 | 동 | — |
-| **카피** | 프리플라이트 `hype` + AST em-dash | `conversationHygiene.test.tsx:536` (`src/` 전수) | `design_preflight_core.mjs` (코어 문장) |
+| **카피** | 프리플라이트 `hype` + AST `emdash`·`progress_word`·`latin_particle`(#1511) | `conversationHygiene.test.tsx:536` (`src/` 전수) | `design_preflight_core.mjs` — 같은 다섯 분류를 코어 문장에도 건다(진행 낱말은 코어 상수로 폰까지 출하된다) |
 | **포커스** | 프리플라이트 `naked_focus` — 링이 **있는지**만. 링의 성질은 §5.3 | ❌ | — |
 | **인라인 스타일** | ESLint + 프리플라이트 `inline_style` (CSP) | 비해당 | — |
 
@@ -268,7 +268,7 @@
 |---|---|---|
 | 2위 (16건) | **상태 누락**(빈·로딩·오류·오프라인) | "표면"의 목록이 코드에 없다 |
 | 5위 (11건) | **시각 위계 역전** — 렌더된 화면에서 | 프로덕션 도구가 세상에 없다(§3 머리말) |
-| 7위 (9건) | **한국어 텍스트 처리** — 조사 고아, `break-all`, 의존형태소 절단 | 검사가 **아예 없다**. `fontStyle: italic`이 한글에서 0픽셀이라는 발견은 이 축에서만 나온다 |
+| 7위 (9건) | **한국어 텍스트 처리** — 조사 고아, `break-all`, 의존형태소 절단 | 이 축에서 **한 모양만** 기계로 내려왔다: 라틴 낱말 뒤 조사의 공백(「Esc 는」 → 프리플라이트 `latin_particle`, #1511). 그 하나는 소스에서 보이기 때문이다. 나머지는 그대로 없다 — 조사 고아 일반·`break-all`·절단은 **렌더된 폭**에 달렸고, `fontStyle: italic`이 한글에서 0픽셀이라는 발견은 이 축에서만 나온다 |
 | 7위 (9건) | **증거·캡처 공백** — 사진 없음/낡음/비현실 픽스처 | 정의상 사람 |
 | 10위 (7건) | **한 클라 안의 내부 불일치** — 같은 것에 두 처리 | "같은 것"의 판정이 의미 질문 |
 | 13위 (6건) | **스크린리더 시맨틱** — 로터 도달성, aria 바인딩, 라이브 리전 | axe 도입 시 일부 커버 |

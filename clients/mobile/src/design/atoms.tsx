@@ -170,6 +170,12 @@ export function PrimaryButton({
   testID,
 }: {
   label: string;
+  /**
+   * 진행 중에 라벨을 대체하는 낱말. 이 버튼은 ActivityIndicator 를 함께 돌리므로
+   * 낱말은 맨몸이다(「저장 중」) — 말줄임표(U+2026)는 스피너가 **없는** 자리의
+   * 진행 신호라, 스피너 옆에 붙이면 같은 사실을 두 번 말한다 (#1511 판정.
+   * 스피너 없는 MessageEditorSheet 의 「저장 중…」이 반대쪽 예다).
+   */
   busyLabel?: string;
   onPress: () => void;
   disabled?: boolean;

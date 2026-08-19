@@ -447,7 +447,7 @@ function ContinuationBlock({
                 group: "인수할 호스트",
                 confirm: HANDOFF_COPY.takeover.button,
                 action: (name) => `${name}에서 인수`,
-                busy: (name) => `${name}에서 인수하는 중`,
+                busy: (name) => `${name}에서 인수 중`,
               }}
               targets={state.targets}
               busyHostId={pendingHostId}
