@@ -591,6 +591,10 @@ function CreateForm({
 }) {
   const urlFieldId = useId();
   const kindsId = useId();
+  // 잠긴 만들기가 가리키는 사유. 아래 오프라인 문장이 이 id 를 진다 — 목록 쪽
+  // 두 사유(`offlineReasonId`/`busyReasonId`)와 같은 배선이고, 여기서 잠그는
+  // 사실은 오프라인 하나뿐이라 문장도 하나다.
+  const offlineReasonId = useId();
   const [url, setUrl] = useState("");
   const [kinds, setKinds] = useState<EventSubscriptionKind[]>([]);
   // Only after a submit attempt: complaining about an address while it is still
@@ -616,6 +620,13 @@ function CreateForm({
 
   function submit(event: React.FormEvent) {
     event.preventDefault();
+    // `aria-disabled` 는 클릭도 Enter 도 막지 않는다(그것이 요점이다 — 초점을
+    // 잃지 않는다). 그래서 거절은 여기서 한다. 주소 칸에서 누른 Enter(암묵적
+    // 제출)도 같은 쓰기를 내므로 `onClick` 이 아니라 폼이 가드를 진다.
+    //
+    // 잠금(`offline`)보다 먼저 서면 안 되는 것이 `setAttempted` 다: 보낼 수 없는
+    // 프레임에서 아직 다 적지도 않은 주소에 대고 규칙을 말하는 꼴이 된다.
+    if (offline || create.isPending) return;
     setAttempted(true);
     if (!normalizeDestination(url) || noKinds) return;
     create.mutate();
@@ -769,11 +780,19 @@ function CreateForm({
       )}
 
       <div className="flex min-w-0 flex-wrap items-center gap-2">
+        {/* 이 줄의 목록 쪽 형제들은 #1541 에서 이미 갈라졌는데 만들기만 남아
+            있었다 (#1559). native `disabled` 는 진행 프레임에서 두 가지를 한꺼번에
+            한다: 낱말(「만드는 중」)을 흐림 아래에 두어 「지금 일어나는 중」을
+            「당신은 이걸 못 한다」로 바꿔 읽히게 하고, 버튼을 tab order 에서 빼
+            바로 아래 오프라인 사유가 키보드·AT 로 닿지 않는 자리에 놓는다.
+            잠그는 사실은 오프라인 하나이고, 진행은 낱말과 `aria-busy` 가 진다. */}
         <Button
           type="submit"
           size="sm"
-          disabled={offline || create.isPending}
+          aria-disabled={offline || undefined}
           aria-busy={create.isPending || undefined}
+          aria-describedby={offline ? offlineReasonId : undefined}
+          className={cn(offline && "opacity-50")}
           data-testid="event-subscription-create"
         >
           {create.isPending ? "만드는 중" : "구독 만들기"}
@@ -792,13 +811,25 @@ function CreateForm({
             만들면 서명 비밀이 한 번만 표시됩니다.
           </span>
         )}
+        {/* 「다시 연결되면 그대로 보내집니다」였다 — 지키지 못하는 약속이다
+            (#1559 회전 1 · design-review #1595 H4). 이 클라이언트에 오프라인 큐는
+            존재하지 않고(`networkMode` 도 `onlineManager` 도 없다), 위 `submit` 은
+            `create.mutate()` 앞에서 하드 리턴하므로 오프라인에서 누른 것은
+            어디에도 쌓이지 않는다. 다시 연결된 뒤 이 사람이 한 번 더 눌러야 한다.
+
+            이 goal 이 이 span 에 id 를 달고 버튼의 `aria-describedby` 를 물리면서
+            그 문장은 화면의 캡션에서 **AT 사용자가 듣는 권위 있는 사유**로
+            올라갔다 — 거짓말을 승격시키는 배선이었다. 올바른 문장은 같은 커밋의
+            형제 파일이 이미 갖고 있었다(`InviteSection.OFFLINE_CREATE_REASON` 의
+            독스트링이 같은 판정을 적는다). */}
         <span
+          id={offlineReasonId}
           className="break-keep text-meta text-ink-muted"
           role="status"
           data-testid="event-subscription-create-offline"
         >
           {offline
-            ? "서버와 연결이 끊겨 지금은 만들 수 없습니다. 다시 연결되면 그대로 보내집니다."
+            ? "서버와 연결이 끊겨 지금은 만들 수 없습니다. 다시 연결되면 이어서 만들 수 있습니다."
             : ""}
         </span>
       </div>
