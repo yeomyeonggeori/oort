@@ -83,13 +83,18 @@ import {
 // 다른 쪽에서 쓸 수 없다.
 // =============================================================================
 
+// 그릇은 세 칸이 전부 --muted-soft 다 (#1515 회전 1). 앞 판의 --surface-hover ·
+// --accent-soft 는 둘 다 **행이 입는 상태의 이름**이고, 이 카드의 행(아래 :158)이
+// 바로 `hover:bg-surface-hover` 로 선다 — 가리키는 순간 칩이 행에 녹았다(실측 대비
+// 1.000). 잉크는 그대로다: 갈라진 것은 그릇이고, 색을 버는 것은 측정이지 이름이
+// 아니므로 톤은 잉크에만 남는다.
 const STATE_CHIP_CLASS: Readonly<Record<AdeState, string>> = {
   // 실행 중은 「지금 흐르고 있다」 — 작업 세션 패널의 running 과 같은 표지다.
-  working: "bg-surface-hover text-warn",
+  working: "bg-muted-soft text-warn",
   // 대기만 accent 를 입는다. 이 화면에서 사람을 부르는 유일한 상태이고, 같은
   // 규칙을 작업 세션 패널이 「호스트 연결 끊김」에 이미 쓴다.
-  blocked: "bg-accent-soft text-accent",
-  idle: "bg-surface-hover text-ink-muted",
+  blocked: "bg-muted-soft text-accent",
+  idle: "bg-muted-soft text-ink-muted",
 };
 
 const DURABILITY_TONE_CLASS = {

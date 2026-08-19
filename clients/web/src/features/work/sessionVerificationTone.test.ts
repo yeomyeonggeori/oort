@@ -239,3 +239,77 @@ describe("칩의 그릇이 행의 상호작용 바탕에서 살아남는다", ()
     }
   });
 });
+
+// -----------------------------------------------------------------------------
+// 그리고 **원장의 칩도** 행의 상호작용 바탕에서 살아남는다 (#1515 / #1514 H-2).
+//
+// #1463 이 검증 칩을 `--surface-hover` 에서 떼어냈을 때 수명주기 칩은 그 자리에
+// 남았고, 그래서 가리킨 행에서 그릇을 잃는 쪽이 **원장의 칩 하나**가 됐다 — 한 행의
+// 두 칩 중 하나만 사라지는 것은, 고치기 전의 「둘 다 사라진다」보다 오히려 읽기
+// 어렵다. 리뷰가 그것을 H-2 로 적었고 이 절이 그 나머지 반쪽을 닫는다.
+//
+// 클래스 문자열이 아니라 **값**을 재는 이유는 위 절과 같다: 두 유틸리티가 서로 다른
+// 이름으로 같은 색을 가리키게 되는 날, 문자열만 보는 가드는 조용하다.
+// -----------------------------------------------------------------------------
+
+/** 클래스 문자열의 `bg-*` 를 tokens.css 의 토큰 이름으로. */
+function fillToken(className: string): string {
+  const found = className.split(/\s+/).find((c) => c.startsWith("bg-"));
+  expect(found, `그릇이 없다: ${className}`).toBeTruthy();
+  return `--${found!.slice("bg-".length)}`;
+}
+
+describe("원장의 칩이 가리킨 행·선택된 행에서 그릇을 잃지 않는다 (#1515)", () => {
+  it("여섯 칸이 한 그릇을 쓰고, 그 그릇이 tokens.css 에 실재한다", () => {
+    const tokens = new Set(
+      Object.values(SESSION_STATUS_CLASS).map((value) => fillToken(value))
+    );
+    expect(tokens.size, `그릇이 칸마다 다르다: ${[...tokens].join(", ")}`).toBe(1);
+    expect(() => tokenValues([...tokens][0])).not.toThrow();
+  });
+
+  it("그 그릇이 행이 입을 수 있는 바탕 셋과 두 스킴 모두에서 다른 값이다", () => {
+    // 셋의 출처는 이 칩을 세우는 네 표면의 실제 클래스다: 기본 바탕(`--surface`),
+    // 가리킨·펼친 행(`--surface-hover`), 선택된 행(`WorkConsoleRoute` 의
+    // `--accent-soft`). 여기 없는 표면에 칩을 세우면 이 목록을 늘려야 한다.
+    const vessel = tokenValues(fillToken(SESSION_STATUS_CLASS.done));
+    for (const rowToken of ["--surface", "--surface-hover", "--accent-soft"]) {
+      const row = tokenValues(rowToken);
+      for (const [index, scheme] of SCHEMES.entries()) {
+        expect(
+          vessel[index],
+          `${scheme}: 칩 그릇이 ${rowToken} 과 같은 값(${vessel[index]})이다 — 그 상태의 행에서 그릇이 사라진다`
+        ).not.toBe(row[index]);
+      }
+    }
+  });
+
+  it("관제 줄의 형제 배지들도 같은 그릇을 쓴다 — 한 행에 두 문법이 서지 않는다", () => {
+    // 수명주기 칩 옆에 서는 리터럴 칩들(`LocationBadge`·계보 「인수함」)이 옛
+    // 그릇에 남으면, 같은 행에서 어떤 칩은 사라지고 어떤 칩은 남는다.
+    const console_ = readFileSync(
+      new URL("../workConsole/WorkConsoleRoute.tsx", import.meta.url),
+      "utf8"
+    );
+    const workstream = readFileSync(
+      new URL("../workstreams/WorkstreamDetailRoute.tsx", import.meta.url),
+      "utf8"
+    );
+    for (const [name, source] of [
+      ["WorkConsoleRoute", console_],
+      ["WorkstreamDetailRoute", workstream],
+    ] as const) {
+      expect(source, `${name}: 형제 배지가 새 그릇을 안 든다`).toContain(
+        "bg-muted-soft"
+      );
+      // 그리고 이 두 파일에서 `--surface-hover` 는 **오직 상호작용 변형으로만**
+      // 나타난다. 맨 `bg-surface-hover` 하나가 곧 「상태 토큰을 정적인 그릇으로
+      // 빌려 썼다」이고, 그것이 H-2 의 정확한 모양이다.
+      const bare = [...source.matchAll(/(^|[^:\w-])bg-surface-hover/g)];
+      expect(
+        bare.map((m) => source.slice(Math.max(0, m.index - 40), m.index + 24)),
+        `${name}: 변형 없는 bg-surface-hover 가 남아 있다`
+      ).toEqual([]);
+    }
+  });
+});
