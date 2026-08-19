@@ -158,12 +158,15 @@
    * ## 실측 (tokens.contrast.test.ts 가 두 스킴에서 잰다)
    *
    *   그릇 vs 이 칩이 서는 행 바탕(surface · surface-hover · surface-raised) —
-   *   라이트 최악 1.056 · 다크 최악 1.134.
+   *   라이트 최악 1.061(warn-soft on surface) · 다크 최악 1.134(warn-soft on
+   *   surface-hover).
    *   나란히 선 중립 그릇(--muted-soft)과의 OKLab 거리 — 라이트 최소 0.0203 ·
    *   다크 최소 0.0379.
    *   각 그릇이 자기 톤의 색상 가족 안에 있다(<= 15도, 실측 최대 2.7도) — 「초록
    *   그릇에 붉은 잉크」는 대비만으로는 잡히지 않는다.
-   *   최악 전경 AA — 라이트 ink-muted 4.74 · 다크 ok 4.68. */
+   *   최악 전경 AA — 라이트 ink-muted on danger-soft 4.96 · 다크 ok on
+   *   danger-soft 4.68. 뒤엣것은 이 팔레트 **전체**의 다크 최악 쌍이기도 하다
+   *   (앞 판은 ok on accent-soft 5.15였다). */
   --ok-soft: light-dark(#e0f4e2, #243323);
   --warn-soft: light-dark(#ffedd4, #372e1b);
   --danger-soft: light-dark(#ffe9e5, #402a26);

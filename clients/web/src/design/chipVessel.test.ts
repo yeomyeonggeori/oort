@@ -167,8 +167,19 @@ function discover(): { fills: Fill[]; chipCalls: number } {
   return { fills, chipCalls };
 }
 
-/** 칩이 그릇으로 들 수 있는 값 전부 (`tokens.css` 의 `-soft` 가족 중 그릇 쪽). */
-const VESSELS = new Set(["bg-muted-soft"]);
+/**
+ * 칩이 그릇으로 들 수 있는 값 전부 (`tokens.css` 의 `-soft` 가족 중 그릇 쪽).
+ *
+ * `--accent-soft`·`--agent-soft` 는 같은 이름 가족이지만 여기 없다: 그 둘은 칩의
+ * 그릇이 아니라 **선택된 행**의 채움이고(사이드바·관제 줄·⌘K), 칩이 그것을 그릇으로
+ * 들면 그게 바로 이 파일이 막는 결함이다.
+ */
+const VESSELS = new Set([
+  "bg-muted-soft",
+  "bg-ok-soft",
+  "bg-warn-soft",
+  "bg-danger-soft",
+]);
 
 /**
  * 아직 옛 그릇에 선 칩 — 좌표와 수 (#1515 회전 1).
@@ -185,16 +196,18 @@ const VESSELS = new Set(["bg-muted-soft"]);
  *
  * 이 표에서 한 줄을 지우려면 그 자리를 실제로 고쳐야 하고, 새 위반을 들이려면 여기
  * 적어야 한다. 둘 다 리뷰를 지나간다.
+ *
+ * #1516 이 `SessionVerificationChip.tsx` 한 줄을 지웠다(검증 칩의 `--surface-raised`
+ * + 테두리가 톤 그릇으로 바뀌었다) — 천장이 25 에서 24 로 내려온 것이 그 기록이다.
  */
 const RESIDUE: readonly (readonly [string, number])[] = [
   ["clients/web/src/features/timeline/StatusChip.tsx", 20],
   ["clients/web/src/features/work/DisplayController.tsx", 2],
-  ["clients/web/src/features/work/SessionVerificationChip.tsx", 1],
   ["clients/web/src/features/work/WorkSessionDetail.tsx", 2],
 ];
 
 /** 잔량 천장. **내려가기만 한다** — 올리는 변경은 위 문단을 지나야 한다. */
-const RESIDUE_CEILING = 25;
+const RESIDUE_CEILING = 24;
 
 describe("칩의 그릇 규칙은 팔레트 전체에 걸린다 (#1515 회전 1)", () => {
   const { fills, chipCalls } = discover();
@@ -246,10 +259,6 @@ describe("칩의 그릇 규칙은 팔레트 전체에 걸린다 (#1515 회전 1)
     const kinds = new Set(
       fills.filter((f) => !VESSELS.has(f.fill)).map((f) => f.fill)
     );
-    expect([...kinds].sort()).toEqual([
-      "bg-accent-soft",
-      "bg-surface-hover",
-      "bg-surface-raised",
-    ]);
+    expect([...kinds].sort()).toEqual(["bg-accent-soft", "bg-surface-hover"]);
   });
 });

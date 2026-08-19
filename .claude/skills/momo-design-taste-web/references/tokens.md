@@ -96,7 +96,7 @@ So the two axes have separate names, and the split is mechanical:
 | axis | tokens | behaviour |
 |---|---|---|
 | interaction state | `--surface-hover`, `--accent-soft` | hovered row, selected row. **Toggles** |
-| chip vessel | `--muted-soft` | the pale fill a chip stands in. **Always on** |
+| chip vessel | `--muted-soft` · `--ok-soft` · `--warn-soft` · `--danger-soft` | the pale fill a chip stands in. **Always on** |
 
 **"Just pick another gray" is arithmetic, not taste.** In light, `--ink-muted`
 needs a background luminance of at least 0.769 to hold AA, and `--surface-hover`
@@ -112,9 +112,18 @@ light `--surface` 1.061 / 0.0207 · `--surface-hover` 1.117 / 0.0366 ·
 `--accent-soft` 1.062 / 0.0256; dark 1.346 / 0.1036 · 1.135 / 0.0380 ·
 1.095 / 0.0470. Before the fix the worst pair was 1.000 / 0.0000.
 
-The surfaces a chip may stand on are a **closed table** (`CHIP_ROW_SURFACES`),
+The surfaces a chip may stand on are a **closed table** (`CHIP_VESSEL_SURFACES`),
 the same discipline as `CONTROL_SURFACES`: put a chip on a new surface and the
-list has to grow, or the defect goes quiet again.
+list has to grow, or the defect goes quiet again. It has **one row per vessel**,
+because the lists genuinely differ — the verification chip never stands on
+`--accent-soft`, and demanding a floor for a pair that never renders would mean
+tuning a token for a problem that is not on screen.
+
+And the rule reaches further than any of those tables: `chipVessel.test.ts` sweeps
+**every** chip in the repo — found by use, not by name, starting from
+`cn(CHIP_CLASS, …)` — classifies where each one gets its fill, and asserts the
+classification is total with a residue count that only decreases. Two live 1.000
+defects were living outside the tables when only the tables existed.
 
 And the vessel carries no tone — all six lifecycle cells share one fill.
 **Colour is earned by measurement, not by naming**: the ledger chip only says what
@@ -174,7 +183,7 @@ Worst case across every foreground x every surface, both schemes:
 | scheme | worst pair | ratio | floor |
 |---|---|---|---|
 | light | `--ink-muted` on `--surface-hover` | **4.51:1** | 4.5 (AA) |
-| dark | `--ok` on `--accent-soft` | **5.15:1** | 4.5 (AA) |
+| dark | `--ok` on `--danger-soft` | **4.68:1** | 4.5 (AA) |
 | light | `--line-strong` on `--surface-hover` | **3.03:1** | 3.0 (non-text) |
 | dark | `--line-strong` on `--surface-hover` | **3.00:1** | 3.0 (non-text) |
 
@@ -221,8 +230,10 @@ outreads `--ink-muted` on every surface in both schemes, so a louder red can
 never be bought by making it a dimmer one. What it may NOT be asked to do is
 outread `--warn` in dark: sRGB has no red that is both more colorful than
 `#d4a72c` and as luminous, so requiring both would have made the order
-unreachable rather than merely unmet. Dark danger now measures 5.72:1 at its
-worst surface (`--accent-soft`), above the AA floor and above muted's 5.17.
+unreachable rather than merely unmet. Dark danger now measures 5.20:1 at its
+worst surface (`--danger-soft`, since #1516 added the chip vessels), above the AA
+floor and above muted's 4.70 on that same surface. The assertion is per-surface,
+so it is the *relation* that is guarded, not these two numbers.
 
 **The ruler measures two different classes of surface, and each has its own
 order.** Naming only the first is how MOMO-641's fix produced MOMO-642 R1 H-2:

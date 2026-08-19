@@ -98,13 +98,13 @@
 
 | 층 | 파일 | 재는 것 |
 |---|---|---|
-| 값 | `tokens.contrast.test.ts` | 그릇 토큰이 자기가 서는 행 바탕과 두 자로 다른가. 행 바탕은 **닫힌 표**(`CHIP_ROW_SURFACES`)다 — `CONTROL_SURFACES`와 같은 성질 |
+| 값 | `tokens.contrast.test.ts` | 그릇 토큰이 자기가 서는 행 바탕과 두 자로 다른가. 행 바탕은 **닫힌 표**(`CHIP_VESSEL_SURFACES`)이고 **그릇마다 목록이 다르다** — `CONTROL_SURFACES`와 같은 성질 |
 | 이름 | `sessionStatusClass.test.ts`(코어) | 역할표 두 개(`SESSION_STATUS_CLASS`·`ROW_STATE_CLASS`) 어느 칸도 상태 토큰을 그릇으로 들지 않는가 |
 | **전수** | `chipVessel.test.ts` | **레포의 모든 칩**이 그릇을 어디서 얻는지 훑어 분류하고, 그 분류가 총체임과 잔량이 줄어들기만 함을 단정 |
 
 셋째 층이 따로 있는 이유는 §5.5②가 이름 대어 적은 실패 양식 그 자체다. 앞의 두 층은 **자기가 아는 표만** 보므로, 규칙은 팔레트 전체인데 강제는 허용목록이 된다. 실제로 그 목록 밖에서 대비 1.000짜리 산 결함 둘이 살아 있었다(워크스트림 목록 행·ADE 서랍 카드 — 그때 앞 두 층은 전부 초록이었다). 전수 층은 칩을 **이름이 아니라 쓰임으로** 찾는다: 칩의 기하는 `CHIP_CLASS` 하나뿐이므로 `cn(CHIP_CLASS, …)` 호출에서 출발해 ①인라인 리터럴과 ②거기서 참조된 역할표를 모은다. 그래서 컨트롤 변형표(`button.tsx`)는 자동으로 빠지고 — 컨트롤이 `--accent-soft`를 선택 상태로 입는 것은 이 규칙의 대상이 아니라 그 토큰이 하는 일 그 자체다 — 새로 생긴 칩은 자동으로 들어온다.
 
-**남은 잔량 25건**, 전부 rule-only다(규칙 위반이되 그 칩을 인 행이 상호작용 바탕을 입지 않아 지금 화면에서는 그릇이 살아 있다): `StatusChip.tsx` 20 · `WorkSessionDetail.tsx` 2 · `DisplayController.tsx` 2 · `SessionVerificationChip.tsx` 1. 좌표와 수가 `chipVessel.test.ts`의 표에 있고 그 표가 **정확히** 맞아야 초록이다 — 새 위반은 적지 않으면 빨갛고, 수리는 표를 줄이지 않으면 빨갛다. 천장은 내려가기만 한다.
+**남은 잔량 24건**, 전부 rule-only다(규칙 위반이되 그 칩을 인 행이 상호작용 바탕을 입지 않아 지금 화면에서는 그릇이 살아 있다): `StatusChip.tsx` 20 · `WorkSessionDetail.tsx` 2 · `DisplayController.tsx` 2. 좌표와 수가 `chipVessel.test.ts`의 표에 있고 그 표가 **정확히** 맞아야 초록이다 — 새 위반은 적지 않으면 빨갛고, 수리는 표를 줄이지 않으면 빨갛다. 천장은 내려가기만 한다: #1515가 25로 세웠고 #1516이 검증 칩을 톤 그릇으로 옮기며 **24로 내렸다.**
 
 **사정거리는 웹이다.** 폰(`clients/mobile`)에도 같은 격의 칩이 있다 — `WorkSessionParts.tsx`의 `WorkStatusBadge`는 같은 `WorkSessionStatus` 키를 쓰고 자기 주석이 「역할 정본은 웹/코어 표이고, 폰은 그 표를 따른다」라고 적는다 — 그리고 그쪽은 아직 톤 채움 + 1px 테두리다. 웹이 방금 컨트롤 문법으로 판정해 걷어낸 그 모양이다. 폰 정렬은 §6 절차를 지나야 하는 별도 결정이라 여기서 하지 않고 **후속 티켓 후보**로 남긴다: 폰의 `okSurface`/`warnSurface`/`dangerSurface`는 새 웹 토큰과 다크에서 OKLab 거리 0.0337/0.0450/0.0421이라, 위 0.02 자로는 **서로 다른 재료**다. 번역이 아니라 신설이 필요한 자리라는 뜻이다.
 
