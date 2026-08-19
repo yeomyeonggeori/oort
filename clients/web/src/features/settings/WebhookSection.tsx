@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/design/ui/button";
 import { Input } from "@/design/ui/input";
@@ -282,6 +282,14 @@ export function WebhookSection({
 
   const busy = create.isPending || rotate.isPending || revoke.isPending;
   const submitBlocked = offline || busy || channelChoices.length === 0;
+  // 지금 날고 있는 쓰기가 **어느 줄의 것**인가 (#1559). `busy` 는 섹션 전체의
+  // 사실이라 그대로 줄에 넘기면 스무 줄이 함께 진행 낱말을 든다. 좁히는 열쇠는
+  // 뮤테이션이 들고 있는 인자다 — #1502 가 삭제에, #1541 이 켜고 끄기에 쓴 것과
+  // 같은 좁히기(`variables`).
+  const rotatingId = rotate.isPending ? rotate.variables?.id : undefined;
+  const revokingId = revoke.isPending ? revoke.variables?.id : undefined;
+  const offlineReasonId = useId();
+  const busyReasonId = useId();
 
   function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -381,7 +389,11 @@ export function WebhookSection({
                     ?.label ?? "채널을 찾을 수 없음"
                 }
                 busy={busy}
+                rotating={rotatingId === installation.id}
+                revoking={revokingId === installation.id}
                 offline={offline}
+                offlineReasonId={offlineReasonId}
+                busyReasonId={busyReasonId}
                 takeFocus={changedRowId === installation.id}
                 onFocusTaken={() => setChangedRowId(null)}
                 onRotate={() => rotate.mutate(installation)}
@@ -389,6 +401,35 @@ export function WebhookSection({
               />
             ))}
           </ul>
+        )}
+
+        {/* 잠긴 줄들이 가리키는 두 사유 (#1542 동형 · #1559). 같은 자리에 서고 한
+            번에 하나만 그려진다 — 한 잠금에 두 이유를 대면 어느 쪽도 답이 아니다.
+
+            줄 **안**이 아니라 목록 바로 아래인 것은 이 파일의 구조 때문이다:
+            확인 프롬프트가 열리면 그 줄의 액션 스트립을 통째로 대체하므로(위
+            docstring 의 리뷰 H1·H2), 문장을 스트립 안에 두면 누군가 묻기 시작하는
+            순간 나머지 줄들의 `aria-describedby` 가 화면에 없는 id 를 가리키게
+            된다 — 없는 문장을 가리키는 describedby 는 사유가 아니라 침묵이다.
+            목록 밖에 한 번 쓰면 스무 줄이 같은 문장을 스무 번 되풀이하지도
+            않는다. */}
+        {rows.length > 0 && offline && (
+          <p
+            id={offlineReasonId}
+            className="break-keep text-meta text-ink-muted"
+            data-testid="webhook-rows-offline"
+          >
+            {OFFLINE_ROW_REASON}
+          </p>
+        )}
+        {rows.length > 0 && !offline && busy && (
+          <p
+            id={busyReasonId}
+            className="break-keep text-meta text-ink-muted"
+            data-testid="webhook-rows-busy"
+          >
+            {BUSY_ROW_REASON}
+          </p>
         )}
 
         {/* 이 표면에 전송 기록이 없다는 사실은 접힌 자리에 두지 않는다 (리뷰 H4).
@@ -487,6 +528,22 @@ export function WebhookSection({
   );
 }
 
+// --- 목록의 두 사유 (#1542 동형 · #1559) --------------------------------------
+
+/** 뒷절의 동사 둘은 이 줄이 실제로 내놓는 두 행동 그대로다 — 회전과 폐기. */
+const OFFLINE_ROW_REASON =
+  "연결이 끊겨 지금은 회전하거나 폐기할 수 없습니다.";
+
+/**
+ * 낱말이 「회전」이나 「폐기」가 아니라 「누른 것」인 이유는 형제 표면
+ * (`EventSubscriptionSection.BUSY_ROW_REASON`)이 적어 둔 것과 같다: 이 잠금을
+ * 켜는 쓰기는 셋이고(만들기·회전·폐기) 그중 무엇이 날고 있는지 이 문장은 알지
+ * 못한다. 아는 줄은 자기 낱말로 이미 말하고 있고, 이 문장은 **모르는 줄들**의
+ * 것이다.
+ */
+const BUSY_ROW_REASON =
+  "앞서 누른 것이 아직 끝나지 않았습니다. 그것이 끝나면 이어서 회전하거나 폐기할 수 있습니다.";
+
 /**
  * 한 줄 = 한 웹훅. 행마다 상자를 두르지 않는다: 카드는 묶음을 뜻하고 여기서
  * 묶이는 것은 목록 전체다.
@@ -510,7 +567,11 @@ function WebhookRow({
   serverBaseUrl,
   channelName,
   busy,
+  rotating,
+  revoking,
   offline,
+  offlineReasonId,
+  busyReasonId,
   takeFocus,
   onFocusTaken,
   onRotate,
@@ -520,8 +581,16 @@ function WebhookRow({
   workspaceId: string;
   serverBaseUrl: string;
   channelName: string;
+  /** 이 섹션의 어떤 쓰기든 날고 있다 — 목록 전체의 사실. */
   busy: boolean;
+  /** 날고 있는 회전이 **이 줄의 것**인가. 진행 낱말은 이 줄만 든다. */
+  rotating: boolean;
+  /** 날고 있는 폐기가 **이 줄의 것**인가. */
+  revoking: boolean;
   offline: boolean;
+  /** 목록 아래에 한 번 쓰인 두 사유. 이 줄의 컨트롤은 가리키기만 한다. */
+  offlineReasonId: string;
+  busyReasonId: string;
   /** 이 행이 방금 바뀌었다. 포커스가 여기 착지해 새 상태를 읽어 준다. */
   takeFocus: boolean;
   onFocusTaken: () => void;
@@ -581,6 +650,29 @@ function WebhookRow({
       ? revokeConfirmQuestion(installation.label)
       : rotateConfirmQuestion(installation.label);
 
+  // 잠금은 오프라인과 **남의 쓰기**뿐이다. 자기 쓰기가 날고 있는 컨트롤은 잠긴
+  // 것이 아니라 진행 중이고, 그 사실은 낱말과 `aria-busy` 가 말한다 (#1486 회전 ·
+  // #1541 · #1559).
+  //
+  // 줄이 아니라 **컨트롤**마다 재는 이유: 회전이 날고 있는 동안 같은 줄의 폐기는
+  // 진행 중이 아니라 잠긴 것이다. 줄 단위로 재면 그 폐기가 열린 채 남아, 날고
+  // 있는 회전 밑에서 같은 웹훅을 폐기하는 길이 그대로 열린다.
+  const rotateLocked = offline || (busy && !rotating);
+  const revokeLocked = offline || (busy && !revoking);
+  // 확인 그룹의 확정은 자기 진행을 가질 수 없다: 쓰기를 내기 전에
+  // `setAsking(null)` 이 이 그룹을 걷어낸다. 여기 `busy` 는 언제나 남의 쓰기다.
+  const confirmLocked = offline || busy;
+
+  /**
+   * 한 잠금에 한 문장. 오프라인이 이기는 이유는 형제 표면과 같다: 오프라인이면
+   * 앞선 쓰기도 어차피 도착하지 못한다. 자기 진행 중에는 사유를 들지 않는다 —
+   * 진행 중에 「왜 못 하는지」를 읽어 주면 지금 그것을 하지 못한다는 뜻이 된다.
+   */
+  function lockReason(mine: boolean): string | undefined {
+    if (offline) return offlineReasonId;
+    return busy && !mine ? busyReasonId : undefined;
+  }
+
   return (
     <li
       ref={rowRef}
@@ -623,12 +715,20 @@ function WebhookRow({
           >
             <p className="break-keep text-body text-ink">{question}</p>
             <div className="flex flex-wrap items-center gap-2">
+              {/* 이 확정은 자기 진행을 가질 수 없다: 쓰기를 내기 전에
+                  `setAsking(null)` 이 이 그룹을 걷어낸다. 그래서 여기 `busy` 는
+                  언제나 **남의 쓰기**이고, 잠그는 사실은 오프라인과 그것뿐이다.
+                  취소는 잠기지 않는다: 되돌릴 수 없는 쪽만 남기고 나가는 길을
+                  막으면 그것은 확인이 아니라 덫이다. */}
               <Button
                 type="button"
                 size="sm"
                 variant={asking === "revoke" ? "destructive" : "outline"}
-                disabled={busy}
+                aria-disabled={confirmLocked || undefined}
+                aria-describedby={lockReason(false)}
+                className={cn(confirmLocked && "opacity-50")}
                 onClick={() => {
+                  if (confirmLocked) return;
                   const kind = asking;
                   setAsking(null);
                   if (kind === "revoke") onRevoke();
@@ -665,25 +765,49 @@ function WebhookRow({
                 testId={`webhook-copy-${installation.id}`}
               />
             )}
+            {/* 이 줄의 두 트리거는 #1541 이 지나갈 때 파일군 밖이었다 (#1559).
+                native `disabled` 였던 동안 이 목록에서 회전 하나가 나가면 스무 줄이
+                통째로 회색이 되고 tab order 에서 사라졌으며, 진행 중인 그 줄조차
+                자기가 무엇을 하고 있는지 말하지 못했다 — 낱말도 `aria-busy` 도
+                없었으므로. 이제 잠금은 오프라인과 남의 쓰기뿐이고, 자기 쓰기는
+                낱말로 말한다.
+
+                낭독되는 이름이 낱말을 따라 움직이는 이유는 label-in-name(WCAG
+                2.5.3)이다: 이름을 `aria-label` 로 고정하면 글자가 「회전 중」이 된
+                뒤에도 이름은 「비밀값 회전」으로 남는다. 줄을 지는 것은 이름이
+                아니라 `installation.label` 이 이미 지고 있는 행 제목이다. */}
             <Button
               type="button"
               size="sm"
               variant="outline"
-              disabled={busy || offline}
-              onClick={() => setAsking("rotate")}
+              aria-disabled={rotateLocked || undefined}
+              aria-busy={rotating || undefined}
+              aria-describedby={lockReason(rotating)}
+              className={cn(rotateLocked && "opacity-50")}
+              onClick={() => {
+                if (rotateLocked || rotating) return;
+                setAsking("rotate");
+              }}
               data-testid={`webhook-rotate-${installation.id}`}
             >
-              비밀값 회전
+              {/* 「회전」은 한자어 동작명사라 「명사 + 중」이다 (#1501 정본). */}
+              {rotating ? "회전 중" : "비밀값 회전"}
             </Button>
             <Button
               type="button"
               size="sm"
               variant="outline"
-              disabled={busy || offline}
-              onClick={() => setAsking("revoke")}
+              aria-disabled={revokeLocked || undefined}
+              aria-busy={revoking || undefined}
+              aria-describedby={lockReason(revoking)}
+              className={cn(revokeLocked && "opacity-50")}
+              onClick={() => {
+                if (revokeLocked || revoking) return;
+                setAsking("revoke");
+              }}
               data-testid={`webhook-revoke-${installation.id}`}
             >
-              폐기
+              {revoking ? "폐기 중" : "폐기"}
             </Button>
           </div>
         ))}

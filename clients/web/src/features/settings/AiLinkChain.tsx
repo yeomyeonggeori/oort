@@ -85,6 +85,29 @@ const CHAIN_KEY = ["settings", "provider-chain"];
 const CHAIN_FULL_NOTE_ID = "chain-full-note";
 
 /**
+ * 나머지 두 사유의 id (#1559 — #1541 이 「PR 에 남긴다」고 적어 둔 배선).
+ *
+ * 추가가 잠기는 사실은 셋(꽉 참·날고 있는 쓰기·읽을 수 없는 사슬)인데 문장을
+ * 가리키는 것은 「꽉 참」 하나뿐이었다. 나머지 둘의 문장은 화면에 **있었지만**
+ * id 를 갖는 노드가 아니어서 가리킬 수 없었고, 그래서 그 두 프레임의 회색은
+ * 아무 말도 하지 않았다 — `aria-disabled` 로 tab order 에 남게 된 뒤로 그 침묵은
+ * 더 크게 들린다: 초점은 닿는데 왜 못 하는지는 어디에도 없다.
+ */
+const CHAIN_UNREADABLE_NOTE_ID = "chain-partial-note";
+const CHAIN_BUSY_NOTE_ID = "chain-busy-note";
+
+/**
+ * 날고 있는 쓰기가 추가를 잠근다는 문장.
+ *
+ * 낱말이 「저장」이 아니라 「누른 것」인 이유는 형제 표면
+ * (`EventSubscriptionSection.BUSY_ROW_REASON`)과 같다: 이 잠금을 켜는 쓰기는
+ * 둘이고(연결 순서 저장, 전부 지우기) 그중 무엇이 날고 있는지 이 문장은 알지
+ * 못한다. 뒷절의 동사는 이 버튼이 하는 일 그대로다.
+ */
+const CHAIN_BUSY_NOTE =
+  "앞서 누른 것이 아직 끝나지 않았습니다. 그것이 끝나면 이어서 추가할 수 있습니다.";
+
+/**
  * Every read and write goes through the parser, so nothing downstream ever
  * holds an object the server did not actually shape. An unreadable 200 becomes
  * a plain Error and lands on the same inline banner a network failure does.
@@ -527,10 +550,26 @@ export function AiLinkChain({
   const canSave = dirty && errors.size === 0 && !offline && !readOnly;
   const blocked = draftBlockedHint(draft, errors);
 
+  /**
+   * 한 잠금에 한 문장 (#1542 규율). 순서는 오래 가는 사실부터다: 읽을 수 없는
+   * 사슬은 이 블록 전체를 읽기 전용으로 만들고, 꽉 참은 이 버튼의 규칙이며,
+   * 날고 있는 쓰기는 몇 백 밀리초 뒤 사라진다. 셋을 동시에 대면 어느 쪽도 답이
+   * 아니게 된다.
+   */
+  function addLockReason(): string | undefined {
+    if (readOnly) return CHAIN_UNREADABLE_NOTE_ID;
+    if (full) return CHAIN_FULL_NOTE_ID;
+    return busy ? CHAIN_BUSY_NOTE_ID : undefined;
+  }
+
   return (
     <Subsection title="연결 순서" lines={lines}>
       {unreadable !== null && (
-        <InlineBanner message={unreadable} testId="chain-partial" />
+        <InlineBanner
+          message={unreadable}
+          messageId={CHAIN_UNREADABLE_NOTE_ID}
+          testId="chain-partial"
+        />
       )}
       <p className="text-body text-ink-muted" data-testid="chain-summary">
         {chainSummary(chain)}
@@ -576,12 +615,10 @@ export function AiLinkChain({
           variant="outline"
           size="sm"
           aria-disabled={addLocked || undefined}
-          // 잠긴 컨트롤은 사유를 든다. 이 버튼이 잠기는 사실 셋 중 문장을 가진
-          // 것은 「꽉 찼다」 하나이고(바로 아래 `chain-full`), 그것이 이 버튼이
-          // 실제로 가장 자주 잠기는 이유다. 나머지 둘의 문장은 이 블록의 배너와
-          // 저장 쪽 힌트가 이미 들고 있으나 id 를 갖는 노드가 아니라 여기서
-          // 가리킬 수 없다 — 그 배선은 이 goal 의 좌표가 아니므로 PR 에 남긴다.
-          aria-describedby={full ? CHAIN_FULL_NOTE_ID : undefined}
+          // 잠긴 컨트롤은 사유를 든다. 이 버튼이 잠기는 사실은 셋이고, 이제 셋 다
+          // 가리킬 문장을 갖는다 (#1559 — #1541 이 여기 남겨 둔 배선). 고르는
+          // 규칙은 `addLockReason` 이 진다.
+          aria-describedby={addLockReason()}
           className={cn(addLocked && "opacity-50")}
           onClick={() => {
             if (addLocked) return;
@@ -642,6 +679,19 @@ export function AiLinkChain({
         >
           예비 provider는 {MAX_FALLBACK_HOPS}개까지 둘 수 있습니다. 하나를 뺀 뒤
           추가하세요.
+        </p>
+      )}
+      {/* 위 두 문장이 이미 서 있는 프레임에서는 그리지 않는다 — 화면에 세 사유가
+          함께 서면 잠긴 버튼이 무엇 때문에 잠겼는지가 도로 사라진다. 서는 조건은
+          `addLockReason` 이 이 id 를 고르는 조건과 같은 것이어야 하고, 그래야
+          가리키는 곳에 문장이 있다. */}
+      {busy && !full && !readOnly && (
+        <p
+          id={CHAIN_BUSY_NOTE_ID}
+          className="text-meta text-ink-muted"
+          data-testid="chain-busy"
+        >
+          {CHAIN_BUSY_NOTE}
         </p>
       )}
       {/* Offline is named where the button is, not only in the route banner at

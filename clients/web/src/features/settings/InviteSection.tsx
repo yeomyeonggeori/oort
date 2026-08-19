@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { cn } from "@/design/lib/cn";
 import { Button } from "@/design/ui/button";
 import { Input } from "@/design/ui/input";
 import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/States";
@@ -45,6 +46,21 @@ import {
 // =============================================================================
 
 const DAY_MS = 86_400_000;
+
+/**
+ * 잠긴 발급이 가리키는 사유 (#1559, #1542 동형).
+ *
+ * 모듈 상수 id 인 이유는 `CHAIN_FULL_NOTE_ID` 와 같다: 이 패널에 이 폼은 하나뿐이라
+ * `useId` 가 벌어 주는 유일성이 살 자리가 없고, 상수는 계약 테스트가 배선을
+ * 문자열로 확인할 수 있게 한다.
+ *
+ * 뒷문장이 형제 표면(이벤트 구독 만들기)의 것을 그대로 베끼지 않는 이유: 그쪽
+ * 문장은 다시 연결되면 누른 것이 알아서 나간다고 약속하는데, 이 발급은 큐에 쌓이지
+ * 않는다. 다시 연결된 뒤 이 사람이 한 번 더 눌러야 하고, 문장은 그 사실을 말한다.
+ */
+const OFFLINE_NOTE_ID = "invite-create-offline-note";
+const OFFLINE_CREATE_REASON =
+  "연결이 끊겨 지금은 초대 링크를 만들 수 없습니다. 다시 연결되면 이어서 만들 수 있습니다.";
 
 export function InviteSection({
   workspaceId,
@@ -97,6 +113,10 @@ export function InviteSection({
 
   function submit(event: React.FormEvent) {
     event.preventDefault();
+    // `aria-disabled` 는 클릭도 Enter 도 막지 않으므로(초점을 잃지 않는 것이
+    // 요점이다) 거절은 여기서 한다. 사용 횟수 칸에서 누른 Enter(암묵적 제출)도
+    // 같은 발급을 내므로 `onClick` 이 아니라 폼이 가드를 진다 (#1559).
+    if (offline || create.isPending) return;
     const uses = Number(maxUses);
     if (!Number.isInteger(uses) || uses < 1 || uses > 10_000) {
       setFormError("사용 횟수는 1에서 10000 사이의 정수여야 합니다.");
@@ -251,14 +271,36 @@ export function InviteSection({
         )}
 
         <div className="flex flex-wrap items-center gap-2">
+          {/* 진행과 잠금은 다른 축이다 (#1486 회전 · #1541 · #1559). 이 자리는
+              그 문법의 어느 쪽도 갖고 있지 않았다: 낱말은 바뀌는데 `aria-busy` 가
+              없어 낭독은 「초대 링크 만들기」에 머물렀고, native `disabled` 가
+              진행 프레임에서까지 버튼을 흐리고 tab order 에서 뺐다.
+              잠그는 사실은 오프라인 하나이고, 진행은 낱말과 `aria-busy` 가 진다.
+              가드는 폼이 진다(위 `submit`). */}
           <Button
             type="submit"
             size="sm"
-            disabled={offline || create.isPending}
+            aria-disabled={offline || undefined}
+            aria-busy={create.isPending || undefined}
+            aria-describedby={offline ? OFFLINE_NOTE_ID : undefined}
+            className={cn(offline && "opacity-50")}
             data-testid="invite-create"
           >
             {create.isPending ? "만드는 중" : "초대 링크 만들기"}
           </Button>
+          {/* 잠긴 컨트롤은 사유를 든다 (#1542 · design-review #1557 M). 회색이
+              혼자 서면 「당신에게는 권한이 없다」로 읽히는데, 이 사람은 발급할 수
+              있고 지금 rail 이 내려가 있을 뿐이다. 형제 표면(이벤트 구독 만들기)이
+              같은 사실에 대해 쓰는 문장을 그대로 쓴다 — 같은 잠금, 같은 문장. */}
+          {offline && (
+            <span
+              id={OFFLINE_NOTE_ID}
+              className="break-keep text-meta text-ink-muted"
+              data-testid="invite-create-offline"
+            >
+              {OFFLINE_CREATE_REASON}
+            </span>
+          )}
         </div>
       </form>
 

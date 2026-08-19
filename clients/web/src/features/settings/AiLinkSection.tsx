@@ -69,6 +69,24 @@ import {
 // promise a flow that does not exist.
 // =============================================================================
 
+/**
+ * 잠긴 세 컨트롤(저장·확인·해제)이 가리키는 두 사유 (#1559).
+ *
+ * 모듈 상수 id 인 이유는 형제 화면(`AiLinkChain.CHAIN_FULL_NOTE_ID`)과 같다: 이
+ * 패널에 이 블록은 하나뿐이라 `useId` 가 벌어 주는 유일성이 살 자리가 없다.
+ *
+ * 문장이 동사를 열거하지 않고 「바꾸거나 확인」으로 묶는 이유: 이 사유를 가리키는
+ * 컨트롤 셋 중 둘(저장·해제)은 같은 일의 두 방향이고, 저장은 수정 폼 안에·확인과
+ * 해제는 그 폼이 닫힌 자리에 산다. 셋을 그대로 늘어놓으면 어느 프레임에서도 절반은
+ * 화면에 없는 행동에 대한 문장이 된다.
+ */
+const LINK_OFFLINE_NOTE_ID = "ai-link-offline-note";
+const LINK_BUSY_NOTE_ID = "ai-link-busy-note";
+const LINK_OFFLINE_REASON =
+  "연결이 끊겨 지금은 이 연결을 바꾸거나 확인할 수 없습니다.";
+const LINK_BUSY_REASON =
+  "앞서 누른 것이 아직 끝나지 않았습니다. 그것이 끝나면 이어서 바꾸거나 확인할 수 있습니다.";
+
 /** Registration methods. Verb-free ids; the server sees neither of these. */
 const LINK_METHODS = [
   {
@@ -248,6 +266,24 @@ export function AiLinkSection({ offline }: { offline: boolean }) {
   const checking = check.isPending;
   const saveLocked = offline || (busy && !saving);
   const checkLocked = offline || (busy && !checking);
+
+  /**
+   * 잠긴 컨트롤이 가리키는 사유 (#1542 규율 · design-review #1557 M · #1559).
+   *
+   * #1541 이 이 두 자리의 **그림**을 고친 뒤에도 문장은 서지 않았다: 흐림만
+   * 남고 이유가 없는 회색은 「당신에게는 권한이 없다」로 읽히는데, 이 사람은 할
+   * 수 있고 지금 rail 이 내려가 있거나 이 패널의 다른 쓰기가 아직 날고 있을
+   * 뿐이다. `aria-disabled` 로 tab order 에 남게 된 뒤로 그 침묵은 더 크게
+   * 들린다 — 초점은 닿는데 왜 못 하는지는 화면 어디에도 없다.
+   *
+   * 한 잠금에 한 문장이고 오프라인이 이긴다(오프라인이면 앞선 쓰기도 어차피
+   * 도착하지 못한다). 자기 쓰기가 날고 있는 컨트롤은 사유를 들지 않는다 — 그것은
+   * 잠긴 것이 아니라 진행 중이다.
+   */
+  function lockReason(mine: boolean): string | undefined {
+    if (offline) return LINK_OFFLINE_NOTE_ID;
+    return busy && !mine ? LINK_BUSY_NOTE_ID : undefined;
+  }
 
   function closeForm() {
     setEditing(false);
@@ -734,6 +770,7 @@ export function AiLinkSection({ offline }: { offline: boolean }) {
               size="sm"
               aria-disabled={saveLocked || undefined}
               aria-busy={saving || undefined}
+              aria-describedby={lockReason(saving)}
               className={cn(saveLocked && "opacity-50")}
               data-testid="ai-link-save"
             >
@@ -763,6 +800,7 @@ export function AiLinkSection({ offline }: { offline: boolean }) {
             size="sm"
             aria-disabled={checkLocked || undefined}
             aria-busy={checking || undefined}
+            aria-describedby={lockReason(checking)}
             className={cn(checkLocked && "opacity-50")}
             onClick={() => {
               if (checkLocked || checking) return;
@@ -778,6 +816,7 @@ export function AiLinkSection({ offline }: { offline: boolean }) {
               question="저장된 주소와 자격증명을 지웁니다."
               confirmLabel="해제"
               disabled={offline || (busy && !unlinking)}
+              describedBy={lockReason(unlinking)}
               busy={unlinking}
               // 한자어 동작명사(해제)가 있는 자리라 「명사 + 중」이다 (#1501).
               busyLabel="해제 중"
@@ -786,6 +825,30 @@ export function AiLinkSection({ offline }: { offline: boolean }) {
             />
           )}
         </div>
+      )}
+
+      {/* 두 사유는 수정 폼과 그 폼이 닫힌 자리 **양쪽 밖**에 산다: 저장은 폼 안,
+          확인과 해제는 폼이 닫힌 자리에 있어 어느 한쪽에 두면 다른 쪽의
+          `aria-describedby` 가 화면에 없는 id 를 가리키게 된다. 같은 자리에 서고
+          한 번에 하나만 그려진다 — 한 잠금에 두 이유를 대면 어느 쪽도 답이
+          아니다. */}
+      {offline && (
+        <p
+          id={LINK_OFFLINE_NOTE_ID}
+          className="break-keep text-meta text-ink-muted"
+          data-testid="ai-link-offline"
+        >
+          {LINK_OFFLINE_REASON}
+        </p>
+      )}
+      {!offline && busy && (
+        <p
+          id={LINK_BUSY_NOTE_ID}
+          className="break-keep text-meta text-ink-muted"
+          data-testid="ai-link-busy"
+        >
+          {LINK_BUSY_REASON}
+        </p>
       )}
 
       {check.isError && (
