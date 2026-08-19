@@ -385,7 +385,7 @@ export function normalisedPoint(
  * [`dispositionForKey`] for why Escape is the one reserved.
  */
 export const CONTROL_CAPTURE_LIMIT_COPY =
-  "브라우저와 운영체제가 먼저 가져가는 단축키는 전달되지 않습니다. 새 탭 열기, 창 전환, 전체 화면 종료 같은 키는 이 브라우저에서 처리됩니다. Esc 는 호스트로 가지 않고, 키보드를 이 화면에서 풀어 화면 돌려주기 버튼으로 옮깁니다. 호스트에 Esc 를 보내려면 Shift+Esc 를 누르세요.";
+  "브라우저와 운영체제가 먼저 가져가는 단축키는 전달되지 않습니다. 새 탭 열기, 창 전환, 전체 화면 종료 같은 키는 이 브라우저에서 처리됩니다. Esc는 호스트로 가지 않고, 키보드를 이 화면에서 풀어 화면 돌려주기 버튼으로 옮깁니다. 호스트에 Esc를 보내려면 Shift+Esc를 누르세요.";
 
 /**
  * What this surface does with one key press.
@@ -580,7 +580,7 @@ export function dispositionForKey(
  * or one Tab.
  */
 export const CONTROL_KEYBOARD_LOST_COPY =
-  "키보드가 이 화면에서 벗어나, 지금 누르는 키는 호스트로 가지 않습니다. 화면을 한 번 누르거나 Tab 으로 이 화면에 오면 다시 이어집니다. 조작 창은 그대로 열려 있습니다.";
+  "키보드가 이 화면에서 벗어나, 지금 누르는 키는 호스트로 가지 않습니다. 화면을 한 번 누르거나 Tab으로 이 화면에 오면 다시 이어집니다. 조작 창은 그대로 열려 있습니다.";
 
 /** The chip word while the window stands but the caret is elsewhere. */
 export const CONTROL_KEYBOARD_LOST_LABEL = "키보드 놓침";
