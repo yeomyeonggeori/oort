@@ -1,5 +1,19 @@
 # oort 기획 현재 상태 (Planning Current State)
 
+> **2026-08-19 스냅샷 42 (Fable · momo-main — 파도 10 완주·#1361 성재 대기. PLN-20260815-01).** 컴팩트 복원 진입점.
+>
+> **파도 10 완주(8/8)**: #1511·#1584(카피/낱말+**3클라** 게이트)·#1515·#1516(칩 그릇·톤 soft 토큰)·#1558·#1559(진행/잠금 분리)·#1479·#1480(폰 AX). **engine=`28bf1a54`**. design-review 4판+재확인 3판·회전 6회로 실결함 11건 적발 — 대부분 코드가 아니라 **주장**이 틀린 경우(정책·근거·「전수를 훑었다」). 후속 발급 5건: #1600(폰 톤 발산)·#1601(멘션 순위 — 코어)·#1602(그물 사각지대)·#1603(재고 묶음)·#1604(폰 진행/잠금 방언).
+>
+> **★ #1361 Grok E2E — 성재 1단계 대기 중**: 준비 완료(#1592 `research/2026-08-19-grok-e2e-prep.md`), **로컬 스택 7컨테이너 가동 중**(회수 금지 — 성재가 이어받는다). 성재가 할 일=①localhost:8088 로그인→에이전트→호스티드 에이전트 연결→**Grok Bot 선택**(새로 만들지 말 것)→「연결 값 다시 발급」 ②Grok 앱에 endpoint `http://localhost:8088/v1/mcp/agent-port`+Bearer 연결 값, Routine 이름 정확히 `Oort Inbox: momo Demo Workspace / Grok Bot` ③오케스트레이터에 알림. 연결 값은 1회 표시·15분 TTL이나 **실패해도 소모되지 않는다**(유효 handshake일 때만 소비 — 실측). 승인 화면에서 **scope 전부** 켜야 함(`agent:port:connect`만이면 tools/list가 빈 목록).
+>
+> **모델 운용**: Fable 5 한도 도달(2026-08-19) — 이 세션의 워커·검수 전원 **Opus 5**. 성재 지시로 검수 레인은 한시적 Opus 유지.
+>
+> **다음 후보**: ①#1361 본편 ②후속 파도(#1600~#1604) ③차기 engine→main 승격 창(파도 9·10+집행분) ④dsh C/D.
+>
+> **성재 손**: #1361 1단계 · Xcode Cloud 9/7 재활성화 체크리스트(켜기 전 Start Conditions 경로 제한: `clients/mobile/`·`packages/momo-core/`).
+>
+> 이하 스냅샷 41:
+
 > **2026-08-19 스냅샷 41 (Fable · momo-main — ★집행 창 완주: TURN 은퇴·프로덕션 8d0f7d9a·LIVE-5 라벨 전해소. PLN-20260815-01).** 컴팩트 복원 진입점.
 >
 > **★ 집행 창(성재 SSH 위임)**: ①런북 §6 완주 — use-auth-secret 켜기·병행 **불성립 실측**(coturn은 켜지면 정적 무시·reload 불충분=restart)·정지창 은퇴(정적 401/단명 12/12) ②프로덕션 배포 68fc52ff→**8d0f7d9a**(LIVE-5 전 축·마이그 077 IDEMPOTENCY_OK·TURN 3키·검증 5종 그린) ③compose 배선 #1586 ④**#1588 microVM 내부 왕복 실측**(relay↔relay·ephemeral만·READY 경쟁 수리 v5) — **engine=`ef134609`·LIVE-5 정직 라벨 0 잔여**. 원장: #1545·#1587 close 코멘트+DEVIATION_LOG 집행 행.
