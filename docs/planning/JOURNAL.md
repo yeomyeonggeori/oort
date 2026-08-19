@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-08-19 (Fable) · ★집행 창 — TURN 은퇴 §6 완주·프로덕션 배포 8d0f7d9a·microVM 실측·LIVE-5 라벨 전해소
+- 성재 SSH 위임("허가 해줄테니까 ssh 포함해서 너가 ㄱㄱ"→경로 B: permission 규칙 추가) 하에 집행: §6-2~6-4 완주(병행 불성립 실측·정지창 은퇴·**coturn은 reload로 인증 설정 안 집음 — restart 필요**), 프로덕션 배포(momo-rust:8d0f7d9a — LIVE-5 전 축·마이그 077·TURN 3키 주입), #1586 배선.
+- **#1587/#1588**: microVM 내부 왕복 실측(relay↔relay·ephemeral만·화면 증거) — grok PASS+회전 1, engine=`ef134609`. producer READY 경쟁 수리(v5). **LIVE-5 정직 라벨 0 잔여.**
+- 발견: momo-cube-host→app.oor7.com 200(5c 권한 경계의 실체는 로컬 서버 부재가 아니었음). #1545 close(원장=코멘트)·C-1=성재 비활성화 수용(9/7 재활성화 체크리스트).
+- 다음: #1361 Grok E2E(성재 합의 — 집행 종결 후 별도 세션)·자율 큐(#1584·#1511·#1515/#1516·#1558·#1559·#1479/#1480)·차기 승격 창.
+
 ## 2026-08-19 (Fable) · 파도 9 완주(4/4) — 게이트 가드 일반화·라벨 예약·remint 반영·base 위생
 - 4건 랜딩(engine=`fe3f2960`): #1572(openapi 인용·bench 주석)·#1573(「멤버 추가하기」 개명 — design-review PASS·택일 지지)·#1574(remint (b) 서술 전수 정정+ICE restart 훅 기록)·#1571(preview-guard 26레인 — grok PASS, 실 점유자 red proof).
 - 후속: #1584(「초대」 어휘 정렬 마이크로 3). 판정 전건 accepted(DEVIATION_LOG).
