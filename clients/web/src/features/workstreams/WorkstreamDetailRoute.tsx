@@ -20,6 +20,7 @@ import { HostPicker } from "@/features/work/HostPicker";
 import { TakeoverDisclosure } from "@/features/work/TakeoverDisclosure";
 import {
   HANDOFF_COPY,
+  TAKEOVER_PICKER_COPY,
   takeoverFailureCopy,
 } from "@momo/core/features/work/sessionHandoff";
 import { useWorkHosts } from "@/features/work/useWorkSessions";
@@ -443,12 +444,7 @@ function ContinuationBlock({
             <HostPicker
               id={HOST_GROUP_ID}
               labelId={HOST_GROUP_LABEL_ID}
-              copy={{
-                group: "인수할 호스트",
-                confirm: HANDOFF_COPY.takeover.button,
-                action: (name) => `${name}에서 인수`,
-                busy: (name) => `${name}에서 인수 중`,
-              }}
+              copy={TAKEOVER_PICKER_COPY}
               targets={state.targets}
               busyHostId={pendingHostId}
               onPick={(hostId) => void takeOver(state.run, hostId)}

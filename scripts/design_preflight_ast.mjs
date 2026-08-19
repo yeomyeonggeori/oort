@@ -1,10 +1,23 @@
 // =============================================================================
 // design_preflight_ast.mjs — TS/TSX 문자열 리터럴 스캐너 (이슈 #1141).
 //
-// CLI 가 아니다. 두 게이트가 **같은 판정**을 쓰도록 규칙 하나를 여기에 둔다:
+// CLI 가 아니다. 소비자들이 **같은 판정**을 쓰도록 규칙 하나를 여기에 둔다.
+// 소비자가 늘 때 이 표도 함께 고친다 — 규칙 한 벌을 만든 파일이 자기 소비자
+// 목록에서 낡으면, 그 목록을 읽고 「내 클라는 안 재진다」를 잘못 아는 사람이
+// 생긴다 (#1511 회전 1 Nitpick):
 //
-//   · scripts/design_preflight_core.mjs        packages/momo-core/src  (emdash·raw_color·hype)
-//   · scripts/design_preflight_web_strings.mjs clients/web/src         (emdash)
+//   · scripts/design_preflight_core.mjs          packages/momo-core/src
+//         emdash · raw_color · hype · progress_word · latin_particle   (#1511)
+//   · scripts/design_preflight_web_strings.mjs   clients/web/src
+//         emdash · progress_word · latin_particle                      (#1511)
+//   · scripts/design_preflight_phone_strings.mjs clients/mobile/src
+//         progress_word · latin_particle                               (#1511 회전 1)
+//         em-dash 는 여기서 걸지 않는다 — 폰은 conversationHygiene.test.tsx 의
+//         `src/` 전수 스윕이 이미 잡는다. 같은 위반을 두 곳에서 세면 어느 쪽이
+//         정본인지 모르게 된다.
+//
+// 앞 둘은 `design_preflight_web.sh` 가, 셋째는 폰 jest 스위트가 부른다(폰에는
+// 「디자인 프리플라이트」라는 실행 단위가 없다 — 디자인 시스템 §5.4).
 //
 // ## 왜 AST 인가
 //
