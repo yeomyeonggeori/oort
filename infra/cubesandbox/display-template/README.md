@@ -19,11 +19,17 @@ that a teammate can **watch** an agent work, and cannot type into it.
 > with frames the message loop discards, because that is exactly where a
 > re-validation in the wrong place starves and a returned keyboard survives. An
 > observer capability still gets `input_enabled: false` and an offer with no
-> `m=application`. What is **still**
-> unverified is that same input round trip *inside a CubeSandbox microVM over a
-> relay candidate* — named in `template.spec.json` as
-> `unverified.inputDeliveryInMicroVM`. The earlier open risk, "can a browser
-> reach the sandbox at all", is **resolved** —
+> `m=application`. **#1587 (2026-08-19) closed the last leg**: the same input
+> round trip *inside a real CubeSandbox microVM over a `typ relay` candidate*. A
+> `momo-display5` microVM producer, wired to a local momo-server it reached by
+> the 8443 hairpin and given ONLY the server-minted ephemeral relay credential
+> (no static TURN env), connected relay↔relay to a viewer holding the same
+> credential; a key the viewer typed was injected into the xterm inside the
+> microVM and read back as the echoed marker on the relay-carried video, at the
+> microVM's own `root@tpl-0956…` prompt. `template.spec.json` records it under
+> `runtimeVerified.inputDeliveredInMicroVM` (specVersion 5), and the host
+> procedure is `docs/runbooks/cubesandbox-host-install.md §8-E`. The earlier open
+> risk, "can a browser reach the sandbox at all", is **resolved** —
 > see [How a browser reaches the sandbox](#how-a-browser-reaches-the-sandbox).
 
 ## The files
@@ -34,10 +40,10 @@ and the two programs it bakes, not a systemd unit.
 
 | file | what it is |
 |---|---|
-| `template.spec.json` | the machine-readable contract (specVersion 3 — what was MEASURED on the dedicated host, not merely declared). `scripts/verify_display_attach.sh` cross-reads it against the server's own constants, so a template that drifts from the server it registers with fails a gate instead of failing a person watching a black rectangle. |
+| `template.spec.json` | the machine-readable contract (specVersion 5 — what was MEASURED on the dedicated host, not merely declared, through the input round trip inside a real microVM). `scripts/verify_display_attach.sh` cross-reads it against the server's own constants, so a template that drifts from the server it registers with fails a gate instead of failing a person watching a black rectangle. |
 | `Dockerfile` | the OCI image `create-from-image` builds the template from. PID 1 is `momo-bootstrap-init` (the #1437 envVars receiver, from [`../bootstrap-init/`](../bootstrap-init/README.md)); it lands the create-time delivery and execs the entrypoint. `iproute2` is in the rootfs so the entrypoint can add the routable ICE base. |
 | `entrypoint.sh` | the ordering a systemd unit would have expressed: add the ICE base to `eth0`, start Xvfb, wait on the X socket, then exec the producer. |
-| `momo-display-producer` | the GStreamer `webrtcbin` producer. Captures X11, encodes H264, forces `ice-transport-policy=relay`, wires the oort TURN from `MOMO_DISPLAY_TURN_URI`, and never logs the credential. |
+| `momo-display-producer` | the GStreamer `webrtcbin` producer. Captures X11, encodes H264, forces `ice-transport-policy=relay`, wires the oort TURN from the **server-minted per-session `ice_servers`** on its own `validate` answer (the static `MOMO_DISPLAY_TURN_URI` is only a pre-LIVE-5a fallback, and #1587 delivered none), and never logs the credential. It creates the input datachannel only after webrtcbin has actually reached READY — `set_state` is async, and doing it a line too early raced the `is_closed` assertion and silently downgraded a granted controller to view-only (fixed #1587, momo-display:v5). |
 | this file | why each of those says what it says. |
 
 ## The shape

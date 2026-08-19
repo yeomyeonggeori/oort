@@ -58,15 +58,32 @@ below the message handlers, rebuild the image, and run:
 A returned window that keeps typing is worse than a stream that never started,
 so this is the ordering that has to be defended by a test rather than a comment.
 
-It does **not** prove the CubeSandbox/TURN leg — that a microVM on
-momo-cube-host relays this same exchange over a `typ relay` candidate. That is
-the other half of LIVE-5c and it is measured on the host, not here.
+THE CUBESANDBOX/TURN LEG (`--remote-proof`, #1587)
+==================================================
+
+This header used to end "it does not prove the CubeSandbox/TURN leg"; that leg
+is now this file's `--remote-proof` mode, and it is what measured
+`runtimeVerified.inputDeliveredInMicroVM`. The producer runs inside a real
+microVM on momo-cube-host and forces relay-only ICE; this harness wires the
+SAME server-minted `ice_servers` the display-attach issue handed it
+(`--ice-servers-json`, REQUIRED in this mode — without it the viewer would
+offer host candidates and a PASS could ride a relay<->host pair the real web
+client never has) and forces relay too, so the exchange completes relay<->relay
+over `typ relay` candidates. A microVM has no exec path out, so the delivery
+proof is not a file — it is the SCREEN: the relay-carried H264 is decoded
+(avdec_h264; a keyframe is requested via upstream force-key-unit -> RTCP PLI,
+because a mid-stream join never sees the opening IDR) and the saved frame shows
+the typed marker echoed at the microVM's own shell prompt. Ledger wiring for
+that run is `scripts/display_microvm_seed.py`; the host procedure is
+docs/runbooks/cubesandbox-host-install.md §8-E.
 
 WHERE IT RUNS
 =============
 
 Inside the display template image, because that is where `webrtcbin`, the X
-server and the producer are. `scripts/verify_display_attach.sh` does not run it
+server and the producer are (the `--remote-proof` viewer additionally wants
+`gstreamer1.0-libav` for avdec_h264 — the measurement used the template image
+plus that one package). `scripts/verify_display_attach.sh` does not run it
 for the same reason it cannot boot a producer: this needs the template.
 """
 
@@ -74,14 +91,17 @@ from __future__ import annotations
 
 import argparse
 import base64
+import glob
 import hashlib
 import json
 import os
+import shutil
 import socket
 import struct
 import sys
 import threading
 import time
+import urllib.parse
 
 WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 SUBPROTOCOL = "momo.display.v1"
@@ -239,6 +259,53 @@ CODE_FOR_CHAR = {
 SHIFTED = set("ABCDEFGHIJKLMNOPQRSTUVWXYZ_>")
 
 
+def turn_uris_from_ice_servers(ice_servers) -> tuple[str, str]:
+    """Render the server's `ice_servers` into webrtcbin's `turn://` spelling.
+
+    Byte-for-byte the producer's own renderer (`momo-display-producer`
+    `turn_uris_from_ice_servers`), copied here rather than imported because this
+    harness stays stdlib+GStreamer with no repo import path. It is what makes the
+    VIEWER a relay peer too: in production the web client builds its
+    `RTCPeerConnection` from exactly this `ice_servers` list (the display-attach
+    ISSUE response), so a microVM measurement in which the viewer used host
+    candidates while the producer was relay-only would connect over a path the
+    real client never has. Returns `(udp_uri, tcp_uri)`; both carry a credential
+    and are therefore never logged.
+    """
+    udp = ""
+    tcp = ""
+    for server in ice_servers or []:
+        username = urllib.parse.quote(str(server.get("username", "")), safe="")
+        credential = urllib.parse.quote(str(server.get("credential", "")), safe="")
+        if not username or not credential:
+            continue
+        for url in server.get("urls") or []:
+            url = str(url).strip()
+            if url.startswith("turn:"):
+                scheme, rest = "turn", url[len("turn:"):]
+            elif url.startswith("turns:"):
+                scheme, rest = "turns", url[len("turns:"):]
+            else:
+                continue
+            uri = f"{scheme}://{username}:{credential}@{rest}"
+            if "transport=tcp" in rest:
+                tcp = tcp or uri
+            else:
+                udp = udp or uri
+    return udp, tcp
+
+
+def ice_servers_from_json(path: str) -> list:
+    """Read `ice_servers` from a display-attach ISSUE response (or a bare array)."""
+    with open(path) as handle:
+        document = json.load(handle)
+    if isinstance(document, dict):
+        return document.get("ice_servers") or []
+    if isinstance(document, list):
+        return document
+    return []
+
+
 def key_frame(action: str, code: str, shift: bool = False) -> dict:
     """`signalling.inputChannel.keyFrame` — and no character, ever."""
     return {
@@ -277,18 +344,22 @@ def frames_for_text(text: str) -> list[dict]:
 class Viewer:
     """A real peer: it answers the producer's offer and receives its channel."""
 
-    def __init__(self, peer: Peer) -> None:
+    def __init__(self, peer: Peer, ice_servers=None, snapshot_dir: str = "") -> None:
         import gi
 
         gi.require_version("Gst", "1.0")
         gi.require_version("GstWebRTC", "1.0")
         gi.require_version("GstSdp", "1.0")
-        from gi.repository import Gst, GstSdp, GstWebRTC
+        gi.require_version("GstVideo", "1.0")
+        from gi.repository import Gst, GstSdp, GstVideo, GstWebRTC
 
         self._Gst = Gst
         self._GstSdp = GstSdp
+        self._GstVideo = GstVideo
         self._GstWebRTC = GstWebRTC
         self.peer = peer
+        self.snapshot_dir = snapshot_dir
+        self._snapshot_serial = 0
         # Built by hand rather than `parse_launch`: a one-element launch string
         # returns the ELEMENT, not a pipeline, and `get_by_name` on it is None.
         self.pipe = Gst.Pipeline.new("viewer")
@@ -301,6 +372,27 @@ class Viewer:
         self.webrtc.set_property(
             "bundle-policy", self._GstWebRTC.WebRTCBundlePolicy.MAX_BUNDLE
         )
+        # LIVE-5c #1587 — when the producer runs inside a CubeSandbox microVM it
+        # forces ice-transport-policy=relay, so it offers ONLY `typ relay`
+        # candidates on the oort TURN. A viewer that offered host candidates
+        # would have nothing the producer's relay could reach. Wiring the SAME
+        # `ice_servers` the display-attach issue handed this viewer (the exact
+        # list the web client feeds `new RTCPeerConnection`) and forcing relay
+        # here makes the round trip relay<->relay end to end — the thing
+        # `unverified.inputDeliveryInMicroVM` names as still unmeasured.
+        udp_uri, tcp_uri = turn_uris_from_ice_servers(ice_servers)
+        if udp_uri:
+            self.webrtc.set_property("turn-server", udp_uri)
+            if tcp_uri:
+                try:
+                    self.webrtc.emit("add-turn-server", tcp_uri)
+                except Exception as exc:  # noqa: BLE001
+                    log(f"ice: viewer add-turn-server(tcp) failed ({exc})")
+            self.webrtc.set_property(
+                "ice-transport-policy",
+                self._GstWebRTC.WebRTCICETransportPolicy.RELAY,
+            )
+            log("ice: viewer TURN wired (udp+tcp), ice-transport-policy=RELAY (credential not logged)")
         self.pipe.add(self.webrtc)
         self.webrtc.connect("on-ice-candidate", self._on_ice_candidate)
         self.webrtc.connect("on-data-channel", self._on_data_channel)
@@ -318,17 +410,173 @@ class Viewer:
         # The producer sends video this harness does not render; a pad that goes
         # nowhere would stall the session, so each one is drained.
         self.webrtc.connect("pad-added", self._on_pad_added)
+        # Surface decode/transport faults instead of a silent "no frame": the
+        # snapshot branch is several elements deep and a caps or plugin fault
+        # there would otherwise present only as an empty directory.
+        bus = self.pipe.get_bus()
+        bus.add_signal_watch()
+        bus.connect("message::error", self._on_bus_error)
+        bus.connect("message::warning", self._on_bus_warning)
         self.pipe.set_state(Gst.State.PLAYING)
         self.channel = None
         self.channel_open = threading.Event()
         self.channel_closed = threading.Event()
 
+    def _on_bus_error(self, _bus, message) -> None:
+        err, debug = message.parse_error()
+        log(f"gst ERROR from {message.src.get_name()}: {err.message} ({debug})")
+
+    def _on_bus_warning(self, _bus, message) -> None:
+        warn, debug = message.parse_warning()
+        log(f"gst warning from {message.src.get_name()}: {warn.message}")
+
     def _on_pad_added(self, _element, pad) -> None:
+        if self.snapshot_dir:
+            self._attach_snapshot_branch(pad)
+            return
         sink = self._Gst.ElementFactory.make("fakesink", None)
         sink.set_property("sync", False)
         self.pipe.add(sink)
         sink.sync_state_with_parent()
         pad.link(sink.get_static_pad("sink"))
+
+    def _attach_snapshot_branch(self, pad) -> None:
+        """Decode the producer's H264 to a rolling PNG on disk.
+
+        The evidence a microVM run can produce is not a proof FILE — that file
+        would be written inside the microVM, which has no exec path out (no
+        envd). It is the SCREEN itself, decoded from the relay-carried video: a
+        frame showing the typed characters echoed in the xterm is the whole loop
+        (datachannel -> XTEST -> the app in the microVM -> its X server -> the
+        capture pipeline -> H264 -> relay -> here). openh264dec, because the
+        template image ships no `avdec_h264`.
+        """
+        Gst = self._Gst
+        os.makedirs(self.snapshot_dir, exist_ok=True)
+        # A leaky queue right off the webrtc pad so decode backpressure never
+        # stalls the transport, then depay -> parse -> H264 decoder -> convert
+        # -> a rolling PNG. avdec_h264 is preferred over openh264dec: a receiver
+        # that joins mid-stream feeds the decoder P-frames before its first IDR,
+        # and openh264dec was measured (#1587) to stall permanently on that
+        # (depay + parse pass every AU, the decoder emits none), while
+        # avdec_h264 waits for the IDU and recovers. openh264dec stays the
+        # fallback for an image without libav. No videorate: it needs two
+        # buffers to compute a rate and stalled the branch before the first
+        # frame.
+        decoder = "avdec_h264" if Gst.ElementFactory.find("avdec_h264") else "openh264dec"
+        log(f"snapshot: using {decoder}")
+        chain = [
+            ("queue", {"leaky": 2, "max-size-buffers": 8}),
+            ("rtph264depay", None),
+            ("h264parse", {"config-interval": -1}),
+            ("capsfilter", {"caps": self._Gst.Caps.from_string(
+                "video/x-h264,stream-format=byte-stream,alignment=au")}),
+            (decoder, None),
+            ("videoconvert", None),
+            ("pngenc", None),
+            (
+                "multifilesink",
+                {
+                    "location": os.path.join(self.snapshot_dir, "frame-%05d.png"),
+                    "max-files": 8,
+                    "sync": False,
+                },
+            ),
+        ]
+        elements = []
+        for factory, props in chain:
+            element = Gst.ElementFactory.make(factory, None)
+            if element is None:
+                log(f"snapshot: {factory} missing — falling back to fakesink")
+                sink = Gst.ElementFactory.make("fakesink", None)
+                sink.set_property("sync", False)
+                self.pipe.add(sink)
+                sink.sync_state_with_parent()
+                pad.link(sink.get_static_pad("sink"))
+                return
+            for name, value in (props or {}).items():
+                element.set_property(name, value)
+            elements.append(element)
+        for element in elements:
+            self.pipe.add(element)
+            element.sync_state_with_parent()
+        caps = pad.get_current_caps()
+        link_ret = pad.link(elements[0].get_static_pad("sink"))
+        for upstream, downstream in zip(elements, elements[1:]):
+            upstream.link(downstream)
+
+        # A counting probe so "no frame" tells host-media-absent from
+        # decode-branch-broken: if buffers arrive here but no PNG lands, the
+        # decoder is the fault; if none arrive, the relay never carried video.
+        def make_counter(stage):
+            def _count(_pad, _info, box={"n": 0}):
+                box["n"] += 1
+                if box["n"] in (1, 30, 150):
+                    log(f"snapshot: {stage} produced {box['n']} buffer(s)")
+                return Gst.PadProbeReturn.OK
+            return _count
+
+        for stage, element in (
+            ("depay", elements[1]),
+            ("h264parse", elements[2]),
+            ("openh264dec", elements[4]),
+            ("pngenc", elements[6]),
+        ):
+            element.get_static_pad("src").add_probe(
+                Gst.PadProbeType.BUFFER, make_counter(stage)
+            )
+        # A receiver that joined mid-stream missed the producer's opening
+        # SPS/PPS/IDR, and a WebRTC H264 sender emits further IDRs only when the
+        # far side asks — so without this the decode branch sees an unbroken run
+        # of P-frames and openh264dec produces nothing (measured #1587: depay
+        # and h264parse pass 150 AUs, the decoder 0). An upstream
+        # force-key-unit event becomes an RTCP PLI to the producer, whose
+        # x264enc then emits an IDR the decoder can start on. Sent a few times
+        # because the first can race DTLS/SRTP coming fully up.
+        self._keyframe_pad = pad
+        self._request_keyframe()
+        from gi.repository import GLib
+        for delay_ms in (700, 1600, 3000):
+            GLib.timeout_add(delay_ms, self._request_keyframe_once)
+        log(
+            f"snapshot: decode branch attached (link={link_ret.value_nick}, "
+            f"pad caps={caps.to_string() if caps else 'none-yet'})"
+        )
+
+    def _request_keyframe(self) -> None:
+        pad = getattr(self, "_keyframe_pad", None)
+        if pad is None:
+            return
+        event = self._GstVideo.video_event_new_upstream_force_key_unit(
+            self._Gst.CLOCK_TIME_NONE, True, 0
+        )
+        pad.send_event(event)
+
+    def _request_keyframe_once(self) -> bool:
+        self._request_keyframe()
+        return False  # one-shot GLib timeout
+
+    def snapshot(self, label: str) -> str:
+        """Copy the freshest decoded frame to `<dir>/<label>.png` and return it.
+
+        Returns an empty string if no frame has decoded yet (a black or
+        never-connected stream), which the caller treats as a failed capture
+        rather than a passing one.
+        """
+        if not self.snapshot_dir:
+            return ""
+        frames = sorted(glob.glob(os.path.join(self.snapshot_dir, "frame-*.png")))
+        if not frames:
+            return ""
+        latest = frames[-1]
+        target = os.path.join(self.snapshot_dir, f"{label}.png")
+        try:
+            shutil.copyfile(latest, target)
+        except OSError as exc:
+            log(f"snapshot: could not save {label} ({exc})")
+            return ""
+        log(f"snapshot: {label} saved ({os.path.getsize(target)} bytes)")
+        return target
 
     def _on_ice_candidate(self, _element, mline_index, candidate) -> None:
         send_json(
@@ -499,6 +747,63 @@ def watch_revoke(viewer: "Viewer", peer: Peer, args) -> int:
     return 0
 
 
+def remote_proof(viewer: "Viewer", args) -> int:
+    """Prove a key reached the app INSIDE a CubeSandbox microVM, over relay.
+
+    This is the half `unverified.inputDeliveryInMicroVM` names. The producer is
+    in a real microVM on momo-cube-host and forced relay-only; this viewer wired
+    the same TURN and connected relay<->relay. What it cannot do is read the
+    microVM's filesystem, so the proof is not a file — it is the SCREEN: the
+    relay-carried video, decoded here, showing the typed characters echoed in the
+    xterm. A frame before typing and a frame after are saved; the caller reads
+    the second one.
+
+    The command typed uses physical keys only and is chosen to be legible on
+    screen (its echo and its output both name the run). The channel opening and
+    the frames going out are asserted here; that the characters actually LANDED
+    is what the saved screenshot shows, which is why the run prints the path
+    rather than swallowing it into a boolean.
+    """
+    # A moment for the first keyframes to decode, so "before" is a real frame.
+    before = ""
+    for _ in range(80):
+        before = viewer.snapshot("before-typing")
+        if before:
+            break
+        time.sleep(0.25)
+    if not before:
+        raise E2EFailure(
+            "delivery",
+            "no video frame decoded before typing — the relay stream never "
+            "arrived, so nothing could carry the on-screen proof either",
+        )
+    log(f"remote: pre-typing frame captured ({before})")
+
+    for frame in frames_for_text(args.type_text):
+        viewer.send_input(frame)
+        time.sleep(0.02)
+    # Snapshot the typed line while it is on the current row, then run it.
+    time.sleep(1.0)
+    typed = viewer.snapshot("after-typing")
+    viewer.send_input(key_frame("down", "Enter"))
+    viewer.send_input(key_frame("up", "Enter"))
+    time.sleep(1.5)
+    after = viewer.snapshot("after-enter")
+    if not typed and not after:
+        raise E2EFailure(
+            "delivery",
+            "no video frame decoded after typing — the stream stopped carrying "
+            "the screen, so the keystrokes cannot be confirmed on it",
+        )
+    log(f"remote: post-typing frames captured (typed={typed} after={after})")
+    print(
+        "[input-e2e] PASS remote granted/channel/typed over relay — "
+        f"on-screen proof in {args.snapshot_dir} "
+        "(read after-typing.png / after-enter.png for the echoed command)"
+    )
+    return 0
+
+
 def soak(viewer: "Viewer", args) -> int:
     """Hold one control session open and keep asking whether it still delivers.
 
@@ -615,7 +920,64 @@ def main() -> int:
         "(red proof: a re-validation that a `continue` can skip never fires)",
     )
     parser.add_argument("--jam-interval", type=float, default=0.05)
+    parser.add_argument(
+        "--ice-servers-json",
+        default="",
+        help="a display-attach ISSUE response (or a bare ice_servers array): "
+        "wires the viewer's TURN and forces relay, so a microVM producer's "
+        "relay-only offer connects relay<->relay (LIVE-5c #1587)",
+    )
+    parser.add_argument(
+        "--snapshot-dir",
+        default="",
+        help="decode the relay-carried video and save PNG frames here; the "
+        "screenshot is the microVM's on-screen proof that a key arrived",
+    )
+    parser.add_argument(
+        "--remote-proof",
+        action="store_true",
+        help="the producer runs in a microVM whose filesystem this harness "
+        "cannot read: succeed on grant+channel+on-screen delivery (a decoded "
+        "frame) instead of a local proof file",
+    )
+    parser.add_argument(
+        "--type-text",
+        default="echo LIVE5C-MICROVM-OK",
+        help="the visible command typed in --remote-proof mode (physical keys "
+        "only; its echo on the xterm is the evidence)",
+    )
     args = parser.parse_args()
+
+    # `--remote-proof` exists to measure the relay leg, so the relay is not
+    # optional in it: without `--ice-servers-json` the viewer would offer host
+    # candidates, and against a host-reachable producer the run could PASS over
+    # a relay<->host pair — a green that contradicts the relay<->relay claim the
+    # graduated label makes. Refused before GStreamer is even imported, so a
+    # re-run that dropped the flag fails in milliseconds with the reason named.
+    if args.remote_proof:
+        if not args.ice_servers_json:
+            parser.error(
+                "--remote-proof requires --ice-servers-json (the display-attach "
+                "issue response): the microVM claim is relay<->relay, and a "
+                "viewer without the server-minted relay credential would not "
+                "measure it"
+            )
+        if not args.snapshot_dir:
+            parser.error(
+                "--remote-proof requires --snapshot-dir: the on-screen frame IS "
+                "the delivery proof in this mode"
+            )
+
+    ice_servers = ice_servers_from_json(args.ice_servers_json) if args.ice_servers_json else None
+    if args.remote_proof:
+        udp_uri, tcp_uri = turn_uris_from_ice_servers(ice_servers)
+        if not udp_uri and not tcp_uri:
+            parser.error(
+                "--remote-proof: the --ice-servers-json document rendered no "
+                "turn:// URI (empty ice_servers, or entries without a "
+                "credential) — the viewer cannot be a relay peer with it, so "
+                "the run would not measure the relay<->relay claim"
+            )
 
     import gi
 
@@ -638,7 +1000,7 @@ def main() -> int:
 
     peer = dial(args.host, args.port, args.capability)
     log("attached")
-    viewer = Viewer(peer)
+    viewer = Viewer(peer, ice_servers=ice_servers, snapshot_dir=args.snapshot_dir)
     box: dict = {}
     stop = threading.Event()
     pumper = threading.Thread(target=pump, args=(peer, viewer, box, stop), daemon=True)
@@ -674,6 +1036,9 @@ def main() -> int:
         if not viewer.channel_open.wait(args.timeout):
             raise E2EFailure("channel", "the producer's input channel never opened")
         log("input channel OPEN — typing")
+
+        if args.remote_proof:
+            return remote_proof(viewer, args)
 
         # Type the command, then Enter. Physical keys only.
         for frame in frames_for_text(f"echo {PROOF_TEXT} > {args.proof_path}"):

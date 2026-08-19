@@ -23,9 +23,14 @@
 #                        black rectangle.
 #   4. no regression     the PTY attach suites this goal extended.
 #
-# What this verifier does NOT prove, and says so in its own PASS line: that a
-# real WebRTC producer inside a CubeSandbox microVM behaves this way. Nothing in
-# this repository can build or boot one — see
+# What this verifier does NOT boot: a CubeSandbox microVM. It cross-reads the
+# template contract against the server and runs the capability plane and the
+# two-peer signalling contract, none of which needs a hypervisor. That the same
+# producer behaves this way INSIDE a real microVM over a relay candidate was
+# measured out of band on momo-cube-host (#1587) and recorded under
+# template.spec.json runtimeVerified.inputDeliveredInMicroVM; the host procedure
+# is docs/runbooks/cubesandbox-host-install.md §8-E, and this verifier's closing
+# notes state it rather than the verifier re-proving it. See also
 # infra/cubesandbox/display-template/README.md.
 #
 # Optional inputs:
@@ -401,17 +406,27 @@ done
 # The honest label for input delivery. LIVE-5c GRADUATED it the way specVersion
 # 3 graduated iceReachability: a real producer now parses the declared frames and
 # a typed command reaches a terminal on the captured display, so the label may
-# leave `unverified` ONLY by standing under `runtimeVerified` — and only while
-# the part that is still unmeasured keeps a label of its own. Measured on the
-# template image is not measured inside a microVM, and deleting BOTH would be the
-# silent deletion this check exists to catch.
+# leave `unverified` ONLY by standing under `runtimeVerified`. #1587 (specVersion
+# 5) then graduated the microVM leg the SAME way — measured inside a CubeSandbox
+# microVM over a relay candidate — so `unverified.inputDeliveryInMicroVM` may
+# ALSO leave `unverified` only by moving to `runtimeVerified.inputDeliveredInMicroVM`,
+# never by silent deletion. Deleting either without its record is the drift this
+# check exists to catch.
 if ! spec_value '.unverified.inputDelivery' >/dev/null 2>&1; then
   [ "$(spec_value '.runtimeVerified.keystrokeReachesAnApplication')" = "true" ] ||
     fail "spec dropped the input-delivery label without recording it as measured under runtimeVerified"
   [ "$(spec_value '.runtimeVerified.producerParsesInputFrames')" = "true" ] ||
     fail "spec claims a keystroke landed without recording that a producer parsed the frames"
-  spec_value '.unverified.inputDeliveryInMicroVM' >/dev/null ||
-    fail "spec graduated input delivery without naming the microVM leg that is still unmeasured"
+  # The microVM leg: still named while unmeasured (a bare unverified label), and
+  # once measured it may leave unverified ONLY by standing under runtimeVerified.
+  # Exactly one of the two must hold — never neither (silent deletion), never both.
+  if spec_value '.unverified.inputDeliveryInMicroVM' >/dev/null 2>&1; then
+    [ "$(spec_value '.runtimeVerified.inputDeliveredInMicroVM')" = "true" ] &&
+      fail "spec both names the microVM leg as unverified AND records it verified — pick one"
+  else
+    [ "$(spec_value '.runtimeVerified.inputDeliveredInMicroVM')" = "true" ] ||
+      fail "spec dropped the microVM input-delivery label without recording it under runtimeVerified (#1587)"
+  fi
   # Delivery without revocation is half a claim, and it is the dangerous half: a
   # keyboard that arrives and never leaves is worse than one that never arrived.
   # Graduating the first without the second is therefore refused by name.
@@ -584,7 +599,13 @@ note "  offer with no m=application. Closing the window closed the channel while
 note "  stream stayed up, and keys typed after it reached nothing — measured while the"
 note "  signalling socket was flooded with frames the loop discards, which is where a"
 note "  re-validation in the wrong place starves. Measured by scripts/display_input_e2e.py."
-note "runtime-unverified(input delivery INSIDE a microVM): the above ran against the"
-note "  template IMAGE, not a CubeSandbox microVM on momo-cube-host, so input over a"
-note "  'typ relay' candidate end to end is still unmeasured — see"
-note "  template.spec.json unverified.inputDeliveryInMicroVM."
+note "runtime-verified(input delivery INSIDE a microVM, #1587 specVersion 5): the input"
+note "  round trip ran inside a REAL momo-display5 CubeSandbox microVM on momo-cube-host,"
+note "  over a 'typ relay' candidate end to end. The microVM producer was wired to a local"
+note "  momo-server it reached by the 8443 hairpin and given ONLY the server-minted"
+note "  ephemeral relay credential (no static TURN env); a viewer with the same credential"
+note "  connected relay<->relay, the producer opened momo.input.v1, and a typed key was"
+note "  injected into the xterm INSIDE the microVM — read back as the echoed marker on the"
+note "  relay-carried video at the microVM's own tpl-* shell prompt. Observer contrast held"
+note "  there too. Measured by scripts/display_input_e2e.py --remote-proof +"
+note "  scripts/display_microvm_seed.py; see docs/runbooks/cubesandbox-host-install.md §8-E."

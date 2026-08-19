@@ -409,7 +409,31 @@ PASS view-only intact on the real microVM: no m=application, a=sendonly
 
 즉 **입력 절반을 넣은 producer가 관전자에겐 여전히 아무 입력 경로도 열지 않는다**는 것이 실기재에서 확인됐다(D4 무회귀).
 
-**아직 못 한 것은 microVM 안에서의 controller 왕복 하나**다. producer의 `validate`가 **microVM에서 닿는 momo-server**를 요구하는데, 로컬 서버를 호스트로 터널링하는 것도 호스트에 서버를 세우는 것도 이 goal의 권한 밖이었다(§9-8). 입력 왕복 자체는 **같은 producer 이미지**를 상대로 측정했다(`scripts/display_input_e2e.py`).
+**아직 못 한 것은 microVM 안에서의 controller 왕복 하나**였다 — §8-E에서 해소됐다.
+
+### E. **[#1587 해소] microVM 안에서의 controller 입력 왕복 — relay 종단 실측 (2026-08-19)**
+
+§8-D가 남긴 마지막 라벨 `unverified.inputDeliveryInMicroVM`를 해소했다. §9-8이 지목한 선행 조건(**microVM이 닿는 momo-server**)을 이번엔 갖췄다: SSH 위임(2026-08-19)으로 호스트에 **로컬 momo-server 스택**을 세웠다.
+
+**세운 것 (프로덕션 비접촉·비충돌)**:
+- `momo-rust:8d0f7d9a` 이미지로 `infra/rust/docker-compose.rust.yml`(+`t3.override.yml`) 스택을 **compose 프로젝트 `momo1587`**, **루프백 포트 28080(api)/28000(centrifugo)**에 기동. 프로덕션(app.oor7.com)·8443/3000/5000 등 기존 포트 전부 비접촉.
+- `MOMO_TURN_URLS`+`MOMO_TURN_STATIC_AUTH_SECRET`(momo-turn `static-auth-secret`)+`MOMO_TURN_CREDENTIAL_TTL_SECONDS=3600`을 api에 주입 → display-attach가 **세션당 단명 자격**(`<만료초>:<work session uuid>` username)을 `ice_servers`로 발급. 정적 TURN은 producer envVars로 **주지 않았다**(§6-4 은퇴 반영).
+- nginx 형상 A 프록시에 **`location /v1/ { proxy_pass http://127.0.0.1:28080; }`** 를 임시 추가(백업 후 reload). microVM은 공인 IP:8443 헤어핀(§5.4)으로 `/v1/`에 닿는다. **이 변경은 goal 종료 시 원복**(nginx conf 백업에서 복원).
+
+**배선**:
+- `scripts/display_microvm_seed.py`(신규)로 owner 로그인 → **display-capable work host 등록**(fresh Ed25519, 공개키만 서버로) → work session 생성 → **host-signed display-binding 발행**. 서명 문법은 producer의 `momo.work_host.request.v2`와 byte-단위 동형(seed는 0600 파일로만).
+- microVM(`momo-display5`, tpl-09566443…) create의 `envVars`: `MOMO_SERVER_ORIGIN=https://101.79.18.230:8443`, `MOMO_WORKSPACE_ID`, `MOMO_WORK_HOST_ID`, `MOMO_DISPLAY_ID`, `MOMO_WORK_HOST_SIGNING_KEY`(→ #1437 수신기가 0600 파일로 랜딩 → `MOMO_WORK_HOST_KEY_PATH`), `MOMO_DISPLAY_SERVER_CA_PEM_B64`(nginx 자체서명 인증서, IP SAN 101.79.18.230). **정적 `MOMO_DISPLAY_TURN_URI` 없음.**
+
+**실측 (전부 실 microVM `tpl-0956…` 상대)**:
+- **producer validate 개통**: 관전자 capability로 producer가 실서버 validate를 **host-signed**로 호출 → `ready: mode=observer input_enabled=False`, **offer에 m=application 없음**(D4 무회귀). validate가 8443 헤어핀→nginx `/v1/`→momo-server로 실제로 도달함을 증명.
+- **controller 입력 왕복 (relay 종단)**: `scripts/display_input_e2e.py --remote-proof`(viewer가 **같은 서버 발급 `ice_servers`로 TURN 배선 + relay 강제** — 웹 클라와 동형). ICE `connected/completed` **relay↔relay**, producer가 `momo.input.v1` 개설, 뷰어가 타이핑한 키가 **microVM 내부 xterm**에 주입돼 실행. 증거는 파일이 아니라 **화면**: relay로 받은 H264를 디코드한 프레임에 `LIVE5C-MICROVM-OK`가 microVM 자신의 `root@tpl-0956:/#` 프롬프트에서 출력됨(캡처 확보). producer 로그 `input: N frames applied`(컨테이너 대조에서 교차확인).
+- **자격**: microVM producer는 정적 TURN 없이 **서버 발급 단명 자격만**으로 릴레이를 열었다 → **ephemeral `use-auth-secret` 경로가 LIVE momo-turn에서 종단 성립**(§6-4 은퇴 완료와 정합). template.spec.json `ice.turn.$credentialComment`의 2026-08-18 "ephemeral 401" 서술을 이 실측으로 정정.
+
+**돌려 보기 전에는 몰랐던 producer 결함 1건 (수리)**:
+- **`set_state(READY)`는 비동기인데 그 직후 `create-data-channel`을 부르면 레이스**다. `create-data-channel`이 검사하는 `is_closed != TRUE`는 webrtcbin이 **실제로 READY에 도달해야** 풀리는데, 비동기 전이가 끝나기 전이면 어서션 실패 → 채널 NULL → 승인된 controller가 **조용히 view-only offer로 강등**(`ready`는 이미 `input_enabled:true`를 보낸 뒤). microVM에선 **매번** 졌다(#1570 템플릿-이미지 런은 우연히 이겼을 뿐 — 입력 축이 없던 #1438 땐 안 보였다). **수리**: `set_state(READY)` 뒤 `get_state`로 전이 완료를 **기다린 뒤** 채널 생성. `momo-display-producer`에 반영, 템플릿 **momo-display:v5**로 재빌드. 계약 변경 아님.
+- 부수(검증 하네스): 늦게 조인한 뷰어는 초기 IDR을 놓치므로 **keyframe(PLI) 요청**(upstream force-key-unit)이 필요하고, 디코더는 mid-stream P-frame에 강한 **avdec_h264**(뷰어 전용 이미지 `momo-viewer` = display + `gstreamer1.0-libav`)를 쓴다. 둘 다 `display_input_e2e.py`/뷰어 이미지에만 있고 템플릿엔 없다.
+
+**자원 회수**: microVM DELETE · momo-display5 템플릿·v5 이미지·`momo-viewer` 이미지 삭제 · `momo1587` 스택 `down -v` · nginx `/v1/` 원복(백업 복원) · `/root/momo-1587` 삭제. (goal 종료 절차, §아래 재설치와 무관.)
 
 ---
 
@@ -424,5 +448,5 @@ PASS view-only intact on the real microVM: no m=application, a=sendonly
 | 5 | **producer 미디어 실도달** | **✅ 해소(#1438)** — momo-turn relay로 외부 브라우저 실화면 도달(1280x720 H264 56프레임, relay↔relay, udp+tcp). 도달 요건은 **relay 강제 + 라우팅 가능 ICE base 주입**(링크로컬 root-cause, §8-B). ADR-0165 증보 2 초안. **잔여**: 실서버 `validate` 결선(#1438은 `STUB_VALIDATE`) · input delivery(LIVE-5) |
 | 6 | **UDP 헤어핀 재측정** | **비임계로 강등(#1438)** — momo-turn이 CubeSandbox 호스트와 **별도 공인 호스트**라 헤어핀은 배치 토폴로지에 불필요(동거 가설의 잔여 질문일 뿐). ACG UDP 규칙 신설은 동거를 시도할 때만 필요 |
 | 7 | **재부팅 생존** | **미시험**(콘솔 복구 수단 부재로 의도적 회피). 대신 `firewall-cmd --reload`로 근사 검증했고, 모든 유닛의 `enabled` 상태·NM zone·레지스트리 `restart=always`를 정적으로 확인했다 |
-| 8 | **microVM 안에서의 input delivery** | **미측정(LIVE-5c 잔여)** — 템플릿 `momo-display4`는 READY로 올라가 있고 입력 절반은 **같은 producer 이미지**에서 실측됐다(§8-D). 남은 것은 microVM + relay 경로에서의 동일 왕복이며, 막힌 지점은 하나다: producer의 `validate`가 **microVM에서 닿는 momo-server**를 요구한다. 로컬 서버를 호스트로 터널링하는 것도, 호스트에 서버를 세우는 것도 이 goal의 권한 밖이었다. **선행 조건**: momo-cube-host가 도달할 수 있는 momo-server 인스턴스(공인 배포 또는 §4.4 nginx에 `/v1/` 업스트림 추가) |
+| 8 | **microVM 안에서의 input delivery** | **✅ 해소(#1587, §8-E)** — SSH 위임으로 호스트에 로컬 momo-server 스택(루프백 28080, 프로덕션 비접촉)을 세우고 nginx `/v1/` 헤어핀을 임시로 열어 선행 조건을 충족. 실 microVM(`momo-display5`) producer가 host-signed validate로 controller 승인을 받고, **relay↔relay**로 뷰어의 키를 microVM 내부 xterm에 주입(`LIVE5C-MICROVM-OK` 화면 확인). 정적 TURN 없이 **서버 발급 단명 자격**만 사용 → ephemeral 경로도 momo-turn에서 종단 성립. 부수로 producer의 READY 레이스 결함 1건 수리(template.spec.json specVersion 5). 자원 전량 회수 |
 | 9 | **자격 TTL 천장(remint)** | **측정 완료 → 구현 불요(§8-D-3)**. coturn은 ALLOCATE에서만 REST username 만료를 보고 기존 allocation의 REFRESH에선 보지 않는다 → 실행 중 스트림은 TTL을 넘겨도 끊기지 않는다(60s TTL / 200s 소크 / 비트 10-10 전달). **택일: (b) TTL을 세션 상한으로 두되 "천장"이라는 서술 자체를 정정** — ICE 재협상(a)은 만들지 않는다. 잔여 좁은 케이스: 세션 중 **재-ALLOCATE**(ICE restart)는 새 자격이 필요하며, 그 시점에 mint 하면 된다(주기적 교체가 아니라) |
