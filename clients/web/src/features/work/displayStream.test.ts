@@ -1109,14 +1109,16 @@ describe("what this file does not prove", () => {
     // producerSelection and templateBuild moved from `unverified` to
     // `runtimeVerified`. LIVE-5c then graduated input delivery the same way: a
     // real producer parsed the declared frames and a typed command reached a
-    // terminal on the captured display. The honesty invariant is what this
-    // asserts, and it is unchanged — a graduation must be RECORDED under
-    // `runtimeVerified`, and the part that is still unmeasured (the same round
-    // trip inside a CubeSandbox microVM) must keep a label of its own.
+    // terminal on the captured display. #1587 graduated the LAST leg the same
+    // way — the same round trip measured INSIDE a CubeSandbox microVM over a
+    // relay candidate. The honesty invariant is what this asserts, and it is
+    // unchanged — a graduation must be RECORDED under `runtimeVerified`, never a
+    // label going quiet.
     expect(spec.runtimeVerified?.browserRendersOverTurnRelay).toBeTruthy();
     expect(spec.runtimeVerified?.producerEncodesInMicroVM).toBeTruthy();
     expect(spec.runtimeVerified?.keystrokeReachesAnApplication).toBeTruthy();
-    expect(spec.unverified?.inputDeliveryInMicroVM).toBeTruthy();
+    expect(spec.runtimeVerified?.inputDeliveredInMicroVM).toBeTruthy();
+    expect(spec.unverified?.inputDeliveryInMicroVM).toBeUndefined();
   });
 
   it("mints and dials nothing at test time", () => {
