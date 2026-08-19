@@ -451,6 +451,27 @@ export function SelectField({
  * a FOCUSED element that becomes `disabled` drops focus to <body>, throwing a
  * keyboard user back to the top of the panel on every successful save. It stays
  * in the tab order, announces itself unavailable, and the click is a no-op.
+ *
+ * 진행과 잠금은 다른 축이다 (#1558). This component spent a year as the cited
+ * precedent for that grammar (#1486, #1541, `ConfirmButton.busy` above) while
+ * itself folding the two into one `blocked = !canSave || busy` — so a save in
+ * flight wore `aria-busy` and `aria-disabled` at once and the one progress word
+ * on the screen sat dead under `opacity-50`, reading as 「당신은 이걸 못 한다」
+ * mid-write (the #1403 리뷰 H-1 class, measured on `work-host-save`: 「저장 중」
+ * · aria-busy=true · aria-disabled=true · opacity 0.5). The axes are now what
+ * the consumers were always told they were:
+ *
+ *   - 잠금 (`!canSave`): dims, announces `aria-disabled`. Nothing is dirty, or
+ *     the save cannot go — 「당신은 이걸 못 한다」.
+ *   - 진행 (`busy`): swaps the word, announces `aria-busy`, changes nothing
+ *     about the paint — 「지금 일어나는 중」.
+ *
+ * Both still swallow the click in the handler; a second Enter during a write
+ * must not fire a duplicate save, and the guard is the handler's job precisely
+ * because native `disabled` is not available (focus). The consumer side of the
+ * same discipline: `canSave` must never be computed FROM the in-flight state
+ * (`dirty && !save.isPending` smuggles the fold back through the prop);
+ * `settingsFieldsBusy.test.ts` scans every call site for that.
  */
 export function SaveButton({
   label,
@@ -468,16 +489,15 @@ export function SaveButton({
   onSave: () => void;
   testId?: string;
 }) {
-  const blocked = !canSave || Boolean(busy);
   return (
     <Button
       type="button"
       size="sm"
-      aria-disabled={blocked || undefined}
+      aria-disabled={!canSave || undefined}
       aria-busy={busy || undefined}
-      className={cn(blocked && "opacity-50")}
+      className={cn(!canSave && "opacity-50")}
       onClick={() => {
-        if (blocked) return;
+        if (!canSave || busy) return;
         onSave();
       }}
       data-testid={testId}
