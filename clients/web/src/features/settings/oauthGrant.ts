@@ -147,7 +147,7 @@ export function parseAuthJson(pasted: string): OAuthParseResult {
   if (!root) {
     return fail(
       "paste",
-      "auth.json 은 중괄호로 시작하는 객체여야 합니다. 파일 전체를 붙여넣었는지 확인하세요."
+      "auth.json은 중괄호로 시작하는 객체여야 합니다. 파일 전체를 붙여넣었는지 확인하세요."
     );
   }
 
@@ -176,7 +176,7 @@ export function parseAuthJson(pasted: string): OAuthParseResult {
   if (!refreshToken) {
     return fail(
       "paste",
-      "tokens.refresh_token 이 없습니다. Codex CLI 로그인을 마친 계정의 auth.json 인지 확인하세요."
+      "tokens.refresh_token이 없습니다. Codex CLI 로그인을 마친 계정의 auth.json인지 확인하세요."
     );
   }
 

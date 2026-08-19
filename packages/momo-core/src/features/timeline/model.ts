@@ -50,8 +50,8 @@ export function emptyTimeline(): TimelineState {
 // 그래서 첫 행동은 이제 양쪽 다 쓰기이고, 멤버 추가는 지워지지 않고 **뒤로
 // 물러난다.** 지우지 않는 이유는 취향이 아니라 이 클라의 사정이다: 빈 채널이
 // 「채널에 멤버 추가」로 가는 **유일한 문**이다(`clients/web/src/app/AppShell.tsx`:
-// "빈 채널의 초대 진입점이 이 하나를 열고, 헤더 메뉴가 생기면 그것도 같은 하나를
-// 연다" — 그 헤더 메뉴는 아직 없다). 유일한 문을 지우는 것은 마찰 하나를 없애자고
+// "빈 채널의 멤버 추가 진입점이 이 하나를 열고, 헤더 메뉴가 생기면 그것도 같은
+// 하나를 연다" — 그 헤더 메뉴는 아직 없다). 유일한 문을 지우는 것은 마찰 하나를 없애자고
 // 기능 하나를 없애는 일이다.
 //
 // A 1:1 DM still gets exactly one action: the server fixes the participant pair

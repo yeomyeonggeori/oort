@@ -307,7 +307,7 @@ export function AgentChannelsSection({
             {busy && mutation.variables?.action === "add" && (
               <Loader2 aria-hidden="true" className="spinner-busy" />
             )}
-            {busy && mutation.variables?.action === "add" ? "추가하는 중" : "채널에 추가"}
+            {busy && mutation.variables?.action === "add" ? "추가 중" : "채널에 추가"}
           </Button>
         </form>
       )}

@@ -51,6 +51,8 @@ import { fileURLToPath } from "node:url";
 import {
   ALLOW_MARKER,
   EMDASH_CATEGORY,
+  LATIN_PARTICLE_CATEGORY,
+  PROGRESS_WORD_CATEGORY,
   loadTypeScript,
   runCases,
   scanSource,
@@ -62,7 +64,10 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, "..");
 const WEB_SRC = join(REPO_ROOT, "clients/web/src");
 
-const CATEGORIES = [EMDASH_CATEGORY];
+// emdash 하나로 시작한 파일이지만(#1141), 낱말꼴 게이트(#1511)가 같은 판정
+// (렌더 문자열만, 주석·테스트 이름 제외)을 필요로 해서 분류가 셋이 됐다.
+// 쉘(design_preflight_web.sh)은 --emit 의 `key|` 접두로 셋을 가른다.
+const CATEGORIES = [EMDASH_CATEGORY, PROGRESS_WORD_CATEGORY, LATIN_PARTICLE_CATEGORY];
 
 const ts = loadTypeScript(REPO_ROOT, [
   join(REPO_ROOT, "clients/web/node_modules/typescript"),
@@ -206,6 +211,68 @@ const SELFTEST_CASES = [
     why: "생성 타입은 사람이 쓴 글이 아니다",
     src: 'export type T = { note: "생성기가 적은 것 — 손으로 고치지 않는다" };',
   },
+  // ---- progress_word (#1511) ------------------------------------------------
+  {
+    want: ["progress_word"],
+    file: "features/settings/copy.ts",
+    why: "한자어 동작명사의 「-하는 중」 — 이 분류의 존재 이유(#1501 정본)",
+    src: 'export const BUSY = "저장하는 중";',
+  },
+  {
+    want: ["progress_word"],
+    file: "features/auth/copy.ts",
+    why: "말줄임표가 동행해도 같은 위반이다 (ConnectPage 가 이 모양이었다)",
+    src: 'export const BUSY = "참여하는 중…";',
+  },
+  {
+    want: ["progress_word"],
+    file: "features/work/copy.ts",
+    why: "치환 꼬리의 진행 낱말 — HostPicker busy 접근성 이름이 이 모양이었다",
+    src: "export const busy = (name: string) => `${name}에서 인수하는 중`;",
+  },
+  {
+    want: [],
+    file: "features/plugins/copy.ts",
+    why: "문장 꼴 「-하는 중입니다」는 옳다 (#1509 이탈 7 — 라벨 대체가 아니라 문장)",
+    src: 'export const NOTE = "관리자 권한을 확인하는 중입니다.";',
+  },
+  {
+    want: [],
+    file: "features/work/copy.ts",
+    why: "고유어 어간 허용표(NATIVE_HANEUN_STEMS) — 「생각 중」이 아니라 이 꼴이 맞다",
+    src: 'export const THINKING = "생각하는 중";',
+  },
+  {
+    want: [],
+    file: "features/work/copy.ts",
+    why: "고유어 동사의 「-는 중」은 애초에 「-하는 중」 꼴이 아니다",
+    src: 'export const ISSUING = "관전 권한을 받는 중";',
+  },
+  // ---- latin_particle (#1511 편입 — #1560 M①) -------------------------------
+  {
+    want: ["latin_particle"],
+    file: "features/work/copy.ts",
+    why: "라틴 낱말과 조사 사이의 공백 — break-keep 아래서 조사가 줄머리 고아가 된다",
+    src: 'export const NOTE = "Esc 는 호스트로 가지 않습니다.";',
+  },
+  {
+    want: ["latin_particle"],
+    file: "features/work/copy.ts",
+    why: "두 글자 조사(으로)도 같다 — CONTROL_KEYBOARD_LOST_COPY 가 이 모양이었다",
+    src: 'export const NOTE = "화면을 한 번 누르거나 Tab 으로 이 화면에 오면 다시 이어집니다.";',
+  },
+  {
+    want: [],
+    file: "features/chat/copy.ts",
+    why: "붙여 쓴 조사가 정답이다 (composerCopy 「Esc로 취소」)",
+    src: 'export const HINT = "Esc로 취소";',
+  },
+  {
+    want: [],
+    file: "features/settings/copy.ts",
+    why: "조사가 아니라 낱말의 첫 글자 — 뒤가 한글이면 조사 판정이 아니다",
+    src: 'export const LABEL = "API 이름을 적으세요";',
+  },
 ];
 
 function runSelftest() {
@@ -234,9 +301,9 @@ if (mode === "--selftest") {
 }
 if (mode === "--help" || mode === "-h") {
   console.log("usage: node scripts/design_preflight_web_strings.mjs [--emit|--list|--selftest]");
-  console.log("  (no args)  clients/web/src 의 렌더 문자열 em-dash 하드 제로 검사");
-  console.log("  --emit     적중을 `파일:줄: 글` 한 줄씩만 출력(게이트 안 함) — 쉘이 세는 형식");
-  console.log("  --list     --emit 과 같되 머리말을 붙인다");
+  console.log("  (no args)  clients/web/src 렌더 문자열의 emdash·progress_word·latin_particle 하드 제로 검사");
+  console.log("  --emit     적중을 `key|파일:줄: 글` 한 줄씩만 출력(게이트 안 함) — 쉘이 세는 형식");
+  console.log("  --list     분류별 머리말을 붙여 출력");
   console.log("  --selftest 주석·JSX 주석·테스트 이름과 렌더 문자열의 분리를 케이스로 증명");
   process.exit(0);
 }
@@ -246,32 +313,42 @@ if (mode !== "" && mode !== "--emit" && mode !== "--list") {
 }
 
 const hits = scanWeb();
-const lines = hits.map((h) => `${h.file}:${h.line}: ${h.text}`);
 
 if (mode === "--emit") {
-  for (const line of lines) console.log(line);
+  // 쉘(design_preflight_web.sh)이 분류별로 세는 형식: `key|파일:줄: 글`.
+  for (const h of hits) console.log(`${h.key}|${h.file}:${h.line}: ${h.text}`);
   process.exit(0);
 }
 
 if (mode === "--list") {
-  console.log(`== design pre-flight (web strings): emdash (${hits.length}) ==`);
-  for (const line of lines) console.log(`   ${line}`);
+  for (const category of CATEGORIES) {
+    const mine = hits.filter((h) => h.key === category.key);
+    console.log(`== design pre-flight (web strings): ${category.key} (${mine.length}) ==`);
+    for (const h of mine) console.log(`   ${h.file}:${h.line}: ${h.text}`);
+  }
   process.exit(0);
 }
 
-console.log("== design pre-flight (web strings), 이슈 #1141 ==");
+console.log("== design pre-flight (web strings), 이슈 #1141·#1511 ==");
 console.log("   scanned: clients/web/src (문자열 리터럴·JSX 텍스트 노드만, *.test.ts(x) 제외)");
 console.log(`   excluded: 주석·JSX 주석(AST가 보지 않는다), *.test.ts(x), *.d.ts, ${ALLOW_MARKER}`);
 console.log("");
-if (hits.length > 0) {
-  console.log(`FAIL  emdash: ${hits.length} hit(s)`);
-  console.log(`        rule: ${EMDASH_CATEGORY.rule}`);
-  for (const line of lines) console.log(`          ${line}`);
-  console.log("");
-  console.log("RESULT: FAIL, 웹의 사용자 가시 문자열에 em-dash 가 있다.");
+let failed = false;
+for (const category of CATEGORIES) {
+  const mine = hits.filter((h) => h.key === category.key);
+  if (mine.length > 0) {
+    console.log(`FAIL  ${category.key}: ${mine.length} hit(s)`);
+    console.log(`        rule: ${category.rule}`);
+    for (const h of mine) console.log(`          ${h.file}:${h.line}: ${h.text}`);
+    failed = true;
+  } else {
+    console.log(`OK    ${category.key}: 0`);
+  }
+}
+console.log("");
+if (failed) {
+  console.log("RESULT: FAIL, 웹의 사용자 가시 문자열에 위반이 있다.");
   process.exit(1);
 }
-console.log("OK    emdash: 0");
-console.log("");
-console.log("RESULT: PASS, 웹 렌더 문자열에 em-dash 가 없다.");
+console.log(`RESULT: PASS, 웹 렌더 문자열 ${CATEGORIES.length}/${CATEGORIES.length} 분류 clean.`);
 process.exit(0);

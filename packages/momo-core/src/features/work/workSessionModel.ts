@@ -224,7 +224,7 @@ const TOOL_PHRASES: ReadonlyArray<readonly [readonly string[], ToolPhrase]> = [
   ],
   [
     ["search", "grep", "glob", "find"],
-    { present: "검색하는 중", past: "검색함", failed: "검색 실패" },
+    { present: "검색 중", past: "검색함", failed: "검색 실패" },
   ],
   [
     ["fetch", "http", "web", "url", "browse"],
