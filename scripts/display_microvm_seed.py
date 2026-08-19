@@ -163,6 +163,10 @@ def seed(args) -> int:
     # receiver lands and the producer's signer reads back.
     seed_b64 = base64.b64encode(raw_seed).decode("ascii")
     fd = os.open(args.key_out, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    # os.open's mode applies only when the file is CREATED: re-seeding into an
+    # existing path would keep whatever mode that file already carried. The 0600
+    # posture is therefore asserted on the descriptor, never assumed.
+    os.fchmod(fd, 0o600)
     with os.fdopen(fd, "w") as handle:
         handle.write(seed_b64 + "\n")
 

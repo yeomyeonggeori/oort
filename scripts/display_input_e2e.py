@@ -58,15 +58,32 @@ below the message handlers, rebuild the image, and run:
 A returned window that keeps typing is worse than a stream that never started,
 so this is the ordering that has to be defended by a test rather than a comment.
 
-It does **not** prove the CubeSandbox/TURN leg — that a microVM on
-momo-cube-host relays this same exchange over a `typ relay` candidate. That is
-the other half of LIVE-5c and it is measured on the host, not here.
+THE CUBESANDBOX/TURN LEG (`--remote-proof`, #1587)
+==================================================
+
+This header used to end "it does not prove the CubeSandbox/TURN leg"; that leg
+is now this file's `--remote-proof` mode, and it is what measured
+`runtimeVerified.inputDeliveredInMicroVM`. The producer runs inside a real
+microVM on momo-cube-host and forces relay-only ICE; this harness wires the
+SAME server-minted `ice_servers` the display-attach issue handed it
+(`--ice-servers-json`, REQUIRED in this mode — without it the viewer would
+offer host candidates and a PASS could ride a relay<->host pair the real web
+client never has) and forces relay too, so the exchange completes relay<->relay
+over `typ relay` candidates. A microVM has no exec path out, so the delivery
+proof is not a file — it is the SCREEN: the relay-carried H264 is decoded
+(avdec_h264; a keyframe is requested via upstream force-key-unit -> RTCP PLI,
+because a mid-stream join never sees the opening IDR) and the saved frame shows
+the typed marker echoed at the microVM's own shell prompt. Ledger wiring for
+that run is `scripts/display_microvm_seed.py`; the host procedure is
+docs/runbooks/cubesandbox-host-install.md §8-E.
 
 WHERE IT RUNS
 =============
 
 Inside the display template image, because that is where `webrtcbin`, the X
-server and the producer are. `scripts/verify_display_attach.sh` does not run it
+server and the producer are (the `--remote-proof` viewer additionally wants
+`gstreamer1.0-libav` for avdec_h264 — the measurement used the template image
+plus that one package). `scripts/verify_display_attach.sh` does not run it
 for the same reason it cannot boot a producer: this needs the template.
 """
 
@@ -931,7 +948,36 @@ def main() -> int:
     )
     args = parser.parse_args()
 
+    # `--remote-proof` exists to measure the relay leg, so the relay is not
+    # optional in it: without `--ice-servers-json` the viewer would offer host
+    # candidates, and against a host-reachable producer the run could PASS over
+    # a relay<->host pair — a green that contradicts the relay<->relay claim the
+    # graduated label makes. Refused before GStreamer is even imported, so a
+    # re-run that dropped the flag fails in milliseconds with the reason named.
+    if args.remote_proof:
+        if not args.ice_servers_json:
+            parser.error(
+                "--remote-proof requires --ice-servers-json (the display-attach "
+                "issue response): the microVM claim is relay<->relay, and a "
+                "viewer without the server-minted relay credential would not "
+                "measure it"
+            )
+        if not args.snapshot_dir:
+            parser.error(
+                "--remote-proof requires --snapshot-dir: the on-screen frame IS "
+                "the delivery proof in this mode"
+            )
+
     ice_servers = ice_servers_from_json(args.ice_servers_json) if args.ice_servers_json else None
+    if args.remote_proof:
+        udp_uri, tcp_uri = turn_uris_from_ice_servers(ice_servers)
+        if not udp_uri and not tcp_uri:
+            parser.error(
+                "--remote-proof: the --ice-servers-json document rendered no "
+                "turn:// URI (empty ice_servers, or entries without a "
+                "credential) — the viewer cannot be a relay peer with it, so "
+                "the run would not measure the relay<->relay claim"
+            )
 
     import gi
 
