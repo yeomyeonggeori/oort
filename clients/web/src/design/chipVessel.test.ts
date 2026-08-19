@@ -233,7 +233,12 @@ function discover(): { fills: Fill[]; sites: Site[] } {
  * 적었다. 지금은 아무것도 빨갛지 않지만, 훗날 에이전트 정체성 칩이 생기면 위반으로
  * 찍히고 고치러 온 사람이 **존재하지 않는 규칙**을 가리키게 된다.
  */
-const VESSELS = new Set(["bg-muted-soft"]);
+const VESSELS = new Set([
+  "bg-muted-soft",
+  "bg-ok-soft",
+  "bg-warn-soft",
+  "bg-danger-soft",
+]);
 
 /**
  * 아직 옛 그릇에 선 칩 — 좌표와 수.
@@ -259,7 +264,9 @@ const VESSELS = new Set(["bg-muted-soft"]);
  *   ArtifactCard.tsx       1  커밋/PR 칩. 손 기하 + 불투명 카드 안.
  *   DisplayObserver.tsx    1  관전 머리 칩. 손 기하.
  *   SettingsFields.tsx     1  설정 `StatusChip` 의 accent 톤 셀.
- *   SessionVerificationChip.tsx 1  `--surface-raised` — #1516 이 이 줄을 지운다.
+ *
+ * #1516 이 `SessionVerificationChip` 한 줄을 지웠다(검증 칩의 `--surface-raised` +
+ * 테두리가 톤 그릇으로 바뀌었다) — 천장이 34 에서 33 으로 내려온 것이 그 기록이다.
  *
  * **두 종류가 섞여 있고 고치는 법이 다르다.** 대부분은 「칩인데 그릇이 틀렸다」이고,
  * `ObserverTerminal:1246`·`HostedAgentWizard:672` 는 반대다 — **컨트롤·상태 표시가 칩
@@ -280,12 +287,11 @@ const RESIDUE: readonly (readonly [string, number])[] = [
   ["clients/web/src/features/work/DisplayController.tsx", 2],
   ["clients/web/src/features/work/DisplayObserver.tsx", 1],
   ["clients/web/src/features/work/ObserverTerminal.tsx", 4],
-  ["clients/web/src/features/work/SessionVerificationChip.tsx", 1],
   ["clients/web/src/features/work/WorkSessionDetail.tsx", 2],
 ];
 
 /** 잔량 천장. **내려가기만 한다** — 올리는 변경은 위 문단을 지나야 한다. */
-const RESIDUE_CEILING = 34;
+const RESIDUE_CEILING = 33;
 
 /**
  * 기하를 손으로 다시 적은 자리 — 좌표와 수.
@@ -373,10 +379,8 @@ describe("칩의 그릇 규칙은 팔레트 전체에 걸린다 (#1515)", () => 
     const kinds = new Set(
       fills.filter((f) => !VESSELS.has(f.fill)).map((f) => f.fill)
     );
-    expect([...kinds].sort()).toEqual([
-      "bg-accent-soft",
-      "bg-surface-hover",
-      "bg-surface-raised",
-    ]);
+    // `bg-surface-raised` 는 #1516 이 검증 칩을 톤 그릇으로 옮기며 사라졌다 —
+    // 이제 잔량은 **전부 상호작용 상태 토큰**이다.
+    expect([...kinds].sort()).toEqual(["bg-accent-soft", "bg-surface-hover"]);
   });
 });

@@ -4,9 +4,15 @@ import {
   COMPLETION_CHECK_OUTCOME_LABEL,
   COMPLETION_CHECK_TONE,
   type CompletionCheckOutcome,
+  type CompletionTone,
 } from "@momo/core/features/timeline/completionReportCard";
 import { SESSION_STATUS_CLASS } from "@momo/core/features/work/workSessionFormat";
-import { COMPLETION_TONE_CLASS, COMPLETION_TONE_TOKEN } from "@/features/timeline/completionTone";
+import {
+  COMPLETION_TONE_CLASS,
+  COMPLETION_TONE_SOFT_CLASS,
+  COMPLETION_TONE_SOFT_TOKEN,
+  COMPLETION_TONE_TOKEN,
+} from "@/features/timeline/completionTone";
 
 // =============================================================================
 // 세션 검증 칩이 **카드와 같은 다리**로 칠해지는가 (UXC-C).
@@ -62,6 +68,8 @@ const OUTCOMES: readonly CompletionCheckOutcome[] = [
   "pending",
   "unknown",
 ];
+
+const TONES: readonly CompletionTone[] = ["ok", "danger", "warn", "muted"];
 
 describe("칩의 색이 코어 역할표를 지난다", () => {
   it("톤 클래스를 인라인으로 다시 적지 않는다", () => {
@@ -185,46 +193,88 @@ describe("통과한 세션의 행에서 초록은 검증 칩 하나다 (#1491)",
 //      `unknown`·`pending` 도 warn 이다. 그릇까지 같으면 한 행의 호박색 알약 둘을
 //      구분할 방법이 없다.
 //
-// 그래서 검증 칩은 한 단 올라온 바탕에 테두리를 진다. 아래는 그 결정이 **이 팔레트의
-// 실제 값에서** 성립하는지 재는 것이다 — 클래스 문자열만 보는 가드는 토큰이 같은
-// 값으로 수렴한 날에 조용하다.
+// #1463 의 답은 이 칩에 **테두리**를 주는 것이었다(`--surface-raised` + `--line`).
+// 그릇은 지켰지만 값을 치렀다: 이 팔레트에서 1px 테두리로 둘러싼 작은 알약은 컨트롤
+// 문법이고(입력·`<select>`·아웃라인 버튼), 그래서 「통과 12」가 누를 수 있는 것으로
+// 읽혔다(#1514 리뷰 H-3). 그래서 #1516 이 테두리가 지던 일을 **채움의 색상**으로
+// 옮겼다 — 이 칩의 그릇은 자기 톤의 옅은 채움이고, 원장의 칩은 톤 없는 그릇에 선다.
+//
+// 아래는 그 결정이 **이 팔레트의 실제 값에서** 성립하는지 재는 것이다 — 클래스
+// 문자열만 보는 가드는 토큰이 같은 값으로 수렴한 날에 조용하다.
 // -----------------------------------------------------------------------------
 
 describe("칩의 그릇이 행의 상호작용 바탕에서 살아남는다", () => {
-  it("검증 칩은 행이 hover·선택될 때 쓰는 바탕을 자기 바탕으로 쓰지 않는다", () => {
+  it("검증 칩은 그릇도 코어 역할표를 지난다 — 인라인 바탕 리터럴이 없다", () => {
     expect(panel).toContain("hover:bg-surface-hover");
+    expect(chip).toContain(
+      "COMPLETION_TONE_SOFT_CLASS[COMPLETION_CHECK_TONE["
+    );
+    // 다리를 지나면서 자기 바탕도 함께 적으면 위 단정이 무의미해진다.
+    expect(chip).not.toMatch(/className=\{?"[^"]*bg-/);
     expect(chip).not.toContain("bg-surface-hover");
-    expect(chip).toContain("bg-surface-raised");
-    expect(chip).toContain("border border-line");
+    expect(chip).not.toContain("bg-surface-raised");
   });
 
-  it("그 바탕이 두 스킴 모두에서 행의 바탕 둘과 실제로 다른 값이다", () => {
-    const raised = tokenValues("--surface-raised");
-    const surface = tokenValues("--surface");
-    const hover = tokenValues("--surface-hover");
-    for (const [index, scheme] of SCHEMES.entries()) {
-      expect(raised[index], `${scheme}: 칩 바탕이 기본 행 바탕과 같다`).not.toBe(
-        surface[index]
-      );
+  it("테두리를 지지 않는다 — 그것이 이 칩을 컨트롤로 읽히게 한 문법이었다", () => {
+    // 테두리를 되돌리는 것은 H-3 회귀다. 채움의 색상이 그 일을 대신 지므로
+    // 테두리는 더 이상 필요하지 않고, 남아 있으면 다시 컨트롤로 읽힌다.
+    expect(chip).not.toContain("border border-line");
+    expect(chip).not.toMatch(/\bborder-line-strong\b/);
+  });
+
+  it("네 그릇이 두 스킴 모두에서 행이 입을 수 있는 바탕과 다른 값이다", () => {
+    // 이 칩이 서는 자리는 목록 행(`--surface` / hover)과 상세의 카드
+    // (`--surface-raised`)다. 톤 그릇은 색상으로 갈리므로 명도가 가까워도
+    // 같은 값이 되지 않는다 — 여기서 재는 것은 그 「같은 값이 아님」이다.
+    for (const tone of TONES) {
+      const vessel = tokenValues(COMPLETION_TONE_SOFT_TOKEN[tone]);
+      for (const rowToken of [
+        "--surface",
+        "--surface-hover",
+        "--surface-raised",
+      ]) {
+        const row = tokenValues(rowToken);
+        for (const [index, scheme] of SCHEMES.entries()) {
+          expect(
+            vessel[index],
+            `${scheme}: ${tone} 그릇이 ${rowToken} 과 같은 값(${vessel[index]})이다`
+          ).not.toBe(row[index]);
+        }
+      }
+    }
+  });
+
+  it("그릇 다리의 네 칸이 tokens.css 에 실재하고 클래스와 짝이다", () => {
+    // `skip: "bg-danger-soft"` 같은 한 글자 오타는 컴파일되지 않는 것이 아니라
+    // **틀린 색으로 컴파일된다**. 잉크 쪽 다리가 이미 지고 있는 계약의 그릇 판.
+    for (const tone of TONES) {
+      const token = COMPLETION_TONE_SOFT_TOKEN[tone];
+      expect(() => tokenValues(token)).not.toThrow();
       expect(
-        raised[index],
-        `${scheme}: 칩 바탕이 hover·선택 행 바탕과 같다 — 가리키는 행에서 그릇이 사라진다`
-      ).not.toBe(hover[index]);
+        COMPLETION_TONE_SOFT_CLASS[tone],
+        `${tone} 그릇 클래스가 자기 토큰을 안 든다`
+      ).toBe(`bg-${token.slice(2)}`);
     }
   });
 
-  it("테두리도 두 바탕과 다른 값이다 — 바탕이 수렴해도 그릇이 남게", () => {
-    const line = tokenValues("--line");
-    const surface = tokenValues("--surface");
-    const hover = tokenValues("--surface-hover");
-    for (const [index, scheme] of SCHEMES.entries()) {
-      expect(line[index], `${scheme}: 테두리가 기본 행 바탕과 같다`).not.toBe(
-        surface[index]
-      );
-      expect(line[index], `${scheme}: 테두리가 hover 행 바탕과 같다`).not.toBe(
-        hover[index]
-      );
+  it("원장의 칩과 측정의 칩이 한 행에서 같은 그릇을 쓰지 않는다 — 톤이 있는 한", () => {
+    // #1463 M2 의 충돌(수명주기 running 도 warn, 게이트 unknown·pending 도 warn)이
+    // 잉크가 아니라 **그릇**에서 갈린다는 것이 #1516 의 계약이다.
+    const ledger = tokenValues(
+      `--${SESSION_STATUS_CLASS.running.split(/\s+/).find((c) => c.startsWith("bg-"))!.slice("bg-".length)}`
+    );
+    for (const tone of ["ok", "danger", "warn"] as const) {
+      const vessel = tokenValues(COMPLETION_TONE_SOFT_TOKEN[tone]);
+      for (const [index, scheme] of SCHEMES.entries()) {
+        expect(
+          vessel[index],
+          `${scheme}: ${tone} 그릇이 원장의 그릇과 같은 값이다 — 한 행의 두 칩이 다시 같아진다`
+        ).not.toBe(ledger[index]);
+      }
     }
+    // 그리고 톤이 없을 때는 **일부러** 같다: 잰 것이 없으면 물들일 것도 없다.
+    expect(COMPLETION_TONE_SOFT_TOKEN.muted).toBe("--muted-soft");
+    expect(tokenValues("--muted-soft")).toEqual(ledger);
   });
 
   it("수명주기 칩은 채움 그대로다 — 갈라진 것은 그릇이지 한쪽을 없앤 것이 아니다", () => {
