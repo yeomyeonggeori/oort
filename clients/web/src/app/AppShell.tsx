@@ -214,8 +214,10 @@ export function AppShell({
        * 이 모달 위에서 물러설 수 있게 열림 상태를 함께 내린다. */}
       <AddWorkspaceProvider>
         {/* 채널에 멤버 추가 다이얼로그도 셸에 한 벌만 있다(검수 #2): 빈 채널의
-         * 초대 진입점이 이 하나를 열고, 헤더 메뉴가 생기면 그것도 같은 하나를
-         * 연다. 채널 만들기와 같은 이유로 폼 상태가 여러 벌이 되지 않는다. */}
+         * 멤버 추가 진입점이 이 하나를 열고, 헤더 메뉴가 생기면 그것도 같은
+         * 하나를 연다. 채널 만들기와 같은 이유로 폼 상태가 여러 벌이 되지
+         * 않는다. (낱말은 #1573 예약 · #1584 — 이 주석을 인용하는 짝은
+         * `packages/momo-core/src/features/timeline/model.ts` 머리말이다.) */}
         <AddChannelMemberProvider>
         <AgentProfileProvider>
           <div
