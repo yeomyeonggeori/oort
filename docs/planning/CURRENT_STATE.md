@@ -1,5 +1,15 @@
 # oort 기획 현재 상태 (Planning Current State)
 
+> **2026-08-19 스냅샷 41 (Fable · momo-main — ★집행 창 완주: TURN 은퇴·프로덕션 8d0f7d9a·LIVE-5 라벨 전해소. PLN-20260815-01).** 컴팩트 복원 진입점.
+>
+> **★ 집행 창(성재 SSH 위임)**: ①런북 §6 완주 — use-auth-secret 켜기·병행 **불성립 실측**(coturn은 켜지면 정적 무시·reload 불충분=restart)·정지창 은퇴(정적 401/단명 12/12) ②프로덕션 배포 68fc52ff→**8d0f7d9a**(LIVE-5 전 축·마이그 077 IDEMPOTENCY_OK·TURN 3키·검증 5종 그린) ③compose 배선 #1586 ④**#1588 microVM 내부 왕복 실측**(relay↔relay·ephemeral만·READY 경쟁 수리 v5) — **engine=`ef134609`·LIVE-5 정직 라벨 0 잔여**. 원장: #1545·#1587 close 코멘트+DEVIATION_LOG 집행 행.
+>
+> **성재 손(재정리)**: ①**#1361 Grok E2E — 성재 합의: 현 작업 종결 후 별도 세션**(의존 9건 전부 CLOSED·준비=오케스트레이터, 성재=Grok 앱 조작 15~20분) ②Xcode Cloud 9/7 재활성화 체크리스트(켜기 전 Start Conditions 경로 제한: clients/mobile/·packages/momo-core/ — 한도 소진 뿌리 차단) ③배포 후 관찰(첫 실사용 세션에서 ice_servers 단명 자격 확인은 #1588이 동형 구성으로 기증명).
+>
+> **다음 후보**: ①#1361 세션 ②자율 큐 파도(#1584 어휘 정렬·#1511·#1515/#1516·#1558·#1559·#1479/#1480) ③차기 engine→main 승격 창(파도 9+집행분) ④dsh C/D 검토.
+>
+> 이하 스냅샷 40:
+
 > **2026-08-19 스냅샷 40 (Fable · momo-main — 파도 9 완주·승격 후 첫 파도 폐곡선. PLN-20260815-01).** 컴팩트 복원 진입점.
 >
 > **파도 9 완주(4/4)**: #1571(preview-guard 26레인 — grok PASS·실 점유자 red proof)·#1572(base 위생 2)·#1573(「멤버 추가하기」 개명 — 「초대」=워크스페이스 낱말 예약, design-review PASS)·#1574(remint (b) 집행 — TTL 천장 반증 서술 전수 정정). **engine=`fe3f2960`**. 판정 전건 accepted. 후속: #1584(어휘 정렬 마이크로 3).
