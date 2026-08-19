@@ -37,6 +37,7 @@ import {
   workHostTypeLabel,
   workTierPolicySaveMessage,
 } from "@momo/core/features/settings/model";
+import { choiceRadiosHintId } from "./fieldIds";
 import {
   ChoiceRadios,
   CopyButton,
@@ -158,6 +159,9 @@ function EngineBlock({ offline }: { offline: boolean }) {
   });
 
   const lines = ["엔진은 워크스페이스마다 하나입니다. 오너나 관리자만 바꿉니다."];
+  // 이름을 한 번만 적는다: 아래 되돌리기가 이 그룹의 상태 문장을 자기 사유로
+  // 가리키므로, 이름이 두 곳에 적히면 한쪽이 조용히 낡는다.
+  const engineRadiosName = "work-host-engine";
 
   if (query.isPending) {
     return (
@@ -227,7 +231,7 @@ function EngineBlock({ offline }: { offline: boolean }) {
           disabled focused radio drops focus to <body>), and the state is said
           in words underneath. */}
       <ChoiceRadios
-        name="work-host-engine"
+        name={engineRadiosName}
         legend="엔진"
         choices={WORK_ENGINES}
         value={selected}
@@ -261,15 +265,30 @@ function EngineBlock({ offline }: { offline: boolean }) {
           onSave={() => save.mutate(selected)}
           testId="work-host-save"
         />
+        {/* 저장 중에는 되돌릴 수 없다 — 날고 있는 PUT 은 이미 `selected` 를 싣고
+            떠났고, 그 밑에서 초안을 되돌리면 착지한 값과 화면이 어긋난다. 그
+            잠금이 `if (save.isPending) return;` 한 줄로만 서 있었다: 눌리는데
+            아무 일도 일어나지 않고 왜인지도 말하지 않는, 두 가드 어느 쪽도
+            보지 못한 자리다 (#1559 회전 1 · design-review #1595 M5).
+
+            사유는 새로 쓰지 않는다. 이 프레임에서 「엔진을 저장하는 중입니다」는
+            위 그룹이 이미 화면에 세워 둔 문장이고, 잠금 하나에 문장 하나가
+            규율이다 — 여기 한 번 더 쓰면 같은 사실이 한 화면에 두 번 선다. */}
         {dirty && (
           <Button
             variant="ghost"
             size="sm"
             aria-label="실행 엔진 되돌리기"
+            aria-disabled={save.isPending || undefined}
+            aria-describedby={
+              save.isPending ? choiceRadiosHintId(engineRadiosName) : undefined
+            }
+            className={cn(save.isPending && "opacity-50")}
             onClick={() => {
               if (save.isPending) return;
               setEngine(current.engine);
             }}
+            data-testid="work-host-revert"
           >
             되돌리기
           </Button>
@@ -786,11 +805,14 @@ function TierPolicyScope({
   // Two scopes draw the same two buttons, so the visible labels carry the scope
   // instead of leaving two identical "저장" stops in the tab order.
   const saveLabel = scope === "member" ? "내 정책 저장" : "워크스페이스 기본 저장";
+  // 위 엔진 블록과 같은 이유로 한 번만 적는다: 되돌리기가 이 그룹의 상태 문장을
+  // 자기 사유로 가리킨다.
+  const modeRadiosName = `work-tier-mode-${scope}`;
 
   return (
     <div className="flex min-w-0 flex-col gap-2">
       <ChoiceRadios
-        name={`work-tier-mode-${scope}`}
+        name={modeRadiosName}
         legend={title}
         choices={WORK_TIER_MODES}
         value={mode}
@@ -833,15 +855,26 @@ function TierPolicyScope({
           onSave={commit}
           testId={`work-tier-save-${scope}`}
         />
+        {/* 위 엔진 블록의 되돌리기와 같은 규칙이다 (#1559 회전 1 · #1595 M5):
+            저장 중에는 잠기고, 잠긴 사실은 흐림과 `aria-disabled` 로 말하며,
+            사유는 이 그룹이 이미 세워 둔 「정책을 저장하는 중입니다」를 가리킨다.
+            한 패널의 같은 자리가 다른 모양이면 다음 사람은 그 차이가 의도인지
+            알 수 없다. */}
         {dirty && (
           <Button
             variant="ghost"
             size="sm"
             aria-label={`${title} 되돌리기`}
+            aria-disabled={save.isPending || undefined}
+            aria-describedby={
+              save.isPending ? choiceRadiosHintId(modeRadiosName) : undefined
+            }
+            className={cn(save.isPending && "opacity-50")}
             onClick={() => {
               if (save.isPending) return;
               setDraft(null);
             }}
+            data-testid={`work-tier-revert-${scope}`}
           >
             되돌리기
           </Button>

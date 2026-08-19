@@ -149,7 +149,14 @@ capture_surface LIGHT-COMPOSER-PLACEHOLDER composer-placeholder-light.png
 # 내는 크기는 아래 접근성 블록의 같은 줄이다.
 capture_surface COMPOSER-GROWTH composer-growth-dark.png
 
+# #1479 절 예산. 이 크기(a11y-large, 배수 2.143)가 규칙이 **값을 내는** 띠다:
+# 상자가 3.2줄이라 `release-2026-08` 의 문장(4줄)은 안 들고 머리 절(3줄)은 든다.
+# 위 XXL 블록만 있으면 두 절 다 안 드는 띠라 「고쳐진 것이 무엇인지」가 안 찍힌다
+# (그 띠도 아래에서 함께 찍고, 셋의 산수가 `Composer.tsx` 의 「절 예산」 절에 있다).
 ORIGINAL_CONTENT_SIZE="$(xcrun simctl ui booted content_size)"
+xcrun simctl ui booted content_size accessibility-large
+capture_surface COMPOSER-PLACEHOLDER composer-placeholder-a11y-large.png
+capture_surface LIGHT-COMPOSER-PLACEHOLDER composer-placeholder-a11y-large-light.png
 xcrun simctl ui booted content_size accessibility-extra-extra-large
 capture_surface WORK-CONSOLE work-console-accessibility-text.png
 capture_surface WORK-DETAIL work-detail-accessibility-text.png

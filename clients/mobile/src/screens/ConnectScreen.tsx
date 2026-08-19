@@ -326,7 +326,7 @@ export default function ConnectScreen({
 
           <PrimaryButton
             label={joining ? '초대 코드로 참여' : '로그인'}
-            busyLabel={joining ? '참여하는 중…' : '로그인 중…'}
+            busyLabel={joining ? '참여 중' : '로그인 중'}
             busy={phase.busy}
             disabled={!canSubmit}
             onPress={() => void onSubmit()}

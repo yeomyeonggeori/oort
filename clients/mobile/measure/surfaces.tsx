@@ -71,7 +71,10 @@ import {
   TOUCH_TARGET,
   type Palette,
 } from '../src/design/tokens';
-import {composerPlaceholder} from '@momo/core/features/chat/composerCopy';
+import {
+  composerPlaceholder,
+  composerPlaceholderClauses,
+} from '@momo/core/features/chat/composerCopy';
 import {FixedScheme, useStyles, type ColorScheme} from '../src/design/theme';
 import WorkConsoleScreen from '../src/screens/WorkConsoleScreen';
 import WorkSessionDetailScreen from '../src/screens/WorkSessionDetailScreen';
@@ -643,10 +646,17 @@ const PLACEHOLDER_BUDGET_PT = 260;
  */
 function PlaceholderProbe(): React.JSX.Element {
   const styles = useStyles(buildStyles);
+  const {fontScale, height: windowHeight} = useWindowDimensions();
   const [slotWidth, setSlotWidth] = React.useState(0);
   const [lines, setLines] = React.useState<Record<string, number>>({});
   // 입력창의 콘텐츠 폭 = 상자 - 좌우 안쪽 여백 - 좌우 테두리.
   const content = slotWidth === 0 ? 0 : slotWidth - space.md * 2 - 2;
+  // 절 예산의 문턱 (#1479). 사진이 「뒷절이 사라졌다」를 보여 줄 때, **왜**
+  // 사라졌는지는 이 두 수가 답한다: 상자가 담는 줄 상자 몇 개인가, 그리고 위
+  // 줄들이 세는 문장은 그보다 긴가. 하나만 있으면 사진은 결과만 들고 판정 기준을
+  // 안 든다.
+  const room = composerMaxHeight(fontScale, windowHeight) - (space.sm * 2 + 2);
+  const rowPt = lineBox.body * fontScale;
   const boxes = [
     {key: '이 기기', width: content},
     {key: '예산 390pt', width: PLACEHOLDER_BUDGET_PT},
@@ -666,33 +676,54 @@ function PlaceholderProbe(): React.JSX.Element {
       {boxes
         .filter(box => box.width > 0)
         .flatMap(box =>
-          PLACEHOLDER_LABELS.map(label => (
-            <View
-              key={`${box.key}/${label}`}
-              style={[styles.probeMeasure, {width: box.width}]}>
-              <Text
-                style={styles.probeText}
-                onTextLayout={event => {
-                  const count = event.nativeEvent.lines.length;
-                  setLines(previous =>
-                    previous[`${box.key}/${label}`] === count
-                      ? previous
-                      : {...previous, [`${box.key}/${label}`]: count},
-                  );
-                }}>
-                {composerPlaceholder(label, 'place')}
-              </Text>
-            </View>
-          )),
+          PLACEHOLDER_LABELS.flatMap(label =>
+            // 두 문장을 나란히 잰다 (#1479): **절을 다 실은 것**과 **머리 절만**.
+            // 절 예산의 판정이 그 둘 사이에서 나므로, 하나만 재면 사진은 결과를
+            // 들고 그 결과가 나온 이유를 안 든다 — 머리 절도 안 드는 띠에서는
+            // 뒷절을 버려도 화면이 안 변한다는 것이 이 짝으로만 읽힌다.
+            [
+              {suffix: '', text: composerPlaceholder(label, 'place')},
+              {
+                suffix: '/머리',
+                text: composerPlaceholderClauses(label, 'place')[0].text,
+              },
+            ].map(({suffix, text}) => (
+              <View
+                key={`${box.key}/${label}${suffix}`}
+                style={[styles.probeMeasure, {width: box.width}]}>
+                <Text
+                  style={styles.probeText}
+                  lineBreakStrategyIOS="hangul-word"
+                  onTextLayout={event => {
+                    const count = event.nativeEvent.lines.length;
+                    const slot = `${box.key}/${label}${suffix}`;
+                    setLines(previous =>
+                      previous[slot] === count
+                        ? previous
+                        : {...previous, [slot]: count},
+                    );
+                  }}>
+                  {withLatinWordBreaks(text)}
+                </Text>
+              </View>
+            )),
+          ),
         )}
       {boxes.map(box => (
         <Text key={box.key} style={styles.probeRead}>
           {`${box.key} 글폭 ${Math.round(box.width)}pt · ` +
             PLACEHOLDER_LABELS.map(
-              label => `${label} ${read(box.key, label)}줄`,
+              label =>
+                `${label} ${read(box.key, label)}줄(머리 ` +
+                `${read(box.key, `${label}/머리`)}줄)`,
             ).join(' · ')}
         </Text>
       ))}
+      <Text style={styles.probeRead}>
+        {`절 예산 문턱 — 글자 배수 ${fontScale.toFixed(3)} · 줄 상자 ` +
+          `${rowPt.toFixed(1)}pt · 상자가 든 글자리 ${room.toFixed(1)}pt = ` +
+          `${(room / rowPt).toFixed(1)}줄 (#1479)`}
+      </Text>
     </View>
   );
 }

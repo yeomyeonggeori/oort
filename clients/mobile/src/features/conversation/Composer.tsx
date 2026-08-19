@@ -2,7 +2,9 @@ import type {RosterMember} from '@momo/core/lib/api';
 import {
   COMPOSER_OFFLINE_COPY,
   composerFieldLabel,
-  composerPlaceholder,
+  composerPlaceholderClauses,
+  fitComposerPlaceholder,
+  type ComposerPlaceholderClause,
 } from '@momo/core/features/chat/composerCopy';
 import {attachParticle, type RecipientKind} from '@momo/core/lib/koreanParticle';
 import type {Directory} from '@momo/core/features/workspace/directory';
@@ -15,8 +17,10 @@ import {
   TextInput,
   useWindowDimensions,
   View,
+  type LayoutChangeEvent,
   type NativeSyntheticEvent,
   type TextInputSelectionChangeEventData,
+  type TextLayoutEventData,
 } from 'react-native';
 import {font, line, radius, SAFE_GUTTER, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
 import {usePalette, useStyles} from '../../design/theme';
@@ -221,6 +225,12 @@ const MIN_ROWS = 2;
 /** 입력창 상하 패딩 한쪽. 상한 계산과 실제 스타일이 같은 값을 읽는다. */
 const INPUT_PAD_Y = space.sm;
 
+/**
+ * 입력창 좌우 패딩 한쪽. 위와 짝이고, 이름을 갖는 이유가 하나 더 있다 — 절 예산의
+ * 프로브가 **글이 놓이는 가로**를 이 값으로 도출한다(#1479).
+ */
+const INPUT_PAD_X = space.md;
+
 /** 입력창 테두리 두께. 위와 같은 이유로 이름을 갖는다. */
 const INPUT_BORDER = 1;
 
@@ -269,6 +279,9 @@ const COMPOSER_COLUMN_SHARE = 0.5;
 
 /** 상한과 실제 상자가 함께 지는 세로 크롬(패딩·테두리). 글자를 안 따라간다. */
 const INPUT_CHROME = INPUT_PAD_Y * 2 + INPUT_BORDER * 2;
+
+/** 같은 것의 가로 몫. 상자의 바깥 폭에서 이만큼을 빼면 글이 놓이는 폭이다. */
+const INPUT_CHROME_X = INPUT_PAD_X * 2 + INPUT_BORDER * 2;
 
 /**
  * 자라기를 멈추는 높이 — **두 상한 중 작은 것**, 그리고 바닥은 두 줄.
@@ -389,6 +402,97 @@ export function withLatinWordBreaks(text: string): string {
   );
 }
 
+// =============================================================================
+// 빈 상자에 못 서는 문장은 **절 경계에서** 접힌다 — 폰이 절 예산을 부른다 (#1479 ②)
+//
+// ## 왜 이 파일의 판정이 뒤집히나
+//
+// 아래 입력창의 주석이 「폰은 코어의 절 예산을 안 부른다」를 실측으로 정했고, 그
+// 근거는 전제 하나였다: RN 의 `multiline` `TextInput` 은 콘텐츠 높이로 자라므로
+// 넘쳐도 **잃는 것이 없다.** 그 전제는 `MAX_ROWS` 가 유일한 상한이던 때의 것이다.
+//
+// #1443 이 그 위에 대화 열의 몫을 얹으면서 상자는 더는 무한히 안 자라고, 큰
+// 글자에서는 몫이 먼저 걸린다(AX-XXL 실측 170.4pt = 2.2줄). 그리고 **빈 상자는
+// 스크롤이 대신해 주지 않는다** — 넘칠 때 상자 안에서 스크롤하는 것은 *콘텐츠*
+// 이고 플레이스홀더는 콘텐츠가 아니라, 아직 아무것도 안 친 사람에게는 스크롤할
+// 것이 없다. 전제가 무너진 자리에서는 웹의 판정이 그대로 선다: 어차피 못 설 절은
+// 절 경계에서 통째로 사라져야 하고, 반쪽 절(「보내기, @」)이나 반노출 줄로 남으면
+// 안 된다(디자인 시스템 §5.3 7위).
+//
+// ## 이 규칙이 **구하지 못하는** 띠도 이름을 갖는다
+//
+// 대가 없이 다 낫는 것이 아니다. 상자가 담는 줄 수는 `152.4 ÷ (22 × 배수)` 라
+// 배수에 반비례하고(글자리 152.4pt 는 배수 ~1.5 위에서 열의 몫이 이기며 고정된다)
+// 문장의 줄 수는 배수를 따라 는다. 그래서 셋으로 갈린다 — 아래 실측
+// (iPhone 17 Pro / iOS 26.5, `measure/captures/clause1479-*`, 계측 줄이 매 사진에
+// 문장·머리 절의 줄 수와 상자의 줄 수를 함께 적는다):
+//
+//   large (배수 1.000)      상자 5.0줄 · 세 이름 다 1~2줄 — **화면이 하나도 안
+//                           변한다.** `composerDraftOffline.test.tsx` 가 그 자리를
+//                           단정으로도 잰다.
+//   a11y-medium (1.786)     상자 3.9줄 · 문장 2~3줄 — 아직 다 든다.
+//   a11y-large (2.143)      상자 3.2줄 · `일반` 3줄(다 든다) · `release-2026-08`
+//                           **4줄, 머리 3줄** — 여기서 규칙이 값을 낸다: 옛 판이
+//                           「…보내기, @로」로 끝나던 자리에 이제 「…보내기」가
+//                           온전히 선다(before/after 사진 두 장이 그 자리다).
+//   a11y-XL 위 (2.643~)     상자 2.6줄 · 머리 절도 3~4줄 — **버릴 절이 없다.**
+//                           웹에도 같은 띠가 있고(`gate-work-panel.mjs` 의
+//                           `head-clause` 레인) 답도 같다: 절 단위 생략 위에서는
+//                           아무것도 그 띠를 못 구한다. 남는 것은 상자 자신의
+//                           문제이고, 그 결정은 위 `composerMaxHeight` 이 진다.
+//
+// 그 마지막 띠까지 낫는다고 적으면 그것이 이 파일이 #1422 에서 한 번 저지른 잘못
+// (전제를 조건절 없이 적는 것)의 재판이다. 여기서는 띠를 세어 두고, 사진이 그
+// 산수를 자기 안에 적는다.
+//
+// ## 규칙은 코어의 것, 자는 이 클라의 것
+//
+// 코어는 화면을 모른다(`purity.mjs`). 그래서 **무엇을 버릴지**는 계속
+// `fitComposerPlaceholder` 가 정하고 「이 문자열이 이 상자에 드는가」만 여기서
+// 답한다 — 웹 `placeholderFit.ts` 와 같은 분업이고, 다른 것은 **자의 축**이다:
+// 웹의 상자는 한 줄(`rows=1`)이라 가로를 재고, 이 상자는 여러 줄이라 **세로**를
+// 잰다. 프로브는 입력창과 같은 글자·같은 줄 상자·같은 줄바꿈 전략으로 서고,
+// `onTextLayout` 이 돌려주는 줄들의 높이를 더해 `composerMaxHeight` 이 든 글자리와
+// 대조한다.
+//
+// **재기 전에는 문장 전체다.** 웹이 같은 방향을 고른 이유와 같다: 「일단 짧게」로
+// 시작하면 드는 상자에서도 광고가 한 프레임 사라졌다 돌아온다. 반대 방향의 대가는
+// 안 드는 문장이 한 프레임 서는 것이고, 그것은 이미 오늘의 화면이다.
+//
+// ## 이 프로브가 **안** 하는 것
+//
+// 사람이 친 글은 안 잰다. `value` 는 이 파일의 첫 번째 규칙이 지키는 것이고, 이
+// 프로브는 `placeholder` 하나만 재며 그 답이 `value` 에 대해 아무것도 결정하지
+// 않는다. 상태가 움직이는 계기도 키스트로크가 아니라 **레이아웃**이다.
+//
+// 스레드처럼 문장을 넘겨받은 자리(`placeholder` prop)에서는 아예 안 선다. 절
+// 계약은 코어가 절로 지은 문장의 것이고, 남이 준 한 덩이 문자열에는 버릴 절
+// 경계가 없다.
+//
+// 접근성: 프로브는 `accessibilityElementsHidden` 과
+// `importantForAccessibility="no-hide-descendants"` 로 접근성 트리 밖에 선다.
+// 안 그러면 VoiceOver 가 같은 문장을 한 번 더 읽는다.
+// =============================================================================
+
+/**
+ * 코어가 물어볼 후보들 — 순서까지 그대로.
+ *
+ * 이음쇠(`, `)를 이 파일이 적지 않는다. 웹 `placeholderFit.ts` 가 같은 자리에서
+ * 같은 이유를 적었다: 사본이 생기는 순간 그것이 두 번째 정본이다. 규칙에 「다
+ * 든다」고 답하면서 지나가는 후보를 모으면 그 목록이 곧 물어볼 목록이고, 절이
+ * 셋이 되는 날에도 이 함수는 안 고친다.
+ */
+function placeholderCandidates(
+  clauses: readonly ComposerPlaceholderClause[],
+): readonly string[] {
+  const asked: string[] = [];
+  fitComposerPlaceholder(clauses, candidate => {
+    asked.push(candidate);
+    return true;
+  });
+  return asked;
+}
+
 /**
  * 연결이 끊겨 지금은 보낼 수 없다는 한 문장. **이름만 여기 있고 값은 코어에
  * 있다** (U4-6 리뷰 H-1).
@@ -505,6 +609,8 @@ export function Composer({
   // `RCTAccessibilityManager` 의 배수 변경을 Dimensions 변경으로 내보낸다).
   const {fontScale, height: windowHeight} = useWindowDimensions();
   const maxHeight = composerMaxHeight(fontScale, windowHeight);
+  // 절 예산의 자 (#1479). 상한이 든 높이에서 세로 크롬을 빼면 **글이 서는 자리**다.
+  const placeholderRoom = maxHeight - INPUT_CHROME;
   // 첫 렌더가 이미 초안을 들고 있다 (`drafts.ts`). 효과로 채우면 빈 상자가 한
   // 프레임 그려졌다가 글이 나타나고, 그것은 「글이 잠깐 사라졌다 돌아오는」
   // 화면이다 — MMKV 가 동기로 읽히는 것이 여기서 값을 한다.
@@ -634,6 +740,60 @@ export function Composer({
   // 하나는 「지금 나갈 수 있는가」다.
   const canSend = text.trim() !== '' && offline !== true;
 
+  // ---- 절 예산 (#1479) ------------------------------------------------------
+  // 넘겨받은 문장에는 절 경계가 없다(위 머리말). 그때는 절도 프로브도 안 선다.
+  const clauses = useMemo(
+    () =>
+      placeholder === undefined
+        ? composerPlaceholderClauses(channelLabel, recipient)
+        : null,
+    [placeholder, channelLabel, recipient],
+  );
+  const placeholderProbes = useMemo(
+    () => (clauses === null ? [] : placeholderCandidates(clauses)),
+    [clauses],
+  );
+
+  // 입력창이 자기 폭을 알린 뒤에야 프로브가 설 수 있다 — 자와 상자의 폭이 다르면
+  // 그 답은 이 상자에 대한 답이 아니다.
+  const [inputWidth, setInputWidth] = useState<number | null>(null);
+  const onInputLayout = useCallback((event: LayoutChangeEvent) => {
+    const {width} = event.nativeEvent.layout;
+    setInputWidth(previous => (previous === width ? previous : width));
+  }, []);
+  const probeWidth =
+    inputWidth === null ? null : inputWidth - INPUT_CHROME_X;
+
+  // 잰 것은 **세로**이지 「든다/안 든다」가 아니다. 상한은 글자 배수와 창이 정하니
+  // 판정을 저장하면 둘 중 하나가 바뀌는 순간 저장된 답이 늙는다 — 웹의 자가
+  // 늙었던 그 결함이고(`placeholderFit.ts` 의 recompute 절), 세로를 들면 판정은
+  // 언제나 지금 상한으로 다시 난다.
+  const [probed, setProbed] = useState<Readonly<Record<string, number>>>({});
+  const onProbeLayout = useCallback(
+    (candidate: string, event: NativeSyntheticEvent<TextLayoutEventData>) => {
+      const height = event.nativeEvent.lines.reduce(
+        (sum, textLine) => sum + textLine.height,
+        0,
+      );
+      setProbed(previous =>
+        previous[candidate] === height
+          ? previous
+          : {...previous, [candidate]: height},
+      );
+    },
+    [],
+  );
+
+  const shownPlaceholder = withLatinWordBreaks(
+    clauses === null
+      ? (placeholder as string)
+      : fitComposerPlaceholder(clauses, candidate => {
+          const height = probed[candidate];
+          // 아직 안 잰 후보는 「든다」다 — 머리말의 안전 방향.
+          return height === undefined || height <= placeholderRoom;
+        }),
+  );
+
   return (
     <View style={styles.root}>
       {showMentions ? (
@@ -703,19 +863,47 @@ export function Composer({
         />
       ) : null}
 
+      {/* 절 예산의 자 (#1479). 화면에 안 나가고(투명·절대 배치) 접근성 트리에도
+          안 들어간다 — 하는 일은 배송되는 입력창과 **같은 조판**으로 후보 문장을
+          세워 `onTextLayout` 에 자기 줄들을 내놓는 것뿐이다. 같은 파일에 두는
+          이유가 그 「같은 조판」이다: 글자·줄 상자·줄바꿈 전략이 아래 `styles.input`
+          바로 옆에 있어야 둘이 조용히 갈라지지 않는다. */}
+      {probeWidth === null || placeholderProbes.length === 0 ? null : (
+        <View
+          style={styles.probeHost}
+          pointerEvents="none"
+          accessibilityElementsHidden
+          importantForAccessibility="no-hide-descendants">
+          {placeholderProbes.map(candidate => (
+            <Text
+              key={candidate}
+              style={[styles.probe, {width: probeWidth}]}
+              lineBreakStrategyIOS="hangul-word"
+              onTextLayout={event => onProbeLayout(candidate, event)}
+              testID="composer-placeholder-probe">
+              {withLatinWordBreaks(candidate)}
+            </Text>
+          ))}
+        </View>
+      )}
+
       <View style={styles.bar}>
         <TextInput
           ref={inputRef}
           style={[styles.input, {maxHeight}]}
+          onLayout={onInputLayout}
           value={text}
           onChangeText={onChangeText}
           onSelectionChange={onSelectionChange}
           // 문장은 코어가 든다 (#1384). 이 두 줄은 웹 `chat/Composer.tsx` 와
           // **같은 문자열을 각자 짓고** 있었다: 값이 같아서 안 보였을 뿐,
           // 한쪽을 고치는 날 갈라진다. 오프라인 문장이 이미 걸어 둔 길이다.
-          placeholder={withLatinWordBreaks(
-            placeholder ?? composerPlaceholder(channelLabel, recipient),
-          )}
+          //
+          // **드는 만큼만 실린다** (#1479). 절을 고르는 것은 코어의
+          // `fitComposerPlaceholder` 이고, 「이 상자에 드는가」만 위의 프로브가
+          // 답한다 — 그 분업과 그것이 구하지 못하는 띠는 이 파일의 「절 예산」
+          // 머리말에 있다.
+          placeholder={shownPlaceholder}
           placeholderTextColor={palette.textFaint}
           accessibilityLabel={placeholder ?? composerFieldLabel(channelLabel, recipient)}
           multiline
@@ -746,16 +934,21 @@ export function Composer({
           // 4~5줄이고 상자는 2.2줄이다. 그리고 여기서는 위 「잃는 것이 없다」가
           // 성립하지 않는다 — 넘칠 때 안에서 스크롤하는 것은 *콘텐츠*이고
           // 플레이스홀더는 콘텐츠가 아니라, 아직 아무것도 안 친 사람에게는
-          // 스크롤할 것이 없다. 큰 글자에서 뒷절은 **사라진다**. 폰이 코어의 절
-          // 예산 규칙을 불러야 하는가는 그래서 다시 열린 질문이고, 그 결정의
-          // 자리는 #1479 다(코어 `composerCopy.ts` 머리말이 같은 것을 적는다).
+          // 스크롤할 것이 없다. 큰 글자에서 뒷절은 **사라진다**.
           //
-          // **아직 안 고친 것 하나**, 같은 사진에 있다: 그 크기에서 뒷절이
-          // 「보내기, @」 / 「로 부르기」로 끊긴다. `hangul-word` 에게 `@` 는
-          // 낱말 하나라 그 뒤가 어절 경계로 보이는 것이다. 고치려면 `@` 와 뒤
-          // 음절을 word joiner 로 묶어야 하는데, 그것은 **코어가 든 문장**
-          // (`MENTION_AFFORDANCE`)의 모양을 폰이 바꾸는 일이라 이 goal 의 범위
-          // 밖이다 — 그것도 #1479 다.
+          // **#1479 가 그 열린 질문에 답했다: 부른다.** 위 「절 예산」 머리말이
+          // 결정과 그 산수를 들고, 이 상자의 `placeholder` 는 이제 프로브가 든
+          // 세로로 고른 문장이다. 그래서 위 문단의 「안 부른다」는 **#1443 까지의
+          // 기록**이지 오늘의 계약이 아니다 — 오늘의 계약은 배수 ~2.2 아래에서
+          // 화면이 하나도 안 변하고(그 아래는 문장 전체가 든다), 그 위에서는 못 설
+          // 절이 절 경계에서 통째로 사라진다는 것이다.
+          //
+          // **같은 사진의 다른 결함도 #1479 가 받았다**: 그 크기에서 뒷절이
+          // 「보내기, @」 / 「로 부르기」로 끊기던 것. `hangul-word` 에게 `@` 는
+          // 낱말 하나라 그 뒤가 어절 경계로 보이는 것이고, 처방은 이 파일이 아니라
+          // 코어가 든 문장 쪽이었다 — `MENTION_AFFORDANCE` 가 `@` 와 조사를 WORD
+          // JOINER(U+2060)로 묶는다(그 결정은 `composerCopy.ts` 의 「절 안에서
+          // 끊기던 자리」 절).
           //
           // 같은 계측이 다른 것을 하나 잡았다: iOS 기본 줄바꿈이 「부르기」를
           // 「부 / 르기」로 끊고 있었다. 이 레포는 그 결함에 이미 이름과 처방을
@@ -845,6 +1038,19 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: color.accent,
   },
+  /**
+   * 프로브가 서는 자리 (#1479). **절대 배치**라 이 컴포넌트의 세로를 한 픽셀도
+   * 안 밀고, 투명이라 안 보이며, `pointerEvents="none"` 이라 안 잡힌다. 높이를
+   * 안 주는 것이 요점이다 — 자가 상자에 갇히면 잰 줄 수가 상자의 것이 된다.
+   */
+  probeHost: {position: 'absolute', top: 0, left: 0, opacity: 0},
+  /**
+   * 프로브의 **조판**. 아래 `input` 과 같은 글자·같은 줄 상자여야 하고, 줄바꿈
+   * 전략은 이 스타일시트가 못 드는 prop 이라 컴포넌트가 같은 값을 든다
+   * (`lineBreakStrategyIOS="hangul-word"`). 폭은 입력창의 실측에서 나오므로
+   * 여기 없다.
+   */
+  probe: {fontSize: font.body, lineHeight: line.body},
   sendDisabled: {backgroundColor: color.border},
   sendPressed: {backgroundColor: color.accentPressed},
   sendLabel: {color: color.onAccent, fontSize: font.label, fontWeight: '700'},
