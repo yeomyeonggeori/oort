@@ -264,7 +264,7 @@ export function ConnectPage({
   const submitLabel =
     mode === "join"
       ? busy
-        ? "참여하는 중…"
+        ? "참여 중…"
         : "초대 코드로 참여"
       : busy
         ? "로그인 중…"

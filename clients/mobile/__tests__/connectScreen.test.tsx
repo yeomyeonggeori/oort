@@ -243,6 +243,36 @@ describe('the login round trip, mocked', () => {
     fireEvent.press(screen.getByTestId('submit-button'));
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it('진행 중에 버튼이 「명사 + 중」으로 말한다 (#1511)', async () => {
+    // 이 낱말은 코어 상수가 아니라 **이 화면의 리터럴**이라, 웹 프리플라이트도
+    // 코어 게이트도 보지 못하는 자리다 (#1511 회전 1 H2 — 폰 몫이 증거 없이
+    // 남아 있었다. `stopTurn.test.tsx` 는 코어의 「중단 중」을 재지 이 낱말을
+    // 재지 않는다).
+    //
+    // 답을 붙잡아 **진행 중인 화면을 실제로 관찰**한다. 이미 끝난 왕복에 대고
+    // 단정하면 아무것도 증명하지 못한다 — stopTurn 이 deferred 를 쓰는 것과
+    // 같은 이유다.
+    let release!: (value: Response) => void;
+    fetchMock.mockReturnValueOnce(
+      new Promise<Response>(resolve => {
+        release = resolve;
+      }),
+    );
+    render(<ConnectScreen />);
+    fillForm();
+    fireEvent.press(screen.getByTestId('submit-button'));
+
+    const submit = () => screen.getByTestId('submit-button');
+    await waitFor(() => expect(submit()).toHaveTextContent('로그인 중'));
+    // 「-하는 중」이 아니고(#1501 정본), 말줄임도 없다 — 이 버튼은 낱말 옆에서
+    // `ActivityIndicator` 를 함께 돌린다(`PrimaryButton` 의 지역 관례).
+    expect(submit()).not.toHaveTextContent('로그인하는 중');
+    expect(submit()).not.toHaveTextContent('로그인 중…');
+
+    release(jsonResponse(200, LOGIN_BODY));
+    await keychainSettled();
+  });
 });
 
 describe('joining with an invite code', () => {
@@ -256,6 +286,28 @@ describe('joining with an invite code', () => {
     fireEvent.changeText(screen.getByTestId('email-input'), 'new.person@example.com');
     fireEvent.changeText(screen.getByTestId('password-input'), 'pw');
   }
+
+  it('진행 중에 버튼이 「참여 중」이라고 말한다 (#1511)', async () => {
+    // 참여 갈래는 로그인 갈래와 **다른 낱말**을 쓴다. 한쪽만 재면 갈래가
+    // 조용히 갈라진다 — 실제로 이 화면이 두 낱말을 한 삼항으로 들고 있다.
+    let release!: (value: Response) => void;
+    fetchMock.mockReturnValueOnce(
+      new Promise<Response>(resolve => {
+        release = resolve;
+      }),
+    );
+    render(<ConnectScreen />);
+    fillJoinForm();
+    fireEvent.press(screen.getByTestId('submit-button'));
+
+    const submit = () => screen.getByTestId('submit-button');
+    await waitFor(() => expect(submit()).toHaveTextContent('참여 중'));
+    expect(submit()).not.toHaveTextContent('참여하는 중');
+    expect(submit()).not.toHaveTextContent('참여 중…');
+
+    release(jsonResponse(200, LOGIN_BODY));
+    await keychainSettled();
+  });
 
   it('redeems the code through the core’s public join route', async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse(200, LOGIN_BODY));
