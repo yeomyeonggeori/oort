@@ -49,6 +49,9 @@ palette for dark mode, so the two schemes cannot drift apart.
 | `--agent` | `#4a6785` | `#7fa0c4` | agent identity: predawn slate-blue |
 | `--agent-soft` | `#e6ebf2` | `#1e2836` | agent avatar/badge backing |
 | `--muted-soft` | `#f3efe8` | `#302e36` | **chip vessel**, tone-free: the pale fill a status chip stands in (§2a) |
+| `--ok-soft` | `#e0f4e2` | `#243323` | chip vessel for a passing measurement (§2a) |
+| `--warn-soft` | `#ffedd4` | `#372e1b` | chip vessel for a pending / unreadable measurement (§2a) |
+| `--danger-soft` | `#ffe9e5` | `#402a26` | chip vessel for a failing measurement (§2a) |
 | `--danger` | `#b3261e` | `#ff796b` | risk **tone**: destructive/failure text, chips, dots, bars |
 | `--danger-fill` | `#8c393d` | `#dc817e` | destructive button **fill** (never the tone above: §3a table B) |
 | `--on-danger-fill` | `#fffefb` | `#17161a` | label on a destructive fill |
@@ -115,8 +118,54 @@ list has to grow, or the defect goes quiet again.
 
 And the vessel carries no tone — all six lifecycle cells share one fill.
 **Colour is earned by measurement, not by naming**: the ledger chip only says what
-the ledger calls the session, so the tone stays in the ink. The chip that carries a
-measurement is the one that gets a tone-tinted vessel (#1516).
+the ledger calls the session, so the tone stays in the ink.
+
+### A border is control grammar, so a measured chip is tinted instead (#1516)
+
+The other half of the same rule. The verification chip got a **border** in #1463
+(`--surface-raised` + `--line`). It kept the vessel but cost something: in this
+palette a small pill wrapped in a 1px border **is** control grammar — inputs,
+`<select>`, outline buttons all look like that — so "통과 12" read as pressable.
+By the palette's own contract it is not a control (`--line` separates,
+`--line-strong` outlines controls). **The token contract and the screen were saying
+different things, and the screen always wins.**
+
+Removing the border alone brings #1463 H1 back (the chip also stands on a
+`--surface-raised` card). So the work the border was doing moves to the **hue of the
+fill**: a tinted fill stays distinct from a neutral surface even at close
+luminance, which is exactly why `--accent-soft` does not vanish on
+`--surface-hover` at 1.051.
+
+| chip | vessel | why |
+|---|---|---|
+| ledger (lifecycle, step rows) | `--muted-soft`, fixed | measures nothing |
+| measurement (verification) | its own tone's soft | has something measured |
+| measurement, `건너뜀` (skip) | `--muted-soft` | **nothing measured, nothing to tint** |
+
+That is what splits the collision #1463 M2 named (lifecycle `running` is warn and
+gate `unknown`/`pending` are warn — two identical amber pills on one row): it now
+splits at the **vessel**, not the ink.
+
+**One plane, hue is the only difference.** The four vessels sit on one plane per
+scheme (light luminance .85–.87, dark .028–.029), so lightness says "this is a
+vessel" and hue says "which tone" — one job per axis. The plane is arithmetic too:
+in dark, `--ok`'s AA runs out at luminance .0320, and the vessel must stay *above*
+`--surface-hover` (.0192) so `--line-strong` does not clear 3:1 and misfile it as a
+surface a bordered control may sit on. The surviving band is .0192–.0320, and .0285
+is inside it.
+
+Measured guards on top of the two above: each vessel stays inside its own tone's
+hue family (<= 15 deg, worst 2.7), each tone vessel keeps OKLab distance >= 0.02
+from the toneless one, and the vessel bridge
+(`COMPLETION_TONE_SOFT_TOKEN`/`_CLASS`) resolves to tokens that exist. The hue
+family matters because the cheapest way to satisfy contrast and distance is "any
+colour that stands out" — and then a passing gate sits in a red vessel.
+
+The vessel is **not derived from the ink**: `muted`'s ink is `--ink-muted` but its
+vessel is `--muted-soft`. Deriving it ("append `-soft` to the ink token") makes that
+one cell reach for a token that does not exist, and the failure shows up not at
+compile time but on screen, as a chip with no vessel. Hence two tables, and a test
+that keeps them from being merged.
 
 ## 3. Measured contrast (from `tokens.contrast.test.ts`)
 
