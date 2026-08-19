@@ -12,6 +12,7 @@ import {
   screen,
   within,
 } from '@testing-library/react-native';
+import {execFileSync} from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import React from 'react';
@@ -568,6 +569,30 @@ describe('M-13 — 색은 전부 토큰에서 나온다', () => {
     expect(offenders).toEqual([]);
   });
 
+  it('`src/` 어디에도 낱말꼴 위반이 없다 — 웹·코어와 같은 판정으로 (#1511)', () => {
+    // #1511 이 진행 낱말(「저장하는 중」)과 라틴 낱말 뒤 조사(「Esc 는」)를 기계로
+    // 내렸고, 코어까지 확장한 사유는 실측이었다: `CANCEL_BUSY_LABEL` 이 웹
+    // 게이트가 못 보는 자리에서 폰까지 출하됐다. 그런데 그렇게 말하고도 **폰
+    // 자체의 리터럴**(`ConnectScreen` 의 busyLabel 처럼 코어를 거치지 않는 글)은
+    // 사각지대로 남아 있었다 (회전 1 M3).
+    //
+    // 지금 답은 0 이다. 「재고 있어서 0」과 「안 재서 0」의 차이가 §5.5 규율이고,
+    // 이 줄이 그 차이를 만든다.
+    //
+    // 판정을 여기 베껴 적지 않는다 — 규칙은 `scripts/design_preflight_ast.mjs`
+    // 한 벌이고, 두 곳에 적힌 규칙은 한쪽만 고쳐지는 날이 온다(§5.5 ①). jest 는
+    // 그 `.mjs` 를 직접 import 할 수 없으므로(preset 이 node_modules 밖 ESM 을
+    // 변환하지 않는다) 규칙을 **가진 프로세스**를 부른다.
+    const scanner = path.resolve(
+      __dirname,
+      '../../../scripts/design_preflight_phone_strings.mjs',
+    );
+    const emitted = execFileSync(process.execPath, [scanner, '--emit'], {
+      encoding: 'utf8',
+    });
+    expect(emitted.split('\n').filter(Boolean)).toEqual([]);
+  });
+
   it('라이트 모드가 들어와도 깨지지 않을 이름들이다', () => {
     // M-13 이 말한 위험은 「값이 못생겼다」가 아니라 **「스킴이 하나 더 생기는
     // 순간 이 지점들이 전부 깨진다」** 였다. 그러니 단정은 이름이 존재하는지다.
@@ -595,6 +620,49 @@ describe('M-13 — 색은 전부 토큰에서 나온다', () => {
     // (「전송 실패」 같은 한 낱말)보다 오래 읽히므로 한 단 올려 둔 것이다.
     // 두 값이 뒤집히면 상자 안이 상자 밖보다 어두워진다.
     expect(luminance(color.dangerText)).toBeGreaterThan(luminance(color.danger));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #1584 — 「초대」는 워크스페이스의 낱말이다
+// ---------------------------------------------------------------------------
+
+describe('#1584 — 채널 범위의 행위는 「추가」다', () => {
+  it('`src/` 의 사용자 문장 속 「초대」는 워크스페이스 가족뿐이다', () => {
+    // #1573 이 「초대」를 워크스페이스에 새 사람을 부르는 행위로 **예약**했다.
+    // 채널에 사람을 넣는 문은 「멤버 추가」 하나뿐이므로, 채널 범위 문장이
+    // 초대라고 말하면 읽는 사람은 이 제품에 없는 액션을 찾으러 간다.
+    //
+    // 이 단정은 허용목록이 아니라 **잔량**이다(오르트 구름 §5.5 ②): 재는 것은
+    // `src/` 전수이고, 아래 표는 오늘 세어 낸 수다. 워크스페이스 가족이 줄면
+    // 통과하고, 채널 범위에 초대가 하나라도 들어오면 목록이 달라져 빨갛다.
+    //
+    // 주석은 빼고 본다 — 이 저장소의 주석은 한국어 산문이고 화면에 안 나간다
+    // (위 em-dash 스윕과 같은 판정).
+    const withoutProse = (source: string): string =>
+      source
+        .replace(/\/\*[\s\S]*?\*\//g, '')
+        .replace(/(?<!:)\/\/.*$/gm, '');
+    const hits: string[] = [];
+    for (const file of sourceFiles(SRC_DIR)) {
+      const code = withoutProse(fs.readFileSync(file, 'utf8'));
+      for (const text of code.split('\n')) {
+        if (text.includes('초대')) {
+          hits.push(`${path.relative(SRC_DIR, file)}: ${text.trim()}`);
+        }
+      }
+    }
+    // 사는 곳이 규칙이다: 「초대」를 쓰는 화면은 워크스페이스에 **참여하는**
+    // 화면 하나뿐이고, 초대 코드는 그 화면이 실제로 다루는 물건이다
+    // (#1584 out of scope — 이 가족은 존치). 줄 번호로 못 박지 않는 이유는
+    // 가드가 수리를 벌하면 안 되기 때문이다(§5.5 ②).
+    const WORKSPACE_JOIN_SCREEN = path.join('screens', 'ConnectScreen.tsx');
+    expect(
+      hits.filter(h => !h.startsWith(`${WORKSPACE_JOIN_SCREEN}: `)),
+    ).toEqual([]);
+    // 그리고 그 화면 안에서도 늘어나면 빨갛다. 오늘 세어 낸 수가 6이고, 이
+    // 숫자는 상한이지 목표가 아니다 — 줄어드는 것은 통과한다.
+    expect(hits.length).toBeLessThanOrEqual(6);
   });
 });
 

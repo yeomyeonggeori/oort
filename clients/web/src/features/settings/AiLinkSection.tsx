@@ -80,7 +80,7 @@ const LINK_METHODS = [
     id: "oauth",
     label: "ChatGPT 계정 (OAuth)",
     detail:
-      "로컬 Codex CLI 로그인이 만든 auth.json 을 붙여넣습니다. 개인 구독으로 동작하는 내부용 경로입니다.",
+      "로컬 Codex CLI 로그인이 만든 auth.json을 붙여넣습니다. 개인 구독으로 동작하는 내부용 경로입니다.",
   },
 ];
 
@@ -649,7 +649,7 @@ export function AiLinkSection({ offline }: { offline: boolean }) {
                       leaving a screen-reader user with a control that silently
                       stopped existing. */}
                   <p className="break-keep text-meta text-ink-muted" role="status">
-                    auth.json 을 읽었습니다. 붙여넣은 원문은 화면에서 지웠습니다.
+                    auth.json을 읽었습니다. 붙여넣은 원문은 화면에서 지웠습니다.
                   </p>
                   <KeyValueRows rows={grantPreviewRows(grant)} />
                   <div>

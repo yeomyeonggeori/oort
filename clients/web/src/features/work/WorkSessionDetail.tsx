@@ -454,7 +454,7 @@ function SessionActions({
               data-testid="work-end-commit"
             >
               {pending && <Loader2 aria-hidden="true" className="spinner-busy" />}
-              {pending ? "종료하는 중" : "종료 확정"}
+              {pending ? "종료 중" : "종료 확정"}
             </Button>
           </span>
         )}

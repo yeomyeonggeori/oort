@@ -58,7 +58,7 @@ export const CANCEL_ACTION_LABEL = "중단";
 export const CANCEL_COMMIT_LABEL = "중단 확정";
 
 /** While the request is out. */
-export const CANCEL_BUSY_LABEL = "중단하는 중";
+export const CANCEL_BUSY_LABEL = "중단 중";
 
 /**
  * What happened, in one shape.
