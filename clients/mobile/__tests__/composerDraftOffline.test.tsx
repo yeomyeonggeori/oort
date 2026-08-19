@@ -18,10 +18,12 @@ import {
   composerColumnBudget,
   composerMaxHeight,
   COMPOSER_OFFLINE_COPY,
+  INPUT_CHROME,
   mentionRowHeight,
   mentionSheetMaxHeight,
   withLatinWordBreaks,
 } from '../src/features/conversation/Composer';
+import {matchMembers} from '../src/features/conversation/mentionQuery';
 import {
   channelDraftKey,
   DRAFT_LIMIT,
@@ -402,7 +404,16 @@ describe('#1443 성장 상한 — 동적 타입 비례', () => {
   /** AX-XXL. RN 의 배수표(`RCTAccessibilityManager.mm`)가 든 값 그대로. */
   const AX_XXL = 3.143;
   const IPHONE_17_PRO_H = 874;
+  /**
+   * 입력창 패딩(8·8)과 테두리(1·1). **손 사본이지만 묶여 있다** (회전 1 M4):
+   * 아래 한 줄이 배송되는 상수와 이 수를 못으로 박으므로, 크롬이 바뀌는 날 이
+   * 파일은 조용히 옛 수로 초록을 내지 못한다 — 같은 describe 의 `BAR_CHROME` 이
+   * `budget.dockChrome` 으로 묶인 것과 같은 장치다.
+   */
   const CHROME = 8 * 2 + 1 * 2;
+  it('크롬 사본이 배송되는 값과 같다', () => {
+    expect(CHROME).toBe(INPUT_CHROME);
+  });
   /**
    * 대화 열 위의 크롬 **실측**(iPhone 17 Pro / AX-XXL): 세이프 62.0 + 헤더 131.3.
    * `measure/` 의 `composer-growth` 계측 줄이 매 캡처마다 다시 내는 숫자이고,
@@ -590,12 +601,39 @@ describe('#1443 라틴 낱말 절단 — 토큰의 자기 경계에서 끊긴다
 // 4행(4 × 44 = 176)과 **4pt 짜리 다섯째 행의 이마**였다. 이 레포는 그 반노출을
 // 웹에서 이미 한 번 닫았다(#1418 의 `1lh` 클램프). 그러니 넷은 새 결정이 아니라
 // 오늘 값의 **뜻**이고, 새로 정한 것은 그 넷이 열을 넘을 때 무엇이 이기는가다.
+//
+// 넷의 두 번째 근거도 **여기서 잰다**(회전 1 H1): 기준 창에서 열이 허락하는 최대
+// 정수 행이 정확히 넷이다. 첫 판은 그 자리에 「`matchMembers` 가 이미 정렬한다」고
+// 적었는데 그 함수는 정렬하지 않는다 — 거짓 근거 위에 선 결정은 다음 사람이 다시
+// 물을 때 답이 없다.
 describe('#1480 멘션 시트 상한 — 동적 타입 비례 + 도크가 열을 안 넘는다', () => {
   const AX_XXL = 3.143;
   const H = 874;
   const TOUCH_TARGET = 44;
   /** `styles.bar` 의 위아래 여백. 도크가 시트·입력창 말고 지는 것. */
   const BAR_CHROME = 8 * 2;
+
+  /**
+   * iOS 동적 타입 배수 **사다리 전부** (`RCTAccessibilityManager` 기본표).
+   *
+   * 몇 개만 골라 쓰면 고른 사람이 안 고른 칸에 대해 아무 말도 안 한 것이 된다 —
+   * 아래 「거짓인 자리」 표가 잔량이려면 재는 것이 전수여야 한다(§5.5 ②).
+   */
+  const SCALES = [
+    0.823, 0.882, 0.941, 1, 1.118, 1.235, 1.353, 1.786, 2.143, 2.643, 3.143,
+    3.571,
+  ];
+
+  /**
+   * 이 앱이 실제로 서는 **세로 논리 높이**.
+   *
+   * 아이폰은 세로 전용이므로(`Info.plist` 의 `UISupportedInterfaceOrientations`)
+   * 창 높이가 곧 기기 높이다 — 667 은 이 파일의 #1443 머리말이 「iOS 26 이 도는
+   * 가장 작은 아이폰」이라 부르는 그 값이고, 같은 describe 의 이웃 테스트들이
+   * 이미 쓴다. 아이패드는 가로가 열려 있어 짧은 변이 창 높이가 될 수 있고,
+   * 그중 가장 작은 것이 744(아이패드 미니 가로)다.
+   */
+  const HEIGHTS = [667, 744, 812, 820, 834, 844, 874, 926, 956, 1032, 1180, 1366];
 
   const sheetStyle = () => {
     fireEvent.changeText(screen.getByTestId('composer-input'), '@');
@@ -611,6 +649,46 @@ describe('#1480 멘션 시트 상한 — 동적 타입 비례 + 도크가 열을
     expect(180 - 4 * TOUCH_TARGET).toBe(4); // 회귀 표식: 옛 값의 나머지
   });
 
+  it('넷의 두 번째 근거 — 기준 창에서 열이 허락하는 최대 정수 행이 넷이다', () => {
+    // 회전 1 H1. 첫 판은 이 자리에 「`matchMembers` 가 이미 정렬해 첫 줄을
+    // 최선으로 만든다」고 적었는데, 그 함수는 `status === 'active'` 로 거르고
+    // 부분일치로 거르고 `.slice` 할 뿐 **정렬하지 않는다** — 아래 단정이 그
+    // 사실을 못으로 박는다(정렬이 생기는 날 이 줄이 빨갛고, 그때는 근거를 다시
+    // 쓸 사람이 이 줄 앞에 선다).
+    const roster = [
+      {...AGENT, id: 'b', displayName: '나중', handle: 'zeta'},
+      {...AGENT, id: 'a', displayName: '먼저', handle: 'alpha'},
+    ] as RosterMember[];
+    expect(matchMembers(roster, '').map(m => m.handle)).toEqual([
+      'zeta',
+      'alpha',
+    ]);
+
+    // 그래서 근거는 **재서 나온다.** 기준 창(874pt · 기본 크기 — 캡처를 찍는 그
+    // 기기)에서 열이 허락하는 정수 행이 정확히 넷이고, 다섯은 안 든다.
+    const budget = composerColumnBudget(1, H);
+    const room = budget.column - budget.composer - BAR_CHROME;
+    expect(room).toBeCloseTo(196.9, 1);
+    expect(Math.floor(room / TOUCH_TARGET)).toBe(4);
+    expect(5 * TOUCH_TARGET).toBeGreaterThan(room);
+    expect(mentionSheetMaxHeight(1, H)).toBe(4 * TOUCH_TARGET);
+  });
+
+  it('상한 4가 실제로 무는 창은 큰 것들뿐이다 — 그 아래는 열이 먼저 문다', () => {
+    // 「넷」이 새 제약을 만드는 자리가 어디인지도 값이어야 한다. 열이 다섯 행을
+    // 허락하려면 창이 933pt 를 넘어야 하고, 오늘 목록에서 그런 것은 넷이다.
+    const capBinds = HEIGHTS.filter(height => {
+      const budget = composerColumnBudget(1, height);
+      const room = budget.column - budget.composer - BAR_CHROME;
+      return Math.floor(room / TOUCH_TARGET) > 4;
+    });
+    expect(capBinds).toEqual([956, 1032, 1180, 1366]);
+    // 그 문턱 자체도 값이다(창 × 0.39 − 입력창 128 − 도크 크롬 16 ≥ 5 × 44):
+    // 926 은 안 물고 956 은 문다.
+    expect((926 * 0.39 - 128 - 16) / TOUCH_TARGET).toBeLessThan(5);
+    expect((956 * 0.39 - 128 - 16) / TOUCH_TARGET).toBeGreaterThanOrEqual(5);
+  });
+
   it('행이 글자를 따라간다 — 44 는 바닥이지 값이 아니다', () => {
     // 행의 두 조각(이름 13 · 핸들 12)은 한 줄로 읽혀야 하므로 `line.head`(15)를
     // 선언한다. 그 상자에 배수가 곱해지고, 44 보다 커지는 순간부터 행이 그것이다.
@@ -619,17 +697,101 @@ describe('#1480 멘션 시트 상한 — 동적 타입 비례 + 도크가 열을
     expect(mentionRowHeight(AX_XXL)).toBeGreaterThan(TOUCH_TARGET);
   });
 
-  it('도크가 대화 열을 안 넘는다 — 시트 + 입력창 + 바 여백', () => {
+  it('행이 44 를 넘기 시작하는 자리는 배수 2.933 이다 — 그 아래 변화는 열의 몫이다', () => {
+    // 회전 1 M3. 캡처 두 장(기본 · a11y-large)은 둘 다 「후보 행 44.0pt」를 적고
+    // 있었다 — 그 사진들이 보여 준 4행 → 3행은 **행 스케일이 아니라 열 예산**에서
+    // 온 변화다. 「동적 타입 비례」를 증거로 세우려면 행이 실제로 자라는 띠를
+    // 찍어야 하고, 그 띠가 어디서 시작하는지는 여기서 값으로 답한다.
+    expect(TOUCH_TARGET / 15).toBeCloseTo(2.9333, 4);
+    for (const fontScale of SCALES.filter(s => s <= 2.643)) {
+      expect(mentionRowHeight(fontScale)).toBe(TOUCH_TARGET);
+    }
+    for (const fontScale of SCALES.filter(s => s >= 3.143)) {
+      expect(mentionRowHeight(fontScale)).toBeGreaterThan(TOUCH_TARGET);
+      expect(mentionRowHeight(fontScale)).toBeCloseTo(15 * fontScale, 5);
+    }
+    // a11y-large(2.143)에서 시트가 3행이 되는 것은 행이 커져서가 아니다 — 행은
+    // 그대로 44 이고, 줄어든 것은 열이 시트에 주는 몫이다.
+    expect(mentionRowHeight(2.143)).toBe(mentionRowHeight(1));
+    expect(mentionSheetMaxHeight(2.143, H)).toBe(3 * TOUCH_TARGET);
+    expect(mentionSheetMaxHeight(1, H)).toBe(4 * TOUCH_TARGET);
+    // 그리고 AX-XXL 에서는 행 자체가 자란다 — 캡처가 그 띠를 든다.
+    expect(mentionRowHeight(AX_XXL)).toBeCloseTo(47.1, 1);
+  });
+
+  // ---------------------------------------------------------------------------
+  // 불변식과 **그것이 거짓인 띠** (회전 1 M1)
+  //
+  // 첫 판은 격자를 `[812, 874, 956, 1366]` 으로 잡았고, 그 넷은 불변식이 거짓인
+  // 세 자리를 정확히 비껴갔다. 산문으로는 「가장 작은 창 · 가장 큰 글자에서는
+  // 바닥이 이긴다」고 고지했지만, 고지된 띠와 **값으로 고정된 띠**는 다르다 —
+  // 앞의 것은 다음 사람이 식을 만질 때 아무것도 안 잡는다(#1594 가 자기 미도달
+  // 띠를 표로 센 것과 같은 규율).
+  //
+  // 그래서 여기서는 사다리 전수 × 기기 전수를 쓸고, 거짓인 자리를 **표로** 든다.
+  // ---------------------------------------------------------------------------
+
+  /**
+   * 불변식이 거짓인 자리 — `[창, 배수, 초과pt, 옛 180 이었다면 초과pt]`.
+   *
+   * 셋 다 「가장 작은 창 × 가장 큰 두 글자」이고, 셋 다 **바닥(2행)이 이겨서**
+   * 거짓이다(아래 기제 단정). 그것이 의도라는 것은 `MENTION_MIN_ROWS` 의
+   * 독스트링이 든다 — 「고를 수 있는 화면」이 「대화가 남는 화면」을 이긴다.
+   *
+   * 마지막 칸이 이 배치의 방향을 든다: 같은 자리에서 옛 고정 180 은 **훨씬 더**
+   * 넘었다. 이 띠는 새로 생긴 결함이 아니라 좁아진 옛 결함이다.
+   */
+  const FLOOR_WINS: ReadonlyArray<readonly [number, number, number, number]> = [
+    [667, 3.143, 6.5, 92.2],
+    [667, 3.571, 38.1, 111.0],
+    [744, 3.571, 8.1, 81.0],
+  ];
+
+  const dockOf = (fontScale: number, height: number) =>
+    mentionSheetMaxHeight(fontScale, height) +
+    composerColumnBudget(fontScale, height).composer +
+    BAR_CHROME;
+
+  it('도크가 대화 열을 안 넘는다 — 표에 든 세 자리를 빼고 전수에서', () => {
     // 이것이 이 티켓의 불변식이다. 넘으면 그 초과분은 타임라인에서 나온다.
-    for (const fontScale of [1, 1.235, 2, 3.143, 3.571]) {
-      for (const height of [812, 874, 956, 1366]) {
+    const over: Array<[number, number, number]> = [];
+    for (const fontScale of SCALES) {
+      for (const height of HEIGHTS) {
         const budget = composerColumnBudget(fontScale, height);
-        const dock =
-          mentionSheetMaxHeight(fontScale, height) +
-          budget.composer +
-          BAR_CHROME;
-        expect(dock).toBeLessThanOrEqual(budget.column + 1e-9);
+        const excess = dockOf(fontScale, height) - budget.column;
+        if (excess > 1e-9) {
+          over.push([height, fontScale, Number(excess.toFixed(1))]);
+        }
       }
+    }
+    // 잔량이지 허용목록이 아니다: 띠가 줄면 이 단정이 먼저 빨갛고, 그때 표를
+    // 줄이는 사람은 자기가 무엇을 고쳤는지 안다.
+    expect(over).toEqual(FLOOR_WINS.map(([h, s, e]) => [h, s, e]));
+  });
+
+  it('거짓인 자리는 **바닥이 이길 때뿐이다** — 식이 진 것이 아니라 양보한 것', () => {
+    // 표가 오늘의 기기 목록에 달려 있는 반면 이것은 기제다: 어떤 격자를 쓰든,
+    // 도크가 열을 넘었다면 시트는 반드시 바닥(2행)에 앉아 있다.
+    for (const fontScale of SCALES) {
+      for (const height of HEIGHTS) {
+        const budget = composerColumnBudget(fontScale, height);
+        if (dockOf(fontScale, height) - budget.column <= 1e-9) continue;
+        expect(mentionSheetMaxHeight(fontScale, height)).toBe(
+          2 * mentionRowHeight(fontScale),
+        );
+      }
+    }
+  });
+
+  it('그 세 자리에서도 옛 값보다 낫다 — 방향이 개선이라는 것', () => {
+    for (const [height, fontScale, excess, oldExcess] of FLOOR_WINS) {
+      const budget = composerColumnBudget(fontScale, height);
+      expect(dockOf(fontScale, height) - budget.column).toBeCloseTo(excess, 1);
+      expect(180 + budget.composer + BAR_CHROME - budget.column).toBeCloseTo(
+        oldExcess,
+        1,
+      );
+      expect(oldExcess).toBeGreaterThan(excess);
     }
   });
 
@@ -645,8 +807,8 @@ describe('#1480 멘션 시트 상한 — 동적 타입 비례 + 도크가 열을
     // 옛 값 180 을 기각한 이유가 이것이고(4행 + 이마 4pt), 상한을 도출로 바꾸면서
     // 같은 결함을 다른 크기에 다시 심으면 안 된다. 내림이 없던 첫 판은
     // a11y-large 에서 3.5행을 내고 사진에 넷째 이름의 윗동을 남겼다.
-    for (const fontScale of [1, 1.235, 2, 2.143, 3.143, 3.571]) {
-      for (const height of [667, 812, 874, 956, 1366]) {
+    for (const fontScale of SCALES) {
+      for (const height of HEIGHTS) {
         const row = mentionRowHeight(fontScale);
         const rows = mentionSheetMaxHeight(fontScale, height) / row;
         expect(Math.abs(rows - Math.round(rows))).toBeLessThan(1e-9);
@@ -658,8 +820,8 @@ describe('#1480 멘션 시트 상한 — 동적 타입 비례 + 도크가 열을
     // #1443 의 `MIN_ROWS` 와 같은 논리이고, 같은 자리에서 불변식을 이긴다:
     // 가장 작은 창 · 가장 큰 글자에서는 바닥이 열을 넘는다. 조건이 부딪히면
     // 「고를 수 있는 화면」이 이긴다.
-    for (const fontScale of [1, 2, 3.143, 3.571]) {
-      for (const height of [667, 874, 1366]) {
+    for (const fontScale of SCALES) {
+      for (const height of HEIGHTS) {
         expect(mentionSheetMaxHeight(fontScale, height)).toBeGreaterThanOrEqual(
           2 * mentionRowHeight(fontScale),
         );
@@ -690,17 +852,66 @@ describe('#1480 멘션 시트 상한 — 동적 타입 비례 + 도크가 열을
     expect(sheetStyle().maxHeight).toBe(4 * TOUCH_TARGET);
   });
 
-  it('행의 두 조각이 선언된 같은 줄 상자를 든다 — 한 줄로 읽힌다', () => {
+  it('행의 **세** 조각이 선언된 같은 줄 상자를 든다 — 한 줄로 읽힌다', () => {
     // 선언하지 않으면 RN 이 광학 중심으로 +2.67pt 어긋나게 놓는다(`tokens.ts` 의
     // `line.head` 독스트링이 그 실측을 든다). 그리고 선언된 값이 없으면 위
     // `mentionRowHeight` 의 산수는 화면이 안 쓰는 수를 쓰는 것이 된다.
+    //
+    // 셋째 조각(「에이전트」)이 이 단정에서 빠져 있었다(회전 1 L3). 배치가 실제로
+    // 고친 것은 셋인데 재는 것이 둘이면, 셋째가 조용히 스케일 밖으로 나가는 날을
+    // 아무도 못 잡는다.
     setWindow({fontScale: 1, height: H});
     composer({directory: makeDirectory([AGENT])});
     fireEvent.changeText(screen.getByTestId('composer-input'), '@');
     const name = screen.getByText(AGENT.displayName);
     const handle = screen.getByText(`@${AGENT.handle}`);
+    const kind = screen.getByText('에이전트');
     expect(StyleSheet.flatten(name.props.style).lineHeight).toBe(15);
     expect(StyleSheet.flatten(handle.props.style).lineHeight).toBe(15);
+    expect(StyleSheet.flatten(kind.props.style).lineHeight).toBe(15);
+  });
+
+  it('행이 넘치는 대신 **잘린다** — 이름이 내고 표지는 온전하다', () => {
+    // 회전 1 H2. Yoga 의 `flexShrink` 기본값은 0 이라(같은 트리의
+    // `AgentDetailScreen` 이 그 사실을 자기 주석에 든다) 양보할 수 있는 것이
+    // `mentionHandle`(flex: 1) 하나뿐이었다. 그러면 긴 한글 이름 + 행 끝의
+    // 「에이전트」 조합에서 행은 잘리는 대신 넘치고, 넘쳐서 사라지는 것은 표지다
+    // (캡처 `dock1480-mention-sheet-axxl-before-dark.png` 의 첫 줄).
+    //
+    // 형제 셋이 이름·핸들을 이미 이렇게 푼다 — `AgentsScreen`·`SidebarScreen`·
+    // `HostedConnectionsScreen`. 셋째 조각(고정폭 표지)은 형제에 없어서 관례가
+    // 없고, 그래서 두 판을 AX-XXL 에서 찍어 골랐다: 표지도 줄이면 「에…」가
+    // 되는데 그것은 뜻이 없다(반노출의 가로판). 이름은 잘려도 앞이 남는다.
+    // **이름만 낸다.**
+    setWindow({fontScale: 1, height: H});
+    composer({directory: makeDirectory([AGENT])});
+    fireEvent.changeText(screen.getByTestId('composer-input'), '@');
+    const name = screen.getByText(AGENT.displayName);
+    const handle = screen.getByText(`@${AGENT.handle}`);
+    const kind = screen.getByText('에이전트');
+    expect(StyleSheet.flatten(name.props.style).flexShrink).toBe(1);
+    expect(StyleSheet.flatten(kind.props.style).flexShrink).toBe(0);
+    // 핸들은 `flex: 1` 이라 남는 자리를 먼저 갖고 먼저 내놓는다.
+    expect(StyleSheet.flatten(handle.props.style).flex).toBe(1);
+    // 셋 다 한 줄이다 — 접힌 행은 위 정수 행 산술이 세는 높이를 넘는다. 표지의
+    // 못은 위 판정이 뒤집히는 날을 위해 미리 박아 둔 것이다.
+    expect(name.props.numberOfLines).toBe(1);
+    expect(handle.props.numberOfLines).toBe(1);
+    expect(kind.props.numberOfLines).toBe(1);
+  });
+
+  it('시트가 스크롤 막대를 든다 — 상한이 2행까지 내려갈 수 있다', () => {
+    // 회전 1 L6. 옛 판은 막대를 껐고, 4행 시트가 `MENTION_LIMIT`(6)을 거의 다
+    // 담던 때는 그것이 안 보였다. 이 배치가 조건을 바꾼다 — 작은 창·큰 글자에서
+    // 상한은 바닥인 2행이고, 그러면 넷이 아래에 숨는다. 같은 모양의 형제
+    // (`MessageActionSheet`)가 이미 막대를 켜 둔다.
+    expect(mentionSheetMaxHeight(3.571, 667)).toBe(2 * mentionRowHeight(3.571));
+    setWindow({fontScale: 1, height: H});
+    composer({directory: makeDirectory([AGENT])});
+    fireEvent.changeText(screen.getByTestId('composer-input'), '@');
+    const list = screen.getByTestId('mention-list');
+    const scroll = list.findByProps({keyboardShouldPersistTaps: 'always'});
+    expect(scroll.props.showsVerticalScrollIndicator).not.toBe(false);
   });
 });
 
@@ -722,8 +933,14 @@ describe('#1480 멘션 시트 상한 — 동적 타입 비례 + 도크가 열을
 describe('#1479 절 예산 — 빈 상자에 못 서는 문장은 절 경계에서 접힌다', () => {
   const AX_XXL = 3.143;
   const H = 874;
-  /** 입력창 패딩(8·8)과 테두리(1·1). 상한에서 이만큼을 빼면 글이 서는 자리다. */
+  /**
+   * 입력창 패딩(8·8)과 테두리(1·1). 상한에서 이만큼을 빼면 글이 서는 자리다.
+   * 위 #1443 블록과 같은 이유로 배송되는 상수에 묶인다 (회전 1 M4).
+   */
   const CHROME = 8 * 2 + 1 * 2;
+  it('크롬 사본이 배송되는 값과 같다', () => {
+    expect(CHROME).toBe(INPUT_CHROME);
+  });
 
   const input = () => screen.getByTestId('composer-input');
 

@@ -17,10 +17,16 @@ name: 90-mention-sheet-capture
 # 쓰는 법(`scripts/measure.sh` 가 아니라 사람이 부른다 — 캡처 하나를 위해 계측
 # 레인 전체에 Maestro 의존을 심지 않는다):
 #
-#   xcrun simctl ui booted content_size accessibility-large
+#   xcrun simctl ui booted content_size <large|accessibility-large|accessibility-extra-extra-large>
 #   xcrun simctl launch booted app.momo.ios --args \
 #     -momoMeasure MENTION-SHEET -RCT_jsLocation 127.0.0.1:$PORT
 #   maestro test clients/mobile/maestro/90-mention-sheet-capture.yaml
+#   # 사진: ~/.maestro/tests/<타임스탬프>/90-mention-sheet-capture/takeScreenshot/
+#
+# 라이트는 표면 이름에 스킴 접두사를 붙인다(`LIGHT-MENTION-SHEET` —
+# `measure/root.ts`). 어느 크기를 왜 찍는지는 `scripts/measure.sh` 끝의 목록이
+# 든다. 사진에 이름이 세 번 나오는 로스터(`MENTION_DIRECTORY`)는 첫 줄이 이 앱에서
+# 가장 긴 이름이라, 이 흐름이 폭 결함까지 함께 찍는다.
 - extendedWaitUntil:
     visible:
       id: "composer-input"

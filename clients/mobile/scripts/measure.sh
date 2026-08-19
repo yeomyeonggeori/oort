@@ -178,10 +178,19 @@ ORIGINAL_CONTENT_SIZE=""
 # 그 글자는 사람이 친다(초안으로 심는 길은 `measure/surfaces.tsx` 의
 # `mention-sheet` 절이 실측으로 기각한다). 캡처는 Maestro 레인이 진다:
 #
-#   xcrun simctl ui booted content_size accessibility-large
+#   xcrun simctl ui booted content_size <large|accessibility-large|accessibility-extra-extra-large>
 #   xcrun simctl launch booted app.momo.ios --args \
 #     -momoMeasure MENTION-SHEET -RCT_jsLocation 127.0.0.1:$METRO_PORT
 #   maestro test maestro/90-mention-sheet-capture.yaml
+#   # 사진: ~/.maestro/tests/<타임스탬프>/90-mention-sheet-capture/takeScreenshot/
+#
+# 라이트는 `LIGHT-MENTION-SHEET`(스킴 접두사 — `measure/root.ts`). 오늘 있는 판:
+#
+#   dock1480-mention-sheet-dark.png                기본 크기 — 4행 그대로(무회귀)
+#   dock1480-mention-sheet-ax-{dark,light}.png     a11y-large(2.143) — 3행
+#   dock1480-mention-sheet-axxl-{dark,light}.png   AX-XXL(3.143) — 행이 44 를 넘어
+#                                                  47.1pt 가 되는 첫 띠(회전 1 M3)
+#   dock1480-mention-sheet-{ax,axxl}-before-*.png  같은 두 크기의 옛 판
 #
 # 여기 안 넣는 이유: 캡처 하나를 위해 계측 레인 전체가 Maestro 를 요구하게 되고,
 # 이 스크립트는 오늘 그 의존이 없다.

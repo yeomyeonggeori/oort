@@ -285,11 +285,18 @@ const CONVERSATION_CHROME_WINDOW_SHARE = 0.23;
  */
 const COMPOSER_COLUMN_SHARE = 0.5;
 
-/** 상한과 실제 상자가 함께 지는 세로 크롬(패딩·테두리). 글자를 안 따라간다. */
-const INPUT_CHROME = INPUT_PAD_Y * 2 + INPUT_BORDER * 2;
+/**
+ * 상한과 실제 상자가 함께 지는 세로 크롬(패딩·테두리). 글자를 안 따라간다.
+ *
+ * **export 되는 이유는 `composerMaxHeight` 과 같다** (회전 1 M4): 이 수는 계측
+ * 하네스와 테스트에도 필요한데, 셋이 각자 `space.sm * 2 + 2` 를 적고 있었다.
+ * 사본은 조용히 어긋나고, 어긋난 사본이 낸 초록은 배송되는 상자를 안 잰다
+ * (디자인 시스템 §5.5).
+ */
+export const INPUT_CHROME = INPUT_PAD_Y * 2 + INPUT_BORDER * 2;
 
 /** 같은 것의 가로 몫. 상자의 바깥 폭에서 이만큼을 빼면 글이 놓이는 폭이다. */
-const INPUT_CHROME_X = INPUT_PAD_X * 2 + INPUT_BORDER * 2;
+export const INPUT_CHROME_X = INPUT_PAD_X * 2 + INPUT_BORDER * 2;
 
 /**
  * 자라기를 멈추는 높이 — **두 상한 중 작은 것**, 그리고 바닥은 두 줄.
@@ -340,7 +347,15 @@ export interface ComposerColumnBudget {
   readonly column: number;
   /** 그 열에서 입력창이 가져가는 것(= `composerMaxHeight`). */
   readonly composer: number;
-  /** 그러고 목록에 남는 것. */
+  /**
+   * 그 열에서 입력창이 **안** 가져가는 것 — `column − composer`.
+   *
+   * 이름이 「목록」이지만 시트가 열려 있는 동안 목록이 실제로 받는 것은 이보다
+   * 작다: 거기서 `dockChrome` 과 `mentions` 가 또 나온다(도크 = 시트 + 입력창 +
+   * 도크 크롬). 즉 이 필드는 **목록의 상한**이고, 시트가 쉬는 상태의 답이다.
+   * 등식을 안 고치고 서술만 고치는 이유는 아래 두 필드가 더한 것이지 고친 것이
+   * 아니기 때문이다 — `column = list + composer` 는 #1443 의 것이고 그대로다.
+   */
   readonly list: number;
   /**
    * 도크가 시트·입력창 **말고** 지는 세로 (#1480). 위 `column` 은 이 항을
@@ -397,9 +412,36 @@ export function composerColumnBudget(
 // 웹에서 이미 한 번 닫았다(#1418 의 `composer-placeholder` `1lh` 클램프). 그러니
 // 넷은 새 결정이 아니라 **옛 값의 뜻**이다.
 //
-// 넷인 이유 자체는 목록의 성질이다: `matchMembers` 가 이미 정렬해 첫 줄을 최선으로
-// 만들고, 넷이면 「그 최선 + 확인할 몇」이 한눈에 든다. 그 위는 스크롤이 받는다
-// (시트는 `ScrollView` 다).
+// 넷인 이유는 **재서 나온다.** 첫 판의 이 자리에는 「`matchMembers` 가 이미 정렬해
+// 첫 줄을 최선으로 만든다」고 적혀 있었는데, 그것은 참이 아니다 —
+// `mentionQuery.ts` 의 그 함수는 `status === 'active'` 로 거르고 부분일치로 거르고
+// `.slice(0, limit)` 할 뿐 **정렬하지 않고**, `makeDirectory` 도 members 를 그대로
+// 통과시킨다(`packages/momo-core/.../directory.ts`). 첫 줄은 로스터가 도착한 순서다.
+// 그래서 근거를 목록의 성질이 아니라 **관측되는 두 수**에 댄다:
+//
+//   ① 오늘 배송되는 값이 담던 정수 행이 넷이다 — 180 = 4 × 44 + 4.
+//   ② 기준 창(874pt · 기본 크기 — 캡처를 찍는 그 기기)에서 **열이 허락하는 최대
+//      정수 행**이 정확히 넷이다:
+//
+//        목록 몫 340.9 − 입력창 128.0 − 도크 크롬 16.0 = 196.9pt
+//        ⌊196.9 ÷ 44⌋ = 4          (다섯 행은 220pt 라 안 든다)
+//
+// 둘이 같은 수를 가리키므로 이 배치는 「몇 개를 보여 주는가」를 **안 바꾼다** —
+// 바꾸는 것은 다섯째 행의 이마 4pt 와, 큰 글자에서 열을 넘던 초과분이다.
+//
+// 그리고 상한이 **실제로 무는 창은 큰 것들뿐이다**: 열이 다섯 행을 허락하려면
+// 창이 933pt 를 넘어야 하고(⌊(h × 0.39 − 128 − 16) ÷ 44⌋ ≥ 5), 오늘 배송되는
+// 세로 높이 중 그런 것은 956 · 1032 · 1180 · 1366 이다(가장 큰 아이폰과 아이패드
+// 들 — 테스트가 그 목록을 값으로 든다). 거기서 넷이 하는 일은 도크가 창 크기를
+// 따라 메뉴로 자라지 않게 잡는 것이다. 그 아래에서는 열이 먼저 물고, 그 위는
+// 스크롤이 받는다(시트는 `ScrollView` 다).
+//
+// **이 결정은 표면 한정이다.** 웹은 같은 물음에 다르게 답한다 — 상한 없이
+// `MENTION_LIMIT`(6) 을 전부 띄운다(`clients/web/src/features/chat/Composer.tsx`).
+// 다른 답이 정당한 이유는 기제가 달라서다: 웹의 팝오버는 `absolute bottom-full`
+// 이라 대화 열을 **안 먹고**, 그래서 「도크 ≤ 대화 열」이라는 이 절의 불변식 자체가
+// 거기서는 걸리지 않는다. 이 넷은 열을 나눠 갖는 표면의 답이지 제품 전체의 답이
+// 아니다.
 //
 // ## 그 넷이 열을 넘을 때 — 열이 이기고, **행 단위로** 이긴다
 //
@@ -412,14 +454,38 @@ export function composerColumnBudget(
 // 3.5행을 주면 넷째 이름이 이마만 내놓고 잘리고, 그것이 정확히 위에서 옛 값 180 을
 // 기각한 그 이유다 — 상한을 도출로 바꾸면서 같은 결함을 다른 크기에 다시 심을
 // 수는 없다. 실측으로 잡았다: 내림이 없던 첫 판은 a11y-large 에서 154.4pt(=3.5행)
-// 를 내고 사진에 「동료1」의 윗동이 남았다
-// (`measure/captures/dock1480-mention-sheet-*`). 즉 **시트는 언제나 정수 행**
-// 이고, 남는 자투리는 타임라인으로 간다.
+// 를 내고 사진 아래쪽에 넷째 이름의 윗동을 남겼다 — 옛 값 180 의 사진
+// (`dock1480-mention-sheet-ax-before-dark.png`, 4.1행)이 같은 결함을 지금도
+// 들고 있으니 나란히 놓으면 보인다. 즉 **시트는 언제나 정수 행**이고, 남는
+// 자투리는 타임라인으로 간다.
 //
 // 바닥은 위 `MIN_ROWS` 와 같은 논리다 — 한 행짜리 시트는 「고를 것이 있다」만
 // 알려 주고 무엇인지는 안 보여 준다. 가장 작은 창 · 가장 큰 글자에서는 그 바닥이
 // 불변식을 이기고, 그것이 의도다(`composerMaxHeight` 의 `MIN_ROWS` 가 같은
-// 자리에서 같은 이유로 이긴다).
+// 자리에서 같은 이유로 이긴다). **그 띠는 값으로 세어 뒀다** —
+// `composerDraftOffline.test.tsx` 의 `FLOOR_WINS` 가 사다리 전수 × 기기 전수에서
+// 거짓인 세 자리(667×3.143 · 667×3.571 · 744×3.571)와 각각의 초과분을 든다.
+// 셋 다 옛 고정 180 이 훨씬 더 넘던 자리다(92.2 · 111.0 · 81.0 → 6.5 · 38.1 · 8.1).
+//
+// ## 이 불변식이 **지키는 것**과 안 지키는 것 (design-review 회전 1 M2)
+//
+// 이름은 「키보드가 올라와도 대화가 남는다」에서 왔지만, 시트가 열린 동안 그
+// 문장이 참인 띠는 **없다.** 874pt 창 실측 — 열에서 도크를 뺀 여유가 배수 1.000
+// 에서 20.9pt, 2.643 에서 22.4pt, 3.143 에서 13.0pt 인데 본문 한 줄은 각각
+// 22.0 / 58.1 / 69.1pt 다. 어느 크기에서도 한 줄이 안 남는다.
+//
+// 그래서 이 절은 불변식을 다시 정하지 않고 **이름을 정확히 한다**: 「도크 ≤ 대화
+// 열」이 지키는 것은 *도크가 열 밖으로 안 나간다*이고, 「대화가 남는다」는 시트가
+// **쉬는** 상태의 약속이다(그때 목록 몫은 `ComposerColumnBudget.list` — 874pt
+// 기본 크기에서 212.9pt = 본문 9.7줄). 시트는 `@` 토큰을 치는 동안에만 서므로 그
+// 분리가 화면과 맞는다.
+//
+// 문턱을 타임라인이 실제로 보여 줄 수 있는 것(한 줄)에 대고 다시 정하는 안은
+// 기각했다: 시트를 한 행 더 깎거나 입력창을 깎아야 하는데, 앞은 「고를 수 있는
+// 화면」을, 뒤는 「쓰고 있는 줄이 보이는 화면」을 판다 — 둘 다 이 파일이 이미
+// 위에서 더 비싸다고 판정한 것들이다. 대신 **여유를 사진에 적는다**
+// (`measure/surfaces.tsx` 의 `MentionSheetProbe`): 판정만 찍고 여유를 안 찍으면
+// 다음 사람은 이 문단을 다시 손으로 계산해야 한다.
 //
 // 기본 크기에서는 몫이 한 번도 안 걸린다: 874pt 창에서 목록 몫 212.9 − 16 = 196.9
 // 이고 4행은 176 이다. **화면이 4행 그대로다** — 사라지는 것은 이마 4pt 뿐이다.
@@ -745,6 +811,20 @@ export function Composer({
   const [text, setText] = useState(() =>
     draftKey === undefined ? '' : readDraft(draftKey),
   );
+  // **0 이 초안과 어긋난다 — 알고 두는 자리다** (#1480 design-review L1).
+  //
+  // 위 `text` 는 초안을 복원해 첫 렌더에 이미 글을 들고 있는데 캐럿은 0 이다.
+  // 같은 파일의 `draftKey` 전환 효과는 같은 사실에 `restored.length` 를 쓰므로,
+  // 두 자리가 같은 상황에 다른 답을 갖고 있다. 실제로 걸린 자리가 있다: 계측이
+  // 「`@` 로 끝나는 초안」을 심어 시트를 열려 했을 때, iOS 가 `focus()` 에도
+  // `setSelection()` 에도 `onSelectionChange` 를 안 내보내서 캐럿이 0 에 머물고
+  // (`mentionQueryAt` 는 캐럿 앞만 본다) 화면에는 캐럿이 `@` 뒤에 보이는데
+  // 목록이 안 열렸다(그래서 그 캡처는 Maestro 가 정말로 친다).
+  //
+  // **여기서 안 고친다.** 아래 `mentionOpen` 의 초기값이 `true` 이므로, 캐럿을
+  // 초안 끝으로 옮기면 `@` 로 끝나는 초안을 복원한 순간 콜드 스타트에 시트가
+  // 스스로 열린다 — 아무도 아직 아무것도 안 쳤는데. 그 둘은 한 결정이고, 이
+  // 티켓(시트의 **상한**)의 것이 아니다.
   const [caret, setCaret] = useState(0);
   const [mentionOpen, setMentionOpen] = useState(true);
   const ownInputRef = useRef<TextInput | null>(null);
@@ -930,7 +1010,24 @@ export function Composer({
           testID="mention-list">
           <ScrollView
             keyboardShouldPersistTaps="always"
-            showsVerticalScrollIndicator={false}>
+            // **막대를 되돌린다** (design-review 회전 1 L6). 옛 판은 이것을 껐고,
+            // 4행 시트가 6개(=`MENTION_LIMIT`)를 거의 다 담던 때는 안 보였다.
+            // 이 배치가 그 조건을 바꾼다 — 상한이 열을 따라가므로 작은 창·큰
+            // 글자에서는 바닥인 **2행**까지 내려가고, 그러면 넷이 아래에 숨는다.
+            // 「아래 더 있다」를 아무것도 안 말하는 목록은 자기가 무엇을 가리고
+            // 있는지 안 보여 준다.
+            //
+            // 이 집의 관례도 그쪽이다: 같은 모양의 형제(`MessageActionSheet` —
+            // 역시 도출된 `maxHeight` 로 잘리는, 고르는 시트)가 막대를 켜 둔다.
+            // 끄고 있는 둘은 가로 레일(`Timeline`·`SearchScreen`)이라 다른 물건
+            // 이다.
+            //
+            // **닫는 것과 못 닫는 것**: iOS 의 막대는 끄는 동안에만 보이므로,
+            // 이것이 주는 것은 「지금 끄는 이 목록에 아래가 더 있다」이지 「손을
+            // 대기 전부터 더 있다고 알려 주는 것」이 아니다. 후자는 페이드
+            // 마스크나 개수 표지가 필요하고, 그것은 이 티켓의 결정(상한)이
+            // 아니다.
+            showsVerticalScrollIndicator>
             {candidates.map(member => (
               <Pressable
                 key={member.id}
@@ -954,7 +1051,12 @@ export function Composer({
                   {`@${member.handle}`}
                 </Text>
                 {member.kind === 'agent' ? (
-                  <Text style={styles.mentionKind}>에이전트</Text>
+                  // 한 줄로 못 박는다 — 줄어들 수 있게 해 둔 조각이(스타일의
+                  // `flexShrink`) 한 줄로 안 묶이면 접히고, 접힌 행은 이 배치가
+                  // 세운 정수 행 산술이 세는 높이를 넘는다.
+                  <Text style={styles.mentionKind} numberOfLines={1}>
+                    에이전트
+                  </Text>
                 ) : null}
               </Pressable>
             ))}
@@ -1139,7 +1241,12 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     minHeight: TOUCH_TARGET,
     // `maxHeight` 는 여기 없다. 글자 배수와 창 높이가 정하므로 컴포넌트가
     // `composerMaxHeight` 로 계산해 붙인다 (#1443).
-    paddingHorizontal: space.md,
+    //
+    // 좌우 여백이 이름으로 서는 이유는 세로 짝과 같다: 위 `INPUT_CHROME_X` 가
+    // 프로브의 글폭을 이 값에서 도출하므로, 여기에 `space.md` 를 다시 적으면
+    // 자와 상자가 각자 다른 수를 들 수 있는 자리가 생긴다(#1479 가 이름을
+    // 만들어 놓고 정작 이 줄은 안 고쳤다 — 회전 1 M4).
+    paddingHorizontal: INPUT_PAD_X,
     paddingTop: INPUT_PAD_Y,
     paddingBottom: INPUT_PAD_Y,
     borderRadius: radius.md,
@@ -1210,7 +1317,45 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   // 토큰이 존재하는 이유가 정확히 이 모양(13pt 이름 + 12pt 보조)이고, 선언이
   // 없으면 RN 이 광학 중심으로 어긋나게 놓는다(`tokens.ts` 의 실측). 그 선언이
   // `mentionRowHeight` 의 산수가 화면과 같은 수를 쓰는 근거이기도 하다.
+  //
+  // **그리고 행은 넘치는 대신 잘려야 한다** (design-review 회전 1 H2). Yoga 의
+  // `flexShrink` 기본값은 0 이고(이 트리의 `AgentDetailScreen.tsx` 가 그 사실을
+  // 자기 주석에 적어 두었다 — 거기서는 안 줄어드는 칩이 `flex: 1` 짜리 제목을
+  // 「릴레이 재…」로 만들었다), 여기서는 양보할 수 있는 것이 `mentionHandle`
+  // 하나뿐이었다. 그래서 긴 한글 이름 + 행 끝의 「에이전트」 조합에서 행은 잘리는
+  // 대신 **넘쳤고**, 넘쳐서 화면 밖으로 나가는 것은 표지 쪽이었다 — 캡처
+  // `dock1480-mention-sheet-axxl-before-dark.png` 의 첫 줄이 그 자리다(핸들이
+  // 「@」 한 글자로 끊긴 채 오른쪽 화면 끝에서 잘리고, 「에이전트」는 사진에
+  // 없다). 이 목록의 일은 「무엇을 고를 수 있는가」를 보여 주는 것이므로, 조용히
+  // 사라지는 조각이 있어서는 안 된다.
+  //
+  // 같은 모양(이름 + @핸들)을 이미 이렇게 푼 형제가 셋이다 — `AgentsScreen`
+  // (`rowTitle`·`rowHandle`) · `SidebarScreen` · `HostedConnectionsScreen`. 웹도
+  // 같은 답이다(양쪽 `truncate`).
+  //
+  // ## 누가 양보하는가 — **이름만**, 그리고 그것은 재서 골랐다
+  //
+  // 형제들에는 이 줄의 셋째 조각(고정폭 표지)이 없어서 그 자리에는 관례가 없다.
+  // 두 판을 같은 크기(AX-XXL · 배수 3.143)에서 실제로 찍어 비교했다:
+  //
+  //   표지도 `flexShrink: 1`   「프로덕트디자…」 + 「에…」
+  //   표지는 `flexShrink: 0`   「프로덕트디…」 + 「에이전트」    <- 이 판
+  //
+  // 앞의 판은 넘치지는 않지만 표지를 **뜻 없는 조각**으로 만든다. 「에…」는
+  // 무엇이 있었다는 것만 알려 주고 무엇인지는 안 알려 주는데, 그것이 이 배치가
+  // 옛 값 180 을 기각한 그 이유(반노출)의 가로판이다. 이름은 반대다 — 잘려도
+  // 앞이 남으므로 「프로덕트디…」가 여전히 사람을 가리키고, 그것이 형제 셋이
+  // 이름에만 `flexShrink` 를 주는 이유이기도 하다.
+  //
+  // 표지가 행을 넘길 위험은 없다: 「에이전트」는 배수 3.571 에서도 ~171pt 이고
+  // 행은 ~358pt 다(넘기려면 배수가 7 을 넘어야 하는데 사다리에 그런 칸이 없다).
+  // `flexShrink: 0` 을 **적어 두는** 이유는 그것이 Yoga 기본값이라서가 아니라,
+  // 위 비교를 아는 사람만 이 줄을 지우게 하려는 것이다.
+  //
+  // 양보하는 순서는 Yoga 가 정한다: `mentionHandle` 은 `flex: 1`(=basis 0)이라
+  // 남는 자리를 먼저 갖고 먼저 내놓고, 그러고도 모자라면 이름이 낸다.
   mentionName: {
+    flexShrink: 1,
     fontSize: font.label,
     lineHeight: line.head,
     fontWeight: '600',
@@ -1223,7 +1368,12 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     lineHeight: line.head,
     color: color.textFaint,
   },
+  // `numberOfLines={1}` 도 이 조각에 붙는다(컴포넌트 쪽). 위 판정이 뒤집혀
+  // 표지가 줄어들게 되는 날, 한 줄로 안 묶인 표지는 접히고 접힌 행은 정수 행
+  // 산술(`mentionRowHeight`)이 세는 높이를 넘는다 — 이 배치가 세운 것이 바로 그
+  // 산술이다. 그래서 못은 지금 박아 둔다.
   mentionKind: {
+    flexShrink: 0,
     fontSize: font.meta,
     lineHeight: line.head,
     color: color.agent,

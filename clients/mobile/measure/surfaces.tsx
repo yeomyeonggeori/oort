@@ -21,6 +21,8 @@ import {
   Composer,
   composerColumnBudget,
   composerMaxHeight,
+  INPUT_CHROME,
+  INPUT_CHROME_X,
   mentionRowHeight,
   withLatinWordBreaks,
 } from '../src/features/conversation/Composer';
@@ -650,13 +652,15 @@ function PlaceholderProbe(): React.JSX.Element {
   const {fontScale, height: windowHeight} = useWindowDimensions();
   const [slotWidth, setSlotWidth] = React.useState(0);
   const [lines, setLines] = React.useState<Record<string, number>>({});
-  // 입력창의 콘텐츠 폭 = 상자 - 좌우 안쪽 여백 - 좌우 테두리.
-  const content = slotWidth === 0 ? 0 : slotWidth - space.md * 2 - 2;
+  // 입력창의 콘텐츠 폭 = 상자 - 좌우 안쪽 여백 - 좌우 테두리. **크롬은 배송되는
+  // 상수를 읽는다** (회전 1 M4): 여기에 `space.md * 2 - 2` 를 다시 적으면 자와
+  // 상자가 각자 다른 수를 들 수 있고, 그러면 이 사진은 배송되지 않는 상자를 잰다.
+  const content = slotWidth === 0 ? 0 : slotWidth - INPUT_CHROME_X;
   // 절 예산의 문턱 (#1479). 사진이 「뒷절이 사라졌다」를 보여 줄 때, **왜**
   // 사라졌는지는 이 두 수가 답한다: 상자가 담는 줄 상자 몇 개인가, 그리고 위
   // 줄들이 세는 문장은 그보다 긴가. 하나만 있으면 사진은 결과만 들고 판정 기준을
   // 안 든다.
-  const room = composerMaxHeight(fontScale, windowHeight) - (space.sm * 2 + 2);
+  const room = composerMaxHeight(fontScale, windowHeight) - INPUT_CHROME;
   const rowPt = lineBox.body * fontScale;
   const boxes = [
     {key: '이 기기', width: content},
@@ -738,8 +742,32 @@ function PlaceholderProbe(): React.JSX.Element {
  * `matchMembers` 의 목록 상한(`MENTION_LIMIT`)까지 채워야 「몇 개를 보여 주는가」가
  * 화면에서 갈리고, before/after 가 다른 그림이 된다. 이름은 이 제품이 쓰는 모양
  * (한글 이름 + 라틴 핸들)을 지킨다 — 라틴만 든 목록은 행 높이를 다르게 잰다.
+ *
+ * ## 첫 줄이 **긴 이름**인 이유 (design-review 회전 1 H2)
+ *
+ * 첫 판의 픽스처는 곽성재·박다연·김인턴·동료1~9 로 **전부 짧았고**, 그래서
+ * 사진은 행이 폭에서 어떻게 지는지를 한 번도 안 보여 줬다. 그 자리에 실제로 결함이
+ * 있었다: 행의 세 조각 중 양보할 수 있는 것이 `mentionHandle` 하나뿐이라, 긴 한글
+ * 이름 + 행 끝의 「에이전트」 표지 조합에서 행은 **잘리는 대신 넘쳤고** 넘쳐서
+ * 사라지는 것은 표지 쪽이었다(Yoga 의 `flexShrink` 기본값은 0). 짧은 이름만 든
+ * 픽스처는 그 결함 위에서도 초록이다.
+ *
+ * 그래서 첫 줄이 이 로스터에서 가장 긴 이름을 든다 — 그리고 에이전트다(표지가
+ * 서는 행이 아니면 그 조합 자체가 안 생긴다). 세 캡처 크기(기본 · a11y-large ·
+ * AX-XXL)에서 이 행이 어디서 잘리는지가 사진에 남고, 결함이 실제로 보이는 것은
+ * 가장 큰 크기다: `dock1480-mention-sheet-axxl-before-dark.png` 의 첫 줄은
+ * 핸들이 「@」 한 글자로 끊긴 채 화면 오른쪽 끝에서 잘리고 「에이전트」가 아예
+ * 없다. 같은 크기의 after 는 「프로덕트디…」 + 「에이전트」다.
  */
+const MENTION_LONG_NAME = {
+  ...(ROSTER.find(m => m.kind === 'agent') ?? ROSTER[0]),
+  id: 'mention-long-name',
+  displayName: '프로덕트디자인 김인턴',
+  handle: 'product-design-intern',
+};
+
 const MENTION_DIRECTORY = makeDirectory([
+  MENTION_LONG_NAME,
   ...ROSTER,
   ...Array.from({length: 9}, (_, i) => ({
     ...ROSTER[0],
@@ -750,11 +778,25 @@ const MENTION_DIRECTORY = makeDirectory([
 ]);
 
 /**
- * 시트가 열렸을 때 **도크가 대화 열 안에 있는가** (#1480).
+ * 시트가 열렸을 때 **도크가 대화 열 안에 있는가**, 그리고 **얼마나 여유로** (#1480).
  *
  * 산수는 배송되는 함수들(`mentionSheetMaxHeight` · `composerColumnBudget`)을 그대로
  * 부른다 — 사본을 두면 사진이 배송되지 않는 식을 증명한다. 행 수까지 적는 이유는
  * 이 티켓의 결정이 높이가 아니라 **「후보를 몇 개 보여 주는가」**라서다.
+ *
+ * ## 참/거짓만으로는 모자랐다 (design-review 회전 1 M2)
+ *
+ * 첫 판은 불변식의 판정만 찍었고, 그래서 사진은 「참」이라고 말하면서 **그 참이
+ * 얼마짜리인지**를 안 들었다. 이 파일이 지키는 규율이 정확히 그것을 금한다 —
+ * 주장을 사진이 반증할 수 있어야 한다(`GrowthProbe` 의 「크롬은 재고 나서 적는다」
+ * 절이 같은 결함을 한 번 고쳤다).
+ *
+ * 그래서 여유(열 − 도크)와 **본문 한 줄**을 나란히 적는다. 둘을 같이 놓으면 이
+ * 불변식이 자기 이름값을 하는지가 사진에서 읽힌다: 오늘의 답은 「시트가 열린
+ * 동안에는 어느 크기에서도 본문 한 줄이 안 남는다」이고, 그것이 이 배치가 이름을
+ * 준 띠다. 불변식이 실제로 지키는 것은 「대화가 한 줄 남는다」가 아니라 **「도크가
+ * 열 밖으로 안 나간다」**이며, 「대화가 남는다」는 시트가 **쉬는** 상태의 약속이다
+ * (그때 목록 몫은 `budget.list` — 874pt 기본 크기에서 212.9pt = 본문 9.7줄).
  */
 function MentionSheetProbe(): React.JSX.Element {
   const styles = useStyles(buildStyles);
@@ -762,6 +804,8 @@ function MentionSheetProbe(): React.JSX.Element {
   const budget = composerColumnBudget(fontScale, windowHeight);
   const row = mentionRowHeight(fontScale);
   const dock = budget.mentions + budget.composer + budget.dockChrome;
+  const slack = budget.column - dock;
+  const bodyRow = lineBox.body * fontScale;
 
   return (
     <View style={styles.probe}>
@@ -776,6 +820,9 @@ function MentionSheetProbe(): React.JSX.Element {
       </Text>
       <Text allowFontScaling={false} style={styles.probeRead}>
         {`대화 열 ${budget.column.toFixed(1)}pt — 도크 ≤ 열 ${dock <= budget.column ? '참' : '거짓'} · 옛 값이었다면 ${(180 + budget.composer + budget.dockChrome).toFixed(1)}pt (${180 + budget.composer + budget.dockChrome <= budget.column ? '참' : '거짓'})`}
+      </Text>
+      <Text allowFontScaling={false} style={styles.probeRead}>
+        {`여유 ${slack.toFixed(1)}pt · 본문 한 줄 ${bodyRow.toFixed(1)}pt — 시트가 열린 동안 타임라인에 한 줄 ${slack >= bodyRow ? '든다' : '안 든다'} · 시트가 쉬면 목록 몫 ${budget.list.toFixed(1)}pt = ${(budget.list / bodyRow).toFixed(1)}줄`}
       </Text>
     </View>
   );
