@@ -335,7 +335,10 @@ export default function SidebarScreen({
         ) : (
           <EmptyState
             headline="아직 참여한 채널이 없습니다."
-            detail="채널 만들기와 초대는 데스크톱에서 할 수 있습니다."
+            // 채널 범위의 행위는 「추가」다 (#1573 예약 · #1584). 「초대」는
+            // 워크스페이스에 새 사람을 부르는 낱말이고, 이 문장이 가리키는
+            // 데스크톱의 문은 「멤버 추가」 다이얼로그다.
+            detail="채널 만들기와 멤버 추가는 데스크톱에서 할 수 있습니다."
             refreshControl={refreshControl}
             testID="channels-empty"
           />
