@@ -1,4 +1,6 @@
 import { SquareTerminal } from "lucide-react";
+import { cn } from "@/design/lib/cn";
+import { CHIP_CLASS } from "@/features/common/chip";
 import type { WorkSessionIdleNotice } from "@momo/core/features/work/workSessionModel";
 
 /**
@@ -27,7 +29,15 @@ export function WorkSessionIdleCard({
         <span className="min-w-0 flex-1 text-body font-medium text-ink">
           작업 세션
         </span>
-        <span className="shrink-0 rounded-sm bg-surface-hover px-2 py-px text-timestamp font-medium text-ink-muted">
+        {/* 기하를 손으로 다시 적지 않는다 (#1515 회전 2). 앞 판은 `CHIP_CLASS` 와
+            **바이트 동일한** 클래스 목록을 직접 적었고, 그래서 이 칩이 칩을 훑는
+            가드에 보이지 않았다 — 그 사이 그릇은 `--surface-hover` 였고 이 카드의
+            <button> 이 바로 `hover:bg-surface-hover` 다. 가리키는 순간 그릇이
+            사라졌다(실측 두 스킴 대비 1.000 · OKLab 거리 0.0000). */}
+        <span
+          data-testid="work-session-idle-chip"
+          className={cn(CHIP_CLASS, "bg-muted-soft text-ink-muted")}
+        >
           {notice.eventLabel}
         </span>
       </span>

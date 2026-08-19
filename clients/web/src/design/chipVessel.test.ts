@@ -4,45 +4,48 @@ import { join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
 
 // =============================================================================
-// 칩의 그릇 규칙을 **전수로** 잰다 (#1515 회전 1 / design-review H-1).
+// 칩의 그릇 규칙을 **전수로** 잰다 (#1515 / design-review H-1).
 //
-// ## 왜 이 파일이 따로 있나
+// ## 회전 1 의 가드는 허용목록을 다른 허용목록으로 바꾼 것이었다 (회전 2)
 //
-// 앞 판의 강제는 두 곳이었다: 코어 역할표 두 개를 이름으로 막는 단정
-// (`sessionStatusClass.test.ts`)과, 그릇 토큰이 행 바탕과 다른 값인지 재는 팔레트
-// 단정(`tokens.contrast.test.ts`). 둘 다 **자기가 아는 표만** 본다. 그런데 팔레트와
-// 정본 문서가 선언한 것은 훨씬 넓은 규칙이다 — 「상호작용 상태를 그리는 토큰은
-// 정적인 그릇이 될 수 없다」. 규칙이 팔레트 전체인데 가드가 허용목록이면, 그 목록
-// 밖에서 같은 결함이 조용히 산다. 실제로 그랬다: 리뷰가 이 레포에서 **대비 1.000짜리
-// 산 결함 둘**을 더 찾아냈고(워크스트림 목록 행·ADE 서랍 카드), 그때 위 두 파일은
-// 전부 초록이었다.
+// 앞 판은 칩을 `cn(CHIP_CLASS, …)` 호출에서 찾았고 그 전제를 이렇게 적었다:
+// 「칩의 기하는 `CHIP_CLASS` 하나뿐이고 화면에 선 칩은 예외 없이 그것을 통과한다」.
+// **이 레포에서 거짓이다.** 여덟 자리가 기하를 손으로 다시 적고 있었고 그중 하나는
+// 살아 있었다 — `WorkSessionIdleCard` 의 「대기 전환」 칩은 `CHIP_CLASS` 와 바이트
+// 동일한 클래스 목록에 `bg-surface-hover` 를 얹었고, 그 칩을 인 <button> 이
+// `hover:bg-surface-hover` 다. 카드를 가리키면 그릇이 사라졌다(두 스킴 실측 대비
+// 1.000 · OKLab 거리 0.0000 — 이 티켓 전체를 정당화한 바로 그 측정).
 //
-// design-system README §6·§5.5②가 요구하는 모양이 그것이다: **전수로 재고 잔량을
-// 세라, 허용목록을 만들지 마라.** 그리고 §3.3이 컨트롤/컨테이너 프리미티브에 대해
-// 한 그대로다 — 분류를 한 자리에 적고, 그 분류가 **총체**임을 단정하고, 남은 위반은
-// 이름을 대어 적는다.
+// 총체성 주장도 근거가 없었다. `chipCalls >= 15` 는 `CHIP_CLASS` 가 **개명**되는
+// 것만 막는다. 아예 import 하지 않는 칩은 그 수를 그대로 두고 가드는 초록이다.
 //
-// ## 무엇을 「칩의 그릇」으로 세나 — 이름이 아니라 **쓰임**
+// ## 그래서 발견을 import 가 아니라 **기하**로 키잉한다
 //
-// 칩인지 아닌지를 변수 이름(`*_CHIP_CLASS`)으로 가르면 그것이야말로 허용목록이다.
-// 대신 이 레포에 이미 있는 사실 하나를 쓴다: **칩의 기하는 `CHIP_CLASS` 하나뿐이고**
-// (`features/common/chip.ts` — 네 번 복붙되던 것을 한 줄로 모은 그 상수), 화면에 선
-// 칩은 예외 없이 그것을 통과한다. 그래서 `cn(CHIP_CLASS, …)` 호출의 인자에서
-// 출발한다:
+// 칩을 칩으로 만드는 것은 상수의 이름이 아니라 모양이다: `rounded-sm px-2 py-px
+// text-timestamp`. 이 파일은 이제 그 시그니처를 지닌 **모든 클래스 목록**을 훑는다.
+// `CHIP_CLASS` 를 import 하든 안 하든 걸린다 — 즉 발견이 더 이상 「모두가 그 상수를
+// 쓴다」는 미검증 전제 위에 서지 않는다. 전제를 참으로 만드는 대신 **전제를 필요
+// 없게** 만든 것이다.
 //
-//   ① 그 안에 직접 적힌 문자열의 `bg-*`            (인라인 삼항·리터럴)
-//   ② 그 안에서 참조된 상수 표의 `키: "bg-…"` 항목  (역할표 — 코어·웹 어디에 있든)
+// 그 위에 기하 자체의 잔량도 함께 센다(아래 `HAND_ROLLED`): 손으로 적은 기하는
+// 목록에 적혀야 하고 그 수는 줄어들기만 한다. 새로 손으로 적으면 빨갛다.
 //
-// 이 둘이 「칩이 그릇을 얻는 길」의 전부다. 그래서 `button.tsx` 의 변형 표나
-// `SettingsFields` 의 `accent` 변형처럼 **칩이 아닌** 표는 자동으로 빠진다 — 그것들은
-// 컨트롤이고, 컨트롤이 `--accent-soft` 를 선택 상태로 입는 것은 이 규칙의 대상이
-// 아니다(그 토큰이 하는 일 그 자체다).
+// ## 무엇을 칩의 그릇으로 세나
 //
-// ## 잔량은 줄어들기만 한다
+//   ① 기하 시그니처를 지닌 클래스 목록 안의 `bg-*`      (손 기하·정본 칩 공통)
+//   ② 그 목록을 감싼 `cn(…)` 호출에서 참조된 상수 표의 `키: "bg-…"` 항목
 //
-// 아래 표는 아직 옛 그릇에 선 칩 전부다. 이 표가 **정확히** 맞아야 하므로, 새 위반은
-// 적지 않으면 빨갛고 수리는 표를 줄이지 않으면 빨갛다. 그리고 천장은 내려가기만
-// 한다 — 올리는 커밋은 이 주석을 지나야 한다.
+// 그래서 `button.tsx` 의 변형표처럼 **칩이 아닌** 표는 자동으로 빠진다 — 컨트롤이
+// `--accent-soft` 를 선택 상태로 입는 것은 이 규칙의 대상이 아니라 그 토큰이 하는 일
+// 그 자체다.
+//
+// ## 이 파일이 재지 **않는** 것
+//
+// `bg-*` 만 읽는다. 칩의 **테두리**는 기계가 아무것도 재지 않는다 —
+// `SettingsFields` 의 `StatusChip` 이 `border-ok`/`border-warn`/`border-danger` 톤
+// 셀로 일곱 설정 표면에 살아 있고, #1516 이 검증 칩에서 「컨트롤 문법」이라 판정해
+// 걷어낸 것이 바로 그 모양이다. 그 공백은 design-system README §5.3(아무것도 재지
+// 않는 축)에 기재돼 있다.
 // =============================================================================
 
 const WEB_SRC = fileURLToPath(new URL("..", import.meta.url));
@@ -75,7 +78,20 @@ const SOURCES: Source[] = [
   })),
 ];
 
-/** Balanced-paren body of every `cn(` call, so a chip's whole argument list is one string. */
+/** 칩의 기하 — 이 넷을 한 목록에 지니면 그것은 칩이다. */
+const GEOMETRY = ["rounded-sm", "px-2", "py-px", "text-timestamp"] as const;
+/** 그 기하가 **살아도 되는** 유일한 자리. */
+const CHIP_GEOMETRY_HOME = "clients/web/src/features/common/chip.ts";
+
+const FILL = /\bbg-[a-z][a-z0-9-]*/g;
+
+function hasGeometry(classList: string): boolean {
+  return GEOMETRY.every((c) =>
+    new RegExp(`(^|[\\s:])${c}($|\\s)`).test(classList)
+  );
+}
+
+/** 균형 잡힌 괄호로 잘라낸 `cn(` 호출 전체. 칩의 인자 목록이 한 문자열이 된다. */
 function cnCalls(src: string): { body: string; at: number }[] {
   const out: { body: string; at: number }[] = [];
   for (let i = src.indexOf("cn("); i !== -1; i = src.indexOf("cn(", i + 1)) {
@@ -95,11 +111,6 @@ function cnCalls(src: string): { body: string; at: number }[] {
   return out;
 }
 
-const FILL = /\bbg-[a-z][a-z0-9-]*/g;
-/** `키: "…bg-… …"` — 역할표 한 칸. 삼항의 가지(`? "bg-…"`)는 여기 걸리지 않는다. */
-const MAP_ENTRY =
-  /^\s*(?:"[^"]+"|'[^']+'|\[[^\]]+\]|[A-Za-z_$][\w$]*)\s*:\s*"([^"]*\bbg-[^"]*)"/;
-
 interface Fill {
   rel: string;
   line: number;
@@ -107,17 +118,30 @@ interface Fill {
   via: string;
 }
 
-/** 이름이 가리키는 상수 표의 `bg-*` 칸 전부. 코어에 있든 웹에 있든 찾는다. */
-function mapFills(name: string): Fill[] {
-  const hits: Fill[] = [];
-  for (const { rel, src } of SOURCES) {
-    const decl = src.indexOf(`const ${name}`);
-    if (decl === -1) continue;
-    const open = src.indexOf("{", decl);
-    if (open === -1) continue;
+/** `키: "…bg-… …"` — 역할표 한 칸. 삼항의 가지(`? "bg-…"`)는 걸리지 않는다. */
+const MAP_ENTRY =
+  /^\s*(?:"[^"]+"|'[^']+'|\[[^\]]+\]|[A-Za-z_$][\w$]*)\s*:\s*"([^"]*\bbg-[^"]*)"/;
+
+/**
+ * 이름 -> 그 상수 표의 `bg-*` 칸 전부. **한 번만** 훑어 색인해 둔다.
+ *
+ * 앞 판은 `src.indexOf("const " + name)` 으로 찾아 두 가지가 틀렸다: 같은 파일에 그
+ * 이름을 **접두로 갖는** 앞선 선언이 있으면 엉뚱한 표를 잡았고, 이름을 부를 때마다 전
+ * 파일을 다시 훑었다. 정확한 이름 경계로 한 번 색인하면 둘 다 사라지고, 이름 규칙
+ * (대문자 다섯 자 이상)으로 거를 이유도 없어진다 — 표가 아니면 색인에 없다.
+ */
+const MAP_INDEX = new Map<string, Fill[]>();
+for (const { rel, src } of SOURCES) {
+  for (const m of src.matchAll(/(?:^|[^\w$])const\s+([A-Za-z_$][\w$]*)/g)) {
+    const name = m[1];
+    const eq = src.indexOf("=", (m.index ?? 0) + m[0].length);
+    if (eq === -1) continue;
+    let k = eq + 1;
+    while (k < src.length && /\s/.test(src[k])) k++;
+    if (src[k] !== "{") continue; // `= {` 인 것만 표로 본다
     let depth = 0;
-    let end = open;
-    for (let j = open; j < src.length; j++) {
+    let end = k;
+    for (let j = k; j < src.length; j++) {
       if (src[j] === "{") depth++;
       else if (src[j] === "}") {
         depth--;
@@ -127,84 +151,192 @@ function mapFills(name: string): Fill[] {
         }
       }
     }
-    const base = src.slice(0, open).split("\n").length - 1;
-    src.slice(open, end).split("\n").forEach((line, k) => {
-      const m = line.match(MAP_ENTRY);
-      if (m)
-        for (const f of m[1].match(FILL) ?? [])
-          hits.push({ rel, line: base + k + 1, fill: f, via: `map ${name}` });
+    const base = src.slice(0, k).split("\n").length - 1;
+    const hits: Fill[] = [];
+    src.slice(k, end).split("\n").forEach((line, i) => {
+      const e = line.match(MAP_ENTRY);
+      if (e)
+        for (const f of e[1].match(FILL) ?? [])
+          hits.push({ rel, line: base + i + 1, fill: f, via: `map ${name}` });
     });
+    if (hits.length > 0 && !MAP_INDEX.has(name)) MAP_INDEX.set(name, hits);
   }
-  return hits;
 }
 
-function discover(): { fills: Fill[]; chipCalls: number } {
-  const found: Fill[] = [];
-  let chipCalls = 0;
+interface Site {
+  rel: string;
+  line: number;
+  handRolled: boolean;
+}
+
+function discover(): { fills: Fill[]; sites: Site[] } {
+  const fills: Fill[] = [];
+  const sites: Site[] = [];
   for (const { rel, src } of SOURCES) {
+    const claimed: [number, number][] = [];
     for (const { body, at } of cnCalls(src)) {
-      if (!body.includes("CHIP_CLASS")) continue;
-      chipCalls++;
+      const literals = body.match(/"[^"]*"/g) ?? [];
+      const geometric = literals.some((l) => hasGeometry(l.slice(1, -1)));
+      if (!body.includes("CHIP_CLASS") && !geometric) continue;
+      claimed.push([at, at + body.length]);
       const line = src.slice(0, at).split("\n").length;
-      for (const lit of body.match(/"[^"]*"/g) ?? [])
+      sites.push({
+        rel,
+        line,
+        handRolled: geometric && rel !== CHIP_GEOMETRY_HOME,
+      });
+      for (const lit of literals)
         for (const f of lit.match(FILL) ?? [])
-          found.push({ rel, line, fill: f, via: "inline" });
-      for (const id of new Set(body.match(/\b[A-Z][A-Z0-9_]{3,}\b/g) ?? [])) {
-        if (id === "CHIP_CLASS") continue;
-        found.push(...mapFills(id));
-      }
+          fills.push({ rel, line, fill: f, via: "inline" });
+      // 같은 호출에서 참조된 상수 표. 이름 규칙으로 거르지 않는다.
+      for (const id of new Set(body.match(/\b[A-Za-z_$][\w$]*\b/g) ?? []))
+        for (const h of MAP_INDEX.get(id) ?? []) fills.push(h);
+    }
+    // `cn()` 을 통하지 않고 className 에 직접 적힌 기하 — 회전 2 가 연 구멍이 이것이다.
+    for (const m of src.matchAll(/"([^"\n]{10,})"/g)) {
+      const lit = m[1];
+      const at = m.index ?? 0;
+      if (!hasGeometry(lit)) continue;
+      if (claimed.some(([s, e]) => at >= s && at < e)) continue;
+      const line = src.slice(0, at).split("\n").length;
+      sites.push({ rel, line, handRolled: rel !== CHIP_GEOMETRY_HOME });
+      for (const f of lit.match(FILL) ?? [])
+        fills.push({ rel, line, fill: f, via: "bare" });
     }
   }
-  // 한 표가 여러 화면에서 쓰이면 같은 선언이 여러 번 잡힌다. 세는 단위는 **선언**이다
-  // — 그래야 렌더 자리 하나가 늘었다고 잔량 수가 흔들리지 않는다.
   const seen = new Set<string>();
-  const fills = found.filter((f) => {
-    const key = `${f.rel}:${f.line}:${f.fill}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-  return { fills, chipCalls };
+  return {
+    fills: fills.filter((f) => {
+      const key = `${f.rel}:${f.line}:${f.fill}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    }),
+    sites,
+  };
 }
 
-/** 칩이 그릇으로 들 수 있는 값 전부 (`tokens.css` 의 `-soft` 가족 중 그릇 쪽). */
+/**
+ * 칩이 그릇으로 들 수 있는 값 전부 (`tokens.css` 의 `-soft` 가족 중 그릇 쪽).
+ *
+ * 같은 `-soft` 이름을 쓰지만 여기 **없는** 둘이 있고, 빠진 이유가 서로 다르다:
+ *
+ *   `--accent-soft`  선택된 행의 채움이다(사이드바·관제 줄·⌘K). 상호작용 상태이므로
+ *                    칩이 그것을 그릇으로 들면 그게 바로 이 파일이 막는 결함이다.
+ *   `--agent-soft`   **정체성**이다 — 에이전트임을 말하는 색이지 상태가 아니다
+ *                    (`MessageRow.tsx:171` · `AgentTurnBadge.tsx:31` ·
+ *                    `AgentHubRoute.tsx:180`,`:242` · `AgentWorkPanel.tsx:229` —
+ *                    트리의 모든 용례가 그렇다). 상태가 아니므로 hover 로 사라지지
+ *                    않고, 따라서 이 규칙이 다루는 결함을 애초에 낼 수 없다.
+ *
+ * 그 갈림을 적어 두는 이유: 앞 판이 `--agent-soft` 를 「선택된 행의 채움」으로 잘못
+ * 적었다. 지금은 아무것도 빨갛지 않지만, 훗날 에이전트 정체성 칩이 생기면 위반으로
+ * 찍히고 고치러 온 사람이 **존재하지 않는 규칙**을 가리키게 된다.
+ */
 const VESSELS = new Set(["bg-muted-soft"]);
 
 /**
- * 아직 옛 그릇에 선 칩 — 좌표와 수 (#1515 회전 1).
+ * 아직 옛 그릇에 선 칩 — 좌표와 수.
  *
  * **live** 는 그 칩을 인 행이 실제로 상호작용 바탕을 입어 대비 1.000 이 나는 자리이고,
- * **rule-only** 는 규칙 위반이되 호스트가 그 바탕을 입지 않아 지금 화면에서는 그릇이
- * 살아 있는 자리다. 회전 1 은 live 를 전부 닫았다(워크스트림 역할표 4칸 · ADE 서랍
- * 3칸). 남은 것은 rule-only 뿐이고, 후속 goal 후보다.
+ * **rule-only** 는 규칙 위반이되 지금 화면에서는 그릇이 살아 있는 자리다. live 는
+ * 전부 닫혔다(회전 1: 워크스트림 4칸·ADE 3칸 / 회전 2: 대기 카드 1칸).
  *
- *   StatusChip.tsx        20  턴·승인·로그인 핸드오프 세 역할표 + 완료 리포트 칩의
- *                             인라인 바탕. 타임라인 행은 hover 바탕을 입지 않는다.
- *   WorkSessionDetail.tsx  2  제어 창 칩. `--surface-raised` 카드 안에 산다.
+ * **rule-only 가 살아 있는 진짜 이유는 「그 행이 hover 하지 않아서」가 아니다.**
+ * 회전 1 이 그렇게 적었는데 거짓이었다 — `timeline/MessageRow.tsx:473` 은
+ * `hover:bg-surface-hover` 를 **입는다**. 실제로 그 칩들을 지켜 주는 것은 사이에 낀
+ * **불투명한 카드**다: `AgentCard.tsx:1034` 와 `ArtifactCard.tsx:711` 이
+ * `bg-surface-raised` 로 행과 칩 사이를 가로막는다. 이 구분은 중요하다 — 틀린
+ * 불변식을 적어 두면 그 카드를 평평하게 만드는 사람이 칩 스무 개를 한꺼번에 지운다.
+ *
+ *   StatusChip.tsx        20  턴·승인·로그인 핸드오프 세 역할표 + 완료 리포트 칩.
+ *                             불투명 카드 안에 산다(위 문단).
+ *   ObserverTerminal.tsx   4  관전 터미널 머리 칩 둘(손 기하) + **토글 버튼** 하나가
+ *                             칩 기하를 빌려 쓴 것(:1246, `aria-pressed`).
+ *   HostedAgentWizard.tsx  2  단계 표시기(:672). 이것도 칩이 아니라 **상태 표시**다.
+ *   WorkSessionDetail.tsx  2  제어 창 칩. `--surface-raised` 카드 안.
  *   DisplayController.tsx  2  제어 등급 칩. 같은 카드 문맥.
+ *   ArtifactCard.tsx       1  커밋/PR 칩. 손 기하 + 불투명 카드 안.
+ *   DisplayObserver.tsx    1  관전 머리 칩. 손 기하.
+ *   SettingsFields.tsx     1  설정 `StatusChip` 의 accent 톤 셀.
+ *   SessionVerificationChip.tsx 1  `--surface-raised` — #1516 이 이 줄을 지운다.
+ *
+ * **두 종류가 섞여 있고 고치는 법이 다르다.** 대부분은 「칩인데 그릇이 틀렸다」이고,
+ * `ObserverTerminal:1246`·`HostedAgentWizard:672` 는 반대다 — **컨트롤·상태 표시가 칩
+ * 기하를 빌려 쓴 것**이라 거기서는 `--accent-soft`(눌림·현재 단계)와
+ * `--surface-hover`(hover)가 **옳게** 쓰이고 있다. 그 둘의 결함은 그릇이 아니라
+ * 기하이고, 그래서 아래 `HAND_ROLLED` 에도 함께 서 있다. 스윕이 기하로 걸리는 이상
+ * 둘 다 여기 보이는 것이 맞고, 「보이지만 사유가 다르다」를 적어 두지 않으면 다음
+ * 사람이 눌림 상태를 그릇으로 오해해 지운다.
  *
  * 이 표에서 한 줄을 지우려면 그 자리를 실제로 고쳐야 하고, 새 위반을 들이려면 여기
- * 적어야 한다. 둘 다 리뷰를 지나간다.
+ * 적어야 한다. 둘 다 리뷰를 지나간다. **후속 goal 후보**: 이 잔량 전부.
  */
 const RESIDUE: readonly (readonly [string, number])[] = [
+  ["clients/web/src/features/hostedAgents/HostedAgentWizard.tsx", 2],
+  ["clients/web/src/features/settings/SettingsFields.tsx", 1],
+  ["clients/web/src/features/timeline/ArtifactCard.tsx", 1],
   ["clients/web/src/features/timeline/StatusChip.tsx", 20],
   ["clients/web/src/features/work/DisplayController.tsx", 2],
+  ["clients/web/src/features/work/DisplayObserver.tsx", 1],
+  ["clients/web/src/features/work/ObserverTerminal.tsx", 4],
   ["clients/web/src/features/work/SessionVerificationChip.tsx", 1],
   ["clients/web/src/features/work/WorkSessionDetail.tsx", 2],
 ];
 
 /** 잔량 천장. **내려가기만 한다** — 올리는 변경은 위 문단을 지나야 한다. */
-const RESIDUE_CEILING = 25;
+const RESIDUE_CEILING = 34;
 
-describe("칩의 그릇 규칙은 팔레트 전체에 걸린다 (#1515 회전 1)", () => {
-  const { fills, chipCalls } = discover();
+/**
+ * 기하를 손으로 다시 적은 자리 — 좌표와 수.
+ *
+ * 이것이 회전 1 의 가드를 눈멀게 한 축이다. 발견은 이제 기하로 키잉하므로 이 자리들도
+ * 전부 보이지만, **기하가 하나여야 한다**는 규칙 자체는 따로 잰다: 여기 적히지 않은
+ * 손 기하가 생기면 빨갛고, 이 수는 줄어들기만 한다.
+ *
+ * 전부 `CHIP_CLASS` 로 옮기지 않은 이유는 다섯이 `font-medium` 을 지니지 않아 옮기는
+ * 순간 그 표면들의 글자 굵기가 바뀌기 때문이다 — 토큰 PR 이 실어 나를 시각 변경이
+ * 아니다. **후속 goal 후보**이고, 그때까지 이 수가 새 손 기하를 막는다.
+ */
+const HAND_ROLLED: readonly (readonly [string, number])[] = [
+  ["clients/web/src/features/hostedAgents/HostedAgentWizard.tsx", 1],
+  ["clients/web/src/features/settings/SettingsFields.tsx", 1],
+  ["clients/web/src/features/timeline/ArtifactCard.tsx", 1],
+  ["clients/web/src/features/work/DisplayObserver.tsx", 1],
+  ["clients/web/src/features/work/ObserverTerminal.tsx", 3],
+];
 
-  it("스윕이 실제로 칩을 보고 있다 — 눈먼 가드는 언제나 초록이다", () => {
-    // `CHIP_CLASS` 가 이름을 바꾸거나 칩이 그 상수를 안 쓰기 시작하면 위 discover 가
-    // 조용히 빈 배열을 내고, 그러면 아래 단정이 전부 무의미해진다. 이 레포가 실제로
-    // 세우는 칩 자리는 열여덟이다.
-    expect(chipCalls).toBeGreaterThanOrEqual(15);
-    expect(fills.length).toBeGreaterThanOrEqual(30);
+/** 손 기하 천장. **내려가기만 한다.** */
+const HAND_ROLLED_CEILING = 7;
+
+describe("칩의 그릇 규칙은 팔레트 전체에 걸린다 (#1515)", () => {
+  const { fills, sites } = discover();
+
+  it("발견이 import 가 아니라 기하로 걸린다 — 손으로 적은 칩도 보인다", () => {
+    // 회전 1 의 `chipCalls >= 15` 는 `CHIP_CLASS` 개명만 막았고 import 하지 않는
+    // 칩에는 눈이 멀었다. 이 단정은 그 반대를 잰다: 손 기하가 실제로 발견에
+    // 걸리는가. 걸리지 않으면 스윕이 다시 허용목록이 된 것이다.
+    const handRolledFound = new Set(
+      sites.filter((s) => s.handRolled).map((s) => s.rel)
+    );
+    for (const [rel] of HAND_ROLLED)
+      expect(handRolledFound.has(rel), `${rel} 의 손 기하를 스윕이 못 봤다`).toBe(
+        true
+      );
+    expect(sites.length).toBeGreaterThanOrEqual(20);
+  });
+
+  it("칩의 기하는 하나다 — 손으로 적은 자리가 표와 정확히 맞는다", () => {
+    const counted = new Map<string, number>();
+    for (const s of sites)
+      if (s.handRolled) counted.set(s.rel, (counted.get(s.rel) ?? 0) + 1);
+    expect(
+      [...counted].sort(([a], [b]) => a.localeCompare(b)),
+      "손 기하 표가 낡았다 — `CHIP_CLASS` 로 옮겼으면 줄이고, 새로 적었으면 적어라"
+    ).toEqual(HAND_ROLLED.map(([rel, n]) => [rel, n]));
+    expect(
+      [...counted.values()].reduce((a, b) => a + b, 0)
+    ).toBeLessThanOrEqual(HAND_ROLLED_CEILING);
   });
 
   it("칩이 그릇을 얻는 모든 자리가 분류된다 — 미분류가 없다", () => {
@@ -223,9 +355,8 @@ describe("칩의 그릇 규칙은 팔레트 전체에 걸린다 (#1515 회전 1)
     for (const f of fills)
       if (!VESSELS.has(f.fill))
         counted.set(f.rel, (counted.get(f.rel) ?? 0) + 1);
-    const actual = [...counted].sort(([a], [b]) => a.localeCompare(b));
     expect(
-      actual,
+      [...counted].sort(([a], [b]) => a.localeCompare(b)),
       "잔량 표가 낡았다 — 고쳤으면 줄이고, 늘었으면 적어라"
     ).toEqual(RESIDUE.map(([rel, n]) => [rel, n]));
   });
@@ -233,16 +364,12 @@ describe("칩의 그릇 규칙은 팔레트 전체에 걸린다 (#1515 회전 1)
   it("잔량은 줄어들기만 한다", () => {
     const total = fills.filter((f) => !VESSELS.has(f.fill)).length;
     expect(total).toBeLessThanOrEqual(RESIDUE_CEILING);
-    expect(
-      RESIDUE.reduce((sum, [, n]) => sum + n, 0),
-      "천장과 표가 어긋난다"
-    ).toBeLessThanOrEqual(RESIDUE_CEILING);
   });
 
   it("옛 그릇의 정체를 이름으로 적어 둔다 — 상호작용 상태이거나, 그릇이 아닌 표면", () => {
-    // 잔량이 무엇 때문에 잔량인지가 표에서 사라지면, 다음 사람은 이 목록을 그냥
-    // 「예외」로 읽는다. 실제로는 두 종류뿐이다: 행이 입는 상태 토큰(그래서 그 행이
-    // hover 하는 순간 사라진다)과, 그릇 가족이 아닌 중립 표면.
+    // 잔량이 무엇 때문에 잔량인지가 표에서 사라지면 다음 사람은 그냥 「예외」로
+    // 읽는다. 실제로는 두 종류뿐이다: 행이 입는 상태 토큰(그래서 그 행이 hover 하는
+    // 순간 사라진다)과, 그릇 가족이 아닌 중립 표면.
     const kinds = new Set(
       fills.filter((f) => !VESSELS.has(f.fill)).map((f) => f.fill)
     );
