@@ -9,6 +9,7 @@ import {
 import { Button } from "@/design/ui/button";
 import { useEscapeLayer } from "@/design/ui/escapeLayer";
 import { cn } from "@/design/lib/cn";
+import { choiceRadiosHintId } from "./fieldIds";
 
 // =============================================================================
 // Presentational parts shared by the settings sections (R-1 §5). Flat rows and
@@ -294,7 +295,7 @@ export function ChoiceRadios({
   hint?: string;
   testId?: string;
 }) {
-  const hintId = hint ? `${name}-hint` : undefined;
+  const hintId = hint ? choiceRadiosHintId(name) : undefined;
   return (
     <fieldset
       className="flex min-w-0 flex-col gap-1"

@@ -25,6 +25,13 @@
 #   8  external_font webfont / CDN / <link href="http (CSP + offline)
 #   9  hype          filler-hype vocabulary in user-visible copy
 #   10 pure_bw       pure #000000 / #ffffff / bg-black / bg-white
+#   11 progress_word 진행 낱말꼴 「명사 + 중」 위반 (「저장하는 중」)   [AST, #1511]
+#   12 latin_particle 라틴 낱말과 조사 사이 공백 (「Esc 는」)          [AST, #1511]
+#
+# 11·12 는 emdash 와 같은 AST 단계가 판정한다(렌더 문자열·JSX 텍스트만, 주석·
+# 테스트 이름 제외 — 규칙 정의는 scripts/design_preflight_ast.mjs). 코어 단계도
+# 같은 두 분류를 함께 건다: 진행 낱말은 코어 상수로 폰까지 출하되기 때문이다
+# (CANCEL_BUSY_LABEL 이 그 자리였다).
 #
 # Excluded by design:
 #   - src/design/tokens.css          the token definition; raw hex is its job
@@ -103,7 +110,7 @@ ALLOW_RE='design-preflight-allow'
 # 통과시키면 emdash 가 0 으로 세어지고, "안 돈 것"이 초록과 구별되지 않는다 —
 # 이 레포가 게이트마다 세워 온 규칙이다(verify_merge_tree.sh 머리말).
 WEB_STRING_SCAN="$SCRIPT_DIR/design_preflight_web_strings.mjs"
-EMDASH_AST_OUT=""
+STRINGS_AST_OUT=""
 
 prepare_string_scan() {
   if [ ! -f "$WEB_STRING_SCAN" ]; then
@@ -115,9 +122,9 @@ prepare_string_scan() {
     echo "  (이 단계는 건너뛰지 않는다: 안 돈 것을 0 으로 세지 않기 위해서다)" >&2
     exit 2
   fi
-  EMDASH_AST_OUT="$(mktemp "${TMPDIR:-/tmp}/momo-preflight-emdash.XXXXXX")" || exit 2
-  trap 'rm -f "$EMDASH_AST_OUT"' EXIT
-  if ! node "$WEB_STRING_SCAN" --emit >"$EMDASH_AST_OUT"; then
+  STRINGS_AST_OUT="$(mktemp "${TMPDIR:-/tmp}/momo-preflight-emdash.XXXXXX")" || exit 2
+  trap 'rm -f "$STRINGS_AST_OUT"' EXIT
+  if ! node "$WEB_STRING_SCAN" --emit >"$STRINGS_AST_OUT"; then
     echo "design pre-flight (web): 문자열 AST 스캔이 실패했다 (위 메시지 참조)." >&2
     exit 2
   fi
@@ -164,7 +171,7 @@ drop_issue_refs() {
   done
 }
 
-KEYS="emdash raw_color inline_style arbitrary_tw ai_gradient toast naked_focus external_font hype pure_bw"
+KEYS="emdash raw_color inline_style arbitrary_tw ai_gradient toast naked_focus external_font hype pure_bw progress_word latin_particle"
 
 label_for() {
   case "$1" in
@@ -178,6 +185,8 @@ label_for() {
     external_font) echo "external font or CDN reference (breaks CSP and offline, SKILL §1)" ;;
     hype)          echo "filler-hype vocabulary in user-visible copy (SKILL §7)" ;;
     pure_bw)       echo "pure black/white (use the surface tokens, they adapt to scheme)" ;;
+    progress_word) echo "진행 낱말은 「명사 + 중」 (#1501 정본·#1511 게이트) — 「-하는 중」은 고유어 어간(ast.mjs NATIVE_HANEUN_STEMS)만, 문장 꼴 「-하는 중입니다」는 검사 밖" ;;
+    latin_particle) echo "라틴 낱말 뒤 조사는 붙여 쓴다 (「Esc 는」→「Esc는」, #1511·#1560 M①) — break-keep 아래서 띈 조사가 줄머리 고아로 선다" ;;
     *)             echo "$1" ;;
   esac
 }
@@ -202,9 +211,17 @@ scan_category() {
       # `index.html` 은 TS 가 아니라 셸 문서다. 제목과 본문이 적힌 그대로 사용자에게
       # 보이므로 여기서는 파서가 아니라 줄 기반으로 훑는다.
       {
-        cat "$EMDASH_AST_OUT"
+        sed -n 's/^emdash|//p' "$STRINGS_AST_OUT"
         grep -nE '—|–' "$HTML" 2>/dev/null | sed "s|^|$HTML:|"
       } | filter_common
+      ;;
+    progress_word)
+      # emdash 와 같은 AST 실행(#1511). 폰 표면은 이 쉘의 범위 밖이지만 코어
+      # 단계(run_core_stage)가 같은 분류를 걸어 코어發 낱말은 거기서 잡힌다.
+      sed -n 's/^progress_word|//p' "$STRINGS_AST_OUT" | filter_common
+      ;;
+    latin_particle)
+      sed -n 's/^latin_particle|//p' "$STRINGS_AST_OUT" | filter_common
       ;;
     raw_color)
       grep -rnE "$COLOR_RE" \
@@ -394,7 +411,7 @@ fi
 echo "== design pre-flight (web), SKILL momo-design-taste-web §10 =="
 echo "   scanned: $SRC, $HTML"
 echo "   excluded: src/design/tokens.css, src/design/tokens.contrast.test.ts"
-echo "   emdash:   AST (문자열 리터럴·JSX 텍스트만, *.test.ts(x)·*.d.ts 제외) — #1141"
+echo "   emdash·progress_word·latin_particle: AST (문자열 리터럴·JSX 텍스트만, *.test.ts(x)·*.d.ts 제외) — #1141·#1511"
 echo ""
 
 overall=0
@@ -414,7 +431,7 @@ echo ""
 if [ "$overall" -ne 0 ]; then
   echo "FAIL  web: 위 분류에 위반이 있다."
 else
-  echo "OK    web: 10/10 categories clean."
+  echo "OK    web: 12/12 categories clean."
 fi
 
 # 코어 단계는 웹이 붉어도 **돈다**. 한 번의 실행이 두 층을 다 말해야 고치는 사람이
@@ -435,7 +452,7 @@ if [ "$overall" -ne 0 ]; then
   exit 1
 fi
 
-echo "RESULT: PASS, web 10/10 + core 3/3 categories clean."
+echo "RESULT: PASS, web 12/12 + core 5/5 categories clean."
 echo "  Still manual (SKILL §10 checklist): light AND dark reviewed, four states"
 echo "  present, keyboard path exists, long Korean strings do not overflow."
 exit 0
