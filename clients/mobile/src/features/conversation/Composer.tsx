@@ -429,12 +429,16 @@ export function composerColumnBudget(
 // 둘이 같은 수를 가리키므로 이 배치는 「몇 개를 보여 주는가」를 **안 바꾼다** —
 // 바꾸는 것은 다섯째 행의 이마 4pt 와, 큰 글자에서 열을 넘던 초과분이다.
 //
-// 그리고 상한이 **실제로 무는 창은 큰 것들뿐이다**: 열이 다섯 행을 허락하려면
-// 창이 933pt 를 넘어야 하고(⌊(h × 0.39 − 128 − 16) ÷ 44⌋ ≥ 5), 오늘 배송되는
-// 세로 높이 중 그런 것은 956 · 1032 · 1180 · 1366 이다(가장 큰 아이폰과 아이패드
-// 들 — 테스트가 그 목록을 값으로 든다). 거기서 넷이 하는 일은 도크가 창 크기를
-// 따라 메뉴로 자라지 않게 잡는 것이다. 그 아래에서는 열이 먼저 물고, 그 위는
-// 스크롤이 받는다(시트는 `ScrollView` 다).
+// 그리고 상한이 **실제로 무는 창은 큰 것들뿐이다**: **배수 1 에서** 열이 다섯
+// 행을 허락하려면 창이 933pt 를 넘어야 하고(⌊(h × 0.39 − 128 − 16) ÷ 44⌋ ≥ 5),
+// 그 조건을 만족하는 배송 높이는 956 · 1024 · 1032 · 1180 · 1366 이다(가장 큰
+// 아이폰과 아이패드들 — 테스트가 그 목록을 값으로 든다). **문턱은 배수를 따라
+// 움직인다**: 사다리 아래쪽에서는 입력창이 작아져 열이 더 일찍 다섯 행을 허락하고
+// (0.823 에서 883.5pt — 926 도 문다), 위쪽에서는 늦어져 3.571 에서는 어느 배송
+// 높이도 안 문다. 933 을 한정 없이 적으면 그 움직임이 안 보인다(회전 2). 상한이
+// 무는 자리에서 넷이 하는 일은 도크가 창 크기를 따라 메뉴로 자라지 않게 잡는
+// 것이다. 그 아래에서는 열이 먼저 물고, 그 위는 스크롤이 받는다(시트는
+// `ScrollView` 다).
 //
 // **이 결정은 표면 한정이다.** 웹은 같은 물음에 다르게 답한다 — 상한 없이
 // `MENTION_LIMIT`(6) 을 전부 띄운다(`clients/web/src/features/chat/Composer.tsx`).
@@ -464,8 +468,15 @@ export function composerColumnBudget(
 // 불변식을 이기고, 그것이 의도다(`composerMaxHeight` 의 `MIN_ROWS` 가 같은
 // 자리에서 같은 이유로 이긴다). **그 띠는 값으로 세어 뒀다** —
 // `composerDraftOffline.test.tsx` 의 `FLOOR_WINS` 가 사다리 전수 × 기기 전수에서
-// 거짓인 세 자리(667×3.143 · 667×3.571 · 744×3.571)와 각각의 초과분을 든다.
-// 셋 다 옛 고정 180 이 훨씬 더 넘던 자리다(92.2 · 111.0 · 81.0 → 6.5 · 38.1 · 8.1).
+// 거짓인 **네** 자리(667×3.143 · 667×3.571 · 736×3.571 · 744×3.571)와 각각의
+// 초과분을 든다. 넷 다 옛 고정 180 이 훨씬 더 넘던 자리다(92.2 · 111.0 · 84.1 ·
+// 81.0 → 6.5 · 38.1 · 11.2 · 8.1). 736(iPhone 8 Plus)이 그 목록에 있는 이유는
+// 이 앱의 배포 하한이 **iOS 16.4** 라서다(`project.pbxproj` 여섯 구성 전부) —
+// 「iOS 26 이 도는 기기」로 격자를 세우면 이 한 자리가 통째로 안 보인다(회전 2 M2).
+// 그리고 목록으로 닫히는 것은 아이폰까지다: `UIRequiresFullScreen` 이 없어
+// 아이패드 멀티태스킹 창 높이는 연속값이라 어떤 목록도 전수가 못 된다. 그 몫은
+// 표가 아니라 **기제 단정**이 진다 — 「도크가 열을 넘었다면 시트는 반드시 바닥에
+// 앉아 있다」가 격자와 무관하게 참이고, 테스트가 그것을 촘촘한 연속 쓸이로 든다.
 //
 // ## 이 불변식이 **지키는 것**과 안 지키는 것 (design-review 회전 1 M2)
 //
@@ -504,6 +515,21 @@ const MENTION_MAX_ROWS = 4;
 
 /** 시트가 절대로 그 아래로 안 내려가는 행 수 — 고른 것과 그 옆의 것. */
 const MENTION_MIN_ROWS = 2;
+
+/**
+ * 행 끝의 표지 — **눈과 스크린리더가 같은 문자열을 든다** (design-review 회전 2 M3).
+ *
+ * 상수인 이유는 사본이 갈라졌기 때문이다: 표지는 행에 그려져 있는데
+ * `accessibilityLabel` 은 이름과 핸들만 들었고, `Pressable` 의 기본
+ * `accessible={true}` 가 그 라벨로 자식들을 덮는다. 그래서 화면에서는 파란 이름과
+ * 표지로 갈라져 있는 두 종류가 VoiceOver 에서는 **똑같이** 읽혔다 — 에이전트를 1급
+ * 멤버로 세우는 제품에서 「이 후보가 사람인가 에이전트인가」는 부수 정보가 아니다.
+ *
+ * 어휘가 하나뿐인 것도 이 상수가 사는 이유다: 표지는 `kind === 'agent'` 일 때만
+ * 서고 그때 문자열은 언제나 이것이라, 두 자리에 각자 적으면 사본이 조용히 갈라진다
+ * (디자인 시스템 §5.5).
+ */
+const MENTION_AGENT_KIND = '에이전트';
 
 /**
  * 후보 한 행의 세로.
@@ -1027,35 +1053,57 @@ export function Composer({
             // 대기 전부터 더 있다고 알려 주는 것」이 아니다. 후자는 페이드
             // 마스크나 개수 표지가 필요하고, 그것은 이 티켓의 결정(상한)이
             // 아니다.
+            //
+            // **막대가 행 끝의 표지를 가리지 않는다**는 것은 사진이 아니라 산수로
+            // 안다(회전 2 nitpick — iOS 막대는 끄는 동안에만 보여서 정지 사진에
+            // 안 찍힌다): 막대는 가장자리 바깥쪽 ~5pt 안에 서고, 행의 조각들은
+            // `SAFE_GUTTER`(16) 만큼 안쪽에서 끝난다. 표지가 가장 오른쪽까지
+            // 가는 AX-XXL 에서도 그 사이에 11pt 가 남는다.
             showsVerticalScrollIndicator>
             {candidates.map(member => (
               <Pressable
                 key={member.id}
                 accessibilityRole="button"
-                accessibilityLabel={`${member.displayName} @${member.handle}`}
+                // 눈에 보이는 것과 같은 것을 읽는다 (회전 2 M3). 이 `Pressable` 은
+                // `accessible` 기본값이 참이라 이 한 줄이 자식 셋을 통째로 덮는다 —
+                // 표지를 여기 안 실으면 스크린리더에서 사람 행과 에이전트 행이
+                // 구별되지 않는다.
+                accessibilityLabel={[
+                  member.displayName,
+                  `@${member.handle}`,
+                  member.kind === 'agent' ? MENTION_AGENT_KIND : null,
+                ]
+                  .filter(Boolean)
+                  .join(' ')}
                 onPress={() => accept(member)}
                 style={({pressed}) => [
                   styles.mentionRow,
                   pressed && styles.pressed,
                 ]}
                 testID="mention-option">
-                <Text
-                  style={[
-                    styles.mentionName,
-                    member.kind === 'agent' && styles.mentionNameAgent,
-                  ]}
-                  numberOfLines={1}>
-                  {member.displayName}
-                </Text>
-                <Text style={styles.mentionHandle} numberOfLines={1}>
-                  {`@${member.handle}`}
-                </Text>
+                {/* 이름과 핸들은 **한 묶음**이다 — 그 묶음이 자라고, 그 안에서 둘이
+                    함께 줄어든다. 형제 셋(`AgentsScreen`·`SidebarScreen`·
+                    `HostedConnectionsScreen`)의 `rowText` + `rowTitleLine` 과 같은
+                    구조이고, 스타일 쪽 주석이 왜 그 구조여야 하는지를 든다. */}
+                <View style={styles.mentionIdentity} testID="mention-identity">
+                  <Text
+                    style={[
+                      styles.mentionName,
+                      member.kind === 'agent' && styles.mentionNameAgent,
+                    ]}
+                    numberOfLines={1}>
+                    {member.displayName}
+                  </Text>
+                  <Text style={styles.mentionHandle} numberOfLines={1}>
+                    {`@${member.handle}`}
+                  </Text>
+                </View>
                 {member.kind === 'agent' ? (
                   // 한 줄로 못 박는다 — 줄어들 수 있게 해 둔 조각이(스타일의
                   // `flexShrink`) 한 줄로 안 묶이면 접히고, 접힌 행은 이 배치가
                   // 세운 정수 행 산술이 세는 높이를 넘는다.
                   <Text style={styles.mentionKind} numberOfLines={1}>
-                    에이전트
+                    {MENTION_AGENT_KIND}
                   </Text>
                 ) : null}
               </Pressable>
@@ -1318,42 +1366,89 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   // 없으면 RN 이 광학 중심으로 어긋나게 놓는다(`tokens.ts` 의 실측). 그 선언이
   // `mentionRowHeight` 의 산수가 화면과 같은 수를 쓰는 근거이기도 하다.
   //
-  // **그리고 행은 넘치는 대신 잘려야 한다** (design-review 회전 1 H2). Yoga 의
-  // `flexShrink` 기본값은 0 이고(이 트리의 `AgentDetailScreen.tsx` 가 그 사실을
-  // 자기 주석에 적어 두었다 — 거기서는 안 줄어드는 칩이 `flex: 1` 짜리 제목을
-  // 「릴레이 재…」로 만들었다), 여기서는 양보할 수 있는 것이 `mentionHandle`
-  // 하나뿐이었다. 그래서 긴 한글 이름 + 행 끝의 「에이전트」 조합에서 행은 잘리는
-  // 대신 **넘쳤고**, 넘쳐서 화면 밖으로 나가는 것은 표지 쪽이었다 — 캡처
-  // `dock1480-mention-sheet-axxl-before-dark.png` 의 첫 줄이 그 자리다(핸들이
-  // 「@」 한 글자로 끊긴 채 오른쪽 화면 끝에서 잘리고, 「에이전트」는 사진에
-  // 없다). 이 목록의 일은 「무엇을 고를 수 있는가」를 보여 주는 것이므로, 조용히
-  // 사라지는 조각이 있어서는 안 된다.
+  // ## 행은 넘치는 대신 **잘리고**, 잘린 조각은 **앞을 남긴다**
   //
-  // 같은 모양(이름 + @핸들)을 이미 이렇게 푼 형제가 셋이다 — `AgentsScreen`
-  // (`rowTitle`·`rowHandle`) · `SidebarScreen` · `HostedConnectionsScreen`. 웹도
-  // 같은 답이다(양쪽 `truncate`).
+  // 옛 판에서 양보할 수 있는 조각은 `mentionHandle` 하나뿐이었다(Yoga 의
+  // `flexShrink` 기본값은 0 — 이 트리의 `AgentDetailScreen.tsx` 가 그 사실을 자기
+  // 주석에 적어 두었다). 그래서 긴 한글 이름 + 행 끝의 「에이전트」 조합에서 행은
+  // 잘리는 대신 **넘쳤고**, 넘쳐서 화면 밖으로 나가는 것은 표지였다(캡처
+  // `dock1480-mention-sheet-axxl-before-dark.png` 의 첫 줄).
   //
-  // ## 누가 양보하는가 — **이름만**, 그리고 그것은 재서 골랐다
+  // 회전 1 은 그 넘침을 잡으면서 「조용히 사라지는 조각이 있어서는 안 된다」를
+  // 원칙으로 세웠는데, **그 판의 렌더가 그 원칙을 어겼다**(회전 2 H). 핸들에
+  // `flex: 1` 이 붙어 있었기 때문이다 — `flex: 1` 은 `flexBasis: 0` 이라 핸들은
+  // 압력이 오기 전부터 **자기 폭이 없는 조각**이고, 남는 자리만 먹는다. 자리가
+  // 모자라면 줄어드는 것이 아니라 처음부터 0 이다. 사진이 그대로 든다:
+  // `dock1480-mention-sheet-ax-*.png`(2.143)의 첫 행에 핸들은 맨 「@」 한 글자로
+  // 남고 생략부호도 없으며, `axxl-*`(3.143)에는 **아예 없다** — 회전 1 이 옛 판의
+  // 결함으로 서술한 바로 그 모양이다.
   //
-  // 형제들에는 이 줄의 셋째 조각(고정폭 표지)이 없어서 그 자리에는 관례가 없다.
-  // 두 판을 같은 크기(AX-XXL · 배수 3.143)에서 실제로 찍어 비교했다:
+  // 사라지는 것이 **유일한 식별자**라 이것은 미관이 아니다. 삽입되는 값은 핸들이고
+  // (`mentionQuery.ts`: *the ACCEPTED value is always the handle*), 표시 이름은
+  // 유일하지 않다 — 이 레포는 그 사실에 이름까지 붙여 뒀다(코어의 `isAmbiguousName`,
+  // 폰의 `features/sidebar/rows.ts` 가 「이름이 모호하면 핸들을 딸려 보낸다」를
+  // 구현하고, `SidebarScreen` 의 「두 김인턴」 주석이 실제 사례다). 게다가 후보는
+  // 정렬돼 있지 않아(`matchMembers` 는 거르고 자를 뿐이다) 「첫 줄이 내가 부른
+  // 사람」이라는 대안 근거도 없다.
   //
-  //   표지도 `flexShrink: 1`   「프로덕트디자…」 + 「에…」
-  //   표지는 `flexShrink: 0`   「프로덕트디…」 + 「에이전트」    <- 이 판
+  // ## 양보 순서 — 형제 셋과 **같은 문법**으로
   //
-  // 앞의 판은 넘치지는 않지만 표지를 **뜻 없는 조각**으로 만든다. 「에…」는
-  // 무엇이 있었다는 것만 알려 주고 무엇인지는 안 알려 주는데, 그것이 이 배치가
-  // 옛 값 180 을 기각한 그 이유(반노출)의 가로판이다. 이름은 반대다 — 잘려도
-  // 앞이 남으므로 「프로덕트디…」가 여전히 사람을 가리키고, 그것이 형제 셋이
-  // 이름에만 `flexShrink` 를 주는 이유이기도 하다.
+  // 같은 모양(이름 + @핸들)을 이미 푼 형제가 셋인데(`AgentsScreen` ·
+  // `SidebarScreen` · `HostedConnectionsScreen`), 셋 다 `rowTitle` 과 `rowHandle`
+  // 에 **둘 다 `flexShrink: 1`** 을 주고 그 둘을 `flex: 1` 짜리 묶음(`rowText` +
+  // `rowTitleLine`)에 넣는다. 두 조각이 각자의 폭에 비례해 함께 내므로 **둘 다
+  // 앞을 남긴다.** 이 행도 이제 같다:
   //
-  // 표지가 행을 넘길 위험은 없다: 「에이전트」는 배수 3.571 에서도 ~171pt 이고
-  // 행은 ~358pt 다(넘기려면 배수가 7 을 넘어야 하는데 사다리에 그런 칸이 없다).
-  // `flexShrink: 0` 을 **적어 두는** 이유는 그것이 Yoga 기본값이라서가 아니라,
-  // 위 비교를 아는 사람만 이 줄을 지우게 하려는 것이다.
+  //   `mentionIdentity`  `flex: 1`      묶음이 자란다 → 표지가 행 끝에 선다
+  //   `mentionName`      `flexShrink: 1` 폭에 비례해 낸다
+  //   `mentionHandle`    `flexShrink: 1` 폭에 비례해 낸다
+  //   `mentionKind`      `flexShrink: 0` 안 낸다
   //
-  // 양보하는 순서는 Yoga 가 정한다: `mentionHandle` 은 `flex: 1`(=basis 0)이라
-  // 남는 자리를 먼저 갖고 먼저 내놓고, 그러고도 모자라면 이름이 낸다.
+  // 묶음이 `flex: 1`(basis 0)이라 표지는 자기 폭을 그대로 받고 묶음이 나머지를
+  // 받는다 — 세 조각의 양보량이 이 네 줄로 결정된다. 실측(874pt 창, 첫 행이 이
+  // 앱에서 가장 긴 이름 `프로덕트디자인 김인턴 / @product-design-intern`):
+  //
+  //   2.143   「프로덕트…」  「@product-…」  「에이전트」
+  //   3.143   「프로…」      「@pro…」       「에이전트」
+  //
+  // ## 표지의 `flexShrink: 0` 은 판정이 아니라 **못이다**
+  //
+  // 회전 1 은 이 줄을 두 판의 사진 비교로 정당화했다(「표지도 줄이면 「에…」가
+  // 되는데 그것은 뜻이 없다」). **그 논증은 이제 두 군데서 안 선다**(회전 2).
+  //
+  // ① 근거가 틀렸다. 이 표지의 어휘는 단일값이라(`kind === 'agent'` 일 때
+  //    「에이전트」 하나 — `MENTION_AGENT_KIND`) 잘려도 **존재만으로 정보가
+  //    완결된다.** 「에…」는 「무엇이 있었다」가 아니라 그냥 「에이전트」다.
+  // ② 비교 자체가 재현되지 않는다. 위 구조에서는 행에 음의 여유가 **아예 안
+  //    생긴다** — 묶음이 basis 0 이라 표지가 제 폭을 먼저 받고 남는 것을 묶음이
+  //    받으므로, 압력은 전부 묶음 안에서 풀린다. 그래서 표지를 `flexShrink: 1` 로
+  //    바꿔 같은 크기에서 다시 찍어도 사진은 **한 픽셀도 안 변한다**(회전 2 에서
+  //    실제로 찍어 확인했다).
+  //
+  // 그러니 이 줄은 판정의 결과가 아니라 **못**이다. 표지가 실제로 줄어들 수 있는
+  // 띠는 표지 혼자 행보다 넓어져 묶음이 0 으로 무너지는 자리뿐이고, 거기서 잘린
+  // **상수** 표지는 어휘가 아니라 **버그로 읽힌다** — 모든 에이전트 행에 같은
+  // 자리에서 같은 말줄임이 서므로 화면이 고장 난 것으로 보이고, 그 대가로 사는
+  // 것은 이름 몇 글자뿐이라 거래가 남는 게 없다.
+  //
+  // 그 띠가 오늘 배송되지 않는다는 것도 재서 안다. 최악 조건은 **가장 좁은 창**
+  // 이다: SE(375pt)의 텍스트 예산은 327pt, 아이패드 Slide Over(320pt)에서는
+  // 272pt 이고, 「에이전트」는 배수 3.571 에서도 ~171pt 다(캡처 역산 ~145pt
+  // @3.143). 가장 좁은 창에서도 표지 뒤에 100pt 가 남아 묶음이 0 으로 안 무너진다.
+  // `flexShrink: 0` 을 **적어 두는** 이유는 그것이 Yoga 기본값이라서가 아니라, 이
+  // 문단을 읽은 사람만 이 줄을 지우게 하려는 것이다.
+  /**
+   * 이름 + 핸들의 묶음 — 형제 셋의 `rowText`/`rowTitleLine` 과 같은 것.
+   *
+   * `flex: 1` 이라 표지가 자기 폭을 다 받고 이 묶음이 나머지를 받는다. 안에서
+   * 두 조각이 폭에 비례해 함께 줄어드는 것이 위 절의 요점이다.
+   */
+  mentionIdentity: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm,
+  },
   mentionName: {
     flexShrink: 1,
     fontSize: font.label,
@@ -1363,7 +1458,7 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   },
   mentionNameAgent: {color: color.agent},
   mentionHandle: {
-    flex: 1,
+    flexShrink: 1,
     fontSize: font.meta,
     lineHeight: line.head,
     color: color.textFaint,

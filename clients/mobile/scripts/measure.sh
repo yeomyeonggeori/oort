@@ -186,11 +186,23 @@ ORIGINAL_CONTENT_SIZE=""
 #
 # 라이트는 `LIGHT-MENTION-SHEET`(스킴 접두사 — `measure/root.ts`). 오늘 있는 판:
 #
-#   dock1480-mention-sheet-dark.png                기본 크기 — 4행 그대로(무회귀)
+#   dock1480-mention-sheet-{dark,light}.png        기본 크기 — 4행 그대로(무회귀).
+#                                                  라이트는 회전 2 에서 붙었다: 기본
+#                                                  크기가 다크 한 장뿐이면 이 티켓이
+#                                                  **안 바꾼** 화면을 한 스킴에서만
+#                                                  드는 것이 된다.
 #   dock1480-mention-sheet-ax-{dark,light}.png     a11y-large(2.143) — 3행
 #   dock1480-mention-sheet-axxl-{dark,light}.png   AX-XXL(3.143) — 행이 44 를 넘어
 #                                                  47.1pt 가 되는 첫 띠(회전 1 M3)
 #   dock1480-mention-sheet-{ax,axxl}-before-*.png  같은 두 크기의 옛 판
+#
+# 접근성 두 크기의 **첫 행**이 회전 2 의 답을 든다 — 세 조각이 각자 앞을 남긴다:
+#
+#   2.143   「프로덕트…」  「@product-…」  「에이전트」
+#   3.143   「프로…」      「@pro…」       「에이전트」
+#
+# 회전 1 의 같은 사진에서는 핸들이 2.143 에서 맨 「@」 한 글자였고 3.143 에서는
+# 아예 없었다(`flex: 1` = basis 0 이라 압력 전부터 자기 폭이 없는 조각이었다).
 #
 # 여기 안 넣는 이유: 캡처 하나를 위해 계측 레인 전체가 Maestro 를 요구하게 되고,
 # 이 스크립트는 오늘 그 의존이 없다.
