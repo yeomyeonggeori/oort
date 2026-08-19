@@ -186,7 +186,11 @@ function RunRow({
               act 를 두 이름으로 부르는 이 티켓의 결함이 원장 안에서 다시 산다. */}
           {run.resumedFromSessionId !== undefined && (
             <span
-              className={cn(CHIP_CLASS, "bg-surface-hover text-ink-muted")}
+              // 그릇은 옆의 수명주기 칩과 같은 --muted-soft 다 (#1515). 이 행은
+              // hover 에서 --surface-hover 를 입으므로, 앞 판의 그릇은 가리키는
+              // 순간 사라졌다 — 그리고 나란히 선 두 칩이 서로 다른 그릇을 쓰면
+              // 「같은 격의 두 낱말」이라는 이 칩의 주장부터 깨진다.
+              className={cn(CHIP_CLASS, "bg-muted-soft text-ink-muted")}
               data-testid="workstream-run-lineage"
             >
               인수함

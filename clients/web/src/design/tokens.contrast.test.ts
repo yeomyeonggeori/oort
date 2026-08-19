@@ -160,7 +160,52 @@ const SURFACES = [
   "surface-hover",
   "accent-soft",
   "agent-soft",
+  "muted-soft",
 ] as const;
+
+/**
+ * 칩이 설 수 있는 행 바탕 — 닫힌 표 (#1515).
+ *
+ * `CONTROL_SURFACES` 와 같은 성질의 표다: 「어디에 설 수 있는가」를 사람의 기억이
+ * 아니라 값으로 지킨다. 목록이 닫혀 있는 이유는 이 네 값이 수명주기 칩을 세우는
+ * 네 표면(`WorkPanel` · `WorkSessionDetail` · `WorkConsoleRoute` ·
+ * `WorkstreamDetailRoute`)에서 실제로 관측된 행 바탕 전부이기 때문이다:
+ *
+ *   --surface        목록·상세가 서는 기본 바탕
+ *   --surface-hover  가리킨 행 · 펼친 행(`WorkPanel` 의 peeked)
+ *   --accent-soft    선택된 행(`WorkConsoleRoute` 의 aria-current)
+ *   --surface-raised 미리보기 패널(peek) — 단계 행 칩이 그 위에 선다
+ *
+ * 칩을 새 표면에 세우면 이 목록을 늘려야 하고, 그러면 그 표면에서도 그릇이
+ * 살아남는지를 아래 두 단정이 즉시 묻는다. 늘리지 않고 세우면 #1514 H-2 가 다시
+ * 조용히 산다 — 그때도 이 파일은 전부 초록이었다.
+ */
+const CHIP_ROW_SURFACES = [
+  "surface",
+  "surface-hover",
+  "accent-soft",
+  "surface-raised",
+] as const;
+
+/**
+ * 칩의 그릇 — 「한 톤의 옅은 채움」 가족 (#1515).
+ *
+ * `--accent-soft`·`--agent-soft` 가 이미 이 가족이지만 그 둘은 칩의 그릇이 아니라
+ * **선택된 행**의 채움으로 쓰인다(사이드바·관제 줄·⌘K). 그래서 여기 드는 것은
+ * 칩이 그릇으로 드는 값뿐이다. #1516 이 ok/warn/danger 를 채운다.
+ */
+const CHIP_VESSELS = ["muted-soft"] as const;
+
+/**
+ * 그릇이 행 바탕에서 살아남았다고 말할 수 있는 바닥.
+ *
+ * 두 자를 함께 건다. 대비(1.05)만 걸면 「대비는 넘는데 눈에는 같은 회색」이
+ * 통과하고, 거리(0.02)만 걸면 명도가 거의 같은 쌍이 통과한다. 두 값 모두 이
+ * 팔레트의 실측에서 나왔다: 라이트 --surface 위가 최악이고 1.061 / 0.0207 이다.
+ * 고치기 전 --surface-hover 위의 그 칩은 1.000 / 0.0000 이었다.
+ */
+const CHIP_VESSEL_MIN_CONTRAST = 1.05;
+const CHIP_VESSEL_MIN_DISTANCE = 0.02;
 
 /** Foregrounds that render text or meaningful glyphs. */
 const FOREGROUNDS = [
@@ -464,6 +509,60 @@ describe("Dawn palette", () => {
           ).toBeGreaterThan(
             contrast(pick("ink-muted", scheme.index), pick(bg, scheme.index))
           );
+        }
+      });
+
+      // 칩의 그릇은 그 칩이 서는 **어떤 행 바탕과도** 같은 재료가 아니다 (#1515).
+      //
+      // #1514 H-2 가 실측한 결함은 값 하나가 틀린 것이 아니라 **두 축이 한 값을
+      // 나눠 가진 것**이었다: 수명주기 칩의 그릇이 `--surface-hover` 였고 그 토큰은
+      // 행이 주목받았다는 **상태**의 이름이라, 상태가 켜지는 순간 그릇이 꺼졌다
+      // (대비 1.00). 그래서 여기서 재는 것은 「그릇이 예쁜가」가 아니라 「그릇이
+      // 행의 어느 상태에서도 남아 있는가」다 — 행이 입을 수 있는 바탕을 닫힌 표로
+      // 두고 전부 돈다.
+      //
+      // 두 자를 함께 걸어야 하는 이유는 이 팔레트의 라이트가 좁기 때문이다.
+      // `--ink-muted` 의 AA 바닥이 휘도 0.769 이고 `--surface-hover` 가 0.7704 라,
+      // 칩이 설 수 있는 띠는 [0.769, 0.9911] 하나뿐이고 표면 다섯이 이미 그것을
+      // 나눠 갖는다. 그 안에서 얻을 수 있는 최선의 대비가 1.06 이므로, 대비만으로
+      // 그릇의 생존을 정의하면 바닥을 1.06 까지 내려야 하고 그 바닥은 「거의 같은
+      // 회색」도 통과시킨다. OKLab 거리가 그 자리를 메운다.
+      it("keeps a chip vessel distinct from every row background it can stand on", () => {
+        for (const vessel of CHIP_VESSELS) {
+          for (const bg of CHIP_ROW_SURFACES) {
+            const ratio = contrast(pick(vessel, scheme.index), pick(bg, scheme.index));
+            const distance = deltaE(
+              pick(vessel, scheme.index),
+              pick(bg, scheme.index)
+            );
+            expect(
+              Number(ratio.toFixed(3)),
+              `${vessel} on ${bg} (${scheme.name}) contrast`
+            ).toBeGreaterThanOrEqual(CHIP_VESSEL_MIN_CONTRAST);
+            expect(
+              Number(distance.toFixed(4)),
+              `${vessel} on ${bg} (${scheme.name}) OKLab distance`
+            ).toBeGreaterThanOrEqual(CHIP_VESSEL_MIN_DISTANCE);
+          }
+        }
+      });
+
+      // ...and the interaction states keep that token to themselves.
+      //
+      // 위 단정은 「그릇이 행과 다르다」를 재지만, 다음 사람이 그릇을
+      // `--surface-hover` 로 되돌리는 것을 막지는 못한다 — 되돌리면 위 단정이
+      // 빨개지긴 하나, 그 실패 메시지는 「대비 1.00」이라 **왜** 안 되는지를 말하지
+      // 않는다. 이 단정이 그 이유를 이름으로 적어 둔다: 상호작용 상태를 그리는
+      // 토큰은 정적인 그릇이 될 수 없다. 상태는 켜졌다 꺼지고 그릇은 늘 있어야
+      // 하므로, 한 값을 나눠 가지면 상태가 켜진 동안 그릇이 반드시 사라진다.
+      it("never lets a chip vessel share a value with an interaction state", () => {
+        for (const vessel of CHIP_VESSELS) {
+          for (const state of ["surface-hover", "accent-soft"] as const) {
+            expect(
+              pick(vessel, scheme.index),
+              `${vessel} (${scheme.name}) is the value ${state} paints interaction with`
+            ).not.toBe(pick(state, scheme.index));
+          }
         }
       });
 

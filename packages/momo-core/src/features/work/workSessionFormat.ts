@@ -29,22 +29,54 @@ import type { WorkRowState, WorkSessionStatusKey } from "./workSessionModel";
  * differently from its own rows is two rules, not one. So the green that
  * survives on this surface is the one that reports a measurement, and the
  * lifecycle says what it is in words.
+ *
+ * ## 그릇은 하나이고, 그것은 톤이 없다 (#1515 / design-review #1514 H-2)
+ *
+ * 앞 판의 바탕은 `--surface-hover` 였는데 그 토큰은 **행이 주목받았다**는 상태의
+ * 이름이다(목록 행의 hover 와 펼침이 같은 값을 쓴다). 그래서 사람이 가리키고 있는
+ * 행에서 칩 바탕과 행 바탕이 한 픽셀도 다르지 않았고(대비 1.00) 그릇이 사라졌다 —
+ * 읽히는 순간에만 사라지는 그릇이다. 상태는 켜졌다 꺼지고 그릇은 늘 거기 있어야
+ * 하므로 둘은 한 값을 나눠 가질 수 없다. 이제 그릇은 자기 토큰(`--muted-soft`)을
+ * 갖고, `--surface-hover` 는 상호작용 상태 전용으로 돌아간다.
+ *
+ * 그릇이 **여섯 칸 전부 같은 값**인 것은 이 표의 결정이다. 원장의 칩은 이 세션을
+ * 무엇이라 부르는지를 말할 뿐 아무것도 재지 않으므로, 그릇에 색을 얹을 근거가
+ * 없다 — 색을 버는 것은 측정이고, 측정을 나르는 칩은 옆에 따로 선다(검증 칩,
+ * #1441). 그래서 톤은 잉크에만 남는다: 도는 세션의 warn, 사람을 기다리는 세션의
+ * accent, 나머지의 muted. `orphaned` 가 `--accent-soft` 를 그릇으로 쓰던 것도 함께
+ * 거둔다 — 그 그릇은 이 레포에서 「선택된 행」의 채움이라(사이드바·관제 줄), 칩
+ * 하나가 선택 문법을 빌려 입고 있었다.
+ *
+ * 두 칩이 그릇으로 갈린다는 계약은 그대로다(#1463 리뷰 H1·M1): 원장의 칩은 톤 없는
+ * 그릇, 자기 보고의 칩은 자기 톤의 그릇. 그 대조는
+ * `clients/web/src/features/work/sessionVerificationTone.test.ts` 가 tokens.css
+ * 실측으로 잰다.
  */
 export const SESSION_STATUS_CLASS: Readonly<Record<WorkSessionStatusKey, string>> = {
-  running: "bg-surface-hover text-warn",
-  idle: "bg-surface-hover text-ink-muted",
-  unavailable: "bg-surface-hover text-ink-muted",
-  orphaned: "bg-accent-soft text-accent",
-  done: "bg-surface-hover text-ink-muted",
-  unknown: "bg-surface-hover text-ink-muted",
+  running: "bg-muted-soft text-warn",
+  idle: "bg-muted-soft text-ink-muted",
+  unavailable: "bg-muted-soft text-ink-muted",
+  orphaned: "bg-muted-soft text-accent",
+  done: "bg-muted-soft text-ink-muted",
+  unknown: "bg-muted-soft text-ink-muted",
 };
 
-/** Step state. 완료 stays muted: a wall of green is not a reading aid. */
+/**
+ * Step state. 완료 stays muted: a wall of green is not a reading aid.
+ *
+ * 그릇은 위 표와 같은 값이다(#1515). 이 칩이 서는 자리는 미리보기 패널
+ * (`--surface-raised`)이라 `--surface-hover` 를 그릇으로 써도 행의 주목 상태와
+ * 부딪히지는 않았다 — 즉 여기엔 H-2 가 없었다. 그래도 함께 옮기는 이유는 규칙이
+ * 파일 하나에 둘일 수 없기 때문이다: 「상호작용 상태 토큰은 정적인 그릇이 될 수
+ * 없다」를 팔레트에 적어 놓고 바로 아래 표가 그것을 어기면, 다음 사람은 두 표 중
+ * 어느 쪽이 규칙인지 고르게 된다. 이 파일은 이미 그 물음에 답해 두었다 —
+ * 「한 파일 안의 두 표가 같은 답을 낸다」(`sessionStatusClass.test.ts`).
+ */
 export const ROW_STATE_CLASS: Readonly<Record<WorkRowState, string>> = {
-  running: "bg-surface-hover text-warn",
-  pending: "bg-accent-soft text-accent",
-  done: "bg-surface-hover text-ink-muted",
-  error: "bg-surface-hover text-danger",
+  running: "bg-muted-soft text-warn",
+  pending: "bg-muted-soft text-accent",
+  done: "bg-muted-soft text-ink-muted",
+  error: "bg-muted-soft text-danger",
 };
 
 /** Wall clock for a row, HH:MM. Numbers carry data-numeric at the call site. */

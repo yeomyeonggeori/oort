@@ -44,10 +44,11 @@ palette for dark mode, so the two schemes cannot drift apart.
 | `--ink` | `#24211c` | `#ececf1` | body text |
 | `--ink-muted` | `#6a655f` | `#9b98a3` | timestamps, meta, secondary |
 | `--accent` | `#a54c08` | `#f0a850` | **the** accent: 호박(amber horizon) |
-| `--accent-soft` | `#f4e7d6` | `#33261a` | selected row, accent-tinted chip |
+| `--accent-soft` | `#f4e7d6` | `#33261a` | selected row (sidebar, work console, ⌘K) |
 | `--on-accent` | `#fffefb` | `#17161a` | label on a filled accent |
 | `--agent` | `#4a6785` | `#7fa0c4` | agent identity: predawn slate-blue |
 | `--agent-soft` | `#e6ebf2` | `#1e2836` | agent avatar/badge backing |
+| `--muted-soft` | `#f3efe8` | `#302e36` | **chip vessel**, tone-free: the pale fill a status chip stands in (§2a) |
 | `--danger` | `#b3261e` | `#ff796b` | risk **tone**: destructive/failure text, chips, dots, bars |
 | `--danger-fill` | `#8c393d` | `#dc817e` | destructive button **fill** (never the tone above: §3a table B) |
 | `--on-danger-fill` | `#fffefb` | `#17161a` | label on a destructive fill |
@@ -77,6 +78,45 @@ Tailwind reaches these as `bg-surface`, `text-ink-muted`, `border-line-strong`,
 (`--color-*: initial`), so `bg-indigo-500` and friends do not compile at all.
 That is the enforcement: the indigo AI-tell is unreachable, not merely
 discouraged.
+
+## 2a. A chip vessel is never an interaction state (#1515)
+
+**A state switches on and off; a vessel is always there. Share one value between
+them and the vessel goes dark exactly while the state is on.** The lifecycle chip
+was built that way: its fill was `--surface-hover`, which is also what a list row
+wears on hover and when expanded, so the chip lost its container **only on the row
+the reader was pointing at** (measured 1.00:1). A vessel that disappears while it
+is being read is worse than no vessel.
+
+So the two axes have separate names, and the split is mechanical:
+
+| axis | tokens | behaviour |
+|---|---|---|
+| interaction state | `--surface-hover`, `--accent-soft` | hovered row, selected row. **Toggles** |
+| chip vessel | `--muted-soft` | the pale fill a chip stands in. **Always on** |
+
+**"Just pick another gray" is arithmetic, not taste.** In light, `--ink-muted`
+needs a background luminance of at least 0.769 to hold AA, and `--surface-hover`
+sits at 0.7704 — already on the floor. The band a chip vessel can occupy is
+therefore [0.769, 0.9911 (paper)], five surfaces already divide it, and **the best
+worst-case separation a sixth neutral can reach is 1.06:1**. Luminance runs out, so
+the second ruler is the OKLab distance §3a already uses for the risk hierarchy. A
+vessel survives only if it clears **both**: contrast >= 1.05 **and** OKLab distance
+>= 0.02. Either alone lets "passes the ratio, reads as the same gray" through.
+
+Measured (`--muted-soft` vs every row background it can stand on, both schemes):
+light `--surface` 1.061 / 0.0207 · `--surface-hover` 1.117 / 0.0366 ·
+`--accent-soft` 1.062 / 0.0256; dark 1.346 / 0.1036 · 1.135 / 0.0380 ·
+1.095 / 0.0470. Before the fix the worst pair was 1.000 / 0.0000.
+
+The surfaces a chip may stand on are a **closed table** (`CHIP_ROW_SURFACES`),
+the same discipline as `CONTROL_SURFACES`: put a chip on a new surface and the
+list has to grow, or the defect goes quiet again.
+
+And the vessel carries no tone — all six lifecycle cells share one fill.
+**Colour is earned by measurement, not by naming**: the ledger chip only says what
+the ledger calls the session, so the tone stays in the ink. The chip that carries a
+measurement is the one that gets a tone-tinted vessel (#1516).
 
 ## 3. Measured contrast (from `tokens.contrast.test.ts`)
 
