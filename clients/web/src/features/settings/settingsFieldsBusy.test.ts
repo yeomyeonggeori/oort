@@ -1,4 +1,5 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
@@ -141,5 +142,91 @@ describe("RED PROOF ③ 두 번째 Enter 는 삼켜진다", () => {
     const cancel = CONFIRM.slice(CONFIRM.lastIndexOf('variant="ghost"'));
     expect(cancel).toContain("onClick={close}");
     expect(cancel).not.toMatch(/\bbusy\b/);
+  });
+});
+
+// =============================================================================
+// #1558 — 정본 컴포넌트 자신이 그 문법을 어겼다.
+//
+// 위 스위트(#1490)와 #1557 이 여섯 소비처를 SaveButton 을 **선례로 들며** 갈라내는
+// 동안, SaveButton 자신은 `blocked = !canSave || busy` 한 식으로 저장 중에
+// aria-busy 와 aria-disabled 와 흐림(opacity-50)을 동시에 걸고 있었다 — #1403
+// 리뷰 H-1 과 같은 클래스가 정본 안에. 진행과 잠금은 다른 축이다: 잠금은
+// `!canSave` 하나에서만 오고, 진행은 낱말과 aria-busy 로만 말한다.
+//
+// 단정이 부분 문자열이 아니라 **식 전체의 등치**인 이유: 결함은 `busy` 라는
+// 글자가 아니라 `blocked` 라는 접힘 변수 뒤에 숨어 있었다. 부분 일치는 그 간접을
+// 통과시키고, 등치는 어떤 별칭도 통과시키지 않는다.
+// =============================================================================
+
+describe("#1558 RED PROOF — SaveButton 의 진행은 잠금으로 그려지지 않는다", () => {
+  it("잠금은 canSave 하나에서만 온다 — aria-disabled", () => {
+    expect(expressions(SAVE, "aria-disabled")).toEqual([
+      "aria-disabled={!canSave || undefined}",
+    ]);
+  });
+
+  it("흐림도 canSave 하나에서만 온다 — opacity-50", () => {
+    const dims = SAVE.match(/className=\{cn\([^)]*\)\}/g) ?? [];
+    expect(dims).toEqual(['className={cn(!canSave && "opacity-50")}']);
+  });
+
+  it("진행은 낱말과 aria-busy 로만 말한다", () => {
+    expect(SAVE).toContain("aria-busy={busy || undefined}");
+    expect(SAVE).toContain("{busy ? busyLabel : label}");
+  });
+
+  it("그럼에도 두 번째 Enter 는 삼켜진다", () => {
+    // 흐림을 걷어냈다고 가드까지 걷히면 날고 있는 쓰기 위에 또 쓰기가 나간다.
+    // native disabled 로 막지 않는 이유는 파일 위 docstring 그대로다: 초점.
+    expect(SAVE).toContain("if (!canSave || busy) return;");
+  });
+});
+
+describe("#1558 소비처 — busy 가 canSave 로 접혀 들어오지 않는다", () => {
+  // 컴포넌트를 갈라도 소비처가 `canSave={dirty && !save.isPending}` 을 넘기면
+  // 같은 겹침이 prop 을 타고 되돌아온다. features/ 아래 모든 <SaveButton> 의
+  // canSave 식을 기계로 훑는다 — 새 소비처도 자동으로 이 규율 아래 선다.
+  const FEATURES_DIR = fileURLToPath(new URL("..", import.meta.url));
+
+  function tsxFiles(dir: string): string[] {
+    return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) return tsxFiles(path);
+      return entry.name.endsWith(".tsx") ? [path] : [];
+    });
+  }
+
+  function saveButtonBlocks(): { file: string; canSave: string }[] {
+    const blocks: { file: string; canSave: string }[] = [];
+    for (const file of tsxFiles(FEATURES_DIR)) {
+      const source = readFileSync(file, "utf8");
+      let from = 0;
+      for (;;) {
+        const start = source.indexOf("<SaveButton", from);
+        if (start === -1) break;
+        const end = source.indexOf("/>", start);
+        const block = source.slice(start, end === -1 ? undefined : end);
+        const canSave = block.match(/canSave=\{([^}]*)\}/)?.[1];
+        expect(canSave, `${file} 의 <SaveButton> 에 canSave 가 없다`).toBeTruthy();
+        blocks.push({ file, canSave: canSave ?? "" });
+        from = start + 1;
+      }
+    }
+    return blocks;
+  }
+
+  it("모든 소비처의 canSave 식에 진행 어휘가 없다", () => {
+    const blocks = saveButtonBlocks();
+    // 소비처가 하나도 안 잡히면 이 단정은 공허하게 초록이다. 오늘의 실측은
+    // 셋(AiLinkChain chain-save, WorkHostSection 엔진·티어)이고, 줄어들면
+    // 스캔이 깨진 것이므로 여기서 같이 빨개진다.
+    expect(blocks.length).toBeGreaterThanOrEqual(3);
+    for (const { file, canSave } of blocks) {
+      expect(
+        /\b(busy|isPending|isLoading|isFetching|saving)\b/i.test(canSave),
+        `${file}: canSave={${canSave}} 가 진행을 잠금으로 접는다`
+      ).toBe(false);
+    }
   });
 });
