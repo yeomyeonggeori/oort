@@ -49,6 +49,7 @@
 
 - **기획 산출물(docs/planning·docs/adr·ROADMAP 등) 플러시는 main 직행이 아니라 `track/engine`에 랜딩한다.** main은 track→main 승격(위임 범위 — 게이트 그린·랜딩 단위) 때만 전진한다. 근거: 플러시의 main 직행이 이 레포에서 main이 track을 앞서는 **유일한** 순간이었고, 그 순간마다 열린 track PR 전부가 alignment fail을 발송했다(실측: 최근 실패 15건 중 ~10건이 이 클래스). 플러시를 track에 두면 이 클래스가 구조적으로 소멸한다 — main은 항상 조상으로 남는다.
 - **push·update-branch 전 정렬 프리플라이트(#1561 D-2)**: 오케스트레이터는 원격에 쓰기 전에 `git fetch origin --prune && scripts/check_track_alignment.sh --remote --local-existing`(~0.5초)을 먼저 돌리고, 어긋나 있으면 sync부터 한다. 코드 검증은 기존 로컬 게이트가 담당하므로 이 프리플라이트는 "보내는 순간의 장부 상태"만 본다.
+  - **파이프에 걸지 마라(2026-08-19 실측).** `check_track_alignment.sh … | tail -7 && git push` 형태는 종료 코드가 `tail`의 것으로 가려져 **빨간 프리플라이트를 통과해 push가 나간다**(파도 10 워커 자기 신고). 그 지시를 받은 다음 워커의 첫 실행이 실제로 `EXIT=1`이었고 **출력의 마지막 줄은 여전히 PASS**였다 — 파이프였다면 그대로 지나갔을 실패다. 맨몸으로 돌리고 종료 코드를 보라.
 - 이 규칙 이전의 관행(플러시 main 직행+즉시 sync 짝)은 창을 좁힐 뿐 소멸시키지 못해 은퇴했다.
 
 ### 3.2 GitHub 보호 적용 순서
