@@ -21,6 +21,7 @@ import {
   Composer,
   composerColumnBudget,
   composerMaxHeight,
+  mentionRowHeight,
   withLatinWordBreaks,
 } from '../src/features/conversation/Composer';
 import {saveDraft} from '../src/features/conversation/drafts';
@@ -723,6 +724,58 @@ function PlaceholderProbe(): React.JSX.Element {
         {`절 예산 문턱 — 글자 배수 ${fontScale.toFixed(3)} · 줄 상자 ` +
           `${rowPt.toFixed(1)}pt · 상자가 든 글자리 ${room.toFixed(1)}pt = ` +
           `${(room / rowPt).toFixed(1)}줄 (#1479)`}
+      </Text>
+    </View>
+  );
+}
+
+// ---- #1480: 시트의 상한이 도크를 열 안에 두는가 -----------------------------
+
+/**
+ * 시트가 **상한에 실제로 닿는** 로스터 (#1480).
+ *
+ * 기본 `DIRECTORY` 는 셋이라 어떤 상한에서도 다 든다 — 그 사진은 상한을 안 잰다.
+ * `matchMembers` 의 목록 상한(`MENTION_LIMIT`)까지 채워야 「몇 개를 보여 주는가」가
+ * 화면에서 갈리고, before/after 가 다른 그림이 된다. 이름은 이 제품이 쓰는 모양
+ * (한글 이름 + 라틴 핸들)을 지킨다 — 라틴만 든 목록은 행 높이를 다르게 잰다.
+ */
+const MENTION_DIRECTORY = makeDirectory([
+  ...ROSTER,
+  ...Array.from({length: 9}, (_, i) => ({
+    ...ROSTER[0],
+    id: `mention-filler-${i}`,
+    displayName: `동료${i + 1}`,
+    handle: `mate${i + 1}`,
+  })),
+]);
+
+/**
+ * 시트가 열렸을 때 **도크가 대화 열 안에 있는가** (#1480).
+ *
+ * 산수는 배송되는 함수들(`mentionSheetMaxHeight` · `composerColumnBudget`)을 그대로
+ * 부른다 — 사본을 두면 사진이 배송되지 않는 식을 증명한다. 행 수까지 적는 이유는
+ * 이 티켓의 결정이 높이가 아니라 **「후보를 몇 개 보여 주는가」**라서다.
+ */
+function MentionSheetProbe(): React.JSX.Element {
+  const styles = useStyles(buildStyles);
+  const {fontScale, height: windowHeight} = useWindowDimensions();
+  const budget = composerColumnBudget(fontScale, windowHeight);
+  const row = mentionRowHeight(fontScale);
+  const dock = budget.mentions + budget.composer + budget.dockChrome;
+
+  return (
+    <View style={styles.probe}>
+      <Text allowFontScaling={false} style={styles.probeRead}>
+        {`글자 배수 ${fontScale.toFixed(3)} · 창 ${Math.round(windowHeight)}pt · 후보 행 ${row.toFixed(1)}pt`}
+      </Text>
+      <Text allowFontScaling={false} style={styles.probeRead}>
+        {`시트 ${budget.mentions.toFixed(1)}pt = ${(budget.mentions / row).toFixed(1)}행 (옛 고정값 180pt = ${(180 / row).toFixed(1)}행)`}
+      </Text>
+      <Text allowFontScaling={false} style={styles.probeRead}>
+        {`도크 ${dock.toFixed(1)}pt = 시트 ${budget.mentions.toFixed(1)} + 입력창 ${budget.composer.toFixed(1)} + 바 여백 ${budget.dockChrome.toFixed(1)}`}
+      </Text>
+      <Text allowFontScaling={false} style={styles.probeRead}>
+        {`대화 열 ${budget.column.toFixed(1)}pt — 도크 ≤ 열 ${dock <= budget.column ? '참' : '거짓'} · 옛 값이었다면 ${(180 + budget.composer + budget.dockChrome).toFixed(1)}pt (${180 + budget.composer + budget.dockChrome <= budget.column ? '참' : '거짓'})`}
       </Text>
     </View>
   );
@@ -2008,6 +2061,29 @@ export function Surface({name}: {name: string}): React.JSX.Element {
             channelLabel={GROWTH_LABEL}
             directory={DIRECTORY}
             draftKey="measure:composer-growth:empty"
+            onSend={() => {}}
+          />
+        </Frame>
+      );
+    }
+    // ---- #1480: 시트가 열린 동안 대화가 남는가 ------------------------------
+    case 'mention-sheet': {
+      // **시트는 진짜로 열려야 한다.** 이 표면의 주장이 「도크가 열을 안 넘는다」
+      // 이므로, 시트를 흉내 낸 사본을 세우면 사진은 그 사본의 기하를 잰다.
+      //
+      // 여는 것도 **사람이 하는 그대로**다: 시트를 여는 것은 `@` 한 글자이고, 그
+      // 글자는 `maestro/90-mention-sheet-capture.yaml` 이 시뮬레이터에 실제로
+      // 친다(초안으로 심어 두는 길은 실측으로 기각했다 — `focus()` 도
+      // `setSelection` 도 iOS 에서 `onSelectionChange` 를 안 내보내므로 컴포저의
+      // 캐럿이 0 에 머물고, 화면에는 캐럿이 `@` 뒤에 보이는데 목록은 안 열린다.
+      // 그 자리는 컴포저의 캐럿 초기값 문제이고 이 티켓의 것이 아니다).
+      return (
+        <Frame label="멘션 시트 — 열린 동안 대화가 남는가 (#1480)">
+          <MentionSheetProbe />
+          <Composer
+            recipient="place"
+            channelLabel="배포"
+            directory={MENTION_DIRECTORY}
             onSend={() => {}}
           />
         </Frame>

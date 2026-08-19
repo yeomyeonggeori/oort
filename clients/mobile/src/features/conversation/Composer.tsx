@@ -174,15 +174,23 @@ import {QuoteDraftBar} from './Quote';
 // 하는데(128 ÷ 0.195) iOS 26 이 도는 가장 작은 아이폰이 667pt 다. 지금 화면은
 // 하나도 안 변한다(`composerDraftOffline.test.tsx` 가 그 자리를 잰다).
 //
-// ## 이 식이 **안** 재는 것 — 액세서리와 `@` 시트
+// ## 이 식이 **안** 재던 것 — 액세서리와 `@` 시트 (#1480 이 절반을 받았다)
 //
 // 도크에는 입력창 말고도 서는 것이 있다: 인용 바·타이핑 바·에이전트 활동 바, 그리고
-// 이 파일 자신의 멘션 후보 시트(`styles.mentions` 의 `maxHeight: 180`). 전부
-// **한때만** 서고, 상한은 쉬는 상태의 계약이다. 다만 그중 하나는 같은 가족의 결함을
-// 자기 안에 갖고 있다 — 180 은 고정 pt 라 큰 글자에서 담는 행 수가 줄고, 열려 있는
-// 동안 목록을 그만큼 더 먹는다. 여기서 안 고치는 이유는 범위가 아니라 **모양**이다:
-// 그 시트의 상한을 바꾸는 것은 「후보를 몇 개 보여 주는가」라는 별개의 결정이고,
-// 자기 캡처(시트가 열린 AX 사진)와 자기 리뷰가 필요하다. 후속 티켓 사유로 남긴다.
+// 이 파일 자신의 멘션 후보 시트. 전부 **한때만** 서고, 위 상한은 쉬는 상태의
+// 계약이다. 그중 시트는 같은 가족의 결함을 자기 안에 갖고 있었다 — `maxHeight: 180`
+// 은 고정 pt 라 큰 글자에서 담는 행 수가 줄고, 열려 있는 동안 목록을 그만큼 더
+// 먹었다. **#1480 이 그것을 받았다**: 아래 「시트의 상한」 절이 결정(넷)과 그것이
+// 지는 불변식(도크가 대화 열을 안 넘는다)을 든다.
+//
+// 그 티켓이 함께 잡은 것이 위 산수의 구멍 하나다: 도크는 시트와 입력창 말고
+// **`styles.bar` 의 위아래 여백**도 진다(`DOCK_CHROME`). 이 절이 열을 나눌 때 그
+// 16pt 를 안 셌으므로, 시트가 열린 화면에서는 「도크 ≤ 대화 열」이 모델 안에서도
+// 거짓이었다(AX-XXL: 180 + 170.4 + 16 = 366.4 vs 340.9).
+//
+// **남은 절반은 액세서리 바들이다.** 인용·타이핑·ADE 요약 줄은 여전히 이 식 밖에
+// 있고, 셋이 동시에 서는 화면은 아직 아무도 재지 않았다. 시트와 달리 그것들은
+// 「몇 개를 보여 주는가」 결정이 없어(있으면 한 줄이다) 같은 처방이 안 붙는다.
 //
 // 사진은 넷이고 레인은 `scripts/measure.sh` 의 `COMPOSER-GROWTH` 다. 계측 줄이
 // 글자 배수·창·**크롬 실측**·상한·목록 몫·실제 상자 높이를 사진 안에 적으므로 이
@@ -334,6 +342,14 @@ export interface ComposerColumnBudget {
   readonly composer: number;
   /** 그러고 목록에 남는 것. */
   readonly list: number;
+  /**
+   * 도크가 시트·입력창 **말고** 지는 세로 (#1480). 위 `column` 은 이 항을
+   * 안 뺀 값이고, 그것이 이 필드가 따로 있는 이유다 — `column = list + composer`
+   * 라는 #1443 의 등식을 고치지 않고 도크의 산수만 정확해진다.
+   */
+  readonly dockChrome: number;
+  /** 시트가 열렸을 때 시트가 가져가는 것(= `mentionSheetMaxHeight`). */
+  readonly mentions: number;
 }
 
 export function composerColumnBudget(
@@ -348,7 +364,116 @@ export function composerColumnBudget(
     column,
     composer,
     list: column - composer,
+    dockChrome: DOCK_CHROME,
+    mentions: mentionSheetMaxHeight(fontScale, windowHeight),
   };
+}
+
+// =============================================================================
+// 시트의 상한 — 「후보를 몇 개 보여 주는가」 (#1480)
+//
+// ## 옛 값이 무엇이었나
+//
+// `maxHeight: 180`. 어디서도 도출되지 않은 상수였고 두 가지가 틀렸다.
+//
+// **① 글자를 안 따라간다.** 위 상한이 #1443 에서 고친 것과 같은 결함이다 — 행은
+// 글자를 따라 커지는데(아래 `mentionRowHeight`) 상한만 180 에 못 박혀 있으니, 큰
+// 글자에서 담는 후보 수가 조용히 준다.
+//
+// **② 열려 있는 동안 대화를 먹는다.** 도크(시트 + 입력창 + `styles.bar` 여백)가
+// 키보드 위 가시 열을 넘었다. AX-XXL / 874pt 창 실측 산수:
+//
+//   시트 180 + 입력창 170.4 + 바 여백 16 = **366.4pt**
+//   대화 열 874 × (1 − 0.38 − 0.23)      = **340.9pt**
+//
+// 25.5pt 가 초과이고, 초과분은 타임라인에서 나온다 — 「키보드가 올라와도 대화가
+// 남는다」가 시트가 열린 동안 거짓이 되는 자리다.
+//
+// ## 결정 — **넷**
+//
+// 티켓이 요구한 「몇 개를 보여 주는가」의 답이고, **오늘도 넷이었다**: 기본 크기의
+// 180pt 가 담던 것은 4행(4 × 44 = 176)과 **다섯째 행의 이마 4pt** 였다. 그 4pt 가
+// 화면에서 하는 일은 이름의 윗동을 보여 주는 것 하나이고, 이 레포는 그 반노출을
+// 웹에서 이미 한 번 닫았다(#1418 의 `composer-placeholder` `1lh` 클램프). 그러니
+// 넷은 새 결정이 아니라 **옛 값의 뜻**이다.
+//
+// 넷인 이유 자체는 목록의 성질이다: `matchMembers` 가 이미 정렬해 첫 줄을 최선으로
+// 만들고, 넷이면 「그 최선 + 확인할 몇」이 한눈에 든다. 그 위는 스크롤이 받는다
+// (시트는 `ScrollView` 다).
+//
+// ## 그 넷이 열을 넘을 때 — 열이 이기고, **행 단위로** 이긴다
+//
+//   상한 = max( 2행, min( 4행, ⌊(목록 몫 − 도크 크롬) ÷ 행⌋ × 행 ) )
+//
+// 가운데 항이 위 ②의 불변식을 **산수로** 참으로 만든다: 시트 ≤ 목록 몫 − 도크
+// 크롬 ⟺ 시트 + 입력창 + 도크 크롬 ≤ 대화 열.
+//
+// 바닥이 아니라 **내림**이 이 식의 두 번째 요점이다. 열이 3.5행을 허락한다고
+// 3.5행을 주면 넷째 이름이 이마만 내놓고 잘리고, 그것이 정확히 위에서 옛 값 180 을
+// 기각한 그 이유다 — 상한을 도출로 바꾸면서 같은 결함을 다른 크기에 다시 심을
+// 수는 없다. 실측으로 잡았다: 내림이 없던 첫 판은 a11y-large 에서 154.4pt(=3.5행)
+// 를 내고 사진에 「동료1」의 윗동이 남았다
+// (`measure/captures/dock1480-mention-sheet-*`). 즉 **시트는 언제나 정수 행**
+// 이고, 남는 자투리는 타임라인으로 간다.
+//
+// 바닥은 위 `MIN_ROWS` 와 같은 논리다 — 한 행짜리 시트는 「고를 것이 있다」만
+// 알려 주고 무엇인지는 안 보여 준다. 가장 작은 창 · 가장 큰 글자에서는 그 바닥이
+// 불변식을 이기고, 그것이 의도다(`composerMaxHeight` 의 `MIN_ROWS` 가 같은
+// 자리에서 같은 이유로 이긴다).
+//
+// 기본 크기에서는 몫이 한 번도 안 걸린다: 874pt 창에서 목록 몫 212.9 − 16 = 196.9
+// 이고 4행은 176 이다. **화면이 4행 그대로다** — 사라지는 것은 이마 4pt 뿐이다.
+// =============================================================================
+
+/**
+ * 도크가 시트·입력창 **말고** 지는 세로 — `styles.bar` 의 위아래 여백 (#1480).
+ *
+ * 상수로 이름을 갖는 이유는 `INPUT_CHROME` 과 같다: 산수와 실제 스타일이 같은 값을
+ * 읽어야 하고, 사본을 두면 사본이 거짓말한다(디자인 시스템 §5.5).
+ */
+const DOCK_CHROME = space.sm * 2;
+
+/** 시트가 담는 후보 수. 위 절이 이 넷을 고른 이유를 든다. */
+const MENTION_MAX_ROWS = 4;
+
+/** 시트가 절대로 그 아래로 안 내려가는 행 수 — 고른 것과 그 옆의 것. */
+const MENTION_MIN_ROWS = 2;
+
+/**
+ * 후보 한 행의 세로.
+ *
+ * `TOUCH_TARGET` 은 **바닥이지 값이 아니다.** 행에 서는 두 조각(이름 `font.label`
+ * 13 · 핸들 `font.meta` 12)은 한 줄로 읽혀야 하고, 그래서 둘 다 `line.head` 를
+ * **선언한다**(그 토큰이 존재하는 이유이고, 선언하지 않으면 RN 이 광학 중심으로
+ * +2.67pt 어긋나게 놓는다 — `tokens.ts` 의 `line.head` 실측). 화면에 그려지는 줄
+ * 상자는 거기에 동적 타입 배수가 곱해진 것이므로(`RCTAttributedTextUtils`), 큰
+ * 글자에서는 그 값이 44 를 넘고 그때부터 행이 그것이다.
+ */
+export function mentionRowHeight(fontScale: number): number {
+  return Math.max(TOUCH_TARGET, line.head * fontScale);
+}
+
+/**
+ * 시트가 자라기를 멈추는 높이 — **넷, 그리고 열이 허락하는 만큼.**
+ *
+ * `composerMaxHeight` 과 같은 모양이고 같은 이유로 export 된다: 계측 하네스와
+ * 테스트가 이 산수를 **다시 적지 않고** 읽는다.
+ */
+export function mentionSheetMaxHeight(
+  fontScale: number,
+  windowHeight: number,
+): number {
+  const row = mentionRowHeight(fontScale);
+  const byColumn =
+    conversationColumn(windowHeight) -
+    composerMaxHeight(fontScale, windowHeight) -
+    DOCK_CHROME;
+  // 열이 허락하는 것을 **행으로 내림**한다 — 반쪽 행은 이름의 이마만 보여 준다.
+  const rowsByColumn = Math.floor(byColumn / row);
+  return Math.max(
+    MENTION_MIN_ROWS * row,
+    Math.min(MENTION_MAX_ROWS, rowsByColumn) * row,
+  );
 }
 
 // =============================================================================
@@ -609,6 +734,9 @@ export function Composer({
   // `RCTAccessibilityManager` 의 배수 변경을 Dimensions 변경으로 내보낸다).
   const {fontScale, height: windowHeight} = useWindowDimensions();
   const maxHeight = composerMaxHeight(fontScale, windowHeight);
+  // 시트의 상한도 같은 두 값이 정한다 (#1480). 위 상한과 나란히 여기서 계산하는
+  // 이유가 그것이다 — 둘은 같은 열을 나눠 갖고, 스타일시트는 그 열을 모른다.
+  const mentionsMaxHeight = mentionSheetMaxHeight(fontScale, windowHeight);
   // 절 예산의 자 (#1479). 상한이 든 높이에서 세로 크롬을 빼면 **글이 서는 자리**다.
   const placeholderRoom = maxHeight - INPUT_CHROME;
   // 첫 렌더가 이미 초안을 들고 있다 (`drafts.ts`). 효과로 채우면 빈 상자가 한
@@ -797,7 +925,9 @@ export function Composer({
   return (
     <View style={styles.root}>
       {showMentions ? (
-        <View style={styles.mentions} testID="mention-list">
+        <View
+          style={[styles.mentions, {maxHeight: mentionsMaxHeight}]}
+          testID="mention-list">
           <ScrollView
             keyboardShouldPersistTaps="always"
             showsVerticalScrollIndicator={false}>
@@ -1055,11 +1185,20 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   sendPressed: {backgroundColor: color.accentPressed},
   sendLabel: {color: color.onAccent, fontSize: font.label, fontWeight: '700'},
   sendLabelDisabled: {color: color.textFaint},
+  /**
+   * 후보 시트 (#1480). **`maxHeight` 는 여기 없다** — 글자 배수와 창 높이가
+   * 정하므로 컴포넌트가 `mentionSheetMaxHeight` 로 계산해 붙인다(입력창이 같은
+   * 이유로 같은 일을 한다). 옛 판의 `maxHeight: 180` 은 도출되지 않은 상수였고,
+   * 그것이 무엇을 틀렸는지는 위 「시트의 상한」 절에 있다.
+   */
   mentions: {
-    maxHeight: 180,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: color.border,
   },
+  /**
+   * 후보 한 행. `minHeight` 는 엄지의 바닥이고, 큰 글자에서 행의 높이를 정하는
+   * 것은 아래 두 조각이 선언한 줄 상자다 — 그 산수가 `mentionRowHeight` 다.
+   */
   mentionRow: {
     minHeight: TOUCH_TARGET,
     flexDirection: 'row',
@@ -1067,10 +1206,28 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     gap: space.sm,
     paddingHorizontal: SAFE_GUTTER,
   },
-  mentionName: {fontSize: font.label, fontWeight: '600', color: color.text},
+  // 세 조각이 **한 줄로 읽혀야** 하므로 셋 다 `line.head` 를 선언한다 — 그
+  // 토큰이 존재하는 이유가 정확히 이 모양(13pt 이름 + 12pt 보조)이고, 선언이
+  // 없으면 RN 이 광학 중심으로 어긋나게 놓는다(`tokens.ts` 의 실측). 그 선언이
+  // `mentionRowHeight` 의 산수가 화면과 같은 수를 쓰는 근거이기도 하다.
+  mentionName: {
+    fontSize: font.label,
+    lineHeight: line.head,
+    fontWeight: '600',
+    color: color.text,
+  },
   mentionNameAgent: {color: color.agent},
-  mentionHandle: {flex: 1, fontSize: font.meta, color: color.textFaint},
-  mentionKind: {fontSize: font.meta, color: color.agent},
+  mentionHandle: {
+    flex: 1,
+    fontSize: font.meta,
+    lineHeight: line.head,
+    color: color.textFaint,
+  },
+  mentionKind: {
+    fontSize: font.meta,
+    lineHeight: line.head,
+    color: color.agent,
+  },
   hint: {
     paddingHorizontal: SAFE_GUTTER,
     paddingTop: space.sm,

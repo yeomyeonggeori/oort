@@ -174,6 +174,18 @@ capture_surface LIGHT-COMPOSER-GROWTH composer-growth-accessibility-text-light.p
 xcrun simctl ui booted content_size "$ORIGINAL_CONTENT_SIZE"
 ORIGINAL_CONTENT_SIZE=""
 
+# #1480 멘션 시트는 이 스크립트가 못 찍는다 — 시트를 여는 것은 `@` 한 글자이고
+# 그 글자는 사람이 친다(초안으로 심는 길은 `measure/surfaces.tsx` 의
+# `mention-sheet` 절이 실측으로 기각한다). 캡처는 Maestro 레인이 진다:
+#
+#   xcrun simctl ui booted content_size accessibility-large
+#   xcrun simctl launch booted app.momo.ios --args \
+#     -momoMeasure MENTION-SHEET -RCT_jsLocation 127.0.0.1:$METRO_PORT
+#   maestro test maestro/90-mention-sheet-capture.yaml
+#
+# 여기 안 넣는 이유: 캡처 하나를 위해 계측 레인 전체가 Maestro 를 요구하게 되고,
+# 이 스크립트는 오늘 그 의존이 없다.
+
 echo
 echo "---- Origin stub ----"
 cat "$OUT_DIR/origin-stub.log"

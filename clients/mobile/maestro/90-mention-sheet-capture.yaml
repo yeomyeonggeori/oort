@@ -1,0 +1,47 @@
+appId: app.momo.ios
+name: 90-mention-sheet-capture
+---
+# 90-mention-sheet-capture — 멘션 시트가 **열린** 사진 (#1480).
+#
+# `measure/` 의 표면들은 저 혼자 서서 찍히는데 이 하나만 못 그런다: 시트를 여는
+# 것은 `@` 한 글자이고, 그 글자는 사람이 치는 것이다. 초안으로 심어 두는 길은
+# 실측으로 막혔다 — `focus()` 도 `setSelection` 도 iOS 에서 `onSelectionChange` 를
+# 안 내보내서 컴포저의 캐럿이 0 에 머물고(`mentionQueryAt` 는 캐럿 앞만 본다),
+# 화면에는 캐럿이 `@` 뒤에 보이는데 목록은 안 열린다.
+#
+# 그래서 이 레인은 **정말로 친다.** 다른 레인들과 달리 로그인도 서버도 필요 없다:
+# 표면은 `-momoMeasure MENTION-SHEET` 로 이미 떠 있고 이 흐름은 그 위에서 두
+# 동작만 한다. 그러므로 `launchApp` 도 여기 없다 — 앱을 다시 띄우면 계측 인자가
+# 아니라 보통의 앱이 뜬다.
+#
+# 쓰는 법(`scripts/measure.sh` 가 아니라 사람이 부른다 — 캡처 하나를 위해 계측
+# 레인 전체에 Maestro 의존을 심지 않는다):
+#
+#   xcrun simctl ui booted content_size accessibility-large
+#   xcrun simctl launch booted app.momo.ios --args \
+#     -momoMeasure MENTION-SHEET -RCT_jsLocation 127.0.0.1:$PORT
+#   maestro test clients/mobile/maestro/90-mention-sheet-capture.yaml
+- extendedWaitUntil:
+    visible:
+      id: "composer-input"
+    timeout: 60000
+- runFlow: subflows/dismiss-dev-logbox.yaml
+
+# 탭이 키보드를 올리고, 시뮬레이터는 **키보드가 처음 오를 때마다** 받아쓰기 설정을
+# 묻는다. 시스템 알림이라 앱 트리를 통째로 가리므로 그 다음 선택자는 전부 「없다」로
+# 읽힌다 — 그래서 여는 탭과 치는 탭 사이에 알림을 걷어낸다.
+- tapOn:
+    id: "composer-input"
+- runFlow:
+    when:
+      visible: "지금 안 함"
+    commands:
+      - tapOn: "지금 안 함"
+- tapOn:
+    id: "composer-input"
+- inputText: "@"
+- extendedWaitUntil:
+    visible:
+      id: "mention-list"
+    timeout: 20000
+- takeScreenshot: mention-sheet

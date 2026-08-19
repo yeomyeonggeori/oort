@@ -2,6 +2,7 @@ import {
   composerPlaceholder,
   MENTION_AFFORDANCE,
 } from '@momo/core/features/chat/composerCopy';
+import type {RosterMember} from '@momo/core/lib/api';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
 import {cleanup, fireEvent, render, screen} from '@testing-library/react-native';
@@ -17,6 +18,8 @@ import {
   composerColumnBudget,
   composerMaxHeight,
   COMPOSER_OFFLINE_COPY,
+  mentionRowHeight,
+  mentionSheetMaxHeight,
   withLatinWordBreaks,
 } from '../src/features/conversation/Composer';
 import {
@@ -46,6 +49,21 @@ import {__setNonSecretStore, NON_SECRET_KEYS} from '../src/storage/kv';
 // =============================================================================
 
 const EMPTY = makeDirectory([]);
+
+/** 멘션 시트를 여는 후보 하나 (#1480). 목록은 후보가 0 이면 아예 안 선다. */
+const AGENT = {
+  workspaceId: 'ws',
+  id: 'm-hermes',
+  kind: 'agent',
+  status: 'active',
+  displayName: '김인턴',
+  handle: 'hermes',
+  channelCount: 0,
+  channelIds: [],
+  capabilities: [],
+  createdAtMs: 0,
+  updatedAtMs: 0,
+} as unknown as RosterMember;
 
 /** MMKV 대역. `jest.setup.js` 의 전역 목은 파일 사이에 상태를 이어 가므로, 이
  *  파일은 자기 이음매를 세워 각 케이스가 빈 저장소에서 시작하게 한다. */
@@ -548,6 +566,141 @@ describe('#1443 라틴 낱말 절단 — 토큰의 자기 경계에서 끊긴다
     expect(screen.getByTestId('composer-input').props.value).toBe(
       'release-2026-08 배포합니다',
     );
+  });
+});
+
+// -----------------------------------------------------------------------------
+// #1480 — 멘션 시트의 상한도 도출된 숫자다.
+//
+// `Composer.tsx` 의 #1443 머리말이 이 결함을 자기 안에 이미 적어 두고 갔다:
+// *"그중 하나는 같은 가족의 결함을 자기 안에 갖고 있다 — 180 은 고정 pt 라 큰
+// 글자에서 담는 행 수가 줄고, 열려 있는 동안 목록을 그만큼 더 먹는다."* 여기서
+// 재는 것은 그 두 축이다.
+//
+// ## 도크는 **입력창보다 크다** — #1443 의 모델이 그것을 안 셌다
+//
+// 열의 몫을 나눌 때 센 것은 입력창의 상한뿐이었다. 화면의 도크는 그것 말고도
+// `styles.bar` 의 위아래 여백(`space.sm` 둘)을 지고, 시트가 열리면 시트까지 진다.
+// AX-XXL 산수가 그래서 안 맞았다: 180 + 170.4 + 16 = **366.4** vs 대화 열
+// **340.9** — 도크가 열을 25.5pt 넘고, 그만큼이 타임라인에서 빠진다.
+//
+// ## 「몇 개를 보여 주는가」 — **넷**, 그리고 오늘도 넷이었다
+//
+// 180 은 아무 데서도 도출되지 않은 값이고, 기본 크기에서 그것이 담던 것은
+// 4행(4 × 44 = 176)과 **4pt 짜리 다섯째 행의 이마**였다. 이 레포는 그 반노출을
+// 웹에서 이미 한 번 닫았다(#1418 의 `1lh` 클램프). 그러니 넷은 새 결정이 아니라
+// 오늘 값의 **뜻**이고, 새로 정한 것은 그 넷이 열을 넘을 때 무엇이 이기는가다.
+describe('#1480 멘션 시트 상한 — 동적 타입 비례 + 도크가 열을 안 넘는다', () => {
+  const AX_XXL = 3.143;
+  const H = 874;
+  const TOUCH_TARGET = 44;
+  /** `styles.bar` 의 위아래 여백. 도크가 시트·입력창 말고 지는 것. */
+  const BAR_CHROME = 8 * 2;
+
+  const sheetStyle = () => {
+    fireEvent.changeText(screen.getByTestId('composer-input'), '@');
+    return StyleSheet.flatten(
+      screen.getByTestId('mention-list').props.style,
+    ) as {maxHeight?: number};
+  };
+
+  it('기본 크기에서 담는 수는 그대로 넷이다 — 다섯째 행의 이마만 없어진다', () => {
+    // 옛 값 180 은 4행(176)에 4pt 가 붙은 값이었다. 그 4pt 가 화면에서 하는 일은
+    // 다섯째 이름의 윗동을 보여 주는 것 하나이고, 그것이 §5.3 이 세는 반노출이다.
+    expect(mentionSheetMaxHeight(1, H)).toBe(4 * TOUCH_TARGET);
+    expect(180 - 4 * TOUCH_TARGET).toBe(4); // 회귀 표식: 옛 값의 나머지
+  });
+
+  it('행이 글자를 따라간다 — 44 는 바닥이지 값이 아니다', () => {
+    // 행의 두 조각(이름 13 · 핸들 12)은 한 줄로 읽혀야 하므로 `line.head`(15)를
+    // 선언한다. 그 상자에 배수가 곱해지고, 44 보다 커지는 순간부터 행이 그것이다.
+    expect(mentionRowHeight(1)).toBe(TOUCH_TARGET);
+    expect(mentionRowHeight(AX_XXL)).toBeCloseTo(15 * AX_XXL, 5);
+    expect(mentionRowHeight(AX_XXL)).toBeGreaterThan(TOUCH_TARGET);
+  });
+
+  it('도크가 대화 열을 안 넘는다 — 시트 + 입력창 + 바 여백', () => {
+    // 이것이 이 티켓의 불변식이다. 넘으면 그 초과분은 타임라인에서 나온다.
+    for (const fontScale of [1, 1.235, 2, 3.143, 3.571]) {
+      for (const height of [812, 874, 956, 1366]) {
+        const budget = composerColumnBudget(fontScale, height);
+        const dock =
+          mentionSheetMaxHeight(fontScale, height) +
+          budget.composer +
+          BAR_CHROME;
+        expect(dock).toBeLessThanOrEqual(budget.column + 1e-9);
+      }
+    }
+  });
+
+  it('옛 값이었다면 그 자리에서 거짓이다 — 회귀 표식', () => {
+    // 티켓이 인용한 산수 그대로: 도크 366.4 vs 열 340.9.
+    const budget = composerColumnBudget(AX_XXL, H);
+    expect(180 + budget.composer + BAR_CHROME).toBeGreaterThan(budget.column);
+    expect(180 + budget.composer + BAR_CHROME).toBeCloseTo(366.4, 1);
+    expect(budget.column).toBeCloseTo(340.9, 1);
+  });
+
+  it('언제나 정수 행이다 — 반쪽 행은 이름의 이마만 보여 준다', () => {
+    // 옛 값 180 을 기각한 이유가 이것이고(4행 + 이마 4pt), 상한을 도출로 바꾸면서
+    // 같은 결함을 다른 크기에 다시 심으면 안 된다. 내림이 없던 첫 판은
+    // a11y-large 에서 3.5행을 내고 사진에 넷째 이름의 윗동을 남겼다.
+    for (const fontScale of [1, 1.235, 2, 2.143, 3.143, 3.571]) {
+      for (const height of [667, 812, 874, 956, 1366]) {
+        const row = mentionRowHeight(fontScale);
+        const rows = mentionSheetMaxHeight(fontScale, height) / row;
+        expect(Math.abs(rows - Math.round(rows))).toBeLessThan(1e-9);
+      }
+    }
+  });
+
+  it('바닥은 두 행 — 한 행 시트는 고를 것이 있다는 것만 알려 준다', () => {
+    // #1443 의 `MIN_ROWS` 와 같은 논리이고, 같은 자리에서 불변식을 이긴다:
+    // 가장 작은 창 · 가장 큰 글자에서는 바닥이 열을 넘는다. 조건이 부딪히면
+    // 「고를 수 있는 화면」이 이긴다.
+    for (const fontScale of [1, 2, 3.143, 3.571]) {
+      for (const height of [667, 874, 1366]) {
+        expect(mentionSheetMaxHeight(fontScale, height)).toBeGreaterThanOrEqual(
+          2 * mentionRowHeight(fontScale),
+        );
+      }
+    }
+  });
+
+  it('예산이 시트를 자기 안에 든다 — 사진과 테스트가 같은 답을 읽는다', () => {
+    const budget = composerColumnBudget(AX_XXL, H);
+    expect(budget.mentions).toBe(mentionSheetMaxHeight(AX_XXL, H));
+    expect(budget.dockChrome).toBe(BAR_CHROME);
+    // #1443 이 세운 등식은 그대로다 — 이 필드들은 더한 것이지 고친 것이 아니다.
+    expect(budget.column).toBeCloseTo(budget.list + budget.composer, 5);
+  });
+
+  it('시트가 그 식을 실제로 든다 — 스타일시트에 못 박히지 않는다', () => {
+    setWindow({fontScale: AX_XXL, height: H});
+    composer({directory: makeDirectory([AGENT])});
+    expect(sheetStyle().maxHeight).toBeCloseTo(
+      mentionSheetMaxHeight(AX_XXL, H),
+      5,
+    );
+  });
+
+  it('기본 크기에서도 같은 식이 든다 — 오늘 화면은 4행 그대로다', () => {
+    setWindow({fontScale: 1, height: H});
+    composer({directory: makeDirectory([AGENT])});
+    expect(sheetStyle().maxHeight).toBe(4 * TOUCH_TARGET);
+  });
+
+  it('행의 두 조각이 선언된 같은 줄 상자를 든다 — 한 줄로 읽힌다', () => {
+    // 선언하지 않으면 RN 이 광학 중심으로 +2.67pt 어긋나게 놓는다(`tokens.ts` 의
+    // `line.head` 독스트링이 그 실측을 든다). 그리고 선언된 값이 없으면 위
+    // `mentionRowHeight` 의 산수는 화면이 안 쓰는 수를 쓰는 것이 된다.
+    setWindow({fontScale: 1, height: H});
+    composer({directory: makeDirectory([AGENT])});
+    fireEvent.changeText(screen.getByTestId('composer-input'), '@');
+    const name = screen.getByText(AGENT.displayName);
+    const handle = screen.getByText(`@${AGENT.handle}`);
+    expect(StyleSheet.flatten(name.props.style).lineHeight).toBe(15);
+    expect(StyleSheet.flatten(handle.props.style).lineHeight).toBe(15);
   });
 });
 
