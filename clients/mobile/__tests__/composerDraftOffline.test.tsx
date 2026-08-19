@@ -1,3 +1,7 @@
+import {
+  composerPlaceholder,
+  MENTION_AFFORDANCE,
+} from '@momo/core/features/chat/composerCopy';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
 import {cleanup, fireEvent, render, screen} from '@testing-library/react-native';
@@ -548,6 +552,155 @@ describe('#1443 라틴 낱말 절단 — 토큰의 자기 경계에서 끊긴다
 });
 
 // -----------------------------------------------------------------------------
+// #1479 — 빈 상자에 못 서는 문장은 절 경계에서 접힌다.
+//
+// #1422 가 「폰은 이 규칙을 안 부른다」를 실측으로 정했을 때 그 근거는 전제
+// 하나였다: RN 의 multiline 입력창은 콘텐츠 높이로 자라므로 **잃는 것이 없다.**
+// #1443 이 세운 성장 상한(대화 열의 몫)은 그 전제를 큰 글자에서 무너뜨린다 —
+// 상자는 더 못 자라는데 문장은 4~5줄이고, **빈 상자는 스크롤이 대신해 주지
+// 않는다**(스크롤하는 것은 콘텐츠이고 플레이스홀더는 콘텐츠가 아니다). 전제가
+// 무너진 자리에서는 웹의 판정이 그대로 선다: 어차피 못 설 절은 절 경계에서
+// 통째로 사라져야 하고, 반쪽 절(「보내기, @」)이나 반노출 줄로 남으면 안 된다.
+//
+// 규칙은 코어의 것이고(`fitComposerPlaceholder`) 자는 이 클라의 것이다: 입력창과
+// 같은 토큰·같은 폭·같은 줄바꿈 전략으로 숨은 프로브를 세워 `onTextLayout` 으로
+// 재고, 그 세로를 `composerMaxHeight` 가 든 자리와 대조한다. 기본 글자 크기에서는
+// 상자가 문장보다 크므로 자가 언제나 「든다」고 답한다 — 화면이 하나도 안 변한다.
+describe('#1479 절 예산 — 빈 상자에 못 서는 문장은 절 경계에서 접힌다', () => {
+  const AX_XXL = 3.143;
+  const H = 874;
+  /** 입력창 패딩(8·8)과 테두리(1·1). 상한에서 이만큼을 빼면 글이 서는 자리다. */
+  const CHROME = 8 * 2 + 1 * 2;
+
+  const input = () => screen.getByTestId('composer-input');
+
+  /** 입력창이 자기 폭을 알린다 — 프로브는 그 다음에야 선다. */
+  const layoutInput = (width = 358) =>
+    fireEvent(input(), 'layout', {
+      nativeEvent: {layout: {x: 0, y: 0, width, height: 44}},
+    });
+
+  /**
+   * 프로브를 찾는다. `includeHiddenElements` 가 **필요한 것 자체가 단정**이다 —
+   * 이 자는 투명하고 `accessibilityElementsHidden` 이라 접근성 트리 밖에 서고,
+   * 그래서 기본 질의로는 안 잡힌다. 아래 「소리를 안 낸다」 케이스가 그 짝이다.
+   */
+  const probes = () =>
+    screen.queryAllByTestId('composer-placeholder-probe', {
+      includeHiddenElements: true,
+    });
+
+  /** 프로브가 잰 줄들. 실기기의 `onTextLayout` 이 돌려주는 모양 그대로다. */
+  const measureProbe = (lineHeights: number[]) =>
+    fireEvent(probes()[0], 'textLayout', {
+      nativeEvent: {lines: lineHeights.map(height => ({height}))},
+    });
+
+  it('재기 전에는 문장 전체다 — 짧게 시작하면 드는 폭에서도 광고가 사라진다', () => {
+    // 웹 `placeholderFit.ts` 와 같은 안전 방향. 자가 답하기 전의 한 프레임에
+    // 짧은 문장을 내면, 드는 상자에서도 광고가 사라졌다 돌아온다.
+    setWindow({fontScale: AX_XXL, height: H});
+    composer();
+    expect(input().props.placeholder).toBe(
+      withLatinWordBreaks(composerPlaceholder('배포', 'place')),
+    );
+  });
+
+  it('큰 글자에서 문장이 상자를 넘으면 뒷절이 통째로 사라진다', () => {
+    setWindow({fontScale: AX_XXL, height: H});
+    composer();
+    layoutInput();
+    const row = 22 * AX_XXL; // 화면의 줄 상자 — 69.1pt
+    // 문장 4줄 = 276.6pt. 상한이 든 글자리는 170.4 − 18 = 152.4pt — 못 선다.
+    measureProbe([row, row, row, row]);
+    expect(input().props.placeholder).toBe('배포에 메시지 보내기');
+    expect(input().props.placeholder).not.toContain(MENTION_AFFORDANCE);
+    // 절 경계에서 끝났다 — 반쪽 절이 아니다.
+    expect(input().props.placeholder.endsWith(',')).toBe(false);
+  });
+
+  it('상자가 다시 커지면 광고가 돌아온다 — 접힘은 상태가 아니라 답이다', () => {
+    setWindow({fontScale: AX_XXL, height: H});
+    composer();
+    layoutInput();
+    const row = 22 * AX_XXL;
+    measureProbe([row, row, row, row]);
+    expect(input().props.placeholder).not.toContain(MENTION_AFFORDANCE);
+    // 같은 표면을 더 넓은 폭에서 다시 재면(회전·iPad) 두 줄이 되고, 152.4pt 에
+    // 138.3pt 는 든다.
+    measureProbe([row, row]);
+    expect(input().props.placeholder).toBe(
+      withLatinWordBreaks(composerPlaceholder('배포', 'place')),
+    );
+  });
+
+  it('기본 글자 크기에서는 아무것도 안 변한다 — 자가 언제나 「든다」고 답한다', () => {
+    setWindow({fontScale: 1, height: H});
+    composer();
+    layoutInput();
+    // 기본 크기의 최장 실측은 2줄(#1422 폰 계측). 상한 128 − 18 = 110pt 에
+    // 44pt 는 넉넉히 든다.
+    measureProbe([22, 22]);
+    expect(input().props.placeholder).toBe(
+      withLatinWordBreaks(composerPlaceholder('배포', 'place')),
+    );
+    expect(input().props.placeholder).toContain(MENTION_AFFORDANCE);
+  });
+
+  it('경계값: 정확히 드는 문장은 접지 않는다', () => {
+    setWindow({fontScale: AX_XXL, height: H});
+    composer();
+    layoutInput();
+    const room = composerMaxHeight(AX_XXL, H) - CHROME;
+    // 합이 정확히 글자리인 판 — 부동소수 잡음으로 접으면 안 된다.
+    measureProbe([room / 2, room / 2]);
+    expect(input().props.placeholder).toContain(MENTION_AFFORDANCE);
+  });
+
+  it('문장을 넘겨받은 자리(스레드)는 절 계약 밖이다 — 프로브도 안 선다', () => {
+    setWindow({fontScale: AX_XXL, height: H});
+    composer({placeholder: '답글 쓰기'});
+    layoutInput();
+    expect(probes()).toHaveLength(0);
+    expect(input().props.placeholder).toBe('답글 쓰기');
+  });
+
+  it('자는 소리를 안 낸다 — 접근성 트리에 같은 문장이 두 번 서지 않는다', () => {
+    setWindow({fontScale: AX_XXL, height: H});
+    composer();
+    layoutInput();
+    // 숨은 것까지 세면 하나 있고, VoiceOver 가 훑는 트리에서는 없다. 이 둘이
+    // 함께여야 「재기는 하는데 안 읽힌다」가 단정된다.
+    expect(probes()).toHaveLength(1);
+    expect(
+      screen.queryAllByTestId('composer-placeholder-probe'),
+    ).toHaveLength(0);
+  });
+
+  it('자는 placeholder 만 잰다 — 사람이 친 글과 필드 이름은 건드리지 않는다', () => {
+    setWindow({fontScale: AX_XXL, height: H});
+    composer({draftKey: CH});
+    layoutInput();
+    const row = 22 * AX_XXL;
+    measureProbe([row, row, row, row]);
+    // 접힌 상태에서 쳐도 값은 친 그대로다 — 이 파일의 첫 번째 규칙.
+    fireEvent.changeText(input(), '안녕하세요');
+    expect(input().props.value).toBe('안녕하세요');
+    // 필드 이름은 별도 문장이고 joiner 도 없다(VoiceOver 전문).
+    expect(input().props.accessibilityLabel).toBe('배포에 보낼 메시지');
+    expect(input().props.accessibilityLabel).not.toContain('\u2060');
+  });
+
+  it('joiner 가 이 화면까지 온다 — 광고 절은 「@로」가 한 낱말이다 (#1479 ①)', () => {
+    setWindow({fontScale: 1, height: H});
+    composer();
+    expect(input().props.placeholder).toContain('@\u2060로 부르기');
+    // withLatinWordBreaks 는 라틴/숫자 사이만 만지므로 joiner 를 안 건드린다.
+    expect(withLatinWordBreaks('@\u2060로 부르기')).toBe('@\u2060로 부르기');
+  });
+});
+
+// -----------------------------------------------------------------------------
 // H-2 (U4-6 병합 리뷰) — 로그아웃은 초안도 데리고 나간다.
 //
 // 리뷰가 실측한 것: 웹은 `app/session.tsx` 의 `signOut` 에서 `clearAllDrafts()`
@@ -681,8 +834,15 @@ describe('컴포저 카피가 한 벌이다 (#1384)', () => {
         'utf8',
       ),
     );
-    expect(code).toContain('composerPlaceholder(channelLabel, recipient)');
+    // 문장이 아니라 **절**을 받는다 (#1479). 이 클라가 절 예산을 부르면서 소비
+    // 지점이 `composerPlaceholder` 에서 `composerPlaceholderClauses` 로 내려갔고,
+    // 그것이 여전히 코어의 이름인 것이 이 단정이 지키는 전부다.
+    expect(code).toContain('composerPlaceholderClauses(channelLabel, recipient)');
     expect(code).toContain('composerFieldLabel(channelLabel, recipient)');
+    // 이음쇠도 코어의 것이다 — 절을 이어 붙이는 것은 `fitComposerPlaceholder`
+    // 이고, 이 파일이 이음쇠를 적으면 그것이 두 번째 정본이다.
+    expect(code).toContain('fitComposerPlaceholder(');
+    expect(code).not.toContain('COMPOSER_PLACEHOLDER_JOINER');
   });
 
   it('조사를 정하는 사실은 화면이 넘긴다 — 컴포저가 추측하지 않는다', () => {
