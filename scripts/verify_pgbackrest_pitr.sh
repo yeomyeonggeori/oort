@@ -233,9 +233,9 @@ wait_for_postgres() {
 }
 
 drop_probe_best_effort() {
-  # EXIT-trap safe: never call fail()/source_psql (those abort the trap and
-  # skip volume/network cleanup). Intermediate RED after probe_created=1 still
-  # attempts DROP SCHEMA IF EXISTS.
+  # EXIT-trap safe: do not go through the fail-closed source helper (that aborts
+  # the trap and skips volume/network cleanup). Intermediate RED after
+  # probe_created=1 still attempts DROP SCHEMA IF EXISTS.
   [ "${probe_created:-0}" -eq 1 ] || return 0
   if [ -z "${source_container_id:-}" ]; then
     printf '[pgbackrest-pitr] RED probe_cleanup_unverified reason=source_id_unset schema=%s\n' \
