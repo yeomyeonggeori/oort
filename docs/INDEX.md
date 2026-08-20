@@ -51,6 +51,7 @@
 | [`NOTICE`](../NOTICE) | Apache 2.0 귀속 — 앱 화면 표기 대상 | 법무 |
 | [`Makefile`](../Makefile) | `build`/`test` = **현행 스택**(cargo + npm), `up`/`down`/`migrate` = dev compose, `swift-build`/`swift-test` = 은퇴 중 트리 | 빌드 명령 |
 | [`docs/SELF_HOST.md`](SELF_HOST.md) | **셀프호스트 첫 기동 정본**(#1229): clone → `scripts/self_host_env.sh` → `up -d --build --wait` → 브라우저 로그인. 분기 0 | 운영 명령 |
+| [`docs/SELF_HOST_FIRST_DAY.md`](SELF_HOST_FIRST_DAY.md) | **셀프호스트 오퍼레이터의 첫 하루**(#1608): 부트스트랩(키 둘) → GUI 초대 → 웹/`oort://join` 합류 → AI 연결 → 첫 멘션 | 운영 명령 |
 | [`infra/rust/README.md`](../infra/rust/README.md) | **현행 스택 심화**: Rust 이미지 + prod형 compose(로컬·푸시·폰·TLS 오버레이 전부) | 운영 명령 |
 | [`docs/runbooks/ncp-rust-deploy.md`](runbooks/ncp-rust-deploy.md) | **라이브 배포 정본**(app.oor7.com Rust 스택 — 이미지 태그 교체 + Caddy/헤더 배포) | 운영 명령 |
 | [`scripts/verify_merge_tree.sh`](../scripts/verify_merge_tree.sh) | **병합 결과**(브랜치가 아니라 머지된 트리)에서 웹·폰·코어를 컴파일하는 크로스-클라 게이트(#1108) | 운영 명령 |
