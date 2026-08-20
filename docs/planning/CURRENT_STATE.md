@@ -1,5 +1,21 @@
 # oort 기획 현재 상태 (Planning Current State)
 
+> **2026-08-20 스냅샷 44 (Fable · momo-main — ITO-0 파도 5/5 완주·grok 워커 체제 개시. PLN-20260815-01).** 컴팩트 복원 진입점.
+>
+> **★ ITO-0 수리 파도 완주(5/5·전부 track/engine 랜딩)**: T-A #1614(셀프호스트 env tauri CORS 2종 기본·CORS 거부 케이스 실측 405/헤더0·허용 compose 실측+GUI 왕복=ITO-1 이관)·T-B #1615(**docs/SELF_HOST_FIRST_DAY.md** — 부트스트랩→GUI 초대→합류→멘션 단일 런북·로그인 화면 6문구 실기동 일치)·T-C #1612(3-Day 팩=**LAUNCH_READY/BLOCKED/NEEDS_MORE_INTERNAL** 계약·Day0~3=ITO-1~4 결속)·T-D #1617(**MOMO_CHANNEL_BUILD** compile-time 가드 — 로컬 release 롤백 구멍 폐쇄·NEXT_CHANNEL §8=성재 복붙 재발행)·T-E #1616(DEPLOY 로그인 문장·RELEASE_PLAYBOOK 은퇴 배너·web-legacy README 이분). 결재=interview_20260820_074206(Q1~Q5 — 스냅샷 43 참조·전부 확정).
+>
+> **★ 신규 P1 #1613(실사고 발견)**: compose 프로젝트명(`oort`)·pgdata 볼륨(`oort-pgdata`) 고정 이름 — 두 체크아웃이 서로의 스택·DB를 무경고 하이재킹(T-A 실기동 중 #1361 스택 재생성+PG 이중 기동 실측). **완전 복구·데이터 무손실**(ws1·agent2·msg2·8088 정상 — #1361 성재 1단계 여전히 유효). ITO-1 H1 전 수리 권장. 파일군=T-A와 동일 — 후속 파도 후보 선두.
+>
+> **grok 4.6 워커 체제 실측(첫 파도)**: 완주 6/7(1은 -c 재개)·조기 종료는 동시 2기 창 집중 → **병렬 1 보수 운용**(grok-fleet 스킬 갱신 후보). 품질 상·게이트 회전 0·티켓 후보 15건 원장화. 검수=Fable 전담(리뷰 실무도 grok 리뷰어 C 가능 실증 — #1342 C0/H1/M3/L2).
+>
+> **GHCR 체인(Q2 집행 중)**: #1342 리뷰 완료(PR 코멘트)·**rebase+발견 4건 대응 워커 비행 중**(1330 워크트리·단독). 랜딩 후 #1332 ready 전환 → 법무 검토+owner 발행 승인(성재)만 남음. H2(digest 설치 실측)는 그 뒤.
+>
+> **다음 후보**: ①#1342 랜딩·#1332 ready ②후속 파도(#1613 선두+T-워커 티켓 후보 15건 선별+#1600~#1604) ③**ITO-1 H1**(성재 실사용 — SELF_HOST_FIRST_DAY 신규 런북로 완주·bench M1~M5) ④#1361 1단계(스택 복구 확인됨·가동 유지).
+>
+> **성재 손**: #1361 1단계·#1332 후 법무+owner 발행 승인·ITO-1~3 실사용자 역(+가능하면 1인 확보)·T-D §8 실발행(ITO-3 I5 직전)·Xcode Cloud 체크리스트.
+>
+> 이하 스냅샷 43:
+
 > **2026-08-20 스냅샷 43 (Fable · momo-main — 오픈소스 런칭 준비도 실측·ITO 계획 상신. PLN-20260815-01).** 컴팩트 복원 진입점.
 >
 > **★ 신규 축(성재 발제): 내부 테스트 운영(ITO)** — 오픈소스 퍼블리싱 전 셀프호스팅 유저 관점 내부 테스트(호스팅→온보딩→실사용, 웹+데스크탑 연동 중심·iOS는 시뮬 스모크만). 정본=`research/2026-08-20-oss-launch-readiness-and-internal-test-plan.md`. 핵심 판정: 레포는 이미 public — 런칭 정의(2026-08-10 지시서)="외부 셀프호스터 3+에이전트 실사용", **ITO=그 리허설**. 런칭 잔여 L1~L10(#1332 NOTICE bundle=P0·GHCR 첫 발행·첫 v0.x 태그·CI gitleaks·커뮤니티 문서·arm64·#1300·stale 스윕).
