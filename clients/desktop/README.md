@@ -418,12 +418,35 @@ the **release-page zip** installed into `/Applications`, not a local build:
 
 ## Known gaps
 
-- The **release** app loads `tauri://localhost`, so the web build's dev proxy for
-  `/v1` does not exist and REST is cross-origin. The server side of that landed on
-  `main` as the CORS origin allowlist (MOMO-605, #768) and is **not in this
-  branch's base** (`track/uxui` P2), so the `0.1.0-next.*` builds published so far
-  install and self-update cleanly but cannot yet sign in against momowebqa. Taking
-  `main` into the track closes it; nothing in the updater depends on it.
+- **Release-app CORS against a self-host stack (ITO-0 T-A / #1607).** The
+  packaged webview origin is `tauri://localhost` (Windows/Android:
+  `http://tauri.localhost`); the Vite `/v1` dev proxy does not exist, so REST
+  is genuinely cross-origin. Server CORS (MOMO-605 / DESK-1,
+  `server-rust/bins/momo-server/src/cors.rs`) **is** on the current engine
+  base. `infra/rust/docker-compose.rust.yml` still defaults
+  `MOMO_CORS_ALLOWED_ORIGINS` empty (same-origin web and NCP /
+  `caddy.override.yml` are not widened). `scripts/self_host_env.sh` now writes
+  the two Tauri origins into a **new** `infra/rust/local.secrets.env`, and
+  appends that one line to an existing file when the key is absent — it never
+  overwrites a value somebody set, including empty. New env files also add
+  the same two origins to `CENTRIFUGO_ALLOWED_ORIGINS` (space-separated; a
+  different knob). A pre-#1607 env that still lists only the loopback web
+  ports is left byte-for-byte; the generator warns on stderr that desktop
+  realtime will 403 until the operator appends the two origins and restarts
+  centrifugo.
+  **runtime-unverified in this worktree (headless):** release-bundle login +
+  message round-trip (including realtime receive) was not driven here. Wiring
+  and `scripts/tests/test_self_host_env_modes.sh` landed; live evidence is the
+  orchestrator procedure on GitHub #1607, transferred to ITO-1 until a
+  headed machine runs it. Until that run, the contract (from
+  `scripts/verify_cors_allowlist.sh` / `cors.rs`, not re-measured against a
+  compose stack in this worktree) is: empty CORS ⇒ `OPTIONS /v1/auth/login`
+  is not 204 and carries no `Access-Control-*`; allowlisted
+  `Origin: tauri://localhost` ⇒ `204` + exact-echo
+  `Access-Control-Allow-Origin: tauri://localhost`, no
+  `Access-Control-Allow-Credentials`. Published `0.1.0-next.*` sign-in
+  against momowebqa is a **deploy-env** question (not this generator) and
+  stays unverified here.
 - `oort://` is registered by this bundle and by the SwiftUI client, and macOS
   picks one handler. Drive a specific build with `open -a <path> "oort://…"`.
 - Unsigned or differently-signed builds: macOS ties keychain ACLs to the binary's
