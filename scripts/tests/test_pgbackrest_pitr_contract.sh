@@ -481,6 +481,16 @@ grep -Fq "$image_id" "$fake_log" || fail "local image tag was not resolved to sh
 # shellcheck disable=SC2016 # `$invocation_id` is literal source under test.
 grep -Fq 'resource_suffix="$invocation_id"' "$VERIFY" \
   || fail "verifier resources are not invocation suffixed"
+grep -Fq 'pg_clock_utc' "$VERIFY" \
+  || fail "verify does not sample evidence timestamps from PostgreSQL clock_timestamp"
+! grep -Fq 'utc_now' "$VERIFY" \
+  || fail "verify still mixes host UTC with PostgreSQL clock_timestamp"
+[ "$(grep -c 'started_at="$(pg_clock_utc)"' "$VERIFY")" -eq 1 ] \
+  || fail "started_at is not sourced from the PostgreSQL clock"
+[ "$(grep -c 'restored_at="$(pg_clock_utc)"' "$VERIFY")" -eq 1 ] \
+  || fail "restored_at is not sourced from the PostgreSQL clock"
+[ "$(grep -c 'completed_at="$(pg_clock_utc)"' "$VERIFY")" -eq 1 ] \
+  || fail "completed_at is not sourced from the PostgreSQL clock"
 grep -Fq 'ensure_pgbackrest_stanza' "$VERIFY" \
   || fail "verify does not skip stanza-create when the stanza already exists"
 [ "$(grep -c '^ensure_pgbackrest_stanza$' "$VERIFY")" -eq 2 ] \
@@ -611,6 +621,11 @@ assert 'const CIPHER_SECRET_PATH: &str = "/run/secrets/pgbackrest_repo1_cipher_p
 assert "a_rotated_repository_cipher_rejects_otherwise_valid_evidence" in migrate
 assert "tamper_forged_unknown_and_duplicate_json_are_rejected" in migrate
 assert "expired_future_and_fail_results_are_rejected" in migrate
+assert "mixed_host_and_pg_clock_chronology_is_rejected" in migrate
+assert "pg_clock_equal_adjacent_timestamps_are_accepted" in migrate
+assert "live_pg_clock" in migrate
+assert "PG_CLOCK_SQL" in migrate
+assert "Utc::now()" not in migrate
 assert "active_target_markers_archive_and_cleanup_are_fail_closed" in migrate
 assert "production_image_paths_are_fixed_and_overrides_are_rejected" in main
 for override in (

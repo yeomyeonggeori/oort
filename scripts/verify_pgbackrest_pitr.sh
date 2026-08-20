@@ -162,17 +162,21 @@ finally:
 PY
 }
 
-utc_now() {
-  python3 - <<'PY'
-import datetime
-print(datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ"))
-PY
-}
-
 source_psql() {
   assert_source_running
   docker exec -i "$source_container_id" \
     psql -X -v ON_ERROR_STOP=1 -U "$database_user" -d "$database" "$@"
+}
+
+# Single clock source for every evidence timestamp: PostgreSQL clock_timestamp()
+# on the live source. Mixing host UTC with PG time is a false-RED chronology
+# when the two clocks disagree by even a second.
+pg_clock_utc() {
+  local ts
+  ts="$(source_psql -qAtc "SELECT to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"');")"
+  [[ "$ts" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{6}Z$ ]] \
+    || fail "pg_clock_utc_invalid value=$ts"
+  printf '%s' "$ts"
 }
 
 restore_psql() {
@@ -666,7 +670,6 @@ config_file="$ROOT/infra/rust/pgbackrest.conf"
 [ ! -L "$config_file" ] && [ -f "$config_file" ] || fail "pgbackrest_config_missing"
 config_file="$(cd "$(dirname "$config_file")" && pwd -P)/$(basename "$config_file")"
 
-started_at="$(utc_now)"
 # The probe is owned by this invocation, not merely by the caller-supplied
 # run-id.  Pre-arming cleanup is therefore safe even if CREATE's commit result
 # becomes ambiguous after a connection failure.
@@ -790,6 +793,7 @@ pgbackrest_version="$(docker exec --user postgres "$source_container_id" \
   /usr/bin/pgbackrest version | sed 's/^pgBackRest //')"
 [ "$pgbackrest_version" = 2.59.0 ] || fail "pgbackrest_version_drift"
 
+started_at="$(pg_clock_utc)"
 probe_created=1
 source_psql --single-transaction -q -v run_id="$run_id" <<SQL
 CREATE SCHEMA "$probe_schema";
@@ -810,7 +814,7 @@ ensure_pgbackrest_stanza
 source_pgbackrest check
 source_pgbackrest --type=full backup
 
-source_backup_completed_at="$(source_psql -qAtc "SELECT to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"');")"
+source_backup_completed_at="$(pg_clock_utc)"
 backup_pre_json="$(source_pgbackrest --output=json info)"
 backup_stop_epoch="$(jq -er '.[0].backup | map(select(.type == "full" and .error == false)) | last | .timestamp.stop' <<<"$backup_pre_json")"
 [[ "$backup_stop_epoch" =~ ^[0-9]+$ ]] || fail "backup_stop_epoch_invalid"
@@ -824,7 +828,7 @@ while :; do
   [ "$target_wait_attempt" -lt 10 ] || fail "source_clock_did_not_pass_backup_stop"
   sleep 1
 done
-recovery_target_time="$(source_psql -qAtc "SELECT to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"');")"
+recovery_target_time="$(pg_clock_utc)"
 source_psql -q -v run_id="$run_id" <<SQL
 INSERT INTO "$probe_schema".marker (run_id, marker) VALUES (:'run_id', 'B');
 SQL
@@ -922,7 +926,7 @@ restored_container_id="$(docker run -d --name "$restored_container" \
 [[ "$restored_container_id" =~ ^[0-9a-f]{12,64}$ ]] \
   || fail "restored_container_id_invalid"
 wait_for_postgres "$restored_container_id"
-restored_at="$(utc_now)"
+restored_at="$(pg_clock_utc)"
 
 marker_a_count="$(restore_psql -qAt -v run_id="$run_id" <<SQL
 SELECT count(*) FROM "$probe_schema".marker WHERE run_id = :'run_id' AND marker = 'A';
@@ -945,7 +949,7 @@ probe_created=0
 [ "$(source_psql -qAtc "SELECT count(*) FROM pg_namespace WHERE nspname='$probe_schema';")" = 0 ] \
   || fail "source_probe_cleanup_failed"
 
-completed_at="$(utc_now)"
+completed_at="$(pg_clock_utc)"
 duration_seconds="$(python3 - "$started_at" "$completed_at" <<'PY'
 import datetime
 import sys

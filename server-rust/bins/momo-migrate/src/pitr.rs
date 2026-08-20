@@ -28,6 +28,8 @@ const DEFAULT_HMAC_KEY_PATH: &str = "/run/secrets/momo_pitr_hmac_key";
 const CIPHER_SECRET_PATH: &str = "/run/secrets/pgbackrest_repo1_cipher_pass";
 const ARCHIVE_COMMAND_PREFIX: &str = "/usr/local/bin/oort-pgbackrest --stanza=";
 const CIPHER_FINGERPRINT_DOMAIN: &[u8] = b"momo-pitr-cipher-fingerprint/v1\n";
+const PG_CLOCK_SQL: &str =
+    r#"SELECT to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"');"#;
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -639,6 +641,9 @@ fn validate(
             "PITR gate: cleanup leak count is non-zero".to_string(),
         ));
     }
+    // Producer timestamps are PostgreSQL clock_timestamp() UTC on the live
+    // source, not host UTC. Mixing the two clocks is a false RED when they
+    // disagree; `now` must therefore be the same PG clock (see live_pg_clock).
     let started = utc("started_at", &payload.started_at)?;
     let backup_completed = utc(
         "source_backup_completed_at",
@@ -679,6 +684,13 @@ fn validate(
     Ok(payload)
 }
 
+fn live_pg_clock(database_url: &str) -> Result<DateTime<Utc>, MigrateError> {
+    utc(
+        "live clock_timestamp",
+        &psql_scalar(database_url, PG_CLOCK_SQL, "PITR live clock probe")?,
+    )
+}
+
 fn verify_required(database_url: &str, migrations: &[Migration]) -> Result<(), MigrateError> {
     let expected = Expected::from_env()?;
     let evidence_path = PathBuf::from(
@@ -697,7 +709,7 @@ fn verify_required(database_url: &str, migrations: &[Migration]) -> Result<(), M
         &expected,
         &migrations_sha256(migrations)?,
         &current_cipher_fingerprint,
-        Utc::now(),
+        live_pg_clock(database_url)?,
     )?;
     let live = psql_scalar(
         database_url,
@@ -1105,6 +1117,43 @@ mod tests {
             now()
         )
         .is_err());
+    }
+
+    #[test]
+    fn mixed_host_and_pg_clock_chronology_is_rejected() {
+        let mut candidate = payload();
+        // Host UTC sampled after a slower PG backup clock: started_at >
+        // source_backup_completed_at is the false-RED shape.
+        candidate.started_at = "2030-01-02T03:04:11.000000Z".into();
+        candidate.source_backup_completed_at = "2030-01-02T03:04:10.000000Z".into();
+        candidate.duration_seconds = 29;
+        assert!(check(&candidate)
+            .unwrap_err()
+            .to_string()
+            .contains("timestamp chronology invalid"));
+    }
+
+    #[test]
+    fn pg_clock_equal_adjacent_timestamps_are_accepted() {
+        let mut candidate = payload();
+        candidate.started_at = "2030-01-02T03:04:10.000000Z".into();
+        candidate.source_backup_completed_at = "2030-01-02T03:04:10.000000Z".into();
+        candidate.recovery_target_time = "2030-01-02T03:04:20.123456Z".into();
+        candidate.restored_at = "2030-01-02T03:04:30.123456Z".into();
+        candidate.completed_at = "2030-01-02T03:04:40.000000Z".into();
+        candidate.duration_seconds = 30;
+        assert_eq!(check(&candidate).unwrap().result, "PASS");
+    }
+
+    #[test]
+    fn recovery_target_must_strictly_precede_restored_at() {
+        let mut candidate = payload();
+        candidate.recovery_target_time = "2030-01-02T03:04:30.000000Z".into();
+        candidate.restored_at = "2030-01-02T03:04:30.000000Z".into();
+        assert!(check(&candidate)
+            .unwrap_err()
+            .to_string()
+            .contains("timestamp chronology invalid"));
     }
 
     #[test]
