@@ -203,7 +203,8 @@ ensure_pgbackrest_stanza() {
       --config=/etc/pgbackrest/pgbackrest.conf --stanza="$STANZA" \
       --output=json info 2>/dev/null)" \
     && jq -e --arg stanza "$STANZA" \
-      'type=="array" and length>=1 and .[0].name==$stanza' \
+      'type=="array" and length>=1 and .[0].name==$stanza
+       and ((.[0].status.message // "") | IN("ok"; "no valid backups"))' \
       >/dev/null 2>&1 <<<"$info_json"; then
     printf '[pgbackrest-pitr] stanza %s exists; skip stanza-create\n' "$STANZA"
     return 0

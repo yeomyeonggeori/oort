@@ -499,6 +499,8 @@ grep -Fq 'ensure_pgbackrest_stanza' "$VERIFY" \
   || fail "verify must stanza-create only through the existence probe"
 grep -Fq 'stanza %s exists; skip stanza-create' "$VERIFY" \
   || fail "verify does not log the existing-stanza skip"
+grep -Fq 'no valid backups' "$VERIFY" \
+  || fail "verify must not treat a missing stanza path as an existing stanza"
 grep -Fq 'docker volume prune -af' "$VERIFY" \
   || fail "verifier volume cleanup is not daemon-side prune -a"
 ! grep -Eq 'docker volume (rm|remove)' "$VERIFY" \
