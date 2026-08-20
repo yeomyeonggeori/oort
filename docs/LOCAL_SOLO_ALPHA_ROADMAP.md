@@ -1,8 +1,24 @@
 # Local Solo Alpha Roadmap
 
-> Purpose: bring oort to a level where one operator can run a local Docker stack,
+> ## ⚠️ 이 문서는 **은퇴 전제**(Swift macOS 앱 + `AWS_READY`)의 1인 알파 로드맵이다 (ITO-0 T-C / #1609)
+>
+> 아래 Definition of Done·goal chain·`macos-ui` 게이트는 현행 실행 지시가 아니다.
+> 1인 셀프호스트 → 웹+데스크탑 도그푸드 → 판정은 이 파일이 아니라:
+>
+> | 하려는 것 | 갈 곳 |
+> |---|---|
+> | 3일 팩 · `LAUNCH_READY` 계약 · ITO-1~4 | [`docs/LOCAL_3_DAY_ALPHA_TEST_PACK.md`](LOCAL_3_DAY_ALPHA_TEST_PACK.md) |
+> | 한 세션 스모크 A–F | [`docs/INTERNAL_ALPHA.md`](INTERNAL_ALPHA.md) |
+> | clone→브라우저 로그인 | [`docs/SELF_HOST.md`](SELF_HOST.md) |
+>
+> 본문은 MOMO-336 시절 원문이다. 사문서로 보존한다.
+
+---
+
+> Purpose (historical): bring oort to a level where one operator can run a local Docker stack,
 > open the macOS dev app, invite/use a local Hermes-compatible agent, and collect
 > enough evidence for a 3-day dogfood decision before AWS.
+> **Do not execute this roadmap on a current checkout.**
 
 ## Definition of Done
 
