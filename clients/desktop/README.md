@@ -270,7 +270,9 @@ Web half: `clients/web/src/features/updates/`. Three surfaces, one store:
   act on;
 - the full state in 설정 > 업데이트, deep-linked as `/settings?section=updates`.
 
-Publishing: `scripts/publish_next_build.sh --version 0.1.0-next.N`.
+Publishing: `scripts/publish_next_build.sh --version 0.1.0-next.N`
+(sets `MOMO_CHANNEL_BUILD=1`; paste-ready steps in `docs/NEXT_CHANNEL.md` §8).
+A local `cargo tauri build` does **not** check the channel — see Known gaps.
 
 ## Notification
 
@@ -418,6 +420,17 @@ the **release-page zip** installed into `/Applications`, not a local build:
 
 ## Known gaps
 
+- **Local release builds do not follow the updater channel (ITO-0 T-D / #1281).**
+  `tauri.conf.json` keeps `version: 0.1.0-next.1` on purpose — the publish
+  script injects the real `0.1.0-next.N` via `--config` and does not commit
+  that file each time. A local `cargo tauri build` (release) therefore still
+  reports `next.1`, which the live manifest (`next.10` as of 2026-07-27)
+  outranks. W-B2-5 (#1280) skipped `tauri dev` and `--debug` only. The hole
+  is closed by a compile-time flag: `updater_check` talks to the network only
+  when `MOMO_CHANNEL_BUILD=1` (set solely by `scripts/publish_next_build.sh`).
+  Local release testers see the baseline version on the badge and no update
+  row. Published zip installs still self-update. Do not bump the committed
+  version to "match" the last publish — that hole reopens at `next.N+1`.
 - **Release-app CORS against a self-host stack (ITO-0 T-A / #1607).** The
   packaged webview origin is `tauri://localhost` (Windows/Android:
   `http://tauri.localhost`); the Vite `/v1` dev proxy does not exist, so REST
