@@ -599,6 +599,33 @@ assert all(
 )
 PY
 
+# Existing self-host/smoke env (development + skip keys) must not beat the
+# backup overlay. `${VAR:-default}` interpolates from process env first.
+ambient_config=$fixture/ambient-compose.json
+env -i \
+  PATH="$(dirname -- "$real_docker"):/usr/local/bin:/usr/bin:/bin" \
+  HOME="${HOME:-/tmp}" \
+  MOMO_MIGRATE_ENV=development \
+  MOMO_PITR_EVIDENCE_REQUIRED=0 \
+  MOMO_PITR_BOOTSTRAP_EMPTY=1 \
+  "$real_docker" compose \
+    --env-file "$render/operator.env" \
+    --env-file "$render/backup.env" \
+    --env-file "$render/bindings.env" \
+    -f "$root/infra/rust/docker-compose.rust.yml" \
+    -f "$root/infra/rust/docker-compose.backup.yml" \
+    config --format json >"$ambient_config"
+python3 - "$ambient_config" <<'PY'
+import json
+import pathlib
+import sys
+
+environment = json.loads(pathlib.Path(sys.argv[1]).read_text())["services"]["migrate"]["environment"]
+assert environment["MOMO_ENV"] == "production", environment["MOMO_ENV"]
+assert environment["MOMO_PITR_EVIDENCE_REQUIRED"] == "1", environment["MOMO_PITR_EVIDENCE_REQUIRED"]
+assert environment["MOMO_PITR_BOOTSTRAP_EMPTY"] == "0", environment["MOMO_PITR_BOOTSTRAP_EMPTY"]
+PY
+
 missing_evidence=$(make_bundle missing-evidence)
 find "$missing_evidence/evidence.json" -delete
 expect_red_before_docker missing_evidence "$missing_evidence" 'cannot open PITR evidence'

@@ -518,9 +518,21 @@ def validate_backup_compose(overlay: str, s3_overlay: str, s3_config: str) -> No
         "repository default must remain project scoped",
     )
     require("PGBACKREST_REPO1_CIPHER_PASS:" not in overlay, "raw cipher passphrase must not enter Compose env")
-    require("MOMO_ENV: ${MOMO_MIGRATE_ENV:-production}" in overlay, "migrate policy environment must be explicit")
-    require("MOMO_PITR_EVIDENCE_REQUIRED: ${MOMO_PITR_EVIDENCE_REQUIRED:-1}" in overlay, "backup migrate must default evidence-required")
-    require("MOMO_PITR_BOOTSTRAP_EMPTY: ${MOMO_PITR_BOOTSTRAP_EMPTY:-0}" in overlay, "backup migrate must not default bootstrap")
+    require("MOMO_ENV: production" in overlay, "backup migrate must lock MOMO_ENV=production")
+    require(
+        "MOMO_ENV: ${MOMO_MIGRATE_ENV:-production}" not in overlay,
+        "backup migrate must not let existing env win over ${VAR:-production}",
+    )
+    require('MOMO_PITR_EVIDENCE_REQUIRED: "1"' in overlay, "backup migrate must lock evidence-required")
+    require(
+        "MOMO_PITR_EVIDENCE_REQUIRED: ${MOMO_PITR_EVIDENCE_REQUIRED:-1}" not in overlay,
+        "backup migrate must not let existing skip keys disable the evidence gate",
+    )
+    require('MOMO_PITR_BOOTSTRAP_EMPTY: "0"' in overlay, "backup migrate must lock bootstrap off")
+    require(
+        "MOMO_PITR_BOOTSTRAP_EMPTY: ${MOMO_PITR_BOOTSTRAP_EMPTY:-0}" not in overlay,
+        "backup migrate must not interpolate bootstrap from existing env",
+    )
     for expected in (
         "RUN_ID", "GIT_COMMIT", "COMPOSE_PROJECT", "SOURCE_VOLUME", "RESTORE_VOLUME",
         "REPO_VOLUME", "POSTGRES_IMAGE_DIGEST", "MIGRATE_IMAGE_DIGEST", "STANZA",

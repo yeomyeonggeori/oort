@@ -29,9 +29,15 @@ services:
 
   migrate:
     environment:
-      MOMO_ENV: ${MOMO_MIGRATE_ENV:-production}
-      MOMO_PITR_EVIDENCE_REQUIRED: ${MOMO_PITR_EVIDENCE_REQUIRED:-1}
-      MOMO_PITR_BOOTSTRAP_EMPTY: ${MOMO_PITR_BOOTSTRAP_EMPTY:-0}
+      # Literal production lock. `${VAR:-default}` interpolates from process
+      # env and --env-file before this overlay is applied, so a self-host/smoke
+      # file that already has MOMO_MIGRATE_ENV=development (and the two skip
+      # keys) would silently disable the signed-evidence gate on a raw
+      # `compose run migrate`. The wrapper still validates the same three keys
+      # in the bindings artifact; it cannot be the only defense.
+      MOMO_ENV: production
+      MOMO_PITR_EVIDENCE_REQUIRED: "1"
+      MOMO_PITR_BOOTSTRAP_EMPTY: "0"
       MOMO_PITR_EVIDENCE_PATH: /run/momo-pitr/evidence.json
       MOMO_PITR_HMAC_KEY_PATH: /run/secrets/momo_pitr_hmac_key
       MOMO_PITR_EXPECT_RUN_ID: ${MOMO_PITR_EXPECT_RUN_ID:-}
