@@ -1,5 +1,10 @@
 # oort 진행 현황
 
+## 셀프호스트 생성 env 데스크탑 CORS 기본값 (#1607, 2026-08-20)
+
+- **택일:** `scripts/self_host_env.sh` 가 만드는 `infra/rust/local.secrets.env` 는 `MOMO_CORS_ALLOWED_ORIGINS=tauri://localhost,http://tauri.localhost` 를 기본 포함한다. 같은 2종을 `CENTRIFUGO_ALLOWED_ORIGINS`(공백 구분)에도 넣는다 — REST 만 열면 로그인은 되고 실시간이 403이다. `docker-compose.rust.yml` 의 빈 기본값과 `caddy.override.yml` 운영 경로는 이 파일을 읽지 않아 운영 형상에 파급이 없다. 기존 env 는 CORS 키가 없을 때만 한 줄을 추가하고, 빈 값·커스텀 값·Centrifugo 목록은 덮어쓰지 않는다.
+- **정직 라벨 `runtime-unverified(release-bundle login + realtime round-trip)`.** 이 워크트리는 headless 라 릴리스 앱 GUI 로그인·compose 스택 Origin 실측을 닫지 못했다. 닫힌 것은 생성기 배선 + `scripts/tests/test_self_host_env_modes.sh`. 실기동 증거는 이슈 #1607 오케스트레이터 절차서 → ITO-1 이관.
+
 ## gate: docs-코드 드리프트 — 운영 문서의 실행 명령을 트리에 대고 해소 (#1525, 2026-08-18)
 
 - **#1472는 명령 하나를 고쳤고, 이건 그 문장이 다시 틀려지는 것을 막는다.** `AGENTS.md` §3은 스스로 "copy-paste, 그대로 실행"이라 적어 놓고 몇 주 동안 `cargo fmt --check --manifest-path server-rust/Cargo.toml`을 실었다 — 두 매니페스트 다 virtual workspace라 그 형태는 "Failed to find targets"로 끝나고 **아무것도 검사하지 않는다**. 워커 3기(#1454·#1442·#1467)가 그 초록을 믿었고 그 아래 rustfmt 드리프트를 각자 다시 발견했다. #1472가 실행형을 게이트에 넣었고, 이 goal은 **문서형**을 넣는다.

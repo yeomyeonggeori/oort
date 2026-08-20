@@ -32,6 +32,16 @@
 # (#1526 실측 F1). MOMO-583 정책은 그대로이고, 바뀌는 것은 **이 인스턴스의 첫
 # owner는 이 인스턴스의 운영자**라는 선언이 셀프호스트 경로에 존재하느냐뿐이다.
 #
+# `MOMO_CORS_ALLOWED_ORIGINS`도 같은 이유다(#1607). compose 기본값은 빈 값
+# (CORS 레이어 비장착 = same-origin 웹 전용)이고, 패키징된 Tauri 릴리스는
+# webview origin 이 `tauri://localhost`(Windows/Android 는 `http://tauri.localhost`)
+# 이라 `/v1` 이 진짜 교차 오리진이다. 셀프호스트 생성 env 만 그 2종을 기본
+# 포함한다. `infra/rust/docker-compose.rust.yml` 의 빈 기본값과
+# `caddy.override.yml` 운영 경로는 이 파일을 읽지 않으므로 운영 형상에
+# 파급이 없다. Centrifugo WSS origin 은 별개 노브(공백 구분)라, 새 env 의
+# `CENTRIFUGO_ALLOWED_ORIGINS`에도 같은 2종을 넣는다 — REST 만 열고 WSS 를
+# 안 열면 로그인은 되고 실시간이 403이다.
+#
 # ## 규율
 #
 # * 이미 파일이 있으면 **절대 덮어쓰지 않는다.** 볼륨이 살아 있는 상태에서 시크릿을
@@ -85,6 +95,13 @@ COMPOSE_CONTROL_KEYS=(
   COMPOSE_PATH_SEPARATOR COMPOSE_PROFILES COMPOSE_PROGRESS
   COMPOSE_REMOVE_ORPHANS COMPOSE_STATUS_STDOUT
 )
+
+# #1607 — packaged Tauri webview origins. REST CORS is comma-separated
+# (`CorsConfig`); Centrifugo v6 env is space-separated. These cannot be
+# derived from APP_DOMAIN. compose 기본값과 운영 overlay 는 이 상수를
+# 읽지 않는다.
+SELF_HOST_DESKTOP_CORS_ORIGINS="tauri://localhost,http://tauri.localhost"
+SELF_HOST_DESKTOP_CENTRIFUGO_ORIGINS="tauri://localhost http://tauri.localhost"
 
 fail() { printf '[self-host] %s\n' "$*" >&2; exit 1; }
 
@@ -301,6 +318,54 @@ ensure_operator_allowlist() {
   printf '[self-host] 이미 떠 있는 스택이라면 api를 재시작해야 반영된다: --compose up -d\n' >&2
 }
 
+# #1607 — desktop CORS allowlist, for env files written before it existed.
+#
+# Same add-only rule as `ensure_operator_allowlist`: this key is not a secret.
+# A value somebody typed (including a deliberately empty one, which is the
+# only way to keep CORS unmounted on this instance) is left exactly as it is.
+# Existing `CENTRIFUGO_ALLOWED_ORIGINS` is never rewritten — REST and WSS are
+# different knobs, and overwriting a space-separated list the operator already
+# has would violate the env-file contract. A missing tauri origin is a
+# diagnostic on stderr, not a mutation.
+ensure_desktop_cors_allowlist() {
+  local count
+  count="$(env_key_count MOMO_CORS_ALLOWED_ORIGINS)"
+  [ "$count" -le 1 ] ||
+    fail "${ENV_FILE}의 MOMO_CORS_ALLOWED_ORIGINS 항목은 최대 한 번만 있어야 한다."
+  [ "$count" -eq 0 ] || return 0
+  validate_env_scalar MOMO_CORS_ALLOWED_ORIGINS "$SELF_HOST_DESKTOP_CORS_ORIGINS"
+  {
+    printf '\n# --- 데스크탑 CORS (#1607, 기존 env에 추가) --------------------------------\n'
+    printf '# 패키징된 Tauri 릴리스는 tauri://localhost 에서 /v1 을 부르므로 교차 오리진이다.\n'
+    printf '# 반영에는 api 재시작이 필요하다(프로세스 env). 시크릿은 하나도 바뀌지 않았다.\n'
+    printf 'MOMO_CORS_ALLOWED_ORIGINS=%s\n' "$SELF_HOST_DESKTOP_CORS_ORIGINS"
+  } >>"$ENV_FILE"
+  printf '[self-host] %s 에 MOMO_CORS_ALLOWED_ORIGINS=%s 를 추가했다 (시크릿은 그대로).\n' \
+    "$ENV_FILE" "$SELF_HOST_DESKTOP_CORS_ORIGINS" >&2
+  printf '[self-host] 이미 떠 있는 스택이라면 api를 재시작해야 반영된다: --compose up -d\n' >&2
+}
+
+warn_if_centrifugo_missing_desktop_origins() {
+  local count current missing=0
+  count="$(env_key_count CENTRIFUGO_ALLOWED_ORIGINS)"
+  [ "$count" -eq 1 ] || return 0
+  current="$(env_value_once CENTRIFUGO_ALLOWED_ORIGINS)"
+  case "$current" in
+    *tauri://localhost*) ;;
+    *) missing=1 ;;
+  esac
+  case "$current" in
+    *http://tauri.localhost*) ;;
+    *) missing=1 ;;
+  esac
+  [ "$missing" -eq 0 ] && return 0
+  printf '[self-host] %s 의 CENTRIFUGO_ALLOWED_ORIGINS 에 tauri://localhost 또는 http://tauri.localhost 가 없다.\n' \
+    "$ENV_FILE" >&2
+  printf '[self-host] 데스크탑 실시간은 업그레이드 전 Origin 대조에서 403이 된다. 시크릿을\n' >&2
+  printf '[self-host] 건드리지 말고 그 줄 끝에 " tauri://localhost http://tauri.localhost" 를\n' >&2
+  printf '[self-host] 추가한 뒤 centrifugo를 재시작하라: --compose up -d\n' >&2
+}
+
 run_self_host_compose() {
   local mode="$1"
   shift
@@ -405,6 +470,10 @@ print_next_steps() {
 [self-host] 비밀번호는 stdout에 쓰지 않는다. $ENV_FILE 에서 직접 확인하라(파일 권한 600).
 [self-host] 이 계정이 이 인스턴스의 운영자다(PLATFORM_ADMIN_EMAILS) — 설정 › AI 연결에서
 [self-host] 프로바이더 키를 넣을 수 있다. 절차: docs/SELF_HOST.md §5.
+[self-host] 패키징된 데스크탑 릴리스(tauri://localhost)는 같은 스택에 교차 오리진으로
+[self-host] 붙는다. 새 env 는 MOMO_CORS_ALLOWED_ORIGINS 와 CENTRIFUGO_ALLOWED_ORIGINS 에
+[self-host] tauri origin 2종을 기본으로 넣는다(#1607). 브라우저 경로는 같은 오리진이라
+[self-host] CORS가 필요 없다.
 EOF
 }
 
@@ -429,6 +498,8 @@ if [ -e "$ENV_FILE" ]; then
   validate_owner_password "$existing_password"
   existing_web_port="$(normalize_port MOMO_WEB_PORT "$existing_web_port")"
   ensure_operator_allowlist "$existing_email"
+  ensure_desktop_cors_allowlist
+  warn_if_centrifugo_missing_desktop_origins
 
   # #1229로 이미 만든 로컬 파일은 mode marker가 없다. 이미지만 보고
   # 가역적으로 승격하되, digest가 없는 ref를 published로 추정하지 않는다.
@@ -519,7 +590,8 @@ PROVIDER_LINK_SECRET="$(gen)"
 # Keep every interpolation used by the env-file sink on the same scalar guard.
 for key in MODE IMAGE PG_PASSWORD APP_PASSWORD RELAY_PASSWORD WORKER_PASSWORD \
            JWT_SECRET CENT_TOKEN_SECRET CENT_API_SECRET CENT_PROXY_SECRET_VALUE \
-           PROVIDER_LINK_SECRET WEB_PORT API_PORT CENT_PORT OWNER_EMAIL; do
+           PROVIDER_LINK_SECRET WEB_PORT API_PORT CENT_PORT OWNER_EMAIL \
+           SELF_HOST_DESKTOP_CORS_ORIGINS SELF_HOST_DESKTOP_CENTRIFUGO_ORIGINS; do
   validate_env_scalar "$key" "${!key}"
 done
 
@@ -559,16 +631,28 @@ PROVIDER_LINK_MASTER_KEY=$PROVIDER_LINK_SECRET
 
 # --- 주소 -------------------------------------------------------------------
 # 브라우저가 여는 곳. SPA · /v1 · /connection 이 전부 이 오리진에서 나오므로
-# CORS가 성립할 여지가 없다(infra/rust/local.override.yml).
+# 브라우저 경로에서는 CORS가 성립할 여지가 없다(infra/rust/local.override.yml).
+# 패키징된 Tauri 릴리스는 예외다: webview origin 이 tauri://localhost
+# (Windows/Android 는 http://tauri.localhost) 이라 /v1 이 진짜 교차 오리진이다.
 MOMO_WEB_PORT=$WEB_PORT
 # 로그인 응답이 클라이언트에게 돌려주는 레일 주소(ADR-0110 유일 권위).
 MOMO_CENTRIFUGO_WS_URL=ws://localhost:$WEB_PORT/connection/websocket
 # Centrifugo는 업그레이드 전에 Origin을 대조한다. **공백 구분** 목록이고,
-# localhost 로 열든 127.0.0.1 로 열든 통하도록 둘 다 적는다.
-CENTRIFUGO_ALLOWED_ORIGINS=http://localhost:$WEB_PORT http://127.0.0.1:$WEB_PORT
+# localhost 로 열든 127.0.0.1 로 열든 통하도록 둘 다 적는다. tauri 2종은
+# REST CORS 와 별개 노브(#1607) — 빠지면 로그인은 되고 실시간이 403이다.
+CENTRIFUGO_ALLOWED_ORIGINS=http://localhost:$WEB_PORT http://127.0.0.1:$WEB_PORT $SELF_HOST_DESKTOP_CENTRIFUGO_ORIGINS
 # 엣지를 거치지 않는 직접 접속(curl·디버깅)용 루프백 포트.
 MOMO_RUST_API_PORT=$API_PORT
 CENT_HOST_PORT=$CENT_PORT
+
+# --- 데스크탑 CORS (#1607) ---------------------------------------------------
+# 택일: 셀프호스트 생성 env 는 tauri origin 2종을 기본 포함한다.
+# 보안: exact-match, 와일드카드 거부, credentials 미전송, 루프백 바인딩
+# (local.override.yml 은 127.0.0.1). compose 기본값은 빈 값
+# (MOMO_CORS_ALLOWED_ORIGINS 미설정)이고, caddy.override.yml 운영 경로는
+# 이 파일을 읽지 않으므로 운영 형상에 파급이 없다. 빈 값으로 바꿔 끄면
+# 이후 실행이 그대로 둔다.
+MOMO_CORS_ALLOWED_ORIGINS=$SELF_HOST_DESKTOP_CORS_ORIGINS
 
 # --- 마이그레이션 -----------------------------------------------------------
 MOMO_AGENT_SEED_MODE=none

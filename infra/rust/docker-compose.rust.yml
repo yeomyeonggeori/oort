@@ -252,6 +252,9 @@ services:
       # A value is required only for non-browser origins — the Tauri desktop
       # webview is `tauri://localhost`, and without this it cannot reach the API
       # at all. Explicit allowlist; `*` is refused at boot.
+      # Self-host generator (`scripts/self_host_env.sh`) writes the two Tauri
+      # origins into local.secrets.env (#1607). This compose default stays empty
+      # so caddy.override.yml / NCP deploy is not widened by that choice.
       MOMO_CORS_ALLOWED_ORIGINS: ${MOMO_CORS_ALLOWED_ORIGINS:-}
       # ADR-0162 Agent Port. A native/server MCP caller normally sends no
       # Origin. When it does, only this operator-controlled exact HTTPS origin
