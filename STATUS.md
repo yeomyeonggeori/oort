@@ -1,5 +1,11 @@
 # oort 진행 현황
 
+## next 채널 위생 — 로컬 release 롤백 가드 + 재발행 체크리스트 (#1281, 2026-08-20)
+
+- **택일:** 로컬 `cargo tauri build`(릴리스)가 항상 `0.1.0-next.1` 이라 매니페스트(`next.10`)보다 낮아 기동 즉시 롤백하던 구멍은 **가드 확장**으로 막았다. `MOMO_CHANNEL_BUILD=1` 이 있는 산출물만 업데이터 네트워크를 탄다. 그 플래그는 `scripts/publish_next_build.sh` 만 켠다. `tauri.conf.json` 버전을 마지막 발행값으로 올리는 주입은 `next.N+1` 에서 같은 구멍이 다시 열리고, 발행 스크립트가 `--config` 로 버전을 넣는 이유(커밋마다 버전 파일을 안 건드림)와 싸운다.
+- 채널 소스(`publish_next_build.sh` · `tauri.conf.json` · `docs/NEXT_CHANNEL.md` · `release-desktop.yml`)의 구 org URL 은 0. `NEXT_CHANNEL.md` §0 은 T-C 사문화·T-E 배너와 맞춰 "채널 하나"로 고쳤다(T-E 티켓 후보 4 흡수). 성재 복붙 재발행은 §8.
+- **정직 라벨:** 실발행·서명·공증은 성재 손(시크릿 3종). `yeomyeonggeori/momo-alpha` 원격 비접촉. 레포 전체 `Dawn-kim-official` 문자열은 이력·픽스처·동결 번들 ID(`com.dawnkim.momo`)·의도적 `momo-signing` 404 주석에 남는다 — 라이브 채널 경로가 아니다.
+
 ## 셀프호스트 생성 env 데스크탑 CORS 기본값 (#1607, 2026-08-20)
 
 - **택일:** `scripts/self_host_env.sh` 가 만드는 `infra/rust/local.secrets.env` 는 `MOMO_CORS_ALLOWED_ORIGINS=tauri://localhost,http://tauri.localhost` 를 기본 포함한다. 같은 2종을 `CENTRIFUGO_ALLOWED_ORIGINS`(공백 구분)에도 넣는다 — REST 만 열면 로그인은 되고 실시간이 403이다. `docker-compose.rust.yml` 의 빈 기본값과 `caddy.override.yml` 운영 경로는 이 파일을 읽지 않아 운영 형상에 파급이 없다. 기존 env 는 CORS 키가 없을 때만 한 줄을 추가하고, 빈 값·커스텀 값·Centrifugo 목록은 덮어쓰지 않는다.
