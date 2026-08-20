@@ -204,7 +204,8 @@ ensure_pgbackrest_stanza() {
       --output=json info 2>/dev/null)" \
     && jq -e --arg stanza "$STANZA" \
       'type=="array" and length>=1 and .[0].name==$stanza
-       and ((.[0].status.message // "") | IN("ok"; "no valid backups"))' \
+       and ((.[0].status.message // "") == "ok"
+            or (.[0].status.message // "") == "no valid backups")' \
       >/dev/null 2>&1 <<<"$info_json"; then
     printf '[pgbackrest-pitr] stanza %s exists; skip stanza-create\n' "$STANZA"
     return 0
