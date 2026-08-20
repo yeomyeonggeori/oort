@@ -1,5 +1,29 @@
 # oort — RELEASE PLAYBOOK (데스크탑 공증 + iOS App Store + CI/CD)
 
+> ## ⚠️ 이 문서는 **은퇴한 SwiftUI 데스크탑(Sparkle·DMG)** 전제의 실행 체크리스트다 (ITO-0 T-E / #1610)
+>
+> 작성: 2026-06-24. 이후 본문은 갱신되지 않았다. `clients/macOS`·`clients/iOS`는
+> 삭제됐다(W-S1 / #1215). STAGE D의 Sparkle 2 + 공증 DMG, STAGE B의
+> `MomoMac.xcodeproj`, STAGE C의 `release-macos.yml`/`ci-build.yml`은 현행 제품
+> 경로가 아니다. <!-- docs-cmd-ignore: 은퇴 워크플로 이름 호명 (#1610) -->
+> 따라 가면 실패하지 않고 **없는 트리를 찾거나, 잘못된 스택을 가리킨다.**
+>
+> **현행 데스크탑 채널(Tauri next, Sparkle 아님 — #736 / ADR-0133):**
+>
+> | 하려는 것 | 갈 곳 |
+> |---|---|
+> | 채널 계약·버전·신뢰 사슬 | [`docs/NEXT_CHANNEL.md`](NEXT_CHANNEL.md) |
+> | 셸 업데이터 UI·실측 | [`clients/desktop/README.md`](../clients/desktop/README.md) (Identity / Updater) |
+> | 발행 스크립트 | `scripts/publish_next_build.sh` (minisign + notarytool + stapler; 실발행은 성재 맥, T-D / #1281) |
+> | 번들 타깃 | `clients/desktop/src-tauri/tauri.conf.json:45` `targets: ["app"]` — DMG 없음. 공증 제출은 `.app` zip, 업데이터 자산은 `.app.tar.gz`, 첫 설치는 zip (`scripts/publish_next_build.sh:129-173`) |
+> | CI 대행 레인 | `.github/workflows/release-desktop.yml` (`workflow_dispatch`; 발행 논리는 스크립트 한 벌) |
+>
+> 본문은 2026-06-24 STAGE A–E 원문이다. 고치지 않고 사문서로 둔다. iOS STAGE E
+> 본문은 삭제된 `clients/iOS`/`MomoiOS.xcodeproj` 전제이며 현행 `clients/mobile`
+> 스토어 런북이 아니다.
+
+---
+
 > 작성: 2026-06-24 · 대상 실행 주체: **Codex (goal 자율 실행)** · REPO: `/Users/kwakseongjae/projects/momo` · GitHub: `yeomyeonggeori/oort` (branch `main`).
 > 범위: **(A) macOS 데스크탑 Developer ID 공증 직접배포(notarytool/stapler/DMG/Sparkle)** + **(B) iOS App Store 전 과정(가입→인증서→TestFlight→Review→배포)** + **(C) CI/CD(fastlane match/gym/pilot/deliver + ASC API Key + GitHub Actions)**.
 > 표기: `(검증됨)` = 2026 기준 Apple/GitHub/fastlane 1차 출처 교차확인 · `(추정)` = 설계 판단(보장 아님) · `[manual]` = 사람 1회 실행 · `[runtime]` = docker/psql 필요.

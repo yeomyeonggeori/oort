@@ -125,10 +125,16 @@ sops exec-env /secure/momo/prod.sops.env \
   'docker compose -f infra/prod/docker-compose.prod.yml run --rm --no-deps migrate set-owner'
 ```
 
-그 자격증명으로 macOS 앱의 **설치된 self-hosted 서버 연결**에서
-`https://API_DOMAIN`에 로그인한 뒤, 워크스페이스 설정 → 멤버 → 초대 링크 만들기를
-선택한다. 원본 초대 코드는 한 번만 표시되는 bearer secret이므로 공개 로그·shell
-history·PR evidence에 복사하지 않는다. 이 시점이 "첫 워크스페이스/초대" 완료다.
+그 자격증명으로 **웹**(설정된 `APP_DOMAIN`의 같은 오리진 SPA) 또는
+**데스크탑(Tauri)**에서 서버에 로그인한 뒤, 설정 → 멤버와 초대 → 「초대 링크
+만들기」를 선택한다. `clients/macOS` SwiftUI 앱은 삭제됐다(W-S1 / #1215).
+라이브 웹 번들은 `clients/web`(`server-rust/Dockerfile:147,157,173,231`;
+배포 런북 `docs/runbooks/ncp-rust-deploy.md`). 데스크탑은 그 번들을 감싼다
+(`clients/desktop/src-tauri/tauri.conf.json:7-10`, ADR-0133). 초대 GUI는
+`clients/web/src/features/settings/InviteSection.tsx`. CLI 초대는 아래
+`momo-ops.sh invite-create`. 원본 초대 코드는 한 번만 표시되는 bearer
+secret이므로 공개 로그·shell history·PR evidence에 복사하지 않는다. 이 시점이
+"첫 워크스페이스/초대" 완료다.
 
 > 현재 v1 installer는 사람 계정 비밀번호나 원본 초대 코드를 인자로 받거나 출력하지
 > 않는다. 초기 owner credential은 SOPS/host-only env로만 받으며, 가입자가 사용할 링크
@@ -523,7 +529,7 @@ dev `infra/centrifugo.json`의 namespace(ch/dm/agent/user) 스펙은 **그대로
 | 키 | 기본값 | 의미 |
 |---|---|---|
 | `APP_DOMAIN` | (unset) | 웹 SPA 공개 도메인(예: `momo.example.com`). unset이면 웹 서빙 비활성. |
-| `MOMO_WEB_IMAGE` | (required) | `clients/web-legacy`(ADR-0119 v0)의 production `dist`를 담은 immutable digest image. install/upgrade가 `web-init`으로 실행한다. ADR-0133 정본 UI(`clients/web`)로의 전환은 parity 게이트 통과 뒤 별도 단계다. |
+| `MOMO_WEB_IMAGE` | (required) | **Swift prod compose 경로**(`infra/prod/Dockerfile.web:8-17`, `infra/prod/docker/momo.Dockerfile:44-69`)는 여전히 `clients/web-legacy` dist를 담는다. **라이브 알파(Rust 이미지)는 이 키가 아니라** `server-rust/Dockerfile:147,157,173,231`이 `clients/web` dist를 `/opt/momo/web/`에 넣고 `command: ["web-assets"]`로 서빙한다(`infra/rust/caddy.override.yml:85-87`, `docs/runbooks/ncp-rust-deploy.md` 「웹(정적 SPA) 배포」 / #1228). |
 | `MOMO_LINKSHORT_IMAGE` | (required) | `services/LinkShort`의 immutable digest image. `/i/*`를 `/join?code=...`로 리다이렉트한다. |
 | `WEB_STATIC_VOLUME_NAME` | `momo-web-static` | `web-init`이 채우고 Caddy가 read-only로 마운트하는 named volume 이름. |
 
