@@ -50,8 +50,10 @@ use sqlx::Row;
 use uuid::Uuid;
 
 use crate::error::T3Error;
-use crate::lifecycle::WorkSessionDetail;
-use crate::terminal_attach::{validated_binding, RemotePtyBinding};
+use crate::lifecycle::{WorkSessionDetail, WS_ATTACH_AVAILABILITY, WS_CONTROL_PROJECTION};
+use crate::terminal_attach::{
+    validated_binding, validated_display_binding, RemoteDisplayBinding, RemotePtyBinding,
+};
 
 /// Default replay page size (`MessageRoutes.replies` `?? 50`, :529).
 pub const REPLAY_LIMIT_DEFAULT: i64 = 50;
@@ -96,10 +98,26 @@ pub struct SessionReattachState {
     pub host_online: bool,
     /// The stored PTY binding, re-validated on read.
     pub binding: Option<RemotePtyBinding>,
+    /// The stored display binding, re-validated on read (LIVE-1). Carried
+    /// beside the PTY one rather than folded into it because the two are
+    /// independent: a returning client can find a screen and no terminal, or
+    /// the reverse, and [`ReattachVerdict`] deliberately still speaks only about
+    /// the terminal — see [`SessionReattachState::verdict`].
+    pub display_binding: Option<RemoteDisplayBinding>,
 }
 
 impl SessionReattachState {
-    /// ADR-0139 D3. Deliberately does **not** consult `host_online`: the ledger
+    /// ADR-0139 D3, and deliberately still a statement about the **terminal**.
+    ///
+    /// LIVE-1 added a display binding beside the PTY one and did not widen this
+    /// verdict, because the two words it chooses between — 이어서 쓰기 versus
+    /// 새 호스트에서 재개 — are both about resuming *work*. A screen is
+    /// something to watch, not something to resume; whether one is available is
+    /// `session.remote_display_available`'s to say, and folding it in here would
+    /// make a session with a live screen and a dead PTY claim it can be
+    /// reattached to.
+    ///
+    /// Deliberately does **not** consult `host_online`: the ledger
     /// decides whether a reattach is offered, and a heartbeat that has not
     /// landed yet is reported separately (`host_online`) so a client can warn
     /// without the server pretending the session is gone. This mirrors the web
@@ -127,7 +145,9 @@ impl SessionReattachState {
 /// in the channel. Copying the gate rather than the bare `count(*)` is the
 /// point — two surfaces reporting different observer counts for the same
 /// session is exactly the drift this projection exists to prevent.
-const REATTACH_COLUMNS: &str = "ws.id, ws.workspace_id, ws.channel_id, ws.member_id, ws.host_id, \
+fn reattach_columns() -> String {
+    format!(
+        "ws.id, ws.workspace_id, ws.channel_id, ws.member_id, ws.host_id, \
      ws.root_message_id, ws.tool, ws.label, ws.status, ws.observation, \
      CASE \
        WHEN ws.status IN ('running', 'idle') \
@@ -152,19 +172,22 @@ const REATTACH_COLUMNS: &str = "ws.id, ws.workspace_id, ws.channel_id, ws.member
             AND tac.expires_at > clock_timestamp()) \
        ELSE 0 \
      END AS observer_grant_count, \
-     (ws.pty_id IS NOT NULL AND ws.attach_endpoint IS NOT NULL) AS remote_attach_available, \
+     {WS_ATTACH_AVAILABILITY}, \
+     {WS_CONTROL_PROJECTION}, \
      floor(extract(epoch from ws.started_at) * 1000)::bigint AS started_at_ms, \
      CASE WHEN ws.ended_at IS NULL THEN NULL \
           ELSE floor(extract(epoch from ws.ended_at) * 1000)::bigint END AS ended_at_ms, \
      ws.exit_code, ws.end_reason, ws.resumed_from_session_id, \
-     ws.pty_id, ws.attach_endpoint, \
+     ws.pty_id, ws.attach_endpoint, ws.display_id, ws.display_endpoint, \
      root.seq AS root_message_seq, \
      (h.revoked_at IS NOT NULL) AS host_revoked, \
      (h.last_seen_at IS NOT NULL \
       AND h.last_seen_at > clock_timestamp() - make_interval(secs => $3::double precision)) \
        AS host_online, \
      (SELECT max(m.seq) FROM message m \
-       WHERE m.channel_id = ws.channel_id AND m.root_id = ws.root_message_id) AS last_event_seq";
+       WHERE m.channel_id = ws.channel_id AND m.root_id = ws.root_message_id) AS last_event_seq"
+    )
+}
 
 /// Read the reattach snapshot. **No row lock**: reattaching is a read, and
 /// taking `FOR UPDATE` here would let a returning client block the host that is
@@ -180,8 +203,9 @@ pub async fn load_session_reattach_state_in_tx(
     session_id: Uuid,
     online_window_seconds: i64,
 ) -> Result<Option<SessionReattachState>, T3Error> {
+    let columns = reattach_columns();
     let sql = format!(
-        "SELECT {REATTACH_COLUMNS} \
+        "SELECT {columns} \
            FROM work_session ws \
            JOIN message root ON root.id = ws.root_message_id \
            JOIN work_host h \
@@ -199,6 +223,8 @@ pub async fn load_session_reattach_state_in_tx(
 
     let pty_id: Option<String> = row.try_get("pty_id")?;
     let attach_endpoint: Option<String> = row.try_get("attach_endpoint")?;
+    let display_id: Option<String> = row.try_get("display_id")?;
+    let display_endpoint: Option<String> = row.try_get("display_endpoint")?;
     let session = WorkSessionDetail {
         id: row.try_get("id")?,
         workspace_id: row.try_get("workspace_id")?,
@@ -212,6 +238,8 @@ pub async fn load_session_reattach_state_in_tx(
         observation: row.try_get("observation")?,
         observer_grant_count: row.try_get("observer_grant_count")?,
         remote_attach_available: row.try_get("remote_attach_available")?,
+        remote_display_available: row.try_get("remote_display_available")?,
+        control_started_at_ms: row.try_get("control_started_at_ms")?,
         started_at_ms: row.try_get("started_at_ms")?,
         ended_at_ms: row.try_get("ended_at_ms")?,
         exit_code: row.try_get("exit_code")?,
@@ -225,6 +253,10 @@ pub async fn load_session_reattach_state_in_tx(
         host_revoked: row.try_get("host_revoked")?,
         host_online: row.try_get("host_online")?,
         binding: validated_binding(pty_id.as_deref(), attach_endpoint.as_deref()),
+        display_binding: validated_display_binding(
+            display_id.as_deref(),
+            display_endpoint.as_deref(),
+        ),
     }))
 }
 
@@ -328,6 +360,8 @@ mod tests {
                 observation: "open".into(),
                 observer_grant_count: 0,
                 remote_attach_available: bound,
+                remote_display_available: false,
+                control_started_at_ms: None,
                 started_at_ms: 1_700_000_000_000,
                 ended_at_ms: None,
                 exit_code: None,
@@ -342,6 +376,56 @@ mod tests {
                 pty_id: "pty".into(),
                 attach_endpoint: "wss://host.example/attach".into(),
             }),
+            display_binding: None,
+        }
+    }
+
+    /// The drift the packet asked to be nailed shut.
+    ///
+    /// The three projections are composed from one definition
+    /// ([`WS_ATTACH_AVAILABILITY`]), so a *forgotten* predicate is already
+    /// unrepresentable. This test covers the other half — someone writing a
+    /// fourth reader, or re-inlining one of these three by hand, which is
+    /// exactly how they came to be three copies in the first place. Both columns
+    /// must appear exactly once in each of the three composed statements.
+    #[test]
+    fn every_projection_publishes_both_availability_columns() {
+        let projections = [
+            ("reattach", reattach_columns()),
+            ("detail", crate::lifecycle::detail_columns_for_test()),
+            (
+                "detail RETURNING",
+                crate::lifecycle::detail_returning_for_test(),
+            ),
+            ("list", crate::lifecycle::list_columns()),
+        ];
+        for (name, sql) in projections {
+            assert_eq!(
+                sql.matches("AS remote_attach_available").count(),
+                1,
+                "{name} must project the PTY availability exactly once"
+            );
+            assert_eq!(
+                sql.matches("AS remote_display_available").count(),
+                1,
+                "{name} must project the display availability exactly once — a \
+                 projection that answers one and not the other is how 「목록은 \
+                 관전 가능이라는데 상세는 아니다」 happens"
+            );
+            // LIVE-5a, and the reason it is asserted in the *same* loop rather
+            // than a test of its own: this is the field LIVE-4 froze the SoT
+            // question over, and the decision was that every projection answers
+            // it — including the bare `RETURNING`, where the cheap answer was a
+            // constant NULL. A `RETURNING` that stopped carrying it would tell a
+            // client the keyboard is free at the moment a write took it.
+            assert_eq!(
+                sql.matches("AS control_started_at_ms").count(),
+                1,
+                "{name} must project the standing control window exactly once — \
+                 the ledger is the SoT (WorkSessionDetail::control_started_at_ms), \
+                 and a projection that omits it is a reload that forgets 「사람이 \
+                 조작 중」"
+            );
         }
     }
 

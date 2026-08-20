@@ -6,6 +6,7 @@ import {
   TAKEOVER_DISCLOSURE_HEADLINE,
   TAKEOVER_FRESH,
   TAKEOVER_NO_TARGET_COPY,
+  TAKEOVER_PICKER_COPY,
   TAKEOVER_RESTORED,
   handoffAdvisory,
   handoffVerb,
@@ -67,6 +68,7 @@ function session(overrides: Partial<WorkSession> = {}): WorkSession {
     observation: "open",
     observerGrantCount: 0,
     remoteAttachAvailable: true,
+    remoteDisplayAvailable: false,
     startedAtMs: 0,
     ...overrides,
   };
@@ -184,6 +186,22 @@ describe("동사 배정 — 두 낱말이 섞이지 않는다", () => {
     // 재개 버튼은 「쓰기」를 약속하지 않는다 — 웹은 observer로만 붙는다.
     expect(HANDOFF_COPY.resume.button).toBe("이어서 보기");
     expect(HANDOFF_COPY.resume.button).not.toContain("쓰기");
+  });
+
+  it("호스트 고르기 문구는 동사에서 파생되고, 진행 낱말은 「명사 + 중」이다", () => {
+    // 두 웹 표면(`TakeoverBlock`·`WorkstreamDetailRoute`)이 이 객체를 손으로
+    // 두 벌 적고 있었다 (#1511 회전 1 N2). 파생으로 바꾸면 낱말이 갈릴 수
+    // 없지만, 파생된 **결과 문장**은 이제 어느 문자열 게이트에도 리터럴로
+    // 보이지 않는다 — 그 자리를 이 단정이 대신 든다.
+    expect(TAKEOVER_PICKER_COPY.group).toBe("인수할 호스트");
+    expect(TAKEOVER_PICKER_COPY.confirm).toBe(HANDOFF_COPY.takeover.button);
+    expect(TAKEOVER_PICKER_COPY.action("성재 맥북")).toBe("성재 맥북에서 인수");
+    expect(TAKEOVER_PICKER_COPY.busy("성재 맥북")).toBe("성재 맥북에서 인수 중");
+    // 「인수하는 중」이 아니다 (#1501 정본 · #1511 게이트).
+    expect(TAKEOVER_PICKER_COPY.busy("성재 맥북")).not.toContain("하는 중");
+    // 확정 버튼의 보이는 글자는 호스트 이름을 담지 않는다 — 폭이 상태에 따라
+    // 흔들리면 포인터 아래에서 버튼이 움직인다(HostPicker 머리말 MOMO-676 M-3).
+    expect(TAKEOVER_PICKER_COPY.confirm).not.toContain("맥북");
   });
 
   it("재개 쪽 문구는 잃는 것을 말하지 않는다 (잃는 것이 없다)", () => {

@@ -415,6 +415,27 @@ pub async fn fetch_work_control_in_tx(
 /// `LIMIT 100` is Swift's bound. A host with more than 100 pending controls has
 /// a bigger problem than pagination, and an unbounded read here would let one
 /// stuck daemon pull an arbitrary slice of the ledger into memory per poll.
+///
+/// ## The control-window clause (LIVE-3 / ADR-0004 증보 3 D3)
+///
+/// `work_controls::create` refuses an agent that *asks* to touch a session while
+/// a person holds control of its screen. This clause is the other half of that
+/// gate, and it is here rather than there because refusing new requests cannot
+/// reach a control the agent asked for one second **before** the window opened:
+/// that row is already `dispatched` and this poll is what would hand it to the
+/// daemon, mid-login.
+///
+/// So a dispatched control addressing a session under human control is
+/// **withheld** — not failed. The distinction matters in both directions: 증보
+/// 3 D3 wants the agent to observe nothing while a person types, and 증보 3's
+/// resume story (D4) wants the work to carry on afterwards. A withheld row is
+/// still `dispatched`, so it is delivered by the next poll after the window
+/// closes, and no state had to be mutated to pause it. That is the 보류 half of
+/// 「보류/거부」.
+///
+/// `session_id` is NULL for a spawn, so a spawn is never withheld: it names no
+/// session yet, and the one it will create is not the one anybody is typing
+/// into.
 pub async fn pending_controls_for_host_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -438,6 +459,13 @@ pub async fn pending_controls_for_host_in_tx(
                WHERE h.id = work_control.target_host_id \
                  AND h.workspace_id = work_control.workspace_id \
                  AND h.revoked_at IS NULL \
+            ) \
+            AND NOT EXISTS ( \
+              SELECT 1 FROM display_control_window w \
+               WHERE w.workspace_id = work_control.workspace_id \
+                 AND w.work_session_id = work_control.session_id \
+                 AND w.ended_at IS NULL \
+                 AND w.lease_expires_at > clock_timestamp() \
             ) \
           ORDER BY created_at, id \
           LIMIT 100"

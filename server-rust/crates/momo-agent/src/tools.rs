@@ -110,6 +110,36 @@ pub const WORK_SESSION_END: &str = "work.session.end";
 /// call that names none is normal, not malformed.
 pub const WORK_SESSION_SPAWN: &str = "work.session.spawn";
 
+/// `work.session.login_handoff` — stop and ask a person to log in on the
+/// session's own screen (LIVE-4 / ADR-0004 증보 3).
+///
+/// Arguments: `{"session_id": "<uuid>", "reason": "…"}`.
+///
+/// ## Why this one belongs in the catalog
+///
+/// It keeps the three properties the module header requires of an entry, and it
+/// keeps the middle one in the strongest possible form:
+///
+/// * **not a new capability** — it opens nothing, dials nothing and grants
+///   nothing. The whole of its effect is an `approval_request` card and the hold
+///   that card already implies, both of which this crate already writes for
+///   every gated tool.
+/// * **no credential, of any kind** — this is the tool that exists *because*
+///   the agent must not receive one. 증보 3 D2: the password is typed by a
+///   person into the VM, and the only thing that crosses this boundary is the
+///   fact that they finished.
+/// * **a human genuinely decides** — here the human does not merely consent,
+///   they *are* the action. Which is why [`approval_reason`] refuses to let a
+///   grant exempt it: an auto-approved login handoff would resume an agent in
+///   front of a login screen nobody has touched.
+///
+/// The executor is deliberately thin, and that is not a gap
+/// (`tool_exec::login_handoff`). What runs after the approval is a **report**:
+/// it reads the control window ledger and tells the model which of the three
+/// boundary endings happened, because `returned` and `expired` mean different
+/// things to whatever the agent does next.
+pub const WORK_SESSION_LOGIN_HANDOFF: &str = "work.session.login_handoff";
+
 /// `approval.action_type` for a tool call, matching Swift
 /// `ApprovalRuntime.pausePlan` (`ApprovalRuntime.swift:36-45`).
 ///
@@ -136,7 +166,11 @@ pub const TOOL_AUDIT_SCHEMA: &str = "momo.agent_tool_call.v0";
 /// default may ever be anything but "required". #1114's spawn brought all three
 /// (`tool_exec::spawn_session`, `tool_exec::spawn_arguments`, and ADR-0114 D5's
 /// `work_auto_approve`).
-pub const CATALOG: &[&str] = &[WORK_SESSION_END, WORK_SESSION_SPAWN];
+pub const CATALOG: &[&str] = &[
+    WORK_SESSION_END,
+    WORK_SESSION_SPAWN,
+    WORK_SESSION_LOGIN_HANDOFF,
+];
 
 /// Capabilities the product already has that a **future** batch may expose as
 /// tools, kept as a list rather than as code.
@@ -227,6 +261,40 @@ pub fn catalog_definitions() -> Vec<ToolDefinition> {
                     }
                 },
                 "required": ["tool", "label"],
+                "additionalProperties": false
+            }),
+        },
+        ToolDefinition {
+            name: WORK_SESSION_LOGIN_HANDOFF,
+            // Two sentences change model behaviour and both are deliberate.
+            // The first tells it what it gets back, so it does not treat the
+            // handoff as a guaranteed success; the second forbids the failure
+            // mode ADR-0004 증보 3 D2 exists to prevent, in the one place the
+            // model is actually reading.
+            description: "Stop and ask a person to sign in on this work session's \
+             screen, then continue once they are done. Use this when a login, a \
+             two-factor prompt or a CAPTCHA blocks you. The result tells you \
+             whether the person finished or the handoff lapsed, and a lapse \
+             means you must re-check the screen instead of assuming you are \
+             signed in. Never ask for a password, a code or any credential in \
+             chat: the person types it directly into the session, and you will \
+             not see it.",
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "session_id": {
+                        "type": "string",
+                        "description": "UUID of the work session whose screen is \
+                                        showing the login."
+                    },
+                    "reason": {
+                        "type": "string",
+                        "description": "One sentence for the person: what is on \
+                                        screen and what they need to do. Never \
+                                        include a credential."
+                    }
+                },
+                "required": ["session_id", "reason"],
                 "additionalProperties": false
             }),
         },
@@ -511,6 +579,14 @@ pub enum ApprovalReason {
     PolicyUnsupported,
     /// The grant exempts the call and the grant is genuinely read-only.
     ExemptReadOnly,
+    /// The tool's whole content is a person doing something, so no grant can
+    /// stand in for them (LIVE-4, [`WORK_SESSION_LOGIN_HANDOFF`]).
+    ///
+    /// Distinct from [`Self::PolicyRequiresApproval`] because that reason names
+    /// a *grant* as the author of the pause, and a reviewer reading this
+    /// approval would go looking for a grant that need not exist. Here the
+    /// author is the tool.
+    HumanIsTheAction,
 }
 
 impl ApprovalReason {
@@ -520,6 +596,7 @@ impl ApprovalReason {
             ApprovalReason::PolicyRequiresApproval => "policy_requires_approval",
             ApprovalReason::PolicyUnsupported => "policy_unsupported",
             ApprovalReason::ExemptReadOnly => "exempt_read_only",
+            ApprovalReason::HumanIsTheAction => "human_is_the_action",
         }
     }
 
@@ -540,6 +617,22 @@ impl ApprovalReason {
 /// approval row records — and "why did this stop" is the first question a human
 /// reading an approval inbox asks.
 pub fn approval_reason(tool_name: &str, grants: Option<&[ToolGrant]>) -> ApprovalReason {
+    // LIVE-4: the login handoff is unexemptable, and it is checked before the
+    // grant projection is even read.
+    //
+    // The gate below can be opened by a grant whose policy says `never` and
+    // whose risk is read-only, and a login handoff would slip through it: the
+    // call touches nothing, so an operator writing that grant is not obviously
+    // wrong. What it would produce is the exact failure 증보 3 exists to
+    // prevent — an agent that asked for a person, was never given one, and
+    // carried on in front of a login screen as though it had been.
+    //
+    // Fail-closed here is therefore not "assume the worst about the grant"; it
+    // is that consent is not the thing being asked for. Nobody can pre-approve
+    // typing somebody else's password.
+    if normalize(tool_name) == normalize(WORK_SESSION_LOGIN_HANDOFF) {
+        return ApprovalReason::HumanIsTheAction;
+    }
     let Some(grants) = grants else {
         return ApprovalReason::GrantMissingOrAmbiguous;
     };
@@ -892,5 +985,105 @@ mod tests {
         let mut keys: Vec<&str> = object.keys().map(String::as_str).collect();
         keys.sort_unstable();
         assert_eq!(keys, ["call_id", "is_error", "output"]);
+    }
+
+    // ---- LIVE-4: the login handoff is unexemptable ---------------------------
+
+    #[test]
+    fn no_grant_can_pre_approve_a_login_handoff() {
+        // The exact grant that exempts every other tool: policy `never` on a
+        // read-only risk. For `work.session.end` this is the one shape that
+        // legitimately opens the gate.
+        let exempting = [grant("never", "read", "read")];
+        assert_eq!(
+            approval_reason(WORK_SESSION_END, Some(&exempting)),
+            ApprovalReason::ExemptReadOnly,
+            "the control case: this grant really does exempt an ordinary tool"
+        );
+
+        // Same grant, aimed at the handoff. It must not open anything: consent
+        // is not the thing being asked for, so there is nothing to pre-give.
+        let aimed = [ToolGrant {
+            tool_name: WORK_SESSION_LOGIN_HANDOFF.to_string(),
+            approval_policy: Some("never".to_string()),
+            risk_level: Some("read".to_string()),
+            ..ToolGrant::default()
+        }];
+        for grants in [None, Some(&[][..]), Some(&aimed[..]), Some(&exempting[..])] {
+            assert!(
+                requires_approval(WORK_SESSION_LOGIN_HANDOFF, grants),
+                "a login handoff without a human is an agent talking to a login screen"
+            );
+        }
+        assert_eq!(
+            approval_reason(WORK_SESSION_LOGIN_HANDOFF, Some(&aimed)),
+            ApprovalReason::HumanIsTheAction,
+            "the reason names the tool, not a grant a reviewer would go looking for"
+        );
+    }
+
+    #[test]
+    fn the_handoff_is_unexemptable_by_every_spelling_of_its_name() {
+        // The executor matches on `normalize`, and so must the gate: a spelling
+        // the executor would run but the gate would not recognise is a hole
+        // through which an auto-approved handoff walks. `normalize` folds case
+        // and dashes and NOT dots (`matching_folds_case_and_dashes_but_not_dots`),
+        // and the wire spelling is mapped back before either is consulted
+        // (`the_mapped_back_name_is_the_one_the_executor_runs`), so these are
+        // exactly the spellings that must reach the same answer.
+        for spelling in [
+            "work.session.login_handoff",
+            "  WORK.SESSION.LOGIN_HANDOFF  ",
+            "Work.Session.Login-Handoff",
+            &momo_tool_name(&wire_tool_name(WORK_SESSION_LOGIN_HANDOFF)),
+        ] {
+            assert_eq!(
+                approval_reason(spelling, Some(&[grant("never", "read", "read")])),
+                ApprovalReason::HumanIsTheAction,
+                "{spelling} must reach the same gate the executor reaches"
+            );
+        }
+    }
+
+    #[test]
+    fn every_approval_reason_has_a_distinct_wire_label() {
+        let labels = [
+            ApprovalReason::GrantMissingOrAmbiguous.as_str(),
+            ApprovalReason::PolicyRequiresApproval.as_str(),
+            ApprovalReason::PolicyUnsupported.as_str(),
+            ApprovalReason::ExemptReadOnly.as_str(),
+            ApprovalReason::HumanIsTheAction.as_str(),
+        ];
+        let mut sorted = labels.to_vec();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(
+            sorted.len(),
+            labels.len(),
+            "a reason that shares a label cannot be read back"
+        );
+        assert!(ApprovalReason::HumanIsTheAction.requires_approval());
+    }
+
+    #[test]
+    fn the_login_handoff_is_described_without_inviting_a_credential() {
+        let definition = catalog_definitions()
+            .into_iter()
+            .find(|definition| definition.name == WORK_SESSION_LOGIN_HANDOFF)
+            .expect("the catalog and its definitions are the same set");
+        // ADR-0004 증보 3 D2 lives or dies in the sentence the model reads.
+        assert!(
+            definition.description.contains("Never ask for a password"),
+            "the one place the model is told not to build a credential path in chat"
+        );
+        // The lapse branch must be in the description too: a model told only
+        // that the person "finishes" will assume completion on every ending.
+        assert!(definition.description.contains("lapse"));
+        let required = definition.parameters["required"]
+            .as_array()
+            .expect("required is a list");
+        assert_eq!(required.len(), 2);
+        assert!(required.iter().any(|value| value == "session_id"));
+        assert!(required.iter().any(|value| value == "reason"));
     }
 }

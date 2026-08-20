@@ -138,7 +138,11 @@ type Phase =
 
 const PHASE_BUSY_COPY: Readonly<Record<"issuing" | "connecting", string>> = {
   issuing: "관전 권한을 받는 중",
-  connecting: "호스트에 연결하는 중",
+  // 「명사 + 중」 (#1501). `DisplayObserver` 의 같은 표와 글자까지 같아야 한다:
+  // 두 관전 패널은 같은 호스트에 같은 걸음으로 붙고, 낱말이 갈리면 같은 사실이
+  // 화면마다 다른 말이 된다. 이 일치는 주석 약속이 아니라 단정이다 —
+  // displayStream.test.ts 「두 관전 패널의 connecting 낱말은 글자까지 같다」(#1511).
+  connecting: "호스트에 연결 중",
 };
 
 export function ObserverTerminal({
@@ -230,6 +234,24 @@ export function ObserverTerminal({
   const terminalRef = useRef<Terminal | null>(null);
   const refitRef = useRef<(() => void) | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
+  /**
+   * The connecting leg's own cleanup — the handshake deadline and the document
+   * listener that catches a CSP refusal — held where `closeSocket` can reach it.
+   *
+   * It is a ref rather than a local because the two events that used to run it
+   * (`onopen`, `onclose`) are the two `closeSocket` deletes first, on purpose: a
+   * socket handler that fires during teardown would report a failure the reader
+   * has already left behind. So on every OTHER way out of `connecting` — the
+   * handshake deadline giving up, 관전 중단, the ledger revoking mid-handshake, a
+   * different session arriving in the same mounted panel, the panel unmounting,
+   * a retry closing the previous attempt — nothing on the socket fires at all,
+   * and a cleanup that lives only in those handlers is a cleanup that never
+   * runs. The timer is harmless when it is missed (the generation counter makes
+   * it a no-op), but the `document` listener is not: it is attached to a node
+   * that outlives this component, so it survives for the life of the tab and a
+   * fresh one accumulates behind every retry and every session switch.
+   */
+  const connectCleanupRef = useRef<(() => void) | null>(null);
   /** Generation counter: an old attempt's callbacks must not touch new state. */
   const runRef = useRef(0);
 
@@ -247,6 +269,15 @@ export function ObserverTerminal({
   }, []);
 
   const closeSocket = useCallback(() => {
+    // First, because it is the one thing here that is NOT reachable from the
+    // socket: everything below either belongs to this component's own refs or
+    // dies with the socket, while the connecting leg hung a listener on the
+    // document. It also has to run ahead of the early return an already-null
+    // socket takes — an attempt whose socket is gone still has that listener.
+    // Running it here is what makes every exit path an exit path.
+    const connectCleanup = connectCleanupRef.current;
+    connectCleanupRef.current = null;
+    connectCleanup?.();
     const socket = socketRef.current;
     socketRef.current = null;
     if (!socket) return;
@@ -428,14 +459,26 @@ export function ObserverTerminal({
     const onViolation = (event: SecurityPolicyViolationEvent) => {
       if (runRef.current !== run || opened) return;
       if (!cspBlockedHost(event, url)) return;
-      window.clearTimeout(deadline);
+      // No clearTimeout here: `give` closes the socket, and closeSocket runs
+      // `done`. One place clears this attempt's deadline, so there is no second
+      // place to forget to add the next line to.
       give("host_blocked_by_policy");
     };
     document.addEventListener("securitypolicyviolation", onViolation);
+    /**
+     * End the connecting leg. Idempotent, because it is now reached from both
+     * directions: the socket settling, and any close that abandons the attempt
+     * before it settled. Removing a listener that is already gone and clearing a
+     * timer that already fired are both no-ops, and the ref is only cleared when
+     * it is still this attempt's — a newer attempt's cleanup must survive an
+     * older one's late `onclose`.
+     */
     const done = () => {
+      if (connectCleanupRef.current === done) connectCleanupRef.current = null;
       window.clearTimeout(deadline);
       document.removeEventListener("securitypolicyviolation", onViolation);
     };
+    connectCleanupRef.current = done;
 
     socket.onopen = () => {
       done();
@@ -653,18 +696,21 @@ export function ObserverTerminal({
     setPhase({ kind: "idle" });
   }, [session.id, closeSocket]);
 
-  // Leaving the panel (or switching sessions) drops the stream with it.
+  // Leaving the panel (or switching sessions) drops the stream with it. It goes
+  // through `closeSocket` like every other exit rather than closing the socket
+  // by hand: doing it by hand left the socket's handlers attached, which made
+  // this the one door whose connecting-leg cleanup depended on `onclose`
+  // arriving after the component was already gone. `closeSocket` is a stable
+  // callback, so this still runs on unmount and nowhere else.
   useEffect(
     () => () => {
       runRef.current += 1;
-      const socket = socketRef.current;
-      socketRef.current = null;
-      socket?.close();
+      closeSocket();
       terminalRef.current?.dispose();
       terminalRef.current = null;
       refitRef.current = null;
     },
-    []
+    [closeSocket]
   );
 
   // Scheme changes re-read the tokens rather than restating them. Geometry is

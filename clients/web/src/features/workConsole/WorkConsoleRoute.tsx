@@ -78,7 +78,11 @@ function LocationBadge({ location }: { location: WorkConsoleLocation }) {
     <span
       className={cn(
         CHIP_CLASS,
-        "inline-flex items-center gap-1 bg-surface-hover text-ink-muted"
+        // 그릇은 --muted-soft 다 (#1515). 이 배지는 수명주기 칩과 **같은 행**에
+        // 서고 그 행은 선택되면 --accent-soft, 가리키면 --surface-hover 로 바뀐다.
+        // 앞 판의 --surface-hover 는 그 두 상태 중 하나와 정확히 같은 값이라,
+        // 가리키는 순간 배지가 행에 녹았다(대비 1.00).
+        "inline-flex items-center gap-1 bg-muted-soft text-ink-muted"
       )}
       data-testid="work-console-location"
       data-location={location.key}
@@ -175,6 +179,32 @@ export function WorkConsoleRoute() {
   const offline = useOffline();
   const [params, setParams] = useSearchParams();
   const selectedParam = params.get("session")?.trim() || null;
+  // 직접 조작 동선을 달고 온 주소인가 (LIVE-5b). 채팅 표면의 `?work=&control=1`
+  // 과 같은 부사이고, 여기서도 같은 일만 한다: 도착지에서 확인 단계를 무장할 뿐
+  // 창을 열지 않는다. 두 목적지가 같은 주소 낱말에 다르게 반응하면, 링크를
+  // 복사해 붙여넣은 사람은 어느 쪽에 떨어지느냐로 결과가 갈린다.
+  //
+  // **읽고 나면 주소에서 지운다** (#1193 규칙 · design-review M3). `?session=`
+  // 은 자리를 가리키므로 남지만 `?control=` 은 **한 번의 의도**이고, 남겨 두면
+  // 사람이 확인을 취소한 뒤에도 주소는 여전히 조작하러 왔다고 말한다 — 그리고
+  // 새로고침 한 번에 취소한 확인이 다시 선다. 세션 id 에 매어 두는 이유는
+  // 채팅 표면과 같다: 다른 행으로 옮겨 가면 그 의도는 따라가지 않아야 한다.
+  const [controlIntentSessionId, setControlIntentSessionId] = useState<
+    string | null
+  >(null);
+  const controlParam = params.get("control");
+  useEffect(() => {
+    if (controlParam !== "1") return;
+    setControlIntentSessionId(selectedParam);
+    setParams(
+      (current) => {
+        const next = new URLSearchParams(current);
+        next.delete("control");
+        return next;
+      },
+      { replace: true }
+    );
+  }, [controlParam, selectedParam, setParams]);
 
   const sessionsQuery = useWorkSessions(workspaceId);
   const hostsQuery = useWorkHosts(workspaceId);
@@ -473,6 +503,7 @@ export function WorkConsoleRoute() {
                 directory={directoryQuery.directory}
                 channelName={channelNameOf(selected.channelId)}
                 liveEvents={rail.liveEvents}
+                controlFrames={rail.controlFrames}
                 live={live}
                 nowMs={nowMs}
                 headingLevel={2}
@@ -482,6 +513,11 @@ export function WorkConsoleRoute() {
                 }
                 onBack={clearSelection}
                 openingThread={false}
+                controlIntent={uuidEq(
+                  controlIntentSessionId ?? undefined,
+                  selected.id
+                )}
+                onControlIntentConsumed={() => setControlIntentSessionId(null)}
                 onOpenThread={() =>
                   navigate(
                     messageAnchorPath(

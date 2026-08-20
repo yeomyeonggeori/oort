@@ -1,7 +1,27 @@
 # macOS Alpha Update Channel Runbook
 
+> ## ⚠️ 이 문서는 **은퇴한 SwiftUI 데스크탑**의 업데이트 채널이다 (ITO-0 T-C / #1609)
+>
+> `clients/macOS`는 삭제됐다(W-S1 / #1215). 아래 Swift/Sparkle/`MomoMac.app` 절차와
+> 삭제된 게이트 프로파일 `macos-ui`는 현행 제품 경로가 아니다. <!-- docs-cmd-ignore: 은퇴 스택 이름 호명 (#1609) -->
+> 따라 가면 실패하지 않고 **없는 트리를 찾거나, 잘못된 스택을 가리킨다.**
+>
+> **현행 데스크탑 업데이트 채널(Tauri next):**
+>
+> | 하려는 것 | 갈 곳 |
+> |---|---|
+> | 채널 계약·발행·매니페스트 | [`docs/NEXT_CHANNEL.md`](NEXT_CHANNEL.md) |
+> | 셸 업데이터 UI·실측·known gaps | [`clients/desktop/README.md`](../clients/desktop/README.md) (Identity / updater / Measured / Known gaps) |
+> | 발행 스크립트 | `scripts/publish_next_build.sh` — 실발행은 성재 맥(T-D / #1281) |
+> | ITO-3 I5 (자동업데이트 1왕복) | [`docs/LOCAL_3_DAY_ALPHA_TEST_PACK.md`](LOCAL_3_DAY_ALPHA_TEST_PACK.md) Day 3 |
+>
+> 본문은 MOMO-244 당시 원문이다. 고치지 않고 사문서로 둔다.
+
+---
+
 > Scope: internal alpha Dev Update Channel v0 for MOMO-244 / #244.
 > This is not a public release path and does not satisfy M4 Sparkle exit by itself.
+> **Retired surface — do not run the commands below on a current checkout.**
 
 ## 0. Current State
 

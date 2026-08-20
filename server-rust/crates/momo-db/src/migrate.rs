@@ -1,7 +1,7 @@
-//! Migration runner — applies the existing 68 SQL files **in place, unmodified**
+//! Migration runner — applies the existing 69 SQL files **in place, unmodified**
 //! via `psql`, matching `scripts/migrate.sh` (L4 §8.7 canonical mechanism).
 //!
-//! ADR-0145 / D2 §3: the 68 migrations under `server/Migrations/NNN_*.sql` are
+//! ADR-0145 / D2 §3: the 69 migrations under `server/Migrations/NNN_*.sql` are
 //! Postgres DDL, language independent, and are the enforcement layer we inherit.
 //!
 //! **Why psql, not `sqlx::raw_sql`.** Several seed migrations (002/006/012) use
@@ -342,19 +342,56 @@ mod tests {
     /// leaving a gap. That is the intended resolution — the contiguity assertion
     /// below is what forces it to be noticed at all, and it is what caught this
     /// one: presence was authored as 066 against a tree where 065 was the head.
+    ///
+    /// 069/070/071/072 are the ADR-0162 hosted Agent Port wave: the pairing
+    /// ledger (HAP-E3), the connection-scoped inbox projection (HAP-E4), the
+    /// kind-inclusive outbox reference plus the job↔run binding trigger that
+    /// make a hosted inbox reference impossible to aim at the wrong outbox kind
+    /// or at another piece of work (HAP-E5), and — closing the wave — HAP-E6's
+    /// cleanup manifest, where the disconnect's per-artifact rows and the
+    /// terminal-state trigger live.
+    ///
+    /// 073 is that wave's hygiene follow-up (#1375, #1386): the ledger's delete
+    /// surface and the disconnect's two unguarded doors — an INSERT that
+    /// arrives already terminal, and leaving the terminal at all.
+    ///
+    /// 074 is ADR-0162 증보 1's `hosted_agent_oauth` (HAP-E7): the OAuth 2.1
+    /// authorization-request ledger, the two OAuth hosted credential classes,
+    /// and the trigger that makes a credential class and its connection's
+    /// `auth_mode` agree — which is where the "no bearer downgrade" invariant
+    /// stops being a convention. It is the wave's second numbering collision
+    /// (see 066/067/068 above): the hygiene batch above and this one each
+    /// claimed 073 in parallel, so whichever landed second — this one —
+    /// renumbered to 074 on rebase rather than leaving a gap, and this
+    /// assertion is what forced that to be noticed.
+    ///
+    /// 075 is ADR-0165's `display_attach` (LIVE-1): the session's display
+    /// binding beside its PTY one, and `terminal_attach_capability.kind`. Its
+    /// last CHECK is the one worth naming here —
+    /// `terminal_attach_display_observer_ck` makes a *controllable* display
+    /// capability unrepresentable, which is how the ADR-0004 증보 3 boundary is
+    /// held by the schema rather than by a route somebody could rewrite.
+    ///
+    /// 076 is LIVE-3's `display_control_window` — that same CHECK removed by the
+    /// decision it was waiting for, and the ledger that took its place.
+    ///
+    /// 077 is LIVE-5a's `prior_observation` on that ledger: opening control
+    /// closes the session to teammates, and the window carries the value it
+    /// displaced so the close can put back what the owner had chosen rather than
+    /// guessing at a default.
     #[test]
-    fn discovers_contiguous_migrations_001_to_068() {
+    fn discovers_contiguous_migrations_001_to_077() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
         assert_eq!(
             migrations.len(),
-            68,
-            "expected 68 migrations under {}",
+            77,
+            "expected 77 migrations under {}",
             dir.display()
         );
         assert_eq!(migrations.first().unwrap().version, 1);
-        assert_eq!(migrations.last().unwrap().version, 68);
+        assert_eq!(migrations.last().unwrap().version, 77);
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
 
         for (i, migration) in migrations.iter().enumerate() {

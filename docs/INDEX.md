@@ -51,10 +51,11 @@
 | [`NOTICE`](../NOTICE) | Apache 2.0 귀속 — 앱 화면 표기 대상 | 법무 |
 | [`Makefile`](../Makefile) | `build`/`test` = **현행 스택**(cargo + npm), `up`/`down`/`migrate` = dev compose, `swift-build`/`swift-test` = 은퇴 중 트리 | 빌드 명령 |
 | [`docs/SELF_HOST.md`](SELF_HOST.md) | **셀프호스트 첫 기동 정본**(#1229): clone → `scripts/self_host_env.sh` → `up -d --build --wait` → 브라우저 로그인. 분기 0 | 운영 명령 |
+| [`docs/SELF_HOST_FIRST_DAY.md`](SELF_HOST_FIRST_DAY.md) | **셀프호스트 오퍼레이터의 첫 하루**(#1608): 부트스트랩(키 둘) → GUI 초대 → 웹/`oort://join` 합류 → AI 연결 → 첫 멘션 | 운영 명령 |
 | [`infra/rust/README.md`](../infra/rust/README.md) | **현행 스택 심화**: Rust 이미지 + prod형 compose(로컬·푸시·폰·TLS 오버레이 전부) | 운영 명령 |
 | [`docs/runbooks/ncp-rust-deploy.md`](runbooks/ncp-rust-deploy.md) | **라이브 배포 정본**(app.oor7.com Rust 스택 — 이미지 태그 교체 + Caddy/헤더 배포) | 운영 명령 |
 | [`scripts/verify_merge_tree.sh`](../scripts/verify_merge_tree.sh) | **병합 결과**(브랜치가 아니라 머지된 트리)에서 웹·폰·코어를 컴파일하는 크로스-클라 게이트(#1108) | 운영 명령 |
-| [`scripts/local_gate.sh`](../scripts/local_gate.sh) | GitHub Actions disabled/manual-only 기간 PR evidence 생성용 로컬 게이트(`docs|web|web-serving|runtime-*|diagnostics|local-alpha|internal-alpha|ios|macos-ui|m3-dbc|swift|all` — `swift`/`macos-ui`는 은퇴 중 트리) | 운영 명령 |
+| [`scripts/local_gate.sh`](../scripts/local_gate.sh) | 로컬 PR evidence 게이트. 현행 usage: `docs\|swift\|diagnostics\|staging-smoke\|host-runtime\|backup\|local-alpha\|internal-alpha\|runtime-*\|external-agent-provider\|m3-dbc\|web-serving\|web\|license\|secrets\|all`. `swift`/`m3-dbc`는 은퇴 중 Swift 트리. 삭제된 프로파일 `macos-ui`는 실행하지 않는다 (#1609) | 운영 명령 |
 | [`scripts/collect_diagnostics.sh`](../scripts/collect_diagnostics.sh) | 내부 alpha 장애 공유용 redacted diagnostics bundle(directory + tar.gz + summary.md) 생성 | 운영 명령 |
 | [`scripts/goal_status.sh`](../scripts/goal_status.sh) | ready/in-progress/needs-review/blocked issue와 branch/PR/worktree/local gate 상태판 | 운영 명령 |
 | [`scripts/goal_claim.sh`](../scripts/goal_claim.sh) | 이슈 claim + canonical branch/worktree 생성 + remote branch lock + status 갱신 | 운영 명령 |
@@ -75,11 +76,12 @@
 | [`docs/DEPLOY.md`](DEPLOY.md) | 백엔드 멀티팀 운영 배포(staging→prod: Caddy 자동TLS/Redis/SOPS+age/pgBackRest PITR/모니터링) | M1, M2 |
 | [`docs/AWS_INTERNAL_ALPHA.md`](AWS_INTERNAL_ALPHA.md) | AWS 1주일 internal alpha stack v0: EC2/Lightsail topology, 비용, 보안그룹, DNS/TLS, backup/restore, image-based deploy/rollback, preflight | M1/M7 준비 |
 | [`docs/SECRETS_BACKUP_RUNBOOK.md`](SECRETS_BACKUP_RUNBOOK.md) | SOPS+age secret lifecycle + pgBackRest PITR backup/restore skeleton(MOMO-006, 실제 secret 없음) | M1 |
-| [`docs/INTERNAL_ALPHA.md`](INTERNAL_ALPHA.md) | 내부 alpha quickstart: local stack, MomoMacDevApp, invite/join, 김인턴, diagnostics, bug report, known limitations | M3/M7 준비 |
-| [`docs/LOCAL_SOLO_ALPHA_ROADMAP.md`](LOCAL_SOLO_ALPHA_ROADMAP.md) | 로컬 1인 알파 승격 레인: Docker one-person messenger + local Hermes-compatible provider + 3-day dogfood evidence로 가는 Definition of Done과 goal chain | M1/M7 준비 |
-| [`docs/LOCAL_3_DAY_ALPHA_TEST_PACK.md`](LOCAL_3_DAY_ALPHA_TEST_PACK.md) | 72h local dogfood decision contract: Day 0~3 checklist, AWS_READY/BLOCKED/NEEDS_MORE_LOCAL 기준, daily report/final report template | M1/M7 준비 |
-| [`docs/INTERNAL_ALPHA_FEEDBACK.md`](INTERNAL_ALPHA_FEEDBACK.md) | 내부 alpha feedback intake: severity, evidence packet, needs-triage, buildable goal handoff | M3/M7 준비 |
-| [`docs/MACOS_ALPHA_UPDATE_CHANNEL.md`](MACOS_ALPHA_UPDATE_CHANNEL.md) | macOS alpha Dev Update Channel runbook: local/file manifest v0, current/available version CTA, operator-assisted install/relaunch, Sparkle/signing boundary | M3/M4 준비 |
+| [`docs/INTERNAL_ALPHA.md`](INTERNAL_ALPHA.md) | **현행** 내부 알파 스모크 A–F: 셀프호스트 웹+Tauri 데스크탑, 초대/합류, 에이전트 멘션, diagnostics. Swift/`macos-ui` 경로 은퇴 | ITO-1~3 |
+| [`docs/LOCAL_SOLO_ALPHA_ROADMAP.md`](LOCAL_SOLO_ALPHA_ROADMAP.md) | **은퇴 배너** — Swift 1인 알파+`AWS_READY` 로드맵 원문. 실행은 3-Day 팩 | 사문서 |
+| [`docs/LOCAL_3_DAY_ALPHA_TEST_PACK.md`](LOCAL_3_DAY_ALPHA_TEST_PACK.md) | **현행** ITO 3일 팩: Day 0~3, `LAUNCH_READY`/`BLOCKED`/`NEEDS_MORE_INTERNAL`, 시나리오 H1–H3·O1–O4·I1–I8 결속 | ITO-1~4 |
+| [`docs/INTERNAL_ALPHA_FEEDBACK.md`](INTERNAL_ALPHA_FEEDBACK.md) | 내부 알파 피드백 intake: severity, evidence packet, needs-triage, buildable goal handoff | ITO-4 |
+| [`docs/NEXT_CHANNEL.md`](NEXT_CHANNEL.md) | **현행** Tauri next 자동 업데이트 채널(매니페스트·발행·서명) | ITO-3 I5 |
+| [`docs/MACOS_ALPHA_UPDATE_CHANNEL.md`](MACOS_ALPHA_UPDATE_CHANNEL.md) | **은퇴 배너** — SwiftUI Sparkle/local-manifest 원문. 실행은 `NEXT_CHANNEL.md` | 사문서 |
 | [`docs/QA_GATE.md`](QA_GATE.md) | **M7 검수 게이트 단일 진입점**(G-0~G-H + 베타 전략 + 사용성 체크리스트 + GO 판정) | M7 |
 | [`docs/RUN.md`](RUN.md) | **은퇴 중** — Swift 기준 로컬 기동/마이그레이션/롤백 절차. 상단 배너가 현행 경로를 가리킨다. `.env`·compose·마이그레이션 절(§2~§4)은 스택과 무관하게 여전히 유효 | M0/M1 |
 | [`docs/INBOUND_MCP.md`](INBOUND_MCP.md) | Inbound MCP v0 서버 skeleton endpoint/security/permission model | M2 |
@@ -100,6 +102,7 @@
 | [`docs/adr/0101-agent-identity-credentials.md`](adr/0101-agent-identity-credentials.md) | **에이전트 신원 ADR(Accepted — Option A)**: 공유 시크릿 → per-agent `agent_bearer` + Phase 2 delegation. 구현: MOMO-337~339 | M1/보안 |
 | [`docs/adr/0102-agent-execution-path.md`](adr/0102-agent-execution-path.md) | **에이전트 실행 경로 ADR(Accepted — Option C)**: gateway=BYOA / worker=managed 이중 경로 + 서버 소유 보장 매트릭스 + SD-5 소급 승인 | M1/에이전트 |
 | [`docs/architecture/overview.md`](architecture/overview.md) | **아키텍처 정본**: 불변식 6개 + 시스템/수명주기/엔티티 mermaid 다이어그램 + 판정 요약 + ADR 결정 큐. 어긋나는 코드 변경은 같은 PR에서 갱신 | 전반 |
+| [`docs/architecture/agent-context-discipline.md`](architecture/agent-context-discipline.md) | **에이전트 컨텍스트 규율 정본**: 서버가 매 턴 싣는 시스템 블록의 실측표(현행 8줄/627자) + 규율 R1~R6(열거·상한·opt-out·**바이트 동일** 증명·소비자 계약 결속·트림 밖 항구비용) + dsh 반면교사 매핑. 시스템 블록을 바꾸는 PR은 §1 표를 같은 PR에서 갱신 | 전반/에이전트 |
 | [`docs/architecture/bible/README.md`](architecture/bible/README.md) | **메신저 아키텍처 바이블(학습용 파생 문서, 정본 아님)**: 문제 지도 M1~M11 + oort 뼈대 해설 + Slack/Discord/셀프호스팅 계열 비교 + 결정 큐 대조 — 정본과 어긋나면 정본 우선 | 전반 |
 | [`docs/ux-bible/README.md`](ux-bible/README.md) | **UX 바이블 정본**: Slack 코퍼스 36선 기반 원칙 P1~P15 — UI/UX 티켓 수용기준이 원칙 번호를 인용 | M3+ |
 | [`docs/design-system/README.md`](design-system/README.md) | **디자인 시스템 정본 「오르트 구름」(ADR-0159)**: 토큰 층(웹 정본 → 폰 번역)·위계 규칙(파괴>주>보조)·상태 규칙 4종·**강제 기제 지도(무엇을 무엇이 재고 무엇이 무검사인가)**·스케일 변경 절차 | M3+ |

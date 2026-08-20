@@ -47,12 +47,22 @@ export const WORKSTREAM_STATUS_LABEL: Readonly<Record<WorkstreamStatus, string>>
  * 멈춤 wears the accent for the reason the session ledger paints 호스트 연결
  * 끊김 with it: it is the one state waiting on a PERSON, and this surface exists
  * so that person can be someone other than whoever started it.
+ *
+ * 그릇은 네 칸이 전부 `--muted-soft` 다 (#1515 회전 1). 앞 판은 셋이
+ * `--surface-hover`, 하나가 `--accent-soft` 였는데 **둘 다 행이 입는 상태의
+ * 이름**이다: 목록 행(`WorkstreamListRoute`)이 `hover:bg-surface-hover` 로 서고
+ * `--accent-soft` 는 이 레포에서 선택된 행의 채움이다. 그래서 가리키고 있는 행에서
+ * 이 칩이 바탕과 한 픽셀도 다르지 않았다(실측 대비 1.000 · OKLab 거리 0.0000).
+ *
+ * 잉크는 그대로다 — 갈라진 것은 그릇이다. 색을 버는 것은 측정이지 이름이 아니므로
+ * 톤은 잉크에만 남고, 그릇은 톤을 지지 않는다. 세션 원장 표가 같은 물음에 먼저 답한
+ * 그대로다(`work/workSessionFormat.ts`).
  */
 export const WORKSTREAM_STATUS_CLASS: Readonly<Record<WorkstreamStatus, string>> = {
-  active: "bg-surface-hover text-ink",
-  paused: "bg-accent-soft text-accent",
-  done: "bg-surface-hover text-ok",
-  cancelled: "bg-surface-hover text-ink-muted",
+  active: "bg-muted-soft text-ink",
+  paused: "bg-muted-soft text-accent",
+  done: "bg-muted-soft text-ok",
+  cancelled: "bg-muted-soft text-ink-muted",
 };
 
 /**

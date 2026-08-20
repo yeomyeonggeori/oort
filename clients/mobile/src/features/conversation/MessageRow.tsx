@@ -31,6 +31,10 @@ import {
   rowPresentation,
   type ArtifactState,
 } from '@momo/core/features/timeline/rowModel';
+// 살릴 본문이 실제로 있는가. 웹이 #1465 에서 세운 판정을 #1478 이 코어로 올렸다.
+// 이 행이 쓰던 `body !== ''` 는 그보다 한 칸 좁았다 — 공백만 있는 본문이 칸을 얻어
+// 빈 줄을 그렸다. 왜 `trim()` 인지는 그 파일 머리말에.
+import {hasRenderableBody} from '@momo/core/features/timeline/bodySlot';
 import {isTruncated, omittedFileCount} from '@momo/core/features/timeline/artifacts';
 import type {ArtifactPresentation} from '@momo/core/features/timeline/artifacts';
 import {deletedFoldLabel} from '@momo/core/features/timeline/deletedFold';
@@ -84,6 +88,28 @@ import {
   approvalCardNote,
   type ApprovalNoteTone,
 } from '@momo/core/features/timeline/approvalNote';
+import {
+  LOGIN_HANDOFF_ELSEWHERE_COPY,
+  LOGIN_HANDOFF_IN_CONTROL_LEAD,
+  loginHandoffOutcomeDetail,
+  loginHandoffStatusLabel,
+  loginHandoffStoppedCopy,
+  loginHandoffWaitingCopy,
+  type LoginHandoffCard,
+} from '@momo/core/features/timeline/loginHandoffCard';
+import {
+  COMPLETION_CHECK_OUTCOME_LABEL,
+  COMPLETION_CHECK_TONE,
+  COMPLETION_OUTCOME_LABEL,
+  COMPLETION_OUTCOME_TONE,
+  completionCheckCounts,
+  completionRowChecks,
+  formatElapsed,
+  WORKED_ELAPSED_LABEL,
+  type CompletionCheckOutcome,
+  type CompletionReportCard,
+  type CompletionTone,
+} from '@momo/core/features/timeline/completionReportCard';
 import {QuoteBlock, quoteAccessibilityPhrase} from './Quote';
 import {useLongPress} from './useLongPress';
 
@@ -595,10 +621,23 @@ function toneForTurn(status: string): 'ok' | 'warn' | 'danger' | 'muted' {
  * ## 축이 잉크와 무게 둘뿐인 이유
  *
  * 크기는 안 쓴다 — 위계는 무게와 이차 색으로 내고 크기 팽창으로 내지 않는다
- * (design-taste §Typography). 그리고 **새 색상을 들이지 않는다.** 「일시적
- * 차단」에 앰버(`warn`)를 주는 안이 있었고 버렸다: 같은 배치가 D-2 에서 앰버를
- * 「경계를 그리는 색」으로 못박았고, 여기에 또 주면 그 색이 세 번째 뜻을 갖는다
- * — 인용 레일이 accent 에 대해 이미 거절한 그 거래다.
+ * (design-taste §Typography). 그리고 **차단에 앰버를 주지 않는다.**
+ *
+ * 이유는 앰버가 이미 쓰였다는 것이 아니라 **무슨 뜻으로 쓰였는가**다 (#1429 에서
+ * 다시 확인). 이 팔레트의 앰버는 「사람이 할 일이 남아 있다 · 여기를 보라」이고
+ * (`tokens.ts` 의 `warn`: *"Something needs a person: unread counts, pending
+ * approvals"*), 미읽 경계(D-2)·대기 승인 칩·ADE 차단 개수가 전부 그 한 뜻의
+ * 사례다. `blocked` 은 그 반대말이다 — 부르는 말이 아니라 **지금은 아무것도 못
+ * 한다**는 말이라, 여기에 앰버를 주면 이 카드가 「너를 기다린다」와 「지금 너는 못
+ * 한다」를 같은 색으로 말한다.
+ *
+ * 그래서 **웹이 같은 톤을 `text-warn` 으로 그리는 것도 옳다.** 그 팔레트에서
+ * 「여기를 보라」를 지는 것은 `--accent` 이므로(`StatusChip.tsx`: *"사람이 할 일이
+ * 남아 있다는 뜻의 색은 이 제품에서 하나여야 한다"*) `--warn` 이 「지금은 정상이
+ * 아니다」로 비어 있고, 차단이 그 뜻이다. 두 답은 취향 갈림이 아니라 한 규칙
+ * (차단은 부름이 아니다)을 두 팔레트가 각자의 토큰으로 만족시킨 것이다. 판정과
+ * 그 근거는 코어 `approvalNote.ts` §색 계약에 있고, 두 클라의 계약 테스트가 각자
+ * 자기 팔레트에 대고 잰다(`approvalCard.test.tsx` · `approvalNoteTone.test.ts`).
  *
  * 남는 것은 이미 있는 회색 3단 중 둘과 무게 하나이고, 그것으로 세 단이 나온다:
  *
@@ -615,6 +654,268 @@ const buildApprovalNoteStyle = (
   blocked: {color: color.text, fontWeight: '400'},
   guidance: {color: color.textMuted, fontWeight: '400'},
 });
+
+/**
+ * 완료 리포트 게이트 셀이 입는 색 (UXC-A). 역할은 코어가 정하고
+ * (`COMPLETION_CHECK_TONE`) 이 표가 폰 팔레트로 옮긴다 — 웹의
+ * `COMPLETION_TONE_CLASS` 와 짝이고, `buildApprovalNoteStyle` 이 승인 노트에 대해
+ * 하는 것과 같은 계약이다. `fail` 만 `danger` 이고 `skip`·`pending` 은 아니다:
+ * 안 돌린 게이트를 붉게 칠하면 침묵이 실패로 승격된다(ADR-0132).
+ */
+const buildCompletionToneStyle = (
+  color: Palette,
+): Record<CompletionTone, {color: string}> => ({
+  ok: {color: color.ok},
+  danger: {color: color.danger},
+  warn: {color: color.warn},
+  muted: {color: color.textMuted},
+});
+
+/** 시각 한 자리. 폰의 다른 시각 표기와 같은 24시간 두 자리다. */
+function handoffClock(atMs: number): string {
+  const at = new Date(atMs);
+  return `${String(at.getHours()).padStart(2, '0')}:${String(
+    at.getMinutes(),
+  ).padStart(2, '0')}`;
+}
+
+/**
+ * 로그인 핸드오프 카드 — **폰 판** (LIVE-4).
+ *
+ * 웹과 같은 카드를 그리되 결정 컨트롤이 없다. 이유는 이 배치의 계약이고
+ * (핸드오프 패킷 §1-1: 폰은 카드 표시 + 안내), 그 계약의 근거는 이 카드가
+ * 사람에게 시키는 일이 **화면을 직접 조작하는 것**이라는 데 있다. 폰에는 그
+ * 화면이 없고, 앞으로도 여기서 열지 않는다 — attach 내부(capability·endpoint·
+ * RTCPeerConnection)는 폰에 들이지 않는다는 가드가 이미 서 있고
+ * (`__tests__/workConsole.test.tsx`), 그 가드가 지키는 것이 정확히 이 자리다.
+ *
+ * 그래서 여기 없는 것이 셋이다: 재개·중단 버튼, 화면 여는 문, 그리고 그 셋을
+ * 흉내 내는 비활성 컨트롤. 대신 **어디서 할 수 있는지 한 문장**이 선다. 이
+ * 레포의 규율 그대로다 — 없는 방으로 가는 문은 버튼이 아니라 문장이다.
+ *
+ * 진행 상황은 전부 그린다. 폰에서 결정할 수 없다는 것이 폰에서 **알 수 없다**는
+ * 뜻은 아니고, 알림을 받고 잠금화면에서 열어 본 사람이 가장 먼저 묻는 것이
+ * 「지금 무슨 상태인가」이기 때문이다.
+ */
+function LoginHandoffCardView({
+  card,
+  styles,
+  noteStyle,
+}: {
+  card: LoginHandoffCard;
+  styles: ReturnType<typeof buildStyles>;
+  noteStyle: ReturnType<typeof buildApprovalNoteStyle>;
+}): React.JSX.Element {
+  const settled = card.phase !== 'waiting';
+  const underControl = card.control !== null && card.control.endedAtMs === null;
+  return (
+    <View style={styles.card} testID="agent-card">
+      <View style={styles.cardHead}>
+        <Text style={styles.cardTitle} numberOfLines={2}>
+          {card.title}
+        </Text>
+        {/* 칩 색이 국면이 아니라 결과를 따르는 것은 웹과 같다. 폰의 팔레트에는
+            `ok`·`warn`·`muted` 셋뿐이라 그 셋으로 옮긴다: 개입 완료는 `ok`,
+            완료 불확실은 `warn`(사고가 아니라 불확실이므로 danger 가 아니다),
+            세션 종료와 중단은 조용한 종결이라 `muted`. */}
+        <StatusChip
+          label={loginHandoffStatusLabel(card)}
+          tone={
+            card.outcome === 'returned'
+              ? 'ok'
+              : card.outcome === 'expired' || card.phase === 'waiting'
+                ? 'warn'
+                : 'muted'
+          }
+        />
+      </View>
+      {card.reason ? (
+        <Text style={styles.cardBody}>{card.reason}</Text>
+      ) : null}
+      {!settled ? (
+        // 창이 닫혔는데 아직 대기인 갈래에서 한 문장이 더 붙는다 (freeze M1).
+        // 폰은 결정 동선이 없으므로 이 줄이 이 화면에서 창의 상태를 말하는
+        // 유일한 자리다 — 조건도 문장도 코어가 답한다.
+        <Text style={styles.cardBody}>{loginHandoffWaitingCopy(card)}</Text>
+      ) : null}
+      {card.control !== null ? (
+        <Text style={styles.cardMeta} testID="card-handoff-boundary">
+          {[
+            `정지 ${handoffClock(card.control.startedAtMs)}`,
+            card.control.endedAtMs !== null
+              ? `재개 ${handoffClock(card.control.endedAtMs)}`
+              : null,
+          ]
+            .filter(Boolean)
+            .join(' · ')}
+        </Text>
+      ) : null}
+      {underControl ? (
+        // 코어의 **사실 한 문장**만 든다. 전문의 둘째 문장(「여기서 재개하거나
+        // 중단할 수 있습니다」)은 결정 동선이 있는 표면에서만 참이라 이 화면에서
+        // 거짓이고, 그렇다고 손으로 베끼면 같은 낱말이 두 곳에서 늙는다 —
+        // 자를 곳을 코어가 정한다 (design-review M1).
+        <Text
+          style={[styles.cardNote, noteStyle.blocked]}
+          testID="card-handoff-in-control">
+          {LOGIN_HANDOFF_IN_CONTROL_LEAD}
+        </Text>
+      ) : null}
+      {card.outcome !== null ? (
+        // 표를 그대로 인덱싱하지 않는다 (freeze M2). 창 없이 `returned` 인
+        // 카드에서 「화면을 돌려주었습니다」는 실행기가 모델에게 하는 말과
+        // 어긋난다.
+        <Text style={styles.cardNote} testID="card-handoff-outcome">
+          {loginHandoffOutcomeDetail(card)}
+        </Text>
+      ) : null}
+      {card.phase === 'stopped' ? (
+        // 문장도 조건도 코어가 답한다 (design-review H2·M1). 창이 있었던
+        // stopped 카드에서 「개입은 시작되지 않았습니다」는 바로 윗줄의 경계 행
+        // (정지 시각)과 모순된다.
+        <Text style={styles.cardNote} testID="card-handoff-stopped">
+          {loginHandoffStoppedCopy(card)}
+        </Text>
+      ) : null}
+      {/* 안내는 **대기 중일 때만** 선다. 끝난 카드에 「데스크톱에서 하세요」를
+          붙이면 할 일이 없는데 가라고 하는 셈이고, 그것이 `approvalNote` 가
+          settled 를 먼저 거르는 이유와 정확히 같은 거짓말이다. */}
+      {!settled ? (
+        <Text
+          style={[styles.cardNote, noteStyle.guidance]}
+          testID="card-handoff-elsewhere">
+          {LOGIN_HANDOFF_ELSEWHERE_COPY}
+        </Text>
+      ) : null}
+    </View>
+  );
+}
+
+/**
+ * 작업 완료 리포트 카드 — **폰 판** (UXC-A / 커서 웹 ADE 벤치마크 §3-A).
+ *
+ * 웹과 같은 리포트를 그린다. 이 카드는 결정 컨트롤이 애초에 없으므로(끝난 일의
+ * 기록) 웹과 폰이 하는 일이 같다 — 로그인 핸드오프처럼 「폰은 안내만」의 비대칭이
+ * 없다. 읽는 순서도 같다: 요약 → 작업 시간 → 한 일 → 표면별 게이트.
+ *
+ * 표는 폰에서 매트릭스 대신 **표면별 묶음**으로 그린다. 좁은 화면에서 표면×게이트
+ * 매트릭스는 가로로 넘치고, 넘친 표는 아무도 읽지 않는다. 대신 각 표면 아래에 그
+ * 게이트들을 이 클라가 이미 쓰는 라벨·값 문법(`detailRow`)으로 세운다.
+ */
+function CompletionReportCardView({
+  card,
+  styles,
+  toneStyle,
+}: {
+  card: CompletionReportCard;
+  styles: ReturnType<typeof buildStyles>;
+  toneStyle: ReturnType<typeof buildCompletionToneStyle>;
+}): React.JSX.Element {
+  const elapsed =
+    card.elapsedMs !== undefined ? formatElapsed(card.elapsedMs) : '';
+  const counts = completionCheckCounts(card.gates);
+  const tally = (
+    ['pass', 'fail', 'skip', 'pending', 'unknown'] as CompletionCheckOutcome[]
+  )
+    .filter(outcome => counts[outcome] > 0)
+    .map(outcome => `${COMPLETION_CHECK_OUTCOME_LABEL[outcome]} ${counts[outcome]}`)
+    .join(' · ');
+  // 상한에 걸려 그리지 않은 것들(M3). 조용히 자르지 않고 개수를 말한다 — 웹과 같은
+  // 「N개 더」.
+  const omittedParts: string[] = [];
+  if (card.omitted.gates > 0) omittedParts.push(`표면 ${card.omitted.gates}개 더`);
+  if (card.omitted.checks > 0)
+    omittedParts.push(`게이트 ${card.omitted.checks}개 더`);
+  const omitted = omittedParts.join(' · ');
+  return (
+    <View style={styles.card} testID="agent-card">
+      <View style={styles.cardHead}>
+        <Text style={styles.cardTitle} numberOfLines={2}>
+          {card.title}
+        </Text>
+        {/* 국면이 아니라 결과가 색을 정한다 — 실패가 있으면 `warn`(사람을 부르는
+            색), 없으면 `ok`. 웹과 같은 규칙, 폰 팔레트로. */}
+        <StatusChip
+          label={COMPLETION_OUTCOME_LABEL[card.outcome]}
+          tone={COMPLETION_OUTCOME_TONE[card.outcome]}
+        />
+      </View>
+      {card.summary ? <Text style={styles.cardBody}>{card.summary}</Text> : null}
+      {elapsed !== '' ? (
+        // 성과의 단위(벤치마크 차용 C). "작업 시간 24분 28초" — 라벨:값 쌍이므로
+        // 낱말은 코어가 준다(`WORKED_ELAPSED_LABEL`, #1468). 폰이 리터럴을 들고
+        // 있으면 웹 카드·작업 세션 정보와 언젠가 갈라진다 — 갈라진 결과가 정확히
+        // 그 티켓이 온 이유(「실행 시간」)다. 여기서 낱말과 값을 잇는 것은 폰의
+        // 배치일 뿐이다: 웹은 `LabeledRow` 두 칸으로, 폰은 한 줄로 세운다.
+        <Text style={styles.cardMeta} testID="completion-elapsed">
+          {`${WORKED_ELAPSED_LABEL} ${elapsed}`}
+        </Text>
+      ) : null}
+      {card.actions.length > 0 ? (
+        <View style={styles.detailRows} testID="completion-actions">
+          {card.actions.map((action, index) => (
+            <View key={index}>
+              <Text style={styles.cardBody}>{`· ${action.text}`}</Text>
+              {action.note ? (
+                // 왜. 커서의 「pinned 1.83 couldn't build it」 자리 — 가장 조용한 격.
+                <Text style={styles.cardMeta}>{action.note}</Text>
+              ) : null}
+            </View>
+          ))}
+          {card.omitted.actions > 0 ? (
+            // 상한에 걸려 그리지 않은 불릿(M3).
+            <Text style={styles.cardMeta}>{`그 밖에 ${card.omitted.actions}개 더`}</Text>
+          ) : null}
+        </View>
+      ) : null}
+      {card.gates.map((row, rowIndex) => (
+        // 표면 이름이 겹쳐도 key 가 충돌하지 않게 index 를 함께 짠다(H1 폰 패리티).
+        <View
+          key={`${row.surface}::${rowIndex}`}
+          style={styles.gateGroup}
+          testID="completion-gate-row">
+          <Text style={styles.gateSurface}>{row.surface}</Text>
+          <View style={styles.detailRows}>
+            {/* 겹친 라벨의 실패가 통과 아래로 밀리지 않게 코어가 순서를 준다 —
+                웹 셀이 겹친 칸을 최악 톤 먼저로 쌓는 것과 같다(폰 패리티). */}
+            {completionRowChecks(row).map((check, index) => (
+              <View key={index} style={styles.detailRow}>
+                <Text style={styles.detailLabel}>{check.label}</Text>
+                {/* 세부가 있으면 그것이, 없으면 결과 낱말이 선다. 색은 결과가 진다.
+                    세부가 낱말을 대신할 때는 보조기술을 위해 결과 낱말을 함께 읽힌다
+                    (L3) — 「896 통과」만 소리로는 통과인지 실패인지 모른다. */}
+                <Text
+                  style={[
+                    styles.detailValue,
+                    toneStyle[COMPLETION_CHECK_TONE[check.outcome]],
+                  ]}
+                  numberOfLines={2}
+                  accessibilityLabel={
+                    check.detail !== undefined
+                      ? `${check.detail} ${COMPLETION_CHECK_OUTCOME_LABEL[check.outcome]}`
+                      : undefined
+                  }>
+                  {check.detail ?? COMPLETION_CHECK_OUTCOME_LABEL[check.outcome]}
+                </Text>
+              </View>
+            ))}
+          </View>
+        </View>
+      ))}
+      {tally !== '' ? (
+        <Text style={styles.cardMeta} testID="completion-tally">
+          {tally}
+        </Text>
+      ) : null}
+      {omitted !== '' ? (
+        // 상한에 걸려 그리지 않은 표면·게이트(M3).
+        <Text style={styles.cardMeta} testID="completion-omitted">
+          {omitted}
+        </Text>
+      ) : null}
+    </View>
+  );
+}
 
 function AgentCard({
   card,
@@ -636,6 +937,7 @@ function AgentCard({
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const approvalNoteStyle = useStyles(buildApprovalNoteStyle);
+  const completionToneStyle = useStyles(buildCompletionToneStyle);
   if (card.kind === 'approval') {
     // 카드가 이미 파싱돼 있으므로 여기서 맞춰 본다 — 목록 쪽에서 하려면 이
     // 파싱을 한 번 더 해야 하고, 그것은 코어 규칙의 두 번째 구현이 된다.
@@ -751,6 +1053,26 @@ function AgentCard({
           />
         ) : null}
       </View>
+    );
+  }
+
+  if (card.kind === 'login_handoff') {
+    return (
+      <LoginHandoffCardView
+        card={card}
+        styles={styles}
+        noteStyle={approvalNoteStyle}
+      />
+    );
+  }
+
+  if (card.kind === 'completion_report') {
+    return (
+      <CompletionReportCardView
+        card={card}
+        styles={styles}
+        toneStyle={completionToneStyle}
+      />
     );
   }
 
@@ -1159,6 +1481,10 @@ function MessageRowInner({
   const rollup =
     rollupOverride === undefined ? threadRollup(message) : rollupOverride;
   const body = message.body ?? '';
+  // 살릴 본문이 실제로 있는가 (#1465 → #1478). 자격(`presentation.keepsBody`)과
+  // 다른 물음이고, 웹의 같은 이름과 **같은 함수**다 — 이 행이 답을 세 곳에서 쓰기
+  // 때문에(본문 칸 · 「내용 없는 메시지」 · 시트의 복사) 이름을 한 번만 짓는다.
+  const hasBody = hasRenderableBody(body);
   // A reply, on a surface that marks them. The parent may still be unknown.
   const isMarkedReply =
     replyParent !== undefined && message.rootId !== undefined;
@@ -1602,7 +1928,7 @@ function MessageRowInner({
           </Text>
         ) : (
           <>
-            {presentation.keepsBody && body !== '' ? (
+            {presentation.keepsBody && hasBody ? (
               // 시각 칸의 여백은 여기 없다. 그릇(`rowTimeReserve`)이 진다 —
               // 본문에 걸어 두었더니 본문이 첫 자식이 아닌 행마다 구멍이었다
               // (design-review M-1).
@@ -1643,8 +1969,13 @@ function MessageRowInner({
               />
             ) : null}
 
+            {/* 위 갈래와 **같은 판정의 반대쪽**이다 (#1478). 여기만 `body === ''`
+                로 남겨 두면 공백만 있는 본문이 어느 쪽에도 안 걸려 행이 통째로
+                말이 없어진다 — 빈 본문에는 「내용 없는 메시지」라고 말해 놓고
+                공백 본문에는 아무 말도 안 하는 것은 같은 사실에 두 답을 주는
+                것이다. */}
             {presentation.keepsBody &&
-            body === '' &&
+            !hasBody &&
             !presentation.card &&
             !presentation.artifact ? (
               <Text style={styles.tombstone}>{appNote('내용 없는 메시지')}</Text>
@@ -1821,8 +2152,9 @@ function MessageRowInner({
           }}
           onCopy={
             // 묘비에는 꺼낼 내용이 없다. `body` 가 비었을 때도 마찬가지 —
-            // 빈 문자열을 클립보드에 넣는 것은 「복사했다」는 거짓말이다.
-            !deleted && body !== ''
+            // 빈 문자열을 클립보드에 넣는 것은 「복사했다」는 거짓말이다. 공백만
+            // 있는 본문도 같은 거짓말이라 같은 판정을 쓴다 (#1478).
+            !deleted && hasBody
               ? () => {
                   setSheetOpen(false);
                   setRowError(null);
@@ -2717,6 +3049,8 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   detailRow: {flexDirection: 'row', gap: space.sm},
   detailLabel: {fontSize: font.meta, color: color.textFaint, minWidth: 72},
   detailValue: {flex: 1, fontSize: font.meta, color: color.textMuted},
+  gateGroup: {marginTop: space.xs},
+  gateSurface: {fontSize: font.label, fontWeight: '600', color: color.text},
   fileRow: {flexDirection: 'row', alignItems: 'center', gap: space.sm},
   filePath: {flex: 1, fontSize: font.meta, color: color.textMuted},
   fileCounts: {fontSize: font.meta, color: color.textFaint},

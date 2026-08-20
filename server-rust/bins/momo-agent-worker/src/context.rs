@@ -107,6 +107,34 @@ struct Turn {
     is_trigger: bool,
 }
 
+/// The `system` blocks the **server** puts in front of a turn, beside the
+/// operator's own prompt.
+///
+/// A struct rather than two more positional `Option<&str>` parameters, for
+/// `momo_messaging::SendExtras`'s reason: both are optional, both are strings,
+/// and they sit next to each other — a call site that has to write `None, None`
+/// to mean "an ordinary turn" is a call site that will eventually pass them in
+/// the wrong order, and nothing would catch it but a human reading a transcript.
+///
+/// Both blocks ride **outside the budget trim** (see [`assemble`]). Two or three
+/// lines cannot be what pushes a window over, and a turn that silently dropped
+/// either of them would lose a capability with nothing on screen to say why.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct SystemBlocks<'a> {
+    /// The current-date block (goal B8 L7). Passed in rather than read from the
+    /// clock so [`assemble`] stays deterministic and its tests stay
+    /// date-independent.
+    pub now: Option<&'a str>,
+    /// The completion-report protocol (#1454) — the only thing that tells a
+    /// model this card exists.
+    ///
+    /// Kept apart from [`SystemBlocks::now`] rather than appended to it because
+    /// the two say different kinds of thing: one is a fact about the world, the
+    /// other a rule about behaviour. Folded into one block, an operator reading
+    /// the transcript could not tell which was which.
+    pub report_protocol: Option<&'a str>,
+}
+
 /// Build the chat array for one turn.
 ///
 /// When `recent_messages` is empty (legacy/back-compat payloads) the amnesiac
@@ -118,23 +146,28 @@ pub fn assemble(
     trigger_message_id: Option<Uuid>,
     fallback_prompt: &str,
     system_prompt: Option<&str>,
-    // The current-date block (goal B8 L7), or `None` to send none. Passed in
-    // rather than read from the clock so this function stays deterministic.
-    now_context: Option<&str>,
+    blocks: SystemBlocks<'_>,
     max_chars: usize,
 ) -> AssembledContext {
     let mut head: Vec<ChatMessage> = Vec::new();
     if let Some(prompt) = system_prompt.map(str::trim).filter(|p| !p.is_empty()) {
         head.push(ChatMessage::system(prompt));
     }
-    // After the operator's instructions and before the conversation: it is a
-    // fact about the world, not a rule about behaviour, and it must not be the
-    // last thing an operator's prompt can be overridden by. It is also outside
-    // the budget trim below, deliberately: two lines cannot be what pushes a
-    // window over, and a turn that dropped them would silently go back to
-    // answering from the training cutoff.
-    if let Some(now) = now_context.map(str::trim).filter(|n| !n.is_empty()) {
+    // After the operator's instructions and before the conversation: they are
+    // the server's own words, and they must not be the last thing an operator's
+    // prompt can be overridden by. They are also outside the budget trim below,
+    // deliberately: a turn that dropped the clock would silently go back to
+    // answering from the training cutoff, and one that dropped the protocol
+    // would stop writing reports in exactly the long conversations that need them.
+    if let Some(now) = blocks.now.map(str::trim).filter(|n| !n.is_empty()) {
         head.push(ChatMessage::system(now));
+    }
+    if let Some(protocol) = blocks
+        .report_protocol
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+    {
+        head.push(ChatMessage::system(protocol));
     }
 
     let mut turns: Vec<Turn> = if recent_messages.is_empty() {
@@ -299,7 +332,10 @@ mod tests {
             Some(Uuid::from_u128(1)),
             "unused",
             Some("you are hermes"),
-            Some("현재 시각: 2026-08-01"),
+            SystemBlocks {
+                now: Some("현재 시각: 2026-08-01"),
+                ..SystemBlocks::default()
+            },
             10_000,
         );
         assert_eq!(
@@ -327,7 +363,10 @@ mod tests {
             Some(Uuid::from_u128(2)),
             "unused",
             None,
-            Some("현재 시각: 2026-08-01"),
+            SystemBlocks {
+                now: Some("현재 시각: 2026-08-01"),
+                ..SystemBlocks::default()
+            },
             20,
         );
         assert_eq!(
@@ -335,6 +374,130 @@ mod tests {
             ChatMessage::system("현재 시각: 2026-08-01")
         );
         assert_eq!(out.dropped_count, 1);
+    }
+
+    /// #1454 — the report protocol rides its own `system` turn, after the
+    /// operator's prompt and the clock, and the budget never trims it.
+    ///
+    /// Both halves matter. Fold it into the user's turn and a model can be talked
+    /// out of it by the next sentence; let the trim reach it and the feature dies
+    /// silently in exactly the channels busy enough to need it — a long setup
+    /// conversation is the one that overflows the window.
+    #[test]
+    fn the_report_protocol_is_a_system_turn_the_budget_cannot_trim() {
+        let window = vec![
+            message(1, Some(5), None, &"가".repeat(200)),
+            message(2, Some(5), Some("성재"), "@hermes 환경 만들어줘"),
+        ];
+        let out = assemble(
+            &window,
+            Uuid::from_u128(AGENT),
+            Some(Uuid::from_u128(2)),
+            "unused",
+            Some("you are hermes"),
+            SystemBlocks {
+                now: Some("현재 시각: 2026-08-17"),
+                report_protocol: Some(crate::completion_report::REPORT_PROTOCOL_BLOCK),
+            },
+            20,
+        );
+        assert_eq!(
+            out.messages[..3],
+            [
+                ChatMessage::system("you are hermes"),
+                ChatMessage::system("현재 시각: 2026-08-17"),
+                ChatMessage::system(crate::completion_report::REPORT_PROTOCOL_BLOCK),
+            ]
+        );
+        assert_eq!(
+            out.dropped_count, 1,
+            "history trimmed, the protocol was not"
+        );
+        assert!(
+            out.messages[2]
+                .content
+                .contains(crate::completion_report::REPORT_FENCE_TAG),
+            "the protocol must name the fence the producer actually reads"
+        );
+    }
+
+    /// A worker built before the card existed passes `None`, and the context it
+    /// assembles must be byte-identical to what it was — the protocol is an
+    /// addition, not a rewrite of every agent's system prompt.
+    #[test]
+    fn no_protocol_means_the_context_is_exactly_what_it_was() {
+        let window = vec![message(1, Some(5), Some("성재"), "안녕")];
+        let out = assemble(
+            &window,
+            Uuid::from_u128(AGENT),
+            Some(Uuid::from_u128(1)),
+            "unused",
+            Some("you are hermes"),
+            SystemBlocks::default(),
+            10_000,
+        );
+        assert_eq!(
+            out.messages,
+            vec![
+                ChatMessage::system("you are hermes"),
+                ChatMessage::user("[성재] 안녕"),
+            ]
+        );
+    }
+
+    /// #1466 — the operator's opt-out lands on that same pre-#1454 context,
+    /// **through the config** rather than by hand.
+    ///
+    /// The test above proves the assembler, and the assembler was never in
+    /// doubt. What is in doubt is the seam: that the flag reaches
+    /// [`SystemBlocks`] at all, and that `off` spends *no* bytes — not an empty
+    /// block, not a blank system turn — on a feature the operator switched off.
+    /// The on/off pair is asserted together so this cannot pass by the flag
+    /// being dead in both directions.
+    #[test]
+    fn the_config_opt_out_assembles_the_byte_identical_pre_protocol_context() {
+        let window = vec![
+            message(1, Some(5), Some("성재"), "@hermes 환경 만들어줘"),
+            message(2, Some(AGENT), Some("hermes"), "네, 시작할게요"),
+        ];
+        let assembled = |protocol: Option<&str>| {
+            assemble(
+                &window,
+                Uuid::from_u128(AGENT),
+                Some(Uuid::from_u128(1)),
+                "unused",
+                Some("you are hermes"),
+                SystemBlocks {
+                    now: Some("현재 시각: 2026-08-17"),
+                    report_protocol: protocol,
+                },
+                10_000,
+            )
+        };
+
+        let mut config = crate::config::WorkerConfig::for_target("postgres://x/y");
+        let on = assembled(config.report_protocol_block());
+        config.report_protocol_enabled = false;
+        let off = assembled(config.report_protocol_block());
+
+        // "Byte-identical to what it was" is spelled as the pre-#1454 call it
+        // has to match, not as a hand-copied literal.
+        let pre_1454 = assembled(None);
+        assert_eq!(
+            off.messages, pre_1454.messages,
+            "opting out must reproduce the pre-protocol context exactly"
+        );
+        assert_eq!(off.dropped_count, pre_1454.dropped_count);
+
+        assert_eq!(
+            on.messages.len(),
+            off.messages.len() + 1,
+            "the default must still cost exactly one extra system turn"
+        );
+        assert_eq!(
+            on.messages[2],
+            ChatMessage::system(crate::completion_report::REPORT_PROTOCOL_BLOCK)
+        );
     }
 
     /// The agent's own past turns must come back as `assistant`; everyone else
@@ -353,7 +516,7 @@ mod tests {
             Some(Uuid::from_u128(3)),
             "unused",
             Some("you are hermes"),
-            None,
+            SystemBlocks::default(),
             10_000,
         );
         assert_eq!(
@@ -381,7 +544,7 @@ mod tests {
             None,
             "직접 물어봄",
             None,
-            None,
+            SystemBlocks::default(),
             10_000,
         );
         assert_eq!(out.messages, vec![ChatMessage::user("직접 물어봄")]);
@@ -402,7 +565,7 @@ mod tests {
             Some(Uuid::from_u128(3)),
             "unused",
             None,
-            None,
+            SystemBlocks::default(),
             120,
         );
         assert_eq!(out.dropped_count, 2);
@@ -417,7 +580,7 @@ mod tests {
             Some(Uuid::from_u128(3)),
             "unused",
             None,
-            None,
+            SystemBlocks::default(),
             10,
         );
         assert_eq!(out.messages.len(), 1);
@@ -438,7 +601,7 @@ mod tests {
             None,
             "unused",
             None,
-            None,
+            SystemBlocks::default(),
             20,
         );
         assert_eq!(out.messages.len(), 1);
@@ -467,7 +630,7 @@ mod tests {
             Some(Uuid::from_u128(3)),
             "unused",
             None,
-            None,
+            SystemBlocks::default(),
             10_000,
         );
         assert_eq!(

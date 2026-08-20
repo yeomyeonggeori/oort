@@ -3,6 +3,7 @@ import { SendHorizontal } from "lucide-react";
 import { sendThreadReply } from "@momo/core/lib/api";
 import { InlineBanner } from "@/features/common/States";
 import { replyFailureMessage } from "@momo/core/features/timeline/actionCopy";
+import { THREAD_COMPOSER_PLACEHOLDER } from "@momo/core/features/chat/composerCopy";
 import { cn } from "@/design/lib/cn";
 import {
   AttachButton,
@@ -164,8 +165,14 @@ export function ThreadComposer({
             ref={ref}
             value={draft}
             disabled={sending}
-            placeholder="답글 쓰기"
-            aria-label="답글 쓰기"
+            // 채널 컴포저와 달리 `@` 를 광고하지 않는다 (#1384). 이유는
+            // **이 상자**에 멘션 자동완성이 없어서다(이 파일 머리말) — 폰의
+            // 스레드는 채널 컴포저를 그대로 세우므로 거기서는 @ 가 목록을 연다.
+            // 그 비대칭은 동작이라 카피 티켓이 고치지 않고 코어가 기록한다
+            // (`composerCopy.ts` 의 THREAD_COMPOSER_PLACEHOLDER). 문장은 두
+            // 클라가 함께 쓰므로 **둘 다 하는 일**까지만 말한다.
+            placeholder={THREAD_COMPOSER_PLACEHOLDER}
+            aria-label={THREAD_COMPOSER_PLACEHOLDER}
             data-testid="thread-composer-input"
             onChange={(event) => setDraft(event.target.value)}
             onPaste={drop.onPaste}

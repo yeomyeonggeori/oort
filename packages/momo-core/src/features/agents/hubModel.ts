@@ -17,7 +17,15 @@ import { isStaleSignal, type AgentWorkingSignal } from "./workingSignal";
 // from the core now and its own tests still pin them from there.
 // =============================================================================
 
-export type AgentHubSection = "profile" | "memory" | "history";
+/**
+ * 에이전트 상세의 탭들.
+ *
+ * `connection` 은 호스티드 연결의 수명(연결 해제와 정리 확인)이 사는 자리다
+ * (HAP-UX2 / #1362). 그 일이 연결 마법사가 아니라 여기 있는 이유는 시간 규모가
+ * 다르기 때문이다 — 연결을 만드는 것은 한 번에 끝나는 흐름이고, 해제는 provider
+ * 설정을 오가며 며칠에 걸쳐 확인하는 장부다.
+ */
+export type AgentHubSection = "profile" | "memory" | "history" | "connection";
 
 export function normalizedId(value: string): string {
   return value.toLowerCase();

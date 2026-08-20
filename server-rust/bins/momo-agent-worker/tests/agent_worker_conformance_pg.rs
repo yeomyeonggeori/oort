@@ -41,13 +41,21 @@
 //! | `b51_2_a_provider_failure_is_visible_to_the_user_and_retried_only_when_worth_it` | post the failure notice on every attempt instead of the last, or widen `is_retryable` so a 4xx is retried |
 //! | `b51_3_one_agent_runs_one_job_at_a_time_and_two_agents_run_together` | drop the `NOT EXISTS` in-flight predicate or the `row_number() = 1` rank, or "fix" the claim into a global `LIMIT 1` |
 //! | `b51_4_the_operators_bearer_never_reaches_a_row_a_message_or_an_error` | remove `redact_secrets`, or start logging/persisting the resolved endpoint |
+//! | `uxc_a_1_a_completion_report_rides_the_ordinary_turn_message` | leave the report fence in the body, stop merging the card into the turn's props, take `elapsed_ms` from the model instead of `agent_run.started_at`, or give the card its own `message_type`/row instead of the turn's |
+//! | `uxc_a_2_a_streamed_report_lands_on_the_message_the_reader_watched` | drop the props patch a deduped commit needs, move it after the closing slice (the row moves with no frame to say so), or stop cutting the fence out of the streamed slices |
+//! | `uxc_a_3_a_report_without_prose_never_commits_its_own_envelope` | make the empty-body fallback reach for the raw turn text again (the envelope lands in the channel as prose), drop the card when there is no sentence to hang it under, or measure `elapsed_ms` against this host's wall clock instead of the database's |
+//!
+//! The DB-free half of the report's conformance — the producer against the core
+//! contract file it must match — is `completion_report_conformance.rs`, which
+//! needs no database and therefore runs in every `cargo test`.
 
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use momo_agent::{create_agent_run_in_tx, NewAgentRun, RunTrigger};
+use momo_agent::{create_agent_run_in_tx, A2aLimits, NewAgentRun, RunTrigger};
+use momo_agent_worker::a2a::{route_a2a_mentions_in_tx, A2aSend};
 use momo_agent_worker::provider::{ChatProvider, MockChatProvider, ProviderError};
 use momo_agent_worker::{AgentWorker, WorkerConfig};
 use momo_db::migrate::{default_migrations_dir, run_migrations, SeedMode};
@@ -1451,4 +1459,546 @@ async fn a_provider_death_mid_answer_freezes_what_the_reader_already_read() {
     );
     let (status, _, _) = job_row(&su, job_id).await;
     assert_eq!(status, "failed");
+}
+
+/// HAP-E3 production exclusion is enforced by the actual worker consumer and
+/// the actual A2A producer, not merely by matching copies of their predicates.
+#[tokio::test]
+#[ignore = "requires DATABASE_URL to a throwaway pgvector/pg18 database"]
+async fn hosted_identities_never_enter_worker_claim_or_a2a_delivery() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    settle_residual_worker_jobs(&su).await;
+    let tenant = seed_tenant(&su).await;
+    let (source_run_id, _, source_job_id) =
+        enqueue_mention_turn(&su, &tenant, tenant.agent_id, "source run").await;
+    sqlx::query("UPDATE outbox SET status='done',processed_at=now() WHERE id=$1")
+        .bind(source_job_id)
+        .execute(&su)
+        .await
+        .expect("retire source fixture job");
+
+    for status in ["pairing_pending", "detected", "expired", "active"] {
+        let initial_status = if status == "active" {
+            "detected"
+        } else {
+            status
+        };
+        let hosted_id = seed_second_agent(&su, &tenant).await;
+        let connection_id = Uuid::new_v4();
+        // Every fixture secret below is derived from a per-run uuid, because
+        // `token_hash_uniq` is a *global* unique key (schema_v0.sql:350 — no
+        // workspace column in it). A literal `digest('hosted-active')` therefore
+        // passed only against a virgin database and raised 23505 on the second
+        // run against the same one, while the rest of this suite is re-runnable
+        // by construction (#1467). `pairing_challenge_hash` carries no unique
+        // index today, but it is the same class of value, so it is derived the
+        // same way rather than left as the next re-run trap.
+        sqlx::query(
+            "UPDATE agent SET model='hosted-agent', \
+               base_url='https://hosted-agent.invalid/disabled', \
+               config=jsonb_build_object('execution_mode','hosted_dial_in') \
+             WHERE workspace_id=$1 AND member_id=$2",
+        )
+        .bind(tenant.workspace_id)
+        .bind(hosted_id)
+        .execute(&su)
+        .await
+        .expect("seal hosted sentinel");
+        sqlx::query(
+            "INSERT INTO hosted_agent_connection( \
+               id,workspace_id,agent_member_id,status,pairing_challenge_hash,pairing_expires_at, \
+               pairing_consumed_at,detected_at,detected_by,confirmed_by,confirmed_at, \
+               approved_scopes,created_by \
+             ) VALUES ($1,$2,$3,$4,digest($5,'sha256'), \
+               CASE WHEN $4='expired' THEN now()-interval '1 second' ELSE now()+interval '1 hour' END, \
+               CASE WHEN $4 IN ('detected','active') THEN now() END, \
+               CASE WHEN $4 IN ('detected','active') THEN now() END, \
+               CASE WHEN $4 IN ('detected','active') THEN $3 END, \
+               CASE WHEN $4='active' THEN $6 END, CASE WHEN $4='active' THEN now() END, \
+               CASE WHEN $4='active' THEN ARRAY['agent:port:connect']::text[] ELSE '{}'::text[] END,$6)",
+        )
+        .bind(connection_id)
+        .bind(tenant.workspace_id)
+        .bind(hosted_id)
+        .bind(initial_status)
+        .bind(format!("hosted-{status}-{connection_id}"))
+        .bind(tenant.human_id)
+        .execute(&su)
+        .await
+        .expect("seed hosted lifecycle row");
+        if status == "active" {
+            let token_id = Uuid::new_v4();
+            sqlx::query(
+                "WITH inserted AS (INSERT INTO token(id,workspace_id,actor_member_id,kind,token_hash,scopes,label, \
+                  credential_class,hosted_connection_id,audience,created_by) \
+                 VALUES ($1,$2,$3,'agent_bearer',digest($6,'sha256'), \
+                  ARRAY['agent:port:connect'],'hosted test','hosted_active',$4, \
+                  '/v1/mcp/agent-port',$5) RETURNING id), \
+                 updated AS (UPDATE hosted_agent_connection SET status='active', \
+                  active_token_id=(SELECT id FROM inserted),confirmed_by=$5,confirmed_at=now(), \
+                  approved_scopes=ARRAY['agent:port:connect'],proved_at=now(),proved_by=$3 \
+                  WHERE workspace_id=$2 AND id=$4 RETURNING id), \
+                 profiled AS (INSERT INTO agent_profile(workspace_id,agent_member_id,paused,updated_by) \
+                  SELECT $2,$3,false,$5 FROM updated RETURNING agent_member_id) \
+                 SELECT count(*) FROM profiled",
+            )
+            .bind(token_id)
+            .bind(tenant.workspace_id)
+            .bind(hosted_id)
+            .bind(connection_id)
+            .bind(tenant.human_id)
+            .bind(format!("hosted-active-{token_id}"))
+            .execute(&su)
+            .await
+            .expect("activate hosted fixture");
+        }
+
+        let hosted_job_id: i64 = sqlx::query_scalar(
+            "INSERT INTO outbox(workspace_id,kind,status,method,payload,partition_key) \
+             VALUES ($1,'agent_job','pending','publish',jsonb_build_object('agent_member_id',$2),$2) \
+             RETURNING id",
+        )
+        .bind(tenant.workspace_id)
+        .bind(hosted_id)
+        .fetch_one(&su)
+        .await
+        .expect("seed hosted worker job");
+        let claimed = momo_outbox::claim_agent_job_batch(
+            &momo_worker_pool().await,
+            100,
+            DEFAULT_WORKER_LEASE_SECONDS,
+        )
+        .await
+        .expect("invoke actual worker claim");
+        assert!(
+            claimed.iter().all(|job| job.id != hosted_job_id),
+            "{status}: actual worker claim admitted hosted job"
+        );
+        let claim_state: (String, i32, bool) = sqlx::query_as(
+            "SELECT status::text,attempts,lease_owner IS NULL FROM outbox WHERE id=$1",
+        )
+        .bind(hosted_job_id)
+        .fetch_one(&su)
+        .await
+        .expect("read hosted claim state");
+        assert_eq!(claim_state, ("pending".into(), 0, true));
+
+        let body = format!("@{} do not delegate", hosted_id);
+        let workspace_id = tenant.workspace_id;
+        let channel_id = tenant.channel_id;
+        let author_id = tenant.agent_id;
+        let (run_before, jobs_before, messages_before): (i64, i64, i64) = sqlx::query_as(
+            "SELECT (SELECT count(*) FROM agent_run WHERE workspace_id=$1 AND agent_member_id=$2), \
+                    (SELECT count(*) FROM outbox WHERE workspace_id=$1 AND kind='agent_job'), \
+                    (SELECT count(*) FROM message WHERE workspace_id=$1)",
+        )
+        .bind(workspace_id)
+        .bind(hosted_id)
+        .fetch_one(&su)
+        .await
+        .expect("read A2A baseline");
+        let routing = with_tenant_tx(&su, workspace_id, move |conn| {
+            Box::pin(async move {
+                let reply = send_message_in_tx(
+                    conn,
+                    workspace_id,
+                    NewMessage::text(channel_id, author_id, body.clone()),
+                )
+                .await?;
+                route_a2a_mentions_in_tx(
+                    conn,
+                    A2aSend {
+                        workspace_id,
+                        channel_id,
+                        message_id: reply.message.id,
+                        message_seq: reply.message.seq,
+                        author_agent_member_id: author_id,
+                        source_run_id,
+                        body: &body,
+                        hlc_ts: reply.message.hlc_ts,
+                        gateway_enabled: false,
+                        context_max_messages: 20,
+                        limits: A2aLimits::default(),
+                    },
+                )
+                .await
+            })
+        })
+        .await
+        .expect("invoke actual A2A producer");
+        assert!(
+            routing.delegated.is_empty(),
+            "{status}: A2A delegated hosted identity"
+        );
+        let after: (i64, i64, i64) = sqlx::query_as(
+            "SELECT (SELECT count(*) FROM agent_run WHERE workspace_id=$1 AND agent_member_id=$2), \
+                    (SELECT count(*) FROM outbox WHERE workspace_id=$1 AND kind='agent_job'), \
+                    (SELECT count(*) FROM message WHERE workspace_id=$1)",
+        )
+        .bind(workspace_id)
+        .bind(hosted_id)
+        .fetch_one(&su)
+        .await
+        .expect("read A2A result");
+        assert_eq!(after.0, run_before, "{status}: A2A inserted hosted run");
+        assert_eq!(
+            after.1, jobs_before,
+            "{status}: A2A inserted hosted job/outbox"
+        );
+        assert_eq!(
+            after.2,
+            messages_before + 1,
+            "{status}: only source reply may persist"
+        );
+        sqlx::query("UPDATE outbox SET status='done',processed_at=now() WHERE id=$1")
+            .bind(hosted_job_id)
+            .execute(&su)
+            .await
+            .expect("retire hosted fixture job");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// UXC-A (#1454) — the completion report producer, end to end
+// ---------------------------------------------------------------------------
+
+/// The model's turn: prose for the reader, then the report fence.
+const REPORTED_TURN: &str = "환경 셋업을 마쳤습니다.\n\n```oort:report\n\
+{\"title\":\"oort 환경 셋업 완료\",\
+ \"summary\":\"Rust 서버·TS 코어·웹/폰이 한 트리에 있고, 게이트를 전부 초록으로 맞췄습니다.\",\
+ \"elapsed_ms\":999,\
+ \"actions\":[{\"text\":\"Rust 툴체인을 1.83에서 1.97로 올림\",\"note\":\"edition2024 때문\"},\
+              {\"text\":\"compose 기동 후 헬스체크 확인\"}],\
+ \"gates\":[{\"surface\":\"웹\",\"checks\":[{\"label\":\"테스트\",\"outcome\":\"pass\",\"detail\":\"896 통과\"}]},\
+            {\"surface\":\"엔진\",\"checks\":[{\"label\":\"빌드\",\"outcome\":\"pass\"},\
+                                             {\"label\":\"소크\",\"outcome\":\"skip\"}]}]}\n```";
+
+/// Every assertion this pair makes about the card's own keys, in one place —
+/// so the streaming and non-streaming halves are held to the *same* envelope
+/// rather than to two lists that can drift apart.
+fn assert_card_envelope(props: &Value, run_id: Uuid, trigger_message_id: Uuid) {
+    // The turn still says everything it always said. The card is an addition to
+    // this envelope, not a replacement for it — a props object that lost
+    // `source` would take the attribution of every reply with it.
+    assert_eq!(props["run_id"], json!(run_id));
+    assert_eq!(props["source"], json!("agent_worker.final_text.v0"));
+    assert_eq!(props["trigger_message_id"], json!(trigger_message_id));
+
+    assert_eq!(
+        props["kind"],
+        json!("completion_report"),
+        "the one key that decides whether a card is drawn at all"
+    );
+    assert_eq!(props["title"], json!("oort 환경 셋업 완료"));
+    assert_eq!(
+        props["summary"],
+        json!("Rust 서버·TS 코어·웹/폰이 한 트리에 있고, 게이트를 전부 초록으로 맞췄습니다.")
+    );
+    assert_eq!(
+        props["actions"],
+        json!([
+            {"text": "Rust 툴체인을 1.83에서 1.97로 올림", "note": "edition2024 때문"},
+            {"text": "compose 기동 후 헬스체크 확인"}
+        ])
+    );
+    // `skip` reaches the card as `skip`. A producer that folded it into `fail`
+    // would paint an un-run gate red, which is exactly the false narrative
+    // ADR-0132 exists to stop.
+    assert_eq!(
+        props["gates"],
+        json!([
+            {"surface": "웹", "checks": [{"label": "테스트", "outcome": "pass", "detail": "896 통과"}]},
+            {"surface": "엔진", "checks": [
+                {"label": "빌드", "outcome": "pass"},
+                {"label": "소크", "outcome": "skip"}
+            ]}
+        ])
+    );
+
+    // The model claimed 999ms. What ships is the server's measurement against
+    // `agent_run.started_at`, which is a real duration and therefore not 999.
+    let elapsed = props["elapsed_ms"]
+        .as_i64()
+        .expect("a run that started has a measured elapsed");
+    assert!(
+        elapsed >= 0 && elapsed != 999,
+        "elapsed_ms must be the server's clock, not the model's claim (got {elapsed})"
+    );
+}
+
+/// **UXC-A 1 — a report is an ordinary turn message that happens to carry a card.**
+///
+/// No new `message_type`, no new ledger, no migration: the same single write path
+/// (`REST send → message + outbox → relay`) every other agent answer takes, with
+/// six more keys on the props it was already writing. This is the whole design,
+/// and it is what makes the card survive a reload, a new device, and a teammate
+/// scrolling back a week later.
+///
+/// Goes red if the producer stops cutting the fence out of the body (raw JSON in
+/// the channel), stops emitting the card, invents an `elapsed_ms` from the
+/// model's own claim, or routes the reply around the message spine so the
+/// broadcast no longer carries the props the relay must publish.
+#[tokio::test]
+#[ignore = "requires DATABASE_URL to a throwaway pgvector/pg18 database"]
+async fn uxc_a_1_a_completion_report_rides_the_ordinary_turn_message() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    settle_residual_worker_jobs(&su).await;
+    let tenant = seed_tenant(&su).await;
+
+    let (run_id, trigger_message_id, _job_id) =
+        enqueue_mention_turn(&su, &tenant, tenant.agent_id, "@hermes 환경 만들어줘").await;
+
+    let provider = Arc::new(MockChatProvider::scripted([(
+        "환경 만들어줘",
+        REPORTED_TURN,
+    )]));
+    let worker = build_worker(provider.clone(), base_config()).await;
+    let stats = worker.drain_once().await.expect("drain");
+    assert_eq!(stats.answered, 1, "the turn produced an answer");
+
+    let messages = agent_messages(&su, &tenant, tenant.agent_id).await;
+    assert_eq!(
+        messages.len(),
+        1,
+        "a report is one turn message — not a second card row beside the answer"
+    );
+    let (message_id, seq, body, props) = messages.into_iter().next().unwrap();
+    assert!(
+        seq > 0,
+        "it took a real channel_seq like every other message"
+    );
+
+    // 1. The fence is gone from the body. The reader gets prose; the card gets
+    //    the structure. Leaving the block in would put raw JSON in the channel.
+    assert_eq!(body, "환경 셋업을 마쳤습니다.");
+    assert!(
+        !body.contains("oort:report") && !body.contains("\"gates\""),
+        "the envelope must never be shown as text: {body}"
+    );
+
+    // 2. The card, key for key.
+    assert_card_envelope(&props, run_id, trigger_message_id);
+
+    // 3. schema_v0 is untouched: this is a plain `text` message, exactly as the
+    //    core's fixture says it must be. A new `message_type` would need a
+    //    migration, and this goal's contract is that there is none.
+    let message_type: String = sqlx::query_scalar("SELECT type::text FROM message WHERE id = $1")
+        .bind(message_id)
+        .fetch_one(&su)
+        .await
+        .expect("read message type");
+    assert_eq!(message_type, "text");
+
+    // 4. **REST ↔ outbox agree.** The relay publishes what is in the outbox row,
+    //    so a card that exists only in the `message` table is a card nobody sees
+    //    until they reload.
+    let broadcast: Value = sqlx::query_scalar(
+        "SELECT payload FROM outbox \
+          WHERE workspace_id = $1 AND kind = 'broadcast' \
+            AND payload->'data'->'payload'->>'id' = $2::text \
+          ORDER BY id DESC LIMIT 1",
+    )
+    .bind(tenant.workspace_id)
+    .bind(message_id.to_string())
+    .fetch_one(&su)
+    .await
+    .expect("read the broadcast the relay will publish");
+    let published = &broadcast["data"]["payload"];
+    assert_eq!(published["body"], json!("환경 셋업을 마쳤습니다."));
+    assert_card_envelope(&published["props"], run_id, trigger_message_id);
+}
+
+/// **UXC-A 2 — the same card on a turn the reader watched arrive.**
+///
+/// This is the half that could quietly not work. On a streamed turn the commit's
+/// `send` is a dedupe (stream rule 4): the opening slice wrote this turn's props
+/// long before the model had written a word of the report, and a deduped send
+/// updates nothing. So the card lands by props patch, written *before* the
+/// closing slice so that slice's `message.edited` frame carries it.
+///
+/// Goes red if the patch is dropped (card missing on every streamed answer — i.e.
+/// on every real one), if it is moved after the closing slice (the row moves with
+/// no frame to say so, and the timeline keeps rendering the props it was handed),
+/// or if the streaming cut stops matching the committed body (the reader watches
+/// raw JSON type itself out and then vanish).
+#[tokio::test]
+#[ignore = "requires DATABASE_URL to a throwaway pgvector/pg18 database"]
+async fn uxc_a_2_a_streamed_report_lands_on_the_message_the_reader_watched() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    settle_residual_worker_jobs(&su).await;
+    let tenant = seed_tenant(&su).await;
+
+    let (run_id, trigger_message_id, _job_id) =
+        enqueue_mention_turn(&su, &tenant, tenant.agent_id, "@hermes 환경 만들어줘").await;
+
+    let provider = Arc::new(
+        MockChatProvider::scripted([("환경 만들어줘", REPORTED_TURN)])
+            .streaming(6, Duration::from_millis(900)),
+    );
+    let worker = build_worker(provider.clone(), base_config()).await;
+    let stats = worker.drain_once().await.expect("drain");
+    assert_eq!(stats.answered, 1, "the streamed turn produced an answer");
+
+    let messages = agent_messages(&su, &tenant, tenant.agent_id).await;
+    assert_eq!(
+        messages.len(),
+        1,
+        "one turn is one message however many writes it took"
+    );
+    let (message_id, _seq, body, props) = messages.into_iter().next().unwrap();
+    assert_eq!(body, "환경 셋업을 마쳤습니다.");
+    assert_card_envelope(&props, run_id, trigger_message_id);
+
+    // The stream is closed under a terminal run (ADR-0155) — the card did not
+    // cost the turn its close.
+    assert_eq!(
+        props[momo_messaging::STREAM_PROPS_KEY]["streaming"],
+        json!(false),
+        "the closing slice still runs in the commit transaction"
+    );
+    assert_eq!(run_status(&su, run_id).await, "succeeded");
+
+    // Every durable slice this turn wrote — the whole of what a reader could
+    // have had on screen — and not one of them showed the envelope.
+    let published: Vec<Value> = sqlx::query_scalar(
+        "SELECT payload FROM outbox \
+          WHERE workspace_id = $1 AND kind = 'broadcast' \
+            AND payload->'data'->'payload'->>'id' = $2::text \
+          ORDER BY id",
+    )
+    .bind(tenant.workspace_id)
+    .bind(message_id.to_string())
+    .fetch_all(&su)
+    .await
+    .expect("read the frames the relay will publish");
+    assert!(
+        published.len() > 1,
+        "the premise of this test: the answer arrived in slices, not in one write"
+    );
+    for frame in &published {
+        let shown = frame["data"]["payload"]["body"]
+            .as_str()
+            .unwrap_or_default();
+        assert!(
+            !shown.contains("oort:report") && !shown.contains("\"gates\""),
+            "a frame typed the report envelope out to the reader: {shown}"
+        );
+    }
+
+    // The LAST frame — the closing slice — is the one every client applies in
+    // place, and it is where the card has to be.
+    let last = published.last().expect("at least one frame");
+    assert_card_envelope(
+        &last["data"]["payload"]["props"],
+        run_id,
+        trigger_message_id,
+    );
+}
+
+/// **UXC-A 3 (H-2) — a report with no prose never shows its own envelope.**
+///
+/// The pathological but reachable shape: the model writes *only* the fence, and
+/// fills in neither `summary` nor `title` — just the gate table. Cutting the
+/// fence leaves nothing, and the code this test was written against fell back to
+/// committing `completion.text`, which is the raw ```oort:report JSON. The
+/// channel got the envelope as prose **and** no card: both halves wrong at once.
+///
+/// The card is the whole message here, so it commits with no body at all
+/// (`message.body` is nullable; the core reads a null body as absent). Goes red
+/// if the fallback ever reaches for the raw turn text again, or if the card is
+/// dropped when there is no sentence to hang it under.
+#[tokio::test]
+#[ignore = "requires DATABASE_URL to a throwaway pgvector/pg18 database"]
+async fn uxc_a_3_a_report_without_prose_never_commits_its_own_envelope() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    settle_residual_worker_jobs(&su).await;
+    let tenant = seed_tenant(&su).await;
+
+    let (run_id, trigger_message_id, _job_id) =
+        enqueue_mention_turn(&su, &tenant, tenant.agent_id, "@hermes 게이트만 돌려줘").await;
+
+    // No prose, no summary, no title — a gates-only envelope and nothing else.
+    let gates_only = "```oort:report\n\
+{\"gates\":[{\"surface\":\"엔진\",\"checks\":[{\"label\":\"빌드\",\"outcome\":\"pass\"},\
+                                             {\"label\":\"테스트\",\"outcome\":\"fail\",\"detail\":\"1 실패\"}]}]}\n```";
+    let provider = Arc::new(MockChatProvider::scripted([(
+        "게이트만 돌려줘",
+        gates_only,
+    )]));
+    let worker = build_worker(provider.clone(), base_config()).await;
+    let stats = worker.drain_once().await.expect("drain");
+    assert_eq!(stats.answered, 1);
+
+    let messages = agent_messages(&su, &tenant, tenant.agent_id).await;
+    assert_eq!(messages.len(), 1, "one turn, one message");
+    let (message_id, _seq, body, props) = messages.into_iter().next().unwrap();
+
+    // 1. The envelope is nowhere in the text. This is the whole point.
+    assert!(
+        !body.contains("oort:report") && !body.contains("\"gates\"") && !body.contains("outcome"),
+        "the report envelope was committed as the channel body: {body}"
+    );
+    // …and with no sentence of the model's to stand above the card, there is no
+    // body at all rather than one the server made up.
+    let stored_body: Option<String> = sqlx::query_scalar("SELECT body FROM message WHERE id = $1")
+        .bind(message_id)
+        .fetch_one(&su)
+        .await
+        .expect("read body");
+    assert_eq!(
+        stored_body, None,
+        "a gates-only report is a card with no prose — the server writes no sentence of its own"
+    );
+
+    // 2. The card is still there. Dropping it would trade one failure for another.
+    assert_eq!(props["kind"], json!("completion_report"));
+    assert_eq!(props["run_id"], json!(run_id));
+    assert_eq!(props["trigger_message_id"], json!(trigger_message_id));
+    assert_eq!(
+        props["gates"][0]["checks"][1]["outcome"],
+        json!("fail"),
+        "the failing gate survives verbatim — the card exists to carry exactly this"
+    );
+
+    // 3. The relay publishes the same thing, envelope-free.
+    let broadcast: Value = sqlx::query_scalar(
+        "SELECT payload FROM outbox \
+          WHERE workspace_id = $1 AND kind = 'broadcast' \
+            AND payload->'data'->'payload'->>'id' = $2::text \
+          ORDER BY id DESC LIMIT 1",
+    )
+    .bind(tenant.workspace_id)
+    .bind(message_id.to_string())
+    .fetch_one(&su)
+    .await
+    .expect("read broadcast");
+    let published = &broadcast["data"]["payload"];
+    assert!(
+        !published["body"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("oort:report"),
+        "the relay would have published the envelope as prose"
+    );
+    assert_eq!(published["props"]["kind"], json!("completion_report"));
+
+    // 4. The elapsed the card prints is measured on the DATABASE's clock (L-1),
+    //    not this host's, so it cannot carry worker↔Postgres skew.
+    let elapsed = props["elapsed_ms"].as_i64().expect("a measured elapsed");
+    let db_elapsed: i64 = sqlx::query_scalar(
+        "SELECT (EXTRACT(EPOCH FROM (now() - started_at)) * 1000)::bigint \
+           FROM agent_run WHERE id = $1",
+    )
+    .bind(run_id)
+    .fetch_one(&su)
+    .await
+    .expect("read the run's own elapsed");
+    assert!(
+        elapsed >= 0 && (db_elapsed - elapsed).abs() < 60_000,
+        "elapsed_ms ({elapsed}) must track the database's own clock ({db_elapsed})"
+    );
 }

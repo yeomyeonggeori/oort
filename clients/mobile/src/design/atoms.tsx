@@ -170,6 +170,26 @@ export function PrimaryButton({
   testID,
 }: {
   label: string;
+  /**
+   * 진행 중에 라벨을 대체하는 낱말. **이 컴포넌트의 지역 관례는 맨몸이다**
+   * (「저장 중」): 이 버튼은 낱말 옆에서 `ActivityIndicator` 를 함께 돌리므로,
+   * 말줄임표(U+2026)까지 붙이면 같은 사실을 두 자리에서 말한다. 그것이 여기서
+   * `busyLabel` 에 말줄임을 넘기지 않는 이유다.
+   *
+   * **레포 전체의 규칙은 아니다** (#1511 회전 1). 앞 판의 이 주석은 「말줄임표는
+   * 스피너가 없는 자리의 진행 신호」라는 일반 판정을 세웠는데, 트리를 재 보면
+   * 그렇지 않다 — 스피너 없이 맨몸인 자리가 다수이고 말줄임은 소수 잔량이다
+   * (2026-08-19 AST 실측, 렌더 문자열만: 맨몸 웹 100·폰 6·코어 49 / 말줄임
+   * 웹 6·폰 7·코어 3 = 16. 맨몸 쪽 수에는 「작업 중」 같은 상태 낱말도 섞여
+   * 있어 상한으로 읽어야 하지만, 말줄임 16 은 정확한 잔량이다). 스피너 없이
+   * 맨몸인 자리는 공유 프리미티브에도 있다: 웹 `SettingsFields` 의 기본
+   * 「저장 중」, `InlineBanner` 의 `actionBusy`(스피너를 그리지 않는다), 그리고
+   * 코어 `CANCEL_BUSY_LABEL` 을 스피너 없이 렌더하는 폰 `StopTurnControl`.
+   *
+   * 그래서 웹 `ConnectPage` 가 「참여 중…」이고 폰이 「참여 중」인 것은 정책의
+   * 결과가 아니라 **관측된 갈림**이다. 잔량 16 을 한 관례로 모을지는 이 goal
+   * 에서 정하지 않았다(별도 goal 후보 — 카피 변경이라 표면마다 판단이 든다).
+   */
   busyLabel?: string;
   onPress: () => void;
   disabled?: boolean;
@@ -385,6 +405,22 @@ export function NoticeBlock({
       </View>
     </View>
   );
+}
+
+/**
+ * 여러 줄로 접히는 **완성된 한국어 본문 문장**. iOS 기본 줄바꿈은 한글을 글자
+ * 단위로 끊어 마지막 한 음절이 둘째 줄에 홀로 남는 결함이 있다(위 `NoticeBlock`
+ * 주석의 실측). `NoticeBlock` 이 그 상자에 `hangul-word` 를 든 것과 같은 이유로,
+ * 상자 밖에서 그리는 본문 문장도 같은 규칙을 든다 — 규칙이 한 자리에 있지 않으면
+ * 같은 앱이 문장마다 다르게 끊긴다(리뷰 M2).
+ *
+ * 낱말·라벨·숫자 카운트에는 쓰지 않는다 — 어절 우선 줄바꿈은 문장에서만 뜻이 있다.
+ * `style`·`numberOfLines`·`testID` 등 `Text` 의 모든 props 를 그대로 받는다.
+ */
+export function Sentence(
+  props: React.ComponentProps<typeof Text>,
+): React.JSX.Element {
+  return <Text lineBreakStrategyIOS="hangul-word" {...props} />;
 }
 
 /** An inline failure attached to a form, rather than a whole-surface state. */

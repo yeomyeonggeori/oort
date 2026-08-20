@@ -33,7 +33,9 @@
 //! whole execution is a local Postgres lifecycle transition. That is one of the
 //! three properties that chose this tool — see `momo_agent::tools`.
 
-use momo_agent::tools::{ToolCall, ToolResult, WORK_SESSION_END, WORK_SESSION_SPAWN};
+use momo_agent::tools::{
+    ToolCall, ToolResult, WORK_SESSION_END, WORK_SESSION_LOGIN_HANDOFF, WORK_SESSION_SPAWN,
+};
 use momo_db::{DbError, PgConnection, PgPool};
 use momo_messaging::{cent_channel, send_message_in_tx, MessageType, NewMessage};
 use momo_outbox::{emit_outbox, OutboxKind};
@@ -46,10 +48,10 @@ use momo_t3::{
     acquire_slot_in_tx, allocate_uuid_v7, card_props, cloud_host_id_for_host,
     cloud_host_id_for_host_in_tx, cloud_host_id_for_session_in_tx,
     create_work_session_with_id_in_tx, end_work_session_in_tx, is_active_channel_member_in_tx,
-    lifecycle_payload, lock_work_session_detail_in_tx, resolve_cloud_host_id, start_usage_in_tx,
-    terminate_in_tx, update_session_card_props_in_tx, with_t3_lifecycle_tx,
-    work_session_scope_in_tx, work_tool_is_enabled_in_tx, NewWorkSession, T3Error, T3LockLadder,
-    TerminationReason,
+    latest_control_window_in_tx, lifecycle_payload, lock_work_session_detail_in_tx,
+    resolve_cloud_host_id, start_usage_in_tx, terminate_in_tx, update_session_card_props_in_tx,
+    with_t3_lifecycle_tx, work_session_scope_in_tx, work_tool_is_enabled_in_tx,
+    ControlWindowEndReason, NewWorkSession, T3Error, T3LockLadder, TerminationReason,
 };
 use uuid::Uuid;
 
@@ -107,6 +109,9 @@ pub async fn execute(
         name if name == momo_agent::tools::normalize(WORK_SESSION_SPAWN) => {
             spawn_session(pool, context, call).await?
         }
+        name if name == momo_agent::tools::normalize(WORK_SESSION_LOGIN_HANDOFF) => {
+            login_handoff(pool, context, call).await?
+        }
         // Unreachable while the catalog has one entry, and deliberately not a
         // `panic!`: a catalog entry added without an executor must degrade to a
         // message, never take the worker down.
@@ -117,6 +122,109 @@ pub async fn execute(
     };
 
     write_result(pool, context, result).await
+}
+
+/// `work.session.login_handoff` — report how the person's intervention ended
+/// (LIVE-4 / ADR-0004 증보 3 D3).
+///
+/// ## What "executing" means for a tool whose action is a person
+///
+/// Nothing here opens a window, dials a screen or touches a run. By the time
+/// this runs a human has already decided — approving the card is what resumed
+/// the agent — and the only thing left to do is tell the model **which of the
+/// three boundary endings happened**, because they are not interchangeable:
+///
+/// * `returned` and a bare approval both mean the person said they finished.
+///   The design canon's 명시 버튼 주동선 makes those the same signal, and the
+///   card a reader is looking at says the same thing, so this must not disagree
+///   with it.
+/// * `expired` means the lease lapsed with nobody saying they were done. That is
+///   「중단·완료 불확실」 and the sentence has to forbid the assumption, or the
+///   agent walks on across a login screen it never got past.
+/// * `session_ended` means there is nothing left to go back to.
+///
+/// ## Why it reads the ledger rather than trusting the decision
+///
+/// The approval only records that a person pressed a button. Whether a control
+/// window stood, and how it closed, is a fact only 076 holds — and the ledger is
+/// the SoT, the boundary envelope merely its transport. A tool result derived
+/// from the decision alone would report `returned` for a window that had
+/// actually lapsed underneath it.
+///
+/// Every settled branch is `ToolResult::ok`. None of them is a tool failure: an
+/// intervention that lapsed is news the model must act on, not an error it
+/// should retry, and marking it `is_error` would paint a person walking away as
+/// a fault (ADR-0132's rule about silence, one surface over).
+async fn login_handoff(
+    pool: &PgPool,
+    context: &ToolContext,
+    call: &ToolCall,
+) -> Result<ToolResult, DbError> {
+    let Some(session_id) = call
+        .arguments
+        .get("session_id")
+        .and_then(serde_json::Value::as_str)
+        .and_then(|raw| Uuid::parse_str(raw.trim()).ok())
+    else {
+        return Ok(ToolResult::error(
+            &call.call_id,
+            "work.session.login_handoff requires a `session_id` argument containing a UUID.",
+        ));
+    };
+
+    let workspace_id = context.workspace_id;
+    let window = momo_db::with_tenant_tx(pool, workspace_id, move |conn| {
+        Box::pin(async move { latest_control_window_in_tx(conn, workspace_id, session_id).await })
+    })
+    .await;
+
+    let window = match window {
+        Ok(window) => window,
+        // A read that failed says so. Guessing 「완료」 here would be the worst
+        // possible direction, for exactly the reason `expired` has its own
+        // sentence.
+        Err(_) => {
+            return Ok(ToolResult::error(
+                &call.call_id,
+                "Could not read the control window ledger for this session. \
+                 Re-check the screen before assuming the sign-in completed.",
+            ))
+        }
+    };
+
+    let output = match window {
+        None => {
+            "The person reported the intervention complete. No control window was opened in \
+             this deployment, so continue from the session's own screen state."
+        }
+        Some(window) if window.ended_at_ms.is_none() => {
+            "A person still holds this session's screen. Wait for the boundary event before \
+             acting on the session."
+        }
+        Some(window) => match window.end_reason {
+            Some(ControlWindowEndReason::Returned) => {
+                "The person finished and handed the screen back. Continue as signed in."
+            }
+            Some(ControlWindowEndReason::Expired) => {
+                "The handoff lapsed with no completion signal. Do NOT assume the sign-in \
+                 succeeded: re-check the screen and only then continue."
+            }
+            Some(ControlWindowEndReason::SessionEnded) => {
+                "The work session ended while the handoff was open, so the sign-in did not \
+                 complete here."
+            }
+            // 076's CHECK makes an ended window without a reason
+            // unrepresentable. Answering the unreachable branch with the
+            // cautious sentence rather than the confident one keeps the failure
+            // direction right if that ever stops being true.
+            None => {
+                "The handoff ended without a recorded reason. Re-check the screen before \
+                 assuming the sign-in succeeded."
+            }
+        },
+    };
+
+    Ok(ToolResult::ok(&call.call_id, output))
 }
 
 /// `work.session.end` — end a work session, settling its T3 ledger.

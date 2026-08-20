@@ -99,11 +99,11 @@
 //
 // 10은 픽스처로 붉힐 수 있으므로 위의 이름 있는 seam(LEDGER)을 갖는다.
 
-import { spawn } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
+import { startGuardedPreview } from "./preview-guard.mjs";
 
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const port = Number(process.env.WORKSTREAM_GATE_PORT || 5188);
@@ -314,10 +314,6 @@ function json(route, body, status = 200) {
   });
 }
 
-function wait(ms) {
-  return new Promise((resolveWait) => setTimeout(resolveWait, ms));
-}
-
 /** Mutable ledger: the takeover has to be observable as a state change. */
 function newState(mode) {
   return {
@@ -416,6 +412,7 @@ function asWorkSession(run) {
     observation: "open",
     observerGrantCount: 0,
     remoteAttachAvailable: false,
+    remoteDisplayAvailable: false,
     startedAtMs: run.startedAtMs,
     ...(run.endedAtMs === undefined ? {} : { endedAtMs: run.endedAtMs }),
     ...(run.resumedFromSessionId === undefined
@@ -608,6 +605,7 @@ async function installRoutes(context, state) {
         observation: "open",
         observerGrantCount: 0,
         remoteAttachAvailable: false,
+        remoteDisplayAvailable: false,
         startedAtMs: Date.now(),
         resumedFromSessionId: state.resumeSessionId,
       };
@@ -643,19 +641,6 @@ async function installRoutes(context, state) {
 
     return json(route, {});
   });
-}
-
-async function waitForServer() {
-  const deadline = Date.now() + 30_000;
-  while (Date.now() < deadline) {
-    try {
-      if ((await fetch(origin)).ok) return;
-    } catch {
-      // Preview is still starting.
-    }
-    await wait(200);
-  }
-  throw new Error("workstream preview server never came up");
 }
 
 async function login(page) {
@@ -1994,14 +1979,13 @@ async function main() {
   if (!existsSync(resolve(webRoot, "dist/index.html"))) {
     throw new Error("dist/ is missing. Run npm run build first.");
   }
-  const server = spawn(
-    resolve(webRoot, "node_modules/.bin/vite"),
-    ["preview", "--port", String(port), "--strictPort", "--host", "127.0.0.1"],
-    { cwd: webRoot, stdio: "ignore" }
-  );
+  const server = await startGuardedPreview({
+    webRoot,
+    port,
+    portEnvVar: "WORKSTREAM_GATE_PORT",
+  });
   let captured = [];
   try {
-    await waitForServer();
     const browser = await chromium.launch();
     try {
       await assertListAndHistory(browser);
@@ -2018,7 +2002,7 @@ async function main() {
       await browser.close();
     }
   } finally {
-    server.kill("SIGTERM");
+    await server.stop();
   }
   console.log(
     "GATE PASS workstream: list rows and server-side status filter, A·B run history with"

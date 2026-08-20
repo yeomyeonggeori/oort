@@ -82,11 +82,11 @@
 // 리뷰어에게 요구하지 않으므로 반복 실행할 수 있다. 반대로 **조건 분기를 부수는**
 // 쪽의 red proof는 src/features/inbox/approvalsPanel.test.ts가 갖는다.
 
-import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
+import { startGuardedPreview } from "./preview-guard.mjs";
 
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const port = Number(process.env.APPROVALS_GATE_PORT || 5188);
@@ -520,19 +520,6 @@ async function installRoutes(context, scenario, delayMs) {
   });
 
   return state;
-}
-
-async function waitForServer() {
-  const deadline = Date.now() + 30_000;
-  while (Date.now() < deadline) {
-    try {
-      if ((await fetch(origin)).ok) return;
-    } catch {
-      // preview is still starting
-    }
-    await wait(200);
-  }
-  throw new Error("approvals preview server never came up");
 }
 
 async function openInbox(page) {
@@ -1292,13 +1279,12 @@ async function main() {
   if (!existsSync(resolve(webRoot, "dist/index.html"))) {
     throw new Error("dist/ is missing. Run npm run build first.");
   }
-  const server = spawn(
-    resolve(webRoot, "node_modules/.bin/vite"),
-    ["preview", "--port", String(port), "--strictPort", "--host", "127.0.0.1"],
-    { cwd: webRoot, stdio: "ignore" }
-  );
+  const server = await startGuardedPreview({
+    webRoot,
+    port,
+    portEnvVar: "APPROVALS_GATE_PORT",
+  });
   try {
-    await waitForServer();
     const browser = await chromium.launch();
     try {
       // 세 가지 지연으로 목록을 돌린다: 같은 tick에 답하는 목은 아무것도 증명하지
@@ -1323,7 +1309,7 @@ async function main() {
       await browser.close();
     }
   } finally {
-    server.kill("SIGTERM");
+    await server.stop();
   }
   console.log(
     "GATE PASS: 결정 대기 탭 · 대기 행에만 결정 컨트롤 · 2단 무장과 초점 이동 ·"

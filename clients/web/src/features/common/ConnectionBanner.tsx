@@ -107,7 +107,7 @@ export function ConnectionBanner() {
       testId="connection-banner"
       {...(canRetry
         ? {
-            actionLabel: retry === "running" ? "연결하는 중" : "다시 연결",
+            actionLabel: retry === "running" ? "연결 중" : "다시 연결",
             actionBusy: retry === "running",
             onAction: () => {
               // A second press during a dial in flight would tear down the

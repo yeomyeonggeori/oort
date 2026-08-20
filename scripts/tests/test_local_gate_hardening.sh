@@ -13,6 +13,20 @@ fail() {
   exit 1
 }
 
+# The skew fixtures below measure what check_branch_skew.sh and the pre-push
+# hook do *by default*, so this harness must not inherit the caller's overrides.
+# A worker whose branch integrates into origin/track/engine has to pass
+# MOMO_GATE_SKEW_REF (or MOMO_GATE_SKIP_SKEW) to get a clean gate run at all,
+# and local_gate.sh exports it straight into here — where it silently replaced
+# the measurement with the override: MOMO_GATE_SKEW_REF made the negative
+# fixture fail on a ref the throwaway repo has never heard of, and
+# MOMO_GATE_SKIP_SKEW turned two must-be-red fixtures green. A harness that
+# reports the caller's environment instead of the code is worse than no harness.
+# The one fixture that *does* exercise the reviewed exception sets the variable
+# inline on its own command line, so it is unaffected. (#1525, found while
+# producing that ticket's gate evidence on a track-based branch.)
+unset MOMO_GATE_SKEW_REF MOMO_GATE_SKIP_SKEW
+
 # The canonical alignment preflight must be an unconditional consumer, not a
 # helper reachable only from selected profiles. Keep exactly one top-level call
 # before the profile switch; deleting or moving it turns this fixture red.
@@ -37,6 +51,18 @@ init_repo() {
   git -C "$repo" branch -M main
 }
 
+# The skew fixtures below assert what check_branch_skew.sh does *by default*,
+# so they must not inherit the caller's overrides. A worker whose branch
+# integrates into origin/track/engine has to pass MOMO_GATE_SKEW_REF (or
+# MOMO_GATE_SKIP_SKEW) to get a clean gate run at all, and local_gate.sh exports
+# that straight into this harness — which then measured the override instead of
+# the behaviour, turning both the negative and the positive fixture into false
+# results. Strip them at the call site rather than at the top of the file: the
+# one call on line ~71 that *does* set MOMO_GATE_SKIP_SKEW is exercising the
+# reviewed-exception path on purpose. (#1525 — found while producing this
+# ticket's own gate evidence on a track-based branch.)
+skew_default() { env -u MOMO_GATE_SKEW_REF -u MOMO_GATE_SKIP_SKEW "$@"; }
+
 # Negative skew fixture: upstream and feature touch disjoint files.
 NEGATIVE_REPO="$SANDBOX/skew-negative"
 init_repo "$NEGATIVE_REPO"
@@ -50,7 +76,7 @@ git -C "$NEGATIVE_REPO" add upstream.txt
 git -C "$NEGATIVE_REPO" commit -qm upstream
 git -C "$NEGATIVE_REPO" update-ref refs/remotes/origin/main HEAD
 git -C "$NEGATIVE_REPO" checkout -q feature
-(cd "$NEGATIVE_REPO" && "$REPO_ROOT/scripts/check_branch_skew.sh") >/dev/null \
+(cd "$NEGATIVE_REPO" && skew_default "$REPO_ROOT/scripts/check_branch_skew.sh") >/dev/null \
   || fail "disjoint upstream/feature changes were rejected"
 
 # Positive skew fixture: both sides modify the same path after merge-base.
@@ -64,11 +90,11 @@ printf 'upstream edit\n' >"$POSITIVE_REPO/shared.txt"
 git -C "$POSITIVE_REPO" commit -qam upstream
 git -C "$POSITIVE_REPO" update-ref refs/remotes/origin/main HEAD
 git -C "$POSITIVE_REPO" checkout -q feature
-if (cd "$POSITIVE_REPO" && "$REPO_ROOT/scripts/check_branch_skew.sh") >"$SANDBOX/skew.out" 2>&1; then
+if (cd "$POSITIVE_REPO" && skew_default "$REPO_ROOT/scripts/check_branch_skew.sh") >"$SANDBOX/skew.out" 2>&1; then
   fail "overlapping upstream/feature change did not fail"
 fi
 grep -Fq 'shared.txt' "$SANDBOX/skew.out" || fail "skew failure omitted overlapping path"
-(cd "$POSITIVE_REPO" && MOMO_GATE_SKIP_SKEW='fixture reviewed exception' "$REPO_ROOT/scripts/check_branch_skew.sh") >/dev/null \
+(cd "$POSITIVE_REPO" && skew_default env MOMO_GATE_SKIP_SKEW='fixture reviewed exception' "$REPO_ROOT/scripts/check_branch_skew.sh") >/dev/null \
   || fail "reasoned skew override was rejected"
 
 # Exercise the optional hook as a final consumer, with a local bare remote so
@@ -87,7 +113,7 @@ cp "$REPO_ROOT/scripts/check_track_alignment.sh" "$POSITIVE_REPO/scripts/"
 cp "$REPO_ROOT/scripts/hooks/pre-push" "$POSITIVE_REPO/scripts/hooks/"
 feature_sha="$(git -C "$POSITIVE_REPO" rev-parse feature)"
 if printf 'refs/heads/feature %s refs/heads/feature %040d\n' "$feature_sha" 0 | \
-  (cd "$POSITIVE_REPO" && scripts/hooks/pre-push) >"$SANDBOX/pre-push.out" 2>&1; then
+  (cd "$POSITIVE_REPO" && skew_default scripts/hooks/pre-push) >"$SANDBOX/pre-push.out" 2>&1; then
   fail "pre-push final consumer did not reject overlapping changes"
 fi
 grep -Fq 'shared.txt' "$SANDBOX/pre-push.out" || fail "pre-push failure omitted overlapping path"
@@ -304,7 +330,25 @@ mkdir -p "$SPEC_SANDBOX/fakebin"
 
 # `aliases:` 를 쓰는 인자 조합만 거부하고 나머지는 실제 ruby 에 위임하는 shim.
 # psych 3(= /usr/bin/ruby 2.6) 의 ArgumentError 와 같은 거절이다.
-REAL_RUBY="$(command -v ruby 2>/dev/null || true)"
+#
+# #1376: 이 픽스처가 증명하는 것은 라이브러리의 **ruby 갈래 안에서의 강등**이므로
+# shim 의 밑감은 "`aliases:` 키워드만 없고 스펙 자체는 읽을 수 있는" ruby 여야
+# 한다. 밑감을 `command -v ruby` 로 잡으면, 게이트가 실제로 스텝을 실행하는
+# `bash -lc` 로그인 셸에서 macOS 시스템 ruby 2.6 이 잡히는데 그 psych 는 08-13 에
+# 들어온 콜론 스코프 HAP enum(docs/api/openapi.yaml)을 아예 파싱하지 못한다.
+# 그 밑감으로는 이 픽스처가 강등이 아니라 **밑감의 무능** 때문에 빨개져서 재는
+# 대상이 바뀐다(#1185 헤더의 "263332 바이트 동일" 실측도 그 enum 이 들어온 뒤로는
+# 2.6 에서 성립하지 않는다 — psych 3 갈래는 오늘의 스펙에서 죽은 갈래다).
+# 그래서 밑감도 자격 실측으로 고른다. 라이브러리가 인터프리터를 고르는 규율과
+# 같은 규율이고, 자격 있는 밑감이 없으면 조용히 넘기지 않고 이유를 대고 SKIP 한다.
+REAL_RUBY=""
+for spec_ruby_cand in "${MOMO_GATE_RUBY:-}" ${MOMO_GATE_RUBY_CANDIDATES:-ruby /opt/homebrew/opt/ruby/bin/ruby /usr/local/opt/ruby/bin/ruby /opt/homebrew/bin/ruby}; do
+  [ -n "$spec_ruby_cand" ] || continue
+  command -v "$spec_ruby_cand" >/dev/null 2>&1 || continue
+  "$spec_ruby_cand" -ryaml -e 'YAML.load_file(ARGV[0])' "$SPEC_SRC" >/dev/null 2>&1 || continue
+  REAL_RUBY="$(command -v "$spec_ruby_cand")"
+  break
+done
 if [ -n "$REAL_RUBY" ]; then
   {
     printf '#!/usr/bin/env bash\n'
@@ -354,7 +398,7 @@ if [ -n "$REAL_RUBY" ]; then
   fi
   echo "[local-gate-hardening-test] PASS spec->json psych3 강등 갈래 + 갈래 고지 (#1185)"
 else
-  echo "[local-gate-hardening-test] SKIP spec->json ruby 강등 픽스처 (ruby 없음)"
+  echo "[local-gate-hardening-test] SKIP spec->json ruby 강등 픽스처 (스펙을 읽을 수 있는 ruby 가 없다 — #1376: brew install ruby, 또는 MOMO_GATE_RUBY 로 지목)"
 fi
 
 # 리더가 하나도 없으면 조용히 넘어가지 않고 갈래별 이유를 대고 죽는다.

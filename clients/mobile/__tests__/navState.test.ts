@@ -4,6 +4,7 @@ import {
   tabLabel,
   TABS,
   type NavState,
+  type OpenHostedConnection,
 } from '../src/nav/state';
 
 // =============================================================================
@@ -22,6 +23,7 @@ describe('the four tabs', () => {
       search: null,
       agent: null,
       workSession: null,
+      hosted: null,
     });
   });
 
@@ -53,6 +55,7 @@ describe('a conversation covers the shell', () => {
       search: null,
       agent: null,
       workSession: null,
+      hosted: null,
     };
     const next = navReducer(onInbox, {type: 'openConversation', conversation: OPEN});
     expect(next).toEqual({
@@ -61,6 +64,7 @@ describe('a conversation covers the shell', () => {
       search: null,
       agent: null,
       workSession: null,
+      hosted: null,
     });
   });
 
@@ -73,6 +77,7 @@ describe('a conversation covers the shell', () => {
       search: null,
       agent: null,
       workSession: null,
+      hosted: null,
     };
     expect(navReducer(fromInbox, {type: 'back'})).toEqual({
       tab: 'inbox',
@@ -80,6 +85,7 @@ describe('a conversation covers the shell', () => {
       search: null,
       agent: null,
       workSession: null,
+      hosted: null,
     });
   });
 
@@ -95,6 +101,7 @@ describe('a conversation covers the shell', () => {
       search: null,
       agent: null,
       workSession: null,
+      hosted: null,
     };
     const second = {channelId: 'CH-2', title: '김인턴'};
     const next = navReducer(first, {type: 'openConversation', conversation: second});
@@ -113,6 +120,7 @@ describe('a conversation covers the shell', () => {
       search: null,
       agent: null,
       workSession: null,
+      hosted: null,
     };
     expect(navReducer(covered, {type: 'selectTab', tab: 'inbox'})).toEqual({
       tab: 'inbox',
@@ -120,6 +128,7 @@ describe('a conversation covers the shell', () => {
       search: null,
       agent: null,
       workSession: null,
+      hosted: null,
     });
   });
 
@@ -130,6 +139,7 @@ describe('a conversation covers the shell', () => {
       search: null,
       agent: null,
       workSession: null,
+      hosted: null,
     };
     expect(navReducer(covered, {type: 'selectTab', tab: 'channels'})).toEqual(
       INITIAL_NAV,
@@ -151,6 +161,7 @@ describe('one agent, opened from the 에이전트 tab', () => {
       search: null,
       agent: null,
       workSession: null,
+      hosted: null,
     };
     expect(navReducer(onAgents, {type: 'openAgent', agent: AGENT})).toEqual({
       tab: 'agents',
@@ -158,6 +169,7 @@ describe('one agent, opened from the 에이전트 tab', () => {
       search: null,
       agent: AGENT,
       workSession: null,
+      hosted: null,
     });
   });
 
@@ -170,6 +182,7 @@ describe('one agent, opened from the 에이전트 tab', () => {
       search: null,
       agent: AGENT,
       workSession: null,
+      hosted: null,
     };
     const withDm = navReducer(open, {type: 'openConversation', conversation: OPEN});
     expect(withDm.agent).toEqual(AGENT);
@@ -187,6 +200,7 @@ describe('one agent, opened from the 에이전트 tab', () => {
       search: null,
       agent: AGENT,
       workSession: null,
+      hosted: null,
     };
     expect(navReducer(open, {type: 'selectTab', tab: 'agents'})).toEqual({
       tab: 'agents',
@@ -194,6 +208,7 @@ describe('one agent, opened from the 에이전트 tab', () => {
       search: null,
       agent: null,
       workSession: null,
+      hosted: null,
     });
   });
 });
@@ -208,6 +223,7 @@ describe('one work session, opened from the 작업 tab', () => {
       search: null,
       agent: null,
       workSession: null,
+      hosted: null,
     };
     const detail = navReducer(onWork, {
       type: 'openWorkSession',
@@ -230,6 +246,7 @@ describe('one work session, opened from the 작업 tab', () => {
       search: null,
       agent: null,
       workSession: WORK,
+      hosted: null,
     };
     expect(navReducer(detail, {type: 'selectTab', tab: 'work'})).toEqual({
       tab: 'work',
@@ -237,7 +254,69 @@ describe('one work session, opened from the 작업 tab', () => {
       search: null,
       agent: null,
       workSession: null,
+      hosted: null,
     });
+  });
+});
+
+describe('호스티드 연결, opened from the 에이전트 tab (goal HAP-UX3)', () => {
+  const CONNECTION: OpenHostedConnection = {
+    connectionId: 'dddddddd-1111-4111-8111-dddddddddddd',
+    agentMemberId: 'cccccccc-1111-4111-8111-cccccccccccc',
+    title: '김인턴',
+  };
+
+  const onAgents: NavState = {
+    tab: 'agents',
+    conversation: null,
+    search: null,
+    agent: null,
+    workSession: null,
+    hosted: null,
+  };
+
+  it('opens the list over the tab it was reached from', () => {
+    const next = navReducer(onAgents, {type: 'openHostedList'});
+    expect(next).toEqual({...onAgents, hosted: {kind: 'list'}});
+  });
+
+  it('is exclusive with 「one agent」 — opening the list closes an open agent', () => {
+    const onAgent: NavState = {
+      ...onAgents,
+      agent: {
+        memberId: CONNECTION.agentMemberId,
+        displayName: '김인턴',
+        handle: 'kim-intern',
+      },
+    };
+    expect(navReducer(onAgent, {type: 'openHostedList'})).toEqual({
+      ...onAgents,
+      hosted: {kind: 'list'},
+    });
+  });
+
+  it('peels the detail back to the list, and only then closes the list', () => {
+    const list = navReducer(onAgents, {type: 'openHostedList'});
+    const detail = navReducer(list, {
+      type: 'openHostedConnection',
+      connection: CONNECTION,
+    });
+    expect(detail.hosted).toEqual({kind: 'detail', connection: CONNECTION});
+    const backToList = navReducer(detail, {type: 'back'});
+    expect(backToList.hosted).toEqual({kind: 'list'});
+    const closed = navReducer(backToList, {type: 'back'});
+    expect(closed.hosted).toBeNull();
+    expect(closed).toEqual(onAgents);
+  });
+
+  it('is cleared by a tab selection, list or detail', () => {
+    const detail = navReducer(
+      navReducer(onAgents, {type: 'openHostedList'}),
+      {type: 'openHostedConnection', connection: CONNECTION},
+    );
+    expect(navReducer(detail, {type: 'selectTab', tab: 'agents'})).toEqual(
+      onAgents,
+    );
   });
 });
 
@@ -253,6 +332,7 @@ describe('sign-out', () => {
         handle: 'kim-intern',
       },
       workSession: null,
+      hosted: null,
     };
     expect(navReducer(deep, {type: 'reset'})).toEqual(INITIAL_NAV);
   });

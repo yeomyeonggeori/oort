@@ -1,5 +1,5 @@
 import React, {useCallback, useMemo} from 'react';
-import {FlatList, StyleSheet, Text, View} from 'react-native';
+import {FlatList, Pressable, StyleSheet, Text, View} from 'react-native';
 import {
   EmptyState,
   ErrorState,
@@ -10,7 +10,7 @@ import {
   TapRow,
 } from '../design/atoms';
 import {useRefreshControl} from '../design/refresh';
-import {font, radius, space, type Palette} from '../design/tokens';
+import {font, line, radius, slopTo, space, type Palette} from '../design/tokens';
 import {useStyles} from '../design/theme';
 import {RUNNING_SESSION_PILL} from '@momo/core/features/agents/agentOps';
 import {
@@ -85,12 +85,19 @@ import {queryFailureDetail} from './SidebarScreen';
 
 export default function AgentsScreen({
   onOpenAgent,
+  onOpenHostedList,
 }: {
   onOpenAgent: (agent: {
     memberId: string;
     displayName: string;
     handle: string;
   }) => void;
+  /**
+   * 호스티드 연결 관전으로 들어가는 문 (goal HAP-UX3). 이 탭에 두는 이유는 그
+   * 연결들의 전용 에이전트가 곧 이 목록의 멤버이기 때문이다 — 「Bring your hosted
+   * agent」로 들인 것도 결국 에이전트다.
+   */
+  onOpenHostedList: () => void;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const {workspaceId} = useSession();
@@ -170,6 +177,17 @@ export default function AgentsScreen({
         title="에이전트"
         subtitle="이 워크스페이스에서 일하는 에이전트"
         titleTestID="agents-title"
+        right={
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="호스티드 연결 보기"
+            onPress={onOpenHostedList}
+            hitSlop={slopTo(line.meta)}
+            style={({pressed}) => [styles.hostedEntry, pressed && styles.hostedEntryPressed]}
+            testID="agents-open-hosted">
+            <Text style={styles.hostedEntryLabel}>호스티드 연결</Text>
+          </Pressable>
+        }
       />
 
       {/* 끊긴 것을 화면에서 말한다 (2R H2). 배지가 회색으로 내려앉는 것만으로는
@@ -332,4 +350,13 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     borderColor: color.okBorder,
   },
   workingPillText: {fontSize: font.meta, color: color.ok, fontWeight: '600'},
+  hostedEntry: {
+    paddingHorizontal: space.sm,
+    paddingVertical: space.xs,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: color.border,
+  },
+  hostedEntryPressed: {backgroundColor: color.surfacePressed},
+  hostedEntryLabel: {fontSize: font.meta, color: color.accentText, fontWeight: '600'},
 });

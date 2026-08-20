@@ -59,7 +59,7 @@ use momo_agent::{
     validate_agent_profile, validated_config, AgentCreation, AgentProfile, AgentProfileSpec,
     AgentSpecInvalid, NewAgentMember,
 };
-use momo_auth::Principal;
+use momo_auth::{is_hosted_agent_activated_in_tx, Principal, HOSTED_CONNECTION_MANAGED_CODE};
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::PgConnection;
 use momo_messaging::active_workspace_role;
@@ -503,6 +503,31 @@ pub async fn put_pause(
                 .await?
                 {
                     return Ok(Err(rejection));
+                }
+                if !paused
+                    && matches!(
+                        is_hosted_agent_activated_in_tx(conn, workspace_id, agent_member_id)
+                            .await?,
+                        Some(false)
+                    )
+                {
+                    write_audit(
+                        conn,
+                        &AuditEntry::new(workspace_id, "hosted_agent.connection.resume_denied")
+                            .by(actor_member_id)
+                            .about(agent_member_id)
+                            .target("agent_profile", agent_member_id)
+                            .via_token(via_token_id)
+                            .with_schema(
+                                "momo.hosted_agent.connection.resume_denied.v1",
+                                json!({ "code": HOSTED_CONNECTION_MANAGED_CODE }),
+                            ),
+                    )
+                    .await?;
+                    return Ok(Err(ApiError::new(
+                        StatusCode::CONFLICT,
+                        HOSTED_CONNECTION_MANAGED_CODE,
+                    )));
                 }
                 let Some(stored) = set_agent_paused_in_tx(
                     conn,

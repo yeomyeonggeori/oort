@@ -117,6 +117,34 @@ export interface OpenWorkSession {
   sessionId: string;
 }
 
+/**
+ * One hosted connection, opened from the 호스티드 연결 list (goal HAP-UX3).
+ *
+ * Carries the title (the dedicated agent's name, disambiguated against the
+ * roster at tap time) for the same reason `OpenAgent` does: a header that
+ * re-derives it flickers on every roster refetch. The connectionId is what the
+ * detail read is keyed by; the agentMemberId re-resolves identity if the roster
+ * arrives late.
+ */
+export interface OpenHostedConnection {
+  connectionId: string;
+  agentMemberId: string;
+  title: string;
+}
+
+/**
+ * 호스티드 연결 관전 층 — 에이전트 탭에서 열리는 목록, 그 목록이 여는 상세.
+ *
+ * 한 필드에 두 겹을 담는다: 목록과 상세는 push 관계라 뒤로가기가 상세→목록→닫힘
+ * 으로 한 겹씩 벗겨져야 하고, 그 관계를 `null | list | detail` 로 적으면 `back`
+ * 이 그것을 그대로 읽는다. 작업 탭이 목록(탭)과 상세(층)로 나뉜 것과 같은 모양을,
+ * 탭이 없는 이 표면은 한 필드 안에서 낸다.
+ */
+export type HostedNav =
+  | null
+  | {kind: 'list'}
+  | {kind: 'detail'; connection: OpenHostedConnection};
+
 export interface NavState {
   tab: Tab;
   /** Pushed over the whole shell, or null when the tabs are visible. */
@@ -145,6 +173,14 @@ export interface NavState {
   agent: OpenAgent | null;
   /** 작업 탭의 목록 위, 그리고 그 상세가 여는 대화 아래. */
   workSession: OpenWorkSession | null;
+  /**
+   * 호스티드 연결 관전 — 에이전트 탭 위에 뜨는 목록/상세 (goal HAP-UX3).
+   *
+   * search·agent·workSession 과 **배타적**이다: 하나가 열리면 나머지는 닫힌다.
+   * 에이전트 탭에서 갈라져 나오는 두 갈래(한 에이전트로 들어가기 · 호스티드 연결
+   * 목록 보기)가 서로를 덮지 않게 하는 규칙이다.
+   */
+  hosted: HostedNav;
 }
 
 export const INITIAL_NAV: NavState = {
@@ -153,6 +189,7 @@ export const INITIAL_NAV: NavState = {
   search: null,
   agent: null,
   workSession: null,
+  hosted: null,
 };
 
 export type NavAction =
@@ -161,6 +198,8 @@ export type NavAction =
   | {type: 'openSearch'; initialQuery?: string}
   | {type: 'openAgent'; agent: OpenAgent}
   | {type: 'openWorkSession'; workSession: OpenWorkSession}
+  | {type: 'openHostedList'}
+  | {type: 'openHostedConnection'; connection: OpenHostedConnection}
   | {type: 'back'}
   | {type: 'reset'};
 
@@ -175,7 +214,8 @@ export function navReducer(state: NavState, action: NavAction): NavState {
         state.conversation === null &&
         state.search === null &&
         state.agent === null &&
-        state.workSession === null
+        state.workSession === null &&
+        state.hosted === null
       ) {
         return state;
       }
@@ -189,6 +229,7 @@ export function navReducer(state: NavState, action: NavAction): NavState {
         search: null,
         agent: null,
         workSession: null,
+        hosted: null,
       };
     case 'openConversation':
       return {...state, conversation: action.conversation};
@@ -198,21 +239,47 @@ export function navReducer(state: NavState, action: NavAction): NavState {
         search: {initialQuery: action.initialQuery ?? ''},
         agent: null,
         workSession: null,
+        hosted: null,
       };
     case 'openAgent':
-      return {...state, search: null, agent: action.agent, workSession: null};
+      return {
+        ...state,
+        search: null,
+        agent: action.agent,
+        workSession: null,
+        hosted: null,
+      };
     case 'openWorkSession':
       return {
         ...state,
         search: null,
         agent: null,
         workSession: action.workSession,
+        hosted: null,
       };
+    case 'openHostedList':
+      // The list is a sibling of 「one agent」 reached from the same tab, so it
+      // closes the same three layers those close among themselves.
+      return {
+        ...state,
+        search: null,
+        agent: null,
+        workSession: null,
+        hosted: {kind: 'list'},
+      };
+    case 'openHostedConnection':
+      // Opened FROM the list: the list stays the layer beneath, so 뒤로 from the
+      // detail returns to it rather than out to the tab.
+      return {...state, hosted: {kind: 'detail', connection: action.connection}};
     case 'back':
       // One step at a time, innermost first: a conversation opened FROM a search
       // result (or from an agent's own screen) goes back to where it was opened
       // from, not past it.
       if (state.conversation !== null) return {...state, conversation: null};
+      // Hosted detail peels back to its list, and only then does the list close —
+      // the same one-step-at-a-time the 작업 detail gets over its list.
+      if (state.hosted?.kind === 'detail') return {...state, hosted: {kind: 'list'}};
+      if (state.hosted?.kind === 'list') return {...state, hosted: null};
       if (state.search !== null) return {...state, search: null};
       if (state.agent !== null) return {...state, agent: null};
       if (state.workSession !== null) return {...state, workSession: null};

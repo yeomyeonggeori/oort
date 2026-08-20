@@ -78,6 +78,35 @@ export function attachParticle(word: string, pair: ParticlePair = "subject"): st
   return `${word}${particleFor(word, pair)}`;
 }
 
+// ---- 에 / 에게 ---------------------------------------------------------------
+//
+// The fourth pair, and the first one in this file that **the word cannot
+// decide**. 이/가, 을/를, 은/는, 과/와 and 로/으로 are all phonology: read the
+// last spoken syllable and the answer follows. 에 vs 에게 is not — it is
+// animacy. "일반에 보낸다" (a place receives), "김인턴에게 보낸다" (a person
+// receives), and nothing in the letters of 김인턴 says it is a person. A
+// workspace can name a channel 하늘 and a member 하늘 on the same day.
+//
+// Why it still lives here: this file is where the repo keeps the answer to
+// "which Korean particle goes after this name", and a caller who cannot find
+// the pair here writes `${label}에` by hand — which is exactly the defect this
+// pair was added for (#1384: the composer said "hermes에 메시지 보내기" in every
+// DM with an agent whose name is not a place).
+//
+// So the rule is honest about its input: the fact comes from the caller, and
+// the type makes the caller say it out loud rather than pass a bare boolean.
+// A screen that does not know whether it is addressing a person does not get a
+// default here — it gets a compile error, which is the right outcome, because
+// the wrong particle is not a rendering detail to a Korean reader.
+
+/** Who receives. 방·문서·채널이면 `place`, 사람·에이전트면 `person`. */
+export type RecipientKind = "place" | "person";
+
+/** "일반" + place -> "일반에"; "Hermes" + person -> "Hermes에게". */
+export function attachRecipient(word: string, kind: RecipientKind): string {
+  return `${word}${kind === "person" ? "에게" : "에"}`;
+}
+
 // ---- 로 / 으로 --------------------------------------------------------------
 //
 // A third pair, and it does not fit the table above, for two reasons that both

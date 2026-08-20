@@ -106,6 +106,12 @@ export function MessageEditorSheet({
             value={text}
             onChangeText={onChangeText}
             multiline
+            // 컴포저와 같은 규칙 (#1422 design-review M2). 이 상자에 담기는 것은
+            // 방금 보낸 한국어 문장이라 낱말 가운데서 끊기면 안 되는 이유가
+            // 그쪽과 똑같다 — `design/atoms.tsx` 의 `Sentence` 가 든 그 값이고,
+            // `conversationHygiene.test.tsx` 의 스윕이 이 클라의 여러 줄 입력창을
+            // 전수로 센다.
+            lineBreakStrategyIOS="hangul-word"
             autoFocus
             blurOnSubmit={false}
             textAlignVertical="top"

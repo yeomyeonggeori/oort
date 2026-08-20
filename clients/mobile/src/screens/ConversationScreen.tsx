@@ -1156,6 +1156,11 @@ export default function ConversationScreen({
             <LongPressHint visible={hint.visible} onDismiss={hint.dismiss} />
             <Composer
               channelLabel={title}
+              // 조사를 정하는 사실 (#1384): DM 의 title 은 방 이름이 아니라 상대
+              // 이름이라 「hermes에」가 아니라 「hermes에게」여야 한다. `peer` 로
+              // 묻는 이유는 로스터가 아직 안 온 DM 의 label 이 사람 이름이 아니라
+              // "다이렉트 메시지"이고(`channelLabelParts`), 그때는 에가 맞아서다.
+              recipient={peer ? 'person' : 'place'}
               directory={directory}
               dmAgent={dmAgent}
               // 승인 컨트롤과 **같은 신호**다. 전송도 REST POST 이므로 레일이

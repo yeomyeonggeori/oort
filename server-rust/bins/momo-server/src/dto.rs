@@ -293,6 +293,19 @@ pub struct QuotedMessageDto {
     /// staircase out of it. Omitted when false.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub quotes_another: bool,
+    /// The quoted row's `props.kind` — the whole of what its props contribute
+    /// here (#1510).
+    ///
+    /// A card message is an ordinary `text` row with no body and its card in
+    /// `props` (#1454's completion report). Without this key the client's
+    /// tombstone belt — "a text with no body was deleted" — calls every such
+    /// card 「삭제된 메시지」, and it cannot do better, because nothing else on
+    /// this object separates the two. Omitted when the quoted row carries no
+    /// kind, and omitted on a tombstone: a deleted row still holds its props,
+    /// and projecting them would let the deletion leave a description of itself
+    /// behind.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub props_kind: Option<String>,
 }
 
 /// A message on the wire (Swift `MessageDTO` / openapi `Message`).
@@ -835,6 +848,13 @@ pub struct CreateWorkSessionRequest {
     pub pty_id: Option<String>,
     #[serde(default)]
     pub attach_endpoint: Option<String>,
+    /// LIVE-1's pair, decoded for the same ADR-0134 D1 reason and refused the
+    /// same way. A display binding is published by the host through its own
+    /// signed route (`…/display-binding`), never smuggled into a human's create.
+    #[serde(default)]
+    pub display_id: Option<String>,
+    #[serde(default)]
+    pub display_endpoint: Option<String>,
 }
 
 /// `PATCH …/work-sessions/{session}` request (Swift `UpdateWorkSessionRequest`,
@@ -856,6 +876,11 @@ pub struct UpdateWorkSessionRequest {
     pub pty_id: Option<String>,
     #[serde(default)]
     pub attach_endpoint: Option<String>,
+    /// LIVE-1's pair. See [`CreateWorkSessionRequest`].
+    #[serde(default)]
+    pub display_id: Option<String>,
+    #[serde(default)]
+    pub display_endpoint: Option<String>,
 }
 
 /// `POST …/work-sessions/{session}/resume` request (Swift, :53-55).
@@ -881,6 +906,30 @@ pub struct WorkSessionDto {
     pub observation: String,
     pub observer_grant_count: i64,
     pub remote_attach_available: bool,
+    /// LIVE-1 (ADR-0165): is there a live screen to watch?
+    ///
+    /// The **raw** `display_endpoint` deliberately does not appear anywhere in
+    /// this DTO, exactly as `attach_endpoint` does not: a session read is a list
+    /// a whole channel can fetch, and an endpoint is only ever handed out beside
+    /// the capability that authorises dialling it
+    /// ([`DisplayAttachCapabilityResponse`]).
+    pub remote_display_available: bool,
+    /// LIVE-5a (ADR-0004 증보 3): when somebody currently holds this session's
+    /// keyboard, the moment they took it. Absent when nobody does.
+    ///
+    /// This is the field that survives a reload. The `work.session.control`
+    /// envelope says the same thing over the wire, but Centrifugo is transport
+    /// (하드 불변식) and a surface that only heard it forgets on refresh; the
+    /// value here is read from `display_control_window`, which is the SoT —
+    /// `momo_t3::WorkSessionDetail::control_started_at_ms` carries the argument.
+    ///
+    /// **Who** holds it is deliberately absent, matching the broadcast: the
+    /// grantee is an audit-log fact, and control is owner-only anyway, so
+    /// 「누군가 조작 중」 is everything a reader — or an agent — needs to behave
+    /// correctly. Nothing typed during the window is reachable from this DTO or
+    /// from anything it links to (증보 3 D2).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub control_started_at: Option<i64>,
     pub started_at_ms: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ended_at_ms: Option<i64>,
@@ -1028,6 +1077,199 @@ pub struct TerminalAttachValidationResponse {
     pub expires_at: String,
     /// `"controller"` | `"observer"`.
     pub mode: &'static str,
+}
+
+// ---------------------------------------------------------------------------
+// display attach capability (LIVE-1 — ADR-0165)
+// ---------------------------------------------------------------------------
+
+/// `POST …/work-sessions/{session}/display-attach` request.
+///
+/// `mode` selects the grade. Absent/`{}` still means `observer` — LIVE-3 opened
+/// `controller` but did not make it the default, because the default is what a
+/// client gets when it did not think about the question, and the answer to "did
+/// you mean to stop the agent and take the keyboard" is never "probably".
+#[derive(Debug, Default, Deserialize)]
+pub struct IssueDisplayAttachRequest {
+    #[serde(default)]
+    pub mode: Option<String>,
+}
+
+/// `POST …/display-attach` response.
+///
+/// snake_case for [`TerminalAttachCapabilityResponse`]'s reason: it is the
+/// sibling of a body two clients already parse that way, and one attach response
+/// in each case would be a trap for whoever writes the third.
+///
+/// `display_endpoint` is the HOST's WebRTC **signalling** WS URL (ADR-0165 D2).
+/// momo does not proxy it and never sees a frame that follows (D5).
+///
+/// Since LIVE-5a it also carries `ice_servers`, and that is the one place momo
+/// touches the ICE negotiation at all: it hands out a **short-lived credential**
+/// for the oort-operated relay (ADR-0165 D3 — never a third party's). It still
+/// carries no media, sees no candidate, and terminates nothing. Handing out the
+/// credential is what lets it be per-session and expiring instead of one shared
+/// password baked into every client, which is what the install runbook shipped
+/// and called temporary in writing.
+#[derive(Debug, Serialize)]
+pub struct DisplayAttachCapabilityResponse {
+    /// The HOST's own signalling endpoint. momo never proxies it.
+    pub display_endpoint: String,
+    /// The opaque 60-second bearer. Returned once; only its SHA-256 is stored.
+    pub capability_token: String,
+    pub display_id: String,
+    /// `"observer"`, or `"controller"` since LIVE-3.
+    ///
+    /// A view-only stream that *looks* identical to a controllable one is how a
+    /// person ends up typing into a window that will never deliver a keystroke.
+    /// The producer enforces the view-only case by not opening an input
+    /// datachannel at all (ADR-0165 D4); this field is what lets the UI say so
+    /// before the socket is even dialled. ADR-0004 증보 3 was always going to
+    /// change this field rather than add one beside it.
+    pub mode: &'static str,
+    /// When this grant opened a control window, the moment it opened (epoch ms).
+    /// Absent on an observer grant.
+    ///
+    /// The client's copy of the boundary event: the same 정지 시각 that the
+    /// `work.session.control` envelope carries, handed straight back to the
+    /// person who caused it so the surface can say when control began without
+    /// waiting for the relay to come round.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub control_started_at: Option<i64>,
+    /// The relay this grant may allocate through, with a credential minted for
+    /// this session and expiring on its own (LIVE-5a).
+    ///
+    /// Handed straight to `new RTCPeerConnection({ iceServers })`, which is why
+    /// the field names are the W3C ones. **Empty** on an instance that was given
+    /// no relay policy, and a client must treat empty as "use what you were
+    /// configured with" rather than as an error: during the retirement window
+    /// that is the static credential the producer template still carries, and
+    /// the whole point of the overlap is that the old path keeps working while
+    /// the new one is proved.
+    ///
+    /// Always serialised, even when empty, so a client can tell an instance that
+    /// has no relay policy from one too old to have the field.
+    pub ice_servers: Vec<IceServerDto>,
+}
+
+/// One entry of `RTCConfiguration.iceServers`, in the browser's own spelling.
+///
+/// snake_case like the response that carries it (`TerminalAttachCapabilityResponse`'s
+/// reason), but the *field names* are W3C's `urls`/`username`/`credential`
+/// because the client passes this array through unchanged. A momo-flavoured name
+/// here would buy nothing and cost a mapping step in every client.
+///
+/// `credential` is a secret with a lifetime measured in the hour, scoped to one
+/// work session. It is not stored anywhere in momo — it is derived on the way
+/// out ([`momo_t3::TurnCredentialPolicy`]) — so there is no row to leak and
+/// nothing to rotate but the relay's own `static-auth-secret`.
+#[derive(Debug, Serialize)]
+pub struct IceServerDto {
+    pub urls: Vec<String>,
+    pub username: String,
+    pub credential: String,
+}
+
+impl From<momo_t3::IceServer> for IceServerDto {
+    fn from(server: momo_t3::IceServer) -> Self {
+        IceServerDto {
+            urls: server.urls,
+            username: server.username,
+            credential: server.credential,
+        }
+    }
+}
+
+/// `DELETE …/work-sessions/{session}/display-control` response — the return.
+///
+/// Answers a body rather than 204 because the two closes a caller can cause are
+/// worth telling apart: `closed: true` means this call ended a standing window,
+/// `false` means there was nothing open. A retry of a return is the second,
+/// which is success — the route is idempotent — but a UI that has just been
+/// told the agent is resuming should not say so twice.
+#[derive(Debug, Serialize)]
+pub struct DisplayControlReturnResponse {
+    pub closed: bool,
+    /// Epoch ms, present only when this call closed a window.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub control_started_at: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub control_ended_at: Option<i64>,
+}
+
+/// `POST …/work-hosts/{host}/display-attach/validate` request.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ValidateDisplayAttachRequest {
+    pub capability_token: String,
+    /// `true` = the producer is re-checking a peer connection it already serves.
+    /// Relaxes the expiry clause and **only** the expiry clause (MOMO-674's rule,
+    /// which a media stream needs even more than a terminal: a WebRTC session
+    /// outlives its 60-second dial window by design).
+    #[serde(default)]
+    pub stream: Option<bool>,
+}
+
+/// `POST …/display-attach/validate` response.
+#[derive(Debug, Serialize)]
+pub struct DisplayAttachValidationResponse {
+    pub work_session_id: String,
+    pub display_id: String,
+    /// ISO-8601 with fractional seconds, rendered by PostgreSQL.
+    pub expires_at: String,
+    /// The grade of the bearer the producer presented.
+    pub mode: &'static str,
+    /// Whether this producer may open an input datachannel **right now**.
+    ///
+    /// A negative instruction on purpose: the view-only guarantee lives in a
+    /// channel that was never opened, not in a client flag anyone could flip
+    /// (ADR-0165 D4), and this field is how the server states that intent to
+    /// the only process that can honour it.
+    ///
+    /// It is the conjunction of three things and not just the grade — the
+    /// bearer must be `controller`, and the control window it opened must still
+    /// be standing. A controller grant whose window was returned, lapsed or
+    /// ended with the session answers `false` here at the next re-validation,
+    /// which is how a returned window actually takes the keyboard away rather
+    /// than merely recording that somebody asked for it back.
+    pub input_enabled: bool,
+    /// The producer's own copy of the relay credential (LIVE-5a).
+    ///
+    /// The same policy the browser is served by [`DisplayAttachCapabilityResponse`],
+    /// and the same session subject, so the two ends of one media path allocate
+    /// on the relay under one username and a coturn log line can be joined back
+    /// to a work session.
+    ///
+    /// **A fresh one is minted on every validate, and the shipped producer only
+    /// installs the first.** Re-minting is a pure function of the request, so it
+    /// costs nothing and keeps the field correct for any client that *can* use
+    /// it; what it does not do is renew a live stream. `webrtcbin` offers no way
+    /// to swap a TURN server underneath a running ICE agent, so the credential a
+    /// peer connection was built with is the one it dies with, and the TTL is
+    /// that connection's **ceiling** rather than a sliding window
+    /// (`momo_t3::turn`'s header carries the argument; closing it —
+    /// renegotiation, or accepting the ceiling — is a LIVE-5c acceptance
+    /// criterion). A *new* viewer is unaffected: new connection, new pipeline,
+    /// credential minted at the moment they attached.
+    ///
+    /// Empty when the instance has no relay policy, which is the retirement
+    /// overlap: the producer then keeps `MOMO_DISPLAY_TURN_URI`, the static
+    /// credential delivered at create time. A producer that receives a non-empty
+    /// array must prefer it — that preference is what makes the static one
+    /// removable later without a second deploy.
+    pub ice_servers: Vec<IceServerDto>,
+}
+
+/// `POST …/work-sessions/{session}/display-binding` request — work-host-signed.
+///
+/// The daemon's own two values. camelCase like every other work-host body, and
+/// `deny_unknown_fields` so a daemon that thinks it is sending something this
+/// server acts on gets told otherwise.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PublishDisplayBindingRequest {
+    pub display_id: String,
+    pub display_endpoint: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -2617,6 +2859,281 @@ pub struct CreateAgentResponse {
     pub agent: AgentMemberDto,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CreateHostedAgentConnectionRequest {
+    pub display_name: String,
+    pub handle: String,
+    #[serde(default = "default_static_bearer")]
+    pub auth_mode: String,
+}
+
+fn default_static_bearer() -> String {
+    "static_bearer".to_string()
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HostedAgentConnectionDto {
+    pub id: String,
+    pub agent_member_id: String,
+    pub status: String,
+    pub auth_mode: String,
+    pub audience: String,
+    pub approved_channel_ids: Vec<String>,
+    pub approved_scopes: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub active_credential_id: Option<String>,
+    pub created_at_ms: i64,
+    pub updated_at_ms: i64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateHostedAgentConnectionResponse {
+    pub connection: HostedAgentConnectionDto,
+    /// Returned once. PostgreSQL stores only sha256(pairingCredential).
+    pub pairing_credential: String,
+    pub pairing_expires_at_ms: i64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HostedAgentConnectionResponse {
+    pub connection: HostedAgentConnectionDto,
+    /// HAP-E6 cleanup manifest. Empty until a disconnect starts, so an
+    /// unstarted connection answers with the same shape rather than a
+    /// different one.
+    pub cleanup_artifacts: Vec<HostedCleanupArtifactDto>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct HostedAgentConnectionListResponse {
+    pub connections: Vec<HostedAgentConnectionDto>,
+}
+
+/// One provider artifact a disconnect must account for (ADR-0162 HAP-E6).
+///
+/// There is deliberately no provider credential, chat content or file path in
+/// this projection: `externalRef` is a bounded operator-chosen label and
+/// `evidence` is the operator's own sentence about what they did.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HostedCleanupArtifactDto {
+    pub id: String,
+    pub kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub external_ref: Option<String>,
+    pub expected_action: String,
+    pub current_status: String,
+    pub disposition: String,
+    pub resolved: bool,
+    pub required: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub acknowledged_by: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub acknowledged_at_ms: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub evidence: Option<String>,
+    pub updated_at_ms: i64,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct HostedCleanupArtifactSeedDto {
+    pub kind: String,
+    pub external_ref: String,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DisconnectHostedAgentConnectionRequest {
+    /// Extra named provider items to track beside the seeded per-kind rows.
+    #[serde(default)]
+    pub artifacts: Vec<HostedCleanupArtifactSeedDto>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DisconnectHostedAgentConnectionResponse {
+    pub connection: HostedAgentConnectionDto,
+    pub cleanup_artifacts: Vec<HostedCleanupArtifactDto>,
+    pub remaining_required: i64,
+    /// False when the disconnect had already started: the same answer, and
+    /// nothing written a second time.
+    pub started_now: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AcknowledgeHostedCleanupArtifactRequest {
+    /// `unknown` | `present` | `inactive` | `absent`. An `inactive` routine is
+    /// an observation and never a cleanup.
+    pub current_status: String,
+    /// `delete` | `preserve` | `revoke`. Omitted records only the observation.
+    #[serde(default)]
+    pub disposition: Option<String>,
+    #[serde(default)]
+    pub evidence: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AcknowledgeHostedCleanupArtifactResponse {
+    pub artifact: HostedCleanupArtifactDto,
+    pub remaining_required: i64,
+    pub changed: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CompleteHostedAgentDisconnectResponse {
+    pub connection: HostedAgentConnectionDto,
+    pub cleanup_artifacts: Vec<HostedCleanupArtifactDto>,
+    /// False for an idempotent replay of a transition that already happened.
+    pub disconnected_now: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ConfirmHostedAgentConnectionRequest {
+    pub agent_member_id: Uuid,
+    pub audience: String,
+    pub approved_channel_ids: Vec<Uuid>,
+    pub approved_scopes: Vec<String>,
+    pub auth_mode: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfirmHostedAgentConnectionResponse {
+    pub connection: HostedAgentConnectionDto,
+    pub credential_id: String,
+    /// Returned once. PostgreSQL stores only sha256(credential).
+    pub credential: String,
+    pub token_type: &'static str,
+}
+
+/// ADR-0162 증보 1 / HAP-E7 — what the resource owner is asked to approve.
+///
+/// Every field is either server-derived or already validated against the
+/// registered client. `clientId` and `redirectUri` are shown because the human
+/// is being asked to trust them; neither is client-declared metadata, both come
+/// from the operator's allowlist.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HostedOauthConsentPreviewResponse {
+    pub client_id: String,
+    pub redirect_uri: String,
+    /// The canonical Agent Port resource this delegation is bound to.
+    pub resource: String,
+    pub issuer: String,
+    pub requested_scopes: Vec<String>,
+    pub expires_at_ms: i64,
+    /// The `pairing_pending` OAuth connections this request may be bound to.
+    pub candidates: Vec<HostedOauthCandidateDto>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HostedOauthCandidateDto {
+    pub connection_id: String,
+    pub agent_member_id: String,
+    pub agent_display_name: String,
+    pub created_at_ms: i64,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HostedOauthDecisionRequest {
+    /// The signed, server-minted authorization request envelope.
+    pub request: String,
+    pub connection_id: Uuid,
+    #[serde(default)]
+    pub approved_scopes: Vec<String>,
+    #[serde(default)]
+    pub approved_channel_ids: Vec<Uuid>,
+}
+
+/// The only thing a decision hands back is where the browser goes next.
+///
+/// It carries `code`/`state`/`iss` (approve) or `error`/`state`/`iss` (deny) and
+/// nothing else — no access token, no refresh token, no PKCE verifier, no
+/// connection secret.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HostedOauthDecisionResponse {
+    pub redirect_to: String,
+    pub connection_id: String,
+}
+
+/// Generic agent bearer metadata. There is deliberately no raw token, digest,
+/// or envelope prefix in this reusable projection.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentCredentialDto {
+    pub id: String,
+    pub agent_member_id: String,
+    pub status: &'static str,
+    pub scopes: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_used_at_ms: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expires_at_ms: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub revoked_at_ms: Option<i64>,
+    pub created_at_ms: i64,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CreateAgentCredentialRequest {
+    #[serde(default)]
+    pub scopes: Option<Vec<String>>,
+    #[serde(default)]
+    pub label: Option<String>,
+    #[serde(default)]
+    pub expires_at_ms: Option<i64>,
+    #[serde(default)]
+    pub rotation_grace_seconds: Option<i64>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateAgentCredentialResponse {
+    pub credential: AgentCredentialDto,
+    /// Returned once; PostgreSQL stores only `sha256(token)`.
+    pub token: String,
+    pub token_type: &'static str,
+    pub rotated_credential_count: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rotation_grace_ends_at_ms: Option<i64>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AgentCredentialListResponse {
+    pub credentials: Vec<AgentCredentialDto>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RevokeAgentCredentialRequest {
+    #[serde(default)]
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RevokeAgentCredentialResponse {
+    pub credential: AgentCredentialDto,
+    pub revoked_now: bool,
+    pub already_revoked: bool,
+}
+
 /// Swift `AgentProfileDTO` (:562-575).
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -3272,6 +3789,8 @@ mod tests {
             observation: "open".into(),
             observer_grant_count: 0,
             remote_attach_available: false,
+            remote_display_available: true,
+            control_started_at: None,
             started_at_ms: 5,
             ended_at_ms: None,
             exit_code: None,
@@ -3282,6 +3801,10 @@ mod tests {
         assert_eq!(json["rootMessageId"], "r");
         assert_eq!(json["observerGrantCount"], 0);
         assert_eq!(json["remoteAttachAvailable"], false);
+        // LIVE-1: a session can offer a screen and no terminal. The two booleans
+        // are set opposite here on purpose — a DTO that folded them would make
+        // this assertion pass while telling every client the wrong thing.
+        assert_eq!(json["remoteDisplayAvailable"], true);
         assert_eq!(json["startedAtMs"], 5);
         assert!(json.get("endedAtMs").is_none());
         assert!(json.get("exitCode").is_none());

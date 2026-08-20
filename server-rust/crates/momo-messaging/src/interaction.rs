@@ -723,6 +723,56 @@ async fn reread_interaction_in_tx(
     }
 }
 
+/// Announce a message the **server itself** rewrote, on the frame every client
+/// already applies in place.
+///
+/// ## Why this exists rather than a props-shaped envelope of its own
+///
+/// Some rows are edited by nobody: a control window opening stamps 정지 시각
+/// onto the login handoff card waiting on that session
+/// (`momo_t3::stamp_control_window_on_cards_in_tx`), and the session card's
+/// props follow the session. Those writes are `UPDATE message SET props`, and a
+/// message row that moves without a message frame is invisible until a reload —
+/// the timeline the person is looking at keeps rendering the props it was given.
+///
+/// The frame is #1152's `message.edited`, unchanged and un-extended:
+/// [`build_message_edited_payload`] already carries the **whole** row including
+/// `props`, at the message's own `seq`, and both clients merge it by seq over
+/// the row they hold (`reconcileMessages`). So a props-only update needs no new
+/// type, no new consumer and no client change — which is the whole reason to
+/// reuse it. A second envelope claiming the same row would be two frames racing
+/// to describe one message.
+///
+/// ## What it deliberately does not touch
+///
+/// `state`, `edited_at` and `seq`, for [`stream_message_body_in_tx`]'s reason:
+/// 「수정됨」 is a claim that a person revised what they said, and a server
+/// stamping a boundary fact onto a card did not. This function only reads and
+/// publishes — the write is the caller's, in the caller's transaction.
+///
+/// Answers `false` when the id names no row, so a caller that raced a delete
+/// publishes nothing instead of failing.
+pub async fn emit_message_edited_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    message_id: Uuid,
+) -> Result<bool, DbError> {
+    let Some(projection) = reread_interaction_in_tx(&mut *conn, message_id).await? else {
+        return Ok(false);
+    };
+    let payload = build_message_edited_payload(workspace_id, &projection);
+    emit_outbox(
+        &mut *conn,
+        workspace_id,
+        OutboxKind::Broadcast,
+        "publish",
+        &payload,
+        Some(projection.message.channel_id),
+    )
+    .await?;
+    Ok(true)
+}
+
 /// `PATCH …/messages/{id}` with a `stream` block — **grow** a message's body.
 ///
 /// ## Why this is an edit and not seventeen messages

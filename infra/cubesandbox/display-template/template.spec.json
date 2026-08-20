@@ -1,0 +1,375 @@
+{
+  "$comment": [
+    "LIVE-1 / ADR-0165 — the CubeSandbox template contract for the live display.",
+    "",
+    "specVersion 5 (2026-08-19, LIVE-5c #1587). specVersion 2 was a DECLARED",
+    "contract; specVersion 3 (#1438) recorded the MEDIA half as measured end to",
+    "end on momo-cube-host (101.79.18.230) + momo-turn (223.130.142.109) — a real",
+    "microVM producer whose H264 screen reached an external browser over a",
+    "TURN-relayed WebRTC stream. specVersion 4 recorded the INPUT half on the",
+    "template IMAGE: a work-host-signed validate, a datachannel the producer opens",
+    "only while the server grants it, declared frames parsed and injected with",
+    "XTEST, and the channel closing when the window closes while the stream stays",
+    "up.",
+    "",
+    "specVersion 5 closes the one thing specVersion 4 named as still owed: the",
+    "input round trip INSIDE a CubeSandbox microVM, over a `typ relay` candidate.",
+    "A producer in a real momo-display5 microVM on momo-cube-host, given ONLY the",
+    "server-minted ephemeral relay credential (no static TURN env), connected",
+    "relay<->relay to a viewer that had the same credential; a key the viewer",
+    "typed was injected into the xterm INSIDE the microVM, and the echoed output",
+    "was read back on the relay-carried video (the frame shows the marker at the",
+    "microVM's own `root@tpl-09566443...` prompt). See",
+    "runtimeVerified.inputDeliveredInMicroVM.",
+    "",
+    "verify with scripts/verify_display_attach.sh (cross-reads server constants),",
+    "scripts/display_input_e2e.py (the input half; --remote-proof drives the",
+    "microVM leg with a relay viewer and on-screen capture) and",
+    "scripts/display_microvm_seed.py (stands the ledger up around a microVM run)."
+  ],
+  "specVersion": 5,
+  "adr": [
+    "ADR-0165",
+    "ADR-0165 증보 2 (needed — see ice.requiresAdrAmendment)",
+    "ADR-0004 증보 3"
+  ],
+  "goal": "LIVE-3",
+  "runtimeVerified": {
+    "$comment": "#1438 measured 2026-08-16 (media). LIVE-5c measured 2026-08-18 (input, template image) and 2026-08-19 (input INSIDE a microVM, #1587). #1438 evidence: external Chromium rendered display-e2e-1438 at 1280x720, 56 frames decoded, media candidate pair relay<->relay; coturn logged ALLOCATE+CHANNEL_BIND success from BOTH the producer (101.79.18.230) and the browser (39.115.69.188), over TURN transport=udp AND transport=tcp. LIVE-5c image evidence, from scripts/display_input_e2e.py against THIS producer image: (a) a work-host-SIGNED validate answered input_enabled=true and the offer carried m=application; (b) key frames encoded to signalling.inputChannel were parsed and injected with XTEST, and the typed command RAN in a real terminal on the captured X display — the proof is the file it wrote, not the frames sent; (c) the same harness with an OBSERVER capability got input_enabled=false and an offer with NO m=application; (d) when the control window was closed server-side, the channel closed, the peer connection and signalling socket STAYED UP, and a command typed afterwards did not run — measured while the signalling socket was flooded with frames the message loop discards, the case where a re-validation in the wrong place starves. #1587 microVM evidence (the leg specVersion 4 named as still owed): a producer in a REAL momo-display5 CubeSandbox microVM on momo-cube-host, wired to a local momo-server the microVM reached by the 8443 hairpin and given ONLY the server-minted ephemeral relay credential (no static MOMO_DISPLAY_TURN_URI), forced ice-transport-policy=relay; a viewer (scripts/display_input_e2e.py --remote-proof) wired the SAME server-minted ice_servers and forced relay too; ICE reached connected/completed relay<->relay, the producer opened momo.input.v1, and a key the viewer typed was injected into the xterm INSIDE the microVM. The proof is not a file this side can read (a microVM has no exec path out) but the SCREEN: the relay-carried H264 decoded to a frame showing the echoed marker LIVE5C-MICROVM-OK at the microVM's own `root@tpl-09566443...` shell prompt. The observer contrast held there too (input_enabled=false, no m=application).",
+    "producerEncodesInMicroVM": true,
+    "browserRendersOverTurnRelay": true,
+    "measuredResolution": "1280x720",
+    "measuredCodec": "H264 constrained-baseline",
+    "producerParsesInputFrames": true,
+    "producerOpensChannelOnGrant": true,
+    "keystrokeReachesAnApplication": true,
+    "observerGetsNoDatachannel": true,
+    "producerSignsValidate": true,
+    "inputRevokedWhenWindowCloses": true,
+    "streamSurvivesRevocation": true,
+    "injectionStopsAfterRevocation": true,
+    "revalidationSurvivesSignallingFlood": true,
+    "inputDeliveredInMicroVM": true,
+    "$inputDeliveredInMicroVMComment": "#1587, 2026-08-19. The whole loop inside a CubeSandbox microVM over a `typ relay` candidate: datachannel -> XTEST -> the shell IN the microVM -> its X server -> the capture pipeline -> H264 -> relay -> a decoded frame showing the marker. Two facts had to be true for this that the template-image runs never exercised, and they live on OPPOSITE sides of the wire. PRODUCER side, baked into momo-display:v5 (the one code change this template carries): create-data-channel must run only AFTER webrtcbin has actually reached READY — `set_state` is async and the is_closed assertion is cleared only on arrival, so the pre-fix producer raced it and silently downgraded a granted controller to a view-only offer inside the microVM every time (the template-image runs won the race by luck). VIEWER side, in scripts/display_input_e2e.py and deliberately NOT in this template: a receiver that joins mid-stream must request a keyframe (an upstream force-key-unit -> RTCP PLI) or its decoder only ever sees P-frames, and it decodes with avdec_h264 (the measurement's viewer image adds gstreamer1.0-libav) — the producer never decodes its own stream, so the template ships neither. Neither is a contract change.",
+    "microVmInputOverEphemeralRelayCredential": true,
+    "$microVmRelayComment": "The microVM producer was delivered NO static TURN env; its only relay credential was the per-session `<expiry>:<uuid>` one momo-server minted into its validate answer (LIVE-5a). The relay<->relay round trip completing against the LIVE momo-turn is therefore also first evidence that the ephemeral `use-auth-secret` path is accepted by momo-turn end to end from a real microVM — consistent with the static retirement (turn-host-install.md §6-4) being complete. See ice.turn.$credentialComment, corrected from the 2026-08-18 pre-retirement reading."
+  },
+  "template": {
+    "$comment": [
+      "The template is built by `cubemastercli tpl create-from-image` from an OCI",
+      "image, NOT by systemd. PID 1 is the #1437 bootstrap receiver, which lands",
+      "the create-time envVars delivery and then execs the entrypoint.",
+      "",
+      "MUST be built WITHOUT `--probe`: the producer legitimately does not listen",
+      "on :8452 until after the create-time delivery arrives, and no delivery",
+      "happens during a template build. A display template built with --probe or",
+      "without the receiver fails EVERY envVars create with 500 (130497), which is",
+      "the exact state the real T3 adapter provisions in (#1437/#1434)."
+    ],
+    "pid1": "momo-bootstrap-init (infra/cubesandbox/bootstrap-init) — the #1437 envVars receiver",
+    "cmd": [
+      "/usr/local/bin/momo-bootstrap-init",
+      "--",
+      "/usr/local/bin/entrypoint.sh"
+    ],
+    "ordering": "entrypoint.sh, not a systemd unit — adds the ICE base (see network.iceBase), starts Xvfb, waits on the X socket, then execs the producer",
+    "buildFlags": [
+      "--with-cube-ca=false",
+      "--expose-port 8452",
+      "no --probe"
+    ],
+    "requiresIproute2": true,
+    "$requiresIproute2Comment": "iproute2 must be in the rootfs so entrypoint can add the routable ICE base; without it, relay gathering fails (see network.iceBase)."
+  },
+  "producer": {
+    "implementation": "gstreamer-webrtcbin",
+    "$comment": [
+      "ADR-0165 D1 named Selkies-GStreamer first with `webrtcbin` as the",
+      "alternative; this template declares the alternative on the D4 structural",
+      "argument (view-only = ABSENCE of an input datachannel). #1438 RESOLVED the",
+      "producerSelection unknown: webrtcbin encodes H264 acceptably inside a",
+      "GPU-less microVM and an external browser decoded 56 frames at 1280x720.",
+      "Swapping the producer is still a one-field change here plus the unit file;",
+      "nothing in server-rust names a producer."
+    ],
+    "capture": {
+      "source": "x11",
+      "display": ":0",
+      "codec": "H264",
+      "audio": false
+    },
+    "direction": "sendonly",
+    "inputDatachannel": false,
+    "$inputComment": "ADR-0165 D4, as amended by inputDatachannelOnDemand. RUNTIME-VERIFIED twice: #1438 measured that the OBSERVER offer carries m=video a=sendonly and NO m=application against a real producer through the host proxy; LIVE-5c measured that the same producer, handed a CONTROLLER grant the server vouched for, offers m=application and delivers keystrokes — and that revoking the grant closes the channel while the stream keeps running. `inputDatachannel: false` below stays the DEFAULT and the observer's guarantee; it is not a global switch (there is no MOMO_DISPLAY_INPUT=1).",
+    "inputDatachannelOnDemand": {
+      "trigger": "validate.input_enabled == true",
+      "revokeOn": "validate.input_enabled == false",
+      "viewerRequestIsNotAuthorisation": true,
+      "$comment": "LIVE-3 / ADR-0004 증보 3. RUNTIME-VERIFIED (LIVE-5c): the producer reads input_enabled off its OWN validate answer, opens the channel between READY and PLAYING so it lands in the first offer, and closes it at the re-validation that first answers false — measured by closing the window server-side and watching the channel close while the stream stayed up. A viewer's `open_input` is still refused by name: asking is not authorisation. The re-validation runs at the TOP of the producer's message loop, where no discarded frame can skip it; a viewer that could starve it would keep a keyboard the server had already taken away.",
+      "closedOn": "the first re-validation answering input_enabled == false"
+    },
+    "recording": false,
+    "bundlePolicy": "max-bundle",
+    "$bundlePolicyComment": "MEASURED (LIVE-5c), not a preference. webrtcbin defaults to bundle-policy `none`, which gives each m-line its own ICE component and DTLS transport. That was invisible while the offer had one m-line (#1438 measured video only); the moment the input channel adds m=application, `none` produced ICE reaching `completed` and the connection then going `failed` in DTLS — a screen that connects and a keyboard that never arrives, with nothing naming the cause. Browsers negotiate max-bundle, so this is also the only policy the real web viewer was ever going to answer with."
+  },
+  "signalling": {
+    "subprotocol": "momo.display.v1",
+    "capabilityPrefix": "momo_terminal_attach_v1",
+    "endpointSchemes": [
+      "wss"
+    ],
+    "validateRoute": "/v1/workspaces/{workspace}/work-hosts/{host}/display-attach/validate",
+    "revalidateSeconds": 30,
+    "hostProxy": {
+      "$comment": "ADR-0165 증보 1 D2-1. RUNTIME-VERIFIED (#1438): external browser -> wss://<host-public>:8443/display/signal/<displayId> -> nginx (형상 A, client-IP preserving) -> microVM :8452. TLS is self-signed in the E2E; a real cert is a follow-up (runbook §9 item 2).",
+      "listen": "wss://<host-public>:8443/display/signal/<displayId>",
+      "upstream": "<SANDBOX_IP>:8452"
+    },
+    "messages": {
+      "producerToViewer": [
+        "ready",
+        "offer",
+        "ice",
+        "error"
+      ],
+      "viewerToProducer": [
+        "answer",
+        "ice",
+        "open_input",
+        "bye"
+      ]
+    },
+    "inputChannel": {
+      "$comment": [
+        "LIVE-5b declared this block; LIVE-5c implemented the producer half against",
+        "it and MEASURED it (scripts/display_input_e2e.py). It is written here rather",
+        "than in one client because this is the one file both halves read: the web",
+        "client (clients/web/src/features/work/controlStream.ts) cross-reads it in",
+        "controlStream.test.ts, and the producer parses exactly these shapes.",
+        "",
+        "OPENED BY THE PRODUCER, NEVER BY THE VIEWER. The trigger is the",
+        "producer's own validate answer (producer.inputDatachannelOnDemand), so a",
+        "viewer that opened its own channel would be routing around the server's",
+        "grant. The web client therefore has no createDataChannel and does not",
+        "encode open_input; it listens on ondatachannel, and the producer still",
+        "refuses `open_input` by name.",
+        "",
+        "The key frame carries `code` (the PHYSICAL key) and modifiers, never the",
+        "character the browser produced from them. A remote keyboard is physical",
+        "keys plus the far side's layout, and it means the character of a",
+        "password never forms as a value this browser client owns (ADR-0004 증보 3",
+        "D2). The producer ENFORCES that rather than assuming it: a frame carrying",
+        "`key`, `char` or `text` is refused.",
+        "",
+        "The field names survived first contact unchanged — LIVE-5c corrected no",
+        "part of this block, which is the outcome the split-by-action pointerFrame",
+        "shape below was written to produce."
+      ],
+      "label": "momo.input.v1",
+      "openedBy": "producer",
+      "viewerOpensChannel": false,
+      "viewerToProducer": [
+        "key",
+        "pointer",
+        "wheel"
+      ],
+      "keyFrame": [
+        "type",
+        "action",
+        "code",
+        "ctrl",
+        "shift",
+        "alt",
+        "meta",
+        "repeat"
+      ],
+      "pointerFrame": {
+        "$comment": [
+          "DECLARED PER ACTION, not as one flat field list. A flat list reads as",
+          "'these fields are always present', and a producer built from that",
+          "reading requires `button` on every pointer frame — so a MOVE, which",
+          "carries none, is dropped, clicks keep working and the cursor never",
+          "travels. That failure is invisible in a paper contract and obvious on",
+          "a screen, so the shape is split here where both halves read it.",
+          "",
+          "`button` is ABSENT on a move rather than sent as 0: a move with button",
+          "0 and a left-button drag are different events, and a sentinel makes",
+          "them the same one."
+        ],
+        "always": [
+          "type",
+          "action",
+          "x",
+          "y"
+        ],
+        "move": [],
+        "down": [
+          "button"
+        ],
+        "up": [
+          "button"
+        ]
+      },
+      "wheelFrame": [
+        "type",
+        "action",
+        "dx",
+        "dy"
+      ],
+      "pointerCoordinates": "normalised 0..1 over the video box, so the VM's resolution stays the VM's",
+      "carriesCharacter": false,
+      "transport": "JSON text frames (RTCDataChannel send-string)",
+      "frameRefusalIsSilentToTheViewer": true,
+      "$refusalComment": "A frame the producer will not inject is counted and logged BY REASON, never echoed and never logged as a frame: a log holding a sequence of key frames is a keylogger written by accident.",
+      "$keyFrameComment": [
+        "The producer injects the PHYSICAL KEY EVENT and nothing else: `code` becomes",
+        "one XTEST key press or release, and `ctrl`/`shift`/`alt`/`meta`/`repeat` are",
+        "read by NO ONE on the producer side.",
+        "",
+        "That is deliberate, and it is why the modifiers stay declared. The web client",
+        "forwards a modifier press as its OWN key frame (`ShiftLeft` down arrives",
+        "before the character it shifts, and its up arrives after), so the far side",
+        "holds real modifier state from real key events. Synthesising modifiers from",
+        "these booleans AS WELL would apply them twice — a shifted character typed",
+        "with the shift already physically down.",
+        "",
+        "So they are carried as CONTEXT, for a viewer or a log to reason about intent,",
+        "never as an instruction. A producer that started honouring them would need",
+        "the client to stop sending modifier keys in the same change."
+      ],
+      "modifiersAreAdvisory": true
+    }
+  },
+  "ice": {
+    "policy": "relay",
+    "$policyComment": [
+      "CHANGED from specVersion 2's 'host-and-server-reflexive'. ADR-0165 증보 1",
+      "(D3-1) established relay is the only viable path (symmetric NAT). #1438",
+      "measured a DEEPER reason the producer must force relay AND the template",
+      "must supply a routable ICE base: see network.iceBase."
+    ],
+    "turn": {
+      "required": true,
+      "operator": "oort (momo-turn 223.130.142.109) — never third-party (ADR-0165 D3)",
+      "transports": [
+        "udp",
+        "tcp"
+      ],
+      "credentialDelivery": "per-session ephemeral (LIVE-5a): the producer reads `ice_servers` off its own display-attach/validate answer and renders it into webrtcbin's `turn://` spelling at pipeline construction. The pre-LIVE-5a static long-term cred delivered via envVars (#1437 receiver) as MOMO_DISPLAY_TURN_URI is now the FALLBACK: an instance whose momo-server was given no MOMO_TURN_STATIC_AUTH_SECRET answers `ice_servers: []` and the static path carries it unchanged.",
+      "credentialPreference": "server-minted wins over the envVars static whenever `ice_servers` is non-empty",
+      "credentialRefreshIsPerConnection": true,
+      "$credentialRefreshComment": [
+        "MEASURED (LIVE-5c, coturn 4.6 with use-auth-secret, TTL forced to 60s).",
+        "",
+        "The reasoning this replaces was: the server re-mints on every validate,",
+        "the producer installs one credential at pipeline construction and throws",
+        "the later mints away (GStreamer cannot swap a TURN server on a running",
+        "ICE agent, and reading `webrtcbin.ice-agent` DESTROYS the agent), so the",
+        "TTL must be a ceiling on the peer connection and the screen must go black",
+        "when it passes.",
+        "",
+        "It does not. A stream held for 200s on a 60s credential lost NOTHING: 10",
+        "of 10 typed beats were delivered, the last at t+180s, over a relay-only",
+        "producer. coturn re-validates the REST username's expiry when an",
+        "ALLOCATE creates an allocation; it does not re-check it to REFRESH an",
+        "allocation that already exists, and the refreshes kept succeeding under",
+        "the long-expired username.",
+        "",
+        "So the TTL bounds when a NEW allocation can be created, not how long a",
+        "running one lives. The re-mint the producer discards is genuinely",
+        "surplus for an established connection. The narrow case that remains is a",
+        "connection that has to allocate AGAIN mid-session (an ICE restart), which",
+        "wants a fresh credential at THAT moment rather than a periodic swap."
+      ],
+      "$credentialComment": [
+        "The server mint is coturn's `use-auth-secret` derivation:",
+        "  username   = <unix expiry>:<work session uuid>",
+        "  credential = base64(HMAC-SHA1(static-auth-secret, username))",
+        "SHA-1 is fixed by WebRTC's STUN MESSAGE-INTEGRITY rather than chosen —",
+        "server-rust/crates/momo-t3/src/turn.rs carries the argument.",
+        "",
+        "MEASURED 2026-08-18 against the LIVE momo-turn (223.130.142.109) from an",
+        "external Mac, RFC 5766 ALLOCATE, the state BEFORE the static retirement:",
+        "the STATIC credential allocated over udp AND tcp (relayed 223.130.142.109:*,",
+        "lifetime 600s, realm oort.turn) and an EPHEMERAL credential was refused 401",
+        "because `use-auth-secret` was not yet enabled on the relay.",
+        "",
+        "CORRECTED 2026-08-19 (#1587): that reading is now historical. The static",
+        "retirement (turn-host-install.md §6-4) is complete, and #1587 measured the",
+        "ephemeral path working end to end against the LIVE momo-turn — a producer in",
+        "a real CubeSandbox microVM was given ONLY the server-minted `<expiry>:<uuid>`",
+        "credential (no static TURN env at all), allocated a relay on momo-turn, and a",
+        "viewer holding the same credential completed a relay<->relay round trip that",
+        "carried both the input datachannel and the return video. So the order this",
+        "block described (server half proved in conformance first, relay half an",
+        "operator step second) has run its course: the relay half is done."
+      ],
+      "$comment": "CHANGED from null. #1438 RESOLVED iceReachability: the producer allocates a relay on momo-turn and the browser connects relay<->relay. coturn logged ALLOCATE success from the microVM (via host egress 101.79.18.230) over both udp and tcp.",
+      "credentialExpiryEndsRunningStream": false,
+      "credentialExpiryBlocksNewAllocation": true
+    },
+    "stun": [],
+    "requiresAdrAmendment": "ADR-0165 증보 2 — turn is now REQUIRED (was 'introduce only if measured necessary'). #1438 is that measurement. The producer forces iceTransportPolicy=relay and the template supplies a routable ICE base."
+  },
+  "network": {
+    "signallingPort": 8452,
+    "mediaUdpPortRange": {
+      "declared": [
+        50000,
+        50100
+      ],
+      "enforced": false,
+      "$comment": [
+        "CHANGED to enforced:false. GStreamer 1.22 webrtcbin has NO port-range",
+        "property, and reading `ice-agent` to reach the underlying ICE object",
+        "DESTROYS it (over-unref → later negotiation dies on GST_IS_WEBRTC_ICE",
+        "assertion) — do not read it. The microVM media ports are therefore not",
+        "constrained here. In the relay topology it does not matter: media does",
+        "not ingress to the microVM on these ports — it egresses to the TURN and",
+        "is relayed, so the ports that face the internet are momo-turn's",
+        "49152-65535 range, not these."
+      ]
+    },
+    "iceBase": {
+      "$comment": [
+        "NEW in specVersion 3 — the #1438 root-cause finding. A CubeSandbox",
+        "microVM's guest eth0 carries ONLY link-local addresses (IPv4",
+        "169.254.68.6/30, IPv6 fe80::). libnice (webrtcbin's ICE stack) REGISTERS",
+        "the TURN but schedules NO STUN/TURN candidate discovery from a link-local",
+        "base — measured 'Candidate gathering FINISHED, no scheduled items' — so",
+        "the producer emits ZERO candidates and cannot allocate a relay, even",
+        "though the TURN works and the microVM can reach it (raw-socket STUN got a",
+        "reply). The fix, measured to work: entrypoint adds a routable RFC1918",
+        "address to eth0 (default 10.99.0.2/24) BEFORE the producer starts. libnice",
+        "then uses it as a base, allocates the relay, and the CubeNet gateway",
+        "MASQUERADEs the flow out the host's public IP and returns the reply.",
+        "The identical producer needed no such fix in a container (it already had",
+        "an RFC1918 172.17.x address) — this is specific to the microVM's",
+        "link-local-only posture."
+      ],
+      "required": true,
+      "address": "10.99.0.2/24",
+      "interface": "eth0",
+      "addedBy": "entrypoint (needs iproute2 + CAP_NET_ADMIN, which PID1 in a microVM has)"
+    }
+  },
+  "workdRegistration": {
+    "advertise": {
+      "route": "POST /v1/workspaces/{workspace}/work-hosts",
+      "capabilityKey": "display_attach",
+      "value": true
+    },
+    "publishBinding": {
+      "route": "POST /v1/workspaces/{workspace}/work-sessions/{session}/display-binding",
+      "body": {
+        "displayId": "<^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$>",
+        "displayEndpoint": "wss://<host>/display/signal/<displayId>"
+      },
+      "idempotent": true
+    }
+  },
+  "unverified": {
+    "$comment": "specVersion 2's producerSelection / iceReachability / templateBuild are RESOLVED (see runtimeVerified). LIVE-5c resolved inputChannelProtocol, inputDelivery and serverValidateWiring on the template image, and MEASURED credentialCeiling. #1587 (specVersion 5) resolved inputDeliveryInMicroVM — the last leg of the input path — so what remains here is the one item that waits on a human. It graduated the way iceReachability and inputDelivery did: by moving under runtimeVerified with its evidence, never by silent deletion (see runtimeVerified.inputDeliveredInMicroVM).",
+    "realTlsCert": "The host proxy used a self-signed cert in the E2E, and #1587 kept it: the microVM producer verified momo-server's 8443 hairpin against exactly that certificate (MOMO_DISPLAY_SERVER_CA_PEM_B64 -> MOMO_DISPLAY_SERVER_CA_BUNDLE), which is real verification against one named cert, not skipped verification. A real cert/domain is still the follow-up (runbook §9 item 2); with neither delivered, https validate verifies against the system store and a self-signed proxy fails closed."
+  }
+}

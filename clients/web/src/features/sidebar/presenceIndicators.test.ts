@@ -94,4 +94,33 @@ describe("상태 메뉴는 하나를 고르는 자리다 (M1)", () => {
     expect(presenceControl).toContain("DropdownMenuRadioItem");
     expect(presenceControl).not.toContain("<DropdownMenuItem");
   });
+
+  it("그룹 제목이 실제로 그룹의 이름이다 (이슈 #1383)", () => {
+    // `DropdownMenuLabel` 은 Radix 가 아무 id 도 안 붙이는 맨 div 다. 그래서 제목을
+    // 그려 두고 `aria-labelledby` 를 빠뜨리면 **눈에만 있는 이름**이 되고, 그룹은
+    // 여전히 이름이 없다 — 그리고 그 결함은 화면상 아무 차이도 만들지 않으므로
+    // 스크린샷도 잡지 못한다. 두 짝을 함께 잰다.
+    expect(presenceControl).toContain("<DropdownMenuLabel id={menuLabelId}>");
+    expect(presenceControl).toContain("aria-labelledby={menuLabelId}");
+  });
+
+  it("제목은 실패 배너보다 위에 선다 — 오류가 패널의 이름을 밀어내지 않는다", () => {
+    // 배너가 위로 가면 「쓰기가 방금 실패했고 그래서 메뉴가 아직 열려 있는」 바로
+    // 그 상태에서만 패널이 이름을 잃는다: 오류 → 제목 → 선택지. 하필 가장 읽기
+    // 어려운 순간에 제목이 비켜서는 것이고, 그게 제목이 있으나 마나가 되는 유일한
+    // 자리다. 이건 실패 상태에서만 보이는 순서라 평상시 스크린샷이 못 잡는다.
+    const title = presenceControl.indexOf("<DropdownMenuLabel id={menuLabelId}>");
+    const banner = presenceControl.indexOf('testId="presence-error"');
+    const options = presenceControl.indexOf("<DropdownMenuRadioGroup");
+    expect(title).toBeGreaterThan(-1);
+    expect(banner).toBeGreaterThan(title);
+    expect(options).toBeGreaterThan(banner);
+  });
+
+  it("제목의 낱말은 트리거와 같은 한 자리에서 온다", () => {
+    // 「내 상태」를 여기 직접 적으면 코어의 `presenceTriggerLabel` 과 두 벌이 되고,
+    // 한쪽만 고쳐도 테스트는 전부 초록이다(PRESENCE_OPTIONS 가 M2 에서 겪은 그 결함).
+    expect(presenceControl).toContain("PRESENCE_MENU_LABEL");
+    expect(presenceControl).not.toContain("내 상태");
+  });
 });

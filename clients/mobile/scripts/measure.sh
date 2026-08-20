@@ -8,6 +8,7 @@
 #   3. the gap between the composer's bottom edge and the keyboard's top edge
 #   4. the `Origin` header React Native's WebSocket sends
 #   5. Work Console/detail in both schemes and an accessibility text size
+#   6. the composer's growth cap under Dynamic Type (#1443)
 #
 # Simulator, deliberately. Spike #837 established that this is the one property
 # where the simulator does NOT lie: the reversed-list numbers came out the same
@@ -136,12 +137,75 @@ capture_surface WORK-DETAIL work-detail-dark.png
 capture_surface LIGHT-WORK-CONSOLE work-console-light.png
 capture_surface LIGHT-WORK-DETAIL work-detail-light.png
 
+# #1422 컴포저 플레이스홀더. 폰에는 웹의 `composer-placeholder` 대응물이 없고
+# 예산은 더 빡빡하다 — 이 두 장이 그 예산을 사진으로 든다: 배송되는 `Composer` 를
+# 세 이름으로 세우고, 위의 계측 줄이 같은 문장을 **이 기기의 입력창**과 **문서된
+# 390pt 예산 상자** 둘에서 재서 줄 수를 적는다.
+capture_surface COMPOSER-PLACEHOLDER composer-placeholder-dark.png
+capture_surface LIGHT-COMPOSER-PLACEHOLDER composer-placeholder-light.png
+
+# #1443 성장 상한. 기본 크기에서 이 장이 하는 일은 「안 변했다」를 보이는 것이다 —
+# 상한 128pt 는 그대로이고, 다섯 줄짜리 글이 그 안에 그대로 든다. 이 장이 값을
+# 내는 크기는 아래 접근성 블록의 같은 줄이다.
+capture_surface COMPOSER-GROWTH composer-growth-dark.png
+
+# #1479 절 예산. 이 크기(a11y-large, 배수 2.143)가 규칙이 **값을 내는** 띠다:
+# 상자가 3.2줄이라 `release-2026-08` 의 문장(4줄)은 안 들고 머리 절(3줄)은 든다.
+# 위 XXL 블록만 있으면 두 절 다 안 드는 띠라 「고쳐진 것이 무엇인지」가 안 찍힌다
+# (그 띠도 아래에서 함께 찍고, 셋의 산수가 `Composer.tsx` 의 「절 예산」 절에 있다).
 ORIGINAL_CONTENT_SIZE="$(xcrun simctl ui booted content_size)"
+xcrun simctl ui booted content_size accessibility-large
+capture_surface COMPOSER-PLACEHOLDER composer-placeholder-a11y-large.png
+capture_surface LIGHT-COMPOSER-PLACEHOLDER composer-placeholder-a11y-large-light.png
 xcrun simctl ui booted content_size accessibility-extra-extra-large
 capture_surface WORK-CONSOLE work-console-accessibility-text.png
 capture_surface WORK-DETAIL work-detail-accessibility-text.png
+# #1422 design-review H2. 기본 크기에서 폰이 플레이스홀더를 **안 자른다**는 것이
+# 웹과 폰이 다른 처리를 하는 근거인데, 그 근거가 이 크기에서도 참인지는 아무도
+# 안 봤었다. 참이 아니다 — 실측은 `composerCopy.ts` 머리말에 적혀 있고, 이 두 줄이
+# 그 실측을 다음 배치에서도 다시 낸다.
+capture_surface COMPOSER-PLACEHOLDER composer-placeholder-accessibility-text.png
+capture_surface LIGHT-COMPOSER-PLACEHOLDER composer-placeholder-accessibility-text-light.png
+# #1443. 위 두 줄이 남긴 실측(이 크기에서 상자가 한 줄만 보여 준다)의 수리를 재는
+# 자리다. 사진 위의 계측 줄이 글자 배수·창 높이·상한·**실제 상자 높이**를 적으므로,
+# 「상한이 커졌다」가 산수가 아니라 화면에서 확인된다.
+capture_surface COMPOSER-GROWTH composer-growth-accessibility-text.png
+capture_surface LIGHT-COMPOSER-GROWTH composer-growth-accessibility-text-light.png
 xcrun simctl ui booted content_size "$ORIGINAL_CONTENT_SIZE"
 ORIGINAL_CONTENT_SIZE=""
+
+# #1480 멘션 시트는 이 스크립트가 못 찍는다 — 시트를 여는 것은 `@` 한 글자이고
+# 그 글자는 사람이 친다(초안으로 심는 길은 `measure/surfaces.tsx` 의
+# `mention-sheet` 절이 실측으로 기각한다). 캡처는 Maestro 레인이 진다:
+#
+#   xcrun simctl ui booted content_size <large|accessibility-large|accessibility-extra-extra-large>
+#   xcrun simctl launch booted app.momo.ios --args \
+#     -momoMeasure MENTION-SHEET -RCT_jsLocation 127.0.0.1:$METRO_PORT
+#   maestro test maestro/90-mention-sheet-capture.yaml
+#   # 사진: ~/.maestro/tests/<타임스탬프>/90-mention-sheet-capture/takeScreenshot/
+#
+# 라이트는 `LIGHT-MENTION-SHEET`(스킴 접두사 — `measure/root.ts`). 오늘 있는 판:
+#
+#   dock1480-mention-sheet-{dark,light}.png        기본 크기 — 4행 그대로(무회귀).
+#                                                  라이트는 회전 2 에서 붙었다: 기본
+#                                                  크기가 다크 한 장뿐이면 이 티켓이
+#                                                  **안 바꾼** 화면을 한 스킴에서만
+#                                                  드는 것이 된다.
+#   dock1480-mention-sheet-ax-{dark,light}.png     a11y-large(2.143) — 3행
+#   dock1480-mention-sheet-axxl-{dark,light}.png   AX-XXL(3.143) — 행이 44 를 넘어
+#                                                  47.1pt 가 되는 첫 띠(회전 1 M3)
+#   dock1480-mention-sheet-{ax,axxl}-before-*.png  같은 두 크기의 옛 판
+#
+# 접근성 두 크기의 **첫 행**이 회전 2 의 답을 든다 — 세 조각이 각자 앞을 남긴다:
+#
+#   2.143   「프로덕트…」  「@product-…」  「에이전트」
+#   3.143   「프로…」      「@pro…」       「에이전트」
+#
+# 회전 1 의 같은 사진에서는 핸들이 2.143 에서 맨 「@」 한 글자였고 3.143 에서는
+# 아예 없었다(`flex: 1` = basis 0 이라 압력 전부터 자기 폭이 없는 조각이었다).
+#
+# 여기 안 넣는 이유: 캡처 하나를 위해 계측 레인 전체가 Maestro 를 요구하게 되고,
+# 이 스크립트는 오늘 그 의존이 없다.
 
 echo
 echo "---- Origin stub ----"

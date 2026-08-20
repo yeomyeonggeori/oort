@@ -8,6 +8,8 @@ import {
   foldPausedNotices,
   emptyChannelCopy,
   emptyTimeline,
+  EMPTY_ADD_MEMBER_ACTION_LABEL,
+  EMPTY_WRITE_ACTION_LABEL,
   failPending,
   isStrictlyOrdered,
   mergeMessages,
@@ -512,14 +514,58 @@ describe("mention autocomplete", () => {
 // A DM and a channel are empty for different reasons, so they cannot land on
 // one line of copy: a 1:1 DM's participants are fixed by dmKey, so the channel
 // copy would offer an action the server refuses (MOMO-611 R2 High).
+//
+// 그런데 **첫 행동**은 두 표면이 같다 (#1536, 온보딩 실측 F5). 채널 분기의 유일한
+// 액션이 `멤버 초대하기`였고, 그래서 첫 실행에서 사람이 첫 메시지가 아니라 초대
+// 다이얼로그로 갔다. 아래 첫 두 절이 그 회귀를 잡는 자리다 — 채널의 primary가
+// invite로 돌아가면 빨갛다.
 describe("empty surface copy", () => {
+  it("makes writing the first action in a channel, invite second", () => {
+    for (const kind of ["public", "private", undefined] as const) {
+      const copy = emptyChannelCopy(kind, null);
+      expect(copy.surface).toBe("channel");
+      expect(copy.headline).toBe("이 채널을 첫 메시지로 시작하세요.");
+      expect(copy.primary).toEqual({
+        kind: "write",
+        label: EMPTY_WRITE_ACTION_LABEL,
+      });
+      expect(copy.secondary).toEqual({
+        kind: "add-member",
+        label: EMPTY_ADD_MEMBER_ACTION_LABEL,
+      });
+    }
+  });
+
+  it("names the same first act on both surfaces, from one source", () => {
+    // 두 표면의 첫 행동이 같은 act이므로 문장도 하나다. 라벨을 클라마다 손으로
+    // 적으면 그 둘은 조용히 갈라지고, 게이트와 캡처 레인은 둘 중 하나만 본다.
+    expect(emptyChannelCopy("public", null).primary.label).toBe(
+      emptyChannelCopy("dm", null).primary.label
+    );
+    expect(EMPTY_WRITE_ACTION_LABEL).toBe("첫 메시지 쓰기");
+    expect(EMPTY_ADD_MEMBER_ACTION_LABEL).toBe("멤버 추가하기");
+  });
+
+  it("keeps 초대 out of the channel-scope action's name (#1573)", () => {
+    // 한 동사=한 행위. 이 버튼이 여는 방은 「멤버 추가」 다이얼로그이고, 「초대」는
+    // 워크스페이스에 새 사람을 부르는 행위의 낱말이다(다이얼로그의 빈-워크스페이스
+    // 상태와 DirectoryRoute의 「멤버 초대하기」 — 둘 다 /settings로 간다). 이
+    // 라벨이 초대 계열로 돌아가면, 혼자 있는 첫 사용자가 빈 채널에서 이 버튼을
+    // 누르고 "다른 멤버가 없습니다" 화면에서 같은 이름의 다른 버튼을 만나는
+    // 이중 의미가 재발한다(PR #1568 design-review Medium 2).
+    expect(EMPTY_ADD_MEMBER_ACTION_LABEL).not.toContain("초대");
+    expect(EMPTY_ADD_MEMBER_ACTION_LABEL).not.toBe("멤버 초대하기");
+  });
+
   it("names the person and offers no invite in a DM", () => {
     const copy = emptyChannelCopy("dm", {
       displayName: "곽성재",
       kind: "human",
     });
+    expect(copy.surface).toBe("dm");
     expect(copy.headline).toBe("곽성재님과의 대화를 시작하세요.");
-    expect(copy.invitable).toBe(false);
+    expect(copy.primary.kind).toBe("write");
+    expect(copy.secondary).toBeNull();
     expect(copy.detail).not.toContain("추가");
   });
 
@@ -529,24 +575,31 @@ describe("empty surface copy", () => {
       kind: "agent",
     });
     expect(copy.headline).toBe("김인턴님에게 첫 일을 맡겨보세요.");
-    expect(copy.invitable).toBe(false);
+    expect(copy.secondary).toBeNull();
   });
 
   it("says nothing about who it is when the roster has not loaded", () => {
     const copy = emptyChannelCopy("dm", null);
     expect(copy.headline).toBe("다이렉트 메시지를 시작하세요.");
-    expect(copy.invitable).toBe(false);
+    expect(copy.secondary).toBeNull();
   });
 
-  it("invites members in a channel, which can gain them", () => {
-    for (const kind of ["public", "private", undefined] as const) {
-      const copy = emptyChannelCopy(kind, null);
-      expect(copy.headline).toBe("이 채널을 함께 시작하세요.");
-      expect(copy.invitable).toBe(true);
-    }
+  it("keeps the channel copy honest about who reads it later", () => {
+    // 혼자 있는 사람이 실제로 망설이는 지점("나 혼자인데 지금 써도 되나")에 답하는
+    // 문장이고, 그 답의 근거는 서버 질의다: 채널 히스토리에 가입 시각 절이 없어서
+    // (momo-messaging `list_messages` / `list_channel_page`) 나중에 들어온 멤버도
+    // 오늘 쓴 줄을 그대로 읽는다. 그 문장이 사라지면 남는 것은 「그냥 쓰라」는
+    // 지시뿐이다.
+    const copy = emptyChannelCopy("public", null);
+    expect(copy.detail).toContain("나중에 들어올");
+    expect(copy.detail).toContain("같은 자격");
   });
 
-  it("writes no em-dash into any of the four copies", () => {
+  it("writes no em-dash into any of the four copies, labels included", () => {
+    // 채워 넣는 말(hype)은 여기서 다시 세지 않는다: 그 규칙의 자는
+    // `scripts/design_preflight_web.sh`이고, 코어 문자열이 그 스캐너의 사정
+    // 범위다. 금지어를 이 파일에 다시 적으면 그 스캐너가 **이 줄을** 위반으로
+    // 집는다(실측 — hype 1건).
     const copies = [
       emptyChannelCopy("dm", { displayName: "곽성재", kind: "human" }),
       emptyChannelCopy("dm", { displayName: "김인턴", kind: "agent" }),
@@ -554,7 +607,13 @@ describe("empty surface copy", () => {
       emptyChannelCopy("public", null),
     ];
     for (const copy of copies) {
-      expect(`${copy.headline}${copy.detail}`).not.toMatch(/[—–]/);
+      const spoken = [
+        copy.headline,
+        copy.detail,
+        copy.primary.label,
+        copy.secondary?.label ?? "",
+      ].join("");
+      expect(spoken).not.toMatch(/[—–]/);
     }
   });
 });

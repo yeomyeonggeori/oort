@@ -49,12 +49,18 @@ flowchart LR
 - 푸시 후보(ADR-0120): `message` INSERT와 같은 트랜잭션에서 migration 011의 AFTER INSERT 트리거가 outbox `push_candidate` 행을 기록하고, NotifierWorker(BYPASSRLS `momo_notifier`)가 SKIP LOCKED로 소비해 기존 판정(DM/멘션/승인, 채널 음소거·자기 메시지 억제) 후 id-only v2 페이로드를 PushRelay로 dispatch한다. v2는 `thread_id=root_id ?? channel_id`, `momo.message|mention|approval|work` category, 승인에만 `approval_id`, ADR-0109 unread 합계 badge를 싣고 PushRelay가 APNs `thread-id`/`category`로 변환한다. **outbox 생산자 트리거는 이 1건이 유일하며, 신규 트리거 생산자는 Accepted ADR 없이 추가하지 않는다.** relay(`broadcast`)·AgentWorker(`agent_job`)·notifier(`push_candidate`)는 kind로 상호 배제된다.
 - 에이전트 실행 경로는 역할이 분리된 **두 공식 경로**다(ADR-0102): `worker` = oort 소유 managed runtime, `gateway` = 사용자 소유 BYOA runtime. `AGENT_GATEWAY_MODE`는 전달 방식을 선택할 뿐 보장 소유권을 바꾸지 않는다.
 - Memory Plane의 `workspace_memory_policy.enabled`와 외부 provider 전송 동의는 별도 축이다. `workspace.memory_external_provider_consent`는 기존 워크스페이스도 기본 false이며, 서버가 admin PUT과 member read projection에서 provider trust(`local-mock|self-hosted|external`) 및 최종 허용 여부를 판정한다. AgentWorker 추출·임베딩은 같은 공유 trust 분류와 서버 소유 원장 값을 소비하며, external 미동의면 원문 provider 호출 전에 건너뛰고 `memory.extraction.consent_required`를 워크스페이스당 한 번 기록한다. local-mock과 literal loopback/RFC1918/ULA self-host는 동의와 무관하게 기존 동작을 유지한다.
-- 에이전트 정의는 `member(kind=agent)` + `agent_profile` + run별 불변 Context Packet이다(ADR-0131). profile은 자격증명 없이 instructions·model preference·enabled tool allowlist·mention 고정/예약 schedule만 보유한다. mention packet은 서버 정책 프리앰블을 profile보다 먼저 두고, profile tool은 실제 Capability grant와 교집합만 허용하며, model preference는 workspace allowlist 밖이면 run당 감사 후 기존 model로 되돌린다. profile 없는 agent는 기존 528 payload 계약을 유지한다.
+- 에이전트 정의는 `member(kind=agent)` + `agent_profile` + run별 불변 Context Packet이다(ADR-0131). profile은 자격증명 없이 instructions·model preference·enabled tool allowlist·mention 고정/예약 schedule만 보유한다. mention packet은 서버 정책 프리앰블을 profile보다 먼저 두고, profile tool은 실제 Capability grant와 교집합만 허용하며, model preference는 workspace allowlist 밖이면 run당 감사 후 기존 model로 되돌린다. profile 없는 agent는 기존 528 payload 계약을 유지한다. 그 위에 서버가 **모든 턴에 강제로 싣는** 시스템 블록(시각·완료 리포트 프로토콜)의 예산 규율과 실측표는 [`agent-context-discipline.md`](agent-context-discipline.md)가 정본이다 — 블록을 늘리는 변경은 그 표를 같은 PR에서 갱신한다.
 - 플러그인 경계(ADR-0113): oort 서버는 검증된 3층 manifest, workspace install 정책, `(workspace, member, plugin, scope)` grant와 Capability Cache projection, audit만 보유한다. provider OAuth/raw credential은 사용자 소유 BYOA 호스트에만 있고 서버 테이블·로그·응답에 들어오지 않는다. install revoke와 grant revoke는 projection을 같은 transaction에서 제거하고, Hermes adapter는 Context Packet마다 위임 사용자와 agent가 함께 속한 채널을 서버에 재검증한 뒤 유효 projection의 MCP 접속 기술자만 tool policy로 조립한다. 조회·manifest가 하나라도 잘못되면 해당 범위를 기본 거부하며 장기 캐시하지 않는다.
 
   이 호스트 커스터디 모델은 에이전트 호스트가 사용자가 직접 소유·통제하는 머신이라는 전제다. OAuth/PAT 등 MCP 자격증명은 그 호스트의 MCP 클라이언트에만 보관해야 하며 oort 서버나 Context Packet으로 전달하지 않는다. 다중 사용자 workspace에서도 한 에이전트 호스트를 사용자 사이에 공유하지 않고, 각 사용자의 호스트 세션과 토큰 저장소를 분리한다.
 
-  Drive 경로 C는 이 일반 remote 커스터디 모델의 좁은 서버 소유 예외다(ADR-0113 D3/D5). `com.momo.plugins.drive`의 상대 MCP endpoint는 catalog 응답에서 현재 서버의 public origin으로 절대화되고, `POST /v1/mcp/drive`는 agent bearer와 위임 사용자·채널 binding, 매 호출의 활성 `drive:read` grant를 재검증한다. 도구는 공유 드라이브 검색·메타데이터·bounded text export 3개뿐이며 전부 read-only다. 배포 운영자가 SA 키 파일과 공유 드라이브 ID를 환경으로 주입하고 키 바이트는 DB·응답·audit·로그에 들어가지 않는다. SA 생성·공유 드라이브 멤버십·수동 실호출 evidence는 [`docs/GWS_INTERNAL_CONSENT_RUNBOOK.md`](../GWS_INTERNAL_CONSENT_RUNBOOK.md)가 정본이다.
+  Drive 경로 C는 이 일반 remote 커스터디 모델의 좁은 서버 소유 **설계 선례**다(ADR-0113 D3/D5). `POST /v1/mcp/drive` 구현은 은퇴 중인 Swift 트리에만 있고 현행 Rust router에는 이식되지 않았다. 따라서 공유 드라이브 검색·메타데이터·bounded text export와 SA 운영 절차를 현행 Rust 기능으로 주장하지 않는다. 역사적 SA 생성·공유 드라이브 멤버십·수동 실호출 절차는 [`docs/GWS_INTERNAL_CONSENT_RUNBOOK.md`](../GWS_INTERNAL_CONSENT_RUNBOOK.md)에 남아 있다.
+
+  ADR-0162의 현행 Rust **Agent Port foundation**은 `POST /v1/mcp/agent-port` 하나다. MCP `2026-07-28` modern 요청은 매 호출 version/capability metadata와 `server/discover`를 사용한다. Grok 실측에서 관측된 legacy-era loader에 대비해 exact `2025-11-25` adapter가 `initialize`·`notifications/initialized`·`ping`·빈 `tools/list`와 빈 catalog의 unknown `tools/call` 오류만 별도 분기하지만, 이 exact version의 Grok live compatibility는 아직 `runtime-unverified`다. 두 분기 모두 protocol session·GET stream·`Mcp-Session-Id`가 없으며 매 POST를 다시 인증한다. 첫 wave는 비기본 `agent:port:connect`를 가진 static agent bearer만 받고 OAuth/resource metadata를 광고하지 않는다. HAP-E5(#1366)부터 이 위에 8개 thin-binding tool(`oort_inbox_read`·`oort_conversation_read`·`oort_message_post`·`oort_jobs_claim`·`oort_job_renew`·`oort_job_release`·`oort_run_event`·`oort_run_complete`)이 올라간다. `tools/list`와 `tools/call`은 **하나의** 교집합(연결의 승인 scope × 현재 token scope × 서버 capability)을 공유하므로 광고 목록과 호출 가능 목록이 구조적으로 어긋날 수 없고, `agent:port:connect`는 어느 tool의 필요 scope도 아니어서 도달성만 열 뿐 능력은 열지 않는다. 각 tool은 기존 domain의 얇은 결속이다 — 메시지는 REST send와 같은 `momo-messaging` 송신 transaction(`channel_seq`·`client_msg_id` 멱등성·message INSERT + outbox INSERT)을 쓰고, job/lease와 run callback은 기존 gateway 의미를 그대로 호출한다. 두 번째 message/job SoT도, MCP 쪽 직접 Centrifugo publish도 없다. client가 쥐는 것은 AEAD로 봉인된 `leaseHandle`뿐이라 job id·lease owner·run id는 밖으로 나가지 않는다. 전달은 **agent별**로 선택된다: active hosted connection을 가진 agent는 전역 provider mode와 무관하게 hosted gateway로 가고, active가 아닌 hosted agent는 managed로 fallback하지 않고 fail-closed된다. 생산 gate `MOMO_HOSTED_DELIVERY_ENABLED`는 HAP-E6(#1367)가 disconnect 수명주기를 랜딩하면서 열렸다 — `#[cfg(debug_assertions)]` 제한이 사라져 release 빌드도 이 변수를 읽지만 기본값은 여전히 closed이고 정확히 소문자 `true` 한 철자만 연다. 프로덕션 활성화는 이제 **운영자의 명시적 결정**이며, 그 결정을 되돌릴 수 있게 하는 것이 아래 disconnect 상태기계다. HAP-E7(#1368)이 그 위에 **MCP OAuth 2.1 authorization server**를 올렸지만 `MOMO_AGENT_PORT_OAUTH_ENABLED`가 정확히 소문자 `true`일 때만 존재한다 — 기본값에서는 RFC 9728 protected-resource metadata도 RFC 8414 authorization-server metadata도 광고하지 않고 `/v1/oauth/{authorize,token,revoke}`가 404이며, static bearer 경로는 flag on/off에서 **byte 동일**하다(challenge 헤더까지 테스트로 고정). 열렸을 때의 계약: issuer와 canonical resource는 운영자 설정에서만 오고 `Host`/`Forwarded`/`X-Forwarded-*`는 어디서도 읽지 않으며, client는 운영자 allowlist에 미리 등록된 public client뿐이고(DCR·URL-form Client ID Metadata Document는 구현·fetch·광고 모두 안 함, `client_secret` 없음), PKCE는 `S256`만, redirect URI는 byte-exact match, `iss`는 RFC 9207로 항상 동봉된다. `GET /v1/oauth/authorize`는 unauthenticated여서 **아무 row도 쓰지 않고** server-서명 단기 envelope만 consent 화면에 넘기며, workspace·connection·human은 인증된 tenant-scoped consent API에서 결정된다(envelope nonce당 terminal decision 정확히 1건). lifecycle은 `pairing_pending ──human consent──> detected ──code 1회 소비 + PKCE proof + exact audience + member unpause(한 transaction)──> active`이고 disconnect/cleanup/terminal은 static arm과 동일하다. pairing challenge· authorization code·access·refresh는 서로 승격되지 않는다 — 저장 digest가 envelope 전체를 덮으므로 재라벨링이 산술적으로 막히고, credential class와 connection의 `auth_mode` 일치는 migration 074의 trigger가 강제한다(= OAuth 실패 뒤 static bearer로의 자동 강등이 스키마상 불가능). code replay와 refresh reuse는 거절과 같은 transaction에서 그 connection의 live OAuth credential 전부를 revoke하고 bounded audit 1행을 남긴다. consent가 발급할 수 있는 scope 상한은 static confirm과 **같은 validator**의 `HOSTED_AGENT_PORT_GRANTABLE_SCOPES`이며 상한 밖·미요청 scope는 code 발급 전에 거절된다. 발급된 OAuth credential은 canonical `/v1/mcp/agent-port`에서만 principal이며 message POST/PATCH·gateway 동사· realtime-token REST에 직접 제시하면 mutation 0으로 거절된다. 근거는 ADR-0162 증보 1(Accepted — 성재 승인 2026-08-15)이고, flag를 여는 것은 #1369 consent UX 랜딩과 runtime proof 폐곡선 뒤의 별도 운영 결정이다.
+
+  **Disconnect 상태기계(HAP-E6 / 마이그레이션 072).** hosted connection은 `pairing_pending → detected → active`에서 두 갈래로 종결한다. disconnect **시작**은 `detected|active → cleanup_pending` 단일 tenant transaction이다 — 이 커넥션의 live bearer revoke + 전용 agent pause + 열린 gateway job 억제(lease 회수 포함) + 종류별 artifact manifest seed + audit 1행이 전부이거나 전부 롤백이다. 잠금 순서는 HAP-E4 계약 그대로 `connection → token → member → membership → profile`이고, revoke는 **`hosted_connection_id` 한정**이라 같은 agent의 형제 커넥션 토큰은 건드리지 않는다(#1374 수리 방향과 정합). 같은 전이의 강제판이 **reconciliation**이다: 커넥션이 스스로 가리키는 `active_token_id`가 만료·운영자 emergency revoke·member 정지·membership 상실로 죽어 있는 것을 첫 domain guard가 관측하면 capability 수행 전에 같은 tx로 `cleanup_pending`까지 fail-closed로 맞춘다(제시된 자격증명이 현재 active token일 때만 — 낡은 토큰으로 살아 있는 커넥션을 끌어내릴 수 없다). manifest는 jsonb가 아니라 **행**이다: `bot`·`routine`·`plugin`·`connector`·`local_plugin_files`·`secret` 각각 한 행(+명명된 항목마다 한 행)이며 expected action·current status·disposition·actor/source·acknowledged-at/evidence를 기록한다. #1344 실측이 스키마가 된 지점이 셋이다 — connector 해제는 `local_plugin_files`를 **자동 충족하지 않고**(다른 행이고, 한 행이 다른 행을 쓰는 경로가 없다), inactive routine은 `current_status`일 뿐 `disposition`이 아니어서 resolved가 되지 않으며, `bot`은 `preserved`가 합법 terminal인 유일한 종류다(bot 삭제는 chat history까지 지우므로 oort가 대신 지우지 않는다). `secret` seed 행 하나만 `server_verified`다 — 이 서버가 직접 revoke하고 되읽을 수 있는 유일한 artifact이기 때문이고, 나머지는 actor+evidence를 요구하는 `manual`이다. terminal `disconnected`는 required artifact가 전부 resolved이고 로컬 절반(이 커넥션의 live credential 0, agent paused)이 서버 판독으로 확인될 때 **정확히 한 번** 일어난다. 마이그레이션 072의 트리거가 같은 계약을 네 절(`OLD.status='cleanup_pending'` · manifest 비어 있지 않음 · required 미해결 0 · credential 0 + paused)로 다시 단언하므로 전이 함수를 우회한 쓰기도 거짓 terminal을 만들 수 없다 — 특히 **manifest 비어 있지 않음** 절이 없으면 "required 미해결 없음"이 행 0건일 때 공허하게 참이 되어 start를 건너뛴 경로가 그대로 통과한다. message/chat/audit/inbox 이력은 보존되고 cascade delete는 없다. 재접속은 old credential/connection을 되살리는 게 아니라 새 pairing·자격증명·connection namespace를 요구하며, 옛 token·cursor·lease는 계속 실패한다.
+
+- **Hosted durable inbox:** channel-local `message.seq`를 여러 채널의 전달 cursor로 재사용하지 않는다. `hosted_agent_inbox_counter`가 active connection마다 별도 `inbox_seq`를 직렬 발급하고, `hosted_agent_inbox_event`는 기존 message/job/run SoT의 immutable reference만 보존한다. opaque AEAD cursor는 workspace·agent·connection·position에 결속된다. append/read는 active hosted credential의 exact actor/connection/audience와 inbox scope, member/workspace/profile/approved channel/current membership을 tenant transaction에서 다시 잠그며, visibility가 사라진 reference는 내용 없이 scan watermark만 전진한다. reconnect는 새 connection namespace를 쓰고 이전 ledger는 보존한다. HAP-E5(#1366)가 producer를 열면서 두 가지를 DB로 닫았다: outbox 참조가 `kind`까지 결속되고(생성 컬럼 + kind 포함 unique index), `agent_job` 참조는 이 agent의 `gateway` job이며 그 payload의 run이 참조된 run과 같아야 한다(trigger). 참조 append는 항상 원본 transaction 안에서 일어나므로(message send tx, job/run mutation tx) 커밋되지 않은 원본을 가리키는 참조도, tombstone을 먼저 만난 참조도 존재할 수 없다. cursor secret은 connection era에 결속된 값이며 봉투에 key-id를 두지 않는다 — 회전은 계약상 disconnect와 같고, 열리지 않는 cursor는 조용한 전량 재전송이 아니라 fail-closed 거절로 끝난다(운영자-facing 강제 재-pairing은 #1367 소유).
 
 ### 클라이언트 roster와 realtime discovery
 
@@ -362,6 +368,128 @@ sequenceDiagram
 MomoServer에는 terminal WebSocket, stdin/stdout, resize, publish, outbox route가 없고 Relay와
 Centrifugo도 이 데이터 경로에 참여하지 않는다. 서버는 capability control plane만 담당하며
 터미널 raw 바이트는 client↔host 직결로만 흐른다.
+
+### 관전 라이브 화면 (display attach, ADR-0165)
+
+같은 capability 기계가 **두 번째 kind**를 갖는다. PTY가 터미널 바이트를 client↔host 직결로
+흘리듯, display는 **화면 프레임을 WebRTC로 browser↔sandbox 직결**로 흘린다(ADR-0165 D1/D2).
+서버는 여기서도 아무것도 나르지 않는다 — 미디어는 물론 **시그널링도 경유하지 않는다**.
+새 표를 만들지 않은 것이 설계의 요점이다: `terminal_attach_capability.kind`(마이그 075)가
+`pty | display`이고, 발급·검증·sweep·관전자 계수·RLS·revoke 조인이 각각 하나뿐이라 "host를
+회수했으니 관전이 끊긴다"가 절반만 참이 되는 상태가 존재할 수 없다.
+
+세 가지가 PTY 축과 다르고, 셋 다 의도적이다.
+
+1. **display에는 observer와 controller가 있고, control은 창(window)을 연다.**
+   LIVE-1까지 display는 observer 전용이었다 — 입력 경계가 ADR-0004 증보 3의 미결 결정이었고,
+   잠금장치는 라우트가 아니라 스키마(075의 `terminal_attach_display_observer_ck`)였다.
+   2026-08-15 그 증보가 Accepted 되면서 마이그 076이 그 절을 지웠고, 세 층(스키마·
+   `AttachKind::permits_mode`·라우트)이 075 주석의 약속대로 함께 움직였다.
+   잠금이 사라진 자리에 들어온 것은 **부재가 아니라 원장**이다. controller 발급은
+   ① **세션 owner 한정**(증보 3 D1 — control은 자기 세션에 대한 사람의 행위이며, PTY
+   controller의 `c.owner_member_id = ws.member_id` 술어를 그대로 재사용한다),
+   ② **`display_control_window` 행 개설**(076 — 경계 이벤트의 SoT), ③ **그 창이 서 있는 동안
+   에이전트의 그 세션 접근 거부**(증보 3 D3의 비관측) 세 가지를 한 트랜잭션에서 한다.
+   view-only 쪽 계약은 그대로다: producer는 **입력 datachannel을 아예 개설하지 않으며**(D4),
+   개설 여부는 클라이언트 플래그가 아니라 서버의 `input_enabled` 응답이 정한다.
+2. **바인딩을 host가 직접 게시한다.** workd는 `POST …/work-sessions/{s}/display-binding`
+   (work-host 서명)으로 `display_id` + credential-free 시그널링 WS URL을 한 번 등록한다.
+   human bearer는 이 경로에서도, 세션 create/PATCH의 같은 이름 필드에서도 거절된다. 경로가
+   host가 아니라 session을 지시하므로 서명자 핀(= 세션의 host와 동일해야 한다)은 핸들러가
+   원장을 읽어 건다 — `…/work-controls/{c}/ack`와 같은 형태다.
+3. **광고 없는 host에는 발급하지 않는다(fail-closed).** `work_host.capabilities.display_attach`
+   가 참일 때만 발급·검증이 성립한다. BYOC는 provider 이름을 검사해서가 아니라 **momo가
+   이미지를 굽지 않으므로 아무것도 광고하지 않기 때문에** 자동 배제된다(불변식 #7 — 정책
+   코드는 provider 신원을 알지 못한다).
+
+세션 read projection은 raw `display_endpoint` 없이 **`remoteDisplayAvailable`** 하나만
+제공하며(`remoteAttachAvailable`의 동형이자 독립 값 — 화면만 있고 터미널이 없는 세션이
+정상이다), 관전자 수는 kind를 구분하지 않는 하나의 숫자다. 프레임은 서버·원장·audit 어디에도
+들어가지 않고 녹화도 없다(D5). ICE는 직결/host-reflexive 1차이며 제3자 TURN은 금지다(D3).
+
+`observation = owner_only`의 뜻도 이 파도에서 확정됐다: **「소유자만 본다」**(「아무도 못 본다」가
+아니다). LIVE-1은 display에 controller 등급이 없어 owner까지 막았고 그것을 미결로 명시해
+두었는데, 증보 3이 답을 주면서 display observer 발급·검증의 observation 절에 owner 예외가
+들어갔다. 예외는 `kind = 'display'`로 좁혀져 있다 — PTY는 owner가 controller로 자기 세션에
+붙으므로 애초에 같은 문제가 없었다. control이 에이전트를 정지시키는 지금은 이 예외가 더
+중요하다: 보기만 하려는 owner가 자기 에이전트를 세우지 않아도 되게 하는 유일한 경로다.
+
+### control 창과 비관측 (ADR-0004 증보 3)
+
+control 창이 서 있는 동안 지켜지는 것은 **에이전트가 그 세션을 관측할 수 없다**는 사실이며,
+이것은 선언이 아니라 **거부**다. 에이전트가 work session에 닿는 서버 경로는 하나뿐이므로
+(`POST /v1/workspaces/{ws}/work-controls` — agent bearer 전용이고 `read`가 화면 읽기,
+`input`이 키보드다. attach 두 라우트는 모두 `require_human`이라 에이전트는 관전 capability
+자체를 받을 수 없다) 그 한 곳을 막으면 관측 경로 전체가 막힌다. 두 층으로 건다:
+
+- **거부** — `work_controls::create`가 창 활성 세션에 대해 409. 모든 쓰기보다 위에서 거부하므로
+  거부된 시도는 `work_control` 행도 audit도 남기지 않는다(= "에이전트가 보지 않았다"가 원장에
+  대한 진술이 된다).
+- **보류** — 창이 열리기 직전 dispatch된 제어는 `pending_controls_for_host_in_tx`가 **withhold**
+  한다. 실패시키지 않고 보류하므로 창이 닫히면 다음 poll에서 그대로 전달된다(증보 3 D4의 재개).
+
+창은 세 경로로 닫히고 셋 다 멱등이다 — **반환**(owner의 명시 REST `DELETE …/display-control`,
+`end_reason=returned`) · **lease 만료**(producer가 재검증을 멈춤, `expired`) · **세션 종료**
+(`session_ended`). lease가 capability의 `expires_at`이 아닌 것이 중요하다: 60초 TTL은 **dial**
+창이고 `stream:true` 재검증은 만료 절만 완화하므로, 창을 그 타임스탬프에 매면 사람이 로그인하는
+도중 60초에 에이전트가 재개된다. lease는 그 재검증이 갱신하므로 **producer가 스트림이 살아
+있다고 말하는 동안** 창이 열려 있다.
+
+VM은 움직이지 않는다(증보 3 D6): `work_session.status`도 ADR-0140 상태기계도 무변경이고
+running-time 과금도 계속된다. 멈추는 것은 런 층의 도달 범위뿐이다. 사람이 입력한 자격증명은
+전사·audit·Memory Plane 어디에도 들어가지 않으며(D2), 원장은 누가·언제·왜 닫혔는지만 갖는다 —
+키 입력을 담을 칸이 없다.
+
+```mermaid
+sequenceDiagram
+    participant B as Browser (LIVE-2)
+    participant S as momo-server
+    participant P as PostgreSQL
+    participant V as Sandbox (workd + WebRTC producer)
+    V->>S: POST display-binding (host-signed, once)
+    S->>P: display_id + credential-free signalling URL
+    B->>S: POST display-attach (human; observer, or controller if owner)
+    S->>P: token digest + issued/expires/grantee/kind
+    S->>P: controller only — open display_control_window (076)
+    S-->>B: signalling endpoint + raw capability + display_id
+    B->>V: direct WSS signalling (momo.display.v1, capability)
+    V->>S: signed capability validation (every 30s)
+    S->>P: expiry/session/revoke/observation/advertisement check
+    S->>P: controller only — renew the window lease
+    S-->>V: validated display_id + expires_at + input_enabled
+    V-->>B: WebRTC video, sendonly (input datachannel only if input_enabled)
+```
+
+```mermaid
+sequenceDiagram
+    participant H as 사람 (세션 owner)
+    participant S as momo-server
+    participant P as PostgreSQL
+    participant A as 에이전트 (run)
+    participant V as Sandbox VM
+    H->>S: POST display-attach {mode: controller}
+    S->>P: controller grant + display_control_window OPEN
+    S-->>H: control_started_at (경계 이벤트)
+    S-->>A: work.session.control {state: opened} — 정지 시각만
+    A->>S: POST work-controls {kind: read}
+    S-->>A: 409 work session is under human control
+    Note over A,V: 에이전트는 프레임도 키도 보지 못한다 (증보 3 D3)
+    Note over H,V: 사람 ↔ VM 직결. 비밀번호는 서버를 지나지 않는다 (D2)
+    Note over S,V: VM은 running 유지, 과금 계속 (D6)
+    H->>S: DELETE display-control (반환)
+    S->>P: window CLOSED (end_reason=returned)
+    S-->>A: work.session.control {state: closed} — 재개 시각
+    A->>S: POST work-controls {kind: read}
+    S-->>A: 201 — 보류됐던 제어도 다음 poll에서 전달
+```
+
+웹 소비(관전 UI)는 LIVE-2 소관이고, **직접 조작 UI는 LIVE-4 소관**이다 — LIVE-3은 서버 계약과
+원장과 게이트까지다. sandbox 템플릿 사양은 `infra/cubesandbox/display-template/`에 있고, 그
+producer는 아직 **`runtime-unverified(cubesandbox webrtc producer)`** — microVM을 빌드·기동해본
+바 없고, 브라우저가 sandbox에 도달할 수 있는지(ingress·ICE)는 미실측 미결이다. 입력 전달도
+마찬가지로 **`runtime-unverified(input delivery)`**: `input_enabled: true`를 읽고 datachannel을
+열어 키를 넣어 본 producer도, 반환 시 그 채널을 닫아 본 producer도 아직 없다. 서버 절반(발급·
+창·게이트·`input_enabled`)은 실제 PostgreSQL 대상 conformance로 증명돼 있고, 화면 절반은 아니다.
 
 ## 에이전트 1회 응답의 수명주기 (이중 경로)
 

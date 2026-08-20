@@ -1,8 +1,17 @@
 import { useState } from "react";
-import { Check, ShieldQuestion, Terminal, Zap } from "lucide-react";
+import {
+  Check,
+  ClipboardCheck,
+  KeyRound,
+  ShieldQuestion,
+  Terminal,
+  Zap,
+} from "lucide-react";
+import { Button } from "@/design/ui/button";
 import { cn } from "@/design/lib/cn";
 import { useOffline } from "@/features/common/useOffline";
 import { memberFor, type Directory } from "@/features/workspace/useWorkspace";
+import type { OpenWorkSession } from "@/features/work/openWorkSession";
 import {
   approvalCardNote,
   type ApprovalCardNote,
@@ -26,9 +35,41 @@ import {
   type ApprovalStatus,
   type PayloadDetail,
 } from "@momo/core/features/timeline/agentCardModel";
+import {
+  LOGIN_HANDOFF_DECISION,
+  LOGIN_HANDOFF_DEPLOYMENT_COPY,
+  loginHandoffNote,
+  loginHandoffOutcomeDetail,
+  loginHandoffSeeksControl,
+  loginHandoffStoppedCopy,
+  loginHandoffWaitingCopy,
+  type LoginHandoffCard,
+  type LoginHandoffNote,
+} from "@momo/core/features/timeline/loginHandoffCard";
+import {
+  COMPLETION_CHECK_OUTCOME_LABEL,
+  COMPLETION_CHECK_TONE,
+  COMPLETION_GATE_SURFACE_LABEL,
+  completionCellChecks,
+  completionCheckCounts,
+  completionGateColumns,
+  formatElapsed,
+  WORKED_ELAPSED_LABEL,
+  type CompletionCheck,
+  type CompletionCheckOutcome,
+  type CompletionReportCard,
+} from "@momo/core/features/timeline/completionReportCard";
+import { COMPLETION_TONE_CLASS } from "./completionTone";
 import { spawnHostGate } from "@momo/core/features/timeline/spawnHostChoice";
-import { ApprovalChip, StreamCaret, TurnChip } from "./StatusChip";
+import {
+  ApprovalChip,
+  CompletionReportChip,
+  LoginHandoffChip,
+  StreamCaret,
+  TurnChip,
+} from "./StatusChip";
 import { ApprovalActions, type Armed } from "./ApprovalActions";
+import { APPROVAL_NOTE_TONE_CLASS } from "./approvalNoteTone";
 import { FoldedValue } from "./FoldToggle";
 import {
   isSurfaceProvided,
@@ -177,7 +218,10 @@ const RESUME_OFFER_COPY =
  * 영수증이 가장 조용한 차림으로 나온다."* 웹도 같았다 — 영수증·재개 안내·원장
  * 없음 고지가 전부 `text-meta text-ink-muted` 한 벌이었다.
  *
- * 격은 코어가 정하고(`APPROVAL_NOTE_TONE_ORDER`) 이 함수가 옷을 입힌다:
+ * 격은 코어가 정하고(`APPROVAL_NOTE_TONE_ORDER`) 이 함수가 옷을 입힌다. **어느
+ * 옷인지는 이 파일이 아니라 `approvalNoteTone.ts`가 답한다** (#1429): 그 표가
+ * 코어의 역할(`APPROVAL_NOTE_TONE_SPEC`)을 이 팔레트의 토큰으로 옮기고,
+ * `approvalNoteTone.test.ts`가 `tokens.css`를 파싱해 그 옮김이 옳은지 잰다.
  *
  *   * `receipt` — 본문 크기의 `text-ink`. 카드 안에서 크기로 올라오는 유일한
  *     문장이고, 그 이유는 이것이 **방금 내가 한 되돌릴 수 없는 행동의 기록**이기
@@ -185,6 +229,12 @@ const RESUME_OFFER_COPY =
  *   * `blocked` — `text-warn`. 위험이 아니라 **때**의 문제이므로 danger가 아니고,
  *     조용한 안내에 묻히면 사람이 버튼을 계속 누르므로 muted도 아니다. 컴포저의
  *     오프라인 줄과 같은 톤이라 한 화면에서 두 자리가 같은 사실을 같은 색으로 말한다.
+ *
+ *     이 클라 **안에서만** 성립하는 논거다. 폰은 같은 톤을 본문 잉크로 그리고 그것도
+ *     옳다 — 이 팔레트에서 「사람이 할 일이 남아 있다」를 지는 것은 `--accent`라
+ *     `--warn`이 「안정 상태가 아니다」(저하·유동 포함 — thinking/streaming 턴 칩이
+ *     그 사례)로 비어 있는 반면, 폰에서는 그 두 역할이
+ *     `warn` 한 토큰에 겹친다. 판정과 근거는 코어 `approvalNote.ts` §색 계약.
  *   * `guidance` — 앞과 같은 `text-ink-muted`. 이 톤은 바뀌지 않았다: 길 안내는
  *     원래 이 격이 맞았고, 문제는 나머지 둘이 여기까지 내려와 있던 것이었다.
  *
@@ -192,18 +242,27 @@ const RESUME_OFFER_COPY =
  * 하는 것은 그 줄 하나이고, 나머지 둘은 화면에 서 있는 조건이지 방금 일어난 일이
  * 아니다.
  */
-function ApprovalNoteLine({ note }: { note: ApprovalCardNote }) {
+function ApprovalNoteLine({
+  note,
+  testIdPrefix = "approval-note",
+}: {
+  note: ApprovalCardNote | LoginHandoffNote;
+  /**
+   * 로그인 핸드오프 카드가 같은 격 체계를 쓰되 자기 이름으로 지목되게 한다.
+   * 한 타임라인에 두 카드가 함께 서 있을 때 훅 하나가 두 요소에 답하면 안 된다
+   * (`ApprovalActions`의 `testIdPrefix`와 같은 이유).
+   */
+  testIdPrefix?: string;
+}) {
   const receipt = note.tone === "receipt";
   return (
     <p
       role={receipt ? "status" : undefined}
-      data-testid={`approval-note-${note.kind}`}
+      data-testid={`${testIdPrefix}-${note.kind}`}
       data-tone={note.tone}
       className={cn(
         "border-t border-line px-3 py-2",
-        receipt && "text-body text-ink",
-        note.tone === "blocked" && "text-meta text-warn",
-        note.tone === "guidance" && "text-meta text-ink-muted"
+        APPROVAL_NOTE_TONE_CLASS[note.tone]
       )}
     >
       {/* 인라인이고 `align-text-bottom`이다: flex로 세우면 두 줄로 접히는 문장에서
@@ -345,6 +404,438 @@ function ApprovalBody({
               .filter((part): part is string => Boolean(part))
               .join(" · ")}
           </span>
+        </LabeledRow>
+      )}
+    </CardFrame>
+  );
+}
+
+/**
+ * 로그인 핸드오프 카드 (LIVE-4 / ADR-0004 증보 3).
+ *
+ * 승인 카드와 **같은 뼈대**를 쓴다: 같은 `CardFrame`, 같은 y/n 키 경로, 같은
+ * 결정 컨트롤(`ApprovalActions`, 낱말만 재개/중단). 판정은 전부 코어가 지고
+ * 이 파일은 옷만 입힌다.
+ *
+ * ## 어포던스 부재 원칙
+ *
+ * 이 빌드에는 채팅에서 화면을 여는 버튼이 없다. 그래서 그 자리에 **비활성
+ * 버튼을 세우지 않고** 문장 하나만 둔다(`LOGIN_HANDOFF_DEPLOYMENT_COPY`).
+ * 영원히 눌리지 않는 버튼은 사람에게 「내가 뭘 잘못했나」를 묻게 하고, 그것은
+ * 화면이 거짓을 말하는 가장 조용한 형태다. 대신 실제로 있는 문 하나 — 작업 세션
+ * 상세 — 는 진짜 버튼으로 서고, 그 세션 화면은 세션 상세가 그린다.
+ */
+function LoginHandoffBody({
+  card,
+  directory,
+  onOpenWorkSession,
+}: {
+  card: LoginHandoffCard;
+  directory: Directory;
+  onOpenWorkSession?: OpenWorkSession;
+}) {
+  const [local, setLocal] = useState<{
+    status: ApprovalStatus;
+    decidedAtMs?: number;
+    decidedByMemberId?: string;
+    note?: string;
+  } | null>(null);
+  const [armed, setArmed] = useState<Armed>(null);
+  const approvalsProvided = isSurfaceProvided("approvals");
+  const offline = useOffline();
+
+  // 로컬 영수증이 스냅샷보다 새로울 수 있는 것은 승인 카드와 같다. 다만 국면은
+  // 코어가 정했으므로, 여기서는 **아직 대기인가**만 로컬로 뒤집는다.
+  const settled = local !== null || card.phase !== "waiting";
+  const underControl =
+    card.control !== null && card.control.endedAtMs === null;
+  const decidedById = local?.decidedByMemberId ?? card.decidedByMemberId;
+  const decidedAtMs = local?.decidedAtMs ?? card.decidedAtMs;
+  const decidedBy = decidedById ? memberFor(directory, decidedById) : null;
+
+  // note 슬롯에 설 수 있는 두 조각. 이름을 붙여 두는 이유는 래퍼가 이 둘의 합을
+  // 조건으로 져야 하기 때문이다 (아래 `note=`).
+  const showDeployment = !settled;
+  const showOpenSession =
+    card.sessionId !== null && onOpenWorkSession !== undefined;
+
+  const note = loginHandoffNote({
+    receiptNote: local?.note ?? null,
+    hasTarget: card.approvalId !== null,
+    settled,
+    underControl,
+    decidableHere: true,
+    offline,
+    approvalsProvided,
+    unsupportedText: `${serverSurface("approvals").absentReason} ${
+      serverSurface("approvals").fallback
+    }`,
+  });
+
+  return (
+    <CardFrame
+      icon={<KeyRound className="size-4" aria-hidden="true" />}
+      title={card.title}
+      chip={<LoginHandoffChip card={card} />}
+      status={card.outcome ?? card.phase}
+      kind="login_handoff"
+      keyboard={note === null && !settled}
+      onApprove={() => setArmed("approve")}
+      onReject={() => setArmed("reject")}
+      detail={card.detail}
+      // 슬롯 **자체가** 조건을 진다 (design-review L1). 안의 두 조각이 모두
+      // 조건부인데 래퍼만 무조건이면, 끝난 카드에 세션 딥링크까지 없을 때
+      // `border-t` 와 `py-2` 만 남아 아무것도 말하지 않는 띠가 선다 — 카드에
+      // 한 줄이 더 있다고 읽히는데 읽을 것이 없다.
+      note={
+        showDeployment || showOpenSession ? (
+          <div className="border-t border-line px-3 py-2">
+            {showDeployment && (
+              <p
+                className="text-meta text-ink-muted"
+                data-testid="handoff-deployment"
+              >
+                {LOGIN_HANDOFF_DEPLOYMENT_COPY}
+              </p>
+            )}
+            {showOpenSession && (
+              // 수제 컨트롤이었다 (design-review H1): 경계가 `--line` 이라
+              // surface 위 1.32/1.43:1 로 WCAG 1.4.11 의 3:1 에 못 미쳤다.
+              // `outline` 변형이 같은 모양으로 `--line-strong`(3.59/3.56:1)을
+              // 들고 있고, 프리미티브에 없어서 남긴 것은 위 여백 하나뿐이다.
+              //
+              // 낱말은 LIVE-5 에서도 바뀌지 않는다 (LIVE-5b). 이 버튼은 이제
+              // 직접 조작 동선을 함께 실어 보내지만, 그 동선이 도착지에 **설지
+              // 말지는 여기서 알 수 없다**: 조작은 세션 소유자만 할 수 있고
+              // (증보 3 D1), 이 카드의 props 에는 소유자가 없다. 「직접 조작으로
+              // 이동」이라고 적어 두고 도착지에 조작 어포던스가 없으면 그것은
+              // 비활성 버튼보다 나쁜 거짓말이다 — 눌리기까지 한다. 그래서
+              // 낱말은 언제나 참인 것(이 버튼은 세션을 연다)에 머물고, 조작
+              // 어포던스는 소유자를 아는 쪽이 세운다.
+              <Button
+                variant="outline"
+                size="sm"
+                className="mt-2"
+                data-testid="handoff-open-session"
+                data-seeks-control={
+                  loginHandoffSeeksControl(card) ? "" : undefined
+                }
+                onClick={() =>
+                  onOpenWorkSession?.(card.sessionId!, {
+                    control: loginHandoffSeeksControl(card),
+                  })
+                }
+              >
+                작업 세션 열기
+              </Button>
+            )}
+          </div>
+        ) : null
+      }
+      footer={
+        note !== null ? (
+          <ApprovalNoteLine note={note} testIdPrefix="handoff-note" />
+        ) : card.approvalId !== null && !settled ? (
+          <ApprovalActions
+            approvalId={card.approvalId}
+            className="border-t border-line"
+            armed={armed}
+            setArmed={setArmed}
+            testIdPrefix="handoff"
+            lead={LOGIN_HANDOFF_DECISION.lead}
+            verbs={{
+              approve: LOGIN_HANDOFF_DECISION.resume,
+              reject: LOGIN_HANDOFF_DECISION.stop,
+              approveCommit: LOGIN_HANDOFF_DECISION.resumeCommit,
+              rejectCommit: LOGIN_HANDOFF_DECISION.stopCommit,
+              approveConfirm: LOGIN_HANDOFF_DECISION.resumeConfirm,
+              rejectConfirm: LOGIN_HANDOFF_DECISION.stopConfirm,
+            }}
+            onSettled={(outcome) => {
+              const next: {
+                status: ApprovalStatus;
+                decidedAtMs?: number;
+                decidedByMemberId?: string;
+                note?: string;
+              } = { status: outcome.status ?? "pending" };
+              if (outcome.decidedAtMs !== undefined) {
+                next.decidedAtMs = outcome.decidedAtMs;
+              }
+              if (outcome.decidedByMemberId !== undefined) {
+                next.decidedByMemberId = outcome.decidedByMemberId;
+              }
+              next.note = decisionNote(outcome).text;
+              setLocal(next);
+            }}
+          />
+        ) : null
+      }
+    >
+      {card.reason && <LabeledRow label="사유">{card.reason}</LabeledRow>}
+      {!settled && (
+        <LabeledRow label="상태" testId="handoff-waiting">
+          {/* 창이 이미 닫혔는데 아직 대기인 갈래에서 한 문장이 더 붙는다
+              (freeze M1). 국면은 승인 원장의 것이라 뒤집지 않고, 화면이
+              「지금도 조작 중」이라고 읽히는 것만 막는다. 문장도 조건도
+              코어가 답한다. */}
+          {loginHandoffWaitingCopy(card)}
+        </LabeledRow>
+      )}
+      {/* 경계 사실. 증보 3 D3이 에이전트에게 허락한 것과 같은 것만 그린다 —
+          정지 시각, 재개 시각, 그리고 어떻게 끝났는지. 프레임도 키도 여기 없고,
+          담을 칸조차 없다는 것이 이 세 행의 뜻이다. */}
+      {card.control !== null && (
+        <LabeledRow label="정지" testId="handoff-control-started">
+          <span data-numeric>{timeLabel(card.control.startedAtMs)}</span>
+        </LabeledRow>
+      )}
+      {card.control?.endedAtMs != null && (
+        <LabeledRow label="재개" testId="handoff-control-ended">
+          <span data-numeric>{timeLabel(card.control.endedAtMs)}</span>
+        </LabeledRow>
+      )}
+      {/* 「지금 누가 잡고 있다」는 행이 여기 있었고, 지웠다.
+          컨트롤 자리에 서는 `in-control` 줄이 같은 사실을 이미 말하고,
+          거기에 **다음에 무엇을 하면 되는지**까지 붙는다. 한 카드가 같은
+          사실을 두 번 말하면 읽는 사람은 두 가지가 일어났다고 읽는다. */}
+      {card.outcome !== null && (
+        <LabeledRow label="결과" testId="handoff-outcome">
+          {/* 표를 그대로 인덱싱하지 않는다 (freeze M2): 창 없이 `returned` 인
+              카드는 「화면을 돌려주었습니다」라고 말할 수 없다 — 이 배포에서는
+              아무도 잡은 적이 없고, 실행기가 모델에게 하는 말도 그렇다. */}
+          {loginHandoffOutcomeDetail(card)}
+        </LabeledRow>
+      )}
+      {card.phase === "stopped" && (
+        <LabeledRow label="결과" testId="handoff-stopped">
+          {/* 「실패」가 아니다. 사람이 멈춘 것은 사고가 아니므로 danger를 입지
+              않는다 (ADR-0132의 규칙, 침묵과 같은 계열).
+
+              문장도 조건도 코어가 답한다 (design-review H2·M1). 앞 판은 두
+              문장을 인라인으로 붙여 두었고, 그래서 창이 있었던 stopped 카드에서
+              바로 윗줄의 「정지」 행과 모순됐다. */}
+          {loginHandoffStoppedCopy(card)}
+        </LabeledRow>
+      )}
+      {settled && (decidedBy || decidedAtMs !== undefined) && (
+        <LabeledRow label="결정" testId="handoff-ledger">
+          <span data-numeric>
+            {[
+              decidedBy?.displayName,
+              decidedAtMs !== undefined ? timeLabel(decidedAtMs) : null,
+              card.approvalId ? `원장 #${ledgerHandle(card.approvalId)}` : null,
+            ]
+              .filter((part): part is string => Boolean(part))
+              .join(" · ")}
+          </span>
+        </LabeledRow>
+      )}
+    </CardFrame>
+  );
+}
+
+/**
+ * 한 칸의 결과. 세부(`896 통과`)가 있으면 그것이 글자이고, 없으면 결과 낱말(`통과`)
+ * 이 선다. 색은 결과가 지고, 세부가 낱말을 대신할 때는 보조기술을 위해 결과 낱말을
+ * 숨은 글자로 함께 싣는다 — 「896 통과」만 읽어서는 통과인지 실패인지 소리로 알 수
+ * 없기 때문이다.
+ *
+ * `<td>` 가 아니라 값(`<span>`) 하나다: 한 (표면,라벨) 셀에 겹친 칸이 여럿일 수
+ * 있어(중복 라벨), 그것들이 **한 칸 안에 쌓인다**(H1). `data-outcome` 은 각 값에
+ * 붙어 실패 칸이 초록에 접혀 사라지지 않는다.
+ */
+function GateCellValue({ check }: { check: CompletionCheck }) {
+  const toneClass = COMPLETION_TONE_CLASS[COMPLETION_CHECK_TONE[check.outcome]];
+  const label = COMPLETION_CHECK_OUTCOME_LABEL[check.outcome];
+  return (
+    <span className="block" data-outcome={check.outcome}>
+      <span className={cn("text-meta", toneClass)}>{check.detail ?? label}</span>
+      {check.detail !== undefined && <span className="sr-only"> {label}</span>}
+    </span>
+  );
+}
+
+/**
+ * 표면 × 게이트 표. 커서 벤치마크의 「Surface × Lint/Test/Build/Run」을 우리
+ * 원장에 실린 표면별 게이트 목록에서 재구성한다. 열(`completionGateColumns`)은
+ * **처음 본 순서**의 게이트 이름 합집합이고, 어떤 표면이 그 게이트를 안 돌렸으면
+ * 칸은 가운뎃점 하나로 비운다(없는 결과를 통과로도 실패로도 짓지 않는다).
+ *
+ * 한 (표면,라벨)에 칸이 여럿이면(중복 라벨) `completionCellChecks` 가 **전부**
+ * 돌려주고 이 셀이 그것들을 쌓는다 — 최악 톤이 앞이라 실패가 절대 접히지 않는다
+ * (H1). 열·셀 판정을 코어가 지므로 웹 표가 폰·집계와 같은 칸 집합을 그린다.
+ *
+ * 넓어질 수 있는 표라 자기 컨테이너 안에서 가로로 스크롤한다 — 페이지 몸통은
+ * 절대 가로로 밀리지 않는다(design-taste-web 반응형 규칙).
+ */
+function CompletionGateTable({ card }: { card: CompletionReportCard }) {
+  const columns = completionGateColumns(card.gates);
+  const counts = completionCheckCounts(card.gates);
+  const tally: Array<{ outcome: CompletionCheckOutcome; count: number }> = (
+    ["pass", "fail", "skip", "pending", "unknown"] as CompletionCheckOutcome[]
+  )
+    .map((outcome) => ({ outcome, count: counts[outcome] }))
+    .filter((entry) => entry.count > 0);
+  // 상한에 걸려 그리지 않은 것들(M3). 조용히 자르지 않고 개수를 말한다.
+  const omittedParts: string[] = [];
+  if (card.omitted.gates > 0)
+    omittedParts.push(`표면 ${formatCount(card.omitted.gates)}개 더`);
+  if (card.omitted.checks > 0)
+    omittedParts.push(`게이트 ${formatCount(card.omitted.checks)}개 더`);
+
+  return (
+    <div className="border-t border-line" data-testid="completion-gates">
+      <div className="overflow-x-auto">
+        <table className="w-full border-collapse">
+          <thead>
+            <tr className="border-b border-line">
+              <th
+                scope="col"
+                className="px-3 py-1 text-left text-meta font-medium text-ink-muted"
+              >
+                {COMPLETION_GATE_SURFACE_LABEL}
+              </th>
+              {columns.map((col) => (
+                <th
+                  key={col}
+                  scope="col"
+                  className="px-3 py-1 text-left text-meta font-medium text-ink-muted"
+                >
+                  {col}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {card.gates.map((row, rowIndex) => (
+              // 표면 이름이 겹쳐도 key 가 충돌하지 않게 index 를 함께 짠다(H1).
+              <tr
+                key={`${row.surface}::${rowIndex}`}
+                data-testid="completion-gate-row"
+              >
+                <th
+                  scope="row"
+                  className="px-3 py-1 text-left text-body font-medium text-ink"
+                >
+                  {row.surface}
+                </th>
+                {columns.map((col) => {
+                  const cellChecks = completionCellChecks(row, col);
+                  if (cellChecks.length === 0) {
+                    return (
+                      <td
+                        key={col}
+                        className="px-3 py-1 text-meta text-ink-muted"
+                        aria-hidden="true"
+                      >
+                        ·
+                      </td>
+                    );
+                  }
+                  return (
+                    <td key={col} className="px-3 py-1 align-baseline">
+                      {/* 겹친 칸은 한 셀 안에서 한 줄씩 쌓인다. 틈은 닫힌 간격
+                          스케일의 1px 실선(`gap-px`)이다 — `gap-0.5`(2px)는 스케일
+                          밖이라 `--spacing: initial` 아래서 조용히 0px 로 죽는다. */}
+                      <span className="flex flex-col gap-px">
+                        {cellChecks.map((check, i) => (
+                          <GateCellValue
+                            key={`${row.surface}::${col}::${i}`}
+                            check={check}
+                          />
+                        ))}
+                      </span>
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {tally.length > 0 && (
+        <p className="px-3 py-2 text-meta text-ink-muted" data-testid="completion-tally">
+          {tally.map((entry, index) => (
+            <span key={entry.outcome}>
+              {index > 0 && " · "}
+              {COMPLETION_CHECK_OUTCOME_LABEL[entry.outcome]}{" "}
+              <span data-numeric>{formatCount(entry.count)}</span>
+            </span>
+          ))}
+        </p>
+      )}
+      {omittedParts.length > 0 && (
+        <p
+          className="px-3 pb-2 text-meta text-ink-muted"
+          data-testid="completion-omitted"
+        >
+          {omittedParts.join(" · ")}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * 작업 완료 리포트 카드 (UXC-A / 커서 웹 ADE 벤치마크 §3-A).
+ *
+ * 에이전트가 긴 작업을 끝내고 자기가 무엇을 했는지 설명하는 카드다. 승인 카드
+ * 가족의 `CardFrame` 을 그대로 쓰되 결정 컨트롤이 없다 — 끝난 일의 기록이라
+ * 승인·거부할 것이 없다. 그래서 키보드 y/n 도, footer 도 서지 않는다.
+ *
+ * 읽는 순서는 벤치마크 그대로다: ①한 문단 요약 ②경과 시간 ③무엇을 했는가(왜까지)
+ * ④표면×게이트 표. 판정은 전부 코어가 지고(요약/불릿/표는 파싱, 결과는 집계) 이
+ * 파일은 옷만 입힌다.
+ */
+function CompletionReportBody({ card }: { card: CompletionReportCard }) {
+  const elapsed = card.elapsedMs !== undefined ? formatElapsed(card.elapsedMs) : "";
+  return (
+    <CardFrame
+      icon={<ClipboardCheck className="size-4" aria-hidden="true" />}
+      title={card.title}
+      chip={<CompletionReportChip outcome={card.outcome} />}
+      status={card.outcome}
+      kind="completion_report"
+      detail={card.detail}
+      // 표는 <dl> 밖에 서야 유효한 HTML 이다(테이블은 dl 안에 들 수 없다). note
+      // 슬롯이 정확히 그 자리다 — dl(요약·시간·불릿) 다음, 숨김 개수 앞.
+      note={card.gates.length > 0 ? <CompletionGateTable card={card} /> : null}
+    >
+      {card.summary && (
+        <LabeledRow label="요약" testId="completion-summary">
+          {card.summary}
+        </LabeledRow>
+      )}
+      {elapsed !== "" && (
+        // 성과의 단위(벤치마크 차용 C). 숫자와 한글 단위가 섞이므로 자릿폭 고정을
+        // 걸지 않는다 — 걸면 음절 사이가 벌어진다(코어 `formatElapsed` 독스트링).
+        // 낱말은 코어의 것이다: 작업 세션 정보의 같은 줄이 같은 상수를 쓴다(#1468).
+        <LabeledRow label={WORKED_ELAPSED_LABEL} testId="completion-elapsed">
+          {elapsed}
+        </LabeledRow>
+      )}
+      {card.actions.length > 0 && (
+        <LabeledRow label="한 일" testId="completion-actions">
+          <ul className="list-disc space-y-1 pl-4 marker:text-ink-muted">
+            {card.actions.map((action, index) => (
+              <li key={index}>
+                {action.text}
+                {action.note && (
+                  // 왜. 커서의 「pinned 1.83 couldn't build it」 자리다. 가장 조용한
+                  // 격으로 — 읽으면 좋고 안 읽어도 무엇을 했는지는 위 줄이 말한다.
+                  <span className="mt-px block text-meta text-ink-muted">
+                    {action.note}
+                  </span>
+                )}
+              </li>
+            ))}
+            {card.omitted.actions > 0 && (
+              // 상한에 걸려 그리지 않은 불릿(M3). 조용히 자르지 않는다.
+              <li className="text-ink-muted" data-testid="completion-actions-omitted">
+                그 밖에 {formatCount(card.omitted.actions)}개 더
+              </li>
+            )}
+          </ul>
         </LabeledRow>
       )}
     </CardFrame>
@@ -560,12 +1051,30 @@ function CardFrame({
 export function AgentCard({
   card,
   directory,
+  onOpenWorkSession,
 }: {
   card: AgentCardModel;
   directory: Directory;
+  /**
+   * 작업 세션 상세로 가는 문. 로그인 핸드오프 카드만 쓴다. 없으면 딥링크 자체가
+   * 그려지지 않는다 — 없는 방으로 가는 문을 그리지 않는다는 이 레포의 규율.
+   */
+  onOpenWorkSession?: OpenWorkSession;
 }) {
   if (card.kind === "approval") {
     return <ApprovalBody card={card} directory={directory} />;
+  }
+  if (card.kind === "login_handoff") {
+    return (
+      <LoginHandoffBody
+        card={card}
+        directory={directory}
+        {...(onOpenWorkSession !== undefined ? { onOpenWorkSession } : {})}
+      />
+    );
+  }
+  if (card.kind === "completion_report") {
+    return <CompletionReportBody card={card} />;
   }
   if (card.kind === "tool") return <ToolBody card={card} />;
   return <TurnBody card={card} />;

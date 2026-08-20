@@ -28,6 +28,9 @@
 //                        (WCAG 2.5.8).
 //  10. 아바타가 얼굴이다 32px, 사람과 에이전트가 모양으로도 갈리고, 명부에 없는
 //                        작성자는 uuid 첫 글자를 이니셜인 척 그리지 않는다.
+//  11. 빈 채널의 첫 문이  메시지 0인 채널에서 맨 앞에 서는 액션이 「첫 메시지
+//      이 컴포저다        쓰기」이고, 누르면 캐럿이 이 컴포저에 온다. 멤버 추가는
+//      (#1536)            지워지지 않고 뒤에 서며, 위계는 채움 순서로 잰다.
 //
 // 이름 붙은 red proof (전부 CSS/DOM/저장소만 건드린다 — 제품 소스는 그대로다):
 //   COMPOSER_GATE_PROVE_RED_DRAFT=1     "a half-written message did not survive"
@@ -36,15 +39,18 @@
 //   COMPOSER_GATE_PROVE_RED_TOMBSTONE=1 "the fold hides a count it refuses to state"
 //   COMPOSER_GATE_PROVE_RED_STANDIN=1   "a quote into a folded tombstone lands nowhere"
 //   COMPOSER_GATE_PROVE_RED_TAP=1       "a finger cannot reliably hit the fold toggle"
+//   COMPOSER_GATE_PROVE_RED_FIRST_ACTION=1
+//     "an empty channel offers no door to the first message" — 실측 F5 당시의
+//     화면 그대로다: 첫 행동 버튼을 DOM에서 걷어내면 멤버 추가 하나만 남는다.
 //
 // 값의 정본은 소스를 읽는다(`--touch-target`, `AVATAR_SIZE`). 여기 베껴 적으면
 // 두 벌이 조용히 갈라지고, 이 레포는 U4-4R W-2에서 그 값을 이미 치렀다.
 
-import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
+import { startGuardedPreview } from "./preview-guard.mjs";
 
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -93,9 +99,33 @@ function composerOfflineCopy() {
   return match[1];
 }
 
+/**
+ * 빈 대화가 내놓는 두 액션의 라벨. 정본은 코어다 (#1536) — 오프라인 문장과 같은
+ * 이유로, 그리고 같은 방법으로 읽는다. 여기 손으로 적으면 이 게이트는 화면을
+ * 지키는 것이 아니라 화면의 문장이 고쳐지는 것을 막는 쪽이 된다.
+ */
+function emptyActionLabels() {
+  const source = readFileSync(
+    resolve(webRoot, "../../packages/momo-core/src/features/timeline/model.ts"),
+    "utf8"
+  );
+  const read = (name) => {
+    const match = source.match(
+      new RegExp(`export const ${name}\\s*=\\s*"([^"]+)"`)
+    );
+    if (match === null) throw new Error(`코어의 ${name}을 읽지 못했다`);
+    return match[1];
+  };
+  return {
+    write: read("EMPTY_WRITE_ACTION_LABEL"),
+    addMember: read("EMPTY_ADD_MEMBER_ACTION_LABEL"),
+  };
+}
+
 const TOUCH_TARGET = touchTargetPx();
 const AVATAR_SIZE = avatarSizePx();
 const COMPOSER_OFFLINE_COPY = composerOfflineCopy();
+const EMPTY_ACTIONS = emptyActionLabels();
 
 const port = Number(process.env.COMPOSER_GATE_PORT || 5198);
 const origin = `http://127.0.0.1:${port}`;
@@ -113,6 +143,8 @@ const proveRedGrow = process.env.COMPOSER_GATE_PROVE_RED_GROW === "1";
 const proveRedTombstone = process.env.COMPOSER_GATE_PROVE_RED_TOMBSTONE === "1";
 const proveRedStandIn = process.env.COMPOSER_GATE_PROVE_RED_STANDIN === "1";
 const proveRedTap = process.env.COMPOSER_GATE_PROVE_RED_TAP === "1";
+const proveRedFirstAction =
+  process.env.COMPOSER_GATE_PROVE_RED_FIRST_ACTION === "1";
 
 // 접힐 묘비 넷과, 그중 하나를 가리키는 인용 답글.
 const TOMB_HEAD = "0199cccc-0000-7000-8000-0000000000c1";
@@ -542,19 +574,6 @@ async function installRoutes(context) {
 
     return json(route, {});
   });
-}
-
-async function waitForServer() {
-  const deadline = Date.now() + 30_000;
-  while (Date.now() < deadline) {
-    try {
-      if ((await fetch(origin)).ok) return;
-    } catch {
-      /* preview 서버가 아직 뜨는 중 */
-    }
-    await wait(200);
-  }
-  throw new Error("composer gate preview server never came up");
 }
 
 function rowLocator(page, messageId) {
@@ -1081,6 +1100,138 @@ async function exerciseTouch(browser) {
   await context.close();
 }
 
+// ---- 11. 빈 채널의 첫 문 (#1536, 온보딩 실측 F5) -----------------------------
+//
+// 실측이 잡은 것: 첫 로그인 직후 채널 2개·메시지 0인 화면에서 채널 분기가 내놓는
+// 유일한 액션이 `멤버 초대하기`였다. 기능은 전부 있었다 — 컴포저도 바로 아래
+// 있었고 `첫 메시지 쓰기`도 DM 분기에 이미 있었다. 없던 것은 **그 둘을 잇는
+// 문장**이고, 그래서 이 절의 질문은 「버튼이 있는가」가 아니라 「빈 채널에서 맨
+// 앞에 선 것이 첫 메시지로 가는 문인가」다.
+//
+// 채널 B의 메시지를 이 판에서만 비운다. Playwright는 나중에 등록한 라우트를 먼저
+// 보므로 이 한 줄이 `installRoutes`의 것을 이기고, 나머지 경로는 그대로 흐른다
+// (`route.fallback()`).
+async function exerciseEmptyFirstAction(browser) {
+  const context = await browser.newContext({
+    viewport: { width: 1280, height: 900 },
+    reducedMotion: "reduce",
+  });
+  const page = await context.newPage();
+  await installRealtimeSocket(page);
+  await installRoutes(context);
+  // GET 만 가로챈다. 전송(POST)까지 이 빈 배열로 답하면 「빈 채널에서 첫 줄을
+  // 보내면 무엇이 보이나」를 다음에 재려는 사람이 조용히 틀린 판 위에 선다.
+  await context.route("**/v1/**/messages*", (route) => {
+    const request = route.request();
+    return request.method() === "GET" && request.url().includes(channelB)
+      ? json(route, { messages: [] })
+      : route.fallback();
+  });
+  await login(page);
+  await openChannel(page, channelB);
+
+  const empty = page.getByTestId("timeline-empty");
+  await empty.waitFor({ state: "visible", timeout: 15_000 });
+  const emptyKind = await empty.getAttribute("data-empty-kind");
+  if (emptyKind !== "channel") {
+    throw new Error(`빈 채널인데 빈 상태가 "${emptyKind}"라고 말한다`);
+  }
+
+  if (proveRedFirstAction) {
+    // red seam: 첫 행동 버튼만 DOM에서 걷어낸다 = F5 당시의 화면(멤버 추가 하나뿐).
+    await page.evaluate(() => {
+      document.querySelector('[data-testid="timeline-empty-primary"]')?.remove();
+    });
+  }
+
+  // 순서는 DOM 순서다. 「맨 앞」이 곧 탭이 먼저 닿는 자리이고, 빈 상태가 답해야
+  // 하는 질문(다음에 무엇을 하나)의 답이다.
+  const actions = await empty.locator("button").evaluateAll((nodes) =>
+    nodes.map((node) => ({
+      testid: node.dataset.testid,
+      kind: node.dataset.actionKind,
+      label: (node.textContent ?? "").trim(),
+      fill: getComputedStyle(node).backgroundColor,
+      borderWidth: Number.parseFloat(getComputedStyle(node).borderTopWidth),
+      borderStyle: getComputedStyle(node).borderTopStyle,
+    }))
+  );
+  console.log(
+    `[empty] 액션 ${actions.length}개: ` +
+      actions.map((a) => `${a.label}(${a.kind})`).join(" > ")
+  );
+
+  const [first, second] = actions;
+  if (first === undefined || first.kind !== "write") {
+    throw new Error(
+      "an empty channel offers no door to the first message: 맨 앞에 선 액션이 " +
+        `${first ? `「${first.label}」(${first.kind})` : "없다"}. 실측 F5가 잡은 ` +
+        "화면이 바로 이것이다 — 첫 실행에서 사람이 첫 메시지가 아니라 초대로 간다"
+    );
+  }
+  if (first.label !== EMPTY_ACTIONS.write) {
+    throw new Error(
+      `첫 행동의 이름이 코어와 다르다: 화면 「${first.label}」 vs 코어 ` +
+        `「${EMPTY_ACTIONS.write}」`
+    );
+  }
+  if (second === undefined || second.kind !== "add-member") {
+    throw new Error(
+      "빈 채널의 멤버 추가가 사라졌다: 이 클라에서 「채널에 멤버 추가」로 가는 문은 " +
+        "여기 하나뿐이라(AppShell), 강등이 아니라 삭제가 되면 기능 하나가 없어진다"
+    );
+  }
+  if (second.label !== EMPTY_ACTIONS.addMember) {
+    throw new Error(
+      `멤버 추가의 이름이 코어와 다르다: 화면 「${second.label}」 vs 코어 ` +
+        `「${EMPTY_ACTIONS.addMember}」`
+    );
+  }
+  if (actions.length !== 2) {
+    throw new Error(`빈 채널의 액션이 2개가 아니라 ${actions.length}개다`);
+  }
+
+  // 위계는 값이 아니라 **관계**다 (디자인 시스템 §3). 주 액션의 채움은 이 창이
+  // 이미 accent 채움을 주는 컨트롤 — 컴포저의 보내기 — 과 같아야 하고, 보조는 그
+  // 채움을 입지 않은 채 자기 윤곽으로 선다.
+  const sendFill = await page
+    .getByTestId("composer-send")
+    .evaluate((node) => getComputedStyle(node).backgroundColor);
+  if (first.fill !== sendFill) {
+    throw new Error(
+      `첫 행동의 채움(${first.fill})이 이 창의 주 액션 채움(${sendFill})과 다르다`
+    );
+  }
+  if (second.fill === first.fill) {
+    throw new Error(
+      `두 액션이 같은 옷(${first.fill})을 입었다: 같은 자리에 같은 옷 두 벌은 ` +
+        "「둘 중 아무거나」라고 말하는 것이고, 그것은 첫 행동을 묻는 사람에게 답이 아니다"
+    );
+  }
+  if (second.borderStyle === "none" || !(second.borderWidth >= 1)) {
+    throw new Error(
+      `보조 액션에 윤곽이 없다(${second.borderStyle} ${second.borderWidth}px): ` +
+        "채움도 윤곽도 없으면 그것은 물러선 것이 아니라 사라진 것이다"
+    );
+  }
+
+  // 그리고 그 문은 실제로 컴포저로 열린다. 캐럿이 오는 것이 전부다 — 가짜 타이핑도
+  // 스크롤도 아니다.
+  await empty.getByTestId("timeline-empty-primary").click();
+  await wait(200);
+  const focused = await page.evaluate(
+    () => document.activeElement?.getAttribute("data-testid") ?? null
+  );
+  if (focused !== "composer-input") {
+    throw new Error(
+      `첫 메시지 쓰기를 눌렀는데 캐럿이 컴포저에 오지 않았다 (focus: ${focused})`
+    );
+  }
+  console.log("[empty] 첫 행동 → 캐럿이 컴포저에 도착");
+
+  await context.close();
+}
+
 /** 리뷰용 스크린샷 (SKILL §11). 판정하지 않는다. */
 async function captureShots(browser) {
   const outDir = resolve(webRoot, "artifacts/composer");
@@ -1123,24 +1274,24 @@ async function main() {
   if (!existsSync(resolve(webRoot, "dist/index.html"))) {
     throw new Error("dist/ is missing. Run npm run build first.");
   }
-  const server = spawn(
-    resolve(webRoot, "node_modules/.bin/vite"),
-    ["preview", "--port", String(port), "--strictPort", "--host", "127.0.0.1"],
-    { cwd: webRoot, stdio: "ignore" }
-  );
+  const server = await startGuardedPreview({
+    webRoot,
+    port,
+    portEnvVar: "COMPOSER_GATE_PORT",
+  });
   try {
-    await waitForServer();
     const browser = await chromium.launch();
     try {
       await exerciseComposer(browser);
       await exerciseTimeline(browser);
       await exerciseTouch(browser);
+      await exerciseEmptyFirstAction(browser);
       if (process.env.COMPOSER_GATE_SHOTS === "1") await captureShots(browser);
     } finally {
       await browser.close();
     }
   } finally {
-    server.kill("SIGTERM");
+    await server.stop();
   }
   console.log("GATE PASS: 쓰던 글은 채널 전환과 새로고침을 넘겼고, 끊긴 동안에는");
   console.log("           막고 이유를 말했고, 감긴 한 문단이 상자를 키웠고, ↵를");
@@ -1149,7 +1300,8 @@ async function main() {
   console.log("           복구 표지에서 seq가 사라지고 낭독이 자리를 되찾았고,");
   console.log("           묘비 넷이 한 줄로 접히고도 그 줄이 몇 개를 대신하는지");
   console.log("           말했으며 그 줄이 인용의 착지점이 되었고, 손가락 타깃과");
-  console.log("           아바타가 각자의 바닥선을 넘었다.");
+  console.log("           아바타가 각자의 바닥선을 넘었으며, 빈 채널의 맨 앞에 선");
+  console.log("           문이 첫 메시지로 열렸다(멤버 추가는 뒤에 그대로 서 있다).");
 }
 
 await main();

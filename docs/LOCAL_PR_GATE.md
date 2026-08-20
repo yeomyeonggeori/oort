@@ -59,6 +59,21 @@ profile switch, so focused `web` and `secrets` runs cannot bypass it:
   numeric prefixes before any database connection. `037_name.sql` and
   `37_other.sql` are treated as the same number. `scripts/migrate.sh` runs the
   same check before psql discovery, so a missing psql cannot hide a collision.
+- `cargo fmt --all --check` over **both** cargo workspaces — `server-rust` and
+  `clients/desktop/src-tauri` — in 0.6s (#1472). The `--all` is load-bearing:
+  both manifests are virtual workspaces, so `cargo fmt --check --manifest-path
+  …` without it exits 1 with `Failed to find targets` and checks nothing, which
+  is the form AGENTS.md carried until #1472 and the reason three workers each
+  hand-formatted only their own files instead. The check covers the whole
+  workspace rather than the changed files, so inherited drift blocks the next
+  Rust PR by design — that is what stops it accumulating the way it did between
+  #1377 and #1472. The step prints the local rustfmt beside the
+  `GATE_RUSTFMT_BASELINE` recorded in the script and announces a mismatch
+  without failing: the repo pins no `rust-toolchain.toml` (#1442), no rustfmt
+  skew has ever actually been measured here, and that line exists to identify
+  the first one rather than to enforce a toolchain. Absent `cargo`/`rustfmt`
+  fails closed with install guidance — a skipped fmt check is the hole this
+  closed.
 
 To enable the same skew check before every push, explicitly install the optional
 hook:
@@ -116,7 +131,7 @@ Profiles:
 
 | Profile | Use when | What it runs |
 |---|---|---|
-| `docs` | docs/spec/script-only changes, including internal alpha runbook/feedback/AWS topology updates | whitespace diff, **secret scan over all refs (#1236)**, workflow YAML parse, actionlint if installed, e2e compose config, AWS internal alpha topology preflight fixture, **Rust publish + self-host image-mode contracts (#1266)**, NCP Centrifugo internal-only contract + mutation/redaction fixtures (#1329), JSON/shell/Python syntax, Hermes adapter smoke, prime adapter contract tests + closed-loop smoke (`adapters/prime/tests/`, no docker/network/credential) |
+| `docs` | docs/spec/script-only changes, including internal alpha runbook/feedback/AWS topology updates | whitespace diff, **`cargo fmt --all --check` over both cargo workspaces (#1472)**, **secret scan over all refs (#1236)**, workflow YAML parse, actionlint if installed, e2e compose config, AWS internal alpha topology preflight fixture, **Rust publish + self-host image-mode contracts (#1266)**, NCP Centrifugo internal-only contract + mutation/redaction fixtures (#1329), JSON/shell/Python syntax, Hermes adapter smoke, prime adapter contract tests + closed-loop smoke (`adapters/prime/tests/`, no docker/network/credential) |
 | `swift` | 잔존 Swift 트리(`server`·`relay/*`·`workers/*`·`services/*`) 변경 | `docs` profile + `make swift-build` + `make swift-test`. **mac 디자인 pre-flight 래칫과 SwiftPM 라이선스 게이트는 W-S1(#1215/#1201)에서 은퇴** — 후속은 각각 `design_preflight_web.sh`(web/병합 트리)와 `--profile license`(cargo+npm) |
 | `diagnostics` | diagnostics/observability bundle changes | `docs` profile + `scripts/collect_diagnostics.sh --smoke` redaction check |
 | `staging-smoke` | staging/prod/internal-hosting/NCP Rust config or runbook changes that do not have real VPS secrets | `docs` profile + `scripts/verify_staging_smoke.sh` + `scripts/verify_internal_hosting_smoke.sh` for prod compose config, internal single-node smoke overlay, Caddyfile structure, Centrifugo Redis config, API health route wiring, relay/worker enablement, secret-template guard, public/staging preflight evidence markdown/json, and SOPS/pgBackRest checklist. The static block also fixes the Rust/NCP edge 403, shared-secret source, rotation-runbook, and redacted verifier contracts |

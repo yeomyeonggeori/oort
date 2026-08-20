@@ -61,6 +61,7 @@ export function SkeletonRows({
 export function InlineBanner({
   tone = "error",
   message,
+  messageId,
   items,
   icon,
   actionLabel,
@@ -72,6 +73,16 @@ export function InlineBanner({
 }: {
   tone?: "error" | "neutral";
   message: string;
+  /**
+   * id on the SENTENCE, so a control this banner explains can point at it with
+   * `aria-describedby` (#1559: 잠긴 컨트롤은 사유를 든다).
+   *
+   * On the sentence and not on the box, because a describedby aimed at the
+   * wrapper drags the action button's label in with it: a reader asking a greyed
+   * control why it is grey would hear the reason and then "다시 시도" as though
+   * that were part of the same sentence.
+   */
+  messageId?: string;
   /** Rendered as a real list under `message`. Omit for a one-sentence banner. */
   items?: readonly string[];
   /**
@@ -131,7 +142,9 @@ export function InlineBanner({
       {/* Wraps, never truncates: this banner also runs in the sidebar column,
           and half an error message is worse than none. */}
       <div className="flex min-w-0 flex-1 flex-col gap-1">
-        <Message className="break-words">{message}</Message>
+        <Message id={messageId} className="break-words">
+          {message}
+        </Message>
         {items && items.length > 0 && (
           <ul className="flex list-outside list-disc flex-col gap-1 ps-4">
             {items.map((item) => (
@@ -156,8 +169,14 @@ export function InlineBanner({
 }
 
 /**
- * Empty state: one line of copy plus at most two equal actions. Left-aligned
- * and quiet, never a centered illustration poster.
+ * Empty state: one line of copy plus at most two actions. Left-aligned and
+ * quiet, never a centered illustration poster.
+ *
+ * 둘일 때 그 둘은 **동급이 아니다** (#1536). 이 상자는 위계를 강제하지 않고
+ * (`actions`가 노드를 그대로 받는다) 호출자가 디자인 시스템 §3 채움 순서로 그것을
+ * 말한다 — 빈 채널이 `첫 메시지 쓰기`(채움)와 `멤버 추가하기`(윤곽)를 그 순서로
+ * 넘긴다. 같은 자리에 같은 옷 두 벌을 세우면 그 화면은 「둘 중 아무거나」라고 말하게
+ * 되고, 그것은 첫 행동을 묻는 사람에게 답이 아니다.
  *
  * Same `break-keep` as the banner above, for the same reason and by the same
  * rule: these two are the file's Korean prose surfaces, so the rule applies to

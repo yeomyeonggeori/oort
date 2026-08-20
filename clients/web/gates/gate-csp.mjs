@@ -40,11 +40,11 @@
 // BREAKS a surface, not one that merely reports on it.
 // =============================================================================
 
-import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
+import { startGuardedPreview } from "./preview-guard.mjs";
 
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const tauriConfigPath = resolve(webRoot, "../desktop/src-tauri/tauri.conf.json");
@@ -86,6 +86,7 @@ const workSession = {
   observation: "open",
   observerGrantCount: 0,
   remoteAttachAvailable: true,
+  remoteDisplayAvailable: false,
   startedAtMs: Date.now() - 10_000,
 };
 
@@ -197,38 +198,21 @@ async function installMocks(context) {
   });
 }
 
-async function waitForServer() {
-  const deadline = Date.now() + 30_000;
-  while (Date.now() < deadline) {
-    try {
-      const response = await fetch(origin);
-      if (response.ok) return response;
-    } catch {
-      // Vite is still starting.
-    }
-    await new Promise((resolve) => setTimeout(resolve, 200));
-  }
-  throw new Error("preview server never came up");
-}
-
 async function main() {
   if (!existsSync(resolve(webRoot, "dist/index.html"))) {
     throw new Error("dist/ is missing. Run npm run build first.");
   }
 
   const csp = cspForRun();
-  const server = spawn(
-    resolve(webRoot, "node_modules/.bin/vite"),
-    ["preview", "--port", String(port), "--strictPort", "--host", "127.0.0.1"],
-    {
-      cwd: webRoot,
-      env: { ...process.env, MOMO_CSP_GATE_HEADER: csp },
-      stdio: "ignore",
-    }
-  );
+  const server = await startGuardedPreview({
+    webRoot,
+    port,
+    portEnvVar: "CSP_GATE_PORT",
+    env: { ...process.env, MOMO_CSP_GATE_HEADER: csp },
+  });
 
   try {
-    const probe = await waitForServer();
+    const probe = server.probe;
     const header = probe.headers.get("content-security-policy");
     if (header !== csp) {
       throw new Error(
@@ -288,7 +272,7 @@ async function main() {
       await browser.close();
     }
   } finally {
-    server.kill("SIGTERM");
+    await server.stop();
   }
 
   console.log("GATE PASS: tauri.conf.json CSP reached preview unchanged and allowed login, shell, and xterm.");

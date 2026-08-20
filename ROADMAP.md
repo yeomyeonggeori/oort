@@ -27,6 +27,21 @@
 
 **모바일 5 feature vs 웹 23이 지금의 가장 큰 격차다.** 서버가 주는 에이전트 운영·작업 관전을 폰이 표면화하지 않으면, 그건 에이전트 네이티브 메신저가 아니라 봇이 있는 채팅이다(ADR-0101이 거부한 자리). 진단 정본 = `docs/planning/2026-08-03-roadmap-diagnosis.md`.
 
+### 런칭 보조축 — Bring your hosted agent (병렬 · ADR-0162 Accepted)
+
+> **이 축은 v0의 관전·승인·대화 임계경로를 대체하거나 늦추지 않는다.** 이미 호스팅된 외부 에이전트를 oort 팀메이트로 데려오는 진입 장벽을 낮춰 런칭 메시지와 초기 유입을 보강하는 병렬 축이다. 제품 약속은 벤더 중립인 **“Bring your hosted agent”**이고, Grok Bot은 첫 설정 프리셋이자 실증 대상으로 둔다. ADR-0162의 보안·lifecycle 경계는 2026-08-12 성재 승인으로 Accepted됐고, HAP-E1~E7·UX1~4·Grok E2E는 #1358~#1369와 `BUILD_TICKETS.md`에 결속됐다. 첫 wave는 custom static bearer만 지원하며, OAuth AS/동의 표면은 #1368/#1369가 모두 닫힐 때까지 광고하지 않는다.
+
+| 권장 순서 | 실질 작업 | 기대효과 | 진행 게이트 |
+|---|---|---|---|
+| **R. 계약 교정 — 완료** | #1343에서 코드·공식 자료를 다시 대조하고, 원격 MCP·기존 agent gateway·credential·pairing 경계를 ADR과 실행계획에 고정했다. ACP live-chain은 #1345의 별도 감사 레인, managed/self-host catalog는 ADR-0163의 deferred 결정 레인으로 분리했다. | 이미 있는 원장·게이트웨이를 중복 구축하거나 Grok 전용 코어를 만드는 일을 막는다. | #1343 완료 · ADR-0162 Accepted |
+| **0. Grok trial-first 실측 — 완료** | 공식 앱·personal account에서 구매 없이 Bot 1개와 기본 채팅을 만들었다. 공식 MIT `Create Plugin`으로 비공개 로컬 plugin에 공개 Agent Port URL을 등록했고, Grok/Cursor loader의 `POST initialize`와 `GET`이 아직 없는 Rust route에서 HTTP/2 404로 끝나는 것을 확인했다. 비활성 monthly routine의 수동 Test run은 약 1분 뒤 성공했으며 routine 삭제와 connector uninstall의 서로 다른 잔여 동작도 측정했다. | 결제 없이 Grok 쪽 custom MCP transport와 routine 표면이 실제로 존재함을 확인하고, 실패 지점을 provider 추정이 아니라 oort route 부재로 좁혔다. connector UI 제거 뒤 로컬 plugin source가 남는다는 사실도 해제 UX의 이중 확인 근거가 됐다. | #1344 측정 완료; auth/pairing/tool call/full E2E는 HAP-E2/E3 및 Grok E2E로 이관 |
+| **1. 범용 연결 기반** | #1358에서 에이전트 credential 발급·회전·폐기를, #1363에서 modern MCP 2026-07-28 core와 exact 2025-11-25 sessionless adapter를, #1364에서 만료되는 1회 pairing proof를 추가한다. Grok 0.16.0 compatibility는 실제 initialize version이 일치할 때만 claim한다. 봇이 proof를 들고 먼저 접속하고 사람이 감지 결과를 확인한다. v0는 `1 Bot=1 connection=1 dedicated agent member=1 routine`으로 격리하고, 별도 active credential proof와 전용 member unpause 뒤에만 협업 권한을 연다. 외부 봇 목록 스크래핑은 하지 않는다. | 어떤 hosted agent든 같은 보안 경계와 최소 권한으로 연결할 수 있고, 한 연결의 해제가 다른 runtime을 멈추지 않으며 Grok 정책 변화가 코어를 흔들지 않는다. | binding 완료; #1358/#1363은 #1344 ADR landing 뒤 `status:ready`; OAuth는 #1368→#1369 후속 |
+| **2. 인박스·게이트웨이 접합** | 채널별 `message.seq` 충돌을 피하는 durable agent inbox cursor를 만들고 기존 gateway의 lease·dedupe·complete·message write 경로에 얇게 연결한다. 새 작업 원장은 만들지 않는다. | 외부 에이전트가 여러 채널의 일을 유실·중복 없이 가져가고 결과를 oort의 기존 감사·메시지 흐름에 남긴다. | runtime DB/MCP replay·idempotency 증거 |
+| **3. 연결·해제 UX** | 웹/Tauri 에이전트 허브에서 제공자 선택 → 설정값/코드 → 대기 → 감지 → 이름·채널·권한 확인 → 별도 active credential 검증과 전용 member unpause → 활성화 → 테스트 멘션을 제공한다. v0은 **1 Bot = 1 connection = 1 dedicated agent member = 1 deterministic routine**이며 모바일은 상태 읽기 전용이다. | “설치형 봇을 새로 운영”하지 않고 이미 쓰는 에이전트를 팀메이트로 데려오며, 한 연결의 해제가 다른 runtime을 멈추지 않는 경험을 짧고 설명 가능하게 만든다. | 엔진 handoff 후 UXUI goal + design review |
+| **4. 정리 폐곡선·Grok 증거** | 해제 즉시 로컬 credential을 폐기하고 새 job·write를 막은 뒤 `cleanup_pending`에서 Grok routine, MCP connector와 setup이 만든 local plugin source를 서로 다른 정리 대상으로 안내·확인한다. 공개 삭제 API가 없으면 사용자 확인으로 닫고, 기존 멤버·메시지·작업 이력은 보존한다. 마지막으로 Grok 1개 봇의 pair→work→disconnect를 증거화한다. | 접근권한은 즉시 끊으면서 외부 자동화 잔재를 숨기지 않는다. 검증된 범위만 “Grok Bot도 연결” 메시지로 말할 수 있다. | #1344 cleanup 관측 + 후속 real E2E; 자동·연쇄 삭제 주장 금지 |
+
+**ACP·셀프호스팅 경계:** `work_tool_profile` 원장과 Rust T3 소비 경로는 이미 존재한다. #1345는 이를 “부재”로 전제하지 않고, 퇴역한 Swift `MomoACPHost` 이후의 현행 stdio ACP/BYOA 포장·호스팅 갭을 재감사한다. 이 레인은 hosted-agent 원격 MCP 런칭 보조축의 선행조건이 아니며, 공통 credential·catalog 계약이 생길 때만 의존성을 연결한다.
+
 ### 서버 — Rust/Axum 재작성 진행 중 (ADR-0145)
 
 ```
@@ -292,6 +307,20 @@ MOMO-180은 Paca/OpenHands/Linear/Rovo/GitHub Copilot/Slack/MCP/A2A 흐름을 �
 - **푸시 (ADR-0120):** Dawn 운영 오픈소스 PushRelay + id-only 페이로드(대화 내용 Dawn 비경유) + outbox 소비 단일 notifier(판정 한 곳, P9) + 전면 무료·rate limit. 서버측 P-1(등록 REST)/P-2(notifier)는 iOS 앱 전 선행 가능 — 웹 첫 배치 뒤 발급. relay 배포·Apple Developer 계정은 별도 실행 결정.
 - **셀프호스팅 배포판 (ADR-0121):** install/upgrade 스크립트(ADR-0002 승계)+"5분 설치" 문서+단일노드 상한 명시, universal link 초대(웹 랜딩 우선, 검증은 셀프호스트 서버), BM=Zulip 모델(전 기능 무료, 수익은 호스팅/relay/지원), 기본 공개 서버 비내장. S 배치는 웹 배치 랜딩 후 순차.
 - **리전:** 멀티 리전은 비채택이 업계 표준(Slack 코어도 단일 리전) — 단일 노드+확장 레버(`docs/DEPLOY.md` §11) 유지가 결정이다.
+
+### 1.7 dsh 벤치마크 overlay (2026-08-18 · 전권 위임 편성 — 정본 `docs/planning/research/2026-08-18-deepseek-harness-dsh-benchmark.md`)
+
+DeepSeek Harness(MIT·5일 153k★) 종합 분석의 차용 후보 A~H를 기존 축에 **상보 편입**(LIVE-5·환경 폐곡선 비침해가 원칙).
+
+| 시점 | 후보 | 티켓 |
+|---|---|---|
+| 다음 위생 파도(즉시 가능) | A docs-코드 드리프트 게이트 · B 온보딩 첫 성공 N분 실측 · H 반면교사 렛슨 | #1525 · #1526 · #1527 |
+| LIVE-5 완주 후 | C 추적성 계약 성문화("모델이 본 것=로그", ADR 증보) · D 훅 택소노미 명명 | 미발급(C가 D 선행) |
+| 세션 표면 심화 | E Trajectory 표면(replay 1단계 권장→fork는 별도 결정) — LIVE-5b 세션 표면과 연접 | 미발급(ADR 선행) |
+| 환경 폐곡선(커서 B) 합석 | F Code Mode×T3(코드로 툴 배칭 — 실행=CubeSandbox 재사용) | 미발급(ADR 선행) |
+| 플랫폼 확장 overlay 개장 시 | G 플러그인 생태 청사진(catalog CI·poison-guard 동형+권한 매니페스트=trust gap 교정판) | 청사진=정본 문서 §3-G |
+
+반면교사 4건(컨텍스트 비대·이중 주입·플러그인 피로·벤치마크 불투명)은 §4 — 우리 규율의 외부 실증으로 유지.
 
 ### 비용 / 기간 (정확 수치 · Apple 1차 출처, 2026 기준)
 

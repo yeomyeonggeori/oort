@@ -195,7 +195,10 @@ async fn login(http: &reqwest::Client, base: &str, workspace: Uuid, person: &Per
         .expect("login");
     assert_eq!(response.status(), 200, "seeded credentials log in");
     let body: Value = response.json().await.expect("login body");
-    body["accessToken"].as_str().expect("accessToken").to_string()
+    body["accessToken"]
+        .as_str()
+        .expect("accessToken")
+        .to_string()
 }
 
 fn leave_url(base: &str, workspace: Uuid) -> String {
@@ -246,7 +249,11 @@ async fn self_leave_guards_the_last_owner() {
         .send()
         .await
         .expect("leave");
-    assert_eq!(left.status(), 200, "an owner leaves while another owner remains");
+    assert_eq!(
+        left.status(),
+        200,
+        "an owner leaves while another owner remains"
+    );
     let body: Value = left.json().await.expect("leave body");
     assert_eq!(body["status"], json!("deleted"));
     assert_eq!(member_status(&su, owner_one.member).await, "deleted");
@@ -294,6 +301,10 @@ async fn self_leave_guards_the_last_owner() {
         .send()
         .await
         .expect("plain leave");
-    assert_eq!(left.status(), 200, "a non-owner leaves without an owner check");
+    assert_eq!(
+        left.status(),
+        200,
+        "a non-owner leaves without an owner check"
+    );
     assert_eq!(member_status(&su, plain.member).await, "deleted");
 }

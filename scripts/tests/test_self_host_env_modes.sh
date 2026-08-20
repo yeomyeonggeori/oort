@@ -108,6 +108,19 @@ grep -Fxq 'MOMO_MIGRATE_ENV=development' "$local_fixture/infra/rust/local.secret
 grep -Fxq 'MOMO_PITR_EVIDENCE_REQUIRED=0' "$local_fixture/infra/rust/local.secrets.env"
 grep -Fxq 'MOMO_PITR_BOOTSTRAP_EMPTY=0' "$local_fixture/infra/rust/local.secrets.env"
 test "$(file_mode "$local_fixture/infra/rust/local.secrets.env")" = "600"
+# #1534 — the instance-operator declaration. An env that names a first owner but
+# no operator produces a stack whose AI-연결 surface is 403 for that very owner,
+# which is what made "설치 → 첫 에이전트 응답" unreachable (#1526 F1).
+grep -Fxq 'PLATFORM_ADMIN_EMAILS=owner@oort.local' "$local_fixture/infra/rust/local.secrets.env"
+test "$(sed -n 's/^PLATFORM_ADMIN_EMAILS=//p' "$local_fixture/infra/rust/local.secrets.env")" \
+   = "$(sed -n 's/^MOMO_INITIAL_OWNER_EMAIL=//p' "$local_fixture/infra/rust/local.secrets.env")"
+# #1607 — packaged Tauri origins. REST CORS is comma-separated; Centrifugo
+# v6 env is space-separated. Both knobs must carry the two desktop origins
+# or login works and realtime 403s (or the reverse).
+grep -Fxq 'MOMO_CORS_ALLOWED_ORIGINS=tauri://localhost,http://tauri.localhost' \
+  "$local_fixture/infra/rust/local.secrets.env"
+grep -Fxq 'CENTRIFUGO_ALLOWED_ORIGINS=http://localhost:49100 http://127.0.0.1:49100 tauri://localhost http://tauri.localhost' \
+  "$local_fixture/infra/rust/local.secrets.env"
 grep -Fq 'scripts/self_host_env.sh --compose' "$local_output"
 grep -Fq 'production 백업/PITR가 아니다' "$local_output"
 grep -Fq -- 'up -d --build --wait' "$local_output"
@@ -130,6 +143,10 @@ published_output="$published_fixture/output"
 run_generator "$published_fixture" "$published_output" 49200 --published-image "$GOOD_DIGEST"
 grep -Fxq 'MOMO_SELF_HOST_MODE=published-digest' "$published_fixture/infra/rust/local.secrets.env"
 grep -Fxq "MOMO_RUST_IMAGE=$GOOD_DIGEST" "$published_fixture/infra/rust/local.secrets.env"
+grep -Fxq 'MOMO_CORS_ALLOWED_ORIGINS=tauri://localhost,http://tauri.localhost' \
+  "$published_fixture/infra/rust/local.secrets.env"
+grep -Fxq 'CENTRIFUGO_ALLOWED_ORIGINS=http://localhost:49200 http://127.0.0.1:49200 tauri://localhost http://tauri.localhost' \
+  "$published_fixture/infra/rust/local.secrets.env"
 grep -Fq -- 'up -d --pull missing --wait' "$published_output"
 grep -Fq 'scripts/self_host_env.sh --compose' "$published_output"
 if grep -Fq -- '--build' "$published_output"; then
@@ -179,11 +196,29 @@ ambient_marker="review-ambient-secret-marker"
 expected_jwt="$(sed -n 's/^JWT_HMAC=//p' "$published_fixture/infra/rust/local.secrets.env")"
 expected_db_url="$(sed -n 's/^MOMO_APP_DATABASE_URL=//p' "$published_fixture/infra/rust/local.secrets.env")"
 expected_ws_url="$(sed -n 's/^MOMO_CENTRIFUGO_WS_URL=//p' "$published_fixture/infra/rust/local.secrets.env")"
+# #1534 — the two keys whose absence from the api service made the self-host
+# path unable to reach a first agent answer: without the master key the AI-연결
+# routes answer 503, and without the allow-list they answer 403 to the operator
+# who installed the instance. Reading them off `docker compose config` (rather
+# than off the env file) is the point: F1a was precisely "the value is in the
+# env file and never reaches the container".
+expected_operator="$(sed -n 's/^PLATFORM_ADMIN_EMAILS=//p' "$published_fixture/infra/rust/local.secrets.env")"
+expected_master_key="$(sed -n 's/^PROVIDER_LINK_MASTER_KEY=//p' "$published_fixture/infra/rust/local.secrets.env")"
+expected_cors="$(sed -n 's/^MOMO_CORS_ALLOWED_ORIGINS=//p' "$published_fixture/infra/rust/local.secrets.env")"
+expected_centrifugo="$(sed -n 's/^CENTRIFUGO_ALLOWED_ORIGINS=//p' "$published_fixture/infra/rust/local.secrets.env")"
+test -n "$expected_operator"
+test -n "$expected_master_key"
+test "$expected_cors" = "tauri://localhost,http://tauri.localhost"
+test "$expected_centrifugo" = "http://localhost:49200 http://127.0.0.1:49200 tauri://localhost http://tauri.localhost"
 jq -e \
   --arg image "$GOOD_DIGEST" \
   --arg jwt "$expected_jwt" \
   --arg db "$expected_db_url" \
-  --arg ws "$expected_ws_url" '
+  --arg ws "$expected_ws_url" \
+  --arg operator "$expected_operator" \
+  --arg master "$expected_master_key" \
+  --arg cors "$expected_cors" \
+  --arg centrifugo "$expected_centrifugo" '
     .name == "oort" and
     .services.api.image == $image and
     .services.api.environment.JWT_HMAC == $jwt and
@@ -192,6 +227,11 @@ jq -e \
     .services.migrate.environment.MOMO_ENV == "development" and
     .services.migrate.environment.MOMO_PITR_EVIDENCE_REQUIRED == "0" and
     .services.migrate.environment.MOMO_PITR_BOOTSTRAP_EMPTY == "0" and
+    .services.api.environment.PLATFORM_ADMIN_EMAILS == $operator and
+    .services.api.environment.PROVIDER_LINK_MASTER_KEY == $master and
+    .services.api.environment.MOMO_CORS_ALLOWED_ORIGINS == $cors and
+    .services["agent-worker"].environment.PROVIDER_LINK_MASTER_KEY == $master and
+    .services.centrifugo.environment.CENTRIFUGO_CLIENT_ALLOWED_ORIGINS == $centrifugo and
     .services.web.image == "caddy:2-alpine" and
     .services.web.ports[0].published == "49200" and
     .services.api.ports[0].published == "49201" and
@@ -410,6 +450,144 @@ fi
 test ! -e "$port_marker"
 test ! -e "$port_fixture/infra/rust/local.secrets.env"
 grep -Fq 'ASCII 10진수' "$port_fixture/output"
+
+# #1534 — an env written before the operator line existed. The generator adds
+# that one line on the next run and rotates NOTHING: a regenerated secret would
+# desynchronise from the role password already inside a migrated database, which
+# is the whole reason this file is never rewritten.
+repair_fixture="$(make_fixture operator-allowlist-repair)"
+run_generator "$repair_fixture" "$repair_fixture/first-output" 49460 --local-build
+repair_env="$repair_fixture/infra/rust/local.secrets.env"
+grep -Fxq 'PLATFORM_ADMIN_EMAILS=owner@oort.local' "$repair_env"
+grep -v '^PLATFORM_ADMIN_EMAILS=' "$repair_env" >"$repair_fixture/stripped.env"
+mv "$repair_fixture/stripped.env" "$repair_env"
+if grep -q '^PLATFORM_ADMIN_EMAILS=' "$repair_env"; then
+  echo "fixture setup failed: allow-list line still present" >&2
+  exit 1
+fi
+repair_secrets_before="$(grep -E '^(JWT_HMAC|PROVIDER_LINK_MASTER_KEY|MOMO_APP_POSTGRES_PASSWORD|MOMO_INITIAL_OWNER_PASSWORD)=' "$repair_env")"
+run_generator "$repair_fixture" "$repair_fixture/repair-output" 49460 --local-build
+grep -Fxq 'PLATFORM_ADMIN_EMAILS=owner@oort.local' "$repair_env"
+test "$repair_secrets_before" = "$(grep -E '^(JWT_HMAC|PROVIDER_LINK_MASTER_KEY|MOMO_APP_POSTGRES_PASSWORD|MOMO_INITIAL_OWNER_PASSWORD)=' "$repair_env")"
+grep -Fq 'PLATFORM_ADMIN_EMAILS' "$repair_fixture/repair-output"
+# Idempotent: a second run neither duplicates the key nor trips the
+# duplicate-key guard the next invocation runs first.
+run_generator "$repair_fixture" "$repair_fixture/repair-output-2" 49460 --local-build
+test "$(grep -c '^PLATFORM_ADMIN_EMAILS=' "$repair_env")" = "1"
+
+# The repair also fires on the `--compose` path, and that path's stdout is a
+# machine surface the generator itself parses (`config --images`). A notice
+# printed there would be read as a rendered image line.
+grep -v '^PLATFORM_ADMIN_EMAILS=' "$repair_env" >"$repair_fixture/stripped-again.env"
+mv "$repair_fixture/stripped-again.env" "$repair_env"
+(
+  cd "$repair_fixture"
+  PATH="$repair_fixture/fake-bin:/usr/bin:/bin" \
+    bash scripts/self_host_env.sh --compose config --images
+) >"$repair_fixture/images.stdout" 2>"$repair_fixture/images.stderr"
+grep -Fxq 'PLATFORM_ADMIN_EMAILS=owner@oort.local' "$repair_env"
+if grep -Fq 'PLATFORM_ADMIN_EMAILS' "$repair_fixture/images.stdout"; then
+  echo "allow-list repair notice reached the machine-parsed --compose stdout" >&2
+  exit 1
+fi
+grep -Fq 'PLATFORM_ADMIN_EMAILS' "$repair_fixture/images.stderr"
+test "$(sort -u "$repair_fixture/images.stdout")" = "oort:local"
+
+# A value somebody chose is never overwritten — including a deliberately empty
+# one, which is the only way to say "close these surfaces on this instance".
+custom_fixture="$(make_fixture operator-allowlist-custom)"
+run_generator "$custom_fixture" "$custom_fixture/first-output" 49470 --local-build
+custom_env="$custom_fixture/infra/rust/local.secrets.env"
+awk '/^PLATFORM_ADMIN_EMAILS=/ { print "PLATFORM_ADMIN_EMAILS=a@example.com,b@example.com"; next } { print }' \
+  "$custom_env" >"$custom_fixture/custom.env"
+mv "$custom_fixture/custom.env" "$custom_env"
+run_generator "$custom_fixture" "$custom_fixture/custom-output" 49470 --local-build
+grep -Fxq 'PLATFORM_ADMIN_EMAILS=a@example.com,b@example.com' "$custom_env"
+test "$(grep -c '^PLATFORM_ADMIN_EMAILS=' "$custom_env")" = "1"
+
+# #1607 — an env written before the desktop CORS line existed. Same add-only
+# rule as PLATFORM_ADMIN_EMAILS: secrets do not rotate, a chosen value
+# (including empty) is never overwritten, and --compose stdout stays a
+# machine surface.
+cors_repair_fixture="$(make_fixture desktop-cors-allowlist-repair)"
+run_generator "$cors_repair_fixture" "$cors_repair_fixture/first-output" 49480 --local-build
+cors_repair_env="$cors_repair_fixture/infra/rust/local.secrets.env"
+grep -Fxq 'MOMO_CORS_ALLOWED_ORIGINS=tauri://localhost,http://tauri.localhost' "$cors_repair_env"
+grep -v '^MOMO_CORS_ALLOWED_ORIGINS=' "$cors_repair_env" >"$cors_repair_fixture/stripped.env"
+mv "$cors_repair_fixture/stripped.env" "$cors_repair_env"
+if grep -q '^MOMO_CORS_ALLOWED_ORIGINS=' "$cors_repair_env"; then
+  echo "fixture setup failed: CORS allow-list line still present" >&2
+  exit 1
+fi
+cors_secrets_before="$(grep -E '^(JWT_HMAC|PROVIDER_LINK_MASTER_KEY|MOMO_APP_POSTGRES_PASSWORD|MOMO_INITIAL_OWNER_PASSWORD)=' "$cors_repair_env")"
+run_generator "$cors_repair_fixture" "$cors_repair_fixture/repair-output" 49480 --local-build
+grep -Fxq 'MOMO_CORS_ALLOWED_ORIGINS=tauri://localhost,http://tauri.localhost' "$cors_repair_env"
+test "$cors_secrets_before" = "$(grep -E '^(JWT_HMAC|PROVIDER_LINK_MASTER_KEY|MOMO_APP_POSTGRES_PASSWORD|MOMO_INITIAL_OWNER_PASSWORD)=' "$cors_repair_env")"
+grep -Fq 'MOMO_CORS_ALLOWED_ORIGINS=tauri://localhost,http://tauri.localhost 를 추가했다' \
+  "$cors_repair_fixture/repair-output"
+run_generator "$cors_repair_fixture" "$cors_repair_fixture/repair-output-2" 49480 --local-build
+test "$(grep -c '^MOMO_CORS_ALLOWED_ORIGINS=' "$cors_repair_env")" = "1"
+
+grep -v '^MOMO_CORS_ALLOWED_ORIGINS=' "$cors_repair_env" >"$cors_repair_fixture/stripped-again.env"
+mv "$cors_repair_fixture/stripped-again.env" "$cors_repair_env"
+(
+  cd "$cors_repair_fixture"
+  PATH="$cors_repair_fixture/fake-bin:/usr/bin:/bin" \
+    bash scripts/self_host_env.sh --compose config --images
+) >"$cors_repair_fixture/images.stdout" 2>"$cors_repair_fixture/images.stderr"
+grep -Fxq 'MOMO_CORS_ALLOWED_ORIGINS=tauri://localhost,http://tauri.localhost' "$cors_repair_env"
+if grep -Fq 'MOMO_CORS_ALLOWED_ORIGINS' "$cors_repair_fixture/images.stdout"; then
+  echo "CORS allow-list repair notice reached the machine-parsed --compose stdout" >&2
+  exit 1
+fi
+grep -Fq 'MOMO_CORS_ALLOWED_ORIGINS=tauri://localhost,http://tauri.localhost 를 추가했다' \
+  "$cors_repair_fixture/images.stderr"
+test "$(sort -u "$cors_repair_fixture/images.stdout")" = "oort:local"
+
+cors_custom_fixture="$(make_fixture desktop-cors-allowlist-custom)"
+run_generator "$cors_custom_fixture" "$cors_custom_fixture/first-output" 49490 --local-build
+cors_custom_env="$cors_custom_fixture/infra/rust/local.secrets.env"
+awk '/^MOMO_CORS_ALLOWED_ORIGINS=/ { print "MOMO_CORS_ALLOWED_ORIGINS=https://app.example.com"; next } { print }' \
+  "$cors_custom_env" >"$cors_custom_fixture/custom.env"
+mv "$cors_custom_fixture/custom.env" "$cors_custom_env"
+run_generator "$cors_custom_fixture" "$cors_custom_fixture/custom-output" 49490 --local-build
+grep -Fxq 'MOMO_CORS_ALLOWED_ORIGINS=https://app.example.com' "$cors_custom_env"
+test "$(grep -c '^MOMO_CORS_ALLOWED_ORIGINS=' "$cors_custom_env")" = "1"
+
+cors_empty_fixture="$(make_fixture desktop-cors-allowlist-empty)"
+run_generator "$cors_empty_fixture" "$cors_empty_fixture/first-output" 49500 --local-build
+cors_empty_env="$cors_empty_fixture/infra/rust/local.secrets.env"
+awk '/^MOMO_CORS_ALLOWED_ORIGINS=/ { print "MOMO_CORS_ALLOWED_ORIGINS="; next } { print }' \
+  "$cors_empty_env" >"$cors_empty_fixture/empty.env"
+mv "$cors_empty_fixture/empty.env" "$cors_empty_env"
+run_generator "$cors_empty_fixture" "$cors_empty_fixture/empty-output" 49500 --local-build
+grep -Fxq 'MOMO_CORS_ALLOWED_ORIGINS=' "$cors_empty_env"
+test "$(grep -c '^MOMO_CORS_ALLOWED_ORIGINS=' "$cors_empty_env")" = "1"
+
+# Existing CENTRIFUGO_ALLOWED_ORIGINS is never rewritten. A pre-#1607 list
+# without tauri origins stays byte-for-byte; the generator warns on stderr.
+cent_warn_fixture="$(make_fixture centrifugo-desktop-origin-warn)"
+run_generator "$cent_warn_fixture" "$cent_warn_fixture/first-output" 49510 --local-build
+cent_warn_env="$cent_warn_fixture/infra/rust/local.secrets.env"
+awk '/^CENTRIFUGO_ALLOWED_ORIGINS=/ { print "CENTRIFUGO_ALLOWED_ORIGINS=http://localhost:49510 http://127.0.0.1:49510"; next } { print }' \
+  "$cent_warn_env" >"$cent_warn_fixture/historical.env"
+mv "$cent_warn_fixture/historical.env" "$cent_warn_env"
+cent_before="$(grep -E '^(CENTRIFUGO_ALLOWED_ORIGINS|JWT_HMAC|MOMO_CORS_ALLOWED_ORIGINS)=' "$cent_warn_env")"
+run_generator "$cent_warn_fixture" "$cent_warn_fixture/warn-output" 49510 --local-build
+test "$cent_before" = "$(grep -E '^(CENTRIFUGO_ALLOWED_ORIGINS|JWT_HMAC|MOMO_CORS_ALLOWED_ORIGINS)=' "$cent_warn_env")"
+grep -Fxq 'CENTRIFUGO_ALLOWED_ORIGINS=http://localhost:49510 http://127.0.0.1:49510' "$cent_warn_env"
+grep -Fq 'CENTRIFUGO_ALLOWED_ORIGINS 에 tauri://localhost 또는 http://tauri.localhost 가 없다' "$cent_warn_fixture/warn-output"
+(
+  cd "$cent_warn_fixture"
+  PATH="$cent_warn_fixture/fake-bin:/usr/bin:/bin" \
+    bash scripts/self_host_env.sh --compose config --images
+) >"$cent_warn_fixture/images.stdout" 2>"$cent_warn_fixture/images.stderr"
+if grep -Fq 'CENTRIFUGO_ALLOWED_ORIGINS 에 tauri://localhost 또는 http://tauri.localhost 가 없다' "$cent_warn_fixture/images.stdout"; then
+  echo "Centrifugo desktop-origin warning reached the machine-parsed --compose stdout" >&2
+  exit 1
+fi
+grep -Fq 'CENTRIFUGO_ALLOWED_ORIGINS 에 tauri://localhost 또는 http://tauri.localhost 가 없다' "$cent_warn_fixture/images.stderr"
+test "$(sort -u "$cent_warn_fixture/images.stdout")" = "oort:local"
 
 # The historical no-argument command remains a local-build alias.
 legacy_fixture="$(make_fixture legacy)"

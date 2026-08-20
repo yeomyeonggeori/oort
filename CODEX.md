@@ -29,7 +29,7 @@ oort = AI 에이전트가 사람과 **동등한 1급 멤버**(`member.kind='agen
 2. 이슈를 claim한 뒤 가능하면 worktree에서 진행한다. 시작 전 `scripts/goal_status.sh`로 충돌을 확인하고, `scripts/goal_claim.sh <issue>`로 branch/worktree/assignee/status lock을 잡는다. 스크립트가 없는 checkout에서는 수동 branch/worktree로 같은 계약을 지킨다.
 3. 작업 전 `STATUS.md` → `ROADMAP.md` → `BUILD_TICKETS.md` → 이슈 본문 순으로 계획을 확인한다. 계획이 미흡하면 추가 리서치를 하고, 계획이 충분하면 현재 사실을 검증한다.
 4. 구현은 이슈 범위에 맞춘다. 범위가 커지면 새 이슈로 제안한다.
-5. 구현 후 해당 검증 등급의 테스트를 실행한다. `pr-ci`는 세 canonical branch PR의 보조 게이트이고, runtime 범위는 `scripts/local_gate.sh --profile ...`가 정본이다. 서버 변경은 `cargo fmt --check`/`clippy -D warnings`/`cargo test --workspace`, 웹·폰·코어 변경은 해당 트리 게이트 + `scripts/verify_merge_tree.sh`를 하드 게이트로 본다.
+5. 구현 후 해당 검증 등급의 테스트를 실행한다. `pr-ci`는 세 canonical branch PR의 보조 게이트이고, runtime 범위는 `scripts/local_gate.sh --profile ...`가 정본이다. 서버 변경은 `cargo fmt --all --check`/`clippy -D warnings`/`cargo test --workspace`, 웹·폰·코어 변경은 해당 트리 게이트 + `scripts/verify_merge_tree.sh`를 하드 게이트로 본다.
 6. worker는 커밋하고 push한 뒤 PR을 연다. PR은 해당 이슈 하나만 닫고, PR 본문에 local gate evidence를 붙인다.
 7. worker는 `scripts/goal_release.sh <issue> --review --pr <PR URL>`로 이슈를 `status:needs-review`로 전환하고 `momo-main`에 handoff한 뒤 멈춘다.
 8. **merge/close/main gate/로드맵 조정은 `momo-main`만 수행한다.** worker는 PR 생성 후 임의 merge, 이슈 close, main 재검증, 로드맵/백로그 재배열을 하지 않는다.
@@ -89,11 +89,21 @@ infra/prod/              Swift prod compose 계열(infra/prod/Dockerfile.web은 
 ## 2. 빌드 / 검증 명령 (copy-paste 그대로 실행)
 
 > 로컬 툴체인: **cargo(rustup) · Node 20+ · Docker Desktop + psql 있음**, hermes 없음. PG18+Centrifugo 런타임은 검증 가능하고, hermes 필요 경로는 실제 hermes 또는 mock OpenAI-compatible gateway를 준비한다.
+> **Rust 툴체인 — 레포에 `rust-toolchain.toml`은 없다**(#1442 판정: 신설하지 않음). 고정이 없으니 환경 기본 툴체인이 그대로 쓰이고, MSRV보다 낮으면 컴파일 이전 resolve 단계에서 거절된다. 카고 워크스페이스는 **둘**이고 MSRV가 다르다(#1442 실측): `server-rust` = **1.88.0**, `clients/desktop/src-tauri` = **1.89.0**. 둘 다 만지면 **stable ≥ 1.89.0**. edition은 양쪽 다 `2021`(마이그레이션 계획 없음).
 > npm 트리는 lockfile이 셋이다 — 루트(`packages/*`), `clients/web`, `clients/mobile`.
+> **이 블록 자체가 게이트를 받는다(#1525).** 여기·`AGENTS.md`·`docs/RUN.md`·`docs/runbooks/*.md`의
+> 명령은 `scripts/check_docs_commands.py`가 매 프로파일에서 트리에 대고 해소한다 — 실행체 존재/구문,
+> `make` 타깃, `--profile` 이름, npm 스크립트, 우리 스크립트에 넘기는 long flag, compose·`--package-path`
+> 경로, 그리고 위의 `cargo fmt --all` 규칙. **명령을 고칠 때 문서도 같은 커밋에서 고쳐라** — 안 고치면
+> docs 게이트가 빨개진다. 폐지된 명령을 "폐지됐다"고 말하려고 이름을 불러야 하면 그 줄 끝에
+> `<!-- docs-cmd-ignore: 이유 -->`를 붙인다(이유 없는 마커는 마커가 아니다).
 
 ```bash
 # --- 서버 (Rust/Axum). 이 셋이 서버 변경의 하드 게이트 ---
-cargo fmt   --check --manifest-path server-rust/Cargo.toml
+# `--all` 생략 금지. 두 매니페스트 다 virtual workspace라 `--all` 없는 cargo fmt는
+# "Failed to find targets"로 exit 1이고 아무것도 검사하지 않는다 — 이 문서가 그 형태를
+# 실어 온 것이 워커들이 "자기 파일만 fmt" 우회를 하게 된 이유다(#1472).
+cargo fmt --all --check --manifest-path server-rust/Cargo.toml
 cargo clippy --manifest-path server-rust/Cargo.toml --workspace --all-targets -- -D warnings
 cargo test   --manifest-path server-rust/Cargo.toml --workspace
 make rust-build                                   # = cargo build --workspace
@@ -130,7 +140,7 @@ make swift-build ; make swift-test
 ```
 
 **검증 등급(각 이슈/티켓에 명시):**
-- `[rust]` = `cargo fmt --check` + `cargo clippy … -D warnings` + `cargo test --workspace` 전부 green.
+- `[rust]` = `cargo fmt --all --check` + `cargo clippy … -D warnings` + `cargo test --workspace` 전부 green. fmt는 **워크스페이스 전체**가 기준이지 자기 파일이 아니다 — 선재 drift를 물려받았으면 그것도 이 PR에서 정리한다(그 우회가 #1377을 #1472로 되돌린 경로). `scripts/local_gate.sh`가 모든 프로파일에서 두 카고 워크스페이스에 이 검사를 돌린다.
 - `[web]` / `[mobile]` = 해당 트리 `typecheck` + `test` green **+ 병합 트리**(`scripts/verify_merge_tree.sh`) green. 브랜치 초록만으로는 부족하다 — 그게 U4-6 B1에서 실제로 깨진 자리다.
 - `[infra]` / `[sql]` = 파일 존재 + `schema_v0.sql`(정본)과 정합. Docker/psql로 적용 가능한 범위는 runtime 검증한다.
 - `[python]` = `python3 -m py_compile` 통과.

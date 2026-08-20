@@ -117,6 +117,7 @@ function workSession(over: Partial<WorkSession> & {id: string}): WorkSession {
     observation: 'open',
     observerGrantCount: 0,
     remoteAttachAvailable: false,
+    remoteDisplayAvailable: false,
     startedAtMs: NOW,
     ...over,
   };
@@ -622,7 +623,13 @@ describe('bounded model and privacy boundary', () => {
     expect(workConsoleSessions(many, 'all')).toHaveLength(WORK_CONSOLE_LIMIT);
   });
 
-  it('contains no terminal attach, WebView, secret, or durable-storage path', () => {
+  // LIVE-2 added `issueDisplayAttach` and its grant to the shared core, which
+  // is exactly the shape this guard already exists to keep off the phone: the
+  // screen half carries the same 60 second bearer and the same host address as
+  // the terminal half, and it arrives on the phone as an import away rather
+  // than as a feature somebody decided to build. The names are listed here so
+  // the guard says no before that decision gets made by accident.
+  it('contains no terminal or display attach, WebView, secret, or durable-storage path', () => {
     const files = [
       '../src/features/work/queries.ts',
       '../src/screens/WorkConsoleScreen.tsx',
@@ -632,7 +639,7 @@ describe('bounded model and privacy boundary', () => {
       .map(file => fs.readFileSync(path.resolve(__dirname, file), 'utf8'))
       .join('\n');
     expect(source).not.toMatch(
-      /issueObserverTerminalAttach|TerminalAttachGrant|WebView|capability_token|attach_endpoint|pty_id|AsyncStorage|MMKV|console\.(?:log|info|warn|error)/,
+      /issueObserverTerminalAttach|TerminalAttachGrant|issueDisplayAttach|DisplayAttachGrant|RTCPeerConnection|WebView|capability_token|attach_endpoint|display_endpoint|pty_id|display_id|AsyncStorage|MMKV|console\.(?:log|info|warn|error)/,
     );
   });
 });

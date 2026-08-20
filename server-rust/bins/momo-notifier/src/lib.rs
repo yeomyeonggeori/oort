@@ -49,6 +49,7 @@
 
 pub mod approval_sweep;
 pub mod config;
+pub mod control_window_sweep;
 pub mod provider;
 pub mod push;
 pub mod push_relay;
@@ -680,6 +681,36 @@ impl Notifier {
             }
         });
 
+        // ---- loop 2c: the control-window lease sweep (#1425) ---------------
+        //
+        // Its own task for the same reason 2b is: this one settles a *human*
+        // boundary (ADR-0004 증보 3), and a T3 provider that is timing out must
+        // not leave an agent parked on a window whose holder shut their laptop.
+        //
+        // It runs regardless of `t3_enabled`, unlike the two T3 loops above, and
+        // the asymmetry is deliberate: a control window is only ever opened by a
+        // request this server served, so a window in the ledger is evidence that
+        // control happened whatever the flag says now — and a flag flipped off
+        // between the grant and the lapse must not strand the run the grant
+        // parked. With no windows the cross-tenant read matches nothing and the
+        // loop costs one indexed poll.
+        let windows = self.clone();
+        let control_window_sweep_task = tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(windows.config.sweep_interval);
+            ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            loop {
+                ticker.tick().await;
+                if let Err(error) = control_window_sweep::sweep_lapsed_control_windows(
+                    &windows.pool,
+                    windows.config.claim_batch_size,
+                )
+                .await
+                {
+                    tracing::error!(error = %error, "control window sweep iteration failed");
+                }
+            }
+        });
+
         // ---- loop 4: ADR-0120 push-candidate drain -------------------------
         let (push_task, push_listener) = match self.push.clone() {
             None => {
@@ -724,6 +755,7 @@ impl Notifier {
         sweep_task.abort();
         lease_task.abort();
         approval_sweep_task.abort();
+        control_window_sweep_task.abort();
         if let Some(task) = push_task {
             task.abort();
         }

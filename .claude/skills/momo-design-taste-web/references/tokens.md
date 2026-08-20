@@ -44,10 +44,14 @@ palette for dark mode, so the two schemes cannot drift apart.
 | `--ink` | `#24211c` | `#ececf1` | body text |
 | `--ink-muted` | `#6a655f` | `#9b98a3` | timestamps, meta, secondary |
 | `--accent` | `#a54c08` | `#f0a850` | **the** accent: 호박(amber horizon) |
-| `--accent-soft` | `#f4e7d6` | `#33261a` | selected row, accent-tinted chip |
+| `--accent-soft` | `#f4e7d6` | `#33261a` | selected row (sidebar, work console, ⌘K) |
 | `--on-accent` | `#fffefb` | `#17161a` | label on a filled accent |
 | `--agent` | `#4a6785` | `#7fa0c4` | agent identity: predawn slate-blue |
 | `--agent-soft` | `#e6ebf2` | `#1e2836` | agent avatar/badge backing |
+| `--muted-soft` | `#f3efe8` | `#302e36` | **chip vessel**, tone-free: the pale fill a status chip stands in (§2a) |
+| `--ok-soft` | `#e0f4e2` | `#243323` | chip vessel for a passing measurement (§2a) |
+| `--warn-soft` | `#ffedd4` | `#372e1b` | chip vessel for a pending / unreadable measurement (§2a) |
+| `--danger-soft` | `#ffe9e5` | `#402a26` | chip vessel for a failing measurement (§2a) |
 | `--danger` | `#b3261e` | `#ff796b` | risk **tone**: destructive/failure text, chips, dots, bars |
 | `--danger-fill` | `#8c393d` | `#dc817e` | destructive button **fill** (never the tone above: §3a table B) |
 | `--on-danger-fill` | `#fffefb` | `#17161a` | label on a destructive fill |
@@ -78,6 +82,100 @@ Tailwind reaches these as `bg-surface`, `text-ink-muted`, `border-line-strong`,
 That is the enforcement: the indigo AI-tell is unreachable, not merely
 discouraged.
 
+## 2a. A chip vessel is never an interaction state (#1515)
+
+**A state switches on and off; a vessel is always there. Share one value between
+them and the vessel goes dark exactly while the state is on.** The lifecycle chip
+was built that way: its fill was `--surface-hover`, which is also what a list row
+wears on hover and when expanded, so the chip lost its container **only on the row
+the reader was pointing at** (measured 1.00:1). A vessel that disappears while it
+is being read is worse than no vessel.
+
+So the two axes have separate names, and the split is mechanical:
+
+| axis | tokens | behaviour |
+|---|---|---|
+| interaction state | `--surface-hover`, `--accent-soft` | hovered row, selected row. **Toggles** |
+| chip vessel | `--muted-soft` · `--ok-soft` · `--warn-soft` · `--danger-soft` | the pale fill a chip stands in. **Always on** |
+
+**"Just pick another gray" is arithmetic, not taste.** In light, `--ink-muted`
+needs a background luminance of at least 0.769 to hold AA, and `--surface-hover`
+sits at 0.7704 — already on the floor. The band a chip vessel can occupy is
+therefore [0.769, 0.9911 (paper)], five surfaces already divide it, and **the best
+worst-case separation a sixth neutral can reach is 1.06:1**. Luminance runs out, so
+the second ruler is the OKLab distance §3a already uses for the risk hierarchy. A
+vessel survives only if it clears **both**: contrast >= 1.05 **and** OKLab distance
+>= 0.02. Either alone lets "passes the ratio, reads as the same gray" through.
+
+Measured (`--muted-soft` vs every row background it can stand on, both schemes):
+light `--surface` 1.061 / 0.0207 · `--surface-hover` 1.117 / 0.0366 ·
+`--accent-soft` 1.062 / 0.0256; dark 1.346 / 0.1036 · 1.135 / 0.0380 ·
+1.095 / 0.0470. Before the fix the worst pair was 1.000 / 0.0000.
+
+The surfaces a chip may stand on are a **closed table** (`CHIP_VESSEL_SURFACES`),
+the same discipline as `CONTROL_SURFACES`: put a chip on a new surface and the
+list has to grow, or the defect goes quiet again. It has **one row per vessel**,
+because the lists genuinely differ — the verification chip never stands on
+`--accent-soft`, and demanding a floor for a pair that never renders would mean
+tuning a token for a problem that is not on screen.
+
+And the rule reaches further than any of those tables: `chipVessel.test.ts` sweeps
+**every** chip in the repo — found by use, not by name, starting from
+`cn(CHIP_CLASS, …)` — classifies where each one gets its fill, and asserts the
+classification is total with a residue count that only decreases. Two live 1.000
+defects were living outside the tables when only the tables existed.
+
+And the vessel carries no tone — all six lifecycle cells share one fill.
+**Colour is earned by measurement, not by naming**: the ledger chip only says what
+the ledger calls the session, so the tone stays in the ink.
+
+### A border is control grammar, so a measured chip is tinted instead (#1516)
+
+The other half of the same rule. The verification chip got a **border** in #1463
+(`--surface-raised` + `--line`). It kept the vessel but cost something: in this
+palette a small pill wrapped in a 1px border **is** control grammar — inputs,
+`<select>`, outline buttons all look like that — so "통과 12" read as pressable.
+By the palette's own contract it is not a control (`--line` separates,
+`--line-strong` outlines controls). **The token contract and the screen were saying
+different things, and the screen always wins.**
+
+Removing the border alone brings #1463 H1 back (the chip also stands on a
+`--surface-raised` card). So the work the border was doing moves to the **hue of the
+fill**: a tinted fill stays distinct from a neutral surface even at close
+luminance, which is exactly why `--accent-soft` does not vanish on
+`--surface-hover` at 1.051.
+
+| chip | vessel | why |
+|---|---|---|
+| ledger (lifecycle, step rows) | `--muted-soft`, fixed | measures nothing |
+| measurement (verification) | its own tone's soft | has something measured |
+| measurement, `건너뜀` (skip) | `--muted-soft` | **nothing measured, nothing to tint** |
+
+That is what splits the collision #1463 M2 named (lifecycle `running` is warn and
+gate `unknown`/`pending` are warn — two identical amber pills on one row): it now
+splits at the **vessel**, not the ink.
+
+**One plane, hue is the only difference.** The four vessels sit on one plane per
+scheme (light luminance .85–.87, dark .028–.029), so lightness says "this is a
+vessel" and hue says "which tone" — one job per axis. The plane is arithmetic too:
+in dark, `--ok`'s AA runs out at luminance .0320, and the vessel must stay *above*
+`--surface-hover` (.0192) so `--line-strong` does not clear 3:1 and misfile it as a
+surface a bordered control may sit on. The surviving band is .0192–.0320, and .0285
+is inside it.
+
+Measured guards on top of the two above: each vessel stays inside its own tone's
+hue family (<= 15 deg, worst 2.7), each tone vessel keeps OKLab distance >= 0.02
+from the toneless one, and the vessel bridge
+(`COMPLETION_TONE_SOFT_TOKEN`/`_CLASS`) resolves to tokens that exist. The hue
+family matters because the cheapest way to satisfy contrast and distance is "any
+colour that stands out" — and then a passing gate sits in a red vessel.
+
+The vessel is **not derived from the ink**: `muted`'s ink is `--ink-muted` but its
+vessel is `--muted-soft`. Deriving it ("append `-soft` to the ink token") makes that
+one cell reach for a token that does not exist, and the failure shows up not at
+compile time but on screen, as a chip with no vessel. Hence two tables, and a test
+that keeps them from being merged.
+
 ## 3. Measured contrast (from `tokens.contrast.test.ts`)
 
 Worst case across every foreground x every surface, both schemes:
@@ -85,7 +183,7 @@ Worst case across every foreground x every surface, both schemes:
 | scheme | worst pair | ratio | floor |
 |---|---|---|---|
 | light | `--ink-muted` on `--surface-hover` | **4.51:1** | 4.5 (AA) |
-| dark | `--ok` on `--accent-soft` | **5.15:1** | 4.5 (AA) |
+| dark | `--ok` on `--danger-soft` | **4.68:1** | 4.5 (AA) |
 | light | `--line-strong` on `--surface-hover` | **3.03:1** | 3.0 (non-text) |
 | dark | `--line-strong` on `--surface-hover` | **3.00:1** | 3.0 (non-text) |
 
@@ -132,8 +230,10 @@ outreads `--ink-muted` on every surface in both schemes, so a louder red can
 never be bought by making it a dimmer one. What it may NOT be asked to do is
 outread `--warn` in dark: sRGB has no red that is both more colorful than
 `#d4a72c` and as luminous, so requiring both would have made the order
-unreachable rather than merely unmet. Dark danger now measures 5.72:1 at its
-worst surface (`--accent-soft`), above the AA floor and above muted's 5.17.
+unreachable rather than merely unmet. Dark danger now measures 5.20:1 at its
+worst surface (`--danger-soft`, since #1516 added the chip vessels), above the AA
+floor and above muted's 4.70 on that same surface. The assertion is per-surface,
+so it is the *relation* that is guarded, not these two numbers.
 
 **The ruler measures two different classes of surface, and each has its own
 order.** Naming only the first is how MOMO-641's fix produced MOMO-642 R1 H-2:

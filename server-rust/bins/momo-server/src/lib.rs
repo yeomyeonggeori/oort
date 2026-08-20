@@ -44,8 +44,8 @@ use axum::Router;
 use momo_db::PgPool;
 
 use crate::config::{
-    AgentGatewaySettings, CorsConfig, EphemeralSettings, MentionSettings, RateLimitConfig,
-    RealtimeSettings, SettingsConfig, T3Settings, WebhookSettings,
+    AgentGatewaySettings, AgentPortConfig, CorsConfig, EphemeralSettings, MentionSettings,
+    RateLimitConfig, RealtimeSettings, SettingsConfig, T3Settings, WebhookSettings,
 };
 use crate::rate_limit::SlidingWindowRateLimiter;
 
@@ -56,6 +56,46 @@ use crate::rate_limit::SlidingWindowRateLimiter;
 pub struct RateLimitState {
     pub config: RateLimitConfig,
     pub limiter: SlidingWindowRateLimiter,
+}
+
+/// Agent Port's own bounded process-local limiter and trusted-origin config.
+/// A separate state object keeps its keys and knobs out of the unauthenticated
+/// join limiter, while one limiter map with `token:`/`agent:`/`ip:` prefixes
+/// bounds all three Agent Port axes.
+#[derive(Default)]
+pub struct AgentPortState {
+    pub config: AgentPortConfig,
+    pub limiter: SlidingWindowRateLimiter,
+    /// The key behind the two opaque Agent Port envelopes — HAP-E4's inbox
+    /// cursor and HAP-E5's `leaseHandle`.
+    ///
+    /// It is a **secret**, so it is private and this struct's `Debug` redacts
+    /// it: an `AgentPortState` reaches a `tracing` field the moment someone adds
+    /// a diagnostic, and the derived formatter would have printed the key that
+    /// authenticates every cursor and lease on the instance.
+    ///
+    /// Empty on a default state, which makes both codecs refuse rather than
+    /// seal under a guessable key.
+    envelope_secret: String,
+}
+
+impl std::fmt::Debug for AgentPortState {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("AgentPortState")
+            .field("config", &self.config)
+            .field("limiter", &self.limiter)
+            .field("envelope_secret", &"<redacted>")
+            .finish()
+    }
+}
+
+impl AgentPortState {
+    /// The Agent Port envelope key. Callers hand it straight to a codec and
+    /// never log, echo or persist it.
+    pub fn envelope_secret(&self) -> &str {
+        &self.envelope_secret
+    }
 }
 
 /// 휘발 신호 state (ADR-0149): the operator's knobs plus the one object in this
@@ -141,6 +181,9 @@ pub struct AppState {
     /// (`POST /v1/join`) is the one unauthenticated write on the instance, so
     /// "the operator configured nothing" has to mean *limited*, not *open*.
     pub rate_limit: Arc<RateLimitState>,
+    /// ADR-0162 Agent Port transport policy. It carries no session or product
+    /// data; only trusted origin input and process-local abuse counters.
+    pub agent_port: Arc<AgentPortState>,
     /// Mention→run routing knobs (B5.2). The default is the shipped one, not a
     /// disabled state: routing an `@mention` to its agent is the product, so an
     /// instance that configured nothing still does it.
@@ -182,6 +225,18 @@ pub struct AppState {
     /// reason. Never logged — [`AppState`]'s hand-written `Debug` covers it by
     /// listing nothing.
     pub ephemeral_grant_key: Arc<String>,
+    /// LIVE-5a — the oort TURN relay's ephemeral-credential policy
+    /// (ADR-0165 증보 1 D3-2). `None` unless [`AppState::with_turn`] says
+    /// otherwise, and `None` means the two display routes answer with an
+    /// **empty** `ice_servers` rather than a credential nothing can verify.
+    ///
+    /// Fail-closed like the rest, with one difference worth naming: an empty
+    /// array is not a closed surface. The producer template still carries the
+    /// static credential the install runbook shipped, so an instance without
+    /// this policy streams exactly as it does today. That overlap **is** the
+    /// retirement order — 신규 단명 자격 실증 먼저, 정적 제거는 그다음 — and it
+    /// lives in the default rather than in a runbook step somebody remembers.
+    pub turn: Option<Arc<momo_t3::TurnCredentialPolicy>>,
 }
 
 impl AppState {
@@ -197,13 +252,26 @@ impl AppState {
             realtime: Arc::new(RealtimeSettings::default()),
             settings: Arc::new(SettingsConfig::default()),
             rate_limit: Arc::new(RateLimitState::default()),
+            agent_port: Arc::new(AgentPortState::default()),
             mentions: Arc::new(MentionSettings::default()),
             cors: Arc::new(CorsConfig::default()),
             ephemeral: Arc::new(EphemeralState::default()),
             webhook: Arc::new(WebhookSettings::default()),
             drive: Arc::new(momo_drive::UnavailableDriveArchive),
             ephemeral_grant_key: Arc::new(ephemeral_grant_key),
+            turn: None,
         }
+    }
+
+    /// Attach the oort TURN relay's ephemeral-credential policy (LIVE-5a).
+    ///
+    /// A builder like every other, and the default it leaves alone is the one
+    /// that matters: without it the display routes mint no credential and the
+    /// producer keeps the static one, which is how the new path is proved beside
+    /// the old rather than instead of it.
+    pub fn with_turn(mut self, policy: momo_t3::TurnCredentialPolicy) -> Self {
+        self.turn = Some(Arc::new(policy));
+        self
     }
 
     /// Attach the operator's Drive archive (ADR-0151), same rationale as every
@@ -265,6 +333,24 @@ impl AppState {
         self.rate_limit = Arc::new(RateLimitState {
             config,
             limiter: SlidingWindowRateLimiter::new(),
+        });
+        self
+    }
+
+    /// Attach Agent Port's dedicated transport knobs and start with empty
+    /// process-local buckets. This is intentionally independent of `/v1/join`.
+    pub fn with_agent_port(mut self, config: AgentPortConfig) -> Self {
+        // The envelope key is derived from the app JWT secret rather than taken
+        // from a second env var, the way `OUTBOUND_WEBHOOK_MASTER_KEY` falls
+        // back to `JWT_HMAC`: an operator who configured nothing still gets a
+        // per-instance key instead of a default one, and the derivation is
+        // domain-separated inside each codec so a cursor and a lease handle
+        // never share a key.
+        let envelope_secret = format!("oort/agent-port/envelope/v1|{}", self.jwt_secret);
+        self.agent_port = Arc::new(AgentPortState {
+            config,
+            limiter: SlidingWindowRateLimiter::new(),
+            envelope_secret,
         });
         self
     }
@@ -659,6 +745,31 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/work-sessions/{session}/terminal-attach",
             post(routes::terminal_attach::issue),
         )
+        // display attach capability (ADR-0165 / LIVE-1). The issue half is a
+        // human asking to watch, so it sits behind the bearer middleware beside
+        // its PTY twin. The publish half is a **daemon** telling the ledger which
+        // screen it serves — protected like `…/pending-controls`, because
+        // `auth::require_principal` resolves a `MomoHost` authorization into a
+        // `WorkHost` principal and the route therefore needs no mounting of its
+        // own. It is the first work-session write this server accepts from a
+        // signed host, and it is deliberately narrow: two columns, one session,
+        // and a signer pinned to that session's host inside the handler.
+        .route(
+            "/v1/workspaces/{ws}/work-sessions/{session}/display-attach",
+            post(routes::display_attach::issue),
+        )
+        .route(
+            "/v1/workspaces/{ws}/work-sessions/{session}/display-binding",
+            post(routes::display_attach::publish_binding),
+        )
+        // The 반환 half of ADR-0004 증보 3 (LIVE-3). DELETE because what is
+        // addressed is the open control window and the act is ending it — which
+        // also gives a return the retry semantics it needs, since deleting
+        // something already gone is success.
+        .route(
+            "/v1/workspaces/{ws}/work-sessions/{session}/display-control",
+            delete(routes::display_attach::return_control),
+        )
         // paid credit
         .route(
             "/v1/admin/workspaces/{ws}/credits/topups",
@@ -700,6 +811,51 @@ pub fn build_app(state: AppState) -> Router {
         // beside the humans and makes it mentionable as soon as it is added to a
         // channel. The profile read is the minimum a hub UI consumes.
         .route("/v1/workspaces/{ws}/agents", post(routes::agents::create))
+        // HAP-E1 — human owner/admin lifecycle for generic per-agent bearer
+        // credentials. Hosted-connection credentials will be connection-managed
+        // by HAP-E3 through the typed policy seam in momo-auth.
+        .route(
+            "/v1/workspaces/{ws}/agents/{agent}/credentials",
+            post(routes::agent_credentials::create).get(routes::agent_credentials::list),
+        )
+        .route(
+            "/v1/workspaces/{ws}/agents/{agent}/credentials/{credential}/revoke",
+            post(routes::agent_credentials::revoke),
+        )
+        .route(
+            "/v1/workspaces/{ws}/hosted-agent-connections",
+            post(routes::hosted_agent_connections::create)
+                .get(routes::hosted_agent_connections::list),
+        )
+        .route(
+            "/v1/workspaces/{ws}/hosted-agent-connections/{connection}",
+            get(routes::hosted_agent_connections::get),
+        )
+        .route(
+            "/v1/workspaces/{ws}/hosted-agent-connections/{connection}/pairing-challenge/regenerate",
+            post(routes::hosted_agent_connections::regenerate),
+        )
+        .route(
+            "/v1/workspaces/{ws}/hosted-agent-connections/{connection}/confirm",
+            post(routes::hosted_agent_connections::confirm),
+        )
+        // HAP-E6 — the disconnect lifecycle. `disconnect` is the atomic start
+        // (revoke + pause + suppress + `cleanup_pending` + manifest seed);
+        // `disconnect/complete` is the terminal transition, refused while any
+        // required artifact is unresolved; the acknowledge route is the manual
+        // half of cleanup confirmation.
+        .route(
+            "/v1/workspaces/{ws}/hosted-agent-connections/{connection}/disconnect",
+            post(routes::hosted_agent_connections::disconnect),
+        )
+        .route(
+            "/v1/workspaces/{ws}/hosted-agent-connections/{connection}/disconnect/complete",
+            post(routes::hosted_agent_connections::complete_disconnect),
+        )
+        .route(
+            "/v1/workspaces/{ws}/hosted-agent-connections/{connection}/cleanup-artifacts/{artifact}/acknowledge",
+            post(routes::hosted_agent_connections::acknowledge_cleanup_artifact),
+        )
         // B5.3a completes the pair: B5.2 could read a profile and respect
         // `paused`, but nothing could write either — an agent's behaviour was
         // fixed at birth and the only way to stop one was to remove it from
@@ -794,6 +950,23 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/event-subscriptions",
             get(routes::event_subscriptions::list).post(routes::event_subscriptions::create),
         )
+        // ADR-0162 증보 1 / HAP-E7 — the resource owner's half of an OAuth
+        // authorization request. Inside the bearer middleware because the only
+        // caller is a logged-in human owner/admin: the browser redirect that
+        // starts the flow is unauthenticated and lives on the public router
+        // below, and it writes nothing.
+        .route(
+            "/v1/workspaces/{ws}/oauth/authorization-requests/preview",
+            get(routes::agent_port_oauth::preview),
+        )
+        .route(
+            "/v1/workspaces/{ws}/oauth/authorization-requests/approve",
+            post(routes::agent_port_oauth::approve),
+        )
+        .route(
+            "/v1/workspaces/{ws}/oauth/authorization-requests/deny",
+            post(routes::agent_port_oauth::deny),
+        )
         .route(
             "/v1/workspaces/{ws}/event-subscriptions/{subscription}",
             put(routes::event_subscriptions::update).delete(routes::event_subscriptions::delete),
@@ -818,6 +991,38 @@ pub fn build_app(state: AppState) -> Router {
         .route("/v1/auth/login", post(routes::auth_routes::login))
         .route("/v1/auth/refresh", post(routes::auth_routes::refresh))
         .route("/v1/auth/logout", post(routes::auth_routes::logout))
+        // ADR-0162 / HAP-E2 — intentionally outside generic bearer middleware:
+        // this route accepts only agent bearers, emits MCP-specific challenges,
+        // and never falls through to human JWT authentication.
+        .route("/v1/mcp/agent-port", post(routes::agent_port::post))
+        // ADR-0162 증보 1 / HAP-E7 — the OAuth 2.1 authorization server.
+        //
+        // Public for the same structural reason `/v1/join` is: the callers hold
+        // no oort credential. A browser arriving at `/authorize` has a provider
+        // redirect and nothing else, and a client at `/token` presents an
+        // authorization code or a refresh credential — neither is a bearer this
+        // middleware could resolve, and putting them behind it would make the
+        // flow permanently unstartable.
+        //
+        // Every one of these five answers 404 while
+        // `AgentPortOauthConfig::is_enabled` is false, which is the default and
+        // stays the default until #1369's consent surface lands. The routes are
+        // mounted unconditionally so the router shape does not itself leak the
+        // operator's configuration.
+        .route(
+            "/.well-known/oauth-protected-resource/v1/mcp/agent-port",
+            get(routes::agent_port_oauth::protected_resource),
+        )
+        .route(
+            "/.well-known/oauth-authorization-server",
+            get(routes::agent_port_oauth::authorization_server),
+        )
+        .route(
+            "/v1/oauth/authorize",
+            get(routes::agent_port_oauth::authorize),
+        )
+        .route("/v1/oauth/token", post(routes::agent_port_oauth::token))
+        .route("/v1/oauth/revoke", post(routes::agent_port_oauth::revoke))
         .route(
             "/v1/workspaces/{ws}/work-hosts/{host}/heartbeat",
             post(routes::work_hosts::heartbeat),
@@ -829,6 +1034,13 @@ pub fn build_app(state: AppState) -> Router {
         .route(
             "/v1/workspaces/{ws}/work-hosts/{host}/terminal-attach/validate",
             post(routes::terminal_attach::validate),
+        )
+        // LIVE-1's twin of the line above, public for the identical reason: the
+        // caller is the WebRTC producer inside the sandbox, and it holds a
+        // signing key rather than a bearer.
+        .route(
+            "/v1/workspaces/{ws}/work-hosts/{host}/display-attach/validate",
+            post(routes::display_attach::validate),
         )
         // B4 adds the fourth, and it is public for the same measured reason: the
         // caller is **Centrifugo**, which holds no bearer at all. It presents the
