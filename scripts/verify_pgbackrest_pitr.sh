@@ -233,7 +233,15 @@ wait_for_postgres() {
 }
 
 drop_probe_best_effort() {
-  [ "$probe_created" -eq 1 ] || return 0
+  # EXIT-trap safe: never call fail()/source_psql (those abort the trap and
+  # skip volume/network cleanup). Intermediate RED after probe_created=1 still
+  # attempts DROP SCHEMA IF EXISTS.
+  [ "${probe_created:-0}" -eq 1 ] || return 0
+  if [ -z "${source_container_id:-}" ]; then
+    printf '[pgbackrest-pitr] RED probe_cleanup_unverified reason=source_id_unset schema=%s\n' \
+      "$probe_schema" >&2
+    return 0
+  fi
   if ! docker container inspect "$source_container_id" >/dev/null 2>&1; then
     printf '[pgbackrest-pitr] RED probe_cleanup_unverified reason=source_missing schema=%s\n' \
       "$probe_schema" >&2
@@ -244,7 +252,9 @@ drop_probe_best_effort() {
       "$probe_schema" >&2
     return 0
   fi
-  if ! source_psql -qAtc "DROP SCHEMA IF EXISTS \"$probe_schema\" CASCADE;" >/dev/null 2>&1; then
+  if ! docker exec -i "$source_container_id" \
+    psql -X -v ON_ERROR_STOP=1 -U "$database_user" -d "$database" \
+    -qAtc "DROP SCHEMA IF EXISTS \"$probe_schema\" CASCADE;" >/dev/null 2>&1; then
     printf '[pgbackrest-pitr] RED probe_cleanup_failed schema=%s\n' "$probe_schema" >&2
     return 0
   fi

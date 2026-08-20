@@ -555,6 +555,12 @@ import sys
 
 producer = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
 migrate = pathlib.Path(sys.argv[2]).read_text(encoding="utf-8")
+drop_probe = producer.split("drop_probe_best_effort() {", 1)[1].split("\n}\n", 1)[0]
+assert "source_psql" not in drop_probe, drop_probe
+assert "fail " not in drop_probe, drop_probe
+assert "DROP SCHEMA IF EXISTS" in drop_probe
+assert "cleanup_resources() {" in producer
+assert "drop_probe_best_effort" in producer.split("cleanup_resources() {", 1)[1].split("\n}\n", 1)[0]
 main = pathlib.Path(sys.argv[3]).read_text(encoding="utf-8")
 dockerfile = pathlib.Path(sys.argv[4]).read_text(encoding="utf-8")
 runbook = pathlib.Path(sys.argv[5]).read_text(encoding="utf-8")
