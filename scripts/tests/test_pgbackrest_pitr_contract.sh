@@ -481,6 +481,14 @@ grep -Fq "$image_id" "$fake_log" || fail "local image tag was not resolved to sh
 # shellcheck disable=SC2016 # `$invocation_id` is literal source under test.
 grep -Fq 'resource_suffix="$invocation_id"' "$VERIFY" \
   || fail "verifier resources are not invocation suffixed"
+grep -Fq 'ensure_pgbackrest_stanza' "$VERIFY" \
+  || fail "verify does not skip stanza-create when the stanza already exists"
+[ "$(grep -c '^ensure_pgbackrest_stanza$' "$VERIFY")" -eq 2 ] \
+  || fail "verify does not prove same-repo stanza-create skip with a second call"
+[ "$(grep -c 'source_pgbackrest stanza-create' "$VERIFY")" -eq 1 ] \
+  || fail "verify must stanza-create only through the existence probe"
+grep -Fq 'stanza %s exists; skip stanza-create' "$VERIFY" \
+  || fail "verify does not log the existing-stanza skip"
 grep -Fq 'docker volume prune -af' "$VERIFY" \
   || fail "verifier volume cleanup is not daemon-side prune -a"
 ! grep -Eq 'docker volume (rm|remove)' "$VERIFY" \

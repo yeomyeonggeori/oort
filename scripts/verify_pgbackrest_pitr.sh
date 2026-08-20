@@ -187,6 +187,26 @@ source_pgbackrest() {
     --config=/etc/pgbackrest/pgbackrest.conf --stanza="$STANZA" "$@"
 }
 
+# stanza-create is not idempotent: a second attach/deploy against an existing
+# repository fails closed and aborts the PITR loop. Probe info for the configured
+# stanza and skip create when it is already present. A false-negative (info
+# fails for any other reason) still attempts create, which is the first-run path.
+ensure_pgbackrest_stanza() {
+  local info_json
+  assert_source_running
+  if info_json="$(docker exec --user postgres "$source_container_id" \
+      /usr/local/bin/oort-pgbackrest \
+      --config=/etc/pgbackrest/pgbackrest.conf --stanza="$STANZA" \
+      --output=json info 2>/dev/null)" \
+    && jq -e --arg stanza "$STANZA" \
+      'type=="array" and length>=1 and .[0].name==$stanza' \
+      >/dev/null 2>&1 <<<"$info_json"; then
+    printf '[pgbackrest-pitr] stanza %s exists; skip stanza-create\n' "$STANZA"
+    return 0
+  fi
+  source_pgbackrest stanza-create
+}
+
 assert_source_running() {
   [[ "${source_container_id:-}" =~ ^[0-9a-f]{12,64}$ ]] \
     || fail "source_container_id_unavailable"
@@ -782,7 +802,11 @@ CREATE TABLE "$probe_schema".marker (
 INSERT INTO "$probe_schema".marker (run_id, marker) VALUES (:'run_id', 'A');
 SQL
 
-source_pgbackrest stanza-create
+ensure_pgbackrest_stanza
+# Same-repo second pass: the first call creates on an empty repo, this one must
+# skip. A bare second stanza-create is the 2nd-deploy RED this helper exists to
+# prevent, and catching it here does not require a second full e2e.
+ensure_pgbackrest_stanza
 source_pgbackrest check
 source_pgbackrest --type=full backup
 
