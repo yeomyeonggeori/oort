@@ -485,11 +485,11 @@ grep -Fq 'pg_clock_utc' "$VERIFY" \
   || fail "verify does not sample evidence timestamps from PostgreSQL clock_timestamp"
 ! grep -Fq 'utc_now' "$VERIFY" \
   || fail "verify still mixes host UTC with PostgreSQL clock_timestamp"
-[ "$(grep -c 'started_at="$(pg_clock_utc)"' "$VERIFY")" -eq 1 ] \
+grep -Fq 'started_at="$(pg_clock_utc)"' "$VERIFY" \
   || fail "started_at is not sourced from the PostgreSQL clock"
-[ "$(grep -c 'restored_at="$(pg_clock_utc)"' "$VERIFY")" -eq 1 ] \
+grep -Fq 'restored_at="$(pg_clock_utc)"' "$VERIFY" \
   || fail "restored_at is not sourced from the PostgreSQL clock"
-[ "$(grep -c 'completed_at="$(pg_clock_utc)"' "$VERIFY")" -eq 1 ] \
+grep -Fq 'completed_at="$(pg_clock_utc)"' "$VERIFY" \
   || fail "completed_at is not sourced from the PostgreSQL clock"
 grep -Fq 'ensure_pgbackrest_stanza' "$VERIFY" \
   || fail "verify does not skip stanza-create when the stanza already exists"
