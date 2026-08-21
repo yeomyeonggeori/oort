@@ -44,11 +44,11 @@
 // 진다 — `packages/momo-core/src/features/timeline/divider.test.ts`. 여기서 재는
 // 것은 그 판정이 **화면에 도달했는가**다.
 
-import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
+import { startGuardedPreview } from "./preview-guard.mjs";
 
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -431,19 +431,6 @@ async function installRoutes(context, traffic) {
   });
 }
 
-async function waitForServer() {
-  const deadline = Date.now() + 30_000;
-  while (Date.now() < deadline) {
-    try {
-      if ((await fetch(origin)).ok) return;
-    } catch {
-      /* preview 서버가 아직 뜨는 중 */
-    }
-    await wait(200);
-  }
-  throw new Error("borders gate preview server never came up");
-}
-
 async function login(page) {
   await page.goto(origin, { waitUntil: "networkidle" });
   await page.getByTestId("login-email").fill("borders@example.test");
@@ -802,13 +789,12 @@ async function main() {
   if (!existsSync(resolve(webRoot, "dist/index.html"))) {
     throw new Error("dist/ is missing. Run npm run build first.");
   }
-  const server = spawn(
-    resolve(webRoot, "node_modules/.bin/vite"),
-    ["preview", "--port", String(port), "--strictPort", "--host", "127.0.0.1"],
-    { cwd: webRoot, stdio: "ignore" }
-  );
+  const server = await startGuardedPreview({
+    webRoot,
+    port,
+    portEnvVar: "BORDERS_GATE_PORT",
+  });
   try {
-    await waitForServer();
     const browser = await chromium.launch();
     try {
       await exercise(browser);
@@ -817,7 +803,7 @@ async function main() {
       await browser.close();
     }
   } finally {
-    server.kill("SIGTERM");
+    await server.stop();
   }
   console.log("GATE PASS: 오늘/어제가 화면에 도달했고, 낭독은 절대 날짜를 얻었고,");
   console.log("           자릿폭 고정은 숫자에만 걸렸고, 연속 행은 hover에 자기");

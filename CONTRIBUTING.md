@@ -67,6 +67,7 @@ scripts/local_gate.sh --profile license   # cargo + npm 한 번에
 |---|---|---|
 | cargo (`server-rust`, `clients/desktop/src-tauri`) | 루트 `deny.toml` | `scripts/check_cargo_licenses.sh` (`cargo-deny` 필요) |
 | npm (워크스페이스 루트 = `packages/momo-core`, `clients/web`, `clients/mobile`) | `scripts/check_npm_licenses.mjs`의 `ALLOWED` | 같은 스크립트 |
+| GHCR 재배포 고지 (app + postgres 이미지) | 생성 산출물 `legal/generated/` (정책 아님) | `scripts/check_ghcr_notice_bundle.sh` + `scripts/tests/test_ghcr_notice_bundle.sh` |
 
 - **허용**: MIT · Apache-2.0 · ISC · BSD 계열 · 0BSD · Zlib · Unicode-3.0 · Unlicense · CC0-1.0 · CDLA-Permissive-2.0 · BlueOak-1.0.0 · Python-2.0 · CC-BY-4.0(데이터) · **MPL-2.0**.
 - **거부(fail-closed)**: GPL/AGPL/LGPL·SSPL·BUSL·EPL·CDDL·CC-BY-SA/NC 등 copyleft 및 상용 제한 계열, 그리고 **라이선스를 알 수 없는 것**.
@@ -76,6 +77,20 @@ scripts/local_gate.sh --profile license   # cargo + npm 한 번에
 
 ## 서드파티 고지
 
-**SwiftPM 라이선스 게이트(`scripts/check_spm_licenses.sh`)는 은퇴했습니다**(2026-08-10, #1201 — base부터 red라 전 프로파일을 막고 있었고, Swift 클라 3트리 삭제와 함께 제거). `legal/THIRD_PARTY_NOTICES.md`의 SwiftPM 섹션은 **그 시점의 동결 스냅샷**이며 재생성기가 없습니다. 잔존 Swift 트리(`server`·`relay/*`·`workers/*`·`services/*`)의 SwiftPM 의존을 바꾸는 경우 그 섹션을 손으로 갱신하고 PR에서 근거를 밝히세요.
+역할은 둘이고 한곳에만 적습니다.
 
-cargo·npm 의존성의 **고지(NOTICE) 생성**은 아직 자동화되어 있지 않습니다 — 현재 `legal/THIRD_PARTY_NOTICES.md` 커버리지는 동결된 SwiftPM 스냅샷뿐입니다. 라이선스 *검사*는 위 표대로 cargo·npm 전 스택을 덮습니다(`--profile license`).
+- **정책(allow/deny)** — 위 표. `deny.toml` / `check_npm_licenses.mjs`를 이 섹션에서 넓히지 마세요.
+- **고지(attribution)** — GHCR 두 이미지가 재배포하는 Cargo·`clients/web` npm 그래프. 정본은 `legal/generated/GHCR_THIRD_PARTY_NOTICES.txt`. 인덱스는 `legal/THIRD_PARTY_NOTICES.md`(현행 vs 역사). 이미지 동봉은 `LICENSE` · `NOTICE` · 인덱스 · 생성 bundle 네 파일.
+
+`server-rust/Cargo.lock` 또는 `clients/web/package-lock.json`을 바꾸면 같은 PR에서 재생성하세요:
+
+```bash
+python3 scripts/generate_ghcr_notice_bundle.py generate
+scripts/check_ghcr_notice_bundle.sh
+```
+
+`generate`는 `cargo metadata --offline`과 `npm ci --prefix clients/web`이 필요합니다. stale 게이트는 lockfile 해시만 보고 그 트리가 없어도 RED/GREEN을 가립니다. 누락 SPDX·LICENSE 파일은 fail-closed입니다. 자동화는 재현 가능한 인벤토리이지 법적 충분성 선언이 아닙니다.
+
+**SwiftPM 라이선스 게이트(`scripts/check_spm_licenses.sh`)는 은퇴했습니다**(2026-08-10, #1201). `legal/THIRD_PARTY_NOTICES.md`의 SwiftPM 섹션은 그 시점의 **역사 스냅샷**입니다. 잔존 Swift 트리의 SwiftPM 의존을 바꾸는 경우 그 역사 섹션을 손으로 갱신하고 PR에서 근거를 밝히세요.
+
+데스크톱 Tauri Cargo·모바일 npm·인앱 "Open Source Licenses" UI는 이 고지 bundle 밖입니다(#35).

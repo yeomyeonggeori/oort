@@ -1,11 +1,12 @@
-# oort Rust multi-command image publication for source-checkout-free hosts.
+# oort runtime image publication for source-checkout-free hosts.
 # Manual-only: the `release` GitHub Environment is the owner-approval boundary,
 # and the selected workflow ref must be main. Repository Environment protection
 # still needs an attended owner setup before the first dispatch.
 #
-# The artifact matches the live stack: `server-rust/Dockerfile`, the current
-# `clients/web` bundle, and native linux/amd64. A future arm64 lane must use a
-# native runner and merge digests; QEMU is intentionally absent here.
+# The artifacts match the live stack: the Rust multi-command app/current web
+# bundle and the pinned PostgreSQL 18 + pgBackRest database image, both native
+# linux/amd64. A future arm64 lane must use a native runner and merge digests;
+# QEMU is intentionally absent here.
 name: publish-images
 
 on:
@@ -23,20 +24,24 @@ concurrency:
 
 env:
   # 2026-08-10: repo renamed momo -> oort. GHCR package names do not follow a
-  # repo rename, so this dispatch creates the `oort` package on first run;
+  # repo rename, so this dispatch creates the `oort` and `oort-postgres`
+  # packages on their first run;
   # pre-rename images remain reachable at ghcr.io/yeomyeonggeori/momo:<tag>.
   IMAGE: ghcr.io/yeomyeonggeori/oort
+  POSTGRES_IMAGE: ghcr.io/yeomyeonggeori/oort-postgres
   IMAGE_TAG: sha-${{ github.sha }}
 
 jobs:
   publish:
-    name: publish oort Rust image (linux/amd64)
+    name: publish oort app + PostgreSQL images (linux/amd64)
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     environment: release
     outputs:
-      image: ${{ env.IMAGE }}
-      digest: ${{ steps.build.outputs.digest }}
+      application-image: ${{ env.IMAGE }}
+      application-digest: ${{ steps.build_app.outputs.digest }}
+      postgres-image: ${{ env.POSTGRES_IMAGE }}
+      postgres-digest: ${{ steps.build_postgres.outputs.digest }}
     steps:
       - name: Require a main-branch dispatch
         env:
@@ -65,7 +70,7 @@ jobs:
       # registry identity: a writer can move a tag. Only the returned digest is
       # immutable and every downstream trust step binds to that digest.
       - name: Build and push commit-addressed multi-command image
-        id: build
+        id: build_app
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: .
@@ -90,25 +95,64 @@ jobs:
           provenance: mode=max
           sbom: true
 
-      - name: Attest the pushed image digest
-        id: attest
+      - name: Build and push commit-addressed PostgreSQL image
+        id: build_postgres
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: .
+          file: infra/rust/postgres-pgbackrest/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.POSTGRES_IMAGE }}:${{ env.IMAGE_TAG }}
+          build-args: |
+            MOMO_BUILD_SHA=${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.url=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha,scope=oort-postgres-amd64
+          cache-to: type=gha,mode=max,scope=oort-postgres-amd64
+          provenance: mode=max
+          sbom: true
+
+      - name: Attest the pushed application image digest
+        id: attest_app
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-name: ${{ env.IMAGE }}
-          subject-digest: ${{ steps.build.outputs.digest }}
+          subject-digest: ${{ steps.build_app.outputs.digest }}
           push-to-registry: true
           # The attestation API + OCI referrer are sufficient for
           # `gh attestation verify`. Avoid artifact-metadata:write by not
           # creating the optional organization storage record.
           create-storage-record: false
 
-      - name: Report digest-pinned image
+      - name: Attest the pushed PostgreSQL image digest
+        id: attest_postgres
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ env.POSTGRES_IMAGE }}
+          subject-digest: ${{ steps.build_postgres.outputs.digest }}
+          push-to-registry: true
+          create-storage-record: false
+
+      # This is deliberately the only release-manifest summary. Step ordering
+      # means it cannot run until both pushed digests have their attestations.
+      - name: Report digest-pinned release manifest
+        id: release_manifest
         env:
-          DIGEST: ${{ steps.build.outputs.digest }}
+          APPLICATION_DIGEST: ${{ steps.build_app.outputs.digest }}
+          POSTGRES_DIGEST: ${{ steps.build_postgres.outputs.digest }}
         run: |
-          test -n "$DIGEST"
+          printf '%s\n' "$APPLICATION_DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$'
+          printf '%s\n' "$POSTGRES_DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$'
           {
-            echo "### Published image"
+            echo "### Published release manifest"
             echo
-            echo "\`$IMAGE@$DIGEST\`"
+            echo "| subject | immutable image |"
+            echo "| --- | --- |"
+            echo "| application | \`$IMAGE@$APPLICATION_DIGEST\` |"
+            echo "| PostgreSQL 18 + pgBackRest | \`$POSTGRES_IMAGE@$POSTGRES_DIGEST\` |"
+            echo
+            echo "Both returned registry digests were attested before this manifest was emitted."
           } >> "$GITHUB_STEP_SUMMARY"

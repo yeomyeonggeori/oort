@@ -28,11 +28,11 @@
 // REQUEST this client composes and the SCREEN it draws, and both are fully
 // determined by the bundle.
 
-import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
+import { startGuardedPreview } from "./preview-guard.mjs";
 
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const port = Number(process.env.AILINK_GATE_PORT || 5186);
@@ -191,19 +191,6 @@ async function installRoutes(context, state) {
   });
 }
 
-async function waitForServer() {
-  const end = Date.now() + 30_000;
-  while (Date.now() < end) {
-    try {
-      if ((await fetch(origin)).ok) return;
-    } catch {
-      /* still starting */
-    }
-    await new Promise((done) => setTimeout(done, 200));
-  }
-  throw new Error("preview server never came up");
-}
-
 function fail(message) {
   throw new Error(message);
 }
@@ -317,13 +304,12 @@ async function main() {
     throw new Error("dist/ is missing. Run npm run build first.");
   }
   const state = { putBodies: [], linkBody: unconfiguredLink };
-  const server = spawn(
-    resolve(webRoot, "node_modules/.bin/vite"),
-    ["preview", "--port", String(port), "--strictPort", "--host", "127.0.0.1"],
-    { cwd: webRoot, stdio: "ignore" }
-  );
+  const server = await startGuardedPreview({
+    webRoot,
+    port,
+    portEnvVar: "AILINK_GATE_PORT",
+  });
   try {
-    await waitForServer();
     const browser = await chromium.launch();
     try {
       const context = await browser.newContext({
@@ -554,7 +540,7 @@ async function main() {
       await browser.close();
     }
   } finally {
-    server.kill("SIGTERM");
+    await server.stop();
   }
   console.log("GATE PASS: the OAuth method sends a deny_unknown_fields-clean `oauth` body");
   console.log("           with no bearer key; no pasted credential reaches the DOM at any");

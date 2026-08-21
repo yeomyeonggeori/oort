@@ -15,6 +15,8 @@
 # 이 스크립트는 update-next.json 하나만 커밋한다. index.html / TESTER_GUIDE.md 는
 # 손대지 않는다(사이트 문안은 사람이 반영).
 #
+# 성재 복붙 재발행 체크리스트(전제·dry-run·실발행·확인): docs/NEXT_CHANNEL.md §8.
+#
 # 버전 규칙 (제안, ADR-0133)
 #   0.1.0-next.N  = 오픈 베타(0.1.0)로 가는 프리릴리스 열차. semver 프리릴리스라
 #                   0.1.0 보다 항상 낮게 정렬되고, alpha 채널의 0.0.x 와도 겹치지
@@ -102,9 +104,13 @@ trap 'rm -rf "$WORK"' EXIT INT TERM
 echo "[next-publish] 1/6 build (v${VERSION}, build ${BUILD_NUM} @${GIT_SHA}, ${UPDATER_TARGET})"
 # --config 로 버전을 주입한다: 발행 때마다 tauri.conf.json 을 커밋하지 않아도 되고,
 # 앱이 스스로 보고하는 버전과 매니페스트가 갈라질 수 없다(같은 값에서 나온다).
+# MOMO_CHANNEL_BUILD=1: 로컬 `cargo tauri build` 는 매니페스트보다 낮은 베이스라인
+# 버전(0.1.0-next.1)을 심고 기동 즉시 롤백을 제안한다(#1281). 채널 산출물만
+# 업데이터 체크를 연다. 이 환경변수를 빼면 발행된 앱이 업데이트를 안 받는다.
 (
   cd clients/desktop
   APPLE_SIGNING_IDENTITY="$SIGN_IDENTITY" \
+  MOMO_CHANNEL_BUILD=1 \
   cargo tauri build --bundles app --ci --config "{\"version\":\"${VERSION}\"}"
 ) > "$WORK/build.log" 2>&1 || { tail -40 "$WORK/build.log" >&2; exit 1; }
 

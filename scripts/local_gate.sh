@@ -130,6 +130,7 @@ AUTO_NEED_AGENT=0
 AUTO_NEED_LIVE=0
 AUTO_NEED_STAGING=0
 AUTO_NEED_HOSTRT=0
+AUTO_NEED_BACKUP=0
 AUTO_NEED_DIAG=0
 AUTO_NEED_WEB=0
 AUTO_NEED_LICENSE=0
@@ -141,8 +142,8 @@ auto_classify_script() {
   case "$1" in
     scripts/migrate.sh|scripts/verify_runtime_role_bootstrap.sh|scripts/verify_prod_seed_password.sh|scripts/verify_owner_bootstrap.sh|scripts/verify_rls.sh|scripts/verify_prod_rls_posture.sh|scripts/verify_roster.sh|scripts/verify_channel_list.sh|scripts/verify_channel_management.sh|scripts/verify_join.sh|scripts/verify_platform_admin.sh|scripts/verify_approval_decision.sh|scripts/verify_auth_hardening.sh|scripts/verify_push_registration.sh|scripts/verify_push_notifier.sh|scripts/verify_notification_mute.sh|scripts/verify_plugin_registry.sh|scripts/verify_signed_webhook_ingress.sh|scripts/verify_drive_mcp.sh|scripts/verify_attachment_upload.sh|scripts/verify_plugin_grant_roundtrip.sh|scripts/verify_huddle_lifecycle.sh|scripts/verify_workspace_search.sh|scripts/verify_thread_reply.sh|scripts/verify_message_interaction.sh|scripts/verify_work_session.sh|scripts/verify_work_session_idle.sh|scripts/verify_work_control.sh|scripts/verify_work_agent_e2e.sh|scripts/verify_work_host.sh|scripts/verify_workd.sh|scripts/verify_workd_attach.sh|scripts/terminal_attach_probe.py|scripts/terminal_attach_tls_proxy.py|scripts/verify_work_pool.sh|scripts/verify_tier_fallback.sh|scripts/verify_t3_migration_repair.sh|scripts/verify_t3_lifecycle_concurrency.sh|scripts/verify_t3_convergence.sh|scripts/verify_work_tool_profile.sh|scripts/verify_agent_create.sh|scripts/verify_agent_credentials_rust.sh|scripts/tests/test_agent_credentials_verifier_safety.sh|scripts/verify_agent_card_onboarding.sh|scripts/verify_agent_profile.sh|scripts/verify_agent_run_history.sh|scripts/verify_agent_interaction_safety.sh|scripts/verify_memory_grant.sh|scripts/verify_membership_lifecycle.sh|scripts/verify_lifecycle_completion.sh|scripts/verify_t3_provider_continuity.sh|scripts/verify_workstream_continuity.sh|scripts/mock_push_relay.py)
       AUTO_NEED_DB=1; AUTO_REASONS+=("$1 -> runtime-db") ;;
-    scripts/check_cargo_licenses.sh|scripts/check_npm_licenses.mjs|scripts/tests/test_license_gate.sh)
-      AUTO_NEED_LICENSE=1; AUTO_REASONS+=("$1 -> license (#1225 cargo/npm dependency license gate)") ;;
+    scripts/check_cargo_licenses.sh|scripts/check_npm_licenses.mjs|scripts/tests/test_license_gate.sh|scripts/generate_ghcr_notice_bundle.py|scripts/check_ghcr_notice_bundle.sh|scripts/check_debian_copyrights.sh|scripts/tests/test_ghcr_notice_bundle.sh)
+      AUTO_NEED_LICENSE=1; AUTO_REASONS+=("$1 -> license (#1225 policy + #1332 GHCR notice bundle)") ;;
     scripts/check_secrets.sh|scripts/tests/test_secrets_gate.sh)
       AUTO_NEED_SECRETS=1; AUTO_REASONS+=("$1 -> secrets (#1236 gitleaks history scan)") ;;
     scripts/check_docs_commands.py|scripts/tests/test_docs_commands_gate.sh)
@@ -172,6 +173,10 @@ auto_classify_script() {
       AUTO_NEED_AGENT=1; AUTO_REASONS+=("$1 -> runtime-agent") ;;
     scripts/self_host_env.sh|scripts/tests/test_self_host_env_modes.sh|scripts/tests/test_publish_images_contract.py|scripts/verify_staging_smoke.sh|scripts/verify_internal_hosting_smoke.sh|scripts/verify_prod_install_upgrade.sh|scripts/verify_metrics_observability.sh|scripts/prod_env_preflight.sh|scripts/aws_internal_alpha_preflight.sh|scripts/verify_ncp_centrifugo_contract.sh|scripts/verify_ncp_centrifugo_boundary.sh|scripts/tests/test_ncp_centrifugo_boundary.sh)
       AUTO_NEED_STAGING=1; AUTO_REASONS+=("$1 -> staging-smoke") ;;
+    scripts/verify_pgbackrest_pitr.sh|scripts/verify_pgbackrest_pitr_e2e.sh|scripts/pgbackrest_pitr_restore.sh|scripts/run_pitr_gated_migrate.sh|scripts/tests/test_pgbackrest_pitr_contract.sh|scripts/tests/test_run_pitr_gated_migrate.sh)
+      AUTO_NEED_BACKUP=1; AUTO_REASONS+=("$1 -> backup (encrypted pgBackRest/PITR proof)") ;;
+    scripts/publish_next_build.sh|scripts/tests/test_next_channel_hygiene.sh)
+      AUTO_REASONS+=("$1 -> docs") ;;
     scripts/verify_internal_host_runtime.sh|scripts/verify_backup_restore_rehearsal.sh)
       AUTO_NEED_HOSTRT=1; AUTO_REASONS+=("$1 -> host-runtime") ;;
     scripts/web_serving_smoke.sh|scripts/verify_web_login_smoke.sh|scripts/verify_web_generated_types.sh)
@@ -193,6 +198,8 @@ auto_classify_path() {
       # #1225 cargo license policy. Its only consumer is the license gate, so
       # this is targeting rather than narrowing: no build/runtime surface reads it.
       AUTO_NEED_LICENSE=1; AUTO_REASONS+=("$1 -> license (cargo-deny policy)") ;;
+    NOTICE|legal/THIRD_PARTY_NOTICES.md|legal/generated/*)
+      AUTO_NEED_LICENSE=1; AUTO_REASONS+=("$1 -> license (#1332 GHCR notice bundle)") ;;
     .gitleaksignore)
       # #1236 secret-scan triage baseline. Same shape as deny.toml: the secret
       # gate is its only reader. The scan itself runs in every profile (it is in
@@ -237,6 +244,8 @@ auto_classify_path() {
       AUTO_REASONS+=("$1 -> swift") ;;
     adapters/*)
       AUTO_NEED_AGENT=1; AUTO_REASONS+=("$1 -> runtime-agent (hermes adapter surface)") ;;
+    infra/rust/docker-compose.backup.yml|infra/rust/pgbackrest*.conf|infra/rust/pgbackrest*.yml|infra/rust/backup*.env.example|infra/rust/pitr-bindings.env.example|infra/rust/postgres-pgbackrest/*)
+      AUTO_NEED_BACKUP=1; AUTO_REASONS+=("$1 -> backup (#1330 PostgreSQL/pgBackRest/PITR surface)") ;;
     infra/prod/*)
       AUTO_NEED_STAGING=1; AUTO_REASONS+=("$1 -> staging-smoke") ;;
     infra/*)
@@ -303,7 +312,7 @@ auto_select_profile() {
   done
   set +f
 
-  local units=$((AUTO_NEED_DB + AUTO_NEED_RELAY + AUTO_NEED_AGENT + AUTO_NEED_LIVE + AUTO_NEED_STAGING + AUTO_NEED_HOSTRT + AUTO_NEED_DIAG + AUTO_NEED_WEB + AUTO_NEED_LICENSE + AUTO_NEED_SECRETS))
+  local units=$((AUTO_NEED_DB + AUTO_NEED_RELAY + AUTO_NEED_AGENT + AUTO_NEED_LIVE + AUTO_NEED_STAGING + AUTO_NEED_HOSTRT + AUTO_NEED_BACKUP + AUTO_NEED_DIAG + AUTO_NEED_WEB + AUTO_NEED_LICENSE + AUTO_NEED_SECRETS))
   if [ "$AUTO_NEED_ALL" -eq 1 ] || [ "$units" -gt 1 ]; then
     AUTO_SUGGESTED="all"
     if [ "$AUTO_NEED_LIVE" -eq 1 ]; then
@@ -327,6 +336,8 @@ auto_select_profile() {
     AUTO_SUGGESTED="staging-smoke"
   elif [ "$AUTO_NEED_HOSTRT" -eq 1 ]; then
     AUTO_SUGGESTED="host-runtime"
+  elif [ "$AUTO_NEED_BACKUP" -eq 1 ]; then
+    AUTO_SUGGESTED="backup"
   elif [ "$AUTO_NEED_DIAG" -eq 1 ]; then
     AUTO_SUGGESTED="diagnostics"
   elif [ "$AUTO_NEED_WEB" -eq 1 ]; then
@@ -637,6 +648,9 @@ add_static_commands() {
   # them. Measured cost: 0.21s for the guard, 1.1s for the regression.
   add_cmd_once "docs command drift contract" 'PYTHONPYCACHEPREFIX="${TMPDIR:-/tmp}/momo-pycache" python3 scripts/check_docs_commands.py'
   add_cmd_once "docs command gate regression (red proofs: #1472 fmt form, deleted executor, unknown profile/target/script/flag)" 'scripts/tests/test_docs_commands_gate.sh'
+  add_cmd_once "next channel hygiene (org URL 0 + channel-build flag)" 'scripts/tests/test_next_channel_hygiene.sh'
+  add_cmd_once "next channel publish/hygiene shell syntax" 'bash -n scripts/publish_next_build.sh scripts/tests/test_next_channel_hygiene.sh'
+  add_cmd_once "GHCR notice bundle shell/python syntax" 'bash -n scripts/check_ghcr_notice_bundle.sh scripts/check_debian_copyrights.sh scripts/tests/test_ghcr_notice_bundle.sh && python3 -m py_compile scripts/generate_ghcr_notice_bundle.py'
   add_note_once coverage "#1525 docs command drift via scripts/check_docs_commands.py: every command in AGENTS.md, CODEX.md, docs/RUN.md and every docs/runbooks/*.md must resolve against this tree — the executor exists, is executable and parses (bash -n / py_compile); \`make <target>\` is a target the Makefile defines; \`--profile <p>\` is a profile local_gate.sh's own parser accepts; \`npm [--prefix DIR] run <s>\` is a script that package.json defines; a long flag handed to one of our scripts appears in that script; docker compose -f/--env-file and --package-path/--manifest-path paths exist; and a documented \`cargo fmt --check\` carries --all (the #1472 rule). Runbooks are gated by glob, so a new one arrives covered; the three top-level documents are a table with reasons, and a tabled document that disappears is red rather than silently uncovered. Deliberately NOT covered: commands are never executed, so a command that resolves but does the wrong thing is still invisible; unrecognized token shapes are skipped rather than guessed at (a gate that flagged <workspace-id> would be switched off within a week); and \`<!-- docs-cmd-ignore: reason -->\` exempts a single line, at the cost of a written reason. The repair that landed with it: 17 broken commands, all in docs/RUN.md's W-S1 residue (scripts/macos_dev_run.sh x9, --profile macos-ui, --package-path clients/macOS x3) and docs/runbooks/ncp-rust-deploy.md (npm run gate:csp-deploy from the wrong prefix x2, npm run build for an abolished procedure)."
   add_cmd_once "self-host quickstart drift contract" 'for f in docs/SELF_HOST.md scripts/self_host_env.sh infra/rust/local.override.yml infra/rust/Caddyfile.local infra/rust/docker-compose.rust.yml infra/rust/docker-compose.rust.build.yml; do test -s "$f" || { echo "self-host path is missing $f"; exit 1; }; done; for doc in docs/SELF_HOST.md scripts/self_host_env.sh; do for ref in infra/rust/docker-compose.rust.yml infra/rust/docker-compose.rust.build.yml infra/rust/local.override.yml infra/rust/local.secrets.env; do grep -Fq "$ref" "$doc" || { echo "$doc no longer names $ref — the quickstart command has drifted"; exit 1; }; done; done; grep -Eq "^:80 \{" infra/rust/Caddyfile.local || { echo "infra/rust/Caddyfile.local must use a port-only site address (:80) — a hostname turns on automatic HTTPS and orders a real certificate at boot (#1239)"; exit 1; }; grep -Fq "Caddyfile.local" infra/rust/local.override.yml || { echo "local.override.yml must mount Caddyfile.local"; exit 1; }; grep -Fq "infra/rust/Caddyfile:" infra/rust/local.override.yml && { echo "local.override.yml must NOT mount the production Caddyfile"; exit 1; }; echo "self-host quickstart wiring intact"'
   add_note_once coverage "#1229 self-host quickstart drift contract: docs/SELF_HOST.md and scripts/self_host_env.sh must keep naming the same three compose files and the generated env path (a renamed overlay fails the gate instead of failing a self-hoster), infra/rust/Caddyfile.local must keep a port-only site address so a local run cannot order a certificate for the live domain at boot (#1239), and local.override.yml must never mount the production Caddyfile."
@@ -649,6 +663,7 @@ add_static_commands() {
   add_cmd_once "shell syntax" 'for f in .conductor/setup.sh adapters/prime/run.sh adapters/prime/container/entrypoint.sh adapters/prime/tests/tenancy_probe.sh scripts/momo scripts/local_gate.sh scripts/planning_context.sh scripts/self_host_env.sh scripts/runtime_process_guard.sh scripts/ensure_runtime_env.sh scripts/check_branch_skew.sh scripts/check_track_alignment.sh scripts/github_track_guardrails.sh scripts/verify_policy_integrity.sh scripts/check_migration_numbers.sh scripts/check_cargo_licenses.sh scripts/check_secrets.sh scripts/check_compose_env_templates.sh scripts/check_design_review_wiring.sh scripts/write_sha256_manifest.sh scripts/install_branch_skew_hook.sh scripts/hooks/pre-push scripts/tests/fixtures/pre-push-branch-skew-v1 scripts/tests/test_license_gate.sh scripts/tests/test_secrets_gate.sh scripts/tests/test_track_alignment_guard.sh scripts/tests/test_github_track_guardrails.sh scripts/tests/test_pr_ci_guardrails.sh scripts/tests/test_policy_integrity_gate.sh scripts/tests/test_compose_env_template_gate.sh scripts/tests/test_docs_commands_gate.sh scripts/tests/test_ncp_centrifugo_boundary.sh scripts/tests/test_local_gate_hardening.sh scripts/tests/test_local_gate_drift_guard.sh scripts/tests/test_local_gate_lint_timeout.sh scripts/tests/test_goal_claim_base_resolution.sh scripts/tests/test_make_deploy_bundle.sh scripts/cleanup_dogfood_seed_agents.sh scripts/local_soak_monitor.sh scripts/collect_diagnostics.sh scripts/compose_janitor.sh scripts/local_alpha_runner.sh scripts/make_deploy_bundle.sh scripts/goal_claim.sh scripts/goal_status.sh scripts/goal_release.sh scripts/github_bootstrap.sh scripts/github/bootstrap.sh scripts/migrate.sh scripts/prod_env_preflight.sh scripts/aws_internal_alpha_preflight.sh scripts/verify_prod_install_upgrade.sh scripts/verify_multibinary_image.sh scripts/verify_momo_ops.sh scripts/verify_momo_ops_runtime.sh scripts/verify_prod_rls_posture.sh scripts/verify_owner_bootstrap.sh scripts/verify_owner_bootstrap_rust.sh scripts/design_preflight_web.sh scripts/verify_pgvector_contract.sh scripts/verify_eve_profile.sh scripts/verify_ncp_centrifugo_contract.sh scripts/verify_ncp_centrifugo_boundary.sh scripts/verify_runtime_role_bootstrap.sh scripts/verify_prod_seed_password.sh scripts/verify_rls.sh scripts/verify_roster.sh scripts/verify_channel_list.sh scripts/verify_channel_management.sh scripts/verify_join.sh scripts/verify_platform_admin.sh scripts/verify_approval_decision.sh scripts/verify_auth_hardening.sh scripts/verify_push_registration.sh scripts/verify_push_notifier.sh scripts/verify_notification_mute.sh scripts/verify_linkshort.sh scripts/push_relay_keygen.sh scripts/verify_push_relay.sh scripts/verify_plugin_registry.sh scripts/verify_signed_webhook_ingress.sh scripts/verify_drive_mcp.sh scripts/verify_attachment_upload.sh scripts/verify_plugin_grant_roundtrip.sh scripts/verify_huddle_lifecycle.sh scripts/verify_workspace_search.sh scripts/verify_thread_reply.sh scripts/verify_work_session.sh scripts/verify_work_control.sh scripts/verify_work_agent_e2e.sh scripts/verify_workd.sh scripts/verify_workd_attach.sh scripts/verify_work_pool.sh scripts/verify_tier_fallback.sh scripts/verify_t3_migration_repair.sh scripts/verify_t3_provider_continuity.sh scripts/verify_t3_convergence.sh scripts/verify_membership_lifecycle.sh scripts/verify_lifecycle_completion.sh scripts/verify_memory_search.sh scripts/verify_context_packet.sh scripts/verify_memory_grant.sh scripts/verify_agent_card_onboarding.sh scripts/verify_agent_profile.sh scripts/verify_openapi_contract.sh scripts/verify_openapi_contract_rust.sh scripts/openapi_spec_to_json.sh scripts/verify_relay.sh scripts/verify_realtime_live.sh scripts/verify_agent_worker_bootstrap.sh scripts/verify_agent_worker.sh scripts/verify_agent_path_equivalence.sh scripts/verify_agent_context_bootstrap.sh scripts/verify_agent_context.sh scripts/verify_agent_live_channel_bootstrap.sh scripts/verify_agent_live_channel.sh scripts/verify_hermes_verifier_bootstrap.sh scripts/verify_external_agent_provider.sh scripts/verify_local_hermes_bridge.sh scripts/verify_hermes_gateway_adapter.sh scripts/verify_hermes_gateway_real_smoke.sh scripts/verify_local_hermes_credentialed_smoke.sh scripts/verify_staging_smoke.sh scripts/verify_internal_hosting_smoke.sh scripts/web_serving_smoke.sh scripts/verify_web_serving.sh scripts/verify_web_login_smoke.sh scripts/verify_web_generated_types.sh scripts/verify_internal_host_runtime.sh scripts/verify_backup_restore_rehearsal.sh infra/prod/install.sh infra/prod/upgrade.sh infra/prod/momo-ops.sh infra/prod/deploy-lib.sh infra/prod/docker/momo-entrypoint.sh infra/workd/bootstrap.sh infra/workd/momo-workd-run infra/eve/bootstrap_world.sh infra/eve/entrypoint.sh; do [ -e "$f" ] || { echo "missing shell script: $f"; exit 1; }; bash -n "$f"; done'
   add_cmd_once "Rust image publication contract" 'python3 scripts/tests/test_publish_images_contract.py'
   add_cmd_once "self-host local-build/published-digest mode contract" 'scripts/tests/test_self_host_env_modes.sh'
+  add_cmd_once "pgBackRest/PITR verifier shell syntax" 'bash -n scripts/verify_pgbackrest_pitr.sh scripts/verify_pgbackrest_pitr_e2e.sh scripts/pgbackrest_pitr_restore.sh scripts/run_pitr_gated_migrate.sh scripts/tests/test_pgbackrest_pitr_contract.sh scripts/tests/test_run_pitr_gated_migrate.sh'
   add_note_once coverage "#1266 Rust publish/self-host security contract: the manual workflow must reject non-main refs before publishing, cross the release Environment, use full-SHA actions, build server-rust/Dockerfile for native linux/amd64, push the image, and bind the canonical subject name plus returned digest to an OCI SLSA attestation; mutation fixtures turn each boundary red and a fake gh locks deploy-lib to the repository plus SLSA v1. The behavioral self-host fixture proves both image modes stay separate, all seven rendered Compose consumers use the exact published digest despite ambient overrides, env-file newline/duplicate injection fails without secret output, and ports are strict decimal before arithmetic."
   add_cmd_once "pgvector image and migration drift contract" "scripts/verify_pgvector_contract.sh"
   add_cmd_once "eve compose profile drift contract" "scripts/verify_eve_profile.sh --config-only"
@@ -793,9 +808,12 @@ add_host_runtime_commands() {
 }
 
 add_backup_commands() {
-  add_cmd_once "backup restore rehearsal verification" "scripts/verify_backup_restore_rehearsal.sh"
-  add_note_once coverage "MOMO-222 backup gate: repo-local PostgreSQL 18 source/restore containers verify pg_dump -> pg_restore into a separate non-primary target, compare marker count/checksum, and generate restore evidence markdown/json suitable for PR handoff."
-  add_note_once not_covered "Actual production pgBackRest stanza-create/check/full backup, WAL archive push, object-store repository, SOPS secret decrypt, and time-target PITR restore rehearsal remain runtime-unverified(public host)."
+  add_cmd_once "legacy logical backup restore smoke" "scripts/verify_backup_restore_rehearsal.sh"
+  add_cmd_once "pgBackRest/PITR fail-closed contract and mutation matrix" "scripts/tests/test_pgbackrest_pitr_contract.sh"
+  add_cmd_once "PostgreSQL 18 encrypted pgBackRest/WAL/time-target PITR closed loop" 'out="${LOCAL_GATE_OUTPUT_DIR:-${TMPDIR:-/tmp}/momo-local-gate}/pgbackrest-pitr"; mkdir -p "$out"; chmod 700 "$out"; PITR_E2E_OUT_DIR="$out" scripts/verify_pgbackrest_pitr_e2e.sh'
+  add_cmd_once "signed PITR migration entrypoint fail-closed contract" "scripts/tests/test_run_pitr_gated_migrate.sh"
+  add_note_once coverage "#1330 backup gate: pinned PostgreSQL 18+pgBackRest and current candidate migrate images run marker A -> encrypted full backup -> post-backup target UTC -> marker B + forced WAL archive -> distinct-volume time-target restore; A=1/B=0, matching system identifier, promoted archive-off target, signed 38-field JSON/Markdown/19-key bindings/current-cipher artifact, candidate migration 68+idempotent 0, and labeled container/volume/network cleanup 0 are required. Focused RED fixtures reject repo/cipher/archive drift, active/same/nonempty restore targets, forged/tampered/expired/foreign proof, current-cipher rotation, local Compose policy bypass, and untrusted migration runner env/argv."
+  add_note_once not_covered "Actual NCP live-source attach, first GHCR PostgreSQL image publish/anonymous pull/attestation, S3-compatible object-store credential/TLS round-trip and schedule/retention remain runtime-unverified(public host)."
 }
 
 add_runtime_bootstrap_commands() {
@@ -1102,8 +1120,12 @@ add_license_commands() {
   add_cmd_once "license gate regression (red proofs: cargo AGPL inject, MPL removal, npm aim)" 'scripts/tests/test_license_gate.sh'
   add_cmd_once "cargo dependency license gate (server-rust + desktop, deny.toml)" 'scripts/check_cargo_licenses.sh'
   add_cmd_once "npm dependency license gate (clients/web + clients/mobile + packages/momo-core)" 'out="${LOCAL_GATE_OUTPUT_DIR:-${TMPDIR:-/tmp}/momo-local-gate}/npm-licenses-${LOCAL_GATE_RUN_ID:-manual}.md"; NPM_LICENSE_REPORT="$out" node scripts/check_npm_licenses.mjs && echo "license inventory: $out"'
+  add_cmd_once "GHCR notice bundle regression (byte-identical + mutation RED)" 'scripts/tests/test_ghcr_notice_bundle.sh'
+  add_cmd_once "GHCR notice bundle stale/Dockerfile gate" 'scripts/check_ghcr_notice_bundle.sh'
+  add_cmd_once "GHCR notice/debian copyright script syntax" 'bash -n scripts/check_ghcr_notice_bundle.sh scripts/check_debian_copyrights.sh scripts/tests/test_ghcr_notice_bundle.sh && python3 -m py_compile scripts/generate_ghcr_notice_bundle.py'
   add_note_once coverage "#1225 dependency license gate: deny.toml is one policy for both cargo workspaces (server-rust 309 crates + clients/desktop/src-tauri 528, 644 unique third-party) and scripts/check_npm_licenses.mjs applies the same allowlist to the canonical npm trees (workspace root incl. packages/momo-core, clients/web, clients/mobile — 1,750 lockfile entries). SPDX expressions are evaluated before any name matching, so a permissive OR branch (node-forge \"BSD-3-Clause OR GPL-2.0\", r-efi \"MIT OR Apache-2.0 OR LGPL-2.1-or-later\") passes while an AND with a copyleft half fails. scripts/tests/test_license_gate.sh proves red on an injected AGPL-3.0 crate, on removing the reviewed MPL-2.0 allowance (desktop only — the backbone has zero MPL), on an unlicensed first-party workspace package, and proves the npm half reads the canonical trees rather than clients/web-legacy."
-  add_note_once not_covered "#1225 covers licenses only. RUSTSEC advisories (cargo deny check advisories), npm audit, duplicate-crate bans, and source registry pinning are not run — and no license gate runs in GitHub Actions yet, so an external PR is still unchecked until the CI promotion that waits on the public-repo decision."
+  add_note_once coverage "#1332 GHCR notice bundle: scripts/generate_ghcr_notice_bundle.py writes legal/generated/GHCR_THIRD_PARTY_NOTICES.txt from server-rust/Cargo.lock + clients/web/package-lock.json (fail-closed on missing SPDX/LICENSE). scripts/check_ghcr_notice_bundle.sh is the attribution-freshness gate (lockfile hashes, committed bytes, Docker COPY of LICENSE/NOTICE/index/bundle). Policy allow/deny stays in the two #1225 checkers — this gate does not widen deny.toml. scripts/tests/test_ghcr_notice_bundle.sh proves byte-identical generation and RED on version drift, license-file deletion, Docker COPY removal, and GPL-as-permissive inventory. PR CI alignment runs the same two scripts on every PR."
+  add_note_once not_covered "#1225 covers licenses only. RUSTSEC advisories (cargo deny check advisories), npm audit, duplicate-crate bans, and source registry pinning are not run. #1332 does not cover desktop/mobile graphs, the Open Source Licenses UI (#35), or legal sufficiency of the Debian OS-layer inventory."
 }
 
 add_secrets_commands() {
@@ -1241,6 +1263,7 @@ case "$PROFILE" in
     ;;
   all)
     add_static_commands
+    add_backup_commands
     add_runtime_env_guard_command
     add_swift_commands
     add_license_commands

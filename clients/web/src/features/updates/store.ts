@@ -76,13 +76,15 @@ export function useUpdateState(): UpdateState {
  * queued. Failure is a state, not a thrown error: every caller here is a click
  * handler or a timer, and neither has anywhere to put an exception.
  *
- * The dev/debug guard is NOT here. This exact bundle ships in both a `tauri dev`
- * run and a production release, so the web side cannot tell a local build (which
- * the published manifest would only ever downgrade) from a shipping one. That
- * judgement lives in the shell, where the build kind is known: `updater_check`
- * in `clients/desktop/src-tauri/src/updater.rs` reports "up to date" for a
- * dev/debug build without touching the manifest (W-B2-5), so the `{kind:
- * "current"}` a dev build settles on here is the shell's honest answer.
+ * The channel/dev/debug guard is NOT here. This exact bundle ships in a
+ * `tauri dev` run, a local `cargo tauri build`, and a published channel
+ * artifact, so the web side cannot tell a local build (which the published
+ * manifest would only ever downgrade) from a shipping one. That judgement
+ * lives in the shell, where the build kind is known: `updater_check` in
+ * `clients/desktop/src-tauri/src/updater.rs` reports "up to date" unless
+ * `MOMO_CHANNEL_BUILD=1` was set at compile time (#1281, W-B2-5), so the
+ * `{kind: "current"}` a local build settles on here is the shell's honest
+ * answer.
  */
 export async function checkForUpdate(): Promise<void> {
   if (!isDesktop()) return;

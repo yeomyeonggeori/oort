@@ -116,7 +116,7 @@ mod tests {
     #[test]
     fn accepts_a_plain_https_link() {
         assert!(is_openable(
-            "https://github.com/Dawn-kim-official/momo/pull/803"
+            "https://github.com/yeomyeonggeori/oort/pull/803"
         ));
     }
 
@@ -149,7 +149,7 @@ mod tests {
         // filtering, and filtering it would have broken the common case: a
         // branch name with a slash or a query value with a space.
         assert!(is_openable(
-            "https://github.com/Dawn-kim-official/momo/tree/feat%2F803-artifact-cards"
+            "https://github.com/yeomyeonggeori/oort/tree/feat%2F803-artifact-cards"
         ));
         assert!(is_openable(
             "https://example.com/search?q=momo%20diff%20card"

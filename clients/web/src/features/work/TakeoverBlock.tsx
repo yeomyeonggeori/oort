@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import type { WorkHost, WorkSession } from "@momo/core/lib/api";
 import {
   HANDOFF_COPY,
+  TAKEOVER_PICKER_COPY,
   takeoverGate,
 } from "@momo/core/features/work/sessionHandoff";
 import { HostPicker } from "./HostPicker";
@@ -105,12 +106,7 @@ export function TakeoverBlock({
         <HostPicker
           id={domId}
           labelId={labelId}
-          copy={{
-            group: "인수할 호스트",
-            confirm: HANDOFF_COPY.takeover.button,
-            action: (name) => `${name}에서 인수`,
-            busy: (name) => `${name}에서 인수하는 중`,
-          }}
+          copy={TAKEOVER_PICKER_COPY}
           targets={targets}
           busyHostId={busyHostId}
           onPick={onPick}

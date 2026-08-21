@@ -1056,6 +1056,31 @@ describe("the four states this surface must ship", () => {
     }
   });
 
+  it("두 관전 패널의 connecting 낱말은 글자까지 같다", () => {
+    // ObserverTerminal 과 DisplayObserver 의 PHASE_BUSY_COPY 는 같은 호스트에
+    // 같은 걸음으로 붙는 두 패널의 같은 국면이다. 지금까지 그 일치는 두 파일의
+    // **주석 주장**뿐이었다 (#1511 편입 ① — design-review #1509). 주석은 한쪽만
+    // 고쳐지는 날이 오므로, 여기서 바이트로 잰다.
+    const terminal = readFileSync(
+      fileURLToPath(new URL("./ObserverTerminal.tsx", import.meta.url)),
+      "utf8"
+    );
+    const connectingOf = (source: string, name: string): string => {
+      const hits = source.match(/\bconnecting: "([^"]*)"/g) ?? [];
+      expect(hits, `${name} 의 PHASE_BUSY_COPY.connecting 은 하나여야 한다`).toHaveLength(1);
+      const only = hits[0];
+      // 위 단정이 이미 터졌을 자리지만, `noUncheckedIndexedAccess` 의 undefined 를
+      // 빈 문자열로 접으면 「못 찾음」 둘이 「같음」으로 통과하는 길이 생긴다.
+      if (only === undefined) throw new Error(`${name} 에서 connecting 을 찾지 못했다`);
+      return only;
+    };
+    const ours = connectingOf(DISPLAY_COMPONENT_SOURCE, "DisplayObserver.tsx");
+    expect(connectingOf(terminal, "ObserverTerminal.tsx")).toBe(ours);
+    // 낱말 자체도 못 박는다: 「명사 + 중」 (#1501) — 「연결하는 중」으로 함께
+    // 미끄러지는 동률 이탈은 위 동치 단정이 못 본다.
+    expect(ours).toBe('connecting: "호스트에 연결 중"');
+  });
+
   it("keeps its viewer id out of the session ledger's own vocabulary", () => {
     // The observer count the server publishes is kind-blind: one number covering
     // terminal and screen grants alike. A second badge here would put the same
@@ -1109,14 +1134,16 @@ describe("what this file does not prove", () => {
     // producerSelection and templateBuild moved from `unverified` to
     // `runtimeVerified`. LIVE-5c then graduated input delivery the same way: a
     // real producer parsed the declared frames and a typed command reached a
-    // terminal on the captured display. The honesty invariant is what this
-    // asserts, and it is unchanged — a graduation must be RECORDED under
-    // `runtimeVerified`, and the part that is still unmeasured (the same round
-    // trip inside a CubeSandbox microVM) must keep a label of its own.
+    // terminal on the captured display. #1587 graduated the LAST leg the same
+    // way — the same round trip measured INSIDE a CubeSandbox microVM over a
+    // relay candidate. The honesty invariant is what this asserts, and it is
+    // unchanged — a graduation must be RECORDED under `runtimeVerified`, never a
+    // label going quiet.
     expect(spec.runtimeVerified?.browserRendersOverTurnRelay).toBeTruthy();
     expect(spec.runtimeVerified?.producerEncodesInMicroVM).toBeTruthy();
     expect(spec.runtimeVerified?.keystrokeReachesAnApplication).toBeTruthy();
-    expect(spec.unverified?.inputDeliveryInMicroVM).toBeTruthy();
+    expect(spec.runtimeVerified?.inputDeliveredInMicroVM).toBeTruthy();
+    expect(spec.unverified?.inputDeliveryInMicroVM).toBeUndefined();
   });
 
   it("mints and dials nothing at test time", () => {

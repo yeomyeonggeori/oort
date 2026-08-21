@@ -1,0 +1,132 @@
+#!/bin/sh
+set -eu
+
+# This path is deliberately not configurable. Compose must mount the secret as
+# an exact file and must never put its value in image/container configuration.
+cipher_secret_file=/run/secrets/pgbackrest_repo1_cipher_pass
+s3_key_file=/run/secrets/pgbackrest_repo1_s3_key
+s3_key_secret_file=/run/secrets/pgbackrest_repo1_s3_key_secret
+
+fail() {
+  printf '%s\n' "oort-pgbackrest: $1" >&2
+  exit 78
+}
+
+read_secret() {
+  secret_label=$1
+  secret_path=$2
+  minimum_bytes=$3
+  [ ! -L "$secret_path" ] || fail "$secret_label secret must not be a symbolic link"
+  [ -f "$secret_path" ] || fail "$secret_label secret must be an exact regular file at $secret_path"
+  [ -r "$secret_path" ] || fail "$secret_label secret is not readable"
+  secret_owner=$(stat -c '%u' -- "$secret_path") \
+    || fail "$secret_label secret owner cannot be inspected"
+  [ "$secret_owner" = "$(id -u)" ] \
+    || fail "$secret_label secret must be owned by the pgBackRest process uid"
+  secret_mode=$(stat -c '%a' -- "$secret_path") \
+    || fail "$secret_label secret mode cannot be inspected"
+  case "$secret_mode" in
+    400|500|600|700) ;;
+    *) fail "$secret_label secret must be owner-readable with no group/world permissions" ;;
+  esac
+  if [ -n "$(find "$secret_path" -prune -perm /022 -print -quit)" ]; then
+    fail "$secret_label secret must not be group/world-writable"
+  fi
+
+  byte_count=$(wc -c < "$secret_path" | tr -d '[:space:]')
+  case "$byte_count" in
+    ''|*[!0-9]*) fail "$secret_label secret size is not numeric" ;;
+  esac
+  [ "$byte_count" -ge 1 ] && [ "$byte_count" -le 4097 ] \
+    || fail "$secret_label secret must be between 1 and 4096 payload bytes"
+
+  newline_count=$(LC_ALL=C tr -cd '\n' < "$secret_path" | wc -c | tr -d '[:space:]')
+  carriage_count=$(LC_ALL=C tr -cd '\r' < "$secret_path" | wc -c | tr -d '[:space:]')
+  nul_count=$(LC_ALL=C tr -cd '\000' < "$secret_path" | wc -c | tr -d '[:space:]')
+  [ "$carriage_count" -eq 0 ] || fail "$secret_label secret must not contain carriage returns"
+  [ "$nul_count" -eq 0 ] || fail "$secret_label secret must not contain NUL bytes"
+  [ "$newline_count" -le 1 ] || fail "$secret_label secret must contain exactly one logical line"
+
+  if [ "$newline_count" -eq 1 ]; then
+    last_byte=$(tail -c 1 "$secret_path" | od -An -tx1 | tr -d '[:space:]')
+    [ "$last_byte" = 0a ] || fail "$secret_label secret newline is allowed only as the final byte"
+    payload_bytes=$((byte_count - 1))
+  else
+    payload_bytes=$byte_count
+  fi
+  [ "$payload_bytes" -ge "$minimum_bytes" ] \
+    || fail "$secret_label secret payload is shorter than its minimum"
+
+  REPLY=
+  IFS= read -r REPLY < "$secret_path" || [ -n "$REPLY" ]
+}
+
+valid_dns_name() {
+  [ "${#1}" -ge 1 ] && [ "${#1}" -le 253 ] || return 1
+  printf '%s\n' "$1" | grep -Eq \
+    '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$'
+}
+
+# No caller-controlled pgBackRest option is allowed through the environment.
+# Otherwise a direct PGBACKREST_CONFIG, repo type, TLS, cipher or command option
+# could override the reviewed file/argv even if credential variables were
+# individually denied. Values are discarded; only the safe variable name is
+# retained for the diagnostic.
+ambient_pgbackrest=$(env | LC_ALL=C sed -n 's/^\(PGBACKREST[_A-Za-z0-9]*\)=.*/\1/p' | LC_ALL=C sort | head -n 1)
+[ -z "$ambient_pgbackrest" ] \
+  || fail "$ambient_pgbackrest must not be supplied through container environment"
+forbidden_momo_secret=
+[ "${MOMO_PGBACKREST_CIPHER_PASS+x}" != x ] \
+  || forbidden_momo_secret=MOMO_PGBACKREST_CIPHER_PASS
+[ "${MOMO_PGBACKREST_S3_KEY+x}" != x ] \
+  || forbidden_momo_secret=MOMO_PGBACKREST_S3_KEY
+[ "${MOMO_PGBACKREST_S3_KEY_SECRET+x}" != x ] \
+  || forbidden_momo_secret=MOMO_PGBACKREST_S3_KEY_SECRET
+[ -z "$forbidden_momo_secret" ] \
+  || fail "$forbidden_momo_secret must be a file path, never a raw environment value"
+
+read_secret cipher "$cipher_secret_file" 32
+export PGBACKREST_REPO1_CIPHER_PASS="$REPLY"
+unset REPLY
+
+repository=${MOMO_PGBACKREST_REPOSITORY:-posix}
+case "$repository" in
+  posix) ;;
+  s3)
+    [ "${MOMO_PGBACKREST_S3_URI_STYLE:-}" = path ] \
+      || fail "MOMO_PGBACKREST_S3_URI_STYLE must be exactly path"
+    [ "${MOMO_PGBACKREST_S3_VERIFY_TLS:-}" = y ] \
+      || fail "MOMO_PGBACKREST_S3_VERIFY_TLS must be exactly y"
+    bucket=${MOMO_PGBACKREST_S3_BUCKET:-}
+    endpoint=${MOMO_PGBACKREST_S3_ENDPOINT:-}
+    region=${MOMO_PGBACKREST_S3_REGION:-}
+    if [ "${#bucket}" -lt 3 ] || [ "${#bucket}" -gt 63 ] \
+      || ! valid_dns_name "$bucket"; then
+      fail "MOMO_PGBACKREST_S3_BUCKET must be a lowercase DNS-style bucket"
+    fi
+    valid_dns_name "$endpoint" \
+      || fail "MOMO_PGBACKREST_S3_ENDPOINT must be a lowercase DNS hostname without a scheme or port"
+    case "$region" in
+      ''|*[!A-Za-z0-9._-]*) fail "MOMO_PGBACKREST_S3_REGION contains unsafe characters or is empty" ;;
+    esac
+    [ "${#region}" -le 64 ] || fail "MOMO_PGBACKREST_S3_REGION is too long"
+    read_secret s3-key "$s3_key_file" 16
+    export PGBACKREST_REPO1_S3_KEY="$REPLY"
+    unset REPLY
+    read_secret s3-key-secret "$s3_key_secret_file" 32
+    export PGBACKREST_REPO1_S3_KEY_SECRET="$REPLY"
+    unset REPLY
+    export PGBACKREST_REPO1_TYPE=s3
+    export PGBACKREST_REPO1_PATH=/oort-pgbackrest-s3
+    export PGBACKREST_REPO1_S3_BUCKET="$MOMO_PGBACKREST_S3_BUCKET"
+    export PGBACKREST_REPO1_S3_ENDPOINT="$MOMO_PGBACKREST_S3_ENDPOINT"
+    export PGBACKREST_REPO1_S3_REGION="$MOMO_PGBACKREST_S3_REGION"
+    export PGBACKREST_REPO1_S3_URI_STYLE=path
+    # pgBackRest's certificate option is repository-storage-wide (not an
+    # S3-namespaced option): `repo1-storage-verify-tls`.
+    export PGBACKREST_REPO1_STORAGE_VERIFY_TLS=y
+    ;;
+  *) fail "MOMO_PGBACKREST_REPOSITORY must be exactly posix or s3" ;;
+esac
+
+exec /usr/bin/pgbackrest "$@"

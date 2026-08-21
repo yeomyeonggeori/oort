@@ -68,6 +68,8 @@ workflow_compliant() {
   grep -Fq 'scripts/tests/test_github_track_guardrails.sh' <<<"$alignment" || return 1
   grep -Fq 'scripts/tests/test_policy_integrity_gate.sh' <<<"$alignment" || return 1
   grep -Fq 'scripts/tests/test_trusted_policy_runner.sh' <<<"$alignment" || return 1
+  grep -Fq 'scripts/tests/test_ghcr_notice_bundle.sh' <<<"$alignment" || return 1
+  grep -Fq 'scripts/check_ghcr_notice_bundle.sh --stale-only' <<<"$alignment" || return 1
   grep -Fq "if: needs.changes.outputs.rust == 'true'" <<<"$rust" || return 1
   grep -Fq "if: needs.changes.outputs.node == 'true'" <<<"$node" || return 1
   grep -Fq "if: needs.changes.outputs.contract == 'true'" <<<"$contract" || return 1
@@ -118,7 +120,9 @@ for required in \
   'run: npm ci --ignore-scripts --prefix clients/web-legacy' \
   'run: node scripts/check_npm_licenses.mjs --root clients/web-legacy' \
   'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1' \
-  'actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444'; do
+  'actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444' \
+  'scripts/tests/test_ghcr_notice_bundle.sh' \
+  'scripts/check_ghcr_notice_bundle.sh --stale-only'; do
   grep -Fq "$required" "$WORKFLOW" || fail "pr-ci missing: $required"
 done
 
@@ -139,6 +143,12 @@ cp "$WORKFLOW" "$TMP_DIR/missing-license.yml"
 sed -i.bak '/check_npm_licenses\.mjs --root clients\/web-legacy/d' "$TMP_DIR/missing-license.yml"
 if workflow_compliant "$TMP_DIR/missing-license.yml"; then
   fail "missing legacy license gate was accepted"
+fi
+
+cp "$WORKFLOW" "$TMP_DIR/missing-notice.yml"
+sed -i.bak '/test_ghcr_notice_bundle\.sh/d' "$TMP_DIR/missing-notice.yml"
+if workflow_compliant "$TMP_DIR/missing-notice.yml"; then
+  fail "missing GHCR notice bundle regression was accepted"
 fi
 
 cp "$WORKFLOW" "$TMP_DIR/failure-softened.yml"

@@ -44,7 +44,7 @@
 // 같은 부류의 오탐(테스트 이름·주석 산문 12건)에 걸려 있었고 같은 판정을 써야
 // 하므로 규칙을 한 벌만 둔다 — 두 곳에 적힌 규칙은 한쪽만 고쳐지는 날이 온다.
 // 여기 남는 것은 **코어의 계약**이다: 무엇을 훑고(packages/momo-core/src), 어떤
-// 분류를 걸고(셋), 어떤 케이스로 그것을 증명하는가(17).
+// 분류를 걸고(다섯 — #1511 이 낱말꼴 둘을 더했다), 어떤 케이스로 그것을 증명하는가.
 //
 // 남는 두 축은 규칙이 아니라 **선언**으로 처리한다:
 //
@@ -80,6 +80,8 @@ import { fileURLToPath } from "node:url";
 import {
   ALLOW_MARKER,
   EMDASH_CATEGORY,
+  LATIN_PARTICLE_CATEGORY,
+  PROGRESS_WORD_CATEGORY,
   loadTypeScript,
   runCases,
   scanSource,
@@ -102,7 +104,8 @@ if (!ts) {
 
 // ---- 분류 -------------------------------------------------------------------
 //
-// 웹 쪽 10 분류 중 코어에서 성립하는 것은 **낱말과 값**에 대한 셋뿐이다. 나머지
+// 웹 분류 중 코어에서 성립하는 것은 **낱말과 값**에 대한 것뿐이다(emdash·raw_color·
+// hype, 그리고 #1511 의 progress_word·latin_particle). 나머지
 // 일곱(inline_style·arbitrary_tw·ai_gradient·toast·naked_focus·external_font·
 // pure_bw)은 마크업/CSS 에 대한 검사인데, 코어에는 `.tsx`·`.css` 가 존재할 수
 // 없다 — `packages/momo-core/scripts/purity.mjs` 가 파일 확장자 단계에서 막는다.
@@ -112,8 +115,13 @@ const ISSUE_REF_RE = /#[0-9]{3,5}(?![0-9a-fA-F])/g;
 const COLOR_RE = /#[0-9a-fA-F]{3,8}\b|rgba?\(|hsla?\(/;
 
 const CATEGORIES = [
-  // 대시의 정의는 웹과 공유한다 (design_preflight_ast.mjs).
+  // 대시·낱말꼴·조사 붙임의 정의는 웹과 공유한다 (design_preflight_ast.mjs).
+  // 코어의 문장은 두 클라가 그대로 렌더하므로(#1141 머리말) 낱말 규칙도 같은
+  // 자리에서 걸어야 한다 — CANCEL_BUSY_LABEL 「중단하는 중」이 웹 게이트가 못
+  // 보는 코어에서 폰으로 출하된 것이 #1511 의 자리였다.
   EMDASH_CATEGORY,
+  PROGRESS_WORD_CATEGORY,
+  LATIN_PARTICLE_CATEGORY,
   {
     key: "raw_color",
     rule: "raw color literal handed to a client (색은 클라의 토큰이 정한다 — 코어는 역할만 말한다)",
@@ -265,6 +273,38 @@ const SELFTEST_CASES = [
     file: "features/x/copy.ts",
     why: "과장 어휘도 사용자 문장의 문제다",
     src: 'export const NOTE = "손쉽게 이어서 작업하세요";',
+  },
+  // ---- progress_word · latin_particle (#1511) — 정의와 케이스 본대는
+  // design_preflight_ast.mjs·web_strings 쪽. 여기는 코어에 실재하던 두 모양만.
+  {
+    want: ["progress_word"],
+    file: "features/agents/runCancel.ts",
+    why: "코어 상수의 진행 낱말 — CANCEL_BUSY_LABEL 이 이 모양이었다(#1511)",
+    src: 'export const CANCEL_BUSY_LABEL = "중단하는 중";',
+  },
+  {
+    want: [],
+    file: "features/work/workSessionModel.ts",
+    why: "고유어 어간 허용표 — think 국면의 「생각하는 중」은 옳은 꼴이다",
+    src: 'export const PHRASE = { present: "생각하는 중", past: "생각함" };',
+  },
+  {
+    want: [],
+    file: "features/routing/tierAxis.ts",
+    why: "문장 꼴 「-하는 중입니다」는 검사 밖이다 (#1509 이탈 7)",
+    src: 'export const REASON = "등록된 호스트를 확인하는 중입니다.";',
+  },
+  {
+    want: ["latin_particle"],
+    file: "features/chat/copy.ts",
+    why: "라틴 낱말과 조사 사이의 공백 — 코어 문장도 같은 규칙이다(#1560 M①)",
+    src: 'export const HINT = "Tab 으로 다음 칸에 갑니다";',
+  },
+  {
+    want: [],
+    file: "features/chat/composerCopy.ts",
+    why: "붙여 쓴 조사가 정답이다 (「Esc로 취소」)",
+    src: 'export const HINT = "Esc로 취소";',
   },
 ];
 

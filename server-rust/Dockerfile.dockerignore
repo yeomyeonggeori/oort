@@ -1,7 +1,8 @@
 # Build-context excludes for `-f server-rust/Dockerfile` (BuildKit reads
 # `<dockerfile>.dockerignore` in preference to the context root's file). The
 # context is the repo root — this image needs `server-rust/`, `server/Migrations`,
-# three SQL files under `infra/`, and LICENSE/NOTICE; everything else is weight.
+# SQL files under `infra/`, LICENSE/NOTICE, the GHCR notice files under
+# `legal/`, and `scripts/check_debian_copyrights.sh`; everything else is weight.
 #
 # It is a superset of the repo-root `.dockerignore`, because when this file
 # exists it REPLACES that one: every secret-bearing pattern there is repeated
@@ -59,11 +60,20 @@ clients/web/artifacts
 docs
 examples
 fastlane
-legal
+# Do not exclude the `legal/` directory itself. A blanket `legal` pattern
+# makes COPY legal/... fail with "not found" because this file REPLACES the
+# root .dockerignore (#1332 review). Drafts stay out; the image copies
+# THIRD_PARTY_NOTICES.md and legal/generated/*.
+legal/privacy-policy.md
+legal/agent-disclosure.md
 relay
 research
 services
-scripts
+# Exclude script tree contents, then re-include the one scanner the image
+# COPYs. `scripts` as a directory exclude would also hide the exception
+# (Docker cannot un-ignore a file whose parent directory is excluded).
+scripts/**
+!scripts/check_debian_copyrights.sh
 workers
 server/Sources
 server/Tests

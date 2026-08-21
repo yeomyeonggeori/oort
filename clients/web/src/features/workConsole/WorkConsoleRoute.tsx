@@ -78,7 +78,11 @@ function LocationBadge({ location }: { location: WorkConsoleLocation }) {
     <span
       className={cn(
         CHIP_CLASS,
-        "inline-flex items-center gap-1 bg-surface-hover text-ink-muted"
+        // 그릇은 --muted-soft 다 (#1515). 이 배지는 수명주기 칩과 **같은 행**에
+        // 서고 그 행은 선택되면 --accent-soft, 가리키면 --surface-hover 로 바뀐다.
+        // 앞 판의 --surface-hover 는 그 두 상태 중 하나와 정확히 같은 값이라,
+        // 가리키는 순간 배지가 행에 녹았다(대비 1.00).
+        "inline-flex items-center gap-1 bg-muted-soft text-ink-muted"
       )}
       data-testid="work-console-location"
       data-location={location.key}

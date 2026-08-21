@@ -4073,7 +4073,7 @@ function reportUnmocked() {
 // 가면서도 자기 다이얼로그만 찍고 지나간다.
 //
 // 두 장을 찍는 이유는 두 분기가 다른 말을 하기 때문이다: 채널은 액션 둘(첫 메시지
-// 쓰기 · 멤버 초대하기)을 위계를 세워 내놓고, DM은 참여자가 dmKey로 고정되어 있어
+// 쓰기 · 멤버 추가하기)을 위계를 세워 내놓고, DM은 참여자가 dmKey로 고정되어 있어
 // 첫 메시지 하나뿐이다. 한 장만 찍으면 리뷰가 보는 것은 둘 중 하나의 옷차림이다.
 async function captureEmptyConversationScenes(browser, scheme) {
   const shots = [];
@@ -4127,7 +4127,7 @@ async function captureEmptyConversationScenes(browser, scheme) {
 // normal shot lands on a real 2xx.
 //
 // The entry point IS the real one: release-notes is emptied of messages so the
-// 빈 채널 "멤버 초대하기" button — the exact control this batch rewired — is on
+// 빈 채널 "멤버 추가하기" button — the exact control this batch rewired — is on
 // screen to click. release-notes is a good target because HERMES is in every
 // channel (renders the "멤버" already-in row) while the rest are addable.
 //
@@ -4170,7 +4170,10 @@ async function captureAddMemberScenes(browser, scheme) {
       .click();
     const empty = page.getByTestId("timeline-empty");
     await empty.waitFor({ state: "visible" });
-    await empty.getByRole("button", { name: "멤버 초대하기" }).click();
+    // #1573: 이 버튼(채널에 멤버 추가)의 이름은 자기 다이얼로그의 동사를 따라
+    // 「추가」다. 아래 empty 샷의 "멤버 초대하기"는 다른 행위(워크스페이스 초대)의
+    // 이름이고, 그 갈라짐이 이 레인이 매 캡처마다 증명하는 것의 일부다.
+    await empty.getByRole("button", { name: "멤버 추가하기" }).click();
     await page
       .getByTestId("add-channel-member-dialog")
       .waitFor({ state: "visible" });

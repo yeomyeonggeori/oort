@@ -1,5 +1,71 @@
 # Third-party notices
 
+This file is an **index**. It is not the complete attribution record and it
+is not legal advice.
+
+| Role | Path |
+|---|---|
+| Current generated bundle (Cargo + `clients/web` npm) | [`legal/generated/GHCR_THIRD_PARTY_NOTICES.txt`](generated/GHCR_THIRD_PARTY_NOTICES.txt) |
+| Input hashes / per-package SPDX | [`legal/generated/GHCR_NOTICE_MANIFEST.json`](generated/GHCR_NOTICE_MANIFEST.json) |
+| Image `sha256sum` of the four bundled files | [`legal/generated/GHCR_NOTICE_BUNDLE.sha256`](generated/GHCR_NOTICE_BUNDLE.sha256) |
+| Project license | [`LICENSE`](../LICENSE) |
+| Project notice | [`NOTICE`](../NOTICE) |
+
+Two gates, two jobs (do not collapse them):
+
+- **Policy (allow/deny):** `deny.toml` + `scripts/check_cargo_licenses.sh` and
+  `scripts/check_npm_licenses.mjs`.
+- **Attribution freshness:** `scripts/check_ghcr_notice_bundle.sh` (lockfile
+  hashes, committed bundle bytes, Docker COPY of the four files).
+
+Regenerate the current bundle:
+
+```sh
+python3 scripts/generate_ghcr_notice_bundle.py generate
+scripts/check_ghcr_notice_bundle.sh
+```
+
+`generate` needs `cargo metadata --offline` and `npm ci --prefix clients/web`.
+The stale check hashes lockfiles and does not need those trees.
+
+## Current (GHCR images)
+
+The two images published by `.github/workflows/publish-images.yml` are the
+Rust multi-command app (`server-rust/Dockerfile`) and PostgreSQL 18 +
+pgBackRest (`infra/rust/postgres-pgbackrest/Dockerfile`). Both copy:
+
+1. `LICENSE`
+2. `NOTICE`
+3. this index
+4. `legal/generated/GHCR_THIRD_PARTY_NOTICES.txt`
+
+App image paths:
+
+- `/usr/share/licenses/momo-rust/`
+- `/opt/momo/web/legal/` (staged onto the web-assets volume, so Caddy can
+  serve the same bytes at `/legal/…`)
+
+Postgres image path: `/usr/share/licenses/oort-postgres/` (in addition to
+the pgBackRest/libssh2 copyright copies from #1330).
+
+Debian OS-layer packages are **not** in the Cargo/npm bundle. Each image
+build runs `scripts/check_debian_copyrights.sh` and writes
+`DEBIAN_COPYRIGHT_INVENTORY.txt` next to the four files. GPL/LGPL/AGPL in
+that inventory are classified `copyleft`, never `permissive`. The inventory
+is file-existence evidence, not a legal-sufficiency declaration.
+
+**Not in the current bundle** (out of this goal / other trees):
+
+- `clients/desktop/src-tauri` Cargo graph (Tauri shell, not the GHCR app image)
+- `clients/mobile` npm graph
+- `clients/web-legacy` (not the SPA the Rust image copies)
+- in-app “Open Source Licenses” UI (#35)
+
+## Historical (frozen snapshots)
+
+The sections below are **not regenerated**. They record what earlier trees
+shipped. Do not read them as the GHCR attribution record.
+
 <!-- BEGIN GENERATED: SPM LICENSES (generator retired 2026-08-10, #1201) -->
 ## Swift Package Manager dependencies
 
@@ -55,17 +121,11 @@
 | xctest-dynamic-overlay | 1.11.0 | MIT | https://github.com/pointfreeco/xctest-dynamic-overlay |
 <!-- END GENERATED: SPM LICENSES -->
 
-## npm (web 런타임 의존)
-| react | MIT
-|  react-dom | MIT
-|  centrifuge | MIT |
+### Hand-written npm (web-legacy / pre-#1332 partial list)
 
-## 웹 클라이언트 npm 의존성 (clients/web-legacy, MOMO-391)
-> 브라우저 번들에 포함되는 런타임 의존성만 표기. dev 도구(vite/eslint/
-> typescript/openapi-typescript/playwright 등)는 배포물 미포함 — 전이 포함
-> 전체 인벤토리는 `scripts/check_npm_licenses.mjs`가 게이트마다 생성(#1225로 이동·재조준).
-> (ADR-0119 v0 — MOMO-596이 `clients/web`에서 `clients/web-legacy`로 이동. 새
-> `clients/web`(ADR-0133) 의존성은 배포물에 아직 포함되지 않아 미표기.)
+These rows described `clients/web-legacy` runtime deps and a partial npm
+list. They are not the GHCR SPA graph. Current web attribution is the
+generated bundle above.
 
 | 패키지 | URL | 라이선스(lockfile 검증) | 사용처 |
 |---|---|---|---|
@@ -77,41 +137,30 @@
 | long | https://github.com/dcodeIO/long.js | Apache-2.0 | protobufjs 전이 |
 | events | https://github.com/browserify/events | MIT | centrifuge-js 전이 |
 
-## 런타임 인프라(앱 번들 외 — 서버 배포물)
+### Runtime companions (not inside the two GHCR images as source trees)
+
+Hand-written operator notes. OS-layer bytes in the two GHCR images are
+covered by each image's Debian copyright inventory, not this table.
+
 | 컴포넌트 | 라이선스(검증) | 메모 |
 |---|---|---|
-| Centrifugo v6 | MIT/OSS(검증) | 메시지 전송계층(셀프호스트) |
-| PostgreSQL 18 | PostgreSQL License(permissive) | DB |
-| pgvector 0.8.5 | PostgreSQL License(검증됨, upstream LICENSE) | PostgreSQL 벡터 타입·HNSW 검색 확장 |
-| Node.js 24.4.1 | MIT(검증됨, upstream LICENSE) | 선택적 eve profile 런타임 베이스 |
-| eve 0.27.0 | Apache-2.0(검증됨, npm package metadata/NOTICE) | 선택적 커스텀 에이전트 런타임 + oort 채널 |
-| @workflow/world-postgres 5.0.0-beta.27 | Apache-2.0(검증됨, npm package metadata/LICENSE) | eve durable workflow state용 별도 PostgreSQL world |
-| LiveKit Egress 1.9.1 | Apache-2.0(검증됨, upstream LICENSE) | 선택적 `transcription` profile 참가자 Track 녹음 |
-| faster-whisper 1.2.1 | MIT(검증됨, upstream LICENSE) | 개발/운영자용 사후 전사 실측 하니스 |
+| Centrifugo v6 | MIT/OSS(검증) | 메시지 전송계층(셀프호스트) — companion service, not baked into the app image |
+| PostgreSQL 18 | PostgreSQL License | DB (oort-postgres image) |
+| pgvector 0.8.5 | PostgreSQL License | PostgreSQL 벡터 타입·HNSW 검색 확장 |
+| pgBackRest 2.59.0 | MIT | PostgreSQL 연속 WAL archive·암호화 backup/PITR |
+| libssh2 1.11.1 | BSD-3-Clause/ISC | pgBackRest S3-compatible transport |
+| Node.js | MIT | web-build stage only; not a runtime package of the app image |
+| eve | Apache-2.0 | optional custom-agent runtime, not the GHCR app image |
+| LiveKit Egress | Apache-2.0 | optional transcription profile |
+| faster-whisper | MIT | operator transcription harness |
 
-`examples/eve-momo-channel/package-lock.json`의 eve world 런타임 그래프는
-Apache-2.0, MIT, ISC, BSD-2/3-Clause, 0BSD, BlueOak-1.0.0, Python-2.0 및
-`(AFL-2.1 OR BSD-3-Clause)`로만 구성됨을 MOMO-538에서 확인했다. GPL/AGPL/
-SSPL/BUSL 항목은 없다.
+### Work-host sidecar engines (WH-1 / MOMO-579, ADR-0114)
 
-## 워크 호스트 사이드카 동봉 엔진 (WH-1 / MOMO-579, ADR-0114 증보1)
-> `infra/prod/docker/workhost.Dockerfile`로 빌드하는 opt-in 사이드카 이미지에만
-> 동봉된다(기본 스택 미포함, `--profile workhost`). 각 엔진 바이너리는 별도
-> 이미지 레이어로 분리하고 upstream LICENSE를 `/usr/share/licenses/<engine>/`에
-> 함께 동봉한다. **Codex는 미동봉** — `codex-local` 엔진은 사용자 호스트의 자체
-> Codex 설치에 연결하며 ChatGPT/OAuth 자격증명 경계는 oort 밖에 남는다(ADR-0004).
+> `infra/prod/docker/workhost.Dockerfile` opt-in sidecar only (not the GHCR
+> app/postgres images). **Codex is not bundled.**
 
 | 엔진 | 라이선스 | 배포 | 사용처 |
 |---|---|---|---|
-| opencode | MIT | GitHub release 단일 바이너리 (`sst/opencode`) | 기본 엔진, HTTP+SSE(`opencode serve`) — OpenCodeHTTPAdapter |
-| goose | Apache-2.0 | GitHub release 단일 바이너리 (`block/goose`) | ACP 엔진(stdio) — ACPEngineAdapter |
-| Codex CLI | (미동봉) | 사용자 호스트 설치 | 로컬 연결 전용(app-server JSON-RPC/stdio) — CodexJSONRPCAdapter. 이미지에 포함하지 않음 |
-
-opencode(MIT)·goose(Apache-2.0) 모두 permissive이며 AGPL/SSPL/BUSL 백본 금지
-원칙에 부합한다. 이미지 빌드 시 엔진 버전/자산 URL·per-arch 체크섬은 오케스트레이터가
-확정하여 핀(supply-chain 하드닝)한다.
-
-## Apache 2.0 NOTICE 집계
-- 각 Apache-2.0 의존성의 NOTICE 파일 내용을 리포 루트 `NOTICE`에 집계(있는 것만).
-- goose(Apache-2.0) 사이드카 동봉 시 upstream NOTICE(있으면)를
-  `/usr/share/licenses/goose/`에 함께 포함한다.
+| opencode | MIT | GitHub release 단일 바이너리 (`sst/opencode`) | 기본 엔진 |
+| goose | Apache-2.0 | GitHub release 단일 바이너리 (`block/goose`) | ACP 엔진 |
+| Codex CLI | (미동봉) | 사용자 호스트 설치 | 로컬 연결 전용 |

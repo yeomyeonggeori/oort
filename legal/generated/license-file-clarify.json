@@ -1,0 +1,67 @@
+{
+  "comment": "Reviewed fallbacks for packages whose tarball/install tree has an SPDX id but no LICENSE/COPYING file. Missing both on-disk files and a row here is fail-closed. This is not a license-policy allowlist (#1225 deny.toml / check_npm_licenses.mjs remain the policy).",
+  "cargo": {
+    "r-efi@6.0.0": {
+      "reason": "crates.io tarball ships AUTHORS and no LICENSE/COPYING. SPDX expression MIT OR Apache-2.0 OR LGPL-2.1-or-later.",
+      "spdx_texts": ["MIT", "Apache-2.0", "LGPL-2.1-or-later"]
+    },
+    "valuable@0.1.1": {
+      "reason": "crates.io tarball ships no LICENSE/COPYING. SPDX MIT.",
+      "spdx_texts": ["MIT"]
+    },
+    "wasite@0.1.0": {
+      "reason": "crates.io tarball ships no LICENSE/COPYING. SPDX Apache-2.0 OR BSL-1.0 OR MIT.",
+      "spdx_texts": ["Apache-2.0", "BSL-1.0", "MIT"]
+    }
+  },
+  "npm": {
+    "@bufbuild/protobuf@1.10.1": {
+      "reason": "install tree has README+dist only. lockfile SPDX (Apache-2.0 AND BSD-3-Clause).",
+      "spdx_texts": ["Apache-2.0", "BSD-3-Clause"]
+    },
+    "@esbuild/darwin-arm64@0.25.12": {
+      "reason": "native optional package ships README+bin only. lockfile SPDX MIT.",
+      "spdx_texts": ["MIT"]
+    },
+    "@esbuild/darwin-arm64@0.21.5": {
+      "reason": "native optional package ships README+bin only. lockfile SPDX MIT.",
+      "spdx_texts": ["MIT"]
+    },
+    "@humanfs/types@0.15.0": {
+      "reason": "install tree has no LICENSE file. lockfile SPDX Apache-2.0.",
+      "spdx_texts": ["Apache-2.0"]
+    },
+    "@rollup/rollup-darwin-arm64@4.62.2": {
+      "reason": "native optional package ships README+binary only. lockfile SPDX MIT.",
+      "spdx_texts": ["MIT"]
+    },
+    "@tauri-apps/api@2.11.1": {
+      "reason": "install tree has no LICENSE file. lockfile SPDX Apache-2.0 OR MIT.",
+      "spdx_texts": ["Apache-2.0", "MIT"]
+    },
+    "esrecurse@4.3.0": {
+      "reason": "install tree has no LICENSE file. lockfile SPDX BSD-2-Clause.",
+      "spdx_texts": ["BSD-2-Clause"]
+    },
+    "imurmurhash@0.1.4": {
+      "reason": "install tree has no LICENSE file. lockfile SPDX MIT.",
+      "spdx_texts": ["MIT"]
+    },
+    "keyv@4.5.4": {
+      "reason": "install tree has no LICENSE file. lockfile SPDX MIT.",
+      "spdx_texts": ["MIT"]
+    },
+    "natural-compare@1.4.0": {
+      "reason": "install tree has no LICENSE file. lockfile SPDX MIT.",
+      "spdx_texts": ["MIT"]
+    },
+    "react-remove-scroll-bar@2.3.8": {
+      "reason": "install tree has no LICENSE file. lockfile SPDX MIT.",
+      "spdx_texts": ["MIT"]
+    },
+    "stackback@0.0.2": {
+      "reason": "install tree has no LICENSE file. lockfile SPDX MIT.",
+      "spdx_texts": ["MIT"]
+    }
+  }
+}

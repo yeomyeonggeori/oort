@@ -40,7 +40,7 @@ import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
 // ## 타이밍
 //
 // 프레임은 구독이 붙은 tick에 오지 않고(`deliver`가 실제로 기다린다), 취소 응답도
-// 테스트가 여는 deferred로 붙잡아 「중단하는 중」을 실제로 관찰한다 (#839).
+// 테스트가 여는 deferred로 붙잡아 「중단 중」을 실제로 관찰한다 (#839, 낱말은 #1511).
 //
 // 시계도 테스트가 쥔다. 확정 버튼은 뜬 직후 `CONFIRM_GUARD_MS` 동안 탭을 받지
 // 않는데(더블탭이 확인 단계를 건너뛰는 구멍), 실제 시계로는 "빠른 두 번째 탭"과
@@ -343,10 +343,10 @@ describe('세 가지 답', () => {
     await waitFor(() => expect(screen.getByTestId(COMMIT)).toBeTruthy());
     pressAfterGuard(COMMIT);
 
-    // 답을 붙잡아 둔 동안 「중단하는 중」이 실제로 화면에 있다. 이미 resolve된
+    // 답을 붙잡아 둔 동안 「중단 중」이 실제로 화면에 있다. 이미 resolve된
     // 목에 대고 단정하면 아무것도 증명하지 못한다 (#839).
     await waitFor(() =>
-      expect(screen.getByTestId(COMMIT)).toHaveTextContent(/중단하는 중/),
+      expect(screen.getByTestId(COMMIT)).toHaveTextContent(/중단 중/),
     );
     expect(log.cancelCalls()).toHaveLength(1);
 

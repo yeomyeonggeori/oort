@@ -142,12 +142,19 @@ services:
     labels: *momo-janitor-labels
     restart: "no"
     environment:
+      # #1330: production/staging values make momo-migrate require either a
+      # signed fresh PITR proof or the one-time empty-database bootstrap probe.
+      # The generated local quickstart sets MOMO_MIGRATE_ENV=development and
+      # emits an explicit non-production backup warning instead.
+      MOMO_ENV: ${MOMO_MIGRATE_ENV:-unconfigured}
       DATABASE_URL: ${MIGRATE_DATABASE_URL:?set MIGRATE_DATABASE_URL}
       MOMO_BOOTSTRAP_RUNTIME_ROLES: "0"
       # `none` is the product default (no legacy agent fixtures, seeded owner
       # password locked by migration 012). A local smoke may select `e2e`.
       MOMO_AGENT_SEED_MODE: ${MOMO_AGENT_SEED_MODE:-none}
       MIGRATE_IDEMPOTENCY_CHECK: ${MIGRATE_IDEMPOTENCY_CHECK:-1}
+      MOMO_PITR_EVIDENCE_REQUIRED: ${MOMO_PITR_EVIDENCE_REQUIRED:-0}
+      MOMO_PITR_BOOTSTRAP_EMPTY: ${MOMO_PITR_BOOTSTRAP_EMPTY:-0}
       # Consumed only by `run --rm migrate set-owner`; unset otherwise.
       MOMO_INITIAL_OWNER_EMAIL: ${MOMO_INITIAL_OWNER_EMAIL:-}
       MOMO_INITIAL_OWNER_PASSWORD: ${MOMO_INITIAL_OWNER_PASSWORD:-}
@@ -252,6 +259,9 @@ services:
       # A value is required only for non-browser origins — the Tauri desktop
       # webview is `tauri://localhost`, and without this it cannot reach the API
       # at all. Explicit allowlist; `*` is refused at boot.
+      # Self-host generator (`scripts/self_host_env.sh`) writes the two Tauri
+      # origins into local.secrets.env (#1607). This compose default stays empty
+      # so caddy.override.yml / NCP deploy is not widened by that choice.
       MOMO_CORS_ALLOWED_ORIGINS: ${MOMO_CORS_ALLOWED_ORIGINS:-}
       # ADR-0162 Agent Port. A native/server MCP caller normally sends no
       # Origin. When it does, only this operator-controlled exact HTTPS origin
@@ -424,4 +434,14 @@ volumes:
     # env file, and the `-p` flag (compose feeds the flag back into
     # interpolation, and `-p` wins over the env var — measured, not assumed).
     # DB_VOLUME_NAME still wins outright when an explicit name is required.
+    #
+    # #1613: `name:` is still a host-global string. Two self-host checkouts
+    # that share COMPOSE_PROJECT_NAME (generator default `oort` → volume
+    # `oort-pgdata`) therefore share this directory. The generator keeps that
+    # default so an existing `oort-pgdata` is not silently replaced by a new
+    # empty volume; `scripts/self_host_env.sh --compose` fail-closes when a
+    # live stack with this project/volume has a different
+    # `com.docker.compose.project.working_dir`. Same-checkout resume is the
+    # legitimate owner and stays silent. down -v still removes only this
+    # explicit name — its meaning does not change.
     name: ${DB_VOLUME_NAME:-${COMPOSE_PROJECT_NAME:-momo-rust}-pgdata}

@@ -134,7 +134,14 @@ When adding/removing operators, update `.sops.yaml` recipients and run:
 sops updatekeys infra/prod/secrets.sops.env
 ```
 
-## 3. pgBackRest PITR Setup
+## 3. pgBackRest PITR Setup (legacy host skeleton — Rust 운영에서 실행 금지)
+
+> **Superseded by #1330.** 아래는 은퇴 중인 `infra/prod` host-install skeleton의
+> 역사 기록이다. 현행 Rust/NCP에서는 raw `PGBACKREST_REPO1_CIPHER_PASS` env,
+> `sudo --preserve-env`, 또는 `/usr/bin/pgbackrest` 직접 호출을 **사용하지 않는다**.
+> 그것들은 [현행 정본](runbooks/pgbackrest-pitr.md)의 fixed secret-file wrapper와
+> signed evidence 경계를 우회한다. Rust 운영자는 이 절을 건너뛰고 정본 런북의
+> pinned image + `/usr/local/bin/oort-pgbackrest` 절차만 따른다.
 
 Install pgBackRest on the database host or in the PostgreSQL image used by
 MOMO-005. The exact package path is host-specific, but the resulting command
@@ -194,6 +201,12 @@ throwaway volume, or isolated compose project.
 
 ### 4.1 Repo-local restore rehearsal gate
 
+> #1330 이후 production-grade 정본은
+> [`docs/runbooks/pgbackrest-pitr.md`](runbooks/pgbackrest-pitr.md)다. 아래
+> `pg_dump`/`pg_restore` 절차는 빠른 logical compatibility smoke일 뿐,
+> signed migration evidence나 WAL/time-target PITR 증거가 아니며 production
+> migration을 열 수 없다.
+
 Before internal test hosting, run the local backup profile and attach the
 generated markdown/json evidence to the PR or handoff. This is not a substitute
 for production pgBackRest PITR; it proves the repo-local operating contract:
@@ -217,7 +230,14 @@ The same verifier is included in `scripts/local_gate.sh --profile host-runtime`
 so internal host-runtime smoke cannot pass while backup restore evidence is
 missing.
 
-### 4.2 Host pgBackRest PITR rehearsal
+### 4.2 Host pgBackRest PITR rehearsal (retired historical example — 실행 금지)
+
+> **Superseded by #1330.** 아래 raw `sops exec-env`/`sudo --preserve-env` restore는
+> repository cipher를 environment로 옮기고 reviewed wrapper·distinct-volume
+> ownership·signed evidence를 우회하므로 현행 Rust/NCP에서 실행하지 않는다. 실제
+> host rehearsal은 [`runbooks/pgbackrest-pitr.md`](runbooks/pgbackrest-pitr.md)의
+> `verify_pgbackrest_pitr.sh --mode attach`와 `pgbackrest_pitr_restore.sh`만 사용한다.
+> 다음 명령은 삭제 전 역사적 형상 설명일 뿐 운영 절차가 아니다.
 
 1. Record a UTC target time after a known marker write.
 2. Stop PostgreSQL in the restore environment and empty only the restore data
@@ -257,15 +277,13 @@ scripts/local_gate.sh --profile staging-smoke
 scripts/local_gate.sh --profile backup
 ```
 
-The actual encrypted secret file, off-host backup repository, and PITR rehearsal
-are intentionally not included because they require real staging/prod
-infrastructure and secrets.
-
-Repo-local verified by `backup`: temporary PostgreSQL dump/restore, marker
-fingerprint equality, markdown/json evidence generation. `runtime-unverified`:
-pgBackRest stanza creation, WAL archive push, full/diff schedule, object-store
-repository, SOPS secret decrypt, and time-target PITR restore rehearsal on a
-public host.
+The repo-local `backup` profile now performs the encrypted POSIX pgBackRest
+closed loop in addition to retaining the logical dump smoke as legacy coverage:
+marker A → online full backup → target UTC → marker B/WAL archive → distinct
+volume time-target restore → A=1/B=0 → signed JSON/Markdown evidence and cleanup
+leak count 0. The public NCP attach run, S3-compatible repository and schedule,
+real host secret injection, first published database-image attestation, and
+human attribution/legal review remain `runtime-unverified(public host)`.
 
 ## 6. References
 

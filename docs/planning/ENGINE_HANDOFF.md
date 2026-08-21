@@ -13,6 +13,7 @@
 
 | # | 상태 | 항목 | UI가 할 일 | 착수 포인터 (전부 main) |
 |---|---|---|---|---|
+| A-27 | `ready` | **Open Source Licenses 화면 (#35) — GHCR 고지 bundle 소비** | 웹/데스크톱(같은 `clients/web` 번들)과 폰에 서드파티 고지 화면을 만든다. **엔진이 이미 만든 바이트를 읽어라.** 정본은 `legal/generated/GHCR_THIRD_PARTY_NOTICES.txt`(Cargo + `clients/web` npm, fail-closed 생성). 인덱스는 `legal/THIRD_PARTY_NOTICES.md`(현행 vs 역사). 라이브 앱 이미지에서는 `/opt/momo/web/legal/` 과 `/usr/share/licenses/momo-rust/`에 같은 네 파일(`LICENSE`·`NOTICE`·인덱스·생성 bundle)이 있다. Caddy `try_files`가 `/legal/…` 실파일을 서빙한다. 클라가 SPDX/저작권을 다시 긁거나 화면에 "permissive only" / "이 목록이 법적 충분하다"를 쓰지 마라. 데스크톱 Tauri Cargo·모바일 전용 그래프·OS dpkg 인벤토리는 이 bundle 밖이며 화면이 그 범위를 주장하면 안 된다. 사람 법무 카피는 #35 본문이 정본. | #1332 `legal/generated/GHCR_THIRD_PARTY_NOTICES.txt`, `legal/THIRD_PARTY_NOTICES.md`, app image `/opt/momo/web/legal/`, `NOTICE`(루트; 미구현 화면 주장 제거됨) |
 | A-1 | `done` | **마켓플레이스 실서버 연동** | REST 카탈로그·추천·설치/해제·grant 발급/회수와 상태 UI를 연결. `external_webhook`은 채널 통합으로 라우팅하고 세션 변경 시 캐시를 전부 폐기 | `GET/POST/DELETE /v1/workspaces/:ws/plugins...` — PluginRoutes.swift, openapi 명세 완비 |
 | A-2 | `done` | **채널 웹훅 발급 UI** | native/Slack 호환 발급·회전·revoke·목록을 연결. one-time secret/URL은 확인 전 화면 이탈을 잠그고 확인 즉시 메모리에서 폐기 | WebhookRoutes.swift, openapi |
 | A-3 | `done` | **초대 단축 링크 노출** | HTTPS(로컬 개발 예외) public base URL을 검증해 `/i/<code>`를 1회 노출·민감 클립보드로 복사하고 확인 전 이탈을 잠금 | services/LinkShort/README.md |
