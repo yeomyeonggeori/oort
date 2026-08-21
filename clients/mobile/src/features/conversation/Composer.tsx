@@ -2,7 +2,9 @@ import type {RosterMember} from '@momo/core/lib/api';
 import {
   COMPOSER_OFFLINE_COPY,
   composerFieldLabel,
-  composerPlaceholder,
+  composerPlaceholderClauses,
+  fitComposerPlaceholder,
+  type ComposerPlaceholderClause,
 } from '@momo/core/features/chat/composerCopy';
 import {attachParticle, type RecipientKind} from '@momo/core/lib/koreanParticle';
 import type {Directory} from '@momo/core/features/workspace/directory';
@@ -15,8 +17,10 @@ import {
   TextInput,
   useWindowDimensions,
   View,
+  type LayoutChangeEvent,
   type NativeSyntheticEvent,
   type TextInputSelectionChangeEventData,
+  type TextLayoutEventData,
 } from 'react-native';
 import {font, line, radius, SAFE_GUTTER, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
 import {usePalette, useStyles} from '../../design/theme';
@@ -170,15 +174,23 @@ import {QuoteDraftBar} from './Quote';
 // 하는데(128 ÷ 0.195) iOS 26 이 도는 가장 작은 아이폰이 667pt 다. 지금 화면은
 // 하나도 안 변한다(`composerDraftOffline.test.tsx` 가 그 자리를 잰다).
 //
-// ## 이 식이 **안** 재는 것 — 액세서리와 `@` 시트
+// ## 이 식이 **안** 재던 것 — 액세서리와 `@` 시트 (#1480 이 절반을 받았다)
 //
 // 도크에는 입력창 말고도 서는 것이 있다: 인용 바·타이핑 바·에이전트 활동 바, 그리고
-// 이 파일 자신의 멘션 후보 시트(`styles.mentions` 의 `maxHeight: 180`). 전부
-// **한때만** 서고, 상한은 쉬는 상태의 계약이다. 다만 그중 하나는 같은 가족의 결함을
-// 자기 안에 갖고 있다 — 180 은 고정 pt 라 큰 글자에서 담는 행 수가 줄고, 열려 있는
-// 동안 목록을 그만큼 더 먹는다. 여기서 안 고치는 이유는 범위가 아니라 **모양**이다:
-// 그 시트의 상한을 바꾸는 것은 「후보를 몇 개 보여 주는가」라는 별개의 결정이고,
-// 자기 캡처(시트가 열린 AX 사진)와 자기 리뷰가 필요하다. 후속 티켓 사유로 남긴다.
+// 이 파일 자신의 멘션 후보 시트. 전부 **한때만** 서고, 위 상한은 쉬는 상태의
+// 계약이다. 그중 시트는 같은 가족의 결함을 자기 안에 갖고 있었다 — `maxHeight: 180`
+// 은 고정 pt 라 큰 글자에서 담는 행 수가 줄고, 열려 있는 동안 목록을 그만큼 더
+// 먹었다. **#1480 이 그것을 받았다**: 아래 「시트의 상한」 절이 결정(넷)과 그것이
+// 지는 불변식(도크가 대화 열을 안 넘는다)을 든다.
+//
+// 그 티켓이 함께 잡은 것이 위 산수의 구멍 하나다: 도크는 시트와 입력창 말고
+// **`styles.bar` 의 위아래 여백**도 진다(`DOCK_CHROME`). 이 절이 열을 나눌 때 그
+// 16pt 를 안 셌으므로, 시트가 열린 화면에서는 「도크 ≤ 대화 열」이 모델 안에서도
+// 거짓이었다(AX-XXL: 180 + 170.4 + 16 = 366.4 vs 340.9).
+//
+// **남은 절반은 액세서리 바들이다.** 인용·타이핑·ADE 요약 줄은 여전히 이 식 밖에
+// 있고, 셋이 동시에 서는 화면은 아직 아무도 재지 않았다. 시트와 달리 그것들은
+// 「몇 개를 보여 주는가」 결정이 없어(있으면 한 줄이다) 같은 처방이 안 붙는다.
 //
 // 사진은 넷이고 레인은 `scripts/measure.sh` 의 `COMPOSER-GROWTH` 다. 계측 줄이
 // 글자 배수·창·**크롬 실측**·상한·목록 몫·실제 상자 높이를 사진 안에 적으므로 이
@@ -220,6 +232,12 @@ const MIN_ROWS = 2;
 
 /** 입력창 상하 패딩 한쪽. 상한 계산과 실제 스타일이 같은 값을 읽는다. */
 const INPUT_PAD_Y = space.sm;
+
+/**
+ * 입력창 좌우 패딩 한쪽. 위와 짝이고, 이름을 갖는 이유가 하나 더 있다 — 절 예산의
+ * 프로브가 **글이 놓이는 가로**를 이 값으로 도출한다(#1479).
+ */
+const INPUT_PAD_X = space.md;
 
 /** 입력창 테두리 두께. 위와 같은 이유로 이름을 갖는다. */
 const INPUT_BORDER = 1;
@@ -267,8 +285,18 @@ const CONVERSATION_CHROME_WINDOW_SHARE = 0.23;
  */
 const COMPOSER_COLUMN_SHARE = 0.5;
 
-/** 상한과 실제 상자가 함께 지는 세로 크롬(패딩·테두리). 글자를 안 따라간다. */
-const INPUT_CHROME = INPUT_PAD_Y * 2 + INPUT_BORDER * 2;
+/**
+ * 상한과 실제 상자가 함께 지는 세로 크롬(패딩·테두리). 글자를 안 따라간다.
+ *
+ * **export 되는 이유는 `composerMaxHeight` 과 같다** (회전 1 M4): 이 수는 계측
+ * 하네스와 테스트에도 필요한데, 셋이 각자 `space.sm * 2 + 2` 를 적고 있었다.
+ * 사본은 조용히 어긋나고, 어긋난 사본이 낸 초록은 배송되는 상자를 안 잰다
+ * (디자인 시스템 §5.5).
+ */
+export const INPUT_CHROME = INPUT_PAD_Y * 2 + INPUT_BORDER * 2;
+
+/** 같은 것의 가로 몫. 상자의 바깥 폭에서 이만큼을 빼면 글이 놓이는 폭이다. */
+export const INPUT_CHROME_X = INPUT_PAD_X * 2 + INPUT_BORDER * 2;
 
 /**
  * 자라기를 멈추는 높이 — **두 상한 중 작은 것**, 그리고 바닥은 두 줄.
@@ -319,8 +347,24 @@ export interface ComposerColumnBudget {
   readonly column: number;
   /** 그 열에서 입력창이 가져가는 것(= `composerMaxHeight`). */
   readonly composer: number;
-  /** 그러고 목록에 남는 것. */
+  /**
+   * 그 열에서 입력창이 **안** 가져가는 것 — `column − composer`.
+   *
+   * 이름이 「목록」이지만 시트가 열려 있는 동안 목록이 실제로 받는 것은 이보다
+   * 작다: 거기서 `dockChrome` 과 `mentions` 가 또 나온다(도크 = 시트 + 입력창 +
+   * 도크 크롬). 즉 이 필드는 **목록의 상한**이고, 시트가 쉬는 상태의 답이다.
+   * 등식을 안 고치고 서술만 고치는 이유는 아래 두 필드가 더한 것이지 고친 것이
+   * 아니기 때문이다 — `column = list + composer` 는 #1443 의 것이고 그대로다.
+   */
   readonly list: number;
+  /**
+   * 도크가 시트·입력창 **말고** 지는 세로 (#1480). 위 `column` 은 이 항을
+   * 안 뺀 값이고, 그것이 이 필드가 따로 있는 이유다 — `column = list + composer`
+   * 라는 #1443 의 등식을 고치지 않고 도크의 산수만 정확해진다.
+   */
+  readonly dockChrome: number;
+  /** 시트가 열렸을 때 시트가 가져가는 것(= `mentionSheetMaxHeight`). */
+  readonly mentions: number;
 }
 
 export function composerColumnBudget(
@@ -335,7 +379,193 @@ export function composerColumnBudget(
     column,
     composer,
     list: column - composer,
+    dockChrome: DOCK_CHROME,
+    mentions: mentionSheetMaxHeight(fontScale, windowHeight),
   };
+}
+
+// =============================================================================
+// 시트의 상한 — 「후보를 몇 개 보여 주는가」 (#1480)
+//
+// ## 옛 값이 무엇이었나
+//
+// `maxHeight: 180`. 어디서도 도출되지 않은 상수였고 두 가지가 틀렸다.
+//
+// **① 글자를 안 따라간다.** 위 상한이 #1443 에서 고친 것과 같은 결함이다 — 행은
+// 글자를 따라 커지는데(아래 `mentionRowHeight`) 상한만 180 에 못 박혀 있으니, 큰
+// 글자에서 담는 후보 수가 조용히 준다.
+//
+// **② 열려 있는 동안 대화를 먹는다.** 도크(시트 + 입력창 + `styles.bar` 여백)가
+// 키보드 위 가시 열을 넘었다. AX-XXL / 874pt 창 실측 산수:
+//
+//   시트 180 + 입력창 170.4 + 바 여백 16 = **366.4pt**
+//   대화 열 874 × (1 − 0.38 − 0.23)      = **340.9pt**
+//
+// 25.5pt 가 초과이고, 초과분은 타임라인에서 나온다 — 「키보드가 올라와도 대화가
+// 남는다」가 시트가 열린 동안 거짓이 되는 자리다.
+//
+// ## 결정 — **넷**
+//
+// 티켓이 요구한 「몇 개를 보여 주는가」의 답이고, **오늘도 넷이었다**: 기본 크기의
+// 180pt 가 담던 것은 4행(4 × 44 = 176)과 **다섯째 행의 이마 4pt** 였다. 그 4pt 가
+// 화면에서 하는 일은 이름의 윗동을 보여 주는 것 하나이고, 이 레포는 그 반노출을
+// 웹에서 이미 한 번 닫았다(#1418 의 `composer-placeholder` `1lh` 클램프). 그러니
+// 넷은 새 결정이 아니라 **옛 값의 뜻**이다.
+//
+// 넷인 이유는 **재서 나온다.** 첫 판의 이 자리에는 「`matchMembers` 가 이미 정렬해
+// 첫 줄을 최선으로 만든다」고 적혀 있었는데, 그것은 참이 아니다 —
+// `mentionQuery.ts` 의 그 함수는 `status === 'active'` 로 거르고 부분일치로 거르고
+// `.slice(0, limit)` 할 뿐 **정렬하지 않고**, `makeDirectory` 도 members 를 그대로
+// 통과시킨다(`packages/momo-core/.../directory.ts`). 첫 줄은 로스터가 도착한 순서다.
+// 그래서 근거를 목록의 성질이 아니라 **관측되는 두 수**에 댄다:
+//
+//   ① 오늘 배송되는 값이 담던 정수 행이 넷이다 — 180 = 4 × 44 + 4.
+//   ② 기준 창(874pt · 기본 크기 — 캡처를 찍는 그 기기)에서 **열이 허락하는 최대
+//      정수 행**이 정확히 넷이다:
+//
+//        목록 몫 340.9 − 입력창 128.0 − 도크 크롬 16.0 = 196.9pt
+//        ⌊196.9 ÷ 44⌋ = 4          (다섯 행은 220pt 라 안 든다)
+//
+// 둘이 같은 수를 가리키므로 이 배치는 「몇 개를 보여 주는가」를 **안 바꾼다** —
+// 바꾸는 것은 다섯째 행의 이마 4pt 와, 큰 글자에서 열을 넘던 초과분이다.
+//
+// 그리고 상한이 **실제로 무는 창은 큰 것들뿐이다**: **배수 1 에서** 열이 다섯
+// 행을 허락하려면 창이 933pt 를 넘어야 하고(⌊(h × 0.39 − 128 − 16) ÷ 44⌋ ≥ 5),
+// 그 조건을 만족하는 배송 높이는 956 · 1024 · 1032 · 1180 · 1366 이다(가장 큰
+// 아이폰과 아이패드들 — 테스트가 그 목록을 값으로 든다). **문턱은 배수를 따라
+// 움직인다**: 사다리 아래쪽에서는 입력창이 작아져 열이 더 일찍 다섯 행을 허락하고
+// (0.823 에서 883.5pt — 926 도 문다), 위쪽에서는 늦어져 3.571 에서는 어느 배송
+// 높이도 안 문다. 933 을 한정 없이 적으면 그 움직임이 안 보인다(회전 2). 상한이
+// 무는 자리에서 넷이 하는 일은 도크가 창 크기를 따라 메뉴로 자라지 않게 잡는
+// 것이다. 그 아래에서는 열이 먼저 물고, 그 위는 스크롤이 받는다(시트는
+// `ScrollView` 다).
+//
+// **이 결정은 표면 한정이다.** 웹은 같은 물음에 다르게 답한다 — 상한 없이
+// `MENTION_LIMIT`(6) 을 전부 띄운다(`clients/web/src/features/chat/Composer.tsx`).
+// 다른 답이 정당한 이유는 기제가 달라서다: 웹의 팝오버는 `absolute bottom-full`
+// 이라 대화 열을 **안 먹고**, 그래서 「도크 ≤ 대화 열」이라는 이 절의 불변식 자체가
+// 거기서는 걸리지 않는다. 이 넷은 열을 나눠 갖는 표면의 답이지 제품 전체의 답이
+// 아니다.
+//
+// ## 그 넷이 열을 넘을 때 — 열이 이기고, **행 단위로** 이긴다
+//
+//   상한 = max( 2행, min( 4행, ⌊(목록 몫 − 도크 크롬) ÷ 행⌋ × 행 ) )
+//
+// 가운데 항이 위 ②의 불변식을 **산수로** 참으로 만든다: 시트 ≤ 목록 몫 − 도크
+// 크롬 ⟺ 시트 + 입력창 + 도크 크롬 ≤ 대화 열.
+//
+// 바닥이 아니라 **내림**이 이 식의 두 번째 요점이다. 열이 3.5행을 허락한다고
+// 3.5행을 주면 넷째 이름이 이마만 내놓고 잘리고, 그것이 정확히 위에서 옛 값 180 을
+// 기각한 그 이유다 — 상한을 도출로 바꾸면서 같은 결함을 다른 크기에 다시 심을
+// 수는 없다. 실측으로 잡았다: 내림이 없던 첫 판은 a11y-large 에서 154.4pt(=3.5행)
+// 를 내고 사진 아래쪽에 넷째 이름의 윗동을 남겼다 — 옛 값 180 의 사진
+// (`dock1480-mention-sheet-ax-before-dark.png`, 4.1행)이 같은 결함을 지금도
+// 들고 있으니 나란히 놓으면 보인다. 즉 **시트는 언제나 정수 행**이고, 남는
+// 자투리는 타임라인으로 간다.
+//
+// 바닥은 위 `MIN_ROWS` 와 같은 논리다 — 한 행짜리 시트는 「고를 것이 있다」만
+// 알려 주고 무엇인지는 안 보여 준다. 가장 작은 창 · 가장 큰 글자에서는 그 바닥이
+// 불변식을 이기고, 그것이 의도다(`composerMaxHeight` 의 `MIN_ROWS` 가 같은
+// 자리에서 같은 이유로 이긴다). **그 띠는 값으로 세어 뒀다** —
+// `composerDraftOffline.test.tsx` 의 `FLOOR_WINS` 가 사다리 전수 × 기기 전수에서
+// 거짓인 **네** 자리(667×3.143 · 667×3.571 · 736×3.571 · 744×3.571)와 각각의
+// 초과분을 든다. 넷 다 옛 고정 180 이 훨씬 더 넘던 자리다(92.2 · 111.0 · 84.1 ·
+// 81.0 → 6.5 · 38.1 · 11.2 · 8.1). 736(iPhone 8 Plus)이 그 목록에 있는 이유는
+// 이 앱의 배포 하한이 **iOS 16.4** 라서다(`project.pbxproj` 여섯 구성 전부) —
+// 「iOS 26 이 도는 기기」로 격자를 세우면 이 한 자리가 통째로 안 보인다(회전 2 M2).
+// 그리고 목록으로 닫히는 것은 아이폰까지다: `UIRequiresFullScreen` 이 없어
+// 아이패드 멀티태스킹 창 높이는 연속값이라 어떤 목록도 전수가 못 된다. 그 몫은
+// 표가 아니라 **기제 단정**이 진다 — 「도크가 열을 넘었다면 시트는 반드시 바닥에
+// 앉아 있다」가 격자와 무관하게 참이고, 테스트가 그것을 촘촘한 연속 쓸이로 든다.
+//
+// ## 이 불변식이 **지키는 것**과 안 지키는 것 (design-review 회전 1 M2)
+//
+// 이름은 「키보드가 올라와도 대화가 남는다」에서 왔지만, 시트가 열린 동안 그
+// 문장이 참인 띠는 **없다.** 874pt 창 실측 — 열에서 도크를 뺀 여유가 배수 1.000
+// 에서 20.9pt, 2.643 에서 22.4pt, 3.143 에서 13.0pt 인데 본문 한 줄은 각각
+// 22.0 / 58.1 / 69.1pt 다. 어느 크기에서도 한 줄이 안 남는다.
+//
+// 그래서 이 절은 불변식을 다시 정하지 않고 **이름을 정확히 한다**: 「도크 ≤ 대화
+// 열」이 지키는 것은 *도크가 열 밖으로 안 나간다*이고, 「대화가 남는다」는 시트가
+// **쉬는** 상태의 약속이다(그때 목록 몫은 `ComposerColumnBudget.list` — 874pt
+// 기본 크기에서 212.9pt = 본문 9.7줄). 시트는 `@` 토큰을 치는 동안에만 서므로 그
+// 분리가 화면과 맞는다.
+//
+// 문턱을 타임라인이 실제로 보여 줄 수 있는 것(한 줄)에 대고 다시 정하는 안은
+// 기각했다: 시트를 한 행 더 깎거나 입력창을 깎아야 하는데, 앞은 「고를 수 있는
+// 화면」을, 뒤는 「쓰고 있는 줄이 보이는 화면」을 판다 — 둘 다 이 파일이 이미
+// 위에서 더 비싸다고 판정한 것들이다. 대신 **여유를 사진에 적는다**
+// (`measure/surfaces.tsx` 의 `MentionSheetProbe`): 판정만 찍고 여유를 안 찍으면
+// 다음 사람은 이 문단을 다시 손으로 계산해야 한다.
+//
+// 기본 크기에서는 몫이 한 번도 안 걸린다: 874pt 창에서 목록 몫 212.9 − 16 = 196.9
+// 이고 4행은 176 이다. **화면이 4행 그대로다** — 사라지는 것은 이마 4pt 뿐이다.
+// =============================================================================
+
+/**
+ * 도크가 시트·입력창 **말고** 지는 세로 — `styles.bar` 의 위아래 여백 (#1480).
+ *
+ * 상수로 이름을 갖는 이유는 `INPUT_CHROME` 과 같다: 산수와 실제 스타일이 같은 값을
+ * 읽어야 하고, 사본을 두면 사본이 거짓말한다(디자인 시스템 §5.5).
+ */
+const DOCK_CHROME = space.sm * 2;
+
+/** 시트가 담는 후보 수. 위 절이 이 넷을 고른 이유를 든다. */
+const MENTION_MAX_ROWS = 4;
+
+/** 시트가 절대로 그 아래로 안 내려가는 행 수 — 고른 것과 그 옆의 것. */
+const MENTION_MIN_ROWS = 2;
+
+/**
+ * 행 끝의 표지 — **눈과 스크린리더가 같은 문자열을 든다** (design-review 회전 2 M3).
+ *
+ * 상수인 이유는 사본이 갈라졌기 때문이다: 표지는 행에 그려져 있는데
+ * `accessibilityLabel` 은 이름과 핸들만 들었고, `Pressable` 의 기본
+ * `accessible={true}` 가 그 라벨로 자식들을 덮는다. 그래서 화면에서는 파란 이름과
+ * 표지로 갈라져 있는 두 종류가 VoiceOver 에서는 **똑같이** 읽혔다 — 에이전트를 1급
+ * 멤버로 세우는 제품에서 「이 후보가 사람인가 에이전트인가」는 부수 정보가 아니다.
+ *
+ * 어휘가 하나뿐인 것도 이 상수가 사는 이유다: 표지는 `kind === 'agent'` 일 때만
+ * 서고 그때 문자열은 언제나 이것이라, 두 자리에 각자 적으면 사본이 조용히 갈라진다
+ * (디자인 시스템 §5.5).
+ */
+const MENTION_AGENT_KIND = '에이전트';
+
+/**
+ * 후보 한 행의 세로.
+ *
+ * `TOUCH_TARGET` 은 **바닥이지 값이 아니다.** 행에 서는 두 조각(이름 `font.label`
+ * 13 · 핸들 `font.meta` 12)은 한 줄로 읽혀야 하고, 그래서 둘 다 `line.head` 를
+ * **선언한다**(그 토큰이 존재하는 이유이고, 선언하지 않으면 RN 이 광학 중심으로
+ * +2.67pt 어긋나게 놓는다 — `tokens.ts` 의 `line.head` 실측). 화면에 그려지는 줄
+ * 상자는 거기에 동적 타입 배수가 곱해진 것이므로(`RCTAttributedTextUtils`), 큰
+ * 글자에서는 그 값이 44 를 넘고 그때부터 행이 그것이다.
+ */
+export function mentionRowHeight(fontScale: number): number {
+  return Math.max(TOUCH_TARGET, line.head * fontScale);
+}
+
+/**
+ * 시트가 자라기를 멈추는 높이 — **넷, 그리고 열이 허락하는 만큼.**
+ *
+ * `composerMaxHeight` 과 같은 모양이고 같은 이유로 export 된다: 계측 하네스와
+ * 테스트가 이 산수를 **다시 적지 않고** 읽는다.
+ */
+export function mentionSheetMaxHeight(
+  fontScale: number,
+  windowHeight: number,
+): number {
+  const row = mentionRowHeight(fontScale);
+  const byColumn =
+    conversationColumn(windowHeight) -
+    composerMaxHeight(fontScale, windowHeight) -
+    DOCK_CHROME;
+  // 열이 허락하는 것을 **행으로 내림**한다 — 반쪽 행은 이름의 이마만 보여 준다.
+  const rowsByColumn = Math.floor(byColumn / row);
+  return Math.max(
+    MENTION_MIN_ROWS * row,
+    Math.min(MENTION_MAX_ROWS, rowsByColumn) * row,
+  );
 }
 
 // =============================================================================
@@ -387,6 +617,97 @@ export function withLatinWordBreaks(text: string): string {
     /([0-9A-Za-z])([-_./])(?=[0-9A-Za-z])/g,
     `$1$2${ZERO_WIDTH_SPACE}`,
   );
+}
+
+// =============================================================================
+// 빈 상자에 못 서는 문장은 **절 경계에서** 접힌다 — 폰이 절 예산을 부른다 (#1479 ②)
+//
+// ## 왜 이 파일의 판정이 뒤집히나
+//
+// 아래 입력창의 주석이 「폰은 코어의 절 예산을 안 부른다」를 실측으로 정했고, 그
+// 근거는 전제 하나였다: RN 의 `multiline` `TextInput` 은 콘텐츠 높이로 자라므로
+// 넘쳐도 **잃는 것이 없다.** 그 전제는 `MAX_ROWS` 가 유일한 상한이던 때의 것이다.
+//
+// #1443 이 그 위에 대화 열의 몫을 얹으면서 상자는 더는 무한히 안 자라고, 큰
+// 글자에서는 몫이 먼저 걸린다(AX-XXL 실측 170.4pt = 2.2줄). 그리고 **빈 상자는
+// 스크롤이 대신해 주지 않는다** — 넘칠 때 상자 안에서 스크롤하는 것은 *콘텐츠*
+// 이고 플레이스홀더는 콘텐츠가 아니라, 아직 아무것도 안 친 사람에게는 스크롤할
+// 것이 없다. 전제가 무너진 자리에서는 웹의 판정이 그대로 선다: 어차피 못 설 절은
+// 절 경계에서 통째로 사라져야 하고, 반쪽 절(「보내기, @」)이나 반노출 줄로 남으면
+// 안 된다(디자인 시스템 §5.3 7위).
+//
+// ## 이 규칙이 **구하지 못하는** 띠도 이름을 갖는다
+//
+// 대가 없이 다 낫는 것이 아니다. 상자가 담는 줄 수는 `152.4 ÷ (22 × 배수)` 라
+// 배수에 반비례하고(글자리 152.4pt 는 배수 ~1.5 위에서 열의 몫이 이기며 고정된다)
+// 문장의 줄 수는 배수를 따라 는다. 그래서 셋으로 갈린다 — 아래 실측
+// (iPhone 17 Pro / iOS 26.5, `measure/captures/clause1479-*`, 계측 줄이 매 사진에
+// 문장·머리 절의 줄 수와 상자의 줄 수를 함께 적는다):
+//
+//   large (배수 1.000)      상자 5.0줄 · 세 이름 다 1~2줄 — **화면이 하나도 안
+//                           변한다.** `composerDraftOffline.test.tsx` 가 그 자리를
+//                           단정으로도 잰다.
+//   a11y-medium (1.786)     상자 3.9줄 · 문장 2~3줄 — 아직 다 든다.
+//   a11y-large (2.143)      상자 3.2줄 · `일반` 3줄(다 든다) · `release-2026-08`
+//                           **4줄, 머리 3줄** — 여기서 규칙이 값을 낸다: 옛 판이
+//                           「…보내기, @로」로 끝나던 자리에 이제 「…보내기」가
+//                           온전히 선다(before/after 사진 두 장이 그 자리다).
+//   a11y-XL 위 (2.643~)     상자 2.6줄 · 머리 절도 3~4줄 — **버릴 절이 없다.**
+//                           웹에도 같은 띠가 있고(`gate-work-panel.mjs` 의
+//                           `head-clause` 레인) 답도 같다: 절 단위 생략 위에서는
+//                           아무것도 그 띠를 못 구한다. 남는 것은 상자 자신의
+//                           문제이고, 그 결정은 위 `composerMaxHeight` 이 진다.
+//
+// 그 마지막 띠까지 낫는다고 적으면 그것이 이 파일이 #1422 에서 한 번 저지른 잘못
+// (전제를 조건절 없이 적는 것)의 재판이다. 여기서는 띠를 세어 두고, 사진이 그
+// 산수를 자기 안에 적는다.
+//
+// ## 규칙은 코어의 것, 자는 이 클라의 것
+//
+// 코어는 화면을 모른다(`purity.mjs`). 그래서 **무엇을 버릴지**는 계속
+// `fitComposerPlaceholder` 가 정하고 「이 문자열이 이 상자에 드는가」만 여기서
+// 답한다 — 웹 `placeholderFit.ts` 와 같은 분업이고, 다른 것은 **자의 축**이다:
+// 웹의 상자는 한 줄(`rows=1`)이라 가로를 재고, 이 상자는 여러 줄이라 **세로**를
+// 잰다. 프로브는 입력창과 같은 글자·같은 줄 상자·같은 줄바꿈 전략으로 서고,
+// `onTextLayout` 이 돌려주는 줄들의 높이를 더해 `composerMaxHeight` 이 든 글자리와
+// 대조한다.
+//
+// **재기 전에는 문장 전체다.** 웹이 같은 방향을 고른 이유와 같다: 「일단 짧게」로
+// 시작하면 드는 상자에서도 광고가 한 프레임 사라졌다 돌아온다. 반대 방향의 대가는
+// 안 드는 문장이 한 프레임 서는 것이고, 그것은 이미 오늘의 화면이다.
+//
+// ## 이 프로브가 **안** 하는 것
+//
+// 사람이 친 글은 안 잰다. `value` 는 이 파일의 첫 번째 규칙이 지키는 것이고, 이
+// 프로브는 `placeholder` 하나만 재며 그 답이 `value` 에 대해 아무것도 결정하지
+// 않는다. 상태가 움직이는 계기도 키스트로크가 아니라 **레이아웃**이다.
+//
+// 스레드처럼 문장을 넘겨받은 자리(`placeholder` prop)에서는 아예 안 선다. 절
+// 계약은 코어가 절로 지은 문장의 것이고, 남이 준 한 덩이 문자열에는 버릴 절
+// 경계가 없다.
+//
+// 접근성: 프로브는 `accessibilityElementsHidden` 과
+// `importantForAccessibility="no-hide-descendants"` 로 접근성 트리 밖에 선다.
+// 안 그러면 VoiceOver 가 같은 문장을 한 번 더 읽는다.
+// =============================================================================
+
+/**
+ * 코어가 물어볼 후보들 — 순서까지 그대로.
+ *
+ * 이음쇠(`, `)를 이 파일이 적지 않는다. 웹 `placeholderFit.ts` 가 같은 자리에서
+ * 같은 이유를 적었다: 사본이 생기는 순간 그것이 두 번째 정본이다. 규칙에 「다
+ * 든다」고 답하면서 지나가는 후보를 모으면 그 목록이 곧 물어볼 목록이고, 절이
+ * 셋이 되는 날에도 이 함수는 안 고친다.
+ */
+function placeholderCandidates(
+  clauses: readonly ComposerPlaceholderClause[],
+): readonly string[] {
+  const asked: string[] = [];
+  fitComposerPlaceholder(clauses, candidate => {
+    asked.push(candidate);
+    return true;
+  });
+  return asked;
 }
 
 /**
@@ -505,12 +826,31 @@ export function Composer({
   // `RCTAccessibilityManager` 의 배수 변경을 Dimensions 변경으로 내보낸다).
   const {fontScale, height: windowHeight} = useWindowDimensions();
   const maxHeight = composerMaxHeight(fontScale, windowHeight);
+  // 시트의 상한도 같은 두 값이 정한다 (#1480). 위 상한과 나란히 여기서 계산하는
+  // 이유가 그것이다 — 둘은 같은 열을 나눠 갖고, 스타일시트는 그 열을 모른다.
+  const mentionsMaxHeight = mentionSheetMaxHeight(fontScale, windowHeight);
+  // 절 예산의 자 (#1479). 상한이 든 높이에서 세로 크롬을 빼면 **글이 서는 자리**다.
+  const placeholderRoom = maxHeight - INPUT_CHROME;
   // 첫 렌더가 이미 초안을 들고 있다 (`drafts.ts`). 효과로 채우면 빈 상자가 한
   // 프레임 그려졌다가 글이 나타나고, 그것은 「글이 잠깐 사라졌다 돌아오는」
   // 화면이다 — MMKV 가 동기로 읽히는 것이 여기서 값을 한다.
   const [text, setText] = useState(() =>
     draftKey === undefined ? '' : readDraft(draftKey),
   );
+  // **0 이 초안과 어긋난다 — 알고 두는 자리다** (#1480 design-review L1).
+  //
+  // 위 `text` 는 초안을 복원해 첫 렌더에 이미 글을 들고 있는데 캐럿은 0 이다.
+  // 같은 파일의 `draftKey` 전환 효과는 같은 사실에 `restored.length` 를 쓰므로,
+  // 두 자리가 같은 상황에 다른 답을 갖고 있다. 실제로 걸린 자리가 있다: 계측이
+  // 「`@` 로 끝나는 초안」을 심어 시트를 열려 했을 때, iOS 가 `focus()` 에도
+  // `setSelection()` 에도 `onSelectionChange` 를 안 내보내서 캐럿이 0 에 머물고
+  // (`mentionQueryAt` 는 캐럿 앞만 본다) 화면에는 캐럿이 `@` 뒤에 보이는데
+  // 목록이 안 열렸다(그래서 그 캡처는 Maestro 가 정말로 친다).
+  //
+  // **여기서 안 고친다.** 아래 `mentionOpen` 의 초기값이 `true` 이므로, 캐럿을
+  // 초안 끝으로 옮기면 `@` 로 끝나는 초안을 복원한 순간 콜드 스타트에 시트가
+  // 스스로 열린다 — 아무도 아직 아무것도 안 쳤는데. 그 둘은 한 결정이고, 이
+  // 티켓(시트의 **상한**)의 것이 아니다.
   const [caret, setCaret] = useState(0);
   const [mentionOpen, setMentionOpen] = useState(true);
   const ownInputRef = useRef<TextInput | null>(null);
@@ -634,37 +974,137 @@ export function Composer({
   // 하나는 「지금 나갈 수 있는가」다.
   const canSend = text.trim() !== '' && offline !== true;
 
+  // ---- 절 예산 (#1479) ------------------------------------------------------
+  // 넘겨받은 문장에는 절 경계가 없다(위 머리말). 그때는 절도 프로브도 안 선다.
+  const clauses = useMemo(
+    () =>
+      placeholder === undefined
+        ? composerPlaceholderClauses(channelLabel, recipient)
+        : null,
+    [placeholder, channelLabel, recipient],
+  );
+  const placeholderProbes = useMemo(
+    () => (clauses === null ? [] : placeholderCandidates(clauses)),
+    [clauses],
+  );
+
+  // 입력창이 자기 폭을 알린 뒤에야 프로브가 설 수 있다 — 자와 상자의 폭이 다르면
+  // 그 답은 이 상자에 대한 답이 아니다.
+  const [inputWidth, setInputWidth] = useState<number | null>(null);
+  const onInputLayout = useCallback((event: LayoutChangeEvent) => {
+    const {width} = event.nativeEvent.layout;
+    setInputWidth(previous => (previous === width ? previous : width));
+  }, []);
+  const probeWidth =
+    inputWidth === null ? null : inputWidth - INPUT_CHROME_X;
+
+  // 잰 것은 **세로**이지 「든다/안 든다」가 아니다. 상한은 글자 배수와 창이 정하니
+  // 판정을 저장하면 둘 중 하나가 바뀌는 순간 저장된 답이 늙는다 — 웹의 자가
+  // 늙었던 그 결함이고(`placeholderFit.ts` 의 recompute 절), 세로를 들면 판정은
+  // 언제나 지금 상한으로 다시 난다.
+  const [probed, setProbed] = useState<Readonly<Record<string, number>>>({});
+  const onProbeLayout = useCallback(
+    (candidate: string, event: NativeSyntheticEvent<TextLayoutEventData>) => {
+      const height = event.nativeEvent.lines.reduce(
+        (sum, textLine) => sum + textLine.height,
+        0,
+      );
+      setProbed(previous =>
+        previous[candidate] === height
+          ? previous
+          : {...previous, [candidate]: height},
+      );
+    },
+    [],
+  );
+
+  const shownPlaceholder = withLatinWordBreaks(
+    clauses === null
+      ? (placeholder as string)
+      : fitComposerPlaceholder(clauses, candidate => {
+          const height = probed[candidate];
+          // 아직 안 잰 후보는 「든다」다 — 머리말의 안전 방향.
+          return height === undefined || height <= placeholderRoom;
+        }),
+  );
+
   return (
     <View style={styles.root}>
       {showMentions ? (
-        <View style={styles.mentions} testID="mention-list">
+        <View
+          style={[styles.mentions, {maxHeight: mentionsMaxHeight}]}
+          testID="mention-list">
           <ScrollView
             keyboardShouldPersistTaps="always"
-            showsVerticalScrollIndicator={false}>
+            // **막대를 되돌린다** (design-review 회전 1 L6). 옛 판은 이것을 껐고,
+            // 4행 시트가 6개(=`MENTION_LIMIT`)를 거의 다 담던 때는 안 보였다.
+            // 이 배치가 그 조건을 바꾼다 — 상한이 열을 따라가므로 작은 창·큰
+            // 글자에서는 바닥인 **2행**까지 내려가고, 그러면 넷이 아래에 숨는다.
+            // 「아래 더 있다」를 아무것도 안 말하는 목록은 자기가 무엇을 가리고
+            // 있는지 안 보여 준다.
+            //
+            // 이 집의 관례도 그쪽이다: 같은 모양의 형제(`MessageActionSheet` —
+            // 역시 도출된 `maxHeight` 로 잘리는, 고르는 시트)가 막대를 켜 둔다.
+            // 끄고 있는 둘은 가로 레일(`Timeline`·`SearchScreen`)이라 다른 물건
+            // 이다.
+            //
+            // **닫는 것과 못 닫는 것**: iOS 의 막대는 끄는 동안에만 보이므로,
+            // 이것이 주는 것은 「지금 끄는 이 목록에 아래가 더 있다」이지 「손을
+            // 대기 전부터 더 있다고 알려 주는 것」이 아니다. 후자는 페이드
+            // 마스크나 개수 표지가 필요하고, 그것은 이 티켓의 결정(상한)이
+            // 아니다.
+            //
+            // **막대가 행 끝의 표지를 가리지 않는다**는 것은 사진이 아니라 산수로
+            // 안다(회전 2 nitpick — iOS 막대는 끄는 동안에만 보여서 정지 사진에
+            // 안 찍힌다): 막대는 가장자리 바깥쪽 ~5pt 안에 서고, 행의 조각들은
+            // `SAFE_GUTTER`(16) 만큼 안쪽에서 끝난다. 표지가 가장 오른쪽까지
+            // 가는 AX-XXL 에서도 그 사이에 11pt 가 남는다.
+            showsVerticalScrollIndicator>
             {candidates.map(member => (
               <Pressable
                 key={member.id}
                 accessibilityRole="button"
-                accessibilityLabel={`${member.displayName} @${member.handle}`}
+                // 눈에 보이는 것과 같은 것을 읽는다 (회전 2 M3). 이 `Pressable` 은
+                // `accessible` 기본값이 참이라 이 한 줄이 자식 셋을 통째로 덮는다 —
+                // 표지를 여기 안 실으면 스크린리더에서 사람 행과 에이전트 행이
+                // 구별되지 않는다.
+                accessibilityLabel={[
+                  member.displayName,
+                  `@${member.handle}`,
+                  member.kind === 'agent' ? MENTION_AGENT_KIND : null,
+                ]
+                  .filter(Boolean)
+                  .join(' ')}
                 onPress={() => accept(member)}
                 style={({pressed}) => [
                   styles.mentionRow,
                   pressed && styles.pressed,
                 ]}
                 testID="mention-option">
-                <Text
-                  style={[
-                    styles.mentionName,
-                    member.kind === 'agent' && styles.mentionNameAgent,
-                  ]}
-                  numberOfLines={1}>
-                  {member.displayName}
-                </Text>
-                <Text style={styles.mentionHandle} numberOfLines={1}>
-                  {`@${member.handle}`}
-                </Text>
+                {/* 이름과 핸들은 **한 묶음**이다 — 그 묶음이 자라고, 그 안에서 둘이
+                    함께 줄어든다. 형제 셋(`AgentsScreen`·`SidebarScreen`·
+                    `HostedConnectionsScreen`)의 `rowText` + `rowTitleLine` 과 같은
+                    구조이고, 스타일 쪽 주석이 왜 그 구조여야 하는지를 든다. */}
+                <View style={styles.mentionIdentity} testID="mention-identity">
+                  <Text
+                    style={[
+                      styles.mentionName,
+                      member.kind === 'agent' && styles.mentionNameAgent,
+                    ]}
+                    numberOfLines={1}>
+                    {member.displayName}
+                  </Text>
+                  <Text style={styles.mentionHandle} numberOfLines={1}>
+                    {`@${member.handle}`}
+                  </Text>
+                </View>
                 {member.kind === 'agent' ? (
-                  <Text style={styles.mentionKind}>에이전트</Text>
+                  // 한 줄로 못 박는다 — 줄어들 수 있게 해 둔 조각이(스타일의
+                  // `flexShrink`) 한 줄로 안 묶이면 접히고, 접힌 행은 이 배치가
+                  // 세운 정수 행 산술이 세는 높이를 넘는다.
+                  <Text style={styles.mentionKind} numberOfLines={1}>
+                    {MENTION_AGENT_KIND}
+                  </Text>
                 ) : null}
               </Pressable>
             ))}
@@ -703,19 +1143,47 @@ export function Composer({
         />
       ) : null}
 
+      {/* 절 예산의 자 (#1479). 화면에 안 나가고(투명·절대 배치) 접근성 트리에도
+          안 들어간다 — 하는 일은 배송되는 입력창과 **같은 조판**으로 후보 문장을
+          세워 `onTextLayout` 에 자기 줄들을 내놓는 것뿐이다. 같은 파일에 두는
+          이유가 그 「같은 조판」이다: 글자·줄 상자·줄바꿈 전략이 아래 `styles.input`
+          바로 옆에 있어야 둘이 조용히 갈라지지 않는다. */}
+      {probeWidth === null || placeholderProbes.length === 0 ? null : (
+        <View
+          style={styles.probeHost}
+          pointerEvents="none"
+          accessibilityElementsHidden
+          importantForAccessibility="no-hide-descendants">
+          {placeholderProbes.map(candidate => (
+            <Text
+              key={candidate}
+              style={[styles.probe, {width: probeWidth}]}
+              lineBreakStrategyIOS="hangul-word"
+              onTextLayout={event => onProbeLayout(candidate, event)}
+              testID="composer-placeholder-probe">
+              {withLatinWordBreaks(candidate)}
+            </Text>
+          ))}
+        </View>
+      )}
+
       <View style={styles.bar}>
         <TextInput
           ref={inputRef}
           style={[styles.input, {maxHeight}]}
+          onLayout={onInputLayout}
           value={text}
           onChangeText={onChangeText}
           onSelectionChange={onSelectionChange}
           // 문장은 코어가 든다 (#1384). 이 두 줄은 웹 `chat/Composer.tsx` 와
           // **같은 문자열을 각자 짓고** 있었다: 값이 같아서 안 보였을 뿐,
           // 한쪽을 고치는 날 갈라진다. 오프라인 문장이 이미 걸어 둔 길이다.
-          placeholder={withLatinWordBreaks(
-            placeholder ?? composerPlaceholder(channelLabel, recipient),
-          )}
+          //
+          // **드는 만큼만 실린다** (#1479). 절을 고르는 것은 코어의
+          // `fitComposerPlaceholder` 이고, 「이 상자에 드는가」만 위의 프로브가
+          // 답한다 — 그 분업과 그것이 구하지 못하는 띠는 이 파일의 「절 예산」
+          // 머리말에 있다.
+          placeholder={shownPlaceholder}
           placeholderTextColor={palette.textFaint}
           accessibilityLabel={placeholder ?? composerFieldLabel(channelLabel, recipient)}
           multiline
@@ -746,16 +1214,21 @@ export function Composer({
           // 4~5줄이고 상자는 2.2줄이다. 그리고 여기서는 위 「잃는 것이 없다」가
           // 성립하지 않는다 — 넘칠 때 안에서 스크롤하는 것은 *콘텐츠*이고
           // 플레이스홀더는 콘텐츠가 아니라, 아직 아무것도 안 친 사람에게는
-          // 스크롤할 것이 없다. 큰 글자에서 뒷절은 **사라진다**. 폰이 코어의 절
-          // 예산 규칙을 불러야 하는가는 그래서 다시 열린 질문이고, 그 결정의
-          // 자리는 #1479 다(코어 `composerCopy.ts` 머리말이 같은 것을 적는다).
+          // 스크롤할 것이 없다. 큰 글자에서 뒷절은 **사라진다**.
           //
-          // **아직 안 고친 것 하나**, 같은 사진에 있다: 그 크기에서 뒷절이
-          // 「보내기, @」 / 「로 부르기」로 끊긴다. `hangul-word` 에게 `@` 는
-          // 낱말 하나라 그 뒤가 어절 경계로 보이는 것이다. 고치려면 `@` 와 뒤
-          // 음절을 word joiner 로 묶어야 하는데, 그것은 **코어가 든 문장**
-          // (`MENTION_AFFORDANCE`)의 모양을 폰이 바꾸는 일이라 이 goal 의 범위
-          // 밖이다 — 그것도 #1479 다.
+          // **#1479 가 그 열린 질문에 답했다: 부른다.** 위 「절 예산」 머리말이
+          // 결정과 그 산수를 들고, 이 상자의 `placeholder` 는 이제 프로브가 든
+          // 세로로 고른 문장이다. 그래서 위 문단의 「안 부른다」는 **#1443 까지의
+          // 기록**이지 오늘의 계약이 아니다 — 오늘의 계약은 배수 ~2.2 아래에서
+          // 화면이 하나도 안 변하고(그 아래는 문장 전체가 든다), 그 위에서는 못 설
+          // 절이 절 경계에서 통째로 사라진다는 것이다.
+          //
+          // **같은 사진의 다른 결함도 #1479 가 받았다**: 그 크기에서 뒷절이
+          // 「보내기, @」 / 「로 부르기」로 끊기던 것. `hangul-word` 에게 `@` 는
+          // 낱말 하나라 그 뒤가 어절 경계로 보이는 것이고, 처방은 이 파일이 아니라
+          // 코어가 든 문장 쪽이었다 — `MENTION_AFFORDANCE` 가 `@` 와 조사를 WORD
+          // JOINER(U+2060)로 묶는다(그 결정은 `composerCopy.ts` 의 「절 안에서
+          // 끊기던 자리」 절).
           //
           // 같은 계측이 다른 것을 하나 잡았다: iOS 기본 줄바꿈이 「부르기」를
           // 「부 / 르기」로 끊고 있었다. 이 레포는 그 결함에 이미 이름과 처방을
@@ -816,7 +1289,12 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     minHeight: TOUCH_TARGET,
     // `maxHeight` 는 여기 없다. 글자 배수와 창 높이가 정하므로 컴포넌트가
     // `composerMaxHeight` 로 계산해 붙인다 (#1443).
-    paddingHorizontal: space.md,
+    //
+    // 좌우 여백이 이름으로 서는 이유는 세로 짝과 같다: 위 `INPUT_CHROME_X` 가
+    // 프로브의 글폭을 이 값에서 도출하므로, 여기에 `space.md` 를 다시 적으면
+    // 자와 상자가 각자 다른 수를 들 수 있는 자리가 생긴다(#1479 가 이름을
+    // 만들어 놓고 정작 이 줄은 안 고쳤다 — 회전 1 M4).
+    paddingHorizontal: INPUT_PAD_X,
     paddingTop: INPUT_PAD_Y,
     paddingBottom: INPUT_PAD_Y,
     borderRadius: radius.md,
@@ -845,15 +1323,37 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: color.accent,
   },
+  /**
+   * 프로브가 서는 자리 (#1479). **절대 배치**라 이 컴포넌트의 세로를 한 픽셀도
+   * 안 밀고, 투명이라 안 보이며, `pointerEvents="none"` 이라 안 잡힌다. 높이를
+   * 안 주는 것이 요점이다 — 자가 상자에 갇히면 잰 줄 수가 상자의 것이 된다.
+   */
+  probeHost: {position: 'absolute', top: 0, left: 0, opacity: 0},
+  /**
+   * 프로브의 **조판**. 아래 `input` 과 같은 글자·같은 줄 상자여야 하고, 줄바꿈
+   * 전략은 이 스타일시트가 못 드는 prop 이라 컴포넌트가 같은 값을 든다
+   * (`lineBreakStrategyIOS="hangul-word"`). 폭은 입력창의 실측에서 나오므로
+   * 여기 없다.
+   */
+  probe: {fontSize: font.body, lineHeight: line.body},
   sendDisabled: {backgroundColor: color.border},
   sendPressed: {backgroundColor: color.accentPressed},
   sendLabel: {color: color.onAccent, fontSize: font.label, fontWeight: '700'},
   sendLabelDisabled: {color: color.textFaint},
+  /**
+   * 후보 시트 (#1480). **`maxHeight` 는 여기 없다** — 글자 배수와 창 높이가
+   * 정하므로 컴포넌트가 `mentionSheetMaxHeight` 로 계산해 붙인다(입력창이 같은
+   * 이유로 같은 일을 한다). 옛 판의 `maxHeight: 180` 은 도출되지 않은 상수였고,
+   * 그것이 무엇을 틀렸는지는 위 「시트의 상한」 절에 있다.
+   */
   mentions: {
-    maxHeight: 180,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: color.border,
   },
+  /**
+   * 후보 한 행. `minHeight` 는 엄지의 바닥이고, 큰 글자에서 행의 높이를 정하는
+   * 것은 아래 두 조각이 선언한 줄 상자다 — 그 산수가 `mentionRowHeight` 다.
+   */
   mentionRow: {
     minHeight: TOUCH_TARGET,
     flexDirection: 'row',
@@ -861,10 +1361,118 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     gap: space.sm,
     paddingHorizontal: SAFE_GUTTER,
   },
-  mentionName: {fontSize: font.label, fontWeight: '600', color: color.text},
+  // 세 조각이 **한 줄로 읽혀야** 하므로 셋 다 `line.head` 를 선언한다 — 그
+  // 토큰이 존재하는 이유가 정확히 이 모양(13pt 이름 + 12pt 보조)이고, 선언이
+  // 없으면 RN 이 광학 중심으로 어긋나게 놓는다(`tokens.ts` 의 실측). 그 선언이
+  // `mentionRowHeight` 의 산수가 화면과 같은 수를 쓰는 근거이기도 하다.
+  //
+  // ## 행은 넘치는 대신 **잘리고**, 잘린 조각은 **앞을 남긴다**
+  //
+  // 옛 판에서 양보할 수 있는 조각은 `mentionHandle` 하나뿐이었다(Yoga 의
+  // `flexShrink` 기본값은 0 — 이 트리의 `AgentDetailScreen.tsx` 가 그 사실을 자기
+  // 주석에 적어 두었다). 그래서 긴 한글 이름 + 행 끝의 「에이전트」 조합에서 행은
+  // 잘리는 대신 **넘쳤고**, 넘쳐서 화면 밖으로 나가는 것은 표지였다(캡처
+  // `dock1480-mention-sheet-axxl-before-dark.png` 의 첫 줄).
+  //
+  // 회전 1 은 그 넘침을 잡으면서 「조용히 사라지는 조각이 있어서는 안 된다」를
+  // 원칙으로 세웠는데, **그 판의 렌더가 그 원칙을 어겼다**(회전 2 H). 핸들에
+  // `flex: 1` 이 붙어 있었기 때문이다 — `flex: 1` 은 `flexBasis: 0` 이라 핸들은
+  // 압력이 오기 전부터 **자기 폭이 없는 조각**이고, 남는 자리만 먹는다. 자리가
+  // 모자라면 줄어드는 것이 아니라 처음부터 0 이다. 사진이 그대로 든다:
+  // `dock1480-mention-sheet-ax-*.png`(2.143)의 첫 행에 핸들은 맨 「@」 한 글자로
+  // 남고 생략부호도 없으며, `axxl-*`(3.143)에는 **아예 없다** — 회전 1 이 옛 판의
+  // 결함으로 서술한 바로 그 모양이다.
+  //
+  // 사라지는 것이 **유일한 식별자**라 이것은 미관이 아니다. 삽입되는 값은 핸들이고
+  // (`mentionQuery.ts`: *the ACCEPTED value is always the handle*), 표시 이름은
+  // 유일하지 않다 — 이 레포는 그 사실에 이름까지 붙여 뒀다(코어의 `isAmbiguousName`,
+  // 폰의 `features/sidebar/rows.ts` 가 「이름이 모호하면 핸들을 딸려 보낸다」를
+  // 구현하고, `SidebarScreen` 의 「두 김인턴」 주석이 실제 사례다). 게다가 후보는
+  // 정렬돼 있지 않아(`matchMembers` 는 거르고 자를 뿐이다) 「첫 줄이 내가 부른
+  // 사람」이라는 대안 근거도 없다.
+  //
+  // ## 양보 순서 — 형제 셋과 **같은 문법**으로
+  //
+  // 같은 모양(이름 + @핸들)을 이미 푼 형제가 셋인데(`AgentsScreen` ·
+  // `SidebarScreen` · `HostedConnectionsScreen`), 셋 다 `rowTitle` 과 `rowHandle`
+  // 에 **둘 다 `flexShrink: 1`** 을 주고 그 둘을 `flex: 1` 짜리 묶음(`rowText` +
+  // `rowTitleLine`)에 넣는다. 두 조각이 각자의 폭에 비례해 함께 내므로 **둘 다
+  // 앞을 남긴다.** 이 행도 이제 같다:
+  //
+  //   `mentionIdentity`  `flex: 1`      묶음이 자란다 → 표지가 행 끝에 선다
+  //   `mentionName`      `flexShrink: 1` 폭에 비례해 낸다
+  //   `mentionHandle`    `flexShrink: 1` 폭에 비례해 낸다
+  //   `mentionKind`      `flexShrink: 0` 안 낸다
+  //
+  // 묶음이 `flex: 1`(basis 0)이라 표지는 자기 폭을 그대로 받고 묶음이 나머지를
+  // 받는다 — 세 조각의 양보량이 이 네 줄로 결정된다. 실측(874pt 창, 첫 행이 이
+  // 앱에서 가장 긴 이름 `프로덕트디자인 김인턴 / @product-design-intern`):
+  //
+  //   2.143   「프로덕트…」  「@product-…」  「에이전트」
+  //   3.143   「프로…」      「@pro…」       「에이전트」
+  //
+  // ## 표지의 `flexShrink: 0` 은 판정이 아니라 **못이다**
+  //
+  // 회전 1 은 이 줄을 두 판의 사진 비교로 정당화했다(「표지도 줄이면 「에…」가
+  // 되는데 그것은 뜻이 없다」). **그 논증은 이제 두 군데서 안 선다**(회전 2).
+  //
+  // ① 근거가 틀렸다. 이 표지의 어휘는 단일값이라(`kind === 'agent'` 일 때
+  //    「에이전트」 하나 — `MENTION_AGENT_KIND`) 잘려도 **존재만으로 정보가
+  //    완결된다.** 「에…」는 「무엇이 있었다」가 아니라 그냥 「에이전트」다.
+  // ② 비교 자체가 재현되지 않는다. 위 구조에서는 행에 음의 여유가 **아예 안
+  //    생긴다** — 묶음이 basis 0 이라 표지가 제 폭을 먼저 받고 남는 것을 묶음이
+  //    받으므로, 압력은 전부 묶음 안에서 풀린다. 그래서 표지를 `flexShrink: 1` 로
+  //    바꿔 같은 크기에서 다시 찍어도 사진은 **한 픽셀도 안 변한다**(회전 2 에서
+  //    실제로 찍어 확인했다).
+  //
+  // 그러니 이 줄은 판정의 결과가 아니라 **못**이다. 표지가 실제로 줄어들 수 있는
+  // 띠는 표지 혼자 행보다 넓어져 묶음이 0 으로 무너지는 자리뿐이고, 거기서 잘린
+  // **상수** 표지는 어휘가 아니라 **버그로 읽힌다** — 모든 에이전트 행에 같은
+  // 자리에서 같은 말줄임이 서므로 화면이 고장 난 것으로 보이고, 그 대가로 사는
+  // 것은 이름 몇 글자뿐이라 거래가 남는 게 없다.
+  //
+  // 그 띠가 오늘 배송되지 않는다는 것도 재서 안다. 최악 조건은 **가장 좁은 창**
+  // 이다: SE(375pt)의 텍스트 예산은 327pt, 아이패드 Slide Over(320pt)에서는
+  // 272pt 이고, 「에이전트」는 배수 3.571 에서도 ~171pt 다(캡처 역산 ~145pt
+  // @3.143). 가장 좁은 창에서도 표지 뒤에 100pt 가 남아 묶음이 0 으로 안 무너진다.
+  // `flexShrink: 0` 을 **적어 두는** 이유는 그것이 Yoga 기본값이라서가 아니라, 이
+  // 문단을 읽은 사람만 이 줄을 지우게 하려는 것이다.
+  /**
+   * 이름 + 핸들의 묶음 — 형제 셋의 `rowText`/`rowTitleLine` 과 같은 것.
+   *
+   * `flex: 1` 이라 표지가 자기 폭을 다 받고 이 묶음이 나머지를 받는다. 안에서
+   * 두 조각이 폭에 비례해 함께 줄어드는 것이 위 절의 요점이다.
+   */
+  mentionIdentity: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm,
+  },
+  mentionName: {
+    flexShrink: 1,
+    fontSize: font.label,
+    lineHeight: line.head,
+    fontWeight: '600',
+    color: color.text,
+  },
   mentionNameAgent: {color: color.agent},
-  mentionHandle: {flex: 1, fontSize: font.meta, color: color.textFaint},
-  mentionKind: {fontSize: font.meta, color: color.agent},
+  mentionHandle: {
+    flexShrink: 1,
+    fontSize: font.meta,
+    lineHeight: line.head,
+    color: color.textFaint,
+  },
+  // `numberOfLines={1}` 도 이 조각에 붙는다(컴포넌트 쪽). 위 판정이 뒤집혀
+  // 표지가 줄어들게 되는 날, 한 줄로 안 묶인 표지는 접히고 접힌 행은 정수 행
+  // 산술(`mentionRowHeight`)이 세는 높이를 넘는다 — 이 배치가 세운 것이 바로 그
+  // 산술이다. 그래서 못은 지금 박아 둔다.
+  mentionKind: {
+    flexShrink: 0,
+    fontSize: font.meta,
+    lineHeight: line.head,
+    color: color.agent,
+  },
   hint: {
     paddingHorizontal: SAFE_GUTTER,
     paddingTop: space.sm,

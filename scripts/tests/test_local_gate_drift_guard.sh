@@ -169,3 +169,17 @@ grep -Fq 'AUTO_NEED_ALL=1' <<<"$clients_case_block" \
 grep -Fq "clients/iOS/*)" "$LOCAL_GATE" \
   && fail "clients/iOS auto classification came back after the tree was deleted"
 echo "[drift-guard-test] PASS unclassified clients/* widening (no simulator lane left)"
+
+# #1330: every new backup env shape must stay on the expensive real PITR gate.
+# A glob that only names the original backup.env.example would let pre-proof,
+# signed bindings, or S3 topology changes fall through to the broad infra case.
+backup_case_block="$(awk '/infra\/rust\/docker-compose\.backup\.yml\|/,/;;/' "$LOCAL_GATE")"
+for backup_surface in \
+  'infra/rust/backup*.env.example' \
+  'infra/rust/pitr-bindings.env.example'; do
+  grep -Fq "$backup_surface" <<<"$backup_case_block" \
+    || fail "$backup_surface no longer maps to the backup profile"
+done
+grep -Fq 'AUTO_NEED_BACKUP=1' <<<"$backup_case_block" \
+  || fail "#1330 backup surface no longer selects the backup profile"
+echo "[drift-guard-test] PASS all #1330 backup env shapes select the real PITR gate"

@@ -44,6 +44,7 @@ import { createServer } from "node:http";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
+import { startGuardedPreview } from "./preview-guard.mjs";
 
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const port = Number(process.env.BOOT_GATE_PORT || 5187);
@@ -121,41 +122,18 @@ async function build() {
   });
 }
 
-async function waitForPreview() {
-  for (let attempt = 0; attempt < 100; attempt += 1) {
-    try {
-      const res = await fetch(origin, { method: "GET" });
-      if (res.ok) return;
-    } catch {
-      // not up yet
-    }
-    await new Promise((done) => setTimeout(done, 150));
-  }
-  throw new Error("preview server never came up");
-}
-
 async function main() {
   await build();
 
   const hole = await startBlackHole();
-  const preview = spawn(
-    "npm",
-    [
-      "run",
-      "preview",
-      "--",
-      "--port",
-      String(port),
-      "--strictPort",
-      "--host",
-      "127.0.0.1",
-    ],
-    { cwd: webRoot, stdio: "inherit" }
-  );
+  const preview = await startGuardedPreview({
+    webRoot,
+    port,
+    portEnvVar: "BOOT_GATE_PORT",
+  });
 
   let browser;
   try {
-    await waitForPreview();
     browser = await chromium.launch();
     const context = await browser.newContext();
 
@@ -220,7 +198,7 @@ async function main() {
     );
   } finally {
     await browser?.close();
-    preview.kill("SIGTERM");
+    await preview.stop();
     hole.close();
   }
 }

@@ -35,11 +35,11 @@
 //   MY_SESSIONS_GATE_PROVE_RED_IDLE=1 npm run gate:my-sessions
 //   MY_SESSIONS_GATE_PROVE_RED_TRANSITION=1 npm run gate:my-sessions
 
-import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
+import { startGuardedPreview } from "./preview-guard.mjs";
 
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const port = Number(process.env.MY_SESSIONS_GATE_PORT || 5184);
@@ -439,19 +439,6 @@ async function installRoutes(context, state) {
   });
 }
 
-async function waitForServer() {
-  const deadline = Date.now() + 30_000;
-  while (Date.now() < deadline) {
-    try {
-      if ((await fetch(origin)).ok) return;
-    } catch {
-      // Preview is still starting.
-    }
-    await new Promise((resolveDelay) => setTimeout(resolveDelay, 200));
-  }
-  throw new Error("preview server never came up");
-}
-
 async function loginAndOpenPanel(context) {
   const page = await loginPage(context);
   await page.getByTestId("open-work-panel").click();
@@ -605,12 +592,83 @@ async function assertNarrowPanePicker(page, row) {
   );
 }
 
+// =============================================================================
+// hover 에서도 칩이 그릇을 잃지 않는가 (#1515 회전 2).
+//
+// 이 레포의 게이트들은 마우스를 **일부러** 치워 둔다(`gate-workstream.mjs:875` —
+// 커서가 남아 있으면 hover 잔상이 150ms 전이와 겹쳐 측정을 흔든다). 옳은 조치였지만
+// 값을 치렀다: 「그릇이 상호작용 상태에서 사라진다」는, 이 티켓이 다루는 바로 그
+// 결함을 **사진 찍은 레인이 하나도 없었다.** 회전 2 의 1.000 두 건은 리뷰어가 손으로
+// hover 프레임을 계측해 찾았고 그때 모든 게이트는 초록이었다.
+//
+// 그래서 이 자리에 rest/hover 짝을 세운다. 사진만 남기지 않고 **수를 잰다**: 칩의
+// 계산된 바탕이 자기가 선 카드의 바탕과 같은 값이면 실패다. 사진은 사람이 볼 때만
+// 보고, 수는 매번 본다.
+//
+// 컨텍스트가 `reducedMotion: "reduce"` 라 전이를 기다릴 필요가 없다 — hover 는 즉시
+// 최종 값에 선다.
+// =============================================================================
+async function assertIdleChipVessel(page, idleCard, { shots, outDir }) {
+  const chip = idleCard.getByTestId("work-session-idle-chip");
+  const readPair = async () => ({
+    card: await idleCard.evaluate((el) => getComputedStyle(el).backgroundColor),
+    chip: await chip.evaluate((el) => getComputedStyle(el).backgroundColor),
+  });
+
+  for (const scheme of ["light", "dark"]) {
+    await page.emulateMedia({ colorScheme: scheme });
+    await page.mouse.move(0, 0); // rest: 커서를 카드 밖으로 확실히 치운다
+    const rest = await readPair();
+    if (shots) {
+      await idleCard.screenshot({
+        path: resolve(outDir, `idle-card-rest-${scheme}.png`),
+      });
+    }
+    await idleCard.hover();
+    const hover = await readPair();
+    if (shots) {
+      await idleCard.screenshot({
+        path: resolve(outDir, `idle-card-hover-${scheme}.png`),
+      });
+    }
+    for (const [phase, pair] of [
+      ["rest", rest],
+      ["hover", hover],
+    ]) {
+      if (pair.chip === pair.card) {
+        throw new Error(
+          `idle card chip lost its vessel at ${phase} (${scheme}): ` +
+            `chip ${pair.chip} === card ${pair.card} — ` +
+            "칩 그릇이 카드의 상호작용 바탕과 같은 값이 됐다 (#1515)."
+        );
+      }
+    }
+    console.log(
+      `[idle-chip] ${scheme}: rest card ${rest.card} / chip ${rest.chip} · ` +
+        `hover card ${hover.card} / chip ${hover.chip}`
+    );
+  }
+  await page.emulateMedia({ colorScheme: null });
+  await page.mouse.move(0, 0);
+}
+
 async function assertContinuity(context, state) {
   const page = await loginPage(context);
 
   const idleCard = page.getByTestId("work-session-idle-card");
   await idleCard.waitFor();
   await idleCard.getByText("현재 세션 보기", { exact: true }).waitFor();
+
+  const shots = process.env.MY_SESSIONS_GATE_SHOTS === "1";
+  const outDir = resolve(webRoot, "artifacts/my-sessions");
+  if (shots) mkdirSync(outDir, { recursive: true });
+  await assertIdleChipVessel(page, idleCard, { shots, outDir });
+  if (shots) {
+    console.log(
+      "[shots] artifacts/my-sessions/idle-card-{rest,hover}-{light,dark}.png"
+    );
+  }
+
   if (
     (await idleCard.getAttribute("data-session-id"))?.toLowerCase() !==
     onlineSessionId
@@ -1007,13 +1065,12 @@ async function main() {
   if (!existsSync(resolve(webRoot, "dist/index.html"))) {
     throw new Error("dist/ is missing. Run npm run build first.");
   }
-  const server = spawn(
-    resolve(webRoot, "node_modules/.bin/vite"),
-    ["preview", "--port", String(port), "--strictPort", "--host", "127.0.0.1"],
-    { cwd: webRoot, stdio: "ignore" }
-  );
+  const server = await startGuardedPreview({
+    webRoot,
+    port,
+    portEnvVar: "MY_SESSIONS_GATE_PORT",
+  });
   try {
-    await waitForServer();
     const browser = await chromium.launch();
     try {
       const context = await browser.newContext({
@@ -1037,7 +1094,7 @@ async function main() {
       await browser.close();
     }
   } finally {
-    server.kill("SIGTERM");
+    await server.stop();
   }
   console.log(
     "PASS my sessions: idle card, reattach/resume copy split, transition timing, shared host wait, owner filter, terminal states, and a host picker that holds one select plus one filled button at the 262px pane measure"

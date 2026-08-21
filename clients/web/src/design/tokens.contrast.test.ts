@@ -160,7 +160,85 @@ const SURFACES = [
   "surface-hover",
   "accent-soft",
   "agent-soft",
+  "muted-soft",
+  "ok-soft",
+  "warn-soft",
+  "danger-soft",
 ] as const;
+
+/**
+ * 어느 그릇이 어느 행 바탕 위에 서는가 — 닫힌 표 (#1515 · #1516).
+ *
+ * `CONTROL_SURFACES` 와 같은 성질의 표다: 「어디에 설 수 있는가」를 사람의 기억이
+ * 아니라 값으로 지킨다. 그리고 **그릇마다 목록이 다르다** — 이 표가 전역 목록
+ * 하나였다면 실제로는 만나지 않는 쌍에 바닥을 요구하게 되고, 그 요구를 맞추려고
+ * 토큰을 조율하는 것은 화면에 없는 문제를 위해 값을 망치는 일이다.
+ *
+ *   `muted-soft`  원장의 칩(수명주기·단계 행)이 드는 톤 없는 그릇. 네 표면 전부에
+ *                 선다 — 목록·상세의 기본 바탕(`--surface`), 가리킨·펼친 행
+ *                 (`--surface-hover`), 선택된 관제 줄(`--accent-soft`), 그리고
+ *                 미리보기 패널(`--surface-raised`, 단계 행 칩이 그 위에 선다).
+ *   톤 그릇 셋    측정을 나르는 검증 칩이 드는 그릇. 이 칩이 서는 자리는 목록 행
+ *                 (`WorkPanel` 의 두 목록)과 상세의 카드뿐이다. **관제 줄에는 이
+ *                 칩이 서지 않는다** — #1514 D2 가 그 행의 셋째 줄에 칩이 들어갈
+ *                 자리가 없다고 실측하고 되돌린 결정이고, 그래서 `--accent-soft`
+ *                 (그 행의 선택 바탕)는 이 셋의 목록에 없다.
+ *
+ * 칩을 새 표면에 세우면 해당 줄을 늘려야 하고, 그러면 그 표면에서도 그릇이
+ * 살아남는지를 아래 단정이 즉시 묻는다. 늘리지 않고 세우면 #1514 H-2 가 다시 조용히
+ * 산다 — 그때도 이 파일은 전부 초록이었다. 관제 줄에 검증 칩을 세우는 후속이 온다면
+ * `--accent-soft` 를 톤 그릇 줄에 더해야 하고, 라이트 `danger-soft` 가 그 위에서
+ * 1.046 이라 **그 순간 이 파일이 빨개진다**. 그것이 이 표의 쓸모다.
+ *
+ * 그때 값을 조율하는 길이 **없지는 않다** (design-review D1). 브루트포스로 여섯 값이
+ * 존재한다 — 예: `#ffeaeb` 은 `--accent-soft` 위에서 1.056 이고 중립 그릇과의 거리도
+ * 0.0213 로 바닥을 넘는다. 다만 그 여섯이 전부 `--danger` 의 색상에서 **7.8~14.8도**
+ * 떨어져 있고, 색상 가족을 5도로 조이면 해집합이 빈다. 즉 이 조율의 값은 「빨강을
+ * 주황 쪽으로 최대 14.5도 밀기」이고, **칩이 서지도 않는 표면 하나를 위해 지불할 값이
+ * 아니다.** 지금 1.046 을 그대로 두는 것은 불가능해서가 아니라 그 거래를 거절한
+ * 것이다 — 실제로 관제 줄에 칩이 서는 날이 오면 그때 이 문단을 다시 읽고 정하면 된다.
+ */
+const CHIP_VESSEL_SURFACES = [
+  ["muted-soft", ["surface", "surface-hover", "accent-soft", "surface-raised"]],
+  ["ok-soft", ["surface", "surface-hover", "surface-raised"]],
+  ["warn-soft", ["surface", "surface-hover", "surface-raised"]],
+  ["danger-soft", ["surface", "surface-hover", "surface-raised"]],
+] as const;
+
+/**
+ * 그릇이 자기 톤에 매인다 (#1516).
+ *
+ * 대비와 거리는 「그릇이 보이는가」를 재지만 「**옳은** 그릇인가」는 재지 않는다.
+ * `--ok-soft` 를 붉게 칠해도 위 단정은 전부 초록이다 — 그러면 통과한 게이트가 붉은
+ * 그릇에 초록 잉크로 서고, 그 조합은 사람이 다시 스크린샷을 뜰 때만 잡힌다.
+ * `--danger-fill` 이 위험 색상 가족을 벗어나지 못하게 한 단정과 같은 자다.
+ */
+const TONE_VESSELS = [
+  ["ok-soft", "ok"],
+  ["warn-soft", "warn"],
+  ["danger-soft", "danger"],
+] as const;
+
+/**
+ * 나란히 선 두 그릇이 서로 다른 재료여야 하는 바닥.
+ *
+ * 한 행에 원장의 칩(중립 그릇)과 측정의 칩(톤 그릇)이 함께 선다. 둘이 한 평면
+ * (라이트 휘도 .85~.87 · 다크 .028~.029)에 서므로 명도로는 갈리지 않고, 갈리는 축은
+ * 색상뿐이다. 실측 최소는 라이트 danger 쌍의 0.0203 이다 — sRGB 에서 이 명도의
+ * 빨강이 채도를 다 사지 못해 가장 좁다.
+ */
+const CHIP_VESSEL_MIN_SIBLING_DISTANCE = 0.02;
+
+/**
+ * 그릇이 행 바탕에서 살아남았다고 말할 수 있는 바닥.
+ *
+ * 두 자를 함께 건다. 대비(1.05)만 걸면 「대비는 넘는데 눈에는 같은 회색」이
+ * 통과하고, 거리(0.02)만 걸면 명도가 거의 같은 쌍이 통과한다. 두 값 모두 이
+ * 팔레트의 실측에서 나왔다: 라이트 --surface 위가 최악이고 1.061 / 0.0207 이다.
+ * 고치기 전 --surface-hover 위의 그 칩은 1.000 / 0.0000 이었다.
+ */
+const CHIP_VESSEL_MIN_CONTRAST = 1.05;
+const CHIP_VESSEL_MIN_DISTANCE = 0.02;
 
 /** Foregrounds that render text or meaningful glyphs. */
 const FOREGROUNDS = [
@@ -464,6 +542,94 @@ describe("Dawn palette", () => {
           ).toBeGreaterThan(
             contrast(pick("ink-muted", scheme.index), pick(bg, scheme.index))
           );
+        }
+      });
+
+      // 칩의 그릇은 그 칩이 서는 **어떤 행 바탕과도** 같은 재료가 아니다 (#1515).
+      //
+      // #1514 H-2 가 실측한 결함은 값 하나가 틀린 것이 아니라 **두 축이 한 값을
+      // 나눠 가진 것**이었다: 수명주기 칩의 그릇이 `--surface-hover` 였고 그 토큰은
+      // 행이 주목받았다는 **상태**의 이름이라, 상태가 켜지는 순간 그릇이 꺼졌다
+      // (대비 1.00). 그래서 여기서 재는 것은 「그릇이 예쁜가」가 아니라 「그릇이
+      // 행의 어느 상태에서도 남아 있는가」다 — 행이 입을 수 있는 바탕을 닫힌 표로
+      // 두고 전부 돈다.
+      //
+      // 두 자를 함께 걸어야 하는 이유는 이 팔레트의 라이트가 좁기 때문이다.
+      // `--ink-muted` 의 AA 바닥이 휘도 0.769 이고 `--surface-hover` 가 0.7704 라,
+      // 칩이 설 수 있는 띠는 [0.769, 0.9911] 하나뿐이고 표면 다섯이 이미 그것을
+      // 나눠 갖는다. 그 안에서 얻을 수 있는 최선의 대비가 1.06 이므로, 대비만으로
+      // 그릇의 생존을 정의하면 바닥을 1.06 까지 내려야 하고 그 바닥은 「거의 같은
+      // 회색」도 통과시킨다. OKLab 거리가 그 자리를 메운다.
+      it("keeps a chip vessel distinct from every row background it can stand on", () => {
+        for (const [vessel, surfaces] of CHIP_VESSEL_SURFACES) {
+          for (const bg of surfaces) {
+            const ratio = contrast(pick(vessel, scheme.index), pick(bg, scheme.index));
+            const distance = deltaE(
+              pick(vessel, scheme.index),
+              pick(bg, scheme.index)
+            );
+            expect(
+              Number(ratio.toFixed(3)),
+              `${vessel} on ${bg} (${scheme.name}) contrast`
+            ).toBeGreaterThanOrEqual(CHIP_VESSEL_MIN_CONTRAST);
+            expect(
+              Number(distance.toFixed(4)),
+              `${vessel} on ${bg} (${scheme.name}) OKLab distance`
+            ).toBeGreaterThanOrEqual(CHIP_VESSEL_MIN_DISTANCE);
+          }
+        }
+      });
+
+      // ...and the interaction states keep that token to themselves.
+      //
+      // 위 단정은 「그릇이 행과 다르다」를 재지만, 다음 사람이 그릇을
+      // `--surface-hover` 로 되돌리는 것을 막지는 못한다 — 되돌리면 위 단정이
+      // 빨개지긴 하나, 그 실패 메시지는 「대비 1.00」이라 **왜** 안 되는지를 말하지
+      // 않는다. 이 단정이 그 이유를 이름으로 적어 둔다: 상호작용 상태를 그리는
+      // 토큰은 정적인 그릇이 될 수 없다. 상태는 켜졌다 꺼지고 그릇은 늘 있어야
+      // 하므로, 한 값을 나눠 가지면 상태가 켜진 동안 그릇이 반드시 사라진다.
+      it("never lets a chip vessel share a value with an interaction state", () => {
+        for (const [vessel] of CHIP_VESSEL_SURFACES) {
+          for (const state of ["surface-hover", "accent-soft"] as const) {
+            expect(
+              pick(vessel, scheme.index),
+              `${vessel} (${scheme.name}) is the value ${state} paints interaction with`
+            ).not.toBe(pick(state, scheme.index));
+          }
+        }
+      });
+
+      // 그릇이 자기 톤의 색상 가족 안에 머문다 (#1516).
+      //
+      // 위 두 단정을 만족시키는 가장 싼 방법은 「눈에 띄는 아무 색이나」다. 그러면
+      // 통과한 게이트가 붉은 그릇에 서고, 대비도 거리도 전부 초록이다. 색상 가족을
+      // 걸어 두면 그 통로가 닫힌다 — `--danger-fill` 이 「조용해지는 대신 위험 색을
+      // 그만두는」 길로 이 파일을 통과하지 못하게 한 것과 같은 자다.
+      it("keeps every tone vessel inside its own tone's hue family", () => {
+        for (const [vessel, tone] of TONE_VESSELS) {
+          expect(
+            Math.round(hueGap(pick(vessel, scheme.index), pick(tone, scheme.index))),
+            `${vessel} vs ${tone} hue gap (${scheme.name})`
+          ).toBeLessThanOrEqual(15);
+        }
+      });
+
+      // 그리고 한 행에 나란히 서는 두 그릇은 서로 다른 재료다 (#1516).
+      //
+      // 원장의 칩(중립 그릇)과 측정의 칩(톤 그릇)이 같은 행에 선다. 네 그릇이 한
+      // 평면에 있으므로 명도로는 갈리지 않고, 갈리는 축은 색상뿐이다. 그 갈림이
+      // 없으면 #1463 M2 가 지적한 「같은 모양 알약 둘」이 그릇에서 되살아난다.
+      it("keeps the toneless vessel a different material from every tone vessel", () => {
+        for (const [vessel] of TONE_VESSELS) {
+          expect(
+            Number(
+              deltaE(
+                pick(vessel, scheme.index),
+                pick("muted-soft", scheme.index)
+              ).toFixed(4)
+            ),
+            `${vessel} vs muted-soft OKLab distance (${scheme.name})`
+          ).toBeGreaterThanOrEqual(CHIP_VESSEL_MIN_SIBLING_DISTANCE);
         }
       });
 

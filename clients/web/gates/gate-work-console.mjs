@@ -7,11 +7,11 @@
 // selected session survives in `?session=`, and the narrow layout swaps list
 // for the exact existing WorkSessionDetail/ObserverTerminal.
 
-import { spawn } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
+import { startGuardedPreview } from "./preview-guard.mjs";
 
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const port = Number(process.env.WORK_CONSOLE_GATE_PORT || 5192);
@@ -536,19 +536,6 @@ async function installRoutes(context, state) {
     }
     return json(route, {});
   });
-}
-
-async function waitForServer() {
-  const deadline = Date.now() + 30_000;
-  while (Date.now() < deadline) {
-    try {
-      if ((await fetch(origin)).ok) return;
-    } catch {
-      // Preview is still starting.
-    }
-    await new Promise((resolveDelay) => setTimeout(resolveDelay, 200));
-  }
-  throw new Error("preview server never came up");
 }
 
 async function openConsole(context, { displayProducer = false } = {}) {
@@ -1536,13 +1523,12 @@ async function main() {
   if (!existsSync(resolve(webRoot, "dist/index.html"))) {
     throw new Error("dist/ is missing. Run npm run build first.");
   }
-  const server = spawn(
-    resolve(webRoot, "node_modules/.bin/vite"),
-    ["preview", "--port", String(port), "--strictPort", "--host", "127.0.0.1"],
-    { cwd: webRoot, stdio: "ignore" }
-  );
+  const server = await startGuardedPreview({
+    webRoot,
+    port,
+    portEnvVar: "WORK_CONSOLE_GATE_PORT",
+  });
   try {
-    await waitForServer();
     const browser = await chromium.launch();
     try {
       const context = await browser.newContext({
@@ -1602,7 +1588,7 @@ async function main() {
       await browser.close();
     }
   } finally {
-    server.kill("SIGTERM");
+    await server.stop();
   }
   console.log(
     "PASS work console: delayed load, projection errors and cached stale fallback, unclipped T1/T2/T3/unknown hosts, cloud icon, observer-only terminal, h1/h2/h3 route outline, linkable selection, responsive keyboard focus, live-screen and terminal connect cleanup on a non-socket exit, live screen busy/failed/watching with a decoded letterboxed frame, cached/cold offline, empty/error"

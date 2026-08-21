@@ -37,6 +37,15 @@ x-momo-janitor-labels: &momo-janitor-labels
   com.momo.janitor.match-label: com.docker.compose.project
 
 services:
+  # Engine-owned compatibility seam for #1330. The phone lane is an isolated
+  # development database, so its migrate service must select the explicit
+  # non-production posture without teaching the UXUI-owned launcher about PITR.
+  migrate:
+    environment:
+      MOMO_ENV: development
+      MOMO_PITR_EVIDENCE_REQUIRED: "0"
+      MOMO_PITR_BOOTSTRAP_EMPTY: "0"
+
   # 목 프로바이더. `infra/docker-compose.e2e.yml:100-128` 과 같은 이미지·같은 커맨드·
   # 같은 헬스체크다: 레인이 바꾸는 것은 **어느 서버가 이 목을 호출하는가**뿐이고,
   # 목 자체는 Swift 레인이 쓰던 그것 그대로다. 그래야 5개 플로우가 초록/빨강을

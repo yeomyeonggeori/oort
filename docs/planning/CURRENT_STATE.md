@@ -1,5 +1,79 @@
 # oort 기획 현재 상태 (Planning Current State)
 
+> **2026-08-20 스냅샷 44 (Fable · momo-main — ITO-0 파도 5/5 완주·grok 워커 체제 개시. PLN-20260815-01).** 컴팩트 복원 진입점.
+>
+> **★ ITO-0 수리 파도 완주(5/5·전부 track/engine 랜딩)**: T-A #1614(셀프호스트 env tauri CORS 2종 기본·CORS 거부 케이스 실측 405/헤더0·허용 compose 실측+GUI 왕복=ITO-1 이관)·T-B #1615(**docs/SELF_HOST_FIRST_DAY.md** — 부트스트랩→GUI 초대→합류→멘션 단일 런북·로그인 화면 6문구 실기동 일치)·T-C #1612(3-Day 팩=**LAUNCH_READY/BLOCKED/NEEDS_MORE_INTERNAL** 계약·Day0~3=ITO-1~4 결속)·T-D #1617(**MOMO_CHANNEL_BUILD** compile-time 가드 — 로컬 release 롤백 구멍 폐쇄·NEXT_CHANNEL §8=성재 복붙 재발행)·T-E #1616(DEPLOY 로그인 문장·RELEASE_PLAYBOOK 은퇴 배너·web-legacy README 이분). 결재=interview_20260820_074206(Q1~Q5 — 스냅샷 43 참조·전부 확정).
+>
+> **★ 신규 P1 #1613(실사고 발견)**: compose 프로젝트명(`oort`)·pgdata 볼륨(`oort-pgdata`) 고정 이름 — 두 체크아웃이 서로의 스택·DB를 무경고 하이재킹(T-A 실기동 중 #1361 스택 재생성+PG 이중 기동 실측). **완전 복구·데이터 무손실**(ws1·agent2·msg2·8088 정상 — #1361 성재 1단계 여전히 유효). ITO-1 H1 전 수리 권장. 파일군=T-A와 동일 — 후속 파도 후보 선두.
+>
+> **grok 4.6 워커 체제 실측(첫 파도)**: 완주 6/7(1은 -c 재개)·조기 종료는 동시 2기 창 집중 → **병렬 1 보수 운용**(grok-fleet 스킬 갱신 후보). 품질 상·게이트 회전 0·티켓 후보 15건 원장화. 검수=Fable 전담(리뷰 실무도 grok 리뷰어 C 가능 실증 — #1342 C0/H1/M3/L2).
+>
+> **GHCR 체인(Q2 집행 중)**: #1342 리뷰 완료(PR 코멘트)·**rebase+발견 4건 대응 워커 비행 중**(1330 워크트리·단독). 랜딩 후 #1332 ready 전환 → 법무 검토+owner 발행 승인(성재)만 남음. H2(digest 설치 실측)는 그 뒤.
+>
+> **다음 후보**: ①#1342 랜딩·#1332 ready ②후속 파도(#1613 선두+T-워커 티켓 후보 15건 선별+#1600~#1604) ③**ITO-1 H1**(성재 실사용 — SELF_HOST_FIRST_DAY 신규 런북로 완주·bench M1~M5) ④#1361 1단계(스택 복구 확인됨·가동 유지).
+>
+> **성재 손**: #1361 1단계·#1332 후 법무+owner 발행 승인·ITO-1~3 실사용자 역(+가능하면 1인 확보)·T-D §8 실발행(ITO-3 I5 직전)·Xcode Cloud 체크리스트.
+>
+> 이하 스냅샷 43:
+
+> **2026-08-20 스냅샷 43 (Fable · momo-main — 오픈소스 런칭 준비도 실측·ITO 계획 상신. PLN-20260815-01).** 컴팩트 복원 진입점.
+>
+> **★ 신규 축(성재 발제): 내부 테스트 운영(ITO)** — 오픈소스 퍼블리싱 전 셀프호스팅 유저 관점 내부 테스트(호스팅→온보딩→실사용, 웹+데스크탑 연동 중심·iOS는 시뮬 스모크만). 정본=`research/2026-08-20-oss-launch-readiness-and-internal-test-plan.md`. 핵심 판정: 레포는 이미 public — 런칭 정의(2026-08-10 지시서)="외부 셀프호스터 3+에이전트 실사용", **ITO=그 리허설**. 런칭 잔여 L1~L10(#1332 NOTICE bundle=P0·GHCR 첫 발행·첫 v0.x 태그·CI gitleaks·커뮤니티 문서·arm64·#1300·stale 스윕).
+>
+> **ITO 편성안(승인 대기)**: ITO-0 수리 파도 5건(T-A **데스크탑 릴리스 빌드 로그인 CORS 실기동**=관문·T-B 통합 온보딩 런북(웹 GUI 초대 경로 미문서 — InviteSection 실물 확인)·T-C 테스트 팩 현행화·T-D #1281·T-E stale 스윕) → ITO-1 호스팅(H1 로컬 빌드/H2 digest/H3 TLS) → ITO-2 온보딩(O1 키 둘~O4=#1361 합류) → ITO-3 웹↔데스크탑 8시나리오(동시 로그인 패리티·딥링크·자동업데이트·관전/개입·재연결) → ITO-4 판정(LAUNCH_READY/BLOCKED/NEEDS_MORE_INTERNAL). 측정=bench_onboarding M1~M5(기준선 M1 1:20·M5 NOTICE 3:58 — ANSWERED가 신규 데이터).
+>
+> **워커 체제 전환**: 향후 워커=**grok 4.6(grok-fleet)** 동시 2기 상한, 기획 검수=Fable(+design-review). 성재 결정 큐 Q1~Q5(정본 §7): ITO-0 발사·L1→L2 병렬 착수·arm64 시점·둘째 실사용자·커뮤니티 문서 톤.
+>
+> **유지 상태**: #1361 성재 1단계 대기(로컬 스택 7컨테이너 22h healthy 실측 유지)·Xcode Cloud 9/7 체크리스트. engine=`28bf1a54`+플러시 — 후속 파도 큐(#1600~#1604)는 ITO-0와 병렬 후보.
+>
+> 이하 스냅샷 42:
+
+> **2026-08-19 스냅샷 42 (Fable · momo-main — 파도 10 완주·#1361 성재 대기. PLN-20260815-01).** 컴팩트 복원 진입점.
+>
+> **파도 10 완주(8/8)**: #1511·#1584(카피/낱말+**3클라** 게이트)·#1515·#1516(칩 그릇·톤 soft 토큰)·#1558·#1559(진행/잠금 분리)·#1479·#1480(폰 AX). **engine=`28bf1a54`**. design-review 4판+재확인 3판·회전 6회로 실결함 11건 적발 — 대부분 코드가 아니라 **주장**이 틀린 경우(정책·근거·「전수를 훑었다」). 후속 발급 5건: #1600(폰 톤 발산)·#1601(멘션 순위 — 코어)·#1602(그물 사각지대)·#1603(재고 묶음)·#1604(폰 진행/잠금 방언).
+>
+> **★ #1361 Grok E2E — 성재 1단계 대기 중**: 준비 완료(#1592 `research/2026-08-19-grok-e2e-prep.md`), **로컬 스택 7컨테이너 가동 중**(회수 금지 — 성재가 이어받는다). 성재가 할 일=①localhost:8088 로그인→에이전트→호스티드 에이전트 연결→**Grok Bot 선택**(새로 만들지 말 것)→「연결 값 다시 발급」 ②Grok 앱에 endpoint `http://localhost:8088/v1/mcp/agent-port`+Bearer 연결 값, Routine 이름 정확히 `Oort Inbox: momo Demo Workspace / Grok Bot` ③오케스트레이터에 알림. 연결 값은 1회 표시·15분 TTL이나 **실패해도 소모되지 않는다**(유효 handshake일 때만 소비 — 실측). 승인 화면에서 **scope 전부** 켜야 함(`agent:port:connect`만이면 tools/list가 빈 목록).
+>
+> **모델 운용**: Fable 5 한도 도달(2026-08-19) — 이 세션의 워커·검수 전원 **Opus 5**. 성재 지시로 검수 레인은 한시적 Opus 유지.
+>
+> **다음 후보**: ①#1361 본편 ②후속 파도(#1600~#1604) ③차기 engine→main 승격 창(파도 9·10+집행분) ④dsh C/D.
+>
+> **성재 손**: #1361 1단계 · Xcode Cloud 9/7 재활성화 체크리스트(켜기 전 Start Conditions 경로 제한: `clients/mobile/`·`packages/momo-core/`).
+>
+> 이하 스냅샷 41:
+
+> **2026-08-19 스냅샷 41 (Fable · momo-main — ★집행 창 완주: TURN 은퇴·프로덕션 8d0f7d9a·LIVE-5 라벨 전해소. PLN-20260815-01).** 컴팩트 복원 진입점.
+>
+> **★ 집행 창(성재 SSH 위임)**: ①런북 §6 완주 — use-auth-secret 켜기·병행 **불성립 실측**(coturn은 켜지면 정적 무시·reload 불충분=restart)·정지창 은퇴(정적 401/단명 12/12) ②프로덕션 배포 68fc52ff→**8d0f7d9a**(LIVE-5 전 축·마이그 077 IDEMPOTENCY_OK·TURN 3키·검증 5종 그린) ③compose 배선 #1586 ④**#1588 microVM 내부 왕복 실측**(relay↔relay·ephemeral만·READY 경쟁 수리 v5) — **engine=`ef134609`·LIVE-5 정직 라벨 0 잔여**. 원장: #1545·#1587 close 코멘트+DEVIATION_LOG 집행 행.
+>
+> **성재 손(재정리)**: ①**#1361 Grok E2E — 성재 합의: 현 작업 종결 후 별도 세션**(의존 9건 전부 CLOSED·준비=오케스트레이터, 성재=Grok 앱 조작 15~20분) ②Xcode Cloud 9/7 재활성화 체크리스트(켜기 전 Start Conditions 경로 제한: clients/mobile/·packages/momo-core/ — 한도 소진 뿌리 차단) ③배포 후 관찰(첫 실사용 세션에서 ice_servers 단명 자격 확인은 #1588이 동형 구성으로 기증명).
+>
+> **다음 후보**: ①#1361 세션 ②자율 큐 파도(#1584 어휘 정렬·#1511·#1515/#1516·#1558·#1559·#1479/#1480) ③차기 engine→main 승격 창(파도 9+집행분) ④dsh C/D 검토.
+>
+> 이하 스냅샷 40:
+
+> **2026-08-19 스냅샷 40 (Fable · momo-main — 파도 9 완주·승격 후 첫 파도 폐곡선. PLN-20260815-01).** 컴팩트 복원 진입점.
+>
+> **파도 9 완주(4/4)**: #1571(preview-guard 26레인 — grok PASS·실 점유자 red proof)·#1572(base 위생 2)·#1573(「멤버 추가하기」 개명 — 「초대」=워크스페이스 낱말 예약, design-review PASS)·#1574(remint (b) 집행 — TTL 천장 반증 서술 전수 정정). **engine=`fe3f2960`**. 판정 전건 accepted. 후속: #1584(어휘 정렬 마이크로 3).
+>
+> **다음 후보(성재 재개 시)**: ①자율 큐 파도(#1584·#1511 낱말+게이트·#1515/#1516 디자인 토큰·#1558 SaveButton·#1559 busy 잔여·#1479/#1480 폰 AX) ②dsh C/D 착수 검토 ③차기 승격 창(engine이 main보다 파도 9만큼 앞 — 게이트 그린·랜딩 단위 위임 범위).
+>
+> **성재 손(비차단)**: 스냅샷 39 목록 그대로 — SSH류(#1545·momo-server 배치)는 오케스트레이터 권한 거부로 성재 직접, C-1·#1361·배포 검증.
+>
+> 이하 스냅샷 39:
+
+> **2026-08-19 스냅샷 39 (Fable · momo-main — ★engine→main 승격 완료·파도 9 비행. PLN-20260815-01).** 컴팩트 복원 진입점.
+>
+> **★ 승격 완료**: main=`e322ccf3`(107커밋 — LIVE-5 전 축·파도 5~8·CI 구조 해소). sync 짝 #1577/#1578로 topology 복원(main=조상·alignment PASS). 세 브랜치 전부 PR-only 보호 실측 확인(직접 push 거부) — 이후 모든 track 합류도 PR 경유.
+>
+> **파도 9 비행 중(4기)**: #1571(게이트 포트-스쿼트 가드 일반화+검출 창)·#1572(base 위생 마이크로 2 — openapi YAML 1.1·bench 주석)·#1573(「멤버 초대하기」 이중 의미 — 방향은 워커 택일 상신)·#1574(remint (b) 반영 — 서술 정정만). 패킷=`handoffs/2026-08-19-wave9-packet.md`. 완료 시 표준 폐곡선(#1573=design-review·#1571=Fable+grok).
+>
+> **성재 손(비차단·2026-08-19 위임 확장 후 재정리)**: SSH 집행류는 오케스트레이터 권한 거부로 성재 직접 — ①#1545(momo-turn use-auth-secret, 런북 §6) ②**microVM 내부 왕복용 momo-server 배치**(momo-cube-host 도달 가능 인스턴스 — 5c 잔여 라벨 해소 조건) ③C-1(Xcode 콘솔) ④#1361(pairing) ⑤배포 검증 1왕복.
+>
+> **자율 큐(파도 9 이후)**: #1511(낱말+게이트)·#1515/#1516(디자인 토큰)·#1558(SaveButton)·#1559(busy 잔여)·#1479/#1480(폰 AX)·폰 EmptyState 액션 자리(#1568 이탈 4). dsh C/D 착수 검토(LIVE-5 종결로 조건 성립).
+>
+> 이하 스냅샷 38:
+
 > **2026-08-18 스냅샷 38 (Fable · momo-main — 파도 8 완주·★LIVE-5 전 축 종결. PLN-20260815-01).** 컴팩트 복원 진입점.
 >
 > **★ LIVE-5 종결**: 5a+5b에 이어 **5c 실기동 E2E 완주(#1565/PR #1570)** — 실 입력 왕복(datachannel→producer→XTEST→실 xterm, 1006프레임)·비관측 mutation red proof 양쪽·**remint 천장 반증**(coturn은 ALLOCATE 시만 만료 검사 — 택일 (b) 채택, 반영=#1574)·validate v2 실호출 개통. producer 실결함 3건(bundle-policy·30s 침묵 오판·오귀책 로그) 실기동 적발·수리 + freeze 회전 1(C1 재검증 굶주림 — 루프 선두 이동·--jam red proof). **engine=`d987ff58`**. 라벨 승격: `runtimeVerified.keystrokeReachesAnApplication` 등 — 잔여 1=`unverified.inputDeliveryInMicroVM`(권한 경계).

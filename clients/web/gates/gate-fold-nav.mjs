@@ -39,11 +39,11 @@
 // 게이트가 다시 저지르는 것이 된다. 접기 임계를 되돌리면(예산을 무한대로) 아래
 // 1·2번이 붉다.
 
-import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
+import { startGuardedPreview } from "./preview-guard.mjs";
 
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -413,19 +413,6 @@ async function installRoutes(context) {
 
     return json(route, {});
   });
-}
-
-async function waitForServer() {
-  const deadline = Date.now() + 30_000;
-  while (Date.now() < deadline) {
-    try {
-      if ((await fetch(origin)).ok) return;
-    } catch {
-      /* preview 서버가 아직 뜨는 중 */
-    }
-    await wait(200);
-  }
-  throw new Error("fold gate preview server never came up");
 }
 
 function rowLocator(page, messageId) {
@@ -904,13 +891,12 @@ async function main() {
   if (!existsSync(resolve(webRoot, "dist/index.html"))) {
     throw new Error("dist/ is missing. Run npm run build first.");
   }
-  const server = spawn(
-    resolve(webRoot, "node_modules/.bin/vite"),
-    ["preview", "--port", String(port), "--strictPort", "--host", "127.0.0.1"],
-    { cwd: webRoot, stdio: "ignore" }
-  );
+  const server = await startGuardedPreview({
+    webRoot,
+    port,
+    portEnvVar: "FOLD_GATE_PORT",
+  });
   try {
-    await waitForServer();
     const browser = await chromium.launch();
     try {
       await exercisePointer(browser);
@@ -923,7 +909,7 @@ async function main() {
       await browser.close();
     }
   } finally {
-    server.kill("SIGTERM");
+    await server.stop();
   }
   console.log("GATE PASS: 긴 답변은 예산만큼만 펴고 남은 줄을 숫자로 말했고, 짧은");
   console.log("           답변은 그대로였고, 펼치면 원문이 전부 왔고, 위로 올라간");

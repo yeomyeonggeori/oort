@@ -2,9 +2,28 @@
 
 > **경로 이력 (MOMO-596 / ADR-0133):** 이 클라이언트는 `clients/web`에 있었고
 > 2026-07-25에 `clients/web-legacy`로 이동했다. 정본 UI 경로 `clients/web`은
-> ADR-0133 React/Tauri 스택이 가져갔다. **이 v0는 폐기되지 않았다** — prod
-> Dockerfile·Caddy 서빙·e2e `web-init`·`local_gate --profile web`이 전부 여전히
-> 이 디렉터리를 빌드·서빙하며, parity 게이트 전까지 알파의 실제 웹 클라이언트다.
+> ADR-0133 React/Tauri 스택이 가져갔다.
+>
+> **이 v0는 삭제되지 않았다. 「알파의 실제 웹 클라이언트」는 더 이상 이
+> 디렉터리가 아니다.** 라이브 Rust 이미지(`server-rust/Dockerfile:147,157,173,231`)가
+> `clients/web` dist를 `/opt/momo/web/`에 넣고, 라이브 배포는 그 이미지의
+> `web-assets` 커맨드로 서빙한다(`infra/rust/caddy.override.yml:85-87`,
+> `docs/runbooks/ncp-rust-deploy.md` 「웹(정적 SPA) 배포」 / #1228).
+>
+> **이 디렉터리가 아직 소비되는 자리(실측, 2026-08-20):**
+> - Swift prod 이미지: `infra/prod/Dockerfile.web:8-17`,
+>   `infra/prod/docker/momo.Dockerfile:44-69`
+> - e2e `web-init`: `infra/docker-compose.e2e.yml:390-400`
+>   (`dockerfile: infra/prod/Dockerfile.web`)
+> - `scripts/local_gate.sh --profile web` (`add_web_commands`, 약 1034–1074행) —
+>   install/lint/test/typecheck/build 대상이 이 트리
+> - 로그인 스모크: `scripts/verify_web_login_smoke.sh:89-97`
+> - 서빙 스모크: `scripts/verify_web_serving.sh:1-5`
+> - 생성 타입 게이트: `scripts/verify_web_generated_types.sh:37`
+>
+> ADR-0133 데스크톱 parity 게이트(기본 다운로드 전환)는 2026-07-25 통과했다
+> (`docs/adr/0133-ui-stack-tauri-react-migration.md` 머리말). 웹 SPA 서빙 전환은
+> 그 게이트 문서가 아니라 #1228(Rust 이미지에 `clients/web` 동봉)로 일어났다.
 
 ADR-0119 W-2 (MOMO-391) 스캐폴드: 로그인 → 채널 목록 → 타임라인 읽기(seq
 페이지네이션 + `?after=` backfill) → centrifuge-js 실시간 구독.
@@ -17,9 +36,10 @@ W-6(#605)는 read-only Work 세션 목록과 root thread 관전, observer 터미
 
 - 스택: Vite + React + TypeScript + centrifuge-js (전부 permissive 라이선스,
   ADR-0119 D2-A). 상태관리 라이브러리 없음(v0 규모에서 불필요).
-- 서빙: 같은 오리진 배포(D1-A). Caddy `{$APP_DOMAIN}` site가 이 앱의 `dist/`를
-  정적 서빙하고 같은 오리진의 `/v1/*`를 api로 프록시한다(`infra/prod/Caddyfile`).
-  CORS 없음, 서버 코드 무변경.
+- 서빙 계약(D1-A): 같은 오리진. **라이브** Caddy(`infra/rust/Caddyfile`)는
+  `clients/web` dist를 서빙한다(위 인용, #1228). 이 v0의 `dist/`는 Swift prod
+  `infra/prod/Caddyfile` + e2e `web-init` 경로가 여전히 복사한다.
+  CORS 없음(웹 same-origin), 서버 코드 무변경.
 - REST 계약: `docs/api/openapi.yaml`이 정본. `src/api/schema.d.ts`는
   `npm run gen:api`(openapi-typescript)로 생성해 **커밋**한다 — web 게이트의
   `scripts/verify_web_generated_types.sh`가 스펙과의 동기화를 diff로 강제하고,

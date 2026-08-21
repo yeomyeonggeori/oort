@@ -1,53 +1,44 @@
-momo
+oort (repository name: momo)
 Copyright (c) 2026 dawnkim
 
-This product includes software developed by third parties under permissive
-open-source licenses (Apache-2.0, MIT, PostgreSQL License). Attribution and
-per-dependency license details are listed in legal/THIRD_PARTY_NOTICES.md and
-surfaced in the app's "Open Source Licenses" screen.
+This product is licensed under the Apache License 2.0. The full license text
+is in LICENSE.
 
 Apache License 2.0 components require preservation of this NOTICE per §4(d).
 See https://www.apache.org/licenses/LICENSE-2.0 for the full license text.
 
-Major bundled/linked components:
-- swift-log (Apache-2.0) — https://github.com/apple/swift-log
-- hummingbird (Apache-2.0) — https://github.com/hummingbird-project/hummingbird
-- async-http-client (Apache-2.0) — https://github.com/swift-server/async-http-client
-- swift-service-lifecycle (Apache-2.0) — https://github.com/swift-server/swift-service-lifecycle
-- postgres-nio (MIT) — https://github.com/vapor/postgres-nio
-- jwt-kit (MIT) — https://github.com/vapor/jwt-kit
-- SwiftNIO and related (Apache-2.0) — https://github.com/apple/swift-nio
-- SwiftCentrifuge / centrifuge-swift (MIT) — https://github.com/centrifugal/centrifuge-swift
-- SwiftTerm (MIT) — https://github.com/migueldeicaza/SwiftTerm
-- xterm.js / @xterm/xterm (MIT) — https://github.com/xtermjs/xterm.js
-- LiveKit JavaScript Client SDK / livekit-client (Apache-2.0) — https://github.com/livekit/client-sdk-js
-- SwiftProtobuf (Apache-2.0) — https://github.com/apple/swift-protobuf
-- pgvector (PostgreSQL License) — https://github.com/pgvector/pgvector
-- Node.js (MIT) — https://github.com/nodejs/node
-- eve (Apache-2.0) — https://github.com/vercel/eve
-- Workflow Postgres World (Apache-2.0) — https://github.com/vercel/workflow
-- LiveKit Egress (Apache-2.0) — https://github.com/livekit/egress
-- faster-whisper (MIT) — https://github.com/SYSTRAN/faster-whisper
+Third-party attribution for the GHCR images this repository publishes
+(app: server-rust/Dockerfile; database: infra/rust/postgres-pgbackrest/Dockerfile):
 
-Coverage of this notice (measured 2026-08-10; see
-docs/planning/research/2026-08-10-buzz-audit-A.md for the full inventory):
+- legal/generated/GHCR_THIRD_PARTY_NOTICES.txt
+  exact name/version/SPDX plus LICENSE/COPYING (and upstream NOTICE when
+  present) from server-rust/Cargo.lock and clients/web/package-lock.json
+- legal/THIRD_PARTY_NOTICES.md
+  index that separates the current generated bundle from historical frozen
+  snapshots (retired SwiftPM, web-legacy handwritten npm, work-host sidecars)
+- Image copies of LICENSE, this NOTICE, the index, and the generated bundle:
+  /usr/share/licenses/momo-rust/ and /opt/momo/web/legal/ (app)
+  /usr/share/licenses/oort-postgres/ (database)
+- Debian OS-layer copyright files are checked at image build
+  (/usr/share/doc/*/copyright) and inventoried beside those copies.
+  GPL/LGPL/AGPL rows in that inventory are copyleft, not permissive.
 
-- What is covered. The component list above, together with the generated
-  SwiftPM section of legal/THIRD_PARTY_NOTICES.md, covers the SwiftPM
-  dependency graph (37 packages) and a hand-written partial npm list. That
-  section is now a FROZEN SNAPSHOT: its generator
-  (`scripts/check_spm_licenses.sh`) retired on 2026-08-10 with the Swift client
-  trees (#1201), so the section no longer regenerates or drift-checks itself.
-- What is NOT covered. The Rust server workspace (644 unique cargo crates) and
-  the current web/mobile npm graphs (1,258 unique packages) have no entries
-  here yet. Closing that gap is open work, tracked with the dependency-license
-  gate effort; do not read this file as a complete attribution record.
-- Non-permissive dependencies. The 2026-08-10 audit found no GPL/AGPL/LGPL-only
-  and no unidentified-license dependency in any graph. Report any such
-  dependency immediately per AGENTS.md §9.
+This NOTICE does not:
 
-An earlier note here asked for regeneration via `scripts/gen-notices.sh`. That
-script has never existed in this repository's history, so the instruction could
-not be followed as written; it is replaced by the accurate description above
-rather than reimplemented, because regenerating from Package.resolved would only
-re-cover the Swift tree that is being retired.
+- claim that redistributed software is permissive-only
+- claim that an in-app "Open Source Licenses" screen exists
+  (that UI is tracked as #35 and is not implemented here)
+- declare legal sufficiency of the inventory (automation produces facts
+  that can be regenerated; legal review is out of scope for this file)
+
+Not covered by the GHCR generated bundle: the Tauri desktop Cargo graph,
+the React Native npm graph, CocoaPods/native notices, and the retired
+SwiftPM snapshot (kept only as history in legal/THIRD_PARTY_NOTICES.md).
+
+Named runtime companions operators actually run next to these images:
+
+- PostgreSQL 18 (PostgreSQL License)
+- pgvector (PostgreSQL License)
+- pgBackRest (MIT)
+- libssh2 (BSD-3-Clause/ISC)
+- Centrifugo v6 (companion service; not baked into the app image)

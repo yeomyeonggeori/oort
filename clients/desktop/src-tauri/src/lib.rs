@@ -31,10 +31,12 @@ use tauri_plugin_deep_link::DeepLinkExt;
 
 /// The version this build reports, e.g. `0.1.0-next.1`.
 ///
-/// Comes from `tauri.conf.json > version`, which is also what the updater
-/// compares against the manifest — so what a tester reads on screen and what
-/// decides "is there a new build" can never disagree. A bug report that names a
-/// version is worth several that say "the latest one".
+/// Comes from `tauri.conf.json > version` unless the publish script overrode it
+/// with `--config`. The updater compares that same string against the manifest,
+/// so what a tester reads on screen and what decides "is there a new build"
+/// cannot disagree — except a local release still shows the committed baseline
+/// and does not check the channel (#1281). A bug report that names a version is
+/// worth several that say "the latest one".
 #[tauri::command]
 fn app_version(app: tauri::AppHandle) -> String {
     app.package_info().version.to_string()

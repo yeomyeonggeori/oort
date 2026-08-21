@@ -93,11 +93,17 @@ else
   BUILT_IMAGE="$IMAGE"
 fi
 
-# The image must actually carry the new SQL, or every later phase would be
-# testing the compiled-in repo-relative fallback instead of the shipped file.
+# The image must carry the fixed SQL and immutable runtime marker without any
+# legacy path override env. Otherwise a dotenv value could replace pre-gate SQL.
 docker run --rm --entrypoint sh "$IMAGE" -c \
-  'test -s "$MOMO_BOOTSTRAP_OWNER_SQL"' ||
-  fail "image does not ship MOMO_BOOTSTRAP_OWNER_SQL"
+  'test "$MOMO_IN_CONTAINER" = 1 &&
+   test -s /opt/momo/sql/bootstrap_owner_if_absent.sql &&
+   test -s /opt/momo/sql/set_initial_owner.sql &&
+   test -s /opt/momo/sql/bootstrap_runtime_roles.sql &&
+   test -s /opt/momo/sql/bootstrap_roles.sql &&
+   test -d /opt/momo/migrations &&
+   test -z "${MOMO_MIGRATIONS_DIR+x}${MOMO_BOOTSTRAP_ROLES_SQL+x}${MOMO_RUNTIME_ROLES_SQL+x}${MOMO_SET_OWNER_SQL+x}${MOMO_BOOTSTRAP_OWNER_SQL+x}"' ||
+  fail "image SQL/migration payload is missing or runtime path overrides remain enabled"
 
 # ---------------------------------------------------------------------------
 # env — generated, never committed, never echoed
@@ -115,6 +121,9 @@ write_env() {
   cat >"$ENV_FILE" <<EOF
 MOMO_RUST_IMAGE=$IMAGE
 MOMO_ENV=staging
+MOMO_MIGRATE_ENV=development
+MOMO_PITR_EVIDENCE_REQUIRED=0
+MOMO_PITR_BOOTSTRAP_EMPTY=0
 LOG_LEVEL=info
 POSTGRES_DB=momo
 POSTGRES_USER=momo

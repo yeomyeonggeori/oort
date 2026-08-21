@@ -1,0 +1,30 @@
+# Optional S3-compatible pgBackRest repository seam (#1330).
+#
+# This overlay carries only non-secret topology. Credentials remain exact
+# owner-only host files and are consumed by the image wrapper; neither value is
+# interpolated into Compose environment/config output. NCP Object Storage is a
+# manual deployment step and is intentionally not provisioned here.
+# The base overlay's POSIX repository volume remains mounted for broad Compose
+# compatibility but is unused: this config has no POSIX path and the wrapper
+# fixes the S3 prefix to `/oort-pgbackrest-s3`.
+
+services:
+  postgres:
+    environment:
+      MOMO_PGBACKREST_REPOSITORY: s3
+      MOMO_PGBACKREST_S3_BUCKET: ${MOMO_PGBACKREST_S3_BUCKET:?set MOMO_PGBACKREST_S3_BUCKET}
+      MOMO_PGBACKREST_S3_ENDPOINT: ${MOMO_PGBACKREST_S3_ENDPOINT:?set MOMO_PGBACKREST_S3_ENDPOINT}
+      MOMO_PGBACKREST_S3_REGION: ${MOMO_PGBACKREST_S3_REGION:?set MOMO_PGBACKREST_S3_REGION}
+      MOMO_PGBACKREST_S3_URI_STYLE: path
+      MOMO_PGBACKREST_S3_VERIFY_TLS: "y"
+    volumes:
+      - ./pgbackrest.s3.conf:/etc/pgbackrest/pgbackrest.conf:ro
+      - ${MOMO_PGBACKREST_CIPHER_FILE:?set absolute MOMO_PGBACKREST_CIPHER_FILE}:/run/secrets/pgbackrest_repo1_cipher_pass:ro
+      - type: bind
+        source: ${MOMO_PGBACKREST_S3_KEY_FILE:?set absolute MOMO_PGBACKREST_S3_KEY_FILE}
+        target: /run/secrets/pgbackrest_repo1_s3_key
+        read_only: true
+      - type: bind
+        source: ${MOMO_PGBACKREST_S3_KEY_SECRET_FILE:?set absolute MOMO_PGBACKREST_S3_KEY_SECRET_FILE}
+        target: /run/secrets/pgbackrest_repo1_s3_key_secret
+        read_only: true

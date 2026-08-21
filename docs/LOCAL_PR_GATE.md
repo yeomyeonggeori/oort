@@ -135,7 +135,7 @@ Profiles:
 | `swift` | 잔존 Swift 트리(`server`·`relay/*`·`workers/*`·`services/*`) 변경 | `docs` profile + `make swift-build` + `make swift-test`. **mac 디자인 pre-flight 래칫과 SwiftPM 라이선스 게이트는 W-S1(#1215/#1201)에서 은퇴** — 후속은 각각 `design_preflight_web.sh`(web/병합 트리)와 `--profile license`(cargo+npm) |
 | `diagnostics` | diagnostics/observability bundle changes | `docs` profile + `scripts/collect_diagnostics.sh --smoke` redaction check |
 | `staging-smoke` | staging/prod/internal-hosting/NCP Rust config or runbook changes that do not have real VPS secrets | `docs` profile + `scripts/verify_staging_smoke.sh` + `scripts/verify_internal_hosting_smoke.sh` for prod compose config, internal single-node smoke overlay, Caddyfile structure, Centrifugo Redis config, API health route wiring, relay/worker enablement, secret-template guard, public/staging preflight evidence markdown/json, and SOPS/pgBackRest checklist. The static block also fixes the Rust/NCP edge 403, shared-secret source, rotation-runbook, and redacted verifier contracts |
-| `backup` | backup/PITR runbook or internal hosting changes that must prove restore rehearsal evidence before review | `docs` profile + `scripts/verify_backup_restore_rehearsal.sh` for temporary PostgreSQL 18 source DB marker writes, `pg_dump -Fc`, separate restore DB `pg_restore`, marker checksum equality, and markdown/json evidence generation |
+| `backup` | backup/PITR image, archive, restore, signed-evidence or migration-gate changes | `docs` profile + legacy logical smoke + focused RED matrix + `scripts/verify_pgbackrest_pitr_e2e.sh`: pinned PostgreSQL 18+pgBackRest image, marker A, encrypted full backup, target UTC, marker B and forced WAL archive, distinct-volume time-target restore, A=1/B=0, signed JSON/Markdown/bindings/current-cipher artifact, candidate migrate verification, and labeled-resource cleanup 0 |
 | `host-runtime` | internal single-node host-runtime smoke before internal test hosting | `docs` profile + `scripts/verify_internal_host_runtime.sh` + `scripts/verify_backup_restore_rehearsal.sh`; proves local image prod+internal-smoke boot/health/agent-runtime-status redaction/migrate/message/relay/mock-agent and repo-local restore evidence |
 | `local-alpha` | AWS 전 1인 local Docker alpha RC gate | `docs` profile + host-runtime boot/health/migrate/message/relay/mock Kim Intern + backup restore rehearsal + redacted diagnostics bundle in one `local-alpha-<run-id>/` packet |
 | `internal-alpha` | internal alpha evidence packet before reviewer handoff | `docs` profile + host-runtime image boot/health/migrate/message/relay/mock Kim Intern evidence + backup restore rehearsal + redacted diagnostics bundle |
@@ -147,7 +147,7 @@ Profiles:
 | `m3-dbc` | M3 D/B/C exit evidence or MOMO-020/021/022 close-readiness review | `swift` profile + Docker/migration bootstrap + `verify_agent_worker.sh` D/B evidence + `verify_approval_decision.sh` C evidence |
 | `web-serving` | `infra/prod/Dockerfile.web`, prod Caddy/compose, LinkShort, or APP_DOMAIN serving verifier changes | `docs` static checks + `scripts/verify_web_serving.sh`; isolated e2e `web` profile on ports 28070-28074, real Vite dist via web-init named volume, `/join` fallback and `/i/*` LinkShort proxy included in the eight-assertion HTTP gate. Public DNS/ACME/TLS and the full invite round-trip are excluded. |
 | `web` | `clients/web-legacy` (ADR-0119 v0), `docs/api/openapi.yaml`, or web serving/smoke script changes | worktree-clean + `npm ci` + `npm run lint` + `npm run test` (Vitest) + `npm run typecheck` + `scripts/verify_web_generated_types.sh` (openapi-typescript output vs committed `src/api/schema.d.ts`; `generator-failed` and `types-stale` are distinct named failures) + `npm run build` + permissive-only license gate (full transitive inventory markdown) + `scripts/web_serving_smoke.sh` + `scripts/verify_web_login_smoke.sh` (e2e compose Chromium login→timeline→realtime) + `scripts/verify_openapi_contract.sh` runtime drift gate |
-| `license` | dependency changes in any cargo/npm tree — `Cargo.lock`, `package-lock.json`, `deny.toml`, or the gate scripts themselves | `docs` profile + `scripts/tests/test_license_gate.sh` (red proofs) + `scripts/check_cargo_licenses.sh` (`cargo deny check licenses` over `server-rust` and `clients/desktop/src-tauri` with the root `deny.toml`) + `scripts/check_npm_licenses.mjs` over the canonical npm trees (workspace root incl. `packages/momo-core`, `clients/web`, `clients/mobile`; inventory markdown to the gate output dir). Requires `cargo-deny`; fails closed with install guidance when absent. Licenses only — no RUSTSEC advisories, no `npm audit` |
+| `license` | dependency changes in any cargo/npm tree — `Cargo.lock`, `package-lock.json`, `deny.toml`, GHCR notice bundle (`legal/generated/`, `NOTICE`, `legal/THIRD_PARTY_NOTICES.md`), or the gate scripts themselves | `docs` profile + `scripts/tests/test_license_gate.sh` (red proofs) + `scripts/check_cargo_licenses.sh` (`cargo deny check licenses` over `server-rust` and `clients/desktop/src-tauri` with the root `deny.toml`) + `scripts/check_npm_licenses.mjs` over the canonical npm trees (workspace root incl. `packages/momo-core`, `clients/web`, `clients/mobile`; inventory markdown to the gate output dir) + `#1332` `scripts/tests/test_ghcr_notice_bundle.sh` (byte-identical + version/license-delete/Docker-COPY/GPL-as-permissive RED) + `scripts/check_ghcr_notice_bundle.sh` (lockfile-hash stale bundle + Dockerfile COPY of LICENSE/NOTICE/index/generated bundle). Policy (#1225 allow/deny) and attribution (#1332 generated notices) are separate gates. Requires `cargo-deny`; fails closed with install guidance when absent. Licenses only — no RUSTSEC advisories, no `npm audit`. Not a legal-sufficiency declaration |
 | `secrets` | fast standalone "did I just commit a credential" lane, or `.gitleaksignore` / secret-gate script changes | `scripts/tests/test_secrets_gate.sh` (red proofs) + `scripts/check_secrets.sh` — gitleaks over every ref with the `.gitleaksignore` triage baseline applied. ~3s, no static checks. The same two steps already run inside **every** other profile through the static block, so this profile is a convenience lane, not extra coverage. Requires `gitleaks`; fails closed with install guidance when absent, with no override env |
 | `all` | merge-critical/runtime-wide changes | broad static/Swift/runtime DB/relay/agent/macOS gate in one run, with shared bootstrap deduped except migration idempotency; run `runtime-live` separately for WebSocket live evidence because it starts host API/relay processes and a compose-network proxy |
 
@@ -615,11 +615,14 @@ staged/unstaged diffs. For exploratory pre-commit runs only, use
 `LOCAL_GATE_ALLOW_DIRTY=1`; do not paste that as final merge evidence.
 
 Backup/PITR PRs must use `backup` or a profile that includes it. The local
-profile proves only the repo-local dump/restore contract and writes separate
-restore evidence markdown/json; production pgBackRest stanza/check/full backup,
-WAL archive push, SOPS decrypt, object-store repo, and time-target PITR remain
-`runtime-unverified(public host)` until a real restore host/volume rehearsal is
-attached.
+profile proves a real encrypted POSIX pgBackRest/WAL/time-target restore in
+disposable Docker resources and writes signed JSON/Markdown plus caller-bound
+migrate bindings and an owner-scoped current-cipher copy whose HMAC fingerprint
+is signed. It also proves the candidate migrate image rejects forged, tampered,
+expired, foreign, or post-proof cipher-rotation evidence before SQL. Production
+NCP attach, host secret injection, first published database-image attestation,
+S3-compatible repository/schedule, and public-host restore remain
+`runtime-unverified(public host)` until attended evidence is attached.
 
 For internal alpha incident handoff, collect a redacted diagnostics bundle:
 
@@ -821,7 +824,7 @@ Use the profile that matches the changed surface.
 | `swift` | Swift package/model/view changes | `scripts/local_gate.sh --profile swift` (includes design pre-flight ratchet + snapshot tests) |
 | `diagnostics` | diagnostics/observability bundle changes | `scripts/local_gate.sh --profile diagnostics` |
 | `staging-smoke` | MOMO-005/006/007/229/406 and #1329 deploy config, Caddy/Centrifugo, install/upgrade matrix, public host preflight, secret/backup/rotation runbooks | `scripts/local_gate.sh --profile staging-smoke` |
-| `backup` | backup/PITR restore rehearsal evidence | `scripts/local_gate.sh --profile backup` |
+| `backup` | encrypted pgBackRest/WAL/time-target restore + signed migration evidence | `scripts/local_gate.sh --profile backup` |
 | `host-runtime` | internal single-node runtime smoke, Kim Intern provider status/redaction, plus restore rehearsal evidence | `scripts/local_gate.sh --profile host-runtime` |
 | `local-alpha` | AWS-free local Docker alpha RC packet | `scripts/local_gate.sh --profile local-alpha` |
 | `internal-alpha` | internal alpha combined evidence packet | `LOCAL_GATE_LAUNCH_UI=1 scripts/local_gate.sh --profile internal-alpha` |

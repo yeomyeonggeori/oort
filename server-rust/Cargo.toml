@@ -58,6 +58,7 @@ hex = "0.4"
 # Both webhook families are HMAC-SHA256 over a domain-separated string, which is
 # exactly what lets Postgres store a random *reference* instead of a secret.
 hmac = "0.12"
+libc = "0.2"
 # LIVE-5a: the coturn REST-API credential (`use-auth-secret`) is HMAC-**SHA1**,
 # and that is a constraint rather than a preference. The temporary password a
 # browser presents is checked through STUN MESSAGE-INTEGRITY, which WebRTC fixes

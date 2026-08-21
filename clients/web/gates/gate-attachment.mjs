@@ -37,13 +37,13 @@
 // 값의 정본은 소스를 읽는다(`ATTACH_COPY`). 여기 베껴 적으면 두 벌이 조용히
 // 갈라지고, 이 레포는 U4-4R W-2에서 그 값을 이미 치렀다.
 
-import { spawn } from "node:child_process";
 import { deflateSync } from "node:zlib";
 import { createServer } from "node:http";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
+import { startGuardedPreview } from "./preview-guard.mjs";
 
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -623,19 +623,6 @@ async function installRoutes(context, archive, sink) {
 
     return json(route, {});
   });
-}
-
-async function waitForServer() {
-  const deadline = Date.now() + 30_000;
-  while (Date.now() < deadline) {
-    try {
-      if ((await fetch(origin)).ok) return;
-    } catch {
-      /* preview 서버가 아직 뜨는 중 */
-    }
-    await wait(200);
-  }
-  throw new Error("attachment gate preview server never came up");
 }
 
 async function login(page_) {
@@ -1614,13 +1601,12 @@ async function main() {
   if (!existsSync(resolve(webRoot, "dist/index.html"))) {
     throw new Error("dist/ is missing. Run npm run build first.");
   }
-  const server = spawn(
-    resolve(webRoot, "node_modules/.bin/vite"),
-    ["preview", "--port", String(port), "--strictPort", "--host", "127.0.0.1"],
-    { cwd: webRoot, stdio: "ignore" }
-  );
+  const server = await startGuardedPreview({
+    webRoot,
+    port,
+    portEnvVar: "ATTACH_GATE_PORT",
+  });
   try {
-    await waitForServer();
     const browser = await chromium.launch();
     try {
       await exerciseComposer(browser);
@@ -1634,7 +1620,7 @@ async function main() {
       await browser.close();
     }
   } finally {
-    server.kill("SIGTERM");
+    await server.stop();
   }
   console.log("GATE PASS: 네 칸이 화면에서 다르고, 바이트가 다 간 순간을 완료라고");
   console.log("           부르지 않았으며, 올라가는 중과 실패한 첨부는 전송을 막고");

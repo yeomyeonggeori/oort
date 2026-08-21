@@ -60,10 +60,10 @@ if [ "$have_docker" -eq 1 ]; then
   [ "$GUARD_STATUS" -eq 0 ] || fail "guard is red on the current tree:
 $GUARD_OUT"
   case "$GUARD_OUT" in
-    *"8 rendering(s)"*) ;;
+    *"11 rendering(s)"*) ;;
     *) fail "guard did not report the expected rendering count: $GUARD_OUT" ;;
   esac
-  pass "green on the current tree, all 8 renderings statically checked and rendered by docker compose"
+  pass "green on the current tree, all 11 renderings statically checked and rendered by docker compose"
 else
   echo "[compose-env-test] skip: docker compose is unavailable on this host"
 fi

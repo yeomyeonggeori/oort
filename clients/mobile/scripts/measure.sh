@@ -149,7 +149,14 @@ capture_surface LIGHT-COMPOSER-PLACEHOLDER composer-placeholder-light.png
 # 내는 크기는 아래 접근성 블록의 같은 줄이다.
 capture_surface COMPOSER-GROWTH composer-growth-dark.png
 
+# #1479 절 예산. 이 크기(a11y-large, 배수 2.143)가 규칙이 **값을 내는** 띠다:
+# 상자가 3.2줄이라 `release-2026-08` 의 문장(4줄)은 안 들고 머리 절(3줄)은 든다.
+# 위 XXL 블록만 있으면 두 절 다 안 드는 띠라 「고쳐진 것이 무엇인지」가 안 찍힌다
+# (그 띠도 아래에서 함께 찍고, 셋의 산수가 `Composer.tsx` 의 「절 예산」 절에 있다).
 ORIGINAL_CONTENT_SIZE="$(xcrun simctl ui booted content_size)"
+xcrun simctl ui booted content_size accessibility-large
+capture_surface COMPOSER-PLACEHOLDER composer-placeholder-a11y-large.png
+capture_surface LIGHT-COMPOSER-PLACEHOLDER composer-placeholder-a11y-large-light.png
 xcrun simctl ui booted content_size accessibility-extra-extra-large
 capture_surface WORK-CONSOLE work-console-accessibility-text.png
 capture_surface WORK-DETAIL work-detail-accessibility-text.png
@@ -166,6 +173,39 @@ capture_surface COMPOSER-GROWTH composer-growth-accessibility-text.png
 capture_surface LIGHT-COMPOSER-GROWTH composer-growth-accessibility-text-light.png
 xcrun simctl ui booted content_size "$ORIGINAL_CONTENT_SIZE"
 ORIGINAL_CONTENT_SIZE=""
+
+# #1480 멘션 시트는 이 스크립트가 못 찍는다 — 시트를 여는 것은 `@` 한 글자이고
+# 그 글자는 사람이 친다(초안으로 심는 길은 `measure/surfaces.tsx` 의
+# `mention-sheet` 절이 실측으로 기각한다). 캡처는 Maestro 레인이 진다:
+#
+#   xcrun simctl ui booted content_size <large|accessibility-large|accessibility-extra-extra-large>
+#   xcrun simctl launch booted app.momo.ios --args \
+#     -momoMeasure MENTION-SHEET -RCT_jsLocation 127.0.0.1:$METRO_PORT
+#   maestro test maestro/90-mention-sheet-capture.yaml
+#   # 사진: ~/.maestro/tests/<타임스탬프>/90-mention-sheet-capture/takeScreenshot/
+#
+# 라이트는 `LIGHT-MENTION-SHEET`(스킴 접두사 — `measure/root.ts`). 오늘 있는 판:
+#
+#   dock1480-mention-sheet-{dark,light}.png        기본 크기 — 4행 그대로(무회귀).
+#                                                  라이트는 회전 2 에서 붙었다: 기본
+#                                                  크기가 다크 한 장뿐이면 이 티켓이
+#                                                  **안 바꾼** 화면을 한 스킴에서만
+#                                                  드는 것이 된다.
+#   dock1480-mention-sheet-ax-{dark,light}.png     a11y-large(2.143) — 3행
+#   dock1480-mention-sheet-axxl-{dark,light}.png   AX-XXL(3.143) — 행이 44 를 넘어
+#                                                  47.1pt 가 되는 첫 띠(회전 1 M3)
+#   dock1480-mention-sheet-{ax,axxl}-before-*.png  같은 두 크기의 옛 판
+#
+# 접근성 두 크기의 **첫 행**이 회전 2 의 답을 든다 — 세 조각이 각자 앞을 남긴다:
+#
+#   2.143   「프로덕트…」  「@product-…」  「에이전트」
+#   3.143   「프로…」      「@pro…」       「에이전트」
+#
+# 회전 1 의 같은 사진에서는 핸들이 2.143 에서 맨 「@」 한 글자였고 3.143 에서는
+# 아예 없었다(`flex: 1` = basis 0 이라 압력 전부터 자기 폭이 없는 조각이었다).
+#
+# 여기 안 넣는 이유: 캡처 하나를 위해 계측 레인 전체가 Maestro 를 요구하게 되고,
+# 이 스크립트는 오늘 그 의존이 없다.
 
 echo
 echo "---- Origin stub ----"

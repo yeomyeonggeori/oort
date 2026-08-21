@@ -49,11 +49,11 @@
 // (src/design/tokens.contrast.test.ts)이 나눠 갖는다.
 // =============================================================================
 
-import { spawn } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
+import { startGuardedPreview } from "./preview-guard.mjs";
 
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const port = Number(process.env.THEME_GATE_PORT || 5192);
@@ -168,32 +168,18 @@ async function openThemePanel(page) {
   await page.waitForSelector('[data-testid="theme-choice"]');
 }
 
-async function waitForServer() {
-  const end = Date.now() + 30_000;
-  while (Date.now() < end) {
-    try {
-      if ((await fetch(origin)).ok) return;
-    } catch {
-      /* still starting */
-    }
-    await new Promise((done) => setTimeout(done, 200));
-  }
-  throw new Error("preview server never came up");
-}
-
 async function main() {
   if (!existsSync(resolve(webRoot, "dist/index.html"))) {
     throw new Error("dist/ is missing. Run npm run build first.");
   }
   mkdirSync(outDir, { recursive: true });
 
-  const server = spawn(
-    resolve(webRoot, "node_modules/.bin/vite"),
-    ["preview", "--port", String(port), "--strictPort", "--host", "127.0.0.1"],
-    { cwd: webRoot, stdio: "ignore" }
-  );
+  const server = await startGuardedPreview({
+    webRoot,
+    port,
+    portEnvVar: "THEME_GATE_PORT",
+  });
   try {
-    await waitForServer();
     const browser = await chromium.launch();
     try {
       // OS는 다크다. 이 게이트의 모든 「라이트」 단언은 그래서 OS를 이긴다는 뜻이
@@ -422,11 +408,12 @@ async function main() {
       await browser.close();
     }
   } finally {
-    server.kill("SIGTERM");
+    await server.stop();
   }
 }
 
 main().catch((error) => {
-  console.error(`GATE FAIL: ${error.message}`);
+  const message = String(error.message ?? error);
+  console.error(message.startsWith("GATE FAIL:") ? message : `GATE FAIL: ${message}`);
   process.exit(1);
 });
