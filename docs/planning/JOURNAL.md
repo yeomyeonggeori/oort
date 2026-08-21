@@ -5,6 +5,19 @@
 
 ---
 
+## 2026-08-21 (Fable) · ★GHCR 첫 발행 완결 — 법무 승인·public 전환·attestation 실측·arm64 경계 실증
+- **발행 폐곡선**: 성재 dispatch+release 승인 → run 32461307786 success → digest 2본(app `0fbddd36…`·postgres `c6806369…`) attestation 동반. **법무 검토 승인**(성재 발화 — 브리핑 3판단: OS 레이어 copyleft 관행 수준·성실 이행 범위·상표 인지) 원장 기록(#1332 코멘트).
+- **public 전환**: kwakseongjae=org **member**라 패키지 관리 불가 발견 → org owner(lifeissea)가 집행(org 패키지 정책 해제 선행). 익명 pull 토큰·digest 일치·`gh attestation verify` 2본 전부 실측 PASS. **Owner 승격 요청 전달됨**(재발 방지).
+- **H2 실측**: Apple Silicon digest pull → `no matching manifest for linux/arm64` — SELF_HOST.md 문서 경계 실증(에뮬레이션 비가정 준수). amd64 부팅 실측=H2 잔여(amd64 호스트 또는 arm64 릴리스 후 — Q3 결정 근거 보강). 테스트 잔재 0 회수.
+- **다음**: ①L3 파도(첫 v0.x 태그+릴리스에 digest 기재·SELF_HOST digest 문면 현행화·runtime-unverified 해소) ②ITO-1 H1(성재 — 조건 충족 상태) ③CI gitleaks·커뮤니티 문서 등 L 잔여.
+
+## 2026-08-21 (Fable) · GHCR 발행 선행 완결 — #1330·#1332·#1613 랜딩·★승격 45a154d2·성재 발행 결재 대기
+- **GHCR 체인 코드 완결**: #1330(PITR 게이트 — rebase 151커밋+리뷰 4건 대응·H1 실측 반증(2.59 stanza-create 멱등)·PR #1342) → **#1332(NOTICE bundle — cargo 292+npm 411·이미지 2본 동봉·mutation 4종 RED·PR #1620)** → #1613(교차-체크아웃 스택/볼륨 충돌 fail-closed·실 docker 증명·PR #1622). 검수 실적발 1: #1332의 per-Dockerfile ignore가 legal/scripts 배제→이미지 COPY 실패(실빌드 2회 재현) — 수리+ignore↔COPY 일반화 단언.
+- **★승격**: main=`45a154d2`(PR #1623, 34커밋 — ITO-0 5건+GHCR 선행 3건+파도 9·10 잔여) + sync 짝 #1624/#1625 → main=양 트랙 조상 실측. 발행 워크플로 main ref 조건 충족.
+- **성재 결정·조치**: #1361 연기(비차단 확인·로컬 스택 down — 볼륨 보존·재개 1커맨드) · NCP 최적화 집행(cube-host·turn 정지 — 월 ≈₩43만 절감·도구 ~/.local/bin/oort-ncp.py·ITO-3 I4 전 재기동 계획·프로덕션 유지).
+- **다음=성재 2클릭**: ①법무 검토 1회(legal/generated bundle·NOTICE·인덱스·Debian 인벤토리) ②publish-images workflow_dispatch+release 승인. 이후 Fable: 발행 실측(digest 검증·SELF_HOST digest 경로=ITO-1 H2)·ITO-1 H1은 #1613 랜딩으로 조건 충족.
+- grok 측정 누계: 구현 완주 9(발사 12회 중 조기종료 4회 전부 회복 — 동시 2기 창 집중→병렬 1 확정)·검수 회전 2(전부 실결함)·게이트 회전 0.
+
 ## 2026-08-20 (Fable) · ITO-0 수리 파도 5/5 완주 — grok 4.6 워커 첫 실전·#1613 실사고 발견·#1342 리뷰
 - **인터뷰 종결**(`interview_20260820_074206` — 성재 결재 5건): Q1 ITO-0 발사·Q2 GHCR 체인(#1330→#1332) 착수·Q3 arm64=런칭 전 후미·Q4 실사용자 A시도/B폴백·Q5 커뮤니티 문서=런칭 전(위임).
 - **ITO-0 랜딩 5/5**: T-A #1614(tauri CORS 기본값+거부 케이스 실측 405·허용은 ITO-1 이관)·T-B #1615(SELF_HOST_FIRST_DAY 런북 — GUI 초대 최초 문서화·로그인 화면 6문구 브라우저 실측 일치·owner 로그인 200)·T-C #1612(LAUNCH_READY 계약·스모크 웹+데스크탑 이관)·T-D #1617(MOMO_CHANNEL_BUILD 가드로 로컬 release 롤백 구멍 폐쇄·NEXT_CHANNEL §8 성재 복붙·policy 감사 마커 절차)·T-E #1616(stale 3파일 이분 정정).

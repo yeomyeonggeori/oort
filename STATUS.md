@@ -1,5 +1,19 @@
 # oort 진행 현황
 
+## 커뮤니티 루트 문서 (#1630, 2026-08-21)
+
+- Contributor Covenant v2.1 `CODE_OF_CONDUCT.md`(연락처=`SECURITY.md` GitHub private advisory — 새 메일 없음). `.github/CODEOWNERS` `* @kwakseongjae`. `CHANGELOG.md` Keep a Changelog 시드 — [v0.1.0](https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.0) 항목은 notes 초안 요약(발명 0). `CONTRIBUTING.md` 영문 정본 + `CONTRIBUTING.ko.md` 한국어 원문. README Being wired up 「Public CI, releases…」 한 줄을 Works today로 옮김(G1 티켓 후보 4 흡수). GOVERNANCE.md 비신설.
+
+## PR CI gitleaks 레인 (#1629, 2026-08-21)
+
+- pr-ci에 상시 gitleaks 잡: PR 범위(`base.sha..head.sha`)만 스캔. 전 히스토리는 로컬 `scripts/check_secrets.sh` 몫. `.gitleaksignore` 재사용. 바이너리 8.30.1 + linux_x64 sha256 pin, 미설치/체크섬/탐지 실패는 RED. `pull_request` 유지(토큰·org license secret 불요). 가드레일 테스트가 경로 필터·전 히스토리·unpinned·`pull_request_target` 변이를 RED로 고정.
+
+## 첫 v0.1.0 릴리스 준비 문서 (#1628, 2026-08-21)
+
+- `docs/RELEASING.md` 신설: 승격→발행(dispatch·owner 승인)→digest 수거→태그(빌드 커밋 `main=45a154d2`)→Release(digest 표)→SELF_HOST 문면. 데스크탑 next 채널은 `NEXT_CHANNEL.md` §8과 경계. 태그/Release 원격 쓰기는 오케스트레이터.
+- `docs/SELF_HOST.md` §2-B: placeholder를 첫 발행 app digest 예시로 교체, 「최신 digest는 GitHub Releases」. 구 `:88` `runtime-unverified`를 실측 완료로 갱신(원장 #1332 코멘트 2026-08-21 · attestation PASS · Apple Silicon native pull 불가). amd64 단일 유지.
+- notes 초안: `docs/planning/research/2026-08-21-v0-1-0-release-notes.md`(README 정직성 톤·digest 표·`gh attestation verify`·amd64 고지). 발명 0(패킷 §G1만 인용).
+
 ## 셀프호스트 compose 교차-체크아웃 충돌 fail-closed (#1613, 2026-08-21)
 
 - **택일 (a) 프로젝트 스코프 볼륨.** 고정 전역 `name: oort-pgdata` + 무조건 선점은 채택하지 않는다 — 프로젝트명을 분리해도 같은 datadir 이중 기동이 그 갈래다. compose 기본은 기존대로 `${DB_VOLUME_NAME:-${COMPOSE_PROJECT_NAME:-momo-rust}-pgdata}` 이고, 셀프호스트 생성기는 기본 `COMPOSE_PROJECT_NAME=oort` → `DB_VOLUME_NAME=oort-pgdata` 를 유지해 기존 볼륨을 무언 대체하지 않는다. Swift `momo-pgdata` 비채택 주석은 보존.
