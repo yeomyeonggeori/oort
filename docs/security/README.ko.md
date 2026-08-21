@@ -59,7 +59,7 @@ Drive plugin migration은 credential과 shared-drive identifier를 DB에 저장�
 
 ### 배포·소스 공개
 
-oort는 Apache-2.0이고 기여에는 DCO를 사용하며 별도 CLA를 요구하지 않는다. [근거: README 159–164행](../../README.md#L159-L164), [CONTRIBUTING 3–13행](../../CONTRIBUTING.md#L3-L13) Tauri **next** 채널은 minisign 업데이트 서명과 Developer ID 서명·공증·staple 절차를 문서화한다. [근거: `NEXT_CHANNEL` 31–60행](../NEXT_CHANNEL.md#L31-L60)
+oort는 Apache-2.0이고 기여에는 DCO를 사용하며 별도 CLA를 요구하지 않는다. [근거: README 187–194행](../../README.md#L187-L194), [CONTRIBUTING DCO 11–22행](../../CONTRIBUTING.md#L11-L22) Tauri **next** 채널은 minisign 업데이트 서명과 Developer ID 서명·공증·staple 절차를 문서화한다. [근거: `NEXT_CHANNEL` 31–60행](../NEXT_CHANNEL.md#L31-L60)
 
 ## 현재 한계와 도입 시 확인할 점
 
@@ -72,4 +72,4 @@ oort는 Apache-2.0이고 기여에는 DCO를 사용하며 별도 CLA를 요구�
 
 ## 읽는 방법
 
-이 자료는 위협 모델이나 인증서가 아니라 현재 구현과 승인된 결정의 인덱스다. 운영 환경의 network egress, provider 선택, archive backend, secret 관리와 업데이트 채널은 조직의 정책과 함께 별도로 검토해야 한다. 취약점은 공개 이슈가 아니라 영문 [Security Policy](../../SECURITY.md#report-a-vulnerability)의 private advisory 절차로 신고한다. [근거: SECURITY 17–37행](../../SECURITY.md#L17-L37)
+이 자료는 위협 모델이나 인증서가 아니라 현재 구현과 승인된 결정의 인덱스다. 운영 환경의 network egress, provider 선택, archive backend, secret 관리와 업데이트 채널은 조직의 정책과 함께 별도로 검토해야 한다. 취약점은 공개 이슈가 아니라 영문 [Security Policy](../../SECURITY.md#report-a-vulnerability)의 private advisory 절차로 신고한다. [근거: SECURITY 22–44행](../../SECURITY.md#L22-L44)

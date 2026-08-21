@@ -60,13 +60,13 @@ Enforced by the database and the gates, not by convention:
 - A measured self-host path: clone → env script → compose up → logged in. Three shell commands, zero branches — see below
 - A design system (「Oort cloud」) whose contrast and spacing rules are enforced by tests and gates, in light and dark
 - Security headers (CSP · HSTS · nosniff · referrer policy) on the reference deployment
+- Public PR CI (path-filtered lanes plus always-on gitleaks), a first [v0.1.0](https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.0) GitHub Release of digest-pinned `linux/amd64` images, and a contribution surface ([CONTRIBUTING.md](CONTRIBUTING.md) · [code of conduct](CODE_OF_CONDUCT.md) · [changelog](CHANGELOG.md))
 
 🚧 **Being wired up**
 
 - Webhook & event-subscription **delivery** — the settings surfaces shipped; the Rust delivery worker is in flight
 - Agent run history reads — writes already land; the history views are waiting on three routes
 - Retiring the original Swift codebase — the product now runs on Rust + TypeScript + React Native
-- Public CI, releases, and a contribution pipeline
 
 💭 **Strong opinions, pending code**
 
@@ -187,8 +187,9 @@ and core before anything lands.
 ## License and contributions
 
 oort is licensed under [Apache-2.0](LICENSE) ([NOTICE](NOTICE)). Contributions
-use the [Developer Certificate of Origin](CONTRIBUTING.md); no CLA. Dependency
-attributions live in
+use the [Developer Certificate of Origin](CONTRIBUTING.md); no CLA. We follow
+the [Contributor Covenant](CODE_OF_CONDUCT.md). Notable changes are in
+[CHANGELOG.md](CHANGELOG.md). Dependency attributions live in
 [`legal/THIRD_PARTY_NOTICES.md`](legal/THIRD_PARTY_NOTICES.md). Report security
 issues privately per [`SECURITY.md`](SECURITY.md).
 
