@@ -64,28 +64,41 @@ scripts/self_host_env.sh --local-build
 
 ### B. 공개 digest pull
 
+최신 불변 digest는 **GitHub Releases**가 정본이다
+([Releases](https://github.com/yeomyeonggeori/oort/releases)). `latest`나
+`sha-<commit>` 태그는 받지 않는다. **반드시 `@sha256:`로 pin된
+`ghcr.io/yeomyeonggeori/oort`만** 받으며, 형식이 틀리면 env를 만들기 전에
+실패한다. 릴리스에 digest 표가 없으면 A를 쓴다.
+
+아래는 첫 공개 발행의 **앱** digest 예시(빌드 커밋 `main=45a154d2`, 원장
+#1332 코멘트 2026-08-21). 이 값이 항상 최신은 아니다 — Releases를 본다.
+
 ```sh
-IMAGE_REF='ghcr.io/yeomyeonggeori/oort@sha256:REPLACE_WITH_64_LOWERCASE_HEX'
+IMAGE_REF='ghcr.io/yeomyeonggeori/oort@sha256:0fbddd36947b4dfd18d6fc91e9229fc5e6f52ebb896b9bf632a2ec127620b8eb'
 scripts/self_host_env.sh --published-image "$IMAGE_REF"
 ```
 
-`latest`나 `sha-<commit>` 태그는 받지 않는다. **반드시 `@sha256:`로 pin된
-`ghcr.io/yeomyeonggeori/oort`만** 받으며, 형식이 틀리면 env를 만들기 전에
-실패한다. #1266은 발행 **경로**를 준비하는 goal이고 실제 첫 digest 발행·
-공개는 owner/M7 게이트 후속이다. 릴리스에 정확한 digest가 없으면 A를 쓴다.
+같은 발행의 두 digest (원장 #1332 코멘트 2026-08-21). `--published-image`에는
+앱 행만 넣는다. postgres 행은 Release 표와 운영/PITR 경로용이며, 이 문서
+compose의 postgres 서비스가 소비하는 값이 아니다.
 
-공개 발행 형상은 현재 **`linux/amd64` 단일 플랫폼**이다. `linux/arm64` manifest가
-없으므로 ARM 서버와 Apple Silicon의 native pull은 지원하지 않는다. 지원하지 않는
-플랫폼에서 에뮬레이션 성공을 가정하지 말고, 공개 digest 모드 대신 호스트에서 검증한
-로컬 빌드 경로를 사용하거나 후속 arm64 릴리스를 기다린다.
+| 대상 | 불변 이미지 |
+|---|---|
+| 앱 | `ghcr.io/yeomyeonggeori/oort@sha256:0fbddd36947b4dfd18d6fc91e9229fc5e6f52ebb896b9bf632a2ec127620b8eb` |
+| PostgreSQL 18 + pgBackRest | `ghcr.io/yeomyeonggeori/oort-postgres@sha256:c68063695bde97bb2911d5eca4ebce6a94858dc9af9f60ad294657ef7cea0757` |
+
+공개 발행 형상은 **`linux/amd64` 단일 플랫폼**이다. `linux/arm64` manifest가
+없다. Apple Silicon에서 native pull은 불가했다(실측 2026-08-21). ARM 서버와
+Apple Silicon은 에뮬레이션 성공을 가정하지 말고, 공개 digest 모드 대신
+호스트에서 검증한 로컬 빌드 경로(A)를 쓰거나 후속 arm64 릴리스를 기다린다.
 
 발행 workflow는 `main` ref의 수동 실행만 허용하고, GitHub `release` Environment의
 owner 승인 뒤 pushed digest에 SLSA v1 provenance를 OCI referrer로 붙인다. 2026-08-12
 attended 설정/readback에서 required reviewer는 `kwakseongjae`(user id `87296259`),
 `prevent_self_review=false`, deployment branch policy는 custom `main` branch 하나임을
 확인했다. `sha-*`
-태그는 커밋을 찾기 위한 이동 가능한 표식일 뿐 불변 신원이 아니다. 실제 첫 발행 뒤에는
-다음처럼 **digest 자체**를 검증한다(`gh`가 설치된 운영자용 선택 단계):
+태그는 커밋을 찾기 위한 이동 가능한 표식일 뿐 불변 신원이 아니다. digest 자체는
+다음처럼 검증한다(`gh`가 설치된 운영자용 선택 단계):
 
 ```sh
 gh attestation verify "oci://$IMAGE_REF" \
@@ -93,8 +106,11 @@ gh attestation verify "oci://$IMAGE_REF" \
   --predicate-type https://slsa.dev/provenance/v1
 ```
 
-첫 workflow dispatch와 위 명령의 공개 GHCR 왕복은 아직 `runtime-unverified`이며
-이 문서가 릴리스 권한을 주지는 않는다.
+첫 workflow dispatch와 공개 GHCR 왕복(발행 · 익명 pull · attestation)은
+실측 완료다. 좌표: 원장 #1332 코멘트 2026-08-21, 빌드 커밋 `main=45a154d2`,
+attestation 검증 PASS, Apple Silicon native pull 불가(amd64 단일, 실측
+2026-08-21). (구 `SELF_HOST.md:88` `runtime-unverified` 문면.) 절차 정본은
+[`RELEASING.md`](RELEASING.md). 이 문서가 릴리스 권한을 주지는 않는다.
 
 `infra/rust/local.secrets.env` 를 만든다 — **채워 넣을 자리가 하나도 없는** 파일이다.
 시크릿 아홉 개를 `openssl` 로 만들고, 서로 같아야 하는 값들(런타임 롤 비밀번호와

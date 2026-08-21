@@ -18,7 +18,7 @@
 | DDL | **`server/Migrations/*.sql`**(정본, Rust 이미지가 싣는다) + `schema_v0.sql` | — |
 | 제품 표면 | **`clients/web`**(React/Vite) · `clients/desktop`(Tauri 2) · `clients/mobile`(RN) | `clients/macOS` · `clients/iOS` |
 | 공유 코어 | **`packages/momo-core`**(TS, `@momo/core`) | `clients/Core`(Swift) |
-| 기동/배포 | [`docs/SELF_HOST.md`](SELF_HOST.md)(**처음 한 번** — clone→로그인) · [`infra/rust/README.md`](../infra/rust/README.md)(그다음 전부: 이미지+compose) · [`docs/runbooks/ncp-rust-deploy.md`](runbooks/ncp-rust-deploy.md)(라이브 정본) | [`docs/RUN.md`](RUN.md)(Swift 기준 — 상단 배너 참조) |
+| 기동/배포 | [`docs/SELF_HOST.md`](SELF_HOST.md)(**처음 한 번** — clone→로그인) · [`docs/RELEASING.md`](RELEASING.md)(서버/이미지 `v0.x` 발행) · [`infra/rust/README.md`](../infra/rust/README.md)(그다음 전부: 이미지+compose) · [`docs/runbooks/ncp-rust-deploy.md`](runbooks/ncp-rust-deploy.md)(라이브 정본) | [`docs/RUN.md`](RUN.md)(Swift 기준 — 상단 배너 참조) |
 
 - **예외 — 은퇴 아님:** `relay/PushRelay`(라이브 푸시 경로가 지금도 빌드·배포) · `clients/web-legacy`(알파가 실제로 서빙하는 산출물, ADR-0133 parity 게이트 전까지).
 - 현행 스택 빌드·검증 명령의 정본은 [`AGENTS.md`](../AGENTS.md) §3(그리고 `Makefile`의 `build`/`test`).
@@ -48,9 +48,15 @@
 | [`AGENTS.md`](../AGENTS.md) | Codex 자동 머지 운영 계약 | **운영 정본(최우선)** |
 | [`CODEX.md`](../CODEX.md) | Codex 자율실행 풀 가이드 | AGENTS.md와 동일 핵심 |
 | [`README.md`](../README.md) | 제품 1줄 + 불변식 + 정직성 표(✅🚧💭) + 아키텍처 | 진입점 |
+| [`CONTRIBUTING.md`](../CONTRIBUTING.md) | 기여 정본(영문, DCO·라이선스 게이트). 한국어 원문 [`CONTRIBUTING.ko.md`](../CONTRIBUTING.ko.md) | 커뮤니티 |
+| [`CODE_OF_CONDUCT.md`](../CODE_OF_CONDUCT.md) | Contributor Covenant v2.1. 신고 경로=`SECURITY.md` | 커뮤니티 |
+| [`SECURITY.md`](../SECURITY.md) | 취약점 신고(GitHub private advisory). 한국어 판단 자료 [`docs/security/README.ko.md`](security/README.ko.md) | 보안 |
+| [`CHANGELOG.md`](../CHANGELOG.md) | Keep a Changelog. 첫 항목 [v0.1.0](https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.0) | 릴리스 |
+| [`.github/CODEOWNERS`](../.github/CODEOWNERS) | 리뷰 라우팅 최소형 `* @kwakseongjae` | 커뮤니티 |
 | [`NOTICE`](../NOTICE) | Apache 2.0 귀속 — 앱 화면 표기 대상 | 법무 |
 | [`Makefile`](../Makefile) | `build`/`test` = **현행 스택**(cargo + npm), `up`/`down`/`migrate` = dev compose, `swift-build`/`swift-test` = 은퇴 중 트리 | 빌드 명령 |
-| [`docs/SELF_HOST.md`](SELF_HOST.md) | **셀프호스트 첫 기동 정본**(#1229): clone → `scripts/self_host_env.sh` → `up -d --build --wait` → 브라우저 로그인. 분기 0 | 운영 명령 |
+| [`docs/SELF_HOST.md`](SELF_HOST.md) | **셀프호스트 첫 기동 정본**(#1229): clone → `scripts/self_host_env.sh` → `up -d --build --wait` → 브라우저 로그인. 분기 0. digest pull 예시는 GitHub Releases | 운영 명령 |
+| [`docs/RELEASING.md`](RELEASING.md) | **서버/이미지 릴리스 정본**(#1628): 승격→발행→digest 수거→태그→Release→SELF_HOST 문면. 데스크탑 next 채널과 경계 | 운영 명령 |
 | [`docs/SELF_HOST_FIRST_DAY.md`](SELF_HOST_FIRST_DAY.md) | **셀프호스트 오퍼레이터의 첫 하루**(#1608): 부트스트랩(키 둘) → GUI 초대 → 웹/`oort://join` 합류 → AI 연결 → 첫 멘션 | 운영 명령 |
 | [`infra/rust/README.md`](../infra/rust/README.md) | **현행 스택 심화**: Rust 이미지 + prod형 compose(로컬·푸시·폰·TLS 오버레이 전부) | 운영 명령 |
 | [`docs/runbooks/ncp-rust-deploy.md`](runbooks/ncp-rust-deploy.md) | **라이브 배포 정본**(app.oor7.com Rust 스택 — 이미지 태그 교체 + Caddy/헤더 배포) | 운영 명령 |
@@ -72,6 +78,7 @@
 | 문서 | 역할 | 마일스톤 |
 |---|---|---|
 | [`docs/HANDOFF_2026-07.md`](HANDOFF_2026-07.md) | **2026-07 재설계 실행 인수인계**(Opus 세션→Codex): main 머지분(316/323/301/300/302/318), 317 브랜치 대기, Codex 진입점(303 MomoDS→308/309), 게이트 배비싯 함정(watchdog/포트가드/verifier 누수) | M1/M3 |
+| [`docs/RELEASING.md`](RELEASING.md) | **현행** 서버/이미지 `v0.x` 릴리스(승격→GHCR digest→태그→Release). 데스크탑은 `NEXT_CHANNEL.md` | #1628 |
 | [`docs/RELEASE_PLAYBOOK.md`](RELEASE_PLAYBOOK.md) | 데스크탑 공증 + iOS App Store + CI/CD **실행 마스터 체크리스트** + 비용/기간 표 + gotcha 집약 | M1~M8 |
 | [`docs/DEPLOY.md`](DEPLOY.md) | 백엔드 멀티팀 운영 배포(staging→prod: Caddy 자동TLS/Redis/SOPS+age/pgBackRest PITR/모니터링) | M1, M2 |
 | [`docs/AWS_INTERNAL_ALPHA.md`](AWS_INTERNAL_ALPHA.md) | AWS 1주일 internal alpha stack v0: EC2/Lightsail topology, 비용, 보안그룹, DNS/TLS, backup/restore, image-based deploy/rollback, preflight | M1/M7 준비 |
