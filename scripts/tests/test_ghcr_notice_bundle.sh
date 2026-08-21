@@ -261,6 +261,44 @@ printf '%s\n' "$DOCKER_OUT"
 pass "removing Docker COPY of the notice bundle turns check RED"
 
 # -----------------------------------------------------------------------------
+# Mutation — per-Dockerfile dockerignore excludes COPY sources → RED
+# -----------------------------------------------------------------------------
+FIX_IGN="$SANDBOX/mut-ignore"
+cp -a "$FIX_A" "$FIX_IGN"
+cat >"$FIX_IGN/server-rust/Dockerfile.dockerignore" <<'EOF'
+legal
+scripts
+EOF
+set +e
+IGN_OUT="$(python3 "$GENERATOR" check --repo-root "$FIX_IGN" --cargo-metadata "$FIX_IGN/cargo-metadata.json" --web-root "$FIX_IGN/clients/web" --stale-only 2>&1)"
+IGN_STATUS=$?
+set -e
+[ "$IGN_STATUS" -ne 0 ] || fail "dockerignore that excludes legal/ still passed COPY-path check"
+case "$IGN_OUT" in
+  *"excluded by"*|*"legal/"*) ;;
+  *) fail "dockerignore RED output did not name the excluded COPY path: $IGN_OUT" ;;
+esac
+echo "[ghcr-notice-test] mutation dockerignore RED log:"
+printf '%s\n' "$IGN_OUT"
+pass "per-Dockerfile dockerignore excluding legal/ turns check RED"
+
+FIX_IGN_OK="$SANDBOX/mut-ignore-ok"
+cp -a "$FIX_A" "$FIX_IGN_OK"
+cat >"$FIX_IGN_OK/server-rust/Dockerfile.dockerignore" <<'EOF'
+legal/privacy-policy.md
+legal/agent-disclosure.md
+scripts/**
+!scripts/check_debian_copyrights.sh
+EOF
+python3 "$GENERATOR" check \
+  --repo-root "$FIX_IGN_OK" \
+  --cargo-metadata "$FIX_IGN_OK/cargo-metadata.json" \
+  --web-root "$FIX_IGN_OK/clients/web" \
+  --stale-only >/dev/null \
+  || fail "dockerignore with notice-file un-ignores stayed red"
+pass "dockerignore un-ignore of notice COPY paths is green"
+
+# -----------------------------------------------------------------------------
 # Mutation 4 — GPL classified as permissive → RED
 # -----------------------------------------------------------------------------
 GPL_CLASS="$(python3 "$GENERATOR" classify-debian "GPL-2+")"

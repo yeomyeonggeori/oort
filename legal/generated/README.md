@@ -16,7 +16,8 @@ files, not legal advice and not a claim of legal sufficiency.
 | `spdx-texts/` | SPDX license texts used only by those fallbacks and optional-not-installed npm packages |
 | `DEBIAN_COPYRIGHT_INVENTORY.txt` | Written inside each image at build (`/usr/share/licenses/...`) |
 | `DEBIAN_COPYRIGHT_INVENTORY.oort-postgres.txt` | Extracted from a local `oort-postgres` image build (exact Dockerfile) |
-| `DEBIAN_COPYRIGHT_INVENTORY.bookworm-runtime-layer.txt` | Probe of `debian:bookworm-slim` + the app image apt packages (not the exact rust app image) |
+| `DEBIAN_COPYRIGHT_INVENTORY.momo-rust.txt` | Extracted from `oort-1332-notice-app-test` (`server-rust/Dockerfile`) |
+| `DEBIAN_COPYRIGHT_INVENTORY.bookworm-runtime-layer.txt` | Probe of `debian:bookworm-slim` + the app image apt packages |
 
 Hand-maintained index: `legal/THIRD_PARTY_NOTICES.md` (current vs historical).
 Project files: repo-root `LICENSE`, `NOTICE`.

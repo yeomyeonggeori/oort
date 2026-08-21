@@ -7,7 +7,7 @@
 - `NOTICE`에서 미구현 "Open Source Licenses" 화면 주장과 permissive-only 단정을 지웠다. 자동화는 재현 가능한 인벤토리이지 법적 충분성 선언이 아니다.
 - stale bundle은 `scripts/check_ghcr_notice_bundle.sh`가 lockfile 해시로 RED. `local_gate --profile license`와 PR CI alignment가 강제한다. 정책 allow/deny(#1225)와 고지 생성(#1332)은 게이트를 나누어 두었다.
 - #35 소비: `docs/planning/ENGINE_HANDOFF.md` A-27 ready.
-- **정직 라벨:** postgres 이미지(`oort-postgres:1332-notice`)는 이 워크트리에서 빌드해 고지 4종 `sha256sum -c` OK + installed dpkg copyright 전항 존재 + GPL/LGPL=copyleft 인벤토리를 `legal/generated/DEBIAN_COPYRIGHT_INVENTORY.oort-postgres.txt`로 남겼다. 앱 이미지 전체 빌드(cargo+npm 멀티스테이지)는 이 세션에서 돌리지 않았다 — `runtime-unverified(full app image)`. 같은 Debian copyright 검사는 Dockerfile RUN에 박혀 있고, OS 레이어 근사 증거는 `debian:bookworm-slim`+런타임 apt 패키지 프로브(`legal/generated/DEBIAN_COPYRIGHT_INVENTORY.bookworm-runtime-layer.txt`)다.
+- 앱 이미지 실빌드(`docker build -f server-rust/Dockerfile -t oort-1332-notice-app-test .`) 완주. 이미지 안 `sha256sum -c` 4종 OK, `/opt/momo/web/legal/`에 LICENSE·NOTICE·인덱스·생성 bundle. `server-rust/Dockerfile.dockerignore`가 `legal` 전체를 배제해 COPY가 not found 되던 구멍은 초안만 배제하도록 고쳤다(회귀: COPY 경로가 per-Dockerfile ignore에 걸리면 RED). dpkg copyright 인벤토리: `legal/generated/DEBIAN_COPYRIGHT_INVENTORY.momo-rust.txt`. postgres 실빌드 증거는 `DEBIAN_COPYRIGHT_INVENTORY.oort-postgres.txt`.
 
 ## Rust PG18 pgBackRest/WAL/PITR 폐곡선 · signed migration gate (#1330, 2026-08-12)
 

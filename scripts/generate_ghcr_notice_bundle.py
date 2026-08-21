@@ -20,10 +20,12 @@ no timestamps, ``LC_ALL=C`` for subprocesses.
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import hashlib
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -673,6 +675,121 @@ def require_contains(path: Path, needle: str) -> None:
         raise BundleError(f"{path}: missing required fragment:\n  {needle}")
 
 
+def dockerignore_patterns(text: str) -> list[str]:
+    patterns: list[str] = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        patterns.append(stripped)
+    return patterns
+
+
+def dockerignore_match(pattern: str, relpath: str) -> bool:
+    relpath = relpath.replace("\\", "/").lstrip("./")
+    pattern = pattern.replace("\\", "/")
+    if not pattern:
+        return False
+    if pattern.endswith("/**"):
+        prefix = pattern[:-3].rstrip("/")
+        if not prefix:
+            return True
+        return relpath == prefix or relpath.startswith(prefix + "/")
+    pattern = pattern.rstrip("/")
+    if relpath == pattern or relpath.startswith(pattern + "/"):
+        return True
+    if pattern.startswith("**/"):
+        return fnmatch.fnmatch(relpath.split("/")[-1], pattern[3:]) or fnmatch.fnmatch(
+            relpath, pattern
+        )
+    if "/" not in pattern and fnmatch.fnmatch(relpath.split("/")[-1], pattern):
+        return True
+    return fnmatch.fnmatch(relpath, pattern)
+
+
+def path_ignored_by_dockerignore(relpath: str, patterns: list[str]) -> bool:
+    ignored = False
+    for pattern in patterns:
+        negate = pattern.startswith("!")
+        body = pattern[1:] if negate else pattern
+        if dockerignore_match(body, relpath):
+            ignored = not negate
+    return ignored
+
+
+def dockerfile_ignore_file(dockerfile: Path, repo_root: Path) -> Path | None:
+    sibling = Path(str(dockerfile) + ".dockerignore")
+    if sibling.is_file():
+        return sibling
+    root_ignore = repo_root / ".dockerignore"
+    return root_ignore if root_ignore.is_file() else None
+
+
+def dockerfile_copy_sources(text: str) -> list[str]:
+    sources: list[str] = []
+    buf: list[str] = []
+    for raw_line in text.splitlines():
+        if raw_line.rstrip().endswith("\\"):
+            buf.append(raw_line.rstrip()[:-1] + " ")
+            continue
+        buf.append(raw_line)
+        joined = "".join(buf).strip()
+        buf = []
+        if not joined.startswith("COPY"):
+            continue
+        try:
+            tokens = shlex.split(joined, posix=True)
+        except ValueError as exc:
+            raise BundleError(f"cannot parse COPY instruction: {joined}: {exc}") from exc
+        if not tokens or tokens[0] != "COPY":
+            continue
+        from_stage = False
+        args: list[str] = []
+        for token in tokens[1:]:
+            if token.startswith("--"):
+                if token == "--from" or token.startswith("--from="):
+                    from_stage = True
+                continue
+            args.append(token)
+        if from_stage or len(args) < 2:
+            continue
+        sources.extend(args[:-1])
+    return sources
+
+
+def check_copy_sources_not_ignored(dockerfile: Path, repo_root: Path) -> None:
+    ignore_path = dockerfile_ignore_file(dockerfile, repo_root)
+    if ignore_path is None:
+        return
+    patterns = dockerignore_patterns(ignore_path.read_text(encoding="utf-8"))
+    blocked: list[str] = []
+    for source in dockerfile_copy_sources(dockerfile.read_text(encoding="utf-8")):
+        rel = source.lstrip("./")
+        if rel.startswith("/") or source.startswith("http"):
+            continue
+        if path_ignored_by_dockerignore(rel, patterns):
+            blocked.append(source)
+    if blocked:
+        raise BundleError(
+            f"{dockerfile} COPYs paths excluded by {ignore_path} "
+            f"(BuildKit uses the per-Dockerfile ignore instead of the root "
+            f".dockerignore): {', '.join(blocked)}"
+        )
+
+
+def check_legal_drafts_stay_out(app_df: Path, repo_root: Path) -> None:
+    ignore_path = dockerfile_ignore_file(app_df, repo_root)
+    if ignore_path is None:
+        return
+    patterns = dockerignore_patterns(ignore_path.read_text(encoding="utf-8"))
+    for draft in ("legal/privacy-policy.md", "legal/agent-disclosure.md"):
+        if not path_ignored_by_dockerignore(draft, patterns):
+            raise BundleError(
+                f"{ignore_path} no longer excludes {draft}; legal drafts must "
+                "stay out of the GHCR app image context"
+            )
+
+
 def check_dockerfiles(repo_root: Path, app_df: Path, postgres_df: Path) -> None:
     for needle in APP_DOCKERFILE_REQUIRED:
         require_contains(app_df, needle)
@@ -687,6 +804,9 @@ def check_dockerfiles(repo_root: Path, app_df: Path, postgres_df: Path) -> None:
         postgres_df,
         "COPY legal/generated/GHCR_NOTICE_BUNDLE.sha256 /usr/share/licenses/oort-postgres/",
     )
+    check_copy_sources_not_ignored(app_df, repo_root)
+    check_copy_sources_not_ignored(postgres_df, repo_root)
+    check_legal_drafts_stay_out(app_df, repo_root)
 
 
 def load_committed(repo_root: Path) -> dict[str, str]:
