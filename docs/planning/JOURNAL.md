@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-08-22 (Fable) · 대기 큐 4/4 완주 — 붕대 제거·문서 진실성·라벨 현행화·arm64 워크플로. 성재=실테스트만
+- **#1635**: pr-ci 붕대 2건 제거(web TZ pin·mobile inboxApproval 제외 — 71/71 실검증)+재도입 RED 가드. **#1641**: 루트 계약 6좌표+동류 2줄의 web-legacy 실서빙 거짓 이분 정정(잔여 grep 판정표). **#1642**: 발행 실측 라벨 현행화(H2 amd64 정직 라벨 보존)+GATED_DOCS 3종 편입(439 fact·15문서). **#1643**: publish-images **multi-arch 준비**(native ubuntu-24.04-arm·digest-only push→manifest list 합성·attestation=아키4+list2·pin=list — 실발행=성재 클릭).
+- **운영 사고 2건 해소**: ①디스크 ENOSPC(도커 빌드캐시 5GB+1330 워크트리 target 9GB 회수 — 39Gi 확보) ②STATUS 상단 경합 DIRTY 2건(#1642 선랜딩과 충돌 — 루프가 BEHIND만 처리해 정체. 교훈: **머지 루프에 DIRTY 즉시 탈출 분기 필수**·STATUS 상단은 순차 랜딩 시 상습 충돌면).
+- **성재 잔여 목록(전량)**: ①ITO-1 실테스트 시작일 ②다음 발행 창에서 multi-arch dispatch+release 승인 클릭(→arm64 실측 digest 기입은 Fable) ③(선택) T-D §8 재발행=ITO-3 직전 ④(대기) 여명님 org 정리 없음 — Owner 승격 안 함 확정.
+- 백로그 잔여(자율 후보): DCO CI·드리프트 게이트·볼륨 소유자 라벨·픽스처 URL·Swift prod 주석·DEPLOY 본체·#1600~#1604 제품 파도 — 각 이슈 코멘트 원장.
+
 ## 2026-08-21 (Fable) · L-파도 4/4 완주 — ★v0.1.0 첫 릴리스·gitleaks CI·커뮤니티 문서·승격 b1bf46e9
 - **★v0.1.0 발행**: tag@45a154d2+GitHub Release(digest 표·검증 커맨드·amd64 고지) — SECURITY.md 「최신 v0.x」 약속 성립. G1(#1628 — RELEASING.md·SELF_HOST digest 실값·:88 라벨 해소).
 - **G2(#1629)**: gitleaks PR-range 레인(8.30.1 tarball+sha256 pin·fail-closed·fork 안전) — 자기 PR 첫 실전 통과. **G3(#1267/#1268)**: 기여자 첫 빨강 결정성(TZ 주입·waitFor 분리 — UTC 빨강 재현·linux 1628ms 실측·3회×2플랫폼) — 검수 회전 1(vite.config tsc TS2769: Vite5/6 타입 충돌). **G4(#1630)**: CoC v2.1·CODEOWNERS·CHANGELOG 시드·CONTRIBUTING 영문 정본+ko.
