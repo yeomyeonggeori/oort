@@ -38,8 +38,11 @@
 Silicon pull은 지원하지 않는다. 수동 발행은 `main` ref와 GitHub `release`
 Environment owner 승인 경계 뒤에만 진행하며, tag가 아니라 pushed digest에 SLSA v1
 provenance를 결속한다. `release`는 attended readback에서 required reviewer
-`kwakseongjae`(id `87296259`)와 custom `main` branch policy 하나를 확인했다. 실제 첫
-dispatch와 공개 digest 검증은 아직 `runtime-unverified`다.
+`kwakseongjae`(id `87296259`)와 custom `main` branch policy 하나를 확인했다. 첫
+workflow dispatch와 공개 GHCR 왕복(발행 · 익명 pull · attestation)은 실측
+완료다. 좌표: 원장 #1332 코멘트 2026-08-21, 빌드 커밋 `main=45a154d2`,
+attestation 검증 PASS, Apple Silicon native pull 불가(amd64 단일, 실측
+2026-08-21).
 
 로컬 quickstart의 named PostgreSQL volume은 production backup이 아니다. 실제 운영
 migrate는 `docker-compose.backup.yml`의 continuous WAL + encrypted pgBackRest repo와
@@ -258,7 +261,7 @@ prod(`momo-pgdata`)와 분리돼 있다. 다른 프로젝트명으로 띄우면 
 
 | 런북 단계 | 이 디렉터리에서 |
 |---|---|
-| 3-1 이미지 퍼블리시 확인 | 수동 `publish-images.yml`이 `main`+`release` 승인 경계에서 `server-rust/Dockerfile`를 native `linux/amd64`로 빌드하고 pushed digest에 SLSA v1 provenance를 발급하는 경로는 #1266에서 정본화. arm64는 미지원. 실 dispatch·digest 핀·익명 pull·attestation 검증은 owner/M7 후속(`runtime-unverified`) |
+| 3-1 이미지 퍼블리시 확인 | 수동 `publish-images.yml`이 `main`+`release` 승인 경계에서 `server-rust/Dockerfile`를 native `linux/amd64`로 빌드하고 pushed digest에 SLSA v1 provenance를 발급하는 경로는 #1266에서 정본화. arm64는 미지원. 실 dispatch·digest 핀·익명 pull·attestation 검증은 실측 완료(원장 #1332 코멘트 2026-08-21 · 패키지 public · digest 2본 attestation PASS · amd64 단일) |
 | 3-3 Docker 설치 | 그대로 |
 | 3-4 스택 기동 | 셀프호스트는 `scripts/self_host_env.sh --compose …`가 generated env·canonical file set을 ambient override 없이 실행한다. 발행 모드는 build 오버레이 없이 exact digest pull |
 | 3-5 마이그레이션 001~059 | `migrate` 서비스(psql 러너). seed 모드는 NCP에서 `none` |
