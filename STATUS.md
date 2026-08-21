@@ -1,5 +1,9 @@
 # oort 진행 현황
 
+## PR CI gitleaks 레인 (#1629, 2026-08-21)
+
+- pr-ci에 상시 gitleaks 잡: PR 범위(`base.sha..head.sha`)만 스캔. 전 히스토리는 로컬 `scripts/check_secrets.sh` 몫. `.gitleaksignore` 재사용. 바이너리 8.30.1 + linux_x64 sha256 pin, 미설치/체크섬/탐지 실패는 RED. `pull_request` 유지(토큰·org license secret 불요). 가드레일 테스트가 경로 필터·전 히스토리·unpinned·`pull_request_target` 변이를 RED로 고정.
+
 ## 첫 v0.1.0 릴리스 준비 문서 (#1628, 2026-08-21)
 
 - `docs/RELEASING.md` 신설: 승격→발행(dispatch·owner 승인)→digest 수거→태그(빌드 커밋 `main=45a154d2`)→Release(digest 표)→SELF_HOST 문면. 데스크탑 next 채널은 `NEXT_CHANNEL.md` §8과 경계. 태그/Release 원격 쓰기는 오케스트레이터.
