@@ -28,7 +28,7 @@ ARG TARGETARCH
 ARG MOMO_BUILD_SHA=unknown
 
 LABEL org.opencontainers.image.title="oort PostgreSQL 18 + pgBackRest" \
-      org.opencontainers.image.description="Pinned pgvector PostgreSQL 18 base with pgBackRest; bundled notices cover the additive pgBackRest/libssh2 delta, not the complete Debian OS inventory" \
+      org.opencontainers.image.description="Pinned pgvector PostgreSQL 18 base with pgBackRest; image copies LICENSE/NOTICE/index/generated bundle and verifies every dpkg copyright file exists. That inventory is evidence, not a legal-sufficiency claim." \
       org.opencontainers.image.revision="${MOMO_BUILD_SHA}" \
       com.oor7.oort.postgres-base.digest="sha256:9d2e61c7352b9e9f4798df5fd9a498f043f4cda1cdacc707de3d198650f4321e" \
       com.oor7.oort.pgbackrest.version="2.59.0-1.pgdg13+1" \
@@ -38,6 +38,9 @@ LABEL org.opencontainers.image.title="oort PostgreSQL 18 + pgBackRest" \
 COPY --from=packages-amd64 /packages/ /tmp/packages/amd64/
 COPY --from=packages-arm64 /packages/ /tmp/packages/arm64/
 COPY infra/rust/postgres-pgbackrest/oort-pgbackrest /usr/local/bin/oort-pgbackrest
+COPY LICENSE NOTICE legal/THIRD_PARTY_NOTICES.md legal/generated/GHCR_THIRD_PARTY_NOTICES.txt /usr/share/licenses/oort-postgres/
+COPY legal/generated/GHCR_NOTICE_BUNDLE.sha256 /usr/share/licenses/oort-postgres/
+COPY scripts/check_debian_copyrights.sh /usr/local/bin/check_debian_copyrights.sh
 
 USER root
 
@@ -62,10 +65,16 @@ RUN set -eux; \
     install -d -m 0755 /usr/share/licenses/oort-postgres; \
     install -m 0644 /usr/share/doc/pgbackrest/copyright /usr/share/licenses/oort-postgres/pgbackrest-MIT; \
     install -m 0644 /usr/share/doc/libssh2-1t64/copyright /usr/share/licenses/oort-postgres/libssh2-BSD3-ISC; \
-    chmod 0755 /usr/local/bin/oort-pgbackrest; \
+    chmod 0755 /usr/local/bin/oort-pgbackrest /usr/local/bin/check_debian_copyrights.sh; \
     rm -rf /tmp/packages; \
+    test -s /usr/share/licenses/oort-postgres/LICENSE; \
+    test -s /usr/share/licenses/oort-postgres/NOTICE; \
+    test -s /usr/share/licenses/oort-postgres/THIRD_PARTY_NOTICES.md; \
+    test -s /usr/share/licenses/oort-postgres/GHCR_THIRD_PARTY_NOTICES.txt; \
     test -s /usr/share/licenses/oort-postgres/pgbackrest-MIT; \
-    test -s /usr/share/licenses/oort-postgres/libssh2-BSD3-ISC
+    test -s /usr/share/licenses/oort-postgres/libssh2-BSD3-ISC; \
+    ( cd /usr/share/licenses/oort-postgres && sha256sum -c GHCR_NOTICE_BUNDLE.sha256 ); \
+    /usr/local/bin/check_debian_copyrights.sh --output /usr/share/licenses/oort-postgres/DEBIAN_COPYRIGHT_INVENTORY.txt
 
 # Keep the upstream postgres entrypoint, PGDATA, and default command. Secrets
 # are loaded only by /usr/local/bin/oort-pgbackrest at command execution time.

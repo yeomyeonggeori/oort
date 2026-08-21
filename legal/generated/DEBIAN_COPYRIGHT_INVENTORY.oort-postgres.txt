@@ -1,0 +1,152 @@
+# provenance: exact local image oort-postgres:1332-notice built from infra/rust/postgres-pgbackrest/Dockerfile. Installed dpkg packages only.
+# debian-copyright-inventory/v1
+# columns: package <TAB> version <TAB> license_fields <TAB> class <TAB> copyright_path
+# class copyleft includes GPL/LGPL/AGPL and is never written as permissive.
+# this is file-existence evidence, not a legal-sufficiency declaration.
+adduser	3.152	GPL-2+	copyleft	/usr/share/doc/adduser/copyright
+apt	3.0.3	BSD-3-clause|Expat|GPL-2|GPL-2+|GPL-2+ and curl|curl	copyleft	/usr/share/doc/apt/copyright
+base-files	13.8+deb13u5	GPL-2+|verbatim	copyleft	/usr/share/doc/base-files/copyright
+base-passwd	3.6.7	GPL-2|public-domain	copyleft	/usr/share/doc/base-passwd/copyright
+bash	5.2.37-2+b9	BSD-4-clause-UC|BSD-4-clause-UC and MIT-like|GFDL-NIV-1.3|GPL-2+|GPL-3+|GPL-3+ with Bison exception|Latex2e|MIT-like|permissive	copyleft	/usr/share/doc/bash/copyright
+bsdutils	1:2.41-5	BSD-2-clause|BSD-3-clause|BSD-4-clause|BSLA|Expat|GPL-2|GPL-2+|GPL-3+|ISC|LGPL|LGPL-2+|LGPL-2.1+|LGPL-3+|public-domain	copyleft	/usr/share/doc/bsdutils/copyright
+coreutils	9.7-3	BSD-4-clause-UC|FSFULLR|GFDL-NIV-1.3|GPL-3+|GPL-3+ and BSD-4-clause-UC|GPL-3+ and ISC|ISC	copyleft	/usr/share/doc/coreutils/copyright
+dash	0.5.12-12	BSD-3-Clause|BSD-3-clause|GPL-2+|public-domain	copyleft	/usr/share/doc/dash/copyright
+debconf	1.5.91	BSD-2-clause	permissive	/usr/share/doc/debconf/copyright
+debian-archive-keyring	2025.1	(no License: field)	other	/usr/share/doc/debian-archive-keyring/copyright
+debianutils	5.23.2	GPL-2+|SMAIL-GPL|public-domain	copyleft	/usr/share/doc/debianutils/copyright
+diffutils	1:3.10-4	FSFAP|FSFULLR|GFDL-NIV-1.3|GPL-2+|GPL-3+|GPL-3+ and FSFULLR|GPL-3+ with autoconf exception|GPL-3+ with texinfo exception|LGPL-2.0+|LGPL-2.1+|LGPL-3.0+|LGPL-3.0+ or GPL-2+|X11|public-domain	copyleft	/usr/share/doc/diffutils/copyright
+dirmngr	2.4.7-21+deb13u1+b3	BSD-3-clause|CC0-1.0|Expat|GPL-2+|GPL-3+|GPL-3+ or BSD-3-clause|LGPL-2.1+|LGPL-3+|LGPL-3+ or GPL-2+|RFC-Reference|TinySCHEME|permissive	copyleft	/usr/share/doc/dirmngr/copyright
+dpkg	1.22.22	GPL-2+|public-domain-s-s-d	copyleft	/usr/share/doc/dpkg/copyright
+findutils	4.10.0-3	BSD-3-clause|BSD-3-clause or GPL-3+|BSD-3-clause or LGPL-2.1+|BSD-3-clause or LGPL-3+|FSFAP|FSFULLR|FSFULLR or GPL or LGPL|GFDL-NIV-1.3+|GFDL-NIV-1.3+ or GFDL-NIV-1.3+|GPL|GPL with automake exception|GPL-2+|GPL-2+ with Autoconf-data exception|GPL-3+|GPL-3+ with Autoconf-data exception|GPL-3+ with Bison-2.2 exception|ISC|ISC or LGPL-2.1+|LGPL|LGPL-2+|LGPL-2.1+|LGPL-3|LGPL-3+|X11|public-domain	copyleft	/usr/share/doc/findutils/copyright
+gcc-14-base	14.2.0-19	(no License: field)	other	/usr/share/doc/gcc-14-base/copyright
+gnupg	2.4.7-21+deb13u1	BSD-3-clause|CC0-1.0|Expat|GPL-2+|GPL-3+|GPL-3+ or BSD-3-clause|LGPL-2.1+|LGPL-3+|LGPL-3+ or GPL-2+|RFC-Reference|TinySCHEME|permissive	copyleft	/usr/share/doc/gnupg/copyright
+gnupg-l10n	2.4.7-21+deb13u1	BSD-3-clause|CC0-1.0|Expat|GPL-2+|GPL-3+|GPL-3+ or BSD-3-clause|LGPL-2.1+|LGPL-3+|LGPL-3+ or GPL-2+|RFC-Reference|TinySCHEME|permissive	copyleft	/usr/share/doc/gnupg-l10n/copyright
+gpg	2.4.7-21+deb13u1+b3	BSD-3-clause|CC0-1.0|Expat|GPL-2+|GPL-3+|GPL-3+ or BSD-3-clause|LGPL-2.1+|LGPL-3+|LGPL-3+ or GPL-2+|RFC-Reference|TinySCHEME|permissive	copyleft	/usr/share/doc/gpg/copyright
+gpg-agent	2.4.7-21+deb13u1+b3	BSD-3-clause|CC0-1.0|Expat|GPL-2+|GPL-3+|GPL-3+ or BSD-3-clause|LGPL-2.1+|LGPL-3+|LGPL-3+ or GPL-2+|RFC-Reference|TinySCHEME|permissive	copyleft	/usr/share/doc/gpg-agent/copyright
+gpgconf	2.4.7-21+deb13u1+b3	BSD-3-clause|CC0-1.0|Expat|GPL-2+|GPL-3+|GPL-3+ or BSD-3-clause|LGPL-2.1+|LGPL-3+|LGPL-3+ or GPL-2+|RFC-Reference|TinySCHEME|permissive	copyleft	/usr/share/doc/gpgconf/copyright
+gpgsm	2.4.7-21+deb13u1+b3	BSD-3-clause|CC0-1.0|Expat|GPL-2+|GPL-3+|GPL-3+ or BSD-3-clause|LGPL-2.1+|LGPL-3+|LGPL-3+ or GPL-2+|RFC-Reference|TinySCHEME|permissive	copyleft	/usr/share/doc/gpgsm/copyright
+grep	3.11-4+b1	GPL-3+	copyleft	/usr/share/doc/grep/copyright
+gzip	1.13-1	FSF-manpages|GFDL-1.3+-no-invariant|GPL-3+	copyleft	/usr/share/doc/gzip/copyright
+hostname	3.25	GPL-2	copyleft	/usr/share/doc/hostname/copyright
+init-system-helpers	1.69~deb13u1	BSD-3-clause|GPL-2+	copyleft	/usr/share/doc/init-system-helpers/copyright
+less	668-1	GPL-3+|GPL-3+ or Less|GPL-3+ or Less, and X11|Less|Spencer-86|X11|public-domain	copyleft	/usr/share/doc/less/copyright
+libacl1	2.3.2-2+b1	GPL-2+|LGPL-2+	copyleft	/usr/share/doc/libacl1/copyright
+libapt-pkg7.0	3.0.3	BSD-3-clause|Expat|GPL-2|GPL-2+|GPL-2+ and curl|curl	copyleft	/usr/share/doc/libapt-pkg7.0/copyright
+libassuan9	3.0.2-2	FSFULLR|FSFULLRWD|GPL-2+ with Autoconf-data exception|GPL-2+ with Libtool exception|GPL-2.with.nonstandard.Autoconf-data.exception|GPL-3+|GPL-3+ with Autoconf-2.0~Archive exception|GPL-3+ with Autoconf-data exception|LGPL-2.1|LGPL-2.1+|LGPL-3+|X11	copyleft	/usr/share/doc/libassuan9/copyright
+libattr1	1:2.5.2-3	GPL-2+|LGPL-2+	copyleft	/usr/share/doc/libattr1/copyright
+libaudit-common	1:4.0.2-2	GPL-2|LGPL-2.1	copyleft	/usr/share/doc/libaudit-common/copyright
+libaudit1	1:4.0.2-2+b2	GPL-2|LGPL-2.1	copyleft	/usr/share/doc/libaudit1/copyright
+libblkid1	2.41-5	BSD-2-clause|BSD-3-clause|BSD-4-clause|BSLA|Expat|GPL-2|GPL-2+|GPL-3+|ISC|LGPL|LGPL-2+|LGPL-2.1+|LGPL-3+|public-domain	copyleft	/usr/share/doc/libblkid1/copyright
+libbsd0	0.12.2-2	BSD-2-clause|BSD-2-clause-NetBSD|BSD-2-clause-author|BSD-2-clause-verbatim|BSD-3-clause|BSD-3-clause-John-Birrell|BSD-3-clause-Regents|BSD-3-clause-Regents and BSD-2-clause-NetBSD|BSD-3-clause-author|BSD-5-clause-Peter-Wemm|Beerware|Expat|ISC|ISC-Original|public-domain	permissive	/usr/share/doc/libbsd0/copyright
+libbz2-1.0	1.0.8-6	BSD-variant|GPL-2	copyleft	/usr/share/doc/libbz2-1.0/copyright
+libc-bin	2.41-12+deb13u3	BSD-2-clause|BSD-2-clause or GPL-2|BSD-3-clause-Berkeley|BSD-3-clause-Berkeley and BSD-3-clause-WIDE|BSD-3-clause-Berkeley and DEC|BSD-3-clause-Berkeley and DEC and IBM and ISC|BSD-3-clause-Berkeley and DEC and ISC|BSD-3-clause-Berkeley and DEC and ISC and LGPL-2.1+|BSD-3-clause-Berkeley and DEC and LGPL-2.1+|BSD-3-clause-Berkeley and ISC|BSD-3-clause-Berkeley and LGPL-2.1+|BSD-3-clause-Berkeley and LGPL-2.1+ and Univ-Coimbra|BSD-3-clause-Carnegie|BSD-3-clause-Oracle|BSD-3-clause-WIDE|BSD-like-Spencer|BSL-1.0|CORE-MATH|Carnegie|Carnegie and LGPL-2.1+|DEC|FSFAP|GPL-2|GPL-2+|GPL-2+-with-link-exception|GPL-3+|IBM|IBM and ISC|ISC|ISC and LGPL-2.1+|Inner-Net|Inner-Net and LGPL-2.1+|LGPL-2+|LGPL-2.1+|LGPL-2.1+ and GPL-2|LGPL-2.1+ and SunPro|LGPL-2.1+-with-link-exception|LGPL-3+|MIT-like-Lord|PCRE|SunPro|Unicode-DFS-2016|Univ-Coimbra|public-domain	copyleft	/usr/share/doc/libc-bin/copyright
+libc-l10n	2.41-12+deb13u3	BSD-2-clause|BSD-2-clause or GPL-2|BSD-3-clause-Berkeley|BSD-3-clause-Berkeley and BSD-3-clause-WIDE|BSD-3-clause-Berkeley and DEC|BSD-3-clause-Berkeley and DEC and IBM and ISC|BSD-3-clause-Berkeley and DEC and ISC|BSD-3-clause-Berkeley and DEC and ISC and LGPL-2.1+|BSD-3-clause-Berkeley and DEC and LGPL-2.1+|BSD-3-clause-Berkeley and ISC|BSD-3-clause-Berkeley and LGPL-2.1+|BSD-3-clause-Berkeley and LGPL-2.1+ and Univ-Coimbra|BSD-3-clause-Carnegie|BSD-3-clause-Oracle|BSD-3-clause-WIDE|BSD-like-Spencer|BSL-1.0|CORE-MATH|Carnegie|Carnegie and LGPL-2.1+|DEC|FSFAP|GPL-2|GPL-2+|GPL-2+-with-link-exception|GPL-3+|IBM|IBM and ISC|ISC|ISC and LGPL-2.1+|Inner-Net|Inner-Net and LGPL-2.1+|LGPL-2+|LGPL-2.1+|LGPL-2.1+ and GPL-2|LGPL-2.1+ and SunPro|LGPL-2.1+-with-link-exception|LGPL-3+|MIT-like-Lord|PCRE|SunPro|Unicode-DFS-2016|Univ-Coimbra|public-domain	copyleft	/usr/share/doc/libc-l10n/copyright
+libc6	2.41-12+deb13u3	BSD-2-clause|BSD-2-clause or GPL-2|BSD-3-clause-Berkeley|BSD-3-clause-Berkeley and BSD-3-clause-WIDE|BSD-3-clause-Berkeley and DEC|BSD-3-clause-Berkeley and DEC and IBM and ISC|BSD-3-clause-Berkeley and DEC and ISC|BSD-3-clause-Berkeley and DEC and ISC and LGPL-2.1+|BSD-3-clause-Berkeley and DEC and LGPL-2.1+|BSD-3-clause-Berkeley and ISC|BSD-3-clause-Berkeley and LGPL-2.1+|BSD-3-clause-Berkeley and LGPL-2.1+ and Univ-Coimbra|BSD-3-clause-Carnegie|BSD-3-clause-Oracle|BSD-3-clause-WIDE|BSD-like-Spencer|BSL-1.0|CORE-MATH|Carnegie|Carnegie and LGPL-2.1+|DEC|FSFAP|GPL-2|GPL-2+|GPL-2+-with-link-exception|GPL-3+|IBM|IBM and ISC|ISC|ISC and LGPL-2.1+|Inner-Net|Inner-Net and LGPL-2.1+|LGPL-2+|LGPL-2.1+|LGPL-2.1+ and GPL-2|LGPL-2.1+ and SunPro|LGPL-2.1+-with-link-exception|LGPL-3+|MIT-like-Lord|PCRE|SunPro|Unicode-DFS-2016|Univ-Coimbra|public-domain	copyleft	/usr/share/doc/libc6/copyright
+libcap-ng0	0.8.5-4+b1	GPL-2+|GPL-3|LGPL-2.1+	copyleft	/usr/share/doc/libcap-ng0/copyright
+libcap2	1:2.75-10+deb13u1+b1	BSD-3-clause|BSD-3-clause or GPL-2|BSD-3-clause or GPL-2+|GPL-2|GPL-2+	copyleft	/usr/share/doc/libcap2/copyright
+libcom-err2	1.47.2-3+b11	0BSD|Apache-2|BSD-3-Clause|BSD-3-Clause-Variant|BSD-4-Clause-CMU|Expat|GPL or MIT-US-export|GPL-2|GPL-2+|GPL-2+ with Texinfo exception|ISC|Kazlib|LGPL-2|Latex2e	copyleft	/usr/share/doc/libcom-err2/copyright
+libcrypt1	1:4.4.38-1	(no License: field)	other	/usr/share/doc/libcrypt1/copyright
+libdb5.3t64	5.3.28+dfsg2-9	Artistic or BSD-3-clause|BSD-3-clause|BSD-3-clause-fjord|GPL|GPL or Artistic|GPL-3|MIT-old|Ms-PL|Sleepycat|Sleepycat and BSD-3-clause|TCL-like|X11|zlib	copyleft	/usr/share/doc/libdb5.3t64/copyright
+libdebconfclient0	0.280	BSD-2-Clause|BSD-2-clause|GPL-2+	copyleft	/usr/share/doc/libdebconfclient0/copyright
+libedit2	3.1-20250104-1	BSD-3-clause	permissive	/usr/share/doc/libedit2/copyright
+libffi8	3.4.8-2	Expat|GPL|GPL-2+|GPL-3+|MPL-1.1 or GPL-2+ or LGPL-2.1+|X11|public-domain	copyleft	/usr/share/doc/libffi8/copyright
+libgcc-s1	14.2.0-19	(no License: field)	other	/usr/share/doc/libgcc-s1/copyright
+libgcrypt20	1.11.0-7+deb13u1	(no License: field)	other	/usr/share/doc/libgcrypt20/copyright
+libgdbm-compat4t64	1.24-2	GFDL-NIV-1.3+|GPL-2+|GPL-3+	copyleft	/usr/share/doc/libgdbm-compat4t64/copyright
+libgdbm6t64	1.24-2	GFDL-NIV-1.3+|GPL-2+|GPL-3+	copyleft	/usr/share/doc/libgdbm6t64/copyright
+libgmp10	2:6.3.0+dfsg-3	GPL-2+|GPL-2+ or LGPL-3+|GPL-3+|GPL-3+ with Bison exception|LGPL-3+	copyleft	/usr/share/doc/libgmp10/copyright
+libgnutls30t64	3.8.9-3+deb13u4	|Apache-2.0|BSD-3-Clause|CC0 license|Expat|FSFAP|GPLv3+|LGPLv2.1+|LGPLv3+_or_GPLv2+|The main library is licensed under GNU Lesser	permissive	/usr/share/doc/libgnutls30t64/copyright
+libgpg-error0	1.51-4	BSD-3-clause|GPL-3+|LGPL-2.1+|LGPL-2.1+ or BSD-3-clause|g10-permissive	copyleft	/usr/share/doc/libgpg-error0/copyright
+libgssapi-krb5-2	1.21.3-5+deb13u1	(no License: field)	other	/usr/share/doc/libgssapi-krb5-2/copyright
+libhogweed6t64	3.10.1-1	Expat|GAP|GPL-2|GPL-2+|GPL-3+ with Autoconf exception|LGPL-2+|LGPL-3+|LGPL-3+ or GPL-2+|public-domain	copyleft	/usr/share/doc/libhogweed6t64/copyright
+libicu76	76.1-4	GPL-3|MIT	copyleft	/usr/share/doc/libicu76/copyright
+libidn2-0	2.3.8-2	Expat|GPL-2+|GPL-3+|LGPL-3+|LGPL-3+ or GPL-2+|Unicode	copyleft	/usr/share/doc/libidn2-0/copyright
+libjson-perl	4.10000-1	Artistic|Artistic or GPL-1+|GPL-1+	copyleft	/usr/share/doc/libjson-perl/copyright
+libk5crypto3	1.21.3-5+deb13u1	(no License: field)	other	/usr/share/doc/libk5crypto3/copyright
+libkeyutils1	1.6.3-6	GPL-2+|LGPL-2+	copyleft	/usr/share/doc/libkeyutils1/copyright
+libkrb5-3	1.21.3-5+deb13u1	(no License: field)	other	/usr/share/doc/libkrb5-3/copyright
+libkrb5support0	1.21.3-5+deb13u1	(no License: field)	other	/usr/share/doc/libkrb5support0/copyright
+libksba8	1.6.7-2+b1	FSFUL|LGPL-2.1-or-later	copyleft	/usr/share/doc/libksba8/copyright
+liblastlog2-2	2.41-5	BSD-2-clause|BSD-3-clause|BSD-4-clause|BSLA|Expat|GPL-2|GPL-2+|GPL-3+|ISC|LGPL|LGPL-2+|LGPL-2.1+|LGPL-3+|public-domain	copyleft	/usr/share/doc/liblastlog2-2/copyright
+libldap2	2.6.10+dfsg-1	BSD-3-clause|BSD-3-clause-California|BSD-3-clause-variant|BSD-4-clause-California|Beerware|Expat|Expat-ISC|Expat-UNM|F5|FSF-unlimited|FSF-unlimited and GPL-2+ with Autoconf exception|FSF-unlimited and GPL-2+ with Libtool exception|FSF-unlimited and OpenLDAP-2.8|GPL-2+|GPL-2+ with Autoconf exception|GPL-2+ with Libtool exception|GPL-2+ with Libtool exception and GPL-3+ with Libtool exception and GPL-3+|GPL-3+|GPL-3+ with Autoconf exception|GPL-3+ with Libtool exception|JCG|MIT-XC|NeoSoft-permissive|OpenLDAP-2.8|OpenLDAP-2.8 and BSD-3-clause|OpenLDAP-2.8 and BSD-3-clause-variant|OpenLDAP-2.8 and BSD-4-clause-California|OpenLDAP-2.8 and Beerware|OpenLDAP-2.8 and Expat|OpenLDAP-2.8 and Expat-ISC|OpenLDAP-2.8 and Expat-UNM|OpenLDAP-2.8 and FSF-unlimited and GPL-2+ with Libtool exception|OpenLDAP-2.8 and JCG and UMich|OpenLDAP-2.8 and UMich|OpenLDAP-2.8 and UMich and F5|UMich|public-domain	copyleft	/usr/share/doc/libldap2/copyright
+libllvm19	1:19.1.7-3+b1	APACHE-2-LLVM-EXCEPTIONS|BSD-3-Clause|BSD-3-clause|MIT|Python|solar-public-domain	permissive	/usr/share/doc/libllvm19/copyright
+liblz4-1	1.10.0-4	BSD-2-clause|BSD-2-clause or GPL-2+|GPL-2+	copyleft	/usr/share/doc/liblz4-1/copyright
+liblzma5	5.8.1-1	|0BSD|FSFUL|FSFULLR|GPL-2+|GPL-3.0-or-later-WITH-Autoconf-exception-macro|LGPL-2.1+|PD|PD-debian|noderivs|none|permissive-nowarranty	copyleft	/usr/share/doc/liblzma5/copyright
+libmd0	1.1.0-2+b1	BSD-2-clause|BSD-2-clause-NetBSD|BSD-3-clause|BSD-3-clause-Aaron-D-Gifford|Beerware|ISC|public-domain-md4|public-domain-md5|public-domain-sha1	permissive	/usr/share/doc/libmd0/copyright
+libmount1	2.41-5	BSD-2-clause|BSD-3-clause|BSD-4-clause|BSLA|Expat|GPL-2|GPL-2+|GPL-3+|ISC|LGPL|LGPL-2+|LGPL-2.1+|LGPL-3+|public-domain	copyleft	/usr/share/doc/libmount1/copyright
+libncursesw6	6.5+20250216-2	BSD-3-clause|MIT/X11|X11	permissive	/usr/share/doc/libncursesw6/copyright
+libnettle8t64	3.10.1-1	Expat|GAP|GPL-2|GPL-2+|GPL-3+ with Autoconf exception|LGPL-2+|LGPL-3+|LGPL-3+ or GPL-2+|public-domain	copyleft	/usr/share/doc/libnettle8t64/copyright
+libnpth0t64	1.8-3	LGPL-2.1+	copyleft	/usr/share/doc/libnpth0t64/copyright
+libnss-wrapper	1.1.16-1	BSD-3-clauses	permissive	/usr/share/doc/libnss-wrapper/copyright
+libnuma1	2.0.19-1	(no License: field)	other	/usr/share/doc/libnuma1/copyright
+libp11-kit0	0.25.5-3	Apache-2.0|BSD-3-clause|FSFAP|FSFULLR|GPL-2+ with Autoconf-data exception|GPL-3+ with Autoconf-data exception|ISC|LGPL-2.1+|X11|customFSFUL|customFSFULLRWD	copyleft	/usr/share/doc/libp11-kit0/copyright
+libpam-modules	1.7.0-5	BSD-3-clause or GPL|BSD-tcp_wrappers|Beerware|GPL-2|GPL-2+|GPL-3|GPL-3+ with Bison exception|LGPL-2+|public-domain	copyleft	/usr/share/doc/libpam-modules/copyright
+libpam-modules-bin	1.7.0-5	BSD-3-clause or GPL|BSD-tcp_wrappers|Beerware|GPL-2|GPL-2+|GPL-3|GPL-3+ with Bison exception|LGPL-2+|public-domain	copyleft	/usr/share/doc/libpam-modules-bin/copyright
+libpam-runtime	1.7.0-5	BSD-3-clause or GPL|BSD-tcp_wrappers|Beerware|GPL-2|GPL-2+|GPL-3|GPL-3+ with Bison exception|LGPL-2+|public-domain	copyleft	/usr/share/doc/libpam-runtime/copyright
+libpam0g	1.7.0-5	BSD-3-clause or GPL|BSD-tcp_wrappers|Beerware|GPL-2|GPL-2+|GPL-3|GPL-3+ with Bison exception|LGPL-2+|public-domain	copyleft	/usr/share/doc/libpam0g/copyright
+libpcre2-8-0	10.46-1~deb13u1	BSD-2-clause|BSD-3-clause|BSD-3-clause-Cambridge with BINARY LIBRARY-LIKE PACKAGES exception|X11|public-domain	permissive	/usr/share/doc/libpcre2-8-0/copyright
+libperl5.40	5.40.1-6	Artistic|Artistic or GPL-1+|Artistic or GPL-1+ or Artistic-dist|Artistic-2|Artistic-dist|BSD-3-clause|BSD-3-clause-GENERIC|BSD-3-clause-with-weird-numbering|BSD-4-clause-POWERDOG|BZIP|CC0-1.0|DONT-CHANGE-THE-GPL|Expat|Expat or GPL-1+ or Artistic|FSFAP|GPL-1+|GPL-1+ or Artistic|GPL-1+ or Artistic or Artistic-dist|GPL-1+ or Artistic, and BSD-3-clause-GENERIC|GPL-1+ or Artistic, and BSD-4-clause-POWERDOG|GPL-1+ or Artistic, and Expat|GPL-1+ or Artistic, and Unicode|GPL-2+|GPL-2+ or Artistic|GPL-3+-WITH-BISON-EXCEPTION|LGPL-2.1|REGCOMP|REGCOMP, and GPL-1+ or Artistic|SDBM-PUBLIC-DOMAIN|TEXT-TABS|Unicode|ZLIB	copyleft	/usr/share/doc/libperl5.40/copyright
+libpq5	18.4-1.pgdg13+1	BSD-2-clause|BSD-3-Clause|BSD-3-clause|Custom-Unicode|Custom-pg_dump|Custom-regex|PostgreSQL|PostgreSQL and Custom-regex and Tcl|Tcl|double-metaphone|nagaysau-ishii	permissive	/usr/share/doc/libpq5/copyright
+libproc2-0	2:4.0.4-9	GPL-2.0+|LGPL-2.0+|LGPL-2.1+	copyleft	/usr/share/doc/libproc2-0/copyright
+libreadline8t64	8.2-6	GFDL-NIV-1.3+|GPL-2+|GPL-3|GPL-3+|ISC-no-attribution	copyleft	/usr/share/doc/libreadline8t64/copyright
+libsasl2-2	2.1.28+dfsg1-9	BSD-2-clause|BSD-2-clause and MIT-CMU|BSD-2.2-clause|BSD-3-Clause-Attribution|BSD-3-Clause-Attribution and IBM-as-is|BSD-3-Clause-Attribution and MIT-Export|BSD-3-clause|BSD-3-clause-JANET|BSD-3-clause-JANET and BSD-3-Clause-Attribution|BSD-3-clause-PADL|BSD-3-clause-PADL and MIT-OpenVision|BSD-4-clause-UC|FSFULLR|FSFULLR and MIT-CMU|GPL-3|GPL-3+|IBM-as-is|MIT-CMU|MIT-Export|MIT-OpenVision|OpenLDAP|RSA-MD	copyleft	/usr/share/doc/libsasl2-2/copyright
+libsasl2-modules-db	2.1.28+dfsg1-9	BSD-2-clause|BSD-2-clause and MIT-CMU|BSD-2.2-clause|BSD-3-Clause-Attribution|BSD-3-Clause-Attribution and IBM-as-is|BSD-3-Clause-Attribution and MIT-Export|BSD-3-clause|BSD-3-clause-JANET|BSD-3-clause-JANET and BSD-3-Clause-Attribution|BSD-3-clause-PADL|BSD-3-clause-PADL and MIT-OpenVision|BSD-4-clause-UC|FSFULLR|FSFULLR and MIT-CMU|GPL-3|GPL-3+|IBM-as-is|MIT-CMU|MIT-Export|MIT-OpenVision|OpenLDAP|RSA-MD	copyleft	/usr/share/doc/libsasl2-modules-db/copyright
+libseccomp2	2.6.0-2	LGPL-2.1	copyleft	/usr/share/doc/libseccomp2/copyright
+libselinux1	3.8.1-1	GPL-2|public-domain	copyleft	/usr/share/doc/libselinux1/copyright
+libsemanage-common	3.8.1-1	GPL-2|LGPL-2.1+	copyleft	/usr/share/doc/libsemanage-common/copyright
+libsemanage2	3.8.1-1	GPL-2|LGPL-2.1+	copyleft	/usr/share/doc/libsemanage2/copyright
+libsepol2	3.8.1-1	GPL-2|GPL-2+|LGPL-2.1+|Zlib	copyleft	/usr/share/doc/libsepol2/copyright
+libsmartcols1	2.41-5	BSD-2-clause|BSD-3-clause|BSD-4-clause|BSLA|Expat|GPL-2|GPL-2+|GPL-3+|ISC|LGPL|LGPL-2+|LGPL-2.1+|LGPL-3+|public-domain	copyleft	/usr/share/doc/libsmartcols1/copyright
+libsqlite3-0	3.46.1-7+deb13u1	GPL-2+|public-domain	copyleft	/usr/share/doc/libsqlite3-0/copyright
+libssh2-1t64	1.11.1-1+deb13u1	BSD3|ISC	permissive	/usr/share/doc/libssh2-1t64/copyright
+libssl3t64	3.5.6-1~deb13u2	Apache-2.0|Artistic|Artistic or GPL-1+|GPL-1+	copyleft	/usr/share/doc/libssl3t64/copyright
+libstdc++6	14.2.0-19	(no License: field)	other	/usr/share/doc/libstdc++6/copyright
+libsystemd0	257.13-1~deb13u1	CC0-1.0|Expat|GPL-2 with Linux-syscall-note exception|GPL-2+|LGPL-2.1+|public-domain	copyleft	/usr/share/doc/libsystemd0/copyright
+libtasn1-6	4.20.0-2	(no License: field)	other	/usr/share/doc/libtasn1-6/copyright
+libtext-charwidth-perl	0.04-11+b4	Artistic|Artistic or GPL-1+|GPL-1+	copyleft	/usr/share/doc/libtext-charwidth-perl/copyright
+libtext-wrapi18n-perl	0.06-10	Artistic|Artistic or GPL-1+|GPL-1+	copyleft	/usr/share/doc/libtext-wrapi18n-perl/copyright
+libtinfo6	6.5+20250216-2	BSD-3-clause|MIT/X11|X11	permissive	/usr/share/doc/libtinfo6/copyright
+libudev1	257.13-1~deb13u1	CC0-1.0|Expat|GPL-2 with Linux-syscall-note exception|GPL-2+|LGPL-2.1+|public-domain	copyleft	/usr/share/doc/libudev1/copyright
+libunistring5	1.3-2	BSD-3-clause or LGPL-2.1+|BSD-3-clause or LGPL-3+|FreeSoftware|GFDL-1.2+ or GPL-3+ or LGPL-3|GFDL-1.3+|GPL-2+|GPL-2+ with distribution exception|GPL-2+ with distribution exception, Expat and GPL-2+|GPL-3+|ISC or LGPL-2.1+|LGPL-2+|LGPL-2+ or LGPL-3+|LGPL-2.1+|LGPL-3|LGPL-3+|Unicode-DFS-2016|X11|bsd-3-clause|gfdl-1.2+|gfdl-1.3+|isc|public-domain|unicode-dfs-2016	copyleft	/usr/share/doc/libunistring5/copyright
+liburing2	2.9-1	GPL-2 with Linux-syscall-note exception|GPL-2 with Linux-syscall-note exception or MIT|LGPL-2.1+|LGPL-2.1+ or MIT|MIT	copyleft	/usr/share/doc/liburing2/copyright
+libuuid1	2.41-5	BSD-2-clause|BSD-3-clause|BSD-4-clause|BSLA|Expat|GPL-2|GPL-2+|GPL-3+|ISC|LGPL|LGPL-2+|LGPL-2.1+|LGPL-3+|public-domain	copyleft	/usr/share/doc/libuuid1/copyright
+libxml2	2.12.7+dfsg+really2.9.14-2.1+deb13u2	ISC|MIT-1	permissive	/usr/share/doc/libxml2/copyright
+libxslt1.1	1.1.35-1.2+deb13u3	(no License: field)	other	/usr/share/doc/libxslt1.1/copyright
+libxxhash0	0.8.3-2	BSD-2-clause|BSD-2-clause or GPL-2+|GPL-2+	copyleft	/usr/share/doc/libxxhash0/copyright
+libz3-4	4.13.3-1	Expat|GPL-2+	copyleft	/usr/share/doc/libz3-4/copyright
+libzstd1	1.5.7+dfsg-1	BSD-3-clause|BSD-3-clause or GPL-2|Expat|GPL-2|zlib	copyleft	/usr/share/doc/libzstd1/copyright
+locales	2.41-12+deb13u3	BSD-2-clause|BSD-2-clause or GPL-2|BSD-3-clause-Berkeley|BSD-3-clause-Berkeley and BSD-3-clause-WIDE|BSD-3-clause-Berkeley and DEC|BSD-3-clause-Berkeley and DEC and IBM and ISC|BSD-3-clause-Berkeley and DEC and ISC|BSD-3-clause-Berkeley and DEC and ISC and LGPL-2.1+|BSD-3-clause-Berkeley and DEC and LGPL-2.1+|BSD-3-clause-Berkeley and ISC|BSD-3-clause-Berkeley and LGPL-2.1+|BSD-3-clause-Berkeley and LGPL-2.1+ and Univ-Coimbra|BSD-3-clause-Carnegie|BSD-3-clause-Oracle|BSD-3-clause-WIDE|BSD-like-Spencer|BSL-1.0|CORE-MATH|Carnegie|Carnegie and LGPL-2.1+|DEC|FSFAP|GPL-2|GPL-2+|GPL-2+-with-link-exception|GPL-3+|IBM|IBM and ISC|ISC|ISC and LGPL-2.1+|Inner-Net|Inner-Net and LGPL-2.1+|LGPL-2+|LGPL-2.1+|LGPL-2.1+ and GPL-2|LGPL-2.1+ and SunPro|LGPL-2.1+-with-link-exception|LGPL-3+|MIT-like-Lord|PCRE|SunPro|Unicode-DFS-2016|Univ-Coimbra|public-domain	copyleft	/usr/share/doc/locales/copyright
+login	1:4.16.0-2+really2.41-5	BSD-2-clause|BSD-3-clause|BSD-4-clause|BSLA|Expat|GPL-2|GPL-2+|GPL-3+|ISC|LGPL|LGPL-2+|LGPL-2.1+|LGPL-3+|public-domain	copyleft	/usr/share/doc/login/copyright
+login.defs	1:4.17.4-2	BSD-3-clause|GPL-1|GPL-2+	copyleft	/usr/share/doc/login.defs/copyright
+mawk	1.3.4.20250131-1	CC-BY-3.0|GPL-2.0-only|X11	copyleft	/usr/share/doc/mawk/copyright
+mount	2.41-5	BSD-2-clause|BSD-3-clause|BSD-4-clause|BSLA|Expat|GPL-2|GPL-2+|GPL-3+|ISC|LGPL|LGPL-2+|LGPL-2.1+|LGPL-3+|public-domain	copyleft	/usr/share/doc/mount/copyright
+ncurses-base	6.5+20250216-2	BSD-3-clause|MIT/X11|X11	permissive	/usr/share/doc/ncurses-base/copyright
+ncurses-bin	6.5+20250216-2	BSD-3-clause|MIT/X11|X11	permissive	/usr/share/doc/ncurses-bin/copyright
+netbase	6.5	GPL-2	copyleft	/usr/share/doc/netbase/copyright
+openssl	3.5.6-1~deb13u2	Apache-2.0|Artistic|Artistic or GPL-1+|GPL-1+	copyleft	/usr/share/doc/openssl/copyright
+openssl-provider-legacy	3.5.6-1~deb13u2	Apache-2.0|Artistic|Artistic or GPL-1+|GPL-1+	copyleft	/usr/share/doc/openssl-provider-legacy/copyright
+passwd	1:4.17.4-2	BSD-3-clause|GPL-1|GPL-2+	copyleft	/usr/share/doc/passwd/copyright
+perl	5.40.1-6	Artistic|Artistic or GPL-1+|Artistic or GPL-1+ or Artistic-dist|Artistic-2|Artistic-dist|BSD-3-clause|BSD-3-clause-GENERIC|BSD-3-clause-with-weird-numbering|BSD-4-clause-POWERDOG|BZIP|CC0-1.0|DONT-CHANGE-THE-GPL|Expat|Expat or GPL-1+ or Artistic|FSFAP|GPL-1+|GPL-1+ or Artistic|GPL-1+ or Artistic or Artistic-dist|GPL-1+ or Artistic, and BSD-3-clause-GENERIC|GPL-1+ or Artistic, and BSD-4-clause-POWERDOG|GPL-1+ or Artistic, and Expat|GPL-1+ or Artistic, and Unicode|GPL-2+|GPL-2+ or Artistic|GPL-3+-WITH-BISON-EXCEPTION|LGPL-2.1|REGCOMP|REGCOMP, and GPL-1+ or Artistic|SDBM-PUBLIC-DOMAIN|TEXT-TABS|Unicode|ZLIB	copyleft	/usr/share/doc/perl/copyright
+perl-base	5.40.1-6	Artistic|Artistic or GPL-1+|Artistic or GPL-1+ or Artistic-dist|Artistic-2|Artistic-dist|BSD-3-clause|BSD-3-clause-GENERIC|BSD-3-clause-with-weird-numbering|BSD-4-clause-POWERDOG|BZIP|CC0-1.0|DONT-CHANGE-THE-GPL|Expat|Expat or GPL-1+ or Artistic|FSFAP|GPL-1+|GPL-1+ or Artistic|GPL-1+ or Artistic or Artistic-dist|GPL-1+ or Artistic, and BSD-3-clause-GENERIC|GPL-1+ or Artistic, and BSD-4-clause-POWERDOG|GPL-1+ or Artistic, and Expat|GPL-1+ or Artistic, and Unicode|GPL-2+|GPL-2+ or Artistic|GPL-3+-WITH-BISON-EXCEPTION|LGPL-2.1|REGCOMP|REGCOMP, and GPL-1+ or Artistic|SDBM-PUBLIC-DOMAIN|TEXT-TABS|Unicode|ZLIB	copyleft	/usr/share/doc/perl-base/copyright
+perl-modules-5.40	5.40.1-6	Artistic|Artistic or GPL-1+|Artistic or GPL-1+ or Artistic-dist|Artistic-2|Artistic-dist|BSD-3-clause|BSD-3-clause-GENERIC|BSD-3-clause-with-weird-numbering|BSD-4-clause-POWERDOG|BZIP|CC0-1.0|DONT-CHANGE-THE-GPL|Expat|Expat or GPL-1+ or Artistic|FSFAP|GPL-1+|GPL-1+ or Artistic|GPL-1+ or Artistic or Artistic-dist|GPL-1+ or Artistic, and BSD-3-clause-GENERIC|GPL-1+ or Artistic, and BSD-4-clause-POWERDOG|GPL-1+ or Artistic, and Expat|GPL-1+ or Artistic, and Unicode|GPL-2+|GPL-2+ or Artistic|GPL-3+-WITH-BISON-EXCEPTION|LGPL-2.1|REGCOMP|REGCOMP, and GPL-1+ or Artistic|SDBM-PUBLIC-DOMAIN|TEXT-TABS|Unicode|ZLIB	copyleft	/usr/share/doc/perl-modules-5.40/copyright
+pgbackrest	2.59.0-1.pgdg13+1	MIT	permissive	/usr/share/doc/pgbackrest/copyright
+pinentry-curses	1.3.1-2	GPL-2|GPL-2+|LGPL-3+|LGPL-3+ or GPL-2+|X11	copyleft	/usr/share/doc/pinentry-curses/copyright
+postgresql-18	18.4-1.pgdg13+1	BSD-2-clause|BSD-3-Clause|BSD-3-clause|Custom-Unicode|Custom-pg_dump|Custom-regex|PostgreSQL|PostgreSQL and Custom-regex and Tcl|Tcl|double-metaphone|nagaysau-ishii	permissive	/usr/share/doc/postgresql-18/copyright
+postgresql-18-jit	18.4-1.pgdg13+1	BSD-2-clause|BSD-3-Clause|BSD-3-clause|Custom-Unicode|Custom-pg_dump|Custom-regex|PostgreSQL|PostgreSQL and Custom-regex and Tcl|Tcl|double-metaphone|nagaysau-ishii	permissive	/usr/share/doc/postgresql-18-jit/copyright
+postgresql-client-18	18.4-1.pgdg13+1	BSD-2-clause|BSD-3-Clause|BSD-3-clause|Custom-Unicode|Custom-pg_dump|Custom-regex|PostgreSQL|PostgreSQL and Custom-regex and Tcl|Tcl|double-metaphone|nagaysau-ishii	permissive	/usr/share/doc/postgresql-client-18/copyright
+postgresql-client-common	291.pgdg13+1	GPL-2+	copyleft	/usr/share/doc/postgresql-client-common/copyright
+postgresql-common	291.pgdg13+1	GPL-2+	copyleft	/usr/share/doc/postgresql-common/copyright
+procps	2:4.0.4-9	GPL-2.0+|LGPL-2.0+|LGPL-2.1+	copyleft	/usr/share/doc/procps/copyright
+readline-common	8.2-6	GFDL-NIV-1.3+|GPL-2+|GPL-3|GPL-3+|ISC-no-attribution	copyleft	/usr/share/doc/readline-common/copyright
+sed	4.9-2+deb13u1	BSD-4-clause-UC|BSL-1|GFDL-NIV-1.3+|GPL-3+|GPL-3+ and ISC|ISC|X11|pcre	copyleft	/usr/share/doc/sed/copyright
+sensible-utils	0.0.25	All-permissive|GPL-2+|configure|installsh	copyleft	/usr/share/doc/sensible-utils/copyright
+sqv	1.3.0-3+b2	LGPL-2.0-or-later	copyleft	/usr/share/doc/sqv/copyright
+ssl-cert	1.1.3	BSD-3-clause	permissive	/usr/share/doc/ssl-cert/copyright
+sysvinit-utils	3.14-4	GPL-2.0|GPL-2.0+|GPL-3.0|LGPL-2.1+	copyleft	/usr/share/doc/sysvinit-utils/copyright
+tar	1.35+dfsg-3.1	GPL-2+|GPL-3+|GPL-3+ with Bison exception|LGPL-2.1+|LGPL-3+	copyleft	/usr/share/doc/tar/copyright
+tzdata	2026b-0+deb13u1	public-domain	other	/usr/share/doc/tzdata/copyright
+ucf	3.0052	GPL-2	copyleft	/usr/share/doc/ucf/copyright
+util-linux	2.41-5	BSD-2-clause|BSD-3-clause|BSD-4-clause|BSLA|Expat|GPL-2|GPL-2+|GPL-3+|ISC|LGPL|LGPL-2+|LGPL-2.1+|LGPL-3+|public-domain	copyleft	/usr/share/doc/util-linux/copyright
+xz-utils	5.8.1-1	|0BSD|FSFUL|FSFULLR|GPL-2+|GPL-3.0-or-later-WITH-Autoconf-exception-macro|LGPL-2.1+|PD|PD-debian|noderivs|none|permissive-nowarranty	copyleft	/usr/share/doc/xz-utils/copyright
+zlib1g	1:1.3.dfsg+really1.3.1-1+b1	Zlib	permissive	/usr/share/doc/zlib1g/copyright
+zstd	1.5.7+dfsg-1	BSD-3-clause|BSD-3-clause or GPL-2|Expat|GPL-2|zlib	copyleft	/usr/share/doc/zstd/copyright

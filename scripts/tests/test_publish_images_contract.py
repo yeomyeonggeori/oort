@@ -8,6 +8,7 @@ v1 invocation with a fake ``gh`` executable.
 """
 
 from copy import deepcopy
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -364,7 +365,13 @@ def validate_postgres_dockerfile(text: str) -> None:
     require("grep -Fxq 'License: MIT'" in text, "pgBackRest MIT license delta must be verified")
     require("grep -Fxq 'License: BSD3'" in text, "libssh2 BSD3 license delta must be verified")
     require("grep -Fxq 'License: ISC'" in text, "libssh2 ISC files must be acknowledged")
-    require("not the complete Debian OS inventory" in text, "image must not overclaim a complete Debian NOTICE inventory")
+    require("not a legal-sufficiency claim" in text, "image must not declare legal sufficiency of the Debian inventory")
+    require("scripts/check_debian_copyrights.sh" in text, "postgres image must scan dpkg copyright files")
+    require(
+        "COPY LICENSE NOTICE legal/THIRD_PARTY_NOTICES.md legal/generated/GHCR_THIRD_PARTY_NOTICES.txt /usr/share/licenses/oort-postgres/"
+        in text,
+        "postgres image must bundle the four GHCR notice files",
+    )
     require("/usr/share/licenses/oort-postgres/pgbackrest-MIT" in text, "pgBackRest notice must remain in the image")
     require("/usr/share/licenses/oort-postgres/libssh2-BSD3-ISC" in text, "libssh2 notice must remain in the image")
     require("ENV PGBACKREST_REPO1_CIPHER_PASS" not in text, "cipher secret must never enter image ENV")
@@ -629,7 +636,61 @@ entrypoint = read("server-rust/docker-entrypoint.sh")
 require("ARG MOMO_BUILD_SHA=unknown" in dockerfile, "Dockerfile needs an honest unstamped fallback")
 require('org.opencontainers.image.revision="${MOMO_BUILD_SHA}"' in dockerfile, "runtime image must carry build SHA")
 require('org.opencontainers.image.licenses="Apache-2.0"' in dockerfile, "runtime image must carry license metadata")
-require("COPY LICENSE NOTICE /usr/share/licenses/momo-rust/" in dockerfile, "redistributed image must contain LICENSE and NOTICE")
+require(
+    "COPY LICENSE NOTICE legal/THIRD_PARTY_NOTICES.md legal/generated/GHCR_THIRD_PARTY_NOTICES.txt /usr/share/licenses/momo-rust/"
+    in dockerfile,
+    "redistributed image must contain LICENSE, NOTICE, index, and generated bundle",
+)
+require(
+    "COPY --chown=momo:momo LICENSE NOTICE legal/THIRD_PARTY_NOTICES.md legal/generated/GHCR_THIRD_PARTY_NOTICES.txt /opt/momo/web/legal/"
+    in dockerfile,
+    "web-assets path must expose the same four notice files",
+)
+require(
+    "cd /usr/share/licenses/momo-rust && sha256sum -c GHCR_NOTICE_BUNDLE.sha256" in dockerfile,
+    "app image must verify notice file hashes at build",
+)
+require("scripts/check_debian_copyrights.sh" in dockerfile, "app image must scan dpkg copyright files")
+_notice_mod_spec = importlib.util.spec_from_file_location(
+    "generate_ghcr_notice_bundle",
+    ROOT / "scripts" / "generate_ghcr_notice_bundle.py",
+)
+_notice_mod = importlib.util.module_from_spec(_notice_mod_spec)
+assert _notice_mod_spec.loader is not None
+_notice_mod_spec.loader.exec_module(_notice_mod)
+_notice_mod.check_copy_sources_not_ignored(ROOT / "server-rust" / "Dockerfile", ROOT)
+_notice_mod.check_copy_sources_not_ignored(
+    ROOT / "infra" / "rust" / "postgres-pgbackrest" / "Dockerfile", ROOT
+)
+_notice_mod.check_legal_drafts_stay_out(ROOT / "server-rust" / "Dockerfile", ROOT)
+app_ignore = ROOT / "server-rust" / "Dockerfile.dockerignore"
+require(app_ignore.is_file(), "server-rust/Dockerfile.dockerignore must exist")
+app_ignore_text = app_ignore.read_text(encoding="utf-8")
+require(
+    "legal/privacy-policy.md" in app_ignore_text
+    and "legal/agent-disclosure.md" in app_ignore_text,
+    "per-Dockerfile ignore must keep legal drafts out of the app image context",
+)
+require(
+    re.search(r"(?m)^legal$", app_ignore_text) is None,
+    "a blanket `legal` dockerignore line excludes COPY legal/... (BuildKit replaces the root ignore)",
+)
+postgres_ignore = ROOT / "infra" / "rust" / "postgres-pgbackrest" / "Dockerfile.dockerignore"
+require(
+    not postgres_ignore.is_file()
+    or "legal/THIRD_PARTY_NOTICES.md"
+    not in [
+        src
+        for src in _notice_mod.dockerfile_copy_sources(
+            read("infra/rust/postgres-pgbackrest/Dockerfile")
+        )
+        if _notice_mod.path_ignored_by_dockerignore(
+            src,
+            _notice_mod.dockerignore_patterns(postgres_ignore.read_text(encoding="utf-8")),
+        )
+    ],
+    "postgres per-Dockerfile ignore must not exclude notice COPY sources",
+)
 require("COPY --from=web-build" in dockerfile, "published Rust image must include current web bundle")
 require('grep -q "content=\\"${MOMO_BUILD_SHA}\\"" dist/index.html' in dockerfile, "web bundle must retain build stamp")
 require(dockerfile.count("ENV MOMO_IN_CONTAINER=1") == 1, "runtime image must enable immutable SQL path policy")

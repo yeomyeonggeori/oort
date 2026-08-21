@@ -1,5 +1,14 @@
 # oort 진행 현황
 
+## GHCR 재배포 고지 bundle + drift/release gate (#1332, 2026-08-21)
+
+- `server-rust/Cargo.lock` + `clients/web/package-lock.json`에서 이름/버전/SPDX·저작권·LICENSE/COPYING·upstream NOTICE를 결정적으로 생성한다. 정본 `legal/generated/GHCR_THIRD_PARTY_NOTICES.txt`(실측 292 cargo + 411 npm, unique blob 343). `legal/THIRD_PARTY_NOTICES.md`는 현행/역사 인덱스. 누락 SPDX·라이선스 파일은 fail-closed. 생성기는 레포 자체 스크립트(`scripts/generate_ghcr_notice_bundle.py`) — cargo-about 등 외부 도구를 새 핀으로 들이지 않았다.
+- 앱·postgres 두 GHCR 이미지에 고지 4종(LICENSE·NOTICE·인덱스·생성 bundle)을 동봉하고 빌드에서 `sha256sum -c`와 dpkg `/usr/share/doc/*/copyright` 존재를 검증한다. 앱 이미지는 `/opt/momo/web/legal/`에도 같은 바이트를 두어 web-assets 경로에서 읽힌다. Debian 인벤토리의 GPL/LGPL는 copyleft이며 permissive로 오분류하면 RED.
+- `NOTICE`에서 미구현 "Open Source Licenses" 화면 주장과 permissive-only 단정을 지웠다. 자동화는 재현 가능한 인벤토리이지 법적 충분성 선언이 아니다.
+- stale bundle은 `scripts/check_ghcr_notice_bundle.sh`가 lockfile 해시로 RED. `local_gate --profile license`와 PR CI alignment가 강제한다. 정책 allow/deny(#1225)와 고지 생성(#1332)은 게이트를 나누어 두었다.
+- #35 소비: `docs/planning/ENGINE_HANDOFF.md` A-27 ready.
+- 앱 이미지 실빌드(`docker build -f server-rust/Dockerfile -t oort-1332-notice-app-test .`) 완주. 이미지 안 `sha256sum -c` 4종 OK, `/opt/momo/web/legal/`에 LICENSE·NOTICE·인덱스·생성 bundle. `server-rust/Dockerfile.dockerignore`가 `legal` 전체를 배제해 COPY가 not found 되던 구멍은 초안만 배제하도록 고쳤다(회귀: COPY 경로가 per-Dockerfile ignore에 걸리면 RED). dpkg copyright 인벤토리: `legal/generated/DEBIAN_COPYRIGHT_INVENTORY.momo-rust.txt`. postgres 실빌드 증거는 `DEBIAN_COPYRIGHT_INVENTORY.oort-postgres.txt`.
+
 ## Rust PG18 pgBackRest/WAL/PITR 폐곡선 · signed migration gate (#1330, 2026-08-12)
 
 - 기존 PG18 단일 named volume·`archive_mode=off` 경로와 logical `pg_dump` smoke를 production backup 증거로 보지 않는다. pinned PostgreSQL 18+pgBackRest image와 encrypted POSIX/S3-compatible overlay가 exact wrapper archive command·60초 timeout·secret-file-only 경계를 고정하고, app/database 두 image는 각각 SBOM·max provenance·returned-digest SLSA attestation 뒤에만 release summary를 낸다.
