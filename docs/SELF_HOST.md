@@ -5,6 +5,9 @@
 > 처음에 이미지 공급 방식만 하나 고른다: 현재 checkout을 짓는
 > **로컬 빌드**, 또는 공개된 이미지를 불변 digest로 받는 **digest pull**. 둘은
 > 같은 Rust 스택을 띄우며 스크립트가 두 경로를 섞지 못하게 막는다.
+> 이 quickstart의 PostgreSQL named volume은 **production backup이 아니다**.
+> 공개 운영·업그레이드는 별도 pgBackRest/WAL/PITR 절차와 fresh signed evidence를
+> 요구한다([운영 런북](runbooks/pgbackrest-pitr.md)).
 >
 > 시간은 약속하지 않는다. 로컬 모드는 이미지를 처음부터 굽고,
 > digest 모드는 레지스트리에서 받는다. 약속하는 것은 **결과**다: 1~4를
@@ -117,6 +120,7 @@ gh attestation verify "oci://$IMAGE_REF" \
   scripts/self_host_env.sh --compose up -d --build --wait
 
 [self-host] --wait 가 붙어 있으므로 그 명령이 끝나면 준비가 끝난 것이다.
+[self-host] 주의: 이 quickstart는 로컬 named volume만 사용하며 production 백업/PITR가 아니다.
 [self-host] 브라우저에서 열고 아래로 로그인한다:
 
   http://localhost:8088
@@ -156,6 +160,12 @@ scripts/self_host_env.sh --compose up -d --pull missing --wait
 그 사이에 순서대로 일어나는 일: 이미지 빌드 또는 pull → PostgreSQL 기동 → 최소권한 런타임
 롤 생성 → 마이그레이션 전량 적용(+2패스 멱등 검사) → 첫 로그인 계정 생성 →
 api·relay·agent-worker·웹 엣지 기동.
+
+이 경로는 생성 env에 `MOMO_MIGRATE_ENV=development`와 evidence gate 비활성 상태를
+**명시적으로** 기록하고, migrate가 같은 사실을 warning으로 남긴다. API의
+`MOMO_ENV=staging` 보안 자세는 그대로다. 운영에서 이 로컬 예외를 복사하지 말 것:
+staging/production migrate는 서명된 15분 이내 PITR evidence 또는 실제 빈 DB의
+단발 bootstrap probe 중 정확히 하나가 없으면 실패한다.
 
 ## 4. 로그인
 
@@ -342,5 +352,6 @@ MOMO_INITIAL_OWNER_PASSWORD='<새 비밀번호>' \
 > 구조적 수리(사이트 주소 파라미터화 / `acme_ca`)는 **#1239** 의 결정 사항이다.
 
 보안 강화·백업·업그레이드·다중 워크스페이스 운영은
-[`docs/DEPLOY.md`](DEPLOY.md), 배포 호스트 절차는
+[`docs/DEPLOY.md`](DEPLOY.md), pgBackRest 폐곡선과 migrate gate는
+[`docs/runbooks/pgbackrest-pitr.md`](runbooks/pgbackrest-pitr.md), 배포 호스트 절차는
 [`docs/runbooks/ncp-rust-deploy.md`](runbooks/ncp-rust-deploy.md).

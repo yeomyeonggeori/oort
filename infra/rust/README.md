@@ -21,6 +21,12 @@
 | `server-rust/docker-entrypoint.sh` | 역할 선택만. prod Swift 이미지와 동일 계약(`command: ["api"]`) |
 | `docker-compose.rust.yml` | prod compose 미러(최소셋): postgres · centrifugo · runtime-roles · migrate · api · relay |
 | `docker-compose.rust.build.yml` | 로컬 빌드 전용 오버라이드(`build:` 주입). 발행 digest 경로는 이 파일과 `--build`를 둘 다 빼고 이미지를 pull(#1266) |
+| `docker-compose.backup.yml` | **운영 전용** PostgreSQL 18+pgBackRest digest, encrypted repo, continuous WAL, signed fresh-evidence migrate gate. 로컬 quickstart는 자동으로 붙이지 않는다(#1330) |
+| `postgres-pgbackrest/Dockerfile` | pinned PG18/pgvector 기반 pgBackRest 이미지. 앱 이미지와 별도 digest·SBOM·provenance subject |
+| `pgbackrest.conf` / `pgbackrest.s3.override.yml` | 비시크릿 POSIX 기본 repo 계약과 S3-compatible 설정 seam. credential은 고정 secret file만 사용 |
+| `backup-preproof.env.example` | 첫 live proof 전에 PostgreSQL service만 pgBackRest image/archive로 바꿀 때 쓰는 일회성 shape. migrate runner 입력은 아님 |
+| `backup.env.example` / `pitr-bindings.env.example` | attended runner의 exact two-key backup shape / verifier가 생성하는 exact 19-key signed bindings shape. 세 env 파일의 overlap은 Docker 전 RED |
+| `pgbackrest-s3.env.example` | 선택 S3-compatible topology와 owner-only credential-file path shape. secret 값 없음 |
 | `rust-smoke.env.example` | env 템플릿. 복사본은 반드시 `*.secrets.env`(레포 전역 gitignore). 셀프호스트 경로는 이 템플릿 대신 `scripts/self_host_env.sh` 가 `local.secrets.env` 를 **생성**한다(#1229) |
 | `local.override.yml` + `Caddyfile.local` | **로컬 셀프호스트 엣지**(#1229) — `web-init` + `web`(Caddy `:80`, 루프백 바인딩, ACME 없음). SPA·`/v1`·`/connection` 을 같은 오리진에서 낸다. 정본 절차는 `docs/SELF_HOST.md` |
 | `docker-compose.lane-phone.yml` | **기본 비활성** MAESTRO 폰 레인 오버레이(#1022) — `mock-hermes` + `agent-worker`의 프로바이더 배선. `clients/mobile/scripts/lane-phone.sh` 전용 |
@@ -34,6 +40,12 @@ Environment owner 승인 경계 뒤에만 진행하며, tag가 아니라 pushed 
 provenance를 결속한다. `release`는 attended readback에서 required reviewer
 `kwakseongjae`(id `87296259`)와 custom `main` branch policy 하나를 확인했다. 실제 첫
 dispatch와 공개 digest 검증은 아직 `runtime-unverified`다.
+
+로컬 quickstart의 named PostgreSQL volume은 production backup이 아니다. 실제 운영
+migrate는 `docker-compose.backup.yml`의 continuous WAL + encrypted pgBackRest repo와
+[`docs/runbooks/pgbackrest-pitr.md`](../../docs/runbooks/pgbackrest-pitr.md)가 생성한
+서명된 fresh evidence를 요구한다. 이 오버레이 없이 staging/production migrate를
+실행하면 fail-closed하는 것이 정상이다.
 
 푸시 오버레이는 `docker-compose.rust.yml`을 **한 줄도 바꾸지 않는다** — 평소의
 `momorust up -d`는 relay를 띄우지도, 새 변수에서 깨지지도 않는다. 절차는
@@ -80,6 +92,12 @@ alias momorustbuild='docker compose --env-file infra/rust/rust-smoke.secrets.env
 ```
 
 ## 3. 로컬 기동
+
+아래는 **로컬 smoke**다. 복사한 env에서 `MOMO_MIGRATE_ENV=development`를
+명시해야 하며, 이는 named volume을 production backup이라고 간주하지 않는 warning
+posture다. `staging`/`production` 값을 유지하면 raw base compose의 migrate가 PITR
+mode 부재를 이름 대고 거절한다. 공개 설치·업그레이드는 이 절차를 쓰지 않고
+`docker-compose.backup.yml` + [PITR 런북](../../docs/runbooks/pgbackrest-pitr.md)을 쓴다.
 
 ```sh
 # (0) 정적 검증 — 데몬 없이 렌더만
@@ -290,10 +308,11 @@ Rust 바이너리는 prod compose가 쓰는 **이름 그대로** 읽는다.
 migrate/runtime-roles는 prod의 스위치를 그대로 읽는다: `DATABASE_URL`,
 `MOMO_RUNTIME_ROLE_PROVISION`(0|1), `MOMO_BOOTSTRAP_RUNTIME_ROLES`(0|1),
 `MOMO_AGENT_SEED_MODE`(none|demo|e2e), `MOMO_APP/RELAY/WORKER_POSTGRES_PASSWORD`,
-`MOMO_INITIAL_OWNER_EMAIL`/`_PASSWORD`. 추가로 이미지 경로 오버라이드
-`MOMO_MIGRATIONS_DIR`, `MOMO_BOOTSTRAP_ROLES_SQL`, `MOMO_RUNTIME_ROLES_SQL`,
-`MOMO_SET_OWNER_SQL`, `MOMO_BOOTSTRAP_OWNER_SQL`(Dockerfile이 `/opt/momo/...`로 세팅)과
-`MIGRATE_IDEMPOTENCY_CHECK`.
+`MOMO_INITIAL_OWNER_EMAIL`/`_PASSWORD`, `MIGRATE_IDEMPOTENCY_CHECK`. 소스 체크아웃의
+focused fixture만 `MOMO_MIGRATIONS_DIR`, `MOMO_BOOTSTRAP_ROLES_SQL`,
+`MOMO_RUNTIME_ROLES_SQL`, `MOMO_SET_OWNER_SQL`, `MOMO_BOOTSTRAP_OWNER_SQL`을 바꿀 수
+있다. Production image는 `MOMO_IN_CONTAINER=1`과 baked `/opt/momo` 경로를 권위로
+삼고 이 override가 존재하면 SQL 전에 거절한다.
 
 `MOMO_INITIAL_OWNER_*`는 **두 커맨드가 공유하되 뜻이 다르다**(#1227): `migrate`는
 「없으면 만든다」(멱등, 세션 무손상), `migrate set-owner`는 「무조건 회전한다」(세션 무효화).

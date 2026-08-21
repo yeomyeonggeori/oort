@@ -83,6 +83,8 @@
 | Centrifugo v6 | MIT/OSS(검증) | 메시지 전송계층(셀프호스트) |
 | PostgreSQL 18 | PostgreSQL License(permissive) | DB |
 | pgvector 0.8.5 | PostgreSQL License(검증됨, upstream LICENSE) | PostgreSQL 벡터 타입·HNSW 검색 확장 |
+| pgBackRest 2.59.0 | MIT(검증됨, pinned Debian package copyright) | PostgreSQL 연속 WAL archive·암호화 backup/PITR |
+| libssh2 1.11.1 | BSD-3-Clause/ISC(검증됨, pinned Debian package copyright) | pgBackRest S3-compatible transport의 직접 runtime dependency |
 | Node.js 24.4.1 | MIT(검증됨, upstream LICENSE) | 선택적 eve profile 런타임 베이스 |
 | eve 0.27.0 | Apache-2.0(검증됨, npm package metadata/NOTICE) | 선택적 커스텀 에이전트 런타임 + oort 채널 |
 | @workflow/world-postgres 5.0.0-beta.27 | Apache-2.0(검증됨, npm package metadata/LICENSE) | eve durable workflow state용 별도 PostgreSQL world |

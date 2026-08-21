@@ -142,12 +142,19 @@ services:
     labels: *momo-janitor-labels
     restart: "no"
     environment:
+      # #1330: production/staging values make momo-migrate require either a
+      # signed fresh PITR proof or the one-time empty-database bootstrap probe.
+      # The generated local quickstart sets MOMO_MIGRATE_ENV=development and
+      # emits an explicit non-production backup warning instead.
+      MOMO_ENV: ${MOMO_MIGRATE_ENV:-unconfigured}
       DATABASE_URL: ${MIGRATE_DATABASE_URL:?set MIGRATE_DATABASE_URL}
       MOMO_BOOTSTRAP_RUNTIME_ROLES: "0"
       # `none` is the product default (no legacy agent fixtures, seeded owner
       # password locked by migration 012). A local smoke may select `e2e`.
       MOMO_AGENT_SEED_MODE: ${MOMO_AGENT_SEED_MODE:-none}
       MIGRATE_IDEMPOTENCY_CHECK: ${MIGRATE_IDEMPOTENCY_CHECK:-1}
+      MOMO_PITR_EVIDENCE_REQUIRED: ${MOMO_PITR_EVIDENCE_REQUIRED:-0}
+      MOMO_PITR_BOOTSTRAP_EMPTY: ${MOMO_PITR_BOOTSTRAP_EMPTY:-0}
       # Consumed only by `run --rm migrate set-owner`; unset otherwise.
       MOMO_INITIAL_OWNER_EMAIL: ${MOMO_INITIAL_OWNER_EMAIL:-}
       MOMO_INITIAL_OWNER_PASSWORD: ${MOMO_INITIAL_OWNER_PASSWORD:-}

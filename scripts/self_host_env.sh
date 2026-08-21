@@ -461,6 +461,8 @@ print_next_steps() {
   scripts/self_host_env.sh --compose $up_args
 
 [self-host] --wait 가 붙어 있으므로 그 명령이 끝나면 준비가 끝난 것이다.
+[self-host] 주의: 이 quickstart는 로컬 named volume만 사용하며 production 백업/PITR가 아니다.
+[self-host] 운영 업그레이드는 pgBackRest 오버레이+서명된 fresh evidence gate를 따라야 한다.
 [self-host] 브라우저에서 열고 아래로 로그인한다:
 
   http://localhost:${web_port}
@@ -605,6 +607,11 @@ COMPOSE_PROJECT_NAME=$PROJECT
 MOMO_SELF_HOST_MODE=$MODE
 MOMO_RUST_IMAGE=$IMAGE
 MOMO_ENV=staging
+# 이 생성기는 로컬 quickstart이다. API는 staging 시크릿 가드를 유지하지만,
+# migrate는 production PITR 증거를 가지고 있다고 거짓말하지 않고 development warning 모드다.
+MOMO_MIGRATE_ENV=development
+MOMO_PITR_EVIDENCE_REQUIRED=0
+MOMO_PITR_BOOTSTRAP_EMPTY=0
 LOG_LEVEL=info
 
 # --- postgres ---------------------------------------------------------------

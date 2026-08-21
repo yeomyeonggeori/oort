@@ -1,5 +1,12 @@
 # oort 진행 현황
 
+## Rust PG18 pgBackRest/WAL/PITR 폐곡선 · signed migration gate (#1330, 2026-08-12)
+
+- 기존 PG18 단일 named volume·`archive_mode=off` 경로와 logical `pg_dump` smoke를 production backup 증거로 보지 않는다. pinned PostgreSQL 18+pgBackRest image와 encrypted POSIX/S3-compatible overlay가 exact wrapper archive command·60초 timeout·secret-file-only 경계를 고정하고, app/database 두 image는 각각 SBOM·max provenance·returned-digest SLSA attestation 뒤에만 release summary를 낸다.
+- 로컬 closed loop는 marker A → online full backup → backup 이후 target UTC → marker B+강제 WAL archive → source와 다른 새 volume의 time-target restore → A=1/B=0·같은 system identifier·promote·archive off를 실측한다. active/used/nonempty restore target, repo/cipher/archive drift와 labeled resource leak은 evidence 생성 전에 RED다.
+- `momo-migrate`는 production/staging SQL 전에 strict `momo-pitr-evidence/v1` HMAC, 15분 freshness, caller nonce·commit, source/restore/repo, 두 image digest, candidate migration bytes, live system identifier, backup/LSN/WAL/A-B/cleanup을 재검증하고, live migration 이력이 candidate set을 벗어난 schema downgrade도 거절한다. runner의 daemon-wide fixed-name lock container가 첫 lineage 검사부터 최종 healthy rollout까지 모든 signed migrate를 직렬화해 newer-schema/older-image 교차 배포를 막는다. 첫 install의 empty-bootstrap만 실제 빈 DB에서 별도 허용하고 local quickstart는 명시적 development warning posture다. 실제 NCP attach/S3 object-store/첫 GHCR database image publish·pull·attestation, scheduled full/differential host timer·실패 알림, #1332 귀속·사람 법무는 attended 후속 전까지 각각 `runtime-unverified(public host/schedule/legal)`다.
+- 리뷰 후속(2026-08-20): 기존 stanza는 `info` status가 `ok`/`no valid backups`일 때만 `stanza-create` skip(`missing stanza path`는 1회차 CREATE). backup overlay migrate 정책 3키는 리터럴 production lock. evidence 시각은 source PG `clock_timestamp` 단일원. EXIT trap probe DROP은 fail-closed helper를 우회한다. 같은 repo 볼륨 2연속 ensure는 CREATE→SKIP으로 실측. 전체 `verify_pgbackrest_pitr_e2e.sh`(rust migrate 이미지 빌드)는 미실행이라 `runtime-unverified(full isolated e2e)`다.
+
 ## next 채널 위생 — 로컬 release 롤백 가드 + 재발행 체크리스트 (#1281, 2026-08-20)
 
 - **택일:** 로컬 `cargo tauri build`(릴리스)가 항상 `0.1.0-next.1` 이라 매니페스트(`next.10`)보다 낮아 기동 즉시 롤백하던 구멍은 **가드 확장**으로 막았다. `MOMO_CHANNEL_BUILD=1` 이 있는 산출물만 업데이터 네트워크를 탄다. 그 플래그는 `scripts/publish_next_build.sh` 만 켠다. `tauri.conf.json` 버전을 마지막 발행값으로 올리는 주입은 `next.N+1` 에서 같은 구멍이 다시 열리고, 발행 스크립트가 `--config` 로 버전을 넣는 이유(커밋마다 버전 파일을 안 건드림)와 싸운다.
