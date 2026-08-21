@@ -1,4 +1,3 @@
-/// <reference types="vitest/config" />
 import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwind from "@tailwindcss/vite";
@@ -166,9 +165,14 @@ export default defineConfig({
   // 49 web files were TZ-independent. CI's `env.TZ` is only a runner bandage
   // (#1267) — a local `npm test` from UTC (external contributor) still went
   // red. process.env.TZ inside the test file is too late: ESM hoists imports.
+  //
+  // `defineConfig` stays on `vite` (this app is Vite 6). `vitest/config`'s
+  // defineConfig is typed against vitest 2.1's nested Vite 5, so Plugin
+  // factories here (`react()`, `tailwind()`, the two below) fail tsc -b
+  // TS2769. Intersection lets `test.env` through without that swap.
   test: {
     env: {
       TZ: "Asia/Seoul",
     },
   },
-});
+} as import("vite").UserConfig & { test: { env: { TZ: string } } });
