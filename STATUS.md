@@ -1,5 +1,10 @@
 # oort 진행 현황
 
+## GHCR publish-images multi-arch 계약 (#1643, 2026-08-22)
+
+- `publish-images.yml`을 native `linux/amd64`(`ubuntu-24.04`) + native `linux/arm64`(`ubuntu-24.04-arm`) 잡 분리 후 `buildx imagetools create`로 manifest list를 묶는 구조로 확장. QEMU 없음. `workflow_dispatch`·`release` Environment·main-only 승인 경계는 각 잡에 유지. attestation은 아키별 digest와 list digest 둘 다(운영자 pin=list). `sha-<gitsha>`는 list에만 붙는다.
+- 계약 테스트가 arm64 잡·manifest 합성·기존 단언(수동 전용·권한·풀 SHA·digest 검증·QEMU 금지·`latest` 금지)을 고정. **실발행 dispatch는 이 goal 밖** — 현행 v0.1.0 digest는 amd64 단일, arm64/list 실측 0.
+
 ## PR CI 노드 레인 붕대 제거 (#1635, 2026-08-22)
 
 - web 레인 `env TZ: Asia/Seoul` 제거. TZ 정본은 `clients/web/vite.config.ts` `test.env` (#1267). CI 중복 pin은 UTC 호스트의 로컬 빨강을 가린다.

@@ -47,12 +47,27 @@ EXPECTED_ACTIONS = {
     "actions/attest": "1e69f48acb82d1966a394da916b4c1698aa569d6",
 }
 EXPECTED_ACTION_COUNTS = {
-    "actions/checkout": 1,
-    "docker/setup-buildx-action": 1,
-    "docker/login-action": 1,
-    "docker/build-push-action": 2,
-    "actions/attest": 2,
+    "actions/checkout": 2,
+    "docker/setup-buildx-action": 3,
+    "docker/login-action": 3,
+    "docker/build-push-action": 4,
+    "actions/attest": 6,
 }
+ARCH_JOBS = {
+    "publish-amd64": {
+        "runner": "ubuntu-24.04",
+        "platform": "linux/amd64",
+        "arch": "amd64",
+    },
+    "publish-arm64": {
+        "runner": "ubuntu-24.04-arm",
+        "platform": "linux/arm64",
+        "arch": "arm64",
+    },
+}
+MANIFEST_JOB = "publish-manifest"
+EXPECTED_JOBS = ("publish-amd64", "publish-arm64", "publish-manifest")
+PUSH_BY_DIGEST = "type=image,name={name},push-by-digest=true,name-canonical=true,push=true"
 EXPECTED_ROLES = (
     "api",
     "relay",
@@ -120,6 +135,239 @@ def step_by_id(steps: list[dict[str, Any]], step_id: str) -> dict[str, Any]:
     return matches[0]
 
 
+def all_steps(model: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
+    steps: list[tuple[str, dict[str, Any]]] = []
+    for job_name, job in model["jobs"].items():
+        for step in job.get("steps", []):
+            steps.append((job_name, step))
+    return steps
+
+
+def validate_main_ref_guard(steps: list[dict[str, Any]], job_name: str) -> dict[str, Any]:
+    guard_steps = [step for step in steps if step.get("name") == "Require a main-branch dispatch"]
+    require(len(guard_steps) == 1, f"{job_name} must have one explicit main-ref guard")
+    guard = guard_steps[0]
+    require(steps.index(guard) == 0, f"{job_name} main-ref guard must run before checkout, login, or push")
+    require(guard.get("env", {}).get("DISPATCH_REF") == "${{ github.ref }}", f"{job_name} main-ref guard must read github.ref")
+    guard_script = guard.get("run")
+    require(isinstance(guard_script, str), f"{job_name} main-ref guard must be a shell step")
+    require("refs/heads/main" in guard_script, f"{job_name} main-ref guard must require refs/heads/main")
+    require(run_ref_guard(guard_script, "refs/heads/main") == 0, f"{job_name} main-ref guard must allow main")
+    require(run_ref_guard(guard_script, "refs/heads/review-fixture") != 0, f"{job_name} main-ref guard must reject non-main")
+    return guard
+
+
+def arch_job_fingerprint(job: dict[str, Any], *, arch: str, platform: str, runner: str) -> str:
+    blob = json.dumps(job, sort_keys=True)
+    return blob.replace(platform, "{platform}").replace(runner, "{runner}").replace(arch, "{arch}")
+
+
+def validate_attestation(
+    steps: list[dict[str, Any]],
+    attest_id: str,
+    *,
+    subject_name: str,
+    subject_digest: str,
+    after_ids: tuple[str, ...],
+) -> dict[str, Any]:
+    attest = step_by_id(steps, attest_id)
+    attest_inputs = attest.get("with", {})
+    for after_id in after_ids:
+        require(
+            steps.index(attest) > steps.index(step_by_id(steps, after_id)),
+            f"{attest_id} must follow {after_id}",
+        )
+    require(
+        attest.get("uses") == f"actions/attest@{EXPECTED_ACTIONS['actions/attest']}",
+        f"{attest_id} action pin drifted",
+    )
+    require(attest_inputs.get("subject-name") == subject_name, f"{attest_id} subject package drifted")
+    require(attest_inputs.get("subject-digest") == subject_digest, f"{attest_id} must bind its returned digest")
+    require(attest_inputs.get("push-to-registry") is True, f"{attest_id} must be an OCI referrer")
+    require(attest_inputs.get("create-storage-record") is False, "optional storage records would widen permissions")
+    return attest
+
+
+def validate_arch_job(job_name: str, job: dict[str, Any], *, runner: str, platform: str, arch: str) -> None:
+    require(job.get("runs-on") == runner, f"{job_name} must use native runner {runner}")
+    require(job.get("environment") == "release", f"{job_name} must cross the release Environment boundary")
+    require(
+        job.get("outputs")
+        == {
+            "application-digest": "${{ steps.build_app.outputs.digest }}",
+            "postgres-digest": "${{ steps.build_postgres.outputs.digest }}",
+        },
+        f"{job_name} outputs must expose both returned platform digests",
+    )
+    steps = job.get("steps")
+    require(isinstance(steps, list) and steps, f"{job_name} must contain steps")
+    validate_main_ref_guard(steps, job_name)
+    require(job.get("timeout-minutes") == 90, f"{job_name} timeout drifted")
+
+    subjects = (
+        (
+            "application",
+            "build_app",
+            "server-rust/Dockerfile",
+            "${{ env.IMAGE }}",
+            "attest_app",
+            f"oort-rust-{arch}",
+        ),
+        (
+            "PostgreSQL",
+            "build_postgres",
+            "infra/rust/postgres-pgbackrest/Dockerfile",
+            "${{ env.POSTGRES_IMAGE }}",
+            "attest_postgres",
+            f"oort-postgres-{arch}",
+        ),
+    )
+    for name, build_id, dockerfile_path, image_name, attest_id, cache_scope in subjects:
+        build = step_by_id(steps, build_id)
+        build_inputs = build.get("with", {})
+        require(
+            build.get("uses") == f"docker/build-push-action@{EXPECTED_ACTIONS['docker/build-push-action']}",
+            f"{job_name} {name} build action pin drifted",
+        )
+        require(build_inputs.get("context") == ".", f"{job_name} {name} build context must be repository root")
+        require(build_inputs.get("file") == dockerfile_path, f"{job_name} {name} Dockerfile path drifted")
+        require(build_inputs.get("platforms") == platform, f"{job_name} {name} must build only {platform}")
+        require("," not in str(build_inputs.get("platforms")), f"{job_name} {name} must not QEMU-cross via a platform list")
+        require(build_inputs.get("push") is True, f"{job_name} {name} digest attestation requires a registry push")
+        require("tags" not in build_inputs, f"{job_name} {name} must not apply sha-* (manifest job owns the locator)")
+        require(
+            build_inputs.get("outputs") == PUSH_BY_DIGEST.format(name=image_name),
+            f"{job_name} {name} must push by digest under the canonical package name",
+        )
+        require("MOMO_BUILD_SHA=${{ github.sha }}" in build_inputs.get("build-args", ""), f"{job_name} {name} image must stamp source SHA")
+        require(build_inputs.get("provenance") == "mode=max", f"{job_name} {name} build must emit maximum provenance")
+        require(build_inputs.get("sbom") is True, f"{job_name} {name} build must emit an SBOM")
+        require(build_inputs.get("cache-from") == f"type=gha,scope={cache_scope}", f"{job_name} {name} cache-from scope drifted")
+        require(
+            build_inputs.get("cache-to") == f"type=gha,mode=max,scope={cache_scope}",
+            f"{job_name} {name} cache-to scope drifted",
+        )
+        labels = build_inputs.get("labels", "")
+        require("org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}" in labels, f"{job_name} {name} package must link source")
+        require("org.opencontainers.image.revision=${{ github.sha }}" in labels, f"{job_name} {name} revision label must bind source SHA")
+        if name == "application":
+            require("org.opencontainers.image.licenses=Apache-2.0" in labels, f"{job_name} application license label drifted")
+        else:
+            require(
+                "org.opencontainers.image.licenses=" not in labels,
+                "PostgreSQL image must not misrepresent a partial dependency delta as a complete OS license inventory",
+            )
+        validate_attestation(
+            steps,
+            attest_id,
+            subject_name=image_name,
+            subject_digest=f"${{{{ steps.{build_id}.outputs.digest }}}}",
+            after_ids=(build_id,),
+        )
+
+
+def validate_merge_script(step: dict[str, Any], *, image_env: str, amd64_from: str, arm64_from: str) -> None:
+    script = step.get("run", "")
+    require("docker buildx imagetools create" in script, "manifest job must join platform digests with imagetools create")
+    require(f'--tag "${{{image_env}}}:${{IMAGE_TAG}}"' in script, "manifest job must apply sha-<gitsha> only to the list")
+    require(f'"${{{image_env}}}@${{AMD64_DIGEST}}"' in script, "manifest job must consume the amd64 digest")
+    require(f'"${{{image_env}}}@${{ARM64_DIGEST}}"' in script, "manifest job must consume the arm64 digest")
+    require("awk '/^Digest:/{print $2; exit}'" in script, "manifest job must take the index digest, not a child manifest")
+    require("echo \"digest=${INDEX_DIGEST}\" >> \"$GITHUB_OUTPUT\"" in script, "manifest job must export the list digest")
+    require('"$AMD64_DIGEST" = "$ARM64_DIGEST"' in script, "manifest job must reject identical platform digests")
+    require(
+        '"$INDEX_DIGEST" = "$AMD64_DIGEST" ] || [ "$INDEX_DIGEST" = "$ARM64_DIGEST"' in script,
+        "manifest job must reject a list digest equal to a platform digest",
+    )
+    require("^sha256:[0-9a-f]{64}$" in script, "manifest job must reject malformed digests")
+    require("latest" not in script, "manifest job must not publish a latest tag")
+    env = step.get("env", {})
+    require(env.get("AMD64_DIGEST") == amd64_from, "manifest job amd64 digest source drifted")
+    require(env.get("ARM64_DIGEST") == arm64_from, "manifest job arm64 digest source drifted")
+
+
+def validate_manifest_job(job: dict[str, Any]) -> None:
+    require(job.get("runs-on") == "ubuntu-24.04", "manifest job must run on ubuntu-24.04")
+    require(job.get("environment") == "release", "manifest job must cross the release Environment boundary")
+    require(job.get("needs") == ["publish-amd64", "publish-arm64"], "manifest job must wait for both native builds")
+    require(
+        job.get("outputs")
+        == {
+            "application-image": "${{ env.IMAGE }}",
+            "application-digest": "${{ steps.merge_app.outputs.digest }}",
+            "postgres-image": "${{ env.POSTGRES_IMAGE }}",
+            "postgres-digest": "${{ steps.merge_postgres.outputs.digest }}",
+        },
+        "manifest job outputs must expose both list digests as the operator pin",
+    )
+    steps = job.get("steps")
+    require(isinstance(steps, list) and steps, "manifest job must contain steps")
+    validate_main_ref_guard(steps, MANIFEST_JOB)
+    require(not any(step.get("uses", "").startswith("actions/checkout@") for step in steps), "manifest job must not checkout source")
+
+    merge_app = step_by_id(steps, "merge_app")
+    merge_postgres = step_by_id(steps, "merge_postgres")
+    validate_merge_script(
+        merge_app,
+        image_env="IMAGE",
+        amd64_from="${{ needs.publish-amd64.outputs.application-digest }}",
+        arm64_from="${{ needs.publish-arm64.outputs.application-digest }}",
+    )
+    validate_merge_script(
+        merge_postgres,
+        image_env="POSTGRES_IMAGE",
+        amd64_from="${{ needs.publish-amd64.outputs.postgres-digest }}",
+        arm64_from="${{ needs.publish-arm64.outputs.postgres-digest }}",
+    )
+
+    attest_app_index = validate_attestation(
+        steps,
+        "attest_app_index",
+        subject_name="${{ env.IMAGE }}",
+        subject_digest="${{ steps.merge_app.outputs.digest }}",
+        after_ids=("merge_app",),
+    )
+    attest_postgres_index = validate_attestation(
+        steps,
+        "attest_postgres_index",
+        subject_name="${{ env.POSTGRES_IMAGE }}",
+        subject_digest="${{ steps.merge_postgres.outputs.digest }}",
+        after_ids=("merge_postgres",),
+    )
+
+    manifest = step_by_id(steps, "release_manifest")
+    require(
+        steps.index(manifest) > steps.index(attest_app_index)
+        and steps.index(manifest) > steps.index(attest_postgres_index),
+        "release manifest must follow both list attestations",
+    )
+    require(
+        manifest.get("env")
+        == {
+            "APPLICATION_DIGEST": "${{ steps.merge_app.outputs.digest }}",
+            "POSTGRES_DIGEST": "${{ steps.merge_postgres.outputs.digest }}",
+            "APPLICATION_AMD64_DIGEST": "${{ needs.publish-amd64.outputs.application-digest }}",
+            "APPLICATION_ARM64_DIGEST": "${{ needs.publish-arm64.outputs.application-digest }}",
+            "POSTGRES_AMD64_DIGEST": "${{ needs.publish-amd64.outputs.postgres-digest }}",
+            "POSTGRES_ARM64_DIGEST": "${{ needs.publish-arm64.outputs.postgres-digest }}",
+        },
+        "release manifest must consume list pins and both platform digests",
+    )
+    manifest_script = manifest.get("run", "")
+    require("$IMAGE@$APPLICATION_DIGEST" in manifest_script, "release manifest missing application list digest ref")
+    require("$POSTGRES_IMAGE@$POSTGRES_DIGEST" in manifest_script, "release manifest missing PostgreSQL list digest ref")
+    require("$IMAGE@$APPLICATION_AMD64_DIGEST" in manifest_script, "release manifest missing application amd64 digest")
+    require("$IMAGE@$APPLICATION_ARM64_DIGEST" in manifest_script, "release manifest missing application arm64 digest")
+    require("$POSTGRES_IMAGE@$POSTGRES_AMD64_DIGEST" in manifest_script, "release manifest missing PostgreSQL amd64 digest")
+    require("$POSTGRES_IMAGE@$POSTGRES_ARM64_DIGEST" in manifest_script, "release manifest missing PostgreSQL arm64 digest")
+    require("manifest list (pin)" in manifest_script, "release manifest must name the list digest as the operator pin")
+    require("^sha256:[0-9a-f]{64}$" in manifest_script, "release manifest must reject malformed digests")
+    require(
+        sum("GITHUB_STEP_SUMMARY" in str(step.get("run", "")) for _, step in ((MANIFEST_JOB, step) for step in steps)) == 1,
+        "release manifest must be the only publication summary in the manifest job",
+    )
+
+
 def validate_workflow(model: dict[str, Any]) -> None:
     # Ruby's YAML 1.1 parser treats the unquoted key `on` as boolean true.
     trigger = model.get("on", model.get("true"))
@@ -133,34 +381,18 @@ def validate_workflow(model: dict[str, Any]) -> None:
     )
 
     jobs = model.get("jobs")
-    require(isinstance(jobs, dict) and list(jobs) == ["publish"], "workflow must expose one publish job")
-    job = jobs["publish"]
-    require(job.get("environment") == "release", "publish job must cross the release Environment boundary")
+    require(isinstance(jobs, dict) and tuple(jobs) == EXPECTED_JOBS, "workflow must expose amd64, arm64, then manifest jobs")
+    for job_name, spec in ARCH_JOBS.items():
+        job = jobs[job_name]
+        validate_arch_job(job_name, job, **spec)
     require(
-        job.get("outputs")
-        == {
-            "application-image": "${{ env.IMAGE }}",
-            "application-digest": "${{ steps.build_app.outputs.digest }}",
-            "postgres-image": "${{ env.POSTGRES_IMAGE }}",
-            "postgres-digest": "${{ steps.build_postgres.outputs.digest }}",
-        },
-        "job outputs must expose both returned image digests",
+        arch_job_fingerprint(jobs["publish-amd64"], **ARCH_JOBS["publish-amd64"])
+        == arch_job_fingerprint(jobs["publish-arm64"], **ARCH_JOBS["publish-arm64"]),
+        "arch jobs must be identical except runner, platform, and cache scope",
     )
-    steps = job.get("steps")
-    require(isinstance(steps, list) and steps, "publish job must contain steps")
+    validate_manifest_job(jobs[MANIFEST_JOB])
 
-    guard_steps = [step for step in steps if step.get("name") == "Require a main-branch dispatch"]
-    require(len(guard_steps) == 1, "workflow must have one explicit main-ref guard")
-    guard = guard_steps[0]
-    require(steps.index(guard) == 0, "main-ref guard must run before checkout, login, or push")
-    require(guard.get("env", {}).get("DISPATCH_REF") == "${{ github.ref }}", "main-ref guard must read github.ref")
-    guard_script = guard.get("run")
-    require(isinstance(guard_script, str), "main-ref guard must be a shell step")
-    require("refs/heads/main" in guard_script, "main-ref guard must require refs/heads/main")
-    require(run_ref_guard(guard_script, "refs/heads/main") == 0, "main-ref guard must allow main")
-    require(run_ref_guard(guard_script, "refs/heads/review-fixture") != 0, "main-ref guard must reject non-main")
-
-    uses_steps = [step for step in steps if "uses" in step]
+    uses_steps = [step for _, step in all_steps(model) if "uses" in step]
     require(len(uses_steps) == sum(EXPECTED_ACTION_COUNTS.values()), "workflow action count drifted")
     seen_actions: dict[str, list[str]] = {}
     for step in uses_steps:
@@ -171,88 +403,14 @@ def validate_workflow(model: dict[str, Any]) -> None:
         )
         action, revision = uses.split("@", 1)
         seen_actions.setdefault(action, []).append(revision)
+        require("qemu" not in action, "native publication must not install QEMU")
     require(set(seen_actions) == set(EXPECTED_ACTIONS), "workflow action set drifted")
     for action, revisions in seen_actions.items():
         require(len(revisions) == EXPECTED_ACTION_COUNTS[action], f"workflow action count drifted: {action}")
         require(set(revisions) == {EXPECTED_ACTIONS[action]}, f"immutable action pin drifted: {action}")
 
-    subjects = (
-        (
-            "application",
-            "build_app",
-            "server-rust/Dockerfile",
-            "${{ env.IMAGE }}:${{ env.IMAGE_TAG }}",
-            "attest_app",
-            "${{ env.IMAGE }}",
-        ),
-        (
-            "PostgreSQL",
-            "build_postgres",
-            "infra/rust/postgres-pgbackrest/Dockerfile",
-            "${{ env.POSTGRES_IMAGE }}:${{ env.IMAGE_TAG }}",
-            "attest_postgres",
-            "${{ env.POSTGRES_IMAGE }}",
-        ),
-    )
-    attestation_steps: list[dict[str, Any]] = []
-    for name, build_id, dockerfile_path, tag, attest_id, subject_name in subjects:
-        build = step_by_id(steps, build_id)
-        build_inputs = build.get("with", {})
-        require(
-            build.get("uses") == f"docker/build-push-action@{EXPECTED_ACTIONS['docker/build-push-action']}",
-            f"{name} build action pin drifted",
-        )
-        require(build_inputs.get("context") == ".", f"{name} build context must be repository root")
-        require(build_inputs.get("file") == dockerfile_path, f"{name} Dockerfile path drifted")
-        require(build_inputs.get("platforms") == "linux/amd64", f"{name} publication must match the live amd64 host")
-        require(build_inputs.get("push") is True, f"{name} digest attestation requires a registry push")
-        require(build_inputs.get("tags") == tag, f"{name} tag must bind package and commit locator")
-        require("MOMO_BUILD_SHA=${{ github.sha }}" in build_inputs.get("build-args", ""), f"{name} image must stamp source SHA")
-        require(build_inputs.get("provenance") == "mode=max", f"{name} build must emit maximum provenance")
-        require(build_inputs.get("sbom") is True, f"{name} build must emit an SBOM")
-        labels = build_inputs.get("labels", "")
-        require("org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}" in labels, f"{name} package must link source")
-        require("org.opencontainers.image.revision=${{ github.sha }}" in labels, f"{name} revision label must bind source SHA")
-        if name == "application":
-            require("org.opencontainers.image.licenses=Apache-2.0" in labels, "application license label drifted")
-        else:
-            require(
-                "org.opencontainers.image.licenses=" not in labels,
-                "PostgreSQL image must not misrepresent a partial dependency delta as a complete OS license inventory",
-            )
-
-        attest = step_by_id(steps, attest_id)
-        attestation_steps.append(attest)
-        attest_inputs = attest.get("with", {})
-        require(steps.index(attest) > steps.index(build), f"{name} attestation must follow its pushed build")
-        require(
-            attest.get("uses") == f"actions/attest@{EXPECTED_ACTIONS['actions/attest']}",
-            f"{name} attestation action pin drifted",
-        )
-        require(attest_inputs.get("subject-name") == subject_name, f"{name} attestation subject package drifted")
-        require(
-            attest_inputs.get("subject-digest") == f"${{{{ steps.{build_id}.outputs.digest }}}}",
-            f"{name} attestation must bind its returned build digest",
-        )
-        require(attest_inputs.get("push-to-registry") is True, f"{name} attestation must be an OCI referrer")
-        require(attest_inputs.get("create-storage-record") is False, "optional storage records would widen permissions")
-
-    manifest = step_by_id(steps, "release_manifest")
-    require(all(steps.index(manifest) > steps.index(step) for step in attestation_steps), "release manifest must follow both attestations")
     require(
-        manifest.get("env")
-        == {
-            "APPLICATION_DIGEST": "${{ steps.build_app.outputs.digest }}",
-            "POSTGRES_DIGEST": "${{ steps.build_postgres.outputs.digest }}",
-        },
-        "release manifest must consume both returned digests",
-    )
-    manifest_script = manifest.get("run", "")
-    require("$IMAGE@$APPLICATION_DIGEST" in manifest_script, "release manifest missing application digest ref")
-    require("$POSTGRES_IMAGE@$POSTGRES_DIGEST" in manifest_script, "release manifest missing PostgreSQL digest ref")
-    require("^sha256:[0-9a-f]{64}$" in manifest_script, "release manifest must reject malformed digests")
-    require(
-        sum("GITHUB_STEP_SUMMARY" in str(step.get("run", "")) for step in steps) == 1,
+        sum("GITHUB_STEP_SUMMARY" in str(step.get("run", "")) for _, step in all_steps(model)) == 1,
         "release manifest must be the only publication summary",
     )
 
@@ -266,37 +424,50 @@ def expect_workflow_rejected(model: dict[str, Any], message: str) -> None:
 
 
 def validate_workflow_mutations(model: dict[str, Any]) -> None:
-    steps = model["jobs"]["publish"]["steps"]
+    amd64_steps = model["jobs"]["publish-amd64"]["steps"]
+    arm64_steps = model["jobs"]["publish-arm64"]["steps"]
 
     mutation = deepcopy(model)
-    step_by_id(mutation["jobs"]["publish"]["steps"], "attest_postgres")["uses"] = "actions/attest@v4"
+    step_by_id(mutation["jobs"]["publish-amd64"]["steps"], "attest_postgres")["uses"] = "actions/attest@v4"
     expect_workflow_rejected(mutation, "mutable action ref")
 
     mutation = deepcopy(model)
-    mutation["jobs"]["publish"]["steps"] = mutation["jobs"]["publish"]["steps"][1:]
+    mutation["jobs"]["publish-arm64"]["steps"] = mutation["jobs"]["publish-arm64"]["steps"][1:]
     expect_workflow_rejected(mutation, "main-ref guard removal")
 
     mutation = deepcopy(model)
-    mutation["jobs"]["publish"]["steps"][0]["run"] = "test -n refs/heads/main\n"
+    mutation["jobs"]["publish-manifest"]["steps"] = mutation["jobs"]["publish-manifest"]["steps"][1:]
+    expect_workflow_rejected(mutation, "manifest job main-ref guard removal")
+
+    mutation = deepcopy(model)
+    mutation["jobs"]["publish-amd64"]["steps"][0]["run"] = "test -n refs/heads/main\n"
     expect_workflow_rejected(mutation, "non-main ref allowed")
 
-    for build_id in ("build_app", "build_postgres"):
-        mutation = deepcopy(model)
-        step_by_id(mutation["jobs"]["publish"]["steps"], build_id)["with"]["push"] = False
-        expect_workflow_rejected(mutation, f"{build_id} registry push disabled")
+    for job_name in ARCH_JOBS:
+        for build_id in ("build_app", "build_postgres"):
+            mutation = deepcopy(model)
+            step_by_id(mutation["jobs"][job_name]["steps"], build_id)["with"]["push"] = False
+            expect_workflow_rejected(mutation, f"{job_name} {build_id} registry push disabled")
 
-    for attest_id in ("attest_app", "attest_postgres"):
+    for job_name, attest_id in (
+        ("publish-amd64", "attest_app"),
+        ("publish-amd64", "attest_postgres"),
+        ("publish-arm64", "attest_app"),
+        ("publish-arm64", "attest_postgres"),
+        ("publish-manifest", "attest_app_index"),
+        ("publish-manifest", "attest_postgres_index"),
+    ):
         for key, replacement, description in (
             ("subject-name", "${{ env.IMAGE }}:${{ env.IMAGE_TAG }}", "tagged attestation subject"),
             ("subject-digest", "sha256:deadbeef", "attestation detached from build digest"),
             ("push-to-registry", False, "OCI attestation publication disabled"),
         ):
             mutation = deepcopy(model)
-            step_by_id(mutation["jobs"]["publish"]["steps"], attest_id)["with"][key] = replacement
-            expect_workflow_rejected(mutation, f"{attest_id}: {description}")
+            step_by_id(mutation["jobs"][job_name]["steps"], attest_id)["with"][key] = replacement
+            expect_workflow_rejected(mutation, f"{job_name} {attest_id}: {description}")
 
     mutation = deepcopy(model)
-    mutated_steps = mutation["jobs"]["publish"]["steps"]
+    mutated_steps = mutation["jobs"]["publish-amd64"]["steps"]
     attest_index = next(index for index, step in enumerate(mutated_steps) if step.get("id") == "attest_postgres")
     attest_step = mutated_steps.pop(attest_index)
     build_index = next(index for index, step in enumerate(mutated_steps) if step.get("id") == "build_postgres")
@@ -304,26 +475,76 @@ def validate_workflow_mutations(model: dict[str, Any]) -> None:
     expect_workflow_rejected(mutation, "PostgreSQL attestation before push")
 
     mutation = deepcopy(model)
-    mutated_steps = mutation["jobs"]["publish"]["steps"]
+    mutated_steps = mutation["jobs"]["publish-manifest"]["steps"]
     manifest_index = next(index for index, step in enumerate(mutated_steps) if step.get("id") == "release_manifest")
     manifest_step = mutated_steps.pop(manifest_index)
-    first_attest_index = next(index for index, step in enumerate(mutated_steps) if step.get("id") == "attest_app")
+    first_attest_index = next(index for index, step in enumerate(mutated_steps) if step.get("id") == "attest_app_index")
     mutated_steps.insert(first_attest_index, manifest_step)
-    expect_workflow_rejected(mutation, "release manifest before both attestations")
+    expect_workflow_rejected(mutation, "release manifest before both list attestations")
 
     mutation = deepcopy(model)
-    step_by_id(mutation["jobs"]["publish"]["steps"], "attest_postgres")["with"]["subject-digest"] = (
+    step_by_id(mutation["jobs"]["publish-amd64"]["steps"], "attest_postgres")["with"]["subject-digest"] = (
         "${{ steps.build_app.outputs.digest }}"
     )
-    expect_workflow_rejected(mutation, "both attestations bound to application digest")
+    expect_workflow_rejected(mutation, "both platform attestations bound to application digest")
+
+    mutation = deepcopy(model)
+    step_by_id(mutation["jobs"]["publish-manifest"]["steps"], "attest_postgres_index")["with"]["subject-digest"] = (
+        "${{ steps.merge_app.outputs.digest }}"
+    )
+    expect_workflow_rejected(mutation, "both list attestations bound to application digest")
+
+    mutation = deepcopy(model)
+    step_by_id(mutation["jobs"]["publish-manifest"]["steps"], "attest_app_index")["with"]["subject-digest"] = (
+        "${{ needs.publish-amd64.outputs.application-digest }}"
+    )
+    expect_workflow_rejected(mutation, "list attestation bound to a platform digest")
 
     mutation = deepcopy(model)
     mutation["permissions"]["artifact-metadata"] = "write"
     expect_workflow_rejected(mutation, "permission expansion")
 
+    mutation = deepcopy(model)
+    del mutation["jobs"]["publish-arm64"]["environment"]
+    expect_workflow_rejected(mutation, "arm64 job skipped the release Environment")
+
+    mutation = deepcopy(model)
+    mutation["jobs"]["publish-manifest"]["needs"] = ["publish-amd64"]
+    expect_workflow_rejected(mutation, "manifest job dropped the arm64 dependency")
+
+    mutation = deepcopy(model)
+    mutation["jobs"]["publish-arm64"]["runs-on"] = "ubuntu-24.04"
+    expect_workflow_rejected(mutation, "arm64 job moved onto an amd64 runner")
+
+    mutation = deepcopy(model)
+    step_by_id(mutation["jobs"]["publish-amd64"]["steps"], "build_app")["with"]["platforms"] = "linux/amd64,linux/arm64"
+    expect_workflow_rejected(mutation, "QEMU-style multi-platform build on one runner")
+
+    mutation = deepcopy(model)
+    step_by_id(mutation["jobs"]["publish-amd64"]["steps"], "build_app")["with"]["tags"] = (
+        "${{ env.IMAGE }}:${{ env.IMAGE_TAG }}"
+    )
+    expect_workflow_rejected(mutation, "arch job applied the sha-* release tag")
+
+    mutation = deepcopy(model)
+    mutation["jobs"]["publish-amd64"]["steps"].insert(
+        1,
+        {"uses": "docker/setup-qemu-action@2913540392141d67144dafa1ecff33efc4894384"},
+    )
+    expect_workflow_rejected(mutation, "QEMU installer added")
+
+    mutation = deepcopy(model)
+    step_by_id(mutation["jobs"]["publish-manifest"]["steps"], "merge_app")["run"] = "echo digest=sha256:deadbeef\n"
+    expect_workflow_rejected(mutation, "imagetools create removed")
+
     # Avoid an unused local that could hide accidental changes to this fixture.
-    require(step_by_id(steps, "build_app") is not None, "base mutation fixture must contain application build")
-    require(step_by_id(steps, "build_postgres") is not None, "base mutation fixture must contain PostgreSQL build")
+    require(step_by_id(amd64_steps, "build_app") is not None, "base mutation fixture must contain application build")
+    require(step_by_id(amd64_steps, "build_postgres") is not None, "base mutation fixture must contain PostgreSQL build")
+    require(step_by_id(arm64_steps, "build_app") is not None, "base mutation fixture must contain arm64 application build")
+    require(
+        step_by_id(model["jobs"]["publish-manifest"]["steps"], "merge_app") is not None,
+        "base mutation fixture must contain application manifest merge",
+    )
 
 
 def validate_postgres_dockerfile(text: str) -> None:
@@ -623,8 +844,11 @@ workflow_model = parse_workflow()
 validate_workflow(workflow_model)
 validate_workflow_mutations(workflow_model)
 require("file: infra/prod/docker/momo.Dockerfile" not in workflow_text, "workflow still publishes retired Swift image")
-require("linux/arm64" not in workflow_text, "first Rust publication must not claim an unbuilt arm64 artifact")
-require("docker/setup-qemu-action" not in workflow_text, "native amd64 publication must not install QEMU")
+require("linux/arm64" in workflow_text, "multi-arch publication must name linux/arm64")
+require("ubuntu-24.04-arm" in workflow_text, "arm64 publication must use the native ubuntu-24.04-arm runner")
+require("docker/setup-qemu-action" not in workflow_text, "native publication must not install QEMU")
+require("imagetools create" in workflow_text, "platform digests must be joined with buildx imagetools create")
+require("push-by-digest=true" in workflow_text, "arch jobs must push by digest so the sha-* tag is list-only")
 require("org.opencontainers.image.source=" in workflow_text, "GHCR package must link to source repository")
 require("org.opencontainers.image.revision=${{ github.sha }}" in workflow_text, "OCI revision must match source SHA")
 require("org.opencontainers.image.licenses=Apache-2.0" in workflow_text, "OCI license metadata must be explicit")
