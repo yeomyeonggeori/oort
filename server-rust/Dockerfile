@@ -221,7 +221,11 @@ COPY infra/prod/bootstrap_runtime_roles.sql /opt/momo/sql/bootstrap_runtime_role
 COPY infra/prod/set_initial_owner.sql /opt/momo/sql/set_initial_owner.sql
 # #1227: the only-if-absent twin the `migrate` command applies at first boot.
 COPY infra/prod/bootstrap_owner_if_absent.sql /opt/momo/sql/bootstrap_owner_if_absent.sql
-COPY LICENSE NOTICE /usr/share/licenses/momo-rust/
+# #1332: four attribution files + sha256sum + Debian copyright scanner.
+# The hash file names the four files as they appear in this directory.
+COPY LICENSE NOTICE legal/THIRD_PARTY_NOTICES.md legal/generated/GHCR_THIRD_PARTY_NOTICES.txt /usr/share/licenses/momo-rust/
+COPY legal/generated/GHCR_NOTICE_BUNDLE.sha256 /usr/share/licenses/momo-rust/
+COPY scripts/check_debian_copyrights.sh /usr/local/bin/check_debian_copyrights.sh
 COPY server-rust/docker-entrypoint.sh /usr/local/bin/momo-rust-entrypoint
 
 # The SPA payload, LAST of the COPYs on purpose: a web-only change then
@@ -229,9 +233,11 @@ COPY server-rust/docker-entrypoint.sh /usr/local/bin/momo-rust-entrypoint
 # Owned by `momo` so `web-assets` can `cp -a` (ownership preservation by a
 # non-root process only succeeds when the source is already its own).
 COPY --from=web-build --chown=momo:momo /src/clients/web/dist/ /opt/momo/web/
+RUN mkdir -p /opt/momo/web/legal && chown momo:momo /opt/momo/web/legal
+COPY --chown=momo:momo LICENSE NOTICE legal/THIRD_PARTY_NOTICES.md legal/generated/GHCR_THIRD_PARTY_NOTICES.txt /opt/momo/web/legal/
 
 RUN set -eux; \
-    chmod +x /usr/local/bin/momo-rust-entrypoint; \
+    chmod +x /usr/local/bin/momo-rust-entrypoint /usr/local/bin/check_debian_copyrights.sh; \
     test -s /opt/momo/migrations/001_init.sql; \
     test -s /opt/momo/sql/bootstrap_roles.sql; \
     test -s /opt/momo/sql/bootstrap_runtime_roles.sql; \
@@ -239,6 +245,11 @@ RUN set -eux; \
     test -s /opt/momo/sql/bootstrap_owner_if_absent.sql; \
     test -s /usr/share/licenses/momo-rust/LICENSE; \
     test -s /usr/share/licenses/momo-rust/NOTICE; \
+    test -s /usr/share/licenses/momo-rust/THIRD_PARTY_NOTICES.md; \
+    test -s /usr/share/licenses/momo-rust/GHCR_THIRD_PARTY_NOTICES.txt; \
+    test -s /opt/momo/web/legal/GHCR_THIRD_PARTY_NOTICES.txt; \
+    sha256sum -c /usr/share/licenses/momo-rust/GHCR_NOTICE_BUNDLE.sha256; \
+    /usr/local/bin/check_debian_copyrights.sh --output /usr/share/licenses/momo-rust/DEBIAN_COPYRIGHT_INVENTORY.txt; \
     test -s /opt/momo/web/index.html; \
     momo-migrate --help >/dev/null
 

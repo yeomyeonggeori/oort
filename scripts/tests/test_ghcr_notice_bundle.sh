@@ -90,7 +90,7 @@ PY
 FROM debian:bookworm-slim
 COPY LICENSE NOTICE legal/THIRD_PARTY_NOTICES.md legal/generated/GHCR_THIRD_PARTY_NOTICES.txt /usr/share/licenses/momo-rust/
 COPY legal/generated/GHCR_NOTICE_BUNDLE.sha256 /usr/share/licenses/momo-rust/
-COPY LICENSE NOTICE legal/THIRD_PARTY_NOTICES.md legal/generated/GHCR_THIRD_PARTY_NOTICES.txt /opt/momo/web/legal/
+COPY --chown=momo:momo LICENSE NOTICE legal/THIRD_PARTY_NOTICES.md legal/generated/GHCR_THIRD_PARTY_NOTICES.txt /opt/momo/web/legal/
 RUN sha256sum -c /usr/share/licenses/momo-rust/GHCR_NOTICE_BUNDLE.sha256
 COPY scripts/check_debian_copyrights.sh /usr/local/bin/check_debian_copyrights.sh
 RUN test -s /usr/share/licenses/momo-rust/LICENSE; \

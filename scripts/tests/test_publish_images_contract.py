@@ -364,7 +364,13 @@ def validate_postgres_dockerfile(text: str) -> None:
     require("grep -Fxq 'License: MIT'" in text, "pgBackRest MIT license delta must be verified")
     require("grep -Fxq 'License: BSD3'" in text, "libssh2 BSD3 license delta must be verified")
     require("grep -Fxq 'License: ISC'" in text, "libssh2 ISC files must be acknowledged")
-    require("not the complete Debian OS inventory" in text, "image must not overclaim a complete Debian NOTICE inventory")
+    require("not a legal-sufficiency claim" in text, "image must not declare legal sufficiency of the Debian inventory")
+    require("scripts/check_debian_copyrights.sh" in text, "postgres image must scan dpkg copyright files")
+    require(
+        "COPY LICENSE NOTICE legal/THIRD_PARTY_NOTICES.md legal/generated/GHCR_THIRD_PARTY_NOTICES.txt /usr/share/licenses/oort-postgres/"
+        in text,
+        "postgres image must bundle the four GHCR notice files",
+    )
     require("/usr/share/licenses/oort-postgres/pgbackrest-MIT" in text, "pgBackRest notice must remain in the image")
     require("/usr/share/licenses/oort-postgres/libssh2-BSD3-ISC" in text, "libssh2 notice must remain in the image")
     require("ENV PGBACKREST_REPO1_CIPHER_PASS" not in text, "cipher secret must never enter image ENV")
@@ -629,7 +635,21 @@ entrypoint = read("server-rust/docker-entrypoint.sh")
 require("ARG MOMO_BUILD_SHA=unknown" in dockerfile, "Dockerfile needs an honest unstamped fallback")
 require('org.opencontainers.image.revision="${MOMO_BUILD_SHA}"' in dockerfile, "runtime image must carry build SHA")
 require('org.opencontainers.image.licenses="Apache-2.0"' in dockerfile, "runtime image must carry license metadata")
-require("COPY LICENSE NOTICE /usr/share/licenses/momo-rust/" in dockerfile, "redistributed image must contain LICENSE and NOTICE")
+require(
+    "COPY LICENSE NOTICE legal/THIRD_PARTY_NOTICES.md legal/generated/GHCR_THIRD_PARTY_NOTICES.txt /usr/share/licenses/momo-rust/"
+    in dockerfile,
+    "redistributed image must contain LICENSE, NOTICE, index, and generated bundle",
+)
+require(
+    "COPY --chown=momo:momo LICENSE NOTICE legal/THIRD_PARTY_NOTICES.md legal/generated/GHCR_THIRD_PARTY_NOTICES.txt /opt/momo/web/legal/"
+    in dockerfile,
+    "web-assets path must expose the same four notice files",
+)
+require(
+    "sha256sum -c /usr/share/licenses/momo-rust/GHCR_NOTICE_BUNDLE.sha256" in dockerfile,
+    "app image must verify notice file hashes at build",
+)
+require("scripts/check_debian_copyrights.sh" in dockerfile, "app image must scan dpkg copyright files")
 require("COPY --from=web-build" in dockerfile, "published Rust image must include current web bundle")
 require('grep -q "content=\\"${MOMO_BUILD_SHA}\\"" dist/index.html' in dockerfile, "web bundle must retain build stamp")
 require(dockerfile.count("ENV MOMO_IN_CONTAINER=1") == 1, "runtime image must enable immutable SQL path policy")

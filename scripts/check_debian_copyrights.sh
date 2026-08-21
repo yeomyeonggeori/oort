@@ -69,14 +69,17 @@ scan_image() {
     exit 1
   fi
   tmp="${out}.tmp"
+  pkgs="${out}.pkgs"
   {
     printf '%s\n' '# debian-copyright-inventory/v1'
     printf '%s\n' '# columns: package <TAB> version <TAB> license_fields <TAB> class <TAB> copyright_path'
     printf '%s\n' '# class copyleft includes GPL/LGPL/AGPL and is never written as permissive.'
     printf '%s\n' '# this is file-existence evidence, not a legal-sufficiency declaration.'
   } >"$tmp"
+  dpkg-query -W -f='${Package}\t${Version}\n' | LC_ALL=C sort >"$pkgs"
   missing=0
-  dpkg-query -W -f='${Package}\t${Version}\n' | LC_ALL=C sort | while IFS="$(printf '\t')" read -r pkg version; do
+  tab=$(printf '\t')
+  while IFS="$tab" read -r pkg version; do
     [ -n "$pkg" ] || continue
     copyright="/usr/share/doc/${pkg}/copyright"
     if [ ! -s "$copyright" ]; then
@@ -88,21 +91,13 @@ scan_image() {
     [ -n "$fields" ] || fields="(no License: field)"
     class=$(classify_debian_license_fields "$fields")
     printf '%s\t%s\t%s\t%s\t%s\n' "$pkg" "$version" "$fields" "$class" "$copyright" >>"$tmp"
-  done
-  # The while-loop is in a pipeline subshell on some shells; re-scan for missing.
-  missing_list=$(dpkg-query -W -f='${Package}\n' | while read -r pkg; do
-    [ -s "/usr/share/doc/${pkg}/copyright" ] || printf '%s\n' "$pkg"
-  done)
-  if [ -n "$missing_list" ]; then
-    echo "DEBIAN COPYRIGHT FAIL: packages without copyright files:" >&2
-    printf '%s\n' "$missing_list" >&2
+  done <"$pkgs"
+  rm -f "$pkgs"
+  if [ "$missing" -ne 0 ]; then
     rm -f "$tmp"
     exit 1
   fi
-  if grep -E $'\tpermissive\t' "$tmp" >/dev/null 2>&1; then
-    # Re-check any permissive row is not actually copyleft.
-    verify_inventory "$tmp"
-  fi
+  verify_inventory "$tmp"
   mv "$tmp" "$out"
   echo "DEBIAN COPYRIGHT PASS: wrote $out"
 }

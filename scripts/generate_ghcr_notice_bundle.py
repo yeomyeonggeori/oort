@@ -68,7 +68,7 @@ PERMISSIVE_FIELD_RE = re.compile(
 
 APP_DOCKERFILE_REQUIRED = (
     "COPY LICENSE NOTICE legal/THIRD_PARTY_NOTICES.md legal/generated/GHCR_THIRD_PARTY_NOTICES.txt /usr/share/licenses/momo-rust/",
-    "COPY LICENSE NOTICE legal/THIRD_PARTY_NOTICES.md legal/generated/GHCR_THIRD_PARTY_NOTICES.txt /opt/momo/web/legal/",
+    "COPY --chown=momo:momo LICENSE NOTICE legal/THIRD_PARTY_NOTICES.md legal/generated/GHCR_THIRD_PARTY_NOTICES.txt /opt/momo/web/legal/",
     "sha256sum -c /usr/share/licenses/momo-rust/GHCR_NOTICE_BUNDLE.sha256",
     "scripts/check_debian_copyrights.sh",
     "test -s /usr/share/licenses/momo-rust/LICENSE",
