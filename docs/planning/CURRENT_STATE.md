@@ -1,5 +1,19 @@
 # oort 기획 현재 상태 (Planning Current State)
 
+> **2026-08-22 스냅샷 48 (Fable · momo-main — 대기 큐 소진·★성재=ITO-1 시작일만. PLN-20260815-01).** 컴팩트 복원 진입점.
+>
+> **★ 대기 큐 4/4 랜딩**: #1635(CI 붕대 제거+재도입 가드)·#1641(루트 계약 web-legacy 거짓 이분 일소)·#1642(발행 라벨 현행화+GATED_DOCS 3종=439 fact)·#1643(**multi-arch 발행 워크플로 준비** — native arm64·manifest list·이중 attestation·pin=list digest. **실발행=성재 dispatch+release 승인 클릭**, 이후 arm64 실측 digest 기입=Fable). engine 전부 그린.
+>
+> **★ 성재 남은 목록(전량·이외 없음)**: ①**ITO-1 실테스트 시작일 결정**(전 조건 충족 — SELF_HOST_FIRST_DAY 런북·LAUNCH_READY 팩·#1613 가드·v0.1.0 digest) ②다음 발행 창 multi-arch dispatch 승인 2클릭 ③T-D §8 데스크탑 재발행(ITO-3 직전) — ②③은 Fable이 시점에 재안내.
+>
+> **운영 교훈 2(성문화)**: 머지 대기 루프는 DIRTY 즉시 탈출 분기 필수(BEHIND만 처리하면 STATUS 상단 경합에서 무한 대기 — 2026-08-22 실측 2건) · 도커 빌드 검증 세션은 빌드캐시/target 회수를 세션 말미 의무로(ENOSPC 실사고 — builder prune 5GB+target 9GB).
+>
+> **자율 백로그(다음 세션 후보)**: 제품 파도 #1600~#1604 · DCO CI·CONTRIBUTING 드리프트 게이트·볼륨 소유자 라벨·raw compose 우회·픽스처 URL·Swift prod 주석·DEPLOY 본체·SELF_HOST GATED_DOCS — 원장=각 이슈 코멘트. ITO 개시 후엔 인테이크 우선.
+>
+> **상태 요약**: main=v0.1.0+L-파도 승격 완료 계열·track 정렬 유지·NCP 2대 정지(스왑 도구)·#1361 연기(볼륨 보존)·grok 병렬 1 안정.
+>
+> 이하 스냅샷 47:
+
 > **2026-08-21 스냅샷 47 (Fable · momo-main — ★L-파도 완주·v0.1.0 릴리스·성재=ITO-1만. PLN-20260815-01).** 컴팩트 복원 진입점.
 >
 > **★ 런칭 위생 완결**: **v0.1.0 첫 릴리스**(tag@45a154d2·digest 표·https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.0) · gitleaks PR-range CI 레인 · 기여자 첫 빨강 2건 결정성 수리 · 커뮤니티 문서 4종(CoC v2.1·CODEOWNERS·CHANGELOG·CONTRIBUTING 영문 정본) — 전부 랜딩 후 **승격 main=`b1bf46e9`**(PR #1637)+sync 짝(#1638/#1639·topology 실측 OK). RELEASING.md=발행 반복 절차 정본. SELF_HOST §2-B=실 digest 문면.
