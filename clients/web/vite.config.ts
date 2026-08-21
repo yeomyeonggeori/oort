@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwind from "@tailwindcss/vite";
@@ -158,5 +159,16 @@ export default defineConfig({
     ...(cspGateHeader
       ? { headers: { "Content-Security-Policy": cspGateHeader } }
       : {}),
+  },
+  // Pin TZ at worker spawn, before any ESM evaluation. quotaModel.test.ts
+  // asserts KST clock strings from UTC fixtures ("2026-07-26T13:00:00Z" →
+  // "22:00"). CI run 31364003821: TZ=UTC made that one file 9-red; the other
+  // 49 web files were TZ-independent. CI's `env.TZ` is only a runner bandage
+  // (#1267) — a local `npm test` from UTC (external contributor) still went
+  // red. process.env.TZ inside the test file is too late: ESM hoists imports.
+  test: {
+    env: {
+      TZ: "Asia/Seoul",
+    },
   },
 });
