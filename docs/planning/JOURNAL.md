@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-08-21 (Fable) · ★GHCR 첫 발행 완결 — 법무 승인·public 전환·attestation 실측·arm64 경계 실증
+- **발행 폐곡선**: 성재 dispatch+release 승인 → run 32461307786 success → digest 2본(app `0fbddd36…`·postgres `c6806369…`) attestation 동반. **법무 검토 승인**(성재 발화 — 브리핑 3판단: OS 레이어 copyleft 관행 수준·성실 이행 범위·상표 인지) 원장 기록(#1332 코멘트).
+- **public 전환**: kwakseongjae=org **member**라 패키지 관리 불가 발견 → org owner(lifeissea)가 집행(org 패키지 정책 해제 선행). 익명 pull 토큰·digest 일치·`gh attestation verify` 2본 전부 실측 PASS. **Owner 승격 요청 전달됨**(재발 방지).
+- **H2 실측**: Apple Silicon digest pull → `no matching manifest for linux/arm64` — SELF_HOST.md 문서 경계 실증(에뮬레이션 비가정 준수). amd64 부팅 실측=H2 잔여(amd64 호스트 또는 arm64 릴리스 후 — Q3 결정 근거 보강). 테스트 잔재 0 회수.
+- **다음**: ①L3 파도(첫 v0.x 태그+릴리스에 digest 기재·SELF_HOST digest 문면 현행화·runtime-unverified 해소) ②ITO-1 H1(성재 — 조건 충족 상태) ③CI gitleaks·커뮤니티 문서 등 L 잔여.
+
 ## 2026-08-21 (Fable) · GHCR 발행 선행 완결 — #1330·#1332·#1613 랜딩·★승격 45a154d2·성재 발행 결재 대기
 - **GHCR 체인 코드 완결**: #1330(PITR 게이트 — rebase 151커밋+리뷰 4건 대응·H1 실측 반증(2.59 stanza-create 멱등)·PR #1342) → **#1332(NOTICE bundle — cargo 292+npm 411·이미지 2본 동봉·mutation 4종 RED·PR #1620)** → #1613(교차-체크아웃 스택/볼륨 충돌 fail-closed·실 docker 증명·PR #1622). 검수 실적발 1: #1332의 per-Dockerfile ignore가 legal/scripts 배제→이미지 COPY 실패(실빌드 2회 재현) — 수리+ignore↔COPY 일반화 단언.
 - **★승격**: main=`45a154d2`(PR #1623, 34커밋 — ITO-0 5건+GHCR 선행 3건+파도 9·10 잔여) + sync 짝 #1624/#1625 → main=양 트랙 조상 실측. 발행 워크플로 main ref 조건 충족.
