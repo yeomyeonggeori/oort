@@ -157,8 +157,9 @@ jobs:
 
           # 레인별 관심 경로. 목록에 없는 경로(docs/·STATUS.md·infra/·scripts/·
           # 은퇴 중인 Swift 트리 server/·relay/·workers/·services/)만 바뀐 PR은
-          # 두 레인 모두 skip된다. skip된 잡은 GitHub에서 성공으로 집계되므로,
+          # rust/node 레인이 skip된다. skip된 잡은 GitHub에서 성공으로 집계되므로,
           # required check으로 승격해도 문서 PR이 막히지 않는다.
+          # gitleaks는 여기 없다: 시크릿은 전 경로라 그 잡은 상시 실행한다.
           #
           # 테스트를 돌리기 시작하면서 레인이 **자기 트리 밖의 입력**도 읽게
           # 됐다. 그 둘은 실측으로 찾아 목록에 넣었다(넣지 않으면 그 파일만
@@ -258,6 +259,110 @@ jobs:
           scripts/tests/test_trusted_policy_runner.sh
           scripts/tests/test_ghcr_notice_bundle.sh
           scripts/check_ghcr_notice_bundle.sh --stale-only
+
+  # Role split with scripts/check_secrets.sh (#1236 local vs #1629 CI):
+  # this job scans the PR commit range (base.sha..head.sha). Full-history
+  # scanning stays in the local gate. Both reuse .gitleaksignore. Fail-closed.
+  gitleaks:
+    name: gitleaks secret scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      # Pinned CLI download. A third-party scanner Action would need an org
+      # license secret, which would break fork PRs (packet: secrets 불요).
+      - name: install pinned gitleaks
+        env:
+          GITLEAKS_VERSION: 8.30.1
+          GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+        run: |
+          set -euo pipefail
+          arch="$(uname -m)"
+          [ "$arch" = "x86_64" ] || {
+            echo "gitleaks pin is linux_x64; unsupported runner arch $arch" >&2
+            exit 1
+          }
+          command -v curl >/dev/null || {
+            echo "curl is not installed; cannot fetch pinned gitleaks" >&2
+            exit 1
+          }
+          [ -n "${RUNNER_TEMP:-}" ] || {
+            echo "RUNNER_TEMP is unset" >&2
+            exit 1
+          }
+          tmp="$RUNNER_TEMP/gitleaks-install"
+          mkdir -p "$tmp"
+          tarball="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          url="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${tarball}"
+          curl -fsSL "$url" -o "$tmp/$tarball"
+          echo "${GITLEAKS_SHA256}  $tmp/$tarball" | sha256sum -c -
+          tar -xzf "$tmp/$tarball" -C "$tmp" gitleaks
+          test -x "$tmp/gitleaks" || {
+            echo "gitleaks binary missing after extract" >&2
+            exit 1
+          }
+          install_dir="$HOME/.local/bin"
+          mkdir -p "$install_dir"
+          install -m 0755 "$tmp/gitleaks" "$install_dir/gitleaks"
+          [ -n "${GITHUB_PATH:-}" ] || {
+            echo "GITHUB_PATH is unset; cannot export gitleaks" >&2
+            exit 1
+          }
+          echo "$install_dir" >> "$GITHUB_PATH"
+          export PATH="$install_dir:$PATH"
+          command -v gitleaks >/dev/null || {
+            echo "gitleaks is not installed" >&2
+            exit 1
+          }
+          got="$(gitleaks version)"
+          got="${got#v}"
+          test "$got" = "$GITLEAKS_VERSION" || {
+            echo "gitleaks version drift: got $got want $GITLEAKS_VERSION" >&2
+            exit 1
+          }
+
+      - name: scan PR commit range
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          command -v gitleaks >/dev/null || {
+            echo "gitleaks is not installed" >&2
+            exit 1
+          }
+          test -f .gitleaksignore || {
+            echo "missing triage baseline: .gitleaksignore" >&2
+            exit 1
+          }
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            [ -n "${BASE_SHA:-}" ] && [ -n "${HEAD_SHA:-}" ] || {
+              echo "missing pull_request base/head SHA" >&2
+              exit 1
+            }
+            git cat-file -e "${BASE_SHA}^{commit}" || {
+              echo "base SHA $BASE_SHA is not in this checkout" >&2
+              exit 1
+            }
+            git cat-file -e "${HEAD_SHA}^{commit}" || {
+              echo "head SHA $HEAD_SHA is not in this checkout" >&2
+              exit 1
+            }
+            log_opts="${BASE_SHA}..${HEAD_SHA}"
+          else
+            log_opts="-1"
+          fi
+          echo "[gitleaks] version=$(gitleaks version) log-opts=$log_opts baseline=.gitleaksignore"
+          gitleaks detect \
+            --source . \
+            --gitleaks-ignore-path .gitleaksignore \
+            --log-opts "$log_opts" \
+            --redact=90
 
   # ── ② Rust 레인 ─────────────────────────────────────────────────────────
   # `cargo test --workspace` + 카고 라이선스 게이트.
@@ -459,11 +564,13 @@ jobs:
 
   # Branch protection requires this one stable context. Optional path lanes may
   # be skipped, but a failure/cancellation in any selected lane keeps it red.
+  # alignment and gitleaks always run; a skip there is red.
   gate:
     name: PR CI gate
     needs:
       - changes
       - alignment
+      - gitleaks
       - rust
       - node
       - contract
@@ -473,6 +580,7 @@ jobs:
     env:
       CHANGES_RESULT: ${{ needs.changes.result }}
       ALIGNMENT_RESULT: ${{ needs.alignment.result }}
+      GITLEAKS_RESULT: ${{ needs.gitleaks.result }}
       RUST_RESULT: ${{ needs.rust.result }}
       NODE_RESULT: ${{ needs.node.result }}
       CONTRACT_RESULT: ${{ needs.contract.result }}
@@ -485,6 +593,7 @@ jobs:
           set -euo pipefail
           test "$CHANGES_RESULT" = success
           test "$ALIGNMENT_RESULT" = success
+          test "$GITLEAKS_RESULT" = success
           require_optional_lane() {
             selected="$1"
             result="$2"
