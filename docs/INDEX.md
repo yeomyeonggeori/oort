@@ -20,7 +20,7 @@
 | 공유 코어 | **`packages/momo-core`**(TS, `@momo/core`) | `clients/Core`(Swift) |
 | 기동/배포 | [`docs/SELF_HOST.md`](SELF_HOST.md)(**처음 한 번** — clone→로그인) · [`docs/RELEASING.md`](RELEASING.md)(서버/이미지 `v0.x` 발행) · [`infra/rust/README.md`](../infra/rust/README.md)(그다음 전부: 이미지+compose) · [`docs/runbooks/ncp-rust-deploy.md`](runbooks/ncp-rust-deploy.md)(라이브 정본) | [`docs/RUN.md`](RUN.md)(Swift 기준 — 상단 배너 참조) |
 
-- **예외 — 은퇴 아님:** `relay/PushRelay`(라이브 푸시 경로가 지금도 빌드·배포) · `clients/web-legacy`(알파가 실제로 서빙하는 산출물, ADR-0133 parity 게이트 전까지).
+- **예외 — 은퇴 아님:** `relay/PushRelay`(라이브 푸시 경로가 지금도 빌드·배포) · `clients/web-legacy`(삭제 아님. 라이브 웹=`clients/web`, `server-rust/Dockerfile:147,157,173,231` web-assets / #1228. Swift prod `Dockerfile.web`·e2e `web-init`·`--profile web`가 아직 소비, #1610).
 - 현행 스택 빌드·검증 명령의 정본은 [`AGENTS.md`](../AGENTS.md) §3(그리고 `Makefile`의 `build`/`test`).
 
 ---
@@ -242,10 +242,10 @@
 | `server-rust/` | **Rust/Axum 워크스페이스**(ADR-0145). `bins/{momo-server,momo-relay,momo-agent-worker,momo-notifier,momo-migrate}` + `crates/momo-*`(messaging=쓰기경로 척추 · outbox · auth · db · agent · provider · push · drive · t3 · wire · settings · ephemeral) |
 | `server/Migrations/` | **정본 DDL**(`00N_*.sql`). Rust 이미지가 그대로 싣는다 — 은퇴 아님 |
 | `packages/momo-core/` | `@momo/core` — 웹·폰이 공유하는 TS 도메인 코어(레포 루트 npm 워크스페이스). **모델 사본 금지** |
-| `clients/web/` | React/Vite SPA — 제품 웹 표면이자 데스크톱이 감싸는 번들 |
+| `clients/web/` | React/Vite SPA — 제품 웹 표면이자 데스크톱이 감싸는 번들. **라이브 서빙**(`server-rust/Dockerfile:147,157,173,231` → `/opt/momo/web/` · `web-assets`, #1228) |
 | `clients/desktop/` | Tauri 2 셸(딥링크·mDNS·알림·키체인·업데이터). UI를 포크하지 않는다 |
 | `clients/mobile/` | React Native 앱(현재 iOS) |
-| `clients/web-legacy/` | ADR-0119 v0 웹 — **알파가 실제로 서빙하는 산출물**(parity 게이트 전까지). 생성 타입이 `docs/api/openapi.yaml`과 동기화돼야 한다 |
+| `clients/web-legacy/` | ADR-0119 v0 웹 — 삭제 아님. 라이브 서빙은 `clients/web`. Swift prod Dockerfile·e2e web-init·`--profile web`가 아직 소비(#1610). 생성 타입이 `docs/api/openapi.yaml`과 동기화돼야 한다 |
 | `adapters/hermes/` · `adapters/prime/` | `momo_adapter.py`(BasePlatformAdapter) + plugin.yaml (py3) · prime-agent 어댑터(스트림 릴레이·하네스 refine·RPC) |
 | `infra/rust/` | **라이브 배포 경로** — Rust 이미지 compose + `Caddyfile`(정본) + 푸시/폰 오버레이 |
 | `infra/` | dev `docker-compose.yml`(PG18+Centrifugo v6) · e2e `docker-compose.e2e.yml`(local gate boundary) · `centrifugo.json` · `.env.example`. Compose layer 정본은 `docs/adr/0002-docker-compose-layering.md` |
@@ -259,7 +259,7 @@
 | `server/Sources/` | MomoServer(Hummingbird 2) — Rust 재작성으로 대체됨 |
 | `relay/OutboxRelay/` · `workers/` · `services/` | Swift 실행체(AgentWorker·WorkHostDaemon·NotifierWorker·LinkShort 등) |
 | `relay/PushRelay/` | ※ **예외 — 은퇴 아님**: 라이브 푸시 경로가 지금도 빌드·배포한다 |
-| `infra/prod/` · `fastlane/` | Swift prod compose(SOPS/age + pgBackRest 예시, 실제 secret 없음) · Apple 배포. ※ `infra/prod/Dockerfile.web`은 예외 — web-legacy를 서빙한다 |
+| `infra/prod/` · `fastlane/` | Swift prod compose(SOPS/age + pgBackRest 예시, 실제 secret 없음) · Apple 배포. ※ `infra/prod/Dockerfile.web`은 **Swift prod 경로**에서 web-legacy dist를 담는다(라이브 알파 아님, #1610) |
 
 ---
 

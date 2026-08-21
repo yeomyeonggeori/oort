@@ -213,15 +213,17 @@ auto_classify_path() {
     clients/web-legacy/*)
       # Before the docs/*.md pattern on purpose: clients/web-legacy/README.md is
       # the httpOnly promotion-gate canon — a web surface change, not docs.
-      # This is the ADR-0119 v0 (MOMO-596 moved it off clients/web); it still owns
-      # the live serving/e2e path, so the `web` profile stays pointed here.
-      AUTO_NEED_WEB=1; AUTO_REASONS+=("$1 -> web (ADR-0119 alpha at clients/web-legacy)") ;;
+      # ADR-0119 v0 (MOMO-596 moved it off clients/web). Live alpha serving is
+      # clients/web (server-rust/Dockerfile:147,157,173,231 web-assets / #1228).
+      # This tree is still consumed by Swift prod Dockerfile.web, e2e web-init,
+      # and this `web` profile — so the profile stays pointed here (#1610).
+      AUTO_NEED_WEB=1; AUTO_REASONS+=("$1 -> web (ADR-0119 v0 at clients/web-legacy; not live serving)") ;;
     clients/web/*|clients/desktop/*)
-      # ADR-0133 canonical UI + Tauri shell (promoted from the MOMO-595 P0 spike
-      # by MOMO-596). No gate profile covers this stack yet, and `web` verifies
-      # clients/web-legacy — narrowing here would emit a green that proves
-      # nothing about the changed files.
-      AUTO_NEED_ALL=1; AUTO_REASONS+=("$1 -> all (ADR-0133 stack has no gate profile yet; widen, do not narrow)") ;;
+      # ADR-0133 canonical UI + Tauri shell. Live alpha serving is clients/web
+      # (server-rust/Dockerfile web-assets / #1228). `--profile web` still
+      # verifies clients/web-legacy only — narrowing here would emit a green
+      # that proves nothing about the changed files, so --auto widens to `all`.
+      AUTO_NEED_ALL=1; AUTO_REASONS+=("$1 -> all (ADR-0133 live stack; web profile still targets web-legacy; widen, do not narrow)") ;;
     docs/*|research/*|legal/*|*.md)
       AUTO_REASONS+=("$1 -> docs") ;;
     clients/*)
@@ -1094,7 +1096,7 @@ add_web_commands() {
   add_note_once coverage "#1141 design pre-flight in this profile: scripts/design_preflight_web.sh runs its three discriminators as cases (web raw_color 11, web strings 16, core separation 17) and then gates clients/web at 10/10 categories and packages/momo-core at 3/3, both hard zero. The emdash category is an AST scan over string-literal and JSX-text nodes, so comments, JSX comments and describe/it names are out of scope by construction rather than by a filter; the one reviewed exception (clients/web/src/features/timeline/spacing.ts throw copy) carries design-preflight-allow with its evidence."
   add_note_once not_covered "The pre-flight is mechanical only: light/dark review, the four states, keyboard path, and long-Korean overflow remain the manual SKILL §10 checklist. It also cannot see an em-dash written as a JSX entity (&mdash;) — there is no such literal in the tree today."
   add_note_once coverage "MOMO-391 web client gate: npm ci install, eslint, Vitest unit tests, tsc typecheck, openapi-typescript generated types verified in sync with docs/api/openapi.yaml, vite production build, and a permissive-only license gate over the full installed transitive closure (markdown inventory written to the gate output dir)."
-  add_note_once coverage "MOMO-678 generated-types step is scripts/verify_web_generated_types.sh: it separates generator-failed (unparseable spec / missing openapi-typescript) from types-stale, prints the offending diff plus the committed-vs-regenerated documented-path counts, and restores src/api/schema.d.ts on every exit path so a drift failure cannot resurface as an unrelated worktree-clean failure on the next run. clients/web-legacy is frozen as a UI but still the served artifact (infra/prod/Dockerfile.web, e2e web-init), so this remains the only compile-time check that a shipped web client matches docs/api/openapi.yaml."
+  add_note_once coverage "MOMO-678 generated-types step is scripts/verify_web_generated_types.sh: it separates generator-failed (unparseable spec / missing openapi-typescript) from types-stale, prints the offending diff plus the committed-vs-regenerated documented-path counts, and restores src/api/schema.d.ts on every exit path so a drift failure cannot resurface as an unrelated worktree-clean failure on the next run. Live serving is clients/web (server-rust/Dockerfile:147,157,173,231 web-assets / #1228). clients/web-legacy is frozen as a UI and still consumed by Swift prod Dockerfile.web, e2e web-init, and this profile (#1610), so this remains the compile-time check that that still-consumed client matches docs/api/openapi.yaml."
   add_note_once coverage "MOMO-390 serving regression via scripts/web_serving_smoke.sh: prod Caddyfile parse matrix (APP_DOMAIN set/unset/empty), SPA deep-link fallback, /v1 proxy wiring, /v1/centrifugo edge 403, strict SPA CSP headers, and APP_DOMAIN-unset sentinel fail-closed ordering (guard before proxy)."
   add_note_once coverage "MOMO-391 browser smoke via scripts/verify_web_login_smoke.sh: isolated e2e compose stack (project momo391web, loopback ports 18990-18995) serving the built SPA through the real prod Caddyfile; real Chromium login (workspace empty -> demo fallback), channel list, seeded timeline display, wss realtime subscribe under the strict CSP, REST-sent message rendered live through REST -> PG -> outbox -> relay -> Centrifugo, REST ?after= catch-up on subscribe, and zero CSP console violations."
   add_note_once coverage "MOMO-400 (ADR-0119 W-4) inside the same browser smoke: composer clientMsgId idempotency (first send forwarded then answered 500; retry must reuse the SAME clientMsgId; exactly one DOM render and one committed row), read-state rail (bulk GET badge init, external cursor PUT reflected through the user:read-state#<member-id> push with zero extra GETs, strictly monotonic browser cursor PUTs), ADR-0112 approval cards (no tool JSON/cost leakage; in-browser approve receipt 200; externally pre-decided 409 receipt handled as a card state transition), and DM open via POST /dms + composer round-trip + GET /dms listing."
