@@ -270,6 +270,36 @@ centrifugo (전송 전용) <── publish ── relay ┘
 실시간도 같은 오리진에서 나오므로 CORS가 성립할 여지가 없고, 실시간 주소는
 로그인 응답이 돌려주는 값을 클라이언트가 그대로 쓴다(ADR-0110).
 
+## 두 체크아웃을 같이 쓸 때
+
+기본 compose 프로젝트 이름은 `oort` 이고, PostgreSQL named volume 은
+`oort-pgdata` 다. 그 이름은 **체크아웃 경로가 아니라 프로젝트 이름에 묶인다.**
+클론 A로 스택을 띄운 뒤 클론 B에서 같은 기본값으로 `--compose up` 하면, 예전에는
+B가 A의 컨테이너를 무경고로 다시 만들었고, 프로젝트 이름만 `oort-b` 로 바꿔도
+볼륨 문자열이 같으면 PostgreSQL이 **같은 데이터 디렉토리로 두 번** 기동됐다
+(#1613).
+
+지금은 기동 전에 산 컨테이너의 `com.docker.compose.project.working_dir` 라벨을
+이 체크아웃 경로와 대조한다. 다른 디렉터리의 스택이 같은 프로젝트 또는 같은
+`DB_VOLUME_NAME` 을 쓰고 있으면 `--compose up` / `down` 은 거절되고, 원인과
+해법을 출력한다. **같은 체크아웃에서 다시 `up` 하는 것**(내 스택 재개)은
+경고 없이 동작한다.
+
+분리하려면 env 의 **두 줄을 함께** 바꾼다. 프로젝트명만 바꾸면 볼륨을 계속
+공유한다:
+
+```sh
+# infra/rust/local.secrets.env — 예시. 이미 파일이 있으면 시크릿을 다시 만들지 말고
+# 이 두 줄만 고친 뒤, 다른 체크아웃의 스택이 내려간 것을 확인하고 up 한다.
+COMPOSE_PROJECT_NAME=oort-lab
+DB_VOLUME_NAME=oort-lab-pgdata
+```
+
+기존 `oort-pgdata` 데이터를 이 클론이 이어받으려면 기본 이름(`oort` /
+`oort-pgdata`)을 유지한 채 **먼저 다른 체크아웃에서 `down`**(볼륨은 남김)한다.
+업그레이드가 볼륨을 지우거나 새 빈 볼륨으로 바꿔 끼우지 않는다. `down -v` 의
+의미는 그대로다: **이 env 가 가리키는 볼륨**을 지운다.
+
 ## 멈추기 · 지우기
 
 3단계의 인자 묶음이 길어서, 아래부터는 함수 하나로 줄여 쓴다. 레포 루트에서
@@ -297,7 +327,9 @@ oort down -v
 ```
 
 `down -v` 로 지운 뒤 처음부터 다시 하려면 `infra/rust/local.secrets.env` 도 지우고
-2단계부터 다시 밟는다(새 DB에는 새 시크릿이 맞다).
+2단계부터 다시 밟는다(새 DB에는 새 시크릿이 맞다). 다른 체크아웃의 스택을 이
+트리의 `--compose down -v` 로 지우려고 하지 마라 — 같은 프로젝트/볼륨을 쓰는
+산 타 체크아웃이면 거절된다([두 체크아웃](#두-체크아웃을-같이-쓸-때)).
 
 ## 막히면
 
@@ -309,6 +341,8 @@ oort down -v
 | 설정 › AI 연결이 **403** | 이 인스턴스에 등재된 운영자가 없다. `grep PLATFORM_ADMIN_EMAILS infra/rust/local.secrets.env` — 줄이 없으면 `scripts/self_host_env.sh --local-build`(또는 자신이 고른 모드)를 다시 실행하면 그 줄만 덧붙는다. 그 뒤 `oort up -d`로 api 재시작. [§5](#5-에이전트가-대답하게-하기-ai-연결). |
 | 설정 › AI 연결이 **503** | api가 `PROVIDER_LINK_MASTER_KEY` 없이 떴다. 2단계가 만든 env에는 있다 — 손으로 만든 env를 쓰고 있다면 그 줄을 채우고 `oort up -d`. |
 | 에이전트를 만들었는데 대답이 없다 | 키를 아직 안 넣었거나(§5), 넣은 엔드포인트가 응답하지 않는 것이다. 채널에 「응답하지 못했습니다」류 메시지가 뜨면 후자다(`oort logs agent-worker`). |
+| `--compose up` 이 다른 체크아웃이 같은 프로젝트/볼륨을 쓴다고 거절 | 그 체크아웃에서 `down`(볼륨은 남김) 하거나, 이 클론의 `COMPOSE_PROJECT_NAME` 과 `DB_VOLUME_NAME` 을 **함께** 바꾼다. [두 체크아웃](#두-체크아웃을-같이-쓸-때). |
+| 업그레이드 후 로그인이 안 되고 DB가 비어 보인다 | 새 env 가 `oort-pgdata` 가 아닌 볼륨을 가리키고 있을 수 있다. 데이터가 삭제된 것이 아니다 — `docker volume ls` 로 `oort-pgdata` 를 확인하고, `DB_VOLUME_NAME=oort-pgdata` 로 채택하거나 기본 프로젝트명 `oort` 로 env 를 다시 만든다. |
 | 처음부터 다시 하고 싶다 | `down -v` + `rm infra/rust/local.secrets.env` + 2단계부터. |
 
 메시지가 실제로 레일까지 갔는지 보는 질의(`broadcast | done` 이 정상):

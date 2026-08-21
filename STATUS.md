@@ -1,5 +1,12 @@
 # oort 진행 현황
 
+## 셀프호스트 compose 교차-체크아웃 충돌 fail-closed (#1613, 2026-08-21)
+
+- **택일 (a) 프로젝트 스코프 볼륨.** 고정 전역 `name: oort-pgdata` + 무조건 선점은 채택하지 않는다 — 프로젝트명을 분리해도 같은 datadir 이중 기동이 그 갈래다. compose 기본은 기존대로 `${DB_VOLUME_NAME:-${COMPOSE_PROJECT_NAME:-momo-rust}-pgdata}` 이고, 셀프호스트 생성기는 기본 `COMPOSE_PROJECT_NAME=oort` → `DB_VOLUME_NAME=oort-pgdata` 를 유지해 기존 볼륨을 무언 대체하지 않는다. Swift `momo-pgdata` 비채택 주석은 보존.
+- **기동 전 가드:** `--compose up/down` 등이 산 컨테이너의 `com.docker.compose.project.working_dir` 을 이 체크아웃과 대조한다. 같은 프로젝트 또는 같은 pgdata 볼륨을 다른 디렉터리가 쓰고 있으면 명시 중단. 같은 체크아웃 재개(#1361 대표 케이스)는 무경고.
+- **마이그레이션:** 생성 시 기존 `oort-pgdata` 가 있으면 채택(기본 이름) 또는 분리(다른 프로젝트명)를 명시 안내. 볼륨 삭제·복사 없음. `down -v` 의미 불변.
+- **게이트:** `scripts/tests/test_self_host_env_modes.sh`(충돌 2시나리오 RED 단언 + 채택/분리 안내) · 실 docker 증명은 `scripts/tests/test_self_host_stack_collision_docker.sh`(임시 `oort1613t*` 프로젝트/볼륨만, 이 머신 `oort-pgdata`·`momo-tracks/engine` 비접촉).
+
 ## GHCR 재배포 고지 bundle + drift/release gate (#1332, 2026-08-21)
 
 - `server-rust/Cargo.lock` + `clients/web/package-lock.json`에서 이름/버전/SPDX·저작권·LICENSE/COPYING·upstream NOTICE를 결정적으로 생성한다. 정본 `legal/generated/GHCR_THIRD_PARTY_NOTICES.txt`(실측 292 cargo + 411 npm, unique blob 343). `legal/THIRD_PARTY_NOTICES.md`는 현행/역사 인덱스. 누락 SPDX·라이선스 파일은 fail-closed. 생성기는 레포 자체 스크립트(`scripts/generate_ghcr_notice_bundle.py`) — cargo-about 등 외부 도구를 새 핀으로 들이지 않았다.
