@@ -1,5 +1,31 @@
 # oort 기획 현재 상태 (Planning Current State)
 
+> **2026-08-21 스냅샷 46 (Fable · momo-main — ★GHCR 첫 발행 완결·컨테이너 공개. PLN-20260815-01).** 컴팩트 복원 진입점.
+>
+> **★ 공개 컨테이너 첫 발행 폐곡선 완결**: 성재 dispatch+release 승인+**법무 검토 승인**(3판단 브리핑 기준 — 원장 #1332) → run success → **app `ghcr.io/yeomyeonggeori/oort@sha256:0fbddd36…`·postgres `…oort-postgres@sha256:c6806369…`** → 패키지 public(org owner 집행 — org 패키지 정책 해제 선행) → 익명 pull·digest 일치·attestation 2본 실측 PASS. 2026-08-10 지시서의 "GHCR 첫 발행" 항목 종결.
+>
+> **거버넌스 발견**: kwakseongjae=org member(owner=lifeissea 1인) — 패키지/조직 설정 병목. **Owner 승격 요청 전달**(성재→owner). / **arm64 실증**: Apple Silicon digest pull 불가 실측(amd64 단일 manifest — SELF_HOST 문서 경계 그대로). amd64 부팅 실측=H2 잔여·Q3(arm64=런칭 전 후미) 근거 보강.
+>
+> **다음 후보**: ①**L3 파도** — 첫 v0.x 태그+GitHub Release(digest 기재)·SELF_HOST §2-B digest 실값 문면 현행화·:88 runtime-unverified 해소·RELEASING 절차 ②**ITO-1 H1**(성재 실사용 — 전 조건 충족) ③L 잔여(CI gitleaks·커뮤니티 문서·#1267 기여자 첫 빨강) ④후속 큐(#1600~#1604+티켓 후보 ~25건 원장).
+>
+> **운영**: NCP cube·turn 정지 유지(스왑=oort-ncp.py)·프로덕션 유지·#1361 연기·로컬 스택 down(볼륨 보존). 워커=grok 병렬 1.
+>
+> 이하 스냅샷 45:
+
+> **2026-08-21 스냅샷 45 (Fable · momo-main — ★GHCR 발행 선행 완결·승격 45a154d2·성재 발행 결재 대기. PLN-20260815-01).** 컴팩트 복원 진입점.
+>
+> **★ GHCR 체인 코드 완결·승격**: #1330(PITR — 리뷰 4건 대응·H1 실측 반증)·#1332(NOTICE bundle — cargo 292+npm 411·이미지 2본 실빌드 4종 해시 OK·검수 회전 1=per-Dockerfile ignore 결함 수리+일반화 단언)·#1613(교차-체크아웃 충돌 fail-closed — ITO-1 H1 선행 충족) 전부 track/engine 랜딩 후 **main 승격 `45a154d2`**(PR #1623)+sync 짝(#1624/#1625 — main=양 트랙 조상 실측).
+>
+> **★ 성재 다음 = 2클릭**: ①**법무 검토 1회** — `legal/generated/GHCR_THIRD_PARTY_NOTICES.txt`·재작성 `NOTICE`·`legal/THIRD_PARTY_NOTICES.md` 인덱스·Debian 인벤토리(전부 main에 있음) ②**GHCR 첫 발행** — Actions→publish-images workflow_dispatch(main)→release Environment 승인. 발행 후 Fable이 digest 실측·H2(digest 설치)·attestation 검증.
+>
+> **운영 상태**: NCP momo-cube-host·momo-turn **정지**(월 ≈₩43만 절감·`~/.local/bin/oort-ncp.py`로 스왑·ITO-3 I4 전 재기동)·프로덕션 t3-smoke 유지. #1361 성재 연기(비차단 — 테스트 팩 SKIP(#1361) 성문)·로컬 페어링 스택 down(oort-pgdata 볼륨 보존 — 재개 `momo-tracks/engine`에서 `--compose up -d --wait`).
+>
+> **다음 후보**: ①발행(성재 2클릭)→H2 실측 ②**ITO-1 H1**(성재 실사용 — SELF_HOST_FIRST_DAY 런북·bench M1~M5·조건 충족) ③후속 큐 선별 파도(#1600~#1604+워커 티켓 후보 ~20건 — 원장은 각 이슈 코멘트) ④L 시리즈 잔여(첫 v0.x 태그·CI gitleaks·커뮤니티 문서·arm64=런칭 전 후미).
+>
+> **워커 체제(확정 실측)**: 구현·리뷰 실무=grok 4.6 **병렬 1**(동시 2기 창 조기종료 실측)·-c 재개 유효·검수=Fable(실검증 재판정 — 이번 창 실적발 2). 상세는 memory momo-opus-implementation-pipeline.
+>
+> 이하 스냅샷 44:
+
 > **2026-08-20 스냅샷 44 (Fable · momo-main — ITO-0 파도 5/5 완주·grok 워커 체제 개시. PLN-20260815-01).** 컴팩트 복원 진입점.
 >
 > **★ ITO-0 수리 파도 완주(5/5·전부 track/engine 랜딩)**: T-A #1614(셀프호스트 env tauri CORS 2종 기본·CORS 거부 케이스 실측 405/헤더0·허용 compose 실측+GUI 왕복=ITO-1 이관)·T-B #1615(**docs/SELF_HOST_FIRST_DAY.md** — 부트스트랩→GUI 초대→합류→멘션 단일 런북·로그인 화면 6문구 실기동 일치)·T-C #1612(3-Day 팩=**LAUNCH_READY/BLOCKED/NEEDS_MORE_INTERNAL** 계약·Day0~3=ITO-1~4 결속)·T-D #1617(**MOMO_CHANNEL_BUILD** compile-time 가드 — 로컬 release 롤백 구멍 폐쇄·NEXT_CHANNEL §8=성재 복붙 재발행)·T-E #1616(DEPLOY 로그인 문장·RELEASE_PLAYBOOK 은퇴 배너·web-legacy README 이분). 결재=interview_20260820_074206(Q1~Q5 — 스냅샷 43 참조·전부 확정).

@@ -45,6 +45,11 @@ import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
 // #839의 교훈: 목이 같은 tick에 답하면 "보내는 중"을 단언해도 헛초록이다. 결정
 // 응답은 테스트가 직접 여는 deferred로 잡아 두고, 그 사이에 상태를 확인한다.
 //
+// #1268: RNTL waitFor 기본 1초는 linux/amd64에서 「행이 목록에서 빠지면」이
+// 결정적으로 빨강이다. 전역 asyncUtilTimeout을 20초로 올리면 그 단정은
+// 통과하지만, 같은 파일의 스쳐가는 상태(「불러오는 동안에는 로딩을 말한다」)가
+// 빨강이 된다. 예산은 단정별로 나눈다 — 아래 TRANSIENT / SETTLE.
+//
 // 시계도 테스트가 쥔다. 확정 버튼은 뜬 직후 `CONFIRM_GUARD_MS` 동안 탭을 받지
 // 않는데(더블탭이 확인 단계를 건너뛰는 구멍 — 아래 red proof ①이 잡아낸 것),
 // 실제 시계로는 "빠른 두 번째 탭"과 "읽고 나서 누른 탭"을 테스트가 구분해서
@@ -283,17 +288,52 @@ const mmkvStore = (
   jest.requireMock('react-native-mmkv') as {__store: Map<string, string>}
 ).__store;
 
+/** RNTL 기본값(`config.asyncUtilTimeout` = 1000). 붙잡아 둔 Promise 위에만
+ *  존재하는 상태(로딩, 보내는 중)에 쓴다. 이 예산을 전역으로 올리면 그 상태가
+ *  지나간 뒤에야 단정이 돌아가 빨강이 된다 — pr-ci.yml #1268 실측. */
+const TRANSIENT_TIMEOUT_MS = 1_000;
+
+/**
+ * 결정 POST → invalidate → refetch → 커밋.
+ *
+ * 근거:
+ *   - 기본 1_000ms는 linux/amd64에서 「행이 목록에서 빠지면」이 결정적으로
+ *     짧다(CI, `--maxWorkers=1` 로도 같은 자리 빨강. 파일 9.4s).
+ *   - 전역 20_000ms는 그 단정을 통과시키지만 「불러오는 동안에는 로딩을
+ *     말한다」를 빨강으로 만든다 — 전역 노브가 아니다.
+ *   - darwin: 수리 전 그 테스트 1152ms(1s 천장). linux/amd64
+ *     node:24-bookworm: 수리 후 1628ms — 기본 1s를 넘긴다.
+ *     10s는 실패한 예산의 10배, 통과가 확인된 실험값(20s)의 절반.
+ * Jest 기본 testTimeout은 5s라서, 아래 파일 timeout을 올려 이 예산이
+ * 실제로 흐를 수 있게 한다.
+ */
+const SETTLE_TIMEOUT_MS = 10_000;
+
+jest.setTimeout(30_000);
+
+function waitForTransient(assertion: () => void) {
+  return waitFor(assertion, {timeout: TRANSIENT_TIMEOUT_MS});
+}
+
+function waitForSettled(assertion: () => void) {
+  return waitFor(assertion, {timeout: SETTLE_TIMEOUT_MS});
+}
+
 async function openInbox() {
   renderShell();
-  await waitFor(() => expect(screen.getByTestId('sidebar-list')).toBeTruthy());
+  await waitForSettled(() =>
+    expect(screen.getByTestId('sidebar-list')).toBeTruthy(),
+  );
   fireEvent.press(screen.getByTestId('tab-inbox'));
-  await waitFor(() => expect(screen.getByTestId('header-title')).toBeTruthy());
+  await waitForSettled(() =>
+    expect(screen.getByTestId('header-title')).toBeTruthy(),
+  );
 }
 
 /** 대기 행이 목록에 그려질 때까지. */
 async function openPendingRow(approvalId = PENDING) {
   await openInbox();
-  await waitFor(() =>
+  await waitForSettled(() =>
     expect(screen.getByTestId(`feed-row-approval:${approvalId}`)).toBeTruthy(),
   );
   return screen.getByTestId(`feed-row-approval:${approvalId}`);
@@ -344,11 +384,13 @@ describe('결정 대기 목록의 네 가지 상태', () => {
         }),
     });
     await openInbox();
-    await waitFor(() => expect(screen.getByTestId('inbox-loading')).toBeTruthy());
+    await waitForTransient(() =>
+      expect(screen.getByTestId('inbox-loading')).toBeTruthy(),
+    );
     expect(screen.queryByTestId(`inbox-approval-${PENDING}-approve`)).toBeNull();
 
     release!();
-    await waitFor(() =>
+    await waitForSettled(() =>
       expect(screen.getByTestId(`inbox-approval-${PENDING}-approve`)).toBeTruthy(),
     );
   });
@@ -356,7 +398,7 @@ describe('결정 대기 목록의 네 가지 상태', () => {
   it('빈 원장은 조용한 것이지 고장난 것이 아니다', async () => {
     installFetch({approvals: () => jsonResponse(200, {approvals: []})});
     await openInbox();
-    await waitFor(() => expect(screen.getByTestId('inbox-empty')).toBeTruthy());
+    await waitForSettled(() => expect(screen.getByTestId('inbox-empty')).toBeTruthy());
     expect(screen.getByTestId('inbox-empty')).toHaveTextContent(
       /지금 결정할 일이 없습니다/,
     );
@@ -367,7 +409,7 @@ describe('결정 대기 목록의 네 가지 상태', () => {
       approvals: () => jsonResponse(500, {error: {message: 'boom'}}),
     });
     await openInbox();
-    await waitFor(() => expect(screen.getByTestId('inbox-error')).toBeTruthy());
+    await waitForSettled(() => expect(screen.getByTestId('inbox-error')).toBeTruthy());
     // 서버 영어가 화면에 새지 않는다.
     expect(screen.queryByText(/boom/)).toBeNull();
     expect(screen.getByTestId('inbox-error-retry')).toBeTruthy();
@@ -377,7 +419,7 @@ describe('결정 대기 목록의 네 가지 상태', () => {
     mockApprovalsProvided = false;
     const fixture = installFetch();
     await openInbox();
-    await waitFor(() => expect(screen.getByTestId('approvals-absent')).toBeTruthy());
+    await waitForSettled(() => expect(screen.getByTestId('approvals-absent')).toBeTruthy());
     expect(screen.getByTestId('approvals-absent')).toHaveTextContent(
       /아직 승인 결정을 기록하지 않습니다/,
     );
@@ -423,7 +465,7 @@ describe('결정의 세 갈래', () => {
     expect(within(row).getByTestId(`inbox-approval-${PENDING}-approve`)).toBeTruthy();
     armAndCommit(PENDING, 'approve');
 
-    await waitFor(() =>
+    await waitForSettled(() =>
       expect(screen.getByTestId('inbox-decision-note')).toHaveTextContent(
         /승인을 기록했습니다\./,
       ),
@@ -432,7 +474,7 @@ describe('결정의 세 갈래', () => {
       {approvalId: PENDING, approve: true, key: expect.any(String)},
     ]);
     // 원장을 다시 읽었고, 결정된 행은 대기 목록에서 사라졌다.
-    await waitFor(() =>
+    await waitForSettled(() =>
       expect(screen.queryByTestId(`feed-row-approval:${PENDING}`)).toBeNull(),
     );
     expect(page).toBeGreaterThan(1);
@@ -452,7 +494,7 @@ describe('결정의 세 갈래', () => {
 
     expect(within(row).getByTestId(`inbox-approval-${PENDING}-reject`)).toBeTruthy();
     armAndCommit(PENDING, 'reject');
-    await waitFor(() =>
+    await waitForSettled(() =>
       expect(screen.getByTestId(`inbox-approval-${PENDING}-error`)).toBeTruthy(),
     );
     // W-2R M5 이후 상태 코드는 문구에 없다. 사람에게 503은 할 말이 아니고,
@@ -467,7 +509,7 @@ describe('결정의 세 갈래', () => {
 
     fireEvent.press(screen.getByTestId(`inbox-approval-${PENDING}-commit`));
     // 행이 아직 목록에 있으므로 답은 그 행 자리에 남는다 (2R H3).
-    await waitFor(() =>
+    await waitForSettled(() =>
       expect(
         screen.getByTestId(`decision-receipt-approval:${PENDING}`),
       ).toHaveTextContent(/거부를 기록했습니다\./),
@@ -497,7 +539,7 @@ describe('결정의 세 갈래', () => {
     // M3: **원장에 실제로 적힌 방향**을 말한다. 내가 승인을 눌렀어도 원장이
     // 거부를 답할 수 있고, 그때 "이미 결정되었습니다"만 말하면 사람은 자기가 누른
     // 대로 됐다고 읽는다.
-    await waitFor(() =>
+    await waitForSettled(() =>
       expect(
         screen.getByTestId(`decision-receipt-approval:${PENDING}`),
       ).toHaveTextContent(/이미 승인으로 기록되어 있었습니다\./),
@@ -522,14 +564,14 @@ describe('결정의 세 갈래', () => {
 
     expect(within(row).getByTestId(`inbox-approval-${PENDING}-approve`)).toBeTruthy();
     armAndCommit(PENDING, 'approve');
-    await waitFor(() =>
+    await waitForSettled(() =>
       expect(screen.getByTestId(`inbox-approval-${PENDING}-error`)).toHaveTextContent(
         /다른 결정으로 기록되어 있습니다/,
       ),
     );
 
     fireEvent.press(screen.getByTestId(`inbox-approval-${PENDING}-commit`));
-    await waitFor(() => expect(fixture.decisions()).toHaveLength(2));
+    await waitForSettled(() => expect(fixture.decisions()).toHaveLength(2));
     const sent = fixture.decisions();
     expect(sent[0].key).not.toBe(sent[1].key);
   });
@@ -676,7 +718,7 @@ describe('RED PROOF ①: 확인 단계를 건너뛰는 경로가 없다', () => 
     // 그리고 사람이 문장을 읽고 누르면 정확히 한 번 나간다.
     elapse(CONFIRM_GUARD_MS + 100);
     fireEvent.press(screen.getByTestId(`inbox-approval-${PENDING}-commit`));
-    await waitFor(() => expect(fixture.decisions()).toHaveLength(1));
+    await waitForSettled(() => expect(fixture.decisions()).toHaveLength(1));
   });
 
   it('확정 버튼이 뜬 직후의 탭은 확인이 아니다 (더블탭 구멍)', async () => {
@@ -699,7 +741,7 @@ describe('RED PROOF ①: 확인 단계를 건너뛰는 경로가 없다', () => 
 
     elapse(200);
     fireEvent.press(screen.getByTestId(`inbox-approval-${PENDING}-commit`));
-    await waitFor(() => expect(fixture.decisions()).toHaveLength(1));
+    await waitForSettled(() => expect(fixture.decisions()).toHaveLength(1));
   });
 
   it('취소하면 아무 일도 일어나지 않은 상태로 돌아간다', async () => {
@@ -749,7 +791,7 @@ describe('RED PROOF ①: 확인 단계를 건너뛰는 경로가 없다', () => 
 
     armAndCommit(PENDING, 'approve');
     // 답이 아직 붙잡혀 있는 동안: 버튼은 "보내는 중"이고, 다시 눌러도 조용하다.
-    await waitFor(() =>
+    await waitForTransient(() =>
       expect(screen.getByTestId(`inbox-approval-${PENDING}-commit`)).toHaveTextContent(
         '보내는 중',
       ),
@@ -758,7 +800,7 @@ describe('RED PROOF ①: 확인 단계를 건너뛰는 경로가 없다', () => 
     expect(fixture.decisions()).toHaveLength(1);
 
     release!();
-    await waitFor(() =>
+    await waitForSettled(() =>
       expect(
         screen.getByTestId(`decision-receipt-approval:${PENDING}`),
       ).toBeTruthy(),
@@ -818,7 +860,7 @@ describe('기한이 지난 요청 (2R M4)', () => {
     });
     await openPendingRow();
     armAndCommit(PENDING, 'approve');
-    await waitFor(() =>
+    await waitForSettled(() =>
       expect(
         screen.getByTestId(`decision-receipt-approval:${PENDING}`),
       ).toHaveTextContent(/결정 전에 만료되어 만료로 기록되었습니다\./),
@@ -843,13 +885,13 @@ describe('영수증 (2R H3/M6)', () => {
     await openPendingRow();
 
     armAndCommit(PENDING, 'approve');
-    await waitFor(() =>
+    await waitForSettled(() =>
       expect(
         screen.getByTestId(`decision-receipt-approval:${PENDING}`),
       ).toHaveTextContent(/승인을 기록했습니다\./),
     );
     armAndCommit(SECOND, 'reject');
-    await waitFor(() =>
+    await waitForSettled(() =>
       expect(
         screen.getByTestId(`decision-receipt-approval:${SECOND}`),
       ).toHaveTextContent(/거부를 기록했습니다\./),
@@ -879,7 +921,7 @@ describe('영수증 (2R H3/M6)', () => {
     });
     await openPendingRow();
     armAndCommit(PENDING, 'approve');
-    await waitFor(() =>
+    await waitForSettled(() =>
       expect(screen.queryByTestId(`feed-row-approval:${PENDING}`)).toBeNull(),
     );
     // 사라진 것과 답을 못 본 것은 다르다.
@@ -898,7 +940,7 @@ describe('영수증 (2R H3/M6)', () => {
     installFetch();
     await openPendingRow();
     armAndCommit(PENDING, 'approve');
-    await waitFor(() =>
+    await waitForSettled(() =>
       expect(announce).toHaveBeenCalledWith('승인을 기록했습니다.'),
     );
   });
@@ -954,7 +996,7 @@ describe('RED PROOF ②: pending 아닌 항목에는 결정 컨트롤이 없다'
     await openPendingRow();
     fireEvent.press(screen.getByTestId('inbox-tab-agents'));
 
-    await waitFor(() =>
+    await waitForSettled(() =>
       expect(
         screen.getByTestId(`decision-elsewhere-approval:${PENDING}`),
       ).toHaveTextContent(/결정 대기 탭에서 승인하거나 거부할 수 있습니다\./),
@@ -971,7 +1013,7 @@ describe('RED PROOF ②: pending 아닌 항목에는 결정 컨트롤이 없다'
     mockApprovalsProvided = false;
     installFetch();
     await openInbox();
-    await waitFor(() => expect(screen.getByTestId('approvals-absent')).toBeTruthy());
+    await waitForSettled(() => expect(screen.getByTestId('approvals-absent')).toBeTruthy());
     expect(screen.queryByLabelText(/^승인/)).toBeNull();
     expect(screen.queryByLabelText(/^거부/)).toBeNull();
   });
@@ -990,7 +1032,7 @@ describe('아직 배포되지 않은 서버 (3R N-A)', () => {
     const fixture = installFetch({approvals: () => routeMissing()});
     await openInbox();
 
-    await waitFor(() =>
+    await waitForSettled(() =>
       expect(screen.getByTestId('inbox-unavailable')).toBeTruthy(),
     );
     expect(screen.getByTestId('inbox-unavailable')).toHaveTextContent(
@@ -1010,7 +1052,7 @@ describe('아직 배포되지 않은 서버 (3R N-A)', () => {
     // 반대 방향의 거짓말: 잠깐 아픈 서버를 영영 없는 기능이라고 말하는 것.
     installFetch({approvals: () => jsonResponse(500, {error: {message: 'boom'}})});
     await openInbox();
-    await waitFor(() => expect(screen.getByTestId('inbox-error')).toBeTruthy());
+    await waitForSettled(() => expect(screen.getByTestId('inbox-error')).toBeTruthy());
     expect(screen.queryByTestId('inbox-unavailable')).toBeNull();
     expect(screen.getByTestId('inbox-error-retry')).toBeTruthy();
   });
@@ -1033,7 +1075,7 @@ describe('아직 배포되지 않은 서버 (3R N-A)', () => {
     fireEvent.press(screen.getByTestId('inbox-tab-mentions'));
     elapse(60_000);
     fireEvent.press(screen.getByTestId('inbox-tab-needs-action'));
-    await waitFor(() => expect(page).toBeGreaterThan(1));
+    await waitForSettled(() => expect(page).toBeGreaterThan(1));
     expect(screen.getByTestId(`feed-row-approval:${PENDING}`)).toBeTruthy();
   });
 });
@@ -1053,7 +1095,7 @@ describe('더는 반쪽이 아닌 「에이전트」 탭 (3R N-B → #1223)', ()
     await openPendingRow();
     fireEvent.press(screen.getByTestId('inbox-tab-agents'));
 
-    await waitFor(() =>
+    await waitForSettled(() =>
       expect(screen.getByTestId(`feed-row-approval:${PENDING}`)).toBeTruthy(),
     );
     expect(screen.queryByTestId('inbox-agents-partial')).toBeNull();
@@ -1086,7 +1128,7 @@ describe('오프라인', () => {
       netInfo.__emit({isConnected: false, isInternetReachable: false});
     });
 
-    await waitFor(() =>
+    await waitForSettled(() =>
       expect(
         screen.getByTestId(`decision-offline-approval:${PENDING}`),
       ).toHaveTextContent(/연결이 끊겨 지금은 결정할 수 없습니다/),
