@@ -5,6 +5,13 @@
 
 ---
 
+## 2026-08-21 (Fable) · L-파도 4/4 완주 — ★v0.1.0 첫 릴리스·gitleaks CI·커뮤니티 문서·승격 b1bf46e9
+- **★v0.1.0 발행**: tag@45a154d2+GitHub Release(digest 표·검증 커맨드·amd64 고지) — SECURITY.md 「최신 v0.x」 약속 성립. G1(#1628 — RELEASING.md·SELF_HOST digest 실값·:88 라벨 해소).
+- **G2(#1629)**: gitleaks PR-range 레인(8.30.1 tarball+sha256 pin·fail-closed·fork 안전) — 자기 PR 첫 실전 통과. **G3(#1267/#1268)**: 기여자 첫 빨강 결정성(TZ 주입·waitFor 분리 — UTC 빨강 재현·linux 1628ms 실측·3회×2플랫폼) — 검수 회전 1(vite.config tsc TS2769: Vite5/6 타입 충돌). **G4(#1630)**: CoC v2.1·CODEOWNERS·CHANGELOG 시드·CONTRIBUTING 영문 정본+ko.
+- **승격 2회차**: main=`b1bf46e9`(PR #1637 — 커뮤니티 문서가 Community Standards 가시권 도달)+sync 짝 #1638/#1639 topology 복원.
+- **거버넌스 확정**: org Owner 승격 없음(성재) — 새 패키지 생성 시에만 owner(여명) 1회 요청. 후속 티켓: #1635(CI 붕대 제거)+워커 후보 ~13건 이슈 코멘트 원장.
+- **성재 앞 잔여 = ITO-1 실테스트 시작일 결정뿐.** grok 누계: 이 창 구현 완주 5·검수 회전 2(전부 실결함)·병렬 1 안정.
+
 ## 2026-08-21 (Fable) · ★GHCR 첫 발행 완결 — 법무 승인·public 전환·attestation 실측·arm64 경계 실증
 - **발행 폐곡선**: 성재 dispatch+release 승인 → run 32461307786 success → digest 2본(app `0fbddd36…`·postgres `c6806369…`) attestation 동반. **법무 검토 승인**(성재 발화 — 브리핑 3판단: OS 레이어 copyleft 관행 수준·성실 이행 범위·상표 인지) 원장 기록(#1332 코멘트).
 - **public 전환**: kwakseongjae=org **member**라 패키지 관리 불가 발견 → org owner(lifeissea)가 집행(org 패키지 정책 해제 선행). 익명 pull 토큰·digest 일치·`gh attestation verify` 2본 전부 실측 PASS. **Owner 승격 요청 전달됨**(재발 방지).

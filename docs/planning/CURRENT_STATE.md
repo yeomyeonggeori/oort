@@ -1,5 +1,19 @@
 # oort 기획 현재 상태 (Planning Current State)
 
+> **2026-08-21 스냅샷 47 (Fable · momo-main — ★L-파도 완주·v0.1.0 릴리스·성재=ITO-1만. PLN-20260815-01).** 컴팩트 복원 진입점.
+>
+> **★ 런칭 위생 완결**: **v0.1.0 첫 릴리스**(tag@45a154d2·digest 표·https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.0) · gitleaks PR-range CI 레인 · 기여자 첫 빨강 2건 결정성 수리 · 커뮤니티 문서 4종(CoC v2.1·CODEOWNERS·CHANGELOG·CONTRIBUTING 영문 정본) — 전부 랜딩 후 **승격 main=`b1bf46e9`**(PR #1637)+sync 짝(#1638/#1639·topology 실측 OK). RELEASING.md=발행 반복 절차 정본. SELF_HOST §2-B=실 digest 문면.
+>
+> **오픈소스 런칭 잔여(성재 실테스트 제외)**: L 시리즈 사실상 소진 — 남은 자율 후보: #1635(CI 붕대 제거 — G3 랜딩으로 조건 성립)·arm64 발행(런칭 전 후미·Q3)·워커 티켓 후보 ~25건 선별 파도(#1600~#1604 포함)·H2 amd64 부팅 종단. **런칭 정의 잔여=외부 셀프호스터 3명(ITO 후)**.
+>
+> **★ 성재 다음 = ITO-1 실테스트 시작일 결정뿐**: SELF_HOST_FIRST_DAY 런북·LAUNCH_READY 팩·#1613 가드·v0.1.0 digest 전부 준비 완료. 시작 선언 시 Fable이 bench M1~M5 수거·인테이크 티켓화로 동행. (부수: T-D §8 재발행은 ITO-3 직전·NCP 2대 재기동은 I4 직전 — Fable 소관)
+>
+> **거버넌스**: org Owner 승격 없음 확정(성재 2026-08-21) — kwakseongjae=member 유지, 새 패키지 생성 시에만 owner(여명) 1회 요청. 발행 승인(release env)은 성재 계정 그대로.
+>
+> **워커 체제**: grok 4.6 병렬 1 안정(이 창 완주 5·검수 회전 2 — vite 타입·dockerignore 전부 실결함). 검수=Fable 실검증 재판정 유지.
+>
+> 이하 스냅샷 46:
+
 > **2026-08-21 스냅샷 46 (Fable · momo-main — ★GHCR 첫 발행 완결·컨테이너 공개. PLN-20260815-01).** 컴팩트 복원 진입점.
 >
 > **★ 공개 컨테이너 첫 발행 폐곡선 완결**: 성재 dispatch+release 승인+**법무 검토 승인**(3판단 브리핑 기준 — 원장 #1332) → run success → **app `ghcr.io/yeomyeonggeori/oort@sha256:0fbddd36…`·postgres `…oort-postgres@sha256:c6806369…`** → 패키지 public(org owner 집행 — org 패키지 정책 해제 선행) → 익명 pull·digest 일치·attestation 2본 실측 PASS. 2026-08-10 지시서의 "GHCR 첫 발행" 항목 종결.
