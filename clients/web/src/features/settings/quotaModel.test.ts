@@ -39,6 +39,17 @@ const nearLimit = parseQuotaSnapshots(fixtures.nearLimit);
  *  it explicitly so nothing here depends on the day it runs. */
 const NOW = Date.parse(fixtures._anchor);
 
+describe("timezone pin (#1267)", () => {
+  it("renders quota clocks in Asia/Seoul, not the host TZ", () => {
+    // vitest injects TZ at worker spawn (vite.config.ts `test.env`). Without
+    // that pin, UTC renders "13:00" where these fixtures say "22:00"
+    // (CI run 31364003821: 9 failed).
+    expect(process.env.TZ).toBe("Asia/Seoul");
+    expect(new Date("2026-07-26T09:12:04Z").getHours()).toBe(18);
+    expect(new Date("2026-07-26T09:12:04Z").getTimezoneOffset()).toBe(-540);
+  });
+});
+
 describe("parseQuotaSnapshots (ADR-0135 D2 계약)", () => {
   it("reads the healthy fixture whole", () => {
     expect(healthy.observedAt).toBe("2026-07-26T09:12:04Z");
