@@ -491,46 +491,12 @@ jobs:
         run: npm run test --workspace @momo/core
 
       - name: test — clients/web (vitest)
-        # TZ 고정은 **임시 조치**다. 근거를 남긴다(런 31364003821, 이 확장의
-        # 첫 런):`src/features/settings/quotaModel.test.ts`가 UTC 인스턴트를
-        # 넣고 KST로 렌더된 문자열을 단정한다(`"2026-07-26T13:00:00Z"` →
-        # `"22:00"`, 주석에도 "05:00 KST"라 적혀 있다). 그런데 타임존을 어디에도
-        # 고정하지 않아서 **개발 머신이 Asia/Seoul이라는 사실에 의존**하고
-        # 있었다. 러너는 UTC라 9시간 어긋나 9개가 빨강이 됐다 — 이 스위트가
-        # 서울 밖에서 돈 것이 이번이 처음이라 지금까지 아무도 못 봤다.
-        # (50파일 중 정확히 이 1파일. 나머지 49 + core + mobile은 UTC에서 초록.)
-        #
-        # 여기서 TZ를 박는 것은 러너를 개발 머신에 맞추는 것일 뿐, 결함을
-        # 고치는 게 아니다. 정본 수리는 `clients/web` 몫이다(테스트가 타임존을
-        # 스스로 고정하거나, KST 단정을 걷어내거나) — 그 전까지는 다른 표준시의
-        # 외부 기여자가 로컬에서 `npm test`를 돌리면 여전히 빨강이다.
-        # PR 본문 §5 적립 6.
-        env:
-          TZ: Asia/Seoul
+        # TZ 정본은 clients/web/vite.config.ts `test.env` (#1267).
+        # 러너 env에 다시 박으면 UTC 호스트의 로컬 빨강을 가린다.
         run: npm --prefix clients/web run test
 
-      - name: test — clients/mobile (jest, inboxApproval 1파일 제외)
-        # 66 스위트 중 **65개(1,094 tests)가 하드 게이트**로 돈다. 나머지 한
-        # 파일을 이름으로 명시해 뺐다 — 초록으로 위장하지 않고 구멍을 grep
-        # 가능하게 남기기 위해서다(`continue-on-error`를 쓰지 않은 이유).
-        #
-        # 왜 빠지나(실측 3런 + 리눅스 컨테이너 재현):
-        #   · `__tests__/inboxApproval.test.tsx`의 「행이 목록에서 빠지면 …」이
-        #     러너에서 **결정적으로** 빨강이다(재실행에도 같은 자리. 플레이키 아님).
-        #   · CPU 경합이 아니다 — `--maxWorkers=1`로 파일 시간이 19.5초→9.4초로
-        #     줄어도 같은 자리에서 빨강이었다.
-        #   · `linux/amd64` node:24 컨테이너에서 그대로 재현된다(맥에서는 초록).
-        #   · 원인은 RNTL `waitFor`의 기본 예산 1초다. `asyncUtilTimeout`을
-        #     20초로 올리면 이 단정은 **통과한다.**
-        #   · 그런데 그 전역 상향은 같은 파일의 다른 단정(「불러오는 동안에는
-        #     로딩을 말한다」 — 잠깐 스쳐가는 상태를 잡는 테스트)을 빨강으로
-        #     만든다. 즉 한 줄짜리 워크플로 우회로 닫히는 문제가 아니라
-        #     **단정별 예산을 다시 잡아야 하는 `clients/mobile` 몫**이다.
-        # PR 본문 §5 적립 7.
-        run: |
-          npm --prefix clients/mobile run test -- \
-            --testPathIgnorePatterns=/node_modules/ \
-            --testPathIgnorePatterns='__tests__/inboxApproval\.test\.tsx'
+      - name: test — clients/mobile (jest)
+        run: npm --prefix clients/mobile run test
 
   # #1295 regression lane. clients/web-legacy remains the committed generated
   # consumer even while product UI work happens in clients/web.
