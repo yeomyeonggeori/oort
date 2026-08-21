@@ -125,7 +125,9 @@ gh release create v0.1.0 \
 
 Release 본문에는 반드시 **digest 표**(§3과 동형)가 들어간다. 초안이 그 표와
 검증 커맨드·amd64 고지를 이미 싣는다. 이후 릴리스는 같은 칸을 새 digest 로
-채운 뒤 SELF_HOST 예시만 따라 고친다.
+채운 뒤 SELF_HOST 예시만 따라 고친다. 사람용 변경 이력은
+[`CHANGELOG.md`](../CHANGELOG.md) — 다음 태그를 자를 때 `[Unreleased]` 를
+새 버전 칸으로 옮긴다.
 
 ---
 

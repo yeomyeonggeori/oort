@@ -1,5 +1,9 @@
 # oort 진행 현황
 
+## 커뮤니티 루트 문서 (#1630, 2026-08-21)
+
+- Contributor Covenant v2.1 `CODE_OF_CONDUCT.md`(연락처=`SECURITY.md` GitHub private advisory — 새 메일 없음). `.github/CODEOWNERS` `* @kwakseongjae`. `CHANGELOG.md` Keep a Changelog 시드 — [v0.1.0](https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.0) 항목은 notes 초안 요약(발명 0). `CONTRIBUTING.md` 영문 정본 + `CONTRIBUTING.ko.md` 한국어 원문. README Being wired up 「Public CI, releases…」 한 줄을 Works today로 옮김(G1 티켓 후보 4 흡수). GOVERNANCE.md 비신설.
+
 ## PR CI gitleaks 레인 (#1629, 2026-08-21)
 
 - pr-ci에 상시 gitleaks 잡: PR 범위(`base.sha..head.sha`)만 스캔. 전 히스토리는 로컬 `scripts/check_secrets.sh` 몫. `.gitleaksignore` 재사용. 바이너리 8.30.1 + linux_x64 sha256 pin, 미설치/체크섬/탐지 실패는 RED. `pull_request` 유지(토큰·org license secret 불요). 가드레일 테스트가 경로 필터·전 히스토리·unpinned·`pull_request_target` 변이를 RED로 고정.
