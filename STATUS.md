@@ -1,5 +1,9 @@
 # oort 진행 현황
 
+## 루트 계약 문서 web-legacy 서빙 거짓 일소 (#1641, 2026-08-22)
+
+- T-E #1610 README 이분(라이브=`clients/web`, `server-rust/Dockerfile:147,157,173,231` web-assets / #1228 · web-legacy=Swift prod `Dockerfile.web`·e2e `web-init`·`--profile web` 소비)을 AGENTS.md §0/§2·CODEX.md·docs/INDEX.md·clients/web/README.md·local_gate.sh auto 분류 주석·docs/LOCAL_PR_GATE.md web 설명에 전수 반영. 서빙 배선 코드 무변경.
+
 ## 발행 실측 라벨 현행화 + 운영 문서 GATED_DOCS 편입 (#1642, 2026-08-22)
 
 - v0.1.0 첫 발행 실측(원장 #1332 코멘트 2026-08-21 · 발행·익명 pull·attestation PASS · 패키지 public · amd64 단일)을 LOCAL_3_DAY H2·INTERNAL_ALPHA·infra/rust README §3-1·ncp-rust-deploy first-dispatch 문면에 반영. **H2 amd64 부팅 실측은 잔여**(Apple Silicon native pull 불가만 실측).
