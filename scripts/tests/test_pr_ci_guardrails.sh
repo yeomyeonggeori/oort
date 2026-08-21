@@ -38,19 +38,75 @@ extract_change_filter() {
   ' "$workflow"
 }
 
+gitleaks_job_compliant() {
+  local gitleaks="$1"
+  [ -n "$gitleaks" ] || return 1
+  grep -Fq '    name: gitleaks secret scan' <<<"$gitleaks" || return 1
+  grep -Fq 'fetch-depth: 0' <<<"$gitleaks" || return 1
+  grep -Fq 'persist-credentials: false' <<<"$gitleaks" || return 1
+  grep -Fq 'GITLEAKS_VERSION: 8.30.1' <<<"$gitleaks" || return 1
+  grep -Fq '551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb' <<<"$gitleaks" || return 1
+  grep -Fq 'sha256sum -c' <<<"$gitleaks" || return 1
+  grep -Fq 'gitleaks is not installed' <<<"$gitleaks" || return 1
+  grep -Fq 'missing triage baseline: .gitleaksignore' <<<"$gitleaks" || return 1
+  grep -Fq -- '--gitleaks-ignore-path .gitleaksignore' <<<"$gitleaks" || return 1
+  grep -Fq 'log_opts="${BASE_SHA}..${HEAD_SHA}"' <<<"$gitleaks" || return 1
+  grep -Fq -- '--log-opts "$log_opts"' <<<"$gitleaks" || return 1
+  grep -Fq 'log_opts="-1"' <<<"$gitleaks" || return 1
+  grep -Fq -- '--redact=90' <<<"$gitleaks" || return 1
+  grep -Fq 'gitleaks detect' <<<"$gitleaks" || return 1
+  grep -Fq 'EVENT_NAME: ${{ github.event_name }}' <<<"$gitleaks" || return 1
+  grep -Fq 'BASE_SHA: ${{ github.event.pull_request.base.sha }}' <<<"$gitleaks" || return 1
+  grep -Fq 'HEAD_SHA: ${{ github.event.pull_request.head.sha }}' <<<"$gitleaks" || return 1
+  grep -Fq 'gitleaks/releases/download/v${GITLEAKS_VERSION}/' <<<"$gitleaks" || return 1
+  if grep -Fq -- '--all' <<<"$gitleaks"; then
+    return 1
+  fi
+  if grep -Fq -- '--no-git' <<<"$gitleaks"; then
+    return 1
+  fi
+  if grep -Fq -- '--report-path' <<<"$gitleaks"; then
+    return 1
+  fi
+  if grep -Fq 'continue-on-error' <<<"$gitleaks"; then
+    return 1
+  fi
+  if grep -Fq 'gitleaks/gitleaks-action' <<<"$gitleaks"; then
+    return 1
+  fi
+  if grep -Fq 'GITLEAKS_LICENSE' <<<"$gitleaks"; then
+    return 1
+  fi
+  if grep -Fq '    if:' <<<"$gitleaks"; then
+    return 1
+  fi
+  if grep -Fq 'needs:' <<<"$gitleaks"; then
+    return 1
+  fi
+  return 0
+}
+
 workflow_compliant() {
   local workflow="$1"
-  local bootstrap_allowlist changes alignment rust node contract gate
+  local bootstrap_allowlist changes alignment gitleaks rust node contract gate
   local license_line install_line verify_line
   changes="$(job_block "$workflow" changes)"
   alignment="$(job_block "$workflow" alignment)"
+  gitleaks="$(job_block "$workflow" gitleaks)"
   rust="$(job_block "$workflow" rust)"
   node="$(job_block "$workflow" node)"
   contract="$(job_block "$workflow" contract)"
   gate="$(job_block "$workflow" gate)"
 
-  [ -n "$changes" ] && [ -n "$alignment" ] && [ -n "$rust" ] \
-    && [ -n "$node" ] && [ -n "$contract" ] && [ -n "$gate" ] || return 1
+  [ -n "$changes" ] && [ -n "$alignment" ] && [ -n "$gitleaks" ] \
+    && [ -n "$rust" ] && [ -n "$node" ] && [ -n "$contract" ] && [ -n "$gate" ] \
+    || return 1
+  gitleaks_job_compliant "$gitleaks" || return 1
+  if grep -Fq 'pull_request_target' "$workflow"; then
+    return 1
+  fi
+  grep -Fq 'gitleaks는 여기 없다: 시크릿은 전 경로라 그 잡은 상시 실행한다.' \
+    <<<"$changes" || return 1
   grep -Fq "gh api \"repos/\$REPO/pulls/\$PR\"" <<<"$changes" || return 1
   grep -Fq 'gh api --paginate --slurp' <<<"$changes" || return 1
   grep -Fq "\"repos/\$REPO/pulls/\$PR/files?per_page=100\"" <<<"$changes" || return 1
@@ -81,10 +137,10 @@ workflow_compliant() {
   verify_line="$(grep -Fn 'run: scripts/verify_web_generated_types.sh' <<<"$contract" | cut -d: -f1)"
   [ "$license_line" -lt "$install_line" ] && [ "$install_line" -lt "$verify_line" ] || return 1
 
-  for dependency in changes alignment rust node contract; do
+  for dependency in changes alignment gitleaks rust node contract; do
     grep -Fq "      - $dependency" <<<"$gate" || return 1
   done
-  for result in CHANGES_RESULT ALIGNMENT_RESULT RUST_RESULT NODE_RESULT CONTRACT_RESULT; do
+  for result in CHANGES_RESULT ALIGNMENT_RESULT GITLEAKS_RESULT RUST_RESULT NODE_RESULT CONTRACT_RESULT; do
     grep -Fq "      ${result}: \${{ needs." <<<"$gate" || return 1
   done
   for selected in RUST_SELECTED NODE_SELECTED CONTRACT_SELECTED; do
@@ -98,6 +154,8 @@ workflow_compliant() {
   grep -Fq 'test "$CHANGES_RESULT" = success' <<<"$gate" || return 1
   # shellcheck disable=SC2016 # These are literal workflow shell contracts.
   grep -Fq 'test "$ALIGNMENT_RESULT" = success' <<<"$gate" || return 1
+  # shellcheck disable=SC2016 # These are literal workflow shell contracts.
+  grep -Fq 'test "$GITLEAKS_RESULT" = success' <<<"$gate" || return 1
   grep -Fq 'true:success|false:skipped) ;;' <<<"$gate" || return 1
   grep -Fq 'lane selection/result mismatch:' <<<"$gate" || return 1
 
@@ -112,7 +170,16 @@ for required in \
   '      - main' \
   '      - track/engine' \
   '      - track/uxui' \
+  '  pull_request:' \
   '    name: PR CI gate' \
+  '  gitleaks:' \
+  '    name: gitleaks secret scan' \
+  'GITLEAKS_VERSION: 8.30.1' \
+  '551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb' \
+  'sha256sum -c' \
+  '--gitleaks-ignore-path .gitleaksignore' \
+  'log_opts="${BASE_SHA}..${HEAD_SHA}"' \
+  '      GITLEAKS_RESULT: ${{ needs.gitleaks.result }}' \
   'docs/api/openapi\.yaml' \
   'clients/web-legacy/' \
   'scripts/check_npm_licenses\.mjs$' \
@@ -123,7 +190,7 @@ for required in \
   'actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444' \
   'scripts/tests/test_ghcr_notice_bundle.sh' \
   'scripts/check_ghcr_notice_bundle.sh --stale-only'; do
-  grep -Fq "$required" "$WORKFLOW" || fail "pr-ci missing: $required"
+  grep -Fq -- "$required" "$WORKFLOW" || fail "pr-ci missing: $required"
 done
 
 workflow_compliant "$WORKFLOW" || fail "contract/gate dependency or failure propagation drift"
@@ -187,6 +254,55 @@ sed -i.bak \
   "$TMP_DIR/wrong-bootstrap-base.yml"
 if workflow_compliant "$TMP_DIR/wrong-bootstrap-base.yml"; then
   fail "unreviewed #1302 bootstrap base was accepted"
+fi
+
+cp "$WORKFLOW" "$TMP_DIR/missing-gitleaks.yml"
+sed -i.bak '/^      - gitleaks$/d' "$TMP_DIR/missing-gitleaks.yml"
+if workflow_compliant "$TMP_DIR/missing-gitleaks.yml"; then
+  fail "missing gitleaks gate dependency was accepted"
+fi
+
+cp "$WORKFLOW" "$TMP_DIR/gitleaks-optional.yml"
+# shellcheck disable=SC2016 # Literal workflow contract, not a shell expansion.
+sed -i.bak '/test "$GITLEAKS_RESULT" = success/d' \
+  "$TMP_DIR/gitleaks-optional.yml"
+if workflow_compliant "$TMP_DIR/gitleaks-optional.yml"; then
+  fail "gitleaks result not required by the gate was accepted"
+fi
+
+cp "$WORKFLOW" "$TMP_DIR/gitleaks-path-filtered.yml"
+sed -i.bak 's/^    name: gitleaks secret scan$/    name: gitleaks secret scan\
+    if: needs.changes.outputs.rust == '\''true'\''/' \
+  "$TMP_DIR/gitleaks-path-filtered.yml"
+if workflow_compliant "$TMP_DIR/gitleaks-path-filtered.yml"; then
+  fail "path-filtered gitleaks job was accepted"
+fi
+
+cp "$WORKFLOW" "$TMP_DIR/gitleaks-full-history.yml"
+sed -i.bak 's/log_opts="${BASE_SHA}..${HEAD_SHA}"/log_opts="--all"/' \
+  "$TMP_DIR/gitleaks-full-history.yml"
+if workflow_compliant "$TMP_DIR/gitleaks-full-history.yml"; then
+  fail "full-history gitleaks scan was accepted"
+fi
+
+cp "$WORKFLOW" "$TMP_DIR/gitleaks-unpinned.yml"
+sed -i.bak 's/GITLEAKS_VERSION: 8.30.1/GITLEAKS_VERSION: latest/' \
+  "$TMP_DIR/gitleaks-unpinned.yml"
+if workflow_compliant "$TMP_DIR/gitleaks-unpinned.yml"; then
+  fail "unpinned gitleaks version was accepted"
+fi
+
+cp "$WORKFLOW" "$TMP_DIR/gitleaks-no-checksum.yml"
+sed -i.bak '/sha256sum -c/d' "$TMP_DIR/gitleaks-no-checksum.yml"
+if workflow_compliant "$TMP_DIR/gitleaks-no-checksum.yml"; then
+  fail "gitleaks install without checksum was accepted"
+fi
+
+cp "$WORKFLOW" "$TMP_DIR/pull-request-target.yml"
+sed -i.bak 's/^  pull_request:$/  pull_request_target:/' \
+  "$TMP_DIR/pull-request-target.yml"
+if workflow_compliant "$TMP_DIR/pull-request-target.yml"; then
+  fail "pull_request_target trigger was accepted"
 fi
 
 # Execute the exact embedded classifier with a fake GitHub API. These fixtures
@@ -292,4 +408,4 @@ for required in \
   grep -Fq "$required" "$MONITOR" || fail "track monitor missing: $required"
 done
 
-echo "[pr-ci-guard-test] PASS targets, complete rename-aware classifier fixtures, generated+license contract, stable fail-closed gate, mutation proofs, and monitor triggers"
+echo "[pr-ci-guard-test] PASS targets, complete rename-aware classifier fixtures, generated+license contract, gitleaks PR-range fail-closed lane, stable fail-closed gate, mutation proofs, and monitor triggers"
