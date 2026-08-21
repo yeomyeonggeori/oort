@@ -48,6 +48,11 @@
 | [`AGENTS.md`](../AGENTS.md) | Codex 자동 머지 운영 계약 | **운영 정본(최우선)** |
 | [`CODEX.md`](../CODEX.md) | Codex 자율실행 풀 가이드 | AGENTS.md와 동일 핵심 |
 | [`README.md`](../README.md) | 제품 1줄 + 불변식 + 정직성 표(✅🚧💭) + 아키텍처 | 진입점 |
+| [`CONTRIBUTING.md`](../CONTRIBUTING.md) | 기여 정본(영문, DCO·라이선스 게이트). 한국어 원문 [`CONTRIBUTING.ko.md`](../CONTRIBUTING.ko.md) | 커뮤니티 |
+| [`CODE_OF_CONDUCT.md`](../CODE_OF_CONDUCT.md) | Contributor Covenant v2.1. 신고 경로=`SECURITY.md` | 커뮤니티 |
+| [`SECURITY.md`](../SECURITY.md) | 취약점 신고(GitHub private advisory). 한국어 판단 자료 [`docs/security/README.ko.md`](security/README.ko.md) | 보안 |
+| [`CHANGELOG.md`](../CHANGELOG.md) | Keep a Changelog. 첫 항목 [v0.1.0](https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.0) | 릴리스 |
+| [`.github/CODEOWNERS`](../.github/CODEOWNERS) | 리뷰 라우팅 최소형 `* @kwakseongjae` | 커뮤니티 |
 | [`NOTICE`](../NOTICE) | Apache 2.0 귀속 — 앱 화면 표기 대상 | 법무 |
 | [`Makefile`](../Makefile) | `build`/`test` = **현행 스택**(cargo + npm), `up`/`down`/`migrate` = dev compose, `swift-build`/`swift-test` = 은퇴 중 트리 | 빌드 명령 |
 | [`docs/SELF_HOST.md`](SELF_HOST.md) | **셀프호스트 첫 기동 정본**(#1229): clone → `scripts/self_host_env.sh` → `up -d --build --wait` → 브라우저 로그인. 분기 0. digest pull 예시는 GitHub Releases | 운영 명령 |

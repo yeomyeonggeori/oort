@@ -24,7 +24,9 @@ latest tag when possible.
 Do not open a public issue, discussion, or pull request for a suspected
 vulnerability. Use GitHub's private
 [Report a vulnerability](https://github.com/yeomyeonggeori/oort/security/advisories/new)
-form to create a private Security Advisory.
+form to create a private Security Advisory. The same private form is the
+enforcement contact named by [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md).
+There is no separate mailbox.
 
 Include:
 
