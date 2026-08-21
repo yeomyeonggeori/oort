@@ -62,8 +62,11 @@ services:
       - private
 
   # 같은 오리진 엣지. 브라우저는 이 포트 하나만 알면 된다 — SPA도 /v1도
-  # /connection/websocket 도 전부 여기서 나오므로 CORS가 성립할 여지가 없고,
-  # Centrifugo 오리진 허용 목록도 이 주소 하나로 끝난다.
+  # /connection/websocket 도 전부 여기서 나오므로 브라우저 경로에서는 CORS가
+  # 성립할 여지가 없다. 패키징된 Tauri 릴리스는 webview origin 이 달라
+  # 교차 오리진이다 — 그 목록은 이 오버레이가 아니라 생성 env 의
+  # MOMO_CORS_ALLOWED_ORIGINS 가 연다(#1607). Centrifugo 오리진 허용 목록은
+  # 같은 env 의 CENTRIFUGO_ALLOWED_ORIGINS (브라우저 주소 + tauri 2종).
   web:
     image: ${MOMO_CADDY_IMAGE:-caddy:2-alpine}
     mem_limit: ${MOMO_WEB_MEM_LIMIT:-256m}

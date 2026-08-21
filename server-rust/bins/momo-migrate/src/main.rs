@@ -32,12 +32,11 @@
 //! (`\getenv` in the SQL files), never through argv, and every error message
 //! names a *key*.
 //!
-//! Paths are runtime-overridable — the compiled-in defaults are repo-relative so
-//! a developer checkout works, and the image sets the four `MOMO_*_SQL` /
-//! `MOMO_MIGRATIONS_DIR` variables to its `/opt/momo` copies (Dockerfile). This
-//! is why the runner needed no change: `run_migrations` already takes the
-//! directory as an argument; only `momo_db::migrate::default_migrations_dir`
-//! is `CARGO_MANIFEST_DIR`-derived, and it is used solely as the unset fallback.
+//! A source checkout may override paths for focused fixtures. The production
+//! image instead sets `MOMO_IN_CONTAINER=1`; in that mode migration/role/owner
+//! paths are fixed `/opt/momo` payloads and every path override is rejected.
+//! This prevents a dotenv value from turning the roles-only or owner commands
+//! into an arbitrary pre-gate SQL execution seam.
 //!
 //! Exit codes (shell-wrapper parity): `0` success, `2` bad invocation or a
 //! malformed `MOMO_AGENT_SEED_MODE`, `1` everything else (missing role posture,
@@ -46,12 +45,13 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
-use momo_db::migrate::{
-    default_migrations_dir, discover_migrations, run_migrations, Migration, SeedMode,
-};
+use momo_db::migrate::{discover_migrations, run_migrations, Migration, SeedMode};
+
+mod pitr;
 
 /// Repo root relative to this crate: `server-rust/bins/momo-migrate` → `../../..`.
 const REPO_ROOT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../..");
+const IMAGE_RUNTIME_ENV: &str = "MOMO_IN_CONTAINER";
 
 /// The role contract `internal-smoke-migrate.sh:97-101` asserts before it will
 /// migrate a database whose runtime roles were provisioned externally.
@@ -173,8 +173,8 @@ fn parse_flag(key: &str, raw: Option<&str>, default: bool) -> Result<bool, Migra
     }
 }
 
-/// `override` wins; otherwise the compiled-in repo-relative path. The image sets
-/// every override, so a container never depends on `CARGO_MANIFEST_DIR`.
+/// In a source checkout an explicit fixture override wins; otherwise use the
+/// compiled-in repo-relative path. Image mode never calls this with an override.
 fn resolve_path(override_value: Option<String>, repo_relative: &str) -> PathBuf {
     match override_value {
         Some(value) => PathBuf::from(value),
@@ -182,11 +182,62 @@ fn resolve_path(override_value: Option<String>, repo_relative: &str) -> PathBuf 
     }
 }
 
-fn migrations_dir() -> PathBuf {
-    match env("MOMO_MIGRATIONS_DIR") {
-        Some(value) => PathBuf::from(value),
-        None => default_migrations_dir(),
+fn in_image_runtime() -> Result<bool, MigrateError> {
+    match std::env::var_os(IMAGE_RUNTIME_ENV) {
+        None => Ok(false),
+        Some(value) if value == "1" => Ok(true),
+        Some(_) => Err(MigrateError::Failed(format!(
+            "{IMAGE_RUNTIME_ENV} must be exactly 1 when present"
+        ))),
     }
+}
+
+fn select_runtime_path(
+    in_image: bool,
+    override_key: &str,
+    override_value: Option<String>,
+    repo_relative: &str,
+    image_path: &str,
+) -> Result<PathBuf, MigrateError> {
+    if in_image {
+        if override_value.is_some() {
+            return Err(MigrateError::Failed(format!(
+                "{override_key} must be unset in the production image"
+            )));
+        }
+        return Ok(PathBuf::from(image_path));
+    }
+    Ok(resolve_path(override_value, repo_relative))
+}
+
+fn runtime_path(
+    override_key: &str,
+    repo_relative: &str,
+    image_path: &str,
+) -> Result<PathBuf, MigrateError> {
+    // Presence is load-bearing in image mode: even an empty override is an
+    // attempted policy mutation and must not be normalized into "unset".
+    let raw_present = std::env::var_os(override_key).is_some();
+    let override_value = if raw_present {
+        Some(std::env::var(override_key).unwrap_or_default())
+    } else {
+        None
+    };
+    select_runtime_path(
+        in_image_runtime()?,
+        override_key,
+        override_value,
+        repo_relative,
+        image_path,
+    )
+}
+
+fn migrations_dir() -> Result<PathBuf, MigrateError> {
+    runtime_path(
+        "MOMO_MIGRATIONS_DIR",
+        "server/Migrations",
+        "/opt/momo/migrations",
+    )
 }
 
 fn require_database_url() -> Result<String, MigrateError> {
@@ -224,6 +275,35 @@ fn resolve_psql() -> Result<PathBuf, MigrateError> {
          (the image installs postgresql-client)"
             .to_string(),
     ))
+}
+
+fn psql_scalar(database_url: &str, sql: &str, label: &str) -> Result<String, MigrateError> {
+    let psql = resolve_psql()?;
+    let output = Command::new(psql)
+        .arg(database_url)
+        .args(["-tA", "-v", "ON_ERROR_STOP=1"])
+        .arg("--no-psqlrc")
+        .arg("-c")
+        .arg(sql)
+        .output()
+        .map_err(|source| {
+            MigrateError::Failed(format!("{label}: failed to spawn psql: {source}"))
+        })?;
+    if !output.status.success() {
+        return Err(MigrateError::Failed(format!(
+            "{label}: psql exited with {:?}",
+            output.status.code()
+        )));
+    }
+    let value = String::from_utf8(output.stdout)
+        .map_err(|_| MigrateError::Failed(format!("{label}: psql emitted non-UTF-8 output")))?;
+    let value = value.trim().to_string();
+    if value.is_empty() || value.contains('\n') || value.contains('\r') {
+        return Err(MigrateError::Failed(format!(
+            "{label}: psql did not emit exactly one scalar value"
+        )));
+    }
+    Ok(value)
 }
 
 /// Apply one repo SQL file through psql with the wrapper's flags. The
@@ -325,29 +405,21 @@ fn migrate() -> Result<(), MigrateError> {
                 return Err(MigrateError::Usage(format!("set {key}")));
             }
         }
-        let file = resolve_path(
-            env("MOMO_RUNTIME_ROLES_SQL"),
+        let file = runtime_path(
+            "MOMO_RUNTIME_ROLES_SQL",
             "infra/prod/bootstrap_runtime_roles.sql",
-        );
+            "/opt/momo/sql/bootstrap_runtime_roles.sql",
+        )?;
         psql_file(&database_url, &file, "runtime-roles")?;
         println!("[migrate] runtime roles provisioned (no password printed)");
         return Ok(());
     }
 
-    // (2) role posture gate. `1` (default) = this process also applies the
-    // committed dev-password role file afterwards; `0` = the roles were
-    // provisioned externally and must already be correct (prod).
-    let bootstrap_roles = parse_flag(
-        "MOMO_BOOTSTRAP_RUNTIME_ROLES",
-        env("MOMO_BOOTSTRAP_RUNTIME_ROLES").as_deref(),
-        true,
-    )?;
-    if !bootstrap_roles {
-        assert_external_runtime_roles(&database_url)?;
-    }
-
-    // (3) migrations.
-    let dir = migrations_dir();
+    // (2) Discover and bind the exact candidate migration bytes before any
+    // migration or role-posture SQL.  Required PITR evidence is verified here;
+    // a bad/missing/foreign proof cannot reach psql at all (the one exception
+    // is the final live system_identifier comparison after its HMAC passes).
+    let dir = migrations_dir()?;
     let discovered = discover_migrations(&dir)
         .map_err(|error| MigrateError::Failed(format!("migration discovery failed: {error}")))?;
     if discovered.is_empty() {
@@ -364,7 +436,25 @@ fn migrate() -> Result<(), MigrateError> {
             dir.display()
         )));
     }
+    // This gate belongs only to the schema-changing `migrate` command. The
+    // roles-only branch returned above, and `set-owner` has its own command
+    // path below: rotating one credential neither applies SQL migrations nor
+    // claims that the current schema has a fresh recovery proof.
+    pitr::enforce_policy(&database_url, &discovered)?;
 
+    // (3) role posture gate. `1` (default) = this process also applies the
+    // committed dev-password role file afterwards; `0` = the roles were
+    // provisioned externally and must already be correct (prod).
+    let bootstrap_roles = parse_flag(
+        "MOMO_BOOTSTRAP_RUNTIME_ROLES",
+        env("MOMO_BOOTSTRAP_RUNTIME_ROLES").as_deref(),
+        true,
+    )?;
+    if !bootstrap_roles {
+        assert_external_runtime_roles(&database_url)?;
+    }
+
+    // (4) migrations.
     println!("[migrate] directory: {}", dir.display());
     println!("[migrate] agent seed mode: {seed_mode:?}");
     let report = run_migrations(&database_url, &dir, seed_mode)
@@ -379,7 +469,7 @@ fn migrate() -> Result<(), MigrateError> {
         report.total()
     );
 
-    // (4) idempotency evidence in one run (`scripts/migrate.sh` MOMO-316): the
+    // (5) idempotency evidence in one run (`scripts/migrate.sh` MOMO-316): the
     // second pass shares the runner's skip judgement, so a violation is caught
     // here rather than on the next deploy.
     if parse_flag(
@@ -402,17 +492,18 @@ fn migrate() -> Result<(), MigrateError> {
         );
     }
 
-    // (5) local/e2e role file, after the schema exists (its GRANTs need tables).
+    // (6) local/e2e role file, after the schema exists (its GRANTs need tables).
     if bootstrap_roles {
-        let file = resolve_path(
-            env("MOMO_BOOTSTRAP_ROLES_SQL"),
+        let file = runtime_path(
+            "MOMO_BOOTSTRAP_ROLES_SQL",
             "infra/e2e/bootstrap_roles.sql",
-        );
+            "/opt/momo/sql/bootstrap_roles.sql",
+        )?;
         psql_file(&database_url, &file, "bootstrap-roles")?;
         println!("[migrate] bootstrap roles applied (development passwords)");
     }
 
-    // (6) #1227 first-boot owner. Last, because it is the only step that cares
+    // (7) #1227 first-boot owner. Last, because it is the only step that cares
     // about product rows: 002 must have seeded the owner and 012 must already
     // have decided whether its password survives.
     bootstrap_owner(&database_url)
@@ -451,10 +542,11 @@ fn bootstrap_owner(database_url: &str) -> Result<(), MigrateError> {
             Ok(())
         }
         OwnerBootstrapPlan::Apply => {
-            let file = resolve_path(
-                env("MOMO_BOOTSTRAP_OWNER_SQL"),
+            let file = runtime_path(
+                "MOMO_BOOTSTRAP_OWNER_SQL",
                 "infra/prod/bootstrap_owner_if_absent.sql",
-            );
+                "/opt/momo/sql/bootstrap_owner_if_absent.sql",
+            )?;
             // psql's NOTICE is the verdict and reaches the container log
             // directly: MOMO_BOOTSTRAP_OWNER=created|skipped|absent. Nothing
             // here echoes a value.
@@ -511,6 +603,8 @@ fn plan_owner_bootstrap(
 
 /// `set-owner` — one-shot bootstrap owner credential takeover (MOMO-561).
 /// Both values reach the SQL through `\getenv`; neither is echoed.
+/// Intentionally outside #1330's PITR gate: this rotates an operator secret but
+/// cannot apply or discover a schema migration.
 fn set_owner() -> Result<(), MigrateError> {
     let database_url = require_database_url()?;
     for key in OWNER_ENV_KEYS {
@@ -518,10 +612,11 @@ fn set_owner() -> Result<(), MigrateError> {
             return Err(MigrateError::Usage(format!("set {key}")));
         }
     }
-    let file = resolve_path(
-        env("MOMO_SET_OWNER_SQL"),
+    let file = runtime_path(
+        "MOMO_SET_OWNER_SQL",
         "infra/prod/set_initial_owner.sql",
-    );
+        "/opt/momo/sql/set_initial_owner.sql",
+    )?;
     psql_file(&database_url, &file, "set-owner")?;
     println!("[migrate] bootstrap owner credentials updated (no value printed)");
     Ok(())
@@ -669,11 +764,36 @@ mod tests {
         );
     }
 
-    /// The image sets `MOMO_MIGRATIONS_DIR`; unset falls back to the runner's
-    /// own compile-time directory, which must be the real one.
+    #[test]
+    fn production_image_paths_are_fixed_and_overrides_are_rejected() {
+        assert_eq!(
+            select_runtime_path(
+                true,
+                "MOMO_RUNTIME_ROLES_SQL",
+                None,
+                "infra/prod/bootstrap_runtime_roles.sql",
+                "/opt/momo/sql/bootstrap_runtime_roles.sql",
+            ),
+            Ok(PathBuf::from("/opt/momo/sql/bootstrap_runtime_roles.sql"))
+        );
+        for value in ["/tmp/attacker.sql", ""] {
+            let error = select_runtime_path(
+                true,
+                "MOMO_RUNTIME_ROLES_SQL",
+                Some(value.to_string()),
+                "infra/prod/bootstrap_runtime_roles.sql",
+                "/opt/momo/sql/bootstrap_runtime_roles.sql",
+            )
+            .expect_err("image override must fail closed");
+            assert!(error.to_string().contains("must be unset"));
+        }
+    }
+
+    /// A source checkout falls back to the runner's own compile-time directory,
+    /// which must be the real one. Image mode uses fixed `/opt/momo/migrations`.
     #[test]
     fn the_default_migrations_directory_is_the_repo_one() {
-        assert!(default_migrations_dir().is_dir());
+        assert!(momo_db::migrate::default_migrations_dir().is_dir());
     }
 
     #[test]
@@ -712,7 +832,8 @@ mod tests {
     /// shell runner connects, now enforced at `cargo test` time.
     #[test]
     fn the_shipped_migrations_have_unique_prefixes() {
-        let migrations = discover_migrations(&default_migrations_dir()).expect("discover");
+        let migrations =
+            discover_migrations(&momo_db::migrate::default_migrations_dir()).expect("discover");
         assert!(!migrations.is_empty());
         assert_eq!(duplicate_prefixes(&migrations), Vec::<i64>::new());
     }

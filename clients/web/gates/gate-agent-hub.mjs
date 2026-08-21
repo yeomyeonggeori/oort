@@ -16,11 +16,11 @@
 // The red seams alter fixture behavior, not product source lines. A proof is
 // therefore repeatable and does not ask a reviewer to delete an assertion.
 
-import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
+import { startGuardedPreview } from "./preview-guard.mjs";
 
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const port = Number(process.env.AGENT_HUB_GATE_PORT || 5186);
@@ -399,19 +399,6 @@ async function installRoutes(context, timing) {
   return state;
 }
 
-async function waitForServer() {
-  const deadline = Date.now() + 30_000;
-  while (Date.now() < deadline) {
-    try {
-      if ((await fetch(origin)).ok) return;
-    } catch {
-      // Preview is still starting.
-    }
-    await wait(200);
-  }
-  throw new Error("agent hub preview server never came up");
-}
-
 async function login(page) {
   await page.goto(origin, { waitUntil: "networkidle" });
   await page.getByTestId("login-email").fill("agent-hub@example.test");
@@ -569,13 +556,12 @@ async function main() {
   if (!existsSync(resolve(webRoot, "dist/index.html"))) {
     throw new Error("dist/ is missing. Run npm run build first.");
   }
-  const server = spawn(
-    resolve(webRoot, "node_modules/.bin/vite"),
-    ["preview", "--port", String(port), "--strictPort", "--host", "127.0.0.1"],
-    { cwd: webRoot, stdio: "ignore" }
-  );
+  const server = await startGuardedPreview({
+    webRoot,
+    port,
+    portEnvVar: "AGENT_HUB_GATE_PORT",
+  });
   try {
-    await waitForServer();
     const browser = await chromium.launch();
     try {
       for (let index = 0; index < timings.length; index += 1) {
@@ -585,7 +571,7 @@ async function main() {
       await browser.close();
     }
   } finally {
-    server.kill("SIGTERM");
+    await server.stop();
   }
   console.log(
     "GATE PASS: agent roster, profile 404, narrow detail, tab width, effort readiness,"

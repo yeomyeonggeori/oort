@@ -8,6 +8,8 @@ import {
 } from "@momo/core/features/timeline/completionReportCard";
 import {
   COMPLETION_TONE_CLASS,
+  COMPLETION_TONE_SOFT_CLASS,
+  COMPLETION_TONE_SOFT_TOKEN,
   COMPLETION_TONE_TOKEN,
 } from "./completionTone";
 
@@ -78,6 +80,58 @@ describe("코어의 역할표를 이 팔레트가 전부 답한다", () => {
   it("네 토큰이 tokens.css 에 light-dark() 한 쌍으로 있다", () => {
     for (const tone of TONES) {
       expect(() => tokenValues(COMPLETION_TONE_TOKEN[tone])).not.toThrow();
+    }
+  });
+});
+
+describe("그릇 쪽 다리도 같은 계약을 진다 (#1516)", () => {
+  it("모든 톤에 그릇 토큰과 그릇 클래스가 있다", () => {
+    for (const tone of TONES) {
+      expect(COMPLETION_TONE_SOFT_TOKEN[tone], `${tone} 그릇 토큰`).toBeTruthy();
+      expect(COMPLETION_TONE_SOFT_CLASS[tone], `${tone} 그릇 클래스`).toBeTruthy();
+    }
+  });
+
+  it("그릇 클래스가 실제로 그 그릇 토큰을 든다", () => {
+    for (const tone of TONES) {
+      const utility = `bg-${COMPLETION_TONE_SOFT_TOKEN[tone].slice(2)}`;
+      expect(
+        COMPLETION_TONE_SOFT_CLASS[tone],
+        `${tone} 그릇 클래스가 자기 토큰을 안 든다`
+      ).toBe(utility);
+    }
+  });
+
+  it("네 그릇 토큰이 tokens.css 에 light-dark() 한 쌍으로 있다", () => {
+    for (const tone of TONES) {
+      expect(() => tokenValues(COMPLETION_TONE_SOFT_TOKEN[tone])).not.toThrow();
+    }
+  });
+
+  it("그릇은 잉크에서 파생되지 않는다 — muted 한 칸이 그 규칙을 깬다", () => {
+    // 「`--X` 에 `-soft` 를 붙인다」로 지으면 muted 칸이 `--ink-muted-soft` 라는 없는
+    // 토큰을 부르고, 그 실패는 컴파일이 아니라 화면에서 **그릇 없는 칩**이 된다.
+    // 그래서 두 표가 따로 적히고, 이 단정이 그 이유를 값으로 붙들어 둔다.
+    expect(COMPLETION_TONE_TOKEN.muted).toBe("--ink-muted");
+    expect(COMPLETION_TONE_SOFT_TOKEN.muted).toBe("--muted-soft");
+    expect(
+      `${COMPLETION_TONE_TOKEN.muted}-soft`,
+      "그릇 이름이 잉크 이름에서 파생 가능해 보이면 다음 사람이 표를 하나로 합친다"
+    ).not.toBe(COMPLETION_TONE_SOFT_TOKEN.muted);
+  });
+
+  it("톤이 있는 세 그릇은 서로 다른 값이다 — 통과와 실패가 같은 그릇에 서지 않는다", () => {
+    for (const [index, scheme] of SCHEMES.entries()) {
+      const seen = new Map<string, CompletionTone>();
+      for (const tone of TONES) {
+        const value = tokenValues(COMPLETION_TONE_SOFT_TOKEN[tone])[index];
+        const clash = seen.get(value);
+        expect(
+          clash,
+          `${scheme}에서 ${tone} 과 ${clash} 의 그릇이 같은 값(${value})이다`
+        ).toBeUndefined();
+        seen.set(value, tone);
+      }
     }
   });
 });

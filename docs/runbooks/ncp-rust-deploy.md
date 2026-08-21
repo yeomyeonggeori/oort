@@ -19,9 +19,17 @@
 | `infra/rust/caddy.override.yml` | 같음 | TLS 에지 + **web-init**(SPA를 이미지에서 볼륨으로) |
 | `infra/rust/cent-origin.override.yml` | 같음 | **centrifugo origin 허용목록** — 틀리면 전 클라이언트 403 |
 | `infra/rust/Caddyfile` | 같음 | 경로 분기 + **보안 헤더 5종**(#1213). `caddy.override.yml`이 `./Caddyfile:/etc/caddy/Caddyfile:ro`로 마운트 |
-| `infra/rust/rust-smoke.env.example` | `smoke.secrets.env` | `MOMO_RUST_IMAGE=<태그>` 포함 — **배포란 이 태그를 바꾸는 일이다** |
+| `infra/rust/rust-smoke.env.example` | `smoke.secrets.env` | `MOMO_RUST_IMAGE=ghcr.io/…@sha256:<digest>` 포함 — migrate evidence와 최종 기동이 같은 불변 digest를 사용 |
 | `infra/rust/push-relay.env.example` | `push-relay.secrets.env` | APNs `.p8` 호스트 경로 등 |
 | `infra/rust/overlays.env.example` | `overlays.secrets.env` | 오버레이 3개가 요구하는 키 (T3 · origin 목록 · caddy 포트) |
+| `infra/rust/docker-compose.backup.yml` | 같음 | PostgreSQL 18+pgBackRest digest · continuous WAL · encrypted repository · signed migrate evidence |
+| `infra/rust/backup-preproof.env.example` | `/run/momo-pitr/backup-preproof.env` | 첫 proof 전 PostgreSQL만 pgBackRest image/archive로 바꾸는 일회성 비시크릿 보간값. migrate runner 입력 금지 |
+| `infra/rust/backup.env.example` | `/run/momo-pitr/backup.env` | attended runner가 허용하는 exact 2 keys: archive cipher host path + repo volume name. 실제 secret 값은 별도 파일 |
+| `infra/rust/pitr-bindings.env.example` | shape only | verifier가 내는 owner-only exact 19-key bindings의 drift 검사용. 사람이 복사해 evidence로 쓰지 않음 |
+| `infra/rust/pgbackrest-s3.env.example` | `/run/momo-pitr/pgbackrest-s3.env` | 선택 S3-compatible topology/credential-file path. credential 값은 별도 owner-only 파일 |
+| `infra/rust/pgbackrest.conf` | 같음 | POSIX repository 비시크릿 정본. S3-compatible 전환은 별도 attended overlay |
+| `scripts/verify_pgbackrest_pitr.sh` | `/opt/momo/scripts/` | live source를 중단하지 않는 full/WAL/time-target restore + signed evidence producer |
+| `scripts/run_pitr_gated_migrate.sh` | `/opt/momo/scripts/` | exact base+backup Compose와 검증된 bindings만 소비하는 migration 진입점 |
 | `scripts/verify_ncp_centrifugo_boundary.sh` | `/opt/momo/scripts/` | 공개 403 · private API 인증 단계 · `CENT_PROXY_SECRET` SHA-256 동일성의 **읽기 전용** 배포 증거 |
 | — | APNs `.p8` · relay Ed25519 개인키 | 레포 비유입이 **정상**(ADR-0004/0120) |
 
@@ -33,38 +41,121 @@
 
 ## 배포 절차
 
-1. (로컬) amd64 이미지 빌드 → 전송 → 서버에서 `docker load`. 태그 = track/engine 커밋 해시.
-   **`MOMO_BUILD_SHA`를 반드시 넘긴다** — 이미지 라벨과 SPA `<meta name="momo-build">`에 박히는 값이고, 이것이 라이브를 커밋으로 되돌리는 유일한 in-band 경로다(#1228 이전에는 없었다).
+1. (owner-attended) `main`의 manual `publish-images.yml`이 application/database
+   두 image를 모두 push하고 각각 returned digest에 SLSA attestation을 붙인 뒤 낸
+   release manifest에서 **두 exact digest를 함께** 가져온다. `sha-*` tag나 로컬
+   retag는 배포 권위가 아니다. 첫 dispatch·anonymous pull·attestation round-trip이
+   아직 없으면 이 절차를 진행하지 않고 `runtime-unverified(first publish)`로 남긴다.
+
    ```bash
-   SHA=$(git rev-parse --short=8 HEAD)
-   docker build --platform linux/amd64 \
-     --build-arg MOMO_BUILD_SHA="$SHA" \
-     -f server-rust/Dockerfile -t "momo-rust:$SHA" .
+   DEPLOY_GIT_COMMIT=<main의-40hex>
+   APP_REF='ghcr.io/yeomyeonggeori/oort@sha256:<application-digest>'
+   POSTGRES_REF='ghcr.io/yeomyeonggeori/oort-postgres@sha256:<postgres-digest>'
+   printf '%s\n' "$DEPLOY_GIT_COMMIT" | grep -Eq '^[0-9a-f]{40}$'
+   printf '%s\n%s\n' "$APP_REF" "$POSTGRES_REF" \
+     | grep -E '^ghcr\.io/yeomyeonggeori/oort(-postgres)?@sha256:[0-9a-f]{64}$'
+   gh attestation verify "oci://$APP_REF" --repo yeomyeonggeori/oort \
+     --predicate-type https://slsa.dev/provenance/v1
+   gh attestation verify "oci://$POSTGRES_REF" --repo yeomyeonggeori/oort \
+     --predicate-type https://slsa.dev/provenance/v1
    ```
-   이 이미지 하나에 **웹 SPA가 들어 있다**(#1228). 별도의 웹 배포 단계는 없다 — 아래 「웹(정적 SPA) 배포」 참조.
+   application image 하나에 **웹 SPA가 들어 있다**(#1228). 별도의 웹 배포 단계는
+   없다. 이 두 ref와 commit은 proof→migrate→final up 전체 창에서 바꾸지 않는다.
 2. (서버, 오버레이가 바뀐 창에서만) 레포 파일 동기화 — **덮어쓰기는 반드시 제자리에서**(`scp`/`cp`, `mv` 금지: 아래 inode 함정):
    ```bash
    ssh root@101.79.11.189 'install -d -m 0755 /opt/momo/scripts'
-   scp infra/rust/{docker-compose.rust.yml,docker-compose.push.yml,t3.override.yml,caddy.override.yml,cent-origin.override.yml,Caddyfile} \
+   scp infra/rust/{docker-compose.rust.yml,docker-compose.backup.yml,backup-preproof.env.example,pgbackrest.conf,docker-compose.push.yml,t3.override.yml,caddy.override.yml,cent-origin.override.yml,Caddyfile} \
      root@101.79.11.189:/opt/momo/infra/rust/
-   scp scripts/verify_ncp_centrifugo_boundary.sh \
+   scp scripts/{verify_pgbackrest_pitr.sh,pgbackrest_pitr_restore.sh,run_pitr_gated_migrate.sh,verify_ncp_centrifugo_boundary.sh} \
      root@101.79.11.189:/opt/momo/scripts/
    ```
    `*.secrets.env`는 **절대 덮어쓰지 않는다** — 값의 정본은 서버다.
-3. (서버) 태그 갱신 + 기동 — **파일 5개·env 3개 전부, 빠지면 안 된다**:
+3. (서버) DB digest를 갱신한 뒤 **PostgreSQL만 먼저 backup overlay로 재생성한다.**
+   기존 live container에는 pgBackRest가 없고 `archive_mode=off`이므로, 이 전환을
+   생략하면 아직 존재하지 않는 WAL/PITR 증거를 요구하는 순환이 생긴다. attended
+   유지보수 창에서 app migration은 실행하지 않고 DB service만 pull/recreate한다.
+
    ```bash
    cd /opt/momo/infra/rust
-   cp smoke.secrets.env smoke.secrets.env.bak-$(date +%Y%m%d)
-   sed -i "s/^MOMO_RUST_IMAGE=.*/MOMO_RUST_IMAGE=momo-rust:<새태그>/" smoke.secrets.env
-   docker compose --env-file smoke.secrets.env --env-file push-relay.secrets.env \
-     --env-file overlays.secrets.env \
-     -f docker-compose.rust.yml -f docker-compose.push.yml -f t3.override.yml \
-     -f caddy.override.yml -f cent-origin.override.yml up -d
+   # 1번에서 검증한 exact 값. tag/local image는 허용하지 않는다.
+   APP_REF='ghcr.io/yeomyeonggeori/oort@sha256:<application-digest>'
+   POSTGRES_REF='ghcr.io/yeomyeonggeori/oort-postgres@sha256:<postgres-digest>'
+   DEPLOY_GIT_COMMIT=<main의-40hex>
+   python3 - "$APP_REF" "$POSTGRES_REF" <<'PY'
+import pathlib, re, sys
+
+def replace_exact(path: pathlib.Path, key: str, value: str) -> None:
+    lines = path.read_text().splitlines()
+    hits = [index for index, line in enumerate(lines) if line.startswith(key + "=")]
+    if len(hits) != 1:
+        raise SystemExit(f"expected exactly one {key} in {path}")
+    lines[hits[0]] = f"{key}={value}"
+    path.write_text("\n".join(lines) + "\n")
+
+app, postgres = sys.argv[1:]
+if not re.fullmatch(r"ghcr\.io/yeomyeonggeori/oort@sha256:[0-9a-f]{64}", app):
+    raise SystemExit("application ref is not canonical digest form")
+if not re.fullmatch(r"ghcr\.io/yeomyeonggeori/oort-postgres@sha256:[0-9a-f]{64}", postgres):
+    raise SystemExit("PostgreSQL ref is not canonical digest form")
+replace_exact(pathlib.Path("smoke.secrets.env"), "MOMO_RUST_IMAGE", app)
+replace_exact(pathlib.Path("/run/momo-pitr/backup-preproof.env"), "MOMO_POSTGRES_PGBACKREST_IMAGE", postgres)
+PY
+   # rust-smoke.env.example의 세 줄은 local-smoke용이다. Production operator
+   # env에는 MOMO_ENV=production만 남기고 signed bindings가 소유할 키는 제거한다.
+   sed -i '/^MOMO_MIGRATE_ENV=/d;/^MOMO_PITR_EVIDENCE_REQUIRED=/d;/^MOMO_PITR_BOOTSTRAP_EMPTY=/d' smoke.secrets.env
+   grep -q '^MOMO_ENV=production$' smoke.secrets.env
+   if grep -Eq '^(MOMO_MIGRATE_ENV|MOMO_PITR_EVIDENCE_REQUIRED|MOMO_PITR_BOOTSTRAP_EMPTY)=' smoke.secrets.env; then
+     echo 'operator env still overlaps signed PITR bindings' >&2; exit 1
+   fi
+   env -i PATH="$PATH" HOME="$HOME" docker compose --env-file smoke.secrets.env \
+     --env-file /run/momo-pitr/backup-preproof.env \
+     -f docker-compose.rust.yml -f docker-compose.backup.yml pull postgres migrate
+   env -i PATH="$PATH" HOME="$HOME" docker compose --env-file smoke.secrets.env \
+     --env-file /run/momo-pitr/backup-preproof.env \
+     -f docker-compose.rust.yml -f docker-compose.backup.yml \
+     up -d --no-deps --wait postgres
    ```
-   migrate는 one-shot으로 돌고 멱등이다(`[migrate] IDEMPOTENCY_OK` 확인). `web-init`도 one-shot이다 — `up -d`가 caddy보다 먼저 돌리고 종료 코드 0을 기다린다(`depends_on: service_completed_successfully`).
+
+   image digest/attestation 검증과 archive cipher/HMAC 두 owner-scoped 복제본 준비는
+   [`pgbackrest-pitr.md`](pgbackrest-pitr.md)의 preflight를 먼저 통과해야 한다.
+
+4. (서버) **기존 DB에서는 PITR 증거를 만든 뒤 migrate한다.**
+   `up -d`가 migration을 대신한다고 간주하지 않는다. DB image·cipher/HMAC key와
+   evidence/bindings 파일의 owner/mode, attach verifier 전체 절차는
+   [`pgbackrest-pitr.md`](pgbackrest-pitr.md)가 정본이다. 첫 install의 explicit
+   empty-bootstrap은 live DB에 `schema_migrations`와 public user table이 모두
+   없음을 binary가 확인한 뒤에만 허용된다. 기존 DB에서 bootstrap을 재사용하거나 일반
+   migrate를 signed evidence 없이 직접 실행하면 SQL 전에 RED가 정상이다.
+   wrapper는 같은 Docker daemon의 고정 lock container를 첫 lineage 검사부터 최종
+   healthy rollout까지 보유하므로, 다른 migration-only 또는 full deploy를 동시에
+   시작하면 SQL 전에 RED가 정상이다.
+
+   ```bash
+   # verifier에는 위 APP_REF/POSTGRES_REF/DEPLOY_GIT_COMMIT의 exact 값을 넘긴다.
+   # attended backup/PITR가 PASS해 owner-only .env bindings를 낸 뒤. 이 한
+   # invocation이 검증한 private snapshot으로 migrate와 production rollout을
+   # 모두 수행한다. 종료 뒤 raw `docker compose up`을 덧붙이지 않는다.
+   /opt/momo/scripts/run_pitr_gated_migrate.sh \
+     --operator-env smoke.secrets.env \
+     --backup-env /run/momo-pitr/backup.env \
+     --bindings-env /opt/momo/evidence/pgbackrest-pitr-<run-id>.env \
+     --deploy-production-stack \
+     --push-env push-relay.secrets.env \
+     --overlays-env overlays.secrets.env
+   ```
+
+   설정/image 변경 없이 같은 컨테이너 process만 재시작할 때는 inspect로 기존
+   container ID/image digest를 고정한 뒤 `docker restart <ids...>`를 사용한다. Compose
+   재렌더나 image 변경은 app-only라도 위 gated deploy wrapper를 다시 거친다.
+
+5. (서버) 4번 wrapper가 같은 private snapshot으로 transport를 health-check하고,
+   `web-init`을 끝낸 뒤 api/relay/workers/notifier/caddy만 scoped `--no-deps`로
+   재생성한다. PostgreSQL·runtime-roles·migrate는 final `up` 대상이 아니므로 proof
+   뒤 재실행되지 않는다. 성공 증거는 signed gate 로그, `[migrate]
+   IDEMPOTENCY_OK`, wrapper exit 0이며 임의 `PASS` 텍스트 파일이 아니다.
 
    > `overlays.secrets.env`가 없다면 `infra/rust/overlays.env.example`를 복사해 채운다. 빠뜨리면 **조용히 기동하지 않는다**: `docker compose config`가 exit 1로 죽으면서 빠진 변수 이름을 댄다(#1228 red proof).
-4. 검증 (밖에서):
+6. 검증 (밖에서):
    ```bash
    curl -s -o /dev/null -w '%{http_code}' https://app.oor7.com/healthz            # 200
    curl -s -o /dev/null -w '%{http_code}' https://app.oor7.com/v1/workspaces/<ws>/approvals  # 401(=서빙), 404면 구 이미지
@@ -74,8 +165,10 @@
    # 보안 헤더 5종 (#1213). 아래 「Caddy 설정 배포」를 한 창에서는 이 줄이 수용기준이다.
    curl -sI https://app.oor7.com | grep -iE 'content-security|strict-transport|x-content-type|referrer|frame'
    ```
-   + `docker ps`에서 momo-rust 4서비스(api·relay·agent-worker·notifier)가 **전부 새 태그**인지 — notifier는 push.yml 소속이라 파일을 빼먹으면 혼자 구 이미지로 남는다(2026-08-04 실증).
-   + 이미지 자신에게 물어도 된다: `docker image inspect momo-rust:<태그> --format '{{index .Config.Labels "org.opencontainers.image.revision"}}'`
+   + `docker ps --no-trunc`와 `docker inspect`에서 api·relay·agent-worker·notifier가
+     **전부 proof와 같은 application image ID/digest**인지 확인한다. notifier는
+     push.yml 소속이라 파일을 빼먹으면 혼자 구 이미지로 남는다(2026-08-04 실증).
+   + 이미지 commit도 확인한다: `docker image inspect "$APP_REF" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}'`이 `$DEPLOY_GIT_COMMIT`과 같아야 한다.
 
 ## CENT_PROXY_SECRET 회전
 
@@ -136,21 +229,20 @@ os.replace(tmp, path)
    chmod 600 smoke.secrets.env "$old_env"
    ```
 
-2. **다섯 compose 파일·세 env 파일을 그대로 유지한 채** 렌더링을 먼저 확인하고,
-   secret을 소비하는 `api`와 `centrifugo`만 같은 명령에서 recreate한다. 이 짧은
-   창에는 신규 realtime 연결이 재시도될 수 있지만, DB/message/outbox는 바뀌지 않는다.
+2. 변경된 env도 raw Compose에 넘기지 않는다. 같은 attested app/PostgreSQL digest로
+   새 attach PITR proof를 만든 뒤, 배포 절차 4의 wrapper가 5개 env를 private snapshot에
+   고정하고 scoped rollout까지 끝내게 한다. 이 창에는 신규 realtime 연결이 재시도될
+   수 있지만 DB/message/outbox는 바뀌지 않는다.
 
    ```bash
-   docker compose --env-file smoke.secrets.env --env-file push-relay.secrets.env \
-     --env-file overlays.secrets.env \
-     -f docker-compose.rust.yml -f docker-compose.push.yml -f t3.override.yml \
-     -f caddy.override.yml -f cent-origin.override.yml config >/dev/null
-
-   docker compose --env-file smoke.secrets.env --env-file push-relay.secrets.env \
-     --env-file overlays.secrets.env \
-     -f docker-compose.rust.yml -f docker-compose.push.yml -f t3.override.yml \
-     -f caddy.override.yml -f cent-origin.override.yml \
-     up -d --no-deps --force-recreate api centrifugo
+   # docs/runbooks/pgbackrest-pitr.md §5 attach 명령으로 <fresh-run-id> 생성 후
+   /opt/momo/scripts/run_pitr_gated_migrate.sh \
+     --operator-env smoke.secrets.env \
+     --backup-env /run/momo-pitr/backup.env \
+     --bindings-env /opt/momo/evidence/pgbackrest-pitr-<fresh-run-id>.env \
+     --deploy-production-stack \
+     --push-env push-relay.secrets.env \
+     --overlays-env overlays.secrets.env
    ```
 
 3. health 뒤 읽기 전용 verifier를 실행한다. 이 출력/JSON/Markdown에는 원문이 없고
@@ -171,8 +263,8 @@ os.replace(tmp, path)
 
 ### 회전 롤백
 
-recreate 또는 verifier가 실패하면 새 env를 별도 0600 파일로 보존한 뒤 직전 env를
-제자리 복원하고 **동일한 두 서비스**를 다시 recreate한다. 롤백 검증에서는 실패한
+gated deploy 또는 verifier가 실패하면 새 env를 별도 0600 파일로 보존한 뒤 직전 env를
+제자리 복원하고 **새 attach proof + gated deploy**를 다시 수행한다. 롤백 검증에서는 실패한
 새 env가 `--old-env-file`이다. 즉, 이전 값으로 돌아온 API가 새 값을 401로 거절하는
 것까지 확인한다.
 
@@ -184,11 +276,14 @@ cp -p smoke.secrets.env "$failed_env"
 cp -p "$old_env" smoke.secrets.env
 chmod 600 smoke.secrets.env "$failed_env"
 
-docker compose --env-file smoke.secrets.env --env-file push-relay.secrets.env \
-  --env-file overlays.secrets.env \
-  -f docker-compose.rust.yml -f docker-compose.push.yml -f t3.override.yml \
-  -f caddy.override.yml -f cent-origin.override.yml \
-  up -d --no-deps --force-recreate api centrifugo
+# docs/runbooks/pgbackrest-pitr.md §5 attach 명령으로 <rollback-run-id> 생성 후
+/opt/momo/scripts/run_pitr_gated_migrate.sh \
+  --operator-env smoke.secrets.env \
+  --backup-env /run/momo-pitr/backup.env \
+  --bindings-env /opt/momo/evidence/pgbackrest-pitr-<rollback-run-id>.env \
+  --deploy-production-stack \
+  --push-env push-relay.secrets.env \
+  --overlays-env overlays.secrets.env
 
 /opt/momo/scripts/verify_ncp_centrifugo_boundary.sh \
   --env-file /opt/momo/infra/rust/smoke.secrets.env \
@@ -251,19 +346,26 @@ docker compose --env-file smoke.secrets.env --env-file push-relay.secrets.env \
 
 ## 롤백
 
-`smoke.secrets.env`의 태그를 직전 값(백업 파일 참조)으로 되돌리고 같은 up -d 한 번.
+mutable tag를 되돌려 raw `up -d`하지 않는다. schema/DB image가 바뀌지 않은
+app-only 롤백도 이전 release manifest의 **attested application digest**를 operator
+env에 설치하고, 같은 PostgreSQL digest로 새 15분 이내 PITR proof를 만든 뒤 위
+gated deploy wrapper를 다시 실행한다. schema 또는 PostgreSQL image가 바뀐 창의
+롤백은 target-time restore로 source를 교체하는 별도 attended recovery 결정이며,
+옛 binary를 현재 schema 위에 임의로 올리는 절차가 아니다.
 
 Caddyfile만 되돌릴 때는 레포의 직전 커밋 판을 같은 방식으로 덮어쓰고 reload 한 번. **단 HSTS는 롤백되지 않는다**: 헤더를 지워도 이미 그 헤더를 받은 브라우저는 max-age 동안 이 호스트를 HTTPS로만 연다. 그래서 첫 값이 1일이다.
 
 ## 디스크 위생
 
-배포 전 `docker images | grep momo`로 사용 안 하는 옛 태그 제거(`docker image rm`). **직전 태그 하나는 롤백용으로 반드시 남긴다.**
+배포 전 registry digest와 현재 컨테이너가 참조하지 않는 local locator tag만
+회수한다. 롤백 권위는 보존한 옛 tag가 아니라 release manifest의 attested digest다.
 
 ## 웹(정적 SPA) 배포 — **별도 단계가 없다** (#1228)
 
 SPA는 `${MOMO_RUST_IMAGE}` **안에** 있다. `caddy.override.yml`의 `web-init` one-shot이 이미지의 `/opt/momo/web`을 `web-static` named volume으로 복사하고, Caddy가 그 볼륨을 `/srv/web`으로 읽는다(`Caddyfile`의 `handle { root * /srv/web }` — 이 줄은 바뀌지 않았다. 바이트의 출처를 Caddyfile은 원래 몰랐다).
 
-**따라서 배포는 위 「배포 절차」 하나뿐이다.** 태그를 바꾸면 API와 웹이 같이 간다.
+**따라서 배포는 위 「배포 절차」 하나뿐이다.** exact application digest를 바꾸면
+API와 웹이 같이 간다.
 
 - 로컬에서 웹 번들을 빌드해 tar로 올리는 절차는 **폐지됐다**. 그 절차가 만들던 것은 편의가 아니라 결함이었다: 웹과 API의 버전이 구조적으로 분리돼 한쪽만 배포된 상태가 기본값이었고, 라이브 번들이 어느 커밋인지 알 방법이 없었다(감사 B-6·B-10).
 - 이 형태는 새로 만든 것이 아니라 **되찾은 것**이다 — Swift 경로의 `infra/prod/docker-compose.prod.yml`이 같은 `web-init` + named volume 구조를 갖고 있었고 Rust 경로가 그것을 잃었었다.
@@ -279,6 +381,9 @@ curl -s "https://app.oor7.com/?v=$(date +%s)" | grep -o 'name="momo-build" conte
 
 ### 롤백과 재기동
 
-`web-init`의 복사는 **병합이 아니라 교체**다(`rm -rf /srv/web/*` → `cp -a`). 그래서 구 태그로 되돌리면 새 청크가 볼륨에 남아 옛 `index.html`을 오염시키는 상태가 생기지 않는다. 볼륨은 프로젝트 스코프라 `down -v`로 회수되고, 다음 `up -d`가 이미지에서 다시 채운다.
+`web-init`의 복사는 **병합이 아니라 교체**다(`rm -rf /srv/web/*` → `cp -a`). 그래서
+이전 attested digest로 gated rollback하면 새 청크가 볼륨에 남아 옛 `index.html`을
+오염시키는 상태가 생기지 않는다. `down -v`는 PostgreSQL/backup repository까지
+지울 수 있으므로 production rollback 명령이 아니며 실행하지 않는다.
 
 > ⚠️ **여전히 유효한 함정 — 단, 이제 `Caddyfile` 한 장에만 적용된다.** docker bind mount는 컨테이너 기동 시점의 **inode**를 잡는다. `caddy.override.yml`은 `./Caddyfile`을 **파일 단위**로 bind 하므로, rename으로 바꾸면(에디터의 「원자적 저장」, `mv`) 컨테이너는 옛 파일을 계속 본다. `scp`·`cp`·`sed -i`는 제자리에 쓰므로 안전하다. 웹 디렉터리는 named volume이 됐으므로 이 함정에서 벗어났다(2026-08-04에 밟았던 `mv web web.bak` 사고는 더 이상 재현 불가능하다).

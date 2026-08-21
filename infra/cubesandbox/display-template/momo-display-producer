@@ -807,7 +807,24 @@ class Session:
         #
         # In READY the element is alive and negotiation has not started, so the
         # channel lands in the FIRST offer.
+        #
+        # `set_state` is ASYNC: it returns before the transition completes, and
+        # the `is_closed != TRUE` assertion `create-data-channel` makes is only
+        # cleared once webrtcbin has ACTUALLY reached READY. Creating the channel
+        # on the line after `set_state` therefore races the state change — and
+        # when the race is lost, `create-data-channel` hits that very assertion,
+        # returns NULL, and the grant is silently downgraded to a view-only
+        # offer (`m=application absent`) while `ready` has already told the
+        # viewer `input_enabled: true`. Measured #1587: inside a CubeSandbox
+        # microVM (and reproduced in a container) this branch lost every time,
+        # so the input half never opened there even though it opened on the
+        # template image in #1570 — the same race, won by luck before an input
+        # path existed to expose it. `get_state` blocks until the transition
+        # finishes, making the window this comment describes a real one.
         self.pipe.set_state(Gst.State.READY)
+        state_change, _current, _pending = self.pipe.get_state(5 * Gst.SECOND)
+        if state_change != Gst.StateChangeReturn.SUCCESS:
+            log(f"prepare: pipeline did not reach READY ({state_change.value_nick})")
         if self.input_enabled:
             self._open_input_channel()
 

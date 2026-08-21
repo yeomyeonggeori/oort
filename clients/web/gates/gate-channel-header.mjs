@@ -34,11 +34,11 @@
 // muted를 뒤집지 않으며, LEAVE는 목이 DELETE에 403을 돌려준다. 제품 소스 줄을
 // 지우거나 단언을 빼라고 요구하지 않으므로 증명은 반복 가능하다.
 
-import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
+import { startGuardedPreview } from "./preview-guard.mjs";
 
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -142,10 +142,6 @@ function json(route, body, status = 200) {
     contentType: "application/json",
     body: JSON.stringify(body),
   });
-}
-
-function wait(ms) {
-  return new Promise((done) => setTimeout(done, ms));
 }
 
 /** 셸이 연결을 기다리므로 최소한의 WS 스텁이 필요하다(프레임은 쓰지 않는다). */
@@ -292,19 +288,6 @@ async function installRoutes(context, traffic, options = {}) {
 
     return json(route, {});
   });
-}
-
-async function waitForServer() {
-  const deadline = Date.now() + 30_000;
-  while (Date.now() < deadline) {
-    try {
-      if ((await fetch(origin)).ok) return;
-    } catch {
-      /* preview 서버가 아직 뜨는 중 */
-    }
-    await wait(200);
-  }
-  throw new Error("channel-header gate preview server never came up");
 }
 
 async function login(page) {
@@ -495,13 +478,12 @@ async function main() {
   if (!existsSync(resolve(webRoot, "dist/index.html"))) {
     throw new Error("dist/ is missing. Run npm run build first.");
   }
-  const server = spawn(
-    resolve(webRoot, "node_modules/.bin/vite"),
-    ["preview", "--port", String(port), "--strictPort", "--host", "127.0.0.1"],
-    { cwd: webRoot, stdio: "ignore" }
-  );
+  const server = await startGuardedPreview({
+    webRoot,
+    port,
+    portEnvVar: "HEADER_GATE_PORT",
+  });
   try {
-    await waitForServer();
     const browser = await chromium.launch();
     try {
       await exercise(browser);
@@ -510,7 +492,7 @@ async function main() {
       await browser.close();
     }
   } finally {
-    server.kill("SIGTERM");
+    await server.stop();
   }
   console.log("GATE PASS: 헤더는 인원수를 숫자로 말했고, 채널 이름 메뉴는 알림·나가기");
   console.log("           둘만 세웠으며(이름 수정 없음), 알림 낱말은 저장된 muted를");
@@ -519,6 +501,7 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error(`GATE FAIL: ${error.message}`);
+  const message = String(error.message ?? error);
+  console.error(message.startsWith("GATE FAIL:") ? message : `GATE FAIL: ${message}`);
   process.exit(1);
 });

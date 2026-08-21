@@ -176,6 +176,12 @@ const SURFACES: Record<SurfaceId, ServerSurface> = {
     absentReason: "이 서버는 에이전트가 한 일의 기록을 아직 보여주지 못합니다.",
     fallback:
       "기록은 쌓이고 있습니다. 지금 확인할 수 있는 것은 에이전트가 채널에 남긴 메시지입니다.",
+    // design-preflight-allow — 승인 줄의 `measured` 와 같은 사유다(위 그 칸의 주석):
+    // 이 칸은 실측 근거이고 어느 클라도 렌더하지 않는다. 그래서 사용자 문장 규칙이
+    // 걸리는 자리가 아니다 — 여기서 걸린 것은 #1511 이 새로 세운 `latin_particle`
+    // (「clients/web 의」)이고, 그 규칙은 화면에 서는 줄바꿈에 대한 것이다. 예외를
+    // 지우고 싶으면 문장을 고칠 것이 아니라 이 칸이 렌더되기 시작했는지를 본다
+    // (지금은 serverSurfaces.test.ts 「사용자 문구에 …」가 measured 를 제외한다).
     measured:
       "2026-08-10 실측(#1223): server-rust/bins/momo-server/src/lib.rs에 읽기 셋이 등록됨. " +
       "GET …/channels/{ch}/agent-runs(routes::agent_runs::list. POST와 같은 .route()에 " +

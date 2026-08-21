@@ -53,7 +53,8 @@ import { loginHandoffSeeksControl } from "@momo/core/features/timeline/loginHand
 //     so the block is no longer one side's guess — but what these tests still
 //     prove is only that the two halves cannot drift while nobody is looking.
 //     That the wire works is measured by `scripts/display_input_e2e.py`, and
-//     inside a microVM it is still owed (`unverified.inputDeliveryInMicroVM`).
+//     since #1587 it is measured INSIDE a CubeSandbox microVM over a relay
+//     candidate too (`runtimeVerified.inputDeliveredInMicroVM`).
 //   * the auto-return tests hold the mapping from "what this client observed"
 //     to "why the window closed". It is total by construction, which is the
 //     property that makes "a control window never outlives its holder" testable
@@ -327,10 +328,11 @@ describe("the input frames, against the contract that declares them", () => {
     // The honesty label is part of the contract, not a footnote to it. It used
     // to read DECLARED ONLY, because nothing had ever parsed one of these
     // frames; LIVE-5c implemented the producer half against this same block and
-    // measured it, and the field names needed no correction. What replaces the
-    // old label is not silence — an unqualified "verified" would hide that the
-    // measurement was made against the template IMAGE and not yet inside a
-    // CubeSandbox microVM, which is the half still owed.
+    // measured it, and the field names needed no correction. #1587 then measured
+    // the same frames landing INSIDE a CubeSandbox microVM over a relay
+    // candidate, so the last qualifier the old label carried ("template image,
+    // not a microVM") is gone — but only because a runtimeVerified field records
+    // it, never by the label going quiet.
     expect(TEMPLATE_SPEC.runtimeVerified.producerParsesInputFrames).toBe(true);
     expect(TEMPLATE_SPEC.runtimeVerified.keystrokeReachesAnApplication).toBe(true);
     // Delivery and revocation graduate together or not at all: this client's
@@ -339,7 +341,10 @@ describe("the input frames, against the contract that declares them", () => {
     // worse half of the pair.
     expect(TEMPLATE_SPEC.runtimeVerified.inputRevokedWhenWindowCloses).toBe(true);
     expect(TEMPLATE_SPEC.runtimeVerified.streamSurvivesRevocation).toBe(true);
-    expect(TEMPLATE_SPEC.unverified.inputDeliveryInMicroVM).toBeTruthy();
+    // The microVM leg is now measured, and it graduated by RECORD (moving under
+    // runtimeVerified), not by the old unverified label being deleted in silence.
+    expect(TEMPLATE_SPEC.runtimeVerified.inputDeliveredInMicroVM).toBe(true);
+    expect(TEMPLATE_SPEC.unverified.inputDeliveryInMicroVM).toBeUndefined();
   });
 
   it("declares the modifier fields it sends as advisory, not as instructions", () => {

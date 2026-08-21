@@ -47,12 +47,12 @@ export function emptyTimeline(): TimelineState {
 // 메시지가 아니라 초대 다이얼로그로 보낸 것이다. `첫 메시지 쓰기`는 DM 분기에만
 // 있었는데, 정작 **두 표면의 첫 행동은 같은 act**다: 아래 컴포저에 쓰는 것.
 //
-// 그래서 첫 행동은 이제 양쪽 다 쓰기이고, 초대는 지워지지 않고 **뒤로 물러난다.**
-// 지우지 않는 이유는 취향이 아니라 이 클라의 사정이다: 빈 채널이 「채널에 멤버
-// 추가」로 가는 **유일한 문**이다(`clients/web/src/app/AppShell.tsx`: "빈 채널의
-// 초대 진입점이 이 하나를 열고, 헤더 메뉴가 생기면 그것도 같은 하나를 연다" —
-// 그 헤더 메뉴는 아직 없다). 유일한 문을 지우는 것은 마찰 하나를 없애자고 기능
-// 하나를 없애는 일이다.
+// 그래서 첫 행동은 이제 양쪽 다 쓰기이고, 멤버 추가는 지워지지 않고 **뒤로
+// 물러난다.** 지우지 않는 이유는 취향이 아니라 이 클라의 사정이다: 빈 채널이
+// 「채널에 멤버 추가」로 가는 **유일한 문**이다(`clients/web/src/app/AppShell.tsx`:
+// "빈 채널의 멤버 추가 진입점이 이 하나를 열고, 헤더 메뉴가 생기면 그것도 같은
+// 하나를 연다" — 그 헤더 메뉴는 아직 없다). 유일한 문을 지우는 것은 마찰 하나를 없애자고
+// 기능 하나를 없애는 일이다.
 //
 // A 1:1 DM still gets exactly one action: the server fixes the participant pair
 // by dmKey (openapi `openDm`), so offering 사람 추가 there would be an action the
@@ -61,14 +61,23 @@ export function emptyTimeline(): TimelineState {
 // 라벨이 여기 사는 이유: 같은 문장을 두 클라가 그리고, 게이트가 그 문장을 이
 // 파일에서 읽어 자기 판정에 쓴다(`clients/web/gates/gate-composer.mjs` 11절 —
 // 게이트가 문장을 손으로 베끼면 화면이 고쳐질 때 게이트가 그것을 막는 쪽이 된다).
+//
+// 이 버튼의 이름이 「추가」인 이유 (#1573, 한 동사=한 행위): 이 문이 여는 방이
+// 「멤버 추가」 다이얼로그다(제목 「멤버 추가」, 행 버튼 「추가」 —
+// `AddChannelMemberDialog.tsx`). 문이 방과 다른 동사를 달면, 혼자 있는 첫
+// 사용자가 이 버튼(당시 「멤버 초대하기」)을 누르고 "다른 멤버가 없습니다" 화면에서
+// **같은 이름의 다른 버튼**(워크스페이스 초대 → /settings)을 만난다 — F5 온보딩
+// 상태에서 재현 보장(PR #1568 design-review Medium 2). 「초대」는 워크스페이스에
+// 새 사람을 부르는 행위의 낱말로 예약한다(`DirectoryRoute` · 다이얼로그의
+// 빈-워크스페이스 상태, 둘 다 /settings의 초대 링크 생성기로 간다).
 
 /** 빈 대화가 내놓는 첫 행동의 이름. 정본은 이 두 상수다. */
 export const EMPTY_WRITE_ACTION_LABEL = "첫 메시지 쓰기";
-export const EMPTY_INVITE_ACTION_LABEL = "멤버 초대하기";
+export const EMPTY_ADD_MEMBER_ACTION_LABEL = "멤버 추가하기";
 
 export interface EmptyChannelAction {
   /** 무엇을 하는 손잡이인가. 표면은 이 값으로 자기 핸들러를 고른다. */
-  kind: "write" | "invite";
+  kind: "write" | "add-member";
   label: string;
 }
 
@@ -88,9 +97,9 @@ const WRITE_ACTION: EmptyChannelAction = {
   label: EMPTY_WRITE_ACTION_LABEL,
 };
 
-const INVITE_ACTION: EmptyChannelAction = {
-  kind: "invite",
-  label: EMPTY_INVITE_ACTION_LABEL,
+const ADD_MEMBER_ACTION: EmptyChannelAction = {
+  kind: "add-member",
+  label: EMPTY_ADD_MEMBER_ACTION_LABEL,
 };
 
 const DM_DETAIL = "여기 쓴 메시지는 둘만 봅니다. 참여자는 이 둘로 고정됩니다.";
@@ -115,9 +124,9 @@ export function emptyChannelCopy(
       surface: "channel",
       headline: "이 채널을 첫 메시지로 시작하세요.",
       detail:
-        "지금 쓴 메시지는 나중에 초대할 사람과 에이전트도 같은 자격으로 읽습니다.",
+        "지금 쓴 메시지는 나중에 들어올 사람과 에이전트도 같은 자격으로 읽습니다.",
       primary: WRITE_ACTION,
-      secondary: INVITE_ACTION,
+      secondary: ADD_MEMBER_ACTION,
     };
   }
   if (!peer) {

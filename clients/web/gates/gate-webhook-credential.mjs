@@ -65,11 +65,11 @@
 // 다른 게이트의 목이 이 측정에 섞이지 않는다.
 // =============================================================================
 
-import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
+import { startGuardedPreview } from "./preview-guard.mjs";
 
 const WEB_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const PORT = Number(process.env.WEBHOOK_GATE_PORT || 5187);
@@ -555,36 +555,19 @@ async function measureEscape(browser) {
   await context.close();
 }
 
-async function waitForServer(url, timeoutMs = 30_000) {
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
-    try {
-      const res = await fetch(url);
-      if (res.ok) return;
-    } catch {
-      /* not up yet */
-    }
-    if (Date.now() > deadline) {
-      throw new Error(`preview server never came up: ${url}`);
-    }
-    await new Promise((r) => setTimeout(r, 200));
-  }
-}
-
 async function main() {
   if (!existsSync(resolve(WEB_ROOT, "dist/index.html"))) {
     throw new Error("dist/ is missing. Run `npm run build` first.");
   }
-  const server = spawn(
-    resolve(WEB_ROOT, "node_modules/.bin/vite"),
-    ["preview", "--port", String(PORT), "--strictPort", "--host", "127.0.0.1"],
-    { cwd: WEB_ROOT, stdio: "ignore" }
-  );
-  const shutdown = () => server.kill("SIGTERM");
+  const server = await startGuardedPreview({
+    webRoot: WEB_ROOT,
+    port: PORT,
+    portEnvVar: "WEBHOOK_GATE_PORT",
+  });
+  const shutdown = () => server.child.kill("SIGTERM");
   process.on("exit", shutdown);
 
   try {
-    await waitForServer(ORIGIN);
     // 힙 스냅샷은 브라우저가 정직해야 뜻이 있다. `--js-flags=--expose-gc` 없이도
     // CDP 의 `HeapProfiler.collectGarbage` 는 실제 GC 를 돌린다.
     const browser = await chromium.launch();
@@ -597,7 +580,7 @@ async function main() {
       await browser.close();
     }
   } finally {
-    shutdown();
+    await server.stop();
   }
 
   if (failures.length > 0) {

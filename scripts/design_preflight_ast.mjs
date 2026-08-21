@@ -1,10 +1,23 @@
 // =============================================================================
 // design_preflight_ast.mjs — TS/TSX 문자열 리터럴 스캐너 (이슈 #1141).
 //
-// CLI 가 아니다. 두 게이트가 **같은 판정**을 쓰도록 규칙 하나를 여기에 둔다:
+// CLI 가 아니다. 소비자들이 **같은 판정**을 쓰도록 규칙 하나를 여기에 둔다.
+// 소비자가 늘 때 이 표도 함께 고친다 — 규칙 한 벌을 만든 파일이 자기 소비자
+// 목록에서 낡으면, 그 목록을 읽고 「내 클라는 안 재진다」를 잘못 아는 사람이
+// 생긴다 (#1511 회전 1 Nitpick):
 //
-//   · scripts/design_preflight_core.mjs        packages/momo-core/src  (emdash·raw_color·hype)
-//   · scripts/design_preflight_web_strings.mjs clients/web/src         (emdash)
+//   · scripts/design_preflight_core.mjs          packages/momo-core/src
+//         emdash · raw_color · hype · progress_word · latin_particle   (#1511)
+//   · scripts/design_preflight_web_strings.mjs   clients/web/src
+//         emdash · progress_word · latin_particle                      (#1511)
+//   · scripts/design_preflight_phone_strings.mjs clients/mobile/src
+//         progress_word · latin_particle                               (#1511 회전 1)
+//         em-dash 는 여기서 걸지 않는다 — 폰은 conversationHygiene.test.tsx 의
+//         `src/` 전수 스윕이 이미 잡는다. 같은 위반을 두 곳에서 세면 어느 쪽이
+//         정본인지 모르게 된다.
+//
+// 앞 둘은 `design_preflight_web.sh` 가, 셋째는 폰 jest 스위트가 부른다(폰에는
+// 「디자인 프리플라이트」라는 실행 단위가 없다 — 디자인 시스템 §5.4).
 //
 // ## 왜 AST 인가
 //
@@ -62,6 +75,58 @@ export const EMDASH_CATEGORY = {
   key: "emdash",
   rule: "em-dash (—/–) in a user-visible string (SKILL §7: binary fail, use , : ( ) or a line break)",
   hit: (text) => /—|–/.test(text),
+};
+
+/**
+ * 「-하는 중」이 옳은 꼴인 고유어 어간 (#1511). 규칙(#1490 전수 조사 → #1501
+ * 정본화)은 어간의 출신으로 갈린다 — 한자어 동작명사가 있으면 「명사 + 중」
+ * (저장 중·연결 중·인수 중), 없으면 고유어 동사가 「-는 중」(받는 중·만드는 중).
+ * 「받는 중」류는 애초에 「-하는 중」 꼴이 아니라 이 검사에 걸리지 않고, 걸리는
+ * 것은 X하다 동사뿐이다. 그중 X 가 고유어인 낱말만 여기 선다.
+ *
+ * 어간을 더하는 것은 곧 「이 X 는 한자어가 아니다」라는 판정이다 — 표에 적기
+ * 전에 그 판정을 실제로 하라. 지금 유일한 항목: 생각(생각하는 중,
+ * workSessionModel 의 think 국면. #1509 전수 조사도 이것을 위반으로 세지 않았다).
+ */
+export const NATIVE_HANEUN_STEMS = ["생각"];
+
+const NATIVE_HANEUN_RE = new RegExp(
+  `(^|[^가-힣])(${NATIVE_HANEUN_STEMS.join("|")})하는 중…?$`
+);
+
+/**
+ * 진행 낱말꼴 분류 (#1511). 원래 라벨을 **제자리에서** 대체하는 진행 낱말만
+ * 겨냥하므로 끝 고정이다: 문자열이 「-하는 중」(말줄임표 동행 포함)으로 **끝나는**
+ * 경우만 위반이고, 문장 꼴 「-하는 중입니다」나 문중의 「-하는 중이라 …」 산문은
+ * 검사 밖이다 (#1509 이탈 7 — 문장에서는 그 꼴이 옳다).
+ */
+export const PROGRESS_WORD_CATEGORY = {
+  key: "progress_word",
+  rule:
+    "진행 낱말은 「명사 + 중」 (#1501 정본·#1511 게이트): 한자어 동작명사가 있으면 「저장 중」, " +
+    "「-하는 중」은 고유어 어간 자리(NATIVE_HANEUN_STEMS)만 — 문장 꼴 「-하는 중입니다」는 검사 밖",
+  hit: (text) => {
+    const t = text.trim();
+    if (!/[가-힣]하는 중…?$/.test(t)) return false;
+    return !NATIVE_HANEUN_RE.test(t);
+  },
+};
+
+/**
+ * 라틴 낱말+조사 띄어쓰기 분류 (#1511 편입 — design-review #1560 Medium ①).
+ * 「Esc 는」「Tab 으로」처럼 라틴 낱말과 조사 사이를 띄면, break-keep 아래서
+ * 조사가 줄머리 고아로 선다(§5.3 7위 축). 형제 정답은 「Esc로」(composerCopy).
+ *
+ * 조사 뒤가 한글이면 조사가 아니라 낱말의 첫 글자다(「API 이름」의 「이」) —
+ * 그래서 뒤 경계는 「한글 아님 또는 끝」이다.
+ */
+export const LATIN_PARTICLE_CATEGORY = {
+  key: "latin_particle",
+  rule:
+    "라틴 낱말 뒤 조사는 붙여 쓴다 (「Esc 는」→「Esc는」, #1511·#1560 M①): " +
+    "break-keep 아래서 띈 조사가 줄머리 고아로 선다",
+  hit: (text) =>
+    /[A-Za-z] (은|는|이|가|을|를|과|와|의|로|으로|에|에서|도|만)(?=$|[^가-힣])/.test(text),
 };
 
 /**

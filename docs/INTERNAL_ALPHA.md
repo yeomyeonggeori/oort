@@ -1,526 +1,334 @@
-# Internal Alpha Runbook
+# Internal Alpha Runbook (웹 + 데스크탑)
 
-> Purpose: one teammate should be able to start oort locally, attach the macOS dev app, exercise invite/join, Kim Intern, diagnostics, and file a useful bug report without reading the whole repo.
-> Scope: internal alpha on a developer Mac. This is not the M7 release gate and not a public/staging production launch.
-> Cloud host: for a one-week AWS team alpha, use `docs/AWS_INTERNAL_ALPHA.md` first. The local runbook below still applies to app behavior and smoke scenarios.
-> Local solo alpha: use [`docs/LOCAL_SOLO_ALPHA_ROADMAP.md`](LOCAL_SOLO_ALPHA_ROADMAP.md) for the narrower path to one-person Docker + macOS app + local Hermes-compatible provider dogfood before AWS.
-> 72-hour local dogfood: use [`docs/LOCAL_3_DAY_ALPHA_TEST_PACK.md`](LOCAL_3_DAY_ALPHA_TEST_PACK.md) as the Day 0~Day 3 decision contract before MOMO-246 starts.
+> 목적: 한 팀원이 셀프호스트 스택을 띄우고, 브라우저와 Tauri 데스크탑으로
+> 초대/합류·에이전트 멘션·diagnostics를 스모크한 뒤, 쓸모 있는 버그를 남긴다.
+> 3일 판정 계약은 [`docs/LOCAL_3_DAY_ALPHA_TEST_PACK.md`](LOCAL_3_DAY_ALPHA_TEST_PACK.md)가 정본이다
+> (`LAUNCH_READY` / `BLOCKED` / `NEEDS_MORE_INTERNAL`). 시나리오 표는
+> [`docs/planning/research/2026-08-20-oss-launch-readiness-and-internal-test-plan.md`](planning/research/2026-08-20-oss-launch-readiness-and-internal-test-plan.md) §4–§5.
+>
+> 범위: 개발자 머신 + Docker의 내부 알파. M7 릴리스 게이트가 아니고 공개 런칭이 아니다.
+> AWS 1주일 호스트 토폴로지는 [`docs/AWS_INTERNAL_ALPHA.md`](AWS_INTERNAL_ALPHA.md) — **ITO 판정값이 아니다.**
 
-## 0. Read This First
+은퇴: `MomoMacDevApp`, 삭제된 `scripts/macos_dev_run.sh`, 삭제된 `clients/macOS` 트리, local-gate 프로파일 `macos-ui`. 그 이름은 실패하지 않고 **잘못된 스택을 가리킨다.** <!-- docs-cmd-ignore: 은퇴 스택 이름 호명 (#1609) -->
 
-- Work from a dedicated worktree. Do not run alpha smoke tests from a dirty root checkout.
-- Never commit `.env`, diagnostics archives, app logs, or screenshots with secrets.
-- Raw invite codes are bearer secrets. oort stores only hashes, so an invite code must be copied when it is created.
-- The durable write path is still REST -> Postgres transaction -> outbox -> relay publish. The macOS app must not publish directly to Centrifugo.
-- Internal alpha can use repo-local mock Hermes. External agent runtime/provider side effects remain `runtime-unverified` unless a real gateway is explicitly attached with an out-of-repo provider env file.
-- "Kim Intern invited" and "Kim Intern connected" are separate checks: invited means the agent is an active `member.kind='agent'` with channel membership; connected means the provider status chip or `/v1/agent-runtime/status` reports mock/available instead of degraded.
-- MOMO-300 changed auth and realtime hardening. Old access/refresh tokens issued before this migration are expected to fail closed with 401; log out and log in again with the seeded credentials.
-- `CENT_PROXY_SECRET` must be set consistently for API and Centrifugo. A missing or mismatched subscribe-proxy secret makes realtime subscribe fail with 401.
-- MOMO-302 means agent calls are no longer single-message prompts. The server sends recent same-channel context to AgentWorker/Hermes, bounded by `AGENT_CONTEXT_MAX_MESSAGES` and `AGENT_CONTEXT_MAX_CHARS`.
-- Rate limiting is enabled by default (`RATE_LIMIT_PER_MEMBER=600`, `RATE_LIMIT_PER_IP=1200` per 60s window). If a local stress loop or repeated verifier run hits 429, record it and temporarily set the relevant limit to `0` in the local env only.
+---
 
-## 1. Tooling Checklist
+## 0. 먼저 읽을 것
 
-| Tool | Check | Used for |
+- dedicated worktree에서 한다. dirty 루트에서 알파 스모크를 돌리지 않는다.
+- `.env`, diagnostics, 앱 로그, 시크릿이 든 스크린샷을 커밋하지 않는다.
+- 초대 원문 코드는 bearer다. 서버는 해시만 저장하므로 발급 순간에 복사한다.
+- 쓰기 경로: REST → Postgres 트랜잭션 → outbox → relay. 웹·데스크탑 모두 Centrifugo에 직접 publish하지 않는다.
+- 셀프호스트 로그인은 `docs/SELF_HOST.md` §4. 기본 `http://localhost:8088` · `owner@oort.local` · `infra/rust/local.secrets.env`의 `MOMO_INITIAL_OWNER_PASSWORD`. `demo@momo.local` / `dev-password`는 이 경로의 계정이 아니다(온보딩 벤치마크 A7: 셀프호스트에서 401).
+- 웹은 same-origin이라 CORS가 없다(`SELF_HOST.md:254-257`). 데스크탑 릴리스는 `tauri://localhost` — 로그인 실기동은 T-A(#1607). README Known gaps를 PASS로 바꾸지 마라.
+- «에이전트 초대됨»과 «provider 연결됨»은 다르다. 전자는 `member.kind='agent'` + 채널 멤버십, 후자는 설정 › AI 연결에 키가 들어가 멘션이 `ANSWERED`가 되는 것이다.
+- 설정 › AI 연결 403 = `PLATFORM_ADMIN_EMAILS` 없음. 503 = `PROVIDER_LINK_MASTER_KEY` 없이 api가 뜸 (`SELF_HOST.md` §막히면).
+
+---
+
+## 1. 도구
+
+| 도구 | 확인 | 용도 |
 |---|---|---|
-| Swift 6.2.x | `swift --version` | server/worker/relay/macOS build and run |
-| Xcode app toolchain | `xcodebuild -version` | macOS dev app build, optional Swift gate |
-| Docker Desktop + Compose v2 | `docker compose version` | PostgreSQL 18 + Centrifugo v6 |
-| PostgreSQL client | `psql --version` | migrations and verifier SQL |
-| jq | `jq --version` | curl examples and local gates |
-| Python 3 | `python3 --version` | mock Hermes, diagnostics, adapter smoke |
+| Docker Engine + Compose v2 | `docker compose version` | 셀프호스트 이미지 스택 (`SELF_HOST.md` 전제) |
+| git | `git --version` | 클론/워크트리 |
+| 브라우저 | — | H1 로그인. 셀프호스트는 호스트에 Node/Rust를 요구하지 않는다 |
+| Rust (데스크탑만) | `cargo --version` | Tauri 셸. 워크스페이스 MSRV는 `clients/desktop/src-tauri` = 1.89.0 (`STATUS.md` #1442 실측). 서버 이미지는 Docker 안에서 빌드된다 |
+| jq (REST 스모크만) | `jq --version` | curl 예시 |
 
-Recommended start in a claimed worktree:
+권장 시작:
 
 ```bash
-bash .conductor/setup.sh
 git status --short --branch
 ```
 
-`.conductor/setup.sh` writes `.env.worktree` with unique `PORT`, `CENT_PORT`, `POSTGRES_PORT`, `HERMES_PORT`, `DATABASE_URL`, and `COMPOSE_PROJECT_NAME`. Use those values instead of hard-coding 8080/8000/5432 when several Codex sessions are running.
+호스팅 env는 `.env.worktree`가 아니라 `scripts/self_host_env.sh`가 쓰는 `infra/rust/local.secrets.env`다. 파일이 있으면 덮어쓰지 않는다.
 
-It also passes through `CENT_PROXY_SECRET` from the primary `.env` when present.
-For manual local alpha without worktrees, copy `infra/.env.example` to `.env`,
-replace every `change-me-*` value, and make sure `CENT_PROXY_SECRET` is not blank.
+---
 
-## 2. Alpha Boot Sequence
+## 2. 기동 (현행 스택)
 
-Run from the worktree root:
+`docs/SELF_HOST.md` 1–4장이 정본이다. 요지만 반복한다 — 어긋나면 SELF_HOST를 따른다.
 
 ```bash
-make up
-make migrate
-make migrate   # second run should report IDEMPOTENCY_OK
+scripts/self_host_env.sh --local-build
+scripts/self_host_env.sh --compose up -d --build --wait
 ```
 
-Open three long-running terminals:
+`--wait`가 끝나면 준비된 것이다. 브라우저에서 스크립트가 인쇄한 주소로 로그인한다.
 
 ```bash
-# terminal 1
-set -a; . ./.env.worktree; set +a
-swift run --package-path server MomoServer
-
-# terminal 2
-set -a; . ./.env.worktree; set +a
-swift run --package-path relay/OutboxRelay OutboxRelay
-
-# terminal 3, only when testing Kim Intern against the repo-local mock
-set -a; . ./.env.worktree; set +a
-python3 scripts/mock_hermes.py --host 127.0.0.1 --port "${HERMES_PORT:-8088}"
-
-# terminal 4, only when testing Kim Intern
-set -a; . ./.env.worktree; set +a
-swift run --package-path workers/AgentWorker AgentWorker
+oort() { scripts/self_host_env.sh --compose "$@"; }
+curl -fsS "http://127.0.0.1:${MOMO_WEB_PORT:-8088}/health"
 ```
 
-If a port is already occupied, stop the older oort process or rerun `.conductor/setup.sh` in a clean worktree. Do not change `infra/centrifugo.json` during alpha testing just to work around a local port conflict.
+포트는 env가 고른 값이다. 8088이 쓰이면 스크립트가 다음 빈 포트를 고르고 알려 준다.
 
-Quick API health check:
+정리:
 
 ```bash
-set -a; . ./.env.worktree; set +a
-curl -fsS "http://127.0.0.1:${PORT:-8080}/health"
+oort down
+# 데이터까지: oort down -v && rm infra/rust/local.secrets.env
 ```
 
-## 3. Local Alpha Bootstrap Assumptions
+Swift `MomoServer` / `OutboxRelay` / `AgentWorker`를 호스트에서 `swift run`으로 띄우지 않는다. 그 빈은 이미지 안의 `momo-server` · `momo-relay` · `momo-agent-worker`다.
 
-`server/Migrations/002_seed.sql` creates the deterministic human/bootstrap world by default:
+---
 
-| Object | Value |
-|---|---|
-| Workspace | `momo Demo Workspace` |
-| Workspace id | `00000000-0000-7000-8000-000000000001` |
-| Workspace slug | `demo` |
-| Human owner | `데모 사용자` / handle `demo` |
-| Login email | `demo@momo.local` |
-| Login password | `dev-password` |
-| Channels | `#general`, `#agent-lab` |
-| `#general` id | `00000000-0000-7000-8000-000000000201` |
-| `#agent-lab` id | `00000000-0000-7000-8000-000000000202` |
+## 3. 로그인 가정 (셀프호스트)
 
-The demo user is an active member of both seeded channels. Fresh persistent/local-alpha has
-zero agent members; first message seq in each seeded channel starts at `1` after the first send.
-Only deterministic demo/e2e runners may set `MOMO_AGENT_SEED_MODE=demo|e2e`.
+셀프호스트 시드는 `SELF_HOST.md`가 만든 첫 owner다. `002_seed.sql`의 `demo@momo.local` 세계를 **이 런북의 로그인으로 쓰지 않는다.**
 
-Hermes internal alpha contract after pairing:
+| 항목 | 값 | 좌표 |
+|---|---|---|
+| URL | 기본 `http://localhost:8088` | `SELF_HOST.md:115-118,157` |
+| 이메일 | 기본 `owner@oort.local` | 같은 절 |
+| 비밀번호 | `MOMO_INITIAL_OWNER_PASSWORD` | `infra/rust/local.secrets.env` (권한 600, 커밋 금지) |
+| 서버 주소 칸 | 비운다 | `SELF_HOST.md:162` |
+| 채널 목록 | `agent-lab` · `general` (`#` 없이) | `SELF_HOST.md:173-175` |
+| 에이전트 시드 | 0명으로 시작 | 온보딩 벤치마크 A2 · `MOMO_AGENT_SEED_MODE=none` |
 
-| Check | Expected |
-|---|---|
-| Workspace invitation | pairing creates `member.kind='agent'`, `member.status='active'`, display name/handle chosen by the operator |
-| Agent profile | pairing creates the agent profile owned by the human operator |
-| Channel invitation | pairing adds active membership only to the explicitly invited channel |
-| Status visibility | macOS sidebar Local AI chip or `GET /v1/agent-runtime/status` shows `Mock`, `Available`, or `Degraded` with redacted endpoint/key details |
-| Send path | only REST `POST /messages` creates the mention; clients do not publish directly to Centrifugo |
+에이전트는 설정 › AI 연결 후 명부에서 만들고 채널에 초대한다(`SELF_HOST.md` §5).
 
-Create the agent through the app pairing wizard before the `@hermes` smoke. Do not substitute a
-human `/v1/join` invite or hard-code the historical `...102`/`...103` seed identities. The pairing
-wizard creates the agent, channel invitation, and scoped credential in that order.
+---
+
+## 4. 로그인, 초대, 합류
+
+### 웹
+
+1. 엣지 주소를 연다. 이메일·비밀번호만 채운다.
+2. 설정 › **멤버와 초대** (`clients/web/src/features/settings/SettingsRoute.tsx` `id: "members"`).
+3. **초대 링크 만들기** (`InviteSection.tsx`). 원문 코드는 이 화면에서만 보인다.
+4. 둘째 사람은 조인 링크를 브라우저에서 연다. 통합 «첫 하루» 서술은 T-B(#1608) 몫이다.
+
+### 데스크탑 딥링크
+
+형식 정본: [`docs/onboarding-deeplink.md`](onboarding-deeplink.md).
+
+```
+oort://join?server=<percent-encoded base URL>&code=<invite code>
+```
+
+릴리스 번들에만 스킴이 붙는다:
 
 ```bash
-scripts/momo hermes-gateway-init
-# App: Members + -> Invite Agent -> pair Hermes -> invite to #agent-lab
-# Pairing: issue credential once, then update ~/.momo/hermes-gateway.env
+cd clients/desktop
+cargo tauri build --bundles app
+open -a <README Run 절의 .app 경로> \
+  "oort://join?server=http%3A%2F%2Flocalhost%3A8088&code=<code>"
 ```
 
-For a pre-MOMO-355 dogfood DB, retire only the historical fixed seed identities with explicit
-operator consent before pairing:
+좌표: `clients/desktop/README.md:353-370`. 기본 `oort://` 핸들러를 믿지 마라 — LaunchServices가 하나면 고른다(`:25-28`).
+
+### REST (증거 보조)
+
+GUI가 막혔을 때만. 베이스 URL·비밀번호는 env에서 읽는다. 시크릿을 셸 히스토리에 남기지 마라.
 
 ```bash
-DATABASE_URL='postgres://<owner>@<host>/<dogfood-db>' scripts/momo cleanup-seeded-agents --yes
+# MOMO_WEB_PORT · MOMO_INITIAL_OWNER_* 는 local.secrets.env
+# POST /v1/auth/login  (workspace 칸 없이 — SELF_HOST §4)
+# POST /v1/workspaces/$WORKSPACE_ID/invites
+# POST /v1/join
 ```
 
-There is no fixed raw invite code in seed data. Create a fresh one through the authenticated invite API and copy the returned `code` immediately.
+기대: 신규 멤버 HTTP 201, 이후 그 이메일 로그인이 성공, 공개 초대만으로 owner/platform admin이 되지 않음.
 
-## 4. Login, Invite, Join
+---
 
-Set environment and log in as the seeded owner:
+## 5. 데스크탑 셸
+
+개발 창(증거 아님):
 
 ```bash
-set -a; . ./.env.worktree; set +a
-BASE_URL="http://127.0.0.1:${PORT:-8080}"
-WORKSPACE_ID="00000000-0000-7000-8000-000000000001"
-
-ACCESS_TOKEN="$(
-  curl -fsS -X POST "$BASE_URL/v1/auth/login" \
-    -H 'Content-Type: application/json' \
-    -d '{"email":"demo@momo.local","password":"dev-password","workspace":"00000000-0000-7000-8000-000000000001"}' \
-  | jq -r '.accessToken'
-)"
+cd clients/desktop
+cargo tauri dev
 ```
 
-Create an invite:
+릴리스 번들(ITO-3 증거):
 
 ```bash
-EXPIRES_AT_MS="$(( ($(date +%s) + 86400) * 1000 ))"
-INVITE_JSON="$(
-  jq -cn --arg role member --argjson maxUses 5 --argjson expiresAtMs "$EXPIRES_AT_MS" \
-    '{role:$role,maxUses:$maxUses,expiresAtMs:$expiresAtMs}'
-)"
-
-curl -fsS -X POST "$BASE_URL/v1/workspaces/$WORKSPACE_ID/invites" \
-  -H "Authorization: Bearer $ACCESS_TOKEN" \
-  -H 'Content-Type: application/json' \
-  -d "$INVITE_JSON" | tee /tmp/momo-alpha-invite.json
-
-INVITE_CODE="$(jq -r '.code' /tmp/momo-alpha-invite.json)"
+cd clients/desktop
+cargo tauri build --bundles app
 ```
 
-Join with that invite:
+실측된 셸 숫자(`clients/desktop/README.md` Measured 2026-07-25): 콜드스타트 537 ms, 유휴 ~196 MB. 이것은 로그인 왕복이 아니다.
 
-```bash
-JOIN_BODY="$(
-  jq -cn --arg code "$INVITE_CODE" \
-    '{code:$code,email:"alpha-joiner@momo.local",displayName:"Alpha Joiner",handle:"alpha-joiner",password:"dev-password",timeZone:"Asia/Seoul"}'
-)"
+로그인 왕복은 T-A(#1607)가 셀프호스트 스택에 대고 재실측한다. 이 런북은 Known gaps를 덮지 않는다.
 
-curl -fsS -X POST "$BASE_URL/v1/join" \
-  -H 'Content-Type: application/json' \
-  -d "$JOIN_BODY" | jq .
-```
+업데이트 UI: 접속 화면 · 사이드바 뱃지 · 설정 > 업데이트 (`/settings?section=updates`). 채널 정본 [`docs/NEXT_CHANNEL.md`](NEXT_CHANNEL.md). Swift `Updates` 팝오버 런북은 은퇴.
 
-Expected result: HTTP 201 for a new member, access token returned, public channel memberships returned, and subsequent `/v1/auth/login` with the joined email + `dev-password` succeeds.
+알림: 멘션·승인 대기만, 포커스 없는 창. 클릭 라우팅은 known gap — 중복 이슈 금지.
 
-## 5. Launch MomoMacDevApp
+---
 
-Demo-only mode, no server needed:
+## 6. 스모크 A–F (웹 + 데스크탑)
 
-```bash
-scripts/macos_dev_run.sh --verify --logs
-```
+ITO-3 I1–I8의 한 세션 대응물이다. 3일 체크리스트는 팩 Day 1–3.
 
-Real local server mode:
+### A. 기본 채팅 — I1 메신저 축
 
-```bash
-set -a; . ./.env.worktree; set +a
+1. 웹에서 `general`을 연다.
+2. 짧은 사람 메시지를 보낸다.
+3. 기대: 타임라인에 나타나고 `message.seq`가 증가한다.
+4. 실시간이 안 오면 outbox를 본다(`SELF_HOST.md:299-307`). `broadcast|done`이면 서버 쪽은 끝난 것이다.
+5. T-A 증거가 있으면 같은 계정으로 데스크탑에서도 보내고, 반대 표면에서 산다. 없으면 이 칸을 웹-only로 적고 I1을 PASS라고 쓰지 마라.
 
-MOMO_SERVER_BASE_URL="http://127.0.0.1:${PORT:-8080}" \
-MOMO_CENTRIFUGO_WS_URL="ws://127.0.0.1:${CENT_PORT:-8000}/connection/websocket" \
-MOMO_LOGIN_EMAIL="demo@momo.local" \
-MOMO_LOGIN_PASSWORD="dev-password" \
-MOMO_WORKSPACE_ID="00000000-0000-7000-8000-000000000001" \
-MOMO_CHANNEL_ID="00000000-0000-7000-8000-000000000202" \
-MACOS_DEV_RUN_DIRECT_EXEC=1 \
-scripts/macos_dev_run.sh --verify --logs
-```
+### B. 초대/합류 — O2 · I3
 
-Use `#agent-lab` for Kim Intern and D/B/C testing. The app first shows the session chooser. Use server mode with the seeded email/password above, or paste an invite code and join as a new user.
+1. 설정 › 멤버와 초대에서 링크를 만든다. 원문을 즉시 복사한다.
+2. 둘째 사용자: 브라우저 조인 링크.
+3. 같은 코드로 데스크탑 `oort://join`(릴리스 번들 + `open -a`).
+4. 기대: 로그인 가능, 공개 채널 보임, 권한 승격 없음.
+5. 코드를 잃으면 그 초대를 폐지하고 새로 만든다.
 
-Internal alpha usability notes:
+### C. 에이전트 멘션 — O3 · O4
 
-- In real-server mode, use the top `Invites` popover to create/list/revoke owner/admin invites. Create/revoke/refresh buttons disable while a request is in flight and failed invite operations show a `Retry` button.
-- When a new invite is created, click `Copy Code` before closing the popover. Existing invite rows only show the masked preview; the raw invite code cannot be recovered later.
-- Use the top `Updates` popover to inspect the alpha Dev Update Channel. With `MOMO_UPDATE_MANIFEST_PATH` or a `file://` `MOMO_UPDATE_MANIFEST_URL`, it compares current vs available version and shows `Open Download` plus relaunch steps when a newer dogfood build exists; the operator runbook is [`docs/MACOS_ALPHA_UPDATE_CHANNEL.md`](MACOS_ALPHA_UPDATE_CHANNEL.md).
-- Use the right detail pane `Alpha` tab as the in-app dogfood guide. It summarizes Server, Realtime, Kim Intern, Invites, Diagnostics, and Updates state, then lists today's smoke checklist and known limitations.
-- `Switch` and `Log Out` return to the chooser and clear the previous channel/member/message/realtime/invite state. `Log Out` also clears the saved-password preference and Keychain password.
-- Login, join, channel load, and message send errors are recoverable: the chooser, sidebar, or timeline keeps the app interactive and offers retry/dismiss instead of leaving a blank session.
-- The sidebar Members list shows Kim Intern as an `AGENT` when he is in the selected channel. The `+`/`-` member action is the admin path for inviting/removing an existing agent from a channel.
-- The sidebar Kim Intern chip distinguishes `Local mock`, `Internal host mock`, and `External Hermes`, plus key/endpoint/degraded diagnostics. The same redacted provider summary appears in session details. `Mock` is connected enough for local alpha; `Available` means credentialed external provider is configured; `Degraded` means invited may still be true but provider connectivity is not usable.
-
-Cleanup:
-
-```bash
-scripts/macos_dev_run.sh --terminate-only
-make down
-```
-
-## 6. Alpha Smoke Scenarios
-
-### A. Basic Chat
-
-1. Open `#general`.
-2. Send a short human message.
-3. Expected: message appears in the timeline with increasing `message.seq`.
-4. If relay is running and live mode is configured, another client should receive the `message.new` publication.
-
-### B. Invite/Join
-
-1. Create a member invite through the owner API or the app's `Invites` popover.
-2. Copy the raw code immediately from the create response or `Copy Code` button.
-3. Join from the app session chooser or `POST /v1/join`.
-4. Expected: joined user can log in, sees public channels, and cannot escalate to owner/platform admin through a public invite.
-5. If the code is lost, revoke that invite and create a new one; only masked previews are durable.
-
-### C. Invited Hermes
-
-1. Before pairing, confirm the agent roster and mention candidates are empty.
-2. Run `scripts/momo hermes-gateway-init`, complete **Members + → Invite Agent**, issue the scoped credential, and update the env file.
-3. Confirm the invited Hermes appears in `#agent-lab` with the `AGENT` badge.
-4. Confirm provider connectivity with `scripts/momo hermes-gateway-status` or `curl -fsS "$BASE_URL/v1/agent-runtime/status" | jq .`.
-5. For local mock smoke, ensure mock Hermes and AgentWorker are running, then send `@hermes 상태 알려줘` in `#agent-lab`.
-6. Expected: an `agent_run`/`agent_job` is created, `agent.status` or `agent.partial` progress may appear, and final durable output returns as a channel timeline message.
-7. Ordering authority remains the final channel `message.seq`; `agent:` events are progress only.
-8. For real-provider smoke, put only Hermes-facing credentials in an out-of-repo provider env file. Use [`docs/external-agent-provider/README.md`](external-agent-provider/README.md) as the env contract.
-9. Default no-secret gate:
+1. 설정 › AI 연결이 열리는지(O1). 403/503이면 `SELF_HOST.md` §5·§막히면.
+2. 외부 `https://` provider 주소와 키를 넣는다. 루프백 로컬 모델은 오늘 400 (`scripts/bench_onboarding.sh:38-41`).
+3. 에이전트를 만들고 채널에 초대한 뒤 `@핸들`을 보낸다.
+4. 기대: 에이전트가 쓴 채널 메시지가 있다. 판정은 `ANSWERED` / `NOTICE` / `BLOCKED` (`bench_onboarding.sh:31-41`). 키 없는 기본 측정은 `NOTICE`가 정직하다. 기준선 3:58은 `#1534` M5 NOTICE(재시도 소진 포함) — `ANSWERED`를 그 숫자로 말하지 마라.
+5. 자격 있는 외부 런타임 게이트:
 
    ```bash
    scripts/local_gate.sh --profile external-agent-provider
    ```
 
-   It must PASS as an explicit `runtime-unverified(external provider credentials)` skip.
-10. Credentialed external runtime gate:
-
-   ```bash
-   EXTERNAL_AGENT_PROVIDER_REQUIRE_CREDENTIALS=1 \
-   EXTERNAL_AGENT_PROVIDER_ENV_FILE="$HOME/.momo/external-agent.env" \
-   scripts/local_gate.sh --profile external-agent-provider
-   ```
-
-   Equivalent local-alpha runner entry:
-
-   ```bash
-   scripts/local_alpha_runner.sh execute \
-     --hermes external \
-     --external-smoke \
-     --secret-env "$HOME/.momo/external-agent.env"
-   ```
-
-   With credentials, evidence includes the isolated Hermes fixture invite precondition, `/v1/agent-runtime/status` readiness, and one `channel message -> agent run -> external runtime call -> durable agent response` roundtrip.
-11. Check the sidebar Hermes chip before filing bugs: `Mock` is expected for repo-local mock Hermes, `Available` indicates a configured external path, and `Degraded` should include a redacted `degradedReason`/diagnostic hint.
+   기본은 `runtime-unverified(external provider credentials)` skip으로 PASS할 수 있다. 그 skip은 O3 `ANSWERED`가 아니다.
+6. O4(#1361 Grok)는 성재 1단계가 열렸을 때만. 아니면 `SKIP(#1361)`.
 
 ### D. Diagnostics
 
-Run after a failure, before restarting everything:
+실패 후, 전체를 내리기 전에:
 
 ```bash
 scripts/collect_diagnostics.sh --output-dir /tmp/momo-diagnostics --since 15m
 ```
 
-The collector writes a directory, `summary.md`, and a `.tar.gz`. It redacts secrets, passwords, API keys, bearer/JWT-shaped tokens, and database URL credentials before writing files. Still inspect `summary.md` and file names before sharing outside the team.
+디렉터리 + `summary.md` + `.tar.gz`. 콜렉터가 시크릿을 가린 뒤에도 `summary.md`와 파일 이름을 보고 공유한다.
 
-### E. In-App Alpha Command Center
+### E. 상태 표면 (구 «Alpha Command Center» 대응)
 
-1. Open the right detail pane and select `Alpha`.
-2. Confirm the status list includes Server, Realtime, Agent Runtime, Invites, Diagnostics, and Updates.
-3. If a row is `Degraded` or `Blocked`, capture the detail/recovery text in feedback before restarting processes.
-4. Use the `Today` checklist for the local dogfood pass: open `#agent-lab`, send a message, mention `@kim-intern`, exercise invite/join, check approval/cost, and collect diagnostics after a failure.
-5. Treat `Known Limits` as scope boundaries. Update install, AWS/public host, iOS/APNs, and credentialed external Hermes proof remain separate gates.
+Swift 우측 `Alpha` 탭은 없다. 현행 대응물:
 
-### F. Local Gate
+| 구 행 | 지금 |
+|---|---|
+| Server | 엣지 `/health`, `oort logs api` |
+| Realtime | 메시지 실시간 · outbox 질의 · `oort logs relay` |
+| Agent runtime | 설정 › AI 연결 · `@핸들` 결과 |
+| Invites | 설정 › 멤버와 초대 |
+| Diagnostics | 스모크 D |
+| Updates | 설정 > 업데이트 · [`NEXT_CHANNEL.md`](NEXT_CHANNEL.md). I5는 T-D(#1281) 전제 |
 
-For alpha docs/runbook changes:
+LIVE 관전+개입(I4)은 이 표의 별행이다. 호스트가 없으면 `SKIP(LIVE host)`.
+
+### F. Local gate
+
+런북/팩 변경:
 
 ```bash
 scripts/local_gate.sh --profile docs
 ```
 
-For diagnostics tooling:
+diagnostics 툴링:
 
 ```bash
 scripts/local_gate.sh --profile diagnostics
 ```
 
-For app smoke without foreground launch:
+웹 클라:
 
 ```bash
-DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile macos-ui
+scripts/local_gate.sh --profile web
 ```
 
-For app smoke with foreground process/window/log evidence:
+내부 알파 패킷(호스트 런타임 · 백업 리허설 · diagnostics — UI 런치 없음):
 
 ```bash
-LOCAL_GATE_LAUNCH_UI=1 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile macos-ui
+scripts/local_gate.sh --profile internal-alpha
 ```
 
-For the AWS-free one-person local alpha RC gate:
+로컬 Docker RC 패킷:
 
 ```bash
 scripts/local_gate.sh --profile local-alpha
 ```
 
-Expected coverage: local image host-runtime boot, migration idempotency, `/health`,
-REST message send, OutboxRelay publish, mock Hermes/Kim Intern roundtrip, backup
-restore rehearsal, macOS real-backend smoke, and a redacted diagnostics bundle.
-This command creates no AWS resources. Add `LOCAL_GATE_LAUNCH_UI=1` when the RC
-must also prove foreground `MomoMacDevApp` process/window/log launch against the
-local server.
-
-For D/B/C combined runtime evidence:
+에이전트 mock 경로:
 
 ```bash
-DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile m3-dbc
+scripts/local_gate.sh --profile runtime-agent
 ```
 
-Paste the `## Local Gate` block from the script into the PR or issue comment.
+`macos-ui` 프로파일은 `local_gate.sh`가 거절한다. `LOCAL_GATE_LAUNCH_UI=1` + Xcode `DEVELOPER_DIR`로 MomoMac을 띄우지 마라.
 
-## 7. One-Person Local Alpha Gate
+PR/이슈에는 스크립트가 인쇄한 `## Local Gate` 블록을 붙인다.
 
-This gate decides whether oort is ready to leave a single developer Mac and move
-to an AWS internal alpha host. It is intentionally local and evidence-based: do
-not provision AWS because the app "feels close". AWS promotion requires every
-required row below to be `PASS`, with evidence paths recorded in the handoff
-note. Use `WAIVED` only for non-blocking P2/P3 polish and explain the follow-up
-issue. P0/P1 rows cannot be waived.
+---
 
-For the planned three-day local dogfood, treat this section as the minimum gate
-and use [`docs/LOCAL_3_DAY_ALPHA_TEST_PACK.md`](LOCAL_3_DAY_ALPHA_TEST_PACK.md)
-for the full Day 0 readiness, Day 1 messenger, Day 2 agent runtime, Day 3 soak,
-daily report, and final decision templates.
+## 7. 한 사람 진입 게이트 (ITO, AWS가 아님)
 
-Recommended handoff file name:
+이 절은 «개발자 맥을 떠나 AWS로»가 아니다. H1이 열렸는지 + 스모크 A–C가 증거와 함께 끝나는지다. AWS 승격 언어(`AWS_READY`)는 쓰지 않는다.
+
+권장 핸드오프:
 
 ```text
-/tmp/momo-one-person-alpha-<YYYYMMDD>/handoff.md
+~/claudedocs/ito-<YYYYMMDD>/handoff.md
 ```
 
-| Check | Required evidence | PASS threshold |
+| 검사 | 증거 | PASS |
 |---|---|---|
-| Login | screenshot or log excerpt for seeded owner login and joined-user login | Both accounts authenticate against local MomoServer; failed login shows recoverable UI/API error. |
-| Channel 조회 | app screenshot or API JSON for `#general` and `#agent-lab` | Seeded channels load, selected channel history loads, Kim Intern appears as an agent member in `#agent-lab`. |
-| 메시지 송수신 | local gate evidence or two-account transcript | Owner sends one message, joined user sends one message, both appear in `message.seq` order after live receipt or refresh. |
-| 초대/가입 | invite create response with redacted code preview and joined-user login proof | Owner/admin creates invite, raw code is copied once, `/v1/join` succeeds, joined user cannot gain owner/platform-admin privileges. |
-| 김인턴 멘션 | `runtime-agent`, `internal-alpha`, or `external-agent-provider` evidence | `@김인턴` in `#agent-lab` creates an agent job and a durable final timeline message. Mock Hermes is enough for local gate; AWS promotion also needs the credentialed external agent runtime smoke below. |
-| 재시작/reconnect | transcript of app restart plus server/relay or Centrifugo restart | App returns to usable state, realtime reconnects or clearly falls back to REST, message history remains ordered by `message.seq`. |
-| diagnostics | redacted diagnostics bundle path plus `summary.md` review note | `scripts/collect_diagnostics.sh --output-dir ... --since 15m` produces a bundle, secrets are redacted, and missing sources are listed explicitly. |
-| feedback filing | GitHub feedback issue/comment URL, or local handoff markdown if GitHub is unavailable | At least one feedback packet exists, even if it is a "no blocker found" soak note with environment, steps, evidence, and severity. |
+| 웹 로그인 | 스크린샷 또는 로그 | `owner@oort.local`이 로컬 엣지에 인증. 실패는 복구 가능한 에러 |
+| 채널 | 화면 또는 API | `general` · `agent-lab` 로드 |
+| 메시지 | 트랜스크립트 또는 게이트 | seq 순서. 가능하면 두 계정 |
+| 초대/합류 | 마스킹된 코드 + 둘째 로그인 | 권한 승격 없음 |
+| 에이전트 멘션 | M5 판정 | `NOTICE` 또는 `ANSWERED`. `BLOCKED`는 진입 실패 |
+| 재시작 | 웹 새로고침 · `oort up -d --wait` | 히스토리 유지, 실시간 또는 REST 폴백이 보임 |
+| diagnostics | 번들 경로 + `summary.md` 검토 | 시크릿 가림, 빠진 소스는 명시 |
+| feedback | 이슈 URL 또는 로컬 노트 | «블로커 없음»도 1건 |
 
-Minimum local command set before marking this gate `PASS`:
+최소 명령:
 
 ```bash
 scripts/local_gate.sh --profile docs
-LOCAL_GATE_LAUNCH_UI=1 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile internal-alpha
+scripts/local_gate.sh --profile internal-alpha
 scripts/local_gate.sh --profile external-agent-provider
 ```
 
-Interpretation:
+`external-agent-provider`의 no-credential skip은 로컬 도그푸드에는 허용된다. `LAUNCH_READY`에서 에이전트 실사용을 주장하려면 팩 §0의 O3 규칙을 따른다.
 
-- `docs` must PASS for runbook/checklist changes.
-- `internal-alpha` must PASS with foreground UI evidence for the one-person
-  local dogfood handoff.
-- `external-agent-provider` may PASS as
-  `runtime-unverified(external provider credentials)` for local dogfood, but
-  that skip is not enough for AWS promotion. AWS promotion requires a
-  credentialed external agent runtime smoke.
+---
 
-### 7.1 Local Soak/Resource Monitor
+## 8. AWS 호스트는 ITO 판정이 아니다
 
-Use the soak monitor after the stack and app are already running. It is not a
-process supervisor; it is a lightweight evidence recorder for the 72-hour local
-dogfood window.
+[`docs/AWS_INTERNAL_ALPHA.md`](AWS_INTERNAL_ALPHA.md)는 공유 1주일 호스트 토폴로지(계획)다. 프리플라이트는 정적이다. 실제 AWS 생성·DNS/TLS·registry·SOPS·PITR은 `runtime-unverified(aws-host)`.
 
-```bash
-SOAK_DIR="/tmp/momo-one-person-alpha-$(date -u +%Y%m%d)/soak"
+ITO-4는 `LAUNCH_READY` / `BLOCKED` / `NEEDS_MORE_INTERNAL`이다. `AWS_READY`로 이 런북을 닫지 마라. H3(도메인+TLS)은 팩 Day 0의 조건부 행이고, 정본 절차는 `docs/runbooks/ncp-rust-deploy.md`다.
 
-scripts/local_soak_monitor.sh \
-  --duration-hours 72 \
-  --interval-seconds 300 \
-  --evidence-dir "$SOAK_DIR" \
-  --macos-evidence /tmp/momo-local-gate/<macos-ui-or-internal-alpha-evidence>.md
-```
+---
 
-For a quick single-snapshot check while the local stack is up:
+## 9. 피드백
 
-```bash
-scripts/local_soak_monitor.sh --smoke --evidence-dir /tmp/momo-soak-smoke
-```
+정본: [`docs/INTERNAL_ALPHA_FEEDBACK.md`](INTERNAL_ALPHA_FEEDBACK.md). GitHub 템플릿 `Internal alpha feedback`. 라벨 `type:feedback` · `area:alpha` · `status:needs-triage`. `status:ready`는 Goal/Context/Acceptance가 붙은 뒤다.
 
-The monitor writes a repo-external directory such as
-`/tmp/momo-one-person-alpha-YYYYMMDD/soak/momo-soak-*/` with `summary.md`,
-`events.tsv`, per-snapshot markdown, API/Centrifugo health responses, DB/outbox
-checks, Docker `ps`/`stats`/`system df`, process snapshots, and optional macOS
-launch evidence.
+발견은 즉흥 수리하지 않고 전량 티켓화한다(ITO 정본 §3.4).
 
-macOS app evidence can be connected in either of two ways:
+---
 
-- Run `LOCAL_GATE_LAUNCH_UI=1 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile macos-ui` or `--profile internal-alpha`, then pass the evidence markdown path via `--macos-evidence`.
-- Use `scripts/local_soak_monitor.sh --launch-macos-smoke` to run `scripts/macos_dev_run.sh --verify --logs` once before monitoring.
+## 10. 알려진 한계 (현행)
 
-`summary.md` result values:
+- 데스크탑 릴리스 로그인/CORS: T-A(#1607) 전까지 README Known gaps가 정본. 낙관 금지.
+- 알림 클릭 라우팅: known gap (`clients/desktop/README.md` Notification).
+- GHCR digest pull: `SELF_HOST.md:88` `runtime-unverified` — H2 SKIP(L2).
+- 공개 호스트 DNS/TLS/SOPS/PITR: `runtime-unverified(public host)` unless 호스트 증거 패킷.
+- iOS 실기기/APNs/external TestFlight: 스코프 밖. I8은 `lane:phone`만.
+- 루프백 로컬 모델 provider: 셀프호스트 env는 `MOMO_ENV=staging`, 외부 https만.
+- 초대 원문은 발급 후 복구 불가.
+- Diagnostics는 best-effort. 빠진 Docker 로그는 콜렉터 실패가 아니라 빠진 증거.
+- Swift `MomoMacDevApp` / Sparkle alpha 채널 / in-app Alpha 탭은 제품 표면이 아니다.
 
-| Result | Meaning |
-|---|---|
-| `PASS` | API, Centrifugo, DB, outbox, Docker health/resources, relay/worker, and app evidence had no recorded P0/P1 signals. |
-| `WARN` | No P0 signal, but at least one P1 signal appeared. This is acceptable only with an explicit follow-up or operator note. |
-| `FAIL` | At least one P0 signal appeared. Do not mark the 72-hour soak complete. |
+---
 
-P0/P1 detection 기준:
-
-| Severity | Signal |
-|---|---|
-| P0 | API `/health`, Centrifugo `/health`, or DB connectivity fails in any snapshot. |
-| P0 | Docker is unavailable, no worktree compose containers are found, or any observed compose container is unhealthy. |
-| P0 | pending outbox rows `>=100` or oldest pending outbox age `>=600s` by default. |
-| P0 | evidence disk free space drops below `2GB`, or required macOS evidence is missing when `--require-macos-evidence` is used. |
-| P1 | pending outbox rows `>=10` or oldest pending outbox age `>=60s` by default. |
-| P1 | OutboxRelay, AgentWorker, or MomoMac process/evidence is not observed during the soak. |
-| P1 | evidence disk free space drops below `10GB`. |
-
-Docker Desktop resource recommendation for the 72-hour local dogfood:
-
-| Resource | Minimum | Preferred |
-|---|---:|---:|
-| CPU | 4 vCPU | 6+ vCPU |
-| Memory | 8 GB | 12-16 GB |
-| Disk image | 64 GB | 100+ GB |
-| Free host disk before start | 20 GB | 40+ GB |
-
-Keep the final `summary.md`, local gate evidence, diagnostics bundle, and any
-feedback issue links together in the one-person alpha handoff directory. AWS
-promotion requires a `PASS` soak summary or a named follow-up for every `WARN`;
-any `FAIL` keeps the decision at `LOCAL_ONLY`.
-
-## 8. AWS Promotion Threshold
-
-AWS promotion is allowed only after the local gate above and the threshold below
-are both satisfied. Record the decision in the handoff note with commit SHA,
-local gate evidence paths, diagnostics bundle path, and feedback issue links.
-
-| Threshold | Required result |
-|---|---|
-| Local gate | One-person local alpha gate is `PASS` with no P0/P1 waiver and no missing required evidence. |
-| 1인 soak | One person completes at least 5 local sessions across at least 2 calendar days, totaling at least 120 minutes of active local server + MomoMacDevApp use. Include at least two app restarts and one server/relay/Centrifugo restart. |
-| External agent runtime smoke | `AGENT_PROVIDER_MODE=external-hermes` with real non-placeholder `HERMES_BASE_URL` and `HERMES_API_KEY` completes one `@김인턴` or equivalent agent-member roundtrip through local MomoServer, AgentWorker, OutboxRelay, the external runtime, and timeline. A no-credential skip blocks AWS promotion. |
-| No P0/P1 | Feedback triage shows zero open P0 or P1 issues. P2/P3 may remain only if each has owner, follow-up issue, and workaround or explicit non-blocking note. |
-| Diagnostics evidence | Final diagnostics bundle exists, is redacted, references the same commit as the handoff, and includes local gate evidence plus server/relay/worker/Centrifugo/macOS context where available. |
-
-Promotion decision values:
-
-| Decision | Meaning |
-|---|---|
-| `NEEDS_MORE_LOCAL` | Keep dogfooding on a developer Mac. Any missing required row, open P0/P1, or skipped credentialed external agent runtime smoke forces this state. |
-| `AWS_READY` | All rows above are PASS and the operator may follow `docs/AWS_INTERNAL_ALPHA.md` to prepare the one-week host. |
-| `BLOCKED` | AWS topology may be documented, but provisioning is blocked by a named external dependency such as credentials, DNS, SOPS, or billing. |
-
-Do not treat `AWS_READY` as M7 release approval. It only authorizes the internal
-AWS alpha host; store/TestFlight/public release gates remain governed by M7.
-
-## 9. Feedback Intake
-
-Canonical intake and triage rules live in
-[`docs/INTERNAL_ALPHA_FEEDBACK.md`](INTERNAL_ALPHA_FEEDBACK.md). Use GitHub's
-`Internal alpha feedback` issue template for raw tester reports. Those issues
-start as `type:feedback`, `area:alpha`, `status:needs-triage` and become
-`status:ready` only after momo-main turns them into a buildable
-`## Goal / ## Context / ## Acceptance / ## Out of scope` contract.
-
-## 10. AWS Team Alpha Host
-
-Use [`docs/AWS_INTERNAL_ALPHA.md`](AWS_INTERNAL_ALPHA.md) when the team needs a
-shared one-week host instead of each tester running Docker locally. The v0
-recommendation is EC2 `t4g.large` single-node with Caddy/API/OutboxRelay/
-AgentWorker/Centrifugo/Redis/Postgres in image-based compose, encrypted `gp3`
-data volume, pgBackRest to S3, and daily EBS snapshots.
-
-Before provisioning or handoff:
-
-```bash
-scripts/aws_internal_alpha_preflight.sh \
-  --env-file infra/prod/aws-internal-alpha.env.example \
-  --mode recommended \
-  --evidence-dir /tmp/momo-aws-alpha-preflight
-```
-
-The preflight is static. It verifies topology and safety intent, not real AWS
-creation, DNS/TLS, registry pull, SOPS decrypt, backup execution, or restore
-rehearsal. Those remain `runtime-unverified(aws-host)` until the host evidence
-packet is attached.
-
-Before running the AWS preflight against a real host env, attach the
-`AWS_READY` handoff from section 8 or from
-[`docs/LOCAL_3_DAY_ALPHA_TEST_PACK.md`](LOCAL_3_DAY_ALPHA_TEST_PACK.md). If the
-handoff is `NEEDS_MORE_LOCAL` or `BLOCKED`, keep this document as planning only
-and do not provision the alpha host.
-
-Use this shape for quick GitHub issues or alpha feedback notes:
+## 11. 빠른 피드백 초안
 
 ```md
 ## Summary
@@ -531,17 +339,16 @@ Use this shape for quick GitHub issues or alpha feedback notes:
 ## Environment
 - Commit:
 - Worktree:
-- macOS:
-- Swift:
+- OS:
 - Docker:
-- App mode: demo / local server / local server + live / Xcode host
-- Server URL:
+- Surface: web / desktop release / desktop dev / both
+- Server URL (no secrets):
 
 ## Workspace Context
 - Workspace:
 - Channel:
 - Member/user:
-- Agent involved: none / Kim Intern / other
+- Agent involved: none / named handle / other
 
 ## Steps
 1.
@@ -560,33 +367,9 @@ Use this shape for quick GitHub issues or alpha feedback notes:
 - Relevant log excerpt:
 
 ## Scope Notes
-- Did this involve invite/join?
-- Did this involve Kim Intern/mock Hermes/external Hermes?
-- Did this involve approval/cost/realtime reconnect?
-- Any secrets removed before sharing?
+- invite/join?
+- agent mention / provider link?
+- approval / realtime reconnect?
+- T-A desktop login / CORS?
+- secrets removed?
 ```
-
-Severity guide:
-
-| Severity | Meaning |
-|---|---|
-| P0 | Data loss/security: cross-tenant leak, secret exposure, destructive corruption, or launch/login impossible for every tester. |
-| P1 | Core alpha flow blocked: send, invite/join, Kim Intern, approval/cost, realtime, diagnostics, or local gate unusable. |
-| P2 | Usability friction: flow works but is confusing, brittle, stale, missing expected feedback, or requires an undocumented workaround. |
-| P3 | Polish: copy, layout, visual fit, minor papercut, or non-blocking affordance issue. |
-
-momo-main triages feedback with `scripts/goal_status.sh --repo yeomyeonggeori/oort`.
-Rows in `status:needs-triage` are not claimable worker goals until severity,
-evidence, labels, milestone, and acceptance are fixed.
-
-## 11. Known Limitations
-
-- `MomoMacDevApp` is a development app. It is not signed/notarized and is separate from the M4 release `MomoMac.app` packaging path.
-- The `Updates` popover is operator-assisted in v0: it reads local/file manifest metadata and can open the announced artifact, but Sparkle 2, signing, notarization, DMG distribution, and fully unattended self-replace updates remain M4 follow-up work.
-- iOS is not present yet. iOS/App Store/TestFlight work remains M5/M7/M8.
-- External Hermes/provider side effects are not covered by default alpha. Repo-local mock Hermes is the normal deterministic path.
-- Public staging DNS/TLS, real registry image pull, SOPS production secret injection, and real pgBackRest WAL/PITR rehearsal are still `runtime-unverified(public host)` unless a host-specific evidence packet is attached.
-- APNs, production presence polish, enterprise SSO, directory sync, and full channel settings/search/archive are out of scope for this alpha packet.
-- Invite raw codes cannot be recovered after creation. Revoke and create a new invite if the code is lost.
-- Diagnostics are best-effort. Missing Docker logs, stopped Swift processes, or absent macOS unified logs should be reported as missing evidence, not as collector failure.
-- GitHub Actions are disabled/manual-only by policy during this period. Local gate evidence plus review is the PR gate.

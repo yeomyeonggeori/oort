@@ -194,6 +194,36 @@ export const HANDOFF_COPY: Readonly<Record<HandoffVerb, HandoffVerbCopy>> = {
 };
 
 /**
+ * 인수 대상 호스트를 고르는 컨트롤의 문구 (#1511 회전 1 N2).
+ *
+ * 웹의 두 표면 — 작업 세션 상세(`TakeoverBlock`)와 작업 흐름 상세
+ * (`WorkstreamDetailRoute`) — 이 같은 컨트롤(`HostPicker`)에 **바이트까지 같은
+ * 객체**를 손으로 두 벌 적고 있었다. 두 벌은 갈라진다: 실제로 #1511 이 진행
+ * 낱말을 고칠 때 두 자리를 각각 고쳐야 했고, 하나를 놓쳤다면 같은 버튼이 화면에
+ * 따라 다른 이름을 갖는 상태로 랜딩했을 것이다.
+ *
+ * 낱말을 다시 적지 않고 `HANDOFF_COPY.takeover` 에서 **파생**한다. 그래서
+ * 진행 낱말 규칙(「명사 + 중」 — #1501 정본, #1511 게이트)이 문자열의 성질이
+ * 아니라 **구조**로 지켜진다: 동사가 바뀌면 네 문구가 함께 따라간다.
+ *
+ * 타입을 웹의 `HostPickerCopy` 로 못 박지 않는 이유는 그것이 웹 컴포넌트의
+ * 인터페이스이기 때문이다. 여기 사는 것은 **문장**이고, 문장의 집은 코어다
+ * (이 파일 머리말과 `features/timeline/model.ts` 의 라벨 상수가 같은 이유).
+ */
+export const TAKEOVER_PICKER_COPY = {
+  /** 눈에 보이는 그룹 라벨. */
+  group: `${HANDOFF_COPY.takeover.verb}할 호스트`,
+  /** 확정 버튼의 보이는 글자. 폭이 흔들리지 않게 호스트 이름을 담지 않는다. */
+  confirm: HANDOFF_COPY.takeover.button,
+  /** 확정 버튼의 접근성 이름. 「성재 맥북에서 인수」. */
+  action: (hostName: string): string =>
+    `${hostName}에서 ${HANDOFF_COPY.takeover.verb}`,
+  /** 진행 중인 버튼의 접근성 이름. 「성재 맥북에서 인수 중」. */
+  busy: (hostName: string): string =>
+    `${hostName}에서 ${HANDOFF_COPY.takeover.verb} 중`,
+} as const;
+
+/**
  * 비대칭 고지 (ADR-0154 D4 「초기 단방향 허용 — 비대칭 명시」).
  *
  * 인수는 **한 방향으로만** 된다. 서버는 `status == "orphaned"` 인 세션만 받고
