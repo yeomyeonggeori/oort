@@ -1,5 +1,10 @@
 # oort 진행 현황
 
+## PR CI 노드 레인 붕대 제거 (#1635, 2026-08-22)
+
+- web 레인 `env TZ: Asia/Seoul` 제거. TZ 정본은 `clients/web/vite.config.ts` `test.env` (#1267). CI 중복 pin은 UTC 호스트의 로컬 빨강을 가린다.
+- mobile 레인 `inboxApproval.test.tsx` 파일명 제외+65/66 하드 게이트 제거. 전 스위트(inboxApproval 포함) 실검증 (#1268). 가드레일이 두 붕대 재도입을 RED로 고정.
+
 ## 커뮤니티 루트 문서 (#1630, 2026-08-21)
 
 - Contributor Covenant v2.1 `CODE_OF_CONDUCT.md`(연락처=`SECURITY.md` GitHub private advisory — 새 메일 없음). `.github/CODEOWNERS` `* @kwakseongjae`. `CHANGELOG.md` Keep a Changelog 시드 — [v0.1.0](https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.0) 항목은 notes 초안 요약(발명 0). `CONTRIBUTING.md` 영문 정본 + `CONTRIBUTING.ko.md` 한국어 원문. README Being wired up 「Public CI, releases…」 한 줄을 Works today로 옮김(G1 티켓 후보 4 흡수). GOVERNANCE.md 비신설.
