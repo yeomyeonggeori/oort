@@ -1,5 +1,10 @@
 # oort 진행 현황
 
+## 발행 실측 라벨 현행화 + 운영 문서 GATED_DOCS 편입 (#1642, 2026-08-22)
+
+- v0.1.0 첫 발행 실측(원장 #1332 코멘트 2026-08-21 · 발행·익명 pull·attestation PASS · 패키지 public · amd64 단일)을 LOCAL_3_DAY H2·INTERNAL_ALPHA·infra/rust README §3-1·ncp-rust-deploy first-dispatch 문면에 반영. **H2 amd64 부팅 실측은 잔여**(Apple Silicon native pull 불가만 실측).
+- `check_docs_commands.py` GATED_DOCS에 `docs/RELEASING.md`·`docs/NEXT_CHANNEL.md`·`CONTRIBUTING.md` 편입. 게이트 407→439 fact / 12→15 문서. 하네스 26/26.
+
 ## PR CI 노드 레인 붕대 제거 (#1635, 2026-08-22)
 
 - web 레인 `env TZ: Asia/Seoul` 제거. TZ 정본은 `clients/web/vite.config.ts` `test.env` (#1267). CI 중복 pin은 UTC 호스트의 로컬 빨강을 가린다.
