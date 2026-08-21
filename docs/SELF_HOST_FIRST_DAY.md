@@ -60,6 +60,9 @@ scripts/self_host_env.sh --local-build
 scripts/self_host_env.sh --compose up -d --build --wait
 ```
 
+같은 머신에 이미 다른 클론의 셀프호스트 스택이 떠 있으면 이 `up` 은 거절된다.
+두 체크아웃 규칙: [`SELF_HOST.md`](SELF_HOST.md) 「두 체크아웃을 같이 쓸 때」.
+
 공개 digest가 있으면 `--published-image` 경로를 쓸 수 있다. 심화:
 [`SELF_HOST.md`](SELF_HOST.md) §2.
 

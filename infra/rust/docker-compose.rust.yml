@@ -434,4 +434,14 @@ volumes:
     # env file, and the `-p` flag (compose feeds the flag back into
     # interpolation, and `-p` wins over the env var — measured, not assumed).
     # DB_VOLUME_NAME still wins outright when an explicit name is required.
+    #
+    # #1613: `name:` is still a host-global string. Two self-host checkouts
+    # that share COMPOSE_PROJECT_NAME (generator default `oort` → volume
+    # `oort-pgdata`) therefore share this directory. The generator keeps that
+    # default so an existing `oort-pgdata` is not silently replaced by a new
+    # empty volume; `scripts/self_host_env.sh --compose` fail-closes when a
+    # live stack with this project/volume has a different
+    # `com.docker.compose.project.working_dir`. Same-checkout resume is the
+    # legitimate owner and stays silent. down -v still removes only this
+    # explicit name — its meaning does not change.
     name: ${DB_VOLUME_NAME:-${COMPOSE_PROJECT_NAME:-momo-rust}-pgdata}

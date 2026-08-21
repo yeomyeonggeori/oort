@@ -53,7 +53,11 @@
 #   충돌을 진단하고 파일을 고치는 왕복이 이 스크립트가 없애려는 바로 그것이다.
 #
 # 환경변수로 바꿀 수 있는 것(전부 선택):
-#   COMPOSE_PROJECT_NAME        기본 oort
+#   COMPOSE_PROJECT_NAME        기본 oort. 체크아웃이 달라도 이 값이 같으면
+#                               같은 compose 프로젝트다 (#1613). --compose up/down
+#                               은 산 타 체크아웃(working_dir 라벨이 다른 스택)을
+#                               거절한다. 인스턴스를 분리하려면 이 값과
+#                               DB_VOLUME_NAME 을 함께 바꾼다.
 #   MOMO_WEB_PORT               기본 8088 (브라우저가 여는 포트)
 #   MOMO_RUST_API_PORT          기본 8080 (루프백 직접 접속용)
 #   CENT_HOST_PORT              기본 8000 (루프백 직접 접속용)
@@ -64,6 +68,12 @@
 # 생성 뒤의 모든 Compose 명령은 이 스크립트의 `--compose` 경유로 실행한다.
 # `--env-file`보다 process env가 우선인 Compose 규칙 때문에, 파일을 만들 때만
 # 검증하고 사용 시점의 ambient env를 그대로 두면 같은 파일이 다른 스택이 된다.
+#
+# #1613 — pgdata 볼륨 정체성은 프로젝트 스코프다(`DB_VOLUME_NAME=$PROJECT-pgdata`).
+# 기본 프로젝트명 `oort` 를 유지하는 것은 기존 `oort-pgdata` 를 무언 대체하지
+# 않기 위해서다. 고정 전역 이름+무조건 선점은 채택하지 않는다: 프로젝트명을
+# 분리해도 볼륨 문자열이 같으면 PostgreSQL이 같은 datadir로 이중 기동된다.
+# 산 타 체크아웃은 `com.docker.compose.project.working_dir` 대조로 fail-closed.
 set -euo pipefail
 umask 077
 
@@ -366,6 +376,143 @@ warn_if_centrifugo_missing_desktop_origins() {
   printf '[self-host] 추가한 뒤 centrifugo를 재시작하라: --compose up -d\n' >&2
 }
 
+# Historical self-host volume name (#1613). Existing installs used the generator
+# default COMPOSE_PROJECT_NAME=oort → DB_VOLUME_NAME=oort-pgdata. Tests may
+# retarget this at a throwaway volume; production stays oort-pgdata. Never
+# delete or rename that volume from this script.
+SELF_HOST_LEGACY_PGDATA_VOLUME="${SELF_HOST_LEGACY_PGDATA_VOLUME:-oort-pgdata}"
+
+self_host_canonical_dir() {
+  local path="$1"
+  [ -n "$path" ] || return 1
+  CDPATH='' cd -P -- "$path" 2>/dev/null && pwd
+}
+
+self_host_same_workdir() {
+  local left="$1" right="$2" cleft cright
+  [ -n "$left" ] && [ -n "$right" ] || return 1
+  left="${left%/}"
+  right="${right%/}"
+  [ "$left" = "$right" ] && return 0
+  cleft="$(self_host_canonical_dir "$left")" || return 1
+  cright="$(self_host_canonical_dir "$right")" || return 1
+  [ "$cleft" = "$cright" ]
+}
+
+self_host_compose_project_name() {
+  if [ "$(env_key_count COMPOSE_PROJECT_NAME)" -eq 1 ]; then
+    env_value_once COMPOSE_PROJECT_NAME
+  else
+    # Matches infra/rust/docker-compose.rust.yml `name:` fallback.
+    printf '%s' 'momo-rust'
+  fi
+}
+
+self_host_db_volume_name() {
+  local project
+  if [ "$(env_key_count DB_VOLUME_NAME)" -eq 1 ]; then
+    env_value_once DB_VOLUME_NAME
+    return 0
+  fi
+  project="$(self_host_compose_project_name)"
+  printf '%s-pgdata' "$project"
+}
+
+self_host_volume_exists() {
+  local name="$1" rendered
+  [ -n "$name" ] || return 1
+  rendered="$("$DOCKER_BIN" volume inspect "$name" --format '{{.Name}}' 2>/dev/null || true)"
+  [ "$rendered" = "$name" ]
+}
+
+self_host_stack_guard_applies() {
+  case "${1:-}" in
+    up|create|start|run|down|restart|kill|stop|rm|pause|unpause|watch)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+warn_legacy_pgdata_identity() {
+  local intended="$1"
+  local legacy="$SELF_HOST_LEGACY_PGDATA_VOLUME"
+  self_host_volume_exists "$legacy" || return 0
+  if [ "$intended" = "$legacy" ]; then
+    printf '[self-host] 기존 볼륨 %s 를 이 프로젝트의 데이터로 채택한다. 삭제·복사하지 않는다 (#1613).\n' \
+      "$legacy"
+    return 0
+  fi
+  printf '[self-host] 이 머신에 기존 셀프호스트 볼륨 %s 가 있다. 새 env 의 DB_VOLUME_NAME 은 %s 다.\n' \
+    "$legacy" "$intended"
+  printf '[self-host] 데이터가 사라진 것이 아니다. 이어받으려면 이 파일을 지우고 COMPOSE_PROJECT_NAME=oort 로\n'
+  printf '[self-host] 다시 만들거나, DB_VOLUME_NAME=%s 로 고친다. 프로젝트명만 바꾸고 볼륨을 공유한 채\n' \
+    "$legacy"
+  printf '[self-host] up 하면 PostgreSQL이 같은 데이터 디렉토리로 이중 기동된다 (#1613).\n'
+}
+
+guard_self_host_stack_collision() {
+  local our_project our_volume our_wd id their_wd their_project
+  local ids_project ids_volume
+  local collisions=0
+  local -a reports=()
+
+  our_project="$(self_host_compose_project_name)"
+  validate_project_name "$our_project"
+  our_volume="$(self_host_db_volume_name)"
+  validate_env_scalar DB_VOLUME_NAME "$our_volume"
+  our_wd="$(self_host_canonical_dir "$REPO_ROOT")" ||
+    fail "이 체크아웃 경로를 정규화할 수 없다: $REPO_ROOT"
+
+  if ! "$DOCKER_BIN" info >/dev/null 2>&1; then
+    fail "docker daemon에 연결할 수 없다 — 스택 충돌 여부를 확인할 수 없어 중단한다."
+  fi
+
+  ids_project="$("$DOCKER_BIN" ps -aq --filter "label=com.docker.compose.project=${our_project}")" ||
+    fail "docker ps 실패 — 스택 충돌 여부를 확인할 수 없어 중단한다."
+  ids_volume=""
+  if [ -n "$our_volume" ]; then
+    ids_volume="$("$DOCKER_BIN" ps -aq --filter "volume=${our_volume}")" ||
+      fail "docker ps 실패 — 스택 충돌 여부를 확인할 수 없어 중단한다."
+  fi
+
+  while IFS= read -r id; do
+    [ -n "$id" ] || continue
+    their_wd="$("$DOCKER_BIN" inspect --format '{{index .Config.Labels "com.docker.compose.project.working_dir"}}' "$id")" ||
+      fail "컨테이너 $id 를 inspect할 수 없다 — 스택 충돌 여부를 확인할 수 없어 중단한다."
+    their_project="$("$DOCKER_BIN" inspect --format '{{index .Config.Labels "com.docker.compose.project"}}' "$id")" ||
+      fail "컨테이너 $id 를 inspect할 수 없다 — 스택 충돌 여부를 확인할 수 없어 중단한다."
+    if self_host_same_workdir "$their_wd" "$our_wd" && [ "$their_project" = "$our_project" ]; then
+      continue
+    fi
+    collisions=$((collisions + 1))
+    reports+=("$id project=${their_project:-?} dir=${their_wd:-?}")
+  done < <(printf '%s\n%s\n' "$ids_project" "$ids_volume" | awk 'NF && !seen[$0]++')
+
+  [ "$collisions" -eq 0 ] && return 0
+
+  printf '[self-host] 다른 체크아웃의 살아있는 스택이 같은 compose 프로젝트 또는 pgdata 볼륨을 쓰고 있다.\n' >&2
+  printf '[self-host] 이 체크아웃:  project=%s  volume=%s  dir=%s\n' \
+    "$our_project" "$our_volume" "$our_wd" >&2
+  local report
+  for report in "${reports[@]}"; do
+    printf '[self-host] 충돌: %s\n' "$report" >&2
+  done
+  printf '[self-host] 무경고로 재생성하면 그 스택이 이 체크아웃의 이미지/env로 바뀌고,\n' >&2
+  printf '[self-host] 같은 PostgreSQL 데이터 디렉토리가 이중 기동될 수 있다 (#1613).\n' >&2
+  printf '[self-host] 해법:\n' >&2
+  printf '[self-host]   1) 그 체크아웃에서 내린다: 그 트리에서 scripts/self_host_env.sh --compose down\n' >&2
+  printf '[self-host]   2) 이 클론을 독립 인스턴스로 쓰려면 COMPOSE_PROJECT_NAME 과 DB_VOLUME_NAME 을\n' >&2
+  printf '[self-host]      함께 바꾼다. 프로젝트명만 바꾸면 볼륨 %s 를 계속 공유한다.\n' \
+    "$our_volume" >&2
+  printf '[self-host]   3) 기존 %s 데이터를 이 체크아웃이 이어받으려면 그 이름을 유지한 채\n' \
+    "$SELF_HOST_LEGACY_PGDATA_VOLUME" >&2
+  printf '[self-host]      먼저 다른 체크아웃을 down 한다. 볼륨을 삭제·복사하지 않는다.\n' >&2
+  exit 1
+}
+
 run_self_host_compose() {
   local mode="$1"
   shift
@@ -378,6 +525,9 @@ run_self_host_compose() {
   for key in "${COMPOSE_CONTRACT_FILES[@]}"; do
     [ -f "$key" ] || fail "canonical Compose file이 없다: $key"
   done
+  if self_host_stack_guard_applies "${1:-}"; then
+    guard_self_host_stack_collision
+  fi
   while IFS= read -r key; do
     case "$key" in
       DOCKER_HOST|DOCKER_CONTEXT|DOCKER_CONFIG) continue ;;
@@ -693,6 +843,7 @@ if [ "$MODE" = "published-digest" ]; then
 fi
 
 printf '[self-host] %s 를 만들었다 (권한 600).\n' "$ENV_FILE"
+warn_legacy_pgdata_identity "$PROJECT-pgdata"
 [ "$REQUESTED_WEB_PORT" = "$WEB_PORT" ] ||
   printf '[self-host] 포트 %s 가 사용 중이라 MOMO_WEB_PORT=%s 로 잡았다.\n' "$REQUESTED_WEB_PORT" "$WEB_PORT"
 [ "$REQUESTED_API_PORT" = "$API_PORT" ] ||

@@ -39,6 +39,10 @@ make_fixture() {
 # Model the Compose precedence that caused #1331's review finding: process env
 # wins over --env-file. The generator must remove that ambient override before
 # asking for the rendered application images.
+#
+# #1613 — also models `docker ps`/`inspect`/`volume inspect` so the stack
+# collision guard can be unit-tested without a daemon. Default: no containers,
+# no volumes. Tests opt in with SELF_HOST_FAKE_*.
 if [ -n "${SELF_HOST_DOCKER_ENV_TRACE:-}" ]; then
   {
     printf 'DOCKER_HOST=%s\n' "${DOCKER_HOST:-}"
@@ -46,25 +50,84 @@ if [ -n "${SELF_HOST_DOCKER_ENV_TRACE:-}" ]; then
     printf 'DOCKER_CONFIG=%s\n' "${DOCKER_CONFIG:-}"
   } >"$SELF_HOST_DOCKER_ENV_TRACE"
 fi
-env_file=""
-previous=""
-is_images=0
-for argument in "$@"; do
-  if [ "$previous" = "--env-file" ]; then
-    env_file="$argument"
-  fi
-  [ "$argument" = "--images" ] && is_images=1
-  previous="$argument"
-done
-if [ "$is_images" -eq 1 ]; then
-  [ -n "$env_file" ] && [ -f "$env_file" ] || exit 3
-  file_image="$(awk -F= '$1 == "MOMO_RUST_IMAGE" { value = substr($0, index($0, "=") + 1) } END { print value }' "$env_file")"
-  effective_image="${MOMO_RUST_IMAGE:-$file_image}"
-  count=0
-  while [ "$count" -lt 7 ]; do
-    printf '%s\n' "$effective_image"
-    count=$((count + 1))
+if [ "${1:-}" = "compose" ]; then
+  env_file=""
+  previous=""
+  is_images=0
+  for argument in "$@"; do
+    if [ "$previous" = "--env-file" ]; then
+      env_file="$argument"
+    fi
+    [ "$argument" = "--images" ] && is_images=1
+    previous="$argument"
   done
+  if [ "$is_images" -eq 1 ]; then
+    [ -n "$env_file" ] && [ -f "$env_file" ] || exit 3
+    file_image="$(awk -F= '$1 == "MOMO_RUST_IMAGE" { value = substr($0, index($0, "=") + 1) } END { print value }' "$env_file")"
+    effective_image="${MOMO_RUST_IMAGE:-$file_image}"
+    count=0
+    while [ "$count" -lt 7 ]; do
+      printf '%s\n' "$effective_image"
+      count=$((count + 1))
+    done
+  fi
+  exit 0
+fi
+if [ "${1:-}" = "ps" ]; then
+  filter=""
+  previous=""
+  for argument in "$@"; do
+    if [ "$previous" = "--filter" ]; then
+      filter="$argument"
+    fi
+    previous="$argument"
+  done
+  case "$filter" in
+    label=com.docker.compose.project=*)
+      want="${filter#label=com.docker.compose.project=}"
+      if [ -n "${SELF_HOST_FAKE_PROJECT:-}" ] && [ "$want" = "$SELF_HOST_FAKE_PROJECT" ]; then
+        [ -n "${SELF_HOST_FAKE_CONTAINER_ID:-}" ] && printf '%s\n' "$SELF_HOST_FAKE_CONTAINER_ID"
+      fi
+      ;;
+    volume=*)
+      want="${filter#volume=}"
+      if [ -n "${SELF_HOST_FAKE_VOLUME_NAME:-}" ] && [ "$want" = "$SELF_HOST_FAKE_VOLUME_NAME" ]; then
+        id="${SELF_HOST_FAKE_VOLUME_CONTAINER_ID:-${SELF_HOST_FAKE_CONTAINER_ID:-}}"
+        [ -n "$id" ] && printf '%s\n' "$id"
+      fi
+      ;;
+  esac
+  exit 0
+fi
+if [ "${1:-}" = "inspect" ]; then
+  format=""
+  previous=""
+  for argument in "$@"; do
+    if [ "$previous" = "--format" ]; then
+      format="$argument"
+    fi
+    previous="$argument"
+  done
+  case "$format" in
+    *working_dir*)
+      printf '%s\n' "${SELF_HOST_FAKE_WORKING_DIR:-}"
+      ;;
+    *com.docker.compose.project*)
+      printf '%s\n' "${SELF_HOST_FAKE_INSPECT_PROJECT:-${SELF_HOST_FAKE_PROJECT:-}}"
+      ;;
+    *)
+      exit 1
+      ;;
+  esac
+  exit 0
+fi
+if [ "${1:-}" = "volume" ] && [ "${2:-}" = "inspect" ]; then
+  name="${3:-}"
+  if [ -n "$name" ] && [ "$name" = "${SELF_HOST_FAKE_VOLUME_NAME:-}" ]; then
+    printf '%s\n' "$name"
+    exit 0
+  fi
+  exit 1
 fi
 exit 0
 EOF
@@ -104,6 +167,10 @@ local_output="$local_fixture/output"
 run_generator "$local_fixture" "$local_output" 49100 --local-build
 grep -Fxq 'MOMO_SELF_HOST_MODE=local-build' "$local_fixture/infra/rust/local.secrets.env"
 grep -Fxq 'MOMO_RUST_IMAGE=oort:local' "$local_fixture/infra/rust/local.secrets.env"
+# #1613 — default identity stays oort / oort-pgdata so an existing volume is
+# not silently replaced by a new empty name on upgrade.
+grep -Fxq 'COMPOSE_PROJECT_NAME=oort' "$local_fixture/infra/rust/local.secrets.env"
+grep -Fxq 'DB_VOLUME_NAME=oort-pgdata' "$local_fixture/infra/rust/local.secrets.env"
 grep -Fxq 'MOMO_MIGRATE_ENV=development' "$local_fixture/infra/rust/local.secrets.env"
 grep -Fxq 'MOMO_PITR_EVIDENCE_REQUIRED=0' "$local_fixture/infra/rust/local.secrets.env"
 grep -Fxq 'MOMO_PITR_BOOTSTRAP_EMPTY=0' "$local_fixture/infra/rust/local.secrets.env"
@@ -595,4 +662,119 @@ run_generator "$legacy_fixture" "$legacy_fixture/output" 49400
 grep -Fxq 'MOMO_SELF_HOST_MODE=local-build' "$legacy_fixture/infra/rust/local.secrets.env"
 grep -Fq -- 'up -d --build --wait' "$legacy_fixture/output"
 
+run_compose_with_fake() {
+  local fixture="$1" output="$2"
+  shift 2
+  (
+    cd "$fixture"
+    PATH="$fixture/fake-bin:/usr/bin:/bin" \
+      bash scripts/self_host_env.sh --compose "$@"
+  ) >"$output" 2>&1
+}
+
+# #1613 scenario 1: same compose project, different checkout working_dir.
+collision_same_project="$(make_fixture collision-same-project)"
+run_generator "$collision_same_project" "$collision_same_project/first-output" 49600 --local-build
+grep -Fxq 'COMPOSE_PROJECT_NAME=oort' "$collision_same_project/infra/rust/local.secrets.env"
+if (
+  SELF_HOST_FAKE_PROJECT=oort \
+  SELF_HOST_FAKE_CONTAINER_ID=ctr-foreign-checkout \
+  SELF_HOST_FAKE_WORKING_DIR=/foreign/oort-checkout \
+  SELF_HOST_FAKE_INSPECT_PROJECT=oort \
+  SELF_HOST_FAKE_VOLUME_NAME=oort-pgdata \
+    run_compose_with_fake "$collision_same_project" "$collision_same_project/up-output" up -d --wait
+); then
+  echo "same-project foreign checkout --compose up unexpectedly succeeded" >&2
+  exit 1
+fi
+grep -Fq '다른 체크아웃의 살아있는 스택' "$collision_same_project/up-output"
+grep -Fq '/foreign/oort-checkout' "$collision_same_project/up-output"
+# config is not a start path — the guard must not fire.
+SELF_HOST_FAKE_PROJECT=oort \
+SELF_HOST_FAKE_CONTAINER_ID=ctr-foreign-checkout \
+SELF_HOST_FAKE_WORKING_DIR=/foreign/oort-checkout \
+SELF_HOST_FAKE_INSPECT_PROJECT=oort \
+SELF_HOST_FAKE_VOLUME_NAME=oort-pgdata \
+  run_compose_with_fake "$collision_same_project" "$collision_same_project/config-output" config --images
+test "$(sort -u "$collision_same_project/config-output")" = "oort:local"
+
+# #1613 scenario 2: project names differ, pgdata volume is shared.
+collision_shared_volume="$(make_fixture collision-shared-volume)"
+COMPOSE_PROJECT_NAME=oort-b \
+  run_generator "$collision_shared_volume" "$collision_shared_volume/first-output" 49610 --local-build
+grep -Fxq 'COMPOSE_PROJECT_NAME=oort-b' "$collision_shared_volume/infra/rust/local.secrets.env"
+grep -Fxq 'DB_VOLUME_NAME=oort-b-pgdata' "$collision_shared_volume/infra/rust/local.secrets.env"
+awk '/^DB_VOLUME_NAME=/ { print "DB_VOLUME_NAME=oort-shared-pgdata"; next } { print }' \
+  "$collision_shared_volume/infra/rust/local.secrets.env" \
+  >"$collision_shared_volume/shared.env"
+mv "$collision_shared_volume/shared.env" "$collision_shared_volume/infra/rust/local.secrets.env"
+if (
+  SELF_HOST_FAKE_PROJECT=oort-a \
+  SELF_HOST_FAKE_INSPECT_PROJECT=oort-a \
+  SELF_HOST_FAKE_WORKING_DIR=/foreign/oort-a \
+  SELF_HOST_FAKE_VOLUME_NAME=oort-shared-pgdata \
+  SELF_HOST_FAKE_VOLUME_CONTAINER_ID=ctr-shared-volume \
+    run_compose_with_fake "$collision_shared_volume" "$collision_shared_volume/up-output" up -d --wait
+); then
+  echo "shared-volume foreign checkout --compose up unexpectedly succeeded" >&2
+  exit 1
+fi
+grep -Fq '다른 체크아웃의 살아있는 스택' "$collision_shared_volume/up-output"
+grep -Fq 'oort-shared-pgdata' "$collision_shared_volume/up-output"
+grep -Fq 'project=oort-a' "$collision_shared_volume/up-output"
+
+# Same checkout = legitimate owner: resume is silent (no collision abort).
+owner_resume="$(make_fixture owner-resume)"
+run_generator "$owner_resume" "$owner_resume/first-output" 49620 --local-build
+owner_wd="$(CDPATH='' cd -P -- "$owner_resume" && pwd)"
+SELF_HOST_FAKE_PROJECT=oort \
+SELF_HOST_FAKE_CONTAINER_ID=ctr-same-checkout \
+SELF_HOST_FAKE_WORKING_DIR="$owner_wd" \
+SELF_HOST_FAKE_INSPECT_PROJECT=oort \
+SELF_HOST_FAKE_VOLUME_NAME=oort-pgdata \
+  run_compose_with_fake "$owner_resume" "$owner_resume/up-output" up -d --wait
+if grep -Fq '다른 체크아웃의 살아있는 스택' "$owner_resume/up-output"; then
+  echo "same-checkout resume was treated as a foreign collision" >&2
+  exit 1
+fi
+
+# down from a foreign checkout is also hijacking (could -v the live volume).
+if (
+  SELF_HOST_FAKE_PROJECT=oort \
+  SELF_HOST_FAKE_CONTAINER_ID=ctr-foreign-checkout \
+  SELF_HOST_FAKE_WORKING_DIR=/foreign/oort-checkout \
+  SELF_HOST_FAKE_INSPECT_PROJECT=oort \
+  SELF_HOST_FAKE_VOLUME_NAME=oort-pgdata \
+    run_compose_with_fake "$collision_same_project" "$collision_same_project/down-output" down -v
+); then
+  echo "foreign checkout --compose down -v unexpectedly succeeded" >&2
+  exit 1
+fi
+grep -Fq '다른 체크아웃의 살아있는 스택' "$collision_same_project/down-output"
+
+# Migration: existing oort-pgdata is adopted when the new env keeps the name.
+adopt_fixture="$(make_fixture legacy-pgdata-adopt)"
+SELF_HOST_FAKE_VOLUME_NAME=oort-pgdata \
+  run_generator "$adopt_fixture" "$adopt_fixture/output" 49630 --local-build
+grep -Fxq 'DB_VOLUME_NAME=oort-pgdata' "$adopt_fixture/infra/rust/local.secrets.env"
+grep -Fq '기존 볼륨 oort-pgdata 를 이 프로젝트의 데이터로 채택한다' "$adopt_fixture/output"
+
+# Migration: a different project name must not quietly leave oort-pgdata behind.
+isolate_fixture="$(make_fixture legacy-pgdata-isolate)"
+SELF_HOST_FAKE_VOLUME_NAME=oort-pgdata \
+COMPOSE_PROJECT_NAME=isolated-clone \
+  run_generator "$isolate_fixture" "$isolate_fixture/output" 49640 --local-build
+grep -Fxq 'COMPOSE_PROJECT_NAME=isolated-clone' "$isolate_fixture/infra/rust/local.secrets.env"
+grep -Fxq 'DB_VOLUME_NAME=isolated-clone-pgdata' "$isolate_fixture/infra/rust/local.secrets.env"
+grep -Fq '기존 셀프호스트 볼륨 oort-pgdata 가 있다' "$isolate_fixture/output"
+grep -Fq 'DB_VOLUME_NAME 은 isolated-clone-pgdata' "$isolate_fixture/output"
+
 echo "self-host image mode contract: PASS"
+
+# Real docker proof is a separate script so local_gate profiles do not each
+# spend ~40s on busybox stacks. Invoke explicitly:
+#   scripts/tests/test_self_host_stack_collision_docker.sh
+bash -n "$ROOT/scripts/tests/test_self_host_stack_collision_docker.sh"
+if [ "${SELF_HOST_RUN_DOCKER_PROOF:-}" = "1" ]; then
+  bash "$ROOT/scripts/tests/test_self_host_stack_collision_docker.sh"
+fi
