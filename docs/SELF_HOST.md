@@ -87,17 +87,22 @@ compose의 postgres 서비스가 소비하는 값이 아니다.
 | 앱 | `ghcr.io/yeomyeonggeori/oort@sha256:0fbddd36947b4dfd18d6fc91e9229fc5e6f52ebb896b9bf632a2ec127620b8eb` |
 | PostgreSQL 18 + pgBackRest | `ghcr.io/yeomyeonggeori/oort-postgres@sha256:c68063695bde97bb2911d5eca4ebce6a94858dc9af9f60ad294657ef7cea0757` |
 
-공개 발행 형상은 **`linux/amd64` 단일 플랫폼**이다. `linux/arm64` manifest가
-없다. Apple Silicon에서 native pull은 불가했다(실측 2026-08-21). ARM 서버와
-Apple Silicon은 에뮬레이션 성공을 가정하지 말고, 공개 digest 모드 대신
-호스트에서 검증한 로컬 빌드 경로(A)를 쓰거나 후속 arm64 릴리스를 기다린다.
+공개 발행 **워크플로**는 다음 발행부터 `linux/amd64`+`linux/arm64` manifest
+list를 만든다. **지금 이 표의 v0.1.0 digest는 amd64 단일**이다 — 그 digest에는
+`linux/arm64` manifest가 없다. Apple Silicon에서 그 digest의 native pull은
+불가했다(실측 2026-08-21). 첫 multi-arch digest 실값은 아직 없다. ARM 서버와
+Apple Silicon은 에뮬레이션 성공을 가정하지 말고, 이 v0.1.0 pin의 공개 digest
+모드 대신 호스트에서 검증한 로컬 빌드 경로(A)를 쓰거나, 후속
+multi-arch 릴리스의 **manifest list digest**를 기다린다.
 
 발행 workflow는 `main` ref의 수동 실행만 허용하고, GitHub `release` Environment의
-owner 승인 뒤 pushed digest에 SLSA v1 provenance를 OCI referrer로 붙인다. 2026-08-12
+owner 승인 뒤 **아키별 digest와 manifest list digest**에 SLSA v1 provenance를 OCI
+referrer로 붙인다. 2026-08-12
 attended 설정/readback에서 required reviewer는 `kwakseongjae`(user id `87296259`),
 `prevent_self_review=false`, deployment branch policy는 custom `main` branch 하나임을
 확인했다. `sha-*`
-태그는 커밋을 찾기 위한 이동 가능한 표식일 뿐 불변 신원이 아니다. digest 자체는
+태그는 커밋을 찾기 위한 이동 가능한 표식일 뿐 불변 신원이 아니다. 다음 발행부터
+운영자 pin은 list digest다. digest 자체는
 다음처럼 검증한다(`gh`가 설치된 운영자용 선택 단계):
 
 ```sh
@@ -107,9 +112,10 @@ gh attestation verify "oci://$IMAGE_REF" \
 ```
 
 첫 workflow dispatch와 공개 GHCR 왕복(발행 · 익명 pull · attestation)은
-실측 완료다. 좌표: 원장 #1332 코멘트 2026-08-21, 빌드 커밋 `main=45a154d2`,
-attestation 검증 PASS, Apple Silicon native pull 불가(amd64 단일, 실측
-2026-08-21). (구 `SELF_HOST.md:88` `runtime-unverified` 문면.) 절차 정본은
+**amd64 단일 v0.1.0** 에 대해 실측 완료다. 좌표: 원장 #1332 코멘트 2026-08-21, 빌드 커밋 `main=45a154d2`,
+attestation 검증 PASS, Apple Silicon native pull 불가(그 digest는 amd64 단일, 실측
+2026-08-21). 첫 multi-arch 발행·arm64 digest·list digest 실측은 아직 없다.
+(구 `SELF_HOST.md:88` `runtime-unverified` 문면.) 절차 정본은
 [`RELEASING.md`](RELEASING.md). 이 문서가 릴리스 권한을 주지는 않는다.
 
 `infra/rust/local.secrets.env` 를 만든다 — **채워 넣을 자리가 하나도 없는** 파일이다.

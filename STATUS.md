@@ -1,5 +1,10 @@
 # oort 진행 현황
 
+## GHCR publish-images multi-arch 계약 (#1643, 2026-08-22)
+
+- `publish-images.yml`을 native `linux/amd64`(`ubuntu-24.04`) + native `linux/arm64`(`ubuntu-24.04-arm`) 잡 분리 후 `buildx imagetools create`로 manifest list를 묶는 구조로 확장. QEMU 없음. `workflow_dispatch`·`release` Environment·main-only 승인 경계는 각 잡에 유지. attestation은 아키별 digest와 list digest 둘 다(운영자 pin=list). `sha-<gitsha>`는 list에만 붙는다.
+- 계약 테스트가 arm64 잡·manifest 합성·기존 단언(수동 전용·권한·풀 SHA·digest 검증·QEMU 금지·`latest` 금지)을 고정. **실발행 dispatch는 이 goal 밖** — 현행 v0.1.0 digest는 amd64 단일, arm64/list 실측 0.
+
 ## 루트 계약 문서 web-legacy 서빙 거짓 일소 (#1641, 2026-08-22)
 
 - T-E #1610 README 이분(라이브=`clients/web`, `server-rust/Dockerfile:147,157,173,231` web-assets / #1228 · web-legacy=Swift prod `Dockerfile.web`·e2e `web-init`·`--profile web` 소비)을 AGENTS.md §0/§2·CODEX.md·docs/INDEX.md·clients/web/README.md·local_gate.sh auto 분류 주석·docs/LOCAL_PR_GATE.md web 설명에 전수 반영. 서빙 배선 코드 무변경.
