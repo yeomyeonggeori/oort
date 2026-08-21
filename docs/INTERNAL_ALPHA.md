@@ -318,7 +318,7 @@ ITO-4는 `LAUNCH_READY` / `BLOCKED` / `NEEDS_MORE_INTERNAL`이다. `AWS_READY`�
 
 - 데스크탑 릴리스 로그인/CORS: T-A(#1607) 전까지 README Known gaps가 정본. 낙관 금지.
 - 알림 클릭 라우팅: known gap (`clients/desktop/README.md` Notification).
-- GHCR digest pull: `SELF_HOST.md:88` `runtime-unverified` — H2 SKIP(L2).
+- GHCR digest pull: 첫 발행·익명 pull·attestation PASS(원장 #1332 코멘트 2026-08-21, amd64 단일). H2 amd64 부팅 실측은 잔여(Apple Silicon native pull 불가만 실측). 구 `SELF_HOST.md:88` `runtime-unverified` — H2 SKIP(L2) 문면은 해당 없음.
 - 공개 호스트 DNS/TLS/SOPS/PITR: `runtime-unverified(public host)` unless 호스트 증거 패킷.
 - iOS 실기기/APNs/external TestFlight: 스코프 밖. I8은 `lane:phone`만.
 - 루프백 로컬 모델 provider: 셀프호스트 env는 `MOMO_ENV=staging`, 외부 https만.
