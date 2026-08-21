@@ -14,7 +14,9 @@ files, not legal advice and not a claim of legal sufficiency.
 | `GHCR_NOTICE_BUNDLE.sha256` | `sha256sum` manifest of the four files Docker copies |
 | `license-file-clarify.json` | Reviewed fallbacks for packages whose tarball has SPDX but no LICENSE file |
 | `spdx-texts/` | SPDX license texts used only by those fallbacks and optional-not-installed npm packages |
-| `DEBIAN_COPYRIGHT_INVENTORY.txt` | Evidence from an image dpkg copyright scan (regenerated inside Docker) |
+| `DEBIAN_COPYRIGHT_INVENTORY.txt` | Written inside each image at build (`/usr/share/licenses/...`) |
+| `DEBIAN_COPYRIGHT_INVENTORY.oort-postgres.txt` | Extracted from a local `oort-postgres` image build (exact Dockerfile) |
+| `DEBIAN_COPYRIGHT_INVENTORY.bookworm-runtime-layer.txt` | Probe of `debian:bookworm-slim` + the app image apt packages (not the exact rust app image) |
 
 Hand-maintained index: `legal/THIRD_PARTY_NOTICES.md` (current vs historical).
 Project files: repo-root `LICENSE`, `NOTICE`.

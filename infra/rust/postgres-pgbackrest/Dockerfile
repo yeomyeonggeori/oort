@@ -73,7 +73,7 @@ RUN set -eux; \
     test -s /usr/share/licenses/oort-postgres/GHCR_THIRD_PARTY_NOTICES.txt; \
     test -s /usr/share/licenses/oort-postgres/pgbackrest-MIT; \
     test -s /usr/share/licenses/oort-postgres/libssh2-BSD3-ISC; \
-    sha256sum -c /usr/share/licenses/oort-postgres/GHCR_NOTICE_BUNDLE.sha256; \
+    ( cd /usr/share/licenses/oort-postgres && sha256sum -c GHCR_NOTICE_BUNDLE.sha256 ); \
     /usr/local/bin/check_debian_copyrights.sh --output /usr/share/licenses/oort-postgres/DEBIAN_COPYRIGHT_INVENTORY.txt
 
 # Keep the upstream postgres entrypoint, PGDATA, and default command. Secrets

@@ -76,7 +76,11 @@ scan_image() {
     printf '%s\n' '# class copyleft includes GPL/LGPL/AGPL and is never written as permissive.'
     printf '%s\n' '# this is file-existence evidence, not a legal-sufficiency declaration.'
   } >"$tmp"
-  dpkg-query -W -f='${Package}\t${Version}\n' | LC_ALL=C sort >"$pkgs"
+  # Only currently installed packages. Residual "config-files" rows
+  # (deinstall leftovers) are not redistributed and have no doc dir.
+  dpkg-query -W -f='${db:Status-Status}\t${Package}\t${Version}\n' \
+    | awk -F'\t' '$1 == "installed" { print $2 "\t" $3 }' \
+    | LC_ALL=C sort >"$pkgs"
   missing=0
   tab=$(printf '\t')
   while IFS="$tab" read -r pkg version; do

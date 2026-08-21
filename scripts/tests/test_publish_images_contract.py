@@ -646,7 +646,7 @@ require(
     "web-assets path must expose the same four notice files",
 )
 require(
-    "sha256sum -c /usr/share/licenses/momo-rust/GHCR_NOTICE_BUNDLE.sha256" in dockerfile,
+    "cd /usr/share/licenses/momo-rust && sha256sum -c GHCR_NOTICE_BUNDLE.sha256" in dockerfile,
     "app image must verify notice file hashes at build",
 )
 require("scripts/check_debian_copyrights.sh" in dockerfile, "app image must scan dpkg copyright files")

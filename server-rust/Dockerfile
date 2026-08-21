@@ -248,7 +248,7 @@ RUN set -eux; \
     test -s /usr/share/licenses/momo-rust/THIRD_PARTY_NOTICES.md; \
     test -s /usr/share/licenses/momo-rust/GHCR_THIRD_PARTY_NOTICES.txt; \
     test -s /opt/momo/web/legal/GHCR_THIRD_PARTY_NOTICES.txt; \
-    sha256sum -c /usr/share/licenses/momo-rust/GHCR_NOTICE_BUNDLE.sha256; \
+    ( cd /usr/share/licenses/momo-rust && sha256sum -c GHCR_NOTICE_BUNDLE.sha256 ); \
     /usr/local/bin/check_debian_copyrights.sh --output /usr/share/licenses/momo-rust/DEBIAN_COPYRIGHT_INVENTORY.txt; \
     test -s /opt/momo/web/index.html; \
     momo-migrate --help >/dev/null

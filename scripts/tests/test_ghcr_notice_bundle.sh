@@ -91,7 +91,7 @@ FROM debian:bookworm-slim
 COPY LICENSE NOTICE legal/THIRD_PARTY_NOTICES.md legal/generated/GHCR_THIRD_PARTY_NOTICES.txt /usr/share/licenses/momo-rust/
 COPY legal/generated/GHCR_NOTICE_BUNDLE.sha256 /usr/share/licenses/momo-rust/
 COPY --chown=momo:momo LICENSE NOTICE legal/THIRD_PARTY_NOTICES.md legal/generated/GHCR_THIRD_PARTY_NOTICES.txt /opt/momo/web/legal/
-RUN sha256sum -c /usr/share/licenses/momo-rust/GHCR_NOTICE_BUNDLE.sha256
+RUN cd /usr/share/licenses/momo-rust && sha256sum -c GHCR_NOTICE_BUNDLE.sha256
 COPY scripts/check_debian_copyrights.sh /usr/local/bin/check_debian_copyrights.sh
 RUN test -s /usr/share/licenses/momo-rust/LICENSE; \
     test -s /usr/share/licenses/momo-rust/NOTICE; \
@@ -103,7 +103,7 @@ EOF
 FROM debian:trixie
 COPY LICENSE NOTICE legal/THIRD_PARTY_NOTICES.md legal/generated/GHCR_THIRD_PARTY_NOTICES.txt /usr/share/licenses/oort-postgres/
 COPY legal/generated/GHCR_NOTICE_BUNDLE.sha256 /usr/share/licenses/oort-postgres/
-RUN sha256sum -c /usr/share/licenses/oort-postgres/GHCR_NOTICE_BUNDLE.sha256
+RUN cd /usr/share/licenses/oort-postgres && sha256sum -c GHCR_NOTICE_BUNDLE.sha256
 COPY scripts/check_debian_copyrights.sh /usr/local/bin/check_debian_copyrights.sh
 RUN test -s /usr/share/licenses/oort-postgres/LICENSE; \
     test -s /usr/share/licenses/oort-postgres/NOTICE; \
