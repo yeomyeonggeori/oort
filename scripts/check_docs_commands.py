@@ -74,6 +74,23 @@ GATED_DOCS = [
         "로컬 기동 가이드. 은퇴 중인 Swift 장을 포함하지만 2~4장은 현행 유효라고 "
         "문서 스스로 못박고 있어, 여기 적힌 명령은 지금도 실행된다.",
     ),
+    (
+        "docs/RELEASING.md",
+        "서버/이미지 릴리스 절차 정본. 스스로 '이 문서 하나로 서버 이미지 릴리스를 "
+        "완주한다'고 선언한다 — workflow dispatch, attestation verify, "
+        "self_host_env --published-image.",
+    ),
+    (
+        "docs/NEXT_CHANNEL.md",
+        "데스크탑 Tauri next 채널 발행 정본. publish_next_build.sh 를 그대로 "
+        "실행하는 운영 문서다.",
+    ),
+    (
+        "CONTRIBUTING.md",
+        "기여자 운영 문서. local_gate --profile secrets/license, "
+        "generate_ghcr_notice_bundle, verify_policy_integrity_from_base 를 "
+        "실행 지시로 싣는다.",
+    ),
 ]
 
 # Every runbook is gated by construction: a runbook is by definition a document

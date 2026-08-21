@@ -5,6 +5,15 @@
 - `publish-images.yml`을 native `linux/amd64`(`ubuntu-24.04`) + native `linux/arm64`(`ubuntu-24.04-arm`) 잡 분리 후 `buildx imagetools create`로 manifest list를 묶는 구조로 확장. QEMU 없음. `workflow_dispatch`·`release` Environment·main-only 승인 경계는 각 잡에 유지. attestation은 아키별 digest와 list digest 둘 다(운영자 pin=list). `sha-<gitsha>`는 list에만 붙는다.
 - 계약 테스트가 arm64 잡·manifest 합성·기존 단언(수동 전용·권한·풀 SHA·digest 검증·QEMU 금지·`latest` 금지)을 고정. **실발행 dispatch는 이 goal 밖** — 현행 v0.1.0 digest는 amd64 단일, arm64/list 실측 0.
 
+## 루트 계약 문서 web-legacy 서빙 거짓 일소 (#1641, 2026-08-22)
+
+- T-E #1610 README 이분(라이브=`clients/web`, `server-rust/Dockerfile:147,157,173,231` web-assets / #1228 · web-legacy=Swift prod `Dockerfile.web`·e2e `web-init`·`--profile web` 소비)을 AGENTS.md §0/§2·CODEX.md·docs/INDEX.md·clients/web/README.md·local_gate.sh auto 분류 주석·docs/LOCAL_PR_GATE.md web 설명에 전수 반영. 서빙 배선 코드 무변경.
+
+## 발행 실측 라벨 현행화 + 운영 문서 GATED_DOCS 편입 (#1642, 2026-08-22)
+
+- v0.1.0 첫 발행 실측(원장 #1332 코멘트 2026-08-21 · 발행·익명 pull·attestation PASS · 패키지 public · amd64 단일)을 LOCAL_3_DAY H2·INTERNAL_ALPHA·infra/rust README §3-1·ncp-rust-deploy first-dispatch 문면에 반영. **H2 amd64 부팅 실측은 잔여**(Apple Silicon native pull 불가만 실측).
+- `check_docs_commands.py` GATED_DOCS에 `docs/RELEASING.md`·`docs/NEXT_CHANNEL.md`·`CONTRIBUTING.md` 편입. 게이트 407→439 fact / 12→15 문서. 하네스 26/26.
+
 ## PR CI 노드 레인 붕대 제거 (#1635, 2026-08-22)
 
 - web 레인 `env TZ: Asia/Seoul` 제거. TZ 정본은 `clients/web/vite.config.ts` `test.env` (#1267). CI 중복 pin은 UTC 호스트의 로컬 빨강을 가린다.

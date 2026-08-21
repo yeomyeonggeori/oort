@@ -90,7 +90,7 @@ only one of them.
 | Target | Policy | Gate |
 |---|---|---|
 | cargo (`server-rust`, `clients/desktop/src-tauri`) | root `deny.toml` | `scripts/check_cargo_licenses.sh` (needs `cargo-deny`) |
-| npm (workspace root = `packages/momo-core`, `clients/web`, `clients/mobile`) | `ALLOWED` in `scripts/check_npm_licenses.mjs` | the same script |
+| npm (workspace root = `packages/momo-core`, `clients/web`, `clients/mobile`) | `ALLOWED` in scripts/check_npm_licenses.mjs | the same script |
 | GHCR redistribution notices (app + postgres images) | generated artifact `legal/generated/` (not policy) | `scripts/check_ghcr_notice_bundle.sh` + `scripts/tests/test_ghcr_notice_bundle.sh` |
 
 - **Allowed**: MIT · Apache-2.0 · ISC · BSD family · 0BSD · Zlib · Unicode-3.0 · Unlicense · CC0-1.0 · CDLA-Permissive-2.0 · BlueOak-1.0.0 · Python-2.0 · CC-BY-4.0 (data) · **MPL-2.0**.
@@ -136,7 +136,7 @@ and will still score RED/GREEN if that tree is missing. Missing SPDX or
 LICENSE files fail closed. The automation is a reproducible inventory, not a
 declaration of legal sufficiency.
 
-**The SwiftPM license gate (`scripts/check_spm_licenses.sh`) is retired**
+**The SwiftPM license gate (`scripts/check_spm_licenses.sh`) is retired** <!-- docs-cmd-ignore: 폐지된 실행체를 이름으로 부르는 문장 (#1201) -->
 (2026-08-10, #1201). The SwiftPM section in `legal/THIRD_PARTY_NOTICES.md` is
 a **historical snapshot** from that date. If you change SwiftPM dependencies
 in the remaining Swift tree, update that historical section by hand and

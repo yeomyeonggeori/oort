@@ -25,7 +25,7 @@ fail() { echo "[docs-cmd-test] FAIL: $*" >&2; exit 1; }
 pass() { CASES=$((CASES + 1)); echo "[docs-cmd-test] ok: $*"; }
 
 # -----------------------------------------------------------------------------
-# A minimal tree with everything the guard resolves against: the three tabled
+# A minimal tree with everything the guard resolves against: the tabled
 # documents, a runbook directory, a Makefile, local_gate.sh (the profile list is
 # read out of it, never restated), and two package.json files.
 # -----------------------------------------------------------------------------
@@ -39,6 +39,9 @@ new_tree() {
   : >"$dir/AGENTS.md"
   : >"$dir/CODEX.md"
   : >"$dir/docs/RUN.md"
+  : >"$dir/docs/RELEASING.md"
+  : >"$dir/docs/NEXT_CHANNEL.md"
+  : >"$dir/CONTRIBUTING.md"
 
   printf 'build:\n\t@true\nts-check:\n\t@true\n' >"$dir/Makefile"
   printf '{"scripts":{"lint":"true"}}\n' >"$dir/package.json"

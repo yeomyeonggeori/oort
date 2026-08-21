@@ -44,8 +44,9 @@
 1. (owner-attended) `main`의 manual `publish-images.yml`이 application/database
    두 image를 모두 push하고 각각 returned digest에 SLSA attestation을 붙인 뒤 낸
    release manifest에서 **두 exact digest를 함께** 가져온다. `sha-*` tag나 로컬
-   retag는 배포 권위가 아니다. 첫 dispatch·anonymous pull·attestation round-trip이
-   아직 없으면 이 절차를 진행하지 않고 `runtime-unverified(first publish)`로 남긴다.
+   retag는 배포 권위가 아니다. 첫 dispatch·anonymous pull·attestation round-trip은
+   실측 완료다(원장 #1332 코멘트 2026-08-21 · 패키지 public · digest 2본
+   attestation PASS · amd64 단일).
 
    ```bash
    DEPLOY_GIT_COMMIT=<main의-40hex>
