@@ -172,7 +172,7 @@ jobs:
           node=false
           contract=false
           printf '%s\n' "$files" | grep -Eq \
-            '^(server-rust/|clients/desktop/src-tauri/|deny\.toml$|scripts/check_cargo_licenses\.sh$|docs/api/harness-refine-client-msg-id\.golden\.json$|\.github/workflows/pr-ci\.yml$)' \
+            '^(server-rust/|clients/desktop/src-tauri/|deny\.toml$|scripts/check_cargo_licenses\.sh$|scripts/generate_ghcr_notice_bundle\.py$|scripts/check_ghcr_notice_bundle\.sh$|scripts/check_debian_copyrights\.sh$|scripts/tests/test_ghcr_notice_bundle\.sh$|legal/generated/|legal/THIRD_PARTY_NOTICES\.md$|NOTICE$|docs/api/harness-refine-client-msg-id\.golden\.json$|\.github/workflows/pr-ci\.yml$)' \
             && rust=true
           printf '%s\n' "$files" | grep -Eq \
             '^(clients/web/|clients/mobile/|packages/|server/Fixtures/|package\.json$|package-lock\.json$|scripts/check_npm_licenses\.mjs$|\.github/workflows/pr-ci\.yml$)' \
@@ -256,6 +256,8 @@ jobs:
           scripts/tests/test_github_track_guardrails.sh
           scripts/tests/test_policy_integrity_gate.sh
           scripts/tests/test_trusted_policy_runner.sh
+          scripts/tests/test_ghcr_notice_bundle.sh
+          scripts/check_ghcr_notice_bundle.sh --stale-only
 
   # ── ② Rust 레인 ─────────────────────────────────────────────────────────
   # `cargo test --workspace` + 카고 라이선스 게이트.
