@@ -3,6 +3,9 @@
 > **이 문서 하나로 서버 이미지 릴리스를 완주한다.** 범위는 `v0.x` 태그 +
 > GitHub Release + GHCR 불변 digest 표 + `docs/SELF_HOST.md` 문면이다.
 > 데스크탑 Tauri next 채널은 **다른 절차**다 — [§데스크탑 next 채널과의 경계](#데스크탑-next-채널과의-경계).
+> 공개 데스크탑 설치 파일(dmg)은 서버 `v0.x` Release 의 **자산**으로 붙인다 —
+> [§데스크탑 dmg 공개 릴리스](#데스크탑-dmg-공개-릴리스). 실공증·실업로드는
+> 오케스트레이터다.
 >
 > 태그 push와 GitHub Release 생성은 오케스트레이터가 집행한다. 이 문서는 그
 > 절차의 정본이지, 워커에게 원격 쓰기를 허가하지 않는다.
@@ -167,12 +170,101 @@ GitHub Release 다.
 `v0.1.0` 은 next 매니페스트를 올리지 않고, next 발행은 GHCR digest 를
 올리지 않는다. 한 커밋·한 릴리스에 두 절차를 섞지 마라.
 
+공개 dmg 의 번들 버전은 `0.1.0`(태그 `v0.1.0` 과 동일)이고, 파일명은 버전을
+넣지 않는다([§데스크탑 dmg 공개 릴리스](#데스크탑-dmg-공개-릴리스)). next
+채널 스크립트는 `--public` 없이 `0.1.0` 을 거절한다.
+
+---
+
+## 데스크탑 dmg 공개 릴리스
+
+T-2 플레이북이 사람·그록봇에게 줄 **안정 다운로드 URL** 의 정본. 워커는
+`--dry-run` 까지. 실공증·`gh release upload` 는 오케스트레이터/성재.
+
+### 택일 (이 절의 권고)
+
+| 갈래 | 무엇 | 판정 |
+|---|---|---|
+| **(a) 기존 `v0.1.0` Release 에 dmg 자산 첨부** | 서버 digest 표와 같은 GitHub Release | **채택** |
+| (b) 별도 `desktop-v0.1.0` 태그 | 데스크탑만의 Release | 기각 |
+
+**(a) 논거.** GitHub `…/releases/latest/download/<filename>` 은 가장 최근
+**비-prerelease** 를 가리킨다. 지금 `latest` = `v0.1.0`(서버 릴리스, dmg
+자산 없음). 그 Release 에 고정 파일명으로 붙이면 T-2 링크가 즉시 성립하고,
+서버 digest 표가 `/releases/latest` 에서 밀리지 않는다. (b) 를 풀 릴리스로
+만들면 그 태그가 latest 가 되어 이미지 digest 안내가 가려진다. prerelease 로
+만들면 `/releases/latest` 가 dmg 를 안 준다. next 채널(`0.1.0-next.N` →
+`momo-alpha`) 과 저장소가 갈라져 계열도 안 섞인다.
+
+파일명에 버전을 넣지 않는다. latest 패턴이 가리키는 이름은 릴리스마다
+같아야 한다.
+
+**안정 URL (T-2 가 이 문자열을 쓴다):**
+
+```
+https://github.com/yeomyeonggeori/oort/releases/latest/download/oort-macos-aarch64.dmg
+```
+
+태그 고정이 필요하면 같은 자산의
+`https://github.com/yeomyeonggeori/oort/releases/download/v0.1.0/oort-macos-aarch64.dmg`.
+darwin-x86_64 / Windows 는 이 절의 범위가 아니다.
+
+### 절차 (오케스트레이터)
+
+시크릿 3종(minisign 개인키·Developer ID 개인키·notarytool 프로파일)은 **값으로
+출력하거나 채팅/이슈/커밋에 붙이지 말 것.** 존재와 이름만
+[`docs/NEXT_CHANNEL.md`](NEXT_CHANNEL.md) §8.1.
+
+`tauri.conf.json` 의 커밋된 버전은 `0.1.0-next.1` 로 둔다. 공개 번호는
+`--config` 로만 주입한다. `--public` 은 next 매니페스트/`momo-alpha` 를
+건드리지 않는다.
+
+```sh
+# 전제: §8.1. 서명 자산은 로컬 키체인. 워커 증명 = 이 한 줄.
+scripts/publish_next_build.sh --public --version 0.1.0 --dry-run
+```
+
+기대: `bundle/dmg/` 아래에 버전 넣은 tauri dmg + `codesign --verify --strict`
+통과, 로그에 `dry run: stopping before notarization`. `spctl` 은 공증 전이므로
+`Unnotarized Developer ID` 가 정상. 이 호출은 `0.1.0` 을 next 채널에 올리지
+않는다.
+
+```sh
+# 실공증·스테이플 (맥 앞에서). 업로드는 하지 않는다.
+scripts/publish_next_build.sh --public --version 0.1.0
+```
+
+산출 안정 파일: `clients/desktop/src-tauri/target/release/bundle/dmg/oort-macos-aarch64.dmg`.
+스크립트가 찍는 `gh` 한 줄을 사람이 실행한다:
+
+```sh
+gh release upload v0.1.0 \
+  clients/desktop/src-tauri/target/release/bundle/dmg/oort-macos-aarch64.dmg \
+  --repo yeomyeonggeori/oort
+```
+
+`--clobber` 는 같은 이름을 교체할 때만. 태그/Release 자체를 새로 만들지 않는다
+(§5 가 이미 `v0.1.0` 을 만들었다).
+
+확인:
+
+```sh
+curl -sI https://github.com/yeomyeonggeori/oort/releases/latest/download/oort-macos-aarch64.dmg \
+  | grep -Ei '^(HTTP|content-type|location):'
+```
+
+302 가 `releases/download/v0.1.0/oort-macos-aarch64.dmg` 로 끝나면 T-2 링크가
+산다.
+
 ---
 
 ## 이 문서가 하지 않는 것
 
 - 태그/Release 의 원격 쓰기 — 오케스트레이터. 워커는 초안과 문면만.
+  공개 dmg 업로드도 같다(`gh release upload` 는 사람이 실행).
+- next 채널 실발행 — [`docs/NEXT_CHANNEL.md`](NEXT_CHANNEL.md) §8.
 - `linux/arm64` 재발행.
+- darwin-x86_64 / Windows 데스크탑 패키지.
 - 장기 버전 정책(semver 이후 자리).
 - 운영 호스트 배포 — [`docs/runbooks/ncp-rust-deploy.md`](runbooks/ncp-rust-deploy.md).
 - 셀프호스트 첫 로그인 — [`docs/SELF_HOST.md`](SELF_HOST.md).

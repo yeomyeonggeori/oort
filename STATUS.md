@@ -1,5 +1,11 @@
 # oort 진행 현황
 
+## 데스크탑 dmg 공개 릴리스 준비 (T-3 / #1653, 2026-08-23)
+
+- bundle target `["app", "dmg"]`. next 채널 `.app` 경로(`bundle/macos/oort.app`)와 momo-alpha 업로드(`.app.tar.gz`+zip)는 불변. `publish_next_build.sh` 가 dmg 를 같은 빌드에서 서명하고 dry-run 에서 `codesign --verify --strict` 까지 잰다. 실공증·`gh release upload` 는 오케스트레이터.
+- **택일 (a):** 기존 `v0.1.0` Release 자산 `oort-macos-aarch64.dmg`. 안정 URL `https://github.com/yeomyeonggeori/oort/releases/latest/download/oort-macos-aarch64.dmg`. 별도 desktop 태그는 latest 가 서버 digest 를 가린다. `--public --version 0.1.0` 만 공개 번호를 쓰고, 커밋된 `tauri.conf.json` 은 `0.1.0-next.1`.
+- `runtime-unverified(실공증·v0.1.0 자산 업로드)` — 워커 범위는 dry-run.
+
 ## 온보딩 첫 왕복 게이트 (T-6 / #1656, 2026-08-22)
 
 - 그록봇(호스티드 에이전트) 초대 완료 직후 채널에 「첫 멘션을 보내보세요」 표면. 왕복 판정은 에이전트 author 메시지 도착=완료. 네 상태(빈/로딩/오류/오프라인)와 에이전트 뱃지 필수. 미도착은 타임아웃 오류로 표면화(무음 실패 없음). 응답 시간 상한은 게이트가 아니다. 위저드 단계 기계는 그대로, 테스트 멘션 링크에 `firstMention` 힌트만 가산.

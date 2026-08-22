@@ -15,7 +15,7 @@
 > | 채널 계약·버전·신뢰 사슬 | [`docs/NEXT_CHANNEL.md`](NEXT_CHANNEL.md) |
 > | 셸 업데이터 UI·실측 | [`clients/desktop/README.md`](../clients/desktop/README.md) (Identity / Updater) |
 > | 발행 스크립트 | `scripts/publish_next_build.sh` (minisign + notarytool + stapler; 실발행은 성재 맥, T-D / #1281) |
-> | 번들 타깃 | `clients/desktop/src-tauri/tauri.conf.json:45` `targets: ["app"]` — DMG 없음. 공증 제출은 `.app` zip, 업데이터 자산은 `.app.tar.gz`, 첫 설치는 zip (`scripts/publish_next_build.sh:129-173`) |
+> | 번들 타깃 | `clients/desktop/src-tauri/tauri.conf.json` `targets: ["app", "dmg"]`. next 채널 자산은 여전히 `.app.tar.gz`/zip. 공개 dmg 는 [`docs/RELEASING.md`](RELEASING.md) §데스크탑 dmg |
 > | CI 대행 레인 | `.github/workflows/release-desktop.yml` (`workflow_dispatch`; 발행 논리는 스크립트 한 벌) |
 >
 > 본문은 2026-06-24 STAGE A–E 원문이다. 고치지 않고 사문서로 둔다. iOS STAGE E

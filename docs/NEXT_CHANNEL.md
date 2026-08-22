@@ -50,9 +50,12 @@ minisign 공개키는 빌드에 컴파일되므로, GitHub Pages 가 털려도 �
 scripts/publish_next_build.sh --version 0.1.0-next.2 --notes "인박스 필터가 새로고침 뒤에도 유지됩니다."
 ```
 
-단계: 빌드(서명 포함) → `codesign --verify` → notarytool 제출 + `stapler staple` → 스테이플된 `.app` 으로 `.app.tar.gz` 재생성 → tar 왕복 검증(`codesign --verify` + `stapler validate`) → minisign 서명 → 릴리스 업로드 → `update-next.json` 커밋.
+단계: 빌드(서명 포함, `--bundles app,dmg`) → `.app`·`.dmg` 각각 `codesign --verify --strict` → notarytool 제출 + `stapler staple`(.app) → 스테이플된 `.app` 으로 `.app.tar.gz` 재생성 → tar 왕복 검증(`codesign --verify` + `stapler validate`) → minisign 서명 → 릴리스 업로드 → `update-next.json` 커밋.
 
-`--dry-run` 은 공증 직전에서 멈춘다(빌드와 서명만 확인).
+`--dry-run` 은 공증 직전에서 멈춘다(빌드와 `.app`/`.dmg` 서명만 확인). dmg 는
+같은 빌드의 가산 산출이다. next 채널이 올리는 자산은 여전히 `.app.tar.gz` 와
+첫 설치 zip 뿐이고, 공개 dmg 는 [`docs/RELEASING.md`](RELEASING.md) §데스크탑
+dmg (`--public`, `v0.1.0` Release 자산).
 
 환경 변수로 덮어쓸 수 있는 것: `MOMO_SIGN_IDENTITY`, `MOMO_NOTARY_PROFILE`, `MOMO_UPDATER_KEY`, `MOMO_DIST_REPO`.
 
@@ -175,7 +178,7 @@ cd "$(git rev-parse --show-toplevel)"
 scripts/publish_next_build.sh --version 0.1.0-next.11 --dry-run --notes "내부 테스트용 next.11 (HEAD 채널 위생)."
 ```
 
-기대: `codesign --verify` 통과, 로그에 `Authority=Developer ID Application: Kwak Seongjae (YWQQFQM38J)`, `dry run: stopping before notarization`. `spctl` 은 공증 전이므로 `Unnotarized Developer ID` 가 정상.
+기대: `.app` 과 `.dmg` 둘 다 `codesign --verify --strict` 통과, 로그에 `Authority=Developer ID Application: Kwak Seongjae (YWQQFQM38J)`, `dry run: stopping before notarization`. `spctl` 은 공증 전이므로 `Unnotarized Developer ID` 가 정상. 공개 `0.1.0` dmg 는 이 줄이 아니라 `docs/RELEASING.md` §데스크탑 dmg 의 `--public --dry-run`.
 
 ### 8.3 실발행
 
