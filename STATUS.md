@@ -2,7 +2,7 @@
 
 ## 그록봇 감지·원클릭 초대 (T-5 / #1655, 2026-08-22)
 
-- 데스크탑(Tauri)만 수동적 시그니처로 Grok Bot을 본다: `/Applications/Grok Bot.app`, 번들 id `com.anysphere.sand`, 프로세스 이름 `Grok Bot`. CDP 포트 접속/스캔은 없다(Q-CDP). 브라우저 탭·미설치는 초대 UI 침묵. 원클릭은 기존 페어링 위저드(#1360) identity 프리필 + create/regenerate 한 번이며 단계 기계는 그대로다. pairing 화면에 자연어 전달 문면. 재페어링은 기존 regenerate API 소비. `runtime-unverified(실기 Grok Bot.app 설치 머신 e2e)`.
+- 데스크탑(Tauri)만 수동적 시그니처로 Grok Bot을 본다: `/Applications/Grok Bot.app`, 번들 id `com.anysphere.sand`, 프로세스 이름 `Grok Bot`. CDP 포트 접속/스캔은 없다(Q-CDP). 브라우저 탭·미설치는 초대 UI 침묵. 원클릭은 기존 페어링 위저드(#1360) identity 프리필 + create/regenerate 한 번이며 단계 기계는 그대로다. 그록 pairing 문면은 말로 전하는 것이 기본, 직접 붙여 넣기는 다른 방법. 원클릭 autoAdvance는 위저드 열림 시점 online일 때만 소비하고 유예되면 무장 해제. 재페어링은 기존 regenerate API 소비. `runtime-unverified(실기 Grok Bot.app 설치 머신 e2e)`.
 
 ## 커뮤니티 루트 문서 (#1630, 2026-08-21)
 

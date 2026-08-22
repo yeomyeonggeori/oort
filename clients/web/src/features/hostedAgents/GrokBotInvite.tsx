@@ -29,8 +29,9 @@ import { useHostedAgentProbe } from "./useHostedAgentProbe";
 // 네 상태:
 //   빈      미감지·비데스크탑·권한 없음 → 그리지 않음 (침묵이 빈 상태다)
 //   로딩    감지된 뒤 연결 목록을 읽는 동안 한 줄 스켈레톤
+//           오프라인이고 목록이 아직 없으면 스켈레톤 대신 침묵
 //   오류    목록을 못 읽음 → 인라인 배너 + 다시 시도. 위저드 수동 진입은 남는다
-//   오프라인 허브가 이미 배너를 세운다. 이 줄은 버튼을 잠근다
+//   오프라인 허브가 이미 배너를 세운다. 목록이 있으면 이 줄은 버튼을 잠근다
 // =============================================================================
 
 export function GrokBotInvite({
@@ -59,6 +60,7 @@ export function GrokBotInvite({
   if (!probes.some(hostedAgentDetected)) return null;
 
   if (list.isPending) {
+    if (offline) return null;
     return (
       <div role="status" className="border-b border-line px-4 py-2" data-testid="grokbot-invite-loading">
         <span className="sr-only">그록봇 연결 상태를 확인하는 중입니다.</span>
@@ -121,7 +123,11 @@ function InviteRow({
         type="button"
         size="sm"
         aria-disabled={offline || undefined}
-        aria-describedby={offline ? "grokbot-invite-offline" : undefined}
+        aria-label={
+          offline
+            ? `${plan.actionLabel}. 연결이 끊겨 지금은 할 수 없습니다`
+            : undefined
+        }
         className={cn(offline && "opacity-50")}
         onClick={(event) => {
           if (offline) return;
@@ -131,14 +137,6 @@ function InviteRow({
       >
         {plan.actionLabel}
       </Button>
-      {offline && (
-        <p
-          id="grokbot-invite-offline"
-          className="basis-full break-keep text-meta text-ink-muted"
-        >
-          연결이 끊겼습니다. 다시 연결된 뒤에 초대할 수 있습니다.
-        </p>
-      )}
     </div>
   );
 }

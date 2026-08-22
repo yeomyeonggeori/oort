@@ -30,6 +30,25 @@ describe("T-5 그록봇 초대 표면은 수동적 감지와 기존 위저드만
     expect(wizard).toContain("HOSTED_WIZARD_STEPS");
     expect(invite).not.toContain("HOSTED_WIZARD_STEPS");
     expect(wizard).toContain("PAIRING_NATURAL_LANGUAGE_HANDOFF");
+    expect(wizard).toContain("GROK_PAIRING_PURPOSE");
+    expect(wizard).toContain("GROK_PAIRING_REVEAL_HEADLINE");
+  });
+
+  it("원클릭 자동 발급은 열림 시점 online 에서만 소비한다", () => {
+    expect(wizard).toContain("decideAutoAdvance");
+    expect(wizard).toContain("initialAutoAdvanceArmed");
+    expect(wizard).toContain("autoAdvanceArmedRef");
+  });
+
+  it("자동 발급 스켈레톤은 자동 시도 진행에만 묶인다", () => {
+    expect(wizard).toMatch(/advancingToPairing = autoAdvancePending && pairing === null/);
+    expect(wizard).not.toMatch(/advancingToPairing =\s*\n\s*launch\?\.autoAdvance !== undefined/);
+  });
+
+  it("오프라인이고 목록이 없으면 스켈레톤 대신 침묵한다", () => {
+    expect(invite).toContain("if (list.isPending)");
+    expect(invite).toContain("if (offline) return null");
+    expect(invite).not.toContain("grokbot-invite-offline");
   });
 
   it("순수 웹은 프로브를 호출하지 않는다", () => {

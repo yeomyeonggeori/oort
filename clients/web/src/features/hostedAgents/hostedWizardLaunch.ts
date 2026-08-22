@@ -13,3 +13,44 @@ export interface HostedWizardLaunch {
   connectionId?: string;
   autoAdvance?: "create" | "regenerate";
 }
+
+/**
+ * 원클릭 자동 발급을 지금 쏠지, 기다릴지, 영구히 내릴지.
+ *
+ * 열림 시점에 온라인이어야 무장한다. 유예됐거나 시드와 다른 초안이면
+ * 무장 해제하고, 발급은 푸터 버튼이 이어받는다.
+ */
+export type AutoAdvanceDecision =
+  | "fire-create"
+  | "fire-regenerate"
+  | "disarm"
+  | "wait";
+
+export function initialAutoAdvanceArmed(
+  launch: HostedWizardLaunch | null,
+  offline: boolean
+): boolean {
+  return launch?.autoAdvance !== undefined && !offline;
+}
+
+export function decideAutoAdvance(input: {
+  armed: boolean;
+  offline: boolean;
+  autoAdvance: HostedWizardLaunch["autoAdvance"];
+  draftReady: boolean;
+  draftMatchesSeed: boolean;
+  hasConnectionId: boolean;
+}): AutoAdvanceDecision {
+  if (!input.armed) return "wait";
+  if (input.offline) return "disarm";
+  if (input.autoAdvance === "create") {
+    if (!input.draftReady) return "wait";
+    if (!input.draftMatchesSeed) return "disarm";
+    return "fire-create";
+  }
+  if (input.autoAdvance === "regenerate") {
+    if (!input.hasConnectionId) return "wait";
+    return "fire-regenerate";
+  }
+  return "wait";
+}
