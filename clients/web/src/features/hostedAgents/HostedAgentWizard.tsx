@@ -1326,7 +1326,10 @@ function ActivationStep({
                 {testMentionSentence(channelName ?? "승인한 채널", agentHandle)}
               </p>
               <Button variant="outline" size="sm" className="self-start" asChild>
-                <Link to={`/c/${normalizedId(firstChannel)}`} data-testid="hosted-test-mention">
+                <Link
+                  to={`/c/${normalizedId(firstChannel)}?firstMention=${normalizedId(connection.agentMemberId)}`}
+                  data-testid="hosted-test-mention"
+                >
                   채널 열고 테스트 멘션
                 </Link>
               </Button>

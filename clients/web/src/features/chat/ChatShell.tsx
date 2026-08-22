@@ -63,6 +63,7 @@ import {
 import { useOffline } from "@/features/common/useOffline";
 import { Button } from "@/design/ui/button";
 import { cn } from "@/design/lib/cn";
+import { FirstMentionOnboarding } from "@/features/hostedAgents/FirstMentionOnboarding";
 
 // =============================================================================
 // Channel surface (R-1 §3): header, offline banner, timeline, composer, thread
@@ -385,11 +386,29 @@ export function ChatShell() {
   const anchorWork = searchParams.get("work");
   const anchorMsg = searchParams.get("msg");
   const anchorSeq = searchParams.get("seq");
+  const anchorFirstMention = searchParams.get("firstMention");
 
   // `?control=1`은 `?work=`의 부사다 — 혼자서는 아무 데도 가리키지 않는다
   // (LIVE-5b). 도착지에서 확인 단계를 무장할 뿐 창을 열지 않으므로, 주소를
   // 복사해 붙여넣은 사람이 그 한 번으로 남의 에이전트를 멈추는 일은 없다.
   const anchorControl = searchParams.get("control");
+
+  // 위저드 「채널 열고 테스트 멘션」이 싣는 힌트. 읽고 나면 지운다 — 주소에
+  // 남으면 새로고침마다 초대 직후인 것처럼 다시 무장한다. 왕복 판정 자체는
+  // 채널 메시지가 하므로, 힌트는 목록이 늦을 때의 뱃지/로딩용이다.
+  const [firstMentionHint, setFirstMentionHint] = useState<string | null>(null);
+  useEffect(() => {
+    if (anchorFirstMention === null || anchorFirstMention.trim() === "") return;
+    setFirstMentionHint(anchorFirstMention);
+    setSearchParams(
+      (current) => {
+        const next = new URLSearchParams(current);
+        next.delete("firstMention");
+        return next;
+      },
+      { replace: true }
+    );
+  }, [anchorFirstMention, setSearchParams]);
 
   useEffect(() => {
     if (anchorWork === null) return;
@@ -891,6 +910,22 @@ export function ChatShell() {
             actionLabel="닫기"
             onAction={() => setAnchorMissed(null)}
             testId="chat-anchor-missed"
+          />
+        )}
+
+        {stressCount === 0 && channelId !== null && (
+          <FirstMentionOnboarding
+            workspaceId={workspaceId}
+            channelId={channelId}
+            members={directory.members}
+            selfMemberId={session.member.id}
+            selfKind={session.member.kind}
+            selfRole={memberFor(directory, session.member.id)?.role}
+            messages={messages}
+            pending={timeline.pending}
+            messagesStatus={timeline.status}
+            hintedAgentMemberId={firstMentionHint}
+            onRetryMessages={timeline.reload}
           />
         )}
 

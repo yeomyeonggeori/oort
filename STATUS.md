@@ -1,5 +1,10 @@
 # oort 진행 현황
 
+## 온보딩 첫 왕복 게이트 (T-6 / #1656, 2026-08-22)
+
+- 그록봇(호스티드 에이전트) 초대 완료 직후 채널에 「첫 멘션을 보내보세요」 표면. 왕복 판정은 에이전트 author 메시지 도착=완료. 네 상태(빈/로딩/오류/오프라인)와 에이전트 뱃지 필수. 미도착은 타임아웃 오류로 표면화(무음 실패 없음). 응답 시간 상한은 게이트가 아니다. 위저드 단계 기계는 그대로, 테스트 멘션 링크에 `firstMention` 힌트만 가산.
+- bench: `scripts/bench_onboarding.sh aggregate`가 M5 first-reply p50/p95를 집계하고, `run` 요약에도 같은 절을 붙인다. M1~M4 로직 불변. `runtime-unverified(실기 그록봇 첫 멘션 e2e)`.
+
 ## 그록봇 감지·원클릭 초대 (T-5 / #1655, 2026-08-22)
 
 - 데스크탑(Tauri)만 수동적 시그니처로 Grok Bot을 본다: `/Applications/Grok Bot.app`, 번들 id `com.anysphere.sand`, 프로세스 이름 `Grok Bot`. CDP 포트 접속/스캔은 없다(Q-CDP). 브라우저 탭·미설치는 초대 UI 침묵. 원클릭은 기존 페어링 위저드(#1360) identity 프리필 + create/regenerate 한 번이며 단계 기계는 그대로다. 그록 pairing 문면은 말로 전하는 것이 기본, 직접 붙여 넣기는 다른 방법. 원클릭 autoAdvance는 위저드 열림 시점 online일 때만 소비하고 유예되면 무장 해제. 재페어링은 기존 regenerate API 소비. `runtime-unverified(실기 Grok Bot.app 설치 머신 e2e)`.
