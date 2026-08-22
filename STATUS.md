@@ -1,5 +1,9 @@
 # oort 진행 현황
 
+## 그록봇 감지·원클릭 초대 (T-5 / #1655, 2026-08-22)
+
+- 데스크탑(Tauri)만 수동적 시그니처로 Grok Bot을 본다: `/Applications/Grok Bot.app`, 번들 id `com.anysphere.sand`, 프로세스 이름 `Grok Bot`. CDP 포트 접속/스캔은 없다(Q-CDP). 브라우저 탭·미설치는 초대 UI 침묵. 원클릭은 기존 페어링 위저드(#1360) identity 프리필 + create/regenerate 한 번이며 단계 기계는 그대로다. pairing 화면에 자연어 전달 문면. 재페어링은 기존 regenerate API 소비. `runtime-unverified(실기 Grok Bot.app 설치 머신 e2e)`.
+
 ## 커뮤니티 루트 문서 (#1630, 2026-08-21)
 
 - Contributor Covenant v2.1 `CODE_OF_CONDUCT.md`(연락처=`SECURITY.md` GitHub private advisory — 새 메일 없음). `.github/CODEOWNERS` `* @kwakseongjae`. `CHANGELOG.md` Keep a Changelog 시드 — [v0.1.0](https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.0) 항목은 notes 초안 요약(발명 0). `CONTRIBUTING.md` 영문 정본 + `CONTRIBUTING.ko.md` 한국어 원문. README Being wired up 「Public CI, releases…」 한 줄을 Works today로 옮김(G1 티켓 후보 4 흡수). GOVERNANCE.md 비신설.

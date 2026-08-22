@@ -195,6 +195,13 @@ export const PAIRING_REVEAL_WARNING =
 export const PAIRING_REVEAL_SCOPE_NOTE =
   "이 값은 접속을 한 번 확인하는 용도입니다. 감지되는 순간 소비되고, 대화나 작업 권한으로 승격되지 않습니다.";
 
+/**
+ * Grok Bot 전용. 그록봇 앱을 프로그램으로 제어하지 않는다(패킷 §0-2).
+ * 사람이 값을 말해 주고, 그록봇이 자기 VM에 붙인다.
+ */
+export const PAIRING_NATURAL_LANGUAGE_HANDOFF =
+  "이 값을 그록봇에게 자연어로 전달하세요. 그록봇이 직접 붙여 넣습니다.";
+
 export const ACTIVE_REVEAL_HEADLINE = "지금 provider 설정의 값을 이 자격증명으로 바꾸세요.";
 
 export const ACTIVE_REVEAL_WARNING =

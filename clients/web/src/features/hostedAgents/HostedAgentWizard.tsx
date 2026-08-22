@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { Loader2 } from "lucide-react";
@@ -95,6 +95,7 @@ import {
   HOSTED_AUTH_MODE_CHOICES,
   HOSTED_PRESETS,
   HOSTED_ROUTINE_TEMPLATE,
+  PAIRING_NATURAL_LANGUAGE_HANDOFF,
   PAIRING_REVEAL_HEADLINE,
   PAIRING_REVEAL_SCOPE_NOTE,
   PAIRING_REVEAL_WARNING,
@@ -117,6 +118,7 @@ import {
   HOSTED_CREDENTIAL_MUTATION_SCOPE,
 } from "./hostedCredentialScope";
 import { OneTimeSecretCard } from "./OneTimeSecretCard";
+import type { HostedWizardLaunch } from "./hostedWizardLaunch";
 
 // =============================================================================
 // "Bring your hosted agent" pairing wizard (ADR-0162, goal HAP-UX1 / #1360).
@@ -166,15 +168,22 @@ export function HostedAgentWizard({
   open,
   onOpenChange,
   opener,
+  launch = null,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   opener?: DialogFocusTarget | null;
+  /** 원클릭 시드. 없으면 기존 목록/1단계 진입. 단계 기계는 바꾸지 않는다. */
+  launch?: HostedWizardLaunch | null;
 }) {
   if (!open) return null;
   return (
     <Dialog open onOpenChange={onOpenChange}>
-      <HostedWizardBody onClose={() => onOpenChange(false)} opener={opener ?? null} />
+      <HostedWizardBody
+        onClose={() => onOpenChange(false)}
+        opener={opener ?? null}
+        launch={launch}
+      />
     </Dialog>
   );
 }
@@ -182,9 +191,11 @@ export function HostedAgentWizard({
 function HostedWizardBody({
   onClose,
   opener,
+  launch,
 }: {
   onClose: () => void;
   opener: DialogFocusTarget | null;
+  launch: HostedWizardLaunch | null;
 }) {
   const { workspaceId, session } = useSession();
   const client = useQueryClient();
@@ -192,10 +203,21 @@ function HostedWizardBody({
   const { directory } = useDirectory(workspaceId);
   const { groups } = useChannels(workspaceId);
 
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [startingNew, setStartingNew] = useState(false);
-  const [draft, setDraft] = useState<Draft>(EMPTY_DRAFT);
-  const [presetId, setPresetId] = useState<HostedPresetId>("generic");
+  const autoAdvanceRef = useRef(false);
+  const [selectedId, setSelectedId] = useState<string | null>(
+    launch?.connectionId ?? null
+  );
+  const [startingNew, setStartingNew] = useState(
+    launch != null && launch.connectionId === undefined
+  );
+  const [draft, setDraft] = useState<Draft>(
+    launch
+      ? { displayName: launch.displayName, handle: launch.handle }
+      : EMPTY_DRAFT
+  );
+  const [presetId, setPresetId] = useState<HostedPresetId>(
+    launch?.presetId ?? "generic"
+  );
   const [pairing, setPairing] = useState<RevealedPairingChallenge | null>(null);
   const [issued, setIssued] = useState<RevealedActiveCredential | null>(null);
   const [channelSelection, setChannelSelection] = useState<string[]>([]);
@@ -336,6 +358,25 @@ function HostedWizardBody({
     onError: (error) => setFailure(hostedFailureMessage("regenerate", error)),
   });
 
+  // 원클릭은 위저드 단계를 건너뛰지 않는다. identity 프리필 뒤 기존 create/
+  // regenerate 를 한 번 밟아 pairing 카드가 뜨게 할 뿐이다. 오프라인이면
+  // 발급하지 않고 프리필된 자리에 머문다. 다시 붙으면 이 효과가 한 번 더 본다.
+  useEffect(() => {
+    if (offline || autoAdvanceRef.current) return;
+    if (launch?.autoAdvance === "create") {
+      if (!draftReady(draft)) return;
+      autoAdvanceRef.current = true;
+      setTouched(true);
+      create.mutate();
+      return;
+    }
+    if (launch?.autoAdvance === "regenerate") {
+      if (selectedId === null) return;
+      autoAdvanceRef.current = true;
+      regenerate.mutate();
+    }
+  }, [launch, offline, draft, selectedId, create, regenerate]);
+
   const channelInputs = useMemo<ApprovalChannelInput[]>(() => {
     const named = groups.channels.map((channel) => ({
       id: channel.id,
@@ -380,6 +421,10 @@ function HostedWizardBody({
   });
 
   const busy = create.isPending || regenerate.isPending || confirm.isPending;
+  const advancingToPairing =
+    launch?.autoAdvance !== undefined &&
+    pairing === null &&
+    (create.isPending || regenerate.isPending);
   const preset = hostedPreset(presetId);
   const spec = hostedStepSpec(step);
   const live = screen === "picker"
@@ -431,9 +476,16 @@ function HostedWizardBody({
       )}
 
       <div className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto p-4">
-        {detailLoading && (
-          <div role="status">
-            <span className="sr-only">연결 상태를 불러오는 중입니다.</span>
+        {(advancingToPairing || detailLoading) && (
+          <div
+            role="status"
+            data-testid={advancingToPairing ? "hosted-wizard-auto-advance" : undefined}
+          >
+            <span className="sr-only">
+              {advancingToPairing
+                ? "연결 값을 발급하는 중입니다."
+                : "연결 상태를 불러오는 중입니다."}
+            </span>
             <SkeletonRows rows={4} className="p-0" />
           </div>
         )}
@@ -447,7 +499,7 @@ function HostedWizardBody({
           />
         )}
 
-        {!detailLoading && detailError === null && screen === "picker" && (
+        {!advancingToPairing && !detailLoading && detailError === null && screen === "picker" && (
           <PickerScreen
             connections={resumableConnections(list.data ?? [])}
             pending={list.isPending}
@@ -463,7 +515,7 @@ function HostedWizardBody({
           />
         )}
 
-        {!detailLoading && detailError === null && screen === "identity" && (
+        {!advancingToPairing && !detailLoading && detailError === null && screen === "identity" && (
           <IdentityStep
             draft={draft}
             setDraft={setDraft}
@@ -474,7 +526,7 @@ function HostedWizardBody({
           />
         )}
 
-        {screen === "pairing" && pairing !== null && (
+        {!advancingToPairing && screen === "pairing" && pairing !== null && (
           <PairingStep
             preset={preset}
             endpoint={endpoint}
@@ -491,7 +543,7 @@ function HostedWizardBody({
           />
         )}
 
-        {screen === "detecting" && connection !== null && (
+        {!advancingToPairing && screen === "detecting" && connection !== null && (
           <DetectingStep
             connection={connection}
             agentLabel={agentLabel}
@@ -500,7 +552,7 @@ function HostedWizardBody({
           />
         )}
 
-        {screen === "expired" && connection !== null && (
+        {!advancingToPairing && screen === "expired" && connection !== null && (
           <ExpiredStep connection={connection} />
         )}
 
@@ -555,7 +607,7 @@ function HostedWizardBody({
           // 이어서 열었을 뿐인데 새로 만들라고 권하는 것은 명부에 쌍둥이
           // 전용 에이전트를 남기라는 말이고, 그것이 PickerScreen 이 애초에
           // 존재하는 이유다.
-          unsettled={detailLoading || detailError !== null}
+          unsettled={detailLoading || detailError !== null || advancingToPairing}
           holdingSecret={holdingSecret}
           offline={offline}
           busy={busy}
@@ -981,7 +1033,11 @@ function PairingStep({
       <OneTimeSecretCard
         headline={PAIRING_REVEAL_HEADLINE}
         warning={PAIRING_REVEAL_WARNING}
-        notes={[PAIRING_REVEAL_SCOPE_NOTE]}
+        notes={
+          preset.id === "grok"
+            ? [PAIRING_NATURAL_LANGUAGE_HANDOFF, PAIRING_REVEAL_SCOPE_NOTE]
+            : [PAIRING_REVEAL_SCOPE_NOTE]
+        }
         rows={rows}
         secretLabel="연결 값"
         secret={pairing.pairingCredential}

@@ -8,6 +8,7 @@ import {
   HOSTED_AUTH_MODE_CHOICES,
   HOSTED_PRESETS,
   HOSTED_ROUTINE_TEMPLATE,
+  PAIRING_NATURAL_LANGUAGE_HANDOFF,
   PAIRING_REVEAL_SCOPE_NOTE,
   PAIRING_REVEAL_WARNING,
 } from "./presets";
@@ -110,6 +111,12 @@ describe("RED PROOF ④ 두 비밀값의 문구는 서로를 대신하지 않는
   it("연결 값 문구는 그 값이 권한이 아니라고 말한다", () => {
     expect(PAIRING_REVEAL_SCOPE_NOTE).toContain("승격되지 않습니다");
     expect(PAIRING_REVEAL_WARNING).toContain("한 번만 보입니다");
+  });
+
+  it("그록 연결 값 화면은 자연어로 전달하라고 말하고 앱을 조종하지 않는다", () => {
+    expect(PAIRING_NATURAL_LANGUAGE_HANDOFF).toContain("그록봇에게 자연어로 전달");
+    expect(PAIRING_NATURAL_LANGUAGE_HANDOFF).not.toMatch(/[—–]/);
+    expect(PAIRING_NATURAL_LANGUAGE_HANDOFF).not.toMatch(/CDP|포트|자동 제어/);
   });
 
   it("자격증명 문구는 앞 값이 이미 죽었다고 말한다", () => {
