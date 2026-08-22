@@ -16,8 +16,10 @@
 # 세 모드
 #   build-only  서명 없이 빌드만 — 러너/툴체인이 살아 있는지, 소스가 빌드되는지.
 #               자격증명 하나도 안 쓴다. 산출물은 워크플로 아티팩트(설치용 아님).
-#   dry-run     publish_next_build.sh --dry-run — 빌드 + Developer ID 서명 + 검증까지.
-#               공증 직전에 멈춘다(네트워크·대기 없음).
+#   dry-run     publish_next_build.sh --dry-run — 빌드 + Developer ID 서명(.app + .dmg)
+#               + codesign --verify --strict 까지. 공증 직전에 멈춘다(네트워크·대기 없음).
+#               next 채널 자산은 여전히 .app.tar.gz / zip. 공개 dmg 는 --public
+#               (docs/RELEASING.md).
 #   release     전체 — 공증·스테이플·릴리스 업로드·update-next.json 커밋.
 #               채널 계약은 docs/NEXT_CHANNEL.md 가 정본이고 이 워크플로는 그
 #               스크립트를 대행 실행할 뿐이다(발행 논리를 두 벌 두지 않는다).
@@ -210,7 +212,7 @@ jobs:
                 echo "- 서명 없는 빌드 확인용. 아티팩트는 설치용이 아니다(Gatekeeper 거부)."
                 ;;
               dry-run)
-                echo "- 버전 \`${INPUT_VERSION}\` — 빌드 + Developer ID 서명까지. 공증·발행 없음."
+                echo "- 버전 \`${INPUT_VERSION}\` — 빌드 + Developer ID 서명(.app + .dmg)까지. 공증·발행 없음."
                 ;;
               release)
                 echo "- 버전 \`${INPUT_VERSION}\` — 발행 완료 시 매니페스트: <https://yeomyeonggeori.github.io/momo-alpha/update-next.json>"

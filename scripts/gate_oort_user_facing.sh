@@ -180,6 +180,11 @@ def check_structured():
         failures.append(
             "scripts/publish_next_build.sh APP_PATH 가 tauri productName(%s)과 어긋난다" % conf["productName"]
         )
+    if '%s_"${VERSION}"_*.dmg' % conf["productName"] not in pub:
+        failures.append(
+            "scripts/publish_next_build.sh dmg glob 이 tauri productName(%s)과 어긋난다"
+            % conf["productName"]
+        )
 
     # 업데이터 매니페스트에 실려 사용자가 읽는 문구.
     for path in ("scripts/switch_default_download.sh", "scripts/publish_next_build.sh"):
