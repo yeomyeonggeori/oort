@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-08-22 (Fable) · 신규 축 발제: 에이전트-운영 셀프호스팅(AOP) — 리서치·계획 상신
+- **성재 발제**: 로컬 그록봇이 핸드오프 하나로 oort를 컨테이너로 띄우고(호스팅·주소·알림·웹훅 전 기능) 업데이트·서버관리까지 하는 형태. 선행: 그록봇 VM co-host 브리핑(동일 채팅 — co-host=조건부 찬성·무료 공용=ADR 필요·localhost 착시 정정).
+- **정본**: `research/2026-08-22-agent-operated-selfhost-grokbot.md` — 판정=agent-native 정체성의 자연 연장·기존 자산 정합 높음(발명 최소). 갭 6(AOR 부재·#1265 웹훅 인바운드·외부 접속 택일(#1239 선행)·알림 범위표·에이전트 시크릿 규율·Day-2는 AOR 흡수).
+- **계획 S1~S4**: S1 에이전트 설치 스파이크(grok 헤드리스+현행 SELF_HOST만·제로 코드 — ITO-1의 에이전트 버전) → S2 AOR 신설+무개입 완주 재실측 → S3 외부 접속+#1265 이식 → S4 다이얼인 관리(#1361 소화 가능). 결정 큐 Q1~Q4(발사·표적·G-C 재료·ITO 별개 유지 권장).
+- 대기: 성재 Q1(S1 발사) 승인.
+
 ## 2026-08-22 (Fable) · 대기 큐 4/4 완주 — 붕대 제거·문서 진실성·라벨 현행화·arm64 워크플로. 성재=실테스트만
 - **#1635**: pr-ci 붕대 2건 제거(web TZ pin·mobile inboxApproval 제외 — 71/71 실검증)+재도입 RED 가드. **#1641**: 루트 계약 6좌표+동류 2줄의 web-legacy 실서빙 거짓 이분 정정(잔여 grep 판정표). **#1642**: 발행 실측 라벨 현행화(H2 amd64 정직 라벨 보존)+GATED_DOCS 3종 편입(439 fact·15문서). **#1643**: publish-images **multi-arch 준비**(native ubuntu-24.04-arm·digest-only push→manifest list 합성·attestation=아키4+list2·pin=list — 실발행=성재 클릭).
 - **운영 사고 2건 해소**: ①디스크 ENOSPC(도커 빌드캐시 5GB+1330 워크트리 target 9GB 회수 — 39Gi 확보) ②STATUS 상단 경합 DIRTY 2건(#1642 선랜딩과 충돌 — 루프가 BEHIND만 처리해 정체. 교훈: **머지 루프에 DIRTY 즉시 탈출 분기 필수**·STATUS 상단은 순차 랜딩 시 상습 충돌면).
