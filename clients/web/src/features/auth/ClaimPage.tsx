@@ -1,4 +1,4 @@
-import { useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { claimOwnerPassword, type LoginResponse } from "@momo/core/lib/api";
 import { claimFailureCopy, type ClaimFailure } from "@momo/core/features/auth/claimModel";
 import { Button } from "@/design/ui/button";
@@ -50,9 +50,17 @@ export function ClaimPage({
   const [mismatch, setMismatch] = useState(false);
   const [failure, setFailure] = useState<ClaimFailure | null>(null);
   const offline = useBrowserOffline();
+  const landingRef = useRef<HTMLDivElement | null>(null);
 
   const missingToken = token === null;
   const showForm = !missingToken && (failure === null || failure.keepForm);
+
+  // 종단(404/410/409)은 폼이 언마운트되며 제출 버튼이 사라지고, 재시도형은
+  // 버튼이 남아 있어도 오류가 그 위에 선다. 둘 다 배너로 포커스를 옮긴다.
+  useEffect(() => {
+    if (!failure && !missingToken) return;
+    landingRef.current?.focus({ preventScroll: true });
+  }, [failure, missingToken]);
 
   async function attempt() {
     if (token === null) return;
@@ -104,21 +112,35 @@ export function ClaimPage({
           )}
 
           {missingToken && (
-            <InlineBanner
-              tone="error"
-              message="이 링크는 유효하지 않습니다. 받은 주소를 그대로 여세요."
-              testId="claim-missing-token"
-            />
+            <div
+              ref={landingRef}
+              tabIndex={-1}
+              className="focus-visible:focus-ring"
+              data-landing="claim-failure"
+            >
+              <InlineBanner
+                tone="error"
+                message="이 링크는 유효하지 않습니다. 받은 주소를 그대로 여세요."
+                testId="claim-missing-token"
+              />
+            </div>
           )}
 
           {showForm ? (
             <form onSubmit={onSubmit} className="flex flex-col gap-6">
               {failure && (
-                <InlineBanner
-                  tone="error"
-                  message={failure.message}
-                  testId="claim-error"
-                />
+                <div
+                  ref={landingRef}
+                  tabIndex={-1}
+                  className="focus-visible:focus-ring"
+                  data-landing="claim-failure"
+                >
+                  <InlineBanner
+                    tone="error"
+                    message={failure.message}
+                    testId="claim-error"
+                  />
+                </div>
               )}
               <div className="flex flex-col gap-3">
                 <label htmlFor="claim-password" className="flex flex-col gap-1 text-body">
@@ -168,7 +190,8 @@ export function ClaimPage({
               </div>
               <Button
                 type="submit"
-                disabled={busy || offline || password === "" || confirm === ""}
+                disabled={busy || offline}
+                title={offline ? "오프라인 상태에서는 연결할 수 없습니다." : undefined}
                 data-testid="claim-submit"
               >
                 {busy ? "설정 중…" : "비밀번호 설정"}
@@ -177,11 +200,18 @@ export function ClaimPage({
           ) : (
             <>
               {failure && (
-                <InlineBanner
-                  tone="error"
-                  message={failure.message}
-                  testId="claim-error"
-                />
+                <div
+                  ref={landingRef}
+                  tabIndex={-1}
+                  className="focus-visible:focus-ring"
+                  data-landing="claim-failure"
+                >
+                  <InlineBanner
+                    tone="error"
+                    message={failure.message}
+                    testId="claim-error"
+                  />
+                </div>
               )}
               <Button
                 type="button"
