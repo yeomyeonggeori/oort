@@ -96,8 +96,10 @@ import {
   type AgentDraft,
 } from "./createModel";
 import { CreateAgentDialog } from "./CreateAgentDialog";
+import { GrokBotInvite } from "@/features/hostedAgents/GrokBotInvite";
 import { HostedAgentWizard } from "@/features/hostedAgents/HostedAgentWizard";
 import { HostedConnectionSection } from "@/features/hostedAgents/HostedConnectionSection";
+import type { HostedWizardLaunch } from "@/features/hostedAgents/hostedWizardLaunch";
 import { HOSTED_WIZARD_TITLE } from "@momo/core/features/hostedAgents/wizard";
 import {
   isSurfaceProvided,
@@ -320,6 +322,9 @@ export function AgentHubRoute() {
   // 되돌릴 수 없는 값(연결 값)이 되돌릴 수 있는 폼과 같은 Esc 를 나눠 갖는다.
   const [pairing, setPairing] = useState(false);
   const [pairingOpener, setPairingOpener] = useState<HTMLButtonElement | null>(null);
+  const [wizardLaunch, setWizardLaunch] = useState<HostedWizardLaunch | null>(
+    null
+  );
   const [agentDraft, setAgentDraft] = useState<AgentDraft>(EMPTY_AGENT_DRAFT);
   const allSignals = useAgentWorkingSignals();
   // 만들 수 없는 사람에게 [만들기]를 내주지 않는다: `routes::agents::create`는
@@ -391,6 +396,7 @@ export function AgentHubRoute() {
                 variant="outline"
                 size="sm"
                 onClick={(event) => {
+                  setWizardLaunch(null);
                   setPairingOpener(event.currentTarget);
                   setPairing(true);
                 }}
@@ -418,6 +424,19 @@ export function AgentHubRoute() {
           tone="neutral"
           message="연결이 끊겼습니다. 마지막으로 받은 내용은 계속 볼 수 있고, 변경은 다시 연결된 뒤에 할 수 있습니다."
           testId="agent-hub-offline"
+        />
+      )}
+
+      {mayCreate && hostedPairingProvided && (
+        <GrokBotInvite
+          mayCreate={mayCreate}
+          offline={offline}
+          members={directoryQuery.directory.members}
+          onLaunch={(next, opener) => {
+            setWizardLaunch(next);
+            setPairingOpener(opener);
+            setPairing(true);
+          }}
         />
       )}
 
@@ -581,8 +600,12 @@ export function AgentHubRoute() {
 
       <HostedAgentWizard
         open={pairing}
-        onOpenChange={setPairing}
+        onOpenChange={(open) => {
+          setPairing(open);
+          if (!open) setWizardLaunch(null);
+        }}
         opener={pairingOpener}
+        launch={wizardLaunch}
       />
     </div>
   );

@@ -42,6 +42,7 @@ src-tauri/
   src/discovery.rs    # _momo._tcp browse
   src/notification.rs # permission + show
   src/opener.rs       # hand one https URL to the OS browser
+  src/detect.rs       # passive local hosted-agent signatures (T-5)
   src/keychain.rs     # refresh token in the OS credential store
   src/updater.rs      # check / install / relaunch over the minisign manifest
   capabilities/       # core:default only (app commands need no permission entry)
@@ -71,6 +72,12 @@ interface DiscoveredServer {
   displayHost: string  // the machine's name, e.g. "MacBook-Pro-2.local:28000"
   instanceName: string // "momo"
 }
+
+interface HostedAgentProbe {
+  id: string              // allowlisted detector id; v1 is "grok"
+  bundlePresent: boolean  // app bundle path or bundle id matched
+  processRunning: boolean // process name matched; names only, never argv
+}
 ```
 
 ## Commands
@@ -88,6 +95,7 @@ interface DiscoveredServer {
 | `keychain_store_refresh_token` | `{ token: string }` | `void` \| error | Rejects an empty token. |
 | `keychain_clear_refresh_token` | — | `void` \| error | Succeeds when there was nothing to delete. |
 | `open_external_url` | `{ url: string }` | `void` \| error | Opens one **https** URL in the OS browser. Rejects anything else. Desktop only. |
+| `detect_hosted_agents` | — | `HostedAgentProbe[]` | Passive allowlist only (app bundle path, bundle id, process name). Never scans ports. Empty-flags, not an error, when nothing matches. Desktop only. |
 | `app_version` | — | `string` | The running build, e.g. `0.1.0-next.1`. |
 | `updater_check` | — | `AvailableUpdate \| null` \| error | `null` = already newest. **Rejects** on a failed check; see below. |
 | `updater_install` | — | `void` \| error | Downloads, verifies minisign, swaps the bundle. Does not restart. |

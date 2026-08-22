@@ -8,7 +8,7 @@
 // permission, no keychain) when there is no shell underneath.
 //
 // The Rust half lives in `clients/desktop/src-tauri/src/{deeplink,discovery,
-// notification,keychain,updater}.rs` and the command/event contract is
+// notification,keychain,updater,detect}.rs` and the command/event contract is
 // documented in `clients/desktop/README.md`. Keep the three in sync — a renamed
 // command fails at runtime, not at compile time.
 //
@@ -18,6 +18,7 @@
 // =============================================================================
 
 import { IS_TAURI } from "./env";
+import type { HostedAgentProbe as HostedAgentProbeWire } from "@momo/core/features/hostedAgents/detect";
 
 /** True when the native commands below can actually do something. */
 export function isDesktop(): boolean {
@@ -184,6 +185,27 @@ export async function openExternalUrl(url: string): Promise<boolean> {
   } catch (error) {
     console.warn("[momo] external link did not open", error);
     return false;
+  }
+}
+
+// ---- local hosted-agent detection (T-5) ------------------------------------
+
+/**
+ * One allowlisted detector, observed. Product copy lives in momo-core, not here.
+ *
+ * A browser tab always sees `[]`. A failed native probe is the same as "nothing
+ * found": the invite surface stays silent rather than drawing an error about
+ * a missing optional app.
+ */
+export type HostedAgentProbe = HostedAgentProbeWire;
+
+/** Passive signatures only. Never scans ports. Empty when not in the shell. */
+export async function detectHostedAgents(): Promise<HostedAgentProbe[]> {
+  if (!IS_TAURI) return [];
+  try {
+    return await invoke<HostedAgentProbe[]>("detect_hosted_agents");
+  } catch {
+    return [];
   }
 }
 

@@ -16,6 +16,7 @@ import {
   subscribeSession,
 } from "@/lib/session";
 import { clearAllDrafts } from "@/features/chat/draftStore";
+import { clearAllFirstMentionRecords } from "@/features/hostedAgents/firstMentionStore";
 import type { RealtimeHandle, RealtimeStatus } from "@/lib/realtime";
 
 /**
@@ -165,6 +166,7 @@ export function useRestoredSession(): SessionLifecycle {
     // 쓰다 만 글은 보낸 메시지보다 사적이다 — 세션 기록과 같은 저장소에 사는 이상
     // 같은 순간에 사라져야 한다(`draftStore.ts` 머리말의 비용 항목).
     clearAllDrafts();
+    clearAllFirstMentionRecords();
     setSession(null);
     setStatus("anonymous");
   }, []);

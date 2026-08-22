@@ -62,6 +62,8 @@
 #   scripts/bench_onboarding.sh run
 #   scripts/bench_onboarding.sh run --repeat 2 --cold
 #   scripts/bench_onboarding.sh run --repeat 1 --keep      # 스택을 남겨 손으로 이어본다
+#   scripts/bench_onboarding.sh aggregate                 # 증거 루트의 M5 p50/p95 (게이트 아님)
+#   scripts/bench_onboarding.sh aggregate --from FILE.tsv
 #
 # 증거는 repo 밖(`${TMPDIR:-/tmp}/oort-onboarding-bench/<UTC>/`)에 남는다.
 # =============================================================================
@@ -77,6 +79,7 @@ PUBLISHED_IMAGE=""
 COLD=0
 KEEP=0
 SKIP_AGENT=0
+AGGREGATE_FROM=""
 TMP_BASE="${TMPDIR:-/tmp}"
 TMP_BASE="${TMP_BASE%/}"
 EVIDENCE_ROOT="${BENCH_ONBOARDING_EVIDENCE_ROOT:-$TMP_BASE/oort-onboarding-bench}"
@@ -98,10 +101,13 @@ usage() {
 Usage:
   scripts/bench_onboarding.sh plan [options]
   scripts/bench_onboarding.sh run  [options]
+  scripts/bench_onboarding.sh aggregate [options]
 
 Actions:
-  plan   아무것도 띄우지 않고 실행 계획·구간 정의·증거 경로만 출력한다.
-  run    실제로 스택을 띄우고 구간별 실측 + 기본값 감사를 수행한다.
+  plan        아무것도 띄우지 않고 실행 계획·구간 정의·증거 경로만 출력한다.
+  run         실제로 스택을 띄우고 구간별 실측 + 기본값 감사를 수행한다.
+  aggregate   기존 timings.tsv 에서 M5 first-reply p50/p95 만 집계한다.
+              스택을 띄우지 않는다. 이 수치는 게이트가 아니다.
 
 Options:
   --repeat N              회전 수 (기본 2). 1회 측정은 캐시 상태를 수치에 숨긴다.
@@ -118,6 +124,8 @@ Options:
                           BENCH_PROVIDER_BEARER 환경변수를 쓴다.
   --reply-timeout SEC     M5 상한 (기본 300 — 워커 재시도 소진이 183초다).
   --evidence-root DIR     증거 루트 (기본 ${TMPDIR:-/tmp}/oort-onboarding-bench).
+  --from PATH             aggregate 전용. timings.tsv 파일 또는 그 파일이
+                          있는 디렉터리. 생략하면 --evidence-root 아래를 찾는다.
   --stack-timeout SEC     스택 기동 상한 (기본 3600).
   -h, --help
 
@@ -129,7 +137,7 @@ EOF
 }
 
 case "${1:-}" in
-  plan|run) MODE_ACTION="$1"; shift ;;
+  plan|run|aggregate) MODE_ACTION="$1"; shift ;;
   -h|--help) usage; exit 0 ;;
   "") usage >&2; exit 2 ;;
   *) echo "[bench] 알 수 없는 action: $1" >&2; usage >&2; exit 2 ;;
@@ -147,6 +155,7 @@ while [ $# -gt 0 ]; do
     --provider-bearer) PROVIDER_BEARER="$2"; shift 2 ;;
     --reply-timeout) REPLY_TIMEOUT="$2"; shift 2 ;;
     --evidence-root) EVIDENCE_ROOT="$2"; shift 2 ;;
+    --from) AGGREGATE_FROM="$2"; shift 2 ;;
     --stack-timeout) STACK_TIMEOUT="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "[bench] 알 수 없는 인자: $1" >&2; usage >&2; exit 2 ;;
@@ -204,6 +213,88 @@ fmt_ms() {
   m=$(( total_s / 60 ))
   s=$(( total_s % 60 ))
   printf '%d:%02d.%03d' "$m" "$s" "$frac"
+}
+
+# --------------------------------------------------------------------------
+# M5 first-reply 집계 (T-6 / #1656). 게이트가 아니다.
+# --------------------------------------------------------------------------
+# timings.tsv 열: cycle  phase  milestone  ms  note
+m5_ms_from_tsv() {
+  local file
+  for file in "$@"; do
+    [ -f "$file" ] || continue
+    awk -F '\t' 'NR > 1 && $3 == "first-reply" && $4 ~ /^[0-9]+$/ { print $4 }' "$file"
+  done
+}
+
+# nearest-rank. stdin = 한 줄에 하나, $1 = p (1~100).
+percentile_ms() {
+  local p="$1" sorted n idx
+  sorted="$(cat | sort -n)"
+  n="$(printf '%s\n' "$sorted" | grep -c . || true)"
+  [ "$n" -ge 1 ] || return 1
+  idx=$(( (p * n + 99) / 100 ))
+  [ "$idx" -lt 1 ] && idx=1
+  [ "$idx" -gt "$n" ] && idx="$n"
+  printf '%s\n' "$sorted" | sed -n "${idx}p"
+}
+
+collect_timings_tsv() {
+  local path="$1"
+  if [ -z "$path" ]; then
+    find "$EVIDENCE_ROOT" -name timings.tsv -type f 2>/dev/null | sort
+    return 0
+  fi
+  if [ -f "$path" ]; then
+    printf '%s\n' "$path"
+    return 0
+  fi
+  if [ -d "$path" ]; then
+    find "$path" -name timings.tsv -type f 2>/dev/null | sort
+    return 0
+  fi
+  return 1
+}
+
+render_m5_aggregate() {
+  local samples n p50 p95
+  samples="$(m5_ms_from_tsv "$@")"
+  n="$(printf '%s\n' "$samples" | grep -c . || true)"
+  echo "## M5 first-reply 집계"
+  echo
+  if [ "$n" -lt 1 ]; then
+    echo "- 표본 없음. p50/p95는 산출하지 않는다. 이 수치는 게이트가 아니다."
+    return 0
+  fi
+  p50="$(printf '%s\n' "$samples" | percentile_ms 50)"
+  p95="$(printf '%s\n' "$samples" | percentile_ms 95)"
+  echo "- 표본: $n"
+  echo "- p50: $(fmt_ms "$p50") ($p50 ms)"
+  echo "- p95: $(fmt_ms "$p95") ($p95 ms)"
+  echo "- 이 수치는 측정 항목이다. 게이트가 아니다. 응답 시간 상한으로 합격/불합격을 가르지 않는다."
+}
+
+run_aggregate() {
+  local tmp line
+  tmp="$(mktemp "${TMPDIR:-/tmp}/oort-m5-agg.XXXXXX")"
+  if ! collect_timings_tsv "$AGGREGATE_FROM" > "$tmp"; then
+    rm -f "$tmp"
+    echo "[bench] --from 경로를 찾지 못했다: $AGGREGATE_FROM" >&2
+    exit 2
+  fi
+  set --
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    set -- "$@" "$line"
+  done < "$tmp"
+  rm -f "$tmp"
+  if [ $# -eq 0 ]; then
+    echo "[bench] timings.tsv 가 없다. 증거 루트: ${AGGREGATE_FROM:-$EVIDENCE_ROOT}"
+    render_m5_aggregate
+    return 0
+  fi
+  log "집계 대상: $#개 timings.tsv"
+  render_m5_aggregate "$@"
 }
 
 # --------------------------------------------------------------------------
@@ -286,6 +377,11 @@ EOF
 
 if [ "$MODE_ACTION" = "plan" ]; then
   print_plan
+  exit 0
+fi
+
+if [ "$MODE_ACTION" = "aggregate" ]; then
+  run_aggregate
   exit 0
 fi
 
@@ -830,6 +926,8 @@ done
   done
   echo
   echo "증거: \`$EVIDENCE_DIR\`"
+  echo
+  render_m5_aggregate "$TIMINGS_TSV"
 } > "$EVIDENCE_DIR/summary.md"
 
 CLEAN_EXIT=1

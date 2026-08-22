@@ -5,9 +5,13 @@ import {
   agentPortEndpoint,
   hostedPreset,
   hostedRoutineLabel,
+  GROK_PAIRING_PURPOSE,
+  GROK_PAIRING_REVEAL_HEADLINE,
   HOSTED_AUTH_MODE_CHOICES,
   HOSTED_PRESETS,
   HOSTED_ROUTINE_TEMPLATE,
+  PAIRING_NATURAL_LANGUAGE_HANDOFF,
+  PAIRING_REVEAL_HEADLINE,
   PAIRING_REVEAL_SCOPE_NOTE,
   PAIRING_REVEAL_WARNING,
 } from "./presets";
@@ -110,6 +114,35 @@ describe("RED PROOF ④ 두 비밀값의 문구는 서로를 대신하지 않는
   it("연결 값 문구는 그 값이 권한이 아니라고 말한다", () => {
     expect(PAIRING_REVEAL_SCOPE_NOTE).toContain("승격되지 않습니다");
     expect(PAIRING_REVEAL_WARNING).toContain("한 번만 보입니다");
+  });
+
+  it("일반 프리셋 연결 값 문면은 그대로다", () => {
+    expect(PAIRING_REVEAL_HEADLINE).toBe(
+      "지금 연결 값을 provider 설정에 붙이세요."
+    );
+    expect(hostedPreset("generic").steps).toEqual([
+      "provider의 MCP 커넥터 설정에서 원격 서버를 하나 추가합니다.",
+      "주소 칸에 아래 Agent Port 주소를 그대로 넣습니다.",
+      "인증 헤더의 bearer 값에 아래 연결 값을 넣습니다.",
+      "저장한 뒤 커넥터를 한 번 실행하면 이 화면이 감지 상태로 넘어갑니다.",
+    ]);
+  });
+
+  it("그록 연결 값 화면은 말로 전하는 것을 기본으로 두고 직접 붙여 넣기는 다른 방법이라고 말한다", () => {
+    expect(GROK_PAIRING_REVEAL_HEADLINE).toBe(
+      "이 값을 그록봇에게 말로 전하세요."
+    );
+    expect(GROK_PAIRING_PURPOSE).toContain("말로 전하는 것이 기본");
+    expect(GROK_PAIRING_PURPOSE).toContain("다른 방법");
+    expect(PAIRING_NATURAL_LANGUAGE_HANDOFF).toContain("자기 쪽에 붙입니다");
+    expect(PAIRING_NATURAL_LANGUAGE_HANDOFF).toContain("직접 붙여 넣으려면");
+    expect(PAIRING_NATURAL_LANGUAGE_HANDOFF).not.toMatch(/자연어/);
+    expect(PAIRING_NATURAL_LANGUAGE_HANDOFF).not.toMatch(/[—–]/);
+    expect(PAIRING_NATURAL_LANGUAGE_HANDOFF).not.toMatch(/CDP|포트|자동 제어/);
+    const grok = hostedPreset("grok");
+    expect(grok.steps[0]).toContain("말로 전하세요");
+    expect(grok.steps.some((step) => step.includes("Create Plugin"))).toBe(true);
+    expect(grok.detail).toContain("말로 전하는 것이 기본");
   });
 
   it("자격증명 문구는 앞 값이 이미 죽었다고 말한다", () => {

@@ -64,6 +64,7 @@ export const HOSTED_WIZARD_STEPS: readonly HostedWizardStepSpec[] = [
     id: "pairing",
     number: 2,
     title: "연결 값 발급",
+    // 일반 프리셋 문면. Grok 은 presets.ts `GROK_PAIRING_PURPOSE` 가 같은 자리를 덮는다.
     purpose:
       "연결 값은 지금 한 번만 보입니다. provider 설정에 붙여 넣고 이 화면에서 저장을 마치세요.",
   },
