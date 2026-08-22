@@ -18,7 +18,7 @@
 | DDL | **`server/Migrations/*.sql`**(정본, Rust 이미지가 싣는다) + `schema_v0.sql` | — |
 | 제품 표면 | **`clients/web`**(React/Vite) · `clients/desktop`(Tauri 2) · `clients/mobile`(RN) | `clients/macOS` · `clients/iOS` |
 | 공유 코어 | **`packages/momo-core`**(TS, `@momo/core`) | `clients/Core`(Swift) |
-| 기동/배포 | [`docs/SELF_HOST.md`](SELF_HOST.md)(**처음 한 번** — clone→로그인) · [`docs/RELEASING.md`](RELEASING.md)(서버/이미지 `v0.x` 발행) · [`infra/rust/README.md`](../infra/rust/README.md)(그다음 전부: 이미지+compose) · [`docs/runbooks/ncp-rust-deploy.md`](runbooks/ncp-rust-deploy.md)(라이브 정본) | [`docs/RUN.md`](RUN.md)(Swift 기준 — 상단 배너 참조) |
+| 기동/배포 | [`docs/SELF_HOST.md`](SELF_HOST.md)(**처음 한 번** — clone→로그인) · [`docs/SELF_HOST_AGENT.md`](SELF_HOST_AGENT.md)(그록봇 3계층 플레이북) · [`docs/RELEASING.md`](RELEASING.md)(서버/이미지 `v0.x` 발행) · [`infra/rust/README.md`](../infra/rust/README.md)(그다음 전부: 이미지+compose) · [`docs/runbooks/ncp-rust-deploy.md`](runbooks/ncp-rust-deploy.md)(라이브 정본) | [`docs/RUN.md`](RUN.md)(Swift 기준 — 상단 배너 참조) |
 
 - **예외 — 은퇴 아님:** `relay/PushRelay`(라이브 푸시 경로가 지금도 빌드·배포) · `clients/web-legacy`(삭제 아님. 라이브 웹=`clients/web`, `server-rust/Dockerfile:147,157,173,231` web-assets / #1228. Swift prod `Dockerfile.web`·e2e `web-init`·`--profile web`가 아직 소비, #1610).
 - 현행 스택 빌드·검증 명령의 정본은 [`AGENTS.md`](../AGENTS.md) §3(그리고 `Makefile`의 `build`/`test`).
@@ -54,8 +54,10 @@
 | [`CHANGELOG.md`](../CHANGELOG.md) | Keep a Changelog. 첫 항목 [v0.1.0](https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.0) | 릴리스 |
 | [`.github/CODEOWNERS`](../.github/CODEOWNERS) | 리뷰 라우팅 최소형 `* @kwakseongjae` | 커뮤니티 |
 | [`NOTICE`](../NOTICE) | Apache 2.0 귀속 — 앱 화면 표기 대상 | 법무 |
+| [`llms.txt`](../llms.txt) | 그록봇 진입 stub — 제품 한 줄 + `SELF_HOST_AGENT.md` GitHub raw URL + 본인 계정/VM 전용 고지 (#1652) | 에이전트 진입 |
 | [`Makefile`](../Makefile) | `build`/`test` = **현행 스택**(cargo + npm), `up`/`down`/`migrate` = dev compose, `swift-build`/`swift-test` = 은퇴 중 트리 | 빌드 명령 |
 | [`docs/SELF_HOST.md`](SELF_HOST.md) | **셀프호스트 첫 기동 정본**(#1229): clone → `scripts/self_host_env.sh` → `up -d --build --wait` → 브라우저 로그인. 분기 0. digest pull 예시는 GitHub Releases | 운영 명령 |
+| [`docs/SELF_HOST_AGENT.md`](SELF_HOST_AGENT.md) | **그록봇 3계층 플레이북**(#1652): 코어 설치(digest·claim·`/workspace` pgdata) → quick tunnel → 사용자 핸드오프. 본인 계정/VM 전용. 진입은 루트 [`llms.txt`](../llms.txt) | 운영 명령(에이전트) |
 | [`docs/RELEASING.md`](RELEASING.md) | **서버/이미지 릴리스 정본**(#1628): 승격→발행→digest 수거→태그→Release→SELF_HOST 문면. 데스크탑 next 채널과 경계 | 운영 명령 |
 | [`docs/SELF_HOST_FIRST_DAY.md`](SELF_HOST_FIRST_DAY.md) | **셀프호스트 오퍼레이터의 첫 하루**(#1608): 부트스트랩(키 둘) → GUI 초대 → 웹/`oort://join` 합류 → AI 연결 → 첫 멘션 | 운영 명령 |
 | [`docs/runbooks/selfhost-pg-dump-restore.md`](runbooks/selfhost-pg-dump-restore.md) | **셀프호스터 pg_dump 백업·복원**(#1654): `/workspace` 덤프, 그록 이탈·B7 트라이얼 잠김·다른 VPS/로컬 이사. 프로덕션 PITR과 별 문서 | 운영 명령 |

@@ -24,7 +24,8 @@
 > 로그인 다음 — 워크스페이스 만들기, 웹 GUI 초대, 둘째 사용자 합류(웹 +
 > `oort://join`), AI 연결 GUI, 첫 멘션 — 은
 > [`SELF_HOST_FIRST_DAY.md`](SELF_HOST_FIRST_DAY.md) (#1608). 이 문서는
-> clone→로그인(+키 둘) 정본이다.
+> clone→로그인(+키 둘) 정본이다. 그록봇이 사용자 본인 VM에 설치하는
+> 경로(본인 계정 전용)는 [`SELF_HOST_AGENT.md`](SELF_HOST_AGENT.md)다.
 
 ---
 

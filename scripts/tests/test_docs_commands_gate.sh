@@ -42,6 +42,7 @@ new_tree() {
   : >"$dir/docs/RELEASING.md"
   : >"$dir/docs/NEXT_CHANNEL.md"
   : >"$dir/CONTRIBUTING.md"
+  : >"$dir/docs/SELF_HOST_AGENT.md"
 
   printf 'build:\n\t@true\nts-check:\n\t@true\n' >"$dir/Makefile"
   printf '{"scripts":{"lint":"true"}}\n' >"$dir/package.json"
