@@ -22,6 +22,9 @@
 자신**이다. 그록봇 앱을 CDP·스크립트·셀렉터로 제어하지 않는다. 사람이
 자연어로 지시하면, 그록봇이 자기 VM 셸에서 아래를 수행한다.
 
+그록봇 VM 위 구동은 **개인 체험용**이다. 업무·상시 사용은 §4로 덤프를
+가져가 자기 서버(VPS 등)에서 한다.
+
 영속성 공식은 **durable-but-resettable**(RA-4): `/workspace` 파일은 durable
 층이고, Docker 이미지·수동 설치물은 Update 때 증발할 수 있다. Reset은
 스냅샷 롤백이다. Postgres 데이터는 그래서 `/workspace` 아래 bind mount가
@@ -325,6 +328,8 @@ claim 토큰은 URL 안에만 있고, 이 한 번뿐이다. TTL 24h, 단회 소�
 
 ```text
 oort를 이 컴퓨터(당신의 그록봇 VM)에 켜 두었습니다. 팀 공용 서버가 아닙니다.
+이 VM 위 구동은 개인 체험용입니다. 업무·상시 사용은 덤프를 가져가 자기
+서버(VPS 등)에서 하세요.
 
 1) 데스크탑 앱
    https://github.com/yeomyeonggeori/oort/releases/latest
