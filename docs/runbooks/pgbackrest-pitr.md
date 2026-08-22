@@ -4,6 +4,9 @@
 > 실제 NCP host, S3-compatible object storage, 첫 GHCR database image publish/pull은
 > 해당 운영 창에서 증거를 다시 만들기 전까지 `runtime-unverified(public host)`다.
 > 이 문서는 법률 자문이나 RPO/RTO 보장이 아니다.
+> 셀프호스터가 그록봇 VM·개인 인스턴스 데이터를 파일로 가져가는 경로는
+> [`selfhost-pg-dump-restore.md`](selfhost-pg-dump-restore.md)다. 여기 적힌
+> WAL/PITR 폐곡선과 섞지 않는다.
 
 ## 1. 무엇을 보호하는가
 
