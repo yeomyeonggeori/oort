@@ -221,6 +221,7 @@ COPY infra/prod/bootstrap_runtime_roles.sql /opt/momo/sql/bootstrap_runtime_role
 COPY infra/prod/set_initial_owner.sql /opt/momo/sql/set_initial_owner.sql
 # #1227: the only-if-absent twin the `migrate` command applies at first boot.
 COPY infra/prod/bootstrap_owner_if_absent.sql /opt/momo/sql/bootstrap_owner_if_absent.sql
+COPY infra/prod/bootstrap_owner_claim_if_absent.sql /opt/momo/sql/bootstrap_owner_claim_if_absent.sql
 # #1332: four attribution files + sha256sum + Debian copyright scanner.
 # The hash file names the four files as they appear in this directory.
 COPY LICENSE NOTICE legal/THIRD_PARTY_NOTICES.md legal/generated/GHCR_THIRD_PARTY_NOTICES.txt /usr/share/licenses/momo-rust/
@@ -243,6 +244,7 @@ RUN set -eux; \
     test -s /opt/momo/sql/bootstrap_runtime_roles.sql; \
     test -s /opt/momo/sql/set_initial_owner.sql; \
     test -s /opt/momo/sql/bootstrap_owner_if_absent.sql; \
+    test -s /opt/momo/sql/bootstrap_owner_claim_if_absent.sql; \
     test -s /usr/share/licenses/momo-rust/LICENSE; \
     test -s /usr/share/licenses/momo-rust/NOTICE; \
     test -s /usr/share/licenses/momo-rust/THIRD_PARTY_NOTICES.md; \

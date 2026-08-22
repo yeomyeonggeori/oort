@@ -98,11 +98,12 @@ fi
 docker run --rm --entrypoint sh "$IMAGE" -c \
   'test "$MOMO_IN_CONTAINER" = 1 &&
    test -s /opt/momo/sql/bootstrap_owner_if_absent.sql &&
+   test -s /opt/momo/sql/bootstrap_owner_claim_if_absent.sql &&
    test -s /opt/momo/sql/set_initial_owner.sql &&
    test -s /opt/momo/sql/bootstrap_runtime_roles.sql &&
    test -s /opt/momo/sql/bootstrap_roles.sql &&
    test -d /opt/momo/migrations &&
-   test -z "${MOMO_MIGRATIONS_DIR+x}${MOMO_BOOTSTRAP_ROLES_SQL+x}${MOMO_RUNTIME_ROLES_SQL+x}${MOMO_SET_OWNER_SQL+x}${MOMO_BOOTSTRAP_OWNER_SQL+x}"' ||
+   test -z "${MOMO_MIGRATIONS_DIR+x}${MOMO_BOOTSTRAP_ROLES_SQL+x}${MOMO_RUNTIME_ROLES_SQL+x}${MOMO_SET_OWNER_SQL+x}${MOMO_BOOTSTRAP_OWNER_SQL+x}${MOMO_BOOTSTRAP_OWNER_CLAIM_SQL+x}"' ||
   fail "image SQL/migration payload is missing or runtime path overrides remain enabled"
 
 # ---------------------------------------------------------------------------

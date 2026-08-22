@@ -1,4 +1,4 @@
-//! Per-IP request rate limiting (MOMO-300), scoped to the public join surface.
+//! Per-IP request rate limiting (MOMO-300), scoped to the public join and claim surfaces.
 //!
 //! Port of Swift `Middleware/RateLimitMiddleware.swift` — the sliding-window
 //! limiter (:33-86), the client-IP resolution (:98-106), the 429 body (:108-118)
@@ -6,12 +6,12 @@
 //!
 //! ## Why this arrives with B4.3 rather than as a global middleware
 //!
-//! `POST /v1/join` is the **only unauthenticated write** this server mounts, and
-//! the credential it accepts is a bearer string in the body. Without a limiter
-//! it is an online guessing oracle against `invite_code.code_hash`: 32 base64url
-//! characters is far out of reach, but "far out of reach" is a property of the
-//! code generator, not of the endpoint, and an endpoint that will answer an
-//! unlimited number of code guesses is a bad endpoint regardless.
+//! `POST /v1/join` and `POST /v1/claim` are the unauthenticated writes this
+//! server mounts, and each accepts a bearer string in the body. Without a
+//! limiter they are online guessing oracles against stored sha256 hashes.
+//! "Far out of reach" is a property of the generator, not of the endpoint, and
+//! an endpoint that will answer an unlimited number of guesses is a bad
+//! endpoint regardless.
 //!
 //! So the limiter lands with the route that needs it, mounted on that route
 //! only. What is **not** ported yet, and is recorded rather than implied:
@@ -289,8 +289,42 @@ fn too_many_requests(retry_after_seconds: u64) -> Response {
 /// Mounted with `route_layer` on `/v1/join` only — see the module docs for what
 /// is deliberately not covered yet.
 pub async fn per_ip(State(state): State<AppState>, request: Request, next: Next) -> Response {
+    gate_per_ip(
+        state,
+        request,
+        next,
+        "ip",
+        |config| config.per_ip_limit,
+        "/v1/join",
+    )
+    .await
+}
+
+/// Per-IP gate for the public claim route. Independent key prefix and budget
+/// from join so the two surfaces cannot starve each other.
+pub async fn per_ip_claim(State(state): State<AppState>, request: Request, next: Next) -> Response {
+    gate_per_ip(
+        state,
+        request,
+        next,
+        "ip:claim",
+        |config| config.claim_per_ip_limit,
+        "/v1/claim",
+    )
+    .await
+}
+
+async fn gate_per_ip(
+    state: AppState,
+    request: Request,
+    next: Next,
+    key_prefix: &'static str,
+    limit_of: fn(&RateLimitConfig) -> u32,
+    surface: &'static str,
+) -> Response {
     let config: &RateLimitConfig = &state.rate_limit.config;
-    if config.per_ip_limit == 0 {
+    let limit = limit_of(config);
+    if limit == 0 {
         return next.run(request).await;
     }
     let peer = request
@@ -302,8 +336,8 @@ pub async fn per_ip(State(state): State<AppState>, request: Request, next: Next)
     };
 
     let verdict = state.rate_limit.limiter.check(
-        &format!("ip:{ip}"),
-        config.per_ip_limit,
+        &format!("{key_prefix}:{ip}"),
+        limit,
         Duration::from_secs(config.window_seconds),
     );
     if verdict.allowed {
@@ -311,12 +345,13 @@ pub async fn per_ip(State(state): State<AppState>, request: Request, next: Next)
     }
     if verdict.should_log {
         // The path is a fixed literal here, and the IP is not a secret. The
-        // request body — which carries an invite code — is never touched.
+        // request body — which carries a token — is never touched.
         tracing::warn!(
             ip = %ip,
-            limit = config.per_ip_limit,
+            limit,
             window_seconds = config.window_seconds,
-            "rate limit exceeded (per-ip, /v1/join)"
+            surface,
+            "rate limit exceeded (per-ip)"
         );
     }
     too_many_requests(verdict.retry_after_seconds)

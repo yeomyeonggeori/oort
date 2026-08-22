@@ -34,6 +34,14 @@ pub struct HealthResponse {
 // auth
 // ---------------------------------------------------------------------------
 
+/// `POST /v1/claim` request (ADR-0166). Public; the token is the only credential.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClaimRequest {
+    pub token: String,
+    pub password: String,
+}
+
 /// `POST /v1/auth/login` request (Swift `LoginRequest`). `platformAdminSecret`
 /// keeps its snake_case alias so both spellings decode.
 #[derive(Debug, Deserialize)]

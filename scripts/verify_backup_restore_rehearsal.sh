@@ -7,6 +7,10 @@
 # ephemeral container, and writing machine-readable restore evidence.
 set -euo pipefail
 
+SCRIPT_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
+# shellcheck source=lib/pg_dump_custom.sh
+. "$SCRIPT_DIR/lib/pg_dump_custom.sh"
+
 OUT_DIR="${BACKUP_REHEARSAL_OUT_DIR:-${LOCAL_GATE_OUT_DIR:-${TMPDIR:-/tmp}/momo-backup-rehearsal}}"
 POSTGRES_IMAGE="${POSTGRES_IMAGE:-pgvector/pgvector:0.8.5-pg18-trixie@sha256:9d2e61c7352b9e9f4798df5fd9a498f043f4cda1cdacc707de3d198650f4321e}"
 POSTGRES_DB="${POSTGRES_DB:-momo}"
@@ -99,7 +103,7 @@ INSERT INTO restore_rehearsal_marker (id, marker, created_at) VALUES
 SQL
 
 SOURCE_FINGERPRINT="$(marker_query "$SRC_CONTAINER")"
-docker exec "$SRC_CONTAINER" pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc > "$DUMP_FILE"
+momo_pg_dump_custom "$SRC_CONTAINER" "$POSTGRES_USER" "$POSTGRES_DB" "$DUMP_FILE"
 
 docker run -d \
   --name "$DST_CONTAINER" \
@@ -110,7 +114,7 @@ docker run -d \
 wait_for_pg "$DST_CONTAINER"
 
 RESTORE_DATA_DIR="$(psql_exec "$DST_CONTAINER" -Atc "SHOW data_directory;")"
-docker exec -i "$DST_CONTAINER" pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --no-owner < "$DUMP_FILE"
+momo_pg_restore_custom "$DST_CONTAINER" "$POSTGRES_USER" "$POSTGRES_DB" "$DUMP_FILE"
 RESTORE_FINGERPRINT="$(marker_query "$DST_CONTAINER")"
 
 if [ "$SOURCE_FINGERPRINT" != "$RESTORE_FINGERPRINT" ]; then

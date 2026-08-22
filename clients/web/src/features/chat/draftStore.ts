@@ -165,6 +165,38 @@ export function clearDraft(workspaceId: string, channelId: string): void {
   writeRaw(draftKey(workspaceId, channelId), null);
 }
 
+/**
+ * 같은 탭의 컴포저가 초안 저장소를 다시 읽게 하는 사건.
+ * `storage` 이벤트는 다른 탭에만 뜨므로, 이 채널에 이미 마운트된 입력창은
+ * 이 이름으로만 복원한다.
+ */
+export const COMPOSER_SEED_EVENT = "momo:composer-seed";
+
+/**
+ * 빈 입력창에만 심는다. 쓰다 만 글이 있으면 덮지 않고 false.
+ * 저장과 사건을 한 함수에서 내는 이유는 저장만 하고 사건이 빠지면
+ * 마운트된 컴포저가 초안을 영원히 못 보기 때문이다.
+ */
+export function seedComposerText(
+  workspaceId: string,
+  channelId: string,
+  text: string,
+  nowMs: number = Date.now()
+): boolean {
+  if (text.trim() === "") return false;
+  const existing = readDraft(workspaceId, channelId, nowMs);
+  if (existing.trim() !== "") return false;
+  writeDraft(workspaceId, channelId, text, nowMs);
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(
+      new CustomEvent(COMPOSER_SEED_EVENT, {
+        detail: { workspaceId, channelId, text },
+      })
+    );
+  }
+  return true;
+}
+
 /** 로그아웃. 이 기기에 남은 초안을 전부 지운다. */
 export function clearAllDrafts(): void {
   for (const key of draftKeys()) writeRaw(key, null);

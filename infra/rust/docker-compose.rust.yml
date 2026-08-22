@@ -158,6 +158,9 @@ services:
       # Consumed only by `run --rm migrate set-owner`; unset otherwise.
       MOMO_INITIAL_OWNER_EMAIL: ${MOMO_INITIAL_OWNER_EMAIL:-}
       MOMO_INITIAL_OWNER_PASSWORD: ${MOMO_INITIAL_OWNER_PASSWORD:-}
+      # ADR-0166 opt-in. 1 = claim-pending owner + one-time /claim/<token> print.
+      # Mutually exclusive with MOMO_INITIAL_OWNER_PASSWORD.
+      MOMO_BOOTSTRAP_CLAIM: ${MOMO_BOOTSTRAP_CLAIM:-}
     depends_on:
       postgres:
         condition: service_healthy

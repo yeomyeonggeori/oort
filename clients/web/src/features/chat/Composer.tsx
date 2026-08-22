@@ -57,7 +57,12 @@ import { QuoteChip } from "@/features/timeline/QuoteBlock";
 import { TypingLine } from "@/features/chat/TypingLine";
 import { useTypingSend } from "@/features/chat/useTyping";
 import { useTypingThreshold, useTypists } from "@/features/chat/typingStore";
-import { clearDraft, readDraft, writeDraft } from "@/features/chat/draftStore";
+import {
+  COMPOSER_SEED_EVENT,
+  clearDraft,
+  readDraft,
+  writeDraft,
+} from "@/features/chat/draftStore";
 import { rememberSendLearned, useSendHintNeeded } from "@/features/chat/sendHint";
 import { useAutoGrow } from "@/features/timeline/useAutoGrow";
 import { useOffline } from "@/features/common/useOffline";
@@ -535,8 +540,25 @@ export function Composer({
     setMentionOpen(false);
     const save = () => writeDraft(workspaceId, channelId, textRef.current);
     window.addEventListener("pagehide", save);
+    const onSeed = (event: Event) => {
+      const detail = (event as CustomEvent<{
+        workspaceId: string;
+        channelId: string;
+        text: string;
+      }>).detail;
+      if (!detail) return;
+      if (detail.workspaceId !== workspaceId || detail.channelId !== channelId) {
+        return;
+      }
+      if (textRef.current.trim() !== "") return;
+      setText(detail.text);
+      setCaret(detail.text.length);
+      setMentionOpen(false);
+    };
+    window.addEventListener(COMPOSER_SEED_EVENT, onSeed);
     return () => {
       window.removeEventListener("pagehide", save);
+      window.removeEventListener(COMPOSER_SEED_EVENT, onSeed);
       save();
     };
   }, [workspaceId, channelId]);

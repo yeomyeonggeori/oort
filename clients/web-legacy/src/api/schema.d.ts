@@ -101,6 +101,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/claim": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Consume a first-owner claim token and set the password (public, no auth).
+         * @description ADR-0166. Redeems a one-time 32-byte claim token issued by momo-migrate claim mode, sets the seeded owner's password in the same transaction, and issues a session token pair. The raw token is never stored (sha256 only). Reuse returns 409; expiry returns 410. Per-IP rate limited.
+         */
+        post: operations["publicClaim"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/workspaces/{workspaceId}/roster": {
         parameters: {
             query?: never;
@@ -2548,6 +2568,12 @@ export interface components {
         };
         MemoryExternalProviderConsentResponse: {
             memoryExternalProviderConsent: components["schemas"]["MemoryExternalProviderConsent"];
+        };
+        ClaimRequest: {
+            /** @description Raw 32-byte claim token (43-char base64url, no padding). Shown once at bootstrap; the server stores only sha256. */
+            token: string;
+            /** @description Required, at most 1024 chars. Set on the first owner. */
+            password: string;
         };
         LoginRequest: {
             /** @description Human member email within the workspace. */
@@ -5358,6 +5384,67 @@ export interface operations {
                 };
             };
             /** @description Invite code expired or revoked. */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    publicClaim: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClaimRequest"];
+            };
+        };
+        responses: {
+            /** @description Password set; session issued. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoginResponse"];
+                };
+            };
+            /** @description Invalid token or password shape. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Claim token is invalid. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Token already used, or owner already has a password. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Claim token expired. */
             410: {
                 headers: {
                     [name: string]: unknown;

@@ -1,5 +1,73 @@
 # oort 기획 현재 상태 (Planning Current State)
 
+> **2026-08-23 스냅샷 50 (Fable · momo-main — ★T계열 파도 6/7 랜딩·Q-LEGAL 브리핑 판단 대기. PLN-20260822-01).** 컴팩트 복원 진입점.
+>
+> **★ 파도 집행(성재 발사 go·ADR-0166 같은 날 Accepted)**: **V-1**(#1650 PASS — 발행 digest에 agent-port 401+WWW-Authenticate 실측·close) · **T-4**(#1658 engine — pg_dump 공유 lib·복원 런북·재판정 재현) · **T-5**(#1659 uxui — 감지 레지스트리(수동 시그니처만·CDP 제외)+위저드 자동채움, design-review H2 수리) · **T-6**(#1660 uxui — 첫 왕복 온보딩+bench M5 p50/p95, design-review 실렌더 H4 수리: failed 전송 제외·최신 멘션 시계·완료/닫기 localStorage 지속화) · **T-1**(#1662 engine — claim-token: ADR-0166 검증계약 전문 실측 PASS·수리 2회전(UX M2+마이그레이션 카운트·GHCR notice)·runtime-db 선재 중단 DEVIATION noted) · **T-3**(#1664 uxui — dmg dry-run 산출·서명 strict PASS·택일(a)=v0.1.0 자산 latest URL). 전부 track 랜딩·이슈 close·잔재 회수. 정책 마커 절차 3회 집행(#1658·#1662·#1664).
+>
+> **★ 잔여 1건 = T-2**(#1663 — llms.txt+SELF_HOST_AGENT.md 449줄, 검수 합격·fail-closed claim 게이트). **Q-LEGAL: 성재 "브리핑 검토 후 머지" 선택 → 브리핑 제시됨**(`research/2026-08-23-t2-assist-risk-briefing.md` — 쟁점 3·3판단·권고=§0 체험위상 1줄 가산 후 머지). **성재 발화 대기.**
+>
+> **★ E2E 전 구조 체인(성재 결재 필요)**: 현행 §2-B digest(v0.1.0)는 T-1 이전 빌드라 **플레이북 claim 게이트가 재발행 전 RED** — ①track/engine·uxui→main 승격(성재 게이트) ②publish-images 재발행(dispatch+release 승인) ③§2-B·플레이북 digest 현행화+llms.txt raw URL main化 ④T-3 실공증+v0.1.0 dmg 자산 업로드 ⑤E2E 수용 런(D7·자연어 릴레이·성재 입회). 마커 2종 잔존 확인(R-1 실측면)도 자연어 릴레이로 병행.
+>
+> 이하 스냅샷 49:
+
+> **2026-08-22 스냅샷 49 (Fable · momo-main — ★성재 결재 3건 집행·T계열 티켓 7건 발급·ADR-0166 기안. PLN-20260822-01).** 컴팩트 복원 진입점.
+>
+> **★ 성재 결재(모계획 §9)**: **Q-CDP=자연어 지시 릴레이 전환** — 우리 E2E 검증의 그록봇 CDP 자동 제어(cdp_*.py) **은퇴**(Cursor ToS B3). R-1 마커 2종 재확인·E2E 수용 런도 자연어 릴레이(지시문=Fable 작성·전달=성재). **Q-STRUCT=체험자 본인 그록봇 계정/VM 전용 확정**(공용 데모 호스트化 금지 성문). **Q-LEGAL=계류**(조력 리스크 법무 1회 여부 — T-2 정본 머지 전 판단 권장).
+>
+> **★ 티켓 발급 완료(발사는 성재 명시 신호 대기)**: 패킷 `handoffs/2026-08-22-grokbot-selfhost-wave-packet.md`(ready). **T-1 claim-token=#1651**(게이트=**ADR-0166 Accept** — `docs/adr/0166-selfhost-claim-token-bootstrap.md` Proposed 기안됨) · **T-2 llms.txt+SELF_HOST_AGENT.md=#1652**(T-1 계약 후·Q-LEGAL 권장) · **T-3 데스크탑 dmg=#1653**(실발행=오케스트레이터) · **T-4 pg_dump 리커버리=#1654** · **T-5 그록봇 감지·원클릭=#1655**(감지 시그니처에서 CDP 포트 제외 — Q-CDP 취지) · **T-6 첫 왕복 게이트=#1656** · **V-1 digest agent-port 실측=#1650**. 순서 제안 V-1→T-4→T-5→T-6→(ADR Accept 후)T-1→T-2→T-3, 워커=grok 병렬 1.
+>
+> **성재 다음 결재 포인트**: ①ADR-0166 Accept(T-1 착수 게이트) ②파도 발사 go ③Q-LEGAL 판단 ④E2E 수용 판정. 스코프 발견: 서버 v0.1.0 태그·Release는 8/21 기존재 → T-3=데스크탑 dmg 공개 릴리스로 확정.
+>
+> 이하 스냅샷 48:
+
+> **2026-08-22 스냅샷 48 (Fable · momo-main — aside 3축 리서치 완주·R-1/R-2 관문 종결. PLN-20260822-01).** 컴팩트 복원 진입점.
+>
+> **★ R-1 관문 종결(그록봇 VM 문서면)**: Grok Bot=xAI+Anysphere(Cursor) 합병제품(약관=Cursor ToS). **durable-but-resettable 공식 확증** — 데이터(/workspace)는 durable, 수동 설치물(우리 Docker 스택)은 replaceable(Update 시 증발). 성재 "리셋 뉘앙스 없었다"=데이터층 한정 정답. **중대 약관리스크**: Beta 무보증·xAI "개인 비상업 용도만"·**자동화 접근 금지(우리 CDP)**·경쟁서비스·계정개방. ⇒ 파이프라인 성립, 단 **"체험자 본인 계정/VM" 구조 못박기 + T-2 멱등재기동 + T-4 백업 필수화**. 정본 `research/2026-08-22-grokbot-vm-persistence-ra4.md`, 종합=모계획 §8.
+>
+> **★ R-2 종결(직접 실측)**: cloudflared quick tunnel×로컬 스택 전면 GREEN(WS 13ms·agent-port 401 통과·데스크탑 Origin 무설정). D4=quick tunnel 확정. `research/2026-08-22-tunnel-spike-r2.md`.
+>
+> **★ aside 3축(성재 발제)**: aside.com(AI 브라우저) 벤치마크로 구독연동·에이전트 감지·Slack 마이그레이션 + 1차 타겟=그록봇 유저 한정. 인터뷰 E1~E10 결재. 리서치 4기 완주·검수 승격(RA-1~4). v1 게이트=PLN E2E+그록봇 감지·등록(T-5)+첫 왕복 온보딩(T-6). 증보계획 `research/2026-08-22-aside-onboarding-three-axis-plan.md`.
+>
+> **성재 결정 큐**: Q-STRUCT(본인 계정 구조 확정)·Q-CDP(검증 CDP vs 자연어 릴레이)·Q-LEGAL(조력 리스크 법무)·티켓 발급(T-5~T-8). PLN 시리즈 R-1·R-2 종결, 잔여 T-1~T-4·V-1·E2E.
+>
+> 이하 스냅샷 47:
+
+> **2026-08-22 스냅샷 47 (Fable · momo-main — ★그록봇 원클릭 셀프호스트 파이프라인 확정. PLN-20260822-01 신설).** 컴팩트 복원 진입점.
+>
+> **★ 새 축(성재 발제)**: llms.txt→그록봇(오퍼레이터)이 자기 VM에 oort 자동 구동→터널 주소+사용법 회신→사용자는 데스크탑 앱 접속+그록봇이 에이전트로 합류. 우로보로스 인터뷰 완결(D1~D10) — 정본 `research/2026-08-22-grokbot-one-click-selfhost-plan.md`. 시리즈: R-1(VM 리셋 재검증=**관문**)·R-2(터널 리서치)·T-1(claim-token 서버+ADR)·T-2(llms.txt+SELF_HOST_AGENT.md)·T-3(데스크탑 v0.x Release)·T-4(pg_dump 리커버리)·V-1·E2E(수용=실측 1회).
+>
+> **그록봇 실측(CDP SEND 자동화 첫 실전 — Q-CTRL 해소)**: ghcr 도달 GREEN·용량 8CPU/15.6G GREEN·**세션 간 VM 재시작 실측(uptime 18h→1h39m)**·Cursor 샌드박스 인프라 확정. 영속성 마커 2종(홈+Docker 볼륨) armed — 다음 세션 잔존 확인이 R-1 실측면 종결. 신규 루틴 `FABLE_DOWNGRADE_ROUTINE.md`.
+>
+> **다음**: ①R-1·R-2 리서치 워커 발사(성재 go) ②T-1 ADR 기안 ③T-2~T-4 티켓 패킷 발급(성재 승인) ④마커 잔존 재확인. 이전 축(L3 파도·ITO-1 H1·#1361 커넥터 스파이크)은 유지 — 본 파이프라인이 ITO·L 시리즈와 산출물 공유(T-3=L3 첫 태그).
+
+> **2026-08-22 스냅샷 48 (Fable · momo-main — 대기 큐 소진·★성재=ITO-1 시작일만. PLN-20260815-01).** 컴팩트 복원 진입점.
+>
+> **★ 대기 큐 4/4 랜딩**: #1635(CI 붕대 제거+재도입 가드)·#1641(루트 계약 web-legacy 거짓 이분 일소)·#1642(발행 라벨 현행화+GATED_DOCS 3종=439 fact)·#1643(**multi-arch 발행 워크플로 준비** — native arm64·manifest list·이중 attestation·pin=list digest. **실발행=성재 dispatch+release 승인 클릭**, 이후 arm64 실측 digest 기입=Fable). engine 전부 그린.
+>
+> **★ 성재 남은 목록(전량·이외 없음)**: ①**ITO-1 실테스트 시작일 결정**(전 조건 충족 — SELF_HOST_FIRST_DAY 런북·LAUNCH_READY 팩·#1613 가드·v0.1.0 digest) ②다음 발행 창 multi-arch dispatch 승인 2클릭 ③T-D §8 데스크탑 재발행(ITO-3 직전) — ②③은 Fable이 시점에 재안내.
+>
+> **운영 교훈 2(성문화)**: 머지 대기 루프는 DIRTY 즉시 탈출 분기 필수(BEHIND만 처리하면 STATUS 상단 경합에서 무한 대기 — 2026-08-22 실측 2건) · 도커 빌드 검증 세션은 빌드캐시/target 회수를 세션 말미 의무로(ENOSPC 실사고 — builder prune 5GB+target 9GB).
+>
+> **자율 백로그(다음 세션 후보)**: 제품 파도 #1600~#1604 · DCO CI·CONTRIBUTING 드리프트 게이트·볼륨 소유자 라벨·raw compose 우회·픽스처 URL·Swift prod 주석·DEPLOY 본체·SELF_HOST GATED_DOCS — 원장=각 이슈 코멘트. ITO 개시 후엔 인테이크 우선.
+>
+> **상태 요약**: main=v0.1.0+L-파도 승격 완료 계열·track 정렬 유지·NCP 2대 정지(스왑 도구)·#1361 연기(볼륨 보존)·grok 병렬 1 안정.
+>
+> 이하 스냅샷 47:
+
+> **2026-08-21 스냅샷 47 (Fable · momo-main — ★L-파도 완주·v0.1.0 릴리스·성재=ITO-1만. PLN-20260815-01).** 컴팩트 복원 진입점.
+>
+> **★ 런칭 위생 완결**: **v0.1.0 첫 릴리스**(tag@45a154d2·digest 표·https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.0) · gitleaks PR-range CI 레인 · 기여자 첫 빨강 2건 결정성 수리 · 커뮤니티 문서 4종(CoC v2.1·CODEOWNERS·CHANGELOG·CONTRIBUTING 영문 정본) — 전부 랜딩 후 **승격 main=`b1bf46e9`**(PR #1637)+sync 짝(#1638/#1639·topology 실측 OK). RELEASING.md=발행 반복 절차 정본. SELF_HOST §2-B=실 digest 문면.
+>
+> **오픈소스 런칭 잔여(성재 실테스트 제외)**: L 시리즈 사실상 소진 — 남은 자율 후보: #1635(CI 붕대 제거 — G3 랜딩으로 조건 성립)·arm64 발행(런칭 전 후미·Q3)·워커 티켓 후보 ~25건 선별 파도(#1600~#1604 포함)·H2 amd64 부팅 종단. **런칭 정의 잔여=외부 셀프호스터 3명(ITO 후)**.
+>
+> **★ 성재 다음 = ITO-1 실테스트 시작일 결정뿐**: SELF_HOST_FIRST_DAY 런북·LAUNCH_READY 팩·#1613 가드·v0.1.0 digest 전부 준비 완료. 시작 선언 시 Fable이 bench M1~M5 수거·인테이크 티켓화로 동행. (부수: T-D §8 재발행은 ITO-3 직전·NCP 2대 재기동은 I4 직전 — Fable 소관)
+>
+> **거버넌스**: org Owner 승격 없음 확정(성재 2026-08-21) — kwakseongjae=member 유지, 새 패키지 생성 시에만 owner(여명) 1회 요청. 발행 승인(release env)은 성재 계정 그대로.
+>
+> **워커 체제**: grok 4.6 병렬 1 안정(이 창 완주 5·검수 회전 2 — vite 타입·dockerignore 전부 실결함). 검수=Fable 실검증 재판정 유지.
+>
+> 이하 스냅샷 46:
+
 > **2026-08-21 스냅샷 46 (Fable · momo-main — ★GHCR 첫 발행 완결·컨테이너 공개. PLN-20260815-01).** 컴팩트 복원 진입점.
 >
 > **★ 공개 컨테이너 첫 발행 폐곡선 완결**: 성재 dispatch+release 승인+**법무 검토 승인**(3판단 브리핑 기준 — 원장 #1332) → run success → **app `ghcr.io/yeomyeonggeori/oort@sha256:0fbddd36…`·postgres `…oort-postgres@sha256:c6806369…`** → 패키지 public(org owner 집행 — org 패키지 정책 해제 선행) → 익명 pull·digest 일치·attestation 2본 실측 PASS. 2026-08-10 지시서의 "GHCR 첫 발행" 항목 종결.

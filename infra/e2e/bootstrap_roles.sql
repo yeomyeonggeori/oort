@@ -59,6 +59,14 @@ REVOKE ALL ON FUNCTION momo_join_private.invite_workspace_id(text)
   FROM PUBLIC, momo_relay, momo_worker, momo_notifier;
 GRANT USAGE ON SCHEMA momo_join_private TO momo_app;
 GRANT EXECUTE ON FUNCTION momo_join_private.invite_workspace_id(text) TO momo_app;
+DO $$
+BEGIN
+  IF to_regprocedure('momo_join_private.owner_claim_workspace_id(text)') IS NOT NULL THEN
+    REVOKE ALL ON FUNCTION momo_join_private.owner_claim_workspace_id(text)
+      FROM PUBLIC, momo_relay, momo_worker, momo_notifier;
+    GRANT EXECUTE ON FUNCTION momo_join_private.owner_claim_workspace_id(text) TO momo_app;
+  END IF;
+END $$;
 
 DO $$
 BEGIN
@@ -101,6 +109,32 @@ BEGIN
        'EXECUTE'
      ) THEN
     RAISE EXCEPTION 'relay/worker/notifier must not execute the locked invite lookup';
+  END IF;
+  IF to_regprocedure('momo_join_private.owner_claim_workspace_id(text)') IS NOT NULL THEN
+    IF NOT has_function_privilege(
+         'momo_app',
+         'momo_join_private.owner_claim_workspace_id(text)',
+         'EXECUTE'
+       ) THEN
+      RAISE EXCEPTION 'momo_app must execute the locked claim lookup';
+    END IF;
+    IF has_function_privilege(
+         'momo_relay',
+         'momo_join_private.owner_claim_workspace_id(text)',
+         'EXECUTE'
+       )
+       OR has_function_privilege(
+         'momo_worker',
+         'momo_join_private.owner_claim_workspace_id(text)',
+         'EXECUTE'
+       )
+       OR has_function_privilege(
+         'momo_notifier',
+         'momo_join_private.owner_claim_workspace_id(text)',
+         'EXECUTE'
+       ) THEN
+      RAISE EXCEPTION 'relay/worker/notifier must not execute the locked claim lookup';
+    END IF;
   END IF;
 END
 $$;

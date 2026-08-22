@@ -3,6 +3,9 @@
 > **이 문서 하나로 서버 이미지 릴리스를 완주한다.** 범위는 `v0.x` 태그 +
 > GitHub Release + GHCR 불변 digest 표 + `docs/SELF_HOST.md` 문면이다.
 > 데스크탑 Tauri next 채널은 **다른 절차**다 — [§데스크탑 next 채널과의 경계](#데스크탑-next-채널과의-경계).
+> 공개 데스크탑 설치 파일(dmg)은 서버 `v0.x` Release 의 **자산**으로 붙인다 —
+> [§데스크탑 dmg 공개 릴리스](#데스크탑-dmg-공개-릴리스). 실공증·실업로드는
+> 오케스트레이터다.
 >
 > 태그 push와 GitHub Release 생성은 오케스트레이터가 집행한다. 이 문서는 그
 > 절차의 정본이지, 워커에게 원격 쓰기를 허가하지 않는다.
@@ -52,21 +55,27 @@ Release(digest 표) → SELF_HOST 문면 갱신.**
    `87296259`), `prevent_self_review=false`, deployment branch policy 는
    custom `main` 하나.
 
-3. 워크플로가 `linux/amd64` 로 앱(`ghcr.io/yeomyeonggeori/oort`)과
-   PostgreSQL 18+pgBackRest(`ghcr.io/yeomyeonggeori/oort-postgres`) 두
-   이미지를 push 하고, 각 returned digest 에 SLSA v1 provenance 를 OCI
-   referrer 로 붙인 뒤에만 summary 표를 낸다. `sha-<commit>` 태그는 커밋
-   locator 이지 불변 신원이 아니다.
+3. 워크플로가 native `linux/amd64`(`ubuntu-24.04`)와 native
+   `linux/arm64`(`ubuntu-24.04-arm`) 두 잡에서 앱
+   (`ghcr.io/yeomyeonggeori/oort`)과 PostgreSQL 18+pgBackRest
+   (`ghcr.io/yeomyeonggeori/oort-postgres`) 을 **아키별 digest** 로
+   push·attestation 한 뒤, `buildx imagetools create` 가 두 digest 를
+   manifest list 로 묶고 그 list digest 에도 SLSA v1 provenance 를 OCI
+   referrer 로 붙인 뒤에만 summary 표를 낸다. 각 잡이 GitHub `release`
+   Environment 를 거친다. `sha-<commit>` 태그는 list 에만 붙는 커밋
+   locator 이지 불변 신원이 아니다. QEMU 는 쓰지 않는다.
 
-`arm64` 재발행은 이 문서 밖이다(이슈 #1628 Out of scope). QEMU 로 arm64 를
-만들지 않는다.
+   **첫 multi-arch 발행 실측은 아직 없다.** 아래 §3 표의 v0.1.0 digest 는
+   amd64 단일 이다. 운영자 pin 은 다음 발행부터 list digest 다.
 
 ---
 
 ## 3. digest 수거
 
-run summary 의 「Published release manifest」 표에서 **두 exact digest 를
-함께** 가져온다. `sha-*` 태그나 로컬 retag 는 배포 권위가 아니다.
+run summary 의 「Published release manifest」 표에서 exact digest 를 가져온다.
+v0.1.0 은 앱·postgres **두** digest (amd64 단일). 다음 발행부터 운영자 pin 은
+manifest list digest 두 행이고, 같은 표에 아키별 digest 가 따라온다.
+`sha-*` 태그나 로컬 retag 는 배포 권위가 아니다.
 
 첫 공개 발행 실값 (원장 #1332 코멘트 2026-08-21, 빌드 커밋
 `main=45a154d2`):
@@ -93,8 +102,12 @@ gh attestation verify "oci://$POSTGRES_REF" \
   --predicate-type https://slsa.dev/provenance/v1
 ```
 
-플랫폼: **`linux/amd64` 단일**. Apple Silicon native pull 은 불가했다(실측
-2026-08-21). 에뮬레이션 성공을 가정하지 않는다.
+플랫폼: **다음 발행부터** 워크플로는 `linux/amd64`+`linux/arm64`
+manifest list 를 만든다. **현행 v0.1.0 digest(`main=45a154d2`)는 amd64
+단일** — Apple Silicon 에서 그 digest 의 native pull 은 불가했다(실측
+2026-08-21). 첫 multi-arch digest 실값은 아직 없다. 에뮬레이션 성공을
+가정하지 않는다. 다음 발행의 운영자 pin 은 summary 표의 manifest list
+digest 행이다.
 
 ---
 
@@ -123,9 +136,9 @@ gh release create v0.1.0 \
   --notes-file docs/planning/research/2026-08-21-v0-1-0-release-notes.md
 ```
 
-Release 본문에는 반드시 **digest 표**(§3과 동형)가 들어간다. 초안이 그 표와
-검증 커맨드·amd64 고지를 이미 싣는다. 이후 릴리스는 같은 칸을 새 digest 로
-채운 뒤 SELF_HOST 예시만 따라 고친다. 사람용 변경 이력은
+Release 본문에는 반드시 **digest 표**(§3과 동형)가 들어간다. v0.1.0 초안이
+그 표와 검증 커맨드·amd64 고지를 싣는다. 이후 **첫 multi-arch 릴리스**는
+list digest 를 pin 칸에 두고 아키별 digest 를 같은 표에 남긴다. 사람용 변경 이력은
 [`CHANGELOG.md`](../CHANGELOG.md) — 다음 태그를 자를 때 `[Unreleased]` 를
 새 버전 칸으로 옮긴다.
 
@@ -167,12 +180,103 @@ GitHub Release 다.
 `v0.1.0` 은 next 매니페스트를 올리지 않고, next 발행은 GHCR digest 를
 올리지 않는다. 한 커밋·한 릴리스에 두 절차를 섞지 마라.
 
+공개 dmg 의 번들 버전은 `0.1.0`(태그 `v0.1.0` 과 동일)이고, 파일명은 버전을
+넣지 않는다([§데스크탑 dmg 공개 릴리스](#데스크탑-dmg-공개-릴리스)). next
+채널 스크립트는 `--public` 없이 `0.1.0` 을 거절한다.
+
+---
+
+## 데스크탑 dmg 공개 릴리스
+
+T-2 플레이북이 사람·그록봇에게 줄 **안정 다운로드 URL** 의 정본. 워커는
+`--dry-run` 까지. 실공증·`gh release upload` 는 오케스트레이터/성재.
+
+### 택일 (이 절의 권고)
+
+| 갈래 | 무엇 | 판정 |
+|---|---|---|
+| **(a) 기존 `v0.1.0` Release 에 dmg 자산 첨부** | 서버 digest 표와 같은 GitHub Release | **채택** |
+| (b) 별도 `desktop-v0.1.0` 태그 | 데스크탑만의 Release | 기각 |
+
+**(a) 논거.** GitHub `…/releases/latest/download/<filename>` 은 가장 최근
+**비-prerelease** 를 가리킨다. 지금 `latest` = `v0.1.0`(서버 릴리스, dmg
+자산 없음). 그 Release 에 고정 파일명으로 붙이면 T-2 링크가 즉시 성립하고,
+서버 digest 표가 `/releases/latest` 에서 밀리지 않는다. (b) 를 풀 릴리스로
+만들면 그 태그가 latest 가 되어 이미지 digest 안내가 가려진다. prerelease 로
+만들면 `/releases/latest` 가 dmg 를 안 준다. next 채널(`0.1.0-next.N` →
+`momo-alpha`) 과 저장소가 갈라져 계열도 안 섞인다.
+
+파일명에 버전을 넣지 않는다. latest 패턴이 가리키는 이름은 릴리스마다
+같아야 한다.
+
+**안정 URL (T-2 가 이 문자열을 쓴다):**
+
+```
+https://github.com/yeomyeonggeori/oort/releases/latest/download/oort-macos-aarch64.dmg
+```
+
+태그 고정이 필요하면 같은 자산의
+`https://github.com/yeomyeonggeori/oort/releases/download/v0.1.0/oort-macos-aarch64.dmg`.
+darwin-x86_64 / Windows 는 이 절의 범위가 아니다.
+
+### 절차 (오케스트레이터)
+
+시크릿 3종(minisign 개인키·Developer ID 개인키·notarytool 프로파일)은 **값으로
+출력하거나 채팅/이슈/커밋에 붙이지 말 것.** 존재와 이름만
+[`docs/NEXT_CHANNEL.md`](NEXT_CHANNEL.md) §8.1.
+
+`tauri.conf.json` 의 커밋된 버전은 `0.1.0-next.1` 로 둔다. 공개 번호는
+`--config` 로만 주입한다. `--public` 은 next 매니페스트/`momo-alpha` 를
+건드리지 않는다.
+
+```sh
+# 전제: §8.1. 서명 자산은 로컬 키체인. 워커 증명 = 이 한 줄.
+scripts/publish_next_build.sh --public --version 0.1.0 --dry-run
+```
+
+기대: `bundle/dmg/` 아래에 버전 넣은 tauri dmg + `codesign --verify --strict`
+통과, 로그에 `dry run: stopping before notarization`. `spctl` 은 공증 전이므로
+`Unnotarized Developer ID` 가 정상. 이 호출은 `0.1.0` 을 next 채널에 올리지
+않는다.
+
+```sh
+# 실공증·스테이플 (맥 앞에서). 업로드는 하지 않는다.
+scripts/publish_next_build.sh --public --version 0.1.0
+```
+
+산출 안정 파일: `clients/desktop/src-tauri/target/release/bundle/dmg/oort-macos-aarch64.dmg`.
+스크립트가 찍는 `gh` 한 줄을 사람이 실행한다:
+
+```sh
+gh release upload v0.1.0 \
+  clients/desktop/src-tauri/target/release/bundle/dmg/oort-macos-aarch64.dmg \
+  --repo yeomyeonggeori/oort
+```
+
+`--clobber` 는 같은 이름을 교체할 때만. 태그/Release 자체를 새로 만들지 않는다
+(§5 가 이미 `v0.1.0` 을 만들었다).
+
+확인:
+
+```sh
+curl -sI https://github.com/yeomyeonggeori/oort/releases/latest/download/oort-macos-aarch64.dmg \
+  | grep -Ei '^(HTTP|content-type|location):'
+```
+
+302 가 `releases/download/v0.1.0/oort-macos-aarch64.dmg` 로 끝나면 T-2 링크가
+산다.
+
 ---
 
 ## 이 문서가 하지 않는 것
 
 - 태그/Release 의 원격 쓰기 — 오케스트레이터. 워커는 초안과 문면만.
+- 실발행 dispatch — owner 가 `release` Environment 에서 승인한다. 워크플로
+  계약은 multi-arch 이지만 첫 arm64 digest 실측은 아직 없다.
+  공개 dmg 업로드도 같다(`gh release upload` 는 사람이 실행).
+- next 채널 실발행 — [`docs/NEXT_CHANNEL.md`](NEXT_CHANNEL.md) §8.
 - `linux/arm64` 재발행.
+- darwin-x86_64 / Windows 데스크탑 패키지.
 - 장기 버전 정책(semver 이후 자리).
 - 운영 호스트 배포 — [`docs/runbooks/ncp-rust-deploy.md`](runbooks/ncp-rust-deploy.md).
 - 셀프호스트 첫 로그인 — [`docs/SELF_HOST.md`](SELF_HOST.md).
