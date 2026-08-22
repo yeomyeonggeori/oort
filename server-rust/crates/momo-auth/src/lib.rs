@@ -69,6 +69,7 @@ pub mod hosted_disconnect;
 pub mod hosted_oauth;
 pub mod issue;
 pub mod jwt;
+pub mod owner_claim;
 pub mod realtime;
 pub mod token_store;
 pub mod work_host_request;
@@ -145,6 +146,11 @@ pub use issue::{
 };
 pub use jwt::{
     verify_app_access, verify_app_refresh, AppClaims, AuthError, Principal, PrincipalKind,
+};
+pub use owner_claim::{
+    consume_claim_in_tx, mint_owner_claim_token, normalized_claim_password, normalized_claim_token,
+    resolve_claim_workspace, ClaimInputError, ClaimMutation, ClaimOutcome, ClaimSpecInvalid,
+    OWNER_CLAIM_TOKEN_LEN, OWNER_CLAIM_TTL_SECONDS,
 };
 pub use realtime::{
     realtime_info_string, sign_centrifugo_connection, CentrifugoConnectionClaims,

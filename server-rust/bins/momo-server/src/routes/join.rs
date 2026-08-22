@@ -29,9 +29,9 @@
 //!   `momo_db::with_tenant_tx` under that workspace's scope. The route cannot
 //!   name a workspace even if a client asks it to — there is no workspace field
 //!   in the request body.
-//! * **the route is rate limited per client IP** ([`crate::rate_limit`]). It is
-//!   the only unauthenticated write on the instance and it accepts a bearer
-//!   string in the body.
+//! * **the route is rate limited per client IP** ([`crate::rate_limit`]). It
+//!   accepts a bearer string in the body. `/v1/claim` is the other
+//!   unauthenticated write and uses the same limiter shape on its own budget.
 //!
 //! ## This route owns no SQL
 //!

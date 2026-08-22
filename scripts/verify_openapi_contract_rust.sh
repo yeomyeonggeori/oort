@@ -1925,6 +1925,11 @@ printf '%s' "$GATE_PASSWORD" >"$LOGIN_PASSWORD_FILE"
 sample login post "/v1/auth/login" "/v1/auth/login" 200 \
   "$(jq -cn --arg e "$GATE_EMAIL" --rawfile p "$LOGIN_PASSWORD_FILE" --arg w "$WS" \
       '{email:$e,password:$p,workspace:$w}')"
+# ADR-0166: unknown token is 404 ErrorResponse. Happy-path consume is
+# claim_conformance_pg / verify_owner_claim.sh (this gate's owner already has
+# a password, so a 200 here would require a second tenant).
+sample claim-unknown post "/v1/claim" "/v1/claim" 404 \
+  '{"token":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","password":"unused-claim-password"}'
 ACCESS="$(printf '%s' "$RESPONSE_BODY" | jq -r '.accessToken // empty')"
 REFRESH="$(printf '%s' "$RESPONSE_BODY" | jq -r '.refreshToken // empty')"
 append_secret_with_derivatives "$ACCESS"

@@ -66,6 +66,8 @@ tags:
     description: Session token issuance, rotation, revocation, realtime token.
   - name: join
     description: Public invite self-signup (no auth required).
+  - name: claim
+    description: Public first-owner claim (ADR-0166). One-time token sets the owner password.
   - name: roster
     description: Workspace member roster.
   - name: membership-admin
@@ -306,6 +308,57 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "410":
           description: Invite code expired or revoked.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /v1/claim:
+    post:
+      tags: [claim]
+      operationId: publicClaim
+      summary: Consume a first-owner claim token and set the password (public, no auth).
+      description: >
+        ADR-0166. Redeems a one-time 32-byte claim token issued by momo-migrate
+        claim mode, sets the seeded owner's password in the same transaction,
+        and issues a session token pair. The raw token is never stored (sha256
+        only). Reuse returns 409; expiry returns 410. Per-IP rate limited.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ClaimRequest"
+      responses:
+        "200":
+          description: Password set; session issued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResponse"
+        "400":
+          description: Invalid token or password shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Claim token is invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Token already used, or owner already has a password.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "410":
+          description: Claim token expired.
           content:
             application/json:
               schema:
@@ -6467,6 +6520,19 @@ components:
           $ref: "#/components/schemas/MemoryExternalProviderConsent"
 
     # ---- Auth ----------------------------------------------------------------
+    ClaimRequest:
+      type: object
+      required: [token, password]
+      properties:
+        token:
+          type: string
+          description: >
+            Raw 32-byte claim token (43-char base64url, no padding). Shown once
+            at bootstrap; the server stores only sha256.
+        password:
+          type: string
+          description: Required, at most 1024 chars. Set on the first owner.
+
     LoginRequest:
       type: object
       required: [email, password]

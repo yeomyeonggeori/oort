@@ -146,9 +146,10 @@ GET /v1/workspaces/{workspaceId}/approvals
 POST /v1/workspaces/{workspaceId}/approvals/{approvalId}/decision
 
 # ── 가입 · 로스터 · 채널 (#1132/#1143 잔여 등재) ────────────────────────────
-# `/v1/join` 은 이 서버의 유일한 미인증 쓰기다. 등재는 그 사실을 Rust 에서
+# `/v1/join` 과 `/v1/claim` 이 미인증 쓰기다. 등재는 그 사실을 Rust 에서
 # 실측한다는 뜻이고, 초대 코드는 스펙에 없는 `…/invites` 대신 SQL 픽스처가 준다.
 POST /v1/join
+POST /v1/claim
 GET /v1/workspaces/{workspaceId}/roster
 GET /v1/workspaces/{workspaceId}/members
 GET /v1/workspaces/{workspaceId}/channels
