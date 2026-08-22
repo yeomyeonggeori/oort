@@ -36,7 +36,7 @@
 | 페이즈 | 시나리오 | 이 팩의 자리 | 성공 판정 (ITO 정본 §4) |
 |---|---|---|---|
 | ITO-1 | H1 깨끗한 환경 첫 설치(로컬 빌드) | Day 0 | M1–M3 측정 · 문서 밖 임기응변 0 · 브라우저 로그인 도달 |
-| ITO-1 | H2 digest pull | Day 0 (조건부) | `SELF_HOST.md:88` `runtime-unverified` 해소. GHCR 미발행이면 `SKIP(L2)` |
+| ITO-1 | H2 digest pull | Day 0 (조건부) | 첫 발행·익명 pull·attestation PASS(원장 #1332 코멘트 2026-08-21). amd64 부팅 실측은 잔여(Apple Silicon native pull 불가만 실측). 구 `SKIP(L2 unpublished)`는 해당 없음 |
 | ITO-1 | H3 도메인+TLS 1회 | Day 0 (조건부) | 외부 브라우저 HTTPS 로그인. 이 회전이 루프백만이면 `SKIP(public host)` |
 | ITO-2 | O1 오퍼레이터 부트스트랩 | Day 1 | `PLATFORM_ADMIN_EMAILS` + `PROVIDER_LINK_MASTER_KEY` 배선 → 설정 표면 도달 |
 | ITO-2 | O2 워크스페이스·초대·둘째 사용자 | Day 1 | 웹 GUI 초대 + 조인 링크(웹) + `oort://join`(데스크탑) |
@@ -110,7 +110,7 @@ Mock provider는 메신저 도그푸드용. `LAUNCH_READY`에서 «에이전트 
 | Worktree | `git status --short --branch` | 깨끗한 알파 워크트리, 커밋 기록 |
 | H1 로컬 빌드 | `docs/SELF_HOST.md` 1–4장을 **그대로**. `scripts/self_host_env.sh --local-build` 그리고 스크립트가 인쇄한 `scripts/self_host_env.sh --compose up -d --build --wait` | 브라우저 로그인 + 채널 목록(`agent-lab` · `general`, 목록에는 `#` 없음 — `SELF_HOST.md:173-175`) + 메시지 1건. 문서 밖 임기응변 0 |
 | H1 측정 | `scripts/bench_onboarding.sh run` (또는 `plan` 후 `run`) | M1–M3 기록. 기준선은 §0.2. 새 시간을 지어내지 말 것 |
-| H2 digest pull | `SELF_HOST.md` §2 B. `IMAGE_REF='ghcr.io/yeomyeonggeori/oort@sha256:…'` | 발행된 digest가 없으면 **`SKIP(L2 unpublished)`** — `SELF_HOST.md:88`이 아직 `runtime-unverified`. 이 SKIP만으로 팩 전체를 `BLOCKED`로 만들지 않는다 |
+| H2 digest pull | `SELF_HOST.md` §2 B. `IMAGE_REF='ghcr.io/yeomyeonggeori/oort@sha256:…'` | 첫 발행·익명 pull·attestation PASS(원장 #1332 코멘트 2026-08-21, 패키지 public, amd64 단일). **amd64 부팅 실측은 잔여** — Apple Silicon native pull 불가만 실측(2026-08-21). 구 `SELF_HOST.md:88` `runtime-unverified`·`SKIP(L2 unpublished)` 문면은 해당 없음. 이 잔여만으로 팩 전체를 `BLOCKED`로 만들지 않는다 |
 | H3 도메인+TLS | `SELF_HOST.md` §운영 + `docs/runbooks/ncp-rust-deploy.md` | 이 회전이 루프백이면 **`SKIP(public host)`**. `caddy.override.yml`을 노트북에서 이름 부르지 마라(`SELF_HOST.md:332-337`) |
 | Docs gate | `scripts/local_gate.sh --profile docs` | PASS 증거 경로 |
 | 이슈판 | `scripts/goal_status.sh --repo yeomyeonggeori/oort` | 이 실행을 막는 열린 P0/P1 없음 |
@@ -124,7 +124,7 @@ Day 0 출력:
 - Worktree:
 - H1 (SELF_HOST 1–4, 임기응변 횟수):
 - bench_onboarding M1/M2/M3 (값 + 증거 경로):
-- H2: PASS / SKIP(L2 unpublished) / FAIL
+- H2: PASS / 잔여(amd64 부팅 미실측) / FAIL
 - H3: PASS / SKIP(public host) / FAIL
 - Docs gate:
 - Open P0/P1:
@@ -379,7 +379,7 @@ ITO 산출 증거는 로컬에 두고 보고서만 레포/이슈로 올린다.
 | ID | 하는 일 | 바로 가는 곳 |
 |---|---|---|
 | H1 | 로컬 빌드 첫 설치 | `docs/SELF_HOST.md` 1–4 · Day 0 |
-| H2 | digest pull | `SELF_HOST.md` §2 B · 미발행이면 SKIP |
+| H2 | digest pull | `SELF_HOST.md` §2 B · 첫 발행 완료(원장 #1332). amd64 부팅 실측은 잔여 |
 | H3 | 도메인+TLS | `SELF_HOST.md` §운영 · `docs/runbooks/ncp-rust-deploy.md` |
 | O1 | 키 둘 | `SELF_HOST.md` §5 · Day 1 |
 | O2 | GUI 초대 + 합류 | 설정 › 멤버와 초대 · `docs/onboarding-deeplink.md` · Day 1. 통합 첫 하루 런북은 T-B(#1608) |

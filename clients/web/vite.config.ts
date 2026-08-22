@@ -162,9 +162,9 @@ export default defineConfig({
   // Pin TZ at worker spawn, before any ESM evaluation. quotaModel.test.ts
   // asserts KST clock strings from UTC fixtures ("2026-07-26T13:00:00Z" →
   // "22:00"). CI run 31364003821: TZ=UTC made that one file 9-red; the other
-  // 49 web files were TZ-independent. CI's `env.TZ` is only a runner bandage
-  // (#1267) — a local `npm test` from UTC (external contributor) still went
-  // red. process.env.TZ inside the test file is too late: ESM hoists imports.
+  // 49 web files were TZ-independent. This inject is the SoT (#1267, #1635) —
+  // a runner-level `env.TZ` in pr-ci would hide a local UTC `npm test`.
+  // process.env.TZ inside the test file is too late: ESM hoists imports.
   //
   // `defineConfig` stays on `vite` (this app is Vite 6). `vitest/config`'s
   // defineConfig is typed against vitest 2.1's nested Vite 5, so Plugin

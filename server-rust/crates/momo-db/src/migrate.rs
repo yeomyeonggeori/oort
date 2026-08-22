@@ -379,19 +379,22 @@ mod tests {
     /// closes the session to teammates, and the window carries the value it
     /// displaced so the close can put back what the owner had chosen rather than
     /// guessing at a default.
+    ///
+    /// 078 is ADR-0166 T-1's `owner_claim`: first-owner bootstrap token hash
+    /// plus TTL plus single-use `consumed_at`. The raw token never lands here.
     #[test]
-    fn discovers_contiguous_migrations_001_to_077() {
+    fn discovers_contiguous_migrations_001_to_078() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
         assert_eq!(
             migrations.len(),
-            77,
-            "expected 77 migrations under {}",
+            78,
+            "expected 78 migrations under {}",
             dir.display()
         );
         assert_eq!(migrations.first().unwrap().version, 1);
-        assert_eq!(migrations.last().unwrap().version, 77);
+        assert_eq!(migrations.last().unwrap().version, 78);
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
 
         for (i, migration) in migrations.iter().enumerate() {

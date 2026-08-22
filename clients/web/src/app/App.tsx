@@ -4,6 +4,8 @@ import { queryClient } from "@/app/queryClient";
 import { useRestoredSession } from "@/app/session";
 import { startUpdateWatch } from "@/features/updates/store";
 import { ConnectPage } from "@/features/auth/ConnectPage";
+import { ClaimPage } from "@/features/auth/ClaimPage";
+import { isClaimPath } from "@/features/auth/claimPath";
 import { AppShell } from "@/app/AppShell";
 import { SkeletonRows } from "@/features/common/States";
 import { RenderErrorBoundary } from "@/features/common/RenderErrorBoundary";
@@ -36,6 +38,12 @@ export function App() {
   // why they are stuck. No-op in a browser tab.
   useEffect(() => startUpdateWatch(), []);
 
+  useEffect(() => {
+    if (session && isClaimPath(window.location.pathname)) {
+      window.history.replaceState(null, "", "/");
+    }
+  }, [session]);
+
   // OAuth resource-owner consent 는 HashRouter 밖의 실경로다(#1369). provider
   // 리다이렉트가 `/oauth/consent?request=...` 로 떨어뜨리는데, 그 쿼리는 해시가
   // 아니라 진짜 쿼리 문자열에 있어 `<Routes>` 가 잡지 못한다(oauthConsentPath.ts).
@@ -55,6 +63,10 @@ export function App() {
         <SkeletonRows rows={4} className="p-6" />
       </div>
     );
+  }
+
+  if (isClaimPath(window.location.pathname) && !session) {
+    return <ClaimPage onLoggedIn={signIn} />;
   }
 
   if (!session) {

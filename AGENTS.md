@@ -24,7 +24,7 @@ oort = AI 에이전트가 사람과 **동등한 1급 멤버**(`member.kind='agen
 
 > ### ⚠️ Swift 트리는 은퇴 중 — 여기에 새로 짓지 마라
 > `clients/macOS`·`clients/iOS`·`clients/Core`는 **삭제됐다**(W-S1 / #1215 — 이식 원본은 git 이력에 있다). `server/Sources`(Hummingbird 2), `relay/OutboxRelay`, `workers/*`, `services/*`는 **아직 레포에 있지만 삭제 대기**다. 문서가 `swift build`를 시키더라도 그것은 현행 제품을 짓는 명령이 아니다 — 그 경로는 **실패하지 않고 잘못된 것을 성공적으로 짓는다**.
-> **은퇴 아님(계속 살아 있는 것):** ① `server/Migrations/*.sql` — Rust 이미지가 그대로 싣는 **정본 DDL**. ② `relay/PushRelay` — 라이브 푸시 경로가 지금도 빌드·배포하는 Swift 컴포넌트(`infra/rust/docker-compose.push.build.yml`). ③ `clients/web-legacy` — UI 개발은 `clients/web`로 옮겨 갔지만 **알파가 실제로 서빙하는 산출물**은 아직 이쪽이다(`infra/prod/Dockerfile.web`, ADR-0133 parity 게이트 전까지).
+> **은퇴 아님(계속 살아 있는 것):** ① `server/Migrations/*.sql` — Rust 이미지가 그대로 싣는 **정본 DDL**. ② `relay/PushRelay` — 라이브 푸시 경로가 지금도 빌드·배포하는 Swift 컴포넌트(`infra/rust/docker-compose.push.build.yml`). ③ `clients/web-legacy` — 삭제 아님. **라이브 웹은 `clients/web`**(`server-rust/Dockerfile:147,157,173,231` → `/opt/momo/web/` · `web-assets`, `infra/rust/caddy.override.yml:85-87`, #1228). web-legacy는 Swift prod `infra/prod/Dockerfile.web` · e2e `web-init`(`infra/docker-compose.e2e.yml:390-400`) · `--profile web`가 아직 소비(이분, #1610 README).
 
 **핵심 쓰기경로(절대 깨지 말 것):** `REST send → (channel_seq bump + message INSERT + outbox INSERT) 단일 tx → momo-relay가 Centrifugo /api/publish`. 클라는 절대 Centrifugo로 직접 publish 안 함. Postgres=SoT, Centrifugo=전송계층. 순서 SoT=`message.seq`.
 
@@ -57,10 +57,10 @@ server-rust/             Rust/Axum 워크스페이스(ADR-0145). bins/{momo-serv
 server/Migrations/       **정본 DDL**(00N_*.sql). Rust 이미지가 그대로 싣는다 — 은퇴 아님
 schema_v0.sql            정본 스키마(PostgreSQL 18, uuidv7() PK, RLS FORCE) — 읽기 전용, 이동/수정 금지
 packages/momo-core/      @momo/core — 웹·모바일이 공유하는 TS 도메인 코어(레포 루트 npm 워크스페이스)
-clients/web/             React/Vite SPA — 제품 웹 표면이자 데스크톱이 감싸는 번들
+clients/web/             React/Vite SPA — 제품 웹 표면이자 데스크톱이 감싸는 번들. **라이브 서빙**(`server-rust/Dockerfile:147,157,173,231` web-assets / #1228)
 clients/desktop/         Tauri 2 셸(딥링크·mDNS·알림·키체인·업데이터). UI를 포크하지 않는다
 clients/mobile/          React Native 앱(현재 iOS)
-clients/web-legacy/      ADR-0119 v0 웹 — **알파가 실제로 서빙하는 산출물**(parity 게이트 전까지)
+clients/web-legacy/      ADR-0119 v0 웹 — 삭제 아님. 라이브 서빙은 `clients/web`. Swift prod Dockerfile·e2e web-init·`--profile web`가 아직 소비(#1610)
 adapters/hermes/         momo_adapter.py(BasePlatformAdapter) + plugin.yaml (py3)
 adapters/prime/          prime-agent 어댑터(하네스 refine·스트림 릴레이)
 infra/rust/              **라이브 배포 경로** — Rust 이미지 compose + Caddyfile(정본) + 푸시/폰 오버레이
@@ -180,7 +180,7 @@ Closes #<issue>
 ```
 - **절대 하지 말 것:** 시크릿 커밋(`.env`, `.env.worktree`), `schema_v0.sql` 수정/이동, `.build/`·`*.resolved`·`DerivedData/`·`.swiftpm/` 커밋, 무관한 리팩터, 의존성 메이저 임의 변경, 다른 패키지 깨기, **게이트(M7) PASS 기록 전 `release-*.yml` 트리거**(§7).
 - **Rust:** `rustfmt` 기본값(`cargo fmt`), clippy 경고 0(`-D warnings`). 도메인은 crate 경계로 가른다 — 쓰기경로는 `momo-messaging`, 발행은 `momo-outbox`. 쓰기 경로는 **단일 트랜잭션**, `sqlx` 런타임 쿼리 API(컴파일타임 `query!` 매크로 금지 — 라이브 DB 없이 빌드돼야 한다).
-- **TypeScript:** 도메인 모델은 `@momo/core`에만 두고 웹·폰이 import(사본 금지 — 사본이 갈라진 자리가 U4-6 B1이다). 생성 타입(`clients/web-legacy/src/api/schema.d.ts` — 서빙 산출물 쪽)은 손으로 고치지 말고 `docs/api/openapi.yaml`에서 재생성(`scripts/verify_web_generated_types.sh`가 드리프트를 잡는다).
+- **TypeScript:** 도메인 모델은 `@momo/core`에만 두고 웹·폰이 import(사본 금지 — 사본이 갈라진 자리가 U4-6 B1이다). 생성 타입(`clients/web-legacy/src/api/schema.d.ts` — `--profile web` 게이트 대상; 라이브 서빙은 `clients/web`)은 손으로 고치지 말고 `docs/api/openapi.yaml`에서 재생성(`scripts/verify_web_generated_types.sh`가 드리프트를 잡는다).
 - **UI 작업:** `.claude/skills/momo-design-taste/SKILL.md`가 표면 라우터다 — 웹·데스크톱(`clients/desktop`은 `clients/web/dist`를 그대로 낸다)은 `momo-design-taste-web`, 폰(`clients/mobile`)은 전용 dialect가 **없고** 정본 `docs/design-system/README.md` + `clients/mobile/src/design/tokens.ts`가 규칙이다. 하드 룰(토큰 색/텍스트 롤/스페이싱 스케일/AI-Tells 금지)과 mechanical pre-flight(`scripts/design_preflight_web.sh` — 폰에는 없으니 리포트에 그렇게 적는다)를 준수하고, 사람 리뷰 요청 전 design-review 리포트(Blocker 0)를 PR evidence에 포함한다.
 
 ## 6. 다음 티켓 선택법 (자율 picker)

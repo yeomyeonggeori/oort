@@ -36,6 +36,25 @@
 - **Docker/디스크**: "자주 저러는" 원인=디스크 99% 포화(worktrees 148G, cargo target). cargo clean 67GB 회수(→92%)+앱 재설치·데몬 복구(29.7.2). translocation 잔여는 성재 brew 재설치로 정리(비차단). **정정(성재 지적): 로컬 Docker는 그록봇-오퍼레이터 테스트 임계경로 아님** — S1 별개 축.
 - 정본 `research/2026-08-22-grok-cdp-control-and-operator-host.md` · 재개 핸드오프 `handoffs/2026-08-22-grok-selfhost-resume-handoff.md`. 대기: Q-CTRL(SEND 자동화 허용?)·Q-HOST(호스트 재사용 vs 신규).
 
+## 2026-08-22 (Fable) · 신규 축 발제: 에이전트-운영 셀프호스팅(AOP) — 리서치·계획 상신
+- **성재 발제**: 로컬 그록봇이 핸드오프 하나로 oort를 컨테이너로 띄우고(호스팅·주소·알림·웹훅 전 기능) 업데이트·서버관리까지 하는 형태. 선행: 그록봇 VM co-host 브리핑(동일 채팅 — co-host=조건부 찬성·무료 공용=ADR 필요·localhost 착시 정정).
+- **정본**: `research/2026-08-22-agent-operated-selfhost-grokbot.md` — 판정=agent-native 정체성의 자연 연장·기존 자산 정합 높음(발명 최소). 갭 6(AOR 부재·#1265 웹훅 인바운드·외부 접속 택일(#1239 선행)·알림 범위표·에이전트 시크릿 규율·Day-2는 AOR 흡수).
+- **계획 S1~S4**: S1 에이전트 설치 스파이크(grok 헤드리스+현행 SELF_HOST만·제로 코드 — ITO-1의 에이전트 버전) → S2 AOR 신설+무개입 완주 재실측 → S3 외부 접속+#1265 이식 → S4 다이얼인 관리(#1361 소화 가능). 결정 큐 Q1~Q4(발사·표적·G-C 재료·ITO 별개 유지 권장).
+- 대기: 성재 Q1(S1 발사) 승인.
+
+## 2026-08-22 (Fable) · 대기 큐 4/4 완주 — 붕대 제거·문서 진실성·라벨 현행화·arm64 워크플로. 성재=실테스트만
+- **#1635**: pr-ci 붕대 2건 제거(web TZ pin·mobile inboxApproval 제외 — 71/71 실검증)+재도입 RED 가드. **#1641**: 루트 계약 6좌표+동류 2줄의 web-legacy 실서빙 거짓 이분 정정(잔여 grep 판정표). **#1642**: 발행 실측 라벨 현행화(H2 amd64 정직 라벨 보존)+GATED_DOCS 3종 편입(439 fact·15문서). **#1643**: publish-images **multi-arch 준비**(native ubuntu-24.04-arm·digest-only push→manifest list 합성·attestation=아키4+list2·pin=list — 실발행=성재 클릭).
+- **운영 사고 2건 해소**: ①디스크 ENOSPC(도커 빌드캐시 5GB+1330 워크트리 target 9GB 회수 — 39Gi 확보) ②STATUS 상단 경합 DIRTY 2건(#1642 선랜딩과 충돌 — 루프가 BEHIND만 처리해 정체. 교훈: **머지 루프에 DIRTY 즉시 탈출 분기 필수**·STATUS 상단은 순차 랜딩 시 상습 충돌면).
+- **성재 잔여 목록(전량)**: ①ITO-1 실테스트 시작일 ②다음 발행 창에서 multi-arch dispatch+release 승인 클릭(→arm64 실측 digest 기입은 Fable) ③(선택) T-D §8 재발행=ITO-3 직전 ④(대기) 여명님 org 정리 없음 — Owner 승격 안 함 확정.
+- 백로그 잔여(자율 후보): DCO CI·드리프트 게이트·볼륨 소유자 라벨·픽스처 URL·Swift prod 주석·DEPLOY 본체·#1600~#1604 제품 파도 — 각 이슈 코멘트 원장.
+
+## 2026-08-21 (Fable) · L-파도 4/4 완주 — ★v0.1.0 첫 릴리스·gitleaks CI·커뮤니티 문서·승격 b1bf46e9
+- **★v0.1.0 발행**: tag@45a154d2+GitHub Release(digest 표·검증 커맨드·amd64 고지) — SECURITY.md 「최신 v0.x」 약속 성립. G1(#1628 — RELEASING.md·SELF_HOST digest 실값·:88 라벨 해소).
+- **G2(#1629)**: gitleaks PR-range 레인(8.30.1 tarball+sha256 pin·fail-closed·fork 안전) — 자기 PR 첫 실전 통과. **G3(#1267/#1268)**: 기여자 첫 빨강 결정성(TZ 주입·waitFor 분리 — UTC 빨강 재현·linux 1628ms 실측·3회×2플랫폼) — 검수 회전 1(vite.config tsc TS2769: Vite5/6 타입 충돌). **G4(#1630)**: CoC v2.1·CODEOWNERS·CHANGELOG 시드·CONTRIBUTING 영문 정본+ko.
+- **승격 2회차**: main=`b1bf46e9`(PR #1637 — 커뮤니티 문서가 Community Standards 가시권 도달)+sync 짝 #1638/#1639 topology 복원.
+- **거버넌스 확정**: org Owner 승격 없음(성재) — 새 패키지 생성 시에만 owner(여명) 1회 요청. 후속 티켓: #1635(CI 붕대 제거)+워커 후보 ~13건 이슈 코멘트 원장.
+- **성재 앞 잔여 = ITO-1 실테스트 시작일 결정뿐.** grok 누계: 이 창 구현 완주 5·검수 회전 2(전부 실결함)·병렬 1 안정.
+
 ## 2026-08-21 (Fable) · ★GHCR 첫 발행 완결 — 법무 승인·public 전환·attestation 실측·arm64 경계 실증
 - **발행 폐곡선**: 성재 dispatch+release 승인 → run 32461307786 success → digest 2본(app `0fbddd36…`·postgres `c6806369…`) attestation 동반. **법무 검토 승인**(성재 발화 — 브리핑 3판단: OS 레이어 copyleft 관행 수준·성실 이행 범위·상표 인지) 원장 기록(#1332 코멘트).
 - **public 전환**: kwakseongjae=org **member**라 패키지 관리 불가 발견 → org owner(lifeissea)가 집행(org 패키지 정책 해제 선행). 익명 pull 토큰·digest 일치·`gh attestation verify` 2본 전부 실측 PASS. **Owner 승격 요청 전달됨**(재발 방지).
