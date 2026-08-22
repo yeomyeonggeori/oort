@@ -22,6 +22,12 @@
 //! stack stays unloginable, which is the fail-closed default rather than an
 //! oversight (#1227 red proof).
 //!
+//! **#1651 / ADR-0166 — claim-token opt-in.** `MOMO_BOOTSTRAP_CLAIM=1` with
+//! `MOMO_INITIAL_OWNER_EMAIL` (and *without* `MOMO_INITIAL_OWNER_PASSWORD`)
+//! creates the owner as claim-pending and prints `MOMO_CLAIM_PATH=/claim/<token>`
+//! once. The existing password path is unchanged. The two modes together are
+//! exit 2.
+//!
 //! What it does NOT do: own any SQL. Every migration is applied by
 //! [`momo_db::migrate::run_migrations`] (psql, single transaction per file,
 //! `schema_migrations` tracking — B0/B1.6), and the two role files are the
@@ -45,6 +51,8 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::Engine as _;
 use momo_db::migrate::{discover_migrations, run_migrations, Migration, SeedMode};
 
 mod pitr;
@@ -311,6 +319,15 @@ fn psql_scalar(database_url: &str, sql: &str, label: &str) -> Result<String, Mig
 /// parity); secrets inside the file come from the inherited environment via
 /// `\getenv`, never from argv.
 fn psql_file(database_url: &str, file: &Path, label: &str) -> Result<(), MigrateError> {
+    psql_file_with_env(database_url, file, label, &[])
+}
+
+fn psql_file_with_env(
+    database_url: &str,
+    file: &Path,
+    label: &str,
+    extra_env: &[(&str, &str)],
+) -> Result<(), MigrateError> {
     if !file.is_file() {
         return Err(MigrateError::Failed(format!(
             "{label}: SQL file not found at {}",
@@ -318,17 +335,20 @@ fn psql_file(database_url: &str, file: &Path, label: &str) -> Result<(), Migrate
         )));
     }
     let psql = resolve_psql()?;
-    let status = Command::new(psql)
+    let mut command = Command::new(psql);
+    command
         .arg(database_url)
         .args(["-v", "ON_ERROR_STOP=1"])
         .arg("--no-psqlrc")
         .arg("--quiet")
         .arg("-f")
-        .arg(file)
-        .status()
-        .map_err(|source| {
-            MigrateError::Failed(format!("{label}: failed to spawn psql: {source}"))
-        })?;
+        .arg(file);
+    for (key, value) in extra_env {
+        command.env(key, value);
+    }
+    let status = command.status().map_err(|source| {
+        MigrateError::Failed(format!("{label}: failed to spawn psql: {source}"))
+    })?;
     if !status.success() {
         return Err(MigrateError::Failed(format!(
             "{label}: psql exited with {:?}",
@@ -512,6 +532,11 @@ fn migrate() -> Result<(), MigrateError> {
 /// The two variables that name the first owner. `set-owner` requires them; the
 /// `migrate` command treats them as an optional first-boot bootstrap.
 const OWNER_ENV_KEYS: [&str; 2] = ["MOMO_INITIAL_OWNER_EMAIL", "MOMO_INITIAL_OWNER_PASSWORD"];
+const CLAIM_ENV_KEY: &str = "MOMO_BOOTSTRAP_CLAIM";
+/// Sealed with ADR-0166 / T-1. Must match `momo_auth::OWNER_CLAIM_TTL_SECONDS`.
+const OWNER_CLAIM_TTL_SECONDS: i64 = 24 * 60 * 60;
+const SEEDED_WORKSPACE_ID: &str = "00000000-0000-7000-8000-000000000001";
+const SEEDED_OWNER_MEMBER_ID: &str = "00000000-0000-7000-8000-000000000101";
 
 /// #1227 — the first-boot owner bootstrap that runs at the end of `migrate`.
 ///
@@ -531,13 +556,15 @@ const OWNER_ENV_KEYS: [&str; 2] = ["MOMO_INITIAL_OWNER_EMAIL", "MOMO_INITIAL_OWN
 fn bootstrap_owner(database_url: &str) -> Result<(), MigrateError> {
     let email = env(OWNER_ENV_KEYS[0]);
     let password = env(OWNER_ENV_KEYS[1]);
-    match plan_owner_bootstrap(email.as_deref(), password.as_deref())? {
+    let claim = parse_flag(CLAIM_ENV_KEY, env(CLAIM_ENV_KEY).as_deref(), false)?;
+    match plan_owner_bootstrap(email.as_deref(), password.as_deref(), claim)? {
         OwnerBootstrapPlan::Closed => {
             println!(
                 "[migrate] no bootstrap owner requested — migration 012 keeps the seeded \
                  password locked and login is closed. Set {} and {} to open it \
-                 (re-runs are no-ops); rotate later with `migrate set-owner`.",
-                OWNER_ENV_KEYS[0], OWNER_ENV_KEYS[1]
+                 (re-runs are no-ops); or set {}=1 with {} for a one-time claim URL. \
+                 Rotate later with `migrate set-owner`.",
+                OWNER_ENV_KEYS[0], OWNER_ENV_KEYS[1], CLAIM_ENV_KEY, OWNER_ENV_KEYS[0]
             );
             Ok(())
         }
@@ -556,6 +583,12 @@ fn bootstrap_owner(database_url: &str) -> Result<(), MigrateError> {
             );
             Ok(())
         }
+        OwnerBootstrapPlan::Claim => {
+            let email = email.ok_or_else(|| {
+                MigrateError::Failed("claim plan selected without an email".to_string())
+            })?;
+            bootstrap_owner_claim(database_url, &email)
+        }
     }
 }
 
@@ -565,16 +598,19 @@ fn bootstrap_owner(database_url: &str) -> Result<(), MigrateError> {
 enum OwnerBootstrapPlan {
     /// No bootstrap requested — leave migration 012's lock in place.
     Closed,
-    /// Both values present: hand them to the only-if-absent SQL.
+    /// Both password values present: hand them to the only-if-absent SQL.
     Apply,
+    /// Claim opt-in: email present, password absent, `MOMO_BOOTSTRAP_CLAIM=1`.
+    Claim,
 }
 
 fn plan_owner_bootstrap(
     email: Option<&str>,
     password: Option<&str>,
+    claim: bool,
 ) -> Result<OwnerBootstrapPlan, MigrateError> {
-    match (email, password) {
-        (None, None) => Ok(OwnerBootstrapPlan::Closed),
+    match (email.is_some(), password.is_some(), claim) {
+        (false, false, false) => Ok(OwnerBootstrapPlan::Closed),
         // #1234 retired the spelling guard that used to stand here. It refused a
         // mixed-case `MOMO_INITIAL_OWNER_EMAIL` because the address was stored
         // `lower(btrim(...))` while `verify_password_login` compared
@@ -588,15 +624,115 @@ fn plan_owner_bootstrap(
         // Keeping a fail-closed refusal whose stated reason no longer holds is
         // worse than no guard: it teaches the next reader something untrue about
         // the auth path and charges an env edit for nothing.
-        (Some(_), Some(_)) => Ok(OwnerBootstrapPlan::Apply),
+        (true, true, false) => Ok(OwnerBootstrapPlan::Apply),
+        (true, false, true) => Ok(OwnerBootstrapPlan::Claim),
+        (true, true, true) => Err(MigrateError::Usage(format!(
+            "{CLAIM_ENV_KEY}=1 cannot be set together with {}",
+            OWNER_ENV_KEYS[1]
+        ))),
+        (false, false, true) => Err(MigrateError::Usage(format!(
+            "{CLAIM_ENV_KEY}=1 requires {}",
+            OWNER_ENV_KEYS[0]
+        ))),
         // A half-filled env file is a typo, and reading it as "off" would lock
         // the operator out behind a green boot log — the exact failure #1227
         // exists to remove. Exit 2, naming the key that is actually set.
-        (present, _) => Err(MigrateError::Usage(format!(
+        (present_email, _, _) => Err(MigrateError::Usage(format!(
             "{} and {} must be set together (only {} has a value)",
             OWNER_ENV_KEYS[0],
             OWNER_ENV_KEYS[1],
-            OWNER_ENV_KEYS[usize::from(present.is_none())]
+            OWNER_ENV_KEYS[usize::from(!present_email)]
+        ))),
+    }
+}
+
+fn mint_claim_token() -> Result<String, MigrateError> {
+    let mut secret = [0_u8; 32];
+    getrandom::getrandom(&mut secret).map_err(|error| {
+        MigrateError::Failed(format!("claim token entropy unavailable: {error}"))
+    })?;
+    Ok(URL_SAFE_NO_PAD.encode(secret))
+}
+
+fn claim_plan_sql() -> String {
+    format!(
+        "SELECT CASE \
+           WHEN NOT EXISTS ( \
+             SELECT 1 FROM human h \
+             JOIN member m ON m.id = h.member_id AND m.workspace_id = h.workspace_id \
+             JOIN workspace_membership wm \
+               ON wm.workspace_id = m.workspace_id AND wm.member_id = m.id AND wm.role = 'owner' \
+            WHERE h.member_id = '{SEEDED_OWNER_MEMBER_ID}' \
+              AND h.workspace_id = '{SEEDED_WORKSPACE_ID}' \
+              AND m.kind = 'human' AND m.status = 'active' AND m.deleted_at IS NULL \
+           ) THEN 'absent' \
+           WHEN EXISTS ( \
+             SELECT 1 FROM human h \
+            WHERE h.member_id = '{SEEDED_OWNER_MEMBER_ID}' \
+              AND h.workspace_id = '{SEEDED_WORKSPACE_ID}' \
+              AND h.password_hash IS NOT NULL AND h.password_hash <> '' \
+           ) THEN 'password' \
+           WHEN EXISTS ( \
+             SELECT 1 FROM owner_claim c \
+            WHERE c.workspace_id = '{SEEDED_WORKSPACE_ID}' \
+              AND c.member_id = '{SEEDED_OWNER_MEMBER_ID}' \
+              AND c.consumed_at IS NULL \
+              AND c.expires_at > now() \
+           ) THEN 'live' \
+           ELSE 'issue' \
+         END \
+         FROM (SELECT set_config('app.workspace_id', '{SEEDED_WORKSPACE_ID}', true)) AS guc"
+    )
+}
+
+fn claim_plan(database_url: &str) -> Result<String, MigrateError> {
+    psql_scalar(database_url, &claim_plan_sql(), "bootstrap-claim-plan")
+}
+
+fn bootstrap_owner_claim(database_url: &str, email: &str) -> Result<(), MigrateError> {
+    match claim_plan(database_url)?.as_str() {
+        "absent" => {
+            println!("[migrate] bootstrap claim skipped — no active owner to adopt");
+            println!("MOMO_BOOTSTRAP_CLAIM=absent");
+            Ok(())
+        }
+        "password" => {
+            println!("[migrate] bootstrap claim skipped — owner already has a password");
+            println!("MOMO_BOOTSTRAP_CLAIM=skipped");
+            Ok(())
+        }
+        "live" => {
+            println!(
+                "[migrate] bootstrap claim skipped — a live claim already exists (not reprinted)"
+            );
+            println!("MOMO_BOOTSTRAP_CLAIM=skipped");
+            Ok(())
+        }
+        "issue" => {
+            let token = mint_claim_token()?;
+            let file = runtime_path(
+                "MOMO_BOOTSTRAP_OWNER_CLAIM_SQL",
+                "infra/prod/bootstrap_owner_claim_if_absent.sql",
+                "/opt/momo/sql/bootstrap_owner_claim_if_absent.sql",
+            )?;
+            let ttl = OWNER_CLAIM_TTL_SECONDS.to_string();
+            psql_file_with_env(
+                database_url,
+                &file,
+                "bootstrap-owner-claim",
+                &[
+                    (OWNER_ENV_KEYS[0], email),
+                    ("MOMO_BOOTSTRAP_CLAIM_TOKEN", &token),
+                    ("MOMO_OWNER_CLAIM_TTL_SECONDS", &ttl),
+                ],
+            )?;
+            println!("[migrate] bootstrap claim issued");
+            println!("MOMO_BOOTSTRAP_CLAIM=created");
+            println!("MOMO_CLAIM_PATH=/claim/{token}");
+            Ok(())
+        }
+        other => Err(MigrateError::Failed(format!(
+            "unexpected claim plan: {other}"
         ))),
     }
 }
@@ -665,7 +801,7 @@ mod tests {
     #[test]
     fn an_unset_owner_environment_leaves_the_lock_in_place() {
         assert_eq!(
-            plan_owner_bootstrap(None, None),
+            plan_owner_bootstrap(None, None, false),
             Ok(OwnerBootstrapPlan::Closed)
         );
     }
@@ -673,9 +809,33 @@ mod tests {
     #[test]
     fn both_owner_variables_request_the_only_if_absent_write() {
         assert_eq!(
-            plan_owner_bootstrap(Some("owner@example.com"), Some("s3cret")),
+            plan_owner_bootstrap(Some("owner@example.com"), Some("s3cret"), false),
             Ok(OwnerBootstrapPlan::Apply)
         );
+    }
+
+    #[test]
+    fn claim_opt_in_with_email_and_no_password_is_the_claim_plan() {
+        assert_eq!(
+            plan_owner_bootstrap(Some("owner@example.com"), None, true),
+            Ok(OwnerBootstrapPlan::Claim)
+        );
+    }
+
+    #[test]
+    fn claim_and_password_together_are_a_usage_error() {
+        let error = plan_owner_bootstrap(Some("owner@example.com"), Some("s3cret"), true)
+            .expect_err("must reject");
+        assert_eq!(error.exit_code(), 2);
+        assert!(error.to_string().contains(CLAIM_ENV_KEY));
+        assert!(error.to_string().contains(OWNER_ENV_KEYS[1]));
+    }
+
+    #[test]
+    fn claim_without_email_is_a_usage_error() {
+        let error = plan_owner_bootstrap(None, None, true).expect_err("must reject");
+        assert_eq!(error.exit_code(), 2);
+        assert!(error.to_string().contains(OWNER_ENV_KEYS[0]));
     }
 
     /// Half-filled is the dangerous case: silently treating it as "off" would
@@ -683,13 +843,14 @@ mod tests {
     #[test]
     fn a_half_filled_owner_environment_is_a_usage_error() {
         let missing_password =
-            plan_owner_bootstrap(Some("owner@example.com"), None).expect_err("must reject");
+            plan_owner_bootstrap(Some("owner@example.com"), None, false).expect_err("must reject");
         assert_eq!(missing_password.exit_code(), 2);
         assert!(missing_password
             .to_string()
             .contains("only MOMO_INITIAL_OWNER_EMAIL has a value"));
 
-        let missing_email = plan_owner_bootstrap(None, Some("s3cret")).expect_err("must reject");
+        let missing_email =
+            plan_owner_bootstrap(None, Some("s3cret"), false).expect_err("must reject");
         assert_eq!(missing_email.exit_code(), 2);
         assert!(missing_email
             .to_string()
@@ -715,7 +876,7 @@ mod tests {
             "owner@example.com ",
         ] {
             assert_eq!(
-                plan_owner_bootstrap(Some(spelling), Some("s3cret")),
+                plan_owner_bootstrap(Some(spelling), Some("s3cret"), false),
                 Ok(OwnerBootstrapPlan::Apply),
                 "{spelling:?} must boot, not be refused"
             );
@@ -748,6 +909,33 @@ mod tests {
             rotate_sql.contains("UPDATE token"),
             "the deliberate rotation must still revoke live sessions"
         );
+
+        let claim = resolve_path(None, "infra/prod/bootstrap_owner_claim_if_absent.sql");
+        assert!(claim.is_file(), "{}", claim.display());
+        let claim_sql = std::fs::read_to_string(&claim).expect("read claim sql");
+        assert!(
+            claim_sql.contains("digest(claim_token, 'sha256')"),
+            "claim bootstrap must hash the token inside Postgres"
+        );
+        assert!(
+            claim_sql.contains("RAISE NOTICE 'MOMO_BOOTSTRAP_CLAIM=created'"),
+            "claim bootstrap reports created without interpolating the token"
+        );
+        assert!(
+            !claim_sql.contains("NOTICE '%', claim_token")
+                && !claim_sql.contains("RAISE NOTICE '%', claim_token"),
+            "NOTICE must not interpolate the raw token"
+        );
+        assert_eq!(OWNER_CLAIM_TTL_SECONDS, 24 * 60 * 60);
+    }
+
+    #[test]
+    fn a_minted_claim_token_is_32_bytes_of_url_safe_base64() {
+        let token = mint_claim_token().expect("entropy");
+        assert_eq!(token.len(), 43);
+        assert!(token
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_'));
     }
 
     #[test]

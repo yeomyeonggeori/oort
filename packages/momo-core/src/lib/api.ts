@@ -828,6 +828,29 @@ export async function joinWithInvite(
 }
 
 /**
+ * Consume a first-owner claim token and land signed in. Public route, mounted
+ * outside AuthMiddleware: the token IS the only credential. Success returns a
+ * LoginResponse, so applying it here is the spec'd claim-login path.
+ */
+export async function claimOwnerPassword(
+  token: string,
+  password: string
+): Promise<LoginResponse> {
+  const res = await rawRequest(
+    "/v1/claim",
+    {
+      method: "POST",
+      body: JSON.stringify({ token: token.trim(), password }),
+    },
+    null
+  );
+  if (!res.ok) throw parseError(res);
+  const claimResponse = loginResponseFromWire(res.json<unknown>());
+  coreSession().applyLogin(claimResponse);
+  return claimResponse;
+}
+
+/**
  * Resume a stored session after a reload or a webview restart (M9). The access
  * token was never persisted, so resuming IS one refresh rotation; identity and
  * the websocket address come from the stored login response.

@@ -65,9 +65,9 @@ pub struct Config {
     /// 설정 표면 settings (B4.2) — provider master key, the env provider tier,
     /// and the instance-operator allow-list. Fail-closed by default.
     pub settings: SettingsConfig,
-    /// MOMO-300 rate-limit knobs (B4.3) — currently consumed by the public join
-    /// route only. **On by default**, because the route it guards is the one
-    /// unauthenticated write on the instance.
+    /// MOMO-300 rate-limit knobs (B4.3) — consumed by the public join and
+    /// claim writes. **On by default**, because those routes are unauthenticated
+    /// writes on the instance.
     pub rate_limit: RateLimitConfig,
     /// ADR-0162 / HAP-E2 Agent Port transport and its dedicated abuse bounds.
     /// These knobs are separate from the public join limiter so changing one
@@ -188,16 +188,19 @@ impl DriveSettings {
 /// Same environment keys and same defaults as the Swift server, so one env block
 /// configures either implementation. A limit of 0 disables the axis.
 ///
-/// Only the per-IP axis is read today (B4.3 mounts it on `/v1/join`); the
-/// per-member axis is not ported yet and the field is deliberately absent rather
-/// than present-and-ignored — a knob that does nothing is worse documentation
-/// than no knob.
+/// The per-IP axis is mounted on the two unauthenticated writes (`/v1/join`
+/// and `/v1/claim`). The per-member axis is not ported yet and the field is
+/// deliberately absent rather than present-and-ignored — a knob that does
+/// nothing is worse documentation than no knob.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RateLimitConfig {
     /// `RATE_LIMIT_WINDOW_SECONDS`, floor 1 (default 60).
     pub window_seconds: u64,
-    /// `RATE_LIMIT_PER_IP` (default 1200). 0 disables.
+    /// `RATE_LIMIT_PER_IP` (default 1200). 0 disables. Join surface.
     pub per_ip_limit: u32,
+    /// `RATE_LIMIT_CLAIM_PER_IP` (default 30). 0 disables. Claim surface.
+    /// Independent of join so invite traffic cannot starve first-owner setup.
+    pub claim_per_ip_limit: u32,
 }
 
 impl Default for RateLimitConfig {
@@ -205,6 +208,7 @@ impl Default for RateLimitConfig {
         RateLimitConfig {
             window_seconds: 60,
             per_ip_limit: 1200,
+            claim_per_ip_limit: 30,
         }
     }
 }
@@ -220,6 +224,9 @@ impl RateLimitConfig {
             per_ip_limit: env("RATE_LIMIT_PER_IP")
                 .and_then(|value| value.trim().parse::<u32>().ok())
                 .unwrap_or(defaults.per_ip_limit),
+            claim_per_ip_limit: env("RATE_LIMIT_CLAIM_PER_IP")
+                .and_then(|value| value.trim().parse::<u32>().ok())
+                .unwrap_or(defaults.claim_per_ip_limit),
         }
     }
 }
@@ -1992,9 +1999,14 @@ mod tests {
         let defaults = RateLimitConfig::default();
         assert_eq!(defaults.window_seconds, 60);
         assert_eq!(defaults.per_ip_limit, 1200);
+        assert_eq!(defaults.claim_per_ip_limit, 30);
         assert!(
             defaults.per_ip_limit > 0,
             "a default of 0 would ship the public join route unguarded"
+        );
+        assert!(
+            defaults.claim_per_ip_limit > 0,
+            "a default of 0 would ship the public claim route unguarded"
         );
     }
 

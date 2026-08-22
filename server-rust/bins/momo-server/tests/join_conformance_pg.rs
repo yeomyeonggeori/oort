@@ -877,9 +877,9 @@ async fn every_refusal_answers_the_status_and_sentence_swift_answers() {
 // 3. the rate limit
 // ---------------------------------------------------------------------------
 
-/// `POST /v1/join` is the only unauthenticated write on this server and it takes
-/// a bearer string in the body, so an unlimited number of guesses is exactly
-/// what must not be available.
+/// `POST /v1/join` is an unauthenticated write and it takes a bearer string in
+/// the body, so an unlimited number of guesses is exactly what must not be
+/// available.
 #[tokio::test]
 #[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
 async fn the_public_join_route_sheds_a_flood_from_one_address() {
@@ -890,8 +890,8 @@ async fn the_public_join_route_sheds_a_flood_from_one_address() {
     let base = start_server(
         app_pool,
         RateLimitConfig {
-            window_seconds: 60,
             per_ip_limit: 2,
+            ..RateLimitConfig::default()
         },
     )
     .await;

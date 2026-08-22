@@ -1,5 +1,11 @@
 # oort 진행 현황
 
+## 셀프호스트 첫 owner claim-token 부트스트랩 (#1651, 2026-08-22)
+
+- ADR-0166: `momo-migrate` opt-in `MOMO_BOOTSTRAP_CLAIM=1`이 시드 owner를 claim-pending으로 두고 1회용 `/claim/<token>`을 stdout에만 출력한다. `POST /v1/claim`이 비밀번호 설정과 토큰 소비를 한 트랜잭션에서 처리한다. 기존 `MOMO_INITIAL_OWNER_PASSWORD` 경로 불변.
+- 봉인: TTL 24h, 라우트 `POST /v1/claim` + 웹 `/claim/<token>`, per-IP 30/60s (join과 별도 버킷), 표현=`owner_claim`(hash/`expires_at`/`consumed_at`) + `password_hash` 공란. 미소비 로그인은 `momo_password_verify` 자연 거부.
+- 검증: `scripts/verify_owner_claim.sh` (발급→로그인 401→claim→로그인 200→재사용 409→TTL 410→DB 해시만→로그 원문 부재). 웹 폼은 로그인 표면 인접 4-상태.
+
 ## 셀프호스트 pg_dump 리커버리 (#1654, 2026-08-22)
 
 - 오퍼레이터 `scripts/self_host_pg_dump.sh` / `scripts/self_host_pg_restore.sh`: compose postgres에 `pg_dump -Fc` → `/workspace/oort-backups`(또는 `--output-dir`) → 다운로드 안내. 구현은 `scripts/lib/pg_dump_custom.sh` 하나이고 리허설 게이트가 같은 함수를 쓴다.
