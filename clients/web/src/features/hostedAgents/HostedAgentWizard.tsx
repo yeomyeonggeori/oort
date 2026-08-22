@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { Loader2 } from "lucide-react";
@@ -92,9 +92,12 @@ import {
   agentPortEndpoint,
   hostedPreset,
   hostedRoutineLabel,
+  GROK_PAIRING_PURPOSE,
+  GROK_PAIRING_REVEAL_HEADLINE,
   HOSTED_AUTH_MODE_CHOICES,
   HOSTED_PRESETS,
   HOSTED_ROUTINE_TEMPLATE,
+  PAIRING_NATURAL_LANGUAGE_HANDOFF,
   PAIRING_REVEAL_HEADLINE,
   PAIRING_REVEAL_SCOPE_NOTE,
   PAIRING_REVEAL_WARNING,
@@ -117,6 +120,11 @@ import {
   HOSTED_CREDENTIAL_MUTATION_SCOPE,
 } from "./hostedCredentialScope";
 import { OneTimeSecretCard } from "./OneTimeSecretCard";
+import {
+  decideAutoAdvance,
+  initialAutoAdvanceArmed,
+  type HostedWizardLaunch,
+} from "./hostedWizardLaunch";
 
 // =============================================================================
 // "Bring your hosted agent" pairing wizard (ADR-0162, goal HAP-UX1 / #1360).
@@ -166,15 +174,22 @@ export function HostedAgentWizard({
   open,
   onOpenChange,
   opener,
+  launch = null,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   opener?: DialogFocusTarget | null;
+  /** 원클릭 시드. 없으면 기존 목록/1단계 진입. 단계 기계는 바꾸지 않는다. */
+  launch?: HostedWizardLaunch | null;
 }) {
   if (!open) return null;
   return (
     <Dialog open onOpenChange={onOpenChange}>
-      <HostedWizardBody onClose={() => onOpenChange(false)} opener={opener ?? null} />
+      <HostedWizardBody
+        onClose={() => onOpenChange(false)}
+        opener={opener ?? null}
+        launch={launch}
+      />
     </Dialog>
   );
 }
@@ -182,9 +197,11 @@ export function HostedAgentWizard({
 function HostedWizardBody({
   onClose,
   opener,
+  launch,
 }: {
   onClose: () => void;
   opener: DialogFocusTarget | null;
+  launch: HostedWizardLaunch | null;
 }) {
   const { workspaceId, session } = useSession();
   const client = useQueryClient();
@@ -192,10 +209,22 @@ function HostedWizardBody({
   const { directory } = useDirectory(workspaceId);
   const { groups } = useChannels(workspaceId);
 
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [startingNew, setStartingNew] = useState(false);
-  const [draft, setDraft] = useState<Draft>(EMPTY_DRAFT);
-  const [presetId, setPresetId] = useState<HostedPresetId>("generic");
+  const autoAdvanceArmedRef = useRef(initialAutoAdvanceArmed(launch, offline));
+  const [autoAdvancePending, setAutoAdvancePending] = useState(false);
+  const [selectedId, setSelectedId] = useState<string | null>(
+    launch?.connectionId ?? null
+  );
+  const [startingNew, setStartingNew] = useState(
+    launch != null && launch.connectionId === undefined
+  );
+  const [draft, setDraft] = useState<Draft>(
+    launch
+      ? { displayName: launch.displayName, handle: launch.handle }
+      : EMPTY_DRAFT
+  );
+  const [presetId, setPresetId] = useState<HostedPresetId>(
+    launch?.presetId ?? "generic"
+  );
   const [pairing, setPairing] = useState<RevealedPairingChallenge | null>(null);
   const [issued, setIssued] = useState<RevealedActiveCredential | null>(null);
   const [channelSelection, setChannelSelection] = useState<string[]>([]);
@@ -311,6 +340,7 @@ function HostedWizardBody({
       void client.invalidateQueries({ queryKey: hostedListQueryKey(workspaceId) });
     },
     onError: (error) => setFailure(hostedFailureMessage("create", error)),
+    onSettled: () => setAutoAdvancePending(false),
   });
 
   const regenerate = useMutation({
@@ -334,7 +364,35 @@ function HostedWizardBody({
       void client.invalidateQueries({ queryKey: hostedListQueryKey(workspaceId) });
     },
     onError: (error) => setFailure(hostedFailureMessage("regenerate", error)),
+    onSettled: () => setAutoAdvancePending(false),
   });
+
+  // 원클릭은 위저드 단계를 건너뛰지 않는다. identity 프리필 뒤 기존 create/
+  // regenerate 를 한 번 밟아 pairing 카드가 뜨게 할 뿐이다. 열림 시점에
+  // 온라인이어야 소비하고, 유예되면 무장 해제해 푸터 버튼이 이어받는다.
+  useEffect(() => {
+    const decision = decideAutoAdvance({
+      armed: autoAdvanceArmedRef.current,
+      offline,
+      autoAdvance: launch?.autoAdvance,
+      draftReady: draftReady(draft),
+      draftMatchesSeed:
+        launch != null &&
+        draft.displayName === launch.displayName &&
+        draft.handle === launch.handle,
+      hasConnectionId: selectedId !== null,
+    });
+    if (decision === "wait") return;
+    autoAdvanceArmedRef.current = false;
+    if (decision === "disarm") return;
+    setAutoAdvancePending(true);
+    if (decision === "fire-create") {
+      setTouched(true);
+      create.mutate();
+      return;
+    }
+    regenerate.mutate();
+  }, [launch, offline, draft, selectedId, create, regenerate]);
 
   const channelInputs = useMemo<ApprovalChannelInput[]>(() => {
     const named = groups.channels.map((channel) => ({
@@ -380,13 +438,20 @@ function HostedWizardBody({
   });
 
   const busy = create.isPending || regenerate.isPending || confirm.isPending;
+  // 자동 시도가 발사한 뮤테이션에만 스켈레톤을 묶는다. 실패 뒤 수동 재시도는
+  // 푸터 버튼 안 스피너로 남기고 identity 초점을 유지한다.
+  const advancingToPairing = autoAdvancePending && pairing === null;
   const preset = hostedPreset(presetId);
   const spec = hostedStepSpec(step);
-  const live = screen === "picker"
-    ? "진행 중인 연결 목록입니다. 이어서 진행하거나 새 연결을 만드세요."
-    : detailLoading
-      ? "연결 상태를 불러오는 중입니다."
-      : hostedLiveMessage(step, connection);
+  const live = advancingToPairing
+    ? "연결 값을 발급하는 중입니다."
+    : screen === "picker"
+      ? "진행 중인 연결 목록입니다. 이어서 진행하거나 새 연결을 만드세요."
+      : detailLoading
+        ? "연결 상태를 불러오는 중입니다."
+        : presetId === "grok" && step === "pairing"
+          ? "2단계. 연결 값이 발급됐습니다. 그록봇에게 말로 전하세요."
+          : hostedLiveMessage(step, connection);
 
   return (
     <DialogContent
@@ -431,9 +496,10 @@ function HostedWizardBody({
       )}
 
       <div className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto p-4">
-        {detailLoading && (
-          <div role="status">
-            <span className="sr-only">연결 상태를 불러오는 중입니다.</span>
+        {(advancingToPairing || detailLoading) && (
+          <div
+            data-testid={advancingToPairing ? "hosted-wizard-auto-advance" : undefined}
+          >
             <SkeletonRows rows={4} className="p-0" />
           </div>
         )}
@@ -447,7 +513,7 @@ function HostedWizardBody({
           />
         )}
 
-        {!detailLoading && detailError === null && screen === "picker" && (
+        {!advancingToPairing && !detailLoading && detailError === null && screen === "picker" && (
           <PickerScreen
             connections={resumableConnections(list.data ?? [])}
             pending={list.isPending}
@@ -463,7 +529,7 @@ function HostedWizardBody({
           />
         )}
 
-        {!detailLoading && detailError === null && screen === "identity" && (
+        {!advancingToPairing && !detailLoading && detailError === null && screen === "identity" && (
           <IdentityStep
             draft={draft}
             setDraft={setDraft}
@@ -474,7 +540,7 @@ function HostedWizardBody({
           />
         )}
 
-        {screen === "pairing" && pairing !== null && (
+        {!advancingToPairing && screen === "pairing" && pairing !== null && (
           <PairingStep
             preset={preset}
             endpoint={endpoint}
@@ -491,7 +557,7 @@ function HostedWizardBody({
           />
         )}
 
-        {screen === "detecting" && connection !== null && (
+        {!advancingToPairing && screen === "detecting" && connection !== null && (
           <DetectingStep
             connection={connection}
             agentLabel={agentLabel}
@@ -500,7 +566,7 @@ function HostedWizardBody({
           />
         )}
 
-        {screen === "expired" && connection !== null && (
+        {!advancingToPairing && screen === "expired" && connection !== null && (
           <ExpiredStep connection={connection} />
         )}
 
@@ -555,7 +621,7 @@ function HostedWizardBody({
           // 이어서 열었을 뿐인데 새로 만들라고 권하는 것은 명부에 쌍둥이
           // 전용 에이전트를 남기라는 말이고, 그것이 PickerScreen 이 애초에
           // 존재하는 이유다.
-          unsettled={detailLoading || detailError !== null}
+          unsettled={detailLoading || detailError !== null || advancingToPairing}
           holdingSecret={holdingSecret}
           offline={offline}
           busy={busy}
@@ -692,6 +758,7 @@ function StepRail({ current }: { current: number }) {
 function StepHeading({
   step,
   connection = null,
+  purpose,
 }: {
   step: HostedWizardStep;
   /**
@@ -700,13 +767,15 @@ function StepHeading({
    * 할 일처럼 지시하게 된다.
    */
   connection?: HostedAgentConnection | null;
+  /** 있으면 단계 기계의 일반 purpose 대신 쓴다. Grok pairing 이 그 자리다. */
+  purpose?: string;
 }) {
   const spec = hostedStepSpec(step);
   return (
     <div className="flex min-w-0 flex-col gap-1">
       <h3 className="break-keep text-body font-semibold text-ink">{spec.title}</h3>
       <p className="break-keep text-meta text-ink-muted">
-        {hostedStepPurpose(step, connection)}
+        {purpose ?? hostedStepPurpose(step, connection)}
       </p>
     </div>
   );
@@ -944,6 +1013,7 @@ function PairingStep({
   nowMs: number;
   onDone: () => void;
 }) {
+  const grok = preset.id === "grok";
   const expiry = pairingExpiry(pairing.pairingExpiresAtMs, nowMs);
   const rows = [
     {
@@ -952,13 +1022,16 @@ function PairingStep({
       token: endpoint !== null,
     },
   ];
-  if (preset.id === "grok") {
+  if (grok) {
     rows.push({ key: "routine 이름", value: routineLabel, token: false });
     rows.push({ key: "routine 지시", value: HOSTED_ROUTINE_TEMPLATE, token: false });
   }
   return (
     <div className="flex min-w-0 flex-col gap-6">
-      <StepHeading step="pairing" />
+      <StepHeading
+        step="pairing"
+        purpose={grok ? GROK_PAIRING_PURPOSE : undefined}
+      />
       <SetupSteps preset={preset} />
       {endpoint && (
         <div className="flex flex-wrap items-center gap-2">
@@ -968,7 +1041,7 @@ function PairingStep({
             subject="Agent Port 주소"
             testId="hosted-copy-endpoint"
           />
-          {preset.id === "grok" && (
+          {grok && (
             <CopyButton
               value={routineLabel}
               label="routine 이름 복사"
@@ -979,9 +1052,13 @@ function PairingStep({
         </div>
       )}
       <OneTimeSecretCard
-        headline={PAIRING_REVEAL_HEADLINE}
+        headline={grok ? GROK_PAIRING_REVEAL_HEADLINE : PAIRING_REVEAL_HEADLINE}
         warning={PAIRING_REVEAL_WARNING}
-        notes={[PAIRING_REVEAL_SCOPE_NOTE]}
+        notes={
+          grok
+            ? [PAIRING_NATURAL_LANGUAGE_HANDOFF, PAIRING_REVEAL_SCOPE_NOTE]
+            : [PAIRING_REVEAL_SCOPE_NOTE]
+        }
         rows={rows}
         secretLabel="연결 값"
         secret={pairing.pairingCredential}
