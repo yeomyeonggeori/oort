@@ -1,10 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  COMPOSER_SEED_EVENT,
   clearAllDrafts,
   clearDraft,
   draftKey,
   pruneDrafts,
   readDraft,
+  seedComposerText,
   writeDraft,
   DRAFT_TTL_MS,
   MAX_DRAFTS,
@@ -160,5 +162,34 @@ describe("저장소가 막힌 환경", () => {
     expect(() => writeDraft(WS, CH_A, "글", NOW)).not.toThrow();
     expect(readDraft(WS, CH_A, NOW)).toBe("");
     expect(() => clearAllDrafts()).not.toThrow();
+  });
+});
+
+describe("컴포저 시드", () => {
+  it("빈 칸에만 심고 쓰다 만 글은 덮지 않는다", () => {
+    expect(seedComposerText(WS, CH_A, "@grokbot ", NOW)).toBe(true);
+    expect(readDraft(WS, CH_A, NOW)).toBe("@grokbot ");
+    expect(seedComposerText(WS, CH_A, "@other ", NOW)).toBe(false);
+    expect(readDraft(WS, CH_A, NOW)).toBe("@grokbot ");
+  });
+
+  it("같은 탭 사건을 낸다", () => {
+    const dispatch = vi.fn();
+    vi.stubGlobal("window", { dispatchEvent: dispatch });
+    class FakeEvent {
+      type: string;
+      detail: unknown;
+      constructor(type: string, init?: { detail?: unknown }) {
+        this.type = type;
+        this.detail = init?.detail;
+      }
+    }
+    vi.stubGlobal("CustomEvent", FakeEvent);
+    expect(seedComposerText(WS, CH_A, "@grokbot ", NOW)).toBe(true);
+    expect(dispatch).toHaveBeenCalledTimes(1);
+    expect(dispatch.mock.calls[0]?.[0]).toMatchObject({
+      type: COMPOSER_SEED_EVENT,
+      detail: { workspaceId: WS, channelId: CH_A, text: "@grokbot " },
+    });
   });
 });

@@ -34,6 +34,12 @@ describe("T-5 그록봇 초대 표면은 수동적 감지와 기존 위저드만
     expect(wizard).toContain("GROK_PAIRING_REVEAL_HEADLINE");
   });
 
+  it("테스트 멘션 링크만 첫 왕복 힌트를 싣고 단계 기계는 그대로다", () => {
+    expect(wizard).toContain("firstMention=");
+    expect(wizard).toContain("hosted-test-mention");
+    expect(invite).not.toContain("firstMention");
+  });
+
   it("원클릭 자동 발급은 열림 시점 online 에서만 소비한다", () => {
     expect(wizard).toContain("decideAutoAdvance");
     expect(wizard).toContain("initialAutoAdvanceArmed");
