@@ -91,6 +91,11 @@ GATED_DOCS = [
         "generate_ghcr_notice_bundle, verify_policy_integrity_from_base 를 "
         "실행 지시로 싣는다.",
     ),
+    (
+        "docs/SELF_HOST_AGENT.md",
+        "그록봇 셀프호스트 플레이북(#1652). 스스로 '이 문서가 제품이다'고 "
+        "선언하고 curl/docker 명령을 그대로 실행한다.",
+    ),
 ]
 
 # Every runbook is gated by construction: a runbook is by definition a document
