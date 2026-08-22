@@ -78,20 +78,20 @@ cd oort-track-engine
 
 | 대상 | 불변 이미지 |
 |---|---|
-| 앱 (`--published-image`가 소비) | `ghcr.io/yeomyeonggeori/oort@sha256:0fbddd36947b4dfd18d6fc91e9229fc5e6f52ebb896b9bf632a2ec127620b8eb` |
-| PostgreSQL 18 + pgBackRest | `ghcr.io/yeomyeonggeori/oort-postgres@sha256:c68063695bde97bb2911d5eca4ebce6a94858dc9af9f60ad294657ef7cea0757` |
+| 앱 (`--published-image`가 소비) | `ghcr.io/yeomyeonggeori/oort@sha256:62843b1a59d04da9c43878ef27d4e35d2350f242f4bdd32d328c21fd0645f23e` |
+| PostgreSQL 18 + pgBackRest | `ghcr.io/yeomyeonggeori/oort-postgres@sha256:b41a3ff9fe24aa5adb740f1159d0c9298d8b483296a9dee86dc6d2c0b4a9fa53` |
 
 postgres 행은 Release 표·운영/PITR용이다. **이 플레이북 compose의 postgres
 서비스는 소비하지 않는다**(§2-B 주석·V-1 #1650과 동일). 앱만 pin한다.
 
-공개 발행은 **`linux/amd64`**. 그록봇 VM 실측은 amd64라 native pull이다.
-Apple Silicon 호스트는 native pull이 불가했다(2026-08-21). 전역
-`DOCKER_DEFAULT_PLATFORM` 은 켜지 않는다(V-1: centrifugo 로컬 index가
-거절된다). 앱만 `--platform linux/amd64` 로 받는다.
+공개 발행은 `linux/amd64`+`linux/arm64` **manifest list**다. 표의 v0.1.1
+digest는 그 list digest다. 그록봇 VM(실측 amd64)과 Apple Silicon 모두
+native pull한다. 전역 `DOCKER_DEFAULT_PLATFORM` 은 켜지 않는다(V-1:
+centrifugo 로컬 index가 거절된다). 앱은 list digest 그대로 받는다.
 
 ```sh
-APP_REF='ghcr.io/yeomyeonggeori/oort@sha256:0fbddd36947b4dfd18d6fc91e9229fc5e6f52ebb896b9bf632a2ec127620b8eb'
-docker pull --platform linux/amd64 "$APP_REF"
+APP_REF='ghcr.io/yeomyeonggeori/oort@sha256:62843b1a59d04da9c43878ef27d4e35d2350f242f4bdd32d328c21fd0645f23e'
+docker pull "$APP_REF"
 ```
 
 **게이트:** `docker image inspect "$APP_REF"` 가 실패하지 않는다.
@@ -126,7 +126,7 @@ fi
 
 ```sh
 scripts/self_host_env.sh --published-image \
-  ghcr.io/yeomyeonggeori/oort@sha256:0fbddd36947b4dfd18d6fc91e9229fc5e6f52ebb896b9bf632a2ec127620b8eb
+  ghcr.io/yeomyeonggeori/oort@sha256:62843b1a59d04da9c43878ef27d4e35d2350f242f4bdd32d328c21fd0645f23e
 ```
 
 생성기는 항상 `MOMO_INITIAL_OWNER_PASSWORD` 를 쓴다. ADR-0166 claim 모드는
@@ -205,9 +205,9 @@ chmod 600 /workspace/oort-claim.env
 
 **게이트:** `/workspace/oort-claim.env` 가 비어 있지 않고
 `MOMO_CLAIM_PATH=/claim/` 로 시작한다. 비어 있으면 **여기서 멈춘다.**
-현행 §2-B digest(v0.1.0)는 #1651 claim 바이너리보다 앞선 발행일 수 있다.
-비밀번호 env를 되살리는 우회는 ADR-0004 위반이다. 재발행은 이 플레이북
-밖이다.
+v0.1.1 list digest(`main=1b79bc65`)는 #1651 claim 부트스트랩을 포함한다.
+이 pin에서 경로가 비면 이미지가 이 표와 다르거나 migrate가 원문을
+인쇄하지 않은 것이다. 비밀번호 env를 되살리는 우회는 ADR-0004 위반이다.
 
 토큰을 대화·로그에 다시 찍지 않는다. 사용자 회신(§3)에서 터널 주소와
 이어 붙일 때만 읽는다.
@@ -221,8 +221,8 @@ chmod 600 /workspace/oort-claim.env
 이미지가 사라진 뒤, **같은 env를 다시 만들지 말고**:
 
 ```sh
-APP_REF='ghcr.io/yeomyeonggeori/oort@sha256:0fbddd36947b4dfd18d6fc91e9229fc5e6f52ebb896b9bf632a2ec127620b8eb'
-docker pull --platform linux/amd64 "$APP_REF"
+APP_REF='ghcr.io/yeomyeonggeori/oort@sha256:62843b1a59d04da9c43878ef27d4e35d2350f242f4bdd32d328c21fd0645f23e'
+docker pull "$APP_REF"
 # bind 볼륨이 없으면 §1.3을 다시 밟는다 (기존 볼륨을 함부로 rm 하지 않는다)
 oort_compose up -d --pull missing --wait
 ```
