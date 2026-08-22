@@ -396,10 +396,18 @@ export function ChatShell() {
   // 위저드 「채널 열고 테스트 멘션」이 싣는 힌트. 읽고 나면 지운다 — 주소에
   // 남으면 새로고침마다 초대 직후인 것처럼 다시 무장한다. 왕복 판정 자체는
   // 채널 메시지가 하므로, 힌트는 목록이 늦을 때의 뱃지/로딩용이다.
-  const [firstMentionHint, setFirstMentionHint] = useState<string | null>(null);
+  // 채널에 키잉한다: A 채널에서 무장한 힌트가 B 채널 타임라인에 따라가면 안 된다.
+  const [firstMentionHints, setFirstMentionHints] = useState<
+    Record<string, string>
+  >({});
   useEffect(() => {
     if (anchorFirstMention === null || anchorFirstMention.trim() === "") return;
-    setFirstMentionHint(anchorFirstMention);
+    if (channelId === null) return;
+    const hinted = anchorFirstMention.trim();
+    setFirstMentionHints((current) => ({
+      ...current,
+      [channelId.toLowerCase()]: hinted,
+    }));
     setSearchParams(
       (current) => {
         const next = new URLSearchParams(current);
@@ -408,7 +416,7 @@ export function ChatShell() {
       },
       { replace: true }
     );
-  }, [anchorFirstMention, setSearchParams]);
+  }, [anchorFirstMention, channelId, setSearchParams]);
 
   useEffect(() => {
     if (anchorWork === null) return;
@@ -921,10 +929,13 @@ export function ChatShell() {
             selfMemberId={session.member.id}
             selfKind={session.member.kind}
             selfRole={memberFor(directory, session.member.id)?.role}
+            rosterSettled={!directoryQuery.isPending}
             messages={messages}
             pending={timeline.pending}
             messagesStatus={timeline.status}
-            hintedAgentMemberId={firstMentionHint}
+            hintedAgentMemberId={
+              firstMentionHints[channelId.toLowerCase()] ?? null
+            }
             onRetryMessages={timeline.reload}
           />
         )}

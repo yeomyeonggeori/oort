@@ -180,6 +180,12 @@ describe("본문 멘션 토큰", () => {
     expect(bodyMentionsHandle("@grokbot2 안녕", "grokbot")).toBe(false);
     expect(bodyMentionsHandle("@other 안녕", "grokbot")).toBe(false);
   });
+
+  it("한글 핸들도 글자 경계로 가른다", () => {
+    expect(bodyMentionsHandle("@봇 안녕", "봇")).toBe(true);
+    expect(bodyMentionsHandle("@봇2 안녕", "봇")).toBe(false);
+    expect(bodyMentionsHandle("@봇안녕", "봇")).toBe(false);
+  });
 });
 
 describe("첫 왕복 네 상태", () => {
@@ -194,13 +200,94 @@ describe("첫 왕복 네 상태", () => {
   });
 
   it("멘션 후 대기와 메시지 로딩은 로딩이다", () => {
+    const waiting = view({
+      messages: [msg({ createdAtMs: NOW - 1_000 })],
+      nowMs: NOW,
+    });
+    expect(waiting.phase).toBe("loading");
+    expect(waiting.loadingKind).toBe("wait");
+    expect(waiting.waitStartedAtMs).toBe(NOW - 1_000);
+    expect(waiting.headline).toContain("답을 기다리는 중입니다");
+    const fetching = view({ messagesStatus: "loading" });
+    expect(fetching.phase).toBe("loading");
+    expect(fetching.loadingKind).toBe("fetch");
+    expect(fetching.waitStartedAtMs).toBeNull();
+  });
+
+  it("실패한 전송은 왕복 멘션이 아니다", () => {
+    const failed = view({
+      messages: [msg({ state: "failed", createdAtMs: NOW - 1_000 })],
+    });
+    expect(failed.phase).toBe("empty");
+    expect(failed.complete).toBe(false);
+  });
+
+  it("보내는 중인 멘션은 대기다", () => {
+    const sending = view({
+      messages: [msg({ state: "sending", createdAtMs: NOW - 1_000 })],
+      nowMs: NOW,
+    });
+    expect(sending.phase).toBe("loading");
+    expect(sending.loadingKind).toBe("wait");
+  });
+
+  it("타임아웃 뒤 재멘션은 최신 멘션 시계로 대기에 돌아온다", () => {
+    const reMentioned = view({
+      messages: [
+        msg({ createdAtMs: NOW - 60_000 }),
+        msg({ createdAtMs: NOW - 1_000, body: "@grokbot 다시" }),
+      ],
+      nowMs: NOW,
+      waitMs: 60_000,
+    });
+    expect(reMentioned.phase).toBe("loading");
+    expect(reMentioned.loadingKind).toBe("wait");
+    expect(reMentioned.errorKind).toBeNull();
+    expect(reMentioned.waitStartedAtMs).toBe(NOW - 1_000);
+  });
+
+  it("실패한 멘션 뒤에 보낸 멘션만 시계에 쓴다", () => {
+    const afterFail = view({
+      messages: [
+        msg({ state: "failed", createdAtMs: NOW - 60_000 }),
+        msg({ createdAtMs: NOW - 1_000 }),
+      ],
+      nowMs: NOW,
+      waitMs: 60_000,
+    });
+    expect(afterFail.phase).toBe("loading");
+    expect(afterFail.waitStartedAtMs).toBe(NOW - 1_000);
+  });
+
+  it("완료와 닫기는 메시지를 보지 않고 숨긴다", () => {
     expect(
       view({
+        recorded: "complete",
         messages: [msg({ createdAtMs: NOW - 1_000 })],
-        nowMs: NOW,
-      }).phase
-    ).toBe("loading");
-    expect(view({ messagesStatus: "loading" }).phase).toBe("loading");
+      })
+    ).toMatchObject({ phase: "hidden", complete: true });
+    expect(
+      view({
+        recorded: "dismissed",
+        messages: [msg({ createdAtMs: NOW - 1_000 })],
+      })
+    ).toMatchObject({ phase: "hidden", complete: false });
+  });
+
+  it("닫은 뒤 에이전트 답이 오면 완료로 승격한다", () => {
+    expect(
+      view({
+        recorded: "dismissed",
+        messages: [
+          msg({ createdAtMs: NOW - 2_000 }),
+          msg({
+            authorMemberId: AGENT,
+            body: "안녕하세요",
+            createdAtMs: NOW - 500,
+          }),
+        ],
+      })
+    ).toMatchObject({ phase: "hidden", complete: true });
   });
 
   it("에이전트 메시지가 오면 완료하고 숨긴다", () => {
@@ -242,11 +329,20 @@ describe("첫 왕복 네 상태", () => {
     const failed = view({
       target: null,
       hintedAgentMemberId: AGENT,
+      previewAgent: target({ displayName: "내 봇" }),
       connectionsStatus: "error",
     });
     expect(failed.phase).toBe("error");
     expect(failed.errorKind).toBe("connections");
-    expect(failed.headline).not.toBe("");
+    expect(failed.headline).toContain("내 봇");
+    expect(failed.headline).not.toContain("그록봇");
+    const unnamed = view({
+      target: null,
+      hintedAgentMemberId: AGENT,
+      connectionsStatus: "error",
+    });
+    expect(unnamed.headline).toContain("에이전트");
+    expect(unnamed.headline).not.toContain("그록봇");
   });
 
   it("대상이 없으면 힌트 없는 채널은 침묵한다", () => {

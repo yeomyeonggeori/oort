@@ -22,11 +22,33 @@ describe("T-6 첫 왕복 표면은 위저드에 이어 붙기만 한다", () => 
   it("네 상태와 에이전트 뱃지가 실존한다", () => {
     expect(surface).toContain("first-mention-agent-badge");
     expect(surface).toContain("FIRST_MENTION_AGENT_BADGE");
-    expect(surface).toContain("first-mention-offline");
+    expect(surface).toContain("data-offline");
     expect(surface).toContain("first-mention-error");
     expect(surface).toContain('data-phase={surface.phase}');
     expect(surface).toContain("SkeletonRows");
     expect(surface).toContain("InlineBanner");
+    expect(surface).toContain("first-mention-wait");
+    expect(surface).toContain("elapsedLabel");
+    expect(surface).toContain("first-mention-dismiss");
+  });
+
+  it("오프라인은 셸 배너에 맡기고 컨트롤만 잠근다", () => {
+    expect(surface).not.toContain("first-mention-offline");
+    expect(surface).toContain("OFFLINE_LOCK_REASON");
+    expect(surface).toContain("aria-disabled");
+    expect(surface).toContain("row.status");
+  });
+
+  it("힌트는 채널에 키잉하고 완료/닫기는 저장한다", () => {
+    const shell = src("../chat/ChatShell.tsx");
+    expect(shell).toContain("firstMentionHints");
+    expect(shell).toContain("channelId.toLowerCase()");
+    expect(surface).toContain("writeFirstMentionRecord");
+    expect(surface).toContain("rosterSettled");
+    expect(surface).not.toContain("canCreateAgentNow(true");
+    expect(src("../../app/session.tsx")).toContain(
+      "clearAllFirstMentionRecords"
+    );
   });
 
   it("비밀값과 CDP 를 부르지 않는다", () => {

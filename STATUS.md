@@ -4,6 +4,7 @@
 
 - 그록봇(호스티드 에이전트) 초대 완료 직후 채널에 「첫 멘션을 보내보세요」 표면. 왕복 판정은 에이전트 author 메시지 도착=완료. 네 상태(빈/로딩/오류/오프라인)와 에이전트 뱃지 필수. 미도착은 타임아웃 오류로 표면화(무음 실패 없음). 응답 시간 상한은 게이트가 아니다. 위저드 단계 기계는 그대로, 테스트 멘션 링크에 `firstMention` 힌트만 가산.
 - bench: `scripts/bench_onboarding.sh aggregate`가 M5 first-reply p50/p95를 집계하고, `run` 요약에도 같은 절을 붙인다. M1~M4 로직 불변. `runtime-unverified(실기 그록봇 첫 멘션 e2e)`.
+- 검수 수리(#1660): 오프라인은 셸 ConnectionBanner만 발화하고 이 표면은 컨트롤 잠금. failed pending은 왕복으로 세지 않음. 시계는 최신 멘션. 완료/닫기는 채널 키 localStorage. 오류 문면은 displayName. 대기는 워킹 시그널 문장.
 
 ## 그록봇 감지·원클릭 초대 (T-5 / #1655, 2026-08-22)
 

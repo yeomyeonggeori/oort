@@ -42,11 +42,21 @@ export type FirstMentionErrorKind =
 
 export type FirstMentionLoadStatus = "idle" | "loading" | "ready" | "error";
 
+/** 로딩의 두 문법. fetch 는 스켈레톤, wait 는 워킹 시그널 문장. */
+export type FirstMentionLoadingKind = "fetch" | "wait" | null;
+
+/** 이 기기에서 이미 끝냈거나 닫은 왕복. 호출부가 지속 저장한다. */
+export type FirstMentionRecorded = "complete" | "dismissed" | null;
+
 /** 왕복 판정이 메시지에서 읽는 칸. 전체 Message 를 끌어오지 않는다. */
 export interface FirstMentionMessage {
   authorMemberId: string;
   createdAtMs: number;
   body?: string;
+  /**
+   * 서버 메시지 `state`(sent/deleted) 또는 낙관적 전송 `status`
+   * (sending/failed). failed 는 왕복 멘션으로 세지 않는다.
+   */
   state?: string;
   props?: Record<string, unknown>;
 }
@@ -66,6 +76,9 @@ export interface FirstMentionView {
   detail: string;
   actionLabel: string | null;
   errorKind: FirstMentionErrorKind;
+  loadingKind: FirstMentionLoadingKind;
+  /** 대기 시계의 시작. fetch 로딩이거나 멘션 전이면 null. */
+  waitStartedAtMs: number | null;
   /** 모든 보이는 상태에서 같은 라벨. 테스트가 누락을 잡는다. */
   agentBadge: typeof FIRST_MENTION_AGENT_BADGE;
 }
@@ -78,6 +91,8 @@ const HIDDEN: FirstMentionView = {
   detail: "",
   actionLabel: null,
   errorKind: null,
+  loadingKind: null,
+  waitStartedAtMs: null,
   agentBadge: FIRST_MENTION_AGENT_BADGE,
 };
 
@@ -181,7 +196,7 @@ export function pickFirstMentionTarget(input: {
 
 function handleBoundaryAfter(body: string, end: number): boolean {
   if (end >= body.length) return true;
-  return !/[A-Za-z0-9_-]/.test(body.charAt(end));
+  return !/[\p{L}\p{N}_-]/u.test(body.charAt(end));
 }
 
 /** 낙관적 echo 처럼 mention_member_ids 가 아직 없는 본문용. */
@@ -208,6 +223,10 @@ function isDeleted(message: FirstMentionMessage): boolean {
   return message.state === "deleted";
 }
 
+function isFailedSend(message: FirstMentionMessage): boolean {
+  return message.state === "failed";
+}
+
 function recordedMentionIds(message: FirstMentionMessage): string[] {
   const raw = message.props?.["mention_member_ids"];
   if (!Array.isArray(raw)) return [];
@@ -219,7 +238,7 @@ export function messageMentionsAgent(
   agentMemberId: string,
   handle: string
 ): boolean {
-  if (isDeleted(message)) return false;
+  if (isDeleted(message) || isFailedSend(message)) return false;
   if (recordedMentionIds(message).some((id) => uuidEq(id, agentMemberId))) {
     return true;
   }
@@ -274,7 +293,7 @@ function copyFor(view: {
   }
   if (view.errorKind === "connections") {
     return {
-      headline: "그록봇 연결 상태를 확인하지 못했습니다.",
+      headline: `${name} 연결 상태를 확인하지 못했습니다.`,
       detail: "다시 시도하세요.",
       actionLabel: "다시 시도",
     };
@@ -290,21 +309,75 @@ function visible(
   agent: FirstMentionTarget,
   phase: Exclude<FirstMentionPhase, "hidden">,
   errorKind: FirstMentionErrorKind,
-  complete = false
+  extras: {
+    complete?: boolean;
+    loadingKind?: FirstMentionLoadingKind;
+    waitStartedAtMs?: number | null;
+  } = {}
 ): FirstMentionView {
   return {
     phase,
-    complete,
+    complete: extras.complete ?? false,
     agent,
     ...copyFor({ phase, agent, errorKind }),
     errorKind,
+    loadingKind:
+      extras.loadingKind ?? (phase === "loading" ? "fetch" : null),
+    waitStartedAtMs: extras.waitStartedAtMs ?? null,
     agentBadge: FIRST_MENTION_AGENT_BADGE,
   };
 }
 
+function connectionCopy(
+  agent: FirstMentionTarget | null,
+  loading: boolean
+): Pick<FirstMentionView, "headline" | "detail" | "actionLabel"> {
+  const who = agent?.displayName ?? "에이전트";
+  if (loading) {
+    return {
+      headline: `${who} 연결 상태를 확인하는 중입니다.`,
+      detail: "",
+      actionLabel: null,
+    };
+  }
+  return {
+    headline: `${who} 연결 상태를 확인하지 못했습니다.`,
+    detail: "다시 시도하세요.",
+    actionLabel: "다시 시도",
+  };
+}
+
+function lastAgentReplyAt(
+  messages: readonly FirstMentionMessage[],
+  agentMemberId: string
+): number {
+  let latest = Number.NEGATIVE_INFINITY;
+  for (const row of messages) {
+    if (!isAgentReply(row, agentMemberId)) continue;
+    if (row.createdAtMs > latest) latest = row.createdAtMs;
+  }
+  return latest;
+}
+
+function latestUnansweredMention(
+  messages: readonly FirstMentionMessage[],
+  selfMemberId: string,
+  agentMemberId: string,
+  handle: string
+): FirstMentionMessage | undefined {
+  const after = lastAgentReplyAt(messages, agentMemberId);
+  return messages
+    .filter(
+      (row) =>
+        row.createdAtMs > after &&
+        selfMentionedAgent(row, selfMemberId, agentMemberId, handle)
+    )
+    .sort((a, b) => b.createdAtMs - a.createdAtMs)[0];
+}
+
 /**
- * 네 상태 중 빈/로딩/오류를 도출한다. 오프라인은 호출부가 배너로 얹는다
- * (캐시된 내용은 계속 그린다).
+ * 네 상태 중 빈/로딩/오류를 도출한다. 오프라인 문장은 셸 ConnectionBanner 가
+ * 말하고, 이 표면은 컨트롤만 잠근다 (캐시된 내용은 계속 그린다).
  */
 export function firstMentionView(input: {
   target: FirstMentionTarget | null;
@@ -316,11 +389,35 @@ export function firstMentionView(input: {
   selfMemberId: string;
   nowMs: number;
   waitMs?: number;
+  recorded?: FirstMentionRecorded;
 }): FirstMentionView {
   const waitMs = input.waitMs ?? FIRST_MENTION_WAIT_MS;
   const hinted = (input.hintedAgentMemberId ?? "").trim() !== "";
+  const target = input.target;
+  const agentOrPreview = target ?? input.previewAgent ?? null;
+  const reply =
+    target === null
+      ? undefined
+      : input.messages.find((row) =>
+          isAgentReply(row, target.agentMemberId)
+        );
 
-  if (input.target === null) {
+  if (reply || input.recorded === "complete") {
+    return {
+      ...HIDDEN,
+      complete: true,
+      agent: agentOrPreview,
+    };
+  }
+  if (input.recorded === "dismissed") {
+    return {
+      ...HIDDEN,
+      complete: false,
+      agent: agentOrPreview,
+    };
+  }
+
+  if (target === null) {
     if (!hinted) return HIDDEN;
     const preview = input.previewAgent ?? null;
     if (input.connectionsStatus === "loading") {
@@ -328,9 +425,8 @@ export function firstMentionView(input: {
         ...HIDDEN,
         phase: "loading",
         agent: preview,
-        headline: "그록봇 연결 상태를 확인하는 중입니다.",
-        detail: "",
-        actionLabel: null,
+        ...connectionCopy(preview, true),
+        loadingKind: "fetch",
       };
     }
     if (input.connectionsStatus === "error") {
@@ -338,51 +434,38 @@ export function firstMentionView(input: {
       return {
         ...HIDDEN,
         phase: "error",
-        headline: "그록봇 연결 상태를 확인하지 못했습니다.",
-        detail: "다시 시도하세요.",
-        actionLabel: "다시 시도",
+        ...connectionCopy(null, false),
         errorKind: "connections",
       };
     }
     return HIDDEN;
   }
 
-  const agent = input.target;
-  const reply = input.messages.find((row) =>
-    isAgentReply(row, agent.agentMemberId)
-  );
-  if (reply) {
-    return {
-      ...HIDDEN,
-      complete: true,
-      agent,
-    };
-  }
+  const agent = target;
 
   if (input.messagesStatus === "error") {
     return visible(agent, "error", "messages");
   }
   if (input.messagesStatus === "loading" || input.messagesStatus === "idle") {
-    return visible(agent, "loading", null);
+    return visible(agent, "loading", null, { loadingKind: "fetch" });
   }
 
-  const mention = input.messages
-    .filter((row) =>
-      selfMentionedAgent(
-        row,
-        input.selfMemberId,
-        agent.agentMemberId,
-        agent.handle
-      )
-    )
-    .sort((a, b) => a.createdAtMs - b.createdAtMs)[0];
+  const mention = latestUnansweredMention(
+    input.messages,
+    input.selfMemberId,
+    agent.agentMemberId,
+    agent.handle
+  );
 
   if (!mention) return visible(agent, "empty", null);
 
   if (input.nowMs - mention.createdAtMs >= waitMs) {
     return visible(agent, "error", "timeout");
   }
-  return visible(agent, "loading", null);
+  return visible(agent, "loading", null, {
+    loadingKind: "wait",
+    waitStartedAtMs: mention.createdAtMs,
+  });
 }
 
 /** 컴포저에 심을 첫 멘션 초안. 이미 글이 있으면 호출부가 덮지 않는다. */
