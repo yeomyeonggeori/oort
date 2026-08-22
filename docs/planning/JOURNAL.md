@@ -5,6 +5,37 @@
 
 ---
 
+## 2026-08-23 (Fable) · T계열 파도 6/7 랜딩 — grok 워커 6완주·수리 5회전·정책 마커 3회
+- 성재 "ㄱㄱ" 발사 go + ADR-0166 Accepted → V-1·T-4·T-5·T-6·T-1·T-3 순차 완주(전부 track 랜딩·close·잔재 회수). 검수 체제: Fable diff 리뷰+재판정 실측+design-review 에이전트(fresh context, T-5/T-6/T-1 — 실렌더 촬영 2건 포함).
+- 수리 회전 실적: T-5(H2 — 문면 모순·오프라인 자동발사)·T-6(H4 — failed 전송 왕복무장·재멘션 미복귀·완료 로드창 묶임·오프라인 4중발화)·T-1(UX M2+CI 2: 마이그레이션 카운트 하드코딩·GHCR notice stale). 전부 워커 수리→재검수→머지.
+- 이탈 판정 3건 DEVIATION 기록: T-4 검증 축소(noted)·T-1 runtime-db 선재 중단(noted — main 재현 실측)·복원 래퍼 가산(accepted). V-1 부수 발견 2건(self_host_env down 오인거절·reclaim rc=1)은 티켓 후보 원장.
+- **잔여=T-2**(#1663 검수 합격): Q-LEGAL 성재 "브리핑 검토 후 머지" → 브리핑 정본 `research/2026-08-23-t2-assist-risk-briefing.md` 제시, 발화 대기. **E2E 전 체인**: main 승격→재발행(claim 포함 digest — 현행 pin으론 플레이북 게이트 RED)→digest 현행화→dmg 공증·업로드→E2E(자연어 릴레이).
+
+## 2026-08-22 (Fable) · 성재 결재 3건 집행 — 자연어 릴레이 전환·본인 계정 확정·T계열 티켓 7건 발급
+- 성재 결재: **Q-CDP=자연어 지시 릴레이 전환**(우리 E2E 검증의 CDP 자동 제어 은퇴 — 마커 재확인·수용 런 포함, 지시문=Fable·전달=성재) · **Q-STRUCT=체험자 본인 계정/VM 전용 확정** · **Q-LEGAL=계류**(T-2 정본 머지 전 판단 권장). 모계획 §9에 성문.
+- **ADR-0166 기안**(Proposed — claim-token 부트스트랩): 현행 env 평문 경로의 전제 붕괴(설치자=에이전트·사용자 VM 셸 무접근·터널=공개 주소) → 1회용 claim URL. 선례 조합=invites 해시+hosted pairing TTL 단회소비+join 무인증 마운트. **Accept가 T-1 착수 게이트.**
+- **티켓 7건 발급**: V-1=#1650·T-1=#1651·T-2=#1652·T-3=#1653·T-4=#1654·T-5=#1655·T-6=#1656 (전부 status:ready). 통합 패킷 `handoffs/2026-08-22-grokbot-selfhost-wave-packet.md`(ready). 스코프 발견: 서버 v0.1.0 릴리스 8/21 기존재→T-3=데스크탑 dmg로 확정 · T-5 감지 시그니처에서 CDP 포트 제외(Q-CDP 취지, E4 원문과 의도적 차이).
+- **발사는 성재 명시 신호 대기.** 다음 결재: ①ADR-0166 Accept ②발사 go ③Q-LEGAL ④E2E 수용.
+
+## 2026-08-22 (Fable) · aside 벤치마크 3축 리서치 완주 + R-1/R-2 관문 종결 + 타겟 축소
+- 성재 발제 2건: aside(=aside.com AI 브라우저) 벤치마크로 ①구독/OpenRouter 연동 ②에이전트 감지·등록 ③Slack 마이그레이션 + 1차 런칭 타겟=그록봇 유저 한정. 우로보로스 인터뷰(`interview_20260822_095929`) 완결 — E1~E10 결재. 증보 계획 `research/2026-08-22-aside-onboarding-three-axis-plan.md`.
+- **리서치 4기 병렬 완주**(서브에이전트, 전부 검수 승격): RA-1 aside(구독=정식 OAuth·3계층 병존·llms.txt 서빙 선례·온보딩 비게이트화)·RA-2 Slack(v1=export zip public채널+드라이런, 라이브 API는 2026-03 유예종료로 BYO 내부앱토큰만 생존→v2)·RA-3 구독약관(Anthropic 금지/예외=미개조 CC·xAI 유일권장·OpenRouter 최청정·aside는 UX만)·RA-4 그록봇VM.
+- **★R-1 관문 종결(RA-4)**: Grok Bot=xAI+Anysphere(Cursor) 합병제품·약관=Cursor ToS. durable-but-resettable **공식 확증**(데이터 durable·설치물 replaceable·Update 시 스택 증발). 중대 약관리스크 발견(Beta 무보증·xAI 비상업용도만·**자동화 접근 금지=우리 CDP 사정권**·경쟁서비스·계정개방). ⇒ **파이프라인 성립하되 "체험자 본인 계정/VM" 구조로 못박고 T-2 멱등재기동+T-4 백업 필수화**.
+- **★R-2 종결(Fable 직접 실측)**: cloudflared quick tunnel×로컬 스택 전면 GREEN(HTTP 200·agent-port 401·WS 프레임왕복·지연 13ms). 데스크탑 Tauri Origin 무설정 통과. D4 확정=quick tunnel. 정본 `research/2026-08-22-tunnel-spike-r2.md`. 스택 down·볼륨 보존·터널 종료.
+- **성재 결정 큐**: Q-STRUCT(본인 계정 구조 확정?)·Q-CDP(검증 CDP 계속 vs 자연어 릴레이 — B3 약관 발견)·Q-LEGAL(조력 리스크 법무검토?)·티켓 발급(T-5 감지·T-6 첫왕복게이트·T-7 Slack·T-8 내장AI). 리서치 산출 6종 정본화 완료.
+## 2026-08-22 (Fable) · ★그록봇 원클릭 셀프호스트 파이프라인 확정(PLN-20260822-01) + CDP SEND 자동화 첫 실전
+- 성재 발제: llms.txt→그록봇이 자기 VM에 oort 자동 구동→주소+사용법 회신→데스크탑 앱 접속+**그록봇 에이전트 합류**. 우로보로스 인터뷰(`interview_20260822_091448`) 완결 — D1~D10 결재: 외부 셀프서브 퍼널 정본·수용=실측 E2E 1회·claim-token 서버 티켓(대화창 비번 기각)·리커버리 v1=pg_dump 스크립트·데스크탑 v0.x Release 포함.
+- 정본 `research/2026-08-22-grokbot-one-click-selfhost-plan.md` — 시리즈 R-1(VM 리셋 재검증=관문)·R-2(터널)·T-1~T-4·V-1·E2E. T계열 병렬 착수 허가. 리서치 워커 발사는 성재 go 대기.
+- **CDP SEND 자동화 성립**(성재 위임 — Q-CTRL 해소): 프로브 실전 — ghcr 401 도달 GREEN·8CPU/15.6G GREEN·**uptime 18h→1h39m=세션 간 VM 재시작 실측**·`cursorenvironments` 샌드박스 확정·영속성 마커 2종(홈 파일+Docker 볼륨) 심음 → 다음 세션 잔존 확인=R-1 실측면 종결.
+- 신규 루틴: `docs/planning/FABLE_DOWNGRADE_ROUTINE.md`(Fable→Opus 강하 시 중단·핸드오프 — 성재 지시·메모리 영속화).
+
+## 2026-08-22 (Fable) · 그록봇 CDP 제어 실증 + 오퍼레이터-호스트 확증 + 로컬 Docker 복구
+- 성재 지시 3: ①로컬 Docker 삭제·재설치("자주 저러더라") ②그록봇 제어=최선방식 계속 테스트(위임) ③표적방향=추천대로(오퍼레이터-호스트).
+- **그록봇 제어(CDP 9333)**: READ✅·WRITE주입✅(ProseMirror `Input.insertText`, WS는 `suppress_origin`)·**SEND는 auto-mode 분류기 차단** → 현행 최선=관측 릴레이(성재 Enter). 자동 SEND엔 성재 권한 규칙 필요. 헬퍼=스크래치패드 cdp_*.py.
+- **표적방향 확증**: 그록봇 VM 자백 — Debian13 amd64·Docker :2375 실가동·126G/7%·공인IP 없음·cgroup /agent. ⇒ 오퍼레이터 적격·호스트 부적격. #1361 static bearer 실왕복 흔적(inbox_read seq1·message_post seq2) 재확인.
+- **Docker/디스크**: "자주 저러는" 원인=디스크 99% 포화(worktrees 148G, cargo target). cargo clean 67GB 회수(→92%)+앱 재설치·데몬 복구(29.7.2). translocation 잔여는 성재 brew 재설치로 정리(비차단). **정정(성재 지적): 로컬 Docker는 그록봇-오퍼레이터 테스트 임계경로 아님** — S1 별개 축.
+- 정본 `research/2026-08-22-grok-cdp-control-and-operator-host.md` · 재개 핸드오프 `handoffs/2026-08-22-grok-selfhost-resume-handoff.md`. 대기: Q-CTRL(SEND 자동화 허용?)·Q-HOST(호스트 재사용 vs 신규).
+
 ## 2026-08-21 (Fable) · ★GHCR 첫 발행 완결 — 법무 승인·public 전환·attestation 실측·arm64 경계 실증
 - **발행 폐곡선**: 성재 dispatch+release 승인 → run 32461307786 success → digest 2본(app `0fbddd36…`·postgres `c6806369…`) attestation 동반. **법무 검토 승인**(성재 발화 — 브리핑 3판단: OS 레이어 copyleft 관행 수준·성실 이행 범위·상표 인지) 원장 기록(#1332 코멘트).
 - **public 전환**: kwakseongjae=org **member**라 패키지 관리 불가 발견 → org owner(lifeissea)가 집행(org 패키지 정책 해제 선행). 익명 pull 토큰·digest 일치·`gh attestation verify` 2본 전부 실측 PASS. **Owner 승격 요청 전달됨**(재발 방지).
