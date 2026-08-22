@@ -7,6 +7,7 @@
 //   notification  mentions/approvals              -> commands
 //   keychain      refresh token at rest           -> commands
 //   updater       self-replace the app bundle     -> commands + progress event
+//   detect        local hosted-agent signatures   -> command (T-5; passive only)
 //
 // Everything above is exposed to the web bundle as plain app commands and two
 // events; the contract is documented in `clients/desktop/README.md` and consumed
@@ -15,6 +16,8 @@
 // the web layer's calls.
 
 mod deeplink;
+#[cfg(desktop)]
+mod detect;
 mod discovery;
 mod keychain;
 mod notification;
@@ -64,6 +67,7 @@ pub fn run() {
             keychain::keychain_store_refresh_token,
             keychain::keychain_clear_refresh_token,
             opener::open_external_url,
+            detect::detect_hosted_agents,
             app_version,
             updater::updater_check,
             updater::updater_install,

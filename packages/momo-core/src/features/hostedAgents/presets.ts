@@ -91,16 +91,16 @@ export const HOSTED_PRESETS: readonly HostedPreset[] = [
     id: "grok",
     label: "Grok Bot",
     detail:
-      "Grok Bot을 이 방식으로 붙이는 순서입니다. 값은 아래 것을 그대로 씁니다.",
+      "Grok Bot은 아래 값을 말로 전하는 것이 기본입니다. 직접 붙여 넣는 순서는 다른 방법입니다.",
     verified: false,
     unverifiedNote:
       "Grok이 이 인증 헤더를 실제로 보내는지는 아직 확인되지 않았습니다. 감지가 되지 않으면 값이 아니라 이 방식이 원인일 수 있습니다.",
     steps: [
-      "Grok의 Create Plugin으로 비공개 플러그인을 만듭니다.",
+      "그록봇에게 아래 주소와 연결 값을 말로 전하세요. 그록봇이 직접 붙입니다.",
+      "말로 전하지 못하면 Grok의 Create Plugin으로 비공개 플러그인을 만듭니다.",
       "그 플러그인의 mcp.json에 아래 Agent Port 주소를 원격 서버로 적습니다.",
       "인증 헤더의 bearer 값에 아래 연결 값을 넣고 커넥터를 설치합니다.",
-      "아래 이름으로 routine을 만들고 아래 문장을 그 routine의 지시로 넣습니다.",
-      "routine을 한 번 수동 실행하면 이 화면이 감지 상태로 넘어갑니다.",
+      "아래 이름으로 routine을 만들고 아래 문장을 넣은 뒤 한 번 수동 실행하면 이 화면이 감지 상태로 넘어갑니다.",
     ],
     leavesBehind:
       "이 방식은 로컬에 플러그인 소스를 남깁니다. 나중에 연결을 해제할 때 커넥터 제거와 별개로 그 소스도 지워야 합니다.",
@@ -188,12 +188,29 @@ export const HOSTED_AUTH_MODE_CHOICES: readonly HostedAuthModeChoice[] = [
 
 export const PAIRING_REVEAL_HEADLINE = "지금 연결 값을 provider 설정에 붙이세요.";
 
+/** Grok 프리셋 한정. 일반 헤드라인은 바꾸지 않는다. */
+export const GROK_PAIRING_REVEAL_HEADLINE = "이 값을 그록봇에게 말로 전하세요.";
+
+/**
+ * Grok 프리셋 2단계 목적 문장. 단계 기계의 일반 purpose
+ * (`wizard.ts` HOSTED_WIZARD_STEPS pairing)는 그대로 두고, 그록 화면만 여기를 쓴다.
+ */
+export const GROK_PAIRING_PURPOSE =
+  "연결 값은 지금 한 번만 보입니다. 그록봇에게 말로 전하는 것이 기본이고, 직접 붙여 넣는 것은 다른 방법입니다. 옮긴 뒤 이 화면에서 저장을 마치세요.";
+
 export const PAIRING_REVEAL_WARNING =
   "이 값은 지금 한 번만 보입니다. 서버는 원문을 보관하지 않고, 이 화면을 벗어나면 다시 볼 수 없습니다. 잃어버리면 값을 다시 발급하세요.";
 
 /** 이 값이 무엇이 아닌지. 두 비밀을 섞는 것이 이 흐름의 가장 비싼 오해다. */
 export const PAIRING_REVEAL_SCOPE_NOTE =
   "이 값은 접속을 한 번 확인하는 용도입니다. 감지되는 순간 소비되고, 대화나 작업 권한으로 승격되지 않습니다.";
+
+/**
+ * Grok Bot 전용. 그록봇 앱을 프로그램으로 제어하지 않는다(패킷 §0-2).
+ * 말로 전하는 것이 1순위이고, 사람이 직접 붙여 넣는 순서는 다른 방법이다.
+ */
+export const PAIRING_NATURAL_LANGUAGE_HANDOFF =
+  "그록봇이 값을 받아 자기 쪽에 붙입니다. 직접 붙여 넣으려면 아래 순서를 따르세요.";
 
 export const ACTIVE_REVEAL_HEADLINE = "지금 provider 설정의 값을 이 자격증명으로 바꾸세요.";
 

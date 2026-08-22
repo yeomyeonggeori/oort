@@ -40,8 +40,11 @@ if got != [want]:
 version = conf.get("version", "")
 if not version.startswith("0.1.0-next."):
     raise SystemExit("tauri.conf.json version %r is not a next-channel prerelease" % version)
+targets = conf.get("bundle", {}).get("targets")
+if targets != ["app", "dmg"]:
+    raise SystemExit("bundle.targets %r must be ['app', 'dmg'] (app first — next-channel .app path)" % (targets,))
 PY
-pass "tauri.conf.json updater endpoint + next.* version"
+pass "tauri.conf.json updater endpoint + next.* version + app,dmg targets"
 
 grep -Fq 'DIST_REPO="${MOMO_DIST_REPO:-yeomyeonggeori/momo-alpha}"' \
   scripts/publish_next_build.sh \
@@ -51,23 +54,40 @@ grep -Fq 'https://yeomyeonggeori.github.io/momo-alpha/${MANIFEST_NAME}' \
   || fail "publish_next_build.sh manifest URL is not yeomyeonggeori Pages"
 pass "publish script DIST_REPO + Pages URL"
 
-# 채널 플래그가 cargo tauri build 와 같은 서브셸에 있어야 한다.
+# 채널 플래그가 next-channel cargo tauri build 와 같은 환경에 있어야 한다.
 # 파일 어딘가에 주석만 있으면 발행 산출물이 다시 가드에 걸린다.
+# --public 갈래는 고의로 플래그를 뺀다(공개 0.1.0 이 next.N 을 업데이트로 보면 안 된다).
 python3 - scripts/publish_next_build.sh <<'PY' || fail "MOMO_CHANNEL_BUILD not on cargo tauri build"
 import pathlib, sys, re
 text = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
-# The assignment must appear in the build subshell, before cargo tauri build.
-block = re.search(
-    r"\(\s*cd clients/desktop.*?cargo tauri build --bundles app --ci",
+if "cargo tauri build --bundles app,dmg --ci" not in text:
+    raise SystemExit("publish build must request --bundles app,dmg (app path stays bundle/macos/oort.app)")
+if not re.search(
+    r"MOMO_CHANNEL_BUILD=1\s*\\\s*\n\s*cargo tauri build --bundles app,dmg --ci",
     text,
-    re.S,
-)
-if block is None:
-    raise SystemExit("could not find the clients/desktop cargo tauri build subshell")
-if "MOMO_CHANNEL_BUILD=1" not in block.group(0):
-    raise SystemExit("MOMO_CHANNEL_BUILD=1 is missing from the build subshell")
+):
+    raise SystemExit("MOMO_CHANNEL_BUILD=1 is missing from the next-channel cargo tauri build")
+if "bundle/macos/oort.app" not in text:
+    raise SystemExit("APP_PATH must stay bundle/macos/oort.app")
+if "codesign --verify --strict" not in text or "DMG_PATH" not in text:
+    raise SystemExit("dmg must be produced and codesign --verify --strict'd")
+# next 채널 업로드는 tar.gz + zip. dmg 는 --public 의 gh 안내 한 줄만.
+create = [ln for ln in text.splitlines() if "gh release create" in ln or "gh release upload" in ln]
+next_uploads = [ln for ln in create if "--public" not in ln and "oort-macos-" not in ln]
+for ln in next_uploads:
+    if ".dmg" in ln:
+        raise SystemExit("next-channel gh release must not upload a dmg: %s" % ln.strip())
 PY
-pass "MOMO_CHANNEL_BUILD=1 is on the publish build"
+pass "MOMO_CHANNEL_BUILD=1 is on the next-channel publish build; dmg is extra, not an updater asset"
+
+# 버전 갈래가 서로 섞이면 next 채널 번호를 태운다. cargo 전에 거절해야 한다.
+reject_next="$(scripts/publish_next_build.sh --version 0.1.0 2>&1 || true)"
+printf '%s\n' "$reject_next" | grep -q '0.1.0-next.N' \
+  || fail "next channel must reject 0.1.0 before build (got: $reject_next)"
+reject_public="$(scripts/publish_next_build.sh --public --version 0.1.0-next.1 2>&1 || true)"
+printf '%s\n' "$reject_public" | grep -qi 'next-channel series' \
+  || fail "public dmg must reject next.N before build (got: $reject_public)"
+pass "version gates keep next.N and public 0.1.0 apart"
 
 grep -Fq 'cfg!(momo_channel_build)' \
   clients/desktop/src-tauri/src/updater.rs \
@@ -79,11 +99,17 @@ pass "shell cfg wiring present"
 
 # §8 체크리스트가 시크릿 값을 묻지 않고 이름/경로만 쓰는지 — 키 파일을 cat 하면 빨강.
 if grep -nE 'cat (~/)?\.momo-secrets/momo-updater\.key|TAURI_SIGNING_PRIVATE_KEY_PASSWORD=' \
-  docs/NEXT_CHANNEL.md; then
-  fail "NEXT_CHANNEL.md checklist prints or assigns a secret value"
+  docs/NEXT_CHANNEL.md docs/RELEASING.md; then
+  fail "release docs print or assign a secret value"
 fi
 grep -Fq '## 8. 성재 복붙' docs/NEXT_CHANNEL.md \
   || fail "docs/NEXT_CHANNEL.md is missing §8 paste-ready checklist"
 pass "checklist is present and does not dump secrets"
+
+grep -Fq 'releases/latest/download/oort-macos-aarch64.dmg' docs/RELEASING.md \
+  || fail "RELEASING.md must pin the T-2 stable dmg URL"
+grep -Fq -- '--public' docs/RELEASING.md \
+  || fail "RELEASING.md must document --public dmg (not next-channel upload)"
+pass "RELEASING.md pins public dmg procedure + stable URL"
 
 echo "[next-channel-hygiene] PASS"

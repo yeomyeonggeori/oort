@@ -2,6 +2,7 @@
 # momo-next 채널 발행 (ADR-0133 P2, MOMO-606).
 #
 #   scripts/publish_next_build.sh --version 0.1.0-next.2 [--notes "..."] [--dry-run]
+#   scripts/publish_next_build.sh --public --version 0.1.0 [--notes "..."] [--dry-run]
 #
 # 무엇이 다른가 (alpha 채널과의 관계)
 #   alpha 채널 = macOS SwiftUI 클라이언트(MomoMac), 수동 설치. 그 발행 스크립트
@@ -16,6 +17,7 @@
 # 손대지 않는다(사이트 문안은 사람이 반영).
 #
 # 성재 복붙 재발행 체크리스트(전제·dry-run·실발행·확인): docs/NEXT_CHANNEL.md §8.
+# 공개 dmg(oort v0.x Release 자산, next 채널 아님): docs/RELEASING.md §데스크탑 dmg.
 #
 # 버전 규칙 (제안, ADR-0133)
 #   0.1.0-next.N  = 오픈 베타(0.1.0)로 가는 프리릴리스 열차. semver 프리릴리스라
@@ -48,23 +50,58 @@ set -euo pipefail
 VERSION=""
 NOTES=""
 DRY_RUN=0
+PUBLIC=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --version) VERSION="$2"; shift 2 ;;
     --notes) NOTES="$2"; shift 2 ;;
     --dry-run) DRY_RUN=1; shift ;;
+    --public) PUBLIC=1; shift ;;
     *) echo "unknown arg: $1" >&2; exit 2 ;;
   esac
 done
-[ -n "$VERSION" ] || { echo "usage: $0 --version 0.1.0-next.N [--notes ...] [--dry-run]" >&2; exit 2; }
-[ -n "$NOTES" ] || NOTES="oort next 내부 빌드 ${VERSION}"
+if [ "$PUBLIC" = "1" ]; then
+  [ -n "$VERSION" ] || { echo "usage: $0 --public --version 0.1.0 [--notes ...] [--dry-run]" >&2; exit 2; }
+else
+  [ -n "$VERSION" ] || { echo "usage: $0 --version 0.1.0-next.N [--notes ...] [--dry-run]" >&2; exit 2; }
+fi
+if [ -z "$NOTES" ]; then
+  if [ "$PUBLIC" = "1" ]; then
+    NOTES="oort desktop ${VERSION}"
+  else
+    NOTES="oort next 내부 빌드 ${VERSION}"
+  fi
+fi
 
-# semver 프리릴리스만 허용한다. 0.1.0 을 실수로 next 채널에 밀면 오픈 베타 번호를
-# 태워버리고 되돌릴 수 없다(업데이터는 내려가지 않는다).
-case "$VERSION" in
-  *-next.[0-9]*) : ;;
-  *) echo "[next-publish] version must look like 0.1.0-next.N (got: $VERSION)" >&2; exit 2 ;;
-esac
+# next 채널은 semver 프리릴리스만. 0.1.0 을 실수로 next 채널에 밀면 오픈 베타
+# 번호를 태워버리고 되돌릴 수 없다(업데이터는 내려가지 않는다).
+# --public 은 그 반대: next.N 을 공개 Release 에 올리면 T-2 안정 URL 과
+# 채널 번호가 섞인다. 두 갈래는 한 호출에서 만나지 않는다.
+if [ "$PUBLIC" = "1" ]; then
+  case "$VERSION" in
+    *-next.*)
+      echo "[next-publish] --public version must not use the next-channel series (got: $VERSION)" >&2
+      exit 2
+      ;;
+    0.[0-9]*.[0-9]*)
+      case "$VERSION" in
+        *-*)
+          echo "[next-publish] --public version must be a release like 0.1.0 (got: $VERSION)" >&2
+          exit 2
+          ;;
+      esac
+      ;;
+    *)
+      echo "[next-publish] --public version must look like 0.1.0 (got: $VERSION)" >&2
+      exit 2
+      ;;
+  esac
+else
+  case "$VERSION" in
+    *-next.[0-9]*) : ;;
+    *) echo "[next-publish] version must look like 0.1.0-next.N (got: $VERSION)" >&2; exit 2 ;;
+  esac
+fi
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "$REPO_ROOT"
@@ -83,11 +120,13 @@ NOTARY_PROFILE="${MOMO_NOTARY_PROFILE:-momo-notary}"
 UPDATER_KEY="${MOMO_UPDATER_KEY:-$HOME/.momo-secrets/momo-updater.key}"
 UPDATER_KEY_PASSWORD="${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}"
 
-[ -f "$UPDATER_KEY" ] || {
-  echo "[next-publish] updater private key not found: $UPDATER_KEY" >&2
-  echo "  generate one with: cargo tauri signer generate -w $UPDATER_KEY" >&2
-  echo "  and put the printed public key in clients/desktop/src-tauri/tauri.conf.json" >&2
-  exit 2; }
+if [ "$PUBLIC" != "1" ]; then
+  [ -f "$UPDATER_KEY" ] || {
+    echo "[next-publish] updater private key not found: $UPDATER_KEY" >&2
+    echo "  generate one with: cargo tauri signer generate -w $UPDATER_KEY" >&2
+    echo "  and put the printed public key in clients/desktop/src-tauri/tauri.conf.json" >&2
+    exit 2; }
+fi
 
 # 업데이터의 플랫폼 키는 {os}-{arch}. 빌드 머신의 아키텍처로 고정한다 — 크로스
 # 아키텍처를 한 줄로 우겨넣는 것보다, 어느 아키텍처를 발행했는지 매니페스트에
@@ -101,35 +140,129 @@ esac
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/momo-next-build.XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT INT TERM
 
-echo "[next-publish] 1/6 build (v${VERSION}, build ${BUILD_NUM} @${GIT_SHA}, ${UPDATER_TARGET})"
+echo "[next-publish] 1/6 build (v${VERSION}, build ${BUILD_NUM} @${GIT_SHA}, ${UPDATER_TARGET}, app+dmg)"
 # --config 로 버전을 주입한다: 발행 때마다 tauri.conf.json 을 커밋하지 않아도 되고,
 # 앱이 스스로 보고하는 버전과 매니페스트가 갈라질 수 없다(같은 값에서 나온다).
 # MOMO_CHANNEL_BUILD=1: 로컬 `cargo tauri build` 는 매니페스트보다 낮은 베이스라인
 # 버전(0.1.0-next.1)을 심고 기동 즉시 롤백을 제안한다(#1281). 채널 산출물만
 # 업데이터 체크를 연다. 이 환경변수를 빼면 발행된 앱이 업데이트를 안 받는다.
+# --public 은 next 매니페스트를 보지 않는다(공개 0.1.0 이 내부 next.N 을
+# "업데이트"로 제안하지 않게).
+# --bundles app,dmg: next 채널 .app 경로는 불변(`bundle/macos/oort.app`). dmg 는
+# 같은 빌드의 가산 산출이다. `--bundles app` 만 주면 conf 의 dmg 타깃을 덮어
+# 공개 산출이 안 나온다.
 (
   cd clients/desktop
-  APPLE_SIGNING_IDENTITY="$SIGN_IDENTITY" \
-  MOMO_CHANNEL_BUILD=1 \
-  cargo tauri build --bundles app --ci --config "{\"version\":\"${VERSION}\"}"
+  if [ "$PUBLIC" = "1" ]; then
+    APPLE_SIGNING_IDENTITY="$SIGN_IDENTITY" \
+    cargo tauri build --bundles app,dmg --ci --config "{\"version\":\"${VERSION}\"}"
+  else
+    APPLE_SIGNING_IDENTITY="$SIGN_IDENTITY" \
+    MOMO_CHANNEL_BUILD=1 \
+    cargo tauri build --bundles app,dmg --ci --config "{\"version\":\"${VERSION}\"}"
+  fi
 ) > "$WORK/build.log" 2>&1 || { tail -40 "$WORK/build.log" >&2; exit 1; }
 
 APP_PATH="clients/desktop/src-tauri/target/release/bundle/macos/oort.app"
 [ -d "$APP_PATH" ] || { echo "[next-publish] .app not found at $APP_PATH" >&2; exit 1; }
 
-echo "[next-publish] 2/6 verify signature"
+# Tauri 2: bundle/dmg/{productName}_{version}_{arch}.dmg
+# version 뒤에 바로 `_` 가 오므로 0.1.0 이 0.1.0-next.N 을 먹지 않는다.
+DMG_DIR="clients/desktop/src-tauri/target/release/bundle/dmg"
+DMG_PATH=""
+if [ -d "$DMG_DIR" ]; then
+  for f in "$DMG_DIR"/oort_"${VERSION}"_*.dmg; do
+    [ -f "$f" ] || continue
+    DMG_PATH="$f"
+  done
+fi
+[ -n "$DMG_PATH" ] && [ -f "$DMG_PATH" ] || {
+  echo "[next-publish] .dmg not found under $DMG_DIR for version ${VERSION}" >&2
+  ls -la "$DMG_DIR" 2>/dev/null >&2 || true
+  exit 1
+}
+
+echo "[next-publish] 2/6 verify signature (.app + .dmg)"
 codesign --verify --strict --deep "$APP_PATH" 2>>"$WORK/codesign.log" || {
   tail -20 "$WORK/codesign.log" >&2
   echo "[next-publish] the bundler did not produce a valid signature (APPLE_SIGNING_IDENTITY?)" >&2
   exit 1; }
 codesign -dv --verbose=2 "$APP_PATH" 2>&1 | grep -E "^(Identifier|Authority|TeamIdentifier|Runtime)" || true
 
+# dmg 는 번들러가 이미 서명했을 수도 있고 아닐 수도 있다. --strict 가 실패하면
+# Developer ID 로 한 번 서명하고 다시 잰다. --deep 은 디스크 이미지에 쓰지 않는다.
+if ! codesign --verify --strict "$DMG_PATH" >/dev/null 2>&1; then
+  echo "[next-publish] signing dmg (bundler left it unsigned or invalid)"
+  codesign --force --sign "$SIGN_IDENTITY" --timestamp "$DMG_PATH" \
+    >>"$WORK/codesign.log" 2>&1 || {
+      tail -20 "$WORK/codesign.log" >&2
+      echo "[next-publish] dmg codesign failed" >&2
+      exit 1
+    }
+fi
+codesign --verify --strict "$DMG_PATH" 2>>"$WORK/codesign.log" || {
+  tail -20 "$WORK/codesign.log" >&2
+  echo "[next-publish] dmg failed codesign --verify --strict" >&2
+  exit 1
+}
+codesign -dv --verbose=2 "$DMG_PATH" 2>&1 | grep -E "^(Identifier|Authority|TeamIdentifier|Format)" || true
+
 if [ "$DRY_RUN" = "1" ]; then
-  echo "[next-publish] dry run: stopping before notarization. app at $APP_PATH"
+  echo "[next-publish] dry run: stopping before notarization."
+  echo "  app at $APP_PATH"
+  echo "  dmg at $DMG_PATH"
+  exit 0
+fi
+
+if [ "$PUBLIC" = "1" ]; then
+  echo "[next-publish] public dmg: notarize + staple (no next-channel upload)"
+  ditto -c -k --keepParent "$APP_PATH" "$WORK/notarize.zip"
+  xcrun notarytool submit "$WORK/notarize.zip" --keychain-profile "$NOTARY_PROFILE" \
+    --wait --timeout 120m > "$WORK/notary.log" 2>&1 || {
+      tail -30 "$WORK/notary.log" >&2
+      echo "[next-publish] notarization failed (xcrun notarytool log <id> --keychain-profile $NOTARY_PROFILE)" >&2
+      exit 1; }
+  grep -q "status: Accepted" "$WORK/notary.log" || { tail -30 "$WORK/notary.log" >&2; exit 1; }
+  xcrun stapler staple "$APP_PATH" >> "$WORK/notary.log" 2>&1 || { echo "[next-publish] staple failed" >&2; exit 1; }
+
+  # 스테이플이 끝난 .app 으로 dmg 를 다시 만든다. 번들러 dmg 는 스테이플 이전
+  # 사본을 담는다. --srcfolder 에 .app 을 직접 주면 번들 내용이 볼륨 루트가 된다.
+  STABLE_DMG="$DMG_DIR/oort-macos-${UPDATER_TARGET#darwin-}.dmg"
+  DMG_STAGE="$WORK/dmgroot"
+  mkdir -p "$DMG_STAGE"
+  cp -R "$APP_PATH" "$DMG_STAGE/"
+  rm -f "$STABLE_DMG"
+  hdiutil create -volname oort -srcfolder "$DMG_STAGE" -ov -format UDZO \
+    "$STABLE_DMG" >> "$WORK/notary.log" 2>&1 || {
+      echo "[next-publish] hdiutil create dmg failed" >&2
+      exit 1
+    }
+  codesign --force --sign "$SIGN_IDENTITY" --timestamp "$STABLE_DMG" \
+    >>"$WORK/codesign.log" 2>&1
+  codesign --verify --strict "$STABLE_DMG" 2>>"$WORK/codesign.log" || {
+    echo "[next-publish] restapled dmg failed codesign --verify --strict" >&2
+    exit 1
+  }
+  xcrun notarytool submit "$STABLE_DMG" --keychain-profile "$NOTARY_PROFILE" \
+    --wait --timeout 120m > "$WORK/notary-dmg.log" 2>&1 || {
+      tail -30 "$WORK/notary-dmg.log" >&2
+      echo "[next-publish] dmg notarization failed" >&2
+      exit 1; }
+  grep -q "status: Accepted" "$WORK/notary-dmg.log" || { tail -30 "$WORK/notary-dmg.log" >&2; exit 1; }
+  xcrun stapler staple "$STABLE_DMG" >> "$WORK/notary-dmg.log" 2>&1 || {
+    echo "[next-publish] dmg staple failed" >&2
+    exit 1
+  }
+  echo "[next-publish] public dmg ready: $STABLE_DMG"
+  echo "  attach (orchestrator — this script does not upload):"
+  echo "  gh release upload v${VERSION} --repo yeomyeonggeori/oort $STABLE_DMG"
+  echo "  stable URL: https://github.com/yeomyeonggeori/oort/releases/latest/download/$(basename "$STABLE_DMG")"
   exit 0
 fi
 
 echo "[next-publish] 3/6 notarize + staple (profile ${NOTARY_PROFILE})"
+# next 채널은 .app 만 공증한다. dmg 는 공개 릴리스(--public) 경로이고 momo-alpha
+# 업데이터 자산이 아니다(zip + .app.tar.gz 만 올린다).
 # 공증은 zip 으로 제출하고, 성공하면 .app 에 티켓을 스테이플한다. 신규 팀의 첫
 # 공증은 1시간을 넘길 수 있다(2026-07-24 실측).
 ditto -c -k --keepParent "$APP_PATH" "$WORK/notarize.zip"

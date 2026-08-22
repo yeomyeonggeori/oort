@@ -238,6 +238,12 @@ describe("RED PROOF ④ 진행 표시와 live region", () => {
     expect(HOSTED_WIZARD_STEPS.map((step) => step.number)).toEqual([1, 2, 3, 4, 5]);
   });
 
+  it("일반 pairing purpose 는 프리셋과 무관하게 그대로다", () => {
+    expect(hostedStepSpec("pairing").purpose).toBe(
+      "연결 값은 지금 한 번만 보입니다. provider 설정에 붙여 넣고 이 화면에서 저장을 마치세요."
+    );
+  });
+
   it("만료는 자기 번호를 갖지 않고 가로막은 단계의 번호를 쓴다", () => {
     expect(hostedStepSpec("expired").number).toBe(2);
     expect(hostedStepSpec("approval").number).toBe(4);
