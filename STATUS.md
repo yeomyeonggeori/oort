@@ -1,5 +1,11 @@
 # oort 진행 현황
 
+## 셀프호스트 pg_dump 리커버리 (#1654, 2026-08-22)
+
+- 오퍼레이터 `scripts/self_host_pg_dump.sh` / `scripts/self_host_pg_restore.sh`: compose postgres에 `pg_dump -Fc` → `/workspace/oort-backups`(또는 `--output-dir`) → 다운로드 안내. 구현은 `scripts/lib/pg_dump_custom.sh` 하나이고 리허설 게이트가 같은 함수를 쓴다.
+- 셀프호스터 복원 정본 `docs/runbooks/selfhost-pg-dump-restore.md` — 그록 이탈·구독 해지·B7 트라이얼 잠김·다른 VPS/로컬 이사. PITR 런북과 경계를 나눈다. T-2 `SELF_HOST_AGENT.md` 링크는 자리만 예약. 앱 UI export는 후속.
+- AC: 고유 compose 프로젝트 2벌에 member/message 시드 → dump → 신규 postgres restore → 잔존 단정(`scripts/verify_self_host_pg_dump_restore.sh`). 시크릿 stdout 비유입.
+
 ## GHCR publish-images multi-arch 계약 (#1643, 2026-08-22)
 
 - `publish-images.yml`을 native `linux/amd64`(`ubuntu-24.04`) + native `linux/arm64`(`ubuntu-24.04-arm`) 잡 분리 후 `buildx imagetools create`로 manifest list를 묶는 구조로 확장. QEMU 없음. `workflow_dispatch`·`release` Environment·main-only 승인 경계는 각 잡에 유지. attestation은 아키별 digest와 list digest 둘 다(운영자 pin=list). `sha-<gitsha>`는 list에만 붙는다.

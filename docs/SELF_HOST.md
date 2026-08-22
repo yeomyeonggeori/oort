@@ -8,6 +8,9 @@
 > 이 quickstart의 PostgreSQL named volume은 **production backup이 아니다**.
 > 공개 운영·업그레이드는 별도 pgBackRest/WAL/PITR 절차와 fresh signed evidence를
 > 요구한다([운영 런북](runbooks/pgbackrest-pitr.md)).
+> 그록봇 VM이나 개인 인스턴스에서 **데이터를 파일로 가져가려면**
+> [`runbooks/selfhost-pg-dump-restore.md`](runbooks/selfhost-pg-dump-restore.md)
+> (`scripts/self_host_pg_dump.sh`) — PITR의 대체재가 아니다.
 >
 > 시간은 약속하지 않는다. 로컬 모드는 이미지를 처음부터 굽고,
 > digest 모드는 레지스트리에서 받는다. 약속하는 것은 **결과**다: 1~4를
