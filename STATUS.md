@@ -1,5 +1,10 @@
 # oort 진행 현황
 
+## 그록봇 셀프호스트 플레이북 (#1652, 2026-08-23)
+
+- 루트 `llms.txt`(진입 stub) + `docs/SELF_HOST_AGENT.md`(3계층: digest 코어 설치 → quick tunnel → 핸드오프). 본인 그록봇 계정/VM 전용. claim 회신은 migrate `MOMO_CLAIM_PATH`. pgdata는 `/workspace` bind. 실기동 E2E는 범위 밖.
+- 현행 §2-B app digest(`0fbddd36…`)는 #1651보다 앞선 발행일 수 있다. 플레이북은 `MOMO_CLAIM_PATH` 부재 시 비밀번호 우회 없이 정지한다. Q-LEGAL(성재)이 정본 main 머지 전 판단 권장.
+
 ## 셀프호스트 첫 owner claim-token 부트스트랩 (#1651, 2026-08-22)
 
 - ADR-0166: `momo-migrate` opt-in `MOMO_BOOTSTRAP_CLAIM=1`이 시드 owner를 claim-pending으로 두고 1회용 `/claim/<token>`을 stdout에만 출력한다. `POST /v1/claim`이 비밀번호 설정과 토큰 소비를 한 트랜잭션에서 처리한다. 기존 `MOMO_INITIAL_OWNER_PASSWORD` 경로 불변.
@@ -9,7 +14,7 @@
 ## 셀프호스트 pg_dump 리커버리 (#1654, 2026-08-22)
 
 - 오퍼레이터 `scripts/self_host_pg_dump.sh` / `scripts/self_host_pg_restore.sh`: compose postgres에 `pg_dump -Fc` → `/workspace/oort-backups`(또는 `--output-dir`) → 다운로드 안내. 구현은 `scripts/lib/pg_dump_custom.sh` 하나이고 리허설 게이트가 같은 함수를 쓴다.
-- 셀프호스터 복원 정본 `docs/runbooks/selfhost-pg-dump-restore.md` — 그록 이탈·구독 해지·B7 트라이얼 잠김·다른 VPS/로컬 이사. PITR 런북과 경계를 나눈다. T-2 `SELF_HOST_AGENT.md` 링크는 자리만 예약. 앱 UI export는 후속.
+- 셀프호스터 복원 정본 `docs/runbooks/selfhost-pg-dump-restore.md` — 그록 이탈·구독 해지·B7 트라이얼 잠김·다른 VPS/로컬 이사. PITR 런북과 경계를 나눈다. T-2 `SELF_HOST_AGENT.md` §3.2·§4가 결속. 앱 UI export는 후속.
 - AC: 고유 compose 프로젝트 2벌에 member/message 시드 → dump → 신규 postgres restore → 잔존 단정(`scripts/verify_self_host_pg_dump_restore.sh`). 시크릿 stdout 비유입.
 
 ## GHCR publish-images multi-arch 계약 (#1643, 2026-08-22)
